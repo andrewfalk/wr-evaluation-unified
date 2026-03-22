@@ -171,7 +171,7 @@ function callGemini({ prompt, systemPrompt, model, apiKey }) {
   const body = JSON.stringify({
     system_instruction: { parts: [{ text: systemPrompt || '' }] },
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: { maxOutputTokens: 2000 }
+    generationConfig: { maxOutputTokens: 8192 }
   });
 
   return new Promise((resolve, reject) => {

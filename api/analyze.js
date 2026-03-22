@@ -105,7 +105,7 @@ async function handleGemini(req, res, { prompt, sysPrompt, model }) {
         body: JSON.stringify({
             system_instruction: { parts: [{ text: sysPrompt }] },
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: { maxOutputTokens: 2000 }
+            generationConfig: { maxOutputTokens: 8192 }
         })
     });
 
