@@ -1,6 +1,6 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 2.1.0
+> **Version:** 2.2.0
 > **Last Updated:** 2026-03-22
 > **Status:** MVP 개발 완료 / Vercel 배포 완료
 
@@ -39,8 +39,9 @@
 | 빌드 | Vite 5 |
 | 데스크톱 | Electron 21 + electron-builder (NSIS) |
 | 웹 배포 | Vercel (서버리스) |
-| AI | Claude API (Vercel 서버리스 프록시 / Electron IPC 직접 호출) |
+| AI | Google Gemini API + Claude API (Vercel 서버리스 프록시 / Electron IPC 직접 호출) |
 | 내보내기 | xlsx (엑셀), html2pdf.js (PDF), jszip |
+| 폰트 | Pretendard (CDN), Noto Sans KR (fallback) |
 
 ---
 
@@ -290,18 +291,29 @@ BMI와 만 나이를 자동 계산하여 표시.
 
 ### 6.1 동작 방식
 
-종합소견 이후 **통합 AI 분석 탭**에서 전체 모듈의 보고서 텍스트를 프롬프트로 Claude API에 전송하고, 전문의 관점의 분석 결과를 받아 표시한다. 모듈별 개별 AI 탭은 제거되고 단일 통합 탭으로 통합되었다.
+종합소견 이후 **통합 AI 분석 탭**에서 전체 모듈의 보고서 텍스트를 프롬프트로 AI API에 전송하고, 전문의 관점의 분석 결과를 받아 표시한다. **Google Gemini**(기본)와 **Anthropic Claude** 중 선택 가능.
 
-### 6.2 플랫폼별 분기
+### 6.2 AI 모델 선택
+
+| 모델 | ID | 특징 |
+|------|----|------|
+| Gemini 2.5 Flash (기본) | `gemini-2.5-flash` | 빠름/저비용, maxOutputTokens 8192 |
+| Gemini 2.5 Pro | `gemini-2.5-pro` | 정밀, maxOutputTokens 65536 (thinking 포함) |
+| Claude Haiku 4.5 | `claude-haiku-4-5-20251001` | 빠름/저비용 |
+| Claude Sonnet 4.6 | `claude-sonnet-4-6-20250514` | 정밀 |
+
+Gemini 2.5 Pro는 thinking(추론) 기능이 기본 활성화되어 비활성화 불가. thinking 토큰이 `maxOutputTokens` 예산을 공유하므로 65536으로 설정.
+
+### 6.3 플랫폼별 분기
 
 | 플랫폼 | 경로 | API 키 관리 |
 |--------|------|-------------|
-| 웹 (Vercel) | `POST /api/analyze` → 서버리스 → Claude API | 서버 환경변수 `CLAUDE_API_KEY` |
-| Electron | `window.electron.analyzeAI()` → IPC → main process | 사용자 입력 키 (설정) |
+| 웹 (Vercel) | `POST /api/analyze` → 서버리스 → Gemini/Claude API | 서버 환경변수 `GEMINI_API_KEY`, `CLAUDE_API_KEY` |
+| Electron | `window.electron.analyzeAI()` → IPC → main process | 사용자 입력 키 (설정 모달) |
 
-웹 환경에서 Vite 개발 서버(`npm run dev`) 사용 시 `/api` 프록시가 `localhost:3001`로 설정되어 있으며, `vercel dev`를 병행 실행해야 서버리스 함수가 동작한다. 에러 핸들링: `res.ok` 체크 → 404 시 안내 메시지, 기타 상태 코드별 구체적 에러 표시.
+모델 ID 접두사(`gemini` / `claude`)로 자동 분기. 웹 환경에서 Vite 개발 서버(`npm run dev`) 사용 시 `vercel dev`를 병행 실행해야 서버리스 함수가 동작한다. 에러 핸들링: API 에러 상세 메시지(`detail`)를 사용자에게 노출.
 
-### 6.3 통합 시스템 프롬프트
+### 6.4 통합 시스템 프롬프트
 
 무릎과 척추 전문 지식을 하나의 시스템 프롬프트에 통합:
 - **무릎:** 신체부담정도 4단계, 신체부담기여도 공식, KLG 등급, 나이/BMI 개인적 요인 등
@@ -444,6 +456,8 @@ ZIP명: `업무관련성평가_{N}명_{날짜}.zip` (동명 파일은 인덱스 
 | 진료과 | 자유입력 | 직업환경의학과 |
 | 의사명 | 자유입력 | 김호길 |
 | 자동저장 간격 | 초 단위 | 30 |
+| Gemini API Key | (Electron 전용) | - |
+| Claude API Key | (Electron 전용) | - |
 
 ---
 
@@ -547,7 +561,11 @@ npm run electron:build   # Electron 패키징 (NSIS, Windows x64+ia32)
 }
 ```
 
-**필수 환경변수:** `CLAUDE_API_KEY` (Vercel 대시보드 또는 `vercel env add`로 설정)
+**필수 환경변수:**
+- `GEMINI_API_KEY` — Google Gemini API 키 (기본 AI 모델)
+- `CLAUDE_API_KEY` — Anthropic Claude API 키 (선택)
+
+Vercel 대시보드 또는 `vercel env add`로 설정.
 
 ---
 
@@ -622,6 +640,21 @@ npm run electron:build   # Electron 패키징 (NSIS, Windows x64+ia32)
 - **AI 에러 핸들링 개선**: `res.ok` 체크, 404/상태코드별 구체적 메시지
 - **Vercel 배포**: `vercel.json` outputDirectory 설정, 프록시 구성, 환경변수 설정
 - **엑셀 Import UI 개선**: `.import-zone` 스타일 추가 (점선 테두리, 아이콘, 호버/드래그 하이라이트)
+
+### Phase 9: Gemini 통합 + UI 리뉴얼 + 모바일 최적화
+
+- **Google Gemini AI 통합**: Gemini 2.5 Flash(기본)/Pro + Claude Haiku/Sonnet 선택 가능
+- **Gemini 2.5 Pro thinking 대응**: maxOutputTokens 65536, 에러 상세 메시지 노출
+- **UI 스타일 리뉴얼**: 보라 그라데이션 → 클린 미니멀 + 블루(`#3b82f6`) 플랫 디자인
+  - 그라데이션 제거, 경량 그림자, CSS 변수 기반 accent 시스템
+  - 폰트: Pretendard (CDN) + Noto Sans KR (fallback), 기본 weight 500
+  - 다크모드: slate-blue 계열, 텍스트 대비 강화
+- **모바일 UI 최적화**: 터치 타겟 44px, 위자드/탭 가로 스크롤, 모달 전체화면, 설정 세로 배치
+- **기본정보 2패널 레이아웃**: 좌측(인적사항+직업력) + 우측(특이사항+평가기관)
+- **샘플 환자 데이터**: 첫 실행 시 예시 환자(홍길동) 자동 생성 (튜토리얼/테스트용)
+- **환자 목록 패널**: 높이 커스텀 조절(resize handle), 사이드바 sticky 레이아웃
+- **엑셀 출력 형식 통일**: 미리보기와 동일한 형식으로 무릎/종합소견 섹션 정렬
+- **Electron 이미지 경로**: 절대 → 상대 경로(`./images/`)로 수정
 
 ---
 
