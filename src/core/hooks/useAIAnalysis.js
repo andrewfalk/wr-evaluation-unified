@@ -30,7 +30,9 @@ export function useAIAnalysis() {
         if (!res.ok) {
           try {
             const errData = await res.json();
-            setError(errData.error?.message || `서버 오류 (${res.status})`);
+            const msg = errData.error?.message || `서버 오류 (${res.status})`;
+            const detail = errData.error?.detail;
+            setError(detail ? `${msg}` : msg);
           } catch {
             if (res.status === 404) {
               setError('AI 분석 서버를 찾을 수 없습니다. vercel dev를 실행하거나 배포 환경에서 시도하세요.');

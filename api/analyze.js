@@ -97,6 +97,7 @@ async function handleGemini(req, res, { prompt, sysPrompt, model }) {
     }
 
     const geminiModel = model || 'gemini-2.5-flash';
+    const isPro = geminiModel.includes('pro');
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
 
     const response = await fetch(url, {
@@ -105,7 +106,7 @@ async function handleGemini(req, res, { prompt, sysPrompt, model }) {
         body: JSON.stringify({
             system_instruction: { parts: [{ text: sysPrompt }] },
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: { maxOutputTokens: 8192 }
+            generationConfig: { maxOutputTokens: isPro ? 65536 : 8192 }
         })
     });
 
@@ -113,12 +114,13 @@ async function handleGemini(req, res, { prompt, sysPrompt, model }) {
 
     if (!response.ok) {
         console.error('Gemini API error:', data);
-        let userMessage = 'AI 분석 중 오류가 발생했습니다.';
-        if (response.status === 400) userMessage = 'Gemini 요청 형식 오류입니다.';
-        else if (response.status === 403) userMessage = 'Gemini API 인증 오류입니다.';
+        const detail = data.error?.message || JSON.stringify(data.error || data);
+        let userMessage = `AI 분석 중 오류가 발생했습니다. (${detail})`;
+        if (response.status === 400) userMessage = `Gemini 요청 형식 오류: ${detail}`;
+        else if (response.status === 403) userMessage = `Gemini API 인증 오류: ${detail}`;
         else if (response.status === 429) userMessage = '요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.';
         return res.status(response.status).json({
-            error: { message: userMessage, detail: data.error?.message }
+            error: { message: userMessage, detail }
         });
     }
 

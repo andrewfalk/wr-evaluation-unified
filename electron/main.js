@@ -168,10 +168,11 @@ function callClaude({ prompt, systemPrompt, model, apiKey }) {
 
 function callGemini({ prompt, systemPrompt, model, apiKey }) {
   const geminiModel = model || 'gemini-2.5-flash';
+  const isPro = geminiModel.includes('pro');
   const body = JSON.stringify({
     system_instruction: { parts: [{ text: systemPrompt || '' }] },
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: { maxOutputTokens: 8192 }
+    generationConfig: { maxOutputTokens: isPro ? 65536 : 8192 }
   });
 
   return new Promise((resolve, reject) => {
