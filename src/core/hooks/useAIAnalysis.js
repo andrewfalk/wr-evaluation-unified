@@ -15,7 +15,10 @@ export function useAIAnalysis() {
 
       if (window.electron?.analyzeAI) {
         // Electron: IPC를 통해 main process에서 직접 API 호출
-        data = await window.electron.analyzeAI({ prompt, systemPrompt, model });
+        const settingsStr = localStorage.getItem('wrEvalUnifiedSettings');
+        const settings = settingsStr ? JSON.parse(settingsStr) : {};
+        const apiKey = settings.claudeApiKey || '';
+        data = await window.electron.analyzeAI({ prompt, systemPrompt, model, apiKey });
       } else {
         // 웹: Vercel 서버리스 함수 경유
         const res = await fetch('/api/analyze', {

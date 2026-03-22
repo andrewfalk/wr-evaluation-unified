@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron');
 const path = require('path');
 const os = require('os');
+const https = require('https');
 
 // Windows 7 GPU 호환성
 if (process.platform === 'win32' && os.release().startsWith('6.1')) {
@@ -114,38 +115,47 @@ ipcMain.handle('show-confirm', async (_event, message) => {
 });
 
 // IPC: AI 분석 (Electron에서 직접 Claude API 호출)
-ipcMain.handle('analyze-ai', async (_event, { prompt, systemPrompt, model }) => {
-  const Store = require('electron-store') || null;
-  let apiKey = '';
-  try {
-    const store = new Store();
-    apiKey = store.get('claudeApiKey', '');
-  } catch {
-    // electron-store 미설치 시 환경변수 fallback
-    apiKey = process.env.CLAUDE_API_KEY || '';
-  }
+ipcMain.handle('analyze-ai', async (_event, { prompt, systemPrompt, model, apiKey }) => {
+  const key = apiKey || process.env.CLAUDE_API_KEY || '';
 
-  if (!apiKey) {
+  if (!key) {
     return { error: { message: 'API 키가 설정되지 않았습니다. 설정에서 Claude API 키를 입력하세요.' } };
   }
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-beta': 'prompt-caching-2024-07-31'
-      },
-      body: JSON.stringify({
-        model: model || 'claude-haiku-4-5-20251001',
-        max_tokens: 2000,
-        system: [{ type: 'text', text: systemPrompt || '', cache_control: { type: 'ephemeral' } }],
-        messages: [{ role: 'user', content: prompt }]
-      })
+    const body = JSON.stringify({
+      model: model || 'claude-haiku-4-5-20251001',
+      max_tokens: 2000,
+      system: [{ type: 'text', text: systemPrompt || '', cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: prompt }]
     });
-    return await response.json();
+
+    const data = await new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+          'anthropic-beta': 'prompt-caching-2024-07-31',
+          'Content-Length': Buffer.byteLength(body)
+        }
+      }, (res) => {
+        let chunks = '';
+        res.on('data', (chunk) => { chunks += chunk; });
+        res.on('end', () => {
+          try { resolve(JSON.parse(chunks)); }
+          catch { reject(new Error('응답 파싱 오류')); }
+        });
+      });
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+
+    return data;
   } catch (error) {
     return { error: { message: 'AI 서버 연결 오류: ' + error.message } };
   }
