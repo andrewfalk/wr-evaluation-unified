@@ -1,13 +1,13 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { getModule, getAllModules } from './core/moduleRegistry';
-import { BasicInfoForm } from './core/components/BasicInfoForm';
+import { BasicInfoForm, BasicInfoSidePanel } from './core/components/BasicInfoForm';
 import { DiagnosisForm } from './core/components/DiagnosisForm';
 import { AssessmentStep } from './core/components/AssessmentStep';
 import { AIAnalysisPanel } from './core/components/AIAnalysisPanel';
 import { SettingsModal } from './core/components/SettingsModal';
 import { BatchImportModal } from './core/components/BatchImportModal';
 import { usePatientList } from './core/hooks/usePatientList';
-import { createPatient, createSharedData, createDiagnosis, DEFAULT_SETTINGS, FONT_SIZE_MAP } from './core/utils/data';
+import { createPatient, createSharedData, createDiagnosis, createSamplePatient, DEFAULT_SETTINGS, FONT_SIZE_MAP } from './core/utils/data';
 import { FALLBACK_PRESETS } from './modules/knee/utils/data';
 import { suggestModules } from './core/utils/diagnosisMapping';
 import { showAlert, showConfirm } from './core/utils/platform';
@@ -22,7 +22,7 @@ import {
 import './modules/knee';
 import './modules/spine';
 
-const UNIFIED_AI_SYSTEM_PROMPT = `당신은 직업성 근골격계 질환 업무관련성 평가 전문 산업의학 전문의입니다.
+const UNIFIED_AI_SYSTEM_PROMPT = `당신은 직업성 근골격계 질환 업무관련성 평가 전문 직업환경의학 전문의입니다.
 무릎(슬관절) 및 척추(요추) 평가 모두에 전문성을 갖추고 있습니다.
 다음 지침에 따라 분석하세요:
 1. 무릎: 신체부담정도 4단계(고도/중등도상/중등도하/경도)와 신체부담기여도 공식을 정확히 적용
@@ -122,7 +122,7 @@ function App() {
       });
   }, []);
 
-  // 자동 저장 복원
+  // 자동 저장 복원 또는 예시 환자 로드
   useEffect(() => {
     const saved = loadAutoSave();
     if (saved) {
@@ -132,9 +132,21 @@ function App() {
           setPatients(saved.patients);
           setActiveId(saved.patients[0].id);
           setCurrentStepIndex(0);
+        } else {
+          // 자동 저장 거부 시 예시 환자 로드
+          const sample = createSamplePatient();
+          setPatients([sample]);
+          setActiveId(sample.id);
+          setCurrentStepIndex(0);
         }
         clearAutoSave();
       });
+    } else {
+      // 저장 데이터 없으면 예시 환자 로드
+      const sample = createSamplePatient();
+      setPatients([sample]);
+      setActiveId(sample.id);
+      setCurrentStepIndex(0);
     }
   }, []);
 
@@ -612,9 +624,14 @@ function App() {
     // 공유 스텝
     if (currentStep.id === 'info') {
       return (
-        <div className="panel">
-          <BasicInfoForm shared={shared} onChange={updateShared} errors={errors} presets={presets} presetMeta={presetMeta} presetError={presetError} onPresetSelect={handlePresetSelect} />
-        </div>
+        <>
+          <div className="panel">
+            <BasicInfoForm shared={shared} onChange={updateShared} errors={errors} presets={presets} presetMeta={presetMeta} presetError={presetError} onPresetSelect={handlePresetSelect} />
+          </div>
+          <div className="panel">
+            <BasicInfoSidePanel shared={shared} onChange={updateShared} />
+          </div>
+        </>
       );
     }
     if (currentStep.id === 'diagnosis') {

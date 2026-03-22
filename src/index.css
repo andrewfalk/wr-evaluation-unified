@@ -34,7 +34,7 @@
 body { font-family: 'Noto Sans KR', sans-serif; background: var(--bg-primary); min-height: 100vh; }
 
 .app-layout { display: flex; max-width: 1800px; margin: 0 auto; padding: 20px; gap: 20px; }
-.sidebar { width: 220px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; }
+.sidebar { width: 220px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; height: calc(100vh - 100px); position: sticky; top: 20px; }
 .sidebar-header { background: var(--bg-panel); border-radius: 12px; padding: 15px; text-align: center; }
 .sidebar-header h2 { font-size: 1rem; color: var(--text-primary); margin-bottom: 10px; }
 .sidebar-actions { display: flex; gap: 5px; flex-wrap: wrap; }
@@ -46,7 +46,7 @@ body { font-family: 'Noto Sans KR', sans-serif; background: var(--bg-primary); m
 .sidebar-filter-row select { flex: 1; }
 .status-dot { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: 0.6rem; flex-shrink: 0; border: 2px solid #e03131; color: #e03131; background: #fff0f0; }
 .status-dot.complete { border-color: #51cf66; color: #51cf66; background: #e6fcf0; }
-.patient-list { background: var(--bg-panel); border-radius: 12px; padding: 10px; flex: 1; overflow-y: auto; max-height: calc(100vh - 320px); }
+.patient-list { background: var(--bg-panel); border-radius: 12px; padding: 10px; flex: 0 0 auto; height: calc(100vh - 350px); overflow-y: auto; min-height: 100px; resize: vertical; }
 .patient-item { padding: 12px; border-radius: 8px; cursor: pointer; margin-bottom: 5px; border: 2px solid transparent; transition: all 0.2s; }
 .patient-item:hover { background: var(--hover-bg); }
 .patient-item.active { border-color: #667eea; background: rgba(102,126,234,0.1); }

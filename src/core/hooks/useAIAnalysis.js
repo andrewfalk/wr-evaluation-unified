@@ -17,7 +17,8 @@ export function useAIAnalysis() {
         // Electron: IPC를 통해 main process에서 직접 API 호출
         const settingsStr = localStorage.getItem('wrEvalUnifiedSettings');
         const settings = settingsStr ? JSON.parse(settingsStr) : {};
-        const apiKey = settings.claudeApiKey || '';
+        const isGemini = model.startsWith('gemini');
+        const apiKey = isGemini ? (settings.geminiApiKey || '') : (settings.claudeApiKey || '');
         data = await window.electron.analyzeAI({ prompt, systemPrompt, model, apiKey });
       } else {
         // 웹: Vercel 서버리스 함수 경유
@@ -47,7 +48,10 @@ export function useAIAnalysis() {
         return null;
       }
 
-      const text = data.content?.[0]?.text || '';
+      // Claude: data.content[0].text, Gemini: data.candidates[0].content.parts[0].text
+      const text = data.content?.[0]?.text
+        || data.candidates?.[0]?.content?.parts?.[0]?.text
+        || '';
       setResult(text);
       return text;
     } catch (err) {

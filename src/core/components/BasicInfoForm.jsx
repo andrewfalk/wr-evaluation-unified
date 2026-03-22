@@ -148,17 +148,32 @@ export function BasicInfoForm({ shared, onChange, errors, refDateField = 'injury
         <button className="btn btn-primary btn-sm" onClick={addJob}>+ 직종 추가</button>
       </div>
 
+    </>
+  );
+}
+
+export function BasicInfoSidePanel({ shared, onChange }) {
+  const handleInput = (field, value) => {
+    onChange({ ...shared, [field]: value });
+  };
+
+  return (
+    <>
       <div className="section">
         <h2 className="section-title"><span className="section-icon">3</span>특이사항</h2>
         <div className="form-group">
-          <textarea rows="2" value={shared.specialNotes} onChange={e => handleInput('specialNotes', e.target.value)} placeholder="산재이력, 상병상태 등" />
+          <textarea rows="4" value={shared.specialNotes} onChange={e => handleInput('specialNotes', e.target.value)} placeholder="산재이력, 상병상태 등" />
         </div>
       </div>
       <div className="section">
         <h2 className="section-title"><span className="section-icon">4</span>평가기관</h2>
         <div className="form-row">
           <div className="form-group"><label>병원명</label><input value={shared.hospitalName} onChange={e => handleInput('hospitalName', e.target.value)} /></div>
+        </div>
+        <div className="form-row">
           <div className="form-group"><label>진료과</label><input value={shared.department} onChange={e => handleInput('department', e.target.value)} /></div>
+        </div>
+        <div className="form-row">
           <div className="form-group"><label>담당의</label><input value={shared.doctorName} onChange={e => handleInput('doctorName', e.target.value)} /></div>
         </div>
       </div>

@@ -3,7 +3,7 @@ import { useAIAnalysis } from '../hooks/useAIAnalysis';
 
 export function AIAnalysisPanel({ generatePrompt, systemPrompt, title = 'AI 분석' }) {
   const { analyze, loading, result, error, reset } = useAIAnalysis();
-  const [model, setModel] = useState('claude-haiku-4-5-20251001');
+  const [model, setModel] = useState('gemini-2.5-flash');
 
   const handleAnalyze = async () => {
     const prompt = generatePrompt();
@@ -16,8 +16,14 @@ export function AIAnalysisPanel({ generatePrompt, systemPrompt, title = 'AI 분�
       <h2 className="section-title"><span className="section-icon">AI</span>{title}</h2>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
         <select value={model} onChange={e => setModel(e.target.value)} style={{ padding: '6px 10px', borderRadius: 6, border: '2px solid var(--border-color)', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '0.85rem' }}>
-          <option value="claude-haiku-4-5-20251001">Haiku 4.5 (빠름/저비용)</option>
-          <option value="claude-sonnet-4-6-20250514">Sonnet 4.6 (정밀)</option>
+          <optgroup label="Google Gemini">
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash (빠름/저비용)</option>
+            <option value="gemini-2.5-pro-preview-06-05">Gemini 2.5 Pro (정밀)</option>
+          </optgroup>
+          <optgroup label="Anthropic Claude">
+            <option value="claude-haiku-4-5-20251001">Haiku 4.5 (빠름/저비용)</option>
+            <option value="claude-sonnet-4-6-20250514">Sonnet 4.6 (정밀)</option>
+          </optgroup>
         </select>
         <button className="btn btn-primary" onClick={handleAnalyze} disabled={loading}>
           {loading ? '분석 중...' : 'AI 분석 실행'}

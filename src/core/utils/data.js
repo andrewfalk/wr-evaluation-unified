@@ -149,6 +149,148 @@ export function migratePatients(patients) {
   return patients.map(migratePatient);
 }
 
+// 예시 환자 데이터 (튜토리얼/테스트용)
+export function createSamplePatient() {
+  const jobId1 = crypto.randomUUID();
+  const jobId2 = crypto.randomUUID();
+
+  return {
+    id: crypto.randomUUID(),
+    phase: 'evaluation',
+    data: {
+      shared: {
+        name: '홍길동(예시)',
+        gender: 'male',
+        height: '175',
+        weight: '78',
+        birthDate: '1970-03-15',
+        injuryDate: '2024-06-01',
+        evaluationDate: '2024-12-15',
+        hospitalName: '근로복지공단 안산병원',
+        department: '직업환경의학과',
+        doctorName: '김호길',
+        specialNotes: '고혈압 약 복용 중. 2024년 3월경부터 무릎 통증 및 요통 호소.',
+        diagnoses: [
+          { id: crypto.randomUUID(), code: 'M17.1', name: '원발성 무릎관절증 우측', side: 'right' },
+          { id: crypto.randomUUID(), code: 'M17.1', name: '원발성 무릎관절증 좌측', side: 'left' },
+          { id: crypto.randomUUID(), code: 'M51.1', name: '요추간판장애(요추 추간판탈출증)', side: '' },
+        ],
+        jobs: [
+          {
+            id: jobId1,
+            jobName: '건설 현장 배근공',
+            presetId: null,
+            startDate: '2000-03-01',
+            endDate: '2018-12-31',
+            workPeriodOverride: '',
+            workDaysPerYear: 250,
+          },
+          {
+            id: jobId2,
+            jobName: '물류 창고 하역작업원',
+            presetId: null,
+            startDate: '2019-02-01',
+            endDate: '2024-06-01',
+            workPeriodOverride: '',
+            workDaysPerYear: 280,
+          },
+        ],
+      },
+      modules: {
+        knee: {
+          jobExtras: [
+            {
+              sharedJobId: jobId1,
+              weight: '3200',
+              squatting: '200',
+              evidenceSources: [],
+              stairs: true,
+              kneeTwist: true,
+              startStop: false,
+              tightSpace: true,
+              kneeContact: true,
+              jumpDown: false,
+            },
+            {
+              sharedJobId: jobId2,
+              weight: '2800',
+              squatting: '120',
+              evidenceSources: [],
+              stairs: false,
+              kneeTwist: false,
+              startStop: true,
+              tightSpace: false,
+              kneeContact: false,
+              jumpDown: true,
+            },
+          ],
+          returnConsiderations: '무거운 중량물 취급 제한 권고. 쪼그려 앉는 작업 회피 필요. 무릎 보호대 착용 권장.',
+        },
+        spine: {
+          tasks: [
+            {
+              id: Date.now() + 1,
+              name: '시멘트 포대 들기',
+              posture: 'G3',
+              weight: 25,
+              frequency: 60,
+              timeValue: 5,
+              timeUnit: 'sec',
+              correctionFactor: 1.0,
+              force: 0,
+            },
+            {
+              id: Date.now() + 2,
+              name: '철근 자재 운반',
+              posture: 'G7',
+              weight: 30,
+              frequency: 40,
+              timeValue: 15,
+              timeUnit: 'sec',
+              correctionFactor: 1.0,
+              force: 0,
+            },
+            {
+              id: Date.now() + 3,
+              name: '거푸집 조립 (비대칭)',
+              posture: 'G5',
+              weight: 20,
+              frequency: 30,
+              timeValue: 8,
+              timeUnit: 'sec',
+              correctionFactor: 1.9,
+              force: 0,
+            },
+            {
+              id: Date.now() + 4,
+              name: '박스 하역 (허리 굽혀)',
+              posture: 'G4',
+              weight: 15,
+              frequency: 100,
+              timeValue: 4,
+              timeUnit: 'sec',
+              correctionFactor: 1.0,
+              force: 0,
+            },
+            {
+              id: Date.now() + 5,
+              name: '자재 어깨 운반',
+              posture: 'G9',
+              weight: 35,
+              frequency: 20,
+              timeValue: 30,
+              timeUnit: 'sec',
+              correctionFactor: 1.0,
+              force: 0,
+            },
+          ],
+        },
+      },
+      activeModules: ['knee', 'spine'],
+    },
+  };
+}
+
 // 설정 기본값
 export const DEFAULT_SETTINGS = {
   theme: 'light',

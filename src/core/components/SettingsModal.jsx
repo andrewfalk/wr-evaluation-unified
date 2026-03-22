@@ -72,11 +72,15 @@ export function SettingsModal({ settings, onSave, onClose }) {
           <div className="settings-section">
             <div className="settings-section-title">AI 설정 (Electron)</div>
             <div className="settings-row">
-              <label>API Key</label>
-              <input type="password" value={draft.claudeApiKey || ''} onChange={e => update('claudeApiKey', e.target.value)} placeholder="Claude API Key" />
+              <label>Gemini API Key</label>
+              <input type="password" value={draft.geminiApiKey || ''} onChange={e => update('geminiApiKey', e.target.value)} placeholder="Google Gemini API Key" />
+            </div>
+            <div className="settings-row">
+              <label>Claude API Key</label>
+              <input type="password" value={draft.claudeApiKey || ''} onChange={e => update('claudeApiKey', e.target.value)} placeholder="Anthropic Claude API Key" />
             </div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-              AI 분석 기능에 필요합니다. 키는 로컬에만 저장됩니다.
+              선택한 모델에 맞는 API 키가 필요합니다. 키는 로컬에만 저장됩니다.
             </div>
           </div>
         )}
