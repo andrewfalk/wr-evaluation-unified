@@ -1,0 +1,62 @@
+{
+  "name": "wr-evaluation-unified",
+  "version": "2.0.0",
+  "description": "직업성 질환 통합 평가 프로그램 (무릎/척추)",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build:web": "vite build --outDir dist/web",
+    "build:electron": "vite build --outDir dist/electron",
+    "preview": "vite preview",
+    "electron:dev": "vite build --outDir dist/electron && electron .",
+    "electron:build": "npm run build:electron && electron-builder",
+    "electron:build:win32": "npm run build:electron && electron-builder --win --ia32",
+    "electron:build:win64": "npm run build:electron && electron-builder --win --x64"
+  },
+  "dependencies": {
+    "html2pdf.js": "^0.10.1",
+    "jszip": "^3.10.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "electron": "^21.4.4",
+    "electron-builder": "^24.9.1",
+    "terser": "^5.46.0",
+    "vite": "^5.0.0"
+  },
+  "build": {
+    "appId": "com.wr-evaluation-unified.app",
+    "productName": "직업성 질환 통합 평가 프로그램",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/electron/**/*",
+      "electron/**/*",
+      "public/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "ia32",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": [
+        "ko"
+      ],
+      "language": "1042"
+    }
+  }
+}

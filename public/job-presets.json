@@ -1,0 +1,170 @@
+{
+  "version": "1.1.0",
+  "lastUpdated": "2026-02-20",
+  "description": "근골격계 질환 업무관련성 평가 - 직종별 신체부담 표준값",
+  "presets": [
+    {
+      "id": 1,
+      "jobName": "내장목공",
+      "category": "건설업",
+      "weight": 1234,
+      "squatting": 120,
+      "description": "가공, 몰딩, 걸레받이",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 2,
+      "jobName": "미장공",
+      "category": "건설업",
+      "weight": 1920,
+      "squatting": 150,
+      "description": "운반, 배합, 미장",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 3,
+      "jobName": "조적공",
+      "category": "건설업",
+      "weight": 2700,
+      "squatting": 150,
+      "description": "운반, 배합, 조적",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 4,
+      "jobName": "형틀목공",
+      "category": "건설업",
+      "weight": 2800,
+      "squatting": 150,
+      "description": "타일 시공",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 5,
+      "jobName": "비계공",
+      "category": "건설업",
+      "weight": 1656,
+      "squatting": 90,
+      "description": "배관 설치",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 6,
+      "jobName": "철근공",
+      "category": "건설업",
+      "weight": 1413,
+      "squatting": 150,
+      "description": "전기 배선 작업",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 7,
+      "jobName": "배관공",
+      "category": "건설업",
+      "weight": 420,
+      "squatting": 120,
+      "description": "페인트 도장 작업",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 8,
+      "jobName": "용접공",
+      "category": "건설업",
+      "weight": 150,
+      "squatting": 150,
+      "description": "자동차 조립 라인",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 9,
+      "jobName": "가시설공",
+      "category": "건설업",
+      "weight": 150,
+      "squatting": 150,
+      "description": "기계 부품 조립",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 10,
+      "jobName": "타일공",
+      "category": "건설업",
+      "weight": 2000,
+      "squatting": 180,
+      "description": "금속 용접 작업",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 11,
+      "jobName": "견출공",
+      "category": "건설업",
+      "weight": 294,
+      "squatting": 150,
+      "description": "제품 포장",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 12,
+      "jobName": "도장공",
+      "category": "건설업",
+      "weight": 100,
+      "squatting": 90,
+      "description": "금형 제작 및 관리",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 13,
+      "jobName": "석공",
+      "category": "건설업",
+      "weight": 1530,
+      "squatting": 120,
+      "description": "프레스 기계 조작",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 14,
+      "jobName": "전기공",
+      "category": "건설업",
+      "weight": 85.5,
+      "squatting": 120,
+      "description": "물류 하역 및 적재",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 15,
+      "jobName": "철골공",
+      "category": "건설업",
+      "weight": 396,
+      "squatting": 150,
+      "description": "택배 상하차 및 배송",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 16,
+      "jobName": "요양보호사",
+      "category": "사회복지업",
+      "weight": 720,
+      "squatting": 30,
+      "description": "지게차 운전 및 하역",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 17,
+      "jobName": "건물청소원",
+      "category": "서비스업",
+      "weight": 0,
+      "squatting": 30,
+      "description": "농작물 재배",
+      "source": "안산병원 자체협의"
+    },
+    {
+      "id": 18,
+      "jobName": "단체급식조리원",
+      "category": "서비스업",
+      "weight": 66,
+      "squatting": 30,
+      "description": "가축 사육 및 관리",
+      "source": "안산병원 자체협의"
+    }
+    
+  ]
+}
