@@ -1,8 +1,9 @@
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { getModule } from '../moduleRegistry';
-import { getSideText, getStatusText, getReasonText } from '../../modules/knee/utils/calculations';
+import { getStatusText, getReasonText } from '../../modules/knee/utils/calculations';
 import { AUX_LABELS } from '../../modules/knee/utils/data';
+import { getDiagnosisModuleHint } from './diagnosisMapping';
 import { calculateAge, calculateBMI } from './common';
 import { getEffectiveWorkPeriodText } from './workPeriod';
 
@@ -48,18 +49,23 @@ function generateUnifiedEMR(patient) {
     const kneeCalc = kneeMod?.computeCalc?.({ shared, module: modules.knee || {} }) || {};
     const { relatedness: rel, cumulativeBurden: cum, jobBurdens: jb } = kneeCalc;
 
-    b6 += `\n<무릎 (슬관절) 신체부담평가>\n`;
+    b6 += `\n<무릎 (슬관절)>\n`;
     (jb || []).filter(j => j.jobName).forEach(j => {
       const checked = Object.entries(AUX_LABELS).filter(([k]) => j[k]).map(([, v]) => v);
-      b6 += `- ${j.jobName}: ${j.period} | 중량물 ${j.weight || '-'}kg | 쪼그려앉기 ${j.squatting || '-'}분 | 신체부담 ${j.burden.level}\n`;
-      if (checked.length > 0) b6 += `  보조: ${checked.join(', ')}\n`;
+      b6 += `직종: ${j.jobName || '-'}\n`;
+      b6 += `일 중량물 취급량: ${j.weight || '-'}kg\n`;
+      b6 += `일 쪼그려 앉기 시간: ${j.squatting || '-'}분\n`;
+      if (checked.length > 0) b6 += `보조변수: ${checked.join(', ')}\n`;
+      b6 += `무릎 부담 정도: ${j.burden.level}\n\n`;
     });
-    const burdenNote = `참고) 신체부담 정도는 다음의 4단계로 구분함.\n1) 고도: 퇴행성 변화를 유발 또는 가속하는 것이 확실함(definite)\n2) 중등도상: 퇴행성 변화를 유발 또는 가속하기에 충분함(probable)\n3) 중등도하: 퇴행성 변화를 유발 또는 가속할 가능성이 있음(possible)\n4) 경도: 퇴행성 변화를 유발 또는 가속하기 어려움(no related)`;
-    b6 += `\n${burdenNote}\n`;
+    b6 += `참고) 신체부담 정도는 다음의 4단계로 구분함.\n`;
+    b6 += `1) 고도: 퇴행성 변화를 유발 또는 가속하는 것이 확실함(definite)\n`;
+    b6 += `2) 중등도상: 퇴행성 변화를 유발 또는 가속하기에 충분함(probable)\n`;
+    b6 += `3) 중등도하: 퇴행성 변화를 유발 또는 가속할 가능성이 있음(possible)\n`;
+    b6 += `4) 경도: 퇴행성 변화를 유발 또는 가속하기 어려움(no related)\n`;
     if (rel) {
-      const avgRel = ((+rel.min + +rel.max) / 2).toFixed(1);
-      b6 += `\n[신체부담기여도 평가]\n- 최소: ${rel.min}%\n- 최대: ${rel.max}%\n- 평균: ${avgRel}%\n`;
-      b6 += `\n[누적신체부담]\n- ${cum}\n`;
+      b6 += `\n[신체부담기여도] ${rel.min}% ~ ${rel.max}%\n`;
+      b6 += `[누적신체부담] ${cum}\n`;
     }
   }
 
@@ -91,26 +97,21 @@ function generateUnifiedEMR(patient) {
   // --- b8: 종합소견 ---
   let b8 = '';
 
-  if (hasKnee) {
-    const kneeMod = getModule('knee');
-    const kneeCalc = kneeMod?.computeCalc?.({ shared, module: modules.knee || {} }) || {};
-    const { relatedness: rel, cumulativeBurden: cum } = kneeCalc;
-    if (rel) {
-      b8 += `[신체부담기여도]\n- 신체부담기여도: ${rel.min}% ~ ${rel.max}%\n- 누적신체부담: ${cum}\n\n`;
-    }
-  }
-
-  b8 += `[상병별 종합소견]\n`;
   b8 += diagnoses.filter(d => d.code || d.name).map((d, i) => {
-    let summary = `#${i + 1}. ${d.code} ${d.name} (${getSideText(d.side)})`;
-    if (hasKnee) {
+    const hint = getDiagnosisModuleHint(d);
+    let summary = `상병 #${i + 1}: ${d.code} ${d.name}`;
+
+    if (hint?.moduleId === 'spine') {
+      summary += `\n  상병 상태(${getStatusText(d.confirmedRight)}) / 업무관련성(${d.assessmentRight === 'high' ? '높음' : d.assessmentRight === 'low' ? '낮음' : '-'})`;
+      if (d.assessmentRight === 'low') summary += `\n    낮음 사유:\n    - ${getReasonText(d.reasonRight, d.reasonRightOther).split('\n').join('\n    - ')}`;
+    } else if (hasKnee) {
       if (d.side === 'right' || d.side === 'both') {
-        summary += `\n   상병 상태: ${getStatusText(d.confirmedRight)} / 업무관련성: ${d.assessmentRight === 'high' ? '높음' : d.assessmentRight === 'low' ? '낮음' : '-'}`;
-        if (d.assessmentRight === 'low') summary += `\n   낮음 사유:\n   - ${getReasonText(d.reasonRight, d.reasonRightOther).split('\n').join('\n   - ')}`;
+        summary += `\n  우측: 상병 상태(${getStatusText(d.confirmedRight)}) / 업무관련성(${d.assessmentRight === 'high' ? '높음' : d.assessmentRight === 'low' ? '낮음' : '-'})`;
+        if (d.assessmentRight === 'low') summary += `\n    낮음 사유:\n    - ${getReasonText(d.reasonRight, d.reasonRightOther).split('\n').join('\n    - ')}`;
       }
       if (d.side === 'left' || d.side === 'both') {
-        summary += `\n   상병 상태: ${getStatusText(d.confirmedLeft)} / 업무관련성: ${d.assessmentLeft === 'high' ? '높음' : d.assessmentLeft === 'low' ? '낮음' : '-'}`;
-        if (d.assessmentLeft === 'low') summary += `\n   낮음 사유:\n   - ${getReasonText(d.reasonLeft, d.reasonLeftOther).split('\n').join('\n   - ')}`;
+        summary += `\n  좌측: 상병 상태(${getStatusText(d.confirmedLeft)}) / 업무관련성(${d.assessmentLeft === 'high' ? '높음' : d.assessmentLeft === 'low' ? '낮음' : '-'})`;
+        if (d.assessmentLeft === 'low') summary += `\n    낮음 사유:\n    - ${getReasonText(d.reasonLeft, d.reasonLeftOther).split('\n').join('\n    - ')}`;
       }
     }
     return summary;
