@@ -1,11 +1,16 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, net } = require('electron');
 const path = require('path');
 const os = require('os');
-const https = require('https');
 
-// Windows 7 GPU 호환성
-if (process.platform === 'win32' && os.release().startsWith('6.1')) {
-  app.commandLine.appendSwitch('disable-gpu');
+// Windows 7/8 호환성 (Electron 22 — 마지막 Win7 지원 버전)
+if (process.platform === 'win32') {
+  const ver = os.release();
+  if (ver.startsWith('6.1') || ver.startsWith('6.2') || ver.startsWith('6.3')) {
+    // Windows 7(6.1), 8(6.2), 8.1(6.3) — sandbox 비활성화 필수
+    app.commandLine.appendSwitch('no-sandbox');
+    app.commandLine.appendSwitch('disable-gpu');
+    app.commandLine.appendSwitch('disable-gpu-compositing');
+  }
 }
 
 let mainWindow;
@@ -80,7 +85,7 @@ function createWindow() {
             type: 'info',
             title: '버전 정보',
             message: '직업성 질환 통합 평가 프로그램',
-            detail: `버전: 2.0.0\n\n직업환경의학 전문의를 위한 통합 평가 도구\n(무릎/척추 평가 지원)`
+            detail: `버전: ${app.getVersion()}\n\n직업환경의학 전문의를 위한 통합 평가 도구\n(무릎/척추 평가 지원)`
           });
         }}
       ]
@@ -133,28 +138,18 @@ ipcMain.handle('analyze-ai', async (_event, { prompt, systemPrompt, model, apiKe
   }
 });
 
-function callClaude({ prompt, systemPrompt, model, apiKey }) {
-  const body = JSON.stringify({
-    model: model || 'claude-haiku-4-5-20251001',
-    max_tokens: 2000,
-    system: systemPrompt || '',
-    messages: [{ role: 'user', content: prompt }]
-  });
-
+// Electron net 모듈을 사용한 HTTPS 요청 헬퍼
+// net.request는 Chromium 네트워크 스택을 사용하므로 시스템 인증서 저장소를 신뢰함
+// → 회사 프록시(SSL Inspection)의 자체 서명 인증서도 정상 통과
+function netRequest(url, options, body) {
   return new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: 'api.anthropic.com',
-      path: '/v1/messages',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'Content-Length': Buffer.byteLength(body)
-      }
-    }, (res) => {
+    const req = net.request({ url, method: 'POST' });
+    for (const [key, value] of Object.entries(options.headers || {})) {
+      req.setHeader(key, value);
+    }
+    req.on('response', (res) => {
       let chunks = '';
-      res.on('data', (chunk) => { chunks += chunk; });
+      res.on('data', (chunk) => { chunks += chunk.toString(); });
       res.on('end', () => {
         try { resolve(JSON.parse(chunks)); }
         catch { reject(new Error('응답 파싱 오류')); }
@@ -166,6 +161,23 @@ function callClaude({ prompt, systemPrompt, model, apiKey }) {
   });
 }
 
+function callClaude({ prompt, systemPrompt, model, apiKey }) {
+  const body = JSON.stringify({
+    model: model || 'claude-haiku-4-5-20251001',
+    max_tokens: 2000,
+    system: systemPrompt || '',
+    messages: [{ role: 'user', content: prompt }]
+  });
+
+  return netRequest('https://api.anthropic.com/v1/messages', {
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    }
+  }, body);
+}
+
 function callGemini({ prompt, systemPrompt, model, apiKey }) {
   const geminiModel = model || 'gemini-2.5-flash';
   const isPro = geminiModel.includes('pro');
@@ -175,27 +187,9 @@ function callGemini({ prompt, systemPrompt, model, apiKey }) {
     generationConfig: { maxOutputTokens: isPro ? 65536 : 8192 }
   });
 
-  return new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: 'generativelanguage.googleapis.com',
-      path: `/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body)
-      }
-    }, (res) => {
-      let chunks = '';
-      res.on('data', (chunk) => { chunks += chunk; });
-      res.on('end', () => {
-        try { resolve(JSON.parse(chunks)); }
-        catch { reject(new Error('응답 파싱 오류')); }
-      });
-    });
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
+  return netRequest(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`, {
+    headers: { 'Content-Type': 'application/json' }
+  }, body);
 }
 
 app.on('window-all-closed', () => {

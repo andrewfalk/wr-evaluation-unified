@@ -72,7 +72,10 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .main-area { flex: 1; min-width: 0; }
 .header { background: var(--bg-panel); border-radius: 12px; padding: 15px 25px; margin-bottom: 15px; box-shadow: var(--shadow-md); }
 .header h1 { font-size: 1.3rem; color: var(--text-primary); }
-.header-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.header-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: flex-start; }
+.export-dropdown { position: absolute; top: 100%; right: 0; z-index: 100; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); min-width: 130px; overflow: hidden; margin-top: 4px; }
+.export-dropdown button { display: block; width: 100%; padding: 8px 14px; border: none; background: none; text-align: left; font-size: 0.85rem; cursor: pointer; color: var(--text-primary); }
+.export-dropdown button:hover { background: var(--bg-hover); }
 .main-content { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
 
 @media (max-width: 1400px) { .main-content { grid-template-columns: 1fr; } }

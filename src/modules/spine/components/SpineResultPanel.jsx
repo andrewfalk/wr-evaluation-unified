@@ -4,7 +4,7 @@ import { convertTimeToSeconds } from '../utils/calculations';
 export function SpineResultPanel({ calc }) {
   if (!calc?.dailyDose) return null;
 
-  const { tasks, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender } = calc;
+  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender } = calc;
   const forceThreshold = thresholds.singleForce[gender];
 
   // Risk gauge colors
@@ -85,8 +85,35 @@ export function SpineResultPanel({ calc }) {
         </div>
       ))}
 
-      {/* Daily Dose Detail */}
-      {!lifetimeDose.excluded && (
+      {/* 직업별 누적선량 내역 */}
+      {jobResults && jobResults.length > 1 && (
+        <>
+          <h3 style={{ margin: '15px 0 10px', fontSize: '0.9rem' }}>직업별 누적선량 내역</h3>
+          {jobResults.map((jr, i) => (
+            <div key={jr.jobId} className="assessment-box" style={{ marginBottom: 6, padding: 10, fontSize: '0.8rem' }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                직력{i + 1}: {jr.jobName} ({jr.periodYears.toFixed(1)}년)
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                <span>일일선량</span><span>{jr.dailyDose.dailyDoseKNh.toFixed(2)} kN{'\xB7'}h</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                <span>누적선량</span>
+                <span>{jr.lifetimeDose.excluded ? '일일선량 미달' : `${jr.lifetimeDose.lifetimeDoseMNh.toFixed(2)} MN\xB7h`}</span>
+              </div>
+              <div style={{ color: 'var(--text-muted)', marginTop: 2 }}>포함 작업: {jr.tasks.length}개</div>
+            </div>
+          ))}
+          <div className="assessment-box" style={{ padding: 10, fontSize: '0.85rem', fontWeight: 600, borderTop: '2px solid var(--primary)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>합계 누적선량</span><span>{lifetimeDose.lifetimeDoseMNh.toFixed(2)} MN{'\xB7'}h</span>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Daily Dose Detail (단일 직업 또는 legacy) */}
+      {(!jobResults || jobResults.length <= 1) && !lifetimeDose.excluded && (
         <div className="assessment-box" style={{ marginTop: 12, fontSize: '0.8rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
             <span>일일 누적 용량</span><span>{dailyDose.dailyDoseKNh.toFixed(2)} kN{'\xB7'}h</span>

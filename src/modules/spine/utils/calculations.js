@@ -119,12 +119,11 @@ export function assessWorkRelatedness(lifetimeDoseMNh, gender) {
   return result;
 }
 
-// shared.jobs에서 직업력 정보 추출
+// shared.jobs에서 직업력 정보 추출 (합산 — 하위호환용)
 function getCareerFromSharedJobs(shared) {
   const jobs = shared.jobs || [];
   if (jobs.length === 0) return { careerYears: 0, careerMonths: 0, workDaysPerYear: 250 };
 
-  // 모든 직종의 근무기간 합산
   let totalYears = 0;
   for (const job of jobs) {
     totalYears += getEffectiveWorkPeriod(job);
@@ -134,6 +133,24 @@ function getCareerFromSharedJobs(shared) {
   const workDaysPerYear = jobs[0]?.workDaysPerYear || 250;
 
   return { careerYears, careerMonths, workDaysPerYear, totalYears };
+}
+
+// 직업별 task 그룹핑 (sharedJobId가 없는 task는 첫 번째 job에 귀속)
+function groupTasksByJob(tasks, jobs) {
+  const firstJobId = jobs.length > 0 ? jobs[0].id : '';
+  const groups = new Map();
+  for (const job of jobs) {
+    groups.set(job.id, []);
+  }
+  for (const task of tasks) {
+    const jobId = task.sharedJobId || firstJobId;
+    if (groups.has(jobId)) {
+      groups.get(jobId).push(task);
+    } else if (firstJobId && groups.has(firstJobId)) {
+      groups.get(firstJobId).push(task);
+    }
+  }
+  return groups;
 }
 
 // 전체 계산 결과 산출 (모듈 레벨)
@@ -146,26 +163,82 @@ export function computeSpineCalc(patientData) {
     return { ...t, force: result ? result.force : 0 };
   });
 
-  // 구형식 호환: mod에 직업 필드가 있으면 그대로 사용, 없으면 shared.jobs에서 추출
+  // 구형식 호환
   const hasLegacyFields = mod.careerYears !== undefined || mod.workDaysPerYear !== undefined;
-  const career = hasLegacyFields
-    ? { careerYears: mod.careerYears || 0, careerMonths: mod.careerMonths || 0, workDaysPerYear: mod.workDaysPerYear || 250 }
-    : getCareerFromSharedJobs(shared);
+  const jobs = shared.jobs || [];
 
+  // 직업별 계산
+  const jobResults = [];
+  let totalLifetimeDoseKNh = 0;
+  let totalLifetimeDoseMNh = 0;
+  let anyExcluded = true;
+
+  if (!hasLegacyFields && jobs.length > 0) {
+    const taskGroups = groupTasksByJob(tasks, jobs);
+
+    for (const job of jobs) {
+      const jobTasks = taskGroups.get(job.id) || [];
+      const periodYears = getEffectiveWorkPeriod(job);
+      const periodYearsInt = Math.floor(periodYears);
+      const periodMonths = Math.round((periodYears - periodYearsInt) * 12);
+      const workDaysPerYear = job.workDaysPerYear || 250;
+
+      const jobDailyDose = calculateDailyDose(jobTasks, gender);
+      const jobLifetimeDose = calculateLifetimeDose(
+        jobDailyDose.dailyDoseKNh, workDaysPerYear, periodYearsInt, periodMonths, gender
+      );
+
+      if (!jobLifetimeDose.excluded) {
+        totalLifetimeDoseKNh += jobLifetimeDose.lifetimeDoseKNh;
+        totalLifetimeDoseMNh += jobLifetimeDose.lifetimeDoseMNh;
+        anyExcluded = false;
+      }
+
+      jobResults.push({
+        jobId: job.id,
+        jobName: job.jobName || '(미입력)',
+        periodYears,
+        workDaysPerYear,
+        tasks: jobTasks,
+        dailyDose: jobDailyDose,
+        lifetimeDose: jobLifetimeDose
+      });
+    }
+  } else {
+    // legacy 또는 job이 없는 경우: 기존 방식
+    const career = hasLegacyFields
+      ? { careerYears: mod.careerYears || 0, careerMonths: mod.careerMonths || 0, workDaysPerYear: mod.workDaysPerYear || 250 }
+      : getCareerFromSharedJobs(shared);
+
+    const legacyDailyDose = calculateDailyDose(tasks, gender);
+    const legacyLifetimeDose = calculateLifetimeDose(
+      legacyDailyDose.dailyDoseKNh, career.workDaysPerYear, career.careerYears, career.careerMonths, gender
+    );
+    totalLifetimeDoseKNh = legacyLifetimeDose.lifetimeDoseKNh;
+    totalLifetimeDoseMNh = legacyLifetimeDose.lifetimeDoseMNh;
+    anyExcluded = legacyLifetimeDose.excluded;
+  }
+
+  // 전체 통합 결과
   const dailyDose = calculateDailyDose(tasks, gender);
-  const lifetimeDose = calculateLifetimeDose(
-    dailyDose.dailyDoseKNh,
-    career.workDaysPerYear,
-    career.careerYears,
-    career.careerMonths,
-    gender
-  );
+  const career = hasLegacyFields
+    ? { careerYears: mod.careerYears || 0, careerMonths: mod.careerMonths || 0 }
+    : getCareerFromSharedJobs(shared);
+  const totalYears = (career.totalYears !== undefined) ? career.totalYears : (career.careerYears + career.careerMonths / 12);
+
+  const lifetimeDose = {
+    lifetimeDoseKNh: totalLifetimeDoseKNh,
+    lifetimeDoseMNh: totalLifetimeDoseMNh,
+    excluded: anyExcluded,
+    totalYears
+  };
+
   const comparison = compareThresholds(lifetimeDose.lifetimeDoseMNh, gender);
   const risk = assessRisk(comparison);
   const workRelatedness = assessWorkRelatedness(lifetimeDose.lifetimeDoseMNh, gender);
   const maxForce = tasks.length > 0 ? Math.max(...tasks.map(t => t.force)) : 0;
 
-  return { tasks, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender };
+  return { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender };
 }
 
 // 완료 판정

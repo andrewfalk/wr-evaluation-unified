@@ -16,7 +16,7 @@ function generateSpineReport(patientData, calc) {
   const shared = patientData.shared || {};
   const mod = patientData.module || {};
   const c = calc || computeSpineCalc(patientData);
-  const { tasks, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce } = c;
+  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce } = c;
 
   // 구형식 호환
   const hasLegacy = mod.jobName !== undefined || mod.careerYears !== undefined;
@@ -32,12 +32,28 @@ function generateSpineReport(patientData, calc) {
   t += `직업: ${jobInfo.jobName}\n`;
   t += `직업력: ${jobInfo.careerText}\n`;
   t += `연간 근무일: ${jobInfo.workDaysPerYear}일\n\n`;
-  t += `[작업 목록]\n`;
-  tasks.forEach((task, i) => {
-    const formula = formulaDB[task.posture];
-    t += `${i + 1}. ${task.name}: ${task.posture}(${formula?.name}) | ${task.weight}kg | ${task.frequency}회/일 | ${task.force.toLocaleString()}N\n`;
-  });
-  t += `\n[평가 결과]\n`;
+
+  // 직업별 작업 목록 및 결과
+  if (jobResults && jobResults.length > 1) {
+    jobResults.forEach((jr, i) => {
+      t += `[직력${i + 1}: ${jr.jobName} (${jr.periodYears.toFixed(1)}년)]\n`;
+      jr.tasks.forEach((task, ti) => {
+        const formula = formulaDB[task.posture];
+        t += `  ${ti + 1}. ${task.name}: ${task.posture}(${formula?.name}) | ${task.weight}kg | ${task.frequency}회/일 | ${task.force.toLocaleString()}N\n`;
+      });
+      t += `  일일선량: ${jr.dailyDose.dailyDoseKNh.toFixed(2)} kN\xB7h\n`;
+      t += `  누적선량: ${jr.lifetimeDose.excluded ? '일일선량 미달' : `${jr.lifetimeDose.lifetimeDoseMNh.toFixed(2)} MN\xB7h`}\n\n`;
+    });
+  } else {
+    t += `[작업 목록]\n`;
+    tasks.forEach((task, i) => {
+      const formula = formulaDB[task.posture];
+      t += `${i + 1}. ${task.name}: ${task.posture}(${formula?.name}) | ${task.weight}kg | ${task.frequency}회/일 | ${task.force.toLocaleString()}N\n`;
+    });
+    t += `\n`;
+  }
+
+  t += `[평가 결과]\n`;
   t += `최대 압박력: ${maxForce.toLocaleString()} N\n`;
   t += `일일선량: ${dailyDose.dailyDoseKNh.toFixed(2)} kN\xB7h\n`;
   t += `누적선량: ${lifetimeDose.lifetimeDoseMNh.toFixed(2)} MN\xB7h\n`;
@@ -56,7 +72,7 @@ export const spineExportHandlers = {
     const shared = patientData.shared || {};
     const mod = patientData.module || {};
     const c = calc || computeSpineCalc(patientData);
-    const { tasks, dailyDose, lifetimeDose, comparison, workRelatedness } = c;
+    const { tasks, jobResults, dailyDose, lifetimeDose, comparison, workRelatedness } = c;
 
     const hasLegacy = mod.jobName !== undefined || mod.careerYears !== undefined;
     const jobInfo = hasLegacy
@@ -74,15 +90,29 @@ export const spineExportHandlers = {
       ['직업력', jobInfo.careerText],
       ['연간 근무일', `${jobInfo.workDaysPerYear}일`],
       ['', ''],
-      ['작업 목록', ''],
-      ['작업명', '자세', '중량(kg)', '횟수/일', '압박력(N)'],
     ];
 
-    tasks.forEach(t => {
-      wsData.push([t.name, t.posture, t.weight, t.frequency, t.force]);
-    });
+    // 직업별 작업 목록
+    if (jobResults && jobResults.length > 1) {
+      jobResults.forEach((jr, i) => {
+        wsData.push([`직력${i + 1}: ${jr.jobName} (${jr.periodYears.toFixed(1)}년)`, '']);
+        wsData.push(['작업명', '자세', '중량(kg)', '횟수/일', '압박력(N)']);
+        jr.tasks.forEach(t => {
+          wsData.push([t.name, t.posture, t.weight, t.frequency, t.force]);
+        });
+        wsData.push(['일일선량', `${jr.dailyDose.dailyDoseKNh.toFixed(2)} kN\xB7h`]);
+        wsData.push(['누적선량', jr.lifetimeDose.excluded ? '일일선량 미달' : `${jr.lifetimeDose.lifetimeDoseMNh.toFixed(2)} MN\xB7h`]);
+        wsData.push(['', '']);
+      });
+    } else {
+      wsData.push(['작업 목록', '']);
+      wsData.push(['작업명', '자세', '중량(kg)', '횟수/일', '압박력(N)']);
+      tasks.forEach(t => {
+        wsData.push([t.name, t.posture, t.weight, t.frequency, t.force]);
+      });
+      wsData.push(['', '']);
+    }
 
-    wsData.push(['', '']);
     wsData.push(['평가 결과', '']);
     wsData.push(['일일선량', `${dailyDose.dailyDoseKNh.toFixed(2)} kN\xB7h`]);
     wsData.push(['누적선량', `${lifetimeDose.lifetimeDoseMNh.toFixed(2)} MN\xB7h`]);

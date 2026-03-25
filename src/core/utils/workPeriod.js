@@ -23,6 +23,17 @@ export function getEffectiveWorkPeriod(job) {
   return calculateWorkPeriod(job.startDate, job.endDate);
 }
 
+export function getWorkPeriodYearMonth(job) {
+  if (job.workPeriodOverride) {
+    const yMatch = job.workPeriodOverride.match(/(\d+)\s*년/);
+    const mMatch = job.workPeriodOverride.match(/(\d+)\s*개월/);
+    return { years: yMatch ? parseInt(yMatch[1]) : 0, months: mMatch ? parseInt(mMatch[1]) : 0 };
+  }
+  if (!job.startDate || !job.endDate) return { years: 0, months: 0 };
+  const totalMonths = Math.round(calculateWorkPeriod(job.startDate, job.endDate) * 12);
+  return { years: Math.floor(totalMonths / 12), months: totalMonths % 12 };
+}
+
 export function getEffectiveWorkPeriodText(job) {
   if (job.workPeriodOverride) return job.workPeriodOverride;
   return formatWorkPeriod(job.startDate, job.endDate);

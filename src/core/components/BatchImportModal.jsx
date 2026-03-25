@@ -4,6 +4,7 @@ import { createPatient, createDiagnosis, createSharedJob } from '../utils/data';
 import { suggestModules } from '../utils/diagnosisMapping';
 import { getModule } from '../moduleRegistry';
 import { createKneeJobExtras } from '../../modules/knee/utils/data';
+import { createTask as createSpineTask, createSpineModuleData } from '../../modules/spine/utils/data';
 import { formatWorkPeriod } from '../utils/workPeriod';
 import { showAlert } from '../utils/platform';
 
@@ -75,7 +76,15 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
       startStop: findCol(['출발', 'start_stop', '정지']),
       tightSpace: findCol(['좁은', 'tight', 'space']),
       kneeContact: findCol(['접촉', 'contact', '충격']),
-      jumpDown: findCol(['뛰어', 'jump'])
+      jumpDown: findCol(['뛰어', 'jump']),
+      // 척추 작업 컬럼
+      taskName: findCol(['작업명', 'task_name', 'task']),
+      posture: findCol(['자세코드', 'posture']),
+      taskWeight: findCol(['작업중량', 'task_weight', 'task_kg']),
+      frequency: findCol(['횟수', 'frequency', 'freq']),
+      timeValue: findCol(['시간값', 'time_value']),
+      timeUnit: findCol(['시간단위', 'time_unit']),
+      correctionFactor: findCol(['보정계수', 'correction', 'factor'])
     };
 
     const sideMap = {
@@ -93,7 +102,11 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
         const d = XLSX.SSF.parse_date_code(v);
         return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
       }
-      return String(v);
+      const s = String(v).trim();
+      // "2025/03/25", "2025.03.25" 등 → "2025-03-25" 정규화
+      const m = s.match(/(\d{4})[\/.\-](\d{1,2})[\/.\-](\d{1,2})/);
+      if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+      return s;
     };
 
     const getVal = (row, key) => {
@@ -118,6 +131,30 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
     const applyKlg = (diag, side, klgRight, klgLeft) => {
       if (side === 'right' || side === 'both') diag.klgRight = klgRight;
       if (side === 'left' || side === 'both') diag.klgLeft = klgLeft;
+    };
+
+    const buildSpineTask = (row, index, sharedJobId = '') => {
+      const name = String(getVal(row, 'taskName') || '').trim();
+      const posture = String(getVal(row, 'posture') || '').trim().toUpperCase();
+      if (!name && !posture) return null;
+      const task = createSpineTask(index, sharedJobId);
+      if (name) task.name = name;
+      if (posture) task.posture = posture;
+      const tw = getVal(row, 'taskWeight');
+      if (tw !== undefined && tw !== '') task.weight = Number(tw) || 0;
+      const freq = getVal(row, 'frequency');
+      if (freq !== undefined && freq !== '') task.frequency = Number(freq) || 0;
+      const tv = getVal(row, 'timeValue');
+      if (tv !== undefined && tv !== '') task.timeValue = Number(tv) || 0;
+      const tu = String(getVal(row, 'timeUnit') || '').trim().toLowerCase();
+      if (['sec', 'min', 'hr'].includes(tu)) task.timeUnit = tu;
+      const cf = getVal(row, 'correctionFactor');
+      if (cf !== undefined && cf !== '') task.correctionFactor = Number(cf) || 1.0;
+      return task;
+    };
+
+    const hasSpineData = (row) => {
+      return (getVal(row, 'taskName') || getVal(row, 'posture'));
     };
 
     let stats = { newPatients: 0, newDiagnoses: 0, newJobs: 0, skipped: 0 };
@@ -171,6 +208,10 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
         if (rowJobName && !suggestedMods.includes('knee')) {
           suggestedMods.push('knee');
         }
+        // 척추 작업 데이터가 있으면 spine 모듈 보장
+        if (hasSpineData(row) && !suggestedMods.includes('spine')) {
+          suggestedMods.push('spine');
+        }
 
         const modulesData = {};
         for (const mId of suggestedMods) {
@@ -185,10 +226,10 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
         p.data.shared.height = getVal(row, 'height') ? String(getVal(row, 'height')) : '';
         p.data.shared.weight = getVal(row, 'weight') ? String(getVal(row, 'weight')) : '';
         p.data.shared.gender = genderMap[(String(getVal(row, 'gender') || '')).toLowerCase()] || '';
-        p.data.shared.hospitalName = String(getVal(row, 'hospitalName') || '');
-        p.data.shared.department = String(getVal(row, 'department') || '');
-        p.data.shared.doctorName = String(getVal(row, 'doctorName') || '');
-        p.data.shared.specialNotes = String(getVal(row, 'specialNotes') || '');
+        p.data.shared.hospitalName = String(getVal(row, 'hospitalName') || '').trim();
+        p.data.shared.department = String(getVal(row, 'department') || '').trim();
+        p.data.shared.doctorName = String(getVal(row, 'doctorName') || '').trim();
+        p.data.shared.specialNotes = String(getVal(row, 'specialNotes') || '').trim();
         if (diagList.length > 0) p.data.shared.diagnoses = diagList;
 
         // 직업 데이터 → shared.jobs + 무릎 jobExtras
@@ -227,6 +268,15 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
           const returnVal = String(getVal(row, 'returnConsiderations') || '');
           if (returnVal) modulesData.knee.returnConsiderations = returnVal;
           p.data.modules.knee = modulesData.knee;
+        }
+
+        // 척추 작업 데이터 (같은 행에 직종이 있으면 해당 job에 연결)
+        if (modulesData.spine && hasSpineData(row)) {
+          const linkedJobId = (p.data.shared.jobs && p.data.shared.jobs.length > 0)
+            ? p.data.shared.jobs[p.data.shared.jobs.length - 1].id : '';
+          const task = buildSpineTask(row, 0, linkedJobId);
+          if (task) modulesData.spine.tasks = [task];
+          p.data.modules.spine = modulesData.spine;
         }
 
         resultPatients.push(p);
@@ -301,6 +351,31 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
             stats.skipped++;
           }
         }
+
+        // 척추 작업 머지
+        if (hasSpineData(row)) {
+          // spine 모듈이 없으면 생성
+          if (!existingPatient.data.activeModules.includes('spine')) {
+            existingPatient.data.activeModules.push('spine');
+            const mod = getModule('spine');
+            if (mod?.createModuleData) existingPatient.data.modules.spine = mod.createModuleData();
+          }
+          const spineData = existingPatient.data.modules.spine;
+          if (spineData) {
+            // 같은 행의 직종명으로 job id를 찾아 sharedJobId 설정
+            let linkedJobId = '';
+            if (rowJobName) {
+              const matchedJob = (existingPatient.data.shared.jobs || []).find(j => j.jobName === rowJobName);
+              if (matchedJob) linkedJobId = matchedJob.id;
+            }
+            const taskName = String(getVal(row, 'taskName') || '').trim();
+            const existingTask = taskName && spineData.tasks.find(t => t.name === taskName);
+            if (!existingTask) {
+              const task = buildSpineTask(row, spineData.tasks.length, linkedJobId);
+              if (task) spineData.tasks.push(task);
+            }
+          }
+        }
       }
     }
 
@@ -340,14 +415,15 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
         </div>
 
         <details style={{ marginTop: 10, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-          <summary style={{ cursor: 'pointer' }}>지원하는 컬럼 (29개)</summary>
+          <summary style={{ cursor: 'pointer' }}>지원하는 컬럼 (36개)</summary>
           <div style={{ marginTop: 8, padding: 10, background: 'var(--card-bg)', borderRadius: 4 }}>
             <strong>기본정보:</strong> 이름, 생년월일, 재해일자, 키, 몸무게, 성별<br/>
             <strong>기관정보:</strong> 병원명, 진료과, 담당의<br/>
             <strong>기타:</strong> 특이사항, 복귀고려사항<br/>
             <strong>상병:</strong> 진단코드, 진단명, 부위, KLG(우측), KLG(좌측)<br/>
             <strong>직업:</strong> 직종명, 시작일, 종료일, 근무기간(년), 근무기간(개월), 중량물(kg), 쪼그려앉기(분)<br/>
-            <strong>보조변수:</strong> 계단오르내리기, 무릎비틀림, 출발정지반복, 좁은공간, 무릎접촉충격, 뛰어내리기
+            <strong>보조변수:</strong> 계단오르내리기, 무릎비틀림, 출발정지반복, 좁은공간, 무릎접촉충격, 뛰어내리기<br/>
+            <strong>척추작업:</strong> 작업명, 자세코드(G1-G11), 작업중량(kg), 횟수/일, 시간값, 시간단위(sec/min/hr), 보정계수
           </div>
         </details>
 

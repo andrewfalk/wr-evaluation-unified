@@ -1,6 +1,6 @@
 // 척추 모듈 전용 데이터
 
-export const createTask = (index = 0) => ({
+export const createTask = (index = 0, sharedJobId = '') => ({
   id: Date.now() + Math.random(),
   name: `작업 ${index + 1}`,
   posture: 'G1',
@@ -9,7 +9,8 @@ export const createTask = (index = 0) => ({
   timeValue: 5,
   timeUnit: 'sec',
   correctionFactor: 1.0,
-  force: 0
+  force: 0,
+  sharedJobId
 });
 
 export const createSpineModuleData = () => ({

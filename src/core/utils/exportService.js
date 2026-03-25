@@ -5,7 +5,7 @@ import { getStatusText, getReasonText } from '../../modules/knee/utils/calculati
 import { AUX_LABELS } from '../../modules/knee/utils/data';
 import { getDiagnosisModuleHint } from './diagnosisMapping';
 import { calculateAge, calculateBMI } from './common';
-import { getEffectiveWorkPeriodText } from './workPeriod';
+import { getEffectiveWorkPeriodText, getWorkPeriodYearMonth } from './workPeriod';
 
 function generateUnifiedEMR(patient) {
   const shared = patient.data.shared || {};
@@ -20,23 +20,11 @@ function generateUnifiedEMR(patient) {
   const hasKnee = activeModules.includes('knee');
   const hasSpine = activeModules.includes('spine');
 
-  // --- b5: 최종 확인 상병명 ---
+  // --- b5: 최종 확인 상병명 (상병 코드+이름만) ---
   const b5 = diagnoses
     .filter(d => d.code || d.name)
-    .map(d => {
-      let line = `${d.code || ''} ${d.name || ''}`.trim();
-      if (hasKnee) {
-        if (d.side === 'right' || d.side === 'both') {
-          line += `\n  - 우측: 상병 상태(${getStatusText(d.confirmedRight)}) / 업무관련성(${d.assessmentRight === 'high' ? '높음' : d.assessmentRight === 'low' ? '낮음' : '-'})`;
-          if (d.assessmentRight === 'low') line += `\n    업무관련성 평가 낮음 사유:\n    - ${getReasonText(d.reasonRight, d.reasonRightOther).split('\n').join('\n    - ')}`;
-        }
-        if (d.side === 'left' || d.side === 'both') {
-          line += `\n  - 좌측: 상병 상태(${getStatusText(d.confirmedLeft)}) / 업무관련성(${d.assessmentLeft === 'high' ? '높음' : d.assessmentLeft === 'low' ? '낮음' : '-'})`;
-          if (d.assessmentLeft === 'low') line += `\n    업무관련성 평가 낮음 사유:\n    - ${getReasonText(d.reasonLeft, d.reasonLeftOther).split('\n').join('\n    - ')}`;
-        }
-      }
-      return line;
-    }).join('\n\n');
+    .map(d => `${d.code || ''} ${d.name || ''}`.trim())
+    .join('\n');
 
   // --- b6: 직업적 요인 ---
   let b6 = `[직업력]\n`;
@@ -72,22 +60,34 @@ function generateUnifiedEMR(patient) {
   if (hasSpine) {
     const spineMod = getModule('spine');
     const spineCalc = spineMod?.computeCalc?.({ shared, module: modules.spine || {} }) || {};
-    const { dailyDose, lifetimeDose, comparison, workRelatedness, maxForce } = spineCalc;
+    const { jobResults, dailyDose, lifetimeDose, comparison, workRelatedness, maxForce } = spineCalc;
 
     b6 += `\n<척추 (요추) MDDM 평가>\n`;
+
+    // 직업별 결과
+    if (jobResults && jobResults.length > 1) {
+      jobResults.forEach((jr, i) => {
+        b6 += `[직력${i + 1}: ${jr.jobName} (${jr.periodYears.toFixed(1)}년)]\n`;
+        b6 += `일일선량: ${jr.dailyDose.dailyDoseKNh.toFixed(2)} kN\xB7h / `;
+        b6 += `누적선량: ${jr.lifetimeDose.excluded ? '일일선량 미달' : `${jr.lifetimeDose.lifetimeDoseMNh.toFixed(2)} MN\xB7h`}`;
+        b6 += ` / 포함 작업 ${jr.tasks.length}개\n`;
+      });
+      b6 += `\n[합계]\n`;
+    }
+
     b6 += `[평가 결과]\n`;
     b6 += `최대 압박력: ${(maxForce || 0).toLocaleString()} N\n`;
     b6 += `일일선량: ${dailyDose?.dailyDoseKNh?.toFixed(2) || '0.00'} kN\xB7h\n`;
     b6 += `누적선량: ${lifetimeDose?.lifetimeDoseMNh?.toFixed(2) || '0.00'} MN\xB7h\n`;
     if (comparison) {
       b6 += `\n[기준 비교]\n`;
-      b6 += `DWS2: ${comparison.dws2.percent.toFixed(0)}% (${comparison.dws2.limit} MN\xB7h)\n`;
-      b6 += `법원기준: ${comparison.court.percent.toFixed(0)}% (${comparison.court.limit} MN\xB7h)\n`;
-      b6 += `MDDM: ${comparison.mddm.percent.toFixed(0)}% (${comparison.mddm.limit} MN\xB7h)\n`;
+      b6 += `DWS2: ${comparison.dws2?.percent?.toFixed(0) || '0'}% (${comparison.dws2?.limit || '-'} MN\xB7h)\n`;
+      b6 += `법원기준: ${comparison.court?.percent?.toFixed(0) || '0'}% (${comparison.court?.limit || '-'} MN\xB7h)\n`;
+      b6 += `MDDM: ${comparison.mddm?.percent?.toFixed(0) || '0'}% (${comparison.mddm?.limit || '-'} MN\xB7h)\n`;
     }
     if (workRelatedness) {
-      b6 += `\n[업무관련성] ${workRelatedness.grade} (기여도: ${workRelatedness.workContribution}%)\n`;
-      b6 += `${workRelatedness.detail}\n`;
+      b6 += `\n[업무관련성] ${workRelatedness.grade || '-'} (기여도: ${workRelatedness.workContribution || 0}%)\n`;
+      b6 += `${workRelatedness.detail || ''}\n`;
     }
   }
 
@@ -103,15 +103,15 @@ function generateUnifiedEMR(patient) {
 
     if (hint?.moduleId === 'spine') {
       summary += `\n  상병 상태(${getStatusText(d.confirmedRight)}) / 업무관련성(${d.assessmentRight === 'high' ? '높음' : d.assessmentRight === 'low' ? '낮음' : '-'})`;
-      if (d.assessmentRight === 'low') summary += `\n    낮음 사유:\n    - ${getReasonText(d.reasonRight, d.reasonRightOther).split('\n').join('\n    - ')}`;
+      if (d.assessmentRight === 'low') summary += `\n    낮음 사유:\n    - ${getReasonText(d.reasonRight || [], d.reasonRightOther).split('\n').join('\n    - ')}`;
     } else if (hasKnee) {
       if (d.side === 'right' || d.side === 'both') {
         summary += `\n  우측: 상병 상태(${getStatusText(d.confirmedRight)}) / 업무관련성(${d.assessmentRight === 'high' ? '높음' : d.assessmentRight === 'low' ? '낮음' : '-'})`;
-        if (d.assessmentRight === 'low') summary += `\n    낮음 사유:\n    - ${getReasonText(d.reasonRight, d.reasonRightOther).split('\n').join('\n    - ')}`;
+        if (d.assessmentRight === 'low') summary += `\n    낮음 사유:\n    - ${getReasonText(d.reasonRight || [], d.reasonRightOther).split('\n').join('\n    - ')}`;
       }
       if (d.side === 'left' || d.side === 'both') {
         summary += `\n  좌측: 상병 상태(${getStatusText(d.confirmedLeft)}) / 업무관련성(${d.assessmentLeft === 'high' ? '높음' : d.assessmentLeft === 'low' ? '낮음' : '-'})`;
-        if (d.assessmentLeft === 'low') summary += `\n    낮음 사유:\n    - ${getReasonText(d.reasonLeft, d.reasonLeftOther).split('\n').join('\n    - ')}`;
+        if (d.assessmentLeft === 'low') summary += `\n    낮음 사유:\n    - ${getReasonText(d.reasonLeft || [], d.reasonLeftOther).split('\n').join('\n    - ')}`;
       }
     }
     return summary;
@@ -141,8 +141,8 @@ function buildUnifiedWorkbook(patient) {
   const ws = XLSX.utils.aoa_to_sheet(wsData);
   ws['!cols'] = [{ wch: 25 }, { wch: 80 }];
   XLSX.utils.book_append_sheet(wb, ws, '업무관련성특별진찰소견서(근골격계질병)');
-  const name = shared.name || '미입력';
-  const date = shared.injuryDate || new Date().toISOString().split('T')[0];
+  const name = (shared.name || '미입력').replace(/[\\/:*?"<>|]/g, '_');
+  const date = (shared.injuryDate || new Date().toISOString().split('T')[0]).replace(/[\\/:*?"<>|]/g, '-');
   return { wb, fileName: `업무관련성평가_${name}_${date}.xlsx` };
 }
 
@@ -155,16 +155,20 @@ async function exportAsZip(patientList, zipName) {
   const zip = new JSZip();
   const usedNames = {};
   for (const patient of patientList) {
-    const { wb, fileName } = buildUnifiedWorkbook(patient);
-    let finalName = fileName;
-    if (usedNames[fileName]) {
-      usedNames[fileName]++;
-      finalName = fileName.replace('.xlsx', `_${usedNames[fileName]}.xlsx`);
-    } else {
-      usedNames[fileName] = 1;
+    try {
+      const { wb, fileName } = buildUnifiedWorkbook(patient);
+      let finalName = fileName;
+      if (usedNames[fileName]) {
+        usedNames[fileName]++;
+        finalName = fileName.replace('.xlsx', `_${usedNames[fileName]}.xlsx`);
+      } else {
+        usedNames[fileName] = 1;
+      }
+      const xlsxBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+      zip.file(finalName, xlsxBuffer);
+    } catch (e) {
+      console.error(`Export failed: ${patient.data.shared?.name || 'unknown'}`, e);
     }
-    const xlsxBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-    zip.file(finalName, xlsxBuffer);
   }
   const blob = await zip.generateAsync({ type: 'blob' });
   const url = URL.createObjectURL(blob);
@@ -187,4 +191,159 @@ export async function exportBatch(patients) {
   if (valid.length === 0) return;
   const date = new Date().toISOString().split('T')[0];
   await exportAsZip(valid, `업무관련성평가_${valid.length}명_${date}.zip`);
+}
+
+// ========== 일괄입력용 서식 Export ==========
+
+const BATCH_HEADERS = [
+  '이름', '생년월일', '재해일자', '키', '몸무게', '성별',
+  '병원명', '진료과', '담당의', '특이사항', '복귀고려사항',
+  '진단코드', '진단명', '부위', 'KLG(우측)', 'KLG(좌측)',
+  '직종명', '시작일', '종료일', '근무기간(년)', '근무기간(개월)', '중량물(kg)', '쪼그려앉기(분)',
+  '계단오르내리기', '무릎비틀림', '출발정지반복', '좁은공간', '무릎접촉충격', '뛰어내리기',
+  '작업명', '자세코드', '작업중량(kg)', '횟수/일', '시간값', '시간단위', '보정계수'
+];
+
+const GENDER_REVERSE = { male: '남', female: '여' };
+const SIDE_REVERSE = { right: '우측', left: '좌측', both: '양측' };
+
+function generateBatchRows(patientList) {
+  const rows = [];
+
+  for (const patient of patientList) {
+    const shared = patient.data.shared || {};
+    const modules = patient.data.modules || {};
+    const diagnoses = (shared.diagnoses || []).filter(d => d.code || d.name);
+    const jobs = shared.jobs || [];
+    const kneeExtras = modules.knee?.jobExtras || [];
+    const spineTasks = modules.spine?.tasks || [];
+
+    // 직업별로 spine task를 그룹핑하여 행 구성
+    const firstJobId = jobs[0]?.id || '';
+    const jobTaskPairs = []; // [{job, task, kneeExtra}]
+
+    if (jobs.length > 0) {
+      for (const job of jobs) {
+        const jobSpineTasks = spineTasks.filter(t => (t.sharedJobId || firstJobId) === job.id);
+        const extra = kneeExtras.find(e => e.sharedJobId === job.id) || null;
+        if (jobSpineTasks.length > 0) {
+          jobSpineTasks.forEach(t => jobTaskPairs.push({ job, task: t, extra }));
+        } else {
+          jobTaskPairs.push({ job, task: null, extra });
+        }
+      }
+      // sharedJobId가 어떤 job에도 안 맞는 task (orphan)
+      const allJobIds = new Set(jobs.map(j => j.id));
+      spineTasks.filter(t => t.sharedJobId && !allJobIds.has(t.sharedJobId)).forEach(t => {
+        jobTaskPairs.push({ job: null, task: t, extra: null });
+      });
+    } else {
+      // job이 없는 경우: task만 나열
+      spineTasks.forEach(t => jobTaskPairs.push({ job: null, task: t, extra: null }));
+    }
+
+    const rowCount = Math.max(1, diagnoses.length, jobTaskPairs.length);
+
+    for (let i = 0; i < rowCount; i++) {
+      const row = [];
+      const isFirst = i === 0;
+
+      // merge key — 매 행 반복
+      row.push(shared.name || '');
+      row.push(shared.birthDate || '');
+      row.push(shared.injuryDate || '');
+
+      // shared 필드 — 첫 행에만
+      row.push(isFirst ? (shared.height || '') : '');
+      row.push(isFirst ? (shared.weight || '') : '');
+      row.push(isFirst ? (GENDER_REVERSE[shared.gender] || '') : '');
+      row.push(isFirst ? (shared.hospitalName || '') : '');
+      row.push(isFirst ? (shared.department || '') : '');
+      row.push(isFirst ? (shared.doctorName || '') : '');
+      row.push(isFirst ? (shared.specialNotes || '') : '');
+      row.push(isFirst ? (modules.knee?.returnConsiderations || '') : '');
+
+      // 진단 컬럼
+      const diag = diagnoses[i];
+      row.push(diag?.code || '');
+      row.push(diag?.name || '');
+      row.push(diag ? (SIDE_REVERSE[diag.side] || '') : '');
+      row.push(diag?.klgRight || '');
+      row.push(diag?.klgLeft || '');
+
+      // 직업 + 척추 작업 컬럼 (직업별 그룹핑)
+      const pair = jobTaskPairs[i];
+      const job = pair?.job;
+      const task = pair?.task;
+      const extra = pair?.extra;
+
+      row.push(job?.jobName || '');
+      row.push(job?.startDate || '');
+      row.push(job?.endDate || '');
+      if (job) {
+        const ym = getWorkPeriodYearMonth(job);
+        row.push(ym.years || '');
+        row.push(ym.months || '');
+      } else {
+        row.push('');
+        row.push('');
+      }
+
+      // 무릎 jobExtras
+      row.push(extra?.weight || '');
+      row.push(extra?.squatting || '');
+      row.push(extra?.stairs ? 'O' : '');
+      row.push(extra?.kneeTwist ? 'O' : '');
+      row.push(extra?.startStop ? 'O' : '');
+      row.push(extra?.tightSpace ? 'O' : '');
+      row.push(extra?.kneeContact ? 'O' : '');
+      row.push(extra?.jumpDown ? 'O' : '');
+
+      // 척추 작업 컬럼
+      row.push(task?.name || '');
+      row.push(task?.posture || '');
+      row.push(task?.weight ?? '');
+      row.push(task?.frequency ?? '');
+      row.push(task?.timeValue ?? '');
+      row.push(task?.timeUnit || '');
+      row.push(task?.correctionFactor ?? '');
+
+      rows.push(row);
+    }
+  }
+
+  return rows;
+}
+
+function buildBatchWorkbook(patientList) {
+  const dataRows = generateBatchRows(patientList);
+  const wb = XLSX.utils.book_new();
+  const wsData = [BATCH_HEADERS, ...dataRows];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = BATCH_HEADERS.map(() => ({ wch: 14 }));
+  XLSX.utils.book_append_sheet(wb, ws, '일괄입력용');
+  return wb;
+}
+
+export function exportBatchFormatSingle(patient) {
+  const name = (patient.data.shared?.name || '미입력').replace(/[\\/:*?"<>|]/g, '_');
+  const date = new Date().toISOString().split('T')[0];
+  const wb = buildBatchWorkbook([patient]);
+  XLSX.writeFile(wb, `일괄입력용_${name}_${date}.xlsx`);
+}
+
+export function exportBatchFormatSelected(patients, selectedIds) {
+  const selected = patients.filter(p => selectedIds.has(p.id) && p.data.shared?.name);
+  if (selected.length === 0) return;
+  const date = new Date().toISOString().split('T')[0];
+  const wb = buildBatchWorkbook(selected);
+  XLSX.writeFile(wb, `일괄입력용_${selected.length}명_${date}.xlsx`);
+}
+
+export function exportBatchFormatAll(patients) {
+  const valid = patients.filter(p => p.data.shared?.name);
+  if (valid.length === 0) return;
+  const date = new Date().toISOString().split('T')[0];
+  const wb = buildBatchWorkbook(valid);
+  XLSX.writeFile(wb, `일괄입력용_${valid.length}명_${date}.xlsx`);
 }

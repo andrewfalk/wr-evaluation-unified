@@ -1,7 +1,7 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 2.2.0
-> **Last Updated:** 2026-03-22
+> **Version:** 2.4.0
+> **Last Updated:** 2026-03-25
 > **Status:** MVP 개발 완료 / Vercel 배포 완료
 
 ---
@@ -109,7 +109,8 @@ Patient
     │   └── spine                       ← 척추 전용
     │       └── tasks[]                 ← MDDM 작업 목록
     │           └── { id, name, posture, weight, frequency,
-    │                 timeValue, timeUnit, correctionFactor, force }
+    │                 timeValue, timeUnit, correctionFactor, force,
+    │                 sharedJobId }     ← 직업력 연결 (shared.jobs[].id)
     └── activeModules: ['knee', 'spine']
 ```
 
@@ -217,10 +218,10 @@ shared.jobs[] + knee.jobExtras[] → mergeJobsWithExtras() → 합성 job 객체
 
 **평가 방법론:** MDDM (Mainz-Dortmund Dose Model) — 독일 직업성 요추 질환 평가 모델
 
-#### 신체부담 평가 (TaskManager + TaskEditor + SpineResultPanel)
+#### 신체부담 평가 (SpineEvaluation + TaskManager + TaskEditor + SpineResultPanel)
 
-**좌측 패널 — 입력 (TaskManager + TaskEditor):**
-작업 목록 관리 및 개별 작업 편집. 신규 환자 생성 시 기본 작업 1개가 자동 생성됨.
+**좌측 패널 — 입력 (SpineEvaluation + TaskManager + TaskEditor):**
+직업력이 2개 이상이면 직업별 탭을 표시하여 작업을 직업별로 관리. 각 작업(task)은 `sharedJobId`로 특정 직업에 연결된다. 신규 환자 생성 시 기본 작업 1개가 자동 생성됨.
 
 | 항목 | 설명 |
 |------|------|
@@ -236,7 +237,8 @@ shared.jobs[] + knee.jobExtras[] → mergeJobsWithExtras() → 합성 job 객체
 - Summary Cards: 최대 압박력(N), 일일 누적 용량(kN·h), 평생 누적 용량(MN·h)
 - Risk Gauge: 위험도 시각화 (안전/주의/위험)
 - Threshold Comparison: MDDM/법원/DWS2 기준 대비 progress bar
-- 일일→평생 용량 산출 과정 상세
+- 직업별 누적선량 내역 (2개 이상 직업 시): 직업별 일일선량/누적선량 + 합계
+- 일일→평생 용량 산출 과정 상세 (단일 직업 또는 legacy)
 - 작업별 압박력, 시간, 기여도 목록
 - 업무관련성 평가 등급 + 기여도 바
 
@@ -245,8 +247,16 @@ shared.jobs[] + knee.jobExtras[] → mergeJobsWithExtras() → 합성 job 객체
 ```
 척추압박력: F = b + m × L  (자세별 계수 b, m + 하중 L)
 일일선량:   D = √(Σ F²·t) / 1000 / 60  (kN·h)
-누적노출량: Dd × 연간근무일수 × 총근무년수  (MN·h)
+
+직업별 누적노출량 (v2.4.0):
+  for each job in shared.jobs:
+    jobTasks = tasks.filter(t => t.sharedJobId === job.id)
+    jobDailyDose = calculateDailyDose(jobTasks, gender)
+    jobLifetimeDose = jobDailyDose × 연간근무일수 × 해당직업 근무년수
+  totalLifetimeDose = Σ(각 직업의 lifetimeDose)  (MN·h)
 ```
+
+**하위 호환:** `sharedJobId`가 없는 기존 task는 첫 번째 직업에 자동 귀속. legacy 필드(`careerYears` 등)가 존재하면 기존 단일 계산 방식 유지.
 
 **업무관련성 판정 기준:**
 
@@ -362,7 +372,8 @@ Gemini 2.5 Pro는 thinking(추론) 기능이 기본 활성화되어 비활성화
   + 기여도 + 누적부담
 
   <척추 (요추)>                ← 척추 활성 시만 표시
-  [평가 결과] + [기준 비교] + [신체부담기여도]
+  [직력별 평가 결과]            ← 2개 이상 직업 시 직업별 일일선량/누적선량
+  [합산 결과] + [기준 비교] + [신체부담기여도]
 
 [종합소견]
 상병별 판정 (무릎 활성 시 KLG/업무관련성 포함)
@@ -393,7 +404,11 @@ Gemini 2.5 Pro는 thinking(추론) 기능이 기본 활성화되어 비활성화
 | 6.종합소견 | 기여도 + 상병별 종합소견 통합 |
 | 7.복귀 관련 고려사항 | 복귀 고려사항 |
 
-**내보내기 모드 3종:**
+**내보내기 형식 2종:**
+
+각 버튼(현재/선택/전체)은 드롭다운으로 형식을 선택할 수 있다.
+
+#### A. EMR 형식 (기존)
 
 | 모드 | 함수 | 출력 |
 |------|------|------|
@@ -404,16 +419,42 @@ Gemini 2.5 Pro는 thinking(추론) 기능이 기본 활성화되어 비활성화
 파일명: `업무관련성평가_{이름}_{재해일}.xlsx`
 ZIP명: `업무관련성평가_{N}명_{날짜}.zip` (동명 파일은 인덱스 접미사 부여)
 
+#### B. 일괄입력용 서식
+
+일괄 Import 템플릿과 동일한 flat table 형태로 환자 데이터를 내보낸다. 내보낸 파일을 다시 Import하면 원본 데이터가 복원되는 roundtrip을 보장한다.
+
+| 모드 | 함수 | 출력 |
+|------|------|------|
+| 현재 환자 | `exportBatchFormatSingle(patient)` | 단일 .xlsx |
+| 선택 환자 | `exportBatchFormatSelected(patients, selectedIds)` | 단일 .xlsx |
+| 전체 환자 | `exportBatchFormatAll(patients)` | 단일 .xlsx |
+
+파일명: `일괄입력용_{이름 또는 N명}_{날짜}.xlsx`
+
+**컬럼 구성 (36열):**
+- 기본정보(6): 이름, 생년월일, 재해일자, 키, 몸무게, 성별
+- 기관정보(3): 병원명, 진료과, 담당의
+- 기타(2): 특이사항, 복귀고려사항
+- 상병(5): 진단코드, 진단명, 부위, KLG(우측), KLG(좌측)
+- 직업(7): 직종명, 시작일, 종료일, 근무기간(년), 근무기간(개월), 중량물(kg), 쪼그려앉기(분)
+- 무릎 보조변수(6): 계단오르내리기, 무릎비틀림, 출발정지반복, 좁은공간, 무릎접촉충격, 뛰어내리기
+- 척추 작업(7): 작업명, 자세코드(G1-G11), 작업중량(kg), 횟수/일, 시간값, 시간단위(sec/min/hr), 보정계수
+
+**행 생성 규칙:** 척추 작업을 직업별로 그룹핑하여 같은 직업의 작업이 해당 직업 행에 배치됨. 환자별 row 수 = max(1, 상병수, 직업-작업 쌍 수). merge key(이름+생년월일+재해일자)는 매 행 반복.
+
 ### 7.3 PDF
 
 무릎 모듈 활성 시 보고서 미리보기 영역을 html2pdf.js로 PDF 변환.
 
 ### 7.4 일괄 입력 (Batch Import)
 
-`BatchImportModal`에서 엑셀 파일을 읽어 복수 환자를 일괄 등록. 드래그 앤 드롭 영역(`.import-zone`)은 점선 테두리 + 아이콘 + 호버/드래그 하이라이트로 시각적 가독성 확보:
+`BatchImportModal`에서 엑셀 파일을 읽어 복수 환자를 일괄 등록 (36열 지원). 드래그 앤 드롭 영역(`.import-zone`)은 점선 테두리 + 아이콘 + 호버/드래그 하이라이트로 시각적 가독성 확보:
 - 공통 필드 → `shared.jobs[]`
 - 무릎 전용 → `modules.knee.jobExtras[]`
-- 기존 환자와 이름 중복 시 상병/직업 추가 (병합)
+- 척추 작업 → `modules.spine.tasks[]` (작업명, 자세코드, 중량, 횟수, 시간값/단위, 보정계수)
+- 같은 행에 직종명과 척추 작업이 모두 있으면 `sharedJobId`로 해당 직업에 자동 연결
+- 기존 환자와 이름 중복 시 상병/직업/작업 추가 (병합)
+- 척추 작업 데이터 존재 시 자동으로 spine 모듈 활성화
 
 ---
 
@@ -655,6 +696,17 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 - **환자 목록 패널**: 높이 커스텀 조절(resize handle), 사이드바 sticky 레이아웃
 - **엑셀 출력 형식 통일**: 미리보기와 동일한 형식으로 무릎/종합소견 섹션 정렬
 - **Electron 이미지 경로**: 절대 → 상대 경로(`./images/`)로 수정
+
+### Phase 10: 척추 모듈 직업별 계산 분리 + Export/Import 연동
+
+- **척추 작업-직업 연결**: 각 task에 `sharedJobId` 필드 추가, 직업별 탭 UI로 작업 관리
+- **직업별 누적선량 계산**: 직업별로 해당 작업만 모아 일일선량 개별 산출, 직업별 기간을 곱해 누적선량 합산 (`computeSpineCalc` → `jobResults[]` 반환)
+- **SpineResultPanel**: 2개 이상 직업 시 직업별 누적선량 내역 섹션 + 합계 표시
+- **미리보기/EMR/텍스트 보고서**: 직업별 평가 결과 표시 (`reportGenerator.js`, `exportService.js`, `exportHandlers.js`)
+- **일괄입력용 Export**: 척추 작업을 해당 직업 행에 배치 (직업별 그룹핑)
+- **일괄 Import**: 같은 행의 직종명으로 `sharedJobId` 자동 연결
+- **하위 호환**: `sharedJobId` 없는 기존 데이터는 첫 번째 직업에 자동 귀속, legacy 필드 존재 시 기존 계산 방식 유지
+- **Electron 버전 동기화**: `main.js`/`preload.js` 하드코딩 제거, `package.json` 버전 자동 참조
 
 ---
 

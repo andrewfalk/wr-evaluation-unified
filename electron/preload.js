@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const pkg = require('../package.json');
 
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
@@ -16,7 +17,7 @@ contextBridge.exposeInMainWorld('electron', {
 
   // 버전 정보
   version: {
-    app: '2.0.0',
+    app: pkg.version,
     electron: process.versions.electron,
     node: process.versions.node,
     chrome: process.versions.chrome

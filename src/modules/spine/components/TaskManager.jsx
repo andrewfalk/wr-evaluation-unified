@@ -1,17 +1,12 @@
-import { createTask } from '../utils/data';
 import { formulaDB } from '../utils/formulaDB';
 
 export function TaskManager({ tasks, selectedIndex, onSelect, onAdd, onRemove }) {
-  const handleAdd = () => {
-    const newTask = createTask(tasks.length);
-    onAdd(newTask);
-  };
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
         <h3 style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>작업 목록 ({tasks.length})</h3>
-        <button className="btn btn-primary btn-sm" onClick={handleAdd}>+ 작업 추가</button>
+        <button className="btn btn-primary btn-sm" onClick={onAdd}>+ 작업 추가</button>
       </div>
       {tasks.length === 0 ? (
         <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', background: 'var(--card-bg)', borderRadius: 8 }}>

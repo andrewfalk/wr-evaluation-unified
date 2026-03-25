@@ -27,9 +27,22 @@ function genKneeBurdenSection(patientData, calc) {
 }
 
 function genSpineBurdenSection(patientData, calc) {
-  const { dailyDose, lifetimeDose, comparison, workRelatedness, maxForce } = calc;
+  const { jobResults, dailyDose, lifetimeDose, comparison, workRelatedness, maxForce } = calc;
   let t = `\n  <척추 (요추)>\n`;
-  t += `  [평가 결과]\n`;
+
+  // 직업별 결과 (2개 이상일 때)
+  if (jobResults && jobResults.length > 1) {
+    t += `  [직력별 평가 결과]\n`;
+    jobResults.forEach((jr, i) => {
+      t += `  직력${i + 1}: ${jr.jobName} (${jr.periodYears.toFixed(1)}년)\n`;
+      t += `  일일선량: ${jr.dailyDose.dailyDoseKNh.toFixed(2)} kN\xB7h / `;
+      t += `누적선량: ${jr.lifetimeDose.excluded ? '일일선량 미달' : `${jr.lifetimeDose.lifetimeDoseMNh.toFixed(2)} MN\xB7h`}\n\n`;
+    });
+    t += `  [합산 결과]\n`;
+  } else {
+    t += `  [평가 결과]\n`;
+  }
+
   t += `  최대 압박력: ${maxForce.toLocaleString()} N\n`;
   t += `  일일선량: ${dailyDose.dailyDoseKNh.toFixed(2)} kN\xB7h\n`;
   t += `  누적선량: ${lifetimeDose.lifetimeDoseMNh.toFixed(2)} MN\xB7h\n`;

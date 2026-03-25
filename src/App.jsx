@@ -363,6 +363,15 @@ function App() {
     if (confirmed) setSavedItems(deleteSavedItem(id, savedItems));
   };
 
+  const [exportDropdown, setExportDropdown] = useState(null);
+
+  useEffect(() => {
+    if (!exportDropdown) return;
+    const close = () => setExportDropdown(null);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [exportDropdown]);
+
   const handleExportSingle = async () => {
     if (!activePatient) return;
     try {
@@ -382,6 +391,28 @@ function App() {
     try {
       const { exportBatch } = await import('./core/utils/exportService');
       await exportBatch(patients);
+    } catch (err) { await showAlert(err.message); }
+  };
+
+  const handleExportBatchFormatSingle = async () => {
+    if (!activePatient) return;
+    try {
+      const { exportBatchFormatSingle } = await import('./core/utils/exportService');
+      exportBatchFormatSingle(activePatient);
+    } catch (err) { await showAlert(err.message); }
+  };
+
+  const handleExportBatchFormatSelected = async () => {
+    try {
+      const { exportBatchFormatSelected } = await import('./core/utils/exportService');
+      await exportBatchFormatSelected(patients, selectedIds);
+    } catch (err) { await showAlert(err.message); }
+  };
+
+  const handleExportBatchFormatAll = async () => {
+    try {
+      const { exportBatchFormatAll } = await import('./core/utils/exportService');
+      await exportBatchFormatAll(patients);
     } catch (err) { await showAlert(err.message); }
   };
 
@@ -813,13 +844,37 @@ function App() {
             <button className="btn btn-secondary btn-sm" onClick={() => setShowLoadModal(true)}>불러오기</button>
             <button className="btn btn-secondary btn-sm" onClick={() => setShowSettings(true)}>설정</button>
             {activePatient && activeModules.length > 0 && (
-              <button className="btn btn-success btn-sm" onClick={handleExportSingle}>Excel(현재)</button>
+              <div style={{ position: 'relative', display: 'inline-block' }}>
+                <button className="btn btn-success btn-sm" onClick={e => { e.stopPropagation(); setExportDropdown(v => v === 'single' ? null : 'single'); }}>Excel(현재) ▾</button>
+                {exportDropdown === 'single' && (
+                  <div className="export-dropdown" onClick={() => setExportDropdown(null)}>
+                    <button onClick={handleExportSingle}>EMR 형식</button>
+                    <button onClick={handleExportBatchFormatSingle}>일괄입력용</button>
+                  </div>
+                )}
+              </div>
             )}
             {selectedIds.size > 0 && (
-              <button className="btn btn-success btn-sm" onClick={handleExportSelected}>Excel(선택 {selectedIds.size})</button>
+              <div style={{ position: 'relative', display: 'inline-block' }}>
+                <button className="btn btn-success btn-sm" onClick={e => { e.stopPropagation(); setExportDropdown(v => v === 'selected' ? null : 'selected'); }}>Excel(선택 {selectedIds.size}) ▾</button>
+                {exportDropdown === 'selected' && (
+                  <div className="export-dropdown" onClick={() => setExportDropdown(null)}>
+                    <button onClick={handleExportSelected}>EMR 형식</button>
+                    <button onClick={handleExportBatchFormatSelected}>일괄입력용</button>
+                  </div>
+                )}
+              </div>
             )}
             {patients.length > 0 && (
-              <button className="btn btn-success btn-sm" onClick={handleExportBatch}>Excel(전체)</button>
+              <div style={{ position: 'relative', display: 'inline-block' }}>
+                <button className="btn btn-success btn-sm" onClick={e => { e.stopPropagation(); setExportDropdown(v => v === 'batch' ? null : 'batch'); }}>Excel(전체) ▾</button>
+                {exportDropdown === 'batch' && (
+                  <div className="export-dropdown" onClick={() => setExportDropdown(null)}>
+                    <button onClick={handleExportBatch}>EMR 형식</button>
+                    <button onClick={handleExportBatchFormatAll}>일괄입력용</button>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </header>
