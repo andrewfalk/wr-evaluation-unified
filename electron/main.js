@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu, ipcMain, dialog, net } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const os = require('os');
 
 // Windows 7/8 호환성 (Electron 22 — 마지막 Win7 지원 버전)
@@ -190,6 +191,42 @@ function callGemini({ prompt, systemPrompt, model, apiKey }) {
   return netRequest(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`, {
     headers: { 'Content-Type': 'application/json' }
   }, body);
+}
+
+// IPC: 구형 무릎 프로그램(wr-evaluation) 저장 데이터 읽기
+ipcMain.handle('load-legacy-data', async () => {
+  const legacyPath = path.join(app.getPath('appData'), 'wr-evaluation', 'Local Storage', 'leveldb');
+  if (!fs.existsSync(legacyPath)) return null;
+
+  const files = fs.readdirSync(legacyPath).filter(f => f.endsWith('.log') || f.endsWith('.ldb'));
+  let savedItems = null;
+
+  for (const file of files) {
+    const buf = fs.readFileSync(path.join(legacyPath, file));
+    // latin1로 디코딩하여 바이너리 바이트를 보존한 채 문자열 탐색
+    const text = buf.toString('latin1');
+
+    const match = text.match(/wrEvaluationSavedItems[\x00-\xff]*?(\[[\s\S]*)/);
+    if (match) {
+      const jsonStr = extractJsonArray(match[1]);
+      if (jsonStr) {
+        try { savedItems = JSON.parse(jsonStr); } catch { /* skip */ }
+      }
+    }
+  }
+
+  return savedItems ? { savedItems } : null;
+});
+
+function extractJsonArray(str) {
+  const start = str.indexOf('[');
+  if (start < 0) return null;
+  let depth = 0;
+  for (let i = start; i < str.length; i++) {
+    if (str[i] === '[') depth++;
+    else if (str[i] === ']') { depth--; if (depth === 0) return str.substring(start, i + 1); }
+  }
+  return null;
 }
 
 app.on('window-all-closed', () => {

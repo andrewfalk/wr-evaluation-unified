@@ -10,8 +10,9 @@
   --card-border: #cbd5e1;
   --hover-bg: #f1f5f9;
   --modal-bg: white;
-  --btn-secondary-bg: #f1f5f9;
-  --btn-secondary-color: #334155;
+  --btn-secondary-bg: #e2e8f0;
+  --btn-secondary-color: #1e293b;
+  --btn-secondary-border: #cbd5e1;
   --accent: #3b82f6;
   --accent-dark: #2563eb;
   --accent-light: rgba(59,130,246,0.08);
@@ -32,8 +33,9 @@
   --card-border: #334155;
   --hover-bg: #334155;
   --modal-bg: #1e293b;
-  --btn-secondary-bg: #334155;
-  --btn-secondary-color: #cbd5e1;
+  --btn-secondary-bg: #475569;
+  --btn-secondary-color: #f1f5f9;
+  --btn-secondary-border: #64748b;
   --accent: #3b82f6;
   --accent-dark: #60a5fa;
   --accent-light: rgba(59,130,246,0.12);
@@ -108,7 +110,7 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .btn:hover { opacity: 0.9; }
 .btn-primary { background: var(--accent); color: white; }
 .btn-primary:hover { background: var(--accent-dark); }
-.btn-secondary { background: var(--btn-secondary-bg); color: var(--btn-secondary-color); }
+.btn-secondary { background: var(--btn-secondary-bg); color: var(--btn-secondary-color); border: 1px solid var(--btn-secondary-border); }
 .btn-danger { background: #ff6b6b; color: white; }
 .btn-success { background: #51cf66; color: white; }
 .btn-info { background: #339af0; color: white; }

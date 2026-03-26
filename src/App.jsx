@@ -7,7 +7,7 @@ import { AIAnalysisPanel } from './core/components/AIAnalysisPanel';
 import { SettingsModal } from './core/components/SettingsModal';
 import { BatchImportModal } from './core/components/BatchImportModal';
 import { usePatientList } from './core/hooks/usePatientList';
-import { createPatient, createSharedData, createDiagnosis, createSamplePatient, DEFAULT_SETTINGS, FONT_SIZE_MAP } from './core/utils/data';
+import { createPatient, createSharedData, createDiagnosis, createSamplePatient, DEFAULT_SETTINGS, FONT_SIZE_MAP, migratePatients } from './core/utils/data';
 import { FALLBACK_PRESETS } from './modules/knee/utils/data';
 import { suggestModules } from './core/utils/diagnosisMapping';
 import { showAlert, showConfirm } from './core/utils/platform';
@@ -84,6 +84,7 @@ function App() {
   const [intakeSelectedModules, setIntakeSelectedModules] = useState([]);
   const [showBatchImport, setShowBatchImport] = useState(false);
   const [showHome, setShowHome] = useState(false);
+  const [legacyItems, setLegacyItems] = useState(null);
   const [presets, setPresets] = useState([]);
   const [presetMeta, setPresetMeta] = useState(null);
   const [presetError, setPresetError] = useState(null);
@@ -341,6 +342,17 @@ function App() {
     await showAlert('저장됨');
   };
 
+  const handleOverwriteSave = async (item) => {
+    const confirmed = await showConfirm(`"${item.name}"에 덮어쓰시겠습니까?`);
+    if (!confirmed) return;
+    const items = savePatientsData(item.name, patients, savedItems);
+    setSavedItems(items);
+    setLastAutoSave(null);
+    setShowSaveModal(false);
+    setSaveName('');
+    await showAlert('저장됨');
+  };
+
   const handleLoad = async (item, mode = 'overwrite') => {
     if (mode === 'overwrite') {
       const confirmed = await showConfirm('현재 데이터를 덮어쓰시겠습니까?');
@@ -361,6 +373,40 @@ function App() {
   const handleDelete = async (id) => {
     const confirmed = await showConfirm('삭제하시겠습니까?');
     if (confirmed) setSavedItems(deleteSavedItem(id, savedItems));
+  };
+
+  const openLoadModal = () => {
+    setShowLoadModal(true);
+    // 레거시 데이터 감지
+    if (window.electron?.loadLegacyData) {
+      // Electron: IPC로 구형 앱 LevelDB 읽기
+      window.electron.loadLegacyData().then(result => {
+        if (result?.savedItems) {
+          try {
+            setLegacyItems(result.savedItems.map(item => ({
+              ...item,
+              patients: item.patients ? migratePatients(item.patients) : []
+            })));
+          } catch { setLegacyItems(null); }
+        } else {
+          setLegacyItems(null);
+        }
+      }).catch(() => setLegacyItems(null));
+    } else {
+      // 웹: 같은 도메인이면 localStorage 직접 접근
+      try {
+        const legacy = localStorage.getItem('wrEvaluationSavedItems');
+        if (legacy) {
+          const items = JSON.parse(legacy);
+          setLegacyItems(items.map(item => ({
+            ...item,
+            patients: item.patients ? migratePatients(item.patients) : []
+          })));
+        } else {
+          setLegacyItems(null);
+        }
+      } catch { setLegacyItems(null); }
+    }
   };
 
   const [exportDropdown, setExportDropdown] = useState(null);
@@ -441,7 +487,35 @@ function App() {
     <div className="modal-overlay" onClick={() => setShowLoadModal(false)}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <h2>불러오기</h2>
-        {savedItems.length === 0 ? (
+
+        {/* 레거시 데이터 섹션 */}
+        {legacyItems && legacyItems.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--accent)', borderBottom: '1px solid var(--border-color)', paddingBottom: 6, marginBottom: 10 }}>
+              이전 프로그램(무릎) 데이터
+            </div>
+            {legacyItems.map((item, idx) => (
+              <div key={`legacy-${idx}`} className="saved-item" style={{ background: 'var(--accent-light)' }}>
+                <div>
+                  <h4>{item.name}</h4>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{item.count || item.patients?.length || 0}명 | {item.savedAt ? new Date(item.savedAt).toLocaleString('ko-KR') : '-'}</p>
+                </div>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button className="btn btn-primary btn-xs" onClick={() => handleLoad(item, 'overwrite')}>덮어쓰기</button>
+                  <button className="btn btn-info btn-xs" onClick={() => handleLoad(item, 'append')}>추가</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 통합 프로그램 저장 데이터 */}
+        {legacyItems && legacyItems.length > 0 && savedItems.length > 0 && (
+          <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-color)', paddingBottom: 6, marginBottom: 10 }}>
+            통합 프로그램 저장 데이터
+          </div>
+        )}
+        {savedItems.length === 0 && (!legacyItems || legacyItems.length === 0) ? (
           <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>저장 데이터 없음</p>
         ) : savedItems.map(item => (
           <div key={item.id} className="saved-item">
@@ -474,7 +548,7 @@ function App() {
           </div>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
             <button className="btn btn-primary" onClick={handleStartIntake} style={{ padding: '12px 24px', fontSize: '1rem' }}>+ 새 환자 평가 시작</button>
-            <button className="btn btn-secondary" onClick={() => setShowLoadModal(true)} style={{ padding: '12px 24px', fontSize: '1rem' }}>불러오기</button>
+            <button className="btn btn-secondary" onClick={() => openLoadModal()} style={{ padding: '12px 24px', fontSize: '1rem' }}>불러오기</button>
             <button className="btn btn-info" onClick={() => setShowBatchImport(true)} style={{ padding: '12px 24px', fontSize: '1rem' }}>엑셀 일괄입력</button>
             <button className="btn btn-secondary" onClick={() => setShowSettings(true)} style={{ padding: '12px 24px', fontSize: '1rem' }}>설정</button>
           </div>
@@ -841,7 +915,7 @@ function App() {
             <button className="btn btn-secondary btn-sm" onClick={() => setShowHome(true)} title="메인 화면으로">홈</button>
             <button className="btn btn-secondary btn-sm sidebar-toggle" onClick={() => setShowSidebar(v => !v)}>환자 ({patients.length})</button>
             <button className="btn btn-secondary btn-sm" onClick={() => setShowSaveModal(true)}>저장</button>
-            <button className="btn btn-secondary btn-sm" onClick={() => setShowLoadModal(true)}>불러오기</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => openLoadModal()}>불러오기</button>
             <button className="btn btn-secondary btn-sm" onClick={() => setShowSettings(true)}>설정</button>
             {activePatient && activeModules.length > 0 && (
               <div style={{ position: 'relative', display: 'inline-block' }}>
@@ -909,14 +983,32 @@ function App() {
       {showSettings && <SettingsModal settings={settings} onSave={handleSaveSettings} onClose={() => setShowSettings(false)} />}
       {showSaveModal && (
         <div className="modal-overlay" onClick={() => setShowSaveModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
             <h2>저장</h2>
             <p style={{ marginBottom: 15, color: 'var(--text-muted)' }}>현재 {patients.length}명의 환자 데이터를 저장합니다</p>
             <div className="form-group"><label>저장명</label><input value={saveName} onChange={e => setSaveName(e.target.value)} autoFocus /></div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 15 }}>
-              <button className="btn btn-primary" onClick={handleSave}>저장</button>
+            <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+              <button className="btn btn-primary" onClick={handleSave}>새로 저장</button>
               <button className="btn btn-secondary" onClick={() => setShowSaveModal(false)}>취소</button>
             </div>
+            {savedItems.length > 0 && (
+              <>
+                <div style={{ borderTop: '1px solid var(--card-border)', margin: '15px 0 10px', paddingTop: 12 }}>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-muted)' }}>기존 저장 목록</label>
+                </div>
+                <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                  {savedItems.map(item => (
+                    <div key={item.id} className="saved-item" style={{ padding: '8px 10px' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.name}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{item.count || 1}명 | {new Date(item.savedAt).toLocaleString('ko-KR')}</div>
+                      </div>
+                      <button className="btn btn-primary btn-xs" onClick={() => handleOverwriteSave(item)}>덮어쓰기</button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

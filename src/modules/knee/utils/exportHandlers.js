@@ -94,7 +94,7 @@ const generateEMRData = (patientData, c) => {
     }
     return summary;
   }).join('\n\n');
-  const b8 = `[신체부담기여도]\n- 신체부담기여도: ${rel.min}% ~ ${rel.max}%\n- 누적신체부담: ${cum}\n\n[상병별 종합소견]\n${diagSummary}`;
+  const b8 = `\n\n${b6}\n\n[ 업무관련성 평가 결과 ]\n\n${diagSummary}`;
   const b9 = mod.returnConsiderations || '';
 
   return { b5, b6, b7, b8, b9 };

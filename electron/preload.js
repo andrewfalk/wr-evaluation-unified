@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('electron', {
   // AI 분석 (Electron 전용)
   analyzeAI: (data) => ipcRenderer.invoke('analyze-ai', data),
 
+  // 구형 프로그램 데이터 임포트
+  loadLegacyData: () => ipcRenderer.invoke('load-legacy-data'),
+
   // 버전 정보
   version: {
     app: pkg.version,

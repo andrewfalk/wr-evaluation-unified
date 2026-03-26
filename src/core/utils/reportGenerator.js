@@ -108,6 +108,33 @@ export function generateUnifiedReport(patient) {
   // ---- [종합소견] ----
   t += `\n[종합소견]\n`;
   const hasKnee = activeModules.includes('knee');
+
+  if (hasKnee) {
+    const kneeMod = getModule('knee');
+    if (kneeMod?.computeCalc) {
+      const kneeCalc = kneeMod.computeCalc({ shared, module: modules.knee || {} });
+      const { relatedness: r, cumulativeBurden: cum, jobBurdens: jb } = kneeCalc;
+
+      t += `\n\n  <무릎 (슬관절)>\n\n`;
+      (jb || []).forEach((j) => {
+        const checked = Object.entries(AUX_LABELS).filter(([k]) => j[k]).map(([, v]) => v);
+        t += `  직종: ${j.jobName || '-'}\n`;
+        t += `  일 중량물 취급량: ${j.weight || '-'}kg\n`;
+        t += `  일 쪼그려 앉기 시간: ${j.squatting || '-'}분\n`;
+        if (checked.length > 0) t += `  보조변수: ${checked.join(', ')}\n`;
+        t += `  무릎 부담 정도: ${j.burden.level}\n\n`;
+      });
+      t += `  참고) 신체부담 정도는 다음의 4단계로 구분함.\n`;
+      t += `  1) 고도: 퇴행성 변화를 유발 또는 가속하는 것이 확실함(definite)\n`;
+      t += `  2) 중등도상: 퇴행성 변화를 유발 또는 가속하기에 충분함(probable)\n`;
+      t += `  3) 중등도하: 퇴행성 변화를 유발 또는 가속할 가능성이 있음(possible)\n`;
+      t += `  4) 경도: 퇴행성 변화를 유발 또는 가속하기 어려움(no related)\n`;
+      t += `\n  [신체부담기여도] ${r.min}% ~ ${r.max}%\n\n`;
+      t += `  [누적신체부담] ${cum}\n`;
+      t += `\n  [ 업무관련성 평가 결과 ]\n`;
+    }
+  }
+
   diagnoses.forEach((d, i) => {
     if (!(d.code || d.name)) return;
     const hint = getDiagnosisModuleHint(d);
