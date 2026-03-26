@@ -1,6 +1,6 @@
 {
   "name": "wr-evaluation-unified",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "직업성 질환 통합 평가 프로그램 (무릎/척추)",
   "main": "electron/main.js",
   "scripts": {

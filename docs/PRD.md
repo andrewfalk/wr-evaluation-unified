@@ -1,7 +1,7 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 2.4.0
-> **Last Updated:** 2026-03-25
+> **Version:** 2.4.1
+> **Last Updated:** 2026-03-26
 > **Status:** MVP 개발 완료 / Vercel 배포 완료
 
 ---
@@ -707,6 +707,21 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 - **일괄 Import**: 같은 행의 직종명으로 `sharedJobId` 자동 연결
 - **하위 호환**: `sharedJobId` 없는 기존 데이터는 첫 번째 직업에 자동 귀속, legacy 필드 존재 시 기존 계산 방식 유지
 - **Electron 버전 동기화**: `main.js`/`preload.js` 하드코딩 제거, `package.json` 버전 자동 참조
+
+### Phase 11: Electron 수정 + 다크모드 개선 + UI 개선 (v2.4.1)
+
+- **Electron preload.js 수정**: `require('../package.json')` → IPC `get-app-version`으로 대체. asar 패키징 후 상대경로 require 실패로 `window.electron` 전체가 undefined되던 근본 버그 수정 (AI 분석, 네이티브 알림, 레거시 임포트 등 모든 IPC 기능 복구)
+- **구버전 데이터 임포트**: Electron main process에서 구형 무릎 프로그램(wr-evaluation)의 LevelDB(WAL) 파싱 + renderer에서 마이그레이션 UI 제공. 디버그 로깅 추가
+- **구버전 통합용 내보내기**: `wr-evaluation-claude`에 36열 일괄입력용 xlsx 내보내기 기능 추가 (`batchExport.js`)
+- **다크모드 전면 개선**:
+  - 테두리 대비 강화: `--card-border`, `--border-color` `#334155` → `#475569`
+  - 시맨틱 색상 변수 도입: `--color-safe/warning/danger/right/left` + 배경 변수 (`--color-safe-bg` 등)
+  - 하드코딩 색상 제거: `AssessmentTab`, `TaskManager`, `SpineResultPanel`의 `#2b8a3e/#c92a2a/#e67700/#1971c2` → CSS 변수로 교체
+  - `.panel`, `.section`에 `color: var(--text-primary)` 추가 (상속 누락 수정)
+  - `.module-check-name`에 `color: var(--text-primary)` 추가
+  - `.value-positive/negative/neutral` 배지 색상을 CSS 변수로 교체
+- **KLG 등급 UI 컴팩트화**: 종합소견 탭에서 별도 `.klg-box` 섹션 제거, 상병명 헤더 우측에 "K-L Grade" 인라인 드롭다운으로 축소
+- **EMR 종합소견(b8) 개선**: 무릎 신체부담 데이터 + 참고문헌 텍스트 삽입, `[ 업무관련성 평가 결과 ]` 소제목 추가. 미리보기에도 동일 반영
 
 ---
 

@@ -16,7 +16,7 @@ export function TaskManager({ tasks, selectedIndex, onSelect, onAdd, onRemove })
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {tasks.map((task, i) => {
             const formula = formulaDB[task.posture];
-            const forceColor = task.force >= 6000 ? '#c92a2a' : task.force >= 2700 ? '#e67700' : '#2b8a3e';
+            const forceColor = task.force >= 6000 ? 'var(--color-danger)' : task.force >= 2700 ? 'var(--color-warning)' : 'var(--color-safe)';
             return (
               <div
                 key={task.id}

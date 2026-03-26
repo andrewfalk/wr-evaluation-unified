@@ -381,17 +381,23 @@ function App() {
     if (window.electron?.loadLegacyData) {
       // Electron: IPC로 구형 앱 LevelDB 읽기
       window.electron.loadLegacyData().then(result => {
-        if (result?.savedItems) {
+        // 디버그 로깅 (DevTools 콘솔에서 확인)
+        if (result?.debug) console.log('[legacy-debug]', result.debug);
+        const legacyData = result?.data || result; // 새 형식({ debug, data }) 또는 기존 형식 호환
+        if (legacyData?.savedItems) {
           try {
-            setLegacyItems(result.savedItems.map(item => ({
+            setLegacyItems(legacyData.savedItems.map(item => ({
               ...item,
               patients: item.patients ? migratePatients(item.patients) : []
             })));
-          } catch { setLegacyItems(null); }
+          } catch (e) {
+            console.error('[legacy-migrate]', e);
+            setLegacyItems(null);
+          }
         } else {
           setLegacyItems(null);
         }
-      }).catch(() => setLegacyItems(null));
+      }).catch((e) => { console.error('[legacy-error]', e); setLegacyItems(null); });
     } else {
       // 웹: 같은 도메인이면 localStorage 직접 접근
       try {

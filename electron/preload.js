@@ -1,5 +1,4 @@
 const { contextBridge, ipcRenderer } = require('electron');
-const pkg = require('../package.json');
 
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
@@ -18,9 +17,9 @@ contextBridge.exposeInMainWorld('electron', {
   // 구형 프로그램 데이터 임포트
   loadLegacyData: () => ipcRenderer.invoke('load-legacy-data'),
 
-  // 버전 정보
+  // 버전 정보 (app.getVersion()은 main process에서 IPC로 전달)
   version: {
-    app: pkg.version,
+    app: ipcRenderer.sendSync('get-app-version'),
     electron: process.versions.electron,
     node: process.versions.node,
     chrome: process.versions.chrome

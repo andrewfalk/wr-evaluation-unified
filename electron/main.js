@@ -100,6 +100,11 @@ function createWindow() {
 
 app.whenReady().then(createWindow);
 
+// IPC: 앱 버전 (preload에서 동기 호출)
+ipcMain.on('get-app-version', (event) => {
+  event.returnValue = app.getVersion();
+});
+
 // IPC: native alert/confirm
 ipcMain.handle('show-alert', async (_event, message) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -194,39 +199,168 @@ function callGemini({ prompt, systemPrompt, model, apiKey }) {
 }
 
 // IPC: 구형 무릎 프로그램(wr-evaluation) 저장 데이터 읽기
+// Chromium localStorage → LevelDB → WAL(.log) 포맷 파싱 + UTF-16LE 값 추출
 ipcMain.handle('load-legacy-data', async () => {
-  const legacyPath = path.join(app.getPath('appData'), 'wr-evaluation', 'Local Storage', 'leveldb');
-  if (!fs.existsSync(legacyPath)) return null;
+  const debug = [];
+  try {
+    const legacyPath = path.join(app.getPath('appData'), 'wr-evaluation', 'Local Storage', 'leveldb');
+    debug.push(`path: ${legacyPath}`);
+    debug.push(`exists: ${fs.existsSync(legacyPath)}`);
+    if (!fs.existsSync(legacyPath)) return { debug, data: null };
 
-  const files = fs.readdirSync(legacyPath).filter(f => f.endsWith('.log') || f.endsWith('.ldb'));
-  let savedItems = null;
+    const targetKey = 'wrEvaluationSavedItems';
+    let savedItems = null;
 
-  for (const file of files) {
-    const buf = fs.readFileSync(path.join(legacyPath, file));
-    // latin1로 디코딩하여 바이너리 바이트를 보존한 채 문자열 탐색
-    const text = buf.toString('latin1');
+    // .log 파일 우선 (WAL, 비압축), 이후 .ldb (SSTable)
+    const files = fs.readdirSync(legacyPath);
+    const logFiles = files.filter(f => f.endsWith('.log'));
+    const ldbFiles = files.filter(f => f.endsWith('.ldb'));
+    debug.push(`files: log=${logFiles.length} ldb=${ldbFiles.length} (${files.join(', ')})`);
 
-    const match = text.match(/wrEvaluationSavedItems[\x00-\xff]*?(\[[\s\S]*)/);
-    if (match) {
-      const jsonStr = extractJsonArray(match[1]);
-      if (jsonStr) {
-        try { savedItems = JSON.parse(jsonStr); } catch { /* skip */ }
+    for (const file of [...logFiles, ...ldbFiles]) {
+      const buf = fs.readFileSync(path.join(legacyPath, file));
+      debug.push(`${file}: ${buf.length} bytes`);
+      if (buf.length === 0) continue;
+
+      const value = file.endsWith('.log')
+        ? extractFromWal(buf, targetKey)
+        : extractFromRawScan(buf, targetKey);
+
+      debug.push(`${file}: value=${value ? `found(${value.length} chars)` : 'null'}`);
+
+      if (value) {
+        try {
+          savedItems = JSON.parse(value);
+          debug.push(`parsed OK: ${Array.isArray(savedItems) ? savedItems.length + ' items' : typeof savedItems}`);
+          break;
+        } catch (e) {
+          debug.push(`JSON parse error: ${e.message}`);
+        }
       }
+    }
+
+    return { debug, data: savedItems ? { savedItems } : null };
+  } catch (e) {
+    debug.push(`FATAL: ${e.message}\n${e.stack}`);
+    return { debug, data: null };
+  }
+});
+
+// Chromium WAL (.log) 포맷 파싱
+// 블록(32KB) → 레코드(header 7B + data) → 배치(sequence + count + entries)
+function extractFromWal(buf, targetKey) {
+  const BLOCK_SIZE = 32768;
+  const HEADER_SIZE = 7;
+
+  // 1단계: WAL 레코드 → 배치 데이터 청크 추출
+  const batches = [];
+  let fragments = [];
+
+  for (let blockStart = 0; blockStart < buf.length; blockStart += BLOCK_SIZE) {
+    let pos = blockStart;
+    const blockEnd = Math.min(blockStart + BLOCK_SIZE, buf.length);
+
+    while (pos + HEADER_SIZE <= blockEnd) {
+      const dataLen = buf.readUInt16LE(pos + 4);
+      const type = buf[pos + 6];
+      if (dataLen === 0 && type === 0) break; // 빈 패딩
+      const dataEnd = Math.min(pos + HEADER_SIZE + dataLen, buf.length);
+      const data = buf.slice(pos + HEADER_SIZE, dataEnd);
+
+      if (type === 1) { // FULL
+        batches.push(data);
+      } else if (type === 2) { // FIRST
+        fragments = [data];
+      } else if (type === 3) { // MIDDLE
+        fragments.push(data);
+      } else if (type === 4) { // LAST
+        fragments.push(data);
+        batches.push(Buffer.concat(fragments));
+        fragments = [];
+      }
+      pos = dataEnd;
     }
   }
 
-  return savedItems ? { savedItems } : null;
-});
+  // 2단계: 배치에서 key-value 쌍 추출
+  const keyBuf = Buffer.from(targetKey, 'ascii');
 
-function extractJsonArray(str) {
-  const start = str.indexOf('[');
-  if (start < 0) return null;
-  let depth = 0;
-  for (let i = start; i < str.length; i++) {
-    if (str[i] === '[') depth++;
-    else if (str[i] === ']') { depth--; if (depth === 0) return str.substring(start, i + 1); }
+  for (const batch of batches) {
+    if (batch.length < 12) continue;
+    // sequence(8) + count(4) + entries
+    let pos = 12;
+
+    while (pos < batch.length) {
+      const entryType = batch[pos++]; // 1=Put, 0=Delete
+      const [keyLen, keyStart] = readVarint(batch, pos);
+      pos = keyStart;
+      if (pos + keyLen > batch.length) break;
+      const key = batch.slice(pos, pos + keyLen);
+      pos += keyLen;
+
+      if (entryType === 1) { // Put
+        const [valLen, valStart] = readVarint(batch, pos);
+        pos = valStart;
+        if (pos + valLen > batch.length) break;
+
+        // key에 targetKey가 포함되어 있으면 값 추출
+        if (key.indexOf(keyBuf) >= 0) {
+          // Chromium localStorage value: 1바이트 타입 접두사(0x00=UTF-16LE) + UTF-16LE 데이터
+          const valBuf = batch.slice(pos + 1, pos + valLen); // 첫 바이트 스킵
+          try { return valBuf.toString('utf16le'); } catch { /* skip */ }
+        }
+        pos += valLen;
+      }
+      // Delete는 value 없음
+    }
   }
   return null;
+}
+
+function readVarint(buf, offset) {
+  let result = 0, shift = 0, pos = offset;
+  while (pos < buf.length) {
+    const byte = buf[pos++];
+    result |= (byte & 0x7F) << shift;
+    if ((byte & 0x80) === 0) break;
+    shift += 7;
+  }
+  return [result, pos];
+}
+
+// .ldb (SSTable) 파일: 나이브 바이트 스캔 (비압축 블록 대상, 최선 노력)
+function extractFromRawScan(buf, targetKey) {
+  const keyBuf = Buffer.from(targetKey, 'ascii');
+  let searchStart = 0;
+
+  while (true) {
+    const idx = buf.indexOf(keyBuf, searchStart);
+    if (idx < 0) return null;
+    searchStart = idx + 1;
+
+    // key 뒤에서 UTF-16LE '[' 또는 '{' 찾기
+    let pos = idx + keyBuf.length;
+    while (pos < buf.length - 1) {
+      const lo = buf[pos], hi = buf[pos + 1];
+      if (hi === 0 && (lo === 0x5B || lo === 0x7B)) break;
+      pos++;
+    }
+    if (pos >= buf.length - 1) continue;
+
+    const openChar = buf[pos];
+    const closeChar = openChar === 0x5B ? 0x5D : 0x7D;
+    let depth = 0, end = -1;
+    for (let i = pos; i < buf.length - 1; i += 2) {
+      const lo = buf[i], hi = buf[i + 1];
+      if (hi !== 0) continue;
+      if (lo === openChar) depth++;
+      else if (lo === closeChar) { depth--; if (depth === 0) { end = i + 2; break; } }
+    }
+    if (end < 0) continue;
+
+    const text = buf.slice(pos, end).toString('utf16le');
+    try { JSON.parse(text); return text; } catch { continue; }
+  }
 }
 
 app.on('window-all-closed', () => {

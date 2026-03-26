@@ -8,12 +8,12 @@ export function SpineResultPanel({ calc }) {
   const forceThreshold = thresholds.singleForce[gender];
 
   // Risk gauge colors
-  const riskColors = { danger: '#c92a2a', warning: '#e67700', safe: '#2b8a3e' };
-  const riskBg = { danger: '#fff5f5', warning: '#fff9db', safe: '#ebfbee' };
+  const riskColors = { danger: 'var(--color-danger)', warning: 'var(--color-warning)', safe: 'var(--color-safe)' };
+  const riskBg = { danger: 'var(--color-danger-bg)', warning: 'var(--color-warning-bg)', safe: 'var(--color-safe-bg)' };
   const riskIcon = { danger: '\u26D4', warning: '\u26A0\uFE0F', safe: '\u2705' };
 
   // Threshold bar status colors
-  const statusColor = { safe: '#2b8a3e', warning: '#e67700', danger: '#c92a2a' };
+  const statusColor = { safe: 'var(--color-safe)', warning: 'var(--color-warning)', danger: 'var(--color-danger)' };
   const statusLabel = { safe: '\u2713 적합', warning: '\u26A0 주의', danger: '\u2717 초과' };
 
   return (
@@ -140,7 +140,7 @@ export function SpineResultPanel({ calc }) {
         const included = task.force >= forceThreshold;
         const timeH = (convertTimeToSeconds(task.timeValue, task.timeUnit) * task.frequency) / 3600;
         const taskDose = included ? (task.force * Math.sqrt(timeH)) / 1000 : 0;
-        const forceColor = task.force >= 6000 ? '#c92a2a' : task.force >= forceThreshold ? '#e67700' : '#2b8a3e';
+        const forceColor = task.force >= 6000 ? 'var(--color-danger)' : task.force >= forceThreshold ? 'var(--color-warning)' : 'var(--color-safe)';
         return (
           <div key={task.id} className="assessment-box" style={{ marginBottom: 6, padding: 10, fontSize: '0.8rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

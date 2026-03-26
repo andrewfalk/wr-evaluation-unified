@@ -4,7 +4,7 @@ import { getDiagnosisModuleHint } from '../../../core/utils/diagnosisMapping';
 
 function SideAssessment({ diag, index, side, onUpdate, label }) {
   const isRight = side === 'right';
-  const color = label ? 'var(--primary)' : (isRight ? '#1971c2' : '#2b8a3e');
+  const color = label ? 'var(--primary)' : (isRight ? 'var(--color-right)' : 'var(--color-left)');
   const displayLabel = label || (isRight ? '우측' : '좌측');
   const confirmedKey = isRight ? 'confirmedRight' : 'confirmedLeft';
   const assessmentKey = isRight ? 'assessmentRight' : 'assessmentLeft';
@@ -73,34 +73,26 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsideratio
         return (
           <div key={diag.id} className="assessment-card">
             <div className="assessment-card-header">
-              <div className="assessment-card-title">상병 #{i + 1}: {diag.code} {diag.name}</div>
-              {!isSpine && <div className="assessment-card-subtitle">부위: {getSideText(diag.side)}</div>}
-            </div>
-
-            {/* KLG: 무릎만 */}
-            {!isSpine && diag.side && (
-              <div className="klg-box">
-                <div className="klg-box-title">KLG 등급</div>
-                <div className="form-row">
-                  {(diag.side === 'right' || diag.side === 'both') && (
-                    <div className="form-group">
-                      <label>우측</label>
+              <div className="assessment-card-header-top">
+                <div className="assessment-card-title">상병 #{i + 1}: {diag.code} {diag.name}</div>
+                {!isSpine && diag.side && (
+                  <div className="klg-inline">
+                    <span className="klg-inline-label">K-L Grade</span>
+                    {(diag.side === 'right' || diag.side === 'both') && (
                       <select value={diag.klgRight} onChange={e => onDiagnosisUpdate(i, 'klgRight', e.target.value)}>
                         {KLG_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                       </select>
-                    </div>
-                  )}
-                  {(diag.side === 'left' || diag.side === 'both') && (
-                    <div className="form-group">
-                      <label>좌측</label>
+                    )}
+                    {(diag.side === 'left' || diag.side === 'both') && (
                       <select value={diag.klgLeft} onChange={e => onDiagnosisUpdate(i, 'klgLeft', e.target.value)}>
                         {KLG_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                       </select>
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
+                )}
               </div>
-            )}
+              {!isSpine && <div className="assessment-card-subtitle">부위: {getSideText(diag.side)}</div>}
+            </div>
 
             {/* 무릎: 좌/우별 SideAssessment */}
             {!isSpine && (diag.side === 'right' || diag.side === 'both') && (
