@@ -94,7 +94,8 @@ const generateEMRData = (patientData, c) => {
     }
     return summary;
   }).join('\n\n');
-  const b8 = `\n\n${b6}\n\n[ 업무관련성 평가 결과 ]\n\n${diagSummary}`;
+  const kneeRef = `**신체부담정도, 신체부담 기여도, 누적 신체부담에 관한 자세한 사항은 <근골격계 질환의 업무관련성 특별진찰 표준화를 위한 모델 개발 - 무릎 관절염을 대상으로 -, 대한직업환경의학회, 2025> 보고서를 참조하기 바람.`;
+  const b8 = `\n\n${b6}\n\n${kneeRef}\n\n[ 업무관련성 평가 결과 ]\n\n${diagSummary}`;
   const b9 = mod.returnConsiderations || '';
 
   return { b5, b6, b7, b8, b9 };
