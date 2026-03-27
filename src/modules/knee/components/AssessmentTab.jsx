@@ -91,7 +91,7 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsideratio
                   </div>
                 )}
               </div>
-              {!isSpine && <div className="assessment-card-subtitle">부위: {getSideText(diag.side)}</div>}
+              {!isSpine && <div className="assessment-card-subtitle">방향: {getSideText(diag.side)}</div>}
             </div>
 
             {/* 무릎: 좌/우별 SideAssessment */}
@@ -101,7 +101,7 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsideratio
             {!isSpine && (diag.side === 'left' || diag.side === 'both') && (
               <SideAssessment diag={diag} index={i} side="left" onUpdate={onDiagnosisUpdate} />
             )}
-            {!isSpine && !diag.side && <div style={{ padding: 15, textAlign: 'center', color: 'var(--text-muted)', background: 'var(--card-bg)', borderRadius: 8, marginTop: 12 }}>신청상병에서 부위 선택 필요</div>}
+            {!isSpine && !diag.side && <div style={{ padding: 15, textAlign: 'center', color: 'var(--text-muted)', background: 'var(--card-bg)', borderRadius: 8, marginTop: 12 }}>신청상병에서 방향 선택 필요</div>}
 
             {/* 척추: 단일 상병 상태 + 업무관련성 (좌우 없음) */}
             {isSpine && (

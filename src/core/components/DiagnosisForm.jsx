@@ -37,7 +37,7 @@ export function DiagnosisForm({ diagnoses, onChange, errors, createDiagnosis, sh
           </div>
           {!isSpine && (
           <div className="form-group">
-            <label>부위</label>
+            <label>방향</label>
             <div className="radio-group">
               {['right', 'left', 'both'].map(v => (
                 <label key={v} className="radio-label">

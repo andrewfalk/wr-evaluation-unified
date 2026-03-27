@@ -3,6 +3,11 @@ import html2pdf from 'html2pdf.js';
 import { AUX_LABELS } from './data';
 import { computeKneeCalc, getSideText, getStatusText, getReasonText } from './calculations';
 
+const escapeHtml = (str) => {
+  if (str == null) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+};
+
 export const genKneeReport = (patientData, c) => {
   const shared = patientData.shared || {};
   const mod = patientData.module || {};
@@ -125,7 +130,7 @@ export const kneeExportHandlers = {
   excelSingle: (patientData, calc) => {
     const emrData = generateEMRData(patientData, calc);
     const wb = buildWorkbook(emrData);
-    XLSX.writeFile(wb, `업무관련성평가_${patientData.shared?.name || '미입력'}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.writeFile(wb, `업무관련성평가_${(patientData.shared?.name || '미입력').replace(/[\\/:*?"<>|]/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`);
   },
   pdf: (patientData, calc) => {
     const shared = patientData.shared || {};
@@ -136,10 +141,10 @@ export const kneeExportHandlers = {
 
     const assessmentHtml = diagnoses.filter(d => d.code || d.name).map((d, i) => {
       let html = `<div style="background:#f8f9fa; padding:12px; border-radius:8px; margin-bottom:10px;">`;
-      html += `<div style="font-weight:bold; margin-bottom:8px;">상병 #${i + 1}: ${d.code} ${d.name} (${getSideText(d.side)})</div>`;
+      html += `<div style="font-weight:bold; margin-bottom:8px;">상병 #${i + 1}: ${escapeHtml(d.code)} ${escapeHtml(d.name)} (${escapeHtml(getSideText(d.side))})</div>`;
       const renderSide = (label, confirmed, assessment, reasons, reasonOther) => {
-        let s = `<div style="margin-left:10px; margin-bottom:6px;"><b>${label}:</b> 상병 상태(${getStatusText(confirmed)}) / 업무관련성(${assessment === 'high' ? '높음' : assessment === 'low' ? '낮음' : '-'})`;
-        if (assessment === 'low' && reasons?.length) s += `<div style="margin-left:15px; margin-top:4px; font-size:11px; color:#555;">낮음 사유: ${getReasonText(reasons, reasonOther).split('\n').join(', ')}</div>`;
+        let s = `<div style="margin-left:10px; margin-bottom:6px;"><b>${escapeHtml(label)}:</b> 상병 상태(${escapeHtml(getStatusText(confirmed))}) / 업무관련성(${assessment === 'high' ? '높음' : assessment === 'low' ? '낮음' : '-'})`;
+        if (assessment === 'low' && reasons?.length) s += `<div style="margin-left:15px; margin-top:4px; font-size:11px; color:#555;">낮음 사유: ${escapeHtml(getReasonText(reasons, reasonOther).split('\n').join(', '))}</div>`;
         return s + `</div>`;
       };
       if (d.side === 'right' || d.side === 'both') html += renderSide('우측', d.confirmedRight, d.assessmentRight, d.reasonRight, d.reasonRightOther);
@@ -152,25 +157,25 @@ export const kneeExportHandlers = {
     content.innerHTML = `
       <h1 style="text-align:center; margin-bottom:30px; font-size:18px; border-bottom:2px solid #333; padding-bottom:10px;">업무관련성 특별진찰 소견서</h1>
       <table style="width:100%; border-collapse:collapse; margin-bottom:20px;">
-        <tr><td style="${th} width:120px;"><b>이름/성별</b></td><td style="${td}">${shared.name} (${shared.gender === 'male' ? '남' : shared.gender === 'female' ? '여' : '-'})</td><td style="${th} width:120px;"><b>키/몸무게</b></td><td style="${td}">${shared.height || '-'}cm / ${shared.weight || '-'}kg (BMI: ${bmi})</td></tr>
-        <tr><td style="${th}"><b>생년월일</b></td><td style="${td}">${shared.birthDate || '-'}</td><td style="${th}"><b>재해일자</b></td><td style="${td}">${shared.injuryDate || '-'} (만 ${age}세)</td></tr>
+        <tr><td style="${th} width:120px;"><b>이름/성별</b></td><td style="${td}">${escapeHtml(shared.name)} (${shared.gender === 'male' ? '남' : shared.gender === 'female' ? '여' : '-'})</td><td style="${th} width:120px;"><b>키/몸무게</b></td><td style="${td}">${escapeHtml(shared.height) || '-'}cm / ${escapeHtml(shared.weight) || '-'}kg (BMI: ${escapeHtml(bmi)})</td></tr>
+        <tr><td style="${th}"><b>생년월일</b></td><td style="${td}">${escapeHtml(shared.birthDate) || '-'}</td><td style="${th}"><b>재해일자</b></td><td style="${td}">${escapeHtml(shared.injuryDate) || '-'} (만 ${escapeHtml(age)}세)</td></tr>
       </table>
       <div style="background:#667eea; color:white; padding:15px; border-radius:8px; margin:20px 0; text-align:center;">
-        <div style="font-size:16px; font-weight:bold;">신체부담기여도: ${r.min}% ~ ${r.max}%</div>
-        <div style="margin-top:5px;">누적신체부담: ${cum}</div>
+        <div style="font-size:16px; font-weight:bold;">신체부담기여도: ${escapeHtml(r.min)}% ~ ${escapeHtml(r.max)}%</div>
+        <div style="margin-top:5px;">누적신체부담: ${escapeHtml(cum)}</div>
       </div>
       <h3 style="margin:20px 0 10px; font-size:14px;">종합소견</h3>
       ${assessmentHtml}
       <div style="border-top:2px solid #333; margin-top:30px; padding-top:15px; text-align:center; font-size:12px; color:#555;">
-        <div>${shared.evaluationDate || '-'}</div>
-        <div style="margin-top:4px;">${shared.hospitalName || '-'} ${shared.department || ''}</div>
-        <div style="margin-top:4px;">담당의: ${shared.doctorName || '-'}</div>
+        <div>${escapeHtml(shared.evaluationDate) || '-'}</div>
+        <div style="margin-top:4px;">${escapeHtml(shared.hospitalName) || '-'} ${escapeHtml(shared.department) || ''}</div>
+        <div style="margin-top:4px;">담당의: ${escapeHtml(shared.doctorName) || '-'}</div>
       </div>
     `;
 
     html2pdf().set({
       margin: 10,
-      filename: `업무관련성평가_${shared.name || '미입력'}_${new Date().toISOString().split('T')[0]}.pdf`,
+      filename: `업무관련성평가_${(shared.name || '미입력').replace(/[\\/:*?"<>|]/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`,
       image: { type: 'jpeg', quality: 0.98 },
       html2canvas: { scale: 2 },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }

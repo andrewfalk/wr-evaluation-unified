@@ -61,7 +61,7 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
       returnConsiderations: findCol(['복귀', 'return', 'consideration']),
       diagCode: findCol(['진단코드', 'code']),
       diagName: findCol(['진단명', 'diag']),
-      side: findCol(['부위', 'side']),
+      side: findCol(['방향', 'side']),
       jobName: findCol(['직종', 'job']),
       jobStart: findCol(['시작', 'start']),
       jobEnd: findCol(['종료', 'end']),
@@ -420,7 +420,7 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
             <strong>기본정보:</strong> 이름, 생년월일, 재해일자, 키, 몸무게, 성별<br/>
             <strong>기관정보:</strong> 병원명, 진료과, 담당의<br/>
             <strong>기타:</strong> 특이사항, 복귀고려사항<br/>
-            <strong>상병:</strong> 진단코드, 진단명, 부위, KLG(우측), KLG(좌측)<br/>
+            <strong>상병:</strong> 진단코드, 진단명, 방향, KLG(우측), KLG(좌측)<br/>
             <strong>직업:</strong> 직종명, 시작일, 종료일, 근무기간(년), 근무기간(개월), 중량물(kg), 쪼그려앉기(분)<br/>
             <strong>보조변수:</strong> 계단오르내리기, 무릎비틀림, 출발정지반복, 좁은공간, 무릎접촉충격, 뛰어내리기<br/>
             <strong>척추작업:</strong> 작업명, 자세코드(G1-G11), 작업중량(kg), 횟수/일, 시간값, 시간단위(sec/min/hr), 보정계수
