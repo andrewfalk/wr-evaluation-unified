@@ -1,7 +1,7 @@
 {
   "name": "wr-evaluation-unified",
-  "version": "2.4.1",
-  "description": "직업성 질환 통합 평가 프로그램 (무릎/척추)",
+  "version": "2.5.0",
+  "description": "근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미",
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",

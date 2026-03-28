@@ -28,7 +28,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js')
     },
     icon: path.join(__dirname, '../public/icon.ico'),
-    title: '직업성 질환 통합 평가 프로그램'
+    title: '근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미'
   });
 
   const isDev = process.env.NODE_ENV === 'development';
@@ -85,7 +85,7 @@ function createWindow() {
           dialog.showMessageBox(mainWindow, {
             type: 'info',
             title: '버전 정보',
-            message: '직업성 질환 통합 평가 프로그램',
+            message: '근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미',
             detail: `버전: ${app.getVersion()}\n\n직업환경의학 전문의를 위한 통합 평가 도구\n(무릎/척추 평가 지원)`
           });
         }}
@@ -362,6 +362,191 @@ function extractFromRawScan(buf, targetKey) {
     try { JSON.parse(text); return text; } catch { continue; }
   }
 }
+
+// ======================================================
+// 파일 기반 저장소 (환자별 개별 파일)
+// ======================================================
+const dataDir = path.join(app.getPath('userData'), 'wr-eval-data');
+const patientsDir = path.join(dataDir, 'patients');
+const savedDir = path.join(dataDir, 'saved');
+
+function ensureDirs() {
+  for (const dir of [dataDir, patientsDir, savedDir]) {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+function readJsonFile(filePath, fallback = null) {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch { return fallback; }
+}
+
+function writeJsonFile(filePath, data) {
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+// index.json: 환자 메타 목록
+function loadIndex() {
+  return readJsonFile(path.join(dataDir, 'index.json'), []);
+}
+
+function saveIndex(index) {
+  writeJsonFile(path.join(dataDir, 'index.json'), index);
+}
+
+// 환자 개별 파일
+ipcMain.handle('fs-load-all-patients', async () => {
+  ensureDirs();
+  const index = loadIndex();
+  const patients = [];
+  for (const meta of index) {
+    const p = readJsonFile(path.join(patientsDir, `${meta.id}.json`));
+    if (p) patients.push(p);
+  }
+  return patients;
+});
+
+ipcMain.handle('fs-load-patient', async (_e, id) => {
+  ensureDirs();
+  return readJsonFile(path.join(patientsDir, `${id}.json`));
+});
+
+ipcMain.handle('fs-save-patient', async (_e, patient) => {
+  ensureDirs();
+  writeJsonFile(path.join(patientsDir, `${patient.id}.json`), patient);
+  // index 업데이트
+  const index = loadIndex();
+  const existing = index.findIndex(m => m.id === patient.id);
+  const meta = {
+    id: patient.id,
+    name: patient.data?.shared?.name || '',
+    createdAt: patient.createdAt || '',
+    updatedAt: patient.updatedAt || '',
+  };
+  if (existing >= 0) index[existing] = meta;
+  else index.push(meta);
+  saveIndex(index);
+});
+
+ipcMain.handle('fs-delete-patient', async (_e, id) => {
+  ensureDirs();
+  const filePath = path.join(patientsDir, `${id}.json`);
+  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  const index = loadIndex().filter(m => m.id !== id);
+  saveIndex(index);
+});
+
+ipcMain.handle('fs-save-all-patients', async (_e, patients) => {
+  ensureDirs();
+  const index = [];
+  for (const p of patients) {
+    writeJsonFile(path.join(patientsDir, `${p.id}.json`), p);
+    index.push({
+      id: p.id,
+      name: p.data?.shared?.name || '',
+      createdAt: p.createdAt || '',
+      updatedAt: p.updatedAt || '',
+    });
+  }
+  saveIndex(index);
+});
+
+// 저장 항목 (savedItems)
+ipcMain.handle('fs-load-items', async () => {
+  ensureDirs();
+  const files = fs.readdirSync(savedDir).filter(f => f.endsWith('.json'));
+  const items = [];
+  for (const file of files) {
+    const item = readJsonFile(path.join(savedDir, file));
+    if (item) items.push(item);
+  }
+  return items.sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || ''));
+});
+
+ipcMain.handle('fs-save-item', async (_e, item) => {
+  ensureDirs();
+  writeJsonFile(path.join(savedDir, `${item.id}.json`), item);
+});
+
+ipcMain.handle('fs-delete-item', async (_e, id) => {
+  ensureDirs();
+  const filePath = path.join(savedDir, `${id}.json`);
+  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+});
+
+// 자동저장
+ipcMain.handle('fs-save-autosave', async (_e, data) => {
+  ensureDirs();
+  writeJsonFile(path.join(dataDir, 'autosave.json'), data);
+});
+
+ipcMain.handle('fs-load-autosave', async () => {
+  ensureDirs();
+  return readJsonFile(path.join(dataDir, 'autosave.json'));
+});
+
+ipcMain.handle('fs-clear-autosave', async () => {
+  const filePath = path.join(dataDir, 'autosave.json');
+  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+});
+
+// 설정
+ipcMain.handle('fs-save-settings', async (_e, settings) => {
+  ensureDirs();
+  writeJsonFile(path.join(dataDir, 'settings.json'), settings);
+});
+
+ipcMain.handle('fs-load-settings', async () => {
+  ensureDirs();
+  return readJsonFile(path.join(dataDir, 'settings.json'));
+});
+
+// 마이그레이션: localStorage 데이터를 파일로 이전
+ipcMain.handle('fs-migrate', async (_e, { savedItems, autoSave, settings }) => {
+  ensureDirs();
+  const indexPath = path.join(dataDir, 'index.json');
+  if (fs.existsSync(indexPath)) return { migrated: false }; // 이미 마이그레이션됨
+
+  // savedItems 마이그레이션
+  if (savedItems && Array.isArray(savedItems)) {
+    for (const item of savedItems) {
+      writeJsonFile(path.join(savedDir, `${item.id}.json`), item);
+      // 환자 데이터도 개별 파일로
+      if (item.patients) {
+        for (const p of item.patients) {
+          writeJsonFile(path.join(patientsDir, `${p.id}.json`), p);
+        }
+      }
+    }
+  }
+
+  // autoSave 마이그레이션
+  if (autoSave && autoSave.patients) {
+    writeJsonFile(path.join(dataDir, 'autosave.json'), autoSave);
+    const index = [];
+    for (const p of autoSave.patients) {
+      writeJsonFile(path.join(patientsDir, `${p.id}.json`), p);
+      index.push({
+        id: p.id,
+        name: p.data?.shared?.name || '',
+        createdAt: p.createdAt || '',
+        updatedAt: p.updatedAt || '',
+      });
+    }
+    saveIndex(index);
+  } else {
+    saveIndex([]);
+  }
+
+  // 설정 마이그레이션
+  if (settings) {
+    writeJsonFile(path.join(dataDir, 'settings.json'), settings);
+  }
+
+  return { migrated: true };
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

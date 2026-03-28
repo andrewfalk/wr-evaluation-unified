@@ -84,7 +84,8 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
       frequency: findCol(['횟수', 'frequency', 'freq']),
       timeValue: findCol(['시간값', 'time_value']),
       timeUnit: findCol(['시간단위', 'time_unit']),
-      correctionFactor: findCol(['보정계수', 'correction', 'factor'])
+      correctionFactor: findCol(['보정계수', 'correction', 'factor']),
+      createdAt: findCol(['등록일', '접수일', 'created', 'registered'])
     };
 
     const sideMap = {
@@ -220,6 +221,10 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
         }
 
         const p = createPatient(suggestedMods, modulesData);
+        const rowCreatedAt = parseDate(getVal(row, 'createdAt'));
+        if (rowCreatedAt) {
+          p.createdAt = `${rowCreatedAt}T00:00:00.000Z`;
+        }
         p.data.shared.name = rowName;
         p.data.shared.birthDate = rowBirthDate;
         p.data.shared.injuryDate = rowInjuryDate;
@@ -415,9 +420,9 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
         </div>
 
         <details style={{ marginTop: 10, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-          <summary style={{ cursor: 'pointer' }}>지원하는 컬럼 (36개)</summary>
+          <summary style={{ cursor: 'pointer' }}>지원하는 컬럼 (37개)</summary>
           <div style={{ marginTop: 8, padding: 10, background: 'var(--card-bg)', borderRadius: 4 }}>
-            <strong>기본정보:</strong> 이름, 생년월일, 재해일자, 키, 몸무게, 성별<br/>
+            <strong>기본정보:</strong> 이름, 생년월일, 재해일자, 등록일(접수일), 키, 몸무게, 성별<br/>
             <strong>기관정보:</strong> 병원명, 진료과, 담당의<br/>
             <strong>기타:</strong> 특이사항, 복귀고려사항<br/>
             <strong>상병:</strong> 진단코드, 진단명, 방향, KLG(우측), KLG(좌측)<br/>

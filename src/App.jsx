@@ -6,8 +6,9 @@ import { AssessmentStep } from './core/components/AssessmentStep';
 import { AIAnalysisPanel } from './core/components/AIAnalysisPanel';
 import { SettingsModal } from './core/components/SettingsModal';
 import { BatchImportModal } from './core/components/BatchImportModal';
+import Dashboard from './core/components/Dashboard';
 import { usePatientList } from './core/hooks/usePatientList';
-import { createPatient, createSharedData, createDiagnosis, createSamplePatient, DEFAULT_SETTINGS, FONT_SIZE_MAP, migratePatients } from './core/utils/data';
+import { createPatient, createSharedData, createDiagnosis, createTestPatients, formatBirthDate, DEFAULT_SETTINGS, FONT_SIZE_MAP, migratePatients } from './core/utils/data';
 import { FALLBACK_PRESETS } from './modules/knee/utils/data';
 import { suggestModules } from './core/utils/diagnosisMapping';
 import { showAlert, showConfirm } from './core/utils/platform';
@@ -15,7 +16,7 @@ import { generateUnifiedReport } from './core/utils/reportGenerator';
 import {
   loadSavedItems, savePatientsData, deleteSavedItem, hasDuplicateName,
   saveAutoSave, loadAutoSave, clearAutoSave,
-  loadSettings, saveSettings
+  loadSettings, loadSettingsAsync, saveSettings, migrateToFileStorage
 } from './core/utils/storage';
 
 // 모듈 등록 (사이드이펙트 import)
@@ -106,7 +107,34 @@ function App() {
     document.documentElement.style.fontSize = FONT_SIZE_MAP[settings.fontSize] || '16px';
   }, [settings.theme, settings.fontSize]);
 
-  useEffect(() => { setSavedItems(loadSavedItems()); }, []);
+  // Electron: 파일 기반 설정 비동기 로드
+  useEffect(() => {
+    loadSettingsAsync(DEFAULT_SETTINGS).then(s => setSettings(s));
+  }, []);
+
+  useEffect(() => {
+    migrateToFileStorage().then(() => loadSavedItems()).then(items => setSavedItems(items));
+  }, []);
+
+  // 평가 완료 시 evaluationDate 자동 설정
+  useEffect(() => {
+    if (!activeId) return;
+    const p = patients.find(x => x.id === activeId);
+    if (!p) return;
+    const mods = p.data.activeModules || [];
+    if (mods.length === 0) return;
+    const allComplete = mods.every(mId => {
+      const mod = getModule(mId);
+      return mod?.isComplete?.({ shared: p.data.shared, module: p.data.modules?.[mId] || {} }) ?? false;
+    });
+    if (allComplete && !p.data.shared?.evaluationDate) {
+      setPatients(prev => prev.map(x =>
+        x.id === activeId
+          ? { ...x, data: { ...x.data, shared: { ...x.data.shared, evaluationDate: new Date().toISOString().split('T')[0] } } }
+          : x
+      ));
+    }
+  }, [activeId, patients]);
 
   // 프리셋 로딩
   useEffect(() => {
@@ -123,32 +151,21 @@ function App() {
       });
   }, []);
 
-  // 자동 저장 복원 또는 예시 환자 로드
+  // 자동 저장 복원
   useEffect(() => {
-    const saved = loadAutoSave();
-    if (saved) {
-      const time = new Date(saved.savedAt).toLocaleString('ko-KR');
-      showConfirm(`이전 자동 저장 데이터가 있습니다 (${time}).\n이어서 작업하시겠습니까?`).then(ok => {
-        if (ok && saved.patients?.length) {
-          setPatients(saved.patients);
-          setActiveId(saved.patients[0].id);
-          setCurrentStepIndex(0);
-        } else {
-          // 자동 저장 거부 시 예시 환자 로드
-          const sample = createSamplePatient();
-          setPatients([sample]);
-          setActiveId(sample.id);
-          setCurrentStepIndex(0);
-        }
-        clearAutoSave();
-      });
-    } else {
-      // 저장 데이터 없으면 예시 환자 로드
-      const sample = createSamplePatient();
-      setPatients([sample]);
-      setActiveId(sample.id);
-      setCurrentStepIndex(0);
-    }
+    loadAutoSave().then(saved => {
+      if (saved) {
+        const time = new Date(saved.savedAt).toLocaleString('ko-KR');
+        showConfirm(`이전 자동 저장 데이터가 있습니다 (${time}).\n이어서 작업하시겠습니까?`).then(ok => {
+          if (ok && saved.patients?.length) {
+            setPatients(saved.patients);
+            setActiveId(saved.patients[0].id);
+            setCurrentStepIndex(0);
+          }
+          clearAutoSave();
+        });
+      }
+    });
   }, []);
 
   // 자동 저장
@@ -218,7 +235,7 @@ function App() {
   const updatePatient = (updater) => {
     setPatients(prev => prev.map(p =>
       p.id === activeId
-        ? { ...p, data: typeof updater === 'function' ? updater(p.data) : { ...p.data, ...updater } }
+        ? { ...p, updatedAt: new Date().toISOString(), data: typeof updater === 'function' ? updater(p.data) : { ...p.data, ...updater } }
         : p
     ));
     if (Object.keys(errors).length) setErrors({});
@@ -326,7 +343,28 @@ function App() {
     showAlert(`가져오기 완료: 신규 ${stats.newPatients}명, 상병 ${stats.newDiagnoses}건, 직업 ${stats.newJobs}건 추가 (중복 ${stats.skipped}건 건너뜀)`);
   };
 
+  const handleLoadTestData = () => {
+    const testPatients = createTestPatients();
+    setPatients(testPatients);
+    if (testPatients.length > 0) {
+      setActiveId(testPatients[0].id);
+      setCurrentStepIndex(0);
+    }
+    setShowHome(false);
+    showAlert(`테스트 데이터 로드 완료: ${testPatients.length}명`);
+  };
+
   const handleSaveSettings = (newSettings) => { setSettings(newSettings); saveSettings(newSettings); setShowSettings(false); };
+
+  const handleResetPatients = async () => {
+    const ok = await showConfirm('현재 작업 중인 환자 목록을 모두 삭제하시겠습니까?');
+    if (!ok) return;
+    setPatients([]);
+    setActiveId(null);
+    setIntakeShared(null);
+    setShowHome(false);
+    clearAutoSave();
+  };
 
   const handleSave = async () => {
     if (!saveName.trim()) { await showAlert('저장명 필수'); return; }
@@ -334,7 +372,7 @@ function App() {
       const confirmed = await showConfirm(`"${saveName}" 이름의 저장 데이터가 이미 존재합니다. 덮어쓰시겠습니까?`);
       if (!confirmed) return;
     }
-    const items = savePatientsData(saveName, patients, savedItems);
+    const items = await savePatientsData(saveName, patients, savedItems);
     setSavedItems(items);
     setLastAutoSave(null);
     setShowSaveModal(false);
@@ -345,7 +383,7 @@ function App() {
   const handleOverwriteSave = async (item) => {
     const confirmed = await showConfirm(`"${item.name}"에 덮어쓰시겠습니까?`);
     if (!confirmed) return;
-    const items = savePatientsData(item.name, patients, savedItems);
+    const items = await savePatientsData(item.name, patients, savedItems);
     setSavedItems(items);
     setLastAutoSave(null);
     setShowSaveModal(false);
@@ -372,7 +410,10 @@ function App() {
 
   const handleDelete = async (id) => {
     const confirmed = await showConfirm('삭제하시겠습니까?');
-    if (confirmed) setSavedItems(deleteSavedItem(id, savedItems));
+    if (confirmed) {
+      const items = await deleteSavedItem(id, savedItems);
+      setSavedItems(items);
+    }
   };
 
   const openLoadModal = () => {
@@ -547,21 +588,26 @@ function App() {
   if ((patients.length === 0 && !activeId && !intakeShared) || showHome) {
     return (
       <div className="app-layout" style={{ justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
-        <div className="panel" style={{ maxWidth: 800, width: '100%' }}>
-          <div style={{ textAlign: 'center', marginBottom: 30 }}>
-            <h1 style={{ fontSize: '1.5rem', color: 'var(--text-primary)' }}>직업성 질환 통합 평가 프로그램</h1>
+        <div className="panel" style={{ maxWidth: 960, width: '100%' }}>
+          <div style={{ textAlign: 'center', marginBottom: 20 }}>
+            <h1 style={{ fontSize: '1.5rem', color: 'var(--text-primary)' }}>근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미</h1>
             <p style={{ color: 'var(--text-muted)', marginTop: 8 }}>새 환자 평가를 시작하거나 저장된 데이터를 불러오세요</p>
           </div>
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <Dashboard patients={patients} onSelectPatient={(id) => { setActiveId(id); setCurrentStepIndex(0); setShowHome(false); }} />
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', marginTop: 12 }}>
             <button className="btn btn-primary" onClick={handleStartIntake} style={{ padding: '12px 24px', fontSize: '1rem' }}>+ 새 환자 평가 시작</button>
             <button className="btn btn-secondary" onClick={() => openLoadModal()} style={{ padding: '12px 24px', fontSize: '1rem' }}>불러오기</button>
             <button className="btn btn-info" onClick={() => setShowBatchImport(true)} style={{ padding: '12px 24px', fontSize: '1rem' }}>엑셀 일괄입력</button>
+            <button className="btn btn-warning" onClick={handleLoadTestData} style={{ padding: '12px 24px', fontSize: '1rem' }}>테스트 데이터</button>
             <button className="btn btn-secondary" onClick={() => setShowSettings(true)} style={{ padding: '12px 24px', fontSize: '1rem' }}>설정</button>
           </div>
           {patients.length > 0 && (
-            <div style={{ textAlign: 'center', marginTop: 20 }}>
+            <div style={{ textAlign: 'center', marginTop: 20, display: 'flex', gap: 8, justifyContent: 'center' }}>
               <button className="btn btn-secondary btn-sm" onClick={() => setShowHome(false)}>
                 작업 중인 환자 목록으로 돌아가기 ({patients.length}명)
+              </button>
+              <button className="btn btn-danger btn-sm" onClick={handleResetPatients}>
+                목록 초기화
               </button>
             </div>
           )}
@@ -900,7 +946,7 @@ function App() {
                   <span style={{ flex: 1 }}>{p.data.shared?.name || `환자 #${origIndex + 1}`}</span>
                   <span className={isComplete ? 'status-dot complete' : 'status-dot'}>●</span>
                 </div>
-                <div className="patient-item-info">{p.data.shared?.birthDate || '-'} | {p.data.shared?.diagnoses?.[0]?.name || '-'}</div>
+                <div className="patient-item-info">{formatBirthDate(p.data.shared?.birthDate)} | {p.data.shared?.diagnoses?.[0]?.name || '-'}</div>
                 <div className="patient-item-actions">
                   <button className="btn btn-danger btn-xs" onClick={e => { e.stopPropagation(); removePatient(p.id); }}>삭제</button>
                 </div>
@@ -918,7 +964,8 @@ function App() {
             {lastAutoSave && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 8, fontWeight: 400 }}>자동저장 {lastAutoSave.toLocaleTimeString('ko-KR')}</span>}
           </h1>
           <div className="header-actions">
-            <button className="btn btn-secondary btn-sm" onClick={() => setShowHome(true)} title="메인 화면으로">홈</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setShowHome(true)} title="대시보드로 이동">대시보드</button>
+            <button className="btn btn-danger btn-sm" onClick={handleResetPatients} title="환자 목록 초기화">초기화</button>
             <button className="btn btn-secondary btn-sm sidebar-toggle" onClick={() => setShowSidebar(v => !v)}>환자 ({patients.length})</button>
             <button className="btn btn-secondary btn-sm" onClick={() => setShowSaveModal(true)}>저장</button>
             <button className="btn btn-secondary btn-sm" onClick={() => openLoadModal()}>불러오기</button>

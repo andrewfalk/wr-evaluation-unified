@@ -1,7 +1,7 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 2.4.1
-> **Last Updated:** 2026-03-26
+> **Version:** 2.5.0
+> **Last Updated:** 2026-03-28
 > **Status:** MVP 개발 완료 / Vercel 배포 완료
 
 ---
@@ -722,6 +722,40 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
   - `.value-positive/negative/neutral` 배지 색상을 CSS 변수로 교체
 - **KLG 등급 UI 컴팩트화**: 종합소견 탭에서 별도 `.klg-box` 섹션 제거, 상병명 헤더 우측에 "K-L Grade" 인라인 드롭다운으로 축소
 - **EMR 종합소견(b8) 개선**: 무릎 신체부담 데이터 + 참고문헌 텍스트 삽입, `[ 업무관련성 평가 결과 ]` 소제목 추가. 미리보기에도 동일 반영
+
+### Phase 12: 대시보드 + 데이터 관리 + Electron 파일 저장소 (v2.5.0)
+
+- **Electron preload.js 수정**: `require('../package.json')` → IPC `get-app-version`으로 대체. asar 패키징 후 상대경로 require 실패로 `window.electron` 전체가 undefined되던 근본 버그 수정 (AI 분석, 네이티브 알림, 레거시 임포트 등 모든 IPC 기능 복구)
+- **구버전 데이터 임포트**: Electron main process에서 구형 무릎 프로그램(wr-evaluation)의 LevelDB(WAL) 파싱 + renderer에서 마이그레이션 UI 제공. 디버그 로깅 추가
+- **구버전 통합용 내보내기**: `wr-evaluation-claude`에 36열 일괄입력용 xlsx 내보내기 기능 추가 (`batchExport.js`)
+- **다크모드 전면 개선**:
+  - 테두리 대비 강화: `--card-border`, `--border-color` `#334155` → `#475569`
+  - 시맨틱 색상 변수 도입: `--color-safe/warning/danger/right/left` + 배경 변수 (`--color-safe-bg` 등)
+  - 하드코딩 색상 제거: `AssessmentTab`, `TaskManager`, `SpineResultPanel`의 `#2b8a3e/#c92a2a/#e67700/#1971c2` → CSS 변수로 교체
+  - `.panel`, `.section`에 `color: var(--text-primary)` 추가 (상속 누락 수정)
+  - `.module-check-name`에 `color: var(--text-primary)` 추가
+  - `.value-positive/negative/neutral` 배지 색상을 CSS 변수로 교체
+- **KLG 등급 UI 컴팩트화**: 종합소견 탭에서 별도 `.klg-box` 섹션 제거, 상병명 헤더 우측에 "K-L Grade" 인라인 드롭다운으로 축소
+- **EMR 종합소견(b8) 개선**: 무릎 신체부담 데이터 + 참고문헌 텍스트 삽입, `[ 업무관련성 평가 결과 ]` 소제목 추가. 미리보기에도 동일 반영
+
+- **대시보드 신설**: 현재 편집 중인 환자 목록 기반 통계 대시보드 추가
+  - 요약 카드: 총 환자 수, 완료된 평가, 진행 중, 모듈 사용 현황
+  - 월별 등록/평가 현황 막대 차트
+  - 최근 활동 테이블 (등록일/평가일 분리, 환자 이름 클릭 시 편집 화면으로 즉시 이동)
+  - `updatedAt` 기반 최신 수정순 정렬
+- **등록일/평가일 분리**: 환자 데이터에 `createdAt`(등록), `updatedAt`(마지막 수정), `evaluationDate`(평가 완료) 세 날짜를 명확히 구분
+- **목록 초기화 기능**: 대시보드 및 메인 헤더에서 현재 환자 목록 전체 초기화 버튼 추가
+- **일괄 입력 등록일 컬럼 지원**: 엑셀 일괄 입력 시 `등록일`/`접수일` 열 인식하여 `createdAt` 반영
+- **홍길동 자동 입력 제거**: 첫 실행 시 예시 환자 자동 생성 기능 삭제 (테스트 데이터 버튼은 유지)
+- **앱 타이틀 변경**: "직업성 질환 통합 평가 프로그램" → "근골격계 질환 업무관련성 평가 및 소견서 작성 도우미"
+- **홈 버튼 → 대시보드 버튼**: 네비게이션 명칭 변경
+- **Electron 파일 기반 저장소 (방안 B)**:
+  - `{userData}/wr-eval-data/` 하위 디렉토리 구조로 환자별 개별 JSON 파일 저장
+  - `patients/{uuid}.json`, `saved/{id}.json`, `index.json`, `autosave.json`, `settings.json`
+  - IPC 핸들러 13종 추가 (`fs-load-all-patients`, `fs-save-patient`, `fs-delete-patient` 등)
+  - localStorage 5-10MB 제한 극복 → 수천 명 이상 환자 관리 가능
+  - localStorage → 파일 마이그레이션 자동 처리 (첫 실행 시)
+  - 웹 버전은 기존 localStorage 방식 유지
 
 ---
 

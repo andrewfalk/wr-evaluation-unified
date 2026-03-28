@@ -7,7 +7,7 @@ import { getEffectiveWorkPeriodText } from './workPeriod';
 
 function genKneeBurdenSection(patientData, calc) {
   const { relatedness: r, cumulativeBurden: cum, jobBurdens: jb } = calc;
-  let t = `\n  <무릎 (슬관절)>\n`;
+  let t = `\n  <무릎(슬관절)>\n`;
   jb.forEach((j) => {
     const checked = Object.entries(AUX_LABELS).filter(([k]) => j[k]).map(([, v]) => v);
     t += `  직종: ${j.jobName || '-'}\n`;
@@ -28,7 +28,7 @@ function genKneeBurdenSection(patientData, calc) {
 
 function genSpineBurdenSection(patientData, calc) {
   const { jobResults, dailyDose, lifetimeDose, comparison, workRelatedness, maxForce } = calc;
-  let t = `\n  <척추 (요추)>\n`;
+  let t = `\n  <척추(요추)>\n`;
 
   // 직업별 결과 (2개 이상일 때)
   if (jobResults && jobResults.length > 1) {
