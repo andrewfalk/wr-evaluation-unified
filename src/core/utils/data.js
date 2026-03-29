@@ -321,7 +321,9 @@ export const DEFAULT_SETTINGS = {
   hospitalName: '근로복지공단 안산병원',
   department: '직업환경의학과',
   doctorName: '김호길',
-  autoSaveInterval: 30
+  autoSaveInterval: 30,
+  integrationMode: 'local',
+  apiBaseUrl: ''
 };
 
 export const FONT_SIZE_MAP = {

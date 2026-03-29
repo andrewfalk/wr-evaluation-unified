@@ -91,6 +91,17 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .header { background: var(--bg-panel); border-radius: 12px; padding: 15px 25px; margin-bottom: 15px; box-shadow: var(--shadow-md); }
 .header h1 { font-size: 1.3rem; color: var(--text-primary); }
 .header-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: flex-start; }
+.integration-status { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--card-border); background: var(--card-bg); }
+.integration-status-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.integration-status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; }
+.integration-status-time { font-size: 0.72rem; color: var(--text-muted); }
+.integration-status-detail { font-size: 0.78rem; color: var(--text-secondary); }
+.integration-status-local .integration-status-pill { background: var(--accent-light); color: var(--accent-dark); }
+.integration-status-checking .integration-status-pill { background: rgba(230, 119, 0, 0.12); color: var(--color-warning); }
+.integration-status-connected .integration-status-pill { background: var(--color-safe-bg); color: var(--color-safe); }
+.integration-status-mock .integration-status-pill { background: rgba(59,130,246,0.12); color: var(--accent-dark); }
+.integration-status-fallback { border-color: rgba(201, 42, 42, 0.2); background: var(--color-danger-bg); }
+.integration-status-fallback .integration-status-pill { background: rgba(201, 42, 42, 0.12); color: var(--color-danger); }
 .export-dropdown { position: absolute; top: 100%; right: 0; z-index: 100; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); min-width: 130px; overflow: hidden; margin-top: 4px; }
 .export-dropdown button { display: block; width: 100%; padding: 8px 14px; border: none; background: none; text-align: left; font-size: 0.85rem; cursor: pointer; color: var(--text-primary); }
 .export-dropdown button:hover { background: var(--bg-hover); }
@@ -234,6 +245,15 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .settings-row input[type="text"]:focus, .settings-row input[type="password"]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
 .settings-row select { padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.85rem; background: var(--input-bg); color: var(--text-primary); font-family: inherit; }
 .settings-row select:focus { outline: none; border-color: var(--accent); }
+.settings-inline-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.settings-inline-hint { font-size: 0.75rem; color: var(--text-muted); }
+.settings-diagnostic-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 12px; }
+.settings-diagnostic-item { padding: 10px 12px; border: 1px solid var(--card-border); border-radius: 10px; background: var(--card-bg); }
+.settings-diagnostic-label { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 4px; }
+.settings-diagnostic-value { font-size: 0.85rem; color: var(--text-primary); word-break: break-word; }
+.settings-diagnostic-card { margin-top: 12px; padding: 12px; border: 1px solid var(--card-border); border-radius: 12px; background: var(--card-bg); }
+.settings-diagnostic-card-title { font-size: 0.8rem; font-weight: 700; color: var(--text-primary); margin-bottom: 8px; }
+.settings-diagnostic-error { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--color-danger-bg); color: var(--color-danger); font-size: 0.8rem; }
 
 /* Module Selector */
 .module-selector-header { text-align: center; margin-bottom: 30px; }

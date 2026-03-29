@@ -1,14 +1,106 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { inspectIntegrationStatus } from '../services/integrationStatus';
 import { isElectron } from '../utils/platform';
 
-export function SettingsModal({ settings, onSave, onClose }) {
+function normalizeUrl(value = '') {
+  return String(value || '').trim().replace(/\/$/, '');
+}
+
+function buildPreviewSession(session, draft) {
+  return {
+    ...session,
+    mode: draft.integrationMode === 'intranet' ? 'intranet' : 'local',
+    apiBaseUrl: normalizeUrl(draft.apiBaseUrl || ''),
+  };
+}
+
+function formatCheckedAt(value) {
+  if (!value) return '-';
+
+  try {
+    return new Date(value).toLocaleString('ko-KR');
+  } catch {
+    return value;
+  }
+}
+
+function formatBoolean(value) {
+  if (value === true) return '있음';
+  if (value === false) return '없음';
+  return '-';
+}
+
+function getStatusTitle(status) {
+  if (status?.connectivity === 'fallback') return '로컬 폴백';
+  if (status?.connectivity === 'connected' && status?.mock) return 'Mock 인트라넷 연결됨';
+  if (status?.connectivity === 'connected') return '인트라넷 연결됨';
+  if (status?.connectivity === 'checking') return '서버 확인 중';
+  return '로컬 저장소';
+}
+
+function getStatusTone(status) {
+  if (status?.connectivity === 'fallback') return 'fallback';
+  if (status?.connectivity === 'connected' && status?.mock) return 'mock';
+  if (status?.connectivity === 'connected') return 'connected';
+  if (status?.connectivity === 'checking') return 'checking';
+  return 'local';
+}
+
+function DiagnosticItem({ label, value }) {
+  return (
+    <div className="settings-diagnostic-item">
+      <div className="settings-diagnostic-label">{label}</div>
+      <div className="settings-diagnostic-value">{value || '-'}</div>
+    </div>
+  );
+}
+
+export function SettingsModal({ settings, session, integrationStatus, onSave, onClose }) {
   const [draft, setDraft] = useState({ ...settings });
+  const [diagnostic, setDiagnostic] = useState(integrationStatus);
+  const [isCheckingConnection, setIsCheckingConnection] = useState(false);
+
+  useEffect(() => {
+    setDraft({ ...settings });
+  }, [settings]);
+
+  useEffect(() => {
+    setDiagnostic(integrationStatus);
+  }, [integrationStatus]);
 
   const update = (key, value) => setDraft(prev => ({ ...prev, [key]: value }));
 
+  const hasConnectionDraftChanges = useMemo(() => (
+    draft.integrationMode !== settings.integrationMode
+    || normalizeUrl(draft.apiBaseUrl) !== normalizeUrl(settings.apiBaseUrl)
+  ), [draft.apiBaseUrl, draft.integrationMode, settings.apiBaseUrl, settings.integrationMode]);
+
+  const handleCheckConnection = async () => {
+    setIsCheckingConnection(true);
+
+    try {
+      const result = await inspectIntegrationStatus({
+        session: buildPreviewSession(session, draft),
+        settings: {
+          ...draft,
+          apiBaseUrl: normalizeUrl(draft.apiBaseUrl),
+        },
+        source: 'settings-diagnostic',
+      });
+
+      setDiagnostic(result);
+    } finally {
+      setIsCheckingConnection(false);
+    }
+  };
+
+  const tone = getStatusTone(diagnostic);
+  const statusTitle = getStatusTitle(diagnostic);
+  const baseUrl = normalizeUrl(diagnostic?.baseUrl || draft.apiBaseUrl || '');
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 680 }}>
         <h2>설정</h2>
 
         <div className="settings-section">
@@ -16,9 +108,13 @@ export function SettingsModal({ settings, onSave, onClose }) {
           <div className="radio-group">
             {[{ value: 'light', label: '라이트' }, { value: 'dark', label: '다크' }].map(opt => (
               <label key={opt.value} className="radio-label">
-                <input type="radio" name="theme" value={opt.value}
+                <input
+                  type="radio"
+                  name="theme"
+                  value={opt.value}
                   checked={draft.theme === opt.value}
-                  onChange={() => update('theme', opt.value)} />
+                  onChange={() => update('theme', opt.value)}
+                />
                 {opt.label}
               </label>
             ))}
@@ -30,9 +126,13 @@ export function SettingsModal({ settings, onSave, onClose }) {
           <div className="radio-group">
             {[{ value: 'small', label: '작게' }, { value: 'medium', label: '보통' }, { value: 'large', label: '크게' }].map(opt => (
               <label key={opt.value} className="radio-label">
-                <input type="radio" name="fontSize" value={opt.value}
+                <input
+                  type="radio"
+                  name="fontSize"
+                  value={opt.value}
                   checked={draft.fontSize === opt.value}
-                  onChange={() => update('fontSize', opt.value)} />
+                  onChange={() => update('fontSize', opt.value)}
+                />
                 {opt.label}
               </label>
             ))}
@@ -68,16 +168,109 @@ export function SettingsModal({ settings, onSave, onClose }) {
           </div>
         </div>
 
+        <div className="settings-section">
+          <div className="settings-section-title">서버 연동</div>
+          <div className="settings-row">
+            <label>데이터 저장 방식</label>
+            <select value={draft.integrationMode || 'local'} onChange={e => update('integrationMode', e.target.value)}>
+              <option value="local">로컬 저장</option>
+              <option value="intranet">인트라넷 서버</option>
+            </select>
+          </div>
+          <div className="settings-row">
+            <label>서버 주소</label>
+            <input
+              type="text"
+              value={draft.apiBaseUrl || ''}
+              onChange={e => update('apiBaseUrl', e.target.value)}
+              placeholder="https://intranet.example.com 또는 http://localhost:3002"
+            />
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+            인트라넷 서버 모드에서는 저장소와 AI 호출이 지정한 서버를 우선 사용합니다.
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <div className="settings-section-title">연결 진단</div>
+          <div className={`integration-status integration-status-${tone}`}>
+            <div className="integration-status-title-row">
+              <span className="integration-status-pill">{statusTitle}</span>
+              <span className="integration-status-time">확인 {formatCheckedAt(diagnostic?.lastCheckedAt)}</span>
+            </div>
+            <div className="integration-status-detail">{diagnostic?.message || '상태 정보 없음'}</div>
+          </div>
+
+          <div className="settings-inline-actions">
+            <button className="btn btn-secondary btn-sm" onClick={handleCheckConnection} disabled={isCheckingConnection}>
+              {isCheckingConnection ? '확인 중...' : '연결 확인'}
+            </button>
+            <span className="settings-inline-hint">
+              {hasConnectionDraftChanges
+                ? '저장되지 않은 입력값으로 진단합니다.'
+                : '현재 적용된 설정으로 진단합니다.'}
+            </span>
+          </div>
+
+          <div className="settings-diagnostic-grid">
+            <DiagnosticItem label="진단 기준" value={hasConnectionDraftChanges ? '미저장 입력값' : '현재 설정'} />
+            <DiagnosticItem label="저장 방식" value={draft.integrationMode === 'intranet' ? '인트라넷' : '로컬'} />
+            <DiagnosticItem label="대상 URL" value={baseUrl || '(기본 /api)'} />
+            <DiagnosticItem label="활성 저장소" value={diagnostic?.activeStore || '-'} />
+            <DiagnosticItem label="사용자 ID" value={diagnostic?.sessionInfo?.userId} />
+            <DiagnosticItem label="조직 ID" value={diagnostic?.sessionInfo?.organizationId} />
+          </div>
+
+          {diagnostic?.lastError && (
+            <div className="settings-diagnostic-error">
+              마지막 오류: {diagnostic.lastError}
+            </div>
+          )}
+
+          {diagnostic?.mockDetails && (
+            <div className="settings-diagnostic-card">
+              <div className="settings-diagnostic-card-title">Mock 서버 상세</div>
+              <div className="settings-diagnostic-grid">
+                <DiagnosticItem label="Scope Key" value={diagnostic.mockDetails.scopeKey} />
+                <DiagnosticItem label="사용자" value={diagnostic.mockDetails.userId} />
+                <DiagnosticItem label="조직" value={diagnostic.mockDetails.organizationId} />
+                <DiagnosticItem label="워크스페이스 수" value={String(diagnostic.mockDetails.workspaceCount ?? '-')} />
+                <DiagnosticItem label="자동저장 존재" value={formatBoolean(diagnostic.mockDetails.hasAutosave)} />
+                <DiagnosticItem label="저장 파일" value={diagnostic.mockDetails.storageFile} />
+              </div>
+            </div>
+          )}
+
+          {!diagnostic?.mockDetails && diagnostic?.remoteDetails && (
+            <div className="settings-diagnostic-card">
+              <div className="settings-diagnostic-card-title">원격 서버 응답 요약</div>
+              <div className="settings-diagnostic-grid">
+                <DiagnosticItem label="워크스페이스 수" value={String(diagnostic.remoteDetails.workspaceCount ?? '-')} />
+              </div>
+            </div>
+          )}
+        </div>
+
         {isElectron() && (
           <div className="settings-section">
             <div className="settings-section-title">AI 설정 (Electron)</div>
             <div className="settings-row">
               <label>Gemini API Key</label>
-              <input type="password" value={draft.geminiApiKey || ''} onChange={e => update('geminiApiKey', e.target.value)} placeholder="Google Gemini API Key" />
+              <input
+                type="password"
+                value={draft.geminiApiKey || ''}
+                onChange={e => update('geminiApiKey', e.target.value)}
+                placeholder="Google Gemini API Key"
+              />
             </div>
             <div className="settings-row">
               <label>Claude API Key</label>
-              <input type="password" value={draft.claudeApiKey || ''} onChange={e => update('claudeApiKey', e.target.value)} placeholder="Anthropic Claude API Key" />
+              <input
+                type="password"
+                value={draft.claudeApiKey || ''}
+                onChange={e => update('claudeApiKey', e.target.value)}
+                placeholder="Anthropic Claude API Key"
+              />
             </div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
               선택한 모델에 맞는 API 키가 필요합니다. 키는 로컬에만 저장됩니다.

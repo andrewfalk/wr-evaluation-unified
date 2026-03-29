@@ -1,14 +1,17 @@
 import { useState, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { createPatient, createDiagnosis, createSharedJob } from '../utils/data';
+import { createDiagnosis, createSharedJob } from '../utils/data';
+import { useAuth } from '../auth/AuthContext';
 import { suggestModules } from '../utils/diagnosisMapping';
 import { getModule } from '../moduleRegistry';
 import { createKneeJobExtras } from '../../modules/knee/utils/data';
 import { createTask as createSpineTask, createSpineModuleData } from '../../modules/spine/utils/data';
 import { formatWorkPeriod } from '../utils/workPeriod';
 import { showAlert } from '../utils/platform';
+import { createManagedPatient, touchPatientRecord } from '../services/patientRecords';
 
 export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
+  const { session } = useAuth();
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [columns, setColumns] = useState([]);
@@ -220,7 +223,7 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
           if (mod?.createModuleData) modulesData[mId] = mod.createModuleData();
         }
 
-        const p = createPatient(suggestedMods, modulesData);
+        const p = createManagedPatient(suggestedMods, modulesData, { session });
         const rowCreatedAt = parseDate(getVal(row, 'createdAt'));
         if (rowCreatedAt) {
           p.createdAt = `${rowCreatedAt}T00:00:00.000Z`;
@@ -389,7 +392,7 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
       return;
     }
 
-    onImport(resultPatients, stats);
+    onImport(resultPatients.map(patient => touchPatientRecord(patient, { session })), stats);
     onClose();
   };
 

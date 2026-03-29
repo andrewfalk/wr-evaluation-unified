@@ -4,20 +4,37 @@ import { BasicInfoForm, BasicInfoSidePanel } from './core/components/BasicInfoFo
 import { DiagnosisForm } from './core/components/DiagnosisForm';
 import { AssessmentStep } from './core/components/AssessmentStep';
 import { AIAnalysisPanel } from './core/components/AIAnalysisPanel';
+import { IntegrationStatusBadge } from './core/components/IntegrationStatusBadge';
 import { SettingsModal } from './core/components/SettingsModal';
 import { BatchImportModal } from './core/components/BatchImportModal';
 import Dashboard from './core/components/Dashboard';
+import { useAuth } from './core/auth/AuthContext';
+import { useIntegrationStatus } from './core/hooks/useIntegrationStatus';
 import { usePatientList } from './core/hooks/usePatientList';
-import { createPatient, createSharedData, createDiagnosis, createTestPatients, formatBirthDate, DEFAULT_SETTINGS, FONT_SIZE_MAP, migratePatients } from './core/utils/data';
+import { createSharedData, createDiagnosis, createTestPatients, formatBirthDate, DEFAULT_SETTINGS, FONT_SIZE_MAP } from './core/utils/data';
 import { FALLBACK_PRESETS } from './modules/knee/utils/data';
 import { suggestModules } from './core/utils/diagnosisMapping';
 import { showAlert, showConfirm } from './core/utils/platform';
 import { generateUnifiedReport } from './core/utils/reportGenerator';
 import {
-  loadSavedItems, savePatientsData, deleteSavedItem, hasDuplicateName,
-  saveAutoSave, loadAutoSave, clearAutoSave,
-  loadSettings, loadSettingsAsync, saveSettings, migrateToFileStorage
-} from './core/utils/storage';
+  createManagedPatient,
+  clonePatientRecordForImport,
+  migratePatientRecords,
+  touchPatientRecord,
+} from './core/services/patientRecords';
+import {
+  clearAutoSavedWorkspace,
+  deleteWorkspaceSnapshot,
+  hasDuplicateWorkspaceName,
+  loadAppSettings,
+  loadAppSettingsAsync,
+  loadAutoSavedWorkspace,
+  loadSavedWorkspaces,
+  migrateWorkspaceStorage,
+  saveAppSettings,
+  saveAutoSavedWorkspace,
+  saveWorkspaceSnapshot,
+} from './core/services/workspaceRepository';
 
 // 모듈 등록 (사이드이펙트 import)
 import './modules/knee';
@@ -62,6 +79,7 @@ function buildSteps(activeModules) {
 }
 
 function App() {
+  const { session, setSession } = useAuth();
   const [patients, setPatients] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
@@ -78,7 +96,7 @@ function App() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [lastAutoSave, setLastAutoSave] = useState(null);
-  const [settings, setSettings] = useState(() => loadSettings(DEFAULT_SETTINGS));
+  const [settings, setSettings] = useState(() => loadAppSettings(DEFAULT_SETTINGS));
   const [showSettings, setShowSettings] = useState(false);
   const [intakeShared, setIntakeShared] = useState(null);
   const [intakeStep, setIntakeStep] = useState(0);
@@ -90,6 +108,7 @@ function App() {
   const [presetMeta, setPresetMeta] = useState(null);
   const [presetError, setPresetError] = useState(null);
 
+  const { status: integrationStatus } = useIntegrationStatus({ session, settings });
   const activePatient = patients.find(p => p.id === activeId);
   const activeModules = activePatient?.data?.activeModules || [];
 
@@ -107,14 +126,53 @@ function App() {
     document.documentElement.style.fontSize = FONT_SIZE_MAP[settings.fontSize] || '16px';
   }, [settings.theme, settings.fontSize]);
 
+  useEffect(() => {
+    setSession(prev => {
+      const nextMode = settings.integrationMode === 'intranet' ? 'intranet' : 'local';
+      const nextBaseUrl = settings.apiBaseUrl || '';
+
+      if (prev.mode === nextMode && (prev.apiBaseUrl || '') === nextBaseUrl) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        mode: nextMode,
+        apiBaseUrl: nextBaseUrl,
+        refreshedAt: new Date().toISOString(),
+      };
+    });
+  }, [setSession, settings.apiBaseUrl, settings.integrationMode]);
+
   // Electron: 파일 기반 설정 비동기 로드
   useEffect(() => {
-    loadSettingsAsync(DEFAULT_SETTINGS).then(s => setSettings(s));
+    loadAppSettingsAsync(DEFAULT_SETTINGS).then(s => setSettings(s));
   }, []);
 
   useEffect(() => {
-    migrateToFileStorage().then(() => loadSavedItems()).then(items => setSavedItems(items));
+    migrateWorkspaceStorage();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    loadSavedWorkspaces({ session, settings })
+      .then(items => {
+        if (!cancelled) setSavedItems(items);
+      })
+      .catch(error => {
+        console.error('[workspace-load]', error);
+      });
+
+    return () => { cancelled = true; };
+  }, [
+    session?.mode,
+    session?.apiBaseUrl,
+    session?.user?.id,
+    session?.user?.organizationId,
+    settings?.integrationMode,
+    settings?.apiBaseUrl,
+  ]);
 
   // 평가 완료 시 evaluationDate 자동 설정
   useEffect(() => {
@@ -130,7 +188,10 @@ function App() {
     if (allComplete && !p.data.shared?.evaluationDate) {
       setPatients(prev => prev.map(x =>
         x.id === activeId
-          ? { ...x, data: { ...x.data, shared: { ...x.data.shared, evaluationDate: new Date().toISOString().split('T')[0] } } }
+          ? touchPatientRecord(
+            { ...x, data: { ...x.data, shared: { ...x.data.shared, evaluationDate: new Date().toISOString().split('T')[0] } } },
+            { session }
+          )
           : x
       ));
     }
@@ -151,9 +212,9 @@ function App() {
       });
   }, []);
 
-  // 자동 저장 복원
+  // 자동 저장 복원 (초기 1회만)
   useEffect(() => {
-    loadAutoSave().then(saved => {
+    loadAutoSavedWorkspace({ session, settings }).then(saved => {
       if (saved) {
         const time = new Date(saved.savedAt).toLocaleString('ko-KR');
         showConfirm(`이전 자동 저장 데이터가 있습니다 (${time}).\n이어서 작업하시겠습니까?`).then(ok => {
@@ -162,7 +223,7 @@ function App() {
             setActiveId(saved.patients[0].id);
             setCurrentStepIndex(0);
           }
-          clearAutoSave();
+          clearAutoSavedWorkspace({ session, settings });
         });
       }
     });
@@ -172,11 +233,20 @@ function App() {
   useEffect(() => {
     if (!settings.autoSaveInterval || patients.length === 0) return;
     const timer = setTimeout(() => {
-      saveAutoSave(patients);
+      saveAutoSavedWorkspace({ patients, session, settings });
       setLastAutoSave(new Date());
     }, settings.autoSaveInterval * 1000);
     return () => clearTimeout(timer);
-  }, [patients, settings.autoSaveInterval]);
+  }, [
+    patients,
+    session?.mode,
+    session?.apiBaseUrl,
+    session?.user?.id,
+    session?.user?.organizationId,
+    settings?.autoSaveInterval,
+    settings?.integrationMode,
+    settings?.apiBaseUrl,
+  ]);
 
   // Electron 메뉴 이벤트
   useEffect(() => {
@@ -224,7 +294,7 @@ function App() {
       const mod = getModule(moduleId);
       if (mod?.createModuleData) modulesData[moduleId] = mod.createModuleData();
     }
-    const p = createPatient(selectedModuleIds, modulesData);
+    const p = createManagedPatient(selectedModuleIds, modulesData, { session });
     p.data.shared = { ...intakeShared };
     setPatients(prev => [...prev, p]);
     setActiveId(p.id);
@@ -235,7 +305,14 @@ function App() {
   const updatePatient = (updater) => {
     setPatients(prev => prev.map(p =>
       p.id === activeId
-        ? { ...p, updatedAt: new Date().toISOString(), data: typeof updater === 'function' ? updater(p.data) : { ...p.data, ...updater } }
+        ? touchPatientRecord(
+          {
+            ...p,
+            updatedAt: new Date().toISOString(),
+            data: typeof updater === 'function' ? updater(p.data) : { ...p.data, ...updater }
+          },
+          { session }
+        )
         : p
     ));
     if (Object.keys(errors).length) setErrors({});
@@ -257,7 +334,7 @@ function App() {
       }
       return { ...d, modules: newModules, activeModules: newActiveModules };
     });
-  }, [activeId]);
+  }, [activeId, session]);
 
   const updateModule = (updater) => {
     if (!activeModuleId) return;
@@ -282,7 +359,7 @@ function App() {
           : { ...(d.modules?.[moduleId] || {}), ...updater }
       }
     }));
-  }, [activeId]);
+  }, [activeId, session]);
 
   const updateDiagnoses = (newDiagnoses) => {
     updatePatient(d => ({ ...d, shared: { ...d.shared, diagnoses: newDiagnoses } }));
@@ -308,9 +385,12 @@ function App() {
           tightSpace: false, kneeContact: false, jumpDown: false,
         });
       }
-      return { ...p, data: { ...p.data, modules: { ...p.data.modules, knee: { ...kneeData, jobExtras: extras } } } };
+      return touchPatientRecord(
+        { ...p, data: { ...p.data, modules: { ...p.data.modules, knee: { ...kneeData, jobExtras: extras } } } },
+        { session }
+      );
     }));
-  }, [activeId]);
+  }, [activeId, session]);
 
   const addPatient = () => { handleStartIntake(); };
 
@@ -333,9 +413,10 @@ function App() {
   };
 
   const handleBatchImport = (importedPatients, stats) => {
-    setPatients(importedPatients);
-    if (importedPatients.length > 0) {
-      setActiveId(importedPatients[importedPatients.length - 1].id);
+    const nextPatients = migratePatientRecords(importedPatients, { session });
+    setPatients(nextPatients);
+    if (nextPatients.length > 0) {
+      setActiveId(nextPatients[nextPatients.length - 1].id);
       setCurrentStepIndex(0);
     }
     setIntakeShared(null);
@@ -344,7 +425,7 @@ function App() {
   };
 
   const handleLoadTestData = () => {
-    const testPatients = createTestPatients();
+    const testPatients = migratePatientRecords(createTestPatients(), { session });
     setPatients(testPatients);
     if (testPatients.length > 0) {
       setActiveId(testPatients[0].id);
@@ -354,7 +435,17 @@ function App() {
     showAlert(`테스트 데이터 로드 완료: ${testPatients.length}명`);
   };
 
-  const handleSaveSettings = (newSettings) => { setSettings(newSettings); saveSettings(newSettings); setShowSettings(false); };
+  const handleSaveSettings = (newSettings) => {
+    setSettings(newSettings);
+    saveAppSettings(newSettings);
+    setSession(prev => ({
+      ...prev,
+      mode: newSettings.integrationMode === 'intranet' ? 'intranet' : 'local',
+      apiBaseUrl: newSettings.apiBaseUrl || '',
+      refreshedAt: new Date().toISOString(),
+    }));
+    setShowSettings(false);
+  };
 
   const handleResetPatients = async () => {
     const ok = await showConfirm('현재 작업 중인 환자 목록을 모두 삭제하시겠습니까?');
@@ -363,16 +454,16 @@ function App() {
     setActiveId(null);
     setIntakeShared(null);
     setShowHome(false);
-    clearAutoSave();
+    clearAutoSavedWorkspace({ session, settings });
   };
 
   const handleSave = async () => {
     if (!saveName.trim()) { await showAlert('저장명 필수'); return; }
-    if (hasDuplicateName(saveName, savedItems)) {
+    if (hasDuplicateWorkspaceName(saveName, savedItems)) {
       const confirmed = await showConfirm(`"${saveName}" 이름의 저장 데이터가 이미 존재합니다. 덮어쓰시겠습니까?`);
       if (!confirmed) return;
     }
-    const items = await savePatientsData(saveName, patients, savedItems);
+    const items = await saveWorkspaceSnapshot({ name: saveName, patients, savedItems, session, settings });
     setSavedItems(items);
     setLastAutoSave(null);
     setShowSaveModal(false);
@@ -383,7 +474,7 @@ function App() {
   const handleOverwriteSave = async (item) => {
     const confirmed = await showConfirm(`"${item.name}"에 덮어쓰시겠습니까?`);
     if (!confirmed) return;
-    const items = await savePatientsData(item.name, patients, savedItems);
+    const items = await saveWorkspaceSnapshot({ name: item.name, patients, savedItems, session, settings });
     setSavedItems(items);
     setLastAutoSave(null);
     setShowSaveModal(false);
@@ -395,10 +486,11 @@ function App() {
     if (mode === 'overwrite') {
       const confirmed = await showConfirm('현재 데이터를 덮어쓰시겠습니까?');
       if (!confirmed) return;
-      setPatients(item.patients);
-      setActiveId(item.patients[0]?.id || null);
+      const nextPatients = migratePatientRecords(item.patients || [], { session });
+      setPatients(nextPatients);
+      setActiveId(nextPatients[0]?.id || null);
     } else {
-      const newPatients = item.patients.map(p => ({ ...p, id: Date.now() + Math.random() }));
+      const newPatients = (item.patients || []).map(p => clonePatientRecordForImport(p, { session }));
       setPatients(prev => [...prev, ...newPatients]);
       setActiveId(newPatients[0]?.id || null);
     }
@@ -411,7 +503,7 @@ function App() {
   const handleDelete = async (id) => {
     const confirmed = await showConfirm('삭제하시겠습니까?');
     if (confirmed) {
-      const items = await deleteSavedItem(id, savedItems);
+      const items = await deleteWorkspaceSnapshot({ id, savedItems, session, settings });
       setSavedItems(items);
     }
   };
@@ -429,7 +521,7 @@ function App() {
           try {
             setLegacyItems(legacyData.savedItems.map(item => ({
               ...item,
-              patients: item.patients ? migratePatients(item.patients) : []
+              patients: item.patients ? migratePatientRecords(item.patients, { session }) : []
             })));
           } catch (e) {
             console.error('[legacy-migrate]', e);
@@ -447,7 +539,7 @@ function App() {
           const items = JSON.parse(legacy);
           setLegacyItems(items.map(item => ({
             ...item,
-            patients: item.patients ? migratePatients(item.patients) : []
+            patients: item.patients ? migratePatientRecords(item.patients, { session }) : []
           })));
         } else {
           setLegacyItems(null);
@@ -612,7 +704,15 @@ function App() {
             </div>
           )}
         </div>
-        {showSettings && <SettingsModal settings={settings} onSave={handleSaveSettings} onClose={() => setShowSettings(false)} />}
+        {showSettings && (
+          <SettingsModal
+            settings={settings}
+            session={session}
+            integrationStatus={integrationStatus}
+            onSave={handleSaveSettings}
+            onClose={() => setShowSettings(false)}
+          />
+        )}
         {showLoadModal && renderLoadModal()}
         {showBatchImport && <BatchImportModal onClose={() => setShowBatchImport(false)} onImport={handleBatchImport} existingPatients={patients} />}
       </div>
@@ -963,6 +1063,7 @@ function App() {
             {headerTitle}
             {lastAutoSave && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 8, fontWeight: 400 }}>자동저장 {lastAutoSave.toLocaleTimeString('ko-KR')}</span>}
           </h1>
+          <IntegrationStatusBadge status={integrationStatus} />
           <div className="header-actions">
             <button className="btn btn-secondary btn-sm" onClick={() => setShowHome(true)} title="대시보드로 이동">대시보드</button>
             <button className="btn btn-danger btn-sm" onClick={handleResetPatients} title="환자 목록 초기화">초기화</button>
@@ -1033,7 +1134,15 @@ function App() {
       </div>
 
       {/* 모달들 */}
-      {showSettings && <SettingsModal settings={settings} onSave={handleSaveSettings} onClose={() => setShowSettings(false)} />}
+      {showSettings && (
+        <SettingsModal
+          settings={settings}
+          session={session}
+          integrationStatus={integrationStatus}
+          onSave={handleSaveSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
       {showSaveModal && (
         <div className="modal-overlay" onClick={() => setShowSaveModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>

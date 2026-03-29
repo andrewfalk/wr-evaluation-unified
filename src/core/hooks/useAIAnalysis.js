@@ -1,6 +1,9 @@
 import { useState, useCallback } from 'react';
+import { useAuth } from '../auth/AuthContext';
+import { analyzeAIRequest } from '../services/analysisClient';
 
 export function useAIAnalysis() {
+  const { session } = useAuth();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -11,58 +14,38 @@ export function useAIAnalysis() {
     setResult(null);
 
     try {
-      let data;
+      const response = await analyzeAIRequest({
+        prompt,
+        systemPrompt,
+        model,
+        session,
+      });
 
-      if (window.electron?.analyzeAI) {
-        // Electron: IPC를 통해 main process에서 직접 API 호출
-        const settingsStr = localStorage.getItem('wrEvalUnifiedSettings');
-        const settings = settingsStr ? JSON.parse(settingsStr) : {};
-        const isGemini = model.startsWith('gemini');
-        const apiKey = isGemini ? (settings.geminiApiKey || '') : (settings.claudeApiKey || '');
-        data = await window.electron.analyzeAI({ prompt, systemPrompt, model, apiKey });
-      } else {
-        // 웹: Vercel 서버리스 함수 경유
-        const res = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, systemPrompt, model })
-        });
-        if (!res.ok) {
-          try {
-            const errData = await res.json();
-            const msg = errData.error?.message || `서버 오류 (${res.status})`;
-            const detail = errData.error?.detail;
-            setError(detail ? `${msg}` : msg);
-          } catch {
-            if (res.status === 404) {
-              setError('AI 분석 서버를 찾을 수 없습니다. vercel dev를 실행하거나 배포 환경에서 시도하세요.');
-            } else {
-              setError(`서버 오류 (${res.status})`);
-            }
-          }
-          return null;
-        }
-        data = await res.json();
+      if (!response.ok) {
+        const msg = response.data?.error?.message || `서버 오류 (${response.status})`;
+        setError(msg);
+        return null;
       }
 
-      if (data.error) {
+      const data = response.data;
+      if (data?.error) {
         setError(data.error.message || 'AI 분석 중 오류가 발생했습니다.');
         return null;
       }
 
-      // Claude: data.content[0].text, Gemini: data.candidates[0].content.parts[0].text
-      const text = data.content?.[0]?.text
-        || data.candidates?.[0]?.content?.parts?.[0]?.text
+      const text = data?.content?.[0]?.text
+        || data?.candidates?.[0]?.content?.parts?.[0]?.text
         || '';
+
       setResult(text);
       return text;
-    } catch (err) {
+    } catch {
       setError('서버 연결 오류. 잠시 후 다시 시도해주세요.');
       return null;
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [session]);
 
   const reset = useCallback(() => {
     setResult(null);
