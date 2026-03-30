@@ -5,7 +5,8 @@ import { useAuth } from '../auth/AuthContext';
 import { suggestModules } from '../utils/diagnosisMapping';
 import { getModule } from '../moduleRegistry';
 import { createKneeJobExtras } from '../../modules/knee/utils/data';
-import { createTask as createSpineTask, createSpineModuleData } from '../../modules/spine/utils/data';
+import { createShoulderJobExtras } from '../../modules/shoulder/utils/data';
+import { createTask as createSpineTask } from '../../modules/spine/utils/data';
 import { formatWorkPeriod } from '../utils/workPeriod';
 import { showAlert } from '../utils/platform';
 import { createManagedPatient, touchPatientRecord } from '../services/patientRecords';
@@ -91,6 +92,15 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
       createdAt: findCol(['등록일', '접수일', 'created', 'registered'])
     };
 
+    colMap.ellmanRight = findCol(['ellman(우측)', 'ellman우측', 'ellman_right', 'ellman(right)']);
+    colMap.ellmanLeft = findCol(['ellman(좌측)', 'ellman좌측', 'ellman_left', 'ellman(left)']);
+    colMap.shoulderOverhead = findCol(['오버헤드', 'overhead']);
+    colMap.shoulderRepetitiveMedium = findCol(['반복중간', 'repetitivemedium', 'repetitive_medium']);
+    colMap.shoulderRepetitiveFast = findCol(['반복빠른', 'repetitivefast', 'repetitive_fast']);
+    colMap.shoulderHeavyLoadCount = findCol(['중량물횟수', 'heavyloadcount', 'heavy_load_count']);
+    colMap.shoulderHeavyLoadSeconds = findCol(['중량물시간', 'heavyloadseconds', 'heavy_load_seconds']);
+    colMap.shoulderVibration = findCol(['진동', 'vibration']);
+
     const sideMap = {
       '우측': 'right', '좌측': 'left', '양측': 'both',
       'right': 'right', 'left': 'left', 'both': 'both'
@@ -137,6 +147,45 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
       if (side === 'left' || side === 'both') diag.klgLeft = klgLeft;
     };
 
+    const applyEllman = (diag, side, ellmanRight, ellmanLeft) => {
+      if (side === 'right' || side === 'both') diag.ellmanRight = ellmanRight;
+      if (side === 'left' || side === 'both') diag.ellmanLeft = ellmanLeft;
+    };
+
+    const hasKneeData = (row) => !!(
+      getVal(row, 'jobWeight') ||
+      getVal(row, 'jobSquat') ||
+      getVal(row, 'stairs') ||
+      getVal(row, 'kneeTwist') ||
+      getVal(row, 'startStop') ||
+      getVal(row, 'tightSpace') ||
+      getVal(row, 'kneeContact') ||
+      getVal(row, 'jumpDown') ||
+      getVal(row, 'klgRight') ||
+      getVal(row, 'klgLeft')
+    );
+
+    const hasShoulderData = (row) => !!(
+      getVal(row, 'ellmanRight') ||
+      getVal(row, 'ellmanLeft') ||
+      getVal(row, 'shoulderOverhead') ||
+      getVal(row, 'shoulderRepetitiveMedium') ||
+      getVal(row, 'shoulderRepetitiveFast') ||
+      getVal(row, 'shoulderHeavyLoadCount') ||
+      getVal(row, 'shoulderHeavyLoadSeconds') ||
+      getVal(row, 'shoulderVibration')
+    );
+
+    const buildShoulderJobExtra = (row, sharedJobId = '') => ({
+      ...createShoulderJobExtras(sharedJobId),
+      overheadHours: getVal(row, 'shoulderOverhead') ? String(getVal(row, 'shoulderOverhead')) : '',
+      repetitiveMediumHours: getVal(row, 'shoulderRepetitiveMedium') ? String(getVal(row, 'shoulderRepetitiveMedium')) : '',
+      repetitiveFastHours: getVal(row, 'shoulderRepetitiveFast') ? String(getVal(row, 'shoulderRepetitiveFast')) : '',
+      heavyLoadCount: getVal(row, 'shoulderHeavyLoadCount') ? String(getVal(row, 'shoulderHeavyLoadCount')) : '',
+      heavyLoadSeconds: getVal(row, 'shoulderHeavyLoadSeconds') ? String(getVal(row, 'shoulderHeavyLoadSeconds')) : '',
+      vibrationHours: getVal(row, 'shoulderVibration') ? String(getVal(row, 'shoulderVibration')) : '',
+    });
+
     const buildSpineTask = (row, index, sharedJobId = '') => {
       const name = String(getVal(row, 'taskName') || '').trim();
       const posture = String(getVal(row, 'posture') || '').trim().toUpperCase();
@@ -171,11 +220,26 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
         shared: { ...p.data.shared, diagnoses: [...(p.data.shared?.diagnoses || [])], jobs: [...(p.data.shared?.jobs || [])] },
         modules: {
           ...p.data.modules,
-          ...(p.data.modules?.knee ? { knee: { ...p.data.modules.knee, jobExtras: [...(p.data.modules.knee.jobExtras || [])] } } : {})
+          ...(p.data.modules?.knee ? { knee: { ...p.data.modules.knee, jobExtras: [...(p.data.modules.knee.jobExtras || [])] } } : {}),
+          ...(p.data.modules?.shoulder ? { shoulder: { ...p.data.modules.shoulder, jobExtras: [...(p.data.modules.shoulder.jobExtras || [])] } } : {})
         },
         activeModules: [...(p.data.activeModules || [])]
       }
     }));
+
+    const ensurePatientModule = (patient, moduleId) => {
+      if (patient.data.activeModules.includes(moduleId)) return patient.data.modules[moduleId];
+      patient.data.activeModules.push(moduleId);
+      const mod = getModule(moduleId);
+      if (mod?.createModuleData) patient.data.modules[moduleId] = mod.createModuleData();
+      return patient.data.modules[moduleId];
+    };
+
+    const applyReturnConsiderations = (modulesData, value) => {
+      if (!value) return;
+      if (modulesData.knee) modulesData.knee.returnConsiderations = value;
+      if (modulesData.shoulder) modulesData.shoulder.returnConsiderations = value;
+    };
 
     for (let i = 1; i < preview.length; i++) {
       const row = preview[i];
@@ -189,7 +253,10 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
       const rowJobName = String(getVal(row, 'jobName') || '').trim();
       const rowKlgRight = parseKlg(getVal(row, 'klgRight'));
       const rowKlgLeft = parseKlg(getVal(row, 'klgLeft'));
+      const rowEllmanRight = String(getVal(row, 'ellmanRight') || '').trim();
+      const rowEllmanLeft = String(getVal(row, 'ellmanLeft') || '').trim();
       const rowInjuryDate = parseDate(getVal(row, 'injuryDate'));
+      const rowReturnConsiderations = String(getVal(row, 'returnConsiderations') || '').trim();
 
       // 환자 찾기 (이름 + 생년월일 + 재해일자)
       let existingPatient = resultPatients.find(p =>
@@ -204,13 +271,17 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
         if (rowDiagCode || rowDiagName) {
           const newDiag = { ...createDiagnosis(), code: rowDiagCode, name: rowDiagName, side: rowSide };
           applyKlg(newDiag, rowSide, rowKlgRight, rowKlgLeft);
+          applyEllman(newDiag, rowSide, rowEllmanRight, rowEllmanLeft);
           diagList.push(newDiag);
         }
 
         const suggestedMods = suggestModules(diagList);
         // 무릎 관련 직업 데이터가 있으면 knee 모듈 보장
-        if (rowJobName && !suggestedMods.includes('knee')) {
+        if (hasKneeData(row) && !suggestedMods.includes('knee')) {
           suggestedMods.push('knee');
+        }
+        if (hasShoulderData(row) && !suggestedMods.includes('shoulder')) {
+          suggestedMods.push('shoulder');
         }
         // 척추 작업 데이터가 있으면 spine 모듈 보장
         if (hasSpineData(row) && !suggestedMods.includes('spine')) {
@@ -269,14 +340,15 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
               jumpDown: parseBool(getVal(row, 'jumpDown'))
             }];
           }
+          if (modulesData.shoulder) {
+            modulesData.shoulder.jobExtras = [buildShoulderJobExtra(row, sharedJob.id)];
+          }
         }
 
         // 무릎 모듈 복귀 고려사항
-        if (modulesData.knee) {
-          const returnVal = String(getVal(row, 'returnConsiderations') || '');
-          if (returnVal) modulesData.knee.returnConsiderations = returnVal;
-          p.data.modules.knee = modulesData.knee;
-        }
+        applyReturnConsiderations(modulesData, rowReturnConsiderations);
+        if (modulesData.knee) p.data.modules.knee = modulesData.knee;
+        if (modulesData.shoulder) p.data.modules.shoulder = modulesData.shoulder;
 
         // 척추 작업 데이터 (같은 행에 직종이 있으면 해당 job에 연결)
         if (modulesData.spine && hasSpineData(row)) {
@@ -291,6 +363,10 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
         stats.newPatients++;
       } else {
         // 기존 환자 머지
+        if (hasKneeData(row)) ensurePatientModule(existingPatient, 'knee');
+        if (hasShoulderData(row)) ensurePatientModule(existingPatient, 'shoulder');
+        if (hasSpineData(row)) ensurePatientModule(existingPatient, 'spine');
+
         const existingDiag = existingPatient.data.shared.diagnoses.find(d =>
           d.code === rowDiagCode && d.name === rowDiagName && d.side === rowSide
         );
@@ -298,6 +374,7 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
         if (!existingDiag && (rowDiagCode || rowDiagName)) {
           const newDiag = { ...createDiagnosis(), code: rowDiagCode, name: rowDiagName, side: rowSide };
           applyKlg(newDiag, rowSide, rowKlgRight, rowKlgLeft);
+          applyEllman(newDiag, rowSide, rowEllmanRight, rowEllmanLeft);
           existingPatient.data.shared.diagnoses.push(newDiag);
           stats.newDiagnoses++;
 
@@ -316,6 +393,12 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
           }
           if (rowKlgLeft && !existingDiag.klgLeft && (rowSide === 'left' || rowSide === 'both')) {
             existingDiag.klgLeft = rowKlgLeft;
+          }
+          if (rowEllmanRight && !existingDiag.ellmanRight && (rowSide === 'right' || rowSide === 'both')) {
+            existingDiag.ellmanRight = rowEllmanRight;
+          }
+          if (rowEllmanLeft && !existingDiag.ellmanLeft && (rowSide === 'left' || rowSide === 'both')) {
+            existingDiag.ellmanLeft = rowEllmanLeft;
           }
         }
 
@@ -361,6 +444,44 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
         }
 
         // 척추 작업 머지
+        const mergedSharedJob = rowJobName
+          ? (existingPatient.data.shared.jobs || []).find(j => j.jobName === rowJobName)
+          : null;
+        if (mergedSharedJob && existingPatient.data.modules?.knee) {
+          const kneeData = existingPatient.data.modules.knee;
+          if (!kneeData.jobExtras) kneeData.jobExtras = [];
+          let kneeExtra = kneeData.jobExtras.find(e => e.sharedJobId === mergedSharedJob.id);
+          if (!kneeExtra) {
+            kneeExtra = { ...createKneeJobExtras(mergedSharedJob.id) };
+            kneeData.jobExtras.push(kneeExtra);
+          }
+          if (!kneeExtra.weight && getVal(row, 'jobWeight')) kneeExtra.weight = String(getVal(row, 'jobWeight'));
+          if (!kneeExtra.squatting && getVal(row, 'jobSquat')) kneeExtra.squatting = String(getVal(row, 'jobSquat'));
+          kneeExtra.stairs = kneeExtra.stairs || parseBool(getVal(row, 'stairs'));
+          kneeExtra.kneeTwist = kneeExtra.kneeTwist || parseBool(getVal(row, 'kneeTwist'));
+          kneeExtra.startStop = kneeExtra.startStop || parseBool(getVal(row, 'startStop'));
+          kneeExtra.tightSpace = kneeExtra.tightSpace || parseBool(getVal(row, 'tightSpace'));
+          kneeExtra.kneeContact = kneeExtra.kneeContact || parseBool(getVal(row, 'kneeContact'));
+          kneeExtra.jumpDown = kneeExtra.jumpDown || parseBool(getVal(row, 'jumpDown'));
+        }
+        if (mergedSharedJob && existingPatient.data.modules?.shoulder) {
+          const shoulderData = existingPatient.data.modules.shoulder;
+          if (!shoulderData.jobExtras) shoulderData.jobExtras = [];
+          let shoulderExtra = shoulderData.jobExtras.find(e => e.sharedJobId === mergedSharedJob.id);
+          if (!shoulderExtra) {
+            shoulderExtra = buildShoulderJobExtra(row, mergedSharedJob.id);
+            shoulderData.jobExtras.push(shoulderExtra);
+          } else {
+            if (!shoulderExtra.overheadHours && getVal(row, 'shoulderOverhead')) shoulderExtra.overheadHours = String(getVal(row, 'shoulderOverhead'));
+            if (!shoulderExtra.repetitiveMediumHours && getVal(row, 'shoulderRepetitiveMedium')) shoulderExtra.repetitiveMediumHours = String(getVal(row, 'shoulderRepetitiveMedium'));
+            if (!shoulderExtra.repetitiveFastHours && getVal(row, 'shoulderRepetitiveFast')) shoulderExtra.repetitiveFastHours = String(getVal(row, 'shoulderRepetitiveFast'));
+            if (!shoulderExtra.heavyLoadCount && getVal(row, 'shoulderHeavyLoadCount')) shoulderExtra.heavyLoadCount = String(getVal(row, 'shoulderHeavyLoadCount'));
+            if (!shoulderExtra.heavyLoadSeconds && getVal(row, 'shoulderHeavyLoadSeconds')) shoulderExtra.heavyLoadSeconds = String(getVal(row, 'shoulderHeavyLoadSeconds'));
+            if (!shoulderExtra.vibrationHours && getVal(row, 'shoulderVibration')) shoulderExtra.vibrationHours = String(getVal(row, 'shoulderVibration'));
+          }
+        }
+        applyReturnConsiderations(existingPatient.data.modules, rowReturnConsiderations);
+
         if (hasSpineData(row)) {
           // spine 모듈이 없으면 생성
           if (!existingPatient.data.activeModules.includes('spine')) {

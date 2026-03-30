@@ -39,6 +39,7 @@ import {
 // 모듈 등록 (사이드이펙트 import)
 import './modules/knee';
 import './modules/spine';
+import './modules/shoulder';
 
 const UNIFIED_AI_SYSTEM_PROMPT = `당신은 직업성 근골격계 질환 업무관련성 평가 전문 직업환경의학 전문의입니다.
 무릎(슬관절) 및 척추(요추) 평가 모두에 전문성을 갖추고 있습니다.

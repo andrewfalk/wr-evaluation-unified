@@ -531,6 +531,10 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   color: var(--accent);
   line-height: 1.2;
 }
+.dashboard-stat-card .stat-value.stat-total    { color: var(--accent); }
+.dashboard-stat-card .stat-value.stat-complete { color: var(--color-safe); }
+.dashboard-stat-card .stat-value.stat-progress { color: #f59e0b; }
+.dashboard-stat-card .stat-value.stat-module   { color: var(--text-secondary); }
 .dashboard-stat-card .stat-label {
   font-size: 0.75rem;
   color: var(--text-muted);

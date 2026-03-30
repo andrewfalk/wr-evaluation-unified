@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { computeDashboardStats } from '../utils/dashboardStats';
 import { getAllModules } from '../moduleRegistry';
 
-const MODULE_LABELS = { knee: '무릎', spine: '척추' };
+const MODULE_LABELS = { knee: '무릎', spine: '척추', shoulder: '어깨' };
 
 const BarChart = ({ data, color, title }) => {
   const maxCount = Math.max(...data.map(m => m.count), 5);
@@ -72,19 +72,19 @@ const Dashboard = ({ patients, onSelectPatient }) => {
       {/* 요약 카드 */}
       <div className="dashboard-summary">
         <div className="dashboard-stat-card">
-          <div className="stat-value">{stats.totalPatients}</div>
+          <div className="stat-value stat-total">{stats.totalPatients}</div>
           <div className="stat-label">총 환자</div>
         </div>
         <div className="dashboard-stat-card">
-          <div className="stat-value">{stats.completedCount}</div>
+          <div className="stat-value stat-complete">{stats.completedCount}</div>
           <div className="stat-label">완료된 평가</div>
         </div>
         <div className="dashboard-stat-card">
-          <div className="stat-value">{stats.inProgressCount}</div>
+          <div className="stat-value stat-progress">{stats.inProgressCount}</div>
           <div className="stat-label">진행 중</div>
         </div>
         <div className="dashboard-stat-card">
-          <div className="stat-value">{stats.totalPatients}</div>
+          <div className="stat-value stat-module">{stats.totalPatients}</div>
           <div className="stat-label">모듈 사용</div>
           <div className="stat-sub">{moduleText}</div>
         </div>

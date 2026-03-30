@@ -1,6 +1,15 @@
 import { KLG_OPTIONS, LOW_REASON_OPTIONS } from '../utils/data';
 import { getSideText } from '../utils/calculations';
-import { getDiagnosisModuleHint } from '../../../core/utils/diagnosisMapping';
+import { resolveDiagnosisModule } from '../../../core/utils/diagnosisMapping';
+
+const ELLMAN_OPTIONS = [
+  { value: '', label: '선택' },
+  { value: 'N/A', label: '해당없음' },
+  { value: 'Grade 1', label: 'Grade 1' },
+  { value: 'Grade 2', label: 'Grade 2' },
+  { value: 'Grade 3', label: 'Grade 3' },
+  { value: 'Full', label: 'Full' },
+];
 
 function SideAssessment({ diag, index, side, onUpdate, label }) {
   const isRight = side === 'right';
@@ -62,20 +71,37 @@ function SideAssessment({ diag, index, side, onUpdate, label }) {
 
 export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsiderations, onReturnChange, activeModules }) {
   const hasKnee = (activeModules || []).includes('knee');
+  const hasShoulder = (activeModules || []).includes('shoulder');
 
   return (
     <div className="section">
       <h2 className="section-title"><span className="section-icon">&#x1F4CB;</span>종합소견</h2>
       {diagnoses.map((diag, i) => {
-        const hint = getDiagnosisModuleHint(diag);
-        const isSpine = hint?.moduleId === 'spine';
+        const resolvedModule = resolveDiagnosisModule(diag, activeModules);
+        const isSpine = resolvedModule?.moduleId === 'spine';
+        const isShoulder = resolvedModule?.moduleId === 'shoulder';
 
         return (
           <div key={diag.id} className="assessment-card">
             <div className="assessment-card-header">
               <div className="assessment-card-header-top">
                 <div className="assessment-card-title">상병 #{i + 1}: {diag.code} {diag.name}</div>
-                {!isSpine && diag.side && (
+                {!isSpine && isShoulder && diag.side && (
+                  <div className="klg-inline">
+                    <span className="klg-inline-label">Ellman Class</span>
+                    {(diag.side === 'right' || diag.side === 'both') && (
+                      <select value={diag.ellmanRight || ''} onChange={e => onDiagnosisUpdate(i, 'ellmanRight', e.target.value)}>
+                        {ELLMAN_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                      </select>
+                    )}
+                    {(diag.side === 'left' || diag.side === 'both') && (
+                      <select value={diag.ellmanLeft || ''} onChange={e => onDiagnosisUpdate(i, 'ellmanLeft', e.target.value)}>
+                        {ELLMAN_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                      </select>
+                    )}
+                  </div>
+                )}
+                {!isSpine && !isShoulder && diag.side && (
                   <div className="klg-inline">
                     <span className="klg-inline-label">K-L Grade</span>
                     {(diag.side === 'right' || diag.side === 'both') && (
@@ -110,7 +136,7 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsideratio
           </div>
         );
       })}
-      {hasKnee && (
+      {(hasKnee || hasShoulder) && (
         <div className="section" style={{ marginTop: 20 }}>
           <h2 className="section-title"><span className="section-icon">&#x1F4BC;</span>복귀 고려사항</h2>
           <textarea rows="3" style={{ width: '100%' }} value={returnConsiderations} onChange={e => onReturnChange(e.target.value)} placeholder="업무 복귀 시 고려사항..." />

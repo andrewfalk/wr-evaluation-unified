@@ -1,7 +1,7 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 2.5.0
-> **Last Updated:** 2026-03-28
+> **Version:** 3.0.0
+> **Last Updated:** 2026-03-30
 > **Status:** MVP 개발 완료 / Vercel 배포 완료
 
 ---
@@ -11,7 +11,7 @@
 ### 1.1 목적
 
 직업환경의학 전문의가 **업무상 질병 인정 여부를 판단**할 때 사용하는 통합 평가 도구.
-현재 무릎(슬관절)과 척추(요추 MDDM) 평가를 지원하며, 향후 고관절·어깨 등 추가 부위를 플러그인 형태로 확장할 수 있는 아키텍처로 설계되었다.
+현재 무릎(슬관절), 척추(요추 MDDM), 어깨(견관절) 평가를 지원하며, 향후 고관절 등 추가 부위를 플러그인 형태로 확장할 수 있는 아키텍처로 설계되었다.
 
 ### 1.2 배경
 
@@ -106,12 +106,18 @@ Patient
     │   │   │         stairs, kneeTwist, startStop,
     │   │   │         tightSpace, kneeContact, jumpDown }
     │   │   └── returnConsiderations    ← 복귀 고려사항
-    │   └── spine                       ← 척추 전용
-    │       └── tasks[]                 ← MDDM 작업 목록
-    │           └── { id, name, posture, weight, frequency,
-    │                 timeValue, timeUnit, correctionFactor, force,
-    │                 sharedJobId }     ← 직업력 연결 (shared.jobs[].id)
-    └── activeModules: ['knee', 'spine']
+    │   ├── spine                       ← 척추 전용
+    │   │   └── tasks[]                 ← MDDM 작업 목록
+    │   │       └── { id, name, posture, weight, frequency,
+    │   │             timeValue, timeUnit, correctionFactor, force,
+    │   │             sharedJobId }     ← 직업력 연결 (shared.jobs[].id)
+    │   └── shoulder                    ← 어깨 전용
+    │       ├── jobExtras[]             ← 직종별 신체부담 (sharedJobId로 연결)
+    │       │   └── { sharedJobId, overheadHours, repetitiveMediumHours,
+    │       │         repetitiveFastHours, heavyLoadCount, heavyLoadSeconds,
+    │       │         vibrationHours, evidenceSources[] }
+    │       └── returnConsiderations    ← 복귀 고려사항
+    └── activeModules: ['knee', 'spine', 'shoulder']
 ```
 
 **공통/전용 분리 원칙:**
@@ -155,6 +161,7 @@ migratePatient(patient)
 [공유] 기본정보 → 상병 입력 → 모듈 선택
 [무릎] 🦵 신체부담 평가
 [척추] 🦴 신체부담 평가
+[어깨] 💪 신체부담 평가
 [공유] 종합소견 → AI 분석
 ```
 
@@ -166,8 +173,9 @@ migratePatient(patient)
 
 **좌측 패널 — 입력:**
 - **무릎 상병:** KLG 등급 입력 (좌/우) + 상태 확인 + 업무관련성 평가
-- **척추 상병:** 상태 확인 + 업무관련성 평가 (KLG/좌우 구분 없음)
-- 복귀 고려사항 (무릎 모듈 활성 시)
+- **어깨 상병:** Ellman Class 입력 (좌/우) + 상태 확인 + 업무관련성 평가
+- **척추 상병:** 상태 확인 + 업무관련성 평가 (좌우 구분 없음)
+- 복귀 고려사항 (무릎 또는 어깨 모듈 활성 시)
 
 **우측 패널 — 미리보기:**
 - 전체 모듈 결과를 텍스트 보고서로 통합 표시 (패널 높이를 꽉 채움)
@@ -213,6 +221,53 @@ shared.jobs[] + knee.jobExtras[] → mergeJobsWithExtras() → 합성 job 객체
 → jobBurdens[] → burden level per job
 → cumulativeBurden → '충분함' | '불충분'
 ```
+
+### 4.3 어깨 모듈 (shoulder)
+
+**평가 방법론:** 독일 직업병 BK2117 기준 — 어깨 근골격계 질환 누적 노출 평가
+
+#### 신체부담 평가 (JobTab + ShoulderResultPanel)
+
+**좌측 패널 — 입력 (JobTab):**
+공통 직업력(BasicInfoForm)과 연결된 어깨 전용 부담 요인 입력 (단위: 일일 노출 시간):
+
+| 항목 | 단위 | 설명 |
+|------|------|------|
+| 오버헤드/어깨높이 이상 작업 | 시간/일 | 팔을 어깨 위로 들어올리는 작업 |
+| 반복동작 중간속도 (4~14회/분) | 시간/일 | 중간 속도 반복 작업 시간 |
+| 반복동작 고도 (≥15회/분) | 시간/일 | 고속 반복 작업 시간 |
+| 중량물(≥20kg) 취급 | 횟수/일 + 초/회 | 취급 횟수와 1회 소요 시간 분리 입력 |
+| 손-팔 진동 (≥3 m/s²) | 시간/일 | 진동 공구 노출 시간 |
+
+**중량물 누적 계산:** `(횟수/일 × 초/회) / 3600 × 연간근무일수 × 근무년수` (시간 단위 환산)
+
+**우측 패널 — 결과 (ShoulderResultPanel):**
+- BK2117 노출 임계값 대비 누적 시간 비교 테이블 (RatioBar 시각화)
+- 반복동작 OR 조건: 중간속도 OR 고도 초과 시 기준 충족 판정
+- 직력별 기여 상세 (2개 이상 직업 시)
+
+#### BK2117 누적 노출 임계값
+
+| 노출 유형 | 임계값 |
+|-----------|--------|
+| 오버헤드 작업 | 3,600시간 |
+| 반복동작 중간속도 | 38,000시간 |
+| 반복동작 고도 | 9,400시간 |
+| 중량물(≥20kg) 취급 | 200시간 |
+| 손-팔 진동 | 5,300시간 |
+
+#### 계산 로직 (`computeShoulderCalc`)
+
+```
+shared.jobs[] + shoulder.jobExtras[] → mergeJobsWithExtras()
+→ computeJobExposures(extras, periodYears, workDaysPerYear)
+   각 변수: cumulativeHours = dailyHours × workDaysPerYear × periodYears
+   (중량물: dailyHours = (heavyLoadCount × heavyLoadSeconds) / 3600)
+→ totals[] = 직력별 합산 누적시간, BK2117 임계값 대비 ratio/exceeded
+→ anyRepetitiveExceeded = repMedium.exceeded || repFast.exceeded
+```
+
+---
 
 ### 4.2 척추 모듈 (spine)
 
@@ -431,13 +486,14 @@ ZIP명: `업무관련성평가_{N}명_{날짜}.zip` (동명 파일은 인덱스 
 
 파일명: `일괄입력용_{이름 또는 N명}_{날짜}.xlsx`
 
-**컬럼 구성 (36열):**
+**컬럼 구성 (44열):**
 - 기본정보(6): 이름, 생년월일, 재해일자, 키, 몸무게, 성별
 - 기관정보(3): 병원명, 진료과, 담당의
 - 기타(2): 특이사항, 복귀고려사항
-- 상병(5): 진단코드, 진단명, 부위, KLG(우측), KLG(좌측)
+- 상병(7): 진단코드, 진단명, 부위, KLG(우측), KLG(좌측), Ellman(우측), Ellman(좌측)
 - 직업(7): 직종명, 시작일, 종료일, 근무기간(년), 근무기간(개월), 중량물(kg), 쪼그려앉기(분)
 - 무릎 보조변수(6): 계단오르내리기, 무릎비틀림, 출발정지반복, 좁은공간, 무릎접촉충격, 뛰어내리기
+- 어깨 노출(6): 오버헤드(시간/일), 반복중간(시간/일), 반복빠른(시간/일), 중량물횟수(회/일), 중량물시간(초/회), 진동(시간/일)
 - 척추 작업(7): 작업명, 자세코드(G1-G11), 작업중량(kg), 횟수/일, 시간값, 시간단위(sec/min/hr), 보정계수
 
 **행 생성 규칙:** 척추 작업을 직업별로 그룹핑하여 같은 직업의 작업이 해당 직업 행에 배치됨. 환자별 row 수 = max(1, 상병수, 직업-작업 쌍 수). merge key(이름+생년월일+재해일자)는 매 행 반복.
@@ -466,8 +522,9 @@ ZIP명: `업무관련성평가_{N}명_{날짜}.zip` (동명 파일은 인덱스 
 |---------------|-----------|
 | M17, M22, M23, M70.4, M76.5, S83 | 무릎 (knee) |
 | M51, M54, M47, M48, M50, M53 | 척추 (spine) |
+| M75, S43, S46, M19.01 | 어깨 (shoulder) |
 
-상병명 키워드 매칭도 병행: 슬관절, 무릎, 반월상, 추간판, 디스크, 협착증 등.
+상병명 키워드 매칭도 병행: 슬관절, 무릎, 반월상, 추간판, 디스크, 협착증, 견관절, 어깨, 회전근개, 극상근, 극하근, 오십견, 충돌증후군, 이두건, 견봉 등.
 
 ---
 
@@ -548,19 +605,30 @@ src/
 │   │       ├── calculations.js          # computeKneeCalc, 신체부담도
 │   │       └── exportHandlers.js        # 보고서 생성, Excel 내보내기
 │   │
-│   └── spine/                           # 척추 모듈
+│   ├── spine/                           # 척추 모듈
+│   │   ├── index.js                     # registerModule()
+│   │   ├── SpineEvaluation.jsx          # 메인 컴포넌트
+│   │   ├── components/
+│   │   │   ├── TaskManager.jsx          # 작업 목록 관리
+│   │   │   ├── TaskEditor.jsx           # 작업 편집 (자세/하중/빈도)
+│   │   │   └── SpineResultPanel.jsx     # MDDM 결과 대시보드 (summary/threshold/기여도)
+│   │   └── utils/
+│   │       ├── data.js                  # createTask, createSpineModuleData
+│   │       ├── calculations.js          # MDDM 압박력/선량/노출량 계산
+│   │       ├── exportHandlers.js        # 보고서 생성, Excel 내보내기
+│   │       ├── formulaDB.js             # G1~G11 자세별 계수 (b, m)
+│   │       └── thresholds.js            # 성별/기준별 판정 역치
+│   │
+│   └── shoulder/                        # 어깨 모듈
 │       ├── index.js                     # registerModule()
-│       ├── SpineEvaluation.jsx          # 메인 컴포넌트
+│       ├── ShoulderEvaluation.jsx       # 메인 컴포넌트
 │       ├── components/
-│       │   ├── TaskManager.jsx          # 작업 목록 관리
-│       │   ├── TaskEditor.jsx           # 작업 편집 (자세/하중/빈도)
-│       │   └── SpineResultPanel.jsx     # MDDM 결과 대시보드 (summary/threshold/기여도)
+│       │   ├── JobTab.jsx               # 어깨 전용 신체부담 입력 (BK2117)
+│       │   └── ShoulderResultPanel.jsx  # BK2117 누적 기준 비교 결과 패널
 │       └── utils/
-│           ├── data.js                  # createTask, createSpineModuleData
-│           ├── calculations.js          # MDDM 압박력/선량/노출량 계산
-│           ├── exportHandlers.js        # 보고서 생성, Excel 내보내기
-│           ├── formulaDB.js             # G1~G11 자세별 계수 (b, m)
-│           └── thresholds.js            # 성별/기준별 판정 역치
+│           ├── data.js                  # createShoulderJobExtras, Ellman 옵션 등
+│           ├── calculations.js          # computeShoulderCalc, BK2117 노출 계산
+│           └── exportHandlers.js        # EMR Excel, PDF 내보내기
 │
 api/analyze.js                           # Vercel 서버리스 (Claude API 프록시)
 electron/
@@ -764,12 +832,27 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 | 우선순위 | 항목 | 설명 |
 |----------|------|------|
 | P0 | ~~런타임 검증~~ | ~~빌드 완료 상태, 실제 사용 시나리오 테스트~~ → Vercel 배포 완료 |
+| P0 | ~~어깨 모듈~~ | ~~shoulder 모듈 추가~~ → v3.0.0 완료 |
 | P1 | 고관절 모듈 | hip 모듈 추가 (플러그인 패턴 활용) |
-| P1 | 어깨 모듈 | shoulder 모듈 추가 |
 | P2 | 척추 프리셋 연동 | 직업 프리셋 선택 시 MDDM 작업/변수 자동 채움 |
 | P2 | 통합 PDF/Word | 통합 보고서를 PDF/Word 형식으로도 출력 |
 | P3 | 다중 사용자 | 서버 기반 데이터 저장 + 사용자 인증 |
-| P3 | 통계 대시보드 | 누적 평가 데이터 기반 역학 분석 |
+
+### Phase 13: 어깨 모듈 구현 (v3.0.0)
+
+- **어깨(견관절) 모듈 신설**: `src/modules/shoulder/` — BK2117(독일 직업병) 기준 누적 노출 평가 플러그인
+- **BK2117 누적 계산 방식**: 일단위 노출 × 연간근무일수 × 근무년수 → 직력 전체 누적시간. 척추 MDDM과 동일한 누적 개념
+- **5가지 노출 변수 입력 (JobTab)**:
+  - 오버헤드 작업(시간/일), 반복동작 중간속도/고도(시간/일), 진동(시간/일) — 직접 시간 입력
+  - 중량물(≥20kg) 취급 — 횟수(회/일) + 시간(초/회) 분리 입력, 내부에서 시간 환산
+- **ShoulderResultPanel**: 5개 노출 유형별 누적시간/임계값/비율 테이블 + RatioBar 시각화. 반복동작 OR 조건 판정. 2개 이상 직업 시 직력별 기여 상세 표시
+- **Ellman Class**: 종합소견에서 어깨 상병별 Ellman Grade 입력 드롭다운 (Grade 1/2/3/Full/N/A)
+- **상병 자동 매핑**: `diagnosisMapping.js`에 M75, S43, S46, M19.01 및 어깨/견관절/회전근개 등 키워드 추가
+- **종합소견/미리보기/EMR 엑셀**: 어깨 BK2117 누적 비교 데이터 포함. 어깨/척추 모듈 종합소견 섹션 추가
+- **일괄입력용 서식**: 어깨 노출 6열(오버헤드, 반복중간, 반복빠른, 중량물횟수, 중량물시간, 진동) 추가 → 44열
+- **대시보드 개선**:
+  - 요약 카드 숫자 색상 구분: 총 환자(파란색) / 완료된 평가(초록색) / 진행 중(주황색) / 모듈 사용(회색)
+  - 모듈 표시명: '어깨 (견관절)' → '어깨'
 
 ---
 

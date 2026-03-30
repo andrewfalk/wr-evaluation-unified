@@ -14,19 +14,30 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
 
   const hasKnee = activeModules.includes('knee');
   const hasSpine = activeModules.includes('spine');
+  const hasShoulder = activeModules.includes('shoulder');
   const kneeData = patient.data.modules?.knee || {};
+  const shoulderData = patient.data.modules?.shoulder || {};
+  const returnConsiderations = kneeData.returnConsiderations || shoulderData.returnConsiderations || '';
+  const handleReturnChange = (value) => {
+    if (hasKnee) {
+      updateModuleById('knee', m => ({ ...m, returnConsiderations: value }));
+    }
+    if (hasShoulder) {
+      updateModuleById('shoulder', m => ({ ...m, returnConsiderations: value }));
+    }
+  };
 
   const previewText = generateUnifiedReport(patient);
 
   return (
     <>
       <div className="panel">
-        {(hasKnee || hasSpine) && (
+        {(hasKnee || hasSpine || hasShoulder) && (
           <AssessmentTab
             diagnoses={diagnoses}
             onDiagnosisUpdate={handleDiagnosisUpdate}
-            returnConsiderations={kneeData.returnConsiderations || ''}
-            onReturnChange={(value) => updateModuleById('knee', m => ({ ...m, returnConsiderations: value }))}
+            returnConsiderations={returnConsiderations}
+            onReturnChange={handleReturnChange}
             activeModules={activeModules}
           />
         )}
