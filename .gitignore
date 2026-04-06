@@ -9,3 +9,4 @@ release/
 Thumbs.db
 .vercel
 .mcp.json
+target_webpage*

@@ -38,8 +38,13 @@ export function BasicInfoForm({ shared, onChange, errors, refDateField = 'injury
 
   return (
     <>
-      <div className="section">
-        <h2 className="section-title"><span className="section-icon">1</span>인적사항</h2>
+      <section className="section pattern-surface form-section">
+        <div className="section-header">
+          <div className="section-title-row">
+            <h2 className="section-title"><span className="section-icon">1</span>인적사항</h2>
+            <p className="section-description">기본 신상 정보와 평가 기준 날짜를 입력합니다.</p>
+          </div>
+        </div>
         <div className="form-row">
           <div className="form-group">
             <label>이름 *</label>
@@ -78,20 +83,31 @@ export function BasicInfoForm({ shared, onChange, errors, refDateField = 'injury
           </div>
           <div className="form-group"><label>만 나이</label><input value={age ? `${age}세` : '-'} readOnly /></div>
         </div>
-      </div>
+      </section>
 
-      <div className="section">
-        <h2 className="section-title"><span className="section-icon">2</span>직업력</h2>
-        {presetMeta && <div className="preset-meta">Preset: {presetMeta.count}개 직종{presetError && <span style={{ color: '#e67700', marginLeft: 10 }}>{presetError}</span>}</div>}
+      <section className="section pattern-surface form-section">
+        <div className="section-header">
+          <div className="section-title-row">
+            <h2 className="section-title"><span className="section-icon">2</span>직업력</h2>
+            <p className="section-description">직종, 근무 기간, 연간 근무일수를 기록합니다.</p>
+          </div>
+          <div className="section-actions">
+            <button className="btn btn-primary btn-sm" onClick={addJob}>+ 직종 추가</button>
+          </div>
+        </div>
+        {presetMeta && <div className="preset-meta form-meta-card">Preset: {presetMeta.count}개 직종{presetError && <span className="form-meta-warning">{presetError}</span>}</div>}
         {errors?.jobs && <div className="error-message">{errors.jobs}</div>}
         {jobs.map((job, i) => (
           <div key={job.id} className="job-card">
             <div className="job-card-header">
-              <span style={{ fontWeight: 600 }}>직력 {i + 1}</span>
+              <div className="card-title-stack">
+                <span className="job-card-title">직력 {i + 1}</span>
+                <span className="job-card-subtitle">해당 직무의 기간과 근무 조건을 입력합니다.</span>
+              </div>
               {jobs.length > 1 && <button className="btn btn-danger btn-xs" onClick={() => removeJob(i)}>삭제</button>}
             </div>
             <div className="form-row">
-              <div className="form-group" style={{ flex: 2 }}>
+              <div className="form-group form-group-wide">
                 <label>직종명</label>
                 {presets ? (
                   <PresetSearch
@@ -115,17 +131,16 @@ export function BasicInfoForm({ shared, onChange, errors, refDateField = 'injury
                   const src = job.workPeriodOverride || auto;
                   const yVal = src.match(/(\d+)\s*년/)?.[1] || '';
                   const mVal = src.match(/(\d+)\s*개월/)?.[1] || '';
-                  const ovrStyle = job.workPeriodOverride ? { borderColor: '#667eea', background: 'var(--card-bg)' } : {};
                   return (
-                    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                      <input type="number" min="0" style={{ width: 70, ...ovrStyle }} value={yVal}
+                    <div className="work-period-editor">
+                      <input type="number" min="0" className={`work-period-input ${job.workPeriodOverride ? 'is-overridden' : ''}`} value={yVal}
                         onChange={e => {
                           const y = parseInt(e.target.value) || 0;
                           const m = parseInt(job.workPeriodOverride?.match(/(\d+)\s*개월/)?.[1]) || 0;
                           handleJob(i, 'workPeriodOverride', (y || m) ? `${y}년 ${m}개월` : '');
                         }} />
                       <span>년</span>
-                      <input type="number" min="0" max="11" style={{ width: 70, ...ovrStyle }} value={mVal}
+                      <input type="number" min="0" max="11" className={`work-period-input ${job.workPeriodOverride ? 'is-overridden' : ''}`} value={mVal}
                         onChange={e => {
                           const m = parseInt(e.target.value) || 0;
                           const y = parseInt(job.workPeriodOverride?.match(/(\d+)\s*년/)?.[1]) || 0;
@@ -145,8 +160,7 @@ export function BasicInfoForm({ shared, onChange, errors, refDateField = 'injury
             </div>
           </div>
         ))}
-        <button className="btn btn-primary btn-sm" onClick={addJob}>+ 직종 추가</button>
-      </div>
+      </section>
 
     </>
   );
@@ -159,14 +173,24 @@ export function BasicInfoSidePanel({ shared, onChange }) {
 
   return (
     <>
-      <div className="section">
-        <h2 className="section-title"><span className="section-icon">3</span>특이사항</h2>
+      <section className="section pattern-surface form-section">
+        <div className="section-header">
+          <div className="section-title-row">
+            <h2 className="section-title"><span className="section-icon">3</span>특이사항</h2>
+            <p className="section-description">산재 이력이나 현재 상태처럼 참고가 필요한 메모를 남깁니다.</p>
+          </div>
+        </div>
         <div className="form-group">
           <textarea rows="4" value={shared.specialNotes} onChange={e => handleInput('specialNotes', e.target.value)} placeholder="산재이력, 상병상태 등" />
         </div>
-      </div>
-      <div className="section">
-        <h2 className="section-title"><span className="section-icon">4</span>평가기관</h2>
+      </section>
+      <section className="section pattern-surface form-section">
+        <div className="section-header">
+          <div className="section-title-row">
+            <h2 className="section-title"><span className="section-icon">4</span>평가기관</h2>
+            <p className="section-description">병원과 담당 진료 정보를 함께 기록합니다.</p>
+          </div>
+        </div>
         <div className="form-row">
           <div className="form-group"><label>병원명</label><input value={shared.hospitalName} onChange={e => handleInput('hospitalName', e.target.value)} /></div>
         </div>
@@ -176,7 +200,7 @@ export function BasicInfoSidePanel({ shared, onChange }) {
         <div className="form-row">
           <div className="form-group"><label>담당의</label><input value={shared.doctorName} onChange={e => handleInput('doctorName', e.target.value)} /></div>
         </div>
-      </div>
+      </section>
     </>
   );
 }

@@ -76,7 +76,7 @@ export function isShoulderAssessmentComplete(patientData) {
     const hint = getDiagnosisModuleHint(dx);
     return !hint || hint.moduleId === 'shoulder';
   });
-  if (!shoulderDiags.length) return true;
+  if (!shoulderDiags.length) return false;
   return shoulderDiags.every(dx => {
     if (!dx.side) return false;
     const needRight = dx.side === 'right' || dx.side === 'both';

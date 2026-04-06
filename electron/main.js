@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Menu, ipcMain, dialog, net } = require('electron');
+const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -157,8 +158,16 @@ function netRequest(url, options, body) {
       let chunks = '';
       res.on('data', (chunk) => { chunks += chunk.toString(); });
       res.on('end', () => {
-        try { resolve(JSON.parse(chunks)); }
-        catch { reject(new Error('응답 파싱 오류')); }
+        try {
+          const parsed = JSON.parse(chunks);
+          if (res.statusCode >= 400) {
+            reject(new Error(parsed.error?.message || `HTTP ${res.statusCode}`));
+          } else {
+            resolve(parsed);
+          }
+        } catch {
+          reject(new Error(`응답 파싱 오류 (HTTP ${res.statusCode})`));
+        }
       });
     });
     req.on('error', reject);
@@ -396,6 +405,13 @@ function saveIndex(index) {
   writeJsonFile(path.join(dataDir, 'index.json'), index);
 }
 
+function sanitizeId(id) {
+  if (typeof id !== 'string' || !/^[\w-]+$/.test(id)) {
+    throw new Error('Invalid id: ' + String(id).slice(0, 50));
+  }
+  return id;
+}
+
 // 환자 개별 파일
 ipcMain.handle('fs-load-all-patients', async () => {
   ensureDirs();
@@ -410,11 +426,12 @@ ipcMain.handle('fs-load-all-patients', async () => {
 
 ipcMain.handle('fs-load-patient', async (_e, id) => {
   ensureDirs();
-  return readJsonFile(path.join(patientsDir, `${id}.json`));
+  return readJsonFile(path.join(patientsDir, `${sanitizeId(id)}.json`));
 });
 
 ipcMain.handle('fs-save-patient', async (_e, patient) => {
   ensureDirs();
+  sanitizeId(patient.id);
   writeJsonFile(path.join(patientsDir, `${patient.id}.json`), patient);
   // index 업데이트
   const index = loadIndex();
@@ -432,7 +449,7 @@ ipcMain.handle('fs-save-patient', async (_e, patient) => {
 
 ipcMain.handle('fs-delete-patient', async (_e, id) => {
   ensureDirs();
-  const filePath = path.join(patientsDir, `${id}.json`);
+  const filePath = path.join(patientsDir, `${sanitizeId(id)}.json`);
   if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
   const index = loadIndex().filter(m => m.id !== id);
   saveIndex(index);
@@ -440,6 +457,7 @@ ipcMain.handle('fs-delete-patient', async (_e, id) => {
 
 ipcMain.handle('fs-save-all-patients', async (_e, patients) => {
   ensureDirs();
+  patients.forEach(p => sanitizeId(p.id));
   const index = [];
   for (const p of patients) {
     writeJsonFile(path.join(patientsDir, `${p.id}.json`), p);
@@ -467,12 +485,13 @@ ipcMain.handle('fs-load-items', async () => {
 
 ipcMain.handle('fs-save-item', async (_e, item) => {
   ensureDirs();
+  sanitizeId(item.id);
   writeJsonFile(path.join(savedDir, `${item.id}.json`), item);
 });
 
 ipcMain.handle('fs-delete-item', async (_e, id) => {
   ensureDirs();
-  const filePath = path.join(savedDir, `${id}.json`);
+  const filePath = path.join(savedDir, `${sanitizeId(id)}.json`);
   if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 });
 
@@ -546,6 +565,114 @@ ipcMain.handle('fs-migrate', async (_e, { savedItems, autoSave, settings }) => {
   }
 
   return { migrated: true };
+});
+
+// IPC: EMR 직접입력 (C# EmrHelper.exe → IE DOM 주입)
+ipcMain.handle('emr-inject', async (_event, fieldData) => {
+  if (process.platform !== 'win32') {
+    return { success: false, message: 'EMR direct input is Windows-only.' };
+  }
+
+  const tmpJson = path.join(os.tmpdir(), `emr-inject-${Date.now()}.json`);
+
+  // 패키징: extraResources → process.resourcesPath / 개발: __dirname 하위
+  const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+  const helperExe = isDev
+    ? path.join(__dirname, 'emr-helper', 'bin', 'Release', 'EmrHelper.exe')
+    : path.join(process.resourcesPath, 'emr-helper', 'EmrHelper.exe');
+
+  if (!fs.existsSync(helperExe)) {
+    return { success: false, message: 'EmrHelper.exe not found: ' + helperExe };
+  }
+
+  try {
+    fs.writeFileSync(tmpJson, JSON.stringify(fieldData), 'utf-8');
+
+    const helperRun = await new Promise((resolve) => {
+      execFile(
+        helperExe,
+        ['--json', tmpJson],
+        { timeout: 15000, windowsHide: true, encoding: 'utf-8' },
+        (error, stdout, stderr) => {
+          resolve({
+            error: error || null,
+            stdout: stdout || '',
+            stderr: stderr || ''
+          });
+        }
+      );
+    });
+
+    const { error, stdout, stderr } = helperRun;
+    const trimmed = stdout.trim();
+    const trimmedStderr = stderr.trim();
+
+    if (error && error.killed && !trimmed) {
+      return {
+        success: false,
+        message: 'EmrHelper timeout (15s)',
+        errorCode: error.code || null
+      };
+    }
+
+    // stdout에 JSON이 있으면 항상 그걸 반환
+    if (trimmed) {
+      try {
+        const result = JSON.parse(trimmed);
+        if (!result.success) {
+          console.warn('[emr-inject:debug]', {
+            candidateWindows: result.candidateWindows || [],
+            debugSummary: result.debugSummary,
+            stderr: trimmedStderr,
+            errorCode: error?.code || null,
+            errorMessage: error?.message || null
+          });
+        }
+        return result;
+      } catch {
+        console.error('[emr-inject:parse-error]', {
+          stdout: trimmed,
+          stderr: trimmedStderr,
+          errorCode: error?.code || null,
+          errorMessage: error?.message || null
+        });
+        return {
+          success: false,
+          message: 'EmrHelper response parse error',
+          rawStdout: trimmed,
+          rawStderr: trimmedStderr || undefined,
+          errorCode: error?.code || null
+        };
+      }
+    }
+
+    if (error) {
+      console.error('[emr-inject:startup-error]', {
+        errorCode: error.code || null,
+        errorMessage: error.message,
+        stderr: trimmedStderr,
+        helperExe
+      });
+      return {
+        success: false,
+        message: error.message || trimmedStderr || 'EmrHelper returned no output',
+        rawStdout: undefined,
+        rawStderr: trimmedStderr || undefined,
+        errorCode: error.code || null
+      };
+    }
+
+    return {
+      success: false,
+      message: trimmedStderr || 'EmrHelper returned no output',
+      rawStdout: undefined,
+      rawStderr: trimmedStderr || undefined
+    };
+  } catch (err) {
+    return { success: false, message: 'EMR inject failed: ' + err.message };
+  } finally {
+    try { fs.unlinkSync(tmpJson); } catch {}
+  }
 });
 
 app.on('window-all-closed', () => {

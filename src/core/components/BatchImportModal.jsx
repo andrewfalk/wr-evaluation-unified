@@ -11,6 +11,51 @@ import { formatWorkPeriod } from '../utils/workPeriod';
 import { showAlert } from '../utils/platform';
 import { createManagedPatient, touchPatientRecord } from '../services/patientRecords';
 
+const IMPORT_FIELD_GROUPS = [
+  {
+    title: '기본정보',
+    description: '환자 식별과 접수 기준 정보',
+    fields: ['이름', '생년월일', '재해일자', '등록일(접수일)', '키', '몸무게', '성별'],
+  },
+  {
+    title: '기관정보',
+    description: '평가 기관과 담당의 정보',
+    fields: ['병원명', '진료과', '담당의'],
+  },
+  {
+    title: '기타',
+    description: '공통 메모와 복귀 의견',
+    fields: ['특이사항', '복귀고려사항'],
+  },
+  {
+    title: '상병',
+    description: '진단과 기본 평가 헤더',
+    fields: ['진단코드', '진단명', '방향'],
+  },
+  {
+    title: '직업 공통',
+    description: '공유 직업 이력과 기간',
+    fields: ['직종명', '시작일', '종료일', '근무기간(년)', '근무기간(개월)'],
+  },
+  {
+    title: '무릎 모듈',
+    description: '무릎 평가와 노출 입력',
+    fields: ['KLG(우측)', 'KLG(좌측)', '중량물(kg)', '쪼그려앉기(분)', '계단오르내리기', '무릎비틀림', '출발정지반복', '좁은공간', '무릎접촉충격', '뛰어내리기'],
+  },
+  {
+    title: '어깨 모듈',
+    description: '어깨 평가와 BK2117 노출 입력',
+    fields: ['Ellman(우측)', 'Ellman(좌측)', '오버헤드', '반복중간', '반복빠른', '중량물횟수', '중량물시간', '진동'],
+  },
+  {
+    title: '척추 모듈',
+    description: 'MDDM 작업 행 입력',
+    fields: ['작업명', '자세코드(G1-G11)', '작업중량(kg)', '횟수/일', '시간값', '시간단위(sec/min/hr)', '보정계수'],
+  },
+];
+
+const IMPORT_FIELD_COUNT = IMPORT_FIELD_GROUPS.reduce((sum, group) => sum + group.fields.length, 0);
+
 export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
   const { session } = useAuth();
   const [file, setFile] = useState(null);
@@ -519,48 +564,89 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 600 }}>
-        <h2>일괄 Import (다중 환자)</h2>
-
-        <div
-          className={`import-zone ${dragover ? 'dragover' : ''}`}
-          onClick={() => fileRef.current.click()}
-          onDragOver={e => { e.preventDefault(); setDragover(true); }}
-          onDragLeave={() => setDragover(false)}
-          onDrop={e => { e.preventDefault(); setDragover(false); handleFile(e.dataTransfer.files[0]); }}
-        >
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".xlsx,.xls,.csv"
-            style={{ display: 'none' }}
-            onChange={e => handleFile(e.target.files[0])}
-          />
-          <p>클릭하거나 파일을 드래그하세요</p>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 5 }}>
-            첫 행: 컬럼명 / 2행부터: 환자별 데이터
-          </p>
-          {file && <p style={{ marginTop: 10, color: '#667eea' }}>선택됨: {file.name}</p>}
+      <div className="modal import-modal" onClick={e => e.stopPropagation()}>
+        <div className="import-modal-header">
+          <div>
+            <h2>일괄 Import (다중 환자)</h2>
+            <p className="import-modal-description">
+              엑셀 한 파일로 여러 환자를 추가하거나 기존 환자 데이터에 병합합니다.
+            </p>
+          </div>
+          <span className="modal-section-badge">지원 형식 .xlsx / .xls / .csv</span>
         </div>
 
-        <details style={{ marginTop: 10, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-          <summary style={{ cursor: 'pointer' }}>지원하는 컬럼 (37개)</summary>
-          <div style={{ marginTop: 8, padding: 10, background: 'var(--card-bg)', borderRadius: 4 }}>
-            <strong>기본정보:</strong> 이름, 생년월일, 재해일자, 등록일(접수일), 키, 몸무게, 성별<br/>
-            <strong>기관정보:</strong> 병원명, 진료과, 담당의<br/>
-            <strong>기타:</strong> 특이사항, 복귀고려사항<br/>
-            <strong>상병:</strong> 진단코드, 진단명, 방향, KLG(우측), KLG(좌측)<br/>
-            <strong>직업:</strong> 직종명, 시작일, 종료일, 근무기간(년), 근무기간(개월), 중량물(kg), 쪼그려앉기(분)<br/>
-            <strong>보조변수:</strong> 계단오르내리기, 무릎비틀림, 출발정지반복, 좁은공간, 무릎접촉충격, 뛰어내리기<br/>
-            <strong>척추작업:</strong> 작업명, 자세코드(G1-G11), 작업중량(kg), 횟수/일, 시간값, 시간단위(sec/min/hr), 보정계수
+        <section className="modal-section pattern-surface">
+          <div className="modal-section-header">
+            <div>
+              <h3 className="modal-section-title">파일 업로드</h3>
+              <p className="modal-section-description">
+                첫 행은 컬럼명, 2행부터는 환자별 데이터로 해석됩니다.
+              </p>
+            </div>
+            {file && <span className="modal-section-badge">{file.name}</span>}
           </div>
-        </details>
+
+          <div
+            className={`import-zone ${dragover ? 'dragover' : ''}`}
+            onClick={() => fileRef.current.click()}
+            onDragOver={e => { e.preventDefault(); setDragover(true); }}
+            onDragLeave={() => setDragover(false)}
+            onDrop={e => { e.preventDefault(); setDragover(false); handleFile(e.dataTransfer.files[0]); }}
+          >
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              style={{ display: 'none' }}
+              onChange={e => handleFile(e.target.files[0])}
+            />
+            <p>클릭하거나 파일을 드래그하세요</p>
+            <p className="import-zone-note">엑셀 헤더를 기준으로 환자, 상병, 직업, 작업 데이터를 자동 분류합니다.</p>
+            {file && <p className="import-zone-file">선택됨: {file.name}</p>}
+          </div>
+        </section>
+
+        <section className="modal-section pattern-surface">
+          <div className="modal-section-header">
+            <div>
+              <h3 className="modal-section-title">지원 컬럼</h3>
+              <p className="modal-section-description">
+                현재 import parser가 인식하는 헤더 목록입니다.
+              </p>
+            </div>
+            <span className="modal-section-badge">{IMPORT_FIELD_COUNT}개</span>
+          </div>
+
+          <div className="import-reference-grid">
+            {IMPORT_FIELD_GROUPS.map(group => (
+              <div key={group.title} className="import-reference-card">
+                <div className="import-reference-card-header">
+                  <h4>{group.title}</h4>
+                  <span className="import-reference-count">{group.fields.length}</span>
+                </div>
+                <p className="import-reference-description">{group.description}</p>
+                <ul className="import-reference-list">
+                  {group.fields.map(field => <li key={field}>{field}</li>)}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </section>
 
         {preview && preview.length > 1 && (
-          <div style={{ marginTop: 12 }}>
-            <h4>미리보기: {preview.length - 1}행</h4>
-            <div style={{ overflowX: 'auto', marginTop: 10 }}>
-              <table className="import-preview">
+          <section className="modal-section pattern-surface">
+            <div className="modal-section-header">
+              <div>
+                <h3 className="modal-section-title">파일 미리보기</h3>
+                <p className="modal-section-description">
+                  앞부분 5행과 최대 8개 컬럼만 빠르게 보여줍니다.
+                </p>
+              </div>
+              <span className="modal-section-badge">{preview.length - 1}행 · {columns.length}개 컬럼</span>
+            </div>
+
+            <div className="dashboard-table-wrap import-preview-wrap">
+              <table className="dashboard-table import-preview">
                 <thead>
                   <tr>
                     {columns.slice(0, 8).map((c, i) => <th key={i}>{c}</th>)}
@@ -575,8 +661,8 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
                     </tr>
                   ))}
                   {preview.length > 6 && (
-                    <tr>
-                      <td colSpan={Math.min(columns.length, 9)} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <tr className="import-preview-more">
+                      <td colSpan={Math.min(columns.length, 9)}>
                         ... 외 {preview.length - 6}행
                       </td>
                     </tr>
@@ -584,10 +670,10 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
                 </tbody>
               </table>
             </div>
-          </div>
+          </section>
         )}
 
-        <div style={{ display: 'flex', gap: 10, marginTop: 15 }}>
+        <div className="modal-actions">
           <button className="btn btn-primary" onClick={handleImport} disabled={!preview}>
             일괄 가져오기
           </button>

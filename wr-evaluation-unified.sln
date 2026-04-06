@@ -1,0 +1,32 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "electron", "electron", "{0D84477B-610C-2238-8B85-B24AA4C55CCA}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "emr-helper", "emr-helper", "{98BB5717-8E78-04B8-6198-947D5EBC1925}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EmrHelper", "electron\emr-helper\EmrHelper.csproj", "{5F1DA284-12F6-83F2-9BFB-03F7DDB2BAE0}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{5F1DA284-12F6-83F2-9BFB-03F7DDB2BAE0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5F1DA284-12F6-83F2-9BFB-03F7DDB2BAE0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5F1DA284-12F6-83F2-9BFB-03F7DDB2BAE0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5F1DA284-12F6-83F2-9BFB-03F7DDB2BAE0}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{98BB5717-8E78-04B8-6198-947D5EBC1925} = {0D84477B-610C-2238-8B85-B24AA4C55CCA}
+		{5F1DA284-12F6-83F2-9BFB-03F7DDB2BAE0} = {98BB5717-8E78-04B8-6198-947D5EBC1925}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {5451FB53-AFE5-46A5-8F43-CD18802A8C97}
+	EndGlobalSection
+EndGlobal

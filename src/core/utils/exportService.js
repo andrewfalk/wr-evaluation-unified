@@ -446,3 +446,65 @@ export function exportBatchFormatAll(patients) {
   const wb = buildBatchWorkbook(valid);
   XLSX.writeFile(wb, `일괄입력용_${valid.length}명_${date}.xlsx`);
 }
+
+// ========== EMR 직접입력용 필드 데이터 생성 ==========
+
+/**
+ * UTF-8 바이트 기준으로 문자열을 안전하게 절단한다.
+ * 한글은 3바이트, 영문/숫자는 1바이트로 계산.
+ * 초과 시 문자 경계에서 잘라내고 suffix를 붙인다.
+ * @returns {{ text: string, truncated: boolean }}
+ */
+function truncateBytes(str, maxBytes, suffix = '\n...(이하 생략)') {
+  if (!str) return { text: '', truncated: false };
+
+  const suffixBytes = new Blob([suffix]).size;
+  const totalBytes = new Blob([str]).size;
+  if (totalBytes <= maxBytes) return { text: str, truncated: false };
+
+  // 문자 단위로 순회하며 바이트 누적
+  const limit = maxBytes - suffixBytes;
+  let bytes = 0;
+  let cutIndex = 0;
+  for (const ch of str) {
+    const charBytes = new Blob([ch]).size;
+    if (bytes + charBytes > limit) break;
+    bytes += charBytes;
+    cutIndex += ch.length; // surrogate pair 대응
+  }
+
+  return { text: str.slice(0, cutIndex) + suffix, truncated: true };
+}
+
+/**
+ * 환자 데이터를 EMR 폼 필드 ID에 매핑한 객체로 변환한다.
+ * Electron → PowerShell emr-inject.ps1에 전달할 데이터.
+ */
+export function generateEMRFieldData(patient) {
+  const { b5, b6, b7, b8, b9 } = generateUnifiedEMR(patient);
+  const shared = patient.data.shared || {};
+
+  const truncatedFields = [];
+
+  const t6 = truncateBytes(b6, 4000);
+  if (t6.truncated) truncatedFields.push('txtJobCusCont');
+
+  const t7 = truncateBytes(b7, 4000);
+  if (t7.truncated) truncatedFields.push('txtPerCusCont');
+
+  const t8 = truncateBytes(b8, 4000);
+  if (t8.truncated) truncatedFields.push('txtSyth1Cont');
+
+  return {
+    txtAppvSickCont: b5 || '',
+    txtJobCusCont: t6.text,
+    txtPerCusCont: t7.text,
+    txtSyth1Cont: t8.text,
+    txtArrv1Cont: b9 || '',
+    txtIdacDte: shared.injuryDate || '',
+    txtCpnyNm: '',
+    rdoHcreTypeCd: '2',
+    rdoCls: 'M',
+    _truncatedFields: truncatedFields,
+  };
+}

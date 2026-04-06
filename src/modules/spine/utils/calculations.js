@@ -262,7 +262,7 @@ export function isSpineAssessmentComplete(patientData) {
     const hint = getDiagnosisModuleHint(dx);
     return hint?.moduleId === 'spine';
   });
-  if (spineDiags.length === 0) return true;
+  if (spineDiags.length === 0) return false;
   return spineDiags.every(dx => {
     if (!dx.confirmedRight || !dx.assessmentRight) return false;
     if (dx.assessmentRight === 'low' && (!dx.reasonRight?.length)) return false;

@@ -1,7 +1,7 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 3.0.0
-> **Last Updated:** 2026-03-30
+> **Version:** 3.1.0
+> **Last Updated:** 2026-04-04
 > **Status:** MVP 개발 완료 / Vercel 배포 완료
 
 ---
@@ -853,6 +853,32 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 - **대시보드 개선**:
   - 요약 카드 숫자 색상 구분: 총 환자(파란색) / 완료된 평가(초록색) / 진행 중(주황색) / 모듈 사용(회색)
   - 모듈 표시명: '어깨 (견관절)' → '어깨'
+
+### Phase 14: 보안 하드닝 + EMR 직접입력 + UX 안정화 (v3.1.0)
+
+- **EMR 직접입력 C# 헬퍼 전면 재작성** (`electron/emr-helper/EmrHelper.cs`):
+  - `dynamic` 키워드 → `Type.InvokeMember` reflection 기반 COM 접근으로 전환
+  - `[STAThread]` 추가 (COM STA 스레드 요구사항)
+  - `IID_IHTMLDocument`(IOleDocument) 제거 — lResult 단일 소모 문제 해결, IHTMLDocument2만 시도
+  - `--diagnose` 모드 추가 (stderr 로깅으로 현장 디버깅 지원)
+  - `Microsoft.CSharp.dll` 참조 제거 (EmrHelper.csproj)
+  - x86/x64 이중 빌드 → 단일 EmrHelper.exe로 통합
+- **API 보안** (`api/analyze.js`):
+  - Gemini API 키: URL 쿼리 `?key=` → `x-goog-api-key` 헤더 전환
+  - CORS: `Access-Control-Allow-Origin: *` → 오리진 허용 목록 (localhost + `*.vercel.app` 패턴)
+- **IPC 보안** (`electron/main.js`):
+  - `sanitizeId()` 함수 추가 — 6개 IPC 핸들러에 경로 순회 방어 적용
+  - `netRequest()` HTTP 상태코드 검사 추가 (≥400 시 에러 reject)
+- **Electron 리스너 안정화** (`electron/preload.js`, `src/App.jsx`):
+  - `onMenuNew`/`onGotoModule` 리스너 unsubscribe 반환값 추가
+  - App.jsx에서 cleanup 함수로 메모리 누수 방지
+- **React 상태 안정화** (`src/App.jsx`):
+  - `handleStartIntake` stale closure 수정 (settingsRef + useRef 패턴)
+  - 모듈 스텝 인덱스: 하드코딩 `3` → `buildSteps()` 기반 동적 계산
+  - 단일 환자 삭제 시 확인 대화상자 추가
+- **저장 안정성** (`src/core/utils/storage.js`):
+  - 저장 snapshot ID: `Date.now()` → `crypto.randomUUID()`
+  - `safeSetItem()` 래퍼 — `QuotaExceededError` 시 사용자 메시지 제공
 
 ---
 

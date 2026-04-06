@@ -2,7 +2,15 @@
 // Claude / Gemini API 프록시 (API 키를 서버에서 안전하게 관리)
 
 export default async function handler(req, res) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    const allowedOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000'];
+    if (process.env.APP_ORIGIN) allowedOrigins.push(process.env.APP_ORIGIN);
+
+    const origin = req.headers.origin || '';
+    const isAllowed = allowedOrigins.includes(origin)
+        || /^https:\/\/[\w-]+\.vercel\.app$/.test(origin);
+    const corsOrigin = isAllowed ? origin : allowedOrigins[0];
+
+    res.setHeader('Access-Control-Allow-Origin', corsOrigin);
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-WR-User-Id, X-WR-Org-Id, X-WR-Auth-Mode');
 
@@ -98,11 +106,11 @@ async function handleGemini(req, res, { prompt, sysPrompt, model }) {
 
     const geminiModel = model || 'gemini-2.5-flash';
     const isPro = geminiModel.includes('pro');
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`;
 
     const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body: JSON.stringify({
             system_instruction: { parts: [{ text: sysPrompt }] },
             contents: [{ role: 'user', parts: [{ text: prompt }] }],

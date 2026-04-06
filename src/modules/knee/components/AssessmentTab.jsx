@@ -21,8 +21,8 @@ function SideAssessment({ diag, index, side, onUpdate, label }) {
   const reasonOtherKey = isRight ? 'reasonRightOther' : 'reasonLeftOther';
 
   return (
-    <div style={{ background: 'var(--card-bg)', padding: 12, borderRadius: 8, marginTop: 12 }}>
-      <h4 style={{ marginBottom: 8, color, fontSize: '0.85rem' }}>&#9654; {displayLabel}</h4>
+    <div className="assessment-side-card">
+      <h4 className="assessment-side-title" style={{ color }}>&#9654; {displayLabel}</h4>
       <div className="form-row">
         <div className="form-group">
           <label>상병 상태</label>
@@ -44,9 +44,9 @@ function SideAssessment({ diag, index, side, onUpdate, label }) {
       {diag[assessmentKey] === 'low' && (
         <div className="form-group">
           <label>업무관련성 평가 낮음 사유</label>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+          <div className="assessment-reason-list">
             {LOW_REASON_OPTIONS.map(opt => (
-              <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}>
+              <label key={opt.value} className="assessment-reason-option">
                 <input
                   type="checkbox"
                   checked={(diag[reasonKey] || []).includes(opt.value)}
@@ -61,7 +61,7 @@ function SideAssessment({ diag, index, side, onUpdate, label }) {
             ))}
           </div>
           {(diag[reasonKey] || []).includes('other') && (
-            <input value={diag[reasonOtherKey]} onChange={e => onUpdate(index, reasonOtherKey, e.target.value)} placeholder="기타 사유" style={{ marginTop: 8 }} />
+            <input className="assessment-reason-other" value={diag[reasonOtherKey]} onChange={e => onUpdate(index, reasonOtherKey, e.target.value)} placeholder="기타 사유" />
           )}
         </div>
       )}
@@ -74,8 +74,13 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsideratio
   const hasShoulder = (activeModules || []).includes('shoulder');
 
   return (
-    <div className="section">
-      <h2 className="section-title"><span className="section-icon">&#x1F4CB;</span>종합소견</h2>
+    <section className="section pattern-surface form-section">
+      <div className="section-header">
+        <div className="section-title-row">
+          <h2 className="section-title"><span className="section-icon">&#x1F4CB;</span>종합소견</h2>
+          <p className="section-description">상병별 확인 상태와 업무관련성 평가를 정리하고, 복귀 시 고려사항을 함께 기록합니다.</p>
+        </div>
+      </div>
       {diagnoses.map((diag, i) => {
         const resolvedModule = resolveDiagnosisModule(diag, activeModules);
         const isSpine = resolvedModule?.moduleId === 'spine';
@@ -127,7 +132,7 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsideratio
             {!isSpine && (diag.side === 'left' || diag.side === 'both') && (
               <SideAssessment diag={diag} index={i} side="left" onUpdate={onDiagnosisUpdate} />
             )}
-            {!isSpine && !diag.side && <div style={{ padding: 15, textAlign: 'center', color: 'var(--text-muted)', background: 'var(--card-bg)', borderRadius: 8, marginTop: 12 }}>신청상병에서 방향 선택 필요</div>}
+            {!isSpine && !diag.side && <div className="evaluation-empty-state assessment-side-empty">신청상병에서 방향 선택 필요</div>}
 
             {/* 척추: 단일 상병 상태 + 업무관련성 (좌우 없음) */}
             {isSpine && (
@@ -137,11 +142,16 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsideratio
         );
       })}
       {(hasKnee || hasShoulder) && (
-        <div className="section" style={{ marginTop: 20 }}>
-          <h2 className="section-title"><span className="section-icon">&#x1F4BC;</span>복귀 고려사항</h2>
-          <textarea rows="3" style={{ width: '100%' }} value={returnConsiderations} onChange={e => onReturnChange(e.target.value)} placeholder="업무 복귀 시 고려사항..." />
-        </div>
+        <section className="assessment-return-section">
+          <div className="section-header">
+            <div className="section-title-row">
+              <h2 className="section-title"><span className="section-icon">&#x1F4BC;</span>복귀 고려사항</h2>
+              <p className="section-description">업무 복귀 시 필요한 제한점이나 유의사항을 정리합니다.</p>
+            </div>
+          </div>
+          <textarea rows="3" className="assessment-return-textarea" value={returnConsiderations} onChange={e => onReturnChange(e.target.value)} placeholder="업무 복귀 시 고려사항..." />
+        </section>
       )}
-    </div>
+    </section>
   );
 }

@@ -94,7 +94,7 @@ export function isKneeAssessmentComplete(patientData) {
     const hint = getDiagnosisModuleHint(dx);
     return !hint || hint.moduleId === 'knee';
   });
-  if (!kneeDiags.length) return true; // 무릎 상병이 없으면 무릎 기준 완료
+  if (!kneeDiags.length) return false;
   return kneeDiags.every(dx => {
     if (!dx.side) return false;
     const needRight = dx.side === 'right' || dx.side === 'both';

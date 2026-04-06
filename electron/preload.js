@@ -4,8 +4,14 @@ contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
 
   // 메뉴 이벤트
-  onMenuNew: (callback) => ipcRenderer.on('menu-new', callback),
-  onGotoModule: (callback) => ipcRenderer.on('goto-module', callback),
+  onMenuNew: (callback) => {
+    ipcRenderer.on('menu-new', callback);
+    return () => ipcRenderer.removeListener('menu-new', callback);
+  },
+  onGotoModule: (callback) => {
+    ipcRenderer.on('goto-module', callback);
+    return () => ipcRenderer.removeListener('goto-module', callback);
+  },
 
   // native alert/confirm
   showAlert: (message) => ipcRenderer.invoke('show-alert', message),
@@ -32,6 +38,9 @@ contextBridge.exposeInMainWorld('electron', {
   fsSaveSettings: (settings) => ipcRenderer.invoke('fs-save-settings', settings),
   fsLoadSettings: () => ipcRenderer.invoke('fs-load-settings'),
   fsMigrate: (data) => ipcRenderer.invoke('fs-migrate', data),
+
+  // EMR 직접입력 (PowerShell → IE DOM 주입, Windows 전용)
+  injectEMR: (data) => ipcRenderer.invoke('emr-inject', data),
 
   // 버전 정보 (app.getVersion()은 main process에서 IPC로 전달)
   version: {

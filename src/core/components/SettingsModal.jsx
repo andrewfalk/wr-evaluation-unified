@@ -100,10 +100,15 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 680 }}>
-        <h2>설정</h2>
+      <div className="modal settings-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-section-header">
+          <div>
+            <h2>설정</h2>
+            <p className="modal-section-description">테마, 저장소, 기본값, AI 연결 옵션을 관리합니다.</p>
+          </div>
+        </div>
 
-        <div className="settings-section">
+        <div className="settings-section modal-section pattern-surface">
           <div className="settings-section-title">테마</div>
           <div className="radio-group">
             {[{ value: 'light', label: '라이트' }, { value: 'dark', label: '다크' }].map(opt => (
@@ -121,7 +126,7 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
           </div>
         </div>
 
-        <div className="settings-section">
+        <div className="settings-section modal-section pattern-surface">
           <div className="settings-section-title">폰트 크기</div>
           <div className="radio-group">
             {[{ value: 'small', label: '작게' }, { value: 'medium', label: '보통' }, { value: 'large', label: '크게' }].map(opt => (
@@ -139,7 +144,7 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
           </div>
         </div>
 
-        <div className="settings-section">
+        <div className="settings-section modal-section pattern-surface">
           <div className="settings-section-title">새 환자 기본값</div>
           <div className="settings-row">
             <label>병원명</label>
@@ -155,7 +160,7 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
           </div>
         </div>
 
-        <div className="settings-section">
+        <div className="settings-section modal-section pattern-surface">
           <div className="settings-section-title">자동 저장</div>
           <div className="settings-row">
             <label>저장 간격</label>
@@ -168,7 +173,7 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
           </div>
         </div>
 
-        <div className="settings-section">
+        <div className="settings-section modal-section pattern-surface">
           <div className="settings-section-title">서버 연동</div>
           <div className="settings-row">
             <label>데이터 저장 방식</label>
@@ -186,12 +191,12 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
               placeholder="https://intranet.example.com 또는 http://localhost:3002"
             />
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+          <div className="settings-help-text">
             인트라넷 서버 모드에서는 저장소와 AI 호출이 지정한 서버를 우선 사용합니다.
           </div>
         </div>
 
-        <div className="settings-section">
+        <div className="settings-section modal-section pattern-surface">
           <div className="settings-section-title">연결 진단</div>
           <div className={`integration-status integration-status-${tone}`}>
             <div className="integration-status-title-row">
@@ -252,7 +257,7 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
         </div>
 
         {isElectron() && (
-          <div className="settings-section">
+          <div className="settings-section modal-section pattern-surface">
             <div className="settings-section-title">AI 설정 (Electron)</div>
             <div className="settings-row">
               <label>Gemini API Key</label>
@@ -272,13 +277,13 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
                 placeholder="Anthropic Claude API Key"
               />
             </div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+            <div className="settings-help-text">
               선택한 모델에 맞는 API 키가 필요합니다. 키는 로컬에만 저장됩니다.
             </div>
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 20 }}>
+        <div className="modal-actions">
           <button className="btn btn-secondary" onClick={onClose}>취소</button>
           <button className="btn btn-primary" onClick={() => onSave(draft)}>저장</button>
         </div>

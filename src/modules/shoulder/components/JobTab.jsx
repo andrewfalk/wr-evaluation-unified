@@ -7,32 +7,6 @@ const GENERIC_FIELDS = [
   { key: 'vibrationHours',       label: '손-팔 진동 (≥3 m/s²)',        unit: '시간/일' },
 ];
 
-const inputStyle = {
-  width: 72,
-  textAlign: 'right',
-  padding: '3px 6px',
-};
-
-const unitStyle = {
-  fontSize: '0.75rem',
-  color: 'var(--text-muted)',
-  whiteSpace: 'nowrap',
-  minWidth: 36,
-};
-
-const labelStyle = {
-  flex: 1,
-  fontSize: '0.82rem',
-  minWidth: 0,
-};
-
-const rowStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '3px 0',
-};
-
 export function JobTab({ sharedJobs, jobExtras, onChange, errors }) {
   const getExtras = (sharedJobId) =>
     jobExtras.find(e => e.sharedJobId === sharedJobId);
@@ -51,11 +25,13 @@ export function JobTab({ sharedJobs, jobExtras, onChange, errors }) {
   };
 
   return (
-    <div className="section">
-      <h2 className="section-title"><span className="section-icon">&#x1F4AA;</span>어깨 신체부담 평가</h2>
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: 12 }}>
-        각 직종별 일평균 노출 시간을 입력하세요. 누적 기준 비교는 우측 패널에서 확인할 수 있습니다.
-      </p>
+    <section className="section pattern-surface form-section">
+      <div className="section-header">
+        <div className="section-title-row">
+          <h2 className="section-title"><span className="section-icon">&#x1F4AA;</span>어깨 신체부담 평가</h2>
+          <p className="section-description">각 직종별 일평균 노출 시간을 입력하세요. 누적 기준 비교는 결과 패널에서 바로 확인할 수 있습니다.</p>
+        </div>
+      </div>
       {errors?.jobs && <div className="error-message">{errors.jobs}</div>}
       {sharedJobs.map((job, i) => {
         const extras = getExtras(job.id) || createShoulderJobExtras(job.id);
@@ -65,52 +41,53 @@ export function JobTab({ sharedJobs, jobExtras, onChange, errors }) {
         return (
           <div key={job.id} className="job-card">
             <div className="job-card-header">
-              <span style={{ fontWeight: 600 }}>직력 {i + 1}: {job.jobName || '(미입력)'}</span>
+              <div className="card-title-stack">
+                <span className="job-card-title">직력 {i + 1}: {job.jobName || '(미입력)'}</span>
+                <span className="job-meta-line">시간 기반 노출과 중량물 취급 빈도를 함께 기록합니다.</span>
+              </div>
               {!hasInput && (
-                <span className="job-badge badge-low" style={{ fontSize: '0.72rem' }}>미입력</span>
+                <span className="job-badge badge-low">미입력</span>
               )}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 8 }}>
+            <div className="exposure-list">
 
-              {/* 일반 필드 */}
               {GENERIC_FIELDS.map(({ key, label, unit }) => (
-                <div key={key} style={rowStyle}>
-                  <span style={labelStyle}>{label}</span>
+                <div key={key} className="exposure-row">
+                  <span className="exposure-label">{label}</span>
                   <input
+                    className="exposure-input"
                     type="number"
                     value={extras[key] ?? ''}
                     onChange={e => handleExtra(job.id, key, e.target.value)}
                     min="0"
                     step="0.1"
-                    style={inputStyle}
                   />
-                  <span style={unitStyle}>{unit}</span>
+                  <span className="exposure-unit">{unit}</span>
                 </div>
               ))}
 
-              {/* 중량물 취급 — 횟수 + 시간 */}
-              <div style={{ ...rowStyle, borderTop: '1px solid var(--border)', paddingTop: 6, marginTop: 2 }}>
-                <span style={labelStyle}>중량물(≥20kg) 취급</span>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>횟수</span>
+              <div className="exposure-row exposure-row-heavy">
+                <span className="exposure-label">중량물(≥20kg) 취급</span>
+                <span className="exposure-mini-label">횟수</span>
                 <input
+                  className="exposure-input"
                   type="number"
                   value={extras.heavyLoadCount ?? ''}
                   onChange={e => handleExtra(job.id, 'heavyLoadCount', e.target.value)}
                   min="0"
                   step="1"
-                  style={{ ...inputStyle, width: 60 }}
                 />
-                <span style={unitStyle}>회/일</span>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>시간</span>
+                <span className="exposure-unit">회/일</span>
+                <span className="exposure-mini-label">시간</span>
                 <input
+                  className="exposure-input"
                   type="number"
                   value={extras.heavyLoadSeconds ?? ''}
                   onChange={e => handleExtra(job.id, 'heavyLoadSeconds', e.target.value)}
                   min="0"
                   step="1"
-                  style={{ ...inputStyle, width: 60 }}
                 />
-                <span style={unitStyle}>초/회</span>
+                <span className="exposure-unit">초/회</span>
               </div>
 
             </div>
@@ -118,8 +95,8 @@ export function JobTab({ sharedJobs, jobExtras, onChange, errors }) {
         );
       })}
       {sharedJobs.length === 0 && (
-        <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>기본정보 탭에서 직종을 추가하세요.</p>
+        <div className="evaluation-empty-state">기본정보 탭에서 직종을 추가하세요.</div>
       )}
-    </div>
+    </section>
   );
 }

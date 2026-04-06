@@ -1,6 +1,6 @@
 # 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 3.0.0 | **Status:** MVP 개발 완료 / Vercel 배포 완료
+> **Version:** 3.1.0 | **Status:** MVP 개발 완료 / Vercel 배포 완료
 
 직업환경의학 전문의가 **업무상 질병 인정 여부를 판단**할 때 사용하는 통합 평가 도구.
 무릎(슬관절), 척추(요추 MDDM), 어깨(견관절 BK2117) 평가를 지원하며, 향후 고관절 등을 플러그인 형태로 확장할 수 있다.
@@ -214,6 +214,13 @@ ICD 코드 기반 모듈 자동 추천:
 ---
 
 ## 변경 이력
+
+### v3.1.0 (2026-04-04)
+- **EMR 직접입력 개선**: C# EmrHelper를 reflection 기반 COM 접근으로 전면 재작성 — `dynamic` 키워드 제거, `[STAThread]` 추가, IHTMLDocument2 단일 시도로 lResult 소모 문제 해결, `--diagnose` 모드 추가
+- **보안 하드닝**: Gemini API 키를 URL 쿼리에서 `x-goog-api-key` 헤더로 전환, CORS 오리진 허용 목록 적용(`*` 제거), IPC 경로 순회 방어(`sanitizeId`), `netRequest()` HTTP 상태코드 검사 추가
+- **상태/UX 안정화**: Electron 메뉴 리스너 cleanup 추가, `handleStartIntake` stale closure 수정(useRef 패턴), 모듈 스텝 인덱스 동적 계산(하드코딩 `3` 제거), 단일 환자 삭제 시 확인 대화상자
+- **저장 안정성**: 저장 snapshot ID를 `Date.now()` → `crypto.randomUUID()`로 변경, localStorage `QuotaExceededError` 처리(`safeSetItem` 래퍼)
+- **빌드 정리**: EmrHelper 단일 빌드로 통합(x86/x64 이중 빌드 제거)
 
 ### v3.0.0 (2026-03-30)
 - **어깨(견관절) 모듈 신설**: BK2117 독일 직업병 기준 누적 노출 평가 — 5개 노출 유형(오버헤드, 반복동작 중간/고도, 중량물, 진동) 직력 전체 누적 계산

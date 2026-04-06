@@ -21,11 +21,13 @@ export function JobTab({ sharedJobs, jobExtras, onChange, errors }) {
   };
 
   return (
-    <div className="section">
-      <h2 className="section-title"><span className="section-icon">&#x1F9B5;</span>무릎 신체부담 평가</h2>
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: 12 }}>
-        각 직종별 무릎 관련 신체부담을 입력하세요. 직종 추가/수정은 기본정보 탭에서 가능합니다.
-      </p>
+    <section className="section pattern-surface form-section">
+      <div className="section-header">
+        <div className="section-title-row">
+          <h2 className="section-title"><span className="section-icon">&#x1F9B5;</span>무릎 신체부담 평가</h2>
+          <p className="section-description">각 직종별 무릎 관련 신체부담을 입력하세요. 직종 추가와 수정은 기본정보 탭에서 할 수 있습니다.</p>
+        </div>
+      </div>
       {errors?.jobs && <div className="error-message">{errors.jobs}</div>}
       {sharedJobs.map((job, i) => {
         const extras = getExtras(job.id) || createKneeJobExtras(job.id);
@@ -34,14 +36,17 @@ export function JobTab({ sharedJobs, jobExtras, onChange, errors }) {
         return (
           <div key={job.id} className="job-card">
             <div className="job-card-header">
-              <span style={{ fontWeight: 600 }}>직력 {i + 1}: {job.jobName || '(미입력)'}</span>
+              <div className="card-title-stack">
+                <span className="job-card-title">직력 {i + 1}: {job.jobName || '(미입력)'}</span>
+                <span className="job-meta-line">직종별 하중과 자세 부담을 따로 기록합니다.</span>
+              </div>
               <span className={`job-badge ${bc}`}>{b.level} ({b.minScore}~{b.maxScore})</span>
             </div>
             <div className="form-row">
               <div className="form-group"><label>쪼그려앉기 (분/일)</label><input type="number" value={extras.squatting} onChange={e => handleExtra(job.id, 'squatting', e.target.value)} min="0" /></div>
               <div className="form-group"><label>중량물 (kg/일)</label><input type="number" value={extras.weight} onChange={e => handleExtra(job.id, 'weight', e.target.value)} min="0" /></div>
             </div>
-            <div className="form-row" style={{ flexWrap: 'wrap', gap: '8px 16px', marginTop: 4 }}>
+            <div className="job-check-grid">
               {[['stairs', '계단오르내리기'], ['kneeTwist', '무릎 비틀림'], ['startStop', '출발/정지 반복'], ['tightSpace', '좁은 공간'], ['kneeContact', '무릎 접촉/충격'], ['jumpDown', '뛰어내리기']].map(([key, label]) => (
                 <label key={key} className="checkbox-label"><input type="checkbox" checked={extras[key] || false} onChange={e => handleExtra(job.id, key, e.target.checked)} /><span>{label}</span></label>
               ))}
@@ -50,8 +55,8 @@ export function JobTab({ sharedJobs, jobExtras, onChange, errors }) {
         );
       })}
       {sharedJobs.length === 0 && (
-        <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>기본정보 탭에서 직종을 추가하세요.</p>
+        <div className="evaluation-empty-state">기본정보 탭에서 직종을 추가하세요.</div>
       )}
-    </div>
+    </section>
   );
 }

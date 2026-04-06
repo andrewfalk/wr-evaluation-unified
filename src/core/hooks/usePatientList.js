@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { getModule } from '../moduleRegistry';
+import { isPatientComplete } from '../utils/patientCompletion';
 
 export function usePatientList(patients, searchQuery, sortKey, statusFilter) {
   return useMemo(() => {
@@ -15,23 +15,9 @@ export function usePatientList(patients, searchQuery, sortKey, statusFilter) {
     }
 
     if (statusFilter === 'complete') {
-      list = list.filter(p => {
-        const pModules = p.data.activeModules || [];
-        return pModules.length > 0 && pModules.every(mId => {
-          const mod = getModule(mId);
-          const compatData = { shared: p.data.shared, module: p.data.modules?.[mId] || {} };
-          return mod?.isComplete?.(compatData) ?? false;
-        });
-      });
+      list = list.filter(p => isPatientComplete(p));
     } else if (statusFilter === 'incomplete') {
-      list = list.filter(p => {
-        const pModules = p.data.activeModules || [];
-        return pModules.length === 0 || !pModules.every(mId => {
-          const mod = getModule(mId);
-          const compatData = { shared: p.data.shared, module: p.data.modules?.[mId] || {} };
-          return mod?.isComplete?.(compatData) ?? false;
-        });
-      });
+      list = list.filter(p => !isPatientComplete(p));
     }
 
     if (sortKey === 'name') {

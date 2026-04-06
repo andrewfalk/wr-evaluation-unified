@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { getModule, getAllModules } from './core/moduleRegistry';
 import { BasicInfoForm, BasicInfoSidePanel } from './core/components/BasicInfoForm';
 import { DiagnosisForm } from './core/components/DiagnosisForm';
@@ -15,6 +15,7 @@ import { createSharedData, createDiagnosis, createTestPatients, formatBirthDate,
 import { FALLBACK_PRESETS } from './modules/knee/utils/data';
 import { suggestModules } from './core/utils/diagnosisMapping';
 import { showAlert, showConfirm } from './core/utils/platform';
+import { getSyncedEvaluationDate, isPatientComplete } from './core/utils/patientCompletion';
 import { generateUnifiedReport } from './core/utils/reportGenerator';
 import {
   createManagedPatient,
@@ -180,23 +181,20 @@ function App() {
     if (!activeId) return;
     const p = patients.find(x => x.id === activeId);
     if (!p) return;
-    const mods = p.data.activeModules || [];
-    if (mods.length === 0) return;
-    const allComplete = mods.every(mId => {
-      const mod = getModule(mId);
-      return mod?.isComplete?.({ shared: p.data.shared, module: p.data.modules?.[mId] || {} }) ?? false;
-    });
-    if (allComplete && !p.data.shared?.evaluationDate) {
-      setPatients(prev => prev.map(x =>
-        x.id === activeId
-          ? touchPatientRecord(
-            { ...x, data: { ...x.data, shared: { ...x.data.shared, evaluationDate: new Date().toISOString().split('T')[0] } } },
-            { session }
-          )
-          : x
-      ));
-    }
-  }, [activeId, patients]);
+
+    const nextEvaluationDate = getSyncedEvaluationDate(p);
+    const currentEvaluationDate = p.data.shared?.evaluationDate || '';
+    if (currentEvaluationDate === nextEvaluationDate) return;
+
+    setPatients(prev => prev.map(x =>
+      x.id === activeId
+        ? touchPatientRecord(
+          { ...x, data: { ...x.data, shared: { ...x.data.shared, evaluationDate: nextEvaluationDate } } },
+          { session }
+        )
+        : x
+    ));
+  }, [activeId, patients, session]);
 
   // 프리셋 로딩
   useEffect(() => {
@@ -250,13 +248,16 @@ function App() {
   ]);
 
   // Electron 메뉴 이벤트
+  const handleStartIntakeRef = useRef(null);
   useEffect(() => {
+    const unsubs = [];
     if (window.electron?.onMenuNew) {
-      window.electron.onMenuNew(() => { setPatients([]); setActiveId(null); setIntakeShared(null); });
+      unsubs.push(window.electron.onMenuNew(() => { setPatients([]); setActiveId(null); setIntakeShared(null); }));
     }
     if (window.electron?.onGotoModule) {
-      window.electron.onGotoModule(() => { handleStartIntake(); });
+      unsubs.push(window.electron.onGotoModule(() => { handleStartIntakeRef.current?.(); }));
     }
+    return () => unsubs.forEach(fn => fn?.());
   }, []);
 
   const displayPatients = usePatientList(patients, searchQuery, sortKey, statusFilter);
@@ -278,16 +279,21 @@ function App() {
 
   // --- 핸들러 ---
 
-  const handleStartIntake = () => {
+  const settingsRef = useRef(settings);
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
+
+  const handleStartIntake = useCallback(() => {
+    const s = settingsRef.current;
     const newShared = createSharedData();
-    newShared.hospitalName = settings.hospitalName;
-    newShared.department = settings.department;
-    newShared.doctorName = settings.doctorName;
+    newShared.hospitalName = s.hospitalName;
+    newShared.department = s.department;
+    newShared.doctorName = s.doctorName;
     setIntakeShared(newShared);
     setIntakeStep(0);
     setIntakeSelectedModules([]);
     setShowHome(false);
-  };
+  }, []);
+  handleStartIntakeRef.current = handleStartIntake;
 
   const handleIntakeComplete = (selectedModuleIds) => {
     const modulesData = {};
@@ -299,7 +305,9 @@ function App() {
     p.data.shared = { ...intakeShared };
     setPatients(prev => [...prev, p]);
     setActiveId(p.id);
-    setCurrentStepIndex(3); // 첫 번째 모듈 스텝
+    const newSteps = buildSteps(selectedModuleIds);
+    const firstModuleIdx = newSteps.findIndex(s => s.group !== 'shared');
+    setCurrentStepIndex(firstModuleIdx >= 0 ? firstModuleIdx : 0);
     setIntakeShared(null);
   };
 
@@ -396,6 +404,8 @@ function App() {
   const addPatient = () => { handleStartIntake(); };
 
   const removePatient = async (id) => {
+    const confirmed = await showConfirm('이 환자를 삭제하시겠습니까?');
+    if (!confirmed) return;
     if (patients.length <= 1) { setPatients([]); setActiveId(null); return; }
     const newPatients = patients.filter(p => p.id !== id);
     setPatients(newPatients);
@@ -602,6 +612,29 @@ function App() {
     } catch (err) { await showAlert(err.message); }
   };
 
+  const handleInjectEMR = async () => {
+    if (!activePatient || !window.electron?.injectEMR) return;
+    const ok = await showConfirm('EMR 소견서에 현재 환자 데이터를 직접 입력합니다.\nEMR 업무관련성 특별진찰소견서가 열려있는지 확인하세요.\n\n계속하시겠습니까?');
+    if (!ok) return;
+    try {
+      const { generateEMRFieldData } = await import('./core/utils/exportService');
+      const fieldData = generateEMRFieldData(activePatient);
+      const result = await window.electron.injectEMR(fieldData);
+      if (result.success) {
+        let msg = `${result.message}`;
+        if (result.truncatedFields?.length > 0) {
+          msg += `\n\n⚠ 길이 제한으로 잘린 필드: ${result.truncatedFields.join(', ')}`;
+        }
+        if (result.failedFields?.length > 0) {
+          msg += `\n\n일부 실패:\n${result.failedFields.map(f => `- ${f.field}: ${f.reason}`).join('\n')}`;
+        }
+        await showAlert(msg);
+      } else {
+        await showAlert(`EMR 입력 실패: ${result.message}`);
+      }
+    } catch (err) { await showAlert('EMR 입력 오류: ' + err.message); }
+  };
+
   // --- 스텝 네비게이션 ---
   const goToStep = (index) => {
     if (index >= 0 && index < steps.length) {
@@ -625,52 +658,72 @@ function App() {
   // --- 불러오기 모달 ---
   const renderLoadModal = () => (
     <div className="modal-overlay" onClick={() => setShowLoadModal(false)}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <h2>불러오기</h2>
+      <div className="modal load-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-section-header">
+          <div>
+            <h2>불러오기</h2>
+            <p className="modal-section-description">저장된 데이터를 덮어쓰거나 현재 목록에 추가할 수 있습니다.</p>
+          </div>
+          <span className="modal-section-badge">
+            {(legacyItems?.length || 0) + savedItems.length}개 항목
+          </span>
+        </div>
 
         {/* 레거시 데이터 섹션 */}
         {legacyItems && legacyItems.length > 0 && (
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--accent)', borderBottom: '1px solid var(--border-color)', paddingBottom: 6, marginBottom: 10 }}>
-              이전 프로그램(무릎) 데이터
+          <section className="modal-section pattern-surface">
+            <div className="modal-section-header">
+              <div>
+                <h3 className="modal-section-title">이전 프로그램(무릎) 데이터</h3>
+                <p className="modal-section-description">레거시 저장본을 현재 통합 포맷으로 불러옵니다.</p>
+              </div>
+              <span className="modal-section-badge">{legacyItems.length}개</span>
             </div>
             {legacyItems.map((item, idx) => (
-              <div key={`legacy-${idx}`} className="saved-item" style={{ background: 'var(--accent-light)' }}>
-                <div>
+              <div key={`legacy-${idx}`} className="saved-item saved-item-legacy">
+                <div className="saved-item-content">
                   <h4>{item.name}</h4>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{item.count || item.patients?.length || 0}명 | {item.savedAt ? new Date(item.savedAt).toLocaleString('ko-KR') : '-'}</p>
+                  <p>{item.count || item.patients?.length || 0}명 | {item.savedAt ? new Date(item.savedAt).toLocaleString('ko-KR') : '-'}</p>
                 </div>
-                <div style={{ display: 'flex', gap: 4 }}>
+                <div className="saved-item-actions">
                   <button className="btn btn-primary btn-xs" onClick={() => handleLoad(item, 'overwrite')}>덮어쓰기</button>
                   <button className="btn btn-info btn-xs" onClick={() => handleLoad(item, 'append')}>추가</button>
                 </div>
               </div>
             ))}
-          </div>
+          </section>
         )}
 
         {/* 통합 프로그램 저장 데이터 */}
-        {legacyItems && legacyItems.length > 0 && savedItems.length > 0 && (
-          <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-color)', paddingBottom: 6, marginBottom: 10 }}>
-            통합 프로그램 저장 데이터
-          </div>
-        )}
         {savedItems.length === 0 && (!legacyItems || legacyItems.length === 0) ? (
-          <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>저장 데이터 없음</p>
-        ) : savedItems.map(item => (
-          <div key={item.id} className="saved-item">
-            <div>
-              <h4>{item.name}</h4>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{item.count || 1}명 | {new Date(item.savedAt).toLocaleString('ko-KR')}</p>
+          <div className="modal-empty-state">저장 데이터 없음</div>
+        ) : (
+          <section className="modal-section pattern-surface">
+            <div className="modal-section-header">
+              <div>
+                <h3 className="modal-section-title">통합 프로그램 저장 데이터</h3>
+                <p className="modal-section-description">현재 앱에서 저장한 환자 데이터입니다.</p>
+              </div>
+              <span className="modal-section-badge">{savedItems.length}개</span>
             </div>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <button className="btn btn-primary btn-xs" onClick={() => handleLoad(item, 'overwrite')}>덮어쓰기</button>
-              <button className="btn btn-info btn-xs" onClick={() => handleLoad(item, 'append')}>추가</button>
-              <button className="btn btn-danger btn-xs" onClick={() => handleDelete(item.id)}>삭제</button>
-            </div>
-          </div>
-        ))}
-        <button className="btn btn-secondary" onClick={() => setShowLoadModal(false)} style={{ marginTop: 15, width: '100%' }}>닫기</button>
+            {savedItems.map(item => (
+              <div key={item.id} className="saved-item">
+                <div className="saved-item-content">
+                  <h4>{item.name}</h4>
+                  <p>{item.count || 1}명 | {new Date(item.savedAt).toLocaleString('ko-KR')}</p>
+                </div>
+                <div className="saved-item-actions">
+                  <button className="btn btn-primary btn-xs" onClick={() => handleLoad(item, 'overwrite')}>덮어쓰기</button>
+                  <button className="btn btn-info btn-xs" onClick={() => handleLoad(item, 'append')}>추가</button>
+                  <button className="btn btn-danger btn-xs" onClick={() => handleDelete(item.id)}>삭제</button>
+                </div>
+              </div>
+            ))}
+          </section>
+        )}
+        <div className="modal-actions modal-actions-stretch">
+          <button className="btn btn-secondary" onClick={() => setShowLoadModal(false)}>닫기</button>
+        </div>
       </div>
     </div>
   );
@@ -680,22 +733,24 @@ function App() {
   // ===========================================
   if ((patients.length === 0 && !activeId && !intakeShared) || showHome) {
     return (
-      <div className="app-layout" style={{ justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
-        <div className="panel" style={{ maxWidth: 960, width: '100%' }}>
-          <div style={{ textAlign: 'center', marginBottom: 20 }}>
-            <h1 style={{ fontSize: '1.5rem', color: 'var(--text-primary)' }}>근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미</h1>
-            <p style={{ color: 'var(--text-muted)', marginTop: 8 }}>새 환자 평가를 시작하거나 저장된 데이터를 불러오세요</p>
+      <div className="app-layout landing-layout">
+        <div className="panel landing-panel pattern-surface pattern-surface-hero">
+          <div className="landing-hero">
+            <div className="section-title-row landing-hero-copy">
+              <h1 className="landing-title">근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미</h1>
+              <p className="landing-description">새 환자 평가를 시작하거나 저장된 데이터를 불러오세요.</p>
+            </div>
           </div>
           <Dashboard patients={patients} onSelectPatient={(id) => { setActiveId(id); setCurrentStepIndex(0); setShowHome(false); }} />
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', marginTop: 12 }}>
-            <button className="btn btn-primary" onClick={handleStartIntake} style={{ padding: '12px 24px', fontSize: '1rem' }}>+ 새 환자 평가 시작</button>
-            <button className="btn btn-secondary" onClick={() => openLoadModal()} style={{ padding: '12px 24px', fontSize: '1rem' }}>불러오기</button>
-            <button className="btn btn-info" onClick={() => setShowBatchImport(true)} style={{ padding: '12px 24px', fontSize: '1rem' }}>엑셀 일괄입력</button>
-            <button className="btn btn-warning" onClick={handleLoadTestData} style={{ padding: '12px 24px', fontSize: '1rem' }}>테스트 데이터</button>
-            <button className="btn btn-secondary" onClick={() => setShowSettings(true)} style={{ padding: '12px 24px', fontSize: '1rem' }}>설정</button>
+          <div className="landing-actions">
+            <button className="btn btn-primary landing-action-btn" onClick={handleStartIntake}>+ 새 환자 평가 시작</button>
+            <button className="btn btn-secondary landing-action-btn" onClick={() => openLoadModal()}>불러오기</button>
+            <button className="btn btn-info landing-action-btn" onClick={() => setShowBatchImport(true)}>엑셀 일괄입력</button>
+            <button className="btn btn-warning landing-action-btn" onClick={handleLoadTestData}>테스트 데이터</button>
+            <button className="btn btn-secondary landing-action-btn" onClick={() => setShowSettings(true)}>설정</button>
           </div>
           {patients.length > 0 && (
-            <div style={{ textAlign: 'center', marginTop: 20, display: 'flex', gap: 8, justifyContent: 'center' }}>
+            <div className="landing-secondary-actions">
               <button className="btn btn-secondary btn-sm" onClick={() => setShowHome(false)}>
                 작업 중인 환자 목록으로 돌아가기 ({patients.length}명)
               </button>
@@ -742,10 +797,13 @@ function App() {
     };
 
     return (
-      <div className="app-layout" style={{ justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
-        <div className="panel" style={{ maxWidth: 900, width: '100%' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <h1 style={{ fontSize: '1.3rem', color: 'var(--text-primary)' }}>새 환자 평가</h1>
+      <div className="app-layout landing-layout">
+        <div className="panel intake-panel pattern-surface pattern-surface-hero">
+          <div className="intake-header">
+            <div className="section-title-row">
+              <h1 className="landing-title intake-title">새 환자 평가</h1>
+              <p className="landing-description intake-description">기본정보, 상병, 모듈 선택 순서로 신규 환자를 등록합니다.</p>
+            </div>
             <button className="btn btn-secondary btn-sm" onClick={() => {
               setIntakeShared(null);
               if (patients.length > 0) setActiveId(patients[0].id);
@@ -796,11 +854,13 @@ function App() {
           {/* Step 3: 모듈 선택 */}
           {intakeStep === 2 && (
             <>
-              <div className="section">
-                <h2 className="section-title"><span className="section-icon">&#x1F4CB;</span>평가 모듈 선택</h2>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: 15 }}>
-                  입력된 상병을 기반으로 평가 모듈이 자동 추천되었습니다.
-                </p>
+              <section className="section pattern-surface form-section">
+                <div className="section-header">
+                  <div className="section-title-row">
+                    <h2 className="section-title"><span className="section-icon">&#x1F4CB;</span>평가 모듈 선택</h2>
+                    <p className="section-description">입력된 상병을 기반으로 평가 모듈이 자동 추천되었습니다.</p>
+                  </div>
+                </div>
                 <div className="module-check-cards">
                   {allModules.map(mod => {
                     const isSuggested = suggested.includes(mod.id);
@@ -813,14 +873,14 @@ function App() {
                         <span className="module-check-icon">{mod.icon}</span>
                         <div>
                           <div className="module-check-name">{mod.name}</div>
-                          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{mod.description}</div>
+                          <div className="module-check-copy">{mod.description}</div>
                         </div>
                         {isSuggested && <span className="module-check-badge">자동감지</span>}
                       </label>
                     );
                   })}
                 </div>
-              </div>
+              </section>
               <div className="wizard-actions">
                 <button className="btn btn-secondary" onClick={() => goIntakeStep(1)}>&larr; 이전</button>
                 <button className="btn btn-primary" onClick={() => handleIntakeComplete(intakeSelectedModules)}
@@ -857,7 +917,7 @@ function App() {
           lastGroup = s.group;
           const mod = s.moduleId ? getModule(s.moduleId) : null;
           return (
-            <div key={s.id} style={{ display: 'contents' }}>
+            <div key={s.id} className="contents-wrapper">
               {showGroupLabel && (
                 <div className="wizard-group-label">{mod?.icon} {mod?.name}</div>
               )}
@@ -908,11 +968,13 @@ function App() {
     if (currentStep.id === 'modules') {
       return (
         <div className="panel">
-          <div className="section">
-            <h2 className="section-title"><span className="section-icon">&#x1F4CB;</span>활성 평가 모듈</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: 10 }}>
-              상병에 따라 자동 추천됩니다. 수동으로 추가/제거할 수도 있습니다.
-            </p>
+          <section className="section pattern-surface form-section">
+            <div className="section-header">
+              <div className="section-title-row">
+                <h2 className="section-title"><span className="section-icon">&#x1F4CB;</span>활성 평가 모듈</h2>
+                <p className="section-description">상병에 따라 자동 추천됩니다. 수동으로 추가하거나 제거할 수도 있습니다.</p>
+              </div>
+            </div>
             <div className="module-check-cards">
               {allModules.map(mod => {
                 const isSuggested = suggested.includes(mod.id);
@@ -926,14 +988,14 @@ function App() {
                     <span className="module-check-icon">{mod.icon}</span>
                     <div>
                       <div className="module-check-name">{mod.name}</div>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{mod.description}</div>
+                      <div className="module-check-copy">{mod.description}</div>
                     </div>
                     {isSuggested && <span className="module-check-badge">추천</span>}
                   </label>
                 );
               })}
             </div>
-          </div>
+          </section>
         </div>
       );
     }
@@ -1009,7 +1071,7 @@ function App() {
         </div>
         <div className="sidebar-filter">
           <input type="search" placeholder="검색 (이름, 진단)" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', padding: '4px 0' }}>
+          <div className="sidebar-selection-row">
             <input type="checkbox" checked={displayPatients.length > 0 && displayPatients.every(p => selectedIds.has(p.id))} onChange={e => {
               setSelectedIds(prev => {
                 const next = new Set(prev);
@@ -1017,8 +1079,8 @@ function App() {
                 return next;
               });
             }} />
-            <span style={{ whiteSpace: 'nowrap' }}>전체선택{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}</span>
-            {selectedIds.size > 0 && <button className="btn btn-danger btn-xs" onClick={removeSelectedPatients} style={{ marginLeft: 'auto', fontSize: '0.7rem' }}>삭제</button>}
+            <span className="sidebar-selection-label">전체선택{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}</span>
+            {selectedIds.size > 0 && <button className="btn btn-danger btn-xs sidebar-selection-delete" onClick={removeSelectedPatients}>삭제</button>}
           </div>
           <div className="sidebar-filter-row">
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
@@ -1033,23 +1095,36 @@ function App() {
           {displayPatients.map(p => {
             const origIndex = patients.indexOf(p);
             const pModules = p.data.activeModules || [];
-            const isComplete = pModules.length > 0 && pModules.every(mId => {
-              const mod = getModule(mId);
-              return mod?.isComplete?.({ shared: p.data.shared, module: p.data.modules?.[mId] || {} }) ?? false;
-            });
+            const isComplete = isPatientComplete(p);
+            const patientName = p.data.shared?.name || `환자 #${origIndex + 1}`;
+            const primaryDiagnosis = p.data.shared?.diagnoses?.[0]?.name || '-';
             return (
               <div key={p.id} className={`patient-item ${p.id === activeId ? 'active' : ''}`} onClick={() => switchPatient(p.id)}>
-                <div className="patient-item-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <input type="checkbox" checked={selectedIds.has(p.id)} onClick={e => e.stopPropagation()} onChange={() => {
-                    setSelectedIds(prev => { const next = new Set(prev); next.has(p.id) ? next.delete(p.id) : next.add(p.id); return next; });
-                  }} />
-                  {pModules.map(mId => { const mod = getModule(mId); return <span key={mId} className="module-badge" title={mod?.name}>{mod?.icon || '?'}</span>; })}
-                  <span style={{ flex: 1 }}>{p.data.shared?.name || `환자 #${origIndex + 1}`}</span>
-                  <span className={isComplete ? 'status-dot complete' : 'status-dot'}>●</span>
-                </div>
-                <div className="patient-item-info">{formatBirthDate(p.data.shared?.birthDate)} | {p.data.shared?.diagnoses?.[0]?.name || '-'}</div>
-                <div className="patient-item-actions">
-                  <button className="btn btn-danger btn-xs" onClick={e => { e.stopPropagation(); removePatient(p.id); }}>삭제</button>
+                <div className="patient-item-grid">
+                  <div className="patient-item-select">
+                    <input type="checkbox" checked={selectedIds.has(p.id)} onClick={e => e.stopPropagation()} onChange={() => {
+                      setSelectedIds(prev => { const next = new Set(prev); next.has(p.id) ? next.delete(p.id) : next.add(p.id); return next; });
+                    }} />
+                  </div>
+                  <div className="patient-item-content">
+                    <div className="patient-item-top">
+                      <div className="patient-item-name-row">
+                        <span className="patient-item-title">{patientName}</span>
+                        <div className="patient-item-modules">
+                          {pModules.map(mId => { const mod = getModule(mId); return <span key={mId} className="module-badge" title={mod?.name}>{mod?.icon || '?'}</span>; })}
+                        </div>
+                      </div>
+                      <span className={isComplete ? 'status-dot complete' : 'status-dot'} title={isComplete ? '완료' : '미완료'}>✓</span>
+                    </div>
+                    <div className="patient-item-info patient-item-meta">
+                      <span>{formatBirthDate(p.data.shared?.birthDate)}</span>
+                      <span className="patient-item-divider">•</span>
+                      <span className="patient-item-diagnosis">{primaryDiagnosis}</span>
+                    </div>
+                    <div className="patient-item-actions">
+                      <button className="btn btn-danger btn-xs" onClick={e => { e.stopPropagation(); removePatient(p.id); }}>삭제</button>
+                    </div>
+                  </div>
                 </div>
               </div>
             );
@@ -1059,52 +1134,61 @@ function App() {
 
       {/* 메인 영역 */}
       <div className="main-area">
-        <header className="header">
-          <h1>
-            {headerTitle}
-            {lastAutoSave && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 8, fontWeight: 400 }}>자동저장 {lastAutoSave.toLocaleTimeString('ko-KR')}</span>}
-          </h1>
+        <header className="header pattern-surface pattern-surface-hero">
+          <div className="header-title-row">
+            <h1>{headerTitle}</h1>
+            {lastAutoSave && <span className="header-meta">자동저장 {lastAutoSave.toLocaleTimeString('ko-KR')}</span>}
+          </div>
           <IntegrationStatusBadge status={integrationStatus} />
-          <div className="header-actions">
-            <button className="btn btn-secondary btn-sm" onClick={() => setShowHome(true)} title="대시보드로 이동">대시보드</button>
-            <button className="btn btn-danger btn-sm" onClick={handleResetPatients} title="환자 목록 초기화">초기화</button>
-            <button className="btn btn-secondary btn-sm sidebar-toggle" onClick={() => setShowSidebar(v => !v)}>환자 ({patients.length})</button>
-            <button className="btn btn-secondary btn-sm" onClick={() => setShowSaveModal(true)}>저장</button>
-            <button className="btn btn-secondary btn-sm" onClick={() => openLoadModal()}>불러오기</button>
-            <button className="btn btn-secondary btn-sm" onClick={() => setShowSettings(true)}>설정</button>
-            {activePatient && activeModules.length > 0 && (
-              <div style={{ position: 'relative', display: 'inline-block' }}>
-                <button className="btn btn-success btn-sm" onClick={e => { e.stopPropagation(); setExportDropdown(v => v === 'single' ? null : 'single'); }}>Excel(현재) ▾</button>
-                {exportDropdown === 'single' && (
-                  <div className="export-dropdown" onClick={() => setExportDropdown(null)}>
-                    <button onClick={handleExportSingle}>EMR 형식</button>
-                    <button onClick={handleExportBatchFormatSingle}>일괄입력용</button>
+          <div className="header-actions action-bar">
+            <div className="action-group">
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowHome(true)} title="대시보드로 이동">대시보드</button>
+              <button className="btn btn-danger btn-sm" onClick={handleResetPatients} title="환자 목록 초기화">초기화</button>
+              <button className="btn btn-secondary btn-sm sidebar-toggle" onClick={() => setShowSidebar(v => !v)}>환자 ({patients.length})</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowSaveModal(true)}>저장</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => openLoadModal()}>불러오기</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowSettings(true)}>설정</button>
+              {(activePatient && activeModules.length > 0) || selectedIds.size > 0 || patients.length > 0 ? (
+                <>
+                {activePatient && activeModules.length > 0 && (
+                  <div className="action-menu">
+                    <button className="btn btn-success btn-sm" onClick={e => { e.stopPropagation(); setExportDropdown(v => v === 'single' ? null : 'single'); }}>Excel(현재) ▾</button>
+                    {exportDropdown === 'single' && (
+                      <div className="export-dropdown" onClick={() => setExportDropdown(null)}>
+                        <button onClick={handleExportSingle}>EMR 형식</button>
+                        <button onClick={handleExportBatchFormatSingle}>일괄입력용</button>
+                        {window.electron?.injectEMR && (
+                          <button className="dropdown-divider-top" onClick={handleInjectEMR}>EMR 직접입력</button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
-            )}
-            {selectedIds.size > 0 && (
-              <div style={{ position: 'relative', display: 'inline-block' }}>
-                <button className="btn btn-success btn-sm" onClick={e => { e.stopPropagation(); setExportDropdown(v => v === 'selected' ? null : 'selected'); }}>Excel(선택 {selectedIds.size}) ▾</button>
-                {exportDropdown === 'selected' && (
-                  <div className="export-dropdown" onClick={() => setExportDropdown(null)}>
-                    <button onClick={handleExportSelected}>EMR 형식</button>
-                    <button onClick={handleExportBatchFormatSelected}>일괄입력용</button>
+                {selectedIds.size > 0 && (
+                  <div className="action-menu">
+                    <button className="btn btn-success btn-sm" onClick={e => { e.stopPropagation(); setExportDropdown(v => v === 'selected' ? null : 'selected'); }}>Excel(선택 {selectedIds.size}) ▾</button>
+                    {exportDropdown === 'selected' && (
+                      <div className="export-dropdown" onClick={() => setExportDropdown(null)}>
+                        <button onClick={handleExportSelected}>EMR 형식</button>
+                        <button onClick={handleExportBatchFormatSelected}>일괄입력용</button>
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
-            )}
-            {patients.length > 0 && (
-              <div style={{ position: 'relative', display: 'inline-block' }}>
-                <button className="btn btn-success btn-sm" onClick={e => { e.stopPropagation(); setExportDropdown(v => v === 'batch' ? null : 'batch'); }}>Excel(전체) ▾</button>
-                {exportDropdown === 'batch' && (
-                  <div className="export-dropdown" onClick={() => setExportDropdown(null)}>
-                    <button onClick={handleExportBatch}>EMR 형식</button>
-                    <button onClick={handleExportBatchFormatAll}>일괄입력용</button>
+                {patients.length > 0 && (
+                  <div className="action-menu">
+                    <button className="btn btn-success btn-sm" onClick={e => { e.stopPropagation(); setExportDropdown(v => v === 'batch' ? null : 'batch'); }}>Excel(전체) ▾</button>
+                    {exportDropdown === 'batch' && (
+                      <div className="export-dropdown" onClick={() => setExportDropdown(null)}>
+                        <button onClick={handleExportBatch}>EMR 형식</button>
+                        <button onClick={handleExportBatchFormatAll}>일괄입력용</button>
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
-            )}
+                </>
+              ) : null}
+            </div>
           </div>
         </header>
 
@@ -1123,7 +1207,7 @@ function App() {
               <button className="btn btn-secondary" onClick={goPrev} disabled={currentStepIndex === 0}>
                 &larr; 이전
               </button>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              <span className="wizard-nav-count">
                 {currentStepIndex + 1} / {steps.length}
               </span>
               <button className="btn btn-primary" onClick={goNext} disabled={currentStepIndex >= steps.length - 1}>
@@ -1146,31 +1230,52 @@ function App() {
       )}
       {showSaveModal && (
         <div className="modal-overlay" onClick={() => setShowSaveModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
-            <h2>저장</h2>
-            <p style={{ marginBottom: 15, color: 'var(--text-muted)' }}>현재 {patients.length}명의 환자 데이터를 저장합니다</p>
-            <div className="form-group"><label>저장명</label><input value={saveName} onChange={e => setSaveName(e.target.value)} autoFocus /></div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
-              <button className="btn btn-primary" onClick={handleSave}>새로 저장</button>
-              <button className="btn btn-secondary" onClick={() => setShowSaveModal(false)}>취소</button>
+          <div className="modal save-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-section-header">
+              <div>
+                <h2>저장</h2>
+                <p className="modal-section-description">현재 {patients.length}명의 환자 데이터를 저장합니다.</p>
+              </div>
             </div>
-            {savedItems.length > 0 && (
-              <>
-                <div style={{ borderTop: '1px solid var(--card-border)', margin: '15px 0 10px', paddingTop: 12 }}>
-                  <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-muted)' }}>기존 저장 목록</label>
+            <section className="modal-section pattern-surface">
+              <div className="modal-section-header">
+                <div>
+                  <h3 className="modal-section-title">새 저장</h3>
+                  <p className="modal-section-description">저장명을 입력해 새 항목으로 보관합니다.</p>
                 </div>
-                <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+              </div>
+              <div className="form-group">
+                <label>저장명</label>
+                <input value={saveName} onChange={e => setSaveName(e.target.value)} autoFocus />
+              </div>
+              <div className="modal-actions">
+                <button className="btn btn-primary" onClick={handleSave}>새로 저장</button>
+                <button className="btn btn-secondary" onClick={() => setShowSaveModal(false)}>취소</button>
+              </div>
+            </section>
+            {savedItems.length > 0 && (
+              <section className="modal-section pattern-surface">
+                <div className="modal-section-header">
+                  <div>
+                    <h3 className="modal-section-title">기존 저장 목록</h3>
+                    <p className="modal-section-description">기존 항목을 선택해 바로 덮어쓸 수 있습니다.</p>
+                  </div>
+                  <span className="modal-section-badge">{savedItems.length}개</span>
+                </div>
+                <div className="modal-scroll-list">
                   {savedItems.map(item => (
-                    <div key={item.id} className="saved-item" style={{ padding: '8px 10px' }}>
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.name}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{item.count || 1}명 | {new Date(item.savedAt).toLocaleString('ko-KR')}</div>
+                    <div key={item.id} className="saved-item">
+                      <div className="saved-item-content">
+                        <h4>{item.name}</h4>
+                        <p>{item.count || 1}명 | {new Date(item.savedAt).toLocaleString('ko-KR')}</p>
                       </div>
-                      <button className="btn btn-primary btn-xs" onClick={() => handleOverwriteSave(item)}>덮어쓰기</button>
+                      <div className="saved-item-actions">
+                        <button className="btn btn-primary btn-xs" onClick={() => handleOverwriteSave(item)}>덮어쓰기</button>
+                      </div>
                     </div>
                   ))}
                 </div>
-              </>
+              </section>
             )}
           </div>
         </div>

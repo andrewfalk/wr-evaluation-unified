@@ -7,6 +7,17 @@ const SETTINGS_KEY = 'wrEvalUnifiedSettings';
 
 const isElectronFS = () => !!window.electron?.fsLoadAllPatients;
 
+function safeSetItem(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e) {
+    if (e.name === 'QuotaExceededError') {
+      throw new Error('저장 공간이 부족합니다. 기존 저장 데이터를 삭제해주세요.');
+    }
+    throw e;
+  }
+}
+
 // ======================================================
 // 저장 목록 (savedItems)
 // ======================================================
@@ -40,7 +51,7 @@ export const hasDuplicateName = (saveName, savedItems) => {
 
 export const savePatientsData = async (saveName, patients, savedItems) => {
   const item = {
-    id: Date.now(),
+    id: crypto.randomUUID(),
     name: saveName,
     count: patients.length,
     savedAt: new Date().toISOString(),
@@ -60,7 +71,7 @@ export const savePatientsData = async (saveName, patients, savedItems) => {
     await window.electron.fsSaveAllPatients(patients);
     await window.electron.fsClearAutoSave();
   } else {
-    localStorage.setItem(SAVED_ITEMS_KEY, JSON.stringify(items));
+    safeSetItem(SAVED_ITEMS_KEY, JSON.stringify(items));
     localStorage.removeItem(AUTO_SAVE_KEY);
   }
   return items;
@@ -71,7 +82,7 @@ export const deleteSavedItem = async (id, savedItems) => {
   if (isElectronFS()) {
     await window.electron.fsDeleteItem(id);
   } else {
-    localStorage.setItem(SAVED_ITEMS_KEY, JSON.stringify(items));
+    safeSetItem(SAVED_ITEMS_KEY, JSON.stringify(items));
   }
   return items;
 };
@@ -85,7 +96,7 @@ export const saveAutoSave = async (patients) => {
   if (isElectronFS()) {
     await window.electron.fsSaveAutoSave(data);
   } else {
-    localStorage.setItem(AUTO_SAVE_KEY, JSON.stringify(data));
+    safeSetItem(AUTO_SAVE_KEY, JSON.stringify(data));
   }
 };
 
@@ -144,7 +155,7 @@ export const saveSettings = async (settings) => {
     await window.electron.fsSaveSettings(settings);
   }
   // 항상 localStorage에도 저장 (동기 loadSettings 폴백용)
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  safeSetItem(SETTINGS_KEY, JSON.stringify(settings));
 };
 
 // ======================================================

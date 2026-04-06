@@ -7,7 +7,7 @@ import { kneeExportHandlers } from './utils/exportHandlers';
 registerModule({
   id: 'knee',
   name: '무릎 (슬관절)',
-  icon: '\uD83E\uDDBF',
+  icon: '\uD83C\uDFC3',
   description: '근골격계 질환 업무관련성 평가',
   EvaluationComponent: KneeEvaluation,
   createModuleData: createKneeModuleData,

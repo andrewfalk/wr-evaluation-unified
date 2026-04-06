@@ -18,8 +18,16 @@ export function DiagnosisForm({ diagnoses, onChange, errors, createDiagnosis, sh
   };
 
   return (
-    <div className="section">
-      <h2 className="section-title"><span className="section-icon">&#x1FA7A;</span>신청 상병</h2>
+    <section className="section pattern-surface form-section">
+      <div className="section-header">
+        <div className="section-title-row">
+          <h2 className="section-title"><span className="section-icon">&#x1FA7A;</span>신청 상병</h2>
+          <p className="section-description">진단코드, 진단명, 방향을 입력해 평가 대상 상병을 구성합니다.</p>
+        </div>
+        <div className="section-actions">
+          <button className="btn btn-primary btn-sm" onClick={addDiagnosis}>+ 상병 추가</button>
+        </div>
+      </div>
       {errors?.diagnoses && <div className="error-message">{errors.diagnoses}</div>}
       {diagnoses.map((diag, i) => {
         const hint = getDiagnosisModuleHint(diag);
@@ -27,7 +35,10 @@ export function DiagnosisForm({ diagnoses, onChange, errors, createDiagnosis, sh
         return (
         <div key={diag.id} className="diagnosis-card">
           <div className="diagnosis-card-header">
-            <span className="diagnosis-card-title">상병 #{i + 1}</span>
+            <div className="card-title-stack">
+              <span className="diagnosis-card-title">상병 #{i + 1}</span>
+              <span className="diagnosis-card-subtitle">필수 입력값을 채우면 모듈 추천과 평가 흐름에 반영됩니다.</span>
+            </div>
             {showModuleHints && hint && <span className="diagnosis-module-badge">{hint.label}</span>}
             {diagnoses.length > 1 && <button className="btn btn-danger btn-xs" onClick={() => removeDiagnosis(i)}>삭제</button>}
           </div>
@@ -51,7 +62,6 @@ export function DiagnosisForm({ diagnoses, onChange, errors, createDiagnosis, sh
         </div>
         );
       })}
-      <button className="btn btn-primary btn-sm" onClick={addDiagnosis}>+ 상병 추가</button>
-    </div>
+    </section>
   );
 }

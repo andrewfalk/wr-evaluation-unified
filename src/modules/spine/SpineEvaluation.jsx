@@ -90,9 +90,15 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
   return (
     <>
       <div className="panel">
-        {/* 직업별 탭 */}
+        <div className="section-header">
+          <div className="section-title-row">
+            <h2 className="section-title"><span className="section-icon">&#x1F9CD;</span>척추 작업 평가</h2>
+            <p className="section-description">직업별 작업을 나눠 입력하고, 선택한 작업의 자세와 하중 조건을 편집합니다.</p>
+          </div>
+        </div>
+
         {jobs.length > 1 && (
-          <div style={{ display: 'flex', gap: 4, marginBottom: 12, flexWrap: 'wrap' }}>
+          <div className="action-group" style={{ marginBottom: 12 }}>
             {jobs.map((job, i) => {
               const isActive = activeJobId === job.id;
               const jobTaskCount = allTasks.filter(t => (t.sharedJobId || firstJobId) === job.id).length;
@@ -101,7 +107,6 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
                   key={job.id}
                   className={`btn btn-sm ${isActive ? 'btn-primary' : 'btn-secondary'}`}
                   onClick={() => handleJobChange(job.id)}
-                  style={{ fontSize: '0.8rem' }}
                 >
                   직력{i + 1}: {job.jobName || '(미입력)'} ({getEffectiveWorkPeriodText(job)})
                   <span style={{ marginLeft: 4, opacity: 0.7 }}>[{jobTaskCount}]</span>
@@ -112,19 +117,19 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
         )}
 
         {jobs.length === 0 && (
-          <div style={{ padding: 12, textAlign: 'center', color: 'var(--text-muted)', background: 'var(--card-bg)', borderRadius: 8, marginBottom: 12 }}>
+          <div className="evaluation-empty-state" style={{ marginBottom: 12 }}>
             직업력을 먼저 등록하세요 (기본정보 → 직업력)
           </div>
         )}
 
-        <TaskManager
-          tasks={jobs.length === 0 ? allTasks : filteredTasks.length > 0 ? filteredTasks : allTasks.filter(t => (t.sharedJobId || firstJobId) === activeJobId)}
-          selectedIndex={selectedTaskIndex}
-          onSelect={setSelectedTaskIndex}
-          onAdd={handleAddTask}
-          onRemove={handleRemoveTask}
-        />
-        <div style={{ marginTop: 15, borderTop: '2px solid var(--card-border)', paddingTop: 15 }}>
+        <div className="evaluation-stack">
+          <TaskManager
+            tasks={jobs.length === 0 ? allTasks : filteredTasks.length > 0 ? filteredTasks : allTasks.filter(t => (t.sharedJobId || firstJobId) === activeJobId)}
+            selectedIndex={selectedTaskIndex}
+            onSelect={setSelectedTaskIndex}
+            onAdd={handleAddTask}
+            onRemove={handleRemoveTask}
+          />
           <TaskEditor
             task={selectedTask}
             gender={shared.gender || 'male'}

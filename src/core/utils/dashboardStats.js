@@ -1,4 +1,4 @@
-import { getModule } from '../moduleRegistry';
+import { isPatientComplete } from './patientCompletion';
 
 function buildMonthBuckets() {
   const now = new Date();
@@ -33,17 +33,6 @@ function bucketDate(dateStr, months) {
   if (found) found.count++;
 }
 
-function checkComplete(patient) {
-  const mods = patient.data?.activeModules || [];
-  if (mods.length === 0) return false;
-  return mods.every(mId => {
-    try {
-      const mod = getModule(mId);
-      return mod?.isComplete?.({ shared: patient.data?.shared, module: patient.data?.modules?.[mId] || {} }) ?? false;
-    } catch { return false; }
-  });
-}
-
 export const computeDashboardStats = (currentPatients) => {
   const allPatients = (currentPatients || []).map(p => ({ ...p, _savedAt: null }));
 
@@ -57,7 +46,7 @@ export const computeDashboardStats = (currentPatients) => {
     const mods = p.data?.activeModules || [];
     mods.forEach(mId => { moduleUsage[mId] = (moduleUsage[mId] || 0) + 1; });
 
-    if (checkComplete(p)) completedCount++;
+    if (isPatientComplete(p)) completedCount++;
     else inProgressCount++;
   });
 
@@ -90,7 +79,7 @@ export const computeDashboardStats = (currentPatients) => {
     registrationDate: p.createdAt?.split('T')[0] || '',
     completionDate: p.data?.shared?.evaluationDate || '',
     moduleIds: p.data?.activeModules || [],
-    status: checkComplete(p) ? '완료' : '진행중',
+    status: isPatientComplete(p) ? '완료' : '진행중',
   }));
 
   return {

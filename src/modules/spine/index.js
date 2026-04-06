@@ -7,7 +7,7 @@ import { spineExportHandlers } from './utils/exportHandlers';
 registerModule({
   id: 'spine',
   name: '척추 (요추)',
-  icon: '\uD83E\uDDB4',
+  icon: '\u2695\uFE0F',
   description: 'MDDM 척추압박력 평가',
   EvaluationComponent: SpineEvaluation,
   createModuleData: createSpineModuleData,

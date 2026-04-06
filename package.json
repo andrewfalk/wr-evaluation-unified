@@ -1,18 +1,19 @@
 {
   "name": "wr-evaluation-unified",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미",
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
     "mock:intranet": "node scripts/mock-intranet-server.cjs",
+    "build:emr-helper": "powershell -ExecutionPolicy Bypass -File scripts/build-emr-helper.ps1",
     "build:web": "vite build --outDir dist/web",
     "build:electron": "vite build --outDir dist/electron",
     "preview": "vite preview",
-    "electron:dev": "vite build --outDir dist/electron && electron .",
-    "electron:build": "npm run build:electron && electron-builder",
-    "electron:build:win32": "npm run build:electron && electron-builder --win --ia32",
-    "electron:build:win64": "npm run build:electron && electron-builder --win --x64"
+    "electron:dev": "npm run build:emr-helper && vite build --outDir dist/electron && electron .",
+    "electron:build": "npm run build:emr-helper && npm run build:electron && electron-builder",
+    "electron:build:win32": "npm run build:emr-helper && npm run build:electron && electron-builder --win --ia32",
+    "electron:build:win64": "npm run build:emr-helper && npm run build:electron && electron-builder --win --x64"
   },
   "dependencies": {
     "html2pdf.js": "^0.10.1",
@@ -38,6 +39,9 @@
       "dist/electron/**/*",
       "electron/**/*",
       "public/**/*"
+    ],
+    "extraResources": [
+      { "from": "electron/emr-helper/bin/Release/EmrHelper.exe", "to": "emr-helper/EmrHelper.exe" }
     ],
     "win": {
       "target": [

@@ -1,10 +1,8 @@
-import { getModule } from '../moduleRegistry';
 import { AssessmentTab } from '../../modules/knee/components/AssessmentTab';
 import { generateUnifiedReport } from '../utils/reportGenerator';
 
 export function AssessmentStep({ patient, activeModules, updateDiagnoses, updateModuleById }) {
-  const shared = patient.data.shared;
-  const diagnoses = shared.diagnoses || [];
+  const diagnoses = patient.data.shared.diagnoses || [];
 
   const handleDiagnosisUpdate = (i, field, value) => {
     const updated = [...diagnoses];
@@ -31,7 +29,7 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
 
   return (
     <>
-      <div className="panel">
+      <div className="panel pattern-surface assessment-panel">
         {(hasKnee || hasSpine || hasShoulder) && (
           <AssessmentTab
             diagnoses={diagnoses}
@@ -42,9 +40,18 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
           />
         )}
       </div>
-      <div className="panel" style={{ display: 'flex', flexDirection: 'column' }}>
+      <div className="panel pattern-surface assessment-preview-panel">
         <h2 className="section-title"><span className="section-icon">&#x1F4CA;</span>미리보기</h2>
-        <div className="preview-section" style={{ flex: 1 }}>{previewText}</div>
+        <p className="preview-caption">
+          저장 또는 내보내기 전에 자동 생성된 통합 문안을 확인하세요.
+        </p>
+        <div className="report-preview">
+          <div className="report-preview-toolbar">
+            <span className="report-preview-label">통합 리포트 초안</span>
+            <span className="report-preview-hint">상병 {diagnoses.length}건 기준 자동 생성</span>
+          </div>
+          <div className="preview-section">{previewText}</div>
+        </div>
       </div>
     </>
   );
