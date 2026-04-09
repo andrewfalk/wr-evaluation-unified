@@ -28,7 +28,7 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
   const previewText = generateUnifiedReport(patient);
 
   return (
-    <>
+    <div className="assessment-step-layout">
       <div className="panel pattern-surface assessment-panel">
         {(hasKnee || hasSpine || hasShoulder) && (
           <AssessmentTab
@@ -53,6 +53,6 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
           <div className="preview-section">{previewText}</div>
         </div>
       </div>
-    </>
+    </div>
   );
 }
