@@ -748,17 +748,17 @@ function App() {
             <button className="btn btn-info landing-action-btn" onClick={() => setShowBatchImport(true)}>엑셀 일괄입력</button>
             <button className="btn btn-warning landing-action-btn" onClick={handleLoadTestData}>테스트 데이터</button>
             <button className="btn btn-secondary landing-action-btn" onClick={() => setShowSettings(true)}>설정</button>
+            {patients.length > 0 && (
+              <>
+                <button className="btn btn-secondary btn-sm" onClick={() => setShowHome(false)}>
+                  작업 목록 돌아가기 ({patients.length}명)
+                </button>
+                <button className="btn btn-danger btn-sm" onClick={handleResetPatients}>
+                  목록 초기화
+                </button>
+              </>
+            )}
           </div>
-          {patients.length > 0 && (
-            <div className="landing-secondary-actions">
-              <button className="btn btn-secondary btn-sm" onClick={() => setShowHome(false)}>
-                작업 중인 환자 목록으로 돌아가기 ({patients.length}명)
-              </button>
-              <button className="btn btn-danger btn-sm" onClick={handleResetPatients}>
-                목록 초기화
-              </button>
-            </div>
-          )}
         </div>
         {showSettings && (
           <SettingsModal

@@ -67,6 +67,9 @@ export const savePatientsData = async (saveName, patients, savedItems) => {
   }
 
   if (isElectronFS()) {
+    if (existingIndex >= 0 && savedItems[existingIndex].id !== item.id) {
+      await window.electron.fsDeleteItem(savedItems[existingIndex].id);
+    }
     await window.electron.fsSaveItem(item);
     await window.electron.fsSaveAllPatients(patients);
     await window.electron.fsClearAutoSave();

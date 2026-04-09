@@ -10,13 +10,14 @@ export function calculatePhysicalBurden(w, t) {
   const W = parseFloat(w) || 0;
   const T = parseFloat(t) || 0;
 
-  if ((W >= 3000 && T >= 180) || (W >= 3000 && T >= 120) || (W >= 2000 && T >= 180)) {
+  // Simplified equivalent ranges to keep the original burden thresholds unchanged.
+  if ((W >= 3000 && T >= 120) || (W >= 2000 && T >= 180)) {
     return { level: '고도', minScore: 6.0, maxScore: 9.0 };
   }
-  if ((W >= 3000 && T >= 60) || (W >= 2000 && T >= 120) || (W < 2000 && T >= 120)) {
+  if ((W >= 3000 && T >= 60) || T >= 120) {
     return { level: '중등도상', minScore: 3.0, maxScore: 6.0 };
   }
-  if ((W >= 3000 && T < 60) || (W >= 2000 && T < 120) || (W < 2000 && T >= 60)) {
+  if ((W >= 2000 && T < 120) || (W < 2000 && T >= 60)) {
     return { level: '중등도하', minScore: 2.0, maxScore: 4.0 };
   }
   return { level: '경도', minScore: 1.0, maxScore: 2.0 };

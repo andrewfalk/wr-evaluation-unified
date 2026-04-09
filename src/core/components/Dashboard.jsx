@@ -93,6 +93,11 @@ const Dashboard = ({ patients, onSelectPatient }) => {
           <div className="stat-value stat-progress">{stats.inProgressCount}</div>
           <div className="stat-label">진행 중</div>
         </div>
+        <div className="dashboard-stat-card metric-card pattern-surface">
+          <div className="stat-value stat-days">{stats.avgProcessingDays ?? '-'}</div>
+          <div className="stat-label">평균 처리일수</div>
+          <div className="stat-sub">일</div>
+        </div>
         <div className="dashboard-stat-card metric-card pattern-surface metric-card-wide">
           <div className="stat-value stat-module">{stats.totalPatients}</div>
           <div className="stat-label">모듈 사용</div>
@@ -119,6 +124,7 @@ const Dashboard = ({ patients, onSelectPatient }) => {
                 <tr>
                   <th>환자명</th>
                   <th>등록일 / 평가일</th>
+                  <th>처리일수</th>
                   <th>모듈</th>
                   <th>상태</th>
                 </tr>
@@ -142,6 +148,7 @@ const Dashboard = ({ patients, onSelectPatient }) => {
                       <div>등록: {item.registrationDate || '-'}</div>
                       <div>평가: {item.completionDate || '-'}</div>
                     </td>
+                    <td>{item.processingDays !== null ? `${item.processingDays}일` : '-'}</td>
                     <td>{item.moduleIds.map(id => MODULE_LABELS[id] || id).join(', ') || '-'}</td>
                     <td>
                       <span className={`dashboard-status ${item.status === '완료' ? 'complete' : 'in-progress'}`}>

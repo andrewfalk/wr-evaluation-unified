@@ -33,14 +33,24 @@ function bucketDate(dateStr, months) {
   if (found) found.count++;
 }
 
+function calcProcessingDays(createdAt, evaluationDate) {
+  if (!createdAt || !evaluationDate) return null;
+  const start = new Date(createdAt);
+  const end = new Date(evaluationDate);
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
+  const diff = Math.round((end - start) / (1000 * 60 * 60 * 24));
+  return diff >= 0 ? diff : null;
+}
+
 export const computeDashboardStats = (currentPatients) => {
   const allPatients = (currentPatients || []).map(p => ({ ...p, _savedAt: null }));
 
 
-  // 완료/진행중 + 모듈 사용량
+  // 완료/진행중 + 모듈 사용량 + 처리일수
   let completedCount = 0;
   let inProgressCount = 0;
   const moduleUsage = {};
+  const processingDaysList = [];
 
   allPatients.forEach(p => {
     const mods = p.data?.activeModules || [];
@@ -73,14 +83,27 @@ export const computeDashboardStats = (currentPatients) => {
     })
     .slice(0, 5);
 
-  const recentActivity = sorted.map(p => ({
-    id: p.id,
-    name: p.data?.shared?.name || '이름 없음',
-    registrationDate: p.createdAt?.split('T')[0] || '',
-    completionDate: p.data?.shared?.evaluationDate || '',
-    moduleIds: p.data?.activeModules || [],
-    status: isPatientComplete(p) ? '완료' : '진행중',
-  }));
+  const recentActivity = sorted.map(p => {
+    const days = calcProcessingDays(p.createdAt, p.data?.shared?.evaluationDate);
+    return {
+      id: p.id,
+      name: p.data?.shared?.name || '이름 없음',
+      registrationDate: p.createdAt?.split('T')[0] || '',
+      completionDate: p.data?.shared?.evaluationDate || '',
+      moduleIds: p.data?.activeModules || [],
+      status: isPatientComplete(p) ? '완료' : '진행중',
+      processingDays: days,
+    };
+  });
+
+  // 평균 처리일수 (완료 환자 대상)
+  allPatients.forEach(p => {
+    const days = calcProcessingDays(p.createdAt, p.data?.shared?.evaluationDate);
+    if (days !== null) processingDaysList.push(days);
+  });
+  const avgProcessingDays = processingDaysList.length > 0
+    ? Math.round(processingDaysList.reduce((a, b) => a + b, 0) / processingDaysList.length * 10) / 10
+    : null;
 
   return {
     totalPatients: allPatients.length,
@@ -90,5 +113,6 @@ export const computeDashboardStats = (currentPatients) => {
     monthlyRegistrations,
     monthlyEvaluations,
     recentActivity,
+    avgProcessingDays,
   };
 };

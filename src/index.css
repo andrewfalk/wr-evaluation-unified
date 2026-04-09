@@ -83,12 +83,20 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .landing-layout {
   justify-content: center;
   align-items: center;
-  min-height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 .landing-panel,
 .intake-panel {
   width: 100%;
-  max-width: 960px;
+  max-width: 1400px;
+}
+.landing-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
 }
 .intake-panel { max-width: 900px; }
 .landing-hero {
@@ -118,13 +126,6 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .landing-action-btn {
   padding: 12px 24px;
   font-size: 1rem;
-}
-.landing-secondary-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-  flex-wrap: wrap;
-  margin-top: 20px;
 }
 .intake-header {
   display: flex;
@@ -967,10 +968,12 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .assessment-card-subtitle { font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
 
 .assessment-card-header-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.klg-inline { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.klg-inline { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; white-space: nowrap; }
 .klg-inline-label { font-size: 0.85rem; font-weight: 600; color: #e67700; margin-right: 2px; }
 [data-theme="dark"] .klg-inline-label { color: #ffb74d; }
 .klg-inline select { padding: 4px 8px; font-size: 0.85rem; border-radius: 4px; border: 1px solid var(--card-border); background: var(--card-bg); color: var(--text-primary); height: 32px; }
+.klg-side-row { display: flex; align-items: center; gap: 6px; }
+.klg-side-label { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); min-width: 1.2em; text-align: center; }
 .assessment-side-card {
   background: var(--card-bg);
   padding: 12px;
@@ -1151,6 +1154,12 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   .posture-option-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
   .wizard-steps-full { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; -ms-overflow-style: none; }
   .wizard-steps-full::-webkit-scrollbar { display: none; }
+  .landing-layout { height: auto; overflow: auto; min-height: 100dvh; }
+  .landing-panel { overflow: visible; max-width: 100%; }
+  .landing-hero { margin-bottom: 10px; }
+  .dashboard-summary { grid-template-columns: repeat(3, 1fr); }
+  .assessment-card-header-top { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .klg-inline { align-items: flex-start; }
 }
 
 /* 스마트폰 */
@@ -1179,6 +1188,19 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   .result-card { padding: 12px; }
   .result-value { font-size: 1.3rem; }
   .assessment-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .assessment-card { padding: 10px; margin-bottom: 10px; }
+  .assessment-card-header { margin: -10px -10px 10px -10px; padding: 10px 12px; }
+  .assessment-card-header-top { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .assessment-card-title { font-size: 0.82rem; }
+  .klg-inline { align-items: flex-start; flex-direction: row; flex-wrap: wrap; gap: 6px; }
+  .klg-inline select { min-height: 44px; font-size: 16px; padding: 8px; }
+  .klg-side-row { gap: 4px; }
+  .assessment-side-card { padding: 10px; margin-top: 8px; }
+  .assessment-side-title { font-size: 0.8rem; }
+  .assessment-reason-option { font-size: 0.82rem; min-height: 44px; padding: 4px 0; }
+  .assessment-reason-option input[type="checkbox"] { width: 20px; height: 20px; }
+  .assessment-return-section { padding: 12px; margin-top: 12px; }
+  .assessment-return-textarea { min-height: 80px; font-size: 16px; }
   .preview-section { font-size: 0.78rem; min-height: 200px; padding: 16px; }
   .modal { width: 100%; max-width: 100%; height: 100vh; max-height: 100vh; border-radius: 0; padding: 16px; }
   .modal-overlay { align-items: stretch; }
@@ -1189,8 +1211,8 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   .saved-item, .saved-item-actions, .ai-toolbar, .settings-inline-actions { flex-direction: column; align-items: stretch; }
   .saved-item-actions .btn { width: 100%; }
   .ai-model-group { min-width: 100%; }
-  .landing-actions, .landing-secondary-actions, .intake-header, .sidebar-selection-row { flex-direction: column; align-items: stretch; }
-  .landing-action-btn, .landing-secondary-actions .btn, .sidebar-selection-delete { width: 100%; }
+  .landing-actions, .intake-header, .sidebar-selection-row { flex-direction: column; align-items: stretch; }
+  .landing-action-btn, .sidebar-selection-delete { width: 100%; }
   .landing-title { font-size: 1.15rem; }
   .module-cards { grid-template-columns: 1fr; }
   .section-header, .section-actions { flex-direction: column; align-items: stretch; }
@@ -1399,8 +1421,8 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 }
 
 /* === 대시보드 === */
-.dashboard { display: flex; flex-direction: column; gap: 16px; width: 100%; margin-bottom: 8px; }
-.dashboard-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.dashboard { display: flex; flex-direction: column; gap: 16px; width: 100%; margin-bottom: 8px; flex: 1; min-height: 0; }
+.dashboard-summary { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
 .dashboard-stat-card {
   background: var(--card-bg);
   border: 1px solid var(--card-border);
@@ -1552,16 +1574,30 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 
 @media (max-width: 900px) {
   .dashboard-content { grid-template-columns: 1fr; }
-  .dashboard-summary { grid-template-columns: repeat(2, 1fr); }
+  .dashboard-summary { grid-template-columns: repeat(3, 1fr); }
+  .dashboard-chart-area { height: 160px; }
   .header-title-row { align-items: flex-start; }
   .action-group-emphasis { margin-left: 0; }
+  .landing-layout { height: auto; overflow: auto; min-height: 100dvh; }
+  .landing-panel { overflow: visible; }
+  .landing-hero { margin-bottom: 12px; }
 }
 @media (max-width: 480px) {
-  .dashboard-summary { grid-template-columns: 1fr; }
+  .dashboard-summary { grid-template-columns: repeat(2, 1fr); }
+  .dashboard-chart-area { height: 120px; }
   .dashboard-bar { width: 20px; }
+  .dashboard-stat-card { padding: 10px; }
+  .dashboard-stat-card .stat-value { font-size: 1.3rem; }
+  .dashboard-section { padding: 12px; }
+  .dashboard-table th, .dashboard-table td { padding: 5px 6px; font-size: 0.72rem; }
   .action-bar { flex-direction: column; align-items: stretch; }
   .action-group { width: 100%; }
   .action-group .btn, .action-menu { flex: 1; }
   .action-menu { display: block; }
   .patient-item-meta { gap: 4px; }
+  .landing-hero { margin-bottom: 8px; }
+  .landing-title { font-size: 1rem; }
+  .landing-description { font-size: 0.8rem; }
+  .landing-actions { gap: 8px; margin-top: 8px; }
+  .landing-action-btn { padding: 10px 16px; font-size: 0.85rem; }
 }

@@ -110,14 +110,20 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsideratio
                   <div className="klg-inline">
                     <span className="klg-inline-label">K-L Grade</span>
                     {(diag.side === 'right' || diag.side === 'both') && (
-                      <select value={diag.klgRight} onChange={e => onDiagnosisUpdate(i, 'klgRight', e.target.value)}>
-                        {KLG_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                      </select>
+                      <label className="klg-side-row">
+                        {diag.side === 'both' && <span className="klg-side-label">우</span>}
+                        <select value={diag.klgRight} onChange={e => onDiagnosisUpdate(i, 'klgRight', e.target.value)}>
+                          {KLG_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                        </select>
+                      </label>
                     )}
                     {(diag.side === 'left' || diag.side === 'both') && (
-                      <select value={diag.klgLeft} onChange={e => onDiagnosisUpdate(i, 'klgLeft', e.target.value)}>
-                        {KLG_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                      </select>
+                      <label className="klg-side-row">
+                        {diag.side === 'both' && <span className="klg-side-label">좌</span>}
+                        <select value={diag.klgLeft} onChange={e => onDiagnosisUpdate(i, 'klgLeft', e.target.value)}>
+                          {KLG_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                        </select>
+                      </label>
                     )}
                   </div>
                 )}

@@ -202,8 +202,11 @@ function callGemini({ prompt, systemPrompt, model, apiKey }) {
     generationConfig: { maxOutputTokens: isPro ? 65536 : 8192 }
   });
 
-  return netRequest(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`, {
-    headers: { 'Content-Type': 'application/json' }
+  return netRequest(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`, {
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
+    }
   }, body);
 }
 
@@ -406,10 +409,11 @@ function saveIndex(index) {
 }
 
 function sanitizeId(id) {
-  if (typeof id !== 'string' || !/^[\w-]+$/.test(id)) {
-    throw new Error('Invalid id: ' + String(id).slice(0, 50));
+  const str = String(id);
+  if (!/^[\w-]+$/.test(str)) {
+    throw new Error('Invalid id: ' + str.slice(0, 50));
   }
-  return id;
+  return str;
 }
 
 // 환자 개별 파일

@@ -4,15 +4,17 @@
 export default async function handler(req, res) {
     const allowedOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000'];
     if (process.env.APP_ORIGIN) allowedOrigins.push(process.env.APP_ORIGIN);
+    if (process.env.VERCEL_URL) allowedOrigins.push(`https://${process.env.VERCEL_URL}`);
 
     const origin = req.headers.origin || '';
-    const isAllowed = allowedOrigins.includes(origin)
-        || /^https:\/\/[\w-]+\.vercel\.app$/.test(origin);
-    const corsOrigin = isAllowed ? origin : allowedOrigins[0];
+    const corsOrigin = allowedOrigins.includes(origin) ? origin : null;
 
-    res.setHeader('Access-Control-Allow-Origin', corsOrigin);
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-WR-User-Id, X-WR-Org-Id, X-WR-Auth-Mode');
+    if (corsOrigin) {
+        res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+        res.setHeader('Vary', 'Origin');
+        res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-WR-User-Id, X-WR-Org-Id, X-WR-Auth-Mode');
+    }
 
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
