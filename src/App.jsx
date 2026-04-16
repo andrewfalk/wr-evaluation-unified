@@ -41,6 +41,7 @@ import {
 import './modules/knee';
 import './modules/spine';
 import './modules/shoulder';
+import './modules/elbow';
 
 const UNIFIED_AI_SYSTEM_PROMPT = `당신은 직업성 근골격계 질환 업무관련성 평가 전문 직업환경의학 전문의입니다.
 무릎(슬관절) 및 척추(요추) 평가 모두에 전문성을 갖추고 있습니다.
@@ -655,6 +656,60 @@ function App() {
     setShowSidebar(false);
   };
 
+  // --- 저장 모달 ---
+  const renderSaveModal = () => (
+    <div className="modal-overlay" onClick={() => setShowSaveModal(false)}>
+      <div className="modal save-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-section-header">
+          <div>
+            <h2>저장</h2>
+            <p className="modal-section-description">현재 {patients.length}명의 환자 데이터를 저장합니다.</p>
+          </div>
+        </div>
+        <section className="modal-section pattern-surface">
+          <div className="modal-section-header">
+            <div>
+              <h3 className="modal-section-title">새 저장</h3>
+              <p className="modal-section-description">저장명을 입력해 새 항목으로 보관합니다.</p>
+            </div>
+          </div>
+          <div className="form-group">
+            <label>저장명</label>
+            <input value={saveName} onChange={e => setSaveName(e.target.value)} autoFocus />
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-primary" onClick={handleSave}>새로 저장</button>
+            <button className="btn btn-secondary" onClick={() => setShowSaveModal(false)}>취소</button>
+          </div>
+        </section>
+        {savedItems.length > 0 && (
+          <section className="modal-section pattern-surface">
+            <div className="modal-section-header">
+              <div>
+                <h3 className="modal-section-title">기존 저장 목록</h3>
+                <p className="modal-section-description">기존 항목을 선택해 바로 덮어쓸 수 있습니다.</p>
+              </div>
+              <span className="modal-section-badge">{savedItems.length}개</span>
+            </div>
+            <div className="modal-scroll-list">
+              {savedItems.map(item => (
+                <div key={item.id} className="saved-item">
+                  <div className="saved-item-content">
+                    <h4>{item.name}</h4>
+                    <p>{item.count || 1}명 | {new Date(item.savedAt).toLocaleString('ko-KR')}</p>
+                  </div>
+                  <div className="saved-item-actions">
+                    <button className="btn btn-primary btn-xs" onClick={() => handleOverwriteSave(item)}>덮어쓰기</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    </div>
+  );
+
   // --- 불러오기 모달 ---
   const renderLoadModal = () => (
     <div className="modal-overlay" onClick={() => setShowLoadModal(false)}>
@@ -741,12 +796,12 @@ function App() {
               <p className="landing-description">새 환자 평가를 시작하거나 저장된 데이터를 불러오세요.</p>
             </div>
           </div>
-          <Dashboard patients={patients} onSelectPatient={(id) => { setActiveId(id); setCurrentStepIndex(0); setShowHome(false); }} />
           <div className="landing-actions">
-            <button className="btn btn-primary landing-action-btn" onClick={handleStartIntake}>+ 새 환자 평가 시작</button>
+            <button className="btn btn-primary landing-action-btn" onClick={handleStartIntake}>+ 새환자</button>
             <button className="btn btn-secondary landing-action-btn" onClick={() => openLoadModal()}>불러오기</button>
+            <button className="btn btn-secondary landing-action-btn" onClick={() => setShowSaveModal(true)}>저장</button>
             <button className="btn btn-info landing-action-btn" onClick={() => setShowBatchImport(true)}>엑셀 일괄입력</button>
-            <button className="btn btn-warning landing-action-btn" onClick={handleLoadTestData}>테스트 데이터</button>
+            <button className="btn btn-warning landing-action-btn" onClick={handleLoadTestData}>테스트</button>
             <button className="btn btn-secondary landing-action-btn" onClick={() => setShowSettings(true)}>설정</button>
             {patients.length > 0 && (
               <>
@@ -759,6 +814,7 @@ function App() {
               </>
             )}
           </div>
+          <Dashboard patients={patients} onSelectPatient={(id) => { setActiveId(id); setCurrentStepIndex(0); setShowHome(false); }} />
         </div>
         {showSettings && (
           <SettingsModal
@@ -769,6 +825,7 @@ function App() {
             onClose={() => setShowSettings(false)}
           />
         )}
+        {showSaveModal && renderSaveModal()}
         {showLoadModal && renderLoadModal()}
         {showBatchImport && <BatchImportModal onClose={() => setShowBatchImport(false)} onImport={handleBatchImport} existingPatients={patients} />}
       </div>
@@ -1017,7 +1074,7 @@ function App() {
       return (
         <AIAnalysisPanel
           generatePrompt={() => unifiedPreviewText}
-          systemPrompt={UNIFIED_AI_SYSTEM_PROMPT}
+          systemPrompt={`${UNIFIED_AI_SYSTEM_PROMPT}\n6. 팔꿈치: BK 유형별 노출 패턴, 시간적 선후관계, 직업별-진단별 narrative를 함께 검토합니다.`}
           title="AI 업무관련성 종합분석"
         />
       );
@@ -1198,7 +1255,7 @@ function App() {
             {renderStepIndicator()}
 
             {/* 콘텐츠 */}
-            <div className="main-content">
+            <div className={`main-content ${currentStep.id === 'info' ? 'main-content-dual' : currentStep.id === 'assessment' ? '' : 'main-content-single'}`}>
               {renderStepContent()}
             </div>
 
@@ -1228,58 +1285,7 @@ function App() {
           onClose={() => setShowSettings(false)}
         />
       )}
-      {showSaveModal && (
-        <div className="modal-overlay" onClick={() => setShowSaveModal(false)}>
-          <div className="modal save-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-section-header">
-              <div>
-                <h2>저장</h2>
-                <p className="modal-section-description">현재 {patients.length}명의 환자 데이터를 저장합니다.</p>
-              </div>
-            </div>
-            <section className="modal-section pattern-surface">
-              <div className="modal-section-header">
-                <div>
-                  <h3 className="modal-section-title">새 저장</h3>
-                  <p className="modal-section-description">저장명을 입력해 새 항목으로 보관합니다.</p>
-                </div>
-              </div>
-              <div className="form-group">
-                <label>저장명</label>
-                <input value={saveName} onChange={e => setSaveName(e.target.value)} autoFocus />
-              </div>
-              <div className="modal-actions">
-                <button className="btn btn-primary" onClick={handleSave}>새로 저장</button>
-                <button className="btn btn-secondary" onClick={() => setShowSaveModal(false)}>취소</button>
-              </div>
-            </section>
-            {savedItems.length > 0 && (
-              <section className="modal-section pattern-surface">
-                <div className="modal-section-header">
-                  <div>
-                    <h3 className="modal-section-title">기존 저장 목록</h3>
-                    <p className="modal-section-description">기존 항목을 선택해 바로 덮어쓸 수 있습니다.</p>
-                  </div>
-                  <span className="modal-section-badge">{savedItems.length}개</span>
-                </div>
-                <div className="modal-scroll-list">
-                  {savedItems.map(item => (
-                    <div key={item.id} className="saved-item">
-                      <div className="saved-item-content">
-                        <h4>{item.name}</h4>
-                        <p>{item.count || 1}명 | {new Date(item.savedAt).toLocaleString('ko-KR')}</p>
-                      </div>
-                      <div className="saved-item-actions">
-                        <button className="btn btn-primary btn-xs" onClick={() => handleOverwriteSave(item)}>덮어쓰기</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
-        </div>
-      )}
+      {showSaveModal && renderSaveModal()}
       {showLoadModal && renderLoadModal()}
       {showBatchImport && <BatchImportModal onClose={() => setShowBatchImport(false)} onImport={handleBatchImport} existingPatients={patients} />}
     </div>

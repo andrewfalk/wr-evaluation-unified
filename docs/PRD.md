@@ -1,7 +1,7 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 3.1.0
-> **Last Updated:** 2026-04-04
+> **Version:** 3.2.0
+> **Last Updated:** 2026-04-16
 > **Status:** MVP 개발 완료 / Vercel 배포 완료
 
 ---
@@ -11,7 +11,7 @@
 ### 1.1 목적
 
 직업환경의학 전문의가 **업무상 질병 인정 여부를 판단**할 때 사용하는 통합 평가 도구.
-현재 무릎(슬관절), 척추(요추 MDDM), 어깨(견관절) 평가를 지원하며, 향후 고관절 등 추가 부위를 플러그인 형태로 확장할 수 있는 아키텍처로 설계되었다.
+현재 무릎(슬관절), 척추(요추 MDDM), 팔꿈치(주관절 BK2101/2103/2105/2106), 어깨(견관절 BK2117) 평가를 지원하며, 향후 고관절 등 추가 부위를 플러그인 형태로 확장할 수 있는 아키텍처로 설계되었다.
 
 ### 1.2 배경
 
@@ -111,17 +111,31 @@ Patient
     │   │       └── { id, name, posture, weight, frequency,
     │   │             timeValue, timeUnit, correctionFactor, force,
     │   │             sharedJobId }     ← 직업력 연결 (shared.jobs[].id)
-    │   └── shoulder                    ← 어깨 전용
-    │       ├── jobExtras[]             ← 직종별 신체부담 (sharedJobId로 연결)
-    │       │   └── { sharedJobId, overheadHours, repetitiveMediumHours,
-    │       │         repetitiveFastHours, heavyLoadCount, heavyLoadSeconds,
-    │       │         vibrationHours, evidenceSources[] }
+    │   ├── shoulder                    ← 어깨 전용
+    │   │   ├── jobExtras[]             ← 직종별 신체부담 (sharedJobId로 연결)
+    │   │   │   └── { sharedJobId, overheadHours, repetitiveMediumHours,
+    │   │   │         repetitiveFastHours, heavyLoadCount, heavyLoadSeconds,
+    │   │   │         vibrationHours, evidenceSources[] }
+    │   │   └── returnConsiderations    ← 복귀 고려사항
+    │   └── elbow                       ← 팔꿈치 전용 (Job × Diagnosis 2차원)
+    │       ├── temporalSequence        ← 공통 시간적 선후관계 (모듈 전체 1회 입력)
+    │       │   └── { recent_task_change, task_change_date,
+    │       │         symptom_onset_interval, improves_with_rest }
+    │       ├── jobEvaluations[]        ← 직업별 × 상병별 엔트리
+    │       │   └── { sharedJobId,
+    │       │         diagnosisEntries[{
+    │       │           diagnosisId, selectedBkType, bkSelectionMode,
+    │       │           main_task_name, direct_anatomic_link,
+    │       │           exposure_types[], 공통지표..., BK분기필드... }] }
     │       └── returnConsiderations    ← 복귀 고려사항
-    └── activeModules: ['knee', 'spine', 'shoulder']
+    └── activeModules: ['knee', 'spine', 'shoulder', 'elbow']
 ```
 
 **공통/전용 분리 원칙:**
 직종명·기간·연간근무일수 등 여러 모듈에서 공통으로 필요한 정보는 `shared.jobs[]`에, 쪼그려앉기 시간·중량물 무게 등 모듈 고유 정보는 `modules.<id>.jobExtras[]`에 저장한다. `sharedJobId`로 1:1 매핑된다.
+
+**팔꿈치 모듈 예외 — Job × Diagnosis 2차원 구조:**
+팔꿈치는 동일 직업 내에서도 상병별로 BK 분기(BK2101/2103/2105/2106)와 세부 지표가 달라지기 때문에 `jobExtras[]`(직업 1차원) 대신 `jobEvaluations[].diagnosisEntries[]`(직업 × 상병 2차원) 구조를 사용한다. `sharedJobId`로 `shared.jobs[]`와 연결되고, `diagnosisId`로 `shared.diagnoses[]`와 연결된다.
 
 ### 2.3 데이터 마이그레이션
 
@@ -160,8 +174,9 @@ migratePatient(patient)
 ```
 [공유] 기본정보 → 상병 입력 → 모듈 선택
 [무릎] 🦵 신체부담 평가
-[척추] 🦴 신체부담 평가
+[팔꿈치] 🦾 신체부담 평가
 [어깨] 💪 신체부담 평가
+[척추] 🦴 신체부담 평가
 [공유] 종합소견 → AI 분석
 ```
 
@@ -173,9 +188,10 @@ migratePatient(patient)
 
 **좌측 패널 — 입력:**
 - **무릎 상병:** KLG 등급 입력 (좌/우) + 상태 확인 + 업무관련성 평가
+- **팔꿈치 상병:** BK 유형(자동 제안/수동) + 공통 시간적 선후관계 + 상태 확인 + 업무관련성 평가
 - **어깨 상병:** Ellman Class 입력 (좌/우) + 상태 확인 + 업무관련성 평가
-- **척추 상병:** 상태 확인 + 업무관련성 평가 (좌우 구분 없음)
-- 복귀 고려사항 (무릎 또는 어깨 모듈 활성 시)
+- **척추 상병:** 수직분포원리(확인/미확인) + 동반성 척추증(확인/미확인) 드롭다운 + 상태 확인 + 업무관련성 평가 (좌우 구분 없음)
+- 복귀 고려사항 (무릎/팔꿈치/어깨 모듈 활성 시)
 
 **우측 패널 — 미리보기:**
 - 전체 모듈 결과를 텍스트 보고서로 통합 표시 (패널 높이를 꽉 채움)
@@ -264,8 +280,101 @@ shared.jobs[] + shoulder.jobExtras[] → mergeJobsWithExtras()
    각 변수: cumulativeHours = dailyHours × workDaysPerYear × periodYears
    (중량물: dailyHours = (heavyLoadCount × heavyLoadSeconds) / 3600)
 → totals[] = 직력별 합산 누적시간, BK2117 임계값 대비 ratio/exceeded
-→ anyRepetitiveExceeded = repMedium.exceeded || repFast.exceeded
+
+누적 신체부담 판정 (3단):
+  1) 초과 항목 ≥1개 → "기준 초과, 누적 신체부담 충분"
+  2) 초과 없으나 50%↑ ≥3개 또는 75%↑ ≥2개 → "복합 노출 고려, 충분"
+  3) 그 외 → "기준 미달, 불충분"
 ```
+
+---
+
+### 4.4 팔꿈치 모듈 (elbow)
+
+**평가 방법론:** 독일 산재보험 BK2101/2103/2105/2106 기반 공통 신체부담 평가. 임계값/스코어가 아닌 **Gate-and-Flag 판정** 방식으로 핵심 위험 요인 조합을 신호(flag)로 표시하고, 서술형(narrative) 종합평가 문장을 자동 생성한다.
+
+#### BK 4유형 분기
+
+| BK 유형 | 질환 | 핵심 분기 지표 |
+|---------|------|----------------|
+| BK2101 | 상과병변 / 부착부 건병증 | 1회 동작 주기, 시간당 반복횟수, 단조 반복패턴, 강제 배측굴곡, 회내·회외 반복 |
+| BK2103 | 팔꿈치 골관절염 / 박리성 골연골염 | 진동 공구 종류, 1일 진동 사용시간, 공구 파지·가압 작업 |
+| BK2105 | 팔꿈치 점액낭염 | 팔꿈치 지지·기대기, 직접 압박/마찰/충격, 압박 원인 |
+| BK2106 | 주관증후군 / 척골신경병변 | 같은 자세 유지, 직접 압박 수준, 압박 원인 |
+
+#### 데이터 구조 (Job × Diagnosis 2차원)
+
+```
+modules.elbow
+├── temporalSequence                       ← 공통 시간적 선후관계 (모듈 1회 입력)
+│   └── { recent_task_change, task_change_date,
+│         symptom_onset_interval, improves_with_rest }
+├── jobEvaluations[]
+│   └── { sharedJobId,
+│         diagnosisEntries[{
+│           diagnosisId, selectedBkType, bkSelectionMode,
+│           main_task_name, direct_anatomic_link,
+│           exposure_types[],                    ← 반복/힘/비중립 자세 복수 선택
+│           repetition_level, force_level,
+│           awkward_posture_level, static_holding_level,
+│           direct_pressure_level, vibration_exposure,
+│           daily_exposure_hours, shift_share_percent,
+│           days_per_week, work_pattern, rest_distribution,
+│           bk2101_*, bk2103_*, bk2105_*, bk2106_*  ← BK 분기 필드
+│         }] }
+└── returnConsiderations
+```
+
+#### 신체부담 평가 (ExposureForm + DiseaseSpecificFields + ElbowResultPanel)
+
+**좌측 패널 — 입력 (ExposureForm + DiseaseSpecificFields):**
+- 직업별 카드 내부에 해당 직업의 팔꿈치 상병 엔트리 카드들을 나열
+- 각 상병 카드: BK 유형(자동/수동), 핵심 동작 연결성 → `yes`일 때만 노출 세부 항목 공개
+- 공통 핵심 노출유형(반복/힘/비중립 자세) 체크박스 + 각 항목 세부 수준
+- BK 유형별 `DiseaseSpecificFields` 분기 렌더링
+
+**우측 패널 — 결과 (ElbowResultPanel):**
+- 최상단: 공통 시간적 선후관계 섹션(모듈 전체 1회 입력)
+- 직업별 카드 → 상병별 Summary Card: BK 라벨, 주요 flag pill, narrative 서술, 위험 요인 요약, 종합평가 문장
+
+#### 계산 로직 (`computeElbowCalc`) — Gate-and-Flag
+
+```
+각 diagnosisEntry에 대해:
+  1) 필수 입력 게이트: REQUIRED_ENTRY_FIELDS 체크 (selectedBkType, main_task_name,
+     direct_anatomic_link, exposure_types, daily_exposure_hours, shift_share_percent,
+     days_per_week, work_pattern, rest_distribution)
+  2) 게이트 통과 시 15+ flag 판정:
+     - core_exposure_present / core_exposure_unclear
+     - daily_share_high / daily_share_moderate / daily_share_low
+     - rest_unfavorable
+     - mechanical_load_dominant / pressure_load_dominant / vibration_present
+     - bk2101_high_freq_example, bk2101_pattern_supported
+     - bk2105_pattern_supported, bk2106_pattern_supported
+     - bk2103_pattern_supported, bk2103_transmission_amplifier_present
+     - temporal_fit_high / temporal_fit_unclear
+  3) RISK_FACTOR_FLAGS 집합을 riskFactorItems로 분리
+  4) narrative + riskFactorSentence 자동 생성
+```
+
+**`work_pattern` 수식자:**
+- `continuous`: daily_share 임계값 상향(1.5h/20% vs 기본 3h/40%), rest_unfavorable이 `moderate` 휴식에서도 활성화
+- `intermittent` / `mixed`: 기본 임계값 유지
+
+#### 자동 BK 매핑 (`inferElbowBkTypeFromDiagnosis`)
+
+ICD 코드 우선 → 상병명 키워드 순:
+
+| 기준 | 추천 BK |
+|------|---------|
+| ICD `^M77\.0` / `^M77\.1` | BK2101 |
+| ICD `^T75\.2` | BK2103 |
+| 상병명 `점액낭염` | BK2105 |
+| 상병명 `주관증후군`/`척골신경`/`단신경병증` | BK2106 |
+| 상병명 `진동성 팔꿈치`/`팔꿈치 골관절염`/`박리성 골연골염` | BK2103 |
+| 상병명 `상과염`/`테니스 엘보`/`골프 엘보`/`부착부 건병증` | BK2101 |
+
+사용자는 `bkSelectionMode = 'manual'`로 수동 덮어쓰기 가능.
 
 ---
 
@@ -302,14 +411,26 @@ shared.jobs[] + shoulder.jobExtras[] → mergeJobsWithExtras()
 ```
 척추압박력: F = b + m × L  (자세별 계수 b, m + 하중 L)
 일일선량:   D = √(Σ F²·t) / 1000 / 60  (kN·h)
+  ※ F ≥ 1,900N인 작업만 합산 (남녀 공통 기준)
 
-직업별 누적노출량 (v2.4.0):
+직업별 누적노출량:
   for each job in shared.jobs:
     jobTasks = tasks.filter(t => t.sharedJobId === job.id)
-    jobDailyDose = calculateDailyDose(jobTasks, gender)
-    jobLifetimeDose = jobDailyDose × 연간근무일수 × 해당직업 근무년수
+    jobDailyDose = calculateDailyDose(jobTasks)
+    if jobDailyDose < 2.0kN·h AND 모든 작업의 F < 4,000N:
+      해당 직업 평생 누적 제외 (excluded)
+    else:
+      jobLifetimeDose = jobDailyDose × 연간근무일수 × 해당직업 근무년수
   totalLifetimeDose = Σ(각 직업의 lifetimeDose)  (MN·h)
+
+일일 노출 중증도:
+  고도:     일일 >4kN·h 또는 최대압박력 ≥6,000N
+  중등도상: 일일 >3kN·h 또는 최대압박력 ≥5,000N
+  중등도하: 일일 ≥2kN·h 또는 최대압박력 ≥4,000N
+  경도:     그 외
 ```
+
+**4,000N 규칙:** 작업 중 하나라도 압박력 ≥ 4,000N이면 일일 누적 용량이 임계치(2.0 kN·h)에 미달하더라도 평생 누적 용량 계산에 포함된다.
 
 **하위 호환:** `sharedJobId`가 없는 기존 task는 첫 번째 직업에 자동 귀속. legacy 필드(`careerYears` 등)가 존재하면 기존 단일 계산 방식 유지.
 
@@ -426,9 +547,20 @@ Gemini 2.5 Pro는 thinking(추론) 기능이 기본 활성화되어 비활성화
   무릎 부담 정도: (등급)
   + 기여도 + 누적부담
 
-  <척추 (요추)>                ← 척추 활성 시만 표시
+  <팔꿈치 (주관절)>            ← 팔꿈치 활성 시만 표시
+  [공통 시간적 선후관계]        ← 모듈 1회 입력 + 주요 flag
+  [직업별 상병 Summary]         ← BK 유형, 주요 flag, narrative, 종합평가 문장
+
+  <어깨 (견관절)>              ← 어깨 활성 시만 표시
+  BK2117 설명문 + 노출 유형별 누적 시간 / 임계값 / 비율
+  ** 누적 신체부담 판정 (3단: 충분/복합노출 충분/불충분)
+  [직력별 기여]                 ← 2개 이상 직업 시
+
+  <척추 (요추)>                ← 척추 활성 시만 표시 (BK2108 해석)
   [직력별 평가 결과]            ← 2개 이상 직업 시 직업별 일일선량/누적선량
-  [합산 결과] + [기준 비교] + [신체부담기여도]
+  [합산 결과] + [일일 노출 중증도(고도/중등도상/중등도하/경도)]
+  [기준 비교] + [tiered interpretation]
+    ↑ DWS2 / 독일 법원 / MDDM 각 기준 초과 여부에 따른 해석 문장 자동 생성
 
 [종합소견]
 상병별 판정 (무릎 활성 시 KLG/업무관련성 포함)
@@ -486,7 +618,7 @@ ZIP명: `업무관련성평가_{N}명_{날짜}.zip` (동명 파일은 인덱스 
 
 파일명: `일괄입력용_{이름 또는 N명}_{날짜}.xlsx`
 
-**컬럼 구성 (44열):**
+**컬럼 구성 (75열):**
 - 기본정보(6): 이름, 생년월일, 재해일자, 키, 몸무게, 성별
 - 기관정보(3): 병원명, 진료과, 담당의
 - 기타(2): 특이사항, 복귀고려사항
@@ -494,9 +626,12 @@ ZIP명: `업무관련성평가_{N}명_{날짜}.zip` (동명 파일은 인덱스 
 - 직업(7): 직종명, 시작일, 종료일, 근무기간(년), 근무기간(개월), 중량물(kg), 쪼그려앉기(분)
 - 무릎 보조변수(6): 계단오르내리기, 무릎비틀림, 출발정지반복, 좁은공간, 무릎접촉충격, 뛰어내리기
 - 어깨 노출(6): 오버헤드(시간/일), 반복중간(시간/일), 반복빠른(시간/일), 중량물횟수(회/일), 중량물시간(초/회), 진동(시간/일)
-- 척추 작업(7): 작업명, 자세코드(G1-G11), 작업중량(kg), 횟수/일, 시간값, 시간단위(sec/min/hr), 보정계수
+- 팔꿈치 시간적 선후관계(4): 최근작업변화, 작업변화시점, 증상발생까지기간, 휴식시호전
+- 팔꿈치 진단 엔트리 공통(16): BK유형, BK선택방식, 문제작업명, 핵심동작연결성, 공통핵심노출유형, 반복동작정도, 1일노출시간, 하루작업비중, 주당수행일수, 작업형태, 휴식분포, 힘사용, 비중립자세, 정적유지, 직접압박수준, 진동노출
+- 팔꿈치 BK 분기(11): BK2101(주기초, 시간당반복횟수, 단조반복, 배측굴곡, 회내회외) 5열 + BK2103(진동공구종류, 진동시간, 공구파지·가압) 3열 + BK2105(팔꿈치지지, 압박원인) 2열 + BK2106(압박원인) 1열
+- 척추 작업(7): 작업명, 자세코드(G1-G11), 작업중량(kg), 횟수/분, 시간값, 시간단위(sec/min/hr), 보정계수
 
-**행 생성 규칙:** 척추 작업을 직업별로 그룹핑하여 같은 직업의 작업이 해당 직업 행에 배치됨. 환자별 row 수 = max(1, 상병수, 직업-작업 쌍 수). merge key(이름+생년월일+재해일자)는 매 행 반복.
+**행 생성 규칙:** 척추 작업과 팔꿈치 진단 엔트리를 직업별로 그룹핑하여 같은 직업의 항목이 해당 직업 행에 배치됨. 환자별 row 수 = max(1, 상병수, 직업-작업 쌍 수, 팔꿈치 직업×상병 pair 수). merge key(이름+생년월일+재해일자)는 매 행 반복. 팔꿈치 시간적 선후관계 4열은 환자 첫 행에만 채움.
 
 ### 7.3 PDF
 
@@ -504,13 +639,15 @@ ZIP명: `업무관련성평가_{N}명_{날짜}.zip` (동명 파일은 인덱스 
 
 ### 7.4 일괄 입력 (Batch Import)
 
-`BatchImportModal`에서 엑셀 파일을 읽어 복수 환자를 일괄 등록 (36열 지원). 드래그 앤 드롭 영역(`.import-zone`)은 점선 테두리 + 아이콘 + 호버/드래그 하이라이트로 시각적 가독성 확보:
+`BatchImportModal`에서 엑셀 파일을 읽어 복수 환자를 일괄 등록 (75열 지원). 드래그 앤 드롭 영역(`.import-zone`)은 점선 테두리 + 아이콘 + 호버/드래그 하이라이트로 시각적 가독성 확보:
 - 공통 필드 → `shared.jobs[]`
 - 무릎 전용 → `modules.knee.jobExtras[]`
+- 어깨 전용 → `modules.shoulder.jobExtras[]`
+- 팔꿈치 → `modules.elbow.jobEvaluations[].diagnosisEntries[]` (행의 직종명 + 상병코드로 `sharedJobId`/`diagnosisId` 연결, BK 유형 미지정 시 `inferElbowBkTypeFromDiagnosis`로 자동 제안)
 - 척추 작업 → `modules.spine.tasks[]` (작업명, 자세코드, 중량, 횟수, 시간값/단위, 보정계수)
 - 같은 행에 직종명과 척추 작업이 모두 있으면 `sharedJobId`로 해당 직업에 자동 연결
-- 기존 환자와 이름 중복 시 상병/직업/작업 추가 (병합)
-- 척추 작업 데이터 존재 시 자동으로 spine 모듈 활성화
+- 기존 환자와 이름 중복 시 상병/직업/작업/팔꿈치 엔트리 추가 (병합)
+- 척추 작업 데이터 존재 시 spine 모듈 자동 활성화, 팔꿈치 BK 엔트리 존재 시 elbow 모듈 자동 활성화
 
 ---
 
@@ -521,10 +658,15 @@ ZIP명: `업무관련성평가_{N}명_{날짜}.zip` (동명 파일은 인덱스 
 | ICD 코드 패턴 | 추천 모듈 |
 |---------------|-----------|
 | M17, M22, M23, M70.4, M76.5, S83 | 무릎 (knee) |
-| M51, M54, M47, M48, M50, M53 | 척추 (spine) |
+| M77.0, M77.1, T75.2 | 팔꿈치 (elbow) |
 | M75, S43, S46, M19.01 | 어깨 (shoulder) |
+| M51, M54, M47, M48, M50, M53 | 척추 (spine) |
 
-상병명 키워드 매칭도 병행: 슬관절, 무릎, 반월상, 추간판, 디스크, 협착증, 견관절, 어깨, 회전근개, 극상근, 극하근, 오십견, 충돌증후군, 이두건, 견봉 등.
+상병명 키워드 매칭도 병행:
+- 무릎: 무릎, 반월상, 십자인대, 관절경, 슬개골
+- 팔꿈치: 팔꿈치, 외측/내측 상과염, 상과염, 테니스 엘보, 골프 엘보, 주관증후군, 점액낭염, 단신경병증, 진동성 팔꿈치 관절병증
+- 어깨: 어깨, 회전근개, 극상근, 견봉하, 충돌증후군, 오십견
+- 척추: 요추, 척추, 추간판, 디스크, 경추, 허리통증
 
 ---
 
@@ -619,16 +761,28 @@ src/
 │   │       ├── formulaDB.js             # G1~G11 자세별 계수 (b, m)
 │   │       └── thresholds.js            # 성별/기준별 판정 역치
 │   │
-│   └── shoulder/                        # 어깨 모듈
+│   ├── shoulder/                        # 어깨 모듈
+│   │   ├── index.js                     # registerModule()
+│   │   ├── ShoulderEvaluation.jsx       # 메인 컴포넌트
+│   │   ├── components/
+│   │   │   ├── JobTab.jsx               # 어깨 전용 신체부담 입력 (BK2117)
+│   │   │   └── ShoulderResultPanel.jsx  # BK2117 누적 기준 비교 결과 패널
+│   │   └── utils/
+│   │       ├── data.js                  # createShoulderJobExtras, Ellman 옵션 등
+│   │       ├── calculations.js          # computeShoulderCalc, BK2117 노출 계산
+│   │       └── exportHandlers.js        # EMR Excel, PDF 내보내기
+│   │
+│   └── elbow/                           # 팔꿈치 모듈 (BK2101/2103/2105/2106)
 │       ├── index.js                     # registerModule()
-│       ├── ShoulderEvaluation.jsx       # 메인 컴포넌트
+│       ├── ElbowEvaluation.jsx          # 메인 컴포넌트 (Job × Diagnosis 2차원)
 │       ├── components/
-│       │   ├── JobTab.jsx               # 어깨 전용 신체부담 입력 (BK2117)
-│       │   └── ShoulderResultPanel.jsx  # BK2117 누적 기준 비교 결과 패널
+│       │   ├── ExposureForm.jsx         # 직업별 카드 + 상병 엔트리 입력
+│       │   ├── DiseaseSpecificFields.jsx # BK 분기별 세부 필드
+│       │   └── ElbowResultPanel.jsx     # 공통 선후관계 + 직업/상병 Summary
 │       └── utils/
-│           ├── data.js                  # createShoulderJobExtras, Ellman 옵션 등
-│           ├── calculations.js          # computeShoulderCalc, BK2117 노출 계산
-│           └── exportHandlers.js        # EMR Excel, PDF 내보내기
+│           ├── data.js                  # BK 옵션, jobEvaluations 싱크/마이그레이션
+│           ├── calculations.js          # computeElbowCalc, Gate-and-Flag 엔진
+│           └── exportHandlers.js        # EMR Excel (B5~B9), PDF 내보내기
 │
 api/analyze.js                           # Vercel 서버리스 (Claude API 프록시)
 electron/
@@ -833,6 +987,7 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 |----------|------|------|
 | P0 | ~~런타임 검증~~ | ~~빌드 완료 상태, 실제 사용 시나리오 테스트~~ → Vercel 배포 완료 |
 | P0 | ~~어깨 모듈~~ | ~~shoulder 모듈 추가~~ → v3.0.0 완료 |
+| P0 | ~~팔꿈치 모듈~~ | ~~elbow 모듈 추가 (BK2101/2103/2105/2106)~~ → v3.2.0 완료 |
 | P1 | 고관절 모듈 | hip 모듈 추가 (플러그인 패턴 활용) |
 | P2 | 척추 프리셋 연동 | 직업 프리셋 선택 시 MDDM 작업/변수 자동 채움 |
 | P2 | 통합 PDF/Word | 통합 보고서를 PDF/Word 형식으로도 출력 |
@@ -879,6 +1034,41 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 - **저장 안정성** (`src/core/utils/storage.js`):
   - 저장 snapshot ID: `Date.now()` → `crypto.randomUUID()`
   - `safeSetItem()` 래퍼 — `QuotaExceededError` 시 사용자 메시지 제공
+
+### Phase 15: 팔꿈치 모듈 + 미리보기/내보내기 리팩터링 (v3.2.0)
+
+- **팔꿈치(주관절) 모듈 신설** (`src/modules/elbow/`, Codex 구현): 독일 산재보험 BK2101(상과병변/부착부 건병증) / BK2103(골관절염/박리성 골연골염) / BK2105(점액낭염) / BK2106(주관증후군/척골신경병변) 4유형 공통 신체부담 평가
+- **Job × Diagnosis 2차원 데이터 구조**: `modules.elbow.jobEvaluations[{ sharedJobId, diagnosisEntries[{ diagnosisId, selectedBkType, ... }] }]` — 다른 모듈과 달리 동일 직업 안에서도 상병별 분기가 핵심이라 `jobExtras[]`(1차원) 대신 2차원을 사용
+- **공통 시간적 선후관계**: `temporalSequence`(최근 작업변화, 작업변화 시점, 증상 발생 간격, 휴가 시 호전) — 모듈 전체에 1회 입력하는 공통 섹션
+- **Gate-and-Flag 판정 엔진** (`computeElbowCalc`): REQUIRED_ENTRY_FIELDS 게이트 통과 시 15+ flag 평가(core_exposure_present, daily_share_high/moderate/low, rest_unfavorable, mechanical_load_dominant, pressure_load_dominant, vibration_present, BK별 pattern_supported, bk2103_transmission_amplifier_present, temporal_fit_high/unclear). RISK_FACTOR_FLAGS 집합을 riskFactorItems로 분리하고 narrative + 종합평가 문장 자동 생성.
+- **`work_pattern` 수식자**: `continuous` 시 daily_share 경계 상향(1.5h / 20% vs 기본 3h / 40%), rest_unfavorable이 `moderate` 휴식에서도 활성화
+- **자동 BK 매핑**(`inferElbowBkTypeFromDiagnosis`): ICD(`^M77\.0` / `^M77\.1` → BK2101, `^T75\.2` → BK2103) + 상병명 키워드(점액낭염→BK2105, 주관증후군/척골신경/단신경병증→BK2106, 진동성 팔꿈치/골관절염/박리성 골연골염→BK2103, 상과염/테니스·골프 엘보/부착부 건병증→BK2101). `bkSelectionMode: auto | manual`로 사용자 수동 덮어쓰기 지원.
+- **ElbowResultPanel**: 공통 시간적 선후관계 섹션 + 직업별 카드 내부에 상병별 Summary Card(BK 라벨, flag pill, narrative, 위험 요인 요약, 종합평가 문장)
+- **팔꿈치 내보내기** (`utils/exportHandlers.js`):
+  - `excelSingle`: EMR 소견서 단일 시트 B5~B9 7행 구조 — 1.신청상병명 / 2.진료기록 / 3.최종확인상병 / 4.직업력·노출 / 5.개인력·특이사항 / 6.종합평가 / 7.복귀 고려사항
+  - `pdf`: html2pdf 기반 — 직업·상병 카드 + 시간적 선후관계 flag 요약
+- **통합 미리보기 리팩터링** (`src/core/utils/reportGenerator.js`):
+  - `genElbowBurdenSection(calc)` 신규 추가 — `< 팔꿈치(주관절) >` 섹션 생성(공통 시간적 선후관계 flag + 직업별 상병 narrative + 종합평가)
+  - `genSpineBurdenSection`을 helper 함수(`formatSpineNumber`, `formatSpinePercent`, `formatSpineLimit`, `isSpineThresholdExceeded`, `getSpineThresholdStatus`, `getSpineTaskDose`, `getSpineInterpretation`)로 리팩터링해 DWS2 / 독일 법원 / MDDM 각 기준 초과 여부 기반 tiered 해석 문장 자동 생성. 척추 섹션이 BK2108을 명시적으로 참조
+  - 복귀 고려사항(`returnConsiderations`) fallback을 `knee || shoulder || elbow` 3개 모듈 공유로 확장
+- **일괄입력용 서식 확장** (`src/core/utils/exportService.js`):
+  - 팔꿈치 시간적 선후관계 4열(최근작업변화/작업변화시점/증상발생까지기간/휴식시호전) + 진단 엔트리 27열(BK 공통 16열 + BK2101 5열 + BK2103 3열 + BK2105 2열 + BK2106 1열) 추가
+  - 총 컬럼 44열 → **75열**
+  - 행 생성 규칙: 팔꿈치 `elbowPairs`(직업×상병) 행 수를 `max()`에 포함해 행 확장. 시간적 선후관계 4열은 환자 첫 행에만 채움
+- **코어 컴포넌트 elbow 연동**:
+  - Dashboard `MODULE_LABELS`에 `elbow: '팔꿈치'` 추가
+  - AssessmentStep: 팔꿈치 상병 BK 유형 자동 제안/수동 선택 UI, 공통 시간적 선후관계 입력, 업무관련성 평가 섹션 추가
+  - `diagnosisMapping.js`: M77.0/M77.1/T75.2 ICD 규칙 + 팔꿈치 관련 상병명 키워드 추가, `MODULE_LABELS`에 elbow 포함
+- **모듈 순서**: UI 위자드/미리보기/내보내기에서 무릎 → 팔꿈치 → 어깨 → 척추(근위 → 원위) 순으로 배치
+
+### Phase 16: 척추/어깨 계산 개선 + 대시보드 개선 (v3.2.0)
+
+- **척추 압박력 기준 변경**: `thresholds.singleForce` 남 2,700N / 여 2,000N → 남녀 공통 1,900N. `calculateDailyDose(tasks)` 시그니처에서 `gender` 제거
+- **4,000N 규칙 도입**: `calculateLifetimeDose`에 `hasHighForceTask` 파라미터 추가 — 작업 압박력 ≥ 4,000N이면 일일 누적 용량 임계치(2.0 kN·h) 미만이어도 평생 누적 용량에 포함
+- **일일 노출 중증도 분류**: `reportGenerator.genSpineBurdenSection` + `exportService.buildSpineExposureText`에 일일 노출량 뒤 고도(>4kN·h / ≥6kN) / 중등도상(>3kN·h / ≥5kN) / 중등도하(≥2kN·h / ≥4kN) / 경도 표시
+- **척추 종합소견 드롭다운 2종**: `AssessmentTab.jsx`에 수직분포원리(확인/미확인) + 동반성 척추증(확인/미확인) 인라인 드롭다운 추가 (`verticalDistribution`, `concomitantSpondylosis` 필드)
+- **어깨 BK2117 누적 신체부담 판정**: `genShoulderBurdenSection` + `exportService` + `exportHandlers`에 3단 해석 로직 추가 — 초과 기준 나열→충분, 복합 노출(50%↑ ≥3개 또는 75%↑ ≥2개)→충분, 미달→불충분. 기존 `anyRepetitiveExceeded` 제거
+- **대시보드 모듈 사용 카드 개선**: 총합 숫자 제거 → 4개 모듈 2×2 그리드(모듈별 개별 색상). 평균 처리일수 `일` 단위를 숫자 옆 인라인으로 이동. 척추→허리 라벨 변경
 
 ---
 

@@ -2,7 +2,8 @@ import { useMemo } from 'react';
 import { computeDashboardStats } from '../utils/dashboardStats';
 import { getAllModules } from '../moduleRegistry';
 
-const MODULE_LABELS = { knee: '무릎', spine: '척추', shoulder: '어깨' };
+const MODULE_LABELS = { knee: '무릎', spine: '허리', shoulder: '어깨', elbow: '팔꿈치' };
+const MODULE_COLORS = { knee: 'var(--accent)', spine: '#f59e0b', shoulder: 'var(--color-safe)', elbow: '#8b5cf6' };
 
 const BarChart = ({ data, color, title }) => {
   const maxCount = Math.max(...data.map(m => m.count), 5);
@@ -73,9 +74,6 @@ const Dashboard = ({ patients, onSelectPatient }) => {
   }
 
   const allModules = getAllModules();
-  const moduleText = allModules
-    .map(m => `${MODULE_LABELS[m.id] || m.name} ${stats.moduleUsage[m.id] || 0}`)
-    .join(' / ');
 
   return (
     <div className="dashboard">
@@ -94,14 +92,26 @@ const Dashboard = ({ patients, onSelectPatient }) => {
           <div className="stat-label">진행 중</div>
         </div>
         <div className="dashboard-stat-card metric-card pattern-surface">
-          <div className="stat-value stat-days">{stats.avgProcessingDays ?? '-'}</div>
+          <div className="stat-value stat-days">
+            {stats.avgProcessingDays ?? '-'}
+            <span className="stat-unit">일</span>
+          </div>
           <div className="stat-label">평균 처리일수</div>
-          <div className="stat-sub">일</div>
         </div>
-        <div className="dashboard-stat-card metric-card pattern-surface metric-card-wide">
-          <div className="stat-value stat-module">{stats.totalPatients}</div>
-          <div className="stat-label">모듈 사용</div>
-          <div className="stat-sub">{moduleText}</div>
+        <div className="dashboard-stat-card metric-card pattern-surface metric-card-modules">
+          <div className="stat-module-grid">
+            {allModules.map(m => (
+              <div className="stat-module-cell" key={m.id}>
+                <div className="stat-module-label">{MODULE_LABELS[m.id] || m.name}</div>
+                <div
+                  className="stat-module-value"
+                  style={{ color: MODULE_COLORS[m.id] || 'var(--accent)' }}
+                >
+                  {stats.moduleUsage[m.id] || 0}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 

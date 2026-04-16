@@ -28,10 +28,11 @@ export function convertTimeToSeconds(value, unit) {
 }
 
 // D = sqrt(sum(F^2 * t)) / 1000 / 60
-export function calculateDailyDose(tasks, gender) {
-  const threshold = thresholds.singleForce[gender];
+export function calculateDailyDose(tasks) {
+  const threshold = thresholds.singleForce;
   let sumFSquaredT = 0;
   let includedCount = 0;
+  let hasHighForceTask = false;
 
   tasks.forEach(task => {
     if (task.force >= threshold) {
@@ -40,16 +41,19 @@ export function calculateDailyDose(tasks, gender) {
       sumFSquaredT += task.force * task.force * totalTime;
       includedCount++;
     }
+    if (task.force >= 4000) {
+      hasHighForceTask = true;
+    }
   });
 
   const dailyDoseNs = Math.sqrt(sumFSquaredT);
   const dailyDoseKNh = dailyDoseNs / 1000 / 60;
-  return { sumFSquaredT, dailyDoseNs, dailyDoseKNh, includedCount };
+  return { sumFSquaredT, dailyDoseNs, dailyDoseKNh, includedCount, hasHighForceTask };
 }
 
-export function calculateLifetimeDose(dailyDoseKNh, workDaysPerYear, careerYears, careerMonths, gender) {
+export function calculateLifetimeDose(dailyDoseKNh, workDaysPerYear, careerYears, careerMonths, gender, hasHighForceTask = false) {
   const dailyThreshold = thresholds.dailyDose[gender];
-  if (dailyDoseKNh < dailyThreshold) {
+  if (dailyDoseKNh < dailyThreshold && !hasHighForceTask) {
     return { lifetimeDoseKNh: 0, lifetimeDoseMNh: 0, excluded: true };
   }
   const totalYears = careerYears + careerMonths / 12;
@@ -183,9 +187,9 @@ export function computeSpineCalc(patientData) {
       const periodMonths = Math.round((periodYears - periodYearsInt) * 12);
       const workDaysPerYear = job.workDaysPerYear || 250;
 
-      const jobDailyDose = calculateDailyDose(jobTasks, gender);
+      const jobDailyDose = calculateDailyDose(jobTasks);
       const jobLifetimeDose = calculateLifetimeDose(
-        jobDailyDose.dailyDoseKNh, workDaysPerYear, periodYearsInt, periodMonths, gender
+        jobDailyDose.dailyDoseKNh, workDaysPerYear, periodYearsInt, periodMonths, gender, jobDailyDose.hasHighForceTask
       );
 
       if (!jobLifetimeDose.excluded) {
@@ -210,9 +214,9 @@ export function computeSpineCalc(patientData) {
       ? { careerYears: mod.careerYears || 0, careerMonths: mod.careerMonths || 0, workDaysPerYear: mod.workDaysPerYear || 250 }
       : getCareerFromSharedJobs(shared);
 
-    const legacyDailyDose = calculateDailyDose(tasks, gender);
+    const legacyDailyDose = calculateDailyDose(tasks);
     const legacyLifetimeDose = calculateLifetimeDose(
-      legacyDailyDose.dailyDoseKNh, career.workDaysPerYear, career.careerYears, career.careerMonths, gender
+      legacyDailyDose.dailyDoseKNh, career.workDaysPerYear, career.careerYears, career.careerMonths, gender, legacyDailyDose.hasHighForceTask
     );
     totalLifetimeDoseKNh = legacyLifetimeDose.lifetimeDoseKNh;
     totalLifetimeDoseMNh = legacyLifetimeDose.lifetimeDoseMNh;
@@ -220,7 +224,7 @@ export function computeSpineCalc(patientData) {
   }
 
   // 전체 통합 결과
-  const dailyDose = calculateDailyDose(tasks, gender);
+  const dailyDose = calculateDailyDose(tasks);
   const career = hasLegacyFields
     ? { careerYears: mod.careerYears || 0, careerMonths: mod.careerMonths || 0 }
     : getCareerFromSharedJobs(shared);

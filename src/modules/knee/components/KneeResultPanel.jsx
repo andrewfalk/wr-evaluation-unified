@@ -16,8 +16,8 @@ export function KneeResultPanel({ calc }) {
         <div className="result-summary-grid">
           <div className="result-summary-card" title="직종별 신체부담 합산 기여도 (최소~최대%)">
             <div className="result-summary-label">신체부담기여도</div>
-            <div className="result-summary-value">{calc.relatedness.min}% ~ {calc.relatedness.max}%</div>
-            <div className="result-summary-sub">평균: {avg}%</div>
+            <div className="result-summary-value">{calc.relatedness.min}% ~ {calc.relatedness.max}% <span className="result-summary-unit">(평균 {avg}%)</span></div>
+            <div className="result-summary-sub">직종별 신체부담 합산 기여도입니다.</div>
           </div>
           <div className={`result-summary-card ${calc.cumulativeBurden === '충분함' ? 'is-safe' : 'is-danger'}`}>
             <div className="result-summary-label">누적신체부담</div>

@@ -16,7 +16,7 @@ function RatioBar({ ratio }) {
 export function ShoulderResultPanel({ calc }) {
   if (!calc?.totals) return null;
 
-  const { totals, jobBurdens, anyRepetitiveExceeded, age, bmi } = calc;
+  const { totals, jobBurdens, anyRepetitiveExceeded } = calc;
   const jobsWithData = (jobBurdens || []).filter(j => j.jobName);
 
   return (
@@ -112,12 +112,6 @@ export function ShoulderResultPanel({ calc }) {
           </div>
         )}
 
-        <div className="result-detail-card">
-          <div className="result-metric-list">
-            <div className="result-metric-row"><span>만 나이</span><strong>{age || '-'}세</strong></div>
-            <div className="result-metric-row"><span>BMI</span><strong>{bmi || '-'}</strong></div>
-          </div>
-        </div>
       </div>
     </div>
   );

@@ -123,6 +123,7 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   justify-content: center;
   flex-wrap: wrap;
   margin-top: 12px;
+  margin-bottom: 20px;
 }
 .landing-action-btn {
   padding: 12px 24px;
@@ -217,11 +218,16 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .export-dropdown { position: absolute; top: 100%; right: 0; z-index: 100; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); min-width: 130px; overflow: hidden; margin-top: 6px; }
 .export-dropdown button { display: block; width: 100%; padding: 8px 14px; border: none; background: none; text-align: left; font-size: 0.85rem; cursor: pointer; color: var(--text-primary); }
 .export-dropdown button:hover { background: var(--bg-hover); }
-.main-content { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; flex: 1; min-height: 0; align-content: start; overflow: visible; }
-.main-content > * { min-width: 0; }
-.main-content > :only-child { grid-column: 1 / -1; }
+.main-content { flex: 1; min-height: 0; overflow: visible; width: 100%; }
+.main-content.main-content-dual { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+.main-content.main-content-dual > * { min-width: 0; }
+.main-content.main-content-single { display: flex; }
+.main-content.main-content-single > .panel { width: 50%; }
 
-@media (max-width: 1400px) { .main-content { grid-template-columns: 1fr; } }
+@media (max-width: 900px) {
+  .main-content.main-content-dual { grid-template-columns: 1fr; }
+  .main-content.main-content-single > .panel { width: 100%; }
+}
 @media (max-width: 900px) { .app-layout { flex-direction: column; } .sidebar { width: 100%; flex-direction: row; flex-wrap: wrap; } .patient-list { max-height: 150px; } }
 
 .sidebar-toggle { display: none; }
@@ -267,7 +273,6 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 }
 .assessment-panel,
 .assessment-preview-panel {
-  width: 100%;
   min-width: 0;
 }
 .assessment-preview-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
@@ -637,7 +642,227 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   line-height: 1.5;
 }
 .result-note strong { color: var(--color-danger); }
-.result-risk-banner {
+.elbow-note-list { margin-top: 6px; color: var(--text-primary); }
+.elbow-flag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.elbow-result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.elbow-entry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+}
+.elbow-entry-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.elbow-common-exposure-group {
+  margin-top: 12px;
+}
+.elbow-task-name-group {
+  margin-top: 10px;
+  margin-bottom: 14px;
+}
+.elbow-task-metrics-row {
+  margin-top: 2px;
+  margin-bottom: 18px;
+  gap: 16px;
+}
+.elbow-common-exposure-group .result-section-title {
+  margin-bottom: 10px;
+}
+.elbow-common-exposure-group .result-section-caption {
+  margin: 0 0 16px;
+  line-height: 1.6;
+}
+.elbow-common-exposure-group .checkbox-group {
+  gap: 12px 16px;
+}
+.elbow-common-exposure-group .assessment-reason-option {
+  padding: 6px 0;
+}
+.elbow-exposure-option {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.elbow-exposure-detail {
+  padding: 12px 10px 6px 14px;
+  border-left: 2px solid rgba(59, 130, 246, 0.18);
+  background: rgba(59, 130, 246, 0.03);
+  border-radius: 8px;
+}
+.elbow-exposure-detail .form-group {
+  margin-bottom: 0;
+}
+.elbow-radio-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 88px));
+  gap: 6px 8px;
+  justify-content: start;
+}
+.elbow-radio-label-grid {
+  justify-content: center;
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 0.75rem;
+  gap: 4px;
+}
+.elbow-job-card {
+  margin-bottom: 14px;
+}
+.elbow-diagnosis-card {
+  margin-bottom: 0;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+}
+.elbow-flag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.elbow-flag-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.72);
+  font-size: 0.72rem;
+}
+.elbow-flag-pill.tone-positive {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+  border-color: rgba(16, 185, 129, 0.24);
+}
+.elbow-flag-pill.tone-info {
+  background: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
+  border-color: rgba(59, 130, 246, 0.2);
+}
+.elbow-flag-pill.tone-warning {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+  border-color: rgba(245, 158, 11, 0.22);
+}
+.elbow-flag-pill.tone-neutral {
+  background: rgba(148, 163, 184, 0.14);
+  color: #475569;
+  border-color: rgba(148, 163, 184, 0.24);
+}
+.elbow-branch-card { margin-top: 14px; }
+.elbow-branch-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+  align-items: start;
+}
+.elbow-branch-fields > .form-group,
+.elbow-branch-fields > .form-row,
+.elbow-branch-fields > .evaluation-empty-state {
+  min-width: 0;
+}
+.elbow-branch-fields > .form-row,
+.elbow-branch-fields > .evaluation-empty-state {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+.elbow-branch-radio-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+.elbow-branch-radio-label {
+  padding: 5px 8px;
+  font-size: 0.8rem;
+  justify-content: flex-start;
+}
+.elbow-short-number-field {
+  max-width: 220px;
+}
+.elbow-input-with-unit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.elbow-input-with-unit input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.elbow-input-unit {
+  flex: 0 0 auto;
+  font-size: 0.86rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.elbow-narrative-panel { margin-top: 14px; }
+.elbow-summary-panel { margin-top: 16px; }
+.elbow-summary-copy {
+  font-size: 0.9rem;
+  line-height: 1.72;
+}
+.elbow-summary-copy p {
+  margin: 0 0 10px;
+}
+.elbow-summary-copy p:last-child {
+  margin-bottom: 0;
+}
+.elbow-summary-copy div {
+  margin: 0 0 10px;
+}
+.elbow-summary-copy div:last-child {
+  margin-bottom: 0;
+}
+.elbow-summary-copy .elbow-summary-conclusion {
+  margin-top: 18px;
+}
+.elbow-analysis-header {
+  margin-bottom: 8px;
+}
+.elbow-result-panel {
+  gap: 10px;
+}
+.elbow-result-spacing {
+  margin-bottom: 4px;
+}
+.elbow-summary-card .result-card-title {
+  font-size: 0.96rem;
+}
+.elbow-summary-card .result-card-meta {
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+.elbow-summary-card .result-metric-row {
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+.elbow-summary-card .result-note {
+  margin-top: 16px;
+}
+.elbow-summary-card .preview-section {
+  font-size: 0.9rem;
+  line-height: 1.72;
+}
+.elbow-note-list {
+  margin-top: 8px;
+  line-height: 1.65;
+}
+  .result-risk-banner {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1164,7 +1389,8 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
     width: 100%; height: 100%; z-index: 1000; background: rgba(0,0,0,0.4);
   }
   .patient-list { max-height: calc(100vh - 200px); }
-  .main-content { grid-template-columns: 1fr; gap: 12px; overflow: visible; }
+  .main-content.main-content-dual { gap: 12px; }
+  .main-content.main-content-single > .panel { width: 100%; }
   .header { padding: 12px 15px; margin-bottom: 8px; }
   .header h1 { font-size: 1.1rem; }
   .header-actions { margin-top: 8px; }
@@ -1232,6 +1458,9 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   .assessment-side-title { font-size: 0.8rem; }
   .assessment-reason-option { font-size: 0.82rem; min-height: 44px; padding: 4px 0; }
   .assessment-reason-option input[type="checkbox"] { width: 20px; height: 20px; }
+  .elbow-radio-grid-2 { grid-template-columns: 1fr; }
+  .elbow-branch-fields { grid-template-columns: 1fr; }
+  .elbow-branch-radio-grid { grid-template-columns: 1fr; }
   .assessment-return-section { padding: 12px; margin-top: 12px; }
   .assessment-panel .section-description { display: none; }
   .assessment-return-textarea { min-height: 60px; font-size: 16px; }
@@ -1472,6 +1701,12 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 }
 .metric-card { min-height: 110px; display: flex; flex-direction: column; justify-content: space-between; }
 .metric-card-wide .stat-sub { max-width: 24ch; }
+.stat-unit { font-size: 0.9rem; font-weight: 500; color: var(--text-secondary); margin-left: 4px; }
+.metric-card-modules { padding: 10px 12px; justify-content: center; gap: 6px; }
+.metric-card-modules .stat-module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; width: 100%; }
+.metric-card-modules .stat-module-cell { display: grid; grid-template-columns: 1fr 1fr; column-gap: 8px; align-items: baseline; }
+.metric-card-modules .stat-module-label { font-size: 0.78rem; color: var(--text-muted); text-align: right; }
+.metric-card-modules .stat-module-value { font-size: 1.25rem; font-weight: 700; line-height: 1.1; text-align: left; font-variant-numeric: tabular-nums; }
 .dashboard-stat-card .stat-value {
   font-size: 1.7rem;
   font-weight: 700;

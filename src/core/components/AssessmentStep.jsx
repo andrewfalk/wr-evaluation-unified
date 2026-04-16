@@ -4,24 +4,29 @@ import { generateUnifiedReport } from '../utils/reportGenerator';
 export function AssessmentStep({ patient, activeModules, updateDiagnoses, updateModuleById }) {
   const diagnoses = patient.data.shared.diagnoses || [];
 
-  const handleDiagnosisUpdate = (i, field, value) => {
+  const handleDiagnosisUpdate = (index, field, value) => {
     const updated = [...diagnoses];
-    updated[i] = { ...updated[i], [field]: value };
+    updated[index] = { ...updated[index], [field]: value };
     updateDiagnoses(updated);
   };
 
   const hasKnee = activeModules.includes('knee');
-  const hasSpine = activeModules.includes('spine');
   const hasShoulder = activeModules.includes('shoulder');
+  const hasElbow = activeModules.includes('elbow');
   const kneeData = patient.data.modules?.knee || {};
   const shoulderData = patient.data.modules?.shoulder || {};
-  const returnConsiderations = kneeData.returnConsiderations || shoulderData.returnConsiderations || '';
+  const elbowData = patient.data.modules?.elbow || {};
+  const returnConsiderations = kneeData.returnConsiderations || shoulderData.returnConsiderations || elbowData.returnConsiderations || '';
+
   const handleReturnChange = (value) => {
     if (hasKnee) {
-      updateModuleById('knee', m => ({ ...m, returnConsiderations: value }));
+      updateModuleById('knee', current => ({ ...current, returnConsiderations: value }));
     }
     if (hasShoulder) {
-      updateModuleById('shoulder', m => ({ ...m, returnConsiderations: value }));
+      updateModuleById('shoulder', current => ({ ...current, returnConsiderations: value }));
+    }
+    if (hasElbow) {
+      updateModuleById('elbow', current => ({ ...current, returnConsiderations: value }));
     }
   };
 
@@ -30,7 +35,7 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
   return (
     <div className="assessment-step-layout">
       <div className="panel pattern-surface assessment-panel">
-        {(hasKnee || hasSpine || hasShoulder) && (
+        {(hasKnee || hasShoulder || hasElbow || activeModules.includes('spine')) && (
           <AssessmentTab
             diagnoses={diagnoses}
             onDiagnosisUpdate={handleDiagnosisUpdate}
@@ -43,7 +48,7 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
       <div className="panel pattern-surface assessment-preview-panel">
         <h2 className="section-title"><span className="section-icon">&#x1F4CA;</span>미리보기</h2>
         <p className="preview-caption">
-          저장 또는 내보내기 전에 자동 생성된 통합 문안을 확인하세요.
+          입력 내용은 오른쪽 미리보기 패널에 즉시 반영됩니다.
         </p>
         <div className="report-preview">
           <div className="report-preview-toolbar">

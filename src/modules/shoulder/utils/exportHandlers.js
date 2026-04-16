@@ -17,7 +17,7 @@ function formatTotalsText(totals) {
 const generateEMRData = (patientData, c) => {
   const shared = patientData.shared || {};
   const mod    = patientData.module || {};
-  const { age, bmi, jobBurdens: jb, totals, anyRepetitiveExceeded } = c || computeShoulderCalc(patientData);
+  const { age, bmi, jobBurdens: jb, totals } = c || computeShoulderCalc(patientData);
   const diagnoses = shared.diagnoses || [];
 
   const b5 = diagnoses
@@ -44,7 +44,18 @@ const generateEMRData = (patientData, c) => {
   });
 
   b6 += `\n[BK2117 누적 기준 비교]\n${formatTotalsText(totals)}`;
-  if (anyRepetitiveExceeded) b6 += `\n  ※ 반복동작 기준 충족 (중간속도 OR 고도 초과)`;
+  const exceededItems = (totals || []).filter(t => t.exceeded);
+  if (exceededItems.length > 0) {
+    b6 += `\n\n** ${exceededItems.map(t => t.label).join(', ')} 기준을 초과하여 누적 신체부담은 충분함.`;
+  } else {
+    const over75 = (totals || []).filter(t => t.ratio >= 0.75);
+    const over50 = (totals || []).filter(t => t.ratio >= 0.50);
+    if (over50.length >= 3 || over75.length >= 2) {
+      b6 += `\n\n** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.`;
+    } else {
+      b6 += `\n\n** 노출 기준치에 미달하여 누적 신체부담 불충분함.`;
+    }
+  }
 
   const b7 = `- 키: ${shared.height || '-'}cm\n- 몸무게: ${shared.weight || '-'}kg\n- BMI: ${bmi || '-'}\n- 나이: ${age || '-'}세 (재해일 기준)\n- 특이사항: ${shared.specialNotes || '없음'}`;
 
@@ -95,7 +106,7 @@ export const shoulderExportHandlers = {
   },
   pdf: (patientData, calc) => {
     const shared = patientData.shared || {};
-    const { age, bmi, totals, anyRepetitiveExceeded } = calc || computeShoulderCalc(patientData);
+    const { age, bmi, totals } = calc || computeShoulderCalc(patientData);
     const diagnoses = shared.diagnoses || [];
     const tdStyle = 'border:1px solid #ddd; padding:5px 8px;';
     const thStyle = `${tdStyle} background:#f5f5f5; font-weight:600;`;
@@ -118,7 +129,14 @@ export const shoulderExportHandlers = {
             <td style="${tdStyle} text-align:center; color:#dc3545; font-weight:bold;">${t.exceeded ? '✓' : ''}</td>
           </tr>`).join('')}
       </table>
-      ${anyRepetitiveExceeded ? '<p style="font-size:10px; color:#dc3545; margin-bottom:8px;">※ 반복동작 기준 충족 (중간속도 OR 고도 초과)</p>' : ''}`;
+      ${(() => {
+        const exc = (totals || []).filter(t => t.exceeded);
+        if (exc.length > 0) return `<p style="font-size:10px; color:#dc3545; font-weight:bold; margin-bottom:8px;">** ${exc.map(t => escapeHtml(t.label)).join(', ')} 기준을 초과하여 누적 신체부담은 충분함.</p>`;
+        const o75 = (totals || []).filter(t => t.ratio >= 0.75);
+        const o50 = (totals || []).filter(t => t.ratio >= 0.50);
+        if (o50.length >= 3 || o75.length >= 2) return '<p style="font-size:10px; color:#e67700; font-weight:bold; margin-bottom:8px;">** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.</p>';
+        return '<p style="font-size:10px; color:#888; margin-bottom:8px;">** 노출 기준치에 미달하여 누적 신체부담 불충분함.</p>';
+      })()}`;
 
     const assessmentHtml = diagnoses.filter(d => d.code || d.name).map((d, i) => {
       let html = `<div style="background:#f8f9fa; padding:10px; border-radius:6px; margin-bottom:8px;">`;

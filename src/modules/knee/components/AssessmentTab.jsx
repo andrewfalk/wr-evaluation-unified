@@ -43,25 +43,32 @@ function SideAssessment({ diag, index, side, onUpdate, label }) {
       </div>
       {diag[assessmentKey] === 'low' && (
         <div className="form-group">
-          <label>업무관련성 평가 낮음 사유</label>
+          <label>업무관련성 낮음 사유</label>
           <div className="assessment-reason-list">
-            {LOW_REASON_OPTIONS.map(opt => (
-              <label key={opt.value} className="assessment-reason-option">
+            {LOW_REASON_OPTIONS.map(option => (
+              <label key={option.value} className="assessment-reason-option">
                 <input
                   type="checkbox"
-                  checked={(diag[reasonKey] || []).includes(opt.value)}
+                  checked={(diag[reasonKey] || []).includes(option.value)}
                   onChange={() => {
                     const current = diag[reasonKey] || [];
-                    const next = current.includes(opt.value) ? current.filter(v => v !== opt.value) : [...current, opt.value];
+                    const next = current.includes(option.value)
+                      ? current.filter(value => value !== option.value)
+                      : [...current, option.value];
                     onUpdate(index, reasonKey, next);
                   }}
                 />
-                {opt.label}
+                {option.label}
               </label>
             ))}
           </div>
           {(diag[reasonKey] || []).includes('other') && (
-            <input className="assessment-reason-other" value={diag[reasonOtherKey]} onChange={e => onUpdate(index, reasonOtherKey, e.target.value)} placeholder="기타 사유" />
+            <input
+              className="assessment-reason-other"
+              value={diag[reasonOtherKey]}
+              onChange={e => onUpdate(index, reasonOtherKey, e.target.value)}
+              placeholder="기타 사유"
+            />
           )}
         </div>
       )}
@@ -72,90 +79,118 @@ function SideAssessment({ diag, index, side, onUpdate, label }) {
 export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsiderations, onReturnChange, activeModules }) {
   const hasKnee = (activeModules || []).includes('knee');
   const hasShoulder = (activeModules || []).includes('shoulder');
+  const hasElbow = (activeModules || []).includes('elbow');
 
   return (
     <section className="section pattern-surface form-section">
       <div className="section-header">
         <div className="section-title-row">
-          <h2 className="section-title"><span className="section-icon">&#x1F4CB;</span>종합소견</h2>
-          <p className="section-description">상병별 확인 상태와 업무관련성 평가를 정리하고, 복귀 시 고려사항을 함께 기록합니다.</p>
+          <h2 className="section-title"><span className="section-icon">&#x1F4CB;</span>종합평가</h2>
+          <p className="section-description">상병별 확인 상태와 업무관련성을 정리하고 복귀 시 고려사항을 기록합니다.</p>
         </div>
       </div>
-      {diagnoses.map((diag, i) => {
+
+      {diagnoses.map((diag, index) => {
         const resolvedModule = resolveDiagnosisModule(diag, activeModules);
         const isSpine = resolvedModule?.moduleId === 'spine';
         const isShoulder = resolvedModule?.moduleId === 'shoulder';
+        const isKnee = resolvedModule?.moduleId === 'knee';
+        const isElbow = resolvedModule?.moduleId === 'elbow';
 
         return (
           <div key={diag.id} className="assessment-card">
             <div className="assessment-card-header">
               <div className="assessment-card-header-top">
-                <div className="assessment-card-title">상병 #{i + 1}: {diag.code} {diag.name}</div>
+                <div className="assessment-card-title">상병 #{index + 1}: {diag.code} {diag.name}</div>
                 {!isSpine && isShoulder && diag.side && (
                   <div className="klg-inline">
                     <span className="klg-inline-label">Ellman Class</span>
                     {(diag.side === 'right' || diag.side === 'both') && (
-                      <select value={diag.ellmanRight || ''} onChange={e => onDiagnosisUpdate(i, 'ellmanRight', e.target.value)}>
-                        {ELLMAN_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                      <select value={diag.ellmanRight || ''} onChange={e => onDiagnosisUpdate(index, 'ellmanRight', e.target.value)}>
+                        {ELLMAN_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
                     )}
                     {(diag.side === 'left' || diag.side === 'both') && (
-                      <select value={diag.ellmanLeft || ''} onChange={e => onDiagnosisUpdate(i, 'ellmanLeft', e.target.value)}>
-                        {ELLMAN_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                      <select value={diag.ellmanLeft || ''} onChange={e => onDiagnosisUpdate(index, 'ellmanLeft', e.target.value)}>
+                        {ELLMAN_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
                     )}
                   </div>
                 )}
-                {!isSpine && !isShoulder && diag.side && (
+                {!isSpine && isKnee && diag.side && (
                   <div className="klg-inline">
                     <span className="klg-inline-label">K-L Grade</span>
                     {(diag.side === 'right' || diag.side === 'both') && (
                       <label className="klg-side-row">
                         {diag.side === 'both' && <span className="klg-side-label">우</span>}
-                        <select value={diag.klgRight} onChange={e => onDiagnosisUpdate(i, 'klgRight', e.target.value)}>
-                          {KLG_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                        <select value={diag.klgRight || ''} onChange={e => onDiagnosisUpdate(index, 'klgRight', e.target.value)}>
+                          {KLG_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                         </select>
                       </label>
                     )}
                     {(diag.side === 'left' || diag.side === 'both') && (
                       <label className="klg-side-row">
                         {diag.side === 'both' && <span className="klg-side-label">좌</span>}
-                        <select value={diag.klgLeft} onChange={e => onDiagnosisUpdate(i, 'klgLeft', e.target.value)}>
-                          {KLG_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                        <select value={diag.klgLeft || ''} onChange={e => onDiagnosisUpdate(index, 'klgLeft', e.target.value)}>
+                          {KLG_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                         </select>
                       </label>
                     )}
                   </div>
                 )}
+                {!isSpine && isElbow && <span className="diagnosis-module-badge">팔꿈치</span>}
               </div>
               {!isSpine && <div className="assessment-card-subtitle">방향: {getSideText(diag.side)}</div>}
             </div>
 
-            {/* 무릎: 좌/우별 SideAssessment */}
             {!isSpine && (diag.side === 'right' || diag.side === 'both') && (
-              <SideAssessment diag={diag} index={i} side="right" onUpdate={onDiagnosisUpdate} />
+              <SideAssessment diag={diag} index={index} side="right" onUpdate={onDiagnosisUpdate} />
             )}
             {!isSpine && (diag.side === 'left' || diag.side === 'both') && (
-              <SideAssessment diag={diag} index={i} side="left" onUpdate={onDiagnosisUpdate} />
+              <SideAssessment diag={diag} index={index} side="left" onUpdate={onDiagnosisUpdate} />
             )}
-            {!isSpine && !diag.side && <div className="evaluation-empty-state assessment-side-empty">신청상병에서 방향 선택 필요</div>}
+            {!isSpine && !diag.side && (
+              <div className="evaluation-empty-state assessment-side-empty">신청상병에서 방향 선택 필요</div>
+            )}
 
-            {/* 척추: 단일 상병 상태 + 업무관련성 (좌우 없음) */}
             {isSpine && (
-              <SideAssessment diag={diag} index={i} side="right" onUpdate={onDiagnosisUpdate} label="평가" />
+              <>
+                <div className="klg-inline" style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', marginTop: 4 }}>
+                  <span className="klg-inline-label">수직분포원리</span>
+                  <select value={diag.verticalDistribution || ''} onChange={e => onDiagnosisUpdate(index, 'verticalDistribution', e.target.value)}>
+                    <option value="">선택</option>
+                    <option value="confirmed">확인</option>
+                    <option value="unconfirmed">미확인</option>
+                  </select>
+                  <span className="klg-inline-label">동반성 척추증</span>
+                  <select value={diag.concomitantSpondylosis || ''} onChange={e => onDiagnosisUpdate(index, 'concomitantSpondylosis', e.target.value)}>
+                    <option value="">선택</option>
+                    <option value="confirmed">확인</option>
+                    <option value="unconfirmed">미확인</option>
+                  </select>
+                </div>
+                <SideAssessment diag={diag} index={index} side="right" onUpdate={onDiagnosisUpdate} label="평가" />
+              </>
             )}
           </div>
         );
       })}
-      {(hasKnee || hasShoulder) && (
+
+      {(hasKnee || hasShoulder || hasElbow) && (
         <section className="assessment-return-section">
           <div className="section-header">
             <div className="section-title-row">
               <h2 className="section-title"><span className="section-icon">&#x1F4BC;</span>복귀 고려사항</h2>
-              <p className="section-description">업무 복귀 시 필요한 제한점이나 유의사항을 정리합니다.</p>
+              <p className="section-description">업무 복귀 시 필요한 제한이나 주의사항을 기록합니다.</p>
             </div>
           </div>
-          <textarea rows="3" className="assessment-return-textarea" value={returnConsiderations} onChange={e => onReturnChange(e.target.value)} placeholder="업무 복귀 시 고려사항..." />
+          <textarea
+            rows="3"
+            className="assessment-return-textarea"
+            value={returnConsiderations}
+            onChange={e => onReturnChange(e.target.value)}
+            placeholder="업무 복귀 시 고려사항..."
+          />
         </section>
       )}
     </section>

@@ -1,6 +1,6 @@
 // MDDM 기준값
 export const thresholds = {
-  singleForce: { male: 2700, female: 2000 },
+  singleForce: 1900,
   criticalForce: 6000,
   dailyDose: { male: 2.0, female: 0.5 },
   lifetimeDose: {

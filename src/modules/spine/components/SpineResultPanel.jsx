@@ -5,7 +5,7 @@ export function SpineResultPanel({ calc }) {
   if (!calc?.dailyDose) return null;
 
   const { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender } = calc;
-  const forceThreshold = thresholds.singleForce[gender];
+  const forceThreshold = thresholds.singleForce;
 
   const riskIcon = { danger: '\u26D4', warning: '\u26A0\uFE0F', safe: '\u2705' };
 

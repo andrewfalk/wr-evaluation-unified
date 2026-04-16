@@ -1,37 +1,43 @@
-// 상병 코드/이름 → 평가 모듈 자동 매핑
+// 진단 코드/이름 기반 평가 모듈 자동 매핑
 
 const ICD_MODULE_MAP = [
-  // 무릎 (슬관절)
-  { pattern: /^M17/i, moduleId: 'knee', label: '무릎(슬관절)' },
-  { pattern: /^M22/i, moduleId: 'knee', label: '무릎(슬관절)' },
-  { pattern: /^M23/i, moduleId: 'knee', label: '무릎(슬관절)' },
-  { pattern: /^M70\.4/i, moduleId: 'knee', label: '무릎(슬관절)' },
-  { pattern: /^M76\.5/i, moduleId: 'knee', label: '무릎(슬관절)' },
-  { pattern: /^S83/i, moduleId: 'knee', label: '무릎(슬관절)' },
+  // 무릎
+  { pattern: /^M17/i, moduleId: 'knee', label: '무릎' },
+  { pattern: /^M22/i, moduleId: 'knee', label: '무릎' },
+  { pattern: /^M23/i, moduleId: 'knee', label: '무릎' },
+  { pattern: /^M70\.4/i, moduleId: 'knee', label: '무릎' },
+  { pattern: /^M76\.5/i, moduleId: 'knee', label: '무릎' },
+  { pattern: /^S83/i, moduleId: 'knee', label: '무릎' },
 
-  // 어깨 (견관절)
-  { pattern: /^M75/i, moduleId: 'shoulder', label: '어깨(견관절)' },
-  { pattern: /^M19\.01/i, moduleId: 'shoulder', label: '어깨(견관절)' },
-  { pattern: /^S43/i, moduleId: 'shoulder', label: '어깨(견관절)' },
-  { pattern: /^S46/i, moduleId: 'shoulder', label: '어깨(견관절)' },
+  // 팔꿈치
+  { pattern: /^M77\.0/i, moduleId: 'elbow', label: '팔꿈치' },
+  { pattern: /^M77\.1/i, moduleId: 'elbow', label: '팔꿈치' },
+  { pattern: /^T75\.2/i, moduleId: 'elbow', label: '팔꿈치' },
 
-  // 척추 (요추)
-  { pattern: /^M51/i, moduleId: 'spine', label: '척추(요추)' },
-  { pattern: /^M54/i, moduleId: 'spine', label: '척추(요추)' },
-  { pattern: /^M47/i, moduleId: 'spine', label: '척추(요추)' },
-  { pattern: /^M48/i, moduleId: 'spine', label: '척추(요추)' },
-  { pattern: /^M50/i, moduleId: 'spine', label: '척추(요추)' },
-  { pattern: /^M53/i, moduleId: 'spine', label: '척추(요추)' },
+  // 어깨
+  { pattern: /^M75/i, moduleId: 'shoulder', label: '어깨' },
+  { pattern: /^M19\.01/i, moduleId: 'shoulder', label: '어깨' },
+  { pattern: /^S43/i, moduleId: 'shoulder', label: '어깨' },
+  { pattern: /^S46/i, moduleId: 'shoulder', label: '어깨' },
+
+  // 척추
+  { pattern: /^M51/i, moduleId: 'spine', label: '척추' },
+  { pattern: /^M54/i, moduleId: 'spine', label: '척추' },
+  { pattern: /^M47/i, moduleId: 'spine', label: '척추' },
+  { pattern: /^M48/i, moduleId: 'spine', label: '척추' },
+  { pattern: /^M50/i, moduleId: 'spine', label: '척추' },
+  { pattern: /^M53/i, moduleId: 'spine', label: '척추' },
 ];
 
 const NAME_MODULE_MAP = [
-  { pattern: /슬관절|무릎|반월상|십자인대|측부인대|관절경|슬개골/i, moduleId: 'knee', label: '무릎(슬관절)' },
-  { pattern: /요추|척추|추간판|디스크|협착증|전방전위증|척추관|요통|경추/i, moduleId: 'spine', label: '척추(요추)' },
-  { pattern: /견관절|어깨|회전근개|극상근|극하근|오십견|충돌증후군|이두건|견봉/i, moduleId: 'shoulder', label: '어깨(견관절)' },
+  { pattern: /무릎|반월상|십자인대|관절경|슬개골/i, moduleId: 'knee', label: '무릎' },
+  { pattern: /팔꿈치|외측\s*상과염|내측\s*상과염|상과염|테니스\s*엘보|골프\s*엘보|주관증후군|점액낭염|단신경병증|진동성\s*팔꿈치\s*관절병증/i, moduleId: 'elbow', label: '팔꿈치' },
+  { pattern: /어깨|회전근개|극상근|견봉하|충돌증후군|오십견/i, moduleId: 'shoulder', label: '어깨' },
+  { pattern: /요추|척추|추간판|디스크|경추|허리통증/i, moduleId: 'spine', label: '척추' },
 ];
 
 /**
- * 단일 상병의 모듈 힌트 반환
+ * 단일 진단의 모듈 힌트를 반환
  * @returns {{ moduleId: string, label: string } | null}
  */
 export function getDiagnosisModuleHint(diag) {
@@ -40,22 +46,25 @@ export function getDiagnosisModuleHint(diag) {
       if (rule.pattern.test(diag.code)) return { moduleId: rule.moduleId, label: rule.label };
     }
   }
+
   if (diag.name) {
     for (const rule of NAME_MODULE_MAP) {
       if (rule.pattern.test(diag.name)) return { moduleId: rule.moduleId, label: rule.label };
     }
   }
+
   return null;
 }
 
 const MODULE_LABELS = {
-  knee: '무릎(슬관절)',
-  shoulder: '어깨(견관절)',
-  spine: '척추(요추)',
+  knee: '무릎',
+  elbow: '팔꿈치',
+  shoulder: '어깨',
+  spine: '척추',
 };
 
 /**
- * ?곷퀝 留ㅽ븨???놁쓣 ?? ?꾩옱 ?쒖꽦?⑸맂 紐⑤뱢 1媛쒕줈 ?좉컙?쇰줈 ?뚰듃 諛섑솚
+ * 진단이 직접 매핑되지 않을 때, 활성 모듈 1개면 그 모듈로 해석
  * @returns {{ moduleId: string, label: string } | null}
  */
 export function resolveDiagnosisModule(diag, activeModules = []) {
@@ -70,7 +79,7 @@ export function resolveDiagnosisModule(diag, activeModules = []) {
 }
 
 /**
- * 상병 배열로부터 추천 모듈 ID 목록 반환
+ * 진단 배열에서 추천 모듈 목록 반환
  * @returns {string[]}
  */
 export function suggestModules(diagnoses) {

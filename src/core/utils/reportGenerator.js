@@ -1,83 +1,226 @@
 import { getModule } from '../moduleRegistry';
 import { getSideText, getStatusText, getReasonText } from '../../modules/knee/utils/calculations';
 import { AUX_LABELS } from '../../modules/knee/utils/data';
+import { convertTimeToSeconds } from '../../modules/spine/utils/calculations';
+import { thresholds } from '../../modules/spine/utils/thresholds';
 import { resolveDiagnosisModule } from './diagnosisMapping';
 import { calculateAge, calculateBMI } from './common';
 import { getEffectiveWorkPeriodText } from './workPeriod';
 
 function genKneeBurdenSection(calc) {
-  const { relatedness: r, cumulativeBurden: cum, jobBurdens: jb } = calc;
-  let t = `\n  <무릎(슬관절)>\n`;
-  jb.forEach((j) => {
-    const checked = Object.entries(AUX_LABELS).filter(([k]) => j[k]).map(([, v]) => v);
-    t += `  직종: ${j.jobName || '-'}\n`;
-    t += `  일 중량물 취급량: ${j.weight || '-'}kg\n`;
-    t += `  일 쪼그려 앉기 시간: ${j.squatting || '-'}분\n`;
-    if (checked.length > 0) t += `  보조변수: ${checked.join(', ')}\n`;
-    t += `  무릎 부담 정도: ${j.burden.level}\n`;
+  const { relatedness, cumulativeBurden, jobBurdens } = calc;
+  let text = `\n  < 무릎(슬관절) >\n`;
+  const avgRelatedness = relatedness
+    ? ((Number(relatedness.min) + Number(relatedness.max)) / 2).toFixed(1)
+    : null;
+
+  (jobBurdens || []).forEach(job => {
+    const checked = Object.entries(AUX_LABELS)
+      .filter(([key]) => job[key])
+      .map(([, label]) => label);
+
+    text += `  직종: ${job.jobName || '-'}\n`;
+    text += `  일 중량물 취급량: ${job.weight || '-'}kg\n`;
+    text += `  일 쪼그려 앉기 시간: ${job.squatting || '-'}분\n`;
+    if (checked.length > 0) {
+      text += `  보조변수: ${checked.join(', ')}\n`;
+    }
+    text += `  무릎 부담 정도: ${job.burden?.level || '-'}\n`;
   });
-  t += `\n  참고) 신체부담 정도는 다음의 4단계로 구분함.\n`;
-  t += `  1) 고도: 퇴행성 변화를 유발 또는 가속하는 것이 확실함(definite)\n`;
-  t += `  2) 중등도상: 퇴행성 변화를 유발 또는 가속하기에 충분함(probable)\n`;
-  t += `  3) 중등도하: 퇴행성 변화를 유발 또는 가속할 가능성이 있음(possible)\n`;
-  t += `  4) 경도: 퇴행성 변화를 유발 또는 가속하기 어려움(no related)\n`;
-  t += `\n  [신체부담기여도] ${r.min}% ~ ${r.max}%\n`;
-  t += `  [누적신체부담] ${cum}\n`;
-  return t;
+
+  if (relatedness) {
+    text += `\n  참고) 신체부담 정도는 다음의 4단계로 구분함.\n`;
+    text += `  1) 고도: 퇴행성 변화를 유발 또는 가속하는 것이 확실함(definite)\n`;
+    text += `  2) 중등도상: 퇴행성 변화를 유발 또는 가속하기에 충분함(probable)\n`;
+    text += `  3) 중등도하: 퇴행성 변화를 유발 또는 가속할 가능성이 있음(possible)\n`;
+    text += `  4) 경도: 퇴행성 변화를 유발 또는 가속하기 어려움(no related)\n`;
+    text += `\n  [신체부담기여도] ${relatedness.min}% ~ ${relatedness.max}% (평균 ${avgRelatedness}%)\n`;
+  }
+  if (cumulativeBurden) {
+    text += `  [누적신체부담] ${cumulativeBurden}\n`;
+  }
+  text += `\n  **신체부담정도, 신체부담 기여도, 누적 신체부담에 관한 자세한 사항은\n`;
+  text += `  <근골격계 질환의 업무관련성 특별진찰 표준화를 위한 모델 개발\n`;
+  text += `  - 무릎 관절염을 대상으로 -, 대한직업환경의학회, 2025>\n`;
+  text += `  보고서를 참조하기 바람.\n`;
+
+  return text;
+}
+
+function getShoulderInterpretation(totals) {
+  const exceeded = (totals || []).filter(t => t.exceeded);
+  if (exceeded.length > 0) {
+    const names = exceeded.map(t => t.label).join(', ');
+    return `** ${names} 기준을 초과하여 누적 신체부담은 충분함.`;
+  }
+  const over75 = (totals || []).filter(t => t.ratio >= 0.75);
+  const over50 = (totals || []).filter(t => t.ratio >= 0.50);
+  if (over50.length >= 3 || over75.length >= 2) {
+    return `** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.`;
+  }
+  return `** 노출 기준치에 미달하여 누적 신체부담 불충분함.`;
 }
 
 function genShoulderBurdenSection(calc) {
-  const { totals, jobBurdens: jb, anyRepetitiveExceeded } = calc;
-  let t = `\n  <어깨(견관절) BK2117 누적 기준 비교>\n`;
-  (totals || []).forEach(tot => {
-    if (tot.totalHours > 0) {
-      const ratioStr = `${(tot.ratio * 100).toFixed(0)}%`;
-      const exceeded = tot.exceeded ? ' [초과]' : '';
-      t += `  ${tot.label}: ${tot.totalHours.toFixed(1)}시간 / 임계값 ${tot.limit.toLocaleString()}시간 (${ratioStr}${exceeded})\n`;
-    } else {
-      t += `  ${tot.label}: -\n`;
-    }
+  const { totals, jobBurdens } = calc;
+  let text = `\n< 어깨(견관절) >\n`;
+  text += `독일의 산재보험 번호 BK2117 장기간의 집중적인 기계적 부하로 인한 어깨 회전근개 병변에 사용하는 어깨 부담 평가 지침을 이용하여 평가하였음.\n\n`;
+
+  (totals || []).forEach(total => {
+    const pct = total.totalHours > 0 ? `${(total.ratio * 100).toFixed(0)}%` : '';
+    const exceeded = total.exceeded ? ' [초과]' : '';
+    text += `- ${total.label}: ${total.totalHours > 0 ? `${total.totalHours.toFixed(1)}시간` : '-'} (기준 ${total.limit.toLocaleString()}시간${pct ? ` / ${pct}` : ''}${exceeded})\n`;
   });
-  if (anyRepetitiveExceeded) t += `  ※ 반복동작 기준 충족 (중간속도 OR 고도 초과)\n`;
-  if ((jb || []).filter(j => j.jobName).length > 1) {
-    t += `\n  [직력별 기여]\n`;
-    jb.filter(j => j.jobName).forEach((j, i) => {
-      t += `  직력${i + 1}: ${j.jobName} (${j.periodYears > 0 ? j.periodYears.toFixed(1) + '년' : '-'})\n`;
-      (j.exposures || []).forEach(exp => {
-        if (exp.dailyHours > 0) t += `    ${exp.label}: ${exp.dailyHours}시간/일 → 누적 ${exp.cumulativeHours.toFixed(1)}시간\n`;
+
+  text += `\n${getShoulderInterpretation(totals)}\n`;
+
+  const jobsWithData = (jobBurdens || []).filter(job => job.jobName);
+  if (jobsWithData.length > 1) {
+    text += `\n[직력별 기여]\n`;
+    jobsWithData.forEach((job, index) => {
+      text += `- 직력${index + 1}: ${job.jobName} (${job.periodYears > 0 ? `${job.periodYears.toFixed(1)}년` : '-'})\n`;
+      (job.exposures || []).forEach(exposure => {
+        if (exposure.dailyHours > 0) {
+          text += `  ${exposure.label}: ${exposure.dailyHours}시간/일, 누적 ${exposure.cumulativeHours.toFixed(1)}시간\n`;
+        }
       });
     });
   }
-  return t;
+
+  return text;
+}
+
+function formatSpineNumber(value, digits = 2) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue.toFixed(digits) : '-';
+}
+
+function formatSpinePercent(item) {
+  return Number.isFinite(item?.percent) ? item.percent.toFixed(0) : '0';
+}
+
+function formatSpineLimit(item) {
+  return Number.isFinite(item?.limit) ? item.limit.toFixed(1) : '-';
+}
+
+function isSpineThresholdExceeded(item) {
+  return Number.isFinite(item?.percent) && item.percent > 100;
+}
+
+function getSpineThresholdStatus(item) {
+  return isSpineThresholdExceeded(item) ? '초과' : '미만';
+}
+
+function getSpineTaskDose(task) {
+  const totalSeconds = convertTimeToSeconds(task.timeValue, task.timeUnit) * (Number(task.frequency) || 0);
+  const force = Number(task.force) || 0;
+  const singleForceThreshold = thresholds.singleForce;
+  const included = force >= singleForceThreshold;
+  const dailyContribution = included ? (force * Math.sqrt(totalSeconds)) / 1000 / 60 : 0;
+
+  return {
+    totalHours: totalSeconds / 3600,
+    dailyContribution,
+  };
+}
+
+function getSpineInterpretation(comparison) {
+  if (!comparison) return '';
+
+  const dws2Limit = formatSpineLimit(comparison.dws2);
+  const courtLimit = formatSpineLimit(comparison.court);
+  const mddmLimit = formatSpineLimit(comparison.mddm);
+
+  if (isSpineThresholdExceeded(comparison.mddm)) {
+    return `** 최신 DWS2 연구 기준(${dws2Limit} MN·h), 독일 연방 사회법원(BSG) 기준(${courtLimit} MN·h), 가장 보수적인 MDDM 최초 모델 기준(${mddmLimit} MN·h)을 모두 초과하여, 직업적 요인을 질병 발생의 주요 원인으로 강하게 추정 가능합니다.`;
+  }
+
+  if (isSpineThresholdExceeded(comparison.court)) {
+    return `** 최신 DWS2 연구 기준(${dws2Limit} MN·h), 보다 보수적인 독일 연방 사회법원(BSG) 기준(${courtLimit} MN·h)을 초과하여, 직업적 요인을 질병 발생의 주요 원인으로 추정 가능합니다.`;
+  }
+
+  if (isSpineThresholdExceeded(comparison.dws2)) {
+    return `** 최신 DWS2 연구 기준(${dws2Limit} MN·h)을 초과하여, 직업적 요인의 관여 가능성을 검토할 수 있습니다.`;
+  }
+
+  return `** DWS2 연구 기준(${dws2Limit} MN·h), 독일 연방 사회법원(BSG) 기준(${courtLimit} MN·h), MDDM 최초 모델 기준(${mddmLimit} MN·h)에 모두 미달하여, MDDM 누적 노출 기준만으로는 직업적 요인을 주요 원인으로 보기 어렵습니다.`;
 }
 
 function genSpineBurdenSection(calc) {
-  const { jobResults, dailyDose, lifetimeDose, comparison, workRelatedness, maxForce } = calc;
-  let t = `\n  <척추(요추)>\n`;
+  const { tasks, dailyDose, lifetimeDose, comparison, maxForce } = calc;
+  const spineTasks = tasks || [];
+  let text = `\n< 허리(요추) >\n`;
+  text += `독일의 산재보험 번호 BK2108. 장기간의 중량물 취급 또는 허리를 굽히기로 인해 발생한 요추간판 탈출증 에서 사용하는 척추 압박력 평가 모델(Mainz-Dortmund Dose Model, MDDM)을 이용하여 평가하였음.\n\n`;
 
-  // 직업별 결과 (2개 이상일 때)
-  if (jobResults && jobResults.length > 1) {
-    t += `  [직력별 평가 결과]\n`;
-    jobResults.forEach((jr, i) => {
-      t += `  직력${i + 1}: ${jr.jobName} (${jr.periodYears.toFixed(1)}년)\n`;
-      t += `  일일선량: ${jr.dailyDose.dailyDoseKNh.toFixed(2)} kN\xB7h / `;
-      t += `누적선량: ${jr.lifetimeDose.excluded ? '일일선량 미달' : `${jr.lifetimeDose.lifetimeDoseMNh.toFixed(2)} MN\xB7h`}\n\n`;
-    });
-    t += `  [합산 결과]\n`;
+  text += `작업별 분석\n`;
+  if (spineTasks.length === 0) {
+    text += `- 입력된 작업 없음\n`;
   } else {
-    t += `  [평가 결과]\n`;
+    spineTasks.forEach((task, index) => {
+      const taskDose = getSpineTaskDose(task);
+      text += `작업 ${index + 1}. ${task.name || '-'}\n`;
+      text += `자세 ${task.posture || '-'} · ${task.weight || '-'}kg · ${task.frequency || 0}회/일\n`;
+      text += `압박력 : ${(task.force || 0).toLocaleString()} N\n`;
+      text += `일일 시간: ${formatSpineNumber(taskDose.totalHours, 3)} h | 일일 기여: ${formatSpineNumber(taskDose.dailyContribution, 2)} kN·h\n`;
+    });
   }
 
-  t += `  최대 압박력: ${maxForce.toLocaleString()} N\n`;
-  t += `  일일선량: ${dailyDose.dailyDoseKNh.toFixed(2)} kN\xB7h\n`;
-  t += `  누적선량: ${lifetimeDose.lifetimeDoseMNh.toFixed(2)} MN\xB7h\n`;
-  t += `\n  [기준 비교]\n`;
-  t += `  DWS2: ${comparison.dws2.percent.toFixed(0)}% (${comparison.dws2.limit} MN\xB7h)\n`;
-  t += `  법원기준: ${comparison.court.percent.toFixed(0)}% (${comparison.court.limit} MN\xB7h)\n`;
-  t += `  MDDM: ${comparison.mddm.percent.toFixed(0)}% (${comparison.mddm.limit} MN\xB7h)\n`;
-  t += `\n  [신체부담기여도] ${workRelatedness.grade} (기여도: ${workRelatedness.workContribution}%)\n`;
-  t += `  ${workRelatedness.detail}\n`;
-  return t;
+  text += `\n종합\n`;
+  text += `- 최대 압박력: ${(maxForce || 0).toLocaleString()} N\n`;
+  const dailyKNh = dailyDose?.dailyDoseKNh || 0;
+  const mf = maxForce || 0;
+  let severityLabel;
+  if (dailyKNh > 4 || mf >= 6000) severityLabel = '고도';
+  else if (dailyKNh > 3 || mf >= 5000) severityLabel = '중등도상';
+  else if (dailyKNh >= 2 || mf >= 4000) severityLabel = '중등도하';
+  else severityLabel = '경도';
+  text += `- 일일 노출량: ${dailyKNh.toFixed(2)} kN·h (${severityLabel})\n`;
+  text += `- **누적 노출량: ${lifetimeDose?.lifetimeDoseMNh?.toFixed(2) || '0.00'} MN·h **\n`;
+
+  if (comparison) {
+    text += `\n기준치 대비\n`;
+    text += `- **DWS2(독일 척추 연구) 기준 대비 : ${formatSpinePercent(comparison.dws2)}% (${formatSpineLimit(comparison.dws2)} MN·h) : ${getSpineThresholdStatus(comparison.dws2)}\n`;
+    text += `- 독일 연방 사회법원(BSG) 기준 대비 : ${formatSpinePercent(comparison.court)}% (${formatSpineLimit(comparison.court)} MN·h) : ${getSpineThresholdStatus(comparison.court)}\n`;
+    text += `- MDDM 최초 모델 기준 대비 : ${formatSpinePercent(comparison.mddm)}% (${formatSpineLimit(comparison.mddm)} MN·h) : ${getSpineThresholdStatus(comparison.mddm)}\n\n`;
+    text += `${getSpineInterpretation(comparison)}\n`;
+  }
+
+  return text;
+}
+
+function genElbowBurdenSection(calc) {
+  let text = `\n< 팔꿈치(주관절) >\n`;
+
+  if (calc.missingCommonFields?.length) {
+    text += `- 공통 시간적 선후관계 누락: ${calc.missingCommonFields.join(', ')}\n`;
+  }
+
+  const temporalFlags = calc.temporalFlagItems || [];
+  if (temporalFlags.length > 0) {
+    text += `- 공통 시간적 선후관계: ${temporalFlags.map(flag => flag.label).join(', ')}\n`;
+  }
+
+  (calc.jobSummaries || []).forEach((jobSummary, index) => {
+    text += `- 직력${index + 1}: ${jobSummary.jobName || '-'}\n`;
+    (jobSummary.diagnosisSummaries || []).forEach(summary => {
+      const diag = summary.diagnosis || {};
+      const riskFactorText = summary.riskFactorItems?.length > 0
+        ? summary.riskFactorItems.map(flag => flag.label).join(', ')
+        : '확인된 위험 요인 없음';
+      text += `  - ${diag.code || ''} ${diag.name || ''} (${getSideText(diag.side)})\n`;
+      if (summary.missingFields.length > 0) {
+        text += `    입력 누락: ${summary.missingFields.join(', ')}\n`;
+      }
+      text += `    분석 정리:\n`;
+      text += `      ${summary.narrative.split('\n').join('\n      ')}\n`;
+      text += `      업무에 포함된 위험 요인: ${riskFactorText}\n`;
+      if (summary.riskFactorSentence) {
+        text += `\n      **종합평가** ${summary.riskFactorSentence}\n`;
+      }
+    });
+  });
+
+  return text;
 }
 
 export function generateUnifiedReport(patient) {
@@ -90,167 +233,81 @@ export function generateUnifiedReport(patient) {
   const age = calculateAge(shared.birthDate, shared.injuryDate);
   const bmi = calculateBMI(shared.height, shared.weight);
 
-  // ---- 헤더 ----
-  let t = `업무관련성 특별진찰 소견서\n\n`;
-  t += `이름: ${shared.name || '-'}(${shared.gender === 'male' ? '남' : shared.gender === 'female' ? '여' : ''})\n`;
-  t += `키/몸무게: ${shared.height || '-'}cm / ${shared.weight || '-'}kg (BMI: ${bmi || '-'})\n`;
-  t += `생년월일: ${shared.birthDate || '-'}\n`;
-  t += `재해일자: ${shared.injuryDate || '-'} (만 ${age}세)\n\n`;
+  let text = `업무관련성 통합 평가 보고서\n\n`;
+  text += `이름: ${shared.name || '-'}(${shared.gender === 'male' ? '남' : shared.gender === 'female' ? '여' : '-'})\n`;
+  text += `키/체중: ${shared.height || '-'}cm / ${shared.weight || '-'}kg (BMI: ${bmi || '-'})\n`;
+  text += `생년월일: ${shared.birthDate || '-'}\n`;
+  text += `재해일자: ${shared.injuryDate || '-'} (만 ${age || '-'}세)\n\n`;
 
-  // ---- [신청 상병] ----
-  t += `[신청 상병]\n`;
-  diagnoses.forEach((d, i) => {
-    if (d.code || d.name) t += `#${i + 1}. ${d.code} ${d.name} (${getSideText(d.side)})\n`;
+  text += `[신청 상병]\n`;
+  diagnoses.forEach((diag, index) => {
+    if (diag.code || diag.name) {
+      text += `#${index + 1}. ${diag.code || ''} ${diag.name || ''}${diag.side ? ` (${getSideText(diag.side)})` : ''}\n`;
+    }
   });
 
-  // ---- [특이사항] ----
-  t += `\n[특이사항]\n${shared.specialNotes || '-'}\n`;
+  text += `\n[특이사항]\n${shared.specialNotes || '-'}\n`;
 
-  // ---- [직업력 및 신체부담 평가] ----
-  t += `\n[직업력 및 신체부담 평가]\n`;
-
-  // 1. 직업력
-  t += `\n1. 직업력\n`;
-  jobs.forEach((j, i) => {
-    t += `  직력${i + 1}: ${j.jobName || '-'} | ${getEffectiveWorkPeriodText(j)}\n`;
+  text += `\n[직업력]\n`;
+  jobs.forEach((job, index) => {
+    text += `- 직력${index + 1}: ${job.jobName || '-'} | ${getEffectiveWorkPeriodText(job)}\n`;
   });
 
-  // 2. 신체부담평가
-  t += `\n2. 신체부담평가\n`;
+  text += `\n[부위별 신체부담 평가]\n`;
   for (const moduleId of activeModules) {
-    const mod = getModule(moduleId);
-    if (!mod?.computeCalc) continue;
-    const patientData = { shared, module: modules[moduleId] || {} };
-    const calc = mod.computeCalc(patientData);
+    const moduleManifest = getModule(moduleId);
+    if (!moduleManifest?.computeCalc) continue;
+    const calc = moduleManifest.computeCalc({
+      shared,
+      module: modules[moduleId] || {},
+    });
 
-    if (moduleId === 'knee') {
-      t += genKneeBurdenSection(calc);
-    } else if (moduleId === 'spine') {
-      t += genSpineBurdenSection(calc);
-    } else if (moduleId === 'shoulder') {
-      t += genShoulderBurdenSection(calc);
-    }
+    if (moduleId === 'knee') text += genKneeBurdenSection(calc);
+    if (moduleId === 'shoulder') text += genShoulderBurdenSection(calc);
+    if (moduleId === 'spine') text += genSpineBurdenSection(calc);
+    if (moduleId === 'elbow') text += genElbowBurdenSection(calc);
   }
 
-  // ---- [종합소견] ----
-  t += `\n[종합소견]\n`;
-  const hasKnee = activeModules.includes('knee');
-  const hasShoulder = activeModules.includes('shoulder');
+  text += `\n[업무관련성 평가 결과]\n`;
+  diagnoses.forEach((diag, index) => {
+    if (!(diag.code || diag.name)) return;
 
-  if (hasKnee) {
-    const kneeMod = getModule('knee');
-    if (kneeMod?.computeCalc) {
-      const kneeCalc = kneeMod.computeCalc({ shared, module: modules.knee || {} });
-      const { relatedness: r, cumulativeBurden: cum, jobBurdens: jb } = kneeCalc;
-
-      t += `\n\n  <무릎 (슬관절)>\n\n`;
-      (jb || []).forEach((j) => {
-        const checked = Object.entries(AUX_LABELS).filter(([k]) => j[k]).map(([, v]) => v);
-        t += `  직종: ${j.jobName || '-'}\n`;
-        t += `  일 중량물 취급량: ${j.weight || '-'}kg\n`;
-        t += `  일 쪼그려 앉기 시간: ${j.squatting || '-'}분\n`;
-        if (checked.length > 0) t += `  보조변수: ${checked.join(', ')}\n`;
-        t += `  무릎 부담 정도: ${j.burden.level}\n\n`;
-      });
-      t += `  참고) 신체부담 정도는 다음의 4단계로 구분함.\n`;
-      t += `  1) 고도: 퇴행성 변화를 유발 또는 가속하는 것이 확실함(definite)\n`;
-      t += `  2) 중등도상: 퇴행성 변화를 유발 또는 가속하기에 충분함(probable)\n`;
-      t += `  3) 중등도하: 퇴행성 변화를 유발 또는 가속할 가능성이 있음(possible)\n`;
-      t += `  4) 경도: 퇴행성 변화를 유발 또는 가속하기 어려움(no related)\n`;
-      t += `\n  [신체부담기여도] ${r.min}% ~ ${r.max}%\n\n`;
-      t += `  [누적신체부담] ${cum}\n`;
-      t += `\n  **신체부담정도, 신체부담 기여도, 누적 신체부담에 관한 자세한 사항은\n`;
-      t += `  <근골격계 질환의 업무관련성 특별진찰 표준화를 위한 모델 개발\n`;
-      t += `  - 무릎 관절염을 대상으로 -, 대한직업환경의학회, 2025>\n`;
-      t += `  보고서를 참조하기 바람.\n`;
-      t += `\n`;
-    }
-  }
-
-  if (hasShoulder) {
-    const shoulderMod = getModule('shoulder');
-    if (shoulderMod?.computeCalc) {
-      const shoulderCalc = shoulderMod.computeCalc({ shared, module: modules.shoulder || {} });
-      const { totals, anyRepetitiveExceeded } = shoulderCalc;
-      t += `\n\n  <어깨 (견관절) BK2117 기준 비교>\n\n`;
-      (totals || []).forEach(tot => {
-        const ratioStr = tot.totalHours > 0 ? ` / 비율 ${(tot.ratio * 100).toFixed(0)}%${tot.exceeded ? ' [초과]' : ''}` : '';
-        t += `  ${tot.label}: ${tot.totalHours > 0 ? tot.totalHours.toFixed(1) + '시간' : '-'} (임계값 ${tot.limit.toLocaleString()}시간${ratioStr})\n`;
-      });
-      if (anyRepetitiveExceeded) t += `  ※ 반복동작 기준 충족 (중간속도 OR 고도 초과)\n`;
-      t += `\n`;
-    }
-  }
-
-  const hasSpine = activeModules.includes('spine');
-  if (hasSpine) {
-    const spineMod = getModule('spine');
-    if (spineMod?.computeCalc) {
-      const spineCalc = spineMod.computeCalc({ shared, module: modules.spine || {} });
-      const { dailyDose, lifetimeDose, comparison, workRelatedness, maxForce } = spineCalc;
-      t += `\n\n  <척추 (요추) MDDM 평가>\n\n`;
-      t += `  최대 압박력: ${(maxForce || 0).toLocaleString()} N\n`;
-      t += `  일일선량: ${dailyDose?.dailyDoseKNh?.toFixed(2) || '0.00'} kN\xB7h\n`;
-      t += `  누적선량: ${lifetimeDose?.lifetimeDoseMNh?.toFixed(2) || '0.00'} MN\xB7h\n`;
-      if (comparison) {
-        t += `\n  [기준 비교]\n`;
-        t += `  DWS2: ${comparison.dws2?.percent?.toFixed(0) || '0'}% (${comparison.dws2?.limit || '-'} MN\xB7h)\n`;
-        t += `  법원기준: ${comparison.court?.percent?.toFixed(0) || '0'}% (${comparison.court?.limit || '-'} MN\xB7h)\n`;
-        t += `  MDDM: ${comparison.mddm?.percent?.toFixed(0) || '0'}% (${comparison.mddm?.limit || '-'} MN\xB7h)\n`;
-      }
-      if (workRelatedness) {
-        t += `\n  [신체부담기여도] ${workRelatedness.grade || '-'} (기여도: ${workRelatedness.workContribution || 0}%)\n`;
-      }
-      t += `\n`;
-    }
-  }
-   t += `\n[ 업무관련성 평가 결과 ]\n`;
-
-  diagnoses.forEach((d, i) => {
-    if (!(d.code || d.name)) return;
-    const resolvedModule = resolveDiagnosisModule(d, activeModules);
-    t += `\n상병 #${i + 1}: ${d.code} ${d.name}\n`;
+    const resolvedModule = resolveDiagnosisModule(diag, activeModules);
+    text += `\n상병 #${index + 1}: ${diag.code || ''} ${diag.name || ''}\n`;
 
     if (resolvedModule?.moduleId === 'spine') {
-      // 척추: 좌우 없이 단일
-      t += `  상병 상태(${getStatusText(d.confirmedRight)}) / 업무관련성(${d.assessmentRight === 'high' ? '높음' : d.assessmentRight === 'low' ? '낮음' : '-'})`;
-      if (d.assessmentRight === 'low') t += `\n    낮음 사유:\n    - ${getReasonText(d.reasonRight, d.reasonRightOther).split('\n').join('\n    - ')}`;
-      t += `\n`;
-    } else if (resolvedModule?.moduleId === 'shoulder') {
-      // 어깨: 좌/우별 출력
-      if (d.side === 'right' || d.side === 'both') {
-        t += `  우측: 상병 상태(${getStatusText(d.confirmedRight)}) / 업무관련성(${d.assessmentRight === 'high' ? '높음' : d.assessmentRight === 'low' ? '낮음' : '-'})`;
-        if (d.assessmentRight === 'low') t += `\n    낮음 사유:\n    - ${getReasonText(d.reasonRight, d.reasonRightOther).split('\n').join('\n    - ')}`;
-        t += `\n`;
+      text += `  평가: 상병 상태(${getStatusText(diag.confirmedRight)}) / 업무관련성(${diag.assessmentRight === 'high' ? '높음' : diag.assessmentRight === 'low' ? '낮음' : '-'})\n`;
+      if (diag.assessmentRight === 'low') {
+        text += `  낮음 사유:\n  - ${getReasonText(diag.reasonRight, diag.reasonRightOther).split('\n').join('\n  - ')}\n`;
       }
-      if (d.side === 'left' || d.side === 'both') {
-        t += `  좌측: 상병 상태(${getStatusText(d.confirmedLeft)}) / 업무관련성(${d.assessmentLeft === 'high' ? '높음' : d.assessmentLeft === 'low' ? '낮음' : '-'})`;
-        if (d.assessmentLeft === 'low') t += `\n    낮음 사유:\n    - ${getReasonText(d.reasonLeft, d.reasonLeftOther).split('\n').join('\n    - ')}`;
-        t += `\n`;
+      return;
+    }
+
+    if (diag.side === 'right' || diag.side === 'both') {
+      text += `  우측: 상병 상태(${getStatusText(diag.confirmedRight)}) / 업무관련성(${diag.assessmentRight === 'high' ? '높음' : diag.assessmentRight === 'low' ? '낮음' : '-'})\n`;
+      if (diag.assessmentRight === 'low') {
+        text += `  낮음 사유:\n  - ${getReasonText(diag.reasonRight, diag.reasonRightOther).split('\n').join('\n  - ')}\n`;
       }
-    } else if (hasKnee) {
-      // 무릎: 좌/우별 출력
-      if (d.side === 'right' || d.side === 'both') {
-        t += `  우측: 상병 상태(${getStatusText(d.confirmedRight)}) / 업무관련성(${d.assessmentRight === 'high' ? '높음' : d.assessmentRight === 'low' ? '낮음' : '-'})`;
-        if (d.assessmentRight === 'low') t += `\n    낮음 사유:\n    - ${getReasonText(d.reasonRight, d.reasonRightOther).split('\n').join('\n    - ')}`;
-        t += `\n`;
-      }
-      if (d.side === 'left' || d.side === 'both') {
-        t += `  좌측: 상병 상태(${getStatusText(d.confirmedLeft)}) / 업무관련성(${d.assessmentLeft === 'high' ? '높음' : d.assessmentLeft === 'low' ? '낮음' : '-'})`;
-        if (d.assessmentLeft === 'low') t += `\n    낮음 사유:\n    - ${getReasonText(d.reasonLeft, d.reasonLeftOther).split('\n').join('\n    - ')}`;
-        t += `\n`;
+    }
+
+    if (diag.side === 'left' || diag.side === 'both') {
+      text += `  좌측: 상병 상태(${getStatusText(diag.confirmedLeft)}) / 업무관련성(${diag.assessmentLeft === 'high' ? '높음' : diag.assessmentLeft === 'low' ? '낮음' : '-'})\n`;
+      if (diag.assessmentLeft === 'low') {
+        text += `  낮음 사유:\n  - ${getReasonText(diag.reasonLeft, diag.reasonLeftOther).split('\n').join('\n  - ')}\n`;
       }
     }
   });
 
-  // ---- [복귀 관련 고려사항] ----
-  const returnConsiderations = modules.knee?.returnConsiderations || modules.shoulder?.returnConsiderations || '';
+  const returnConsiderations = modules.knee?.returnConsiderations
+    || modules.shoulder?.returnConsiderations
+    || modules.elbow?.returnConsiderations
+    || '';
+
   if (returnConsiderations) {
-    t += `\n[복귀 관련 고려사항]\n${returnConsiderations}\n`;
+    text += `\n[복귀 관련 고려사항]\n${returnConsiderations}\n`;
   }
 
-  // ---- 꼬리 ----
-  t += `\n${'─'.repeat(50)}\n${shared.evaluationDate || '-'}\n${shared.hospitalName || '-'} ${shared.department || ''}\n담당의: ${shared.doctorName || '-'}`;
+  text += `\n${'-'.repeat(50)}\n${shared.evaluationDate || '-'}\n${shared.hospitalName || '-'} ${shared.department || ''}\n담당의 ${shared.doctorName || '-'}`;
 
-  return t;
+  return text;
 }
