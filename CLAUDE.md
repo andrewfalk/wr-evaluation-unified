@@ -1,8 +1,8 @@
 # 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
 ## 프로젝트 개요
-직업환경의학 전문의를 위한 통합 평가 도구. 무릎(슬관절) + 척추(MDDM) 평가를 모듈식으로 결합.
-향후 고관절, 어깨 등 추가 예정 → 플러그인 아키텍처.
+직업환경의학 전문의를 위한 통합 평가 도구. 무릎(슬관절) + 팔꿈치(BK2101/2103/2105/2106) + 어깨(BK2117) + 척추(MDDM) 평가를 모듈식으로 결합.
+향후 고관절 등 추가 예정 → 플러그인 아키텍처.
 
 - **기술 스택**: React 18 + Vite 5 + CSS Variables
 - **배포**: 웹(Vercel) + 데스크톱(Electron) 동시 지원
@@ -25,11 +25,14 @@ vercel deploy            # Vercel 배포
 src/
 ├── core/                    # 공유 프레임워크
 │   ├── moduleRegistry.js    # registerModule(), getModule(), getAllModules()
-│   ├── components/          # BasicInfoForm, DiagnosisForm, AIAnalysisPanel, ModuleSelector, SettingsModal
+│   ├── components/          # BasicInfoForm, DiagnosisForm, AIAnalysisPanel, PresetSearch, PresetManageModal, SettingsModal
 │   ├── hooks/               # useAIAnalysis (web/electron 자동 분기), usePatientList
+│   ├── services/            # presetRepository (프리셋 CRUD, builtin+custom 병합)
 │   └── utils/               # storage, platform, common, data
 ├── modules/
 │   ├── knee/                # 무릎 모듈 (KneeEvaluation, JobTab, AssessmentTab, KneeResultPanel)
+│   ├── shoulder/            # 어깨 모듈 (ShoulderEvaluation, JobTab, ShoulderResultPanel)
+│   ├── elbow/               # 팔꿈치 모듈 (ElbowEvaluation, ExposureForm, ElbowResultPanel)
 │   └── spine/               # 척추 MDDM 모듈 (SpineEvaluation, TaskManager, TaskEditor, ResultDashboard)
 api/analyze.js               # Vercel 서버리스 (Claude API 프록시)
 electron/                    # main.js + preload.js (IPC 기반 AI 호출)
@@ -51,6 +54,12 @@ registerModule({
   computeCalc: computeFn,
   isComplete: checkFn,
   exportHandlers: { excelSingle: exportFn },
+  presetConfig: {                          // 프리셋 시스템 연동 (선택)
+    label: '프리셋 표시명',
+    fields: [{ key: 'fieldKey', label: '라벨', type: 'number' }],
+    extractFromModule(moduleData, sharedJobId) { /* → 프리셋 데이터 */ },
+    applyToModule(moduleData, sharedJobId, presetData) { /* → 수정된 moduleData */ },
+  },
 });
 ```
 

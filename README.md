@@ -1,6 +1,6 @@
 # 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 3.2.0 | **Status:** MVP 개발 완료 / Vercel 배포 완료
+> **Version:** 3.2.1 | **Status:** MVP 개발 완료 / Vercel 배포 완료
 
 직업환경의학 전문의가 **업무상 질병 인정 여부를 판단**할 때 사용하는 통합 평가 도구.
 무릎(슬관절), 척추(요추 MDDM), 팔꿈치(주관절 BK2101/2103/2105/2106), 어깨(견관절 BK2117) 평가를 지원하며, 향후 고관절 등을 플러그인 형태로 확장할 수 있다.
@@ -54,7 +54,12 @@ registerModule({
   computeCalc,            // 계산/점수 산출 함수
   isComplete,             // 완료 판정 함수
   exportHandlers,         // 내보내기 핸들러
-  tabs: [{ id: 'job', label: '신체부담 평가' }]
+  tabs: [{ id: 'job', label: '신체부담 평가' }],
+  presetConfig: {         // 프리셋 시스템 연동 (선택)
+    label, fields,
+    extractFromModule(moduleData, sharedJobId) { ... },
+    applyToModule(moduleData, sharedJobId, presetData) { ... },
+  },
 });
 ```
 
@@ -196,8 +201,10 @@ src/
 ├── core/                            # 공유 프레임워크
 │   ├── moduleRegistry.js           # 모듈 등록/조회 API
 │   ├── components/                 # BasicInfoForm, DiagnosisForm, AssessmentStep,
-│   │                               # AIAnalysisPanel, BatchImportModal, SettingsModal 등
+│   │                               # AIAnalysisPanel, PresetSearch, PresetManageModal,
+│   │                               # BatchImportModal, SettingsModal 등
 │   ├── hooks/                      # useAIAnalysis, usePatientList
+│   ├── services/                   # presetRepository (프리셋 CRUD, builtin+custom 병합)
 │   └── utils/                      # data, diagnosisMapping, reportGenerator,
 │                                   # exportService, storage, platform 등
 ├── modules/
@@ -235,13 +242,20 @@ ICD 코드 기반 모듈 자동 추천:
 | 우선순위 | 항목 | 설명 |
 |----------|------|------|
 | P1 | 고관절 모듈 | hip 모듈 추가 (플러그인 패턴 활용) |
-| P2 | 척추 프리셋 연동 | 직업 프리셋 선택 시 MDDM 작업/변수 자동 채움 |
+| P2 | ~~척추 프리셋 연동~~ | ~~직업 프리셋 선택 시 MDDM 작업/변수 자동 채움~~ → v3.2.1 완료 |
 | P2 | 통합 PDF/Word | 통합 보고서를 PDF/Word 형식으로도 출력 |
 | P3 | 다중 사용자 | 서버 기반 데이터 저장 + 사용자 인증 |
 
 ---
 
 ## 변경 이력
+
+### v3.2.1 (2026-04-16)
+- **커스텀 프리셋 생성/저장**: `PresetManageModal` — 현재 입력된 신체부담 데이터를 프리셋으로 저장. 모듈별 선택, 데이터 미리보기, 커스텀 프리셋 삭제 지원
+- **프리셋 저장소 신설**: `presetRepository.js` — builtin(`job-presets.json`) + custom(localStorage/Electron FS) 이중 저장소, 병합 로드, JSON 내보내기/가져오기
+- **전 모듈 presetConfig 지원**: 무릎(8개 필드), 어깨(6개 노출량), 척추(작업 배열 교체) — 각 모듈이 `extractFromModule`/`applyToModule` 계약으로 프리셋 시스템 연동
+- **프리셋 검색 개선**: 모듈 배지 표시, 커스텀 프리셋 태그, 검색 결과 10개 확장
+- **중복 저장 방지**: id + jobName 이중 매칭
 
 ### v3.2.0 (2026-04-16)
 - **팔꿈치(주관절) 모듈 신설**: `src/modules/elbow/` — BK2101/2103/2105/2106 4유형 분기, Gate-and-Flag 판정, 공통 시간적 선후관계(모듈 전체 1회 입력), 직업 × 상병 2차원 `jobEvaluations[]` 구조

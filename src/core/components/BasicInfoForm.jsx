@@ -3,7 +3,7 @@ import { formatWorkPeriod } from '../utils/workPeriod';
 import { createSharedJob } from '../utils/data';
 import { PresetSearch } from './PresetSearch';
 
-export function BasicInfoForm({ shared, onChange, errors, refDateField = 'injuryDate', refDateLabel = '재해일자', presets, presetMeta, presetError, onPresetSelect }) {
+export function BasicInfoForm({ shared, onChange, errors, refDateField = 'injuryDate', refDateLabel = '재해일자', presets, presetMeta, presetError, onPresetSelect, onSavePreset, activeModules }) {
   const handleInput = (field, value) => {
     onChange({ ...shared, [field]: value });
   };
@@ -104,7 +104,10 @@ export function BasicInfoForm({ shared, onChange, errors, refDateField = 'injury
                 <span className="job-card-title">직력 {i + 1}</span>
                 <span className="job-card-subtitle">해당 직무의 기간과 근무 조건을 입력합니다.</span>
               </div>
-              {jobs.length > 1 && <button className="btn btn-danger btn-xs" onClick={() => removeJob(i)}>삭제</button>}
+              <div className="job-card-actions">
+                {onSavePreset && <button className="btn btn-outline btn-xs" onClick={() => onSavePreset(job.id)}>프리셋 저장</button>}
+                {jobs.length > 1 && <button className="btn btn-danger btn-xs" onClick={() => removeJob(i)}>삭제</button>}
+              </div>
             </div>
             <div className="form-row">
               <div className="form-group form-group-wide">

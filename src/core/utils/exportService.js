@@ -101,7 +101,7 @@ function getSpineInterpretation(comparison) {
 function buildSpineExposureText(calc) {
   const { tasks, dailyDose, lifetimeDose, comparison, maxForce } = calc || {};
   const spineTasks = tasks || [];
-  let text = '\n[허리(요추)]\n';
+  let text = '\n<허리(요추)>\n';
   text += '독일의 BK2108 장기간의 중량물 취급 또는 허리를 굽히기로 인해 발생한 요추간판 탈출증 평가에서 사용하는 척추 압박력 평가 모델(Mainz-Dortmund Dose Model, MDDM)을 이용하여 평가하였음.\n\n';
 
   text += '작업별 분석\n';
@@ -152,7 +152,7 @@ function buildExposureSection(shared, modules, activeModules) {
       ? ((Number(calc.relatedness.min) + Number(calc.relatedness.max)) / 2).toFixed(1)
       : null;
 
-    text += '\n<무릎 (슬관절)>\n';
+    text += '\n<무릎(슬관절)>\n';
     (calc?.jobBurdens || []).filter(job => job.jobName).forEach(job => {
       const checked = Object.entries(AUX_LABELS).filter(([key]) => job[key]).map(([, label]) => label);
       text += `직종: ${job.jobName || '-'}\n`;
@@ -180,7 +180,7 @@ function buildExposureSection(shared, modules, activeModules) {
 
   if (activeModules.includes('shoulder')) {
     const calc = getModule('shoulder')?.computeCalc?.({ shared, module: modules.shoulder || {} });
-    text += '\n[어깨(견관절)]\n';
+    text += '\n<어깨(견관절)>\n';
     text += '독일의 산재보험 번호 BK2117 장기간의 집중적인 기계적 부하로 인한 어깨 회전근개 병변에 사용하는 어깨 부담 평가 지침을 이용하여 평가하였음.\n\n';
     const shoulderTotals = calc?.totals || [];
     shoulderTotals.forEach(total => {
@@ -203,7 +203,7 @@ function buildExposureSection(shared, modules, activeModules) {
 
   if (activeModules.includes('elbow')) {
     const calc = getModule('elbow')?.computeCalc?.({ shared, module: modules.elbow || {} });
-    text += '\n[팔꿈치]\n';
+    text += '\n<팔꿈치(주관절)>\n';
     if (calc?.missingCommonFields?.length) {
       text += `- 공통 시간적 선후관계 누락: ${calc.missingCommonFields.join(', ')}\n`;
     }

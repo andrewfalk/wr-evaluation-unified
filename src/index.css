@@ -327,6 +327,7 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .btn:hover { opacity: 0.9; }
 .btn-primary { background: var(--accent); color: white; }
 .btn-primary:hover { background: var(--accent-dark); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-secondary { background: var(--btn-secondary-bg); color: var(--btn-secondary-color); border: 1px solid var(--btn-secondary-border); }
 .btn-danger { background: #ff6b6b; color: white; }
 .btn-success { background: #51cf66; color: white; }
@@ -1306,8 +1307,42 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   background: var(--hover-bg);
   box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.3);
 }
-.search-item-name { font-weight: 500; }
-.search-item-info { font-size: 0.75rem; color: var(--text-muted); }
+.search-item-name { font-weight: 500; display: flex; align-items: center; gap: 6px; }
+.search-item-info { font-size: 0.75rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+
+/* 프리셋 모듈 뱃지 */
+.preset-module-badges { display: inline-flex; gap: 3px; margin-left: 4px; }
+.preset-badge { font-size: 0.65rem; padding: 1px 5px; border-radius: 4px; background: var(--accent-bg, rgba(59,130,246,0.1)); color: var(--accent); font-weight: 600; white-space: nowrap; }
+.preset-custom-tag { font-size: 0.6rem; padding: 1px 4px; border-radius: 3px; background: rgba(245,158,11,0.15); color: #d97706; font-weight: 600; }
+.search-item.is-custom { border-left: 2px solid #d97706; }
+
+/* 프리셋 관리 모달 */
+.preset-manage-modal { max-width: 640px; display: flex; flex-direction: column; gap: 16px; }
+.preset-category-row { display: flex; gap: 8px; align-items: center; }
+.preset-category-row select, .preset-category-row input { flex: 1; }
+.preset-module-section { padding: 10px; border-radius: 8px; background: var(--hover-bg); margin-bottom: 8px; }
+.preset-module-section.is-empty { opacity: 0.5; }
+.preset-module-header { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+.preset-module-icon { font-size: 1rem; }
+.preset-no-data { font-size: 0.75rem; color: var(--text-muted); font-weight: 400; }
+.preset-field-preview { margin-top: 8px; padding-left: 28px; }
+.preset-preview-row { display: flex; justify-content: space-between; font-size: 0.8rem; padding: 2px 0; }
+.preset-preview-label { color: var(--text-secondary); }
+.preset-preview-value { font-weight: 500; color: var(--text-primary); }
+.preset-empty-notice { font-size: 0.85rem; color: var(--text-muted); text-align: center; padding: 16px; }
+
+/* 프리셋 목록 */
+.preset-list { display: flex; flex-direction: column; gap: 6px; }
+.preset-list-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-radius: 8px; background: var(--card-bg); border: 1px solid var(--card-border); }
+.preset-list-info { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
+.preset-list-name { font-weight: 600; }
+.preset-list-category { font-size: 0.75rem; color: var(--text-muted); }
+.preset-list-modules { font-size: 0.9rem; }
+
+/* job-card 액션 버튼 */
+.job-card-actions { display: flex; gap: 6px; align-items: center; }
+.btn-outline { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+.btn-outline:hover { background: var(--accent-bg, rgba(59,130,246,0.1)); }
 .contents-wrapper { display: contents; }
 .dropdown-divider-top { border-top: 1px solid var(--border-color) !important; }
 

@@ -458,10 +458,12 @@ BMI와 만 나이를 자동 계산하여 표시.
 기존에 모듈별로 분산되어 있던 직업 정보를 **공통 영역으로 통합**:
 
 - **카드 형식**: 복수 직종 입력 가능 (추가/삭제)
-- **직종명**: 프리셋 검색(PresetSearch) 지원 — `job-presets.json` 기반 자동완성
+- **직종명**: 프리셋 검색(PresetSearch) 지원 — `job-presets.json` 기반 자동완성 + 커스텀 프리셋 통합 검색
 - **기간**: 시작일/종료일 또는 수동 입력 ("5년 3개월")
 - **연간 근무일수**: 기본값 250일
-- **프리셋 연동**: 무릎 모듈 활성 시 프리셋 선택으로 weight/squatting 자동 채움
+- **프리셋 적용**: 활성 모듈 전체에 프리셋 데이터 자동 채움 (무릎: weight/squatting/보조변수, 어깨: 5개 노출량, 척추: 작업 목록). 각 모듈의 `presetConfig.applyToModule()`이 데이터 형태에 맞게 적용
+- **커스텀 프리셋 저장**: 현재 입력된 신체부담 데이터를 프리셋으로 저장 (PresetManageModal). 모듈별 체크박스 선택, 데이터 미리보기, 기존 커스텀 프리셋 삭제 지원
+- **프리셋 저장소**: `presetRepository.js` — builtin(`job-presets.json`) + custom(localStorage/Electron FS) 이중 저장, 병합 로드, JSON 내보내기/가져오기
 
 ### 5.3 특이사항 (섹션 3)
 
@@ -716,7 +718,8 @@ src/
 │   │   ├── DiagnosisForm.jsx            # 상병 입력 (ICD 코드/이름/부위)
 │   │   ├── AssessmentStep.jsx           # 종합소견 (공유 최종 스텝)
 │   │   ├── AIAnalysisPanel.jsx          # Claude AI 분석 UI
-│   │   ├── PresetSearch.jsx             # 직업 프리셋 검색 (자동완성)
+│   │   ├── PresetSearch.jsx             # 직업 프리셋 검색 (자동완성, 모듈 배지 표시)
+│   │   ├── PresetManageModal.jsx        # 커스텀 프리셋 저장/관리 모달
 │   │   ├── BatchImportModal.jsx         # 엑셀 일괄 입력
 │   │   ├── ModuleSelector.jsx           # 모듈 선택 UI
 │   │   └── SettingsModal.jsx            # 설정 모달
@@ -732,6 +735,8 @@ src/
 │       ├── exportService.js             # 통합 EMR Excel 내보내기 (single/selected/batch)
 │       ├── storage.js                   # localStorage 관리
 │       └── platform.js                  # 플랫폼 추상화 (alert, confirm)
+│   └── services/
+│       └── presetRepository.js          # 프리셋 CRUD (builtin+custom 병합, 내보내기/가져오기)
 │
 ├── modules/
 │   ├── knee/                            # 무릎 모듈
@@ -989,7 +994,7 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 | P0 | ~~어깨 모듈~~ | ~~shoulder 모듈 추가~~ → v3.0.0 완료 |
 | P0 | ~~팔꿈치 모듈~~ | ~~elbow 모듈 추가 (BK2101/2103/2105/2106)~~ → v3.2.0 완료 |
 | P1 | 고관절 모듈 | hip 모듈 추가 (플러그인 패턴 활용) |
-| P2 | 척추 프리셋 연동 | 직업 프리셋 선택 시 MDDM 작업/변수 자동 채움 |
+| P2 | ~~척추 프리셋 연동~~ | ~~직업 프리셋 선택 시 MDDM 작업/변수 자동 채움~~ → v3.2.1 완료 (전 모듈 presetConfig 지원) |
 | P2 | 통합 PDF/Word | 통합 보고서를 PDF/Word 형식으로도 출력 |
 | P3 | 다중 사용자 | 서버 기반 데이터 저장 + 사용자 인증 |
 
@@ -1069,6 +1074,19 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 - **척추 종합소견 드롭다운 2종**: `AssessmentTab.jsx`에 수직분포원리(확인/미확인) + 동반성 척추증(확인/미확인) 인라인 드롭다운 추가 (`verticalDistribution`, `concomitantSpondylosis` 필드)
 - **어깨 BK2117 누적 신체부담 판정**: `genShoulderBurdenSection` + `exportService` + `exportHandlers`에 3단 해석 로직 추가 — 초과 기준 나열→충분, 복합 노출(50%↑ ≥3개 또는 75%↑ ≥2개)→충분, 미달→불충분. 기존 `anyRepetitiveExceeded` 제거
 - **대시보드 모듈 사용 카드 개선**: 총합 숫자 제거 → 4개 모듈 2×2 그리드(모듈별 개별 색상). 평균 처리일수 `일` 단위를 숫자 옆 인라인으로 이동. 척추→허리 라벨 변경
+
+### Phase 17: 프리셋 기능 강화 (v3.2.1)
+
+- **커스텀 프리셋 생성/저장**: `PresetManageModal` — 현재 입력된 신체부담 데이터를 프리셋으로 저장. 모듈별 체크박스 선택, 데이터 미리보기, 기존 커스텀 프리셋 목록 표시/삭제
+- **프리셋 저장소 신설**: `presetRepository.js` — builtin(`job-presets.json`) + custom(localStorage/Electron FS) 이중 저장소. `loadAllPresets()`로 병합 로드, `saveCustomPreset()`/`deleteCustomPreset()`으로 CRUD, JSON 내보내기/가져오기 지원
+- **전 모듈 presetConfig 지원**: 각 모듈이 `presetConfig` 계약(`label`, `fields`, `extractFromModule`, `applyToModule`)을 선언하여 프리셋 시스템과 결합
+  - **무릎**: 8개 필드(weight, squatting, 6개 보조변수) — flat jobExtras 패턴
+  - **어깨**: 6개 노출 필드(overhead, repetitionMid, repetitionHigh, heavyLifting, liftingTime, vibration) — flat jobExtras 패턴
+  - **척추**: `fields: 'tasks'` — 작업 배열 교체 패턴 (sharedJobId 기준 필터/교체)
+  - **팔꿈치**: BK 유형 분기가 진단 의존적이어 v1에서는 제외
+- **프리셋 검색 개선**: `PresetSearch`에 모듈 배지(ModuleBadges) 표시, 커스텀 프리셋 태그, 검색 결과 10개로 확장
+- **프리셋 적용 일반화**: `handlePresetSelect`가 활성 모듈 전체를 순회하며 각 모듈의 `applyToModule()` 호출
+- **중복 저장 방지**: `saveCustomPreset()`에서 id + jobName 이중 매칭으로 동일 직종 중복 생성 차단
 
 ---
 

@@ -42,8 +42,12 @@ function calcProcessingDays(createdAt, evaluationDate) {
   return diff >= 0 ? diff : null;
 }
 
+function getRegistrationTimestamp(patient) {
+  return patient?.createdAt || patient?._savedAt || '';
+}
+
 export const computeDashboardStats = (currentPatients) => {
-  const allPatients = (currentPatients || []).map(p => ({ ...p, _savedAt: null }));
+  const allPatients = currentPatients || [];
 
 
   // 완료/진행중 + 모듈 사용량 + 처리일수
@@ -77,28 +81,35 @@ export const computeDashboardStats = (currentPatients) => {
   // 최근 활동 5건 (최종 수정일 기준)
   const sorted = [...allPatients]
     .sort((a, b) => {
-      const da = a.updatedAt || a.createdAt || '';
-      const db = b.updatedAt || b.createdAt || '';
+      const da = a.updatedAt || getRegistrationTimestamp(a);
+      const db = b.updatedAt || getRegistrationTimestamp(b);
       return db.localeCompare(da);
     })
     .slice(0, 5);
 
   const recentActivity = sorted.map(p => {
-    const days = calcProcessingDays(p.createdAt, p.data?.shared?.evaluationDate);
+    const complete = isPatientComplete(p);
+    const registrationTimestamp = getRegistrationTimestamp(p);
+    const days = complete
+      ? calcProcessingDays(registrationTimestamp, p.data?.shared?.evaluationDate)
+      : null;
+
     return {
       id: p.id,
       name: p.data?.shared?.name || '이름 없음',
-      registrationDate: p.createdAt?.split('T')[0] || '',
+      registrationDate: registrationTimestamp?.split('T')[0] || '',
       completionDate: p.data?.shared?.evaluationDate || '',
       moduleIds: p.data?.activeModules || [],
-      status: isPatientComplete(p) ? '완료' : '진행중',
+      status: complete ? '완료' : '진행중',
       processingDays: days,
     };
   });
 
   // 평균 처리일수 (완료 환자 대상)
   allPatients.forEach(p => {
-    const days = calcProcessingDays(p.createdAt, p.data?.shared?.evaluationDate);
+    if (!isPatientComplete(p)) return;
+
+    const days = calcProcessingDays(getRegistrationTimestamp(p), p.data?.shared?.evaluationDate);
     if (days !== null) processingDaysList.push(days);
   });
   const avgProcessingDays = processingDaysList.length > 0

@@ -1,6 +1,6 @@
 import { registerModule } from '../../core/moduleRegistry';
 import { SpineEvaluation } from './SpineEvaluation';
-import { createSpineModuleData } from './utils/data';
+import { createSpineModuleData, createTask } from './utils/data';
 import { computeSpineCalc, isSpineAssessmentComplete } from './utils/calculations';
 import { spineExportHandlers } from './utils/exportHandlers';
 
@@ -16,5 +16,25 @@ registerModule({
   exportHandlers: spineExportHandlers,
   tabs: [
     { id: 'tasks', label: '신체부담 평가' },
-  ]
+  ],
+  presetConfig: {
+    label: '척추 작업목록',
+    fields: 'tasks',
+    extractFromModule(moduleData, sharedJobId) {
+      const tasks = (moduleData.tasks || []).filter(t => t.sharedJobId === sharedJobId);
+      if (!tasks.length) return null;
+      return {
+        tasks: tasks.map(({ name, posture, weight, frequency, timeValue, timeUnit, correctionFactor }) =>
+          ({ name, posture, weight, frequency, timeValue, timeUnit, correctionFactor })),
+      };
+    },
+    applyToModule(moduleData, sharedJobId, presetData) {
+      const otherTasks = (moduleData.tasks || []).filter(t => t.sharedJobId !== sharedJobId);
+      const newTasks = (presetData.tasks || []).map((t, i) => ({
+        ...createTask(i, sharedJobId),
+        ...t,
+      }));
+      return { ...moduleData, tasks: [...otherTasks, ...newTasks] };
+    },
+  },
 });

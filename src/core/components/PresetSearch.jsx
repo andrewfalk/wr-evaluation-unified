@@ -1,4 +1,20 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { getModule } from '../moduleRegistry';
+
+const MODULE_LABELS = { knee: '무릎', shoulder: '어깨', spine: '척추', elbow: '팔꿈치' };
+
+function ModuleBadges({ modules }) {
+  if (!modules) return null;
+  const ids = Object.keys(modules);
+  if (!ids.length) return null;
+  return (
+    <span className="preset-module-badges">
+      {ids.map(id => (
+        <span key={id} className="preset-badge">{MODULE_LABELS[id] || id}</span>
+      ))}
+    </span>
+  );
+}
 
 export function PresetSearch({ presets, onSelect, value, onChange }) {
   const [query, setQuery] = useState(value || '');
@@ -54,7 +70,7 @@ export function PresetSearch({ presets, onSelect, value, onChange }) {
         p.jobName.toLowerCase().includes(nextQuery.toLowerCase()) ||
         p.category.toLowerCase().includes(nextQuery.toLowerCase())
       ))
-      .slice(0, 8);
+      .slice(0, 10);
 
     setResults(filtered);
     setShowResults(filtered.length > 0);
@@ -117,14 +133,20 @@ export function PresetSearch({ presets, onSelect, value, onChange }) {
               ref={el => {
                 itemRefs.current[index] = el;
               }}
-              className={`search-item preset-search-item ${activeIndex === index ? 'is-active' : ''}`}
+              className={`search-item preset-search-item ${activeIndex === index ? 'is-active' : ''} ${preset.source === 'custom' || preset._customId ? 'is-custom' : ''}`}
               onMouseEnter={() => setActiveIndex(index)}
               onClick={() => selectPreset(preset)}
               role="option"
               aria-selected={activeIndex === index}
             >
-              <div className="search-item-name">{preset.jobName}</div>
-              <div className="search-item-info">{preset.category} | {preset.weight}kg | {preset.squatting}분</div>
+              <div className="search-item-name">
+                {preset.jobName}
+                {(preset.source === 'custom' || preset._customId) && <span className="preset-custom-tag">custom</span>}
+              </div>
+              <div className="search-item-info">
+                {preset.category}
+                <ModuleBadges modules={preset.modules} />
+              </div>
             </div>
           ))}
         </div>

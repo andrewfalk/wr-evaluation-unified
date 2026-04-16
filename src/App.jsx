@@ -7,12 +7,14 @@ import { AIAnalysisPanel } from './core/components/AIAnalysisPanel';
 import { IntegrationStatusBadge } from './core/components/IntegrationStatusBadge';
 import { SettingsModal } from './core/components/SettingsModal';
 import { BatchImportModal } from './core/components/BatchImportModal';
+import { PresetManageModal } from './core/components/PresetManageModal';
 import Dashboard from './core/components/Dashboard';
 import { useAuth } from './core/auth/AuthContext';
 import { useIntegrationStatus } from './core/hooks/useIntegrationStatus';
 import { usePatientList } from './core/hooks/usePatientList';
 import { createSharedData, createDiagnosis, createTestPatients, formatBirthDate, DEFAULT_SETTINGS, FONT_SIZE_MAP } from './core/utils/data';
 import { FALLBACK_PRESETS } from './modules/knee/utils/data';
+import { loadAllPresets, normalizeBuiltinPreset, saveCustomPreset, deleteCustomPreset, loadCustomPresets } from './core/services/presetRepository';
 import { suggestModules } from './core/utils/diagnosisMapping';
 import { showAlert, showConfirm } from './core/utils/platform';
 import { getSyncedEvaluationDate, isPatientComplete } from './core/utils/patientCompletion';
@@ -110,6 +112,7 @@ function App() {
   const [presets, setPresets] = useState([]);
   const [presetMeta, setPresetMeta] = useState(null);
   const [presetError, setPresetError] = useState(null);
+  const [presetModalJobId, setPresetModalJobId] = useState(null);
 
   const { status: integrationStatus } = useIntegrationStatus({ session, settings });
   const activePatient = patients.find(p => p.id === activeId);
@@ -197,20 +200,22 @@ function App() {
     ));
   }, [activeId, patients, session]);
 
-  // 프리셋 로딩
-  useEffect(() => {
-    fetch('./job-presets.json')
-      .then(r => { if (!r.ok) throw new Error('Not found'); return r.json(); })
-      .then(data => {
-        setPresets(data.presets || []);
-        setPresetMeta({ version: data.version, lastUpdated: data.lastUpdated, count: data.presets?.length });
-      })
-      .catch(() => {
-        setPresets(FALLBACK_PRESETS);
-        setPresetMeta({ version: 'fallback', count: FALLBACK_PRESETS.length });
-        setPresetError('Preset 파일 로드 실패');
-      });
+  // 프리셋 로딩 (builtin + custom 통합)
+  const reloadPresets = useCallback(async () => {
+    try {
+      const { merged, builtinCount, customCount } = await loadAllPresets();
+      setPresets(merged);
+      setPresetMeta({ count: merged.length, builtinCount, customCount });
+      setPresetError(null);
+    } catch {
+      const fallback = FALLBACK_PRESETS.map(normalizeBuiltinPreset);
+      setPresets(fallback);
+      setPresetMeta({ count: fallback.length, builtinCount: fallback.length, customCount: 0 });
+      setPresetError('Preset 파일 로드 실패');
+    }
   }, []);
+
+  useEffect(() => { reloadPresets(); }, [reloadPresets]);
 
   // 자동 저장 복원 (초기 1회만)
   useEffect(() => {
@@ -375,32 +380,41 @@ function App() {
     updatePatient(d => ({ ...d, shared: { ...d.shared, diagnoses: newDiagnoses } }));
   };
 
-  // 프리셋 선택 시 무릎 모듈 jobExtras 자동 채움
+  // 프리셋 선택 시 활성 모듈 전체에 자동 채움
   const handlePresetSelect = useCallback((jobId, preset) => {
     setPatients(prev => prev.map(p => {
       if (p.id !== activeId) return p;
-      const kneeData = p.data.modules?.knee;
-      if (!kneeData) return p;
-      const extras = [...(kneeData.jobExtras || [])];
-      const idx = extras.findIndex(e => e.sharedJobId === jobId);
-      if (idx >= 0) {
-        extras[idx] = { ...extras[idx], weight: String(preset.weight), squatting: String(preset.squatting) };
-      } else {
-        extras.push({
-          sharedJobId: jobId,
-          weight: String(preset.weight),
-          squatting: String(preset.squatting),
-          evidenceSources: [],
-          stairs: false, kneeTwist: false, startStop: false,
-          tightSpace: false, kneeContact: false, jumpDown: false,
-        });
+      const newModules = { ...p.data.modules };
+      for (const moduleId of (p.data.activeModules || [])) {
+        const mod = getModule(moduleId);
+        const presetModuleData = preset.modules?.[moduleId];
+        if (mod?.presetConfig?.applyToModule && presetModuleData) {
+          newModules[moduleId] = mod.presetConfig.applyToModule(
+            newModules[moduleId] || mod.createModuleData(),
+            jobId,
+            presetModuleData
+          );
+        }
       }
       return touchPatientRecord(
-        { ...p, data: { ...p.data, modules: { ...p.data.modules, knee: { ...kneeData, jobExtras: extras } } } },
+        { ...p, data: { ...p.data, modules: newModules } },
         { session }
       );
     }));
   }, [activeId, session]);
+
+  // 커스텀 프리셋 저장
+  const handleSaveCustomPreset = useCallback(async (preset) => {
+    await saveCustomPreset(preset);
+    await reloadPresets();
+    setPresetModalJobId(null);
+  }, [reloadPresets]);
+
+  // 커스텀 프리셋 삭제
+  const handleDeleteCustomPreset = useCallback(async (id) => {
+    await deleteCustomPreset(id);
+    await reloadPresets();
+  }, [reloadPresets]);
 
   const addPatient = () => { handleStartIntake(); };
 
@@ -1001,7 +1015,7 @@ function App() {
       return (
         <>
           <div className="panel">
-            <BasicInfoForm shared={shared} onChange={updateShared} errors={errors} presets={presets} presetMeta={presetMeta} presetError={presetError} onPresetSelect={handlePresetSelect} />
+            <BasicInfoForm shared={shared} onChange={updateShared} errors={errors} presets={presets} presetMeta={presetMeta} presetError={presetError} onPresetSelect={handlePresetSelect} onSavePreset={setPresetModalJobId} activeModules={activeModules} />
           </div>
           <div className="panel">
             <BasicInfoSidePanel shared={shared} onChange={updateShared} />
@@ -1288,6 +1302,16 @@ function App() {
       {showSaveModal && renderSaveModal()}
       {showLoadModal && renderLoadModal()}
       {showBatchImport && <BatchImportModal onClose={() => setShowBatchImport(false)} onImport={handleBatchImport} existingPatients={patients} />}
+      {presetModalJobId && activePatient && (
+        <PresetManageModal
+          jobId={presetModalJobId}
+          patient={activePatient}
+          presets={presets}
+          onSave={handleSaveCustomPreset}
+          onDelete={handleDeleteCustomPreset}
+          onClose={() => setPresetModalJobId(null)}
+        />
+      )}
     </div>
   );
 }

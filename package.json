@@ -1,6 +1,6 @@
 {
   "name": "wr-evaluation-unified",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "description": "근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미",
   "main": "electron/main.js",
   "scripts": {
