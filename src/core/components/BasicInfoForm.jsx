@@ -1,7 +1,9 @@
+import { useRef, useCallback } from 'react';
 import { calculateBMI, calculateAge } from '../utils/common';
 import { formatWorkPeriod } from '../utils/workPeriod';
 import { createSharedJob } from '../utils/data';
 import { PresetSearch } from './PresetSearch';
+
 
 export function BasicInfoForm({ shared, onChange, errors, refDateField = 'injuryDate', refDateLabel = '재해일자', presets, presetMeta, presetError, onPresetSelect, onSavePreset, activeModules }) {
   const handleInput = (field, value) => {
@@ -46,6 +48,10 @@ export function BasicInfoForm({ shared, onChange, errors, refDateField = 'injury
           </div>
         </div>
         <div className="form-row">
+          <div className="form-group">
+            <label>환자등록번호</label>
+            <input value={shared.patientNo || ''} onChange={e => handleInput('patientNo', e.target.value)} placeholder="등록번호" />
+          </div>
           <div className="form-group">
             <label>이름 *</label>
             <input value={shared.name} onChange={e => handleInput('name', e.target.value)} />
@@ -169,6 +175,35 @@ export function BasicInfoForm({ shared, onChange, errors, refDateField = 'injury
   );
 }
 
+function AutoResizeTextarea({ value, onChange, placeholder, maxHeight = '50vh' }) {
+  const ref = useRef(null);
+  const handleChange = useCallback((e) => {
+    onChange(e);
+    const el = e.target;
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
+  }, [onChange]);
+
+  const handleRef = useCallback((el) => {
+    ref.current = el;
+    if (el) {
+      el.style.height = 'auto';
+      el.style.height = el.scrollHeight + 'px';
+    }
+  }, []);
+
+  return (
+    <textarea
+      ref={handleRef}
+      value={value}
+      onChange={handleChange}
+      placeholder={placeholder}
+      rows="2"
+      style={{ resize: 'none', maxHeight, overflowY: 'auto' }}
+    />
+  );
+}
+
 export function BasicInfoSidePanel({ shared, onChange }) {
   const handleInput = (field, value) => {
     onChange({ ...shared, [field]: value });
@@ -176,10 +211,107 @@ export function BasicInfoSidePanel({ shared, onChange }) {
 
   return (
     <>
+      {/* 섹션 3: EMR 연동 데이터 */}
       <section className="section pattern-surface form-section">
         <div className="section-header">
           <div className="section-title-row">
-            <h2 className="section-title"><span className="section-icon">3</span>특이사항</h2>
+            <h2 className="section-title"><span className="section-icon">3</span>EMR 연동 데이터</h2>
+            <p className="section-description">진료기록과 기저질환, 수진이력을 기록합니다.</p>
+          </div>
+        </div>
+        <div className="form-group">
+          <label>진료기록 / 의학적 소견</label>
+          <AutoResizeTextarea
+            value={shared.medicalRecord || ''}
+            onChange={e => handleInput('medicalRecord', e.target.value)}
+            placeholder="의무 기록, 영상 검사, 수술 이력 등"
+          />
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label>고혈압</label>
+            <div className="radio-group">
+              <label className="radio-label">
+                <input type="radio" name="highBloodPressure" value="유" checked={shared.highBloodPressure === '유'} onChange={e => handleInput('highBloodPressure', e.target.value)} />
+                <span>유</span>
+              </label>
+              <label className="radio-label">
+                <input type="radio" name="highBloodPressure" value="무" checked={shared.highBloodPressure === '무'} onChange={e => handleInput('highBloodPressure', e.target.value)} />
+                <span>무</span>
+              </label>
+            </div>
+          </div>
+          <div className="form-group">
+            <label>당뇨병</label>
+            <div className="radio-group">
+              <label className="radio-label">
+                <input type="radio" name="diabetes" value="유" checked={shared.diabetes === '유'} onChange={e => handleInput('diabetes', e.target.value)} />
+                <span>유</span>
+              </label>
+              <label className="radio-label">
+                <input type="radio" name="diabetes" value="무" checked={shared.diabetes === '무'} onChange={e => handleInput('diabetes', e.target.value)} />
+                <span>무</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div className="form-group">
+          <label>수진이력</label>
+          <AutoResizeTextarea
+            value={shared.visitHistory || ''}
+            onChange={e => handleInput('visitHistory', e.target.value)}
+            placeholder="부위별 수진이력 (예: 무릎 부위 : 2024-01-01 이후 15회)"
+          />
+        </div>
+      </section>
+
+      {/* 섹션 4: 다학제 회신 */}
+      <section className="section pattern-surface form-section">
+        <div className="section-header">
+          <div className="section-title-row">
+            <h2 className="section-title"><span className="section-icon">4</span>다학제 회신</h2>
+            <p className="section-description">과별 다학제 회신 내용을 기록합니다.</p>
+          </div>
+        </div>
+        <div className="form-group">
+          <label>정형외과</label>
+          <AutoResizeTextarea
+            value={shared.consultReplyOrtho || ''}
+            onChange={e => handleInput('consultReplyOrtho', e.target.value)}
+            placeholder="정형외과 회신 내용"
+          />
+        </div>
+        <div className="form-group">
+          <label>신경외과</label>
+          <AutoResizeTextarea
+            value={shared.consultReplyNeuro || ''}
+            onChange={e => handleInput('consultReplyNeuro', e.target.value)}
+            placeholder="신경외과 회신 내용"
+          />
+        </div>
+        <div className="form-group">
+          <label>재활의학과</label>
+          <AutoResizeTextarea
+            value={shared.consultReplyRehab || ''}
+            onChange={e => handleInput('consultReplyRehab', e.target.value)}
+            placeholder="재활의학과 회신 내용"
+          />
+        </div>
+        <div className="form-group">
+          <label>기타</label>
+          <AutoResizeTextarea
+            value={shared.consultReplyOther || ''}
+            onChange={e => handleInput('consultReplyOther', e.target.value)}
+            placeholder="기타 과목 회신 내용"
+          />
+        </div>
+      </section>
+
+      {/* 섹션 5: 특이사항 */}
+      <section className="section pattern-surface form-section">
+        <div className="section-header">
+          <div className="section-title-row">
+            <h2 className="section-title"><span className="section-icon">5</span>특이사항</h2>
             <p className="section-description">산재 이력이나 현재 상태처럼 참고가 필요한 메모를 남깁니다.</p>
           </div>
         </div>
@@ -187,10 +319,12 @@ export function BasicInfoSidePanel({ shared, onChange }) {
           <textarea rows="4" value={shared.specialNotes} onChange={e => handleInput('specialNotes', e.target.value)} placeholder="산재이력, 상병상태 등" />
         </div>
       </section>
+
+      {/* 섹션 6: 평가기관 */}
       <section className="section pattern-surface form-section">
         <div className="section-header">
           <div className="section-title-row">
-            <h2 className="section-title"><span className="section-icon">4</span>평가기관</h2>
+            <h2 className="section-title"><span className="section-icon">6</span>평가기관</h2>
             <p className="section-description">병원과 담당 진료 정보를 함께 기록합니다.</p>
           </div>
         </div>

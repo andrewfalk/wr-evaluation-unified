@@ -240,6 +240,76 @@ function buildExposureSection(shared, modules, activeModules) {
   return text;
 }
 
+function formatEmrBoolean(value) {
+  if (value === '유') return '(+)';
+  if (value === '무') return '(-)';
+  return value || '미상';
+}
+
+function buildPersonalFactorText(shared, age, bmi) {
+  const visitHistory = shared.visitHistory?.trim() || '없음';
+  const specialNotes = shared.specialNotes?.trim() || '없음';
+
+  return [
+    `- 키 ${shared.height || '-'}cm`,
+    `- 체중 ${shared.weight || '-'}kg`,
+    `- BMI: ${bmi || '-'}`,
+    `- 나이: ${age || '-'}세`,
+    `- 고혈압: ${formatEmrBoolean(shared.highBloodPressure)}`,
+    `- 당뇨병: ${formatEmrBoolean(shared.diabetes)}`,
+    `- 수진이력: ${visitHistory}`,
+    `- 특이사항: ${specialNotes}`,
+  ].join('\n');
+}
+
+function formatConsultReplySection(label, value) {
+  const trimmed = value?.trim();
+  if (!trimmed) return '';
+  return `[ ${label} ]\n${trimmed}`;
+}
+
+function buildConsultReplySummary(shared) {
+  const sections = [
+    formatConsultReplySection('정형외과', shared.consultReplyOrtho),
+    formatConsultReplySection('신경외과', shared.consultReplyNeuro),
+    formatConsultReplySection('재활의학과', shared.consultReplyRehab),
+    formatConsultReplySection('기타', shared.consultReplyOther),
+  ].filter(Boolean);
+
+  return sections.length > 0 ? `[ 다학제 회신 ]\n${sections.join('\n\n')}` : '';
+}
+
+function buildConsultReplySlots(shared) {
+  const ortho = formatConsultReplySection('정형외과', shared.consultReplyOrtho);
+  const neuro = formatConsultReplySection('신경외과', shared.consultReplyNeuro);
+  const rehab = formatConsultReplySection('재활의학과', shared.consultReplyRehab);
+  const other = formatConsultReplySection('기타', shared.consultReplyOther);
+
+  let slot2 = '';
+  let slot3 = '';
+
+  const append = (slot, text) => (slot ? `${slot}\n${text}` : text);
+
+  if (ortho) slot2 = append(slot2, ortho);
+
+  if (neuro) {
+    if (slot2.includes('정형외과')) slot3 = append(slot3, neuro);
+    else slot2 = append(slot2, neuro);
+  }
+
+  if (rehab) {
+    if (slot2.includes('정형외과') || slot2.includes('신경외과')) slot3 = append(slot3, rehab);
+    else slot2 = append(slot2, rehab);
+  }
+
+  if (other) {
+    if (!slot2) slot2 = append(slot2, other);
+    else slot3 = append(slot3, other);
+  }
+
+  return { slot2, slot3 };
+}
+
 function generateUnifiedEMR(patient) {
   const shared = patient.data.shared || {};
   const modules = patient.data.modules || {};
@@ -255,16 +325,22 @@ function generateUnifiedEMR(patient) {
     .join('\n');
 
   const b6 = buildExposureSection(shared, modules, activeModules);
-  const b7 = `- 키 ${shared.height || '-'}cm\n- 체중 ${shared.weight || '-'}kg\n- BMI: ${bmi || '-'}\n- 나이: ${age || '-'}세\n- 특이사항: ${shared.specialNotes || '없음'}`;
-  const b8 = `${b6}\n\n[ 업무관련성 평가 결과 ]\n\n${buildAssessmentSummary(diagnoses, activeModules)}`;
+  const b7 = buildPersonalFactorText(shared, age, bmi);
+  const consultReplySummary = buildConsultReplySummary(shared);
+  const b8 = [
+    b6,
+    '[ 업무관련성 평가 결과 ]',
+    buildAssessmentSummary(diagnoses, activeModules),
+  ].filter(Boolean).join('\n\n');
   const b9 = modules.knee?.returnConsiderations || modules.shoulder?.returnConsiderations || modules.elbow?.returnConsiderations || '';
 
-  return { b5, b6, b7, b8, b9 };
+  return { b5, b6, b7, b8, b9, consultReplySummary };
 }
 
 function buildUnifiedWorkbook(patient) {
   const shared = patient.data.shared || {};
-  const { b5, b6, b7, b8, b9 } = generateUnifiedEMR(patient);
+  const { b5, b6, b7, b8, b9, consultReplySummary } = generateUnifiedEMR(patient);
+  const b8Full = consultReplySummary ? b8 + '\n\n' + consultReplySummary : b8;
   const wb = XLSX.utils.book_new();
   const wsData = [
     ['업무관련성특별진찰소견서(근골격계질병)', ''],
@@ -274,7 +350,7 @@ function buildUnifiedWorkbook(patient) {
     ['3.최종 확인 상병명', b5],
     ['4.직업적 요인', b6],
     ['5.개인적 요인', b7],
-    ['6.종합소견', b8],
+    ['6.종합소견', b8Full],
     ['7.복귀 관련 고려사항', b9]
   ];
   const ws = XLSX.utils.aoa_to_sheet(wsData);
@@ -563,6 +639,8 @@ export function generateEMRFieldData(patient) {
   const shared = patient.data.shared || {};
 
   const truncatedFields = [];
+  const tMrec = truncateBytes(shared.medicalRecord || '', 4000);
+  if (tMrec.truncated) truncatedFields.push('txtMrec_Med_Pov_Cont');
   const t6 = truncateBytes(b6, 4000);
   if (t6.truncated) truncatedFields.push('txtJobCusCont');
   const t7 = truncateBytes(b7, 4000);
@@ -572,6 +650,7 @@ export function generateEMRFieldData(patient) {
 
   return {
     txtAppvSickCont: b5 || '',
+    txtMrecMedPovCont: tMrec.text,
     txtJobCusCont: t6.text,
     txtPerCusCont: t7.text,
     txtSyth1Cont: t8.text,
@@ -580,6 +659,26 @@ export function generateEMRFieldData(patient) {
     txtCpnyNm: '',
     rdoHcreTypeCd: '2',
     rdoCls: 'M',
+    _truncatedFields: truncatedFields,
+  };
+}
+
+export function generateConsultReplyFieldData(patient) {
+  const shared = patient.data.shared || {};
+  const consultSlots = buildConsultReplySlots(shared);
+
+  const truncatedFields = [];
+  const tSyth2 = truncateBytes(consultSlots.slot2, 4000);
+  if (tSyth2.truncated) truncatedFields.push('txtSyth2Cont');
+  const tSyth3 = truncateBytes(consultSlots.slot3, 4000);
+  if (tSyth3.truncated) truncatedFields.push('txtSyth3Cont');
+
+  return {
+    txtSyth2Cont: tSyth2.text,
+    txtSyth3Cont: tSyth3.text,
+    rdoCureCost: 'N',
+    rdoExamToDte: 'N',
+    rdoIdacDcsDte: 'N',
     _truncatedFields: truncatedFields,
   };
 }

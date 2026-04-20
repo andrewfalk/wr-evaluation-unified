@@ -39,8 +39,14 @@ contextBridge.exposeInMainWorld('electron', {
   fsLoadSettings: () => ipcRenderer.invoke('fs-load-settings'),
   fsMigrate: (data) => ipcRenderer.invoke('fs-migrate', data),
 
-  // EMR 직접입력 (PowerShell → IE DOM 주입, Windows 전용)
+  // EMR 직접입력 (C# EmrHelper → IE DOM 주입, Windows 전용)
   injectEMR: (data) => ipcRenderer.invoke('emr-inject', data),
+
+  // EMR 데이터 추출 (진료기록분석지 → 환자 데이터)
+  extractRecord: (patientNo) => ipcRenderer.invoke('emr-extract-record', patientNo),
+
+  // 다학제회신 추출 (진료메인 → 과별 회신)
+  extractConsultation: () => ipcRenderer.invoke('emr-extract-consultation'),
 
   // 버전 정보 (app.getVersion()은 main process에서 IPC로 전달)
   version: {

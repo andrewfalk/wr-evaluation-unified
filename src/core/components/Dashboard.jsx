@@ -132,6 +132,7 @@ const Dashboard = ({ patients, onSelectPatient }) => {
             <table className="dashboard-table list-table">
               <thead>
                 <tr>
+                  <th>등록번호</th>
                   <th>환자명</th>
                   <th>등록일 / 평가일</th>
                   <th>처리일수</th>
@@ -142,6 +143,7 @@ const Dashboard = ({ patients, onSelectPatient }) => {
               <tbody>
                 {stats.recentActivity.map((item, i) => (
                   <tr key={i}>
+                    <td>{item.patientNo || '-'}</td>
                     <td>
                       {onSelectPatient ? (
                         <a

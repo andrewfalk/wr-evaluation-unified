@@ -1,7 +1,7 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 3.2.0
-> **Last Updated:** 2026-04-16
+> **Version:** 3.3.0
+> **Last Updated:** 2026-04-20
 > **Status:** MVP 개발 완료 / Vercel 배포 완료
 
 ---
@@ -90,9 +90,14 @@ Patient
 ├── phase: 'intake' | 'evaluation'
 └── data
     ├── shared                          ← 모듈 공통
+    │   ├── patientNo                   ← 환자등록번호
     │   ├── name, gender, height, weight, birthDate
     │   ├── injuryDate, evaluationDate
     │   ├── hospitalName, department, doctorName
+    │   ├── medicalRecord               ← 진료기록 / 의학적 소견
+    │   ├── highBloodPressure, diabetes  ← 기저질환 (유/무)
+    │   ├── visitHistory                ← 수진이력
+    │   ├── consultReplyOrtho/Neuro/Rehab/Other ← 다학제 회신 (과별)
     │   ├── specialNotes
     │   ├── diagnoses[]                 ← 상병 목록
     │   │   └── { id, code, name, side }
@@ -995,6 +1000,7 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 | P0 | ~~팔꿈치 모듈~~ | ~~elbow 모듈 추가 (BK2101/2103/2105/2106)~~ → v3.2.0 완료 |
 | P1 | 고관절 모듈 | hip 모듈 추가 (플러그인 패턴 활용) |
 | P2 | ~~척추 프리셋 연동~~ | ~~직업 프리셋 선택 시 MDDM 작업/변수 자동 채움~~ → v3.2.1 완료 (전 모듈 presetConfig 지원) |
+| P2 | ~~EMR 데이터 추출~~ | ~~진료기록분석지/다학제회신 자동 추출~~ → v3.3.0 완료 |
 | P2 | 통합 PDF/Word | 통합 보고서를 PDF/Word 형식으로도 출력 |
 | P3 | 다중 사용자 | 서버 기반 데이터 저장 + 사용자 인증 |
 
@@ -1087,6 +1093,30 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 - **프리셋 검색 개선**: `PresetSearch`에 모듈 배지(ModuleBadges) 표시, 커스텀 프리셋 태그, 검색 결과 10개로 확장
 - **프리셋 적용 일반화**: `handlePresetSelect`가 활성 모듈 전체를 순회하며 각 모듈의 `applyToModule()` 호출
 - **중복 저장 방지**: `saveCustomPreset()`에서 id + jobName 이중 매칭으로 동일 직종 중복 생성 차단
+
+### Phase 18: EMR 연동 + 다학제 회신 + 팔꿈치 프리셋 (v3.3.0)
+
+- **EMR 데이터 추출 (Electron)**: `EmrHelper.cs`에 `--extract-record`/`--extract-consultation` 모드 추가 — IE COM 자동화로 진료기록분석지/진료메인 페이지에서 환자 데이터 읽기
+  - `ExtractRecord`: 환자등록번호 → 환자명, 생년월일, 재해일자, 진료기록(의무기록/영상검사/수술이력), 기저질환(고혈압/당뇨), 수진이력 + 상병 목록 자동 추출
+  - `ExtractConsultation`: 진료메인 FarPoint Spread에서 과별 다학제 회신 추출 → `consultReplyOrtho/Neuro/Rehab/Other` 자동 저장
+  - `ReadSpreadCell`: FarPoint Spread ActiveX ByRef 파라미터 처리 (`ParameterModifier`)
+  - `runHelper` 공통 래퍼: `getHelperExe()` 경로 해석 + `execFile` 타임아웃/에러 처리 통합
+  - IPC 핸들러 2종 추가: `emr-extract-record`, `emr-extract-consultation`
+  - preload.js에 `extractRecord`, `extractConsultation` 채널 노출
+- **EMR 일괄 추출 UI**: 헤더에 `EMR 추출` 버튼 — 선택된 환자 또는 현재 환자의 `patientNo` 기반 순차 추출 + 프로그레스 바(`.emr-progress-bar`). patientNo 교차검증으로 잘못된 환자 매칭 방지
+- **다학제 회신 추출 UI**: 헤더에 `다학제 추출` 버튼 — 진료메인 페이지에서 과별 회신 읽어 현재 환자에 저장. 환자 식별 확인 대화상자 포함
+- **다학제 회신 EMR 입력**: `다학제 보내기` 버튼 — `generateConsultReplyFieldData()`로 과별 회신을 slot2/slot3(EMR 종합소견 2,3번 칸)에 분배 후 직접 입력. EMR 직접입력 버튼은 드롭다운에서 헤더 독립 버튼으로 이동
+- **환자등록번호 필드 (`patientNo`)**: `createSharedData`에 추가, BasicInfoForm 입력 필드, Dashboard 테이블 컬럼, BatchImportModal 매핑, `dashboardStats.js` 반영
+- **EMR 연동 데이터 섹션 (BasicInfoSidePanel)**: 기존 섹션 3 '특이사항' → 섹션 5로 이동, 새 섹션 3 'EMR 연동 데이터' 추가
+  - 진료기록/의학적 소견 (`medicalRecord`) — AutoResizeTextarea 컴포넌트
+  - 기저질환: 고혈압/당뇨병 라디오 버튼 (`highBloodPressure`, `diabetes`)
+  - 수진이력 (`visitHistory`)
+- **다학제 회신 섹션 (BasicInfoSidePanel)**: 새 섹션 4 — 정형외과/신경외과/재활의학과/기타 4과 회신 입력
+- **EMR 소견서 개인적 요인 확장**: `buildPersonalFactorText()`에 고혈압/당뇨/수진이력/특이사항 포함. `generateEMRFieldData()`에 `txtMrecMedPovCont`(진료기록) 추가. `buildConsultReplySummary()`로 다학제 회신 요약을 종합소견 엑셀에 포함
+- **팔꿈치 프리셋 지원**: `elbow/index.js`에 `presetConfig` 추가 — 공통 노출 10개 필드(`main_task_name`, `daily_exposure_hours`, `shift_share_percent`, `work_pattern` 등) 추출/적용. `_pendingPreset` 메커니즘으로 진단 엔트리 미생성 시 프리셋 대기 후 `syncElbowModuleData` 시점에 적용
+- **모듈 jobExtras 자동 생성**: KneeEvaluation/ShoulderEvaluation에 `useEffect` — 직업 추가 시 누락된 jobExtras 자동 생성. SpineEvaluation에 `sharedJobId` 빈 태스크 첫 번째 직업 자동 귀속 마이그레이션. `spine/index.js`에 미귀속 태스크 폴백
+- **프리셋 내보내기/가져오기 개선**: `toExportableCustomPreset()`으로 커스텀 프리셋만 정제해서 내보내기 (builtin 필드 혼입 방지). `mergePresets()`에서 `_customCategory`/`_customDescription` 보존. `importPresetsFromJSON()` 필드 정규화. `loadAllPresets()`에 `builtinError` 반환 추가
+- **일괄 Import 필드 그룹 세분화**: 기존 '직업/작업'+'팔꿈치' 2개 그룹 → 직업/무릎/어깨/척추/팔꿈치 공통/팔꿈치 BK별 6개 그룹으로 분리. UI에 카드 헤더 필드 개수 배지 + 리스트 형식 적용
 
 ---
 

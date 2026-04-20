@@ -218,6 +218,11 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .export-dropdown { position: absolute; top: 100%; right: 0; z-index: 100; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); min-width: 130px; overflow: hidden; margin-top: 6px; }
 .export-dropdown button { display: block; width: 100%; padding: 8px 14px; border: none; background: none; text-align: left; font-size: 0.85rem; cursor: pointer; color: var(--text-primary); }
 .export-dropdown button:hover { background: var(--bg-hover); }
+.emr-progress-bar { position: relative; height: 32px; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; margin: 8px 0; }
+.emr-progress-inner { position: absolute; left: 0; top: 0; height: 100%; background: var(--accent-color); opacity: 0.18; transition: width 0.3s ease; }
+.emr-progress-text { position: relative; z-index: 1; display: flex; align-items: center; height: 100%; padding: 0 12px; font-size: 0.82rem; font-weight: 600; color: var(--text-primary); }
+.emr-progress-close { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; font-size: 1.1rem; cursor: pointer; color: var(--text-muted); z-index: 2; padding: 2px 6px; }
+.emr-progress-close:hover { color: var(--text-primary); }
 .main-content { flex: 1; min-height: 0; overflow: visible; width: 100%; }
 .main-content.main-content-dual { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
 .main-content.main-content-dual > * { min-width: 0; }
@@ -309,7 +314,8 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .report-preview-hint { font-size: 0.76rem; color: var(--text-muted); }
 
 .form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px; }
-.form-group { display: flex; flex-direction: column; }
+.form-group { display: flex; flex-direction: column; margin-bottom: 12px; }
+.form-row > .form-group { margin-bottom: 0; }
 .form-group label { font-size: 0.8rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 5px; }
 .form-group input, .form-group select, .form-group textarea { padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 0.9rem; transition: all 0.2s; font-family: inherit; background: var(--input-bg); color: var(--text-primary); }
 .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }

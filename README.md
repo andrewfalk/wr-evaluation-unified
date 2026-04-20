@@ -1,6 +1,6 @@
 # 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 3.2.1 | **Status:** MVP 개발 완료 / Vercel 배포 완료
+> **Version:** 3.3.0 | **Status:** MVP 개발 완료 / Vercel 배포 완료
 
 직업환경의학 전문의가 **업무상 질병 인정 여부를 판단**할 때 사용하는 통합 평가 도구.
 무릎(슬관절), 척추(요추 MDDM), 팔꿈치(주관절 BK2101/2103/2105/2106), 어깨(견관절 BK2117) 평가를 지원하며, 향후 고관절 등을 플러그인 형태로 확장할 수 있다.
@@ -76,14 +76,18 @@ Patient
 ├── id, phase
 └── data
     ├── shared                     ← 모듈 공통
-    │   ├── name, gender, height, weight, birthDate, injuryDate
+    │   ├── patientNo, name, gender, height, weight, birthDate, injuryDate
     │   ├── hospitalName, department, doctorName
+    │   ├── medicalRecord, highBloodPressure, diabetes, visitHistory
+    │   ├── consultReplyOrtho/Neuro/Rehab/Other  ← 다학제 회신
     │   ├── diagnoses[]            ← 상병 목록 { id, code, name, side }
     │   └── jobs[]                 ← 직업력 { id, jobName, startDate, endDate, ... }
     ├── modules
     │   ├── knee                   ← 무릎 전용 (jobExtras[], returnConsiderations)
+    │   ├── shoulder               ← 어깨 전용 (jobExtras[], returnConsiderations)
+    │   ├── elbow                  ← 팔꿈치 전용 (jobEvaluations[], temporalSequence)
     │   └── spine                  ← 척추 전용 (tasks[] — sharedJobId로 직업 연결)
-    └── activeModules: ['knee', 'spine']
+    └── activeModules: ['knee', 'spine', 'shoulder', 'elbow']
 ```
 
 ## UI 흐름 (위자드)
@@ -243,12 +247,27 @@ ICD 코드 기반 모듈 자동 추천:
 |----------|------|------|
 | P1 | 고관절 모듈 | hip 모듈 추가 (플러그인 패턴 활용) |
 | P2 | ~~척추 프리셋 연동~~ | ~~직업 프리셋 선택 시 MDDM 작업/변수 자동 채움~~ → v3.2.1 완료 |
+| P2 | ~~EMR 데이터 추출~~ | ~~진료기록분석지/다학제회신 자동 추출~~ → v3.3.0 완료 |
 | P2 | 통합 PDF/Word | 통합 보고서를 PDF/Word 형식으로도 출력 |
 | P3 | 다중 사용자 | 서버 기반 데이터 저장 + 사용자 인증 |
 
 ---
 
 ## 변경 이력
+
+### v3.3.0 (2026-04-20)
+- **EMR 데이터 추출 (Electron)**: `EmrHelper.cs`에 진료기록분석지(`--extract-record`) / 다학제회신(`--extract-consultation`) 추출 모드 추가. IE COM 자동화로 환자명, 생년월일, 재해일자, 진료기록, 기저질환, 수진이력, 상병 목록, 과별 회신 자동 읽기
+- **EMR 일괄 추출 UI**: 선택된 환자 또는 현재 환자의 환자등록번호 기반 순차 추출 + 프로그레스 바. patientNo 교차검증 포함
+- **다학제 회신 추출/입력**: `다학제 추출` 버튼으로 과별 회신 읽기 → `다학제 보내기` 버튼으로 EMR 종합소견 2,3번 칸에 입력
+- **환자등록번호 (`patientNo`)**: 기본정보 입력, 대시보드 테이블, 일괄 Import에 등록번호 컬럼 추가
+- **EMR 연동 데이터 섹션**: 기본정보 사이드패널에 진료기록/기저질환(고혈압·당뇨)/수진이력 입력 섹션 추가 (섹션 3)
+- **다학제 회신 섹션**: 정형외과/신경외과/재활의학과/기타 4과 회신 입력 (섹션 4). AutoResizeTextarea 적용
+- **EMR 소견서 확장**: 개인적 요인에 고혈압/당뇨/수진이력 포함, 진료기록 필드(`txtMrecMedPovCont`) 직접입력 지원, 다학제 회신 요약을 종합소견 엑셀에 포함
+- **팔꿈치 프리셋 지원**: 공통 노출 10개 필드 추출/적용, `_pendingPreset` 대기 메커니즘
+- **모듈 jobExtras 자동 생성**: 무릎/어깨 직업 추가 시 자동 생성, 척추 미귀속 태스크 폴백
+- **프리셋 내보내기/가져오기 개선**: 커스텀 프리셋만 정제 내보내기, category/description 보존
+- **일괄 Import 필드 그룹 세분화**: 직업/무릎/어깨/척추/팔꿈치 공통/팔꿈치 BK별 6개 그룹으로 분리
+- **EmrHelper 공통 래퍼**: `runHelper()` 함수로 EMR 헬퍼 실행 경로/타임아웃/에러 처리 통합
 
 ### v3.2.1 (2026-04-16)
 - **커스텀 프리셋 생성/저장**: `PresetManageModal` — 현재 입력된 신체부담 데이터를 프리셋으로 저장. 모듈별 선택, 데이터 미리보기, 커스텀 프리셋 삭제 지원

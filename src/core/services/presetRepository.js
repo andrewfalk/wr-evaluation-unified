@@ -116,6 +116,8 @@ export function mergePresets(builtins, customs) {
         ...result[builtinIdx],
         modules: { ...result[builtinIdx].modules, ...c.modules },
         _customId: c.id,
+        _customCategory: c.category,
+        _customDescription: c.description,
       };
     } else {
       result.push({ ...c });
@@ -130,27 +132,53 @@ export function mergePresets(builtins, customs) {
 
 export async function loadAllPresets() {
   let builtins = [];
+  let builtinError = null;
   try {
     const res = await fetch('./job-presets.json');
     if (!res.ok) throw new Error('Not found');
     const data = await res.json();
     builtins = (data.presets || []).map(normalizeBuiltinPreset);
-  } catch {
-    // fallback은 호출 측에서 처리
+  } catch (e) {
+    builtinError = e;
   }
   const customs = await loadCustomPresets();
-  return { merged: mergePresets(builtins, customs), builtinCount: builtins.length, customCount: customs.length };
+  if (builtinError && customs.length === 0) {
+    throw builtinError;
+  }
+  return { merged: mergePresets(builtins, customs), builtinCount: builtins.length, customCount: customs.length, builtinError };
 }
 
 // ======================================================
 // 내보내기 / 가져오기
 // ======================================================
 
+function toExportableCustomPreset(preset) {
+  if (!preset) return null;
+
+  const customId = preset._customId || (preset.source === 'custom' ? preset.id : null);
+  if (!customId) return null;
+
+  return {
+    id: customId,
+    jobName: preset.jobName,
+    category: preset._customCategory || preset.category || '미분류',
+    description: preset._customDescription || preset.description || '',
+    source: 'custom',
+    createdAt: preset.createdAt || null,
+    updatedAt: preset.updatedAt || null,
+    modules: { ...(preset.modules || {}) },
+  };
+}
+
 export function exportPresetsToJSON(presets) {
+  const customPresets = (presets || [])
+    .map(toExportableCustomPreset)
+    .filter(Boolean);
+
   const data = {
     version: '2.0.0',
     exportedAt: new Date().toISOString(),
-    presets: presets.filter(p => p.source === 'custom'),
+    presets: customPresets,
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -171,7 +199,16 @@ export async function importPresetsFromJSON(file) {
   let addedCount = 0;
   for (const p of imported) {
     if (!existingNames.has(p.jobName)) {
-      existing.push({ ...p, id: crypto.randomUUID(), source: 'custom', createdAt: now, updatedAt: now });
+      existing.push({
+        id: crypto.randomUUID(),
+        jobName: p.jobName,
+        category: p.category || '미분류',
+        description: p.description || '',
+        modules: p.modules || {},
+        source: 'custom',
+        createdAt: now,
+        updatedAt: now,
+      });
       existingNames.add(p.jobName);
       addedCount++;
     }

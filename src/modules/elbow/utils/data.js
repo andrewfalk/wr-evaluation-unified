@@ -260,18 +260,29 @@ export function syncElbowModuleData(moduleData = {}, jobs = [], diagnoses = []) 
 
   const nextJobEvaluations = (jobs || []).map(job => {
     const existingJobEvaluation = existingJobMap.get(job.id);
+    const pendingPreset = existingJobEvaluation?._pendingPreset;
     const existingEntryMap = new Map(
       (existingJobEvaluation?.diagnosisEntries || []).map(entry => [entry.diagnosisId, entry])
     );
 
     const diagnosisEntries = elbowDiagnoses.map(diagnosis => {
       const existingEntry = existingEntryMap.get(diagnosis.id) || legacyEntryMap.get(`${job.id}:${diagnosis.id}`);
-      return normalizeDiagnosisEntry(existingEntry, diagnosis);
+      const entry = normalizeDiagnosisEntry(existingEntry, diagnosis);
+      // _pendingPreset이 있고 기존 엔트리가 없으면 프리셋 공통 필드 적용
+      if (!existingEntry && pendingPreset) {
+        for (const key of Object.keys(pendingPreset)) {
+          if (key in entry && pendingPreset[key] !== undefined) {
+            entry[key] = pendingPreset[key];
+          }
+        }
+      }
+      return entry;
     });
 
+    const { _pendingPreset, ...restJobEval } = (existingJobEvaluation || {});
     return {
       ...createElbowJobEvaluation(job.id),
-      ...(existingJobEvaluation || {}),
+      ...restJobEval,
       sharedJobId: job.id,
       diagnosisEntries,
     };

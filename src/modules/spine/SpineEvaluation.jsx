@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { TaskManager } from './components/TaskManager';
 import { TaskEditor } from './components/TaskEditor';
 import { SpineResultPanel } from './components/SpineResultPanel';
@@ -12,6 +12,17 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
   const jobs = shared.jobs || [];
   const [selectedJobId, setSelectedJobId] = useState(jobs[0]?.id || '');
   const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
+
+  // 기존 태스크 중 sharedJobId가 빈 것을 첫 번째 직업에 귀속 (마이그레이션)
+  useEffect(() => {
+    const fj = jobs[0]?.id;
+    if (fj && (mod.tasks || []).some(t => !t.sharedJobId)) {
+      updateModule(m => ({
+        ...m,
+        tasks: (m.tasks || []).map(t => t.sharedJobId ? t : { ...t, sharedJobId: fj })
+      }));
+    }
+  }, [jobs[0]?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const allTasks = useMemo(() => (mod.tasks || []).map(t => {
     const result = calculateCompressiveForce(t.posture, t.weight, t.correctionFactor);

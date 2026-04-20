@@ -96,6 +96,7 @@ export const computeDashboardStats = (currentPatients) => {
 
     return {
       id: p.id,
+      patientNo: p.data?.shared?.patientNo || '',
       name: p.data?.shared?.name || '이름 없음',
       registrationDate: registrationTimestamp?.split('T')[0] || '',
       completionDate: p.data?.shared?.evaluationDate || '',

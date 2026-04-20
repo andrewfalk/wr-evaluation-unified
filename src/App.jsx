@@ -113,6 +113,7 @@ function App() {
   const [presetMeta, setPresetMeta] = useState(null);
   const [presetError, setPresetError] = useState(null);
   const [presetModalJobId, setPresetModalJobId] = useState(null);
+  const [extractProgress, setExtractProgress] = useState(null); // { current, total, currentName, status }
 
   const { status: integrationStatus } = useIntegrationStatus({ session, settings });
   const activePatient = patients.find(p => p.id === activeId);
@@ -648,6 +649,137 @@ function App() {
         await showAlert(`EMR 입력 실패: ${result.message}`);
       }
     } catch (err) { await showAlert('EMR 입력 오류: ' + err.message); }
+  };
+
+  const handleInjectConsultReply = async () => {
+    if (!activePatient || !window.electron?.injectEMR) return;
+    const ok = await showConfirm('다학제 회신 내용을 EMR 종합소견 2,3번 칸에 입력합니다.\nEMR 업무관련성 특별진찰소견서가 열려있는지 확인하세요.\n\n계속하시겠습니까?');
+    if (!ok) return;
+    try {
+      const { generateConsultReplyFieldData } = await import('./core/utils/exportService');
+      const fieldData = generateConsultReplyFieldData(activePatient);
+      const result = await window.electron.injectEMR(fieldData);
+      if (result.success) {
+        let msg = `${result.message}`;
+        if (result.truncatedFields?.length > 0) {
+          msg += `\n\n⚠ 길이 제한으로 잘린 필드: ${result.truncatedFields.join(', ')}`;
+        }
+        if (result.failedFields?.length > 0) {
+          msg += `\n\n일부 실패:\n${result.failedFields.map(f => `- ${f.field}: ${f.reason}`).join('\n')}`;
+        }
+        await showAlert(msg);
+      } else {
+        await showAlert(`다학제 회신 입력 실패: ${result.message}`);
+      }
+    } catch (err) { await showAlert('다학제 회신 입력 오류: ' + err.message); }
+  };
+
+  // EMR 데이터 일괄 추출 (선택된 환자들의 patientNo 기반)
+  const handleEmrExtractBatch = async () => {
+    if (!window.electron?.extractRecord) return;
+    const targets = selectedIds.size > 0
+      ? patients.filter(p => selectedIds.has(p.id) && p.data?.shared?.patientNo)
+      : (activePatient?.data?.shared?.patientNo ? [activePatient] : []);
+    if (targets.length === 0) {
+      await showAlert('선택된 환자 중 환자등록번호가 입력된 환자가 없습니다.');
+      return;
+    }
+    const ok = await showConfirm(`${targets.length}명의 환자 데이터를 EMR에서 추출합니다.\n진료기록분석지 페이지가 열려있는지 확인하세요.\n\n계속하시겠습니까?`);
+    if (!ok) return;
+
+    let successCount = 0, failCount = 0;
+    setExtractProgress({ current: 0, total: targets.length, currentName: '', status: 'running' });
+
+    for (let i = 0; i < targets.length; i++) {
+      const p = targets[i];
+      setExtractProgress({ current: i + 1, total: targets.length, currentName: p.data.shared.name || p.data.shared.patientNo, status: 'running' });
+
+      try {
+        const result = await window.electron.extractRecord(p.data.shared.patientNo);
+        if (result.success) {
+          // patientNo 교차검증: EMR이 다른 환자 데이터를 반환한 경우 skip
+          if (result.patientNo && result.patientNo !== p.data.shared.patientNo) {
+            failCount++;
+            continue;
+          }
+          successCount++;
+          const updated = { ...p.data.shared };
+          if (result.patientName) updated.name = result.patientName;
+          if (result.birthDate) updated.birthDate = result.birthDate;
+          if (result.accidentDate) updated.injuryDate = result.accidentDate;
+          if (result.medicalRecord) updated.medicalRecord = result.medicalRecord;
+          if (result.highBloodPressure) updated.highBloodPressure = result.highBloodPressure;
+          if (result.diabetes) updated.diabetes = result.diabetes;
+          if (result.visitHistory) updated.visitHistory = result.visitHistory;
+
+          // Update diagnoses if extracted (append only unexisting codes)
+          if (result.diseases?.length > 0) {
+            const existingCodes = new Set((updated.diagnoses || []).map(d => d.code).filter(Boolean));
+            const newDiseases = result.diseases.filter(d => d.code && !existingCodes.has(d.code));
+            if (newDiseases.length > 0) {
+              const diseasesToAdd = newDiseases.map(d => ({
+                id: crypto.randomUUID(),
+                code: d.code,
+                name: d.name,
+                side: ''
+              }));
+              updated.diagnoses = [...(updated.diagnoses || []), ...diseasesToAdd];
+            }
+          }
+
+          setPatients(prev => prev.map(pt =>
+            pt.id === p.id
+              ? touchPatientRecord(
+                  { ...pt, updatedAt: new Date().toISOString(), data: { ...pt.data, shared: updated } },
+                  { session }
+                )
+              : pt
+          ));
+        } else {
+          failCount++;
+        }
+      } catch {
+        failCount++;
+      }
+    }
+
+    setExtractProgress(null);
+    await showAlert(`EMR 추출 완료: ${targets.length}명 중 성공 ${successCount}명, 실패 ${failCount}명`);
+  };
+
+  // 다학제회신 추출 (현재 환자, 진료메인 페이지 대상)
+  const handleExtractConsultation = async () => {
+    if (!window.electron?.extractConsultation) return;
+    try {
+      const result = await window.electron.extractConsultation();
+      if (result.success && result.consultations) {
+        // 환자 식별 확인: EMR 진료메인 화면의 환자와 앱의 현재 환자가 일치하는지 사용자에게 확인
+        const patientLabel = activePatient.data.shared.name
+          ? `${activePatient.data.shared.name}(${activePatient.data.shared.patientNo || ''})`
+          : activePatient.data.shared.patientNo || '현재 환자';
+        const confirmed = await showConfirm(
+          `EMR 화면의 다학제 회신 ${result.consultations.length}건을 [${patientLabel}]에게 저장합니다.\nEMR 진료메인 화면이 이 환자의 화면인지 확인해주세요.`
+        );
+        if (!confirmed) return;
+
+        const updated = { ...activePatient.data.shared };
+        const appendReply = (key, content) => {
+          updated[key] = updated[key] ? updated[key] + '\n---\n' + content : content;
+        };
+        for (const c of result.consultations) {
+          if (c.department === '정형외과') appendReply('consultReplyOrtho', c.content);
+          else if (c.department === '신경외과') appendReply('consultReplyNeuro', c.content);
+          else if (c.department === '재활의학과') appendReply('consultReplyRehab', c.content);
+          else appendReply('consultReplyOther', c.content);
+        }
+        updateShared(updated);
+        await showAlert(`${result.consultations.length}개 과목 회신을 가져왔습니다.`);
+      } else {
+        await showAlert(`다학제회신 추출 실패: ${result.error || result.message || '알 수 없는 오류'}`);
+      }
+    } catch (err) {
+      await showAlert('다학제회신 추출 오류: ' + err.message);
+    }
   };
 
   // --- 스텝 네비게이션 ---
@@ -1228,9 +1360,6 @@ function App() {
                       <div className="export-dropdown" onClick={() => setExportDropdown(null)}>
                         <button onClick={handleExportSingle}>EMR 형식</button>
                         <button onClick={handleExportBatchFormatSingle}>일괄입력용</button>
-                        {window.electron?.injectEMR && (
-                          <button className="dropdown-divider-top" onClick={handleInjectEMR}>EMR 직접입력</button>
-                        )}
                       </div>
                     )}
                   </div>
@@ -1259,9 +1388,39 @@ function App() {
                 )}
                 </>
               ) : null}
+              {window.electron?.extractRecord && (selectedIds.size > 0 || activePatient?.data?.shared?.patientNo) && (
+                <button className="btn btn-primary btn-sm" onClick={handleEmrExtractBatch} disabled={!!extractProgress}>
+                  {selectedIds.size > 0 ? `EMR 추출 (${selectedIds.size})` : 'EMR 추출'}
+                </button>
+              )}
+              {window.electron?.extractConsultation && activePatient && (
+                <button className="btn btn-primary btn-sm" onClick={handleExtractConsultation}>다학제 추출</button>
+              )}
+              {window.electron?.injectEMR && activePatient && activeModules.length > 0 && (
+                <button className="btn btn-primary btn-sm" onClick={handleInjectEMR}>EMR 직접입력</button>
+              )}
+              {window.electron?.injectEMR && activePatient && (
+                <button className="btn btn-primary btn-sm" onClick={handleInjectConsultReply}>다학제 보내기</button>
+              )}
             </div>
           </div>
         </header>
+
+        {/* EMR 추출 프로그레스 바 */}
+        {extractProgress && (
+          <div className="emr-progress-bar">
+            <div className="emr-progress-inner" style={{ width: `${(extractProgress.current / extractProgress.total) * 100}%` }} />
+            <span className="emr-progress-text">
+              {extractProgress.status === 'done'
+                ? `${extractProgress.total}명 추출 완료 (성공 ${extractProgress.successCount}, 실패 ${extractProgress.failCount})`
+                : `${extractProgress.total}명 중 ${extractProgress.current}번째 ${extractProgress.currentName} 데이터 가져오는 중...`
+              }
+            </span>
+            {extractProgress.status === 'done' && (
+              <button className="emr-progress-close" onClick={() => setExtractProgress(null)}>&times;</button>
+            )}
+          </div>
+        )}
 
         {activePatient && (
           <>

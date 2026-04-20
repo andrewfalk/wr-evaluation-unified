@@ -72,7 +72,7 @@ const IMPORT_FIELD_GROUPS = [
   {
     title: '기본정보',
     description: '환자 기본 정보와 평가 문서 정보',
-    fields: ['이름', '생년월일', '재해일자', '키', '체중', '성별', '병원명', '진료과', '담당의', '특이사항', '복귀고려사항'],
+    fields: ['이름', '등록번호', '생년월일', '재해일자', '키', '체중', '성별', '병원명', '진료과', '담당의', '특이사항', '복귀고려사항'],
   },
   {
     title: '진단',
@@ -80,14 +80,46 @@ const IMPORT_FIELD_GROUPS = [
     fields: ['진단코드', '진단명', '방향', 'KLG(우)', 'KLG(좌)', 'Ellman(우)', 'Ellman(좌)'],
   },
   {
-    title: '직업/작업',
-    description: '무릎, 어깨, 척추 입력이 연결되는 공통 직업 열',
-    fields: ['직종명', '시작일', '종료일', '근무기간(년)', '근무기간(개월)', '작업명', '자세코드'],
+    title: '직업',
+    description: '모든 모듈이 공유하는 직업 정보',
+    fields: ['직종명', '시작일', '종료일', '근무기간(년)', '근무기간(개월)'],
   },
   {
-    title: '팔꿈치',
-    description: '공통 시간적 선후관계와 직업별-진단별 팔꿈치 열',
-    fields: ['팔꿈치_시간적선후관계_최근작업변화', '팔꿈치_시간적선후관계_작업변화시점', '팔꿈치_BK유형', '팔꿈치_문제작업명', '팔꿈치_핵심노출유형'],
+    title: '무릎',
+    description: '직업별 무릎 부담 요인',
+    fields: ['중량물(kg)', '쪼그려앉기', '계단오르내리기', '무릎비틀기', '출발정지반복', '좁은공간', '무릎접촉충격', '점프착지'],
+  },
+  {
+    title: '어깨',
+    description: '직업별 어깨 부담 요인',
+    fields: ['오버헤드', '반복중간', '반복빠름', '중량물횟수', '중량물시간', '진동(시간/일)'],
+  },
+  {
+    title: '척추',
+    description: '직업별 작업-자세 조합',
+    fields: ['작업명', '자세코드', '작업중량', '횟수/분', '시간값', '시간단위', '보정계수'],
+  },
+  {
+    title: '팔꿈치 공통',
+    description: '시간적 선후관계와 노출 공통 항목',
+    fields: [
+      '팔꿈치_시간적선후관계_최근작업변화', '팔꿈치_시간적선후관계_작업변화시점',
+      '팔꿈치_시간적선후관계_증상발생까지기간', '팔꿈치_시간적선후관계_휴식시호전',
+      '팔꿈치_BK유형', '팔꿈치_BK선택방식', '팔꿈치_문제작업명', '팔꿈치_핵심동작연결성', '팔꿈치_핵심노출유형',
+      '팔꿈치_반복동작정도', '팔꿈치_1일노출시간', '팔꿈치_하루작업비중',
+      '팔꿈치_주당수행일수', '팔꿈치_작업형태', '팔꿈치_휴식분포',
+      '팔꿈치_힘사용', '팔꿈치_비중립자세', '팔꿈치_정적유지', '팔꿈치_직접압박수준', '팔꿈치_진동노출',
+    ],
+  },
+  {
+    title: '팔꿈치 BK별',
+    description: 'BK2101/2103/2105/2106 유형별 세부 항목',
+    fields: [
+      '팔꿈치_BK2101_주기초', '팔꿈치_BK2101_시간당반복횟수', '팔꿈치_BK2101_단조반복', '팔꿈치_BK2101_배측굴곡', '팔꿈치_BK2101_회내회외',
+      '팔꿈치_BK2105_팔꿈치지지', '팔꿈치_BK2105_반복마찰충격', '팔꿈치_BK2105_압박원인',
+      '팔꿈치_BK2106_반복기계적부담', '팔꿈치_BK2106_강제자세', '팔꿈치_BK2106_관절자세유지', '팔꿈치_BK2106_압박원인', '팔꿈치_BK2106_공구압박', '팔꿈치_BK2106_고힘그립',
+      '팔꿈치_BK2103_진동공구종류', '팔꿈치_BK2103_진동시간', '팔꿈치_BK2103_손유도공구', '팔꿈치_BK2103_공구압박', '팔꿈치_BK2103_고힘그립',
+    ],
   },
 ];
 
@@ -135,6 +167,7 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
 
     const colMap = {
       name: findCol('이름', 'name'),
+      patientNo: findCol('등록번호', 'patientno', 'registration'),
       birthDate: findCol('생년월일', 'birth'),
       injuryDate: findCol('재해일자', 'injury'),
       height: findCol('키', 'height'),
@@ -480,6 +513,7 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
 
         patient = createManagedPatient(suggestedModules, modulesData, { session });
         patient.data.shared.name = name;
+        patient.data.shared.patientNo = String(getCell(row, colMap.patientNo) || '').trim();
         patient.data.shared.birthDate = birthDate;
         patient.data.shared.injuryDate = injuryDate;
         patient.data.shared.height = String(getCell(row, colMap.height) || '');
@@ -570,11 +604,14 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
           <div className="import-reference-grid">
             {IMPORT_FIELD_GROUPS.map(group => (
               <div key={group.title} className="import-reference-card">
-                <h4>{group.title}</h4>
-                <p>{group.description}</p>
-                <div className="import-reference-fields">
-                  {group.fields.map(field => <span key={field} className="import-reference-field">{field}</span>)}
+                <div className="import-reference-card-header">
+                  <h4>{group.title}</h4>
+                  <span className="import-reference-count">{group.fields.length}</span>
                 </div>
+                <p className="import-reference-description">{group.description}</p>
+                <ul className="import-reference-list">
+                  {group.fields.map(field => <li key={field}>{field}</li>)}
+                </ul>
               </div>
             ))}
           </div>

@@ -26,11 +26,12 @@ export function PresetManageModal({ jobId, patient, presets, onSave, onDelete, o
     || presets.find(p => p.source === 'custom' && p.jobName === job?.jobName);
 
   const [jobName, setJobName] = useState(job?.jobName || '');
-  const [category, setCategory] = useState(existingCustom?.category || '');
-  const [description, setDescription] = useState(existingCustom?.description || '');
+  const [category, setCategory] = useState(existingCustom?._customCategory || existingCustom?.category || '');
+  const [description, setDescription] = useState(existingCustom?._customDescription || existingCustom?.description || '');
   const [customCategory, setCustomCategory] = useState('');
+  const effectiveCategory = existingCustom?._customCategory || existingCustom?.category;
   const [categoryMode, setCategoryMode] = useState(
-    existingCustom?.category && !CATEGORY_OPTIONS.includes(existingCustom.category) ? 'custom' : 'select'
+    effectiveCategory && !CATEGORY_OPTIONS.includes(effectiveCategory) ? 'custom' : 'select'
   );
   const [selectedModules, setSelectedModules] = useState(() => {
     const set = new Set(Object.keys(moduleExtracts));

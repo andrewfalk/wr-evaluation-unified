@@ -34,6 +34,7 @@ export const createSharedJob = () => ({
 });
 
 export const createSharedData = () => ({
+  patientNo: '',
   name: '',
   gender: '',
   height: '',
@@ -44,6 +45,14 @@ export const createSharedData = () => ({
   department: '직업환경의학과',
   doctorName: '김호길',
   evaluationDate: '',
+  medicalRecord: '',
+  highBloodPressure: '',
+  diabetes: '',
+  visitHistory: '',
+  consultReplyOrtho: '',
+  consultReplyNeuro: '',
+  consultReplyRehab: '',
+  consultReplyOther: '',
   specialNotes: '',
   diagnoses: [createDiagnosis()],
   jobs: [createSharedJob()],

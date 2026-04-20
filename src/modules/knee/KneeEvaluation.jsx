@@ -1,10 +1,24 @@
+import { useEffect } from 'react';
 import { JobTab } from './components/JobTab';
 import { KneeResultPanel } from './components/KneeResultPanel';
+import { createKneeJobExtras } from './utils/data';
 
 export function KneeEvaluation({ patient, calc, activeTab, updateModule, errors }) {
   const shared = patient.data.shared;
   const mod = patient.data.module;
   const sharedJobs = shared.jobs || [];
+
+  // 누락된 직업의 jobExtras 자동 생성
+  useEffect(() => {
+    const extras = mod.jobExtras || [];
+    const missing = sharedJobs.filter(j => !extras.find(e => e.sharedJobId === j.id));
+    if (missing.length > 0) {
+      updateModule(m => ({
+        ...m,
+        jobExtras: [...(m.jobExtras || []), ...missing.map(j => createKneeJobExtras(j.id))]
+      }));
+    }
+  }, [sharedJobs.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleJobExtrasChange = (newExtras) => {
     updateModule(m => ({ ...m, jobExtras: newExtras }));

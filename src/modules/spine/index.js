@@ -21,7 +21,12 @@ registerModule({
     label: '척추 작업목록',
     fields: 'tasks',
     extractFromModule(moduleData, sharedJobId) {
-      const tasks = (moduleData.tasks || []).filter(t => t.sharedJobId === sharedJobId);
+      let tasks = (moduleData.tasks || []).filter(t => t.sharedJobId === sharedJobId);
+      // 미귀속 태스크 폴백 (sharedJobId가 빈 레거시 데이터)
+      if (!tasks.length) {
+        const unlinked = (moduleData.tasks || []).filter(t => !t.sharedJobId);
+        if (unlinked.length) tasks = unlinked;
+      }
       if (!tasks.length) return null;
       return {
         tasks: tasks.map(({ name, posture, weight, frequency, timeValue, timeUnit, correctionFactor }) =>

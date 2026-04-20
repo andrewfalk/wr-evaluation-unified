@@ -571,6 +571,53 @@ ipcMain.handle('fs-migrate', async (_e, { savedItems, autoSave, settings }) => {
   return { migrated: true };
 });
 
+// EmrHelper.exe 경로 해석 (개발: bin/Release, 패키징: extraResources)
+function getHelperExe() {
+  const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+  return isDev
+    ? path.join(__dirname, 'emr-helper', 'bin', 'Release', 'EmrHelper.exe')
+    : path.join(process.resourcesPath, 'emr-helper', 'EmrHelper.exe');
+}
+
+// EmrHelper 실행 공통 래퍼 (args: string[], timeoutMs: number)
+function runHelper(args, timeoutMs = 15000) {
+  const helperExe = getHelperExe();
+  if (!fs.existsSync(helperExe)) {
+    return Promise.resolve({ success: false, message: 'EmrHelper.exe not found: ' + helperExe });
+  }
+  return new Promise((resolve) => {
+    execFile(
+      helperExe, args,
+      { timeout: timeoutMs, windowsHide: true, encoding: 'utf-8' },
+      (error, stdout, stderr) => {
+        const trimmed = (stdout || '').trim();
+        const trimmedStderr = (stderr || '').trim();
+
+        if (error && error.killed && !trimmed) {
+          resolve({ success: false, message: `EmrHelper timeout (${timeoutMs / 1000}s)`, errorCode: error.code || null });
+          return;
+        }
+
+        if (trimmed) {
+          try {
+            resolve(JSON.parse(trimmed));
+          } catch {
+            resolve({ success: false, message: 'EmrHelper response parse error', rawStdout: trimmed, rawStderr: trimmedStderr || undefined });
+          }
+          return;
+        }
+
+        if (error) {
+          resolve({ success: false, message: error.message || trimmedStderr || 'EmrHelper returned no output', rawStderr: trimmedStderr || undefined, errorCode: error.code || null });
+          return;
+        }
+
+        resolve({ success: false, message: trimmedStderr || 'EmrHelper returned no output' });
+      }
+    );
+  });
+}
+
 // IPC: EMR 직접입력 (C# EmrHelper.exe → IE DOM 주입)
 ipcMain.handle('emr-inject', async (_event, fieldData) => {
   if (process.platform !== 'win32') {
@@ -579,11 +626,7 @@ ipcMain.handle('emr-inject', async (_event, fieldData) => {
 
   const tmpJson = path.join(os.tmpdir(), `emr-inject-${Date.now()}.json`);
 
-  // 패키징: extraResources → process.resourcesPath / 개발: __dirname 하위
-  const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
-  const helperExe = isDev
-    ? path.join(__dirname, 'emr-helper', 'bin', 'Release', 'EmrHelper.exe')
-    : path.join(process.resourcesPath, 'emr-helper', 'EmrHelper.exe');
+  const helperExe = getHelperExe();
 
   if (!fs.existsSync(helperExe)) {
     return { success: false, message: 'EmrHelper.exe not found: ' + helperExe };
@@ -677,6 +720,22 @@ ipcMain.handle('emr-inject', async (_event, fieldData) => {
   } finally {
     try { fs.unlinkSync(tmpJson); } catch {}
   }
+});
+
+// IPC: 진료기록 데이터 추출 (단건 — App.jsx가 환자별 루프 수행)
+ipcMain.handle('emr-extract-record', async (_event, patientNo) => {
+  if (process.platform !== 'win32') {
+    return { success: false, error: 'EMR extraction is Windows-only.' };
+  }
+  return runHelper(['--extract-record', String(patientNo)], 30000);
+});
+
+// IPC: 다학제회신 추출 (현재 열린 진료메인 페이지 대상)
+ipcMain.handle('emr-extract-consultation', async () => {
+  if (process.platform !== 'win32') {
+    return { success: false, error: 'EMR extraction is Windows-only.' };
+  }
+  return runHelper(['--extract-consultation'], 15000);
 });
 
 app.on('window-all-closed', () => {

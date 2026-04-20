@@ -708,6 +708,487 @@ namespace EmrHelper
             return false;
         }
 
+        // ── Generic page finder: reuses FindIEServerHandles + GetDocument ──
+
+        static object FindDocumentByMatch(List<IntPtr> handles, string urlFragment, string titleFragment)
+        {
+            foreach (var hwnd in handles)
+            {
+                var cw = new CandidateWindow();
+                cw.Handle = ToHex(hwnd);
+                var doc = GetDocument(hwnd, cw);
+                if (doc == null) continue;
+
+                if (!string.IsNullOrEmpty(urlFragment))
+                {
+                    string url = COM.GetStringProp(doc, "URL");
+                    if (url.IndexOf(urlFragment, StringComparison.OrdinalIgnoreCase) >= 0)
+                        return doc;
+                }
+                if (!string.IsNullOrEmpty(titleFragment))
+                {
+                    string title = COM.GetStringProp(doc, "title");
+                    if (title.IndexOf(titleFragment, StringComparison.OrdinalIgnoreCase) >= 0)
+                        return doc;
+                }
+            }
+            return null;
+        }
+
+        static string ReadField(object doc, string fieldId)
+        {
+            try
+            {
+                object elem = FindElement(doc, fieldId);
+                if (elem == null) return "";
+                string val = COM.GetStringProp(elem, "value");
+                return val ?? "";
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>
+        /// Read a cell from a FarPoint Spread ActiveX control.
+        /// GetText(col, row, outVal) uses ByRef for the 3rd param —
+        /// ParameterModifier is REQUIRED or the COM binder sends by-value and outVal is always null.
+        /// </summary>
+        static string ReadSpreadCell(object spread, int col, int row)
+        {
+            try
+            {
+                object[] args = { col, row, null };
+                ParameterModifier pm = new ParameterModifier(3);
+                pm[2] = true; // 3rd parameter is ByRef
+                spread.GetType().InvokeMember(
+                    "GetText",
+                    BindingFlags.InvokeMethod,
+                    null, spread, args,
+                    new ParameterModifier[] { pm },
+                    null, null);
+                return args[2] != null ? args[2].ToString() : "";
+            }
+            catch { return ""; }
+        }
+
+        // ── RecordExtractor: Module1 VBA → C# ──
+
+        static string ExtractRecord(List<IntPtr> handles, string patientNo)
+        {
+            var doc = FindDocumentByMatch(handles, "CREATEDUTYANLYNEW", null);
+            if (doc == null)
+                return "{\"success\":false,\"error\":\"진료기록분석지 페이지를 찾을 수 없습니다.\"}";
+
+            // Set patient number and trigger query
+            object txtPtNo = FindElement(doc, "txtPtNo");
+            if (txtPtNo == null)
+                return "{\"success\":false,\"error\":\"txtPtNo 필드를 찾을 수 없습니다.\"}";
+
+            COM.SetProp(txtPtNo, "value", patientNo);
+            try
+            {
+                object parentWindow = COM.GetProp(doc, "parentWindow");
+                COM.Invoke(parentWindow, "execScript", "PtInfoSetting()", "vbscript");
+            }
+            catch (Exception ex)
+            {
+                return string.Format("{{\"success\":false,\"error\":\"execScript 실패: {0}\"}}", Json.Escape(ex.Message));
+            }
+
+            Thread.Sleep(4000); // Wait for patient data to load
+
+            // Read input grid (SSRHPLANLIST)
+            object spreadObj = FindElement(doc, "SSRHPLANLIST");
+            if (spreadObj != null)
+            {
+                int recordCount = COM.GetIntProp(spreadObj, "MaxRows");
+                if (recordCount > 0)
+                {
+                    // Double-click first record to load details
+                    try
+                    {
+                        object pw = COM.GetProp(doc, "parentWindow");
+                        COM.Invoke(pw, "execScript", "Call SSRHPLANLIST_DblClick(0, 1)", "vbscript");
+                    }
+                    catch { }
+                    Thread.Sleep(4000); // Wait for record to load
+                }
+            }
+
+            // Read basic info
+            string patientName = ReadField(doc, "txtptNm");
+            string idacDate = ReadField(doc, "txtIdac_Dte");
+            string sickCont = ReadField(doc, "txtSick_Cont");
+
+            // Parse birth date from SSN
+            string birthDate = ParseBirthDate(ReadField(doc, "txtSsnNo"));
+
+            // Read medical records
+            string sptCont = ReadField(doc, "txtSpt_Cont").Trim();
+            string mriDate = ReadField(doc, "txtMri_Dte_Txt").Trim().Replace("\r\n", "").Replace("\n", "");
+            string mriMain = ReadField(doc, "txtMri_Mian_Cont").Trim();
+            string opDate = ReadField(doc, "txtOp_Dte").Trim().Replace("\r\n", "").Replace("\n", "");
+            string opMain = ReadField(doc, "txtOp_Main_Cont").Trim();
+            string opTst = ReadField(doc, "txtOp_Tst_Cont").Trim();
+
+            // Assemble medical record summary
+            if (string.IsNullOrEmpty(sptCont)) sptCont = "없음";
+
+            string mriCombined;
+            if (string.IsNullOrEmpty(mriDate) && string.IsNullOrEmpty(mriMain))
+            {
+                mriCombined = "없음";
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(mriDate)) mriDate = "없음";
+                if (string.IsNullOrEmpty(mriMain)) mriMain = "없음";
+                int lfPos = mriMain.IndexOf('\n');
+                if (lfPos >= 0)
+                    mriCombined = mriDate + " " + mriMain.Substring(0, lfPos).Trim() + "\n" + mriMain.Substring(lfPos + 1).Trim();
+                else
+                    mriCombined = mriDate + " " + mriMain;
+            }
+
+            string opCombined;
+            if (string.IsNullOrEmpty(opDate) && string.IsNullOrEmpty(opMain) && string.IsNullOrEmpty(opTst))
+            {
+                opCombined = "없음";
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(opDate)) opDate = "없음";
+                if (string.IsNullOrEmpty(opMain)) opMain = "없음";
+                if (string.IsNullOrEmpty(opTst)) opTst = "없음";
+                opCombined = opDate + " " + opMain + "\n" + opTst;
+            }
+
+            string medicalRecord = "\n[ 의무 기록 ]\n" + sptCont +
+                                   "\n[ 영상 검사 ]\n" + mriCombined +
+                                   "\n[ 수술 이력 ]\n" + opCombined;
+
+            // Analyze FarPoint Spread (sprYoyang): highBP, diabetes, visit history
+            string highBP = "무", diabetes = "무", visitHistory = "";
+            object sprYoyang = FindElement(doc, "sprYoyang");
+            if (sprYoyang != null)
+            {
+                int maxRow = COM.GetIntProp(sprYoyang, "MaxRows");
+
+                // Check first row for highBP/diabetes
+                if (maxRow >= 1)
+                {
+                    string firstVal = ReadSpreadCell(sprYoyang, 2, 1);
+                    if (firstVal.IndexOf("고혈압") >= 0) highBP = "유";
+                    if (firstVal.IndexOf("당뇨") >= 0) diabetes = "유";
+                }
+
+                // Visit history calculation
+                var visitParts = new List<string>();
+                bool isTracking = false;
+                string currentPrefix = "", currentDate = "";
+                long currentSum = 0;
+                string minDate = "9999-12-31";
+                long totalSum = 0;
+
+                for (int y = 1; y <= maxRow; y++)
+                {
+                    string valCol2 = ReadSpreadCell(sprYoyang, 2, y);
+                    string valCol3 = ReadSpreadCell(sprYoyang, 3, y);
+                    string valCol7 = ReadSpreadCell(sprYoyang, 7, y);
+
+                    // Extract number from col7
+                    long extractedNum = ExtractNumber(valCol7);
+                    totalSum += extractedNum;
+
+                    // Track min date
+                    if (!string.IsNullOrEmpty(valCol3) && valCol3 != "1111-11-11" && string.Compare(valCol3, minDate) < 0)
+                        minDate = valCol3;
+
+                    // Match body part prefix
+                    string matchedPrefix = MatchBodyPart(valCol2);
+
+                    if (!string.IsNullOrEmpty(matchedPrefix))
+                    {
+                        if (isTracking)
+                        {
+                            visitParts.Add(FormatVisitEntry(currentPrefix, currentDate, currentSum));
+                        }
+                        currentPrefix = matchedPrefix;
+                        currentSum = 0;
+                        isTracking = true;
+
+                        // Get next row's date
+                        if (y < maxRow)
+                        {
+                            string nd = ReadSpreadCell(sprYoyang, 3, y + 1);
+                            currentDate = (string.IsNullOrEmpty(nd) || nd == "1111-11-11") ? "" : nd;
+                        }
+                        else
+                        {
+                            currentDate = "";
+                        }
+                    }
+                    else if (isTracking)
+                    {
+                        currentSum += extractedNum;
+                    }
+                }
+
+                // Final tracking entry
+                if (isTracking)
+                {
+                    visitParts.Add(FormatVisitEntry(currentPrefix, currentDate, currentSum));
+                }
+
+                if (visitParts.Count > 0)
+                    visitHistory = string.Join("\n", visitParts.ToArray());
+                else if (minDate != "9999-12-31")
+                    visitHistory = minDate + " 부터 " + totalSum + " 회";
+            }
+
+            // Parse disease codes from sickCont
+            var diseases = ParseDiseaseCodes(sickCont);
+
+            // Build JSON output
+            var sb = new StringBuilder();
+            sb.Append("{\"success\":true");
+            sb.AppendFormat(",\"patientNo\":\"{0}\"", Json.Escape(patientNo));
+            sb.AppendFormat(",\"patientName\":\"{0}\"", Json.Escape(patientName));
+            sb.AppendFormat(",\"birthDate\":\"{0}\"", Json.Escape(birthDate));
+            sb.AppendFormat(",\"accidentDate\":\"{0}\"", Json.Escape(idacDate));
+            sb.AppendFormat(",\"medicalRecord\":\"{0}\"", Json.Escape(medicalRecord));
+            sb.AppendFormat(",\"highBloodPressure\":\"{0}\"", Json.Escape(highBP));
+            sb.AppendFormat(",\"diabetes\":\"{0}\"", Json.Escape(diabetes));
+            sb.AppendFormat(",\"visitHistory\":\"{0}\"", Json.Escape(visitHistory));
+            sb.Append(",\"diseases\":[");
+            for (int i = 0; i < diseases.Count; i++)
+            {
+                if (i > 0) sb.Append(",");
+                sb.AppendFormat("{{\"code\":\"{0}\",\"name\":\"{1}\"}}", Json.Escape(diseases[i][0]), Json.Escape(diseases[i][1]));
+            }
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
+        static string ParseBirthDate(string ssn)
+        {
+            if (string.IsNullOrEmpty(ssn)) return "";
+            ssn = ssn.Replace("-", "");
+            if (ssn.Length < 6) return "";
+
+            string yy = ssn.Substring(0, 2);
+            string mm = ssn.Substring(2, 2);
+            string dd = ssn.Substring(4, 2);
+            string century = "19";
+            if (ssn.Length >= 7)
+            {
+                char g = ssn[6];
+                if (g == '3' || g == '4' || g == '7' || g == '8') century = "20";
+            }
+            else
+            {
+                int yyInt;
+                if (int.TryParse(yy, out yyInt) && yyInt <= 30) century = "20";
+            }
+            return century + yy + "-" + mm + "-" + dd;
+        }
+
+        static long ExtractNumber(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return 0;
+            var numStr = new StringBuilder();
+            foreach (char c in s)
+            {
+                if (c >= '0' && c <= '9') numStr.Append(c);
+            }
+            if (numStr.Length == 0) return 0;
+            long val;
+            return long.TryParse(numStr.ToString(), out val) ? val : 0;
+        }
+
+        static string MatchBodyPart(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            if (text.IndexOf("경추") >= 0) return "목 부위";
+            // "목" standalone check (not part of compound word)
+            for (int i = 0; i < text.Length; i++)
+            {
+                if (text[i] == '목')
+                {
+                    bool leftOk = (i == 0 || !IsKoreanOrAlphaNum(text[i - 1]));
+                    bool rightOk = (i == text.Length - 1 || !IsKoreanOrAlphaNum(text[i + 1]));
+                    if (leftOk && rightOk) return "목 부위";
+                }
+            }
+            if (text.IndexOf("어깨") >= 0 || text.IndexOf("견관절") >= 0) return "어깨 부위";
+            if (text.IndexOf("팔꿈치") >= 0 || text.IndexOf("주관절") >= 0) return "팔꿈치 부위";
+            if (text.IndexOf("손목") >= 0 || text.IndexOf("손가락") >= 0 || text.IndexOf("완관절") >= 0 || text.IndexOf("손") >= 0) return "손목 부위";
+            if (text.IndexOf("무릎") >= 0 || text.IndexOf("슬관절") >= 0) return "무릎 부위";
+            if (text.IndexOf("허리") >= 0 || text.IndexOf("요추") >= 0) return "허리 부위";
+            if (text.IndexOf("발목") >= 0 || text.IndexOf("족관절") >= 0) return "발목 부위";
+            if (text.IndexOf("고관절") >= 0) return "고관절 부위";
+            return "";
+        }
+
+        static bool IsKoreanOrAlphaNum(char c)
+        {
+            if (c >= '가' && c <= '힣') return true;
+            if (c >= 'a' && c <= 'z') return true;
+            if (c >= 'A' && c <= 'Z') return true;
+            if (c >= '0' && c <= '9') return true;
+            return false;
+        }
+
+        static string FormatVisitEntry(string prefix, string date, long count)
+        {
+            if (count == 0 || string.IsNullOrEmpty(date))
+                return prefix + " 수진 이력 없음";
+            return prefix + " : " + date + " 이후 " + count + " 회";
+        }
+
+        static List<string[]> ParseDiseaseCodes(string sickCont)
+        {
+            var result = new List<string[]>();
+            if (string.IsNullOrEmpty(sickCont)) return result;
+
+            // Find all matches of pattern: uppercase letter + 3-5 digits
+            var codes = new List<int[]>(); // [startIndex, length]
+            for (int i = 0; i < sickCont.Length; i++)
+            {
+                char c = sickCont[i];
+                if (c >= 'A' && c <= 'Z')
+                {
+                    int j = i + 1;
+                    while (j < sickCont.Length && j - i <= 5 && sickCont[j] >= '0' && sickCont[j] <= '9') j++;
+                    int digitCount = j - i - 1;
+                    if (digitCount >= 3 && digitCount <= 5)
+                    {
+                        codes.Add(new int[] { i, j - i });
+                        i = j - 1; // skip past matched code
+                    }
+                }
+            }
+
+            for (int m = 0; m < codes.Count; m++)
+            {
+                string code = sickCont.Substring(codes[m][0], codes[m][1]);
+                int nameStart = codes[m][0] + codes[m][1];
+                int nameEnd = (m + 1 < codes.Count) ? codes[m + 1][0] : sickCont.Length;
+                string name = sickCont.Substring(nameStart, nameEnd - nameStart).Trim().Replace("\r", "").Replace("\n", "");
+                result.Add(new string[] { code, name });
+            }
+
+            return result;
+        }
+
+        // ── ConsultationExtractor: Module3 VBA → C# ──
+
+        static string ExtractConsultation(List<IntPtr> handles)
+        {
+            // Find 진료메인 page by title
+            var doc = FindDocumentByMatch(handles, null, "\uC9C4\uB8CC\uBA54\uC778"); // "진료메인"
+            if (doc == null)
+                return "{\"success\":false,\"error\":\"진료메인 페이지를 찾을 수 없습니다.\"}";
+
+            // Navigate frames: topFrame → leftIFrame → NoteViewer
+            object targetDoc = null;
+            try
+            {
+                object frames = COM.GetProp(doc, "frames");
+                object topFrame = COM.Invoke(frames, "item", "topFrame");
+                object topDoc = COM.GetProp(topFrame, "document");
+
+                object topFrames = COM.GetProp(topDoc, "frames");
+                object leftFrame = COM.Invoke(topFrames, "item", "leftIFrame");
+                object leftDoc = COM.GetProp(leftFrame, "document");
+
+                object leftFrames = COM.GetProp(leftDoc, "frames");
+                object noteViewer = COM.Invoke(leftFrames, "item", "NoteViewer");
+                targetDoc = COM.GetProp(noteViewer, "document");
+            }
+            catch { }
+
+            // Fallback: try getElementById approach
+            if (targetDoc == null)
+            {
+                try
+                {
+                    object topEl = COM.Invoke(doc, "getElementById", "topFrame");
+                    object topCW = COM.GetProp(topEl, "contentWindow");
+                    object topDoc = COM.GetProp(topCW, "document");
+
+                    object leftEl = COM.Invoke(topDoc, "getElementById", "leftIFrame");
+                    object leftCW = COM.GetProp(leftEl, "contentWindow");
+                    object leftDoc = COM.GetProp(leftCW, "document");
+
+                    object noteEl = COM.Invoke(leftDoc, "getElementById", "NoteViewer");
+                    object noteCW = COM.GetProp(noteEl, "contentWindow");
+                    targetDoc = COM.GetProp(noteCW, "document");
+                }
+                catch { }
+            }
+
+            if (targetDoc == null)
+                return "{\"success\":false,\"error\":\"프레임 탐색 실패 (topFrame/leftIFrame/NoteViewer)\"}";
+
+            // Extract consultation replies from width=590 tables
+            var consultations = new List<string[]>(); // [department, content]
+            try
+            {
+                object allTables = COM.Invoke(targetDoc, "getElementsByTagName", "table");
+                int tableCount = COM.GetIntProp(allTables, "length");
+
+                for (int t = 0; t < tableCount; t++)
+                {
+                    object tbl = COM.Invoke(allTables, "item", t);
+                    if (tbl == null) continue;
+
+                    string widthAttr = "";
+                    try { object wa = COM.Invoke(tbl, "getAttribute", "width"); widthAttr = wa != null ? wa.ToString() : ""; } catch { }
+                    if (widthAttr != "590") continue;
+
+                    string tblText = COM.GetStringProp(tbl, "innerText").Replace(" ", "");
+                    string dept = "";
+                    if (tblText.IndexOf("\uB2E4\uD559\uC81C\uD68C\uC2E0:\uC815\uD615\uC678\uACFC") >= 0) dept = "정형외과";
+                    else if (tblText.IndexOf("\uB2E4\uD559\uC81C\uD68C\uC2E0:\uC2E0\uACBD\uC678\uACFC") >= 0) dept = "신경외과";
+                    else if (tblText.IndexOf("\uB2E4\uD559\uC81C\uD68C\uC2E0:\uC7AC\uD65C\uC758\uD559\uACFC") >= 0) dept = "재활의학과";
+                    if (string.IsNullOrEmpty(dept)) continue;
+
+                    if (tblText.IndexOf("\uD68C\uC2E0\uB0B4\uC6A9") < 0) continue; // "회신내용"
+
+                    // Find the cell with "회신내용" and get the next cell
+                    object cells = COM.GetProp(tbl, "cells");
+                    int cellCount = COM.GetIntProp(cells, "length");
+                    for (int ci = 0; ci < cellCount; ci++)
+                    {
+                        object cell = COM.Invoke(cells, "item", ci);
+                        string cellText = COM.GetStringProp(cell, "innerText").Replace("\r", "").Replace("\n", "").Replace(" ", "");
+                        if (cellText == "\uD68C\uC2E0\uB0B4\uC6A9" && ci + 1 < cellCount) // "회신내용"
+                        {
+                            object nextCell = COM.Invoke(cells, "item", ci + 1);
+                            string content = COM.GetStringProp(nextCell, "innerText").Trim();
+                            consultations.Add(new string[] { dept, content });
+                            break;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                return string.Format("{{\"success\":false,\"error\":\"테이블 파싱 오류: {0}\"}}", Json.Escape(ex.Message));
+            }
+
+            // Build JSON output
+            var sb = new StringBuilder();
+            sb.Append("{\"success\":true,\"consultations\":[");
+            for (int i = 0; i < consultations.Count; i++)
+            {
+                if (i > 0) sb.Append(",");
+                sb.AppendFormat("{{\"department\":\"{0}\",\"content\":\"{1}\"}}", Json.Escape(consultations[i][0]), Json.Escape(consultations[i][1]));
+            }
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
         [STAThread]
         static int Main(string[] args)
         {
@@ -716,19 +1197,23 @@ namespace EmrHelper
 
             if (args.Length == 0)
             {
-                _result.Message = "Usage: EmrHelper.exe [--diagnose] --probe | [--diagnose] --json <path>";
+                _result.Message = "Usage: EmrHelper.exe --probe | --json <path> | --extract-record <ptNo> | --extract-consultation";
                 Console.WriteLine(_result.ToJson());
                 return 1;
             }
 
             bool probeOnly = false;
             string jsonPath = null;
+            string extractRecordPtNo = null;
+            bool extractConsultation = false;
 
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "--probe") probeOnly = true;
                 else if (args[i] == "--diagnose") _diagnose = true;
                 else if (args[i] == "--json" && i + 1 < args.Length) jsonPath = args[++i];
+                else if (args[i] == "--extract-record" && i + 1 < args.Length) extractRecordPtNo = args[++i];
+                else if (args[i] == "--extract-consultation") extractConsultation = true;
             }
 
             var handles = FindIEServerHandles();
@@ -742,6 +1227,23 @@ namespace EmrHelper
                 Console.WriteLine(_result.ToJson());
                 return 1;
             }
+
+            // ── New commands: extract-record, extract-consultation ──
+            if (extractRecordPtNo != null)
+            {
+                string json = ExtractRecord(handles, extractRecordPtNo);
+                Console.WriteLine(json);
+                return json.Contains("\"success\":true") ? 0 : 1;
+            }
+
+            if (extractConsultation)
+            {
+                string json = ExtractConsultation(handles);
+                Console.WriteLine(json);
+                return json.Contains("\"success\":true") ? 0 : 1;
+            }
+
+            // ── Legacy commands: probe, json (DRFMNG inject) ──
 
             string windowTitle;
             List<CandidateWindow> candidates;
@@ -780,6 +1282,7 @@ namespace EmrHelper
 
             // Tab 1 fields
             SetField(doc, "txtAppv_Sick_Cont", data.Get("txtAppvSickCont"));
+            SetField(doc, "txtMrec_Med_Pov_Cont", data.Get("txtMrecMedPovCont"));
             SetField(doc, "txtJobCusCont", data.Get("txtJobCusCont"));
             SetField(doc, "txtPerCusCont", data.Get("txtPerCusCont"));
             SetField(doc, "txtIdacDte", data.Get("txtIdacDte"));
@@ -806,6 +1309,12 @@ namespace EmrHelper
 
                 string cureCost = data.Get("rdoCureCost");
                 if (!string.IsNullOrEmpty(cureCost)) SetRadio(doc, "rdoCureCost", cureCost);
+
+                string examToDte = data.Get("rdoExamToDte");
+                if (!string.IsNullOrEmpty(examToDte)) SetRadio(doc, "rdoExamToDte", examToDte);
+
+                string idacDcsDte = data.Get("rdoIdacDcsDte");
+                if (!string.IsNullOrEmpty(idacDcsDte)) SetRadio(doc, "rdoIdacDcsDte", idacDcsDte);
             }
             else
             {
