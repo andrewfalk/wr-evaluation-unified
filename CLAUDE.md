@@ -25,7 +25,7 @@ vercel deploy            # Vercel 배포
 src/
 ├── core/                    # 공유 프레임워크
 │   ├── moduleRegistry.js    # registerModule(), getModule(), getAllModules()
-│   ├── components/          # BasicInfoForm, DiagnosisForm, AIAnalysisPanel, PresetSearch, PresetManageModal, SettingsModal
+│   ├── components/          # BasicInfoForm, DiagnosisForm, AIAnalysisPanel, PresetSearch, PresetManageModal, Dashboard, BatchImportModal, SettingsModal
 │   ├── hooks/               # useAIAnalysis (web/electron 자동 분기), usePatientList
 │   ├── services/            # presetRepository (프리셋 CRUD, builtin+custom 병합)
 │   └── utils/               # storage, platform, common, data
@@ -34,8 +34,8 @@ src/
 │   ├── shoulder/            # 어깨 모듈 (ShoulderEvaluation, JobTab, ShoulderResultPanel)
 │   ├── elbow/               # 팔꿈치 모듈 (ElbowEvaluation, ExposureForm, ElbowResultPanel)
 │   └── spine/               # 척추 MDDM 모듈 (SpineEvaluation, TaskManager, TaskEditor, ResultDashboard)
-api/analyze.js               # Vercel 서버리스 (Claude API 프록시)
-electron/                    # main.js + preload.js (IPC 기반 AI 호출)
+api/analyze.js               # Vercel 서버리스 (Gemini/Claude API 프록시)
+electron/                    # main.js + preload.js + emr-helper/ (IPC: AI 호출 + EMR 연동)
 ```
 
 ## 모듈 추가 방법
@@ -69,18 +69,22 @@ registerModule({
 
 ```javascript
 Patient = {
-  id, moduleId,
+  id, phase,
   data: {
-    shared: { name, gender, height, weight, birthDate, evaluationDate, hospitalName, department, doctorName, diagnoses },
-    module: { /* 모듈별 고유 데이터 */ }
+    shared: { patientNo, name, gender, height, weight, birthDate, injuryDate, evaluationDate,
+              hospitalName, department, doctorName, specialNotes, diagnoses[], jobs[],
+              medicalRecord, highBloodPressure, diabetes, visitHistory,
+              consultReplyOrtho, consultReplyNeuro, consultReplyRehab, consultReplyOther },
+    modules: { knee: {}, shoulder: {}, elbow: {}, spine: {} },
+    activeModules: ['knee', 'spine', ...]
   }
 }
 ```
 
 ## AI API 분기
 
-- **웹**: `fetch('/api/analyze')` → Vercel 서버리스 → Claude API (서버 환경변수 CLAUDE_API_KEY)
-- **Electron**: `window.electron.analyzeAI()` → IPC → main process → 직접 Claude API (사용자 입력 키)
+- **웹**: `fetch('/api/analyze')` → Vercel 서버리스 → Gemini(기본)/Claude API (서버 환경변수 GEMINI_API_KEY / CLAUDE_API_KEY)
+- **Electron**: `window.electron.analyzeAI()` → IPC → main process → 직접 Gemini/Claude API (사용자 입력 키)
 - 분기 로직: `src/core/hooks/useAIAnalysis.js`
 
 ## 주의사항
