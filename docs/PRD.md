@@ -1167,6 +1167,14 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 - **프리셋 내보내기/가져오기 개선**: `toExportableCustomPreset()`으로 커스텀 프리셋만 정제해서 내보내기 (builtin 필드 혼입 방지). `mergePresets()`에서 `_customCategory`/`_customDescription` 보존. `importPresetsFromJSON()` 필드 정규화. `loadAllPresets()`에 `builtinError` 반환 추가
 - **일괄 Import 필드 그룹 세분화**: 기존 '직업/작업'+'팔꿈치' 2개 그룹 → 직업/무릎/어깨/척추/팔꿈치 공통/팔꿈치 BK별 6개 그룹으로 분리. UI에 카드 헤더 필드 개수 배지 + 리스트 형식 적용
 
+### Phase 19: 손목(수관절) 모듈 추가 (v3.4.0)
+
+- **손목 모듈 신설** (`src/modules/wrist/`): 팔꿈치 모듈의 구조를 차용하여, 독일 산재보험 기준을 준용한 손목의 평가 항목(BK2113 수근관증후군, BK2101 건초염/방아쇠수지, BK2103 관절병증, BK2106 Guyon canal 증후군)을 마련함
+- **Gate-and-Flag 유지**: 팔꿈치 평가 모델처럼 필수 조건 파라미터(시간, 형태, 휴식분포 등)를 검사하여 플래그화 하고 결과를 문서(Narrative)로 자동 생성
+- **공유 데이터셋 적용**: `jobEvaluations[]`와 `temporalSequence`를 손목 특화 필드로 재정의.
+- **통합 소견서 및 EMR 보강**: 인코딩 깨짐을 보호하기 위한 유니코드 처리가 적용된 텍스트(`reportGenerator.js`, `exportService.js`) 내보내기 구현
+- **일괄 Export/Import 서식 확장**: 손목 전용 입력 지표들을 포함하여 엑셀 문서 컬럼 확장(101열 첨부)
+
 ---
 
 ## 부록 A: MDDM 자세 코드
