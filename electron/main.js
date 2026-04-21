@@ -381,6 +381,7 @@ function extractFromRawScan(buf, targetKey) {
 const dataDir = path.join(app.getPath('userData'), 'wr-eval-data');
 const patientsDir = path.join(dataDir, 'patients');
 const savedDir = path.join(dataDir, 'saved');
+const customPresetsPath = path.join(dataDir, 'custom-presets.json');
 
 function ensureDirs() {
   for (const dir of [dataDir, patientsDir, savedDir]) {
@@ -524,6 +525,17 @@ ipcMain.handle('fs-save-settings', async (_e, settings) => {
 ipcMain.handle('fs-load-settings', async () => {
   ensureDirs();
   return readJsonFile(path.join(dataDir, 'settings.json'));
+});
+
+// 커스텀 프리셋
+ipcMain.handle('fs-load-custom-presets', async () => {
+  ensureDirs();
+  return readJsonFile(customPresetsPath, []);
+});
+
+ipcMain.handle('fs-save-custom-presets', async (_e, presets) => {
+  ensureDirs();
+  writeJsonFile(customPresetsPath, Array.isArray(presets) ? presets : []);
 });
 
 // 마이그레이션: localStorage 데이터를 파일로 이전

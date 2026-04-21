@@ -201,6 +201,37 @@ function buildExposureSection(shared, modules, activeModules) {
     }
   }
 
+  if (activeModules.includes('wrist')) {
+    const calc = getModule('wrist')?.computeCalc?.({ shared, module: modules.wrist || {} });
+    text += '\n<손목/손가락>\n';
+    if (calc?.missingCommonFields?.length) {
+      text += `- 공통 시간적 선후관계 누락: ${calc.missingCommonFields.join(', ')}\n`;
+    }
+    if (calc?.temporalFlagItems?.length > 0) {
+      text += `- 공통 시간적 선후관계: ${calc.temporalFlagItems.map(flag => flag.label).join(', ')}\n`;
+    }
+    (calc?.jobSummaries || []).forEach(jobSummary => {
+      text += `- ${jobSummary.jobName || '-'}\n`;
+      (jobSummary.diagnosisSummaries || []).forEach(summary => {
+        const diagnosis = summary.diagnosis || {};
+        const riskFactorText = summary.riskFactorItems?.length > 0
+          ? summary.riskFactorItems.map(flag => flag.label).join(', ')
+          : '확인된 위험 요인 없음';
+
+        text += `  - ${diagnosis.code || ''} ${diagnosis.name || ''}${diagnosis.side ? ` (${getSideText(diagnosis.side)})` : ''}\n`;
+        if (summary.missingFields?.length > 0) {
+          text += `    입력 누락: ${summary.missingFields.join(', ')}\n`;
+        }
+        text += `    분석 정리:\n`;
+        text += `      ${(summary.narrative || '-').split('\n').join('\n      ')}\n`;
+        text += `      업무에 포함된 위험 요인: ${riskFactorText}\n`;
+        if (summary.riskFactorSentence) {
+          text += `\n      **종합평가** ${summary.riskFactorSentence}\n`;
+        }
+      });
+    });
+  }
+
   if (activeModules.includes('elbow')) {
     const calc = getModule('elbow')?.computeCalc?.({ shared, module: modules.elbow || {} });
     text += '\n<팔꿈치(주관절)>\n';
@@ -332,7 +363,7 @@ function generateUnifiedEMR(patient) {
     '[ 업무관련성 평가 결과 ]',
     buildAssessmentSummary(diagnoses, activeModules),
   ].filter(Boolean).join('\n\n');
-  const b9 = modules.knee?.returnConsiderations || modules.shoulder?.returnConsiderations || modules.elbow?.returnConsiderations || '';
+  const b9 = modules.knee?.returnConsiderations || modules.wrist?.returnConsiderations || modules.shoulder?.returnConsiderations || modules.elbow?.returnConsiderations || '';
 
   return { b5, b6, b7, b8, b9, consultReplySummary };
 }
@@ -412,7 +443,7 @@ export async function exportBatch(patients) {
 }
 
 const BATCH_HEADERS = [
-  '이름', '생년월일', '재해일자', '키', '체중', '성별',
+  '이름', '등록번호', '생년월일', '재해일자', '키', '체중', '성별',
   '병원명', '진료과', '담당의', '특이사항', '복귀고려사항',
   '진단코드', '진단명', '방향', 'KLG(우)', 'KLG(좌)', 'Ellman(우)', 'Ellman(좌)',
   '직종명', '시작일', '종료일', '근무기간(년)', '근무기간(개월)',
@@ -426,6 +457,14 @@ const BATCH_HEADERS = [
   '팔꿈치_BK2103_진동공구종류', '팔꿈치_BK2103_진동시간', '팔꿈치_BK2103_공구를강하게쥐거나누르면서사용하는작업',
   '팔꿈치_BK2105_팔꿈치지지', '팔꿈치_BK2105_압박원인',
   '팔꿈치_BK2106_압박원인',
+  '손목_시간적선후관계_최근작업변화', '손목_시간적선후관계_작업변화시점', '손목_시간적선후관계_증상발생까지기간', '손목_시간적선후관계_휴식시호전',
+  '손목_BK유형', '손목_BK선택방식', '손목_문제작업명', '손목_핵심동작연결성', '손목_공통핵심노출유형', '손목_반복동작정도',
+  '손목_1일노출시간', '손목_하루작업비중', '손목_주당수행일수', '손목_작업형태', '손목_휴식분포',
+  '손목_힘사용', '손목_비중립자세', '손목_정적유지', '손목_직접압박수준', '손목_진동노출',
+  '손목_BK2113_반복손목운동',
+  '손목_BK2101_주기초', '손목_BK2101_시간당반복횟수', '손목_BK2101_단조반복', '손목_BK2101_배측굴곡', '손목_BK2101_회내회외',
+  '손목_BK2103_진동공구종류', '손목_BK2103_진동시간', '손목_BK2103_공구압박', '손목_BK2103_고강도파지',
+  '손목_BK2106_압박원인',
   '작업명', '자세코드', '작업중량(kg)', '횟수/분', '시간값', '시간단위', '보정계수',
 ];
 
@@ -445,21 +484,32 @@ function generateBatchRows(patientList) {
     const spineTasks = modules.spine?.tasks || [];
     const elbowTemporal = modules.elbow?.temporalSequence || modules.elbow?.temporalRelation || {};
     const elbowJobEvaluations = modules.elbow?.jobEvaluations || [];
+    const wristTemporal = modules.wrist?.temporalSequence || modules.wrist?.temporalRelation || {};
+    const wristJobEvaluations = modules.wrist?.jobEvaluations || [];
 
     const firstJobId = jobs[0]?.id || '';
     const jobTaskPairs = [];
     const elbowPairs = [];
+    const wristPairs = [];
 
     if (jobs.length > 0) {
       for (const job of jobs) {
         const jobSpineTasks = spineTasks.filter(task => (task.sharedJobId || firstJobId) === job.id);
         const kneeExtra = kneeExtras.find(extra => extra.sharedJobId === job.id) || null;
         const elbowJobEvaluation = elbowJobEvaluations.find(item => item.sharedJobId === job.id);
+        const wristJobEvaluation = wristJobEvaluations.find(item => item.sharedJobId === job.id);
 
         (elbowJobEvaluation?.diagnosisEntries || []).forEach(entry => {
           const diagnosis = diagnoses.find(item => item.id === entry.diagnosisId);
           if (diagnosis) {
             elbowPairs.push({ job, diagnosis, entry });
+          }
+        });
+
+        (wristJobEvaluation?.diagnosisEntries || []).forEach(entry => {
+          const diagnosis = diagnoses.find(item => item.id === entry.diagnosisId);
+          if (diagnosis) {
+            wristPairs.push({ job, diagnosis, entry });
           }
         });
 
@@ -473,21 +523,24 @@ function generateBatchRows(patientList) {
       spineTasks.forEach(task => jobTaskPairs.push({ job: null, task, kneeExtra: null }));
     }
 
-    const rowCount = Math.max(1, diagnoses.length, jobTaskPairs.length, elbowPairs.length);
+    const rowCount = Math.max(1, diagnoses.length, jobTaskPairs.length, elbowPairs.length, wristPairs.length);
 
     for (let index = 0; index < rowCount; index += 1) {
       const row = [];
       const isFirst = index === 0;
       const elbowPair = elbowPairs[index] || null;
+      const wristPair = wristPairs[index] || null;
       const pair = jobTaskPairs[index];
-      const diag = elbowPair?.diagnosis || diagnoses[index];
-      const job = elbowPair?.job || pair?.job;
+      const diag = elbowPair?.diagnosis || wristPair?.diagnosis || diagnoses[index];
+      const job = elbowPair?.job || wristPair?.job || pair?.job;
       const task = pair?.task;
       const kneeExtra = job ? (pair?.kneeExtra || kneeExtras.find(extra => extra.sharedJobId === job.id) || null) : pair?.kneeExtra;
       const shoulderExtra = job ? shoulderExtras.find(extra => extra.sharedJobId === job.id) : null;
       const elbowEntry = elbowPair?.entry || null;
+      const wristEntry = wristPair?.entry || null;
 
       row.push(shared.name || '');
+      row.push(shared.patientNo || '');
       row.push(shared.birthDate || '');
       row.push(shared.injuryDate || '');
       row.push(isFirst ? (shared.height || '') : '');
@@ -497,7 +550,7 @@ function generateBatchRows(patientList) {
       row.push(isFirst ? (shared.department || '') : '');
       row.push(isFirst ? (shared.doctorName || '') : '');
       row.push(isFirst ? (shared.specialNotes || '') : '');
-      row.push(isFirst ? (modules.knee?.returnConsiderations || modules.shoulder?.returnConsiderations || modules.elbow?.returnConsiderations || '') : '');
+      row.push(isFirst ? (modules.knee?.returnConsiderations || modules.wrist?.returnConsiderations || modules.shoulder?.returnConsiderations || modules.elbow?.returnConsiderations || '') : '');
 
       row.push(diag?.code || '');
       row.push(diag?.name || '');
@@ -569,6 +622,38 @@ function generateBatchRows(patientList) {
       row.push(elbowEntry?.bk2105_elbow_leaning || '');
       row.push((elbowEntry?.bk2105_pressure_source || []).join('|'));
       row.push((elbowEntry?.bk2106_pressure_source || []).join('|'));
+
+      row.push(isFirst ? (wristTemporal.recent_task_change || '') : '');
+      row.push(isFirst ? (wristTemporal.task_change_date || '') : '');
+      row.push(isFirst ? (wristTemporal.symptom_onset_interval || '') : '');
+      row.push(isFirst ? (wristTemporal.improves_with_rest || '') : '');
+      row.push(wristEntry?.selectedBkType || '');
+      row.push(wristEntry?.bkSelectionMode || '');
+      row.push(wristEntry?.main_task_name || '');
+      row.push(wristEntry?.direct_anatomic_link || '');
+      row.push((wristEntry?.exposure_types || []).join('|'));
+      row.push(wristEntry?.repetition_level || '');
+      row.push(wristEntry?.daily_exposure_hours || '');
+      row.push(wristEntry?.shift_share_percent || '');
+      row.push(wristEntry?.days_per_week || '');
+      row.push(wristEntry?.work_pattern || '');
+      row.push(wristEntry?.rest_distribution || '');
+      row.push(wristEntry?.force_level || '');
+      row.push(wristEntry?.awkward_posture_level || '');
+      row.push(wristEntry?.static_holding_level || '');
+      row.push(wristEntry?.direct_pressure_level || '');
+      row.push(wristEntry?.vibration_exposure || '');
+      row.push(wristEntry?.bk2113_repetitive_wrist_motion || '');
+      row.push(wristEntry?.bk2101_cycle_seconds || '');
+      row.push(wristEntry ? getBk2101RepetitionPerHour(wristEntry) || '' : '');
+      row.push(wristEntry?.bk2101_monotony || '');
+      row.push(wristEntry?.bk2101_forced_dorsal_extension || '');
+      row.push(wristEntry?.bk2101_prosupination || '');
+      row.push((wristEntry?.bk2103_vibration_tool_type || []).join('|'));
+      row.push(wristEntry?.bk2103_daily_vibration_hours || '');
+      row.push(wristEntry?.bk2103_tool_pressing || '');
+      row.push(wristEntry?.bk2103_frequent_high_force_grip || '');
+      row.push((wristEntry?.bk2106_pressure_source || []).join('|'));
 
       row.push(task?.name || '');
       row.push(task?.posture || '');

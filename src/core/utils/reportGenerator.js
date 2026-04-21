@@ -223,6 +223,41 @@ function genElbowBurdenSection(calc) {
   return text;
 }
 
+function genWristBurdenSection(calc) {
+  const wristLines = ['\n< \uC190\uBAA9/\uC190\uAC00\uB77D >'];
+
+  if (calc.missingCommonFields?.length) {
+    wristLines.push(`- \uACF5\uD1B5 \uC2DC\uAC04\uC801 \uC120\uD6C4\uAD00\uACC4 \uB204\uB77D: ${calc.missingCommonFields.join(', ')}`);
+  }
+
+  const wristTemporalFlags = calc.temporalFlagItems || [];
+  if (wristTemporalFlags.length > 0) {
+    wristLines.push(`- \uACF5\uD1B5 \uC2DC\uAC04\uC801 \uC120\uD6C4\uAD00\uACC4 ${wristTemporalFlags.map(flag => flag.label).join(', ')}`);
+  }
+
+  (calc.jobSummaries || []).forEach((jobSummary, index) => {
+    wristLines.push(`- \uC9C1\uB825${index + 1}: ${jobSummary.jobName || '-'}`);
+    (jobSummary.diagnosisSummaries || []).forEach(summary => {
+      const diag = summary.diagnosis || {};
+      const riskFactorText = summary.riskFactorItems?.length > 0
+        ? summary.riskFactorItems.map(flag => flag.label).join(', ')
+        : '\uD655\uC778\uB41C \uC704\uD5D8 \uC694\uC778 \uC5C6\uC74C';
+      wristLines.push(`  - ${diag.code || ''} ${diag.name || ''} (${getSideText(diag.side)})`);
+      if (summary.missingFields.length > 0) {
+        wristLines.push(`    \uC785\uB825 \uB204\uB77D: ${summary.missingFields.join(', ')}`);
+      }
+      wristLines.push('    \uBD84\uC11D \uC815\uB9AC:');
+      wristLines.push(`      ${summary.narrative.split('\n').join('\n      ')}`);
+      wristLines.push(`      \uC5C5\uBB34\uAD00\uB828\uC131 \uC704\uD5D8 \uC694\uC778: ${riskFactorText}`);
+      if (summary.riskFactorSentence) {
+        wristLines.push(`\n      **\uC885\uD569\uD3C9\uAC00** ${summary.riskFactorSentence}`);
+      }
+    });
+  });
+
+  return `${wristLines.join('\n')}\n`;
+}
+
 export function generateUnifiedReport(patient) {
   const shared = patient.data.shared || {};
   const modules = patient.data.modules || {};
@@ -263,6 +298,7 @@ export function generateUnifiedReport(patient) {
     });
 
     if (moduleId === 'knee') text += genKneeBurdenSection(calc);
+    if (moduleId === 'wrist') text += genWristBurdenSection(calc);
     if (moduleId === 'shoulder') text += genShoulderBurdenSection(calc);
     if (moduleId === 'spine') text += genSpineBurdenSection(calc);
     if (moduleId === 'elbow') text += genElbowBurdenSection(calc);
@@ -299,6 +335,7 @@ export function generateUnifiedReport(patient) {
   });
 
   const returnConsiderations = modules.knee?.returnConsiderations
+    || modules.wrist?.returnConsiderations
     || modules.shoulder?.returnConsiderations
     || modules.elbow?.returnConsiderations
     || '';
@@ -311,3 +348,4 @@ export function generateUnifiedReport(patient) {
 
   return text;
 }
+

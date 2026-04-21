@@ -1,9 +1,9 @@
 # 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 3.3.0 | **Status:** MVP 개발 완료 / Vercel 배포 완료
+> **Version:** 3.4.0 | **Status:** MVP 개발 완료 / Vercel 배포 완료
 
 직업환경의학 전문의가 **업무상 질병 인정 여부를 판단**할 때 사용하는 통합 평가 도구.
-무릎(슬관절), 척추(요추 MDDM), 팔꿈치(주관절 BK2101/2103/2105/2106), 어깨(견관절 BK2117) 평가를 지원하며, 향후 고관절 등을 플러그인 형태로 확장할 수 있다.
+무릎(슬관절), 척추(요추 MDDM), 팔꿈치(주관절 BK2101/2103/2105/2106), 어깨(견관절 BK2117), 손목(수관절 BK2113/2101/2103/2106) 평가를 지원하며, 향후 고관절 등을 플러그인 형태로 확장할 수 있다.
 
 ## 기술 스택
 
@@ -86,8 +86,9 @@ Patient
     │   ├── knee                   ← 무릎 전용 (jobExtras[], returnConsiderations)
     │   ├── shoulder               ← 어깨 전용 (jobExtras[], returnConsiderations)
     │   ├── elbow                  ← 팔꿈치 전용 (jobEvaluations[], temporalSequence)
-    │   └── spine                  ← 척추 전용 (tasks[] — sharedJobId로 직업 연결)
-    └── activeModules: ['knee', 'spine', 'shoulder', 'elbow']
+    │   ├── spine                  ← 척추 전용 (tasks[] — sharedJobId로 직업 연결)
+    │   └── wrist                  ← 손목 전용 (jobEvaluations[], temporalSequence)
+    └── activeModules: ['knee', 'spine', 'shoulder', 'elbow', 'wrist']
 ```
 
 ## UI 흐름 (위자드)
@@ -96,6 +97,7 @@ Patient
 [공유] 기본정보 → 상병 입력 → 모듈 선택
 [무릎] 🦵 신체부담 평가
 [팔꿈치] 🦾 신체부담 평가
+[손목] ✋ 신체부담 평가
 [어깨] 💪 신체부담 평가
 [척추] 🦴 신체부담 평가
 [공유] 종합소견 → AI 분석
@@ -104,7 +106,7 @@ Patient
 ### 종합소견
 
 좌우 2패널 레이아웃:
-- **좌측**: 상병별 상태 확인 및 업무관련성 평가 (무릎: KLG/좌우 구분, 어깨: Ellman Class/좌우 구분, 팔꿈치: BK 유형 자동 제안/수동 + 공통 시간적 선후관계, 척추: 수직분포원리/동반성 척추증 확인 + 업무관련성)
+- **좌측**: 상병별 상태 확인 및 업무관련성 평가 (무릎: KLG/좌우 구분, 어깨: Ellman Class/좌우 구분, 팔꿈치/손목: BK 유형 자동 제안/수동 + 공통 시간적 선후관계, 척추: 수직분포원리/동반성 척추증 확인 + 업무관련성)
 - **우측**: 전체 모듈 결과 통합 미리보기
 
 ## 평가 모듈
@@ -132,6 +134,21 @@ Patient
 - **입력**: 핵심 동작 연결성, 공통 노출유형(반복/힘/비중립 자세), 1일 노출시간, 하루 작업 비중, 작업 형태, 휴식 분포, BK 분기별 세부 필드
 - **판정**: 공통 필수 입력 게이트 통과 시 15+ flag(daily_share_high/moderate/low, rest_unfavorable, core_exposure_present, BK별 pattern_supported, temporal_fit_high 등). `work_pattern === 'continuous'` 시 daily_share 임계값 상향(1.5h/20% vs 3h/40%)
 - **결과**: 상병별 위험 요인 목록 + narrative 서술 + 종합평가 문장
+
+### 손목 모듈 (wrist)
+
+팔꿈치 모듈과 동일한 Gate-and-Flag 판정 방식을 따르며 손목/손가락 특화 지표(BK2113 등)를 추가로 수집하여 서술 형태 보고서를 자동화.
+
+| BK 유형 | 질환 |
+|---------|------|
+| BK2113 | 수근관 증후군 (손목터널증후군) |
+| BK2101 | 건초염 (방아쇠수지, 드퀘르벵 등) |
+| BK2103 | 손목 관절병증 (진동) |
+| BK2106 | Guyon canal 증후군 / 압박성 신경병증 |
+
+- **데이터 구조**: `jobEvaluations[]` (직업 × 상병 2차원 entry) + 모듈 전체 공통 `temporalSequence` 1회 입력
+- **입력**: 팔꿈치 공통 노출 항목 + 손목 고유 추가 지표(예: BK2113 반복적 손목 굴곡 유무 등)
+- **판정 및 결과**: 팔꿈치와 마찬가지로 공통 필수 임계값 게이트 통과 이후 flag 조합에 따른 서술형 평가 반영.
 
 ### 어깨 모듈 (shoulder)
 
@@ -221,9 +238,13 @@ src/
 │   ├── shoulder/                   # 어깨 모듈 (BK2117)
 │   │   ├── components/             # JobTab, ShoulderResultPanel
 │   │   └── utils/                  # calculations, data, exportHandlers
-│   └── elbow/                      # 팔꿈치 모듈 (BK2101/2103/2105/2106)
-│       ├── ElbowEvaluation.jsx
-│       ├── components/             # ExposureForm, DiseaseSpecificFields, ElbowResultPanel
+│   ├── elbow/                      # 팔꿈치 모듈 (BK2101/2103/2105/2106)
+│   │   ├── ElbowEvaluation.jsx
+│   │   ├── components/             # ExposureForm, DiseaseSpecificFields, ElbowResultPanel
+│   │   └── utils/                  # calculations, data, exportHandlers
+│   └── wrist/                      # 손목 모듈 (BK2113/BK2101/2103/2106)
+│       ├── WristEvaluation.jsx
+│       ├── components/             # ExposureForm, DiseaseSpecificFields, WristResultPanel
 │       └── utils/                  # calculations, data, exportHandlers
 api/analyze.js                       # Vercel 서버리스 (Gemini/Claude API 프록시)
 electron/                            # main.js + preload.js (IPC 기반 AI 호출)
@@ -238,6 +259,7 @@ ICD 코드 기반 모듈 자동 추천:
 |---------------|-----------|
 | M17, M22, M23, M70.4, M76.5, S83 | 무릎 (knee) |
 | M77.0, M77.1, T75.2 | 팔꿈치 (elbow) |
+| G56.0, M65.3, M65.4, M65.8, M19.04 | 손목 (wrist) |
 | M75, S43, S46, M19.01 | 어깨 (shoulder) |
 | M51, M54, M47, M48, M50, M53 | 척추 (spine) |
 
@@ -254,6 +276,11 @@ ICD 코드 기반 모듈 자동 추천:
 ---
 
 ## 변경 이력
+
+### v3.4.0 (2026-04-21)
+- **손목(수관절) 모듈 신설**: 수근관 증후군(BK2113), 건초염/방아쇠수지(BK2101) 등 평가 지원
+- 팔꿈치 모듈과 동일한 Gate-and-Flag 아키텍처 적용
+- 엑셀 일괄입력 서식 및 EMR 단일 보고서 통합 출력 강화(101열 지원)
 
 ### v3.3.0 (2026-04-20)
 - **EMR 데이터 추출 (Electron)**: `EmrHelper.cs`에 진료기록분석지(`--extract-record`) / 다학제회신(`--extract-consultation`) 추출 모드 추가. IE COM 자동화로 환자명, 생년월일, 재해일자, 진료기록, 기저질환, 수진이력, 상병 목록, 과별 회신 자동 읽기

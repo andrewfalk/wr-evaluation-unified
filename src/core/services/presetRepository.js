@@ -4,6 +4,19 @@ const CUSTOM_PRESETS_KEY = 'wrEvalUnifiedCustomPresets';
 
 const isElectronFS = () => !!window.electron?.fsLoadAllPatients;
 
+function loadCustomPresetsFromLocalStorage() {
+  const raw = localStorage.getItem(CUSTOM_PRESETS_KEY);
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    localStorage.removeItem(CUSTOM_PRESETS_KEY);
+    return [];
+  }
+}
+
 function safeSetItem(key, value) {
   try {
     localStorage.setItem(key, value);
@@ -50,14 +63,23 @@ export function normalizeBuiltinPreset(raw) {
 export async function loadCustomPresets() {
   if (isElectronFS() && window.electron.fsLoadCustomPresets) {
     const presets = await window.electron.fsLoadCustomPresets();
-    return presets || [];
+    if (Array.isArray(presets) && presets.length > 0) {
+      return presets;
+    }
+
+    const legacyPresets = loadCustomPresetsFromLocalStorage();
+    if (legacyPresets.length > 0) {
+      if (window.electron.fsSaveCustomPresets) {
+        await window.electron.fsSaveCustomPresets(legacyPresets);
+      }
+      localStorage.removeItem(CUSTOM_PRESETS_KEY);
+      return legacyPresets;
+    }
+
+    return Array.isArray(presets) ? presets : [];
   }
-  const raw = localStorage.getItem(CUSTOM_PRESETS_KEY);
-  if (raw) {
-    try { return JSON.parse(raw); }
-    catch { localStorage.removeItem(CUSTOM_PRESETS_KEY); }
-  }
-  return [];
+
+  return loadCustomPresetsFromLocalStorage();
 }
 
 async function saveCustomPresetsAll(list) {

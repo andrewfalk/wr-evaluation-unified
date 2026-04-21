@@ -1,3 +1,9 @@
+import {
+  createWristDiagnosisEntry,
+  createWristJobEvaluation,
+  createWristModuleData,
+} from '../../modules/wrist/utils/data';
+
 // 공통 데이터 생성 함수
 
 // 생년월일을 YYYY-MM-DD 형식으로 정규화
@@ -191,6 +197,7 @@ export function createSamplePatient() {
     phase: 'evaluation',
     data: {
       shared: {
+        patientNo: 'SAMPLE-0001',
         name: '홍길동(예시)',
         gender: 'male',
         height: '175',
@@ -593,6 +600,10 @@ export function createTestPatients() {
     { createdAt: '2025-12-09', evaluationDate: '2025-12-27', modules: ['knee', 'shoulder'] },
     { createdAt: '2026-02-06', evaluationDate: '', modules: ['shoulder', 'spine'] },
     { createdAt: '2026-03-12', evaluationDate: '2026-03-25', modules: ['shoulder'] },
+    { createdAt: '2025-12-18', evaluationDate: '2026-01-06', modules: ['wrist'] },
+    { createdAt: '2026-01-22', evaluationDate: '', modules: ['wrist', 'shoulder'] },
+    { createdAt: '2026-02-27', evaluationDate: '2026-03-18', modules: ['wrist', 'spine'] },
+    { createdAt: '2026-03-21', evaluationDate: '', modules: ['wrist'] },
   ];
 
   const names = [
@@ -600,6 +611,7 @@ export function createTestPatients() {
     '한지훈', '조현우', '윤상미', '강민석', '오진아',
     '박경훈', '신다은', '임효진', '유동현', '문형준', '송은지',
     '서지연', '장민호', '노유진', '백승현', '하은서',
+    '안수진', '구태훈', '진서영', '마현준',
   ];
 
   const kneeReturnConsiderationsMap = {
@@ -614,6 +626,20 @@ export function createTestPatients() {
     18: '중량물 상하차와 상지 반복 작업을 줄이고 교대 배치를 권고합니다.',
     20: '견봉 위 작업을 줄이고 진동 공구 사용 시간을 최소화하는 것이 좋습니다.',
   };
+
+  const wristReturnConsiderationsMap = {
+    21: '반복적인 손목 굴신과 강한 파지 작업을 제한하고 충분한 미세 휴식을 배정합니다.',
+    22: '손목 편위 자세와 진동 공구 사용 시간을 줄이고 교대 배치를 권고합니다.',
+    23: '손목 압박과 반복 굴신 작업을 축소하고 보호대 사용을 고려합니다.',
+    24: '장시간 반복 손작업은 제한하고 증상 악화 시 즉시 업무 조정이 필요합니다.',
+  };
+
+  const wristDiagnosisTemplates = [
+    { code: 'G56.0', name: '수근관증후군', side: 'right' },
+    { code: 'M65.4', name: '드퀘르벵 건초염', side: 'right' },
+    { code: 'G56.2', name: '기용관 증후군', side: 'left' },
+    { code: 'M65.3', name: '방아쇠수지', side: 'right' },
+  ];
 
   const job1Periods = [
     { years: 6, months: 3 },
@@ -921,12 +947,159 @@ export function createTestPatients() {
     return next;
   };
 
+  const buildWristModuleData = (jobs, diagnosis, idxValue) => {
+    const wristData = createWristModuleData();
+    wristData.returnConsiderations = wristReturnConsiderationsMap[idxValue] || '';
+    wristData.temporalSequence = {
+      recent_task_change: idxValue % 2 === 0 ? 'increased_load' : 'process_change',
+      task_change_date: jobs[1]?.startDate || jobs[0]?.startDate || '',
+      symptom_onset_interval: idxValue % 3 === 0 ? '3to12m' : 'within3m',
+      improves_with_rest: idxValue % 2 === 0 ? 'yes' : 'unclear',
+    };
+
+    const jobConfigsByBkType = {
+      BK2113: [
+        {
+          main_task_name: '전동 드라이버 조립 작업',
+          direct_anatomic_link: 'yes',
+          exposure_types: ['repetition', 'force'],
+          repetition_level: 'frequent',
+          daily_exposure_hours: '4.0',
+          shift_share_percent: '60',
+          days_per_week: '5',
+          work_pattern: 'continuous',
+          rest_distribution: 'insufficient',
+          force_level: 'moderate',
+          awkward_posture_level: 'frequent',
+          static_holding_level: 'moderate',
+          direct_pressure_level: 'moderate',
+          vibration_exposure: 'present',
+          bk2113_repetitive_wrist_motion: 'yes',
+        },
+        {
+          main_task_name: '검사품 포장 및 테이핑 작업',
+          direct_anatomic_link: 'yes',
+          exposure_types: ['repetition', 'awkward_posture'],
+          repetition_level: 'frequent',
+          daily_exposure_hours: '2.5',
+          shift_share_percent: '35',
+          days_per_week: '5',
+          work_pattern: 'intermittent',
+          rest_distribution: 'moderate',
+          force_level: 'moderate',
+          awkward_posture_level: 'frequent',
+          static_holding_level: 'moderate',
+          direct_pressure_level: 'mild',
+          vibration_exposure: 'none',
+          bk2113_repetitive_wrist_motion: 'yes',
+        },
+      ],
+      BK2101: [
+        {
+          main_task_name: '반복 절단 및 칼집 내기 작업',
+          direct_anatomic_link: 'yes',
+          exposure_types: ['repetition', 'awkward_posture', 'force'],
+          repetition_level: 'frequent',
+          daily_exposure_hours: '3.5',
+          shift_share_percent: '55',
+          days_per_week: '6',
+          work_pattern: 'continuous',
+          rest_distribution: 'insufficient',
+          force_level: 'moderate',
+          awkward_posture_level: 'frequent',
+          static_holding_level: 'frequent',
+          direct_pressure_level: 'mild',
+          vibration_exposure: 'none',
+          bk2101_cycle_seconds: '0.32',
+          bk2101_repetition_per_hour: '11250',
+          bk2101_monotony: 'yes',
+          bk2101_forced_dorsal_extension: 'yes',
+          bk2101_prosupination: 'yes',
+        },
+        {
+          main_task_name: '집게형 부품 선별 작업',
+          direct_anatomic_link: 'yes',
+          exposure_types: ['repetition', 'awkward_posture'],
+          repetition_level: 'frequent',
+          daily_exposure_hours: '2.2',
+          shift_share_percent: '32',
+          days_per_week: '5',
+          work_pattern: 'intermittent',
+          rest_distribution: 'moderate',
+          force_level: 'mild',
+          awkward_posture_level: 'frequent',
+          static_holding_level: 'moderate',
+          direct_pressure_level: 'none',
+          vibration_exposure: 'none',
+          bk2101_cycle_seconds: '0.55',
+          bk2101_repetition_per_hour: '6545',
+          bk2101_monotony: 'yes',
+          bk2101_forced_dorsal_extension: 'no',
+          bk2101_prosupination: 'yes',
+        },
+      ],
+      BK2106: [
+        {
+          main_task_name: '손바닥 압박이 큰 연마기 가이드 작업',
+          direct_anatomic_link: 'yes',
+          exposure_types: ['force', 'awkward_posture'],
+          repetition_level: 'occasional',
+          daily_exposure_hours: '3.0',
+          shift_share_percent: '45',
+          days_per_week: '5',
+          work_pattern: 'continuous',
+          rest_distribution: 'insufficient',
+          force_level: 'high',
+          awkward_posture_level: 'frequent',
+          static_holding_level: 'frequent',
+          direct_pressure_level: 'frequent',
+          vibration_exposure: 'present',
+          bk2106_pressure_source: ['tool_edge', 'palm_contact'],
+        },
+        {
+          main_task_name: '운반 손잡이 파지 작업',
+          direct_anatomic_link: 'yes',
+          exposure_types: ['force'],
+          repetition_level: 'occasional',
+          daily_exposure_hours: '1.8',
+          shift_share_percent: '28',
+          days_per_week: '5',
+          work_pattern: 'intermittent',
+          rest_distribution: 'moderate',
+          force_level: 'moderate',
+          awkward_posture_level: 'moderate',
+          static_holding_level: 'frequent',
+          direct_pressure_level: 'frequent',
+          vibration_exposure: 'none',
+          bk2106_pressure_source: ['carrying_contact'],
+        },
+      ],
+    };
+
+    const bkType = createWristDiagnosisEntry(diagnosis).selectedBkType || 'BK2113';
+    const jobConfigs = jobConfigsByBkType[bkType] || jobConfigsByBkType.BK2113;
+
+    wristData.jobEvaluations = jobs.map((job, jobIndex) => {
+      const entry = createWristDiagnosisEntry(diagnosis);
+      Object.assign(entry, jobConfigs[Math.min(jobIndex, jobConfigs.length - 1)], {
+        diagnosisId: diagnosis.id,
+      });
+      return {
+        ...createWristJobEvaluation(job.id),
+        diagnosisEntries: [entry],
+      };
+    });
+
+    return wristData;
+  };
+
   testData.forEach((data, idx) => {
     const patient = createPatient(data.modules, {});
     const isCompleteCase = Boolean(data.evaluationDate);
 
     patient.createdAt = `${data.createdAt}T09:${String((idx * 4) % 60).padStart(2, '0')}:00.000Z`;
     patient.data.shared.name = names[idx] || `테스트환자${idx + 1}`;
+    patient.data.shared.patientNo = `WR${String(240001 + idx).padStart(6, '0')}`;
     patient.data.shared.gender = idx % 2 === 0 ? 'male' : 'female';
     patient.data.shared.height = String(160 + (Math.floor(idx / 2) % 15));
     patient.data.shared.weight = String(60 + (Math.floor(idx / 2) % 20));
@@ -1066,6 +1239,24 @@ export function createTestPatients() {
       }
     }
 
+    if (data.modules.includes('wrist')) {
+      const wristTemplate = wristDiagnosisTemplates[idx % wristDiagnosisTemplates.length];
+      const confirmedKey = wristTemplate.side === 'left' ? 'confirmedLeft' : 'confirmedRight';
+      const assessmentKey = wristTemplate.side === 'left' ? 'assessmentLeft' : 'assessmentRight';
+      diagnoses.push({
+        id: crypto.randomUUID(),
+        code: wristTemplate.code,
+        name: wristTemplate.name,
+        side: wristTemplate.side,
+        ...(isCompleteCase ? {
+          [confirmedKey]: 'confirmed',
+          [assessmentKey]: idx === 23 ? 'low' : 'high',
+          ...(idx === 23 ? { [wristTemplate.side === 'left' ? 'reasonLeft' : 'reasonRight']: ['lowBurden'] } : {}),
+          ...(idx === 23 ? { [wristTemplate.side === 'left' ? 'reasonLeftOther' : 'reasonRightOther']: '' } : {}),
+        } : {}),
+      });
+    }
+
     if (diagnoses.length === 0) {
       diagnoses.push({ id: crypto.randomUUID(), code: 'M79.3', name: '근육통', side: '' });
     }
@@ -1135,6 +1326,13 @@ export function createTestPatients() {
           ...buildSpineTasks(job2Id, job2Burden, idx * 100 + 21, idx + 1),
         ],
       };
+    }
+
+    if (data.modules.includes('wrist')) {
+      const wristDiagnosis = diagnoses.find(diag => ['G56.0', 'M65.4', 'G56.2', 'M65.3'].includes(diag.code));
+      if (wristDiagnosis) {
+        patient.data.modules.wrist = buildWristModuleData(patient.data.shared.jobs, wristDiagnosis, idx);
+      }
     }
 
     testPatients.push(patient);

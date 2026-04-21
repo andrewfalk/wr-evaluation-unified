@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('electron', {
   fsClearAutoSave: () => ipcRenderer.invoke('fs-clear-autosave'),
   fsSaveSettings: (settings) => ipcRenderer.invoke('fs-save-settings', settings),
   fsLoadSettings: () => ipcRenderer.invoke('fs-load-settings'),
+  fsLoadCustomPresets: () => ipcRenderer.invoke('fs-load-custom-presets'),
+  fsSaveCustomPresets: (presets) => ipcRenderer.invoke('fs-save-custom-presets', presets),
   fsMigrate: (data) => ipcRenderer.invoke('fs-migrate', data),
 
   // EMR 직접입력 (C# EmrHelper → IE DOM 주입, Windows 전용)

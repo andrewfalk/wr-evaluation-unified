@@ -46,6 +46,7 @@ function buildJobNarratives(calc) {
         `    BK 유형: ${summary.branchLabel}`,
         `    주요 신호: ${flagText}`,
         `    요약: ${summary.narrative}`,
+        `    종합평가: ${summary.riskFactorSentence || '-'}`,
       ].join('\n');
     }).join('\n');
 
@@ -123,6 +124,7 @@ export const elbowExportHandlers = {
             <div style="font-size:11px; color:#555; margin-bottom:6px;">${escapeHtml(summary.branchLabel)}</div>
             <div style="font-size:11px; margin-bottom:6px;">주요 신호: ${escapeHtml(summary.flagItems.map(flag => flag.label).join(', ') || '활성 신호 없음')}</div>
             <div style="font-size:11px; white-space:pre-wrap;">${escapeHtml(summary.narrative)}</div>
+            <div style="font-size:11px; font-weight:600; margin-top:6px; color:#1a73e8;">${escapeHtml(summary.riskFactorSentence || '')}</div>
           </div>
         `).join('')}
       </div>

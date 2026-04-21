@@ -1,4 +1,4 @@
-import { AssessmentTab } from '../../modules/knee/components/AssessmentTab';
+import { AssessmentTab } from './AssessmentTab';
 import { generateUnifiedReport } from '../utils/reportGenerator';
 
 export function AssessmentStep({ patient, activeModules, updateDiagnoses, updateModuleById }) {
@@ -11,16 +11,21 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
   };
 
   const hasKnee = activeModules.includes('knee');
+  const hasWrist = activeModules.includes('wrist');
   const hasShoulder = activeModules.includes('shoulder');
   const hasElbow = activeModules.includes('elbow');
   const kneeData = patient.data.modules?.knee || {};
+  const wristData = patient.data.modules?.wrist || {};
   const shoulderData = patient.data.modules?.shoulder || {};
   const elbowData = patient.data.modules?.elbow || {};
-  const returnConsiderations = kneeData.returnConsiderations || shoulderData.returnConsiderations || elbowData.returnConsiderations || '';
+  const returnConsiderations = kneeData.returnConsiderations || wristData.returnConsiderations || shoulderData.returnConsiderations || elbowData.returnConsiderations || '';
 
   const handleReturnChange = (value) => {
     if (hasKnee) {
       updateModuleById('knee', current => ({ ...current, returnConsiderations: value }));
+    }
+    if (hasWrist) {
+      updateModuleById('wrist', current => ({ ...current, returnConsiderations: value }));
     }
     if (hasShoulder) {
       updateModuleById('shoulder', current => ({ ...current, returnConsiderations: value }));
@@ -35,7 +40,7 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
   return (
     <div className="assessment-step-layout">
       <div className="panel pattern-surface assessment-panel">
-        {(hasKnee || hasShoulder || hasElbow || activeModules.includes('spine')) && (
+        {(hasKnee || hasWrist || hasShoulder || hasElbow || activeModules.includes('spine')) && (
           <AssessmentTab
             diagnoses={diagnoses}
             onDiagnosisUpdate={handleDiagnosisUpdate}
