@@ -1,8 +1,52 @@
-// 프리셋 저장소: builtin(JSON) + custom(localStorage/Electron FS) 통합 관리
-
 const CUSTOM_PRESETS_KEY = 'wrEvalUnifiedCustomPresets';
 
+export const DEFAULT_CATEGORY = '미분류';
+
 const isElectronFS = () => !!window.electron?.fsLoadAllPatients;
+
+export function normalizePresetIdentityPart(value) {
+  return String(value || '').trim();
+}
+
+export function buildPresetIdentity(preset = {}) {
+  return [
+    preset.jobName,
+    preset.category,
+    preset.description,
+  ]
+    .map(normalizePresetIdentityPart)
+    .join('|||');
+}
+
+export function isSamePresetIdentity(left, right) {
+  return buildPresetIdentity(left) === buildPresetIdentity(right);
+}
+
+export function getPresetCategory(preset) {
+  const safePreset = preset || {};
+  if (Object.prototype.hasOwnProperty.call(safePreset, '_customCategory')) {
+    return safePreset._customCategory ?? '';
+  }
+  return safePreset.category ?? DEFAULT_CATEGORY;
+}
+
+export function getPresetDescription(preset) {
+  const safePreset = preset || {};
+  if (Object.prototype.hasOwnProperty.call(safePreset, '_customDescription')) {
+    return safePreset._customDescription ?? '';
+  }
+  return safePreset.description ?? '';
+}
+
+function normalizePresetRecord(preset = {}) {
+  return {
+    ...preset,
+    jobName: normalizePresetIdentityPart(preset.jobName),
+    category: normalizePresetIdentityPart(preset.category) || DEFAULT_CATEGORY,
+    description: normalizePresetIdentityPart(preset.description),
+    modules: { ...(preset.modules || {}) },
+  };
+}
 
 function loadCustomPresetsFromLocalStorage() {
   const raw = localStorage.getItem(CUSTOM_PRESETS_KEY);
@@ -22,15 +66,11 @@ function safeSetItem(key, value) {
     localStorage.setItem(key, value);
   } catch (e) {
     if (e.name === 'QuotaExceededError') {
-      throw new Error('저장 공간이 부족합니다. 기존 저장 데이터를 삭제해주세요.');
+      throw new Error('저장 공간이 부족합니다. 기존 데이터를 정리해주세요.');
     }
     throw e;
   }
 }
-
-// ======================================================
-// builtin 프리셋 정규화
-// ======================================================
 
 export function normalizeBuiltinPreset(raw) {
   return {
@@ -55,10 +95,6 @@ export function normalizeBuiltinPreset(raw) {
     },
   };
 }
-
-// ======================================================
-// custom 프리셋 CRUD (localStorage / Electron FS)
-// ======================================================
 
 export async function loadCustomPresets() {
   if (isElectronFS() && window.electron.fsLoadCustomPresets) {
@@ -90,27 +126,38 @@ async function saveCustomPresetsAll(list) {
   }
 }
 
-export async function saveCustomPreset(preset) {
+export async function saveCustomPreset(preset, options = {}) {
   const list = await loadCustomPresets();
   const now = new Date().toISOString();
-  // id 매칭 또는 동일 jobName 매칭 (중복 방지)
-  let idx = list.findIndex(p => preset.id && p.id === preset.id);
+  const normalizedPreset = normalizePresetRecord(preset);
+
+  let idx = list.findIndex(p => normalizedPreset.id && p.id === normalizedPreset.id);
   if (idx < 0) {
-    idx = list.findIndex(p => p.jobName === preset.jobName);
+    idx = list.findIndex(p => isSamePresetIdentity(p, normalizedPreset));
   }
+
+  const existing = idx >= 0 ? list[idx] : null;
   const record = {
-    ...preset,
+    ...existing,
+    ...normalizedPreset,
+    id: existing?.id || normalizedPreset.id || crypto.randomUUID(),
     source: 'custom',
+    createdAt: existing?.createdAt || normalizedPreset.createdAt || now,
     updatedAt: now,
-    createdAt: (idx >= 0 ? list[idx].createdAt : null) || preset.createdAt || now,
+    modules: options.replaceModules
+      ? { ...(normalizedPreset.modules || {}) }
+      : {
+          ...(existing?.modules || {}),
+          ...(normalizedPreset.modules || {}),
+        },
   };
+
   if (idx >= 0) {
-    record.id = list[idx].id;
     list[idx] = record;
   } else {
-    record.id = record.id || crypto.randomUUID();
     list.push(record);
   }
+
   await saveCustomPresetsAll(list);
   return record;
 }
@@ -122,39 +169,46 @@ export async function deleteCustomPreset(id) {
   return filtered;
 }
 
-// ======================================================
-// 병합: builtin + custom
-// ======================================================
-
 export function mergePresets(builtins, customs) {
-  const result = builtins.map(b => ({ ...b }));
-  for (const c of customs) {
-    // custom이 builtin의 동일 jobName을 보충하는 경우
+  const result = builtins.map(b => ({
+    ...b,
+    modules: { ...(b.modules || {}) },
+  }));
+
+  for (const customPreset of customs) {
     const builtinIdx = result.findIndex(
-      b => b.source === 'builtin' && b.jobName === c.jobName
+      builtinPreset =>
+        builtinPreset.source === 'builtin'
+        && isSamePresetIdentity(builtinPreset, customPreset)
     );
+
     if (builtinIdx >= 0) {
       result[builtinIdx] = {
         ...result[builtinIdx],
-        modules: { ...result[builtinIdx].modules, ...c.modules },
-        _customId: c.id,
-        _customCategory: c.category,
-        _customDescription: c.description,
+        modules: {
+          ...(result[builtinIdx].modules || {}),
+          ...(customPreset.modules || {}),
+        },
+        _customId: customPreset.id,
+        _customCategory: customPreset.category,
+        _customDescription: customPreset.description,
       };
-    } else {
-      result.push({ ...c });
+      continue;
     }
+
+    result.push({
+      ...customPreset,
+      modules: { ...(customPreset.modules || {}) },
+    });
   }
+
   return result;
 }
-
-// ======================================================
-// 통합 로드
-// ======================================================
 
 export async function loadAllPresets() {
   let builtins = [];
   let builtinError = null;
+
   try {
     const res = await fetch('./job-presets.json');
     if (!res.ok) throw new Error('Not found');
@@ -163,16 +217,19 @@ export async function loadAllPresets() {
   } catch (e) {
     builtinError = e;
   }
+
   const customs = await loadCustomPresets();
   if (builtinError && customs.length === 0) {
     throw builtinError;
   }
-  return { merged: mergePresets(builtins, customs), builtinCount: builtins.length, customCount: customs.length, builtinError };
-}
 
-// ======================================================
-// 내보내기 / 가져오기
-// ======================================================
+  return {
+    merged: mergePresets(builtins, customs),
+    builtinCount: builtins.length,
+    customCount: customs.length,
+    builtinError,
+  };
+}
 
 function toExportableCustomPreset(preset) {
   if (!preset) return null;
@@ -183,8 +240,8 @@ function toExportableCustomPreset(preset) {
   return {
     id: customId,
     jobName: preset.jobName,
-    category: preset._customCategory || preset.category || '미분류',
-    description: preset._customDescription || preset.description || '',
+    category: getPresetCategory(preset) || DEFAULT_CATEGORY,
+    description: getPresetDescription(preset),
     source: 'custom',
     createdAt: preset.createdAt || null,
     updatedAt: preset.updatedAt || null,
@@ -202,6 +259,7 @@ export function exportPresetsToJSON(presets) {
     exportedAt: new Date().toISOString(),
     presets: customPresets,
   };
+
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -216,25 +274,27 @@ export async function importPresetsFromJSON(file) {
   const data = JSON.parse(text);
   const imported = data.presets || [];
   const existing = await loadCustomPresets();
-  const existingNames = new Set(existing.map(p => p.jobName));
+  const existingIdentities = new Set(existing.map(buildPresetIdentity));
   const now = new Date().toISOString();
   let addedCount = 0;
-  for (const p of imported) {
-    if (!existingNames.has(p.jobName)) {
-      existing.push({
-        id: crypto.randomUUID(),
-        jobName: p.jobName,
-        category: p.category || '미분류',
-        description: p.description || '',
-        modules: p.modules || {},
-        source: 'custom',
-        createdAt: now,
-        updatedAt: now,
-      });
-      existingNames.add(p.jobName);
-      addedCount++;
-    }
+
+  for (const preset of imported) {
+    const normalizedPreset = normalizePresetRecord(preset);
+    const identity = buildPresetIdentity(normalizedPreset);
+
+    if (existingIdentities.has(identity)) continue;
+
+    existing.push({
+      id: crypto.randomUUID(),
+      ...normalizedPreset,
+      source: 'custom',
+      createdAt: now,
+      updatedAt: now,
+    });
+    existingIdentities.add(identity);
+    addedCount++;
   }
+
   await saveCustomPresetsAll(existing);
   return { addedCount, totalCount: existing.length };
 }

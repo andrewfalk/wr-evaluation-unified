@@ -6,9 +6,9 @@ import { spineExportHandlers } from './utils/exportHandlers';
 
 registerModule({
   id: 'spine',
-  name: '척추 (요추)',
+  name: '요추(허리)',
   icon: '\u2695\uFE0F',
-  description: 'MDDM 척추압박력 평가',
+  description: 'MDDM 요추 압박력 평가',
   EvaluationComponent: SpineEvaluation,
   createModuleData: createSpineModuleData,
   computeCalc: computeSpineCalc,
@@ -22,7 +22,7 @@ registerModule({
     fields: 'tasks',
     extractFromModule(moduleData, sharedJobId) {
       let tasks = (moduleData.tasks || []).filter(t => t.sharedJobId === sharedJobId);
-      // 미귀속 태스크 폴백 (sharedJobId가 빈 레거시 데이터)
+      // 연결되지 않은 task만 남아 있는 예전 데이터도 허용한다.
       if (!tasks.length) {
         const unlinked = (moduleData.tasks || []).filter(t => !t.sharedJobId);
         if (unlinked.length) tasks = unlinked;

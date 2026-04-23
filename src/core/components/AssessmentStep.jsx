@@ -14,11 +14,18 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
   const hasWrist = activeModules.includes('wrist');
   const hasShoulder = activeModules.includes('shoulder');
   const hasElbow = activeModules.includes('elbow');
+  const hasCervical = activeModules.includes('cervical');
   const kneeData = patient.data.modules?.knee || {};
   const wristData = patient.data.modules?.wrist || {};
   const shoulderData = patient.data.modules?.shoulder || {};
   const elbowData = patient.data.modules?.elbow || {};
-  const returnConsiderations = kneeData.returnConsiderations || wristData.returnConsiderations || shoulderData.returnConsiderations || elbowData.returnConsiderations || '';
+  const cervicalData = patient.data.modules?.cervical || {};
+  const returnConsiderations = kneeData.returnConsiderations
+    || wristData.returnConsiderations
+    || shoulderData.returnConsiderations
+    || elbowData.returnConsiderations
+    || cervicalData.returnConsiderations
+    || '';
 
   const handleReturnChange = (value) => {
     if (hasKnee) {
@@ -33,6 +40,9 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
     if (hasElbow) {
       updateModuleById('elbow', current => ({ ...current, returnConsiderations: value }));
     }
+    if (hasCervical) {
+      updateModuleById('cervical', current => ({ ...current, returnConsiderations: value }));
+    }
   };
 
   const previewText = generateUnifiedReport(patient);
@@ -40,7 +50,7 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
   return (
     <div className="assessment-step-layout">
       <div className="panel pattern-surface assessment-panel">
-        {(hasKnee || hasWrist || hasShoulder || hasElbow || activeModules.includes('spine')) && (
+        {(hasKnee || hasWrist || hasShoulder || hasElbow || hasCervical || activeModules.includes('spine')) && (
           <AssessmentTab
             diagnoses={diagnoses}
             onDiagnosisUpdate={handleDiagnosisUpdate}

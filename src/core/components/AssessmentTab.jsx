@@ -90,6 +90,7 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsideratio
   const hasWrist = (activeModules || []).includes('wrist');
   const hasShoulder = (activeModules || []).includes('shoulder');
   const hasElbow = (activeModules || []).includes('elbow');
+  const hasCervical = (activeModules || []).includes('cervical');
 
   return (
     <section className="section pattern-surface form-section">
@@ -103,6 +104,8 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsideratio
       {diagnoses.map((diag, index) => {
         const resolvedModule = resolveDiagnosisModule(diag, activeModules);
         const isSpine = resolvedModule?.moduleId === 'spine';
+        const isCervical = resolvedModule?.moduleId === 'cervical';
+        const isAxial = isSpine || isCervical;
         const isShoulder = resolvedModule?.moduleId === 'shoulder';
         const isKnee = resolvedModule?.moduleId === 'knee';
         const isWrist = resolvedModule?.moduleId === 'wrist';
@@ -152,19 +155,20 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsideratio
                   </div>
                 )}
 
-                {!isSpine && isWrist && <span className="diagnosis-module-badge">손목/손가락</span>}
-                {!isSpine && isElbow && <span className="diagnosis-module-badge">팔꿈치</span>}
+                {!isAxial && isWrist && <span className="diagnosis-module-badge">손목/손가락</span>}
+                {!isAxial && isElbow && <span className="diagnosis-module-badge">팔꿈치</span>}
+                {isCervical && <span className="diagnosis-module-badge">경추(목)</span>}
               </div>
-              {!isSpine && <div className="assessment-card-subtitle">방향: {getSideText(diag.side)}</div>}
+              {!isAxial && <div className="assessment-card-subtitle">방향: {getSideText(diag.side)}</div>}
             </div>
 
-            {!isSpine && (diag.side === 'right' || diag.side === 'both') && (
+            {!isAxial && (diag.side === 'right' || diag.side === 'both') && (
               <SideAssessment diag={diag} index={index} side="right" onUpdate={onDiagnosisUpdate} />
             )}
-            {!isSpine && (diag.side === 'left' || diag.side === 'both') && (
+            {!isAxial && (diag.side === 'left' || diag.side === 'both') && (
               <SideAssessment diag={diag} index={index} side="left" onUpdate={onDiagnosisUpdate} />
             )}
-            {!isSpine && !diag.side && (
+            {!isAxial && !diag.side && (
               <div className="evaluation-empty-state assessment-side-empty">요청 상병에서 방향 선택이 필요합니다.</div>
             )}
 
@@ -187,11 +191,15 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsideratio
                 <SideAssessment diag={diag} index={index} side="right" onUpdate={onDiagnosisUpdate} label="평가" />
               </>
             )}
+
+            {isCervical && (
+              <SideAssessment diag={diag} index={index} side="right" onUpdate={onDiagnosisUpdate} label="평가" />
+            )}
           </div>
         );
       })}
 
-      {(hasKnee || hasWrist || hasShoulder || hasElbow) && (
+      {(hasKnee || hasWrist || hasShoulder || hasElbow || hasCervical) && (
         <section className="assessment-return-section">
           <div className="section-header">
             <div className="section-title-row">

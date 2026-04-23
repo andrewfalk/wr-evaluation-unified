@@ -2,8 +2,8 @@ import { useMemo } from 'react';
 import { computeDashboardStats } from '../utils/dashboardStats';
 import { getAllModules } from '../moduleRegistry';
 
-const MODULE_LABELS = { knee: '무릎', spine: '허리', shoulder: '어깨', elbow: '팔꿈치' };
-const MODULE_COLORS = { knee: 'var(--accent)', spine: '#f59e0b', shoulder: 'var(--color-safe)', elbow: '#8b5cf6' };
+const MODULE_LABELS = { knee: '무릎', spine: '허리', shoulder: '어깨', elbow: '팔꿈치', wrist: '손목/손', cervical: '목' };
+const MODULE_COLORS = { knee: 'var(--accent)', spine: '#f59e0b', shoulder: 'var(--color-safe)', elbow: '#8b5cf6', wrist: '#ec4899', cervical: '#06b6d4' };
 
 const BarChart = ({ data, color, title }) => {
   const maxCount = Math.max(...data.map(m => m.count), 5);
@@ -34,6 +34,7 @@ const BarChart = ({ data, color, title }) => {
           <div className="dashboard-bars">
             {data.map(m => (
               <div className="dashboard-bar-wrapper" key={m.key}>
+                {m.count > 0 && <span className="dashboard-bar-label">{m.count}</span>}
                 <div
                   className="dashboard-bar"
                   style={{

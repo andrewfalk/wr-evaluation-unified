@@ -16,7 +16,7 @@ function generateSpineReport(patientData, calc) {
   const shared = patientData.shared || {};
   const mod = patientData.module || {};
   const c = calc || computeSpineCalc(patientData);
-  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce } = c;
+  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, weightedDailyDose } = c;
 
   // 구형식 호환
   const hasLegacy = mod.jobName !== undefined || mod.careerYears !== undefined;
@@ -24,7 +24,7 @@ function generateSpineReport(patientData, calc) {
     ? { jobName: mod.jobName || '-', careerText: `${mod.careerYears || 0}년 ${mod.careerMonths || 0}개월`, workDaysPerYear: mod.workDaysPerYear || 250 }
     : getJobInfoFromShared(shared);
 
-  let t = `MDDM 척추압박력 평가 보고서\n\n`;
+  let t = `MDDM 요추 압박력 평가 보고서\n\n`;
   t += `이름: ${shared.name} (${shared.gender === 'male' ? '남' : '여'})\n`;
   t += `키/몸무게: ${shared.height || '-'}cm / ${shared.weight || '-'}kg\n`;
   t += `생년월일: ${shared.birthDate || '-'}\n\n`;
@@ -55,7 +55,7 @@ function generateSpineReport(patientData, calc) {
 
   t += `[평가 결과]\n`;
   t += `최대 압박력: ${maxForce.toLocaleString()} N\n`;
-  t += `일일선량: ${dailyDose.dailyDoseKNh.toFixed(2)} kN\xB7h\n`;
+  t += `일일선량: ${(weightedDailyDose ? weightedDailyDose.value : dailyDose.dailyDoseKNh).toFixed(2)} kN\xB7h${weightedDailyDose ? ' (가중평균)' : ''}\n`;
   t += `누적선량: ${lifetimeDose.lifetimeDoseMNh.toFixed(2)} MN\xB7h\n`;
   t += `\n[기준 비교]\n`;
   t += `DWS2: ${comparison.dws2.percent.toFixed(0)}% (${comparison.dws2.limit} MN\xB7h)\n`;
@@ -72,7 +72,7 @@ export const spineExportHandlers = {
     const shared = patientData.shared || {};
     const mod = patientData.module || {};
     const c = calc || computeSpineCalc(patientData);
-    const { tasks, jobResults, dailyDose, lifetimeDose, comparison, workRelatedness } = c;
+    const { tasks, jobResults, dailyDose, lifetimeDose, comparison, workRelatedness, weightedDailyDose } = c;
 
     const hasLegacy = mod.jobName !== undefined || mod.careerYears !== undefined;
     const jobInfo = hasLegacy
@@ -81,7 +81,7 @@ export const spineExportHandlers = {
 
     const wb = XLSX.utils.book_new();
     const wsData = [
-      ['MDDM 척추압박력 평가', ''],
+      ['MDDM 요추 압박력 평가', ''],
       ['항목', '내용'],
       ['이름', shared.name || ''],
       ['성별', shared.gender === 'male' ? '남' : '여'],
@@ -114,7 +114,7 @@ export const spineExportHandlers = {
     }
 
     wsData.push(['평가 결과', '']);
-    wsData.push(['일일선량', `${dailyDose.dailyDoseKNh.toFixed(2)} kN\xB7h`]);
+    wsData.push(['일일선량', `${(weightedDailyDose ? weightedDailyDose.value : dailyDose.dailyDoseKNh).toFixed(2)} kN\xB7h${weightedDailyDose ? ' (가중평균)' : ''}`]);
     wsData.push(['누적선량', `${lifetimeDose.lifetimeDoseMNh.toFixed(2)} MN\xB7h`]);
     wsData.push(['DWS2 기준', `${comparison.dws2.percent.toFixed(0)}%`]);
     wsData.push(['법원 기준', `${comparison.court.percent.toFixed(0)}%`]);

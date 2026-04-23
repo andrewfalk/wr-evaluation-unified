@@ -16,7 +16,7 @@ const PRESET_COMMON_FIELDS = [
 registerModule({
   id: 'elbow',
   name: '팔꿈치',
-  icon: '🦾',
+  icon: '💪',
   description: '팔꿈치 질환 공통 신체부담 평가',
   EvaluationComponent: ElbowEvaluation,
   createModuleData: createElbowModuleData,

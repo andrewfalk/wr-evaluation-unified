@@ -7,6 +7,7 @@ import { convertTimeToSeconds } from '../../modules/spine/utils/calculations';
 import { thresholds } from '../../modules/spine/utils/thresholds';
 import { AUX_LABELS } from '../../modules/knee/utils/data';
 import { calculateAge, calculateBMI } from './common';
+import { resolveDiagnosisModule } from './diagnosisMapping';
 import { getEffectiveWorkPeriodText, getWorkPeriodYearMonth } from './workPeriod';
 
 function buildAssessmentSummary(diagnoses = [], activeModules = []) {
@@ -14,8 +15,9 @@ function buildAssessmentSummary(diagnoses = [], activeModules = []) {
     .filter(diag => diag.code || diag.name)
     .map((diag, index) => {
       let summary = `상병 #${index + 1}: ${diag.code || ''} ${diag.name || ''}`.trim();
+      const resolvedModule = resolveDiagnosisModule(diag, activeModules);
 
-      if (activeModules.includes('spine') && !diag.side) {
+      if ((resolvedModule?.moduleId === 'spine' || resolvedModule?.moduleId === 'cervical') && !diag.side) {
         summary += `\n  평가: 상병 상태(${getStatusText(diag.confirmedRight)}) / 업무관련성(${diag.assessmentRight === 'high' ? '높음' : diag.assessmentRight === 'low' ? '낮음' : '-'})`;
         if (diag.assessmentRight === 'low') {
           summary += `\n    낮음 사유:\n    - ${getReasonText(diag.reasonRight || [], diag.reasonRightOther).split('\n').join('\n    - ')}`;
@@ -99,7 +101,7 @@ function getSpineInterpretation(comparison) {
 }
 
 function buildSpineExposureText(calc) {
-  const { tasks, dailyDose, lifetimeDose, comparison, maxForce } = calc || {};
+  const { tasks, dailyDose, lifetimeDose, comparison, maxForce, weightedDailyDose } = calc || {};
   const spineTasks = tasks || [];
   let text = '\n<허리(요추)>\n';
   text += '독일의 BK2108 장기간의 중량물 취급 또는 허리를 굽히기로 인해 발생한 요추간판 탈출증 평가에서 사용하는 척추 압박력 평가 모델(Mainz-Dortmund Dose Model, MDDM)을 이용하여 평가하였음.\n\n';
@@ -119,14 +121,14 @@ function buildSpineExposureText(calc) {
 
   text += '\n종합\n';
   text += `- 최대 압박력: ${(maxForce || 0).toLocaleString()} N\n`;
-  const dailyKNh = dailyDose?.dailyDoseKNh || 0;
+  const dailyKNh = weightedDailyDose?.value ?? dailyDose?.dailyDoseKNh ?? 0;
   const mf = maxForce || 0;
   let severityLabel;
   if (dailyKNh > 4 || mf >= 6000) severityLabel = '고도';
   else if (dailyKNh > 3 || mf >= 5000) severityLabel = '중등도상';
   else if (dailyKNh >= 2 || mf >= 4000) severityLabel = '중등도하';
   else severityLabel = '경도';
-  text += `- 일일 노출량: ${dailyKNh.toFixed(2)} kN·h (${severityLabel})\n`;
+  text += `- 일일 노출량: ${dailyKNh.toFixed(2)} kN·h${weightedDailyDose ? ' (직력가중평균)' : ''} (${severityLabel})\n`;
   text += `- **누적 노출량: ${lifetimeDose?.lifetimeDoseMNh?.toFixed(2) || '0.00'} MN·h **\n`;
 
   if (comparison) {
@@ -136,6 +138,29 @@ function buildSpineExposureText(calc) {
     text += `- MDDM 최초 모델 기준 대비 : ${formatSpinePercent(comparison.mddm)}% (${formatSpineLimit(comparison.mddm)} MN·h) : ${getSpineThresholdStatus(comparison.mddm)}\n\n`;
     text += `${getSpineInterpretation(comparison)}\n`;
   }
+
+  return text;
+}
+
+function buildCervicalExposureText(calc) {
+  let text = '\n<경추(목)>\n';
+
+  (calc?.jobSummaries || []).forEach(jobSummary => {
+    text += `- ${jobSummary.jobName || '-'}\n`;
+    (jobSummary.diagnosisSummaries || []).forEach(summary => {
+      const riskFactorText = summary.riskFactorItems?.length > 0
+        ? summary.riskFactorItems.map(flag => flag.label).join(', ')
+        : '확인된 위험 요인 없음';
+
+      if (summary.missingFields?.length > 0) {
+        text += `  입력 누락: ${summary.missingFields.join(', ')}\n`;
+      }
+      text += '  분석 정리:\n';
+      text += `    ${(summary.narrative || '-').split('\n').join('\n    ')}\n`;
+      text += `    업무관련성 위험 요인: ${riskFactorText}\n`;
+      text += `    ** 종합평가 : ${summary.conclusionText}\n`;
+    });
+  });
 
   return text;
 }
@@ -263,6 +288,11 @@ function buildExposureSection(shared, modules, activeModules) {
     });
   }
 
+  if (activeModules.includes('cervical')) {
+    const calc = getModule('cervical')?.computeCalc?.({ shared, module: modules.cervical || {} });
+    text += buildCervicalExposureText(calc);
+  }
+
   if (activeModules.includes('spine')) {
     const calc = getModule('spine')?.computeCalc?.({ shared, module: modules.spine || {} });
     text += buildSpineExposureText(calc);
@@ -363,7 +393,12 @@ function generateUnifiedEMR(patient) {
     '[ 업무관련성 평가 결과 ]',
     buildAssessmentSummary(diagnoses, activeModules),
   ].filter(Boolean).join('\n\n');
-  const b9 = modules.knee?.returnConsiderations || modules.wrist?.returnConsiderations || modules.shoulder?.returnConsiderations || modules.elbow?.returnConsiderations || '';
+  const b9 = modules.knee?.returnConsiderations
+    || modules.wrist?.returnConsiderations
+    || modules.shoulder?.returnConsiderations
+    || modules.elbow?.returnConsiderations
+    || modules.cervical?.returnConsiderations
+    || '';
 
   return { b5, b6, b7, b8, b9, consultReplySummary };
 }
@@ -550,7 +585,7 @@ function generateBatchRows(patientList) {
       row.push(isFirst ? (shared.department || '') : '');
       row.push(isFirst ? (shared.doctorName || '') : '');
       row.push(isFirst ? (shared.specialNotes || '') : '');
-      row.push(isFirst ? (modules.knee?.returnConsiderations || modules.wrist?.returnConsiderations || modules.shoulder?.returnConsiderations || modules.elbow?.returnConsiderations || '') : '');
+      row.push(isFirst ? (modules.knee?.returnConsiderations || modules.wrist?.returnConsiderations || modules.shoulder?.returnConsiderations || modules.elbow?.returnConsiderations || modules.cervical?.returnConsiderations || '') : '');
 
       row.push(diag?.code || '');
       row.push(diag?.name || '');

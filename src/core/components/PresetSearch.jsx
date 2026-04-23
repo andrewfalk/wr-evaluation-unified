@@ -1,12 +1,20 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { getModule } from '../moduleRegistry';
+import { getPresetCategory, getPresetDescription } from '../services/presetRepository';
 
-const MODULE_LABELS = { knee: '무릎', shoulder: '어깨', spine: '척추', elbow: '팔꿈치' };
+const MODULE_LABELS = {
+  knee: '무릎',
+  shoulder: '어깨',
+  spine: '요추(허리)',
+  cervical: '경추(목)',
+  elbow: '팔꿈치',
+  wrist: '손목',
+};
 
 function ModuleBadges({ modules }) {
   if (!modules) return null;
   const ids = Object.keys(modules);
   if (!ids.length) return null;
+
   return (
     <span className="preset-module-badges">
       {ids.map(id => (
@@ -65,10 +73,12 @@ export function PresetSearch({ presets, onSelect, value, onChange }) {
       return;
     }
 
+    const keyword = nextQuery.toLowerCase();
     const filtered = presets
-      .filter(p => (
-        p.jobName.toLowerCase().includes(nextQuery.toLowerCase()) ||
-        p.category.toLowerCase().includes(nextQuery.toLowerCase())
+      .filter(preset => (
+        preset.jobName.toLowerCase().includes(keyword)
+        || getPresetCategory(preset).toLowerCase().includes(keyword)
+        || getPresetDescription(preset).toLowerCase().includes(keyword)
       ))
       .slice(0, 10);
 
@@ -144,9 +154,12 @@ export function PresetSearch({ presets, onSelect, value, onChange }) {
                 {(preset.source === 'custom' || preset._customId) && <span className="preset-custom-tag">custom</span>}
               </div>
               <div className="search-item-info">
-                {preset.category}
+                {getPresetCategory(preset)}
                 <ModuleBadges modules={preset.modules} />
               </div>
+              {!!getPresetDescription(preset) && (
+                <div className="search-item-info">{getPresetDescription(preset)}</div>
+              )}
             </div>
           ))}
         </div>

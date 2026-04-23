@@ -103,8 +103,8 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
       <div className="panel">
         <div className="section-header">
           <div className="section-title-row">
-            <h2 className="section-title"><span className="section-icon">&#x1F9CD;</span>척추 작업 평가</h2>
-            <p className="section-description">직업별 작업을 나눠 입력하고, 선택한 작업의 자세와 하중 조건을 편집합니다.</p>
+            <h2 className="section-title"><span className="section-icon">&#x1F9CD;</span>요추 작업 평가</h2>
+            <p className="section-description">직업별 허리 부담 작업을 나눠 입력하고, 선택한 작업의 자세와 하중 조건을 편집합니다.</p>
           </div>
         </div>
 

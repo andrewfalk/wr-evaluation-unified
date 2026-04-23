@@ -31,7 +31,7 @@ export function DiagnosisForm({ diagnoses, onChange, errors, createDiagnosis, sh
       {errors?.diagnoses && <div className="error-message">{errors.diagnoses}</div>}
       {diagnoses.map((diag, i) => {
         const hint = getDiagnosisModuleHint(diag);
-        const isSpine = hint?.moduleId === 'spine';
+        const isAxial = hint?.moduleId === 'spine' || hint?.moduleId === 'cervical';
         return (
         <div key={diag.id} className="diagnosis-card">
           <div className="diagnosis-card-header">
@@ -46,7 +46,7 @@ export function DiagnosisForm({ diagnoses, onChange, errors, createDiagnosis, sh
             <div className="form-group"><label>진단코드 *</label><input value={diag.code} onChange={e => handleDiagnosis(i, 'code', e.target.value)} placeholder="M17.0" /></div>
             <div className="form-group"><label>진단명 *</label><input value={diag.name} onChange={e => handleDiagnosis(i, 'name', e.target.value)} placeholder="진단명 입력" /></div>
           </div>
-          {!isSpine && (
+          {!isAxial && (
           <div className="form-group">
             <label>방향</label>
             <div className="radio-group">

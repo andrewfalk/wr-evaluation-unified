@@ -36,7 +36,7 @@
       "category": "건설업",
       "weight": 2800,
       "squatting": 150,
-      "description": "타일 시공",
+      "description": "운반, 유로폼 조립, 파이프서포트 조립, 해체",
       "source": "안산병원 자체협의"
     },
     {
@@ -45,7 +45,7 @@
       "category": "건설업",
       "weight": 1656,
       "squatting": 90,
-      "description": "배관 설치",
+      "description": "운반, 강관조립, 안전발판조립, 해체",
       "source": "안산병원 자체협의"
     },
     {
@@ -54,7 +54,7 @@
       "category": "건설업",
       "weight": 1413,
       "squatting": 150,
-      "description": "전기 배선 작업",
+      "description": "운반, 배근, 결속",
       "source": "안산병원 자체협의"
     },
     {
@@ -63,7 +63,7 @@
       "category": "건설업",
       "weight": 420,
       "squatting": 120,
-      "description": "페인트 도장 작업",
+      "description": "운반, 배관, 용접, 볼팅, 가공",
       "source": "안산병원 자체협의"
     },
     {
@@ -72,7 +72,7 @@
       "category": "건설업",
       "weight": 150,
       "squatting": 150,
-      "description": "자동차 조립 라인",
+      "description": "운반, 가공, 용접",
       "source": "안산병원 자체협의"
     },
     {
@@ -81,7 +81,7 @@
       "category": "건설업",
       "weight": 150,
       "squatting": 150,
-      "description": "기계 부품 조립",
+      "description": "운반, 절단, 용접, 볼팅",
       "source": "안산병원 자체협의"
     },
     {
@@ -90,7 +90,7 @@
       "category": "건설업",
       "weight": 2000,
       "squatting": 180,
-      "description": "금속 용접 작업",
+      "description": "운반, 배합, 타일설치",
       "source": "안산병원 자체협의"
     },
     {
@@ -99,7 +99,7 @@
       "category": "건설업",
       "weight": 294,
       "squatting": 150,
-      "description": "제품 포장",
+      "description": "운반, 배합, 견출",
       "source": "안산병원 자체협의"
     },
     {
@@ -108,7 +108,7 @@
       "category": "건설업",
       "weight": 100,
       "squatting": 90,
-      "description": "금형 제작 및 관리",
+      "description": "운반, 퍼티, 면처리, 도장",
       "source": "안산병원 자체협의"
     },
     {
@@ -117,7 +117,7 @@
       "category": "건설업",
       "weight": 1530,
       "squatting": 120,
-      "description": "프레스 기계 조작",
+      "description": "운반, 배합, 구조물 설치, 석재 설치",
       "source": "안산병원 자체협의"
     },
     {
@@ -126,7 +126,7 @@
       "category": "건설업",
       "weight": 85.5,
       "squatting": 120,
-      "description": "물류 하역 및 적재",
+      "description": "운반, 포설, 설치, 배전반 설치",
       "source": "안산병원 자체협의"
     },
     {
@@ -135,7 +135,7 @@
       "category": "건설업",
       "weight": 396,
       "squatting": 150,
-      "description": "택배 상하차 및 배송",
+      "description": "운반, 가공, 볼팅",
       "source": "안산병원 자체협의"
     },
     {
@@ -144,7 +144,7 @@
       "category": "사회복지업",
       "weight": 720,
       "squatting": 30,
-      "description": "지게차 운전 및 하역",
+      "description": "환자이동보조, 식사보조, 체위변경, 목욕, 활동지원",
       "source": "안산병원 자체협의"
     },
     {
@@ -153,7 +153,7 @@
       "category": "서비스업",
       "weight": 0,
       "squatting": 30,
-      "description": "농작물 재배",
+      "description": "쓰레기수거, 계단 청소, 건물 청소, 화장실 청소",
       "source": "안산병원 자체협의"
     },
     {
@@ -162,7 +162,7 @@
       "category": "서비스업",
       "weight": 66,
       "squatting": 30,
-      "description": "가축 사육 및 관리",
+      "description": "전처리, 운반, 조리, 배식, 청소",
       "source": "안산병원 자체협의"
     }
     

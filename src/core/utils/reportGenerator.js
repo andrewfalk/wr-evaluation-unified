@@ -147,7 +147,7 @@ function getSpineInterpretation(comparison) {
 }
 
 function genSpineBurdenSection(calc) {
-  const { tasks, dailyDose, lifetimeDose, comparison, maxForce } = calc;
+  const { tasks, dailyDose, lifetimeDose, comparison, maxForce, weightedDailyDose } = calc;
   const spineTasks = tasks || [];
   let text = `\n< 허리(요추) >\n`;
   text += `독일의 산재보험 번호 BK2108. 장기간의 중량물 취급 또는 허리를 굽히기로 인해 발생한 요추간판 탈출증 에서 사용하는 척추 압박력 평가 모델(Mainz-Dortmund Dose Model, MDDM)을 이용하여 평가하였음.\n\n`;
@@ -167,14 +167,14 @@ function genSpineBurdenSection(calc) {
 
   text += `\n종합\n`;
   text += `- 최대 압박력: ${(maxForce || 0).toLocaleString()} N\n`;
-  const dailyKNh = dailyDose?.dailyDoseKNh || 0;
+  const dailyKNh = weightedDailyDose?.value ?? dailyDose?.dailyDoseKNh ?? 0;
   const mf = maxForce || 0;
   let severityLabel;
   if (dailyKNh > 4 || mf >= 6000) severityLabel = '고도';
   else if (dailyKNh > 3 || mf >= 5000) severityLabel = '중등도상';
   else if (dailyKNh >= 2 || mf >= 4000) severityLabel = '중등도하';
   else severityLabel = '경도';
-  text += `- 일일 노출량: ${dailyKNh.toFixed(2)} kN·h (${severityLabel})\n`;
+  text += `- 일일 노출량: ${dailyKNh.toFixed(2)} kN·h${weightedDailyDose ? ' (직력가중평균)' : ''} (${severityLabel})\n`;
   text += `- **누적 노출량: ${lifetimeDose?.lifetimeDoseMNh?.toFixed(2) || '0.00'} MN·h **\n`;
 
   if (comparison) {
@@ -224,38 +224,61 @@ function genElbowBurdenSection(calc) {
 }
 
 function genWristBurdenSection(calc) {
-  const wristLines = ['\n< \uC190\uBAA9/\uC190\uAC00\uB77D >'];
+  const wristLines = ['\n< 손목/손가락 >'];
 
   if (calc.missingCommonFields?.length) {
-    wristLines.push(`- \uACF5\uD1B5 \uC2DC\uAC04\uC801 \uC120\uD6C4\uAD00\uACC4 \uB204\uB77D: ${calc.missingCommonFields.join(', ')}`);
+    wristLines.push(`- 공통 시간적 선후관계 누락: ${calc.missingCommonFields.join(', ')}`);
   }
 
   const wristTemporalFlags = calc.temporalFlagItems || [];
   if (wristTemporalFlags.length > 0) {
-    wristLines.push(`- \uACF5\uD1B5 \uC2DC\uAC04\uC801 \uC120\uD6C4\uAD00\uACC4 ${wristTemporalFlags.map(flag => flag.label).join(', ')}`);
+    wristLines.push(`- 공통 시간적 선후관계 ${wristTemporalFlags.map(flag => flag.label).join(', ')}`);
   }
 
   (calc.jobSummaries || []).forEach((jobSummary, index) => {
-    wristLines.push(`- \uC9C1\uB825${index + 1}: ${jobSummary.jobName || '-'}`);
+    wristLines.push(`- 직력${index + 1}: ${jobSummary.jobName || '-'}`);
     (jobSummary.diagnosisSummaries || []).forEach(summary => {
       const diag = summary.diagnosis || {};
       const riskFactorText = summary.riskFactorItems?.length > 0
         ? summary.riskFactorItems.map(flag => flag.label).join(', ')
-        : '\uD655\uC778\uB41C \uC704\uD5D8 \uC694\uC778 \uC5C6\uC74C';
+        : '확인된 위험 요인 없음';
       wristLines.push(`  - ${diag.code || ''} ${diag.name || ''} (${getSideText(diag.side)})`);
       if (summary.missingFields.length > 0) {
-        wristLines.push(`    \uC785\uB825 \uB204\uB77D: ${summary.missingFields.join(', ')}`);
+        wristLines.push(`    입력 누락: ${summary.missingFields.join(', ')}`);
       }
-      wristLines.push('    \uBD84\uC11D \uC815\uB9AC:');
+      wristLines.push('    분석 정리:');
       wristLines.push(`      ${summary.narrative.split('\n').join('\n      ')}`);
-      wristLines.push(`      \uC5C5\uBB34\uAD00\uB828\uC131 \uC704\uD5D8 \uC694\uC778: ${riskFactorText}`);
+      wristLines.push(`      업무관련성 위험 요인: ${riskFactorText}`);
       if (summary.riskFactorSentence) {
-        wristLines.push(`\n      **\uC885\uD569\uD3C9\uAC00** ${summary.riskFactorSentence}`);
+        wristLines.push(`\n      **종합평가** ${summary.riskFactorSentence}`);
       }
     });
   });
 
   return `${wristLines.join('\n')}\n`;
+}
+
+function genCervicalBurdenSection(calc) {
+  let text = `\n< 경추(목) >\n`;
+
+  (calc.jobSummaries || []).forEach((jobSummary, index) => {
+    text += `- 직력${index + 1}: ${jobSummary.jobName || '-'}\n`;
+    (jobSummary.diagnosisSummaries || []).forEach(summary => {
+      const riskFactorText = summary.riskFactorItems?.length > 0
+        ? summary.riskFactorItems.map(flag => flag.label).join(', ')
+        : '확인된 위험 요인 없음';
+
+      if (summary.missingFields.length > 0) {
+        text += `    입력 누락: ${summary.missingFields.join(', ')}\n`;
+      }
+      text += '    분석 정리:\n';
+      text += `      ${summary.narrative.split('\n').join('\n      ')}\n`;
+      text += `      업무관련성 위험 요인: ${riskFactorText}\n`;
+      text += `      ** 종합평가 : ${summary.conclusionText}\n`;
+    });
+  });
+
+  return text;
 }
 
 export function generateUnifiedReport(patient) {
@@ -302,6 +325,7 @@ export function generateUnifiedReport(patient) {
     if (moduleId === 'shoulder') text += genShoulderBurdenSection(calc);
     if (moduleId === 'spine') text += genSpineBurdenSection(calc);
     if (moduleId === 'elbow') text += genElbowBurdenSection(calc);
+    if (moduleId === 'cervical') text += genCervicalBurdenSection(calc);
   }
 
   text += `\n[업무관련성 평가 결과]\n`;
@@ -311,7 +335,7 @@ export function generateUnifiedReport(patient) {
     const resolvedModule = resolveDiagnosisModule(diag, activeModules);
     text += `\n상병 #${index + 1}: ${diag.code || ''} ${diag.name || ''}\n`;
 
-    if (resolvedModule?.moduleId === 'spine') {
+    if (resolvedModule?.moduleId === 'spine' || resolvedModule?.moduleId === 'cervical') {
       text += `  평가: 상병 상태(${getStatusText(diag.confirmedRight)}) / 업무관련성(${diag.assessmentRight === 'high' ? '높음' : diag.assessmentRight === 'low' ? '낮음' : '-'})\n`;
       if (diag.assessmentRight === 'low') {
         text += `  낮음 사유:\n  - ${getReasonText(diag.reasonRight, diag.reasonRightOther).split('\n').join('\n  - ')}\n`;
@@ -338,6 +362,7 @@ export function generateUnifiedReport(patient) {
     || modules.wrist?.returnConsiderations
     || modules.shoulder?.returnConsiderations
     || modules.elbow?.returnConsiderations
+    || modules.cervical?.returnConsiderations
     || '';
 
   if (returnConsiderations) {
@@ -348,4 +373,3 @@ export function generateUnifiedReport(patient) {
 
   return text;
 }
-

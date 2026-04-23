@@ -8,13 +8,14 @@ import { IntegrationStatusBadge } from './core/components/IntegrationStatusBadge
 import { SettingsModal } from './core/components/SettingsModal';
 import { BatchImportModal } from './core/components/BatchImportModal';
 import { PresetManageModal } from './core/components/PresetManageModal';
+import { PresetBrowseModal } from './core/components/PresetBrowseModal';
 import Dashboard from './core/components/Dashboard';
 import { useAuth } from './core/auth/AuthContext';
 import { useIntegrationStatus } from './core/hooks/useIntegrationStatus';
 import { usePatientList } from './core/hooks/usePatientList';
 import { createSharedData, createDiagnosis, createTestPatients, formatBirthDate, DEFAULT_SETTINGS, FONT_SIZE_MAP } from './core/utils/data';
 import { FALLBACK_PRESETS } from './modules/knee/utils/data';
-import { loadAllPresets, normalizeBuiltinPreset, saveCustomPreset, deleteCustomPreset, loadCustomPresets } from './core/services/presetRepository';
+import { loadAllPresets, normalizeBuiltinPreset, saveCustomPreset, deleteCustomPreset, loadCustomPresets, getPresetCategory, getPresetDescription } from './core/services/presetRepository';
 import { suggestModules } from './core/utils/diagnosisMapping';
 import { showAlert, showConfirm } from './core/utils/platform';
 import { getSyncedEvaluationDate, isPatientComplete } from './core/utils/patientCompletion';
@@ -42,6 +43,7 @@ import {
 // 모듈 등록 (사이드이펙트 import)
 import './modules/knee';
 import './modules/spine';
+import './modules/cervical';
 import './modules/shoulder';
 import './modules/elbow';
 import './modules/wrist';
@@ -114,6 +116,8 @@ function App() {
   const [presetMeta, setPresetMeta] = useState(null);
   const [presetError, setPresetError] = useState(null);
   const [presetModalJobId, setPresetModalJobId] = useState(null);
+  const [presetEditingPreset, setPresetEditingPreset] = useState(null);
+  const [presetBrowseJobId, setPresetBrowseJobId] = useState(null);
   const [extractProgress, setExtractProgress] = useState(null); // { current, total, currentName, status }
 
   const { status: integrationStatus } = useIntegrationStatus({ session, settings });
@@ -383,7 +387,16 @@ function App() {
   };
 
   // 프리셋 선택 시 활성 모듈 전체에 자동 채움
-  const handlePresetSelect = useCallback((jobId, preset) => {
+  const formatModuleNames = useCallback((moduleIds = []) => (
+    moduleIds.map(moduleId => getModule(moduleId)?.name || moduleId).join(', ')
+  ), []);
+
+  const handlePresetSelect = useCallback(async (jobId, preset) => {
+    const applicableModuleIds = (activeModules || []).filter(moduleId => {
+      const mod = getModule(moduleId);
+      return mod?.presetConfig?.applyToModule && preset.modules?.[moduleId];
+    });
+
     setPatients(prev => prev.map(p => {
       if (p.id !== activeId) return p;
       const newModules = { ...p.data.modules };
@@ -403,20 +416,78 @@ function App() {
         { session }
       );
     }));
-  }, [activeId, session]);
+    if (applicableModuleIds.length > 0) {
+      await showAlert(
+        `프리셋 "${preset.jobName}"이 적용되었습니다.\n적용 모듈: ${formatModuleNames(applicableModuleIds)}`
+      );
+    } else {
+      await showAlert(
+        `프리셋 "${preset.jobName}"을 선택했지만 현재 활성 모듈과 겹치는 저장 데이터가 없습니다.`
+      );
+    }
+  }, [activeId, activeModules, formatModuleNames, session]);
 
   // 커스텀 프리셋 저장
-  const handleSaveCustomPreset = useCallback(async (preset) => {
-    await saveCustomPreset(preset);
+  const handleSaveCustomPreset = useCallback(async (preset, feedback = {}) => {
+    const savedPreset = await saveCustomPreset(preset, {
+      replaceModules: feedback.replaceModules,
+    });
     await reloadPresets();
     setPresetModalJobId(null);
-  }, [reloadPresets]);
+    setPresetEditingPreset(null);
+    const presetLabel = savedPreset.description
+      ? `${savedPreset.jobName} / ${savedPreset.category} / ${savedPreset.description}`
+      : `${savedPreset.jobName} / ${savedPreset.category}`;
+
+    if (feedback.isUpdate) {
+      const removedModulesLine = feedback.removedModuleIds?.length
+        ? `\n제거된 모듈: ${formatModuleNames(feedback.removedModuleIds)}`
+        : '';
+      await showAlert(
+        `기존 프리셋 업데이트 완료\n프리셋: ${presetLabel}\n기존 모듈: ${formatModuleNames(feedback.existingModuleIds)}\n이번 저장 모듈: ${formatModuleNames(feedback.selectedModuleIds)}\n저장 후 모듈: ${formatModuleNames(feedback.mergedModuleIds)}${removedModulesLine}`
+      );
+      return;
+    }
+
+    await showAlert(
+      `새 프리셋 저장 완료\n프리셋: ${presetLabel}\n저장 모듈: ${formatModuleNames(feedback.selectedModuleIds || Object.keys(savedPreset.modules || {}))}`
+    );
+  }, [formatModuleNames, reloadPresets]);
+
+  const closePresetManageModal = useCallback(() => {
+    if (presetEditingPreset && presetModalJobId) {
+      setPresetBrowseJobId(presetModalJobId);
+    }
+    setPresetModalJobId(null);
+    setPresetEditingPreset(null);
+  }, [presetEditingPreset, presetModalJobId]);
 
   // 커스텀 프리셋 삭제
-  const handleDeleteCustomPreset = useCallback(async (id) => {
+  const handleDeleteCustomPreset = useCallback(async (presetOrId) => {
+    const preset =
+      presetOrId && typeof presetOrId === 'object'
+        ? presetOrId
+        : presets.find(item => (item._customId || item.id) === presetOrId);
+    const id = preset?._customId || preset?.id || presetOrId;
+    if (!id) return false;
+
+    const label = preset?.jobName
+      ? getPresetDescription(preset)
+        ? `${preset.jobName} / ${getPresetCategory(preset)} / ${getPresetDescription(preset)}`
+        : `${preset.jobName} / ${getPresetCategory(preset)}`
+      : null;
+
+    const confirmed = await showConfirm(
+      label
+        ? `"${label}" 프리셋을 삭제하시겠습니까?`
+        : '이 프리셋을 삭제하시겠습니까?'
+    );
+    if (!confirmed) return false;
+
     await deleteCustomPreset(id);
     await reloadPresets();
-  }, [reloadPresets]);
+    return true;
+  }, [presets, reloadPresets]);
 
   const addPatient = () => { handleStartIntake(); };
 
@@ -1148,7 +1219,7 @@ function App() {
       return (
         <>
           <div className="panel">
-            <BasicInfoForm shared={shared} onChange={updateShared} errors={errors} presets={presets} presetMeta={presetMeta} presetError={presetError} onPresetSelect={handlePresetSelect} onSavePreset={setPresetModalJobId} activeModules={activeModules} />
+            <BasicInfoForm shared={shared} onChange={updateShared} errors={errors} presets={presets} presetMeta={presetMeta} presetError={presetError} onPresetSelect={handlePresetSelect} onSavePreset={setPresetModalJobId} onBrowsePreset={setPresetBrowseJobId} activeModules={activeModules} />
           </div>
           <div className="panel">
             <BasicInfoSidePanel shared={shared} onChange={updateShared} />
@@ -1467,9 +1538,26 @@ function App() {
           jobId={presetModalJobId}
           patient={activePatient}
           presets={presets}
+          editingPreset={presetEditingPreset}
           onSave={handleSaveCustomPreset}
+          onClose={closePresetManageModal}
+        />
+      )}
+      {presetBrowseJobId && activePatient && (
+        <PresetBrowseModal
+          job={(activePatient.data.shared.jobs || []).find(job => job.id === presetBrowseJobId)}
+          presets={presets}
           onDelete={handleDeleteCustomPreset}
-          onClose={() => setPresetModalJobId(null)}
+          onEdit={(preset) => {
+            setPresetEditingPreset(preset);
+            setPresetModalJobId(presetBrowseJobId);
+            setPresetBrowseJobId(null);
+          }}
+          onSelect={async (preset) => {
+            await handlePresetSelect(presetBrowseJobId, preset);
+            setPresetBrowseJobId(null);
+          }}
+          onClose={() => setPresetBrowseJobId(null)}
         />
       )}
     </div>

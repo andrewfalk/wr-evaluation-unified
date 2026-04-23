@@ -1,9 +1,9 @@
 # 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 3.4.0 | **Status:** MVP 개발 완료 / Vercel 배포 완료
+> **Version:** 4.0.0 | **Status:** MVP 개발 완료 / Vercel 배포 완료
 
 직업환경의학 전문의가 **업무상 질병 인정 여부를 판단**할 때 사용하는 통합 평가 도구.
-무릎(슬관절), 척추(요추 MDDM), 팔꿈치(주관절 BK2101/2103/2105/2106), 어깨(견관절 BK2117), 손목(수관절 BK2113/2101/2103/2106) 평가를 지원하며, 향후 고관절 등을 플러그인 형태로 확장할 수 있다.
+무릎(슬관절), 척추(요추 MDDM), 경추(목 BK2109), 팔꿈치(주관절 BK2101/2103/2105/2106), 어깨(견관절 BK2117), 손목(수관절 BK2113/2101/2103/2106) 평가를 지원하며, 향후 고관절 등을 플러그인 형태로 확장할 수 있다.
 
 ## 기술 스택
 
@@ -86,9 +86,10 @@ Patient
     │   ├── knee                   ← 무릎 전용 (jobExtras[], returnConsiderations)
     │   ├── shoulder               ← 어깨 전용 (jobExtras[], returnConsiderations)
     │   ├── elbow                  ← 팔꿈치 전용 (jobEvaluations[], temporalSequence)
+    │   ├── wrist                  ← 손목 전용 (jobEvaluations[], temporalSequence)
+    │   ├── cervical               ← 경추 전용 (jobEvaluations[])
     │   ├── spine                  ← 척추 전용 (tasks[] — sharedJobId로 직업 연결)
-    │   └── wrist                  ← 손목 전용 (jobEvaluations[], temporalSequence)
-    └── activeModules: ['knee', 'spine', 'shoulder', 'elbow', 'wrist']
+    └── activeModules: ['knee', 'spine', 'shoulder', 'elbow', 'wrist', 'cervical']
 ```
 
 ## UI 흐름 (위자드)
@@ -96,17 +97,18 @@ Patient
 ```
 [공유] 기본정보 → 상병 입력 → 모듈 선택
 [무릎] 🦵 신체부담 평가
-[팔꿈치] 🦾 신체부담 평가
+[팔꿈치] 💪 신체부담 평가
 [손목] ✋ 신체부담 평가
-[어깨] 💪 신체부담 평가
-[척추] 🦴 신체부담 평가
+[어깨] 🙆 신체부담 평가
+[경추] 👤 부담 노출 평가
+[척추] ⚕️ 신체부담 평가
 [공유] 종합소견 → AI 분석
 ```
 
 ### 종합소견
 
 좌우 2패널 레이아웃:
-- **좌측**: 상병별 상태 확인 및 업무관련성 평가 (무릎: KLG/좌우 구분, 어깨: Ellman Class/좌우 구분, 팔꿈치/손목: BK 유형 자동 제안/수동 + 공통 시간적 선후관계, 척추: 수직분포원리/동반성 척추증 확인 + 업무관련성)
+- **좌측**: 상병별 상태 확인 및 업무관련성 평가 (무릎: KLG/좌우 구분, 어깨: Ellman Class/좌우 구분, 팔꿈치/손목: BK 유형 자동 제안/수동 + 공통 시간적 선후관계, 경추/척추: 수직분포원리/동반성 척추증 확인 + 업무관련성, 좌우 구분 없음)
 - **우측**: 전체 모듈 결과 통합 미리보기
 
 ## 평가 모듈
@@ -166,6 +168,18 @@ Patient
 | 반복동작 고도 | 9,400시간 |
 | 중량물(≥20kg) | 200시간 |
 | 손-팔 진동 | 5,300시간 |
+
+### 경추 모듈 (cervical)
+
+독일 산재보험 BK2109 기준 — 경추 질환 부담 노출 평가. 팔꿈치/손목 모듈과 유사한 **Gate-and-Flag 판정** 방식.
+
+- **평가 대상**: 경추간판 탈출증(M50), 경추 협착증(M48.02) 등 경추 질환
+- **노출 유형**: 어깨에 무거운 하중 운반(BK2109), 장시간 비중립·정적 목 부하(Awkward/Static Neck Load)
+- **데이터 구조**: `jobEvaluations[]` (직업 × 상병 2차원 entry) — 팔꿈치/손목과 동일 구조
+- **입력**: 대표 문제 작업, 하중(kg), 교대당 운반 시간, 부자연스러운 목 자세 강제 여부, 비중립 정적 자세 시간(시간/일), 굴곡/회전 동시 발생, 고도의 정밀 작업
+- **판정**: BK2109 하중 ≥40kg → heavy_load_met, 비중립 자세 ≥1.5~2시간 → static_load_met 등 flag 판정 후 narrative 및 종합평가 문장 자동 생성
+- **종합소견**: 척추(spine) 모듈과 동일하게 좌우 구분 없는 축(Axial) 상병으로 처리
+- **프리셋 지원**: 경추 공통 노출 7개 필드(`main_task_name`, `load_weight_kg`, `carry_hours_per_shift` 등) 추출/적용
 
 ### 척추 모듈 (spine)
 
@@ -242,9 +256,13 @@ src/
 │   │   ├── ElbowEvaluation.jsx
 │   │   ├── components/             # ExposureForm, DiseaseSpecificFields, ElbowResultPanel
 │   │   └── utils/                  # calculations, data, exportHandlers
-│   └── wrist/                      # 손목 모듈 (BK2113/BK2101/2103/2106)
-│       ├── WristEvaluation.jsx
-│       ├── components/             # ExposureForm, DiseaseSpecificFields, WristResultPanel
+│   ├── wrist/                      # 손목 모듈 (BK2113/BK2101/2103/2106)
+│   │   ├── WristEvaluation.jsx
+│   │   ├── components/             # ExposureForm, DiseaseSpecificFields, WristResultPanel
+│   │   └── utils/                  # calculations, data, exportHandlers
+│   └── cervical/                   # 경추 모듈 (BK2109)
+│       ├── CervicalEvaluation.jsx
+│       ├── components/             # ExposureForm, DiseaseSpecificFields, CervicalResultPanel
 │       └── utils/                  # calculations, data, exportHandlers
 api/analyze.js                       # Vercel 서버리스 (Gemini/Claude API 프록시)
 electron/                            # main.js + preload.js (IPC 기반 AI 호출)
@@ -261,7 +279,8 @@ ICD 코드 기반 모듈 자동 추천:
 | M77.0, M77.1, T75.2 | 팔꿈치 (elbow) |
 | G56.0, M65.3, M65.4, M65.8, M19.04 | 손목 (wrist) |
 | M75, S43, S46, M19.01 | 어깨 (shoulder) |
-| M51, M54, M47, M48, M50, M53 | 척추 (spine) |
+| M50, M48.02 | 경추 (cervical) |
+| M51, M54, M47, M48, M53 | 척추 (spine) |
 
 ## 향후 로드맵
 
@@ -276,6 +295,18 @@ ICD 코드 기반 모듈 자동 추천:
 ---
 
 ## 변경 이력
+
+### v4.0.0 (2026-04-23)
+- **경추(목) 모듈 신설**: BK2109 기반 경추 질환 부담 노출 평가 — 어깨 하중 운반(≥40kg) + 비중립·정적 목 부하(≥1.5~2시간) Gate-and-Flag 판정
+- 경추 전용 `jobEvaluations[]` 2차원 구조 (팔꿈치/손목과 동일 패턴)
+- 경추 프리셋 시스템 연동 (`presetConfig` — 공통 노출 7개 필드 추출/적용, `_pendingPreset` 대기 메커니즘)
+- 상병 자동 매핑에 경추 ICD 코드(M50, M48.02) 및 키워드(경추, 목디스크, 척수병) 추가
+- 통합 미리보기/EMR 소견서/엑셀에 `<경추(목)>` 섹션 자동 포함
+- 종합소견에서 경추 상병은 척추와 동일하게 좌우 구분 없는 축(Axial) 상병으로 처리
+- **모듈 아이콘 호환성 개선**: 윈도우 7 기본 폰트에서 깨지지 않도록 Unicode 6.0 이하 기호로 일괄 교체
+  - 경추: 👤 (Bust in Silhouette) / 어깨: 🙆 (Person Gesturing OK) / 팔꿈치: 💪 (Flexed Biceps) / 요추: ⚕️ (유지)
+- **프리셋 모달 안정화**: `getPresetCategory`/`getPresetDescription` null 안전 처리 — 프리셋 저장 버튼 클릭 시 빈 화면 크래시 수정
+- 프리셋 저장 정책 개선: 직종명+카테고리+설명 기반 identity 저장, 모듈별 비파괴 병합
 
 ### v3.4.0 (2026-04-21)
 - **손목(수관절) 모듈 신설**: 수근관 증후군(BK2113), 건초염/방아쇠수지(BK2101) 등 평가 지원

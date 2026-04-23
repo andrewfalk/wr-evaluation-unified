@@ -237,12 +237,26 @@ export function computeSpineCalc(patientData) {
     totalYears
   };
 
+  // 다중 직업 통계: 임계치 초과 직업들의 근무기간 가중평균 일일선량
+  let weightedDailyDose;
+  if (jobResults.length > 1) {
+    const qualifying = jobResults.filter(jr => !jr.lifetimeDose.excluded);
+    if (qualifying.length > 0) {
+      const sumWeighted = qualifying.reduce((s, jr) => s + jr.dailyDose.dailyDoseKNh * jr.periodYears, 0);
+      const sumYears = qualifying.reduce((s, jr) => s + jr.periodYears, 0);
+      weightedDailyDose = { value: sumYears > 0 ? sumWeighted / sumYears : 0, aboveThreshold: true };
+    } else {
+      const maxVal = Math.max(...jobResults.map(jr => jr.dailyDose.dailyDoseKNh));
+      weightedDailyDose = { value: maxVal, aboveThreshold: false };
+    }
+  }
+
   const comparison = compareThresholds(lifetimeDose.lifetimeDoseMNh, gender);
   const risk = assessRisk(comparison);
   const workRelatedness = assessWorkRelatedness(lifetimeDose.lifetimeDoseMNh, gender);
   const maxForce = tasks.length > 0 ? Math.max(...tasks.map(t => t.force)) : 0;
 
-  return { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender };
+  return { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender, weightedDailyDose };
 }
 
 // 완료 판정

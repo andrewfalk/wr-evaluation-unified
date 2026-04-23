@@ -4,7 +4,7 @@ import { convertTimeToSeconds } from '../utils/calculations';
 export function SpineResultPanel({ calc }) {
   if (!calc?.dailyDose) return null;
 
-  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender } = calc;
+  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender, weightedDailyDose } = calc;
   const forceThreshold = thresholds.singleForce;
 
   const riskIcon = { danger: '\u26D4', warning: '\u26A0\uFE0F', safe: '\u2705' };
@@ -31,15 +31,21 @@ export function SpineResultPanel({ calc }) {
         />
         <SummaryCard
           label="일일 누적 용량"
-          value={dailyDose.dailyDoseKNh.toFixed(2)}
+          value={(weightedDailyDose ? weightedDailyDose.value : dailyDose.dailyDoseKNh).toFixed(2)}
           unit={`kN\xB7h`}
-          sub={`임계치 ${thresholds.dailyDose[gender]} kN\xB7h ${dailyDose.dailyDoseKNh >= thresholds.dailyDose[gender] ? '초과' : '미만'}`}
+          sub={weightedDailyDose
+            ? (weightedDailyDose.aboveThreshold
+              ? `가중평균 | 임계치 ${thresholds.dailyDose[gender]} kN\xB7h 초과`
+              : `최대 직업별 | 임계치 ${thresholds.dailyDose[gender]} kN\xB7h 미만`)
+            : `임계치 ${thresholds.dailyDose[gender]} kN\xB7h ${dailyDose.dailyDoseKNh >= thresholds.dailyDose[gender] ? '초과' : '미만'}`}
         />
         <SummaryCard
           label="평생 누적 용량"
           value={lifetimeDose.excluded ? '0' : lifetimeDose.lifetimeDoseMNh.toFixed(2)}
           unit={`MN\xB7h`}
-          sub={lifetimeDose.excluded ? '일일선량 미달' : `DWS2 ${comparison.dws2.percent.toFixed(0)}%`}
+          sub={lifetimeDose.excluded
+            ? (jobResults && jobResults.length > 1 ? '전 직업 일일선량 미달' : '일일선량 미달')
+            : `DWS2 ${comparison.dws2.percent.toFixed(0)}%`}
           highlight={!lifetimeDose.excluded && comparison.dws2.status !== 'safe'}
         />
       </div>

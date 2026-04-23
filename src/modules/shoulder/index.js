@@ -7,7 +7,7 @@ import { shoulderExportHandlers } from './utils/exportHandlers';
 registerModule({
   id: 'shoulder',
   name: '어깨',
-  icon: '\uD83D\uDCAA',
+  icon: '🙆',
   description: '어깨 근골격계 질환 업무관련성 평가',
   EvaluationComponent: ShoulderEvaluation,
   createModuleData: createShoulderModuleData,

@@ -26,13 +26,16 @@ const ICD_MODULE_MAP = [
   { pattern: /^S43/i, moduleId: 'shoulder', label: '어깨' },
   { pattern: /^S46/i, moduleId: 'shoulder', label: '어깨' },
 
-  // 척추
-  { pattern: /^M51/i, moduleId: 'spine', label: '척추' },
-  { pattern: /^M54/i, moduleId: 'spine', label: '척추' },
-  { pattern: /^M47/i, moduleId: 'spine', label: '척추' },
-  { pattern: /^M48/i, moduleId: 'spine', label: '척추' },
-  { pattern: /^M50/i, moduleId: 'spine', label: '척추' },
-  { pattern: /^M53/i, moduleId: 'spine', label: '척추' },
+  // 경추(목)
+  { pattern: /^M50/i, moduleId: 'cervical', label: '경추(목)' },
+  { pattern: /^M4802/i, moduleId: 'cervical', label: '경추(목)' },
+
+  // 요추(허리)
+  { pattern: /^M51/i, moduleId: 'spine', label: '요추(허리)' },
+  { pattern: /^M54/i, moduleId: 'spine', label: '요추(허리)' },
+  { pattern: /^M47/i, moduleId: 'spine', label: '요추(허리)' },
+  { pattern: /^M4806/i, moduleId: 'spine', label: '요추(허리)' },
+  { pattern: /^M53/i, moduleId: 'spine', label: '요추(허리)' },
 ];
 
 const NAME_MODULE_MAP = [
@@ -57,9 +60,14 @@ const NAME_MODULE_MAP = [
     label: '어깨',
   },
   {
-    pattern: /요추|척추|추간판|디스크|경추|허리통증/i,
+    pattern: /경추|경추간판|목\s*디스크|cervical|경추협착|경추 협착|척수병증|목통증|목\s*통증/i,
+    moduleId: 'cervical',
+    label: '경추(목)',
+  },
+  {
+    pattern: /요추|허리|허리통증|요통|lumbar|요추간판|요추협착|요추 협착|/i,
     moduleId: 'spine',
-    label: '척추',
+    label: '요추(허리)',
   },
 ];
 
@@ -68,6 +76,15 @@ const NAME_MODULE_MAP = [
  * @returns {{ moduleId: string, label: string } | null}
  */
 export function getDiagnosisModuleHint(diag) {
+  const code = String(diag.code || '').trim().toUpperCase();
+  const name = String(diag.name || '').trim();
+
+  if (/^M48/i.test(code) || /^M47/i.test(code) || /^M54/i.test(code)) {
+    if (/(경추|목|cervical)/i.test(name)) {
+      return { moduleId: 'cervical', label: '경추(목)' };
+    }
+  }
+
   if (diag.code) {
     for (const rule of ICD_MODULE_MAP) {
       if (rule.pattern.test(diag.code)) return { moduleId: rule.moduleId, label: rule.label };
@@ -88,7 +105,8 @@ const MODULE_LABELS = {
   wrist: '손목/손가락',
   elbow: '팔꿈치',
   shoulder: '어깨',
-  spine: '척추',
+  spine: '요추(허리)',
+  cervical: '경추(목)',
 };
 
 /**
