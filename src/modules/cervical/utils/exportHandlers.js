@@ -9,7 +9,7 @@ function buildWorkbook(patientData, calc) {
     ['항목', '내용'],
     ['이름', shared.name || ''],
     ['진단', (shared.diagnoses || []).map(diag => `${diag.code || ''} ${diag.name || ''}`.trim()).join('\n')],
-    ['요약', (c.diagnosisSummaries || []).map(summary =>
+    ['요약', (c.jobSummaries || []).map(summary =>
       `${summary.jobName || '-'} / ${summary.conclusionText}`
     ).join('\n')],
     ['복귀 고려사항', patientData.module?.returnConsiderations || ''],

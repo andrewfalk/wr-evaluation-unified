@@ -8,6 +8,7 @@ import { createKneeJobExtras } from '../../modules/knee/utils/data';
 import { createShoulderJobExtras } from '../../modules/shoulder/utils/data';
 import { createElbowDiagnosisEntry, createElbowJobEvaluation, createElbowModuleData } from '../../modules/elbow/utils/data';
 import { createWristDiagnosisEntry, createWristJobEvaluation, createWristModuleData } from '../../modules/wrist/utils/data';
+import { createCervicalTask, EXPOSURE_TYPE_OPTIONS as CERVICAL_EXPOSURE_TYPE_OPTIONS } from '../../modules/cervical/utils/data';
 import { createTask as createSpineTask } from '../../modules/spine/utils/data';
 import { showAlert } from '../utils/platform';
 import { createManagedPatient, touchPatientRecord } from '../services/patientRecords';
@@ -37,6 +38,14 @@ function parseBool(value) {
   return ['o', '1', 'true', 'yes', 'y', '예'].includes(str);
 }
 
+function parseYesNo(value, fallback = '') {
+  if (value === undefined || value === null || value === '') return fallback;
+  const str = String(value).trim().toLowerCase();
+  if (['o', '1', 'true', 'yes', 'y', '예'].includes(str)) return 'yes';
+  if (['x', '0', 'false', 'no', 'n', '아니오'].includes(str)) return 'no';
+  return String(value).trim();
+}
+
 function parseGender(value) {
   const str = String(value || '').trim().toLowerCase();
   if (['남', '남자', 'male', 'm'].includes(str)) return 'male';
@@ -63,6 +72,20 @@ function parseKlg(value) {
 function splitList(value) {
   if (!value) return [];
   return String(value).split('|').map(item => item.trim()).filter(Boolean);
+}
+
+const CERVICAL_EXPOSURE_TYPE_LOOKUP = CERVICAL_EXPOSURE_TYPE_OPTIONS.reduce((acc, option) => {
+  acc[option.value] = option.value;
+  acc[option.label] = option.value;
+  return acc;
+}, {});
+
+function parseCervicalExposureTypes(value) {
+  return splitList(value)
+    .map(item => CERVICAL_EXPOSURE_TYPE_LOOKUP[item] || item)
+    .filter(mapped =>
+      CERVICAL_EXPOSURE_TYPE_OPTIONS.some(option => option.value === mapped)
+    );
 }
 
 function clonePatients(existingPatients = []) {
@@ -99,6 +122,15 @@ const IMPORT_FIELD_GROUPS = [
     title: '요추(허리)',
     description: '직업별 작업-자세 조합',
     fields: ['작업명', '자세코드', '작업중량', '횟수/분', '시간값', '시간단위', '보정계수'],
+  },
+  {
+    title: '경추(목)',
+    description: '직업별 경추 부담 작업과 노출시간',
+    fields: [
+      '경추_작업명', '경추_노출유형', '경추_하중(kg)', '경추_교대당운반시간',
+      '경추_부자연스러운목자세강제', '경추_비중립정적자세시간',
+      '경추_굴곡신전회전측굴동시발생', '경추_고도의정밀작업', '경추_메모',
+    ],
   },
   {
     title: '팔꿈치 공통',
@@ -227,6 +259,15 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
       shoulderHeavyCount: findCol('중량물횟수', 'heavyloadcount'),
       shoulderHeavySeconds: findCol('중량물시간', 'heavyloadseconds'),
       shoulderVibration: findCol('진동(시간/일)', 'vibration'),
+      cervicalTaskName: findCol('경추_작업명', 'cervical_task_name'),
+      cervicalExposureTypes: findCol('경추_노출유형', 'cervical_exposure_types'),
+      cervicalLoadWeightKg: findCol('경추_하중(kg)', 'cervical_load_weight_kg'),
+      cervicalCarryHoursPerShift: findCol('경추_교대당운반시간', 'cervical_carry_hours_per_shift'),
+      cervicalForcedNeckPosture: findCol('경추_부자연스러운목자세강제', 'cervical_forced_neck_posture'),
+      cervicalNeckNonneutralHours: findCol('경추_비중립정적자세시간', 'cervical_neck_nonneutral_hours_per_day'),
+      cervicalCombinedFlexionRotationPosture: findCol('경추_굴곡신전회전측굴동시발생', 'cervical_combined_flexion_rotation_posture'),
+      cervicalPrecisionWork: findCol('경추_고도의정밀작업', 'cervical_precision_work'),
+      cervicalNotes: findCol('경추_메모', 'cervical_notes'),
       elbowRecentTaskChange: findCol('팔꿈치_시간적선후관계_최근작업변화', 'elbow_recent_task_change'),
       elbowTaskChangeDate: findCol('팔꿈치_시간적선후관계_작업변화시점', 'elbow_task_change_date'),
       elbowSymptomOnsetInterval: findCol('팔꿈치_시간적선후관계_증상발생까지기간', 'elbow_symptom_onset_interval'),
@@ -328,7 +369,7 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
 
     const applyReturnConsiderations = (patient, value) => {
       if (!value) return;
-      ['knee', 'wrist', 'shoulder', 'elbow'].forEach(moduleId => {
+      ['knee', 'wrist', 'shoulder', 'elbow', 'cervical', 'spine'].forEach(moduleId => {
         if (patient.data.modules[moduleId]) {
           patient.data.modules[moduleId].returnConsiderations = value;
         }
@@ -552,6 +593,60 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
       }
     };
 
+    const updateCervicalEvaluation = (patient, row, job) => {
+      if (!job) return;
+
+      const hasCervicalData = [
+        colMap.cervicalTaskName,
+        colMap.cervicalExposureTypes,
+        colMap.cervicalLoadWeightKg,
+        colMap.cervicalCarryHoursPerShift,
+        colMap.cervicalForcedNeckPosture,
+        colMap.cervicalNeckNonneutralHours,
+        colMap.cervicalCombinedFlexionRotationPosture,
+        colMap.cervicalPrecisionWork,
+        colMap.cervicalNotes,
+      ].some(index => getCell(row, index));
+      if (!hasCervicalData) return;
+
+      const cervicalData = ensureModule(patient, 'cervical');
+      if (!Array.isArray(cervicalData.tasks)) {
+        cervicalData.tasks = [];
+      }
+
+      const taskName = String(getCell(row, colMap.cervicalTaskName) || '').trim();
+      const exposureTypes = parseCervicalExposureTypes(getCell(row, colMap.cervicalExposureTypes));
+      const taskKey = taskName || `__row_${rowIndex}`;
+
+      let task = (cervicalData.tasks || []).find(item =>
+        item.sharedJobId === job.id
+        && (item.name || '') === taskKey
+      );
+
+      if (!task) {
+        const jobTaskCount = (cervicalData.tasks || []).filter(item => item.sharedJobId === job.id).length;
+        task = createCervicalTask(jobTaskCount, job.id);
+        task.name = taskName || task.name;
+        cervicalData.tasks.push(task);
+      }
+
+      Object.assign(task, {
+        sharedJobId: job.id,
+        name: taskName || task.name,
+        exposure_types: exposureTypes.length > 0 ? exposureTypes : (task.exposure_types || []),
+        load_weight_kg: String(getCell(row, colMap.cervicalLoadWeightKg) || task.load_weight_kg || ''),
+        carry_hours_per_shift: String(getCell(row, colMap.cervicalCarryHoursPerShift) || task.carry_hours_per_shift || ''),
+        forced_neck_posture: parseYesNo(getCell(row, colMap.cervicalForcedNeckPosture), task.forced_neck_posture || ''),
+        neck_nonneutral_hours_per_day: String(getCell(row, colMap.cervicalNeckNonneutralHours) || task.neck_nonneutral_hours_per_day || ''),
+        combined_flexion_rotation_posture: parseYesNo(
+          getCell(row, colMap.cervicalCombinedFlexionRotationPosture),
+          task.combined_flexion_rotation_posture || ''
+        ),
+        precision_work: parseYesNo(getCell(row, colMap.cervicalPrecisionWork), task.precision_work || ''),
+        notes: String(getCell(row, colMap.cervicalNotes) || task.notes || '').trim(),
+      });
+    };
+
     const updateKneeShoulderSpine = (patient, row, diagnosis, job) => {
       const hasKneeData = [colMap.kneeWeight, colMap.kneeSquatting, colMap.kneeStairs, colMap.kneeTwist, colMap.kneeStartStop, colMap.kneeTightSpace, colMap.kneeContact, colMap.kneeJumpDown].some(index => getCell(row, index));
       const hasShoulderData = [colMap.shoulderOverhead, colMap.shoulderMedium, colMap.shoulderFast, colMap.shoulderHeavyCount, colMap.shoulderHeavySeconds, colMap.shoulderVibration].some(index => getCell(row, index));
@@ -683,11 +778,12 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
 
       const diagnosis = ensureDiagnosis(patient, diagCode, diagName, side);
       const job = ensureSharedJob(patient, row);
-      applyReturnConsiderations(patient, String(getCell(row, colMap.returnConsiderations) || '').trim());
 
       updateKneeShoulderSpine(patient, row, diagnosis, job);
+      updateCervicalEvaluation(patient, row, job);
       updateElbowEvaluation(patient, row, diagnosis, job);
       updateWristEvaluation(patient, row, diagnosis, job);
+      applyReturnConsiderations(patient, String(getCell(row, colMap.returnConsiderations) || '').trim());
     }
 
     if (stats.newPatients === 0 && stats.newDiagnoses === 0 && stats.newJobs === 0) {

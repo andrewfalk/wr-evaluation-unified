@@ -13,16 +13,22 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
   const [selectedJobId, setSelectedJobId] = useState(jobs[0]?.id || '');
   const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
 
-  // 기존 태스크 중 sharedJobId가 빈 것을 첫 번째 직업에 귀속 (마이그레이션)
+  // sharedJobId가 빈 태스크는 첫 번째 직업에 귀속(마이그레이션), 삭제된 직업을 가리키는 고아 태스크는 정리
   useEffect(() => {
-    const fj = jobs[0]?.id;
-    if (fj && (mod.tasks || []).some(t => !t.sharedJobId)) {
-      updateModule(m => ({
-        ...m,
-        tasks: (m.tasks || []).map(t => t.sharedJobId ? t : { ...t, sharedJobId: fj })
-      }));
-    }
-  }, [jobs[0]?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (jobs.length === 0) return;
+    const firstId = jobs[0].id;
+    const jobIds = new Set(jobs.map(j => j.id).filter(Boolean));
+    const tasks = mod.tasks || [];
+    const hasEmpty = tasks.some(t => !t.sharedJobId);
+    const hasOrphan = tasks.some(t => t.sharedJobId && !jobIds.has(t.sharedJobId));
+    if (!hasEmpty && !hasOrphan) return;
+    updateModule(m => ({
+      ...m,
+      tasks: (m.tasks || [])
+        .filter(t => !t.sharedJobId || jobIds.has(t.sharedJobId))
+        .map(t => t.sharedJobId ? t : { ...t, sharedJobId: firstId })
+    }));
+  }, [jobs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const allTasks = useMemo(() => (mod.tasks || []).map(t => {
     const result = calculateCompressiveForce(t.posture, t.weight, t.correctionFactor);

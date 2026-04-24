@@ -34,10 +34,12 @@ registerModule({
       };
     },
     applyToModule(moduleData, sharedJobId, presetData) {
-      const otherTasks = (moduleData.tasks || []).filter(t => t.sharedJobId !== sharedJobId);
+      // sharedJobId가 비어있는 기본/레거시 태스크는 첫 직업에 귀속될 예정이므로 preset 적용 시 덮어씀
+      const otherTasks = (moduleData.tasks || []).filter(t => t.sharedJobId && t.sharedJobId !== sharedJobId);
       const newTasks = (presetData.tasks || []).map((t, i) => ({
         ...createTask(i, sharedJobId),
         ...t,
+        sharedJobId,
       }));
       return { ...moduleData, tasks: [...otherTasks, ...newTasks] };
     },

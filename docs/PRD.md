@@ -1,7 +1,7 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 4.0.0
-> **Last Updated:** 2026-04-23
+> **Version:** 4.1.0
+> **Last Updated:** 2026-04-24
 > **Status:** MVP 개발 완료 / Vercel 배포 완료
 
 ---
@@ -137,9 +137,14 @@ Patient
     │   │   ├── temporalSequence        ← 공통 시간적 선후관계 (모듈 전체 1회 입력)
     │   │   ├── jobEvaluations[]        ← 직업별 × 상병별 엔트리
     │   │   └── returnConsiderations    ← 복귀 고려사항
-    │   └── cervical                    ← 경추 전용 (Job × Diagnosis 2차원)
-    │       ├── jobEvaluations[]        ← 직업별 × 상병별 엔트리
-    │       └── returnConsiderations    ← 복귀 고려사항
+    │   └── cervical                    ← 경추 전용 (spine 패턴과 동일)
+    │       └── tasks[]                 ← 경추 작업 목록
+    │           └── { id, name, exposure_types[], load_weight_kg,
+    │                 carry_hours_per_shift, forced_neck_posture,
+    │                 neck_nonneutral_hours_per_day,
+    │                 combined_flexion_rotation_posture,
+    │                 precision_work, notes,
+    │                 sharedJobId }     ← 직업력 연결 (shared.jobs[].id)
     └── activeModules: ['knee', 'spine', 'shoulder', 'elbow', 'wrist', 'cervical']
 ```
 
@@ -148,6 +153,9 @@ Patient
 
 **팔꿈치/손목 모듈 예외 — Job × Diagnosis 2차원 구조:**
 팔꿈치와 손목은 동일 직업 내에서도 상병별로 BK 분기별 지표가 달라지기 때문에 `jobExtras[]`(직업 1차원) 대신 `jobEvaluations[].diagnosisEntries[]`(직업 × 상병 2차원) 구조를 사용한다. `sharedJobId`로 `shared.jobs[]`와 연결되고, `diagnosisId`로 `shared.diagnoses[]`와 연결된다.
+
+**경추 모듈 — 척추(spine) tasks[] 패턴:**
+경추는 상병별 분기 없이 작업 단위로 노출을 평가하므로 팔꿈치/손목 2차원 구조 대신 척추와 동일한 `tasks[]` 1차원 구조를 사용한다. 각 task는 `sharedJobId`로 `shared.jobs[]`의 특정 직업에 연결된다.
 
 ### 2.3 데이터 마이그레이션
 
@@ -436,41 +444,38 @@ ICD 코드 우선 → 상병명 키워드 순:
 | 어깨 하중 운반 (BK2109) | 어깨 위에 무거운 하중을 지고 운반하는 작업 | 하중 ≥40kg, 교대당 1시간 이상 |
 | 비중립·정적 목 부하 | 장시간 목을 20도 이상 굴곡한 상태로 유지 | 1일 1.5~2시간 이상 |
 
-#### 데이터 구조 (Job × Diagnosis 2차원)
+#### 데이터 구조 (척추 tasks[] 패턴)
 
 ```
 modules.cervical
-├── jobEvaluations[]
-│   └── { sharedJobId,
-│         diagnosisEntries[{
-│           diagnosisId, main_task_name,
-│           exposure_types[],
-│           load_weight_kg, carry_hours_per_shift,
-│           forced_neck_posture, neck_flexion_hours_per_day,
-│           combined_flexion_rotation_posture,
-│           precision_work, notes }] }
-└── returnConsiderations
+└── tasks[]
+    └── { id, name, exposure_types[],
+          load_weight_kg, carry_hours_per_shift,
+          forced_neck_posture, neck_nonneutral_hours_per_day,
+          combined_flexion_rotation_posture,
+          precision_work, notes,
+          sharedJobId }   ← 직업력 연결 (shared.jobs[].id)
 ```
 
-#### 신체부담 평가 (ExposureForm + DiseaseSpecificFields + CervicalResultPanel)
+#### 신체부담 평가 (CervicalEvaluation + TaskManager + TaskEditor + CervicalResultPanel)
 
-**좌측 패널 — 입력 (ExposureForm + DiseaseSpecificFields):**
-- 직업별 카드 내부에 해당 직업의 경추 상병 엔트리 카드들을 나열
+**좌측 패널 — 입력 (TaskManager + TaskEditor):**
+- 직업이 2개 이상이면 직업별 탭으로 작업 분리 (척추 모듈과 동일 UX)
 - 노출 유형 선택 (어깨 하중 운반 / 비중립·정적 목 부하)
-- 유형별 세부 입력: 하중(kg), 교대당 운반 시간, 목 굴곡 시간, 복합 자세, 정밀 작업 등
+- 유형별 세부 입력: 하중(kg), 교대당 운반 시간, 목 비중립 자세 시간(시/일), 복합 굴곡/회전 자세, 정밀 작업 등
 
 **우측 패널 — 결과 (CervicalResultPanel):**
-- 직업별 → 상병별 요약: 노출 유형, 주요 flag pill, narrative 서술, 종합평가 문장
+- 직업별 요약: 노출 유형, 주요 flag pill, narrative 서술, 종합평가 문장
 
 #### 계산 로직 (`computeCervicalCalc`) — Gate-and-Flag
 
 ```
-각 diagnosisEntry에 대해:
+각 task에 대해:
   1) 노출 유형 확인: shoulder_heavy_load 또는 awkward_static_neck_load
   2) BK2109 하중 판정: load_weight_kg ≥ 40 → heavy_load_met
-  3) 정적 목 부하 판정: neck_flexion_hours_per_day ≥ 1.5~2 → static_load_met
+  3) 정적 목 부하 판정: neck_nonneutral_hours_per_day ≥ 1.5~2 → static_load_met
   4) narrative + conclusionText 자동 생성
-  5) riskFactorItems 분리
+  5) riskFactorItems: warning tone 플래그(4개)만 분리 (positive/info는 제외)
 ```
 
 #### 자동 상병 매핑
@@ -897,16 +902,28 @@ src/
 │           ├── calculations.js          # computeElbowCalc, Gate-and-Flag 엔진
 │           └── exportHandlers.js        # EMR Excel (B5~B9), PDF 내보내기
 │   ├── wrist/                           # 손목 모듈 (BK2113/2101/2103/2106)
-│       ├── index.js
-│       ├── WristEvaluation.jsx
+│   │   ├── index.js
+│   │   ├── WristEvaluation.jsx
+│   │   ├── components/
+│   │   │   ├── ExposureForm.jsx
+│   │   │   ├── DiseaseSpecificFields.jsx
+│   │   │   └── WristResultPanel.jsx
+│   │   └── utils/
+│   │       ├── data.js
+│   │       ├── calculations.js
+│   │       └── exportHandlers.js
+│   │
+│   └── cervical/                        # 경추 모듈 (BK2109)
+│       ├── index.js                     # registerModule()
+│       ├── CervicalEvaluation.jsx       # 메인 컴포넌트 (spine 패턴, tasks[] 기반)
 │       ├── components/
-│       │   ├── ExposureForm.jsx
-│       │   ├── DiseaseSpecificFields.jsx
-│       │   └── WristResultPanel.jsx
+│       │   ├── TaskManager.jsx          # 경추 작업 목록 관리
+│       │   ├── TaskEditor.jsx           # 경추 작업 편집 (노출유형/하중/자세)
+│       │   └── CervicalResultPanel.jsx  # 직업별 flag + narrative + 종합평가
 │       └── utils/
-│           ├── data.js
-│           ├── calculations.js
-│           └── exportHandlers.js
+│           ├── data.js                  # createCervicalTask, syncCervicalModuleData
+│           ├── calculations.js          # computeCervicalCalc, Gate-and-Flag 엔진
+│           └── exportHandlers.js        # EMR Excel, 엑셀 요약
 │
 api/analyze.js                           # Vercel 서버리스 (Claude API 프록시)
 electron/
@@ -1244,15 +1261,26 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 
 - **경추(목) 모듈 신설** (`src/modules/cervical/`): 독일 산재보험 BK2109 기반 경추 질환 부담 노출 평가 플러그인
   - 어깨 하중 운반(≥40kg) + 비중립·정적 목 부하(≥1.5~2시간) 2가지 노출 유형 Gate-and-Flag 판정
-  - `jobEvaluations[]` 2차원 구조 (팔꿈치/손목과 동일 패턴)
+  - `tasks[]` (sharedJobId로 직업 연결) — 척추(spine)와 동일 패턴
   - 경추간판 탈출증(M50), 경추 협착증(M48.02) 등 자동 상병 매핑
   - 종합소견에서 척추와 동일하게 좌우 구분 없는 축(Axial) 상병 처리
-- **경추 프리셋 시스템 연동**: `presetConfig` — 공통 노출 7개 필드(`main_task_name`, `load_weight_kg`, `carry_hours_per_shift` 등) 추출/적용. `_pendingPreset` 대기 메커니즘으로 진단 엔트리 미생성 시 프리셋 보관 후 `syncCervicalModuleData` 시점에 적용
+- **경추 프리셋 시스템 연동**: `presetConfig` — 공통 노출 7개 필드(`name`, `exposure_types`, `load_weight_kg`, `carry_hours_per_shift` 등) 추출/적용
 - **통합 미리보기/EMR/엑셀**: `genCervicalBurdenSection` / `buildCervicalExposureText` 추가 — `<경추(목)>` 섹션 자동 포함
 - **모듈 아이콘 Windows 7 호환성 개선**: Unicode 6.0 이하 기호로 일괄 교체
   - 경추: 👤 (Bust in Silhouette) / 어깨: 🙆 (Person Gesturing OK) / 팔꿈치: 💪 (Flexed Biceps) / 요추: ⚕️ (유지)
 - **프리셋 모달 크래시 수정**: `getPresetCategory`/`getPresetDescription`에 null 안전 처리 추가 — 프리셋 저장 버튼 클릭 시 빈 화면 TypeError 해결
 - **프리셋 저장 정책 개선**: 직종명+카테고리+설명 기반 identity 저장, 유사 프리셋 키워드 매칭, 모듈별 비파괴 병합
+
+### Phase 21: 경추·척추 모듈 품질 개선 (v4.1.0)
+
+- **경추 평가 완료 판정 완화** (`isCervicalAssessmentComplete`): 경추 task가 있는 직업에 대해서만 필드 완성 여부 체크 — 경추와 무관한 직업이 있어도 "완료" 표시 가능
+- **경추 위험요인 의미론 수정** (`RISK_FACTOR_FLAGS`): `warning` tone 4개(heavy_load_present / carry_time_supported / forced_neck_posture_present / cumulative_load_supported)로 한정 — positive/info 진단 지지 플래그가 "업무관련성 위험 요인"으로 혼입되던 문제 해결
+- **파생 플래그 중복 집계 제거**: `mechanical_cervical_load_dominant`를 FLAG_ORDER에서 제외, 종합 배지 전용으로 변경 — 동일 노출이 위험요인 카운트에 두 번 집계되던 문제 제거
+- **isCervicalAssessmentComplete 중복 sync 제거**: 내부 `syncCervicalModuleData` 이중 호출 → `computeCervicalCalc` 단일 호출로 통합
+- **고아 task 자동 정리 (경추)**: `syncCervicalModuleData`에서 삭제된 직업을 참조하는 task 제거; jobs 배열이 임시로 비는 경우 pruning 건너뜀(`shouldPrune` 가드)
+- **고아 task 자동 정리 (척추)**: `SpineEvaluation` useEffect에서 삭제된 직업 참조 task 제거; 의존성 `[jobs[0]?.id]` → `[jobs]`로 확장해 직업 중간 삭제도 감지
+- **프리셋 적용 시 기본 task 교체 (경추·척추)**: `applyToModule`에서 `sharedJobId`가 비어 있는 초기 기본 task를 교체 대상으로 처리 — 프리셋 적용 후 "작업 1"이 잔존하던 문제 해결
+- **경추 프리셋 id 이중 생성 제거**: `applyToModule`의 불필요한 `id: createCervicalTask(...).id` 재할당 삭제
 
 ---
 

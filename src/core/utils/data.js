@@ -585,15 +585,15 @@ export function createTestPatients() {
     { createdAt: '2025-11-10', evaluationDate: '', modules: ['knee', 'spine'] },
     { createdAt: '2025-11-22', evaluationDate: '', modules: ['spine'] },
     { createdAt: '2025-11-28', evaluationDate: '', modules: ['knee'] },
-    { createdAt: '2025-12-02', evaluationDate: '2025-12-15', modules: ['knee', 'spine'] },
+    { createdAt: '2025-12-02', evaluationDate: '2025-12-15', modules: ['knee', 'spine', 'cervical'], jobCount: 2 },
     { createdAt: '2025-12-12', evaluationDate: '', modules: ['spine'] },
     { createdAt: '2025-12-20', evaluationDate: '', modules: ['knee'] },
     { createdAt: '2026-01-05', evaluationDate: '', modules: ['knee'] },
-    { createdAt: '2026-01-14', evaluationDate: '', modules: ['knee', 'spine'] },
+    { createdAt: '2026-01-14', evaluationDate: '', modules: ['knee', 'spine', 'cervical'], jobCount: 1 },
     { createdAt: '2026-01-28', evaluationDate: '', modules: ['spine'] },
     { createdAt: '2026-02-08', evaluationDate: '', modules: ['knee'] },
-    { createdAt: '2026-02-18', evaluationDate: '', modules: ['knee', 'spine'] },
-    { createdAt: '2026-03-05', evaluationDate: '', modules: ['spine'] },
+    { createdAt: '2026-02-18', evaluationDate: '', modules: ['knee', 'spine', 'cervical'], jobCount: 3 },
+    { createdAt: '2026-03-05', evaluationDate: '', modules: ['spine', 'cervical'], jobCount: 2 },
 
     { createdAt: '2025-10-24', evaluationDate: '2025-11-04', modules: ['shoulder'] },
     { createdAt: '2025-11-16', evaluationDate: '', modules: ['shoulder'] },
@@ -602,8 +602,10 @@ export function createTestPatients() {
     { createdAt: '2026-03-12', evaluationDate: '2026-03-25', modules: ['shoulder'] },
     { createdAt: '2025-12-18', evaluationDate: '2026-01-06', modules: ['wrist'] },
     { createdAt: '2026-01-22', evaluationDate: '', modules: ['wrist', 'shoulder'] },
-    { createdAt: '2026-02-27', evaluationDate: '2026-03-18', modules: ['wrist', 'spine'] },
+    { createdAt: '2026-02-27', evaluationDate: '2026-03-18', modules: ['wrist', 'spine', 'cervical'], jobCount: 3 },
     { createdAt: '2026-03-21', evaluationDate: '', modules: ['wrist'] },
+    { createdAt: '2026-04-03', evaluationDate: '2026-04-18', modules: ['cervical'], jobCount: 1 },
+    { createdAt: '2026-04-12', evaluationDate: '', modules: ['shoulder', 'cervical'], jobCount: 2 },
   ];
 
   const names = [
@@ -632,6 +634,12 @@ export function createTestPatients() {
     22: '손목 편위 자세와 진동 공구 사용 시간을 줄이고 교대 배치를 권고합니다.',
     23: '손목 압박과 반복 굴신 작업을 축소하고 보호대 사용을 고려합니다.',
     24: '장시간 반복 손작업은 제한하고 증상 악화 시 즉시 업무 조정이 필요합니다.',
+  };
+
+  const cervicalReturnConsiderationsMap = {
+    7: '40kg 이상 중량물 견착 운반과 장시간 비중립 목 자세 작업을 줄이고 보조 장비 사용을 권고합니다.',
+    23: '경추 굴곡·회전이 결합되는 정적 작업 시간을 줄이고 작업대 높이 조정이 필요합니다.',
+    25: '반복적인 목 신전 자세와 중량물 운반을 교대 배치하고 충분한 휴식 시간을 배정합니다.',
   };
 
   const wristDiagnosisTemplates = [
@@ -914,8 +922,8 @@ export function createTestPatients() {
     };
   };
 
-  const buildSpineTasks = (sharedJobId, preset, idSeed, seed) =>
-    preset.spineTasks.map((task, taskIdx) => ({
+  const buildSpineTasks = (sharedJobId, preset, idSeed, seed, taskCount = preset.spineTasks.length) =>
+    preset.spineTasks.slice(0, taskCount).map((task, taskIdx) => ({
       id: idSeed + taskIdx,
       sharedJobId,
       name: task.name,
@@ -927,6 +935,50 @@ export function createTestPatients() {
       correctionFactor: Number((task.correctionFactor + (((seed + taskIdx) % 2) * 0.1)).toFixed(1)),
       force: 0,
     }));
+
+  const buildCervicalTasks = (sharedJobId, preset, idSeed, seed, taskCount = 2) => {
+    const templates = [
+      {
+        name: '중량물 어깨 운반',
+        exposure_types: ['shoulder_heavy_load'],
+        load_weight_kg: 36 + (seed % 4) * 4,
+        carry_hours_per_shift: 0.4 + (seed % 3) * 0.3,
+        forced_neck_posture: seed % 2 === 0 ? 'yes' : 'no',
+        neck_nonneutral_hours_per_day: '',
+        combined_flexion_rotation_posture: '',
+        precision_work: '',
+      },
+      {
+        name: '상방 주시 및 목 고정 작업',
+        exposure_types: ['awkward_static_neck_load'],
+        load_weight_kg: '',
+        carry_hours_per_shift: '',
+        forced_neck_posture: '',
+        neck_nonneutral_hours_per_day: formatDecimal(1.2 + (seed % 4) * 0.5),
+        combined_flexion_rotation_posture: seed % 3 === 0 ? 'yes' : 'no',
+        precision_work: seed % 2 === 0 ? 'yes' : 'no',
+      },
+      {
+        name: '적재물 정리와 목 회전 확인',
+        exposure_types: ['shoulder_heavy_load', 'awkward_static_neck_load'],
+        load_weight_kg: 18 + (seed % 5) * 5,
+        carry_hours_per_shift: formatDecimal(0.3 + (seed % 4) * 0.2),
+        forced_neck_posture: seed % 2 === 1 ? 'yes' : 'no',
+        neck_nonneutral_hours_per_day: formatDecimal(0.8 + (seed % 3) * 0.4),
+        combined_flexion_rotation_posture: 'yes',
+        precision_work: preset === burdenPresets.precision ? 'yes' : 'no',
+      },
+    ];
+
+    return templates.slice(0, taskCount).map((task, taskIdx) => ({
+      id: idSeed + taskIdx,
+      sharedJobId,
+      ...task,
+      load_weight_kg: task.load_weight_kg === '' ? '' : String(task.load_weight_kg),
+      carry_hours_per_shift: task.carry_hours_per_shift === '' ? '' : String(task.carry_hours_per_shift),
+      notes: taskIdx === 0 ? '테스트 데이터 자동 생성' : '',
+    }));
+  };
 
   const toDateString = (date) => {
     const year = String(date.getFullYear());
@@ -1186,6 +1238,20 @@ export function createTestPatients() {
       }
     }
 
+    if (data.modules.includes('cervical')) {
+      diagnoses.push({
+        id: crypto.randomUUID(),
+        code: idx % 2 === 0 ? 'M50.1' : 'M48.02',
+        name: idx % 2 === 0 ? '경추간판장애' : '경추 척추관 협착',
+        side: '',
+        ...(isCompleteCase ? {
+          confirmedRight: 'confirmed',
+          assessmentRight: idx === 25 ? 'low' : 'high',
+          ...(idx === 25 ? { reasonRight: ['lowBurden'], reasonRightOther: '' } : {}),
+        } : {}),
+      });
+    }
+
     if (data.modules.includes('shoulder')) {
       if (isCompleteCase && idx === 18) {
         diagnoses.push(
@@ -1262,8 +1328,6 @@ export function createTestPatients() {
     }
     patient.data.shared.diagnoses = diagnoses;
 
-    const job1Id = crypto.randomUUID();
-    const job2Id = crypto.randomUUID();
     const injuryDate = new Date(`${data.createdAt}T09:00:00`);
     const job2Period = job2Periods[idx % job2Periods.length];
     const job1Period = job1Periods[idx % job1Periods.length];
@@ -1271,60 +1335,88 @@ export function createTestPatients() {
     const job2Profile = job2Profiles[idx % job2Profiles.length];
     const job1Burden = burdenPresets[job1BurdenKeys[idx % job1BurdenKeys.length]];
     const job2Burden = burdenPresets[job2BurdenKeys[idx % job2BurdenKeys.length]];
-    const job2DurationMonths = job2Period.years * 12 + job2Period.months;
-    const job1DurationMonths = job1Period.years * 12 + job1Period.months;
-    const job2EndDate = injuryDate;
-    const job2StartDate = shiftMonths(job2EndDate, -job2DurationMonths);
-    const job1EndDate = shiftDays(job2StartDate, -1);
-    const job1StartDate = shiftMonths(job1EndDate, -job1DurationMonths);
+    const jobCount = data.jobCount || (idx % 6 === 0 ? 3 : idx % 5 === 0 ? 1 : 2);
+    const legacyJobProfile = job1Profiles[(idx + 7) % job1Profiles.length];
+    const legacyJobPeriod = job1Periods[(idx + 5) % job1Periods.length];
+    const legacyJobBurden = burdenPresets[job1BurdenKeys[(idx + 5) % job1BurdenKeys.length]];
+    const jobInputs = jobCount === 1
+      ? [{ profile: job2Profile, period: job2Period, burden: job2Burden }]
+      : jobCount === 2
+        ? [
+            { profile: job1Profile, period: job1Period, burden: job1Burden },
+            { profile: job2Profile, period: job2Period, burden: job2Burden },
+          ]
+        : [
+            { profile: legacyJobProfile, period: legacyJobPeriod, burden: legacyJobBurden },
+            { profile: job1Profile, period: job1Period, burden: job1Burden },
+            { profile: job2Profile, period: job2Period, burden: job2Burden },
+          ];
 
-    patient.data.shared.jobs = [
-      {
-        id: job1Id,
-        jobName: job1Profile.jobName,
+    const jobRows = [];
+    let nextEndDate = injuryDate;
+    for (let jobIndex = jobInputs.length - 1; jobIndex >= 0; jobIndex -= 1) {
+      const input = jobInputs[jobIndex];
+      const durationMonths = input.period.years * 12 + input.period.months;
+      const startDate = shiftMonths(nextEndDate, -durationMonths);
+      jobRows[jobIndex] = {
+        id: crypto.randomUUID(),
+        jobName: input.profile.jobName,
         presetId: null,
-        startDate: toDateString(job1StartDate),
-        endDate: toDateString(job1EndDate),
+        startDate: toDateString(startDate),
+        endDate: toDateString(nextEndDate),
         workPeriodOverride: '',
-        workDaysPerYear: job1Profile.workDaysPerYear,
-      },
-      {
-        id: job2Id,
-        jobName: job2Profile.jobName,
-        presetId: null,
-        startDate: toDateString(job2StartDate),
-        endDate: toDateString(job2EndDate),
-        workPeriodOverride: '',
-        workDaysPerYear: job2Profile.workDaysPerYear,
-      },
-    ];
+        workDaysPerYear: input.profile.workDaysPerYear,
+        burden: input.burden,
+      };
+      nextEndDate = shiftDays(startDate, -1);
+    }
+
+    patient.data.shared.jobs = jobRows.map(({ burden, ...job }) => job);
 
     if (data.modules.includes('knee')) {
       patient.data.modules.knee = {
-        jobExtras: [
-          buildKneeExtra(job1Id, job1Burden, 0, idx),
-          buildKneeExtra(job2Id, job2Burden, 1, idx + 1),
-        ],
+        jobExtras: jobRows.map((job, jobIndex) =>
+          buildKneeExtra(job.id, job.burden, Math.min(jobIndex, 1), idx + jobIndex)
+        ),
         returnConsiderations: kneeReturnConsiderationsMap[idx] || '',
       };
     }
 
     if (data.modules.includes('shoulder')) {
       patient.data.modules.shoulder = {
-        jobExtras: [
-          buildShoulderExtra(job1Id, job1Burden, 0, idx),
-          buildShoulderExtra(job2Id, job2Burden, 1, idx + 2),
-        ],
+        jobExtras: jobRows.map((job, jobIndex) =>
+          buildShoulderExtra(job.id, job.burden, Math.min(jobIndex, 1), idx + jobIndex + 2)
+        ),
         returnConsiderations: shoulderReturnConsiderationsMap[idx] || '',
       };
     }
 
     if (data.modules.includes('spine')) {
       patient.data.modules.spine = {
-        tasks: [
-          ...buildSpineTasks(job1Id, job1Burden, idx * 100 + 1, idx),
-          ...buildSpineTasks(job2Id, job2Burden, idx * 100 + 21, idx + 1),
-        ],
+        tasks: jobRows.flatMap((job, jobIndex) =>
+          buildSpineTasks(
+            job.id,
+            job.burden,
+            idx * 100 + jobIndex * 20 + 1,
+            idx + jobIndex,
+            ((idx + jobIndex) % 3) + 1
+          )
+        ),
+      };
+    }
+
+    if (data.modules.includes('cervical')) {
+      patient.data.modules.cervical = {
+        tasks: jobRows.flatMap((job, jobIndex) =>
+          buildCervicalTasks(
+            job.id,
+            job.burden,
+            idx * 1000 + jobIndex * 20 + 1,
+            idx + jobIndex,
+            ((idx + jobIndex + 1) % 3) + 1
+          )
+        ),
+        returnConsiderations: cervicalReturnConsiderationsMap[idx] || '',
       };
     }
 

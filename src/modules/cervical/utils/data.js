@@ -1,11 +1,5 @@
 import { getDiagnosisModuleHint } from '../../../core/utils/diagnosisMapping';
 
-export const CERVICAL_SUBTYPE_LABELS = {
-  cervical_disc_herniation: '경추간판 탈출증',
-  cervical_stenosis: '경추 협착증',
-  cervical_other: '경추 질환',
-};
-
 export const EXPOSURE_TYPE_OPTIONS = [
   { value: 'shoulder_heavy_load', label: '어깨에 무거운 하중 운반' },
   { value: 'awkward_static_neck_load', label: '장시간 비중립·정적 목 부하' },
@@ -19,51 +13,32 @@ function serialize(value) {
   return JSON.stringify(value || null);
 }
 
-function clonePresetValue(value) {
-  return Array.isArray(value) ? [...value] : value;
+function normalizeExposureTypes(exposureTypes = []) {
+  return (exposureTypes || []).filter(value =>
+    EXPOSURE_TYPE_OPTIONS.some(option => option.value === value)
+  );
 }
 
-export function inferCervicalSubtypeFromDiagnosis(diagnosis = {}) {
-  const code = String(diagnosis.code || '').trim().toUpperCase();
-  const name = String(diagnosis.name || '').trim();
-
-  if (/^M50/.test(code) || /경추.*탈출|목디스크|cervical.*disc|disc herniation/i.test(name)) {
-    return 'cervical_disc_herniation';
-  }
-
-  if (/협착|stenosis|척수병|myelopathy/i.test(name)) {
-    return 'cervical_stenosis';
-  }
-
-  return 'cervical_other';
-}
-
-export function createCervicalDiagnosisEntry(diagnosis = {}) {
+export function createCervicalTask(index = 0, sharedJobId = '') {
   return {
-    diagnosisId: diagnosis.id || '',
-    main_task_name: '',
+    id: Date.now() + Math.random(),
+    sharedJobId,
+    name: `작업 ${index + 1}`,
     exposure_types: [],
     load_weight_kg: '',
     carry_hours_per_shift: '',
     forced_neck_posture: '',
-    neck_flexion_hours_per_day: '',
+    neck_nonneutral_hours_per_day: '',
     combined_flexion_rotation_posture: '',
     precision_work: '',
     notes: '',
   };
 }
 
-export function createCervicalJobEvaluation(sharedJobId = '') {
-  return {
-    sharedJobId,
-    diagnosisEntries: [],
-  };
-}
-
 export function createCervicalModuleData() {
   return {
     returnConsiderations: '',
-    jobEvaluations: [],
+    tasks: [],
   };
 }
 
@@ -72,72 +47,42 @@ export function isCervicalDiagnosis(diag) {
   return hint?.moduleId === 'cervical';
 }
 
-function normalizeDiagnosisEntry(existingEntry, diagnosis) {
-  const baseEntry = {
-    ...createCervicalDiagnosisEntry(diagnosis),
-    ...(existingEntry || {}),
-    diagnosisId: diagnosis.id,
+export function normalizeCervicalTask(task = {}, index = 0, sharedJobId = '') {
+  const normalized = {
+    ...createCervicalTask(index, sharedJobId),
+    ...(task || {}),
   };
 
-  baseEntry.exposure_types = (baseEntry.exposure_types || []).filter(value =>
-    EXPOSURE_TYPE_OPTIONS.some(option => option.value === value)
-  );
+  normalized.sharedJobId = normalized.sharedJobId || sharedJobId;
+  normalized.exposure_types = normalizeExposureTypes(normalized.exposure_types);
 
-  return baseEntry;
+  return normalized;
 }
 
-export function syncCervicalModuleData(moduleData = {}, jobs = [], diagnoses = []) {
-  const cervicalDiagnoses = (diagnoses || []).filter(isCervicalDiagnosis);
-  const existingJobMap = new Map(
-    (moduleData.jobEvaluations || []).map(jobEvaluation => [jobEvaluation.sharedJobId, jobEvaluation])
-  );
-
-  const nextJobEvaluations = (jobs || []).map(job => {
-    const existingJobEvaluation = existingJobMap.get(job.id);
-    const pendingPreset = existingJobEvaluation?._pendingPreset;
-    const existingEntryMap = new Map(
-      (existingJobEvaluation?.diagnosisEntries || []).map(entry => [entry.diagnosisId, entry])
-    );
-
-    const diagnosisEntries = cervicalDiagnoses.map(diagnosis => {
-      const existingEntry = existingEntryMap.get(diagnosis.id);
-      const entry = normalizeDiagnosisEntry(existingEntry, diagnosis);
-
-      if (!existingEntry && pendingPreset) {
-        for (const key of Object.keys(pendingPreset)) {
-          if (key in entry && pendingPreset[key] !== undefined) {
-            entry[key] = clonePresetValue(pendingPreset[key]);
-          }
-        }
-      }
-
-      return entry;
-    });
-
-    const { _pendingPreset, ...restJobEval } = (existingJobEvaluation || {});
-    return {
-      ...createCervicalJobEvaluation(job.id),
-      ...restJobEval,
-      sharedJobId: job.id,
-      diagnosisEntries,
-    };
+export function syncCervicalModuleData(moduleData = {}, jobs = []) {
+  const firstJobId = jobs[0]?.id || '';
+  const jobIds = new Set(jobs.map(job => job.id).filter(Boolean));
+  const shouldPrune = jobIds.size > 0;
+  const rawTasks = (moduleData.tasks || []).filter(task => {
+    if (!shouldPrune) return true;
+    if (!task?.sharedJobId) return true;
+    return jobIds.has(task.sharedJobId);
   });
+  const normalizedTasks = rawTasks.map((task, index) =>
+    normalizeCervicalTask(task, index, firstJobId)
+  );
 
   const nextModuleData = {
     returnConsiderations: moduleData?.returnConsiderations || '',
-    jobEvaluations: nextJobEvaluations,
+    tasks: normalizedTasks,
   };
 
   const currentComparable = {
     returnConsiderations: moduleData?.returnConsiderations || '',
-    jobEvaluations: (moduleData.jobEvaluations || []).map(jobEvaluation => ({
-      ...jobEvaluation,
-      diagnosisEntries: (jobEvaluation.diagnosisEntries || []).map(entry => ({ ...entry })),
-    })),
+    tasks: (moduleData.tasks || []).map(task => ({ ...task })),
   };
 
   return {
-    cervicalDiagnoses,
     changed: serialize(currentComparable) !== serialize(nextModuleData),
     moduleData: nextModuleData,
   };

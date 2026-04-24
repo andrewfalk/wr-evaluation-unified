@@ -3,6 +3,7 @@ import JSZip from 'jszip';
 import { getModule } from '../moduleRegistry';
 import { getStatusText, getReasonText, getSideText } from '../../modules/knee/utils/calculations';
 import { getBk2101RepetitionPerHour } from '../../modules/elbow/utils/calculations';
+import { EXPOSURE_TYPE_LABELS as CERVICAL_EXPOSURE_TYPE_LABELS } from '../../modules/cervical/utils/data';
 import { convertTimeToSeconds } from '../../modules/spine/utils/calculations';
 import { thresholds } from '../../modules/spine/utils/thresholds';
 import { AUX_LABELS } from '../../modules/knee/utils/data';
@@ -147,22 +148,29 @@ function buildCervicalExposureText(calc) {
 
   (calc?.jobSummaries || []).forEach(jobSummary => {
     text += `- ${jobSummary.jobName || '-'}\n`;
-    (jobSummary.diagnosisSummaries || []).forEach(summary => {
-      const riskFactorText = summary.riskFactorItems?.length > 0
-        ? summary.riskFactorItems.map(flag => flag.label).join(', ')
-        : '확인된 위험 요인 없음';
+    const riskFactorText = jobSummary.riskFactorItems?.length > 0
+      ? jobSummary.riskFactorItems.map(flag => flag.label).join(', ')
+      : '확인된 위험 요인 없음';
 
-      if (summary.missingFields?.length > 0) {
-        text += `  입력 누락: ${summary.missingFields.join(', ')}\n`;
-      }
-      text += '  분석 정리:\n';
-      text += `    ${(summary.narrative || '-').split('\n').join('\n    ')}\n`;
-      text += `    업무관련성 위험 요인: ${riskFactorText}\n`;
-      text += `    ** 종합평가 : ${summary.conclusionText}\n`;
-    });
+    if (jobSummary.diagnosisText) {
+      text += `  적용 상병: ${jobSummary.diagnosisText}\n`;
+    }
+    if (jobSummary.missingFields?.length > 0) {
+      text += `  입력 누락: ${jobSummary.missingFields.join(', ')}\n`;
+    }
+    text += '  분석 정리:\n';
+    text += `    ${(jobSummary.narrative || '-').split('\n').join('\n    ')}\n`;
+    text += `    업무관련성 위험 요인: ${riskFactorText}\n`;
+    text += `    ** 종합평가 : ${jobSummary.conclusionText}\n`;
   });
 
   return text;
+}
+
+function formatCervicalExposureTypes(exposureTypes = []) {
+  return (exposureTypes || [])
+    .map(type => CERVICAL_EXPOSURE_TYPE_LABELS[type] || type)
+    .join('|');
 }
 
 function buildExposureSection(shared, modules, activeModules) {
@@ -484,6 +492,8 @@ const BATCH_HEADERS = [
   '직종명', '시작일', '종료일', '근무기간(년)', '근무기간(개월)',
   '중량물(kg)', '쪼그려앉기(분)', '계단오르내리기', '무릎비틀기', '출발정지반복', '좁은공간', '무릎접촉충격', '점프착지',
   '오버헤드(시간/일)', '반복중간(시간/일)', '반복빠름(시간/일)', '중량물횟수(회/일)', '중량물시간(초/회)', '진동(시간/일)',
+  '경추_작업명', '경추_노출유형', '경추_하중(kg)', '경추_교대당운반시간', '경추_부자연스러운목자세강제',
+  '경추_비중립정적자세시간', '경추_굴곡신전회전측굴동시발생', '경추_고도의정밀작업', '경추_메모',
   '팔꿈치_시간적선후관계_최근작업변화', '팔꿈치_시간적선후관계_작업변화시점', '팔꿈치_시간적선후관계_증상발생까지기간', '팔꿈치_시간적선후관계_휴식시호전',
   '팔꿈치_BK유형', '팔꿈치_BK선택방식', '팔꿈치_문제작업명', '팔꿈치_핵심동작연결성', '팔꿈치_공통핵심노출유형', '팔꿈치_반복동작정도',
   '팔꿈치_1일노출시간', '팔꿈치_하루작업비중', '팔꿈치_주당수행일수', '팔꿈치_작업형태', '팔꿈치_휴식분포',
@@ -516,6 +526,7 @@ function generateBatchRows(patientList) {
     const jobs = shared.jobs || [];
     const kneeExtras = modules.knee?.jobExtras || [];
     const shoulderExtras = modules.shoulder?.jobExtras || [];
+    const cervicalTasks = modules.cervical?.tasks || [];
     const spineTasks = modules.spine?.tasks || [];
     const elbowTemporal = modules.elbow?.temporalSequence || modules.elbow?.temporalRelation || {};
     const elbowJobEvaluations = modules.elbow?.jobEvaluations || [];
@@ -530,6 +541,7 @@ function generateBatchRows(patientList) {
     if (jobs.length > 0) {
       for (const job of jobs) {
         const jobSpineTasks = spineTasks.filter(task => (task.sharedJobId || firstJobId) === job.id);
+        const jobCervicalTasks = cervicalTasks.filter(task => (task.sharedJobId || firstJobId) === job.id);
         const kneeExtra = kneeExtras.find(extra => extra.sharedJobId === job.id) || null;
         const elbowJobEvaluation = elbowJobEvaluations.find(item => item.sharedJobId === job.id);
         const wristJobEvaluation = wristJobEvaluations.find(item => item.sharedJobId === job.id);
@@ -548,14 +560,26 @@ function generateBatchRows(patientList) {
           }
         });
 
-        if (jobSpineTasks.length > 0) {
-          jobSpineTasks.forEach(task => jobTaskPairs.push({ job, task, kneeExtra }));
-        } else {
-          jobTaskPairs.push({ job, task: null, kneeExtra });
+        const pairCount = Math.max(jobSpineTasks.length, jobCervicalTasks.length, 1);
+        for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
+          jobTaskPairs.push({
+            job,
+            task: jobSpineTasks[pairIndex] || null,
+            cervicalTask: jobCervicalTasks[pairIndex] || null,
+            kneeExtra,
+          });
         }
       }
     } else {
-      spineTasks.forEach(task => jobTaskPairs.push({ job: null, task, kneeExtra: null }));
+      const pairCount = Math.max(spineTasks.length, cervicalTasks.length, 1);
+      for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
+        jobTaskPairs.push({
+          job: null,
+          task: spineTasks[pairIndex] || null,
+          cervicalTask: cervicalTasks[pairIndex] || null,
+          kneeExtra: null,
+        });
+      }
     }
 
     const rowCount = Math.max(1, diagnoses.length, jobTaskPairs.length, elbowPairs.length, wristPairs.length);
@@ -569,6 +593,7 @@ function generateBatchRows(patientList) {
       const diag = elbowPair?.diagnosis || wristPair?.diagnosis || diagnoses[index];
       const job = elbowPair?.job || wristPair?.job || pair?.job;
       const task = pair?.task;
+      const cervicalTask = pair?.cervicalTask;
       const kneeExtra = job ? (pair?.kneeExtra || kneeExtras.find(extra => extra.sharedJobId === job.id) || null) : pair?.kneeExtra;
       const shoulderExtra = job ? shoulderExtras.find(extra => extra.sharedJobId === job.id) : null;
       const elbowEntry = elbowPair?.entry || null;
@@ -622,6 +647,16 @@ function generateBatchRows(patientList) {
       row.push(shoulderExtra?.heavyLoadCount ?? '');
       row.push(shoulderExtra?.heavyLoadSeconds ?? '');
       row.push(shoulderExtra?.vibrationHours ?? '');
+
+      row.push(cervicalTask?.name || '');
+      row.push(formatCervicalExposureTypes(cervicalTask?.exposure_types || []));
+      row.push(cervicalTask?.load_weight_kg || '');
+      row.push(cervicalTask?.carry_hours_per_shift || '');
+      row.push(cervicalTask?.forced_neck_posture === 'yes' ? '예' : cervicalTask?.forced_neck_posture === 'no' ? '아니오' : '');
+      row.push(cervicalTask?.neck_nonneutral_hours_per_day || '');
+      row.push(cervicalTask?.combined_flexion_rotation_posture === 'yes' ? '예' : cervicalTask?.combined_flexion_rotation_posture === 'no' ? '아니오' : '');
+      row.push(cervicalTask?.precision_work === 'yes' ? '예' : cervicalTask?.precision_work === 'no' ? '아니오' : '');
+      row.push(cervicalTask?.notes || '');
 
       row.push(isFirst ? (elbowTemporal.recent_task_change || '') : '');
       row.push(isFirst ? (elbowTemporal.task_change_date || '') : '');

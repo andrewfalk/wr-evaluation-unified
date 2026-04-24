@@ -263,19 +263,20 @@ function genCervicalBurdenSection(calc) {
 
   (calc.jobSummaries || []).forEach((jobSummary, index) => {
     text += `- 직력${index + 1}: ${jobSummary.jobName || '-'}\n`;
-    (jobSummary.diagnosisSummaries || []).forEach(summary => {
-      const riskFactorText = summary.riskFactorItems?.length > 0
-        ? summary.riskFactorItems.map(flag => flag.label).join(', ')
-        : '확인된 위험 요인 없음';
+    const riskFactorText = jobSummary.riskFactorItems?.length > 0
+      ? jobSummary.riskFactorItems.map(flag => flag.label).join(', ')
+      : '확인된 위험 요인 없음';
 
-      if (summary.missingFields.length > 0) {
-        text += `    입력 누락: ${summary.missingFields.join(', ')}\n`;
-      }
-      text += '    분석 정리:\n';
-      text += `      ${summary.narrative.split('\n').join('\n      ')}\n`;
-      text += `      업무관련성 위험 요인: ${riskFactorText}\n`;
-      text += `      ** 종합평가 : ${summary.conclusionText}\n`;
-    });
+    if (jobSummary.diagnosisText) {
+      text += `    적용 상병: ${jobSummary.diagnosisText}\n`;
+    }
+    if (jobSummary.missingFields.length > 0) {
+      text += `    입력 누락: ${jobSummary.missingFields.join(', ')}\n`;
+    }
+    text += '    분석 정리:\n';
+    text += `      ${jobSummary.narrative.split('\n').join('\n      ')}\n`;
+    text += `      업무관련성 위험 요인: ${riskFactorText}\n`;
+    text += `      ** 종합평가 : ${jobSummary.conclusionText}\n`;
   });
 
   return text;
