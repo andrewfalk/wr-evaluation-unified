@@ -1,8 +1,8 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 4.1.0
-> **Last Updated:** 2026-04-24
-> **Status:** MVP 개발 완료 / Vercel 배포 완료
+> **Version:** 4.2.0
+> **Last Updated:** 2026-04-25
+> **Status:** MVP 개발 완료 / Vercel 배포 완료 / 아키텍처 리팩터링 진행 중
 
 ---
 
@@ -1359,4 +1359,62 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 | electron | 21.4.4 |
 | xlsx | 0.18.5 |
 | html2pdf.js | 0.10.1 |
+
+---
+
+## 변경 이력
+
+### v4.2.0 (준비 중) — 아키텍처 리팩터링
+
+**App.jsx 대규모 분리 리팩터링**
+- **목표**: Monolithic App.jsx를 컴포넌트와 훅으로 분리하여 유지보수성·테스트 가능성 향상
+- **새로운 UI 컴포넌트** (`src/core/components/`)
+  - `LandingScreen.jsx`: 홈 화면 및 환자 목록 표시
+  - `IntakeWizard.jsx`: 신규 환자 생성 3단계 위자드 (기본정보 → 상병 입력 → 모듈 선택)
+  - `PatientSidebar.jsx`: 환자 목록 사이드바 (검색/필터/정렬)
+  - `MainHeader.jsx`: 상단 헤더 (환자 정보, 설정, 내보내기 도구)
+  - `StepContent.jsx`: 활성 스텝의 콘텐츠 렌더러 (공유/모듈별 스텝 분기)
+  - `StepIndicator.jsx`: 위자드 진행 표시기 (현재 스텝 강조)
+  - `SaveLoadModals.jsx`: 저장/로드 모달 (SaveModal, LoadModal 내보내기)
+- **새로운 사용자 정의 훅** (`src/core/hooks/`)
+  - `useEMRIntegration.js`: EMR 통합 상태 및 동기화 관리
+  - `useExportHandlers.js`: 엑셀/PDF/HTML 내보내기 로직 통합
+  - `useIntakeWizard.js`: 신규 환자 위자드 상태 및 검증
+  - `usePatientCrud.js`: 환자 생성/조회/수정/삭제 작업
+  - `usePresetManagement.js`: 프리셋 로드/저장/삭제 및 캐싱
+  - `useStepNavigation.js`: 스텝 네비게이션 및 진행 상태 관리
+  - `useWorkspacePersistence.js`: 워크스페이스 자동 저장/복구
+- **새로운 유틸리티** (`src/core/utils/`)
+  - `steps.js`: `buildSteps(activeModules)` 함수로 활성 모듈에 따른 동적 스텝 생성
+- **개선 사항**
+  - App.jsx 파일 크기 1500+ 줄 → 200줄 이하로 축소
+  - 로직별 관심사 분리로 코드 이해도·유지보수성 향상
+  - 개별 훅·컴포넌트 단위 테스트 작성 가능
+  - 번들 코드 스플릿 최적화 기반 마련
+
+**경추 모듈 계산 로직 최적화** (`src/modules/cervical/`)
+- 완료 판정 완화: task가 있는 직업에 대해서만 필드 완성 체크
+- RISK_FACTOR_FLAGS를 warning tone 4개로 한정 (positive/info 혼입 제거)
+- 파생 플래그 중복 집계 제거로 성능 향상
+- 고아 task 자동 정리 (jobExtras에서 orphan 제거)
+- 프리셋 적용 시 sharedJobId 없는 기본 task 교체로 안정성 개선
+- 컴포넌트 재구성: ExposureForm/DiseaseSpecificFields → TaskManager/TaskEditor (spine 패턴 동일화)
+
+### v4.1.0 (2026-04-24) — 경추·척추 품질 개선 + 문서 업데이트
+
+**경추 모듈 개선**
+- 완료 판정 완화: task가 있는 직업에만 필드 완성 체크 적용
+- RISK_FACTOR_FLAGS 정규화: warning tone 4개로 한정
+- 파생 플래그 중복 집계 제거
+- 고아 task 자동 정리 (직업 삭제 시 고아 task 정리)
+- 프리셋 적용 안정성: sharedJobId 없는 기본 task 자동 교체
+
+**척추 모듈 개선**
+- isCervicalAssessmentComplete 중복 syncCervicalModuleData 호출 제거
+- 고아 task 자동 정리 useEffect 추가
+
+**문서 업데이트**
+- PRD.md: 데이터 모델 및 디렉토리 구조 최신화
+- README.md: 빌드/실행 명령어 및 모듈 추가 절차 명확화
+- CLAUDE.md: 지원 모듈 목록 확대 (손목 모듈 추가)
 | jszip | 3.10.1 |

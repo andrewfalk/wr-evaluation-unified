@@ -189,13 +189,14 @@ function formatExposureTypeText(task = {}) {
 
 function computeTaskSignals(task = {}, job = {}) {
   const exposureTypes = task.exposure_types || [];
-  const cumulativeKgHours = getTaskCumulativeKgHours(task, job);
   const awkwardHours = toNumber(task.neck_nonneutral_hours_per_day);
   const representativeHours = getTaskRepresentativeHours(task);
 
   const heavy_load_present = exposureTypes.includes('shoulder_heavy_load') && toNumber(task.load_weight_kg) >= 40;
   const carry_time_supported = exposureTypes.includes('shoulder_heavy_load') && toNumber(task.carry_hours_per_shift) >= 0.5;
   const forced_neck_posture_present = exposureTypes.includes('shoulder_heavy_load') && task.forced_neck_posture === 'yes';
+  const bk2109CoreTask = heavy_load_present && carry_time_supported && forced_neck_posture_present;
+  const cumulativeKgHours = bk2109CoreTask ? getTaskCumulativeKgHours(task, job) : 0;
   const awkward_supportive_task = exposureTypes.includes('awkward_static_neck_load')
     && awkwardHours >= 1.5
     && (task.combined_flexion_rotation_posture === 'yes' || task.precision_work === 'yes');
@@ -204,6 +205,7 @@ function computeTaskSignals(task = {}, job = {}) {
     heavy_load_present,
     carry_time_supported,
     forced_neck_posture_present,
+    bk2109CoreTask,
     awkward_supportive_task,
     cumulativeKgHours,
     awkwardHours,
@@ -265,7 +267,11 @@ function generateJobNarrative({ job, taskSummaries, aggregate }) {
       lines.push(` - 하중 : ${hasValue(taskSummary.load_weight_kg) ? `${formatNumber(taskSummary.load_weight_kg)}kg` : '-'}`);
       lines.push(` - 한 작업 교대(shift)당 노출 시간 : ${formatHours(taskSummary.carry_hours_per_shift)}`);
       lines.push(` - 운반 시 목의 부자연스러운 자세가 강제 : ${labelValue(taskSummary.forced_neck_posture, YES_NO_LABELS)}`);
-      lines.push(` - 작업별 누적 총부하량 : ${formatNumber(taskSummary.cumulativeKgHours)} kg·h`);
+      lines.push(
+        taskSummary.signals.bk2109CoreTask
+          ? ` - 작업별 누적 총부하량 : ${formatNumber(taskSummary.cumulativeKgHours)} kg·h`
+          : ' - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정'
+      );
     }
 
     if ((taskSummary.exposure_types || []).includes('awkward_static_neck_load')) {
