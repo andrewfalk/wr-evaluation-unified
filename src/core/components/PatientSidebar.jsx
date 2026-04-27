@@ -1,6 +1,129 @@
-import { getModule } from '../moduleRegistry';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { getAllModules, getModule } from '../moduleRegistry';
 import { isPatientComplete } from '../utils/patientCompletion';
 import { formatBirthDate } from '../utils/data';
+
+const DEFAULT_SORT_DIRECTION = {
+  default: 'asc',
+  name: 'asc',
+  patientNo: 'asc',
+  birthDate: 'asc',
+  registrationDate: 'desc',
+  evaluationDate: 'desc',
+};
+
+const ADVANCED_FILTER_DEFAULTS = {
+  moduleFilter: 'all',
+  jobFilter: '',
+  registrationFrom: '',
+  registrationTo: '',
+  completionFrom: '',
+  completionTo: '',
+};
+
+const DATE_INPUT_MIN = '1900-01-01';
+const DATE_INPUT_MAX = '2099-12-31';
+
+function formatShortDate(value) {
+  if (!value) return '-';
+  return String(value).slice(0, 10);
+}
+
+function JobFilterCombobox({ patients, value, onChange }) {
+  const [showList, setShowList] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const containerRef = useRef(null);
+  const itemRefs = useRef([]);
+
+  const allJobNames = useMemo(() => {
+    const names = new Set();
+    patients.forEach(p => {
+      (p.data?.shared?.jobs || []).forEach(j => {
+        const n = (j.jobName || '').trim();
+        if (n) names.add(n);
+      });
+    });
+    return [...names].sort((a, b) => a.localeCompare(b, 'ko'));
+  }, [patients]);
+
+  const suggestions = useMemo(() => {
+    if (!value.trim()) return [];
+    const q = value.trim().toLowerCase();
+    return allJobNames.filter(n => n.toLowerCase().includes(q)).slice(0, 10);
+  }, [allJobNames, value]);
+
+  useEffect(() => {
+    const handleClick = e => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setShowList(false);
+        setActiveIndex(-1);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  useEffect(() => {
+    if (activeIndex >= 0) itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex]);
+
+  const handleChange = e => {
+    onChange(e.target.value);
+    setActiveIndex(-1);
+    setShowList(true);
+  };
+
+  const handleKeyDown = e => {
+    if (!showList || suggestions.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex(i => Math.min(i + 1, suggestions.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex(i => Math.max(i - 1, 0));
+    } else if (e.key === 'Enter' && activeIndex >= 0) {
+      e.preventDefault();
+      onChange(suggestions[activeIndex]);
+      setShowList(false);
+      setActiveIndex(-1);
+    } else if (e.key === 'Escape') {
+      setShowList(false);
+      setActiveIndex(-1);
+    }
+  };
+
+  const visible = showList && suggestions.length > 0;
+
+  return (
+    <div className="search-container" ref={containerRef}>
+      <input
+        type="search"
+        placeholder="직종명 입력..."
+        value={value}
+        onChange={handleChange}
+        onFocus={() => { if (suggestions.length) setShowList(true); }}
+        onKeyDown={handleKeyDown}
+        aria-autocomplete="list"
+        aria-expanded={visible}
+      />
+      {visible && (
+        <div className="search-results">
+          {suggestions.map((name, i) => (
+            <div
+              key={name}
+              ref={el => { itemRefs.current[i] = el; }}
+              className={`search-item${i === activeIndex ? ' is-active' : ''}`}
+              onMouseEnter={() => setActiveIndex(i)}
+              onClick={() => { onChange(name); setShowList(false); setActiveIndex(-1); }}
+            >
+              <div className="search-item-name">{name}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function PatientSidebar({
   showSidebar,
@@ -8,12 +131,8 @@ export function PatientSidebar({
   patients,
   displayPatients,
   activeId,
-  searchQuery,
-  onSearchChange,
-  statusFilter,
-  onStatusFilterChange,
-  sortKey,
-  onSortKeyChange,
+  filters,
+  setFilters,
   selectedIds,
   setSelectedIds,
   onAddPatient,
@@ -22,22 +141,80 @@ export function PatientSidebar({
   onRemovePatient,
   onRemoveSelectedPatients,
 }) {
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const allModules = useMemo(() => getAllModules(), []);
+
+  const {
+    searchQuery = '',
+    statusFilter = 'all',
+    moduleFilter = 'all',
+    jobFilter = 'all',
+    registrationFrom = '',
+    registrationTo = '',
+    completionFrom = '',
+    completionTo = '',
+    sortKey = 'default',
+    sortDirection = 'asc',
+  } = filters || {};
+
+  const updateFilter = (key, value, { keepSelection = false } = {}) => {
+    setFilters(prev => ({ ...prev, [key]: value }));
+    if (!keepSelection) setSelectedIds(new Set());
+  };
+
+  const handleSortKeyChange = (value) => {
+    setFilters(prev => ({
+      ...prev,
+      sortKey: value,
+      sortDirection: DEFAULT_SORT_DIRECTION[value] || 'asc',
+    }));
+  };
+
+  const toggleSortDirection = () => {
+    updateFilter('sortDirection', sortDirection === 'desc' ? 'asc' : 'desc', { keepSelection: true });
+  };
+
+  const resetAdvancedFilters = () => {
+    setFilters(prev => ({ ...prev, ...ADVANCED_FILTER_DEFAULTS }));
+    setSelectedIds(new Set());
+  };
+
+  const activeAdvancedFilterCount = [
+    moduleFilter !== 'all',
+    Boolean(jobFilter.trim()),
+    Boolean(registrationFrom),
+    Boolean(registrationTo),
+    Boolean(completionFrom),
+    Boolean(completionTo),
+  ].filter(Boolean).length;
+
+  const hasVisibleFilter = searchQuery.trim() || statusFilter !== 'all' || activeAdvancedFilterCount > 0;
+
   return (
     <>
       {showSidebar && <div className="sidebar-overlay" onClick={onClose} />}
 
       <div className={`sidebar ${showSidebar ? 'sidebar-open' : ''}`}>
         <div className="sidebar-header">
-          <h2>환자 목록 ({(searchQuery.trim() || statusFilter !== 'all') ? `${displayPatients.length}/${patients.length}` : patients.length})</h2>
+          <h2>환자 목록 ({hasVisibleFilter ? `${displayPatients.length}/${patients.length}` : patients.length})</h2>
           <div className="sidebar-actions">
             <button className="btn btn-primary btn-sm" onClick={onAddPatient} title="새 환자 추가">+ 추가</button>
             <button className="btn btn-info btn-sm" onClick={onShowBatchImport} title="엑셀 일괄입력">일괄</button>
           </div>
         </div>
+
         <div className="sidebar-filter">
-          <input type="search" placeholder="검색 (이름, 진단)" value={searchQuery} onChange={onSearchChange} />
+          <input
+            type="search"
+            placeholder="검색..."
+            title="이름, 등록번호, 진단, 직종 검색"
+            value={searchQuery}
+            onChange={e => updateFilter('searchQuery', e.target.value)}
+          />
+
           <div className="sidebar-selection-row">
-            <input type="checkbox"
+            <input
+              type="checkbox"
               checked={displayPatients.length > 0 && displayPatients.every(p => selectedIds.has(p.id))}
               onChange={e => {
                 setSelectedIds(prev => {
@@ -50,44 +227,132 @@ export function PatientSidebar({
             <span className="sidebar-selection-label">전체선택{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}</span>
             {selectedIds.size > 0 && <button className="btn btn-danger btn-xs sidebar-selection-delete" onClick={onRemoveSelectedPatients}>삭제</button>}
           </div>
+
           <div className="sidebar-filter-row">
-            <select value={statusFilter} onChange={onStatusFilterChange}>
-              <option value="all">전체</option><option value="complete">완료</option><option value="incomplete">미완료</option>
+            <select value={statusFilter} onChange={e => updateFilter('statusFilter', e.target.value)}>
+              <option value="all">전체</option>
+              <option value="complete">완료</option>
+              <option value="incomplete">미완료</option>
             </select>
-            <select value={sortKey} onChange={onSortKeyChange}>
-              <option value="default">입력순</option><option value="name">이름순</option><option value="birthDate">생년월일순</option><option value="evaluationDate">평가일순</option>
+            <select value={sortKey} onChange={e => handleSortKeyChange(e.target.value)}>
+              <option value="default">입력순</option>
+              <option value="name">이름순</option>
+              <option value="patientNo">등록번호순</option>
+              <option value="birthDate">생년월일순</option>
+              <option value="registrationDate">등록일순</option>
+              <option value="evaluationDate">완료일순</option>
             </select>
+            <button
+              type="button"
+              className="sort-dir-btn"
+              onClick={toggleSortDirection}
+              title={sortDirection === 'desc' ? '내림차순' : '오름차순'}
+            >
+              {sortDirection === 'desc' ? '▼' : '▲'}
+            </button>
           </div>
+
+          <button
+            type="button"
+            className="filter-toggle-btn"
+            onClick={() => setShowAdvancedFilters(v => !v)}
+          >
+            필터 {showAdvancedFilters ? '▲' : '▼'}
+            {activeAdvancedFilterCount > 0 && <span className="active-filter-badge">{activeAdvancedFilterCount}</span>}
+          </button>
+
+          {showAdvancedFilters && (
+            <div className="sidebar-filter-advanced">
+              <label className="sidebar-filter-field">
+                <span>모듈</span>
+                <select value={moduleFilter} onChange={e => updateFilter('moduleFilter', e.target.value)}>
+                  <option value="all">전체 모듈</option>
+                  {allModules.map(module => (
+                    <option key={module.id} value={module.id}>{module.name}</option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="sidebar-filter-field">
+                <span>직종</span>
+                <JobFilterCombobox
+                  patients={patients}
+                  value={jobFilter}
+                  onChange={v => updateFilter('jobFilter', v)}
+                />
+              </div>
+
+              <div className="sidebar-date-filter">
+                <span>등록일</span>
+                <div className="sidebar-date-row">
+                  <input type="date" min={DATE_INPUT_MIN} max={DATE_INPUT_MAX} value={registrationFrom} onChange={e => updateFilter('registrationFrom', e.target.value)} />
+                  <input type="date" min={DATE_INPUT_MIN} max={DATE_INPUT_MAX} value={registrationTo} onChange={e => updateFilter('registrationTo', e.target.value)} />
+                </div>
+              </div>
+
+              <div className="sidebar-date-filter">
+                <span>완료일</span>
+                <div className="sidebar-date-row">
+                  <input type="date" min={DATE_INPUT_MIN} max={DATE_INPUT_MAX} value={completionFrom} onChange={e => updateFilter('completionFrom', e.target.value)} />
+                  <input type="date" min={DATE_INPUT_MIN} max={DATE_INPUT_MAX} value={completionTo} onChange={e => updateFilter('completionTo', e.target.value)} />
+                </div>
+              </div>
+
+              <button type="button" className="btn btn-secondary btn-xs" onClick={resetAdvancedFilters}>필터 초기화</button>
+            </div>
+          )}
         </div>
+
         <div className="patient-list">
           {displayPatients.map(p => {
             const origIndex = patients.indexOf(p);
-            const pModules = p.data.activeModules || [];
+            const pModules = p.data?.activeModules || [];
             const isComplete = isPatientComplete(p);
-            const patientName = p.data.shared?.name || `환자 #${origIndex + 1}`;
-            const primaryDiagnosis = p.data.shared?.diagnoses?.[0]?.name || '-';
+            const patientName = p.data?.shared?.name || `환자 #${origIndex + 1}`;
+            const patientNo = p.data?.shared?.patientNo || '';
+            const registrationDate = formatShortDate(p.createdAt || p._savedAt);
+            const evaluationDate = formatShortDate(p.data?.shared?.evaluationDate);
+            const primaryDiagnosis = p.data?.shared?.diagnoses?.[0]?.name || '-';
+
             return (
               <div key={p.id} className={`patient-item ${p.id === activeId ? 'active' : ''}`} onClick={() => onSwitchPatient(p.id)}>
                 <div className="patient-item-grid">
                   <div className="patient-item-select">
-                    <input type="checkbox" checked={selectedIds.has(p.id)} onClick={e => e.stopPropagation()} onChange={() => {
-                      setSelectedIds(prev => { const next = new Set(prev); next.has(p.id) ? next.delete(p.id) : next.add(p.id); return next; });
-                    }} />
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(p.id)}
+                      onClick={e => e.stopPropagation()}
+                      onChange={() => {
+                        setSelectedIds(prev => {
+                          const next = new Set(prev);
+                          next.has(p.id) ? next.delete(p.id) : next.add(p.id);
+                          return next;
+                        });
+                      }}
+                    />
                   </div>
                   <div className="patient-item-content">
                     <div className="patient-item-top">
                       <div className="patient-item-name-row">
                         <span className="patient-item-title">{patientName}</span>
+                        {patientNo && <span className="patient-no">#{patientNo}</span>}
                         <div className="patient-item-modules">
-                          {pModules.map(mId => { const mod = getModule(mId); return <span key={mId} className="module-badge" title={mod?.name}>{mod?.icon || '?'}</span>; })}
+                          {pModules.map(mId => {
+                            const mod = getModule(mId);
+                            return <span key={mId} className="module-badge" title={mod?.name}>{mod?.icon || '?'}</span>;
+                          })}
                         </div>
                       </div>
-                      <span className={isComplete ? 'status-dot complete' : 'status-dot'} title={isComplete ? '완료' : '미완료'}>✓</span>
+                      <span className={isComplete ? 'status-dot complete' : 'status-dot'} title={isComplete ? '완료' : '미완료'}>●</span>
                     </div>
                     <div className="patient-item-info patient-item-meta">
-                      <span>{formatBirthDate(p.data.shared?.birthDate)}</span>
+                      <span>{formatBirthDate(p.data?.shared?.birthDate)}</span>
                       <span className="patient-item-divider">•</span>
                       <span className="patient-item-diagnosis">{primaryDiagnosis}</span>
+                    </div>
+                    <div className="patient-item-dates">
+                      <span>등록 {registrationDate}</span>
+                      <span>완료 {evaluationDate}</span>
                     </div>
                     <div className="patient-item-actions">
                       <button className="btn btn-danger btn-xs" onClick={e => { e.stopPropagation(); onRemovePatient(p.id); }}>삭제</button>

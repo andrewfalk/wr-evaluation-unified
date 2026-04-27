@@ -35,6 +35,19 @@ import {
   saveAppSettings,
 } from './core/services/workspaceRepository';
 
+const DEFAULT_PATIENT_FILTERS = {
+  searchQuery: '',
+  statusFilter: 'all',
+  moduleFilter: 'all',
+  jobFilter: '',
+  registrationFrom: '',
+  registrationTo: '',
+  completionFrom: '',
+  completionTo: '',
+  sortKey: 'default',
+  sortDirection: 'asc',
+};
+
 // 모듈 등록 (사이드이펙트 import)
 import './modules/knee';
 import './modules/spine';
@@ -52,9 +65,7 @@ function App() {
   const [showLoadModal, setShowLoadModal] = useState(false);
   const [errors, setErrors] = useState({});
   const [showSidebar, setShowSidebar] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [sortKey, setSortKey] = useState('default');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [patientFilters, setPatientFilters] = useState(DEFAULT_PATIENT_FILTERS);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [settings, setSettings] = useState(() => loadAppSettings(DEFAULT_SETTINGS));
   const [showSettings, setShowSettings] = useState(false);
@@ -182,7 +193,7 @@ function App() {
     return () => unsubs.forEach(fn => fn?.());
   }, []);
 
-  const displayPatients = usePatientList(patients, searchQuery, sortKey, statusFilter);
+  const displayPatients = usePatientList(patients, patientFilters);
 
   // 계산 결과
   const calc = useMemo(() => {
@@ -337,12 +348,8 @@ function App() {
         patients={patients}
         displayPatients={displayPatients}
         activeId={activeId}
-        searchQuery={searchQuery}
-        onSearchChange={e => setSearchQuery(e.target.value)}
-        statusFilter={statusFilter}
-        onStatusFilterChange={e => setStatusFilter(e.target.value)}
-        sortKey={sortKey}
-        onSortKeyChange={e => setSortKey(e.target.value)}
+        filters={patientFilters}
+        setFilters={setPatientFilters}
         selectedIds={selectedIds}
         setSelectedIds={setSelectedIds}
         onAddPatient={addPatient}
