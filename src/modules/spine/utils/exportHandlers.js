@@ -16,7 +16,7 @@ function generateSpineReport(patientData, calc) {
   const shared = patientData.shared || {};
   const mod = patientData.module || {};
   const c = calc || computeSpineCalc(patientData);
-  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, weightedDailyDose } = c;
+  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, workRelatedness, maxForce, weightedDailyDose } = c;
 
   // 구형식 호환
   const hasLegacy = mod.jobName !== undefined || mod.careerYears !== undefined;

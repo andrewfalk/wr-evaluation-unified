@@ -5,29 +5,47 @@
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
-    "mock:intranet": "node scripts/mock-intranet-server.cjs",
+    "premock:intranet": "node scripts/prebuild-shared.mjs",
+    "mock:intranet": "node scripts/mock-intranet-server.mjs",
     "build:emr-helper": "powershell -ExecutionPolicy Bypass -File scripts/build-emr-helper.ps1",
+    "prebuild": "node scripts/prebuild-shared.mjs",
+    "prebuild:web": "node scripts/prebuild-shared.mjs",
     "build:web": "vite build --outDir dist/web",
+    "prebuild:electron": "node scripts/prebuild-shared.mjs",
     "build:electron": "vite build --outDir dist/electron",
     "preview": "vite preview",
+    "preelectron:dev": "node scripts/prebuild-shared.mjs",
     "electron:dev": "npm run build:emr-helper && vite build --outDir dist/electron && electron .",
+    "preelectron:build": "node scripts/prebuild-shared.mjs",
     "electron:build": "npm run build:emr-helper && npm run build:electron && electron-builder",
     "electron:build:win32": "npm run build:emr-helper && npm run build:electron && electron-builder --win --ia32",
-    "electron:build:win64": "npm run build:emr-helper && npm run build:electron && electron-builder --win --x64"
+    "electron:build:win64": "npm run build:emr-helper && npm run build:electron && electron-builder --win --x64",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint src/"
   },
   "dependencies": {
     "html2pdf.js": "^0.10.1",
     "jszip": "^3.10.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@vitejs/plugin-react": "^4.2.1",
     "electron": "^22.3.27",
     "electron-builder": "^24.9.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.5.0",
     "terser": "^5.46.0",
-    "vite": "^5.0.0"
+    "typescript": "^5.4.0",
+    "vite": "^5.0.0",
+    "vitest": "^1.6.0"
   },
   "build": {
     "appId": "com.wr-evaluation-unified.app",
@@ -41,7 +59,10 @@
       "public/**/*"
     ],
     "extraResources": [
-      { "from": "electron/emr-helper/bin/Release/EmrHelper.exe", "to": "emr-helper/EmrHelper.exe" }
+      {
+        "from": "electron/emr-helper/bin/Release/EmrHelper.exe",
+        "to": "emr-helper/EmrHelper.exe"
+      }
     ],
     "win": {
       "target": [

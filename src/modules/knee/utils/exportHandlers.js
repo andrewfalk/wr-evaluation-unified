@@ -134,7 +134,7 @@ export const kneeExportHandlers = {
   },
   pdf: (patientData, calc) => {
     const shared = patientData.shared || {};
-    const { age, bmi, relatedness: r, cumulativeBurden: cum, jobBurdens: jb } = calc;
+    const { age, bmi, relatedness: r, cumulativeBurden: cum } = calc;
     const diagnoses = shared.diagnoses || [];
     const td = 'border:1px solid #ddd; padding:8px;';
     const th = `${td} background:#f5f5f5;`;

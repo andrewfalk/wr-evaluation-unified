@@ -4,6 +4,7 @@ import { migratePatients } from './data';
 const SAVED_ITEMS_KEY = 'wrEvalUnifiedSavedItems';
 const AUTO_SAVE_KEY = 'wrEvalUnifiedAutoSave';
 const SETTINGS_KEY = 'wrEvalUnifiedSettings';
+const DEVICE_ID_KEY = 'wrEvalUnifiedDeviceId';
 
 const isElectronFS = () => !!window.electron?.fsLoadAllPatients;
 
@@ -140,7 +141,7 @@ export const loadSettings = (defaults) => {
   const saved = localStorage.getItem(SETTINGS_KEY);
   if (saved) {
     try { return { ...defaults, ...JSON.parse(saved) }; }
-    catch {}
+    catch { /* ignore parse errors, return defaults */ }
   }
   return { ...defaults };
 };
@@ -176,9 +177,9 @@ export const migrateToFileStorage = async () => {
   let autoSave = null;
   let settings = null;
 
-  try { savedItems = savedItemsRaw ? JSON.parse(savedItemsRaw) : null; } catch {}
-  try { autoSave = autoSaveRaw ? JSON.parse(autoSaveRaw) : null; } catch {}
-  try { settings = settingsRaw ? JSON.parse(settingsRaw) : null; } catch {}
+  try { savedItems = savedItemsRaw ? JSON.parse(savedItemsRaw) : null; } catch { /* ignore */ }
+  try { autoSave = autoSaveRaw ? JSON.parse(autoSaveRaw) : null; } catch { /* ignore */ }
+  try { settings = settingsRaw ? JSON.parse(settingsRaw) : null; } catch { /* ignore */ }
 
   // 마이그레이션할 데이터가 없으면 스킵
   if (!savedItems && !autoSave && !settings) return;
@@ -190,3 +191,25 @@ export const migrateToFileStorage = async () => {
     localStorage.removeItem(AUTO_SAVE_KEY);
   }
 };
+
+// ======================================================
+// 디바이스 ID
+// ======================================================
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+// Per-install stable identifier used for autosave isolation and device registration.
+// Uses globalThis.localStorage so it can be mocked in unit tests (Node.js has no localStorage).
+export function getDeviceId() {
+  const storage = globalThis.localStorage;
+  if (!storage) return crypto.randomUUID(); // SSR / non-browser fallback
+  try {
+    const existing = storage.getItem(DEVICE_ID_KEY);
+    if (existing && UUID_RE.test(existing)) return existing;
+    const id = crypto.randomUUID();
+    storage.setItem(DEVICE_ID_KEY, id);
+    return id;
+  } catch {
+    return crypto.randomUUID();
+  }
+}
