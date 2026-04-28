@@ -474,8 +474,7 @@ function getRiskFactorSentence(riskFactorCount = 0, flags = {}) {
   return `확인된 위험 요인이 ${riskFactorCount}개로 팔꿈치 부위 부담이 ${grade}인 작업입니다.`;
 }
 
-export function generateNarrative({ jobName, diagnosis, entry, temporalSequence }) {
-  const bkLabel = BK_TYPE_LABELS[entry.selectedBkType] || 'BK 유형 미선택';
+export function generateNarrative({ _jobName, _diagnosis, entry, temporalSequence }) {
   if (!shouldEvaluateExposureDetails(entry)) {
     return [
       `핵심 동작/자세 연결성: ${labelValue(entry.direct_anatomic_link, YES_NO_LABELS)}`,

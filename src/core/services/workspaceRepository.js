@@ -28,7 +28,7 @@ import { migratePatientRecords } from './patientRecords';
 
 // This repository keeps the current local/Electron implementation,
 // while giving us a single seam to replace with intranet APIs later.
-function useRemoteWorkspaceRepository({ session, settings } = {}) {
+function shouldUseRemoteRepository({ session, settings } = {}) {
   return settings?.integrationMode === 'intranet' || session?.mode === 'intranet';
 }
 
@@ -37,7 +37,7 @@ function shouldFallbackToLocal(error) {
 }
 
 export async function loadSavedWorkspaces(options = {}) {
-  if (useRemoteWorkspaceRepository(options)) {
+  if (shouldUseRemoteRepository(options)) {
     try {
       const items = await loadRemoteWorkspaces(options);
       markRemoteIntegrationStatus({ ...options, source: 'workspace-load' });
@@ -59,7 +59,7 @@ export async function loadSavedWorkspaces(options = {}) {
 }
 
 export async function saveWorkspaceSnapshot({ name, patients, savedItems, ...options }) {
-  if (useRemoteWorkspaceRepository(options)) {
+  if (shouldUseRemoteRepository(options)) {
     try {
       const items = await saveRemoteWorkspace({ name, patients, ...options });
       markRemoteIntegrationStatus({ ...options, source: 'workspace-save' });
@@ -77,7 +77,7 @@ export async function saveWorkspaceSnapshot({ name, patients, savedItems, ...opt
 }
 
 export async function deleteWorkspaceSnapshot({ id, savedItems, ...options }) {
-  if (useRemoteWorkspaceRepository(options)) {
+  if (shouldUseRemoteRepository(options)) {
     try {
       const items = await deleteRemoteWorkspace({ id, ...options });
       markRemoteIntegrationStatus({ ...options, source: 'workspace-delete' });
@@ -99,7 +99,7 @@ export function hasDuplicateWorkspaceName(name, savedItems) {
 }
 
 export async function loadAutoSavedWorkspace(options = {}) {
-  if (useRemoteWorkspaceRepository(options)) {
+  if (shouldUseRemoteRepository(options)) {
     try {
       const saved = await loadRemoteAutoSave(options);
       markRemoteIntegrationStatus({ ...options, source: 'autosave-load' });
@@ -122,7 +122,7 @@ export async function loadAutoSavedWorkspace(options = {}) {
 }
 
 export async function saveAutoSavedWorkspace({ patients, ...options }) {
-  if (useRemoteWorkspaceRepository(options)) {
+  if (shouldUseRemoteRepository(options)) {
     try {
       const result = await saveRemoteAutoSave({ patients, ...options });
       markRemoteIntegrationStatus({ ...options, source: 'autosave-save' });
@@ -140,7 +140,7 @@ export async function saveAutoSavedWorkspace({ patients, ...options }) {
 }
 
 export async function clearAutoSavedWorkspace(options = {}) {
-  if (useRemoteWorkspaceRepository(options)) {
+  if (shouldUseRemoteRepository(options)) {
     try {
       const result = await clearRemoteAutoSave(options);
       markRemoteIntegrationStatus({ ...options, source: 'autosave-clear' });

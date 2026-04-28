@@ -48,7 +48,7 @@ function buildWeekBuckets() {
     const d = new Date(now);
     d.setDate(d.getDate() - i * 7);
     const monday = getWeekMonday(d);
-    const [y, m, day] = monday.split('-');
+    const [_y, m, day] = monday.split('-');
     weeks.push({
       key: monday,
       label: `${m}/${day}`,

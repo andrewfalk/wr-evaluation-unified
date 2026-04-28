@@ -44,7 +44,7 @@ function SummaryCard({ summary }) {
         </div>
         <div className="preview-section cervical-summary-copy">
           <div style={{ whiteSpace: 'pre-line' }}>{summary.narrative}</div>
-          <div><strong>업무관련성 위험 요인:</strong> {riskFactorSummary}</div>
+          <div><strong>BK2109 위험 요인:</strong> {riskFactorSummary}</div>
           <div className="cervical-summary-conclusion"><strong>종합평가:</strong> {summary.conclusionText}</div>
         </div>
       </div>
