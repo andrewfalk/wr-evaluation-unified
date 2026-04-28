@@ -49,15 +49,16 @@ CREATE TABLE sessions (
 
 CREATE INDEX sessions_user_id_idx      ON sessions(user_id);
 CREATE INDEX sessions_refresh_hash_idx ON sessions(refresh_token_hash);
--- expired/revoked sessions cleanup query uses this
 CREATE INDEX sessions_expires_at_idx   ON sessions(expires_at);
 
 -- ---------------------------------------------------------------------------
 -- patient_records
+-- organization_id NOT NULL: patient data must always belong to an org for
+-- row-level permission isolation.
 -- ---------------------------------------------------------------------------
 CREATE TABLE patient_records (
   id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id  UUID        REFERENCES organizations(id) ON DELETE RESTRICT,
+  organization_id  UUID        NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
   owner_user_id    UUID        REFERENCES users(id) ON DELETE SET NULL,
   name             TEXT        NOT NULL,
   patient_no       TEXT,
@@ -119,10 +120,11 @@ CREATE INDEX patient_records_evaluation_date
 
 -- ---------------------------------------------------------------------------
 -- workspaces  (snapshot semantics — payload frozen at save time)
+-- organization_id NOT NULL: same permission isolation requirement as patients.
 -- ---------------------------------------------------------------------------
 CREATE TABLE workspaces (
   id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id  UUID        REFERENCES organizations(id) ON DELETE RESTRICT,
+  organization_id  UUID        NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
   owner_user_id    UUID        REFERENCES users(id) ON DELETE SET NULL,
   name             TEXT        NOT NULL,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -134,6 +136,7 @@ CREATE INDEX workspaces_org_created ON workspaces(organization_id, created_at DE
 
 -- ---------------------------------------------------------------------------
 -- autosaves  (one row per user+device, upsert semantics)
+-- organization_id nullable: temporary local data, less critical for isolation.
 -- ---------------------------------------------------------------------------
 CREATE TABLE autosaves (
   user_id         UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -145,10 +148,18 @@ CREATE TABLE autosaves (
 );
 
 -- ---------------------------------------------------------------------------
--- audit_logs  (append-only; partitioned in 0003_audit_partition.sql)
+-- audit_logs  (append-only, PARTITION BY RANGE(created_at))
+--
+-- PRIMARY KEY (id, created_at): partition key must be part of PK in pg.
+-- BIGSERIAL replaced by a standalone sequence since BIGSERIAL is not valid
+-- on a partitioned table parent.
+-- T24 adds the auto-partition cron; this migration creates the initial
+-- monthly partitions plus a DEFAULT catch-all for safety.
 -- ---------------------------------------------------------------------------
+CREATE SEQUENCE audit_logs_id_seq;
+
 CREATE TABLE audit_logs (
-  id            BIGSERIAL   PRIMARY KEY,
+  id            BIGINT      NOT NULL DEFAULT nextval('audit_logs_id_seq'),
   actor_user_id UUID,
   actor_org_id  UUID,
   action        TEXT        NOT NULL,
@@ -158,8 +169,32 @@ CREATE TABLE audit_logs (
   ip            INET,
   user_agent    TEXT,
   extra         JSONB,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id, created_at)
+) PARTITION BY RANGE (created_at);
+
+-- Create partitions for current month + next 3 months dynamically
+DO $$
+DECLARE
+  start_date DATE;
+  end_date   DATE;
+  pname      TEXT;
+BEGIN
+  FOR i IN 0..3 LOOP
+    start_date := date_trunc('month', now())::DATE + (i * INTERVAL '1 month')::INTERVAL;
+    end_date   := start_date + INTERVAL '1 month';
+    pname      := 'audit_logs_' || to_char(start_date, 'YYYY_MM');
+    EXECUTE format(
+      'CREATE TABLE IF NOT EXISTS %I PARTITION OF audit_logs FOR VALUES FROM (%L) TO (%L)',
+      pname, start_date, end_date
+    );
+  END LOOP;
+END;
+$$;
+
+-- Default partition: catches rows that fall outside explicit monthly partitions
+-- (e.g., before T24 cron creates future months)
+CREATE TABLE audit_logs_default PARTITION OF audit_logs DEFAULT;
 
 CREATE INDEX audit_logs_actor_user_idx ON audit_logs(actor_user_id);
 CREATE INDEX audit_logs_action_idx     ON audit_logs(action);
