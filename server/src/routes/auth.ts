@@ -258,6 +258,7 @@ async function csrfReissue(pool: Pool, req: Request, res: Response): Promise<voi
 
   const client = await pool.connect();
   let sessionId: string | null = null;
+  let sessionUserId: string | null = null;
   try {
     const existing = await verifySession(client, rawRefreshToken);
     if (!existing) {
@@ -265,12 +266,51 @@ async function csrfReissue(pool: Pool, req: Request, res: Response): Promise<voi
       return;
     }
     sessionId = existing.sessionId;
+    sessionUserId = existing.userId;
   } finally {
     client.release();
   }
 
-  await reissueCsrfToken(pool, sessionId!, res, isSecure);
-  res.status(200).json({ ok: true });
+  // Reissue CSRF cookie and get new raw token so we can embed its hash in a
+  // fresh access token. Without a new access token the old csrfHash inside the
+  // JWT would mismatch the new CSRF cookie, breaking every subsequent mutating
+  // request with 403.
+  const newCsrfToken = await reissueCsrfToken(pool, sessionId!, res, isSecure);
+
+  // Fetch user info to generate the new access token.
+  interface UserRow {
+    role: string; name: string;
+    organization_id: string | null; must_change_password: boolean;
+  }
+  const userClient = await pool.connect();
+  let userRow: UserRow | null = null;
+  try {
+    const { rows } = await userClient.query<UserRow>(
+      `SELECT role, name, organization_id, must_change_password
+       FROM users WHERE id = $1`,
+      [sessionUserId]
+    );
+    userRow = rows[0] ?? null;
+  } finally {
+    userClient.release();
+  }
+
+  if (!userRow) {
+    res.status(401).json({ code: 'USER_NOT_FOUND', error: 'Associated user not found' });
+    return;
+  }
+
+  const { token: accessToken, expiresAt: accessExpiresAt } = generateAccessToken({
+    sub:                sessionUserId!,
+    sessionId:          sessionId!,
+    orgId:              userRow.organization_id,
+    role:               userRow.role,
+    name:               userRow.name,
+    mustChangePassword: userRow.must_change_password,
+    csrfHash:           hashToken(newCsrfToken),
+  });
+
+  res.status(200).json({ ok: true, accessToken, accessExpiresAt: accessExpiresAt.toISOString() });
 }
 
 // ---------------------------------------------------------------------------

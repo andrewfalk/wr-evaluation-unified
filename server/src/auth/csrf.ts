@@ -52,12 +52,14 @@ export function clearCsrfCookie(res: Response, secure: boolean): void {
 //   2. Origin header whitelist check (in CORS middleware)
 //   3. Rate limit (10 req/min/IP)
 // ---------------------------------------------------------------------------
+// Returns the new raw CSRF token so callers can embed its hash in a fresh
+// access token (avoids csrfHash mismatch between new cookie and old JWT).
 export async function reissueCsrfToken(
   pool: Pool,
   sessionId: string,
   res: Response,
   secure: boolean
-): Promise<void> {
+): Promise<string> {
   const newToken = crypto.randomBytes(32).toString('hex');
 
   const client = await pool.connect();
@@ -71,4 +73,5 @@ export async function reissueCsrfToken(
   }
 
   setCsrfCookie(res, newToken, secure);
+  return newToken;
 }

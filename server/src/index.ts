@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { type Request, type Response, type NextFunction } from 'express';
 import { createServer } from 'http';
 import cookieParser from 'cookie-parser';
 import config from './config';
@@ -16,6 +16,14 @@ app.get('/health', (_req, res) => {
 
 app.use('/api/auth', createAuthRouter(pool));
 app.use('/api/config', createConfigRouter());
+
+// Global JSON error handler — keeps API responses consistent when middleware
+// calls next(err) (e.g. DB failures in auth middleware).
+// Must be registered after all routes and have exactly 4 parameters.
+app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('[wr-server] unhandled error', err);
+  res.status(500).json({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
+});
 
 if (require.main === module) {
   const server = createServer(app);

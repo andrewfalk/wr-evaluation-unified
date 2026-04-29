@@ -128,4 +128,17 @@ describe('reissueCsrfToken', () => {
     await expect(reissueCsrfToken(pool, 'sess', res, true)).rejects.toThrow('DB error');
     expect(client.release).toHaveBeenCalledOnce();
   });
+
+  it('returns the raw token so callers can embed its hash in a new access token', async () => {
+    const pool = makePool();
+    const res  = makeMockRes();
+
+    const rawToken = await reissueCsrfToken(pool, 'sess-id', res, true);
+
+    expect(typeof rawToken).toBe('string');
+    expect(rawToken.length).toBeGreaterThan(0);
+    // The cookie must be set with the same raw token
+    const [, cookieValue] = (res.cookie as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string];
+    expect(cookieValue).toBe(rawToken);
+  });
 });
