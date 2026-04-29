@@ -213,26 +213,34 @@ curl http://localhost:3001/health
 ### 리허설 절차
 
 ```bash
-# 1. 테스트용 PostgreSQL 기동
+# 1. 격리된 테스트 네트워크 + PostgreSQL 기동
+#    --network host는 Windows/Docker Desktop에서 기대대로 동작하지 않으므로
+#    명시적 네트워크를 만들고 두 컨테이너를 같은 네트워크에 연결합니다.
+docker network create wr-restore-test-net
+
 docker run -d --name wr-restore-test \
+  --network wr-restore-test-net \
   -e POSTGRES_DB=wr_evaluation \
   -e POSTGRES_USER=wr_user \
   -e POSTGRES_PASSWORD=test_only \
   postgres:16-alpine
 
 # 2. 가장 최근 월간 백업으로 복구 시도
+#    restore.sh는 이미지에 포함되지 않으므로 :ro 마운트로 주입합니다.
 docker run --rm -it \
+  --network wr-restore-test-net \
   -v $(pwd)/wr-backup-private.asc:/tmp/private.asc:ro \
   -v /path/to/monthly:/backups:ro \
+  -v $(pwd)/scripts/restore.sh:/scripts/restore.sh:ro \
   -e PGHOST=wr-restore-test \
   -e PGPASSWORD=test_only \
   -e RESTORE_AUTH_TICKET=REHEARSAL-$(date +%Y%m) \
-  --network host \
   <backup_image> \
-  sh -c "gpg --import /tmp/private.asc && /scripts/restore.sh /backups/wr-backup-$(date +%Y%m).dump.gpg"
+  sh -c "gpg --import /tmp/private.asc && sh /scripts/restore.sh /backups/wr-backup-$(date +%Y%m).dump.gpg"
 
-# 3. 복구 성공 확인 후 테스트 컨테이너 삭제
+# 3. 복구 성공 확인 후 테스트 환경 전체 삭제
 docker rm -f wr-restore-test
+docker network rm wr-restore-test-net
 ```
 
 ### 리허설 기록
