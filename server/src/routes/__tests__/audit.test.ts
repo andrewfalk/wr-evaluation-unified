@@ -44,16 +44,19 @@ function exportPublicKey(pubKey: crypto.KeyObject): string {
   return der.subarray(12).toString('base64');
 }
 
-// Build a valid Ed25519 signature over the canonical message
+// Build a valid Ed25519 signature over the canonical message.
+// Format: "<deviceId>.<deviceTs>.<deviceNonce>.<JSON-sorted-body>"
 function signPayload(
-  privKey:  crypto.KeyObject,
-  deviceTs: string,
-  body:     object
+  privKey:   crypto.KeyObject,
+  deviceId:  string,
+  deviceTs:  string,
+  deviceNonce: string,
+  body:      object
 ): string {
   const sorted = Object.fromEntries(
     Object.entries(body).sort(([a], [b]) => a.localeCompare(b))
   );
-  const message = `${deviceTs}.${JSON.stringify(sorted)}`;
+  const message = `${deviceId}.${deviceTs}.${deviceNonce}.${JSON.stringify(sorted)}`;
   return crypto.sign(null, Buffer.from(message), privKey).toString('base64');
 }
 
@@ -141,8 +144,9 @@ describe('POST /api/audit/emr', () => {
   it('returns 401 when timestamp is out of range', async () => {
     const { privateKey, publicKey } = makeKeyPair();
     const pool    = makePool();
-    const staleTs = new Date(Date.now() - 10 * 60 * 1000).toISOString(); // 10 min ago
-    const sig     = signPayload(privateKey, staleTs, VALID_BODY);
+    const devNonce = nonce();
+    const staleTs  = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const sig      = signPayload(privateKey, 'dev-1', staleTs, devNonce, VALID_BODY);
 
     (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
 
@@ -153,21 +157,21 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
       .set('x-wr-device-ts',    staleTs)
-      .set('x-wr-device-nonce', nonce())
+      .set('x-wr-device-nonce', devNonce)
       .send(VALID_BODY);
 
     expect(res.status).toBe(401);
     expect(res.body.error).toMatch(/timestamp/i);
-    // exportPublicKey is unused in this path; suppress lint
     void exportPublicKey(publicKey);
   });
 
   it('returns 400 on invalid body (unknown action)', async () => {
     const { privateKey } = makeKeyPair();
-    const pool = makePool();
-    const ts   = new Date().toISOString();
-    const body = { action: 'unknown_action', outcome: 'success' };
-    const sig  = signPayload(privateKey, ts, body);
+    const pool     = makePool();
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const body     = { action: 'unknown_action', outcome: 'success' };
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, body);
 
     (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
 
@@ -178,7 +182,7 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
       .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', nonce())
+      .set('x-wr-device-nonce', devNonce)
       .send(body);
 
     expect(res.status).toBe(400);
@@ -187,9 +191,10 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 401 when device does not exist', async () => {
     const { privateKey } = makeKeyPair();
-    const pool = makePool();
-    const ts   = new Date().toISOString();
-    const sig  = signPayload(privateKey, ts, VALID_BODY);
+    const pool     = makePool();
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-missing', ts, devNonce, VALID_BODY);
 
     wireDevice(pool, null);
 
@@ -200,7 +205,7 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-device-id',  'dev-missing')
       .set('x-wr-device-sig', sig)
       .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', nonce())
+      .set('x-wr-device-nonce', devNonce)
       .send(VALID_BODY);
 
     expect(res.status).toBe(401);
@@ -209,9 +214,10 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 401 when device is pending', async () => {
     const { privateKey, publicKey } = makeKeyPair();
-    const pool = makePool();
-    const ts   = new Date().toISOString();
-    const sig  = signPayload(privateKey, ts, VALID_BODY);
+    const pool     = makePool();
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
 
     wireDevice(pool, {
       user_id:         'user-1',
@@ -227,7 +233,7 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
       .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', nonce())
+      .set('x-wr-device-nonce', devNonce)
       .send(VALID_BODY);
 
     expect(res.status).toBe(401);
@@ -236,9 +242,10 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 401 when device is revoked', async () => {
     const { privateKey, publicKey } = makeKeyPair();
-    const pool = makePool();
-    const ts   = new Date().toISOString();
-    const sig  = signPayload(privateKey, ts, VALID_BODY);
+    const pool     = makePool();
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
 
     wireDevice(pool, {
       user_id:         'user-1',
@@ -254,7 +261,7 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
       .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', nonce())
+      .set('x-wr-device-nonce', devNonce)
       .send(VALID_BODY);
 
     expect(res.status).toBe(401);
@@ -263,12 +270,13 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 401 when session.user !== device.user', async () => {
     const { privateKey, publicKey } = makeKeyPair();
-    const pool = makePool();
-    const ts   = new Date().toISOString();
-    const sig  = signPayload(privateKey, ts, VALID_BODY);
+    const pool     = makePool();
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
 
     wireDevice(pool, {
-      user_id:         'other-user-99',   // mismatch with session user-1
+      user_id:         'other-user-99',
       organization_id: 'org-1',
       public_key:      exportPublicKey(publicKey),
       status:          'active',
@@ -281,7 +289,7 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
       .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', nonce())
+      .set('x-wr-device-nonce', devNonce)
       .send(VALID_BODY);
 
     expect(res.status).toBe(401);
@@ -289,11 +297,12 @@ describe('POST /api/audit/emr', () => {
   });
 
   it('returns 401 when Ed25519 signature is invalid', async () => {
-    const { publicKey }              = makeKeyPair();
-    const { privateKey: wrongPriv }  = makeKeyPair();   // different key pair
-    const pool = makePool();
-    const ts   = new Date().toISOString();
-    const sig  = signPayload(wrongPriv, ts, VALID_BODY); // signed with wrong key
+    const { publicKey }             = makeKeyPair();
+    const { privateKey: wrongPriv } = makeKeyPair();
+    const pool     = makePool();
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(wrongPriv, 'dev-1', ts, devNonce, VALID_BODY);
 
     wireDevice(pool, {
       user_id:         'user-1',
@@ -309,7 +318,7 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
       .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', nonce())
+      .set('x-wr-device-nonce', devNonce)
       .send(VALID_BODY);
 
     expect(res.status).toBe(401);
@@ -318,9 +327,10 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 200 when approved device with valid signature', async () => {
     const { privateKey, publicKey } = makeKeyPair();
-    const pool = makePool();
-    const ts   = new Date().toISOString();
-    const sig  = signPayload(privateKey, ts, VALID_BODY);
+    const pool     = makePool();
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
 
     wireDevice(pool, {
       user_id:         'user-1',
@@ -336,7 +346,7 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
       .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', nonce())
+      .set('x-wr-device-nonce', devNonce)
       .send(VALID_BODY);
 
     expect(res.status).toBe(200);
@@ -346,9 +356,10 @@ describe('POST /api/audit/emr', () => {
   it('writes audit log on successful request', async () => {
     const { writeAuditLog } = await import('../../middleware/audit');
     const { privateKey, publicKey } = makeKeyPair();
-    const pool = makePool();
-    const ts   = new Date().toISOString();
-    const sig  = signPayload(privateKey, ts, VALID_BODY);
+    const pool     = makePool();
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
 
     wireDevice(pool, {
       user_id:         'user-1',
@@ -364,7 +375,7 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
       .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', nonce())
+      .set('x-wr-device-nonce', devNonce)
       .send(VALID_BODY);
 
     expect(writeAuditLog).toHaveBeenCalledWith(
@@ -379,13 +390,14 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 401 when device.organization_id !== session.organizationId', async () => {
     const { privateKey, publicKey } = makeKeyPair();
-    const pool = makePool();
-    const ts   = new Date().toISOString();
-    const sig  = signPayload(privateKey, ts, VALID_BODY);
+    const pool     = makePool();
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
 
     wireDevice(pool, {
       user_id:         'user-1',
-      organization_id: 'different-org-99',  // mismatch with session org-1
+      organization_id: 'different-org-99',
       public_key:      exportPublicKey(publicKey),
       status:          'active',
     });
@@ -397,7 +409,35 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
       .set('x-wr-device-ts',    ts)
-      .set('x-wr-device-nonce', nonce())
+      .set('x-wr-device-nonce', devNonce)
+      .send(VALID_BODY);
+
+    expect(res.status).toBe(401);
+    expect(res.body.error).toMatch(/mismatch/i);
+  });
+
+  it('returns 401 when device.organization_id is null but session has an org', async () => {
+    const { privateKey, publicKey } = makeKeyPair();
+    const pool     = makePool();
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
+
+    wireDevice(pool, {
+      user_id:         'user-1',
+      organization_id: null,   // null org — rejected when session has org-1
+      public_key:      exportPublicKey(publicKey),
+      status:          'active',
+    });
+
+    const res = await request(makeApp(pool))
+      .post('/api/audit/emr')
+      .set('Authorization', `Bearer ${userToken()}`)
+      .set('x-wr-source',     'electron-main')
+      .set('x-wr-device-id',  'dev-1')
+      .set('x-wr-device-sig', sig)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', devNonce)
       .send(VALID_BODY);
 
     expect(res.status).toBe(401);
@@ -406,14 +446,13 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 401 when same nonce is reused (replay attack)', async () => {
     const { privateKey, publicKey } = makeKeyPair();
-    const pool1 = makePool();
-    const pool2 = makePool();
-    const app   = makeApp(pool1);
-    const ts    = new Date().toISOString();
-    const sig   = signPayload(privateKey, ts, VALID_BODY);
+    const pool1      = makePool();
+    const pool2      = makePool();
+    const app        = makeApp(pool1);
+    const ts         = new Date().toISOString();
     const replayNonce = nonce();
+    const sig         = signPayload(privateKey, 'dev-1', ts, replayNonce, VALID_BODY);
 
-    // First request — succeeds
     wireDevice(pool1, {
       user_id:         'user-1',
       organization_id: 'org-1',
@@ -430,7 +469,7 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-device-nonce', replayNonce)
       .send(VALID_BODY);
 
-    // Second request with same nonce — must be rejected
+    // Replay with same nonce — must be rejected even though signature is valid
     wireDevice(pool2, {
       user_id:         'user-1',
       organization_id: 'org-1',

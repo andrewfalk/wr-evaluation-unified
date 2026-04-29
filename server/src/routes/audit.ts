@@ -93,13 +93,14 @@ async function handleEmrAudit(pool: Pool, req: Request, res: Response): Promise<
     return;
   }
 
-  // --- 3b. Nonce replay guard ---
+  // --- 3b. Nonce duplicate check (pre-signature) ---
+  // We only record the nonce after signature passes to prevent an attacker from
+  // exhausting nonces by replaying with a different nonce but the same payload.
   const nonceKey = `${deviceId}:${deviceNonce}`;
   if (seenNonces.has(nonceKey)) {
     res.status(401).json({ code: 'UNAUTHORIZED', error: 'Duplicate request (nonce reuse)' });
     return;
   }
-  seenNonces.set(nonceKey, Date.now() + NONCE_TTL_MS);
 
   // --- 4. Body validation ---
   const parse = EmrAuditBody.safeParse(req.body);
@@ -130,10 +131,11 @@ async function handleEmrAudit(pool: Pool, req: Request, res: Response): Promise<
   const session = req.sessionInfo!;
 
   const userMismatch = session.userId !== device.user_id;
-  // Org mismatch: only enforce when both sides have a non-null org.
-  // A null device org (legacy row) is tolerated; a non-null mismatch is blocked.
+  // If the session belongs to an org, the device must belong to the same org.
+  // A null device.organization_id is not tolerated for org-scoped sessions:
+  // legitimate devices are always registered with an org in production.
+  // Superadmin (session.organizationId === null) bypasses the org check.
   const orgMismatch =
-    device.organization_id !== null &&
     session.organizationId !== null &&
     session.organizationId !== device.organization_id;
 
@@ -157,13 +159,16 @@ async function handleEmrAudit(pool: Pool, req: Request, res: Response): Promise<
   }
 
   // --- 7. Ed25519 signature verification ---
-  // Canonical message = "<deviceTs>.<JSON-sorted-body>"
+  // Canonical message = "<deviceId>.<deviceTs>.<deviceNonce>.<JSON-sorted-body>"
+  // Including deviceId and deviceNonce binds the signature to this specific
+  // device+request so an attacker cannot reuse a valid signature by substituting
+  // a fresh nonce (which would otherwise bypass the nonce replay guard).
   const canonicalBody = JSON.stringify(
     Object.fromEntries(
       Object.entries(body).sort(([a], [b]) => a.localeCompare(b))
     )
   );
-  const message = `${deviceTs}.${canonicalBody}`;
+  const message = `${deviceId}.${deviceTs}.${deviceNonce}.${canonicalBody}`;
 
   let sigValid = false;
   try {
@@ -186,6 +191,10 @@ async function handleEmrAudit(pool: Pool, req: Request, res: Response): Promise<
     res.status(401).json({ code: 'UNAUTHORIZED', error: 'Invalid device signature' });
     return;
   }
+
+  // Record nonce only after signature passes — prevents exhausting nonces via
+  // unauthenticated replay attempts with valid signatures but fresh nonces.
+  seenNonces.set(nonceKey, Date.now() + NONCE_TTL_MS);
 
   // --- 8. Write audit log ---
   writeAuditLog(pool, {
