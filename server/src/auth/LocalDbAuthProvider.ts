@@ -2,9 +2,10 @@ import bcrypt from 'bcrypt';
 import type { Pool } from 'pg';
 import type { AuthProvider, UserCredentials } from './AuthProvider';
 
-// Dummy hash used for constant-time comparison when user is not found,
-// preventing timing-based user enumeration attacks.
-const DUMMY_HASH = '$2b$12$invalidhashinvalidhashinvalidh.invalidhashinvalidhashXX';
+// Precomputed cost-12 bcrypt hash used for constant-time comparison when the
+// user is not found or is disabled, preventing timing-based enumeration.
+// Must be a real bcrypt hash so bcrypt.compare takes the full ~190ms.
+const DUMMY_HASH = '$2b$12$myqU8KWBckwmVrNxYaZndOoWQo.3bbvMNTID7jpYSxBAPb.Zmy5uW';
 
 interface UserRow {
   id:                   string;

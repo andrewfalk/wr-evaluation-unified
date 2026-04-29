@@ -41,7 +41,10 @@ CREATE TABLE sessions (
   refresh_token_hash TEXT        NOT NULL UNIQUE,
   csrf_token_hash    TEXT        NOT NULL,
   expires_at         TIMESTAMPTZ NOT NULL,
+  -- revoked_at: set during token rotation; grace window applies (30s)
   revoked_at         TIMESTAMPTZ,
+  -- invalidated_at: set on logout / password change; no grace window
+  invalidated_at     TIMESTAMPTZ,
   user_agent         TEXT,
   ip                 INET,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now()

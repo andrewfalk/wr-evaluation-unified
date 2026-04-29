@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Pool } from 'pg';
 import { LocalDbAuthProvider } from '../LocalDbAuthProvider';
-import bcrypt from 'bcrypt';
 
 function makePool(rows: unknown[]): Pool {
   return {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { PoolClient, Pool } from 'pg';
 import {
   createSession,
@@ -12,14 +12,6 @@ import {
 // ---------------------------------------------------------------------------
 // Mock helpers
 // ---------------------------------------------------------------------------
-
-function makeClient(queryResults: Record<string, unknown[][]> = {}): PoolClient {
-  const client = {
-    query: vi.fn(),
-    release: vi.fn(),
-  } as unknown as PoolClient;
-  return client;
-}
 
 function makeClientWithResponses(responses: Array<{ rows: unknown[] }>): PoolClient {
   const client = {
@@ -152,6 +144,14 @@ describe('verifySession', () => {
     const [sql] = (client.query as ReturnType<typeof vi.fn>).mock.calls[0] as [string, unknown[]];
     expect(sql).toContain("interval '30 seconds'");
   });
+
+  it('SQL checks invalidated_at IS NULL (terminal revoke has no grace)', async () => {
+    const client = makeClientWithResponses([{ rows: [] }]);
+    await verifySession(client, 'token');
+
+    const [sql] = (client.query as ReturnType<typeof vi.fn>).mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('invalidated_at IS NULL');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -159,13 +159,24 @@ describe('verifySession', () => {
 // ---------------------------------------------------------------------------
 describe('rotateSession', () => {
   it('returns null when old token is not valid', async () => {
-    // verifySession returns empty rows → existing is null
+    // verifySessionStrict returns empty rows → existing is null
     const pool = makePool([
       { rows: [] }, // BEGIN
-      { rows: [] }, // verifySession SELECT → empty
+      { rows: [] }, // verifySessionStrict SELECT → empty
       { rows: [] }, // ROLLBACK
     ]);
     const result = await rotateSession(pool, 'bad-token', {}, 900);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when old token was already rotated (revoked_at IS NOT NULL)', async () => {
+    // verifySessionStrict requires revoked_at IS NULL — already-rotated token returns empty
+    const pool = makePool([
+      { rows: [] }, // BEGIN
+      { rows: [] }, // verifySessionStrict SELECT → empty (token already rotated)
+      { rows: [] }, // ROLLBACK
+    ]);
+    const result = await rotateSession(pool, 'already-rotated-token', {}, 900);
     expect(result).toBeNull();
   });
 
@@ -238,28 +249,30 @@ describe('rotateSession', () => {
 });
 
 // ---------------------------------------------------------------------------
-// revokeSession
+// revokeSession  (terminal — logout)
 // ---------------------------------------------------------------------------
 describe('revokeSession', () => {
-  it('updates revoked_at for the given session id', async () => {
+  it('sets invalidated_at (not revoked_at) for immediate terminal revoke', async () => {
     const client = makeClientWithResponses([{ rows: [] }]);
     await revokeSession(client, 'sess-123');
 
     const [sql, params] = (client.query as ReturnType<typeof vi.fn>).mock.calls[0] as [string, unknown[]];
-    expect(sql).toContain('UPDATE sessions SET revoked_at');
+    expect(sql).toContain('invalidated_at = now()');
+    expect(sql).not.toContain('revoked_at');
     expect(params[0]).toBe('sess-123');
   });
 });
 
 // ---------------------------------------------------------------------------
-// revokeAllUserSessions
+// revokeAllUserSessions  (terminal — password change)
 // ---------------------------------------------------------------------------
 describe('revokeAllUserSessions', () => {
-  it('revokes all sessions for a user', async () => {
+  it('sets invalidated_at for all user sessions', async () => {
     const client = makeClientWithResponses([{ rows: [] }]);
     await revokeAllUserSessions(client, 'user-1');
 
     const [sql, params] = (client.query as ReturnType<typeof vi.fn>).mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('invalidated_at = now()');
     expect(sql).toContain('WHERE user_id = $1');
     expect(sql).not.toContain('id !=');
     expect(params[0]).toBe('user-1');
