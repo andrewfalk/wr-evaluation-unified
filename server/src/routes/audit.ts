@@ -3,7 +3,7 @@ import { Router, type Request, type Response } from 'express';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import { createAuthMiddleware } from '../middleware/auth';
-import { writeAuditLog } from '../middleware/audit';
+import { writeAuditLog, writeAuditLogStrict } from '../middleware/audit';
 
 // ---------------------------------------------------------------------------
 // POST /api/audit/emr
@@ -211,8 +211,10 @@ async function handleEmrAudit(pool: Pool, req: Request, res: Response): Promise<
     nonceCommitted = true;
     seenNonces.set(nonceKey, Date.now() + NONCE_TTL_MS);
 
-    // --- 8. Write audit log ---
-    writeAuditLog(pool, {
+    // --- 8. Write audit log (strict — throws on failure) ---
+    // This endpoint exists solely to record the audit row. If the INSERT fails
+    // we must NOT return 200; the caller's retry logic depends on it.
+    await writeAuditLogStrict(pool, {
       actorUserId: session.userId,
       actorOrgId:  device.organization_id,
       action:      body.action,

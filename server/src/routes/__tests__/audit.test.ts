@@ -19,7 +19,10 @@ vi.mock('../../config', () => ({
   },
 }));
 
-vi.mock('../../middleware/audit', () => ({ writeAuditLog: vi.fn() }));
+vi.mock('../../middleware/audit', () => ({
+  writeAuditLog:       vi.fn(),
+  writeAuditLogStrict: vi.fn().mockResolvedValue(undefined),
+}));
 
 import { createAuditRouter } from '../audit';
 import { generateAccessToken } from '../../auth/tokens';
@@ -354,7 +357,7 @@ describe('POST /api/audit/emr', () => {
   });
 
   it('writes audit log on successful request', async () => {
-    const { writeAuditLog } = await import('../../middleware/audit');
+    const { writeAuditLogStrict } = await import('../../middleware/audit');
     const { privateKey, publicKey } = makeKeyPair();
     const pool     = makePool();
     const ts       = new Date().toISOString();
@@ -378,7 +381,7 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-device-nonce', devNonce)
       .send(VALID_BODY);
 
-    expect(writeAuditLog).toHaveBeenCalledWith(
+    expect(writeAuditLogStrict).toHaveBeenCalledWith(
       pool,
       expect.objectContaining({
         actorUserId: 'user-1',

@@ -15,29 +15,40 @@ export interface AuditEntry {
   extra?:       Record<string, unknown> | null;
 }
 
+const AUDIT_SQL = `
+  INSERT INTO audit_logs
+    (actor_user_id, actor_org_id, action, target_type, target_id, outcome, ip, user_agent, extra)
+  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`;
+
+function auditParams(entry: AuditEntry): unknown[] {
+  return [
+    entry.actorUserId ?? null,
+    entry.actorOrgId  ?? null,
+    entry.action,
+    entry.targetType  ?? null,
+    entry.targetId    ?? null,
+    entry.outcome,
+    entry.ip          ?? null,
+    entry.userAgent   ?? null,
+    entry.extra       ? JSON.stringify(entry.extra) : null,
+  ];
+}
+
 // Fire-and-forget INSERT into audit_logs. Errors are logged but never thrown —
 // an audit failure must never break the main request path.
 export async function writeAuditLog(pool: Pool, entry: AuditEntry): Promise<void> {
   try {
-    await pool.query(
-      `INSERT INTO audit_logs
-         (actor_user_id, actor_org_id, action, target_type, target_id, outcome, ip, user_agent, extra)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [
-        entry.actorUserId ?? null,
-        entry.actorOrgId  ?? null,
-        entry.action,
-        entry.targetType  ?? null,
-        entry.targetId    ?? null,
-        entry.outcome,
-        entry.ip          ?? null,
-        entry.userAgent   ?? null,
-        entry.extra       ? JSON.stringify(entry.extra) : null,
-      ]
-    );
+    await pool.query(AUDIT_SQL, auditParams(entry));
   } catch (err) {
     console.error('[audit] failed to write audit log', { action: entry.action, err });
   }
+}
+
+// Strict INSERT: throws on DB failure. Use when the audit row IS the primary
+// purpose of the request (e.g. POST /api/audit/emr) so the caller can return
+// 500 instead of silently losing the record.
+export async function writeAuditLogStrict(pool: Pool, entry: AuditEntry): Promise<void> {
+  await pool.query(AUDIT_SQL, auditParams(entry));
 }
 
 // ---------------------------------------------------------------------------
