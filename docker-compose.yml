@@ -94,7 +94,45 @@ services:
       retries:  3
       start_period: 15s
 
+  # ---------------------------------------------------------------------------
+  # Backup sidecar — daily pg_dump → GPG-encrypted files in backup_data volume.
+  #
+  # One-time GPG public key setup:
+  #   docker compose exec backup gpg --import /path/to/public-key.asc
+  #
+  # Required environment variables:
+  #   BACKUP_GPG_RECIPIENT — GPG key fingerprint or email
+  #
+  # See docs/BACKUP_RESTORE.md for full runbook.
+  # ---------------------------------------------------------------------------
+  backup:
+    build:
+      context: .
+      dockerfile: backup/Dockerfile
+    environment:
+      PGHOST:              postgres
+      PGPORT:              "5432"
+      PGUSER:              wr_user
+      PGPASSWORD:          ${POSTGRES_PASSWORD:-changeme_for_dev_only}
+      PGDATABASE:          wr_evaluation
+      BACKUP_DIR:          /backups
+      BACKUP_GPG_RECIPIENT: ${BACKUP_GPG_RECIPIENT:?BACKUP_GPG_RECIPIENT is required — set to GPG key fingerprint}
+    volumes:
+      - ./scripts/backup.sh:/scripts/backup.sh:ro
+      - backup_data:/backups
+      - backup_gnupg:/root/.gnupg
+    command: >
+      sh -c "chmod +x /scripts/backup.sh &&
+             echo '0 2 * * * /scripts/backup.sh >> /var/log/wr-backup.log 2>&1' | crontab - &&
+             crond -f -l 6"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   caddy_data:
   caddy_config:
+  backup_data:
+  backup_gnupg:
