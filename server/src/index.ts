@@ -7,6 +7,7 @@ import { createAuthRouter } from './routes/auth';
 import { createConfigRouter } from './routes/config';
 import { createDevicesRouter } from './routes/devices';
 import { createAdminRouter } from './routes/admin';
+import { createAuditRouter } from './routes/audit';
 import { cspMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
 
@@ -25,6 +26,7 @@ app.use('/api/auth', createAuthRouter(pool));
 app.use('/api/config', createConfigRouter());
 app.use('/api/devices', createDevicesRouter(pool));
 app.use('/api/admin',   createAdminRouter(pool));
+app.use('/api/audit',   createAuditRouter(pool));
 
 // Global JSON error handler — keeps API responses consistent when middleware
 // calls next(err) (e.g. DB failures in auth middleware).
