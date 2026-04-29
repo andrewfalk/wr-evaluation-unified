@@ -9,6 +9,7 @@ import { createDevicesRouter } from './routes/devices';
 import { createAdminRouter } from './routes/admin';
 import { createAuditRouter } from './routes/audit';
 import { createWorkspacesRouter } from './routes/workspaces';
+import { createAutosaveRouter } from './routes/autosave';
 import { cspMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
 
@@ -29,6 +30,7 @@ app.use('/api/devices', createDevicesRouter(pool));
 app.use('/api/admin',      createAdminRouter(pool));
 app.use('/api/audit',      createAuditRouter(pool));
 app.use('/api/workspaces', createWorkspacesRouter(pool));
+app.use('/api/autosave',  createAutosaveRouter(pool));
 
 // Global JSON error handler — keeps API responses consistent when middleware
 // calls next(err) (e.g. DB failures in auth middleware).
