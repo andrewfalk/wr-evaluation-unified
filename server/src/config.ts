@@ -20,6 +20,16 @@ function bool(env: NodeJS.ProcessEnv, key: string, fallback = false): boolean {
   return val === 'true' || val === '1';
 }
 
+function positiveInt(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
+  const raw = env[key];
+  if (raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(`${key} must be a positive integer, got '${raw}'`);
+  }
+  return n;
+}
+
 export type DeploymentMode = 'intranet' | 'standalone';
 export type AiProvider     = 'none' | 'internal' | 'external';
 
@@ -51,11 +61,21 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
   const aiProvider               = rawAiProvider as AiProvider;
   const aiExternalVendorApproved = bool(env, 'AI_EXTERNAL_VENDOR_APPROVED');
   const aiDeidentifyRequired     = bool(env, 'AI_DEIDENTIFY_REQUIRED');
+  const aiExternalEndpoint       = optional(env, 'AI_EXTERNAL_ENDPOINT', '');
+  const aiExternalApiKey         = optional(env, 'AI_EXTERNAL_API_KEY', '');
 
   function resolveAiEnabled(): boolean {
     if (aiProvider === 'none')     return false;
     if (aiProvider === 'internal') return true;
-    return aiExternalVendorApproved && aiDeidentifyRequired;
+    // external: both approval flags AND endpoint+key must be present
+    if (!aiExternalVendorApproved || !aiDeidentifyRequired) return false;
+    if (!aiExternalEndpoint) {
+      throw new Error('AI_EXTERNAL_ENDPOINT is required when AI_PROVIDER=external and approval flags are set');
+    }
+    if (!aiExternalApiKey) {
+      throw new Error('AI_EXTERNAL_API_KEY is required when AI_PROVIDER=external and approval flags are set');
+    }
+    return true;
   }
 
   // ---------------------------------------------------------------------------
@@ -66,10 +86,19 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
     .map((s) => s.trim())
     .filter(Boolean);
 
+  // ---------------------------------------------------------------------------
+  // NODE_ENV
+  // ---------------------------------------------------------------------------
+  const rawNodeEnv = optional(env, 'NODE_ENV', 'development');
+  if (!['development', 'production', 'test'].includes(rawNodeEnv)) {
+    throw new Error(`NODE_ENV must be 'development', 'production', or 'test', got '${rawNodeEnv}'`);
+  }
+  const nodeEnv = rawNodeEnv as 'development' | 'production' | 'test';
+
   return Object.freeze({
-    env:            optional(env, 'NODE_ENV', 'development') as 'development' | 'production' | 'test',
-    port:           Number(optional(env, 'PORT', '3001')),
-    databaseUrl:    required(env, 'DATABASE_URL'),
+    env:         nodeEnv,
+    port:        positiveInt(env, 'PORT', 3001),
+    databaseUrl: required(env, 'DATABASE_URL'),
 
     deploymentMode,
     // intranet mode never falls back to local storage on server errors
@@ -79,17 +108,17 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
       accessTokenSecret:  required(env, 'ACCESS_TOKEN_SECRET'),
       refreshTokenSecret: required(env, 'REFRESH_TOKEN_SECRET'),
       // access token TTL in seconds (default 15 min)
-      accessTokenTtl:  Number(optional(env, 'ACCESS_TOKEN_TTL',  String(15 * 60))),
+      accessTokenTtl:  positiveInt(env, 'ACCESS_TOKEN_TTL',  15 * 60),
       // refresh token TTL in seconds (default 7 days)
-      refreshTokenTtl: Number(optional(env, 'REFRESH_TOKEN_TTL', String(7 * 24 * 60 * 60))),
+      refreshTokenTtl: positiveInt(env, 'REFRESH_TOKEN_TTL', 7 * 24 * 60 * 60),
     }),
 
     ai: Object.freeze({
       provider:               aiProvider,
       enabled:                resolveAiEnabled(),
       internalEndpoint:       optional(env, 'AI_INTERNAL_ENDPOINT', 'http://localhost:11434'),
-      externalEndpoint:       optional(env, 'AI_EXTERNAL_ENDPOINT', ''),
-      externalApiKey:         optional(env, 'AI_EXTERNAL_API_KEY', ''),
+      externalEndpoint:       aiExternalEndpoint,
+      externalApiKey:         aiExternalApiKey,
       externalVendorApproved: aiExternalVendorApproved,
       deidentifyRequired:     aiDeidentifyRequired,
     }),

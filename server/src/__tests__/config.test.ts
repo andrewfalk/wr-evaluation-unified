@@ -53,13 +53,33 @@ describe('config — AI gate', () => {
     expect(c.ai.enabled).toBe(false);
   });
 
-  it('external: enabled only when both flags are true', () => {
+  it('external: enabled when both flags + endpoint + key are set', () => {
     const c = make({
       AI_PROVIDER:                  'external',
       AI_EXTERNAL_VENDOR_APPROVED:  'true',
       AI_DEIDENTIFY_REQUIRED:       'true',
+      AI_EXTERNAL_ENDPOINT:         'https://llm.hospital.local',
+      AI_EXTERNAL_API_KEY:          'secret-key',
     });
     expect(c.ai.enabled).toBe(true);
+    expect(c.ai.externalEndpoint).toBe('https://llm.hospital.local');
+  });
+
+  it('external: throws when endpoint is missing but flags are set', () => {
+    expect(() => make({
+      AI_PROVIDER:                 'external',
+      AI_EXTERNAL_VENDOR_APPROVED: 'true',
+      AI_DEIDENTIFY_REQUIRED:      'true',
+    })).toThrow('AI_EXTERNAL_ENDPOINT is required');
+  });
+
+  it('external: throws when api key is missing but flags + endpoint are set', () => {
+    expect(() => make({
+      AI_PROVIDER:                 'external',
+      AI_EXTERNAL_VENDOR_APPROVED: 'true',
+      AI_DEIDENTIFY_REQUIRED:      'true',
+      AI_EXTERNAL_ENDPOINT:        'https://llm.hospital.local',
+    })).toThrow('AI_EXTERNAL_API_KEY is required');
   });
 
   it('throws on unknown AI_PROVIDER', () => {
@@ -94,6 +114,54 @@ describe('config — auth TTLs', () => {
     const c = make({ ACCESS_TOKEN_TTL: '300', REFRESH_TOKEN_TTL: '86400' });
     expect(c.auth.accessTokenTtl).toBe(300);
     expect(c.auth.refreshTokenTtl).toBe(86400);
+  });
+
+  it('throws on non-integer TTL', () => {
+    expect(() => make({ ACCESS_TOKEN_TTL: 'abc' })).toThrow(
+      'ACCESS_TOKEN_TTL must be a positive integer'
+    );
+  });
+
+  it('throws on zero TTL', () => {
+    expect(() => make({ REFRESH_TOKEN_TTL: '0' })).toThrow(
+      'REFRESH_TOKEN_TTL must be a positive integer'
+    );
+  });
+
+  it('throws on negative TTL', () => {
+    expect(() => make({ ACCESS_TOKEN_TTL: '-300' })).toThrow(
+      'ACCESS_TOKEN_TTL must be a positive integer'
+    );
+  });
+});
+
+describe('config — PORT validation', () => {
+  it('uses default port 3001', () => {
+    expect(make().port).toBe(3001);
+  });
+
+  it('parses valid PORT', () => {
+    expect(make({ PORT: '8080' }).port).toBe(8080);
+  });
+
+  it('throws on non-integer PORT', () => {
+    expect(() => make({ PORT: 'abc' })).toThrow('PORT must be a positive integer');
+  });
+
+  it('throws on zero PORT', () => {
+    expect(() => make({ PORT: '0' })).toThrow('PORT must be a positive integer');
+  });
+});
+
+describe('config — NODE_ENV validation', () => {
+  it('throws on unknown NODE_ENV', () => {
+    expect(() => make({ NODE_ENV: 'staging' })).toThrow(
+      "NODE_ENV must be 'development', 'production', or 'test'"
+    );
+  });
+
+  it('accepts production', () => {
+    expect(make({ NODE_ENV: 'production' }).env).toBe('production');
   });
 });
 
