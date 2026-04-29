@@ -29,6 +29,9 @@ GPG_RECIPIENT="${BACKUP_GPG_RECIPIENT:?BACKUP_GPG_RECIPIENT is required}"
 
 NOW=$(date +%Y%m%d_%H%M%S)
 DUMP_TMP="/tmp/wr-backup-${NOW}.dump"
+
+# Always wipe the plaintext dump on exit, even on error.
+trap 'rm -f "${DUMP_TMP}"' EXIT
 ENCRYPTED_FILE="wr-backup-${NOW}.dump.gpg"
 
 DAILY_DIR="${BACKUP_DIR}/daily"
@@ -59,8 +62,8 @@ gpg \
   --recipient "${GPG_RECIPIENT}" \
   --output "${DAILY_DIR}/${ENCRYPTED_FILE}" \
   --encrypt "${DUMP_TMP}"
-rm -f "${DUMP_TMP}"
 echo "[backup] Encrypted: ${DAILY_DIR}/${ENCRYPTED_FILE}"
+# DUMP_TMP is cleaned up by the EXIT trap.
 
 # ---------------------------------------------------------------------------
 # 3. Monthly / yearly promotion (first backup of each period)

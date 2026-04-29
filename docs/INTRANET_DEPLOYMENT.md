@@ -34,12 +34,17 @@
 cp .env.example .env
 # .env 편집: ACCESS_TOKEN_SECRET, REFRESH_TOKEN_SECRET, CORS_ORIGINS, WR_DOMAIN 입력
 
-# 2. 서비스 기동
+# 2. 핵심 서비스 기동 (postgres + app + caddy)
 docker compose up -d
 
 # 3. Admin 계정 초기 생성 (최초 1회)
 docker compose exec app node dist/cli/seedAdmin.js
 # → stdin에서 비밀번호 입력 (shell history에 남지 않음)
+
+# 4. 백업 사이드카 활성화 (GPG 공개 키 설정 후)
+# .env에 BACKUP_GPG_RECIPIENT 설정 → docs/BACKUP_RESTORE.md 3절 참조
+# GPG 공개 키 등록 전에는 backup 서비스를 기동하지 마세요.
+docker compose --profile backup up -d
 ```
 
 서비스가 정상 기동되면 Caddy가 자동으로 내부 CA를 생성하고 `wr.hospital.local`에 대한 인증서를 발급합니다.

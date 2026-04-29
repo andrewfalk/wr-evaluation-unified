@@ -113,9 +113,13 @@ docker compose exec backup ls /backups/daily/
 ### 4-1. 자동 백업 (일반)
 
 `backup` 컨테이너의 crond가 **매일 02:00**에 자동 실행합니다.  
-별도 조작 없이 `docker compose up -d`로 서비스 기동 시 활성화됩니다.
+`.env`에 `BACKUP_GPG_RECIPIENT`를 설정한 뒤 `--profile backup`으로 활성화합니다.
 
-백업 로그 확인:
+```bash
+docker compose --profile backup up -d
+```
+
+백업 로그 확인 (crond 출력은 컨테이너 stdout으로 전달됩니다):
 
 ```bash
 docker compose logs backup --tail=50
@@ -158,9 +162,11 @@ docker compose cp backup:/backups/yearly/wr-backup-2026.dump.gpg ./
 
 ```bash
 # 복구 전용 임시 컨테이너 실행 (프로덕션 backup 컨테이너 아님)
+# restore.sh가 이미지에 포함되지 않으므로 :ro로 직접 마운트합니다.
 docker run --rm -it \
   -v $(pwd)/wr-backup-private.asc:/tmp/private.asc:ro \
   -v /path/to/backup/files:/backups:ro \
+  -v $(pwd)/scripts/restore.sh:/scripts/restore.sh:ro \
   -e PGHOST=<복구대상_DB호스트> \
   -e PGPASSWORD=<password> \
   -e RESTORE_AUTH_TICKET=<티켓번호> \
@@ -177,9 +183,8 @@ gpg --import /tmp/private.asc
 ### 5-3. 복구 실행
 
 ```bash
-# 컨테이너 내부
-chmod +x /scripts/restore.sh
-RESTORE_AUTH_TICKET=<티켓번호> /scripts/restore.sh /backups/daily/wr-backup-YYYYMMDD_HHmmss.dump.gpg
+# 컨테이너 내부 — :ro 마운트이므로 chmod 불필요, sh로 직접 실행
+RESTORE_AUTH_TICKET=<티켓번호> sh /scripts/restore.sh /backups/daily/wr-backup-YYYYMMDD_HHmmss.dump.gpg
 ```
 
 스크립트가 `YES` 입력을 요구합니다. 확인 후 입력하면 복구가 진행됩니다.

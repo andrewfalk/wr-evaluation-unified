@@ -97,15 +97,19 @@ services:
   # ---------------------------------------------------------------------------
   # Backup sidecar — daily pg_dump → GPG-encrypted files in backup_data volume.
   #
-  # One-time GPG public key setup:
-  #   docker compose exec backup gpg --import /path/to/public-key.asc
+  # Activate with:  docker compose --profile backup up -d
+  # (Separated into a profile so docker compose up without GPG setup doesn't fail.)
   #
-  # Required environment variables:
+  # One-time GPG public key setup (before first start):
+  #   docker compose --profile backup run --rm backup gpg --import /path/to/public-key.asc
+  #
+  # Required environment variables (set in .env):
   #   BACKUP_GPG_RECIPIENT — GPG key fingerprint or email
   #
   # See docs/BACKUP_RESTORE.md for full runbook.
   # ---------------------------------------------------------------------------
   backup:
+    profiles: ["backup"]
     build:
       context: .
       dockerfile: backup/Dockerfile
@@ -116,14 +120,16 @@ services:
       PGPASSWORD:          ${POSTGRES_PASSWORD:-changeme_for_dev_only}
       PGDATABASE:          wr_evaluation
       BACKUP_DIR:          /backups
-      BACKUP_GPG_RECIPIENT: ${BACKUP_GPG_RECIPIENT:?BACKUP_GPG_RECIPIENT is required — set to GPG key fingerprint}
+      BACKUP_GPG_RECIPIENT: ${BACKUP_GPG_RECIPIENT:-}
     volumes:
       - ./scripts/backup.sh:/scripts/backup.sh:ro
+      - ./scripts/restore.sh:/scripts/restore.sh:ro
       - backup_data:/backups
       - backup_gnupg:/root/.gnupg
+    # Use 'sh script' instead of executing directly — :ro mount cannot be chmod'd.
+    # Logs go to stdout so 'docker compose logs backup' works.
     command: >
-      sh -c "chmod +x /scripts/backup.sh &&
-             echo '0 2 * * * /scripts/backup.sh >> /var/log/wr-backup.log 2>&1' | crontab - &&
+      sh -c "echo '0 2 * * * sh /scripts/backup.sh' | crontab - &&
              crond -f -l 6"
     depends_on:
       postgres:

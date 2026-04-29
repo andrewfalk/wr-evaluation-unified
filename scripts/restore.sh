@@ -52,6 +52,9 @@ fi
 
 DUMP_TMP="/tmp/wr-restore-$(date +%s).dump"
 
+# Always wipe the plaintext dump on exit, even on error or Ctrl-C.
+trap 'rm -f "${DUMP_TMP}"' EXIT
+
 # ---------------------------------------------------------------------------
 # 1. GPG decrypt
 # ---------------------------------------------------------------------------
@@ -73,8 +76,8 @@ pg_restore \
   --no-owner \
   "${DUMP_TMP}"
 
-rm -f "${DUMP_TMP}"
 echo "[restore] Restore complete"
+# DUMP_TMP is cleaned up by the EXIT trap.
 
 # ---------------------------------------------------------------------------
 # 3. Verification — basic row count sanity check
