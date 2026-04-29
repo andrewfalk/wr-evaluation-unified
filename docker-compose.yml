@@ -37,7 +37,7 @@ services:
   # ---------------------------------------------------------------------------
   app:
     build:
-      context: ..
+      context: .
       dockerfile: server/Dockerfile
     environment:
       DATABASE_URL:         postgres://wr_user:${POSTGRES_PASSWORD:-changeme_for_dev_only}@postgres:5432/wr_evaluation
