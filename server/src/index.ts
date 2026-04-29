@@ -5,6 +5,7 @@ import config from './config';
 import { pool } from './db/client';
 import { createAuthRouter } from './routes/auth';
 import { createConfigRouter } from './routes/config';
+import { createDevicesRouter } from './routes/devices';
 import { cspMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
 
@@ -21,6 +22,7 @@ app.get('/health', (_req, res) => {
 
 app.use('/api/auth', createAuthRouter(pool));
 app.use('/api/config', createConfigRouter());
+app.use('/api/devices', createDevicesRouter(pool));
 
 // Global JSON error handler — keeps API responses consistent when middleware
 // calls next(err) (e.g. DB failures in auth middleware).
