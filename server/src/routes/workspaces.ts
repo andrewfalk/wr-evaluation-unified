@@ -25,20 +25,137 @@ interface WorkspaceRow {
   snapshot_payload: unknown;
 }
 
-// Extracts UUIDs from the patients array so patient_ids stays queryable for
-// ?view=current. Only well-formed UUIDs are included; local string IDs are skipped.
+// ---------------------------------------------------------------------------
+// Patient metadata extraction helpers
+// ---------------------------------------------------------------------------
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(v: unknown): v is string {
+  return typeof v === 'string' && UUID_RE.test(v);
+}
+
+// Resolve the authoritative server-side UUID for a patient.
+// Phase 3 (patient 1급 API) assigns sync.serverId. Until then, patient.id
+// is used as the row ID. This function ensures patient_ids[] and
+// patient_records.id are consistent across both phases.
+function resolvePatientId(p: unknown): string | null {
+  if (typeof p !== 'object' || p === null) return null;
+  const raw = p as Record<string, unknown>;
+  const sync = raw['sync'];
+  if (typeof sync === 'object' && sync !== null) {
+    const serverId = (sync as Record<string, unknown>)['serverId'];
+    if (isUuid(serverId)) return serverId;
+  }
+  return isUuid(raw['id']) ? (raw['id'] as string) : null;
+}
+
+// Extracts UUIDs for the workspaces.patient_ids column.
+// Prefers sync.serverId (server-assigned) over patient.id (local UUID).
 function extractPatientIds(patients: unknown[]): string[] {
   const ids: string[] = [];
   for (const p of patients) {
-    if (typeof p === 'object' && p !== null && 'id' in p) {
-      const id = (p as Record<string, unknown>).id;
-      if (typeof id === 'string' && UUID_RE.test(id)) ids.push(id);
-    }
+    const id = resolvePatientId(p);
+    if (id) ids.push(id);
   }
   return ids;
 }
 
+// Metadata extracted from a patient object for patient_records upsert.
+interface PatientMeta {
+  id:              string;
+  name:            string;
+  patientNo:       string | null;
+  birthDate:       string | null;
+  evaluationDate:  string | null;
+  activeModules:   string[];
+  diagnosesCodes:  string[];
+  jobsNames:       string[];
+  payload:         unknown;
+}
+
+// Safely pull metadata fields out of an unknown patient object.
+// Returns null if the patient cannot be identified or has no name (NOT NULL in DB).
+function extractPatientMeta(p: unknown): PatientMeta | null {
+  const id = resolvePatientId(p);
+  if (!id) return null;
+
+  if (typeof p !== 'object' || p === null) return null;
+  const raw    = p as Record<string, unknown>;
+  const data   = typeof raw['data'] === 'object' && raw['data'] !== null
+    ? raw['data'] as Record<string, unknown>
+    : null;
+  const shared = data && typeof data['shared'] === 'object' && data['shared'] !== null
+    ? data['shared'] as Record<string, unknown>
+    : null;
+
+  const name = typeof shared?.['name'] === 'string' ? (shared['name'] as string).trim() : '';
+  if (!name) return null; // name is NOT NULL in DB
+
+  const diagnoses = Array.isArray(shared?.['diagnoses']) ? shared!['diagnoses'] as unknown[] : [];
+  const jobs      = Array.isArray(shared?.['jobs'])      ? shared!['jobs']      as unknown[] : [];
+  const mods      = Array.isArray(data?.['activeModules']) ? data!['activeModules'] as unknown[] : [];
+
+  return {
+    id,
+    name,
+    patientNo:      typeof shared?.['patientNo']      === 'string' ? shared!['patientNo']      as string : null,
+    birthDate:      typeof shared?.['birthDate']      === 'string' && (shared['birthDate'] as string).trim()
+      ? shared!['birthDate'] as string : null,
+    evaluationDate: typeof shared?.['evaluationDate'] === 'string' && (shared['evaluationDate'] as string).trim()
+      ? shared!['evaluationDate'] as string : null,
+    activeModules:  mods.filter((m): m is string => typeof m === 'string'),
+    diagnosesCodes: diagnoses
+      .filter((d): d is Record<string, unknown> => typeof d === 'object' && d !== null)
+      .map((d) => d['code'])
+      .filter((c): c is string => typeof c === 'string'),
+    jobsNames: jobs
+      .filter((j): j is Record<string, unknown> => typeof j === 'object' && j !== null)
+      .map((j) => j['jobName'])
+      .filter((n): n is string => typeof n === 'string'),
+    payload: p,
+  };
+}
+
+// Upsert a single patient into patient_records. Errors are logged but not thrown
+// so that a single malformed patient does not block the whole workspace save.
+// The WHERE clause on ON CONFLICT ensures we never overwrite another org's patient.
+async function upsertPatientRecord(
+  pool: Pool, orgId: string, userId: string, meta: PatientMeta,
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO patient_records
+       (id, organization_id, owner_user_id, name, patient_no,
+        birth_date, evaluation_date, active_modules, diagnoses_codes,
+        jobs_names, revision, payload)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11)
+     ON CONFLICT (id) DO UPDATE SET
+       name             = EXCLUDED.name,
+       patient_no       = EXCLUDED.patient_no,
+       birth_date       = EXCLUDED.birth_date,
+       evaluation_date  = EXCLUDED.evaluation_date,
+       active_modules   = EXCLUDED.active_modules,
+       diagnoses_codes  = EXCLUDED.diagnoses_codes,
+       jobs_names       = EXCLUDED.jobs_names,
+       revision         = patient_records.revision + 1,
+       payload          = EXCLUDED.payload,
+       deleted_at       = NULL
+     WHERE patient_records.organization_id = EXCLUDED.organization_id`,
+    [
+      meta.id, orgId, userId, meta.name,
+      meta.patientNo,
+      meta.birthDate       ? meta.birthDate       : null,
+      meta.evaluationDate  ? meta.evaluationDate  : null,
+      meta.activeModules,
+      meta.diagnosesCodes,
+      meta.jobsNames,
+      JSON.stringify(meta.payload),
+    ]
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
 function toItem(row: WorkspaceRow) {
   const patients = Array.isArray(row.snapshot_payload) ? row.snapshot_payload : [];
   return {
@@ -152,7 +269,9 @@ async function getWorkspace(pool: Pool, req: Request, res: Response): Promise<vo
 // ---------------------------------------------------------------------------
 // POST /api/workspaces
 // Body: { name, patients }
-// Stores snapshot, returns refreshed list.
+// Stores snapshot AND upserts patient_records so ?view=current works immediately.
+// patient_records upserts are best-effort — failures are logged but do not block
+// the workspace save; the snapshot remains the primary source of truth.
 // ---------------------------------------------------------------------------
 async function saveWorkspace(pool: Pool, req: Request, res: Response): Promise<void> {
   const session = req.sessionInfo!;
@@ -171,11 +290,28 @@ async function saveWorkspace(pool: Pool, req: Request, res: Response): Promise<v
   const { name, patients } = parse.data;
   const patientIds = extractPatientIds(patients);
 
+  // Primary operation: insert workspace snapshot.
   await pool.query(
     `INSERT INTO workspaces (organization_id, owner_user_id, name, patient_ids, snapshot_payload)
      VALUES ($1, $2, $3, $4, $5)`,
     [orgId, session.userId, name, patientIds, JSON.stringify(patients)]
   );
+
+  // Secondary (best-effort): decompose patients into patient_records so that
+  // ?view=current returns live data immediately after the first workspace save.
+  // Failures are logged per patient and do not roll back the workspace row.
+  const metas = patients.map(extractPatientMeta).filter((m): m is PatientMeta => m !== null);
+  const results = await Promise.allSettled(
+    metas.map((meta) => upsertPatientRecord(pool, orgId, session.userId, meta))
+  );
+  results.forEach((r, i) => {
+    if (r.status === 'rejected') {
+      console.error('[workspaces] patient_records upsert failed', {
+        patientId: metas[i].id,
+        err: r.reason,
+      });
+    }
+  });
 
   const rows = await listQuery(pool, orgId, session.userId);
   res.status(201).json({ items: rows.map(toItem) });
