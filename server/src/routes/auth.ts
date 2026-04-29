@@ -21,6 +21,7 @@ import {
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { loginRateLimit, csrfRateLimit } from '../middleware/rateLimit';
+import { auditLogin, auditLogout, auditRefreshFail } from '../middleware/audit';
 
 const REFRESH_COOKIE = 'wr_refresh';
 
@@ -60,6 +61,7 @@ async function login(pool: Pool, req: Request, res: Response): Promise<void> {
   const provider = new LocalDbAuthProvider(pool);
   const creds = await provider.verifyCredentials(parsed.data.loginId, parsed.data.password);
   if (!creds) {
+    auditLogin(pool, req, 'failure');
     res.status(401).json({ code: 'INVALID_CREDENTIALS', error: 'Invalid login ID or password' });
     return;
   }
@@ -92,6 +94,8 @@ async function login(pool: Pool, req: Request, res: Response): Promise<void> {
 
     setRefreshCookie(res, session.refreshToken, session.expiresAt);
     setCsrfCookie(res, session.csrfToken, isSecure);
+
+    auditLogin(pool, req, 'success', creds.userId, creds.organizationId);
 
     res.status(200).json({
       user: {
@@ -129,6 +133,7 @@ async function refresh(pool: Pool, req: Request, res: Response): Promise<void> {
   try {
     const existing = await verifySession(client, oldRefreshToken);
     if (!existing) {
+      auditRefreshFail(pool, req, 'SESSION_INVALID');
       res.status(401).json({ code: 'SESSION_INVALID', error: 'Refresh token invalid or expired' });
       return;
     }
@@ -138,6 +143,7 @@ async function refresh(pool: Pool, req: Request, res: Response): Promise<void> {
   }
 
   if (!validateCsrf(req.headers[CSRF_HEADER], csrfTokenHash!)) {
+    auditRefreshFail(pool, req, 'CSRF_INVALID');
     res.status(403).json({ code: 'CSRF_INVALID', error: 'Invalid or missing CSRF token' });
     return;
   }
@@ -151,6 +157,7 @@ async function refresh(pool: Pool, req: Request, res: Response): Promise<void> {
 
   if (!newSession) {
     // Token was already rotated by a concurrent request (race condition resolved)
+    auditRefreshFail(pool, req, 'SESSION_ALREADY_ROTATED');
     res.status(401).json({ code: 'SESSION_ALREADY_ROTATED', error: 'Session was already rotated' });
     return;
   }
@@ -207,6 +214,7 @@ async function logout(pool: Pool, req: Request, res: Response): Promise<void> {
       client.release();
     }
   }
+  auditLogout(pool, req);
   clearAuthCookies(res);
   res.status(200).json({ ok: true });
 }
