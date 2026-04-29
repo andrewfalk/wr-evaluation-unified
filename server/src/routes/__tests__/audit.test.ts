@@ -489,4 +489,49 @@ describe('POST /api/audit/emr', () => {
     expect(res2.status).toBe(401);
     expect(res2.body.error).toMatch(/nonce/i);
   });
+
+  it('allows nonce reuse after a failed request (pendingNonces released)', async () => {
+    // A request that fails verification (invalid sig) should release the nonce
+    // from pendingNonces so the device can retry with the same nonce.
+    const { privateKey, publicKey }    = makeKeyPair();
+    const { privateKey: wrongPriv }    = makeKeyPair();
+    const pool     = makePool();
+    const app      = makeApp(pool);
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+
+    // First attempt: wrong key → signature invalid → nonce released
+    const badSig = signPayload(wrongPriv, 'dev-1', ts, devNonce, VALID_BODY);
+    wireDevice(pool, {
+      user_id: 'user-1', organization_id: 'org-1',
+      public_key: exportPublicKey(publicKey), status: 'active',
+    });
+    const res1 = await request(app)
+      .post('/api/audit/emr')
+      .set('Authorization', `Bearer ${userToken()}`)
+      .set('x-wr-source', 'electron-main')
+      .set('x-wr-device-id', 'dev-1')
+      .set('x-wr-device-sig', badSig)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', devNonce)
+      .send(VALID_BODY);
+    expect(res1.status).toBe(401);
+
+    // Second attempt: correct key, same nonce → must succeed
+    const goodSig = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
+    wireDevice(pool, {
+      user_id: 'user-1', organization_id: 'org-1',
+      public_key: exportPublicKey(publicKey), status: 'active',
+    });
+    const res2 = await request(app)
+      .post('/api/audit/emr')
+      .set('Authorization', `Bearer ${userToken()}`)
+      .set('x-wr-source', 'electron-main')
+      .set('x-wr-device-id', 'dev-1')
+      .set('x-wr-device-sig', goodSig)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', devNonce)
+      .send(VALID_BODY);
+    expect(res2.status).toBe(200);
+  });
 });
