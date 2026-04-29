@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
@@ -29,12 +30,16 @@ import type { Pool } from 'pg';
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function makePool(insertRows: unknown[] = [{ id: 'dev-1' }]): Pool {
-  const release = vi.fn();
-  const client  = { query: vi.fn(), release } as unknown as { query: ReturnType<typeof vi.fn>; release: ReturnType<typeof vi.fn> };
+
+// Valid Ed25519 public key: 32 random bytes as standard base64 (44 chars, 1 padding =).
+function validPublicKey(): string {
+  return crypto.randomBytes(32).toString('base64');
+}
+
+function makePool(queryRows: unknown[] = [{ id: 'dev-1', status: 'pending', inserted: true }]): Pool {
   return {
-    connect: vi.fn().mockResolvedValue(client),
-    query:   vi.fn().mockResolvedValue({ rows: insertRows }),
+    connect: vi.fn(),
+    query:   vi.fn().mockResolvedValue({ rows: queryRows }),
   } as unknown as Pool;
 }
 
@@ -55,17 +60,16 @@ function makeApp(pool: Pool) {
   const app = express();
   app.use(express.json());
   app.use(cookieParser());
-  // Minimal auth middleware stub: set sessionInfo from token, check DB live
-  app.use((req, _res, next) => {
-    const auth = req.headers.authorization;
-    if (auth?.startsWith('Bearer ')) {
-      // Simulate pool.query returning a live session row for auth middleware
-      (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    }
-    next();
-  });
   app.use('/api/devices', createDevicesRouter(pool));
   return app;
+}
+
+// Wire pool.query to return a live session for auth middleware, then the
+// insert result for the handler.
+function wireAuth(pool: Pool, insertRow = { id: 'dev-1', status: 'pending', inserted: true }) {
+  (pool.query as ReturnType<typeof vi.fn>)
+    .mockResolvedValueOnce({ rows: [{ exists: 1 }] })   // auth middleware session check
+    .mockResolvedValueOnce({ rows: [insertRow] });        // INSERT ... ON CONFLICT ... RETURNING
 }
 
 // ---------------------------------------------------------------------------
@@ -76,13 +80,16 @@ describe('POST /api/devices/register', () => {
 
   it('returns 401 when not authenticated', async () => {
     const pool = makePool();
-    const res  = await request(makeApp(pool))
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [] }); // no session
+
+    const res = await request(makeApp(pool))
       .post('/api/devices/register')
-      .send({ publicKey: 'abc', buildTarget: 'intranet' });
+      .send({ publicKey: validPublicKey(), buildTarget: 'intranet' });
+
     expect(res.status).toBe(401);
   });
 
-  it('returns 400 when body is invalid', async () => {
+  it('returns 400 when publicKey is missing', async () => {
     const pool  = makePool();
     const token = validToken();
     (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
@@ -90,13 +97,13 @@ describe('POST /api/devices/register', () => {
     const res = await request(makeApp(pool))
       .post('/api/devices/register')
       .set('Authorization', `Bearer ${token}`)
-      .send({ publicKey: 'abc' }); // missing buildTarget
+      .send({ buildTarget: 'intranet' });
 
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('INVALID_BODY');
   });
 
-  it('returns 400 for invalid buildTarget', async () => {
+  it('returns 400 when publicKey is not a valid 32-byte base64 key', async () => {
     const pool  = makePool();
     const token = validToken();
     (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
@@ -104,72 +111,116 @@ describe('POST /api/devices/register', () => {
     const res = await request(makeApp(pool))
       .post('/api/devices/register')
       .set('Authorization', `Bearer ${token}`)
-      .send({ publicKey: 'abc', buildTarget: 'cloud' });
+      .send({ publicKey: 'not-a-valid-ed25519-key', buildTarget: 'intranet' });
 
     expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_BODY');
   });
 
-  it('returns 201 with deviceId and pending status on valid request', async () => {
-    const pool  = makePool([{ id: 'dev-1' }]);
+  it('returns 400 when publicKey decodes to wrong length (not 32 bytes)', async () => {
+    const pool  = makePool();
     const token = validToken();
-    // Auth middleware DB check: live session
     (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    // INSERT returning device id
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ id: 'dev-1' }] });
+
+    const shortKey = crypto.randomBytes(16).toString('base64'); // 16 bytes, not 32
 
     const res = await request(makeApp(pool))
       .post('/api/devices/register')
       .set('Authorization', `Bearer ${token}`)
-      .send({ publicKey: 'ed25519-pub-key-base64', buildTarget: 'intranet' });
+      .send({ publicKey: shortKey, buildTarget: 'intranet' });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when buildTarget is standalone (not permitted)', async () => {
+    const pool  = makePool();
+    const token = validToken();
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+
+    const res = await request(makeApp(pool))
+      .post('/api/devices/register')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ publicKey: validPublicKey(), buildTarget: 'standalone' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_BODY');
+  });
+
+  it('returns 201 with deviceId and pending status on new registration', async () => {
+    const pool  = makePool();
+    const token = validToken();
+    wireAuth(pool);
+
+    const res = await request(makeApp(pool))
+      .post('/api/devices/register')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ publicKey: validPublicKey(), buildTarget: 'intranet' });
 
     expect(res.status).toBe(201);
     expect(res.body.deviceId).toBe('dev-1');
     expect(res.body.status).toBe('pending');
   });
 
-  it('stores user_id, org_id, publicKey, buildTarget in DB', async () => {
-    const pool  = makePool([{ id: 'dev-2' }]);
+  it('returns 200 when same key is re-registered (duplicate)', async () => {
+    const pool  = makePool();
     const token = validToken();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ id: 'dev-2' }] });
+    wireAuth(pool, { id: 'dev-1', status: 'active', inserted: false });
+
+    const res = await request(makeApp(pool))
+      .post('/api/devices/register')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ publicKey: validPublicKey(), buildTarget: 'intranet' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.deviceId).toBe('dev-1');
+    expect(res.body.message).toContain('already registered');
+  });
+
+  it('stores publicKey, fingerprint, buildTarget in DB', async () => {
+    const pool  = makePool();
+    const token = validToken();
+    const pubKey = validPublicKey();
+    wireAuth(pool);
 
     await request(makeApp(pool))
       .post('/api/devices/register')
       .set('Authorization', `Bearer ${token}`)
-      .send({ publicKey: 'my-pub-key', buildTarget: 'intranet' });
+      .send({ publicKey: pubKey, buildTarget: 'intranet' });
 
-    // Find the INSERT call (last pool.query after auth check)
     const calls = (pool.query as ReturnType<typeof vi.fn>).mock.calls;
-    const insertCall = calls.find((args: unknown[]) => typeof args[0] === 'string' && args[0].includes('INSERT INTO devices'));
+    const insertCall = calls.find((args: unknown[]) =>
+      typeof args[0] === 'string' && args[0].includes('INSERT INTO devices')
+    );
     expect(insertCall).toBeDefined();
     const params = insertCall![1] as unknown[];
     expect(params[0]).toBe('user-1');    // user_id
     expect(params[1]).toBe('org-1');     // organization_id
-    expect(params[2]).toBe('my-pub-key'); // public_key
-    expect(params[3]).toBe('intranet');  // build_target
+    expect(params[2]).toBe(pubKey);      // public_key
+    expect(typeof params[3]).toBe('string'); // fingerprint (SHA-256 hex)
+    expect((params[3] as string).length).toBe(64);
+    expect(params[4]).toBe('intranet');  // build_target
   });
 
-  it('returns 429 after exceeding IP rate limit (1/min)', async () => {
+  it('returns 429 after exceeding IP rate limit', async () => {
     const pool  = makePool();
     const token = validToken();
     const app   = makeApp(pool);
 
-    // First request succeeds (mocks wired inside makeApp per request, so
-    // set up fresh mocks for each call)
+    // First request
     (pool.query as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ rows: [{ exists: 1 }] }) // auth check
-      .mockResolvedValueOnce({ rows: [{ id: 'dev-1' }] }); // insert
+      .mockResolvedValueOnce({ rows: [{ exists: 1 }] })
+      .mockResolvedValueOnce({ rows: [{ id: 'dev-1', status: 'pending', inserted: true }] });
 
     await request(app)
       .post('/api/devices/register')
       .set('Authorization', `Bearer ${token}`)
-      .send({ publicKey: 'k', buildTarget: 'intranet' });
+      .send({ publicKey: validPublicKey(), buildTarget: 'intranet' });
 
-    // Second request should be rate-limited (same IP)
+    // Second request — rate limited at IP level
     const res2 = await request(app)
       .post('/api/devices/register')
       .set('Authorization', `Bearer ${token}`)
-      .send({ publicKey: 'k', buildTarget: 'intranet' });
+      .send({ publicKey: validPublicKey(), buildTarget: 'intranet' });
 
     expect(res2.status).toBe(429);
     expect(res2.body.code).toBe('RATE_LIMITED');
