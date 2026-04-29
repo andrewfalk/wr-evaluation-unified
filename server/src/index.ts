@@ -8,6 +8,7 @@ import { createConfigRouter } from './routes/config';
 import { createDevicesRouter } from './routes/devices';
 import { createAdminRouter } from './routes/admin';
 import { createAuditRouter } from './routes/audit';
+import { createWorkspacesRouter } from './routes/workspaces';
 import { cspMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
 
@@ -25,8 +26,9 @@ app.get('/health', (_req, res) => {
 app.use('/api/auth', createAuthRouter(pool));
 app.use('/api/config', createConfigRouter());
 app.use('/api/devices', createDevicesRouter(pool));
-app.use('/api/admin',   createAdminRouter(pool));
-app.use('/api/audit',   createAuditRouter(pool));
+app.use('/api/admin',      createAdminRouter(pool));
+app.use('/api/audit',      createAuditRouter(pool));
+app.use('/api/workspaces', createWorkspacesRouter(pool));
 
 // Global JSON error handler — keeps API responses consistent when middleware
 // calls next(err) (e.g. DB failures in auth middleware).
