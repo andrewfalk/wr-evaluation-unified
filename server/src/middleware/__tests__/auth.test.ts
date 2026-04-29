@@ -61,6 +61,17 @@ describe('createAuthMiddleware', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it('calls next(err) when pool.query throws (DB down)', async () => {
+    const { token } = generateAccessToken(BASE);
+    const pool = { query: vi.fn().mockRejectedValue(new Error('DB down')) } as unknown as Pool;
+    const middleware = createAuthMiddleware(pool);
+    const req  = makeReq(`Bearer ${token}`) as Request & { sessionInfo?: unknown };
+    const next = vi.fn() as unknown as NextFunction;
+    const { res } = makeRes();
+    await middleware(req, res, next);
+    expect(next).toHaveBeenCalledWith(expect.any(Error));
+  });
+
   it('populates req.sessionInfo and calls next when JWT + DB session are valid', async () => {
     const { token } = generateAccessToken(BASE);
     // DB returns a row → session is live

@@ -20,12 +20,20 @@ export function createAuthMiddleware(pool: Pool): RequestHandler {
     }
 
     // Verify the session is still alive (not invalidated by logout / password change).
-    // Primary-key lookup — fast even without caching.
-    const { rows } = await pool.query<{ exists: number }>(
-      `SELECT 1 AS exists FROM sessions
-       WHERE id = $1 AND invalidated_at IS NULL AND expires_at > now()`,
-      [payload.sessionId]
-    );
+    // Also confirms user_id matches the token subject as defence-in-depth.
+    // Note: revoked_at (rotation grace) is intentionally NOT checked here — the
+    // access token remains valid until its own JWT expiry after a normal refresh.
+    let rows: { exists: number }[];
+    try {
+      ({ rows } = await pool.query<{ exists: number }>(
+        `SELECT 1 AS exists FROM sessions
+         WHERE id = $1 AND user_id = $2 AND invalidated_at IS NULL AND expires_at > now()`,
+        [payload.sessionId, payload.sub]
+      ));
+    } catch (err) {
+      next(err);
+      return;
+    }
 
     if (rows.length === 0) {
       res.status(401).json({ code: 'SESSION_REVOKED', error: 'Session has been revoked or expired' });
