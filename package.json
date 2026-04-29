@@ -23,7 +23,8 @@
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "server:seed:admin": "cd server && npm run seed:admin"
   },
   "dependencies": {
     "html2pdf.js": "^0.10.1",
