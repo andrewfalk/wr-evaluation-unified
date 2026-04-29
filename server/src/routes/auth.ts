@@ -20,6 +20,7 @@ import {
 } from '../auth/csrf';
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
+import { loginRateLimit, csrfRateLimit } from '../middleware/rateLimit';
 
 const REFRESH_COOKIE = 'wr_refresh';
 
@@ -323,13 +324,13 @@ export function createAuthRouter(pool: Pool): Router {
   const auth   = createAuthMiddleware(pool);
 
   // Unauthenticated
-  router.post('/login',   (req, res) => login(pool, req, res).catch(() => res.status(500).json(internalError())));
+  router.post('/login',   loginRateLimit(), (req, res) => login(pool, req, res).catch(() => res.status(500).json(internalError())));
   router.post('/refresh', (req, res) => refresh(pool, req, res).catch(() => res.status(500).json(internalError())));
 
-  // /csrf is exempt from csrfMiddleware (called when wr_csrf cookie is lost).
-  // Origin check + rate limit are applied globally in T13.
-  // Refresh cookie (HttpOnly + SameSite=Strict) prevents cross-site requests.
-  router.post('/csrf', (req, res) => csrfReissue(pool, req, res).catch(() => res.status(500).json(internalError())));
+  // /csrf is exempt from csrfMiddleware (wr_csrf cookie is missing when called).
+  // Protected by: HttpOnly wr_refresh cookie (SameSite=Strict), Origin check
+  // (CORS middleware), and rate limit below.
+  router.post('/csrf', csrfRateLimit(), (req, res) => csrfReissue(pool, req, res).catch(() => res.status(500).json(internalError())));
 
   // Requires valid access token + live DB session check
   router.get('/me', auth, (req, res) => me(pool, req, res).catch(() => res.status(500).json(internalError())));

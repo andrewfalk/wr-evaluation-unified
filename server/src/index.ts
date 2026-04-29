@@ -5,8 +5,13 @@ import config from './config';
 import { pool } from './db/client';
 import { createAuthRouter } from './routes/auth';
 import { createConfigRouter } from './routes/config';
+import { cspMiddleware } from './middleware/csp';
+import { corsMiddleware } from './middleware/corsMiddleware';
 
 export const app = express();
+// Security headers first — applied to every response before any route runs.
+app.use(cspMiddleware());
+app.use(corsMiddleware());
 app.use(express.json());
 app.use(cookieParser());
 
