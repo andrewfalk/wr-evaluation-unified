@@ -4,11 +4,12 @@
 #   ACCESS_TOKEN_SECRET   — random 64-char string (openssl rand -hex 32)
 #   REFRESH_TOKEN_SECRET  — random 64-char string (openssl rand -hex 32)
 #   CORS_ORIGINS          — comma-separated allowed origins (e.g. https://wr.hospital.local)
+#   WR_DOMAIN             — intranet hostname Caddy serves (e.g. wr.hospital.local)
 #
 # Optional:
 #   POSTGRES_PASSWORD     — DB password (default: changeme_for_dev_only)
 #   DEPLOYMENT_MODE       — intranet | standalone (default: intranet)
-#   PORT                  — host port for the app (default: 3001)
+#   PORT                  — host port for direct app access bypassing Caddy (default: 3001)
 #   AI_PROVIDER           — none | internal | external (default: none)
 
 services:
@@ -34,6 +35,7 @@ services:
   # ---------------------------------------------------------------------------
   # Application server
   # Runs DB migrations automatically on startup before accepting connections.
+  # Not exposed externally — Caddy proxies all inbound traffic.
   # ---------------------------------------------------------------------------
   app:
     build:
@@ -48,8 +50,6 @@ services:
       REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET is required — run: export REFRESH_TOKEN_SECRET=$(openssl rand -hex 32)}
       CORS_ORIGINS:         ${CORS_ORIGINS:-https://wr.hospital.local}
       AI_PROVIDER:          ${AI_PROVIDER:-none}
-    ports:
-      - "${PORT:-3001}:3001"
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,5 +61,37 @@ services:
       retries:  3
       start_period: 30s
 
+  # ---------------------------------------------------------------------------
+  # Caddy — HTTPS reverse proxy with internal CA
+  #
+  # Root CA certificate (must be installed on every client PC):
+  #   docker compose exec caddy cat /data/caddy/pki/authorities/local/root.crt
+  #
+  # See docs/INTRANET_DEPLOYMENT.md for full CA installation procedure.
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      WR_DOMAIN: ${WR_DOMAIN:?WR_DOMAIN is required — set to your intranet hostname, e.g. wr.hospital.local}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --no-check-certificate https://localhost/health 2>/dev/null | grep -q ok || exit 1"]
+      interval: 30s
+      timeout:  5s
+      retries:  3
+      start_period: 15s
+
 volumes:
   postgres_data:
+  caddy_data:
+  caddy_config:
