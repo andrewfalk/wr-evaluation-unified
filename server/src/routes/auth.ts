@@ -18,7 +18,8 @@ import {
   CSRF_HEADER,
   validateCsrf,
 } from '../auth/csrf';
-import { authMiddleware } from '../middleware/auth';
+import { createAuthMiddleware } from '../middleware/auth';
+import { csrfMiddleware } from '../middleware/csrf';
 
 const REFRESH_COOKIE = 'wr_refresh';
 
@@ -279,18 +280,22 @@ const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server e
 
 export function createAuthRouter(pool: Pool): Router {
   const router = Router();
+  const auth   = createAuthMiddleware(pool);
 
   // Unauthenticated
   router.post('/login',   (req, res) => login(pool, req, res).catch(() => res.status(500).json(internalError())));
   router.post('/refresh', (req, res) => refresh(pool, req, res).catch(() => res.status(500).json(internalError())));
 
-  // /csrf is exempt from CSRF middleware and uses refresh cookie for auth
-  // (called when access token is expired and csrf cookie is lost)
-  router.post('/csrf',    (req, res) => csrfReissue(pool, req, res).catch(() => res.status(500).json(internalError())));
+  // /csrf is exempt from csrfMiddleware (called when wr_csrf cookie is lost).
+  // Origin check + rate limit are applied globally in T13.
+  // Refresh cookie (HttpOnly + SameSite=Strict) prevents cross-site requests.
+  router.post('/csrf', (req, res) => csrfReissue(pool, req, res).catch(() => res.status(500).json(internalError())));
 
-  // Requires valid access token
-  router.post('/logout', authMiddleware, (req, res) => logout(pool, req, res).catch(() => res.status(500).json(internalError())));
-  router.get('/me',      authMiddleware, (req, res) => me(pool, req, res).catch(() => res.status(500).json(internalError())));
+  // Requires valid access token + live DB session check
+  router.get('/me', auth, (req, res) => me(pool, req, res).catch(() => res.status(500).json(internalError())));
+
+  // logout: auth + CSRF (mutating POST)
+  router.post('/logout', auth, csrfMiddleware, (req, res) => logout(pool, req, res).catch(() => res.status(500).json(internalError())));
 
   return router;
 }

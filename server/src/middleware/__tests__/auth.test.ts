@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Request, Response, NextFunction } from 'express';
-import { authMiddleware } from '../auth';
+import type { Pool } from 'pg';
+import { createAuthMiddleware } from '../auth';
 import { generateAccessToken, type AccessTokenPayload } from '../../auth/tokens';
 
 const BASE: AccessTokenPayload = {
@@ -13,6 +14,10 @@ const BASE: AccessTokenPayload = {
   csrfHash:           'csrfhash',
 };
 
+function makePool(sessionRows: unknown[]): Pool {
+  return { query: vi.fn().mockResolvedValue({ rows: sessionRows }) } as unknown as Pool;
+}
+
 function makeReq(authorization?: string): Request {
   return { headers: { authorization } } as unknown as Request;
 }
@@ -23,30 +28,47 @@ function makeRes() {
   return { res: { status, json } as unknown as Response, status, json };
 }
 
-describe('authMiddleware', () => {
-  it('returns 401 when Authorization header is missing', () => {
+describe('createAuthMiddleware', () => {
+  it('returns 401 when Authorization header is missing', async () => {
+    const middleware = createAuthMiddleware(makePool([]));
     const req  = makeReq();
     const next = vi.fn() as unknown as NextFunction;
     const { res, status } = makeRes();
-    authMiddleware(req, res, next);
+    await middleware(req, res, next);
     expect(status).toHaveBeenCalledWith(401);
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('returns 401 when token is invalid', () => {
+  it('returns 401 when token is invalid', async () => {
+    const middleware = createAuthMiddleware(makePool([]));
     const req  = makeReq('Bearer bad.token.here');
     const next = vi.fn() as unknown as NextFunction;
     const { res, status } = makeRes();
-    authMiddleware(req, res, next);
+    await middleware(req, res, next);
     expect(status).toHaveBeenCalledWith(401);
   });
 
-  it('populates req.sessionInfo and calls next for valid token', () => {
+  it('returns 401 when session is revoked in DB (invalidated_at set)', async () => {
     const { token } = generateAccessToken(BASE);
+    // DB returns empty rows → session revoked / expired
+    const middleware = createAuthMiddleware(makePool([]));
+    const req  = makeReq(`Bearer ${token}`) as Request & { sessionInfo?: unknown };
+    const next = vi.fn() as unknown as NextFunction;
+    const { res, status, json } = makeRes();
+    await middleware(req, res, next);
+    expect(status).toHaveBeenCalledWith(401);
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({ code: 'SESSION_REVOKED' }));
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('populates req.sessionInfo and calls next when JWT + DB session are valid', async () => {
+    const { token } = generateAccessToken(BASE);
+    // DB returns a row → session is live
+    const middleware = createAuthMiddleware(makePool([{ exists: 1 }]));
     const req  = makeReq(`Bearer ${token}`) as Request & { sessionInfo?: unknown };
     const next = vi.fn() as unknown as NextFunction;
     const { res } = makeRes();
-    authMiddleware(req, res, next);
+    await middleware(req, res, next);
 
     expect(next).toHaveBeenCalledOnce();
     expect(req.sessionInfo).toMatchObject({
