@@ -207,13 +207,13 @@ async function handleEmrAudit(pool: Pool, req: Request, res: Response): Promise<
       return;
     }
 
-    // Signature verified — commit nonce so replay attempts are permanently blocked.
-    nonceCommitted = true;
-    seenNonces.set(nonceKey, Date.now() + NONCE_TTL_MS);
-
     // --- 8. Write audit log (strict — throws on failure) ---
     // This endpoint exists solely to record the audit row. If the INSERT fails
     // we must NOT return 200; the caller's retry logic depends on it.
+    //
+    // IMPORTANT: nonce is committed to seenNonces ONLY after a successful INSERT.
+    // If writeAuditLogStrict throws, nonceCommitted stays false → finally releases
+    // the nonce from pendingNonces so the device can retry with the same nonce+sig.
     await writeAuditLogStrict(pool, {
       actorUserId: session.userId,
       actorOrgId:  device.organization_id,
@@ -229,6 +229,10 @@ async function handleEmrAudit(pool: Pool, req: Request, res: Response): Promise<
         ...(body.extra ?? {}),
       },
     });
+
+    // Audit row persisted — permanently block replay of this nonce.
+    nonceCommitted = true;
+    seenNonces.set(nonceKey, Date.now() + NONCE_TTL_MS);
 
     // Update device last_seen_at
     pool.query(

@@ -537,4 +537,52 @@ describe('POST /api/audit/emr', () => {
       .send(VALID_BODY);
     expect(res2.status).toBe(200);
   });
+
+  it('releases nonce when writeAuditLogStrict fails, allowing retry with same nonce', async () => {
+    // If the DB INSERT throws after signature verification, the nonce must NOT be
+    // committed to seenNonces. The device must be able to retry with the same
+    // nonce+signature and succeed on the next attempt.
+    const { writeAuditLogStrict } = await import('../../middleware/audit');
+    const { privateKey, publicKey } = makeKeyPair();
+    const pool     = makePool();
+    const app      = makeApp(pool);
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
+
+    // First attempt: DB fails after signature verification
+    (writeAuditLogStrict as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('DB connection lost')
+    );
+    wireDevice(pool, {
+      user_id: 'user-1', organization_id: 'org-1',
+      public_key: exportPublicKey(publicKey), status: 'active',
+    });
+    const res1 = await request(app)
+      .post('/api/audit/emr')
+      .set('Authorization', `Bearer ${userToken()}`)
+      .set('x-wr-source',     'electron-main')
+      .set('x-wr-device-id',  'dev-1')
+      .set('x-wr-device-sig', sig)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', devNonce)
+      .send(VALID_BODY);
+    expect(res1.status).toBe(500);
+
+    // Second attempt: same nonce+sig, DB now succeeds → must not get 401
+    wireDevice(pool, {
+      user_id: 'user-1', organization_id: 'org-1',
+      public_key: exportPublicKey(publicKey), status: 'active',
+    });
+    const res2 = await request(app)
+      .post('/api/audit/emr')
+      .set('Authorization', `Bearer ${userToken()}`)
+      .set('x-wr-source',     'electron-main')
+      .set('x-wr-device-id',  'dev-1')
+      .set('x-wr-device-sig', sig)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', devNonce)
+      .send(VALID_BODY);
+    expect(res2.status).toBe(200);
+  });
 });
