@@ -16,8 +16,8 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["vitest/globals", "node"],
     "paths": {
-      "@contracts": ["./shared/contracts/index.ts"],
-      "@contracts/*": ["./shared/contracts/*.ts"]
+      "@contracts": ["./shared/dist/index.d.ts"],
+      "@contracts/*": ["./shared/dist/*.d.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "shared/**/*.ts", "scripts/**/*.mjs", "types/**/*.d.ts"],

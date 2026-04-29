@@ -104,26 +104,40 @@ Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -like "*WR Eva
 Electron 인트라넷 빌드는 `loadURL('https://wr.hospital.local')`로 서버에 접속합니다.  
 Windows 신뢰 저장소에 CA가 설치되어 있으면 Electron도 자동으로 신뢰합니다.
 
-### 4-1. Windows 신뢰 저장소 미설치 PC 대응 (권장하지 않음)
+### 4-1. Windows 신뢰 저장소 미설치 PC 대응
 
-**운영상 CA 설치가 선행되어야 하며**, 아래는 임시 예외 처리입니다.  
-`electron/main.js`에서 특정 인증서에만 예외를 허용:
+> **운영 환경에서는 반드시 Windows 신뢰 저장소에 CA를 설치(3절)하는 방법만 사용하세요.**  
+> `certificate-error` 이벤트에서 콜백으로 예외를 허용하는 방식은 PHI 환경에서 **운영 금지**입니다.  
+> — CA 이름/issuer 문자열 검증은 공격자가 동일 이름의 CA를 만들어 우회할 수 있습니다.  
+> — 불가피하게 예외가 필요한 경우, 아래 SPKI 핀닝 방식을 사용하되 보안팀 승인을 받으세요.
+
+**SPKI 핀닝 예시 (최후 수단, 보안팀 승인 필요):**
+
+```bash
+# 1. 서버에서 루트 CA의 SPKI 핀 값 추출
+docker compose exec caddy cat /data/caddy/pki/authorities/local/root.crt \
+  | openssl x509 -pubkey -noout \
+  | openssl pkey -pubin -outform der \
+  | openssl dgst -sha256 -binary \
+  | base64
+# → 출력값(예: "abc123...==")을 아래 PINNED_SPKI에 하드코딩
+```
 
 ```javascript
-// 인트라넷 빌드에서만, CA 지문이 일치할 때만 허용
+// electron/main.js — 인트라넷 빌드 전용, SPKI 핀으로만 허용
+const PINNED_SPKI = 'abc123...=='; // 위에서 추출한 값을 하드코딩
+const INTRANET_URL = process.env.WR_INTRANET_URL ?? '';
+
 app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-  const isIntranetUrl = url.startsWith(process.env.WR_INTRANET_URL ?? '');
-  const isOurCA = certificate.issuerName.includes('WR Evaluation Internal CA');
-  if (isIntranetUrl && isOurCA) {
-    event.preventDefault();
-    callback(true);
-  } else {
-    callback(false);
-  }
+  const spki = certificate.fingerprint256; // Electron은 sha256 fingerprint 제공
+  // 실제 SPKI pin과 다르므로 아래는 개념 예시 — 실 구현은 Node crypto로 검증
+  const isIntranet = url.startsWith(INTRANET_URL);
+  // ⚠️ 이 예시를 그대로 사용하지 말 것. 보안팀과 함께 구현하세요.
+  callback(false); // 기본은 항상 거부
 });
 ```
 
-> **주의**: 이 코드는 CA 이름만 검증합니다. 운영 환경에서는 반드시 Windows 신뢰 저장소에 CA를 설치하는 방법을 사용하세요.
+> **권고**: SPKI 핀 방식도 CA 교체 시 앱 재배포가 필요합니다. Windows 신뢰 저장소 설치가 유일한 올바른 해법입니다.
 
 ### 4-2. `will-navigate` 외부 이동 차단
 

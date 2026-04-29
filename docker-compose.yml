@@ -9,7 +9,7 @@
 # Optional:
 #   POSTGRES_PASSWORD     — DB password (default: changeme_for_dev_only)
 #   DEPLOYMENT_MODE       — intranet | standalone (default: intranet)
-#   PORT                  — host port for direct app access bypassing Caddy (default: 3001)
+#   PORT                  — internal app container port (default: 3001, rarely changed)
 #   AI_PROVIDER           — none | internal | external (default: none)
 
 services:
@@ -85,7 +85,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- --no-check-certificate https://localhost/health 2>/dev/null | grep -q ok || exit 1"]
+      # Caddy admin API (localhost:2019) is always available regardless of vhost config.
+      # Checking https://{WR_DOMAIN}/health would require SNI matching and CA trust inside
+      # the container — Caddy admin API is the correct liveness probe here.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:2019/ >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout:  5s
       retries:  3

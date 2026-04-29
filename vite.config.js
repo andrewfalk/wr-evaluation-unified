@@ -7,7 +7,7 @@ export default defineConfig({
   base: './',
   resolve: {
     alias: {
-      '@contracts': path.resolve('./shared/contracts'),
+      '@contracts': path.resolve('./shared/dist'),
     },
   },
   build: {
