@@ -30,7 +30,10 @@ interface DeviceRow {
   register_ip:     string | null;
 }
 
-async function listDevices(pool: Pool, _req: Request, res: Response): Promise<void> {
+async function listDevices(pool: Pool, req: Request, res: Response): Promise<void> {
+  // Org-scoped: admin with an org sees only their org's devices.
+  // Admin without an org (system-level superadmin) sees all.
+  const orgId = req.sessionInfo?.organizationId ?? null;
   const { rows } = await pool.query<DeviceRow>(
     `SELECT
        d.id, d.user_id, u.name AS user_name, u.login_id AS user_login_id,
@@ -41,7 +44,9 @@ async function listDevices(pool: Pool, _req: Request, res: Response): Promise<vo
      FROM devices d
      JOIN users u ON u.id = d.user_id
      LEFT JOIN users a ON a.id = d.approved_by
-     ORDER BY d.registered_at DESC`
+     WHERE ($1::uuid IS NULL OR d.organization_id = $1)
+     ORDER BY d.registered_at DESC`,
+    [orgId]
   );
 
   const devices = rows.map((d) => ({
@@ -74,20 +79,23 @@ async function listDevices(pool: Pool, _req: Request, res: Response): Promise<vo
 async function approveDevice(pool: Pool, req: Request, res: Response): Promise<void> {
   const { id } = req.params;
   const session = req.sessionInfo!;
+  const orgId   = session.organizationId ?? null;
 
   const { rows } = await pool.query<{ id: string; status: string }>(
     `UPDATE devices
      SET status = 'active', approved_by = $1, approved_at = now()
      WHERE id = $2 AND status = 'pending'
+       AND ($3::uuid IS NULL OR organization_id = $3)
      RETURNING id, status`,
-    [session.userId, id]
+    [session.userId, id, orgId]
   );
 
   if (rows.length === 0) {
-    // Either not found or not in pending state
+    // Either not found, not pending, or outside org scope
     const existing = await pool.query<{ status: string }>(
-      'SELECT status FROM devices WHERE id = $1',
-      [id]
+      `SELECT status FROM devices
+       WHERE id = $1 AND ($2::uuid IS NULL OR organization_id = $2)`,
+      [id, orgId]
     );
     if (existing.rows.length === 0) {
       res.status(404).json({ code: 'DEVICE_NOT_FOUND', error: 'Device not found' });
@@ -121,19 +129,22 @@ async function approveDevice(pool: Pool, req: Request, res: Response): Promise<v
 async function revokeDevice(pool: Pool, req: Request, res: Response): Promise<void> {
   const { id } = req.params;
   const session = req.sessionInfo!;
+  const orgId   = session.organizationId ?? null;
 
   const { rows } = await pool.query<{ id: string; status: string }>(
     `UPDATE devices
      SET status = 'revoked', revoked_at = now()
      WHERE id = $1 AND status != 'revoked'
+       AND ($2::uuid IS NULL OR organization_id = $2)
      RETURNING id, status`,
-    [id]
+    [id, orgId]
   );
 
   if (rows.length === 0) {
     const existing = await pool.query<{ status: string }>(
-      'SELECT status FROM devices WHERE id = $1',
-      [id]
+      `SELECT status FROM devices
+       WHERE id = $1 AND ($2::uuid IS NULL OR organization_id = $2)`,
+      [id, orgId]
     );
     if (existing.rows.length === 0) {
       res.status(404).json({ code: 'DEVICE_NOT_FOUND', error: 'Device not found' });

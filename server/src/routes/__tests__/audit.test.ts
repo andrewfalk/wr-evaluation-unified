@@ -60,6 +60,9 @@ function signPayload(
 const CSRF_TOKEN = 'ok';
 const CSRF_HASH  = crypto.createHash('sha256').update(CSRF_TOKEN).digest('hex');
 
+// Each test must use a unique nonce (replay guard rejects duplicates within TTL)
+function nonce(): string { return crypto.randomBytes(16).toString('hex'); }
+
 function userToken(userId = 'user-1'): string {
   return generateAccessToken({
     sub:                userId,
@@ -149,7 +152,8 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-source',     'electron-main')
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',  staleTs)
+      .set('x-wr-device-ts',    staleTs)
+      .set('x-wr-device-nonce', nonce())
       .send(VALID_BODY);
 
     expect(res.status).toBe(401);
@@ -173,7 +177,8 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-source',     'electron-main')
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',  ts)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', nonce())
       .send(body);
 
     expect(res.status).toBe(400);
@@ -194,7 +199,8 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-source',     'electron-main')
       .set('x-wr-device-id',  'dev-missing')
       .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',  ts)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', nonce())
       .send(VALID_BODY);
 
     expect(res.status).toBe(401);
@@ -220,7 +226,8 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-source',     'electron-main')
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',  ts)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', nonce())
       .send(VALID_BODY);
 
     expect(res.status).toBe(401);
@@ -246,7 +253,8 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-source',     'electron-main')
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',  ts)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', nonce())
       .send(VALID_BODY);
 
     expect(res.status).toBe(401);
@@ -272,7 +280,8 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-source',     'electron-main')
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',  ts)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', nonce())
       .send(VALID_BODY);
 
     expect(res.status).toBe(401);
@@ -299,7 +308,8 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-source',     'electron-main')
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',  ts)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', nonce())
       .send(VALID_BODY);
 
     expect(res.status).toBe(401);
@@ -325,7 +335,8 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-source',     'electron-main')
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',  ts)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', nonce())
       .send(VALID_BODY);
 
     expect(res.status).toBe(200);
@@ -352,7 +363,8 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-source',     'electron-main')
       .set('x-wr-device-id',  'dev-1')
       .set('x-wr-device-sig', sig)
-      .set('x-wr-device-ts',  ts)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', nonce())
       .send(VALID_BODY);
 
     expect(writeAuditLog).toHaveBeenCalledWith(
@@ -363,5 +375,79 @@ describe('POST /api/audit/emr', () => {
         outcome:     'success',
       })
     );
+  });
+
+  it('returns 401 when device.organization_id !== session.organizationId', async () => {
+    const { privateKey, publicKey } = makeKeyPair();
+    const pool = makePool();
+    const ts   = new Date().toISOString();
+    const sig  = signPayload(privateKey, ts, VALID_BODY);
+
+    wireDevice(pool, {
+      user_id:         'user-1',
+      organization_id: 'different-org-99',  // mismatch with session org-1
+      public_key:      exportPublicKey(publicKey),
+      status:          'active',
+    });
+
+    const res = await request(makeApp(pool))
+      .post('/api/audit/emr')
+      .set('Authorization', `Bearer ${userToken()}`)
+      .set('x-wr-source',     'electron-main')
+      .set('x-wr-device-id',  'dev-1')
+      .set('x-wr-device-sig', sig)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', nonce())
+      .send(VALID_BODY);
+
+    expect(res.status).toBe(401);
+    expect(res.body.error).toMatch(/mismatch/i);
+  });
+
+  it('returns 401 when same nonce is reused (replay attack)', async () => {
+    const { privateKey, publicKey } = makeKeyPair();
+    const pool1 = makePool();
+    const pool2 = makePool();
+    const app   = makeApp(pool1);
+    const ts    = new Date().toISOString();
+    const sig   = signPayload(privateKey, ts, VALID_BODY);
+    const replayNonce = nonce();
+
+    // First request — succeeds
+    wireDevice(pool1, {
+      user_id:         'user-1',
+      organization_id: 'org-1',
+      public_key:      exportPublicKey(publicKey),
+      status:          'active',
+    });
+    await request(app)
+      .post('/api/audit/emr')
+      .set('Authorization', `Bearer ${userToken()}`)
+      .set('x-wr-source',     'electron-main')
+      .set('x-wr-device-id',  'dev-1')
+      .set('x-wr-device-sig', sig)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', replayNonce)
+      .send(VALID_BODY);
+
+    // Second request with same nonce — must be rejected
+    wireDevice(pool2, {
+      user_id:         'user-1',
+      organization_id: 'org-1',
+      public_key:      exportPublicKey(publicKey),
+      status:          'active',
+    });
+    const res2 = await request(makeApp(pool2))
+      .post('/api/audit/emr')
+      .set('Authorization', `Bearer ${userToken()}`)
+      .set('x-wr-source',     'electron-main')
+      .set('x-wr-device-id',  'dev-1')
+      .set('x-wr-device-sig', sig)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', replayNonce)
+      .send(VALID_BODY);
+
+    expect(res2.status).toBe(401);
+    expect(res2.body.error).toMatch(/nonce/i);
   });
 });

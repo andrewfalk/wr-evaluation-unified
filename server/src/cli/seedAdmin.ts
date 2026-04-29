@@ -23,11 +23,59 @@ async function prompt(rl: readline.Interface, question: string): Promise<string>
   return new Promise((resolve) => rl.question(question, resolve));
 }
 
-async function promptPassword(rl: readline.Interface, question: string): Promise<string> {
-  // On a real TTY we would suppress echo; Node's readline has no built-in for
-  // this without native deps. We use a convention: warn the user and move on.
-  process.stdout.write('\x1b[33mWARNING: password will be visible while typing.\x1b[0m\n');
-  return prompt(rl, question);
+// Read a password from stdin without echoing characters.
+// Falls back to visible input on non-TTY streams (e.g., piped CI input).
+async function promptPassword(_rl: readline.Interface, question: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    // Non-interactive: read a single line from the already-open readline
+    return new Promise((resolve) => {
+      let buf = '';
+      const onData = (chunk: Buffer) => {
+        const str = chunk.toString();
+        const nl  = str.indexOf('\n');
+        if (nl !== -1) {
+          buf += str.slice(0, nl).replace('\r', '');
+          process.stdin.removeListener('data', onData);
+          process.stdin.pause();
+          resolve(buf);
+        } else {
+          buf += str;
+        }
+      };
+      process.stdin.resume();
+      process.stdin.on('data', onData);
+    });
+  }
+
+  return new Promise((resolve) => {
+    process.stdout.write(question);
+    const chars: string[] = [];
+
+    const onData = (chunk: Buffer) => {
+      for (const byte of chunk) {
+        const c = String.fromCharCode(byte);
+        if (c === '\r' || c === '\n') {
+          process.stdin.setRawMode(false);
+          process.stdin.removeListener('data', onData);
+          process.stdout.write('\n');
+          resolve(chars.join(''));
+        } else if (byte === 0x7f || byte === 0x08) {
+          // Backspace / DEL
+          chars.pop();
+        } else if (byte === 0x03) {
+          // Ctrl+C
+          process.stdout.write('\n');
+          process.exit(0);
+        } else {
+          chars.push(c);
+        }
+      }
+    };
+
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on('data', onData);
+  });
 }
 
 async function main(): Promise<void> {

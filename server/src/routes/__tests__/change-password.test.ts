@@ -50,7 +50,7 @@ import type { Pool, PoolClient } from 'pg';
 // ---------------------------------------------------------------------------
 function makePool(): Pool {
   const release = vi.fn();
-  const client: Partial<PoolClient> = { query: vi.fn(), release };
+  const client = { query: vi.fn() as unknown as PoolClient['query'], release } as unknown as PoolClient;
   return {
     connect: vi.fn().mockResolvedValue(client),
     query:   vi.fn(),

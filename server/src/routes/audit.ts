@@ -20,10 +20,31 @@ import { writeAuditLog } from '../middleware/audit';
 //   X-WR-Source:     must equal 'electron-main'
 // ---------------------------------------------------------------------------
 
-const DEVICE_HEADER_ID  = 'x-wr-device-id';
-const DEVICE_HEADER_SIG = 'x-wr-device-sig';
-const DEVICE_HEADER_TS  = 'x-wr-device-ts';
-const SOURCE_HEADER     = 'x-wr-source';
+const DEVICE_HEADER_ID    = 'x-wr-device-id';
+const DEVICE_HEADER_SIG   = 'x-wr-device-sig';
+const DEVICE_HEADER_TS    = 'x-wr-device-ts';
+const DEVICE_HEADER_NONCE = 'x-wr-device-nonce';
+const SOURCE_HEADER       = 'x-wr-source';
+
+// Replay window: ±5 minutes
+const TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000;
+
+// ---------------------------------------------------------------------------
+// In-memory nonce store: prevents replay of the same signed request within
+// the timestamp window. Each entry = nonce → expiry timestamp.
+// A periodic sweep bounds memory. For multi-instance deployments, replace
+// with a shared Redis SETNX + TTL key.
+// ---------------------------------------------------------------------------
+const seenNonces  = new Map<string, number>();
+const NONCE_TTL_MS = TIMESTAMP_TOLERANCE_MS * 2 + 1000;
+
+function sweepNonces(): void {
+  const now = Date.now();
+  for (const [nonce, expiresAt] of seenNonces) {
+    if (expiresAt < now) seenNonces.delete(nonce);
+  }
+}
+setInterval(sweepNonces, 60_000).unref();
 
 const EMR_AUDIT_ACTIONS = new Set([
   'emr_inject',
@@ -40,9 +61,6 @@ const EmrAuditBody = z.object({
   extra:       z.record(z.unknown()).optional().nullable(),
 });
 
-// Replay window: ±5 minutes
-const TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000;
-
 interface DeviceRow {
   user_id:         string;
   organization_id: string | null;
@@ -58,11 +76,12 @@ async function handleEmrAudit(pool: Pool, req: Request, res: Response): Promise<
   }
 
   // --- 2. Device headers ---
-  const deviceId  = req.headers[DEVICE_HEADER_ID]  as string | undefined;
-  const deviceSig = req.headers[DEVICE_HEADER_SIG] as string | undefined;
-  const deviceTs  = req.headers[DEVICE_HEADER_TS]  as string | undefined;
+  const deviceId    = req.headers[DEVICE_HEADER_ID]    as string | undefined;
+  const deviceSig   = req.headers[DEVICE_HEADER_SIG]   as string | undefined;
+  const deviceTs    = req.headers[DEVICE_HEADER_TS]    as string | undefined;
+  const deviceNonce = req.headers[DEVICE_HEADER_NONCE] as string | undefined;
 
-  if (!deviceId || !deviceSig || !deviceTs) {
+  if (!deviceId || !deviceSig || !deviceTs || !deviceNonce) {
     res.status(401).json({ code: 'UNAUTHORIZED', error: 'Missing device headers' });
     return;
   }
@@ -73,6 +92,14 @@ async function handleEmrAudit(pool: Pool, req: Request, res: Response): Promise<
     res.status(401).json({ code: 'UNAUTHORIZED', error: 'Timestamp out of range' });
     return;
   }
+
+  // --- 3b. Nonce replay guard ---
+  const nonceKey = `${deviceId}:${deviceNonce}`;
+  if (seenNonces.has(nonceKey)) {
+    res.status(401).json({ code: 'UNAUTHORIZED', error: 'Duplicate request (nonce reuse)' });
+    return;
+  }
+  seenNonces.set(nonceKey, Date.now() + NONCE_TTL_MS);
 
   // --- 4. Body validation ---
   const parse = EmrAuditBody.safeParse(req.body);
@@ -99,21 +126,33 @@ async function handleEmrAudit(pool: Pool, req: Request, res: Response): Promise<
     return;
   }
 
-  // --- 6. Verify session.user_id ≡ device.user_id ---
+  // --- 6. Verify session.user_id ≡ device.user_id AND org match ---
   const session = req.sessionInfo!;
-  if (session.userId !== device.user_id) {
+
+  const userMismatch = session.userId !== device.user_id;
+  // Org mismatch: only enforce when both sides have a non-null org.
+  // A null device org (legacy row) is tolerated; a non-null mismatch is blocked.
+  const orgMismatch =
+    device.organization_id !== null &&
+    session.organizationId !== null &&
+    session.organizationId !== device.organization_id;
+
+  if (userMismatch || orgMismatch) {
+    const action = userMismatch ? 'device_user_mismatch' : 'device_org_mismatch';
     writeAuditLog(pool, {
       actorUserId: session.userId,
       actorOrgId:  session.organizationId ?? null,
-      action:      'device_user_mismatch',
+      action,
       targetType:  'device',
       targetId:    deviceId,
       outcome:     'denied',
       ip:          req.ip ?? null,
       userAgent:   req.headers['user-agent'] ?? null,
-      extra:       { deviceUserId: device.user_id },
+      extra: userMismatch
+        ? { deviceUserId: device.user_id }
+        : { deviceOrgId: device.organization_id },
     });
-    res.status(401).json({ code: 'UNAUTHORIZED', error: 'Device / session user mismatch' });
+    res.status(401).json({ code: 'UNAUTHORIZED', error: 'Device / session identity mismatch' });
     return;
   }
 
