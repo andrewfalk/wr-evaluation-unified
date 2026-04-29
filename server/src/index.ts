@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import config from './config';
 import { pool } from './db/client';
 import { createAuthRouter } from './routes/auth';
+import { createConfigRouter } from './routes/config';
 
 export const app = express();
 app.use(express.json());
@@ -14,6 +15,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/api/auth', createAuthRouter(pool));
+app.use('/api/config', createConfigRouter());
 
 if (require.main === module) {
   const server = createServer(app);

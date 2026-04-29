@@ -103,7 +103,7 @@ function validToken(extra?: object): string {
 // POST /api/auth/login
 // ------------------------------------------------------------------
 describe('POST /api/auth/login', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 400 when body is missing required fields', async () => {
     const pool = makePool();
@@ -164,7 +164,7 @@ describe('POST /api/auth/login', () => {
 // POST /api/auth/refresh
 // ------------------------------------------------------------------
 describe('POST /api/auth/refresh', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when refresh cookie is absent', async () => {
     const pool = makePool();
@@ -248,7 +248,7 @@ describe('POST /api/auth/refresh', () => {
 // GET /api/auth/me  (requires valid JWT + live DB session)
 // ------------------------------------------------------------------
 describe('GET /api/auth/me', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when no Authorization header', async () => {
     const pool = makePool();
@@ -291,7 +291,7 @@ describe('GET /api/auth/me', () => {
 // POST /api/auth/logout — after logout, /me must be blocked
 // ------------------------------------------------------------------
 describe('POST /api/auth/logout', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when not authenticated', async () => {
     const pool = makePool();
