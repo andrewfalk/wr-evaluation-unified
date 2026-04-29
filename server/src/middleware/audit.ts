@@ -46,8 +46,9 @@ export async function writeAuditLog(pool: Pool, entry: AuditEntry): Promise<void
 // Usage:
 //   router.post('/patients', authMiddleware, auditMiddleware(pool, 'patient_create', 'patient'), handler)
 //
-// Intercepts the response status after the handler runs and records
-// success (2xx), failure (4xx client error), or denied (401/403).
+// Uses res.on('finish') so the audit fires regardless of response method
+// (json, send, end, pipe, stream). For error responses, route handlers
+// should set res.locals.auditErrorCode before sending so it can be captured.
 // ---------------------------------------------------------------------------
 export function auditMiddleware(
   pool:       Pool,
@@ -56,31 +57,27 @@ export function auditMiddleware(
   getTargetId?: (req: Request) => string | null,
 ): RequestHandler {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const originalJson = res.json.bind(res);
-
-    res.json = function (body: unknown): Response {
-      const status     = res.statusCode;
+    res.on('finish', () => {
+      const status  = res.statusCode;
       const outcome: AuditOutcome =
         status === 401 || status === 403 ? 'denied' :
         status >= 400                    ? 'failure' : 'success';
 
-      const session = req.sessionInfo;
+      const session   = req.sessionInfo;
+      const errorCode = res.locals.auditErrorCode as string | undefined;
+
       writeAuditLog(pool, {
-        actorUserId: session?.userId       ?? null,
+        actorUserId: session?.userId         ?? null,
         actorOrgId:  session?.organizationId ?? null,
         action,
         targetType,
         targetId:    getTargetId ? getTargetId(req) : (req.params.id ?? null),
         outcome,
-        ip:          req.ip           ?? null,
+        ip:          req.ip                    ?? null,
         userAgent:   req.headers['user-agent'] ?? null,
-        extra:       typeof body === 'object' && body !== null && status >= 400
-                       ? { responseCode: (body as Record<string, unknown>).code }
-                       : null,
+        extra:       errorCode ? { responseCode: errorCode } : null,
       });
-
-      return originalJson(body);
-    };
+    });
 
     next();
   };
@@ -125,11 +122,30 @@ export function auditLogout(pool: Pool, req: Request): void {
 
 export function auditRefreshFail(pool: Pool, req: Request, code: string): void {
   writeAuditLog(pool, {
-    action:    'auth_refresh_fail',
+    action:     'auth_refresh_fail',
     targetType: 'session',
-    outcome:   'failure',
-    ip:        req.ip ?? null,
-    userAgent: req.headers['user-agent'] ?? null,
-    extra:     { code },
+    outcome:    'failure',
+    ip:         req.ip ?? null,
+    userAgent:  req.headers['user-agent'] ?? null,
+    extra:      { code },
+  });
+}
+
+export function auditRefreshSuccess(
+  pool:      Pool,
+  req:       Request,
+  userId:    string,
+  orgId:     string | null,
+  sessionId: string,
+): void {
+  writeAuditLog(pool, {
+    actorUserId: userId,
+    actorOrgId:  orgId,
+    action:      'auth_refresh',
+    targetType:  'session',
+    targetId:    sessionId,
+    outcome:     'success',
+    ip:          req.ip ?? null,
+    userAgent:   req.headers['user-agent'] ?? null,
   });
 }

@@ -21,7 +21,7 @@ import {
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { loginRateLimit, csrfRateLimit } from '../middleware/rateLimit';
-import { auditLogin, auditLogout, auditRefreshFail } from '../middleware/audit';
+import { auditLogin, auditLogout, auditRefreshFail, auditRefreshSuccess } from '../middleware/audit';
 
 const REFRESH_COOKIE = 'wr_refresh';
 
@@ -54,6 +54,7 @@ const LoginBody = z.object({
 async function login(pool: Pool, req: Request, res: Response): Promise<void> {
   const parsed = LoginBody.safeParse(req.body);
   if (!parsed.success) {
+    auditLogin(pool, req, 'failure');
     res.status(400).json({ code: 'INVALID_BODY', error: 'loginId and password are required' });
     return;
   }
@@ -122,6 +123,7 @@ async function login(pool: Pool, req: Request, res: Response): Promise<void> {
 async function refresh(pool: Pool, req: Request, res: Response): Promise<void> {
   const oldRefreshToken: string | undefined = req.cookies?.[REFRESH_COOKIE];
   if (!oldRefreshToken) {
+    auditRefreshFail(pool, req, 'NO_REFRESH_TOKEN');
     res.status(401).json({ code: 'NO_REFRESH_TOKEN', error: 'Refresh token cookie missing' });
     return;
   }
@@ -197,6 +199,8 @@ async function refresh(pool: Pool, req: Request, res: Response): Promise<void> {
 
   setRefreshCookie(res, newSession.refreshToken, newSession.expiresAt);
   setCsrfCookie(res, newSession.csrfToken, isSecure);
+
+  auditRefreshSuccess(pool, req, userRow.user_id, userRow.organization_id, newSession.sessionId);
 
   res.status(200).json({ accessToken, accessExpiresAt: accessExpiresAt.toISOString() });
 }

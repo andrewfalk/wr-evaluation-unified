@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { EventEmitter } from 'events';
 import type { Request, Response, NextFunction } from 'express';
 import type { Pool } from 'pg';
 import { writeAuditLog, auditMiddleware, auditLogin, auditLogout, auditRefreshFail } from '../audit';
@@ -20,13 +21,13 @@ function makeReq(overrides: Partial<Request> = {}): Request {
   } as unknown as Request;
 }
 
-function makeRes(status = 200): { res: Response; jsonSpy: ReturnType<typeof vi.fn> } {
-  const jsonSpy = vi.fn().mockReturnThis();
-  const res = {
+// EventEmitter-based mock so res.on('finish') works correctly.
+function makeRes(status = 200): Response {
+  const emitter = new EventEmitter();
+  return Object.assign(emitter, {
     statusCode: status,
-    json: jsonSpy,
-  } as unknown as Response;
-  return { res, jsonSpy };
+    locals:     {} as Record<string, unknown>,
+  }) as unknown as Response;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,21 +81,17 @@ describe('writeAuditLog', () => {
 describe('auditMiddleware', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it('records success for 2xx responses', async () => {
+  it('records success for 2xx responses (via finish event)', async () => {
     const pool = makePool();
     const req  = makeReq({ sessionInfo: { userId: 'u1', organizationId: 'o1' } } as Partial<Request>);
-    const { res } = makeRes(200);
-    const next: NextFunction = vi.fn();
+    const res  = makeRes(200);
+    const next = vi.fn() as unknown as NextFunction;
 
     const mw = auditMiddleware(pool, 'patient_create', 'patient');
     mw(req, res, next);
-
     expect(next).toHaveBeenCalledOnce();
 
-    // Trigger response
-    res.json({ id: 'pat-1' });
-
-    // Fire-and-forget — wait a tick
+    res.emit('finish');
     await new Promise((r) => setTimeout(r, 0));
 
     const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
@@ -105,12 +102,11 @@ describe('auditMiddleware', () => {
   it('records denied for 401 responses', async () => {
     const pool = makePool();
     const req  = makeReq();
-    const { res } = makeRes(401);
-    const next: NextFunction = vi.fn();
+    const res  = makeRes(401);
+    const next = vi.fn() as unknown as NextFunction;
 
     auditMiddleware(pool, 'patient_view', 'patient')(req, res, next);
-    res.json({ code: 'UNAUTHORIZED' });
-
+    res.emit('finish');
     await new Promise((r) => setTimeout(r, 0));
 
     const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
@@ -120,33 +116,49 @@ describe('auditMiddleware', () => {
   it('records failure for 4xx (non-auth) responses', async () => {
     const pool = makePool();
     const req  = makeReq();
-    const { res } = makeRes(400);
-    const next: NextFunction = vi.fn();
+    const res  = makeRes(400);
+    const next = vi.fn() as unknown as NextFunction;
 
     auditMiddleware(pool, 'patient_create', 'patient')(req, res, next);
-    res.json({ code: 'INVALID_BODY' });
-
+    // Simulate route handler setting error code before sending
+    (res as unknown as { locals: Record<string, unknown> }).locals.auditErrorCode = 'INVALID_BODY';
+    res.emit('finish');
     await new Promise((r) => setTimeout(r, 0));
 
     const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
     expect(params[5]).toBe('failure');
-    // extra should contain the response code
     expect(params[8]).toContain('INVALID_BODY');
   });
 
   it('uses getTargetId when provided', async () => {
     const pool = makePool();
     const req  = makeReq({ params: { id: 'pat-42' } } as Partial<Request>);
-    const { res } = makeRes(200);
-    const next: NextFunction = vi.fn();
+    const res  = makeRes(200);
+    const next = vi.fn() as unknown as NextFunction;
 
     auditMiddleware(pool, 'patient_view', 'patient', (r) => r.params.id)(req, res, next);
-    res.json({ ok: true });
-
+    res.emit('finish');
     await new Promise((r) => setTimeout(r, 0));
 
     const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
     expect(params[4]).toBe('pat-42'); // target_id
+  });
+
+  it('fires on non-json response (res.send equivalent via finish)', async () => {
+    const pool = makePool();
+    const req  = makeReq();
+    const res  = makeRes(200);
+    const next = vi.fn() as unknown as NextFunction;
+
+    auditMiddleware(pool, 'export_csv', 'patient')(req, res, next);
+    // Simulate a streaming/file response that never calls res.json()
+    res.emit('finish');
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(pool.query).toHaveBeenCalledOnce();
+    const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
+    expect(params[2]).toBe('export_csv');
+    expect(params[5]).toBe('success');
   });
 });
 
