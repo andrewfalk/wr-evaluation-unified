@@ -19,7 +19,7 @@ describe('config — deployment mode', () => {
   });
 
   it('intranet mode disables local fallback', () => {
-    const c = make({ DEPLOYMENT_MODE: 'intranet' });
+    const c = make({ DEPLOYMENT_MODE: 'intranet', CORS_ORIGINS: 'https://wr.hospital.local' });
     expect(c.deploymentMode).toBe('intranet');
     expect(c.localFallbackAllowed).toBe(false);
   });
@@ -160,8 +160,8 @@ describe('config — NODE_ENV validation', () => {
     );
   });
 
-  it('accepts production', () => {
-    expect(make({ NODE_ENV: 'production' }).env).toBe('production');
+  it('accepts production when CORS_ORIGINS is provided', () => {
+    expect(make({ NODE_ENV: 'production', CORS_ORIGINS: 'https://wr.hospital.local' }).env).toBe('production');
   });
 });
 
@@ -174,8 +174,27 @@ describe('config — CORS origins', () => {
     ]);
   });
 
-  it('returns empty array when CORS_ORIGINS is unset', () => {
-    const c = make();
+  it('returns empty array when CORS_ORIGINS is unset (development)', () => {
+    const c = make({ NODE_ENV: 'development' });
     expect(c.cors.origins).toEqual([]);
+  });
+
+  it('throws when CORS_ORIGINS is empty in production', () => {
+    expect(() => make({ NODE_ENV: 'production' })).toThrow(
+      'CORS_ORIGINS must be set'
+    );
+  });
+
+  it('throws when CORS_ORIGINS is empty in intranet mode', () => {
+    expect(() => make({ DEPLOYMENT_MODE: 'intranet' })).toThrow(
+      'CORS_ORIGINS must be set'
+    );
+  });
+
+  it('does not throw in intranet mode when CORS_ORIGINS is provided', () => {
+    expect(() => make({
+      DEPLOYMENT_MODE: 'intranet',
+      CORS_ORIGINS:    'https://wr.hospital.local',
+    })).not.toThrow();
   });
 });

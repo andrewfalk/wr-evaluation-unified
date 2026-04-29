@@ -66,19 +66,21 @@ describe('CORS middleware', () => {
     expect(res.headers['access-control-allow-origin']).toBe('https://wr.hospital.local');
   });
 
-  it('blocks null origin', async () => {
+  it('blocks null origin with 403 CORS_ORIGIN_DENIED', async () => {
     const res = await request(makeApp())
       .get('/test')
       .set('Origin', 'null');
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('CORS_ORIGIN_DENIED');
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
   });
 
-  it('blocks unknown external origin', async () => {
+  it('blocks unknown external origin with 403', async () => {
     const res = await request(makeApp())
       .get('/test')
       .set('Origin', 'https://evil.example.com');
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('CORS_ORIGIN_DENIED');
   });
 
   it('allows requests with no Origin header (same-origin / server-to-server)', async () => {
@@ -86,11 +88,12 @@ describe('CORS middleware', () => {
     expect(res.status).toBe(200);
   });
 
-  it('does NOT allow localhost:5173 in production mode', async () => {
+  it('does NOT allow localhost:5173 in production mode (403)', async () => {
     const res = await request(makeApp())
       .get('/test')
       .set('Origin', 'http://localhost:5173');
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('CORS_ORIGIN_DENIED');
   });
 });
 

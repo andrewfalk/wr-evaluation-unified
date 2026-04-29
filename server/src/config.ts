@@ -95,6 +95,15 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
   }
   const nodeEnv = rawNodeEnv as 'development' | 'production' | 'test';
 
+  // CORS_ORIGINS is mandatory in production / intranet deployments.
+  // An empty allowlist in production would silently block all credentialed
+  // browser requests that include an Origin header (login, CSRF, etc.).
+  if (corsOrigins.length === 0 && (nodeEnv === 'production' || deploymentMode === 'intranet')) {
+    throw new Error(
+      'CORS_ORIGINS must be set (e.g. https://wr.hospital.local) in production or intranet mode'
+    );
+  }
+
   return Object.freeze({
     env:         nodeEnv,
     port:        positiveInt(env, 'PORT', 3001),
