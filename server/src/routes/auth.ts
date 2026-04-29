@@ -1,3 +1,4 @@
+import bcrypt from 'bcrypt';
 import { Router, type Request, type Response } from 'express';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
@@ -21,7 +22,8 @@ import {
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { loginRateLimit, csrfRateLimit } from '../middleware/rateLimit';
-import { auditLogin, auditLogout, auditRefreshFail, auditRefreshSuccess } from '../middleware/audit';
+import { auditLogin, auditLogout, auditRefreshFail, auditRefreshSuccess, writeAuditLog } from '../middleware/audit';
+import { checkPasswordPolicy, isPasswordReused, appendPasswordHistory } from '../auth/passwordPolicy';
 
 const REFRESH_COOKIE = 'wr_refresh';
 
@@ -327,6 +329,108 @@ async function csrfReissue(pool: Pool, req: Request, res: Response): Promise<voi
 }
 
 // ---------------------------------------------------------------------------
+// Route: POST /api/auth/change-password
+// ---------------------------------------------------------------------------
+const ChangePasswordBody = z.object({
+  currentPassword: z.string().min(1),
+  newPassword:     z.string().min(1),
+});
+
+async function changePassword(pool: Pool, req: Request, res: Response): Promise<void> {
+  const parse = ChangePasswordBody.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ code: 'INVALID_BODY', error: parse.error.issues });
+    return;
+  }
+  const { currentPassword, newPassword } = parse.data;
+  const { userId, organizationId } = req.sessionInfo!;
+
+  // Policy check first (fast path before DB round-trip)
+  const policy = checkPasswordPolicy(newPassword);
+  if (!policy.ok) {
+    res.status(400).json({ code: 'PASSWORD_POLICY_VIOLATION', error: policy.error });
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query<{
+      password_hash:    string;
+      password_history: string[];
+    }>(
+      `SELECT password_hash, password_history FROM users WHERE id = $1`,
+      [userId]
+    );
+    if (rows.length === 0) {
+      res.status(401).json({ code: 'UNAUTHORIZED', error: 'User not found' });
+      return;
+    }
+    const { password_hash, password_history } = rows[0];
+
+    // Verify current password
+    const currentValid = await bcrypt.compare(currentPassword, password_hash);
+    if (!currentValid) {
+      writeAuditLog(pool, {
+        actorUserId: userId,
+        actorOrgId:  organizationId ?? null,
+        action:      'auth_change_password_fail',
+        outcome:     'denied',
+        ip:          req.ip ?? null,
+        userAgent:   req.headers['user-agent'] ?? null,
+        extra:       { reason: 'wrong_current_password' },
+      });
+      res.status(401).json({ code: 'WRONG_CURRENT_PASSWORD', error: 'Current password is incorrect' });
+      return;
+    }
+
+    // Check history (includes current hash)
+    const historyToCheck = [...(password_history ?? []), password_hash];
+    if (await isPasswordReused(newPassword, historyToCheck)) {
+      res.status(400).json({
+        code:  'PASSWORD_RECENTLY_USED',
+        error: '최근 사용한 비밀번호는 다시 사용할 수 없습니다.',
+      });
+      return;
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 12);
+    const newHistory = appendPasswordHistory(historyToCheck, newHash);
+
+    // Update password, clear must_change_password, revoke all other sessions
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE users
+       SET password_hash = $1, password_history = $2, must_change_password = false
+       WHERE id = $3`,
+      [newHash, newHistory, userId]
+    );
+    // Revoke all sessions except the current one
+    await client.query(
+      `UPDATE sessions SET invalidated_at = now()
+       WHERE user_id = $1 AND id != $2 AND invalidated_at IS NULL`,
+      [userId, req.sessionInfo!.sessionId]
+    );
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  writeAuditLog(pool, {
+    actorUserId: userId,
+    actorOrgId:  organizationId ?? null,
+    action:      'auth_change_password',
+    outcome:     'success',
+    ip:          req.ip ?? null,
+    userAgent:   req.headers['user-agent'] ?? null,
+  });
+
+  res.status(200).json({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
 // Router factory
 // ---------------------------------------------------------------------------
 const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
@@ -349,6 +453,9 @@ export function createAuthRouter(pool: Pool): Router {
 
   // logout: auth + CSRF (mutating POST)
   router.post('/logout', auth, csrfMiddleware, (req, res) => logout(pool, req, res).catch(() => res.status(500).json(internalError())));
+
+  // change-password: auth + CSRF (mutating POST)
+  router.post('/change-password', auth, csrfMiddleware, (req, res) => changePassword(pool, req, res).catch(() => res.status(500).json(internalError())));
 
   return router;
 }
