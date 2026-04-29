@@ -1,0 +1,48 @@
+{
+  "name": "@wr/server",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "predev": "cd ../shared && npm run build",
+    "dev": "tsx watch src/index.ts",
+    "migrate": "tsx src/db/migrate.ts",
+    "prebuild": "cd ../shared && npm run build",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "test": "vitest run --config vitest.config.ts --passWithNoTests",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "seed:admin": "tsx src/cli/seedAdmin.ts"
+  },
+  "dependencies": {
+    "@wr/contracts": "file:../shared",
+    "bcrypt": "^5.1.1",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.6",
+    "drizzle-orm": "^0.29.3",
+    "express": "^4.18.2",
+    "express-rate-limit": "^8.4.1",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.11.3",
+    "pino": "^8.19.0",
+    "pino-pretty": "^10.3.1",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@types/cookie-parser": "^1.4.6",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^20.11.5",
+    "@types/pg": "^8.10.9",
+    "@types/supertest": "^6.0.2",
+    "eslint": "^9.0.0",
+    "supertest": "^6.3.4",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^1.6.0"
+  }
+}

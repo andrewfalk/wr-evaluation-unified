@@ -1,0 +1,65 @@
+# wr-evaluation-unified — local / intranet docker-compose
+#
+# Required environment variables (set via .env or shell export):
+#   ACCESS_TOKEN_SECRET   — random 64-char string (openssl rand -hex 32)
+#   REFRESH_TOKEN_SECRET  — random 64-char string (openssl rand -hex 32)
+#   CORS_ORIGINS          — comma-separated allowed origins (e.g. https://wr.hospital.local)
+#
+# Optional:
+#   POSTGRES_PASSWORD     — DB password (default: changeme_for_dev_only)
+#   DEPLOYMENT_MODE       — intranet | standalone (default: intranet)
+#   PORT                  — host port for the app (default: 3001)
+#   AI_PROVIDER           — none | internal | external (default: none)
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 16
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB:       wr_evaluation
+      POSTGRES_USER:     wr_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_for_dev_only}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wr_user -d wr_evaluation"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Application server
+  # Runs DB migrations automatically on startup before accepting connections.
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    environment:
+      DATABASE_URL:         postgres://wr_user:${POSTGRES_PASSWORD:-changeme_for_dev_only}@postgres:5432/wr_evaluation
+      NODE_ENV:             production
+      PORT:                 3001
+      DEPLOYMENT_MODE:      ${DEPLOYMENT_MODE:-intranet}
+      ACCESS_TOKEN_SECRET:  ${ACCESS_TOKEN_SECRET:?ACCESS_TOKEN_SECRET is required — run: export ACCESS_TOKEN_SECRET=$(openssl rand -hex 32)}
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET is required — run: export REFRESH_TOKEN_SECRET=$(openssl rand -hex 32)}
+      CORS_ORIGINS:         ${CORS_ORIGINS:-https://wr.hospital.local}
+      AI_PROVIDER:          ${AI_PROVIDER:-none}
+    ports:
+      - "${PORT:-3001}:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]
+      interval: 30s
+      timeout:  5s
+      retries:  3
+      start_period: 30s
+
+volumes:
+  postgres_data:

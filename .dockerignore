@@ -1,0 +1,38 @@
+# Build artifacts (rebuilt inside Docker)
+dist/
+node_modules/
+server/node_modules/
+shared/node_modules/
+
+# VCS
+.git/
+.gitignore
+
+# Electron (not needed for server image)
+electron/
+out/
+release/
+
+# Dev / local files
+.env
+.env.*
+*.local
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Claude / review tooling
+.claude/
+.code-review-graph/
