@@ -116,52 +116,66 @@ function App() {
       // baseUrl comes from the original failed request so we always hit the
       // same server, even if session.apiBaseUrl is momentarily out of sync.
       onRefresh: ({ baseUrl: requestBaseUrl } = {}) =>
-        runRefreshWithBroadcast(async () => {
-          const current = sessionRef.current;
-          const base = (
-            requestBaseUrl ?? current?.apiBaseUrl ?? ''
-          ).trim().replace(/\/$/, '');
+        runRefreshWithBroadcast(
+          // doRefresh: this tab won the lock and performs the actual refresh.
+          async () => {
+            const current = sessionRef.current;
+            const base = (
+              requestBaseUrl ?? current?.apiBaseUrl ?? ''
+            ).trim().replace(/\/$/, '');
 
-          let csrfToken = getCsrfToken();
+            let csrfToken = getCsrfToken();
 
-          // CSRF cookie missing: call /api/auth/csrf first (no CSRF required
-          // for this endpoint). It re-validates the HttpOnly refresh cookie,
-          // sets a new wr_csrf cookie, and returns a fresh accessToken.
-          if (!csrfToken) {
-            const csrfRes = await fetch(`${base}/api/auth/csrf`, {
+            // CSRF cookie missing: call /api/auth/csrf first (no CSRF required
+            // for this endpoint). It re-validates the HttpOnly refresh cookie,
+            // sets a new wr_csrf cookie, and returns a fresh accessToken.
+            if (!csrfToken) {
+              const csrfRes = await fetch(`${base}/api/auth/csrf`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+              });
+              if (!csrfRes.ok) throw new Error('CSRF renewal failed');
+              const csrfData = await csrfRes.json();
+              const newSession = normalizeSession({
+                ...sessionRef.current,
+                accessToken: csrfData.accessToken,
+                status: 'ready',
+              });
+              setSession(newSession);
+              return newSession;
+            }
+
+            const res = await fetch(`${base}/api/auth/refresh`, {
               method: 'POST',
               credentials: 'include',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken,
+              },
             });
-            if (!csrfRes.ok) throw new Error('CSRF renewal failed');
-            const csrfData = await csrfRes.json();
+            if (!res.ok) throw new Error('Refresh failed');
+            const data = await res.json();
             const newSession = normalizeSession({
-              ...current,
-              accessToken: csrfData.accessToken,
+              ...sessionRef.current,
+              accessToken: data.accessToken,
               status: 'ready',
             });
             setSession(newSession);
             return newSession;
-          }
-
-          const res = await fetch(`${base}/api/auth/refresh`, {
-            method: 'POST',
-            credentials: 'include',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-CSRF-Token': csrfToken,
-            },
-          });
-          if (!res.ok) throw new Error('Refresh failed');
-          const data = await res.json();
-          const newSession = normalizeSession({
-            ...current,
-            accessToken: data.accessToken,
-            status: 'ready',
-          });
-          setSession(newSession);
-          return newSession;
-        }),
+          },
+          // applyToken: another tab broadcast REFRESH_SUCCESS — update this
+          // tab's session without a server round-trip.
+          (accessToken) => {
+            const newSession = normalizeSession({
+              ...sessionRef.current,
+              accessToken,
+              status: 'ready',
+            });
+            setSession(newSession);
+            return newSession;
+          },
+        ),
       onLogout: () => { broadcastLogout(); resetToLocalSession(); },
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
