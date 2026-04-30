@@ -1,0 +1,7 @@
+# Intranet backend server — Docker only, not deployed to Vercel
+server/
+backup/
+caddy/
+docs/
+scripts/
+shared/node_modules/
