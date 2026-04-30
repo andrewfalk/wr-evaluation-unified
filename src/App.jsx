@@ -438,7 +438,7 @@ function App() {
 
   // Password change guard: server flagged must_change_password (e.g. seed admin first login).
   // Blocks all other UI until the password is changed. Non-dismissable.
-  if (isIntranetMode && isAuthenticated && session?.user?.must_change_password) {
+  if (isIntranetMode && isAuthenticated && session?.user?.mustChangePassword) {
     return (
       <ChangePasswordModal apiBaseUrl={session?.apiBaseUrl || settings?.apiBaseUrl || ''} />
     );

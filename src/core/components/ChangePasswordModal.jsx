@@ -25,9 +25,10 @@ export function ChangePasswordModal({ apiBaseUrl = '' }) {
         method: 'POST',
         session,
         body: { currentPassword, newPassword },
-        _retry: true, // wrong current password = 401, not token expiry
+        // No _retry: token expiry 401 → interceptor refreshes → retry (correct).
+        // Wrong password 401 → interceptor refreshes (no-op, token still valid) → retry → error shown.
       });
-      // Server returns updated user (must_change_password=false) and optionally new tokens.
+      // Server returns updated user (mustChangePassword=false) and optionally new tokens.
       if (data?.accessToken) {
         // Full session rotation (server revoked other sessions, issued new token).
         setSession(prev => ({
@@ -35,12 +36,12 @@ export function ChangePasswordModal({ apiBaseUrl = '' }) {
           accessToken: data.accessToken,
           accessExpiresAt: data.accessExpiresAt,
           refreshedAt: new Date().toISOString(),
-          user: { ...prev.user, ...data.user, must_change_password: false },
+          user: { ...prev.user, ...data.user, mustChangePassword: false },
         }));
       } else {
         setSession(prev => ({
           ...prev,
-          user: { ...prev.user, ...(data?.user || {}), must_change_password: false },
+          user: { ...prev.user, ...(data?.user || {}), mustChangePassword: false },
         }));
       }
     } catch (err) {
