@@ -87,7 +87,9 @@ export function AuthProvider({ children }) {
     const fallback = saveStoredSession(createLocalSession());
     sessionRef.current = fallback;
     setSessionState(fallback);
-    setSessionVerified(false);
+    // Local sessions need no server verification — mark as verified immediately
+    // so sessionVerified=false is reserved exclusively for "intranet boot check in-flight".
+    setSessionVerified(true);
     return fallback;
   }, []);
 
