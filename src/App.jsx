@@ -237,13 +237,19 @@ function App() {
   // session.mode is intentionally NOT synced here — it is only set to 'intranet'
   // by login() after server authentication, preventing unauthenticated local
   // sessions from being treated as authenticated by the isAuthenticated gate.
+  // If the URL changes while an intranet session is active, the existing auth is
+  // invalid for the new server — reset to local so the LoginModal re-prompts.
   useEffect(() => {
-    setSession(prev => {
-      const nextBaseUrl = settings.apiBaseUrl || '';
-      if ((prev.apiBaseUrl || '') === nextBaseUrl) return prev;
-      return { ...prev, apiBaseUrl: nextBaseUrl };
-    });
-  }, [setSession, settings.apiBaseUrl]);
+    const prev = session;
+    const nextBaseUrl = settings.apiBaseUrl || '';
+    if ((prev.apiBaseUrl || '') === nextBaseUrl) return;
+    if (prev.mode === 'intranet') {
+      resetToLocalSession();
+    } else {
+      setSession(s => ({ ...s, apiBaseUrl: nextBaseUrl }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.apiBaseUrl]); // intentionally excludes session/setSession/resetToLocalSession — URL-change only
 
   // Electron: 파일 기반 설정 비동기 로드
   useEffect(() => {
@@ -304,8 +310,14 @@ function App() {
   const handleSaveSettings = (newSettings) => {
     setSettings(newSettings);
     saveAppSettings(newSettings);
-    // Only sync apiBaseUrl — mode is controlled by login()/resetToLocalSession().
-    setSession(prev => ({ ...prev, apiBaseUrl: newSettings.apiBaseUrl || '' }));
+    const nextBaseUrl = newSettings.apiBaseUrl || '';
+    // If the URL changed while an intranet session is active, auth is invalid for
+    // the new server — reset so the LoginModal re-prompts against the new URL.
+    if (session.mode === 'intranet' && (session.apiBaseUrl || '') !== nextBaseUrl) {
+      resetToLocalSession();
+    } else {
+      setSession(prev => ({ ...prev, apiBaseUrl: nextBaseUrl }));
+    }
     setShowSettings(false);
   };
 

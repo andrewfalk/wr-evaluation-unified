@@ -27,9 +27,16 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const snap = sessionRef.current;
     if (snap?.mode !== 'intranet') return;
+    // Identity key: uniquely identifies the session at request time so the response
+    // handler can detect if login/logout changed the session while the request was in flight.
+    const snapIdentity = `${snap.mode}|${snap.apiBaseUrl || ''}|${snap.user?.id || ''}|${snap.refreshedAt || ''}`;
     const baseUrl = snap.apiBaseUrl || '';
     fetch(`${baseUrl}/api/auth/csrf`, { method: 'POST', credentials: 'include' })
       .then(async r => {
+        // Skip if the session changed while the request was in flight (e.g. login/logout).
+        const currentIdentity = `${sessionRef.current.mode}|${sessionRef.current.apiBaseUrl || ''}|${sessionRef.current.user?.id || ''}|${sessionRef.current.refreshedAt || ''}`;
+        if (currentIdentity !== snapIdentity) return;
+
         if (!r.ok) {
           clearStoredSession();
           const fallback = saveStoredSession(createLocalSession());
@@ -54,6 +61,9 @@ export function AuthProvider({ children }) {
         setSessionVerified(true);
       })
       .catch(() => {
+        // Same guard: don't reset a session that changed after the request started.
+        const currentIdentity = `${sessionRef.current.mode}|${sessionRef.current.apiBaseUrl || ''}|${sessionRef.current.user?.id || ''}|${sessionRef.current.refreshedAt || ''}`;
+        if (currentIdentity !== snapIdentity) return;
         clearStoredSession();
         const fallback = saveStoredSession(createLocalSession());
         sessionRef.current = fallback;
