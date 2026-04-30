@@ -3,5 +3,4 @@ server/
 backup/
 caddy/
 docs/
-scripts/
 shared/node_modules/
