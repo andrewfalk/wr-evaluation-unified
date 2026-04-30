@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   clearStoredSession,
   createLocalSession,
@@ -13,25 +13,57 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [session, setSessionState] = useState(() => loadStoredSession());
+  // Boot-time flag: false for persisted intranet sessions until /api/auth/csrf confirms
+  // the refresh cookie is still valid. True immediately for local/non-intranet sessions.
+  const [sessionVerified, setSessionVerified] = useState(
+    () => loadStoredSession()?.mode !== 'intranet'
+  );
+  // Ref that shadows session state so callbacks don't close over stale values.
+  const sessionRef = useRef(session);
 
+  // Verify a persisted intranet session on mount. Uses plain fetch (not httpClient)
+  // to avoid triggering the refresh interceptor before configureHttpClient is wired.
+  // On failure, falls back to local session rather than leaving a stale intranet session.
+  useEffect(() => {
+    const snap = sessionRef.current;
+    if (snap?.mode !== 'intranet') return;
+    const baseUrl = snap.apiBaseUrl || '';
+    fetch(`${baseUrl}/api/auth/csrf`, { method: 'POST', credentials: 'include' })
+      .then(r => {
+        if (r.ok) {
+          setSessionVerified(true);
+        } else {
+          clearStoredSession();
+          const fallback = saveStoredSession(createLocalSession());
+          sessionRef.current = fallback;
+          setSessionState(fallback);
+        }
+      })
+      .catch(() => {
+        clearStoredSession();
+        const fallback = saveStoredSession(createLocalSession());
+        sessionRef.current = fallback;
+        setSessionState(fallback);
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps — mount-only, uses ref snapshot
+
+  // Normalize and persist outside the state updater so the return value is stable.
   const setSession = useCallback((nextSession) => {
-    let normalized;
-    setSessionState(prevSession => {
-      const resolved = typeof nextSession === 'function'
-        ? nextSession(prevSession)
-        : nextSession;
-
-      normalized = saveStoredSession(resolved);
-      return normalized;
-    });
-
+    const resolved = typeof nextSession === 'function'
+      ? nextSession(sessionRef.current)
+      : nextSession;
+    const normalized = saveStoredSession(resolved);
+    sessionRef.current = normalized;
+    setSessionState(normalized);
     return normalized;
   }, []);
 
   const resetToLocalSession = useCallback(() => {
     clearStoredSession();
     const fallback = saveStoredSession(createLocalSession());
+    sessionRef.current = fallback;
     setSessionState(fallback);
+    setSessionVerified(false);
     return fallback;
   }, []);
 
@@ -48,13 +80,15 @@ export function AuthProvider({ children }) {
     });
     // saveStoredSession strips accessToken before writing localStorage.
     saveStoredSession(next);
+    sessionRef.current = next;
     setSessionState(next);
+    setSessionVerified(true);
     return next;
   }, []);
 
   // Calls /api/auth/logout, then resets to local session regardless of server response.
   const logout = useCallback(async () => {
-    const snap = session; // capture before clear
+    const snap = sessionRef.current; // capture via ref before state is cleared
     broadcastLogout();
     resetToLocalSession();
     try {
@@ -68,17 +102,20 @@ export function AuthProvider({ children }) {
     } catch {
       // Server logout is best-effort; local state is already cleared.
     }
-  }, [session, resetToLocalSession]);
+  }, [resetToLocalSession]);
 
   const value = useMemo(() => ({
     session,
     user: normalizeSession(session).user,
-    isAuthenticated: session?.mode === 'intranet' && !!session?.user?.id,
+    // sessionVerified gates isAuthenticated: persisted intranet sessions are not
+    // trusted until the boot-time /api/auth/csrf check confirms the refresh cookie.
+    isAuthenticated: session?.mode === 'intranet' && !!session?.user?.id && sessionVerified,
+    sessionVerified,
     setSession,
     resetToLocalSession,
     login,
     logout,
-  }), [session, setSession, resetToLocalSession, login, logout]);
+  }), [session, sessionVerified, setSession, resetToLocalSession, login, logout]);
 
   return (
     <AuthContext.Provider value={value}>

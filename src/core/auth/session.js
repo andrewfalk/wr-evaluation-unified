@@ -20,10 +20,10 @@ export function createLocalSession(overrides = {}) {
     refreshedAt: now,
     user: {
       id: `${runtime}-user`,
-      displayName: runtime === 'electron-local' ? 'Desktop User' : 'Local User',
+      displayName: runtime === 'electron' ? 'Desktop User' : 'Local User',
       email: '',
       role: 'clinician',
-      organizationId: runtime === 'electron-local' ? 'local-electron-workspace' : 'local-web-workspace',
+      organizationId: runtime === 'electron' ? 'local-electron-workspace' : 'local-web-workspace',
       authProvider: 'local-fallback',
     },
   };
