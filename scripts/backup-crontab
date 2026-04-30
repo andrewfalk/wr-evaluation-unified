@@ -1,0 +1,3 @@
+# backup service crontab
+# Daily DB backup at 02:00
+0 2 * * * sh /scripts/backup.sh

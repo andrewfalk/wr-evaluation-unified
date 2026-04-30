@@ -5,6 +5,7 @@ import { createServer } from 'http';
 import cookieParser from 'cookie-parser';
 import config from './config';
 import { pool } from './db/client';
+import { auditPool } from './db/auditClient';
 import { runMigrations } from './db/migrate';
 import { createAuthRouter } from './routes/auth';
 import { createConfigRouter } from './routes/config';
@@ -30,7 +31,7 @@ app.get('/health', (_req, res) => {
 app.use('/api/auth', createAuthRouter(pool));
 app.use('/api/config', createConfigRouter());
 app.use('/api/devices', createDevicesRouter(pool));
-app.use('/api/admin',      createAdminRouter(pool));
+app.use('/api/admin',      createAdminRouter(pool, auditPool));
 app.use('/api/audit',      createAuditRouter(pool));
 app.use('/api/workspaces', createWorkspacesRouter(pool));
 app.use('/api/autosave',  createAutosaveRouter(pool));

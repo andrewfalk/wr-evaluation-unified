@@ -1,0 +1,3 @@
+# partition service crontab
+# Create next month's audit_logs partition on the 25th at 03:00
+0 3 25 * * sh /scripts/audit-partition.sh

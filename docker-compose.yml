@@ -4,11 +4,13 @@
 #   ACCESS_TOKEN_SECRET   — random 64-char string (openssl rand -hex 32)
 #   REFRESH_TOKEN_SECRET  — random 64-char string (openssl rand -hex 32)
 #   CORS_ORIGINS          — comma-separated allowed origins (e.g. https://wr.hospital.local)
+#   WR_DOMAIN             — intranet hostname Caddy serves (e.g. wr.hospital.local)
 #
 # Optional:
 #   POSTGRES_PASSWORD     — DB password (default: changeme_for_dev_only)
+#   AUDIT_DB_PASSWORD     — wr_audit_reader password (default: changeme_audit_reader)
 #   DEPLOYMENT_MODE       — intranet | standalone (default: intranet)
-#   PORT                  — host port for the app (default: 3001)
+#   PORT                  — internal app container port (default: 3001, rarely changed)
 #   AI_PROVIDER           — none | internal | external (default: none)
 
 services:
@@ -34,6 +36,7 @@ services:
   # ---------------------------------------------------------------------------
   # Application server
   # Runs DB migrations automatically on startup before accepting connections.
+  # Not exposed externally — Caddy proxies all inbound traffic.
   # ---------------------------------------------------------------------------
   app:
     build:
@@ -41,15 +44,14 @@ services:
       dockerfile: server/Dockerfile
     environment:
       DATABASE_URL:         postgres://wr_user:${POSTGRES_PASSWORD:-changeme_for_dev_only}@postgres:5432/wr_evaluation
+      AUDIT_DATABASE_URL:   postgres://wr_audit_reader:${AUDIT_DB_PASSWORD:-changeme_audit_reader}@postgres:5432/wr_evaluation
       NODE_ENV:             production
       PORT:                 3001
       DEPLOYMENT_MODE:      ${DEPLOYMENT_MODE:-intranet}
-      ACCESS_TOKEN_SECRET:  ${ACCESS_TOKEN_SECRET:?ACCESS_TOKEN_SECRET is required — run: export ACCESS_TOKEN_SECRET=$(openssl rand -hex 32)}
-      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET is required — run: export REFRESH_TOKEN_SECRET=$(openssl rand -hex 32)}
+      ACCESS_TOKEN_SECRET:  "${ACCESS_TOKEN_SECRET:?ACCESS_TOKEN_SECRET is required}"
+      REFRESH_TOKEN_SECRET: "${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET is required}"
       CORS_ORIGINS:         ${CORS_ORIGINS:-https://wr.hospital.local}
       AI_PROVIDER:          ${AI_PROVIDER:-none}
-    ports:
-      - "${PORT:-3001}:3001"
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,5 +63,109 @@ services:
       retries:  3
       start_period: 30s
 
+  # ---------------------------------------------------------------------------
+  # Caddy — HTTPS reverse proxy with internal CA
+  #
+  # Root CA certificate (must be installed on every client PC):
+  #   docker compose exec caddy cat /data/caddy/pki/authorities/local/root.crt
+  #
+  # See docs/INTRANET_DEPLOYMENT.md for full CA installation procedure.
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      WR_DOMAIN: "${WR_DOMAIN:?WR_DOMAIN is required}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      # Caddy admin API (127.0.0.1:2019) is always available regardless of vhost config.
+      # Checking https://{WR_DOMAIN}/health would require SNI matching and CA trust inside
+      # the container — Caddy admin API is the correct liveness probe here.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:2019/config/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout:  5s
+      retries:  3
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # Partition sidecar — maintains audit_logs monthly partitions.
+  # Always active (no profile) — partition creation must not be gated on
+  # GPG backup setup. Runs on the 25th of each month to prepare the next
+  # month's partition before rollover.
+  # ---------------------------------------------------------------------------
+  partition:
+    image: postgres:16-alpine
+    environment:
+      PGHOST:     postgres
+      PGPORT:     "5432"
+      PGUSER:     wr_user
+      PGPASSWORD: ${POSTGRES_PASSWORD:-changeme_for_dev_only}
+      PGDATABASE: wr_evaluation
+    volumes:
+      - ./scripts/audit-partition.sh:/scripts/audit-partition.sh:ro
+      - ./scripts/partition-crontab:/scripts/partition-crontab:ro
+    command: >
+      sh -c "crontab /scripts/partition-crontab &&
+             crond -f -l 6"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Backup sidecar — daily pg_dump → GPG-encrypted files in backup_data volume.
+  #
+  # Activate with:  docker compose --profile backup up -d
+  # (Separated into a profile so docker compose up without GPG setup doesn't fail.)
+  #
+  # One-time GPG public key setup (before first start):
+  #   docker compose --profile backup run --rm backup gpg --import /path/to/public-key.asc
+  #
+  # Required environment variables (set in .env):
+  #   BACKUP_GPG_RECIPIENT — GPG key fingerprint or email
+  #
+  # See docs/BACKUP_RESTORE.md for full runbook.
+  # ---------------------------------------------------------------------------
+  backup:
+    profiles: ["backup"]
+    build:
+      context: .
+      dockerfile: backup/Dockerfile
+    environment:
+      PGHOST:               postgres
+      PGPORT:               "5432"
+      PGUSER:               wr_user
+      PGPASSWORD:           ${POSTGRES_PASSWORD:-changeme_for_dev_only}
+      PGDATABASE:           wr_evaluation
+      BACKUP_DIR:           /backups
+      BACKUP_GPG_RECIPIENT: ${BACKUP_GPG_RECIPIENT:-}
+    volumes:
+      - ./scripts/backup.sh:/scripts/backup.sh:ro
+      - ./scripts/restore.sh:/scripts/restore.sh:ro
+      - ./scripts/backup-crontab:/scripts/backup-crontab:ro
+      - backup_data:/backups
+      - backup_gnupg:/root/.gnupg
+    # crontab file avoids shell escaping issues in YAML command strings.
+    command: >
+      sh -c "crontab /scripts/backup-crontab &&
+             crond -f -l 6"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  caddy_data:
+  caddy_config:
+  backup_data:
+  backup_gnupg:

@@ -10,7 +10,8 @@
     "rootDir": "src",
     "baseUrl": ".",
     "paths": {
-      "@wr/contracts/*": ["node_modules/@wr/contracts/contracts/*.ts"]
+      "@wr/contracts": ["node_modules/@wr/contracts/dist/index.d.cts"],
+      "@wr/contracts/*": ["node_modules/@wr/contracts/dist/*.d.cts"]
     }
   },
   "include": ["src/**/*.ts"]
