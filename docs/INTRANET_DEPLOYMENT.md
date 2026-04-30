@@ -58,7 +58,7 @@ docker compose --profile backup up -d
 ```
 
 > **⚠ 기본 비밀번호 주의**: `POSTGRES_PASSWORD`, `AUDIT_DB_PASSWORD`는 반드시 기본값에서 변경하세요.  
-> 특히 `AUDIT_DB_PASSWORD`는 migration 기본값(`changeme_audit_reader`)과 반드시 일치시켜야 합니다 — 불일치 시 서버가 production 모드에서 기동을 거부합니다.
+> 특히 `.env`의 `AUDIT_DB_PASSWORD` 값과 DB role `wr_audit_reader`의 실제 비밀번호가 반드시 일치해야 합니다 — 4단계의 `ALTER ROLE` 명령으로 동기화하며, 불일치 시 서버가 production 모드에서 기동을 거부합니다.
 
 서비스가 정상 기동되면 Caddy가 자동으로 내부 CA를 생성하고 `wr.hospital.local`에 대한 인증서를 발급합니다.
 
