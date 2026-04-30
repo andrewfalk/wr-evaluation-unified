@@ -161,10 +161,21 @@ async function runWithLocalStorageLock(doRefresh, applyToken) {
 
   if (!hasLock) {
     if (_ch) {
-      try {
-        const accessToken = await waitForRefreshBroadcast();
-        return applyToken(accessToken);
-      } catch { /* timeout/failure — attempt takeover */ }
+      // Medium fix: check signal first — lock holder may have already broadcast
+      // before we registered a listener. If signal says success, try a short BC
+      // wait to catch any in-flight message; on miss, fall through to own refresh
+      // (T09 grace window means re-using the new cookies will succeed).
+      if (checkRecentSuccess()) {
+        try {
+          const accessToken = await waitForRefreshBroadcast(1500);
+          return applyToken(accessToken);
+        } catch { /* broadcast already passed — fall through to own refresh */ }
+      } else {
+        try {
+          const accessToken = await waitForRefreshBroadcast();
+          return applyToken(accessToken);
+        } catch { /* timeout/failure — attempt takeover */ }
+      }
     } else {
       // No BC: wait for lock to free, then do own refresh (server grace window).
       try { await pollUntilLockFree(); } catch { /* proceed */ }
@@ -178,12 +189,17 @@ async function runWithLocalStorageLock(doRefresh, applyToken) {
     _ch?.postMessage({ type: 'REFRESH_SUCCESS', accessToken: newSession.accessToken });
     return newSession;
   } catch (err) {
-    // TOCTOU: another tab may have succeeded concurrently — check before failing.
-    if (checkRecentSuccess() && _ch) {
+    // TOCTOU: another tab may have raced us and already succeeded. Its Set-Cookie
+    // is now in the browser jar, so a single recovery doRefresh() will pass with
+    // the new cookies — without needing the token from the broadcast (which already
+    // passed). One retry only to prevent infinite loops.
+    if (checkRecentSuccess()) {
       try {
-        const accessToken = await waitForRefreshBroadcast(1500);
-        return applyToken(accessToken);
-      } catch { /* fall through to failure */ }
+        const recoverySession = await doRefresh();
+        storeSignal('success');
+        _ch?.postMessage({ type: 'REFRESH_SUCCESS', accessToken: recoverySession.accessToken });
+        return recoverySession;
+      } catch { /* recovery also failed — proceed to broadcast failure */ }
     }
     storeSignal('failure');
     _ch?.postMessage({ type: 'REFRESH_FAILURE' });
