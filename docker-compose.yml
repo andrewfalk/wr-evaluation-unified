@@ -97,6 +97,31 @@ services:
       start_period: 15s
 
   # ---------------------------------------------------------------------------
+  # Partition sidecar — maintains audit_logs monthly partitions.
+  # Always active (no profile) — partition creation must not be gated on
+  # GPG backup setup. Runs on the 25th of each month to prepare the next
+  # month's partition before rollover.
+  # ---------------------------------------------------------------------------
+  partition:
+    image: postgres:16-alpine
+    environment:
+      PGHOST:     postgres
+      PGPORT:     "5432"
+      PGUSER:     wr_user
+      PGPASSWORD: ${POSTGRES_PASSWORD:-changeme_for_dev_only}
+      PGDATABASE: wr_evaluation
+    volumes:
+      - ./scripts/audit-partition.sh:/scripts/audit-partition.sh:ro
+      - ./scripts/partition-crontab:/scripts/partition-crontab:ro
+    command: >
+      sh -c "crontab /scripts/partition-crontab &&
+             crond -f -l 6"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
   # Backup sidecar — daily pg_dump → GPG-encrypted files in backup_data volume.
   #
   # Activate with:  docker compose --profile backup up -d
@@ -116,26 +141,22 @@ services:
       context: .
       dockerfile: backup/Dockerfile
     environment:
-      PGHOST:              postgres
-      PGPORT:              "5432"
-      PGUSER:              wr_user
-      PGPASSWORD:          ${POSTGRES_PASSWORD:-changeme_for_dev_only}
-      PGDATABASE:          wr_evaluation
-      BACKUP_DIR:          /backups
+      PGHOST:               postgres
+      PGPORT:               "5432"
+      PGUSER:               wr_user
+      PGPASSWORD:           ${POSTGRES_PASSWORD:-changeme_for_dev_only}
+      PGDATABASE:           wr_evaluation
+      BACKUP_DIR:           /backups
       BACKUP_GPG_RECIPIENT: ${BACKUP_GPG_RECIPIENT:-}
     volumes:
       - ./scripts/backup.sh:/scripts/backup.sh:ro
       - ./scripts/restore.sh:/scripts/restore.sh:ro
-      - ./scripts/audit-partition.sh:/scripts/audit-partition.sh:ro
+      - ./scripts/backup-crontab:/scripts/backup-crontab:ro
       - backup_data:/backups
       - backup_gnupg:/root/.gnupg
-    # Use 'sh script' instead of executing directly — :ro mount cannot be chmod'd.
-    # Logs go to stdout so 'docker compose logs backup' works.
-    # audit-partition runs on the 25th of each month at 03:00 to prepare
-    # the next month's partition before the month turns over.
+    # crontab file avoids shell escaping issues in YAML command strings.
     command: >
-      sh -c "printf '%s\n' '0 2 * * * sh /scripts/backup.sh'
-                           '0 3 25 * * sh /scripts/audit-partition.sh' | crontab - &&
+      sh -c "crontab /scripts/backup-crontab &&
              crond -f -l 6"
     depends_on:
       postgres:
