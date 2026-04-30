@@ -8,6 +8,7 @@
 #
 # Optional:
 #   POSTGRES_PASSWORD     — DB password (default: changeme_for_dev_only)
+#   AUDIT_DB_PASSWORD     — wr_audit_reader password (default: changeme_audit_reader)
 #   DEPLOYMENT_MODE       — intranet | standalone (default: intranet)
 #   PORT                  — internal app container port (default: 3001, rarely changed)
 #   AI_PROVIDER           — none | internal | external (default: none)
@@ -43,11 +44,12 @@ services:
       dockerfile: server/Dockerfile
     environment:
       DATABASE_URL:         postgres://wr_user:${POSTGRES_PASSWORD:-changeme_for_dev_only}@postgres:5432/wr_evaluation
+      AUDIT_DATABASE_URL:   postgres://wr_audit_reader:${AUDIT_DB_PASSWORD:-changeme_audit_reader}@postgres:5432/wr_evaluation
       NODE_ENV:             production
       PORT:                 3001
       DEPLOYMENT_MODE:      ${DEPLOYMENT_MODE:-intranet}
-      ACCESS_TOKEN_SECRET:  ${ACCESS_TOKEN_SECRET:?ACCESS_TOKEN_SECRET is required — run: export ACCESS_TOKEN_SECRET=$(openssl rand -hex 32)}
-      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET is required — run: export REFRESH_TOKEN_SECRET=$(openssl rand -hex 32)}
+      ACCESS_TOKEN_SECRET:  "${ACCESS_TOKEN_SECRET:?ACCESS_TOKEN_SECRET is required}"
+      REFRESH_TOKEN_SECRET: "${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET is required}"
       CORS_ORIGINS:         ${CORS_ORIGINS:-https://wr.hospital.local}
       AI_PROVIDER:          ${AI_PROVIDER:-none}
     depends_on:
@@ -72,7 +74,7 @@ services:
   caddy:
     image: caddy:2-alpine
     environment:
-      WR_DOMAIN: ${WR_DOMAIN:?WR_DOMAIN is required — set to your intranet hostname, e.g. wr.hospital.local}
+      WR_DOMAIN: "${WR_DOMAIN:?WR_DOMAIN is required}"
     ports:
       - "80:80"
       - "443:443"
@@ -85,10 +87,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      # Caddy admin API (localhost:2019) is always available regardless of vhost config.
+      # Caddy admin API (127.0.0.1:2019) is always available regardless of vhost config.
       # Checking https://{WR_DOMAIN}/health would require SNI matching and CA trust inside
       # the container — Caddy admin API is the correct liveness probe here.
-      test: ["CMD-SHELL", "wget -qO- http://localhost:2019/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:2019/config/ >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout:  5s
       retries:  3

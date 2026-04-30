@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { z } from 'zod';
 import type { Pool } from 'pg';
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
@@ -175,6 +176,16 @@ async function revokeDevice(pool: Pool, req: Request, res: Response): Promise<vo
 // ---------------------------------------------------------------------------
 const MAX_AUDIT_LIMIT = 200;
 
+const auditQuerySchema = z.object({
+  page:        z.coerce.number().int().min(1).default(1),
+  limit:       z.coerce.number().int().min(1).max(MAX_AUDIT_LIMIT).default(50),
+  action:      z.string().max(100).optional(),
+  actorUserId: z.string().uuid().optional(),
+  targetType:  z.string().max(100).optional(),
+  from:        z.string().datetime({ offset: true }).optional(),
+  to:          z.string().datetime({ offset: true }).optional(),
+});
+
 interface AuditRow {
   id:            string;
   actor_user_id: string | null;
@@ -189,19 +200,16 @@ interface AuditRow {
   created_at:    Date;
 }
 
-async function listAuditLogs(auditPool: Pool, req: Request, res: Response): Promise<void> {
-  const orgId = req.sessionInfo?.organizationId ?? null;
+async function listAuditLogs(pool: Pool, auditPool: Pool, req: Request, res: Response): Promise<void> {
+  const parsed = auditQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ code: 'INVALID_PARAMS', errors: parsed.error.flatten().fieldErrors });
+    return;
+  }
 
-  const page  = Math.max(1, parseInt(String(req.query['page']  ?? '1'),  10) || 1);
-  const limit = Math.min(MAX_AUDIT_LIMIT,
-                  Math.max(1, parseInt(String(req.query['limit'] ?? '50'), 10) || 50));
+  const { page, limit, action, actorUserId, targetType, from, to } = parsed.data;
   const offset = (page - 1) * limit;
-
-  const action      = typeof req.query['action']      === 'string' ? req.query['action']      : null;
-  const actorUserId = typeof req.query['actorUserId'] === 'string' ? req.query['actorUserId'] : null;
-  const targetType  = typeof req.query['targetType']  === 'string' ? req.query['targetType']  : null;
-  const from        = typeof req.query['from']        === 'string' ? req.query['from']        : null;
-  const to          = typeof req.query['to']          === 'string' ? req.query['to']          : null;
+  const orgId  = req.sessionInfo?.organizationId ?? null;
 
   // Build dynamic WHERE clause; org-scoped for non-superadmin.
   const conditions: string[] = [];
@@ -249,6 +257,20 @@ async function listAuditLogs(auditPool: Pool, req: Request, res: Response): Prom
   ]);
 
   const total = parseInt(countRows[0]?.total ?? '0', 10);
+
+  // Audit the audit query itself — filter params recorded, no PHI in extra.
+  const session = req.sessionInfo!;
+  writeAuditLog(pool, {
+    actorUserId: session.userId,
+    actorOrgId:  session.organizationId ?? null,
+    action:      'admin_audit_view',
+    targetType:  'audit_logs',
+    targetId:    null,
+    outcome:     'success',
+    ip:          req.ip ?? null,
+    userAgent:   req.headers['user-agent'] ?? null,
+    extra:       { page, limit, action, actorUserId, targetType, from, to, total },
+  });
 
   res.status(200).json({
     items: rows.map((r) => ({
@@ -303,7 +325,7 @@ export function createAdminRouter(pool: Pool, auditPool: Pool): Router {
   router.get(
     '/audit',
     auth, admin,
-    (req, res) => listAuditLogs(auditPool, req, res).catch(() => res.status(500).json(internalError()))
+    (req, res) => listAuditLogs(pool, auditPool, req, res).catch(() => res.status(500).json(internalError()))
   );
 
   return router;

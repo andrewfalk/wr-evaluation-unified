@@ -315,22 +315,69 @@ describe('GET /api/admin/audit', () => {
     expect(calls[0][1]).toContain('session');
   });
 
-  it('clamps limit to 200', async () => {
+  it('returns 400 for limit exceeding 200', async () => {
     const pool      = makePool();
     const auditPool = makePool();
 
     (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    const auditMock = auditPool.query as ReturnType<typeof vi.fn>;
-    auditMock
-      .mockResolvedValueOnce({ rows: [{ total: '0' }] })
-      .mockResolvedValueOnce({ rows: [] });
 
     const res = await request(makeApp(pool, auditPool))
       .get('/api/admin/audit?limit=9999')
       .set('Authorization', `Bearer ${token('admin')}`);
 
-    expect(res.status).toBe(200);
-    expect(res.body.limit).toBe(200);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_PARAMS');
+    expect((auditPool.query as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+  });
+
+  it('returns 400 for invalid actorUserId (not a UUID)', async () => {
+    const pool      = makePool();
+    const auditPool = makePool();
+
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+
+    const res = await request(makeApp(pool, auditPool))
+      .get('/api/admin/audit?actorUserId=not-a-uuid')
+      .set('Authorization', `Bearer ${token('admin')}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_PARAMS');
+    // auditPool should not have been queried
+    expect((auditPool.query as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+  });
+
+  it('returns 400 for invalid from date', async () => {
+    const pool      = makePool();
+    const auditPool = makePool();
+
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+
+    const res = await request(makeApp(pool, auditPool))
+      .get('/api/admin/audit?from=not-a-date')
+      .set('Authorization', `Bearer ${token('admin')}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_PARAMS');
+  });
+
+  it('records admin_audit_view in audit log after successful query', async () => {
+    const { writeAuditLog } = await import('../../middleware/audit');
+    const pool      = makePool();
+    const auditPool = makePool();
+
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    (auditPool.query as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ rows: [{ total: '0' }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await request(makeApp(pool, auditPool))
+      .get('/api/admin/audit')
+      .set('Authorization', `Bearer ${token('admin')}`);
+
+    expect(writeAuditLog).toHaveBeenCalledWith(
+      pool,
+      expect.objectContaining({ action: 'admin_audit_view', outcome: 'success' })
+    );
   });
 
   it('uses auditPool not pool for queries', async () => {
