@@ -19,6 +19,7 @@ export function LoginModal({ apiBaseUrl = '' }) {
         baseUrl: apiBaseUrl,
         method: 'POST',
         body: { loginId: loginId.trim(), password },
+        _retry: true, // login 401 = wrong credentials, not token expiry — skip refresh interceptor
       });
       login(data, apiBaseUrl);
     } catch (err) {

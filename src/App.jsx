@@ -312,9 +312,10 @@ function App() {
     setSettings(newSettings);
     saveAppSettings(newSettings);
     const nextBaseUrl = newSettings.apiBaseUrl || '';
-    // If the URL changed while an intranet session is active, auth is invalid for
-    // the new server — reset so the LoginModal re-prompts against the new URL.
-    if (session.mode === 'intranet' && (session.apiBaseUrl || '') !== nextBaseUrl) {
+    const switchingToLocal = newSettings.integrationMode !== 'intranet';
+    // Reset intranet session when: switching to local mode, or changing the server URL.
+    // Either case means the existing auth token is no longer valid for the new context.
+    if (session.mode === 'intranet' && (switchingToLocal || (session.apiBaseUrl || '') !== nextBaseUrl)) {
       resetToLocalSession();
     } else {
       setSession(prev => ({ ...prev, apiBaseUrl: nextBaseUrl }));

@@ -42,6 +42,7 @@ export function AuthProvider({ children }) {
           const fallback = saveStoredSession(createLocalSession());
           sessionRef.current = fallback;
           setSessionState(fallback);
+          setSessionVerified(true); // local session needs no server check
           return;
         }
         // Apply access token if the server returns one (forward-compatible: no-op if absent).
@@ -68,6 +69,7 @@ export function AuthProvider({ children }) {
         const fallback = saveStoredSession(createLocalSession());
         sessionRef.current = fallback;
         setSessionState(fallback);
+        setSessionVerified(true); // local session needs no server check
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps — mount-only, uses ref snapshot
 
