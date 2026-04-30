@@ -32,7 +32,11 @@
 ```bash
 # 1. 환경 변수 설정
 cp .env.example .env
-# .env 편집: ACCESS_TOKEN_SECRET, REFRESH_TOKEN_SECRET, CORS_ORIGINS, WR_DOMAIN 입력
+# .env 편집: 아래 항목을 반드시 실제 값으로 변경
+#   ACCESS_TOKEN_SECRET, REFRESH_TOKEN_SECRET   (openssl rand -hex 32)
+#   CORS_ORIGINS, WR_DOMAIN
+#   POSTGRES_PASSWORD                           (기본값 변경 필수)
+#   AUDIT_DB_PASSWORD                           (기본값 changeme_audit_reader 반드시 변경)
 
 # 2. 핵심 서비스 기동 (postgres + app + caddy)
 docker compose up -d
@@ -41,11 +45,20 @@ docker compose up -d
 docker compose exec app node dist/cli/seedAdmin.js
 # → stdin에서 비밀번호 입력 (shell history에 남지 않음)
 
-# 4. 백업 사이드카 활성화 (GPG 공개 키 설정 후)
+# 4. audit reader 비밀번호를 .env의 AUDIT_DB_PASSWORD 값으로 동기화 (최초 1회)
+#    migration이 기본값 'changeme_audit_reader'로 role을 생성하므로,
+#    .env에서 변경한 값으로 아래 명령을 실행해야 합니다.
+docker compose exec postgres psql -U wr_user -d wr_evaluation \
+  -c "ALTER ROLE wr_audit_reader PASSWORD '실제_AUDIT_DB_PASSWORD_값';"
+
+# 5. 백업 사이드카 활성화 (GPG 공개 키 설정 후)
 # .env에 BACKUP_GPG_RECIPIENT 설정 → docs/BACKUP_RESTORE.md 3절 참조
 # GPG 공개 키 등록 전에는 backup 서비스를 기동하지 마세요.
 docker compose --profile backup up -d
 ```
+
+> **⚠ 기본 비밀번호 주의**: `POSTGRES_PASSWORD`, `AUDIT_DB_PASSWORD`는 반드시 기본값에서 변경하세요.  
+> 특히 `AUDIT_DB_PASSWORD`는 migration 기본값(`changeme_audit_reader`)과 반드시 일치시켜야 합니다 — 불일치 시 서버가 production 모드에서 기동을 거부합니다.
 
 서비스가 정상 기동되면 Caddy가 자동으로 내부 CA를 생성하고 `wr.hospital.local`에 대한 인증서를 발급합니다.
 
