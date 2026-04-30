@@ -13,6 +13,9 @@ import { MainHeader } from './core/components/MainHeader';
 import { StepIndicator } from './core/components/StepIndicator';
 import { useAuth } from './core/auth/AuthContext';
 import { useServerConfig } from './core/hooks/useServerConfig';
+import { configureHttpClient } from './core/services/httpClient';
+import { getCsrfToken } from './core/utils/csrfCookie';
+import { normalizeSession } from './core/auth/session';
 import { useIntegrationStatus } from './core/hooks/useIntegrationStatus';
 import { usePatientList } from './core/hooks/usePatientList';
 import { DEFAULT_SETTINGS, FONT_SIZE_MAP } from './core/utils/data';
@@ -59,7 +62,7 @@ import './modules/wrist';
 
 
 function App() {
-  const { session, setSession } = useAuth();
+  const { session, setSession, resetToLocalSession } = useAuth();
   const [patients, setPatients] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -100,6 +103,40 @@ function App() {
 
   const handleStartIntakeRef = useRef(null);
   const handleResetPatientsRef = useRef(null);
+
+  // Keep a stable ref to the latest session so the refresh handler never
+  // captures a stale closure value.
+  const sessionRef = useRef(session);
+  useEffect(() => { sessionRef.current = session; }, [session]);
+
+  // Wire up httpClient's 401-refresh interceptor once at mount.
+  useEffect(() => {
+    configureHttpClient({
+      onRefresh: async () => {
+        const current = sessionRef.current;
+        const base = (current?.apiBaseUrl || '').trim().replace(/\/$/, '');
+        const csrfToken = getCsrfToken();
+        const res = await fetch(`${base}/api/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+          },
+        });
+        if (!res.ok) throw new Error('Refresh failed');
+        const data = await res.json();
+        const newSession = normalizeSession({
+          ...current,
+          accessToken: data.accessToken,
+          status: 'ready',
+        });
+        setSession(newSession);
+        return newSession;
+      },
+      onLogout: resetToLocalSession,
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 현재 환자의 스텝 목록
   const steps = useMemo(() => buildSteps(activeModules), [activeModules]);
