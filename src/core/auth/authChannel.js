@@ -1,31 +1,21 @@
-// Cross-tab auth coordination via BroadcastChannel + localStorage lock.
+// Cross-tab auth coordination.
 //
-// Lock protocol (read-back CAS):
-//   tryAcquireLock() writes { ownerId, expiresAt } then immediately re-reads
-//   to confirm ownership. If another tab overwrote the entry between the
-//   write and read-back the lock is considered lost and the tab falls into
-//   the broadcast-wait path instead.
+// Primary:  navigator.locks  — true mutual exclusion, no race window.
+// Fallback: localStorage CAS — best-effort; TOCTOU window is tiny and
+//           the server's 30 s grace window (T09) absorbs the rare double-refresh.
 //
-// Missed-broadcast recovery:
-//   The lock holder writes the result to RESULT_KEY before broadcasting.
-//   A waiter checks RESULT_KEY first so a message that arrived before the
-//   listener was registered is not missed.
-//
-// BroadcastChannel fallback:
-//   When BroadcastChannel is unavailable the waiter polls RESULT_KEY every
-//   500 ms until the result appears or the lock TTL expires.
-//
-// Security note: RESULT_KEY stores the access token in localStorage for up
-//   to 30 s. This is intentional and acceptable for same-origin intranet
-//   deployments protected by strict CSP (connect-src 'self').
+// Security: access tokens are NEVER written to localStorage.
+//   SIGNAL_KEY stores only { status, completedAt } — no token.
+//   Tokens travel exclusively via BroadcastChannel payload (in-memory delivery).
 
 const TAB_ID = Math.random().toString(36).slice(2, 10);
-const LOCK_KEY = 'wr-auth-refresh-lock';
-const RESULT_KEY = 'wr-auth-refresh-result';
+const LOCK_NAME = 'wr-auth-refresh';       // navigator.locks key
+const LOCK_KEY = 'wr-auth-refresh-lock';   // localStorage fallback key
+const SIGNAL_KEY = 'wr-auth-refresh-sig';  // { status:'success'|'failure', completedAt } — no token
 const LOCK_TTL_MS = 10_000;
-const RESULT_TTL_MS = 30_000;
-const WAIT_TIMEOUT_MS = 12_000; // slightly longer than LOCK_TTL so expiry fires first
-const POLL_INTERVAL_MS = 500;
+const WAIT_TIMEOUT_MS = 12_000;
+const POLL_INTERVAL_MS = 300;
+const SIGNAL_TTL_MS = 5_000;
 
 const _ch = (() => {
   if (typeof BroadcastChannel === 'undefined') return null;
@@ -33,27 +23,36 @@ const _ch = (() => {
   catch { return null; }
 })();
 
-// --- Lock helpers ---
+// --- Signal helpers (status only, no token) ---
+
+function storeSignal(status) {
+  try {
+    localStorage.setItem(SIGNAL_KEY, JSON.stringify({ status, completedAt: Date.now() }));
+  } catch (_e) { /* best-effort */ }
+}
+
+function checkRecentSuccess() {
+  try {
+    const raw = localStorage.getItem(SIGNAL_KEY);
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+    return s.status === 'success' && (Date.now() - s.completedAt) < SIGNAL_TTL_MS;
+  } catch { return false; }
+}
+
+// --- localStorage lock helpers (fallback only) ---
 
 function tryAcquireLock() {
   try {
     const raw = localStorage.getItem(LOCK_KEY);
     const existing = raw ? JSON.parse(raw) : null;
-    if (existing && existing.ownerId !== TAB_ID && existing.expiresAt > Date.now()) {
-      return false; // valid lock held by another tab
-    }
-    localStorage.setItem(LOCK_KEY, JSON.stringify({
-      ownerId: TAB_ID,
-      expiresAt: Date.now() + LOCK_TTL_MS,
-    }));
-    // Read-back verification: if another tab won the simultaneous write race
-    // the entry will have a different ownerId — treat that as lock loss.
+    if (existing && existing.ownerId !== TAB_ID && existing.expiresAt > Date.now()) return false;
+    localStorage.setItem(LOCK_KEY, JSON.stringify({ ownerId: TAB_ID, expiresAt: Date.now() + LOCK_TTL_MS }));
+    // Read-back CAS: verify we were not overwritten in the write race
     const readBack = localStorage.getItem(LOCK_KEY);
     const confirmed = readBack ? JSON.parse(readBack) : null;
     return confirmed?.ownerId === TAB_ID;
-  } catch {
-    return true; // localStorage unavailable — proceed without lock
-  }
+  } catch { return true; } // localStorage unavailable — proceed without lock
 }
 
 function releaseLock() {
@@ -61,78 +60,29 @@ function releaseLock() {
     const raw = localStorage.getItem(LOCK_KEY);
     const confirmed = raw ? JSON.parse(raw) : null;
     if (confirmed?.ownerId === TAB_ID) localStorage.removeItem(LOCK_KEY);
-  } catch (_e) {
-    // localStorage unavailable — lock will expire via TTL
-  }
+  } catch (_e) { /* lock expires via TTL */ }
 }
 
-// --- Result storage (missed-broadcast recovery) ---
-
-function storeResult(accessToken) {
-  try {
-    localStorage.setItem(RESULT_KEY, JSON.stringify({
-      accessToken,
-      expiresAt: Date.now() + RESULT_TTL_MS,
-    }));
-  } catch (_e) { /* best-effort */ }
-}
-
-function checkStoredResult() {
-  try {
-    const raw = localStorage.getItem(RESULT_KEY);
-    if (!raw) return null;
-    const r = JSON.parse(raw);
-    return r.expiresAt > Date.now() ? r.accessToken : null;
-  } catch {
-    return null;
-  }
-}
-
-function isLockExpired() {
+function isLockFree() {
   try {
     const raw = localStorage.getItem(LOCK_KEY);
     if (!raw) return true;
     return JSON.parse(raw).expiresAt <= Date.now();
-  } catch {
-    return true;
-  }
+  } catch { return true; }
 }
 
-// --- Wait helpers ---
+// --- Broadcast wait ---
 
-// Polling fallback for environments without BroadcastChannel.
-function pollForResult() {
+// Returns a promise that resolves with the new accessToken from another tab.
+// Token comes ONLY from the BroadcastChannel message — never from localStorage.
+function waitForRefreshBroadcast(timeoutMs = WAIT_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
-    const deadline = Date.now() + WAIT_TIMEOUT_MS;
-    const interval = setInterval(() => {
-      const accessToken = checkStoredResult();
-      if (accessToken) {
-        clearInterval(interval);
-        resolve(accessToken);
-        return;
-      }
-      if (isLockExpired() || Date.now() >= deadline) {
-        clearInterval(interval);
-        reject(new Error('Lock expired without broadcast result'));
-      }
-    }, POLL_INTERVAL_MS);
-  });
-}
+    if (!_ch) { reject(new Error('BroadcastChannel unavailable')); return; }
 
-// Waits for the lock-holding tab to broadcast its result.
-// Checks RESULT_KEY first so a message that arrived before the listener was
-// registered (tiny race between tryAcquireLock and addEventListener) is caught.
-function waitForRefreshBroadcast() {
-  const stored = checkStoredResult();
-  if (stored) return Promise.resolve(stored);
-
-  if (!_ch) return pollForResult();
-
-  return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       _ch.removeEventListener('message', onMsg);
       reject(new Error('Cross-tab refresh timeout'));
-    }, WAIT_TIMEOUT_MS);
+    }, timeoutMs);
 
     function onMsg(e) {
       if (e.data?.type !== 'REFRESH_SUCCESS' && e.data?.type !== 'REFRESH_FAILURE') return;
@@ -146,48 +96,119 @@ function waitForRefreshBroadcast() {
   });
 }
 
-// --- Public API ---
+// Polls until the lock is released or the deadline passes (no-BC fallback).
+function pollUntilLockFree() {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + WAIT_TIMEOUT_MS;
+    const id = setInterval(() => {
+      if (isLockFree() || Date.now() >= deadline) {
+        clearInterval(id);
+        if (isLockFree()) resolve();
+        else reject(new Error('Polling timeout'));
+      }
+    }, POLL_INTERVAL_MS);
+  });
+}
 
-// Within-tab in-flight lock: concurrent requests in the same tab share one refresh.
-let _inFlightRefresh = null;
+// --- Lock-path implementations ---
 
-// Full cross-tab coordination:
-//   doRefresh()          — called by the tab that won the lock; returns newSession
-//   applyToken(token)    — called by waiting tabs on REFRESH_SUCCESS; returns newSession
-export async function runRefreshWithBroadcast(doRefresh, applyToken) {
-  if (_inFlightRefresh) return _inFlightRefresh;
+async function runWithNavigatorLocks(doRefresh, applyToken) {
+  let needsWait = false;
+  let newSession = null;
+  let lockError = null;
 
-  _inFlightRefresh = (async () => {
-    let hasLock = tryAcquireLock();
+  try {
+    await navigator.locks.request(LOCK_NAME, { ifAvailable: true }, async (lock) => {
+      if (!lock) { needsWait = true; return; } // another tab holds the lock
+      newSession = await doRefresh();
+      storeSignal('success');
+      _ch?.postMessage({ type: 'REFRESH_SUCCESS', accessToken: newSession.accessToken });
+    });
+  } catch (err) {
+    // doRefresh() failed — we held the lock
+    lockError = err;
+    _ch?.postMessage({ type: 'REFRESH_FAILURE' });
+    storeSignal('failure');
+  }
 
-    if (!hasLock) {
-      // Another tab holds the lock — wait for its broadcast.
+  if (needsWait) {
+    // Another tab holds the lock. Check if it already completed (tiny BC miss window).
+    if (checkRecentSuccess()) {
+      try {
+        const accessToken = await waitForRefreshBroadcast(1500);
+        return applyToken(accessToken);
+      } catch { /* broadcast missed — fall through to own refresh */ }
+    }
+    // Lock holder is still running — wait for its broadcast.
+    try {
+      const accessToken = await waitForRefreshBroadcast();
+      return applyToken(accessToken);
+    } catch {
+      // Timeout or holder failed — do own refresh (lock now released).
+      const session = await doRefresh();
+      storeSignal('success');
+      _ch?.postMessage({ type: 'REFRESH_SUCCESS', accessToken: session.accessToken });
+      return session;
+    }
+  }
+
+  if (lockError) throw lockError;
+  return newSession;
+}
+
+async function runWithLocalStorageLock(doRefresh, applyToken) {
+  let hasLock = tryAcquireLock();
+
+  if (!hasLock) {
+    if (_ch) {
       try {
         const accessToken = await waitForRefreshBroadcast();
         return applyToken(accessToken);
-      } catch {
-        // Timed out or other tab failed — attempt takeover.
-        hasLock = tryAcquireLock();
-        if (!hasLock) throw new Error('Refresh lock unavailable after timeout');
-        // Fall through to run doRefresh below.
-      }
+      } catch { /* timeout/failure — attempt takeover */ }
+    } else {
+      // No BC: wait for lock to free, then do own refresh (server grace window).
+      try { await pollUntilLockFree(); } catch { /* proceed */ }
     }
+    hasLock = tryAcquireLock(); // takeover attempt (lock may have expired)
+  }
 
-    // This tab holds the lock — perform the refresh.
-    try {
-      const newSession = await doRefresh();
-      // Store before broadcast so waiters that missed the message find it.
-      storeResult(newSession.accessToken);
-      _ch?.postMessage({ type: 'REFRESH_SUCCESS', accessToken: newSession.accessToken });
-      return newSession;
-    } catch (err) {
-      _ch?.postMessage({ type: 'REFRESH_FAILURE' });
-      throw err;
-    } finally {
-      releaseLock();
+  try {
+    const newSession = await doRefresh();
+    storeSignal('success');
+    _ch?.postMessage({ type: 'REFRESH_SUCCESS', accessToken: newSession.accessToken });
+    return newSession;
+  } catch (err) {
+    // TOCTOU: another tab may have succeeded concurrently — check before failing.
+    if (checkRecentSuccess() && _ch) {
+      try {
+        const accessToken = await waitForRefreshBroadcast(1500);
+        return applyToken(accessToken);
+      } catch { /* fall through to failure */ }
     }
-  })().finally(() => { _inFlightRefresh = null; });
+    storeSignal('failure');
+    _ch?.postMessage({ type: 'REFRESH_FAILURE' });
+    throw err;
+  } finally {
+    if (hasLock) releaseLock();
+  }
+}
 
+// --- Public API ---
+
+let _inFlightRefresh = null;
+
+// Full cross-tab refresh coordination with within-tab deduplication.
+//   doRefresh()       — called by the tab that wins the lock; returns newSession
+//   applyToken(token) — called by waiting tabs on REFRESH_SUCCESS; returns newSession
+export async function runRefreshWithBroadcast(doRefresh, applyToken) {
+  if (_inFlightRefresh) return _inFlightRefresh;
+
+  const run =
+    typeof navigator !== 'undefined' && typeof navigator.locks?.request === 'function'
+      ? () => runWithNavigatorLocks(doRefresh, applyToken)
+      : () => runWithLocalStorageLock(doRefresh, applyToken);
+
+  _inFlightRefresh = run().finally(() => { _inFlightRefresh = null; });
   return _inFlightRefresh;
 }
 
