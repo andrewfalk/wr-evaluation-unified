@@ -69,13 +69,14 @@ export function useWorkspacePersistence({
 
   // 자동 저장
   useEffect(() => {
-    if (!settings.autoSaveInterval || patients.length === 0) return;
+    if (disabled || !settings.autoSaveInterval || patients.length === 0) return;
     const timer = setTimeout(() => {
       saveAutoSavedWorkspace({ patients, session, settings });
       setLastAutoSave(new Date());
     }, settings.autoSaveInterval * 1000);
     return () => clearTimeout(timer);
   }, [
+    disabled,
     patients,
     session?.mode,
     session?.apiBaseUrl,

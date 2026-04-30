@@ -8,27 +8,26 @@ const FAIL_CLOSED_CONFIG = {
   serverTime: null,
 };
 
-// Accepts both session and settings so detection is correct before the
-// settings→session sync effect fires on the first render.
 export function useServerConfig({ session, settings }) {
-  // isIntranet does NOT require a non-empty baseUrl — same-origin intranet
-  // (Caddy serving app + API at https://wr.hospital.local) has no apiBaseUrl.
   const isIntranet =
     session?.mode === 'intranet' || settings?.integrationMode === 'intranet';
   const baseUrl = session?.apiBaseUrl || settings?.apiBaseUrl || '';
 
+  // fetchedBaseUrl in state (not ref) so render can safely read it for
+  // effectiveLoading without triggering the react-hooks/exhaustive-deps lint rule.
   const [state, setState] = useState(() => ({
     config: null,
     loading: isIntranet,
     error: null,
+    fetchedBaseUrl: null,
   }));
 
-  // Track which URL was last successfully initiated so a change triggers re-fetch.
+  // Ref used only inside the effect to deduplicate fetches — safe per React rules.
   const lastFetchedUrlRef = useRef(null);
 
   useEffect(() => {
     if (!isIntranet) {
-      setState({ config: null, loading: false, error: null });
+      setState({ config: null, loading: false, error: null, fetchedBaseUrl: null });
       lastFetchedUrlRef.current = null;
       return;
     }
@@ -37,27 +36,33 @@ export function useServerConfig({ session, settings }) {
     lastFetchedUrlRef.current = baseUrl;
 
     let cancelled = false;
-    setState(prev => ({ ...prev, loading: true, error: null }));
+    // Set fetchedBaseUrl immediately so render-time effectiveLoading sees it.
+    setState(prev => ({ ...prev, loading: true, error: null, fetchedBaseUrl: baseUrl }));
 
     requestJson('/api/config/public', { baseUrl })
       .then(data => {
         if (cancelled) return;
-        setState({ config: data, loading: false, error: null });
+        setState({ config: data, loading: false, error: null, fetchedBaseUrl: baseUrl });
       })
       .catch(err => {
         if (cancelled) return;
-        setState({ config: FAIL_CLOSED_CONFIG, loading: false, error: err.message || '서버 연결 실패' });
+        setState({
+          config: FAIL_CLOSED_CONFIG,
+          loading: false,
+          error: err.message || '서버 연결 실패',
+          fetchedBaseUrl: baseUrl,
+        });
       });
 
     return () => { cancelled = true; };
   }, [isIntranet, baseUrl]);
 
-  // effectiveLoading is computed synchronously: true whenever isIntranet but
-  // we have not yet completed a fetch for the current baseUrl. This closes the
-  // one-render gap that occurs when async settings load changes integrationMode
-  // after the useState initializer has already run with loading:false.
+  // Computed synchronously in render using state (not ref) so it's lint-safe.
+  // True whenever intranet is active but we haven't completed a fetch for
+  // the current baseUrl yet — closes the gap when async settings load changes
+  // integrationMode after the useState initializer already ran.
   const effectiveLoading =
-    state.loading || (isIntranet && lastFetchedUrlRef.current !== baseUrl && !state.error);
+    state.loading || (isIntranet && state.fetchedBaseUrl !== baseUrl && !state.error);
 
   return {
     serverConfig: state.config,

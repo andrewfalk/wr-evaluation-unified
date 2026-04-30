@@ -73,6 +73,8 @@ function App() {
   const [showBatchImport, setShowBatchImport] = useState(false);
   const [showHome, setShowHome] = useState(false);
   const { serverConfig, configLoading, configError } = useServerConfig({ session, settings });
+  const isIntranetMode =
+    session?.mode === 'intranet' || settings?.integrationMode === 'intranet';
   const { status: integrationStatus } = useIntegrationStatus({ session, settings });
   const activePatient = patients.find(p => p.id === activeId);
   const activeModules = activePatient?.data?.activeModules || [];
@@ -287,9 +289,6 @@ function App() {
   // ===========================================
   // 인트라넷 모드 부팅 게이팅
   // ===========================================
-  const isIntranetMode =
-    session?.mode === 'intranet' || settings?.integrationMode === 'intranet';
-
   if (isIntranetMode && configLoading) {
     return (
       <div className="app-boot-overlay">
