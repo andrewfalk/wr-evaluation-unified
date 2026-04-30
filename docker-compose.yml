@@ -126,12 +126,16 @@ services:
     volumes:
       - ./scripts/backup.sh:/scripts/backup.sh:ro
       - ./scripts/restore.sh:/scripts/restore.sh:ro
+      - ./scripts/audit-partition.sh:/scripts/audit-partition.sh:ro
       - backup_data:/backups
       - backup_gnupg:/root/.gnupg
     # Use 'sh script' instead of executing directly — :ro mount cannot be chmod'd.
     # Logs go to stdout so 'docker compose logs backup' works.
+    # audit-partition runs on the 25th of each month at 03:00 to prepare
+    # the next month's partition before the month turns over.
     command: >
-      sh -c "echo '0 2 * * * sh /scripts/backup.sh' | crontab - &&
+      sh -c "printf '%s\n' '0 2 * * * sh /scripts/backup.sh'
+                           '0 3 25 * * sh /scripts/audit-partition.sh' | crontab - &&
              crond -f -l 6"
     depends_on:
       postgres:
