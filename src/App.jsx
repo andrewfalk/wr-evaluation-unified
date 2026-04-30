@@ -40,6 +40,7 @@ import {
   saveAppSettings,
 } from './core/services/workspaceRepository';
 import { LoginModal } from './core/components/LoginModal';
+import { ChangePasswordModal } from './core/components/ChangePasswordModal';
 
 const DEFAULT_PATIENT_FILTERS = {
   searchQuery: '',
@@ -432,6 +433,14 @@ function App() {
   if (isIntranetMode && !isAuthenticated) {
     return (
       <LoginModal apiBaseUrl={session?.apiBaseUrl || settings?.apiBaseUrl || ''} />
+    );
+  }
+
+  // Password change guard: server flagged must_change_password (e.g. seed admin first login).
+  // Blocks all other UI until the password is changed. Non-dismissable.
+  if (isIntranetMode && isAuthenticated && session?.user?.must_change_password) {
+    return (
+      <ChangePasswordModal apiBaseUrl={session?.apiBaseUrl || settings?.apiBaseUrl || ''} />
     );
   }
 
