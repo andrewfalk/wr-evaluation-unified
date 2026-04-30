@@ -12,6 +12,7 @@ import { StepContent } from './core/components/StepContent';
 import { MainHeader } from './core/components/MainHeader';
 import { StepIndicator } from './core/components/StepIndicator';
 import { useAuth } from './core/auth/AuthContext';
+import { useServerConfig } from './core/hooks/useServerConfig';
 import { useIntegrationStatus } from './core/hooks/useIntegrationStatus';
 import { usePatientList } from './core/hooks/usePatientList';
 import { DEFAULT_SETTINGS, FONT_SIZE_MAP } from './core/utils/data';
@@ -71,6 +72,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showBatchImport, setShowBatchImport] = useState(false);
   const [showHome, setShowHome] = useState(false);
+  const { serverConfig, configLoading, configError } = useServerConfig({ session });
   const { status: integrationStatus } = useIntegrationStatus({ session, settings });
   const activePatient = patients.find(p => p.id === activeId);
   const activeModules = activePatient?.data?.activeModules || [];
@@ -280,6 +282,40 @@ function App() {
       )}
     </>
   );
+
+  // ===========================================
+  // 인트라넷 모드 부팅 게이팅
+  // ===========================================
+  if (session?.mode === 'intranet' && configLoading) {
+    return (
+      <div className="app-boot-overlay">
+        <div className="app-boot-box">
+          <p>서버에 연결 중입니다…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (session?.mode === 'intranet' && configError) {
+    return (
+      <div className="app-boot-overlay">
+        <div className="app-boot-box app-boot-error">
+          <h2>서버 연결 실패</h2>
+          <p>{configError}</p>
+          <p className="app-boot-hint">
+            인트라넷 서버({session.apiBaseUrl})에 연결할 수 없습니다.<br />
+            서버 상태를 확인하거나 관리자에게 문의하세요.
+          </p>
+          <button
+            className="btn btn-secondary"
+            onClick={() => window.location.reload()}
+          >
+            다시 시도
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ===========================================
   // 랜딩 화면
