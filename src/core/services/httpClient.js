@@ -79,7 +79,9 @@ export async function requestJson(path, {
   }
 
   if (!response.ok) {
-    const message = data?.error?.message || `Request failed (${response.status})`;
+    const message = data?.error?.message
+      || (typeof data?.error === 'string' ? data.error : null)
+      || `Request failed (${response.status})`;
     const error = new Error(message);
     error.status = response.status;
     error.data = data;
