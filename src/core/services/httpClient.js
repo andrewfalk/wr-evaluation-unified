@@ -54,7 +54,15 @@ export async function requestJson(path, {
     let newSession;
     try {
       newSession = await _onRefresh({ baseUrl });
-    } catch {
+    } catch (refreshErr) {
+      // Retryable coordination errors (e.g. cross-tab lock contention) should not
+      // log the user out — only this request fails; the next 401 will re-enter refresh.
+      if (refreshErr?.retryable) {
+        const err = new Error('일시적인 인증 조율 오류입니다. 잠시 후 다시 시도해 주세요.');
+        err.status = 401;
+        err.retryable = true;
+        throw err;
+      }
       _onLogout?.();
       const err = new Error('인증이 만료되었습니다. 다시 로그인해 주세요.');
       err.status = 401;
