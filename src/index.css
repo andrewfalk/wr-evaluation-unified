@@ -2447,3 +2447,50 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .app-boot-box .btn {
   margin-top: 8px;
 }
+
+/* LoginModal */
+.login-modal-box {
+  text-align: left;
+}
+.login-modal-title {
+  margin: 0 0 16px;
+  font-size: 1.15rem;
+  color: var(--text-primary, #222);
+  text-align: center;
+}
+.login-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.login-modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.login-modal-field label {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #666);
+  font-weight: 500;
+}
+.login-modal-field input {
+  padding: 8px 10px;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 4px;
+  font-size: 0.95rem;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #222);
+}
+.login-modal-field input:focus {
+  outline: none;
+  border-color: var(--primary, #0d6efd);
+}
+.login-modal-error {
+  margin: 0;
+  color: var(--danger, #dc3545);
+  font-size: 0.85rem;
+}
+.login-modal-submit {
+  margin-top: 4px;
+  width: 100%;
+}

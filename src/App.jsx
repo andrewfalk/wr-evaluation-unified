@@ -39,6 +39,7 @@ import {
   loadAppSettingsAsync,
   saveAppSettings,
 } from './core/services/workspaceRepository';
+import { LoginModal } from './core/components/LoginModal';
 
 const DEFAULT_PATIENT_FILTERS = {
   searchQuery: '',
@@ -63,7 +64,7 @@ import './modules/wrist';
 
 
 function App() {
-  const { session, setSession, resetToLocalSession } = useAuth();
+  const { session, setSession, resetToLocalSession, isAuthenticated, sessionVerified } = useAuth();
   const [patients, setPatients] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -410,6 +411,26 @@ function App() {
           </button>
         </div>
       </div>
+    );
+  }
+
+  // Boot-time session verification in progress (persisted intranet session, not yet confirmed).
+  // session.mode==='intranet' && !sessionVerified means the /api/auth/csrf check is in flight.
+  if (isIntranetMode && session?.mode === 'intranet' && !sessionVerified) {
+    return (
+      <div className="app-boot-overlay">
+        <div className="app-boot-box">
+          <p>세션을 확인하는 중입니다…</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Login guard: intranet mode but not authenticated (no persisted session, or
+  // verification failed and session was reset to local). Non-dismissable.
+  if (isIntranetMode && !isAuthenticated) {
+    return (
+      <LoginModal apiBaseUrl={session?.apiBaseUrl || settings?.apiBaseUrl || ''} />
     );
   }
 
