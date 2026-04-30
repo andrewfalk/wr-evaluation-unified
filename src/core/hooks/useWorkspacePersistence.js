@@ -17,6 +17,7 @@ export function useWorkspacePersistence({
   session, settings,
   setActiveId, setCurrentStepIndex, setIntakeShared, setShowHome,
   setShowSaveModal, setShowLoadModal,
+  disabled = false,
 }) {
   const [savedItems, setSavedItems] = useState([]);
   const [saveName, setSaveName] = useState('');
@@ -28,6 +29,7 @@ export function useWorkspacePersistence({
   }, []);
 
   useEffect(() => {
+    if (disabled) return;
     let cancelled = false;
     loadSavedWorkspaces({ session, settings })
       .then(items => {
@@ -38,6 +40,7 @@ export function useWorkspacePersistence({
       });
     return () => { cancelled = true; };
   }, [
+    disabled,
     session?.mode,
     session?.apiBaseUrl,
     session?.user?.id,
@@ -46,8 +49,9 @@ export function useWorkspacePersistence({
     settings?.apiBaseUrl,
   ]);
 
-  // 자동 저장 복원 (초기 1회만)
+  // 자동 저장 복원 (초기 1회만) — config 준비 전에는 실행하지 않음
   useEffect(() => {
+    if (disabled) return;
     loadAutoSavedWorkspace({ session, settings }).then(saved => {
       if (saved) {
         const time = new Date(saved.savedAt).toLocaleString('ko-KR');
@@ -61,7 +65,7 @@ export function useWorkspacePersistence({
         });
       }
     });
-  }, []);
+  }, [disabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 자동 저장
   useEffect(() => {

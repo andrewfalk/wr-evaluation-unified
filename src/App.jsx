@@ -112,6 +112,7 @@ function App() {
     session, settings,
     setActiveId, setCurrentStepIndex, setIntakeShared, setShowHome,
     setShowSaveModal, setShowLoadModal,
+    disabled: isIntranetMode && (configLoading || !!configError),
   });
   const currentStep = steps[currentStepIndex] || steps[0];
 
@@ -287,8 +288,7 @@ function App() {
   // 인트라넷 모드 부팅 게이팅
   // ===========================================
   const isIntranetMode =
-    (session?.mode === 'intranet' || settings?.integrationMode === 'intranet') &&
-    !!(session?.apiBaseUrl || settings?.apiBaseUrl);
+    session?.mode === 'intranet' || settings?.integrationMode === 'intranet';
 
   if (isIntranetMode && configLoading) {
     return (

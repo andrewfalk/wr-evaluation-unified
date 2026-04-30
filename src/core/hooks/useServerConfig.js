@@ -8,22 +8,22 @@ const FAIL_CLOSED_CONFIG = {
   serverTime: null,
 };
 
-// Accepts both session and settings so the hook works correctly on the very
-// first render before the settings→session sync effect has fired.
+// Accepts both session and settings so detection is correct before the
+// settings→session sync effect fires on the first render.
 export function useServerConfig({ session, settings }) {
-  const baseUrl = session?.apiBaseUrl || settings?.apiBaseUrl || '';
+  // isIntranet does NOT require a non-empty baseUrl — same-origin intranet
+  // (Caddy serving app + API at https://wr.hospital.local) has no apiBaseUrl.
   const isIntranet =
-    (session?.mode === 'intranet' || settings?.integrationMode === 'intranet') && !!baseUrl;
+    session?.mode === 'intranet' || settings?.integrationMode === 'intranet';
+  const baseUrl = session?.apiBaseUrl || settings?.apiBaseUrl || '';
 
-  // Start in loading state immediately when intranet is detected — prevents
-  // the one-render gap where the gate hasn't engaged yet.
   const [state, setState] = useState(() => ({
     config: null,
     loading: isIntranet,
     error: null,
   }));
 
-  // Track which URL was last fetched so changing apiBaseUrl triggers a re-fetch.
+  // Track which URL was last successfully initiated so a change triggers re-fetch.
   const lastFetchedUrlRef = useRef(null);
 
   useEffect(() => {
@@ -52,9 +52,16 @@ export function useServerConfig({ session, settings }) {
     return () => { cancelled = true; };
   }, [isIntranet, baseUrl]);
 
+  // effectiveLoading is computed synchronously: true whenever isIntranet but
+  // we have not yet completed a fetch for the current baseUrl. This closes the
+  // one-render gap that occurs when async settings load changes integrationMode
+  // after the useState initializer has already run with loading:false.
+  const effectiveLoading =
+    state.loading || (isIntranet && lastFetchedUrlRef.current !== baseUrl && !state.error);
+
   return {
     serverConfig: state.config,
-    configLoading: state.loading,
+    configLoading: effectiveLoading,
     configError: state.error,
   };
 }
