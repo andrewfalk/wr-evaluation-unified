@@ -233,23 +233,17 @@ function App() {
     document.documentElement.style.fontSize = FONT_SIZE_MAP[settings.fontSize] || '16px';
   }, [settings.theme, settings.fontSize]);
 
+  // Sync apiBaseUrl into session when settings change.
+  // session.mode is intentionally NOT synced here — it is only set to 'intranet'
+  // by login() after server authentication, preventing unauthenticated local
+  // sessions from being treated as authenticated by the isAuthenticated gate.
   useEffect(() => {
     setSession(prev => {
-      const nextMode = settings.integrationMode === 'intranet' ? 'intranet' : 'local';
       const nextBaseUrl = settings.apiBaseUrl || '';
-
-      if (prev.mode === nextMode && (prev.apiBaseUrl || '') === nextBaseUrl) {
-        return prev;
-      }
-
-      return {
-        ...prev,
-        mode: nextMode,
-        apiBaseUrl: nextBaseUrl,
-        refreshedAt: new Date().toISOString(),
-      };
+      if ((prev.apiBaseUrl || '') === nextBaseUrl) return prev;
+      return { ...prev, apiBaseUrl: nextBaseUrl };
     });
-  }, [setSession, settings.apiBaseUrl, settings.integrationMode]);
+  }, [setSession, settings.apiBaseUrl]);
 
   // Electron: 파일 기반 설정 비동기 로드
   useEffect(() => {
@@ -310,12 +304,8 @@ function App() {
   const handleSaveSettings = (newSettings) => {
     setSettings(newSettings);
     saveAppSettings(newSettings);
-    setSession(prev => ({
-      ...prev,
-      mode: newSettings.integrationMode === 'intranet' ? 'intranet' : 'local',
-      apiBaseUrl: newSettings.apiBaseUrl || '',
-      refreshedAt: new Date().toISOString(),
-    }));
+    // Only sync apiBaseUrl — mode is controlled by login()/resetToLocalSession().
+    setSession(prev => ({ ...prev, apiBaseUrl: newSettings.apiBaseUrl || '' }));
     setShowSettings(false);
   };
 

@@ -29,15 +29,29 @@ export function AuthProvider({ children }) {
     if (snap?.mode !== 'intranet') return;
     const baseUrl = snap.apiBaseUrl || '';
     fetch(`${baseUrl}/api/auth/csrf`, { method: 'POST', credentials: 'include' })
-      .then(r => {
-        if (r.ok) {
-          setSessionVerified(true);
-        } else {
+      .then(async r => {
+        if (!r.ok) {
           clearStoredSession();
           const fallback = saveStoredSession(createLocalSession());
           sessionRef.current = fallback;
           setSessionState(fallback);
+          return;
         }
+        // Apply access token if the server returns one (forward-compatible: no-op if absent).
+        let data = null;
+        try { data = await r.json(); } catch { /* csrf-only response with no body */ }
+        const next = normalizeSession({
+          ...sessionRef.current,
+          ...(data?.accessToken ? {
+            accessToken: data.accessToken,
+            accessExpiresAt: data.accessExpiresAt,
+          } : {}),
+          refreshedAt: new Date().toISOString(),
+        });
+        saveStoredSession(next); // strips accessToken before writing localStorage
+        sessionRef.current = next;
+        setSessionState(next);
+        setSessionVerified(true);
       })
       .catch(() => {
         clearStoredSession();
