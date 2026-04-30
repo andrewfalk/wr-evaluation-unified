@@ -112,16 +112,44 @@ function App() {
   // Wire up httpClient's 401-refresh interceptor once at mount.
   useEffect(() => {
     configureHttpClient({
-      onRefresh: async () => {
+      // baseUrl comes from the original failed request so we always hit the
+      // same server, even if session.apiBaseUrl is momentarily out of sync.
+      onRefresh: async ({ baseUrl: requestBaseUrl } = {}) => {
         const current = sessionRef.current;
-        const base = (current?.apiBaseUrl || '').trim().replace(/\/$/, '');
-        const csrfToken = getCsrfToken();
+        const base = (
+          requestBaseUrl ?? current?.apiBaseUrl ?? ''
+        ).trim().replace(/\/$/, '');
+
+        let csrfToken = getCsrfToken();
+
+        // CSRF cookie missing: call /api/auth/csrf first (no CSRF required for
+        // this endpoint). It re-validates the HttpOnly refresh cookie, sets a
+        // new wr_csrf cookie, and returns a fresh accessToken.
+        if (!csrfToken) {
+          const csrfRes = await fetch(`${base}/api/auth/csrf`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+          });
+          if (!csrfRes.ok) throw new Error('CSRF renewal failed');
+          const csrfData = await csrfRes.json();
+          csrfToken = getCsrfToken(); // cookie is now set by the response
+          // /api/auth/csrf also returns an accessToken — use it directly.
+          const newSession = normalizeSession({
+            ...current,
+            accessToken: csrfData.accessToken,
+            status: 'ready',
+          });
+          setSession(newSession);
+          return newSession;
+        }
+
         const res = await fetch(`${base}/api/auth/refresh`, {
           method: 'POST',
           credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
-            ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+            'X-CSRF-Token': csrfToken,
           },
         });
         if (!res.ok) throw new Error('Refresh failed');

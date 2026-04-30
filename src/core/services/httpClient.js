@@ -49,10 +49,11 @@ export async function requestJson(path, {
 
   // 401 → attempt one token refresh, then retry the original request.
   // _retry flag prevents infinite loops if the retry itself gets a 401.
+  // Pass baseUrl so the refresh handler uses the same server as this request.
   if (response.status === 401 && !_retry && _onRefresh) {
     let newSession;
     try {
-      newSession = await _onRefresh();
+      newSession = await _onRefresh({ baseUrl });
     } catch {
       _onLogout?.();
       const err = new Error('인증이 만료되었습니다. 다시 로그인해 주세요.');
