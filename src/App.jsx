@@ -16,6 +16,7 @@ import { useServerConfig } from './core/hooks/useServerConfig';
 import { configureHttpClient } from './core/services/httpClient';
 import { getCsrfToken } from './core/utils/csrfCookie';
 import { normalizeSession } from './core/auth/session';
+import { runRefreshWithBroadcast, onAuthBroadcast, broadcastLogout } from './core/auth/authChannel';
 import { useIntegrationStatus } from './core/hooks/useIntegrationStatus';
 import { usePatientList } from './core/hooks/usePatientList';
 import { DEFAULT_SETTINGS, FONT_SIZE_MAP } from './core/utils/data';
@@ -114,57 +115,67 @@ function App() {
     configureHttpClient({
       // baseUrl comes from the original failed request so we always hit the
       // same server, even if session.apiBaseUrl is momentarily out of sync.
-      onRefresh: async ({ baseUrl: requestBaseUrl } = {}) => {
-        const current = sessionRef.current;
-        const base = (
-          requestBaseUrl ?? current?.apiBaseUrl ?? ''
-        ).trim().replace(/\/$/, '');
+      onRefresh: ({ baseUrl: requestBaseUrl } = {}) =>
+        runRefreshWithBroadcast(async () => {
+          const current = sessionRef.current;
+          const base = (
+            requestBaseUrl ?? current?.apiBaseUrl ?? ''
+          ).trim().replace(/\/$/, '');
 
-        let csrfToken = getCsrfToken();
+          let csrfToken = getCsrfToken();
 
-        // CSRF cookie missing: call /api/auth/csrf first (no CSRF required for
-        // this endpoint). It re-validates the HttpOnly refresh cookie, sets a
-        // new wr_csrf cookie, and returns a fresh accessToken.
-        if (!csrfToken) {
-          const csrfRes = await fetch(`${base}/api/auth/csrf`, {
+          // CSRF cookie missing: call /api/auth/csrf first (no CSRF required
+          // for this endpoint). It re-validates the HttpOnly refresh cookie,
+          // sets a new wr_csrf cookie, and returns a fresh accessToken.
+          if (!csrfToken) {
+            const csrfRes = await fetch(`${base}/api/auth/csrf`, {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+            });
+            if (!csrfRes.ok) throw new Error('CSRF renewal failed');
+            const csrfData = await csrfRes.json();
+            const newSession = normalizeSession({
+              ...current,
+              accessToken: csrfData.accessToken,
+              status: 'ready',
+            });
+            setSession(newSession);
+            return newSession;
+          }
+
+          const res = await fetch(`${base}/api/auth/refresh`, {
             method: 'POST',
             credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-Token': csrfToken,
+            },
           });
-          if (!csrfRes.ok) throw new Error('CSRF renewal failed');
-          const csrfData = await csrfRes.json();
-          csrfToken = getCsrfToken(); // cookie is now set by the response
-          // /api/auth/csrf also returns an accessToken — use it directly.
+          if (!res.ok) throw new Error('Refresh failed');
+          const data = await res.json();
           const newSession = normalizeSession({
             ...current,
-            accessToken: csrfData.accessToken,
+            accessToken: data.accessToken,
             status: 'ready',
           });
           setSession(newSession);
           return newSession;
-        }
-
-        const res = await fetch(`${base}/api/auth/refresh`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': csrfToken,
-          },
-        });
-        if (!res.ok) throw new Error('Refresh failed');
-        const data = await res.json();
-        const newSession = normalizeSession({
-          ...current,
-          accessToken: data.accessToken,
-          status: 'ready',
-        });
-        setSession(newSession);
-        return newSession;
-      },
-      onLogout: resetToLocalSession,
+        }),
+      onLogout: () => { broadcastLogout(); resetToLocalSession(); },
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync session state when another tab refreshes or logs out.
+  useEffect(() => {
+    return onAuthBroadcast((msg) => {
+      if (msg?.type === 'REFRESH_SUCCESS' && msg.accessToken) {
+        setSession(prev => normalizeSession({ ...prev, accessToken: msg.accessToken, status: 'ready' }));
+      } else if (msg?.type === 'LOGOUT') {
+        resetToLocalSession();
+      }
+    });
+  }, [setSession, resetToLocalSession]);
 
   // 현재 환자의 스텝 목록
   const steps = useMemo(() => buildSteps(activeModules), [activeModules]);
