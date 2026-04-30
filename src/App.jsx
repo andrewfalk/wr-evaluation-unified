@@ -72,7 +72,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showBatchImport, setShowBatchImport] = useState(false);
   const [showHome, setShowHome] = useState(false);
-  const { serverConfig, configLoading, configError } = useServerConfig({ session });
+  const { serverConfig, configLoading, configError } = useServerConfig({ session, settings });
   const { status: integrationStatus } = useIntegrationStatus({ session, settings });
   const activePatient = patients.find(p => p.id === activeId);
   const activeModules = activePatient?.data?.activeModules || [];
@@ -286,7 +286,11 @@ function App() {
   // ===========================================
   // 인트라넷 모드 부팅 게이팅
   // ===========================================
-  if (session?.mode === 'intranet' && configLoading) {
+  const isIntranetMode =
+    (session?.mode === 'intranet' || settings?.integrationMode === 'intranet') &&
+    !!(session?.apiBaseUrl || settings?.apiBaseUrl);
+
+  if (isIntranetMode && configLoading) {
     return (
       <div className="app-boot-overlay">
         <div className="app-boot-box">
@@ -296,14 +300,15 @@ function App() {
     );
   }
 
-  if (session?.mode === 'intranet' && configError) {
+  if (isIntranetMode && configError) {
+    const serverUrl = session?.apiBaseUrl || settings?.apiBaseUrl || '';
     return (
       <div className="app-boot-overlay">
         <div className="app-boot-box app-boot-error">
           <h2>서버 연결 실패</h2>
           <p>{configError}</p>
           <p className="app-boot-hint">
-            인트라넷 서버({session.apiBaseUrl})에 연결할 수 없습니다.<br />
+            인트라넷 서버({serverUrl})에 연결할 수 없습니다.<br />
             서버 상태를 확인하거나 관리자에게 문의하세요.
           </p>
           <button
