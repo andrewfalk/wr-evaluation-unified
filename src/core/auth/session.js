@@ -72,7 +72,10 @@ export function saveStoredSession(session) {
   if (typeof window === 'undefined') return normalizeSession(session);
 
   const normalized = normalizeSession(session);
-  localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(normalized));
+  // Access token lives in memory only — never persisted to localStorage.
+  // Refresh token lives in HttpOnly cookie (server-managed).
+  const { accessToken: _drop, ...toStore } = normalized;
+  localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(toStore));
   return normalized;
 }
 
