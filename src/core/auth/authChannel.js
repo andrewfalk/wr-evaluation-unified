@@ -181,6 +181,20 @@ async function runWithLocalStorageLock(doRefresh, applyToken) {
       try { await pollUntilLockFree(); } catch { /* proceed */ }
     }
     hasLock = tryAcquireLock(); // takeover attempt (lock may have expired)
+
+    // Another tab still holds a valid lock — wait one more cycle before giving up.
+    // Throwing here (not broadcasting FAILURE) means only this request fails;
+    // the caller's 401 retry logic will re-enter runRefreshWithBroadcast once the
+    // lock holder finishes, avoiding a spurious logout.
+    if (!hasLock) {
+      try { await pollUntilLockFree(); } catch { /* proceed to final attempt */ }
+      hasLock = tryAcquireLock();
+      if (!hasLock) {
+        const coordErr = new Error('Auth coordination: lock unavailable after wait');
+        coordErr.retryable = true;
+        throw coordErr;
+      }
+    }
   }
 
   try {
