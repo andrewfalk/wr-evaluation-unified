@@ -55,7 +55,7 @@ function DiagnosticItem({ label, value }) {
   );
 }
 
-export function SettingsModal({ settings, session, integrationStatus, onSave, onClose }) {
+export function SettingsModal({ settings, session, integrationStatus, onSave, onClose, onLogout }) {
   const isIntranetLocked = session?.mode === 'intranet';
   const [draft, setDraft] = useState({ ...settings });
   const [diagnostic, setDiagnostic] = useState(integrationStatus);
@@ -179,6 +179,17 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
           {isIntranetLocked && (
             <div className="settings-help-text settings-help-text--locked">
               인트라넷 모드로 로그인 중입니다. 서버 연동 설정은 관리자만 변경할 수 있습니다.
+            </div>
+          )}
+          {isIntranetLocked && onLogout && (
+            <div className="settings-row">
+              <label>계정</label>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => { onLogout(); onClose(); }}
+              >
+                로그아웃
+              </button>
             </div>
           )}
           <div className="settings-row">

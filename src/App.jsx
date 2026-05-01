@@ -66,7 +66,7 @@ import './modules/wrist';
 
 
 function App() {
-  const { session, setSession, resetToLocalSession, isAuthenticated, sessionVerified } = useAuth();
+  const { session, setSession, resetToLocalSession, isAuthenticated, sessionVerified, logout } = useAuth();
   const [patients, setPatients] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -348,6 +348,7 @@ function App() {
           integrationStatus={integrationStatus}
           onSave={handleSaveSettings}
           onClose={() => setShowSettings(false)}
+          onLogout={logout}
         />
       )}
       {showSaveModal && <SaveModal patientCount={patients.length} saveName={saveName} onSaveNameChange={e => setSaveName(e.target.value)} savedItems={savedItems} onSave={handleSave} onOverwriteSave={handleOverwriteSave} onClose={() => setShowSaveModal(false)} />}
