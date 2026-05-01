@@ -16,7 +16,7 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const PORT = Number(process.env.MOCK_INTRANET_PORT || 3002);
+const PORT = Number(process.env.MOCK_INTRANET_PORT || 3001);
 const STORAGE_DIR = path.join(__dirname, '..', '.mock-intranet');
 const STORAGE_FILE = path.join(STORAGE_DIR, 'db.json');
 
@@ -86,13 +86,62 @@ function getScopedState(store, scopeKey) {
   return store.scopes[scopeKey];
 }
 
-function sendJson(res, statusCode, data) {
+// ── Auth helpers ─────────────────────────────────────────────────────────────
+
+const MOCK_MUST_CHANGE_PASSWORD = process.env.MOCK_MUST_CHANGE_PASSWORD === 'true';
+
+const MOCK_USER = {
+  id:                 'mock-user',
+  loginId:            'admin',
+  name:               '테스트 의사',
+  role:               'admin',
+  orgId:              'mock-org',       // legacy compat
+  organizationId:     'mock-org',       // matches real server user shape
+  mustChangePassword: MOCK_MUST_CHANGE_PASSWORD,
+};
+
+const MOCK_ORG          = { id: 'mock-org', name: 'Mock 병원' };
+const MOCK_ACCESS_TOKEN = 'mock-access-token';
+const MOCK_ACCESS_EXPIRES = () => new Date(Date.now() + 15 * 60 * 1000).toISOString();
+const MOCK_COOKIE_MAX_AGE = 86400; // 24 h
+
+function parseCookies(req) {
+  const cookies = {};
+  (req.headers.cookie || '').split(';').forEach(part => {
+    const [k, ...v] = part.trim().split('=');
+    if (k) cookies[k.trim()] = v.join('=').trim();
+  });
+  return cookies;
+}
+
+// Returns an array of Set-Cookie strings to be used via sendJson extraHeaders.
+// Secure flag is omitted — dev environment is HTTP (localhost).
+function setAuthCookies() {
+  return [
+    `wr_refresh=mock-refresh-token; Path=/; HttpOnly; SameSite=Strict; Max-Age=${MOCK_COOKIE_MAX_AGE}`,
+    `wr_csrf=mock-csrf-token; Path=/; SameSite=Strict; Max-Age=${MOCK_COOKIE_MAX_AGE}`,
+  ];
+}
+
+function clearAuthCookies() {
+  return [
+    'wr_refresh=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0',
+    'wr_csrf=; Path=/; SameSite=Strict; Max-Age=0',
+  ];
+}
+
+// ── HTTP helper ───────────────────────────────────────────────────────────────
+
+// extraHeaders may include a 'Set-Cookie' key as a string array.
+// Node's http.writeHead handles Set-Cookie arrays correctly.
+function sendJson(res, statusCode, data, extraHeaders = {}) {
   res.writeHead(statusCode, {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-WR-User-Id, X-WR-Org-Id, X-WR-Auth-Mode',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-WR-User-Id, X-WR-Org-Id, X-WR-Auth-Mode, X-CSRF-Token',
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
+    ...extraHeaders,
   });
   res.end(JSON.stringify(data));
 }
@@ -281,6 +330,86 @@ async function handleAutoSave(req, res, url) {
   methodNotAllowed(res, 'GET, PUT, or DELETE');
 }
 
+// ── Auth / config stub handlers ───────────────────────────────────────────────
+
+function handleConfigPublic(_req, res) {
+  sendJson(res, 200, {
+    mode:                'intranet',
+    aiEnabled:           false,
+    localFallbackAllowed: false,
+    serverTime:          new Date().toISOString(),
+  });
+}
+
+async function handleAuthCsrf(req, res) {
+  const cookies = parseCookies(req);
+  if (!cookies['wr_refresh']) {
+    sendJson(res, 401, { code: 'NO_REFRESH_TOKEN', error: 'Refresh token cookie missing' });
+    return;
+  }
+  // Reissue wr_csrf so httpClient can read it for subsequent mutating requests.
+  sendJson(res, 200,
+    { accessToken: MOCK_ACCESS_TOKEN, accessExpiresAt: MOCK_ACCESS_EXPIRES() },
+    { 'Set-Cookie': setAuthCookies() },
+  );
+}
+
+async function handleAuthLogin(_req, res) {
+  // Accept any credentials — dev only.
+  // Planting wr_csrf here is essential: httpClient reads it as X-CSRF-Token header.
+  sendJson(res, 200,
+    { user: MOCK_USER, accessToken: MOCK_ACCESS_TOKEN, accessExpiresAt: MOCK_ACCESS_EXPIRES() },
+    { 'Set-Cookie': setAuthCookies() },
+  );
+}
+
+function handleAuthLogout(_req, res) {
+  sendJson(res, 200, { ok: true }, { 'Set-Cookie': clearAuthCookies() });
+}
+
+function handleAuthMe(req, res) {
+  const cookies = parseCookies(req);
+  if (!cookies['wr_refresh']) {
+    sendJson(res, 401, { code: 'NO_REFRESH_TOKEN', error: 'Refresh token cookie missing' });
+    return;
+  }
+  // Shape matches real server auth.ts:248 — SettingsModal reads org.name and capabilities.ai.
+  sendJson(res, 200, {
+    user:         MOCK_USER,
+    org:          MOCK_ORG,
+    capabilities: {
+      autosave:             true,
+      workspaces:           true,
+      patients:             true,
+      ai:                   false,
+      isAdmin:              true,
+      localFallbackAllowed: false,
+    },
+  });
+}
+
+async function handleAuthChangePassword(req, res) {
+  const body = await readJsonBody(req);
+  // Use currentPassword === 'wrong' to exercise the error path in ChangePasswordModal.
+  if (body?.currentPassword === 'wrong') {
+    sendJson(res, 401, { code: 'WRONG_CURRENT_PASSWORD', error: 'Wrong current password' });
+    return;
+  }
+  const updatedUser = { ...MOCK_USER, mustChangePassword: false };
+  sendJson(res, 200,
+    { user: updatedUser, accessToken: MOCK_ACCESS_TOKEN, accessExpiresAt: MOCK_ACCESS_EXPIRES() },
+    { 'Set-Cookie': setAuthCookies() },
+  );
+}
+
+function handleAiAnalyze(_req, res) {
+  // aiEnabled=false means the UI gate should block this call entirely.
+  // Return 403 AI_DISABLED as a defensive backstop matching the real server policy.
+  sendJson(res, 403, { code: 'AI_DISABLED', error: { message: 'AI is not enabled on this server.' } });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function handleAnalyzeMock(req, res) {
   if (req.method !== 'POST') {
     methodNotAllowed(res, 'POST');
@@ -339,6 +468,14 @@ const server = http.createServer(async (req, res) => {
       await handleWorkspaces(req, res, url);
       return;
     }
+
+    if (url.pathname === '/api/config/public'        && req.method === 'GET')  { handleConfigPublic(req, res); return; }
+    if (url.pathname === '/api/auth/csrf'            && req.method === 'POST') { await handleAuthCsrf(req, res); return; }
+    if (url.pathname === '/api/auth/login'           && req.method === 'POST') { await handleAuthLogin(req, res); return; }
+    if (url.pathname === '/api/auth/logout'          && req.method === 'POST') { handleAuthLogout(req, res); return; }
+    if (url.pathname === '/api/auth/me'              && req.method === 'GET')  { handleAuthMe(req, res); return; }
+    if (url.pathname === '/api/auth/change-password' && req.method === 'POST') { await handleAuthChangePassword(req, res); return; }
+    if (url.pathname === '/api/ai/analyze'           && req.method === 'POST') { handleAiAnalyze(req, res); return; }
 
     notFound(res);
   } catch (error) {
