@@ -36,16 +36,22 @@ export function useServerConfig({ session, settings }) {
     lastFetchedUrlRef.current = baseUrl;
 
     let cancelled = false;
+    // Manual AbortController for 8s timeout — more compatible than AbortSignal.timeout().
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
     // Set fetchedBaseUrl immediately so render-time effectiveLoading sees it.
     setState(prev => ({ ...prev, loading: true, error: null, fetchedBaseUrl: baseUrl }));
 
-    requestJson('/api/config/public', { baseUrl, signal: AbortSignal.timeout(8000) })
+    requestJson('/api/config/public', { baseUrl, signal: controller.signal })
       .then(data => {
         if (cancelled) return;
+        clearTimeout(timeoutId);
         setState({ config: data, loading: false, error: null, fetchedBaseUrl: baseUrl });
       })
       .catch(err => {
         if (cancelled) return;
+        clearTimeout(timeoutId);
         const isTimeout = err.name === 'TimeoutError' || err.name === 'AbortError';
         setState({
           config: FAIL_CLOSED_CONFIG,
@@ -55,7 +61,13 @@ export function useServerConfig({ session, settings }) {
         });
       });
 
-    return () => { cancelled = true; };
+    // Reset the dedup ref on cleanup so StrictMode's second effect invocation
+    // (and any genuine remount) always fires a fresh fetch.
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+      lastFetchedUrlRef.current = null;
+    };
   }, [isIntranet, baseUrl]);
 
   // Computed synchronously in render using state (not ref) so it's lint-safe.
