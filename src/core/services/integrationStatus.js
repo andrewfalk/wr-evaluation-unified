@@ -37,6 +37,7 @@ function createBaseStatus() {
     },
     mockDetails: null,
     remoteDetails: null,
+    meDetails: null,
   };
 }
 
@@ -105,8 +106,9 @@ function createCheckingStatus(context = {}, overrides = {}) {
 function createRemoteStatus(context = {}, overrides = {}) {
   const baseUrl = normalizeBaseUrl(context?.settings?.apiBaseUrl || context?.session?.apiBaseUrl || '');
   const mock = overrides?.mock ?? context?.mock ?? (currentStatus.baseUrl === baseUrl ? currentStatus.mock : false);
-  const hasMockDetails = Object.prototype.hasOwnProperty.call(overrides, 'mockDetails');
-  const hasRemoteDetails = Object.prototype.hasOwnProperty.call(overrides, 'remoteDetails');
+  const hasMockDetails    = Object.prototype.hasOwnProperty.call(overrides, 'mockDetails');
+  const hasRemoteDetails  = Object.prototype.hasOwnProperty.call(overrides, 'remoteDetails');
+  const hasMeDetails      = Object.prototype.hasOwnProperty.call(overrides, 'meDetails');
   const sameTarget = currentStatus.baseUrl === baseUrl && currentStatus.mock === mock;
   return buildStatus({
     mode: 'intranet',
@@ -121,8 +123,9 @@ function createRemoteStatus(context = {}, overrides = {}) {
     lastCheckedAt: new Date().toISOString(),
     lastError: null,
     sessionInfo: buildSessionInfo(context),
-    mockDetails: hasMockDetails ? overrides.mockDetails : (sameTarget ? currentStatus.mockDetails : null),
-    remoteDetails: hasRemoteDetails ? overrides.remoteDetails : (sameTarget ? currentStatus.remoteDetails : null),
+    mockDetails:    hasMockDetails   ? overrides.mockDetails   : (sameTarget ? currentStatus.mockDetails   : null),
+    remoteDetails:  hasRemoteDetails ? overrides.remoteDetails : (sameTarget ? currentStatus.remoteDetails : null),
+    meDetails:      hasMeDetails     ? overrides.meDetails     : (sameTarget ? currentStatus.meDetails     : null),
     ...overrides,
   });
 }
@@ -164,6 +167,15 @@ function extractMockDetails(data = {}) {
 function extractRemoteDetails(workspaces = []) {
   return {
     workspaceCount: Array.isArray(workspaces) ? workspaces.length : null,
+  };
+}
+
+function extractMeDetails(data = {}) {
+  return {
+    userName:     data?.user?.name     || null,
+    userRole:     data?.user?.role     || null,
+    orgName:      data?.org?.name      || null,
+    capabilities: data?.capabilities   || null,
   };
 }
 
@@ -217,23 +229,31 @@ export async function inspectIntegrationStatus(context = {}) {
     }
   }
 
+  // /api/auth/me is the primary check: confirms auth works and exposes capabilities.
+  const baseUrl = context?.settings?.apiBaseUrl || context?.session?.apiBaseUrl || '';
+  let meData = null;
   try {
-    const data = await requestJson('/api/workspaces', {
-      baseUrl: context?.settings?.apiBaseUrl || context?.session?.apiBaseUrl || '',
-      session: context?.session,
-    });
-
-    return createRemoteStatus(
-      { ...context, source: context?.source || 'inspect', mock: false },
-      {
-        mock: false,
-        mockDetails: null,
-        remoteDetails: extractRemoteDetails(data?.items || []),
-      }
-    );
+    meData = await requestJson('/api/auth/me', { baseUrl, session: context?.session });
   } catch (error) {
     return createFallbackStatus(error, { ...context, source: context?.source || 'inspect' });
   }
+
+  // /api/workspaces for workspace count — not fatal if unavailable.
+  let workspaces = [];
+  try {
+    const wsData = await requestJson('/api/workspaces', { baseUrl, session: context?.session });
+    workspaces = wsData?.items || [];
+  } catch { /* non-fatal */ }
+
+  return createRemoteStatus(
+    { ...context, source: context?.source || 'inspect', mock: false },
+    {
+      mock: false,
+      mockDetails: null,
+      remoteDetails: extractRemoteDetails(workspaces),
+      meDetails: extractMeDetails(meData),
+    }
+  );
 }
 
 export async function probeIntegrationStatus(context = {}) {

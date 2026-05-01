@@ -238,6 +238,12 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
             <DiagnosticItem label="활성 저장소" value={diagnostic?.activeStore || '-'} />
             <DiagnosticItem label="사용자 ID" value={diagnostic?.sessionInfo?.userId} />
             <DiagnosticItem label="조직 ID" value={diagnostic?.sessionInfo?.organizationId} />
+            {diagnostic?.meDetails && (<>
+              <DiagnosticItem label="사용자명" value={diagnostic.meDetails.userName} />
+              <DiagnosticItem label="역할" value={diagnostic.meDetails.userRole} />
+              <DiagnosticItem label="소속 기관" value={diagnostic.meDetails.orgName} />
+              <DiagnosticItem label="AI 기능" value={diagnostic.meDetails.capabilities?.ai ? '활성' : '비활성'} />
+            </>)}
           </div>
 
           {diagnostic?.lastError && (

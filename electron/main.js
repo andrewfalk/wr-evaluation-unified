@@ -685,6 +685,7 @@ function runHelper(args, timeoutMs = 15000) {
 ipcMain.handle('emr-inject', async (event, fieldData) => {
   if (IS_INTRANET_BUILD && !isAllowedSender(event.sender.getURL())) {
     console.warn('[emr-inject] rejected: sender origin not in whitelist', event.sender.getURL());
+    // TODO(T34): send rejection event to server audit log via device token signature
     return { success: false, message: 'EMR access denied: sender origin not allowed.' };
   }
   if (process.platform !== 'win32') {
@@ -793,6 +794,7 @@ ipcMain.handle('emr-inject', async (event, fieldData) => {
 ipcMain.handle('emr-extract-record', async (event, patientNo) => {
   if (IS_INTRANET_BUILD && !isAllowedSender(event.sender.getURL())) {
     console.warn('[emr-extract-record] rejected: sender origin not in whitelist', event.sender.getURL());
+    // TODO(T34): send rejection event to server audit log via device token signature
     return { success: false, error: 'EMR access denied: sender origin not allowed.' };
   }
   if (process.platform !== 'win32') {
@@ -805,6 +807,7 @@ ipcMain.handle('emr-extract-record', async (event, patientNo) => {
 ipcMain.handle('emr-extract-consultation', async (event) => {
   if (IS_INTRANET_BUILD && !isAllowedSender(event.sender.getURL())) {
     console.warn('[emr-extract-consultation] rejected: sender origin not in whitelist', event.sender.getURL());
+    // TODO(T34): send rejection event to server audit log via device token signature
     return { success: false, error: 'EMR access denied: sender origin not allowed.' };
   }
   if (process.platform !== 'win32') {

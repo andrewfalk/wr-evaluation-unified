@@ -4,6 +4,31 @@
 // File-storage (fs*) APIs are absent — data lives on the intranet server.
 const { contextBridge, ipcRenderer } = require('electron');
 
+// ---------------------------------------------------------------------------
+// Preload-level origin gate (defence-in-depth, main process gate is primary).
+// EMR APIs are only bound when the renderer's origin matches WR_INTRANET_URL.
+// Mismatched origin → stubs that immediately reject without touching IPC.
+// ---------------------------------------------------------------------------
+const INTRANET_URL = (process.env.WR_INTRANET_URL || '').trim();
+let allowedOrigin = null;
+try { allowedOrigin = INTRANET_URL ? new URL(INTRANET_URL).origin : null; } catch { /* invalid URL */ }
+
+const originAllowed = !!allowedOrigin && window.location.origin === allowedOrigin;
+
+const ORIGIN_DENIED = { success: false, error: 'EMR access denied: origin not in whitelist.' };
+
+const emrApis = originAllowed
+  ? {
+      injectEMR:           (data)      => ipcRenderer.invoke('emr-inject',              data),
+      extractRecord:       (patientNo) => ipcRenderer.invoke('emr-extract-record',       patientNo),
+      extractConsultation: ()          => ipcRenderer.invoke('emr-extract-consultation'),
+    }
+  : {
+      injectEMR:           ()          => Promise.resolve(ORIGIN_DENIED),
+      extractRecord:       ()          => Promise.resolve(ORIGIN_DENIED),
+      extractConsultation: ()          => Promise.resolve(ORIGIN_DENIED),
+    };
+
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
 
@@ -21,10 +46,7 @@ contextBridge.exposeInMainWorld('electron', {
   showAlert:   (message) => ipcRenderer.invoke('show-alert',   message),
   showConfirm: (message) => ipcRenderer.invoke('show-confirm', message),
 
-  // EMR direct input (C# EmrHelper → IE DOM injection, Windows only)
-  injectEMR:            (data)      => ipcRenderer.invoke('emr-inject',               data),
-  extractRecord:        (patientNo) => ipcRenderer.invoke('emr-extract-record',        patientNo),
-  extractConsultation:  ()          => ipcRenderer.invoke('emr-extract-consultation'),
+  ...emrApis,
 
   // Version metadata
   version: {
