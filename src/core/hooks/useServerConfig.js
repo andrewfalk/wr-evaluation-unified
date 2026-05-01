@@ -39,17 +39,18 @@ export function useServerConfig({ session, settings }) {
     // Set fetchedBaseUrl immediately so render-time effectiveLoading sees it.
     setState(prev => ({ ...prev, loading: true, error: null, fetchedBaseUrl: baseUrl }));
 
-    requestJson('/api/config/public', { baseUrl })
+    requestJson('/api/config/public', { baseUrl, signal: AbortSignal.timeout(8000) })
       .then(data => {
         if (cancelled) return;
         setState({ config: data, loading: false, error: null, fetchedBaseUrl: baseUrl });
       })
       .catch(err => {
         if (cancelled) return;
+        const isTimeout = err.name === 'TimeoutError' || err.name === 'AbortError';
         setState({
           config: FAIL_CLOSED_CONFIG,
           loading: false,
-          error: err.message || '서버 연결 실패',
+          error: isTimeout ? '서버 응답 시간 초과 (8초). 서버가 실행 중인지 확인하세요.' : (err.message || '서버 연결 실패'),
           fetchedBaseUrl: baseUrl,
         });
       });

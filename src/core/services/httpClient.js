@@ -38,6 +38,7 @@ export async function requestJson(path, {
   body,
   session,
   headers = {},
+  signal,
   _retry = false,
 } = {}) {
   const response = await fetch(buildUrl(baseUrl, path), {
@@ -45,6 +46,7 @@ export async function requestJson(path, {
     credentials: 'include',
     headers: buildHeaders(method, session, headers),
     body: body === undefined ? undefined : JSON.stringify(body),
+    ...(signal !== undefined ? { signal } : {}),
   });
 
   // 401 → attempt one token refresh, then retry the original request.
