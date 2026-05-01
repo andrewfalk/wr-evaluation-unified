@@ -40,8 +40,9 @@ async function analyzeHandler(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // external — approval flags already verified by resolveAiEnabled() at startup
-    const text = await callExternalLLM({ prompt, systemPrompt, model });
+    // external — approval flags already verified by resolveAiEnabled() at startup.
+    // Use server-configured model to enforce the approved vendor contract.
+    const text = await callExternalLLM({ prompt, systemPrompt, model: config.ai.externalModel });
     res.status(200).json({ text });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'AI backend error';
@@ -86,11 +87,11 @@ async function callInternalLLM({
 async function callExternalLLM({
   prompt,
   systemPrompt,
-  model = 'gpt-4o',
+  model,
 }: {
   prompt: string;
   systemPrompt?: string;
-  model?: string;
+  model: string;
 }): Promise<string> {
   const url = `${config.ai.externalEndpoint.replace(/\/$/, '')}/chat/completions`;
   const messages: { role: string; content: string }[] = [];

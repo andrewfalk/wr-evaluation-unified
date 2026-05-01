@@ -130,6 +130,10 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
       // Overrides any model name the client sends — the client has no visibility
       // into what models are loaded in the hospital's Ollama/vLLM instance.
       internalModel:          optional(env, 'AI_INTERNAL_MODEL', 'llama3'),
+      // Model name sent to the external vendor endpoint (e.g. 'gpt-4o').
+      // Overrides the client-sent model — the approved vendor contract may
+      // restrict which models are permitted under the hospital agreement.
+      externalModel:          optional(env, 'AI_EXTERNAL_MODEL', 'gpt-4o'),
       externalEndpoint:       aiExternalEndpoint,
       externalApiKey:         aiExternalApiKey,
       externalVendorApproved: aiExternalVendorApproved,
