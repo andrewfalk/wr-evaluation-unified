@@ -56,6 +56,7 @@ function DiagnosticItem({ label, value }) {
 }
 
 export function SettingsModal({ settings, session, integrationStatus, onSave, onClose }) {
+  const isIntranetLocked = session?.mode === 'intranet';
   const [draft, setDraft] = useState({ ...settings });
   const [diagnostic, setDiagnostic] = useState(integrationStatus);
   const [isCheckingConnection, setIsCheckingConnection] = useState(false);
@@ -175,9 +176,18 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
 
         <div className="settings-section modal-section pattern-surface">
           <div className="settings-section-title">서버 연동</div>
+          {isIntranetLocked && (
+            <div className="settings-help-text settings-help-text--locked">
+              인트라넷 모드로 로그인 중입니다. 서버 연동 설정은 관리자만 변경할 수 있습니다.
+            </div>
+          )}
           <div className="settings-row">
             <label>데이터 저장 방식</label>
-            <select value={draft.integrationMode || 'local'} onChange={e => update('integrationMode', e.target.value)}>
+            <select
+              value={draft.integrationMode || 'local'}
+              onChange={e => update('integrationMode', e.target.value)}
+              disabled={isIntranetLocked}
+            >
               <option value="local">로컬 저장</option>
               <option value="intranet">인트라넷 서버</option>
             </select>
@@ -189,11 +199,15 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
               value={draft.apiBaseUrl || ''}
               onChange={e => update('apiBaseUrl', e.target.value)}
               placeholder="https://intranet.example.com 또는 http://localhost:3002"
+              disabled={isIntranetLocked}
+              readOnly={isIntranetLocked}
             />
           </div>
-          <div className="settings-help-text">
-            인트라넷 서버 모드에서는 저장소와 AI 호출이 지정한 서버를 우선 사용합니다.
-          </div>
+          {!isIntranetLocked && (
+            <div className="settings-help-text">
+              인트라넷 서버 모드에서는 저장소와 AI 호출이 지정한 서버를 우선 사용합니다.
+            </div>
+          )}
         </div>
 
         <div className="settings-section modal-section pattern-surface">

@@ -4,6 +4,28 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+// ---------------------------------------------------------------------------
+// Build target: 'intranet' or 'standalone' (default)
+// Set WR_BUILD_TARGET=intranet + WR_INTRANET_URL=https://wr.hospital.local
+// in the intranet build environment.
+// ---------------------------------------------------------------------------
+const IS_INTRANET_BUILD = process.env.WR_BUILD_TARGET === 'intranet';
+const INTRANET_URL      = (process.env.WR_INTRANET_URL || '').trim().replace(/\/$/, '');
+
+// Allowed origin for intranet build — derived from WR_INTRANET_URL.
+// EMR ipc handlers reject requests from any other origin.
+function getAllowedOrigin() {
+  if (!INTRANET_URL) return null;
+  try { return new URL(INTRANET_URL).origin; } catch { return null; }
+}
+const ALLOWED_ORIGIN = getAllowedOrigin();
+
+function isAllowedSender(url) {
+  if (!IS_INTRANET_BUILD) return true; // standalone: no origin gate
+  if (!ALLOWED_ORIGIN) return false;
+  try { return new URL(url).origin === ALLOWED_ORIGIN; } catch { return false; }
+}
+
 // Windows 7/8 호환성 (Electron 22 — 마지막 Win7 지원 버전)
 if (process.platform === 'win32') {
   const ver = os.release();
@@ -18,6 +40,10 @@ if (process.platform === 'win32') {
 let mainWindow;
 
 function createWindow() {
+  const preloadFile = IS_INTRANET_BUILD
+    ? path.join(__dirname, 'preload-intranet.js')
+    : path.join(__dirname, 'preload-standalone.js');
+
   mainWindow = new BrowserWindow({
     width: 1600,
     height: 900,
@@ -26,19 +52,44 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
+      sandbox: true,
+      webSecurity: true,
+      preload: preloadFile,
     },
     icon: path.join(__dirname, '../public/icon.ico'),
     title: '근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미'
   });
 
-  const isDev = process.env.NODE_ENV === 'development';
+  if (IS_INTRANET_BUILD) {
+    if (!INTRANET_URL) {
+      dialog.showErrorBox('설정 오류', 'WR_INTRANET_URL 환경변수가 설정되지 않았습니다.');
+      app.quit();
+      return;
+    }
+    mainWindow.loadURL(INTRANET_URL);
 
-  if (isDev) {
-    mainWindow.loadURL('http://localhost:3000');
-    mainWindow.webContents.openDevTools();
+    // Block navigation away from the allowed origin.
+    mainWindow.webContents.on('will-navigate', (event, url) => {
+      if (!isAllowedSender(url)) {
+        event.preventDefault();
+        console.warn('[intranet] blocked navigation to', url);
+      }
+    });
+
+    // Block new windows from opening external origins.
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+      if (isAllowedSender(url)) return { action: 'allow' };
+      console.warn('[intranet] blocked window open for', url);
+      return { action: 'deny' };
+    });
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/electron/index.html'));
+    const isDev = process.env.NODE_ENV === 'development';
+    if (isDev) {
+      mainWindow.loadURL('http://localhost:3000');
+      mainWindow.webContents.openDevTools();
+    } else {
+      mainWindow.loadFile(path.join(__dirname, '../dist/electron/index.html'));
+    }
   }
 
   const menuTemplate = [
@@ -631,7 +682,11 @@ function runHelper(args, timeoutMs = 15000) {
 }
 
 // IPC: EMR 직접입력 (C# EmrHelper.exe → IE DOM 주입)
-ipcMain.handle('emr-inject', async (_event, fieldData) => {
+ipcMain.handle('emr-inject', async (event, fieldData) => {
+  if (IS_INTRANET_BUILD && !isAllowedSender(event.sender.getURL())) {
+    console.warn('[emr-inject] rejected: sender origin not in whitelist', event.sender.getURL());
+    return { success: false, message: 'EMR access denied: sender origin not allowed.' };
+  }
   if (process.platform !== 'win32') {
     return { success: false, message: 'EMR direct input is Windows-only.' };
   }
@@ -735,7 +790,11 @@ ipcMain.handle('emr-inject', async (_event, fieldData) => {
 });
 
 // IPC: 진료기록 데이터 추출 (단건 — App.jsx가 환자별 루프 수행)
-ipcMain.handle('emr-extract-record', async (_event, patientNo) => {
+ipcMain.handle('emr-extract-record', async (event, patientNo) => {
+  if (IS_INTRANET_BUILD && !isAllowedSender(event.sender.getURL())) {
+    console.warn('[emr-extract-record] rejected: sender origin not in whitelist', event.sender.getURL());
+    return { success: false, error: 'EMR access denied: sender origin not allowed.' };
+  }
   if (process.platform !== 'win32') {
     return { success: false, error: 'EMR extraction is Windows-only.' };
   }
@@ -743,7 +802,11 @@ ipcMain.handle('emr-extract-record', async (_event, patientNo) => {
 });
 
 // IPC: 다학제회신 추출 (현재 열린 진료메인 페이지 대상)
-ipcMain.handle('emr-extract-consultation', async () => {
+ipcMain.handle('emr-extract-consultation', async (event) => {
+  if (IS_INTRANET_BUILD && !isAllowedSender(event.sender.getURL())) {
+    console.warn('[emr-extract-consultation] rejected: sender origin not in whitelist', event.sender.getURL());
+    return { success: false, error: 'EMR access denied: sender origin not allowed.' };
+  }
   if (process.platform !== 'win32') {
     return { success: false, error: 'EMR extraction is Windows-only.' };
   }
