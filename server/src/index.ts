@@ -14,6 +14,7 @@ import { createAdminRouter } from './routes/admin';
 import { createAuditRouter } from './routes/audit';
 import { createWorkspacesRouter } from './routes/workspaces';
 import { createAutosaveRouter } from './routes/autosave';
+import { createAIRouter } from './routes/ai';
 import { cspMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
 
@@ -35,6 +36,7 @@ app.use('/api/admin',      createAdminRouter(pool, auditPool));
 app.use('/api/audit',      createAuditRouter(pool));
 app.use('/api/workspaces', createWorkspacesRouter(pool));
 app.use('/api/autosave',  createAutosaveRouter(pool));
+app.use('/api/ai',        createAIRouter(pool));
 
 // ---------------------------------------------------------------------------
 // Static web SPA (dist/web/) — registered after API routes so API paths win.
