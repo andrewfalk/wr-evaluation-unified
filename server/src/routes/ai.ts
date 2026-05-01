@@ -29,7 +29,7 @@ async function analyzeHandler(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const { prompt, systemPrompt, model } = parsed.data;
+  const { prompt, systemPrompt } = parsed.data;
 
   try {
     if (config.ai.provider === 'internal') {

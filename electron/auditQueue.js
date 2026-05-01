@@ -12,27 +12,28 @@ function queueFile() {
 }
 
 // ── Encryption helpers ───────────────────────────────────────────────────────
+// Fail-closed: if safeStorage is unavailable, entries are dropped rather than
+// written as plaintext. On Windows (the EMR target platform), safeStorage is
+// always available, so this guard is belt-and-suspenders.
 
 function encryptLine(plaintext) {
-  if (safeStorage.isEncryptionAvailable()) {
-    return 'enc:' + safeStorage.encryptString(plaintext).toString('base64');
-  }
-  return 'raw:' + Buffer.from(plaintext, 'utf-8').toString('base64');
+  return 'enc:' + safeStorage.encryptString(plaintext).toString('base64');
 }
 
 function decryptLine(line) {
   if (line.startsWith('enc:')) {
     return safeStorage.decryptString(Buffer.from(line.slice(4), 'base64'));
   }
-  if (line.startsWith('raw:')) {
-    return Buffer.from(line.slice(4), 'base64').toString('utf-8');
-  }
-  throw new Error('unknown line format');
+  throw new Error('unknown line format — expected enc: prefix');
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
 function enqueue(entry) {
+  if (!safeStorage.isEncryptionAvailable()) {
+    console.error('[auditQueue] safeStorage unavailable — entry dropped (fail-closed):', entry.action);
+    return;
+  }
   try {
     fs.appendFileSync(queueFile(), encryptLine(JSON.stringify(entry)) + '\n', 'utf-8');
   } catch (err) {

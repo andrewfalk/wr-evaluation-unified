@@ -32,29 +32,21 @@ function saveMeta(meta) {
   fs.writeFileSync(metaPath(), JSON.stringify(meta, null, 2), 'utf-8');
 }
 
-// Saves PKCS8 DER private key, encrypted by safeStorage when available.
-// Format prefix: "enc:" (safeStorage-encrypted base64) or "raw:" (plain base64).
+// Saves PKCS8 DER private key encrypted by safeStorage (fail-closed: throws if unavailable).
 function savePrivateKey(pkcs8Der) {
-  const b64 = pkcs8Der.toString('base64');
-  if (safeStorage.isEncryptionAvailable()) {
-    fs.writeFileSync(keyPath(), 'enc:' + safeStorage.encryptString(b64).toString('base64'), 'utf-8');
-  } else {
-    fs.writeFileSync(keyPath(), 'raw:' + b64, 'utf-8');
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('safeStorage unavailable — cannot encrypt device private key');
   }
+  const b64 = pkcs8Der.toString('base64');
+  fs.writeFileSync(keyPath(), 'enc:' + safeStorage.encryptString(b64).toString('base64'), 'utf-8');
 }
 
 function loadPrivateKey() {
   if (!fs.existsSync(keyPath())) return null;
   try {
     const content = fs.readFileSync(keyPath(), 'utf-8');
-    let b64;
-    if (content.startsWith('enc:')) {
-      b64 = safeStorage.decryptString(Buffer.from(content.slice(4), 'base64'));
-    } else if (content.startsWith('raw:')) {
-      b64 = content.slice(4);
-    } else {
-      return null;
-    }
+    if (!content.startsWith('enc:')) return null; // reject non-encrypted key files
+    const b64 = safeStorage.decryptString(Buffer.from(content.slice(4), 'base64'));
     return crypto.createPrivateKey({ key: Buffer.from(b64, 'base64'), format: 'der', type: 'pkcs8' });
   } catch { return null; }
 }
@@ -207,7 +199,12 @@ async function recordAudit(entry) {
 }
 
 // Attempt to flush the pending queue. Handles corrupt file gracefully.
+// Also retries device registration when status is 'pending' so that admin
+// approvals are picked up within the next 5-minute interval without a restart.
 async function flushQueue() {
+  if (_state.status === 'pending') {
+    await tryRegister(); // admin may have approved since last check
+  }
   if (_state.status !== 'active') return;
 
   if (checkCorrupt()) {
@@ -235,6 +232,12 @@ async function flushQueue() {
 async function initAudit({ getAccessToken, apiBaseUrl }) {
   _getAccessToken = getAccessToken || (() => null);
   _apiBaseUrl     = (apiBaseUrl || '').replace(/\/$/, '');
+
+  if (!safeStorage.isEncryptionAvailable()) {
+    console.error('[audit] safeStorage unavailable — audit module disabled (fail-closed)');
+    _state.status = 'error';
+    return;
+  }
 
   initDevice();
 
