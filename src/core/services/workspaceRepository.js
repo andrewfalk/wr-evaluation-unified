@@ -32,14 +32,22 @@ function shouldUseRemoteRepository({ session, settings } = {}) {
   return settings?.integrationMode === 'intranet' || session?.mode === 'intranet';
 }
 
-function shouldFallbackToLocal(error, options = {}) {
-  // In remote mode, require explicit server permission to fall back to local storage.
-  // Any missing or non-true localFallbackAllowed is treated as fail-closed so that
-  // a forgotten serverConfig argument cannot silently reopen the fallback gate.
-  if (shouldUseRemoteRepository(options)) {
-    return options?.serverConfig?.localFallbackAllowed === true;
-  }
+// Errors that indicate "endpoint not implemented yet" — safe to fall back to local.
+// Auth failures (401/403), server errors (500/502), and contract violations are
+// intentionally excluded so they surface to the user rather than silently degrading.
+function isFallbackEligibleError(error) {
   return !error?.status || error.status === 404 || error.status === 405 || error.status === 501;
+}
+
+function shouldFallbackToLocal(error, options = {}) {
+  // In remote mode: require both explicit server permission AND an eligible error type.
+  // localFallbackAllowed=true with a 401/500 still surfaces the error — preventing
+  // auth failures and contract violations from being silently hidden in local storage.
+  if (shouldUseRemoteRepository(options)) {
+    return options?.serverConfig?.localFallbackAllowed === true
+      && isFallbackEligibleError(error);
+  }
+  return isFallbackEligibleError(error);
 }
 
 export async function loadSavedWorkspaces(options = {}) {
