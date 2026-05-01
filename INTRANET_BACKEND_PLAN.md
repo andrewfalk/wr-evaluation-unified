@@ -445,9 +445,7 @@ main (v4.2.1 → v4.2.x 핫픽스만)
 
 | ID | 작업 | 영향 | 검증 | deps | 규모 | 상태 |
 |---|---|---|---|---|---|---|
-| T-mock | mock 서버 auth stub 추가 (포트 3001, 쿠키 헬퍼, 7개 엔드포인트, CORS 수정) + `useServerConfig` StrictMode freeze 수정 + AbortController 타임아웃 | `scripts/mock-intranet-server.mjs`, `src/core/hooks/useServerConfig.js`, `src/core/services/httpClient.js` | 시나리오 A~F2 수동 통과 | T25~T35 | M | ✅ 구현 완료, **수동 검증 진행 중** |
-
-**현재 해야 할 일**: 위 수동 검증 시나리오 A~F2를 순서대로 실행하고 통과 확인.
+| T-mock | mock 서버 auth stub 추가 (포트 3001, 쿠키 헬퍼, 7개 엔드포인트, CORS 수정) + `useServerConfig` StrictMode freeze 수정 + AbortController 타임아웃 + SettingsModal 로그아웃 버튼 | `scripts/mock-intranet-server.mjs`, `src/core/hooks/useServerConfig.js`, `src/core/services/httpClient.js`, `src/core/components/SettingsModal.jsx` | 시나리오 A~F2 수동 통과 | T25~T35 | M | ✅ **완료** |
 
 ---
 
