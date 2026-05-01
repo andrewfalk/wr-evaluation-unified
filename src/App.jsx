@@ -13,6 +13,7 @@ import { MainHeader } from './core/components/MainHeader';
 import { StepIndicator } from './core/components/StepIndicator';
 import { useAuth } from './core/auth/AuthContext';
 import { useServerConfig } from './core/hooks/useServerConfig';
+import { useAIAvailable } from './core/hooks/useAIAvailable';
 import { configureHttpClient } from './core/services/httpClient';
 import { getCsrfToken } from './core/utils/csrfCookie';
 import { normalizeSession } from './core/auth/session';
@@ -79,6 +80,7 @@ function App() {
   const [showBatchImport, setShowBatchImport] = useState(false);
   const [showHome, setShowHome] = useState(false);
   const { serverConfig, configLoading, configError } = useServerConfig({ session, settings });
+  const { aiAvailable } = useAIAvailable({ serverConfig, session });
   const isIntranetMode =
     session?.mode === 'intranet' || settings?.integrationMode === 'intranet';
   const { status: integrationStatus } = useIntegrationStatus({ session, settings });
@@ -582,6 +584,7 @@ function App() {
                 presets={presets}
                 presetMeta={presetMeta}
                 presetError={presetError}
+                aiAvailable={aiAvailable}
                 updateShared={updateShared}
                 updateModule={updateModule}
                 updateModuleById={updateModuleById}

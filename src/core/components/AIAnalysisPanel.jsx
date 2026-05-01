@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAIAnalysis } from '../hooks/useAIAnalysis';
 
-export function AIAnalysisPanel({ generatePrompt, systemPrompt, title = 'AI 분석' }) {
+export function AIAnalysisPanel({ generatePrompt, systemPrompt, title = 'AI 분석', aiAvailable = true }) {
   const { analyze, loading, result, error, reset } = useAIAnalysis();
   const [model, setModel] = useState('gemini-2.5-flash');
 
@@ -10,6 +10,19 @@ export function AIAnalysisPanel({ generatePrompt, systemPrompt, title = 'AI 분�
     if (!prompt) return;
     await analyze(prompt, systemPrompt, model);
   };
+
+  if (!aiAvailable) {
+    return (
+      <div className="section">
+        <h2 className="section-title"><span className="section-icon">AI</span>{title}</h2>
+        <div className="modal-section pattern-surface ai-panel-shell">
+          <div className="ai-status-card">
+            <p className="ai-status-text">AI 분석이 이 서버에서 비활성화되어 있습니다.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="section">
