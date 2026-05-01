@@ -33,7 +33,9 @@ async function analyzeHandler(req: Request, res: Response): Promise<void> {
 
   try {
     if (config.ai.provider === 'internal') {
-      const text = await callInternalLLM({ prompt, systemPrompt, model });
+      // Always use the server-configured model — the client's model name
+      // (e.g. 'gemini-2.5-flash') is meaningless to the local Ollama/vLLM instance.
+      const text = await callInternalLLM({ prompt, systemPrompt, model: config.ai.internalModel });
       res.status(200).json({ text });
       return;
     }
@@ -53,11 +55,11 @@ async function analyzeHandler(req: Request, res: Response): Promise<void> {
 async function callInternalLLM({
   prompt,
   systemPrompt,
-  model = 'llama3',
+  model,
 }: {
   prompt: string;
   systemPrompt?: string;
-  model?: string;
+  model: string;
 }): Promise<string> {
   const url = `${config.ai.internalEndpoint.replace(/\/$/, '')}/api/generate`;
   const body: Record<string, unknown> = { model, prompt, stream: false };
