@@ -26,7 +26,8 @@ export function ChangePasswordModal({ apiBaseUrl = '' }) {
         session,
         body: { currentPassword, newPassword },
         // No _retry: token expiry 401 → interceptor refreshes → retry (correct).
-        // Wrong password 401 → interceptor refreshes (no-op, token still valid) → retry → error shown.
+        // Wrong password 401 → httpClient detects WRONG_CURRENT_PASSWORD code and throws directly,
+        // skipping refresh entirely (see httpClient.js WRONG_CURRENT_PASSWORD guard).
       });
       // Server returns updated user (mustChangePassword=false) and optionally new tokens.
       if (data?.accessToken) {

@@ -14,7 +14,7 @@ import { clonePatientRecordForImport, migratePatientRecords } from '../services/
 
 export function useWorkspacePersistence({
   patients, setPatients,
-  session, settings,
+  session, settings, serverConfig,
   setActiveId, setCurrentStepIndex, setIntakeShared, setShowHome,
   setShowSaveModal, setShowLoadModal,
   disabled = false,
@@ -31,7 +31,7 @@ export function useWorkspacePersistence({
   useEffect(() => {
     if (disabled) return;
     let cancelled = false;
-    loadSavedWorkspaces({ session, settings })
+    loadSavedWorkspaces({ session, settings, serverConfig })
       .then(items => {
         if (!cancelled) setSavedItems(items);
       })
@@ -52,7 +52,7 @@ export function useWorkspacePersistence({
   // 자동 저장 복원 (초기 1회만) — config 준비 전에는 실행하지 않음
   useEffect(() => {
     if (disabled) return;
-    loadAutoSavedWorkspace({ session, settings }).then(saved => {
+    loadAutoSavedWorkspace({ session, settings, serverConfig }).then(saved => {
       if (saved) {
         const time = new Date(saved.savedAt).toLocaleString('ko-KR');
         showConfirm(`이전 자동 저장 데이터가 있습니다 (${time}).\n이어서 작업하시겠습니까?`).then(ok => {
@@ -61,7 +61,7 @@ export function useWorkspacePersistence({
             setActiveId(saved.patients[0].id);
             setCurrentStepIndex(0);
           }
-          clearAutoSavedWorkspace({ session, settings });
+          clearAutoSavedWorkspace({ session, settings, serverConfig });
         });
       }
     });
@@ -71,7 +71,7 @@ export function useWorkspacePersistence({
   useEffect(() => {
     if (disabled || !settings.autoSaveInterval || patients.length === 0) return;
     const timer = setTimeout(() => {
-      saveAutoSavedWorkspace({ patients, session, settings });
+      saveAutoSavedWorkspace({ patients, session, settings, serverConfig });
       setLastAutoSave(new Date());
     }, settings.autoSaveInterval * 1000);
     return () => clearTimeout(timer);
@@ -93,7 +93,7 @@ export function useWorkspacePersistence({
       const confirmed = await showConfirm(`"${saveName}" 이름의 저장 데이터가 이미 존재합니다. 덮어쓰시겠습니까?`);
       if (!confirmed) return;
     }
-    const items = await saveWorkspaceSnapshot({ name: saveName, patients, savedItems, session, settings });
+    const items = await saveWorkspaceSnapshot({ name: saveName, patients, savedItems, session, settings, serverConfig });
     setSavedItems(items);
     setLastAutoSave(null);
     setShowSaveModal(false);
@@ -104,7 +104,7 @@ export function useWorkspacePersistence({
   const handleOverwriteSave = async (item) => {
     const confirmed = await showConfirm(`"${item.name}"에 덮어쓰시겠습니까?`);
     if (!confirmed) return;
-    const items = await saveWorkspaceSnapshot({ name: item.name, patients, savedItems, session, settings });
+    const items = await saveWorkspaceSnapshot({ name: item.name, patients, savedItems, session, settings, serverConfig });
     setSavedItems(items);
     setLastAutoSave(null);
     setShowSaveModal(false);
@@ -133,7 +133,7 @@ export function useWorkspacePersistence({
   const handleDelete = async (id) => {
     const confirmed = await showConfirm('삭제하시겠습니까?');
     if (confirmed) {
-      const items = await deleteWorkspaceSnapshot({ id, savedItems, session, settings });
+      const items = await deleteWorkspaceSnapshot({ id, savedItems, session, settings, serverConfig });
       setSavedItems(items);
     }
   };

@@ -203,7 +203,7 @@ function App() {
     handleSave, handleOverwriteSave, handleLoad, handleDelete, openLoadModal,
   } = useWorkspacePersistence({
     patients, setPatients,
-    session, settings,
+    session, settings, serverConfig,
     setActiveId, setCurrentStepIndex, setIntakeShared, setShowHome,
     setShowSaveModal, setShowLoadModal,
     disabled: isIntranetMode && (configLoading || !!configError),

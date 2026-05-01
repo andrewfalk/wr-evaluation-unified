@@ -32,7 +32,10 @@ function shouldUseRemoteRepository({ session, settings } = {}) {
   return settings?.integrationMode === 'intranet' || session?.mode === 'intranet';
 }
 
-function shouldFallbackToLocal(error) {
+function shouldFallbackToLocal(error, options = {}) {
+  // If the server explicitly prohibits local fallback (intranet mode, fail-closed),
+  // never silently downgrade — surface the error so the user knows the save failed.
+  if (options?.serverConfig?.localFallbackAllowed === false) return false;
   return !error?.status || error.status === 404 || error.status === 405 || error.status === 501;
 }
 
@@ -44,7 +47,7 @@ export async function loadSavedWorkspaces(options = {}) {
       return items;
     } catch (error) {
       markFallbackIntegrationStatus(error, { ...options, source: 'workspace-load' });
-      if (!shouldFallbackToLocal(error)) throw error;
+      if (!shouldFallbackToLocal(error, options)) throw error;
       console.warn('[workspaceRepository] Falling back to local workspace storage:', error.message);
     }
   } else {
@@ -66,7 +69,7 @@ export async function saveWorkspaceSnapshot({ name, patients, savedItems, ...opt
       return items;
     } catch (error) {
       markFallbackIntegrationStatus(error, { ...options, source: 'workspace-save' });
-      if (!shouldFallbackToLocal(error)) throw error;
+      if (!shouldFallbackToLocal(error, options)) throw error;
       console.warn('[workspaceRepository] Falling back to local workspace save:', error.message);
     }
   } else {
@@ -84,7 +87,7 @@ export async function deleteWorkspaceSnapshot({ id, savedItems, ...options }) {
       return items;
     } catch (error) {
       markFallbackIntegrationStatus(error, { ...options, source: 'workspace-delete' });
-      if (!shouldFallbackToLocal(error)) throw error;
+      if (!shouldFallbackToLocal(error, options)) throw error;
       console.warn('[workspaceRepository] Falling back to local workspace delete:', error.message);
     }
   } else {
@@ -106,7 +109,7 @@ export async function loadAutoSavedWorkspace(options = {}) {
       return saved;
     } catch (error) {
       markFallbackIntegrationStatus(error, { ...options, source: 'autosave-load' });
-      if (!shouldFallbackToLocal(error)) throw error;
+      if (!shouldFallbackToLocal(error, options)) throw error;
       console.warn('[workspaceRepository] Falling back to local autosave load:', error.message);
     }
   } else {
@@ -129,7 +132,7 @@ export async function saveAutoSavedWorkspace({ patients, ...options }) {
       return result;
     } catch (error) {
       markFallbackIntegrationStatus(error, { ...options, source: 'autosave-save' });
-      if (!shouldFallbackToLocal(error)) throw error;
+      if (!shouldFallbackToLocal(error, options)) throw error;
       console.warn('[workspaceRepository] Falling back to local autosave save:', error.message);
     }
   } else {
@@ -147,7 +150,7 @@ export async function clearAutoSavedWorkspace(options = {}) {
       return result;
     } catch (error) {
       markFallbackIntegrationStatus(error, { ...options, source: 'autosave-clear' });
-      if (!shouldFallbackToLocal(error)) throw error;
+      if (!shouldFallbackToLocal(error, options)) throw error;
       console.warn('[workspaceRepository] Falling back to local autosave clear:', error.message);
     }
   } else {
