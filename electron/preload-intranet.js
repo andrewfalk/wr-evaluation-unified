@@ -15,19 +15,15 @@ try { allowedOrigin = INTRANET_URL ? new URL(INTRANET_URL).origin : null; } catc
 
 const originAllowed = !!allowedOrigin && window.location.origin === allowedOrigin;
 
-const ORIGIN_DENIED = { success: false, error: 'EMR access denied: origin not in whitelist.' };
-
+// On origin mismatch: expose no EMR methods at all (empty object).
+// Main process still has its own sender-URL gate as primary defence.
 const emrApis = originAllowed
   ? {
       injectEMR:           (data)      => ipcRenderer.invoke('emr-inject',              data),
       extractRecord:       (patientNo) => ipcRenderer.invoke('emr-extract-record',       patientNo),
       extractConsultation: ()          => ipcRenderer.invoke('emr-extract-consultation'),
     }
-  : {
-      injectEMR:           ()          => Promise.resolve(ORIGIN_DENIED),
-      extractRecord:       ()          => Promise.resolve(ORIGIN_DENIED),
-      extractConsultation: ()          => Promise.resolve(ORIGIN_DENIED),
-    };
+  : {};
 
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,

@@ -276,7 +276,7 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
           )}
         </div>
 
-        {isElectron() && (
+        {isElectron() && !!window.electron?.analyzeAI && (
           <div className="settings-section modal-section pattern-surface">
             <div className="settings-section-title">AI 설정 (Electron)</div>
             <div className="settings-row">
