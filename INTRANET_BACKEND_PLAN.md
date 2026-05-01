@@ -242,6 +242,54 @@ wr-evaluation-unified/
 - `src/core/hooks/useAIAvailable.js`
 - `src/core/utils/csrfCookie.js` — wr_csrf 쿠키 read
 
+### Phase 2.5 — Mock 서버 UI 수동 검증 (완료)
+
+**목적**: Phase 2 완료 후 실서버 없이 `npm run mock:intranet` + `npm run dev` 조합으로 인트라넷 모드 전체 UI를 실제처럼 돌리고, 수동 시나리오로 한 차례 검증한다.
+
+**실행 방법**
+
+```bash
+# 터미널 1
+npm run mock:intranet     # localhost:3001 (mock API)
+
+# 터미널 2
+npm run dev               # localhost:3000 → Vite가 /api/* → 3001 프록시
+```
+
+브라우저: `http://localhost:3000` (또는 `settings.apiBaseUrl`에 `http://localhost:3001` 직접 지정)
+
+**구현 내역 (`scripts/mock-intranet-server.mjs`)**
+
+| 항목 | 내용 |
+|---|---|
+| 포트 | 기본값 3002 → 3001 (Vite 프록시 타겟과 통일) |
+| 쿠키 헬퍼 | `parseCookies`, `setAuthCookies`, `clearAuthCookies` |
+| 환경 변수 | `MOCK_MUST_CHANGE_PASSWORD=true` — ChangePasswordModal 경로 테스트 |
+| 신규 엔드포인트 | `GET /api/config/public`, `POST /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, `POST /api/auth/change-password`, `POST /api/ai/analyze` |
+| CORS | `Access-Control-Allow-Origin: *` → 요청 Origin 에코 + `Access-Control-Allow-Credentials: true` (cross-origin 직접 요청 지원) |
+
+**구현 중 발견 · 수정된 버그**
+
+1. **useServerConfig StrictMode 무한 loading** — React StrictMode가 effect를 두 번(실행→cleanup→재실행) 돌릴 때 `lastFetchedUrlRef.current = baseUrl`이 이미 세팅되어 두 번째 effect가 dedup에 걸려 fetch를 안 보냄 → cleanup 시 `lastFetchedUrlRef.current = null`로 리셋하도록 수정
+2. **useServerConfig 타임아웃 없음** — 도달 불가 URL로 `fetch`가 무한 대기 → `AbortController` + `setTimeout(8000)`으로 타임아웃 추가 (`AbortSignal.timeout()` 보다 호환성 넓음)
+3. **mock 서버 CORS** — `credentials: 'include'` + `Access-Control-Allow-Origin: *` 조합은 브라우저가 cross-origin 요청을 차단함 → 요청 Origin을 에코하는 방식으로 수정
+
+**수동 검증 시나리오**
+
+| ID | 시나리오 | 확인 항목 |
+|---|---|---|
+| A | 로그인 + 기본 흐름 | LoginModal 표시 → 로그인 → Settings read-only, AI 버튼 비활성(`aiEnabled:false`) |
+| B | 세션 유지 (새로고침) | F5 후 LoginModal 없이 바로 앱 진입 (`/api/auth/csrf` → 세션 복구) |
+| C | 워크스페이스 저장/불러오기 | 환자 추가 → 저장 → `.mock-intranet/db.json` 기록 → 새로고침 후 불러오기 동일 |
+| D | 로그아웃 | 로그아웃 → LoginModal 재등장, 워크스페이스 저장 시도 → 로그인 모달 |
+| E | ChangePasswordModal | `MOCK_MUST_CHANGE_PASSWORD=true npm run mock:intranet` → 로그인 직후 모달 강제. `currentPassword=wrong` 에러 경로. DevTools Network에서 `X-CSRF-Token` 헤더 확인 |
+| F1 | fail-closed (서버 처음부터 dead) | mock 서버 없이 접속 → 8초 후 "서버 응답 시간 초과" 에러 화면, 로컬 저장 잠금 |
+| F2 | fail-closed (로그인 후 서버 종료) | 로그인 후 `Ctrl+C` → 워크스페이스 저장 실패 알림, localStorage 오염 없음 |
+
+**완료 기준**: 시나리오 A~F2 모두 통과, E에서 DevTools Network로 `X-CSRF-Token` 헤더 확인.
+
+---
+
 ### Phase 3 — 환자 1급 API + 양방향 동기화 (1.5주)
 - 서버: `GET/POST /api/patients`, `GET/PATCH/DELETE /api/patients/:serverId`
   - PATCH는 `If-Match: <revision>` 필수
@@ -392,6 +440,16 @@ main (v4.2.1 → v4.2.x 핫픽스만)
 | T33 | Electron preload 분리(`preload-standalone.js` / `preload-intranet.js`) + EMR origin 게이트 (preload + ipcMain 양쪽) | `electron/preload-*.js`, `electron/main.js` | 인트라넷 빌드에서 EMR 동작, 외부 origin sender ipc 거부 | T26 | M |
 | T34 | **EMR audit (main process + Ed25519 서명 + 암호화 로컬 fallback + 세션 만료 대응)**: ipcMain handler가 EMR 호출 전후 main process에서 (a) `session.defaultSession.cookies`로 wr_refresh+wr_csrf 추출 (b) `safeStorage`에서 device private key 로드 (c) Ed25519 서명 → `/api/audit/emr` 전송 + main pino 로그. **첫 실행 시** device 미등록이면 `/api/devices/register` 호출 후 admin 승인 대기 모달(승인 전 EMR 호출 차단). 서버 전송 실패 시 `%APPDATA%/wr-evaluation-unified/audit-emr-pending.enc`에 **electron `safeStorage`로 암호화** 후 누적. **최소 필드만 저장**: actor_user_id, actor_org_id, action, target_id_hash(sha256(patient.id)), at, outcome, sender_origin, device_signature. 부팅 시·5분 주기 재전송 → 성공 라인 즉시 fsync 후 안전 삭제. **재전송 시 세션 만료 대응**: 큐 entry에 actor snapshot이 함께 보관되어 있으므로 device 서명만으로 서버가 받되, audit row의 `extra.session_missing=true` + `extra.actor_from_queue=true` 플래그로 표시. **safeStorage 복호화 실패 정책**: 깨진 파일을 `audit-emr-pending-corrupt-{ts}.bin`으로 rename, pino error 로그, 서버에 별도 audit 액션(`audit_queue_corrupt`)으로 관리자 알림, 새 빈 큐 시작 | `electron/main.js`, `electron/audit.js`, `electron/auditQueue.js` | (a) 렌더러 audit POST 우회해도 server audit_logs에 main 측 row 존재 (b) 서버 down 시 로컬 큐 암호화 확인(평문 read 거부) (c) 복구 시 자동 재전송 + 큐 파일 비워짐 (d) safeStorage 손상 시 corrupt 파일 보존 + 관리자 알림 audit row 생성 (e) 강제 로그아웃 후 재전송 시 session_missing 플래그 기록 | T15a, T15b, T15c, T33, T35 | M |
 | T35 | `package.json` scripts `electron:build:standalone` / `electron:build:intranet` + `WR_BUILD_TARGET` env | `package.json`, `electron/main.js` | 두 빌드 모두 성공 + 분기 동작 | T33 | S |
+
+### Phase 2.5 — Mock UI 검증 (통합 브랜치: `feature/intranet-backend`)
+
+| ID | 작업 | 영향 | 검증 | deps | 규모 | 상태 |
+|---|---|---|---|---|---|---|
+| T-mock | mock 서버 auth stub 추가 (포트 3001, 쿠키 헬퍼, 7개 엔드포인트, CORS 수정) + `useServerConfig` StrictMode freeze 수정 + AbortController 타임아웃 | `scripts/mock-intranet-server.mjs`, `src/core/hooks/useServerConfig.js`, `src/core/services/httpClient.js` | 시나리오 A~F2 수동 통과 | T25~T35 | M | ✅ 구현 완료, **수동 검증 진행 중** |
+
+**현재 해야 할 일**: 위 수동 검증 시나리오 A~F2를 순서대로 실행하고 통과 확인.
+
+---
 
 ### Phase 3 — 환자 1급 API + 동기화 (통합 브랜치 계속)
 | ID | 작업 | 영향 | 검증 | deps | 규모 |
