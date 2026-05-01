@@ -184,6 +184,32 @@ function getDeviceStatus() {
   return { status: _state.status, deviceId: _state.deviceId };
 }
 
+// Send with automatic session-missing fallback.
+// If the call fails with HTTP 401 (expired/revoked token), strips the
+// Authorization header and retries. Device-level 401s (wrong sig, pending)
+// will also fail on retry and propagate so the caller can enqueue.
+async function doSendWithSessionFallback(entry, accessToken) {
+  if (!accessToken) {
+    const e = { ...entry, extra: { ...(entry.extra ?? {}), session_missing: true, actor_from_queue: true } };
+    await doSend(e, null);
+    return;
+  }
+  try {
+    await doSend(entry, accessToken);
+  } catch (err) {
+    if (err.status === 401) {
+      // Token may be expired or revoked — retry without Authorization.
+      // If the underlying issue is with the device (not the token), the
+      // retry will also fail and the entry is propagated to the caller.
+      console.warn('[audit] HTTP 401 with token, retrying as session_missing');
+      const e = { ...entry, extra: { ...(entry.extra ?? {}), session_missing: true, actor_from_queue: true } };
+      await doSend(e, null);
+    } else {
+      throw err;
+    }
+  }
+}
+
 // Send an audit entry immediately if device is active; enqueue otherwise.
 async function recordAudit(entry) {
   if (!_state.deviceId || !_state.privateKey) return;
@@ -191,7 +217,7 @@ async function recordAudit(entry) {
 
   const token = _getAccessToken();
   try {
-    await doSend(entry, token);
+    await doSendWithSessionFallback(entry, token);
   } catch (err) {
     console.error('[audit] send failed, enqueuing:', err.message);
     enqueue(entry);
@@ -199,11 +225,12 @@ async function recordAudit(entry) {
 }
 
 // Attempt to flush the pending queue. Handles corrupt file gracefully.
-// Also retries device registration when status is 'pending' so that admin
-// approvals are picked up within the next 5-minute interval without a restart.
+// Retries device registration for pending/error/unregistered statuses so
+// that admin approvals and transient network failures self-heal within the
+// 5-minute interval without requiring an app restart.
 async function flushQueue() {
-  if (_state.status === 'pending') {
-    await tryRegister(); // admin may have approved since last check
+  if (_state.status !== 'active') {
+    await tryRegister(); // covers pending, error, unregistered
   }
   if (_state.status !== 'active') return;
 
@@ -220,11 +247,7 @@ async function flushQueue() {
 
   const token = _getAccessToken();
   await flush(async entry => {
-    const enriched = { ...entry };
-    if (!token) {
-      enriched.extra = { ...(enriched.extra || {}), session_missing: true, actor_from_queue: true };
-    }
-    await doSend(enriched, token);
+    await doSendWithSessionFallback(entry, token);
   });
 }
 

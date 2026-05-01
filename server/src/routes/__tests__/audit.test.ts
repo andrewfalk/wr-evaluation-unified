@@ -100,6 +100,14 @@ function wireDevice(
   mock.mockResolvedValue({ rows: [] });                           // last_seen_at UPDATE + any extra
 }
 
+// Wire for queue-replay requests that have no Authorization header.
+// makeOptionalAuth skips the session check, so no auth query fires.
+function wireDeviceNoSession(pool: Pool, deviceRow: object | null) {
+  const mock = pool.query as ReturnType<typeof vi.fn>;
+  mock.mockResolvedValueOnce({ rows: deviceRow ? [deviceRow] : [] }); // device SELECT (first call)
+  mock.mockResolvedValue({ rows: [] });                              // last_seen_at UPDATE + any extra
+}
+
 const VALID_BODY = {
   action:  'emr_inject',
   outcome: 'success' as const,
@@ -491,6 +499,100 @@ describe('POST /api/audit/emr', () => {
 
     expect(res2.status).toBe(401);
     expect(res2.body.error).toMatch(/nonce/i);
+  });
+
+  // ── Queue-replay paths (no Authorization header) ─────────────────────────
+
+  it('accepts queue replay without Authorization and records session_missing flag', async () => {
+    const { writeAuditLogStrict } = await import('../../middleware/audit');
+    const { privateKey, publicKey } = makeKeyPair();
+    const pool     = makePool();
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
+
+    wireDeviceNoSession(pool, {
+      user_id:         'user-1',
+      organization_id: 'org-1',
+      public_key:      exportPublicKey(publicKey),
+      status:          'active',
+    });
+
+    const res = await request(makeApp(pool))
+      .post('/api/audit/emr')
+      // No Authorization header — simulates queue replay after session expiry
+      .set('x-wr-source',       'electron-main')
+      .set('x-wr-device-id',    'dev-1')
+      .set('x-wr-device-sig',   sig)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', devNonce)
+      .send(VALID_BODY);
+
+    expect(res.status).toBe(200);
+    // Actor falls back to device.user_id / device.organization_id
+    expect(writeAuditLogStrict).toHaveBeenCalledWith(
+      pool,
+      expect.objectContaining({
+        actorUserId: 'user-1',
+        actorOrgId:  'org-1',
+        extra:       expect.objectContaining({ session_missing: true, actor_from_queue: true }),
+      })
+    );
+  });
+
+  it('accepts audit_queue_corrupt action without Authorization', async () => {
+    const { privateKey, publicKey } = makeKeyPair();
+    const pool      = makePool();
+    const ts        = new Date().toISOString();
+    const devNonce  = nonce();
+    const corruptBody = { action: 'audit_queue_corrupt', outcome: 'failure' as const };
+    const sig = signPayload(privateKey, 'dev-1', ts, devNonce, corruptBody);
+
+    wireDeviceNoSession(pool, {
+      user_id:         'user-1',
+      organization_id: 'org-1',
+      public_key:      exportPublicKey(publicKey),
+      status:          'active',
+    });
+
+    const res = await request(makeApp(pool))
+      .post('/api/audit/emr')
+      .set('x-wr-source',       'electron-main')
+      .set('x-wr-device-id',    'dev-1')
+      .set('x-wr-device-sig',   sig)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', devNonce)
+      .send(corruptBody);
+
+    expect(res.status).toBe(200);
+  });
+
+  it('rejects invalid signature even without Authorization header', async () => {
+    const { publicKey }             = makeKeyPair();
+    const { privateKey: wrongPriv } = makeKeyPair();
+    const pool     = makePool();
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(wrongPriv, 'dev-1', ts, devNonce, VALID_BODY);
+
+    wireDeviceNoSession(pool, {
+      user_id:         'user-1',
+      organization_id: 'org-1',
+      public_key:      exportPublicKey(publicKey),
+      status:          'active',
+    });
+
+    const res = await request(makeApp(pool))
+      .post('/api/audit/emr')
+      .set('x-wr-source',       'electron-main')
+      .set('x-wr-device-id',    'dev-1')
+      .set('x-wr-device-sig',   sig)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', devNonce)
+      .send(VALID_BODY);
+
+    expect(res.status).toBe(401);
+    expect(res.body.error).toMatch(/signature/i);
   });
 
   it('allows nonce reuse after a failed request (pendingNonces released)', async () => {
