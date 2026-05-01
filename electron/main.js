@@ -66,13 +66,23 @@ function createWindow() {
       app.quit();
       return;
     }
-    mainWindow.loadURL(INTRANET_URL);
 
-    // Block navigation away from the allowed origin.
+    // Register all navigation guards BEFORE loadURL so no redirect can slip
+    // through between the load call and handler registration.
+
+    // Block SPA-level navigation away from the allowed origin.
     mainWindow.webContents.on('will-navigate', (event, url) => {
       if (!isAllowedSender(url)) {
         event.preventDefault();
         console.warn('[intranet] blocked navigation to', url);
+      }
+    });
+
+    // Block HTTP 30x redirects that land on an external origin.
+    mainWindow.webContents.on('will-redirect', (event, url) => {
+      if (!isAllowedSender(url)) {
+        event.preventDefault();
+        console.warn('[intranet] blocked redirect to', url);
       }
     });
 
@@ -82,6 +92,8 @@ function createWindow() {
       console.warn('[intranet] blocked window open for', url);
       return { action: 'deny' };
     });
+
+    mainWindow.loadURL(INTRANET_URL);
   } else {
     const isDev = process.env.NODE_ENV === 'development';
     if (isDev) {
