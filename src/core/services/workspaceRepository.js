@@ -33,9 +33,12 @@ function shouldUseRemoteRepository({ session, settings } = {}) {
 }
 
 function shouldFallbackToLocal(error, options = {}) {
-  // If the server explicitly prohibits local fallback (intranet mode, fail-closed),
-  // never silently downgrade — surface the error so the user knows the save failed.
-  if (options?.serverConfig?.localFallbackAllowed === false) return false;
+  // In remote mode, require explicit server permission to fall back to local storage.
+  // Any missing or non-true localFallbackAllowed is treated as fail-closed so that
+  // a forgotten serverConfig argument cannot silently reopen the fallback gate.
+  if (shouldUseRemoteRepository(options)) {
+    return options?.serverConfig?.localFallbackAllowed === true;
+  }
   return !error?.status || error.status === 404 || error.status === 405 || error.status === 501;
 }
 
