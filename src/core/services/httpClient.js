@@ -50,7 +50,27 @@ export async function requestJson(path, {
   // 401 → attempt one token refresh, then retry the original request.
   // _retry flag prevents infinite loops if the retry itself gets a 401.
   // Pass baseUrl so the refresh handler uses the same server as this request.
+  // For 401s, read the body first so we can inspect the error code before deciding
+  // whether to attempt a token refresh. Body reading is one-shot, so we cache it.
+  let data = null;
+  if (response.status === 401 || !response.ok) {
+    try { data = await response.json(); } catch { data = null; }
+  }
+
   if (response.status === 401 && !_retry && _onRefresh) {
+    // Skip refresh for domain errors where a fresh token won't help.
+    const errCode = data?.code || data?.error?.code;
+    if (errCode === 'WRONG_CURRENT_PASSWORD') {
+      const message = data?.error?.message
+        || (typeof data?.error === 'string' ? data.error : null)
+        || data?.message
+        || `Request failed (${response.status})`;
+      const err = new Error(message);
+      err.status = 401;
+      err.data = data;
+      throw err;
+    }
+
     let newSession;
     try {
       newSession = await _onRefresh({ baseUrl });
@@ -71,11 +91,9 @@ export async function requestJson(path, {
     return requestJson(path, { baseUrl, method, body, session: newSession, headers, _retry: true });
   }
 
-  let data = null;
-  try {
-    data = await response.json();
-  } catch {
-    data = null;
+  // Success responses and non-401 errors haven't had their body read yet.
+  if (data === null) {
+    try { data = await response.json(); } catch { data = null; }
   }
 
   if (!response.ok) {
