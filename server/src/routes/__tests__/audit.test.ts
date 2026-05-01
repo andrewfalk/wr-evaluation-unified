@@ -687,4 +687,37 @@ describe('POST /api/audit/emr', () => {
       .send(VALID_BODY);
     expect(res2.status).toBe(200);
   });
+
+  it('returns code UNAUTHORIZED (not TOKEN_INVALID/SESSION_REVOKED) on device/session mismatch', async () => {
+    // The Electron client retries without auth ONLY for TOKEN_INVALID / SESSION_REVOKED.
+    // Mismatch must return UNAUTHORIZED so doSendWithSessionFallback() does NOT retry,
+    // preserving the device.user_id ≡ session.user_id identity enforcement.
+    const { privateKey, publicKey } = makeKeyPair();
+    const pool     = makePool();
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
+
+    wireDevice(pool, {
+      user_id:         'other-user-99', // device owned by a different user
+      organization_id: 'org-1',
+      public_key:      exportPublicKey(publicKey),
+      status:          'active',
+    });
+
+    const res = await request(makeApp(pool))
+      .post('/api/audit/emr')
+      .set('Authorization', `Bearer ${userToken('user-1')}`)
+      .set('x-wr-source',     'electron-main')
+      .set('x-wr-device-id',  'dev-1')
+      .set('x-wr-device-sig', sig)
+      .set('x-wr-device-ts',    ts)
+      .set('x-wr-device-nonce', devNonce)
+      .send(VALID_BODY);
+
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('UNAUTHORIZED');
+    expect(res.body.code).not.toBe('TOKEN_INVALID');
+    expect(res.body.code).not.toBe('SESSION_REVOKED');
+  });
 });

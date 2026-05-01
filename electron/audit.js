@@ -96,8 +96,10 @@ function httpPost(url, headers, body) {
         try {
           const json = JSON.parse(data);
           if (res.statusCode >= 400) {
-            const err = new Error(json?.error?.message || `HTTP ${res.statusCode}`);
+            const msg = (typeof json?.error === 'string' ? json.error : json?.error?.message) || `HTTP ${res.statusCode}`;
+            const err = new Error(msg);
             err.status = res.statusCode;
+            err.code   = json?.code ?? null;
             reject(err);
           } else {
             resolve({ status: res.statusCode, data: json });
@@ -184,10 +186,17 @@ function getDeviceStatus() {
   return { status: _state.status, deviceId: _state.deviceId };
 }
 
+// 401 codes that indicate the token itself is bad (expired / revoked).
+// UNAUTHORIZED is returned by the audit route for device-level failures
+// (mismatch, bad signature, device not active) and must NOT be retried as
+// session_missing — that would allow a mismatched session to bypass the
+// device.user_id ≡ session.user_id identity check.
+const TOKEN_EXPIRY_CODES = new Set(['TOKEN_INVALID', 'SESSION_REVOKED']);
+
 // Send with automatic session-missing fallback.
-// If the call fails with HTTP 401 (expired/revoked token), strips the
-// Authorization header and retries. Device-level 401s (wrong sig, pending)
-// will also fail on retry and propagate so the caller can enqueue.
+// If the call fails with TOKEN_INVALID or SESSION_REVOKED, strips the
+// Authorization header and retries once. Any other 401 (device mismatch,
+// bad signature, device not active) propagates to the caller for enqueue.
 async function doSendWithSessionFallback(entry, accessToken) {
   if (!accessToken) {
     const e = { ...entry, extra: { ...(entry.extra ?? {}), session_missing: true, actor_from_queue: true } };
@@ -197,11 +206,8 @@ async function doSendWithSessionFallback(entry, accessToken) {
   try {
     await doSend(entry, accessToken);
   } catch (err) {
-    if (err.status === 401) {
-      // Token may be expired or revoked — retry without Authorization.
-      // If the underlying issue is with the device (not the token), the
-      // retry will also fail and the entry is propagated to the caller.
-      console.warn('[audit] HTTP 401 with token, retrying as session_missing');
+    if (err.status === 401 && TOKEN_EXPIRY_CODES.has(err.code)) {
+      console.warn('[audit] HTTP 401 token expiry/revocation, retrying as session_missing');
       const e = { ...entry, extra: { ...(entry.extra ?? {}), session_missing: true, actor_from_queue: true } };
       await doSend(e, null);
     } else {
