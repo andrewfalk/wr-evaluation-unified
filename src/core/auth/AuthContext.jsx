@@ -132,6 +132,14 @@ export function AuthProvider({ children }) {
     }
   }, [resetToLocalSession]);
 
+  // Propagate the current access token to the Electron main process so the
+  // audit module can sign EMR audit entries without going through the renderer.
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.electron?.setAccessToken) {
+      window.electron.setAccessToken(session?.accessToken || '');
+    }
+  }, [session?.accessToken]);
+
   const value = useMemo(() => ({
     session,
     user: normalizeSession(session).user,

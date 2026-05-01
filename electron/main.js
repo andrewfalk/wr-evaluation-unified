@@ -3,14 +3,34 @@ const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
+const audit = require('./audit');
 
 // ---------------------------------------------------------------------------
 // Build target: 'intranet' or 'standalone' (default)
 // Set WR_BUILD_TARGET=intranet + WR_INTRANET_URL=https://wr.hospital.local
-// in the intranet build environment.
+// OR run `npm run electron:build:intranet` which writes electron/build-target.json.
 // ---------------------------------------------------------------------------
-const IS_INTRANET_BUILD = process.env.WR_BUILD_TARGET === 'intranet';
+function detectBuildTarget() {
+  if (process.env.WR_BUILD_TARGET) return process.env.WR_BUILD_TARGET;
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, 'build-target.json'), 'utf-8')).target || '';
+  } catch { return ''; }
+}
+const IS_INTRANET_BUILD = detectBuildTarget() === 'intranet';
 const INTRANET_URL      = (process.env.WR_INTRANET_URL || '').trim().replace(/\/$/, '');
+
+// ---------------------------------------------------------------------------
+// In-memory access token — set by the renderer via 'set-access-token' IPC.
+// Used by the audit module for device registration and audit signing.
+// ---------------------------------------------------------------------------
+let _accessToken = null;
+ipcMain.on('set-access-token', (_event, token) => {
+  _accessToken = token || null;
+  if (IS_INTRANET_BUILD && _accessToken) {
+    audit.tryRegister().catch(e => console.error('[audit] register on token set:', e.message));
+  }
+});
 
 // Allowed origin for intranet build — derived from WR_INTRANET_URL.
 // EMR ipc handlers reject requests from any other origin.
@@ -162,7 +182,21 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(async () => {
+  createWindow();
+
+  if (IS_INTRANET_BUILD) {
+    await audit.initAudit({
+      getAccessToken: () => _accessToken,
+      apiBaseUrl: INTRANET_URL,
+    }).catch(e => console.error('[audit] initAudit error:', e.message));
+
+    // 5-minute queue flush interval
+    setInterval(() => {
+      audit.flushQueue().catch(e => console.error('[audit] flush interval:', e.message));
+    }, 5 * 60 * 1000);
+  }
+});
 
 // IPC: 앱 버전 (preload에서 동기 호출)
 ipcMain.on('get-app-version', (event) => {
@@ -693,19 +727,30 @@ function runHelper(args, timeoutMs = 15000) {
   });
 }
 
-// IPC: EMR 직접입력 (C# EmrHelper.exe → IE DOM 주입)
-ipcMain.handle('emr-inject', async (event, fieldData) => {
+// ── EMR helpers ───────────────────────────────────────────────────────────────
+
+// Shared origin + device gate for all EMR ipc handlers.
+// Returns a rejection object if access should be denied, null if access is allowed.
+function emrGate(event, action) {
   if (IS_INTRANET_BUILD && !isAllowedSender(event.sender.getURL())) {
-    console.warn('[emr-inject] rejected: sender origin not in whitelist', event.sender.getURL());
-    // TODO(T34): send rejection event to server audit log via device token signature
+    console.warn(`[${action}] rejected: sender origin not in whitelist`, event.sender.getURL());
+    audit.recordAudit({ action, outcome: 'failure', extra: { reason: 'origin_rejected' } }).catch(() => {});
     return { success: false, message: 'EMR access denied: sender origin not allowed.' };
   }
-  if (process.platform !== 'win32') {
-    return { success: false, message: 'EMR direct input is Windows-only.' };
+  if (IS_INTRANET_BUILD) {
+    const { status } = audit.getDeviceStatus();
+    if (status !== 'active') {
+      const msg = status === 'pending'
+        ? '이 PC의 EMR 접근이 관리자 승인 대기 중입니다.'
+        : 'EMR 장치 등록이 필요합니다. 관리자에게 문의하세요.';
+      return { success: false, message: msg };
+    }
   }
+  return null; // access allowed
+}
 
-  const tmpJson = path.join(os.tmpdir(), `emr-inject-${Date.now()}.json`);
-
+async function execEmrInject(fieldData) {
+  const tmpJson   = path.join(os.tmpdir(), `emr-inject-${Date.now()}.json`);
   const helperExe = getHelperExe();
 
   if (!fs.existsSync(helperExe)) {
@@ -721,28 +766,19 @@ ipcMain.handle('emr-inject', async (event, fieldData) => {
         ['--json', tmpJson],
         { timeout: 15000, windowsHide: true, encoding: 'utf-8' },
         (error, stdout, stderr) => {
-          resolve({
-            error: error || null,
-            stdout: stdout || '',
-            stderr: stderr || ''
-          });
+          resolve({ error: error || null, stdout: stdout || '', stderr: stderr || '' });
         }
       );
     });
 
     const { error, stdout, stderr } = helperRun;
-    const trimmed = stdout.trim();
+    const trimmed       = stdout.trim();
     const trimmedStderr = stderr.trim();
 
     if (error && error.killed && !trimmed) {
-      return {
-        success: false,
-        message: 'EmrHelper timeout (15s)',
-        errorCode: error.code || null
-      };
+      return { success: false, message: 'EmrHelper timeout (15s)', errorCode: error.code || null };
     }
 
-    // stdout에 JSON이 있으면 항상 그걸 반환
     if (trimmed) {
       try {
         const result = JSON.parse(trimmed);
@@ -757,12 +793,7 @@ ipcMain.handle('emr-inject', async (event, fieldData) => {
         }
         return result;
       } catch {
-        console.error('[emr-inject:parse-error]', {
-          stdout: trimmed,
-          stderr: trimmedStderr,
-          errorCode: error?.code || null,
-          errorMessage: error?.message || null
-        });
+        console.error('[emr-inject:parse-error]', { stdout: trimmed, stderr: trimmedStderr, errorCode: error?.code || null });
         return {
           success: false,
           message: 'EmrHelper response parse error',
@@ -774,12 +805,7 @@ ipcMain.handle('emr-inject', async (event, fieldData) => {
     }
 
     if (error) {
-      console.error('[emr-inject:startup-error]', {
-        errorCode: error.code || null,
-        errorMessage: error.message,
-        stderr: trimmedStderr,
-        helperExe
-      });
+      console.error('[emr-inject:startup-error]', { errorCode: error.code || null, errorMessage: error.message, helperExe });
       return {
         success: false,
         message: error.message || trimmedStderr || 'EmrHelper returned no output',
@@ -789,43 +815,70 @@ ipcMain.handle('emr-inject', async (event, fieldData) => {
       };
     }
 
-    return {
-      success: false,
-      message: trimmedStderr || 'EmrHelper returned no output',
-      rawStdout: undefined,
-      rawStderr: trimmedStderr || undefined
-    };
+    return { success: false, message: trimmedStderr || 'EmrHelper returned no output', rawStdout: undefined, rawStderr: trimmedStderr || undefined };
   } catch (err) {
     return { success: false, message: 'EMR inject failed: ' + err.message };
   } finally {
     try { fs.unlinkSync(tmpJson); } catch {}
   }
+}
+
+// IPC: EMR 직접입력 (C# EmrHelper.exe → IE DOM 주입)
+ipcMain.handle('emr-inject', async (event, fieldData) => {
+  const denied = emrGate(event, 'emr_inject');
+  if (denied) return denied;
+
+  if (process.platform !== 'win32') {
+    return { success: false, message: 'EMR direct input is Windows-only.' };
+  }
+
+  const result   = await execEmrInject(fieldData);
+  const targetId = fieldData?.patientNo
+    ? crypto.createHash('sha256').update(String(fieldData.patientNo)).digest('hex')
+    : undefined;
+  if (IS_INTRANET_BUILD) {
+    audit.recordAudit({
+      action: 'emr_inject', outcome: result?.success ? 'success' : 'failure',
+      ...(targetId ? { targetId } : {}),
+    }).catch(() => {});
+  }
+  return result;
 });
 
 // IPC: 진료기록 데이터 추출 (단건 — App.jsx가 환자별 루프 수행)
 ipcMain.handle('emr-extract-record', async (event, patientNo) => {
-  if (IS_INTRANET_BUILD && !isAllowedSender(event.sender.getURL())) {
-    console.warn('[emr-extract-record] rejected: sender origin not in whitelist', event.sender.getURL());
-    // TODO(T34): send rejection event to server audit log via device token signature
-    return { success: false, error: 'EMR access denied: sender origin not allowed.' };
-  }
+  const denied = emrGate(event, 'emr_extract_record');
+  if (denied) return { success: false, error: denied.message };
+
   if (process.platform !== 'win32') {
     return { success: false, error: 'EMR extraction is Windows-only.' };
   }
-  return runHelper(['--extract-record', String(patientNo)], 30000);
+  const result   = await runHelper(['--extract-record', String(patientNo)], 30000);
+  const targetId = patientNo
+    ? crypto.createHash('sha256').update(String(patientNo)).digest('hex')
+    : undefined;
+  if (IS_INTRANET_BUILD) {
+    audit.recordAudit({
+      action: 'emr_extract_record', outcome: result?.success ? 'success' : 'failure',
+      ...(targetId ? { targetId } : {}),
+    }).catch(() => {});
+  }
+  return result;
 });
 
 // IPC: 다학제회신 추출 (현재 열린 진료메인 페이지 대상)
 ipcMain.handle('emr-extract-consultation', async (event) => {
-  if (IS_INTRANET_BUILD && !isAllowedSender(event.sender.getURL())) {
-    console.warn('[emr-extract-consultation] rejected: sender origin not in whitelist', event.sender.getURL());
-    // TODO(T34): send rejection event to server audit log via device token signature
-    return { success: false, error: 'EMR access denied: sender origin not allowed.' };
-  }
+  const denied = emrGate(event, 'emr_extract_consultation');
+  if (denied) return { success: false, error: denied.message };
+
   if (process.platform !== 'win32') {
     return { success: false, error: 'EMR extraction is Windows-only.' };
   }
-  return runHelper(['--extract-consultation'], 15000);
+  const result = await runHelper(['--extract-consultation'], 15000);
+  if (IS_INTRANET_BUILD) {
+    audit.recordAudit({ action: 'emr_extract_consultation', outcome: result?.success ? 'success' : 'failure' }).catch(() => {});
+  }
+  return result;
 });
 
 app.on('window-all-closed', () => {

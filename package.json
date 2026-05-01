@@ -20,6 +20,8 @@
     "electron:build": "npm run build:emr-helper && npm run build:electron && electron-builder",
     "electron:build:win32": "npm run build:emr-helper && npm run build:electron && electron-builder --win --ia32",
     "electron:build:win64": "npm run build:emr-helper && npm run build:electron && electron-builder --win --x64",
+    "electron:build:standalone": "node scripts/set-build-target.mjs standalone && npm run build:emr-helper && npm run build:electron && electron-builder",
+    "electron:build:intranet": "node scripts/set-build-target.mjs intranet && npm run build:emr-helper && npm run build:electron && electron-builder",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json",

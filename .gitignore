@@ -13,3 +13,4 @@ target_webpage*
 업무관련성 평가 진료기록분석지.htm
 .code-review-graph/graph.db
 .claude/
+electron/build-target.json

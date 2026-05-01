@@ -41,6 +41,9 @@ if (!originAllowed) {
     extractRecord:       (patientNo) => ipcRenderer.invoke('emr-extract-record',       patientNo),
     extractConsultation: ()          => ipcRenderer.invoke('emr-extract-consultation'),
 
+    // Access token bridge — main process stores the token in memory for device audit signing.
+    setAccessToken: (token) => ipcRenderer.send('set-access-token', token),
+
     // Version metadata
     version: {
       app:      ipcRenderer.sendSync('get-app-version'),
