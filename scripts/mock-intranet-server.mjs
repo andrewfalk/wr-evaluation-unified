@@ -136,9 +136,6 @@ function clearAuthCookies() {
 // Node's http.writeHead handles Set-Cookie arrays correctly.
 function sendJson(res, statusCode, data, extraHeaders = {}) {
   res.writeHead(statusCode, {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-WR-User-Id, X-WR-Org-Id, X-WR-Auth-Mode, X-CSRF-Token',
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     ...extraHeaders,
@@ -443,8 +440,17 @@ function handleStatus(req, res) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || `localhost:${PORT}`}`);
 
+  // Echo request Origin so credentials: 'include' cross-origin requests work.
+  // Vite proxy path (same-origin) sends no Origin header — fall back to *.
+  const origin = req.headers['origin'];
+  res.setHeader('Access-Control-Allow-Origin', origin || '*');
+  if (origin) res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-WR-User-Id, X-WR-Org-Id, X-WR-Auth-Mode, X-CSRF-Token');
+
   if (req.method === 'OPTIONS') {
-    sendJson(res, 200, { ok: true });
+    res.writeHead(204);
+    res.end();
     return;
   }
 
