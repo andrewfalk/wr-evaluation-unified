@@ -332,7 +332,7 @@ function App() {
     setSelectedIds(new Set());
     setIntakeShared(null);
     setShowHome(false);
-    clearAutoSavedWorkspace({ session, settings });
+    clearAutoSavedWorkspace({ session, settings, serverConfig });
   };
   handleResetPatientsRef.current = handleResetPatients;
 

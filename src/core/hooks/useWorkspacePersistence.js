@@ -47,6 +47,7 @@ export function useWorkspacePersistence({
     session?.user?.organizationId,
     settings?.integrationMode,
     settings?.apiBaseUrl,
+    serverConfig?.localFallbackAllowed,
   ]);
 
   // 자동 저장 복원 (초기 1회만) — config 준비 전에는 실행하지 않음
@@ -85,6 +86,7 @@ export function useWorkspacePersistence({
     settings?.autoSaveInterval,
     settings?.integrationMode,
     settings?.apiBaseUrl,
+    serverConfig?.localFallbackAllowed,
   ]);
 
   const handleSave = async () => {
@@ -93,23 +95,31 @@ export function useWorkspacePersistence({
       const confirmed = await showConfirm(`"${saveName}" 이름의 저장 데이터가 이미 존재합니다. 덮어쓰시겠습니까?`);
       if (!confirmed) return;
     }
-    const items = await saveWorkspaceSnapshot({ name: saveName, patients, savedItems, session, settings, serverConfig });
-    setSavedItems(items);
-    setLastAutoSave(null);
-    setShowSaveModal(false);
-    setSaveName('');
-    await showAlert('저장됨');
+    try {
+      const items = await saveWorkspaceSnapshot({ name: saveName, patients, savedItems, session, settings, serverConfig });
+      setSavedItems(items);
+      setLastAutoSave(null);
+      setShowSaveModal(false);
+      setSaveName('');
+      await showAlert('저장됨');
+    } catch (err) {
+      await showAlert(`저장에 실패했습니다. ${err?.message || '서버 오류'}`);
+    }
   };
 
   const handleOverwriteSave = async (item) => {
     const confirmed = await showConfirm(`"${item.name}"에 덮어쓰시겠습니까?`);
     if (!confirmed) return;
-    const items = await saveWorkspaceSnapshot({ name: item.name, patients, savedItems, session, settings, serverConfig });
-    setSavedItems(items);
-    setLastAutoSave(null);
-    setShowSaveModal(false);
-    setSaveName('');
-    await showAlert('저장됨');
+    try {
+      const items = await saveWorkspaceSnapshot({ name: item.name, patients, savedItems, session, settings, serverConfig });
+      setSavedItems(items);
+      setLastAutoSave(null);
+      setShowSaveModal(false);
+      setSaveName('');
+      await showAlert('저장됨');
+    } catch (err) {
+      await showAlert(`저장에 실패했습니다. ${err?.message || '서버 오류'}`);
+    }
   };
 
   const handleLoad = async (item, mode = 'overwrite') => {
@@ -133,8 +143,12 @@ export function useWorkspacePersistence({
   const handleDelete = async (id) => {
     const confirmed = await showConfirm('삭제하시겠습니까?');
     if (confirmed) {
-      const items = await deleteWorkspaceSnapshot({ id, savedItems, session, settings, serverConfig });
-      setSavedItems(items);
+      try {
+        const items = await deleteWorkspaceSnapshot({ id, savedItems, session, settings, serverConfig });
+        setSavedItems(items);
+      } catch (err) {
+        await showAlert(`삭제에 실패했습니다. ${err?.message || '서버 오류'}`);
+      }
     }
   };
 
