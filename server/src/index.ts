@@ -19,6 +19,7 @@ import { cspMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
 
 export const app = express();
+app.set('trust proxy', config.trustProxy);
 // Security headers first — applied to every response before any route runs.
 app.use(cspMiddleware());
 app.use(corsMiddleware());

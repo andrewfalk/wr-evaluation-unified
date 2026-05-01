@@ -5,9 +5,9 @@
  * Usage:
  *   npm run server:seed:admin
  *
- * Prompts for login_id and password via stdin so the credentials are never
- * stored in shell history. Sets must_change_password=true so the admin is
- * forced to set a new password on first login.
+ * Prompts for organization, login_id, and password via stdin so credentials
+ * are never stored in shell history. Sets must_change_password=true so the
+ * admin is forced to set a new password on first login.
  *
  * Safe to run on an existing DB: aborts if a user with the given login_id
  * already exists.
@@ -92,6 +92,12 @@ async function main(): Promise<void> {
     console.log('This creates the first admin account in an empty database.');
     console.log('');
 
+    const organizationName = (await prompt(rl, 'Initial hospital/organization name: ')).trim();
+    if (!organizationName) {
+      console.error('ERROR: Organization name cannot be empty.');
+      process.exit(1);
+    }
+
     const loginId  = (await prompt(rl, 'Login ID (e.g. admin): ')).trim();
     if (!loginId) {
       console.error('ERROR: Login ID cannot be empty.');
@@ -112,24 +118,38 @@ async function main(): Promise<void> {
     await client.connect();
 
     try {
+      await client.query('BEGIN');
+
       // Abort if the login_id already exists
       const existing = await client.query(
         `SELECT id FROM users WHERE login_id = $1`,
         [loginId]
       );
       if (existing.rows.length > 0) {
+        await client.query('ROLLBACK');
         console.error(`ERROR: User with login_id "${loginId}" already exists.`);
-        process.exit(1);
+        process.exitCode = 1;
+        return;
       }
 
       const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
-      const { rows } = await client.query<{ id: string }>(
-        `INSERT INTO users (login_id, password_hash, name, role, must_change_password)
-         VALUES ($1, $2, $3, 'admin', true)
+      const { rows: orgRows } = await client.query<{ id: string }>(
+        `INSERT INTO organizations (name)
+         VALUES ($1)
          RETURNING id`,
-        [loginId, passwordHash, name]
+        [organizationName]
       );
+      const organizationId = orgRows[0].id;
+
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO users (login_id, password_hash, name, role, organization_id, must_change_password)
+         VALUES ($1, $2, $3, 'admin', $4, true)
+         RETURNING id`,
+        [loginId, passwordHash, name, organizationId]
+      );
+
+      await client.query('COMMIT');
 
       console.log('');
       console.log(`\x1b[32mAdmin account created successfully.\x1b[0m`);
@@ -137,9 +157,13 @@ async function main(): Promise<void> {
       console.log(`  Login ID: ${loginId}`);
       console.log(`  Name:     ${name}`);
       console.log(`  Role:     admin`);
+      console.log(`  Organization: ${organizationName} (${organizationId})`);
       console.log(`  must_change_password: true`);
       console.log('');
       console.log('Log in and change the password immediately.');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw err;
     } finally {
       await client.end();
     }

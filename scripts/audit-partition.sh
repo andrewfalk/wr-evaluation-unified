@@ -37,8 +37,11 @@ BEGIN
         pname, start_date, end_date
       );
       RAISE NOTICE 'Created partition: %', pname;
-    EXCEPTION WHEN duplicate_table THEN
-      RAISE NOTICE 'Partition already exists (ok): %', pname;
+    EXCEPTION
+      WHEN duplicate_table THEN
+        RAISE NOTICE 'Partition already exists (ok): %', pname;
+      WHEN check_violation THEN
+        RAISE WARNING 'Cannot create partition % because matching rows already exist in audit_logs_default. Manual intervention required.', pname;
     END;
   END LOOP;
 END;

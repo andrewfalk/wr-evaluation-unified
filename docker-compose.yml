@@ -11,6 +11,7 @@
 #   AUDIT_DB_PASSWORD     — wr_audit_reader password (default: changeme_audit_reader)
 #   DEPLOYMENT_MODE       — intranet | standalone (default: intranet)
 #   PORT                  — internal app container port (default: 3001, rarely changed)
+#   TRUST_PROXY           — Express trust proxy setting (default: 1 in intranet)
 #   AI_PROVIDER           — none | internal | external (default: none)
 
 services:
@@ -48,6 +49,7 @@ services:
       NODE_ENV:             production
       PORT:                 3001
       DEPLOYMENT_MODE:      ${DEPLOYMENT_MODE:-intranet}
+      TRUST_PROXY:          ${TRUST_PROXY:-}
       ACCESS_TOKEN_SECRET:  "${ACCESS_TOKEN_SECRET:?ACCESS_TOKEN_SECRET is required}"
       REFRESH_TOKEN_SECRET: "${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET is required}"
       CORS_ORIGINS:         ${CORS_ORIGINS:-https://wr.hospital.local}
