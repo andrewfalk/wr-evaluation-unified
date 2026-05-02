@@ -293,6 +293,42 @@ async function listAuditLogs(pool: Pool, auditPool: Pool, req: Request, res: Res
 }
 
 // ---------------------------------------------------------------------------
+// DELETE /api/admin/workspaces/:id/purge
+// Hard-deletes a workspace row immediately (bypasses the 5-year retention window).
+// Org-scoped: an admin with an org can only purge workspaces in their org.
+// ---------------------------------------------------------------------------
+async function purgeWorkspace(pool: Pool, req: Request, res: Response): Promise<void> {
+  const { id } = req.params;
+  const session = req.sessionInfo!;
+  const orgId   = session.organizationId ?? null;
+
+  const { rows } = await pool.query<{ id: string }>(
+    `DELETE FROM workspaces
+     WHERE id = $1 AND ($2::uuid IS NULL OR organization_id = $2)
+     RETURNING id`,
+    [id, orgId]
+  );
+
+  if (rows.length === 0) {
+    res.status(404).json({ code: 'WORKSPACE_NOT_FOUND', error: 'Workspace not found' });
+    return;
+  }
+
+  writeAuditLog(pool, {
+    actorUserId: session.userId,
+    actorOrgId:  session.organizationId ?? null,
+    action:      'admin_workspace_purge',
+    targetType:  'workspace',
+    targetId:    id,
+    outcome:     'success',
+    ip:          req.ip ?? null,
+    userAgent:   req.headers['user-agent'] ?? null,
+  });
+
+  res.status(204).end();
+}
+
+// ---------------------------------------------------------------------------
 // Router factory
 // ---------------------------------------------------------------------------
 const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
@@ -326,6 +362,12 @@ export function createAdminRouter(pool: Pool, auditPool: Pool): Router {
     '/audit',
     auth, admin,
     (req, res) => listAuditLogs(pool, auditPool, req, res).catch(() => res.status(500).json(internalError()))
+  );
+
+  router.delete(
+    '/workspaces/:id/purge',
+    auth, admin, csrfMiddleware,
+    (req, res) => purgeWorkspace(pool, req, res).catch(() => res.status(500).json(internalError()))
   );
 
   return router;

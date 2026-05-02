@@ -398,3 +398,56 @@ describe('GET /api/admin/audit', () => {
     expect((auditPool.query as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// DELETE /api/admin/workspaces/:id/purge
+// ---------------------------------------------------------------------------
+describe('DELETE /api/admin/workspaces/:id/purge', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  const WS_ID = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+
+  it('returns 403 for non-admin', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
+    const res = await request(makeApp(pool))
+      .delete(`/api/admin/workspaces/${WS_ID}/purge`)
+      .set('Authorization', `Bearer ${token('doctor')}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 404 when workspace not found', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    mock.mockResolvedValueOnce({ rows: [] });               // DELETE RETURNING (no rows)
+    const res = await request(makeApp(pool))
+      .delete(`/api/admin/workspaces/${WS_ID}/purge`)
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe('WORKSPACE_NOT_FOUND');
+  });
+
+  it('returns 204 and writes audit log on successful purge', async () => {
+    const { writeAuditLog } = await import('../../middleware/audit');
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    mock.mockResolvedValueOnce({ rows: [{ id: WS_ID }] }); // DELETE RETURNING
+
+    const res = await request(makeApp(pool))
+      .delete(`/api/admin/workspaces/${WS_ID}/purge`)
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+
+    expect(res.status).toBe(204);
+    expect(writeAuditLog).toHaveBeenCalledWith(pool, expect.objectContaining({
+      action:     'admin_workspace_purge',
+      targetType: 'workspace',
+      targetId:   WS_ID,
+      outcome:    'success',
+    }));
+  });
+});

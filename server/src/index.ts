@@ -13,10 +13,12 @@ import { createDevicesRouter } from './routes/devices';
 import { createAdminRouter } from './routes/admin';
 import { createAuditRouter } from './routes/audit';
 import { createWorkspacesRouter } from './routes/workspaces';
+import { createPatientsRouter } from './routes/patients';
 import { createAutosaveRouter } from './routes/autosave';
 import { createAIRouter } from './routes/ai';
 import { cspMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
+import { runWorkspaceRetention } from './jobs/workspaceRetention';
 
 export const app = express();
 app.set('trust proxy', config.trustProxy);
@@ -36,6 +38,7 @@ app.use('/api/devices', createDevicesRouter(pool));
 app.use('/api/admin',      createAdminRouter(pool, auditPool));
 app.use('/api/audit',      createAuditRouter(pool));
 app.use('/api/workspaces', createWorkspacesRouter(pool));
+app.use('/api/patients',  createPatientsRouter(pool));
 app.use('/api/autosave',  createAutosaveRouter(pool));
 app.use('/api/ai',        createAIRouter(pool));
 
@@ -69,6 +72,18 @@ if (require.main === module) {
       const server = createServer(app);
       server.listen(config.port, () => {
         console.log(`[wr-server] Listening on http://localhost:${config.port}`);
+
+        // Workspace retention: run once at startup, then every 24 hours.
+        // Errors are non-fatal — the server keeps running.
+        const doRetention = () => {
+          runWorkspaceRetention(pool)
+            .then(({ deleted }) => {
+              if (deleted > 0) console.log(`[wr-server] workspace-retention: removed ${deleted} expired workspace(s)`);
+            })
+            .catch((err) => console.error('[wr-server] workspace-retention error', err));
+        };
+        doRetention();
+        setInterval(doRetention, 24 * 60 * 60 * 1000).unref();
       });
     })
     .catch((err) => {

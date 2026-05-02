@@ -181,10 +181,11 @@ wr-evaluation-unified/
 **DB 스키마 (Phase 1)**
 - `users(id, login_id UNIQUE, password_hash, name, role, organization_id, created_at, last_login_at, disabled_at)`
 - `sessions(id, user_id, refresh_token_hash, csrf_token_hash, expires_at, revoked_at, user_agent, ip)`
-- `patient_records(id, organization_id, owner_user_id, name, patient_no, birth_date, evaluation_date, active_modules text[], diagnoses_codes text[], jobs_names text[], updated_at, created_at, revision int, deleted_at, payload jsonb)` + 인덱스 (트리그램, GIN)
+- `patient_records(id, organization_id, owner_user_id, name, patient_no, birth_date, evaluation_date, active_modules text[], diagnoses_codes text[], jobs_names text[], updated_at, created_at, revision int, deleted_at, payload jsonb)` + 인덱스 (트리그램, GIN) + `UNIQUE(organization_id, patient_no) WHERE deleted_at IS NULL AND patient_no IS NOT NULL` (soft-delete된 환자는 번호 점유 해제)
 - `workspaces(id, organization_id, owner_user_id, name, created_at, patient_ids uuid[], snapshot_payload jsonb)` — **snapshot 보존**
 - `autosaves(user_id, device_id, organization_id, saved_at, payload jsonb, PK(user_id, device_id))`
-- `audit_logs(...)` — append-only via app role
+- `idempotency_keys(key, user_id, org_id, status, body jsonb, created_at, expires_at, PK(key, user_id))` — POST /api/patients 멱등성 캐시, 24h TTL
+- `audit_logs(...)` — append-only via app role. **보존 목표: 최소 10년**. `target_id`/`extra` 컬럼에 PHI(환자명, 주민번호, 진단문 등) 직접 저장 금지 — 해시값·사유코드·플래그만 허용
 
 **구현할 엔드포인트**
 - `POST /api/auth/login` → HttpOnly `wr_refresh` + non-HttpOnly `wr_csrf` 쿠키 set, body `{user, accessToken, accessExpiresAt}`
@@ -452,7 +453,7 @@ main (v4.2.1 → v4.2.x 핫픽스만)
 ### Phase 3 — 환자 1급 API + 동기화 (통합 브랜치 계속)
 | ID | 작업 | 영향 | 검증 | deps | 규모 |
 |---|---|---|---|---|---|
-| T36 | 서버 `routes/patients.ts`: GET list/search, GET one, POST(Idempotency-Key 저장 테이블), PATCH(If-Match), DELETE(?revision=). **파생 컬럼은 zod 검증 후 앱 서버에서 명시 계산** | `server/src/routes/patients.ts`, `server/migrations/0004_idempotency.sql` | supertest 충돌/멱등 시나리오 | T11, T14, T17 | M |
+| T36 | 서버 `routes/patients.ts`: GET list/search, GET one, POST(Idempotency-Key 저장 테이블), PATCH(If-Match), DELETE(?revision=). **파생 컬럼은 zod 검증 후 앱 서버에서 명시 계산** | `server/src/routes/patients.ts`, `server/migrations/0005_idempotency.sql`(멱등성 캐시 테이블), `server/migrations/0006_patient_no_audit_retention.sql`(patient_no 조직 내 유니크 제약 + audit_logs 보존 정책 주석) | supertest 충돌/멱등 시나리오 | T11, T14, T17 | M ✅ |
 | T36b | **환자 soft delete 시 snapshot PHI 비식별화 + retention 정책** (T36 DELETE 구현과 함께): `DELETE /api/patients/:id` 시 모든 `workspaces.snapshot_payload` 내 해당 환자 entry를 비식별화(name/patient_no/birth_date 필드 redact, payload 본문 제거, `redacted: true` 플래그). 워크스페이스 retention = 5년 후 자동 cleanup 잡. 관리자 강제 삭제 `DELETE /api/admin/workspaces/:id/purge` 제공 | `server/src/routes/patients.ts`, `server/src/routes/admin.ts`, `server/src/jobs/workspaceRetention.ts`, `server/migrations/0005_workspace_retention.sql` | (a) 환자 삭제 후 워크스페이스 조회 시 해당 entry redacted 표시 + UI 회색 처리 (b) 5년 경과 워크스페이스 cleanup 잡 동작 (c) admin purge + audit 기록 | T36 | M |
 | T37 | 클라 `patientServerRepository.js` + `patient.sync` 활용 push/pull | `src/core/services/patientServerRepository.js` | 다중 클라이언트 동시 PATCH → 409 + 충돌 모달 | T36, T28 | M |
 | T38 | 백그라운드 동기화: 5분 주기 + window focus pull + 즉시 push | `src/core/hooks/usePatientSync.js`, `src/App.jsx` | 두 PC에서 동기화 시각 확인 | T37 | M |
