@@ -54,6 +54,9 @@ export function AuthProvider({ children }) {
             accessToken: data.accessToken,
             accessExpiresAt: data.accessExpiresAt,
           } : {}),
+          ...(data?.user ? {
+            user: { ...sessionRef.current?.user, ...data.user },
+          } : {}),
           refreshedAt: new Date().toISOString(),
         });
         saveStoredSession(next); // strips accessToken before writing localStorage

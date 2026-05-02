@@ -73,7 +73,7 @@ function isLockFree() {
 
 // --- Broadcast wait ---
 
-// Returns a promise that resolves with the new accessToken from another tab.
+// Returns a promise that resolves with the new auth update from another tab.
 // Token comes ONLY from the BroadcastChannel message — never from localStorage.
 function waitForRefreshBroadcast(timeoutMs = WAIT_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
@@ -88,11 +88,26 @@ function waitForRefreshBroadcast(timeoutMs = WAIT_TIMEOUT_MS) {
       if (e.data?.type !== 'REFRESH_SUCCESS' && e.data?.type !== 'REFRESH_FAILURE') return;
       clearTimeout(timer);
       _ch.removeEventListener('message', onMsg);
-      if (e.data.type === 'REFRESH_SUCCESS') resolve(e.data.accessToken);
+      if (e.data.type === 'REFRESH_SUCCESS') {
+        resolve({
+          accessToken:     e.data.accessToken,
+          accessExpiresAt: e.data.accessExpiresAt,
+          user:            e.data.user,
+        });
+      }
       else reject(new Error('Refresh failed in another tab'));
     }
 
     _ch.addEventListener('message', onMsg);
+  });
+}
+
+function postRefreshSuccess(session) {
+  _ch?.postMessage({
+    type:            'REFRESH_SUCCESS',
+    accessToken:     session?.accessToken,
+    accessExpiresAt: session?.accessExpiresAt,
+    user:            session?.user,
   });
 }
 
@@ -122,7 +137,7 @@ async function runWithNavigatorLocks(doRefresh, applyToken) {
       if (!lock) { needsWait = true; return; } // another tab holds the lock
       newSession = await doRefresh();
       storeSignal('success');
-      _ch?.postMessage({ type: 'REFRESH_SUCCESS', accessToken: newSession.accessToken });
+      postRefreshSuccess(newSession);
     });
   } catch (err) {
     // doRefresh() failed — we held the lock
@@ -135,20 +150,26 @@ async function runWithNavigatorLocks(doRefresh, applyToken) {
     // Another tab holds the lock. Check if it already completed (tiny BC miss window).
     if (checkRecentSuccess()) {
       try {
-        const accessToken = await waitForRefreshBroadcast(1500);
-        return applyToken(accessToken);
+        const authUpdate = await waitForRefreshBroadcast(1500);
+        return applyToken(authUpdate);
       } catch { /* broadcast missed — fall through to own refresh */ }
     }
     // Lock holder is still running — wait for its broadcast.
     try {
-      const accessToken = await waitForRefreshBroadcast();
-      return applyToken(accessToken);
+      const authUpdate = await waitForRefreshBroadcast();
+      return applyToken(authUpdate);
     } catch {
       // Timeout or holder failed — do own refresh (lock now released).
-      const session = await doRefresh();
-      storeSignal('success');
-      _ch?.postMessage({ type: 'REFRESH_SUCCESS', accessToken: session.accessToken });
-      return session;
+      try {
+        const session = await doRefresh();
+        storeSignal('success');
+        postRefreshSuccess(session);
+        return session;
+      } catch (err) {
+        storeSignal('failure');
+        _ch?.postMessage({ type: 'REFRESH_FAILURE' });
+        throw err;
+      }
     }
   }
 
@@ -167,13 +188,13 @@ async function runWithLocalStorageLock(doRefresh, applyToken) {
       // (T09 grace window means re-using the new cookies will succeed).
       if (checkRecentSuccess()) {
         try {
-          const accessToken = await waitForRefreshBroadcast(1500);
-          return applyToken(accessToken);
+          const authUpdate = await waitForRefreshBroadcast(1500);
+          return applyToken(authUpdate);
         } catch { /* broadcast already passed — fall through to own refresh */ }
       } else {
         try {
-          const accessToken = await waitForRefreshBroadcast();
-          return applyToken(accessToken);
+          const authUpdate = await waitForRefreshBroadcast();
+          return applyToken(authUpdate);
         } catch { /* timeout/failure — attempt takeover */ }
       }
     } else {
@@ -200,7 +221,7 @@ async function runWithLocalStorageLock(doRefresh, applyToken) {
   try {
     const newSession = await doRefresh();
     storeSignal('success');
-    _ch?.postMessage({ type: 'REFRESH_SUCCESS', accessToken: newSession.accessToken });
+    postRefreshSuccess(newSession);
     return newSession;
   } catch (err) {
     // TOCTOU: another tab may have raced us and already succeeded. Its Set-Cookie
@@ -211,7 +232,7 @@ async function runWithLocalStorageLock(doRefresh, applyToken) {
       try {
         const recoverySession = await doRefresh();
         storeSignal('success');
-        _ch?.postMessage({ type: 'REFRESH_SUCCESS', accessToken: recoverySession.accessToken });
+        postRefreshSuccess(recoverySession);
         return recoverySession;
       } catch { /* recovery also failed — proceed to broadcast failure */ }
     }
@@ -229,7 +250,7 @@ let _inFlightRefresh = null;
 
 // Full cross-tab refresh coordination with within-tab deduplication.
 //   doRefresh()       — called by the tab that wins the lock; returns newSession
-//   applyToken(token) — called by waiting tabs on REFRESH_SUCCESS; returns newSession
+//   applyToken(update) — called by waiting tabs on REFRESH_SUCCESS; returns newSession
 export async function runRefreshWithBroadcast(doRefresh, applyToken) {
   if (_inFlightRefresh) return _inFlightRefresh;
 

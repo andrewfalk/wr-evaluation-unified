@@ -29,6 +29,31 @@ const REFRESH_COOKIE = 'wr_refresh';
 
 const isSecure = config.env === 'production';
 
+interface AuthUserRow {
+  user_id: string;
+  role: string;
+  name: string;
+  organization_id: string | null;
+  must_change_password: boolean;
+  disabled_at: string | null;
+}
+
+function toUserPayload(user: {
+  user_id: string;
+  name: string;
+  role: string;
+  organization_id: string | null;
+  must_change_password: boolean;
+}) {
+  return {
+    id:                 user.user_id,
+    name:               user.name,
+    role:               user.role,
+    organizationId:     user.organization_id,
+    mustChangePassword: user.must_change_password,
+  };
+}
+
 function setRefreshCookie(res: Response, rawToken: string, expiresAt: Date): void {
   res.cookie(REFRESH_COOKIE, rawToken, {
     httpOnly: true,
@@ -134,6 +159,7 @@ async function refresh(pool: Pool, req: Request, res: Response): Promise<void> {
   // Uses a brief non-transactional read; rotation itself is atomic.
   const client = await pool.connect();
   let csrfTokenHash: string | null = null;
+  let sessionUserId: string | null = null;
   try {
     const existing = await verifySession(client, oldRefreshToken);
     if (!existing) {
@@ -142,6 +168,7 @@ async function refresh(pool: Pool, req: Request, res: Response): Promise<void> {
       return;
     }
     csrfTokenHash = existing.csrfTokenHash;
+    sessionUserId = existing.userId;
   } finally {
     client.release();
   }
@@ -149,6 +176,32 @@ async function refresh(pool: Pool, req: Request, res: Response): Promise<void> {
   if (!validateCsrf(req.headers[CSRF_HEADER], csrfTokenHash!)) {
     auditRefreshFail(pool, req, 'CSRF_INVALID');
     res.status(403).json({ code: 'CSRF_INVALID', error: 'Invalid or missing CSRF token' });
+    return;
+  }
+
+  // Fetch current user info before rotation so disabled accounts stop refreshing
+  // immediately and no fresh session is issued for them.
+  const userClient = await pool.connect();
+  let userRow: AuthUserRow | null = null;
+  try {
+    const { rows } = await userClient.query<AuthUserRow>(
+      `SELECT id AS user_id, role, name, organization_id, must_change_password, disabled_at
+       FROM users WHERE id = $1`,
+      [sessionUserId]
+    );
+    userRow = rows[0] ?? null;
+  } finally {
+    userClient.release();
+  }
+
+  if (!userRow) {
+    res.status(401).json({ code: 'USER_NOT_FOUND', error: 'Associated user not found' });
+    return;
+  }
+
+  if (userRow.disabled_at != null) {
+    auditRefreshFail(pool, req, 'USER_DISABLED');
+    res.status(401).json({ code: 'USER_DISABLED', error: 'User account is disabled' });
     return;
   }
 
@@ -163,29 +216,6 @@ async function refresh(pool: Pool, req: Request, res: Response): Promise<void> {
     // Token was already rotated by a concurrent request (race condition resolved)
     auditRefreshFail(pool, req, 'SESSION_ALREADY_ROTATED');
     res.status(401).json({ code: 'SESSION_ALREADY_ROTATED', error: 'Session was already rotated' });
-    return;
-  }
-
-  // Fetch user info for the new access token
-  interface UserRow {
-    user_id: string; role: string; name: string;
-    organization_id: string | null; must_change_password: boolean;
-  }
-  const userClient = await pool.connect();
-  let userRow: UserRow | null = null;
-  try {
-    const { rows } = await userClient.query<UserRow>(
-      `SELECT u.id AS user_id, u.role, u.name, u.organization_id, u.must_change_password
-       FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = $1`,
-      [newSession.sessionId]
-    );
-    userRow = rows[0] ?? null;
-  } finally {
-    userClient.release();
-  }
-
-  if (!userRow) {
-    res.status(401).json({ code: 'USER_NOT_FOUND', error: 'Associated user not found' });
     return;
   }
 
@@ -204,7 +234,11 @@ async function refresh(pool: Pool, req: Request, res: Response): Promise<void> {
 
   auditRefreshSuccess(pool, req, userRow.user_id, userRow.organization_id, newSession.sessionId);
 
-  res.status(200).json({ accessToken, accessExpiresAt: accessExpiresAt.toISOString() });
+  res.status(200).json({
+    accessToken,
+    accessExpiresAt: accessExpiresAt.toISOString(),
+    user: toUserPayload(userRow),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -286,22 +320,12 @@ async function csrfReissue(pool: Pool, req: Request, res: Response): Promise<voi
     client.release();
   }
 
-  // Reissue CSRF cookie and get new raw token so we can embed its hash in a
-  // fresh access token. Without a new access token the old csrfHash inside the
-  // JWT would mismatch the new CSRF cookie, breaking every subsequent mutating
-  // request with 403.
-  const newCsrfToken = await reissueCsrfToken(pool, sessionId!, res, isSecure);
-
   // Fetch user info to generate the new access token.
-  interface UserRow {
-    role: string; name: string;
-    organization_id: string | null; must_change_password: boolean;
-  }
   const userClient = await pool.connect();
-  let userRow: UserRow | null = null;
+  let userRow: AuthUserRow | null = null;
   try {
-    const { rows } = await userClient.query<UserRow>(
-      `SELECT role, name, organization_id, must_change_password
+    const { rows } = await userClient.query<AuthUserRow>(
+      `SELECT id AS user_id, role, name, organization_id, must_change_password, disabled_at
        FROM users WHERE id = $1`,
       [sessionUserId]
     );
@@ -315,6 +339,17 @@ async function csrfReissue(pool: Pool, req: Request, res: Response): Promise<voi
     return;
   }
 
+  if (userRow.disabled_at != null) {
+    res.status(401).json({ code: 'USER_DISABLED', error: 'User account is disabled' });
+    return;
+  }
+
+  // Reissue CSRF cookie and get new raw token so we can embed its hash in a
+  // fresh access token. Without a new access token the old csrfHash inside the
+  // JWT would mismatch the new CSRF cookie, breaking every subsequent mutating
+  // request with 403.
+  const newCsrfToken = await reissueCsrfToken(pool, sessionId!, res, isSecure);
+
   const { token: accessToken, expiresAt: accessExpiresAt } = generateAccessToken({
     sub:                sessionUserId!,
     sessionId:          sessionId!,
@@ -325,7 +360,12 @@ async function csrfReissue(pool: Pool, req: Request, res: Response): Promise<voi
     csrfHash:           hashToken(newCsrfToken),
   });
 
-  res.status(200).json({ ok: true, accessToken, accessExpiresAt: accessExpiresAt.toISOString() });
+  res.status(200).json({
+    ok: true,
+    accessToken,
+    accessExpiresAt: accessExpiresAt.toISOString(),
+    user: toUserPayload(userRow),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -343,7 +383,7 @@ async function changePassword(pool: Pool, req: Request, res: Response): Promise<
     return;
   }
   const { currentPassword, newPassword } = parse.data;
-  const { userId, organizationId } = req.sessionInfo!;
+  const { userId, organizationId, sessionId, csrfTokenHash } = req.sessionInfo!;
 
   // Policy check first (fast path before DB round-trip)
   const policy = checkPasswordPolicy(newPassword);
@@ -353,6 +393,10 @@ async function changePassword(pool: Pool, req: Request, res: Response): Promise<
   }
 
   const client = await pool.connect();
+  let updatedUser: {
+    id: string; name: string; role: string;
+    organization_id: string | null; must_change_password: boolean;
+  } | null = null;
   try {
     const { rows } = await client.query<{
       password_hash:    string;
@@ -398,12 +442,17 @@ async function changePassword(pool: Pool, req: Request, res: Response): Promise<
 
     // Update password, clear must_change_password, revoke all other sessions
     await client.query('BEGIN');
-    await client.query(
+    const { rows: updatedRows } = await client.query<{
+      id: string; name: string; role: string;
+      organization_id: string | null; must_change_password: boolean;
+    }>(
       `UPDATE users
        SET password_hash = $1, password_history = $2, must_change_password = false
-       WHERE id = $3`,
+       WHERE id = $3
+       RETURNING id, name, role, organization_id, must_change_password`,
       [newHash, newHistory, userId]
     );
+    updatedUser = updatedRows[0] ?? null;
     // Revoke all sessions except the current one
     await client.query(
       `UPDATE sessions SET invalidated_at = now()
@@ -427,7 +476,33 @@ async function changePassword(pool: Pool, req: Request, res: Response): Promise<
     userAgent:   req.headers['user-agent'] ?? null,
   });
 
-  res.status(200).json({ ok: true });
+  if (!updatedUser) {
+    res.status(401).json({ code: 'UNAUTHORIZED', error: 'User not found' });
+    return;
+  }
+
+  const { token: accessToken, expiresAt: accessExpiresAt } = generateAccessToken({
+    sub:                updatedUser.id,
+    sessionId,
+    orgId:              updatedUser.organization_id,
+    role:               updatedUser.role,
+    name:               updatedUser.name,
+    mustChangePassword: updatedUser.must_change_password,
+    csrfHash:           csrfTokenHash,
+  });
+
+  res.status(200).json({
+    ok: true,
+    user: {
+      id:                 updatedUser.id,
+      name:               updatedUser.name,
+      role:               updatedUser.role,
+      organizationId:     updatedUser.organization_id,
+      mustChangePassword: updatedUser.must_change_password,
+    },
+    accessToken,
+    accessExpiresAt: accessExpiresAt.toISOString(),
+  });
 }
 
 // ---------------------------------------------------------------------------

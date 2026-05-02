@@ -65,6 +65,20 @@ import './modules/elbow';
 import './modules/wrist';
 
 
+function applyAuthUpdate(currentSession, authUpdate) {
+  const patch = typeof authUpdate === 'string'
+    ? { accessToken: authUpdate }
+    : (authUpdate || {});
+  const next = {
+    ...(currentSession || {}),
+    status: 'ready',
+  };
+  if (patch.accessToken !== undefined) next.accessToken = patch.accessToken;
+  if (patch.accessExpiresAt !== undefined) next.accessExpiresAt = patch.accessExpiresAt;
+  if (patch.user) next.user = { ...(currentSession?.user || {}), ...patch.user };
+  return normalizeSession(next);
+}
+
 function App() {
   const { session, setSession, resetToLocalSession, isAuthenticated, sessionVerified, logout } = useAuth();
   const [patients, setPatients] = useState([]);
@@ -141,11 +155,7 @@ function App() {
               });
               if (!csrfRes.ok) throw new Error('CSRF renewal failed');
               const csrfData = await csrfRes.json();
-              const newSession = normalizeSession({
-                ...sessionRef.current,
-                accessToken: csrfData.accessToken,
-                status: 'ready',
-              });
+              const newSession = applyAuthUpdate(sessionRef.current, csrfData);
               setSession(newSession);
               return newSession;
             }
@@ -160,22 +170,14 @@ function App() {
             });
             if (!res.ok) throw new Error('Refresh failed');
             const data = await res.json();
-            const newSession = normalizeSession({
-              ...sessionRef.current,
-              accessToken: data.accessToken,
-              status: 'ready',
-            });
+            const newSession = applyAuthUpdate(sessionRef.current, data);
             setSession(newSession);
             return newSession;
           },
           // applyToken: another tab broadcast REFRESH_SUCCESS — update this
           // tab's session without a server round-trip.
-          (accessToken) => {
-            const newSession = normalizeSession({
-              ...sessionRef.current,
-              accessToken,
-              status: 'ready',
-            });
+          (authUpdate) => {
+            const newSession = applyAuthUpdate(sessionRef.current, authUpdate);
             setSession(newSession);
             return newSession;
           },
@@ -188,7 +190,7 @@ function App() {
   useEffect(() => {
     return onAuthBroadcast((msg) => {
       if (msg?.type === 'REFRESH_SUCCESS' && msg.accessToken) {
-        setSession(prev => normalizeSession({ ...prev, accessToken: msg.accessToken, status: 'ready' }));
+        setSession(prev => applyAuthUpdate(prev, msg));
       } else if (msg?.type === 'LOGOUT') {
         resetToLocalSession();
       }

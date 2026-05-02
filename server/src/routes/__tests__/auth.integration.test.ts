@@ -204,6 +204,13 @@ describe('POST /api/auth/refresh', () => {
     vi.mocked(verifySession).mockResolvedValue(SESSION_ROW as never);
     vi.mocked(validateCsrf).mockReturnValue(true);
     vi.mocked(rotateSession).mockResolvedValue(null);
+    const client = (await pool.connect()) as unknown as { query: ReturnType<typeof vi.fn> };
+    client.query.mockResolvedValue({
+      rows: [{
+        user_id: 'user-1', role: 'doctor', name: 'Dr. Kim',
+        organization_id: 'org-1', must_change_password: false, disabled_at: null,
+      }],
+    });
 
     const res = await request(makeApp(pool))
       .post('/api/auth/refresh')
@@ -214,7 +221,7 @@ describe('POST /api/auth/refresh', () => {
     expect(res.body.code).toBe('SESSION_ALREADY_ROTATED');
   });
 
-  it('returns 200 with new accessToken on valid refresh', async () => {
+  it('returns 200 with new accessToken and current user on valid refresh', async () => {
     const pool   = makePool();
     vi.mocked(verifySession).mockResolvedValue(SESSION_ROW as never);
     vi.mocked(validateCsrf).mockReturnValue(true);
@@ -230,7 +237,7 @@ describe('POST /api/auth/refresh', () => {
     client.query.mockResolvedValue({
       rows: [{
         user_id: 'user-1', role: 'doctor', name: 'Dr. Kim',
-        organization_id: 'org-1', must_change_password: false,
+        organization_id: 'org-1', must_change_password: false, disabled_at: null,
       }],
     });
 
@@ -241,6 +248,36 @@ describe('POST /api/auth/refresh', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('accessToken');
+    expect(res.body.user).toMatchObject({
+      id:                 'user-1',
+      role:               'doctor',
+      organizationId:     'org-1',
+      mustChangePassword: false,
+    });
+  });
+
+  it('returns 401 and does not rotate when the user account is disabled', async () => {
+    const pool = makePool();
+    vi.mocked(verifySession).mockResolvedValue(SESSION_ROW as never);
+    vi.mocked(validateCsrf).mockReturnValue(true);
+
+    const client = (await pool.connect()) as unknown as { query: ReturnType<typeof vi.fn> };
+    client.query.mockResolvedValue({
+      rows: [{
+        user_id: 'user-1', role: 'doctor', name: 'Dr. Kim',
+        organization_id: 'org-1', must_change_password: false,
+        disabled_at: '2026-01-01T00:00:00Z',
+      }],
+    });
+
+    const res = await request(makeApp(pool))
+      .post('/api/auth/refresh')
+      .set('Cookie', 'wr_refresh=valid-token')
+      .set('x-csrf-token', 'ok');
+
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('USER_DISABLED');
+    expect(rotateSession).not.toHaveBeenCalled();
   });
 });
 

@@ -23,11 +23,16 @@ export function createAuthMiddleware(pool: Pool): RequestHandler {
     // Also confirms user_id matches the token subject as defence-in-depth.
     // Note: revoked_at (rotation grace) is intentionally NOT checked here — the
     // access token remains valid until its own JWT expiry after a normal refresh.
-    let rows: { exists: number }[];
+    let rows: { disabled_at: string | null }[];
     try {
-      ({ rows } = await pool.query<{ exists: number }>(
-        `SELECT 1 AS exists FROM sessions
-         WHERE id = $1 AND user_id = $2 AND invalidated_at IS NULL AND expires_at > now()`,
+      ({ rows } = await pool.query<{ disabled_at: string | null }>(
+        `SELECT u.disabled_at
+         FROM sessions s
+         JOIN users u ON u.id = s.user_id
+         WHERE s.id = $1
+           AND s.user_id = $2
+           AND s.invalidated_at IS NULL
+           AND s.expires_at > now()`,
         [payload.sessionId, payload.sub]
       ));
     } catch (err) {
@@ -37,6 +42,11 @@ export function createAuthMiddleware(pool: Pool): RequestHandler {
 
     if (rows.length === 0) {
       res.status(401).json({ code: 'SESSION_REVOKED', error: 'Session has been revoked or expired' });
+      return;
+    }
+
+    if (rows[0].disabled_at != null) {
+      res.status(401).json({ code: 'USER_DISABLED', error: 'User account is disabled' });
       return;
     }
 
