@@ -5,6 +5,11 @@ import { z } from 'zod';
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { auditMiddleware } from '../middleware/audit';
+import {
+  PatientIdentityConflictError,
+  resolvePatientPersonId,
+  type QueryRunner,
+} from '../db/patientPersons';
 
 // ---------------------------------------------------------------------------
 // Schemas — defined locally, mirroring shared/contracts/patient.ts structure
@@ -38,10 +43,12 @@ const PatchBody = z.object({
 interface PatientRow {
   id:              string;
   organization_id: string;
+  patient_person_id: string;
   owner_user_id:   string;
   name:            string;
   patient_no:      string | null;
   birth_date:      string | null;
+  injury_date:     string | null;
   evaluation_date: string | null;
   active_modules:  string[];
   diagnoses_codes: string[];
@@ -53,8 +60,8 @@ interface PatientRow {
 }
 
 const SELECT_COLS = `
-  id, organization_id, owner_user_id, name, patient_no, birth_date,
-  evaluation_date, active_modules, diagnoses_codes, jobs_names,
+  id, organization_id, patient_person_id, owner_user_id, name, patient_no, birth_date,
+  injury_date, evaluation_date, active_modules, diagnoses_codes, jobs_names,
   revision, created_at, updated_at, payload`;
 
 interface PgErrorLike {
@@ -83,19 +90,27 @@ function isUniqueViolation(err: unknown): err is PgErrorLike {
 }
 
 function uniqueConflictResponse(err: PgErrorLike): { code: string; error: string } {
-  if (err.constraint === 'patient_records_org_patient_no_uniq') {
+  if (err.constraint === 'patient_persons_org_patient_no_uniq') {
     return {
-      code:  'PATIENT_NO_CONFLICT',
+      code:  'PATIENT_PERSON_CONFLICT',
       error: 'A patient with this patient number already exists in this organization',
     };
   }
   return { code: 'CONFLICT', error: 'A patient with this ID already exists' };
 }
 
+function identityConflictResponse(): { code: string; error: string } {
+  return {
+    code:  'PATIENT_IDENTITY_CONFLICT',
+    error: 'This patient number belongs to an existing patient with a different birth date',
+  };
+}
+
 interface ExtractedMeta {
   name:           string;
   patientNo:      string | null;
   birthDate:      string | null;
+  injuryDate:     string | null;
   evaluationDate: string | null;
   activeModules:  string[];
   diagnosesCodes: string[];
@@ -112,6 +127,7 @@ function extractMeta(data: Record<string, unknown>): ExtractedMeta {
     name:           strOrNull(shared['name']) ?? '',
     patientNo:      strOrNull(shared['patientNo']),
     birthDate:      strOrNull(shared['birthDate']),
+    injuryDate:     strOrNull(shared['injuryDate']),
     evaluationDate: strOrNull(shared['evaluationDate']),
     activeModules:  Array.isArray(data['activeModules'])
       ? (data['activeModules'] as unknown[]).filter((m): m is string => typeof m === 'string')
@@ -326,16 +342,18 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
 
     // We own the slot. All remaining work is inside the same transaction so any
     // failure triggers a ROLLBACK that also removes the slot, keeping the key free.
+    const personId = await resolvePatientPersonId(client as QueryRunner, orgId, meta);
+
     await client.query(
       `INSERT INTO patient_records
-         (id, organization_id, owner_user_id, name, patient_no,
-          birth_date, evaluation_date, active_modules, diagnoses_codes,
+         (id, organization_id, patient_person_id, owner_user_id, name, patient_no,
+          birth_date, injury_date, evaluation_date, active_modules, diagnoses_codes,
           jobs_names, revision, payload)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,1,$13)`,
       [
-        patientId, orgId, session.userId,
+        patientId, orgId, personId, session.userId,
         meta.name, meta.patientNo,
-        meta.birthDate, meta.evaluationDate,
+        meta.birthDate, meta.injuryDate, meta.evaluationDate,
         meta.activeModules, meta.diagnosesCodes, meta.jobsNames,
         JSON.stringify(fullPayload),
       ]
@@ -358,6 +376,10 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
     res.status(201).json(body);
   } catch (err: unknown) {
     await client.query('ROLLBACK').catch(() => {});
+    if (err instanceof PatientIdentityConflictError) {
+      res.status(409).json(identityConflictResponse());
+      return;
+    }
     if (isUniqueViolation(err)) {
       res.status(409).json(uniqueConflictResponse(err));
       return;
@@ -399,89 +421,107 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
     return;
   }
 
-  const { rows: current } = await pool.query<PatientRow>(
-    `SELECT ${SELECT_COLS}
-     FROM patient_records
-     WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
-    [id, orgId]
-  );
-
-  if (current.length === 0) {
-    res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
-    return;
-  }
-
-  if (current[0].revision !== expectedRevision) {
-    res.status(409).json({
-      code:            'CONFLICT',
-      error:           'Revision mismatch. Fetch the latest version before retrying.',
-      currentRevision: current[0].revision,
-    });
-    return;
-  }
-
-  const { phase, data } = parse.data;
-
-  const existingPayload = typeof current[0].payload === 'object' && current[0].payload !== null
-    ? (current[0].payload as Record<string, unknown>) : {};
-
-  const newPayload: Record<string, unknown> = {
-    ...existingPayload,
-    ...(phase !== undefined ? { phase }  : {}),
-    ...(data  !== undefined ? { data }   : {}),
-  };
-
-  const mergedData = typeof newPayload['data'] === 'object' && newPayload['data'] !== null
-    ? (newPayload['data'] as Record<string, unknown>) : {};
-  const meta = extractMeta(mergedData);
-
-  if (!meta.name) {
-    res.status(400).json({ code: 'NAME_REQUIRED', error: 'Patient name (data.shared.name) is required' });
-    return;
-  }
-
-  // WHERE clause includes revision to catch concurrent modification between read and write.
-  let updated: PatientRow[];
+  const client = await pool.connect();
   try {
-    ({ rows: updated } = await pool.query<PatientRow>(
+    await client.query('BEGIN');
+
+    const { rows: current } = await client.query<PatientRow>(
+      `SELECT ${SELECT_COLS}
+       FROM patient_records
+       WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
+      [id, orgId]
+    );
+
+    if (current.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
+      return;
+    }
+
+    if (current[0].revision !== expectedRevision) {
+      await client.query('ROLLBACK');
+      res.status(409).json({
+        code:            'CONFLICT',
+        error:           'Revision mismatch. Fetch the latest version before retrying.',
+        currentRevision: current[0].revision,
+      });
+      return;
+    }
+
+    const { phase, data } = parse.data;
+
+    const existingPayload = typeof current[0].payload === 'object' && current[0].payload !== null
+      ? (current[0].payload as Record<string, unknown>) : {};
+
+    const newPayload: Record<string, unknown> = {
+      ...existingPayload,
+      ...(phase !== undefined ? { phase }  : {}),
+      ...(data  !== undefined ? { data }   : {}),
+    };
+
+    const mergedData = typeof newPayload['data'] === 'object' && newPayload['data'] !== null
+      ? (newPayload['data'] as Record<string, unknown>) : {};
+    const meta = extractMeta(mergedData);
+
+    if (!meta.name) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ code: 'NAME_REQUIRED', error: 'Patient name (data.shared.name) is required' });
+      return;
+    }
+
+    const personId = await resolvePatientPersonId(client as QueryRunner, orgId, meta, current[0].patient_person_id);
+
+    // WHERE clause includes revision to catch concurrent modification between read and write.
+    const { rows: updated } = await client.query<PatientRow>(
       `UPDATE patient_records SET
-         name            = $3,
-         patient_no      = $4,
-         birth_date      = $5,
-         evaluation_date = $6,
-         active_modules  = $7,
-         diagnoses_codes = $8,
-         jobs_names      = $9,
-         revision        = revision + 1,
-         payload         = $10
-       WHERE id = $1 AND organization_id = $2 AND revision = $11 AND deleted_at IS NULL
+         patient_person_id = $3,
+         name              = $4,
+         patient_no        = $5,
+         birth_date        = $6,
+         injury_date       = $7,
+         evaluation_date   = $8,
+         active_modules    = $9,
+         diagnoses_codes   = $10,
+         jobs_names        = $11,
+         revision          = revision + 1,
+         payload           = $12
+       WHERE id = $1 AND organization_id = $2 AND revision = $13 AND deleted_at IS NULL
        RETURNING ${SELECT_COLS}`,
       [
-        id, orgId,
+        id, orgId, personId,
         meta.name, meta.patientNo,
-        meta.birthDate, meta.evaluationDate,
+        meta.birthDate, meta.injuryDate, meta.evaluationDate,
         meta.activeModules, meta.diagnosesCodes, meta.jobsNames,
         JSON.stringify(newPayload),
         expectedRevision,
       ]
-    ));
+    );
+
+    if (updated.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(409).json({
+        code:  'CONFLICT',
+        error: 'Concurrent modification detected. Please retry.',
+      });
+      return;
+    }
+
+    await client.query('COMMIT');
+    res.status(200).json(toResponse(updated[0]));
   } catch (err: unknown) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err instanceof PatientIdentityConflictError) {
+      res.status(409).json(identityConflictResponse());
+      return;
+    }
     if (isUniqueViolation(err)) {
       res.status(409).json(uniqueConflictResponse(err));
       return;
     }
     throw err;
+  } finally {
+    client.release();
   }
-
-  if (updated.length === 0) {
-    res.status(409).json({
-      code:  'CONFLICT',
-      error: 'Concurrent modification detected. Please retry.',
-    });
-    return;
-  }
-
-  res.status(200).json(toResponse(updated[0]));
 }
 
 // ---------------------------------------------------------------------------

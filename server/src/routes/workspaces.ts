@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { auditMiddleware } from '../middleware/audit';
+import { resolvePatientPersonId, type QueryRunner } from '../db/patientPersons';
 
 // ---------------------------------------------------------------------------
 // POST /api/workspaces body schema
@@ -32,6 +33,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function isUuid(v: unknown): v is string {
   return typeof v === 'string' && UUID_RE.test(v);
+}
+
+function strOrNull(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null;
 }
 
 // Resolve the authoritative server-side UUID for a patient.
@@ -66,6 +71,7 @@ interface PatientMeta {
   name:            string;
   patientNo:       string | null;
   birthDate:       string | null;
+  injuryDate:      string | null;
   evaluationDate:  string | null;
   activeModules:   string[];
   diagnosesCodes:  string[];
@@ -98,11 +104,10 @@ function extractPatientMeta(p: unknown): PatientMeta | null {
   return {
     id,
     name,
-    patientNo:      typeof shared?.['patientNo']      === 'string' ? shared!['patientNo']      as string : null,
-    birthDate:      typeof shared?.['birthDate']      === 'string' && (shared['birthDate'] as string).trim()
-      ? shared!['birthDate'] as string : null,
-    evaluationDate: typeof shared?.['evaluationDate'] === 'string' && (shared['evaluationDate'] as string).trim()
-      ? shared!['evaluationDate'] as string : null,
+    patientNo:      strOrNull(shared?.['patientNo']),
+    birthDate:      strOrNull(shared?.['birthDate']),
+    injuryDate:     strOrNull(shared?.['injuryDate']),
+    evaluationDate: strOrNull(shared?.['evaluationDate']),
     activeModules:  mods.filter((m): m is string => typeof m === 'string'),
     diagnosesCodes: diagnoses
       .filter((d): d is Record<string, unknown> => typeof d === 'object' && d !== null)
@@ -122,16 +127,27 @@ function extractPatientMeta(p: unknown): PatientMeta | null {
 async function upsertPatientRecord(
   pool: Pool, orgId: string, userId: string, meta: PatientMeta,
 ): Promise<void> {
+  const existing = await pool.query<{ patient_person_id: string | null }>(
+    `SELECT patient_person_id
+     FROM patient_records
+     WHERE id = $1 AND organization_id = $2`,
+    [meta.id, orgId]
+  );
+  const existingPersonId = existing.rows[0]?.patient_person_id ?? null;
+  const personId = await resolvePatientPersonId(pool as QueryRunner, orgId, meta, existingPersonId);
+
   await pool.query(
     `INSERT INTO patient_records
-       (id, organization_id, owner_user_id, name, patient_no,
-        birth_date, evaluation_date, active_modules, diagnoses_codes,
+       (id, organization_id, patient_person_id, owner_user_id, name, patient_no,
+        birth_date, injury_date, evaluation_date, active_modules, diagnoses_codes,
         jobs_names, revision, payload)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,1,$13)
      ON CONFLICT (id) DO UPDATE SET
+       patient_person_id = EXCLUDED.patient_person_id,
        name             = EXCLUDED.name,
        patient_no       = EXCLUDED.patient_no,
        birth_date       = EXCLUDED.birth_date,
+       injury_date      = EXCLUDED.injury_date,
        evaluation_date  = EXCLUDED.evaluation_date,
        active_modules   = EXCLUDED.active_modules,
        diagnoses_codes  = EXCLUDED.diagnoses_codes,
@@ -141,9 +157,10 @@ async function upsertPatientRecord(
        deleted_at       = NULL
      WHERE patient_records.organization_id = EXCLUDED.organization_id`,
     [
-      meta.id, orgId, userId, meta.name,
+      meta.id, orgId, personId, userId, meta.name,
       meta.patientNo,
       meta.birthDate       ? meta.birthDate       : null,
+      meta.injuryDate      ? meta.injuryDate      : null,
       meta.evaluationDate  ? meta.evaluationDate  : null,
       meta.activeModules,
       meta.diagnosesCodes,

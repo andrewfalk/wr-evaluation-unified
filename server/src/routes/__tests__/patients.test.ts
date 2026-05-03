@@ -86,6 +86,7 @@ function makeClientSetup(pool: Pool, ...clientResults: { rows: unknown[]; rowCou
 // Test data
 // ---------------------------------------------------------------------------
 const PAT_ID  = '11111111-1111-1111-1111-111111111111';
+const PERSON_ID = '99999999-9999-9999-9999-999999999999';
 const ORG_ID  = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 const USER_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const IDEMP_KEY = 'idem-key-0000-0000-0000-000000000001';
@@ -95,7 +96,7 @@ const LATER     = new Date('2024-06-01T11:00:00Z');
 
 const SHARED = {
   name: 'Kim', patientNo: 'P001', birthDate: '1980-01-01',
-  evaluationDate: '2024-06-01', diagnoses: [{ code: 'M54.5' }],
+  injuryDate: '2024-01-01', evaluationDate: '2024-06-01', diagnoses: [{ code: 'M54.5' }],
   jobs: [{ jobName: '사무직' }],
 };
 
@@ -110,10 +111,12 @@ const CREATE_BODY = { id: PAT_ID, phase: 'evaluation', data: VALID_DATA };
 const PAT_ROW: Record<string, unknown> = {
   id:              PAT_ID,
   organization_id: ORG_ID,
+  patient_person_id: PERSON_ID,
   owner_user_id:   USER_ID,
   name:            'Kim',
   patient_no:      'P001',
   birth_date:      '1980-01-01',
+  injury_date:     '2024-01-01',
   evaluation_date: '2024-06-01',
   active_modules:  ['knee'],
   diagnoses_codes: ['M54.5'],
@@ -123,13 +126,6 @@ const PAT_ROW: Record<string, unknown> = {
   updated_at:      NOW,
   payload:         { id: PAT_ID, phase: 'evaluation', createdAt: NOW.toISOString(), data: VALID_DATA },
 };
-
-function uniqueViolation(constraint: string) {
-  return Object.assign(new Error('duplicate key value violates unique constraint'), {
-    code: '23505',
-    constraint,
-  });
-}
 
 // ---------------------------------------------------------------------------
 // GET /api/patients
@@ -268,6 +264,8 @@ describe('POST /api/patients', () => {
       { rows: [] },                           // BEGIN
       { rows: [] },                           // DELETE expired
       { rows: [], rowCount: 1 },              // INSERT slot (won)
+      { rows: [] },                           // SELECT patient_persons by patient_no
+      { rows: [{ id: PERSON_ID }] },          // INSERT patient_persons
       { rows: [] },                           // INSERT patient_records
       { rows: [PAT_ROW] },                    // SELECT after INSERT
       { rows: [] },                           // UPDATE slot to status=201
@@ -295,14 +293,44 @@ describe('POST /api/patients', () => {
     expect((updateCall![1] as unknown[])[2]).toBe(201);
   });
 
-  it('returns 409 when patient number already exists — rolls back transaction', async () => {
+  it('allows same patient number for another injury/evaluation record', async () => {
     const pool = makePool();
     const cq = makeClientSetup(pool,
       { rows: [] },                           // BEGIN
       { rows: [] },                           // DELETE expired
       { rows: [], rowCount: 1 },              // INSERT slot (won)
+      { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, // existing person
+      { rows: [] },                           // UPDATE existing person
+      { rows: [] },                           // INSERT patient_records
+      { rows: [PAT_ROW] },                    // SELECT after INSERT
+      { rows: [] },                           // UPDATE slot to status=201
+      { rows: [] },                           // COMMIT
     );
-    cq.mockRejectedValueOnce(uniqueViolation('patient_records_org_patient_no_uniq')); // INSERT patient fails
+
+    const res = await request(makeApp(pool))
+      .post('/api/patients')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('idempotency-key', IDEMP_KEY)
+      .send(CREATE_BODY);
+
+    expect(res.status).toBe(201);
+    expect(res.body.id).toBe(PAT_ID);
+    const insertRecordCall = (cq.mock.calls as unknown[][]).find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO patient_records')
+    );
+    expect(insertRecordCall).toBeDefined();
+    expect((insertRecordCall![1] as unknown[])[2]).toBe(PERSON_ID);
+  });
+
+  it('returns 409 when patient number matches a different birth date', async () => {
+    const pool = makePool();
+    const cq = makeClientSetup(pool,
+      { rows: [] },                           // BEGIN
+      { rows: [] },                           // DELETE expired
+      { rows: [], rowCount: 1 },              // INSERT slot (won)
+      { rows: [{ id: PERSON_ID, birth_date: '1970-01-01' }] }, // identity conflict
+    );
     cq.mockResolvedValueOnce({ rows: [] });   // ROLLBACK (in catch)
 
     const res = await request(makeApp(pool))
@@ -313,7 +341,7 @@ describe('POST /api/patients', () => {
       .send(CREATE_BODY);
 
     expect(res.status).toBe(409);
-    expect(res.body.code).toBe('PATIENT_NO_CONFLICT');
+    expect(res.body.code).toBe('PATIENT_IDENTITY_CONFLICT');
 
     // Verify ROLLBACK was called — this atomically releases the slot
     const rollbackCall = (cq.mock.calls as unknown[][]).find(
@@ -402,7 +430,11 @@ describe('PATCH /api/patients/:id', () => {
 
   it('returns 404 when patient not found', async () => {
     const pool = makePool();
-    wireQueries(pool, { rows: [] }); // SELECT returns nothing
+    makeClientSetup(pool,
+      { rows: [] }, // BEGIN
+      { rows: [] }, // SELECT returns nothing
+      { rows: [] }, // ROLLBACK
+    );
     const res = await request(makeApp(pool))
       .patch(`/api/patients/${PAT_ID}`)
       .set('Authorization', `Bearer ${orgToken()}`)
@@ -415,7 +447,11 @@ describe('PATCH /api/patients/:id', () => {
   it('returns 409 when If-Match revision does not match current', async () => {
     const staleRow = { ...PAT_ROW, revision: 2 }; // server is at rev 2
     const pool = makePool();
-    wireQueries(pool, { rows: [staleRow] }); // SELECT returns rev 2
+    makeClientSetup(pool,
+      { rows: [] },          // BEGIN
+      { rows: [staleRow] },  // SELECT returns rev 2
+      { rows: [] },          // ROLLBACK
+    );
     const res = await request(makeApp(pool))
       .patch(`/api/patients/${PAT_ID}`)
       .set('Authorization', `Bearer ${orgToken()}`)
@@ -429,10 +465,14 @@ describe('PATCH /api/patients/:id', () => {
 
   it('returns 409 on concurrent modification (UPDATE returns 0 rows)', async () => {
     const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    mock.mockResolvedValueOnce({ rows: [PAT_ROW] });        // SELECT (rev 1 matches)
-    mock.mockResolvedValueOnce({ rows: [] });               // UPDATE RETURNING (race → 0 rows)
+    makeClientSetup(pool,
+      { rows: [] }, // BEGIN
+      { rows: [PAT_ROW] }, // SELECT (rev 1 matches)
+      { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, // person lookup
+      { rows: [] }, // person update
+      { rows: [] }, // UPDATE RETURNING (race -> 0 rows)
+      { rows: [] }, // ROLLBACK
+    );
     const res = await request(makeApp(pool))
       .patch(`/api/patients/${PAT_ID}`)
       .set('Authorization', `Bearer ${orgToken()}`)
@@ -446,10 +486,14 @@ describe('PATCH /api/patients/:id', () => {
   it('returns 200 with updated patient on success', async () => {
     const updatedRow = { ...PAT_ROW, revision: 2, updated_at: LATER };
     const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    mock.mockResolvedValueOnce({ rows: [PAT_ROW] });        // SELECT (rev 1)
-    mock.mockResolvedValueOnce({ rows: [updatedRow] });     // UPDATE RETURNING
+    makeClientSetup(pool,
+      { rows: [] }, // BEGIN
+      { rows: [PAT_ROW] }, // SELECT (rev 1)
+      { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, // person lookup
+      { rows: [] }, // person update
+      { rows: [updatedRow] }, // UPDATE RETURNING
+      { rows: [] }, // COMMIT
+    );
 
     const res = await request(makeApp(pool))
       .patch(`/api/patients/${PAT_ID}`)
@@ -464,12 +508,14 @@ describe('PATCH /api/patients/:id', () => {
     expect(res.body.sync.lastSyncedAt).toBe(LATER.toISOString());
   });
 
-  it('returns 409 when patch would duplicate patient number in the organization', async () => {
+  it('returns 409 when patch would link to a patient number with different birth date', async () => {
     const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    mock.mockResolvedValueOnce({ rows: [PAT_ROW] });        // SELECT (rev 1)
-    mock.mockRejectedValueOnce(uniqueViolation('patient_records_org_patient_no_uniq'));
+    makeClientSetup(pool,
+      { rows: [] }, // BEGIN
+      { rows: [PAT_ROW] }, // SELECT (rev 1)
+      { rows: [{ id: PERSON_ID, birth_date: '1970-01-01' }] }, // identity conflict
+      { rows: [] }, // ROLLBACK
+    );
 
     const res = await request(makeApp(pool))
       .patch(`/api/patients/${PAT_ID}`)
@@ -479,15 +525,19 @@ describe('PATCH /api/patients/:id', () => {
       .send({ data: VALID_DATA });
 
     expect(res.status).toBe(409);
-    expect(res.body.code).toBe('PATIENT_NO_CONFLICT');
+    expect(res.body.code).toBe('PATIENT_IDENTITY_CONFLICT');
   });
 
   it('preserves existing payload when only phase is updated', async () => {
     const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    mock.mockResolvedValueOnce({ rows: [PAT_ROW] });
-    mock.mockResolvedValueOnce({ rows: [{ ...PAT_ROW, revision: 2, updated_at: LATER }] });
+    const cq = makeClientSetup(pool,
+      { rows: [] }, // BEGIN
+      { rows: [PAT_ROW] },
+      { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] },
+      { rows: [] },
+      { rows: [{ ...PAT_ROW, revision: 2, updated_at: LATER }] },
+      { rows: [] }, // COMMIT
+    );
 
     await request(makeApp(pool))
       .patch(`/api/patients/${PAT_ID}`)
@@ -497,11 +547,11 @@ describe('PATCH /api/patients/:id', () => {
       .send({ phase: 'intake' });
 
     // Check the UPDATE query payload includes updated phase
-    const updateCall = (mock.mock.calls as unknown[][]).find(
+    const updateCall = (cq.mock.calls as unknown[][]).find(
       (c) => typeof c[0] === 'string' && (c[0] as string).startsWith('UPDATE patient_records')
     );
     expect(updateCall).toBeDefined();
-    const payload = JSON.parse((updateCall![1] as unknown[])[9] as string) as Record<string, unknown>;
+    const payload = JSON.parse((updateCall![1] as unknown[])[11] as string) as Record<string, unknown>;
     expect(payload['phase']).toBe('intake');
   });
 });
