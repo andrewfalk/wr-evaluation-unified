@@ -7,8 +7,13 @@
  * intentionally minimal and does not set these headers.
  *
  * Usage:
- *   node scripts/verify-csp.mjs [--url <base>]
- *   npm run verify:csp -- --url http://localhost:3001
+ *   node scripts/verify-csp.mjs [--url <base>] [--origin <allowed-origin>]
+ *   npm run verify:csp -- --url http://localhost:3001 --origin http://localhost:5173
+ *   npm run verify:csp -- --url https://wr.hospital.local --origin https://wr.hospital.local
+ *
+ * --origin enables two additional CORS checks:
+ *   1. Allowed origin receives ACAO echo + Access-Control-Allow-Credentials: true
+ *   2. OPTIONS preflight for PUT + If-Match/Idempotency-Key returns correct headers
  *
  * Exit codes: 0 = all checks passed, 1 = failures, 2 = connection error.
  */
@@ -21,6 +26,9 @@ const urlIdx = args.indexOf('--url');
 const BASE = (urlIdx !== -1 ? args[urlIdx + 1] : args.find(a => !a.startsWith('--')))
   ?.replace(/\/$/, '')
   ?? 'http://localhost:3001';
+
+const originIdx = args.indexOf('--origin');
+const ALLOWED_ORIGIN = originIdx !== -1 ? args[originIdx + 1] : null;
 
 // Unauthenticated endpoint present on every deployment — safe to probe.
 const PROBE = `${BASE}/api/config/public`;
@@ -133,6 +141,53 @@ async function checkCORS() {
     ok('allows same-origin request (no Origin header)');
   } else {
     fail('allows same-origin request (no Origin header)', `got HTTP ${sameOriginRes.status}`);
+  }
+
+  if (!ALLOWED_ORIGIN) {
+    console.log('  \x1b[33m(skip)\x1b[0m allowed-origin + preflight checks require --origin <url>');
+    console.log(`        e.g. npm run verify:csp -- --url ${BASE} --origin http://localhost:5173`);
+    return;
+  }
+
+  // Allowed origin: must echo ACAO + Access-Control-Allow-Credentials: true.
+  const allowedRes = await probe({ Origin: ALLOWED_ORIGIN });
+  const acao = allowedRes.headers.get('access-control-allow-origin');
+  const acac = allowedRes.headers.get('access-control-allow-credentials');
+  if (allowedRes.ok && acao === ALLOWED_ORIGIN) {
+    ok(`allows origin: ${ALLOWED_ORIGIN} (ACAO echoed)`);
+  } else {
+    fail(`allows origin: ${ALLOWED_ORIGIN} (ACAO echoed)`,
+      `status=${allowedRes.status}, Access-Control-Allow-Origin: ${acao}`);
+  }
+  if (acac === 'true') {
+    ok('Access-Control-Allow-Credentials: true for allowed origin');
+  } else {
+    fail('Access-Control-Allow-Credentials: true for allowed origin', `got: ${acac}`);
+  }
+
+  // OPTIONS preflight: PUT method + T40 custom headers must be allowed.
+  const preflightRes = await fetch(PROBE, {
+    method: 'OPTIONS',
+    headers: {
+      Origin:                          ALLOWED_ORIGIN,
+      'Access-Control-Request-Method': 'PUT',
+      'Access-Control-Request-Headers': 'if-match,idempotency-key,x-csrf-token',
+    },
+  });
+  const allowMethods = (preflightRes.headers.get('access-control-allow-methods') ?? '').toUpperCase();
+  if (preflightRes.status < 400 && allowMethods.includes('PUT')) {
+    ok('preflight: PUT in Access-Control-Allow-Methods');
+  } else {
+    fail('preflight: PUT in Access-Control-Allow-Methods',
+      `status=${preflightRes.status}, methods=${allowMethods}`);
+  }
+  const allowHeaders = (preflightRes.headers.get('access-control-allow-headers') ?? '').toLowerCase();
+  for (const h of ['if-match', 'idempotency-key', 'x-csrf-token']) {
+    if (allowHeaders.includes(h)) {
+      ok(`preflight: ${h} in Access-Control-Allow-Headers`);
+    } else {
+      fail(`preflight: ${h} in Access-Control-Allow-Headers`, `got: ${allowHeaders}`);
+    }
   }
 }
 
