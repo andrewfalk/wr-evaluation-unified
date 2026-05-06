@@ -55,7 +55,7 @@ function DiagnosticItem({ label, value }) {
   );
 }
 
-export function SettingsModal({ settings, session, integrationStatus, onSave, onClose, onLogout }) {
+export function SettingsModal({ settings, session, integrationStatus, onSave, onClose, onLogout, onMigrate }) {
   const isIntranetLocked = session?.mode === 'intranet';
   const [draft, setDraft] = useState({ ...settings });
   const [diagnostic, setDiagnostic] = useState(integrationStatus);
@@ -313,6 +313,30 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
             </div>
           </div>
         )}
+
+        {(isIntranetLocked || draft.integrationMode === 'intranet') && onMigrate && (
+          <div className="settings-section modal-section pattern-surface">
+            <div className="settings-section-title">데이터 마이그레이션</div>
+            <div className="settings-help-text">
+              기존 로컬 저장 환자 데이터를 인트라넷 서버로 이전합니다.
+              이미 서버에 등록된 환자는 자동으로 건너뜁니다.
+            </div>
+            <div className="settings-inline-actions">
+              <button className="btn btn-secondary btn-sm" onClick={onMigrate}>
+                서버로 마이그레이션
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="settings-section modal-section pattern-surface">
+          <div className="settings-section-title">직업 프리셋</div>
+          <div className="settings-help-text">
+            사용자 정의 직업 프리셋은 이 기기의 로컬 저장소에만 보관됩니다.
+            다른 기기에서도 사용하려면 마이그레이션 화면의 프리셋 내보내기를 이용하세요.
+            (환자 PHI와 달리 프리셋 데이터의 로컬 보관은 운영 정책상 허용됩니다.)
+          </div>
+        </div>
 
         <div className="modal-actions">
           <button className="btn btn-secondary" onClick={onClose}>취소</button>

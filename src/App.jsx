@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { getModule, getAllModules } from './core/moduleRegistry';
 import { SettingsModal } from './core/components/SettingsModal';
+import { MigrationReportModal } from './core/components/MigrationReportModal';
 import { ConflictResolveModal } from './core/components/ConflictResolveModal';
 import { BatchImportModal } from './core/components/BatchImportModal';
 import { PresetManageModal } from './core/components/PresetManageModal';
@@ -95,6 +96,7 @@ function App() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [settings, setSettings] = useState(() => loadAppSettings(DEFAULT_SETTINGS));
   const [showSettings, setShowSettings] = useState(false);
+  const [showMigrationReport, setShowMigrationReport] = useState(false);
   const [showBatchImport, setShowBatchImport] = useState(false);
   const [showHome, setShowHome] = useState(false);
   const [conflictPatientId, setConflictPatientId] = useState(null);
@@ -438,6 +440,14 @@ function App() {
           onSave={handleSaveSettings}
           onClose={() => setShowSettings(false)}
           onLogout={logout}
+          onMigrate={() => { setShowSettings(false); setShowMigrationReport(true); }}
+        />
+      )}
+      {showMigrationReport && (
+        <MigrationReportModal
+          session={session}
+          settings={settings}
+          onClose={() => setShowMigrationReport(false)}
         />
       )}
       {showSaveModal && <SaveModal patientCount={patients.length} saveName={saveName} onSaveNameChange={e => setSaveName(e.target.value)} savedItems={savedItems} onSave={handleSave} onOverwriteSave={handleOverwriteSave} onDelete={handleDelete} onClose={() => setShowSaveModal(false)} />}
