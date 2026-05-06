@@ -99,6 +99,7 @@ export function MigrationReportModal({
   result,
   onStart,
   onRetry,
+  onReset,
   onClose,
   onPresetsImported,
 }) {
@@ -110,8 +111,15 @@ export function MigrationReportModal({
 
   const handleRetry = () => onRetry(failed.map(f => f.patient));
 
+  // done + 성공만 있는 경우: 닫을 때 state 초기화 (다음 열기 시 idle로 시작)
+  // done + 실패 있는 경우: 닫아도 실패 큐 유지 (재오픈 시 결과 화면 유지)
+  const handleClose = () => {
+    if (allSucceeded) onReset?.();
+    onClose();
+  };
+
   return (
-    <div className="modal-overlay" onClick={status === 'running' ? undefined : onClose}>
+    <div className="modal-overlay" onClick={status === 'running' ? undefined : handleClose}>
       <div className="modal migration-modal" onClick={e => e.stopPropagation()}>
 
         {/* Header */}
@@ -206,7 +214,7 @@ export function MigrationReportModal({
         <div className="modal-actions">
           {status === 'idle' && (
             <>
-              <button className="btn btn-secondary" onClick={onClose}>취소</button>
+              <button className="btn btn-secondary" onClick={handleClose}>취소</button>
               <button className="btn btn-primary" onClick={onStart}>마이그레이션 시작</button>
             </>
           )}
@@ -215,7 +223,16 @@ export function MigrationReportModal({
           )}
           {(status === 'done' || status === 'error') && (
             <>
-              <button className="btn btn-secondary" onClick={onClose}>닫기</button>
+              <button className="btn btn-secondary" onClick={handleClose}>닫기</button>
+              {/* done + 실패 있을 때: 실패 큐 초기화 후 처음부터 재실행 */}
+              {status === 'done' && hasFailed && (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => { onReset?.(); onStart(); }}
+                >
+                  새로 실행
+                </button>
+              )}
               {status === 'error' && (
                 <button className="btn btn-primary" onClick={onStart}>다시 시도</button>
               )}

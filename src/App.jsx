@@ -125,6 +125,7 @@ function App() {
     result: migrationResult,
     start:  startMigration,
     retry:  retryMigration,
+    reset:  resetMigration,
   } = useMigration({ session, settings });
 
   const {
@@ -458,6 +459,7 @@ function App() {
           result={migrationResult}
           onStart={startMigration}
           onRetry={retryMigration}
+          onReset={resetMigration}
           onClose={() => setShowMigrationReport(false)}
           onPresetsImported={reloadPresets}
         />
