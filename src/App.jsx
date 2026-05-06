@@ -37,7 +37,7 @@ import { showAlert, showConfirm } from './core/utils/platform';
 import { getSyncedEvaluationDate } from './core/utils/patientCompletion';
 import { generateUnifiedReport } from './core/utils/reportGenerator';
 import { buildSteps } from './core/utils/steps';
-import { touchPatientRecord } from './core/services/patientRecords';
+import { isRedactedPatientRecord, touchPatientRecord } from './core/services/patientRecords';
 import {
   clearAutoSavedWorkspace,
   loadAppSettings,
@@ -107,7 +107,7 @@ function App() {
   const conflictPatient = patients.find(
     p => p.id === conflictPatientId && p.sync?.syncStatus === 'conflict'
   );
-  const activeModules = activePatient?.data?.activeModules || [];
+  const activeModules = isRedactedPatientRecord(activePatient) ? [] : (activePatient?.data?.activeModules || []);
 
   const {
     presets, presetMeta, presetError,
@@ -291,10 +291,10 @@ function App() {
   useEffect(() => {
     if (!activeId) return;
     const p = patients.find(x => x.id === activeId);
-    if (!p) return;
+    if (!p || isRedactedPatientRecord(p) || !p.data) return;
 
     const nextEvaluationDate = getSyncedEvaluationDate(p);
-    const currentEvaluationDate = p.data.shared?.evaluationDate || '';
+    const currentEvaluationDate = p.data?.shared?.evaluationDate || '';
     if (currentEvaluationDate === nextEvaluationDate) return;
 
     setPatients(prev => prev.map(x =>
@@ -323,16 +323,16 @@ function App() {
 
   // 계산 결과
   const calc = useMemo(() => {
-    if (!activePatient || !activeModule?.computeCalc) return {};
+    if (!activePatient || isRedactedPatientRecord(activePatient) || !activePatient.data || !activeModule?.computeCalc) return {};
     return activeModule.computeCalc({
-      shared: activePatient.data.shared,
+      shared: activePatient.data.shared || {},
       module: activePatient.data.modules?.[activeModuleId] || {}
     });
   }, [activePatient, activeModule, activeModuleId]);
 
   // 통합 미리보기 텍스트
   const unifiedPreviewText = useMemo(() => {
-    if (!activePatient || activeModules.length === 0) return '';
+    if (!activePatient || isRedactedPatientRecord(activePatient) || activeModules.length === 0) return '';
     return generateUnifiedReport(activePatient);
   }, [activePatient, activeModules]);
 
@@ -440,7 +440,7 @@ function App() {
           onLogout={logout}
         />
       )}
-      {showSaveModal && <SaveModal patientCount={patients.length} saveName={saveName} onSaveNameChange={e => setSaveName(e.target.value)} savedItems={savedItems} onSave={handleSave} onOverwriteSave={handleOverwriteSave} onClose={() => setShowSaveModal(false)} />}
+      {showSaveModal && <SaveModal patientCount={patients.length} saveName={saveName} onSaveNameChange={e => setSaveName(e.target.value)} savedItems={savedItems} onSave={handleSave} onOverwriteSave={handleOverwriteSave} onDelete={handleDelete} onClose={() => setShowSaveModal(false)} />}
       {showLoadModal && <LoadModal legacyItems={legacyItems} savedItems={savedItems} onLoad={handleLoad} onDelete={handleDelete} onClose={() => setShowLoadModal(false)} />}
       {showBatchImport && <BatchImportModal onClose={() => setShowBatchImport(false)} onImport={handleBatchImport} existingPatients={patients} />}
       {conflictPatient && (

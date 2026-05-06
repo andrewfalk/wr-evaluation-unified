@@ -72,10 +72,10 @@ export async function loadSavedWorkspaces(options = {}) {
   }));
 }
 
-export async function saveWorkspaceSnapshot({ name, patients, savedItems, ...options }) {
+export async function saveWorkspaceSnapshot({ id, name, patients, savedItems, ...options }) {
   if (shouldUseRemoteRepository(options)) {
     try {
-      const items = await saveRemoteWorkspace({ name, patients, ...options });
+      const items = await saveRemoteWorkspace({ id, name, patients, ...options });
       markRemoteIntegrationStatus({ ...options, source: 'workspace-save' });
       return items;
     } catch (error) {

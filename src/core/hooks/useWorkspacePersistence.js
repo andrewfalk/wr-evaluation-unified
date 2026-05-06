@@ -10,7 +10,11 @@ import {
   saveAutoSavedWorkspace,
   saveWorkspaceSnapshot,
 } from '../services/workspaceRepository';
-import { clonePatientRecordForImport, migratePatientRecords } from '../services/patientRecords';
+import {
+  clonePatientRecordForImport,
+  isRedactedPatientRecord,
+  migratePatientRecords,
+} from '../services/patientRecords';
 
 export function useWorkspacePersistence({
   patients, setPatients,
@@ -90,13 +94,14 @@ export function useWorkspacePersistence({
   ]);
 
   const handleSave = async () => {
+    const existingItem = savedItems.find(item => item.name === saveName);
     if (!saveName.trim()) { await showAlert('저장명 필수'); return; }
     if (hasDuplicateWorkspaceName(saveName, savedItems)) {
       const confirmed = await showConfirm(`"${saveName}" 이름의 저장 데이터가 이미 존재합니다. 덮어쓰시겠습니까?`);
       if (!confirmed) return;
     }
     try {
-      const items = await saveWorkspaceSnapshot({ name: saveName, patients, savedItems, session, settings, serverConfig });
+      const items = await saveWorkspaceSnapshot({ id: existingItem?.id, name: saveName, patients, savedItems, session, settings, serverConfig });
       setSavedItems(items);
       setLastAutoSave(null);
       setShowSaveModal(false);
@@ -111,7 +116,7 @@ export function useWorkspacePersistence({
     const confirmed = await showConfirm(`"${item.name}"에 덮어쓰시겠습니까?`);
     if (!confirmed) return;
     try {
-      const items = await saveWorkspaceSnapshot({ name: item.name, patients, savedItems, session, settings, serverConfig });
+      const items = await saveWorkspaceSnapshot({ id: item.id, name: item.name, patients, savedItems, session, settings, serverConfig });
       setSavedItems(items);
       setLastAutoSave(null);
       setShowSaveModal(false);
@@ -128,9 +133,12 @@ export function useWorkspacePersistence({
       if (!confirmed) return;
       const nextPatients = migratePatientRecords(item.patients || [], { session });
       setPatients(nextPatients);
-      setActiveId(nextPatients[0]?.id || null);
+      setActiveId(nextPatients.find(p => !isRedactedPatientRecord(p))?.id || null);
     } else {
-      const newPatients = (item.patients || []).map(p => clonePatientRecordForImport(p, { session }));
+      const newPatients = (item.patients || [])
+        .filter(p => !isRedactedPatientRecord(p))
+        .map(p => clonePatientRecordForImport(p, { session }))
+        .filter(Boolean);
       setPatients(prev => [...prev, ...newPatients]);
       setActiveId(newPatients[0]?.id || null);
     }

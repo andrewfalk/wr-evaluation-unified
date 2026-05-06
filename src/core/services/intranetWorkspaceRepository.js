@@ -45,14 +45,16 @@ export async function loadRemoteWorkspaces({ session, settings }) {
   return normalizeSavedItems(data.items, { session });
 }
 
-export async function saveRemoteWorkspace({ name, patients, session, settings }) {
-  const raw = await requestJson('/api/workspaces', {
+export async function saveRemoteWorkspace({ id, name, patients, session, settings }) {
+  const path = id ? `/api/workspaces/${id}` : '/api/workspaces';
+  const method = id ? 'PUT' : 'POST';
+  const raw = await requestJson(path, {
     baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
-    method: 'POST',
+    method,
     session,
     body: { name, patients },
   });
-  const data = parseResponse(GetWorkspacesResponseSchema, raw, 'POST /api/workspaces');
+  const data = parseResponse(GetWorkspacesResponseSchema, raw, `${method} ${path}`);
   return normalizeSavedItems(data.items, { session });
 }
 

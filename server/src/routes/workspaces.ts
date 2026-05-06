@@ -321,9 +321,16 @@ async function getWorkspace(pool: Pool, req: Request, res: Response): Promise<vo
 // patient_records upserts are best-effort — failures are logged but do not block
 // the workspace save; the snapshot remains the primary source of truth.
 // ---------------------------------------------------------------------------
-async function saveWorkspace(pool: Pool, req: Request, res: Response): Promise<void> {
+async function saveWorkspace(
+  pool: Pool,
+  req: Request,
+  res: Response,
+  options: { workspaceId?: string; statusCode?: 200 | 201 } = {},
+): Promise<void> {
   const session = req.sessionInfo!;
   const orgId   = session.organizationId;
+  const workspaceId = options.workspaceId ?? null;
+  const statusCode = options.statusCode ?? 201;
 
   if (orgId === null) {
     res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
@@ -346,12 +353,29 @@ async function saveWorkspace(pool: Pool, req: Request, res: Response): Promise<v
     snapshotPatients = redactDeletedPatients(patients, deletedPatientIds);
     const patientIds = extractPatientIds(snapshotPatients);
 
-    // Primary operation: insert workspace snapshot.
-    await client.query(
-      `INSERT INTO workspaces (organization_id, owner_user_id, name, patient_ids, snapshot_payload)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [orgId, session.userId, name, patientIds, JSON.stringify(snapshotPatients)]
-    );
+    // Primary operation: insert or overwrite workspace snapshot.
+    if (workspaceId) {
+      const result = await client.query(
+        `UPDATE workspaces
+         SET name = $4,
+             patient_ids = $5,
+             snapshot_payload = $6,
+             created_at = now()
+         WHERE id = $1 AND organization_id = $2 AND owner_user_id = $3`,
+        [workspaceId, orgId, session.userId, name, patientIds, JSON.stringify(snapshotPatients)]
+      );
+      if ((result.rowCount ?? 0) === 0) {
+        await client.query('ROLLBACK');
+        res.status(404).json({ code: 'WORKSPACE_NOT_FOUND', error: 'Workspace not found' });
+        return;
+      }
+    } else {
+      await client.query(
+        `INSERT INTO workspaces (organization_id, owner_user_id, name, patient_ids, snapshot_payload)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [orgId, session.userId, name, patientIds, JSON.stringify(snapshotPatients)]
+      );
+    }
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -377,7 +401,7 @@ async function saveWorkspace(pool: Pool, req: Request, res: Response): Promise<v
   });
 
   const rows = await listQuery(pool, orgId, session.userId);
-  res.status(201).json({ items: rows.map(toItem) });
+  res.status(statusCode).json({ items: rows.map(toItem) });
 }
 
 // ---------------------------------------------------------------------------
@@ -436,6 +460,15 @@ export function createWorkspacesRouter(pool: Pool): Router {
     '/',
     auth, csrfMiddleware, audit('workspace_save'),
     (req, res) => saveWorkspace(pool, req, res).catch(() => res.status(500).json(internalError()))
+  );
+
+  router.put(
+    '/:id',
+    auth, csrfMiddleware, audit('workspace_overwrite'),
+    (req, res) => saveWorkspace(pool, req, res, {
+      workspaceId: req.params.id,
+      statusCode: 200,
+    }).catch(() => res.status(500).json(internalError()))
   );
 
   router.delete(

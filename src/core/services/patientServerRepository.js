@@ -1,4 +1,5 @@
 import { requestJson } from './httpClient';
+import { isRedactedPatientRecord } from './patientRecords';
 
 function getBaseUrl(session, settings) {
   return settings?.apiBaseUrl || session?.apiBaseUrl || '';
@@ -59,6 +60,9 @@ export async function fetchPatient(serverId, { session, settings } = {}) {
 // Throws with error.status === 409 on revision conflict or identity conflict.
 // ---------------------------------------------------------------------------
 export async function pushPatient(patient, { session, settings } = {}) {
+  if (isRedactedPatientRecord(patient)) {
+    throw new Error('Cannot push a redacted patient snapshot stub.');
+  }
   const base = getBaseUrl(session, settings);
   const serverId = patient.sync?.serverId ?? null;
   const revision = patient.sync?.revision ?? 0;
@@ -114,6 +118,7 @@ export async function deletePatientOnServer(serverId, revision, { session, setti
 // ---------------------------------------------------------------------------
 export async function pushPendingPatients(patients, { session, settings } = {}) {
   const pending = patients.filter(p => {
+    if (isRedactedPatientRecord(p)) return false;
     const s = p.sync?.syncStatus;
     return s === 'local-only' || s === 'dirty';
   });

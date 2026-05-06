@@ -308,6 +308,19 @@ npm run dev               # localhost:3000 → Vite가 /api/* → 3001 프록시
 - 클라: `src/core/services/patientServerRepository.js` 신설. patient.sync 활용.
 - 동기화: 5분 주기 + window focus pull, 변경 즉시 push. 충돌 모달.
 
+### Phase 3 완료 게이트 — 환자 동기화 실검증 (0.5~1일)
+- 목적: Phase 4/5로 넘어가기 전에 환자/건 분리, revision, 삭제 동기화, workspace redaction 정책이 실제 서버 흐름에서 맞는지 확인한다.
+- 개발 PC에서 Docker Compose 기반 실제 PostgreSQL 서버로 검증한다. mock 서버는 UI smoke test 보조용이며, DB lock/transaction/redaction 최종 검증에는 사용하지 않는다.
+- 검증 범위:
+  - 환자 생성/수정/조회/검색, 같은 `patientNo` + 다른 `injuryDate` 복수 건 생성.
+  - `PATCH If-Match` stale revision → 409 + 충돌 모달.
+  - `DELETE ?revision=N` 성공/404/409 경로 + 다른 탭 pull 후 삭제 반영.
+  - 환자 soft delete 후 기존 workspace snapshot redaction.
+  - stale 클라이언트가 삭제 환자를 포함해 workspace 저장 시 새 snapshot도 `{ id, redacted: true }`만 보관.
+  - 충돌 모달에서 서버 버전 지연 fetch 중 merge textarea 입력이 덮어써지지 않음.
+- stale revision, remote-delete conflict, merge fetch race의 구체적 재현 절차는 작업표의 T39b 체크리스트를 따른다.
+- 통과 기준: 위 시나리오 수동 체크 + `npm test`, `npm --prefix server test`, `npm --prefix server run build`, `npm run build:web` 통과.
+
 ### Phase 4 — 운영 보안 강화 (3~4일)
 - audit 미들웨어가 mutating + read(patient/workspace/export) 모두 기록.
 - on-prem CSP 검증.
@@ -316,6 +329,12 @@ npm run dev               # localhost:3000 → Vite가 /api/* → 3001 프록시
 ### Phase 5 — 마이그레이션 도구 (3일)
 - `LocalToServerMigrator`: localStorage 4개 키(presets 제외) → POST /api/patients (Idempotency-Key=local id).
 - 결과 리포트 모달.
+
+### Phase 5.5 — Staging / 실제 서버 이전 리허설 (2~3일)
+- Phase 3~5 개발 PC 통합테스트 통과 후 진행한다. 실제 환자 PHI 사용 금지, 비식별 샘플 데이터만 사용한다.
+- 병원 실제 운영 서버에 바로 올리기 전, 동일한 Docker Compose 구성으로 staging 배포를 수행한다.
+- 검증 항목: 내부 CA 인증서, Caddy HTTPS, Postgres volume, 백업/복구 스크립트, admin seed, device approval, Electron intranet build 접속, audit reader 권한, fail-closed 동작.
+- 통과 후 운영 전환 일정을 잡고 production DB/volume을 새로 구성한다. staging DB를 production으로 승격하지 않는다.
 
 ---
 
@@ -469,6 +488,7 @@ main (v4.2.1 → v4.2.x 핫픽스만)
 | T38 | 백그라운드 동기화: 5분 주기 + window focus pull + 즉시 push | `src/core/hooks/usePatientSync.js`, `src/App.jsx` | 두 PC에서 동기화 시각 확인 | T37 | M |
 | T38b | 삭제 동기화: `removePatient` / `removeSelectedPatients`에서 로컬 제거 전 `DELETE /api/patients/:id?revision=N` 호출. local-only 환자는 로컬에서만 제거하고, 서버 환자는 204/404 후 로컬 제거. 409는 로컬 제거하지 않고 `syncStatus: conflict`, `conflict.kind = delete`로 표시 | `src/core/hooks/usePatientCrud.js`, `src/App.jsx` | PC A에서 삭제한 환자가 PC B pull 후 사라짐. stale revision 삭제는 conflict로 남음 | T36b, T37, T38 | S |
 | T39 | 충돌 해결 모달 (내 버전/서버 버전/병합). 병합 JSON은 문법뿐 아니라 최소 환자 데이터 구조(`shared` object, `modules` object, `activeModules` string array)를 검증한 뒤 적용한다. | `src/core/components/ConflictResolveModal.jsx`, `src/core/components/__tests__/ConflictResolveModal.test.js` | 강제 충돌 시나리오 + 잘못된 병합 JSON/구조 입력 시 적용 차단 | T37 | M |
+| T39b | **Phase 3 완료 게이트 / 실제 서버 실검증**: mock이 아니라 Docker Compose + PostgreSQL로 환자 1급 API와 동기화 UX를 수동 검증한다. mock `/api/patients`는 선택 사항이며 UI smoke test 보조용으로만 사용한다. | `docker-compose.yml`, `server/`, `src/`, 체크리스트 문서 또는 PR 코멘트 | (a) 환자 CRUD/search (b) 같은 patientNo + 다른 injuryDate 복수 건 (c) stale PATCH 409 + conflict modal — **재현**: 탭 두 개 → 같은 환자 동시 수정 → 한 탭 저장 완료 후 다른 탭 push 시 409 + 충돌 모달 확인 (d) DELETE 성공/404/409 + pull 반영 (e) soft delete 후 기존/new workspace snapshot redaction (f) merge textarea fetch race — **재현**: DevTools Network에서 `GET /api/patients/:id` 응답을 Slow 3G로 throttle 후 conflict modal 열기 → 서버 fetch 완료 시점에 textarea 내용이 초기화되지 않는지 확인 (g) **remote-delete conflict**: PC A에서 환자 서버 저장 후 PC B에서 해당 환자 dirty 상태로 수정 → 서버에서 DELETE 후 PC B에서 pull → `remote-delete` conflict 표시 + 충돌 모달에서 "Use Local"(새 ID 재등록) 또는 "Accept Delete" 정상 동작 | T36~T39 | S |
 
 ### Phase 4 — 보안/감사 강화 (통합 브랜치 계속)
 | ID | 작업 | 영향 | 검증 | deps | 규모 |
@@ -481,6 +501,13 @@ main (v4.2.1 → v4.2.x 핫픽스만)
 |---|---|---|---|---|---|
 | T42 | `LocalToServerMigrator`: localStorage 4개 키(presets 제외) → POST /api/patients (Idempotency-Key=local id) | `src/core/services/localToServerMigrator.js`, 진입점 hook | 로컬 환자 5명 → 인트라넷 전환 → 서버 5명 + 재실행 중복 없음 | T36, T28 | M |
 | T43 | 마이그레이션 결과 리포트 모달 + 실패 보류 큐 + **presets 로컬 보존 안내 강화**: "직업 프리셋은 이 PC에만 저장됩니다. 다른 PC에서도 사용하려면 [프리셋 export] 후 새 PC에서 [import] 하세요" 명시 + export/import 버튼 링크. **운영 모드 settings에 "프리셋 로컬 저장 허용" 플래그를 명시적으로 표시** (운영 정책상 환자 PHI는 아니지만 사용자 업무 데이터가 PC에 남는다는 사실을 정보보안팀이 인지하도록) | `src/core/components/MigrationReportModal.jsx`, `src/core/components/SettingsModal.jsx` | 부분 실패 시나리오 + presets 안내 + export/import 동선 + Settings에 옵트인 표시 | T42 | S |
+
+### Phase 5.5 — Staging / 실제 서버 이전 리허설 (운영 전환 전)
+| ID | 작업 | 영향 | 검증 | deps | 규모 |
+|---|---|---|---|---|---|
+| T44 | **Staging 배포 리허설**: 개발 PC 통합테스트 통과 후 실제 서버와 동일한 Docker Compose/Caddy/Postgres 구성으로 staging 배포. 실제 환자 PHI 사용 금지, 비식별 샘플 데이터만 사용 | `docker-compose.yml`, `server/Dockerfile`, `caddy/Caddyfile`, `.env.staging`, 배포 runbook | staging URL 접속, `/api/config/public`, login, 환자 CRUD, workspace, autosave, audit 기본 흐름 통과 | T40~T43 | M |
+| T45 | **운영 인프라 검증**: 내부 CA 설치, Caddy HTTPS, Postgres volume, 백업/복구, audit reader role, admin seed, device approval, Electron intranet build 접속, fail-closed 동작 확인 | `docs/INTRANET_DEPLOYMENT.md`, `docs/BACKUP_RESTORE.md`, `scripts/backup.sh`, `scripts/restore.sh`, Electron intranet build | CA 미설치/설치 PC 동작 차이, 백업 후 별도 DB 복구, audit reader 권한, device approve/revoke, 서버 중단 시 저장 차단 확인 | T44 | M |
+| T46 | **Production 전환 준비**: staging DB를 production으로 승격하지 않고 production DB/volume을 새로 구성. 운영 전환 일정, rollback 절차, 초기 admin/device 승인 절차 확정 | 운영 전환 체크리스트, `.env.production`, 빈 production volume | 빈 production DB migrate → seed admin → smoke test → rollback 절차 리허설 | T45 | S |
 
 ### 머지 게이트
 - **전제 조건 (T00에서 정의)**: root `package.json`에 `test`(vitest), `lint`(eslint), `typecheck`(tsc --noEmit), `build:web`(vite build), `electron:build`(현행) 스크립트 실재. server에는 `test`(vitest), `lint`, `typecheck` 실재.

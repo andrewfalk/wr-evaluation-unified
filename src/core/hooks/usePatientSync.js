@@ -5,6 +5,7 @@ import {
   pullPatients,
   pushPendingPatients,
 } from '../services/patientServerRepository';
+import { isRedactedPatientRecord } from '../services/patientRecords';
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const PUSH_DEBOUNCE_MS = 1000;
@@ -12,6 +13,7 @@ const PULL_PAGE_SIZE = 100;
 
 function hasPendingPatients(patients = []) {
   return patients.some(p => {
+    if (isRedactedPatientRecord(p)) return false;
     const status = p?.sync?.syncStatus;
     return status === 'local-only' || status === 'dirty';
   });

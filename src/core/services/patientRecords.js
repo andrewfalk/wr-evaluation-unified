@@ -39,6 +39,8 @@ export function createPatientSyncState(overrides = {}) {
 }
 
 export function ensurePatientMetadata(patient, context = {}) {
+  if (!patient || typeof patient !== 'object') return patient;
+  if (isRedactedPatientRecord(patient)) return patient;
   return {
     ...patient,
     meta: {
@@ -52,11 +54,16 @@ export function ensurePatientMetadata(patient, context = {}) {
   };
 }
 
+export function isRedactedPatientRecord(patient) {
+  return Boolean(patient && typeof patient === 'object' && patient.redacted === true);
+}
+
 export function createManagedPatient(activeModules = [], modulesData = {}, context = {}) {
   return ensurePatientMetadata(createBasePatient(activeModules, modulesData), context);
 }
 
 export function migratePatientRecord(patient, context = {}) {
+  if (isRedactedPatientRecord(patient)) return patient;
   return ensurePatientMetadata(migratePatient(patient), context);
 }
 
@@ -65,6 +72,7 @@ export function migratePatientRecords(patients = [], context = {}) {
 }
 
 export function touchPatientRecord(patient, context = {}) {
+  if (isRedactedPatientRecord(patient)) return patient;
   const user = resolveContextUser(context);
   const ensured = ensurePatientMetadata(patient, context);
   const nextSyncStatus = ensured.sync.serverId
@@ -87,6 +95,7 @@ export function touchPatientRecord(patient, context = {}) {
 }
 
 export function clonePatientRecordForImport(patient, context = {}) {
+  if (isRedactedPatientRecord(patient)) return null;
   const cloned = JSON.parse(JSON.stringify(migratePatientRecord(patient, context)));
   const user = resolveContextUser(context);
 

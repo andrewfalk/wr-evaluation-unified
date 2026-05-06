@@ -269,6 +269,20 @@ describe('pushPendingPatients', () => {
     expect(failed).toHaveLength(0);
     expect(requestJson).not.toHaveBeenCalled();
   });
+
+  it('skips redacted workspace snapshot stubs', async () => {
+    const patients = [
+      { id: 'redacted-1', redacted: true },
+      makeLocalPatient({ id: 'p1' }),
+    ];
+    requestJson.mockResolvedValueOnce(makeServerPatient({ id: 'p1' }));
+
+    const { synced, failed } = await pushPendingPatients(patients, { session: SESSION });
+
+    expect(synced).toHaveLength(1);
+    expect(failed).toHaveLength(0);
+    expect(requestJson).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ---------------------------------------------------------------------------

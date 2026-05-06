@@ -520,6 +520,80 @@ describe('POST /api/workspaces', () => {
 });
 
 // ---------------------------------------------------------------------------
+// PUT /api/workspaces/:id
+// ---------------------------------------------------------------------------
+describe('PUT /api/workspaces/:id', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('returns 401 when not authenticated', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [] });
+    const res = await request(makeApp(pool))
+      .put(`/api/workspaces/${WS_ID}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send(VALID_BODY);
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 404 when workspace not found or not owned', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    mock.mockResolvedValueOnce({ rows: [] }); // BEGIN
+    mock.mockResolvedValueOnce({ rows: [] }); // deleted patient check
+    mock.mockResolvedValueOnce({ rows: [], rowCount: 0 }); // UPDATE workspace
+    mock.mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+
+    const res = await request(makeApp(pool))
+      .put(`/api/workspaces/${WS_ID}`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send(VALID_BODY);
+
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe('WORKSPACE_NOT_FOUND');
+  });
+
+  it('returns 200 with updated list on overwrite success', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    const updatedRow = { ...WS_ROW, name: 'New Visit' };
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    mock.mockResolvedValueOnce({ rows: [] }); // BEGIN
+    mock.mockResolvedValueOnce({ rows: [] }); // deleted patient check
+    mock.mockResolvedValueOnce({ rows: [], rowCount: 1 }); // UPDATE workspace
+    mock.mockResolvedValueOnce({ rows: [] }); // COMMIT
+    mock.mockResolvedValueOnce({ rows: [] }); // SELECT existing patient_records
+    mock.mockResolvedValueOnce({ rows: [] }); // SELECT patient_persons
+    mock.mockResolvedValueOnce({ rows: [{ id: PERSON_ID }] }); // INSERT patient_persons
+    mock.mockResolvedValueOnce({ rows: [] }); // upsert patient_records
+    mock.mockResolvedValueOnce({ rows: [updatedRow] }); // list query
+
+    const res = await request(makeApp(pool))
+      .put(`/api/workspaces/${WS_ID}`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send(VALID_BODY);
+
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0].name).toBe('New Visit');
+
+    const calls = mock.mock.calls as unknown[][];
+    const updateWsCall = calls.find((c) =>
+      typeof c[0] === 'string' && (c[0] as string).includes('UPDATE workspaces')
+    );
+    expect(updateWsCall).toBeDefined();
+    expect((updateWsCall![1] as unknown[])[0]).toBe(WS_ID);
+
+    const insertWsCall = calls.find((c) =>
+      typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO workspaces')
+    );
+    expect(insertWsCall).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // DELETE /api/workspaces/:id
 // ---------------------------------------------------------------------------
 describe('DELETE /api/workspaces/:id', () => {

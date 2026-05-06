@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { getAllModules, getModule } from '../moduleRegistry';
 import { isPatientComplete } from '../utils/patientCompletion';
 import { formatBirthDate } from '../utils/data';
+import { isRedactedPatientRecord } from '../services/patientRecords';
 
 const DEFAULT_SORT_DIRECTION = {
   default: 'asc',
@@ -307,13 +308,14 @@ export function PatientSidebar({
         <div className="patient-list">
           {displayPatients.map(p => {
             const origIndex = patients.indexOf(p);
+            const isRedacted = isRedactedPatientRecord(p);
             const pModules = p.data?.activeModules || [];
-            const isComplete = isPatientComplete(p);
-            const patientName = p.data?.shared?.name || `환자 #${origIndex + 1}`;
+            const isComplete = !isRedacted && isPatientComplete(p);
+            const patientName = isRedacted ? '삭제된 환자' : (p.data?.shared?.name || `환자 #${origIndex + 1}`);
             const patientNo = p.data?.shared?.patientNo || '';
             const registrationDate = formatShortDate(p.createdAt || p._savedAt);
             const evaluationDate = formatShortDate(p.data?.shared?.evaluationDate);
-            const primaryDiagnosis = p.data?.shared?.diagnoses?.[0]?.name || '-';
+            const primaryDiagnosis = isRedacted ? '삭제된 스냅샷' : (p.data?.shared?.diagnoses?.[0]?.name || '-');
             const hasConflict = p.sync?.syncStatus === 'conflict';
             const conflictKind = p.sync?.conflict?.kind || 'conflict';
 
@@ -339,6 +341,7 @@ export function PatientSidebar({
                       <div className="patient-item-name-row">
                         <span className="patient-item-title">{patientName}</span>
                         {patientNo && <span className="patient-no">#{patientNo}</span>}
+                        {isRedacted && <span className="patient-sync-badge">redacted</span>}
                         {hasConflict && <span className="patient-sync-badge">{conflictKind}</span>}
                         <div className="patient-item-modules">
                           {pModules.map(mId => {
