@@ -65,7 +65,7 @@ export async function pushPatient(patient, { session, settings } = {}) {
   }
   const base = getBaseUrl(session, settings);
   const serverId = patient.sync?.serverId ?? null;
-  const revision = patient.sync?.revision ?? 0;
+  const revision = patient.sync?.revision;
 
   if (!serverId) {
     if (!patient.id) {
@@ -88,8 +88,8 @@ export async function pushPatient(patient, { session, settings } = {}) {
     return applyServerSync(data, patient.id, patient.meta);
   }
 
-  if (!Number.isFinite(revision)) {
-    const err = new Error(`PATCH /api/patients/:id requires a numeric revision for If-Match (got ${revision}).`);
+  if (!Number.isInteger(revision) || revision < 1) {
+    const err = new Error(`PATCH /api/patients/:id requires a positive integer revision for If-Match (got ${revision}).`);
     err.status = 400;
     throw err;
   }
@@ -118,8 +118,8 @@ export async function deletePatientOnServer(serverId, revision, { session, setti
     err.status = 400;
     throw err;
   }
-  if (revision == null || !Number.isFinite(revision)) {
-    const err = new Error(`DELETE /api/patients/:id requires a numeric revision (?revision=N, got ${revision}).`);
+  if (!Number.isInteger(revision) || revision < 1) {
+    const err = new Error(`DELETE /api/patients/:id requires a positive integer revision (?revision=N, got ${revision}).`);
     err.status = 400;
     throw err;
   }

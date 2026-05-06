@@ -184,9 +184,16 @@ describe('pushPatient — PATCH (has serverId)', () => {
     expect(result.sync.serverId).toBe('server-1');
   });
 
-  it('throws 400 when revision is NaN (If-Match guard)', async () => {
+  it.each([
+    ['undefined', undefined],
+    ['null',      null],
+    ['0',         0],
+    ['-1',        -1],
+    ['NaN',       NaN],
+    ['1.5',       1.5],
+  ])('throws 400 when revision is %s (If-Match guard)', async (_label, rev) => {
     const patient = makeLocalPatient({
-      sync: { serverId: 'server-1', revision: NaN, syncStatus: 'dirty', lastSyncedAt: null },
+      sync: { serverId: 'server-1', revision: rev, syncStatus: 'dirty', lastSyncedAt: null },
     });
     await expect(pushPatient(patient, { session: SESSION }))
       .rejects.toMatchObject({ status: 400 });
@@ -222,25 +229,21 @@ describe('deletePatientOnServer', () => {
     expect(opts.method).toBe('DELETE');
   });
 
-  it('accepts revision 0 (valid for first-revision delete)', async () => {
-    requestJson.mockResolvedValue(null);
-    await expect(deletePatientOnServer('server-1', 0, { session: SESSION })).resolves.toBeUndefined();
-  });
-
   it('throws 400 when serverId is missing', async () => {
     await expect(deletePatientOnServer(null, 1, { session: SESSION }))
       .rejects.toMatchObject({ status: 400 });
     expect(requestJson).not.toHaveBeenCalled();
   });
 
-  it('throws 400 when revision is null', async () => {
-    await expect(deletePatientOnServer('server-1', null, { session: SESSION }))
-      .rejects.toMatchObject({ status: 400 });
-    expect(requestJson).not.toHaveBeenCalled();
-  });
-
-  it('throws 400 when revision is undefined', async () => {
-    await expect(deletePatientOnServer('server-1', undefined, { session: SESSION }))
+  it.each([
+    ['undefined', undefined],
+    ['null',      null],
+    ['0',         0],
+    ['-1',        -1],
+    ['NaN',       NaN],
+    ['1.5',       1.5],
+  ])('throws 400 when revision is %s', async (_label, rev) => {
+    await expect(deletePatientOnServer('server-1', rev, { session: SESSION }))
       .rejects.toMatchObject({ status: 400 });
     expect(requestJson).not.toHaveBeenCalled();
   });
