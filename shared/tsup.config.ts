@@ -8,6 +8,7 @@ export default defineConfig({
     auth: 'contracts/auth.ts',
     config: 'contracts/config.ts',
     patient: 'contracts/patient.ts',
+    preset: 'contracts/preset.ts',
   },
   format: ['esm', 'cjs'],
   outDir: 'dist',

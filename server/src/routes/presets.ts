@@ -171,16 +171,10 @@ async function updatePreset(pool: Pool, req: Request, res: Response): Promise<vo
     res.status(403).json({ code: 'FORBIDDEN', error: 'Not your organization' });
     return;
   }
-  if (row['owner_user_id'] !== userId && row['visibility'] !== 'organization') {
+  // Only the owner may edit — even org-visible presets are write-protected to
+  // non-owners until explicit collaborative-edit permissions are introduced.
+  if (row['owner_user_id'] !== userId) {
     res.status(403).json({ code: 'FORBIDDEN', error: 'Cannot edit this preset' });
-    return;
-  }
-  if ((row['revision'] as number) !== ifMatch) {
-    res.status(409).json({
-      code:           'REVISION_CONFLICT',
-      error:          'Preset was modified concurrently',
-      serverRevision: row['revision'],
-    });
     return;
   }
 
@@ -191,6 +185,8 @@ async function updatePreset(pool: Pool, req: Request, res: Response): Promise<vo
       ? (replaceModules ? modules : { ...(row['modules'] as object), ...modules })
       : row['modules'];
 
+  // Atomic revision check inside the UPDATE prevents stale writes when two
+  // requests pass the SELECT checks simultaneously.
   const { rows: updated } = await pool.query(
     `UPDATE custom_presets SET
        job_name    = COALESCE($1, job_name),
@@ -200,7 +196,7 @@ async function updatePreset(pool: Pool, req: Request, res: Response): Promise<vo
        modules     = $5,
        revision    = revision + 1,
        updated_at  = now()
-     WHERE id = $6
+     WHERE id = $6 AND revision = $7 AND deleted_at IS NULL
      RETURNING *`,
     [
       jobName     ?? null,
@@ -209,8 +205,14 @@ async function updatePreset(pool: Pool, req: Request, res: Response): Promise<vo
       visibility  ?? null,
       JSON.stringify(mergedModules),
       id,
+      ifMatch,
     ],
   );
+
+  if (updated.length === 0) {
+    res.status(409).json({ code: 'REVISION_CONFLICT', error: 'Preset was modified concurrently' });
+    return;
+  }
 
   await writeAuditLog(pool, {
     actorUserId: userId,
@@ -234,6 +236,18 @@ async function deletePreset(pool: Pool, req: Request, res: Response): Promise<vo
   }
 
   const { id } = req.params;
+
+  // Optional ?revision=N guard — prevents deleting a stale version from another device.
+  const revisionRaw = req.query['revision'];
+  let clientRevision: number | null = null;
+  if (revisionRaw !== undefined) {
+    clientRevision = parseInt(revisionRaw as string, 10);
+    if (!Number.isInteger(clientRevision) || clientRevision < 1) {
+      res.status(400).json({ code: 'INVALID_REVISION', error: 'revision must be a positive integer' });
+      return;
+    }
+  }
+
   const { rows: found } = await pool.query(
     `SELECT * FROM custom_presets WHERE id = $1 AND deleted_at IS NULL`,
     [id],
@@ -250,6 +264,14 @@ async function deletePreset(pool: Pool, req: Request, res: Response): Promise<vo
   }
   if (row['owner_user_id'] !== userId) {
     res.status(403).json({ code: 'FORBIDDEN', error: 'Can only delete your own presets' });
+    return;
+  }
+  if (clientRevision !== null && (row['revision'] as number) !== clientRevision) {
+    res.status(409).json({
+      code:           'REVISION_CONFLICT',
+      error:          'Preset was modified concurrently',
+      serverRevision: row['revision'],
+    });
     return;
   }
 

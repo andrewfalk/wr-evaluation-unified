@@ -103,6 +103,7 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
         : presets.find(item => (item._customId || item.id) === presetOrId);
     const id = preset?._customId || preset?.id || presetOrId;
     if (!id) return false;
+    const revision = preset?._customRevision ?? preset?.revision ?? null;
 
     const label = preset?.jobName
       ? getPresetDescription(preset)
@@ -115,7 +116,7 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
     );
     if (!confirmed) return false;
 
-    await deleteCustomPreset(id, session);
+    await deleteCustomPreset(id, session, revision);
     await reloadPresets();
     return true;
   }, [presets, reloadPresets, session]);

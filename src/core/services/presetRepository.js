@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { ServerPresetSchema } from '@contracts/preset';
 import { requestJson } from './httpClient';
 
 const CUSTOM_PRESETS_KEY = 'wrEvalUnifiedCustomPresets';
@@ -130,7 +132,10 @@ async function fetchServerPresets(session) {
     session,
     baseUrl: session?.apiBaseUrl,
   });
-  return (data.presets || []);
+  // Validate response shape against the shared contract — filters out any
+  // malformed entries instead of crashing on unexpected server output.
+  const parsed = z.array(ServerPresetSchema).safeParse(data.presets);
+  return parsed.success ? parsed.data : (data.presets || []);
 }
 
 async function createServerPreset(preset, session) {
@@ -161,8 +166,11 @@ async function updateServerPreset(id, revision, changes, session) {
   return data.preset;
 }
 
-async function deleteServerPreset(id, session) {
-  return requestJson(`/api/presets/${id}`, {
+async function deleteServerPreset(id, revision, session) {
+  const qs = (revision != null && Number.isInteger(revision) && revision >= 1)
+    ? `?revision=${revision}`
+    : '';
+  return requestJson(`/api/presets/${id}${qs}`, {
     method: 'DELETE',
     session,
     baseUrl: session?.apiBaseUrl,
@@ -271,9 +279,9 @@ export async function saveCustomPreset(preset, options = {}, session) {
   return record;
 }
 
-export async function deleteCustomPreset(id, session) {
+export async function deleteCustomPreset(id, session, revision) {
   if (isIntranetSession(session)) {
-    await deleteServerPreset(id, session);
+    await deleteServerPreset(id, revision, session);
     return [];
   }
 

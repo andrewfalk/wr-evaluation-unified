@@ -515,6 +515,74 @@ main (v4.2.1 → v4.2.x 핫픽스만)
 | T45 | **운영 인프라 검증**: 내부 CA 설치, Caddy HTTPS, Postgres volume, 백업/복구, audit reader role, admin seed, device approval, Electron intranet build 접속, fail-closed 동작 확인 | `docs/INTRANET_DEPLOYMENT.md`, `docs/BACKUP_RESTORE.md`, `scripts/backup.sh`, `scripts/restore.sh`, Electron intranet build | CA 미설치/설치 PC 동작 차이, 백업 후 별도 DB 복구, audit reader 권한, device approve/revoke, 서버 중단 시 저장 차단 확인 | T44 | M |
 | T46 | **Production 전환 준비**: staging DB를 production으로 승격하지 않고 production DB/volume을 새로 구성. 운영 전환 일정, rollback 절차, 초기 admin/device 승인 절차 확정 | 운영 전환 체크리스트, `.env.production`, 빈 production volume | 빈 production DB migrate → seed admin → smoke test → rollback 절차 리허설 | T45 | S |
 
+#### Phase 5.5 오프라인 인트라넷 배포 패키지 상세
+인트라넷 서버 PC가 인터넷에 연결되지 않는다는 전제를 명시한다. 운영 서버에서는 `npm install`, `docker pull`, 패키지 다운로드, Let's Encrypt 인증서 발급을 수행하지 않는다. 인터넷이 되는 개발/준비 PC에서 필요한 산출물을 모두 만든 뒤 USB/외장 SSD/내부 보안 반입 절차로 서버에 옮긴다.
+
+**A. 인터넷 되는 개발/준비 PC에서 만드는 산출물**
+- 애플리케이션 Docker image: `wr-evaluation-unified-app` 이미지를 build한 뒤 `docker save`로 `.tar` 파일 생성.
+- 기반 Docker image: `postgres`, `caddy`, partition/cron sidecar 등 compose가 사용하는 모든 image를 `docker save`로 `.tar` 파일 생성.
+- Compose/설정 파일: `docker-compose.yml`, `caddy/Caddyfile`, `.env.production.example`, 실제 서버용 `.env.production` 초안.
+- DB schema: `server/migrations/` 전체와 migration runner가 포함된 app image.
+- 운영 스크립트: 백업/복구 스크립트, 파티션 생성 스크립트, 로그/상태 확인 스크립트.
+- 인증서 파일: 병원 내부 CA 또는 self-signed CA의 루트 인증서(`rootCA.crt`)와 서버 인증서/키(`server.crt`, `server.key`). 서버 private key는 별도 암호화 저장/반입 권장.
+- Electron intranet installer: `electron:build:intranet` 산출물. 사용자 PC 설치용.
+- 배포 runbook: 아래 B~G 절차를 그대로 따라 할 수 있는 문서. 명령어, 예상 출력, 실패 시 되돌리기 절차 포함.
+
+**B. 오프라인 반입 전 체크**
+- `.env.production` 안의 비밀값(`JWT secret`, DB 비밀번호 등)은 staging 값과 다르게 새로 생성한다.
+- staging DB/volume은 절대 production으로 복사하지 않는다.
+- Docker image `.tar` 파일 목록과 버전을 문서화한다.
+- USB/외장 SSD 반입은 병원 보안 정책에 맞게 승인받는다.
+- 서버 PC의 Docker Desktop 또는 Docker Engine은 사전에 설치되어 있어야 한다. Docker 자체 설치 파일도 인터넷 PC에서 받아 반입해야 할 수 있다.
+
+**C. 인트라넷 서버 PC에서 최초 설치**
+- 반입한 Docker image를 모두 load한다: `docker load -i <image>.tar`.
+- production 작업 폴더를 만든다. 예: `C:\wr-evaluation-unified-prod`.
+- `docker-compose.yml`, `.env.production`, `caddy/`, `scripts/`, 인증서 파일을 production 폴더에 배치한다.
+- Docker volume 이름을 production 전용으로 지정한다. staging volume과 이름이 겹치면 안 된다.
+- `docker compose --env-file .env.production up -d`로 최초 기동한다.
+- app 컨테이너 로그에서 migration 성공 여부를 확인한다.
+
+**D. 빈 production DB 초기화**
+- production은 빈 Postgres volume에서 시작한다.
+- app 시작 시 migration runner가 `server/migrations/`를 순서대로 적용해야 한다.
+- migration 실패 시 운영을 시작하지 않는다. 컨테이너 로그와 migration 번호를 확인하고, 빈 volume을 폐기한 뒤 원인을 수정해 다시 초기화한다.
+- schema 확인 쿼리 예: `organizations`, `users`, `patient_persons`, `patient_records`, `workspaces`, `autosaves`, `audit_logs`, `custom_presets` 테이블 존재 여부 확인.
+
+**E. 초기 admin / 조직 / 기기 승인**
+- app 컨테이너 안에서 admin seed를 실행한다: `npm run seed:admin`.
+- seed 입력값: 병원/조직명, admin login id, 임시 비밀번호.
+- 첫 admin 로그인 후 반드시 비밀번호 변경을 확인한다.
+- Electron intranet app을 사용자 PC에 설치하고 첫 실행 시 device registration을 수행한다.
+- admin 화면에서 pending device를 확인한 뒤 승인한다.
+- 승인 전 EMR 기능이 차단되고, 승인 후 정상 동작하는지 확인한다.
+
+**F. HTTPS / 인증서 검증**
+- 인터넷 없는 서버에서는 Let's Encrypt를 사용할 수 없다.
+- 병원 내부 CA가 있으면 내부 CA가 `wr.hospital.local` 같은 서버 도메인용 인증서를 발급한다.
+- 내부 CA가 없으면 self-signed root CA를 만들고, 그 CA로 서버 인증서를 직접 발급한다.
+- Caddy는 `server.crt`와 `server.key`를 사용해 HTTPS를 제공한다.
+- 사용자 PC에는 `rootCA.crt`를 "신뢰할 수 있는 루트 인증 기관"에 설치한다.
+- CA가 설치되지 않은 PC에서는 인증서 경고 또는 접속 실패가 나는 것이 정상이다. CA 설치 후 경고 없이 접속되어야 한다.
+
+**G. 백업/복구**
+- production DB는 매일 `pg_dump` 백업을 생성한다.
+- 백업 파일은 GPG 또는 병원 승인 방식으로 암호화한다.
+- 백업 위치는 서버 로컬 디스크만으로 충분하지 않다. 내부 NAS/파일서버/외장 매체 등 별도 위치가 필요하다.
+- 복구 리허설은 production DB가 아닌 별도 빈 DB/volume에서 수행한다.
+- 복구 리허설 결과: 테이블 수, 환자 샘플 수, workspace/autosave/audit 일부 조회, 로그인 가능 여부를 확인한다.
+
+**H. 최종 smoke test**
+- `/health`, `/api/config/public` 응답 확인.
+- admin 로그인/비밀번호 변경 확인.
+- 일반 사용자 로그인 확인.
+- 환자 생성/수정/삭제, 같은 patient no + 다른 재해일자 생성 확인.
+- workspace 저장/불러오기/삭제, autosave 확인.
+- custom preset 생성/수정/삭제, 다른 PC 로그인 후 조회 확인.
+- audit log 기록 확인.
+- 서버 중단 시 fail-closed 동작 확인.
+- Electron intranet build 접속, device 승인, EMR audit 기본 흐름 확인.
+
 ### 머지 게이트
 - **전제 조건 (T00에서 정의)**: root `package.json`에 `test`(vitest), `lint`(eslint), `typecheck`(tsc --noEmit), `build:web`(vite build), `electron:build`(현행) 스크립트 실재. server에는 `test`(vitest), `lint`, `typecheck` 실재.
 - 각 Phase 종료 시: 해당 Phase 모든 T## 통과 + 다음 모두 0 exit:

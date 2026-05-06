@@ -210,8 +210,8 @@ describe('PATCH /api/presets/:id', () => {
 
   it('returns 409 on revision mismatch', async () => {
     const pool = makePool();
-    // auth, fetch existing (revision=2)
-    wireQueries(pool, { rows: [presetRow({ revision: 2 })] });
+    // auth, SELECT (revision=2), atomic UPDATE returns 0 rows (If-Match:1 ≠ 2)
+    wireQueries(pool, { rows: [presetRow({ revision: 2 })] }, { rows: [] });
 
     const res = await request(makeApp(pool))
       .patch(`/api/presets/${PRESET_ID}`)
@@ -222,7 +222,7 @@ describe('PATCH /api/presets/:id', () => {
 
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('REVISION_CONFLICT');
-    expect(res.body.serverRevision).toBe(2);
+    // serverRevision not returned by the atomic UPDATE path — client retries with GET
   });
 
   it('returns 404 for unknown preset', async () => {
