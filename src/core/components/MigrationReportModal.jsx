@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react';
-import { useMigration } from '../hooks/useMigration';
 import {
   exportPresetsToJSON,
   importPresetsFromJSON,
@@ -29,15 +28,16 @@ function FailedPatientItem({ patient, name }) {
 
 // ---------------------------------------------------------------------------
 // Presets section (shown in idle + done phases)
+// onPresetsImported: callback to reload preset state in the parent hook after import
 // ---------------------------------------------------------------------------
-function PresetsSection() {
+function PresetsSection({ onPresetsImported }) {
   const fileInputRef = useRef(null);
   const [presetMsg, setPresetMsg] = useState(null);
 
   const handleExport = async () => {
     try {
-      const presets = await loadAllPresets();
-      exportPresetsToJSON(presets);
+      const { merged } = await loadAllPresets();
+      exportPresetsToJSON(merged);
     } catch {
       setPresetMsg({ type: 'error', text: '내보내기 실패' });
     }
@@ -50,6 +50,7 @@ function PresetsSection() {
     try {
       const { addedCount } = await importPresetsFromJSON(file);
       setPresetMsg({ type: 'ok', text: `${addedCount}개 프리셋을 가져왔습니다.` });
+      onPresetsImported?.();
     } catch {
       setPresetMsg({ type: 'error', text: '가져오기 실패: 파일 형식을 확인해주세요.' });
     }
@@ -88,25 +89,29 @@ function PresetsSection() {
 
 // ---------------------------------------------------------------------------
 // Main modal
+//
+// Migration state (status/result/onStart/onRetry) is owned by App.jsx so that
+// failed patients persist across modal open/close cycles.
+// onPresetsImported: triggers usePresetManagement.reloadPresets in App.jsx
 // ---------------------------------------------------------------------------
-export function MigrationReportModal({ session, settings, onClose }) {
-  const { status, result, start, retry, reset } = useMigration({ session, settings });
-
-  const migrated     = result?.migrated     ?? [];
+export function MigrationReportModal({
+  status,
+  result,
+  onStart,
+  onRetry,
+  onClose,
+  onPresetsImported,
+}) {
+  const migrated      = result?.migrated      ?? [];
   const alreadySynced = result?.alreadySynced ?? [];
-  const failed       = result?.failed       ?? [];
-  const hasFailed    = failed.length > 0;
-  const allSucceeded = status === 'done' && !hasFailed;
+  const failed        = result?.failed        ?? [];
+  const hasFailed     = failed.length > 0;
+  const allSucceeded  = status === 'done' && !hasFailed;
 
-  const handleRetry = () => retry(failed.map(f => f.patient));
-
-  const handleClose = () => {
-    reset();
-    onClose();
-  };
+  const handleRetry = () => onRetry(failed.map(f => f.patient));
 
   return (
-    <div className="modal-overlay" onClick={status === 'running' ? undefined : handleClose}>
+    <div className="modal-overlay" onClick={status === 'running' ? undefined : onClose}>
       <div className="modal migration-modal" onClick={e => e.stopPropagation()}>
 
         {/* Header */}
@@ -133,7 +138,7 @@ export function MigrationReportModal({ session, settings, onClose }) {
                 <li>실패한 항목은 결과 화면에서 재시도할 수 있습니다.</li>
               </ul>
             </div>
-            <PresetsSection />
+            <PresetsSection onPresetsImported={onPresetsImported} />
           </div>
         )}
 
@@ -149,21 +154,9 @@ export function MigrationReportModal({ session, settings, onClose }) {
         {status === 'done' && (
           <div className="migration-content">
             <div className="migration-summary">
-              <MigrationSummaryRow
-                label="서버 등록 완료"
-                count={migrated.length}
-                tone="success"
-              />
-              <MigrationSummaryRow
-                label="이미 등록됨 (건너뜀)"
-                count={alreadySynced.length}
-                tone="neutral"
-              />
-              <MigrationSummaryRow
-                label="실패"
-                count={failed.length}
-                tone={hasFailed ? 'error' : 'neutral'}
-              />
+              <MigrationSummaryRow label="서버 등록 완료"     count={migrated.length}      tone="success" />
+              <MigrationSummaryRow label="이미 등록됨 (건너뜀)" count={alreadySynced.length} tone="neutral" />
+              <MigrationSummaryRow label="실패"               count={failed.length}        tone={hasFailed ? 'error' : 'neutral'} />
             </div>
 
             {hasFailed && (
@@ -178,12 +171,11 @@ export function MigrationReportModal({ session, settings, onClose }) {
                   </button>
                 </div>
                 <ul className="migration-failed-list">
-                  {failed.map(({ patient, error }) => (
+                  {failed.map(({ patient }) => (
                     <FailedPatientItem
                       key={patient.id}
                       patient={patient}
                       name={patient.data?.shared?.name}
-                      error={error}
                     />
                   ))}
                 </ul>
@@ -196,7 +188,7 @@ export function MigrationReportModal({ session, settings, onClose }) {
               </p>
             )}
 
-            <PresetsSection />
+            <PresetsSection onPresetsImported={onPresetsImported} />
           </div>
         )}
 
@@ -214,8 +206,8 @@ export function MigrationReportModal({ session, settings, onClose }) {
         <div className="modal-actions">
           {status === 'idle' && (
             <>
-              <button className="btn btn-secondary" onClick={handleClose}>취소</button>
-              <button className="btn btn-primary" onClick={start}>마이그레이션 시작</button>
+              <button className="btn btn-secondary" onClick={onClose}>취소</button>
+              <button className="btn btn-primary" onClick={onStart}>마이그레이션 시작</button>
             </>
           )}
           {status === 'running' && (
@@ -223,9 +215,9 @@ export function MigrationReportModal({ session, settings, onClose }) {
           )}
           {(status === 'done' || status === 'error') && (
             <>
-              <button className="btn btn-secondary" onClick={handleClose}>닫기</button>
+              <button className="btn btn-secondary" onClick={onClose}>닫기</button>
               {status === 'error' && (
-                <button className="btn btn-primary" onClick={start}>다시 시도</button>
+                <button className="btn btn-primary" onClick={onStart}>다시 시도</button>
               )}
             </>
           )}

@@ -29,6 +29,7 @@ import { useEMRIntegration } from './core/hooks/useEMRIntegration';
 import { useStepNavigation } from './core/hooks/useStepNavigation';
 import { useIntakeWizard } from './core/hooks/useIntakeWizard';
 import { useWorkspacePersistence } from './core/hooks/useWorkspacePersistence';
+import { useMigration } from './core/hooks/useMigration';
 import { usePatientCrud } from './core/hooks/usePatientCrud';
 import { usePatientSync } from './core/hooks/usePatientSync';
 import { resolvePatientConflictInList } from './core/services/patientConflictResolution';
@@ -115,8 +116,16 @@ function App() {
     presets, presetMeta, presetError,
     presetModalJobId, presetEditingPreset, presetBrowseJobId,
     setPresetModalJobId, setPresetEditingPreset, setPresetBrowseJobId,
+    reloadPresets,
     handlePresetSelect, handleSaveCustomPreset, closePresetManageModal, handleDeleteCustomPreset,
   } = usePresetManagement({ activeId, activeModules, session, setPatients });
+
+  const {
+    status: migrationStatus,
+    result: migrationResult,
+    start:  startMigration,
+    retry:  retryMigration,
+  } = useMigration({ session, settings });
 
   const {
     exportDropdown, setExportDropdown,
@@ -445,9 +454,12 @@ function App() {
       )}
       {showMigrationReport && (
         <MigrationReportModal
-          session={session}
-          settings={settings}
+          status={migrationStatus}
+          result={migrationResult}
+          onStart={startMigration}
+          onRetry={retryMigration}
           onClose={() => setShowMigrationReport(false)}
+          onPresetsImported={reloadPresets}
         />
       )}
       {showSaveModal && <SaveModal patientCount={patients.length} saveName={saveName} onSaveNameChange={e => setSaveName(e.target.value)} savedItems={savedItems} onSave={handleSave} onOverwriteSave={handleOverwriteSave} onDelete={handleDelete} onClose={() => setShowSaveModal(false)} />}

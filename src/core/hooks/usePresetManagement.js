@@ -130,6 +130,7 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
     setPresetModalJobId,
     setPresetEditingPreset,
     setPresetBrowseJobId,
+    reloadPresets,
     handlePresetSelect,
     handleSaveCustomPreset,
     closePresetManageModal,
