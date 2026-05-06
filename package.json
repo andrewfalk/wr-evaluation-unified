@@ -28,7 +28,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint src/",
-    "server:seed:admin": "cd server && npm run seed:admin"
+    "server:seed:admin": "cd server && npm run seed:admin",
+    "verify:csp": "node scripts/verify-csp.mjs"
   },
   "dependencies": {
     "html2pdf.js": "^0.10.1",
