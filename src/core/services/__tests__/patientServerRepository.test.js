@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   pullPatients,
+  fetchPatient,
   pushPatient,
   deletePatientOnServer,
   pushPendingPatients,
@@ -86,6 +87,19 @@ describe('pullPatients', () => {
   });
 });
 
+describe('fetchPatient', () => {
+  it('loads a single patient by server id', async () => {
+    requestJson.mockResolvedValue(makeServerPatient({ id: 'server-1' }));
+
+    const result = await fetchPatient('server-1', { session: SESSION });
+
+    const [path] = requestJson.mock.calls[0];
+    expect(path).toBe('/api/patients/server-1');
+    expect(result.id).toBe('server-1');
+    expect(result.sync.syncStatus).toBe('synced');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // pushPatient — POST (local-only)
 // ---------------------------------------------------------------------------
@@ -96,7 +110,7 @@ describe('pushPatient — POST (no serverId)', () => {
     requestJson.mockResolvedValue(returned);
 
     const patient = makeLocalPatient();
-    const result = await pushPatient(patient, { session: SESSION });
+    await pushPatient(patient, { session: SESSION });
 
     const [path, opts] = requestJson.mock.calls[0];
     expect(path).toBe('/api/patients');
@@ -111,6 +125,22 @@ describe('pushPatient — POST (no serverId)', () => {
     const result = await pushPatient(makeLocalPatient(), { session: SESSION });
     expect(result.id).toBe('local-uuid');
     expect(result.sync.syncStatus).toBe('synced');
+  });
+
+  it('preserves local meta when the server response omits it', async () => {
+    requestJson.mockResolvedValue(makeServerPatient({ id: 'local-uuid' }));
+    const meta = {
+      organizationId: 'org1',
+      ownerUserId:   'u1',
+      createdBy:     'u1',
+      updatedBy:     'u1',
+      authMode:      'intranet',
+      source:        'web',
+    };
+
+    const result = await pushPatient(makeLocalPatient({ meta }), { session: SESSION });
+
+    expect(result.meta).toEqual(meta);
   });
 });
 
@@ -211,6 +241,23 @@ describe('pushPendingPatients', () => {
     expect(failed).toHaveLength(1);
     expect(failed[0].patient.id).toBe('p1');
     expect(failed[0].error).toBe(err);
+    expect(failed[0].kind).toBe('error');
+  });
+
+  it('marks 409 failures as conflict kind', async () => {
+    const err = new Error('Conflict');
+    err.status = 409;
+    requestJson.mockRejectedValue(err);
+
+    const patients = [makeLocalPatient({
+      id: 'p1',
+      sync: { syncStatus: 'dirty', serverId: 's1', revision: 1, lastSyncedAt: null },
+    })];
+    const { synced, failed } = await pushPendingPatients(patients, { session: SESSION });
+
+    expect(synced).toHaveLength(0);
+    expect(failed).toHaveLength(1);
+    expect(failed[0].kind).toBe('conflict');
   });
 
   it('returns empty results for an all-synced list', async () => {
@@ -235,8 +282,8 @@ describe('mergeServerPatient', () => {
     expect(result[0].id).toBe('server-1');
   });
 
-  it('replaces existing patient matched by id, preserving local id', () => {
-    const local = makeLocalPatient({ id: 'server-1', sync: { serverId: 'server-1', revision: 1, syncStatus: 'dirty', lastSyncedAt: null } });
+  it('replaces synced patient matched by id, preserving local id', () => {
+    const local = makeLocalPatient({ id: 'server-1', sync: { serverId: 'server-1', revision: 1, syncStatus: 'synced', lastSyncedAt: null } });
     const sp    = makeServerPatient({ sync: { serverId: 'server-1', revision: 2, syncStatus: 'synced', lastSyncedAt: '2024-06-01T00:00:00Z' } });
 
     const result = mergeServerPatient([local], sp);
@@ -247,8 +294,8 @@ describe('mergeServerPatient', () => {
     expect(result[0].sync.syncStatus).toBe('synced');
   });
 
-  it('matches by sync.serverId and preserves distinct local id', () => {
-    const local = makeLocalPatient({ id: 'local-uuid', sync: { serverId: 'server-1', revision: 1, syncStatus: 'dirty', lastSyncedAt: null } });
+  it('matches synced patient by sync.serverId and preserves distinct local id', () => {
+    const local = makeLocalPatient({ id: 'local-uuid', sync: { serverId: 'server-1', revision: 1, syncStatus: 'synced', lastSyncedAt: null } });
     const sp    = makeServerPatient({ id: 'server-1', sync: { serverId: 'server-1', revision: 2, syncStatus: 'synced', lastSyncedAt: '...' } });
 
     const result = mergeServerPatient([local], sp);
@@ -256,6 +303,83 @@ describe('mergeServerPatient', () => {
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe('local-uuid');
     expect(result[0].sync.revision).toBe(2);
+  });
+
+  it('preserves local meta when replacing a synced patient with a server response', () => {
+    const meta = {
+      organizationId: 'org1',
+      ownerUserId:   'u1',
+      createdBy:     'u1',
+      updatedBy:     'u1',
+      authMode:      'intranet',
+      source:        'web',
+    };
+    const local = makeLocalPatient({
+      id:   'local-uuid',
+      meta,
+      sync: { serverId: 'server-1', revision: 1, syncStatus: 'synced', lastSyncedAt: null },
+    });
+    const sp = makeServerPatient({
+      id:   'server-1',
+      sync: { serverId: 'server-1', revision: 2, syncStatus: 'synced', lastSyncedAt: '...' },
+    });
+
+    const result = mergeServerPatient([local], sp);
+
+    expect(result[0].meta).toEqual(meta);
+  });
+
+  it('preserves dirty local data and marks conflict when pulled server revision is newer', () => {
+    const local = makeLocalPatient({ id: 'local-uuid', sync: { serverId: 'server-1', revision: 1, syncStatus: 'dirty', lastSyncedAt: null } });
+    const dirtyData = { shared: { name: 'Local Edit', patientNo: 'P001' }, modules: {}, activeModules: [] };
+    const sp = makeServerPatient({
+      id: 'server-1',
+      data: { shared: { name: 'Server Edit', patientNo: 'P001' }, modules: {}, activeModules: [] },
+      sync: { serverId: 'server-1', revision: 2, syncStatus: 'synced', lastSyncedAt: '...' },
+    });
+
+    const result = mergeServerPatient([{ ...local, data: dirtyData }], sp);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('local-uuid');
+    expect(result[0].data).toEqual(dirtyData);
+    expect(result[0].sync.syncStatus).toBe('conflict');
+    expect(result[0].sync.conflict.serverRevision).toBe(2);
+    expect(result[0].sync.conflict.serverPatient.data.shared.name).toBe('Server Edit');
+  });
+
+  it('preserves dirty local data without conflict when pulled revision is not newer', () => {
+    const local = makeLocalPatient({ id: 'local-uuid', sync: { serverId: 'server-1', revision: 2, syncStatus: 'dirty', lastSyncedAt: null } });
+    const sp    = makeServerPatient({ id: 'server-1', sync: { serverId: 'server-1', revision: 2, syncStatus: 'synced', lastSyncedAt: '...' } });
+
+    const result = mergeServerPatient([local], sp);
+
+    expect(result[0]).toBe(local);
+    expect(result[0].sync.syncStatus).toBe('dirty');
+  });
+
+  it('preserves existing delete conflict intent when pull attaches the server version', () => {
+    const local = makeLocalPatient({
+      id: 'local-uuid',
+      sync: {
+        serverId: 'server-1',
+        revision: 1,
+        syncStatus: 'conflict',
+        lastSyncedAt: null,
+        conflict: { kind: 'delete', serverRevision: 2 },
+      },
+    });
+    const sp = makeServerPatient({
+      id: 'server-1',
+      data: { shared: { name: 'Server Still Exists', patientNo: 'P001' }, modules: {}, activeModules: [] },
+      sync: { serverId: 'server-1', revision: 2, syncStatus: 'synced', lastSyncedAt: '...' },
+    });
+
+    const result = mergeServerPatient([local], sp);
+
+    expect(result[0].sync.syncStatus).toBe('conflict');
+    expect(result[0].sync.conflict.kind).toBe('delete');
+    expect(result[0].sync.conflict.serverPatient.data.shared.name).toBe('Server Still Exists');
   });
 
   it('does not mutate the original array', () => {
@@ -272,7 +396,7 @@ describe('mergeServerPatient', () => {
 
 describe('mergePulledPatients', () => {
   it('applies all pulled patients sequentially', () => {
-    const local = makeLocalPatient({ id: 'local-uuid', sync: { serverId: 's1', revision: 1, syncStatus: 'dirty', lastSyncedAt: null } });
+    const local = makeLocalPatient({ id: 'local-uuid', sync: { serverId: 's1', revision: 1, syncStatus: 'synced', lastSyncedAt: null } });
     const sp1   = makeServerPatient({ id: 's1', sync: { serverId: 's1', revision: 2, syncStatus: 'synced', lastSyncedAt: '...' } });
     const sp2   = makeServerPatient({ id: 's2', sync: { serverId: 's2', revision: 1, syncStatus: 'synced', lastSyncedAt: '...' } });
 

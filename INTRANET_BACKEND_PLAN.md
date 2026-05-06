@@ -104,7 +104,8 @@
    - `GET /api/workspaces/:id?view=current` → snapshot의 patient_ids로 patient_records 현재값 조회. "이 워크스페이스를 만들 때부터 환자가 어떻게 변했는지 비교" 용도.
    - 기본 동작은 snapshot. 사용자 멘탈 모델("저장본")과 일치.
    - **환자 soft delete 영향**: 환자 삭제 시 모든 워크스페이스의 `snapshot_payload` 내 해당 환자 entry는 **redacted 표시**됨(name/patient_no/birth_date 등 PHI 필드 제거, `redacted: true` 플래그). 즉 "저장본 보존" UX는 삭제되지 않은 환자에 대해서만 완전. **UI에 명시 안내**: 워크스페이스 로드 시 redacted entry는 회색 처리 + "[삭제된 환자] 식별정보가 제거되었습니다" 표시. 5년 retention 후 워크스페이스 자체 자동 cleanup.
-   - `POST /api/workspaces`는 그 시점의 환자 배열을 snapshot_payload로 통째 보관.
+   - `POST /api/workspaces`는 그 시점의 환자 배열을 snapshot_payload로 통째 보관하되, 저장 시점에 이미 soft delete 된 환자는 새 snapshot에 PHI를 다시 쓰지 않고 `{ id, redacted: true }` stub으로 저장한다.
+   - workspace의 `patient_records` mirror upsert는 best-effort지만 삭제 상태를 되살리면 안 된다. 기존 `patient_records.deleted_at IS NOT NULL`인 row는 mirror 대상에서 제외하고, `ON CONFLICT DO UPDATE`도 `deleted_at IS NULL` row에만 적용한다.
 
 7. **CORS production 강화**
    - production 화이트리스트: 인트라넷 도메인만 (`https://wr.hospital.local` 등).
@@ -193,7 +194,7 @@ wr-evaluation-unified/
 - API 호환성 기준: `/api/patients`와 프론트 `Patient` 모델은 당분간 "평가/재해 건" 단위 이름을 유지한다. 내부 DB에서만 `patient_persons`를 추가해 사람 마스터를 분리한다.
 - 저장 기준: `POST/PATCH /api/patients`는 `data.shared.patientNo/name/birthDate`로 `patient_persons`를 find-or-create/upsert하고, `data.shared.injuryDate/evaluationDate`와 전체 payload는 `patient_records`에 case row로 저장한다.
 - 충돌 기준: 같은 조직의 같은 `patient_no`는 같은 person으로 연결한다. 단, 기존 person의 `birth_date`와 새 payload의 `birthDate`가 서로 다른 비어있지 않은 값이면 `409 PATIENT_IDENTITY_CONFLICT`로 표면화한다.
-- Workspace 기준: `workspaces.snapshot_payload`는 저장 시점의 원본 스냅샷이며 계속 저장 성공 우선이다. best-effort mirror는 person 연결 후 `patient_records` case row를 갱신하되, 실패해도 snapshot 저장은 롤백하지 않는다.
+- Workspace 기준: `workspaces.snapshot_payload`는 저장 시점의 원본 스냅샷이며 계속 저장 성공 우선이다. best-effort mirror는 person 연결 후 `patient_records` case row를 갱신하되, 실패해도 snapshot 저장은 롤백하지 않는다. 단, 삭제된 환자 PHI는 원본 스냅샷보다 삭제/비식별화 정책이 우선하므로 새 workspace 저장 시에도 redacted stub만 보관한다.
 
 **구현할 엔드포인트**
 - `POST /api/auth/login` → HttpOnly `wr_refresh` + non-HttpOnly `wr_csrf` 쿠키 set, body `{user, accessToken, accessExpiresAt}`
@@ -462,11 +463,12 @@ main (v4.2.1 → v4.2.x 핫픽스만)
 | ID | 작업 | 영향 | 검증 | deps | 규모 |
 |---|---|---|---|---|---|
 | T36 | 서버 `routes/patients.ts`: GET list/search, GET one, POST(Idempotency-Key 저장 테이블), PATCH(If-Match), DELETE(?revision=). **파생 컬럼은 zod 검증 후 앱 서버에서 명시 계산** | `server/src/routes/patients.ts`, `server/migrations/0005_idempotency.sql`(멱등성 캐시 테이블), `server/migrations/0006_patient_no_audit_retention.sql`(초기 patient_no 유니크 제약 + audit_logs 보존 정책 주석; patient_no 유니크 위치는 T36c에서 `patient_persons`로 이동) | supertest 충돌/멱등 시나리오 | T11, T14, T17 | M ✅ |
-| T36b | **환자 soft delete 시 snapshot PHI 비식별화 + retention 정책** (T36 DELETE 구현과 함께): `DELETE /api/patients/:id` 시 모든 `workspaces.snapshot_payload` 내 해당 환자 entry를 비식별화(name/patient_no/birth_date 필드 redact, payload 본문 제거, `redacted: true` 플래그). 워크스페이스 retention = 5년 후 자동 cleanup 잡. 관리자 강제 삭제 `DELETE /api/admin/workspaces/:id/purge` 제공 | `server/src/routes/patients.ts`, `server/src/routes/admin.ts`, `server/src/jobs/workspaceRetention.ts`, `server/migrations/0007_workspace_retention.sql`, `server/migrations/0008_workspace_snapshot_default.sql` | (a) 환자 삭제 후 워크스페이스 조회 시 해당 entry redacted 표시 + UI 회색 처리 (b) 5년 경과 워크스페이스 cleanup 잡 동작 (c) admin purge + audit 기록 | T36 | M |
+| T36b | **환자 soft delete 시 snapshot PHI 비식별화 + retention 정책** (T36 DELETE 구현과 함께): `DELETE /api/patients/:id` 시 모든 `workspaces.snapshot_payload` 내 해당 환자 entry를 비식별화(name/patient_no/birth_date 필드 redact, payload 본문 제거, `redacted: true` 플래그). 이후 stale 클라이언트가 `POST /api/workspaces`로 같은 환자를 포함해 저장하더라도 서버가 `patient_records.deleted_at`을 조회해 새 snapshot에는 redacted stub만 저장하고, workspace mirror upsert가 `deleted_at`을 `NULL`로 되살리지 못하게 한다. 워크스페이스 retention = 5년 후 자동 cleanup 잡. 관리자 강제 삭제 `DELETE /api/admin/workspaces/:id/purge` 제공 | `server/src/routes/patients.ts`, `server/src/routes/admin.ts`, `server/src/jobs/workspaceRetention.ts`, `server/migrations/0007_workspace_retention.sql`, `server/migrations/0008_workspace_snapshot_default.sql`, `server/src/routes/workspaces.ts` | (a) 환자 삭제 후 워크스페이스 조회 시 해당 entry redacted 표시 + UI 회색 처리 (b) 삭제 환자를 포함한 stale workspace 저장 시 새 snapshot도 `{ id, redacted: true }`만 보관 (c) workspace mirror upsert SQL이 `deleted_at IS NULL` row만 갱신 (d) 5년 경과 워크스페이스 cleanup 잡 동작 (e) admin purge + audit 기록 | T36 | M |
 | T36c | **환자 사람(person)과 평가/재해 건(record) 분리**. `patient_no`는 병원 내 환자 사람의 고유번호로 유지하되, 같은 환자에게 재해일자/평가일자가 다른 여러 `patient_records`를 허용한다. `/api/patients`는 호환성을 위해 평가 건 API로 유지하고 내부적으로 `patient_persons`를 연결한다. | `server/migrations/0009_patient_persons.sql`, `server/src/db/patientPersons.ts`, `server/src/routes/patients.ts`, `server/src/routes/workspaces.ts`, `server/src/routes/__tests__/patients.test.ts`, `server/src/routes/__tests__/workspaces.test.ts` | (a) 같은 `patientNo` + 다른 `injuryDate` 2건 생성 성공 (b) 같은 `patientNo`는 하나의 `patient_persons`에 연결 (c) birthDate 충돌은 409 (d) workspace mirror가 중복 `patientNo`를 실패로 보지 않음 | T36, T36b | M |
 | T37 | 클라 `patientServerRepository.js` + `patient.sync` 활용 push/pull | `src/core/services/patientServerRepository.js` | 다중 클라이언트 동시 PATCH → 409 + 충돌 모달 | T36, T28 | M |
 | T38 | 백그라운드 동기화: 5분 주기 + window focus pull + 즉시 push | `src/core/hooks/usePatientSync.js`, `src/App.jsx` | 두 PC에서 동기화 시각 확인 | T37 | M |
-| T39 | 충돌 해결 모달 (내 버전/서버 버전/병합) | `src/core/components/ConflictResolveModal.jsx` | 강제 충돌 시나리오 | T37 | M |
+| T38b | 삭제 동기화: `removePatient` / `removeSelectedPatients`에서 로컬 제거 전 `DELETE /api/patients/:id?revision=N` 호출. local-only 환자는 로컬에서만 제거하고, 서버 환자는 204/404 후 로컬 제거. 409는 로컬 제거하지 않고 `syncStatus: conflict`, `conflict.kind = delete`로 표시 | `src/core/hooks/usePatientCrud.js`, `src/App.jsx` | PC A에서 삭제한 환자가 PC B pull 후 사라짐. stale revision 삭제는 conflict로 남음 | T36b, T37, T38 | S |
+| T39 | 충돌 해결 모달 (내 버전/서버 버전/병합). 병합 JSON은 문법뿐 아니라 최소 환자 데이터 구조(`shared` object, `modules` object, `activeModules` string array)를 검증한 뒤 적용한다. | `src/core/components/ConflictResolveModal.jsx`, `src/core/components/__tests__/ConflictResolveModal.test.js` | 강제 충돌 시나리오 + 잘못된 병합 JSON/구조 입력 시 적용 차단 | T37 | M |
 
 ### Phase 4 — 보안/감사 강화 (통합 브랜치 계속)
 | ID | 작업 | 영향 | 검증 | deps | 규모 |

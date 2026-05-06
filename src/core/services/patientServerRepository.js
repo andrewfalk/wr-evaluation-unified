@@ -12,11 +12,15 @@ function getBaseUrl(session, settings) {
 // When we POST a new patient, we send our local UUID as the body id so the server
 // stores it as its own id — meaning serverPatient.id === localPatient.id after a push.
 // On pull (records created on another device), localId may differ; callers pass null.
-function applyServerSync(serverPatient, localId = null) {
-  return {
+function applyServerSync(serverPatient, localId = null, localMeta = undefined) {
+  const mapped = {
     ...serverPatient,
     id: localId ?? serverPatient.id,
   };
+  if (mapped.meta === undefined && localMeta !== undefined) {
+    mapped.meta = localMeta;
+  }
+  return mapped;
 }
 
 // ---------------------------------------------------------------------------
@@ -39,6 +43,14 @@ export async function pullPatients({ session, settings, params = {} } = {}) {
     items: (data.items ?? []).map(p => applyServerSync(p)),
     total: data.total ?? data.items?.length ?? 0,
   };
+}
+
+export async function fetchPatient(serverId, { session, settings } = {}) {
+  const data = await requestJson(`/api/patients/${serverId}`, {
+    baseUrl: getBaseUrl(session, settings),
+    session,
+  });
+  return applyServerSync(data);
 }
 
 // ---------------------------------------------------------------------------
@@ -64,7 +76,7 @@ export async function pushPatient(patient, { session, settings } = {}) {
         data:      patient.data,
       },
     });
-    return applyServerSync(data, patient.id);
+    return applyServerSync(data, patient.id, patient.meta);
   }
 
   const data = await requestJson(`/api/patients/${serverId}`, {
@@ -77,7 +89,7 @@ export async function pushPatient(patient, { session, settings } = {}) {
       data:  patient.data,
     },
   });
-  return applyServerSync(data, patient.id);
+  return applyServerSync(data, patient.id, patient.meta);
 }
 
 // ---------------------------------------------------------------------------
@@ -116,11 +128,19 @@ export async function pushPendingPatients(patients, { session, settings } = {}) 
     if (r.status === 'fulfilled') {
       synced.push(r.value);
     } else {
-      failed.push({ patient: pending[i], error: r.reason });
+      failed.push({
+        patient: pending[i],
+        error:   r.reason,
+        kind:    isConflictError(r.reason) ? 'conflict' : 'error',
+      });
     }
   });
 
   return { synced, failed };
+}
+
+export function isConflictError(error) {
+  return error?.status === 409;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,8 +162,42 @@ export function mergeServerPatient(localPatients, serverPatient) {
     return [...localPatients, serverPatient];
   }
 
-  const merged = { ...serverPatient, id: localPatients[idx].id };
+  const local = localPatients[idx];
+  const localStatus = local.sync?.syncStatus;
+  const localRevision = local.sync?.revision ?? 0;
+  const serverRevision = serverPatient.sync?.revision ?? 0;
+
+  if (localStatus === 'dirty') {
+    const merged = serverRevision > localRevision
+      ? markPullConflict(local, serverPatient)
+      : local;
+    return localPatients.map((p, i) => (i === idx ? merged : p));
+  }
+
+  if (localStatus === 'conflict') {
+    const merged = markPullConflict(local, serverPatient);
+    return localPatients.map((p, i) => (i === idx ? merged : p));
+  }
+
+  const merged = applyServerSync(serverPatient, local.id, local.meta);
   return localPatients.map((p, i) => (i === idx ? merged : p));
+}
+
+function markPullConflict(localPatient, serverPatient) {
+  const existingConflict = localPatient.sync?.conflict || {};
+  return {
+    ...localPatient,
+    sync: {
+      ...(localPatient.sync || {}),
+      syncStatus: 'conflict',
+      conflict: {
+        ...existingConflict,
+        kind: existingConflict.kind || 'pull',
+        serverPatient,
+        serverRevision: serverPatient.sync?.revision ?? null,
+      },
+    },
+  };
 }
 
 export function mergePulledPatients(localPatients, pulledItems) {

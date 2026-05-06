@@ -1388,6 +1388,49 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .modal-scroll-list { display: flex; flex-direction: column; gap: 8px; max-height: 240px; overflow-y: auto; }
 .load-modal { max-width: 720px; display: flex; flex-direction: column; gap: 16px; }
 .save-modal { max-width: 560px; display: flex; flex-direction: column; gap: 16px; }
+.conflict-modal { max-width: 920px; display: flex; flex-direction: column; gap: 16px; }
+.conflict-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.conflict-panel {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 14px;
+  background: var(--card-bg);
+}
+.conflict-panel h3 { margin: 0 0 10px; font-size: 0.92rem; color: var(--text-primary); }
+.conflict-summary { display: grid; gap: 7px; margin: 0; }
+.conflict-summary div { display: grid; grid-template-columns: 86px 1fr; gap: 10px; align-items: baseline; }
+.conflict-summary dt { color: var(--text-muted); font-size: 0.74rem; }
+.conflict-summary dd { margin: 0; color: var(--text-primary); font-size: 0.82rem; min-width: 0; overflow-wrap: anywhere; }
+.conflict-empty,
+.conflict-notice { color: var(--text-muted); font-size: 0.84rem; }
+.conflict-notice { padding: 10px 12px; border-radius: 8px; background: rgba(59,130,246,0.1); }
+.conflict-notice-warning { background: rgba(245,158,11,0.14); color: #b45309; }
+.conflict-merge { display: flex; flex-direction: column; gap: 10px; }
+.conflict-merge textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+.conflict-actions { justify-content: flex-end; flex-wrap: wrap; }
+.patient-sync-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(245,158,11,0.16);
+  color: #b45309;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.patient-item.conflict { border-color: rgba(245,158,11,0.45); }
 
 .import-zone {
   border: 2px dashed var(--card-border);

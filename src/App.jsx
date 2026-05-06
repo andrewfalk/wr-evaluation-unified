@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { getModule, getAllModules } from './core/moduleRegistry';
 import { SettingsModal } from './core/components/SettingsModal';
+import { ConflictResolveModal } from './core/components/ConflictResolveModal';
 import { BatchImportModal } from './core/components/BatchImportModal';
 import { PresetManageModal } from './core/components/PresetManageModal';
 import { PresetBrowseModal } from './core/components/PresetBrowseModal';
@@ -28,8 +29,11 @@ import { useStepNavigation } from './core/hooks/useStepNavigation';
 import { useIntakeWizard } from './core/hooks/useIntakeWizard';
 import { useWorkspacePersistence } from './core/hooks/useWorkspacePersistence';
 import { usePatientCrud } from './core/hooks/usePatientCrud';
+import { usePatientSync } from './core/hooks/usePatientSync';
+import { resolvePatientConflictInList } from './core/services/patientConflictResolution';
+import { deletePatientOnServer } from './core/services/patientServerRepository';
 import { suggestModules } from './core/utils/diagnosisMapping';
-import { showConfirm } from './core/utils/platform';
+import { showAlert, showConfirm } from './core/utils/platform';
 import { getSyncedEvaluationDate } from './core/utils/patientCompletion';
 import { generateUnifiedReport } from './core/utils/reportGenerator';
 import { buildSteps } from './core/utils/steps';
@@ -93,12 +97,16 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showBatchImport, setShowBatchImport] = useState(false);
   const [showHome, setShowHome] = useState(false);
+  const [conflictPatientId, setConflictPatientId] = useState(null);
   const { serverConfig, configLoading, configError } = useServerConfig({ session, settings });
   const { aiAvailable } = useAIAvailable({ serverConfig, session });
   const isIntranetMode =
     session?.mode === 'intranet' || settings?.integrationMode === 'intranet';
   const { status: integrationStatus } = useIntegrationStatus({ session, settings });
   const activePatient = patients.find(p => p.id === activeId);
+  const conflictPatient = patients.find(
+    p => p.id === conflictPatientId && p.sync?.syncStatus === 'conflict'
+  );
   const activeModules = activePatient?.data?.activeModules || [];
 
   const {
@@ -202,6 +210,23 @@ function App() {
   const { currentStepIndex, setCurrentStepIndex, goToStep, goNext, goPrev, switchPatient } = useStepNavigation({ steps, activeId, setActiveId, setShowSidebar });
   const { intakeShared, setIntakeShared, handleStartIntake, handleIntakeComplete } = useIntakeWizard({ settings, session, setPatients, setActiveId, setCurrentStepIndex, setShowHome });
   handleStartIntakeRef.current = handleStartIntake;
+
+  usePatientSync({
+    patients,
+    setPatients,
+    activeId,
+    setActiveId,
+    session,
+    settings,
+    enabled:
+      isIntranetMode &&
+      isAuthenticated &&
+      sessionVerified &&
+      !session?.user?.mustChangePassword &&
+      !configLoading &&
+      !configError,
+  });
+
   const {
     savedItems, setSavedItems, saveName, setSaveName, lastAutoSave, legacyItems,
     handleSave, handleOverwriteSave, handleLoad, handleDelete, openLoadModal,
@@ -224,7 +249,7 @@ function App() {
     addPatient, removePatient, removeSelectedPatients,
     handleBatchImport, handleLoadTestData,
   } = usePatientCrud({
-    activeId, activeModuleId, session,
+    activeId, activeModuleId, session, settings,
     patients, setPatients,
     selectedIds, setSelectedIds,
     errors, setErrors,
@@ -340,6 +365,68 @@ function App() {
   };
   handleResetPatientsRef.current = handleResetPatients;
 
+  const applyResolvedConflict = (patientId, resolution, options = {}) => {
+    setPatients(prev => {
+      const next = resolvePatientConflictInList(prev, patientId, resolution, options);
+      if (activeId === patientId && !next.some(p => p.id === patientId)) {
+        queueMicrotask(() => {
+          setActiveId(next[0]?.id || null);
+          setCurrentStepIndex(0);
+        });
+      }
+      return next;
+    });
+    setConflictPatientId(null);
+  };
+
+  const handleResolveConflict = async (resolution, { patient, serverPatient, mergedData } = {}) => {
+    if (!patient) return;
+    const conflict = patient.sync?.conflict || {};
+    const conflictKind = conflict.kind;
+
+    if (resolution === 'use-local' && conflictKind === 'delete') {
+      try {
+        await deletePatientOnServer(
+          patient.sync.serverId,
+          serverPatient?.sync?.revision ?? conflict.serverRevision ?? patient.sync.revision,
+          { session, settings }
+        );
+        applyResolvedConflict(patient.id, resolution, { serverPatient });
+      } catch (error) {
+        if (error?.status === 404) {
+          applyResolvedConflict(patient.id, resolution, { serverPatient });
+          return;
+        }
+        setPatients(prev => prev.map(p => (
+          p.id === patient.id
+            ? {
+                ...p,
+                sync: {
+                  ...(p.sync || {}),
+                  syncStatus: 'conflict',
+                  conflict: {
+                    ...(p.sync?.conflict || {}),
+                    serverRevision: error?.data?.currentRevision ?? p.sync?.conflict?.serverRevision ?? null,
+                  },
+                },
+              }
+            : p
+        )));
+        await showAlert(`Delete failed. ${error?.message || 'Please try again.'}`);
+      }
+      return;
+    }
+
+    const needsNewLocalId = conflictKind === 'remote-delete' && (
+      resolution === 'use-local' || resolution === 'merge'
+    );
+    applyResolvedConflict(patient.id, resolution, {
+      serverPatient,
+      mergedData,
+      newId: needsNewLocalId ? crypto.randomUUID() : null,
+    });
+  };
+
   // 공통 모달 렌더링
   const renderModals = () => (
     <>
@@ -356,6 +443,15 @@ function App() {
       {showSaveModal && <SaveModal patientCount={patients.length} saveName={saveName} onSaveNameChange={e => setSaveName(e.target.value)} savedItems={savedItems} onSave={handleSave} onOverwriteSave={handleOverwriteSave} onClose={() => setShowSaveModal(false)} />}
       {showLoadModal && <LoadModal legacyItems={legacyItems} savedItems={savedItems} onLoad={handleLoad} onDelete={handleDelete} onClose={() => setShowLoadModal(false)} />}
       {showBatchImport && <BatchImportModal onClose={() => setShowBatchImport(false)} onImport={handleBatchImport} existingPatients={patients} />}
+      {conflictPatient && (
+        <ConflictResolveModal
+          patient={conflictPatient}
+          session={session}
+          settings={settings}
+          onResolve={handleResolveConflict}
+          onClose={() => setConflictPatientId(null)}
+        />
+      )}
       {presetModalJobId && activePatient && (
         <PresetManageModal
           jobId={presetModalJobId}
@@ -525,6 +621,7 @@ function App() {
         onSwitchPatient={switchPatient}
         onRemovePatient={removePatient}
         onRemoveSelectedPatients={removeSelectedPatients}
+        onResolveConflict={setConflictPatientId}
       />
 
       {/* 메인 영역 */}

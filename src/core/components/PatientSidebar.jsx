@@ -140,6 +140,7 @@ export function PatientSidebar({
   onSwitchPatient,
   onRemovePatient,
   onRemoveSelectedPatients,
+  onResolveConflict,
 }) {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const allModules = useMemo(() => getAllModules(), []);
@@ -313,9 +314,11 @@ export function PatientSidebar({
             const registrationDate = formatShortDate(p.createdAt || p._savedAt);
             const evaluationDate = formatShortDate(p.data?.shared?.evaluationDate);
             const primaryDiagnosis = p.data?.shared?.diagnoses?.[0]?.name || '-';
+            const hasConflict = p.sync?.syncStatus === 'conflict';
+            const conflictKind = p.sync?.conflict?.kind || 'conflict';
 
             return (
-              <div key={p.id} className={`patient-item ${p.id === activeId ? 'active' : ''}`} onClick={() => onSwitchPatient(p.id)}>
+              <div key={p.id} className={`patient-item ${p.id === activeId ? 'active' : ''} ${hasConflict ? 'conflict' : ''}`} onClick={() => onSwitchPatient(p.id)}>
                 <div className="patient-item-grid">
                   <div className="patient-item-select">
                     <input
@@ -336,6 +339,7 @@ export function PatientSidebar({
                       <div className="patient-item-name-row">
                         <span className="patient-item-title">{patientName}</span>
                         {patientNo && <span className="patient-no">#{patientNo}</span>}
+                        {hasConflict && <span className="patient-sync-badge">{conflictKind}</span>}
                         <div className="patient-item-modules">
                           {pModules.map(mId => {
                             const mod = getModule(mId);
@@ -355,6 +359,9 @@ export function PatientSidebar({
                       <span>완료 {evaluationDate}</span>
                     </div>
                     <div className="patient-item-actions">
+                      {hasConflict && (
+                        <button className="btn btn-info btn-xs" onClick={e => { e.stopPropagation(); onResolveConflict?.(p.id); }}>Resolve</button>
+                      )}
                       <button className="btn btn-danger btn-xs" onClick={e => { e.stopPropagation(); onRemovePatient(p.id); }}>삭제</button>
                     </div>
                   </div>

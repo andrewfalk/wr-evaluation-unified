@@ -65,6 +65,34 @@ function extractPatientIds(patients: unknown[]): string[] {
   return ids;
 }
 
+async function loadDeletedPatientIds(db: QueryRunner, orgId: string, patientIds: string[]): Promise<Set<string>> {
+  if (patientIds.length === 0) return new Set();
+
+  const { rows } = await db.query<{ id: string; deleted_at: Date | null }>(
+    `SELECT id, deleted_at
+     FROM patient_records
+     WHERE organization_id = $1 AND id = ANY($2::uuid[])
+     FOR SHARE`,
+    [orgId, patientIds]
+  );
+
+  return new Set(
+    rows
+      .filter((row) => row.deleted_at != null)
+      .map((row) => row.id)
+  );
+}
+
+function redactDeletedPatients(patients: unknown[], deletedPatientIds: Set<string>): unknown[] {
+  if (deletedPatientIds.size === 0) return patients;
+
+  return patients.map((patient) => {
+    const id = resolvePatientId(patient);
+    if (!id || !deletedPatientIds.has(id)) return patient;
+    return { id, redacted: true };
+  });
+}
+
 // Metadata extracted from a patient object for patient_records upsert.
 interface PatientMeta {
   id:              string;
@@ -127,13 +155,16 @@ function extractPatientMeta(p: unknown): PatientMeta | null {
 async function upsertPatientRecord(
   pool: Pool, orgId: string, userId: string, meta: PatientMeta,
 ): Promise<void> {
-  const existing = await pool.query<{ patient_person_id: string | null }>(
-    `SELECT patient_person_id
+  const existing = await pool.query<{ patient_person_id: string | null; deleted_at: Date | null }>(
+    `SELECT patient_person_id, deleted_at
      FROM patient_records
      WHERE id = $1 AND organization_id = $2`,
     [meta.id, orgId]
   );
-  const existingPersonId = existing.rows[0]?.patient_person_id ?? null;
+  const existingRow = existing.rows[0];
+  if (existingRow?.deleted_at !== null && existingRow?.deleted_at !== undefined) return;
+
+  const existingPersonId = existingRow?.patient_person_id ?? null;
   const personId = await resolvePatientPersonId(pool as QueryRunner, orgId, meta, existingPersonId);
 
   await pool.query(
@@ -153,9 +184,9 @@ async function upsertPatientRecord(
        diagnoses_codes  = EXCLUDED.diagnoses_codes,
        jobs_names       = EXCLUDED.jobs_names,
        revision         = patient_records.revision + 1,
-       payload          = EXCLUDED.payload,
-       deleted_at       = NULL
-     WHERE patient_records.organization_id = EXCLUDED.organization_id`,
+       payload          = EXCLUDED.payload
+     WHERE patient_records.organization_id = EXCLUDED.organization_id
+       AND patient_records.deleted_at IS NULL`,
     [
       meta.id, orgId, personId, userId, meta.name,
       meta.patientNo,
@@ -305,19 +336,34 @@ async function saveWorkspace(pool: Pool, req: Request, res: Response): Promise<v
     return;
   }
   const { name, patients } = parse.data;
-  const patientIds = extractPatientIds(patients);
+  const rawPatientIds = extractPatientIds(patients);
+  let snapshotPatients: unknown[] = patients;
 
-  // Primary operation: insert workspace snapshot.
-  await pool.query(
-    `INSERT INTO workspaces (organization_id, owner_user_id, name, patient_ids, snapshot_payload)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [orgId, session.userId, name, patientIds, JSON.stringify(patients)]
-  );
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const deletedPatientIds = await loadDeletedPatientIds(client as QueryRunner, orgId, rawPatientIds);
+    snapshotPatients = redactDeletedPatients(patients, deletedPatientIds);
+    const patientIds = extractPatientIds(snapshotPatients);
+
+    // Primary operation: insert workspace snapshot.
+    await client.query(
+      `INSERT INTO workspaces (organization_id, owner_user_id, name, patient_ids, snapshot_payload)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [orgId, session.userId, name, patientIds, JSON.stringify(snapshotPatients)]
+    );
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 
   // Secondary (best-effort): decompose patients into patient_records so that
   // ?view=current returns live data immediately after the first workspace save.
   // Failures are logged per patient and do not roll back the workspace row.
-  const metas = patients.map(extractPatientMeta).filter((m): m is PatientMeta => m !== null);
+  const metas = snapshotPatients.map(extractPatientMeta).filter((m): m is PatientMeta => m !== null);
   const results = await Promise.allSettled(
     metas.map((meta) => upsertPatientRecord(pool, orgId, session.userId, meta))
   );

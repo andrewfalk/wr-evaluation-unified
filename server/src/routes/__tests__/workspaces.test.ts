@@ -32,7 +32,9 @@ import type { Pool } from 'pg';
 // Helpers
 // ---------------------------------------------------------------------------
 function makePool(): Pool {
-  return { connect: vi.fn(), query: vi.fn() } as unknown as Pool;
+  const query = vi.fn();
+  const client = { query, release: vi.fn() };
+  return { connect: vi.fn().mockResolvedValue(client), query } as unknown as Pool;
 }
 
 const CSRF_TOKEN = 'ok';
@@ -300,9 +302,13 @@ describe('POST /api/workspaces', () => {
     const pool   = makePool();
     const newRow = { ...WS_ROW, id: '33333333-3333-3333-3333-333333333333', name: 'New Visit' };
     const mock   = pool.query as ReturnType<typeof vi.fn>;
-    // Call order: auth → INSERT workspace → existing record lookup → person lookup/insert → upsert patient_records → list
+    // Call order: auth -> BEGIN -> deleted check -> INSERT workspace -> COMMIT -> existing record lookup
+    // -> person lookup/insert -> upsert patient_records -> list
     mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });   // auth
+    mock.mockResolvedValueOnce({ rows: [] });                  // BEGIN
+    mock.mockResolvedValueOnce({ rows: [] });                  // deleted patient check
     mock.mockResolvedValueOnce({ rows: [] });                  // INSERT workspace
+    mock.mockResolvedValueOnce({ rows: [] });                  // COMMIT
     mock.mockResolvedValueOnce({ rows: [] });                  // SELECT existing patient_records
     mock.mockResolvedValueOnce({ rows: [] });                  // SELECT patient_persons
     mock.mockResolvedValueOnce({ rows: [{ id: PERSON_ID }] }); // INSERT patient_persons
@@ -319,6 +325,43 @@ describe('POST /api/workspaces', () => {
     expect(res.body.items[0].name).toBe('New Visit');
   });
 
+  it('redacts soft-deleted patients before saving a new workspace snapshot', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    mock.mockResolvedValueOnce({ rows: [] }); // BEGIN
+    mock.mockResolvedValueOnce({ rows: [{ id: PAT_ID, deleted_at: new Date('2024-02-01T00:00:00Z') }] });
+    mock.mockResolvedValueOnce({ rows: [] }); // INSERT workspace
+    mock.mockResolvedValueOnce({ rows: [] }); // COMMIT
+    mock.mockResolvedValueOnce({
+      rows: [{
+        ...WS_ROW,
+        snapshot_payload: [{ id: PAT_ID, redacted: true }],
+      }],
+    }); // list query
+
+    const res = await request(makeApp(pool))
+      .post('/api/workspaces')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send(VALID_BODY);
+
+    expect(res.status).toBe(201);
+    const calls = mock.mock.calls as unknown[][];
+    const insertWsCall = calls.find((c) =>
+      typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO workspaces')
+    );
+    expect(insertWsCall).toBeDefined();
+    expect(JSON.parse((insertWsCall![1] as unknown[])[4] as string)).toEqual([
+      { id: PAT_ID, redacted: true },
+    ]);
+
+    const upsertCall = calls.find((c) =>
+      typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO patient_records')
+    );
+    expect(upsertCall).toBeUndefined();
+  });
+
   it('upserts patient_records after workspace insert', async () => {
     const pool = makePool();
     const mock  = pool.query as ReturnType<typeof vi.fn>;
@@ -330,8 +373,14 @@ describe('POST /api/workspaces', () => {
       .set('x-csrf-token', CSRF_TOKEN)
       .send(VALID_BODY);
 
-    // 1st call: auth, 2nd: INSERT workspace, 3rd: upsert patient_records, 4th: list
+    // Transactional workspace insert is followed by best-effort patient_records upsert.
     const calls = (mock).mock.calls;
+    const deletedCheckCall = calls.find((c: unknown[]) =>
+      typeof c[0] === 'string' && (c[0] as string).includes('FROM patient_records') &&
+      (c[0] as string).includes('FOR SHARE')
+    );
+    expect(deletedCheckCall).toBeDefined();
+
     const upsertCall = calls.find((c: unknown[]) =>
       typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO patient_records')
     );
@@ -340,6 +389,8 @@ describe('POST /api/workspaces', () => {
     expect(upsertCall![1][1]).toBe(ORG_ID);   // organization_id
     expect(upsertCall![1][3]).toBe(USER_ID);  // owner_user_id
     expect(upsertCall![1][4]).toBe('Kim');    // name
+    expect(upsertCall![0]).not.toContain('deleted_at       = NULL');
+    expect(upsertCall![0]).toContain('patient_records.deleted_at IS NULL');
   });
 
   it('reuses existing anonymous patient_person when patientNo is blank', async () => {
@@ -357,7 +408,10 @@ describe('POST /api/workspaces', () => {
     const pool = makePool();
     const mock = pool.query as ReturnType<typeof vi.fn>;
     mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    mock.mockResolvedValueOnce({ rows: [] }); // BEGIN
+    mock.mockResolvedValueOnce({ rows: [] }); // deleted patient check
     mock.mockResolvedValueOnce({ rows: [] }); // INSERT workspace
+    mock.mockResolvedValueOnce({ rows: [] }); // COMMIT
     mock.mockResolvedValueOnce({ rows: [{ patient_person_id: ANON_PERSON_ID }] }); // existing record lookup
     mock.mockResolvedValueOnce({ rows: [] }); // UPDATE existing person
     mock.mockResolvedValueOnce({ rows: [] }); // upsert patient_records
@@ -443,8 +497,13 @@ describe('POST /api/workspaces', () => {
     const pool = makePool();
     const mock  = pool.query as ReturnType<typeof vi.fn>;
     mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });  // auth
+    mock.mockResolvedValueOnce({ rows: [] });                // BEGIN
+    mock.mockResolvedValueOnce({ rows: [] });                // deleted patient check
     mock.mockResolvedValueOnce({ rows: [] });                // INSERT workspace
+    mock.mockResolvedValueOnce({ rows: [] });                // COMMIT
     mock.mockResolvedValueOnce({ rows: [] });                // SELECT existing patient_records
+    mock.mockResolvedValueOnce({ rows: [] });                // SELECT patient_persons
+    mock.mockResolvedValueOnce({ rows: [{ id: PERSON_ID }] }); // INSERT patient_persons
     mock.mockRejectedValueOnce(new Error('DB error'));       // upsert fails
     mock.mockResolvedValueOnce({ rows: [WS_ROW] });         // list query
 
