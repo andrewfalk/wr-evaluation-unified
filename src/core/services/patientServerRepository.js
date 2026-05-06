@@ -68,6 +68,11 @@ export async function pushPatient(patient, { session, settings } = {}) {
   const revision = patient.sync?.revision ?? 0;
 
   if (!serverId) {
+    if (!patient.id) {
+      const err = new Error('POST /api/patients requires patient.id for Idempotency-Key.');
+      err.status = 400;
+      throw err;
+    }
     const data = await requestJson('/api/patients', {
       baseUrl: base,
       method:  'POST',
@@ -83,6 +88,11 @@ export async function pushPatient(patient, { session, settings } = {}) {
     return applyServerSync(data, patient.id, patient.meta);
   }
 
+  if (!Number.isFinite(revision)) {
+    const err = new Error(`PATCH /api/patients/:id requires a numeric revision for If-Match (got ${revision}).`);
+    err.status = 400;
+    throw err;
+  }
   const data = await requestJson(`/api/patients/${serverId}`, {
     baseUrl: base,
     method:  'PATCH',
@@ -103,6 +113,16 @@ export async function pushPatient(patient, { session, settings } = {}) {
 // Throws with status 409 on revision mismatch.
 // ---------------------------------------------------------------------------
 export async function deletePatientOnServer(serverId, revision, { session, settings } = {}) {
+  if (!serverId) {
+    const err = new Error('DELETE /api/patients requires a serverId.');
+    err.status = 400;
+    throw err;
+  }
+  if (revision == null || !Number.isFinite(revision)) {
+    const err = new Error(`DELETE /api/patients/:id requires a numeric revision (?revision=N, got ${revision}).`);
+    err.status = 400;
+    throw err;
+  }
   await requestJson(`/api/patients/${serverId}?revision=${revision}`, {
     baseUrl: getBaseUrl(session, settings),
     method:  'DELETE',

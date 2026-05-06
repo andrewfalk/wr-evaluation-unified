@@ -105,6 +105,13 @@ describe('fetchPatient', () => {
 // ---------------------------------------------------------------------------
 
 describe('pushPatient — POST (no serverId)', () => {
+  it('throws 400 when patient.id is missing (Idempotency-Key guard)', async () => {
+    const patient = makeLocalPatient({ id: undefined });
+    await expect(pushPatient(patient, { session: SESSION }))
+      .rejects.toMatchObject({ status: 400 });
+    expect(requestJson).not.toHaveBeenCalled();
+  });
+
   it('sends POST with Idempotency-Key header and local id in body', async () => {
     const returned = makeServerPatient({ id: 'local-uuid' });
     requestJson.mockResolvedValue(returned);
@@ -177,6 +184,15 @@ describe('pushPatient — PATCH (has serverId)', () => {
     expect(result.sync.serverId).toBe('server-1');
   });
 
+  it('throws 400 when revision is NaN (If-Match guard)', async () => {
+    const patient = makeLocalPatient({
+      sync: { serverId: 'server-1', revision: NaN, syncStatus: 'dirty', lastSyncedAt: null },
+    });
+    await expect(pushPatient(patient, { session: SESSION }))
+      .rejects.toMatchObject({ status: 400 });
+    expect(requestJson).not.toHaveBeenCalled();
+  });
+
   it('rethrows 409 conflict without modification', async () => {
     const err = new Error('Conflict');
     err.status = 409;
@@ -204,6 +220,29 @@ describe('deletePatientOnServer', () => {
     const [path, opts] = requestJson.mock.calls[0];
     expect(path).toBe('/api/patients/server-1?revision=4');
     expect(opts.method).toBe('DELETE');
+  });
+
+  it('accepts revision 0 (valid for first-revision delete)', async () => {
+    requestJson.mockResolvedValue(null);
+    await expect(deletePatientOnServer('server-1', 0, { session: SESSION })).resolves.toBeUndefined();
+  });
+
+  it('throws 400 when serverId is missing', async () => {
+    await expect(deletePatientOnServer(null, 1, { session: SESSION }))
+      .rejects.toMatchObject({ status: 400 });
+    expect(requestJson).not.toHaveBeenCalled();
+  });
+
+  it('throws 400 when revision is null', async () => {
+    await expect(deletePatientOnServer('server-1', null, { session: SESSION }))
+      .rejects.toMatchObject({ status: 400 });
+    expect(requestJson).not.toHaveBeenCalled();
+  });
+
+  it('throws 400 when revision is undefined', async () => {
+    await expect(deletePatientOnServer('server-1', undefined, { session: SESSION }))
+      .rejects.toMatchObject({ status: 400 });
+    expect(requestJson).not.toHaveBeenCalled();
   });
 });
 
