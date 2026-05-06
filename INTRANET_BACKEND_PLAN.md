@@ -356,6 +356,11 @@ npm run dev               # localhost:3000 → Vite가 /api/* → 3001 프록시
 10. **Workspace snapshot**: 환자 A → workspace 저장 → 환자 A 수정 → workspace 다시 열면 저장 시점 그대로. `?view=current`로 현재값 비교.
 11. **공유 스키마 방향**: server에서 `src/` import 시도 → 빌드 실패. client/server/mock 모두 `shared/contracts/`만 import.
 12. **CORS**: production에서 null/file/app origin 거부, 인트라넷 도메인만 허용.
+    반드시 `--origin` 플래그 포함 실행:
+    ```
+    npm run verify:csp -- --url https://wr.hospital.local --origin https://wr.hospital.local
+    ```
+    확인 항목: 허용 origin의 ACAO echo + `Access-Control-Allow-Credentials: true`, OPTIONS preflight에 `PUT`·`If-Match`·`Idempotency-Key` 허용.
 13. **CA 인증서 미설치 PC**: https://wr.hospital.local 접근 시 인증서 경고 → 운영 절차 따라 CA 설치 후 정상 접근.
 14. **마이그레이션**: 로컬 5명 → 인트라넷 → 5명 모두 서버 + sync.serverId, 재실행 중복 없음.
 15. **감사 로그**: read(patient GET/search/export, workspace load) + mutating + login success/fail + refresh fail 모두 기록. 앱 role SELECT 거부, audit reader role만 가능.
@@ -519,3 +524,4 @@ main (v4.2.1 → v4.2.x 핫픽스만)
   - `npm run electron:build` (Phase 0/1) 또는 `electron:build:{standalone,intranet}` (Phase 2 이후, T35에서 정의)
   - `cd server && npm test && npm run lint && npm run typecheck`
 - 통합 브랜치 → main 머지 직전: 전체 검증 항목(위 "검증 방법") 수동 점검표.
+  - **CORS 전체 검증 필수**: `npm run verify:csp -- --url https://wr.hospital.local --origin https://wr.hospital.local` (`--origin` 없이 실행하면 허용 origin + preflight 검사가 skip됨)
