@@ -84,7 +84,7 @@ function getKeywordMatchScore(preset, draft) {
   return score;
 }
 
-export function PresetManageModal({ jobId, patient, presets, editingPreset = null, onSave, onClose }) {
+export function PresetManageModal({ jobId, patient, presets, editingPreset = null, onSave, onClose, session }) {
   const job = (patient.data.shared.jobs || []).find(item => item.id === jobId);
   const activeModules = patient.data.activeModules || [];
 
@@ -217,9 +217,11 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
     }
 
     onSave({
-      id: existingCustom?._customId || existingCustom?.id || undefined,
-      jobName: normalizedJobName,
-      category: finalCategory || DEFAULT_CATEGORY,
+      id:          existingCustom?._customId || existingCustom?.id || undefined,
+      revision:    existingCustom?._customRevision || existingCustom?.revision || undefined,
+      visibility:  'private',
+      jobName:     normalizedJobName,
+      category:    finalCategory || DEFAULT_CATEGORY,
       description: normalizedDescription,
       modules,
     }, {
@@ -349,6 +351,13 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
           <h2>프리셋 저장</h2>
           <p className="modal-section-description">현재 입력한 직무 부담 데이터를 직업 프리셋으로 저장합니다.</p>
         </div>
+
+        {session?.mode === 'intranet' && (
+          <div className="form-meta-card preset-phi-notice">
+            인트라넷 모드에서 프리셋은 서버에 저장됩니다. 모듈 데이터에는
+            직업 노출 정보가 포함될 수 있습니다.
+          </div>
+        )}
 
         {editingPreset && (
           <div className="form-meta-card preset-match-card">

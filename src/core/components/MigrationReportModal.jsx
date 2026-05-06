@@ -30,13 +30,13 @@ function FailedPatientItem({ patient, name }) {
 // Presets section (shown in idle + done phases)
 // onPresetsImported: callback to reload preset state in the parent hook after import
 // ---------------------------------------------------------------------------
-function PresetsSection({ onPresetsImported }) {
+function PresetsSection({ onPresetsImported, session }) {
   const fileInputRef = useRef(null);
   const [presetMsg, setPresetMsg] = useState(null);
 
   const handleExport = async () => {
     try {
-      const { merged } = await loadAllPresets();
+      const { merged } = await loadAllPresets(session);
       exportPresetsToJSON(merged);
     } catch {
       setPresetMsg({ type: 'error', text: '내보내기 실패' });
@@ -48,7 +48,7 @@ function PresetsSection({ onPresetsImported }) {
     if (!file) return;
     e.target.value = '';
     try {
-      const { addedCount } = await importPresetsFromJSON(file);
+      const { addedCount } = await importPresetsFromJSON(file, session);
       setPresetMsg({ type: 'ok', text: `${addedCount}개 프리셋을 가져왔습니다.` });
       onPresetsImported?.();
     } catch {
@@ -102,6 +102,7 @@ export function MigrationReportModal({
   onReset,
   onClose,
   onPresetsImported,
+  session,
 }) {
   const migrated      = result?.migrated      ?? [];
   const alreadySynced = result?.alreadySynced ?? [];
@@ -146,7 +147,7 @@ export function MigrationReportModal({
                 <li>실패한 항목은 결과 화면에서 재시도할 수 있습니다.</li>
               </ul>
             </div>
-            <PresetsSection onPresetsImported={onPresetsImported} />
+            <PresetsSection onPresetsImported={onPresetsImported} session={session} />
           </div>
         )}
 
@@ -196,7 +197,7 @@ export function MigrationReportModal({
               </p>
             )}
 
-            <PresetsSection onPresetsImported={onPresetsImported} />
+            <PresetsSection onPresetsImported={onPresetsImported} session={session} />
           </div>
         )}
 

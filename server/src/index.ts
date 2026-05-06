@@ -16,6 +16,7 @@ import { createWorkspacesRouter } from './routes/workspaces';
 import { createPatientsRouter } from './routes/patients';
 import { createAutosaveRouter } from './routes/autosave';
 import { createAIRouter } from './routes/ai';
+import { createPresetsRouter } from './routes/presets';
 import { cspMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
 import { runWorkspaceRetention } from './jobs/workspaceRetention';
@@ -41,6 +42,7 @@ app.use('/api/workspaces', createWorkspacesRouter(pool));
 app.use('/api/patients',  createPatientsRouter(pool));
 app.use('/api/autosave',  createAutosaveRouter(pool));
 app.use('/api/ai',        createAIRouter(pool));
+app.use('/api/presets',   createPresetsRouter(pool));
 
 // ---------------------------------------------------------------------------
 // Static web SPA (dist/web/) — registered after API routes so API paths win.

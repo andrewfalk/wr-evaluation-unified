@@ -1,8 +1,14 @@
+import { requestJson } from './httpClient';
+
 const CUSTOM_PRESETS_KEY = 'wrEvalUnifiedCustomPresets';
 
 export const DEFAULT_CATEGORY = '미분류';
 
 const isElectronFS = () => !!window.electron?.fsLoadAllPatients;
+
+// ---------------------------------------------------------------------------
+// Identity helpers
+// ---------------------------------------------------------------------------
 
 export function normalizePresetIdentityPart(value) {
   return String(value || '').trim();
@@ -47,6 +53,10 @@ function normalizePresetRecord(preset = {}) {
     modules: { ...(preset.modules || {}) },
   };
 }
+
+// ---------------------------------------------------------------------------
+// Local storage helpers
+// ---------------------------------------------------------------------------
 
 function loadCustomPresetsFromLocalStorage() {
   const raw = localStorage.getItem(CUSTOM_PRESETS_KEY);
@@ -96,7 +106,90 @@ export function normalizeBuiltinPreset(raw) {
   };
 }
 
-export async function loadCustomPresets() {
+// ---------------------------------------------------------------------------
+// Server API helpers (intranet mode only)
+// ---------------------------------------------------------------------------
+
+function isIntranetSession(session) {
+  return session?.mode === 'intranet';
+}
+
+function buildIdempotencyKey(preset) {
+  const identity = buildPresetIdentity(preset);
+  // base64url-encode the identity string for safe use as an HTTP header value
+  try {
+    return btoa(unescape(encodeURIComponent(identity)))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  } catch {
+    return btoa(identity).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  }
+}
+
+async function fetchServerPresets(session) {
+  const data = await requestJson('/api/presets', {
+    session,
+    baseUrl: session?.apiBaseUrl,
+  });
+  return (data.presets || []);
+}
+
+async function createServerPreset(preset, session) {
+  const data = await requestJson('/api/presets', {
+    method: 'POST',
+    session,
+    baseUrl: session?.apiBaseUrl,
+    body: {
+      jobName:     preset.jobName,
+      category:    preset.category || DEFAULT_CATEGORY,
+      description: preset.description || '',
+      visibility:  preset.visibility || 'private',
+      modules:     preset.modules || {},
+    },
+    headers: { 'Idempotency-Key': buildIdempotencyKey(preset) },
+  });
+  return data.preset;
+}
+
+async function updateServerPreset(id, revision, changes, session) {
+  const data = await requestJson(`/api/presets/${id}`, {
+    method: 'PATCH',
+    session,
+    baseUrl: session?.apiBaseUrl,
+    body: changes,
+    headers: { 'If-Match': String(revision) },
+  });
+  return data.preset;
+}
+
+async function deleteServerPreset(id, session) {
+  return requestJson(`/api/presets/${id}`, {
+    method: 'DELETE',
+    session,
+    baseUrl: session?.apiBaseUrl,
+  });
+}
+
+// Upsert for server mode: if preset has a server revision → PATCH, else → POST
+async function saveServerCustomPreset(preset, options, session) {
+  const normalized = normalizePresetRecord(preset);
+  const hasServerId = normalized.id && !String(normalized.id).startsWith('builtin-');
+  if (hasServerId && normalized.revision) {
+    return updateServerPreset(normalized.id, normalized.revision, {
+      jobName:        normalized.jobName,
+      category:       normalized.category,
+      description:    normalized.description,
+      modules:        normalized.modules,
+      replaceModules: !!options.replaceModules,
+    }, session);
+  }
+  return createServerPreset(normalized, session);
+}
+
+// ---------------------------------------------------------------------------
+// Local storage CRUD (existing implementation)
+// ---------------------------------------------------------------------------
+
+async function loadCustomPresetsLocal() {
   if (isElectronFS() && window.electron.fsLoadCustomPresets) {
     const presets = await window.electron.fsLoadCustomPresets();
     if (Array.isArray(presets) && presets.length > 0) {
@@ -126,8 +219,24 @@ async function saveCustomPresetsAll(list) {
   }
 }
 
-export async function saveCustomPreset(preset, options = {}) {
-  const list = await loadCustomPresets();
+// ---------------------------------------------------------------------------
+// Public API — all functions accept optional session for mode dispatch
+// ---------------------------------------------------------------------------
+
+export async function loadCustomPresets(session) {
+  if (isIntranetSession(session)) {
+    return fetchServerPresets(session);
+  }
+  return loadCustomPresetsLocal();
+}
+
+export async function saveCustomPreset(preset, options = {}, session) {
+  if (isIntranetSession(session)) {
+    return saveServerCustomPreset(preset, options, session);
+  }
+
+  // Local mode (unchanged from original)
+  const list = await loadCustomPresetsLocal();
   const now = new Date().toISOString();
   const normalizedPreset = normalizePresetRecord(preset);
 
@@ -162,8 +271,13 @@ export async function saveCustomPreset(preset, options = {}) {
   return record;
 }
 
-export async function deleteCustomPreset(id) {
-  const list = await loadCustomPresets();
+export async function deleteCustomPreset(id, session) {
+  if (isIntranetSession(session)) {
+    await deleteServerPreset(id, session);
+    return [];
+  }
+
+  const list = await loadCustomPresetsLocal();
   const filtered = list.filter(p => p.id !== id);
   await saveCustomPresetsAll(filtered);
   return filtered;
@@ -189,8 +303,9 @@ export function mergePresets(builtins, customs) {
           ...(result[builtinIdx].modules || {}),
           ...(customPreset.modules || {}),
         },
-        _customId: customPreset.id,
-        _customCategory: customPreset.category,
+        _customId:          customPreset.id,
+        _customRevision:    customPreset.revision,
+        _customCategory:    customPreset.category,
         _customDescription: customPreset.description,
       };
       continue;
@@ -205,7 +320,7 @@ export function mergePresets(builtins, customs) {
   return result;
 }
 
-export async function loadAllPresets() {
+export async function loadAllPresets(session) {
   let builtins = [];
   let builtinError = null;
 
@@ -218,7 +333,7 @@ export async function loadAllPresets() {
     builtinError = e;
   }
 
-  const customs = await loadCustomPresets();
+  const customs = await loadCustomPresets(session);
   if (builtinError && customs.length === 0) {
     throw builtinError;
   }
@@ -230,6 +345,10 @@ export async function loadAllPresets() {
     builtinError,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Export / Import
+// ---------------------------------------------------------------------------
 
 function toExportableCustomPreset(preset) {
   if (!preset) return null;
@@ -269,11 +388,29 @@ export function exportPresetsToJSON(presets) {
   URL.revokeObjectURL(url);
 }
 
-export async function importPresetsFromJSON(file) {
+export async function importPresetsFromJSON(file, session) {
   const text = await file.text();
   const data = JSON.parse(text);
   const imported = data.presets || [];
-  const existing = await loadCustomPresets();
+
+  if (isIntranetSession(session)) {
+    const existing = await fetchServerPresets(session);
+    const existingIdentities = new Set(existing.map(buildPresetIdentity));
+    let addedCount = 0;
+
+    for (const preset of imported) {
+      const normalized = normalizePresetRecord(preset);
+      const identity = buildPresetIdentity(normalized);
+      if (existingIdentities.has(identity)) continue;
+      await createServerPreset(normalized, session);
+      existingIdentities.add(identity);
+      addedCount++;
+    }
+    return { addedCount, totalCount: existing.length + addedCount };
+  }
+
+  // Local mode
+  const existing = await loadCustomPresetsLocal();
   const existingIdentities = new Set(existing.map(buildPresetIdentity));
   const now = new Date().toISOString();
   let addedCount = 0;

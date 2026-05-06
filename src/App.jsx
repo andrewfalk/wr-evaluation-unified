@@ -462,6 +462,7 @@ function App() {
           onReset={resetMigration}
           onClose={() => setShowMigrationReport(false)}
           onPresetsImported={reloadPresets}
+          session={session}
         />
       )}
       {showSaveModal && <SaveModal patientCount={patients.length} saveName={saveName} onSaveNameChange={e => setSaveName(e.target.value)} savedItems={savedItems} onSave={handleSave} onOverwriteSave={handleOverwriteSave} onDelete={handleDelete} onClose={() => setShowSaveModal(false)} />}
@@ -484,6 +485,7 @@ function App() {
           editingPreset={presetEditingPreset}
           onSave={handleSaveCustomPreset}
           onClose={closePresetManageModal}
+          session={session}
         />
       )}
       {presetBrowseJobId && activePatient && (
