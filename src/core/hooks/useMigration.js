@@ -11,6 +11,7 @@ export function useMigration({ session, settings } = {}) {
   const [result, setResult] = useState(null);
 
   const start = useCallback(async () => {
+    if (status === 'running') return;
     setStatus('running');
     setResult(null);
     try {
@@ -21,7 +22,7 @@ export function useMigration({ session, settings } = {}) {
       setResult({ error: err });
       setStatus('error');
     }
-  }, [session, settings]);
+  }, [session, settings, status]);
 
   const reset = useCallback(() => {
     setStatus('idle');
