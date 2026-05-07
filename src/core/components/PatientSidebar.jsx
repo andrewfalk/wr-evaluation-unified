@@ -30,6 +30,11 @@ function formatShortDate(value) {
   return String(value).slice(0, 10);
 }
 
+function getPatientNameWarning(patient) {
+  const warnings = Array.isArray(patient?.sync?.warnings) ? patient.sync.warnings : [];
+  return warnings.find(warning => warning?.code === 'PATIENT_NAME_MISMATCH') || null;
+}
+
 function JobFilterCombobox({ patients, value, onChange }) {
   const [showList, setShowList] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -318,6 +323,10 @@ export function PatientSidebar({
             const primaryDiagnosis = isRedacted ? '삭제된 스냅샷' : (p.data?.shared?.diagnoses?.[0]?.name || '-');
             const hasConflict = p.sync?.syncStatus === 'conflict';
             const conflictKind = p.sync?.conflict?.kind || 'conflict';
+            const nameWarning = getPatientNameWarning(p);
+            const nameWarningTitle = nameWarning
+              ? `같은 등록번호와 생년월일의 기존 이름(${nameWarning.existingName || '-'})과 현재 이름(${nameWarning.incomingName || patientName})이 다릅니다. 개명 또는 입력 오류인지 확인하세요.`
+              : '';
 
             return (
               <div key={p.id} className={`patient-item ${p.id === activeId ? 'active' : ''} ${hasConflict ? 'conflict' : ''}`} onClick={() => onSwitchPatient(p.id)}>
@@ -343,6 +352,7 @@ export function PatientSidebar({
                         {patientNo && <span className="patient-no">#{patientNo}</span>}
                         {isRedacted && <span className="patient-sync-badge">redacted</span>}
                         {hasConflict && <span className="patient-sync-badge">{conflictKind}</span>}
+                        {nameWarning && <span className="patient-sync-badge patient-sync-badge-warning" title={nameWarningTitle}>이름 확인</span>}
                         <div className="patient-item-modules">
                           {pModules.map(mId => {
                             const mod = getModule(mId);

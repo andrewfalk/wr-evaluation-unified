@@ -1430,6 +1430,10 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   font-size: 0.68rem;
   font-weight: 700;
 }
+.patient-sync-badge-warning {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
 .patient-item.conflict { border-color: rgba(245,158,11,0.45); }
 
 .import-zone {

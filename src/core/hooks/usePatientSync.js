@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   mergePulledPatients,
+  mergePushedPatientAck,
   mergeServerPatient,
   pullPatients,
   pushPendingPatients,
@@ -21,7 +22,7 @@ function hasPendingPatients(patients = []) {
 
 function applySyncedPatients(localPatients, syncedPatients) {
   return syncedPatients.reduce(
-    (next, serverPatient) => mergeServerPatient(next, serverPatient),
+    (next, serverPatient) => mergePushedPatientAck(next, serverPatient),
     localPatients
   );
 }

@@ -208,6 +208,41 @@ export function mergeServerPatient(localPatients, serverPatient) {
   return localPatients.map((p, i) => (i === idx ? merged : p));
 }
 
+export function mergePushedPatientAck(localPatients, serverPatient) {
+  const serverId = serverPatient.sync?.serverId ?? serverPatient.id;
+  const idx = localPatients.findIndex(
+    p => p.id === serverPatient.id || (p.sync?.serverId && p.sync.serverId === serverId)
+  );
+
+  if (idx === -1) {
+    return [...localPatients, serverPatient];
+  }
+
+  const local = localPatients[idx];
+  const localStatus = local.sync?.syncStatus;
+
+  if (localStatus === 'dirty') {
+    const merged = {
+      ...local,
+      sync: {
+        ...(local.sync || {}),
+        serverId,
+        revision: serverPatient.sync?.revision ?? local.sync?.revision ?? 0,
+        syncStatus: 'dirty',
+        lastSyncedAt: serverPatient.sync?.lastSyncedAt ?? local.sync?.lastSyncedAt ?? null,
+      },
+    };
+    return localPatients.map((p, i) => (i === idx ? merged : p));
+  }
+
+  if (localStatus === 'conflict') {
+    return localPatients;
+  }
+
+  const merged = applyServerSync(serverPatient, local.id, local.meta);
+  return localPatients.map((p, i) => (i === idx ? merged : p));
+}
+
 function markPullConflict(localPatient, serverPatient) {
   const existingConflict = localPatient.sync?.conflict || {};
   return {
