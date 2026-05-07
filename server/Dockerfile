@@ -31,7 +31,7 @@ COPY src/ ./src/
 COPY public/ ./public/
 
 RUN npm ci
-RUN npm run build:web
+RUN VITE_DEFAULT_INTEGRATION_MODE=intranet npm run build:web
 
 # =============================================================================
 # Stage 2: Build server TypeScript
@@ -59,6 +59,13 @@ WORKDIR /app
 COPY --from=server-builder /build/server/dist       ./dist
 COPY --from=server-builder /build/server/node_modules ./node_modules
 COPY server/migrations ./migrations
+
+# npm installs local file dependencies as symlinks. The @wr/contracts symlink
+# points outside /app in the builder image, so vendor the built contract package
+# into the final runtime image as real files.
+RUN rm -rf ./node_modules/@wr/contracts && mkdir -p ./node_modules/@wr/contracts
+COPY --from=server-builder /build/shared/package.json ./node_modules/@wr/contracts/package.json
+COPY --from=server-builder /build/shared/dist ./node_modules/@wr/contracts/dist
 
 # Web SPA served at / for non-API routes
 COPY --from=web-builder /build/dist/web ./dist/web

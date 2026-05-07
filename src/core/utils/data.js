@@ -334,6 +334,11 @@ export function createSamplePatient() {
 }
 
 // 설정 기본값
+const DEFAULT_INTEGRATION_MODE =
+  import.meta.env.VITE_DEFAULT_INTEGRATION_MODE === 'intranet'
+    ? 'intranet'
+    : 'local';
+
 export const DEFAULT_SETTINGS = {
   theme: 'light',
   fontSize: 'medium',
@@ -341,7 +346,7 @@ export const DEFAULT_SETTINGS = {
   department: '직업환경의학과',
   doctorName: '김호길',
   autoSaveInterval: 30,
-  integrationMode: 'local',
+  integrationMode: DEFAULT_INTEGRATION_MODE,
   apiBaseUrl: ''
 };
 
