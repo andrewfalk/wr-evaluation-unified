@@ -323,6 +323,37 @@ describe('POST /api/patients', () => {
     expect((insertRecordCall![1] as unknown[])[2]).toBe(PERSON_ID);
   });
 
+  it('returns a warning when patient number and birth date match but name differs', async () => {
+    const pool = makePool();
+    makeClientSetup(pool,
+      { rows: [] },                           // BEGIN
+      { rows: [] },                           // DELETE expired
+      { rows: [], rowCount: 1 },              // INSERT slot (won)
+      { rows: [{ id: PERSON_ID, name: 'Old Name', birth_date: '1980-01-01' }] }, // existing person
+      { rows: [] },                           // UPDATE existing person
+      { rows: [] },                           // INSERT patient_records
+      { rows: [PAT_ROW] },                    // SELECT after INSERT
+      { rows: [] },                           // UPDATE slot to status=201
+      { rows: [] },                           // COMMIT
+    );
+
+    const res = await request(makeApp(pool))
+      .post('/api/patients')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('idempotency-key', IDEMP_KEY)
+      .send(CREATE_BODY);
+
+    expect(res.status).toBe(201);
+    expect(res.body.sync.warnings).toEqual([
+      expect.objectContaining({
+        code: 'PATIENT_NAME_MISMATCH',
+        existingName: 'Old Name',
+        incomingName: 'Kim',
+      }),
+    ]);
+  });
+
   it('returns 409 when patient number matches a different birth date', async () => {
     const pool = makePool();
     const cq = makeClientSetup(pool,
@@ -506,6 +537,35 @@ describe('PATCH /api/patients/:id', () => {
     expect(res.body.id).toBe(PAT_ID);
     expect(res.body.sync.revision).toBe(2);
     expect(res.body.sync.lastSyncedAt).toBe(LATER.toISOString());
+  });
+
+  it('returns a warning on patch when patient number and birth date match but name differs', async () => {
+    const updatedRow = { ...PAT_ROW, revision: 2, updated_at: LATER };
+    const pool = makePool();
+    makeClientSetup(pool,
+      { rows: [] }, // BEGIN
+      { rows: [PAT_ROW] }, // SELECT (rev 1)
+      { rows: [{ id: PERSON_ID, name: 'Old Name', birth_date: '1980-01-01' }] }, // person lookup
+      { rows: [] }, // person update
+      { rows: [updatedRow] }, // UPDATE RETURNING
+      { rows: [] }, // COMMIT
+    );
+
+    const res = await request(makeApp(pool))
+      .patch(`/api/patients/${PAT_ID}`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('if-match', '1')
+      .send({ data: VALID_DATA });
+
+    expect(res.status).toBe(200);
+    expect(res.body.sync.warnings).toEqual([
+      expect.objectContaining({
+        code: 'PATIENT_NAME_MISMATCH',
+        existingName: 'Old Name',
+        incomingName: 'Kim',
+      }),
+    ]);
   });
 
   it('returns 409 when patch would link to a patient number with different birth date', async () => {

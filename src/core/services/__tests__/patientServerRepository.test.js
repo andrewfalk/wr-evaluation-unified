@@ -6,6 +6,7 @@ import {
   deletePatientOnServer,
   pushPendingPatients,
   mergeServerPatient,
+  mergePushedPatientAck,
   mergePulledPatients,
 } from '../patientServerRepository.js';
 
@@ -443,6 +444,45 @@ describe('mergeServerPatient', () => {
     const before   = original[0];
     mergeServerPatient(original, makeServerPatient());
     expect(original[0]).toBe(before);
+  });
+});
+
+describe('mergePushedPatientAck', () => {
+  it('keeps newer local dirty edits when a stale push acknowledgement returns', () => {
+    const local = makeLocalPatient({
+      id: 'local-uuid',
+      data: { shared: { name: 'Local Later Edit', patientNo: 'P001' }, modules: {}, activeModules: [] },
+      sync: { serverId: 'local-uuid', revision: 1, syncStatus: 'dirty', lastSyncedAt: null },
+    });
+    const ack = makeServerPatient({
+      id: 'local-uuid',
+      data: { shared: { name: 'Earlier Pushed Edit', patientNo: 'P001' }, modules: {}, activeModules: [] },
+      sync: { serverId: 'local-uuid', revision: 2, syncStatus: 'synced', lastSyncedAt: '2024-06-01T00:00:00Z' },
+    });
+
+    const result = mergePushedPatientAck([local], ack);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].data.shared.name).toBe('Local Later Edit');
+    expect(result[0].sync.syncStatus).toBe('dirty');
+    expect(result[0].sync.revision).toBe(2);
+    expect(result[0].sync.conflict).toBeUndefined();
+  });
+
+  it('applies the server acknowledgement when the local patient is still pending but not dirty', () => {
+    const local = makeLocalPatient({
+      id: 'local-uuid',
+      sync: { serverId: null, revision: 0, syncStatus: 'local-only', lastSyncedAt: null },
+    });
+    const ack = makeServerPatient({
+      id: 'local-uuid',
+      sync: { serverId: 'local-uuid', revision: 1, syncStatus: 'synced', lastSyncedAt: '2024-06-01T00:00:00Z' },
+    });
+
+    const result = mergePushedPatientAck([local], ack);
+
+    expect(result[0].sync.syncStatus).toBe('synced');
+    expect(result[0].sync.revision).toBe(1);
   });
 });
 

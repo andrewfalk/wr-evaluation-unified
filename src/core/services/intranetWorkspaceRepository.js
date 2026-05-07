@@ -1,5 +1,6 @@
 import { requestJson } from './httpClient';
 import { migratePatientRecords } from './patientRecords';
+import { getDeviceId } from '../utils/storage';
 import {
   GetWorkspacesResponseSchema,
 } from '@contracts/workspace';
@@ -36,6 +37,10 @@ function normalizeSavedItems(items = [], context = {}) {
   }));
 }
 
+function autosavePath() {
+  return `/api/autosave?deviceId=${encodeURIComponent(getDeviceId())}`;
+}
+
 export async function loadRemoteWorkspaces({ session, settings }) {
   const raw = await requestJson('/api/workspaces', {
     baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
@@ -69,11 +74,12 @@ export async function deleteRemoteWorkspace({ id, session, settings }) {
 }
 
 export async function loadRemoteAutoSave({ session, settings }) {
-  const raw = await requestJson('/api/autosave', {
+  const path = autosavePath();
+  const raw = await requestJson(path, {
     baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
     session,
   });
-  const data = parseResponse(GetAutosaveResponseSchema, raw, 'GET /api/autosave');
+  const data = parseResponse(GetAutosaveResponseSchema, raw, `GET ${path}`);
   if (!data?.patients) return data || null;
   return {
     ...data,
@@ -82,20 +88,22 @@ export async function loadRemoteAutoSave({ session, settings }) {
 }
 
 export async function saveRemoteAutoSave({ patients, session, settings }) {
-  const raw = await requestJson('/api/autosave', {
+  const path = autosavePath();
+  const raw = await requestJson(path, {
     baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
     method: 'PUT',
     session,
     body: { patients },
   });
-  return parseResponse(PutAutosaveResponseSchema, raw, 'PUT /api/autosave');
+  return parseResponse(PutAutosaveResponseSchema, raw, `PUT ${path}`);
 }
 
 export async function clearRemoteAutoSave({ session, settings }) {
-  const raw = await requestJson('/api/autosave', {
+  const path = autosavePath();
+  const raw = await requestJson(path, {
     baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
     method: 'DELETE',
     session,
   });
-  return parseResponse(DeleteAutosaveResponseSchema, raw, 'DELETE /api/autosave');
+  return parseResponse(DeleteAutosaveResponseSchema, raw, `DELETE ${path}`);
 }
