@@ -109,7 +109,8 @@ async function createPreset(pool: Pool, req: Request, res: Response): Promise<vo
          LIMIT 1`,
         [organizationId, userId, jobName, category, description],
       );
-      res.status(200).json({ preset: toClient((dup[0] ?? {}) as PresetRow) });
+      if (dup.length === 0) throw err;
+      res.status(200).json({ preset: toClient(dup[0] as PresetRow) });
       return;
     }
     throw err;
@@ -185,27 +186,37 @@ async function updatePreset(pool: Pool, req: Request, res: Response): Promise<vo
 
   // Atomic revision check inside the UPDATE prevents stale writes when two
   // requests pass the SELECT checks simultaneously.
-  const { rows: updated } = await pool.query(
-    `UPDATE custom_presets SET
-       job_name    = COALESCE($1, job_name),
-       category    = COALESCE($2, category),
-       description = COALESCE($3, description),
-       visibility  = COALESCE($4, visibility),
-       modules     = $5,
-       revision    = revision + 1,
-       updated_at  = now()
-     WHERE id = $6 AND revision = $7 AND deleted_at IS NULL
-     RETURNING *`,
-    [
-      jobName     ?? null,
-      category    ?? null,
-      description ?? null,
-      visibility  ?? null,
-      JSON.stringify(mergedModules),
-      id,
-      ifMatch,
-    ],
-  );
+  let updated: PresetRow[];
+  try {
+    const { rows } = await pool.query(
+      `UPDATE custom_presets SET
+         job_name    = COALESCE($1, job_name),
+         category    = COALESCE($2, category),
+         description = COALESCE($3, description),
+         visibility  = COALESCE($4, visibility),
+         modules     = $5,
+         revision    = revision + 1,
+         updated_at  = now()
+       WHERE id = $6 AND revision = $7 AND deleted_at IS NULL
+       RETURNING *`,
+      [
+        jobName     ?? null,
+        category    ?? null,
+        description ?? null,
+        visibility  ?? null,
+        JSON.stringify(mergedModules),
+        id,
+        ifMatch,
+      ],
+    );
+    updated = rows as PresetRow[];
+  } catch (err: unknown) {
+    if ((err as { code?: string }).code === '23505') {
+      res.status(409).json({ code: 'DUPLICATE_PRESET', error: 'A preset with that identity already exists' });
+      return;
+    }
+    throw err;
+  }
 
   if (updated.length === 0) {
     res.status(409).json({ code: 'REVISION_CONFLICT', error: 'Preset was modified concurrently' });

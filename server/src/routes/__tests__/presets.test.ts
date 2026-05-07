@@ -272,6 +272,26 @@ describe('PATCH /api/presets/:id', () => {
 
     expect(res.status).toBe(403);
   });
+
+  it('returns 409 DUPLICATE_PRESET when identity collides with another preset', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    // auth, SELECT existing, UPDATE → 23505 unique violation
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    mock.mockResolvedValueOnce({ rows: [presetRow()] });
+    const uniqueErr = Object.assign(new Error('unique violation'), { code: '23505' });
+    mock.mockRejectedValueOnce(uniqueErr);
+
+    const res = await request(makeApp(pool))
+      .patch(`/api/presets/${PRESET_ID}`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set('If-Match', '1')
+      .send({ jobName: '다른 프리셋과 동일한 직종' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('DUPLICATE_PRESET');
+  });
 });
 
 describe('DELETE /api/presets/:id', () => {
