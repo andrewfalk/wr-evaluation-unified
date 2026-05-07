@@ -167,10 +167,10 @@ async function updateServerPreset(id, revision, changes, session) {
 }
 
 async function deleteServerPreset(id, revision, session) {
-  const qs = (revision != null && Number.isInteger(revision) && revision >= 1)
-    ? `?revision=${revision}`
-    : '';
-  return requestJson(`/api/presets/${id}${qs}`, {
+  if (revision == null || !Number.isInteger(revision) || revision < 1) {
+    throw new Error('preset revision required for server delete');
+  }
+  return requestJson(`/api/presets/${id}?revision=${revision}`, {
     method: 'DELETE',
     session,
     baseUrl: session?.apiBaseUrl,

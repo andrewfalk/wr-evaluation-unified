@@ -165,6 +165,26 @@ describe('POST /api/presets', () => {
     expect(res.body.code).toBe('INVALID_BODY');
   });
 
+  it('returns 200 (idempotent) on concurrent create (23505 unique violation)', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    // auth check, idempotency SELECT (empty), INSERT → 23505, recovery SELECT
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    mock.mockResolvedValueOnce({ rows: [] });
+    const uniqueErr = Object.assign(new Error('unique violation'), { code: '23505' });
+    mock.mockRejectedValueOnce(uniqueErr);
+    mock.mockResolvedValueOnce({ rows: [presetRow()] });
+
+    const res = await request(makeApp(pool))
+      .post('/api/presets')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-CSRF-Token', CSRF_TOKEN)
+      .send(body);
+
+    expect(res.status).toBe(200);
+    expect(res.body.preset.id).toBe(PRESET_ID);
+  });
+
   it('returns 403 for missing CSRF token', async () => {
     const pool = makePool();
     wireQueries(pool);
@@ -257,16 +277,45 @@ describe('PATCH /api/presets/:id', () => {
 describe('DELETE /api/presets/:id', () => {
   it('soft-deletes own preset', async () => {
     const pool = makePool();
-    // auth, fetch existing, soft delete
-    wireQueries(pool, { rows: [presetRow()] }, { rows: [] });
+    // auth, fetch existing, atomic soft-delete (returns id)
+    wireQueries(pool, { rows: [presetRow()] }, { rows: [{ id: PRESET_ID }] });
+
+    const res = await request(makeApp(pool))
+      .delete(`/api/presets/${PRESET_ID}`)
+      .query({ revision: '1' })
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-CSRF-Token', CSRF_TOKEN);
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
+
+  it('returns 428 when revision param is missing', async () => {
+    const pool = makePool();
+    wireQueries(pool);
 
     const res = await request(makeApp(pool))
       .delete(`/api/presets/${PRESET_ID}`)
       .set('Authorization', `Bearer ${orgToken()}`)
       .set('X-CSRF-Token', CSRF_TOKEN);
 
-    expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
+    expect(res.status).toBe(428);
+    expect(res.body.code).toBe('PRECONDITION_REQUIRED');
+  });
+
+  it('returns 409 on revision mismatch (stale delete)', async () => {
+    const pool = makePool();
+    // auth, SELECT (current revision=2), atomic UPDATE returns 0 rows (client sent revision=1)
+    wireQueries(pool, { rows: [presetRow({ revision: 2 })] }, { rows: [] });
+
+    const res = await request(makeApp(pool))
+      .delete(`/api/presets/${PRESET_ID}`)
+      .query({ revision: '1' })
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-CSRF-Token', CSRF_TOKEN);
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('REVISION_CONFLICT');
   });
 
   it('returns 403 when deleting another user\'s preset', async () => {
@@ -275,6 +324,7 @@ describe('DELETE /api/presets/:id', () => {
 
     const res = await request(makeApp(pool))
       .delete(`/api/presets/${PRESET_ID}`)
+      .query({ revision: '1' })
       .set('Authorization', `Bearer ${orgToken()}`)
       .set('X-CSRF-Token', CSRF_TOKEN);
 
@@ -288,6 +338,7 @@ describe('DELETE /api/presets/:id', () => {
 
     const res = await request(makeApp(pool))
       .delete(`/api/presets/${PRESET_ID}`)
+      .query({ revision: '1' })
       .set('Authorization', `Bearer ${orgToken()}`)
       .set('X-CSRF-Token', CSRF_TOKEN);
 
@@ -300,6 +351,7 @@ describe('DELETE /api/presets/:id', () => {
 
     const res = await request(makeApp(pool))
       .delete(`/api/presets/${PRESET_ID}`)
+      .query({ revision: '1' })
       .set('Authorization', `Bearer ${orgToken()}`);
 
     expect(res.status).toBe(403);

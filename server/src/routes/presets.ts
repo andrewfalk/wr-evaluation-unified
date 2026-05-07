@@ -1,31 +1,10 @@
 import { randomUUID } from 'crypto';
 import { Router, type Request, type Response } from 'express';
 import type { Pool } from 'pg';
-import { z } from 'zod';
+import { CreatePresetBodySchema as CreateBody, UpdatePresetBodySchema as UpdateBody } from '@wr/contracts/preset';
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { writeAuditLog } from '../middleware/audit';
-
-// ---------------------------------------------------------------------------
-// Schemas
-// ---------------------------------------------------------------------------
-
-const CreateBody = z.object({
-  jobName:     z.string().min(1).max(200),
-  category:    z.string().max(100).default('미분류'),
-  description: z.string().max(500).default(''),
-  visibility:  z.enum(['private', 'organization']).default('private'),
-  modules:     z.record(z.string(), z.unknown()),
-});
-
-const UpdateBody = z.object({
-  jobName:        z.string().min(1).max(200).optional(),
-  category:       z.string().max(100).optional(),
-  description:    z.string().max(500).optional(),
-  visibility:     z.enum(['private', 'organization']).optional(),
-  modules:        z.record(z.string(), z.unknown()).optional(),
-  replaceModules: z.boolean().optional(),
-});
 
 // ---------------------------------------------------------------------------
 // Row → client shape
@@ -109,13 +88,32 @@ async function createPreset(pool: Pool, req: Request, res: Response): Promise<vo
   }
 
   const id = randomUUID();
-  const { rows } = await pool.query(
-    `INSERT INTO custom_presets
-       (id, organization_id, owner_user_id, job_name, category, description, visibility, modules)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-     RETURNING *`,
-    [id, organizationId, userId, jobName, category, description, visibility, JSON.stringify(modules)],
-  );
+  let insertedRows: PresetRow[];
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO custom_presets
+         (id, organization_id, owner_user_id, job_name, category, description, visibility, modules)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       RETURNING *`,
+      [id, organizationId, userId, jobName, category, description, visibility, JSON.stringify(modules)],
+    );
+    insertedRows = rows as PresetRow[];
+  } catch (err: unknown) {
+    // Concurrent create hit the unique index — return the existing preset idempotently.
+    if ((err as { code?: string }).code === '23505') {
+      const { rows: dup } = await pool.query(
+        `SELECT * FROM custom_presets
+         WHERE deleted_at IS NULL
+           AND organization_id = $1 AND owner_user_id = $2
+           AND job_name = $3 AND category = $4 AND description = $5
+         LIMIT 1`,
+        [organizationId, userId, jobName, category, description],
+      );
+      res.status(200).json({ preset: toClient((dup[0] ?? {}) as PresetRow) });
+      return;
+    }
+    throw err;
+  }
 
   await writeAuditLog(pool, {
     actorUserId: userId,
@@ -128,7 +126,7 @@ async function createPreset(pool: Pool, req: Request, res: Response): Promise<vo
     userAgent:   req.headers['user-agent'] as string ?? null,
   });
 
-  res.status(201).json({ preset: toClient(rows[0] as PresetRow) });
+  res.status(201).json({ preset: toClient(insertedRows[0]) });
 }
 
 async function updatePreset(pool: Pool, req: Request, res: Response): Promise<void> {
@@ -237,17 +235,19 @@ async function deletePreset(pool: Pool, req: Request, res: Response): Promise<vo
 
   const { id } = req.params;
 
-  // Optional ?revision=N guard — prevents deleting a stale version from another device.
+  // ?revision=N is required — prevents stale cross-device deletes.
   const revisionRaw = req.query['revision'];
-  let clientRevision: number | null = null;
-  if (revisionRaw !== undefined) {
-    clientRevision = parseInt(revisionRaw as string, 10);
-    if (!Number.isInteger(clientRevision) || clientRevision < 1) {
-      res.status(400).json({ code: 'INVALID_REVISION', error: 'revision must be a positive integer' });
-      return;
-    }
+  if (revisionRaw === undefined) {
+    res.status(428).json({ code: 'PRECONDITION_REQUIRED', error: 'revision query parameter required' });
+    return;
+  }
+  const clientRevision = parseInt(revisionRaw as string, 10);
+  if (!Number.isInteger(clientRevision) || clientRevision < 1) {
+    res.status(400).json({ code: 'INVALID_REVISION', error: 'revision must be a positive integer' });
+    return;
   }
 
+  // SELECT for 404/403 checks before the atomic soft-delete.
   const { rows: found } = await pool.query(
     `SELECT * FROM custom_presets WHERE id = $1 AND deleted_at IS NULL`,
     [id],
@@ -266,19 +266,19 @@ async function deletePreset(pool: Pool, req: Request, res: Response): Promise<vo
     res.status(403).json({ code: 'FORBIDDEN', error: 'Can only delete your own presets' });
     return;
   }
-  if (clientRevision !== null && (row['revision'] as number) !== clientRevision) {
-    res.status(409).json({
-      code:           'REVISION_CONFLICT',
-      error:          'Preset was modified concurrently',
-      serverRevision: row['revision'],
-    });
+
+  // Atomic soft-delete: revision in WHERE prevents a stale delete racing with a PATCH.
+  const { rows: deleted } = await pool.query(
+    `UPDATE custom_presets SET deleted_at = now()
+     WHERE id = $1 AND organization_id = $2 AND owner_user_id = $3
+       AND revision = $4 AND deleted_at IS NULL
+     RETURNING id`,
+    [id, organizationId, userId, clientRevision],
+  );
+  if (deleted.length === 0) {
+    res.status(409).json({ code: 'REVISION_CONFLICT', error: 'Preset was modified concurrently' });
     return;
   }
-
-  await pool.query(
-    `UPDATE custom_presets SET deleted_at = now() WHERE id = $1`,
-    [id],
-  );
 
   await writeAuditLog(pool, {
     actorUserId: userId,
