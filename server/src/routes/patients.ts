@@ -8,6 +8,7 @@ import { auditMiddleware } from '../middleware/audit';
 import {
   PatientIdentityConflictError,
   resolvePatientPersonId,
+  type PatientPersonWarning,
   type QueryRunner,
 } from '../db/patientPersons';
 
@@ -143,7 +144,7 @@ function extractMeta(data: Record<string, unknown>): ExtractedMeta {
   };
 }
 
-function toResponse(row: PatientRow): Record<string, unknown> {
+function toResponse(row: PatientRow, warnings: PatientPersonWarning[] = []): Record<string, unknown> {
   const base = typeof row.payload === 'object' && row.payload !== null
     ? (row.payload as Record<string, unknown>) : {};
 
@@ -155,6 +156,7 @@ function toResponse(row: PatientRow): Record<string, unknown> {
       revision:    row.revision,
       syncStatus:  'synced',
       lastSyncedAt: row.updated_at.toISOString(),
+      ...(warnings.length > 0 ? { warnings } : {}),
     },
   };
 }
@@ -224,7 +226,7 @@ async function listPatients(pool: Pool, req: Request, res: Response): Promise<vo
   ]);
 
   res.status(200).json({
-    items:  rows.map(toResponse),
+    items:  rows.map((row) => toResponse(row)),
     total:  parseInt(countRows[0]?.total ?? '0', 10),
     limit,
     offset,
@@ -342,7 +344,7 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
 
     // We own the slot. All remaining work is inside the same transaction so any
     // failure triggers a ROLLBACK that also removes the slot, keeping the key free.
-    const personId = await resolvePatientPersonId(client as QueryRunner, orgId, meta);
+    const { personId, warnings } = await resolvePatientPersonId(client as QueryRunner, orgId, meta);
 
     await client.query(
       `INSERT INTO patient_records
@@ -364,7 +366,7 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
       [patientId]
     );
 
-    const body = toResponse(newRows[0]);
+    const body = toResponse(newRows[0], warnings);
 
     await client.query(
       `UPDATE idempotency_keys SET status = $3, body = $4
@@ -469,7 +471,7 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
       return;
     }
 
-    const personId = await resolvePatientPersonId(client as QueryRunner, orgId, meta, current[0].patient_person_id);
+    const { personId, warnings } = await resolvePatientPersonId(client as QueryRunner, orgId, meta, current[0].patient_person_id);
 
     // WHERE clause includes revision to catch concurrent modification between read and write.
     const { rows: updated } = await client.query<PatientRow>(
@@ -507,7 +509,7 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
     }
 
     await client.query('COMMIT');
-    res.status(200).json(toResponse(updated[0]));
+    res.status(200).json(toResponse(updated[0], warnings));
   } catch (err: unknown) {
     await client.query('ROLLBACK').catch(() => {});
     if (err instanceof PatientIdentityConflictError) {

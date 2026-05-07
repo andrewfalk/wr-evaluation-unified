@@ -15,7 +15,20 @@ export interface PatientPersonMeta {
 
 interface PatientPersonRow {
   id: string;
+  name: string;
   birth_date: string | Date | null;
+}
+
+export interface PatientPersonWarning {
+  code: string;
+  message: string;
+  existingName?: string;
+  incomingName?: string;
+}
+
+export interface ResolvePatientPersonResult {
+  personId: string;
+  warnings: PatientPersonWarning[];
 }
 
 export class PatientIdentityConflictError extends Error {
@@ -39,6 +52,27 @@ function assertCompatibleBirthDate(existing: string | Date | null, incoming: str
   }
 }
 
+function normalizeName(value: string | null | undefined): string {
+  return String(value || '').trim();
+}
+
+function buildNameMismatchWarning(row: PatientPersonRow, meta: PatientPersonMeta): PatientPersonWarning[] {
+  const currentBirthDate = dateOnly(row.birth_date);
+  const incomingBirthDate = dateOnly(meta.birthDate);
+  const existingName = normalizeName(row.name);
+  const incomingName = normalizeName(meta.name);
+
+  if (!currentBirthDate || !incomingBirthDate || currentBirthDate !== incomingBirthDate) return [];
+  if (!existingName || !incomingName || existingName === incomingName) return [];
+
+  return [{
+    code: 'PATIENT_NAME_MISMATCH',
+    message: 'Same patient number and birth date, but the name differs. Confirm whether this is a legal name change or a data entry issue.',
+    existingName,
+    incomingName,
+  }];
+}
+
 async function updateExistingPerson(
   db: QueryRunner,
   personId: string,
@@ -60,10 +94,11 @@ export async function resolvePatientPersonId(
   orgId: string,
   meta: PatientPersonMeta,
   existingPersonId?: string | null,
-): Promise<string> {
+): Promise<ResolvePatientPersonResult> {
   if (!meta.patientNo) {
     if (existingPersonId) {
-      return updateExistingPerson(db, existingPersonId, orgId, meta);
+      const personId = await updateExistingPerson(db, existingPersonId, orgId, meta);
+      return { personId, warnings: [] };
     }
 
     const { rows } = await db.query<{ id: string }>(
@@ -72,11 +107,11 @@ export async function resolvePatientPersonId(
        RETURNING id`,
       [orgId, meta.name, meta.birthDate]
     );
-    return rows[0].id;
+    return { personId: rows[0].id, warnings: [] };
   }
 
   const existing = await db.query<PatientPersonRow>(
-    `SELECT id, birth_date
+    `SELECT id, name, birth_date
      FROM patient_persons
      WHERE organization_id = $1
        AND patient_no = $2
@@ -88,7 +123,9 @@ export async function resolvePatientPersonId(
   if (existing.rows.length > 0) {
     const row = existing.rows[0];
     assertCompatibleBirthDate(row.birth_date, meta.birthDate);
-    return updateExistingPerson(db, row.id, orgId, meta);
+    const warnings = buildNameMismatchWarning(row, meta);
+    const personId = await updateExistingPerson(db, row.id, orgId, meta);
+    return { personId, warnings };
   }
 
   try {
@@ -98,11 +135,11 @@ export async function resolvePatientPersonId(
        RETURNING id`,
       [orgId, meta.patientNo, meta.name, meta.birthDate]
     );
-    return inserted.rows[0].id;
+    return { personId: inserted.rows[0].id, warnings: [] };
   } catch (err) {
     // A concurrent request may have inserted the same person after our SELECT.
     const retry = await db.query<PatientPersonRow>(
-      `SELECT id, birth_date
+      `SELECT id, name, birth_date
        FROM patient_persons
        WHERE organization_id = $1
          AND patient_no = $2
@@ -113,7 +150,9 @@ export async function resolvePatientPersonId(
     if (retry.rows.length > 0) {
       const row = retry.rows[0];
       assertCompatibleBirthDate(row.birth_date, meta.birthDate);
-      return updateExistingPerson(db, row.id, orgId, meta);
+      const warnings = buildNameMismatchWarning(row, meta);
+      const personId = await updateExistingPerson(db, row.id, orgId, meta);
+      return { personId, warnings };
     }
     throw err;
   }

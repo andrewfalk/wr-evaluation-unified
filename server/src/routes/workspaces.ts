@@ -165,7 +165,7 @@ async function upsertPatientRecord(
   if (existingRow?.deleted_at !== null && existingRow?.deleted_at !== undefined) return;
 
   const existingPersonId = existingRow?.patient_person_id ?? null;
-  const personId = await resolvePatientPersonId(pool as QueryRunner, orgId, meta, existingPersonId);
+  const { personId } = await resolvePatientPersonId(pool as QueryRunner, orgId, meta, existingPersonId);
 
   await pool.query(
     `INSERT INTO patient_records
