@@ -17,17 +17,17 @@ export const ServerPresetSchema = z.object({
 });
 
 export const CreatePresetBodySchema = z.object({
-  jobName:     z.string().min(1).max(200),
-  category:    z.string().max(100).default('미분류'),
-  description: z.string().max(500).default(''),
+  jobName:     z.string().trim().min(1).max(200),
+  category:    z.string().trim().max(100).default('미분류'),
+  description: z.string().trim().max(500).default(''),
   visibility:  z.enum(['private', 'organization']).default('private'),
   modules:     PresetModulesSchema,
 });
 
 export const UpdatePresetBodySchema = z.object({
-  jobName:        z.string().min(1).max(200).optional(),
-  category:       z.string().max(100).optional(),
-  description:    z.string().max(500).optional(),
+  jobName:        z.string().trim().min(1).max(200).optional(),
+  category:       z.string().trim().max(100).optional(),
+  description:    z.string().trim().max(500).optional(),
   visibility:     z.enum(['private', 'organization']).optional(),
   modules:        PresetModulesSchema.optional(),
   replaceModules: z.boolean().optional(),
