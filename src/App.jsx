@@ -451,6 +451,7 @@ function App() {
           onClose={() => setShowSettings(false)}
           onLogout={logout}
           onMigrate={() => { setShowSettings(false); setShowMigrationReport(true); }}
+          onPresetsImported={reloadPresets}
         />
       )}
       {showMigrationReport && (
