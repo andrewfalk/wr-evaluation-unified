@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { requestJson } from '../services/httpClient';
 
-export function ChangePasswordModal({ apiBaseUrl = '' }) {
+export function ChangePasswordModal({ apiBaseUrl = '', onClose }) {
   const { session, setSession } = useAuth();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -52,13 +52,17 @@ export function ChangePasswordModal({ apiBaseUrl = '' }) {
     }
   };
 
+  const isForced = !onClose;
+
   return (
-    <div className="app-boot-overlay">
-      <div className="app-boot-box login-modal-box">
-        <h2 className="login-modal-title">비밀번호 변경 필요</h2>
-        <p className="app-boot-hint" style={{ textAlign: 'center' }}>
-          최초 로그인입니다. 보안을 위해 비밀번호를 변경해 주세요.
-        </p>
+    <div className={isForced ? 'app-boot-overlay' : 'modal-overlay'} onClick={isForced ? undefined : onClose}>
+      <div className={isForced ? 'app-boot-box login-modal-box' : 'modal login-modal-box'} onClick={e => e.stopPropagation()}>
+        <h2 className="login-modal-title">{isForced ? '비밀번호 변경 필요' : '비밀번호 변경'}</h2>
+        {isForced && (
+          <p className="app-boot-hint" style={{ textAlign: 'center' }}>
+            최초 로그인입니다. 보안을 위해 비밀번호를 변경해 주세요.
+          </p>
+        )}
         <form onSubmit={handleSubmit} className="login-modal-form">
           <div className="login-modal-field">
             <label htmlFor="cp-current">현재 비밀번호</label>
@@ -111,6 +115,17 @@ export function ChangePasswordModal({ apiBaseUrl = '' }) {
           >
             {loading ? '변경 중…' : '비밀번호 변경'}
           </button>
+          {!isForced && (
+            <button
+              type="button"
+              className="btn btn-secondary login-modal-submit"
+              style={{ marginTop: 8 }}
+              onClick={onClose}
+              disabled={loading}
+            >
+              취소
+            </button>
+          )}
         </form>
       </div>
     </div>

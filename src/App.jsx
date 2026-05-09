@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { getModule, getAllModules } from './core/moduleRegistry';
 import { SettingsModal } from './core/components/SettingsModal';
 import { MigrationReportModal } from './core/components/MigrationReportModal';
@@ -48,6 +48,7 @@ import {
 } from './core/services/workspaceRepository';
 import { LoginModal } from './core/components/LoginModal';
 import { ChangePasswordModal } from './core/components/ChangePasswordModal';
+import { AdminConsoleModal } from './core/components/AdminConsoleModal';
 
 const DEFAULT_PATIENT_FILTERS = {
   searchQuery: '',
@@ -97,6 +98,8 @@ function App() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [settings, setSettings] = useState(() => loadAppSettings(DEFAULT_SETTINGS));
   const [showSettings, setShowSettings] = useState(false);
+  const [showAdminConsole, setShowAdminConsole] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
   const [showMigrationReport, setShowMigrationReport] = useState(false);
   const [showBatchImport, setShowBatchImport] = useState(false);
   const [showHome, setShowHome] = useState(false);
@@ -153,7 +156,7 @@ function App() {
     configureHttpClient({
       // baseUrl comes from the original failed request so we always hit the
       // same server, even if session.apiBaseUrl is momentarily out of sync.
-      onRefresh: ({ baseUrl: requestBaseUrl } = {}) =>
+      onRefresh: ({ baseUrl: requestBaseUrl, forceCsrf = false } = {}) =>
         runRefreshWithBroadcast(
           // doRefresh: this tab won the lock and performs the actual refresh.
           async () => {
@@ -167,7 +170,7 @@ function App() {
             // CSRF cookie missing: call /api/auth/csrf first (no CSRF required
             // for this endpoint). It re-validates the HttpOnly refresh cookie,
             // sets a new wr_csrf cookie, and returns a fresh accessToken.
-            if (!csrfToken) {
+            if (forceCsrf || !csrfToken) {
               const csrfRes = await fetch(`${base}/api/auth/csrf`, {
                 method: 'POST',
                 credentials: 'include',
@@ -391,6 +394,26 @@ function App() {
     setConflictPatientId(null);
   };
 
+  const markRemoteDeleteConflict = useCallback((patientId) => {
+    if (!patientId) return;
+    setPatients(prev => prev.map(p => (
+      p.id === patientId
+        ? {
+            ...p,
+            sync: {
+              ...(p.sync || {}),
+              syncStatus: 'conflict',
+              conflict: {
+                ...(p.sync?.conflict || {}),
+                kind: 'remote-delete',
+                serverRevision: null,
+              },
+            },
+          }
+        : p
+    )));
+  }, [setPatients]);
+
   const handleResolveConflict = async (resolution, { patient, serverPatient, mergedData } = {}) => {
     if (!patient) return;
     const conflict = patient.sync?.conflict || {};
@@ -442,6 +465,18 @@ function App() {
   // 공통 모달 렌더링
   const renderModals = () => (
     <>
+      {showAdminConsole && (
+        <AdminConsoleModal
+          session={session}
+          onClose={() => setShowAdminConsole(false)}
+        />
+      )}
+      {showChangePassword && (
+        <ChangePasswordModal
+          apiBaseUrl={session?.apiBaseUrl || settings?.apiBaseUrl || ''}
+          onClose={() => setShowChangePassword(false)}
+        />
+      )}
       {showSettings && (
         <SettingsModal
           settings={settings}
@@ -475,6 +510,7 @@ function App() {
           session={session}
           settings={settings}
           onResolve={handleResolveConflict}
+          onRemoteDeleteDetected={markRemoteDeleteConflict}
           onClose={() => setConflictPatientId(null)}
         />
       )}
@@ -657,6 +693,10 @@ function App() {
           title={headerTitle}
           lastAutoSave={lastAutoSave}
           integrationStatus={integrationStatus}
+          session={session}
+          onShowAdminConsole={() => setShowAdminConsole(true)}
+          onLogout={logout}
+          onChangePassword={() => setShowChangePassword(true)}
           patients={patients}
           activePatient={activePatient}
           activeModules={activeModules}
