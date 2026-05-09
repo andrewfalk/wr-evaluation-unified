@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { requestJson } from '../services/httpClient';
+import { SignupRequestModal } from './SignupRequestModal';
 
 export function LoginModal({ apiBaseUrl = '' }) {
   const { login } = useAuth();
-  const [loginId, setLoginId] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loginId, setLoginId]       = useState('');
+  const [password, setPassword]     = useState('');
+  const [error, setError]           = useState('');
+  const [loading, setLoading]       = useState(false);
+  const [showSignup, setShowSignup] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -73,7 +75,20 @@ export function LoginModal({ apiBaseUrl = '' }) {
             {loading ? '로그인 중…' : '로그인'}
           </button>
         </form>
+        <p className="login-modal-signup-hint">
+          계정이 없으신가요?{' '}
+          <button
+            type="button"
+            className="login-modal-signup-link"
+            onClick={() => setShowSignup(true)}
+          >
+            계정 신청
+          </button>
+        </p>
       </div>
+      {showSignup && (
+        <SignupRequestModal apiBaseUrl={apiBaseUrl} onClose={() => setShowSignup(false)} />
+      )}
     </div>
   );
 }

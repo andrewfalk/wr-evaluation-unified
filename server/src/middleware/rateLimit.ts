@@ -35,6 +35,17 @@ export function deviceRegisterIpRateLimit(): RequestHandler {
   });
 }
 
+// Signup requests: 3 per hour per IP — prevents spam account requests.
+export function signupRateLimit(): RequestHandler {
+  return rateLimit({
+    windowMs:        60 * 60 * 1000,
+    limit:           3,
+    standardHeaders: 'draft-7',
+    legacyHeaders:   false,
+    message:         { code: 'RATE_LIMITED', error: 'Too many signup requests, please try again later' },
+  });
+}
+
 // Device registration: 5 per hour per authenticated user (inner guard, after auth).
 // keyGenerator uses userId from req.sessionInfo so each user has a separate bucket.
 export function deviceRegisterUserRateLimit(): RequestHandler {

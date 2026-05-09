@@ -21,7 +21,7 @@ import {
 } from '../auth/csrf';
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
-import { loginRateLimit, csrfRateLimit } from '../middleware/rateLimit';
+import { loginRateLimit, csrfRateLimit, signupRateLimit } from '../middleware/rateLimit';
 import { auditLogin, auditLogout, auditRefreshFail, auditRefreshSuccess, writeAuditLog } from '../middleware/audit';
 import { checkPasswordPolicy, isPasswordReused, appendPasswordHistory } from '../auth/passwordPolicy';
 
@@ -506,6 +506,42 @@ async function changePassword(pool: Pool, req: Request, res: Response): Promise<
 }
 
 // ---------------------------------------------------------------------------
+// POST /api/auth/signup-requests  (public — no auth required)
+// Submits a new account request.  Admins approve/reject in the admin console.
+// ---------------------------------------------------------------------------
+const signupRequestSchema = z.object({
+  loginId:       z.string().trim().min(3).max(50).regex(/^[a-zA-Z0-9_.-]+$/),
+  name:          z.string().trim().min(1).max(100),
+  requestedRole: z.enum(['doctor', 'nurse', 'staff']),
+  note:          z.string().max(500).optional(),
+});
+
+async function createSignupRequest(pool: Pool, req: Request, res: Response): Promise<void> {
+  const parsed = signupRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ code: 'INVALID_BODY', errors: parsed.error.flatten().fieldErrors });
+    return;
+  }
+  const { loginId, name, requestedRole, note } = parsed.data;
+
+  try {
+    const { rows } = await pool.query<{ id: string }>(
+      `INSERT INTO user_signup_requests (login_id, name, requested_role, note)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id`,
+      [loginId, name, requestedRole, note ?? null]
+    );
+    res.status(201).json({ id: rows[0].id });
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException & { code?: string }).code === '23505') {
+      res.status(409).json({ code: 'ALREADY_REQUESTED', error: 'A pending request already exists for this login ID' });
+      return;
+    }
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Router factory
 // ---------------------------------------------------------------------------
 const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
@@ -531,6 +567,9 @@ export function createAuthRouter(pool: Pool): Router {
 
   // change-password: auth + CSRF (mutating POST)
   router.post('/change-password', auth, csrfMiddleware, (req, res) => changePassword(pool, req, res).catch(() => res.status(500).json(internalError())));
+
+  // Public: no auth, no CSRF — protected only by rate limit.
+  router.post('/signup-requests', signupRateLimit(), (req, res) => createSignupRequest(pool, req, res).catch(() => res.status(500).json(internalError())));
 
   return router;
 }
