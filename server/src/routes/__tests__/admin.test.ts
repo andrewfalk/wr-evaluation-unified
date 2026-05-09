@@ -702,6 +702,229 @@ describe('POST /api/admin/users/:id/enable', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Signup-requests shared fixture
+// ---------------------------------------------------------------------------
+const REQ_ROW = {
+  id:             'req-1',
+  login_id:       'newdoc',
+  name:           '김의사',
+  requested_role: 'doctor',
+  note:           null,
+  status:         'pending',
+  reviewer_name:  null,
+  reviewed_at:    null,
+  created_at:     new Date(),
+};
+
+// ---------------------------------------------------------------------------
+// GET /api/admin/signup-requests
+// ---------------------------------------------------------------------------
+describe('GET /api/admin/signup-requests', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('returns 403 for non-admin', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    const res = await request(makeApp(pool))
+      .get('/api/admin/signup-requests')
+      .set('Authorization', `Bearer ${token('doctor')}`);
+    expect(res.status).toBe(403);
+  });
+
+  it('returns list of pending requests by default', async () => {
+    const pool = makePool();
+    wireQueries(pool, [REQ_ROW]);
+    const res = await request(makeApp(pool))
+      .get('/api/admin/signup-requests')
+      .set('Authorization', `Bearer ${token('admin')}`);
+    expect(res.status).toBe(200);
+    expect(res.body.requests).toHaveLength(1);
+    expect(res.body.requests[0].loginId).toBe('newdoc');
+    expect(res.body.requests[0].requestedRole).toBe('doctor');
+    expect(res.body.requests[0].status).toBe('pending');
+  });
+
+  it('applies status filter for approved requests', async () => {
+    const pool = makePool();
+    wireQueries(pool, [{ ...REQ_ROW, status: 'approved', reviewer_name: 'Admin User' }]);
+    const res = await request(makeApp(pool))
+      .get('/api/admin/signup-requests?status=approved')
+      .set('Authorization', `Bearer ${token('admin')}`);
+    expect(res.status).toBe(200);
+    expect(res.body.requests[0].status).toBe('approved');
+    expect(res.body.requests[0].reviewerName).toBe('Admin User');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/admin/signup-requests/:id/approve
+// ---------------------------------------------------------------------------
+describe('POST /api/admin/signup-requests/:id/approve', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('returns 403 for non-admin', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    const res = await request(makeApp(pool))
+      .post('/api/admin/signup-requests/req-1/approve')
+      .set('Authorization', `Bearer ${token('doctor')}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 404 when request does not exist', async () => {
+    const pool = makePool();
+    wireTxClient(pool, { rows: [] }); // SELECT FOR UPDATE → not found
+    const res = await request(makeApp(pool))
+      .post('/api/admin/signup-requests/missing/approve')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe('REQUEST_NOT_FOUND');
+  });
+
+  it('returns 409 when request has already been reviewed', async () => {
+    const pool = makePool();
+    wireTxClient(pool, { rows: [{ ...REQ_ROW, status: 'approved' }] }); // SELECT FOR UPDATE → already reviewed
+    const res = await request(makeApp(pool))
+      .post('/api/admin/signup-requests/req-1/approve')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('ALREADY_REVIEWED');
+  });
+
+  it('returns 409 when login_id is already taken (INSERT 23505)', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    const clientMock = { query: vi.fn(), release: vi.fn() } as unknown as PoolClient;
+    const q = clientMock.query as ReturnType<typeof vi.fn>;
+    q.mockResolvedValueOnce(undefined);              // BEGIN
+    q.mockResolvedValueOnce({ rows: [REQ_ROW] });   // SELECT FOR UPDATE → pending
+    const pgError = Object.assign(new Error('duplicate key'), { code: '23505' });
+    q.mockRejectedValueOnce(pgError);               // INSERT INTO users → unique violation
+    q.mockResolvedValue(undefined);                 // ROLLBACK (catchall)
+    (pool.connect as ReturnType<typeof vi.fn>).mockResolvedValueOnce(clientMock);
+
+    const res = await request(makeApp(pool))
+      .post('/api/admin/signup-requests/req-1/approve')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('LOGIN_ID_TAKEN');
+  });
+
+  it('returns 200 with userId and tempPassword, creates user with must_change_password', async () => {
+    const pool = makePool();
+    const q    = wireTxClient(
+      pool,
+      { rows: [REQ_ROW] },              // SELECT FOR UPDATE → pending
+      { rows: [{ id: 'new-user-1' }] }, // INSERT INTO users RETURNING id
+    );
+    const res = await request(makeApp(pool))
+      .post('/api/admin/signup-requests/req-1/approve')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+
+    expect(res.status).toBe(200);
+    expect(res.body.userId).toBe('new-user-1');
+    expect(res.body.loginId).toBe('newdoc');
+    // tempPassword must satisfy password policy (10+ chars, letter + digit + special)
+    const pw = res.body.tempPassword as string;
+    expect(pw.length).toBeGreaterThanOrEqual(10);
+    expect(/[a-zA-Z]/.test(pw)).toBe(true);
+    expect(/\d/.test(pw)).toBe(true);
+    expect(/[^a-zA-Z0-9]/.test(pw)).toBe(true);
+    // INSERT SQL must contain must_change_password = TRUE (literal, not a param)
+    const insertCall = q.mock.calls[2]; // calls: [0]=BEGIN, [1]=SELECT, [2]=INSERT
+    expect(insertCall[0]).toMatch(/must_change_password/i);
+    expect(insertCall[0]).toMatch(/TRUE/i);
+  });
+
+  it('writes admin_signup_approve audit log on success', async () => {
+    const { writeAuditLog } = await import('../../middleware/audit');
+    const pool = makePool();
+    wireTxClient(
+      pool,
+      { rows: [REQ_ROW] },
+      { rows: [{ id: 'new-user-2' }] },
+    );
+    await request(makeApp(pool))
+      .post('/api/admin/signup-requests/req-1/approve')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+
+    expect(writeAuditLog).toHaveBeenCalledWith(pool, expect.objectContaining({
+      action:     'admin_signup_approve',
+      targetType: 'user',
+      targetId:   'new-user-2',
+      outcome:    'success',
+    }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/admin/signup-requests/:id/reject
+// ---------------------------------------------------------------------------
+describe('POST /api/admin/signup-requests/:id/reject', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('returns 403 for non-admin', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    const res = await request(makeApp(pool))
+      .post('/api/admin/signup-requests/req-1/reject')
+      .set('Authorization', `Bearer ${token('doctor')}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 404 when request does not exist', async () => {
+    const pool = makePool();
+    wireQueries(pool, [], []); // UPDATE → empty, SELECT → empty
+    const res = await request(makeApp(pool))
+      .post('/api/admin/signup-requests/missing/reject')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe('REQUEST_NOT_FOUND');
+  });
+
+  it('returns 409 when request has already been reviewed', async () => {
+    const pool = makePool();
+    wireQueries(pool,
+      [],                           // UPDATE: was not pending
+      [{ status: 'approved' }]      // SELECT: exists but already reviewed
+    );
+    const res = await request(makeApp(pool))
+      .post('/api/admin/signup-requests/req-1/reject')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('ALREADY_REVIEWED');
+  });
+
+  it('returns 200 and writes admin_signup_reject audit log', async () => {
+    const { writeAuditLog } = await import('../../middleware/audit');
+    const pool = makePool();
+    wireQueries(pool, [{ id: 'req-1' }]); // UPDATE WHERE status='pending' RETURNING
+    const res = await request(makeApp(pool))
+      .post('/api/admin/signup-requests/req-1/reject')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe('req-1');
+    expect(writeAuditLog).toHaveBeenCalledWith(pool, expect.objectContaining({
+      action:     'admin_signup_reject',
+      targetType: 'signup_request',
+      targetId:   'req-1',
+      outcome:    'success',
+    }));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // DELETE /api/admin/workspaces/:id/purge
 // ---------------------------------------------------------------------------
 describe('DELETE /api/admin/workspaces/:id/purge', () => {

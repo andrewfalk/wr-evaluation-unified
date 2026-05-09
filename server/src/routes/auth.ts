@@ -524,6 +524,16 @@ async function createSignupRequest(pool: Pool, req: Request, res: Response): Pro
   }
   const { loginId, name, requestedRole, note } = parsed.data;
 
+  // Reject early if the login_id is already taken by an active account.
+  const { rows: existing } = await pool.query<{ id: string }>(
+    `SELECT id FROM users WHERE login_id = $1 LIMIT 1`,
+    [loginId]
+  );
+  if (existing.length > 0) {
+    res.status(409).json({ code: 'LOGIN_ID_TAKEN', error: 'An account with this login ID already exists' });
+    return;
+  }
+
   try {
     const { rows } = await pool.query<{ id: string }>(
       `INSERT INTO user_signup_requests (login_id, name, requested_role, note)
@@ -531,6 +541,16 @@ async function createSignupRequest(pool: Pool, req: Request, res: Response): Pro
        RETURNING id`,
       [loginId, name, requestedRole, note ?? null]
     );
+    writeAuditLog(pool, {
+      actorUserId: null,
+      actorOrgId:  null,
+      action:      'signup_request_create',
+      targetType:  'signup_request',
+      targetId:    rows[0].id,
+      outcome:     'success',
+      ip:          req.ip ?? null,
+      userAgent:   req.headers['user-agent'] ?? null,
+    });
     res.status(201).json({ id: rows[0].id });
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException & { code?: string }).code === '23505') {
