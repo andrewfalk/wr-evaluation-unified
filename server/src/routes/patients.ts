@@ -162,6 +162,21 @@ function toResponse(
   const base = typeof row.payload === 'object' && row.payload !== null
     ? (row.payload as Record<string, unknown>) : {};
 
+  // Reconstruct assignment warning from persisted state when not provided at creation time.
+  // If assigned_doctor_user_id is still null but the payload carries a doctorName, the name
+  // could not be resolved to a user at write time — surface that fact on every GET.
+  const effectiveAssignmentWarnings: AssignmentWarning[] = assignmentWarnings.length > 0
+    ? assignmentWarnings
+    : (() => {
+        if (row.assigned_doctor_user_id !== null) return [];
+        const data   = base['data']   as Record<string, unknown> | undefined;
+        const shared = data?.['shared'] as Record<string, unknown> | undefined;
+        const dn     = shared?.['doctorName'];
+        if (typeof dn !== 'string' || !dn) return [];
+        return [{ code: 'DOCTOR_NAME_UNRESOLVED',
+                  message: `'${dn}': 이름으로 의사 계정을 찾을 수 없어 자동 배정이 건너뛰어졌습니다.` }];
+      })();
+
   return {
     ...base,
     id:                   row.id,
@@ -171,8 +186,8 @@ function toResponse(
       revision:    row.revision,
       syncStatus:  'synced',
       lastSyncedAt: row.updated_at.toISOString(),
-      ...(warnings.length           > 0 ? { warnings }           : {}),
-      ...(assignmentWarnings.length > 0 ? { assignmentWarnings } : {}),
+      ...(warnings.length                       > 0 ? { warnings }                                          : {}),
+      ...(effectiveAssignmentWarnings.length    > 0 ? { assignmentWarnings: effectiveAssignmentWarnings }   : {}),
     },
   };
 }
