@@ -18,7 +18,7 @@ export function StepContent({
   activePatient,
   shared, diagnoses, activeModules, allModules, suggested,
   activeModuleId, EvaluationComponent, calc, unifiedPreviewText,
-  errors, settings,
+  errors, settings, session,
   presets, presetMeta, presetError,
   aiAvailable,
   updateShared, updateModule, updateModuleById, updateDiagnoses, updateActiveModules,
@@ -31,7 +31,7 @@ export function StepContent({
     return (
       <>
         <div className="panel">
-          <BasicInfoForm shared={shared} onChange={updateShared} errors={errors} presets={presets} presetMeta={presetMeta} presetError={presetError} onPresetSelect={handlePresetSelect} onSavePreset={setPresetModalJobId} onBrowsePreset={setPresetBrowseJobId} activeModules={activeModules} />
+          <BasicInfoForm shared={shared} onChange={updateShared} errors={errors} presets={presets} presetMeta={presetMeta} presetError={presetError} onPresetSelect={handlePresetSelect} onSavePreset={setPresetModalJobId} onBrowsePreset={setPresetBrowseJobId} activeModules={activeModules} session={session} />
         </div>
         <div className="panel">
           <BasicInfoSidePanel shared={shared} onChange={updateShared} />

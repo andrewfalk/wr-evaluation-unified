@@ -390,6 +390,8 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .form-group input, .form-group select, .form-group textarea { padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 0.9rem; transition: all 0.2s; font-family: inherit; background: var(--input-bg); color: var(--text-primary); }
 .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
 .form-group input[readonly] { background: var(--card-bg); color: var(--text-muted); }
+.readonly-field { padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 0.9rem; background: var(--card-bg); color: var(--text-secondary); }
+.form-hint { font-size: 0.76rem; color: var(--text-muted); margin-top: 4px; }
 
 .radio-group { display: flex; gap: 10px; flex-wrap: wrap; }
 .radio-label { display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 6px 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 0.85rem; color: var(--text-primary); transition: all 0.2s; }
@@ -2725,6 +2727,7 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   font-size: 0.85rem;
 }
 .admin-filter-row input { flex: 1; min-width: 140px; }
+.admin-filter-label { font-size: 0.85rem; color: var(--text-muted); flex: 1; }
 
 /* Table */
 .admin-table-wrap { overflow-x: auto; flex: 1; min-height: 0; }

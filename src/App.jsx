@@ -754,6 +754,7 @@ function App() {
                 unifiedPreviewText={unifiedPreviewText}
                 errors={errors}
                 settings={settings}
+                session={session}
                 presets={presets}
                 presetMeta={presetMeta}
                 presetError={presetError}

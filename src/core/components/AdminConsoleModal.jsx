@@ -540,12 +540,126 @@ function SignupRequestsTab({ session }) {
   );
 }
 
+// ── Patient Assignment Tab ────────────────────────────────────────────────────
+function PatientAssignmentTab({ session }) {
+  const [doctors, setDoctors]       = useState([]);
+  const [patients, setPatients]     = useState([]);
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState(null);
+  const [pending, setPending]       = useState({}); // { patientId: userId | '' }
+  const [actioning, setActioning]   = useState(null);
+  const baseUrl = session?.apiBaseUrl || '';
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [doctorData, patientData] = await Promise.all([
+        requestJson('/api/admin/users', { baseUrl, session }),
+        requestJson('/api/patients?scope=all&limit=500', { baseUrl, session }),
+      ]);
+      setDoctors((doctorData.users || []).filter(u => u.role === 'doctor' && !u.disabled));
+      setPatients(patientData.items || []);
+      setPending({});
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleAssign = async (patientId) => {
+    const selectedVal = pending[patientId];
+    const assignedUserId = selectedVal === '' ? null : (selectedVal ?? null);
+    setActioning(patientId);
+    try {
+      await requestJson(`/api/patients/${patientId}/assignment`, {
+        baseUrl, session, method: 'POST', body: { assignedUserId },
+      });
+      await load();
+    } catch (err) {
+      setError(err.message);
+      setActioning(null);
+    }
+  };
+
+  return (
+    <div className="admin-tab-content">
+      <div className="admin-filter-row">
+        <span className="admin-filter-label">담당의가 지정되지 않은 환자를 확인하고 배정합니다.</span>
+        <button className="btn btn-secondary" onClick={load} disabled={loading}>새로 고침</button>
+      </div>
+
+      {error && <p className="admin-error">{error}</p>}
+
+      {loading ? (
+        <p className="admin-empty">불러오는 중…</p>
+      ) : (
+        <div className="admin-table-wrap">
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>환자명</th><th>등록번호</th><th>현재 담당의</th><th>배정 변경</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {patients.map(p => {
+                const shared = p.data?.shared || {};
+                const currentId = p.assignedDoctorUserId ?? null;
+                const selectedVal = pending[p.id] !== undefined ? pending[p.id] : (currentId ?? '');
+                const hasChange = selectedVal !== (currentId ?? '');
+                return (
+                  <tr key={p.id}>
+                    <td>{shared.name || '-'}</td>
+                    <td className="admin-cell-mono">{shared.patientNo || '-'}</td>
+                    <td>
+                      {currentId === null
+                        ? <span className="admin-badge admin-badge--warn">미배정</span>
+                        : (shared.doctorName || '-')}
+                    </td>
+                    <td>
+                      <select
+                        value={selectedVal}
+                        onChange={e => setPending(prev => ({ ...prev, [p.id]: e.target.value }))}
+                      >
+                        <option value="">미배정</option>
+                        {doctors.map(d => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="admin-actions-cell">
+                      <button
+                        className="btn btn-primary btn-sm"
+                        disabled={!hasChange || actioning === p.id}
+                        onClick={() => handleAssign(p.id)}
+                      >
+                        변경
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {patients.length === 0 && (
+                <tr><td colSpan={5} className="admin-empty">환자가 없습니다.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 const TABS = [
-  { id: 'audit',    label: '감사 로그' },
-  { id: 'devices',  label: '디바이스' },
-  { id: 'users',    label: '사용자 관리' },
-  { id: 'requests', label: '가입 요청' },
+  { id: 'audit',      label: '감사 로그' },
+  { id: 'devices',    label: '디바이스' },
+  { id: 'users',      label: '사용자 관리' },
+  { id: 'requests',   label: '가입 요청' },
+  { id: 'assignment', label: '환자 배정' },
 ];
 
 export function AdminConsoleModal({ session, onClose }) {
@@ -573,10 +687,11 @@ export function AdminConsoleModal({ session, onClose }) {
           ))}
         </div>
 
-        {activeTab === 'audit'    && <AuditTab           session={session} />}
-        {activeTab === 'devices'  && <DevicesTab         session={session} />}
-        {activeTab === 'users'    && <UsersTab            session={session} />}
-        {activeTab === 'requests' && <SignupRequestsTab  session={session} />}
+        {activeTab === 'audit'      && <AuditTab              session={session} />}
+        {activeTab === 'devices'    && <DevicesTab            session={session} />}
+        {activeTab === 'users'      && <UsersTab              session={session} />}
+        {activeTab === 'requests'   && <SignupRequestsTab     session={session} />}
+        {activeTab === 'assignment' && <PatientAssignmentTab  session={session} />}
 
         <div className="modal-actions">
           <button className="btn btn-secondary" onClick={onClose}>닫기</button>

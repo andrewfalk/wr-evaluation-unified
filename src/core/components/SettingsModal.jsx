@@ -156,10 +156,12 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
             <label>진료과</label>
             <input type="text" value={draft.department} onChange={e => update('department', e.target.value)} />
           </div>
-          <div className="settings-row">
-            <label>의사명</label>
-            <input type="text" value={draft.doctorName} onChange={e => update('doctorName', e.target.value)} />
-          </div>
+          {!isIntranetLocked && (
+            <div className="settings-row">
+              <label>의사명</label>
+              <input type="text" value={draft.doctorName} onChange={e => update('doctorName', e.target.value)} />
+            </div>
+          )}
         </div>
 
         <div className="settings-section modal-section pattern-surface">
