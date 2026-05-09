@@ -841,6 +841,33 @@ describe('POST /api/patients/:id/assignment', () => {
     );
   });
 
+  it('accepts null assignedUserId to unassign a patient', async () => {
+    const pool = makePool();
+    wireQueries(pool,
+      // no user lookup (assignedUserId is null, so user verification is skipped)
+      { rows: [{ assigned_doctor_user_id: DOCTOR_ID, previous_doctor_name: 'Dr. Kim' }] }, // old row
+      { rows: [{ id: PAT_ID, revision: 3 }] },                                             // update result
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/assignment`)
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ assignedUserId: null });
+    expect(res.status).toBe(200);
+    expect(res.body.assignedUserId).toBeNull();
+    expect(res.body.revision).toBe(3);
+    expect(writeAuditLog).toHaveBeenCalledWith(
+      pool,
+      expect.objectContaining({
+        action: 'patient_assignment_change',
+        extra:  expect.objectContaining({
+          assignedUserId: null,
+          newDoctorName:  null,
+        }),
+      })
+    );
+  });
+
   it('uses assigned_doctor_user_id (not owner_user_id) for the update', async () => {
     const pool = makePool();
     const mock = pool.query as ReturnType<typeof vi.fn>;

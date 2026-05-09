@@ -542,25 +542,49 @@ function SignupRequestsTab({ session }) {
 
 // ── Patient Assignment Tab ────────────────────────────────────────────────────
 function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
-  const [doctors, setDoctors]       = useState([]);
-  const [patients, setPatients]     = useState([]);
-  const [loading, setLoading]       = useState(false);
-  const [error, setError]           = useState(null);
-  const [pending, setPending]       = useState({}); // { patientId: userId | '' }
-  const [actioning, setActioning]   = useState(null);
-  const [search, setSearch]         = useState('');
+  const [doctors, setDoctors]     = useState([]);
+  const [patients, setPatients]   = useState([]);
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState(null);
+  const [pending, setPending]     = useState({}); // { patientId: userId | '' }
+  const [actioning, setActioning] = useState(null);
+  const [search, setSearch]       = useState('');
   const baseUrl = session?.apiBaseUrl || '';
 
-  const load = async () => {
+  // Load doctors once on mount.
+  useEffect(() => {
+    requestJson('/api/admin/users', { baseUrl, session })
+      .then(data => setDoctors((data.users || []).filter(u => u.role === 'doctor' && !u.disabled)))
+      .catch(err => setError(err.message));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadPatients = async (q) => {
     setLoading(true);
     setError(null);
     try {
-      const [doctorData, patientData] = await Promise.all([
-        requestJson('/api/admin/users', { baseUrl, session }),
-        requestJson('/api/patients?scope=all&limit=200', { baseUrl, session }),
-      ]);
-      setDoctors((doctorData.users || []).filter(u => u.role === 'doctor' && !u.disabled));
-      setPatients(patientData.items || []);
+      let all = [];
+      if (q.trim()) {
+        // Server-side search: returns up to 100 matches
+        const data = await requestJson(
+          `/api/patients?scope=all&q=${encodeURIComponent(q.trim())}&limit=100`,
+          { baseUrl, session }
+        );
+        all = data.items || [];
+      } else {
+        // Full load: offset loop to bypass the server's 100-per-page cap
+        const LIMIT = 100;
+        let offset = 0;
+        while (true) {
+          const data = await requestJson(
+            `/api/patients?scope=all&limit=${LIMIT}&offset=${offset}`,
+            { baseUrl, session }
+          );
+          all = [...all, ...(data.items || [])];
+          if (all.length >= (data.total ?? 0)) break;
+          offset += LIMIT;
+        }
+      }
+      setPatients(all);
       setPending({});
     } catch (err) {
       setError(err.message);
@@ -569,10 +593,18 @@ function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  // Initial full load; re-runs with debounce when search changes.
+  useEffect(() => {
+    if (!search.trim()) {
+      loadPatients('');
+      return;
+    }
+    const timer = setTimeout(() => loadPatients(search), 400);
+    return () => clearTimeout(timer);
+  }, [search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAssign = async (patientId) => {
-    const selectedVal = pending[patientId];
+    const selectedVal  = pending[patientId];
     const assignedUserId = selectedVal === '' ? null : (selectedVal ?? null);
     setActioning(patientId);
     try {
@@ -580,32 +612,23 @@ function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
         baseUrl, session, method: 'POST', body: { assignedUserId },
       });
       onPatientAssignmentChanged?.();
-      await load();
+      await loadPatients(search);
     } catch (err) {
       setError(err.message);
       setActioning(null);
     }
   };
 
-  const q = search.trim().toLowerCase();
-  const visible = q
-    ? patients.filter(p => {
-        const s = p.data?.shared || {};
-        return (s.name || '').toLowerCase().includes(q) ||
-               (s.patientNo || '').toLowerCase().includes(q);
-      })
-    : patients;
-
   return (
     <div className="admin-tab-content">
       <div className="admin-filter-row">
         <input
           type="text"
-          placeholder="환자명 또는 등록번호 검색"
+          placeholder="환자명 또는 등록번호 검색 (서버 검색)"
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
-        <button className="btn btn-secondary" onClick={load} disabled={loading}>새로 고침</button>
+        <button className="btn btn-secondary" onClick={() => loadPatients(search)} disabled={loading}>새로 고침</button>
       </div>
 
       {error && <p className="admin-error">{error}</p>}
@@ -621,11 +644,11 @@ function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
               </tr>
             </thead>
             <tbody>
-              {visible.map(p => {
-                const shared = p.data?.shared || {};
-                const currentId = p.assignedDoctorUserId ?? null;
+              {patients.map(p => {
+                const shared     = p.data?.shared || {};
+                const currentId  = p.assignedDoctorUserId ?? null;
                 const selectedVal = pending[p.id] !== undefined ? pending[p.id] : (currentId ?? '');
-                const hasChange = selectedVal !== (currentId ?? '');
+                const hasChange  = selectedVal !== (currentId ?? '');
                 return (
                   <tr key={p.id}>
                     <td>{shared.name || '-'}</td>
@@ -658,8 +681,8 @@ function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
                   </tr>
                 );
               })}
-              {visible.length === 0 && (
-                <tr><td colSpan={5} className="admin-empty">{q ? '검색 결과가 없습니다.' : '환자가 없습니다.'}</td></tr>
+              {patients.length === 0 && (
+                <tr><td colSpan={5} className="admin-empty">{search.trim() ? '검색 결과가 없습니다.' : '환자가 없습니다.'}</td></tr>
               )}
             </tbody>
           </table>
