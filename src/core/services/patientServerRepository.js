@@ -222,14 +222,19 @@ export function mergePushedPatientAck(localPatients, serverPatient) {
   const localStatus = local.sync?.syncStatus;
 
   if (localStatus === 'dirty') {
+    const serverWarnings = Array.isArray(serverPatient.sync?.warnings)
+      ? serverPatient.sync.warnings
+      : [];
+    const { warnings: _warnings, ...localSyncWithoutWarnings } = local.sync || {};
     const merged = {
       ...local,
       sync: {
-        ...(local.sync || {}),
+        ...localSyncWithoutWarnings,
         serverId,
         revision: serverPatient.sync?.revision ?? local.sync?.revision ?? 0,
         syncStatus: 'dirty',
         lastSyncedAt: serverPatient.sync?.lastSyncedAt ?? local.sync?.lastSyncedAt ?? null,
+        ...(serverWarnings.length > 0 ? { warnings: serverWarnings } : {}),
       },
     };
     return localPatients.map((p, i) => (i === idx ? merged : p));

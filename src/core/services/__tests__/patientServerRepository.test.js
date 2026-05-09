@@ -469,6 +469,36 @@ describe('mergePushedPatientAck', () => {
     expect(result[0].sync.conflict).toBeUndefined();
   });
 
+  it('preserves server warnings while keeping newer local dirty edits', () => {
+    const local = makeLocalPatient({
+      id: 'local-uuid',
+      data: { shared: { name: 'New Name', patientNo: 'P001' }, modules: {}, activeModules: [] },
+      sync: { serverId: 'local-uuid', revision: 1, syncStatus: 'dirty', lastSyncedAt: null },
+    });
+    const warning = {
+      code: 'PATIENT_NAME_MISMATCH',
+      message: 'Name differs',
+      existingName: 'Old Name',
+      incomingName: 'New Name',
+    };
+    const ack = makeServerPatient({
+      id: 'local-uuid',
+      sync: {
+        serverId: 'local-uuid',
+        revision: 2,
+        syncStatus: 'synced',
+        lastSyncedAt: '2024-06-01T00:00:00Z',
+        warnings: [warning],
+      },
+    });
+
+    const result = mergePushedPatientAck([local], ack);
+
+    expect(result[0].sync.syncStatus).toBe('dirty');
+    expect(result[0].sync.revision).toBe(2);
+    expect(result[0].sync.warnings).toEqual([warning]);
+  });
+
   it('applies the server acknowledgement when the local patient is still pending but not dirty', () => {
     const local = makeLocalPatient({
       id: 'local-uuid',
