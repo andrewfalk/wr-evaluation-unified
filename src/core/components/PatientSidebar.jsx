@@ -30,9 +30,55 @@ function formatShortDate(value) {
   return String(value).slice(0, 10);
 }
 
-function getPatientNameWarning(patient) {
+function normalizeWarningText(value) {
+  return String(value || '').trim();
+}
+
+function getPatientIdentityKey(patient) {
+  if (isRedactedPatientRecord(patient)) return null;
+  const shared = patient?.data?.shared || {};
+  const patientNo = normalizeWarningText(shared.patientNo);
+  const birthDate = normalizeWarningText(shared.birthDate).slice(0, 10);
+  if (!patientNo || !birthDate) return null;
+  return `${patientNo}\u0000${birthDate}`;
+}
+
+export function buildPatientNameWarningMap(patients = []) {
+  const groups = new Map();
+
+  patients.forEach(patient => {
+    const key = getPatientIdentityKey(patient);
+    const name = normalizeWarningText(patient?.data?.shared?.name);
+    if (!key || !name || !patient?.id) return;
+
+    const group = groups.get(key) || { entries: [], names: new Map() };
+    group.entries.push({ id: patient.id, name });
+    group.names.set(name.toLocaleLowerCase('ko'), name);
+    groups.set(key, group);
+  });
+
+  const warnings = new Map();
+  groups.forEach(group => {
+    if (group.names.size < 2) return;
+    group.entries.forEach(entry => {
+      const otherName = group.entries.find(candidate => candidate.name !== entry.name)?.name || '';
+      warnings.set(entry.id, {
+        code: 'PATIENT_NAME_MISMATCH',
+        message: 'Same patient number and birth date, but the name differs.',
+        existingName: otherName,
+        incomingName: entry.name,
+      });
+    });
+  });
+
+  return warnings;
+}
+
+function getPatientNameWarning(patient, warningMap) {
   const warnings = Array.isArray(patient?.sync?.warnings) ? patient.sync.warnings : [];
-  return warnings.find(warning => warning?.code === 'PATIENT_NAME_MISMATCH') || null;
+  return warnings.find(warning => warning?.code === 'PATIENT_NAME_MISMATCH')
+    || warningMap?.get(patient?.id)
+    || null;
 }
 
 function JobFilterCombobox({ patients, value, onChange }) {
@@ -150,6 +196,7 @@ export function PatientSidebar({
 }) {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const allModules = useMemo(() => getAllModules(), []);
+  const nameWarningMap = useMemo(() => buildPatientNameWarningMap(patients), [patients]);
 
   const {
     searchQuery = '',
@@ -320,16 +367,16 @@ export function PatientSidebar({
             const patientNo = p.data?.shared?.patientNo || '';
             const registrationDate = formatShortDate(p.createdAt || p._savedAt);
             const evaluationDate = formatShortDate(p.data?.shared?.evaluationDate);
-            const primaryDiagnosis = isRedacted ? '삭제된 스냅샷' : (p.data?.shared?.diagnoses?.[0]?.name || '-');
+            const primaryDiagnosis = isRedacted ? '개인정보 삭제됨' : (p.data?.shared?.diagnoses?.[0]?.name || '-');
             const hasConflict = p.sync?.syncStatus === 'conflict';
             const conflictKind = p.sync?.conflict?.kind || 'conflict';
-            const nameWarning = getPatientNameWarning(p);
+            const nameWarning = getPatientNameWarning(p, nameWarningMap);
             const nameWarningTitle = nameWarning
               ? `같은 등록번호와 생년월일의 기존 이름(${nameWarning.existingName || '-'})과 현재 이름(${nameWarning.incomingName || patientName})이 다릅니다. 개명 또는 입력 오류인지 확인하세요.`
               : '';
 
             return (
-              <div key={p.id} className={`patient-item ${p.id === activeId ? 'active' : ''} ${hasConflict ? 'conflict' : ''}`} onClick={() => onSwitchPatient(p.id)}>
+              <div key={p.id} className={`patient-item ${p.id === activeId ? 'active' : ''} ${hasConflict ? 'conflict' : ''} ${isRedacted ? 'redacted' : ''}`} onClick={() => onSwitchPatient(p.id)}>
                 <div className="patient-item-grid">
                   <div className="patient-item-select">
                     <input
@@ -350,7 +397,7 @@ export function PatientSidebar({
                       <div className="patient-item-name-row">
                         <span className="patient-item-title">{patientName}</span>
                         {patientNo && <span className="patient-no">#{patientNo}</span>}
-                        {isRedacted && <span className="patient-sync-badge">redacted</span>}
+                        {isRedacted && <span className="patient-sync-badge patient-sync-badge-redacted">삭제됨</span>}
                         {hasConflict && <span className="patient-sync-badge">{conflictKind}</span>}
                         {nameWarning && <span className="patient-sync-badge patient-sync-badge-warning" title={nameWarningTitle}>이름 확인</span>}
                         <div className="patient-item-modules">
@@ -360,7 +407,7 @@ export function PatientSidebar({
                           })}
                         </div>
                       </div>
-                      <span className={isComplete ? 'status-dot complete' : 'status-dot'} title={isComplete ? '완료' : '미완료'}>●</span>
+                      <span className={isRedacted ? 'status-dot redacted' : (isComplete ? 'status-dot complete' : 'status-dot')} title={isRedacted ? '삭제된 환자' : (isComplete ? '완료' : '미완료')}>{isRedacted ? '삭제' : '●'}</span>
                     </div>
                     <div className="patient-item-info patient-item-meta">
                       <span>{formatBirthDate(p.data?.shared?.birthDate)}</span>
