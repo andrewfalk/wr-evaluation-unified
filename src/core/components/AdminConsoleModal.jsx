@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { requestJson } from '../services/httpClient';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -549,6 +549,7 @@ function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
   const [pending, setPending]     = useState({}); // { patientId: userId | '' }
   const [actioning, setActioning] = useState(null);
   const [search, setSearch]       = useState('');
+  const controllerRef             = useRef(null);
   const baseUrl = session?.apiBaseUrl || '';
 
   // Load doctors once on mount.
@@ -556,40 +557,40 @@ function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
     requestJson('/api/admin/users', { baseUrl, session })
       .then(data => setDoctors((data.users || []).filter(u => u.role === 'doctor' && !u.disabled)))
       .catch(err => setError(err.message));
+    return () => { controllerRef.current?.abort(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Unified offset loop for both full-load and search.
+  // Aborts any in-flight request before starting a new one (race condition guard).
   const loadPatients = async (q) => {
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    const { signal } = controller;
+
     setLoading(true);
     setError(null);
     try {
+      const LIMIT = 100;
+      const qParam = q.trim() ? `&q=${encodeURIComponent(q.trim())}` : '';
       let all = [];
-      if (q.trim()) {
-        // Server-side search: returns up to 100 matches
+      let offset = 0;
+      while (true) {
         const data = await requestJson(
-          `/api/patients?scope=all&q=${encodeURIComponent(q.trim())}&limit=100`,
-          { baseUrl, session }
+          `/api/patients?scope=all&limit=${LIMIT}&offset=${offset}${qParam}`,
+          { baseUrl, session, signal }
         );
-        all = data.items || [];
-      } else {
-        // Full load: offset loop to bypass the server's 100-per-page cap
-        const LIMIT = 100;
-        let offset = 0;
-        while (true) {
-          const data = await requestJson(
-            `/api/patients?scope=all&limit=${LIMIT}&offset=${offset}`,
-            { baseUrl, session }
-          );
-          all = [...all, ...(data.items || [])];
-          if (all.length >= (data.total ?? 0)) break;
-          offset += LIMIT;
-        }
+        all = [...all, ...(data.items || [])];
+        if (all.length >= (data.total ?? 0)) break;
+        offset += LIMIT;
       }
       setPatients(all);
       setPending({});
     } catch (err) {
+      if (signal.aborted) return; // stale request superseded by a newer one
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   };
 
@@ -600,7 +601,7 @@ function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
       return;
     }
     const timer = setTimeout(() => loadPatients(search), 400);
-    return () => clearTimeout(timer);
+    return () => { clearTimeout(timer); controllerRef.current?.abort(); };
   }, [search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAssign = async (patientId) => {
