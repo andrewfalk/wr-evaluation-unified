@@ -316,7 +316,7 @@ export function usePatientSync({
   useEffect(() => {
     if (!canSync || !hasPendingPatients(patients || [])) return;
     const timer = window.setTimeout(() => {
-      runSync({ push: true, reason: 'local-change' });
+      runSync({ push: true, pull: true, reason: 'local-change' });
     }, PUSH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [canSync, patients, runSync]);
