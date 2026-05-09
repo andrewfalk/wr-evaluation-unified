@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchPatient } from '../services/patientServerRepository';
 
+const SERVER_DELETED_MESSAGE = 'Server version was deleted.';
+
 function getPatientLabel(patient) {
   const shared = patient?.data?.shared || {};
   return shared.name || shared.patientNo || patient?.id || '-';
@@ -63,6 +65,13 @@ export function getMergeInitializationKey(patient, conflictKind, serverId) {
   ].join(':');
 }
 
+export function getDisplayConflictKind(conflictKind, serverError) {
+  const kind = conflictKind || 'pull';
+  return kind === 'push' && serverError === SERVER_DELETED_MESSAGE
+    ? 'remote-delete'
+    : kind;
+}
+
 function SummaryPanel({ title, patient, emptyText }) {
   return (
     <section className="conflict-panel">
@@ -88,6 +97,7 @@ export function ConflictResolveModal({
   session,
   settings,
   onResolve,
+  onRemoteDeleteDetected,
   onClose,
 }) {
   const conflict = patient?.sync?.conflict || {};
@@ -119,7 +129,8 @@ export function ConflictResolveModal({
       .catch(error => {
         if (!cancelled) {
           if (error?.status === 404) {
-            setServerError('Server version was deleted.');
+            setServerError(SERVER_DELETED_MESSAGE);
+            onRemoteDeleteDetected?.(patient?.id);
           } else {
             setServerError(error?.message || 'Could not load server version.');
           }
@@ -130,13 +141,15 @@ export function ConflictResolveModal({
       });
 
     return () => { cancelled = true; };
-  }, [canFetchServer, serverId, session, settings]);
+  }, [canFetchServer, onRemoteDeleteDetected, patient?.id, serverId, session, settings]);
+
+  const displayConflictKind = getDisplayConflictKind(conflictKind, serverError);
 
   const initialMergeData = useMemo(
     () => buildInitialMergeData(patient, serverPatient),
     [patient, serverPatient]
   );
-  const mergeInitializationKey = getMergeInitializationKey(patient, conflictKind, serverId);
+  const mergeInitializationKey = getMergeInitializationKey(patient, displayConflictKind, serverId);
 
   useEffect(() => {
     if (mergeTextInitializedRef.current.key !== mergeInitializationKey) {
@@ -154,6 +167,20 @@ export function ConflictResolveModal({
 
   if (!patient) return null;
 
+  const patientForResolution = displayConflictKind === conflictKind
+    ? patient
+    : {
+        ...patient,
+        sync: {
+          ...(patient.sync || {}),
+          conflict: {
+            ...(patient.sync?.conflict || {}),
+            kind: displayConflictKind,
+            serverRevision: null,
+          },
+        },
+      };
+
   const handleMerge = () => {
     try {
       const mergedData = JSON.parse(mergeText);
@@ -163,24 +190,24 @@ export function ConflictResolveModal({
         return;
       }
       setMergeError('');
-      onResolve('merge', { patient, serverPatient, mergedData });
+      onResolve('merge', { patient: patientForResolution, serverPatient, mergedData });
     } catch {
       setMergeError('Merged data must be valid JSON.');
     }
   };
 
   const handleUseLocal = () => {
-    onResolve('use-local', { patient, serverPatient });
+    onResolve('use-local', { patient: patientForResolution, serverPatient });
   };
 
   const handleUseServer = () => {
-    onResolve('use-server', { patient, serverPatient });
+    onResolve('use-server', { patient: patientForResolution, serverPatient });
   };
 
   const serverUnavailable = !serverPatient;
   const mergeInitializing = shouldWaitForMergeInitialization({ canFetchServer, serverPatient, serverError });
-  const localLabel = conflictKind === 'delete' ? 'Apply Delete' : 'Use Local';
-  const serverLabel = conflictKind === 'remote-delete' ? 'Accept Delete' : 'Use Server';
+  const localLabel = displayConflictKind === 'delete' ? 'Apply Delete' : 'Use Local';
+  const serverLabel = displayConflictKind === 'remote-delete' ? 'Accept Delete' : 'Use Server';
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -189,7 +216,7 @@ export function ConflictResolveModal({
           <div>
             <h2>Resolve Conflict</h2>
             <p className="modal-section-description">
-              {getPatientLabel(patient)} · {conflictKind}
+              {getPatientLabel(patient)} · {displayConflictKind}
             </p>
           </div>
           <span className="modal-section-badge">rev {patient.sync?.revision ?? '-'}</span>
@@ -224,7 +251,7 @@ export function ConflictResolveModal({
           <button
             className="btn btn-primary"
             onClick={handleUseServer}
-            disabled={serverUnavailable && conflictKind !== 'remote-delete'}
+            disabled={serverUnavailable && displayConflictKind !== 'remote-delete'}
           >
             {serverLabel}
           </button>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getDisplayConflictKind,
   getMergeInitializationKey,
   shouldWaitForMergeInitialization,
   validateMergedPatientData,
@@ -67,5 +68,15 @@ describe('merge text initialization helpers', () => {
 
     expect(getMergeInitializationKey(patient, 'push', 'server-1')).toBe('local-1:server-1:push:2');
     expect(getMergeInitializationKey(patient, 'pull', 'server-1')).toBe('local-1:server-1:pull:2');
+  });
+});
+
+describe('conflict display kind', () => {
+  it('shows a deleted server version as a remote-delete conflict', () => {
+    expect(getDisplayConflictKind('push', 'Server version was deleted.')).toBe('remote-delete');
+  });
+
+  it('keeps ordinary push conflicts as push', () => {
+    expect(getDisplayConflictKind('push', '')).toBe('push');
   });
 });
