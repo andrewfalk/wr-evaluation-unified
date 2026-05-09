@@ -15,10 +15,13 @@ export function useIntakeWizard({ settings, session, setPatients, setActiveId, s
     const newShared = createSharedData();
     newShared.hospitalName = s.hospitalName;
     newShared.department = s.department;
-    newShared.doctorName = s.doctorName;
+    // In intranet mode, default to the logged-in user's name so the patient is
+    // immediately associated with the right doctor without manual entry.
+    const intranetName = session?.mode === 'intranet' ? (session?.user?.name || '') : '';
+    newShared.doctorName = intranetName || s.doctorName;
     setIntakeShared(newShared);
     setShowHome(false);
-  }, [setShowHome]);
+  }, [session, setShowHome]);
 
   const handleIntakeComplete = (selectedModuleIds) => {
     const modulesData = {};

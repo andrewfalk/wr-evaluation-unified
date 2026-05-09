@@ -3,8 +3,9 @@ import { Router, type Request, type Response } from 'express';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import { createAuthMiddleware } from '../middleware/auth';
+import { adminOnly } from '../middleware/adminOnly';
 import { csrfMiddleware } from '../middleware/csrf';
-import { auditMiddleware } from '../middleware/audit';
+import { auditMiddleware, writeAuditLog } from '../middleware/audit';
 import {
   PatientIdentityConflictError,
   resolvePatientPersonId,
@@ -150,7 +151,8 @@ function toResponse(row: PatientRow, warnings: PatientPersonWarning[] = []): Rec
 
   return {
     ...base,
-    id: row.id,
+    id:          row.id,
+    ownerUserId: row.owner_user_id ?? null,
     sync: {
       serverId:    row.id,
       revision:    row.revision,
@@ -179,6 +181,7 @@ async function listPatients(pool: Pool, req: Request, res: Response): Promise<vo
   const diagCode     = typeof req.query['diagnosesCode'] === 'string' ? req.query['diagnosesCode'].trim() : '';
   const jobName      = typeof req.query['jobName']       === 'string' ? req.query['jobName'].trim()       : '';
   const moduleFilter = typeof req.query['module']        === 'string' ? req.query['module'].trim()        : '';
+  const scope        = req.query['scope'] === 'all' ? 'all' : 'mine';
 
   const rawLimit  = Number(req.query['limit']  ?? 20);
   const rawOffset = Number(req.query['offset'] ?? 0);
@@ -187,6 +190,13 @@ async function listPatients(pool: Pool, req: Request, res: Response): Promise<vo
 
   const filterParams: unknown[] = [orgId];
   const conditions: string[] = ['organization_id = $1', 'deleted_at IS NULL'];
+
+  // Default: only show patients assigned to the current user.
+  // Pass scope=all to retrieve all patients in the organisation.
+  if (scope === 'mine') {
+    filterParams.push(session.userId);
+    conditions.push(`owner_user_id = $${filterParams.length}`);
+  }
 
   if (q) {
     filterParams.push(`%${q}%`);
@@ -621,6 +631,70 @@ async function deletePatient(pool: Pool, req: Request, res: Response): Promise<v
 }
 
 // ---------------------------------------------------------------------------
+// POST /api/patients/:id/assignment  (admin only)
+// Changes the owning doctor (owner_user_id) of a patient record.
+// The target user must belong to the same organisation.
+// ---------------------------------------------------------------------------
+const AssignmentBody = z.object({
+  assignedUserId: z.string().uuid(),
+});
+
+async function assignPatient(pool: Pool, req: Request, res: Response): Promise<void> {
+  const { id } = req.params;
+  const session = req.sessionInfo!;
+  const orgId   = session.organizationId;
+
+  if (!orgId) {
+    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
+    return;
+  }
+
+  const parsed = AssignmentBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ code: 'INVALID_BODY', errors: parsed.error.flatten().fieldErrors });
+    return;
+  }
+
+  const { assignedUserId } = parsed.data;
+
+  // Verify the target user exists within the organisation.
+  const { rows: userRows } = await pool.query<{ id: string }>(
+    `SELECT id FROM users WHERE id = $1 AND organization_id = $2 AND disabled_at IS NULL`,
+    [assignedUserId, orgId]
+  );
+  if (userRows.length === 0) {
+    res.status(404).json({ code: 'USER_NOT_FOUND', error: 'User not found in this organization' });
+    return;
+  }
+
+  const { rows } = await pool.query<{ id: string; prev_owner: string | null }>(
+    `UPDATE patient_records
+     SET owner_user_id = $1
+     WHERE id = $2 AND organization_id = $3 AND deleted_at IS NULL
+     RETURNING id, (SELECT id FROM users WHERE id = owner_user_id) AS prev_owner`,
+    [assignedUserId, id, orgId]
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
+    return;
+  }
+
+  writeAuditLog(pool, {
+    actorUserId: session.userId,
+    actorOrgId:  orgId,
+    action:      'patient_assignment_change',
+    targetType:  'patient',
+    targetId:    id,
+    outcome:     'success',
+    ip:          req.ip ?? null,
+    userAgent:   req.headers['user-agent'] ?? null,
+    extra:       { assignedUserId },
+  });
+
+  res.status(200).json({ patientId: id, assignedUserId });
+}
+
+// ---------------------------------------------------------------------------
 // Router factory
 // ---------------------------------------------------------------------------
 const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
@@ -659,6 +733,12 @@ export function createPatientsRouter(pool: Pool): Router {
     '/:id',
     auth, csrfMiddleware, audit('patient_delete'),
     (req, res) => deletePatient(pool, req, res).catch(() => res.status(500).json(internalError()))
+  );
+
+  router.post(
+    '/:id/assignment',
+    auth, adminOnly(), csrfMiddleware,
+    (req, res) => assignPatient(pool, req, res).catch(() => res.status(500).json(internalError()))
   );
 
   return router;

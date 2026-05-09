@@ -98,7 +98,7 @@ export function reconcilePulledPatients(localPatients, pulledItems) {
     });
 }
 
-async function pullAllPatients({ session, settings }) {
+async function pullAllPatients({ session, settings, scope = 'mine' }) {
   const all = [];
   let offset = 0;
   let total = null;
@@ -107,7 +107,7 @@ async function pullAllPatients({ session, settings }) {
     const result = await pullPatients({
       session,
       settings,
-      params: { limit: PULL_PAGE_SIZE, offset },
+      params: { limit: PULL_PAGE_SIZE, offset, scope },
     });
     const items = result.items || [];
     all.push(...items);
@@ -127,6 +127,7 @@ export function usePatientSync({
   session,
   settings,
   enabled = true,
+  scope = 'mine',
 } = {}) {
   const [syncState, setSyncState] = useState({
     status: 'idle',
@@ -154,11 +155,14 @@ export function usePatientSync({
     session?.accessToken,
   ]);
 
+  const scopeRef = useRef(scope);
+
   useEffect(() => { patientsRef.current = patients || []; }, [patients]);
   useEffect(() => { activeIdRef.current = activeId || null; }, [activeId]);
   useEffect(() => { sessionRef.current = session || null; }, [session]);
   useEffect(() => { settingsRef.current = settings || null; }, [settings]);
   useEffect(() => { enabledRef.current = canSync; }, [canSync]);
+  useEffect(() => { scopeRef.current = scope; }, [scope]);
 
   const ensureActivePatient = useCallback((before, after) => {
     if (activeIdRef.current || before.length > 0 || after.length === 0 || !setActiveId) {
@@ -211,8 +215,9 @@ export function usePatientSync({
 
       if (pull) {
         const pulledItems = await pullAllPatients({
-          session: sessionRef.current,
+          session:  sessionRef.current,
           settings: settingsRef.current,
+          scope:    scopeRef.current,
         });
         setPatients(prev => {
           const next = reconcilePulledPatients(prev, pulledItems);
@@ -253,6 +258,15 @@ export function usePatientSync({
     if (!canSync) return;
     runSync({ push: true, pull: true, reason: 'startup' });
   }, [canSync, runSync]);
+
+  // Re-pull when scope changes (mine ↔ all).
+  const prevScopeRef = useRef(scope);
+  useEffect(() => {
+    if (prevScopeRef.current === scope) return;
+    prevScopeRef.current = scope;
+    if (!canSync) return;
+    runSync({ pull: true, reason: 'scope-change' });
+  }, [scope, canSync, runSync]);
 
   useEffect(() => {
     if (!canSync) return;

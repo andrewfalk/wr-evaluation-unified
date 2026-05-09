@@ -193,6 +193,9 @@ export function PatientSidebar({
   onRemovePatient,
   onRemoveSelectedPatients,
   onResolveConflict,
+  scope = 'mine',
+  onScopeChange,
+  session,
 }) {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const allModules = useMemo(() => getAllModules(), []);
@@ -258,6 +261,19 @@ export function PatientSidebar({
         </div>
 
         <div className="sidebar-filter">
+          {session?.mode === 'intranet' && (
+            <div className="patient-scope-toggle">
+              <button
+                className={`patient-scope-btn${scope === 'mine' ? ' patient-scope-btn--active' : ''}`}
+                onClick={() => onScopeChange?.('mine')}
+              >내 담당</button>
+              <button
+                className={`patient-scope-btn${scope === 'all' ? ' patient-scope-btn--active' : ''}`}
+                onClick={() => onScopeChange?.('all')}
+              >전체</button>
+            </div>
+          )}
+
           <input
             type="search"
             placeholder="검색..."
@@ -400,6 +416,9 @@ export function PatientSidebar({
                         {isRedacted && <span className="patient-sync-badge patient-sync-badge-redacted">삭제됨</span>}
                         {hasConflict && <span className="patient-sync-badge">{conflictKind}</span>}
                         {nameWarning && <span className="patient-sync-badge patient-sync-badge-warning" title={nameWarningTitle}>이름 확인</span>}
+                        {scope === 'all' && session?.mode === 'intranet' && p.ownerUserId && p.ownerUserId !== session?.user?.id && (
+                          <span className="patient-others-badge">타 담당</span>
+                        )}
                         <div className="patient-item-modules">
                           {pModules.map(mId => {
                             const mod = getModule(mId);

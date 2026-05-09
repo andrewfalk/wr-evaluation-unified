@@ -89,6 +89,7 @@ function applyAuthUpdate(currentSession, authUpdate) {
 function App() {
   const { session, setSession, resetToLocalSession, isAuthenticated, sessionVerified, logout } = useAuth();
   const [patients, setPatients] = useState([]);
+  const [patientScope, setPatientScope] = useState('mine');
   const [activeId, setActiveId] = useState(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showLoadModal, setShowLoadModal] = useState(false);
@@ -233,6 +234,7 @@ function App() {
     setActiveId,
     session,
     settings,
+    scope: patientScope,
     enabled:
       isIntranetMode &&
       isAuthenticated &&
@@ -685,6 +687,9 @@ function App() {
         onRemovePatient={removePatient}
         onRemoveSelectedPatients={removeSelectedPatients}
         onResolveConflict={setConflictPatientId}
+        scope={patientScope}
+        onScopeChange={setPatientScope}
+        session={session}
       />
 
       {/* 메인 영역 */}
