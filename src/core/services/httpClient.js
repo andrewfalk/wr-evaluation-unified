@@ -90,7 +90,21 @@ export async function requestJson(path, {
       err.status = 401;
       throw err;
     }
-    return requestJson(path, { baseUrl, method, body, session: newSession, headers, _retry: true });
+    return requestJson(path, { baseUrl, method, body, session: newSession, headers, signal, _retry: true });
+  }
+
+  const errCode = data?.code || data?.error?.code;
+  if (response.status === 403 && errCode === 'CSRF_INVALID' && !_retry && _onRefresh) {
+    let newSession;
+    try {
+      newSession = await _onRefresh({ baseUrl, forceCsrf: true });
+    } catch {
+      const err = new Error('CSRF token renewal failed');
+      err.status = 403;
+      err.data = data;
+      throw err;
+    }
+    return requestJson(path, { baseUrl, method, body, session: newSession, headers, signal, _retry: true });
   }
 
   // Success responses and non-401 errors haven't had their body read yet.
