@@ -62,6 +62,18 @@ describe('reconcilePulledPatients', () => {
     expect(result[0].sync.syncStatus).toBe('dirty');
   });
 
+  it('keeps conflict patients when authoritativeDeletes is false', () => {
+    const local = makePatient({
+      sync: { serverId: 'server-1', revision: 2, syncStatus: 'conflict',
+              conflict: { kind: 'push-rejected', serverRevision: 3 }, lastSyncedAt: null },
+    });
+
+    const result = reconcilePulledPatients([local], [], { authoritativeDeletes: false });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].sync.syncStatus).toBe('conflict');
+  });
+
   it('merges patients still present in the pull result', () => {
     const local = makePatient({
       sync: { serverId: 'server-1', revision: 1, syncStatus: 'synced', lastSyncedAt: null },

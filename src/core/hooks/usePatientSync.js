@@ -96,8 +96,9 @@ export function reconcilePulledPatients(localPatients, pulledItems, { authoritat
       const serverId = patient?.sync?.serverId;
       if (!serverId || pulledServerIds.has(serverId)) return true;
       if (!authoritativeDeletes) {
-        // scope=mine: remove synced (out-of-scope), keep dirty (not a real delete)
-        return patient.sync?.syncStatus === 'dirty';
+        // scope=mine: remove synced (out-of-scope), keep dirty/conflict (not a real delete)
+        const status = patient.sync?.syncStatus;
+        return status === 'dirty' || status === 'conflict';
       }
       return patient.sync?.syncStatus !== 'synced';
     });
