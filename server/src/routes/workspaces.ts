@@ -5,6 +5,7 @@ import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { auditMiddleware } from '../middleware/audit';
 import { resolvePatientPersonId, type QueryRunner } from '../db/patientPersons';
+import { resolveAssignedDoctor } from '../db/resolveAssignedDoctor';
 
 // ---------------------------------------------------------------------------
 // POST /api/workspaces body schema
@@ -97,6 +98,7 @@ function redactDeletedPatients(patients: unknown[], deletedPatientIds: Set<strin
 interface PatientMeta {
   id:              string;
   name:            string;
+  doctorName:      string | null;
   patientNo:       string | null;
   birthDate:       string | null;
   injuryDate:      string | null;
@@ -132,6 +134,7 @@ function extractPatientMeta(p: unknown): PatientMeta | null {
   return {
     id,
     name,
+    doctorName:     strOrNull(shared?.['doctorName']),
     patientNo:      strOrNull(shared?.['patientNo']),
     birthDate:      strOrNull(shared?.['birthDate']),
     injuryDate:     strOrNull(shared?.['injuryDate']),
@@ -152,8 +155,13 @@ function extractPatientMeta(p: unknown): PatientMeta | null {
 // Upsert a single patient into patient_records. Errors are logged but not thrown
 // so that a single malformed patient does not block the whole workspace save.
 // The WHERE clause on ON CONFLICT ensures we never overwrite another org's patient.
+// On conflict, assigned_doctor_user_id is kept if already set (COALESCE), so existing
+// assignments are never overwritten by a workspace re-save.
 async function upsertPatientRecord(
-  pool: Pool, orgId: string, userId: string, meta: PatientMeta,
+  pool: Pool,
+  orgId: string,
+  user: { id: string; role: string },
+  meta: PatientMeta,
 ): Promise<void> {
   const existing = await pool.query<{ patient_person_id: string | null; deleted_at: Date | null }>(
     `SELECT patient_person_id, deleted_at
@@ -167,28 +175,34 @@ async function upsertPatientRecord(
   const existingPersonId = existingRow?.patient_person_id ?? null;
   const { personId } = await resolvePatientPersonId(pool as QueryRunner, orgId, meta, existingPersonId);
 
+  const { assignedDoctorUserId } = await resolveAssignedDoctor(
+    pool as unknown as QueryRunner,
+    { orgId, currentUser: user, requestedDoctorName: meta.doctorName }
+  );
+
   await pool.query(
     `INSERT INTO patient_records
-       (id, organization_id, patient_person_id, owner_user_id, name, patient_no,
-        birth_date, injury_date, evaluation_date, active_modules, diagnoses_codes,
-        jobs_names, revision, payload)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,1,$13)
+       (id, organization_id, patient_person_id, owner_user_id, assigned_doctor_user_id,
+        name, patient_no, birth_date, injury_date, evaluation_date,
+        active_modules, diagnoses_codes, jobs_names, revision, payload)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14)
      ON CONFLICT (id) DO UPDATE SET
-       patient_person_id = EXCLUDED.patient_person_id,
-       name             = EXCLUDED.name,
-       patient_no       = EXCLUDED.patient_no,
-       birth_date       = EXCLUDED.birth_date,
-       injury_date      = EXCLUDED.injury_date,
-       evaluation_date  = EXCLUDED.evaluation_date,
-       active_modules   = EXCLUDED.active_modules,
-       diagnoses_codes  = EXCLUDED.diagnoses_codes,
-       jobs_names       = EXCLUDED.jobs_names,
-       revision         = patient_records.revision + 1,
-       payload          = EXCLUDED.payload
+       patient_person_id       = EXCLUDED.patient_person_id,
+       name                    = EXCLUDED.name,
+       patient_no              = EXCLUDED.patient_no,
+       birth_date              = EXCLUDED.birth_date,
+       injury_date             = EXCLUDED.injury_date,
+       evaluation_date         = EXCLUDED.evaluation_date,
+       active_modules          = EXCLUDED.active_modules,
+       diagnoses_codes         = EXCLUDED.diagnoses_codes,
+       jobs_names              = EXCLUDED.jobs_names,
+       assigned_doctor_user_id = COALESCE(patient_records.assigned_doctor_user_id, EXCLUDED.assigned_doctor_user_id),
+       revision                = patient_records.revision + 1,
+       payload                 = EXCLUDED.payload
      WHERE patient_records.organization_id = EXCLUDED.organization_id
        AND patient_records.deleted_at IS NULL`,
     [
-      meta.id, orgId, personId, userId, meta.name,
+      meta.id, orgId, personId, user.id, assignedDoctorUserId, meta.name,
       meta.patientNo,
       meta.birthDate       ? meta.birthDate       : null,
       meta.injuryDate      ? meta.injuryDate      : null,
@@ -389,7 +403,7 @@ async function saveWorkspace(
   // Failures are logged per patient and do not roll back the workspace row.
   const metas = snapshotPatients.map(extractPatientMeta).filter((m): m is PatientMeta => m !== null);
   const results = await Promise.allSettled(
-    metas.map((meta) => upsertPatientRecord(pool, orgId, session.userId, meta))
+    metas.map((meta) => upsertPatientRecord(pool, orgId, { id: session.userId, role: session.role }, meta))
   );
   results.forEach((r, i) => {
     if (r.status === 'rejected') {

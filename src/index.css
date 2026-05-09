@@ -2620,6 +2620,17 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   border: 1px solid var(--warning, #ffc107);
   white-space: nowrap;
 }
+.patient-unassigned-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: var(--bg-secondary, #f5f5f5);
+  color: var(--text-muted, #999);
+  border: 1px solid var(--border-color, #ddd);
+  white-space: nowrap;
+}
 
 /* ── Account menu ─────────────────────────────────────────────────────────── */
 .account-menu { position: relative; }

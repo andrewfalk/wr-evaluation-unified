@@ -782,7 +782,7 @@ describe('POST /api/patients/:id/assignment', () => {
   it('returns 422 when target user exists but is not a doctor', async () => {
     const pool = makePool();
     wireQueries(pool,
-      { rows: [{ id: DOCTOR_ID, role: 'nurse' }] }, // user exists, wrong role
+      { rows: [{ id: DOCTOR_ID, role: 'nurse', name: 'Nurse Park' }] }, // user exists, wrong role
     );
     const res = await request(makeApp(pool))
       .post(`/api/patients/${PAT_ID}/assignment`)
@@ -796,8 +796,8 @@ describe('POST /api/patients/:id/assignment', () => {
   it('returns 404 when patient not found', async () => {
     const pool = makePool();
     wireQueries(pool,
-      { rows: [{ id: DOCTOR_ID, role: 'doctor' }] }, // user ok
-      { rows: [] },                                   // patient not found
+      { rows: [{ id: DOCTOR_ID, role: 'doctor', name: 'Dr. Lee' }] }, // user ok
+      { rows: [] },                                   // patient not found (old value read)
     );
     const res = await request(makeApp(pool))
       .post(`/api/patients/${PAT_ID}/assignment`)
@@ -808,12 +808,12 @@ describe('POST /api/patients/:id/assignment', () => {
     expect(res.body.code).toBe('PATIENT_NOT_FOUND');
   });
 
-  it('returns 200 and records both previous and new doctor in audit log', async () => {
+  it('returns 200 and records previous/new doctor names in audit log', async () => {
     const pool = makePool();
     wireQueries(pool,
-      { rows: [{ id: DOCTOR_ID, role: 'doctor' }] },       // user ok
-      { rows: [{ assigned_doctor_user_id: USER_ID }] },    // old value
-      { rows: [{ id: PAT_ID }] },                          // UPDATE ok
+      { rows: [{ id: DOCTOR_ID, role: 'doctor', name: 'Dr. Lee' }] },
+      { rows: [{ assigned_doctor_user_id: USER_ID, previous_doctor_name: 'Dr. Kim' }] },
+      { rows: [{ id: PAT_ID, revision: 2 }] },
     );
     const res = await request(makeApp(pool))
       .post(`/api/patients/${PAT_ID}/assignment`)
@@ -823,11 +823,17 @@ describe('POST /api/patients/:id/assignment', () => {
     expect(res.status).toBe(200);
     expect(res.body.patientId).toBe(PAT_ID);
     expect(res.body.assignedUserId).toBe(DOCTOR_ID);
+    expect(res.body.revision).toBe(2);
     expect(writeAuditLog).toHaveBeenCalledWith(
       pool,
       expect.objectContaining({
         action: 'patient_assignment_change',
-        extra:  { previousDoctorUserId: USER_ID, assignedUserId: DOCTOR_ID },
+        extra:  {
+          previousDoctorUserId: USER_ID,
+          previousDoctorName:   'Dr. Kim',
+          assignedUserId:       DOCTOR_ID,
+          newDoctorName:        'Dr. Lee',
+        },
       })
     );
   });
@@ -835,10 +841,10 @@ describe('POST /api/patients/:id/assignment', () => {
   it('uses assigned_doctor_user_id (not owner_user_id) for the update', async () => {
     const pool = makePool();
     const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });          // auth
-    mock.mockResolvedValueOnce({ rows: [{ id: DOCTOR_ID, role: 'doctor' }] }); // user
-    mock.mockResolvedValueOnce({ rows: [{ assigned_doctor_user_id: null }] }); // old
-    mock.mockResolvedValueOnce({ rows: [{ id: PAT_ID }] });         // UPDATE
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    mock.mockResolvedValueOnce({ rows: [{ id: DOCTOR_ID, role: 'doctor', name: 'Dr. Lee' }] });
+    mock.mockResolvedValueOnce({ rows: [{ assigned_doctor_user_id: null, previous_doctor_name: null }] });
+    mock.mockResolvedValueOnce({ rows: [{ id: PAT_ID, revision: 2 }] });
 
     await request(makeApp(pool))
       .post(`/api/patients/${PAT_ID}/assignment`)
@@ -852,5 +858,6 @@ describe('POST /api/patients/:id/assignment', () => {
     expect(updateCall).toBeDefined();
     expect((updateCall![0] as string)).toMatch(/assigned_doctor_user_id/);
     expect((updateCall![0] as string)).not.toMatch(/SET owner_user_id/);
+    expect((updateCall![0] as string)).toMatch(/jsonb_set/);
   });
 });

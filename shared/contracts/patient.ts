@@ -69,6 +69,7 @@ export const PatientSyncSchema = z.object({
   lastSyncedAt: z.string().nullable(),
   conflict: PatientSyncConflictSchema.optional(),
   warnings: z.array(PatientSyncWarningSchema).optional(),
+  assignmentWarnings: z.array(PatientSyncWarningSchema).optional(),
 });
 
 // Matches patientRecords.js createPatientMeta()
@@ -88,6 +89,7 @@ export const PatientSchema = z.object({
   data: PatientDataSchema,
   sync: PatientSyncSchema.optional(),
   meta: PatientMetaSchema.optional(),
+  assignedDoctorUserId: z.string().uuid().nullable().optional(),
 });
 
 export type Diagnosis = z.infer<typeof DiagnosisSchema>;

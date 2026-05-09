@@ -388,7 +388,8 @@ describe('POST /api/workspaces', () => {
     expect(upsertCall![1][0]).toBe(PAT_ID);   // id
     expect(upsertCall![1][1]).toBe(ORG_ID);   // organization_id
     expect(upsertCall![1][3]).toBe(USER_ID);  // owner_user_id
-    expect(upsertCall![1][4]).toBe('Kim');    // name
+    expect(upsertCall![1][4]).toBe(USER_ID);  // assigned_doctor_user_id (resolved: role=doctor, no doctorName)
+    expect(upsertCall![1][5]).toBe('Kim');    // name (shifted)
     expect(upsertCall![0]).not.toContain('deleted_at       = NULL');
     expect(upsertCall![0]).toContain('patient_records.deleted_at IS NULL');
   });

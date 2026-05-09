@@ -12,6 +12,11 @@ import {
   type PatientPersonWarning,
   type QueryRunner,
 } from '../db/patientPersons';
+import {
+  resolveAssignedDoctor,
+  type AssignmentWarning,
+  type ResolveAssignedDoctorResult,
+} from '../db/resolveAssignedDoctor';
 
 // ---------------------------------------------------------------------------
 // Schemas — defined locally, mirroring shared/contracts/patient.ts structure
@@ -76,38 +81,8 @@ interface PgErrorLike {
 // Helpers
 // ---------------------------------------------------------------------------
 
-interface AssignmentWarning { code: string; message: string; }
-interface ResolveAssignedDoctorResult {
-  assignedDoctorUserId: string | null;
-  assignmentWarnings:   AssignmentWarning[];
-}
-
-async function resolveAssignedDoctor(
-  qr: QueryRunner,
-  { orgId, currentUser, requestedDoctorName }: {
-    orgId:                string;
-    currentUser:          { id: string; role: string };
-    requestedDoctorName:  string | null;
-  }
-): Promise<ResolveAssignedDoctorResult> {
-  if (requestedDoctorName) {
-    const { rows } = await qr.query<{ id: string }>(
-      `SELECT id FROM users
-       WHERE organization_id = $1 AND name = $2 AND role = 'doctor' AND disabled_at IS NULL`,
-      [orgId, requestedDoctorName]
-    );
-    if (rows.length === 1) return { assignedDoctorUserId: rows[0].id, assignmentWarnings: [] };
-    const code = rows.length > 1 ? 'DOCTOR_NAME_AMBIGUOUS' : 'DOCTOR_NAME_NOT_MATCHED';
-    const message = rows.length > 1
-      ? `'${requestedDoctorName}': 동명이인 의사가 있어 자동 배정을 건너뜁니다.`
-      : `'${requestedDoctorName}': 해당 이름의 의사 계정이 없어 자동 배정을 건너뜁니다.`;
-    return { assignedDoctorUserId: null, assignmentWarnings: [{ code, message }] };
-  }
-  return {
-    assignedDoctorUserId: currentUser.role === 'doctor' ? currentUser.id : null,
-    assignmentWarnings:   [],
-  };
-}
+// Re-export types so callers only need to import from this module.
+export type { AssignmentWarning, ResolveAssignedDoctorResult };
 
 function strOrNull(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null;
@@ -705,8 +680,8 @@ async function assignPatient(pool: Pool, req: Request, res: Response): Promise<v
   const { assignedUserId } = parsed.data;
 
   // Verify target user exists in the organisation and has doctor role.
-  const { rows: userRows } = await pool.query<{ id: string; role: string }>(
-    `SELECT id, role FROM users WHERE id = $1 AND organization_id = $2 AND disabled_at IS NULL`,
+  const { rows: userRows } = await pool.query<{ id: string; role: string; name: string }>(
+    `SELECT id, role, name FROM users WHERE id = $1 AND organization_id = $2 AND disabled_at IS NULL`,
     [assignedUserId, orgId]
   );
   if (userRows.length === 0) {
@@ -717,11 +692,17 @@ async function assignPatient(pool: Pool, req: Request, res: Response): Promise<v
     res.status(422).json({ code: 'TARGET_NOT_A_DOCTOR', error: 'Assigned user must have the doctor role' });
     return;
   }
+  const newDoctorName = userRows[0].name;
 
-  // Read previous doctor before update so the audit log captures both sides.
-  const { rows: oldRows } = await pool.query<{ assigned_doctor_user_id: string | null }>(
-    `SELECT assigned_doctor_user_id FROM patient_records
-     WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
+  // Read previous doctor (id + name) before update for audit.
+  const { rows: oldRows } = await pool.query<{
+    assigned_doctor_user_id: string | null;
+    previous_doctor_name: string | null;
+  }>(
+    `SELECT pr.assigned_doctor_user_id, u.name AS previous_doctor_name
+     FROM patient_records pr
+     LEFT JOIN users u ON u.id = pr.assigned_doctor_user_id
+     WHERE pr.id = $1 AND pr.organization_id = $2 AND pr.deleted_at IS NULL`,
     [id, orgId]
   );
   if (oldRows.length === 0) {
@@ -729,13 +710,17 @@ async function assignPatient(pool: Pool, req: Request, res: Response): Promise<v
     return;
   }
   const previousDoctorUserId = oldRows[0].assigned_doctor_user_id;
+  const previousDoctorName   = oldRows[0].previous_doctor_name;
 
-  const { rows } = await pool.query<{ id: string }>(
+  // Update assigned doctor, sync doctorName in payload, and bump revision.
+  const { rows } = await pool.query<{ id: string; revision: number }>(
     `UPDATE patient_records
-     SET assigned_doctor_user_id = $1
+     SET assigned_doctor_user_id = $1,
+         payload  = jsonb_set(payload, '{data,shared,doctorName}', to_jsonb($4::text), true),
+         revision = revision + 1
      WHERE id = $2 AND organization_id = $3 AND deleted_at IS NULL
-     RETURNING id`,
-    [assignedUserId, id, orgId]
+     RETURNING id, revision`,
+    [assignedUserId, id, orgId, newDoctorName]
   );
   if (rows.length === 0) {
     res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
@@ -751,10 +736,10 @@ async function assignPatient(pool: Pool, req: Request, res: Response): Promise<v
     outcome:     'success',
     ip:          req.ip ?? null,
     userAgent:   req.headers['user-agent'] ?? null,
-    extra:       { previousDoctorUserId, assignedUserId },
+    extra:       { previousDoctorUserId, previousDoctorName, assignedUserId, newDoctorName },
   });
 
-  res.status(200).json({ patientId: id, assignedUserId });
+  res.status(200).json({ patientId: id, assignedUserId, revision: rows[0].revision });
 }
 
 // ---------------------------------------------------------------------------

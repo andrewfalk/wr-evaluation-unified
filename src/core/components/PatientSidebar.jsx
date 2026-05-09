@@ -416,6 +416,9 @@ export function PatientSidebar({
                         {isRedacted && <span className="patient-sync-badge patient-sync-badge-redacted">삭제됨</span>}
                         {hasConflict && <span className="patient-sync-badge">{conflictKind}</span>}
                         {nameWarning && <span className="patient-sync-badge patient-sync-badge-warning" title={nameWarningTitle}>이름 확인</span>}
+                        {scope === 'all' && session?.mode === 'intranet' && !p.assignedDoctorUserId && (
+                          <span className="patient-unassigned-badge">미배정</span>
+                        )}
                         {scope === 'all' && session?.mode === 'intranet' && p.assignedDoctorUserId && p.assignedDoctorUserId !== session?.user?.id && (
                           <span className="patient-others-badge">타 담당</span>
                         )}
