@@ -2631,6 +2631,21 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   border: 1px solid var(--border-color, #ddd);
   white-space: nowrap;
 }
+.patient-unassigned-badge--warning {
+  background: var(--warning-light, #fff3cd);
+  color: var(--warning-dark, #856404);
+  border-color: var(--warning, #ffc107);
+}
+.patient-assignment-banner {
+  margin: 4px 8px 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  background: var(--warning-light, #fff3cd);
+  color: var(--warning-dark, #856404);
+  border: 1px solid var(--warning, #ffc107);
+  line-height: 1.4;
+}
 
 /* ── Account menu ─────────────────────────────────────────────────────────── */
 .account-menu { position: relative; }

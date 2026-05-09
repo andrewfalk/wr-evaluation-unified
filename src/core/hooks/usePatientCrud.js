@@ -181,7 +181,10 @@ export function usePatientCrud({
     }
     setIntakeShared(null);
     setShowHome(false);
-    showAlert(`가져오기 완료: 신규 ${stats.newPatients}명, 상병 ${stats.newDiagnoses}건, 직업 ${stats.newJobs}건 추가 (중복 ${stats.skipped}건 건너뜀)`);
+    const doctorNote = session?.mode === 'intranet' && stats.withDoctorName > 0
+      ? `, 담당의 배정 예정 ${stats.withDoctorName}명 (서버 동기화 후 확인)`
+      : '';
+    showAlert(`가져오기 완료: 신규 ${stats.newPatients}명, 상병 ${stats.newDiagnoses}건, 직업 ${stats.newJobs}건 추가 (중복 ${stats.skipped}건 건너뜀)${doctorNote}`);
   };
 
   const handleLoadTestData = () => {

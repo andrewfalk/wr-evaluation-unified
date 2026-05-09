@@ -43,6 +43,24 @@ function getPatientIdentityKey(patient) {
   return `${patientNo}\u0000${birthDate}`;
 }
 
+export function getUnassignedBadgeInfo(patient) {
+  const warnings = patient?.sync?.assignmentWarnings || [];
+  const tooltipLines = [
+    ...warnings.map(w => w.message),
+    '관리자 콘솔에서 담당의를 배정하세요.',
+  ];
+  return { hasWarning: warnings.length > 0, tooltip: tooltipLines.join('\n') };
+}
+
+export function buildAssignmentBannerMessage(patients, scope) {
+  const unassignedCount = (patients || []).filter(p => !p.assignedDoctorUserId).length;
+  if (unassignedCount === 0) return null;
+  const hint = scope === 'mine'
+    ? '전체 보기로 전환하여 확인하세요.'
+    : '목록에서 미배정 배지를 확인하세요.';
+  return `담당의 배정이 필요한 환자 ${unassignedCount}건이 있습니다. ${hint}`;
+}
+
 export function buildPatientNameWarningMap(patients = []) {
   const groups = new Map();
 
@@ -373,6 +391,11 @@ export function PatientSidebar({
           )}
         </div>
 
+        {session?.mode === 'intranet' && (() => {
+          const msg = buildAssignmentBannerMessage(patients, scope);
+          return msg ? <div className="patient-assignment-banner">{msg}</div> : null;
+        })()}
+
         <div className="patient-list">
           {displayPatients.map(p => {
             const origIndex = patients.indexOf(p);
@@ -416,14 +439,15 @@ export function PatientSidebar({
                         {isRedacted && <span className="patient-sync-badge patient-sync-badge-redacted">삭제됨</span>}
                         {hasConflict && <span className="patient-sync-badge">{conflictKind}</span>}
                         {nameWarning && <span className="patient-sync-badge patient-sync-badge-warning" title={nameWarningTitle}>이름 확인</span>}
-                        {scope === 'all' && session?.mode === 'intranet' && !p.assignedDoctorUserId && (
-                          <span
-                            className="patient-unassigned-badge"
-                            title={p.sync?.assignmentWarnings?.length
-                              ? p.sync.assignmentWarnings.map(w => w.message).join('\n')
-                              : undefined}
-                          >미배정</span>
-                        )}
+                        {scope === 'all' && session?.mode === 'intranet' && !p.assignedDoctorUserId && (() => {
+                          const { hasWarning, tooltip } = getUnassignedBadgeInfo(p);
+                          return (
+                            <span
+                              className={`patient-unassigned-badge${hasWarning ? ' patient-unassigned-badge--warning' : ''}`}
+                              title={tooltip}
+                            >미배정</span>
+                          );
+                        })()}
                         {scope === 'all' && session?.mode === 'intranet' && p.assignedDoctorUserId && p.assignedDoctorUserId !== session?.user?.id && (
                           <span className="patient-others-badge">타 담당</span>
                         )}
