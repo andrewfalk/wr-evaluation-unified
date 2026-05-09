@@ -72,7 +72,7 @@ export function MigrationReportModal({
           <div className="migration-content">
             <div className="migration-info">
               <p>
-                저장된 워크스페이스와 자동저장에서 환자 목록을 수집하여
+                저장된 환자 목록과 자동저장에서 환자 데이터를 수집하여
                 인트라넷 서버에 등록합니다.
               </p>
               <ul className="migration-info-list">

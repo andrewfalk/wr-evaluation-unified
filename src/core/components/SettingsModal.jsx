@@ -271,7 +271,7 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
                 <DiagnosticItem label="Scope Key" value={diagnostic.mockDetails.scopeKey} />
                 <DiagnosticItem label="사용자" value={diagnostic.mockDetails.userId} />
                 <DiagnosticItem label="조직" value={diagnostic.mockDetails.organizationId} />
-                <DiagnosticItem label="워크스페이스 수" value={String(diagnostic.mockDetails.workspaceCount ?? '-')} />
+                <DiagnosticItem label="저장된 환자 목록 수" value={String(diagnostic.mockDetails.workspaceCount ?? '-')} />
                 <DiagnosticItem label="자동저장 존재" value={formatBoolean(diagnostic.mockDetails.hasAutosave)} />
                 <DiagnosticItem label="저장 파일" value={diagnostic.mockDetails.storageFile} />
               </div>
@@ -282,7 +282,7 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
             <div className="settings-diagnostic-card">
               <div className="settings-diagnostic-card-title">원격 서버 응답 요약</div>
               <div className="settings-diagnostic-grid">
-                <DiagnosticItem label="워크스페이스 수" value={String(diagnostic.remoteDetails.workspaceCount ?? '-')} />
+                <DiagnosticItem label="저장된 환자 목록 수" value={String(diagnostic.remoteDetails.workspaceCount ?? '-')} />
               </div>
             </div>
           )}
