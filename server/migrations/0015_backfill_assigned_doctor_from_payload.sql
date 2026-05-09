@@ -14,7 +14,7 @@ WITH doctor_matches AS (
     ON  u.organization_id = pr.organization_id
     AND u.role            = 'doctor'
     AND u.disabled_at     IS NULL
-    AND u.name            = pr.payload #>> '{data,shared,doctorName}'
+    AND BTRIM(u.name)     = BTRIM(pr.payload #>> '{data,shared,doctorName}')
   WHERE pr.deleted_at               IS NULL
     AND pr.assigned_doctor_user_id  IS NULL
     AND NULLIF(BTRIM(pr.payload #>> '{data,shared,doctorName}'), '') IS NOT NULL
