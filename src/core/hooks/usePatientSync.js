@@ -108,6 +108,7 @@ async function pullAllPatients({ session, settings, scope = 'mine' }) {
   const all = [];
   let offset = 0;
   let total = null;
+  let unassignedCount;
 
   do {
     const result = await pullPatients({
@@ -118,11 +119,12 @@ async function pullAllPatients({ session, settings, scope = 'mine' }) {
     const items = result.items || [];
     all.push(...items);
     total = typeof result.total === 'number' ? result.total : all.length;
+    if (typeof result.unassignedCount === 'number') unassignedCount = result.unassignedCount;
     offset += items.length;
     if (items.length === 0) break;
   } while (all.length < total);
 
-  return all;
+  return { items: all, unassignedCount };
 }
 
 export function usePatientSync({
@@ -139,6 +141,7 @@ export function usePatientSync({
     status: 'idle',
     lastSyncedAt: null,
     lastError: null,
+    serverUnassignedCount: null,
   });
 
   const patientsRef = useRef(patients || []);
@@ -219,12 +222,14 @@ export function usePatientSync({
         }
       }
 
+      let serverUnassignedCount;
       if (pull) {
-        const pulledItems = await pullAllPatients({
+        const { items: pulledItems, unassignedCount } = await pullAllPatients({
           session:  sessionRef.current,
           settings: settingsRef.current,
           scope:    scopeRef.current,
         });
+        if (typeof unassignedCount === 'number') serverUnassignedCount = unassignedCount;
         setPatients(prev => {
           const next = reconcilePulledPatients(prev, pulledItems, { authoritativeDeletes: scopeRef.current === 'all' });
           ensureActivePatient(prev, next);
@@ -240,7 +245,13 @@ export function usePatientSync({
       }
 
       const lastSyncedAt = new Date().toISOString();
-      setSyncState({ status: 'idle', lastSyncedAt, lastError: null });
+      setSyncState(prev => ({
+        ...prev,
+        status: 'idle',
+        lastSyncedAt,
+        lastError: null,
+        ...(typeof serverUnassignedCount === 'number' ? { serverUnassignedCount } : {}),
+      }));
       return { ok: true, reason, lastSyncedAt };
     } catch (error) {
       console.warn('[patient-sync]', reason, error);

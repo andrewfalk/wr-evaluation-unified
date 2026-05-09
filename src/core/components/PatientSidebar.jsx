@@ -52,9 +52,8 @@ export function getUnassignedBadgeInfo(patient) {
   return { hasWarning: warnings.length > 0, tooltip: tooltipLines.join('\n') };
 }
 
-export function buildAssignmentBannerMessage(patients, scope) {
-  const unassignedCount = (patients || []).filter(p => !p.assignedDoctorUserId).length;
-  if (unassignedCount === 0) return null;
+export function buildAssignmentBannerMessage(unassignedCount, scope) {
+  if (!unassignedCount) return null;
   const hint = scope === 'mine'
     ? '전체 보기로 전환하여 확인하세요.'
     : '목록에서 미배정 배지를 확인하세요.';
@@ -214,6 +213,7 @@ export function PatientSidebar({
   scope = 'mine',
   onScopeChange,
   session,
+  serverUnassignedCount = null,
 }) {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const allModules = useMemo(() => getAllModules(), []);
@@ -392,7 +392,10 @@ export function PatientSidebar({
         </div>
 
         {session?.mode === 'intranet' && (() => {
-          const msg = buildAssignmentBannerMessage(patients, scope);
+          const count = typeof serverUnassignedCount === 'number'
+            ? serverUnassignedCount
+            : patients.filter(p => p.redacted !== true && p.assignedDoctorUserId === null).length;
+          const msg = buildAssignmentBannerMessage(count, scope);
           return msg ? <div className="patient-assignment-banner">{msg}</div> : null;
         })()}
 
@@ -439,7 +442,7 @@ export function PatientSidebar({
                         {isRedacted && <span className="patient-sync-badge patient-sync-badge-redacted">삭제됨</span>}
                         {hasConflict && <span className="patient-sync-badge">{conflictKind}</span>}
                         {nameWarning && <span className="patient-sync-badge patient-sync-badge-warning" title={nameWarningTitle}>이름 확인</span>}
-                        {scope === 'all' && session?.mode === 'intranet' && !p.assignedDoctorUserId && (() => {
+                        {scope === 'all' && session?.mode === 'intranet' && p.assignedDoctorUserId === null && (() => {
                           const { hasWarning, tooltip } = getUnassignedBadgeInfo(p);
                           return (
                             <span

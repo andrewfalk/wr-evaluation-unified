@@ -167,6 +167,7 @@ describe('GET /api/patients', () => {
     mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
     mock.mockResolvedValueOnce({ rows: [PAT_ROW] });        // items (Promise.all first)
     mock.mockResolvedValueOnce({ rows: [{ total: '1' }] }); // count (Promise.all second)
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // unassignedCount (Promise.all third)
 
     const res = await request(makeApp(pool))
       .get('/api/patients')
@@ -185,13 +186,15 @@ describe('GET /api/patients', () => {
     const mock = pool.query as ReturnType<typeof vi.fn>;
     mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
     mock.mockResolvedValueOnce({ rows: [] });
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] });
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // count
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // unassignedCount
     const res = await request(makeApp(pool))
       .get('/api/patients')
       .set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(0);
     expect(res.body.total).toBe(0);
+    expect(res.body.unassignedCount).toBe(0);
   });
 });
 

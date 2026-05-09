@@ -227,7 +227,7 @@ function App() {
   const { intakeShared, setIntakeShared, handleStartIntake, handleIntakeComplete } = useIntakeWizard({ settings, session, setPatients, setActiveId, setCurrentStepIndex, setShowHome });
   handleStartIntakeRef.current = handleStartIntake;
 
-  usePatientSync({
+  const { syncState } = usePatientSync({
     patients,
     setPatients,
     activeId,
@@ -690,6 +690,7 @@ function App() {
         scope={patientScope}
         onScopeChange={setPatientScope}
         session={session}
+        serverUnassignedCount={syncState?.serverUnassignedCount ?? null}
       />
 
       {/* 메인 영역 */}

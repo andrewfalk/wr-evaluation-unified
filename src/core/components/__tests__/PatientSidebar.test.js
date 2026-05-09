@@ -50,27 +50,28 @@ describe('getUnassignedBadgeInfo', () => {
 });
 
 describe('buildAssignmentBannerMessage', () => {
-  const assigned = { assignedDoctorUserId: 'user-1' };
-  const unassigned = { assignedDoctorUserId: null };
-
-  it('returns null when all patients are assigned', () => {
-    expect(buildAssignmentBannerMessage([assigned, assigned], 'mine')).toBeNull();
-  });
-
-  it('returns null for empty patient list', () => {
-    expect(buildAssignmentBannerMessage([], 'all')).toBeNull();
+  it('returns null when count is 0', () => {
+    expect(buildAssignmentBannerMessage(0, 'mine')).toBeNull();
   });
 
   it('includes correct count and scope=mine hint', () => {
-    const msg = buildAssignmentBannerMessage([unassigned, assigned, unassigned], 'mine');
+    const msg = buildAssignmentBannerMessage(2, 'mine');
     expect(msg).toContain('2건');
     expect(msg).toContain('전체 보기로 전환하여 확인하세요');
   });
 
   it('includes correct count and scope=all hint', () => {
-    const msg = buildAssignmentBannerMessage([unassigned], 'all');
+    const msg = buildAssignmentBannerMessage(1, 'all');
     expect(msg).toContain('1건');
     expect(msg).toContain('미배정 배지를 확인하세요');
+  });
+
+  it('treats undefined assignedDoctorUserId as not null (local patients excluded from banner count)', () => {
+    const localPatient = { assignedDoctorUserId: undefined };
+    const unassigned   = { assignedDoctorUserId: null };
+    const count = [localPatient, unassigned]
+      .filter(p => p.redacted !== true && p.assignedDoctorUserId === null).length;
+    expect(count).toBe(1);
   });
 });
 

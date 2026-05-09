@@ -182,7 +182,7 @@ export function usePatientCrud({
     setIntakeShared(null);
     setShowHome(false);
     const doctorNote = session?.mode === 'intranet' && stats.withDoctorName > 0
-      ? `, 담당의 배정 예정 ${stats.withDoctorName}명 (서버 동기화 후 확인)`
+      ? `, 담당의 입력 ${stats.withDoctorName}명 (동기화 시 자동 배정 시도)`
       : '';
     showAlert(`가져오기 완료: 신규 ${stats.newPatients}명, 상병 ${stats.newDiagnoses}건, 직업 ${stats.newJobs}건 추가 (중복 ${stats.skipped}건 건너뜀)${doctorNote}`);
   };

@@ -43,6 +43,7 @@ export async function pullPatients({ session, settings, params = {} } = {}) {
   return {
     items: (data.items ?? []).map(p => applyServerSync(p)),
     total: data.total ?? data.items?.length ?? 0,
+    unassignedCount: typeof data.unassignedCount === 'number' ? data.unassignedCount : undefined,
   };
 }
 

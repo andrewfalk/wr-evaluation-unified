@@ -249,7 +249,7 @@ async function listPatients(pool: Pool, req: Request, res: Response): Promise<vo
 
   const where = conditions.join(' AND ');
 
-  const [{ rows }, { rows: countRows }] = await Promise.all([
+  const [{ rows }, { rows: countRows }, { rows: unassignedRows }] = await Promise.all([
     pool.query<PatientRow>(
       `SELECT ${SELECT_COLS}
        FROM patient_records
@@ -262,11 +262,17 @@ async function listPatients(pool: Pool, req: Request, res: Response): Promise<vo
       `SELECT COUNT(*)::text AS total FROM patient_records WHERE ${where}`,
       filterParams
     ),
+    pool.query<{ total: string }>(
+      `SELECT COUNT(*)::text AS total FROM patient_records
+       WHERE organization_id = $1 AND deleted_at IS NULL AND assigned_doctor_user_id IS NULL`,
+      [orgId]
+    ),
   ]);
 
   res.status(200).json({
-    items:  rows.map((row) => toResponse(row)),
-    total:  parseInt(countRows[0]?.total ?? '0', 10),
+    items:          rows.map((row) => toResponse(row)),
+    total:          parseInt(countRows[0]?.total    ?? '0', 10),
+    unassignedCount: parseInt(unassignedRows[0]?.total ?? '0', 10),
     limit,
     offset,
   });
