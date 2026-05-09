@@ -16,6 +16,28 @@ import {
   migratePatientRecords,
 } from '../services/patientRecords';
 
+export function getLoadablePatientsFromSnapshot(patients = [], context = {}) {
+  const migrated = migratePatientRecords(patients || [], context);
+  const loadablePatients = migrated.filter(patient => !isRedactedPatientRecord(patient));
+
+  return {
+    patients: loadablePatients,
+    failedCount: migrated.length - loadablePatients.length,
+    totalCount: migrated.length,
+  };
+}
+
+export function buildLoadFailureMessage({ failedCount = 0, totalCount = 0 } = {}) {
+  if (!failedCount) return '';
+  return `불러오기한 환자 목록에 삭제된 환자가 포함되어 있어 작업 목록에서 제외했습니다. (실패 ${failedCount}건 / 총 ${totalCount}건)`;
+}
+
+async function showLoadFailureNotice(loadResult) {
+  if (!loadResult) return;
+  const message = buildLoadFailureMessage(loadResult);
+  if (message) await showAlert(message);
+}
+
 export function useWorkspacePersistence({
   patients, setPatients,
   session, settings, serverConfig,
@@ -60,11 +82,13 @@ export function useWorkspacePersistence({
     loadAutoSavedWorkspace({ session, settings, serverConfig }).then(saved => {
       if (saved) {
         const time = new Date(saved.savedAt).toLocaleString('ko-KR');
-        showConfirm(`이전 자동 저장 데이터가 있습니다 (${time}).\n이어서 작업하시겠습니까?`).then(ok => {
+        showConfirm(`이전 자동 저장 데이터가 있습니다 (${time}).\n이어서 작업하시겠습니까?`).then(async ok => {
           if (ok && saved.patients?.length) {
-            setPatients(saved.patients);
-            setActiveId(saved.patients[0].id);
+            const loadResult = getLoadablePatientsFromSnapshot(saved.patients, { session });
+            setPatients(loadResult.patients);
+            setActiveId(loadResult.patients[0]?.id || null);
             setCurrentStepIndex(0);
+            await showLoadFailureNotice(loadResult);
           }
           clearAutoSavedWorkspace({ session, settings, serverConfig });
         });
@@ -128,24 +152,28 @@ export function useWorkspacePersistence({
   };
 
   const handleLoad = async (item, mode = 'overwrite') => {
+    let loadResultForNotice = null;
     if (mode === 'overwrite') {
       const confirmed = await showConfirm('현재 데이터를 덮어쓰시겠습니까?');
       if (!confirmed) return;
-      const nextPatients = migratePatientRecords(item.patients || [], { session });
-      setPatients(nextPatients);
-      setActiveId(nextPatients.find(p => !isRedactedPatientRecord(p))?.id || null);
+      const loadResult = getLoadablePatientsFromSnapshot(item.patients || [], { session });
+      setPatients(loadResult.patients);
+      setActiveId(loadResult.patients[0]?.id || null);
+      loadResultForNotice = loadResult;
     } else {
-      const newPatients = (item.patients || [])
-        .filter(p => !isRedactedPatientRecord(p))
+      const loadResult = getLoadablePatientsFromSnapshot(item.patients || [], { session });
+      const newPatients = loadResult.patients
         .map(p => clonePatientRecordForImport(p, { session }))
         .filter(Boolean);
       setPatients(prev => [...prev, ...newPatients]);
       setActiveId(newPatients[0]?.id || null);
+      loadResultForNotice = loadResult;
     }
     setCurrentStepIndex(0);
     setShowLoadModal(false);
     setIntakeShared(null);
     setShowHome(false);
+    await showLoadFailureNotice(loadResultForNotice);
   };
 
   const handleDelete = async (id) => {
