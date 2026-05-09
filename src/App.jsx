@@ -227,7 +227,7 @@ function App() {
   const { intakeShared, setIntakeShared, handleStartIntake, handleIntakeComplete } = useIntakeWizard({ settings, session, setPatients, setActiveId, setCurrentStepIndex, setShowHome });
   handleStartIntakeRef.current = handleStartIntake;
 
-  const { syncState } = usePatientSync({
+  const { syncState, syncNow } = usePatientSync({
     patients,
     setPatients,
     activeId,
@@ -471,6 +471,7 @@ function App() {
         <AdminConsoleModal
           session={session}
           onClose={() => setShowAdminConsole(false)}
+          onPatientAssignmentChanged={() => syncNow({ pull: true, reason: 'assignment-change' })}
         />
       )}
       {showChangePassword && (
@@ -648,6 +649,7 @@ function App() {
         presets={presets}
         presetMeta={presetMeta}
         presetError={presetError}
+        session={session}
       />
     );
   }

@@ -21,6 +21,7 @@ export function IntakeWizard({
   presets,
   presetMeta,
   presetError,
+  session,
 }) {
   const [step, setStep] = useState(0);
   const [selectedModules, setSelectedModules] = useState([]);
@@ -61,7 +62,7 @@ export function IntakeWizard({
 
         {step === 0 && (
           <>
-            <BasicInfoForm shared={shared} onChange={onSharedChange} errors={errors} presets={presets} presetMeta={presetMeta} presetError={presetError} />
+            <BasicInfoForm shared={shared} onChange={onSharedChange} errors={errors} presets={presets} presetMeta={presetMeta} presetError={presetError} session={session} />
             <div className="wizard-actions">
               <span />
               <button className="btn btn-primary" onClick={() => goStep(1)}>다음: 상병 입력 &rarr;</button>

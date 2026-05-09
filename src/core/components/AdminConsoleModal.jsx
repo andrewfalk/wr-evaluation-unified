@@ -541,13 +541,14 @@ function SignupRequestsTab({ session }) {
 }
 
 // ── Patient Assignment Tab ────────────────────────────────────────────────────
-function PatientAssignmentTab({ session }) {
+function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
   const [doctors, setDoctors]       = useState([]);
   const [patients, setPatients]     = useState([]);
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState(null);
   const [pending, setPending]       = useState({}); // { patientId: userId | '' }
   const [actioning, setActioning]   = useState(null);
+  const [search, setSearch]         = useState('');
   const baseUrl = session?.apiBaseUrl || '';
 
   const load = async () => {
@@ -556,7 +557,7 @@ function PatientAssignmentTab({ session }) {
     try {
       const [doctorData, patientData] = await Promise.all([
         requestJson('/api/admin/users', { baseUrl, session }),
-        requestJson('/api/patients?scope=all&limit=500', { baseUrl, session }),
+        requestJson('/api/patients?scope=all&limit=200', { baseUrl, session }),
       ]);
       setDoctors((doctorData.users || []).filter(u => u.role === 'doctor' && !u.disabled));
       setPatients(patientData.items || []);
@@ -578,6 +579,7 @@ function PatientAssignmentTab({ session }) {
       await requestJson(`/api/patients/${patientId}/assignment`, {
         baseUrl, session, method: 'POST', body: { assignedUserId },
       });
+      onPatientAssignmentChanged?.();
       await load();
     } catch (err) {
       setError(err.message);
@@ -585,10 +587,24 @@ function PatientAssignmentTab({ session }) {
     }
   };
 
+  const q = search.trim().toLowerCase();
+  const visible = q
+    ? patients.filter(p => {
+        const s = p.data?.shared || {};
+        return (s.name || '').toLowerCase().includes(q) ||
+               (s.patientNo || '').toLowerCase().includes(q);
+      })
+    : patients;
+
   return (
     <div className="admin-tab-content">
       <div className="admin-filter-row">
-        <span className="admin-filter-label">담당의가 지정되지 않은 환자를 확인하고 배정합니다.</span>
+        <input
+          type="text"
+          placeholder="환자명 또는 등록번호 검색"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
         <button className="btn btn-secondary" onClick={load} disabled={loading}>새로 고침</button>
       </div>
 
@@ -605,7 +621,7 @@ function PatientAssignmentTab({ session }) {
               </tr>
             </thead>
             <tbody>
-              {patients.map(p => {
+              {visible.map(p => {
                 const shared = p.data?.shared || {};
                 const currentId = p.assignedDoctorUserId ?? null;
                 const selectedVal = pending[p.id] !== undefined ? pending[p.id] : (currentId ?? '');
@@ -642,8 +658,8 @@ function PatientAssignmentTab({ session }) {
                   </tr>
                 );
               })}
-              {patients.length === 0 && (
-                <tr><td colSpan={5} className="admin-empty">환자가 없습니다.</td></tr>
+              {visible.length === 0 && (
+                <tr><td colSpan={5} className="admin-empty">{q ? '검색 결과가 없습니다.' : '환자가 없습니다.'}</td></tr>
               )}
             </tbody>
           </table>
@@ -662,7 +678,7 @@ const TABS = [
   { id: 'assignment', label: '환자 배정' },
 ];
 
-export function AdminConsoleModal({ session, onClose }) {
+export function AdminConsoleModal({ session, onClose, onPatientAssignmentChanged }) {
   const [activeTab, setActiveTab] = useState('audit');
 
   return (
@@ -691,7 +707,7 @@ export function AdminConsoleModal({ session, onClose }) {
         {activeTab === 'devices'    && <DevicesTab            session={session} />}
         {activeTab === 'users'      && <UsersTab              session={session} />}
         {activeTab === 'requests'   && <SignupRequestsTab     session={session} />}
-        {activeTab === 'assignment' && <PatientAssignmentTab  session={session} />}
+        {activeTab === 'assignment' && <PatientAssignmentTab  session={session} onPatientAssignmentChanged={onPatientAssignmentChanged} />}
 
         <div className="modal-actions">
           <button className="btn btn-secondary" onClick={onClose}>닫기</button>

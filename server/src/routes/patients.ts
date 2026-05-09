@@ -690,7 +690,7 @@ async function deletePatient(pool: Pool, req: Request, res: Response): Promise<v
 // The target user must belong to the same organisation.
 // ---------------------------------------------------------------------------
 const AssignmentBody = z.object({
-  assignedUserId: z.string().uuid(),
+  assignedUserId: z.string().uuid().nullable(),
 });
 
 async function assignPatient(pool: Pool, req: Request, res: Response): Promise<void> {
@@ -711,20 +711,23 @@ async function assignPatient(pool: Pool, req: Request, res: Response): Promise<v
 
   const { assignedUserId } = parsed.data;
 
-  // Verify target user exists in the organisation and has doctor role.
-  const { rows: userRows } = await pool.query<{ id: string; role: string; name: string }>(
-    `SELECT id, role, name FROM users WHERE id = $1 AND organization_id = $2 AND disabled_at IS NULL`,
-    [assignedUserId, orgId]
-  );
-  if (userRows.length === 0) {
-    res.status(404).json({ code: 'USER_NOT_FOUND', error: 'User not found in this organization' });
-    return;
+  let newDoctorName: string | null = null;
+  if (assignedUserId !== null) {
+    // Verify target user exists in the organisation and has doctor role.
+    const { rows: userRows } = await pool.query<{ id: string; role: string; name: string }>(
+      `SELECT id, role, name FROM users WHERE id = $1 AND organization_id = $2 AND disabled_at IS NULL`,
+      [assignedUserId, orgId]
+    );
+    if (userRows.length === 0) {
+      res.status(404).json({ code: 'USER_NOT_FOUND', error: 'User not found in this organization' });
+      return;
+    }
+    if (userRows[0].role !== 'doctor') {
+      res.status(422).json({ code: 'TARGET_NOT_A_DOCTOR', error: 'Assigned user must have the doctor role' });
+      return;
+    }
+    newDoctorName = userRows[0].name;
   }
-  if (userRows[0].role !== 'doctor') {
-    res.status(422).json({ code: 'TARGET_NOT_A_DOCTOR', error: 'Assigned user must have the doctor role' });
-    return;
-  }
-  const newDoctorName = userRows[0].name;
 
   // Read previous doctor (id + name) before update for audit.
   const { rows: oldRows } = await pool.query<{
@@ -752,7 +755,7 @@ async function assignPatient(pool: Pool, req: Request, res: Response): Promise<v
          revision = revision + 1
      WHERE id = $2 AND organization_id = $3 AND deleted_at IS NULL
      RETURNING id, revision`,
-    [assignedUserId, id, orgId, newDoctorName]
+    [assignedUserId, id, orgId, newDoctorName ?? '']
   );
   if (rows.length === 0) {
     res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
