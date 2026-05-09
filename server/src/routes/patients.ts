@@ -43,28 +43,29 @@ const PatchBody = z.object({
 // ---------------------------------------------------------------------------
 
 interface PatientRow {
-  id:              string;
-  organization_id: string;
-  patient_person_id: string;
-  owner_user_id:   string;
-  name:            string;
-  patient_no:      string | null;
-  birth_date:      string | null;
-  injury_date:     string | null;
-  evaluation_date: string | null;
-  active_modules:  string[];
-  diagnoses_codes: string[];
-  jobs_names:      string[];
-  revision:        number;
-  created_at:      Date;
-  updated_at:      Date;
-  payload:         unknown;
+  id:                      string;
+  organization_id:         string;
+  patient_person_id:       string;
+  owner_user_id:           string;
+  assigned_doctor_user_id: string | null;
+  name:                    string;
+  patient_no:              string | null;
+  birth_date:              string | null;
+  injury_date:             string | null;
+  evaluation_date:         string | null;
+  active_modules:          string[];
+  diagnoses_codes:         string[];
+  jobs_names:              string[];
+  revision:                number;
+  created_at:              Date;
+  updated_at:              Date;
+  payload:                 unknown;
 }
 
 const SELECT_COLS = `
-  id, organization_id, patient_person_id, owner_user_id, name, patient_no, birth_date,
-  injury_date, evaluation_date, active_modules, diagnoses_codes, jobs_names,
-  revision, created_at, updated_at, payload`;
+  id, organization_id, patient_person_id, owner_user_id, assigned_doctor_user_id,
+  name, patient_no, birth_date, injury_date, evaluation_date, active_modules,
+  diagnoses_codes, jobs_names, revision, created_at, updated_at, payload`;
 
 interface PgErrorLike {
   code?:       string;
@@ -74,6 +75,39 @@ interface PgErrorLike {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+interface AssignmentWarning { code: string; message: string; }
+interface ResolveAssignedDoctorResult {
+  assignedDoctorUserId: string | null;
+  assignmentWarnings:   AssignmentWarning[];
+}
+
+async function resolveAssignedDoctor(
+  qr: QueryRunner,
+  { orgId, currentUser, requestedDoctorName }: {
+    orgId:                string;
+    currentUser:          { id: string; role: string };
+    requestedDoctorName:  string | null;
+  }
+): Promise<ResolveAssignedDoctorResult> {
+  if (requestedDoctorName) {
+    const { rows } = await qr.query<{ id: string }>(
+      `SELECT id FROM users
+       WHERE organization_id = $1 AND name = $2 AND role = 'doctor' AND disabled_at IS NULL`,
+      [orgId, requestedDoctorName]
+    );
+    if (rows.length === 1) return { assignedDoctorUserId: rows[0].id, assignmentWarnings: [] };
+    const code = rows.length > 1 ? 'DOCTOR_NAME_AMBIGUOUS' : 'DOCTOR_NAME_NOT_MATCHED';
+    const message = rows.length > 1
+      ? `'${requestedDoctorName}': 동명이인 의사가 있어 자동 배정을 건너뜁니다.`
+      : `'${requestedDoctorName}': 해당 이름의 의사 계정이 없어 자동 배정을 건너뜁니다.`;
+    return { assignedDoctorUserId: null, assignmentWarnings: [{ code, message }] };
+  }
+  return {
+    assignedDoctorUserId: currentUser.role === 'doctor' ? currentUser.id : null,
+    assignmentWarnings:   [],
+  };
+}
 
 function strOrNull(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null;
@@ -145,20 +179,25 @@ function extractMeta(data: Record<string, unknown>): ExtractedMeta {
   };
 }
 
-function toResponse(row: PatientRow, warnings: PatientPersonWarning[] = []): Record<string, unknown> {
+function toResponse(
+  row: PatientRow,
+  warnings: PatientPersonWarning[] = [],
+  assignmentWarnings: AssignmentWarning[] = []
+): Record<string, unknown> {
   const base = typeof row.payload === 'object' && row.payload !== null
     ? (row.payload as Record<string, unknown>) : {};
 
   return {
     ...base,
-    id:          row.id,
-    ownerUserId: row.owner_user_id ?? null,
+    id:                   row.id,
+    assignedDoctorUserId: row.assigned_doctor_user_id ?? null,
     sync: {
       serverId:    row.id,
       revision:    row.revision,
       syncStatus:  'synced',
       lastSyncedAt: row.updated_at.toISOString(),
-      ...(warnings.length > 0 ? { warnings } : {}),
+      ...(warnings.length           > 0 ? { warnings }           : {}),
+      ...(assignmentWarnings.length > 0 ? { assignmentWarnings } : {}),
     },
   };
 }
@@ -195,7 +234,7 @@ async function listPatients(pool: Pool, req: Request, res: Response): Promise<vo
   // Pass scope=all to retrieve all patients in the organisation.
   if (scope === 'mine') {
     filterParams.push(session.userId);
-    conditions.push(`owner_user_id = $${filterParams.length}`);
+    conditions.push(`assigned_doctor_user_id = $${filterParams.length}`);
   }
 
   if (q) {
@@ -354,16 +393,24 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
 
     // We own the slot. All remaining work is inside the same transaction so any
     // failure triggers a ROLLBACK that also removes the slot, keeping the key free.
+    const doctorName = strOrNull(
+      (data.shared as Record<string, unknown>)?.['doctorName']
+    );
+    const { assignedDoctorUserId, assignmentWarnings } = await resolveAssignedDoctor(
+      client as unknown as QueryRunner,
+      { orgId, currentUser: { id: session.userId, role: session.role }, requestedDoctorName: doctorName }
+    );
+
     const { personId, warnings } = await resolvePatientPersonId(client as QueryRunner, orgId, meta);
 
     await client.query(
       `INSERT INTO patient_records
-         (id, organization_id, patient_person_id, owner_user_id, name, patient_no,
-          birth_date, injury_date, evaluation_date, active_modules, diagnoses_codes,
-          jobs_names, revision, payload)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,1,$13)`,
+         (id, organization_id, patient_person_id, owner_user_id, assigned_doctor_user_id,
+          name, patient_no, birth_date, injury_date, evaluation_date,
+          active_modules, diagnoses_codes, jobs_names, revision, payload)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14)`,
       [
-        patientId, orgId, personId, session.userId,
+        patientId, orgId, personId, session.userId, assignedDoctorUserId,
         meta.name, meta.patientNo,
         meta.birthDate, meta.injuryDate, meta.evaluationDate,
         meta.activeModules, meta.diagnosesCodes, meta.jobsNames,
@@ -376,7 +423,7 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
       [patientId]
     );
 
-    const body = toResponse(newRows[0], warnings);
+    const body = toResponse(newRows[0], warnings, assignmentWarnings);
 
     await client.query(
       `UPDATE idempotency_keys SET status = $3, body = $4
@@ -657,21 +704,37 @@ async function assignPatient(pool: Pool, req: Request, res: Response): Promise<v
 
   const { assignedUserId } = parsed.data;
 
-  // Verify the target user exists within the organisation.
-  const { rows: userRows } = await pool.query<{ id: string }>(
-    `SELECT id FROM users WHERE id = $1 AND organization_id = $2 AND disabled_at IS NULL`,
+  // Verify target user exists in the organisation and has doctor role.
+  const { rows: userRows } = await pool.query<{ id: string; role: string }>(
+    `SELECT id, role FROM users WHERE id = $1 AND organization_id = $2 AND disabled_at IS NULL`,
     [assignedUserId, orgId]
   );
   if (userRows.length === 0) {
     res.status(404).json({ code: 'USER_NOT_FOUND', error: 'User not found in this organization' });
     return;
   }
+  if (userRows[0].role !== 'doctor') {
+    res.status(422).json({ code: 'TARGET_NOT_A_DOCTOR', error: 'Assigned user must have the doctor role' });
+    return;
+  }
 
-  const { rows } = await pool.query<{ id: string; prev_owner: string | null }>(
+  // Read previous doctor before update so the audit log captures both sides.
+  const { rows: oldRows } = await pool.query<{ assigned_doctor_user_id: string | null }>(
+    `SELECT assigned_doctor_user_id FROM patient_records
+     WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
+    [id, orgId]
+  );
+  if (oldRows.length === 0) {
+    res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
+    return;
+  }
+  const previousDoctorUserId = oldRows[0].assigned_doctor_user_id;
+
+  const { rows } = await pool.query<{ id: string }>(
     `UPDATE patient_records
-     SET owner_user_id = $1
+     SET assigned_doctor_user_id = $1
      WHERE id = $2 AND organization_id = $3 AND deleted_at IS NULL
-     RETURNING id, (SELECT id FROM users WHERE id = owner_user_id) AS prev_owner`,
+     RETURNING id`,
     [assignedUserId, id, orgId]
   );
   if (rows.length === 0) {
@@ -688,7 +751,7 @@ async function assignPatient(pool: Pool, req: Request, res: Response): Promise<v
     outcome:     'success',
     ip:          req.ip ?? null,
     userAgent:   req.headers['user-agent'] ?? null,
-    extra:       { assignedUserId },
+    extra:       { previousDoctorUserId, assignedUserId },
   });
 
   res.status(200).json({ patientId: id, assignedUserId });

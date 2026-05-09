@@ -26,6 +26,7 @@ vi.mock('../../middleware/audit', () => ({
 
 import { createPatientsRouter } from '../patients';
 import { generateAccessToken } from '../../auth/tokens';
+import { writeAuditLog } from '../../middleware/audit';
 import type { Pool } from 'pg';
 
 // ---------------------------------------------------------------------------
@@ -50,6 +51,13 @@ function superToken(): string {
     sub: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
     sessionId: 'sess-2', orgId: null,
     role: 'admin', name: 'Superadmin', mustChangePassword: false, csrfHash: CSRF_HASH,
+  }).token;
+}
+
+function adminToken(): string {
+  return generateAccessToken({
+    sub: ADMIN_ID, sessionId: 'sess-3', orgId: ORG_ID,
+    role: 'admin', name: 'Admin User', mustChangePassword: false, csrfHash: CSRF_HASH,
   }).token;
 }
 
@@ -108,11 +116,15 @@ const VALID_DATA = {
 
 const CREATE_BODY = { id: PAT_ID, phase: 'evaluation', data: VALID_DATA };
 
+const DOCTOR_ID = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+const ADMIN_ID  = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+
 const PAT_ROW: Record<string, unknown> = {
   id:              PAT_ID,
   organization_id: ORG_ID,
   patient_person_id: PERSON_ID,
   owner_user_id:   USER_ID,
+  assigned_doctor_user_id: USER_ID,
   name:            'Kim',
   patient_no:      'P001',
   birth_date:      '1980-01-01',
@@ -721,5 +733,124 @@ describe('DELETE /api/patients/:id', () => {
     expect((updateCall![1] as unknown[])[0]).toBe(PAT_ID); // $1 = id
     expect((updateCall![1] as unknown[])[1]).toBe(ORG_ID); // $2 = org
     expect((updateCall![1] as unknown[])[2]).toBe(2);      // $3 = revision
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/patients/:id/assignment
+// ---------------------------------------------------------------------------
+describe('POST /api/patients/:id/assignment', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('returns 403 for non-admin users', async () => {
+    const pool = makePool();
+    wireQueries(pool); // auth only
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/assignment`)
+      .set('Authorization', `Bearer ${orgToken()}`) // role: doctor
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ assignedUserId: DOCTOR_ID });
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 400 when body is invalid', async () => {
+    const pool = makePool();
+    wireQueries(pool);
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/assignment`)
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ assignedUserId: 'not-a-uuid' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_BODY');
+  });
+
+  it('returns 404 when target user is not found in org', async () => {
+    const pool = makePool();
+    wireQueries(pool,
+      { rows: [] }, // user lookup empty
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/assignment`)
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ assignedUserId: DOCTOR_ID });
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe('USER_NOT_FOUND');
+  });
+
+  it('returns 422 when target user exists but is not a doctor', async () => {
+    const pool = makePool();
+    wireQueries(pool,
+      { rows: [{ id: DOCTOR_ID, role: 'nurse' }] }, // user exists, wrong role
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/assignment`)
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ assignedUserId: DOCTOR_ID });
+    expect(res.status).toBe(422);
+    expect(res.body.code).toBe('TARGET_NOT_A_DOCTOR');
+  });
+
+  it('returns 404 when patient not found', async () => {
+    const pool = makePool();
+    wireQueries(pool,
+      { rows: [{ id: DOCTOR_ID, role: 'doctor' }] }, // user ok
+      { rows: [] },                                   // patient not found
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/assignment`)
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ assignedUserId: DOCTOR_ID });
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe('PATIENT_NOT_FOUND');
+  });
+
+  it('returns 200 and records both previous and new doctor in audit log', async () => {
+    const pool = makePool();
+    wireQueries(pool,
+      { rows: [{ id: DOCTOR_ID, role: 'doctor' }] },       // user ok
+      { rows: [{ assigned_doctor_user_id: USER_ID }] },    // old value
+      { rows: [{ id: PAT_ID }] },                          // UPDATE ok
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/assignment`)
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ assignedUserId: DOCTOR_ID });
+    expect(res.status).toBe(200);
+    expect(res.body.patientId).toBe(PAT_ID);
+    expect(res.body.assignedUserId).toBe(DOCTOR_ID);
+    expect(writeAuditLog).toHaveBeenCalledWith(
+      pool,
+      expect.objectContaining({
+        action: 'patient_assignment_change',
+        extra:  { previousDoctorUserId: USER_ID, assignedUserId: DOCTOR_ID },
+      })
+    );
+  });
+
+  it('uses assigned_doctor_user_id (not owner_user_id) for the update', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });          // auth
+    mock.mockResolvedValueOnce({ rows: [{ id: DOCTOR_ID, role: 'doctor' }] }); // user
+    mock.mockResolvedValueOnce({ rows: [{ assigned_doctor_user_id: null }] }); // old
+    mock.mockResolvedValueOnce({ rows: [{ id: PAT_ID }] });         // UPDATE
+
+    await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/assignment`)
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ assignedUserId: DOCTOR_ID });
+
+    const updateCall = (mock.mock.calls as unknown[][]).find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('UPDATE patient_records')
+    );
+    expect(updateCall).toBeDefined();
+    expect((updateCall![0] as string)).toMatch(/assigned_doctor_user_id/);
+    expect((updateCall![0] as string)).not.toMatch(/SET owner_user_id/);
   });
 });
