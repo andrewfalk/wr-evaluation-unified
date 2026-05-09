@@ -371,10 +371,21 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
     const doctorName = strOrNull(
       (data.shared as Record<string, unknown>)?.['doctorName']
     );
-    const { assignedDoctorUserId, assignmentWarnings } = await resolveAssignedDoctor(
+    const { assignedDoctorUserId, assignedDoctorName, assignmentWarnings } = await resolveAssignedDoctor(
       client as unknown as QueryRunner,
-      { orgId, currentUser: { id: session.userId, role: session.role }, requestedDoctorName: doctorName }
+      { orgId, currentUser: { id: session.userId, role: session.role, name: session.name }, requestedDoctorName: doctorName }
     );
+
+    // If the server resolved a doctor but the payload carried no doctorName,
+    // fill it in so the stored payload matches the DB FK.
+    let resolvedData = data as Record<string, unknown>;
+    if (assignedDoctorName && !doctorName) {
+      resolvedData = {
+        ...resolvedData,
+        shared: { ...(resolvedData['shared'] as Record<string, unknown>), doctorName: assignedDoctorName },
+      };
+    }
+    const storedPayload = { id: patientId, phase, createdAt: createdAt ?? new Date().toISOString(), data: resolvedData };
 
     const { personId, warnings } = await resolvePatientPersonId(client as QueryRunner, orgId, meta);
 
@@ -389,7 +400,7 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
         meta.name, meta.patientNo,
         meta.birthDate, meta.injuryDate, meta.evaluationDate,
         meta.activeModules, meta.diagnosesCodes, meta.jobsNames,
-        JSON.stringify(fullPayload),
+        JSON.stringify(storedPayload),
       ]
     );
 

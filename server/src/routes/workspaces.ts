@@ -175,10 +175,14 @@ async function upsertPatientRecord(
   const existingPersonId = existingRow?.patient_person_id ?? null;
   const { personId } = await resolvePatientPersonId(pool as QueryRunner, orgId, meta, existingPersonId);
 
-  const { assignedDoctorUserId } = await resolveAssignedDoctor(
+  const { assignedDoctorUserId, assignmentWarnings } = await resolveAssignedDoctor(
     pool as unknown as QueryRunner,
     { orgId, currentUser: user, requestedDoctorName: meta.doctorName }
   );
+  if (assignmentWarnings.length > 0) {
+    console.warn('[upsertPatientRecord] assignment warnings for patient %s:', meta.id,
+      assignmentWarnings.map(w => `${w.code}: ${w.message}`).join('; '));
+  }
 
   await pool.query(
     `INSERT INTO patient_records

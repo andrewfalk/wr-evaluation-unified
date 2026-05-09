@@ -60,7 +60,7 @@ function applyPushFailures(localPatients, failures) {
   });
 }
 
-export function reconcilePulledPatients(localPatients, pulledItems) {
+export function reconcilePulledPatients(localPatients, pulledItems, { authoritativeDeletes = true } = {}) {
   const pulledServerIds = new Set(
     pulledItems
       .map(patient => patient?.sync?.serverId || patient?.id)
@@ -71,6 +71,7 @@ export function reconcilePulledPatients(localPatients, pulledItems) {
 
   return merged
     .map(patient => {
+      if (!authoritativeDeletes) return patient;
       const serverId = patient?.sync?.serverId;
       if (!serverId || pulledServerIds.has(serverId)) return patient;
 
@@ -92,6 +93,7 @@ export function reconcilePulledPatients(localPatients, pulledItems) {
       return patient;
     })
     .filter(patient => {
+      if (!authoritativeDeletes) return true;
       const serverId = patient?.sync?.serverId;
       if (!serverId || pulledServerIds.has(serverId)) return true;
       return patient.sync?.syncStatus !== 'synced';
@@ -220,7 +222,7 @@ export function usePatientSync({
           scope:    scopeRef.current,
         });
         setPatients(prev => {
-          const next = reconcilePulledPatients(prev, pulledItems);
+          const next = reconcilePulledPatients(prev, pulledItems, { authoritativeDeletes: scopeRef.current === 'all' });
           ensureActivePatient(prev, next);
           if (activeIdRef.current && !next.some(p => p.id === activeIdRef.current)) {
             queueMicrotask(() => {
