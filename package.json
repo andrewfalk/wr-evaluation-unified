@@ -16,6 +16,8 @@
     "preview": "vite preview",
     "preelectron:dev": "node scripts/prebuild-shared.mjs && node scripts/set-build-target.mjs standalone",
     "electron:dev": "npm run build:emr-helper && vite build --outDir dist/electron && electron .",
+    "preelectron:dev:intranet": "node scripts/prebuild-shared.mjs && node scripts/set-build-target.mjs intranet",
+    "electron:dev:intranet": "npm run build:emr-helper && electron .",
     "preelectron:build": "node scripts/prebuild-shared.mjs && node scripts/set-build-target.mjs standalone",
     "electron:build": "npm run build:emr-helper && npm run build:electron && electron-builder",
     "preelectron:build:win32": "node scripts/set-build-target.mjs standalone",

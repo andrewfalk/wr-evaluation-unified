@@ -63,6 +63,16 @@ const DEFAULT_PATIENT_FILTERS = {
   sortDirection: 'asc',
 };
 
+function getDefaultPatientScope(session) {
+  return session?.mode === 'intranet' && session?.user?.role !== 'doctor'
+    ? 'all'
+    : 'mine';
+}
+
+function normalizeBaseUrl(baseUrl = '') {
+  return String(baseUrl || '').trim().replace(/\/$/, '');
+}
+
 // 모듈 등록 (사이드이펙트 import)
 import './modules/knee';
 import './modules/spine';
@@ -89,7 +99,8 @@ function applyAuthUpdate(currentSession, authUpdate) {
 function App() {
   const { session, setSession, resetToLocalSession, isAuthenticated, sessionVerified, logout } = useAuth();
   const [patients, setPatients] = useState([]);
-  const [patientScope, setPatientScope] = useState('mine');
+  const [patientScope, setPatientScope] = useState(() => getDefaultPatientScope(session));
+  const [patientSyncPaused, setPatientSyncPaused] = useState(false);
   const [activeId, setActiveId] = useState(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showLoadModal, setShowLoadModal] = useState(false);
@@ -109,6 +120,8 @@ function App() {
   const { aiAvailable } = useAIAvailable({ serverConfig, session });
   const isIntranetMode =
     session?.mode === 'intranet' || settings?.integrationMode === 'intranet';
+  const canUseMinePatientScope = session?.mode !== 'intranet' || session?.user?.role === 'doctor';
+  const effectivePatientScope = canUseMinePatientScope ? patientScope : 'all';
   const { status: integrationStatus } = useIntegrationStatus({ session, settings });
   const activePatient = patients.find(p => p.id === activeId);
   const conflictPatient = patients.find(
@@ -146,6 +159,7 @@ function App() {
 
   const handleStartIntakeRef = useRef(null);
   const handleResetPatientsRef = useRef(null);
+  const skipNextSettingsUrlResetRef = useRef(false);
 
   // Keep a stable ref to the latest session so the refresh handler never
   // captures a stale closure value.
@@ -227,6 +241,17 @@ function App() {
   const { intakeShared, setIntakeShared, handleStartIntake, handleIntakeComplete } = useIntakeWizard({ settings, session, setPatients, setActiveId, setCurrentStepIndex, setShowHome });
   handleStartIntakeRef.current = handleStartIntake;
 
+  useEffect(() => {
+    setPatientScope(getDefaultPatientScope(session));
+    setPatientSyncPaused(false);
+  }, [session?.mode, session?.user?.id, session?.user?.role]);
+
+  useEffect(() => {
+    if (patients.length > 0 || intakeShared) {
+      setPatientSyncPaused(false);
+    }
+  }, [patients.length, intakeShared]);
+
   const { syncState, syncNow } = usePatientSync({
     patients,
     setPatients,
@@ -234,14 +259,15 @@ function App() {
     setActiveId,
     session,
     settings,
-    scope: patientScope,
+    scope: effectivePatientScope,
     enabled:
       isIntranetMode &&
       isAuthenticated &&
       sessionVerified &&
       !session?.user?.mustChangePassword &&
       !configLoading &&
-      !configError,
+      !configError &&
+      !patientSyncPaused,
   });
 
   const {
@@ -289,8 +315,17 @@ function App() {
   // invalid for the new server — reset to local so the LoginModal re-prompts.
   useEffect(() => {
     const prev = session;
-    const nextBaseUrl = settings.apiBaseUrl || '';
-    if ((prev.apiBaseUrl || '') === nextBaseUrl) return;
+    const nextBaseUrl = normalizeBaseUrl(settings.apiBaseUrl);
+    const prevBaseUrl = normalizeBaseUrl(prev.apiBaseUrl);
+    const skipReset = skipNextSettingsUrlResetRef.current;
+    skipNextSettingsUrlResetRef.current = false;
+    if (prevBaseUrl === nextBaseUrl) return;
+    if (skipReset) {
+      if (prev.mode !== 'intranet') {
+        setSession(s => ({ ...s, apiBaseUrl: nextBaseUrl }));
+      }
+      return;
+    }
     if (prev.mode === 'intranet') {
       resetToLocalSession();
     } else {
@@ -301,7 +336,13 @@ function App() {
 
   // Electron: 파일 기반 설정 비동기 로드
   useEffect(() => {
-    loadAppSettingsAsync(DEFAULT_SETTINGS).then(s => setSettings(s));
+    let cancelled = false;
+    loadAppSettingsAsync(DEFAULT_SETTINGS).then(s => {
+      if (cancelled) return;
+      skipNextSettingsUrlResetRef.current = true;
+      setSettings(s);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   // 평가 완료 시 evaluationDate 자동 설정
@@ -358,11 +399,11 @@ function App() {
   const handleSaveSettings = (newSettings) => {
     setSettings(newSettings);
     saveAppSettings(newSettings);
-    const nextBaseUrl = newSettings.apiBaseUrl || '';
+    const nextBaseUrl = normalizeBaseUrl(newSettings.apiBaseUrl);
     const switchingToLocal = newSettings.integrationMode !== 'intranet';
     // Reset intranet session when: switching to local mode, or changing the server URL.
     // Either case means the existing auth token is no longer valid for the new context.
-    if (session.mode === 'intranet' && (switchingToLocal || (session.apiBaseUrl || '') !== nextBaseUrl)) {
+    if (session.mode === 'intranet' && (switchingToLocal || normalizeBaseUrl(session.apiBaseUrl) !== nextBaseUrl)) {
       resetToLocalSession();
     } else {
       setSession(prev => ({ ...prev, apiBaseUrl: nextBaseUrl }));
@@ -373,12 +414,16 @@ function App() {
   const handleResetPatients = async () => {
     const ok = await showConfirm('현재 작업 중인 환자 목록을 모두 삭제하시겠습니까?');
     if (!ok) return;
+    setPatientSyncPaused(true);
     setPatients([]);
     setActiveId(null);
     setSelectedIds(new Set());
     setIntakeShared(null);
-    setShowHome(false);
-    clearAutoSavedWorkspace({ session, settings, serverConfig });
+    setShowHome(true);
+    clearAutoSavedWorkspace({ session, settings, serverConfig })
+      .catch(error => {
+        console.warn('[autosave-clear]', error);
+      });
   };
   handleResetPatientsRef.current = handleResetPatients;
 
@@ -689,8 +734,11 @@ function App() {
         onRemovePatient={removePatient}
         onRemoveSelectedPatients={removeSelectedPatients}
         onResolveConflict={setConflictPatientId}
-        scope={patientScope}
-        onScopeChange={setPatientScope}
+        scope={effectivePatientScope}
+        onScopeChange={scope => {
+          setPatientSyncPaused(false);
+          setPatientScope(canUseMinePatientScope ? scope : 'all');
+        }}
         session={session}
         serverUnassignedCount={syncState?.serverUnassignedCount ?? null}
       />

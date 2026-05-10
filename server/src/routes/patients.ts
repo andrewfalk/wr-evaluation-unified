@@ -210,7 +210,10 @@ async function listPatients(pool: Pool, req: Request, res: Response): Promise<vo
   const diagCode     = typeof req.query['diagnosesCode'] === 'string' ? req.query['diagnosesCode'].trim() : '';
   const jobName      = typeof req.query['jobName']       === 'string' ? req.query['jobName'].trim()       : '';
   const moduleFilter = typeof req.query['module']        === 'string' ? req.query['module'].trim()        : '';
-  const scope        = req.query['scope'] === 'all' ? 'all' : 'mine';
+  const requestedScope = req.query['scope'];
+  const scope = requestedScope === 'all' || requestedScope === 'mine'
+    ? requestedScope
+    : (session.role === 'doctor' ? 'mine' : 'all');
 
   const rawLimit  = Number(req.query['limit']  ?? 20);
   const rawOffset = Number(req.query['offset'] ?? 0);

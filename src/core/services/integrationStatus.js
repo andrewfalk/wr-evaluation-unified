@@ -19,6 +19,10 @@ function buildSessionInfo(context = {}) {
   };
 }
 
+function getContextBaseUrl(context = {}) {
+  return normalizeBaseUrl(context?.session?.apiBaseUrl || context?.settings?.apiBaseUrl || '');
+}
+
 function createBaseStatus() {
   return {
     mode: 'local',
@@ -64,7 +68,7 @@ function buildStatus(overrides = {}) {
 }
 
 function createLocalStatus(context = {}, overrides = {}) {
-  const baseUrl = normalizeBaseUrl(context?.settings?.apiBaseUrl || context?.session?.apiBaseUrl || '');
+  const baseUrl = getContextBaseUrl(context);
   return buildStatus({
     mode: 'local',
     activeStore: 'local',
@@ -83,7 +87,7 @@ function createLocalStatus(context = {}, overrides = {}) {
 }
 
 function createCheckingStatus(context = {}, overrides = {}) {
-  const baseUrl = normalizeBaseUrl(context?.settings?.apiBaseUrl || context?.session?.apiBaseUrl || '');
+  const baseUrl = getContextBaseUrl(context);
   return buildStatus({
     mode: 'intranet',
     activeStore: 'checking',
@@ -104,7 +108,7 @@ function createCheckingStatus(context = {}, overrides = {}) {
 }
 
 function createRemoteStatus(context = {}, overrides = {}) {
-  const baseUrl = normalizeBaseUrl(context?.settings?.apiBaseUrl || context?.session?.apiBaseUrl || '');
+  const baseUrl = getContextBaseUrl(context);
   const mock = overrides?.mock ?? context?.mock ?? (currentStatus.baseUrl === baseUrl ? currentStatus.mock : false);
   const hasMockDetails    = Object.prototype.hasOwnProperty.call(overrides, 'mockDetails');
   const hasRemoteDetails  = Object.prototype.hasOwnProperty.call(overrides, 'remoteDetails');
@@ -131,7 +135,7 @@ function createRemoteStatus(context = {}, overrides = {}) {
 }
 
 function createFallbackStatus(error, context = {}, overrides = {}) {
-  const baseUrl = normalizeBaseUrl(context?.settings?.apiBaseUrl || context?.session?.apiBaseUrl || '');
+  const baseUrl = getContextBaseUrl(context);
   return buildStatus({
     mode: 'intranet',
     activeStore: 'fallback',
@@ -211,7 +215,7 @@ export async function inspectIntegrationStatus(context = {}) {
 
   try {
     const mockStatus = await requestJson('/api/mock/status', {
-      baseUrl: context?.settings?.apiBaseUrl || context?.session?.apiBaseUrl || '',
+      baseUrl: getContextBaseUrl(context),
       session: context?.session,
     });
 
@@ -230,7 +234,7 @@ export async function inspectIntegrationStatus(context = {}) {
   }
 
   // /api/auth/me is the primary check: confirms auth works and exposes capabilities.
-  const baseUrl = context?.settings?.apiBaseUrl || context?.session?.apiBaseUrl || '';
+  const baseUrl = getContextBaseUrl(context);
   let meData = null;
   try {
     meData = await requestJson('/api/auth/me', { baseUrl, session: context?.session });

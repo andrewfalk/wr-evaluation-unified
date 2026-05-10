@@ -52,8 +52,10 @@ services:
       TRUST_PROXY:          ${TRUST_PROXY:-}
       ACCESS_TOKEN_SECRET:  "${ACCESS_TOKEN_SECRET:?ACCESS_TOKEN_SECRET is required}"
       REFRESH_TOKEN_SECRET: "${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET is required}"
-      CORS_ORIGINS:         ${CORS_ORIGINS:-https://wr.hospital.local}
+      CORS_ORIGINS:         ${CORS_ORIGINS:-https://wr.hospital.local,http://localhost:3001}
       AI_PROVIDER:          ${AI_PROVIDER:-none}
+    ports:
+      - "${DEV_PORT:-3001}:3001"
     depends_on:
       postgres:
         condition: service_healthy

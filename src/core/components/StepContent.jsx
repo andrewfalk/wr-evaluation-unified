@@ -34,7 +34,7 @@ export function StepContent({
           <BasicInfoForm shared={shared} onChange={updateShared} errors={errors} presets={presets} presetMeta={presetMeta} presetError={presetError} onPresetSelect={handlePresetSelect} onSavePreset={setPresetModalJobId} onBrowsePreset={setPresetBrowseJobId} activeModules={activeModules} session={session} />
         </div>
         <div className="panel">
-          <BasicInfoSidePanel shared={shared} onChange={updateShared} />
+          <BasicInfoSidePanel shared={shared} onChange={updateShared} session={session} />
         </div>
       </>
     );

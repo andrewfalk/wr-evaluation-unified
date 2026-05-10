@@ -11,6 +11,8 @@ const audit = require('./audit');
 // Set WR_BUILD_TARGET=intranet + WR_INTRANET_URL=https://wr.hospital.local
 // OR run `npm run electron:build:intranet` which writes electron/build-target.json.
 // ---------------------------------------------------------------------------
+const DEFAULT_INTRANET_URL = 'https://wr.hospital.local';
+
 function detectBuildTarget() {
   if (process.env.WR_BUILD_TARGET) return process.env.WR_BUILD_TARGET;
   try {
@@ -18,7 +20,7 @@ function detectBuildTarget() {
   } catch { return ''; }
 }
 const IS_INTRANET_BUILD = detectBuildTarget() === 'intranet';
-const INTRANET_URL      = (process.env.WR_INTRANET_URL || '').trim().replace(/\/$/, '');
+const INTRANET_URL      = (process.env.WR_INTRANET_URL || (IS_INTRANET_BUILD ? DEFAULT_INTRANET_URL : '')).trim().replace(/\/$/, '');
 
 // ---------------------------------------------------------------------------
 // In-memory access token — set by the renderer via 'set-access-token' IPC.

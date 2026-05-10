@@ -3,15 +3,31 @@ import { inspectIntegrationStatus } from '../services/integrationStatus';
 import { isElectron } from '../utils/platform';
 import { PresetsSection } from './PresetsSection';
 
+const DEFAULT_INTRANET_URL = 'https://wr.hospital.local';
+
 function normalizeUrl(value = '') {
   return String(value || '').trim().replace(/\/$/, '');
 }
 
+function getEffectiveServerUrl({ session, diagnostic, draft } = {}) {
+  return normalizeUrl(
+    session?.apiBaseUrl ||
+    diagnostic?.baseUrl ||
+    draft?.apiBaseUrl ||
+    (session?.mode === 'intranet' || draft?.integrationMode === 'intranet' ? DEFAULT_INTRANET_URL : '')
+  );
+}
+
 function buildPreviewSession(session, draft) {
+  const draftUrl = normalizeUrl(draft.apiBaseUrl || '');
   return {
     ...session,
     mode: draft.integrationMode === 'intranet' ? 'intranet' : 'local',
-    apiBaseUrl: normalizeUrl(draft.apiBaseUrl || ''),
+    apiBaseUrl: draftUrl || (
+      session?.mode === 'intranet' || draft.integrationMode === 'intranet'
+        ? DEFAULT_INTRANET_URL
+        : ''
+    ),
   };
 }
 
@@ -98,7 +114,10 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
 
   const tone = getStatusTone(diagnostic);
   const statusTitle = getStatusTitle(diagnostic);
-  const baseUrl = normalizeUrl(diagnostic?.baseUrl || draft.apiBaseUrl || '');
+  const baseUrl = getEffectiveServerUrl({ session, diagnostic, draft });
+  const serverUrlInputValue = isIntranetLocked
+    ? baseUrl
+    : (draft.apiBaseUrl || '');
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -210,9 +229,9 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
             <label>서버 주소</label>
             <input
               type="text"
-              value={draft.apiBaseUrl || ''}
+              value={serverUrlInputValue}
               onChange={e => update('apiBaseUrl', e.target.value)}
-              placeholder="https://intranet.example.com 또는 http://localhost:3002"
+              placeholder={DEFAULT_INTRANET_URL}
               disabled={isIntranetLocked}
               readOnly={isIntranetLocked}
             />

@@ -218,6 +218,7 @@ export function PatientSidebar({
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const allModules = useMemo(() => getAllModules(), []);
   const nameWarningMap = useMemo(() => buildPatientNameWarningMap(patients), [patients]);
+  const canUseMineScope = session?.user?.role === 'doctor';
 
   const {
     searchQuery = '',
@@ -281,10 +282,12 @@ export function PatientSidebar({
         <div className="sidebar-filter">
           {session?.mode === 'intranet' && (
             <div className="patient-scope-toggle">
-              <button
-                className={`patient-scope-btn${scope === 'mine' ? ' patient-scope-btn--active' : ''}`}
-                onClick={() => onScopeChange?.('mine')}
-              >내 담당</button>
+              {canUseMineScope && (
+                <button
+                  className={`patient-scope-btn${scope === 'mine' ? ' patient-scope-btn--active' : ''}`}
+                  onClick={() => onScopeChange?.('mine')}
+                >내 담당</button>
+              )}
               <button
                 className={`patient-scope-btn${scope === 'all' ? ' patient-scope-btn--active' : ''}`}
                 onClick={() => onScopeChange?.('all')}

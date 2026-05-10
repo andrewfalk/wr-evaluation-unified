@@ -124,6 +124,7 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
     env:         nodeEnv,
     port:        positiveInt(env, 'PORT', 3001),
     databaseUrl: required(env, 'DATABASE_URL'),
+    jsonBodyLimit: optional(env, 'JSON_BODY_LIMIT', '10mb'),
 
     deploymentMode,
     // intranet mode never falls back to local storage on server errors

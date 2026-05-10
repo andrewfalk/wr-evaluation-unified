@@ -41,9 +41,13 @@ function autosavePath() {
   return `/api/autosave?deviceId=${encodeURIComponent(getDeviceId())}`;
 }
 
+function getBaseUrl(session, settings) {
+  return session?.apiBaseUrl || settings?.apiBaseUrl || '';
+}
+
 export async function loadRemoteWorkspaces({ session, settings }) {
   const raw = await requestJson('/api/workspaces', {
-    baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
+    baseUrl: getBaseUrl(session, settings),
     session,
   });
   const data = parseResponse(GetWorkspacesResponseSchema, raw, 'GET /api/workspaces');
@@ -54,7 +58,7 @@ export async function saveRemoteWorkspace({ id, name, patients, session, setting
   const path = id ? `/api/workspaces/${id}` : '/api/workspaces';
   const method = id ? 'PUT' : 'POST';
   const raw = await requestJson(path, {
-    baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
+    baseUrl: getBaseUrl(session, settings),
     method,
     session,
     body: { name, patients },
@@ -65,7 +69,7 @@ export async function saveRemoteWorkspace({ id, name, patients, session, setting
 
 export async function deleteRemoteWorkspace({ id, session, settings }) {
   const raw = await requestJson(`/api/workspaces/${id}`, {
-    baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
+    baseUrl: getBaseUrl(session, settings),
     method: 'DELETE',
     session,
   });
@@ -76,7 +80,7 @@ export async function deleteRemoteWorkspace({ id, session, settings }) {
 export async function loadRemoteAutoSave({ session, settings }) {
   const path = autosavePath();
   const raw = await requestJson(path, {
-    baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
+    baseUrl: getBaseUrl(session, settings),
     session,
   });
   const data = parseResponse(GetAutosaveResponseSchema, raw, `GET ${path}`);
@@ -90,7 +94,7 @@ export async function loadRemoteAutoSave({ session, settings }) {
 export async function saveRemoteAutoSave({ patients, session, settings }) {
   const path = autosavePath();
   const raw = await requestJson(path, {
-    baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
+    baseUrl: getBaseUrl(session, settings),
     method: 'PUT',
     session,
     body: { patients },
@@ -101,7 +105,7 @@ export async function saveRemoteAutoSave({ patients, session, settings }) {
 export async function clearRemoteAutoSave({ session, settings }) {
   const path = autosavePath();
   const raw = await requestJson(path, {
-    baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
+    baseUrl: getBaseUrl(session, settings),
     method: 'DELETE',
     session,
   });

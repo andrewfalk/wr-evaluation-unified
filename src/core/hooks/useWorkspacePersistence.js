@@ -90,7 +90,10 @@ export function useWorkspacePersistence({
             setCurrentStepIndex(0);
             await showLoadFailureNotice(loadResult);
           }
-          clearAutoSavedWorkspace({ session, settings, serverConfig });
+          clearAutoSavedWorkspace({ session, settings, serverConfig })
+            .catch(error => {
+              console.warn('[autosave-clear]', error);
+            });
         });
       }
     });
@@ -100,8 +103,13 @@ export function useWorkspacePersistence({
   useEffect(() => {
     if (disabled || !settings.autoSaveInterval || patients.length === 0) return;
     const timer = setTimeout(() => {
-      saveAutoSavedWorkspace({ patients, session, settings, serverConfig });
-      setLastAutoSave(new Date());
+      saveAutoSavedWorkspace({ patients, session, settings, serverConfig })
+        .then(() => {
+          setLastAutoSave(new Date());
+        })
+        .catch(error => {
+          console.warn('[autosave-save]', error);
+        });
     }, settings.autoSaveInterval * 1000);
     return () => clearTimeout(timer);
   }, [

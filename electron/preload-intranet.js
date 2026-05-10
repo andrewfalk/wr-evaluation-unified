@@ -10,7 +10,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 // The will-navigate / setWindowOpenHandler in main.js prevents external pages
 // from loading, so this is a belt-and-suspenders guard.
 // ---------------------------------------------------------------------------
-const INTRANET_URL = (process.env.WR_INTRANET_URL || '').trim();
+const DEFAULT_INTRANET_URL = 'https://wr.hospital.local';
+const INTRANET_URL = (process.env.WR_INTRANET_URL || DEFAULT_INTRANET_URL).trim();
 let allowedOrigin = null;
 try { allowedOrigin = INTRANET_URL ? new URL(INTRANET_URL).origin : null; } catch { /* invalid URL */ }
 

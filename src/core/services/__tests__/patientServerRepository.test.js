@@ -86,6 +86,18 @@ describe('pullPatients', () => {
     const [path] = requestJson.mock.calls[0];
     expect(path).toBe('/api/patients');
   });
+
+  it('uses the authenticated session base URL before stale settings', async () => {
+    requestJson.mockResolvedValue({ items: [], total: 0 });
+    const session = { ...SESSION, apiBaseUrl: 'https://session.example' };
+    const settings = { apiBaseUrl: 'https://stale-settings.example' };
+
+    await pullPatients({ session, settings });
+
+    expect(requestJson).toHaveBeenCalledWith('/api/patients', expect.objectContaining({
+      baseUrl: 'https://session.example',
+    }));
+  });
 });
 
 describe('fetchPatient', () => {

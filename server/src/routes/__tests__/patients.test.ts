@@ -179,6 +179,46 @@ describe('GET /api/patients', () => {
     expect(res.body.items[0].id).toBe(PAT_ID);
     expect(res.body.items[0].sync.serverId).toBe(PAT_ID);
     expect(res.body.items[0].sync.syncStatus).toBe('synced');
+
+    const itemsCall = mock.mock.calls[1] as unknown[];
+    expect(itemsCall[0] as string).toContain('assigned_doctor_user_id');
+    expect(itemsCall[1] as unknown[]).toContain(USER_ID);
+  });
+
+  it('defaults admin patient list scope to all', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    mock.mockResolvedValueOnce({ rows: [PAT_ROW] });        // items
+    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] }); // count
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // unassignedCount
+
+    const res = await request(makeApp(pool))
+      .get('/api/patients')
+      .set('Authorization', `Bearer ${adminToken()}`);
+
+    expect(res.status).toBe(200);
+    const itemsCall = mock.mock.calls[1] as unknown[];
+    expect(itemsCall[0] as string).not.toMatch(/AND\s+assigned_doctor_user_id\s*=/);
+    expect(itemsCall[1] as unknown[]).toEqual([ORG_ID, 20, 0]);
+  });
+
+  it('allows admin to explicitly request mine scope', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    mock.mockResolvedValueOnce({ rows: [] });              // items
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // count
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // unassignedCount
+
+    const res = await request(makeApp(pool))
+      .get('/api/patients?scope=mine')
+      .set('Authorization', `Bearer ${adminToken()}`);
+
+    expect(res.status).toBe(200);
+    const itemsCall = mock.mock.calls[1] as unknown[];
+    expect(itemsCall[0] as string).toContain('assigned_doctor_user_id');
+    expect(itemsCall[1] as unknown[]).toContain(ADMIN_ID);
   });
 
   it('returns 200 with empty result', async () => {

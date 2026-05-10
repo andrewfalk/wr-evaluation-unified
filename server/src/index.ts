@@ -26,7 +26,7 @@ app.set('trust proxy', config.trustProxy);
 // Security headers first — applied to every response before any route runs.
 app.use(cspMiddleware());
 app.use(corsMiddleware());
-app.use(express.json());
+app.use(express.json({ limit: config.jsonBodyLimit }));
 app.use(cookieParser());
 
 app.get('/health', (_req, res) => {
@@ -61,7 +61,15 @@ if (fs.existsSync(WEB_DIR)) {
 // Global JSON error handler — keeps API responses consistent when middleware
 // calls next(err) (e.g. DB failures in auth middleware).
 // Must be registered after all routes and have exactly 4 parameters.
-app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+app.use((err: Error & { type?: string; limit?: number }, _req: Request, res: Response, _next: NextFunction) => {
+  if (err.type === 'entity.too.large') {
+    console.warn('[wr-server] request body too large', { limit: err.limit });
+    res.status(413).json({
+      code: 'PAYLOAD_TOO_LARGE',
+      error: 'Request body is too large',
+    });
+    return;
+  }
   console.error('[wr-server] unhandled error', err);
   res.status(500).json({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 });

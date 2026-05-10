@@ -283,7 +283,7 @@ function AutoResizeTextarea({ value, onChange, placeholder, maxHeight = '50vh' }
   );
 }
 
-export function BasicInfoSidePanel({ shared, onChange }) {
+export function BasicInfoSidePanel({ shared, onChange, session }) {
   const handleInput = (field, value) => {
     onChange({ ...shared, [field]: value });
   };

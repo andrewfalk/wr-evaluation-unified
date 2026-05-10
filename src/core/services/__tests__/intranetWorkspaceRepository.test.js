@@ -57,6 +57,21 @@ describe('saveRemoteWorkspace', () => {
     }));
   });
 
+  it('uses the authenticated session base URL before stale settings', async () => {
+    requestJson.mockResolvedValue({ items: [] });
+
+    await saveRemoteWorkspace({
+      name: 'Snapshot',
+      patients: [PATIENT],
+      session: SESSION,
+      settings: { apiBaseUrl: 'https://stale-settings.test' },
+    });
+
+    expect(requestJson).toHaveBeenCalledWith('/api/workspaces', expect.objectContaining({
+      baseUrl: 'https://intranet.test',
+    }));
+  });
+
   it('puts when overwriting an existing workspace snapshot', async () => {
     requestJson.mockResolvedValue({ items: [] });
 

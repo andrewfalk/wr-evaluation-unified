@@ -2,7 +2,7 @@ import { requestJson } from './httpClient';
 import { isRedactedPatientRecord } from './patientRecords';
 
 function getBaseUrl(session, settings) {
-  return settings?.apiBaseUrl || session?.apiBaseUrl || '';
+  return session?.apiBaseUrl || settings?.apiBaseUrl || '';
 }
 
 // ---------------------------------------------------------------------------

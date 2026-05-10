@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   mergePulledPatients,
   mergePushedPatientAck,
-  mergeServerPatient,
   pullPatients,
   pushPendingPatients,
 } from '../services/patientServerRepository';
@@ -166,6 +165,7 @@ export function usePatientSync({
 
   const scopeRef = useRef(scope);
 
+  enabledRef.current = canSync;
   useEffect(() => { patientsRef.current = patients || []; }, [patients]);
   useEffect(() => { activeIdRef.current = activeId || null; }, [activeId]);
   useEffect(() => { sessionRef.current = session || null; }, [session]);
@@ -210,6 +210,11 @@ export function usePatientSync({
             settings: settingsRef.current,
           });
 
+          if (!enabledRef.current) {
+            setSyncState(prev => ({ ...prev, status: 'idle' }));
+            return null;
+          }
+
           if (synced.length > 0 || failed.some(f => f.kind === 'conflict')) {
             setPatients(prev => {
               const withSynced = applySyncedPatients(prev, synced);
@@ -230,6 +235,10 @@ export function usePatientSync({
           scope:    scopeRef.current,
         });
         if (typeof unassignedCount === 'number') serverUnassignedCount = unassignedCount;
+        if (!enabledRef.current) {
+          setSyncState(prev => ({ ...prev, status: 'idle' }));
+          return null;
+        }
         setPatients(prev => {
           const next = reconcilePulledPatients(prev, pulledItems, { authoritativeDeletes: scopeRef.current === 'all' });
           ensureActivePatient(prev, next);
