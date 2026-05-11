@@ -45,6 +45,10 @@ if (!originAllowed) {
     // Access token bridge — main process stores the token in memory for device audit signing.
     setAccessToken: (token) => ipcRenderer.send('set-access-token', token),
 
+    // Read-only local-data snapshot for one-shot server migration.
+    // Main-process gates: build target + origin + access token + native confirm dialog.
+    loadLocalMigrationData: () => ipcRenderer.invoke('migration-load-local-data'),
+
     // Version metadata
     version: {
       app:      ipcRenderer.sendSync('get-app-version'),

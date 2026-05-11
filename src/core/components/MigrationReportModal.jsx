@@ -21,6 +21,24 @@ function FailedPatientItem({ patient, name }) {
   );
 }
 
+const DENIED_REASON_MESSAGES = {
+  not_intranet_build: '이 기능은 인트라넷 빌드에서만 사용할 수 있습니다.',
+  origin_not_allowed: '허용되지 않은 페이지에서의 요청입니다.',
+  not_authenticated: '먼저 로그인해 주세요.',
+};
+
+// Compare by name (not instanceof) to be safe across module/bundle boundaries.
+function formatMigrationError(err) {
+  if (!err) return '알 수 없는 오류';
+  if (err.name === 'MigrationDeniedError') {
+    return DENIED_REASON_MESSAGES[err.reason] || `권한 거부: ${err.reason}`;
+  }
+  if (err.name === 'MigrationReadError') {
+    return `로컬 데이터 읽기에 실패했습니다: ${err.detail || err.message || ''}`;
+  }
+  return `마이그레이션 중 오류가 발생했습니다: ${err.message ?? '알 수 없는 오류'}`;
+}
+
 // ---------------------------------------------------------------------------
 // Main modal
 //
@@ -139,8 +157,7 @@ export function MigrationReportModal({
         {status === 'error' && (
           <div className="migration-content">
             <div className="migration-error">
-              마이그레이션 중 오류가 발생했습니다:&nbsp;
-              {result?.error?.message ?? '알 수 없는 오류'}
+              {formatMigrationError(result?.error)}
             </div>
           </div>
         )}

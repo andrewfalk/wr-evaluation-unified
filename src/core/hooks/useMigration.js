@@ -1,5 +1,9 @@
 import { useCallback, useState } from 'react';
-import { migrateToServer, runMigration } from '../services/localToServerMigrator';
+import {
+  migrateToServer,
+  runMigration,
+  MigrationCanceledError,
+} from '../services/localToServerMigrator';
 
 // Hook wrapping the local-to-server migration.
 // session and settings must come from the caller (same pattern as usePatientSync).
@@ -19,6 +23,13 @@ export function useMigration({ session, settings } = {}) {
       setResult(r);
       setStatus('done');
     } catch (err) {
+      // User canceled the native confirm dialog — quietly return to idle.
+      // Not an error to display in the modal.
+      if (err instanceof MigrationCanceledError) {
+        setStatus('idle');
+        setResult(null);
+        return;
+      }
       setResult({ error: err });
       setStatus('error');
     }

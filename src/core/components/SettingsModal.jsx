@@ -340,12 +340,13 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
           <div className="settings-section modal-section pattern-surface">
             <div className="settings-section-title">데이터 마이그레이션</div>
             <div className="settings-help-text">
-              기존 로컬 저장 환자 데이터를 인트라넷 서버로 이전합니다.
-              이미 서버에 등록된 환자는 자동으로 건너뜁니다.
+              이 PC의 로컬 환자 데이터를 인트라넷 서버로 이전합니다.
+              환자 데이터만 이전되며 사용자 설정·프리셋·워크스페이스는 별도입니다.
+              중복 등록되지 않도록 처리합니다.
             </div>
             <div className="settings-inline-actions">
               <button className="btn btn-secondary btn-sm" onClick={onMigrate}>
-                서버로 마이그레이션
+                이 PC의 로컬 환자 데이터를 서버로 이전
               </button>
             </div>
           </div>

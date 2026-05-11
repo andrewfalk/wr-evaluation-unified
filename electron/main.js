@@ -5,6 +5,9 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const audit = require('./audit');
+const { getDataPaths } = require('./paths');
+const { readMigrationSnapshot } = require('./migrationDataReader');
+const { evaluateMigrationGate } = require('./migrationGate');
 
 // ---------------------------------------------------------------------------
 // Build target: 'intranet' or 'standalone' (default)
@@ -477,10 +480,7 @@ function extractFromRawScan(buf, targetKey) {
 // ======================================================
 // 파일 기반 저장소 (환자별 개별 파일)
 // ======================================================
-const dataDir = path.join(app.getPath('userData'), 'wr-eval-data');
-const patientsDir = path.join(dataDir, 'patients');
-const savedDir = path.join(dataDir, 'saved');
-const customPresetsPath = path.join(dataDir, 'custom-presets.json');
+const { dataDir, patientsDir, savedDir, customPresetsPath } = getDataPaths(app);
 
 function ensureDirs() {
   for (const dir of [dataDir, patientsDir, savedDir]) {
@@ -680,6 +680,44 @@ ipcMain.handle('fs-migrate', async (_e, { savedItems, autoSave, settings }) => {
   }
 
   return { migrated: true };
+});
+
+// 인트라넷 마이그레이션 전용 — 로컬 데이터를 읽기 전용으로 노출.
+// fs-* 핸들러와 별도. 4단계 게이트(빌드 타깃 / origin / 토큰 / 사용자 확인) 통과 시에만
+// 디스크 읽기. patients/는 index.json 기준만 — fs-save-all-patients가 stale 파일을
+// 정리하지 않아 ghost 부활 위험이 있음. saved/, autosave.json은 사용자 명시 데이터.
+ipcMain.handle('migration-load-local-data', async (event) => {
+  const empty = { savedItems: [], indexedPatients: [], autoSave: null };
+
+  const gate = evaluateMigrationGate({
+    isIntranet: IS_INTRANET_BUILD,
+    senderUrl: event.sender.getURL(),
+    allowedOrigin: ALLOWED_ORIGIN,
+    accessToken: _accessToken,
+  });
+  if (!gate.allowed) {
+    return { ...empty, denied: true, reason: gate.reason };
+  }
+
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const { response } = await dialog.showMessageBox(win, {
+    type: 'warning',
+    buttons: ['취소', '계속'],
+    defaultId: 0,
+    cancelId: 0,
+    title: '로컬 데이터 마이그레이션',
+    message: '이 PC의 로컬 환자 데이터를 서버 이전 목적으로 읽습니다.',
+    detail: '계속하시면 저장된 환자 데이터가 메모리로 로드된 후 서버에 업로드됩니다.',
+  });
+  if (response !== 1) {
+    return { ...empty, denied: true, reason: 'user_canceled' };
+  }
+
+  try {
+    return await readMigrationSnapshot(dataDir);
+  } catch (err) {
+    return { ...empty, error: String(err && err.message ? err.message : err) };
+  }
 });
 
 // EmrHelper.exe 경로 해석 (개발: bin/Release, 패키징: extraResources)
