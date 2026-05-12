@@ -3,13 +3,13 @@ import { IntegrationStatusBadge } from './IntegrationStatusBadge';
 
 const ROLE_LABELS = { admin: '관리자', doctor: '의사', nurse: '간호사', staff: '직원' };
 
-function AccountMenu({ session, onShowAdminConsole, onLogout, onChangePassword }) {
+function AccountMenu({ session, onShowAdminConsole, onLogout, onChangePassword, onShowAccountProfile }) {
   const [open, setOpen] = useState(false);
   if (session?.mode !== 'intranet') return null;
 
-  const user      = session.user;
-  const roleLabel = ROLE_LABELS[user?.role] || user?.role || '';
-  const displayName = user?.displayName || user?.name || '사용자';
+  const user        = session.user;
+  const roleLabel   = ROLE_LABELS[user?.role] || user?.role || '';
+  const displayName = user?.name || user?.displayName || '사용자';
 
   return (
     <div className="action-menu account-menu">
@@ -21,6 +21,7 @@ function AccountMenu({ session, onShowAdminConsole, onLogout, onChangePassword }
       </button>
       {open && (
         <div className="export-dropdown account-dropdown" onClick={() => setOpen(false)}>
+          <button onClick={onShowAccountProfile}>내 계정</button>
           {user?.role === 'admin' && (
             <button onClick={onShowAdminConsole}>관리자 콘솔</button>
           )}
@@ -105,7 +106,7 @@ function EMRButtons({ activePatient, activeModules, selectedIds, extractProgress
 
 export function MainHeader({
   title, lastAutoSave, integrationStatus,
-  session, onShowAdminConsole, onLogout, onChangePassword,
+  session, onShowAdminConsole, onLogout, onChangePassword, onShowAccountProfile,
   patients, activePatient, activeModules, selectedIds,
   extractProgress, setExtractProgress,
   exportDropdown, setExportDropdown,
@@ -138,6 +139,7 @@ export function MainHeader({
               onShowAdminConsole={onShowAdminConsole}
               onLogout={onLogout}
               onChangePassword={onChangePassword}
+              onShowAccountProfile={onShowAccountProfile}
             />
             <ExportMenu
               activePatient={activePatient}

@@ -49,6 +49,7 @@ import {
 import { LoginModal } from './core/components/LoginModal';
 import { ChangePasswordModal } from './core/components/ChangePasswordModal';
 import { AdminConsoleModal } from './core/components/AdminConsoleModal';
+import { AccountProfileModal } from './core/components/AccountProfileModal';
 
 const DEFAULT_PATIENT_FILTERS = {
   searchQuery: '',
@@ -111,6 +112,7 @@ function App() {
   const [settings, setSettings] = useState(() => loadAppSettings(DEFAULT_SETTINGS));
   const [showSettings, setShowSettings] = useState(false);
   const [showAdminConsole, setShowAdminConsole] = useState(false);
+  const [showAccountProfile, setShowAccountProfile] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showMigrationReport, setShowMigrationReport] = useState(false);
   const [showBatchImport, setShowBatchImport] = useState(false);
@@ -519,6 +521,17 @@ function App() {
           onPatientAssignmentChanged={() => syncNow({ pull: true, reason: 'assignment-change' })}
         />
       )}
+      {showAccountProfile && (
+        <AccountProfileModal
+          session={session}
+          settings={settings}
+          syncState={syncState}
+          onClose={() => setShowAccountProfile(false)}
+          onLogout={logout}
+          onChangePassword={() => { setShowAccountProfile(false); setShowChangePassword(true); }}
+          onShowAdminConsole={() => { setShowAccountProfile(false); setShowAdminConsole(true); }}
+        />
+      )}
       {showChangePassword && (
         <ChangePasswordModal
           apiBaseUrl={session?.apiBaseUrl || settings?.apiBaseUrl || ''}
@@ -754,6 +767,7 @@ function App() {
           onShowAdminConsole={() => setShowAdminConsole(true)}
           onLogout={logout}
           onChangePassword={() => setShowChangePassword(true)}
+          onShowAccountProfile={() => setShowAccountProfile(true)}
           patients={patients}
           activePatient={activePatient}
           activeModules={activeModules}

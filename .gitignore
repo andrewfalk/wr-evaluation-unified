@@ -16,3 +16,6 @@ target_webpage*
 electron/build-target.json
 *.crt
 *.key
+# GPG backup keys — never commit; store offline
+wr-backup-private.asc
+wr-backup-public.asc
