@@ -673,6 +673,7 @@ function App() {
           onGoBack={() => setShowHome(false)}
           onResetPatients={handleResetPatients}
           onSelectPatient={(id) => { setActiveId(id); setCurrentStepIndex(0); setShowHome(false); }}
+          isIntranetMode={session?.mode === 'intranet'}
         />
         {renderModals()}
       </div>
