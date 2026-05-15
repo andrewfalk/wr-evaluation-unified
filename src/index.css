@@ -2798,6 +2798,32 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   flex-shrink: 0;
 }
 
+.admin-card {
+  padding: 10px 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+}
+
+/* Global ops-alert banner — shown to admins when backup monitoring detects an issue */
+.ops-alert-banner {
+  display: block;
+  width: 100%;
+  padding: 8px 16px;
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border: none;
+  border-bottom: 1px solid rgba(201, 42, 42, 0.2);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.ops-alert-banner:hover {
+  background: rgba(201, 42, 42, 0.15);
+}
+
 /* Create form (Users tab) */
 .admin-create-form {
   padding: 12px 14px;

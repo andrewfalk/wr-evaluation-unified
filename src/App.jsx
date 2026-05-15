@@ -30,6 +30,7 @@ import { useStepNavigation } from './core/hooks/useStepNavigation';
 import { useIntakeWizard } from './core/hooks/useIntakeWizard';
 import { useWorkspacePersistence } from './core/hooks/useWorkspacePersistence';
 import { useMigration } from './core/hooks/useMigration';
+import { useOpsStatus } from './core/hooks/useOpsStatus';
 import { usePatientCrud } from './core/hooks/usePatientCrud';
 import { usePatientSync } from './core/hooks/usePatientSync';
 import { resolvePatientConflictInList } from './core/services/patientConflictResolution';
@@ -146,6 +147,9 @@ function App() {
     retry:  retryMigration,
     reset:  resetMigration,
   } = useMigration({ session, settings });
+
+  const isAdmin = session?.user?.role === 'admin' && isAuthenticated;
+  const { showBanner: showOpsBanner, bannerMessage: opsBannerMessage } = useOpsStatus({ session, enabled: isAdmin });
 
   const {
     exportDropdown, setExportDropdown,
@@ -797,6 +801,26 @@ function App() {
             onInjectConsultReply: handleInjectConsultReply,
           }}
         />
+
+        {showOpsBanner && (
+          <button
+            className="ops-alert-banner"
+            type="button"
+            onClick={() => setShowAdminConsole(true)}
+          >
+            {opsBannerMessage}
+          </button>
+        )}
+
+        {false && showOpsBanner && (
+          <button
+            className="ops-alert-banner"
+            type="button"
+            onClick={() => setShowAdminConsole(true)}
+          >
+            백업 이상 감지 — 관리자 콘솔 &gt; 운영 상태 탭에서 확인하세요
+          </button>
+        )}
 
         {activePatient && (
           <>

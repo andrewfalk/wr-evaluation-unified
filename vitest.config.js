@@ -14,6 +14,8 @@ export default defineConfig({
       'shared/**/__tests__/**/*.{js,ts}',
       'electron/**/*.test.{js,ts}',
       'electron/**/__tests__/**/*.{js,ts}',
+      'services/**/*.test.{js,ts}',
+      'services/**/__tests__/**/*.{js,ts}',
     ],
     exclude: [
       'server/**',
