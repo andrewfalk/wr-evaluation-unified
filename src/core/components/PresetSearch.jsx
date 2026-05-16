@@ -151,7 +151,9 @@ export function PresetSearch({ presets, onSelect, value, onChange }) {
             >
               <div className="search-item-name">
                 {preset.jobName}
-                {(preset.source === 'custom' || preset._customId) && <span className="preset-custom-tag">custom</span>}
+                {(preset.source === 'custom' || preset._customId) && (
+                  <span className="preset-custom-tag">{"\uB0B4 \uD504\uB9AC\uC14B"}</span>
+                )}
               </div>
               <div className="search-item-info">
                 {getPresetCategory(preset)}

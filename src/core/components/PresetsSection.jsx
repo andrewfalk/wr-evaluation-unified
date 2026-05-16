@@ -36,12 +36,12 @@ export function PresetsSection({ onPresetsImported, session }) {
   return (
     <div className="migration-presets-section">
       <div className="migration-presets-title">
-        {isServer ? '직업 프리셋 (서버 저장)' : '직업 프리셋 (로컬 저장)'}
+        {isServer ? '내 직업 프리셋 (계정별 서버 저장)' : '내 직업 프리셋 (로컬 저장)'}
       </div>
       <p className="migration-presets-notice">
         {isServer
-          ? '사용자 정의 직업 프리셋은 인트라넷 서버에 저장됩니다. 내보내기로 파일에 백업하거나 다른 계정으로 가져올 수 있습니다.'
-          : '사용자 정의 직업 프리셋은 이 기기에만 저장됩니다. 다른 기기에서도 사용하려면 내보내기 후 해당 기기에서 가져오세요.'}
+          ? '사용자 정의 직업 프리셋은 현재 로그인한 계정의 내 프리셋으로 인트라넷 서버에 저장됩니다. 내보내기로 파일에 백업하거나 다른 계정으로 가져올 수 있습니다.'
+          : '사용자 정의 직업 프리셋은 이 기기의 내 프리셋으로만 저장됩니다. 다른 기기에서도 사용하려면 내보내기 후 해당 기기에서 가져오세요.'}
       </p>
       <div className="settings-inline-actions">
         <button className="btn btn-secondary btn-sm" onClick={handleExport}>

@@ -354,8 +354,8 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
 
         {session?.mode === 'intranet' && (
           <div className="form-meta-card preset-phi-notice">
-            인트라넷 모드에서 프리셋은 서버에 저장됩니다. 모듈 데이터에는
-            직업 노출 정보가 포함될 수 있습니다.
+            이 프리셋은 현재 로그인한 계정의 내 프리셋으로 서버에 저장됩니다.
+            환자 식별 정보가 아닌 직업 노출 정보만 포함하세요.
           </div>
         )}
 
