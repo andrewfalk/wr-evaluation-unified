@@ -95,6 +95,28 @@ describe('CORS middleware', () => {
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('CORS_ORIGIN_DENIED');
   });
+
+  it('echoes Access-Control-Allow-Credentials: true for whitelisted origin', async () => {
+    const res = await request(makeApp())
+      .get('/test')
+      .set('Origin', 'https://wr.hospital.local');
+    expect(res.headers['access-control-allow-credentials']).toBe('true');
+  });
+
+  it('OPTIONS preflight allows PUT and custom headers from whitelisted origin', async () => {
+    const res = await request(makeApp())
+      .options('/test')
+      .set('Origin', 'https://wr.hospital.local')
+      .set('Access-Control-Request-Method', 'PUT')
+      .set('Access-Control-Request-Headers', 'if-match,idempotency-key,x-csrf-token');
+    expect(res.status).toBe(204);
+    const methods = (res.headers['access-control-allow-methods'] ?? '').toUpperCase();
+    expect(methods).toContain('PUT');
+    const hdrs = (res.headers['access-control-allow-headers'] ?? '').toLowerCase();
+    expect(hdrs).toContain('if-match');
+    expect(hdrs).toContain('idempotency-key');
+    expect(hdrs).toContain('x-csrf-token');
+  });
 });
 
 // ---------------------------------------------------------------------------

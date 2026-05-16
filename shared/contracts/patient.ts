@@ -48,12 +48,28 @@ export const PatientDataSchema = z.object({
   activeModules: z.array(z.string()),
 });
 
+export const PatientSyncConflictSchema = z.object({
+  kind: z.string(),
+  serverPatient: z.unknown().optional(),
+  serverRevision: z.number().int().nullable().optional(),
+}).passthrough();
+
+export const PatientSyncWarningSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  existingName: z.string().optional(),
+  incomingName: z.string().optional(),
+}).passthrough();
+
 // Matches patientRecords.js DEFAULT_PATIENT_SYNC
 export const PatientSyncSchema = z.object({
   serverId: z.string().nullable(),
   revision: z.number().int(),
   syncStatus: z.enum(['local-only', 'dirty', 'synced', 'conflict']),
   lastSyncedAt: z.string().nullable(),
+  conflict: PatientSyncConflictSchema.optional(),
+  warnings: z.array(PatientSyncWarningSchema).optional(),
+  assignmentWarnings: z.array(PatientSyncWarningSchema).optional(),
 });
 
 // Matches patientRecords.js createPatientMeta()
@@ -73,12 +89,15 @@ export const PatientSchema = z.object({
   data: PatientDataSchema,
   sync: PatientSyncSchema.optional(),
   meta: PatientMetaSchema.optional(),
+  assignedDoctorUserId: z.string().uuid().nullable().optional(),
 });
 
 export type Diagnosis = z.infer<typeof DiagnosisSchema>;
 export type SharedJob = z.infer<typeof SharedJobSchema>;
 export type SharedData = z.infer<typeof SharedDataSchema>;
 export type PatientData = z.infer<typeof PatientDataSchema>;
+export type PatientSyncConflict = z.infer<typeof PatientSyncConflictSchema>;
+export type PatientSyncWarning = z.infer<typeof PatientSyncWarningSchema>;
 export type PatientSync = z.infer<typeof PatientSyncSchema>;
 export type PatientMeta = z.infer<typeof PatientMetaSchema>;
 export type Patient = z.infer<typeof PatientSchema>;

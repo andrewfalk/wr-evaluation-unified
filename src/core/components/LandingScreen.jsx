@@ -11,19 +11,28 @@ export function LandingScreen({
   onGoBack,
   onResetPatients,
   onSelectPatient,
+  isIntranetMode,
 }) {
   return (
     <div className="panel landing-panel pattern-surface pattern-surface-hero">
       <div className="landing-hero">
         <div className="section-title-row landing-hero-copy">
           <h1 className="landing-title">근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미</h1>
-          <p className="landing-description">새 환자 평가를 시작하거나 저장된 데이터를 불러오세요.</p>
+          <p className="landing-description">
+            {isIntranetMode
+              ? '서버에 저장된 환자 목록에서 평가를 시작하세요. 목록에 없는 새 환자를 1명씩 또는 대량으로 일괄 입력한 후에 진행할 수도 있습니다.'
+              : '새 환자 평가를 시작하거나 저장된 데이터를 불러오세요.'}
+          </p>
         </div>
       </div>
       <div className="landing-actions">
         <button className="btn btn-primary landing-action-btn" onClick={onStartIntake}>+ 새환자</button>
-        <button className="btn btn-secondary landing-action-btn" onClick={onOpenLoadModal}>불러오기</button>
-        <button className="btn btn-secondary landing-action-btn" onClick={onShowSaveModal}>저장</button>
+        {!isIntranetMode && (
+          <>
+            <button className="btn btn-secondary landing-action-btn" onClick={onOpenLoadModal}>불러오기</button>
+            <button className="btn btn-secondary landing-action-btn" onClick={onShowSaveModal}>저장</button>
+          </>
+        )}
         <button className="btn btn-info landing-action-btn" onClick={onShowBatchImport}>엑셀 일괄입력</button>
         <button className="btn btn-warning landing-action-btn" onClick={onLoadTestData}>테스트</button>
         <button className="btn btn-secondary landing-action-btn" onClick={onShowSettings}>설정</button>

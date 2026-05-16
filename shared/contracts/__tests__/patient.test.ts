@@ -4,6 +4,7 @@ import {
   SharedJobSchema,
   SharedDataSchema,
   PatientSchema,
+  PatientSyncConflictSchema,
   PatientSyncSchema,
   PatientMetaSchema,
 } from '../patient';
@@ -212,8 +213,37 @@ describe('PatientSyncSchema', () => {
     expect(result.syncStatus).toBe('local-only');
   });
 
+  it('preserves conflict metadata for unresolved server/local conflicts', () => {
+    const conflict = {
+      kind: 'pull',
+      serverPatient: { id: validPatient.id, phase: validPatient.phase },
+      serverRevision: 2,
+    };
+    const result = PatientSyncSchema.parse({
+      serverId: 'srv-1',
+      revision: 1,
+      syncStatus: 'conflict',
+      lastSyncedAt: null,
+      conflict,
+    });
+    expect(result.conflict).toEqual(conflict);
+  });
+
   it('rejects missing revision', () => {
     expect(() => PatientSyncSchema.parse({ serverId: null, syncStatus: 'local-only', lastSyncedAt: null })).toThrow();
+  });
+});
+
+describe('PatientSyncConflictSchema', () => {
+  it('accepts pull conflict metadata with an optional server patient snapshot', () => {
+    const result = PatientSyncConflictSchema.parse({
+      kind: 'pull',
+      serverPatient: { id: validPatient.id },
+      serverRevision: 3,
+      extra: 'kept',
+    });
+    expect(result.kind).toBe('pull');
+    expect(result.extra).toBe('kept');
   });
 });
 

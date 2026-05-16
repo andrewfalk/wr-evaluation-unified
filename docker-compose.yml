@@ -11,6 +11,7 @@
 #   AUDIT_DB_PASSWORD     — wr_audit_reader password (default: changeme_audit_reader)
 #   DEPLOYMENT_MODE       — intranet | standalone (default: intranet)
 #   PORT                  — internal app container port (default: 3001, rarely changed)
+#   TRUST_PROXY           — Express trust proxy setting (default: 1 in intranet)
 #   AI_PROVIDER           — none | internal | external (default: none)
 
 services:
@@ -48,10 +49,17 @@ services:
       NODE_ENV:             production
       PORT:                 3001
       DEPLOYMENT_MODE:      ${DEPLOYMENT_MODE:-intranet}
+      TRUST_PROXY:          ${TRUST_PROXY:-}
       ACCESS_TOKEN_SECRET:  "${ACCESS_TOKEN_SECRET:?ACCESS_TOKEN_SECRET is required}"
       REFRESH_TOKEN_SECRET: "${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET is required}"
-      CORS_ORIGINS:         ${CORS_ORIGINS:-https://wr.hospital.local}
+      CORS_ORIGINS:         ${CORS_ORIGINS:-https://wr.hospital.local,http://localhost:3001}
       AI_PROVIDER:          ${AI_PROVIDER:-none}
+      BACKUPS_DIR:          /backups
+    ports:
+      - "${DEV_PORT:-3001}:3001"
+    volumes:
+      - backup_data:/backups:ro
+      - backup_alerts:/backups/_alerts
     depends_on:
       postgres:
         condition: service_healthy
@@ -122,6 +130,23 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
+  # Backup monitor — hourly check of backup status and alert files.
+  # Writes _status/monitor-report.json for the app server to read via API.
+  # Always active (no profile) — independent of GPG/backup setup.
+  # ---------------------------------------------------------------------------
+  backup-monitor:
+    build:
+      context: services/backup-monitor
+    environment:
+      BACKUPS_DIR:             /backups
+      CHECK_INTERVAL_SECONDS:  "3600"
+      STALE_THRESHOLD_HOURS:   "36"
+    volumes:
+      - backup_data:/backups
+      - backup_alerts:/backups/_alerts:ro
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
   # Backup sidecar — daily pg_dump → GPG-encrypted files in backup_data volume.
   #
   # Activate with:  docker compose --profile backup up -d
@@ -153,6 +178,7 @@ services:
       - ./scripts/restore.sh:/scripts/restore.sh:ro
       - ./scripts/backup-crontab:/scripts/backup-crontab:ro
       - backup_data:/backups
+      - backup_alerts:/backups/_alerts
       - backup_gnupg:/root/.gnupg
     # crontab file avoids shell escaping issues in YAML command strings.
     command: >
@@ -168,4 +194,5 @@ volumes:
   caddy_data:
   caddy_config:
   backup_data:
+  backup_alerts:
   backup_gnupg:

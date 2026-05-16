@@ -1,16 +1,33 @@
 import { useEffect, useMemo, useState } from 'react';
 import { inspectIntegrationStatus } from '../services/integrationStatus';
 import { isElectron } from '../utils/platform';
+import { PresetsSection } from './PresetsSection';
+
+const DEFAULT_INTRANET_URL = 'https://wr.hospital.local';
 
 function normalizeUrl(value = '') {
   return String(value || '').trim().replace(/\/$/, '');
 }
 
+function getEffectiveServerUrl({ session, diagnostic, draft } = {}) {
+  return normalizeUrl(
+    session?.apiBaseUrl ||
+    diagnostic?.baseUrl ||
+    draft?.apiBaseUrl ||
+    (session?.mode === 'intranet' || draft?.integrationMode === 'intranet' ? DEFAULT_INTRANET_URL : '')
+  );
+}
+
 function buildPreviewSession(session, draft) {
+  const draftUrl = normalizeUrl(draft.apiBaseUrl || '');
   return {
     ...session,
     mode: draft.integrationMode === 'intranet' ? 'intranet' : 'local',
-    apiBaseUrl: normalizeUrl(draft.apiBaseUrl || ''),
+    apiBaseUrl: draftUrl || (
+      session?.mode === 'intranet' || draft.integrationMode === 'intranet'
+        ? DEFAULT_INTRANET_URL
+        : ''
+    ),
   };
 }
 
@@ -55,7 +72,8 @@ function DiagnosticItem({ label, value }) {
   );
 }
 
-export function SettingsModal({ settings, session, integrationStatus, onSave, onClose }) {
+export function SettingsModal({ settings, session, integrationStatus, onSave, onClose, onLogout, onMigrate, onPresetsImported }) {
+  const isIntranetLocked = session?.mode === 'intranet';
   const [draft, setDraft] = useState({ ...settings });
   const [diagnostic, setDiagnostic] = useState(integrationStatus);
   const [isCheckingConnection, setIsCheckingConnection] = useState(false);
@@ -96,7 +114,10 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
 
   const tone = getStatusTone(diagnostic);
   const statusTitle = getStatusTitle(diagnostic);
-  const baseUrl = normalizeUrl(diagnostic?.baseUrl || draft.apiBaseUrl || '');
+  const baseUrl = getEffectiveServerUrl({ session, diagnostic, draft });
+  const serverUrlInputValue = isIntranetLocked
+    ? baseUrl
+    : (draft.apiBaseUrl || '');
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -154,10 +175,12 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
             <label>진료과</label>
             <input type="text" value={draft.department} onChange={e => update('department', e.target.value)} />
           </div>
-          <div className="settings-row">
-            <label>의사명</label>
-            <input type="text" value={draft.doctorName} onChange={e => update('doctorName', e.target.value)} />
-          </div>
+          {!isIntranetLocked && (
+            <div className="settings-row">
+              <label>의사명</label>
+              <input type="text" value={draft.doctorName} onChange={e => update('doctorName', e.target.value)} />
+            </div>
+          )}
         </div>
 
         <div className="settings-section modal-section pattern-surface">
@@ -175,9 +198,29 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
 
         <div className="settings-section modal-section pattern-surface">
           <div className="settings-section-title">서버 연동</div>
+          {isIntranetLocked && (
+            <div className="settings-help-text settings-help-text--locked">
+              인트라넷 모드로 로그인 중입니다. 서버 연동 설정은 관리자만 변경할 수 있습니다.
+            </div>
+          )}
+          {isIntranetLocked && onLogout && (
+            <div className="settings-row">
+              <label>계정</label>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => { onLogout(); onClose(); }}
+              >
+                로그아웃
+              </button>
+            </div>
+          )}
           <div className="settings-row">
             <label>데이터 저장 방식</label>
-            <select value={draft.integrationMode || 'local'} onChange={e => update('integrationMode', e.target.value)}>
+            <select
+              value={draft.integrationMode || 'local'}
+              onChange={e => update('integrationMode', e.target.value)}
+              disabled={isIntranetLocked}
+            >
               <option value="local">로컬 저장</option>
               <option value="intranet">인트라넷 서버</option>
             </select>
@@ -186,14 +229,18 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
             <label>서버 주소</label>
             <input
               type="text"
-              value={draft.apiBaseUrl || ''}
+              value={serverUrlInputValue}
               onChange={e => update('apiBaseUrl', e.target.value)}
-              placeholder="https://intranet.example.com 또는 http://localhost:3002"
+              placeholder={DEFAULT_INTRANET_URL}
+              disabled={isIntranetLocked}
+              readOnly={isIntranetLocked}
             />
           </div>
-          <div className="settings-help-text">
-            인트라넷 서버 모드에서는 저장소와 AI 호출이 지정한 서버를 우선 사용합니다.
-          </div>
+          {!isIntranetLocked && (
+            <div className="settings-help-text">
+              인트라넷 서버 모드에서는 저장소와 AI 호출이 지정한 서버를 우선 사용합니다.
+            </div>
+          )}
         </div>
 
         <div className="settings-section modal-section pattern-surface">
@@ -224,6 +271,12 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
             <DiagnosticItem label="활성 저장소" value={diagnostic?.activeStore || '-'} />
             <DiagnosticItem label="사용자 ID" value={diagnostic?.sessionInfo?.userId} />
             <DiagnosticItem label="조직 ID" value={diagnostic?.sessionInfo?.organizationId} />
+            {diagnostic?.meDetails && (<>
+              <DiagnosticItem label="사용자명" value={diagnostic.meDetails.userName} />
+              <DiagnosticItem label="역할" value={diagnostic.meDetails.userRole} />
+              <DiagnosticItem label="소속 기관" value={diagnostic.meDetails.orgName} />
+              <DiagnosticItem label="AI 기능" value={diagnostic.meDetails.capabilities?.ai ? '활성' : '비활성'} />
+            </>)}
           </div>
 
           {diagnostic?.lastError && (
@@ -239,7 +292,7 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
                 <DiagnosticItem label="Scope Key" value={diagnostic.mockDetails.scopeKey} />
                 <DiagnosticItem label="사용자" value={diagnostic.mockDetails.userId} />
                 <DiagnosticItem label="조직" value={diagnostic.mockDetails.organizationId} />
-                <DiagnosticItem label="워크스페이스 수" value={String(diagnostic.mockDetails.workspaceCount ?? '-')} />
+                <DiagnosticItem label="저장된 환자 목록 수" value={String(diagnostic.mockDetails.workspaceCount ?? '-')} />
                 <DiagnosticItem label="자동저장 존재" value={formatBoolean(diagnostic.mockDetails.hasAutosave)} />
                 <DiagnosticItem label="저장 파일" value={diagnostic.mockDetails.storageFile} />
               </div>
@@ -250,13 +303,13 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
             <div className="settings-diagnostic-card">
               <div className="settings-diagnostic-card-title">원격 서버 응답 요약</div>
               <div className="settings-diagnostic-grid">
-                <DiagnosticItem label="워크스페이스 수" value={String(diagnostic.remoteDetails.workspaceCount ?? '-')} />
+                <DiagnosticItem label="저장된 환자 목록 수" value={String(diagnostic.remoteDetails.workspaceCount ?? '-')} />
               </div>
             </div>
           )}
         </div>
 
-        {isElectron() && (
+        {isElectron() && !!window.electron?.analyzeAI && (
           <div className="settings-section modal-section pattern-surface">
             <div className="settings-section-title">AI 설정 (Electron)</div>
             <div className="settings-row">
@@ -282,6 +335,27 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
             </div>
           </div>
         )}
+
+        {isIntranetLocked && onMigrate && (
+          <div className="settings-section modal-section pattern-surface">
+            <div className="settings-section-title">데이터 마이그레이션</div>
+            <div className="settings-help-text">
+              이 PC의 로컬 환자 데이터를 인트라넷 서버로 이전합니다.
+              환자 데이터만 이전되며 사용자 설정·프리셋·워크스페이스는 별도입니다.
+              중복 등록되지 않도록 처리합니다.
+            </div>
+            <div className="settings-inline-actions">
+              <button className="btn btn-secondary btn-sm" onClick={onMigrate}>
+                이 PC의 로컬 환자 데이터를 서버로 이전
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="settings-section modal-section pattern-surface">
+          <div className="settings-section-title">직업 프리셋</div>
+          <PresetsSection onPresetsImported={onPresetsImported} session={session} />
+        </div>
 
         <div className="modal-actions">
           <button className="btn btn-secondary" onClick={onClose}>취소</button>

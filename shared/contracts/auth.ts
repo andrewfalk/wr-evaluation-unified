@@ -7,6 +7,7 @@ export const UserSchema = z.object({
   role: z.string(),          // 'clinician' | 'admin' | ...
   organizationId: z.string(),
   authProvider: z.string(),  // 'local-fallback' | 'local-db' | ...
+  mustChangePassword: z.boolean().optional(), // true for seed/admin accounts on first login
 });
 
 export const OrgSchema = z.object({

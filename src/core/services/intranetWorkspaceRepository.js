@@ -1,5 +1,6 @@
 import { requestJson } from './httpClient';
 import { migratePatientRecords } from './patientRecords';
+import { getDeviceId } from '../utils/storage';
 import {
   GetWorkspacesResponseSchema,
 } from '@contracts/workspace';
@@ -36,29 +37,39 @@ function normalizeSavedItems(items = [], context = {}) {
   }));
 }
 
+function autosavePath() {
+  return `/api/autosave?deviceId=${encodeURIComponent(getDeviceId())}`;
+}
+
+function getBaseUrl(session, settings) {
+  return session?.apiBaseUrl || settings?.apiBaseUrl || '';
+}
+
 export async function loadRemoteWorkspaces({ session, settings }) {
   const raw = await requestJson('/api/workspaces', {
-    baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
+    baseUrl: getBaseUrl(session, settings),
     session,
   });
   const data = parseResponse(GetWorkspacesResponseSchema, raw, 'GET /api/workspaces');
   return normalizeSavedItems(data.items, { session });
 }
 
-export async function saveRemoteWorkspace({ name, patients, session, settings }) {
-  const raw = await requestJson('/api/workspaces', {
-    baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
-    method: 'POST',
+export async function saveRemoteWorkspace({ id, name, patients, session, settings }) {
+  const path = id ? `/api/workspaces/${id}` : '/api/workspaces';
+  const method = id ? 'PUT' : 'POST';
+  const raw = await requestJson(path, {
+    baseUrl: getBaseUrl(session, settings),
+    method,
     session,
     body: { name, patients },
   });
-  const data = parseResponse(GetWorkspacesResponseSchema, raw, 'POST /api/workspaces');
+  const data = parseResponse(GetWorkspacesResponseSchema, raw, `${method} ${path}`);
   return normalizeSavedItems(data.items, { session });
 }
 
 export async function deleteRemoteWorkspace({ id, session, settings }) {
   const raw = await requestJson(`/api/workspaces/${id}`, {
-    baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
+    baseUrl: getBaseUrl(session, settings),
     method: 'DELETE',
     session,
   });
@@ -67,11 +78,12 @@ export async function deleteRemoteWorkspace({ id, session, settings }) {
 }
 
 export async function loadRemoteAutoSave({ session, settings }) {
-  const raw = await requestJson('/api/autosave', {
-    baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
+  const path = autosavePath();
+  const raw = await requestJson(path, {
+    baseUrl: getBaseUrl(session, settings),
     session,
   });
-  const data = parseResponse(GetAutosaveResponseSchema, raw, 'GET /api/autosave');
+  const data = parseResponse(GetAutosaveResponseSchema, raw, `GET ${path}`);
   if (!data?.patients) return data || null;
   return {
     ...data,
@@ -80,20 +92,22 @@ export async function loadRemoteAutoSave({ session, settings }) {
 }
 
 export async function saveRemoteAutoSave({ patients, session, settings }) {
-  const raw = await requestJson('/api/autosave', {
-    baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
+  const path = autosavePath();
+  const raw = await requestJson(path, {
+    baseUrl: getBaseUrl(session, settings),
     method: 'PUT',
     session,
     body: { patients },
   });
-  return parseResponse(PutAutosaveResponseSchema, raw, 'PUT /api/autosave');
+  return parseResponse(PutAutosaveResponseSchema, raw, `PUT ${path}`);
 }
 
 export async function clearRemoteAutoSave({ session, settings }) {
-  const raw = await requestJson('/api/autosave', {
-    baseUrl: settings?.apiBaseUrl || session?.apiBaseUrl || '',
+  const path = autosavePath();
+  const raw = await requestJson(path, {
+    baseUrl: getBaseUrl(session, settings),
     method: 'DELETE',
     session,
   });
-  return parseResponse(DeleteAutosaveResponseSchema, raw, 'DELETE /api/autosave');
+  return parseResponse(DeleteAutosaveResponseSchema, raw, `DELETE ${path}`);
 }

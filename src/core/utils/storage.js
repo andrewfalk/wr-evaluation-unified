@@ -140,7 +140,13 @@ export const loadSettings = (defaults) => {
   // Electron에서도 첫 로드는 localStorage 폴백 후, 비동기로 갱신
   const saved = localStorage.getItem(SETTINGS_KEY);
   if (saved) {
-    try { return { ...defaults, ...JSON.parse(saved) }; }
+    try {
+      const merged = { ...defaults, ...JSON.parse(saved) };
+      if (defaults.integrationMode === 'intranet') {
+        return { ...merged, integrationMode: 'intranet' };
+      }
+      return merged;
+    }
     catch { /* ignore parse errors, return defaults */ }
   }
   return { ...defaults };

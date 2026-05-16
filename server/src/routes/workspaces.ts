@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { auditMiddleware } from '../middleware/audit';
+import { resolvePatientPersonId, type QueryRunner } from '../db/patientPersons';
+import { resolveAssignedDoctor } from '../db/resolveAssignedDoctor';
 
 // ---------------------------------------------------------------------------
 // POST /api/workspaces body schema
@@ -34,6 +36,10 @@ function isUuid(v: unknown): v is string {
   return typeof v === 'string' && UUID_RE.test(v);
 }
 
+function strOrNull(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null;
+}
+
 // Resolve the authoritative server-side UUID for a patient.
 // Phase 3 (patient 1급 API) assigns sync.serverId. Until then, patient.id
 // is used as the row ID. This function ensures patient_ids[] and
@@ -60,12 +66,42 @@ function extractPatientIds(patients: unknown[]): string[] {
   return ids;
 }
 
+async function loadDeletedPatientIds(db: QueryRunner, orgId: string, patientIds: string[]): Promise<Set<string>> {
+  if (patientIds.length === 0) return new Set();
+
+  const { rows } = await db.query<{ id: string; deleted_at: Date | null }>(
+    `SELECT id, deleted_at
+     FROM patient_records
+     WHERE organization_id = $1 AND id = ANY($2::uuid[])
+     FOR SHARE`,
+    [orgId, patientIds]
+  );
+
+  return new Set(
+    rows
+      .filter((row) => row.deleted_at != null)
+      .map((row) => row.id)
+  );
+}
+
+function redactDeletedPatients(patients: unknown[], deletedPatientIds: Set<string>): unknown[] {
+  if (deletedPatientIds.size === 0) return patients;
+
+  return patients.map((patient) => {
+    const id = resolvePatientId(patient);
+    if (!id || !deletedPatientIds.has(id)) return patient;
+    return { id, redacted: true };
+  });
+}
+
 // Metadata extracted from a patient object for patient_records upsert.
 interface PatientMeta {
   id:              string;
   name:            string;
+  doctorName:      string | null;
   patientNo:       string | null;
   birthDate:       string | null;
+  injuryDate:      string | null;
   evaluationDate:  string | null;
   activeModules:   string[];
   diagnosesCodes:  string[];
@@ -98,11 +134,11 @@ function extractPatientMeta(p: unknown): PatientMeta | null {
   return {
     id,
     name,
-    patientNo:      typeof shared?.['patientNo']      === 'string' ? shared!['patientNo']      as string : null,
-    birthDate:      typeof shared?.['birthDate']      === 'string' && (shared['birthDate'] as string).trim()
-      ? shared!['birthDate'] as string : null,
-    evaluationDate: typeof shared?.['evaluationDate'] === 'string' && (shared['evaluationDate'] as string).trim()
-      ? shared!['evaluationDate'] as string : null,
+    doctorName:     strOrNull(shared?.['doctorName']),
+    patientNo:      strOrNull(shared?.['patientNo']),
+    birthDate:      strOrNull(shared?.['birthDate']),
+    injuryDate:     strOrNull(shared?.['injuryDate']),
+    evaluationDate: strOrNull(shared?.['evaluationDate']),
     activeModules:  mods.filter((m): m is string => typeof m === 'string'),
     diagnosesCodes: diagnoses
       .filter((d): d is Record<string, unknown> => typeof d === 'object' && d !== null)
@@ -119,31 +155,61 @@ function extractPatientMeta(p: unknown): PatientMeta | null {
 // Upsert a single patient into patient_records. Errors are logged but not thrown
 // so that a single malformed patient does not block the whole workspace save.
 // The WHERE clause on ON CONFLICT ensures we never overwrite another org's patient.
+// On conflict, assigned_doctor_user_id is kept if already set (COALESCE), so existing
+// assignments are never overwritten by a workspace re-save.
 async function upsertPatientRecord(
-  pool: Pool, orgId: string, userId: string, meta: PatientMeta,
+  pool: Pool,
+  orgId: string,
+  user: { id: string; role: string },
+  meta: PatientMeta,
 ): Promise<void> {
+  const existing = await pool.query<{ patient_person_id: string | null; deleted_at: Date | null }>(
+    `SELECT patient_person_id, deleted_at
+     FROM patient_records
+     WHERE id = $1 AND organization_id = $2`,
+    [meta.id, orgId]
+  );
+  const existingRow = existing.rows[0];
+  if (existingRow?.deleted_at !== null && existingRow?.deleted_at !== undefined) return;
+
+  const existingPersonId = existingRow?.patient_person_id ?? null;
+  const { personId } = await resolvePatientPersonId(pool as QueryRunner, orgId, meta, existingPersonId);
+
+  const { assignedDoctorUserId, assignmentWarnings } = await resolveAssignedDoctor(
+    pool as unknown as QueryRunner,
+    { orgId, currentUser: user, requestedDoctorName: meta.doctorName }
+  );
+  if (assignmentWarnings.length > 0) {
+    console.warn('[upsertPatientRecord] assignment warnings for patient %s:', meta.id,
+      assignmentWarnings.map(w => `${w.code}: ${w.message}`).join('; '));
+  }
+
   await pool.query(
     `INSERT INTO patient_records
-       (id, organization_id, owner_user_id, name, patient_no,
-        birth_date, evaluation_date, active_modules, diagnoses_codes,
-        jobs_names, revision, payload)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11)
+       (id, organization_id, patient_person_id, owner_user_id, assigned_doctor_user_id,
+        name, patient_no, birth_date, injury_date, evaluation_date,
+        active_modules, diagnoses_codes, jobs_names, revision, payload)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14)
      ON CONFLICT (id) DO UPDATE SET
-       name             = EXCLUDED.name,
-       patient_no       = EXCLUDED.patient_no,
-       birth_date       = EXCLUDED.birth_date,
-       evaluation_date  = EXCLUDED.evaluation_date,
-       active_modules   = EXCLUDED.active_modules,
-       diagnoses_codes  = EXCLUDED.diagnoses_codes,
-       jobs_names       = EXCLUDED.jobs_names,
-       revision         = patient_records.revision + 1,
-       payload          = EXCLUDED.payload,
-       deleted_at       = NULL
-     WHERE patient_records.organization_id = EXCLUDED.organization_id`,
+       patient_person_id       = EXCLUDED.patient_person_id,
+       name                    = EXCLUDED.name,
+       patient_no              = EXCLUDED.patient_no,
+       birth_date              = EXCLUDED.birth_date,
+       injury_date             = EXCLUDED.injury_date,
+       evaluation_date         = EXCLUDED.evaluation_date,
+       active_modules          = EXCLUDED.active_modules,
+       diagnoses_codes         = EXCLUDED.diagnoses_codes,
+       jobs_names              = EXCLUDED.jobs_names,
+       assigned_doctor_user_id = COALESCE(patient_records.assigned_doctor_user_id, EXCLUDED.assigned_doctor_user_id),
+       revision                = patient_records.revision + 1,
+       payload                 = EXCLUDED.payload
+     WHERE patient_records.organization_id = EXCLUDED.organization_id
+       AND patient_records.deleted_at IS NULL`,
     [
-      meta.id, orgId, userId, meta.name,
+      meta.id, orgId, personId, user.id, assignedDoctorUserId, meta.name,
       meta.patientNo,
       meta.birthDate       ? meta.birthDate       : null,
+      meta.injuryDate      ? meta.injuryDate      : null,
       meta.evaluationDate  ? meta.evaluationDate  : null,
       meta.activeModules,
       meta.diagnosesCodes,
@@ -273,9 +339,16 @@ async function getWorkspace(pool: Pool, req: Request, res: Response): Promise<vo
 // patient_records upserts are best-effort — failures are logged but do not block
 // the workspace save; the snapshot remains the primary source of truth.
 // ---------------------------------------------------------------------------
-async function saveWorkspace(pool: Pool, req: Request, res: Response): Promise<void> {
+async function saveWorkspace(
+  pool: Pool,
+  req: Request,
+  res: Response,
+  options: { workspaceId?: string; statusCode?: 200 | 201 } = {},
+): Promise<void> {
   const session = req.sessionInfo!;
   const orgId   = session.organizationId;
+  const workspaceId = options.workspaceId ?? null;
+  const statusCode = options.statusCode ?? 201;
 
   if (orgId === null) {
     res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
@@ -288,21 +361,53 @@ async function saveWorkspace(pool: Pool, req: Request, res: Response): Promise<v
     return;
   }
   const { name, patients } = parse.data;
-  const patientIds = extractPatientIds(patients);
+  const rawPatientIds = extractPatientIds(patients);
+  let snapshotPatients: unknown[] = patients;
 
-  // Primary operation: insert workspace snapshot.
-  await pool.query(
-    `INSERT INTO workspaces (organization_id, owner_user_id, name, patient_ids, snapshot_payload)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [orgId, session.userId, name, patientIds, JSON.stringify(patients)]
-  );
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const deletedPatientIds = await loadDeletedPatientIds(client as QueryRunner, orgId, rawPatientIds);
+    snapshotPatients = redactDeletedPatients(patients, deletedPatientIds);
+    const patientIds = extractPatientIds(snapshotPatients);
+
+    // Primary operation: insert or overwrite workspace snapshot.
+    if (workspaceId) {
+      const result = await client.query(
+        `UPDATE workspaces
+         SET name = $4,
+             patient_ids = $5,
+             snapshot_payload = $6,
+             created_at = now()
+         WHERE id = $1 AND organization_id = $2 AND owner_user_id = $3`,
+        [workspaceId, orgId, session.userId, name, patientIds, JSON.stringify(snapshotPatients)]
+      );
+      if ((result.rowCount ?? 0) === 0) {
+        await client.query('ROLLBACK');
+        res.status(404).json({ code: 'WORKSPACE_NOT_FOUND', error: 'Workspace not found' });
+        return;
+      }
+    } else {
+      await client.query(
+        `INSERT INTO workspaces (organization_id, owner_user_id, name, patient_ids, snapshot_payload)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [orgId, session.userId, name, patientIds, JSON.stringify(snapshotPatients)]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 
   // Secondary (best-effort): decompose patients into patient_records so that
   // ?view=current returns live data immediately after the first workspace save.
   // Failures are logged per patient and do not roll back the workspace row.
-  const metas = patients.map(extractPatientMeta).filter((m): m is PatientMeta => m !== null);
+  const metas = snapshotPatients.map(extractPatientMeta).filter((m): m is PatientMeta => m !== null);
   const results = await Promise.allSettled(
-    metas.map((meta) => upsertPatientRecord(pool, orgId, session.userId, meta))
+    metas.map((meta) => upsertPatientRecord(pool, orgId, { id: session.userId, role: session.role }, meta))
   );
   results.forEach((r, i) => {
     if (r.status === 'rejected') {
@@ -314,7 +419,7 @@ async function saveWorkspace(pool: Pool, req: Request, res: Response): Promise<v
   });
 
   const rows = await listQuery(pool, orgId, session.userId);
-  res.status(201).json({ items: rows.map(toItem) });
+  res.status(statusCode).json({ items: rows.map(toItem) });
 }
 
 // ---------------------------------------------------------------------------
@@ -373,6 +478,15 @@ export function createWorkspacesRouter(pool: Pool): Router {
     '/',
     auth, csrfMiddleware, audit('workspace_save'),
     (req, res) => saveWorkspace(pool, req, res).catch(() => res.status(500).json(internalError()))
+  );
+
+  router.put(
+    '/:id',
+    auth, csrfMiddleware, audit('workspace_overwrite'),
+    (req, res) => saveWorkspace(pool, req, res, {
+      workspaceId: req.params.id,
+      statusCode: 200,
+    }).catch(() => res.status(500).json(internalError()))
   );
 
   router.delete(

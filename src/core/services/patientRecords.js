@@ -7,6 +7,11 @@ export const DEFAULT_PATIENT_SYNC = {
   lastSyncedAt: null,
 };
 
+const EDIT_RESOLVABLE_PUSH_CONFLICT_CODES = new Set([
+  'PATIENT_IDENTITY_CONFLICT',
+  'PATIENT_PERSON_CONFLICT',
+]);
+
 function resolveContextUser(context = {}) {
   if (context?.user) return context.user;
   if (context?.session?.user) return context.session.user;
@@ -39,6 +44,8 @@ export function createPatientSyncState(overrides = {}) {
 }
 
 export function ensurePatientMetadata(patient, context = {}) {
+  if (!patient || typeof patient !== 'object') return patient;
+  if (isRedactedPatientRecord(patient)) return patient;
   return {
     ...patient,
     meta: {
@@ -52,11 +59,16 @@ export function ensurePatientMetadata(patient, context = {}) {
   };
 }
 
+export function isRedactedPatientRecord(patient) {
+  return Boolean(patient && typeof patient === 'object' && patient.redacted === true);
+}
+
 export function createManagedPatient(activeModules = [], modulesData = {}, context = {}) {
   return ensurePatientMetadata(createBasePatient(activeModules, modulesData), context);
 }
 
 export function migratePatientRecord(patient, context = {}) {
+  if (isRedactedPatientRecord(patient)) return patient;
   return ensurePatientMetadata(migratePatient(patient), context);
 }
 
@@ -64,12 +76,24 @@ export function migratePatientRecords(patients = [], context = {}) {
   return (patients || []).map(patient => migratePatientRecord(patient, context));
 }
 
+function shouldClearConflictOnEdit(sync = {}) {
+  return (
+    sync.syncStatus === 'conflict'
+    && sync.conflict?.kind === 'push'
+    && EDIT_RESOLVABLE_PUSH_CONFLICT_CODES.has(sync.conflict?.code)
+  );
+}
+
 export function touchPatientRecord(patient, context = {}) {
+  if (isRedactedPatientRecord(patient)) return patient;
   const user = resolveContextUser(context);
   const ensured = ensurePatientMetadata(patient, context);
+  const clearConflict = shouldClearConflictOnEdit(ensured.sync);
+  const { conflict: _conflict, ...syncWithoutConflict } = ensured.sync || {};
+  const baseSync = clearConflict ? syncWithoutConflict : ensured.sync;
   const nextSyncStatus = ensured.sync.serverId
-    ? (ensured.sync.syncStatus === 'conflict' ? 'conflict' : 'dirty')
-    : (ensured.sync.syncStatus || 'local-only');
+    ? (ensured.sync.syncStatus === 'conflict' && !clearConflict ? 'conflict' : 'dirty')
+    : (clearConflict ? 'local-only' : (ensured.sync.syncStatus || 'local-only'));
 
   return {
     ...ensured,
@@ -80,13 +104,14 @@ export function touchPatientRecord(patient, context = {}) {
       updatedBy: user?.id || ensured.meta.updatedBy || ensured.meta.createdBy || null,
     },
     sync: {
-      ...ensured.sync,
+      ...baseSync,
       syncStatus: nextSyncStatus,
     },
   };
 }
 
 export function clonePatientRecordForImport(patient, context = {}) {
+  if (isRedactedPatientRecord(patient)) return null;
   const cloned = JSON.parse(JSON.stringify(migratePatientRecord(patient, context)));
   const user = resolveContextUser(context);
 

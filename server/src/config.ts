@@ -30,6 +30,22 @@ function positiveInt(env: NodeJS.ProcessEnv, key: string, fallback: number): num
   return n;
 }
 
+function trustProxy(env: NodeJS.ProcessEnv, deploymentMode: DeploymentMode): false | true | number {
+  const raw = env['TRUST_PROXY'];
+  if (raw === undefined || raw === '') {
+    return deploymentMode === 'intranet' ? 1 : false;
+  }
+
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) {
+    throw new Error("TRUST_PROXY must be 'true', 'false', or a non-negative integer");
+  }
+  return n;
+}
+
 export type DeploymentMode = 'intranet' | 'standalone';
 export type AiProvider     = 'none' | 'internal' | 'external';
 
@@ -108,10 +124,15 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
     env:         nodeEnv,
     port:        positiveInt(env, 'PORT', 3001),
     databaseUrl: required(env, 'DATABASE_URL'),
+    jsonBodyLimit: optional(env, 'JSON_BODY_LIMIT', '10mb'),
 
     deploymentMode,
     // intranet mode never falls back to local storage on server errors
     localFallbackAllowed: deploymentMode !== 'intranet',
+    // Caddy terminates TLS and forwards requests to the app container in
+    // intranet mode. Trust exactly one proxy hop by default so req.ip and
+    // rate-limit buckets reflect the real client address.
+    trustProxy: trustProxy(env, deploymentMode),
 
     auth: Object.freeze({
       accessTokenSecret:  required(env, 'ACCESS_TOKEN_SECRET'),
@@ -126,6 +147,14 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
       provider:               aiProvider,
       enabled:                resolveAiEnabled(),
       internalEndpoint:       optional(env, 'AI_INTERNAL_ENDPOINT', 'http://localhost:11434'),
+      // Model name sent to the internal LLM backend (e.g. 'llama3', 'mistral').
+      // Overrides any model name the client sends — the client has no visibility
+      // into what models are loaded in the hospital's Ollama/vLLM instance.
+      internalModel:          optional(env, 'AI_INTERNAL_MODEL', 'llama3'),
+      // Model name sent to the external vendor endpoint (e.g. 'gpt-4o').
+      // Overrides the client-sent model — the approved vendor contract may
+      // restrict which models are permitted under the hospital agreement.
+      externalModel:          optional(env, 'AI_EXTERNAL_MODEL', 'gpt-4o'),
       externalEndpoint:       aiExternalEndpoint,
       externalApiKey:         aiExternalApiKey,
       externalVendorApproved: aiExternalVendorApproved,

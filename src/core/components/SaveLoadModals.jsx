@@ -1,4 +1,4 @@
-export function SaveModal({ patientCount, saveName, onSaveNameChange, savedItems, onSave, onOverwriteSave, onClose }) {
+export function SaveModal({ patientCount, saveName, onSaveNameChange, savedItems, onSave, onOverwriteSave, onDelete, onClose }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal save-modal" onClick={e => e.stopPropagation()}>
@@ -42,6 +42,7 @@ export function SaveModal({ patientCount, saveName, onSaveNameChange, savedItems
                   </div>
                   <div className="saved-item-actions">
                     <button className="btn btn-primary btn-xs" onClick={() => onOverwriteSave(item)}>덮어쓰기</button>
+                    <button className="btn btn-danger btn-xs" onClick={() => onDelete(item.id)}>삭제</button>
                   </div>
                 </div>
               ))}

@@ -24,6 +24,26 @@ describe('config — deployment mode', () => {
     expect(c.localFallbackAllowed).toBe(false);
   });
 
+  it('trusts one proxy hop by default in intranet mode', () => {
+    const c = make({ DEPLOYMENT_MODE: 'intranet', CORS_ORIGINS: 'https://wr.hospital.local' });
+    expect(c.trustProxy).toBe(1);
+  });
+
+  it('does not trust proxy headers by default in standalone mode', () => {
+    const c = make();
+    expect(c.trustProxy).toBe(false);
+  });
+
+  it('allows TRUST_PROXY override', () => {
+    expect(make({ TRUST_PROXY: '2' }).trustProxy).toBe(2);
+    expect(make({ TRUST_PROXY: 'true' }).trustProxy).toBe(true);
+    expect(make({ TRUST_PROXY: 'false' }).trustProxy).toBe(false);
+  });
+
+  it('throws on invalid TRUST_PROXY', () => {
+    expect(() => make({ TRUST_PROXY: 'sideways' })).toThrow('TRUST_PROXY must be');
+  });
+
   it('throws on unknown DEPLOYMENT_MODE', () => {
     expect(() => make({ DEPLOYMENT_MODE: 'cloud' })).toThrow(
       "DEPLOYMENT_MODE must be 'intranet' or 'standalone'"

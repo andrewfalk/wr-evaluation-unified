@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { getAllModules, getModule } from '../moduleRegistry';
 import { isPatientComplete } from '../utils/patientCompletion';
 import { formatBirthDate } from '../utils/data';
+import { isRedactedPatientRecord } from '../services/patientRecords';
 
 const DEFAULT_SORT_DIRECTION = {
   default: 'asc',
@@ -27,6 +28,74 @@ const DATE_INPUT_MAX = '2099-12-31';
 function formatShortDate(value) {
   if (!value) return '-';
   return String(value).slice(0, 10);
+}
+
+function normalizeWarningText(value) {
+  return String(value || '').trim();
+}
+
+function getPatientIdentityKey(patient) {
+  if (isRedactedPatientRecord(patient)) return null;
+  const shared = patient?.data?.shared || {};
+  const patientNo = normalizeWarningText(shared.patientNo);
+  const birthDate = normalizeWarningText(shared.birthDate).slice(0, 10);
+  if (!patientNo || !birthDate) return null;
+  return `${patientNo}\u0000${birthDate}`;
+}
+
+export function getUnassignedBadgeInfo(patient) {
+  const warnings = patient?.sync?.assignmentWarnings || [];
+  const tooltipLines = [
+    ...warnings.map(w => w.message),
+    '관리자 콘솔에서 담당의를 배정하세요.',
+  ];
+  return { hasWarning: warnings.length > 0, tooltip: tooltipLines.join('\n') };
+}
+
+export function buildAssignmentBannerMessage(unassignedCount, scope) {
+  if (!unassignedCount) return null;
+  const hint = scope === 'mine'
+    ? '전체 보기로 전환하여 확인하세요.'
+    : '목록에서 미배정 배지를 확인하세요.';
+  return `담당의 배정이 필요한 환자 ${unassignedCount}건이 있습니다. ${hint}`;
+}
+
+export function buildPatientNameWarningMap(patients = []) {
+  const groups = new Map();
+
+  patients.forEach(patient => {
+    const key = getPatientIdentityKey(patient);
+    const name = normalizeWarningText(patient?.data?.shared?.name);
+    if (!key || !name || !patient?.id) return;
+
+    const group = groups.get(key) || { entries: [], names: new Map() };
+    group.entries.push({ id: patient.id, name });
+    group.names.set(name.toLocaleLowerCase('ko'), name);
+    groups.set(key, group);
+  });
+
+  const warnings = new Map();
+  groups.forEach(group => {
+    if (group.names.size < 2) return;
+    group.entries.forEach(entry => {
+      const otherName = group.entries.find(candidate => candidate.name !== entry.name)?.name || '';
+      warnings.set(entry.id, {
+        code: 'PATIENT_NAME_MISMATCH',
+        message: 'Same patient number and birth date, but the name differs.',
+        existingName: otherName,
+        incomingName: entry.name,
+      });
+    });
+  });
+
+  return warnings;
+}
+
+function getPatientNameWarning(patient, warningMap) {
+  const warnings = Array.isArray(patient?.sync?.warnings) ? patient.sync.warnings : [];
+  return warnings.find(warning => warning?.code === 'PATIENT_NAME_MISMATCH')
+    || warningMap?.get(patient?.id)
+    || null;
 }
 
 function JobFilterCombobox({ patients, value, onChange }) {
@@ -140,9 +209,16 @@ export function PatientSidebar({
   onSwitchPatient,
   onRemovePatient,
   onRemoveSelectedPatients,
+  onResolveConflict,
+  scope = 'mine',
+  onScopeChange,
+  session,
+  serverUnassignedCount = null,
 }) {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const allModules = useMemo(() => getAllModules(), []);
+  const nameWarningMap = useMemo(() => buildPatientNameWarningMap(patients), [patients]);
+  const canUseMineScope = session?.user?.role === 'doctor';
 
   const {
     searchQuery = '',
@@ -204,6 +280,21 @@ export function PatientSidebar({
         </div>
 
         <div className="sidebar-filter">
+          {session?.mode === 'intranet' && (
+            <div className="patient-scope-toggle">
+              {canUseMineScope && (
+                <button
+                  className={`patient-scope-btn${scope === 'mine' ? ' patient-scope-btn--active' : ''}`}
+                  onClick={() => onScopeChange?.('mine')}
+                >내 담당</button>
+              )}
+              <button
+                className={`patient-scope-btn${scope === 'all' ? ' patient-scope-btn--active' : ''}`}
+                onClick={() => onScopeChange?.('all')}
+              >전체</button>
+            </div>
+          )}
+
           <input
             type="search"
             placeholder="검색..."
@@ -303,19 +394,34 @@ export function PatientSidebar({
           )}
         </div>
 
+        {session?.mode === 'intranet' && (() => {
+          const count = typeof serverUnassignedCount === 'number'
+            ? serverUnassignedCount
+            : patients.filter(p => p.redacted !== true && p.assignedDoctorUserId === null).length;
+          const msg = buildAssignmentBannerMessage(count, scope);
+          return msg ? <div className="patient-assignment-banner">{msg}</div> : null;
+        })()}
+
         <div className="patient-list">
           {displayPatients.map(p => {
             const origIndex = patients.indexOf(p);
+            const isRedacted = isRedactedPatientRecord(p);
             const pModules = p.data?.activeModules || [];
-            const isComplete = isPatientComplete(p);
-            const patientName = p.data?.shared?.name || `환자 #${origIndex + 1}`;
+            const isComplete = !isRedacted && isPatientComplete(p);
+            const patientName = isRedacted ? '삭제된 환자' : (p.data?.shared?.name || `환자 #${origIndex + 1}`);
             const patientNo = p.data?.shared?.patientNo || '';
             const registrationDate = formatShortDate(p.createdAt || p._savedAt);
             const evaluationDate = formatShortDate(p.data?.shared?.evaluationDate);
-            const primaryDiagnosis = p.data?.shared?.diagnoses?.[0]?.name || '-';
+            const primaryDiagnosis = isRedacted ? '개인정보 삭제됨' : (p.data?.shared?.diagnoses?.[0]?.name || '-');
+            const hasConflict = p.sync?.syncStatus === 'conflict';
+            const conflictKind = p.sync?.conflict?.kind || 'conflict';
+            const nameWarning = getPatientNameWarning(p, nameWarningMap);
+            const nameWarningTitle = nameWarning
+              ? `같은 등록번호와 생년월일의 기존 이름(${nameWarning.existingName || '-'})과 현재 이름(${nameWarning.incomingName || patientName})이 다릅니다. 개명 또는 입력 오류인지 확인하세요.`
+              : '';
 
             return (
-              <div key={p.id} className={`patient-item ${p.id === activeId ? 'active' : ''}`} onClick={() => onSwitchPatient(p.id)}>
+              <div key={p.id} className={`patient-item ${p.id === activeId ? 'active' : ''} ${hasConflict ? 'conflict' : ''} ${isRedacted ? 'redacted' : ''}`} onClick={() => onSwitchPatient(p.id)}>
                 <div className="patient-item-grid">
                   <div className="patient-item-select">
                     <input
@@ -336,6 +442,21 @@ export function PatientSidebar({
                       <div className="patient-item-name-row">
                         <span className="patient-item-title">{patientName}</span>
                         {patientNo && <span className="patient-no">#{patientNo}</span>}
+                        {isRedacted && <span className="patient-sync-badge patient-sync-badge-redacted">삭제됨</span>}
+                        {hasConflict && <span className="patient-sync-badge">{conflictKind}</span>}
+                        {nameWarning && <span className="patient-sync-badge patient-sync-badge-warning" title={nameWarningTitle}>이름 확인</span>}
+                        {scope === 'all' && session?.mode === 'intranet' && p.assignedDoctorUserId === null && (() => {
+                          const { hasWarning, tooltip } = getUnassignedBadgeInfo(p);
+                          return (
+                            <span
+                              className={`patient-unassigned-badge${hasWarning ? ' patient-unassigned-badge--warning' : ''}`}
+                              title={tooltip}
+                            >미배정</span>
+                          );
+                        })()}
+                        {scope === 'all' && session?.mode === 'intranet' && p.assignedDoctorUserId && p.assignedDoctorUserId !== session?.user?.id && (
+                          <span className="patient-others-badge">타 담당</span>
+                        )}
                         <div className="patient-item-modules">
                           {pModules.map(mId => {
                             const mod = getModule(mId);
@@ -343,7 +464,7 @@ export function PatientSidebar({
                           })}
                         </div>
                       </div>
-                      <span className={isComplete ? 'status-dot complete' : 'status-dot'} title={isComplete ? '완료' : '미완료'}>●</span>
+                      <span className={isRedacted ? 'status-dot redacted' : (isComplete ? 'status-dot complete' : 'status-dot')} title={isRedacted ? '삭제된 환자' : (isComplete ? '완료' : '미완료')}>{isRedacted ? '삭제' : '●'}</span>
                     </div>
                     <div className="patient-item-info patient-item-meta">
                       <span>{formatBirthDate(p.data?.shared?.birthDate)}</span>
@@ -355,6 +476,9 @@ export function PatientSidebar({
                       <span>완료 {evaluationDate}</span>
                     </div>
                     <div className="patient-item-actions">
+                      {hasConflict && (
+                        <button className="btn btn-info btn-xs" onClick={e => { e.stopPropagation(); onResolveConflict?.(p.id); }}>Resolve</button>
+                      )}
                       <button className="btn btn-danger btn-xs" onClick={e => { e.stopPropagation(); onRemovePatient(p.id); }}>삭제</button>
                     </div>
                   </div>

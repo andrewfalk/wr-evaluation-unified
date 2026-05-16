@@ -18,8 +18,9 @@ export function StepContent({
   activePatient,
   shared, diagnoses, activeModules, allModules, suggested,
   activeModuleId, EvaluationComponent, calc, unifiedPreviewText,
-  errors, settings,
+  errors, settings, session,
   presets, presetMeta, presetError,
+  aiAvailable,
   updateShared, updateModule, updateModuleById, updateDiagnoses, updateActiveModules,
   handlePresetSelect, setPresetModalJobId, setPresetBrowseJobId,
 }) {
@@ -30,10 +31,10 @@ export function StepContent({
     return (
       <>
         <div className="panel">
-          <BasicInfoForm shared={shared} onChange={updateShared} errors={errors} presets={presets} presetMeta={presetMeta} presetError={presetError} onPresetSelect={handlePresetSelect} onSavePreset={setPresetModalJobId} onBrowsePreset={setPresetBrowseJobId} activeModules={activeModules} />
+          <BasicInfoForm shared={shared} onChange={updateShared} errors={errors} presets={presets} presetMeta={presetMeta} presetError={presetError} onPresetSelect={handlePresetSelect} onSavePreset={setPresetModalJobId} onBrowsePreset={setPresetBrowseJobId} activeModules={activeModules} session={session} />
         </div>
         <div className="panel">
-          <BasicInfoSidePanel shared={shared} onChange={updateShared} />
+          <BasicInfoSidePanel shared={shared} onChange={updateShared} session={session} />
         </div>
       </>
     );
@@ -105,6 +106,7 @@ export function StepContent({
         generatePrompt={() => unifiedPreviewText}
         systemPrompt={`${UNIFIED_AI_SYSTEM_PROMPT}\n6. 팔꿈치: BK 유형별 노출 패턴, 시간적 선후관계, 직업별-진단별 narrative를 함께 검토합니다.`}
         title="AI 업무관련성 종합분석"
+        aiAvailable={aiAvailable}
       />
     );
   }

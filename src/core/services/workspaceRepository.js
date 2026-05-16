@@ -32,8 +32,22 @@ function shouldUseRemoteRepository({ session, settings } = {}) {
   return settings?.integrationMode === 'intranet' || session?.mode === 'intranet';
 }
 
-function shouldFallbackToLocal(error) {
+// Errors that indicate "endpoint not implemented yet" — safe to fall back to local.
+// Auth failures (401/403), server errors (500/502), and contract violations are
+// intentionally excluded so they surface to the user rather than silently degrading.
+function isFallbackEligibleError(error) {
   return !error?.status || error.status === 404 || error.status === 405 || error.status === 501;
+}
+
+function shouldFallbackToLocal(error, options = {}) {
+  // In remote mode: require both explicit server permission AND an eligible error type.
+  // localFallbackAllowed=true with a 401/500 still surfaces the error — preventing
+  // auth failures and contract violations from being silently hidden in local storage.
+  if (shouldUseRemoteRepository(options)) {
+    return options?.serverConfig?.localFallbackAllowed === true
+      && isFallbackEligibleError(error);
+  }
+  return isFallbackEligibleError(error);
 }
 
 export async function loadSavedWorkspaces(options = {}) {
@@ -44,7 +58,7 @@ export async function loadSavedWorkspaces(options = {}) {
       return items;
     } catch (error) {
       markFallbackIntegrationStatus(error, { ...options, source: 'workspace-load' });
-      if (!shouldFallbackToLocal(error)) throw error;
+      if (!shouldFallbackToLocal(error, options)) throw error;
       console.warn('[workspaceRepository] Falling back to local workspace storage:', error.message);
     }
   } else {
@@ -58,15 +72,15 @@ export async function loadSavedWorkspaces(options = {}) {
   }));
 }
 
-export async function saveWorkspaceSnapshot({ name, patients, savedItems, ...options }) {
+export async function saveWorkspaceSnapshot({ id, name, patients, savedItems, ...options }) {
   if (shouldUseRemoteRepository(options)) {
     try {
-      const items = await saveRemoteWorkspace({ name, patients, ...options });
+      const items = await saveRemoteWorkspace({ id, name, patients, ...options });
       markRemoteIntegrationStatus({ ...options, source: 'workspace-save' });
       return items;
     } catch (error) {
       markFallbackIntegrationStatus(error, { ...options, source: 'workspace-save' });
-      if (!shouldFallbackToLocal(error)) throw error;
+      if (!shouldFallbackToLocal(error, options)) throw error;
       console.warn('[workspaceRepository] Falling back to local workspace save:', error.message);
     }
   } else {
@@ -84,7 +98,7 @@ export async function deleteWorkspaceSnapshot({ id, savedItems, ...options }) {
       return items;
     } catch (error) {
       markFallbackIntegrationStatus(error, { ...options, source: 'workspace-delete' });
-      if (!shouldFallbackToLocal(error)) throw error;
+      if (!shouldFallbackToLocal(error, options)) throw error;
       console.warn('[workspaceRepository] Falling back to local workspace delete:', error.message);
     }
   } else {
@@ -106,7 +120,7 @@ export async function loadAutoSavedWorkspace(options = {}) {
       return saved;
     } catch (error) {
       markFallbackIntegrationStatus(error, { ...options, source: 'autosave-load' });
-      if (!shouldFallbackToLocal(error)) throw error;
+      if (!shouldFallbackToLocal(error, options)) throw error;
       console.warn('[workspaceRepository] Falling back to local autosave load:', error.message);
     }
   } else {
@@ -129,7 +143,7 @@ export async function saveAutoSavedWorkspace({ patients, ...options }) {
       return result;
     } catch (error) {
       markFallbackIntegrationStatus(error, { ...options, source: 'autosave-save' });
-      if (!shouldFallbackToLocal(error)) throw error;
+      if (!shouldFallbackToLocal(error, options)) throw error;
       console.warn('[workspaceRepository] Falling back to local autosave save:', error.message);
     }
   } else {
@@ -147,7 +161,7 @@ export async function clearAutoSavedWorkspace(options = {}) {
       return result;
     } catch (error) {
       markFallbackIntegrationStatus(error, { ...options, source: 'autosave-clear' });
-      if (!shouldFallbackToLocal(error)) throw error;
+      if (!shouldFallbackToLocal(error, options)) throw error;
       console.warn('[workspaceRepository] Falling back to local autosave clear:', error.message);
     }
   } else {

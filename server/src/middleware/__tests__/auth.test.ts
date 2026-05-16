@@ -61,6 +61,18 @@ describe('createAuthMiddleware', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it('returns 401 when the user account is disabled', async () => {
+    const { token } = generateAccessToken(BASE);
+    const middleware = createAuthMiddleware(makePool([{ disabled_at: '2026-01-01T00:00:00Z' }]));
+    const req  = makeReq(`Bearer ${token}`) as Request & { sessionInfo?: unknown };
+    const next = vi.fn() as unknown as NextFunction;
+    const { res, status, json } = makeRes();
+    await middleware(req, res, next);
+    expect(status).toHaveBeenCalledWith(401);
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({ code: 'USER_DISABLED' }));
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it('calls next(err) when pool.query throws (DB down)', async () => {
     const { token } = generateAccessToken(BASE);
     const pool = { query: vi.fn().mockRejectedValue(new Error('DB down')) } as unknown as Pool;

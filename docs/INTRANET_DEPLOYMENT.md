@@ -166,10 +166,12 @@ Electron main.js에는 외부 origin 이동 차단이 이미 구현되어 있습
 
 ## 5. 인증서 갱신 절차
 
-Caddy는 내부 CA 인증서를 **자동으로 갱신**합니다. 만료 전에 새 인증서를 발급하므로 별도 작업이 불필요합니다.
+Caddy는 내부 CA 인증서를 **자동으로 갱신**합니다. 다만 Caddy 내부 CA의 leaf 인증서 기본 유효기간은 **12시간**입니다.
+이 프로젝트의 `caddy/Caddyfile`은 개발/인트라넷 검증 편의를 위해 서버 인증서(leaf)를 **6일**로 설정합니다.
 
 **루트 CA 인증서는 10년 유효**합니다 (Caddy 기본값).  
-서버 인증서(leaf)는 약 1년 주기로 Caddy가 자동 갱신합니다.
+중간 인증서(intermediate)는 프로젝트 설정상 365일을 요청하지만, 기존에 이미 생성된 중간 인증서는 기존 만료일까지 유지될 수 있습니다.
+leaf 인증서 수명은 반드시 중간 인증서 수명보다 짧아야 하므로 현재 설정은 6일입니다.
 
 ### 수동 확인 방법
 
@@ -188,6 +190,12 @@ docker compose restart caddy
 ```
 
 Caddy는 재시작 시 인증서 상태를 점검하고 필요하면 재발급합니다.
+이미 발급된 leaf 인증서의 수명 설정을 바꾼 직후에는 기존 인증서를 계속 사용할 수 있습니다. 이 경우 루트 CA는 유지하고 leaf 인증서만 삭제한 뒤 Caddy를 재시작합니다.
+
+```bash
+docker compose exec caddy sh -c "rm -f /data/caddy/certificates/local/wr.hospital.local/wr.hospital.local.crt /data/caddy/certificates/local/wr.hospital.local/wr.hospital.local.key /data/caddy/certificates/local/wr.hospital.local/wr.hospital.local.json"
+docker compose restart caddy
+```
 
 ---
 

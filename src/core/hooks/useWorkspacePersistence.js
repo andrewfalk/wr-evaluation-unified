@@ -10,13 +10,40 @@ import {
   saveAutoSavedWorkspace,
   saveWorkspaceSnapshot,
 } from '../services/workspaceRepository';
-import { clonePatientRecordForImport, migratePatientRecords } from '../services/patientRecords';
+import {
+  clonePatientRecordForImport,
+  isRedactedPatientRecord,
+  migratePatientRecords,
+} from '../services/patientRecords';
+
+export function getLoadablePatientsFromSnapshot(patients = [], context = {}) {
+  const migrated = migratePatientRecords(patients || [], context);
+  const loadablePatients = migrated.filter(patient => !isRedactedPatientRecord(patient));
+
+  return {
+    patients: loadablePatients,
+    failedCount: migrated.length - loadablePatients.length,
+    totalCount: migrated.length,
+  };
+}
+
+export function buildLoadFailureMessage({ failedCount = 0, totalCount = 0 } = {}) {
+  if (!failedCount) return '';
+  return `불러오기한 환자 목록에 삭제된 환자가 포함되어 있어 작업 목록에서 제외했습니다. (실패 ${failedCount}건 / 총 ${totalCount}건)`;
+}
+
+async function showLoadFailureNotice(loadResult) {
+  if (!loadResult) return;
+  const message = buildLoadFailureMessage(loadResult);
+  if (message) await showAlert(message);
+}
 
 export function useWorkspacePersistence({
   patients, setPatients,
-  session, settings,
+  session, settings, serverConfig,
   setActiveId, setCurrentStepIndex, setIntakeShared, setShowHome,
   setShowSaveModal, setShowLoadModal,
+  disabled = false,
 }) {
   const [savedItems, setSavedItems] = useState([]);
   const [saveName, setSaveName] = useState('');
@@ -28,8 +55,9 @@ export function useWorkspacePersistence({
   }, []);
 
   useEffect(() => {
+    if (disabled) return;
     let cancelled = false;
-    loadSavedWorkspaces({ session, settings })
+    loadSavedWorkspaces({ session, settings, serverConfig })
       .then(items => {
         if (!cancelled) setSavedItems(items);
       })
@@ -38,40 +66,54 @@ export function useWorkspacePersistence({
       });
     return () => { cancelled = true; };
   }, [
+    disabled,
     session?.mode,
     session?.apiBaseUrl,
     session?.user?.id,
     session?.user?.organizationId,
     settings?.integrationMode,
     settings?.apiBaseUrl,
+    serverConfig?.localFallbackAllowed,
   ]);
 
-  // 자동 저장 복원 (초기 1회만)
+  // 자동 저장 복원 (초기 1회만) — config 준비 전에는 실행하지 않음
   useEffect(() => {
-    loadAutoSavedWorkspace({ session, settings }).then(saved => {
+    if (disabled) return;
+    loadAutoSavedWorkspace({ session, settings, serverConfig }).then(saved => {
       if (saved) {
         const time = new Date(saved.savedAt).toLocaleString('ko-KR');
-        showConfirm(`이전 자동 저장 데이터가 있습니다 (${time}).\n이어서 작업하시겠습니까?`).then(ok => {
+        showConfirm(`이전 자동 저장 데이터가 있습니다 (${time}).\n이어서 작업하시겠습니까?`).then(async ok => {
           if (ok && saved.patients?.length) {
-            setPatients(saved.patients);
-            setActiveId(saved.patients[0].id);
+            const loadResult = getLoadablePatientsFromSnapshot(saved.patients, { session });
+            setPatients(loadResult.patients);
+            setActiveId(loadResult.patients[0]?.id || null);
             setCurrentStepIndex(0);
+            await showLoadFailureNotice(loadResult);
           }
-          clearAutoSavedWorkspace({ session, settings });
+          clearAutoSavedWorkspace({ session, settings, serverConfig })
+            .catch(error => {
+              console.warn('[autosave-clear]', error);
+            });
         });
       }
     });
-  }, []);
+  }, [disabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 자동 저장
   useEffect(() => {
-    if (!settings.autoSaveInterval || patients.length === 0) return;
+    if (disabled || !settings.autoSaveInterval || patients.length === 0) return;
     const timer = setTimeout(() => {
-      saveAutoSavedWorkspace({ patients, session, settings });
-      setLastAutoSave(new Date());
+      saveAutoSavedWorkspace({ patients, session, settings, serverConfig })
+        .then(() => {
+          setLastAutoSave(new Date());
+        })
+        .catch(error => {
+          console.warn('[autosave-save]', error);
+        });
     }, settings.autoSaveInterval * 1000);
     return () => clearTimeout(timer);
   }, [
+    disabled,
     patients,
     session?.mode,
     session?.apiBaseUrl,
@@ -80,56 +122,77 @@ export function useWorkspacePersistence({
     settings?.autoSaveInterval,
     settings?.integrationMode,
     settings?.apiBaseUrl,
+    serverConfig?.localFallbackAllowed,
   ]);
 
   const handleSave = async () => {
+    const existingItem = savedItems.find(item => item.name === saveName);
     if (!saveName.trim()) { await showAlert('저장명 필수'); return; }
     if (hasDuplicateWorkspaceName(saveName, savedItems)) {
       const confirmed = await showConfirm(`"${saveName}" 이름의 저장 데이터가 이미 존재합니다. 덮어쓰시겠습니까?`);
       if (!confirmed) return;
     }
-    const items = await saveWorkspaceSnapshot({ name: saveName, patients, savedItems, session, settings });
-    setSavedItems(items);
-    setLastAutoSave(null);
-    setShowSaveModal(false);
-    setSaveName('');
-    await showAlert('저장됨');
+    try {
+      const items = await saveWorkspaceSnapshot({ id: existingItem?.id, name: saveName, patients, savedItems, session, settings, serverConfig });
+      setSavedItems(items);
+      setLastAutoSave(null);
+      setShowSaveModal(false);
+      setSaveName('');
+      await showAlert('저장됨');
+    } catch (err) {
+      await showAlert(`저장에 실패했습니다. ${err?.message || '서버 오류'}`);
+    }
   };
 
   const handleOverwriteSave = async (item) => {
     const confirmed = await showConfirm(`"${item.name}"에 덮어쓰시겠습니까?`);
     if (!confirmed) return;
-    const items = await saveWorkspaceSnapshot({ name: item.name, patients, savedItems, session, settings });
-    setSavedItems(items);
-    setLastAutoSave(null);
-    setShowSaveModal(false);
-    setSaveName('');
-    await showAlert('저장됨');
+    try {
+      const items = await saveWorkspaceSnapshot({ id: item.id, name: item.name, patients, savedItems, session, settings, serverConfig });
+      setSavedItems(items);
+      setLastAutoSave(null);
+      setShowSaveModal(false);
+      setSaveName('');
+      await showAlert('저장됨');
+    } catch (err) {
+      await showAlert(`저장에 실패했습니다. ${err?.message || '서버 오류'}`);
+    }
   };
 
   const handleLoad = async (item, mode = 'overwrite') => {
+    let loadResultForNotice = null;
     if (mode === 'overwrite') {
       const confirmed = await showConfirm('현재 데이터를 덮어쓰시겠습니까?');
       if (!confirmed) return;
-      const nextPatients = migratePatientRecords(item.patients || [], { session });
-      setPatients(nextPatients);
-      setActiveId(nextPatients[0]?.id || null);
+      const loadResult = getLoadablePatientsFromSnapshot(item.patients || [], { session });
+      setPatients(loadResult.patients);
+      setActiveId(loadResult.patients[0]?.id || null);
+      loadResultForNotice = loadResult;
     } else {
-      const newPatients = (item.patients || []).map(p => clonePatientRecordForImport(p, { session }));
+      const loadResult = getLoadablePatientsFromSnapshot(item.patients || [], { session });
+      const newPatients = loadResult.patients
+        .map(p => clonePatientRecordForImport(p, { session }))
+        .filter(Boolean);
       setPatients(prev => [...prev, ...newPatients]);
       setActiveId(newPatients[0]?.id || null);
+      loadResultForNotice = loadResult;
     }
     setCurrentStepIndex(0);
     setShowLoadModal(false);
     setIntakeShared(null);
     setShowHome(false);
+    await showLoadFailureNotice(loadResultForNotice);
   };
 
   const handleDelete = async (id) => {
     const confirmed = await showConfirm('삭제하시겠습니까?');
     if (confirmed) {
-      const items = await deleteWorkspaceSnapshot({ id, savedItems, session, settings });
-      setSavedItems(items);
+      try {
+        const items = await deleteWorkspaceSnapshot({ id, savedItems, session, settings, serverConfig });
+        setSavedItems(items);
+      } catch (err) {
+        await showAlert(`삭제에 실패했습니다. ${err?.message || '서버 오류'}`);
+      }
     }
   };
 

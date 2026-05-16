@@ -104,7 +104,8 @@
    - `GET /api/workspaces/:id?view=current` → snapshot의 patient_ids로 patient_records 현재값 조회. "이 워크스페이스를 만들 때부터 환자가 어떻게 변했는지 비교" 용도.
    - 기본 동작은 snapshot. 사용자 멘탈 모델("저장본")과 일치.
    - **환자 soft delete 영향**: 환자 삭제 시 모든 워크스페이스의 `snapshot_payload` 내 해당 환자 entry는 **redacted 표시**됨(name/patient_no/birth_date 등 PHI 필드 제거, `redacted: true` 플래그). 즉 "저장본 보존" UX는 삭제되지 않은 환자에 대해서만 완전. **UI에 명시 안내**: 워크스페이스 로드 시 redacted entry는 회색 처리 + "[삭제된 환자] 식별정보가 제거되었습니다" 표시. 5년 retention 후 워크스페이스 자체 자동 cleanup.
-   - `POST /api/workspaces`는 그 시점의 환자 배열을 snapshot_payload로 통째 보관.
+   - `POST /api/workspaces`는 그 시점의 환자 배열을 snapshot_payload로 통째 보관하되, 저장 시점에 이미 soft delete 된 환자는 새 snapshot에 PHI를 다시 쓰지 않고 `{ id, redacted: true }` stub으로 저장한다.
+   - workspace의 `patient_records` mirror upsert는 best-effort지만 삭제 상태를 되살리면 안 된다. 기존 `patient_records.deleted_at IS NOT NULL`인 row는 mirror 대상에서 제외하고, `ON CONFLICT DO UPDATE`도 `deleted_at IS NULL` row에만 적용한다.
 
 7. **CORS production 강화**
    - production 화이트리스트: 인트라넷 도메인만 (`https://wr.hospital.local` 등).
@@ -181,10 +182,19 @@ wr-evaluation-unified/
 **DB 스키마 (Phase 1)**
 - `users(id, login_id UNIQUE, password_hash, name, role, organization_id, created_at, last_login_at, disabled_at)`
 - `sessions(id, user_id, refresh_token_hash, csrf_token_hash, expires_at, revoked_at, user_agent, ip)`
-- `patient_records(id, organization_id, owner_user_id, name, patient_no, birth_date, evaluation_date, active_modules text[], diagnoses_codes text[], jobs_names text[], updated_at, created_at, revision int, deleted_at, payload jsonb)` + 인덱스 (트리그램, GIN)
+- `patient_persons(id, organization_id, patient_no, name, birth_date, created_at, updated_at, deleted_at)` — **환자 사람 마스터**. `UNIQUE(organization_id, patient_no) WHERE deleted_at IS NULL AND patient_no IS NOT NULL`; 같은 병원 내 등록번호는 한 사람을 식별한다.
+- `patient_records(id, organization_id, patient_person_id, owner_user_id, name, patient_no, birth_date, injury_date, evaluation_date, active_modules text[], diagnoses_codes text[], jobs_names text[], updated_at, created_at, revision int, deleted_at, payload jsonb)` — **평가/재해 건**. 프론트의 `Patient` 객체와 `/api/patients` 응답은 호환성을 위해 이 case/record 단위를 유지한다. 같은 `patient_no`라도 `injury_date`가 다른 여러 건이 가능하다.
 - `workspaces(id, organization_id, owner_user_id, name, created_at, patient_ids uuid[], snapshot_payload jsonb)` — **snapshot 보존**
 - `autosaves(user_id, device_id, organization_id, saved_at, payload jsonb, PK(user_id, device_id))`
-- `audit_logs(...)` — append-only via app role
+- `idempotency_keys(key, user_id, org_id, status, body jsonb, created_at, expires_at, PK(key, user_id))` — POST /api/patients 멱등성 캐시, 24h TTL
+- `audit_logs(...)` — append-only via app role. **보존 목표: 최소 10년**. `target_id`/`extra` 컬럼에 PHI(환자명, 주민번호, 진단문 등) 직접 저장 금지 — 해시값·사유코드·플래그만 허용
+
+**T36c 환자/건 분리 결정**
+- 도메인 기준: `patient_no`는 환자 사람의 고유 등록번호이고, 한 사람은 재해일자/평가일자가 다른 여러 평가 건을 가질 수 있다.
+- API 호환성 기준: `/api/patients`와 프론트 `Patient` 모델은 당분간 "평가/재해 건" 단위 이름을 유지한다. 내부 DB에서만 `patient_persons`를 추가해 사람 마스터를 분리한다.
+- 저장 기준: `POST/PATCH /api/patients`는 `data.shared.patientNo/name/birthDate`로 `patient_persons`를 find-or-create/upsert하고, `data.shared.injuryDate/evaluationDate`와 전체 payload는 `patient_records`에 case row로 저장한다.
+- 충돌 기준: 같은 조직의 같은 `patient_no`는 같은 person으로 연결한다. 단, 기존 person의 `birth_date`와 새 payload의 `birthDate`가 서로 다른 비어있지 않은 값이면 `409 PATIENT_IDENTITY_CONFLICT`로 표면화한다.
+- Workspace 기준: `workspaces.snapshot_payload`는 저장 시점의 원본 스냅샷이며 계속 저장 성공 우선이다. best-effort mirror는 person 연결 후 `patient_records` case row를 갱신하되, 실패해도 snapshot 저장은 롤백하지 않는다. 단, 삭제된 환자 PHI는 원본 스냅샷보다 삭제/비식별화 정책이 우선하므로 새 workspace 저장 시에도 redacted stub만 보관한다.
 
 **구현할 엔드포인트**
 - `POST /api/auth/login` → HttpOnly `wr_refresh` + non-HttpOnly `wr_csrf` 쿠키 set, body `{user, accessToken, accessExpiresAt}`
@@ -242,6 +252,54 @@ wr-evaluation-unified/
 - `src/core/hooks/useAIAvailable.js`
 - `src/core/utils/csrfCookie.js` — wr_csrf 쿠키 read
 
+### Phase 2.5 — Mock 서버 UI 수동 검증 (완료)
+
+**목적**: Phase 2 완료 후 실서버 없이 `npm run mock:intranet` + `npm run dev` 조합으로 인트라넷 모드 전체 UI를 실제처럼 돌리고, 수동 시나리오로 한 차례 검증한다.
+
+**실행 방법**
+
+```bash
+# 터미널 1
+npm run mock:intranet     # localhost:3001 (mock API)
+
+# 터미널 2
+npm run dev               # localhost:3000 → Vite가 /api/* → 3001 프록시
+```
+
+브라우저: `http://localhost:3000` (또는 `settings.apiBaseUrl`에 `http://localhost:3001` 직접 지정)
+
+**구현 내역 (`scripts/mock-intranet-server.mjs`)**
+
+| 항목 | 내용 |
+|---|---|
+| 포트 | 기본값 3002 → 3001 (Vite 프록시 타겟과 통일) |
+| 쿠키 헬퍼 | `parseCookies`, `setAuthCookies`, `clearAuthCookies` |
+| 환경 변수 | `MOCK_MUST_CHANGE_PASSWORD=true` — ChangePasswordModal 경로 테스트 |
+| 신규 엔드포인트 | `GET /api/config/public`, `POST /api/auth/csrf`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, `POST /api/auth/change-password`, `POST /api/ai/analyze` |
+| CORS | `Access-Control-Allow-Origin: *` → 요청 Origin 에코 + `Access-Control-Allow-Credentials: true` (cross-origin 직접 요청 지원) |
+
+**구현 중 발견 · 수정된 버그**
+
+1. **useServerConfig StrictMode 무한 loading** — React StrictMode가 effect를 두 번(실행→cleanup→재실행) 돌릴 때 `lastFetchedUrlRef.current = baseUrl`이 이미 세팅되어 두 번째 effect가 dedup에 걸려 fetch를 안 보냄 → cleanup 시 `lastFetchedUrlRef.current = null`로 리셋하도록 수정
+2. **useServerConfig 타임아웃 없음** — 도달 불가 URL로 `fetch`가 무한 대기 → `AbortController` + `setTimeout(8000)`으로 타임아웃 추가 (`AbortSignal.timeout()` 보다 호환성 넓음)
+3. **mock 서버 CORS** — `credentials: 'include'` + `Access-Control-Allow-Origin: *` 조합은 브라우저가 cross-origin 요청을 차단함 → 요청 Origin을 에코하는 방식으로 수정
+
+**수동 검증 시나리오**
+
+| ID | 시나리오 | 확인 항목 |
+|---|---|---|
+| A | 로그인 + 기본 흐름 | LoginModal 표시 → 로그인 → Settings read-only, AI 버튼 비활성(`aiEnabled:false`) |
+| B | 세션 유지 (새로고침) | F5 후 LoginModal 없이 바로 앱 진입 (`/api/auth/csrf` → 세션 복구) |
+| C | 워크스페이스 저장/불러오기 | 환자 추가 → 저장 → `.mock-intranet/db.json` 기록 → 새로고침 후 불러오기 동일 |
+| D | 로그아웃 | 로그아웃 → LoginModal 재등장, 워크스페이스 저장 시도 → 로그인 모달 |
+| E | ChangePasswordModal | `MOCK_MUST_CHANGE_PASSWORD=true npm run mock:intranet` → 로그인 직후 모달 강제. `currentPassword=wrong` 에러 경로. DevTools Network에서 `X-CSRF-Token` 헤더 확인 |
+| F1 | fail-closed (서버 처음부터 dead) | mock 서버 없이 접속 → 8초 후 "서버 응답 시간 초과" 에러 화면, 로컬 저장 잠금 |
+| F2 | fail-closed (로그인 후 서버 종료) | 로그인 후 `Ctrl+C` → 워크스페이스 저장 실패 알림, localStorage 오염 없음 |
+
+**완료 기준**: 시나리오 A~F2 모두 통과, E에서 DevTools Network로 `X-CSRF-Token` 헤더 확인.
+
+---
+
 ### Phase 3 — 환자 1급 API + 양방향 동기화 (1.5주)
 - 서버: `GET/POST /api/patients`, `GET/PATCH/DELETE /api/patients/:serverId`
   - PATCH는 `If-Match: <revision>` 필수
@@ -249,6 +307,19 @@ wr-evaluation-unified/
   - DELETE는 `?revision=N`
 - 클라: `src/core/services/patientServerRepository.js` 신설. patient.sync 활용.
 - 동기화: 5분 주기 + window focus pull, 변경 즉시 push. 충돌 모달.
+
+### Phase 3 완료 게이트 — 환자 동기화 실검증 (0.5~1일)
+- 목적: Phase 4/5로 넘어가기 전에 환자/건 분리, revision, 삭제 동기화, workspace redaction 정책이 실제 서버 흐름에서 맞는지 확인한다.
+- 개발 PC에서 Docker Compose 기반 실제 PostgreSQL 서버로 검증한다. mock 서버는 UI smoke test 보조용이며, DB lock/transaction/redaction 최종 검증에는 사용하지 않는다.
+- 검증 범위:
+  - 환자 생성/수정/조회/검색, 같은 `patientNo` + 다른 `injuryDate` 복수 건 생성.
+  - `PATCH If-Match` stale revision → 409 + 충돌 모달.
+  - `DELETE ?revision=N` 성공/404/409 경로 + 다른 탭 pull 후 삭제 반영.
+  - 환자 soft delete 후 기존 workspace snapshot redaction.
+  - stale 클라이언트가 삭제 환자를 포함해 workspace 저장 시 새 snapshot도 `{ id, redacted: true }`만 보관.
+  - 충돌 모달에서 서버 버전 지연 fetch 중 merge textarea 입력이 덮어써지지 않음.
+- stale revision, remote-delete conflict, merge fetch race의 구체적 재현 절차는 작업표의 T39b 체크리스트를 따른다.
+- 통과 기준: 위 시나리오 수동 체크 + `npm test`, `npm --prefix server test`, `npm --prefix server run build`, `npm run build:web` 통과.
 
 ### Phase 4 — 운영 보안 강화 (3~4일)
 - audit 미들웨어가 mutating + read(patient/workspace/export) 모두 기록.
@@ -258,6 +329,12 @@ wr-evaluation-unified/
 ### Phase 5 — 마이그레이션 도구 (3일)
 - `LocalToServerMigrator`: localStorage 4개 키(presets 제외) → POST /api/patients (Idempotency-Key=local id).
 - 결과 리포트 모달.
+
+### Phase 5.5 — Staging / 실제 서버 이전 리허설 (2~3일)
+- Phase 3~5 개발 PC 통합테스트 통과 후 진행한다. 실제 환자 PHI 사용 금지, 비식별 샘플 데이터만 사용한다.
+- 병원 실제 운영 서버에 바로 올리기 전, 동일한 Docker Compose 구성으로 staging 배포를 수행한다.
+- 검증 항목: 내부 CA 인증서, Caddy HTTPS, Postgres volume, 백업/복구 스크립트, admin seed, device approval, Electron intranet build 접속, audit reader 권한, fail-closed 동작.
+- 통과 후 운영 전환 일정을 잡고 production DB/volume을 새로 구성한다. staging DB를 production으로 승격하지 않는다.
 
 ---
 
@@ -279,6 +356,11 @@ wr-evaluation-unified/
 10. **Workspace snapshot**: 환자 A → workspace 저장 → 환자 A 수정 → workspace 다시 열면 저장 시점 그대로. `?view=current`로 현재값 비교.
 11. **공유 스키마 방향**: server에서 `src/` import 시도 → 빌드 실패. client/server/mock 모두 `shared/contracts/`만 import.
 12. **CORS**: production에서 null/file/app origin 거부, 인트라넷 도메인만 허용.
+    반드시 `--origin` 플래그 포함 실행:
+    ```
+    npm run verify:csp -- --url https://wr.hospital.local --origin https://wr.hospital.local
+    ```
+    확인 항목: 허용 origin의 ACAO echo + `Access-Control-Allow-Credentials: true`, OPTIONS preflight에 `PUT`·`If-Match`·`Idempotency-Key` 허용.
 13. **CA 인증서 미설치 PC**: https://wr.hospital.local 접근 시 인증서 경고 → 운영 절차 따라 CA 설치 후 정상 접근.
 14. **마이그레이션**: 로컬 5명 → 인트라넷 → 5명 모두 서버 + sync.serverId, 재실행 중복 없음.
 15. **감사 로그**: read(patient GET/search/export, workspace load) + mutating + login success/fail + refresh fail 모두 기록. 앱 role SELECT 거부, audit reader role만 가능.
@@ -393,14 +475,25 @@ main (v4.2.1 → v4.2.x 핫픽스만)
 | T34 | **EMR audit (main process + Ed25519 서명 + 암호화 로컬 fallback + 세션 만료 대응)**: ipcMain handler가 EMR 호출 전후 main process에서 (a) `session.defaultSession.cookies`로 wr_refresh+wr_csrf 추출 (b) `safeStorage`에서 device private key 로드 (c) Ed25519 서명 → `/api/audit/emr` 전송 + main pino 로그. **첫 실행 시** device 미등록이면 `/api/devices/register` 호출 후 admin 승인 대기 모달(승인 전 EMR 호출 차단). 서버 전송 실패 시 `%APPDATA%/wr-evaluation-unified/audit-emr-pending.enc`에 **electron `safeStorage`로 암호화** 후 누적. **최소 필드만 저장**: actor_user_id, actor_org_id, action, target_id_hash(sha256(patient.id)), at, outcome, sender_origin, device_signature. 부팅 시·5분 주기 재전송 → 성공 라인 즉시 fsync 후 안전 삭제. **재전송 시 세션 만료 대응**: 큐 entry에 actor snapshot이 함께 보관되어 있으므로 device 서명만으로 서버가 받되, audit row의 `extra.session_missing=true` + `extra.actor_from_queue=true` 플래그로 표시. **safeStorage 복호화 실패 정책**: 깨진 파일을 `audit-emr-pending-corrupt-{ts}.bin`으로 rename, pino error 로그, 서버에 별도 audit 액션(`audit_queue_corrupt`)으로 관리자 알림, 새 빈 큐 시작 | `electron/main.js`, `electron/audit.js`, `electron/auditQueue.js` | (a) 렌더러 audit POST 우회해도 server audit_logs에 main 측 row 존재 (b) 서버 down 시 로컬 큐 암호화 확인(평문 read 거부) (c) 복구 시 자동 재전송 + 큐 파일 비워짐 (d) safeStorage 손상 시 corrupt 파일 보존 + 관리자 알림 audit row 생성 (e) 강제 로그아웃 후 재전송 시 session_missing 플래그 기록 | T15a, T15b, T15c, T33, T35 | M |
 | T35 | `package.json` scripts `electron:build:standalone` / `electron:build:intranet` + `WR_BUILD_TARGET` env | `package.json`, `electron/main.js` | 두 빌드 모두 성공 + 분기 동작 | T33 | S |
 
+### Phase 2.5 — Mock UI 검증 (통합 브랜치: `feature/intranet-backend`)
+
+| ID | 작업 | 영향 | 검증 | deps | 규모 | 상태 |
+|---|---|---|---|---|---|---|
+| T-mock | mock 서버 auth stub 추가 (포트 3001, 쿠키 헬퍼, 7개 엔드포인트, CORS 수정) + `useServerConfig` StrictMode freeze 수정 + AbortController 타임아웃 + SettingsModal 로그아웃 버튼 | `scripts/mock-intranet-server.mjs`, `src/core/hooks/useServerConfig.js`, `src/core/services/httpClient.js`, `src/core/components/SettingsModal.jsx` | 시나리오 A~F2 수동 통과 | T25~T35 | M | ✅ **완료** |
+
+---
+
 ### Phase 3 — 환자 1급 API + 동기화 (통합 브랜치 계속)
 | ID | 작업 | 영향 | 검증 | deps | 규모 |
 |---|---|---|---|---|---|
-| T36 | 서버 `routes/patients.ts`: GET list/search, GET one, POST(Idempotency-Key 저장 테이블), PATCH(If-Match), DELETE(?revision=). **파생 컬럼은 zod 검증 후 앱 서버에서 명시 계산** | `server/src/routes/patients.ts`, `server/migrations/0004_idempotency.sql` | supertest 충돌/멱등 시나리오 | T11, T14, T17 | M |
-| T36b | **환자 soft delete 시 snapshot PHI 비식별화 + retention 정책** (T36 DELETE 구현과 함께): `DELETE /api/patients/:id` 시 모든 `workspaces.snapshot_payload` 내 해당 환자 entry를 비식별화(name/patient_no/birth_date 필드 redact, payload 본문 제거, `redacted: true` 플래그). 워크스페이스 retention = 5년 후 자동 cleanup 잡. 관리자 강제 삭제 `DELETE /api/admin/workspaces/:id/purge` 제공 | `server/src/routes/patients.ts`, `server/src/routes/admin.ts`, `server/src/jobs/workspaceRetention.ts`, `server/migrations/0005_workspace_retention.sql` | (a) 환자 삭제 후 워크스페이스 조회 시 해당 entry redacted 표시 + UI 회색 처리 (b) 5년 경과 워크스페이스 cleanup 잡 동작 (c) admin purge + audit 기록 | T36 | M |
+| T36 | 서버 `routes/patients.ts`: GET list/search, GET one, POST(Idempotency-Key 저장 테이블), PATCH(If-Match), DELETE(?revision=). **파생 컬럼은 zod 검증 후 앱 서버에서 명시 계산** | `server/src/routes/patients.ts`, `server/migrations/0005_idempotency.sql`(멱등성 캐시 테이블), `server/migrations/0006_patient_no_audit_retention.sql`(초기 patient_no 유니크 제약 + audit_logs 보존 정책 주석; patient_no 유니크 위치는 T36c에서 `patient_persons`로 이동) | supertest 충돌/멱등 시나리오 | T11, T14, T17 | M ✅ |
+| T36b | **환자 soft delete 시 snapshot PHI 비식별화 + retention 정책** (T36 DELETE 구현과 함께): `DELETE /api/patients/:id` 시 모든 `workspaces.snapshot_payload` 내 해당 환자 entry를 비식별화(name/patient_no/birth_date 필드 redact, payload 본문 제거, `redacted: true` 플래그). 이후 stale 클라이언트가 `POST /api/workspaces`로 같은 환자를 포함해 저장하더라도 서버가 `patient_records.deleted_at`을 조회해 새 snapshot에는 redacted stub만 저장하고, workspace mirror upsert가 `deleted_at`을 `NULL`로 되살리지 못하게 한다. 워크스페이스 retention = 5년 후 자동 cleanup 잡. 관리자 강제 삭제 `DELETE /api/admin/workspaces/:id/purge` 제공 | `server/src/routes/patients.ts`, `server/src/routes/admin.ts`, `server/src/jobs/workspaceRetention.ts`, `server/migrations/0007_workspace_retention.sql`, `server/migrations/0008_workspace_snapshot_default.sql`, `server/src/routes/workspaces.ts` | (a) 환자 삭제 후 워크스페이스 조회 시 해당 entry redacted 표시 + UI 회색 처리 (b) 삭제 환자를 포함한 stale workspace 저장 시 새 snapshot도 `{ id, redacted: true }`만 보관 (c) workspace mirror upsert SQL이 `deleted_at IS NULL` row만 갱신 (d) 5년 경과 워크스페이스 cleanup 잡 동작 (e) admin purge + audit 기록 | T36 | M |
+| T36c | **환자 사람(person)과 평가/재해 건(record) 분리**. `patient_no`는 병원 내 환자 사람의 고유번호로 유지하되, 같은 환자에게 재해일자/평가일자가 다른 여러 `patient_records`를 허용한다. `/api/patients`는 호환성을 위해 평가 건 API로 유지하고 내부적으로 `patient_persons`를 연결한다. | `server/migrations/0009_patient_persons.sql`, `server/src/db/patientPersons.ts`, `server/src/routes/patients.ts`, `server/src/routes/workspaces.ts`, `server/src/routes/__tests__/patients.test.ts`, `server/src/routes/__tests__/workspaces.test.ts` | (a) 같은 `patientNo` + 다른 `injuryDate` 2건 생성 성공 (b) 같은 `patientNo`는 하나의 `patient_persons`에 연결 (c) birthDate 충돌은 409 (d) workspace mirror가 중복 `patientNo`를 실패로 보지 않음 | T36, T36b | M |
 | T37 | 클라 `patientServerRepository.js` + `patient.sync` 활용 push/pull | `src/core/services/patientServerRepository.js` | 다중 클라이언트 동시 PATCH → 409 + 충돌 모달 | T36, T28 | M |
 | T38 | 백그라운드 동기화: 5분 주기 + window focus pull + 즉시 push | `src/core/hooks/usePatientSync.js`, `src/App.jsx` | 두 PC에서 동기화 시각 확인 | T37 | M |
-| T39 | 충돌 해결 모달 (내 버전/서버 버전/병합) | `src/core/components/ConflictResolveModal.jsx` | 강제 충돌 시나리오 | T37 | M |
+| T38b | 삭제 동기화: `removePatient` / `removeSelectedPatients`에서 로컬 제거 전 `DELETE /api/patients/:id?revision=N` 호출. local-only 환자는 로컬에서만 제거하고, 서버 환자는 204/404 후 로컬 제거. 409는 로컬 제거하지 않고 `syncStatus: conflict`, `conflict.kind = delete`로 표시 | `src/core/hooks/usePatientCrud.js`, `src/App.jsx` | PC A에서 삭제한 환자가 PC B pull 후 사라짐. stale revision 삭제는 conflict로 남음 | T36b, T37, T38 | S |
+| T39 | 충돌 해결 모달 (내 버전/서버 버전/병합). 병합 JSON은 문법뿐 아니라 최소 환자 데이터 구조(`shared` object, `modules` object, `activeModules` string array)를 검증한 뒤 적용한다. | `src/core/components/ConflictResolveModal.jsx`, `src/core/components/__tests__/ConflictResolveModal.test.js` | 강제 충돌 시나리오 + 잘못된 병합 JSON/구조 입력 시 적용 차단 | T37 | M |
+| T39b | **Phase 3 완료 게이트 / 실제 서버 실검증**: mock이 아니라 Docker Compose + PostgreSQL로 환자 1급 API와 동기화 UX를 수동 검증한다. mock `/api/patients`는 선택 사항이며 UI smoke test 보조용으로만 사용한다. | `docker-compose.yml`, `server/`, `src/`, 체크리스트 문서 또는 PR 코멘트 | (a) 환자 CRUD/search (b) 같은 patientNo + 다른 injuryDate 복수 건 (c) stale PATCH 409 + conflict modal — **재현**: 탭 두 개 → 같은 환자 동시 수정 → 한 탭 저장 완료 후 다른 탭 push 시 409 + 충돌 모달 확인 (d) DELETE 성공/404/409 + pull 반영 (e) soft delete 후 기존/new workspace snapshot redaction (f) merge textarea fetch race — **재현**: DevTools Network에서 `GET /api/patients/:id` 응답을 Slow 3G로 throttle 후 conflict modal 열기 → 서버 fetch 완료 시점에 textarea 내용이 초기화되지 않는지 확인 (g) **remote-delete conflict**: PC A에서 환자 서버 저장 후 PC B에서 해당 환자 dirty 상태로 수정 → 서버에서 DELETE 후 PC B에서 pull → `remote-delete` conflict 표시 + 충돌 모달에서 "Use Local"(새 ID 재등록) 또는 "Accept Delete" 정상 동작 | T36~T39 | S |
 
 ### Phase 4 — 보안/감사 강화 (통합 브랜치 계속)
 | ID | 작업 | 영향 | 검증 | deps | 규모 |
@@ -413,6 +506,96 @@ main (v4.2.1 → v4.2.x 핫픽스만)
 |---|---|---|---|---|---|
 | T42 | `LocalToServerMigrator`: localStorage 4개 키(presets 제외) → POST /api/patients (Idempotency-Key=local id) | `src/core/services/localToServerMigrator.js`, 진입점 hook | 로컬 환자 5명 → 인트라넷 전환 → 서버 5명 + 재실행 중복 없음 | T36, T28 | M |
 | T43 | 마이그레이션 결과 리포트 모달 + 실패 보류 큐 + **presets 로컬 보존 안내 강화**: "직업 프리셋은 이 PC에만 저장됩니다. 다른 PC에서도 사용하려면 [프리셋 export] 후 새 PC에서 [import] 하세요" 명시 + export/import 버튼 링크. **운영 모드 settings에 "프리셋 로컬 저장 허용" 플래그를 명시적으로 표시** (운영 정책상 환자 PHI는 아니지만 사용자 업무 데이터가 PC에 남는다는 사실을 정보보안팀이 인지하도록) | `src/core/components/MigrationReportModal.jsx`, `src/core/components/SettingsModal.jsx` | 부분 실패 시나리오 + presets 안내 + export/import 동선 + Settings에 옵트인 표시 | T42 | S |
+| T43b | **서버 기반 사용자 정의 직업 프리셋 동기화**: `custom_presets` 테이블/API를 추가하여 로그인한 사용자가 어느 PC에서 접속해도 같은 사용자 정의 프리셋을 사용할 수 있게 한다. 기본 범위는 `private`(개인 프리셋)로 시작하고, 조직 공유는 `visibility='organization'`로 확장 가능하게 설계한다. 프리셋은 PHI가 아니지만 사용자가 환자명/사업장 식별 정보를 입력할 가능성이 있으므로 `organization_id` 격리, owner 권한, 생성/수정/삭제 audit, UI 경고 문구를 포함한다. 기존 export/import는 백업·수동 이관용으로 유지한다. | `server/migrations/0010_custom_presets.sql`, `server/src/routes/presets.ts`, `shared/contracts/preset.ts`, `src/core/services/presetRepository.js`, `src/core/hooks/usePresetManagement.js`, `src/core/components/PresetManageModal.jsx`, `src/core/components/PresetBrowseModal.jsx` | (a) 개인 프리셋 생성 후 다른 PC/브라우저 로그인 시 조회 가능 (b) 다른 조직 사용자는 조회 불가 (c) 수정/삭제 권한과 revision 충돌 검증 (d) create/update/delete audit 기록 (e) 서버 장애 시 fail-closed 또는 명시적 로컬 fallback 정책 확인 (f) export/import와 서버 프리셋 중복 병합 정책 검증 | T43, T14, T28 | M |
+
+| T43c | **관리자 콘솔 + 계정 관리 UI**: 운영자가 DevTools/psql 없이 앱 안에서 audit, device, user를 확인·관리할 수 있게 한다. 상단 계정 메뉴에 현재 사용자/역할 표시, `관리자 콘솔`, `비밀번호 변경`, `로그아웃` 액션을 추가한다. 관리자 콘솔은 `감사 로그`, `기기 승인`, `사용자 계정` 탭으로 구성한다. 감사 로그 탭은 `/api/admin/audit` 목록/필터/페이지 이동, 기기 탭은 `/api/admin/devices` 목록과 approve/revoke, 사용자 탭은 `/api/admin/users` 목록·생성·비밀번호 초기화·활성/비활성화를 제공한다. 모든 관리자 mutating API는 admin role + CSRF를 요구하고, 비밀번호 값은 audit/로그에 기록하지 않는다. | `src/core/components/AdminConsoleModal.jsx`, `src/core/components/MainHeader.jsx`, `src/App.jsx`, `server/src/routes/admin.ts`, `src/index.css` | (a) admin만 관리자 콘솔 버튼 표시/접근 가능 (b) doctor/staff는 `/api/admin/*` 403 (c) audit log 조회 후 `admin_audit_view` 기록 (d) pending device 승인/철회 UI 동작 + `device_approve`/`device_revoke` audit (e) 사용자 생성 후 첫 로그인 시 `must_change_password` 강제 (f) 로그아웃/비밀번호 변경 버튼 동작 | T23, T28, T34, T43b | M |
+| T43d | **T43c 리뷰 보강(운영 보안 hardening)**: admin 비밀번호 초기화 시 대상 사용자의 기존 세션을 모두 무효화하여 이미 로그인된 브라우저/기기가 계속 API를 쓰지 못하게 한다. admin 사용자 생성/비밀번호 초기화의 임시 비밀번호에도 일반 비밀번호 변경과 같은 `checkPasswordPolicy()`(최소 10자 + 문자/숫자/특수문자)를 적용한다. 사용자 관리 API 테스트를 추가하여 권한/CSRF/audit/조직 scope/중복 loginId/자가 비활성화 방지/세션 revoke를 자동 검증한다. 추후 필요 시 이름/role 수정용 `PATCH /api/admin/users/:id`를 별도 소작업으로 추가한다. | `server/src/routes/admin.ts`, `server/src/auth/passwordPolicy.ts`, `server/src/routes/__tests__/admin.test.ts`, 필요 시 `src/core/components/AdminConsoleModal.jsx` | (a) reset-password 후 기존 access/refresh 세션으로 `/api/auth/me` 또는 protected API가 401 (b) 약한 임시 비밀번호는 create/reset 모두 400 `PASSWORD_POLICY_VIOLATION` (c) create/list/reset/disable/enable admin success + non-admin 403 + CSRF 실패 테스트 (d) `admin_user_create/reset_password/disable/enable` audit 기록 (e) self disable 400 유지 | T43c | S |
+| T43e | **로그인 화면 계정 신청 + 관리자 승인 흐름**: 일반 사용자가 로그인 화면에서 직접 계정을 신청할 수 있게 하되, 승인 전에는 실제 로그인 계정을 만들지 않는다. 로그인 모달에 `계정 신청` 버튼을 추가하고 신청 모달에서 로그인 ID, 이름, 요청 역할(의사/간호사/직원), 부서/비고를 입력받는다. 서버는 이를 `pending` 상태의 가입 요청으로 저장하고, 관리자는 관리자 콘솔의 `가입 요청` 탭에서 요청을 확인한 뒤 승인 또는 거절한다. 승인 시 관리자가 임시 비밀번호를 지정하고 실제 `users` row를 생성하며 `must_change_password=true`로 첫 로그인 비밀번호 변경을 강제한다. 거절/승인/중복 신청/승인 계정 생성은 모두 audit log에 기록한다. | `server/migrations/00xx_user_signup_requests.sql`, `server/src/routes/auth.ts`, `server/src/routes/admin.ts`, `src/core/components/LoginModal.jsx`, `src/core/components/SignupRequestModal.jsx`, `src/core/components/AdminConsoleModal.jsx`, `src/index.css` | (a) 비로그인 상태에서 신청 가능하나 로그인은 불가 (b) 이미 존재하는 loginId 또는 pending loginId는 중복 신청 409 (c) 신청 API는 rate limit 적용 (d) admin만 pending 목록 조회/승인/거절 가능, 일반 사용자는 403 (e) 승인 시 사용자가 임시 비밀번호로 로그인 가능하고 첫 로그인에서 비밀번호 변경 강제 (f) 거절된 신청은 로그인 불가 (g) `signup_request_create/approve/reject`, `admin_user_create` audit 기록 | T43c, T43d | M |
+
+| T43f | ✅ **완료** — **담당의 기반 환자 목록 필터링 + 배정 관리** (Codex 4회 리뷰 반영): `owner_user_id`(작성자)와 분리된 `assigned_doctor_user_id` 컬럼을 신규 추가(`0014_assigned_doctor.sql`, 기존 doctor 소유 환자 backfill). `resolveAssignedDoctor()` 공유 헬퍼(`server/src/db/resolveAssignedDoctor.ts`)로 이름→user 매칭 일원화(0매치/중복매치 시 warning 반환). `GET /api/patients?scope=mine\|all` 지원, 기본 `mine`. `POST /api/patients/:id/assignment`(admin 전용)으로 담당의 변경 + `patient_assignment_change` audit + `payload.shared.doctorName` 자동 동기화. 이름 매칭 실패 warning은 `toResponse()`에서 `assigned_doctor_user_id=null` + payload doctorName 존재 시 `DOCTOR_NAME_UNRESOLVED`로 재구성해 GET 응답마다 tooltip 유지. workspace upsert도 `resolveAssignedDoctor` 경유 + `COALESCE`로 기존 배정 보존. 프론트: "내 담당/전체" 토글, "타 담당" 배지, "미배정" 배지(warning tooltip), `reconcilePulledPatients`에 `authoritativeDeletes` 옵션 추가(scope=mine: synced 제거·dirty·conflict 보존, 삭제 오판 방지). | `server/migrations/0014_assigned_doctor.sql`(신규), `server/src/db/resolveAssignedDoctor.ts`(신규), `server/src/routes/patients.ts`, `server/src/routes/workspaces.ts`, `shared/contracts/patient.ts`, `src/core/hooks/usePatientSync.js`, `src/core/hooks/__tests__/usePatientSync.test.js`, `src/App.jsx`, `src/core/components/PatientSidebar.jsx`, `src/index.css`, `server/src/routes/__tests__/patients.test.ts`, `server/src/routes/__tests__/workspaces.test.ts` | (a) 인트라넷 기본 목록이 `assigned_doctor_user_id` 기준 내 담당 환자만 표시 (b) "전체" 전환 시 "타 담당" 배지·"미배정" 배지 표시 (c) 미배정 배지 tooltip에 이름 매칭 실패 이유 표시, 새로고침 후에도 유지 (d) scope=mine 전환 시 타 담당 synced 환자 제거, dirty/conflict 환자 보존 (e) admin이 assignment 변경 → payload doctorName 동기화 + audit (f) workspace 일괄 업로드/마이그레이션도 `resolveAssignedDoctor` 경유, 기존 배정 COALESCE 보존 (g) 비-admin assignment 시도 403 | T43e | M ✅ |
+
+| T43f-fix | ✅ **완료** — **payload doctorName 기반 backfill migration** (`0015_backfill_assigned_doctor_from_payload.sql`): `0014_assigned_doctor.sql`의 기존 backfill은 `owner_user_id`가 doctor인 경우만 처리하여, admin/staff가 생성한 환자 중 `payload.data.shared.doctorName`이 있어도 `assigned_doctor_user_id`가 NULL로 남는 문제 발견(T43g 테스트 중). 0015에서 `assigned_doctor_user_id IS NULL` + doctorName 비어있지 않음 조건 환자에 대해, 동일 조직의 활성 doctor 중 이름이 **정확히 1명만** 매칭되는 경우에만 FK를 채운다. 동명이인(2+ 매칭)·미매칭(0건)은 자동 배정하지 않고 `DOCTOR_NAME_UNRESOLVED` warning 대상으로 남김. payload는 건드리지 않음. | `server/migrations/0015_backfill_assigned_doctor_from_payload.sql`(신규) | (a) doctorName 1명 매칭 → `assigned_doctor_user_id` 채워짐 (b) 동명이인 → NULL 유지 (c) doctorName 없음 → NULL 유지 (d) `deleted_at NOT NULL` 환자 미처리 (e) `disabled_at` doctor 제외 (f) 개발 DB 적용 후 미배정 21→0건 확인 | T43f | XS ✅ |
+
+| T43g | **담당의 배정 실패 알림 UI (T43g)**: Excel 일괄입력·마이그레이션·동기화 과정에서 발생한 담당의 자동 배정 실패를 사용자가 놓치지 않도록 한다. ① `PatientSidebar` 목록 상단에 "담당의 배정이 필요한 환자 N건" 요약 배너 추가(scope=mine이면 "전체 보기에서 확인", scope=all이면 "미배정 배지를 확인" 안내). ② "미배정" 배지에 warning이 있을 때(`sync.assignmentWarnings` 존재)와 없을 때(`assignedDoctorUserId=null`이지만 warning 없음)를 CSS 클래스로 구분해 시각 강조. ③ tooltip에 각 warning 메시지 줄바꿈 표시 + "관리자 콘솔에서 담당의를 배정하세요" 안내 추가. ④ Excel 일괄입력(`BatchImportModal`) 완료 후 배정 실패 건수를 결과 요약에 포함. Excel row-level preview(각 행 배정 상태 표시)는 T43h로 분리. | `src/core/components/PatientSidebar.jsx`, `src/core/components/__tests__/PatientSidebar.test.js`, `src/core/components/BatchImportModal.jsx`, `src/index.css` | (a) scope=mine에서 미배정 환자 존재 시 요약 배너 표시 + "전체 보기에서 확인" 문구 (b) scope=all에서 warning 있는 미배정 배지가 warning 없는 미배정 배지와 시각적으로 구분됨 (c) tooltip에 warning message + 관리자 콘솔 안내 포함 (d) Excel import 후 결과 요약에 "N건 담당의 미배정" 표시 (e) 신규 테스트 통과 | T43f | S |
+
+| T43i | ✅ **완료** — **담당의 배정 UI 정리**: 인트라넷 모드에서 기본정보 탭의 담당의 필드를 read-only 표시 전용으로 변경(`.readonly-field` + 안내 문구). 담당의 수정은 관리자 콘솔 → 환자 배정 탭에서만 가능하도록 정책 일원화. Settings의 "의사명 기본값" 입력 항목을 인트라넷 모드에서 숨김(로컬 모드는 유지). 관리자 콘솔에 "환자 배정" 탭(`PatientAssignmentTab`) 신규 추가 — `/api/admin/users`에서 의사 목록 로드, `/api/patients?scope=all`에서 전체 환자 로드, 환자 행마다 현재 담당의 표시 + 의사 select + 변경 버튼(`POST /api/patients/:id/assignment` 호출). | `src/core/components/BasicInfoForm.jsx`, `src/core/components/StepContent.jsx`, `src/App.jsx`, `src/core/components/SettingsModal.jsx`, `src/core/components/AdminConsoleModal.jsx`, `src/index.css` | (a) 인트라넷 모드 기본정보 탭에서 담당의 필드가 read-only div로 표시됨 (b) 로컬 모드에서는 기존 input 유지 (c) 인트라넷 모드 Settings에 의사명 입력 항목 미표시 (d) 관리자 콘솔 "환자 배정" 탭에서 의사 선택 후 변경 버튼 동작 (e) 미배정 환자는 "미배정" 배지로 구분 표시 | T43g | S ✅ |
+
+| T43h | **Excel 일괄입력 담당의 사전 검증 (row-level preview)**: BatchImportModal에서 파일 파싱 후 "가져오기" 버튼 클릭 전에, 각 행의 담당의 이름이 실제 배정될지 미리 보여준다. 실무에서 "김철수", "김철수 과장", "Kim", 동명이인 등 이름 표기 불일치가 흔하므로, 가져오기 전에 문제를 발견·수정할 수 있게 한다. **구현 방식**: 서버에 `POST /api/patients/assignment-preview` 엔드포인트 추가. 요청: `{ doctorNames: string[] }` (중복 제거한 고유 이름 목록). 응답: 각 이름에 대해 `{ doctorName, status: "matched"|"not_found"|"ambiguous"|"empty", userId?, displayName? }`. BatchImportModal은 파싱 완료 후 unique doctorName만 서버로 보내고, 미리보기 테이블 각 행에 결과(✓ 매칭됨 / ✗ 의사 계정 없음 / ⚠ 동명이인 / — 미입력)를 표시한다. 서버 배정 정책(`resolveAssignedDoctor`)과 preview가 동일한 로직을 쓰므로 불일치 없음. | `server/src/routes/patients.ts` (`POST /api/patients/assignment-preview`), `src/core/components/BatchImportModal.jsx`, `server/src/routes/__tests__/patients.test.ts` | (a) 파일 업로드 후 미리보기 테이블에 각 행의 담당의 배정 상태 표시 (b) status=matched: 의사 userId + 이름 표시 (c) status=not_found: 경고 표시 (d) status=ambiguous: 동명이인 경고 표시 (e) status=empty: 미입력 표시 (f) 가져오기 클릭 전에 문제 행을 확인하고 Excel 수정 가능한 UX (g) assignment-preview API는 읽기 전용, audit 불필요 | T43g | S |
+
+### Phase 5.5 — Staging / 실제 서버 이전 리허설 (운영 전환 전)
+| ID | 작업 | 영향 | 검증 | deps | 규모 |
+|---|---|---|---|---|---|
+| T44 | **Staging 배포 리허설**: 개발 PC 통합테스트 통과 후 실제 서버와 동일한 Docker Compose/Caddy/Postgres 구성으로 staging 배포. 실제 환자 PHI 사용 금지, 비식별 샘플 데이터만 사용 | `docker-compose.yml`, `server/Dockerfile`, `caddy/Caddyfile`, `.env.staging`, 배포 runbook | staging URL 접속, `/api/config/public`, login, 환자 CRUD, workspace, autosave, audit 기본 흐름 통과 | T40~T43 | M |
+| T45 | **운영 인프라 검증**: 내부 CA 설치, Caddy HTTPS, Postgres volume, 백업/복구, audit reader role, admin seed, device approval, Electron intranet build 접속, fail-closed 동작 확인 | `docs/INTRANET_DEPLOYMENT.md`, `docs/BACKUP_RESTORE.md`, `scripts/backup.sh`, `scripts/restore.sh`, Electron intranet build | CA 미설치/설치 PC 동작 차이, 백업 후 별도 DB 복구, audit reader 권한, device approve/revoke, 서버 중단 시 저장 차단 확인 | T44 | M |
+| T46 | **Production 전환 준비**: staging DB를 production으로 승격하지 않고 production DB/volume을 새로 구성. 운영 전환 일정, rollback 절차, 초기 admin/device 승인 절차 확정 | 운영 전환 체크리스트, `.env.production`, 빈 production volume | 빈 production DB migrate → seed admin → smoke test → rollback 절차 리허설 | T45 | S |
+
+#### Phase 5.5 오프라인 인트라넷 배포 패키지 상세
+인트라넷 서버 PC가 인터넷에 연결되지 않는다는 전제를 명시한다. 운영 서버에서는 `npm install`, `docker pull`, 패키지 다운로드, Let's Encrypt 인증서 발급을 수행하지 않는다. 인터넷이 되는 개발/준비 PC에서 필요한 산출물을 모두 만든 뒤 USB/외장 SSD/내부 보안 반입 절차로 서버에 옮긴다.
+
+**A. 인터넷 되는 개발/준비 PC에서 만드는 산출물**
+- 애플리케이션 Docker image: `wr-evaluation-unified-app` 이미지를 build한 뒤 `docker save`로 `.tar` 파일 생성.
+- 기반 Docker image: `postgres`, `caddy`, partition/cron sidecar 등 compose가 사용하는 모든 image를 `docker save`로 `.tar` 파일 생성.
+- Compose/설정 파일: `docker-compose.yml`, `caddy/Caddyfile`, `.env.production.example`, 실제 서버용 `.env.production` 초안.
+- DB schema: `server/migrations/` 전체와 migration runner가 포함된 app image.
+- 운영 스크립트: 백업/복구 스크립트, 파티션 생성 스크립트, 로그/상태 확인 스크립트.
+- 인증서 파일: 병원 내부 CA 또는 self-signed CA의 루트 인증서(`rootCA.crt`)와 서버 인증서/키(`server.crt`, `server.key`). 서버 private key는 별도 암호화 저장/반입 권장.
+- Electron intranet installer: `electron:build:intranet` 산출물. 사용자 PC 설치용.
+- 배포 runbook: 아래 B~G 절차를 그대로 따라 할 수 있는 문서. 명령어, 예상 출력, 실패 시 되돌리기 절차 포함.
+
+**B. 오프라인 반입 전 체크**
+- `.env.production` 안의 비밀값(`JWT secret`, DB 비밀번호 등)은 staging 값과 다르게 새로 생성한다.
+- staging DB/volume은 절대 production으로 복사하지 않는다.
+- Docker image `.tar` 파일 목록과 버전을 문서화한다.
+- USB/외장 SSD 반입은 병원 보안 정책에 맞게 승인받는다.
+- 서버 PC의 Docker Desktop 또는 Docker Engine은 사전에 설치되어 있어야 한다. Docker 자체 설치 파일도 인터넷 PC에서 받아 반입해야 할 수 있다.
+
+**C. 인트라넷 서버 PC에서 최초 설치**
+- 반입한 Docker image를 모두 load한다: `docker load -i <image>.tar`.
+- production 작업 폴더를 만든다. 예: `C:\wr-evaluation-unified-prod`.
+- `docker-compose.yml`, `.env.production`, `caddy/`, `scripts/`, 인증서 파일을 production 폴더에 배치한다.
+- Docker volume 이름을 production 전용으로 지정한다. staging volume과 이름이 겹치면 안 된다.
+- `docker compose --env-file .env.production up -d`로 최초 기동한다.
+- app 컨테이너 로그에서 migration 성공 여부를 확인한다.
+
+**D. 빈 production DB 초기화**
+- production은 빈 Postgres volume에서 시작한다.
+- app 시작 시 migration runner가 `server/migrations/`를 순서대로 적용해야 한다.
+- migration 실패 시 운영을 시작하지 않는다. 컨테이너 로그와 migration 번호를 확인하고, 빈 volume을 폐기한 뒤 원인을 수정해 다시 초기화한다.
+- schema 확인 쿼리 예: `organizations`, `users`, `patient_persons`, `patient_records`, `workspaces`, `autosaves`, `audit_logs`, `custom_presets` 테이블 존재 여부 확인.
+
+**E. 초기 admin / 조직 / 기기 승인**
+- app 컨테이너 안에서 admin seed를 실행한다: `npm run seed:admin`.
+- seed 입력값: 병원/조직명, admin login id, 임시 비밀번호.
+- 첫 admin 로그인 후 반드시 비밀번호 변경을 확인한다.
+- Electron intranet app을 사용자 PC에 설치하고 첫 실행 시 device registration을 수행한다.
+- admin 화면에서 pending device를 확인한 뒤 승인한다.
+- 승인 전 EMR 기능이 차단되고, 승인 후 정상 동작하는지 확인한다.
+
+**F. HTTPS / 인증서 검증**
+- 인터넷 없는 서버에서는 Let's Encrypt를 사용할 수 없다.
+- 병원 내부 CA가 있으면 내부 CA가 `wr.hospital.local` 같은 서버 도메인용 인증서를 발급한다.
+- 내부 CA가 없으면 self-signed root CA를 만들고, 그 CA로 서버 인증서를 직접 발급한다.
+- Caddy는 `server.crt`와 `server.key`를 사용해 HTTPS를 제공한다.
+- 사용자 PC에는 `rootCA.crt`를 "신뢰할 수 있는 루트 인증 기관"에 설치한다.
+- CA가 설치되지 않은 PC에서는 인증서 경고 또는 접속 실패가 나는 것이 정상이다. CA 설치 후 경고 없이 접속되어야 한다.
+
+**G. 백업/복구**
+- production DB는 매일 `pg_dump` 백업을 생성한다.
+- 백업 파일은 GPG 또는 병원 승인 방식으로 암호화한다.
+- 백업 위치는 서버 로컬 디스크만으로 충분하지 않다. 내부 NAS/파일서버/외장 매체 등 별도 위치가 필요하다.
+- 복구 리허설은 production DB가 아닌 별도 빈 DB/volume에서 수행한다.
+- 복구 리허설 결과: 테이블 수, 환자 샘플 수, workspace/autosave/audit 일부 조회, 로그인 가능 여부를 확인한다.
+
+**H. 최종 smoke test**
+- `/health`, `/api/config/public` 응답 확인.
+- admin 로그인/비밀번호 변경 확인.
+- 일반 사용자 로그인 확인.
+- 환자 생성/수정/삭제, 같은 patient no + 다른 재해일자 생성 확인.
+- workspace 저장/불러오기/삭제, autosave 확인.
+- custom preset 생성/수정/삭제, 다른 PC 로그인 후 조회 확인.
+- audit log 기록 확인.
+- 서버 중단 시 fail-closed 동작 확인.
+- Electron intranet build 접속, device 승인, EMR audit 기본 흐름 확인.
 
 ### 머지 게이트
 - **전제 조건 (T00에서 정의)**: root `package.json`에 `test`(vitest), `lint`(eslint), `typecheck`(tsc --noEmit), `build:web`(vite build), `electron:build`(현행) 스크립트 실재. server에는 `test`(vitest), `lint`, `typecheck` 실재.
@@ -424,3 +607,4 @@ main (v4.2.1 → v4.2.x 핫픽스만)
   - `npm run electron:build` (Phase 0/1) 또는 `electron:build:{standalone,intranet}` (Phase 2 이후, T35에서 정의)
   - `cd server && npm test && npm run lint && npm run typecheck`
 - 통합 브랜치 → main 머지 직전: 전체 검증 항목(위 "검증 방법") 수동 점검표.
+  - **CORS 전체 검증 필수**: `npm run verify:csp -- --url https://wr.hospital.local --origin https://wr.hospital.local` (`--origin` 없이 실행하면 허용 origin + preflight 검사가 skip됨)

@@ -132,8 +132,8 @@ export function PresetBrowseModal({ job, presets, onSelect, onDelete, onEdit, on
               <label>{"\uC18C\uC2A4"}</label>
               <select value={sourceFilter} onChange={e => setSourceFilter(e.target.value)}>
                 <option value="all">{"\uC804\uCCB4"}</option>
-                <option value="custom">custom</option>
-                <option value="builtin">builtin</option>
+                <option value="custom">{"\uB0B4 \uD504\uB9AC\uC14B"}</option>
+                <option value="builtin">{"\uAE30\uBCF8 \uD504\uB9AC\uC14B"}</option>
               </select>
             </div>
           </div>
@@ -182,7 +182,7 @@ export function PresetBrowseModal({ job, presets, onSelect, onDelete, onEdit, on
             )}
           </div>
           <div className="settings-inline-hint">
-            {"\uD604\uC7AC \uC9C1\uC885\uBA85\uACFC \uAC19\uC740 \uD504\uB9AC\uC14B, \uADF8 \uB2E4\uC74C custom \uD504\uB9AC\uC14B \uC21C\uC73C\uB85C \uC704\uC5D0 \uBC30\uCE58\uD569\uB2C8\uB2E4."}
+            {"\uD604\uC7AC \uC9C1\uC885\uBA85\uACFC \uAC19\uC740 \uD504\uB9AC\uC14B, \uADF8 \uB2E4\uC74C \uB0B4 \uD504\uB9AC\uC14B \uC21C\uC73C\uB85C \uC704\uC5D0 \uBC30\uCE58\uD569\uB2C8\uB2E4."}
           </div>
         </div>
 
@@ -209,7 +209,7 @@ export function PresetBrowseModal({ job, presets, onSelect, onDelete, onEdit, on
                         <span className="preset-list-name">{preset.jobName}</span>
                         <div className="preset-browse-badges">
                           {isExact && <span className="preset-badge">{"\uD604\uC7AC \uC9C1\uB825"}</span>}
-                          {isCustom && <span className="preset-custom-tag">custom</span>}
+                          {isCustom && <span className="preset-custom-tag">{"\uB0B4 \uD504\uB9AC\uC14B"}</span>}
                         </div>
                       </div>
                       <div className="preset-list-category">{getPresetCategory(preset)}</div>

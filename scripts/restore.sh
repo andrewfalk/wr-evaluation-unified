@@ -17,6 +17,8 @@
 #   PGPASSWORD   — PostgreSQL password
 #   PGDATABASE   — Database name (default: wr_evaluation)
 #   RESTORE_AUTH_TICKET — Authorization ticket number (mandatory)
+#   GPG_PASSPHRASE      — (optional) passphrase for the private key.
+#                         Leave unset when using a passphrase-free restore key (recommended).
 #
 # Required tools: gpg (with private key imported), pg_restore
 
@@ -59,7 +61,13 @@ trap 'rm -f "${DUMP_TMP}"' EXIT
 # 1. GPG decrypt
 # ---------------------------------------------------------------------------
 echo "[restore] Decrypting ${BACKUP_FILE} ..."
-gpg --batch --decrypt --output "${DUMP_TMP}" "${BACKUP_FILE}"
+if [ -n "${GPG_PASSPHRASE:-}" ]; then
+  printf '%s' "${GPG_PASSPHRASE}" | \
+    gpg --batch --pinentry-mode loopback --passphrase-fd 0 \
+        --decrypt --output "${DUMP_TMP}" "${BACKUP_FILE}"
+else
+  gpg --batch --decrypt --output "${DUMP_TMP}" "${BACKUP_FILE}"
+fi
 echo "[restore] Decryption complete ($(du -sh "${DUMP_TMP}" | cut -f1))"
 
 # ---------------------------------------------------------------------------

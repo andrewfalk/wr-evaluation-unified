@@ -21,8 +21,8 @@ export function corsMiddleware(): RequestHandler {
   const corsHandler = cors({
     origin: true, // actual enforcement done in the guard below; cors just reflects
     credentials:    true,
-    methods:        ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-csrf-token'],
+    methods:        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-csrf-token', 'If-Match', 'Idempotency-Key'],
   });
 
   return (req: Request, res: Response, next: NextFunction): void => {

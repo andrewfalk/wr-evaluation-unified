@@ -35,6 +35,7 @@ export function useAIAnalysis() {
 
       const text = data?.content?.[0]?.text
         || data?.candidates?.[0]?.content?.parts?.[0]?.text
+        || data?.text
         || '';
 
       setResult(text);

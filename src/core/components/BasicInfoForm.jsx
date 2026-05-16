@@ -17,6 +17,7 @@ export function BasicInfoForm({
   onSavePreset,
   onBrowsePreset,
   activeModules,
+  session,
 }) {
   const handleInput = (field, value) => {
     onChange({ ...shared, [field]: value });
@@ -282,7 +283,7 @@ function AutoResizeTextarea({ value, onChange, placeholder, maxHeight = '50vh' }
   );
 }
 
-export function BasicInfoSidePanel({ shared, onChange }) {
+export function BasicInfoSidePanel({ shared, onChange, session }) {
   const handleInput = (field, value) => {
     onChange({ ...shared, [field]: value });
   };
@@ -446,7 +447,14 @@ export function BasicInfoSidePanel({ shared, onChange }) {
         <div className="form-row">
           <div className="form-group">
             <label>담당의</label>
-            <input value={shared.doctorName} onChange={e => handleInput('doctorName', e.target.value)} />
+            {session?.mode === 'intranet' ? (
+              <>
+                <div className="readonly-field">{shared.doctorName || '미배정'}</div>
+                <div className="form-hint">인트라넷 모드에서는 관리자 콘솔에서 담당의를 배정합니다.</div>
+              </>
+            ) : (
+              <input value={shared.doctorName} onChange={e => handleInput('doctorName', e.target.value)} />
+            )}
           </div>
         </div>
       </section>

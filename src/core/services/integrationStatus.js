@@ -19,6 +19,10 @@ function buildSessionInfo(context = {}) {
   };
 }
 
+function getContextBaseUrl(context = {}) {
+  return normalizeBaseUrl(context?.session?.apiBaseUrl || context?.settings?.apiBaseUrl || '');
+}
+
 function createBaseStatus() {
   return {
     mode: 'local',
@@ -37,6 +41,7 @@ function createBaseStatus() {
     },
     mockDetails: null,
     remoteDetails: null,
+    meDetails: null,
   };
 }
 
@@ -63,7 +68,7 @@ function buildStatus(overrides = {}) {
 }
 
 function createLocalStatus(context = {}, overrides = {}) {
-  const baseUrl = normalizeBaseUrl(context?.settings?.apiBaseUrl || context?.session?.apiBaseUrl || '');
+  const baseUrl = getContextBaseUrl(context);
   return buildStatus({
     mode: 'local',
     activeStore: 'local',
@@ -82,7 +87,7 @@ function createLocalStatus(context = {}, overrides = {}) {
 }
 
 function createCheckingStatus(context = {}, overrides = {}) {
-  const baseUrl = normalizeBaseUrl(context?.settings?.apiBaseUrl || context?.session?.apiBaseUrl || '');
+  const baseUrl = getContextBaseUrl(context);
   return buildStatus({
     mode: 'intranet',
     activeStore: 'checking',
@@ -103,10 +108,11 @@ function createCheckingStatus(context = {}, overrides = {}) {
 }
 
 function createRemoteStatus(context = {}, overrides = {}) {
-  const baseUrl = normalizeBaseUrl(context?.settings?.apiBaseUrl || context?.session?.apiBaseUrl || '');
+  const baseUrl = getContextBaseUrl(context);
   const mock = overrides?.mock ?? context?.mock ?? (currentStatus.baseUrl === baseUrl ? currentStatus.mock : false);
-  const hasMockDetails = Object.prototype.hasOwnProperty.call(overrides, 'mockDetails');
-  const hasRemoteDetails = Object.prototype.hasOwnProperty.call(overrides, 'remoteDetails');
+  const hasMockDetails    = Object.prototype.hasOwnProperty.call(overrides, 'mockDetails');
+  const hasRemoteDetails  = Object.prototype.hasOwnProperty.call(overrides, 'remoteDetails');
+  const hasMeDetails      = Object.prototype.hasOwnProperty.call(overrides, 'meDetails');
   const sameTarget = currentStatus.baseUrl === baseUrl && currentStatus.mock === mock;
   return buildStatus({
     mode: 'intranet',
@@ -121,14 +127,15 @@ function createRemoteStatus(context = {}, overrides = {}) {
     lastCheckedAt: new Date().toISOString(),
     lastError: null,
     sessionInfo: buildSessionInfo(context),
-    mockDetails: hasMockDetails ? overrides.mockDetails : (sameTarget ? currentStatus.mockDetails : null),
-    remoteDetails: hasRemoteDetails ? overrides.remoteDetails : (sameTarget ? currentStatus.remoteDetails : null),
+    mockDetails:    hasMockDetails   ? overrides.mockDetails   : (sameTarget ? currentStatus.mockDetails   : null),
+    remoteDetails:  hasRemoteDetails ? overrides.remoteDetails : (sameTarget ? currentStatus.remoteDetails : null),
+    meDetails:      hasMeDetails     ? overrides.meDetails     : (sameTarget ? currentStatus.meDetails     : null),
     ...overrides,
   });
 }
 
 function createFallbackStatus(error, context = {}, overrides = {}) {
-  const baseUrl = normalizeBaseUrl(context?.settings?.apiBaseUrl || context?.session?.apiBaseUrl || '');
+  const baseUrl = getContextBaseUrl(context);
   return buildStatus({
     mode: 'intranet',
     activeStore: 'fallback',
@@ -167,6 +174,15 @@ function extractRemoteDetails(workspaces = []) {
   };
 }
 
+function extractMeDetails(data = {}) {
+  return {
+    userName:     data?.user?.name     || null,
+    userRole:     data?.user?.role     || null,
+    orgName:      data?.org?.name      || null,
+    capabilities: data?.capabilities   || null,
+  };
+}
+
 export function getIntegrationStatus() {
   return currentStatus;
 }
@@ -199,7 +215,7 @@ export async function inspectIntegrationStatus(context = {}) {
 
   try {
     const mockStatus = await requestJson('/api/mock/status', {
-      baseUrl: context?.settings?.apiBaseUrl || context?.session?.apiBaseUrl || '',
+      baseUrl: getContextBaseUrl(context),
       session: context?.session,
     });
 
@@ -217,23 +233,31 @@ export async function inspectIntegrationStatus(context = {}) {
     }
   }
 
+  // /api/auth/me is the primary check: confirms auth works and exposes capabilities.
+  const baseUrl = getContextBaseUrl(context);
+  let meData = null;
   try {
-    const data = await requestJson('/api/workspaces', {
-      baseUrl: context?.settings?.apiBaseUrl || context?.session?.apiBaseUrl || '',
-      session: context?.session,
-    });
-
-    return createRemoteStatus(
-      { ...context, source: context?.source || 'inspect', mock: false },
-      {
-        mock: false,
-        mockDetails: null,
-        remoteDetails: extractRemoteDetails(data?.items || []),
-      }
-    );
+    meData = await requestJson('/api/auth/me', { baseUrl, session: context?.session });
   } catch (error) {
     return createFallbackStatus(error, { ...context, source: context?.source || 'inspect' });
   }
+
+  // /api/workspaces for workspace count — not fatal if unavailable.
+  let workspaces = [];
+  try {
+    const wsData = await requestJson('/api/workspaces', { baseUrl, session: context?.session });
+    workspaces = wsData?.items || [];
+  } catch { /* non-fatal */ }
+
+  return createRemoteStatus(
+    { ...context, source: context?.source || 'inspect', mock: false },
+    {
+      mock: false,
+      mockDetails: null,
+      remoteDetails: extractRemoteDetails(workspaces),
+      meDetails: extractMeDetails(meData),
+    }
+  );
 }
 
 export async function probeIntegrationStatus(context = {}) {

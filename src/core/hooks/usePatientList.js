@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { isPatientComplete } from '../utils/patientCompletion';
+import { isRedactedPatientRecord } from '../services/patientRecords';
 
 const DEFAULT_FILTERS = {
   searchQuery: '',
@@ -58,67 +59,69 @@ function comparePatients(a, b, sortKey) {
   return 0;
 }
 
+export function filterPatients(patients, filters = DEFAULT_FILTERS) {
+  const {
+    searchQuery = '',
+    statusFilter = 'all',
+    moduleFilter = 'all',
+    jobFilter = 'all',
+    registrationFrom = '',
+    registrationTo = '',
+    completionFrom = '',
+    completionTo = '',
+    sortKey = 'default',
+    sortDirection = 'asc',
+  } = filters || {};
+
+  let list = (patients || []).filter(patient => !isRedactedPatientRecord(patient));
+
+  if (searchQuery.trim()) {
+    const q = searchQuery.trim().toLowerCase();
+    list = list.filter(p => {
+      const shared = getShared(p);
+      const diagnoses = shared.diagnoses || [];
+      const jobs = shared.jobs || [];
+
+      return includesQuery(shared.name, q)
+        || includesQuery(shared.patientNo, q)
+        || diagnoses.some(d => includesQuery(d.name, q) || includesQuery(d.code, q))
+        || jobs.some(j => includesQuery(j.jobName, q));
+    });
+  }
+
+  if (statusFilter === 'complete') {
+    list = list.filter(p => isPatientComplete(p));
+  } else if (statusFilter === 'incomplete') {
+    list = list.filter(p => !isPatientComplete(p));
+  }
+
+  if (moduleFilter !== 'all') {
+    list = list.filter(p => (p.data?.activeModules || []).includes(moduleFilter));
+  }
+
+  if (jobFilter.trim()) {
+    const jq = jobFilter.trim().toLowerCase();
+    list = list.filter(p => (getShared(p).jobs || []).some(job => includesQuery(job.jobName, jq)));
+  }
+
+  if (registrationFrom || registrationTo) {
+    list = list.filter(p => inDateRange(getRegistrationDate(p), registrationFrom, registrationTo));
+  }
+
+  if (completionFrom || completionTo) {
+    list = list.filter(p => inDateRange(getShared(p).evaluationDate || '', completionFrom, completionTo));
+  }
+
+  if (sortKey === 'default') {
+    if (sortDirection === 'desc') list = [...list].reverse();
+  } else {
+    const direction = sortDirection === 'desc' ? -1 : 1;
+    list = [...list].sort((a, b) => comparePatients(a, b, sortKey) * direction);
+  }
+
+  return list;
+}
+
 export function usePatientList(patients, filters = DEFAULT_FILTERS) {
-  return useMemo(() => {
-    const {
-      searchQuery = '',
-      statusFilter = 'all',
-      moduleFilter = 'all',
-      jobFilter = 'all',
-      registrationFrom = '',
-      registrationTo = '',
-      completionFrom = '',
-      completionTo = '',
-      sortKey = 'default',
-      sortDirection = 'asc',
-    } = filters || {};
-
-    let list = patients;
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      list = list.filter(p => {
-        const shared = getShared(p);
-        const diagnoses = shared.diagnoses || [];
-        const jobs = shared.jobs || [];
-
-        return includesQuery(shared.name, q)
-          || includesQuery(shared.patientNo, q)
-          || diagnoses.some(d => includesQuery(d.name, q) || includesQuery(d.code, q))
-          || jobs.some(j => includesQuery(j.jobName, q));
-      });
-    }
-
-    if (statusFilter === 'complete') {
-      list = list.filter(p => isPatientComplete(p));
-    } else if (statusFilter === 'incomplete') {
-      list = list.filter(p => !isPatientComplete(p));
-    }
-
-    if (moduleFilter !== 'all') {
-      list = list.filter(p => (p.data?.activeModules || []).includes(moduleFilter));
-    }
-
-    if (jobFilter.trim()) {
-      const jq = jobFilter.trim().toLowerCase();
-      list = list.filter(p => (getShared(p).jobs || []).some(job => includesQuery(job.jobName, jq)));
-    }
-
-    if (registrationFrom || registrationTo) {
-      list = list.filter(p => inDateRange(getRegistrationDate(p), registrationFrom, registrationTo));
-    }
-
-    if (completionFrom || completionTo) {
-      list = list.filter(p => inDateRange(getShared(p).evaluationDate || '', completionFrom, completionTo));
-    }
-
-    if (sortKey === 'default') {
-      if (sortDirection === 'desc') list = [...list].reverse();
-    } else {
-      const direction = sortDirection === 'desc' ? -1 : 1;
-      list = [...list].sort((a, b) => comparePatients(a, b, sortKey) * direction);
-    }
-
-    return list;
-  }, [patients, filters]);
+  return useMemo(() => filterPatients(patients, filters), [patients, filters]);
 }

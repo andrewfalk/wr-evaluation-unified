@@ -13,15 +13,21 @@ import { createDevicesRouter } from './routes/devices';
 import { createAdminRouter } from './routes/admin';
 import { createAuditRouter } from './routes/audit';
 import { createWorkspacesRouter } from './routes/workspaces';
+import { createPatientsRouter } from './routes/patients';
 import { createAutosaveRouter } from './routes/autosave';
+import { createAIRouter } from './routes/ai';
+import { createPresetsRouter } from './routes/presets';
+import { createOpsStatusRouter } from './routes/opsStatus';
 import { cspMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
+import { runWorkspaceRetention } from './jobs/workspaceRetention';
 
 export const app = express();
+app.set('trust proxy', config.trustProxy);
 // Security headers first — applied to every response before any route runs.
 app.use(cspMiddleware());
 app.use(corsMiddleware());
-app.use(express.json());
+app.use(express.json({ limit: config.jsonBodyLimit }));
 app.use(cookieParser());
 
 app.get('/health', (_req, res) => {
@@ -32,9 +38,13 @@ app.use('/api/auth', createAuthRouter(pool));
 app.use('/api/config', createConfigRouter());
 app.use('/api/devices', createDevicesRouter(pool));
 app.use('/api/admin',      createAdminRouter(pool, auditPool));
+app.use('/api/admin/ops',  createOpsStatusRouter(pool));
 app.use('/api/audit',      createAuditRouter(pool));
 app.use('/api/workspaces', createWorkspacesRouter(pool));
+app.use('/api/patients',  createPatientsRouter(pool));
 app.use('/api/autosave',  createAutosaveRouter(pool));
+app.use('/api/ai',        createAIRouter(pool));
+app.use('/api/presets',   createPresetsRouter(pool));
 
 // ---------------------------------------------------------------------------
 // Static web SPA (dist/web/) — registered after API routes so API paths win.
@@ -53,7 +63,15 @@ if (fs.existsSync(WEB_DIR)) {
 // Global JSON error handler — keeps API responses consistent when middleware
 // calls next(err) (e.g. DB failures in auth middleware).
 // Must be registered after all routes and have exactly 4 parameters.
-app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+app.use((err: Error & { type?: string; limit?: number }, _req: Request, res: Response, _next: NextFunction) => {
+  if (err.type === 'entity.too.large') {
+    console.warn('[wr-server] request body too large', { limit: err.limit });
+    res.status(413).json({
+      code: 'PAYLOAD_TOO_LARGE',
+      error: 'Request body is too large',
+    });
+    return;
+  }
   console.error('[wr-server] unhandled error', err);
   res.status(500).json({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 });
@@ -66,6 +84,18 @@ if (require.main === module) {
       const server = createServer(app);
       server.listen(config.port, () => {
         console.log(`[wr-server] Listening on http://localhost:${config.port}`);
+
+        // Workspace retention: run once at startup, then every 24 hours.
+        // Errors are non-fatal — the server keeps running.
+        const doRetention = () => {
+          runWorkspaceRetention(pool)
+            .then(({ deleted }) => {
+              if (deleted > 0) console.log(`[wr-server] workspace-retention: removed ${deleted} expired workspace(s)`);
+            })
+            .catch((err) => console.error('[wr-server] workspace-retention error', err));
+        };
+        doRetention();
+        setInterval(doRetention, 24 * 60 * 60 * 1000).unref();
       });
     })
     .catch((err) => {

@@ -42,7 +42,7 @@ vi.mock('../../auth/passwordPolicy', () => ({
 import bcrypt from 'bcrypt';
 import { checkPasswordPolicy, isPasswordReused } from '../../auth/passwordPolicy';
 import { createAuthRouter } from '../auth';
-import { generateAccessToken } from '../../auth/tokens';
+import { generateAccessToken, verifyAccessToken } from '../../auth/tokens';
 import type { Pool, PoolClient } from 'pg';
 
 // ---------------------------------------------------------------------------
@@ -96,7 +96,15 @@ function wireSuccess(pool: Pool) {
   client.query
     .mockResolvedValueOnce({ rows: [{ password_hash: '$oldhash$', password_history: [] }] }) // SELECT
     .mockResolvedValueOnce({ rows: [] }) // BEGIN
-    .mockResolvedValueOnce({ rows: [] }) // UPDATE users
+    .mockResolvedValueOnce({
+      rows: [{
+        id:                   'user-1',
+        name:                 'Dr. Kim',
+        role:                 'doctor',
+        organization_id:      'org-1',
+        must_change_password: false,
+      }],
+    }) // UPDATE users RETURNING
     .mockResolvedValueOnce({ rows: [] }) // UPDATE sessions
     .mockResolvedValueOnce({ rows: [] }); // COMMIT
   return client;
@@ -203,6 +211,21 @@ describe('POST /api/auth/change-password', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
+    expect(res.body.user).toMatchObject({
+      id:                 'user-1',
+      name:               'Dr. Kim',
+      role:               'doctor',
+      organizationId:     'org-1',
+      mustChangePassword: false,
+    });
+    expect(typeof res.body.accessToken).toBe('string');
+    expect(typeof res.body.accessExpiresAt).toBe('string');
+
+    const decoded = verifyAccessToken(res.body.accessToken);
+    expect(decoded?.sub).toBe('user-1');
+    expect(decoded?.sessionId).toBe('sess-1');
+    expect(decoded?.orgId).toBe('org-1');
+    expect(decoded?.mustChangePassword).toBe(false);
 
     // Verify COMMIT was called
     const calls = client.query.mock.calls.map((c: unknown[]) => c[0]);

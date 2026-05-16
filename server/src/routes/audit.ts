@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { Router, type Request, type Response } from 'express';
+import { Router, type Request, type Response, type NextFunction, type RequestHandler } from 'express';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import { createAuthMiddleware } from '../middleware/auth';
@@ -52,6 +52,7 @@ const EMR_AUDIT_ACTIONS = new Set([
   'emr_inject',
   'emr_extract_record',
   'emr_extract_consultation',
+  'audit_queue_corrupt',  // diagnostic: sent when the client-side encrypted queue was corrupt
 ]);
 
 const EmrAuditBody = z.object({
@@ -142,36 +143,47 @@ async function handleEmrAudit(pool: Pool, req: Request, res: Response): Promise<
       return;
     }
 
-    // --- 6. Verify session.user_id ≡ device.user_id AND org match ---
-    const session = req.sessionInfo!;
+    // --- 6. Optional session check + actor resolution ---
+    // When replaying from the encrypted local queue (session expired), no Bearer
+    // token is sent. In that case we skip the user/org mismatch check and use
+    // the device's own user_id / organization_id as the audit actor, marked with
+    // session_missing=true in the extra field.
+    const session = req.sessionInfo ?? null;
+    const sessionMissing = session === null;
 
-    const userMismatch = session.userId !== device.user_id;
-    // If the session belongs to an org, the device must belong to the same org.
-    // A null device.organization_id is not tolerated for org-scoped sessions:
-    // legitimate devices are always registered with an org in production.
-    // Superadmin (session.organizationId === null) bypasses the org check.
-    const orgMismatch =
-      session.organizationId !== null &&
-      session.organizationId !== device.organization_id;
+    if (!sessionMissing) {
+      const userMismatch = session.userId !== device.user_id;
+      // If the session belongs to an org, the device must belong to the same org.
+      // A null device.organization_id is not tolerated for org-scoped sessions:
+      // legitimate devices are always registered with an org in production.
+      // Superadmin (session.organizationId === null) bypasses the org check.
+      const orgMismatch =
+        session.organizationId !== null &&
+        session.organizationId !== device.organization_id;
 
-    if (userMismatch || orgMismatch) {
-      const action = userMismatch ? 'device_user_mismatch' : 'device_org_mismatch';
-      writeAuditLog(pool, {
-        actorUserId: session.userId,
-        actorOrgId:  session.organizationId ?? null,
-        action,
-        targetType:  'device',
-        targetId:    deviceId,
-        outcome:     'denied',
-        ip:          req.ip ?? null,
-        userAgent:   req.headers['user-agent'] ?? null,
-        extra: userMismatch
-          ? { deviceUserId: device.user_id }
-          : { deviceOrgId: device.organization_id },
-      });
-      res.status(401).json({ code: 'UNAUTHORIZED', error: 'Device / session identity mismatch' });
-      return;
+      if (userMismatch || orgMismatch) {
+        const action = userMismatch ? 'device_user_mismatch' : 'device_org_mismatch';
+        writeAuditLog(pool, {
+          actorUserId: session.userId,
+          actorOrgId:  session.organizationId ?? null,
+          action,
+          targetType:  'device',
+          targetId:    deviceId,
+          outcome:     'denied',
+          ip:          req.ip ?? null,
+          userAgent:   req.headers['user-agent'] ?? null,
+          extra: userMismatch
+            ? { deviceUserId: device.user_id }
+            : { deviceOrgId: device.organization_id },
+        });
+        res.status(401).json({ code: 'UNAUTHORIZED', error: 'Device / session identity mismatch' });
+        return;
+      }
     }
+
+    // Actor identity: from live session when present, from device registration otherwise.
+    const actorUserId = session?.userId ?? device.user_id;
+    const actorOrgId  = session?.organizationId ?? device.organization_id ?? null;
 
     // --- 7. Ed25519 signature verification ---
     // Canonical message = "<deviceId>.<deviceTs>.<deviceNonce>.<JSON-sorted-body>"
@@ -215,17 +227,18 @@ async function handleEmrAudit(pool: Pool, req: Request, res: Response): Promise<
     // If writeAuditLogStrict throws, nonceCommitted stays false → finally releases
     // the nonce from pendingNonces so the device can retry with the same nonce+sig.
     await writeAuditLogStrict(pool, {
-      actorUserId: session.userId,
-      actorOrgId:  device.organization_id,
-      action:      body.action,
-      targetType:  'emr',
-      targetId:    body.targetId ?? null,
-      outcome:     body.outcome,
-      ip:          req.ip ?? null,
-      userAgent:   req.headers['user-agent'] ?? null,
-      extra:       {
+      actorUserId,
+      actorOrgId,
+      action:    body.action,
+      targetType: 'emr',
+      targetId:   body.targetId ?? null,
+      outcome:    body.outcome,
+      ip:         req.ip ?? null,
+      userAgent:  req.headers['user-agent'] ?? null,
+      extra:      {
         deviceId,
-        source:     'electron-main',
+        source:   'electron-main',
+        ...(sessionMissing ? { session_missing: true, actor_from_queue: true } : {}),
         ...(body.extra ?? {}),
       },
     });
@@ -251,13 +264,26 @@ async function handleEmrAudit(pool: Pool, req: Request, res: Response): Promise<
 // ---------------------------------------------------------------------------
 // Router factory
 // ---------------------------------------------------------------------------
+
+// Optional auth: if no Authorization header is present, skip token verification
+// and let the request through with req.sessionInfo undefined (null after ??).
+// This enables the Electron main process to replay queued audit entries after the
+// user's session expires, relying on the Ed25519 device signature for authenticity.
+// If an Authorization header IS present it must be valid — invalid tokens still 401.
+function makeOptionalAuth(pool: Pool): RequestHandler {
+  const required = createAuthMiddleware(pool);
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.headers['authorization']) return next();
+    required(req, res, next);
+  };
+}
+
 export function createAuditRouter(pool: Pool): Router {
   const router = Router();
-  const auth   = createAuthMiddleware(pool);
 
   router.post(
     '/emr',
-    auth,
+    makeOptionalAuth(pool),
     (req, res) => handleEmrAudit(pool, req, res).catch(() =>
       res.status(500).json({ code: 'INTERNAL_ERROR', error: 'Internal server error' })
     )

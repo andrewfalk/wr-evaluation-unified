@@ -13,13 +13,19 @@
 	pki {
 		ca local {
 			name "WR Evaluation Internal CA"
+			intermediate_lifetime 365d
 		}
 	}
 }
 
 # HTTPS — terminate TLS with internal CA, proxy to the Express app.
 https://{$WR_DOMAIN} {
-	tls internal
+	tls {
+		issuer internal {
+			ca local
+			lifetime 6d
+		}
+	}
 
 	reverse_proxy app:3001
 

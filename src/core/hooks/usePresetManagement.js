@@ -15,7 +15,7 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
 
   const reloadPresets = useCallback(async () => {
     try {
-      const { merged, builtinCount, customCount } = await loadAllPresets();
+      const { merged, builtinCount, customCount } = await loadAllPresets(session);
       setPresets(merged);
       setPresetMeta({ count: merged.length, builtinCount, customCount });
       setPresetError(null);
@@ -25,7 +25,7 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
       setPresetMeta({ count: fallback.length, builtinCount: fallback.length, customCount: 0 });
       setPresetError('Preset 파일 로드 실패');
     }
-  }, []);
+  }, [session]);
 
   useEffect(() => { reloadPresets(); }, [reloadPresets]);
 
@@ -66,7 +66,7 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
   }, [activeId, activeModules, formatModuleNames, session, setPatients]);
 
   const handleSaveCustomPreset = useCallback(async (preset, feedback = {}) => {
-    const savedPreset = await saveCustomPreset(preset, { replaceModules: feedback.replaceModules });
+    const savedPreset = await saveCustomPreset(preset, { replaceModules: feedback.replaceModules }, session);
     await reloadPresets();
     setPresetModalJobId(null);
     setPresetEditingPreset(null);
@@ -86,7 +86,7 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
     await showAlert(
       `새 프리셋 저장 완료\n프리셋: ${presetLabel}\n저장 모듈: ${formatModuleNames(feedback.selectedModuleIds || Object.keys(savedPreset.modules || {}))}`
     );
-  }, [formatModuleNames, reloadPresets]);
+  }, [formatModuleNames, reloadPresets, session]);
 
   const closePresetManageModal = useCallback(() => {
     if (presetEditingPreset && presetModalJobId) {
@@ -103,6 +103,7 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
         : presets.find(item => (item._customId || item.id) === presetOrId);
     const id = preset?._customId || preset?.id || presetOrId;
     if (!id) return false;
+    const revision = preset?._customRevision ?? preset?.revision ?? null;
 
     const label = preset?.jobName
       ? getPresetDescription(preset)
@@ -115,10 +116,10 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
     );
     if (!confirmed) return false;
 
-    await deleteCustomPreset(id);
+    await deleteCustomPreset(id, session, revision);
     await reloadPresets();
     return true;
-  }, [presets, reloadPresets]);
+  }, [presets, reloadPresets, session]);
 
   return {
     presets,
@@ -130,6 +131,7 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
     setPresetModalJobId,
     setPresetEditingPreset,
     setPresetBrowseJobId,
+    reloadPresets,
     handlePresetSelect,
     handleSaveCustomPreset,
     closePresetManageModal,

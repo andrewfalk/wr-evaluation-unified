@@ -20,10 +20,10 @@ export function createLocalSession(overrides = {}) {
     refreshedAt: now,
     user: {
       id: `${runtime}-user`,
-      displayName: runtime === 'electron-local' ? 'Desktop User' : 'Local User',
+      displayName: runtime === 'electron' ? 'Desktop User' : 'Local User',
       email: '',
       role: 'clinician',
-      organizationId: runtime === 'electron-local' ? 'local-electron-workspace' : 'local-web-workspace',
+      organizationId: runtime === 'electron' ? 'local-electron-workspace' : 'local-web-workspace',
       authProvider: 'local-fallback',
     },
   };
@@ -72,7 +72,10 @@ export function saveStoredSession(session) {
   if (typeof window === 'undefined') return normalizeSession(session);
 
   const normalized = normalizeSession(session);
-  localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(normalized));
+  // Access token lives in memory only — never persisted to localStorage.
+  // Refresh token lives in HttpOnly cookie (server-managed).
+  const { accessToken: _drop, ...toStore } = normalized;
+  localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(toStore));
   return normalized;
 }
 

@@ -78,6 +78,8 @@ export const createPatient = (activeModules = [], modulesData = {}) => ({
 
 // 구형식 → 신형식 마이그레이션
 export function migratePatient(patient) {
+  if (!patient || typeof patient !== 'object') return patient;
+  if (patient.redacted === true) return patient;
   // createdAt 마이그레이션: 없으면 폴백
   let p = patient;
   if (!p.createdAt) {
@@ -85,12 +87,12 @@ export function migratePatient(patient) {
   }
 
   // 이미 신형식이면 그대로
-  if (p.data.modules && p.data.activeModules) {
+  if (p.data?.modules && p.data?.activeModules) {
     // jobs 마이그레이션도 체크
     return migrateJobsToShared(p);
   }
   // 구형식: moduleId + data.module → 신형식
-  if (p.moduleId && p.data.module !== undefined) {
+  if (p.moduleId && p.data?.module !== undefined) {
     const migrated = {
       ...p,
       phase: 'evaluation',
@@ -107,9 +109,10 @@ export function migratePatient(patient) {
 
 // jobs를 shared로 이동하는 마이그레이션
 function migrateJobsToShared(patient) {
+  if (!patient?.data || typeof patient.data !== 'object') return patient;
   if (patient.data.shared?.jobs) return patient; // 이미 마이그레이션됨
 
-  const shared = { ...patient.data.shared, jobs: [] };
+  const shared = { ...(patient.data.shared || {}), jobs: [] };
   const modules = { ...patient.data.modules };
 
   // 무릎 모듈에서 jobs 마이그레이션
@@ -331,6 +334,11 @@ export function createSamplePatient() {
 }
 
 // 설정 기본값
+const DEFAULT_INTEGRATION_MODE =
+  import.meta.env.VITE_DEFAULT_INTEGRATION_MODE === 'intranet'
+    ? 'intranet'
+    : 'local';
+
 export const DEFAULT_SETTINGS = {
   theme: 'light',
   fontSize: 'medium',
@@ -338,7 +346,7 @@ export const DEFAULT_SETTINGS = {
   department: '직업환경의학과',
   doctorName: '김호길',
   autoSaveInterval: 30,
-  integrationMode: 'local',
+  integrationMode: DEFAULT_INTEGRATION_MODE,
   apiBaseUrl: ''
 };
 

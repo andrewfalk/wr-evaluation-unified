@@ -1,0 +1,91 @@
+# Production overrides — wr-evaluation-unified
+#
+# USAGE (always specify -p wr-prod to keep volumes isolated from dev/staging):
+#
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f docker-compose.prod.yml \
+#     --env-file .env.production \
+#     -p wr-prod \
+#     up -d
+#
+# This creates volumes prefixed with wr-prod_ (e.g. wr-prod_postgres_data),
+# completely isolated from any dev or staging volumes.
+#
+# Requires: Docker Compose v2.17+ (for !reset tag, included in Docker Engine 24+)
+#
+# IMAGE STRATEGY (offline package):
+#   app, backup-monitor, backup all use pre-built images from the offline package
+#   (wr-images.tar), NOT local build contexts. This ensures the installed environment
+#   matches exactly what was tested, and works on air-gapped servers without source code.
+#
+#   Set WR_VERSION in .env.production to pin the image tag.
+#   The export-offline-package script builds with these exact names.
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — enforce required password (no changeme_ fallback in production)
+  # ---------------------------------------------------------------------------
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env.production — see .env.production.example}"
+    restart: always
+
+  # ---------------------------------------------------------------------------
+  # Application server
+  #
+  # Key changes from base compose:
+  #   - image: pre-built image from offline package (no local build context)
+  #   - build: !reset null → prevents accidental rebuild from source
+  #   - ports: !reset []  → app port NOT exposed externally.
+  #                          Caddy (80/443) is the only external entry point.
+  #   - All secrets required (no changeme_ defaults)
+  #   - restart: always for production uptime
+  # ---------------------------------------------------------------------------
+  app:
+    image: wr-app-server:${WR_VERSION:?WR_VERSION must be set in .env.production}
+    build: !reset null
+    environment:
+      DATABASE_URL:         "postgres://wr_user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/wr_evaluation"
+      AUDIT_DATABASE_URL:   "postgres://wr_audit_reader:${AUDIT_DB_PASSWORD:?AUDIT_DB_PASSWORD must be set}@postgres:5432/wr_evaluation"
+      ACCESS_TOKEN_SECRET:  "${ACCESS_TOKEN_SECRET:?ACCESS_TOKEN_SECRET must be set}"
+      REFRESH_TOKEN_SECRET: "${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET must be set}"
+      CORS_ORIGINS:         "${CORS_ORIGINS:?CORS_ORIGINS must be set (e.g. https://wr.hospital.local)}"
+      TRUST_PROXY:          "1"
+    ports: !reset []
+    restart: always
+
+  # ---------------------------------------------------------------------------
+  # Caddy — enforce required domain
+  # ---------------------------------------------------------------------------
+  caddy:
+    environment:
+      WR_DOMAIN: "${WR_DOMAIN:?WR_DOMAIN must be set (e.g. wr.hospital.local)}"
+    restart: always
+
+  # ---------------------------------------------------------------------------
+  # Partition sidecar
+  # ---------------------------------------------------------------------------
+  partition:
+    environment:
+      PGPASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}"
+    restart: always
+
+  # ---------------------------------------------------------------------------
+  # Backup monitor — pre-built image, no local build
+  # ---------------------------------------------------------------------------
+  backup-monitor:
+    image: wr-backup-monitor:${WR_VERSION:?WR_VERSION must be set in .env.production}
+    build: !reset null
+    restart: always
+
+  # ---------------------------------------------------------------------------
+  # Backup sidecar (--profile backup) — pre-built image, no local build
+  # ---------------------------------------------------------------------------
+  backup:
+    image: wr-backup:${WR_VERSION:?WR_VERSION must be set in .env.production}
+    build: !reset null
+    environment:
+      PGPASSWORD:           "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}"
+      BACKUP_GPG_RECIPIENT: "${BACKUP_GPG_RECIPIENT:?BACKUP_GPG_RECIPIENT must be set — see docs/BACKUP_RESTORE.md}"
+    restart: always

@@ -348,7 +348,7 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
     };
 
     const resultPatients = clonePatients(existingPatients);
-    const stats = { newPatients: 0, newDiagnoses: 0, newJobs: 0, skipped: 0 };
+    const stats = { newPatients: 0, newDiagnoses: 0, newJobs: 0, skipped: 0, withDoctorName: 0 };
 
     const ensureModule = (patient, moduleId) => {
       if (!patient.data.activeModules.includes(moduleId)) {
@@ -772,6 +772,7 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
         patient.data.shared.specialNotes = String(getCell(row, colMap.specialNotes) || '').trim();
         patient.data.shared.diagnoses = [];
         patient.data.shared.jobs = [];
+        if (patient.data.shared.doctorName) stats.withDoctorName += 1;
         resultPatients.push(patient);
         stats.newPatients += 1;
       }

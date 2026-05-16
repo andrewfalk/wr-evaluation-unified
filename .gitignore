@@ -3,6 +3,8 @@ dist/
 release/
 .env
 .env.local
+.env.production
+.env.staging
 .mock-intranet/
 *.log
 .DS_Store
@@ -13,3 +15,11 @@ target_webpage*
 업무관련성 평가 진료기록분석지.htm
 .code-review-graph/graph.db
 .claude/
+electron/build-target.json
+*.crt
+*.key
+# GPG backup keys — never commit; store offline
+wr-backup-private.asc
+wr-backup-public.asc
+wr-backup-restore-private.asc
+wr-backup-restore-public.asc
