@@ -46,7 +46,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "electron": "^22.3.27",
     "electron-builder": "^24.9.1",
-    "eslint": "^9.39.4",
+    "eslint": "^10.4.0",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.5.0",
