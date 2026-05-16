@@ -168,6 +168,7 @@ describe('GET /api/patients', () => {
     mock.mockResolvedValueOnce({ rows: [PAT_ROW] });        // items (Promise.all first)
     mock.mockResolvedValueOnce({ rows: [{ total: '1' }] }); // count (Promise.all second)
     mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // unassignedCount (Promise.all third)
+    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] }); // orgPatientCount (Promise.all fourth)
 
     const res = await request(makeApp(pool))
       .get('/api/patients')
@@ -176,6 +177,7 @@ describe('GET /api/patients', () => {
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(1);
     expect(res.body.total).toBe(1);
+    expect(res.body.orgPatientCount).toBe(1);
     expect(res.body.items[0].id).toBe(PAT_ID);
     expect(res.body.items[0].sync.serverId).toBe(PAT_ID);
     expect(res.body.items[0].sync.syncStatus).toBe('synced');
@@ -192,6 +194,7 @@ describe('GET /api/patients', () => {
     mock.mockResolvedValueOnce({ rows: [PAT_ROW] });        // items
     mock.mockResolvedValueOnce({ rows: [{ total: '1' }] }); // count
     mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // unassignedCount
+    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] }); // orgPatientCount
 
     const res = await request(makeApp(pool))
       .get('/api/patients')
@@ -210,6 +213,7 @@ describe('GET /api/patients', () => {
     mock.mockResolvedValueOnce({ rows: [] });              // items
     mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // count
     mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // unassignedCount
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // orgPatientCount
 
     const res = await request(makeApp(pool))
       .get('/api/patients?scope=mine')
@@ -228,6 +232,7 @@ describe('GET /api/patients', () => {
     mock.mockResolvedValueOnce({ rows: [] });
     mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // count
     mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // unassignedCount
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // orgPatientCount
     const res = await request(makeApp(pool))
       .get('/api/patients')
       .set('Authorization', `Bearer ${orgToken()}`);
@@ -235,6 +240,7 @@ describe('GET /api/patients', () => {
     expect(res.body.items).toHaveLength(0);
     expect(res.body.total).toBe(0);
     expect(res.body.unassignedCount).toBe(0);
+    expect(res.body.orgPatientCount).toBe(0);
   });
 });
 

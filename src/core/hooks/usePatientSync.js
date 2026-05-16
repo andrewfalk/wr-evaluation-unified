@@ -108,6 +108,7 @@ async function pullAllPatients({ session, settings, scope = 'mine' }) {
   let offset = 0;
   let total = null;
   let unassignedCount;
+  let orgPatientCount;
 
   do {
     const result = await pullPatients({
@@ -119,11 +120,12 @@ async function pullAllPatients({ session, settings, scope = 'mine' }) {
     all.push(...items);
     total = typeof result.total === 'number' ? result.total : all.length;
     if (typeof result.unassignedCount === 'number') unassignedCount = result.unassignedCount;
+    if (typeof result.orgPatientCount === 'number') orgPatientCount = result.orgPatientCount;
     offset += items.length;
     if (items.length === 0) break;
   } while (all.length < total);
 
-  return { items: all, unassignedCount };
+  return { items: all, unassignedCount, orgPatientCount };
 }
 
 export function usePatientSync({
@@ -141,6 +143,7 @@ export function usePatientSync({
     lastSyncedAt: null,
     lastError: null,
     serverUnassignedCount: null,
+    serverPatientCount: null,
   });
 
   const patientsRef = useRef(patients || []);
@@ -228,13 +231,15 @@ export function usePatientSync({
       }
 
       let serverUnassignedCount;
+      let serverPatientCount;
       if (pull) {
-        const { items: pulledItems, unassignedCount } = await pullAllPatients({
+        const { items: pulledItems, unassignedCount, orgPatientCount } = await pullAllPatients({
           session:  sessionRef.current,
           settings: settingsRef.current,
           scope:    scopeRef.current,
         });
         if (typeof unassignedCount === 'number') serverUnassignedCount = unassignedCount;
+        if (typeof orgPatientCount === 'number') serverPatientCount = orgPatientCount;
         if (!enabledRef.current) {
           setSyncState(prev => ({ ...prev, status: 'idle' }));
           return null;
@@ -260,6 +265,7 @@ export function usePatientSync({
         lastSyncedAt,
         lastError: null,
         ...(typeof serverUnassignedCount === 'number' ? { serverUnassignedCount } : {}),
+        ...(typeof serverPatientCount    === 'number' ? { serverPatientCount }    : {}),
       }));
       return { ok: true, reason, lastSyncedAt };
     } catch (error) {

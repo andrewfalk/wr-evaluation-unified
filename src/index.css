@@ -80,6 +80,18 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 }
 
 .app-layout { display: flex; align-items: flex-start; max-width: 1800px; min-height: 100dvh; margin: 0 auto; padding: 20px; gap: 20px; }
+.app-boot-overlay {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100dvh;
+  background: var(--bg-primary);
+}
+.app-boot-box {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
 .landing-layout {
   justify-content: center;
   align-items: flex-start;

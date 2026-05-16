@@ -674,9 +674,40 @@ function App() {
   }
 
   // ===========================================
-  // 랜딩 화면
+  // 인트라넷 초기 부팅: pull 중이거나 서버에 환자가 존재하면 랜딩 억제
   // ===========================================
-  if ((patients.length === 0 && !activeId && !intakeShared) || showHome) {
+  // pull 중: 아직 응답 전 → 로딩 화면
+  // pull 완료 후 mine=0이지만 serverPatientCount>0: 서버에 환자 있음(다른 의사 담당 등)
+  //   → 환자 목록 껍데기를 보여줘서 scope 전환, 재마이그레이션 등 다음 행동 가능하게 함
+  const isBootingFromServer =
+    session?.mode === 'intranet'
+    && patients.length === 0
+    && !activeId
+    && !intakeShared
+    && !showHome;
+
+  if (isBootingFromServer && syncState.status === 'syncing') {
+    return (
+      <div className="app-boot-overlay">
+        <div className="app-boot-box">
+          <p>서버 환자 목록을 불러오는 중입니다…</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ===========================================
+  // 랜딩 / 대시보드 화면
+  // ===========================================
+  // 자동 진입: 환자가 없을 때만 랜딩으로 보낸다.
+  //   인트라넷에서 mine=0이지만 서버에 환자가 있으면 자동 랜딩을 억제 (목록 화면에서 scope 전환 등으로 해결 가능).
+  // 사용자 진입: 헤더의 대시보드/홈 버튼(showHome)은 서버 상태와 무관하게 항상 허용.
+  const hasAnyServerPatient =
+    session?.mode === 'intranet' && (syncState.serverPatientCount ?? 0) > 0;
+  const shouldAutoShowLanding =
+    patients.length === 0 && !activeId && !intakeShared;
+
+  if (showHome || (!hasAnyServerPatient && shouldAutoShowLanding)) {
     return (
       <div className="app-layout landing-layout">
         <LandingScreen

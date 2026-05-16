@@ -44,6 +44,7 @@ export async function pullPatients({ session, settings, params = {} } = {}) {
     items: (data.items ?? []).map(p => applyServerSync(p)),
     total: data.total ?? data.items?.length ?? 0,
     unassignedCount: typeof data.unassignedCount === 'number' ? data.unassignedCount : undefined,
+    orgPatientCount: typeof data.orgPatientCount === 'number' ? data.orgPatientCount : undefined,
   };
 }
 
