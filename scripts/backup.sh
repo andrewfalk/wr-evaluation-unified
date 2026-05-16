@@ -131,6 +131,9 @@ write_json_atomic() {
   local tmp="${dest}.tmp.$$"
   printf '%s\n' "${content}" > "${tmp}"
   mv "${tmp}" "${dest}"
+  # Alert files are shared with the app container (node uid 1000).
+  # backup runs as root, so chown here to allow app to resolve alerts.
+  case "${dest}" in */_alerts/*) chown 1000:1000 "${dest}" 2>/dev/null || true ;; esac
 }
 
 fmt_status_json() {

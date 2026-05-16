@@ -158,44 +158,60 @@ docker compose cp backup:/backups/yearly/wr-backup-2026.dump.gpg ./
 2. 정보보안팀 책임자가 티켓 승인
 3. 승인된 **티켓 번호**를 복구 실행자에게 전달
 
-### 5-2. 개인 키를 임시 복구 환경으로 가져오기
+> **T46/production 리허설 절차 우선**: production-like 환경에서의 복구 리허설은
+> `PRODUCTION_RELEASE_PLAN.md` section 5-3을 정본으로 따릅니다.
+> 이 절(5-2~5-4)은 실제 운영 복구(production DB 대상) 절차입니다.
+
+> **GPG 개인키 정책**: 복구에 사용하는 개인키는 **passphrase 없는 복구 전용 키**여야 합니다.
+> `gpg --batch --import` + `gpg --batch --decrypt`는 pinentry/agent 없이 실행되므로
+> passphrase가 설정된 키는 비대화형 컨테이너 환경에서 실패합니다.
+
+### 5-2. 복구 실행
 
 ```bash
-# 복구 전용 임시 컨테이너 실행 (프로덕션 backup 컨테이너 아님)
-# restore.sh가 이미지에 포함되지 않으므로 :ro로 직접 마운트합니다.
+# WR_VERSION을 .env.production에서 읽기
+WR_VERSION=$(grep '^WR_VERSION=' .env.production | cut -d= -f2)
+echo "WR_VERSION=${WR_VERSION}"   # 빈 값이면 중단
+
+# 복구 전용 임시 컨테이너 — production backup 컨테이너와 무관
+# restore.sh는 이미지에 포함되지 않으므로 :ro로 직접 마운트
+# GPG 개인키는 ephemeral GNUPGHOME에만 import → --rm 종료 시 자동 폐기
+# "YES" 확인 프롬프트 때문에 -it 필수
 docker run --rm -it \
-  -v $(pwd)/wr-backup-private.asc:/tmp/private.asc:ro \
-  -v /path/to/backup/files:/backups:ro \
-  -v $(pwd)/scripts/restore.sh:/scripts/restore.sh:ro \
+  -v "$(pwd)/wr-backup-private.asc:/tmp/private.asc:ro" \
+  -v wr-prod_backup_data:/backups:ro \
+  -v "$(pwd)/scripts/restore.sh:/scripts/restore.sh:ro" \
   -e PGHOST=<복구대상_DB호스트> \
   -e PGPASSWORD=<password> \
+  -e PGDATABASE=wr_evaluation \
   -e RESTORE_AUTH_TICKET=<티켓번호> \
-  --name wr-restore \
-  <backup_image> \
-  sh
-```
-
-```bash
-# 컨테이너 내부에서
-gpg --import /tmp/private.asc
-```
-
-### 5-3. 복구 실행
-
-```bash
-# 컨테이너 내부 — :ro 마운트이므로 chmod 불필요, sh로 직접 실행
-RESTORE_AUTH_TICKET=<티켓번호> sh /scripts/restore.sh /backups/daily/wr-backup-YYYYMMDD_HHmmss.dump.gpg
+  "wr-backup:${WR_VERSION}" \
+  sh -c 'export GNUPGHOME=$(mktemp -d) \
+    && gpg --batch --import /tmp/private.asc \
+    && sh /scripts/restore.sh /backups/daily/wr-backup-YYYYMMDD_HHMMSS.dump.gpg'
 ```
 
 스크립트가 `YES` 입력을 요구합니다. 확인 후 입력하면 복구가 진행됩니다.
 
-### 5-4. 복구 후 검증
+### 5-3. 복구 후 검증
 
 ```bash
-# 행 수 확인 (스크립트가 자동으로 출력)
-# 애플리케이션 기동 후 정상 동작 확인
-docker compose up -d app
-curl http://localhost:3001/health
+# restore.sh가 자동으로 row count를 출력함 (users / patient_records / audit_logs)
+# 애플리케이션 재기동 후 정상 동작 확인
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.prod.yml \
+  --env-file .env.production \
+  -p wr-prod \
+  up -d app
+docker compose -p wr-prod exec app wget -qO- http://localhost:3001/health
+```
+
+### 5-4. 개인키 삭제 (필수)
+
+```bash
+rm -f wr-backup-private.asc
+ls wr-backup-private.asc 2>/dev/null && echo "WARNING: key not deleted" || echo "Key deleted OK"
 ```
 
 ---
@@ -212,10 +228,13 @@ curl http://localhost:3001/health
 
 ### 리허설 절차
 
+> **분기 리허설의 상세 절차는 `PRODUCTION_RELEASE_PLAN.md` section 5-3이 정본입니다.**
+> 아래는 요약 참조용입니다.
+
 ```bash
+WR_VERSION=$(grep '^WR_VERSION=' .env.production | cut -d= -f2)
+
 # 1. 격리된 테스트 네트워크 + PostgreSQL 기동
-#    --network host는 Windows/Docker Desktop에서 기대대로 동작하지 않으므로
-#    명시적 네트워크를 만들고 두 컨테이너를 같은 네트워크에 연결합니다.
 docker network create wr-restore-test-net
 
 docker run -d --name wr-restore-test \
@@ -225,22 +244,35 @@ docker run -d --name wr-restore-test \
   -e POSTGRES_PASSWORD=test_only \
   postgres:16-alpine
 
+until docker exec wr-restore-test \
+  pg_isready -U wr_user -d wr_evaluation 2>/dev/null; do sleep 2; done
+
+# 1-a. wr_audit_reader role 생성 (dump에 GRANT가 포함되므로 필수)
+docker exec wr-restore-test \
+  psql -U wr_user -d wr_evaluation \
+  -c "CREATE ROLE wr_audit_reader LOGIN PASSWORD 'restore_audit_pw';"
+
 # 2. 가장 최근 월간 백업으로 복구 시도
-#    restore.sh는 이미지에 포함되지 않으므로 :ro 마운트로 주입합니다.
 docker run --rm -it \
   --network wr-restore-test-net \
-  -v $(pwd)/wr-backup-private.asc:/tmp/private.asc:ro \
-  -v /path/to/monthly:/backups:ro \
-  -v $(pwd)/scripts/restore.sh:/scripts/restore.sh:ro \
+  -v "$(pwd)/wr-backup-private.asc:/tmp/private.asc:ro" \
+  -v wr-prod_backup_data:/backups:ro \
+  -v "$(pwd)/scripts/restore.sh:/scripts/restore.sh:ro" \
   -e PGHOST=wr-restore-test \
+  -e PGUSER=wr_user \
   -e PGPASSWORD=test_only \
-  -e RESTORE_AUTH_TICKET=REHEARSAL-$(date +%Y%m) \
-  <backup_image> \
-  sh -c "gpg --import /tmp/private.asc && sh /scripts/restore.sh /backups/wr-backup-$(date +%Y%m).dump.gpg"
+  -e PGDATABASE=wr_evaluation \
+  -e "RESTORE_AUTH_TICKET=REHEARSAL-$(date +%Y%m)" \
+  "wr-backup:${WR_VERSION}" \
+  sh -c 'export GNUPGHOME=$(mktemp -d) \
+    && gpg --batch --import /tmp/private.asc \
+    && sh /scripts/restore.sh "/backups/monthly/wr-backup-$(date +%Y%m).dump.gpg"'
 
 # 3. 복구 성공 확인 후 테스트 환경 전체 삭제
 docker rm -f wr-restore-test
+docker volume rm wr-restore-test-data 2>/dev/null || true
 docker network rm wr-restore-test-net
+rm -f wr-backup-private.asc
 ```
 
 ### 리허설 기록

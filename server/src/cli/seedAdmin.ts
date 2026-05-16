@@ -14,8 +14,10 @@
  */
 
 import readline from 'readline';
+import fs from 'fs';
 import bcrypt from 'bcrypt';
 import pg from 'pg';
+import { checkPasswordPolicy } from '../auth/passwordPolicy';
 
 const BCRYPT_ROUNDS = 12;
 
@@ -27,24 +29,9 @@ async function prompt(rl: readline.Interface, question: string): Promise<string>
 // Falls back to visible input on non-TTY streams (e.g., piped CI input).
 async function promptPassword(_rl: readline.Interface, question: string): Promise<string> {
   if (!process.stdin.isTTY) {
-    // Non-interactive: read a single line from the already-open readline
-    return new Promise((resolve) => {
-      let buf = '';
-      const onData = (chunk: Buffer) => {
-        const str = chunk.toString();
-        const nl  = str.indexOf('\n');
-        if (nl !== -1) {
-          buf += str.slice(0, nl).replace('\r', '');
-          process.stdin.removeListener('data', onData);
-          process.stdin.pause();
-          resolve(buf);
-        } else {
-          buf += str;
-        }
-      };
-      process.stdin.resume();
-      process.stdin.on('data', onData);
-    });
+    // Non-interactive stdin is already owned/buffered by readline, so keep using
+    // the same interface. Password echo suppression only applies to real TTYs.
+    return prompt(_rl, question);
   }
 
   return new Promise((resolve) => {
@@ -85,32 +72,48 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const scriptedAnswers = !process.stdin.isTTY
+    ? fs.readFileSync(0, 'utf-8').split(/\r?\n/)
+    : null;
+  let scriptedAnswerIndex = 0;
+
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const ask = async (question: string): Promise<string> => {
+    if (!scriptedAnswers) return prompt(rl, question);
+    process.stdout.write(question);
+    return scriptedAnswers[scriptedAnswerIndex++] ?? '';
+  };
+  const askPassword = async (question: string): Promise<string> => {
+    if (!scriptedAnswers) return promptPassword(rl, question);
+    process.stdout.write(question);
+    return scriptedAnswers[scriptedAnswerIndex++] ?? '';
+  };
 
   try {
     console.log('=== wr-evaluation-unified: Admin seed ===');
     console.log('This creates the first admin account in an empty database.');
     console.log('');
 
-    const organizationName = (await prompt(rl, 'Initial hospital/organization name: ')).trim();
+    const organizationName = (await ask('Initial hospital/organization name: ')).trim();
     if (!organizationName) {
       console.error('ERROR: Organization name cannot be empty.');
       process.exit(1);
     }
 
-    const loginId  = (await prompt(rl, 'Login ID (e.g. admin): ')).trim();
+    const loginId  = (await ask('Login ID (e.g. admin): ')).trim();
     if (!loginId) {
       console.error('ERROR: Login ID cannot be empty.');
       process.exit(1);
     }
 
-    const password = (await promptPassword(rl, 'Password: ')).trim();
-    if (password.length < 10) {
-      console.error('ERROR: Password must be at least 10 characters.');
+    const password = (await askPassword('Password: ')).trim();
+    const policyResult = checkPasswordPolicy(password);
+    if (!policyResult.ok) {
+      console.error(`ERROR: ${policyResult.error}`);
       process.exit(1);
     }
 
-    const name = (await prompt(rl, 'Display name (e.g. 시스템 관리자): ')).trim() || '시스템 관리자';
+    const name = (await ask('Display name (e.g. 시스템 관리자): ')).trim() || '시스템 관리자';
 
     rl.close();
 
