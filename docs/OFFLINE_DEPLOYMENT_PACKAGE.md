@@ -113,6 +113,40 @@ wr-evaluation-unified-5.0.0-intranet/    ← 이 디렉터리가 compose 실행 
 
 > Docker Desktop(Windows)을 설치하면 Docker Engine + Compose가 함께 설치됩니다.
 
+> **PowerShell 버전**: Windows 10 / 11 / Server 2019 이상에는 PowerShell 5.1이 기본 내장되어 있습니다. 별도 설치가 필요 없습니다.
+
+### 3-2. PowerShell 스크립트 실행 정책 설정 (Windows 10/11 필수)
+
+Windows는 기본적으로 `.ps1` 스크립트 실행을 차단합니다.
+설치 스크립트(`install-prod.ps1`, `import-images.ps1`)를 실행하기 전에 **반드시** 아래 명령을 먼저 실행해야 합니다.
+
+**PowerShell을 관리자 권한으로 열고:**
+
+```powershell
+# 현재 실행 정책 확인
+Get-ExecutionPolicy
+
+# Restricted (기본값) 이면 아래 명령으로 변경
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+# 확인 메시지가 나오면 Y 입력
+```
+
+변경 후 확인:
+
+```powershell
+Get-ExecutionPolicy -Scope CurrentUser
+# RemoteSigned 가 출력되면 정상
+```
+
+> **실행 정책이란?** 악성 스크립트로부터 시스템을 보호하기 위한 Windows 보안 설정입니다.
+> `RemoteSigned`는 로컬 스크립트는 허용하고 인터넷에서 내려받은 스크립트는 서명 요구합니다.
+> 설치 완료 후 원래 값(`Restricted`)으로 되돌리려면:
+> ```powershell
+> Set-ExecutionPolicy -Scope CurrentUser Restricted
+> ```
+
+> **"이 시스템에서 스크립트를 실행할 수 없습니다"** 오류가 발생하면 위 절차를 먼저 수행한 것인지 확인하세요.
+
 ### 3-2. 네트워크 설정
 
 병원 내 **모든 클라이언트 PC**에서 서버 도메인이 해석되어야 합니다.
@@ -250,10 +284,7 @@ docker images | Select-String "wr-"
 4. 기존 volume 상태 확인
 5. `docker compose up -d` 실행
 
-> **실행 전 확인**: PowerShell 실행 정책이 `RemoteSigned` 이상이어야 합니다.
-> ```powershell
-> Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-> ```
+> **실행 전 확인**: PowerShell 실행 정책이 `RemoteSigned`이어야 합니다. 아직 설정하지 않았다면 3-2절을 먼저 수행하세요.
 
 ### 4-6. 서비스 상태 확인
 
@@ -785,6 +816,20 @@ invalid argument "images/wr-images.tar": no such file or directory
    ```
 2. `.env.production`의 `BACKUP_GPG_RECIPIENT` 값과 일치하는지 확인
 3. 불일치 시 9-2, 9-3절 재수행
+
+---
+
+### "이 시스템에서 스크립트를 실행할 수 없습니다" (PowerShell)
+
+**원인**: Windows 기본 실행 정책(`Restricted`)이 `.ps1` 실행을 차단
+
+**해결**: 3-2절의 실행 정책 변경 명령을 먼저 수행합니다.
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+확인 메시지에서 **Y** 를 입력한 후 다시 스크립트를 실행하세요.
 
 ---
 
