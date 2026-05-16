@@ -4,11 +4,11 @@ import { PresetsSection } from './PresetsSection';
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function MigrationSummaryRow({ label, count, tone }) {
+function MigrationSummaryRow({ label, count, tone, unit = '명' }) {
   return (
     <div className={`migration-summary-row migration-summary-row--${tone}`}>
       <span className="migration-summary-label">{label}</span>
-      <span className="migration-summary-count">{count}명</span>
+      <span className="migration-summary-count">{count}{unit}</span>
     </div>
   );
 }
@@ -56,11 +56,14 @@ export function MigrationReportModal({
   onPresetsImported,
   session,
 }) {
-  const migrated      = result?.migrated      ?? [];
-  const alreadySynced = result?.alreadySynced ?? [];
-  const failed        = result?.failed        ?? [];
-  const hasFailed     = failed.length > 0;
-  const allSucceeded  = status === 'done' && !hasFailed;
+  const migrated         = result?.migrated      ?? [];
+  const alreadySynced    = result?.alreadySynced ?? [];
+  const failed           = result?.failed        ?? [];
+  const presetResult     = result?.presetResult;
+  const presetFailed     = presetResult?.failed?.length ?? 0;
+  const hasPatientFailed = failed.length > 0;
+  const hasFailed        = hasPatientFailed || presetFailed > 0;
+  const allSucceeded     = status === 'done' && !hasFailed;
 
   const handleRetry = () => onRetry(failed.map(f => f.patient));
 
@@ -117,10 +120,10 @@ export function MigrationReportModal({
             <div className="migration-summary">
               <MigrationSummaryRow label="서버 등록 완료"     count={migrated.length}      tone="success" />
               <MigrationSummaryRow label="이미 등록됨 (건너뜀)" count={alreadySynced.length} tone="neutral" />
-              <MigrationSummaryRow label="실패"               count={failed.length}        tone={hasFailed ? 'error' : 'neutral'} />
+              <MigrationSummaryRow label="실패"               count={failed.length}        tone={hasPatientFailed ? 'error' : 'neutral'} />
             </div>
 
-            {hasFailed && (
+            {hasPatientFailed && (
               <div className="migration-failed-section">
                 <div className="migration-failed-header">
                   실패한 환자 목록
@@ -140,6 +143,15 @@ export function MigrationReportModal({
                     />
                   ))}
                 </ul>
+              </div>
+            )}
+
+            {presetResult && (
+              <div className="migration-summary migration-summary--presets">
+                <div className="migration-summary-section-label">프리셋</div>
+                <MigrationSummaryRow label="서버 등록 완료"       count={presetResult.migrated} tone="success" unit="개" />
+                <MigrationSummaryRow label="이미 등록됨 (건너뜀)" count={presetResult.skipped}  tone="neutral" unit="개" />
+                <MigrationSummaryRow label="실패"                 count={presetFailed}          tone={presetFailed > 0 ? 'error' : 'neutral'} unit="개" />
               </div>
             )}
 

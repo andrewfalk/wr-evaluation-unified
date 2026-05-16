@@ -46,7 +46,7 @@ export function getPresetDescription(preset) {
   return safePreset.description ?? '';
 }
 
-function normalizePresetRecord(preset = {}) {
+export function normalizePresetRecord(preset = {}) {
   return {
     ...preset,
     jobName: normalizePresetIdentityPart(preset.jobName),
@@ -127,7 +127,7 @@ function buildIdempotencyKey(preset) {
   }
 }
 
-async function fetchServerPresets(session) {
+export async function fetchServerPresets(session) {
   const data = await requestJson('/api/presets', {
     session,
     baseUrl: session?.apiBaseUrl,
@@ -138,7 +138,7 @@ async function fetchServerPresets(session) {
   return parsed.success ? parsed.data : (data.presets || []);
 }
 
-async function createServerPreset(preset, session) {
+export async function createServerPreset(preset, session) {
   const data = await requestJson('/api/presets', {
     method: 'POST',
     session,

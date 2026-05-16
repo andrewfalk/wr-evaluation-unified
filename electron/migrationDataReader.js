@@ -70,17 +70,20 @@ async function readMigrationSnapshot(dataDir) {
   const patientsDir = path.join(dataDir, 'patients');
   const indexPath = path.join(dataDir, 'index.json');
   const autosavePath = path.join(dataDir, 'autosave.json');
+  const customPresetsPath = path.join(dataDir, 'custom-presets.json');
 
-  const [savedItems, indexedPatients, autoSave] = await Promise.all([
+  const [savedItems, indexedPatients, autoSave, customPresets] = await Promise.all([
     readSavedItems(savedDir),
     readIndexedPatients(patientsDir, indexPath),
     readJsonSafe(autosavePath, null),
+    readJsonSafe(customPresetsPath, []),
   ]);
 
   return {
     savedItems,
     indexedPatients,
     autoSave,
+    customPresets: Array.isArray(customPresets) ? customPresets : [],
     summary: {
       savedItemCount: savedItems.length,
       indexedPatientCount: indexedPatients.length,

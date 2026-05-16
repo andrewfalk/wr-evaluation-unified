@@ -3,6 +3,7 @@ import {
   collectLocalPatients,
   migrateToServer,
   mergePatientsFromSnapshot,
+  migratePresetsToServer,
   runMigration,
   MigrationCanceledError,
   MigrationDeniedError,
@@ -21,8 +22,16 @@ vi.mock('../patientServerRepository.js', () => ({
   pushPatient: vi.fn(),
 }));
 
+vi.mock('../presetRepository.js', () => ({
+  fetchServerPresets:  vi.fn(),
+  createServerPreset:  vi.fn(),
+  normalizePresetRecord: vi.fn(p => ({ ...p, category: p.category || '미분류', description: p.description || '' })),
+  buildPresetIdentity:   vi.fn(p => [p.jobName, p.category || '미분류', p.description || ''].join('|||')),
+}));
+
 import { loadAutoSave, loadSavedItems } from '../../utils/storage';
 import { pushPatient } from '../patientServerRepository.js';
+import { fetchServerPresets, createServerPreset } from '../presetRepository.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -301,12 +310,40 @@ describe('migrateToServer', () => {
     expect(pushPatient).not.toHaveBeenCalled();
     expect(result.alreadySynced).toHaveLength(1);
   });
+
+  it('stamps session user name into doctorName so server assigns to the logged-in doctor', async () => {
+    const sessionWithUser = { ...SESSION, user: { id: 'u1', name: '김의사', role: 'doctor' } };
+    const local = makePatient('p1', { data: { shared: { name: 'P-1', doctorName: '구형이름' }, modules: {}, activeModules: [] } });
+    const synced = { ...local, sync: { serverId: 'srv-p1', revision: 1, syncStatus: 'synced' } };
+    pushPatient.mockResolvedValue(synced);
+
+    await migrateToServer([local], { session: sessionWithUser });
+
+    const pushedPatient = pushPatient.mock.calls[0][0];
+    expect(pushedPatient.data.shared.doctorName).toBe('김의사');
+  });
+
+  it('does not modify the patient when session has no user name', async () => {
+    const local = makePatient('p1', { data: { shared: { name: 'P-1', doctorName: '구형이름' }, modules: {}, activeModules: [] } });
+    const synced = { ...local, sync: { serverId: 'srv-p1', revision: 1, syncStatus: 'synced' } };
+    pushPatient.mockResolvedValue(synced);
+
+    await migrateToServer([local], { session: SESSION });
+
+    const pushedPatient = pushPatient.mock.calls[0][0];
+    expect(pushedPatient.data.shared.doctorName).toBe('구형이름');
+  });
 });
 
 // ---------------------------------------------------------------------------
 // runMigration
 // ---------------------------------------------------------------------------
 describe('runMigration', () => {
+  beforeEach(() => {
+    fetchServerPresets.mockResolvedValue([]);
+    createServerPreset.mockResolvedValue({});
+  });
+
   it('collects from storage and migrates in one call', async () => {
     const p1 = makePatient('p1');
     const syncedP1 = { ...p1, sync: { serverId: 'srv-1', revision: 1, syncStatus: 'synced' } };
@@ -319,10 +356,114 @@ describe('runMigration', () => {
     expect(result.migrated).toHaveLength(1);
     expect(result.failed).toHaveLength(0);
     expect(result.alreadySynced).toHaveLength(0);
+    expect(result.presetResult).toEqual({ migrated: 0, skipped: 0, failed: [] });
   });
 
   it('returns all-empty result when storage is empty', async () => {
     const result = await runMigration({ session: SESSION });
-    expect(result).toEqual({ migrated: [], failed: [], alreadySynced: [] });
+    expect(result.migrated).toEqual([]);
+    expect(result.failed).toEqual([]);
+    expect(result.alreadySynced).toEqual([]);
+    expect(result.presetResult).toEqual({ migrated: 0, skipped: 0, failed: [] });
+  });
+
+  it('calls IPC only once when intranet snapshot is available', async () => {
+    const ipcMock = vi.fn().mockResolvedValue({
+      savedItems: [], indexedPatients: [], autoSave: null, customPresets: [],
+    });
+    vi.stubGlobal('window', { electron: { loadLocalMigrationData: ipcMock } });
+
+    await runMigration({ session: SESSION });
+
+    expect(ipcMock).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
+
+  it('migrates presets from snapshot alongside patients', async () => {
+    const preset = { jobName: '용접공', category: '제조업', description: '', modules: {} };
+    const ipcMock = vi.fn().mockResolvedValue({
+      savedItems: [], indexedPatients: [], autoSave: null,
+      customPresets: [preset],
+    });
+    vi.stubGlobal('window', { electron: { loadLocalMigrationData: ipcMock } });
+    createServerPreset.mockResolvedValue({ id: 'srv-p1', ...preset });
+
+    const result = await runMigration({ session: SESSION });
+
+    expect(result.presetResult.migrated).toBe(1);
+    expect(result.presetResult.skipped).toBe(0);
+    expect(result.presetResult.failed).toHaveLength(0);
+    vi.unstubAllGlobals();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// migratePresetsToServer
+// ---------------------------------------------------------------------------
+describe('migratePresetsToServer', () => {
+  beforeEach(() => {
+    fetchServerPresets.mockResolvedValue([]);
+    createServerPreset.mockResolvedValue({});
+  });
+
+  it('returns zeros for empty preset list', async () => {
+    const result = await migratePresetsToServer([], { session: SESSION });
+    expect(result).toEqual({ migrated: 0, skipped: 0, failed: [] });
+    expect(fetchServerPresets).not.toHaveBeenCalled();
+  });
+
+  it('uploads new presets and returns migrated count', async () => {
+    const preset = { jobName: '용접공', category: '제조업', description: '', modules: {} };
+    createServerPreset.mockResolvedValue({ id: 'srv-1', ...preset });
+
+    const result = await migratePresetsToServer([preset], { session: SESSION });
+
+    expect(createServerPreset).toHaveBeenCalledOnce();
+    expect(result.migrated).toBe(1);
+    expect(result.skipped).toBe(0);
+    expect(result.failed).toHaveLength(0);
+  });
+
+  it('skips presets already on the server', async () => {
+    const existing = { jobName: '용접공', category: '미분류', description: '' };
+    fetchServerPresets.mockResolvedValue([existing]);
+
+    const result = await migratePresetsToServer([existing], { session: SESSION });
+
+    expect(createServerPreset).not.toHaveBeenCalled();
+    expect(result.migrated).toBe(0);
+    expect(result.skipped).toBe(1);
+  });
+
+  it('deduplicates within the local batch', async () => {
+    const preset = { jobName: '용접공', category: '제조업', description: '', modules: {} };
+
+    const result = await migratePresetsToServer([preset, preset], { session: SESSION });
+
+    expect(createServerPreset).toHaveBeenCalledOnce();
+    expect(result.migrated).toBe(1);
+    expect(result.skipped).toBe(1);
+  });
+
+  it('collects POST failures without throwing', async () => {
+    const preset = { jobName: '용접공', category: '제조업', description: '', modules: {} };
+    createServerPreset.mockRejectedValue(new Error('server error'));
+
+    const result = await migratePresetsToServer([preset], { session: SESSION });
+
+    expect(result.migrated).toBe(0);
+    expect(result.failed).toHaveLength(1);
+  });
+
+  it('absorbs fetchServerPresets failure into result without throwing', async () => {
+    const preset = { jobName: '용접공', category: '제조업', description: '', modules: {} };
+    fetchServerPresets.mockRejectedValue(new Error('network error'));
+
+    const result = await migratePresetsToServer([preset], { session: SESSION });
+
+    expect(result.migrated).toBe(0);
+    expect(result.skipped).toBe(0);
+    expect(result.failed).toHaveLength(1);
+    expect(createServerPreset).not.toHaveBeenCalled();
   });
 });

@@ -46,6 +46,7 @@ export function useMigration({ session, settings } = {}) {
         migrated:     [...(prev?.migrated     ?? []), ...r.migrated],
         alreadySynced:[...(prev?.alreadySynced ?? []), ...r.alreadySynced],
         failed:       r.failed,
+        presetResult: prev?.presetResult,
       }));
       setStatus('done');
     } catch (err) {

@@ -687,7 +687,7 @@ ipcMain.handle('fs-migrate', async (_e, { savedItems, autoSave, settings }) => {
 // 디스크 읽기. patients/는 index.json 기준만 — fs-save-all-patients가 stale 파일을
 // 정리하지 않아 ghost 부활 위험이 있음. saved/, autosave.json은 사용자 명시 데이터.
 ipcMain.handle('migration-load-local-data', async (event) => {
-  const empty = { savedItems: [], indexedPatients: [], autoSave: null };
+  const empty = { savedItems: [], indexedPatients: [], autoSave: null, customPresets: [] };
 
   const gate = evaluateMigrationGate({
     isIntranet: IS_INTRANET_BUILD,

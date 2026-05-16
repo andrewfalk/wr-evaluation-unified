@@ -167,4 +167,38 @@ describe('readMigrationSnapshot', () => {
     await expect(readMigrationSnapshot(tmpDir)).rejects.toMatchObject({ code: 'EACCES' });
     spy.mockRestore();
   });
+
+  it('reads custom-presets.json when present', async () => {
+    const presets = [{ id: 'p1', jobName: '용접공', category: '제조업', modules: {} }];
+    await writeJson(path.join(tmpDir, 'custom-presets.json'), presets);
+    const snap = await readMigrationSnapshot(tmpDir);
+    expect(snap.customPresets).toEqual(presets);
+  });
+
+  it('returns [] for customPresets when custom-presets.json is absent', async () => {
+    const snap = await readMigrationSnapshot(tmpDir);
+    expect(snap.customPresets).toEqual([]);
+  });
+
+  it('returns [] for customPresets when custom-presets.json has corrupt JSON', async () => {
+    await fs.writeFile(path.join(tmpDir, 'custom-presets.json'), 'not-json', 'utf-8');
+    const snap = await readMigrationSnapshot(tmpDir);
+    expect(snap.customPresets).toEqual([]);
+  });
+
+  it('returns [] for customPresets when file contains non-array JSON', async () => {
+    await writeJson(path.join(tmpDir, 'custom-presets.json'), { oops: true });
+    const snap = await readMigrationSnapshot(tmpDir);
+    expect(snap.customPresets).toEqual([]);
+  });
+
+  it('surfaces EACCES on custom-presets.json instead of swallowing it', async () => {
+    const eacces = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    const spy = vi.spyOn(fs, 'readFile').mockImplementation(async (filePath) => {
+      if (String(filePath).endsWith('custom-presets.json')) throw eacces;
+      return '[]';
+    });
+    await expect(readMigrationSnapshot(tmpDir)).rejects.toMatchObject({ code: 'EACCES' });
+    spy.mockRestore();
+  });
 });
