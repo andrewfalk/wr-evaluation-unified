@@ -34,13 +34,13 @@
     .\scripts\export-offline-package.ps1
 
     # Explicit installer path (recommended when both build targets exist)
-    .\scripts\export-offline-package.ps1 -ElectronInstallerPath "dist\electron\직업성 질환 통합 평가 프로그램 Setup 4.2.1.exe"
+    .\scripts\export-offline-package.ps1 -ElectronInstallerPath "dist\electron\직업성 질환 통합 평가 프로그램 Setup 5.0.0.exe"
 
     # Exclude base images (target has Docker Hub access)
     .\scripts\export-offline-package.ps1 -ExcludeBaseImages
 
     # Explicit version, skip rebuild (CI reuse of previously built images)
-    .\scripts\export-offline-package.ps1 -Version "4.2.1" -SkipBuild
+    .\scripts\export-offline-package.ps1 -Version "5.0.0" -SkipBuild
 #>
 [CmdletBinding()]
 param(

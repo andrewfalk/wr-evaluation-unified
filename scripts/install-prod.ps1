@@ -152,7 +152,7 @@ $wrVersion = (Get-Content $EnvFile | Where-Object { $_ -match '^\s*WR_VERSION\s*
     ForEach-Object { ($_ -split '=', 2)[1].Trim() } | Select-Object -First 1
 
 if (-not $wrVersion) {
-    Write-Fail "WR_VERSION is not set in $EnvFile. Set it to the image tag (e.g. WR_VERSION=4.2.1)."
+    Write-Fail "WR_VERSION is not set in $EnvFile. Set it to the image tag (e.g. WR_VERSION=5.0.0)."
     exit 1
 }
 Write-Ok "WR_VERSION=$wrVersion"
