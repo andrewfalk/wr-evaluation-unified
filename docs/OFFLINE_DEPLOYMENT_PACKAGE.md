@@ -177,6 +177,20 @@ C:\Windows\System32\drivers\etc\hosts
 | 80 | TCP | HTTP (HTTPS 리다이렉트용) |
 | 443 | TCP | HTTPS (Electron 앱 + 브라우저) |
 
+서버 PC에서 PowerShell을 관리자 권한으로 실행 (시작 메뉴 → PowerShell 우클릭 → "관리자 권한으로 실행")
+아래 두 줄 실행:
+
+netsh advfirewall firewall add rule name="WR-HTTP" dir=in action=allow protocol=TCP localport=80
+netsh advfirewall firewall add rule name="WR-HTTPS" dir=in action=allow protocol=TCP localport=443
+완료되면 확인 메시지가 뜹니다. 이후 클라이언트 PC에서 브라우저로 http://서버IP 접속해서 연결되는지 테스트해보면 됩니다.
+
+서버 PC에서 ipconfig 실행하면 됩니다.
+
+IPv4 주소: 192.168.x.x  ← 이게 서버 IP
+단, 서버 IP가 DHCP로 자동 할당되면 재부팅 시 바뀔 수 있으니 고정 IP(Static IP)로 설정해두는 게 좋습니다. 안 그러면 클라이언트 PC들이 접속 못하게 됩니다.
+
+고정 IP 설정은 네트워크 설정 → 어댑터 속성 → IPv4 → 수동 입력으로 하면 됩니다.
+
 > 앱 서버 포트(3001)는 외부에 노출되지 않습니다. Caddy가 443→3001 프록시 역할을 합니다.
 
 ---
