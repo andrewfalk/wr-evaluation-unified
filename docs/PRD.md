@@ -1,8 +1,8 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 4.2.1
-> **Last Updated:** 2026-04-27
-> **Status:** MVP 개발 완료 / Vercel 배포 완료
+> **Version:** 5.0.0
+> **Last Updated:** 2026-05-16
+> **Status:** 인트라넷 백엔드 통합 완료 / T46 프로덕션 릴리즈 리허설 PASS / 오프라인 배포 패키지 v5.0.0 빌드 완료
 
 ---
 
@@ -31,17 +31,47 @@
 - **근로복지공단 자문의사** — 요양급여 신청 사례 검토
 - **산업보건 연구자** — 직업성 근골격계 질환 역학 분석
 
-### 1.4 기술 스택
+### 1.4 배포 형태 (v5.0.0)
+
+본 시스템은 동일 코드베이스에서 세 가지 형태로 배포된다:
+
+| 형태 | 사용 시나리오 | 데이터 저장 | 인증 |
+|------|---------------|-------------|------|
+| **웹 (Vercel)** | 개인 사용자, 데모, 평가 도구 단독 사용 | 브라우저 localStorage | 없음 |
+| **Electron Standalone** | 단일 PC 임상 사용, 인터넷 불가 환경 | 사용자 데이터 디렉터리 파일 | 없음 |
+| **Electron Intranet** | 병원 인트라넷, 다중 사용자 | 서버 PostgreSQL | JWT + Device 등록 |
+
+빌드 타깃은 `electron/build-target.json` (`standalone` | `intranet`)으로 분기되며, `npm run electron:build` / `npm run electron:build:intranet`로 각각 빌드한다.
+
+### 1.5 기술 스택
+
+#### 프론트엔드 / 클라이언트
 
 | 영역 | 기술 |
 |------|------|
 | 프론트엔드 | React 18, CSS Variables (다크모드 지원) |
 | 빌드 | Vite 5 |
-| 데스크톱 | Electron 21 + electron-builder (NSIS) |
+| 데스크톱 | Electron 22 + electron-builder (NSIS) |
 | 웹 배포 | Vercel (서버리스) |
-| AI | Google Gemini API + Claude API (Vercel 서버리스 프록시 / Electron IPC 직접 호출) |
+| AI | Google Gemini API + Claude API (Vercel 서버리스 / Electron IPC / 인트라넷 서버 프록시) |
 | 내보내기 | xlsx (엑셀), html2pdf.js (PDF), jszip |
 | 폰트 | Pretendard (CDN), Noto Sans KR (fallback) |
+| 테스트 | Vitest (renderer + electron) |
+
+#### 백엔드 / 인프라 (인트라넷 모드, v5.0.0 신규)
+
+| 영역 | 기술 |
+|------|------|
+| API 서버 | Node.js 20 + TypeScript + Express |
+| DB | PostgreSQL 16 (감사 로그 월별 파티셔닝) |
+| HTTPS 리버스 프록시 | Caddy 2 (내부 CA 자동 발급) |
+| 컨테이너 오케스트레이션 | Docker Compose v2.17+ (`!reset` 태그 + profile 기반 backup 분리) |
+| 인증 | JWT access(15m) + refresh(7d), bcrypt 12라운드 |
+| 감사 로그 | Ed25519 (Electron device 키페어) + append-only 파티션 |
+| 백업 | pg_dump + GPG (RSA 4096, passphrase-less 복구 키) |
+| 백업 모니터링 | 별도 컨테이너 — stale 감지, alert 파일 생성 |
+| 테스트 | Vitest (server/) — admin/auth/audit/patients/presets/workspaces/opsBackupStatus |
+| CI | (없음 — 오프라인 빌드 + 수동 리허설 패스 정책) |
 
 ---
 
@@ -925,17 +955,75 @@ src/
 │           ├── calculations.js          # computeCervicalCalc, Gate-and-Flag 엔진
 │           └── exportHandlers.js        # EMR Excel, 엑셀 요약
 │
-api/analyze.js                           # Vercel 서버리스 (Claude API 프록시)
+api/analyze.js                           # Vercel 서버리스 (Gemini/Claude 프록시, standalone 모드)
 electron/
 ├── main.js                              # Electron 메인 프로세스
-└── preload.js                           # IPC 브릿지
+├── preload-standalone.js                # standalone 빌드 preload
+├── preload-intranet.js                  # intranet 빌드 preload (device 등록, 감사 서명) — v5.0.0
+├── build-target.json                    # standalone | intranet 분기 설정 — v5.0.0
+├── audit.js                             # Ed25519 device 키페어 + 감사 서명 — v5.0.0
+├── auditQueue.js                        # 디스크 큐 (전송 실패 백업) — v5.0.0
+├── migrationGate.js, migrationDataReader.js   # standalone → intranet 마이그레이션 — v5.0.0
+└── emr-helper/                          # EMR 자동화 (C#)
 public/
 ├── images/                              # G1~G11 자세 이미지
 ├── job-presets.json                     # 직업별 부담 프리셋 DB
 └── icon.ico                             # 앱 아이콘
 ```
 
-**총 소스 파일:** 38개 (23 .jsx + 15 .js)
+### 인트라넷 모드 추가 디렉터리 (v5.0.0)
+
+```
+server/                                  # API 백엔드 — Node 20 + TS + Express
+├── Dockerfile
+├── migrations/                          # 15개 SQL migration
+├── src/
+│   ├── index.ts                         # Express 진입점, 두 개의 pg pool
+│   ├── config.ts                        # env 검증
+│   ├── middleware/                      # auth, audit, cors, rateLimit, security
+│   ├── routes/                          # auth, patients, presets, workspaces, admin,
+│   │                                    # audit, devices, ai, opsStatus
+│   ├── jobs/                            # workspaceRetention 등
+│   ├── db/                              # patientPersons, resolveAssignedDoctor
+│   └── cli/                             # seedAdmin, runRetention
+└── package.json
+
+services/backup-monitor/                 # 백업 stale 감지 + alert 컨테이너
+├── Dockerfile
+├── index.js
+└── __tests__/isStale.test.js
+
+backup/Dockerfile                        # backup 사이드카 (postgres + gnupg + cron)
+caddy/Caddyfile                          # HTTPS + 내부 CA
+
+shared/contracts/                        # 클라이언트 ↔ 서버 공유 타입 (zod)
+└── auth.ts, patient.ts, preset.ts, index.ts
+
+scripts/                                 # 운영 자동화
+├── backup.sh, restore.sh, audit-partition.sh
+├── backup-crontab, partition-crontab
+├── export-offline-package.ps1           # 오프라인 패키지 생성
+├── import-images.ps1 / .sh              # docker load 일괄
+├── install-prod.ps1                     # Windows 자동 설치
+├── set-build-target.mjs                 # standalone/intranet 빌드 토글
+└── verify-csp.mjs
+
+src/core/auth/                           # AuthContext, authChannel, session — v5.0.0
+src/core/components/                     # AdminConsoleModal, LoginModal, ChangePasswordModal,
+                                         # SignupRequestModal, AccountProfileModal,
+                                         # ConflictResolveModal, MigrationReportModal — v5.0.0
+src/core/hooks/                          # usePatientSync, useMigration, useServerConfig,
+                                         # useOpsStatus, useAIAvailable — v5.0.0
+src/core/services/                       # patientServerRepository, intranetWorkspaceRepository,
+                                         # patientConflictResolution, localToServerMigrator,
+                                         # httpClient, analysisClient — v5.0.0
+
+docker-compose.yml                       # 기본 compose (dev + intranet 공통)
+docker-compose.prod.yml                  # 프로덕션 오버레이 (포트 미노출, healthcheck)
+.env.production.example                  # 프로덕션 env 템플릿
+```
+
+**총 소스 파일:** 38개 (23 .jsx + 15 .js) — standalone 기준. 인트라넷 모드 추가분은 server/ 50+ 파일, shared/contracts 10+ 파일, src/core/{auth,components,hooks,services}/ 30+ 파일.
 
 ---
 
@@ -970,6 +1058,192 @@ npm run electron:build   # Electron 패키징 (NSIS, Windows x64+ia32)
 - `CLAUDE_API_KEY` — Anthropic Claude API 키 (선택)
 
 Vercel 대시보드 또는 `vercel env add`로 설정.
+
+---
+
+## 12.A. 인트라넷 모드 (v5.0.0 신규)
+
+병원 인트라넷 환경에서 다중 사용자 운영을 위한 풀스택 백엔드. standalone 모드와 동일한 평가 엔진을 사용하면서 데이터 저장과 인증을 서버로 위임한다.
+
+### 12.A.1 시스템 구성
+
+```
+                   [클라이언트 PC들 (Electron 인트라넷 빌드)]
+                                      │
+                                      │  HTTPS (wr.hospital.local)
+                                      ▼
+                              ┌──────────────┐
+                              │   Caddy 2    │  ── 내부 CA 자동 발급
+                              │ reverse proxy│      leaf cert 자동 갱신
+                              └──────┬───────┘
+                                     │ 127.0.0.1:3001 (외부 미노출)
+                                     ▼
+                              ┌──────────────┐       ┌────────────────┐
+                              │  app server  │◀─────▶│ PostgreSQL 16  │
+                              │ (Node/TS)    │       │  + audit reader│
+                              └──────┬───────┘       └────────┬───────┘
+                                     │                        │
+                       ┌─────────────┴───────────┐    ┌───────┴────────┐
+                       │  backup-monitor         │    │ backup sidecar │
+                       │  (stale 감지, alert)    │    │ (cron + GPG)   │
+                       └─────────────────────────┘    └────────────────┘
+```
+
+### 12.A.2 데이터베이스 스키마 (migrations 0001~0015)
+
+| Migration | 내용 |
+|---|---|
+| 0001 | 초기 스키마 (users, organizations, sessions, audit_logs, devices, ...) |
+| 0002 | patient_records — 환자 데이터 JSONB + assigned_doctor |
+| 0003 | workspaces — 자동 저장/스냅샷 |
+| 0004 | custom_presets (초기) |
+| 0005 | idempotency — POST 재시도 안전 |
+| 0006 | patient_no audit retention 정책 |
+| 0007 | workspace retention 정책 |
+| 0008 | workspace snapshot 기본값 |
+| 0009 | patient_persons — 환자 person identity 별도 테이블 |
+| 0010 | custom_presets 사용자별 |
+| 0011 | preset unique index |
+| 0012 | user_signup_requests — 비로그인 가입 요청 → admin 승인 |
+| 0013 | patient_owner 인덱스 |
+| 0014 | assigned_doctor 컬럼 |
+| 0015 | 기존 payload에서 assigned_doctor backfill |
+
+### 12.A.3 API 엔드포인트
+
+| 경로 | 메서드 | 역할 |
+|---|---|---|
+| `/api/auth/login` | POST | 로그인 (JWT 발급, must_change_password 응답 포함) |
+| `/api/auth/refresh` | POST | refresh token으로 access token 재발급 |
+| `/api/auth/logout` | POST | refresh token 무효화 |
+| `/api/auth/change-password` | POST | 비밀번호 변경 (must_change_password 해제) |
+| `/api/auth/signup-request` | POST | 비로그인 가입 요청 |
+| `/api/devices/register` | POST | Electron device 등록 (pending 상태로 insert) |
+| `/api/patients` | CRUD | 환자 CRUD + 충돌 감지 (updated_at 기반 ETag) |
+| `/api/presets` | CRUD | custom 직업 프리셋 |
+| `/api/workspaces` | CRUD | 자동 저장 / 스냅샷 |
+| `/api/audit` | POST | Electron 서명 감사 로그 수신 |
+| `/api/admin/users` | CRUD | (admin) 사용자 관리 |
+| `/api/admin/devices/:id/approve` | POST | (admin) device 승인 |
+| `/api/admin/audit` | GET | (admin) audit log 조회 (read-only role) |
+| `/api/admin/signup-requests` | CRUD | (admin) 가입 요청 처리 |
+| `/api/ops/backup-status` | GET | 백업 상태 조회 |
+| `/api/ai` | POST | Gemini/Claude 프록시 (서버 환경변수 키 사용) |
+
+### 12.A.4 인증 / 세션
+
+- **JWT**: ACCESS_TOKEN_SECRET / REFRESH_TOKEN_SECRET (32 bytes hex 각각)
+- **must_change_password**: admin이 신규 사용자 생성 시 `true` → 첫 로그인 시 강제 변경
+- **비밀번호 정책**: 10자 이상, 영문 + 숫자 + 특수문자 1개 이상
+- **bcrypt**: 12라운드
+- **rate limit**: login에 적용 (`middleware/rateLimit.ts`)
+- **CSRF**: csrfCookie 유틸리티 (renderer 측, 인트라넷 모드만)
+
+### 12.A.5 Electron Device 등록 / 감사
+
+**Device 등록 흐름** (`electron/audit.js`)
+1. 앱 첫 실행 → `initAudit()`이 Ed25519 키페어 생성 후 `wr-device.json`에 저장
+2. 로그인 시 `setAccessToken` IPC → `tryRegister()` 호출 → `POST /api/devices/register`
+3. 서버는 `pending` 상태로 insert (admin 승인 대기)
+4. 관리자가 `POST /api/admin/devices/:id/approve` 호출 → `active`로 업데이트
+5. `flushQueue` (5분 간격)에서 pending이면 `tryRegister()` 재시도 → 승인 후 자동 갱신
+
+**감사 로그 서명**
+- 모든 사용자 액션은 device 개인키로 Ed25519 서명
+- canonical message: `{deviceId}.{ts}.{nonce}.{sortedBodyJson}`
+- 서버는 `devices.public_key`로 검증, 통과 시 `audit_logs` 파티션에 insert
+- 네트워크 실패 시 `auditQueue` (디스크 큐)에 저장 → `flushQueue`에서 재전송
+
+**EMR 접근 제어**
+- IS_INTRANET_BUILD + EMR 호출 → `audit.getDeviceStatus()` 검사
+- `status !== 'active'`이면 EMR helper 호출 거부 (pending: 승인 대기 메시지)
+
+### 12.A.6 백업 / 복구
+
+**백업** (`scripts/backup.sh`, daily cron)
+1. `pg_dump --format=custom` → plaintext dump
+2. `gpg --encrypt --recipient $BACKUP_GPG_RECIPIENT` → `.dump.gpg`
+3. `/backups/daily/wr-backup-{RUN_ID}.dump.gpg` + `_status/`, `_alerts/` 갱신
+4. 성공 시 resolved alert 자동 prune, 실패 시 `_alerts/FAILED_{RUN_ID}.json` 생성
+
+**모니터링** (`services/backup-monitor`)
+- 매시간 `_status/backup-status.json` + `_alerts/*.json` 점검
+- stale (마지막 성공 24h 초과) 시 alert 생성
+- `/api/ops/backup-status`로 admin 콘솔에 노출
+
+**복구** (`scripts/restore.sh`)
+- 2인 인가 (`RESTORE_AUTH_TICKET` 필수)
+- `GPG_PASSPHRASE` env 지원 (passphrase 있는 키 대응) — 단 권장은 복구 전용 passphrase-less 키 사용
+- 임시 DB 컨테이너에서 복원 → row count 검증 → 운영 DB는 별도 절차로 교체
+
+**복구 전용 GPG 키 정책**
+- production `wr-prod_backup_gnupg` volume에는 **공개키만** 보관
+- 개인키(`wr-backup-restore-private.asc`)는 USB 등 오프라인 매체에 별도 보관
+- 운영 데이터는 패키지에 포함하지 않으며, secret도 패키지에 포함하지 않고 example만 제공
+
+### 12.A.7 데이터 마이그레이션 (standalone → intranet)
+
+기존 standalone 사용자가 인트라넷 모드로 전환 시:
+
+1. **MigrationGate** (`electron/migrationGate.js`): 인트라넷 모드 첫 진입 시 사용자 데이터 디렉터리에 standalone 데이터가 있는지 확인
+2. **migrationDataReader**: `wr-eval-data/patients/*.json`, `saved/*.json` 읽기
+3. **localToServerMigrator** (`src/core/services/`): 환자 데이터를 서버 스키마로 변환 후 `/api/patients`로 일괄 업로드
+4. **MigrationReportModal**: 성공/실패/스킵 항목 리포트, 사용자가 결과 확인 후 확정
+5. 확정 후 standalone 데이터는 보존 (재실행 시 다시 마이그레이션되지 않도록 flag 저장)
+
+### 12.A.8 실시간 동기화 / 충돌 해결
+
+- **usePatientSync**: 인트라넷 모드에서 환자 목록을 주기적으로 폴링 + 다른 사용자의 변경 감지
+- **patientConflictResolution**: 동일 환자를 다른 클라이언트에서 동시 편집 시 충돌 감지
+  - 서버는 `updated_at`을 ETag로 사용 → PUT 시 `If-Unmodified-Since` 검증
+  - 충돌 시 409 응답 → 클라이언트에서 ConflictResolveModal 표시
+  - 사용자 선택: mine (내 버전으로 덮어쓰기) / theirs (서버 버전 적용) / merge (필드별 수동 병합)
+
+### 12.A.9 관리자 콘솔 (AdminConsoleModal)
+
+탭 구성:
+1. **사용자 관리** — CRUD, 역할 변경, 비밀번호 리셋
+2. **기기 관리** — pending device 승인/거부, active device 목록
+3. **감사 로그** — `wr_audit_reader` read-only role로 조회, 필터 (action, user, date range)
+4. **백업 상태** — 마지막 백업 시각, 성공/실패, alert 목록 (해결 처리)
+5. **가입 요청** — signup-request 승인/거부
+
+### 12.A.10 오프라인 배포 패키지
+
+`scripts/export-offline-package.ps1`로 생성. 자세한 명세는 [docs/OFFLINE_DEPLOYMENT_PACKAGE.md](OFFLINE_DEPLOYMENT_PACKAGE.md) 참조.
+
+**구성:**
+- Docker 이미지: app, backup-monitor, backup + 베이스 (postgres:16-alpine, caddy:2-alpine)
+- Electron 인스톨러: `직업성 질환 통합 평가 프로그램 Setup {VERSION}.exe`
+- compose 파일, Caddyfile, 스크립트, 문서
+- SHA256SUMS, release-manifest.json
+
+**보안 가드:**
+- `.env`, `.env.production` 실제 시크릿 파일은 패키지에서 제외
+- private GPG key (`wr-backup-private.asc`, `wr-backup-restore-private.asc`)는 제외
+- 운영 데이터, DB dump, volume snapshot 절대 미포함
+- 시크릿 누출 가드(`Secret leak guard`) 단계가 export 스크립트에 자동 통합
+
+### 12.A.11 T46 프로덕션 릴리즈 리허설 (v5.0.0)
+
+**리허설 7개 섹션 (전 PASS):**
+
+| 섹션 | 항목 | 핵심 검증 |
+|---|---|---|
+| 1 | Production 환경 분리 | `wr-prod_*` volume 격리, 포트 미노출 |
+| 2 | 오프라인 패키지 무결성 | SHA256SUMS, secret 미포함, Electron 인스톨러 포함 |
+| 3 | Admin 초기화 | seedAdmin 비대화형 파이프 입력, must_change_password 플로우 |
+| 4 | Device 등록 / 승인 | doctor01 로그인 → pending → admin 승인 → active 자동 인식 |
+| 5 | 백업 | pg_dump + GPG 암호화 성공, monitor "ok" |
+| 6 | 복구 리허설 | 임시 DB에서 GPG 복호화 + pg_restore, row count 일치, 운영 DB 무영향 |
+| 7 | 롤백 dry-run | `WR_VERSION=4.2.0`으로 compose config 검증, 파괴 명령 미실행 |
+
+**리허설 중 발견된 개선 항목 (모두 fix 완료):**
+
+| 항목 | 조치 |
+|---|---|
+| alert resolve 권한 (500 에러) | `backup.sh`의 `write_json_atomic`에 `_alerts/` 경로 감지 시 `chown 1000:1000` 추가 |
+| GPG 개인키 passphrase | `restore.sh`에 `GPG_PASSPHRASE` env 지원 + 복구 전용 passphrase-less 키 발급 가이드 |
 
 ---
 
@@ -1129,11 +1403,15 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 | P0 | ~~런타임 검증~~ | ~~빌드 완료 상태, 실제 사용 시나리오 테스트~~ → Vercel 배포 완료 |
 | P0 | ~~어깨 모듈~~ | ~~shoulder 모듈 추가~~ → v3.0.0 완료 |
 | P0 | ~~팔꿈치 모듈~~ | ~~elbow 모듈 추가 (BK2101/2103/2105/2106)~~ → v3.2.0 완료 |
+| P0 | ~~다중 사용자 / 인트라넷 백엔드~~ | ~~서버 기반 데이터 저장 + 사용자 인증 + device 등록 + 감사 로그~~ → v5.0.0 완료 |
+| P0 | ~~프로덕션 릴리즈 리허설~~ | ~~T46 7개 섹션 전체 PASS, 오프라인 패키지 빌드 완료~~ → v5.0.0 완료 |
 | P1 | 고관절 모듈 | hip 모듈 추가 (플러그인 패턴 활용) |
+| P1 | 현장 device smoke | 병원 PC에 인트라넷 인스톨러 배포 + 의료진 device 등록 검증 |
 | P2 | ~~척추 프리셋 연동~~ | ~~직업 프리셋 선택 시 MDDM 작업/변수 자동 채움~~ → v3.2.1 완료 (전 모듈 presetConfig 지원) |
 | P2 | ~~EMR 데이터 추출~~ | ~~진료기록분석지/다학제회신 자동 추출~~ → v3.3.0 완료 |
 | P2 | 통합 PDF/Word | 통합 보고서를 PDF/Word 형식으로도 출력 |
-| P3 | 다중 사용자 | 서버 기반 데이터 저장 + 사용자 인증 |
+| P2 | 백업 자동 재해 복구 훈련 | 분기별 1회 복구 전용 환경에서 실제 복원 검증 |
+| P3 | 다국어 지원 (i18n) | 영어 인터페이스 추가 — 해외 직업환경의학 도구로 확장 |
 
 ### Phase 13: 어깨 모듈 구현 (v3.0.0)
 
@@ -1282,6 +1560,80 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 - **프리셋 적용 시 기본 task 교체 (경추·척추)**: `applyToModule`에서 `sharedJobId`가 비어 있는 초기 기본 task를 교체 대상으로 처리 — 프리셋 적용 후 "작업 1"이 잔존하던 문제 해결
 - **경추 프리셋 id 이중 생성 제거**: `applyToModule`의 불필요한 `id: createCervicalTask(...).id` 재할당 삭제
 
+### Phase 22: 인트라넷 백엔드 + 오프라인 배포 (v5.0.0)
+
+이전 Phase들은 모두 클라이언트 단일 앱 단위였지만, v5.0.0은 **병원 인트라넷 환경에서 다중 사용자 운영**을 위한 풀스택 백엔드 도입이 핵심. 동일 React 평가 엔진을 그대로 사용하면서 데이터 저장 / 인증 / 감사 / 백업을 모두 서버로 위임.
+
+**Phase 22-A: 백엔드 API 서버 구축**
+- `server/` 디렉토리 신설 — Node 20 + TypeScript + Express + PostgreSQL 16
+- 15개 SQL migration (users, organizations, sessions, devices, audit_logs(partition), patient_records, custom_presets, workspaces, user_signup_requests 등)
+- 두 개의 pg pool (메인 + audit reader)
+- JWT 인증 (access 15m + refresh 7d), bcrypt 12라운드, must_change_password 정책
+- 역할 기반 (admin/doctor/nurse/staff), CSRF 쿠키, rate limit
+- DTO 검증: `shared/contracts/*` (zod) — 클라이언트와 타입 공유
+- 테스트: server/src/**/__tests__/* (admin, auth, audit, patients, presets, workspaces, opsBackupStatus)
+
+**Phase 22-B: Electron 인트라넷 빌드 분기**
+- `electron/build-target.json` (`standalone` | `intranet`) — preload-standalone.js / preload-intranet.js 분리
+- `electron/audit.js`: Ed25519 device 키페어 생성 + 감사 메시지 서명 (canonical: `{deviceId}.{ts}.{nonce}.{sortedBodyJson}`)
+- `electron/auditQueue.js`: 디스크 큐로 네트워크 실패 백업, `flushQueue` 5분 주기 자동 재전송
+- Device 등록 흐름: 첫 실행 시 키페어 생성 → 로그인 시 `tryRegister()` → 서버 pending → admin 승인 → active 자동 인식
+- EMR 접근 제어: `IS_INTRANET_BUILD` + EMR 호출 시 `audit.getDeviceStatus()` 검사, active 아니면 차단
+- `migrationGate.js` + `migrationDataReader.js`: 인트라넷 첫 진입 시 standalone 데이터 자동 마이그레이션 게이트
+
+**Phase 22-C: 다중 사용자 UI**
+- `src/core/auth/` — AuthContext, authChannel(자동 refresh), session
+- `src/core/components/LoginModal.jsx`, `ChangePasswordModal.jsx`, `AccountProfileModal.jsx`
+- `AdminConsoleModal.jsx` — 사용자/디바이스/감사로그/백업/가입요청 5개 탭
+- `SignupRequestModal.jsx` — 비로그인 가입 요청
+- `ConflictResolveModal.jsx` — 동시 편집 충돌 시 mine/theirs/merge 선택
+- `MigrationReportModal.jsx` — standalone → 서버 마이그레이션 결과 리포트
+
+**Phase 22-D: 서버 통신 / 동기화**
+- `patientServerRepository`: 환자 CRUD + assigned_doctor 자동 해결 (`resolveAssignedDoctor`)
+- `intranetWorkspaceRepository`: 워크스페이스 서버 저장
+- `httpClient`: 자동 refresh + CSRF + 에러 매핑
+- `usePatientSync`: 환자 목록 폴링 + 다른 사용자 변경 감지
+- `patientConflictResolution`: ETag(updated_at) 낙관적 락
+- `localToServerMigrator`: standalone localStorage/파일 → 서버 일괄 전송
+
+**Phase 22-E: HTTPS / 내부 CA**
+- `caddy/Caddyfile`: `tls internal`로 내부 CA 자동 생성 + leaf 자동 갱신
+- `wr-prod-caddy-1`에서 `/data/caddy/pki/authorities/local/root.crt` 추출 → 클라이언트 PC 신뢰 등록
+- 3가지 설치 방법 문서화: GUI / PowerShell Import-Certificate / certutil
+
+**Phase 22-F: 백업 / 모니터링 / 복구**
+- `backup/Dockerfile` — postgres:16-alpine + gnupg + busybox-suid (cron)
+- `scripts/backup.sh` — pg_dump → GPG 암호화 → `_status/`, `_alerts/` 갱신, resolved alert prune
+- `services/backup-monitor/` — 별도 컨테이너, stale 감지, alert 파일 생성
+- `/api/ops/backup-status` 엔드포인트로 admin 콘솔에 노출
+- `scripts/restore.sh` — 2인 인가(`RESTORE_AUTH_TICKET`) + `GPG_PASSPHRASE` env 지원
+- **복구 전용 키 정책**: passphrase-less RSA 4096 별도 발급 (`wr-backup-restore-public.asc` / `*-private.asc`)
+
+**Phase 22-G: 오프라인 배포 패키징**
+- `scripts/export-offline-package.ps1` — Docker save → tar → zip 일괄
+- 포함: app/backup-monitor/backup 이미지 + postgres:16-alpine + caddy:2-alpine + Electron 인스톨러 + compose + Caddyfile + 스크립트 + 문서
+- SHA256SUMS, release-manifest.json 자동 생성
+- 시크릿 누출 가드: `.env`, `*-private.asc`, DB dump 등 자동 검출 후 제외 확인
+- `scripts/import-images.ps1` / `.sh` — docker load 일괄
+- `scripts/install-prod.ps1` — Windows 자동 설치 (사전 검증 6단계 → up -d)
+
+**Phase 22-H: T46 프로덕션 릴리즈 리허설 (전 섹션 PASS)**
+- 7개 섹션: 환경 분리 / 패키지 무결성 / Admin 초기화 / Device 등록 승인 / 백업 / 복구 / 롤백 dry-run
+- 발견 + fix 완료:
+  - **alert resolve 권한**: `backup.sh`의 `_alerts/*.json`이 root 소유 → `chown 1000:1000` 추가
+  - **GPG passphrase 비대화형 실패**: `restore.sh`에 `GPG_PASSPHRASE` env 지원 + 복구 전용 passphrase-less 키 발급 가이드
+- `seedAdmin.ts` 비대화형 파이프 입력 수정 (`fs.readFileSync(0, 'utf-8').split(/\r?\n/)` 사전 읽기)
+- 리허설 결과 → `docs/T46_GO_NO_GO.md` 7개 섹션 PASS 확정
+
+**Phase 22-I: 문서 (신규 / 대폭 개정)**
+- `docs/OFFLINE_DEPLOYMENT_PACKAGE.md` — 12개 섹션 단계별 설치 가이드 (Windows/Linux 분리, PowerShell 실행 정책, 인증서 등록, GPG 키 생성, 백업 활성화, 트러블슈팅)
+- `docs/PRODUCTION_RELEASE_PLAN.md` — 운영 절차서 (롤백 6-2/6-3 경로 분기)
+- `docs/T46_GO_NO_GO.md`, `docs/T46_IMPLEMENTATION_PLAN.md`
+- `docs/OPERATIONS_RUNBOOK.md`, `docs/BACKUP_MONITORING_PLAN.md`
+- `docs/INTRANET_DEPLOYMENT.md` — HTTPS / 내부 CA / 인증서 신뢰 등록
+- 기존 `docs/BACKUP_RESTORE.md` 대폭 보강
+
 ---
 
 ## 부록 A: MDDM 자세 코드
@@ -1351,18 +1703,127 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 
 ## 부록 C: 주요 의존성 버전
 
+### 클라이언트
+
 | 패키지 | 버전 |
 |--------|------|
 | react | 18.2.0 |
 | react-dom | 18.2.0 |
 | vite | 5.0.0 |
-| electron | 21.4.4 |
+| electron | 22.x |
 | xlsx | 0.18.5 |
 | html2pdf.js | 0.10.1 |
+
+### 서버 (인트라넷 모드, v5.0.0)
+
+| 패키지 | 버전 |
+|--------|------|
+| node | 20 (Docker 컨테이너) |
+| typescript | 5.x |
+| express | 4.x |
+| pg | 8.x (PostgreSQL 드라이버) |
+| bcrypt | 5.x |
+| jsonwebtoken | 9.x |
+| zod | 3.x (DTO 검증) |
+| vitest | 1.x (테스트) |
+
+### 인프라
+
+| 컴포넌트 | 버전 |
+|----------|------|
+| PostgreSQL | 16 (alpine) |
+| Caddy | 2 (alpine) |
+| Docker Engine | 24+ |
+| Docker Compose | v2.17+ (`!reset` 태그 필수) |
 
 ---
 
 ## 변경 이력
+
+### v5.0.0 (2026-05-16) — 인트라넷 백엔드 + 다중 사용자 모드 + 오프라인 배포
+
+병원 인트라넷 환경 운영을 위한 풀스택 백엔드 도입. 동일 평가 엔진 + 새로운 빌드 타깃 분리 (standalone | intranet).
+
+**백엔드 API 서버 (신규)**
+- **Node 20 + TypeScript + Express**, PostgreSQL 16 (15개 migration)
+- **인증**: JWT access(15m) + refresh(7d), bcrypt 12라운드, must_change_password 강제 흐름
+- **역할 기반 접근**: admin / doctor / nurse / staff
+- **두 개의 DB 커넥션 풀**: 메인 (wr_user) + 감사 read-only (wr_audit_reader)
+- **DTO 검증**: shared/contracts/* (zod) — 클라이언트와 타입 공유
+- **idempotency**: POST 재시도 안전 (migration 0005)
+- **테스트**: server/src/**/__tests__/* — admin, auth, audit, patients, presets, workspaces, opsBackupStatus
+
+**Electron 인트라넷 빌드 (신규)**
+- **build-target.json**: standalone / intranet 분기 (preload 파일 분리)
+- **Device 등록**: 앱 첫 실행 시 Ed25519 키페어 생성, 서버에 공개키 등록 (pending → admin 승인 → active)
+- **감사 로그 서명**: 모든 사용자 액션 → device 개인키로 서명 → 서버 검증 → audit_logs 파티션 insert
+- **auditQueue**: 네트워크 실패 시 디스크 큐, `flushQueue` (5분 간격)에서 자동 재전송
+- **자가 치유**: pending 상태에서도 flushQueue가 tryRegister 재시도 → 승인 후 자동 active 인식
+- **EMR 접근 제어**: device active 상태일 때만 EMR helper 호출 허용
+
+**다중 사용자 UI (신규)**
+- **AuthContext + authChannel**: 토큰 관리, 자동 refresh, 로그아웃
+- **LoginModal**: 인트라넷 모드 진입점
+- **ChangePasswordModal**: must_change_password 강제 흐름
+- **AccountProfileModal**: 본인 정보 / 비밀번호 변경
+- **AdminConsoleModal**: 사용자 관리, device 승인, 감사 로그, 백업 상태, 가입 요청
+- **SignupRequestModal**: 비로그인 가입 요청
+- **ConflictResolveModal**: 동시 편집 충돌 시 mine/theirs/merge 선택
+- **MigrationReportModal**: standalone → 서버 데이터 마이그레이션 결과
+
+**서버 통신 / 동기화**
+- **patientServerRepository**: 환자 CRUD (assigned_doctor 자동 해결, payload backfill)
+- **intranetWorkspaceRepository**: 워크스페이스 서버 저장
+- **usePatientSync**: 환자 목록 폴링 + 변경 감지
+- **patientConflictResolution**: ETag(updated_at) 기반 낙관적 락
+- **httpClient**: 자동 refresh + CSRF 쿠키 + 에러 매핑
+- **localToServerMigrator**: standalone localStorage/파일 → 서버 일괄 마이그레이션
+
+**HTTPS / 내부 CA**
+- **Caddy 2** `tls internal` — 내부 CA 자동 생성 + 서버 leaf 인증서 자동 발급/갱신
+- **클라이언트 신뢰 등록**: `caddy-root.crt` 추출 → `certutil -addstore -user Root` 또는 GUI 설치
+
+**백업 / 모니터링 / 복구**
+- **backup 사이드카** (postgres:16-alpine + gnupg + cron): daily pg_dump + GPG 암호화
+- **backup-monitor** (별도 컨테이너): stale 감지, alert 파일 생성, `/api/ops/backup-status`로 노출
+- **restore.sh**: 2인 인가(`RESTORE_AUTH_TICKET`) + `GPG_PASSPHRASE` env 지원
+- **복구 전용 키 정책**: passphrase-less RSA 4096 별도 발급, 운영 volume에는 공개키만
+
+**오프라인 배포 패키지** (`scripts/export-offline-package.ps1`)
+- Docker save → tar → zip 일괄 생성 (app + backup-monitor + backup + postgres:16-alpine + caddy:2-alpine)
+- Electron 인스톨러 + compose + Caddyfile + 스크립트 + 문서 포함
+- SHA256SUMS, release-manifest.json 자동 생성
+- 시크릿 누출 가드: `.env`, `*-private.asc`, DB dump 등 자동 제외 확인
+
+**설치 자동화 스크립트**
+- `import-images.ps1` / `.sh` — docker load 일괄
+- `install-prod.ps1` — Windows 자동 설치 (사전 검증 6단계 → up -d)
+
+**T46 프로덕션 릴리즈 리허설 (전 섹션 PASS)**
+1. Production 환경 분리 (`wr-prod_*` volume 격리)
+2. 오프라인 패키지 무결성 (SHA256, secret 미포함, Electron 인스톨러 포함)
+3. Admin 초기화 (seedAdmin 비대화형 파이프 입력, must_change_password 플로우)
+4. Device 등록 / 승인 (doctor01 pending → admin 승인 → active 자동 인식)
+5. 백업 (pg_dump + GPG 암호화, monitor "ok")
+6. 복구 리허설 (임시 DB에서 GPG 복호화 + pg_restore, row count 일치, 운영 DB 무영향)
+7. 롤백 dry-run (`WR_VERSION=4.2.0` compose config 검증, 파괴 명령 미실행)
+
+**리허설 중 발견 + fix 완료**
+- **alert resolve 권한**: `backup.sh` `write_json_atomic`에 `_alerts/*` 생성 후 `chown 1000:1000` → admin 콘솔 "해결" 버튼 500 에러 수정
+- **GPG passphrase**: `restore.sh`에 `GPG_PASSPHRASE` env 지원 + 복구 전용 passphrase-less 키 발급 가이드 추가
+
+**문서 (신규 / 대폭 개정)**
+- `docs/OFFLINE_DEPLOYMENT_PACKAGE.md` — 12개 섹션 단계별 설치 가이드 (Windows/Linux 분리, PowerShell 실행 정책 포함)
+- `docs/PRODUCTION_RELEASE_PLAN.md` — 운영 절차서 (롤백 6-2/6-3 경로 분기)
+- `docs/T46_GO_NO_GO.md`, `docs/T46_IMPLEMENTATION_PLAN.md`
+- `docs/OPERATIONS_RUNBOOK.md`, `docs/BACKUP_MONITORING_PLAN.md`
+- `docs/INTRANET_DEPLOYMENT.md` — HTTPS / 내부 CA / 인증서 신뢰 등록 3가지 방법
+
+**리팩터링 / 개선**
+- `seedAdmin.ts` 비대화형 파이프 입력 지원 수정 (`fs.readFileSync(0, 'utf-8').split(/\r?\n/)` 사전 읽기)
+- 프리셋 UI 한국어 라벨화 (custom → "내 프리셋", builtin → "기본 프리셋")
+- 인트라넷 모드에서 마이그레이션 직후 랜딩↔환자목록 튕김 해결
+- Electron Standalone 인스톨러에서도 마이그레이션 IPC 지원 (`feature/intranet-backend`)
 
 ### v4.2.1 (2026-04-27) — 대시보드 & 환자 관리 기능 강화
 
