@@ -1,4 +1,4 @@
-import { getDiagnosisModuleHint } from '../../../core/utils/diagnosisMapping';
+import { resolveDiagnosisModule } from '../../../core/utils/diagnosisMapping';
 
 export const EXPOSURE_TYPE_OPTIONS = [
   { value: 'shoulder_heavy_load', label: '어깨에 무거운 하중 운반' },
@@ -42,9 +42,8 @@ export function createCervicalModuleData() {
   };
 }
 
-export function isCervicalDiagnosis(diag) {
-  const hint = getDiagnosisModuleHint(diag);
-  return hint?.moduleId === 'cervical';
+export function isCervicalDiagnosis(diag, activeModules = []) {
+  return resolveDiagnosisModule(diag, activeModules)?.moduleId === 'cervical';
 }
 
 export function normalizeCervicalTask(task = {}, index = 0, sharedJobId = '') {

@@ -1,4 +1,4 @@
-import { getDiagnosisModuleHint } from '../../../core/utils/diagnosisMapping';
+import { resolveDiagnosisModule } from '../../../core/utils/diagnosisMapping';
 
 export const BK_TYPE_OPTIONS = [
   { value: '', label: '선택' },
@@ -171,8 +171,8 @@ export function createElbowModuleData() {
   };
 }
 
-export function isElbowDiagnosis(diag) {
-  return getDiagnosisModuleHint(diag)?.moduleId === 'elbow';
+export function isElbowDiagnosis(diag, activeModules = []) {
+  return resolveDiagnosisModule(diag, activeModules)?.moduleId === 'elbow';
 }
 
 export function resetElbowBranchFields(entry = {}, nextBkType = '') {
@@ -250,8 +250,8 @@ function normalizeDiagnosisEntry(existingEntry, diagnosis) {
   return baseEntry;
 }
 
-export function syncElbowModuleData(moduleData = {}, jobs = [], diagnoses = []) {
-  const elbowDiagnoses = (diagnoses || []).filter(isElbowDiagnosis);
+export function syncElbowModuleData(moduleData = {}, jobs = [], diagnoses = [], activeModules = []) {
+  const elbowDiagnoses = (diagnoses || []).filter(diag => isElbowDiagnosis(diag, activeModules));
   const temporalSequence = normalizeTemporalSequence(moduleData);
   const legacyEntryMap = buildLegacyEntryMap(moduleData, jobs, elbowDiagnoses);
   const existingJobMap = new Map(

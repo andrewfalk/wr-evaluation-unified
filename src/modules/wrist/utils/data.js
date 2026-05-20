@@ -1,4 +1,4 @@
-import { getDiagnosisModuleHint } from '../../../core/utils/diagnosisMapping';
+import { resolveDiagnosisModule } from '../../../core/utils/diagnosisMapping';
 
 export const BK_TYPE_OPTIONS = [
   { value: '', label: '선택' },
@@ -158,9 +158,10 @@ export function createWristModuleData() {
   };
 }
 
-export function isWristDiagnosis(diag) {
-  const hint = getDiagnosisModuleHint(diag);
-  if (hint?.moduleId === 'wrist') return true;
+export function isWristDiagnosis(diag, activeModules = []) {
+  const resolved = resolveDiagnosisModule(diag, activeModules);
+  if (resolved?.moduleId === 'wrist') return true;
+  if (diag?.moduleId === '__none__' || resolved) return false;
   return Boolean(inferWristBkTypeFromDiagnosis(diag));
 }
 
@@ -236,8 +237,8 @@ function normalizeDiagnosisEntry(existingEntry, diagnosis) {
   return baseEntry;
 }
 
-export function syncWristModuleData(moduleData = {}, jobs = [], diagnoses = []) {
-  const wristDiagnoses = (diagnoses || []).filter(isWristDiagnosis);
+export function syncWristModuleData(moduleData = {}, jobs = [], diagnoses = [], activeModules = []) {
+  const wristDiagnoses = (diagnoses || []).filter(diag => isWristDiagnosis(diag, activeModules));
   const temporalSequence = normalizeTemporalSequence(moduleData);
   const legacyEntryMap = buildLegacyEntryMap(moduleData, jobs, wristDiagnoses);
   const existingJobMap = new Map(

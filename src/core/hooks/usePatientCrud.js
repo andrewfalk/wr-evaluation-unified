@@ -6,7 +6,7 @@ import { createTestPatients } from '../utils/data';
 import { showAlert, showConfirm } from '../utils/platform';
 import { canEditPatient, canDeletePatient } from '../utils/patientOwnership';
 import { preserveDeletedSpineCommonFields } from '../utils/spineAssessmentMigration';
-import { resolveDiagnosisModule } from '../utils/diagnosisMapping';
+import { isValidDiagnosisModuleId, resolveDiagnosisModule } from '../utils/diagnosisMapping';
 
 export function usePatientCrud({
   activeId, activeModuleId, session, settings,
@@ -93,7 +93,28 @@ export function usePatientCrud({
         newDiagnoses,
         isSpineDiagnosis
       );
-      return { ...d, shared: { ...d.shared, diagnoses: preserved } };
+      const explicitModules = preserved
+        .map(diag => diag.moduleId)
+        .filter(isValidDiagnosisModuleId);
+      const toAdd = explicitModules.filter(moduleId => !activeModules.includes(moduleId));
+
+      let nextModules = d.modules || {};
+      if (toAdd.length) {
+        nextModules = { ...nextModules };
+        for (const moduleId of toAdd) {
+          if (!nextModules[moduleId]) {
+            const mod = getModule(moduleId);
+            nextModules[moduleId] = mod?.createModuleData ? mod.createModuleData() : {};
+          }
+        }
+      }
+
+      return {
+        ...d,
+        shared: { ...d.shared, diagnoses: preserved },
+        activeModules: toAdd.length ? [...activeModules, ...toAdd] : activeModules,
+        modules: nextModules,
+      };
     });
   };
 

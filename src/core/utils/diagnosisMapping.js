@@ -40,12 +40,12 @@ const ICD_MODULE_MAP = [
 
 const NAME_MODULE_MAP = [
   {
-    pattern: /무릎|슬관절|반월상|십자인대|관절경|슬개골/i,
+    pattern: /무릎|슬관절|족관절|발목|반월상|십자인대|관절경|슬개골/i,
     moduleId: 'knee',
     label: '무릎',
   },
   {
-    pattern: /손목|손가락|완관절|수근관|손목\s*터널|듀피트렌|뒤피트랑|Dupuytren|손바닥\s*섬유종증|손부위|드퀘르벵|방아쇠수지|방아쇠엄지|trigger\s*finger|trigger\s*thumb|de\s*quervain|tenosynovitis|tendovaginitis|carpal\s*tunnel|cts|guyon|ulnar\s*neuropathy\s*at\s*wrist|wrist\s*arthr|finger\s*arthr|hand\s*arthr|kienb[oö]ck|월상골/i,
+    pattern: /손목|손가락|완관절|척골|수근관|손목\s*터널|듀피트렌|뒤피트랑|Dupuytren|손바닥\s*섬유종증|손부위|드퀘르벵|방아쇠수지|방아쇠엄지|trigger\s*finger|trigger\s*thumb|de\s*quervain|tenosynovitis|tendovaginitis|carpal\s*tunnel|cts|guyon|ulnar\s*neuropathy\s*at\s*wrist|wrist\s*arthr|finger\s*arthr|hand\s*arthr|kienb[oö]ck|월상골/i,
     moduleId: 'wrist',
     label: '손목/손가락',
   },
@@ -100,7 +100,7 @@ export function getDiagnosisModuleHint(diag) {
   return null;
 }
 
-const MODULE_LABELS = {
+export const MODULE_LABELS = {
   knee: '무릎',
   wrist: '손목/손가락',
   elbow: '팔꿈치',
@@ -109,15 +109,25 @@ const MODULE_LABELS = {
   cervical: '경추(목)',
 };
 
+export function isValidDiagnosisModuleId(id) {
+  return !!id && id !== '__none__' && Object.hasOwn(MODULE_LABELS, id);
+}
+
 /**
  * 진단과 직접 매핑되지 않을 때 활성 모듈이 1개면 그 모듈로 해석
  * @returns {{ moduleId: string, label: string } | null}
  */
 export function resolveDiagnosisModule(diag, activeModules = []) {
+  if (diag?.moduleId === '__none__') return null;
+  if (isValidDiagnosisModuleId(diag?.moduleId)) {
+    const moduleId = diag.moduleId;
+    return { moduleId, label: MODULE_LABELS[moduleId] };
+  }
+
   const hint = getDiagnosisModuleHint(diag);
   if (hint) return hint;
 
-  const candidates = (activeModules || []).filter(moduleId => Object.hasOwn(MODULE_LABELS, moduleId));
+  const candidates = (activeModules || []).filter(isValidDiagnosisModuleId);
   if (candidates.length !== 1) return null;
 
   const moduleId = candidates[0];
@@ -131,7 +141,7 @@ export function resolveDiagnosisModule(diag, activeModules = []) {
 export function suggestModules(diagnoses) {
   const suggested = new Set();
   for (const diag of diagnoses) {
-    const hint = getDiagnosisModuleHint(diag);
+    const hint = resolveDiagnosisModule(diag, []);
     if (hint) suggested.add(hint.moduleId);
   }
   return Array.from(suggested);

@@ -386,7 +386,8 @@ export function computeCervicalCalc(patientData) {
   const shared = patientData.shared || {};
   const jobs = shared.jobs || [];
   const synced = syncCervicalModuleData(patientData.module || {}, jobs);
-  const cervicalDiagnoses = (shared.diagnoses || []).filter(isCervicalDiagnosis);
+  const activeModules = patientData.activeModules || [];
+  const cervicalDiagnoses = (shared.diagnoses || []).filter(diag => isCervicalDiagnosis(diag, activeModules));
   const age = calculateAge(shared.birthDate, shared.injuryDate);
   const bmi = calculateBMI(shared.height, shared.weight);
 
@@ -413,7 +414,8 @@ function isDiagnosisAssessmentComplete(diag) {
 export function isCervicalAssessmentComplete(patientData) {
   const shared = patientData.shared || {};
   const jobs = shared.jobs || [];
-  const cervicalDiagnoses = (shared.diagnoses || []).filter(isCervicalDiagnosis);
+  const activeModules = patientData.activeModules || [];
+  const cervicalDiagnoses = (shared.diagnoses || []).filter(diag => isCervicalDiagnosis(diag, activeModules));
   const calc = computeCervicalCalc(patientData);
 
   if (cervicalDiagnoses.length === 0) return false;

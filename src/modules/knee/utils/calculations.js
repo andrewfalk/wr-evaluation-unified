@@ -1,6 +1,6 @@
 import { calculateAge, calculateBMI } from '../../../core/utils/common';
 import { calculateWorkPeriod, formatWorkPeriod, parseWorkPeriodOverride, getEffectiveWorkPeriod, getEffectiveWorkPeriodText } from '../../../core/utils/workPeriod';
-import { getDiagnosisModuleHint } from '../../../core/utils/diagnosisMapping';
+import { resolveDiagnosisModule } from '../../../core/utils/diagnosisMapping';
 
 // re-export for any external consumers
 export { calculateWorkPeriod, formatWorkPeriod, parseWorkPeriodOverride, getEffectiveWorkPeriod, getEffectiveWorkPeriodText };
@@ -91,10 +91,9 @@ export function isKneeAssessmentComplete(patientData) {
   const diagnoses = patientData.shared?.diagnoses || [];
   if (!diagnoses.length) return false;
   // 무릎 상병만 필터링하여 체크
-  const kneeDiags = diagnoses.filter(dx => {
-    const hint = getDiagnosisModuleHint(dx);
-    return !hint || hint.moduleId === 'knee';
-  });
+  const kneeDiags = diagnoses.filter(dx =>
+    resolveDiagnosisModule(dx, patientData.activeModules || [])?.moduleId === 'knee'
+  );
   if (!kneeDiags.length) return false;
   return kneeDiags.every(dx => {
     if (!dx.side) return false;

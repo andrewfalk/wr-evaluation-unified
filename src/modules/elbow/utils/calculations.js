@@ -552,7 +552,7 @@ function buildDiagnosisSummary({ diagnosis, job, entry, temporalSequence }) {
 export function computeElbowCalc(patientData) {
   const shared = patientData.shared || {};
   const jobs = shared.jobs || [];
-  const synced = syncElbowModuleData(patientData.module || {}, jobs, shared.diagnoses || []);
+  const synced = syncElbowModuleData(patientData.module || {}, jobs, shared.diagnoses || [], patientData.activeModules || []);
   const temporalSequence = synced.moduleData.temporalSequence || createElbowTemporalSequence();
   const temporalFlags = computeTemporalFlags(temporalSequence);
   const missingCommonFields = getMissingFields(temporalSequence, getTemporalRequiredFields(temporalSequence));
@@ -612,8 +612,9 @@ function isDiagnosisAssessmentComplete(diag) {
 export function isElbowAssessmentComplete(patientData) {
   const shared = patientData.shared || {};
   const jobs = shared.jobs || [];
-  const synced = syncElbowModuleData(patientData.module || {}, jobs, shared.diagnoses || []);
-  const calc = computeElbowCalc({ shared, module: synced.moduleData });
+  const activeModules = patientData.activeModules || [];
+  const synced = syncElbowModuleData(patientData.module || {}, jobs, shared.diagnoses || [], activeModules);
+  const calc = computeElbowCalc({ shared, module: synced.moduleData, activeModules });
 
   if (synced.elbowDiagnoses.length === 0) return false;
   if (jobs.length === 0) return false;

@@ -1,6 +1,6 @@
 import { calculateAge, calculateBMI } from '../../../core/utils/common';
 import { getEffectiveWorkPeriod } from '../../../core/utils/workPeriod';
-import { getDiagnosisModuleHint } from '../../../core/utils/diagnosisMapping';
+import { resolveDiagnosisModule } from '../../../core/utils/diagnosisMapping';
 
 export { calculateAge, calculateBMI };
 
@@ -73,8 +73,8 @@ export function isShoulderAssessmentComplete(patientData) {
   const diagnoses = patientData.shared?.diagnoses || [];
   if (!diagnoses.length) return false;
   const shoulderDiags = diagnoses.filter(dx => {
-    const hint = getDiagnosisModuleHint(dx);
-    return !hint || hint.moduleId === 'shoulder';
+    const resolved = resolveDiagnosisModule(dx, patientData.activeModules || []);
+    return resolved?.moduleId === 'shoulder';
   });
   if (!shoulderDiags.length) return false;
   return shoulderDiags.every(dx => {

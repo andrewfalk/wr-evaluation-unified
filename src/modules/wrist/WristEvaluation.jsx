@@ -7,9 +7,10 @@ export function WristEvaluation({ patient, calc, updateModule }) {
   const shared = patient.data.shared || {};
   const mod = patient.data.module || {};
   const diagnoses = shared.diagnoses || [];
+  const activeModules = patient.data.activeModules || [];
   const sharedJobs = shared.jobs || [];
 
-  const synced = useMemo(() => syncWristModuleData(mod, sharedJobs, diagnoses), [mod, sharedJobs, diagnoses]);
+  const synced = useMemo(() => syncWristModuleData(mod, sharedJobs, diagnoses, activeModules), [mod, sharedJobs, diagnoses, activeModules]);
 
   useEffect(() => {
     if (synced.changed) {
@@ -42,7 +43,7 @@ export function WristEvaluation({ patient, calc, updateModule }) {
 
   const updateTemporalSequence = (field, value) => {
     updateModule(current => {
-      const normalized = syncWristModuleData(current, sharedJobs, diagnoses).moduleData;
+      const normalized = syncWristModuleData(current, sharedJobs, diagnoses, activeModules).moduleData;
       return {
         ...normalized,
         temporalSequence: {
@@ -55,7 +56,7 @@ export function WristEvaluation({ patient, calc, updateModule }) {
 
   const updateDiagnosisEntry = (sharedJobId, diagnosisId, patch) => {
     updateModule(current => {
-      const normalized = syncWristModuleData(current, sharedJobs, diagnoses).moduleData;
+      const normalized = syncWristModuleData(current, sharedJobs, diagnoses, activeModules).moduleData;
       return {
         ...normalized,
         jobEvaluations: normalized.jobEvaluations.map(jobEvaluation => {

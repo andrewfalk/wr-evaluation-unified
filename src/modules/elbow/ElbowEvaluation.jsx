@@ -7,9 +7,10 @@ export function ElbowEvaluation({ patient, calc, updateModule, errors }) {
   const shared = patient.data.shared || {};
   const mod = patient.data.module || {};
   const diagnoses = shared.diagnoses || [];
+  const activeModules = patient.data.activeModules || [];
   const sharedJobs = shared.jobs || [];
 
-  const synced = useMemo(() => syncElbowModuleData(mod, sharedJobs, diagnoses), [mod, sharedJobs, diagnoses]);
+  const synced = useMemo(() => syncElbowModuleData(mod, sharedJobs, diagnoses, activeModules), [mod, sharedJobs, diagnoses, activeModules]);
 
   useEffect(() => {
     if (synced.changed) {
@@ -23,7 +24,7 @@ export function ElbowEvaluation({ patient, calc, updateModule, errors }) {
 
   const updateTemporalSequence = (field, value) => {
     updateModule(current => {
-      const normalized = syncElbowModuleData(current, sharedJobs, diagnoses).moduleData;
+      const normalized = syncElbowModuleData(current, sharedJobs, diagnoses, activeModules).moduleData;
       return {
         ...normalized,
         temporalSequence: {
@@ -37,7 +38,7 @@ export function ElbowEvaluation({ patient, calc, updateModule, errors }) {
 
   const updateDiagnosisEntry = (sharedJobId, diagnosisId, patch) => {
     updateModule(current => {
-      const normalized = syncElbowModuleData(current, sharedJobs, diagnoses).moduleData;
+      const normalized = syncElbowModuleData(current, sharedJobs, diagnoses, activeModules).moduleData;
       return {
         ...normalized,
         jobEvaluations: normalized.jobEvaluations.map(jobEvaluation => {

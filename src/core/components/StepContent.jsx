@@ -50,6 +50,7 @@ export function StepContent({
             errors={errors}
             createDiagnosis={createDiagnosis}
             showModuleHints
+            activeModules={activeModules}
           />
         </div>
       );

@@ -9,10 +9,11 @@ export function CervicalEvaluation({ patient, calc, updateModule }) {
   const shared = patient.data.shared || {};
   const mod = patient.data.module || {};
   const diagnoses = shared.diagnoses || [];
+  const activeModules = patient.data.activeModules || [];
   const sharedJobs = shared.jobs || [];
   const cervicalDiagnoses = useMemo(
-    () => (diagnoses || []).filter(isCervicalDiagnosis),
-    [diagnoses]
+    () => (diagnoses || []).filter(diag => isCervicalDiagnosis(diag, activeModules)),
+    [diagnoses, activeModules]
   );
   const [selectedJobId, setSelectedJobId] = useState(sharedJobs[0]?.id || '');
   const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);

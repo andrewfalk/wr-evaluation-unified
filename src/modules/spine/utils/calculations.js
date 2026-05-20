@@ -1,7 +1,7 @@
 import { formulaDB } from './formulaDB';
 import { thresholds } from './thresholds';
 import { getEffectiveWorkPeriod } from '../../../core/utils/workPeriod';
-import { getDiagnosisModuleHint } from '../../../core/utils/diagnosisMapping';
+import { resolveDiagnosisModule } from '../../../core/utils/diagnosisMapping';
 
 // F = b + m * L
 export function calculateCompressiveForce(postureCode, weight, correctionFactor = 1.0) {
@@ -276,10 +276,9 @@ export function isSpineAssessmentComplete(patientData) {
 
   // 종합소견: 척추 상병의 상병 상태 + 업무관련성 체크
   const diagnoses = shared.diagnoses || [];
-  const spineDiags = diagnoses.filter(dx => {
-    const hint = getDiagnosisModuleHint(dx);
-    return hint?.moduleId === 'spine';
-  });
+  const spineDiags = diagnoses.filter(dx =>
+    resolveDiagnosisModule(dx, patientData.activeModules || [])?.moduleId === 'spine'
+  );
   if (spineDiags.length === 0) return false;
   return spineDiags.every(dx => {
     if (!dx.confirmedRight || !dx.assessmentRight) return false;

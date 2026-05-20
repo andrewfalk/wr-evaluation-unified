@@ -547,7 +547,7 @@ function buildDiagnosisSummary({ diagnosis, job, entry, temporalSequence }) {
 export function computeWristCalc(patientData) {
   const shared = patientData.shared || {};
   const jobs = shared.jobs || [];
-  const synced = syncWristModuleData(patientData.module || {}, jobs, shared.diagnoses || []);
+  const synced = syncWristModuleData(patientData.module || {}, jobs, shared.diagnoses || [], patientData.activeModules || []);
   const temporalSequence = synced.moduleData.temporalSequence || createWristTemporalSequence();
   const temporalFlags = computeTemporalFlags(temporalSequence);
   const missingCommonFields = getMissingFields(temporalSequence, getTemporalRequiredFields(temporalSequence));
@@ -607,8 +607,9 @@ function isDiagnosisAssessmentComplete(diag) {
 export function isWristAssessmentComplete(patientData) {
   const shared = patientData.shared || {};
   const jobs = shared.jobs || [];
-  const synced = syncWristModuleData(patientData.module || {}, jobs, shared.diagnoses || []);
-  const calc = computeWristCalc({ shared, module: synced.moduleData });
+  const activeModules = patientData.activeModules || [];
+  const synced = syncWristModuleData(patientData.module || {}, jobs, shared.diagnoses || [], activeModules);
+  const calc = computeWristCalc({ shared, module: synced.moduleData, activeModules });
 
   if (synced.wristDiagnoses.length === 0) return false;
   if (jobs.length === 0) return false;

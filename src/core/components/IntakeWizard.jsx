@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { BasicInfoForm } from './BasicInfoForm';
 import { DiagnosisForm } from './DiagnosisForm';
 import { getAllModules } from '../moduleRegistry';
-import { suggestModules } from '../utils/diagnosisMapping';
+import { isValidDiagnosisModuleId, suggestModules } from '../utils/diagnosisMapping';
 import { createDiagnosis } from '../utils/data';
 
 const INTAKE_STEPS = [
@@ -29,6 +29,10 @@ export function IntakeWizard({
   const intakeDiagnoses = shared.diagnoses || [createDiagnosis()];
   const suggested = suggestModules(intakeDiagnoses);
   const allModules = getAllModules();
+  const explicitModules = intakeDiagnoses
+    .map(diag => diag.moduleId)
+    .filter(isValidDiagnosisModuleId);
+  const finalSelectedModules = Array.from(new Set([...selectedModules, ...explicitModules]));
 
   const goStep = (next) => {
     if (next === 2 && selectedModules.length === 0 && suggested.length > 0) {
@@ -78,6 +82,7 @@ export function IntakeWizard({
               errors={errors}
               createDiagnosis={createDiagnosis}
               showModuleHints
+              activeModules={selectedModules}
             />
             <div className="wizard-actions">
               <button className="btn btn-secondary" onClick={() => goStep(0)}>&larr; 이전</button>
@@ -117,9 +122,9 @@ export function IntakeWizard({
             </section>
             <div className="wizard-actions">
               <button className="btn btn-secondary" onClick={() => goStep(1)}>&larr; 이전</button>
-              <button className="btn btn-primary" onClick={() => onComplete(selectedModules)}
-                disabled={selectedModules.length === 0}>
-                평가 시작 ({selectedModules.length}개 모듈)
+              <button className="btn btn-primary" onClick={() => onComplete(finalSelectedModules)}
+                disabled={finalSelectedModules.length === 0}>
+                평가 시작 ({finalSelectedModules.length}개 모듈)
               </button>
             </div>
           </>

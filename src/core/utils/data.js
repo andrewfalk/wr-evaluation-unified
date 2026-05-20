@@ -26,6 +26,7 @@ export const createDiagnosis = () => ({
   id: crypto.randomUUID(),
   code: '',
   name: '',
+  moduleId: null,
   side: ''
 });
 

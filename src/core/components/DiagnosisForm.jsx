@@ -1,6 +1,13 @@
-import { getDiagnosisModuleHint } from '../utils/diagnosisMapping';
+import { getAllModules } from '../moduleRegistry';
+import {
+  getDiagnosisModuleHint,
+  isValidDiagnosisModuleId,
+  resolveDiagnosisModule,
+} from '../utils/diagnosisMapping';
 
-export function DiagnosisForm({ diagnoses, onChange, errors, createDiagnosis, showModuleHints = false }) {
+export function DiagnosisForm({ diagnoses, onChange, errors, createDiagnosis, showModuleHints = false, activeModules = [] }) {
+  const moduleOptions = getAllModules().filter(mod => isValidDiagnosisModuleId(mod.id));
+
   const handleDiagnosis = (i, field, value) => {
     const updated = [...diagnoses];
     updated[i] = { ...updated[i], [field]: value };
@@ -31,7 +38,10 @@ export function DiagnosisForm({ diagnoses, onChange, errors, createDiagnosis, sh
       {errors?.diagnoses && <div className="error-message">{errors.diagnoses}</div>}
       {diagnoses.map((diag, i) => {
         const hint = getDiagnosisModuleHint(diag);
-        const isAxial = hint?.moduleId === 'spine' || hint?.moduleId === 'cervical';
+        const resolved = resolveDiagnosisModule(diag, activeModules);
+        const isManual = diag.moduleId != null && diag.moduleId !== '';
+        const isExplicitNone = diag.moduleId === '__none__';
+        const isAxial = resolved?.moduleId === 'spine' || resolved?.moduleId === 'cervical';
         return (
         <div key={diag.id} className="diagnosis-card">
           <div className="diagnosis-card-header">
@@ -39,12 +49,30 @@ export function DiagnosisForm({ diagnoses, onChange, errors, createDiagnosis, sh
               <span className="diagnosis-card-title">상병 #{i + 1}</span>
               <span className="diagnosis-card-subtitle">필수 입력값을 채우면 모듈 추천과 평가 흐름에 반영됩니다.</span>
             </div>
-            {showModuleHints && hint && <span className="diagnosis-module-badge">{hint.label}</span>}
+            {showModuleHints && (resolved || isExplicitNone) && (
+              <span className="diagnosis-module-badge">
+                {isExplicitNone ? '해당 없음' : resolved.label}
+                {isManual && ' · 수동'}
+              </span>
+            )}
             {diagnoses.length > 1 && <button className="btn btn-danger btn-xs" onClick={() => removeDiagnosis(i)}>삭제</button>}
           </div>
           <div className="form-row">
             <div className="form-group"><label>진단코드 *</label><input value={diag.code} onChange={e => handleDiagnosis(i, 'code', e.target.value)} placeholder="M17.0" /></div>
             <div className="form-group"><label>진단명 *</label><input value={diag.name} onChange={e => handleDiagnosis(i, 'name', e.target.value)} placeholder="진단명 입력" /></div>
+          </div>
+          <div className="form-group">
+            <label>평가 모듈</label>
+            <select
+              value={diag.moduleId || ''}
+              onChange={e => handleDiagnosis(i, 'moduleId', e.target.value === '' ? null : e.target.value)}
+            >
+              <option value="">자동 (감지: {hint?.label || '없음'})</option>
+              {moduleOptions.map(mod => (
+                <option key={mod.id} value={mod.id}>{mod.icon ? `${mod.icon} ` : ''}{mod.name}</option>
+              ))}
+              <option value="__none__">해당 없음</option>
+            </select>
           </div>
           {!isAxial && (
           <div className="form-group">
