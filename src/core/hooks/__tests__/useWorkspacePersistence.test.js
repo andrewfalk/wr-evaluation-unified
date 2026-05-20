@@ -3,6 +3,10 @@ import {
   buildLoadFailureMessage,
   getLoadablePatientsFromSnapshot,
 } from '../useWorkspacePersistence.js';
+import {
+  isIntranetWorkspaceMode,
+  shouldUseWorkspaceAutosave,
+} from '../../utils/workspaceAutosavePolicy.js';
 
 vi.mock('../../services/workspaceRepository', () => ({
   clearAutoSavedWorkspace: vi.fn(),
@@ -43,5 +47,44 @@ describe('workspace patient loading', () => {
       '불러오기한 환자 목록에 삭제된 환자가 포함되어 있어 작업 목록에서 제외했습니다. (실패 2건 / 총 5건)'
     );
     expect(buildLoadFailureMessage({ failedCount: 0, totalCount: 5 })).toBe('');
+  });
+});
+
+describe('workspace autosave policy', () => {
+  it('keeps workspace autosave enabled in local mode', () => {
+    expect(shouldUseWorkspaceAutosave({
+      disabled: false,
+      session: { mode: 'local' },
+      settings: { integrationMode: 'local' },
+    })).toBe(true);
+  });
+
+  it('disables workspace autosave for intranet sessions', () => {
+    expect(isIntranetWorkspaceMode({
+      session: { mode: 'intranet' },
+      settings: { integrationMode: 'local' },
+    })).toBe(true);
+
+    expect(shouldUseWorkspaceAutosave({
+      disabled: false,
+      session: { mode: 'intranet' },
+      settings: { integrationMode: 'local' },
+    })).toBe(false);
+  });
+
+  it('disables workspace autosave when intranet integration is selected before session hydration', () => {
+    expect(shouldUseWorkspaceAutosave({
+      disabled: false,
+      session: { mode: 'local' },
+      settings: { integrationMode: 'intranet' },
+    })).toBe(false);
+  });
+
+  it('keeps workspace autosave disabled while the hook is disabled', () => {
+    expect(shouldUseWorkspaceAutosave({
+      disabled: true,
+      session: { mode: 'local' },
+      settings: { integrationMode: 'local' },
+    })).toBe(false);
   });
 });

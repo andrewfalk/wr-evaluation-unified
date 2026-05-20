@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { showAlert, showConfirm } from '../utils/platform';
 import {
   clearAutoSavedWorkspace,
@@ -15,6 +15,10 @@ import {
   isRedactedPatientRecord,
   migratePatientRecords,
 } from '../services/patientRecords';
+import {
+  isIntranetWorkspaceMode,
+  shouldUseWorkspaceAutosave,
+} from '../utils/workspaceAutosavePolicy';
 
 export function getLoadablePatientsFromSnapshot(patients = [], context = {}) {
   const migrated = migratePatientRecords(patients || [], context);
@@ -49,6 +53,9 @@ export function useWorkspacePersistence({
   const [saveName, setSaveName] = useState('');
   const [lastAutoSave, setLastAutoSave] = useState(null);
   const [legacyItems, setLegacyItems] = useState(null);
+  const autosaveRestoreCheckedRef = useRef(false);
+  const intranetWorkspaceMode = isIntranetWorkspaceMode({ session, settings });
+  const autosaveEnabled = shouldUseWorkspaceAutosave({ disabled, session, settings });
 
   useEffect(() => {
     migrateWorkspaceStorage();
@@ -78,7 +85,13 @@ export function useWorkspacePersistence({
 
   // 자동 저장 복원 (초기 1회만) — config 준비 전에는 실행하지 않음
   useEffect(() => {
-    if (disabled) return;
+    if (!autosaveEnabled) {
+      autosaveRestoreCheckedRef.current = false;
+      return;
+    }
+    if (autosaveRestoreCheckedRef.current) return;
+    autosaveRestoreCheckedRef.current = true;
+
     loadAutoSavedWorkspace({ session, settings, serverConfig }).then(saved => {
       if (saved) {
         const time = new Date(saved.savedAt).toLocaleString('ko-KR');
@@ -97,11 +110,17 @@ export function useWorkspacePersistence({
         });
       }
     });
-  }, [disabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [autosaveEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (intranetWorkspaceMode && lastAutoSave) {
+      setLastAutoSave(null);
+    }
+  }, [intranetWorkspaceMode, lastAutoSave]);
 
   // 자동 저장
   useEffect(() => {
-    if (disabled || !settings.autoSaveInterval || patients.length === 0) return;
+    if (!autosaveEnabled || !settings?.autoSaveInterval || patients.length === 0) return;
     const timer = setTimeout(() => {
       saveAutoSavedWorkspace({ patients, session, settings, serverConfig })
         .then(() => {
@@ -113,7 +132,7 @@ export function useWorkspacePersistence({
     }, settings.autoSaveInterval * 1000);
     return () => clearTimeout(timer);
   }, [
-    disabled,
+    autosaveEnabled,
     patients,
     session?.mode,
     session?.apiBaseUrl,

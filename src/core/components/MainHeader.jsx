@@ -119,7 +119,7 @@ export function MainHeader({
       <header className="header pattern-surface pattern-surface-hero">
         <div className="header-title-row">
           <h1>{title}</h1>
-          {lastAutoSave && <span className="header-meta">자동저장 {lastAutoSave.toLocaleTimeString('ko-KR')}</span>}
+          {session?.mode !== 'intranet' && lastAutoSave && <span className="header-meta">자동저장 {lastAutoSave.toLocaleTimeString('ko-KR')}</span>}
         </div>
         <IntegrationStatusBadge status={integrationStatus} />
         <div className="header-actions action-bar">

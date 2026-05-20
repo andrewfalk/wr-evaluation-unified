@@ -25,6 +25,7 @@ import {
   markRemoteIntegrationStatus,
 } from './integrationStatus';
 import { migratePatientRecords } from './patientRecords';
+import { isIntranetWorkspaceMode } from '../utils/workspaceAutosavePolicy';
 
 // This repository keeps the current local/Electron implementation,
 // while giving us a single seam to replace with intranet APIs later.
@@ -113,6 +114,8 @@ export function hasDuplicateWorkspaceName(name, savedItems) {
 }
 
 export async function loadAutoSavedWorkspace(options = {}) {
+  if (isIntranetWorkspaceMode(options)) return null;
+
   if (shouldUseRemoteRepository(options)) {
     try {
       const saved = await loadRemoteAutoSave(options);
@@ -136,6 +139,8 @@ export async function loadAutoSavedWorkspace(options = {}) {
 }
 
 export async function saveAutoSavedWorkspace({ patients, ...options }) {
+  if (isIntranetWorkspaceMode(options)) return null;
+
   if (shouldUseRemoteRepository(options)) {
     try {
       const result = await saveRemoteAutoSave({ patients, ...options });
