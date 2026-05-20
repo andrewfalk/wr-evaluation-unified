@@ -12,7 +12,7 @@ import express from 'express';
 vi.mock('../../config', () => ({
   default: {
     env:  'production',
-    cors: { origins: ['https://wr.hospital.local'] },
+    cors: { origins: ['https://wr.hospital.local:8443'] },
   },
 }));
 
@@ -62,8 +62,8 @@ describe('CORS middleware', () => {
   it('allows requests from the whitelisted intranet origin', async () => {
     const res = await request(makeApp())
       .get('/test')
-      .set('Origin', 'https://wr.hospital.local');
-    expect(res.headers['access-control-allow-origin']).toBe('https://wr.hospital.local');
+      .set('Origin', 'https://wr.hospital.local:8443');
+    expect(res.headers['access-control-allow-origin']).toBe('https://wr.hospital.local:8443');
   });
 
   it('blocks null origin with 403 CORS_ORIGIN_DENIED', async () => {
@@ -99,14 +99,14 @@ describe('CORS middleware', () => {
   it('echoes Access-Control-Allow-Credentials: true for whitelisted origin', async () => {
     const res = await request(makeApp())
       .get('/test')
-      .set('Origin', 'https://wr.hospital.local');
+      .set('Origin', 'https://wr.hospital.local:8443');
     expect(res.headers['access-control-allow-credentials']).toBe('true');
   });
 
   it('OPTIONS preflight allows PUT and custom headers from whitelisted origin', async () => {
     const res = await request(makeApp())
       .options('/test')
-      .set('Origin', 'https://wr.hospital.local')
+      .set('Origin', 'https://wr.hospital.local:8443')
       .set('Access-Control-Request-Method', 'PUT')
       .set('Access-Control-Request-Headers', 'if-match,idempotency-key,x-csrf-token');
     expect(res.status).toBe(204);
@@ -163,7 +163,7 @@ describe('CORS dev mode (non-production)', () => {
     vi.doMock('../../config', () => ({
       default: {
         env:  'development',
-        cors: { origins: ['https://wr.hospital.local'] },
+        cors: { origins: ['https://wr.hospital.local:8443'] },
       },
     }));
     const { corsMiddleware: corsDevMiddleware } = await import('../corsMiddleware');

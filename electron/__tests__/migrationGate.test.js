@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateMigrationGate } from '../migrationGate.js';
 
-const ALLOWED = 'https://wr.hospital.local';
+const ALLOWED = 'https://wr.hospital.local:8443';
 
 describe('evaluateMigrationGate', () => {
   it('rejects when build target is not intranet', () => {

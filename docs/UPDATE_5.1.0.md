@@ -6,9 +6,10 @@
 
 - **서버**: 환자 권한 미들웨어 추가 (`PATCH/DELETE /api/patients/:id`는 담당의 또는 admin만)
 - **클라이언트(Electron)**: 권한 UI 게이팅, 대시보드 scope 분리, 척추 모듈 개선, 인트라넷 차단 화면 탈출구
+- **네트워크 포트**: Caddy 호스트 매핑이 80/443 → **8080/8443** 으로 변경됨 (호스트의 80/443이 다른 프로세스에 점유된 환경 대응). Electron `DEFAULT_INTRANET_URL`도 `:8443` 명시
 - **DB 스키마 변경**: 없음 (`assigned_doctor_user_id` 기존 컬럼 활용)
-- **환경변수 변경**: 없음
-- **인증서 변경**: 없음
+- **환경변수 변경**: **`CORS_ORIGINS` 값에 `:8443` 포함 필수** (예: `https://wr.hospital.local:8443`). 기존 v5.0.x에서 `https://wr.hospital.local`로 설정해 두었다면 반드시 수정
+- **인증서 변경**: 없음 (Caddy 내부 CA 그대로, 컨테이너 내부 listen 포트도 443/80 그대로 — 호스트 매핑만 변경)
 
 ## 예상 다운타임
 
@@ -52,6 +53,29 @@ docker compose -p wr-prod --profile backup run --rm backup /scripts/backup.sh
 
 `_status\last-success.txt`에 새 백업 시각이 찍히는지 확인.
 
+### 4) (필수) .env.production CORS_ORIGINS 수정
+
+기존 운영 환경의 `.env.production`의 `CORS_ORIGINS` 값에 **포트 `:8443` 추가** 필요:
+
+```
+# 수정 전
+CORS_ORIGINS=https://wr.hospital.local
+
+# 수정 후
+CORS_ORIGINS=https://wr.hospital.local:8443
+```
+
+빠뜨리면 Electron 클라이언트가 서버에 접속할 때 CORS 거부 (HTTP 403)로 막힙니다.
+
+### 5) (필수 시) Windows 방화벽 인바운드 규칙
+
+5.0.x 운영 시 80/443 인바운드만 열어두었다면 **TCP 8080, 8443**도 인바운드 허용 필요. PowerShell 관리자 권한:
+
+```powershell
+New-NetFirewallRule -DisplayName "WR Caddy HTTPS (8443)" -Direction Inbound -Protocol TCP -LocalPort 8443 -Action Allow
+New-NetFirewallRule -DisplayName "WR Caddy HTTP (8080)"  -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
+```
+
 ---
 
 ## 업데이트 절차
@@ -88,7 +112,8 @@ docker compose -p wr-prod `
 
 **`up -d app` 동작**:
 - app 이미지 태그가 바뀌었음을 감지 → 컨테이너 재생성 (`Recreate`)
-- postgres/caddy/backup/backup-monitor는 이미지 변경 없으므로 그대로 유지
+- postgres/backup/backup-monitor는 이미지 변경 없으므로 그대로 유지
+- **caddy는 포트 매핑(80/443 → 8080/8443) 변경 감지로 재생성됨** — 잠시 다운(수 초). 호스트 80을 점유 중인 다른 프로세스와 충돌 안 해 안전
 
 ### B. 서버 헬스 체크
 
@@ -96,9 +121,13 @@ docker compose -p wr-prod `
 # 컨테이너 상태
 docker ps --filter "name=wr-prod" --format "table {{.Names}}\t{{.Status}}"
 
-# app health
+# app health (컨테이너 내부에서)
 docker exec wr-prod-app-1 wget -qO- http://localhost:3001/health
 # → {"ok":true,...}
+
+# Caddy 경유 HTTPS 헬스체크 (호스트에서)
+curl.exe -k -o NUL -w "8443: %{http_code}`n" https://localhost:8443/health
+# → 8443: 200 이면 정상 (인증서 경고는 -k로 무시)
 
 # 새 권한 미들웨어 동작 확인 (admin 토큰 필요 — 운영자 본인 계정으로 로그인 후 DevTools에서)
 # 다른 의사 담당 환자에 PATCH 직접 호출 → 403 응답이 와야 정상

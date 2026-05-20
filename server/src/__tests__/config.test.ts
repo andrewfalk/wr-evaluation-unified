@@ -19,13 +19,13 @@ describe('config — deployment mode', () => {
   });
 
   it('intranet mode disables local fallback', () => {
-    const c = make({ DEPLOYMENT_MODE: 'intranet', CORS_ORIGINS: 'https://wr.hospital.local' });
+    const c = make({ DEPLOYMENT_MODE: 'intranet', CORS_ORIGINS: 'https://wr.hospital.local:8443' });
     expect(c.deploymentMode).toBe('intranet');
     expect(c.localFallbackAllowed).toBe(false);
   });
 
   it('trusts one proxy hop by default in intranet mode', () => {
-    const c = make({ DEPLOYMENT_MODE: 'intranet', CORS_ORIGINS: 'https://wr.hospital.local' });
+    const c = make({ DEPLOYMENT_MODE: 'intranet', CORS_ORIGINS: 'https://wr.hospital.local:8443' });
     expect(c.trustProxy).toBe(1);
   });
 
@@ -181,16 +181,16 @@ describe('config — NODE_ENV validation', () => {
   });
 
   it('accepts production when CORS_ORIGINS is provided', () => {
-    expect(make({ NODE_ENV: 'production', CORS_ORIGINS: 'https://wr.hospital.local' }).env).toBe('production');
+    expect(make({ NODE_ENV: 'production', CORS_ORIGINS: 'https://wr.hospital.local:8443' }).env).toBe('production');
   });
 });
 
 describe('config — CORS origins', () => {
   it('parses comma-separated origins', () => {
-    const c = make({ CORS_ORIGINS: 'https://wr.hospital.local, https://wr2.hospital.local' });
+    const c = make({ CORS_ORIGINS: 'https://wr.hospital.local:8443, https://wr2.hospital.local:8443' });
     expect(c.cors.origins).toEqual([
-      'https://wr.hospital.local',
-      'https://wr2.hospital.local',
+      'https://wr.hospital.local:8443',
+      'https://wr2.hospital.local:8443',
     ]);
   });
 
@@ -214,7 +214,7 @@ describe('config — CORS origins', () => {
   it('does not throw in intranet mode when CORS_ORIGINS is provided', () => {
     expect(() => make({
       DEPLOYMENT_MODE: 'intranet',
-      CORS_ORIGINS:    'https://wr.hospital.local',
+      CORS_ORIGINS:    'https://wr.hospital.local:8443',
     })).not.toThrow();
   });
 });

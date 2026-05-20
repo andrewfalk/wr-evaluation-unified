@@ -50,7 +50,7 @@ services:
       AUDIT_DATABASE_URL:   "postgres://wr_audit_reader:${AUDIT_DB_PASSWORD:?AUDIT_DB_PASSWORD must be set}@postgres:5432/wr_evaluation"
       ACCESS_TOKEN_SECRET:  "${ACCESS_TOKEN_SECRET:?ACCESS_TOKEN_SECRET must be set}"
       REFRESH_TOKEN_SECRET: "${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET must be set}"
-      CORS_ORIGINS:         "${CORS_ORIGINS:?CORS_ORIGINS must be set (e.g. https://wr.hospital.local)}"
+      CORS_ORIGINS:         "${CORS_ORIGINS:?CORS_ORIGINS must be set (e.g. https://wr.hospital.local:8443)}"
       TRUST_PROXY:          "1"
     ports: !reset []
     restart: always

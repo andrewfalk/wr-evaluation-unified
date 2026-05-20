@@ -88,7 +88,7 @@ const DEVICE_ROW = {
   public_key: 'abc', build_target: 'intranet', status: 'pending',
   approved_by: null, approver_name: null, approved_at: null,
   registered_at: new Date(), revoked_at: null, last_seen_at: null,
-  register_origin: 'https://wr.hospital.local',
+  register_origin: 'https://wr.hospital.local:8443',
   register_ua: 'Electron/28.0 Chrome/120',
   register_ip: '10.0.0.1',
 };

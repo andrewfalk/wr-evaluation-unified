@@ -19,6 +19,8 @@
 }
 
 # HTTPS — terminate TLS with internal CA, proxy to the Express app.
+# 컨테이너 내부는 표준 443으로 listen. 호스트 매핑은 docker-compose.yml에서 8443:443.
+# Electron 클라이언트(electron/main.js)는 호스트 포트 8443으로 접속.
 https://{$WR_DOMAIN} {
 	tls {
 		issuer internal {
@@ -41,7 +43,7 @@ https://{$WR_DOMAIN} {
 	}
 }
 
-# HTTP → HTTPS redirect.
+# HTTP → HTTPS redirect. 컨테이너 내부는 80, 호스트 매핑은 8080:80.
 http://{$WR_DOMAIN} {
 	redir https://{host}{uri} permanent
 }

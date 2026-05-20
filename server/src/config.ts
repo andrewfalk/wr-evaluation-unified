@@ -116,7 +116,7 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
   // browser requests that include an Origin header (login, CSRF, etc.).
   if (corsOrigins.length === 0 && (nodeEnv === 'production' || deploymentMode === 'intranet')) {
     throw new Error(
-      'CORS_ORIGINS must be set (e.g. https://wr.hospital.local) in production or intranet mode'
+      'CORS_ORIGINS must be set (e.g. https://wr.hospital.local:8443) in production or intranet mode'
     );
   }
 
