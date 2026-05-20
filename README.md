@@ -534,6 +534,28 @@ ICD 코드 기반 모듈 자동 추천:
 
 ## 변경 이력
 
+### v5.1.1 (2026-05-20) — 진단별 모듈 수동 지정
+
+자동 매핑이 실패한 진단을 모듈에 수동으로 지정할 수 있도록 정책과 UI 통합.
+
+**진단 모델 + 매핑 정책**
+- 진단에 `moduleId` 필드 추가 (`null`=자동, `'knee'/'spine'/...`=수동 지정, `'__none__'`=해당 없음)
+- `resolveDiagnosisModule()` 우선순위 단일화: `__none__` → 수동 → 자동 키워드 hint → 단일 활성 모듈 fallback
+- 모든 모듈 필터(`isCervicalDiagnosis`, `isElbowDiagnosis`, `isWristDiagnosis`, knee/spine/shoulder 인라인 필터)를 `resolveDiagnosisModule` 기반으로 통일 — 자동 매핑이 실패한 진단도 수동 지정만 하면 해당 모듈 화면에 즉시 노출
+- `MODULE_LABELS` export + `isValidDiagnosisModuleId()` 헬퍼로 UI/resolve 유효성 기준 일원화
+- 정책 회귀 보호용 단위 테스트 7건 추가
+
+**UI**
+- 진단 카드에 "평가 모듈" 드롭다운 추가 — "자동 (감지: 무릎)" / 등록 모듈 / "해당 없음"
+- 수동 지정 시 진단 배지에 `· 수동` 표시
+- 척추/경추 수동 지정 시 방향 라디오 자동 숨김
+- 신규 환자 IntakeWizard 완료 시 진단의 명시 `moduleId`를 `selectedModules`에 자동 병합 → 모듈 선택 단계에서 빼먹어도 진단에 지정된 모듈은 자동 활성화
+- 기존 환자 편집 시 `updateDiagnoses`가 수동 지정 모듈을 `activeModules`에 자동 추가 (기존 `modules[id]` 데이터는 보존)
+
+**자동 매핑 키워드 보강**
+- `족관절|발목` → knee 모듈로 임시 흡수 (전용 모듈 추가 시 분리 예정)
+- `척골` → wrist 모듈
+
 ### v5.1.0 (2026-05-20) — 다중 사용자 운영 UX 강화 + 권한 정책 + 척추 모듈 개선
 
 v5.0.0 인트라넷 백엔드 도입 후 실제 운영에서 드러난 권한 미비점과 UX 결함을 정리.
