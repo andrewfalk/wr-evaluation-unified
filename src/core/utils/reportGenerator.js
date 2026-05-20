@@ -140,7 +140,7 @@ function getSpineInterpretation(comparison) {
   }
 
   if (isSpineThresholdExceeded(comparison.dws2)) {
-    return `** 최신 DWS2 연구 기준(${dws2Limit} MN·h)을 초과하여, 직업적 요인의 관여 가능성을 검토할 수 있습니다.`;
+    return `** 최신 DWS2 연구 기준(${dws2Limit} MN·h)을 초과하였습니다. 해당 기준 초과가 자동으로 누적 신체 부담이 충분하다는 의미는 아니며, 직업적 요인의 관여 가능성을 다른 제반 요건과 함께 종합적으로 검토해 볼 수 있습니다.`;
   }
 
   return `** DWS2 연구 기준(${dws2Limit} MN·h), 독일 연방 사회법원(BSG) 기준(${courtLimit} MN·h), MDDM 최초 모델 기준(${mddmLimit} MN·h)에 모두 미달하여, MDDM 누적 노출 기준만으로는 직업적 요인을 주요 원인으로 보기 어렵습니다.`;

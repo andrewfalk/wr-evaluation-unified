@@ -1,0 +1,7 @@
+# Dev-only override. Automatically merged with docker-compose.yml by `docker compose`.
+# Allows Vite dev server (localhost:3000) and direct API probes (localhost:3001) to
+# pass CORS checks during local frontend development. Do not ship to production.
+services:
+  app:
+    environment:
+      CORS_ORIGINS: "https://wr.hospital.local,http://localhost:3000,http://localhost:3001"

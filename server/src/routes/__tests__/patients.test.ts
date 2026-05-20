@@ -78,16 +78,55 @@ function wireQueries(pool: Pool, ...results: { rows: unknown[]; rowCount?: numbe
   }
 }
 
-// Routes that use pool.connect() + client.query() (POST, DELETE) need this helper.
+// Routes that use pool.connect() + client.query() (POST, DELETE, PATCH) need this helper.
 // Auth middleware still goes through pool.query (first call); all subsequent
 // queries go through the dedicated client returned by pool.connect().
-function makeClientSetup(pool: Pool, ...clientResults: { rows: unknown[]; rowCount?: number }[]) {
+//
+// PATCH/DELETE /:id 는 assignedDoctorOrAdmin 미들웨어가 추가로 pool.query를 호출하므로
+// withAccessCheck 옵션으로 미들웨어 SELECT mock도 끼워준다.
+// withAccessCheck.assigned === undefined 이면 USER_ID (테스트의 기본 caller가 owner)
+function makeClientSetup(
+  pool: Pool,
+  ...args:
+    | [...clientResults: { rows: unknown[]; rowCount?: number }[]]
+    | [{ withAccessCheck: { assigned?: string | null } }, ...clientResults: { rows: unknown[]; rowCount?: number }[]]
+): ReturnType<typeof vi.fn> {
+  let withAccess: { assigned?: string | null } | null = null;
+  let clientResults: { rows: unknown[]; rowCount?: number }[];
+  if (args.length > 0 && typeof args[0] === 'object' && args[0] !== null && 'withAccessCheck' in args[0]) {
+    withAccess = (args[0] as { withAccessCheck: { assigned?: string | null } }).withAccessCheck;
+    clientResults = args.slice(1) as { rows: unknown[]; rowCount?: number }[];
+  } else {
+    clientResults = args as { rows: unknown[]; rowCount?: number }[];
+  }
+
   const clientMock = { query: vi.fn(), release: vi.fn() };
   (pool.connect as ReturnType<typeof vi.fn>).mockResolvedValueOnce(clientMock);
   (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+  if (withAccess) {
+    const assigned = withAccess.assigned === undefined ? USER_ID : withAccess.assigned;
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      rows: [{ assigned_doctor_user_id: assigned }],
+    });
+  }
   const cq = clientMock.query as ReturnType<typeof vi.fn>;
   for (const r of clientResults) cq.mockResolvedValueOnce(r);
   return cq;
+}
+
+// PATCH/DELETE /:id에서 assignedDoctorOrAdmin 미들웨어가 환자를 찾지 못하게 만든다.
+// auth 1번 + 미들웨어 SELECT 1번(빈 결과) = 미들웨어가 404 반환 → handler 호출 X.
+function setupMiddlewareNotFound(pool: Pool) {
+  (pool.query as ReturnType<typeof vi.fn>)
+    .mockResolvedValueOnce({ rows: [{ exists: 1 }] }) // auth
+    .mockResolvedValueOnce({ rows: [] });             // middleware: not found
+}
+
+// 미들웨어가 403을 반환하게 만든다 (다른 의사가 담당).
+function setupMiddlewareForbidden(pool: Pool, otherUserId: string = DOCTOR_ID) {
+  (pool.query as ReturnType<typeof vi.fn>)
+    .mockResolvedValueOnce({ rows: [{ exists: 1 }] })
+    .mockResolvedValueOnce({ rows: [{ assigned_doctor_user_id: otherUserId }] });
 }
 
 // ---------------------------------------------------------------------------
@@ -497,7 +536,9 @@ describe('PATCH /api/patients/:id', () => {
 
   it('returns 400 when If-Match header is missing', async () => {
     const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
+    (pool.query as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ rows: [{ exists: 1 }] }) // auth
+      .mockResolvedValueOnce({ rows: [{ assigned_doctor_user_id: USER_ID }] }); // middleware
     const res = await request(makeApp(pool))
       .patch(`/api/patients/${PAT_ID}`)
       .set('Authorization', `Bearer ${orgToken()}`)
@@ -509,7 +550,9 @@ describe('PATCH /api/patients/:id', () => {
 
   it('returns 400 when If-Match is not a positive integer', async () => {
     const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
+    (pool.query as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ rows: [{ exists: 1 }] }) // auth
+      .mockResolvedValueOnce({ rows: [{ assigned_doctor_user_id: USER_ID }] }); // middleware
     const res = await request(makeApp(pool))
       .patch(`/api/patients/${PAT_ID}`)
       .set('Authorization', `Bearer ${orgToken()}`)
@@ -520,13 +563,9 @@ describe('PATCH /api/patients/:id', () => {
     expect(res.body.code).toBe('INVALID_IF_MATCH');
   });
 
-  it('returns 404 when patient not found', async () => {
+  it('returns 404 when patient not found (middleware short-circuits)', async () => {
     const pool = makePool();
-    makeClientSetup(pool,
-      { rows: [] }, // BEGIN
-      { rows: [] }, // SELECT returns nothing
-      { rows: [] }, // ROLLBACK
-    );
+    setupMiddlewareNotFound(pool);
     const res = await request(makeApp(pool))
       .patch(`/api/patients/${PAT_ID}`)
       .set('Authorization', `Bearer ${orgToken()}`)
@@ -534,12 +573,13 @@ describe('PATCH /api/patients/:id', () => {
       .set('if-match', '1')
       .send({ data: VALID_DATA });
     expect(res.status).toBe(404);
+    expect(res.body.code).toBe('PATIENT_NOT_FOUND');
   });
 
   it('returns 409 when If-Match revision does not match current', async () => {
     const staleRow = { ...PAT_ROW, revision: 2 }; // server is at rev 2
     const pool = makePool();
-    makeClientSetup(pool,
+    makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] },          // BEGIN
       { rows: [staleRow] },  // SELECT returns rev 2
       { rows: [] },          // ROLLBACK
@@ -557,7 +597,7 @@ describe('PATCH /api/patients/:id', () => {
 
   it('returns 409 on concurrent modification (UPDATE returns 0 rows)', async () => {
     const pool = makePool();
-    makeClientSetup(pool,
+    makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] }, // BEGIN
       { rows: [PAT_ROW] }, // SELECT (rev 1 matches)
       { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, // person lookup
@@ -578,7 +618,7 @@ describe('PATCH /api/patients/:id', () => {
   it('returns 200 with updated patient on success', async () => {
     const updatedRow = { ...PAT_ROW, revision: 2, updated_at: LATER };
     const pool = makePool();
-    makeClientSetup(pool,
+    makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] }, // BEGIN
       { rows: [PAT_ROW] }, // SELECT (rev 1)
       { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, // person lookup
@@ -603,7 +643,7 @@ describe('PATCH /api/patients/:id', () => {
   it('returns a warning on patch when patient number and birth date match but name differs', async () => {
     const updatedRow = { ...PAT_ROW, revision: 2, updated_at: LATER };
     const pool = makePool();
-    makeClientSetup(pool,
+    makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] }, // BEGIN
       { rows: [PAT_ROW] }, // SELECT (rev 1)
       { rows: [{ id: PERSON_ID, name: 'Old Name', birth_date: '1980-01-01' }] }, // person lookup
@@ -631,7 +671,7 @@ describe('PATCH /api/patients/:id', () => {
 
   it('returns 409 when patch would link to a patient number with different birth date', async () => {
     const pool = makePool();
-    makeClientSetup(pool,
+    makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] }, // BEGIN
       { rows: [PAT_ROW] }, // SELECT (rev 1)
       { rows: [{ id: PERSON_ID, birth_date: '1970-01-01' }] }, // identity conflict
@@ -651,7 +691,7 @@ describe('PATCH /api/patients/:id', () => {
 
   it('preserves existing payload when only phase is updated', async () => {
     const pool = makePool();
-    const cq = makeClientSetup(pool,
+    const cq = makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] }, // BEGIN
       { rows: [PAT_ROW] },
       { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] },
@@ -685,7 +725,9 @@ describe('DELETE /api/patients/:id', () => {
 
   it('returns 400 when revision query param is missing', async () => {
     const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
+    (pool.query as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ rows: [{ exists: 1 }] }) // auth
+      .mockResolvedValueOnce({ rows: [{ assigned_doctor_user_id: USER_ID }] }); // middleware
     const res = await request(makeApp(pool))
       .delete(`/api/patients/${PAT_ID}`)
       .set('Authorization', `Bearer ${orgToken()}`)
@@ -698,14 +740,9 @@ describe('DELETE /api/patients/:id', () => {
   // Happy-path client queries: BEGIN → UPDATE patient → UPDATE workspaces → COMMIT
   // Error-path: BEGIN → UPDATE patient (rowCount=0) → SELECT → ROLLBACK
 
-  it('returns 404 when patient does not exist', async () => {
+  it('returns 404 when patient does not exist (middleware short-circuits)', async () => {
     const pool = makePool();
-    makeClientSetup(pool,
-      { rows: [] },                           // BEGIN
-      { rows: [], rowCount: 0 },              // UPDATE patient (no match)
-      { rows: [] },                           // SELECT to distinguish 404 vs 409
-      { rows: [] },                           // ROLLBACK
-    );
+    setupMiddlewareNotFound(pool);
     const res = await request(makeApp(pool))
       .delete(`/api/patients/${PAT_ID}?revision=1`)
       .set('Authorization', `Bearer ${orgToken()}`)
@@ -716,7 +753,7 @@ describe('DELETE /api/patients/:id', () => {
 
   it('returns 409 when revision does not match', async () => {
     const pool = makePool();
-    makeClientSetup(pool,
+    makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] },                                                    // BEGIN
       { rows: [], rowCount: 0 },                                       // UPDATE patient (no match)
       { rows: [{ revision: 3, deleted_at: null }] },                   // SELECT → rev 3
@@ -733,7 +770,7 @@ describe('DELETE /api/patients/:id', () => {
 
   it('returns 204 and redacts snapshot on successful soft-delete', async () => {
     const pool = makePool();
-    const cq = makeClientSetup(pool,
+    const cq = makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] },                           // BEGIN
       { rows: [], rowCount: 1 },              // UPDATE patient (soft-delete succeeds)
       { rows: [] },                           // UPDATE workspaces (snapshot redaction)
@@ -763,7 +800,7 @@ describe('DELETE /api/patients/:id', () => {
 
   it('issues soft-delete UPDATE with correct id, org, and revision', async () => {
     const pool = makePool();
-    const cq = makeClientSetup(pool,
+    const cq = makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] },                           // BEGIN
       { rows: [], rowCount: 1 },              // UPDATE patient
       { rows: [] },                           // UPDATE workspaces
@@ -782,6 +819,176 @@ describe('DELETE /api/patients/:id', () => {
     expect((updateCall![1] as unknown[])[0]).toBe(PAT_ID); // $1 = id
     expect((updateCall![1] as unknown[])[1]).toBe(ORG_ID); // $2 = org
     expect((updateCall![1] as unknown[])[2]).toBe(2);      // $3 = revision
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 권한 정책: assignedDoctorOrAdmin 미들웨어 (PATCH/DELETE)
+// ---------------------------------------------------------------------------
+describe('PATCH /api/patients/:id — 권한 정책', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('담당 의사면 200', async () => {
+    const updatedRow = { ...PAT_ROW, revision: 2, updated_at: LATER };
+    const pool = makePool();
+    makeClientSetup(pool, { withAccessCheck: { assigned: USER_ID } },
+      { rows: [] }, { rows: [PAT_ROW] },
+      { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, { rows: [] },
+      { rows: [updatedRow] }, { rows: [] },
+    );
+    const res = await request(makeApp(pool))
+      .patch(`/api/patients/${PAT_ID}`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN).set('if-match', '1')
+      .send({ data: VALID_DATA });
+    expect(res.status).toBe(200);
+  });
+
+  it('다른 의사(assigned 다름)면 403, handler 호출 안 됨', async () => {
+    const pool = makePool();
+    setupMiddlewareForbidden(pool, DOCTOR_ID);
+    const res = await request(makeApp(pool))
+      .patch(`/api/patients/${PAT_ID}`)
+      .set('Authorization', `Bearer ${orgToken()}`) // USER_ID
+      .set('x-csrf-token', CSRF_TOKEN).set('if-match', '1')
+      .send({ data: VALID_DATA });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('FORBIDDEN');
+    // connect() 호출되지 않았어야 함 (handler 미진입)
+    expect((pool.connect as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+  });
+
+  it('admin이면 assigned 무관 200, 미들웨어가 DB 조회 없이 통과', async () => {
+    const updatedRow = { ...PAT_ROW, revision: 2, updated_at: LATER };
+    const pool = makePool();
+    // admin은 미들웨어가 즉시 통과하므로 withAccessCheck 없음 — auth + client.query만
+    makeClientSetup(pool,
+      { rows: [] }, { rows: [PAT_ROW] },
+      { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, { rows: [] },
+      { rows: [updatedRow] }, { rows: [] },
+    );
+    const res = await request(makeApp(pool))
+      .patch(`/api/patients/${PAT_ID}`)
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN).set('if-match', '1')
+      .send({ data: VALID_DATA });
+    expect(res.status).toBe(200);
+    // pool.query는 auth 1번만 (미들웨어 SELECT 없음)
+    expect((pool.query as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+  });
+
+  it('admin이라도 다른 org 환자는 404 (handler의 org 가드)', async () => {
+    const pool = makePool();
+    // admin 미들웨어 통과 → handler에서 다른 org → SELECT empty → ROLLBACK
+    makeClientSetup(pool,
+      { rows: [] },     // BEGIN
+      { rows: [] },     // SELECT empty (다른 org라 못 찾음)
+      { rows: [] },     // ROLLBACK
+    );
+    const res = await request(makeApp(pool))
+      .patch(`/api/patients/${PAT_ID}`)
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN).set('if-match', '1')
+      .send({ data: VALID_DATA });
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe('PATIENT_NOT_FOUND');
+  });
+
+  it('미배정 환자(assigned NULL) + 일반 의사는 403', async () => {
+    const pool = makePool();
+    setupMiddlewareForbidden(pool, null as unknown as string);
+    const res = await request(makeApp(pool))
+      .patch(`/api/patients/${PAT_ID}`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN).set('if-match', '1')
+      .send({ data: VALID_DATA });
+    expect(res.status).toBe(403);
+  });
+
+  it('일반 의사가 존재하지 않는 환자(같은 org)에 PATCH → 404 (미들웨어 차단)', async () => {
+    const pool = makePool();
+    setupMiddlewareNotFound(pool);
+    const res = await request(makeApp(pool))
+      .patch(`/api/patients/${PAT_ID}`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN).set('if-match', '1')
+      .send({ data: VALID_DATA });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('DELETE /api/patients/:id — 권한 정책', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('담당 의사면 204', async () => {
+    const pool = makePool();
+    makeClientSetup(pool, { withAccessCheck: { assigned: USER_ID } },
+      { rows: [] }, { rows: [], rowCount: 1 }, { rows: [] }, { rows: [] },
+    );
+    const res = await request(makeApp(pool))
+      .delete(`/api/patients/${PAT_ID}?revision=1`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(204);
+  });
+
+  it('다른 의사면 403, handler 호출 안 됨', async () => {
+    const pool = makePool();
+    setupMiddlewareForbidden(pool, DOCTOR_ID);
+    const res = await request(makeApp(pool))
+      .delete(`/api/patients/${PAT_ID}?revision=1`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(403);
+    expect((pool.connect as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+  });
+
+  it('admin이면 204, 미들웨어가 DB 조회 없이 통과', async () => {
+    const pool = makePool();
+    makeClientSetup(pool,
+      { rows: [] }, { rows: [], rowCount: 1 }, { rows: [] }, { rows: [] },
+    );
+    const res = await request(makeApp(pool))
+      .delete(`/api/patients/${PAT_ID}?revision=1`)
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(204);
+    expect((pool.query as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+  });
+
+  it('admin이라도 다른 org 환자 → 404', async () => {
+    const pool = makePool();
+    makeClientSetup(pool,
+      { rows: [] },                  // BEGIN
+      { rows: [], rowCount: 0 },     // UPDATE patient no match
+      { rows: [] },                  // SELECT empty (다른 org)
+      { rows: [] },                  // ROLLBACK
+    );
+    const res = await request(makeApp(pool))
+      .delete(`/api/patients/${PAT_ID}?revision=1`)
+      .set('Authorization', `Bearer ${adminToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(404);
+  });
+
+  it('미배정 환자 + 일반 의사 → 403', async () => {
+    const pool = makePool();
+    setupMiddlewareForbidden(pool, null as unknown as string);
+    const res = await request(makeApp(pool))
+      .delete(`/api/patients/${PAT_ID}?revision=1`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(403);
+  });
+
+  it('일반 의사 + 존재하지 않는 환자 → 404 (미들웨어 차단)', async () => {
+    const pool = makePool();
+    setupMiddlewareNotFound(pool);
+    const res = await request(makeApp(pool))
+      .delete(`/api/patients/${PAT_ID}?revision=1`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(404);
   });
 });
 

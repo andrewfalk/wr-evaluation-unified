@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
-import { computeDashboardStats } from '../utils/dashboardStats';
+import { computeDashboardStats, getDoctorPatientCounts } from '../utils/dashboardStats';
 import { getAllModules } from '../moduleRegistry';
+import { isMyPatient } from '../utils/patientOwnership';
+import { isRedactedPatientRecord } from '../services/patientRecords';
+import { isPatientComplete } from '../utils/patientCompletion';
 
 const MODULE_LABELS = { knee: '무릎', spine: '허리', shoulder: '어깨', elbow: '팔꿈치', wrist: '손목', cervical: '목' };
 const MODULE_COLORS = { knee: 'var(--accent)', spine: '#f59e0b', shoulder: 'var(--color-safe)', elbow: '#8b5cf6', wrist: '#ec4899', cervical: '#06b6d4' };
@@ -112,13 +115,52 @@ const StackedBarChart = ({ data, title, caption = '' }) => {
   );
 };
 
-const Dashboard = ({ patients, onSelectPatient }) => {
+const Dashboard = ({
+  patients,
+  onSelectPatient,
+  session,
+  scope = 'all',
+  onScopeChange,
+  canUseScope = false,
+  patientListScope,
+}) => {
   const [period, setPeriod] = useState('monthly');
   const [showJobStats, setShowJobStats] = useState(false);
 
+  const userId = session?.user?.id;
+  const allPatientsSafe = Array.isArray(patients) ? patients : [];
+
+  const nonRedactedPatients = useMemo(
+    () => allPatientsSafe.filter(p => !isRedactedPatientRecord(p)),
+    [allPatientsSafe]
+  );
+
+  const scopedPatients = useMemo(
+    () => scope === 'mine'
+      ? nonRedactedPatients.filter(p => isMyPatient(p, session))
+      : nonRedactedPatients,
+    [nonRedactedPatients, scope, userId] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
   const stats = useMemo(
-    () => computeDashboardStats(patients),
-    [patients]
+    () => computeDashboardStats(scopedPatients),
+    [scopedPatients]
+  );
+
+  // 'mine' 전용: 미완료 평가 건수
+  const incompleteCount = useMemo(
+    () => scope === 'mine'
+      ? scopedPatients.filter(p => !isPatientComplete(p)).length
+      : 0,
+    [scopedPatients, scope]
+  );
+
+  // 'all' 전용: 의사별 환자 수 Top 5
+  const doctorCounts = useMemo(
+    () => scope === 'all' && canUseScope
+      ? getDoctorPatientCounts(scopedPatients)
+      : null,
+    [scopedPatients, scope, canUseScope]
   );
 
   const PERIOD_META = {
@@ -138,21 +180,64 @@ const Dashboard = ({ patients, onSelectPatient }) => {
     daily: stats.dailyEvaluations
   };
 
+  const allModules = getAllModules();
+  const showSyncMismatchBanner = canUseScope && scope === 'all' && patientListScope === 'mine';
+
+  const header = (
+    <div className="dashboard-header-row">
+      {canUseScope && (
+        <div className="patient-scope-toggle">
+          <button
+            type="button"
+            className={`patient-scope-btn${scope === 'mine' ? ' patient-scope-btn--active' : ''}`}
+            onClick={() => onScopeChange?.('mine')}
+          >
+            내 환자 통계
+          </button>
+          <button
+            type="button"
+            className={`patient-scope-btn${scope === 'all' ? ' patient-scope-btn--active' : ''}`}
+            onClick={() => onScopeChange?.('all')}
+          >
+            전체 통계
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  const banner = showSyncMismatchBanner ? (
+    <div className="dashboard-banner dashboard-banner-warning">
+      사이드바가 본인 환자만 동기화 중이라 전체 통계가 부정확할 수 있습니다.
+      사이드바에서 [전체]로 전환하세요.
+    </div>
+  ) : null;
+
   if (stats.totalPatients === 0) {
     return (
       <div className="dashboard">
+        {header}
+        {banner}
         <div className="dashboard-empty">
-          아직 저장된 평가 데이터가 없습니다.<br />
-          평가를 시작하면 통계가 여기에 표시됩니다.
+          {scope === 'mine'
+            ? <>담당 환자가 아직 없습니다.<br />
+                {canUseScope && (
+                  <button className="btn btn-sm" onClick={() => onScopeChange?.('all')} style={{ marginTop: 8 }}>
+                    전체 보기로 전환
+                  </button>
+                )}
+              </>
+            : <>아직 저장된 평가 데이터가 없습니다.<br />평가를 시작하면 통계가 여기에 표시됩니다.</>
+          }
         </div>
       </div>
     );
   }
 
-  const allModules = getAllModules();
-
   return (
     <div className="dashboard">
+      {header}
+      {banner}
       {/* 요약 카드 */}
       <div className="dashboard-summary">
         <div className="dashboard-stat-card metric-card pattern-surface">
@@ -231,6 +316,37 @@ const Dashboard = ({ patients, onSelectPatient }) => {
           </div>
           <div className="stat-label">평가 결과</div>
         </div>
+
+        {scope === 'mine' && (
+          <div className="dashboard-stat-card metric-card pattern-surface">
+            <div className="stat-value stat-progress">{incompleteCount}</div>
+            <div className="stat-label">내 미완료 평가</div>
+          </div>
+        )}
+
+        {scope === 'all' && doctorCounts && (
+          <div className="dashboard-stat-card metric-card pattern-surface metric-card-modules">
+            <div className="stat-job-grid">
+              {doctorCounts.top.length > 0 ? (
+                doctorCounts.top.map(row => (
+                  <div className="stat-job-row" key={row.key}>
+                    <div className="stat-job-name">{row.label}</div>
+                    <div className="stat-job-count">{row.count}명</div>
+                  </div>
+                ))
+              ) : (
+                <div className="stat-empty">담당 의사 데이터 없음</div>
+              )}
+              {doctorCounts.unassigned && (
+                <div className="stat-job-row" key="__unassigned__">
+                  <div className="stat-job-name">{doctorCounts.unassigned.label}</div>
+                  <div className="stat-job-count">{doctorCounts.unassigned.count}명</div>
+                </div>
+              )}
+            </div>
+            <div className="stat-label">의사별 환자 수 (Top 5)</div>
+          </div>
+        )}
       </div>
 
       {/* 차트 2개 */}

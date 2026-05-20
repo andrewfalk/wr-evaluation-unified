@@ -1,4 +1,44 @@
 import { isPatientComplete } from './patientCompletion';
+import { getOwnerGroupKey } from './patientOwnership';
+
+export const UNASSIGNED_GROUP_KEY = '__unassigned__';
+
+// 의사별 환자 수 집계 (Top 5 + 미배정 별도)
+// 그룹 키: assignedDoctorUserId(top-level → meta) 우선, 없으면 meta.createdBy
+// null/undefined는 __unassigned__로 묶음
+export function getDoctorPatientCounts(patients, { topN = 5 } = {}) {
+  const list = Array.isArray(patients) ? patients : [];
+  const groups = new Map();
+
+  for (const p of list) {
+    const raw = getOwnerGroupKey(p);
+    const key = raw == null ? UNASSIGNED_GROUP_KEY : raw;
+    const entry = groups.get(key) || { key, count: 0, doctorNameSample: null };
+    entry.count += 1;
+    if (!entry.doctorNameSample) {
+      const dn = p?.data?.shared?.doctorName;
+      if (dn) entry.doctorNameSample = String(dn);
+    }
+    groups.set(key, entry);
+  }
+
+  const formatLabel = (entry) => {
+    if (entry.key === UNASSIGNED_GROUP_KEY) return '미배정/알 수 없음';
+    if (entry.doctorNameSample) return entry.doctorNameSample;
+    const id = String(entry.key);
+    return id.length > 8 ? `${id.slice(0, 8)}…` : id;
+  };
+
+  const all = [...groups.values()].map(e => ({ key: e.key, label: formatLabel(e), count: e.count }));
+
+  const unassigned = all.find(e => e.key === UNASSIGNED_GROUP_KEY) || null;
+  const assigned = all.filter(e => e.key !== UNASSIGNED_GROUP_KEY)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, topN);
+
+  return { top: assigned, unassigned };
+}
+
 
 // 로컬 시간대 기준으로 Date 객체 반환. ISO와 YYYY-MM-DD 형식 모두 처리
 function parseDateLocal(dateStr) {

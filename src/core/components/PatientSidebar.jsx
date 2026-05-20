@@ -3,6 +3,7 @@ import { getAllModules, getModule } from '../moduleRegistry';
 import { isPatientComplete } from '../utils/patientCompletion';
 import { formatBirthDate } from '../utils/data';
 import { isRedactedPatientRecord } from '../services/patientRecords';
+import { canDeletePatient } from '../utils/patientOwnership';
 
 const DEFAULT_SORT_DIRECTION = {
   default: 'asc',
@@ -316,7 +317,21 @@ export function PatientSidebar({
               }}
             />
             <span className="sidebar-selection-label">전체선택{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}</span>
-            {selectedIds.size > 0 && <button className="btn btn-danger btn-xs sidebar-selection-delete" onClick={onRemoveSelectedPatients}>삭제</button>}
+            {selectedIds.size > 0 && (() => {
+              // 선택된 환자 전체에 대해 권한 검사 (필터로 가려진 항목 포함하려 patients 전체 기준)
+              const selected = patients.filter(p => selectedIds.has(p.id));
+              const allDeletable = selected.length > 0 && selected.every(p => canDeletePatient(p, session));
+              return (
+                <button
+                  className="btn btn-danger btn-xs sidebar-selection-delete"
+                  onClick={onRemoveSelectedPatients}
+                  disabled={!allDeletable}
+                  title={allDeletable ? undefined : '선택 항목 중 권한 없는 환자가 있습니다'}
+                >
+                  삭제
+                </button>
+              );
+            })()}
           </div>
 
           <div className="sidebar-filter-row">
@@ -479,7 +494,9 @@ export function PatientSidebar({
                       {hasConflict && (
                         <button className="btn btn-info btn-xs" onClick={e => { e.stopPropagation(); onResolveConflict?.(p.id); }}>Resolve</button>
                       )}
-                      <button className="btn btn-danger btn-xs" onClick={e => { e.stopPropagation(); onRemovePatient(p.id); }}>삭제</button>
+                      {canDeletePatient(p, session) && (
+                        <button className="btn btn-danger btn-xs" onClick={e => { e.stopPropagation(); onRemovePatient(p.id); }}>삭제</button>
+                      )}
                     </div>
                   </div>
                 </div>

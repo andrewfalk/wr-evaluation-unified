@@ -12,6 +12,7 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
   const jobs = shared.jobs || [];
   const [selectedJobId, setSelectedJobId] = useState(jobs[0]?.id || '');
   const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
+  const [pendingSelectId, setPendingSelectId] = useState(null);
 
   // sharedJobId가 빈 태스크는 첫 번째 직업에 귀속(마이그레이션), 삭제된 직업을 가리키는 고아 태스크는 정리
   useEffect(() => {
@@ -35,19 +36,22 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
     return { ...t, force: result ? result.force : 0 };
   }), [mod.tasks]);
 
-  // 선택된 직업의 task만 필터 (sharedJobId 없으면 첫 번째 job 귀속)
   const firstJobId = jobs[0]?.id || '';
-  const filteredTasks = useMemo(() => {
-    if (jobs.length === 0) return allTasks;
-    return allTasks.filter(t => (t.sharedJobId || firstJobId) === selectedJobId);
-  }, [allTasks, selectedJobId, firstJobId, jobs.length]);
+  // selectedJobId가 유효하지 않으면 firstJobId로 보정 (렌더용 임시값)
+  const activeJobId = jobs.find(j => j.id === selectedJobId) ? selectedJobId : firstJobId;
 
-  // 선택된 task의 전체 배열 내 실제 index
+  // 단일 진실원: TaskManager가 보여주는 task 목록 + 모든 핸들러(select/remove/reorder)의 기준
+  const visibleTasks = useMemo(() => {
+    if (jobs.length === 0) return allTasks;
+    return allTasks.filter(t => (t.sharedJobId || firstJobId) === activeJobId);
+  }, [jobs.length, allTasks, firstJobId, activeJobId]);
+
+  // 선택된 task의 전체 배열 내 실제 index (visibleTasks 기준)
   const globalIndex = useMemo(() => {
-    if (selectedTaskIndex < 0 || selectedTaskIndex >= filteredTasks.length) return -1;
-    const task = filteredTasks[selectedTaskIndex];
+    if (selectedTaskIndex < 0 || selectedTaskIndex >= visibleTasks.length) return -1;
+    const task = visibleTasks[selectedTaskIndex];
     return allTasks.findIndex(t => t.id === task.id);
-  }, [filteredTasks, selectedTaskIndex, allTasks]);
+  }, [visibleTasks, selectedTaskIndex, allTasks]);
 
   const selectedTask = globalIndex >= 0 ? allTasks[globalIndex] : null;
 
@@ -58,8 +62,8 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
   }, []);
 
   const handleAddTask = useCallback(() => {
-    const jobId = selectedJobId || firstJobId;
-    const existingCount = (mod.tasks || []).filter(t => (t.sharedJobId || firstJobId) === jobId).length;
+    const jobId = activeJobId;
+    const existingCount = visibleTasks.length;
     const newTask = createTask(existingCount, jobId);
     const result = calculateCompressiveForce(newTask.posture, newTask.weight, newTask.correctionFactor);
     newTask.force = result ? result.force : 0;
@@ -67,13 +71,12 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
       ...m,
       tasks: [...(m.tasks || []), newTask]
     }));
-    // 새 task는 필터된 목록의 마지막에 추가됨
-    const newFilteredCount = (mod.tasks || []).filter(t => (t.sharedJobId || firstJobId) === jobId).length;
-    setSelectedTaskIndex(newFilteredCount);
-  }, [mod.tasks, updateModule, selectedJobId, firstJobId]);
+    // 새 task는 visibleTasks의 마지막에 추가됨 → 그 인덱스로 선택 이동
+    setSelectedTaskIndex(existingCount);
+  }, [visibleTasks, activeJobId, updateModule]);
 
-  const handleRemoveTask = useCallback((filteredIndex) => {
-    const task = filteredTasks[filteredIndex];
+  const handleRemoveTask = useCallback((visibleIndex) => {
+    const task = visibleTasks[visibleIndex];
     if (!task) return;
     const gIdx = allTasks.findIndex(t => t.id === task.id);
     if (gIdx < 0) return;
@@ -82,11 +85,11 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
       return { ...m, tasks: newTasks };
     });
     setSelectedTaskIndex(prev => {
-      if (prev >= filteredTasks.length - 1) return Math.max(0, filteredTasks.length - 2);
-      if (prev > filteredIndex) return prev - 1;
+      if (prev >= visibleTasks.length - 1) return Math.max(0, visibleTasks.length - 2);
+      if (prev > visibleIndex) return prev - 1;
       return prev;
     });
-  }, [filteredTasks, allTasks, updateModule]);
+  }, [visibleTasks, allTasks, updateModule]);
 
   const handleTaskUpdate = useCallback((updatedTask) => {
     if (globalIndex < 0) return;
@@ -97,12 +100,47 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
     });
   }, [globalIndex, updateModule]);
 
-  // selectedJobId가 유효하지 않으면 보정
-  if (jobs.length > 0 && !jobs.find(j => j.id === selectedJobId)) {
-    // 렌더 중 setState 불가 → useEffect에서 처리하거나, 그냥 firstJobId로 렌더
-    // 여기서는 렌더 시 임시로 firstJobId 사용
-  }
-  const activeJobId = jobs.find(j => j.id === selectedJobId) ? selectedJobId : firstJobId;
+  // 드래그앤드롭 reorder — visible 범위 내에서만, id 기반 재구성
+  const handleReorderTask = useCallback((fromIdx, toIdx) => {
+    if (fromIdx === toIdx) return;
+    const fromTask = visibleTasks[fromIdx];
+    const toTask = visibleTasks[toIdx];
+    if (!fromTask || !toTask) return;
+    const fromId = fromTask.id;
+    const toId = toTask.id;
+    const visibleIds = visibleTasks.map(t => t.id);
+    const visibleIdSet = new Set(visibleIds);
+
+    updateModule(m => {
+      const all = m.tasks || [];
+      const byId = new Map(all.map(t => [t.id, t]));
+      const visibleSubset = visibleIds.map(id => byId.get(id)).filter(Boolean);
+
+      const fromSubIdx = visibleSubset.findIndex(t => t.id === fromId);
+      const toSubIdx = visibleSubset.findIndex(t => t.id === toId);
+      if (fromSubIdx < 0 || toSubIdx < 0) return m;
+      const [moved] = visibleSubset.splice(fromSubIdx, 1);
+      visibleSubset.splice(toSubIdx, 0, moved);
+
+      // mod.tasks 재구성: visibleIdSet 위치는 새 순서로 채우고 그 외 task는 그대로
+      let visIter = 0;
+      const next = all.map(t => {
+        if (visibleIdSet.has(t.id)) return visibleSubset[visIter++];
+        return t;
+      });
+      return { ...m, tasks: next };
+    });
+
+    setPendingSelectId(fromId);
+  }, [visibleTasks, updateModule]);
+
+  // visibleTasks가 갱신되면 pendingSelectId가 가리키는 task의 새 위치로 선택 보정
+  useEffect(() => {
+    if (!pendingSelectId) return;
+    const idx = visibleTasks.findIndex(t => t.id === pendingSelectId);
+    if (idx >= 0) setSelectedTaskIndex(idx);
+    setPendingSelectId(null);
+  }, [visibleTasks, pendingSelectId]);
 
   return (
     <>
@@ -141,11 +179,12 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
 
         <div className="evaluation-stack">
           <TaskManager
-            tasks={jobs.length === 0 ? allTasks : filteredTasks.length > 0 ? filteredTasks : allTasks.filter(t => (t.sharedJobId || firstJobId) === activeJobId)}
+            tasks={visibleTasks}
             selectedIndex={selectedTaskIndex}
             onSelect={setSelectedTaskIndex}
             onAdd={handleAddTask}
             onRemove={handleRemoveTask}
+            onReorder={handleReorderTask}
           />
           <TaskEditor
             task={selectedTask}

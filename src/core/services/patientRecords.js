@@ -26,7 +26,7 @@ function getRuntimeSource(context = {}) {
 
 export function createPatientMeta(context = {}) {
   const user = resolveContextUser(context);
-  return {
+  const meta = {
     organizationId: user?.organizationId || null,
     ownerUserId: user?.id || null,
     createdBy: user?.id || null,
@@ -34,6 +34,13 @@ export function createPatientMeta(context = {}) {
     authMode: context?.session?.mode || context?.mode || 'local',
     source: getRuntimeSource(context),
   };
+  // 인트라넷 doctor가 신규 생성 시 서버(resolveAssignedDoctor)는 자동으로
+  // assigned_doctor_user_id = currentUser.id 로 세팅한다 (doctorName 없는 경우).
+  // 클라단에도 동일하게 미리 찍어둬야 sync 전에 본인 환자를 정상 수정 가능.
+  if (context?.session?.mode === 'intranet' && user?.id && user?.role === 'doctor') {
+    meta.assignedDoctorUserId = user.id;
+  }
+  return meta;
 }
 
 export function createPatientSyncState(overrides = {}) {

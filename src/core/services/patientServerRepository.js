@@ -155,10 +155,13 @@ export async function pushPendingPatients(patients, { session, settings } = {}) 
     if (r.status === 'fulfilled') {
       synced.push(r.value);
     } else {
+      let kind = 'error';
+      if (isConflictError(r.reason)) kind = 'conflict';
+      else if (isPermissionDeniedError(r.reason)) kind = 'permission';
       failed.push({
         patient: pending[i],
         error:   r.reason,
-        kind:    isConflictError(r.reason) ? 'conflict' : 'error',
+        kind,
       });
     }
   });
@@ -168,6 +171,12 @@ export async function pushPendingPatients(patients, { session, settings } = {}) 
 
 export function isConflictError(error) {
   return error?.status === 409;
+}
+
+// 권한 거부: 서버가 PATCH /:id에서 담당의/admin 아닌 호출자에게 403 반환.
+// 일반 네트워크 에러와 구분해 사용자에게 "권한 없음" 메시지 표시용.
+export function isPermissionDeniedError(error) {
+  return error?.status === 403;
 }
 
 // ---------------------------------------------------------------------------

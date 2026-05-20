@@ -1010,6 +1010,65 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ---
 
+### 80/443 포트가 이미 점유 중이거나 네트워크에서 차단되는 경우
+
+병원 환경에 따라 다음과 같은 상황이 발생할 수 있습니다.
+
+| 증상 | 원인 |
+|---|---|
+| 80 포트가 IIS 등 다른 서비스에 의해 점유됨 | 기존 업무 시스템이 80을 사용 중 |
+| 443 포트가 네트워크 ACL에 의해 차단됨 | 병원 GPO/방화벽 정책 |
+| 비표준 포트(8443 등)는 통과 가능 | 위 두 제약의 조합 |
+
+**대응**: Caddy를 8443으로 옮겨 운영합니다.
+
+1. `docker-compose.yml`의 caddy ports를 변경:
+   ```yaml
+       ports:
+         - "8443:443"
+   ```
+   (80도 점유 중이면 `8080:80` 매핑 추가)
+
+2. `.env.production`의 CORS_ORIGINS에 포트 명시:
+   ```
+   CORS_ORIGINS=https://wr.hospital.local:8443
+   ```
+
+3. 방화벽 인바운드 8443 허용:
+   ```powershell
+   New-NetFirewallRule -DisplayName "WR Hospital HTTPS (8443)" `
+     -Direction Inbound -Protocol TCP -LocalPort 8443 -Action Allow
+   ```
+
+4. 서버 PC 네트워크 프로파일이 **Public**이면 **Private**으로 전환 (외부에서 Docker 가상 어댑터를 통과한 패킷이 차단되는 사례 있음):
+   ```powershell
+   Set-NetConnectionProfile -InterfaceAlias "이더넷 2" -NetworkCategory Private
+   ```
+
+5. 클라이언트는 `https://wr.hospital.local:8443`로 접속.
+
+6. Electron 인트라넷 빌드는 `DEFAULT_INTRANET_URL`이 `:8443` 포함된 빌드를 사용 (v5.0.1+).
+
+---
+
+### Chrome에서 `ERR_PROXY_CONNECTION_FAILED` (병원 PAC 프록시 강제)
+
+**원인**: 병원 자동 프록시 구성(PAC)이 인트라넷 도메인까지 외부 프록시로 보냄. TCP 연결은 가능하지만 브라우저만 차단.
+
+**해결**:
+
+- **권장 (영구)**: 병원 IT 부서에 PAC 파일에 인트라넷 도메인을 DIRECT 처리하도록 추가 요청:
+  ```javascript
+  if (shExpMatch(host, "wr.hospital.local")) return "DIRECT";
+  ```
+- **우회 (검증/Electron)**: Electron 인트라넷 빌드는 `session.setProxy`로 인트라넷 호스트만 자체 우회하도록 구현됨(v5.0.1+). 따라서 PAC가 수정 불가한 환경에서도 Electron 클라이언트는 정상 동작.
+- **임시 (단일 브라우저)**: Chrome 단일 인스턴스를 프록시 없이 실행:
+  ```cmd
+  "C:\Program Files\Google\Chrome\Application\chrome.exe" --no-proxy-server --user-data-dir=C:\temp\chrome-test
+  ```
+
+---
+
 ### 도움이 필요한 경우
 
 이 문서로 해결되지 않는 문제는 아래 문서를 추가로 참고하세요:

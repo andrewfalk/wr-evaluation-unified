@@ -58,7 +58,13 @@ $Failed  = 0
 Write-Step 1 "Prerequisites"
 
 # Docker daemon
-docker info *>$null
+# Note: In Windows PowerShell 5.1, `*>$null` collects native command stderr into
+# the PS pipeline as ErrorRecords (NativeCommandError) and sets $? to $false even
+# on exit 0. With $ErrorActionPreference=Stop this terminates the script on harmless
+# Docker warnings (e.g. "WARNING: No blkio throttle.read_bps_device support").
+# Send stdout to $null and stderr to system null separately — this avoids the
+# ErrorRecord wrapping while still suppressing output. Rely on $LASTEXITCODE.
+$null = docker info 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "Docker is not running. Start Docker Desktop (or the docker service) and retry."
     exit 1

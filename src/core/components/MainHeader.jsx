@@ -125,7 +125,9 @@ export function MainHeader({
         <div className="header-actions action-bar">
           <div className="action-group">
             <button className="btn btn-secondary btn-sm" onClick={onShowHome} title="대시보드로 이동">대시보드</button>
-            <button className="btn btn-danger btn-sm" onClick={onResetPatients} title="환자 목록 초기화">초기화</button>
+            {session?.mode !== 'intranet' && (
+              <button className="btn btn-danger btn-sm" onClick={onResetPatients} title="환자 목록 초기화">초기화</button>
+            )}
             <button className="btn btn-secondary btn-sm sidebar-toggle" onClick={onToggleSidebar}>환자 ({patients.length})</button>
             {session?.mode !== 'intranet' && (
               <>

@@ -12,11 +12,32 @@ export function LandingScreen({
   onResetPatients,
   onSelectPatient,
   isIntranetMode,
+  session,
+  dashboardScope,
+  onDashboardScopeChange,
+  canUseDashboardScope,
+  patientListScope,
+  onShowPatientList,
+  canShowPatientList,
 }) {
+  const userBadge = (() => {
+    if (session?.mode !== 'intranet' || !session?.user) return null;
+    const displayName = session.user.name || session.user.displayName || session.user.loginId;
+    if (!displayName) return null;
+    const role = session.user.role;
+    const roleLabel = role === 'admin' ? '관리자' : role === 'doctor' ? '의사' : role;
+    return (
+      <div className="landing-user-badge">
+        <span className="landing-user-name">{displayName}</span>
+        {role && <span className="landing-user-role">{roleLabel}</span>}
+      </div>
+    );
+  })();
   return (
     <div className="panel landing-panel pattern-surface pattern-surface-hero">
       <div className="landing-hero">
         <div className="section-title-row landing-hero-copy">
+          {userBadge}
           <h1 className="landing-title">근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미</h1>
           <p className="landing-description">
             {isIntranetMode
@@ -27,6 +48,11 @@ export function LandingScreen({
       </div>
       <div className="landing-actions">
         <button className="btn btn-primary landing-action-btn" onClick={onStartIntake}>+ 새환자</button>
+        {isIntranetMode && canShowPatientList && (
+          <button className="btn btn-secondary landing-action-btn" onClick={onShowPatientList}>
+            환자 목록 보기
+          </button>
+        )}
         {!isIntranetMode && (
           <>
             <button className="btn btn-secondary landing-action-btn" onClick={onOpenLoadModal}>불러오기</button>
@@ -41,13 +67,23 @@ export function LandingScreen({
             <button className="btn btn-secondary btn-sm" onClick={onGoBack}>
               작업 목록 돌아가기 ({patients.length}명)
             </button>
-            <button className="btn btn-danger btn-sm" onClick={onResetPatients}>
-              목록 초기화
-            </button>
+            {session?.mode !== 'intranet' && (
+              <button className="btn btn-danger btn-sm" onClick={onResetPatients}>
+                목록 초기화
+              </button>
+            )}
           </>
         )}
       </div>
-      <Dashboard patients={patients} onSelectPatient={onSelectPatient} />
+      <Dashboard
+        patients={patients}
+        onSelectPatient={onSelectPatient}
+        session={session}
+        scope={dashboardScope}
+        onScopeChange={onDashboardScopeChange}
+        canUseScope={canUseDashboardScope}
+        patientListScope={patientListScope}
+      />
     </div>
   );
 }

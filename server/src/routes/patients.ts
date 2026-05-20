@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import { z } from 'zod';
 import { createAuthMiddleware } from '../middleware/auth';
 import { adminOnly } from '../middleware/adminOnly';
+import { assignedDoctorOrAdmin } from '../middleware/patientAccess';
 import { csrfMiddleware } from '../middleware/csrf';
 import { auditMiddleware, writeAuditLog } from '../middleware/audit';
 import {
@@ -817,13 +818,13 @@ export function createPatientsRouter(pool: Pool): Router {
 
   router.patch(
     '/:id',
-    auth, csrfMiddleware, audit('patient_update'),
+    auth, csrfMiddleware, assignedDoctorOrAdmin(pool), audit('patient_update'),
     (req, res) => patchPatient(pool, req, res).catch(() => res.status(500).json(internalError()))
   );
 
   router.delete(
     '/:id',
-    auth, csrfMiddleware, audit('patient_delete'),
+    auth, csrfMiddleware, assignedDoctorOrAdmin(pool), audit('patient_delete'),
     (req, res) => deletePatient(pool, req, res).catch(() => res.status(500).json(internalError()))
   );
 

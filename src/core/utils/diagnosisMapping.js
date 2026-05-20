@@ -45,7 +45,7 @@ const NAME_MODULE_MAP = [
     label: '무릎',
   },
   {
-    pattern: /손목|손가락|수근관|손목\s*터널|듀피트렌|뒤피트랑|Dupuytren|손바닥\s*섬유종증|손부위|드퀘르벵|방아쇠수지|방아쇠엄지|trigger\s*finger|trigger\s*thumb|de\s*quervain|tenosynovitis|tendovaginitis|carpal\s*tunnel|cts|guyon|ulnar\s*neuropathy\s*at\s*wrist|wrist\s*arthr|finger\s*arthr|hand\s*arthr|kienb[oö]ck|월상골/i,
+    pattern: /손목|손가락|완관절|수근관|손목\s*터널|듀피트렌|뒤피트랑|Dupuytren|손바닥\s*섬유종증|손부위|드퀘르벵|방아쇠수지|방아쇠엄지|trigger\s*finger|trigger\s*thumb|de\s*quervain|tenosynovitis|tendovaginitis|carpal\s*tunnel|cts|guyon|ulnar\s*neuropathy\s*at\s*wrist|wrist\s*arthr|finger\s*arthr|hand\s*arthr|kienb[oö]ck|월상골/i,
     moduleId: 'wrist',
     label: '손목/손가락',
   },
@@ -55,7 +55,7 @@ const NAME_MODULE_MAP = [
     label: '팔꿈치',
   },
   {
-    pattern: /어깨|견관절|회전근개|극상근|충돌증후군|석회성건염/i,
+    pattern: /어깨|견관절|회전근개|견쇄관절|견쇄 관절|극상근|충돌증후군|석회성건염/i,
     moduleId: 'shoulder',
     label: '어깨',
   },

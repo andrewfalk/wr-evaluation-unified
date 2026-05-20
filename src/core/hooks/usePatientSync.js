@@ -204,6 +204,10 @@ export function usePatientSync({
     inFlightRef.current = true;
     setSyncState(prev => ({ ...prev, status: 'syncing', lastError: null }));
 
+    // 이번 sync에서 발생한 permission failure 수. push가 실제 발생하지 않으면 0 유지.
+    // 종료부에서 lastSyncedAt setState와 함께 한 번에 반영해 push-only/pull-only/both 모두 일관 처리.
+    let permissionDeniedCount = 0;
+
     try {
       if (push) {
         const snapshot = patientsRef.current;
@@ -225,8 +229,14 @@ export function usePatientSync({
             });
           }
 
-          const nonConflictFailure = failed.find(f => f.kind !== 'conflict');
-          if (nonConflictFailure) throw nonConflictFailure.error;
+          permissionDeniedCount = failed.filter(f => f.kind === 'permission').length;
+          if (permissionDeniedCount > 0) {
+            console.warn(`[sync] ${permissionDeniedCount}건의 환자가 권한 없음으로 동기화되지 않았습니다.`);
+          }
+
+          // permission/conflict 외 진짜 에러만 throw → 일반 실패 알림 흐름
+          const realFailure = failed.find(f => f.kind !== 'conflict' && f.kind !== 'permission');
+          if (realFailure) throw realFailure.error;
         }
       }
 
@@ -259,6 +269,9 @@ export function usePatientSync({
       }
 
       const lastSyncedAt = new Date().toISOString();
+      // 권한 거부 배너 통합 처리: push/pull 어느 쪽이든 성공 종료 시 stale 정리.
+      // - permission failure 있었음 → count/timestamp 갱신
+      // - 없거나 push가 안 일어남 → 이전에 남아있던 카운트를 0으로 clear (pull-only sync 포함)
       setSyncState(prev => ({
         ...prev,
         status: 'idle',
@@ -266,6 +279,11 @@ export function usePatientSync({
         lastError: null,
         ...(typeof serverUnassignedCount === 'number' ? { serverUnassignedCount } : {}),
         ...(typeof serverPatientCount    === 'number' ? { serverPatientCount }    : {}),
+        ...(permissionDeniedCount > 0
+          ? { lastPermissionDeniedCount: permissionDeniedCount, lastPermissionDeniedAt: lastSyncedAt }
+          : (prev.lastPermissionDeniedCount
+              ? { lastPermissionDeniedCount: 0, lastPermissionDeniedAt: null }
+              : {})),
       }));
       return { ok: true, reason, lastSyncedAt };
     } catch (error) {

@@ -4,6 +4,9 @@ import { touchPatientRecord, migratePatientRecords } from '../services/patientRe
 import { deletePatientOnServer, isConflictError } from '../services/patientServerRepository';
 import { createTestPatients } from '../utils/data';
 import { showAlert, showConfirm } from '../utils/platform';
+import { canEditPatient, canDeletePatient } from '../utils/patientOwnership';
+import { preserveDeletedSpineCommonFields } from '../utils/spineAssessmentMigration';
+import { resolveDiagnosisModule } from '../utils/diagnosisMapping';
 
 export function usePatientCrud({
   activeId, activeModuleId, session, settings,
@@ -15,6 +18,12 @@ export function usePatientCrud({
   handleStartIntake,
 }) {
   const updatePatient = (updater) => {
+    // 권한 없는 환자에는 silent guard. UI(fieldset disabled)와 사이드바 게이팅이
+    // 정상 흐름에서 호출 자체를 차단하므로, 여기에 도달하면 우회 경로(EMR import,
+    // preset select, conflict resolve 등) — 조용히 무시해 잘못된 setState/sync 방지.
+    const activePatient = patients.find(p => p.id === activeId);
+    if (!canEditPatient(activePatient, session)) return;
+
     setPatients(prev => prev.map(p =>
       p.id === activeId
         ? touchPatientRecord(
@@ -74,7 +83,18 @@ export function usePatientCrud({
   }, [activeId, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateDiagnoses = (newDiagnoses) => {
-    updatePatient(d => ({ ...d, shared: { ...d.shared, diagnoses: newDiagnoses } }));
+    updatePatient(d => {
+      // spine 진단 삭제 시 verticalDistribution/concomitantSpondylosis 값이 사라지지 않도록
+      // 살아남은 첫 spine 진단으로 이송 (override 안 함).
+      const activeModules = d.activeModules || [];
+      const isSpineDiagnosis = diag => resolveDiagnosisModule(diag, activeModules)?.moduleId === 'spine';
+      const preserved = preserveDeletedSpineCommonFields(
+        d.shared?.diagnoses || [],
+        newDiagnoses,
+        isSpineDiagnosis
+      );
+      return { ...d, shared: { ...d.shared, diagnoses: preserved } };
+    });
   };
 
   const addPatient = () => { handleStartIntake(); };
@@ -148,6 +168,11 @@ export function usePatientCrud({
   };
 
   const removePatient = async (id) => {
+    const patient = patients.find(p => p.id === id);
+    if (!canDeletePatient(patient, session)) {
+      await showAlert('이 환자를 삭제할 권한이 없습니다.');
+      return;
+    }
     const confirmed = await showConfirm('이 환자를 삭제하시겠습니까?');
     if (!confirmed) return;
     const { conflicts, failures, nextPatients } = await deletePatientsByIds([id]);
@@ -162,6 +187,11 @@ export function usePatientCrud({
 
   const removeSelectedPatients = async () => {
     if (selectedIds.size === 0) return;
+    const selected = patients.filter(p => selectedIds.has(p.id));
+    if (!selected.every(p => canDeletePatient(p, session))) {
+      await showAlert('선택 항목 중 권한 없는 환자가 있어 일괄 삭제할 수 없습니다.');
+      return;
+    }
     if (selectedIds.size >= patients.length) { await showAlert('최소 1명의 환자는 유지해야 합니다'); return; }
     const confirmed = await showConfirm(`선택된 ${selectedIds.size}명의 환자를 삭제하시겠습니까?`);
     if (!confirmed) return;

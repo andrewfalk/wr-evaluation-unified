@@ -41,6 +41,7 @@ import { getSyncedEvaluationDate } from './core/utils/patientCompletion';
 import { generateUnifiedReport } from './core/utils/reportGenerator';
 import { buildSteps } from './core/utils/steps';
 import { isRedactedPatientRecord, touchPatientRecord } from './core/services/patientRecords';
+import { canEditPatient } from './core/utils/patientOwnership';
 import {
   clearAutoSavedWorkspace,
   loadAppSettings,
@@ -49,6 +50,7 @@ import {
 } from './core/services/workspaceRepository';
 import { LoginModal } from './core/components/LoginModal';
 import { ChangePasswordModal } from './core/components/ChangePasswordModal';
+import { SwitchToLocalButton } from './core/components/SwitchToLocalButton';
 import { AdminConsoleModal } from './core/components/AdminConsoleModal';
 import { AccountProfileModal } from './core/components/AccountProfileModal';
 
@@ -102,6 +104,7 @@ function App() {
   const { session, setSession, resetToLocalSession, isAuthenticated, sessionVerified, logout } = useAuth();
   const [patients, setPatients] = useState([]);
   const [patientScope, setPatientScope] = useState(() => getDefaultPatientScope(session));
+  const [dashboardScope, setDashboardScope] = useState(() => getDefaultPatientScope(session));
   const [patientSyncPaused, setPatientSyncPaused] = useState(false);
   const [activeId, setActiveId] = useState(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -125,6 +128,8 @@ function App() {
     session?.mode === 'intranet' || settings?.integrationMode === 'intranet';
   const canUseMinePatientScope = session?.mode !== 'intranet' || session?.user?.role === 'doctor';
   const effectivePatientScope = canUseMinePatientScope ? patientScope : 'all';
+  const canUseDashboardScope = session?.mode === 'intranet' && !!session?.user?.id;
+  const effectiveDashboardScope = canUseDashboardScope ? dashboardScope : 'all';
   const { status: integrationStatus } = useIntegrationStatus({ session, settings });
   const activePatient = patients.find(p => p.id === activeId);
   const conflictPatient = patients.find(
@@ -249,6 +254,7 @@ function App() {
 
   useEffect(() => {
     setPatientScope(getDefaultPatientScope(session));
+    setDashboardScope(getDefaultPatientScope(session));
     setPatientSyncPaused(false);
   }, [session?.mode, session?.user?.id, session?.user?.role]);
 
@@ -416,6 +422,29 @@ function App() {
     }
     setShowSettings(false);
   };
+
+  const showPatientList = useCallback(() => {
+    setShowHome(false);
+    setShowSidebar(true);
+  }, []);
+
+  const switchToLocalMode = useCallback(() => {
+    if (!window.confirm(
+      '로컬 모드로 전환하면 서버 동기화가 중단되고 ' +
+      '이 브라우저에 저장된 데이터로만 작업하게 됩니다.\n' +
+      '서버 감사/동기화에 포함되지 않을 수 있습니다.\n\n계속할까요?'
+    )) return;
+    handleSaveSettings({ ...settings, integrationMode: 'local' });
+  }, [settings, handleSaveSettings]);
+
+  const withLocalEscape = (content) => (
+    <>
+      {content}
+      <div className="app-boot-escape-hatch">
+        <SwitchToLocalButton onSwitch={switchToLocalMode} />
+      </div>
+    </>
+  );
 
   const handleResetPatients = async () => {
     const ok = await showConfirm('현재 작업 중인 환자 목록을 모두 삭제하시겠습니까?');
@@ -614,7 +643,7 @@ function App() {
   // 인트라넷 모드 부팅 게이팅
   // ===========================================
   if (isIntranetMode && configLoading) {
-    return (
+    return withLocalEscape(
       <div className="app-boot-overlay">
         <div className="app-boot-box">
           <p>서버에 연결 중입니다…</p>
@@ -625,7 +654,7 @@ function App() {
 
   if (isIntranetMode && configError) {
     const serverUrl = session?.apiBaseUrl || settings?.apiBaseUrl || '';
-    return (
+    return withLocalEscape(
       <div className="app-boot-overlay">
         <div className="app-boot-box app-boot-error">
           <h2>서버 연결 실패</h2>
@@ -648,7 +677,7 @@ function App() {
   // Boot-time session verification in progress (persisted intranet session, not yet confirmed).
   // session.mode==='intranet' && !sessionVerified means the /api/auth/csrf check is in flight.
   if (isIntranetMode && session?.mode === 'intranet' && !sessionVerified) {
-    return (
+    return withLocalEscape(
       <div className="app-boot-overlay">
         <div className="app-boot-box">
           <p>세션을 확인하는 중입니다…</p>
@@ -660,7 +689,7 @@ function App() {
   // Login guard: intranet mode but not authenticated (no persisted session, or
   // verification failed and session was reset to local). Non-dismissable.
   if (isIntranetMode && !isAuthenticated) {
-    return (
+    return withLocalEscape(
       <LoginModal apiBaseUrl={session?.apiBaseUrl || settings?.apiBaseUrl || ''} />
     );
   }
@@ -668,7 +697,7 @@ function App() {
   // Password change guard: server flagged must_change_password (e.g. seed admin first login).
   // Blocks all other UI until the password is changed. Non-dismissable.
   if (isIntranetMode && isAuthenticated && session?.user?.mustChangePassword) {
-    return (
+    return withLocalEscape(
       <ChangePasswordModal apiBaseUrl={session?.apiBaseUrl || settings?.apiBaseUrl || ''} />
     );
   }
@@ -687,7 +716,7 @@ function App() {
     && !showHome;
 
   if (isBootingFromServer && syncState.status === 'syncing') {
-    return (
+    return withLocalEscape(
       <div className="app-boot-overlay">
         <div className="app-boot-box">
           <p>서버 환자 목록을 불러오는 중입니다…</p>
@@ -722,6 +751,16 @@ function App() {
           onResetPatients={handleResetPatients}
           onSelectPatient={(id) => { setActiveId(id); setCurrentStepIndex(0); setShowHome(false); }}
           isIntranetMode={session?.mode === 'intranet'}
+          session={session}
+          dashboardScope={effectiveDashboardScope}
+          onDashboardScopeChange={setDashboardScope}
+          canUseDashboardScope={canUseDashboardScope}
+          patientListScope={effectivePatientScope}
+          onShowPatientList={showPatientList}
+          canShowPatientList={
+            session?.mode === 'intranet' &&
+            ((syncState.serverPatientCount ?? 0) > 0 || patients.length > 0)
+          }
         />
         {renderModals()}
       </div>
@@ -857,6 +896,20 @@ function App() {
           <>
             {/* 스텝 인디케이터 */}
             <StepIndicator steps={steps} currentStepIndex={currentStepIndex} goToStep={goToStep} />
+
+            {/* 권한 없는 환자 안내 (스텝 탭 ↔ 콘텐츠 사이) */}
+            {!canEditPatient(activePatient, session) && (
+              <div className="read-only-banner" role="status">
+                담당 의사가 아니므로 조회만 가능합니다.
+              </div>
+            )}
+
+            {/* 동기화 권한 거부 알림: 다른 디바이스에서 만든 dirty 환자가 더 이상 본인 담당이 아닐 때 */}
+            {syncState?.lastPermissionDeniedCount > 0 && (
+              <div className="read-only-banner" role="status" style={{ background: '#fde2e2', color: '#9b1c1c', borderColor: '#f5b5b5' }}>
+                권한 없음으로 동기화되지 않은 환자: {syncState.lastPermissionDeniedCount}건. 담당 의사 변경 또는 관리자 문의가 필요합니다.
+              </div>
+            )}
 
             {/* 콘텐츠 */}
             <div className={`main-content ${currentStep.id === 'info' ? 'main-content-dual' : currentStep.id === 'assessment' ? '' : 'main-content-single'}`}>

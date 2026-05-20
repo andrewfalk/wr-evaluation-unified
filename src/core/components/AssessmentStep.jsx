@@ -54,6 +54,7 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
           <AssessmentTab
             diagnoses={diagnoses}
             onDiagnosisUpdate={handleDiagnosisUpdate}
+            onDiagnosesReplace={updateDiagnoses}
             returnConsiderations={returnConsiderations}
             onReturnChange={handleReturnChange}
             activeModules={activeModules}

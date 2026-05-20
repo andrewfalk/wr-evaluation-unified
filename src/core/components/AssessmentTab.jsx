@@ -1,6 +1,8 @@
+import { useCallback, useEffect, useMemo } from 'react';
 import { KLG_OPTIONS, LOW_REASON_OPTIONS } from '../../modules/knee/utils/data';
 import { getSideText } from '../../modules/knee/utils/calculations';
 import { resolveDiagnosisModule } from '../utils/diagnosisMapping';
+import { normalizeSpineAssessmentFields } from '../utils/spineAssessmentMigration';
 
 const ELLMAN_OPTIONS = [
   { value: '', label: '선택' },
@@ -85,12 +87,27 @@ function SideAssessment({ diag, index, side, onUpdate, label }) {
   );
 }
 
-export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsiderations, onReturnChange, activeModules }) {
+export function AssessmentTab({ diagnoses, onDiagnosisUpdate, onDiagnosesReplace, returnConsiderations, onReturnChange, activeModules }) {
   const hasKnee = (activeModules || []).includes('knee');
   const hasWrist = (activeModules || []).includes('wrist');
   const hasShoulder = (activeModules || []).includes('shoulder');
   const hasElbow = (activeModules || []).includes('elbow');
   const hasCervical = (activeModules || []).includes('cervical');
+
+  // 수직분포/동반 척추증: spine 진단 중 첫 번째에만 표시 + 기존 데이터 통합 마이그레이션
+  const isSpineDiagnosis = useCallback(
+    diag => resolveDiagnosisModule(diag, activeModules)?.moduleId === 'spine',
+    [activeModules]
+  );
+  const firstSpineIndex = useMemo(
+    () => diagnoses.findIndex(isSpineDiagnosis),
+    [diagnoses, isSpineDiagnosis]
+  );
+  useEffect(() => {
+    if (!onDiagnosesReplace) return;
+    const next = normalizeSpineAssessmentFields(diagnoses, isSpineDiagnosis);
+    if (next !== diagnoses) onDiagnosesReplace(next);
+  }, [diagnoses, isSpineDiagnosis, onDiagnosesReplace]);
 
   return (
     <section className="section pattern-surface form-section">
@@ -174,20 +191,22 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, returnConsideratio
 
             {isSpine && (
               <>
-                <div className="klg-inline" style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', marginTop: 4 }}>
-                  <span className="klg-inline-label">수직분포 정리</span>
-                  <select value={diag.verticalDistribution || ''} onChange={e => onDiagnosisUpdate(index, 'verticalDistribution', e.target.value)}>
-                    <option value="">선택</option>
-                    <option value="confirmed">확인</option>
-                    <option value="unconfirmed">미확인</option>
-                  </select>
-                  <span className="klg-inline-label">동반 척추증</span>
-                  <select value={diag.concomitantSpondylosis || ''} onChange={e => onDiagnosisUpdate(index, 'concomitantSpondylosis', e.target.value)}>
-                    <option value="">선택</option>
-                    <option value="confirmed">확인</option>
-                    <option value="unconfirmed">미확인</option>
-                  </select>
-                </div>
+                {index === firstSpineIndex && (
+                  <div className="klg-inline" style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', marginTop: 4 }}>
+                    <span className="klg-inline-label">수직분포 정리</span>
+                    <select value={diag.verticalDistribution || ''} onChange={e => onDiagnosisUpdate(index, 'verticalDistribution', e.target.value)}>
+                      <option value="">선택</option>
+                      <option value="confirmed">확인</option>
+                      <option value="unconfirmed">미확인</option>
+                    </select>
+                    <span className="klg-inline-label">동반 척추증</span>
+                    <select value={diag.concomitantSpondylosis || ''} onChange={e => onDiagnosisUpdate(index, 'concomitantSpondylosis', e.target.value)}>
+                      <option value="">선택</option>
+                      <option value="confirmed">확인</option>
+                      <option value="unconfirmed">미확인</option>
+                    </select>
+                  </div>
+                )}
                 <SideAssessment diag={diag} index={index} side="right" onUpdate={onDiagnosisUpdate} label="평가" />
               </>
             )}

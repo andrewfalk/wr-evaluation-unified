@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, net } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, net, session } = require('electron');
 const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -11,10 +11,10 @@ const { evaluateMigrationGate } = require('./migrationGate');
 
 // ---------------------------------------------------------------------------
 // Build target: 'intranet' or 'standalone' (default)
-// Set WR_BUILD_TARGET=intranet + WR_INTRANET_URL=https://wr.hospital.local
+// Set WR_BUILD_TARGET=intranet + WR_INTRANET_URL=https://wr.hospital.local:8443
 // OR run `npm run electron:build:intranet` which writes electron/build-target.json.
 // ---------------------------------------------------------------------------
-const DEFAULT_INTRANET_URL = 'https://wr.hospital.local';
+const DEFAULT_INTRANET_URL = 'https://wr.hospital.local:8443';
 
 function detectBuildTarget() {
   if (process.env.WR_BUILD_TARGET) return process.env.WR_BUILD_TARGET;
@@ -188,6 +188,26 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // ─ Intranet proxy bypass ────────────────────────────────────────────────
+  // 일부 병원은 PAC(Proxy Auto-Config)를 강제 적용해 인트라넷 도메인까지
+  // 외부 프록시로 보낸다(ERR_PROXY_CONNECTION_FAILED).
+  //
+  // 이전 시도: mode='system' + proxyBypassRules. Chromium이 system PAC를
+  // 우선 평가하면서 bypassRules를 무시하는 케이스가 있어 PAC 환경에서 실패.
+  //
+  // 현재 방식: mode='direct'로 PAC를 완전히 우회한다. 인트라넷 빌드는 오직
+  // 인트라넷 서버에만 접속하므로(will-navigate + setWindowOpenHandler에서
+  // 외부 origin 차단) PAC를 거칠 필요가 없다. 시스템 PAC는 다른 앱에는
+  // 그대로 적용되므로 영향 없음.
+  if (IS_INTRANET_BUILD && INTRANET_URL) {
+    try {
+      await session.defaultSession.setProxy({ mode: 'direct' });
+      console.log('[proxy] mode=direct (intranet build bypasses system PAC)');
+    } catch (e) {
+      console.error('[proxy] setProxy failed:', e.message);
+    }
+  }
+
   createWindow();
 
   if (IS_INTRANET_BUILD) {

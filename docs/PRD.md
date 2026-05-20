@@ -1634,6 +1634,63 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 - `docs/INTRANET_DEPLOYMENT.md` — HTTPS / 내부 CA / 인증서 신뢰 등록
 - 기존 `docs/BACKUP_RESTORE.md` 대폭 보강
 
+### Phase 23: 다중 사용자 운영 UX 강화 + 척추 모듈 개선 (v5.1.0)
+
+Phase 22에서 인트라넷 백엔드를 도입한 뒤 실제 다중 사용자 운영 환경에서 드러난 UX 결함과 권한 정책 미비점을 정리. 동시에 척추 모듈의 입력 효율도 개선.
+
+**Phase 23-A: 환자 권한 정책 강화**
+- **수정/삭제 권한**: 담당의(`assigned_doctor_user_id == session.userId`) 또는 admin만 (조회는 같은 organization 누구나)
+- **서버 미들웨어**: 신규 `server/src/middleware/patientAccess.ts` `assignedDoctorOrAdmin(pool)` — `PATCH /api/patients/:id`, `DELETE /api/patients/:id`에 적용. 다른 org는 404(존재 누설 방지), 비담당은 403
+- **클라이언트 헬퍼**: `src/core/utils/patientOwnership.js` `canEditPatient`/`canDeletePatient` — 로컬 모드는 단일 사용자라 항상 true, redacted/null patient는 항상 false (admin/로컬 무관)
+- **신규 환자 자동 assigned**: `createPatientMeta`에서 인트라넷 doctor 세션이면 `meta.assignedDoctorUserId = user.id` 자동 세팅 (서버 `resolveAssignedDoctor`와 동일 로직 mirroring) → sync 전에도 본인 환자 정상 수정
+- **local-only 안전망**: assigned 미정의 + createdBy == me + syncStatus == 'local-only' 시 임시 편집 허용 (assigned가 명시적 null이면 미배정 정책 유지)
+- **UI 게이팅**:
+  - PatientSidebar 개별 삭제 버튼: `canDeletePatient`일 때만 렌더
+  - 일괄 삭제: `patients.filter(p => selectedIds.has(p.id))` 전체가 모두 삭제 가능할 때만 활성 (필터로 가려진 항목 포함)
+  - StepContent: `canEditPatient === false`면 평가 영역을 `<div className="read-only-content" inert="">`로 감쌈 — HTML `inert` 속성으로 키보드 포커스/탭/스크린리더까지 차단. 부모 grid 보존(`display: contents`) + opacity 약화
+  - "담당 의사가 아니므로 조회만 가능합니다" pill 배너 (스텝 탭 ↔ 콘텐츠 사이)
+- **usePatientCrud 다층 방어**: `updatePatient`에 silent guard (EMR import/preset select 등 우회 경로 차단), 삭제 함수 2개 진입부에 권한 거부 alert
+- **403 sync 알림**: `pushPendingPatients` 결과를 conflict/permission/error로 분류. `syncState.lastPermissionDeniedCount` 노출 → 메인 영역 빨간 배너로 "권한 없음으로 동기화되지 않은 환자: N건" 표시. push가 시도된 sync에서 0건이면 자동 clear (pull-only sync 종료부에서도 통합 정리)
+- **테스트**: 서버 권한 12케이스, 클라이언트 헬퍼 11케이스 추가
+
+**Phase 23-B: 대시보드 scope 분리 (내 환자 / 전체)**
+- 인트라넷 다중 의사 환경에서 본인 담당 통계와 조직 전체 통계가 섞여 의사결정 맥락이 흐려지던 문제 해결
+- **별도 state** `dashboardScope` (사이드바 `patientScope`와 분리) — 사이드바 환자 목록(서버 sync)을 건드리지 않음
+- **canUseScope 게이팅**: `session?.mode === 'intranet' && !!session?.user?.id` — 로컬 모드는 토글 숨김
+- **'내 환자' 판정**: dashboard 헬퍼 `isMyPatient`는 `assignedDoctorUserId` 우선, 없으면 `createdBy` 폴백
+- **차별 카드**:
+  - 'mine' 전용: "내 미완료 평가 건수"
+  - 'all' 전용: "의사별 환자 수 Top 5" (`getDoctorPatientCounts` 신규) — 그룹 키 우선순위 `assignedDoctorUserId` top-level → `meta.assignedDoctorUserId` → `meta.createdBy`, null/미배정은 `__unassigned__` 별도 표시. 라벨은 `data.shared.doctorName` → ID 축약 폴백
+- **빈 상태 처리**: 'mine'에서 0명이어도 헤더+토글 보이고 "전체 보기로 전환" 버튼 제공
+- **sync 범위 불일치 배너**: 사이드바 mine sync + 대시보드 all 선택 시 안내
+- 세션 변경 시 자동 reset (`getDefaultPatientScope`)
+
+**Phase 23-C: 다중 사용자 운영 UX**
+- **인트라넷 차단 화면 탈출구**: 6개 차단 화면(configLoading/configError/sessionVerifying/LoginModal/ChangePasswordModal/booting-syncing) 우상단에 신규 `SwitchToLocalButton` 컴포넌트. confirm 후 `handleSaveSettings({...settings, integrationMode: 'local'})`로 즉시 메인 UI 진입 — dev 모드에서 서버 없거나 운영에서 서버 장애 시 작업자 탈출구
+- **랜딩에 "환자 목록 보기" 버튼**: 헤더 "대시보드" 클릭 후 LandingScreen에서 환자 목록으로 다시 빠져나갈 수단이 없던 문제 해결. `setShowHome(false) + setShowSidebar(true)`. 인트라넷 + (서버 환자 ≥ 1 또는 로컬 환자 ≥ 1)일 때만 노출
+- **랜딩 로그인 사용자 배지**: `landing-hero` 안에 이름/역할 표시 (필드 우선순위 `name → displayName → loginId`, MainHeader와 동일 패턴). 인트라넷 모드만
+- **인트라넷 "초기화" 버튼 숨김**: LandingScreen "목록 초기화" + MainHeader "초기화" 버튼이 클라이언트 state만 비우고 서버 데이터는 그대로 남는 동작이라, 다중 사용자 환경에서는 삭제처럼 오해될 수 있어 인트라넷에서만 숨김 (로컬 유지)
+- **dev CORS override**: 신규 `docker-compose.override.yml` — dev 스택만 `http://localhost:3000` (Vite) origin 허용. prod compose는 영향 없음
+
+**Phase 23-D: 척추 모듈 개선**
+- **수직분포 정리 / 동반 척추증 통합**: 척추(spine) 진단마다 두 select가 반복 노출되던 것을 첫 spine 진단에만 표시
+  - 신규 순수 함수 `src/core/utils/spineAssessmentMigration.js`:
+    - `normalizeSpineAssessmentFields(diagnoses, isSpineDiagnosis)` — 첫 spine 진단에 빈 값이면 다른 spine 진단의 첫 non-empty 값 승계, 나머지 spine 진단들은 두 필드 제거. 변경 없으면 동일 참조 반환(무한 루프 방지). 빈 필드 안 만듦
+    - `preserveDeletedSpineCommonFields(prev, next, isSpineDiagnosis)` — 첫 spine 진단 삭제 시 살아남은 첫 spine 진단으로 값 이송 (override 안 함)
+  - AssessmentTab: `useCallback(isSpineDiagnosis)` + 마이그레이션 effect (eslint 억제 없음), `index === firstSpineIndex`일 때만 select UI 렌더
+  - `usePatientCrud.updateDiagnoses` 래핑: 진단 변경 모든 경로(IntakeWizard/StepContent/AssessmentTab)에서 자동 보호
+  - 테스트: 마이그레이션 9 + 삭제 시 이송 6 = 15케이스
+- **척추 작업 순서 드래그앤드롭**: 현재 직업 탭 내에서 작업 순서를 마우스로 변경
+  - HTML5 native DnD (외부 라이브러리 없음). 단일 항목/빈 탭은 draggable 자동 비활성
+  - `visibleTasks` useMemo로 단일 진실원 도입 — 기존 `filteredTasks` 제거, 모든 핸들러(select/remove/reorder)가 같은 기준 사용
+  - **id 기반 reorder**: index → id로 변환 후 `Set`/`Map`으로 O(n) 재구성. mod.tasks 전체 배열에서 같은 직업 task 위치만 재배치(다른 직업 순서 보존). `from === to` early return
+  - 드래그 후 선택 유지: `pendingSelectId` state + useEffect로 새 visible 위치 자동 보정
+  - **방향 인식 drop indicator**: source < target이면 target 하단, source > target이면 target 상단에 box-shadow inset (border-top 대신 사용 — 높이 변경 없음, active 상태와 충돌 없음)
+
+**Phase 23-E: 기타 정리**
+- `useIntegrationStatus` 등 기존 hook의 react-hooks/exhaustive-deps 경고는 의도된 stable closure로 유지 (eslint 5 warnings remain, 0 errors)
+- `diagnosisMapping.js`/`reportGenerator.js`: 작은 보정(사용자 직접 수정)
+
 ---
 
 ## 부록 A: MDDM 자세 코드
@@ -1739,6 +1796,45 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 ---
 
 ## 변경 이력
+
+### v5.1.0 (2026-05-20) — 다중 사용자 운영 UX 강화 + 권한 정책 + 척추 모듈 개선
+
+v5.0.0 인트라넷 백엔드 도입 후 실제 다중 사용자 운영에서 드러난 UX 결함과 권한 미비점을 정리. 척추 모듈 입력 효율도 개선.
+
+**환자 권한 정책 (서버 + UI)**
+- 신규 미들웨어 `assignedDoctorOrAdmin` — `PATCH/DELETE /api/patients/:id`는 담당의 또는 admin만 허용 (다른 org 404, 비담당 403). 인계(`POST /:id/assignment`)는 현행 admin 전용 유지
+- 신규 헬퍼 `src/core/utils/patientOwnership.js` (`canEditPatient`, `canDeletePatient`) — 로컬 모드 단일 사용자라 항상 true, redacted/null patient는 admin/로컬 무관 항상 false
+- 신규 환자 생성 시 doctor 세션이면 `meta.assignedDoctorUserId = user.id` 자동 mirroring → sync 전에도 본인 환자 정상 수정
+- local-only 안전망: assigned 미정의 + createdBy == me 시 임시 편집 허용
+- PatientSidebar 삭제 버튼 게이팅 + 일괄 삭제는 patients 전체 기준 권한 검사
+- StepContent 평가 영역을 `inert` div로 감싸 키보드 포커스/탭/스크린리더까지 차단
+- `usePatientCrud.updatePatient` silent guard (EMR/preset/conflict resolve 등 우회 경로 차단)
+- sync 403 분리 처리: `lastPermissionDeniedCount` 빨간 배너로 명시 표시, 정상 sync 시 자동 clear (pull-only sync 포함)
+- 테스트: 서버 12 + 클라 11 = 23 신규
+
+**대시보드 scope 분리**
+- 헤더 우상단 토글로 "내 환자 통계" ↔ "전체 통계" 전환 (인트라넷 + 로그인 시만 노출)
+- 별도 `dashboardScope` state — 사이드바 환자 목록 sync는 건드리지 않음
+- 'mine' 전용 카드: "내 미완료 평가 건수"
+- 'all' 전용 카드: "의사별 환자 수 Top 5" (`getDoctorPatientCounts` 신규, 미배정 그룹 별도 표시)
+- 빈 상태에서도 헤더+토글 보이고 "전체 보기로 전환" 버튼 제공
+- 세션 변경 시 자동 reset
+
+**다중 사용자 운영 UX**
+- 신규 `SwitchToLocalButton` — 인트라넷 6개 차단 화면(configLoading/configError/sessionVerifying/LoginModal/ChangePasswordModal/booting-syncing) 우상단 탈출구. 서버 없거나 장애 시 즉시 로컬 전환
+- 랜딩에 **"환자 목록 보기"** 버튼 추가 — 헤더 "대시보드" 클릭 후 랜딩에서 환자 목록으로 빠져나갈 수단 마련
+- 랜딩 로그인 사용자 배지 (이름/역할) — 인트라넷만
+- 인트라넷에서 "초기화" 버튼 숨김 (클라이언트 state만 비우는 동작이라 다중 사용자 환경에서는 삭제처럼 오해될 수 있음). 로컬 모드는 유지
+- 신규 `docker-compose.override.yml` — dev 스택만 `http://localhost:3000` CORS 허용
+
+**척추 모듈 개선**
+- 수직분포 / 동반 척추증을 **첫 spine 진단에만** 표시 (이전: 진단마다 반복)
+- 자동 마이그레이션: 기존 여러 진단에 흩어진 값을 첫 진단으로 통합, 나머지는 필드 제거. 첫 진단 삭제 시 살아남은 spine 진단으로 값 자동 이송
+- **척추 작업 드래그앤드롭** — HTML5 native, 현재 직업 탭 내에서만, id 기반 재구성으로 다른 직업 순서 보존. 드래그 후 선택 유지. 방향 인식 drop indicator (위/아래)
+- `visibleTasks` 단일 진실원 — 모든 핸들러(select/add/remove/reorder) 일관 기준
+- 테스트 15 신규
+
+**검증**: 클라이언트 299 + 서버 369 = 668 tests pass. lint 0 errors. 빌드 성공.
 
 ### v5.0.0 (2026-05-16) — 인트라넷 백엔드 + 다중 사용자 모드 + 오프라인 배포
 
