@@ -8,7 +8,9 @@
 - **클라이언트(Electron)**: 권한 UI 게이팅, 대시보드 scope 분리, 척추 모듈 개선, 인트라넷 차단 화면 탈출구
 - **네트워크 포트**: Caddy 호스트 매핑이 80/443 → **8080/8443** 으로 변경됨 (호스트의 80/443이 다른 프로세스에 점유된 환경 대응). Electron `DEFAULT_INTRANET_URL`도 `:8443` 명시
 - **DB 스키마 변경**: 없음 (`assigned_doctor_user_id` 기존 컬럼 활용)
-- **환경변수 변경**: **`CORS_ORIGINS` 값에 `:8443` 포함 필수** (예: `https://wr.hospital.local:8443`). 기존 v5.0.x에서 `https://wr.hospital.local`로 설정해 두었다면 반드시 수정
+- **환경변수 변경**: `.env.production`에서 두 항목 수정 필수
+  - **`WR_VERSION=5.1.0`** ← compose가 `wr-app-server:${WR_VERSION}` 형태로 이미지를 찾으므로 이 값을 안 바꾸면 5.1.0 이미지 로드해도 컨테이너는 계속 구버전 사용
+  - **`CORS_ORIGINS=https://wr.hospital.local:8443`** ← 포트 명시. 기존이 `https://wr.hospital.local`이면 Electron 5.1.0이 CORS 403 받음
 - **인증서 변경**: 없음 (Caddy 내부 CA 그대로, 컨테이너 내부 listen 포트도 443/80 그대로 — 호스트 매핑만 변경)
 
 ## 예상 다운타임
@@ -17,6 +19,35 @@
 - **클라이언트 PC**: 의사별 5분 이내 (Electron 인스톨러 재실행 → 자동 업그레이드)
 
 ## 사전 준비
+
+### 0) 현재 운영 환경 정보 파악 (제일 먼저)
+
+업데이트 명령에 필요한 값들을 모두 확인:
+
+```powershell
+Write-Host "=== 1. Compose 프로젝트 이름 ===" -ForegroundColor Cyan
+docker compose ls
+# NAME 컬럼이 'wr-prod'인지 확인 → -p 값
+
+Write-Host "`n=== 2. 현재 app 컨테이너 이미지 ===" -ForegroundColor Cyan
+docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"
+# 예: wr-app-server:5.0.1 ← 업데이트 후 5.1.0이 되어야 함
+
+Write-Host "`n=== 3. 현재 운영 .env.production 경로 ===" -ForegroundColor Cyan
+$installDir = docker inspect wr-prod-app-1 --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
+Write-Host "Install dir: $installDir"
+Get-ChildItem -Path $installDir -Filter ".env*" -ErrorAction SilentlyContinue
+# 예: C:\wr\wr-evaluation-unified-5.0.1-intranet\.env.production
+
+Write-Host "`n=== 4. .env.production의 핵심 값 ===" -ForegroundColor Cyan
+$envPath = Join-Path $installDir ".env.production"
+Get-Content $envPath | Select-String "WR_VERSION|CORS_ORIGINS"
+```
+
+위 출력에서 얻는 값들 — 다음 단계에서 그대로 씀:
+- `-p` 값: `wr-prod`
+- env 파일 경로: 예) `C:\wr\wr-evaluation-unified-5.0.1-intranet\.env.production`
+- 현재 `WR_VERSION` / `CORS_ORIGINS` (4번에서 수정 필요 여부 확인)
 
 ### 1) 패키지 이송
 - `release\wr-evaluation-unified-5.1.0-intranet.zip` (350MB)를 USB 또는 인트라넷 파일 공유로 서버에 복사
@@ -53,19 +84,37 @@ docker compose -p wr-prod --profile backup run --rm backup /scripts/backup.sh
 
 `_status\last-success.txt`에 새 백업 시각이 찍히는지 확인.
 
-### 4) (필수) .env.production CORS_ORIGINS 수정
+### 4) (필수) .env.production 수정 — 두 항목
 
-기존 운영 환경의 `.env.production`의 `CORS_ORIGINS` 값에 **포트 `:8443` 추가** 필요:
+0번 단계에서 찾은 env 파일을 메모장으로 열어 두 값을 수정:
 
-```
-# 수정 전
-CORS_ORIGINS=https://wr.hospital.local
-
-# 수정 후
-CORS_ORIGINS=https://wr.hospital.local:8443
+```powershell
+notepad "C:\wr\wr-evaluation-unified-5.0.1-intranet\.env.production"
+# (실제 경로는 0번 단계 출력값 사용)
 ```
 
-빠뜨리면 Electron 클라이언트가 서버에 접속할 때 CORS 거부 (HTTP 403)로 막힙니다.
+```
+# === WR_VERSION (필수) ===
+# 수정 전:   WR_VERSION=5.0.1
+# 수정 후:   WR_VERSION=5.1.0
+#
+# 이 값을 안 바꾸면 docker compose가 wr-app-server:5.0.1 이미지로 컨테이너를 만들기 때문에
+# 5.1.0 이미지가 로드되어 있어도 업데이트가 적용되지 않음 (가장 흔한 실수)
+
+# === CORS_ORIGINS (필수) ===
+# 수정 전:   CORS_ORIGINS=https://wr.hospital.local
+# 수정 후:   CORS_ORIGINS=https://wr.hospital.local:8443
+#
+# Electron 5.1.0 클라이언트가 :8443 origin으로 접속하므로 서버 화이트리스트에 포트 포함 필수.
+# 빠뜨리면 클라이언트가 CORS 거부(HTTP 403)로 막힘.
+```
+
+수정 후 다시 확인:
+```powershell
+Get-Content "<env경로>" | Select-String "WR_VERSION|CORS_ORIGINS"
+# WR_VERSION=5.1.0
+# CORS_ORIGINS=https://wr.hospital.local:8443
+```
 
 ### 5) (필수 시) Windows 방화벽 인바운드 규칙
 
@@ -82,58 +131,79 @@ New-NetFirewallRule -DisplayName "WR Caddy HTTP (8080)"  -Direction Inbound -Pro
 
 ### A. 서버 업데이트
 
+**중요**: 사전 준비 4번에서 `WR_VERSION=5.1.0`과 `CORS_ORIGINS=...:8443` 수정을 마쳤는지 다시 한 번 확인. 안 했으면 아래 명령을 실행해도 컨테이너가 재생성되지 않음.
+
 서버에서 PowerShell 관리자 권한으로:
 
 ```powershell
-cd wr-evaluation-unified-5.1.0-intranet
+# 1. 새 패키지 폴더로 이동 (compose 파일을 이 폴더에서 읽음)
+cd C:\wr\wr-evaluation-unified-5.1.0-intranet
 
-# 1. 새 Docker 이미지 로드 (postgres/caddy base 이미지도 포함되어 있으나 기존과 같은 태그면 docker가 자동으로 skip)
+# 2. 새 Docker 이미지 로드 (postgres/caddy base 이미지는 기존 태그와 같으면 skip)
 .\scripts\import-images.ps1
 
-# 2. 현재 운영 중인 .env.production 위치 확인 (보통 기존 설치 디렉토리)
-#    예: C:\wr-evaluation-unified\.env.production
-#    이 .env는 손대지 않음. 새 패키지의 .env.production.example은 참고용
+# 3. 로드된 이미지 확인 (wr-app-server:5.1.0 보여야 함)
+docker images | Select-String "wr-app-server"
 
-# 3. 새 compose 파일 적용 + app 컨테이너만 재생성
-#    -p wr-prod : 기존 프로젝트 이름 (기존 볼륨/네트워크 유지)
-#    --env-file : 기존 운영 .env 경로
+# 4. app 컨테이너 재생성
+#    -p             : 기존 프로젝트 이름 (사전 준비 0번에서 확인한 값, 보통 wr-prod)
+#    --env-file     : 기존 운영 .env.production 절대경로 (0번 출력값 그대로)
+#    -f             : compose 파일 (현재 폴더의 5.1.0 버전)
+#    실제 경로는 본인 환경에 맞게 수정
 docker compose `
   -p wr-prod `
-  --env-file C:\path\to\.env.production `
+  --env-file C:\wr\wr-evaluation-unified-5.0.1-intranet\.env.production `
   -f docker-compose.yml -f docker-compose.prod.yml `
   up -d app
 
-# 4. 백업 프로필도 같이 운영 중이면 한 줄 더 (선택)
-docker compose -p wr-prod `
-  --env-file C:\path\to\.env.production `
+# 5. 백업 프로필도 운영 중이면 한 줄 더 (선택)
+docker compose `
+  -p wr-prod `
+  --env-file C:\wr\wr-evaluation-unified-5.0.1-intranet\.env.production `
   -f docker-compose.yml -f docker-compose.prod.yml `
   --profile backup up -d
 ```
+
+**정상 동작 시 출력에 "Recreate wr-prod-app-1"이 보여야 함**. 만약 app 관련 출력이 없으면:
+- `.env.production`의 `WR_VERSION`이 아직 5.0.x로 남아 있을 가능성 높음 → 4단계 출력 다시 확인
 
 **`up -d app` 동작**:
 - app 이미지 태그가 바뀌었음을 감지 → 컨테이너 재생성 (`Recreate`)
 - postgres/backup/backup-monitor는 이미지 변경 없으므로 그대로 유지
 - **caddy는 포트 매핑(80/443 → 8080/8443) 변경 감지로 재생성됨** — 잠시 다운(수 초). 호스트 80을 점유 중인 다른 프로세스와 충돌 안 해 안전
 
+> **참고**: 매번 5.0.1 폴더의 env를 참조하는 게 헷갈리면 한 번 복사해 두는 게 편함:
+> ```powershell
+> Copy-Item "C:\wr\wr-evaluation-unified-5.0.1-intranet\.env.production" `
+>           "C:\wr\wr-evaluation-unified-5.1.0-intranet\.env.production"
+> ```
+> 그러면 다음부터 `--env-file .env.production` (상대경로)로 짧게 가능.
+
 ### B. 서버 헬스 체크
 
 ```powershell
-# 컨테이너 상태
-docker ps --filter "name=wr-prod" --format "table {{.Names}}\t{{.Status}}"
+# 1. ★가장 중요★ app 이미지 태그가 실제로 5.1.0인지 확인
+docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"
+# → wr-app-server:5.1.0  이어야 정상
+# → wr-app-server:5.0.1 이면 업데이트 실패 (WR_VERSION 수정 빠뜨림 — A 단계 다시)
 
-# app health (컨테이너 내부에서)
+# 2. 전체 컨테이너 상태
+docker ps --filter "name=wr-prod" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
+
+# 3. app health (컨테이너 내부에서)
 docker exec wr-prod-app-1 wget -qO- http://localhost:3001/health
 # → {"ok":true,...}
 
-# Caddy 경유 HTTPS 헬스체크 (호스트에서)
+# 4. Caddy 경유 HTTPS 헬스체크 (호스트에서)
 curl.exe -k -o NUL -w "8443: %{http_code}`n" https://localhost:8443/health
 # → 8443: 200 이면 정상 (인증서 경고는 -k로 무시)
 
-# 새 권한 미들웨어 동작 확인 (admin 토큰 필요 — 운영자 본인 계정으로 로그인 후 DevTools에서)
-# 다른 의사 담당 환자에 PATCH 직접 호출 → 403 응답이 와야 정상
+# 5. 부팅 로그 확인
+docker logs wr-prod-app-1 --tail 50
+# 에러 없이 "Server listening on port 3001" 류 메시지 보여야 정상
 ```
 
-`docker logs wr-prod-app-1 --tail 50`으로 부팅 에러 없는지 확인.
+권한 미들웨어 동작 확인은 의사 계정으로 클라이언트에서 검증 (다음 섹션 검증 시나리오).
 
 ### C. 클라이언트 PC 업데이트 (의사들 데스크톱)
 
@@ -168,22 +238,61 @@ curl.exe -k -o NUL -w "8443: %{http_code}`n" https://localhost:8443/health
 문제 발생 시 v5.0.1로 즉시 롤백:
 
 ```powershell
-# 1. 기존 5.0.1 패키지 디렉토리로 이동 (보관 중이어야 함)
-cd wr-evaluation-unified-5.0.1-intranet
+# 1. .env.production 되돌리기 (메모장)
+#    WR_VERSION=5.1.0  → WR_VERSION=5.0.1
+#    CORS_ORIGINS=https://wr.hospital.local:8443  → 기존 값 (포트 없으면 없는 채로)
+notepad C:\wr\wr-evaluation-unified-5.0.1-intranet\.env.production
 
-# 2. 5.0.1 이미지가 이미 로컬에 있으면 (docker images로 확인) skip 가능. 아니면:
-.\scripts\import-images.ps1
+# 2. 기존 5.0.1 패키지 디렉토리로 이동
+cd C:\wr\wr-evaluation-unified-5.0.1-intranet
 
-# 3. compose 재실행 (이미지 태그가 바뀌어 자동 다운그레이드)
-docker compose -p wr-prod `
-  --env-file C:\path\to\.env.production `
+# 3. 5.0.1 이미지가 로컬에 있는지 확인 (보통 그대로 남아 있음)
+docker images | Select-String "wr-app-server:5.0.1"
+# 없으면 .\scripts\import-images.ps1 (5.0.1 패키지에서)
+
+# 4. compose 재실행 (5.0.1 폴더의 옛 yml 사용)
+docker compose `
+  -p wr-prod `
+  --env-file .\.env.production `
   -f docker-compose.yml -f docker-compose.prod.yml `
   up -d app
+
+# 5. 확인
+docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"
+# → wr-app-server:5.0.1
 ```
 
 **DB는 변경 없음이라 롤백 시 데이터 손실 없음.**
 
+**포트도 자동 롤백**: 5.0.1의 docker-compose.yml은 80:80, 443:443 매핑이라 caddy도 옛 설정으로 재생성됨. 단 호스트 80을 다른 프로세스가 여전히 점유 중이면 caddy가 다시 바인딩 실패할 수 있음 — 이 경우 사용자가 5.0.x 운영 중에 직접 수정해 둔 ports 변경이 5.0.1 폴더 yml에 그대로 남아 있는지 확인.
+
 클라이언트 PC: Setup 5.0.1.exe 재실행 (NSIS 다운그레이드 동작).
+
+---
+
+## 알려진 함정 (실제 경험)
+
+업데이트 중 실제로 막힌 사례들. 같은 실수 반복 방지용.
+
+### "Couldn't find env file: ...\.env.production"
+**원인**: 5.1.0 폴더에는 `.env.production`이 없는데 `--env-file .env.production` (상대경로)을 줌.
+**해결**: 0번 단계에서 찾은 절대경로를 그대로 사용. 또는 5.0.x 폴더 env를 5.1.0 폴더에 복사 (위 참고 박스).
+
+### `up -d app` 실행했는데 app 컨테이너 안 보이고 5.0.1 그대로
+**원인**: `.env.production`의 `WR_VERSION`이 5.0.x로 남아 있음. compose가 `wr-app-server:${WR_VERSION}` → `wr-app-server:5.0.1`로 해석해서 "이미 그 이미지로 떠 있음"으로 판단 → 재생성 안 함.
+**해결**: 사전 준비 4번대로 `WR_VERSION=5.1.0`으로 수정 후 다시 `up -d app`.
+
+### `docker ps` 명령만 하고 업데이트 됐다고 착각
+**원인**: `up -d app` 대신 `ps`(목록 조회)만 실행.
+**해결**: 끝이 `up -d app`인지 다시 확인.
+
+### Electron 클라이언트가 서버에 접속 안 됨 / 일부 API가 CORS 403
+**원인**: `.env.production`의 `CORS_ORIGINS`에 `:8443`이 빠짐. 서버는 떠 있지만 Electron이 보내는 `Origin: https://wr.hospital.local:8443` 헤더와 안 맞아 거부.
+**해결**: 사전 준비 4번대로 `CORS_ORIGINS=https://wr.hospital.local:8443` 수정 후 `up -d app`.
+
+### Caddy가 포트 80 바인딩 실패 (`Ports are not available`)
+**원인**: 호스트 80을 다른 프로세스가 점유 중. 5.1.0은 이미 호스트 8080/8443으로 매핑하므로 발생 안 해야 하지만, 5.0.x 시절 caddy 컨테이너가 80에 묶인 채 잔존한 경우.
+**해결**: `docker compose -p wr-prod ... up -d caddy` 한 번 더 명시 실행해 강제 재생성.
 
 ---
 
