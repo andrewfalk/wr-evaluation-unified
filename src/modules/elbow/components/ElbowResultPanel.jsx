@@ -1,5 +1,5 @@
 import { BK_TYPE_LABELS } from '../utils/data';
-import { formatCommonExposureTypeText } from '../utils/calculations';
+import { formatCommonExposureTypeText, groupSummariesByBkType, mergeBkGroupSummaries } from '../utils/calculations';
 
 const TASK_CHANGE_OPTIONS = [
   { value: 'none', label: '변화 없음' },
@@ -153,6 +153,54 @@ function SummaryCard({ summary }) {
   );
 }
 
+function BkGroupSummaryCard({ group }) {
+  const merged = mergeBkGroupSummaries(group.summaries);
+  const representativeEntry = merged.entry || {};
+  const exposureTypes = formatCommonExposureTypeText(representativeEntry);
+  const riskFactorSummary = merged.riskFactorItems?.length > 0
+    ? merged.riskFactorItems.map(flag => flag.label).join(', ')
+    : '확인된 위험 요인 없음';
+  const diagSubtitle = group.summaries
+    .map(s => {
+      const d = s.diagnosis || {};
+      return `${d.code || ''} ${d.name || ''}`.trim();
+    })
+    .join(' / ');
+
+  return (
+    <div className="result-detail-card elbow-summary-card">
+      <div className="result-card-title">{BK_TYPE_LABELS[group.bkType] || group.bkType}</div>
+      <div className="result-card-meta">{diagSubtitle}</div>
+
+      <div className="result-metric-list">
+        <div className="result-metric-row"><span>문제 작업</span><strong>{representativeEntry.main_task_name || '-'}</strong></div>
+        <div className="result-metric-row"><span>공통 핵심 노출유형</span><strong>{exposureTypes}</strong></div>
+        <div className="result-metric-row"><span>1일 노출시간</span><strong>{representativeEntry.daily_exposure_hours || '-'}시간</strong></div>
+        <div className="result-metric-row"><span>하루 작업 비중</span><strong>{representativeEntry.shift_share_percent || '-'}%</strong></div>
+      </div>
+
+      <div className="elbow-flag-list">
+        {merged.flagItems?.length > 0
+          ? merged.flagItems.map(flag => <FlagPill key={flag.key} flag={flag} />)
+          : <span className="result-card-meta">표시할 신호 없음</span>}
+      </div>
+
+      <MissingList title="입력 누락" items={merged.missingFields} />
+
+      <div className="report-preview ai-result-panel elbow-summary-panel">
+        <div className="report-preview-toolbar">
+          <span className="report-preview-label">분석 정리</span>
+        </div>
+        <div className="preview-section elbow-summary-copy">
+          <div>{merged.narrative}</div>
+          <div><strong>업무에 포함된 위험 요인:</strong> {riskFactorSummary}</div>
+          <div className="elbow-summary-conclusion"><strong>종합평가</strong> {merged.riskFactorSentence}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ElbowResultPanel({ calc, temporalSequence, onTemporalChange }) {
   if (!calc) return null;
 
@@ -184,9 +232,11 @@ export function ElbowResultPanel({ calc, temporalSequence, onTemporalChange }) {
                 활성 신호 {jobSummary.flagCount}개
               </div>
               <div className="result-detail-stack">
-                {jobSummary.diagnosisSummaries.map(summary => (
-                  <SummaryCard key={`${summary.sharedJobId}_${summary.diagnosisId}`} summary={summary} />
-                ))}
+                {groupSummariesByBkType(jobSummary.diagnosisSummaries || []).map(group =>
+                  group.isGrouped
+                    ? <BkGroupSummaryCard key={group.bkType} group={group} />
+                    : <SummaryCard key={`${group.summaries[0]?.sharedJobId}_${group.summaries[0]?.diagnosisId}`} summary={group.summaries[0]} />
+                )}
               </div>
             </div>
           ))}

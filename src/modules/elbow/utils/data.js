@@ -35,6 +35,7 @@ export const PRESSURE_SOURCE_LABELS = Object.fromEntries(
 );
 
 export const VIBRATION_TOOL_OPTIONS = [
+  { value: 'grinder', label: '그라인더' },
   { value: 'jackhammer', label: '착암기' },
   { value: 'demolition_hammer', label: '파쇄 해머' },
   { value: 'chipping_hammer', label: '치핑 해머' },

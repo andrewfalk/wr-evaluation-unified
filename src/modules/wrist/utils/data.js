@@ -94,7 +94,7 @@ export function inferWristBkTypeFromDiagnosis(diagnosis = {}) {
     return 'BK2101';
   }
 
-  if (/kienb[oö]ck|월상골|손목.*관절|wrist arthrosis|wrist arthropathy|손가락.*관절|finger arthrosis|finger arthropathy|hand arthropathy/i.test(name)) {
+  if (/kienb[oö]ck|월상골|손목.*관절|wrist arthrosis|wrist arthropathy|손가락.*관절|finger arthrosis|finger arthropathy|hand arthropathy|손가락.*관절염|수지.*관절염|수부.*관절염|finger arthritis|hand arthritis|DIP arthritis|PIP arthritis/i.test(name)) {
     return 'BK2103';
   }
 

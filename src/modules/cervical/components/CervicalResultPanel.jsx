@@ -74,6 +74,15 @@ export function CervicalResultPanel({ calc }) {
         {(calc.jobSummaries || []).length === 0 && (
           <div className="evaluation-empty-state">직업 또는 경추 상병이 없어 결과를 표시할 수 없습니다.</div>
         )}
+
+        {(calc.jobSummaries || []).length > 1 && calc.overallConclusionText && (
+          <div className="result-detail-card" style={{ marginTop: '1rem', borderTop: '2px solid var(--color-primary, #2563eb)' }}>
+            <div className="result-card-title">최종 종합평가 (전체 직업 노출 합산 기준)</div>
+            <div className="cervical-summary-conclusion" style={{ marginTop: '0.5rem' }}>
+              {calc.overallConclusionText}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

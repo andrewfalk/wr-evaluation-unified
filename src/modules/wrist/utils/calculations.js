@@ -17,12 +17,6 @@ const YES_NO_LABELS = {
   unclear: '불분명',
 };
 
-const TASK_CHANGE_LABELS = {
-  none: '변화 없음',
-  increased_load: '부담 증가',
-  process_change: '공정 변경',
-  new_task: '신규 작업',
-};
 
 const LOAD_LEVEL_LABELS = {
   none: '없음',
@@ -485,25 +479,19 @@ export function formatCommonExposureTypeText(entry = {}) {
   }).join(', ') || '-';
 }
 
-export function generateNarrative({ diagnosis, entry, temporalSequence }) {
-  const bkLabel = BK_TYPE_LABELS[entry.selectedBkType] || 'BK 유형 미선택';
+export function generateNarrative({ diagnosis: _diagnosis, entry, temporalSequence: _temporalSequence }) {
   if (!shouldEvaluateExposureDetails(entry)) {
     return [
-      `BK 유형: ${bkLabel}`,
       `해부학적 연결성 ${labelValue(entry.direct_anatomic_link, YES_NO_LABELS)}`,
       '직접 연결되는 핵심 작업이 확인되지 않아 추가 노출 평가는 제한적입니다.',
-      `시간적 선후관계 최근 작업변화 ${labelValue(temporalSequence.recent_task_change, TASK_CHANGE_LABELS)}, 변화 시점 ${temporalSequence.task_change_date || '-'}, 증상 발생까지 기간 ${temporalSequence.symptom_onset_interval || '-'}, 휴식/업무중단 시 호전 ${labelValue(temporalSequence.improves_with_rest, YES_NO_LABELS)}`,
     ].join('\n');
   }
 
   return [
-    `상병: ${diagnosis.code || ''} ${diagnosis.name || ''}`.trim(),
-    `BK 유형: ${bkLabel}`,
     `문제 작업: ${entry.main_task_name || '미입력'}`,
     `작업량: 1일 ${entry.daily_exposure_hours || '-'}시간, 근무시간 비중 ${entry.shift_share_percent || '-'}%, 주당 ${entry.days_per_week || '-'}일`,
     `공통 노출: ${formatCommonExposureTypeText(entry)}`,
     `질환별 노출 항목: ${getBranchNarrative(entry.selectedBkType, entry)}`,
-    `시간적 선후관계 최근 작업변화 ${labelValue(temporalSequence.recent_task_change, TASK_CHANGE_LABELS)}, 변화 시점 ${temporalSequence.task_change_date || '-'}, 증상 발생까지 기간 ${temporalSequence.symptom_onset_interval || '-'}, 휴식/업무중단 시 호전 ${labelValue(temporalSequence.improves_with_rest, YES_NO_LABELS)}`,
   ].join('\n');
 }
 
@@ -621,4 +609,84 @@ export function isWristAssessmentComplete(patientData) {
   return calc.jobSummaries.every(jobSummary =>
     jobSummary.diagnosisSummaries.every(summary => summary.missingFields.length === 0)
   );
+}
+
+// ── BK 유형별 그룹화 helper ──
+
+const BK_META_FIELDS = new Set(['diagnosisId', 'selectedBkType', 'bkSelectionMode']);
+
+function scoreEntry(entry) {
+  if (!entry) return 0;
+  return Object.entries(entry).filter(([k, v]) =>
+    !BK_META_FIELDS.has(k) &&
+    v !== '' && v !== null &&
+    !(Array.isArray(v) && v.length === 0)
+  ).length;
+}
+
+export function groupDiagnosesByBkType(diagnoses, jobEvaluation) {
+  const map = new Map();
+  (diagnoses || []).forEach(diagnosis => {
+    const entry = (jobEvaluation.diagnosisEntries || []).find(
+      item => item.diagnosisId === diagnosis.id
+    );
+    const bkType = entry?.selectedBkType || '';
+    const key = bkType ? bkType : `__none__:${diagnosis.id}`;
+    if (!map.has(key)) {
+      map.set(key, { bkType, isGrouped: !!bkType, items: [] });
+    }
+    map.get(key).items.push({ diagnosis, entry: entry || null });
+  });
+  return Array.from(map.values());
+}
+
+export function groupSummariesByBkType(diagnosisSummaries = []) {
+  const map = new Map();
+  diagnosisSummaries.forEach(summary => {
+    const bkType = summary.entry?.selectedBkType || '';
+    const diagnosisId = summary.diagnosis?.id || summary.entry?.diagnosisId || '';
+    const key = bkType ? bkType : `__none__:${diagnosisId}`;
+    if (!map.has(key)) {
+      map.set(key, { bkType, isGrouped: !!bkType, summaries: [] });
+    }
+    map.get(key).summaries.push(summary);
+  });
+  return Array.from(map.values());
+}
+
+export function pickRepresentativeEntry(items) {
+  const scored = (items || []).map(({ entry }) => ({ entry, score: scoreEntry(entry) }));
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0]?.entry || items[0]?.entry || {};
+}
+
+export function mergeBkGroupSummaries(summaries) {
+  const primary = (summaries || []).reduce((best, s) => {
+    const score = scoreEntry(s.entry);
+    return score > (best._score || 0) ? { ...s, _score: score } : best;
+  }, { ...(summaries[0] || {}), _score: 0 });
+
+  const missingFields = [...new Set(summaries.flatMap(s => s.missingFields || []))];
+
+  const flagMap = new Map();
+  summaries.forEach(s => (s.flagItems || []).forEach(f => flagMap.set(f.key, f)));
+  const flagItems = Array.from(flagMap.values());
+
+  const rfMap = new Map();
+  summaries.forEach(s => (s.riskFactorItems || []).forEach(f => rfMap.set(f.key, f)));
+  const riskFactorItems = Array.from(rfMap.values());
+
+  const mergedFlags = Object.fromEntries(riskFactorItems.map(item => [item.key, true]));
+  const riskFactorCount = riskFactorItems.length;
+  const riskFactorSentence = getRiskFactorSentence(riskFactorCount, mergedFlags);
+
+  const { _score: _removed, ...primaryClean } = primary;
+  return {
+    ...primaryClean,
+    missingFields,
+    flagItems,
+    riskFactorItems,
+    riskFactorCount,
+    riskFactorSentence,
+  };
 }
