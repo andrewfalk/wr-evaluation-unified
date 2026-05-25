@@ -2,7 +2,10 @@ import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { getModule } from '../moduleRegistry';
 import { getStatusText, getReasonText, getSideText } from '../../modules/knee/utils/calculations';
-import { getBk2101RepetitionPerHour } from '../../modules/elbow/utils/calculations';
+import { getBk2101RepetitionPerHour, groupSummariesByBkType as groupElbowSummaries, mergeBkGroupSummaries as mergeElbowGroups } from '../../modules/elbow/utils/calculations';
+import { BK_TYPE_LABELS as ELBOW_BK_LABELS } from '../../modules/elbow/utils/data';
+import { groupSummariesByBkType as groupWristSummaries, mergeBkGroupSummaries as mergeWristGroups } from '../../modules/wrist/utils/calculations';
+import { BK_TYPE_LABELS as WRIST_BK_LABELS } from '../../modules/wrist/utils/data';
 import { EXPOSURE_TYPE_LABELS as CERVICAL_EXPOSURE_TYPE_LABELS } from '../../modules/cervical/utils/data';
 import { convertTimeToSeconds } from '../../modules/spine/utils/calculations';
 import { thresholds } from '../../modules/spine/utils/thresholds';
@@ -164,6 +167,10 @@ function buildCervicalExposureText(calc) {
     text += `    ** 종합평가 : ${jobSummary.conclusionText}\n`;
   });
 
+  if ((calc?.jobSummaries || []).length > 1 && calc?.overallConclusionText) {
+    text += `\n  ** 최종 종합평가 (전체 직업 노출 합산 기준): ${calc.overallConclusionText}\n`;
+  }
+
   return text;
 }
 
@@ -178,6 +185,10 @@ function buildExposureSection(shared, modules, activeModules) {
   (shared.jobs || []).forEach((job, index) => {
     text += `- 직력${index + 1}: ${job.jobName || '-'} | ${getEffectiveWorkPeriodText(job)}\n`;
   });
+
+  if (activeModules.length > 0) {
+    text += '\n[부위별 신체부담 평가]\n';
+  }
 
   if (activeModules.includes('knee')) {
     const calc = getModule('knee')?.computeCalc?.({ shared, module: modules.knee || {} });
@@ -245,21 +256,29 @@ function buildExposureSection(shared, modules, activeModules) {
     }
     (calc?.jobSummaries || []).forEach(jobSummary => {
       text += `- ${jobSummary.jobName || '-'}\n`;
-      (jobSummary.diagnosisSummaries || []).forEach(summary => {
-        const diagnosis = summary.diagnosis || {};
-        const riskFactorText = summary.riskFactorItems?.length > 0
-          ? summary.riskFactorItems.map(flag => flag.label).join(', ')
-          : '확인된 위험 요인 없음';
-
-        text += `  - ${diagnosis.code || ''} ${diagnosis.name || ''}${diagnosis.side ? ` (${getSideText(diagnosis.side)})` : ''}\n`;
-        if (summary.missingFields?.length > 0) {
-          text += `    입력 누락: ${summary.missingFields.join(', ')}\n`;
+      const wristGroups = groupWristSummaries(jobSummary.diagnosisSummaries || []);
+      wristGroups.forEach(group => {
+        const merged = mergeWristGroups(group.summaries);
+        const diagList = group.summaries
+          .map(s => {
+            const d = s.diagnosis || {};
+            return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
+          })
+          .join(' / ');
+        const bkLabel = group.bkType ? WRIST_BK_LABELS[group.bkType] || group.bkType : null;
+        const header = bkLabel ? `[${bkLabel}] ${diagList}` : diagList;
+        text += `  - ${header}\n`;
+        if (merged.missingFields?.length > 0) {
+          text += `    입력 누락: ${merged.missingFields.join(', ')}\n`;
         }
+        const riskFactorText = merged.riskFactorItems?.length > 0
+          ? merged.riskFactorItems.map(flag => flag.label).join(', ')
+          : '확인된 위험 요인 없음';
         text += `    분석 정리:\n`;
-        text += `      ${(summary.narrative || '-').split('\n').join('\n      ')}\n`;
+        text += `      ${(merged.narrative || '-').split('\n').join('\n      ')}\n`;
         text += `      업무에 포함된 위험 요인: ${riskFactorText}\n`;
-        if (summary.riskFactorSentence) {
-          text += `\n      **종합평가** ${summary.riskFactorSentence}\n`;
+        if (merged.riskFactorSentence) {
+          text += `\n      **종합평가** ${merged.riskFactorSentence}\n`;
         }
       });
     });
@@ -276,21 +295,29 @@ function buildExposureSection(shared, modules, activeModules) {
     }
     (calc?.jobSummaries || []).forEach(jobSummary => {
       text += `- ${jobSummary.jobName || '-'}\n`;
-      (jobSummary.diagnosisSummaries || []).forEach(summary => {
-        const diagnosis = summary.diagnosis || {};
-        const riskFactorText = summary.riskFactorItems?.length > 0
-          ? summary.riskFactorItems.map(flag => flag.label).join(', ')
-          : '확인된 위험 요인 없음';
-
-        text += `  - ${diagnosis.code || ''} ${diagnosis.name || ''}${diagnosis.side ? ` (${getSideText(diagnosis.side)})` : ''}\n`;
-        if (summary.missingFields?.length > 0) {
-          text += `    입력 누락: ${summary.missingFields.join(', ')}\n`;
+      const elbowGroups = groupElbowSummaries(jobSummary.diagnosisSummaries || []);
+      elbowGroups.forEach(group => {
+        const merged = mergeElbowGroups(group.summaries);
+        const diagList = group.summaries
+          .map(s => {
+            const d = s.diagnosis || {};
+            return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
+          })
+          .join(' / ');
+        const bkLabel = group.bkType ? ELBOW_BK_LABELS[group.bkType] || group.bkType : null;
+        const header = bkLabel ? `[${bkLabel}] ${diagList}` : diagList;
+        text += `  - ${header}\n`;
+        if (merged.missingFields?.length > 0) {
+          text += `    입력 누락: ${merged.missingFields.join(', ')}\n`;
         }
+        const riskFactorText = merged.riskFactorItems?.length > 0
+          ? merged.riskFactorItems.map(flag => flag.label).join(', ')
+          : '확인된 위험 요인 없음';
         text += `    분석 정리:\n`;
-        text += `      ${(summary.narrative || '-').split('\n').join('\n      ')}\n`;
+        text += `      ${(merged.narrative || '-').split('\n').join('\n      ')}\n`;
         text += `      업무에 포함된 위험 요인: ${riskFactorText}\n`;
-        if (summary.riskFactorSentence) {
-          text += `\n      **종합평가** ${summary.riskFactorSentence}\n`;
+        if (merged.riskFactorSentence) {
+          text += `\n      **종합평가** ${merged.riskFactorSentence}\n`;
         }
       });
     });

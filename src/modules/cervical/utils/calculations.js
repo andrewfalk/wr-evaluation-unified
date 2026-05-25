@@ -1,7 +1,6 @@
 import { calculateAge, calculateBMI } from '../../../core/utils/common';
 import { getEffectiveWorkPeriod } from '../../../core/utils/workPeriod';
 import {
-  EXPOSURE_TYPE_LABELS,
   isCervicalDiagnosis,
   syncCervicalModuleData,
 } from './data';
@@ -183,9 +182,6 @@ function formatHours(value) {
   })}시간`;
 }
 
-function formatExposureTypeText(task = {}) {
-  return (task.exposure_types || []).map(type => EXPOSURE_TYPE_LABELS[type] || type).join(', ') || '-';
-}
 
 function computeTaskSignals(task = {}, job = {}) {
   const exposureTypes = task.exposure_types || [];
@@ -260,7 +256,6 @@ function generateJobNarrative({ job, taskSummaries, aggregate }) {
 
   taskSummaries.forEach((taskSummary, index) => {
     lines.push(`작업 ${index + 1}: ${taskSummary.displayName}`);
-    lines.push(`노출 유형: ${formatExposureTypeText(taskSummary)}`);
 
     if ((taskSummary.exposure_types || []).includes('shoulder_heavy_load')) {
       lines.push('(어깨에 무거운 하중 올려서 운반)');
@@ -379,6 +374,7 @@ function buildJobSummary({ job, diagnoses, tasks }) {
     totalAwkwardHours,
     workDaysPerYear: Number(job?.workDaysPerYear) || 0,
     yearsExposed: getEffectiveWorkPeriod(job),
+    hasBk2109CoreTask,
   };
 }
 
@@ -397,11 +393,39 @@ export function computeCervicalCalc(patientData) {
     tasks: (synced.moduleData.tasks || []).filter(task => task.sharedJobId === job.id),
   }));
 
+  // 전체 직업 합산 종합평가 (직업 2개 이상인 경우만 의미 있음)
+  const totalYears = jobSummaries.reduce((sum, js) => sum + (js.yearsExposed || 0), 0);
+  const overallCumulativeKgHours = jobSummaries.reduce((sum, js) => sum + (js.cumulativeKgHours || 0), 0);
+  const overallRepresentativeHours = totalYears > 0
+    ? jobSummaries.reduce((sum, js) => sum + (js.representativeHours || 0) * (js.yearsExposed || 0), 0) / totalYears
+    : Math.max(...jobSummaries.map(js => js.representativeHours || 0), 0);
+  const overallAwkwardHours = totalYears > 0
+    ? jobSummaries.reduce((sum, js) => sum + (js.totalAwkwardHours || 0) * (js.yearsExposed || 0), 0) / totalYears
+    : Math.max(...jobSummaries.map(js => js.totalAwkwardHours || 0), 0);
+
+  const overallFlags = {};
+  overallFlags.heavy_load_present = jobSummaries.some(js => js.flags?.heavy_load_present);
+  overallFlags.carry_time_supported = jobSummaries.some(js => js.flags?.carry_time_supported);
+  overallFlags.forced_neck_posture_present = jobSummaries.some(js => js.flags?.forced_neck_posture_present);
+  overallFlags.cumulative_load_supported = overallCumulativeKgHours >= BK2109_REFERENCE_KG_HOURS;
+  const hasCoreJob = jobSummaries.some(js => js.hasBk2109CoreTask);
+  overallFlags.bk2109_pattern_supported = overallFlags.cumulative_load_supported && hasCoreJob;
+  overallFlags.daily_share_high = overallRepresentativeHours >= 3.5;
+  overallFlags.daily_share_moderate = !overallFlags.daily_share_high && overallRepresentativeHours >= 2.5;
+  overallFlags.awkward_static_neck_supported =
+    overallAwkwardHours >= 2 || jobSummaries.some(js => js.flags?.awkward_static_neck_supported);
+
+  const overallBurdenGrade = getCervicalBurdenGrade(overallFlags);
+  const overallConclusionText = getCervicalConclusionText(overallBurdenGrade);
+
   return {
     age,
     bmi,
     jobSummaries,
     anyFlagged: jobSummaries.some(summary => summary.flagItems.length > 0),
+    overallBurdenGrade,
+    overallConclusionText,
+    overallCumulativeKgHours,
   };
 }
 
