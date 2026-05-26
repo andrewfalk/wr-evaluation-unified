@@ -325,6 +325,18 @@ describe('pushPendingPatients', () => {
     expect(requestJson).not.toHaveBeenCalled();
   });
 
+  it('returns synced entries as { patient, serverPatient } pairs preserving the pushed snapshot', async () => {
+    const pushed = makeLocalPatient({ id: 'p1' });
+    const ack = makeServerPatient({ id: 'p1' });
+    requestJson.mockResolvedValueOnce(ack);
+
+    const { synced } = await pushPendingPatients([pushed], { session: SESSION });
+
+    expect(synced).toHaveLength(1);
+    expect(synced[0].patient).toBe(pushed);
+    expect(synced[0].serverPatient).toEqual(expect.objectContaining({ id: 'p1' }));
+  });
+
   it('skips redacted workspace snapshot stubs', async () => {
     const patients = [
       { id: 'redacted-1', redacted: true },
@@ -525,6 +537,105 @@ describe('mergePushedPatientAck', () => {
 
     expect(result[0].sync.syncStatus).toBe('synced');
     expect(result[0].sync.revision).toBe(1);
+  });
+
+  it('converges dirty to synced when the local reference is identical to the pushed snapshot', () => {
+    const local = makeLocalPatient({
+      id: 'local-uuid',
+      data: { shared: { name: 'Kim', patientNo: 'P001', doctorName: '' }, modules: {}, activeModules: [] },
+      sync: { serverId: 'local-uuid', revision: 1, syncStatus: 'dirty', lastSyncedAt: null },
+    });
+    const ack = makeServerPatient({
+      id: 'local-uuid',
+      data: { shared: { name: 'Kim', patientNo: 'P001', doctorName: 'Dr. Echo' }, modules: {}, activeModules: [] },
+      sync: { serverId: 'local-uuid', revision: 2, syncStatus: 'synced', lastSyncedAt: '2024-06-01T00:00:00Z' },
+    });
+
+    const result = mergePushedPatientAck([local], ack, local);
+
+    expect(result[0].sync.syncStatus).toBe('synced');
+    expect(result[0].sync.revision).toBe(2);
+    // Server echo applied: doctorName resolved by server lands locally.
+    expect(result[0].data.shared.doctorName).toBe('Dr. Echo');
+    // Local id is preserved even when server returns its own id.
+    expect(result[0].id).toBe('local-uuid');
+  });
+
+  it('converges dirty to synced when local and pushed snapshot share updatedAt', () => {
+    const updatedAt = '2024-06-01T00:00:00.000Z';
+    const pushed = makeLocalPatient({
+      id: 'local-uuid',
+      updatedAt,
+      sync: { serverId: 'local-uuid', revision: 1, syncStatus: 'dirty', lastSyncedAt: null },
+    });
+    // Different object, same updatedAt — represents the same logical edit.
+    const local = { ...pushed };
+    const ack = makeServerPatient({
+      id: 'local-uuid',
+      sync: { serverId: 'local-uuid', revision: 2, syncStatus: 'synced', lastSyncedAt: '2024-06-01T00:00:01Z' },
+    });
+
+    const result = mergePushedPatientAck([local], ack, pushed);
+
+    expect(result[0].sync.syncStatus).toBe('synced');
+    expect(result[0].sync.revision).toBe(2);
+  });
+
+  it('keeps dirty when local was edited during the push (updatedAt differs)', () => {
+    const pushed = makeLocalPatient({
+      id: 'local-uuid',
+      updatedAt: '2024-06-01T00:00:00.000Z',
+      data: { shared: { name: 'Pushed Name', patientNo: 'P001' }, modules: {}, activeModules: [] },
+      sync: { serverId: 'local-uuid', revision: 1, syncStatus: 'dirty', lastSyncedAt: null },
+    });
+    const local = {
+      ...pushed,
+      updatedAt: '2024-06-01T00:00:05.000Z',
+      data: { shared: { name: 'Later Edit', patientNo: 'P001' }, modules: {}, activeModules: [] },
+    };
+    const ack = makeServerPatient({
+      id: 'local-uuid',
+      sync: { serverId: 'local-uuid', revision: 2, syncStatus: 'synced', lastSyncedAt: '2024-06-01T00:00:02Z' },
+    });
+
+    const result = mergePushedPatientAck([local], ack, pushed);
+
+    expect(result[0].sync.syncStatus).toBe('dirty');
+    expect(result[0].sync.revision).toBe(2);
+    // Local data preserved — the user's later edit survives.
+    expect(result[0].data.shared.name).toBe('Later Edit');
+  });
+
+  it('keeps dirty as a safe fallback when pushedPatient is omitted', () => {
+    const local = makeLocalPatient({
+      id: 'local-uuid',
+      sync: { serverId: 'local-uuid', revision: 1, syncStatus: 'dirty', lastSyncedAt: null },
+    });
+    const ack = makeServerPatient({
+      id: 'local-uuid',
+      sync: { serverId: 'local-uuid', revision: 2, syncStatus: 'synced', lastSyncedAt: '2024-06-01T00:00:00Z' },
+    });
+
+    const result = mergePushedPatientAck([local], ack /* pushedPatient omitted */);
+
+    expect(result[0].sync.syncStatus).toBe('dirty');
+    expect(result[0].sync.revision).toBe(2);
+  });
+
+  it('keeps dirty when both updatedAt are undefined and references differ', () => {
+    const pushed = makeLocalPatient({
+      id: 'local-uuid',
+      sync: { serverId: 'local-uuid', revision: 1, syncStatus: 'dirty', lastSyncedAt: null },
+    });
+    const local = { ...pushed }; // different reference, no updatedAt on either
+    const ack = makeServerPatient({
+      id: 'local-uuid',
+      sync: { serverId: 'local-uuid', revision: 2, syncStatus: 'synced', lastSyncedAt: '2024-06-01T00:00:00Z' },
+    });
+
+    const result = mergePushedPatientAck([local], ack, pushed);
+
+    expect(result[0].sync.syncStatus).toBe('dirty');
   });
 });
 

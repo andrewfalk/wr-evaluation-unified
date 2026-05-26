@@ -153,7 +153,7 @@ export async function pushPendingPatients(patients, { session, settings } = {}) 
   const failed = [];
   results.forEach((r, i) => {
     if (r.status === 'fulfilled') {
-      synced.push(r.value);
+      synced.push({ patient: pending[i], serverPatient: r.value });
     } else {
       let kind = 'error';
       if (isConflictError(r.reason)) kind = 'conflict';
@@ -219,7 +219,21 @@ export function mergeServerPatient(localPatients, serverPatient) {
   return localPatients.map((p, i) => (i === idx ? merged : p));
 }
 
-export function mergePushedPatientAck(localPatients, serverPatient) {
+// Decide whether the local patient was untouched while a push was in flight.
+// If untouched, the ack is safe to apply as the authoritative server state.
+// `pushedPatient` is the snapshot captured at push-call time. Reference equality
+// is the strongest signal (setPatients always produces a new object on edit).
+// updatedAt equality is a secondary signal that survives unrelated setPatients
+// calls that re-create the array without touching this patient. When pushedPatient
+// is missing (legacy callers), default to the conservative "still dirty" path.
+function unchangedSincePush(local, pushedPatient) {
+  if (!pushedPatient) return false;
+  if (local === pushedPatient) return true;
+  if (pushedPatient.updatedAt && local.updatedAt === pushedPatient.updatedAt) return true;
+  return false;
+}
+
+export function mergePushedPatientAck(localPatients, serverPatient, pushedPatient) {
   const serverId = serverPatient.sync?.serverId ?? serverPatient.id;
   const idx = localPatients.findIndex(
     p => p.id === serverPatient.id || (p.sync?.serverId && p.sync.serverId === serverId)
@@ -233,6 +247,15 @@ export function mergePushedPatientAck(localPatients, serverPatient) {
   const localStatus = local.sync?.syncStatus;
 
   if (localStatus === 'dirty') {
+    if (unchangedSincePush(local, pushedPatient)) {
+      // No edits since push started — converge to synced using the server echo
+      // so doctorName/warnings/normalized payload all land in local state.
+      const merged = applyServerSync(serverPatient, local.id, local.meta);
+      return localPatients.map((p, i) => (i === idx ? merged : p));
+    }
+
+    // Edits arrived during push — preserve local data, bump revision/serverId
+    // so the next push uses the latest If-Match.
     const serverWarnings = Array.isArray(serverPatient.sync?.warnings)
       ? serverPatient.sync.warnings
       : [];

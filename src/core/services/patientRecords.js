@@ -12,6 +12,14 @@ const EDIT_RESOLVABLE_PUSH_CONFLICT_CODES = new Set([
   'PATIENT_PERSON_CONFLICT',
 ]);
 
+export function isPatientIdentityPushConflict(conflict) {
+  return Boolean(
+    conflict
+    && conflict.kind === 'push'
+    && EDIT_RESOLVABLE_PUSH_CONFLICT_CODES.has(conflict.code)
+  );
+}
+
 function resolveContextUser(context = {}) {
   if (context?.user) return context.user;
   if (context?.session?.user) return context.session.user;
@@ -84,11 +92,7 @@ export function migratePatientRecords(patients = [], context = {}) {
 }
 
 function shouldClearConflictOnEdit(sync = {}) {
-  return (
-    sync.syncStatus === 'conflict'
-    && sync.conflict?.kind === 'push'
-    && EDIT_RESOLVABLE_PUSH_CONFLICT_CODES.has(sync.conflict?.code)
-  );
+  return sync.syncStatus === 'conflict' && isPatientIdentityPushConflict(sync.conflict);
 }
 
 export function touchPatientRecord(patient, context = {}) {

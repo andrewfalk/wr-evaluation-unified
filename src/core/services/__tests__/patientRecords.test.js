@@ -1,11 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import {
   clonePatientRecordForImport,
+  isPatientIdentityPushConflict,
   isRedactedPatientRecord,
   migratePatientRecord,
   migratePatientRecords,
   touchPatientRecord,
 } from '../patientRecords.js';
+
+describe('isPatientIdentityPushConflict', () => {
+  it('returns true for push + PATIENT_IDENTITY_CONFLICT', () => {
+    expect(isPatientIdentityPushConflict({ kind: 'push', code: 'PATIENT_IDENTITY_CONFLICT' })).toBe(true);
+  });
+
+  it('returns true for push + PATIENT_PERSON_CONFLICT', () => {
+    expect(isPatientIdentityPushConflict({ kind: 'push', code: 'PATIENT_PERSON_CONFLICT' })).toBe(true);
+  });
+
+  it('returns false for push + other code', () => {
+    expect(isPatientIdentityPushConflict({ kind: 'push', code: 'CONFLICT' })).toBe(false);
+  });
+
+  it('returns false for pull kind even with matching code', () => {
+    expect(isPatientIdentityPushConflict({ kind: 'pull', code: 'PATIENT_IDENTITY_CONFLICT' })).toBe(false);
+  });
+
+  it('returns false for undefined / null conflict', () => {
+    expect(isPatientIdentityPushConflict(undefined)).toBe(false);
+    expect(isPatientIdentityPushConflict(null)).toBe(false);
+  });
+});
 
 describe('redacted patient snapshot stubs', () => {
   it('preserves redacted stubs during migration', () => {

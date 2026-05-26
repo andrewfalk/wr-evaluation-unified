@@ -3,6 +3,7 @@ import { getModule, getAllModules } from './core/moduleRegistry';
 import { SettingsModal } from './core/components/SettingsModal';
 import { MigrationReportModal } from './core/components/MigrationReportModal';
 import { ConflictResolveModal } from './core/components/ConflictResolveModal';
+import { PatientIdentityConflictModal } from './core/components/PatientIdentityConflictModal';
 import { BatchImportModal } from './core/components/BatchImportModal';
 import { PresetManageModal } from './core/components/PresetManageModal';
 import { PresetBrowseModal } from './core/components/PresetBrowseModal';
@@ -40,7 +41,7 @@ import { showAlert, showConfirm } from './core/utils/platform';
 import { getSyncedEvaluationDate } from './core/utils/patientCompletion';
 import { generateUnifiedReport } from './core/utils/reportGenerator';
 import { buildSteps } from './core/utils/steps';
-import { isRedactedPatientRecord, touchPatientRecord } from './core/services/patientRecords';
+import { isPatientIdentityPushConflict, isRedactedPatientRecord, touchPatientRecord } from './core/services/patientRecords';
 import { canEditPatient } from './core/utils/patientOwnership';
 import {
   clearAutoSavedWorkspace,
@@ -598,7 +599,24 @@ function App() {
       {showSaveModal && <SaveModal patientCount={patients.length} saveName={saveName} onSaveNameChange={e => setSaveName(e.target.value)} savedItems={savedItems} onSave={handleSave} onOverwriteSave={handleOverwriteSave} onDelete={handleDelete} onClose={() => setShowSaveModal(false)} />}
       {showLoadModal && <LoadModal legacyItems={legacyItems} savedItems={savedItems} onLoad={handleLoad} onDelete={handleDelete} onClose={() => setShowLoadModal(false)} />}
       {showBatchImport && <BatchImportModal onClose={() => setShowBatchImport(false)} onImport={handleBatchImport} existingPatients={patients} />}
-      {conflictPatient && (
+      {conflictPatient && isPatientIdentityPushConflict(conflictPatient.sync?.conflict) ? (
+        <PatientIdentityConflictModal
+          patient={conflictPatient}
+          session={session}
+          settings={settings}
+          onUseServer={(serverPatient) =>
+            handleResolveConflict('use-server', { patient: conflictPatient, serverPatient })
+          }
+          onEditIdentity={() => {
+            setConflictPatientId(null);
+            setActiveId(conflictPatient.id);
+            setShowHome(false);
+            const infoIdx = steps.findIndex(s => s.id === 'info');
+            if (infoIdx >= 0) setCurrentStepIndex(infoIdx);
+          }}
+          onClose={() => setConflictPatientId(null)}
+        />
+      ) : conflictPatient ? (
         <ConflictResolveModal
           patient={conflictPatient}
           session={session}
@@ -607,7 +625,7 @@ function App() {
           onRemoteDeleteDetected={markRemoteDeleteConflict}
           onClose={() => setConflictPatientId(null)}
         />
-      )}
+      ) : null}
       {presetModalJobId && activePatient && (
         <PresetManageModal
           jobId={presetModalJobId}

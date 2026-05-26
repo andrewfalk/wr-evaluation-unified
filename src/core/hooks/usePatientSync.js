@@ -19,9 +19,10 @@ function hasPendingPatients(patients = []) {
   });
 }
 
-function applySyncedPatients(localPatients, syncedPatients) {
-  return syncedPatients.reduce(
-    (next, serverPatient) => mergePushedPatientAck(next, serverPatient),
+function applySyncedPatients(localPatients, syncedPairs) {
+  return syncedPairs.reduce(
+    (next, { patient: pushedPatient, serverPatient }) =>
+      mergePushedPatientAck(next, serverPatient, pushedPatient),
     localPatients
   );
 }
