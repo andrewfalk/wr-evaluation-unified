@@ -48,6 +48,136 @@ const BarChart = ({ data, color, title, caption }) => {
   );
 };
 
+const GENDER_OPTIONS = [
+  { key: 'all', label: '전체' },
+  { key: 'male', label: '남' },
+  { key: 'female', label: '여' },
+];
+
+const GenderToggle = ({ value, onChange }) => (
+  <div className="card-gender-toggle">
+    {GENDER_OPTIONS.map(opt => (
+      <button
+        key={opt.key}
+        type="button"
+        className={`card-gender-btn${value === opt.key ? ' card-gender-btn--active' : ''}`}
+        onClick={() => onChange(opt.key)}
+      >
+        {opt.label}
+      </button>
+    ))}
+  </div>
+);
+
+const GenderToggleCard = ({ title, data, renderBody }) => {
+  const [g, setG] = useState('all');
+  return (
+    <div className="dashboard-stat-card metric-card pattern-surface dashboard-card-with-toggle">
+      <div className="card-toggle-row">
+        <div className="stat-label">{title}</div>
+        <GenderToggle value={g} onChange={setG} />
+      </div>
+      <div className="card-toggle-body">{renderBody(data?.[g], g)}</div>
+    </div>
+  );
+};
+
+const Top5List = (items) => {
+  const filled = [...(items || [])];
+  while (filled.length < 5) filled.push(null);
+  return (
+    <div className="stat-job-grid">
+      {filled.map((it, i) => (
+        <div className="stat-job-row" key={i}>
+          {it ? (
+            <>
+              <div className="stat-job-name" title={it.name || ''}>
+                {it.key}{it.name ? ` · ${it.name}` : ''}
+              </div>
+              <div className="stat-job-count">{it.count}명</div>
+            </>
+          ) : (
+            <>
+              <div className="stat-job-name stat-empty-row">&nbsp;</div>
+              <div className="stat-job-count">&nbsp;</div>
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const GenderDonut = ({ segments }) => {
+  const size = 130;
+  const stroke = 26;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const total = segments.reduce((sum, s) => sum + s.value, 0);
+  let offset = 0;
+  const cx = size / 2;
+  const cy = size / 2;
+  const midRadius = radius;
+  const pad = 8;
+  const vbSize = size + pad * 2;
+
+  return (
+    <div className="gender-donut">
+      <svg
+        width={vbSize} height={vbSize}
+        viewBox={`${-pad} ${-pad} ${vbSize} ${vbSize}`}
+        style={{ overflow: 'visible' }}
+        role="img" aria-label="성별 비율"
+      >
+        <circle
+          cx={cx} cy={cy} r={radius}
+          fill="none" stroke="var(--bg-secondary, #f5f5f5)" strokeWidth={stroke}
+        />
+        {total > 0 && segments.map(s => {
+          if (s.value <= 0) return null;
+          const length = (s.value / total) * circumference;
+          const dash = `${length} ${circumference - length}`;
+          const dashOffset = -offset;
+          offset += length;
+          return (
+            <circle
+              key={s.key}
+              cx={cx} cy={cy} r={radius}
+              fill="none" stroke={s.color} strokeWidth={stroke}
+              strokeDasharray={dash} strokeDashoffset={dashOffset}
+              transform={`rotate(-90 ${cx} ${cy})`}
+            />
+          );
+        })}
+        {total > 0 && (() => {
+          let segStart = 0;
+          return segments.map(s => {
+            if (s.value <= 0) return null;
+            const angleSpan = (s.value / total) * 2 * Math.PI;
+            const midAngle = -Math.PI / 2 + segStart + angleSpan / 2;
+            segStart += angleSpan;
+            const lx = cx + Math.cos(midAngle) * midRadius;
+            const ly = cy + Math.sin(midAngle) * midRadius;
+            const pct = Math.round((s.value / total) * 100);
+            return (
+              <text
+                key={s.key}
+                x={lx} y={ly}
+                textAnchor="middle" dominantBaseline="central"
+                className="gender-donut-seg-label"
+              >
+                {s.label} {pct}%
+              </text>
+            );
+          });
+        })()}
+        <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central"
+              className="gender-donut-center">{total}</text>
+      </svg>
+    </div>
+  );
+};
+
 const SEG_COLORS = {
   high: 'var(--color-safe)',
   low: '#f59e0b',
@@ -183,26 +313,44 @@ const Dashboard = ({
   const allModules = getAllModules();
   const showSyncMismatchBanner = canUseScope && scope === 'all' && patientListScope === 'mine';
 
+  const userBadge = (() => {
+    if (session?.mode !== 'intranet' || !session?.user) return null;
+    const displayName = session.user.name || session.user.displayName || session.user.loginId;
+    if (!displayName) return null;
+    const role = session.user.role;
+    const roleLabel = role === 'admin' ? '관리자' : role === 'doctor' ? '의사' : role;
+    return (
+      <div className="dashboard-user-badge">
+        <span className="dashboard-user-name">{displayName}</span>
+        {role && <span className="dashboard-user-role">{roleLabel}</span>}
+      </div>
+    );
+  })();
+
   const header = (
     <div className="dashboard-header-row">
-      {canUseScope && (
-        <div className="patient-scope-toggle">
-          <button
-            type="button"
-            className={`patient-scope-btn${scope === 'mine' ? ' patient-scope-btn--active' : ''}`}
-            onClick={() => onScopeChange?.('mine')}
-          >
-            내 환자 통계
-          </button>
-          <button
-            type="button"
-            className={`patient-scope-btn${scope === 'all' ? ' patient-scope-btn--active' : ''}`}
-            onClick={() => onScopeChange?.('all')}
-          >
-            전체 통계
-          </button>
-        </div>
-      )}
+      <div className="dashboard-header-spacer" />
+      <div className="dashboard-header-center">{userBadge}</div>
+      <div className="dashboard-header-right">
+        {canUseScope && (
+          <div className="patient-scope-toggle">
+            <button
+              type="button"
+              className={`patient-scope-btn${scope === 'mine' ? ' patient-scope-btn--active' : ''}`}
+              onClick={() => onScopeChange?.('mine')}
+            >
+              내 환자 통계
+            </button>
+            <button
+              type="button"
+              className={`patient-scope-btn${scope === 'all' ? ' patient-scope-btn--active' : ''}`}
+              onClick={() => onScopeChange?.('all')}
+            >
+              전체 통계
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 
@@ -317,12 +465,18 @@ const Dashboard = ({
           <div className="stat-label">평가 결과</div>
         </div>
 
-        {scope === 'mine' && (
-          <div className="dashboard-stat-card metric-card pattern-surface">
-            <div className="stat-value stat-progress">{incompleteCount}</div>
-            <div className="stat-label">내 미완료 평가</div>
-          </div>
-        )}
+        {scope === 'mine' && (() => {
+          const total = scopedPatients.length;
+          const completed = total - incompleteCount;
+          const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+          return (
+            <div className="dashboard-stat-card metric-card pattern-surface">
+              <div className="stat-value stat-complete">{pct}<span className="stat-unit">%</span></div>
+              <div className="stat-label">내 환자 완료율</div>
+              <div className="stat-subnote">완료 {completed} / 총 {total}</div>
+            </div>
+          );
+        })()}
 
         {scope === 'all' && doctorCounts && (
           <div className="dashboard-stat-card metric-card pattern-surface metric-card-modules">
@@ -347,6 +501,71 @@ const Dashboard = ({
             <div className="stat-label">의사별 환자 수 (Top 5)</div>
           </div>
         )}
+
+        {/* 성별 비율 (도넛) */}
+        <div className="dashboard-stat-card metric-card pattern-surface">
+          <div className="stat-label">성별 비율</div>
+          {(() => {
+            const gb = stats.genderBreakdown || { male: 0, female: 0, unknown: 0 };
+            const segments = [
+              { key: 'male',    label: '남',   value: gb.male,    color: '#3b82f6' },
+              { key: 'female',  label: '여',   value: gb.female,  color: '#ec4899' },
+              { key: 'unknown', label: '미상', value: gb.unknown, color: 'var(--text-muted)' },
+            ];
+            return <GenderDonut segments={segments} />;
+          })()}
+        </div>
+
+        {/* 평균 연령 (토글: 전체/남/여) */}
+        <GenderToggleCard
+          title="평균 연령"
+          data={stats.avgAgeByGender}
+          renderBody={(v) => (
+            <div className="stat-value stat-total">
+              {v == null ? '-' : v}
+              <span className="stat-unit">세</span>
+            </div>
+          )}
+        />
+
+        {/* 연령대 분포 */}
+        <GenderToggleCard
+          title="연령대 분포"
+          data={stats.ageGroupDistribution}
+          renderBody={(buckets) => {
+            const b = buckets || { '30대↓': 0, '40대': 0, '50대': 0, '60대': 0, '70대↑': 0 };
+            const max = Math.max(1, ...Object.values(b));
+            const order = ['30대↓', '40대', '50대', '60대', '70대↑'];
+            return (
+              <div className="age-group-rows">
+                {order.map(k => (
+                  <div className="age-group-row" key={k}>
+                    <div className="age-group-label">{k}</div>
+                    <div className="age-group-bar-track">
+                      <div className="age-group-bar-fill"
+                           style={{ width: `${(b[k] / max) * 100}%` }} />
+                    </div>
+                    <div className="age-group-count">{b[k]}</div>
+                  </div>
+                ))}
+              </div>
+            );
+          }}
+        />
+
+        {/* 대표 직종 Top 5 */}
+        <GenderToggleCard
+          title="대표 직종 Top 5"
+          data={stats.topJobsByGender}
+          renderBody={(items) => Top5List(items)}
+        />
+
+        {/* 상병 Top 5 */}
+        <GenderToggleCard
+          title="상병 Top 5"
+          data={stats.topDiagnosesByGender}
+          renderBody={(items) => Top5List(items)}
+        />
       </div>
 
       {/* 차트 2개 */}

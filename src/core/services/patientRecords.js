@@ -108,6 +108,7 @@ export function touchPatientRecord(patient, context = {}) {
 
   return {
     ...ensured,
+    updatedAt: new Date().toISOString(),
     meta: {
       ...ensured.meta,
       organizationId: ensured.meta.organizationId || user?.organizationId || null,

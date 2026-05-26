@@ -238,7 +238,14 @@ export function usePatientCrud({
     showAlert(`가져오기 완료: 신규 ${stats.newPatients}명, 상병 ${stats.newDiagnoses}건, 직업 ${stats.newJobs}건 추가 (중복 ${stats.skipped}건 건너뜀)${doctorNote}`);
   };
 
-  const handleLoadTestData = () => {
+  const handleLoadTestData = async () => {
+    const isIntranet = session?.mode === 'intranet';
+    const isAdmin = session?.user?.role === 'admin';
+    if (isIntranet && !isAdmin) return;
+    if (isIntranet && isAdmin) {
+      const ok = await showConfirm('테스트 데이터가 로드되면 현재 환자 목록이 교체되고, 서버 모드에서는 서버로 동기화될 수 있습니다. 진행하시겠습니까?');
+      if (!ok) return;
+    }
     const testPatients = migratePatientRecords(createTestPatients(), { session });
     setPatients(testPatients);
     if (testPatients.length > 0) {

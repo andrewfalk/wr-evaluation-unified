@@ -226,6 +226,82 @@ describe('GET /api/patients', () => {
     expect(itemsCall[1] as unknown[]).toContain(USER_ID);
   });
 
+  it('includes top-level updatedAt and createdAt on each item', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    mock.mockResolvedValueOnce({ rows: [PAT_ROW] });
+    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] });
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] });
+    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] });
+
+    const res = await request(makeApp(pool))
+      .get('/api/patients')
+      .set('Authorization', `Bearer ${orgToken()}`);
+
+    expect(res.status).toBe(200);
+    const item = res.body.items[0];
+    expect(item.updatedAt).toBe(NOW.toISOString());
+    expect(item.createdAt).toBe(NOW.toISOString());
+  });
+
+  it('overrides stale payload updatedAt with DB updated_at', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    const stalePayloadRow = {
+      ...PAT_ROW,
+      updated_at: LATER,
+      payload: {
+        ...(PAT_ROW.payload as Record<string, unknown>),
+        updatedAt: '2020-01-01T00:00:00.000Z',
+      },
+    };
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    mock.mockResolvedValueOnce({ rows: [stalePayloadRow] });
+    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] });
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] });
+    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] });
+
+    const res = await request(makeApp(pool))
+      .get('/api/patients')
+      .set('Authorization', `Bearer ${orgToken()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.items[0].updatedAt).toBe(LATER.toISOString());
+  });
+
+  it('preserves payload createdAt when present, falls back to DB created_at when missing', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    const payloadCreatedAt = '2023-12-15T08:30:00.000Z';
+    const withPayloadCreatedAt = {
+      ...PAT_ROW,
+      payload: {
+        ...(PAT_ROW.payload as Record<string, unknown>),
+        createdAt: payloadCreatedAt,
+      },
+    };
+    const { createdAt: _omit, ...payloadWithoutCreatedAt } = PAT_ROW.payload as Record<string, unknown>;
+    const noPayloadCreatedAt = {
+      ...PAT_ROW,
+      id: '22222222-2222-2222-2222-222222222222',
+      payload: payloadWithoutCreatedAt,
+    };
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    mock.mockResolvedValueOnce({ rows: [withPayloadCreatedAt, noPayloadCreatedAt] });
+    mock.mockResolvedValueOnce({ rows: [{ total: '2' }] });
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] });
+    mock.mockResolvedValueOnce({ rows: [{ total: '2' }] });
+
+    const res = await request(makeApp(pool))
+      .get('/api/patients')
+      .set('Authorization', `Bearer ${orgToken()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.items[0].createdAt).toBe(payloadCreatedAt);
+    expect(res.body.items[1].createdAt).toBe(NOW.toISOString());
+  });
+
   it('defaults admin patient list scope to all', async () => {
     const pool = makePool();
     const mock = pool.query as ReturnType<typeof vi.fn>;
@@ -308,6 +384,17 @@ describe('GET /api/patients/:id', () => {
     expect(res.status).toBe(200);
     expect(res.body.id).toBe(PAT_ID);
     expect(res.body.sync.revision).toBe(1);
+  });
+
+  it('GET /:id 응답에도 top-level updatedAt/createdAt이 포함된다', async () => {
+    const pool = makePool();
+    wireQueries(pool, { rows: [PAT_ROW] });
+    const res = await request(makeApp(pool))
+      .get(`/api/patients/${PAT_ID}`)
+      .set('Authorization', `Bearer ${orgToken()}`);
+    expect(res.status).toBe(200);
+    expect(res.body.updatedAt).toBe(NOW.toISOString());
+    expect(res.body.createdAt).toBe(NOW.toISOString());
   });
 });
 

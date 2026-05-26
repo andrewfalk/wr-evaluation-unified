@@ -1,5 +1,6 @@
 import { isPatientComplete } from './patientCompletion';
 import { getOwnerGroupKey } from './patientOwnership';
+import { formatBirthDate } from './data';
 
 export const UNASSIGNED_GROUP_KEY = '__unassigned__';
 
@@ -158,6 +159,72 @@ function getRegistrationTimestamp(patient) {
   return patient?.createdAt || patient?._savedAt || '';
 }
 
+// 최근 활동 정렬용 timestamp (epoch ms).
+// sync.lastSyncedAt은 동기화 시각이지 사용자 활동 시각이 아니므로 의도적으로 제외한다.
+// updatedAt → _savedAt → createdAt 순으로 본다. invalid는 0.
+function getRecentActivityTimestamp(patient) {
+  const candidates = [patient?.updatedAt, patient?._savedAt, patient?.createdAt];
+  for (const c of candidates) {
+    if (typeof c !== 'string' || !c) continue;
+    const t = Date.parse(c);
+    if (!Number.isNaN(t)) return t;
+  }
+  return 0;
+}
+
+// shared.gender의 다양한 표기(M/F, 남/여, male/female 등)를 정규화.
+export function normalizeGender(raw) {
+  if (typeof raw !== 'string') return 'unknown';
+  const s = raw.trim().toLowerCase();
+  if (!s) return 'unknown';
+  if (s === 'm' || s === 'male' || s === '남' || s === '남자' || s === '남성') return 'male';
+  if (s === 'f' || s === 'female' || s === '여' || s === '여자' || s === '여성') return 'female';
+  return 'unknown';
+}
+
+// 만 나이. birthDate가 invalid면 null. ref가 invalid면 today로 폴백. 비현실값(<0, >120) null.
+// YYYYMMDD 형식도 허용 (formatBirthDate가 YYYY-MM-DD로 정규화).
+export function computeAge(birthDate, ref) {
+  if (typeof birthDate !== 'string' || !birthDate) return null;
+  const normalized = formatBirthDate(birthDate);
+  if (normalized === '-' || !/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null;
+  const b = new Date(normalized);
+  if (Number.isNaN(b.getTime())) return null;
+  let r;
+  if (typeof ref === 'string' && ref) {
+    r = new Date(ref);
+    if (Number.isNaN(r.getTime())) r = new Date();
+  } else {
+    r = new Date();
+  }
+  let age = r.getFullYear() - b.getFullYear();
+  const m = r.getMonth() - b.getMonth();
+  if (m < 0 || (m === 0 && r.getDate() < b.getDate())) age -= 1;
+  if (age < 0 || age > 120) return null;
+  return age;
+}
+
+// 30대 이하(<40) / 40대 / 50대 / 60대 / 70대 이상
+function ageGroupKey(age) {
+  if (age == null) return null;
+  if (age < 40) return '30대↓';
+  if (age < 50) return '40대';
+  if (age < 60) return '50대';
+  if (age < 70) return '60대';
+  return '70대↑';
+}
+
+function emptyAgeGroupBuckets() {
+  return { '30대↓': 0, '40대': 0, '50대': 0, '60대': 0, '70대↑': 0 };
+}
+
+function topN(map, n) {
+  return Array.from(map.entries())
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, n)
+    .map(([key, v]) => ({ key, ...v }));
+}
+
 // 상병을 high > low > 미평가 우선순위로 분류 (스택 차트용 상호배타적 카운트)
 function getDiagnosisBreakdown(patient) {
   const diagnoses = (patient.data?.shared?.diagnoses || []).filter(d => d.code || d.name);
@@ -293,11 +360,7 @@ export const computeDashboardStats = (currentPatients) => {
 
   // 최근 활동 5건 (최종 수정일 기준)
   const sorted = [...allPatients]
-    .sort((a, b) => {
-      const da = a.updatedAt || getRegistrationTimestamp(a);
-      const db = b.updatedAt || getRegistrationTimestamp(b);
-      return db.localeCompare(da);
-    })
+    .sort((a, b) => getRecentActivityTimestamp(b) - getRecentActivityTimestamp(a))
     .slice(0, 5);
 
   const recentActivity = sorted.map(p => {
@@ -372,6 +435,78 @@ export const computeDashboardStats = (currentPatients) => {
     if (dateStr) bucketEvalDay(dateStr, dailyEvaluations, getDiagnosisBreakdown(p));
   });
 
+  // ─── 성별/연령/직종/상병 by-gender 집계 ────────────────────────────────
+  const genderBreakdown = { male: 0, female: 0, unknown: 0 };
+  const ageSums = { all: 0, male: 0, female: 0 };
+  const ageCounts = { all: 0, male: 0, female: 0 };
+  const ageGroupDistribution = {
+    all: emptyAgeGroupBuckets(),
+    male: emptyAgeGroupBuckets(),
+    female: emptyAgeGroupBuckets(),
+  };
+  const jobMaps = { all: new Map(), male: new Map(), female: new Map() };
+  const diagMaps = { all: new Map(), male: new Map(), female: new Map() };
+
+  allPatients.forEach(p => {
+    const shared = p?.data?.shared || {};
+    const g = normalizeGender(shared.gender);
+    genderBreakdown[g] += 1;
+
+    const age = computeAge(shared.birthDate, shared.evaluationDate);
+    if (age != null) {
+      ageSums.all += age; ageCounts.all += 1;
+      const gk = ageGroupKey(age);
+      if (gk) ageGroupDistribution.all[gk] += 1;
+      if (g !== 'unknown') {
+        ageSums[g] += age; ageCounts[g] += 1;
+        if (gk) ageGroupDistribution[g][gk] += 1;
+      }
+    }
+
+    const jobName = shared.jobs?.[0]?.jobName;
+    if (jobName) {
+      const bumpJob = (map) => {
+        const cur = map.get(jobName) || { count: 0 };
+        cur.count += 1;
+        map.set(jobName, cur);
+      };
+      bumpJob(jobMaps.all);
+      if (g !== 'unknown') bumpJob(jobMaps[g]);
+    }
+
+    const diagnoses = (shared.diagnoses || []).filter(d => d?.code);
+    const seen = new Set();
+    diagnoses.forEach(d => {
+      const code = d.code;
+      if (seen.has(code)) return;
+      seen.add(code);
+      const bumpDiag = (map) => {
+        const cur = map.get(code) || { count: 0, name: d.name || '' };
+        cur.count += 1;
+        if (!cur.name && d.name) cur.name = d.name;
+        map.set(code, cur);
+      };
+      bumpDiag(diagMaps.all);
+      if (g !== 'unknown') bumpDiag(diagMaps[g]);
+    });
+  });
+
+  const avgAgeByGender = {
+    all: ageCounts.all > 0 ? Math.round((ageSums.all / ageCounts.all) * 10) / 10 : null,
+    male: ageCounts.male > 0 ? Math.round((ageSums.male / ageCounts.male) * 10) / 10 : null,
+    female: ageCounts.female > 0 ? Math.round((ageSums.female / ageCounts.female) * 10) / 10 : null,
+  };
+  const topJobsByGender = {
+    all: topN(jobMaps.all, 5),
+    male: topN(jobMaps.male, 5),
+    female: topN(jobMaps.female, 5),
+  };
+  const topDiagnosesByGender = {
+    all: topN(diagMaps.all, 5),
+    male: topN(diagMaps.male, 5),
+    female: topN(diagMaps.female, 5),
+  };
+
   return {
     totalPatients: allPatients.length,
     completedCount,
@@ -390,5 +525,10 @@ export const computeDashboardStats = (currentPatients) => {
     dailyEvaluations,
     recentActivity,
     avgProcessingDays,
+    genderBreakdown,
+    avgAgeByGender,
+    ageGroupDistribution,
+    topJobsByGender,
+    topDiagnosesByGender,
   };
 };

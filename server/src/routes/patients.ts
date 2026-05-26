@@ -178,10 +178,16 @@ function toResponse(
                   message: `'${dn}': 이름으로 의사 계정을 찾을 수 없어 자동 배정이 건너뛰어졌습니다.` }];
       })();
 
+  const baseCreatedAt = typeof base['createdAt'] === 'string' && base['createdAt']
+    ? (base['createdAt'] as string)
+    : row.created_at.toISOString();
+
   return {
     ...base,
     id:                   row.id,
     assignedDoctorUserId: row.assigned_doctor_user_id ?? null,
+    createdAt:            baseCreatedAt,
+    updatedAt:            row.updated_at.toISOString(),
     sync: {
       serverId:    row.id,
       revision:    row.revision,

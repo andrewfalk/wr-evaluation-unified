@@ -20,24 +20,10 @@ export function LandingScreen({
   onShowPatientList,
   canShowPatientList,
 }) {
-  const userBadge = (() => {
-    if (session?.mode !== 'intranet' || !session?.user) return null;
-    const displayName = session.user.name || session.user.displayName || session.user.loginId;
-    if (!displayName) return null;
-    const role = session.user.role;
-    const roleLabel = role === 'admin' ? '관리자' : role === 'doctor' ? '의사' : role;
-    return (
-      <div className="landing-user-badge">
-        <span className="landing-user-name">{displayName}</span>
-        {role && <span className="landing-user-role">{roleLabel}</span>}
-      </div>
-    );
-  })();
   return (
     <div className="panel landing-panel pattern-surface pattern-surface-hero">
       <div className="landing-hero">
         <div className="section-title-row landing-hero-copy">
-          {userBadge}
           <h1 className="landing-title">근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미</h1>
           <p className="landing-description">
             {isIntranetMode
@@ -60,7 +46,9 @@ export function LandingScreen({
           </>
         )}
         <button className="btn btn-info landing-action-btn" onClick={onShowBatchImport}>엑셀 일괄입력</button>
-        <button className="btn btn-warning landing-action-btn" onClick={onLoadTestData}>테스트</button>
+        {(session?.mode !== 'intranet' || session?.user?.role === 'admin') && (
+          <button className="btn btn-warning landing-action-btn" onClick={onLoadTestData}>테스트</button>
+        )}
         <button className="btn btn-secondary landing-action-btn" onClick={onShowSettings}>설정</button>
         {patients.length > 0 && (
           <>

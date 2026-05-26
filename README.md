@@ -1,6 +1,6 @@
 # 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 5.1.1 | **Status:** 진단별 모듈 수동 지정 + 다중 사용자 권한 정책 / 인트라넷 운영 중
+> **Version:** 5.1.2 | **Status:** 대시보드 통계 확장 + 최근활동 timestamp 계약 정리 / 인트라넷 운영 중
 
 직업환경의학 전문의가 **업무상 질병 인정 여부를 판단**할 때 사용하는 통합 평가 도구.
 무릎(슬관절), 척추(요추 MDDM), 경추(목 BK2109), 팔꿈치(주관절 BK2101/2103/2105/2106), 어깨(견관절 BK2117), 손목(수관절 BK2113/2101/2103/2106) 평가를 지원하며, 향후 고관절 등을 플러그인 형태로 확장할 수 있다.
@@ -536,6 +536,32 @@ ICD 코드 기반 모듈 자동 추천:
 ---
 
 ## 변경 이력
+
+### v5.1.2 (2026-05-26) — 대시보드 통계 확장 + 최근활동 timestamp 계약 정리
+
+서버 모드 전환 후 노출된 최근활동 회귀 (다음 날 옛 환자가 다시 상단에 올라오는 증상)를 데이터 계약 차원에서 수정. 대시보드 카드 의미 강화 + 인트라넷 테스트 버튼 가드.
+
+**최근활동 timestamp 계약**
+- 서버 `toResponse()`: `updatedAt`(DB `updated_at`으로 무조건 덮어쓰기, stale payload 차단) + `createdAt`(payload 값 우선, 없으면 DB `created_at`) 명시
+- 클라이언트 `getRecentActivityTimestamp`: `updatedAt → _savedAt → createdAt` 폴백, `sync.lastSyncedAt`은 동기화 시각이라 의도적으로 제외, `Date.parse()` 숫자 비교
+- `touchPatientRecord`가 모든 환자 변경 진입점에서 `updatedAt` 일관 set (이전엔 caller별로 비대칭)
+- 회귀 테스트: 서버 4건, 클라이언트 4건
+
+**대시보드 카드 확장**
+- 헤더 3영역(좌 spacer / 중앙 로그인 배지 / 우 scope 토글)로 통합
+- 내 환자 scope 마지막 카드: "내 미완료 평가" → **"내 환자 평가 완료율"** (진행중 카드와 중복 해소)
+- 신규 카드 5종 (모두 전체/남/여 토글):
+  1. 성별 비율 (SVG 도넛, 세그먼트 위 라벨 직접 표시)
+  2. 평균 연령
+  3. 연령대 분포 (30대↓ / 40대 / 50대 / 60대 / 70대↑)
+  4. 대표 직종 Top 5 (`jobs[0].jobName` 기준)
+  5. 상병 Top 5 (`diagnoses[].code` 기준, 한 환자 중복 카운트 없음)
+- 신규 헬퍼: `normalizeGender`(`M/F`·`남/여`·`male/female` 정규화), `computeAge`(`formatBirthDate` 재사용으로 YYYYMMDD도 처리)
+- 카드 그리드: `repeat(auto-fit, minmax(200px, 1fr))` + `grid-auto-rows: minmax(170px, 1fr)` — 카드 수 증가에 자동 적응, 모든 카드 동일 높이
+
+**테스트 버튼 가드 (인트라넷)**
+- 비admin: LandingScreen 버튼 자체 숨김 + 핸들러 early return (이중 방어, 콘솔 우회 차단)
+- admin: `showConfirm`으로 "목록 교체 + 서버 동기화 가능성" 안내
 
 ### v5.1.1 (2026-05-20) — 진단별 모듈 수동 지정
 
