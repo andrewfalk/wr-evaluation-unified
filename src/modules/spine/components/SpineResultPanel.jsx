@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { thresholds } from '../utils/thresholds';
 import { convertTimeToSeconds } from '../utils/calculations';
 
@@ -147,28 +148,7 @@ export function SpineResultPanel({ calc }) {
         <div className="result-section-caption">기준값 초과 여부와 일일 기여 용량</div>
       </div>
       <div className="result-detail-stack">
-      {tasks.map((task) => {
-        const included = task.force >= forceThreshold;
-        const timeH = (convertTimeToSeconds(task.timeValue, task.timeUnit) * task.frequency) / 3600;
-        const taskDose = included ? (task.force * Math.sqrt(timeH)) / 1000 : 0;
-        const forceLevel = task.force >= 6000 ? 'danger' : task.force >= forceThreshold ? 'warning' : 'safe';
-        return (
-          <div key={task.id} className="result-detail-card">
-            <div className="result-card-top">
-              <div>
-                <div className="result-card-title">{task.name}</div>
-                <div className="result-card-meta">{task.posture} {'\xB7'} {task.weight}kg {'\xB7'} {task.frequency}회/일</div>
-              </div>
-              <span className={`result-force-value level-${forceLevel}`}>{task.force.toLocaleString()} N</span>
-            </div>
-            <div className="result-card-meta result-card-meta-spaced">
-              {included
-                ? `일일 시간: ${timeH.toFixed(3)} h | 일일 기여: ${taskDose.toFixed(2)} kN\xB7h`
-                : `기준값(${forceThreshold}N) 미만 - 일일선량 미포함`}
-            </div>
-          </div>
-        );
-      })}
+      {renderTaskCards(tasks, jobResults, forceThreshold)}
       </div>
       </div>
 
@@ -196,6 +176,45 @@ export function SpineResultPanel({ calc }) {
       </div>
     </div>
   );
+}
+
+function renderTaskCard(task, forceThreshold) {
+  const included = task.force >= forceThreshold;
+  const timeH = (convertTimeToSeconds(task.timeValue, task.timeUnit) * task.frequency) / 3600;
+  const taskDose = included ? (task.force * Math.sqrt(timeH)) / 1000 : 0;
+  const forceLevel = task.force >= 6000 ? 'danger' : task.force >= forceThreshold ? 'warning' : 'safe';
+  return (
+    <div key={task.id} className="result-detail-card">
+      <div className="result-card-top">
+        <div>
+          <div className="result-card-title">{task.name}</div>
+          <div className="result-card-meta">{task.posture} {'\xB7'} {task.weight}kg {'\xB7'} {task.frequency}회/일</div>
+        </div>
+        <span className={`result-force-value level-${forceLevel}`}>{task.force.toLocaleString()} N</span>
+      </div>
+      <div className="result-card-meta result-card-meta-spaced">
+        {included
+          ? `일일 시간: ${timeH.toFixed(3)} h | 일일 기여: ${taskDose.toFixed(2)} kN\xB7h`
+          : `기준값(${forceThreshold}N) 미만 - 일일선량 미포함`}
+      </div>
+    </div>
+  );
+}
+
+function renderTaskCards(tasks, jobResults, forceThreshold) {
+  if (jobResults && jobResults.length > 1) {
+    return jobResults.map((jr, ji) => {
+      const jrTasks = jr.tasks || [];
+      if (jrTasks.length === 0) return null;
+      return (
+        <Fragment key={jr.jobId}>
+          <div className="result-section-caption result-task-group-label">직력{ji + 1}: {jr.jobName || '-'}</div>
+          {jrTasks.map(task => renderTaskCard(task, forceThreshold))}
+        </Fragment>
+      );
+    });
+  }
+  return tasks.map(task => renderTaskCard(task, forceThreshold));
 }
 
 function SummaryCard({ label, value, unit, sub, highlight }) {

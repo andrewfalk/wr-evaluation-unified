@@ -105,21 +105,36 @@ function getSpineInterpretation(comparison) {
 }
 
 function buildSpineExposureText(calc) {
-  const { tasks, dailyDose, lifetimeDose, comparison, maxForce, weightedDailyDose } = calc || {};
+  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, maxForce, weightedDailyDose } = calc || {};
   const spineTasks = tasks || [];
   let text = '\n<허리(요추)>\n';
   text += '독일의 BK2108 장기간의 중량물 취급 또는 허리를 굽히기로 인해 발생한 요추간판 탈출증 평가에서 사용하는 척추 압박력 평가 모델(Mainz-Dortmund Dose Model, MDDM)을 이용하여 평가하였음.\n\n';
 
+  const renderSpineTask = (task, index) => {
+    const taskDose = getSpineTaskDose(task);
+    let s = `작업 ${index + 1}. ${task.name || '-'}\n`;
+    s += `자세 ${task.posture || '-'} · ${task.weight || '-'}kg · ${task.frequency || 0}회/일\n`;
+    s += `압박력 : ${(task.force || 0).toLocaleString()} N\n`;
+    s += `일일 시간: ${formatSpineNumber(taskDose.totalHours, 3)} h | 일일 기여: ${formatSpineNumber(taskDose.dailyContribution, 2)} kN·h\n`;
+    return s;
+  };
+
   text += '작업별 분석\n';
   if (spineTasks.length === 0) {
     text += '- 입력된 작업 없음\n';
+  } else if (jobResults && jobResults.length > 1) {
+    jobResults.forEach((jr, ji) => {
+      const jrTasks = jr.tasks || [];
+      if (jrTasks.length === 0) return;
+      text += `[직력${ji + 1}: ${jr.jobName || '-'}]\n`;
+      jrTasks.forEach((task, index) => {
+        text += renderSpineTask(task, index);
+      });
+      text += '\n';
+    });
   } else {
     spineTasks.forEach((task, index) => {
-      const taskDose = getSpineTaskDose(task);
-      text += `작업 ${index + 1}. ${task.name || '-'}\n`;
-      text += `자세 ${task.posture || '-'} · ${task.weight || '-'}kg · ${task.frequency || 0}회/일\n`;
-      text += `압박력 : ${(task.force || 0).toLocaleString()} N\n`;
-      text += `일일 시간: ${formatSpineNumber(taskDose.totalHours, 3)} h | 일일 기여: ${formatSpineNumber(taskDose.dailyContribution, 2)} kN·h\n`;
+      text += renderSpineTask(task, index);
     });
   }
 
