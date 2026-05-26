@@ -255,10 +255,14 @@ function generateJobNarrative({ job, taskSummaries, aggregate }) {
   ];
 
   taskSummaries.forEach((taskSummary, index) => {
-    lines.push(`작업 ${index + 1}: ${taskSummary.displayName}`);
+    const exposureTypes = taskSummary.exposure_types || [];
+    const typeLabels = [];
+    if (exposureTypes.includes('shoulder_heavy_load')) typeLabels.push('어깨에 무거운 하중 올려서 운반');
+    if (exposureTypes.includes('awkward_static_neck_load')) typeLabels.push('비중립·정적 목 부하');
+    const typeSuffix = typeLabels.length > 0 ? ` (${typeLabels.join(' / ')})` : '';
+    lines.push(`작업 ${index + 1}: ${taskSummary.displayName}${typeSuffix}`);
 
-    if ((taskSummary.exposure_types || []).includes('shoulder_heavy_load')) {
-      lines.push('(어깨에 무거운 하중 올려서 운반)');
+    if (exposureTypes.includes('shoulder_heavy_load')) {
       lines.push(` - 하중 : ${hasValue(taskSummary.load_weight_kg) ? `${formatNumber(taskSummary.load_weight_kg)}kg` : '-'}`);
       lines.push(` - 한 작업 교대(shift)당 노출 시간 : ${formatHours(taskSummary.carry_hours_per_shift)}`);
       lines.push(` - 운반 시 목의 부자연스러운 자세가 강제 : ${labelValue(taskSummary.forced_neck_posture, YES_NO_LABELS)}`);
@@ -269,8 +273,7 @@ function generateJobNarrative({ job, taskSummaries, aggregate }) {
       );
     }
 
-    if ((taskSummary.exposure_types || []).includes('awkward_static_neck_load')) {
-      lines.push('(비중립·정적 목 부하)');
+    if (exposureTypes.includes('awkward_static_neck_load')) {
       lines.push(` - 수행 시간 : ${formatHours(taskSummary.neck_nonneutral_hours_per_day)}`);
       lines.push(` - 굴곡/신전과 회전/측굴이 동시에 발생 : ${labelValue(taskSummary.combined_flexion_rotation_posture, YES_NO_LABELS)}`);
       lines.push(` - 고도의 정밀(precision) 작업 : ${labelValue(taskSummary.precision_work, YES_NO_LABELS)}`);

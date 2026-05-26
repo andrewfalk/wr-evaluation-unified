@@ -25,8 +25,6 @@ function SummaryCard({ summary }) {
     <div className="result-detail-card">
       <div className="result-card-title">{summary.jobName || '직업 미입력'}</div>
       <div className="result-card-meta">
-        적용 상병 {summary.diagnosisText || '경추 상병 없음'}
-        {' · '}
         완료 작업 {summary.completedTaskCount}/{summary.totalTaskCount}
       </div>
 

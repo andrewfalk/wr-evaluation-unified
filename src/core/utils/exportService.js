@@ -170,9 +170,6 @@ function buildCervicalExposureText(calc) {
       ? jobSummary.riskFactorItems.map(flag => flag.label).join(', ')
       : '확인된 위험 요인 없음';
 
-    if (jobSummary.diagnosisText) {
-      text += `  적용 상병: ${jobSummary.diagnosisText}\n`;
-    }
     if (jobSummary.missingFields?.length > 0) {
       text += `  입력 누락: ${jobSummary.missingFields.join(', ')}\n`;
     }
