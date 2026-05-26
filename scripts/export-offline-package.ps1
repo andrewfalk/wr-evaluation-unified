@@ -80,7 +80,10 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 if (-not $Version) {
     $pkgJson = Join-Path $RepoRoot "package.json"
     if (Test-Path $pkgJson) {
-        $Version = (Get-Content $pkgJson -Raw | ConvertFrom-Json).version
+        # package.json은 BOM 없는 UTF-8. PS 5.1 Get-Content는 BOM 없으면 시스템 ANSI(CP949)로
+        # 읽어 한글이 깨지고 ConvertFrom-Json이 실패하므로 .NET API로 명시적 UTF-8 읽기.
+        $raw = [System.IO.File]::ReadAllText($pkgJson, [System.Text.Encoding]::UTF8)
+        $Version = ($raw | ConvertFrom-Json).version
     }
 }
 if (-not $Version) {
