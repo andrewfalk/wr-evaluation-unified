@@ -1,8 +1,7 @@
 import { getModule } from '../moduleRegistry';
 import { getSideText, getStatusText, getReasonText } from '../../modules/knee/utils/calculations';
 import { AUX_LABELS } from '../../modules/knee/utils/data';
-import { convertTimeToSeconds } from '../../modules/spine/utils/calculations';
-import { thresholds } from '../../modules/spine/utils/thresholds';
+import { convertTimeToSeconds, getSpineTaskDoses, classifySpineSeverity } from '../../modules/spine/utils/calculations';
 import { resolveDiagnosisModule } from './diagnosisMapping';
 import { calculateAge, calculateBMI } from './common';
 import { getEffectiveWorkPeriodText } from './workPeriod';
@@ -115,17 +114,9 @@ function getSpineThresholdStatus(item) {
   return isSpineThresholdExceeded(item) ? '초과' : '미만';
 }
 
-function getSpineTaskDose(task) {
+function getSpineTaskTotalHours(task) {
   const totalSeconds = convertTimeToSeconds(task.timeValue, task.timeUnit) * (Number(task.frequency) || 0);
-  const force = Number(task.force) || 0;
-  const singleForceThreshold = thresholds.singleForce;
-  const included = force >= singleForceThreshold;
-  const dailyContribution = included ? (force * Math.sqrt(totalSeconds)) / 1000 / 60 : 0;
-
-  return {
-    totalHours: totalSeconds / 3600,
-    dailyContribution,
-  };
+  return totalSeconds / 3600;
 }
 
 function getSpineInterpretation(comparison) {
@@ -151,17 +142,16 @@ function getSpineInterpretation(comparison) {
 }
 
 function genSpineBurdenSection(calc) {
-  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, maxForce, weightedDailyDose } = calc;
+  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, maxForce, weightedDailyDose, gender, formulaVersion } = calc;
   const spineTasks = tasks || [];
   let text = `\n< 허리(요추) >\n`;
   text += `독일의 산재보험 번호 BK2108. 장기간의 중량물 취급 또는 허리를 굽히기로 인해 발생한 요추간판 탈출증 에서 사용하는 척추 압박력 평가 모델(Mainz-Dortmund Dose Model, MDDM)을 이용하여 평가하였음.\n\n`;
 
-  const renderSpineTask = (task, index) => {
-    const taskDose = getSpineTaskDose(task);
+  const renderSpineTask = (task, index, contributions) => {
     let s = `작업 ${index + 1}. ${task.name || '-'}\n`;
     s += `자세 ${task.posture || '-'} · ${task.weight || '-'}kg · ${task.frequency || 0}회/일\n`;
     s += `압박력 : ${(task.force || 0).toLocaleString()} N\n`;
-    s += `일일 시간: ${formatSpineNumber(taskDose.totalHours, 3)} h | 일일 기여: ${formatSpineNumber(taskDose.dailyContribution, 2)} kN·h\n`;
+    s += `일일 시간: ${formatSpineNumber(getSpineTaskTotalHours(task), 3)} h | 일일 기여: ${formatSpineNumber(contributions[index], 2)} kN·h\n`;
     return s;
   };
 
@@ -172,15 +162,17 @@ function genSpineBurdenSection(calc) {
     jobResults.forEach((jr, ji) => {
       const jrTasks = jr.tasks || [];
       if (jrTasks.length === 0) return;
+      const contributions = getSpineTaskDoses(jrTasks, formulaVersion);
       text += `[직력${ji + 1}: ${jr.jobName || '-'}]\n`;
       jrTasks.forEach((task, index) => {
-        text += renderSpineTask(task, index);
+        text += renderSpineTask(task, index, contributions);
       });
       text += `\n`;
     });
   } else {
+    const contributions = getSpineTaskDoses(spineTasks, formulaVersion);
     spineTasks.forEach((task, index) => {
-      text += renderSpineTask(task, index);
+      text += renderSpineTask(task, index, contributions);
     });
   }
 
@@ -188,11 +180,7 @@ function genSpineBurdenSection(calc) {
   text += `- 최대 압박력: ${(maxForce || 0).toLocaleString()} N\n`;
   const dailyKNh = weightedDailyDose?.value ?? dailyDose?.dailyDoseKNh ?? 0;
   const mf = maxForce || 0;
-  let severityLabel;
-  if (dailyKNh > 4 || mf >= 6000) severityLabel = '고도';
-  else if (dailyKNh > 3 || mf >= 5000) severityLabel = '중등도상';
-  else if (dailyKNh >= 2 || mf >= 4000) severityLabel = '중등도하';
-  else severityLabel = '경도';
+  const severityLabel = classifySpineSeverity(dailyKNh, mf, gender);
   text += `- 일일 노출량: ${dailyKNh.toFixed(2)} kN·h${weightedDailyDose ? ' (직력가중평균)' : ''} (${severityLabel})\n`;
   text += `- **누적 노출량: ${lifetimeDose?.lifetimeDoseMNh?.toFixed(2) || '0.00'} MN·h **\n`;
 

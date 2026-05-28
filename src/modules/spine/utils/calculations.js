@@ -1,5 +1,6 @@
 import { formulaDB } from './formulaDB';
 import { thresholds } from './thresholds';
+import { SPINE_FORMULA_V513 } from './formulaVersion';
 import { getEffectiveWorkPeriod } from '../../../core/utils/workPeriod';
 import { resolveDiagnosisModule } from '../../../core/utils/diagnosisMapping';
 
@@ -27,8 +28,8 @@ export function convertTimeToSeconds(value, unit) {
   }
 }
 
-// D_r = sqrt(Σ F_i^2 · t_i / 8h) · 8h   (t_i, 8h 모두 시간 단위)
-export function calculateDailyDose(tasks) {
+// v5.1.3 정정 공식: D_r = sqrt(Σ F_i^2 · t_i / 8h) · 8h
+function calculateDailyDoseV513(tasks) {
   const threshold = thresholds.singleForce;
   const REFERENCE_HOURS = 8;
   let sumF2T_hour = 0;
@@ -50,6 +51,91 @@ export function calculateDailyDose(tasks) {
   const dailyDoseNh = Math.sqrt(sumF2T_hour / REFERENCE_HOURS) * REFERENCE_HOURS;
   const dailyDoseKNh = dailyDoseNh / 1000;
   return { sumF2T_hour, dailyDoseNh, dailyDoseKNh, includedCount, hasHighForceTask };
+}
+
+// legacy 공식(v5.1.2 이전): sqrt(Σ F^2 · t_초) / 1000 / 60.
+// 기존 환자 결과 보존을 위해 그대로 유지한다.
+function calculateDailyDoseLegacy(tasks) {
+  const threshold = thresholds.singleForce;
+  let sumFSquaredT = 0;
+  let includedCount = 0;
+  let hasHighForceTask = false;
+
+  tasks.forEach(task => {
+    if (task.force >= threshold) {
+      const timeSeconds = convertTimeToSeconds(task.timeValue, task.timeUnit);
+      const totalTime = timeSeconds * task.frequency;
+      sumFSquaredT += task.force * task.force * totalTime;
+      includedCount++;
+    }
+    if (task.force >= 4000) {
+      hasHighForceTask = true;
+    }
+  });
+
+  const dailyDoseNs = Math.sqrt(sumFSquaredT);
+  const dailyDoseKNh = dailyDoseNs / 1000 / 60;
+  return { sumFSquaredT, dailyDoseNs, dailyDoseKNh, includedCount, hasHighForceTask };
+}
+
+export function calculateDailyDose(tasks, formulaVersion) {
+  if (formulaVersion === SPINE_FORMULA_V513) return calculateDailyDoseV513(tasks);
+  return calculateDailyDoseLegacy(tasks);
+}
+
+// 작업별 일일 기여도. legacy/V513 정책이 다르다.
+//  - legacy: 기존 단일 작업 공식 (F * sqrt(t_초)) / 60000 그대로. 합 != 총량이지만 v5.1.2 출력 보존.
+//  - V513: 총량을 F²·t 비중대로 배분. 합 == 총량 (합산 무결성).
+// 반환은 입력 tasksInJob과 동일 길이·순서의 배열. 호출부는 index로 꺼낸다.
+export function getSpineTaskDoses(tasksInJob, formulaVersion) {
+  const list = Array.isArray(tasksInJob) ? tasksInJob : [];
+  if (list.length === 0) return [];
+  const threshold = thresholds.singleForce;
+
+  if (formulaVersion === SPINE_FORMULA_V513) {
+    const weights = list.map(task => {
+      const force = Number(task.force) || 0;
+      if (force < threshold) return 0;
+      const totalSeconds = convertTimeToSeconds(task.timeValue, task.timeUnit) * (Number(task.frequency) || 0);
+      return force * force * totalSeconds;
+    });
+    const totalWeight = weights.reduce((s, w) => s + w, 0);
+    if (totalWeight === 0) return list.map(() => 0);
+    const { dailyDoseKNh } = calculateDailyDoseV513(list);
+    return weights.map(w => dailyDoseKNh * (w / totalWeight));
+  }
+
+  // legacy 분기: 단일 작업 공식 그대로
+  return list.map(task => {
+    const force = Number(task.force) || 0;
+    if (force < threshold) return 0;
+    const totalSeconds = convertTimeToSeconds(task.timeValue, task.timeUnit) * (Number(task.frequency) || 0);
+    return (force * Math.sqrt(totalSeconds)) / 1000 / 60;
+  });
+}
+
+// 단일 작업 wrapper. tasksInJob과 index를 받아 contributions[index]를 반환.
+export function getSpineTaskDose(task, tasksInJob, formulaVersion) {
+  const contributions = getSpineTaskDoses(tasksInJob, formulaVersion);
+  const idx = (tasksInJob || []).indexOf(task);
+  if (idx < 0) return 0;
+  return contributions[idx];
+}
+
+// 중증도 4단계 분류. 남녀 기준이 분리되어 있다.
+export function classifySpineSeverity(dailyKNh, maxForce, gender) {
+  const mf = Number(maxForce) || 0;
+  const d = Number(dailyKNh) || 0;
+  if (gender === 'female') {
+    if (d > 3.0 || mf >= 5000) return '고도';
+    if (d > 2.0 || mf >= 4000) return '중등도상';
+    if (d >= 0.5 || mf >= 3000) return '중등도하';
+    return '경도';
+  }
+  if (d > 4 || mf >= 6000) return '고도';
+  if (d > 3 || mf >= 5000) return '중등도상';
+  if (d >= 2 || mf >= 4000) return '중등도하';
+  return '경도';
 }
 
 export function calculateLifetimeDose(dailyDoseKNh, workDaysPerYear, careerYears, careerMonths, gender, hasHighForceTask = false) {
@@ -163,6 +249,7 @@ export function computeSpineCalc(patientData) {
   const shared = patientData.shared || {};
   const mod = patientData.module || {};
   const gender = shared.gender || 'male';
+  const formulaVersion = mod.formulaVersion;
   const tasks = (mod.tasks || []).map(t => {
     const result = calculateCompressiveForce(t.posture, t.weight, t.correctionFactor);
     return { ...t, force: result ? result.force : 0 };
@@ -188,7 +275,7 @@ export function computeSpineCalc(patientData) {
       const periodMonths = Math.round((periodYears - periodYearsInt) * 12);
       const workDaysPerYear = job.workDaysPerYear || 250;
 
-      const jobDailyDose = calculateDailyDose(jobTasks);
+      const jobDailyDose = calculateDailyDose(jobTasks, formulaVersion);
       const jobLifetimeDose = calculateLifetimeDose(
         jobDailyDose.dailyDoseKNh, workDaysPerYear, periodYearsInt, periodMonths, gender, jobDailyDose.hasHighForceTask
       );
@@ -215,7 +302,7 @@ export function computeSpineCalc(patientData) {
       ? { careerYears: mod.careerYears || 0, careerMonths: mod.careerMonths || 0, workDaysPerYear: mod.workDaysPerYear || 250 }
       : getCareerFromSharedJobs(shared);
 
-    const legacyDailyDose = calculateDailyDose(tasks);
+    const legacyDailyDose = calculateDailyDose(tasks, formulaVersion);
     const legacyLifetimeDose = calculateLifetimeDose(
       legacyDailyDose.dailyDoseKNh, career.workDaysPerYear, career.careerYears, career.careerMonths, gender, legacyDailyDose.hasHighForceTask
     );
@@ -225,7 +312,7 @@ export function computeSpineCalc(patientData) {
   }
 
   // 전체 통합 결과
-  const dailyDose = calculateDailyDose(tasks);
+  const dailyDose = calculateDailyDose(tasks, formulaVersion);
   const career = hasLegacyFields
     ? { careerYears: mod.careerYears || 0, careerMonths: mod.careerMonths || 0 }
     : getCareerFromSharedJobs(shared);
@@ -257,7 +344,7 @@ export function computeSpineCalc(patientData) {
   const workRelatedness = assessWorkRelatedness(lifetimeDose.lifetimeDoseMNh, gender);
   const maxForce = tasks.length > 0 ? Math.max(...tasks.map(t => t.force)) : 0;
 
-  return { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender, weightedDailyDose };
+  return { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender, weightedDailyDose, formulaVersion };
 }
 
 // 완료 판정

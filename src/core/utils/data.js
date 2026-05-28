@@ -270,6 +270,7 @@ export function createSamplePatient() {
           returnConsiderations: '무거운 중량물 취급 제한 권고. 쪼그려 앉는 작업 회피 필요. 무릎 보호대 착용 권장.',
         },
         spine: {
+          formulaVersion: 'v5.1.3',
           tasks: [
             {
               id: Date.now() + 1,
@@ -1177,6 +1178,7 @@ export function createTestPatients() {
 
     if (data.modules.includes('spine')) {
       patient.data.modules.spine = {
+        formulaVersion: 'v5.1.3',
         tasks: jobRows.flatMap((job, jobIndex) =>
           buildSpineTasks(
             job.id,

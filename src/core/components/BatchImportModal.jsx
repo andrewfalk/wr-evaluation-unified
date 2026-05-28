@@ -10,6 +10,7 @@ import { createElbowDiagnosisEntry, createElbowJobEvaluation, createElbowModuleD
 import { createWristDiagnosisEntry, createWristJobEvaluation, createWristModuleData } from '../../modules/wrist/utils/data';
 import { createCervicalTask, EXPOSURE_TYPE_OPTIONS as CERVICAL_EXPOSURE_TYPE_OPTIONS } from '../../modules/cervical/utils/data';
 import { createTask as createSpineTask } from '../../modules/spine/utils/data';
+import { SPINE_FORMULA_V513 } from '../../modules/spine/utils/formulaVersion';
 import { showAlert } from '../utils/platform';
 import { createManagedPatient, touchPatientRecord } from '../services/patientRecords';
 
@@ -721,6 +722,8 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
             timeUnit: String(getCell(row, colMap.timeUnit) || task.timeUnit || 'sec').trim().toLowerCase(),
             correctionFactor: Number(getCell(row, colMap.correctionFactor) || task.correctionFactor || 1),
           });
+          // 실제 task 생성/갱신이 일어난 경우에만 v5.1.3 공식으로 승격
+          spineData.formulaVersion = SPINE_FORMULA_V513;
         }
       }
     };

@@ -2,6 +2,7 @@ import { registerModule } from '../../core/moduleRegistry';
 import { SpineEvaluation } from './SpineEvaluation';
 import { createSpineModuleData, createTask } from './utils/data';
 import { computeSpineCalc, isSpineAssessmentComplete } from './utils/calculations';
+import { SPINE_FORMULA_V513 } from './utils/formulaVersion';
 import { spineExportHandlers } from './utils/exportHandlers';
 
 registerModule({
@@ -41,7 +42,7 @@ registerModule({
         ...t,
         sharedJobId,
       }));
-      return { ...moduleData, tasks: [...otherTasks, ...newTasks] };
+      return { ...moduleData, tasks: [...otherTasks, ...newTasks], formulaVersion: SPINE_FORMULA_V513 };
     },
   },
 });

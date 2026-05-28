@@ -4,7 +4,12 @@ import { TaskEditor } from './components/TaskEditor';
 import { SpineResultPanel } from './components/SpineResultPanel';
 import { calculateCompressiveForce } from './utils/calculations';
 import { createTask } from './utils/data';
+import { SPINE_FORMULA_V513 } from './utils/formulaVersion';
 import { getEffectiveWorkPeriodText } from '../../core/utils/workPeriod';
+
+// 사용자가 임상 입력(tasks)을 실제로 건드릴 때마다 spine 모듈을 v5.1.3 공식으로 승격.
+// 단순 자동 정리(sharedJobId 마이그레이션)에서는 호출하지 않는다.
+const promoteSpineFormula = (m) => ({ ...m, formulaVersion: SPINE_FORMULA_V513 });
 
 export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors }) {
   const shared = patient.data.shared;
@@ -67,7 +72,7 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
     const newTask = createTask(existingCount, jobId);
     const result = calculateCompressiveForce(newTask.posture, newTask.weight, newTask.correctionFactor);
     newTask.force = result ? result.force : 0;
-    updateModule(m => ({
+    updateModule(m => promoteSpineFormula({
       ...m,
       tasks: [...(m.tasks || []), newTask]
     }));
@@ -82,7 +87,7 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
     if (gIdx < 0) return;
     updateModule(m => {
       const newTasks = (m.tasks || []).filter((_, i) => i !== gIdx);
-      return { ...m, tasks: newTasks };
+      return promoteSpineFormula({ ...m, tasks: newTasks });
     });
     setSelectedTaskIndex(prev => {
       if (prev >= visibleTasks.length - 1) return Math.max(0, visibleTasks.length - 2);
@@ -96,7 +101,7 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
     updateModule(m => {
       const newTasks = [...(m.tasks || [])];
       newTasks[globalIndex] = updatedTask;
-      return { ...m, tasks: newTasks };
+      return promoteSpineFormula({ ...m, tasks: newTasks });
     });
   }, [globalIndex, updateModule]);
 
@@ -128,7 +133,7 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
         if (visibleIdSet.has(t.id)) return visibleSubset[visIter++];
         return t;
       });
-      return { ...m, tasks: next };
+      return promoteSpineFormula({ ...m, tasks: next });
     });
 
     setPendingSelectId(fromId);
