@@ -27,18 +27,19 @@ export function convertTimeToSeconds(value, unit) {
   }
 }
 
-// D = sqrt(sum(F^2 * t)) / 1000 / 60
+// D_r = sqrt(Σ F_i^2 · t_i / 8h) · 8h   (t_i, 8h 모두 시간 단위)
 export function calculateDailyDose(tasks) {
   const threshold = thresholds.singleForce;
-  let sumFSquaredT = 0;
+  const REFERENCE_HOURS = 8;
+  let sumF2T_hour = 0;
   let includedCount = 0;
   let hasHighForceTask = false;
 
   tasks.forEach(task => {
     if (task.force >= threshold) {
       const timeSeconds = convertTimeToSeconds(task.timeValue, task.timeUnit);
-      const totalTime = timeSeconds * task.frequency;
-      sumFSquaredT += task.force * task.force * totalTime;
+      const totalTimeHours = (timeSeconds * task.frequency) / 3600;
+      sumF2T_hour += task.force * task.force * totalTimeHours;
       includedCount++;
     }
     if (task.force >= 4000) {
@@ -46,9 +47,9 @@ export function calculateDailyDose(tasks) {
     }
   });
 
-  const dailyDoseNs = Math.sqrt(sumFSquaredT);
-  const dailyDoseKNh = dailyDoseNs / 1000 / 60;
-  return { sumFSquaredT, dailyDoseNs, dailyDoseKNh, includedCount, hasHighForceTask };
+  const dailyDoseNh = Math.sqrt(sumF2T_hour / REFERENCE_HOURS) * REFERENCE_HOURS;
+  const dailyDoseKNh = dailyDoseNh / 1000;
+  return { sumF2T_hour, dailyDoseNh, dailyDoseKNh, includedCount, hasHighForceTask };
 }
 
 export function calculateLifetimeDose(dailyDoseKNh, workDaysPerYear, careerYears, careerMonths, gender, hasHighForceTask = false) {
