@@ -1,6 +1,6 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 5.1.3
+> **Version:** 5.1.4
 > **Last Updated:** 2026-05-26
 > **Status:** 대시보드 통계 확장 + 최근활동 timestamp 계약 정리 / 인트라넷 운영 중
 
@@ -1984,6 +1984,25 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 ---
 
 ## 변경 이력
+
+### v5.1.4 (2026-05-28) — 척추 공식 버전 UI 노출
+
+v5.1.3에서 환자별로 legacy/v5.1.3 공식이 분기되지만 UI에 표시되지 않아 임상가가 어느 공식 적용 중인지 알 수 없던 문제 해결. 계산 로직 변경 없음(순수 표시 추가).
+
+**변경:**
+- `src/modules/spine/components/SpineResultPanel.jsx`: "MDDM 결과" 제목 옆 배지 추가
+  - v5.1.3: `MDDM v5.1.3` (초록), 정정된 MDDM 공식 적용 안내
+  - legacy: `MDDM 레거시` (호박색), v5.1.2 결과 보존 중 + 입력 편집 시 자동 승격 안내
+  - 마우스 오버 시 `title` 속성으로 tooltip 노출
+- `src/index.css`: `.spine-formula-badge` 스타일 (is-v513 / is-legacy 두 variant)
+- `src/core/utils/reportGenerator.js`: PDF 척추 섹션 헤더에 `[적용 공식: MDDM v5.1.3 (정정)]` 또는 `[적용 공식: MDDM 레거시 (v5.1.2 이전 결과 보존)]` 라인 추가
+- `src/core/utils/exportService.js`: EMR 텍스트에도 동일 라인 추가
+
+**배포 사유:**
+- v5.1.3을 이미 배포한 상태에서 같은 태그 덮어쓰기를 피하기 위해 patch 범프
+- 의료 도구에서 "같은 버전 = 같은 동작" 보장 유지 (Docker 이미지 태그도 5.1.4 신규 생성)
+
+**영향 범위:** 계산 함수·반환 키·환자 데이터 스키마 변경 없음. 기존 환자 결과 동일하게 유지되며 단지 어느 공식인지 표시만 추가됨. 380 tests pass.
 
 ### v5.1.3 (2026-05-28) — 척추 공식 정정 + 레거시 보존 + 여성 중증도 분리
 
