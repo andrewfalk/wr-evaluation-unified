@@ -99,7 +99,8 @@ function buildSpineExposureText(calc) {
   const { tasks, jobResults, dailyDose, lifetimeDose, comparison, maxForce, weightedDailyDose, gender, formulaVersion } = calc || {};
   const spineTasks = tasks || [];
   let text = '\n<허리(요추)>\n';
-  text += '독일의 BK2108 장기간의 중량물 취급 또는 허리를 굽히기로 인해 발생한 요추간판 탈출증 평가에서 사용하는 척추 압박력 평가 모델(Mainz-Dortmund Dose Model, MDDM)을 이용하여 평가하였음.\n\n';
+  text += '독일의 BK2108 장기간의 중량물 취급 또는 허리를 굽히기로 인해 발생한 요추간판 탈출증 평가에서 사용하는 척추 압박력 평가 모델(Mainz-Dortmund Dose Model, MDDM)을 이용하여 평가하였음.\n';
+  text += `[적용 공식: ${formulaVersion === 'v5.1.3' ? 'MDDM v5.1.3 (정정)' : 'MDDM 레거시 (v5.1.2 이전 결과 보존)'}]\n\n`;
 
   const renderSpineTask = (task, index, contributions) => {
     let s = `작업 ${index + 1}. ${task.name || '-'}\n`;

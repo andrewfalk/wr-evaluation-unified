@@ -357,6 +357,26 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 }
 .section-title-row { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .section-title-row .section-title { margin-bottom: 0; }
+.spine-formula-badge {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  border-radius: 10px;
+  border: 1px solid;
+  cursor: help;
+  white-space: nowrap;
+}
+.spine-formula-badge.is-v513 {
+  background: rgba(34, 197, 94, 0.10);
+  border-color: rgba(34, 197, 94, 0.40);
+  color: rgb(21, 128, 61);
+}
+.spine-formula-badge.is-legacy {
+  background: rgba(234, 179, 8, 0.12);
+  border-color: rgba(234, 179, 8, 0.45);
+  color: rgb(133, 77, 14);
+}
 .section-description {
   font-size: 0.8rem;
   line-height: 1.5;

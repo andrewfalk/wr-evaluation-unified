@@ -1,12 +1,18 @@
 import { Fragment } from 'react';
 import { thresholds } from '../utils/thresholds';
 import { convertTimeToSeconds } from '../utils/calculations';
+import { SPINE_FORMULA_V513 } from '../utils/formulaVersion';
 
 export function SpineResultPanel({ calc }) {
   if (!calc?.dailyDose) return null;
 
-  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender, weightedDailyDose } = calc;
+  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender, weightedDailyDose, formulaVersion } = calc;
   const forceThreshold = thresholds.singleForce;
+  const isV513 = formulaVersion === SPINE_FORMULA_V513;
+  const formulaBadgeLabel = isV513 ? 'MDDM v5.1.3' : 'MDDM 레거시';
+  const formulaBadgeTitle = isV513
+    ? '정정된 MDDM 공식(D_r = √(ΣF²·t/8h)·8h) 적용 중. 신규 환자 또는 v5.1.3 이후 입력이 편집된 환자에 적용됩니다.'
+    : '이전 공식 적용 중 (v5.1.2와 동일한 결과 보존). 이 환자의 spine 작업을 추가/수정/삭제하면 자동으로 v5.1.3 공식으로 재계산됩니다.';
 
   const riskIcon = { danger: '\u26D4', warning: '\u26A0\uFE0F', safe: '\u2705' };
 
@@ -16,7 +22,15 @@ export function SpineResultPanel({ calc }) {
     <div className="panel">
       <div className="section-header">
         <div className="section-title-row">
-          <h2 className="section-title"><span className="section-icon">&#x1F4CA;</span>MDDM 결과</h2>
+          <h2 className="section-title">
+            <span className="section-icon">&#x1F4CA;</span>MDDM 결과
+            <span
+              className={`spine-formula-badge ${isV513 ? 'is-v513' : 'is-legacy'}`}
+              title={formulaBadgeTitle}
+            >
+              {formulaBadgeLabel}
+            </span>
+          </h2>
           <p className="section-description">최대 압박력, 일일·평생 누적 용량, 기준 비교와 업무관련성 평가를 함께 보여줍니다.</p>
         </div>
       </div>
