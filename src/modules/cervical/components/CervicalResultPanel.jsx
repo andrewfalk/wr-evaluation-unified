@@ -17,9 +17,9 @@ function MissingList({ items }) {
 }
 
 function SummaryCard({ summary }) {
-  const riskFactorSummary = summary.riskFactorItems?.length > 0
-    ? summary.riskFactorItems.map(flag => flag.label).join(', ')
-    : '확인된 위험 요인 없음';
+  const burdenIndicatorText = summary.flagItems?.length > 0
+    ? summary.flagItems.map(flag => flag.label).join(', ')
+    : '확인된 부담 지표 없음';
 
   return (
     <div className="result-detail-card">
@@ -42,7 +42,7 @@ function SummaryCard({ summary }) {
         </div>
         <div className="preview-section cervical-summary-copy">
           <div style={{ whiteSpace: 'pre-line' }}>{summary.narrative}</div>
-          <div><strong>BK2109 위험 요인:</strong> {riskFactorSummary}</div>
+          <div><strong>확인된 목 부위 부담 지표:</strong> {burdenIndicatorText}</div>
           <div className="cervical-summary-conclusion"><strong>종합평가:</strong> {summary.conclusionText}</div>
         </div>
       </div>

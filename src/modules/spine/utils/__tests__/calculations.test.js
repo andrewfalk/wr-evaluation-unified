@@ -3,6 +3,9 @@ import {
   calculateDailyDose,
   getSpineTaskDoses,
   classifySpineSeverity,
+  calculateLifetimeDose,
+  assessRisk,
+  assessWorkRelatedness,
 } from '../calculations';
 import { SPINE_FORMULA_V513 } from '../formulaVersion';
 
@@ -92,50 +95,133 @@ describe('getSpineTaskDoses - 작업별 기여 정책', () => {
   });
 });
 
-describe('classifySpineSeverity - 남녀 분리 기준', () => {
-  // 남성 (기존 유지)
-  it('남성: 일일 >4 또는 최대 ≥6000 → 고도', () => {
-    expect(classifySpineSeverity(4.1, 0, 'male')).toBe('고도');
+describe('classifySpineSeverity - 남녀 분리 기준 (v5.1.3 스케일)', () => {
+  // 남성
+  it('남성: 일일 >10 또는 최대 ≥6000 → 고도', () => {
+    expect(classifySpineSeverity(10.5, 0, 'male')).toBe('고도');
     expect(classifySpineSeverity(0, 6000, 'male')).toBe('고도');
   });
-  it('남성: 일일 >3 또는 최대 ≥5000 → 중등도상', () => {
-    expect(classifySpineSeverity(3.5, 0, 'male')).toBe('중등도상');
+  it('남성: 일일 >8.0 또는 최대 ≥5000 → 중등도상', () => {
+    expect(classifySpineSeverity(9.0, 0, 'male')).toBe('중등도상');
     expect(classifySpineSeverity(0, 5500, 'male')).toBe('중등도상');
   });
-  it('남성: 일일 ≥2 또는 최대 ≥4000 → 중등도하', () => {
-    expect(classifySpineSeverity(2.5, 4500, 'male')).toBe('중등도하');
-    expect(classifySpineSeverity(2.0, 0, 'male')).toBe('중등도하');
+  it('남성: 일일 ≥5.5 또는 최대 ≥4000 → 중등도하', () => {
+    expect(classifySpineSeverity(6.0, 4500, 'male')).toBe('중등도하');
+    expect(classifySpineSeverity(5.5, 0, 'male')).toBe('중등도하');
   });
   it('남성: 그 외 → 경도', () => {
-    expect(classifySpineSeverity(1.5, 3500, 'male')).toBe('경도');
-    expect(classifySpineSeverity(0.6, 3200, 'male')).toBe('경도');
+    expect(classifySpineSeverity(4.0, 3500, 'male')).toBe('경도');
   });
 
-  // 여성 (신설 — 더 민감한 기준)
-  it('여성: 일일 >3 또는 최대 ≥5000 → 고도', () => {
-    expect(classifySpineSeverity(3.5, 0, 'female')).toBe('고도');
-    expect(classifySpineSeverity(0, 5000, 'female')).toBe('고도');
+  // 여성
+  it('여성: 일일 >8.0 또는 최대 ≥6000 → 고도', () => {
+    expect(classifySpineSeverity(9.0, 0, 'female')).toBe('고도');
+    expect(classifySpineSeverity(0, 6000, 'female')).toBe('고도');
   });
-  it('여성: 일일 >2 또는 최대 ≥4000 → 중등도상', () => {
-    expect(classifySpineSeverity(2.5, 4500, 'female')).toBe('중등도상');
-    expect(classifySpineSeverity(2.1, 0, 'female')).toBe('중등도상');
+  it('여성: 일일 >5.5 또는 최대 ≥5000 → 중등도상', () => {
+    expect(classifySpineSeverity(6.0, 0, 'female')).toBe('중등도상');
+    expect(classifySpineSeverity(0, 5500, 'female')).toBe('중등도상');
   });
-  it('여성: 일일 ≥0.5 또는 최대 ≥3000 → 중등도하', () => {
-    expect(classifySpineSeverity(0.6, 3200, 'female')).toBe('중등도하');
-    expect(classifySpineSeverity(0.5, 0, 'female')).toBe('중등도하');
+  it('여성: 일일 ≥3.5 또는 최대 ≥4000 → 중등도하', () => {
+    expect(classifySpineSeverity(4.0, 0, 'female')).toBe('중등도하');
+    expect(classifySpineSeverity(3.5, 0, 'female')).toBe('중등도하');
+    expect(classifySpineSeverity(0, 4500, 'female')).toBe('중등도하');
   });
   it('여성: 그 외 → 경도', () => {
-    expect(classifySpineSeverity(0.3, 2500, 'female')).toBe('경도');
-    expect(classifySpineSeverity(0, 0, 'female')).toBe('경도');
+    expect(classifySpineSeverity(3.0, 3000, 'female')).toBe('경도');
   });
 
   // 동일 입력에서 남녀 판정이 다르게 나뉘는 핵심 케이스
-  it('동일 입력 (2.5 kN·h, 4500 N): 남성=중등도하, 여성=중등도상', () => {
-    expect(classifySpineSeverity(2.5, 4500, 'male')).toBe('중등도하');
-    expect(classifySpineSeverity(2.5, 4500, 'female')).toBe('중등도상');
+  it('동일 입력 (6.0 kN·h, 4500 N): 남성=중등도하, 여성=중등도상', () => {
+    expect(classifySpineSeverity(6.0, 4500, 'male')).toBe('중등도하');
+    expect(classifySpineSeverity(6.0, 4500, 'female')).toBe('중등도상');
   });
-  it('동일 입력 (0.6 kN·h, 3200 N): 남성=경도, 여성=중등도하', () => {
-    expect(classifySpineSeverity(0.6, 3200, 'male')).toBe('경도');
-    expect(classifySpineSeverity(0.6, 3200, 'female')).toBe('중등도하');
+  it('동일 입력 (4.0 kN·h, 3000 N): 남성=경도, 여성=중등도하', () => {
+    expect(classifySpineSeverity(4.0, 3000, 'male')).toBe('경도');
+    expect(classifySpineSeverity(4.0, 3000, 'female')).toBe('중등도하');
+  });
+});
+
+describe('assessRisk - court 단일 기준 (BSG)', () => {
+  const mk = (pct) => ({ court: { percent: pct } });
+
+  it('80% 미만 → safe', () => {
+    expect(assessRisk(mk(79.9)).level).toBe('safe');
+  });
+  it('80% ~ 100% → warning (근접)', () => {
+    expect(assessRisk(mk(80)).level).toBe('warning');
+    expect(assessRisk(mk(100)).level).toBe('warning');
+  });
+  it('100% 초과 → danger', () => {
+    expect(assessRisk(mk(100.01)).level).toBe('danger');
+  });
+});
+
+describe('assessWorkRelatedness - court 단일 3단계 (BSG)', () => {
+  // 남성: courtLimit=12.5, courtHalf=6.25
+  it('남성: < courtHalf → 낮음', () => {
+    const r = assessWorkRelatedness(6.24, 'male');
+    expect(r.level).toBe('low');
+    expect(r.workContribution).toBe(50); // 6.24 / 12.5 * 100 ≈ 49.92 → 50
+  });
+  it('남성: courtHalf ≤ x ≤ courtLimit → 불충분', () => {
+    expect(assessWorkRelatedness(6.25, 'male').level).toBe('medium');
+    expect(assessWorkRelatedness(6.25, 'male').grade).toBe('불충분');
+    expect(assessWorkRelatedness(12.5, 'male').level).toBe('medium');
+  });
+  it('남성: > courtLimit → 높음 (기여도 100% 캡)', () => {
+    const r = assessWorkRelatedness(12.51, 'male');
+    expect(r.level).toBe('high');
+    expect(r.workContribution).toBe(100);
+  });
+
+  // 여성: courtLimit=8.5, courtHalf=4.25
+  it('여성: < courtHalf → 낮음', () => {
+    expect(assessWorkRelatedness(4.24, 'female').level).toBe('low');
+  });
+  it('여성: courtHalf ≤ x ≤ courtLimit → 불충분', () => {
+    expect(assessWorkRelatedness(4.25, 'female').level).toBe('medium');
+    expect(assessWorkRelatedness(8.5, 'female').level).toBe('medium');
+  });
+  it('여성: > courtLimit → 높음', () => {
+    expect(assessWorkRelatedness(8.51, 'female').level).toBe('high');
+  });
+});
+
+describe('calculateLifetimeDose - 버전별 dailyDose 임계치', () => {
+  // v5.1.3: 남 5.5 / 여 3.5
+  it('v5.1.3 남성: dailyDose 5.6 → excluded false', () => {
+    const r = calculateLifetimeDose(5.6, 250, 1, 0, 'male', false, SPINE_FORMULA_V513);
+    expect(r.excluded).toBe(false);
+  });
+  it('v5.1.3 남성: dailyDose 5.4 (high force 없음) → excluded true', () => {
+    const r = calculateLifetimeDose(5.4, 250, 1, 0, 'male', false, SPINE_FORMULA_V513);
+    expect(r.excluded).toBe(true);
+  });
+  it('v5.1.3 여성: dailyDose 3.6 → excluded false', () => {
+    const r = calculateLifetimeDose(3.6, 250, 1, 0, 'female', false, SPINE_FORMULA_V513);
+    expect(r.excluded).toBe(false);
+  });
+  it('v5.1.3 여성: dailyDose 3.4 → excluded true', () => {
+    const r = calculateLifetimeDose(3.4, 250, 1, 0, 'female', false, SPINE_FORMULA_V513);
+    expect(r.excluded).toBe(true);
+  });
+
+  // legacy: 남 2.0 / 여 0.5 (formulaVersion 미지정)
+  it('legacy 남성: dailyDose 2.5 → excluded false', () => {
+    const r = calculateLifetimeDose(2.5, 250, 1, 0, 'male', false);
+    expect(r.excluded).toBe(false);
+  });
+  it('legacy 남성: dailyDose 1.5 → excluded true', () => {
+    const r = calculateLifetimeDose(1.5, 250, 1, 0, 'male', false);
+    expect(r.excluded).toBe(true);
+  });
+  it('legacy 여성: dailyDose 0.6 → excluded false', () => {
+    const r = calculateLifetimeDose(0.6, 250, 1, 0, 'female', false);
+    expect(r.excluded).toBe(false);
+  });
+  it('legacy 여성: dailyDose 0.4 → excluded true', () => {
+    const r = calculateLifetimeDose(0.4, 250, 1, 0, 'female', false);
+    expect(r.excluded).toBe(true);
   });
 });

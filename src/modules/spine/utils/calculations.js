@@ -127,19 +127,20 @@ export function classifySpineSeverity(dailyKNh, maxForce, gender) {
   const mf = Number(maxForce) || 0;
   const d = Number(dailyKNh) || 0;
   if (gender === 'female') {
-    if (d > 3.0 || mf >= 5000) return '고도';
-    if (d > 2.0 || mf >= 4000) return '중등도상';
-    if (d >= 0.5 || mf >= 3000) return '중등도하';
+    if (d > 8.0 || mf >= 6000) return '고도';
+    if (d > 5.5 || mf >= 5000) return '중등도상';
+    if (d >= 3.5 || mf >= 4000) return '중등도하';
     return '경도';
   }
-  if (d > 4 || mf >= 6000) return '고도';
-  if (d > 3 || mf >= 5000) return '중등도상';
-  if (d >= 2 || mf >= 4000) return '중등도하';
+  if (d > 10 || mf >= 6000) return '고도';
+  if (d > 8.0 || mf >= 5000) return '중등도상';
+  if (d >= 5.5 || mf >= 4000) return '중등도하';
   return '경도';
 }
 
-export function calculateLifetimeDose(dailyDoseKNh, workDaysPerYear, careerYears, careerMonths, gender, hasHighForceTask = false) {
-  const dailyThreshold = thresholds.dailyDose[gender];
+export function calculateLifetimeDose(dailyDoseKNh, workDaysPerYear, careerYears, careerMonths, gender, hasHighForceTask = false, formulaVersion) {
+  const versionKey = formulaVersion === SPINE_FORMULA_V513 ? 'v513' : 'legacy';
+  const dailyThreshold = thresholds.dailyDose[versionKey][gender];
   if (dailyDoseKNh < dailyThreshold && !hasHighForceTask) {
     return { lifetimeDoseKNh: 0, lifetimeDoseMNh: 0, excluded: true };
   }
@@ -171,40 +172,33 @@ export function compareThresholds(lifetimeDoseMNh, gender) {
 }
 
 export function assessRisk(comparison) {
-  const dangerCount = [comparison.mddm, comparison.court, comparison.dws2].filter(c => c.status === 'danger').length;
-  const warningCount = [comparison.mddm, comparison.court, comparison.dws2].filter(c => c.status === 'warning').length;
-  if (dangerCount >= 2) return { level: 'danger', text: '즉각적인 개선 필요', description: '다수 기준 초과' };
-  if (dangerCount >= 1 || warningCount >= 2) return { level: 'warning', text: '작업 환경 개선 권고', description: '일부 기준 초과' };
-  return { level: 'safe', text: '현재 수준 유지', description: '모든 기준 충족' };
+  const pct = comparison.court.percent;
+  if (pct > 100) return { level: 'danger',  text: '즉각적인 개선 필요',   description: '독일 법원(BSG) 기준 초과' };
+  if (pct >= 80) return { level: 'warning', text: '작업 환경 개선 권고', description: '독일 법원(BSG) 기준 근접' };
+  return                { level: 'safe',    text: '현재 수준 유지',     description: '독일 법원(BSG) 기준 충족' };
 }
 
 export function assessWorkRelatedness(lifetimeDoseMNh, gender) {
-  const dws2Limit = gender === 'male' ? 7.0 : 3.0;
   const courtLimit = gender === 'male' ? 12.5 : 8.5;
-  const mddmLimit = gender === 'male' ? 25 : 17;
-  const mddmHalfLimit = mddmLimit * 0.5;
+  const courtHalf  = courtLimit * 0.5;
 
   let result = { level: '', grade: '', description: '', detail: '', recommendation: '', workContribution: 0, personalContribution: 100 };
 
-  if (lifetimeDoseMNh >= dws2Limit) {
+  if (lifetimeDoseMNh > courtLimit) {
     result = { ...result, level: 'high', grade: '높음', description: '업무관련성 높음',
-      detail: `DWS2 연구 기준(${dws2Limit} MN\xB7h)을 초과하여, 직업적 요인이 질병 발생의 주요 원인으로 추정됩니다.`,
+      detail: `독일 법원(BSG) 기준(${courtLimit} MN\xB7h)을 초과하여, 직업적 요인이 질병 발생의 주요 원인으로 추정됩니다.`,
       recommendation: '산재보험 요양급여 신청을 적극 권고합니다.' };
-  } else if (lifetimeDoseMNh >= courtLimit) {
-    result = { ...result, level: 'medium', grade: '중등도', description: '업무관련성 중등도',
-      detail: `독일 법원 기준(${courtLimit} MN\xB7h)을 초과하여, 직업적 요인의 상당한 기여가 인정될 수 있습니다.`,
-      recommendation: '산재 신청 가능성이 있습니다.' };
-  } else if (lifetimeDoseMNh >= mddmHalfLimit) {
-    result = { ...result, level: 'low', grade: '낮음', description: '업무관련성 낮음',
-      detail: `MDDM 기준의 50%(${mddmHalfLimit.toFixed(1)} MN\xB7h) 이상이나, 법원 기준 미만입니다.`,
-      recommendation: '업무 외 요인의 영향을 함께 평가할 필요가 있습니다.' };
+  } else if (lifetimeDoseMNh >= courtHalf) {
+    result = { ...result, level: 'medium', grade: '불충분', description: '업무관련성 불충분(다른 요건 고려)',
+      detail: `독일 법원(BSG) 기준의 50%(${courtHalf.toFixed(1)} MN\xB7h) 이상이나, 기준(${courtLimit} MN\xB7h)을 초과하지는 않습니다. 누적 노출만으로는 충분치 않으므로, 다른 직업적·임상적 요건을 함께 고려해야 합니다.`,
+      recommendation: '업무 외 요인 및 추가 임상 소견과 함께 종합 판단이 필요합니다.' };
   } else {
-    result = { ...result, level: 'insufficient', grade: '불충분', description: '업무관련성 불충분',
-      detail: `현재 누적 노출량(${lifetimeDoseMNh.toFixed(2)} MN\xB7h)이 MDDM 기준의 50% 미만입니다.`,
+    result = { ...result, level: 'low', grade: '낮음', description: '업무관련성 낮음',
+      detail: `현재 누적 노출량(${lifetimeDoseMNh.toFixed(2)} MN\xB7h)이 독일 법원(BSG) 기준의 50%(${courtHalf.toFixed(1)} MN\xB7h) 미만입니다.`,
       recommendation: '현재 노출 수준으로는 업무상 질병 인정이 어렵습니다.' };
   }
 
-  const contributionPercent = Math.min(100, (lifetimeDoseMNh / dws2Limit) * 100);
+  const contributionPercent = Math.min(100, (lifetimeDoseMNh / courtLimit) * 100);
   result.workContribution = Math.round(contributionPercent);
   result.personalContribution = 100 - result.workContribution;
   return result;
@@ -277,7 +271,7 @@ export function computeSpineCalc(patientData) {
 
       const jobDailyDose = calculateDailyDose(jobTasks, formulaVersion);
       const jobLifetimeDose = calculateLifetimeDose(
-        jobDailyDose.dailyDoseKNh, workDaysPerYear, periodYearsInt, periodMonths, gender, jobDailyDose.hasHighForceTask
+        jobDailyDose.dailyDoseKNh, workDaysPerYear, periodYearsInt, periodMonths, gender, jobDailyDose.hasHighForceTask, formulaVersion
       );
 
       if (!jobLifetimeDose.excluded) {
@@ -304,7 +298,7 @@ export function computeSpineCalc(patientData) {
 
     const legacyDailyDose = calculateDailyDose(tasks, formulaVersion);
     const legacyLifetimeDose = calculateLifetimeDose(
-      legacyDailyDose.dailyDoseKNh, career.workDaysPerYear, career.careerYears, career.careerMonths, gender, legacyDailyDose.hasHighForceTask
+      legacyDailyDose.dailyDoseKNh, career.workDaysPerYear, career.careerYears, career.careerMonths, gender, legacyDailyDose.hasHighForceTask, formulaVersion
     );
     totalLifetimeDoseKNh = legacyLifetimeDose.lifetimeDoseKNh;
     totalLifetimeDoseMNh = legacyLifetimeDose.lifetimeDoseMNh;

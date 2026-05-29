@@ -99,8 +99,7 @@ function buildSpineExposureText(calc) {
   const { tasks, jobResults, dailyDose, lifetimeDose, comparison, maxForce, weightedDailyDose, gender, formulaVersion } = calc || {};
   const spineTasks = tasks || [];
   let text = '\n<허리(요추)>\n';
-  text += '독일의 BK2108 장기간의 중량물 취급 또는 허리를 굽히기로 인해 발생한 요추간판 탈출증 평가에서 사용하는 척추 압박력 평가 모델(Mainz-Dortmund Dose Model, MDDM)을 이용하여 평가하였음.\n';
-  text += `[적용 공식: ${formulaVersion === 'v5.1.3' ? 'MDDM v5.1.3 (정정)' : 'MDDM 레거시 (v5.1.2 이전 결과 보존)'}]\n\n`;
+  text += '독일의 BK2108 장기간의 중량물 취급 또는 허리를 굽히기로 인해 발생한 요추간판 탈출증 평가에서 사용하는 척추 압박력 평가 모델(Mainz-Dortmund Dose Model, MDDM)을 이용하여 평가하였음.\n\n';
 
   const renderSpineTask = (task, index, contributions) => {
     let s = `작업 ${index + 1}. ${task.name || '-'}\n`;
@@ -155,16 +154,16 @@ function buildCervicalExposureText(calc) {
 
   (calc?.jobSummaries || []).forEach(jobSummary => {
     text += `- ${jobSummary.jobName || '-'}\n`;
-    const riskFactorText = jobSummary.riskFactorItems?.length > 0
-      ? jobSummary.riskFactorItems.map(flag => flag.label).join(', ')
-      : '확인된 위험 요인 없음';
+    const burdenIndicatorText = jobSummary.flagItems?.length > 0
+      ? jobSummary.flagItems.map(flag => flag.label).join(', ')
+      : '확인된 부담 지표 없음';
 
     if (jobSummary.missingFields?.length > 0) {
       text += `  입력 누락: ${jobSummary.missingFields.join(', ')}\n`;
     }
     text += '  분석 정리:\n';
     text += `    ${(jobSummary.narrative || '-').split('\n').join('\n    ')}\n`;
-    text += `    업무관련성 위험 요인: ${riskFactorText}\n`;
+    text += `    확인된 목 부위 부담 지표: ${burdenIndicatorText}\n`;
     text += `    ** 종합평가 : ${jobSummary.conclusionText}\n`;
   });
 

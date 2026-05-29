@@ -193,7 +193,7 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, onDiagnosesReplace
               <>
                 {index === firstSpineIndex && (
                   <div className="klg-inline" style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', marginTop: 4 }}>
-                    <span className="klg-inline-label">수직분포 정리</span>
+                    <span className="klg-inline-label">수직분포 원리</span>
                     <select value={diag.verticalDistribution || ''} onChange={e => onDiagnosisUpdate(index, 'verticalDistribution', e.target.value)}>
                       <option value="">선택</option>
                       <option value="confirmed">확인</option>

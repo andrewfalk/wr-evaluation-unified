@@ -9,6 +9,7 @@ export function SpineResultPanel({ calc }) {
   const { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender, weightedDailyDose, formulaVersion } = calc;
   const forceThreshold = thresholds.singleForce;
   const isV513 = formulaVersion === SPINE_FORMULA_V513;
+  const dailyDoseThreshold = thresholds.dailyDose[isV513 ? 'v513' : 'legacy'][gender];
   const formulaBadgeLabel = isV513 ? 'MDDM v5.1.3' : 'MDDM 레거시';
   const formulaBadgeTitle = isV513
     ? '정정된 MDDM 공식(D_r = √(ΣF²·t/8h)·8h) 적용 중. 신규 환자 또는 v5.1.3 이후 입력이 편집된 환자에 적용됩니다.'
@@ -50,9 +51,9 @@ export function SpineResultPanel({ calc }) {
           unit={`kN\xB7h`}
           sub={weightedDailyDose
             ? (weightedDailyDose.aboveThreshold
-              ? `가중평균 | 임계치 ${thresholds.dailyDose[gender]} kN\xB7h 초과`
-              : `최대 직업별 | 임계치 ${thresholds.dailyDose[gender]} kN\xB7h 미만`)
-            : `임계치 ${thresholds.dailyDose[gender]} kN\xB7h ${dailyDose.dailyDoseKNh >= thresholds.dailyDose[gender] ? '초과' : '미만'}`}
+              ? `가중평균 | 임계치 ${dailyDoseThreshold} kN\xB7h 초과`
+              : `최대 직업별 | 임계치 ${dailyDoseThreshold} kN\xB7h 미만`)
+            : `임계치 ${dailyDoseThreshold} kN\xB7h ${dailyDose.dailyDoseKNh >= dailyDoseThreshold ? '초과' : '미만'}`}
         />
         <SummaryCard
           label="평생 누적 용량"
@@ -60,8 +61,8 @@ export function SpineResultPanel({ calc }) {
           unit={`MN\xB7h`}
           sub={lifetimeDose.excluded
             ? (jobResults && jobResults.length > 1 ? '전 직업 일일선량 미달' : '일일선량 미달')
-            : `DWS2 ${comparison.dws2.percent.toFixed(0)}%`}
-          highlight={!lifetimeDose.excluded && comparison.dws2.status !== 'safe'}
+            : `독일 법원(BSG) ${comparison.court.percent.toFixed(0)}%`}
+          highlight={!lifetimeDose.excluded && comparison.court.percent >= 80}
         />
       </div>
 
@@ -145,7 +146,7 @@ export function SpineResultPanel({ calc }) {
           </div>
           <div className="result-metric-list">
             <div className="result-metric-row"><span>일일 누적 용량</span><strong>{dailyDose.dailyDoseKNh.toFixed(2)} kN{'\xB7'}h</strong></div>
-            <div className="result-metric-row"><span>일일 임계치 ({gender === 'male' ? '남성' : '여성'})</span><strong>{thresholds.dailyDose[gender]} kN{'\xB7'}h</strong></div>
+            <div className="result-metric-row"><span>일일 임계치 ({gender === 'male' ? '남성' : '여성'})</span><strong>{dailyDoseThreshold} kN{'\xB7'}h</strong></div>
           {lifetimeDose.totalYears > 0 && (
             <>
               <div className="result-metric-row"><span>직업력</span><strong>{'\u00D7'} {lifetimeDose.totalYears.toFixed(1)}년</strong></div>

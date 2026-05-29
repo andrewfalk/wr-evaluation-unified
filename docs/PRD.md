@@ -1,8 +1,8 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 5.1.4
-> **Last Updated:** 2026-05-26
-> **Status:** 대시보드 통계 확장 + 최근활동 timestamp 계약 정리 / 인트라넷 운영 중
+> **Version:** 5.1.5
+> **Last Updated:** 2026-05-29
+> **Status:** 척추 임계치·중증도 v5.1.3 스케일 재조정 + 위험/업무관련성 BSG 단일화 / 인트라넷 운영 중
 
 ---
 
@@ -560,38 +560,47 @@ modules.cervical
   for each job in shared.jobs:
     jobTasks = tasks.filter(t => t.sharedJobId === job.id)
     jobDailyDose = calculateDailyDose(jobTasks)
-    if jobDailyDose < 2.0kN·h AND 모든 작업의 F < 4,000N:
+    if jobDailyDose < dailyDoseThreshold AND 모든 작업의 F < 4,000N:
       해당 직업 평생 누적 제외 (excluded)
     else:
       jobLifetimeDose = jobDailyDose × 연간근무일수 × 해당직업 근무년수
   totalLifetimeDose = Σ(각 직업의 lifetimeDose)  (MN·h)
 
-일일 노출 중증도 (v5.1.3+ 남녀 분리):
+  ※ dailyDoseThreshold (v5.1.5+ 버전별 분기):
+      v5.1.3 공식 환자: 남 5.5 / 여 3.5 kN·h
+      legacy 환자:      남 2.0 / 여 0.5 kN·h  (기존 임계치 보존)
+
+일일 노출 중증도 (v5.1.5+ 새 공식 스케일):
   남성:
-    고도:     일일 >4 kN·h   또는 최대압박력 ≥6,000N
-    중등도상: 일일 >3 kN·h   또는 최대압박력 ≥5,000N
-    중등도하: 일일 ≥2 kN·h   또는 최대압박력 ≥4,000N
+    고도:     일일 >10 kN·h   또는 최대압박력 ≥6,000N
+    중등도상: 일일 >8.0 kN·h  또는 최대압박력 ≥5,000N
+    중등도하: 일일 ≥5.5 kN·h  또는 최대압박력 ≥4,000N
     경도:     그 외
   여성:
-    고도:     일일 >3 kN·h   또는 최대압박력 ≥5,000N
-    중등도상: 일일 >2 kN·h   또는 최대압박력 ≥4,000N
-    중등도하: 일일 ≥0.5 kN·h 또는 최대압박력 ≥3,000N
+    고도:     일일 >8.0 kN·h  또는 최대압박력 ≥6,000N
+    중등도상: 일일 >5.5 kN·h  또는 최대압박력 ≥5,000N
+    중등도하: 일일 ≥3.5 kN·h  또는 최대압박력 ≥4,000N
     경도:     그 외
 ```
 
-**4,000N 규칙:** 작업 중 하나라도 압박력 ≥ 4,000N이면 일일 누적 용량이 임계치(2.0 kN·h)에 미달하더라도 평생 누적 용량 계산에 포함된다.
+**4,000N 규칙:** 작업 중 하나라도 압박력 ≥ 4,000N이면 일일 누적 용량이 임계치(버전별 dailyDoseThreshold)에 미달하더라도 평생 누적 용량 계산에 포함된다.
 
 **하위 호환:** `sharedJobId`가 없는 기존 task는 첫 번째 직업에 자동 귀속. legacy 필드(`careerYears` 등)가 존재하면 기존 단일 계산 방식 유지.
 
-**업무관련성 판정 기준:**
+**위험 배너 (`assessRisk`, v5.1.5+ 독일 법원(BSG) 단일 기준):** `comparison.court.percent` 직접 판정.
+- `> 100%` → danger ("즉각적인 개선 필요", "독일 법원(BSG) 기준 초과")
+- `80% ~ 100%` → warning ("작업 환경 개선 권고", "독일 법원(BSG) 기준 근접")
+- `< 80%` → safe ("현재 수준 유지", "독일 법원(BSG) 기준 충족")
 
-| 기준 | 남성 | 여성 | 판정 |
-|------|------|------|------|
-| DWS2 연구 기준 | 7.0 MN·h | 3.0 MN·h | 높음 (산재 적극 권고) |
-| 독일 법원 기준 | 12.5 MN·h | 8.5 MN·h | 중등도 |
-| MDDM 기준 | 25 MN·h | 17 MN·h | 참고 |
-| MDDM 50% | 12.5 MN·h | 8.5 MN·h | 낮음 |
-| MDDM 50% 미만 | — | — | 불충분 |
+**업무관련성 판정 기준 (`assessWorkRelatedness`, v5.1.5+ 독일 법원(BSG) 단일 3단계):**
+
+| 범위 (lifetimeDoseMNh) | 남성 | 여성 | 판정 |
+|-----------------------|------|------|------|
+| `> courtLimit` | > 12.5 MN·h | > 8.5 MN·h | 높음 (산재 적극 권고) |
+| `courtHalf ≤ x ≤ courtLimit` | 6.25 ~ 12.5 MN·h | 4.25 ~ 8.5 MN·h | 불충분 (다른 요건 고려) |
+| `< courtHalf` | < 6.25 MN·h | < 4.25 MN·h | 낮음 |
+
+기여도(workContribution) 분모 = courtLimit. KPI 카드 "평생 누적 용량" 서브 텍스트도 `독일 법원(BSG) NN%`로 표시되고, 하단 3개 비교 카드(MDDM/독일 법원/DWS2)는 그대로 모두 노출되어 참고용으로 유지된다.
 
 ---
 
@@ -1984,6 +1993,62 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 ---
 
 ## 변경 이력
+
+### v5.1.5 (2026-05-29) — 척추 임계치·중증도 v5.1.3 스케일 재조정 + 위험/업무관련성 BSG 단일화
+
+v5.1.3 일일선량 공식 정정으로 `dailyDoseKNh` 값 자릿수와 분포가 바뀐 뒤에도 임계치·중증도·위험/업무관련성 분기는 옛 공식 기준 그대로였음. 새 공식 스케일에 맞춰 일괄 재조정하고, 동시에 KPI/위험/업무관련성 패널이 비교 대상으로 삼는 기준을 독일 법원(BSG) 단일로 통일.
+
+**1. 일일선량 임계치 버전별 분기 (`thresholds.dailyDose`)**
+- v5.1.3: 남 5.5 / 여 3.5 kN·h
+- legacy: 남 2.0 / 여 0.5 kN·h (보존)
+- `calculateLifetimeDose(..., formulaVersion)`이 환자의 `formulaVersion`을 보고 버전 키(`v513`/`legacy`)로 임계치 선택. 두 호출부(직업별/legacy 단일직업) 모두 전달.
+
+**2. 중증도 분류 (`classifySpineSeverity`) — 모든 환자 일괄 적용**
+- 남: 고도 `>10 kN·h | ≥6,000N` / 중등도상 `>8.0 | ≥5,000` / 중등도하 `≥5.5 | ≥4,000` / 경도
+- 여: 고도 `>8.0 | ≥6,000N` / 중등도상 `>5.5 | ≥5,000` / 중등도하 `≥3.5 | ≥4,000` / 경도
+
+**3. KPI 카드 "평생 누적 용량" 비교 기준 DWS2 → 독일 법원(BSG)**
+- `SpineResultPanel.jsx`: sub `독일 법원(BSG) ${comparison.court.percent}%`, highlight = `court.percent ≥ 80`
+- 하단 3개 비교 카드(MDDM/독일 법원/DWS2)는 그대로 유지 — 참고용으로 모두 노출
+- `isV513`에 따라 `dailyDoseThreshold` 변수를 하나로 추출해 KPI 일일 카드 sub와 단일 직업 누적 카드 "일일 임계치" 5곳을 일관 표시
+
+**4. 위험 배너 (`assessRisk`) — court 단일 기준 직접 판정**
+- mddm/dws2 status를 함께 보던 다단 분기 → `comparison.court.percent` 단일 직접 판정
+- `> 100%` danger, `80~100%` warning, `< 80%` safe
+- `comparison.court.status`(100~120%를 warning으로 보는 정의)와 의미가 달라 percent 기반으로 직접 판정
+
+**5. 업무관련성 평가 (`assessWorkRelatedness`) — court 단일 3단계**
+- `> courtLimit` → 높음 / `courtHalf ≤ x ≤ courtLimit` → 불충분(다른 요건 고려) / `< courtHalf` → 낮음
+- 기여도 분모 = courtLimit (이전엔 dws2Limit)
+- 기존 `insufficient` 레벨 제거, 배지 매핑 자연 호환(high/medium/low)
+
+**6. LandingScreen 중복 버튼 정리**
+- intranet 모드에서 "환자 목록 보기"와 "작업 목록 돌아가기"가 동시에 보이던 문제를, `patients.length === 0`일 때만 "환자 목록 보기"를 노출하도록 변경. 서버에 환자가 있고 로컬엔 0명인 케이스의 진입 경로는 유지.
+
+**7. 경추(목) 모듈 결과 패널 정리**
+- "BK2109 위험 요인" / "업무관련성 위험 요인" 라벨 불일치를 **"확인된 목 부위 부담 지표"**로 통일.
+- 표시 항목을 `riskFactorItems`(BK2109 한정 4개) → `flagItems`(확인된 모든 양성 flag)로 확장. 부담평가/종합소견 미리보기·EMR 텍스트·통합 Excel 모두 동일 라벨/항목 적용.
+- `generateJobNarrative`의 첫 줄 `직업: {jobName}` 제거 → SummaryCard 제목/reportGenerator의 `- 직력N:`이 이미 직업명을 제공하던 중복 제거.
+
+**8. 종합소견/내보내기에서 척추 "적용 공식" 텍스트 제거**
+- 외부로 나가는 EMR 텍스트와 PDF 척추 섹션 헤더에서 `[적용 공식: MDDM v5.1.3 (정정) / MDDM 레거시 …]` 라인 삭제. 화면 내 SpineResultPanel 배지는 유지 — 임상가 화면 확인용은 그대로, 외부 산출물에선 비공개.
+
+**9. AssessmentTab 오타 수정**
+- "수직분포 정리" → "수직분포 원리"
+
+**변경 파일:**
+- `src/modules/spine/utils/thresholds.js`: `dailyDose`를 `{ legacy, v513 }` 객체로 구조 변경
+- `src/modules/spine/utils/calculations.js`: `calculateLifetimeDose`(+formulaVersion), `classifySpineSeverity`, `assessRisk`, `assessWorkRelatedness`
+- `src/modules/spine/components/SpineResultPanel.jsx`: `dailyDoseThreshold` 추출 + 5곳 치환, KPI BSG 전환
+- `src/core/components/LandingScreen.jsx`: "환자 목록 보기" 노출 조건
+- `src/core/components/AssessmentTab.jsx`: "수직분포 원리"
+- `src/modules/cervical/components/CervicalResultPanel.jsx`: SummaryCard 라벨/항목
+- `src/modules/cervical/utils/calculations.js`: `generateJobNarrative` 첫 줄 제거
+- `src/core/utils/reportGenerator.js`: cervical 섹션 라벨/항목 통일, spine 섹션 "적용 공식" 라인 제거
+- `src/core/utils/exportService.js`: cervical 섹션 라벨/항목 통일, spine 섹션 "적용 공식" 라인 제거
+- `src/modules/spine/utils/__tests__/calculations.test.js`: import 확장, `classifySpineSeverity` 재작성, `assessRisk`/`assessWorkRelatedness`/`calculateLifetimeDose 버전 분기` 3개 describe 신설
+
+**영향 범위:** 환자 데이터 스키마 변경 없음. legacy 환자도 spine 작업을 편집하면 기존 `promoteSpineFormula`로 자동 v5.1.3 승격되어 새 임계치/공식이 함께 적용됨(공식과 임계치를 묶어서 일관). 397 tests pass.
 
 ### v5.1.4 (2026-05-28) — 척추 공식 버전 UI 노출
 

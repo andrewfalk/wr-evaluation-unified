@@ -250,9 +250,7 @@ function generateJobNarrative({ job, taskSummaries, aggregate }) {
   const referenceRatio = aggregate.cumulativeKgHours > 0
     ? (aggregate.cumulativeKgHours / BK2109_REFERENCE_KG_HOURS) * 100
     : 0;
-  const lines = [
-    `직업: ${job.jobName || '-'}`,
-  ];
+  const lines = [];
 
   taskSummaries.forEach((taskSummary, index) => {
     const exposureTypes = taskSummary.exposure_types || [];

@@ -34,7 +34,7 @@ export function LandingScreen({
       </div>
       <div className="landing-actions">
         <button className="btn btn-primary landing-action-btn" onClick={onStartIntake}>+ 새환자</button>
-        {isIntranetMode && canShowPatientList && (
+        {isIntranetMode && canShowPatientList && patients.length === 0 && (
           <button className="btn btn-secondary landing-action-btn" onClick={onShowPatientList}>
             환자 목록 보기
           </button>
