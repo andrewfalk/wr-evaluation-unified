@@ -10,6 +10,7 @@ export function isPatientComplete(patient) {
       return mod?.isComplete?.({
         shared: patient?.data?.shared,
         module: patient?.data?.modules?.[moduleId] || {},
+        activeModules: moduleIds,
       }) ?? false;
     } catch {
       return false;

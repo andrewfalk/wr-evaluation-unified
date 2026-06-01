@@ -246,7 +246,7 @@ function getCervicalConclusionText(burdenGrade) {
   return '현재 입력된 작업 기반 노출정보만으로는 경추 부담 노출을 뚜렷하게 지지하기 어렵습니다.';
 }
 
-function generateJobNarrative({ job, taskSummaries, aggregate }) {
+function generateJobNarrative({ taskSummaries, aggregate }) {
   const referenceRatio = aggregate.cumulativeKgHours > 0
     ? (aggregate.cumulativeKgHours / BK2109_REFERENCE_KG_HOURS) * 100
     : 0;

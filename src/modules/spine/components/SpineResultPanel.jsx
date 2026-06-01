@@ -1,9 +1,13 @@
 import { Fragment } from 'react';
 import { thresholds } from '../utils/thresholds';
-import { convertTimeToSeconds } from '../utils/calculations';
+import { convertTimeToSeconds, classifySpineSeverity } from '../utils/calculations';
+import { getSpineInterpretation } from '../utils/sectionText';
 import { SPINE_FORMULA_V513 } from '../utils/formulaVersion';
 
 export function SpineResultPanel({ calc }) {
+  // present일 때만 결과 패널 표시. unknown(미평가)·none(노출없음)은 공간 절약을 위해 미표시.
+  const mddmStatus = calc?.mddmStatus || (calc?.dailyDose ? 'present' : 'unknown');
+  if (mddmStatus !== 'present') return null;
   if (!calc?.dailyDose) return null;
 
   const { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender, weightedDailyDose, formulaVersion } = calc;
@@ -45,22 +49,37 @@ export function SpineResultPanel({ calc }) {
           sub={tasks.length > 0 ? `${tasks.reduce((max, t) => t.force > max.force ? t : max, tasks[0]).name}` : '-'}
           highlight={maxForce >= 6000}
         />
-        <SummaryCard
-          label="일일 누적 용량"
-          value={(weightedDailyDose ? weightedDailyDose.value : dailyDose.dailyDoseKNh).toFixed(2)}
-          unit={`kN\xB7h`}
-          sub={weightedDailyDose
-            ? (weightedDailyDose.aboveThreshold
-              ? `가중평균 | 임계치 ${dailyDoseThreshold} kN\xB7h 초과`
-              : `최대 직업별 | 임계치 ${dailyDoseThreshold} kN\xB7h 미만`)
-            : `임계치 ${dailyDoseThreshold} kN\xB7h ${dailyDose.dailyDoseKNh >= dailyDoseThreshold ? '초과' : '미만'}`}
-        />
+        {(() => {
+          const displayedDaily = weightedDailyDose ? weightedDailyDose.value : dailyDose.dailyDoseKNh;
+          const meetsThreshold = displayedDaily >= dailyDoseThreshold;
+          const severityLabel = classifySpineSeverity(displayedDaily, maxForce, gender);
+          let subText;
+          if (weightedDailyDose) {
+            if (meetsThreshold) {
+              subText = `가중평균 | 임계치 ${dailyDoseThreshold} kN\xB7h 이상`;
+            } else if (weightedDailyDose.aboveThreshold) {
+              subText = `가중평균 ${displayedDaily.toFixed(2)} kN\xB7h | 임계치 ${dailyDoseThreshold} kN\xB7h 미만 (단, 수행 직업 중 임계치 초과 직업이 포함, 그 기간만으로 누적량을 산출)`;
+            } else {
+              subText = `최대 직업별 | 임계치 ${dailyDoseThreshold} kN\xB7h 미만`;
+            }
+          } else {
+            subText = `임계치 ${dailyDoseThreshold} kN\xB7h ${meetsThreshold ? '이상' : '미만'}`;
+          }
+          return (
+            <SummaryCard
+              label="일일 누적 용량"
+              value={displayedDaily.toFixed(2)}
+              unit={`kN\xB7h`}
+              sub={`${subText} (${severityLabel})`}
+            />
+          );
+        })()}
         <SummaryCard
           label="평생 누적 용량"
-          value={lifetimeDose.excluded ? '0' : lifetimeDose.lifetimeDoseMNh.toFixed(2)}
+          value={lifetimeDose.excluded ? '0.00' : lifetimeDose.lifetimeDoseMNh.toFixed(2)}
           unit={`MN\xB7h`}
           sub={lifetimeDose.excluded
-            ? (jobResults && jobResults.length > 1 ? '전 직업 일일선량 미달' : '일일선량 미달')
+            ? '(일 임계값 미만으로 누적 노출량이 0으로 계산됩니다)'
             : `독일 법원(BSG) ${comparison.court.percent.toFixed(0)}%`}
           highlight={!lifetimeDose.excluded && comparison.court.percent >= 80}
         />
@@ -79,13 +98,12 @@ export function SpineResultPanel({ calc }) {
       <div>
       <div className="result-section-heading">
         <div className="result-section-title">평생 누적 용량 기준 비교</div>
-        <div className="result-section-caption">MDDM, 독일 법원, DWS2 기준 대비 비율</div>
+        <div className="result-section-caption">MDDM, 독일 법원(BSG) 기준 대비 비율</div>
       </div>
       <div className="result-detail-stack">
       {[
+        { key: 'court', name: '독일 법원(BSG) 기준', data: comparison.court },
         { key: 'mddm', name: 'MDDM 최초 기준', data: comparison.mddm },
-        { key: 'court', name: '독일 법원 기준', data: comparison.court },
-        { key: 'dws2', name: 'DWS2 연구 기준', data: comparison.dws2 },
       ].map(({ key, name, data }) => (
         <div key={key} className="result-detail-card">
           <div className="result-card-top result-card-top-tight">
@@ -106,6 +124,12 @@ export function SpineResultPanel({ calc }) {
           </div>
         </div>
       ))}
+      <div className="result-detail-card">
+        <div className="result-section-caption">해석</div>
+        <div className="result-card-meta result-card-meta-bottom">
+          {getSpineInterpretation(comparison, { markdown: false })}
+        </div>
+      </div>
       </div>
       </div>
 
@@ -138,7 +162,7 @@ export function SpineResultPanel({ calc }) {
         </div>
       )}
 
-      {(!jobResults || jobResults.length <= 1) && !lifetimeDose.excluded && (
+      {(!jobResults || jobResults.length <= 1) && (
         <div className="result-detail-card">
           <div className="result-section-heading">
             <div className="result-section-title">단일 직업 누적 용량</div>
@@ -147,7 +171,12 @@ export function SpineResultPanel({ calc }) {
           <div className="result-metric-list">
             <div className="result-metric-row"><span>일일 누적 용량</span><strong>{dailyDose.dailyDoseKNh.toFixed(2)} kN{'\xB7'}h</strong></div>
             <div className="result-metric-row"><span>일일 임계치 ({gender === 'male' ? '남성' : '여성'})</span><strong>{dailyDoseThreshold} kN{'\xB7'}h</strong></div>
-          {lifetimeDose.totalYears > 0 && (
+          {lifetimeDose.excluded ? (
+            <div className="result-metric-row">
+              <span>평생 누적 용량</span>
+              <strong>0.00 MN{'\xB7'}h <span className="result-card-meta">(일 임계값 미만으로 누적 노출량이 0으로 계산됩니다)</span></strong>
+            </div>
+          ) : lifetimeDose.totalYears > 0 && (
             <>
               <div className="result-metric-row"><span>직업력</span><strong>{'\u00D7'} {lifetimeDose.totalYears.toFixed(1)}년</strong></div>
               <div className="result-metric-row"><span>평생 누적 용량</span><strong>{lifetimeDose.lifetimeDoseMNh.toFixed(2)} MN{'\xB7'}h</strong></div>

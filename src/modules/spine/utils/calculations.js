@@ -3,6 +3,21 @@ import { thresholds } from './thresholds';
 import { SPINE_FORMULA_V513 } from './formulaVersion';
 import { getEffectiveWorkPeriod } from '../../../core/utils/workPeriod';
 import { resolveDiagnosisModule } from '../../../core/utils/diagnosisMapping';
+import { convertTimeToSeconds } from './time';
+import { computeVibrationCalc, isVibrationComplete, resolveVibrationStatus } from './vibrationCalc';
+
+// 기존 import 경로 하위호환: 다른 파일들이 calculations에서 convertTimeToSeconds를 가져온다.
+export { convertTimeToSeconds };
+// vibrationCalc의 상태 헬퍼를 calculations 경유로도 노출(UI에서 한 곳에서 import 가능).
+export { resolveVibrationStatus };
+
+// MDDM 평가 상태 3단계 해석 (하위호환 포함).
+// 'unknown'(미평가) | 'none'(해당없음) | 'present'(평가함).
+export function resolveMddmStatus(mod) {
+  if (mod.mddmStatus) return mod.mddmStatus;
+  if (mod.evalMethod === 'wbv') return 'unknown';      // 1차 WBV 환자: 기본 task 있어도 MDDM 미평가
+  return mod.tasks?.length ? 'present' : 'unknown';    // 기존 MDDM 환자(작업 배열 있으면)→present
+}
 
 // F = b + m * L
 export function calculateCompressiveForce(postureCode, weight, correctionFactor = 1.0) {
@@ -20,13 +35,6 @@ export function calculateCompressiveForce(postureCode, weight, correctionFactor 
   };
 }
 
-export function convertTimeToSeconds(value, unit) {
-  switch (unit) {
-    case 'min': return value * 60;
-    case 'hr': return value * 3600;
-    default: return value;
-  }
-}
 
 // v5.1.3 정정 공식: D_r = sqrt(Σ F_i^2 · t_i / 8h) · 8h
 function calculateDailyDoseV513(tasks) {
@@ -162,11 +170,6 @@ export function compareThresholds(lifetimeDoseMNh, gender) {
       limit: limits.court[gender],
       percent: (lifetimeDoseMNh / limits.court[gender]) * 100,
       status: lifetimeDoseMNh <= limits.court[gender] ? 'safe' : (lifetimeDoseMNh <= limits.court[gender] * 1.2 ? 'warning' : 'danger')
-    },
-    dws2: {
-      limit: limits.dws2[gender],
-      percent: (lifetimeDoseMNh / limits.dws2[gender]) * 100,
-      status: lifetimeDoseMNh <= limits.dws2[gender] ? 'safe' : (lifetimeDoseMNh <= limits.dws2[gender] * 1.2 ? 'warning' : 'danger')
     }
   };
 }
@@ -239,7 +242,19 @@ function groupTasksByJob(tasks, jobs) {
 }
 
 // 전체 계산 결과 산출 (모듈 레벨)
+// MDDM과 WBV를 공존시켜 반환. MDDM 평탄 필드는 top-level 유지(기존 consumer 무변경),
+// WBV는 calc.vibration 서브키. mddmStatus도 top-level에 실어 출력/패널이 게이트한다.
 export function computeSpineCalc(patientData) {
+  const mod = patientData.module || {};
+  const mddmStatus = resolveMddmStatus(mod);
+  return {
+    ...computeMddmCalc(patientData),
+    mddmStatus,
+    vibration: computeVibrationCalc(patientData),
+  };
+}
+
+function computeMddmCalc(patientData) {
   const shared = patientData.shared || {};
   const mod = patientData.module || {};
   const gender = shared.gender || 'male';
@@ -341,22 +356,9 @@ export function computeSpineCalc(patientData) {
   return { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender, weightedDailyDose, formulaVersion };
 }
 
-// 완료 판정
-export function isSpineAssessmentComplete(patientData) {
-  const mod = patientData.module || {};
+// 척추 상병 완료 체크 — MDDM/WBV 양 경로 공용.
+export function isSpineDiagnosisComplete(patientData) {
   const shared = patientData.shared || {};
-  const hasTasks = (mod.tasks || []).length > 0;
-
-  // 구형식 호환
-  if (mod.careerYears !== undefined) {
-    if (!(hasTasks && (mod.careerYears > 0 || mod.careerMonths > 0))) return false;
-  } else {
-    // 신형식: shared.jobs에 유효한 기간이 있는지
-    const hasCareer = (shared.jobs || []).some(j => getEffectiveWorkPeriod(j) > 0);
-    if (!(hasTasks && hasCareer)) return false;
-  }
-
-  // 종합소견: 척추 상병의 상병 상태 + 업무관련성 체크
   const diagnoses = shared.diagnoses || [];
   const spineDiags = diagnoses.filter(dx =>
     resolveDiagnosisModule(dx, patientData.activeModules || [])?.moduleId === 'spine'
@@ -367,4 +369,27 @@ export function isSpineAssessmentComplete(patientData) {
     if (dx.assessmentRight === 'low' && (!dx.reasonRight?.length)) return false;
     return true;
   });
+}
+
+// MDDM portion 완료: 'none'(해당없음)이면 OK, 'present'면 작업+유효 근속, 'unknown'이면 false.
+function isMddmComplete(patientData) {
+  const mod = patientData.module || {};
+  const shared = patientData.shared || {};
+  const status = resolveMddmStatus(mod);
+  if (status === 'unknown') return false;
+  if (status === 'none') return true;
+
+  const hasTasks = (mod.tasks || []).length > 0;
+  // 구형식 호환
+  if (mod.careerYears !== undefined) {
+    return hasTasks && (mod.careerYears > 0 || mod.careerMonths > 0);
+  }
+  const hasCareer = (shared.jobs || []).some(j => getEffectiveWorkPeriod(j) > 0);
+  return hasTasks && hasCareer;
+}
+
+// 완료 판정 — (MDDM 유효 || WBV 유효) && 상병. 둘 중 하나만 평가해도 완료 가능.
+export function isSpineAssessmentComplete(patientData) {
+  if (!isSpineDiagnosisComplete(patientData)) return false;
+  return isMddmComplete(patientData) || isVibrationComplete(patientData);
 }

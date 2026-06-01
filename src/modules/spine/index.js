@@ -9,7 +9,7 @@ registerModule({
   id: 'spine',
   name: '요추(허리)',
   icon: '\u2695\uFE0F',
-  description: 'MDDM 요추 압박력 평가',
+  description: 'MDDM 요추 압박력 및 BK2110 전신진동 평가',
   EvaluationComponent: SpineEvaluation,
   createModuleData: createSpineModuleData,
   computeCalc: computeSpineCalc,

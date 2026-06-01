@@ -1,7 +1,7 @@
 import { getModule } from '../moduleRegistry';
 import { getSideText, getStatusText, getReasonText } from '../../modules/knee/utils/calculations';
 import { AUX_LABELS } from '../../modules/knee/utils/data';
-import { convertTimeToSeconds, getSpineTaskDoses, classifySpineSeverity } from '../../modules/spine/utils/calculations';
+import { buildSpineSectionText } from '../../modules/spine/utils/sectionText';
 import { resolveDiagnosisModule } from './diagnosisMapping';
 import { calculateAge, calculateBMI } from './common';
 import { getEffectiveWorkPeriodText } from './workPeriod';
@@ -93,106 +93,8 @@ function genShoulderBurdenSection(calc) {
   return text;
 }
 
-function formatSpineNumber(value, digits = 2) {
-  const numericValue = Number(value);
-  return Number.isFinite(numericValue) ? numericValue.toFixed(digits) : '-';
-}
-
-function formatSpinePercent(item) {
-  return Number.isFinite(item?.percent) ? item.percent.toFixed(0) : '0';
-}
-
-function formatSpineLimit(item) {
-  return Number.isFinite(item?.limit) ? item.limit.toFixed(1) : '-';
-}
-
-function isSpineThresholdExceeded(item) {
-  return Number.isFinite(item?.percent) && item.percent > 100;
-}
-
-function getSpineThresholdStatus(item) {
-  return isSpineThresholdExceeded(item) ? '초과' : '미만';
-}
-
-function getSpineTaskTotalHours(task) {
-  const totalSeconds = convertTimeToSeconds(task.timeValue, task.timeUnit) * (Number(task.frequency) || 0);
-  return totalSeconds / 3600;
-}
-
-function getSpineInterpretation(comparison) {
-  if (!comparison) return '';
-
-  const dws2Limit = formatSpineLimit(comparison.dws2);
-  const courtLimit = formatSpineLimit(comparison.court);
-  const mddmLimit = formatSpineLimit(comparison.mddm);
-
-  if (isSpineThresholdExceeded(comparison.mddm)) {
-    return `** 최신 DWS2 연구 기준(${dws2Limit} MN·h), 독일 연방 사회법원(BSG) 기준(${courtLimit} MN·h), 가장 보수적인 MDDM 최초 모델 기준(${mddmLimit} MN·h)을 모두 초과하여, 직업적 요인을 질병 발생의 주요 원인으로 강하게 추정 가능합니다.`;
-  }
-
-  if (isSpineThresholdExceeded(comparison.court)) {
-    return `** 최신 DWS2 연구 기준(${dws2Limit} MN·h), 보다 보수적인 독일 연방 사회법원(BSG) 기준(${courtLimit} MN·h)을 초과하여, 직업적 요인을 질병 발생의 주요 원인으로 추정 가능합니다.`;
-  }
-
-  if (isSpineThresholdExceeded(comparison.dws2)) {
-    return `** 최신 DWS2 연구 기준(${dws2Limit} MN·h)을 초과하였습니다. 해당 기준 초과가 자동으로 누적 신체 부담이 충분하다는 의미는 아니며, 직업적 요인의 관여 가능성을 다른 제반 요건과 함께 종합적으로 검토해 볼 수 있습니다.`;
-  }
-
-  return `** DWS2 연구 기준(${dws2Limit} MN·h), 독일 연방 사회법원(BSG) 기준(${courtLimit} MN·h), MDDM 최초 모델 기준(${mddmLimit} MN·h)에 모두 미달하여, MDDM 누적 노출 기준만으로는 직업적 요인을 주요 원인으로 보기 어렵습니다.`;
-}
-
 function genSpineBurdenSection(calc) {
-  const { tasks, jobResults, dailyDose, lifetimeDose, comparison, maxForce, weightedDailyDose, gender, formulaVersion } = calc;
-  const spineTasks = tasks || [];
-  let text = `\n< 허리(요추) >\n`;
-  text += `독일의 산재보험 번호 BK2108. 장기간의 중량물 취급 또는 허리를 굽히기로 인해 발생한 요추간판 탈출증 에서 사용하는 척추 압박력 평가 모델(Mainz-Dortmund Dose Model, MDDM)을 이용하여 평가하였음.\n\n`;
-
-  const renderSpineTask = (task, index, contributions) => {
-    let s = `작업 ${index + 1}. ${task.name || '-'}\n`;
-    s += `자세 ${task.posture || '-'} · ${task.weight || '-'}kg · ${task.frequency || 0}회/일\n`;
-    s += `압박력 : ${(task.force || 0).toLocaleString()} N\n`;
-    s += `일일 시간: ${formatSpineNumber(getSpineTaskTotalHours(task), 3)} h | 일일 기여: ${formatSpineNumber(contributions[index], 2)} kN·h\n`;
-    return s;
-  };
-
-  text += `작업별 분석\n`;
-  if (spineTasks.length === 0) {
-    text += `- 입력된 작업 없음\n`;
-  } else if (jobResults && jobResults.length > 1) {
-    jobResults.forEach((jr, ji) => {
-      const jrTasks = jr.tasks || [];
-      if (jrTasks.length === 0) return;
-      const contributions = getSpineTaskDoses(jrTasks, formulaVersion);
-      text += `[직력${ji + 1}: ${jr.jobName || '-'}]\n`;
-      jrTasks.forEach((task, index) => {
-        text += renderSpineTask(task, index, contributions);
-      });
-      text += `\n`;
-    });
-  } else {
-    const contributions = getSpineTaskDoses(spineTasks, formulaVersion);
-    spineTasks.forEach((task, index) => {
-      text += renderSpineTask(task, index, contributions);
-    });
-  }
-
-  text += `\n종합\n`;
-  text += `- 최대 압박력: ${(maxForce || 0).toLocaleString()} N\n`;
-  const dailyKNh = weightedDailyDose?.value ?? dailyDose?.dailyDoseKNh ?? 0;
-  const mf = maxForce || 0;
-  const severityLabel = classifySpineSeverity(dailyKNh, mf, gender);
-  text += `- 일일 노출량: ${dailyKNh.toFixed(2)} kN·h${weightedDailyDose ? ' (직력가중평균)' : ''} (${severityLabel})\n`;
-  text += `- **누적 노출량: ${lifetimeDose?.lifetimeDoseMNh?.toFixed(2) || '0.00'} MN·h **\n`;
-
-  if (comparison) {
-    text += `\n기준치 대비\n`;
-    text += `- **DWS2(독일 척추 연구) 기준 대비 : ${formatSpinePercent(comparison.dws2)}% (${formatSpineLimit(comparison.dws2)} MN·h) : ${getSpineThresholdStatus(comparison.dws2)}\n`;
-    text += `- 독일 연방 사회법원(BSG) 기준 대비 : ${formatSpinePercent(comparison.court)}% (${formatSpineLimit(comparison.court)} MN·h) : ${getSpineThresholdStatus(comparison.court)}\n`;
-    text += `- MDDM 최초 모델 기준 대비 : ${formatSpinePercent(comparison.mddm)}% (${formatSpineLimit(comparison.mddm)} MN·h) : ${getSpineThresholdStatus(comparison.mddm)}\n\n`;
-    text += `${getSpineInterpretation(comparison)}\n`;
-  }
-
-  return text;
+  return buildSpineSectionText(calc);
 }
 
 function genElbowBurdenSection(calc) {

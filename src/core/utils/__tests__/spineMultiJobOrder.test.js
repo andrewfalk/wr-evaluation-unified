@@ -125,7 +125,7 @@ describe('척추 다중 직업 — 출력 순서가 jobResults 기준', () => {
 
       expect(txtJobCusCont).not.toMatch(/\[직력1:/);
       // 평탄 출력에서도 순서는 보장되어야 함
-      const spineStart = txtJobCusCont.indexOf('<허리(요추)>');
+      const spineStart = txtJobCusCont.indexOf('< 허리(요추) >');
       const after = txtJobCusCont.slice(spineStart);
       assertOrder(after, ['A1-인양', 'A2-인양', 'A3-인양']);
     });
