@@ -262,7 +262,7 @@ export function generateUnifiedReport(patient) {
     if (!(diag.code || diag.name)) return;
 
     const resolvedModule = resolveDiagnosisModule(diag, activeModules);
-    text += `\n상병 #${index + 1}: ${diag.code || ''} ${diag.name || ''}\n`;
+    text += `\n#${index + 1}: ${diag.code || ''} ${diag.name || ''}\n`;
 
     if (resolvedModule?.moduleId === 'spine' || resolvedModule?.moduleId === 'cervical') {
       text += `  평가: 상병 상태(${getStatusText(diag.confirmedRight)}) / 업무관련성(${diag.assessmentRight === 'high' ? '높음' : diag.assessmentRight === 'low' ? '낮음' : '-'})\n`;

@@ -18,7 +18,7 @@ function buildAssessmentSummary(diagnoses = [], activeModules = []) {
   return diagnoses
     .filter(diag => diag.code || diag.name)
     .map((diag, index) => {
-      let summary = `상병 #${index + 1}: ${diag.code || ''} ${diag.name || ''}`.trim();
+      let summary = `#${index + 1}: ${diag.code || ''} ${diag.name || ''}`.trim();
       const resolvedModule = resolveDiagnosisModule(diag, activeModules);
 
       if ((resolvedModule?.moduleId === 'spine' || resolvedModule?.moduleId === 'cervical') && !diag.side) {
