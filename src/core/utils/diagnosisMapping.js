@@ -110,7 +110,9 @@ export const MODULE_LABELS = {
 };
 
 export function isValidDiagnosisModuleId(id) {
-  return !!id && id !== '__none__' && Object.hasOwn(MODULE_LABELS, id);
+  // Object.hasOwn은 ES2022(Chrome 93+)라 윈도7 구형 크롬에서 미지원 → 흰 화면 유발.
+  // 호환을 위해 Object.prototype.hasOwnProperty.call 사용.
+  return !!id && id !== '__none__' && Object.prototype.hasOwnProperty.call(MODULE_LABELS, id);
 }
 
 /**

@@ -15,6 +15,10 @@ export default defineConfig({
     assetsDir: 'assets',
     sourcemap: false,
     minify: 'esbuild',
+    // 인트라넷 클라이언트(윈도7 + 구형 크롬)를 위해 ES2020+ 문법을 트랜스파일.
+    // 주의: target은 문법만 변환하므로 Object.hasOwn 같은 신규 "메서드"는
+    // 소스에서 직접 호환 코드로 작성해야 함(diagnosisMapping.js 참고).
+    target: ['chrome80', 'es2019'],
     rollupOptions: {
       output: {
         manualChunks: {
