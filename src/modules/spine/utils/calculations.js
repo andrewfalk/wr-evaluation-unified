@@ -135,14 +135,14 @@ export function classifySpineSeverity(dailyKNh, maxForce, gender) {
   const mf = Number(maxForce) || 0;
   const d = Number(dailyKNh) || 0;
   if (gender === 'female') {
-    if (d > 8.0 || mf >= 6000) return '고도';
-    if (d > 5.5 || mf >= 5000) return '중등도상';
-    if (d >= 3.5 || mf >= 4000) return '중등도하';
+    if (d > 6.0 || mf >= 6000) return '고도';
+    if (d > 4.5 || mf >= 5000) return '중등도상';
+    if (d >= 3.0 || mf >= 4000) return '중등도하';
     return '경도';
   }
-  if (d > 10 || mf >= 6000) return '고도';
-  if (d > 8.0 || mf >= 5000) return '중등도상';
-  if (d >= 5.5 || mf >= 4000) return '중등도하';
+  if (d > 8.0 || mf >= 6000) return '고도';
+  if (d > 6.0 || mf >= 5000) return '중등도상';
+  if (d >= 4.0 || mf >= 4000) return '중등도하';
   return '경도';
 }
 

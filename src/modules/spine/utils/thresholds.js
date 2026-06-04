@@ -4,7 +4,7 @@ export const thresholds = {
   criticalForce: 6000,
   dailyDose: {
     legacy: { male: 2.0, female: 0.5 },
-    v513:   { male: 5.5, female: 3.5 },
+    v513:   { male: 4.0, female: 3.0 },
   },
   lifetimeDose: {
     mddm: { male: 25, female: 17 },
