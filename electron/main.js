@@ -30,7 +30,9 @@ const INTRANET_URL      = (process.env.WR_INTRANET_URL || (IS_INTRANET_BUILD ? D
 // Used by the audit module for device registration and audit signing.
 // ---------------------------------------------------------------------------
 let _accessToken = null;
-ipcMain.on('set-access-token', (_event, token) => {
+ipcMain.on('set-access-token', (event, token) => {
+  // emr-* 핸들러와 동일한 origin 게이트 — 허용 외 origin의 토큰 주입 차단
+  if (!isAllowedSender(event.senderFrame?.url ?? event.sender.getURL())) return;
   _accessToken = token || null;
   if (IS_INTRANET_BUILD && _accessToken) {
     audit.tryRegister().catch(e => console.error('[audit] register on token set:', e.message));
@@ -666,11 +668,11 @@ ipcMain.handle('fs-migrate', async (_e, { savedItems, autoSave, settings }) => {
   // savedItems 마이그레이션
   if (savedItems && Array.isArray(savedItems)) {
     for (const item of savedItems) {
-      writeJsonFile(path.join(savedDir, `${item.id}.json`), item);
+      writeJsonFile(path.join(savedDir, `${sanitizeId(item.id)}.json`), item);
       // 환자 데이터도 개별 파일로
       if (item.patients) {
         for (const p of item.patients) {
-          writeJsonFile(path.join(patientsDir, `${p.id}.json`), p);
+          writeJsonFile(path.join(patientsDir, `${sanitizeId(p.id)}.json`), p);
         }
       }
     }
@@ -681,7 +683,7 @@ ipcMain.handle('fs-migrate', async (_e, { savedItems, autoSave, settings }) => {
     writeJsonFile(path.join(dataDir, 'autosave.json'), autoSave);
     const index = [];
     for (const p of autoSave.patients) {
-      writeJsonFile(path.join(patientsDir, `${p.id}.json`), p);
+      writeJsonFile(path.join(patientsDir, `${sanitizeId(p.id)}.json`), p);
       index.push({
         id: p.id,
         name: p.data?.shared?.name || '',

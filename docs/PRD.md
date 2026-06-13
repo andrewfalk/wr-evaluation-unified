@@ -1,8 +1,8 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 5.1.6
-> **Last Updated:** 2026-06-01
-> **Status:** 척추 모듈에 전신진동(BK2110) 평가 추가 + MDDM과 공존 / 인트라넷 운영 중
+> **Version:** 5.1.8
+> **Last Updated:** 2026-06-13
+> **Status:** 보안 점검 적용(AI 프록시 모델 allowlist + Electron IPC 보강 + PDF 푸터 이스케이프) / 인트라넷 운영 중
 
 ---
 
@@ -2059,6 +2059,16 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 ---
 
 ## 변경 이력
+
+### v5.1.8 (2026-06-13) — 보안 점검 적용: AI 프록시 모델 allowlist + Electron IPC 보강 + PDF 푸터 이스케이프
+
+전체 코드 리뷰(보안/리팩터링/정리) 1차 적용분. 즉시 적용 가능한 보안 보강과 정리 작업.
+
+- **AI 프록시 모델 allowlist** (`api/analyze.js`): 허용된 Gemini/Claude 모델 외 요청은 400 반환 — 비용 탈취·경로 조작 방지.
+- **Electron IPC 보강** (`electron/main.js`): `fs-migrate` 핸들러 3곳에 `sanitizeId()` 적용(path traversal 방지), `set-access-token`에 `isAllowedSender` origin 검사 추가.
+- **PDF 푸터 XSS 방지**: elbow/wrist/shoulder 모듈 export의 PDF 푸터에 `escapeHtml` 적용 (knee는 기존부터 적용됨).
+- **정리**: 미사용 `electron/preload.js`, `types/placeholder.d.ts`, `artifacts/elbow_module_structure.md` 삭제 + CLAUDE.md/AGENTS.md/README.md의 구조 참조를 `preload-intranet.js`/`preload-standalone.js`로 갱신.
+- 검증: 클라이언트 446 tests pass, `npm run build:web` 통과. package.json 버전 미변경.
 
 ### v5.1.7 (2026-06-04) — 척추 dailyDose 임계치·중증도 사다리 하향 (임상 피드백)
 

@@ -138,9 +138,9 @@ export const wristExportHandlers = {
       <div style="margin-bottom:12px;">시간적 선후관계: ${escapeHtml(c.temporalFlagItems?.map(flag => flag.label).join(', ') || '-')}</div>
       ${summaryHtml || '<p style="color:#888;">손목/손가락 결과가 없습니다.</p>'}
       <div style="border-top:2px solid #333; margin-top:24px; padding-top:12px; text-align:center; font-size:11px; color:#555;">
-        <div>${shared.evaluationDate || '-'}</div>
-        <div style="margin-top:4px;">${shared.hospitalName || '-'} ${shared.department || ''}</div>
-        <div style="margin-top:4px;">담당의 ${shared.doctorName || '-'}</div>
+        <div>${escapeHtml(shared.evaluationDate) || '-'}</div>
+        <div style="margin-top:4px;">${escapeHtml(shared.hospitalName) || '-'} ${escapeHtml(shared.department) || ''}</div>
+        <div style="margin-top:4px;">담당의 ${escapeHtml(shared.doctorName) || '-'}</div>
       </div>`;
 
     html2pdf().set({

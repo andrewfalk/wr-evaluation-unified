@@ -35,7 +35,7 @@ src/
 │   ├── elbow/               # 팔꿈치 모듈 (ElbowEvaluation, ExposureForm, ElbowResultPanel)
 │   └── spine/               # 척추 MDDM 모듈 (SpineEvaluation, TaskManager, TaskEditor, ResultDashboard)
 api/analyze.js               # Vercel 서버리스 (Gemini/Claude API 프록시)
-electron/                    # main.js + preload.js + emr-helper/ (IPC: AI 호출 + EMR 연동)
+electron/                    # main.js + preload-intranet.js/preload-standalone.js + emr-helper/ (IPC: AI 호출 + EMR 연동)
 ```
 
 ## 모듈 추가 방법

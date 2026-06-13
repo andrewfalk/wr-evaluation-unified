@@ -1,6 +1,15 @@
 // 통합 평가 시스템 - AI 분석 API Route
 // Claude / Gemini API 프록시 (API 키를 서버에서 안전하게 관리)
 
+// 허용 모델 allowlist — AIAnalysisPanel의 선택 옵션과 동기화 유지.
+// 임의 모델명은 고가 모델 호출(비용)과 Gemini URL 경로 조작에 쓰일 수 있어 차단.
+const ALLOWED_MODELS = new Set([
+    'gemini-2.5-flash',
+    'gemini-2.5-pro',
+    'claude-haiku-4-5-20251001',
+    'claude-sonnet-4-6-20250514',
+]);
+
 export default async function handler(req, res) {
     const allowedOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000'];
     if (process.env.APP_ORIGIN) allowedOrigins.push(process.env.APP_ORIGIN);
@@ -38,6 +47,12 @@ export default async function handler(req, res) {
         if (prompt.length > 50000) {
             return res.status(400).json({
                 error: { message: '요청 데이터가 너무 큽니다.' }
+            });
+        }
+
+        if (model && !ALLOWED_MODELS.has(model)) {
+            return res.status(400).json({
+                error: { message: '허용되지 않은 모델입니다.' }
             });
         }
 

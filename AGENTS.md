@@ -32,7 +32,7 @@ src/
 │   ├── knee/                # 무릎 모듈 (KneeEvaluation, JobTab, AssessmentTab, KneeResultPanel)
 │   └── spine/               # 척추 MDDM 모듈 (SpineEvaluation, TaskManager, TaskEditor, ResultDashboard)
 api/analyze.js               # Vercel 서버리스 (Codex API 프록시)
-electron/                    # main.js + preload.js (IPC 기반 AI 호출)
+electron/                    # main.js + preload-intranet.js/preload-standalone.js (IPC 기반 AI 호출)
 ```
 
 ## 모듈 추가 방법
