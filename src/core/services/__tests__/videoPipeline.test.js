@@ -21,7 +21,7 @@ import {
   applyFeatureToModule,
   rollbackAppliedInput,
 } from '../videoProvenance.js';
-import { getModule, getModulesWithVideoMapping } from '../../moduleRegistry.js';
+import { getModulesWithVideoMapping } from '../../moduleRegistry.js';
 import { createVideoAnalysisData } from '../../utils/data.js';
 import { VideoFeatureValueSchema } from '../../../../shared/contracts/videoAnalysis';
 import { VIDEO_FEATURE_TARGETS } from '../../../../shared/contracts/videoAnalysis';

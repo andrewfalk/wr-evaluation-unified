@@ -145,7 +145,7 @@ export function rollbackAppliedInput(patient, ref) {
   let next = patient;
 
   if (cfg?.writeField) {
-    const featureKey = featureKeyFromTargetPath(entry, mod);
+    const featureKey = featureKeyFromTargetPath(entry);
     const moduleData = patient.data.modules[entry.moduleId];
     if (moduleData && featureKey) {
       // previousValue를 그대로(coerce 없이) 복원 — 적용 전 값은 이미 모듈 타입.
@@ -172,7 +172,7 @@ function ctxFromTargetPath(entry) {
 }
 
 // targetPath의 마지막 필드명 → featureKey 역매핑(VIDEO_FEATURE_TARGETS).
-function featureKeyFromTargetPath(entry, mod) {
+function featureKeyFromTargetPath(entry) {
   const field = entry.targetPath.split('.').pop();
   const found = Object.entries(VIDEO_FEATURE_TARGETS).find(
     ([, t]) => t.moduleId === entry.moduleId && t.targetField === field

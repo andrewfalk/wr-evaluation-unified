@@ -17,14 +17,14 @@
   - [x] `moduleRegistry` JSDoc + `getModulesWithVideoMapping()` + shape 매니페스트 테스트
   - [x] knee/shoulder/spine/cervical `videoMappingConfig` 선언(모듈별 타입 코어싱)
   - [x] vitest.config `@contracts` alias(소스) + 테스트 20건 (531 passed)
-- [~] **PR4 (6.0-3)** 피처플래그 5곳 배선 + 로컬 mock UI (구현 완료, PR 머지 대기)
-  - [x] 플래그 5곳(server config env / ServerPublicConfigSchema / `/api/config/public` / `FAIL_CLOSED_CONFIG` / mock 서버)
-  - [x] `buildSteps(activeModules, opts)` 시그니처 + 호출부(App.jsx, useIntakeWizard) + 테스트
-  - [x] `VideoAnalysisStep.jsx` + `StepContent` 라우팅(`updatePatient` 전달)
-  - [x] 로컬 mock UI(공정/클립/시점/%/profile → mock 분석 → 제안 검토 → 적용·무시 → 적용이력 rollback)
-  - [x] config 테스트(클라+서버) 갱신 + 전체 테스트(client 543/server 373)·빌드·tsc OK
-  - 참고: task-scope(척추·경추) 자동적용은 process↔task 링크 설계 후속(현재 직업단위 모듈 적용·candidate/검토 표시까지)
-- [ ] **PR5 (6.0-4)** clip/job DB + 서버 mock 폴링 + apply endpoint + audit
+- [x] **PR4 (6.0-3)** 피처플래그 5곳 배선 + 로컬 mock UI — PR #14 ✅ 머지
+- [~] **PR5 (6.0-4)** clip/job DB + 서버 mock 폴링 + apply endpoint + audit (백본 완료, UI 연결은 PR5.1)
+  - [x] 마이그레이션 `0016_video_analysis.sql`(clips + jobs, denormalize, applied_*, nullable)
+  - [x] `videoAnalysis.ts` 라우터(clips/sample-detect/select-target/jobs/poll) + job-scoped guard + flag fail-closed(404)
+  - [x] `POST /jobs/:id/apply`(If-Match + FOR UPDATE + 멱등성 + writeAuditLog)
+  - [x] 클라 `videoAnalysisClient.js` + `patientServerRepository.applyVideoAnalysisJob`
+  - [x] 서버/클라 테스트(server +12 / client +7) + 전체(client 554/server 385) + 빌드 OK
+  - [ ] **PR5.1** VideoAnalysisStep ↔ 서버 job 폴링·apply 연결(synced 게이팅 + 환자목록 머지) — 회귀 위험 분리
 
 ### M2 — 실제 추론 PoC (6.0-3.5, 6.0-5, 6.0-6)
 - [ ] 6.0-3.5 검증 하네스 skeleton
