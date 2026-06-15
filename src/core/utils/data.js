@@ -34,6 +34,18 @@ export const createSharedJob = () => ({
   workDaysPerYear: 250,
 });
 
+// 작업 영상 인간공학 분석 데이터(§8.11). 환자 JSONB(영구·UI용) — 임시파일 경로 절대 미포함.
+// shape는 shared/contracts VideoAnalysisDataSchema.parse({})와 일치해야 한다(테스트로 강제).
+export const createVideoAnalysisData = () => ({
+  processes: [],          // 공정 메타(name, shiftSharePercent 등)
+  clips: [],              // 클립 메타데이터만 — 파일 경로 저장 금지
+  processFeatures: [],    // 공정 단위 fused feature
+  jobFeatures: [],        // 직업 단위 집계(파생값)
+  candidateFeatures: [],  // 자동입력 금지 후보(진동·회전 등)
+  appliedInputs: [],      // provenance
+  settings: { retentionMode: 'privacy_first' },
+});
+
 export const createSharedData = () => ({
   patientNo: '',
   name: '',
@@ -57,6 +69,7 @@ export const createSharedData = () => ({
   specialNotes: '',
   diagnoses: [createDiagnosis()],
   jobs: [createSharedJob()],
+  videoAnalysis: createVideoAnalysisData(),
 });
 
 // 신형식: 다중 모듈 지원
@@ -81,14 +94,13 @@ export function migratePatient(patient) {
     p = { ...p, createdAt: p.data?.shared?.evaluationDate || new Date(Date.now() - 86400000).toISOString() };
   }
 
-  // 이미 신형식이면 그대로
+  let migrated;
+  // 이미 신형식이면 그대로 (jobs 마이그레이션도 체크)
   if (p.data?.modules && p.data?.activeModules) {
-    // jobs 마이그레이션도 체크
-    return migrateJobsToShared(p);
-  }
-  // 구형식: moduleId + data.module → 신형식
-  if (p.moduleId && p.data?.module !== undefined) {
-    const migrated = {
+    migrated = migrateJobsToShared(p);
+  } else if (p.moduleId && p.data?.module !== undefined) {
+    // 구형식: moduleId + data.module → 신형식
+    migrated = migrateJobsToShared({
       ...p,
       phase: 'evaluation',
       data: {
@@ -96,10 +108,49 @@ export function migratePatient(patient) {
         modules: { [p.moduleId]: p.data.module },
         activeModules: [p.moduleId]
       }
-    };
-    return migrateJobsToShared(migrated);
+    });
+  } else {
+    migrated = migrateJobsToShared(p);
   }
-  return migrateJobsToShared(p);
+
+  // migrateJobsToShared는 shared.jobs가 이미 있으면 조기 반환하므로(신형식 환자),
+  // 누락 shared 기본값(jobs·videoAnalysis)은 여기서 항상 보강한다.
+  return ensureSharedDefaults(migrated);
+}
+
+// shared 누락 기본값 보강(조기 반환 경로 무관, 신형식 환자에도 적용).
+// 기존 데이터는 보존하고 빠진 키만 채운다.
+export function ensureSharedDefaults(patient) {
+  if (!patient?.data || typeof patient.data !== 'object') return patient;
+  const shared = { ...(patient.data.shared || {}) };
+  let changed = false;
+  if (!Array.isArray(shared.jobs)) {
+    shared.jobs = [createSharedJob()];
+    changed = true;
+  }
+  // videoAnalysis는 없거나(undefined) 부분 객체({})여도 빠진 키를 채운다 —
+  // 하위(PR3/PR4)에서 processes·clips·appliedInputs 배열 존재를 가정하므로.
+  const defaults = createVideoAnalysisData();
+  const cur = shared.videoAnalysis;
+  if (!cur || typeof cur !== 'object') {
+    shared.videoAnalysis = defaults;
+    changed = true;
+  } else {
+    const needsFill =
+      Object.keys(defaults).some(k => cur[k] === undefined) ||
+      typeof cur.settings !== 'object' || cur.settings === null ||
+      cur.settings.retentionMode === undefined;
+    if (needsFill) {
+      shared.videoAnalysis = {
+        ...defaults,
+        ...cur,
+        settings: { ...defaults.settings, ...(cur.settings || {}) },
+      };
+      changed = true;
+    }
+  }
+  if (!changed) return patient;
+  return { ...patient, data: { ...patient.data, shared } };
 }
 
 // jobs를 shared로 이동하는 마이그레이션
@@ -232,6 +283,12 @@ export function createSamplePatient() {
             workDaysPerYear: 280,
           },
         ],
+        videoAnalysis: {
+          ...createVideoAnalysisData(),
+          processes: [
+            { id: 'sample-proc-1', sharedJobId: jobId1, name: '철근 배근', shiftSharePercent: 60 },
+          ],
+        },
       },
       modules: {
         knee: {
