@@ -9,6 +9,7 @@ import { auditPool } from './db/auditClient';
 import { runMigrations } from './db/migrate';
 import { createAuthRouter } from './routes/auth';
 import { createConfigRouter } from './routes/config';
+import { createVideoAnalysisRouter } from './routes/videoAnalysis';
 import { createDevicesRouter } from './routes/devices';
 import { createAdminRouter } from './routes/admin';
 import { createAuditRouter } from './routes/audit';
@@ -45,6 +46,7 @@ app.use('/api/patients',  createPatientsRouter(pool));
 app.use('/api/autosave',  createAutosaveRouter(pool));
 app.use('/api/ai',        createAIRouter(pool));
 app.use('/api/presets',   createPresetsRouter(pool));
+app.use('/api/video-analysis', createVideoAnalysisRouter(pool));
 
 // ---------------------------------------------------------------------------
 // Static web SPA (dist/web/) — registered after API routes so API paths win.

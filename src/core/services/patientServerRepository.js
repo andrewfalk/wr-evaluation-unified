@@ -1,5 +1,6 @@
 import { requestJson } from './httpClient';
 import { isRedactedPatientRecord } from './patientRecords';
+import { requireSyncedServerId } from './videoAnalysisClient';
 
 function getBaseUrl(session, settings) {
   return session?.apiBaseUrl || settings?.apiBaseUrl || '';
@@ -106,6 +107,36 @@ export async function pushPatient(patient, { session, settings } = {}) {
     },
   });
   return applyServerSync(data, patient.id, patient.meta);
+}
+
+// ---------------------------------------------------------------------------
+// Apply video-analysis job — POST /api/video-analysis/jobs/:jobId/apply
+// 클라가 applyFeatureToModule로 계산한 환자 data를 If-Match(현재 revision)와 함께 보내
+// 서버가 단일 트랜잭션으로 영속화한다. 서버 응답(갱신 patient)을 로컬 sync에 반영해
+// 다음 저장이 stale revision으로 409 나는 것을 막는다(§8.12).
+// 동기화된 환자(serverId + revision)만 호출해야 한다 — synced 판정은 호출부 책임.
+// ---------------------------------------------------------------------------
+export async function applyVideoAnalysisJob(
+  jobId, patient, computedData,
+  { appliedInputsHash, appliedInputsCount, session, settings } = {}
+) {
+  // synced 강제(serverId + syncStatus==='synced') — dirty/conflict/local-only 차단.
+  requireSyncedServerId(patient);
+  const revision = patient?.sync?.revision;
+  if (!Number.isInteger(revision) || revision < 1) {
+    const err = new Error(`apply requires a positive integer revision for If-Match (got ${revision}).`);
+    err.status = 400;
+    throw err;
+  }
+  const res = await requestJson(`/api/video-analysis/jobs/${jobId}/apply`, {
+    baseUrl: getBaseUrl(session, settings),
+    method: 'POST',
+    session,
+    headers: { 'If-Match': String(revision) },
+    body: { data: computedData, appliedInputsHash, appliedInputsCount },
+  });
+  // res = { patient } | { idempotent: true, patient }
+  return applyServerSync(res.patient, patient.id, patient.meta);
 }
 
 // ---------------------------------------------------------------------------
