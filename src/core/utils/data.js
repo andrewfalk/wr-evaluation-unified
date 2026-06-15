@@ -128,9 +128,26 @@ export function ensureSharedDefaults(patient) {
     shared.jobs = [createSharedJob()];
     changed = true;
   }
-  if (!shared.videoAnalysis || typeof shared.videoAnalysis !== 'object') {
-    shared.videoAnalysis = createVideoAnalysisData();
+  // videoAnalysis는 없거나(undefined) 부분 객체({})여도 빠진 키를 채운다 —
+  // 하위(PR3/PR4)에서 processes·clips·appliedInputs 배열 존재를 가정하므로.
+  const defaults = createVideoAnalysisData();
+  const cur = shared.videoAnalysis;
+  if (!cur || typeof cur !== 'object') {
+    shared.videoAnalysis = defaults;
     changed = true;
+  } else {
+    const needsFill =
+      Object.keys(defaults).some(k => cur[k] === undefined) ||
+      typeof cur.settings !== 'object' || cur.settings === null ||
+      cur.settings.retentionMode === undefined;
+    if (needsFill) {
+      shared.videoAnalysis = {
+        ...defaults,
+        ...cur,
+        settings: { ...defaults.settings, ...(cur.settings || {}) },
+      };
+      changed = true;
+    }
   }
   if (!changed) return patient;
   return { ...patient, data: { ...patient.data, shared } };

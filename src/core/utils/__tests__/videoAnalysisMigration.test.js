@@ -52,6 +52,45 @@ describe('ensureSharedDefaults()', () => {
     expect(out.data.shared.jobs).toEqual([{ id: 'j1', jobName: 'x' }]);
   });
 
+  it('backfills an EMPTY videoAnalysis object ({}) with all arrays + settings', () => {
+    const patient = {
+      data: { shared: { jobs: [{ id: 'j1' }], videoAnalysis: {} }, modules: {}, activeModules: [] },
+    };
+    const out = ensureSharedDefaults(patient);
+    expect(out.data.shared.videoAnalysis).toEqual(createVideoAnalysisData());
+  });
+
+  it('backfills a PARTIAL videoAnalysis object — preserves present keys, fills missing', () => {
+    const patient = {
+      data: {
+        shared: {
+          jobs: [{ id: 'j1' }],
+          videoAnalysis: { processes: [{ id: 'p', sharedJobId: 'j1', name: 'x', shiftSharePercent: 10 }] },
+        },
+        modules: {},
+        activeModules: [],
+      },
+    };
+    const va = ensureSharedDefaults(patient).data.shared.videoAnalysis;
+    expect(va.processes).toHaveLength(1); // 보존
+    expect(va.clips).toEqual([]); // 보강
+    expect(va.appliedInputs).toEqual([]); // 보강
+    expect(va.candidateFeatures).toEqual([]);
+    expect(va.settings.retentionMode).toBe('privacy_first'); // 보강
+  });
+
+  it('backfills settings.retentionMode when settings object lacks it', () => {
+    const patient = {
+      data: {
+        shared: { jobs: [{ id: 'j1' }], videoAnalysis: { ...createVideoAnalysisData(), settings: {} } },
+        modules: {},
+        activeModules: [],
+      },
+    };
+    const va = ensureSharedDefaults(patient).data.shared.videoAnalysis;
+    expect(va.settings.retentionMode).toBe('privacy_first');
+  });
+
   it('backfills jobs when missing', () => {
     const out = ensureSharedDefaults({ data: { shared: {}, modules: {}, activeModules: [] } });
     expect(Array.isArray(out.data.shared.jobs)).toBe(true);
