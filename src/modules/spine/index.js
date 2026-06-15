@@ -5,6 +5,7 @@ import { computeSpineCalc, isSpineAssessmentComplete } from './utils/calculation
 import { SPINE_FORMULA_V513 } from './utils/formulaVersion';
 import { spineExportHandlers } from './utils/exportHandlers';
 import { ensureModule } from '../../core/utils/batchImportHelpers';
+import { taskScopeWriteField, numberCoerce } from '../../core/utils/videoMapping';
 
 registerModule({
   id: 'spine',
@@ -19,6 +20,16 @@ registerModule({
   tabs: [
     { id: 'tasks', label: '신체부담 평가' },
   ],
+  // 영상 분석 자동 매핑(§8.10). 공정≈task 1:1(task-scope). frequency(회/일)·timeValue(1회 소요시간)
+  // 자동제안+수기확인. cycleSeconds는 항상 초 단위로 기입(timeUnit='sec'). trunkPostureG는 candidate.
+  videoMappingConfig: {
+    scope: 'task',
+    featureKeys: ['cyclesPerDay', 'cycleSeconds'],
+    coerce: numberCoerce, // frequency·timeValue는 숫자 저장
+    writeField: (moduleData, ctx, featureKey, value) =>
+      taskScopeWriteField('spine', moduleData, ctx, featureKey, value,
+        (fk) => (fk === 'cycleSeconds' ? { timeUnit: 'sec' } : undefined)),
+  },
   presetConfig: {
     label: '척추 작업목록',
     fields: 'tasks',

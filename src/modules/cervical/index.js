@@ -4,6 +4,7 @@ import { createCervicalModuleData, createCervicalTask, EXPOSURE_TYPE_OPTIONS } f
 import { computeCervicalCalc, isCervicalAssessmentComplete } from './utils/calculations';
 import { cervicalExportHandlers } from './utils/exportHandlers';
 import { ensureModule, parseYesNo, splitList } from '../../core/utils/batchImportHelpers';
+import { taskScopeWriteField, stringCoerce } from '../../core/utils/videoMapping';
 
 const EXPOSURE_TYPE_LOOKUP = EXPOSURE_TYPE_OPTIONS.reduce((acc, option) => {
   acc[option.value] = option.value;
@@ -30,6 +31,15 @@ registerModule({
   tabs: [
     { id: 'burden', label: '부담 노출 평가' },
   ],
+  // 영상 분석 자동 매핑(§8.10). 공정≈task 1:1(task-scope). 목 20°↑ 굴곡 유지시간·굴곡 성분
+  // 자동제안. neckCombinedFlexRot(회전·복합)은 candidate로 격하 — 모듈 미기입.
+  videoMappingConfig: {
+    scope: 'task',
+    featureKeys: ['neckFlexionOver20HoursPerDay', 'neckForcedFlexion'],
+    coerce: stringCoerce, // neck_* 필드는 문자열 저장
+    writeField: (moduleData, ctx, featureKey, value) =>
+      taskScopeWriteField('cervical', moduleData, ctx, featureKey, value),
+  },
   presetConfig: {
     label: '경추 작업목록',
     fields: 'tasks',

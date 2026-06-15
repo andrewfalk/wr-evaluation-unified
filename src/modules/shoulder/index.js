@@ -4,6 +4,7 @@ import { createShoulderModuleData, createShoulderDiagnosis, createShoulderJobExt
 import { computeShoulderCalc, isShoulderAssessmentComplete } from './utils/calculations';
 import { shoulderExportHandlers } from './utils/exportHandlers';
 import { ensureModule } from '../../core/utils/batchImportHelpers';
+import { jobScopeWriteField, stringCoerce } from '../../core/utils/videoMapping';
 
 registerModule({
   id: 'shoulder',
@@ -19,6 +20,15 @@ registerModule({
   tabs: [
     { id: 'job', label: '신체부담 평가' },
   ],
+  // 영상 분석 자동 매핑(§8.10). overhead·반복(중/고속) 시간(시간/일) 자동제안.
+  // vibrationToolUseDurationCandidate는 candidate로 격하 — 모듈 미기입(가속도 측정 불가).
+  videoMappingConfig: {
+    scope: 'job',
+    featureKeys: ['overheadHours', 'repetitiveMediumHours', 'repetitiveFastHours'],
+    coerce: stringCoerce, // *_Hours는 문자열 저장
+    writeField: (moduleData, ctx, featureKey, value) =>
+      jobScopeWriteField('shoulder', createShoulderJobExtras, moduleData, ctx, featureKey, value),
+  },
   presetConfig: {
     label: '어깨 신체부담',
     fields: [
