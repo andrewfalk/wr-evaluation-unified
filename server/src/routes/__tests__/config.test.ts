@@ -7,6 +7,7 @@ vi.mock('../../config', () => ({
     deploymentMode:      'intranet',
     ai:                  { enabled: false },
     localFallbackAllowed: false,
+    videoAnalysisEnabled: false,
   },
 }));
 
@@ -26,6 +27,7 @@ describe('GET /api/config/public', () => {
       mode:                 'intranet',
       aiEnabled:            false,
       localFallbackAllowed: false,
+      videoAnalysisEnabled: false,
     });
     expect(res.body).toHaveProperty('serverTime');
     expect(new Date(res.body.serverTime).getTime()).not.toBeNaN();

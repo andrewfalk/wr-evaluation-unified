@@ -2,6 +2,7 @@ import { BasicInfoForm, BasicInfoSidePanel } from './BasicInfoForm';
 import { DiagnosisForm } from './DiagnosisForm';
 import { AssessmentStep } from './AssessmentStep';
 import { AIAnalysisPanel } from './AIAnalysisPanel';
+import { VideoAnalysisStep } from './VideoAnalysisStep';
 import { createDiagnosis } from '../utils/data';
 import { canEditPatient } from '../utils/patientOwnership';
 
@@ -22,7 +23,7 @@ export function StepContent({
   errors, settings, session,
   presets, presetMeta, presetError,
   aiAvailable,
-  updateShared, updateModule, updateModuleById, updateDiagnoses, updateActiveModules,
+  updatePatient, updateShared, updateModule, updateModuleById, updateDiagnoses, updateActiveModules,
   handlePresetSelect, setPresetModalJobId, setPresetBrowseJobId,
 }) {
   if (!currentStep || !activePatient) return null;
@@ -87,6 +88,18 @@ export function StepContent({
             </div>
           </section>
         </div>
+      );
+    }
+    if (currentStep.id === 'videoAnalysis') {
+      return (
+        <VideoAnalysisStep
+          shared={shared}
+          updateShared={updateShared}
+          updatePatient={updatePatient}
+          activePatient={activePatient}
+          activeModules={activeModules}
+          session={session}
+        />
       );
     }
     if (currentStep.id === 'assessment') {

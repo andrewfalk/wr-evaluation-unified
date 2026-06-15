@@ -10,14 +10,20 @@
 ### M1 — mock 세로조각 (6.0-0 ~ 6.0-4)
 - [x] **PR1 (6.0-0)** feature 계약 + SharedDataSchema 확장 — PR #11 ✅ 머지
 - [x] **PR2 (6.0-1)** videoAnalysis 데이터 모델 + `ensureSharedDefaults()` 마이그레이션 — PR #12 ✅ 머지
-- [~] **PR3 (6.0-2)** mock 생성기 + 집계 + `videoMappingConfig` + provenance/rollback (구현 완료, PR 머지 대기)
+- [x] **PR3 (6.0-2)** mock 생성기 + 집계 + `videoMappingConfig` + provenance/rollback — PR #13 ✅ 머지
   - [x] `videoMock.js` — `generateMockFeatures(requestedFeatures, profile)`
   - [x] `videoAggregate.js` — 공정→직업 집계(누적=가중합, 피크=max, 빈도=가중평균)
   - [x] `videoProvenance.js` — `applyFeatureToModule()` + rollback + `videoMapping.js` 헬퍼
   - [x] `moduleRegistry` JSDoc + `getModulesWithVideoMapping()` + shape 매니페스트 테스트
   - [x] knee/shoulder/spine/cervical `videoMappingConfig` 선언(모듈별 타입 코어싱)
   - [x] vitest.config `@contracts` alias(소스) + 테스트 20건 (531 passed)
-- [ ] **PR4 (6.0-3)** 피처플래그 5곳 배선 + 로컬 mock UI
+- [~] **PR4 (6.0-3)** 피처플래그 5곳 배선 + 로컬 mock UI (구현 완료, PR 머지 대기)
+  - [x] 플래그 5곳(server config env / ServerPublicConfigSchema / `/api/config/public` / `FAIL_CLOSED_CONFIG` / mock 서버)
+  - [x] `buildSteps(activeModules, opts)` 시그니처 + 호출부(App.jsx, useIntakeWizard) + 테스트
+  - [x] `VideoAnalysisStep.jsx` + `StepContent` 라우팅(`updatePatient` 전달)
+  - [x] 로컬 mock UI(공정/클립/시점/%/profile → mock 분석 → 제안 검토 → 적용·무시 → 적용이력 rollback)
+  - [x] config 테스트(클라+서버) 갱신 + 전체 테스트(client 543/server 373)·빌드·tsc OK
+  - 참고: task-scope(척추·경추) 자동적용은 process↔task 링크 설계 후속(현재 직업단위 모듈 적용·candidate/검토 표시까지)
 - [ ] **PR5 (6.0-4)** clip/job DB + 서버 mock 폴링 + apply endpoint + audit
 
 ### M2 — 실제 추론 PoC (6.0-3.5, 6.0-5, 6.0-6)

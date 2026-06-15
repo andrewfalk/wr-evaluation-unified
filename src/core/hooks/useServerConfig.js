@@ -5,6 +5,7 @@ const FAIL_CLOSED_CONFIG = {
   mode: 'intranet',
   aiEnabled: false,
   localFallbackAllowed: false,
+  videoAnalysisEnabled: false,
   serverTime: null,
 };
 

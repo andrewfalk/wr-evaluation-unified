@@ -162,6 +162,9 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
     }),
 
     cors: Object.freeze({ origins: corsOrigins }),
+
+    // 작업 영상 인간공학 분석(v6.0.0). 검증(6.0-B2) 통과 전까지 운영 기본 비활성.
+    videoAnalysisEnabled: bool(env, 'VIDEO_ANALYSIS_ENABLED', false),
   });
 }
 

@@ -334,6 +334,7 @@ function handleConfigPublic(_req, res) {
     mode:                'intranet',
     aiEnabled:           false,
     localFallbackAllowed: false,
+    videoAnalysisEnabled: process.env.VIDEO_ANALYSIS_ENABLED === 'true' || process.env.VIDEO_ANALYSIS_ENABLED === '1',
     serverTime:          new Date().toISOString(),
   });
 }

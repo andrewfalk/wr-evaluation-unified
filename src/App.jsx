@@ -138,9 +138,13 @@ function App() {
   const handleResetPatientsRef = useRef(null);
 
   // 현재 환자의 스텝 목록
-  const steps = useMemo(() => buildSteps(activeModules), [activeModules]);
+  const videoAnalysisEnabled = !!serverConfig?.videoAnalysisEnabled;
+  const steps = useMemo(
+    () => buildSteps(activeModules, { videoAnalysisEnabled }),
+    [activeModules, videoAnalysisEnabled]
+  );
   const { currentStepIndex, setCurrentStepIndex, goToStep, goNext, goPrev, switchPatient } = useStepNavigation({ steps, activeId, setActiveId, setShowSidebar });
-  const { intakeShared, setIntakeShared, handleStartIntake, handleIntakeComplete } = useIntakeWizard({ settings, session, setPatients, setActiveId, setCurrentStepIndex, setShowHome });
+  const { intakeShared, setIntakeShared, handleStartIntake, handleIntakeComplete } = useIntakeWizard({ settings, session, setPatients, setActiveId, setCurrentStepIndex, setShowHome, videoAnalysisEnabled });
   handleStartIntakeRef.current = handleStartIntake;
 
   useEffect(() => {
@@ -588,6 +592,7 @@ function App() {
                 presetMeta={presetMeta}
                 presetError={presetError}
                 aiAvailable={aiAvailable}
+                updatePatient={updatePatient}
                 updateShared={updateShared}
                 updateModule={updateModule}
                 updateModuleById={updateModuleById}
