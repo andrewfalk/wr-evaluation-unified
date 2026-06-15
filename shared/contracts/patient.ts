@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { VideoAnalysisDataSchema } from './videoAnalysis';
 
 export const DiagnosisSchema = z.object({
   id: z.string().uuid(),
@@ -40,6 +41,8 @@ export const SharedDataSchema = z.object({
   specialNotes: z.string(),
   diagnoses: z.array(DiagnosisSchema),
   jobs: z.array(SharedJobSchema),
+  // 작업 영상 인간공학 분석(§8.11). 구파일 parse 호환 위해 optional — 런타임은 ensureSharedDefaults로 보강(PR2).
+  videoAnalysis: VideoAnalysisDataSchema.optional(),
 });
 
 export const PatientDataSchema = z.object({
