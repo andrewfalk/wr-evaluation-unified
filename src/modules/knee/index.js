@@ -4,6 +4,7 @@ import { createKneeModuleData, createKneeDiagnosis, createKneeJobExtras } from '
 import { computeKneeCalc, isKneeAssessmentComplete } from './utils/calculations';
 import { kneeExportHandlers } from './utils/exportHandlers';
 import { parseKlg, parseBool, ensureModule } from '../../core/utils/batchImportHelpers';
+import { jobScopeWriteField, stringCoerce } from '../../core/utils/videoMapping';
 
 registerModule({
   id: 'knee',
@@ -19,6 +20,14 @@ registerModule({
   tabs: [
     { id: 'job', label: '신체부담 평가' },
   ],
+  // 영상 분석 자동 매핑(§8.10). squatting(분/일)만 자동제안. kneeTwist는 candidate(suspectedKneeTwist)로 격하 — 모듈 미기입.
+  videoMappingConfig: {
+    scope: 'job',
+    featureKeys: ['squatDuration'],
+    coerce: stringCoerce, // squatting은 문자열 저장
+    writeField: (moduleData, ctx, featureKey, value) =>
+      jobScopeWriteField('knee', createKneeJobExtras, moduleData, ctx, featureKey, value),
+  },
   presetConfig: {
     label: '무릎 신체부담',
     fields: [
