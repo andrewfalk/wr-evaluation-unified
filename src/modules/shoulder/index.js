@@ -3,6 +3,7 @@ import { ShoulderEvaluation } from './ShoulderEvaluation';
 import { createShoulderModuleData, createShoulderDiagnosis, createShoulderJobExtras } from './utils/data';
 import { computeShoulderCalc, isShoulderAssessmentComplete } from './utils/calculations';
 import { shoulderExportHandlers } from './utils/exportHandlers';
+import { ensureModule } from '../../core/utils/batchImportHelpers';
 
 registerModule({
   id: 'shoulder',
@@ -52,6 +53,43 @@ registerModule({
       if (idx >= 0) extras[idx] = { ...extras[idx], ...patch };
       else extras.push(patch);
       return { ...moduleData, jobExtras: extras };
+    },
+  },
+  batchImportConfig: {
+    columns: {
+      ellmanRight: ['ellman(우)', 'ellman_right'],
+      ellmanLeft: ['ellman(좌)', 'ellman_left'],
+      shoulderOverhead: ['오버헤드', 'overhead'],
+      shoulderMedium: ['반복중간', 'repetitivemedium'],
+      shoulderFast: ['반복빠름', 'repetitivefast'],
+      shoulderHeavyCount: ['중량물횟수', 'heavyloadcount'],
+      shoulderHeavySeconds: ['중량물시간', 'heavyloadseconds'],
+      shoulderVibration: ['진동(시간/일)', 'vibration'],
+    },
+    applyRow({ patient, row, diagnosis, job, colMap, getCell }) {
+      if (diagnosis && (getCell(row, colMap.ellmanRight) || getCell(row, colMap.ellmanLeft))) {
+        diagnosis.ellmanRight = diagnosis.ellmanRight || String(getCell(row, colMap.ellmanRight) || '').trim();
+        diagnosis.ellmanLeft = diagnosis.ellmanLeft || String(getCell(row, colMap.ellmanLeft) || '').trim();
+      }
+
+      const hasShoulderData = [colMap.shoulderOverhead, colMap.shoulderMedium, colMap.shoulderFast, colMap.shoulderHeavyCount, colMap.shoulderHeavySeconds, colMap.shoulderVibration].some(index => getCell(row, index));
+      if (!hasShoulderData || !job) return;
+
+      const shoulderData = ensureModule(patient, 'shoulder');
+      if (!shoulderData.jobExtras) shoulderData.jobExtras = [];
+      let extra = (shoulderData.jobExtras || []).find(item => item.sharedJobId === job.id);
+      if (!extra) {
+        extra = createShoulderJobExtras(job.id);
+        shoulderData.jobExtras.push(extra);
+      }
+      Object.assign(extra, {
+        overheadHours: String(getCell(row, colMap.shoulderOverhead) || extra.overheadHours || ''),
+        repetitiveMediumHours: String(getCell(row, colMap.shoulderMedium) || extra.repetitiveMediumHours || ''),
+        repetitiveFastHours: String(getCell(row, colMap.shoulderFast) || extra.repetitiveFastHours || ''),
+        heavyLoadCount: String(getCell(row, colMap.shoulderHeavyCount) || extra.heavyLoadCount || ''),
+        heavyLoadSeconds: String(getCell(row, colMap.shoulderHeavySeconds) || extra.heavyLoadSeconds || ''),
+        vibrationHours: String(getCell(row, colMap.shoulderVibration) || extra.vibrationHours || ''),
+      });
     },
   },
 });

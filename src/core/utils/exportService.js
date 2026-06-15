@@ -415,10 +415,12 @@ export async function exportBatch(patients) {
   await exportAsZip(valid, `업무관련성평가_${valid.length}명_${date}.zip`);
 }
 
-const BATCH_HEADERS = [
+export const BATCH_HEADERS = [
   '이름', '등록번호', '생년월일', '재해일자', '키', '체중', '성별',
   '병원명', '진료과', '담당의', '특이사항', '복귀고려사항',
   '진단코드', '진단명', '방향', 'KLG(우)', 'KLG(좌)', 'Ellman(우)', 'Ellman(좌)',
+  '상병상태(우)', '상병상태(좌)', '업무관련성(우)', '업무관련성(좌)',
+  '업무관련성낮음사유(우)', '업무관련성낮음사유(좌)', '수직분포원리', '동반척추증',
   '직종명', '시작일', '종료일', '근무기간(년)', '근무기간(개월)',
   '중량물(kg)', '쪼그려앉기(분)', '계단오르내리기', '무릎비틀기', '출발정지반복', '좁은공간', '무릎접촉충격', '점프착지',
   '오버헤드(시간/일)', '반복중간(시간/일)', '반복빠름(시간/일)', '중량물횟수(회/일)', '중량물시간(초/회)', '진동(시간/일)',
@@ -446,7 +448,11 @@ const BATCH_HEADERS = [
 const GENDER_REVERSE = { male: '남', female: '여' };
 const SIDE_REVERSE = { right: '우측', left: '좌측', both: '양측' };
 
-function generateBatchRows(patientList) {
+function getAssessmentLevelText(level) {
+  return level === 'high' ? '높음' : level === 'low' ? '낮음' : '';
+}
+
+export function generateBatchRows(patientList) {
   const rows = [];
 
   for (const patient of patientList) {
@@ -551,6 +557,15 @@ function generateBatchRows(patientList) {
       row.push(diag?.klgLeft || '');
       row.push(diag?.ellmanRight || '');
       row.push(diag?.ellmanLeft || '');
+
+      row.push(diag?.confirmedRight ? getStatusText(diag.confirmedRight) : '');
+      row.push(diag?.confirmedLeft ? getStatusText(diag.confirmedLeft) : '');
+      row.push(getAssessmentLevelText(diag?.assessmentRight));
+      row.push(getAssessmentLevelText(diag?.assessmentLeft));
+      row.push(diag?.assessmentRight === 'low' ? getReasonText(diag.reasonRight || [], diag.reasonRightOther) : '');
+      row.push(diag?.assessmentLeft === 'low' ? getReasonText(diag.reasonLeft || [], diag.reasonLeftOther) : '');
+      row.push(diag?.verticalDistribution ? getStatusText(diag.verticalDistribution) : '');
+      row.push(diag?.concomitantSpondylosis ? getStatusText(diag.concomitantSpondylosis) : '');
 
       row.push(job?.jobName || '');
       row.push(job?.startDate || '');

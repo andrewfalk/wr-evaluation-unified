@@ -1,29 +1,22 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { getModule, getAllModules } from './core/moduleRegistry';
-import { SettingsModal } from './core/components/SettingsModal';
-import { MigrationReportModal } from './core/components/MigrationReportModal';
-import { ConflictResolveModal } from './core/components/ConflictResolveModal';
-import { PatientIdentityConflictModal } from './core/components/PatientIdentityConflictModal';
-import { BatchImportModal } from './core/components/BatchImportModal';
-import { PresetManageModal } from './core/components/PresetManageModal';
-import { PresetBrowseModal } from './core/components/PresetBrowseModal';
-import { SaveModal, LoadModal } from './core/components/SaveLoadModals';
 import { LandingScreen } from './core/components/LandingScreen';
 import { IntakeWizard } from './core/components/IntakeWizard';
 import { PatientSidebar } from './core/components/PatientSidebar';
 import { StepContent } from './core/components/StepContent';
 import { MainHeader } from './core/components/MainHeader';
 import { StepIndicator } from './core/components/StepIndicator';
+import { AppModals } from './core/components/AppModals';
 import { useAuth } from './core/auth/AuthContext';
 import { useServerConfig } from './core/hooks/useServerConfig';
 import { useAIAvailable } from './core/hooks/useAIAvailable';
-import { configureHttpClient } from './core/services/httpClient';
-import { getCsrfToken } from './core/utils/csrfCookie';
-import { normalizeSession } from './core/auth/session';
-import { runRefreshWithBroadcast, onAuthBroadcast, broadcastLogout } from './core/auth/authChannel';
+import { useAuthSync } from './core/hooks/useAuthSync';
+import { useAppSettings } from './core/hooks/useAppSettings';
+import { useEvaluationDateSync } from './core/hooks/useEvaluationDateSync';
+import { useElectronMenuEvents } from './core/hooks/useElectronMenuEvents';
+import { useConflictResolution } from './core/hooks/useConflictResolution';
 import { useIntegrationStatus } from './core/hooks/useIntegrationStatus';
 import { usePatientList } from './core/hooks/usePatientList';
-import { DEFAULT_SETTINGS, FONT_SIZE_MAP } from './core/utils/data';
 import { useExportHandlers } from './core/hooks/useExportHandlers';
 import { usePresetManagement } from './core/hooks/usePresetManagement';
 import { useEMRIntegration } from './core/hooks/useEMRIntegration';
@@ -34,26 +27,16 @@ import { useMigration } from './core/hooks/useMigration';
 import { useOpsStatus } from './core/hooks/useOpsStatus';
 import { usePatientCrud } from './core/hooks/usePatientCrud';
 import { usePatientSync } from './core/hooks/usePatientSync';
-import { resolvePatientConflictInList } from './core/services/patientConflictResolution';
-import { deletePatientOnServer } from './core/services/patientServerRepository';
 import { suggestModules } from './core/utils/diagnosisMapping';
-import { showAlert, showConfirm } from './core/utils/platform';
-import { getSyncedEvaluationDate } from './core/utils/patientCompletion';
+import { showConfirm } from './core/utils/platform';
 import { generateUnifiedReport } from './core/utils/reportGenerator';
 import { buildSteps } from './core/utils/steps';
-import { isPatientIdentityPushConflict, isRedactedPatientRecord, touchPatientRecord } from './core/services/patientRecords';
+import { isRedactedPatientRecord } from './core/services/patientRecords';
 import { canEditPatient } from './core/utils/patientOwnership';
-import {
-  clearAutoSavedWorkspace,
-  loadAppSettings,
-  loadAppSettingsAsync,
-  saveAppSettings,
-} from './core/services/workspaceRepository';
+import { clearAutoSavedWorkspace } from './core/services/workspaceRepository';
 import { LoginModal } from './core/components/LoginModal';
 import { ChangePasswordModal } from './core/components/ChangePasswordModal';
 import { SwitchToLocalButton } from './core/components/SwitchToLocalButton';
-import { AdminConsoleModal } from './core/components/AdminConsoleModal';
-import { AccountProfileModal } from './core/components/AccountProfileModal';
 
 const DEFAULT_PATIENT_FILTERS = {
   searchQuery: '',
@@ -74,10 +57,6 @@ function getDefaultPatientScope(session) {
     : 'mine';
 }
 
-function normalizeBaseUrl(baseUrl = '') {
-  return String(baseUrl || '').trim().replace(/\/$/, '');
-}
-
 // 모듈 등록 (사이드이펙트 import)
 import './modules/knee';
 import './modules/spine';
@@ -85,21 +64,6 @@ import './modules/cervical';
 import './modules/shoulder';
 import './modules/elbow';
 import './modules/wrist';
-
-
-function applyAuthUpdate(currentSession, authUpdate) {
-  const patch = typeof authUpdate === 'string'
-    ? { accessToken: authUpdate }
-    : (authUpdate || {});
-  const next = {
-    ...(currentSession || {}),
-    status: 'ready',
-  };
-  if (patch.accessToken !== undefined) next.accessToken = patch.accessToken;
-  if (patch.accessExpiresAt !== undefined) next.accessExpiresAt = patch.accessExpiresAt;
-  if (patch.user) next.user = { ...(currentSession?.user || {}), ...patch.user };
-  return normalizeSession(next);
-}
 
 function App() {
   const { session, setSession, resetToLocalSession, isAuthenticated, sessionVerified, logout } = useAuth();
@@ -114,7 +78,8 @@ function App() {
   const [showSidebar, setShowSidebar] = useState(false);
   const [patientFilters, setPatientFilters] = useState(DEFAULT_PATIENT_FILTERS);
   const [selectedIds, setSelectedIds] = useState(new Set());
-  const [settings, setSettings] = useState(() => loadAppSettings(DEFAULT_SETTINGS));
+  const { settings, handleSaveSettings, switchToLocalMode } = useAppSettings({ session, setSession, resetToLocalSession });
+  useAuthSync({ session, setSession, resetToLocalSession });
   const [showSettings, setShowSettings] = useState(false);
   const [showAdminConsole, setShowAdminConsole] = useState(false);
   const [showAccountProfile, setShowAccountProfile] = useState(false);
@@ -171,81 +136,6 @@ function App() {
 
   const handleStartIntakeRef = useRef(null);
   const handleResetPatientsRef = useRef(null);
-  const skipNextSettingsUrlResetRef = useRef(false);
-
-  // Keep a stable ref to the latest session so the refresh handler never
-  // captures a stale closure value.
-  const sessionRef = useRef(session);
-  useEffect(() => { sessionRef.current = session; }, [session]);
-
-  // Wire up httpClient's 401-refresh interceptor once at mount.
-  useEffect(() => {
-    configureHttpClient({
-      // baseUrl comes from the original failed request so we always hit the
-      // same server, even if session.apiBaseUrl is momentarily out of sync.
-      onRefresh: ({ baseUrl: requestBaseUrl, forceCsrf = false } = {}) =>
-        runRefreshWithBroadcast(
-          // doRefresh: this tab won the lock and performs the actual refresh.
-          async () => {
-            const current = sessionRef.current;
-            const base = (
-              requestBaseUrl ?? current?.apiBaseUrl ?? ''
-            ).trim().replace(/\/$/, '');
-
-            let csrfToken = getCsrfToken();
-
-            // CSRF cookie missing: call /api/auth/csrf first (no CSRF required
-            // for this endpoint). It re-validates the HttpOnly refresh cookie,
-            // sets a new wr_csrf cookie, and returns a fresh accessToken.
-            if (forceCsrf || !csrfToken) {
-              const csrfRes = await fetch(`${base}/api/auth/csrf`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: { 'Content-Type': 'application/json' },
-              });
-              if (!csrfRes.ok) throw new Error('CSRF renewal failed');
-              const csrfData = await csrfRes.json();
-              const newSession = applyAuthUpdate(sessionRef.current, csrfData);
-              setSession(newSession);
-              return newSession;
-            }
-
-            const res = await fetch(`${base}/api/auth/refresh`, {
-              method: 'POST',
-              credentials: 'include',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken,
-              },
-            });
-            if (!res.ok) throw new Error('Refresh failed');
-            const data = await res.json();
-            const newSession = applyAuthUpdate(sessionRef.current, data);
-            setSession(newSession);
-            return newSession;
-          },
-          // applyToken: another tab broadcast REFRESH_SUCCESS — update this
-          // tab's session without a server round-trip.
-          (authUpdate) => {
-            const newSession = applyAuthUpdate(sessionRef.current, authUpdate);
-            setSession(newSession);
-            return newSession;
-          },
-        ),
-      onLogout: () => { broadcastLogout(); resetToLocalSession(); },
-    });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Sync session state when another tab refreshes or logs out.
-  useEffect(() => {
-    return onAuthBroadcast((msg) => {
-      if (msg?.type === 'REFRESH_SUCCESS' && msg.accessToken) {
-        setSession(prev => applyAuthUpdate(prev, msg));
-      } else if (msg?.type === 'LOGOUT') {
-        resetToLocalSession();
-      }
-    });
-  }, [setSession, resetToLocalSession]);
 
   // 현재 환자의 스텝 목록
   const steps = useMemo(() => buildSteps(activeModules), [activeModules]);
@@ -314,81 +204,11 @@ function App() {
     handleStartIntake,
   });
 
-  // 테마/폰트 적용
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', settings.theme);
-    document.documentElement.style.fontSize = FONT_SIZE_MAP[settings.fontSize] || '16px';
-  }, [settings.theme, settings.fontSize]);
-
-  // Sync apiBaseUrl into session when settings change.
-  // session.mode is intentionally NOT synced here — it is only set to 'intranet'
-  // by login() after server authentication, preventing unauthenticated local
-  // sessions from being treated as authenticated by the isAuthenticated gate.
-  // If the URL changes while an intranet session is active, the existing auth is
-  // invalid for the new server — reset to local so the LoginModal re-prompts.
-  useEffect(() => {
-    const prev = session;
-    const nextBaseUrl = normalizeBaseUrl(settings.apiBaseUrl);
-    const prevBaseUrl = normalizeBaseUrl(prev.apiBaseUrl);
-    const skipReset = skipNextSettingsUrlResetRef.current;
-    skipNextSettingsUrlResetRef.current = false;
-    if (prevBaseUrl === nextBaseUrl) return;
-    if (skipReset) {
-      if (prev.mode !== 'intranet') {
-        setSession(s => ({ ...s, apiBaseUrl: nextBaseUrl }));
-      }
-      return;
-    }
-    if (prev.mode === 'intranet') {
-      resetToLocalSession();
-    } else {
-      setSession(s => ({ ...s, apiBaseUrl: nextBaseUrl }));
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.apiBaseUrl]); // intentionally excludes session/setSession/resetToLocalSession — URL-change only
-
-  // Electron: 파일 기반 설정 비동기 로드
-  useEffect(() => {
-    let cancelled = false;
-    loadAppSettingsAsync(DEFAULT_SETTINGS).then(s => {
-      if (cancelled) return;
-      skipNextSettingsUrlResetRef.current = true;
-      setSettings(s);
-    });
-    return () => { cancelled = true; };
-  }, []);
-
   // 평가 완료 시 evaluationDate 자동 설정
-  useEffect(() => {
-    if (!activeId) return;
-    const p = patients.find(x => x.id === activeId);
-    if (!p || isRedactedPatientRecord(p) || !p.data) return;
-
-    const nextEvaluationDate = getSyncedEvaluationDate(p);
-    const currentEvaluationDate = p.data?.shared?.evaluationDate || '';
-    if (currentEvaluationDate === nextEvaluationDate) return;
-
-    setPatients(prev => prev.map(x =>
-      x.id === activeId
-        ? touchPatientRecord(
-          { ...x, data: { ...x.data, shared: { ...x.data.shared, evaluationDate: nextEvaluationDate } } },
-          { session }
-        )
-        : x
-    ));
-  }, [activeId, patients, session]);
+  useEvaluationDateSync({ activeId, patients, setPatients, session });
 
   // Electron 메뉴 이벤트
-  useEffect(() => {
-    const unsubs = [];
-    if (window.electron?.onMenuNew) {
-      unsubs.push(window.electron.onMenuNew(() => { handleResetPatientsRef.current?.(); }));
-    }
-    if (window.electron?.onGotoModule) {
-      unsubs.push(window.electron.onGotoModule(() => { handleStartIntakeRef.current?.(); }));
-    }
-    return () => unsubs.forEach(fn => fn?.());
-  }, []);
+  useElectronMenuEvents({ handleResetPatientsRef, handleStartIntakeRef });
 
   const displayPatients = usePatientList(patients, patientFilters);
 
@@ -409,18 +229,8 @@ function App() {
 
   // --- 핸들러 ---
 
-  const handleSaveSettings = (newSettings) => {
-    setSettings(newSettings);
-    saveAppSettings(newSettings);
-    const nextBaseUrl = normalizeBaseUrl(newSettings.apiBaseUrl);
-    const switchingToLocal = newSettings.integrationMode !== 'intranet';
-    // Reset intranet session when: switching to local mode, or changing the server URL.
-    // Either case means the existing auth token is no longer valid for the new context.
-    if (session.mode === 'intranet' && (switchingToLocal || normalizeBaseUrl(session.apiBaseUrl) !== nextBaseUrl)) {
-      resetToLocalSession();
-    } else {
-      setSession(prev => ({ ...prev, apiBaseUrl: nextBaseUrl }));
-    }
+  const handleSaveSettingsAndClose = (newSettings) => {
+    handleSaveSettings(newSettings);
     setShowSettings(false);
   };
 
@@ -428,15 +238,6 @@ function App() {
     setShowHome(false);
     setShowSidebar(true);
   }, []);
-
-  const switchToLocalMode = useCallback(() => {
-    if (!window.confirm(
-      '로컬 모드로 전환하면 서버 동기화가 중단되고 ' +
-      '이 브라우저에 저장된 데이터로만 작업하게 됩니다.\n' +
-      '서버 감사/동기화에 포함되지 않을 수 있습니다.\n\n계속할까요?'
-    )) return;
-    handleSaveSettings({ ...settings, integrationMode: 'local' });
-  }, [settings, handleSaveSettings]);
 
   const withLocalEscape = (content) => (
     <>
@@ -463,199 +264,36 @@ function App() {
   };
   handleResetPatientsRef.current = handleResetPatients;
 
-  const applyResolvedConflict = (patientId, resolution, options = {}) => {
-    setPatients(prev => {
-      const next = resolvePatientConflictInList(prev, patientId, resolution, options);
-      if (activeId === patientId && !next.some(p => p.id === patientId)) {
-        queueMicrotask(() => {
-          setActiveId(next[0]?.id || null);
-          setCurrentStepIndex(0);
-        });
-      }
-      return next;
-    });
-    setConflictPatientId(null);
+  const { markRemoteDeleteConflict, handleResolveConflict } = useConflictResolution({
+    setPatients, activeId, setActiveId, setCurrentStepIndex, session, settings, setConflictPatientId,
+  });
+
+  // 공통 모달 props (AppModals)
+  const modalsProps = {
+    session, settings, integrationStatus, syncState, syncNow, logout,
+    patients, activePatient, steps,
+    setActiveId, setCurrentStepIndex, setShowHome,
+
+    showAdminConsole, setShowAdminConsole,
+    showAccountProfile, setShowAccountProfile,
+    showChangePassword, setShowChangePassword,
+    showSettings, setShowSettings, handleSaveSettings: handleSaveSettingsAndClose,
+    showMigrationReport, setShowMigrationReport,
+    migrationStatus, migrationResult, startMigration, retryMigration, resetMigration,
+    reloadPresets,
+
+    showSaveModal, setShowSaveModal,
+    saveName, setSaveName, savedItems, handleSave, handleOverwriteSave, handleDelete,
+    showLoadModal, setShowLoadModal, legacyItems, handleLoad,
+
+    showBatchImport, setShowBatchImport, handleBatchImport,
+
+    conflictPatient, setConflictPatientId, handleResolveConflict, markRemoteDeleteConflict,
+
+    presetModalJobId, setPresetModalJobId, presetEditingPreset, setPresetEditingPreset,
+    presetBrowseJobId, setPresetBrowseJobId,
+    presets, handleSaveCustomPreset, closePresetManageModal, handleDeleteCustomPreset, handlePresetSelect,
   };
-
-  const markRemoteDeleteConflict = useCallback((patientId) => {
-    if (!patientId) return;
-    setPatients(prev => prev.map(p => (
-      p.id === patientId
-        ? {
-            ...p,
-            sync: {
-              ...(p.sync || {}),
-              syncStatus: 'conflict',
-              conflict: {
-                ...(p.sync?.conflict || {}),
-                kind: 'remote-delete',
-                serverRevision: null,
-              },
-            },
-          }
-        : p
-    )));
-  }, [setPatients]);
-
-  const handleResolveConflict = async (resolution, { patient, serverPatient, mergedData } = {}) => {
-    if (!patient) return;
-    const conflict = patient.sync?.conflict || {};
-    const conflictKind = conflict.kind;
-
-    if (resolution === 'use-local' && conflictKind === 'delete') {
-      try {
-        await deletePatientOnServer(
-          patient.sync.serverId,
-          serverPatient?.sync?.revision ?? conflict.serverRevision ?? patient.sync.revision,
-          { session, settings }
-        );
-        applyResolvedConflict(patient.id, resolution, { serverPatient });
-      } catch (error) {
-        if (error?.status === 404) {
-          applyResolvedConflict(patient.id, resolution, { serverPatient });
-          return;
-        }
-        setPatients(prev => prev.map(p => (
-          p.id === patient.id
-            ? {
-                ...p,
-                sync: {
-                  ...(p.sync || {}),
-                  syncStatus: 'conflict',
-                  conflict: {
-                    ...(p.sync?.conflict || {}),
-                    serverRevision: error?.data?.currentRevision ?? p.sync?.conflict?.serverRevision ?? null,
-                  },
-                },
-              }
-            : p
-        )));
-        await showAlert(`Delete failed. ${error?.message || 'Please try again.'}`);
-      }
-      return;
-    }
-
-    const needsNewLocalId = conflictKind === 'remote-delete' && (
-      resolution === 'use-local' || resolution === 'merge'
-    );
-    applyResolvedConflict(patient.id, resolution, {
-      serverPatient,
-      mergedData,
-      newId: needsNewLocalId ? crypto.randomUUID() : null,
-    });
-  };
-
-  // 공통 모달 렌더링
-  const renderModals = () => (
-    <>
-      {showAdminConsole && (
-        <AdminConsoleModal
-          session={session}
-          onClose={() => setShowAdminConsole(false)}
-          onPatientAssignmentChanged={() => syncNow({ pull: true, reason: 'assignment-change' })}
-        />
-      )}
-      {showAccountProfile && (
-        <AccountProfileModal
-          session={session}
-          settings={settings}
-          syncState={syncState}
-          onClose={() => setShowAccountProfile(false)}
-          onLogout={logout}
-          onChangePassword={() => { setShowAccountProfile(false); setShowChangePassword(true); }}
-          onShowAdminConsole={() => { setShowAccountProfile(false); setShowAdminConsole(true); }}
-        />
-      )}
-      {showChangePassword && (
-        <ChangePasswordModal
-          apiBaseUrl={session?.apiBaseUrl || settings?.apiBaseUrl || ''}
-          onClose={() => setShowChangePassword(false)}
-        />
-      )}
-      {showSettings && (
-        <SettingsModal
-          settings={settings}
-          session={session}
-          integrationStatus={integrationStatus}
-          onSave={handleSaveSettings}
-          onClose={() => setShowSettings(false)}
-          onLogout={logout}
-          onMigrate={() => { setShowSettings(false); setShowMigrationReport(true); }}
-          onPresetsImported={reloadPresets}
-        />
-      )}
-      {showMigrationReport && (
-        <MigrationReportModal
-          status={migrationStatus}
-          result={migrationResult}
-          onStart={startMigration}
-          onRetry={retryMigration}
-          onReset={resetMigration}
-          onClose={() => setShowMigrationReport(false)}
-          onPresetsImported={reloadPresets}
-          session={session}
-        />
-      )}
-      {showSaveModal && <SaveModal patientCount={patients.length} saveName={saveName} onSaveNameChange={e => setSaveName(e.target.value)} savedItems={savedItems} onSave={handleSave} onOverwriteSave={handleOverwriteSave} onDelete={handleDelete} onClose={() => setShowSaveModal(false)} />}
-      {showLoadModal && <LoadModal legacyItems={legacyItems} savedItems={savedItems} onLoad={handleLoad} onDelete={handleDelete} onClose={() => setShowLoadModal(false)} />}
-      {showBatchImport && <BatchImportModal onClose={() => setShowBatchImport(false)} onImport={handleBatchImport} existingPatients={patients} />}
-      {conflictPatient && isPatientIdentityPushConflict(conflictPatient.sync?.conflict) ? (
-        <PatientIdentityConflictModal
-          patient={conflictPatient}
-          session={session}
-          settings={settings}
-          onUseServer={(serverPatient) =>
-            handleResolveConflict('use-server', { patient: conflictPatient, serverPatient })
-          }
-          onEditIdentity={() => {
-            setConflictPatientId(null);
-            setActiveId(conflictPatient.id);
-            setShowHome(false);
-            const infoIdx = steps.findIndex(s => s.id === 'info');
-            if (infoIdx >= 0) setCurrentStepIndex(infoIdx);
-          }}
-          onClose={() => setConflictPatientId(null)}
-        />
-      ) : conflictPatient ? (
-        <ConflictResolveModal
-          patient={conflictPatient}
-          session={session}
-          settings={settings}
-          onResolve={handleResolveConflict}
-          onRemoteDeleteDetected={markRemoteDeleteConflict}
-          onClose={() => setConflictPatientId(null)}
-        />
-      ) : null}
-      {presetModalJobId && activePatient && (
-        <PresetManageModal
-          jobId={presetModalJobId}
-          patient={activePatient}
-          presets={presets}
-          editingPreset={presetEditingPreset}
-          onSave={handleSaveCustomPreset}
-          onClose={closePresetManageModal}
-          session={session}
-        />
-      )}
-      {presetBrowseJobId && activePatient && (
-        <PresetBrowseModal
-          job={(activePatient.data?.shared?.jobs || []).find(job => job.id === presetBrowseJobId)}
-          presets={presets}
-          onDelete={handleDeleteCustomPreset}
-          onEdit={(preset) => {
-            setPresetEditingPreset(preset);
-            setPresetModalJobId(presetBrowseJobId);
-            setPresetBrowseJobId(null);
-          }}
-          onSelect={async (preset) => {
-            await handlePresetSelect(presetBrowseJobId, preset);
-            setPresetBrowseJobId(null);
-          }}
-          onClose={() => setPresetBrowseJobId(null)}
-        />
-      )}
-    </>
-  );
 
   // ===========================================
   // 인트라넷 모드 부팅 게이팅
@@ -780,7 +418,7 @@ function App() {
             ((syncState.serverPatientCount ?? 0) > 0 || patients.length > 0)
           }
         />
-        {renderModals()}
+        <AppModals {...modalsProps} />
       </div>
     );
   }
@@ -978,7 +616,7 @@ function App() {
       </div>
 
       {/* 모달들 */}
-      {renderModals()}
+      <AppModals {...modalsProps} />
     </div>
   );
 }

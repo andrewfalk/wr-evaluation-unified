@@ -3,6 +3,7 @@ import { KneeEvaluation } from './KneeEvaluation';
 import { createKneeModuleData, createKneeDiagnosis, createKneeJobExtras } from './utils/data';
 import { computeKneeCalc, isKneeAssessmentComplete } from './utils/calculations';
 import { kneeExportHandlers } from './utils/exportHandlers';
+import { parseKlg, parseBool, ensureModule } from '../../core/utils/batchImportHelpers';
 
 registerModule({
   id: 'knee',
@@ -56,6 +57,47 @@ registerModule({
       if (idx >= 0) extras[idx] = { ...extras[idx], ...patch };
       else extras.push(patch);
       return { ...moduleData, jobExtras: extras };
+    },
+  },
+  batchImportConfig: {
+    columns: {
+      klgRight: ['klg(우)', 'klg_right'],
+      klgLeft: ['klg(좌)', 'klg_left'],
+      kneeWeight: ['중량물(kg)', 'jobweight'],
+      kneeSquatting: ['쪼그려앉기', 'squat'],
+      kneeStairs: ['계단오르내리기', 'stair'],
+      kneeTwist: ['무릎비틀기', 'twist'],
+      kneeStartStop: ['출발정지반복', 'startstop'],
+      kneeTightSpace: ['좁은공간', 'tightspace'],
+      kneeContact: ['무릎접촉충격', 'contact'],
+      kneeJumpDown: ['점프착지', 'jump'],
+    },
+    applyRow({ patient, row, diagnosis, job, colMap, getCell }) {
+      if (diagnosis && (getCell(row, colMap.klgRight) || getCell(row, colMap.klgLeft))) {
+        diagnosis.klgRight = diagnosis.klgRight || parseKlg(getCell(row, colMap.klgRight));
+        diagnosis.klgLeft = diagnosis.klgLeft || parseKlg(getCell(row, colMap.klgLeft));
+      }
+
+      const hasKneeData = [colMap.kneeWeight, colMap.kneeSquatting, colMap.kneeStairs, colMap.kneeTwist, colMap.kneeStartStop, colMap.kneeTightSpace, colMap.kneeContact, colMap.kneeJumpDown].some(index => getCell(row, index));
+      if (!hasKneeData || !job) return;
+
+      const kneeData = ensureModule(patient, 'knee');
+      if (!kneeData.jobExtras) kneeData.jobExtras = [];
+      let extra = (kneeData.jobExtras || []).find(item => item.sharedJobId === job.id);
+      if (!extra) {
+        extra = createKneeJobExtras(job.id);
+        kneeData.jobExtras.push(extra);
+      }
+      Object.assign(extra, {
+        weight: String(getCell(row, colMap.kneeWeight) || extra.weight || ''),
+        squatting: String(getCell(row, colMap.kneeSquatting) || extra.squatting || ''),
+        stairs: extra.stairs || parseBool(getCell(row, colMap.kneeStairs)),
+        kneeTwist: extra.kneeTwist || parseBool(getCell(row, colMap.kneeTwist)),
+        startStop: extra.startStop || parseBool(getCell(row, colMap.kneeStartStop)),
+        tightSpace: extra.tightSpace || parseBool(getCell(row, colMap.kneeTightSpace)),
+        kneeContact: extra.kneeContact || parseBool(getCell(row, colMap.kneeContact)),
+        jumpDown: extra.jumpDown || parseBool(getCell(row, colMap.kneeJumpDown)),
+      });
     },
   },
 });

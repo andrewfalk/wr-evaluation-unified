@@ -8,6 +8,7 @@ const audit = require('./audit');
 const { getDataPaths } = require('./paths');
 const { readMigrationSnapshot } = require('./migrationDataReader');
 const { evaluateMigrationGate } = require('./migrationGate');
+const aiModels = require('../ai-models.config.cjs');
 
 // ---------------------------------------------------------------------------
 // Build target: 'intranet' or 'standalone' (default)
@@ -302,8 +303,8 @@ function netRequest(url, options, body) {
 
 function callClaude({ prompt, systemPrompt, model, apiKey }) {
   const body = JSON.stringify({
-    model: model || 'claude-haiku-4-5-20251001',
-    max_tokens: 2000,
+    model: model || aiModels.DEFAULT_CLAUDE_MODEL,
+    max_tokens: aiModels.CLAUDE_MAX_TOKENS,
     system: systemPrompt || '',
     messages: [{ role: 'user', content: prompt }]
   });
@@ -318,12 +319,12 @@ function callClaude({ prompt, systemPrompt, model, apiKey }) {
 }
 
 function callGemini({ prompt, systemPrompt, model, apiKey }) {
-  const geminiModel = model || 'gemini-2.5-flash';
+  const geminiModel = model || aiModels.DEFAULT_GEMINI_MODEL;
   const isPro = geminiModel.includes('pro');
   const body = JSON.stringify({
     system_instruction: { parts: [{ text: systemPrompt || '' }] },
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: { maxOutputTokens: isPro ? 65536 : 8192 }
+    generationConfig: { maxOutputTokens: isPro ? aiModels.GEMINI_MAX_OUTPUT_TOKENS.pro : aiModels.GEMINI_MAX_OUTPUT_TOKENS.flash }
   });
 
   return netRequest(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`, {

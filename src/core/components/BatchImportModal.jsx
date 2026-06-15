@@ -1,93 +1,14 @@
 import { useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { createDiagnosis, createSharedJob } from '../utils/data';
 import { useAuth } from '../auth/AuthContext';
-import { suggestModules } from '../utils/diagnosisMapping';
-import { getModule } from '../moduleRegistry';
-import { createKneeJobExtras } from '../../modules/knee/utils/data';
-import { createShoulderJobExtras } from '../../modules/shoulder/utils/data';
-import { createElbowDiagnosisEntry, createElbowJobEvaluation, createElbowModuleData } from '../../modules/elbow/utils/data';
-import { createWristDiagnosisEntry, createWristJobEvaluation, createWristModuleData } from '../../modules/wrist/utils/data';
-import { createCervicalTask, EXPOSURE_TYPE_OPTIONS as CERVICAL_EXPOSURE_TYPE_OPTIONS } from '../../modules/cervical/utils/data';
-import { createTask as createSpineTask } from '../../modules/spine/utils/data';
-import { SPINE_FORMULA_V513 } from '../../modules/spine/utils/formulaVersion';
+import { suggestModules, resolveDiagnosisModule } from '../utils/diagnosisMapping';
+import { getModule, getAllModules } from '../moduleRegistry';
 import { showAlert } from '../utils/platform';
 import { createManagedPatient, touchPatientRecord } from '../services/patientRecords';
-
-function normalizeHeader(value) {
-  return String(value || '').trim().toLowerCase();
-}
-
-function parseDate(value) {
-  if (!value) return '';
-  if (typeof value === 'number') {
-    const parsed = XLSX.SSF.parse_date_code(value);
-    if (!parsed) return '';
-    return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
-  }
-  const str = String(value).trim();
-  const match = str.match(/(\d{4})[./-](\d{1,2})[./-](\d{1,2})/);
-  if (match) {
-    return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
-  }
-  return str;
-}
-
-function parseBool(value) {
-  if (!value) return false;
-  const str = String(value).trim().toLowerCase();
-  return ['o', '1', 'true', 'yes', 'y', '예'].includes(str);
-}
-
-function parseYesNo(value, fallback = '') {
-  if (value === undefined || value === null || value === '') return fallback;
-  const str = String(value).trim().toLowerCase();
-  if (['o', '1', 'true', 'yes', 'y', '예'].includes(str)) return 'yes';
-  if (['x', '0', 'false', 'no', 'n', '아니오'].includes(str)) return 'no';
-  return String(value).trim();
-}
-
-function parseGender(value) {
-  const str = String(value || '').trim().toLowerCase();
-  if (['남', '남자', 'male', 'm'].includes(str)) return 'male';
-  if (['여', '여자', 'female', 'f'].includes(str)) return 'female';
-  return '';
-}
-
-function parseSide(value) {
-  const str = String(value || '').trim().toLowerCase();
-  if (['우측', 'right'].includes(str)) return 'right';
-  if (['좌측', 'left'].includes(str)) return 'left';
-  if (['양측', 'both'].includes(str)) return 'both';
-  return '';
-}
-
-function parseKlg(value) {
-  if (!value) return '';
-  const str = String(value).trim();
-  if (str === 'N/A' || str === '해당없음') return 'N/A';
-  const match = str.match(/(\d)/);
-  return match ? match[1] : '';
-}
-
-function splitList(value) {
-  if (!value) return [];
-  return String(value).split('|').map(item => item.trim()).filter(Boolean);
-}
-
-const CERVICAL_EXPOSURE_TYPE_LOOKUP = CERVICAL_EXPOSURE_TYPE_OPTIONS.reduce((acc, option) => {
-  acc[option.value] = option.value;
-  acc[option.label] = option.value;
-  return acc;
-}, {});
-
-function parseCervicalExposureTypes(value) {
-  return splitList(value)
-    .map(item => CERVICAL_EXPOSURE_TYPE_LOOKUP[item] || item)
-    .filter(mapped =>
-      CERVICAL_EXPOSURE_TYPE_OPTIONS.some(option => option.value === mapped)
-    );
-}
+import {
+  normalizeHeader, parseDate, parseGender, parseSide, getCell, buildColMap,
+  ensureDiagnosis, ensureSharedJob, applyReturnConsiderations, applyDiagnosisAssessment,
+} from '../utils/batchImportHelpers';
 
 function clonePatients(existingPatients = []) {
   return JSON.parse(JSON.stringify(existingPatients || []));
@@ -102,7 +23,11 @@ const IMPORT_FIELD_GROUPS = [
   {
     title: '진단',
     description: '진단 코드와 방향, 영상등급 입력',
-    fields: ['진단코드', '진단명', '방향', 'KLG(우)', 'KLG(좌)', 'Ellman(우)', 'Ellman(좌)'],
+    fields: [
+      '진단코드', '진단명', '방향', 'KLG(우)', 'KLG(좌)', 'Ellman(우)', 'Ellman(좌)',
+      '상병상태(우)', '상병상태(좌)', '업무관련성(우)', '업무관련성(좌)',
+      '업무관련성낮음사유(우)', '업무관련성낮음사유(좌)', '수직분포원리', '동반척추증',
+    ],
   },
   {
     title: '직업',
@@ -181,6 +106,37 @@ const IMPORT_FIELD_GROUPS = [
 
 const IMPORT_FIELD_COUNT = IMPORT_FIELD_GROUPS.reduce((sum, group) => sum + group.fields.length, 0);
 
+const BASE_COLUMNS = {
+  name: ['이름', 'name'],
+  patientNo: ['등록번호', 'patientno', 'registration'],
+  birthDate: ['생년월일', 'birth'],
+  injuryDate: ['재해일자', 'injury'],
+  height: ['키', 'height'],
+  weight: ['체중', 'weight'],
+  gender: ['성별', 'gender'],
+  hospitalName: ['병원명', 'hospital'],
+  department: ['진료과', 'department'],
+  doctorName: ['담당의', 'doctor'],
+  specialNotes: ['특이사항', 'special'],
+  returnConsiderations: ['복귀고려사항', 'return'],
+  diagCode: ['진단코드', 'code'],
+  diagName: ['진단명', 'diag'],
+  side: ['방향', 'side'],
+  diagConfirmedRight: ['상병상태(우)'],
+  diagConfirmedLeft: ['상병상태(좌)'],
+  diagAssessmentRight: ['업무관련성(우)'],
+  diagAssessmentLeft: ['업무관련성(좌)'],
+  diagReasonRight: ['업무관련성낮음사유(우)'],
+  diagReasonLeft: ['업무관련성낮음사유(좌)'],
+  diagVerticalDistribution: ['수직분포원리'],
+  diagConcomitantSpondylosis: ['동반척추증'],
+  jobName: ['직종명', 'job'],
+  jobStart: ['시작일', 'start'],
+  jobEnd: ['종료일', 'end'],
+  jobPeriodY: ['근무기간(년)', 'period(년)', 'period_y'],
+  jobPeriodM: ['근무기간(개월)', 'period(개월)', 'period_m'],
+};
+
 export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
   const { session } = useAuth();
   const [file, setFile] = useState(null);
@@ -218,515 +174,17 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
     }
 
     const headerRow = preview[0].map(normalizeHeader);
-    const findCol = (...names) => headerRow.findIndex(header => names.some(name => header.includes(name)));
-    const getCell = (row, index) => (index >= 0 ? row[index] : undefined);
+    const moduleConfigs = getAllModules()
+      .map(mod => ({ id: mod.id, batchImportConfig: mod.batchImportConfig }))
+      .filter(mod => mod.batchImportConfig);
 
-    const colMap = {
-      name: findCol('이름', 'name'),
-      patientNo: findCol('등록번호', 'patientno', 'registration'),
-      birthDate: findCol('생년월일', 'birth'),
-      injuryDate: findCol('재해일자', 'injury'),
-      height: findCol('키', 'height'),
-      weight: findCol('체중', 'weight'),
-      gender: findCol('성별', 'gender'),
-      hospitalName: findCol('병원명', 'hospital'),
-      department: findCol('진료과', 'department'),
-      doctorName: findCol('담당의', 'doctor'),
-      specialNotes: findCol('특이사항', 'special'),
-      returnConsiderations: findCol('복귀고려사항', 'return'),
-      diagCode: findCol('진단코드', 'code'),
-      diagName: findCol('진단명', 'diag'),
-      side: findCol('방향', 'side'),
-      klgRight: findCol('klg(우)', 'klg_right'),
-      klgLeft: findCol('klg(좌)', 'klg_left'),
-      ellmanRight: findCol('ellman(우)', 'ellman_right'),
-      ellmanLeft: findCol('ellman(좌)', 'ellman_left'),
-      jobName: findCol('직종명', 'job'),
-      jobStart: findCol('시작일', 'start'),
-      jobEnd: findCol('종료일', 'end'),
-      jobPeriodY: findCol('근무기간(년)', 'period(년)', 'period_y'),
-      jobPeriodM: findCol('근무기간(개월)', 'period(개월)', 'period_m'),
-      kneeWeight: findCol('중량물(kg)', 'jobweight'),
-      kneeSquatting: findCol('쪼그려앉기', 'squat'),
-      kneeStairs: findCol('계단오르내리기', 'stair'),
-      kneeTwist: findCol('무릎비틀기', 'twist'),
-      kneeStartStop: findCol('출발정지반복', 'startstop'),
-      kneeTightSpace: findCol('좁은공간', 'tightspace'),
-      kneeContact: findCol('무릎접촉충격', 'contact'),
-      kneeJumpDown: findCol('점프착지', 'jump'),
-      shoulderOverhead: findCol('오버헤드', 'overhead'),
-      shoulderMedium: findCol('반복중간', 'repetitivemedium'),
-      shoulderFast: findCol('반복빠름', 'repetitivefast'),
-      shoulderHeavyCount: findCol('중량물횟수', 'heavyloadcount'),
-      shoulderHeavySeconds: findCol('중량물시간', 'heavyloadseconds'),
-      shoulderVibration: findCol('진동(시간/일)', 'vibration'),
-      cervicalTaskName: findCol('경추_작업명', 'cervical_task_name'),
-      cervicalExposureTypes: findCol('경추_노출유형', 'cervical_exposure_types'),
-      cervicalLoadWeightKg: findCol('경추_하중(kg)', 'cervical_load_weight_kg'),
-      cervicalCarryHoursPerShift: findCol('경추_교대당운반시간', 'cervical_carry_hours_per_shift'),
-      cervicalForcedNeckPosture: findCol('경추_부자연스러운목자세강제', 'cervical_forced_neck_posture'),
-      cervicalNeckNonneutralHours: findCol('경추_비중립정적자세시간', 'cervical_neck_nonneutral_hours_per_day'),
-      cervicalCombinedFlexionRotationPosture: findCol('경추_굴곡신전회전측굴동시발생', 'cervical_combined_flexion_rotation_posture'),
-      cervicalPrecisionWork: findCol('경추_고도의정밀작업', 'cervical_precision_work'),
-      cervicalNotes: findCol('경추_메모', 'cervical_notes'),
-      elbowRecentTaskChange: findCol('팔꿈치_시간적선후관계_최근작업변화', 'elbow_recent_task_change'),
-      elbowTaskChangeDate: findCol('팔꿈치_시간적선후관계_작업변화시점', 'elbow_task_change_date'),
-      elbowSymptomOnsetInterval: findCol('팔꿈치_시간적선후관계_증상발생까지기간', 'elbow_symptom_onset_interval'),
-      elbowImprovesWithRest: findCol('팔꿈치_시간적선후관계_휴식시호전', 'elbow_improves_with_rest'),
-      elbowBkType: findCol('팔꿈치_bk유형', 'elbow_bk_type'),
-      elbowBkSelectionMode: findCol('팔꿈치_bk선택방식'),
-      elbowMainTaskName: findCol('팔꿈치_문제작업명', 'elbow_main_task_name'),
-      elbowDirectAnatomicLink: findCol('팔꿈치_핵심동작연결성', 'elbow_direct_anatomic_link'),
-      elbowExposureTypes: findCol('팔꿈치_공통핵심노출유형', '팔꿈치_핵심노출유형', 'elbow_exposure_types'),
-      elbowRepetitionLevel: findCol('팔꿈치_반복동작정도'),
-      elbowDailyExposureHours: findCol('팔꿈치_1일노출시간', 'elbow_daily_exposure_hours'),
-      elbowShiftSharePercent: findCol('팔꿈치_하루작업비중', '팔꿈치_교대비율', 'elbow_shift_share_percent'),
-      elbowDaysPerWeek: findCol('팔꿈치_주당수행일수', 'elbow_days_per_week'),
-      elbowWorkPattern: findCol('팔꿈치_작업형태', 'elbow_work_pattern'),
-      elbowRestDistribution: findCol('팔꿈치_휴식분포', 'elbow_rest_distribution'),
-      elbowForceLevel: findCol('팔꿈치_힘사용', 'elbow_force_level'),
-      elbowAwkwardPostureLevel: findCol('팔꿈치_비중립자세', 'elbow_awkward_posture_level'),
-      elbowStaticHoldingLevel: findCol('팔꿈치_정적유지', 'elbow_static_holding_level'),
-      elbowDirectPressureLevel: findCol('팔꿈치_직접압박수준', 'elbow_direct_pressure_level'),
-      elbowVibrationExposure: findCol('팔꿈치_진동노출', 'elbow_vibration_exposure'),
-      elbowBk2101CycleSeconds: findCol('팔꿈치_bk2101_주기초', 'elbow_bk2101_cycle_seconds'),
-      elbowBk2101RepetitionPerHour: findCol('팔꿈치_bk2101_시간당반복횟수', 'elbow_bk2101_repetition_per_hour'),
-      elbowBk2101Monotony: findCol('팔꿈치_bk2101_단조반복', 'elbow_bk2101_monotony'),
-      elbowBk2101ForcedDorsalExtension: findCol('팔꿈치_bk2101_배측굴곡', 'elbow_bk2101_forced_dorsal_extension'),
-      elbowBk2101Prosupination: findCol('팔꿈치_bk2101_회내회외', 'elbow_bk2101_prosupination'),
-      elbowBk2105ElbowLeaning: findCol('팔꿈치_bk2105_팔꿈치지지', 'elbow_bk2105_elbow_leaning'),
-      elbowBk2105RepeatedFrictionImpact: findCol('팔꿈치_bk2105_반복마찰충격', 'elbow_bk2105_repeated_friction_impact'),
-      elbowBk2105PressureSource: findCol('팔꿈치_bk2105_압박원인', 'elbow_bk2105_pressure_source'),
-      elbowBk2106RepeatedMechanicalExposure: findCol('팔꿈치_bk2106_반복기계적부담', 'elbow_bk2106_repeated_mechanical_exposure'),
-      elbowBk2106NoncorrectablePosture: findCol('팔꿈치_bk2106_강제자세', 'elbow_bk2106_noncorrectable_posture'),
-      elbowBk2106ProlongedJointPosition: findCol('팔꿈치_bk2106_관절자세유지', 'elbow_bk2106_prolonged_joint_position'),
-      elbowBk2106PressureSource: findCol('팔꿈치_bk2106_압박원인', 'elbow_bk2106_pressure_source'),
-      elbowBk2106ToolPressing: findCol('팔꿈치_bk2106_공구압박', 'elbow_bk2106_tool_pressing'),
-      elbowBk2106FrequentHighForceGrip: findCol('팔꿈치_bk2106_고힘그립', 'elbow_bk2106_frequent_high_force_grip'),
-      elbowBk2103VibrationToolType: findCol('팔꿈치_bk2103_진동공구종류', 'elbow_bk2103_vibration_tool_type'),
-      elbowBk2103DailyVibrationHours: findCol('팔꿈치_bk2103_진동시간', 'elbow_bk2103_daily_vibration_hours'),
-      elbowBk2103HandheldOrGuided: findCol('팔꿈치_bk2103_손유도공구', 'elbow_bk2103_handheld_or_guided'),
-      elbowBk2103ToolPressing: findCol('팔꿈치_bk2103_공구를강하게쥐거나누르면서사용하는작업', '팔꿈치_bk2103_공구압박', 'elbow_bk2103_tool_pressing'),
-      elbowBk2103FrequentHighForceGrip: findCol('팔꿈치_bk2103_강하게쥐는동작반복', '팔꿈치_bk2103_고힘그립', 'elbow_bk2103_frequent_high_force_grip'),
-      wristRecentTaskChange: findCol('손목_시간적선후관계_최근작업변화', 'wrist_recent_task_change'),
-      wristTaskChangeDate: findCol('손목_시간적선후관계_작업변화시점', 'wrist_task_change_date'),
-      wristSymptomOnsetInterval: findCol('손목_시간적선후관계_증상발생까지기간', 'wrist_symptom_onset_interval'),
-      wristImprovesWithRest: findCol('손목_시간적선후관계_휴식시호전', 'wrist_improves_with_rest'),
-      wristBkType: findCol('손목_bk유형', 'wrist_bk_type'),
-      wristBkSelectionMode: findCol('손목_bk선택방식', 'wrist_bk_selection_mode'),
-      wristMainTaskName: findCol('손목_문제작업명', 'wrist_main_task_name'),
-      wristDirectAnatomicLink: findCol('손목_핵심동작연결성', 'wrist_direct_anatomic_link'),
-      wristExposureTypes: findCol('손목_공통핵심노출유형', '손목_핵심노출유형', 'wrist_exposure_types'),
-      wristRepetitionLevel: findCol('손목_반복동작정도', 'wrist_repetition_level'),
-      wristDailyExposureHours: findCol('손목_1일노출시간', 'wrist_daily_exposure_hours'),
-      wristShiftSharePercent: findCol('손목_하루작업비중', '손목_근무시간비중', 'wrist_shift_share_percent'),
-      wristDaysPerWeek: findCol('손목_주당수행일수', 'wrist_days_per_week'),
-      wristWorkPattern: findCol('손목_작업형태', 'wrist_work_pattern'),
-      wristRestDistribution: findCol('손목_휴식분포', 'wrist_rest_distribution'),
-      wristForceLevel: findCol('손목_힘사용', 'wrist_force_level'),
-      wristAwkwardPostureLevel: findCol('손목_비중립자세', 'wrist_awkward_posture_level'),
-      wristStaticHoldingLevel: findCol('손목_정적유지', 'wrist_static_holding_level'),
-      wristDirectPressureLevel: findCol('손목_직접압박수준', 'wrist_direct_pressure_level'),
-      wristVibrationExposure: findCol('손목_진동노출', 'wrist_vibration_exposure'),
-      wristBk2113RepetitiveMotion: findCol('손목_bk2113_반복손목운동', 'wrist_bk2113_repetitive_wrist_motion'),
-      wristBk2101CycleSeconds: findCol('손목_bk2101_주기초', 'wrist_bk2101_cycle_seconds'),
-      wristBk2101RepetitionPerHour: findCol('손목_bk2101_시간당반복횟수', 'wrist_bk2101_repetition_per_hour'),
-      wristBk2101Monotony: findCol('손목_bk2101_단조반복', 'wrist_bk2101_monotony'),
-      wristBk2101ForcedDorsalExtension: findCol('손목_bk2101_배측굴곡', 'wrist_bk2101_forced_dorsal_extension'),
-      wristBk2101Prosupination: findCol('손목_bk2101_회내회외', 'wrist_bk2101_prosupination'),
-      wristBk2103VibrationToolType: findCol('손목_bk2103_진동공구종류', 'wrist_bk2103_vibration_tool_type'),
-      wristBk2103DailyVibrationHours: findCol('손목_bk2103_진동시간', 'wrist_bk2103_daily_vibration_hours'),
-      wristBk2103ToolPressing: findCol('손목_bk2103_공구압박', 'wrist_bk2103_tool_pressing'),
-      wristBk2103FrequentHighForceGrip: findCol('손목_bk2103_고강도파지', 'wrist_bk2103_frequent_high_force_grip'),
-      wristBk2106PressureSource: findCol('손목_bk2106_압박원인', 'wrist_bk2106_pressure_source'),
-      taskName: findCol('작업명', 'task'),
-      posture: findCol('자세코드', 'posture'),
-      taskWeight: findCol('작업중량', 'taskweight'),
-      frequency: findCol('횟수/분', 'frequency'),
-      timeValue: findCol('시간값', 'timevalue'),
-      timeUnit: findCol('시간단위', 'timeunit'),
-      correctionFactor: findCol('보정계수', 'correction'),
-    };
+    const colMap = buildColMap(headerRow, [
+      BASE_COLUMNS,
+      ...moduleConfigs.map(mod => mod.batchImportConfig.columns || {}),
+    ]);
 
     const resultPatients = clonePatients(existingPatients);
-    const stats = { newPatients: 0, newDiagnoses: 0, newJobs: 0, skipped: 0, withDoctorName: 0 };
-
-    const ensureModule = (patient, moduleId) => {
-      if (!patient.data.activeModules.includes(moduleId)) {
-        patient.data.activeModules.push(moduleId);
-      }
-      if (!patient.data.modules[moduleId]) {
-        if (moduleId === 'elbow') {
-          patient.data.modules[moduleId] = createElbowModuleData();
-        } else if (moduleId === 'wrist') {
-          patient.data.modules[moduleId] = createWristModuleData();
-        } else {
-          const mod = getModule(moduleId);
-          if (mod?.createModuleData) patient.data.modules[moduleId] = mod.createModuleData();
-        }
-      }
-      return patient.data.modules[moduleId];
-    };
-
-    const applyReturnConsiderations = (patient, value) => {
-      if (!value) return;
-      ['knee', 'wrist', 'shoulder', 'elbow', 'cervical', 'spine'].forEach(moduleId => {
-        if (patient.data.modules[moduleId]) {
-          patient.data.modules[moduleId].returnConsiderations = value;
-        }
-      });
-    };
-
-    const ensureDiagnosis = (patient, diagCode, diagName, side) => {
-      let diagnosis = (patient.data.shared.diagnoses || []).find(item =>
-        item.code === diagCode && item.name === diagName && item.side === side
-      );
-      if (!diagnosis && (diagCode || diagName)) {
-        diagnosis = { ...createDiagnosis(), code: diagCode, name: diagName, side };
-        patient.data.shared.diagnoses.push(diagnosis);
-        stats.newDiagnoses += 1;
-      }
-      return diagnosis;
-    };
-
-    const ensureSharedJob = (patient, row) => {
-      const jobName = String(getCell(row, colMap.jobName) || '').trim();
-      if (!jobName) return null;
-      let job = (patient.data.shared.jobs || []).find(item => item.jobName === jobName);
-      if (!job) {
-        job = createSharedJob();
-        job.jobName = jobName;
-        job.startDate = parseDate(getCell(row, colMap.jobStart));
-        job.endDate = parseDate(getCell(row, colMap.jobEnd));
-        const years = parseInt(getCell(row, colMap.jobPeriodY), 10) || 0;
-        const months = parseInt(getCell(row, colMap.jobPeriodM), 10) || 0;
-        job.workPeriodOverride = years || months ? `${years}년 ${months}개월` : '';
-        patient.data.shared.jobs.push(job);
-        stats.newJobs += 1;
-      }
-      return job;
-    };
-
-    const ensureElbowEntry = (patient, jobId, diagnosis) => {
-      const elbowData = ensureModule(patient, 'elbow');
-      if (!elbowData.temporalSequence) {
-        elbowData.temporalSequence = elbowData.temporalRelation || createElbowModuleData().temporalSequence;
-      }
-      if (!Array.isArray(elbowData.jobEvaluations)) {
-        elbowData.jobEvaluations = [];
-      }
-
-      let jobEvaluation = elbowData.jobEvaluations.find(item => item.sharedJobId === jobId);
-      if (!jobEvaluation) {
-        jobEvaluation = createElbowJobEvaluation(jobId);
-        elbowData.jobEvaluations.push(jobEvaluation);
-      }
-      if (!Array.isArray(jobEvaluation.diagnosisEntries)) {
-        jobEvaluation.diagnosisEntries = [];
-      }
-
-      let entry = jobEvaluation.diagnosisEntries.find(item => item.diagnosisId === diagnosis.id);
-      if (!entry) {
-        entry = createElbowDiagnosisEntry(diagnosis);
-        jobEvaluation.diagnosisEntries.push(entry);
-      }
-
-      return { elbowData, entry };
-    };
-
-    const ensureWristEntry = (patient, jobId, diagnosis) => {
-      const wristData = ensureModule(patient, 'wrist');
-      if (!wristData.temporalSequence) {
-        wristData.temporalSequence = wristData.temporalRelation || createWristModuleData().temporalSequence;
-      }
-      if (!Array.isArray(wristData.jobEvaluations)) {
-        wristData.jobEvaluations = [];
-      }
-
-      let jobEvaluation = wristData.jobEvaluations.find(item => item.sharedJobId === jobId);
-      if (!jobEvaluation) {
-        jobEvaluation = createWristJobEvaluation(jobId);
-        wristData.jobEvaluations.push(jobEvaluation);
-      }
-      if (!Array.isArray(jobEvaluation.diagnosisEntries)) {
-        jobEvaluation.diagnosisEntries = [];
-      }
-
-      let entry = jobEvaluation.diagnosisEntries.find(item => item.diagnosisId === diagnosis.id);
-      if (!entry) {
-        entry = createWristDiagnosisEntry(diagnosis);
-        jobEvaluation.diagnosisEntries.push(entry);
-      }
-
-      return { wristData, entry };
-    };
-
-    const updateElbowEvaluation = (patient, row, diagnosis, job) => {
-      if (!diagnosis || !job) return;
-
-      const hasElbowData = [
-        colMap.elbowBkType,
-        colMap.elbowMainTaskName,
-        colMap.elbowExposureTypes,
-        colMap.elbowRecentTaskChange,
-      ].some(index => getCell(row, index));
-      if (!hasElbowData) return;
-
-      const { elbowData, entry } = ensureElbowEntry(patient, job.id, diagnosis);
-
-      const bk2103ToolPressing =
-        String(
-          getCell(row, colMap.elbowBk2103ToolPressing)
-          || getCell(row, colMap.elbowBk2103FrequentHighForceGrip)
-          || getCell(row, colMap.elbowBk2106ToolPressing)
-          || entry.bk2103_tool_pressing
-          || ''
-        ).trim();
-
-      Object.assign(entry, {
-        selectedBkType: String(getCell(row, colMap.elbowBkType) || entry.selectedBkType || '').trim(),
-        bkSelectionMode: String(getCell(row, colMap.elbowBkSelectionMode) || entry.bkSelectionMode || 'manual').trim() || 'manual',
-        main_task_name: String(getCell(row, colMap.elbowMainTaskName) || entry.main_task_name || '').trim(),
-        direct_anatomic_link: String(getCell(row, colMap.elbowDirectAnatomicLink) || entry.direct_anatomic_link || '').trim(),
-        exposure_types: splitList(getCell(row, colMap.elbowExposureTypes)).length ? splitList(getCell(row, colMap.elbowExposureTypes)) : (entry.exposure_types || []),
-        repetition_level: String(getCell(row, colMap.elbowRepetitionLevel) || entry.repetition_level || '').trim(),
-        daily_exposure_hours: String(getCell(row, colMap.elbowDailyExposureHours) || entry.daily_exposure_hours || ''),
-        shift_share_percent: String(getCell(row, colMap.elbowShiftSharePercent) || entry.shift_share_percent || ''),
-        days_per_week: String(getCell(row, colMap.elbowDaysPerWeek) || entry.days_per_week || ''),
-        work_pattern: String(getCell(row, colMap.elbowWorkPattern) || entry.work_pattern || '').trim(),
-        rest_distribution: String(getCell(row, colMap.elbowRestDistribution) || entry.rest_distribution || '').trim(),
-        force_level: String(getCell(row, colMap.elbowForceLevel) || entry.force_level || '').trim(),
-        awkward_posture_level: String(getCell(row, colMap.elbowAwkwardPostureLevel) || entry.awkward_posture_level || '').trim(),
-        static_holding_level: String(getCell(row, colMap.elbowStaticHoldingLevel) || entry.static_holding_level || '').trim(),
-        direct_pressure_level: String(getCell(row, colMap.elbowDirectPressureLevel) || entry.direct_pressure_level || '').trim(),
-        vibration_exposure: String(getCell(row, colMap.elbowVibrationExposure) || entry.vibration_exposure || '').trim(),
-        bk2101_cycle_seconds: String(getCell(row, colMap.elbowBk2101CycleSeconds) || entry.bk2101_cycle_seconds || ''),
-        bk2101_repetition_per_hour: String(getCell(row, colMap.elbowBk2101RepetitionPerHour) || entry.bk2101_repetition_per_hour || ''),
-        bk2101_monotony: String(getCell(row, colMap.elbowBk2101Monotony) || entry.bk2101_monotony || '').trim(),
-        bk2101_forced_dorsal_extension: String(getCell(row, colMap.elbowBk2101ForcedDorsalExtension) || entry.bk2101_forced_dorsal_extension || '').trim(),
-        bk2101_prosupination: String(getCell(row, colMap.elbowBk2101Prosupination) || entry.bk2101_prosupination || '').trim(),
-        bk2105_elbow_leaning: String(getCell(row, colMap.elbowBk2105ElbowLeaning) || entry.bk2105_elbow_leaning || '').trim(),
-        bk2105_pressure_source: splitList(getCell(row, colMap.elbowBk2105PressureSource)).length ? splitList(getCell(row, colMap.elbowBk2105PressureSource)) : (entry.bk2105_pressure_source || []),
-        bk2106_pressure_source: splitList(getCell(row, colMap.elbowBk2106PressureSource)).length ? splitList(getCell(row, colMap.elbowBk2106PressureSource)) : (entry.bk2106_pressure_source || []),
-        bk2103_vibration_tool_type: splitList(getCell(row, colMap.elbowBk2103VibrationToolType)).length ? splitList(getCell(row, colMap.elbowBk2103VibrationToolType)) : (entry.bk2103_vibration_tool_type || []),
-        bk2103_daily_vibration_hours: String(getCell(row, colMap.elbowBk2103DailyVibrationHours) || entry.bk2103_daily_vibration_hours || ''),
-        bk2103_tool_pressing: bk2103ToolPressing,
-      });
-
-      if (getCell(row, colMap.elbowRecentTaskChange)) {
-        elbowData.temporalSequence.recent_task_change = String(getCell(row, colMap.elbowRecentTaskChange)).trim();
-      }
-      if (getCell(row, colMap.elbowTaskChangeDate)) {
-        elbowData.temporalSequence.task_change_date = parseDate(getCell(row, colMap.elbowTaskChangeDate));
-      }
-      if (getCell(row, colMap.elbowSymptomOnsetInterval)) {
-        elbowData.temporalSequence.symptom_onset_interval = String(getCell(row, colMap.elbowSymptomOnsetInterval)).trim();
-      }
-      if (getCell(row, colMap.elbowImprovesWithRest)) {
-        elbowData.temporalSequence.improves_with_rest = String(getCell(row, colMap.elbowImprovesWithRest)).trim();
-      }
-    };
-
-    const updateWristEvaluation = (patient, row, diagnosis, job) => {
-      if (!diagnosis || !job) return;
-
-      const hasWristData = [
-        colMap.wristBkType,
-        colMap.wristMainTaskName,
-        colMap.wristExposureTypes,
-        colMap.wristRecentTaskChange,
-      ].some(index => getCell(row, index));
-      if (!hasWristData) return;
-
-      const { wristData, entry } = ensureWristEntry(patient, job.id, diagnosis);
-      const wristToolPressing = String(
-        getCell(row, colMap.wristBk2103ToolPressing)
-        || entry.bk2103_tool_pressing
-        || ''
-      ).trim();
-      const wristHighForceGrip = String(
-        getCell(row, colMap.wristBk2103FrequentHighForceGrip)
-        || entry.bk2103_frequent_high_force_grip
-        || ''
-      ).trim();
-
-      Object.assign(entry, {
-        selectedBkType: String(getCell(row, colMap.wristBkType) || entry.selectedBkType || '').trim(),
-        bkSelectionMode: String(getCell(row, colMap.wristBkSelectionMode) || entry.bkSelectionMode || 'manual').trim() || 'manual',
-        main_task_name: String(getCell(row, colMap.wristMainTaskName) || entry.main_task_name || '').trim(),
-        direct_anatomic_link: String(getCell(row, colMap.wristDirectAnatomicLink) || entry.direct_anatomic_link || '').trim(),
-        exposure_types: splitList(getCell(row, colMap.wristExposureTypes)).length ? splitList(getCell(row, colMap.wristExposureTypes)) : (entry.exposure_types || []),
-        repetition_level: String(getCell(row, colMap.wristRepetitionLevel) || entry.repetition_level || '').trim(),
-        daily_exposure_hours: String(getCell(row, colMap.wristDailyExposureHours) || entry.daily_exposure_hours || ''),
-        shift_share_percent: String(getCell(row, colMap.wristShiftSharePercent) || entry.shift_share_percent || ''),
-        days_per_week: String(getCell(row, colMap.wristDaysPerWeek) || entry.days_per_week || ''),
-        work_pattern: String(getCell(row, colMap.wristWorkPattern) || entry.work_pattern || '').trim(),
-        rest_distribution: String(getCell(row, colMap.wristRestDistribution) || entry.rest_distribution || '').trim(),
-        force_level: String(getCell(row, colMap.wristForceLevel) || entry.force_level || '').trim(),
-        awkward_posture_level: String(getCell(row, colMap.wristAwkwardPostureLevel) || entry.awkward_posture_level || '').trim(),
-        static_holding_level: String(getCell(row, colMap.wristStaticHoldingLevel) || entry.static_holding_level || '').trim(),
-        direct_pressure_level: String(getCell(row, colMap.wristDirectPressureLevel) || entry.direct_pressure_level || '').trim(),
-        vibration_exposure: String(getCell(row, colMap.wristVibrationExposure) || entry.vibration_exposure || '').trim(),
-        bk2113_repetitive_wrist_motion: String(getCell(row, colMap.wristBk2113RepetitiveMotion) || entry.bk2113_repetitive_wrist_motion || '').trim(),
-        bk2101_cycle_seconds: String(getCell(row, colMap.wristBk2101CycleSeconds) || entry.bk2101_cycle_seconds || ''),
-        bk2101_repetition_per_hour: String(getCell(row, colMap.wristBk2101RepetitionPerHour) || entry.bk2101_repetition_per_hour || ''),
-        bk2101_monotony: String(getCell(row, colMap.wristBk2101Monotony) || entry.bk2101_monotony || '').trim(),
-        bk2101_forced_dorsal_extension: String(getCell(row, colMap.wristBk2101ForcedDorsalExtension) || entry.bk2101_forced_dorsal_extension || '').trim(),
-        bk2101_prosupination: String(getCell(row, colMap.wristBk2101Prosupination) || entry.bk2101_prosupination || '').trim(),
-        bk2103_vibration_tool_type: splitList(getCell(row, colMap.wristBk2103VibrationToolType)).length ? splitList(getCell(row, colMap.wristBk2103VibrationToolType)) : (entry.bk2103_vibration_tool_type || []),
-        bk2103_daily_vibration_hours: String(getCell(row, colMap.wristBk2103DailyVibrationHours) || entry.bk2103_daily_vibration_hours || ''),
-        bk2103_tool_pressing: wristToolPressing,
-        bk2103_frequent_high_force_grip: wristHighForceGrip,
-        bk2106_pressure_source: splitList(getCell(row, colMap.wristBk2106PressureSource)).length ? splitList(getCell(row, colMap.wristBk2106PressureSource)) : (entry.bk2106_pressure_source || []),
-      });
-
-      if (getCell(row, colMap.wristRecentTaskChange)) {
-        wristData.temporalSequence.recent_task_change = String(getCell(row, colMap.wristRecentTaskChange)).trim();
-      }
-      if (getCell(row, colMap.wristTaskChangeDate)) {
-        wristData.temporalSequence.task_change_date = parseDate(getCell(row, colMap.wristTaskChangeDate));
-      }
-      if (getCell(row, colMap.wristSymptomOnsetInterval)) {
-        wristData.temporalSequence.symptom_onset_interval = String(getCell(row, colMap.wristSymptomOnsetInterval)).trim();
-      }
-      if (getCell(row, colMap.wristImprovesWithRest)) {
-        wristData.temporalSequence.improves_with_rest = String(getCell(row, colMap.wristImprovesWithRest)).trim();
-      }
-    };
-
-    const updateCervicalEvaluation = (patient, row, job) => {
-      if (!job) return;
-
-      const hasCervicalData = [
-        colMap.cervicalTaskName,
-        colMap.cervicalExposureTypes,
-        colMap.cervicalLoadWeightKg,
-        colMap.cervicalCarryHoursPerShift,
-        colMap.cervicalForcedNeckPosture,
-        colMap.cervicalNeckNonneutralHours,
-        colMap.cervicalCombinedFlexionRotationPosture,
-        colMap.cervicalPrecisionWork,
-        colMap.cervicalNotes,
-      ].some(index => getCell(row, index));
-      if (!hasCervicalData) return;
-
-      const cervicalData = ensureModule(patient, 'cervical');
-      if (!Array.isArray(cervicalData.tasks)) {
-        cervicalData.tasks = [];
-      }
-
-      const taskName = String(getCell(row, colMap.cervicalTaskName) || '').trim();
-      const exposureTypes = parseCervicalExposureTypes(getCell(row, colMap.cervicalExposureTypes));
-      const taskKey = taskName || `__row_${rowIndex}`;
-
-      let task = (cervicalData.tasks || []).find(item =>
-        item.sharedJobId === job.id
-        && (item.name || '') === taskKey
-      );
-
-      if (!task) {
-        const jobTaskCount = (cervicalData.tasks || []).filter(item => item.sharedJobId === job.id).length;
-        task = createCervicalTask(jobTaskCount, job.id);
-        task.name = taskName || task.name;
-        cervicalData.tasks.push(task);
-      }
-
-      Object.assign(task, {
-        sharedJobId: job.id,
-        name: taskName || task.name,
-        exposure_types: exposureTypes.length > 0 ? exposureTypes : (task.exposure_types || []),
-        load_weight_kg: String(getCell(row, colMap.cervicalLoadWeightKg) || task.load_weight_kg || ''),
-        carry_hours_per_shift: String(getCell(row, colMap.cervicalCarryHoursPerShift) || task.carry_hours_per_shift || ''),
-        forced_neck_posture: parseYesNo(getCell(row, colMap.cervicalForcedNeckPosture), task.forced_neck_posture || ''),
-        neck_nonneutral_hours_per_day: String(getCell(row, colMap.cervicalNeckNonneutralHours) || task.neck_nonneutral_hours_per_day || ''),
-        combined_flexion_rotation_posture: parseYesNo(
-          getCell(row, colMap.cervicalCombinedFlexionRotationPosture),
-          task.combined_flexion_rotation_posture || ''
-        ),
-        precision_work: parseYesNo(getCell(row, colMap.cervicalPrecisionWork), task.precision_work || ''),
-        notes: String(getCell(row, colMap.cervicalNotes) || task.notes || '').trim(),
-      });
-    };
-
-    const updateKneeShoulderSpine = (patient, row, diagnosis, job) => {
-      const hasKneeData = [colMap.kneeWeight, colMap.kneeSquatting, colMap.kneeStairs, colMap.kneeTwist, colMap.kneeStartStop, colMap.kneeTightSpace, colMap.kneeContact, colMap.kneeJumpDown].some(index => getCell(row, index));
-      const hasShoulderData = [colMap.shoulderOverhead, colMap.shoulderMedium, colMap.shoulderFast, colMap.shoulderHeavyCount, colMap.shoulderHeavySeconds, colMap.shoulderVibration].some(index => getCell(row, index));
-      const hasSpineData = [colMap.taskName, colMap.posture].some(index => getCell(row, index));
-
-      if (diagnosis && (getCell(row, colMap.klgRight) || getCell(row, colMap.klgLeft))) {
-        diagnosis.klgRight = diagnosis.klgRight || parseKlg(getCell(row, colMap.klgRight));
-        diagnosis.klgLeft = diagnosis.klgLeft || parseKlg(getCell(row, colMap.klgLeft));
-      }
-
-      if (diagnosis && (getCell(row, colMap.ellmanRight) || getCell(row, colMap.ellmanLeft))) {
-        diagnosis.ellmanRight = diagnosis.ellmanRight || String(getCell(row, colMap.ellmanRight) || '').trim();
-        diagnosis.ellmanLeft = diagnosis.ellmanLeft || String(getCell(row, colMap.ellmanLeft) || '').trim();
-      }
-
-      if (hasKneeData && job) {
-        const kneeData = ensureModule(patient, 'knee');
-        if (!kneeData.jobExtras) kneeData.jobExtras = [];
-        let extra = (kneeData.jobExtras || []).find(item => item.sharedJobId === job.id);
-        if (!extra) {
-          extra = createKneeJobExtras(job.id);
-          kneeData.jobExtras.push(extra);
-        }
-        Object.assign(extra, {
-          weight: String(getCell(row, colMap.kneeWeight) || extra.weight || ''),
-          squatting: String(getCell(row, colMap.kneeSquatting) || extra.squatting || ''),
-          stairs: extra.stairs || parseBool(getCell(row, colMap.kneeStairs)),
-          kneeTwist: extra.kneeTwist || parseBool(getCell(row, colMap.kneeTwist)),
-          startStop: extra.startStop || parseBool(getCell(row, colMap.kneeStartStop)),
-          tightSpace: extra.tightSpace || parseBool(getCell(row, colMap.kneeTightSpace)),
-          kneeContact: extra.kneeContact || parseBool(getCell(row, colMap.kneeContact)),
-          jumpDown: extra.jumpDown || parseBool(getCell(row, colMap.kneeJumpDown)),
-        });
-      }
-
-      if (hasShoulderData && job) {
-        const shoulderData = ensureModule(patient, 'shoulder');
-        if (!shoulderData.jobExtras) shoulderData.jobExtras = [];
-        let extra = (shoulderData.jobExtras || []).find(item => item.sharedJobId === job.id);
-        if (!extra) {
-          extra = createShoulderJobExtras(job.id);
-          shoulderData.jobExtras.push(extra);
-        }
-        Object.assign(extra, {
-          overheadHours: String(getCell(row, colMap.shoulderOverhead) || extra.overheadHours || ''),
-          repetitiveMediumHours: String(getCell(row, colMap.shoulderMedium) || extra.repetitiveMediumHours || ''),
-          repetitiveFastHours: String(getCell(row, colMap.shoulderFast) || extra.repetitiveFastHours || ''),
-          heavyLoadCount: String(getCell(row, colMap.shoulderHeavyCount) || extra.heavyLoadCount || ''),
-          heavyLoadSeconds: String(getCell(row, colMap.shoulderHeavySeconds) || extra.heavyLoadSeconds || ''),
-          vibrationHours: String(getCell(row, colMap.shoulderVibration) || extra.vibrationHours || ''),
-        });
-      }
-
-      if (hasSpineData) {
-        const spineData = ensureModule(patient, 'spine');
-        if (!spineData.tasks) spineData.tasks = [];
-        const taskName = String(getCell(row, colMap.taskName) || '').trim();
-        const posture = String(getCell(row, colMap.posture) || '').trim();
-        if (taskName || posture) {
-          let task = (spineData.tasks || []).find(item => item.name === taskName && item.posture === posture);
-          if (!task) {
-            task = createSpineTask((spineData.tasks || []).length, job?.id || '');
-            spineData.tasks.push(task);
-          }
-          Object.assign(task, {
-            sharedJobId: job?.id || task.sharedJobId,
-            name: taskName || task.name,
-            posture: posture || task.posture,
-            weight: Number(getCell(row, colMap.taskWeight) || task.weight || 0),
-            frequency: Number(getCell(row, colMap.frequency) || task.frequency || 0),
-            timeValue: Number(getCell(row, colMap.timeValue) || task.timeValue || 0),
-            timeUnit: String(getCell(row, colMap.timeUnit) || task.timeUnit || 'sec').trim().toLowerCase(),
-            correctionFactor: Number(getCell(row, colMap.correctionFactor) || task.correctionFactor || 1),
-          });
-          // 실제 task 생성/갱신이 일어난 경우에만 v5.1.3 공식으로 승격
-          spineData.formulaVersion = SPINE_FORMULA_V513;
-        }
-      }
-    };
+    const stats = { newPatients: 0, newDiagnoses: 0, newJobs: 0, updatedAssessments: 0, skipped: 0, withDoctorName: 0 };
 
     for (let rowIndex = 1; rowIndex < preview.length; rowIndex += 1) {
       const row = preview[rowIndex];
@@ -751,14 +209,8 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
         const suggestedModules = suggestModules([{ code: diagCode, name: diagName, side }]);
         const modulesData = {};
         suggestedModules.forEach(moduleId => {
-          if (moduleId === 'elbow') {
-            modulesData.elbow = createElbowModuleData();
-          } else if (moduleId === 'wrist') {
-            modulesData.wrist = createWristModuleData();
-          } else {
-            const mod = getModule(moduleId);
-            if (mod?.createModuleData) modulesData[moduleId] = mod.createModuleData();
-          }
+          const mod = getModule(moduleId);
+          if (mod?.createModuleData) modulesData[moduleId] = mod.createModuleData();
         });
 
         patient = createManagedPatient(suggestedModules, modulesData, { session });
@@ -780,17 +232,27 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
         stats.newPatients += 1;
       }
 
-      const diagnosis = ensureDiagnosis(patient, diagCode, diagName, side);
-      const job = ensureSharedJob(patient, row);
+      const diagnosis = ensureDiagnosis(patient, diagCode, diagName, side, stats);
+      if (diagnosis) {
+        const diagModuleId = resolveDiagnosisModule(diagnosis, patient.data.activeModules)?.moduleId;
+        if (applyDiagnosisAssessment(diagnosis, row, colMap, getCell, diagModuleId)) {
+          stats.updatedAssessments += 1;
+        }
+      }
+      const job = ensureSharedJob(patient, row, colMap, getCell, stats);
 
-      updateKneeShoulderSpine(patient, row, diagnosis, job);
-      updateCervicalEvaluation(patient, row, job);
-      updateElbowEvaluation(patient, row, diagnosis, job);
-      updateWristEvaluation(patient, row, diagnosis, job);
-      applyReturnConsiderations(patient, String(getCell(row, colMap.returnConsiderations) || '').trim());
+      moduleConfigs.forEach(mod => {
+        mod.batchImportConfig.applyRow({ patient, row, diagnosis, job, colMap, getCell, rowIndex });
+      });
+
+      applyReturnConsiderations(
+        patient,
+        String(getCell(row, colMap.returnConsiderations) || '').trim(),
+        moduleConfigs.map(mod => mod.id)
+      );
     }
 
-    if (stats.newPatients === 0 && stats.newDiagnoses === 0 && stats.newJobs === 0) {
+    if (stats.newPatients === 0 && stats.newDiagnoses === 0 && stats.newJobs === 0 && stats.updatedAssessments === 0) {
       await showAlert('가져올 데이터가 없습니다.');
       return;
     }

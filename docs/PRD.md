@@ -1,8 +1,8 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
 > **Version:** 5.1.8
-> **Last Updated:** 2026-06-13
-> **Status:** 보안 점검 적용(AI 프록시 모델 allowlist + Electron IPC 보강 + PDF 푸터 이스케이프) / 인트라넷 운영 중
+> **Last Updated:** 2026-06-15
+> **Status:** 보안 점검 적용(AI 프록시 모델 allowlist + Electron IPC 보강 + PDF 푸터 이스케이프) + 코드 구조 리팩터링 + 종합소견 Excel 일괄입출력 / 인트라넷 운영 중
 
 ---
 
@@ -2069,6 +2069,33 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 - **PDF 푸터 XSS 방지**: elbow/wrist/shoulder 모듈 export의 PDF 푸터에 `escapeHtml` 적용 (knee는 기존부터 적용됨).
 - **정리**: 미사용 `electron/preload.js`, `types/placeholder.d.ts`, `artifacts/elbow_module_structure.md` 삭제 + CLAUDE.md/AGENTS.md/README.md의 구조 참조를 `preload-intranet.js`/`preload-standalone.js`로 갱신.
 - 검증: 클라이언트 446 tests pass, `npm run build:web` 통과. package.json 버전 미변경.
+
+#### 2차 적용분 (2026-06-15) — 코드 구조 리팩터링 + 종합소견 Excel 일괄입출력
+
+- **BatchImportModal 모듈화**: 587줄짜리 `handleImport`를 knee/shoulder/elbow/wrist/
+  cervical/spine 6개 모듈의 `registerModule().batchImportConfig(columns/applyRow)`로
+  분리, 공통 헬퍼는 `src/core/utils/batchImportHelpers.js`로 이동.
+- **App.jsx 오케스트레이션 분할**: 987줄 → 624줄. 신규 훅 5개(`useAuthSync`,
+  `useAppSettings`, `useEvaluationDateSync`, `useElectronMenuEvents`,
+  `useConflictResolution`) + `AppModals.jsx` 컴포넌트로 순수 이동(로직 변경 없음).
+- **AI 호출 모델 상수 공유**: 레포 루트에 `ai-models.config.cjs` 신설
+  (ALLOWED_MODELS / DEFAULT_CLAUDE_MODEL / DEFAULT_GEMINI_MODEL / CLAUDE_MAX_TOKENS /
+  GEMINI_MAX_OUTPUT_TOKENS) — `api/analyze.js`(ESM)와 `electron/main.js`(CJS) 양쪽의
+  하드코딩 제거 후 공용 참조.
+- **createTestPatients lazy 분리**: `src/core/utils/data.js`(859줄)의 테스트 데이터
+  생성 로직을 `src/core/fixtures/createTestPatients.js`로 이동, `usePatientCrud.js`에서
+  동적 import로 로드 — 빌드 시 별도 청크(`createTestPatients-*.js`)로 분리.
+- **종합소견 Excel 일괄내보내기·일괄입력**: "일괄입력 형식" 엑셀(`BATCH_HEADERS`/
+  `generateBatchRows`)의 'Ellman(좌)' 컬럼 뒤에 **상병상태(우/좌)·업무관련성(우/좌)·
+  업무관련성낮음사유(우/좌)·수직분포원리·동반척추증** 8개 컬럼 추가.
+  재import 시 `batchImportHelpers.js`의 `applyDiagnosisAssessment`가 값을 진단에
+  반영(spine 전용 필드는 `moduleId === 'spine'`일 때만). 기존 환자·기존 진단의
+  평가값만 갱신되는 재import도 "가져올 데이터가 없습니다"로 막히지 않도록
+  `stats.updatedAssessments` 카운터를 완료 조건에 추가했고, 기존 값과 동일한
+  평가값은 갱신 건수에서 제외.
+- **문서**: CLAUDE.md에 cervical/wrist/server(11개 라우터)/shared-contracts 섹션 추가,
+  `docs/VERCEL_AI_PROXY_HARDENING.md` 신규(운영자용 Vercel 보안 설정 가이드).
+- 검증: vitest 471 passed, `npm run build:web` / `build:electron` 통과, `npm run lint` 0 errors.
 
 ### v5.1.7 (2026-06-04) — 척추 dailyDose 임계치·중증도 사다리 하향 (임상 피드백)
 

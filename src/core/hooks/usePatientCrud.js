@@ -2,7 +2,6 @@ import { useCallback } from 'react';
 import { getModule } from '../moduleRegistry';
 import { touchPatientRecord, migratePatientRecords } from '../services/patientRecords';
 import { deletePatientOnServer, isConflictError } from '../services/patientServerRepository';
-import { createTestPatients } from '../utils/data';
 import { showAlert, showConfirm } from '../utils/platform';
 import { canEditPatient, canDeletePatient } from '../utils/patientOwnership';
 import { preserveDeletedSpineCommonFields } from '../utils/spineAssessmentMigration';
@@ -235,7 +234,10 @@ export function usePatientCrud({
     const doctorNote = session?.mode === 'intranet' && stats.withDoctorName > 0
       ? `, 담당의 입력 ${stats.withDoctorName}명 (동기화 시 자동 배정 시도)`
       : '';
-    showAlert(`가져오기 완료: 신규 ${stats.newPatients}명, 상병 ${stats.newDiagnoses}건, 직업 ${stats.newJobs}건 추가 (중복 ${stats.skipped}건 건너뜀)${doctorNote}`);
+    const assessmentNote = stats.updatedAssessments > 0
+      ? `, 종합소견 ${stats.updatedAssessments}건 갱신`
+      : '';
+    showAlert(`가져오기 완료: 신규 ${stats.newPatients}명, 상병 ${stats.newDiagnoses}건, 직업 ${stats.newJobs}건 추가 (중복 ${stats.skipped}건 건너뜀)${assessmentNote}${doctorNote}`);
   };
 
   const handleLoadTestData = async () => {
@@ -246,6 +248,7 @@ export function usePatientCrud({
       const ok = await showConfirm('테스트 데이터가 로드되면 현재 환자 목록이 교체되고, 서버 모드에서는 서버로 동기화될 수 있습니다. 진행하시겠습니까?');
       if (!ok) return;
     }
+    const { createTestPatients } = await import('../fixtures/createTestPatients');
     const testPatients = migratePatientRecords(createTestPatients(), { session });
     setPatients(testPatients);
     if (testPatients.length > 0) {

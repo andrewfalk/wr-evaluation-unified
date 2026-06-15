@@ -4,6 +4,7 @@ import { createSpineModuleData, createTask } from './utils/data';
 import { computeSpineCalc, isSpineAssessmentComplete } from './utils/calculations';
 import { SPINE_FORMULA_V513 } from './utils/formulaVersion';
 import { spineExportHandlers } from './utils/exportHandlers';
+import { ensureModule } from '../../core/utils/batchImportHelpers';
 
 registerModule({
   id: 'spine',
@@ -43,6 +44,45 @@ registerModule({
         sharedJobId,
       }));
       return { ...moduleData, tasks: [...otherTasks, ...newTasks], formulaVersion: SPINE_FORMULA_V513 };
+    },
+  },
+  batchImportConfig: {
+    columns: {
+      taskName: ['작업명', 'task'],
+      posture: ['자세코드', 'posture'],
+      taskWeight: ['작업중량', 'taskweight'],
+      frequency: ['횟수/분', 'frequency'],
+      timeValue: ['시간값', 'timevalue'],
+      timeUnit: ['시간단위', 'timeunit'],
+      correctionFactor: ['보정계수', 'correction'],
+    },
+    applyRow({ patient, row, job, colMap, getCell }) {
+      const hasSpineData = [colMap.taskName, colMap.posture].some(index => getCell(row, index));
+      if (!hasSpineData) return;
+
+      const spineData = ensureModule(patient, 'spine');
+      if (!spineData.tasks) spineData.tasks = [];
+      const taskName = String(getCell(row, colMap.taskName) || '').trim();
+      const posture = String(getCell(row, colMap.posture) || '').trim();
+      if (!taskName && !posture) return;
+
+      let task = (spineData.tasks || []).find(item => item.name === taskName && item.posture === posture);
+      if (!task) {
+        task = createTask((spineData.tasks || []).length, job?.id || '');
+        spineData.tasks.push(task);
+      }
+      Object.assign(task, {
+        sharedJobId: job?.id || task.sharedJobId,
+        name: taskName || task.name,
+        posture: posture || task.posture,
+        weight: Number(getCell(row, colMap.taskWeight) || task.weight || 0),
+        frequency: Number(getCell(row, colMap.frequency) || task.frequency || 0),
+        timeValue: Number(getCell(row, colMap.timeValue) || task.timeValue || 0),
+        timeUnit: String(getCell(row, colMap.timeUnit) || task.timeUnit || 'sec').trim().toLowerCase(),
+        correctionFactor: Number(getCell(row, colMap.correctionFactor) || task.correctionFactor || 1),
+      });
+      // 실제 task 생성/갱신이 일어난 경우에만 v5.1.3 공식으로 승격
+      spineData.formulaVersion = SPINE_FORMULA_V513;
     },
   },
 });

@@ -33,9 +33,13 @@ src/
 │   ├── knee/                # 무릎 모듈 (KneeEvaluation, JobTab, AssessmentTab, KneeResultPanel)
 │   ├── shoulder/            # 어깨 모듈 (ShoulderEvaluation, JobTab, ShoulderResultPanel)
 │   ├── elbow/               # 팔꿈치 모듈 (ElbowEvaluation, ExposureForm, ElbowResultPanel)
-│   └── spine/               # 척추 MDDM 모듈 (SpineEvaluation, TaskManager, TaskEditor, ResultDashboard)
+│   ├── spine/               # 척추 MDDM 모듈 (SpineEvaluation, TaskManager, TaskEditor, ResultDashboard)
+│   ├── cervical/            # 경추(목) 모듈 (CervicalEvaluation, TaskManager — spine과 유사한 부담 노출 평가)
+│   └── wrist/                # 손목/손가락 모듈 (WristEvaluation — BK2101/2106/2113 공통 노출 평가)
 api/analyze.js               # Vercel 서버리스 (Gemini/Claude API 프록시)
 electron/                    # main.js + preload-intranet.js/preload-standalone.js + emr-helper/ (IPC: AI 호출 + EMR 연동)
+server/                       # 인트라넷 서버 (Express + PostgreSQL, server/src/routes/ — 아래 "서버" 섹션 참고)
+shared/contracts/             # 클라이언트-서버 공유 zod 스키마 (아래 "공유 계약" 섹션 참고)
 ```
 
 ## 모듈 추가 방법
@@ -60,6 +64,13 @@ registerModule({
     extractFromModule(moduleData, sharedJobId) { /* → 프리셋 데이터 */ },
     applyToModule(moduleData, sharedJobId, presetData) { /* → 수정된 moduleData */ },
   },
+  batchImportConfig: {                     // BatchImportModal 일괄 import 연동 (선택)
+    columns: { fieldKey: ['엑셀헤더후보1', 'header_candidate2'] },  // findCol 후보 목록
+    applyRow({ patient, row, diagnosis, job, colMap, getCell, rowIndex }) {
+      // colMap[key] + getCell(row, index)로 셀 값을 읽어 patient.data.modules[id]에 반영
+      // 데이터가 없으면 즉시 return (hasXxxData 가드)
+    },
+  },
 });
 ```
 
@@ -75,11 +86,38 @@ Patient = {
               hospitalName, department, doctorName, specialNotes, diagnoses[], jobs[],
               medicalRecord, highBloodPressure, diabetes, visitHistory,
               consultReplyOrtho, consultReplyNeuro, consultReplyRehab, consultReplyOther },
-    modules: { knee: {}, shoulder: {}, elbow: {}, spine: {} },
+    modules: { knee: {}, shoulder: {}, elbow: {}, spine: {}, cervical: {}, wrist: {} },
     activeModules: ['knee', 'spine', ...]
   }
 }
 ```
+
+## 서버 (server/)
+
+인트라넷 배포용 Express + PostgreSQL 서버. `server/src/routes/`에 11개 라우터:
+
+- **auth.ts**: 로그인/로그아웃/비밀번호 변경/가입 요청, `/me`, CSRF 토큰 재발급
+- **admin.ts**: 디바이스 관리, 조직 설정, 사용자 비밀번호 초기화/권한 부여 등 관리자 기능
+- **patients.ts**: 환자 레코드 CRUD, 일괄 작업, 충돌 해소, 담당의 배정
+- **workspaces.ts**: 환자 목록 스냅샷(워크스페이스) CRUD (사용자/조직 범위)
+- **autosave.ts**: 워크스페이스 자동저장 스냅샷 조회/저장/삭제
+- **presets.ts**: 직업 노출 프리셋 CRUD (공유/조직/개인 범위)
+- **devices.ts**: Ed25519 공개키 + UA 검증 기반 디바이스 등록
+- **audit.ts**: Electron 메인 프로세스에서 전송한 EMR 감사 로그 수신 (Ed25519 서명 검증)
+- **opsStatus.ts**: 백업 실행 상태 조회, 실행/알림 확인 작업
+- **config.ts**: `/api/config/public` — 배포 모드, AI 활성화 여부, 서버 시간 등 공개 설정
+- **ai.ts**: `/api/ai/analyze` — 내부 LLM 또는 승인된 외부 벤더로 AI 분석 요청 프록시
+
+서버 스크립트(`server/package.json`): `dev`(tsx watch), `build`(tsc), `start`,
+`migrate`(DB 마이그레이션), `seed:admin`(관리자 계정 시딩, 루트에서는
+`npm run server:seed:admin`), `retention`(데이터 보존정책 정리 CLI).
+
+## 공유 계약 (shared/contracts/)
+
+클라이언트(`src/`)와 서버(`server/`) 간 요청/응답 형태를 정의하는 zod 스키마 모음
+(`index.ts`에서 재export). `auth.ts`(User/Org/Capabilities), `patient.ts`(Diagnosis/
+SharedJob/SharedData), `workspace.ts`(WorkspaceScope/WorkspaceItem), `autosave.ts`,
+`config.ts`, `preset.ts` 등 — 런타임 의존 없이 타입/스키마만 공유.
 
 ## AI API 분기
 

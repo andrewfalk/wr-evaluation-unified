@@ -1,14 +1,11 @@
 // 통합 평가 시스템 - AI 분석 API Route
 // Claude / Gemini API 프록시 (API 키를 서버에서 안전하게 관리)
 
+import aiModels from '../ai-models.config.cjs';
+
 // 허용 모델 allowlist — AIAnalysisPanel의 선택 옵션과 동기화 유지.
 // 임의 모델명은 고가 모델 호출(비용)과 Gemini URL 경로 조작에 쓰일 수 있어 차단.
-const ALLOWED_MODELS = new Set([
-    'gemini-2.5-flash',
-    'gemini-2.5-pro',
-    'claude-haiku-4-5-20251001',
-    'claude-sonnet-4-6-20250514',
-]);
+const ALLOWED_MODELS = new Set(aiModels.ALLOWED_MODELS);
 
 export default async function handler(req, res) {
     const allowedOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000'];
@@ -91,8 +88,8 @@ async function handleClaude(req, res, { prompt, sysPrompt, model }) {
             'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-            model: model || 'claude-haiku-4-5-20251001',
-            max_tokens: 2000,
+            model: model || aiModels.DEFAULT_CLAUDE_MODEL,
+            max_tokens: aiModels.CLAUDE_MAX_TOKENS,
             system: sysPrompt,
             messages: [{ role: 'user', content: prompt }]
         })
@@ -121,7 +118,7 @@ async function handleGemini(req, res, { prompt, sysPrompt, model }) {
         });
     }
 
-    const geminiModel = model || 'gemini-2.5-flash';
+    const geminiModel = model || aiModels.DEFAULT_GEMINI_MODEL;
     const isPro = geminiModel.includes('pro');
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`;
 
@@ -131,7 +128,7 @@ async function handleGemini(req, res, { prompt, sysPrompt, model }) {
         body: JSON.stringify({
             system_instruction: { parts: [{ text: sysPrompt }] },
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: { maxOutputTokens: isPro ? 65536 : 8192 }
+            generationConfig: { maxOutputTokens: isPro ? aiModels.GEMINI_MAX_OUTPUT_TOKENS.pro : aiModels.GEMINI_MAX_OUTPUT_TOKENS.flash }
         })
     });
 
