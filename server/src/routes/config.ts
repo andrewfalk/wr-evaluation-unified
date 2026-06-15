@@ -10,6 +10,7 @@ export function createConfigRouter(): Router {
       mode:                 config.deploymentMode,
       aiEnabled:            config.ai.enabled,
       localFallbackAllowed: config.localFallbackAllowed,
+      videoAnalysisEnabled: config.videoAnalysisEnabled,
       serverTime:           new Date().toISOString(),
     });
   });

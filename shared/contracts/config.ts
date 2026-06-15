@@ -7,6 +7,8 @@ export const ServerPublicConfigSchema = z.object({
   mode: DeploymentModeSchema,
   aiEnabled: z.boolean(),
   localFallbackAllowed: z.boolean(),
+  // 작업 영상 인간공학 분석(v6.0.0). 구버전 서버 응답 호환 위해 기본 false.
+  videoAnalysisEnabled: z.boolean().default(false),
   serverTime: z.string(),
 });
 

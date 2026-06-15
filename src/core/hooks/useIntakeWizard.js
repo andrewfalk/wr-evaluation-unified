@@ -4,7 +4,7 @@ import { createSharedData } from '../utils/data';
 import { createManagedPatient } from '../services/patientRecords';
 import { buildSteps } from '../utils/steps';
 
-export function useIntakeWizard({ settings, session, setPatients, setActiveId, setCurrentStepIndex, setShowHome }) {
+export function useIntakeWizard({ settings, session, setPatients, setActiveId, setCurrentStepIndex, setShowHome, videoAnalysisEnabled = false }) {
   const [intakeShared, setIntakeShared] = useState(null);
 
   const settingsRef = useRef(settings);
@@ -33,7 +33,7 @@ export function useIntakeWizard({ settings, session, setPatients, setActiveId, s
     p.data.shared = { ...intakeShared };
     setPatients(prev => [...prev, p]);
     setActiveId(p.id);
-    const newSteps = buildSteps(selectedModuleIds);
+    const newSteps = buildSteps(selectedModuleIds, { videoAnalysisEnabled });
     const firstModuleIdx = newSteps.findIndex(s => s.group !== 'shared');
     setCurrentStepIndex(firstModuleIdx >= 0 ? firstModuleIdx : 0);
     setIntakeShared(null);

@@ -59,6 +59,27 @@ describe('ServerPublicConfigSchema', () => {
       localFallbackAllowed: false,
     })).toThrow();
   });
+
+  it('defaults videoAnalysisEnabled to false for legacy server responses', () => {
+    const result = ServerPublicConfigSchema.parse({
+      mode: 'intranet',
+      aiEnabled: false,
+      localFallbackAllowed: false,
+      serverTime: '2024-01-10T09:00:00.000Z',
+    });
+    expect(result.videoAnalysisEnabled).toBe(false);
+  });
+
+  it('parses videoAnalysisEnabled when present', () => {
+    const result = ServerPublicConfigSchema.parse({
+      mode: 'intranet',
+      aiEnabled: false,
+      localFallbackAllowed: false,
+      videoAnalysisEnabled: true,
+      serverTime: '2024-01-10T09:00:00.000Z',
+    });
+    expect(result.videoAnalysisEnabled).toBe(true);
+  });
 });
 
 describe('MockScopedStateSchema', () => {
