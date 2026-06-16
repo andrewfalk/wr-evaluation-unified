@@ -7,3 +7,4 @@ export * from './preset';
 export * from './videoAnalysis';
 export * from './videoAnnotation';
 export * from './poseKeypoints';
+export * from './clipFeatures';

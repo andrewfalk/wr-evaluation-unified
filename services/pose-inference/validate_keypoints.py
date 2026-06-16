@@ -39,6 +39,19 @@ def main():
                     print(f"INVALID: frame {f.get('frameIndex')} person has {len(p['keypoints'])} keypoints, expected {expected}")
                     sys.exit(1)
 
+    # clip_features cross-field 검증(Draft7로 어려운 부분): posture_ratio 0..1, segment 순서.
+    if "featureConfigVersion" in doc and isinstance(doc.get("features"), dict):
+        for key, fv in doc["features"].items():
+            if fv.get("metric") == "posture_ratio":
+                v = fv.get("value")
+                if not (isinstance(v, (int, float)) and 0.0 <= v <= 1.0):
+                    print(f"INVALID: {key} posture_ratio {v} out of 0..1")
+                    sys.exit(1)
+            for seg in fv.get("segments", []):
+                if seg.get("endMs", 0) < seg.get("startMs", 0):
+                    print(f"INVALID: {key} segment endMs < startMs ({seg})")
+                    sys.exit(1)
+
     print(f"VALID: {args.input}")
 
 
