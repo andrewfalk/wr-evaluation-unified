@@ -1,7 +1,8 @@
-// [공유] 영상 분석 스텝 (6.0-3, mock-first). 서버 추론 없이 로컬 mock feature로
-// 공정 정리 → mock 분석 → 제안 검토 → 적용/무시 → provenance/rollback 흐름을 검증한다.
-// 실제 업로드·서버 폴링은 PR5(6.0-4), 실제 추론은 M2에서 연결된다.
-import { useMemo } from 'react';
+// [공유] 영상 분석 스텝 (6.0-3/6.0-4, mock-first). mock feature로 공정 정리 → 분석 →
+// 제안 검토 → 적용/무시 → provenance/rollback 흐름. 인트라넷+synced 환자는 적용을
+// 서버 경로(clip→job→apply, audit·영속화)로, 그 외는 로컬로 처리한다(§8.2/§8.12).
+// 실제 추론은 M2에서 서버 셸에 연결된다.
+import { useMemo, useState } from 'react';
 import { generateMockFeatures } from '../services/videoMock';
 import { aggregateProcessFeatures } from '../services/videoAggregate';
 import {
@@ -10,6 +11,8 @@ import {
   applyFeatureToModule,
   rollbackAppliedInput,
 } from '../services/videoProvenance';
+import { isVideoAnalysisSupported } from '../services/videoAnalysisClient';
+import { applyVideoFeatureViaServer } from '../services/videoServerApply';
 import { getModule } from '../moduleRegistry';
 import { VIDEO_FEATURE_TARGETS } from '@contracts/index';
 
@@ -99,14 +102,30 @@ export function removeClipVA(va, id) {
   return clearDerived({ ...va, clips: va.clips.filter((c) => c.id !== id) });
 }
 
+// 적용 경로 결정: 인트라넷=서버(synced 필요), 인트라넷+미동기=차단, 그 외=로컬.
+export function resolveApplyMode(serverSupported, isSynced) {
+  if (serverSupported && isSynced) return 'server';
+  if (serverSupported && !isSynced) return 'blocked';
+  return 'local';
+}
+
 // ── 컴포넌트 ──────────────────────────────────────────────────────────────
-export function VideoAnalysisStep({ shared, updateShared, updatePatient, activePatient, activeModules = [], session }) {
+export function VideoAnalysisStep({ shared, updateShared, updatePatient, activePatient, activeModules = [], session, settings, onServerApplied }) {
   const va = shared?.videoAnalysis || {
     processes: [], clips: [], processFeatures: [], jobFeatures: [], candidateFeatures: [], appliedInputs: [],
   };
   const jobs = shared?.jobs || [];
   const jobName = (id) => jobs.find((j) => j.id === id)?.jobName || '(직업 미지정)';
   const appliedBy = session?.user?.name || shared?.doctorName || 'unknown';
+
+  // 적용 경로 결정: 인트라넷=서버 경로(synced 필요), 그 외=로컬.
+  const serverSupported = isVideoAnalysisSupported(session);
+  const isSynced = !!activePatient?.sync?.serverId && activePatient?.sync?.syncStatus === 'synced';
+  const applyMode = resolveApplyMode(serverSupported, isSynced);
+  const serverMode = applyMode === 'server';
+  const applyBlocked = applyMode === 'blocked'; // 인트라넷인데 미동기 → 적용 불가
+  const [busy, setBusy] = useState(false);
+  const [applyError, setApplyError] = useState('');
 
   const jobScopeModules = activeModules.filter((m) => getModule(m)?.videoMappingConfig?.scope === 'job');
   const shareTotals = useMemo(() => shareTotalsByJob(va.processes), [va.processes]);
@@ -136,13 +155,37 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   };
 
   // ── 제안 적용 / 되돌리기 ──
-  const applySuggestion = (moduleId, ctx, s, processIds) => {
-    updatePatient((d) => applyFeatureToModule({ data: d }, {
-      moduleId, ctx, featureKey: s.featureKey,
-      suggestedValue: s.suggestedValue, confidence: s.confidence,
-      processIds: processIds || [], analysisBundleVersion: MOCK_BUNDLE, appliedBy,
-    }).patient.data);
+  // 서버 모드: clip→job→apply(영속화·audit) 후 서버 동기화 환자를 목록에 반영(per-field, apply마다 job).
+  // 로컬 모드: updatePatient로 즉시 반영(standalone/web).
+  const applySuggestion = async (moduleId, ctx, s, processIds, analysisProfile) => {
+    if (applyBlocked) {
+      setApplyError('서버에 저장·동기화된 환자만 적용할 수 있습니다. 먼저 저장하세요.');
+      return;
+    }
+    if (!serverMode) {
+      updatePatient((d) => applyFeatureToModule({ data: d }, {
+        moduleId, ctx, featureKey: s.featureKey,
+        suggestedValue: s.suggestedValue, confidence: s.confidence,
+        processIds: processIds || [], analysisBundleVersion: MOCK_BUNDLE, appliedBy,
+      }).patient.data);
+      return;
+    }
+    setBusy(true);
+    setApplyError('');
+    try {
+      const serverPatient = await applyVideoFeatureViaServer(
+        activePatient,
+        { moduleId, ctx, featureKey: s.featureKey, suggestedValue: s.suggestedValue, confidence: s.confidence, processIds: processIds || [], analysisProfile },
+        { session, settings, appliedBy }
+      );
+      onServerApplied?.(serverPatient);
+    } catch (e) {
+      setApplyError(e?.message || '서버 적용에 실패했습니다.');
+    } finally {
+      setBusy(false);
+    }
   };
+  // rollback은 로컬 적용에만(서버 apply 후 rollback은 M3 — §8.12 경계).
   const rollback = (entry) => updatePatient((d) => rollbackAppliedInput({ data: d }, d.shared.videoAnalysis.appliedInputs.indexOf(entry)).data);
 
   const hasAnalysis = (va.jobFeatures || []).length > 0 || (va.processFeatures || []).length > 0;
@@ -155,8 +198,15 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
             <h2 className="section-title"><span className="section-icon">🎥</span>작업 영상 인간공학 분석 (mock)</h2>
             <p className="section-description">
               조사 서류 기반으로 공정을 정리하고 mock 분석을 실행합니다. 결과는 항상 <b>제안값</b>이며 전문의가 확정합니다.
-              (서버 추론·업로드는 후속 단계에서 연결됩니다.)
+              {serverMode && ' 적용은 서버에 기록됩니다(audit).'}
+              {!serverSupported && ' (인트라넷 외 모드: 로컬 적용만)'}
             </p>
+            {applyBlocked && (
+              <p className="muted" style={{ color: '#b26a00' }}>
+                ⚠ 이 환자는 서버에 동기화되지 않았습니다. 먼저 저장·동기화하면 영상 분석 결과를 적용할 수 있습니다.
+              </p>
+            )}
+            {applyError && <p className="muted" style={{ color: '#c62828' }}>오류: {applyError}</p>}
           </div>
         </div>
 
@@ -216,7 +266,9 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                 {jobScopeModules.map((moduleId) => {
                   const suggestions = getModuleSuggestions(jf.features, moduleId);
                   if (suggestions.length === 0) return null;
-                  const procIds = va.processes.filter((p) => p.sharedJobId === jf.sharedJobId).map((p) => p.id);
+                  const jobProcesses = va.processes.filter((p) => p.sharedJobId === jf.sharedJobId);
+                  const procIds = jobProcesses.map((p) => p.id);
+                  const analysisProfile = jobProcesses[0]?.analysisProfile;
                   return (
                     <ul key={moduleId} style={{ listStyle: 'none', paddingLeft: 12 }}>
                       {suggestions.map((s) => (
@@ -226,8 +278,10 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                             신뢰도 {Math.round(s.confidence * 100)}%
                           </span>
                           {s.requiresManualReview && <span style={{ marginLeft: 6, fontSize: 12, color: '#b26a00' }}>수기확인</span>}
-                          <button type="button" style={{ marginLeft: 8 }}
-                            onClick={() => applySuggestion(moduleId, { sharedJobId: jf.sharedJobId }, s, procIds)}>적용</button>
+                          <button type="button" style={{ marginLeft: 8 }} disabled={busy || applyBlocked}
+                            onClick={() => applySuggestion(moduleId, { sharedJobId: jf.sharedJobId }, s, procIds, analysisProfile)}>
+                            {serverMode ? '서버 적용' : '적용'}
+                          </button>
                         </li>
                       ))}
                     </ul>
@@ -254,12 +308,18 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
         {(va.appliedInputs || []).length > 0 && (
           <div style={{ marginTop: 16 }}>
             <h3>적용 이력 (provenance)</h3>
+            {serverMode && (
+              <p className="muted">서버 적용 항목의 되돌리기는 후속 단계(M3)에서 지원됩니다. 모듈 탭에서 직접 수정하세요.</p>
+            )}
             <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
               {va.appliedInputs.map((e, i) => (
                 <li key={i} style={{ margin: '4px 0' }}>
                   <code>{e.targetPath.split('.').slice(-2).join('.')}</code> = {String(e.appliedValue)}
                   <span className="muted" style={{ marginLeft: 6 }}>(이전: {String(e.previousValue)})</span>
-                  <button type="button" style={{ marginLeft: 8 }} onClick={() => rollback(e)}>되돌리기</button>
+                  {/* 서버 모드: 로컬 rollback은 서버(done) 상태와 갈라지므로 미노출(§8.12, Codex). */}
+                  {!serverMode && (
+                    <button type="button" style={{ marginLeft: 8 }} onClick={() => rollback(e)}>되돌리기</button>
+                  )}
                 </li>
               ))}
             </ul>

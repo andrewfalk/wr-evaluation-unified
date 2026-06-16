@@ -7,6 +7,7 @@ import {
   editProcessVA,
   removeProcessVA,
   addClipVA,
+  resolveApplyMode,
 } from '../VideoAnalysisStep.jsx';
 
 describe('requestedFeaturesForModules', () => {
@@ -65,6 +66,19 @@ describe('shareTotalsByJob', () => {
       { sharedJobId: 'b', shiftSharePercent: 100 },
     ]);
     expect(totals).toEqual({ a: 90, b: 100 });
+  });
+});
+
+describe('resolveApplyMode (server vs local vs blocked)', () => {
+  it('intranet + synced → server', () => {
+    expect(resolveApplyMode(true, true)).toBe('server');
+  });
+  it('intranet + not synced → blocked', () => {
+    expect(resolveApplyMode(true, false)).toBe('blocked');
+  });
+  it('non-intranet → local (regardless of sync)', () => {
+    expect(resolveApplyMode(false, true)).toBe('local');
+    expect(resolveApplyMode(false, false)).toBe('local');
   });
 });
 

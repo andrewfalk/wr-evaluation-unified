@@ -25,6 +25,7 @@ export function StepContent({
   aiAvailable,
   updatePatient, updateShared, updateModule, updateModuleById, updateDiagnoses, updateActiveModules,
   handlePresetSelect, setPresetModalJobId, setPresetBrowseJobId,
+  onVideoServerApplied,
 }) {
   if (!currentStep || !activePatient) return null;
 
@@ -99,6 +100,8 @@ export function StepContent({
           activePatient={activePatient}
           activeModules={activeModules}
           session={session}
+          settings={settings}
+          onServerApplied={onVideoServerApplied}
         />
       );
     }
