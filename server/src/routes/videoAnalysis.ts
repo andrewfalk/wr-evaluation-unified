@@ -19,13 +19,15 @@ const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server e
 
 const CreateClipBody = z.object({
   patientId: z.string().uuid(),
-  processId: z.string().optional(),
+  // job-scope 집계는 특정 공정이 없어 null을 보낸다(컬럼도 nullable). null/undefined 모두 허용.
+  processId: z.string().nullable().optional(),
 });
 const SelectTargetBody = z.object({ targetPersonId: z.string().min(1) });
 const CreateJobBody = z.object({
   clipId: z.string().uuid(),
-  processId: z.string().optional(),
-  analysisProfile: z.string().optional(),
+  // job-scope 집계 제안은 process_id 없이 null로 들어온다(여러 공정 집계, 추적은 appliedInputs.processIds).
+  processId: z.string().nullable().optional(),
+  analysisProfile: z.string().nullable().optional(),
   requestedFeatures: z.array(z.string()).optional(),
 });
 // apply: 클라가 applyFeatureToModule로 계산한 환자 data + 멱등 해시.

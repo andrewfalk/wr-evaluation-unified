@@ -159,6 +159,20 @@ describe('POST /jobs (denormalize org/patient from clip)', () => {
     expect(insertCall[1]).toContain(PAT_ID);
     expect(writeAuditLog).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'video_analysis_submit' }));
   });
+
+  it('accepts processId:null (job-scope aggregate) — regression for nullable schema', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [{ id: CLIP_ID, patient_record_id: PAT_ID, organization_id: ORG_ID, assigned_doctor_user_id: USER_ID }] });
+    q(pool).mockResolvedValueOnce({ rows: [{ id: JOB_ID, clip_id: CLIP_ID, process_id: null, status: 'review_pending', analysis_profile: 'posture-basic', requested_features: ['overheadHours'], applied_at: null, applied_revision: null }] });
+    const res = await request(makeApp(pool))
+      .post('/api/video-analysis/jobs')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ clipId: CLIP_ID, processId: null, analysisProfile: 'posture-basic', requestedFeatures: ['overheadHours'] });
+    expect(res.status).toBe(201);
+    expect(res.body.jobId).toBe(JOB_ID);
+  });
 });
 
 describe('POST /jobs/:jobId/apply', () => {
