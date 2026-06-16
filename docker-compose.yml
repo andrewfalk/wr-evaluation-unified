@@ -54,6 +54,8 @@ services:
       REFRESH_TOKEN_SECRET: "${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET is required}"
       CORS_ORIGINS:         ${CORS_ORIGINS:-https://wr.hospital.local:8443,http://localhost:3001}
       AI_PROVIDER:          ${AI_PROVIDER:-none}
+      # 작업 영상 인간공학 분석(v6.0.0). 검증(6.0-B2) 전까지 기본 비활성.
+      VIDEO_ANALYSIS_ENABLED: ${VIDEO_ANALYSIS_ENABLED:-false}
       BACKUPS_DIR:          /backups
     ports:
       - "${DEV_PORT:-3001}:3001"
