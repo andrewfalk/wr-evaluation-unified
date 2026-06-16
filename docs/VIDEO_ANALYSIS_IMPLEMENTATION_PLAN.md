@@ -25,11 +25,16 @@
   - [x] App `onVideoServerApplied`(서버 동기화 환자 목록 반영) → StepContent → 컴포넌트 배선
   - [x] 서버 모드 rollback 미노출 + job review_pending 방어 + processId null 명시(Codex)
   - [x] 테스트(오케스트레이터 5 + resolveApplyMode 3) client 567 / lint 0 / build OK
+- [x] **PR #17 hotfix** job/clip `processId` nullable + `docker-compose.yml` 플래그 passthrough (라이브 검증서 발견)
+- [x] **M1 라이브 검증 완료** (dev docker + 실 Postgres): 0016 마이그레이션 적용, `/api/config/public` 플래그, flag on/off 라우트 401/404, UI에서 clip→job(`done`)→apply, `video_analysis_submit/apply` audit, 환자 payload `appliedInputs` 영속화(knee `squatting="126"` 문자열 coercion·`previousValue` 보존·3공정 집계) 확인
 
-### M2 — 실제 추론 PoC (6.0-3.5, 6.0-5, 6.0-6)
-- [ ] 6.0-3.5 검증 하네스 skeleton
-- [ ] 6.0-5 단일클립 RTMDet+RTMPose ONNX CPU PoC
-- [ ] 6.0-6 feature 계산기 + 대상자 tracking + 시점 융합
+### M2 — 실제 추론 PoC (6.0-3.5, 6.0-5, 6.0-6) — 상세계획 확정(Codex 반영)
+- [ ] **PR A (6.0-3.5)** 검증 하네스 — annotation 계약(+segments/events) + 오차 계산기 (순수 코드, 의존성 0)
+- [ ] **PR B (6.0-5)** 단일클립 RTMDet+RTMPose ONNX CPU PoC — `services/pose-inference/`(Python) + **keypoints 계약 선고정** + 모델 manifest + golden fixture 검증 + privacy guard
+- [ ] **PR C (6.0-6a)** feature 계산기(keypoints→VideoFeatureMap, fixture 기반, OneEuro/각도/threshold 규칙 config 버전관리)
+- [ ] **PR D1 (6.0-6b)** 서버 job 큐/status/result_features + `GET /jobs/:id` 폴링 실동작 (fixture clip 입력)
+- [ ] **PR D2 (6.0-6b)** 대상자 선택/tracking(§8.7) 실제화
+- [ ] **PR D3 (6.0-6b)** 품질검사 + 시점 융합(§8.6.1) + confidence(§8.8)
 
 ### M3 — 업로드·검증·매핑 (6.0-7, 6.0-B2, 6.0-8)
 - [ ] 6.0-7 multipart 업로드 + 임시저장·TTL·cleanup
@@ -53,7 +58,7 @@
 - **기존 기능 무파손** — 하위호환 마이그레이션, 기능은 **피처플래그 뒤에서 비활성 기본**.
 
 이 플랜은 PRD §8.16의 11개 하위단계(6.0-0~6.0-10)를 **실제 코드 구조에 매핑**하고 **단계별 PR→main(피처플래그)**
-워크플로를 입힌다. 1차 마일스톤(M1)을 파일·함수 단위로 상세화, M2~M4는 개요로 둔다.
+워크플로를 입힌다. M1·M2를 파일·함수/PR 경계 수준으로 상세화, M3~M4는 개요로 둔다(착수 직전 상세화).
 
 ### 코드베이스 그라운딩 (실제 코드 검증 — "코드가 진실")
 
@@ -156,10 +161,83 @@
 
 ---
 
-## M2~M4 (개요)
+## M2 — 실제 추론 PoC (상세)
 
-- **M2** 6.0-3.5 검증 하네스(annotation 스키마+오차 계산기) / 6.0-5 ONNX CPU PoC(백엔드 교체 어댑터, 성능목표: 720p sampling fps·1분 처리시간·동시1건·취소/만료/재시도) / 6.0-6 feature 계산기+OneEuro+tracking(§8.7)+시점 융합(§8.6.1).
-- **M3** 6.0-7 multipart 업로드(requestMultipart 계층·multer·디스크 스트리밍·TTL·cleanup·Caddy/Express 상향, tus 후속) / 6.0-B2 검증셋(층화: 시점·가림·다수·작업복·카메라높이·작업유형 + inter-rater) → 임계값 결정 / 6.0-8 저위험 모듈 자동제안 on + skeleton overlay 검수.
+mock feature를 **실제 RTMPose 추론**으로 교체한다. M1 계약(`VideoFeatureValue`/`VIDEO_FEATURE_TARGETS`)은 그대로 유지하므로 소비측(매핑·provenance·UI)은 무변경 — 생성원만 mock→실제로 바뀐다.
+
+### 아키텍처 결정 — 추론 위치 전환 (가장 중요)
+- **M1**: `generateMockFeatures`가 **클라이언트**에서 동작(mock). **M2**: 실제 추론은 PRD §8.2에 따라 **인트라넷 서버 측**에서 수행한다.
+- **추론 스택은 Python**(RTMDet+RTMPose ONNX). 이유: RTMPose/MMPose 생태계가 Python 중심, `onnxruntime-node` 네이티브는 클라(Win7) 제약이 있으나 **서버(Linux 컨테이너/Win10)** 에선 Python+onnxruntime+opencv가 표준. → 신규 **`services/pose-inference/`**(Python) 도입.
+- **Node 서버 ↔ 추론 서비스 연동**: 공유 볼륨 + 비동기 큐(§8.6) 또는 localhost HTTP. **M2 PoC 단계에선 결합을 최소화**(독립 스크립트→fixture)하고, 실제 큐/HTTP 결선은 PR D에서. 에어갭 패키징(docker save/load)은 **M4(6.0-9)**.
+- **백엔드 교체 어댑터(§8.14)**: CPU(ONNX/OpenVINO) 기본, GPU는 후순위 — 추론 호출부를 어댑터로 추상화해 교체 가능하게.
+- **mock은 폐기하지 않음**: 계약이 동일하므로 mock 생성기·fixture는 테스트/오프라인 폴백으로 유지(클라 standalone/web은 계속 mock 또는 미지원).
+
+### keypoints 계약 — PR B 착수 전 선고정 (Codex)
+PR B 산출물이 C/D의 입력이므로 **PR B 코드 전에 `keypoints.json` 스키마를 먼저 박는다**(흔들림 방지). 위치: `services/pose-inference/schema/keypoints.schema.json` + `shared/contracts/poseKeypoints.ts`(zod, 클라/노드 소비용). 필수 필드:
+- `keypointConvention`: `'coco17' | 'wholebody133'`(M2는 coco17, 손목 SI용 wholebody는 6.0-10)
+- `coordinateSpace`: `'pixel' | 'normalized'` + `frameWidth`/`frameHeight`
+- 프레임별: `frameIndex`, `timestampMs`, `sampledFps`
+- 사람별: `bbox[x,y,w,h]`, `personId`/`trackId`, `keypoints[[x,y,score]...]`, per-keypoint `visibility`
+- 재현성: `modelName`/`modelVersion`, `inputSize`, `preprocessConfigHash`
+
+**drift 방지(Codex)**: `keypoints.schema.json`을 **single source of truth**로 삼고 `poseKeypoints.ts`(zod)는 그로부터 파생/정합되게 한다. **PR B/C에 "Python 산출 keypoints.json을 JSON Schema(또는 zod)로 검증하는 테스트"** 를 포함 — Python 출력과 TS 계약이 어긋나면 테스트가 깨지도록.
+
+### 모델 manifest — 재현성·에어갭·법적 방어가능성 (Codex)
+`services/pose-inference/models/manifest.json`: 모델별 `fileName`, `sourceUrl`, `sha256`, `inputSize`, `opset`, `preprocessing`(resize/normalize/letterbox), `postprocessing`(SimCC 등). 가중치 자체는 커밋 금지(.gitignore), manifest만 버전관리 → 에어갭 반입(M4)·재현성(§8.11)의 근거.
+
+### privacy guard — PR B부터 적용 (Codex)
+실제 영상·keypoints는 민감정보. `services/pose-inference/.gitignore`로 영상/가중치/실 keypoints 제외. **테스트 fixture는 synthetic(합성 좌표) 또는 공개 샘플 기반만** 허용 — 실 작업조사 영상·실 환자 keypoints는 저장소 반입 금지(§8.13).
+
+### PR A — 6.0-3.5: 검증 하네스 (의존성 0, 추론과 독립 → 먼저)
+- **`shared/contracts/videoAnnotation.ts`**(신규): `GoldStandardAnnotation`(FeatureKey-keyed gold 값 + 층화 메타 §8.9: viewpoint/occlusion/multiplePeople/clothing/cameraHeight/workType), `AnnotationValue`(numeric/boolean/categorical discriminatedUnion, confidence 없음), `AnnotationSet`.
+  - **segments/events 추가(Codex)**: feature별 최종값뿐 아니라 선택적 `segments`(예: 쪼그림 start/end, overhead 구간, 반복 cycle 구간 `[{featureKey, startMs, endMs}]`). duration/repetition 오차가 "어느 구간에서 틀렸는지" 추적 가능.
+  - `index.ts` 재export.
+- **`src/core/services/videoValidation.js`**(신규, 순수 함수): `metricKind(unit)`(degrees→angle / *_per_day·seconds_per_cycle→time / cycles_*→count / ratio), `numericError(extracted, gold)`→{absError, errorRate}, `compareFeatureMap(featureMap, annotationFeatures)`, `summarizeErrors(comparisons)`→featureKey별 {n, mae, meanErrorRate, agreement}, `binaryMetrics(pairs)`→sensitivity/specificity(위험 역치 초과), `EXAMPLE_TOLERANCES`(§8.9 placeholder: 각도 ±12.5°, 시간 ±20%, 반복 ±17.5% — **실값은 6.0-B2**), `withinTolerance(summary)`.
+- **테스트**: 스키마 parse·discriminatedUnion, 오차 계산, **mock↔annotation 비교**(예: mock overheadHours 1.8 vs gold 2.0 → absError 0.2/errorRate 0.1/time), summarize·binaryMetrics·tolerance.
+- **산출물**: annotation 포맷 + 오차 계산기 → 6.0-B2(실 검증셋, M3)의 토대. 런타임 영향 0.
+
+### PR B — 6.0-5: 단일 클립 RTMDet+RTMPose ONNX CPU PoC
+- **선행**: 위 keypoints 계약 + 모델 manifest + privacy guard 먼저 확정.
+- **목표**: 클립 1개 → `keypoints.json`(계약 준수)을 **CPU·오프라인**으로 산출. 앱/서버 결선 없음(독립 검증).
+- **`services/pose-inference/`**(신규, Python): 입력 클립 경로 → (opencv/ffmpeg 프레임 샘플, profile별 fps) → RTMDet 사람탐지 → RTMPose 추정(SimCC 후처리) → keypoints.json. **백엔드 어댑터**(CPU now). `requirements.txt`.
+- **환경 준비(코드 외)**: Python 3.x, onnxruntime(CPU), opencv-python-headless, **모델 가중치**(manifest 기준, 오프라인 반입은 M4). dev에선 1회 다운로드.
+- **PR 범위**: `services/pose-inference/` + docs만. **앱 런타임 무변경**. 의존성 디렉터리 격리.
+- **검증(육안 이상으로, Codex)**: synthetic/공개 샘플 fixture로 회귀 가능한 단위 검사 — keypoint 수(=17), score 범위(0~1), bbox 안 좌표 비율, 누락 프레임 비율, 처리시간 로그. 골든 출력 일부를 fixture로 고정.
+- **CI 전략(Codex)**: 모델 가중치/ONNX 런타임은 일반 CI에서 매번 받지 않는다. **스키마·계약 검증·feature 계산 테스트는 CI(상시), 실제 ONNX inference smoke는 `RUN_POSE_INFERENCE_TESTS=1` opt-in/수동**으로 분리(가중치 없으면 skip).
+
+### PR C — 6.0-6a: feature 계산기 (keypoints → VideoFeatureMap)
+- **입력**: keypoints 계약 JSON → 계산 레이어. 출력은 M1 **`VideoFeatureMap` 계약 형태**(numeric/categorical/candidate).
+- **계산 규칙을 config로 버전관리(Codex)** — `featureConfig`(버전 포함): 
+  - **각도 정의**: 각 각도를 어떤 3 keypoint로 계산하는지 명시(예: 체간 전굴 = shoulder-hip-knee 벡터각).
+  - **threshold duration**: "연속 N프레임(또는 ms) 이상"이어야 자세시간/이벤트로 카운트.
+  - **OneEuro 파라미터**(mincutoff/beta)를 profile별 config로.
+  - **frame drop 시간 보정**: 누락 프레임 구간 duration 보정 방식.
+- **fixture 기반**: PR B의 keypoints.json(합성) fixture로 단위 테스트(추론 재실행 없이 계산 로직 검증).
+- **검증**: 계산된 feature를 **PR A 오차 계산기**로 annotation과 비교(초기 오차 감 — 정식 검증은 6.0-B2).
+
+### PR D1 — 6.0-6b: 서버 job 워커 + 폴링 실동작
+- **업로드 전 입력 경로 명확화(Codex)**: M3 전까지 multipart 업로드가 없으므로, **dev-only fixture clip 경로를 job에 연결**. 즉 M2-D는 "**fixture 기반 worker job**"으로 한정 — 실제 업로드는 M3(6.0-7).
+- **fixture 경로 보안 가드(Codex)**: `VIDEO_ANALYSIS_FIXTURE_MODE=true` **dev-only 플래그**(production 기본 비활성)일 때만 fixture 경로 허용 + **allowlist 디렉터리 내부로 제한** + 경로 정규화 후 allowlist escape(상대경로/`..`/심볼릭) 차단 → path traversal·임의 파일 접근 방지.
+- **단일 인물 한정(Codex)**: D1은 **single-person fixture만 지원**(tracking이 D2이므로). 다중 인물·`targetPersonId` 안정화는 D2.
+- 추론 서비스를 PR5 job 파이프라인에 연결: `POST /jobs` 큐 투입 → status `queued→processing→review_pending`(실제 비동기), **`GET /jobs/:id` 폴링 실동작**(PR5.1에서 미룬 부분), `result_features` 저장. 동시추론 1건 순차 큐 + 취소/만료(TTL)/재시도(§8.14).
+- **mock→real 전환점 명확화(Codex)**: `GET /jobs/:id`의 `result_features`를 VideoAnalysisStep의 `processFeatures`/`jobFeatures`/`candidateFeatures`에 반영하고, **서버 결과가 있으면 로컬 `generateMockFeatures`를 우회**한다(서버 모드). 로컬 모드(standalone/web)는 계속 mock. 이 지점이 실제 mock→real 교체 경계.
+
+### PR D2 — 6.0-6b: 대상자 선택/tracking 실제화 (§8.7)
+- 샘플 프레임 person box 후보 → 사용자 선택(targetPersonId, PR5 `sample-detect`/`select-target` 셸 실제화) → track ID 추적, track-loss 구간 저신뢰 처리.
+
+### PR D3 — 6.0-6b: 품질검사 + 시점 융합 + confidence
+- **영상 품질검사**: motion blur·frame drop → `usableFrameRatio`.
+- **시점 융합(§8.6.1)**: sagittal/frontal 평면별 각도 채택, `INTER_VIEW_CONFLICT` 경고.
+- **confidence 산출(§8.8)**: keypoint/visibility/tracking/viewpoint/usableFrameRatio → overall.
+- **검증**: 샘플 클립 e2e(업로드 전 단계는 M3) → review_pending → 제안 → 적용. 오차는 6.0-B2 정식 판정.
+
+> **M2 PR 경계 요약**: (선고정) keypoints 계약+모델 manifest+privacy guard → A(검증 하네스·순수) → B(Python 추론 PoC·격리) → C(feature 계산·fixture·config) → D1(서버 job 워커·폴링·fixture 입력) → D2(tracking) → D3(품질·융합·confidence). A는 즉시 착수, B는 환경(Python·가중치) 선행.
+
+---
+
+## M3~M4 (개요)
+
+- **M3** 6.0-7 multipart 업로드(requestMultipart 계층·multer·디스크 스트리밍·TTL·cleanup·Caddy/Express 상향, tus 후속) / 6.0-B2 검증셋(층화: 시점·가림·다수·작업복·카메라높이·작업유형 + inter-rater) → 변수별 임계값 결정 / 6.0-8 저위험 모듈 자동제안 on + skeleton overlay 검수.
 - **M4** 6.0-9 에어갭 Docker(ONNX/OpenVINO CPU, docker save/load, --network none, recipe versioning, WSL2 메모리 vs 네이티브 결정, 동시1건) / 6.0-10(선택) hand 모델 손목 SI(IE 수기).
 
 ---
