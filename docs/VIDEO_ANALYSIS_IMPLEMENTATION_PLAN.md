@@ -145,7 +145,7 @@
 - **rollback 경계**: M1은 로컬 rollback만, 서버 apply rollback은 M3.
 - **테스트**: 서버(flag off 404·guard 403/404·If-Match 400/409·멱등성·denormalize 무결성·audit) / 클라(non-synced dirty·conflict·local-only 차단).
 
-### PR 5.1 — 6.0-4 UI: VideoAnalysisStep ↔ 서버 apply 연결 ✅ 머지 (PR #__)
+### PR 5.1 — 6.0-4 UI: VideoAnalysisStep ↔ 서버 apply 연결 ✅ 머지 (PR #16)
 - `videoServerApply.js` 오케스트레이터: `createClip→createJob(review_pending 방어)→applyFeatureToModule(로컬 data 계산)→applyVideoAnalysisJob`(If-Match 영속화). `computeAppliedInputsHash`(previousValue 제외). 순환 import 회피용 별도 모듈.
 - `resolveApplyMode(serverSupported, isSynced)` → `server`/`blocked`/`local`. 인트라넷+synced=서버 적용(per-field, apply마다 job), 인트라넷+미동기=차단+안내, 그 외=로컬.
 - `App.onVideoServerApplied` → 서버 동기화 환자를 로컬 id로 목록 교체(StepContent 경유 배선, `settings` 전달).
