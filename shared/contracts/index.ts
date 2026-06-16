@@ -6,3 +6,4 @@ export * from './patient';
 export * from './preset';
 export * from './videoAnalysis';
 export * from './videoAnnotation';
+export * from './poseKeypoints';

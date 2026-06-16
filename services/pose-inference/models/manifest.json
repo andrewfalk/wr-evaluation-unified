@@ -1,0 +1,27 @@
+{
+  "description": "포즈 추정 모델 manifest (6.0-5). 가중치 파일 자체는 커밋 금지(.gitignore) — 재현성·에어갭 반입(M4 6.0-9)·법적 방어가능성(§8.11)을 위해 출처/해시/입력크기만 버전관리한다. PoC는 rtmlib가 ~/.cache/rtmlib 로 자동 다운로드.",
+  "backend": "onnxruntime-cpu",
+  "source": "rtmlib==0.0.15 (mode=lightweight body)",
+  "models": [
+    {
+      "role": "detector",
+      "name": "yolox_tiny_8xb8-300e_humanart",
+      "file": "yolox_tiny_8xb8-300e_humanart-6f3252f9.onnx",
+      "sourceUrl": "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/yolox_tiny_8xb8-300e_humanart-6f3252f9.zip",
+      "sha256": "TODO_FILL_FROM_DOWNLOAD",
+      "inputSize": [416, 416],
+      "note": "PRD는 RTMDet을 명시하나 PoC는 rtmlib 기본 person detector(YOLOX-tiny) 사용 — detector는 교체 가능(어댑터)."
+    },
+    {
+      "role": "pose",
+      "name": "rtmpose-s_simcc-body7",
+      "file": "rtmpose-s_simcc-body7_pt-body7_420e-256x192-acd4a1ef_20230504.onnx",
+      "sourceUrl": "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-s_simcc-body7_pt-body7_420e-256x192-acd4a1ef_20230504.zip",
+      "sha256": "TODO_FILL_FROM_DOWNLOAD",
+      "inputSize": [192, 256],
+      "keypointConvention": "coco17",
+      "postprocessing": "SimCC"
+    }
+  ],
+  "todo": "sha256는 6.0-9 에어갭 반입 시 실제 다운로드 파일 해시로 채운다(현재 PoC는 rtmlib 캐시 사용)."
+}

@@ -1,0 +1,85 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://wr-evaluation/keypoints.schema.json",
+  "title": "PoseKeypoints",
+  "description": "포즈 추정 keypoints 시계열 계약 (6.0-5). 이 JSON Schema가 canonical source of truth이며 shared/contracts/poseKeypoints.ts(zod)가 이를 미러링한다. PR C/D는 이 형태를 입력으로 받는다.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "keypointConvention", "coordinateSpace", "frameWidth", "frameHeight", "requestedFps", "sampledFps", "source", "model", "frames"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "keypointConvention": { "enum": ["coco17", "wholebody133"] },
+    "coordinateSpace": { "enum": ["pixel", "normalized"] },
+    "frameWidth": { "type": "integer", "exclusiveMinimum": 0 },
+    "frameHeight": { "type": "integer", "exclusiveMinimum": 0 },
+    "requestedFps": { "type": "number", "exclusiveMinimum": 0 },
+    "sampledFps": { "type": "number", "exclusiveMinimum": 0, "description": "실제 샘플링 fps(= originalFps / step)" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clipRef", "originalFps", "totalFrames"],
+      "properties": {
+        "clipRef": { "type": "string", "minLength": 1 },
+        "originalFps": { "type": "number", "exclusiveMinimum": 0 },
+        "totalFrames": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["detector", "pose", "inputSize", "modelName", "modelVersion", "preprocessConfigHash"],
+      "properties": {
+        "detector": { "type": "string", "minLength": 1 },
+        "pose": { "type": "string", "minLength": 1 },
+        "inputSize": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
+        "modelName": { "type": "string", "minLength": 1 },
+        "modelVersion": { "type": "string", "minLength": 1 },
+        "preprocessConfigHash": { "type": "string", "minLength": 1 }
+      }
+    },
+    "frames": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["frameIndex", "timestampMs", "persons"],
+        "properties": {
+          "frameIndex": { "type": "integer", "minimum": 0 },
+          "timestampMs": { "type": "number", "minimum": 0 },
+          "persons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["trackId", "bbox", "score", "keypoints"],
+              "properties": {
+                "trackId": { "type": ["string", "null"] },
+                "bbox": {
+                  "oneOf": [
+                    { "type": "null" },
+                    { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 }
+                  ]
+                },
+                "score": { "type": "number", "minimum": 0, "maximum": 1 },
+                "keypoints": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": [
+                      { "type": "number" },
+                      { "type": "number" },
+                      { "type": "number", "minimum": 0, "maximum": 1 }
+                    ],
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "additionalItems": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

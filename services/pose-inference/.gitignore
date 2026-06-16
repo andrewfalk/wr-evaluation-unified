@@ -1,0 +1,13 @@
+# privacy guard (§8.13) — 실제 영상·산출 keypoints·모델 가중치는 커밋 금지.
+# fixture는 synthetic/공개 샘플만 fixtures/ 에 둔다.
+.venv/
+__pycache__/
+samples/
+out/
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.onnx
+_probe.py
