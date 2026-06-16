@@ -16,12 +16,25 @@ python -m venv .venv
 
 ## 실행
 ```bash
-# 클립 1개 → keypoints.json (profile별 fps 샘플링)
+# 1) 클립 1개 → keypoints.json (profile별 fps 샘플링)
 .venv/Scripts/python infer_clip.py --input samples/clip.mp4 --output out/keypoints.json --fps 5
+.venv/Scripts/python validate_keypoints.py --input out/keypoints.json   # 계약 검증
 
-# 산출물이 계약(schema/keypoints.schema.json)에 맞는지 검증
-.venv/Scripts/python validate_keypoints.py --input out/keypoints.json
+# 2) keypoints.json → intrinsic clipFeatures (6.0-6a, 자세시간 비율·각도)
+.venv/Scripts/python feature_calc.py --keypoints out/keypoints.json --output out/clip_features.json
+.venv/Scripts/python validate_keypoints.py --input out/clip_features.json --schema schema/clip_features.schema.json
+
+# 계산 로직 골든 테스트(합성 keypoints, 의존성 불필요)
+.venv/Scripts/python test_feature_calc.py
 ```
+
+## feature 계산 (6.0-6a)
+- `feature_calc.py`: keypoints → **intrinsic clipFeatures**(클립 시간 중 자세 비율·각도). 규칙은
+  `feature_config.json`(버전관리: 각도 정의·임계값·OneEuro·품질). PoC 범위 = 자세시간/각도
+  (squatDuration 무릎각<90°, overheadHours 손목>어깨 OR 상완거상≥90°, neckFlexion>20°, trunkPostureG peak각 candidate).
+- **per-day 환산 아님**: `hours_per_day`/`cyclesPerDay`는 공정 활동시간(수기)과 결합하는 별도 단계(PR D1).
+- 계약: `schema/clip_features.schema.json`(canonical) + `shared/contracts/clipFeatures.ts`(zod).
+- 반복(cyclesPerMinute/cycleSeconds)은 별도 알고리즘 → 후속.
 
 ## 계약 (drift 방지)
 - **canonical**: `schema/keypoints.schema.json` (JSON Schema)

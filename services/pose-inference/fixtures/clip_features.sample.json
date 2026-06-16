@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "featureConfigVersion": "feature-calc-2026-06-a",
+  "clipRef": "synthetic-sample",
+  "clipDurationMs": 10000,
+  "analyzedFrames": 50,
+  "features": {
+    "squatDuration": {
+      "kind": "numeric", "metric": "posture_ratio", "value": 0.42, "unit": "ratio",
+      "confidence": 0.8, "segments": [{ "startMs": 2000, "endMs": 6200 }], "warnings": []
+    },
+    "overheadHours": {
+      "kind": "numeric", "metric": "posture_ratio", "value": 0.0, "unit": "ratio",
+      "confidence": 0.7, "segments": [], "warnings": []
+    },
+    "neckFlexionOver20HoursPerDay": {
+      "kind": "numeric", "metric": "posture_ratio", "value": 0.31, "unit": "ratio",
+      "confidence": 0.72, "segments": [{ "startMs": 1000, "endMs": 4100 }], "warnings": []
+    },
+    "trunkPostureG": {
+      "kind": "numeric", "metric": "peak_angle", "value": 48.5, "unit": "degrees",
+      "confidence": 0.75, "segments": [], "warnings": ["POSTURE_G_MANUAL"]
+    }
+  }
+}

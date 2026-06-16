@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://wr-evaluation/clip_features.schema.json",
+  "title": "ClipFeatureSet",
+  "description": "intrinsic 클립 feature (6.0-6a). feature_calc.py 산출. per-day 환산은 PR D1. canonical; shared/contracts/clipFeatures.ts(zod)가 미러.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "featureConfigVersion", "clipRef", "clipDurationMs", "analyzedFrames", "features"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "featureConfigVersion": { "type": "string", "minLength": 1 },
+    "clipRef": { "type": "string", "minLength": 1 },
+    "clipDurationMs": { "type": "number", "minimum": 0 },
+    "analyzedFrames": { "type": "integer", "minimum": 0 },
+    "features": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "squatDuration", "overheadHours", "repetitiveMediumHours", "repetitiveFastHours",
+          "cyclesPerDay", "cycleSeconds", "trunkPostureG",
+          "neckFlexionOver20HoursPerDay", "neckForcedFlexion", "neckCombinedFlexRot",
+          "vibrationToolUseDurationCandidate", "suspectedKneeTwist"
+        ]
+      },
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "metric", "value", "unit", "confidence"],
+            "properties": {
+              "kind": { "const": "numeric" },
+              "metric": { "enum": ["posture_ratio", "peak_angle", "mean_angle", "cycles_per_minute", "seconds_per_cycle"] },
+              "value": { "type": "number" },
+              "unit": { "enum": ["minutes_per_day", "hours_per_day", "cycles_per_minute", "cycles_per_day", "seconds_per_cycle", "ratio", "degrees"] },
+              "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+              "segments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["startMs", "endMs"],
+                  "properties": { "startMs": { "type": "number", "minimum": 0 }, "endMs": { "type": "number", "minimum": 0 } }
+                }
+              },
+              "warnings": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "value", "confidence"],
+            "properties": {
+              "kind": { "const": "boolean" },
+              "value": { "type": "boolean" },
+              "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+              "warnings": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "value", "confidence"],
+            "properties": {
+              "kind": { "const": "categorical" },
+              "value": { "type": "string" },
+              "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+              "warnings": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
