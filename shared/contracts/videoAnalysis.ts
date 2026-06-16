@@ -144,6 +144,8 @@ export const AppliedInputSchema = z.object({
   source: z.literal('video'),
   processIds: z.array(z.string()).default([]),
   clipIds: z.array(z.string()).default([]),
+  // 이 제안을 만든 원본 분석 job id(추론 출처 추적). 적용은 별도 셸 job을 쓰므로 audit jobId와 구분(§8.11/PR D1).
+  analysisJobIds: z.array(z.string()).default([]),
   confidence: z.number().min(0).max(1),
   analysisBundleVersion: z.string(), // = recipe (§8.11)
   appliedAt: z.string(),
@@ -164,6 +166,8 @@ export const VideoProcessSchema = z
     sharedJobId: z.string(),
     name: z.string(),
     shiftSharePercent: z.number().min(0).max(100).default(0), // 시간 점유율(직업 집계 가중치)
+    // 공정활동분/일(수기). intrinsic posture_ratio → per-day 환산 입력(PRD §8.10.2-1). null/미입력=모름.
+    activeMinutesPerDay: z.number().nonnegative().max(1440).nullable().optional(),
   })
   .passthrough();
 
@@ -180,6 +184,8 @@ export const VideoClipSchema = z
 // 공정 단위 fused feature(VideoFeatureMap, §8.6.1 시점 융합 결과).
 export const ProcessFeaturesSchema = z.object({
   processId: z.string(),
+  // 이 공정 결과를 산출한 분석 job id(서버 실분석 시). provenance로 운반; mock/로컬 모드는 생략.
+  jobId: z.string().optional(),
   features: VideoFeatureMapSchema,
 });
 
