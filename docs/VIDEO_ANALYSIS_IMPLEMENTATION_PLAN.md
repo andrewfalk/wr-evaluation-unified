@@ -38,14 +38,20 @@
   - [x] Codex 반영: sampledFps=실제값(orig/step)+requestedFps 분리, modelVersion 동적(importlib), zod `.strict()`(additionalProperties:false 정합), score [0,1] clamp(SimCC>1 대응)
   - [x] PoC 실측: 768×432, 2fps, ~28ms/frame(CPU). 전체 601 / lint errors 0 / build·tsc·server build OK
   - 참고: 실 영상·산출은 비커밋(privacy). 실제 추론 위치/큐 결선·tracking은 PR D.
-- [~] **PR C (6.0-6a)** feature 계산기 — keypoints→**intrinsic clipFeatures**(자세시간 비율·각도) (구현 완료, 리뷰 대기)
+- [x] **PR C (6.0-6a)** feature 계산기 — keypoints→**intrinsic clipFeatures**(자세시간 비율·각도) — PR #21 ✅ 머지
   - [x] `clipFeatures` 계약: `schema/clip_features.schema.json`(canonical) + `shared/contracts/clipFeatures.ts`(zod, .strict, discriminatedUnion)
   - [x] `feature_config.json`(버전관리: 각도 COCO17 인덱스·임계값 squat<90°/neck>20°/overhead OR·OneEuro·minConf·frameDrop) + `oneeuro.py` + `feature_calc.py`
   - [x] squatDuration(무릎각<90°)·overheadHours(손목>어깨 OR 상완거상≥90°)·neckFlexion>20°·trunkPostureG(peak각 candidate). 반복(cyclesPerMinute)은 후속.
   - [x] Node 테스트 8건(fixture↔zod·strict·confidence·segment·featureKey·**posture_ratio 0..1** + feature_config↔contract 교차검증) / Python 골든 test_feature_calc.py
   - [x] Codex 반영: canonical schema featureKey **propertyNames enum**(typo 차단), zod **posture_ratio 0..1 superRefine**, validate_keypoints.py **clip_features post-check**(ratio 0..1·segment 순서) — 3중 방어
   - [x] 실 keypoints→clip_features schema VALID, bad 케이스(typo/ratio>1/역순seg) 모두 차단. 전체 609 / lint errors 0 / build·tsc·server build OK. *per-day 환산은 PR D1.*
-- [ ] **PR D1 (6.0-6b)** 서버 job 큐/status/result_features + `GET /jobs/:id` 폴링 실동작 (fixture clip 입력) + **clipFeatures→per-day VideoFeatureMap 환산**(공정 활동시간 결합)
+- [~] **PR D1 (6.0-6b)** 서버 job 워커(queued→processing→review_pending, FOR UPDATE SKIP LOCKED 단일 트랜잭션 claim) + `GET /jobs/:id` 폴링 실동작(fixture clip 입력) + **clipFeatures→per-day 환산은 클라이언트**(process.activeMinutesPerDay) — 구현 완료(브랜치 `feat/video-6.0-6b-job-worker`), 커밋/PR 대기
+  - [x] **설계 결정**: ① 환산=클라(서버는 intrinsic `ClipFeatureSet`만 `result_features`에 저장, 마이그레이션 불필요) ② `VideoProcessSchema.activeMinutesPerDay`(nullable, null=모름→적용불가, 0=정상) ③ fixture는 `VIDEO_ANALYSIS_FIXTURE_MODE`+allowlist(`resolveFixtureClip`, traversal/심볼릭/확장자 차단), 경로는 `clips.upload_path` 재사용
+  - [x] **분석 실행 vs 적용 분리**(Codex): `runAnalysis`(공정별 createClip→createJob(fixture,queued)→pollJob→환산)만 추론, `applySuggestion`은 fixtureClipName 없는 셸 job으로 persist만(추론 미재실행)
+  - [x] **provenance·수명주기**(Codex): `AppliedInput.analysisJobIds`+apply audit `sourceAnalysisJobIds`, 적용 시 원본 분석 job을 done(consumed) 전이, TTL sweep은 queued/processing만
+  - [x] **per-day 정합(Codex 2차)**: 서버 절대 per-day는 job 집계 시 share 재가중 없이 합산(`buildJobFeatures absolutePerDay`), 변환은 활성모듈 requested로 필터(고정 feature set 정리)
+  - [x] **sourceAnalysisJobIds 방어(Codex 3차)**: 적용 셸 job·실패/만료·결과없는 job 차단 — `result_features IS NOT NULL` + `process_id IS NOT NULL` + `status IN(review_pending,done)` + `id<>현재 셸 job`. 위조/셸 job → 400 INVALID_SOURCE_JOB
+  - [x] 테스트: 서버 403(워커 claim/SKIP LOCKED·중복방지·error·fixture traversal·apply consumed·INVALID_SOURCE_JOB·셸 job 거부) / 클라 632(환산 null≠0·필터·pollJob·run 오케스트레이션·provenance·absolutePerDay 합산). lint 0 / build·tsc·server build OK. *실영상 e2e는 로컬 venv(비커밋).*
 - [ ] **PR D2 (6.0-6b)** 대상자 선택/tracking(§8.7) 실제화
 - [ ] **PR D3 (6.0-6b)** 품질검사 + 시점 융합(§8.6.1) + confidence(§8.8)
 
