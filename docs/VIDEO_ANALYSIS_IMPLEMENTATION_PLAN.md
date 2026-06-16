@@ -18,13 +18,13 @@
   - [x] knee/shoulder/spine/cervical `videoMappingConfig` 선언(모듈별 타입 코어싱)
   - [x] vitest.config `@contracts` alias(소스) + 테스트 20건 (531 passed)
 - [x] **PR4 (6.0-3)** 피처플래그 5곳 배선 + 로컬 mock UI — PR #14 ✅ 머지
-- [~] **PR5 (6.0-4)** clip/job DB + 서버 mock 폴링 + apply endpoint + audit (백본 완료, UI 연결은 PR5.1)
-  - [x] 마이그레이션 `0016_video_analysis.sql`(clips + jobs, denormalize, applied_*, nullable)
-  - [x] `videoAnalysis.ts` 라우터(clips/sample-detect/select-target/jobs/poll) + job-scoped guard + flag fail-closed(404)
-  - [x] `POST /jobs/:id/apply`(If-Match + FOR UPDATE + 멱등성 + writeAuditLog)
-  - [x] 클라 `videoAnalysisClient.js` + `patientServerRepository.applyVideoAnalysisJob`
-  - [x] 서버/클라 테스트(server +12 / client +7) + 전체(client 554/server 385) + 빌드 OK
-  - [ ] **PR5.1** VideoAnalysisStep ↔ 서버 job 폴링·apply 연결(synced 게이팅 + 환자목록 머지) — 회귀 위험 분리
+- [x] **PR5 (6.0-4 백본)** clip/job DB + 서버 job API + apply endpoint + audit — PR #15 ✅ 머지
+- [x] **PR5.1 (6.0-4 UI)** VideoAnalysisStep ↔ 서버 apply 연결 — **M1 완료**
+  - [x] `videoServerApply.js` 오케스트레이터(createClip→createJob→apply) + `computeAppliedInputsHash`
+  - [x] VideoAnalysisStep 서버/로컬/차단 분기(`resolveApplyMode`) + synced 게이팅 + busy/error
+  - [x] App `onVideoServerApplied`(서버 동기화 환자 목록 반영) → StepContent → 컴포넌트 배선
+  - [x] 서버 모드 rollback 미노출 + job review_pending 방어 + processId null 명시(Codex)
+  - [x] 테스트(오케스트레이터 5 + resolveApplyMode 3) client 567 / lint 0 / build OK
 
 ### M2 — 실제 추론 PoC (6.0-3.5, 6.0-5, 6.0-6)
 - [ ] 6.0-3.5 검증 하네스 skeleton
@@ -96,7 +96,7 @@
 
 플래그 `videoAnalysisEnabled=false` 기본. 추론 없이 mock feature로 전 흐름 검증.
 
-### PR 1 — 6.0-0: feature 계약 + SharedDataSchema 확장 ✅
+### PR 1 — 6.0-0: feature 계약 + SharedDataSchema 확장 ✅ 머지 (PR #11)
 **산출물**: `shared/contracts/videoAnalysis.ts` + `index.ts` 재export + `patient.ts` SharedDataSchema 확장.
 - `VideoFeatureValue = discriminatedUnion('kind', [Numeric|Boolean|Categorical|Candidate])`.
 - candidate 불변식(`autoSuggestAllowed:false`/`requiresManualReview:true`)을 `z.literal`로 스키마 강제.
@@ -104,13 +104,13 @@
 - `VIDEO_FEATURE_TARGETS`: featureKey→targetPath→unit 테이블(§8.10.2-1).
 - `SharedDataSchema`에 `videoAnalysis` optional 추가(구파일 호환).
 
-### PR 2 — 6.0-1: 데이터 모델 + `ensureSharedDefaults()` 마이그레이션 ✅
+### PR 2 — 6.0-1: 데이터 모델 + `ensureSharedDefaults()` 마이그레이션 ✅ 머지 (PR #12)
 - `createVideoAnalysisData()` 신설(§8.11) — schema default와 shape 일치(drift 테스트).
 - `createSharedData()`에 `videoAnalysis` 추가.
 - `ensureSharedDefaults()` — `migratePatient` 말미 항상 호출, 빈/부분 객체도 merge 보강.
 - `createSamplePatient()`에 샘플 videoAnalysis.
 
-### PR 3 — 6.0-2: mock 생성기 + 집계 + 매핑 + provenance/rollback (진행 중)
+### PR 3 — 6.0-2: mock 생성기 + 집계 + 매핑 + provenance/rollback ✅ 머지 (PR #13)
 - `src/core/services/videoMock.js`: `generateMockFeatures(requestedFeatures, profile)` → `VideoFeatureMap`.
 - `src/core/services/videoAggregate.js`(§8.6.2): 공정→직업(누적=가중합, 피크=max, 빈도=가중평균). spine/cervical은 공정≈task 1:1 단축.
 - **`videoMappingConfig`(§8.10.1)** registerModule 신규 선택 키:
@@ -121,14 +121,14 @@
 - **환자 revision 충돌 정책**: 적용은 환자 객체를 변경 → dirty 표시 + 기존 PatientSync 충돌 처리 재사용(서버 반영은 PR5).
 - **테스트**: mock→매핑→적용→appliedInputs→rollback, 모듈별 코어싱.
 
-### PR 4 — 6.0-3: 피처플래그 배선 + 로컬 mock UI
+### PR 4 — 6.0-3: 피처플래그 배선 + 로컬 mock UI ✅ 머지 (PR #14)
 - 플래그 5곳 일관 배선(env / ServerPublicConfigSchema / `/api/config/public` / `FAIL_CLOSED_CONFIG` / mock 서버).
 - 클라: `serverConfig.videoAnalysisEnabled` 소비. `buildSteps(activeModules, opts)` 시그니처 확장(App.jsx, useIntakeWizard.js, 기존 테스트 동반).
 - 플래그 on일 때만 공유 스텝 `[공유] 영상 분석`(modules 뒤) + `StepContent.jsx` 라우팅 → `VideoAnalysisStep.jsx`.
 - 로컬 mock UI 한정: 공정 추가 → 클립/시점/시간점유율(%)/profile → 로컬 `generateMockFeatures` → 제안 검토(confidence/warning, 저신뢰 "참고만") → 적용·무시.
 - win7 호환(최신 JS 메서드 금지). config 테스트 갱신.
 
-### PR 5 — 6.0-4: clip/job DB + 서버 mock 폴링 + apply endpoint + audit
+### PR 5 — 6.0-4: clip/job DB + 서버 mock 폴링 + apply endpoint + audit ✅ 백본 머지 (PR #15)
 - **마이그레이션 `0016_video_analysis.sql`**:
   - `video_analysis_clips`(clip_id PK, patient_record_id, organization_id, upload_path NULL 허용, original_sha256, `sample_detect_result JSONB`, target_person_id).
   - `video_analysis_jobs`(job_id PK, clip_id FK, organization_id·patient_record_id denormalize[서버가 clip 조회로 채움], process_id, status, analysis_profile, *_sha256, preprocess_config_hash, error_*, `applied_at`·`applied_revision`·`applied_inputs_hash`, expires_at). status CHECK enum, set_updated_at 트리거, 인덱스(org+status, patient, created desc).
@@ -141,11 +141,18 @@
   - **클라 sync 반영**: `patientServerRepository.applyVideoAnalysisJob()` 신설(내부 `applyServerSync` 매핑).
   - **apply 멱등성·상태**: review_pending에서만, 성공 시 done. `applied_inputs_hash`=jobId+featureKeys+targetPaths+appliedValues canonical JSON(previousValue 미포함). `applied_revision`=apply 후 revision.
   - **audit**: handler 내 `writeAuditLog()` — target=patient, extra:{jobId,clipId,appliedInputsCount}.
-- 클라 폴링 서비스 `videoAnalysisClient.js`(3-way 형제).
+- 클라 서비스 `videoAnalysisClient.js`(intranet 전용, electron/web stub) + `requireSyncedServerId`(synced 강제).
 - **rollback 경계**: M1은 로컬 rollback만, 서버 apply rollback은 M3.
-- **테스트**: 서버(상태전이·guard 403/404·If-Match 400/409·멱등성·denormalize 무결성·audit·flag off 404) / 클라(non-synced 차단·sync revision 갱신).
+- **테스트**: 서버(flag off 404·guard 403/404·If-Match 400/409·멱등성·denormalize 무결성·audit) / 클라(non-synced dirty·conflict·local-only 차단).
 
-**M1 완료 기준**: 플래그 on → 공정 추가 → 서버 mock job 폴링 review_pending → apply(If-Match)로 모듈 값 반영 + appliedInputs + audit, 로컬 rollback 복원, 비담당 403/404. 플래그 off → 기존 앱 100% 동일.
+### PR 5.1 — 6.0-4 UI: VideoAnalysisStep ↔ 서버 apply 연결 ✅ 머지 (PR #16)
+- `videoServerApply.js` 오케스트레이터: `createClip→createJob(review_pending 방어)→applyFeatureToModule(로컬 data 계산)→applyVideoAnalysisJob`(If-Match 영속화). `computeAppliedInputsHash`(previousValue 제외). 순환 import 회피용 별도 모듈.
+- `resolveApplyMode(serverSupported, isSynced)` → `server`/`blocked`/`local`. 인트라넷+synced=서버 적용(per-field, apply마다 job), 인트라넷+미동기=차단+안내, 그 외=로컬.
+- `App.onVideoServerApplied` → 서버 동기화 환자를 로컬 id로 목록 교체(StepContent 경유 배선, `settings` 전달).
+- **서버 모드 rollback 미노출**(로컬/서버 갈라짐 방지, 되돌리기는 모듈 탭 직접 수정). job-scope라 `process_id`는 의도적 null(공정 추적은 `appliedInputs.processIds`).
+- **테스트**: 오케스트레이터(순서·hash·JOB_NOT_READY·synced 전파) + `resolveApplyMode`.
+
+**M1 완료 기준**: 플래그 on → 공정 추가 → (인트라넷+synced) 서버 적용(clip→job→apply, If-Match)으로 모듈 값 반영 + appliedInputs + audit + 목록 동기화 / (로컬) updatePatient 적용·rollback. 비담당 403/404, 미동기 차단. 플래그 off → 기존 앱 100% 동일.
 
 ---
 

@@ -208,6 +208,12 @@ function App() {
     handleStartIntake,
   });
 
+  // 영상 분석 서버 적용 후 서버 동기화 환자를 목록에 반영(로컬 id 보존 → id로 교체).
+  const onVideoServerApplied = useCallback((serverPatient) => {
+    if (!serverPatient?.id) return;
+    setPatients(prev => prev.map(p => (p.id === serverPatient.id ? serverPatient : p)));
+  }, [setPatients]);
+
   // 평가 완료 시 evaluationDate 자동 설정
   useEvaluationDateSync({ activeId, patients, setPatients, session });
 
@@ -593,6 +599,7 @@ function App() {
                 presetError={presetError}
                 aiAvailable={aiAvailable}
                 updatePatient={updatePatient}
+                onVideoServerApplied={onVideoServerApplied}
                 updateShared={updateShared}
                 updateModule={updateModule}
                 updateModuleById={updateModuleById}
