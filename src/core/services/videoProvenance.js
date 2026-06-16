@@ -80,6 +80,7 @@ export function applyFeatureToModule(patient, {
   appliedBy = 'unknown',
   processIds = [],
   clipIds = [],
+  analysisJobIds = [],   // 이 제안을 만든 원본 분석 job id(서버 실분석 시). 추론 출처 추적(PR D1).
   editReason,
 }) {
   const mod = getModule(moduleId);
@@ -115,6 +116,7 @@ export function applyFeatureToModule(patient, {
     source: 'video',
     processIds,
     clipIds,
+    analysisJobIds,
     confidence: confidence ?? 0,
     analysisBundleVersion,
     appliedAt: new Date().toISOString(),

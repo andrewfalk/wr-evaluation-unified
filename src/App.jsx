@@ -598,6 +598,7 @@ function App() {
                 presetMeta={presetMeta}
                 presetError={presetError}
                 aiAvailable={aiAvailable}
+                videoAnalysisFixtureMode={!!serverConfig?.videoAnalysisFixtureMode}
                 updatePatient={updatePatient}
                 onVideoServerApplied={onVideoServerApplied}
                 updateShared={updateShared}

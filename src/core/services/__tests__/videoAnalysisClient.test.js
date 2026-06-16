@@ -7,6 +7,7 @@ import {
   createClip,
   createJob,
   getJob,
+  pollJob,
   isVideoAnalysisSupported,
 } from '../videoAnalysisClient.js';
 import { applyVideoAnalysisJob } from '../patientServerRepository.js';
@@ -34,7 +35,15 @@ describe('videoAnalysisClient — platform gating', () => {
     const res = await createClip(syncedPatient, intranet);
     expect(res.clipId).toBe('c1');
     expect(requestJson).toHaveBeenCalledWith('/api/video-analysis/clips', expect.objectContaining({
-      method: 'POST', body: { patientId: 'srv-9' }, baseUrl: 'https://srv',
+      method: 'POST', body: { patientId: 'srv-9', processId: null }, baseUrl: 'https://srv',
+    }));
+  });
+
+  it('createClip forwards processId for per-process analysis jobs', async () => {
+    requestJson.mockResolvedValueOnce({ clipId: 'c2' });
+    await createClip(syncedPatient, { ...intranet, processId: 'pr-7' });
+    expect(requestJson).toHaveBeenCalledWith('/api/video-analysis/clips', expect.objectContaining({
+      body: { patientId: 'srv-9', processId: 'pr-7' },
     }));
   });
 
@@ -62,6 +71,23 @@ describe('videoAnalysisClient — platform gating', () => {
     await getJob('j1', intranet);
     expect(requestJson).toHaveBeenCalledWith('/api/video-analysis/jobs/j1', expect.objectContaining({ baseUrl: 'https://srv' }));
   });
+
+  it('pollJob loops getJob until a terminal status (queued→processing→review_pending)', async () => {
+    requestJson
+      .mockResolvedValueOnce({ jobId: 'j1', status: 'queued' })
+      .mockResolvedValueOnce({ jobId: 'j1', status: 'processing' })
+      .mockResolvedValueOnce({ jobId: 'j1', status: 'review_pending', resultFeatures: { features: {} } });
+    const out = await pollJob('j1', intranet, { intervalMs: 0, maxAttempts: 10 });
+    expect(out.status).toBe('review_pending');
+    expect(requestJson).toHaveBeenCalledTimes(3);
+  });
+
+  it('pollJob stops on error status', async () => {
+    requestJson.mockResolvedValueOnce({ jobId: 'j1', status: 'error', errorCode: 'INFERENCE_ERROR' });
+    const out = await pollJob('j1', intranet, { intervalMs: 0, maxAttempts: 5 });
+    expect(out.status).toBe('error');
+    expect(requestJson).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('applyVideoAnalysisJob', () => {
@@ -88,7 +114,7 @@ describe('applyVideoAnalysisJob', () => {
     expect(requestJson).toHaveBeenCalledWith('/api/video-analysis/jobs/j1/apply', expect.objectContaining({
       method: 'POST',
       headers: { 'If-Match': '3' },
-      body: { data: computedData, appliedInputsHash: 'h1', appliedInputsCount: 2 },
+      body: { data: computedData, appliedInputsHash: 'h1', appliedInputsCount: 2, sourceAnalysisJobIds: [] },
     }));
     // applyServerSync는 로컬 id/meta를 보존하고 서버 revision을 반영한다.
     expect(out.id).toBe('local-1');

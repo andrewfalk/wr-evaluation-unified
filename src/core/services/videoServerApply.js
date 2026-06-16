@@ -41,14 +41,17 @@ export async function applyVideoFeatureViaServer(patient, opts, env) {
     throw err;
   }
   // 3) 환자 data 로컬 계산(모듈 값 + appliedInputs) — 서버는 coerce를 모르므로 클라가 계산.
+  //    analysisJobIds: 이 제안을 만든 원본 분석 job(들). 적용 셸 job(job.jobId)과 구분해 provenance에 기록.
+  const sourceAnalysisJobIds = opts.analysisJobIds || [];
   const { patient: nextLocal, appliedInput } = applyFeatureToModule(patient, {
     moduleId: opts.moduleId, ctx: opts.ctx, featureKey: opts.featureKey,
     suggestedValue: opts.suggestedValue, confidence: opts.confidence,
-    processIds: opts.processIds || [], analysisBundleVersion: MOCK_BUNDLE, appliedBy,
+    processIds: opts.processIds || [], analysisJobIds: sourceAnalysisJobIds,
+    analysisBundleVersion: opts.analysisBundleVersion || MOCK_BUNDLE, appliedBy,
   });
-  // 4) apply(영속화) — If-Match 단일 트랜잭션. 서버가 payload 저장·revision+1·audit.
+  // 4) apply(영속화) — If-Match 단일 트랜잭션. 서버가 payload 저장·revision+1·audit + source job consumed.
   const hash = computeAppliedInputsHash(job.jobId, appliedInput);
   return applyVideoAnalysisJob(job.jobId, patient, nextLocal.data, {
-    appliedInputsHash: hash, appliedInputsCount: 1, session, settings,
+    appliedInputsHash: hash, appliedInputsCount: 1, sourceAnalysisJobIds, session, settings,
   });
 }

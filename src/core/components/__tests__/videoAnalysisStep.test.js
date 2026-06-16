@@ -56,6 +56,22 @@ describe('buildJobFeatures', () => {
     const out = buildJobFeatures([], [{ processId: 'ghost', features: { overheadHours: num(1) } }]);
     expect(out).toEqual([]);
   });
+
+  it('absolutePerDay=true sums per-day values without re-discounting by shiftSharePercent (서버 실분석)', () => {
+    // 서버 경로: value=ratio×activeMinutesPerDay로 이미 절대 per-day → share로 또 깎으면 안 된다.
+    const processes = [
+      { id: 'p1', sharedJobId: 'jobA', shiftSharePercent: 50 },
+      { id: 'p2', sharedJobId: 'jobA', shiftSharePercent: 50 },
+    ];
+    const processFeatures = [
+      { processId: 'p1', features: { overheadHours: num(2.0) } },
+      { processId: 'p2', features: { overheadHours: num(1.0) } },
+    ];
+    // 기본(mock): 2*0.5 + 1*0.5 = 1.5
+    expect(buildJobFeatures(processes, processFeatures).find((j) => j.sharedJobId === 'jobA').features.overheadHours.value).toBeCloseTo(1.5, 5);
+    // absolutePerDay: 2 + 1 = 3.0 (이중 차감 없음)
+    expect(buildJobFeatures(processes, processFeatures, { absolutePerDay: true }).find((j) => j.sharedJobId === 'jobA').features.overheadHours.value).toBeCloseTo(3.0, 5);
+  });
 });
 
 describe('shareTotalsByJob', () => {

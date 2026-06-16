@@ -60,6 +60,24 @@ describe('applyVideoFeatureViaServer', () => {
     expect(out).toBe(serverPatient);
   });
 
+  it('threads analysisJobIds → provenance + sourceAnalysisJobIds (consumed source jobs)', async () => {
+    createClip.mockResolvedValueOnce({ clipId: 'c1' });
+    createJob.mockResolvedValueOnce({ jobId: 'shell-1', status: 'review_pending' });
+    const appliedInput = { targetPath: 'tp', appliedValue: '1.8' };
+    applyFeatureToModule.mockReturnValueOnce({ patient: { data: { computed: true } }, appliedInput });
+    applyVideoAnalysisJob.mockResolvedValueOnce({ id: 'local-1' });
+
+    await applyVideoFeatureViaServer(patient, { ...opts, analysisJobIds: ['ja', 'jb'], analysisBundleVersion: 'recipe-1' }, env);
+
+    expect(applyFeatureToModule).toHaveBeenCalledWith(patient, expect.objectContaining({
+      analysisJobIds: ['ja', 'jb'], analysisBundleVersion: 'recipe-1',
+    }));
+    expect(applyVideoAnalysisJob).toHaveBeenCalledWith(
+      'shell-1', patient, { computed: true },
+      expect.objectContaining({ sourceAnalysisJobIds: ['ja', 'jb'] })
+    );
+  });
+
   it('blocks apply when the job is not review_pending (defensive guard)', async () => {
     createClip.mockResolvedValueOnce({ clipId: 'c1' });
     createJob.mockResolvedValueOnce({ jobId: 'j1', status: 'error' });
