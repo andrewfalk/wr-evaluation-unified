@@ -6,6 +6,7 @@ const FAIL_CLOSED_CONFIG = {
   aiEnabled: false,
   localFallbackAllowed: false,
   videoAnalysisEnabled: false,
+  videoAnalysisFixtureMode: false,
   serverTime: null,
 };
 

@@ -39,11 +39,13 @@ export function requireSyncedServerId(patient) {
 }
 
 // 환자 객체를 받아 serverId를 추출(synced 강제)해 clip을 생성한다 — 로컬 id 오전송 방지.
-export async function createClip(patient, { session, settings } = {}) {
+// processId: 분석 job은 어느 공정 클립인지 채운다(per-process). 적용 셸 경로는 생략(=null).
+export async function createClip(patient, { processId, session, settings } = {}) {
   ensureIntranet(session);
   const serverPatientId = requireSyncedServerId(patient);
   return requestJson('/api/video-analysis/clips', {
-    baseUrl: getBaseUrl(session, settings), method: 'POST', session, body: { patientId: serverPatientId },
+    baseUrl: getBaseUrl(session, settings), method: 'POST', session,
+    body: { patientId: serverPatientId, processId: processId ?? null },
   });
 }
 
@@ -61,11 +63,13 @@ export async function selectTarget(clipId, targetPersonId, { session, settings }
   });
 }
 
-export async function createJob({ clipId, processId, analysisProfile, requestedFeatures }, { session, settings } = {}) {
+// fixtureClipName: dev-only fixture 입력(서버 fixtureMode=true일 때만 의미). 분석 job은 전달,
+// 적용 셸 job은 생략(서버가 즉시 review_pending 셸로 처리, 추론 미트리거).
+export async function createJob({ clipId, processId, analysisProfile, requestedFeatures, fixtureClipName }, { session, settings } = {}) {
   ensureIntranet(session);
   return requestJson('/api/video-analysis/jobs', {
     baseUrl: getBaseUrl(session, settings), method: 'POST', session,
-    body: { clipId, processId, analysisProfile, requestedFeatures },
+    body: { clipId, processId, analysisProfile, requestedFeatures, fixtureClipName },
   });
 }
 
@@ -74,4 +78,18 @@ export async function getJob(jobId, { session, settings } = {}) {
   return requestJson(`/api/video-analysis/jobs/${jobId}`, {
     baseUrl: getBaseUrl(session, settings), session,
   });
+}
+
+const TERMINAL_STATUSES = new Set(['review_pending', 'done', 'error', 'expired', 'cancelled']);
+
+// job이 종료 상태에 도달할 때까지 getJob을 간격 폴링한다(분석 실행 → review_pending 대기).
+// 타임아웃/최대 시도 초과 시 마지막 job을 반환(호출측이 status로 판단).
+export async function pollJob(jobId, { session, settings } = {}, { intervalMs = 1000, maxAttempts = 120 } = {}) {
+  let last = null;
+  for (let i = 0; i < maxAttempts; i += 1) {
+    last = await getJob(jobId, { session, settings });
+    if (last && TERMINAL_STATUSES.has(last.status)) return last;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return last;
 }

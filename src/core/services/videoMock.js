@@ -24,7 +24,7 @@ const MOCK_VALUES = {
 // 실제 임계값은 6.0-B2 검증으로 확정(§8.9).
 const CONFIDENCE_BY_MODE = { auto: 0.82, 'auto-review': 0.7, candidate: 0.5 };
 
-const CANDIDATE_REASONS = {
+export const CANDIDATE_REASONS = {
   suspectedKneeTwist: '무릎 비틀림은 2D 영상에서 저신뢰 — 수기 확인 필요',
   vibrationToolUseDurationCandidate: '공구 사용시간 후보만 — 진동 가속도 측정 불가',
   trunkPostureG: 'G1~G11은 하중 위치·작업유형 반영 — 수기 확인 필수',

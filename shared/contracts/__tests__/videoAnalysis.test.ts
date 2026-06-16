@@ -9,6 +9,8 @@ import {
   ConfidenceSchema,
   AppliedInputSchema,
   VideoAnalysisDataSchema,
+  VideoProcessSchema,
+  ProcessFeaturesSchema,
   VIDEO_FEATURE_TARGETS,
 } from '../videoAnalysis';
 import { SharedDataSchema } from '../patient';
@@ -195,6 +197,36 @@ describe('AppliedInputSchema (§8.11 provenance)', () => {
         appliedBy: '',
       })
     ).toThrow();
+  });
+});
+
+describe('PR D1 fields — activeMinutesPerDay / analysisJobIds / ProcessFeatures.jobId', () => {
+  it('VideoProcessSchema: activeMinutesPerDay nullable·optional·범위', () => {
+    expect(VideoProcessSchema.parse({ id: 'p', sharedJobId: 'j', name: 'n', activeMinutesPerDay: 200 }).activeMinutesPerDay).toBe(200);
+    expect(VideoProcessSchema.parse({ id: 'p', sharedJobId: 'j', name: 'n', activeMinutesPerDay: null }).activeMinutesPerDay).toBeNull();
+    // 미입력(하위호환): 필드 없이도 통과
+    expect(VideoProcessSchema.parse({ id: 'p', sharedJobId: 'j', name: 'n' }).shiftSharePercent).toBe(0);
+    expect(() => VideoProcessSchema.parse({ id: 'p', sharedJobId: 'j', name: 'n', activeMinutesPerDay: 1441 })).toThrow();
+    expect(() => VideoProcessSchema.parse({ id: 'p', sharedJobId: 'j', name: 'n', activeMinutesPerDay: -1 })).toThrow();
+  });
+
+  it('AppliedInputSchema: analysisJobIds 기본 []', () => {
+    const r = AppliedInputSchema.parse({
+      moduleId: 'shoulder', targetPath: 'x', suggestedValue: 1, appliedValue: 1, previousValue: null,
+      unit: null, source: 'video', confidence: 0.5, analysisBundleVersion: 'v', appliedAt: '', appliedBy: '',
+    });
+    expect(r.analysisJobIds).toEqual([]);
+    const r2 = AppliedInputSchema.parse({
+      moduleId: 'shoulder', targetPath: 'x', suggestedValue: 1, appliedValue: 1, previousValue: null,
+      unit: null, source: 'video', confidence: 0.5, analysisBundleVersion: 'v', appliedAt: '', appliedBy: '',
+      analysisJobIds: ['job-a', 'job-b'],
+    });
+    expect(r2.analysisJobIds).toEqual(['job-a', 'job-b']);
+  });
+
+  it('ProcessFeaturesSchema: jobId optional', () => {
+    expect(ProcessFeaturesSchema.parse({ processId: 'p', features: {} }).jobId).toBeUndefined();
+    expect(ProcessFeaturesSchema.parse({ processId: 'p', jobId: 'job-1', features: {} }).jobId).toBe('job-1');
   });
 });
 

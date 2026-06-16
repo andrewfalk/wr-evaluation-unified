@@ -13,6 +13,7 @@ import {
 } from '../services/videoProvenance';
 import { isVideoAnalysisSupported } from '../services/videoAnalysisClient';
 import { applyVideoFeatureViaServer } from '../services/videoServerApply';
+import { runServerAnalysis } from '../services/videoAnalysisRun';
 import { getModule } from '../moduleRegistry';
 import { VIDEO_FEATURE_TARGETS } from '@contracts/index';
 
@@ -36,14 +37,19 @@ export function requestedFeaturesForModules(activeModules = []) {
   );
 }
 
-/** 공정별 feature를 직업(sharedJobId) 단위로 묶어 집계한다(job-scope). */
-export function buildJobFeatures(processes = [], processFeatures = []) {
+/**
+ * 공정별 feature를 직업(sharedJobId) 단위로 묶어 집계한다(job-scope).
+ * @param {boolean} absolutePerDay - 서버 실분석 값은 ratio×activeMinutesPerDay로 이미 절대 per-day이므로
+ *   share로 재가중하지 않고 합산한다(share=100). mock 값은 "공정 100% 가정" 값이라 share 가중(기본).
+ *   둘을 섞으면 per-day가 이중 차감되므로 경로별로 분리한다(PR D1).
+ */
+export function buildJobFeatures(processes = [], processFeatures = [], { absolutePerDay = false } = {}) {
   const byJob = {};
   for (const pf of processFeatures) {
     const proc = processes.find((p) => p.id === pf.processId);
     if (!proc) continue;
     (byJob[proc.sharedJobId] = byJob[proc.sharedJobId] || []).push({
-      share: proc.shiftSharePercent,
+      share: absolutePerDay ? 100 : proc.shiftSharePercent,
       features: pf.features,
     });
   }
@@ -75,6 +81,7 @@ export function addProcessVA(va, jobs = []) {
       sharedJobId: jobs[0]?.id || '',
       name: `공정 ${va.processes.length + 1}`,
       shiftSharePercent: 0,
+      activeMinutesPerDay: null, // 공정활동분/일(수기). per-day 환산 입력. null=모름(적용 불가).
       analysisProfile: 'posture-basic',
     }],
   });
@@ -110,7 +117,7 @@ export function resolveApplyMode(serverSupported, isSynced) {
 }
 
 // ── 컴포넌트 ──────────────────────────────────────────────────────────────
-export function VideoAnalysisStep({ shared, updateShared, updatePatient, activePatient, activeModules = [], session, settings, onServerApplied }) {
+export function VideoAnalysisStep({ shared, updateShared, updatePatient, activePatient, activeModules = [], session, settings, fixtureMode = false, onServerApplied }) {
   const va = shared?.videoAnalysis || {
     processes: [], clips: [], processFeatures: [], jobFeatures: [], candidateFeatures: [], appliedInputs: [],
   };
@@ -126,6 +133,11 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   const applyBlocked = applyMode === 'blocked'; // 인트라넷인데 미동기 → 적용 불가
   const [busy, setBusy] = useState(false);
   const [applyError, setApplyError] = useState('');
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState('');
+  // 서버 실분석 산출물: 적용 시 provenance recipe·누락 활동시간 안내에 사용.
+  const [analysisBundle, setAnalysisBundle] = useState(MOCK_BUNDLE);
+  const [missingActiveTime, setMissingActiveTime] = useState({}); // { processId: featureKey[] }
 
   const jobScopeModules = activeModules.filter((m) => getModule(m)?.videoMappingConfig?.scope === 'job');
   const shareTotals = useMemo(() => shareTotalsByJob(va.processes), [va.processes]);
@@ -140,18 +152,43 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   const editClip = (id, patch) => updateVA((v) => editClipVA(v, id, patch));
   const removeClip = (id) => updateVA((v) => removeClipVA(v, id));
 
-  // ── mock 분석 실행 ──
-  const runMockAnalysis = () => {
-    const requested = requestedFeaturesForModules(activeModules);
-    const processFeatures = va.processes.map((p) => ({
-      processId: p.id,
-      features: generateMockFeatures(requested, p.analysisProfile),
-    }));
-    const jobFeatures = buildJobFeatures(va.processes, processFeatures);
+  // 분석 산출(공통): processFeatures → jobFeatures/candidateFeatures 재구성 후 저장.
+  // absolutePerDay: 서버 실분석은 절대 per-day(합산), mock은 공정점유율 가중.
+  const commitAnalysis = (processFeatures, { absolutePerDay = false } = {}) => {
+    const jobFeatures = buildJobFeatures(va.processes, processFeatures, { absolutePerDay });
     const candidateFeatures = processFeatures.flatMap((pf) =>
       collectCandidateFeatures(pf.features, { processIds: [pf.processId] })
     );
     updateVA((v) => ({ ...v, processFeatures, jobFeatures, candidateFeatures }));
+  };
+
+  // ── 분석 실행 ── 서버 모드=fixture 실추론+per-day 환산, 그 외=mock. 적용과 분리(추론은 여기서만).
+  const runAnalysis = async () => {
+    setAnalysisError('');
+    setMissingActiveTime({});
+    if (!serverMode) {
+      const requested = requestedFeaturesForModules(activeModules);
+      const processFeatures = va.processes.map((p) => ({
+        processId: p.id,
+        features: generateMockFeatures(requested, p.analysisProfile),
+      }));
+      setAnalysisBundle(MOCK_BUNDLE);
+      commitAnalysis(processFeatures);
+      return;
+    }
+    setAnalyzing(true);
+    try {
+      const { processFeatures, missingActiveTime: missing, bundleVersion, errors } =
+        await runServerAnalysis(activePatient, va, { activeModules, session, settings });
+      setAnalysisBundle(bundleVersion || MOCK_BUNDLE);
+      setMissingActiveTime(missing);
+      commitAnalysis(processFeatures, { absolutePerDay: true });
+      if (errors.length > 0) setAnalysisError(errors.map((e) => e.message).join(' / '));
+    } catch (e) {
+      setAnalysisError(e?.message || '분석에 실패했습니다.');
+    } finally {
+      setAnalyzing(false);
+    }
   };
 
   // ── 제안 적용 / 되돌리기 ──
@@ -162,11 +199,15 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
       setApplyError('서버에 저장·동기화된 환자만 적용할 수 있습니다. 먼저 저장하세요.');
       return;
     }
+    // 이 제안을 만든 원본 분석 job(들): 해당 공정들의 processFeatures.jobId. 셸 적용 job과 구분해 provenance에.
+    const analysisJobIds = (va.processFeatures || [])
+      .filter((pf) => (processIds || []).includes(pf.processId) && pf.jobId)
+      .map((pf) => pf.jobId);
     if (!serverMode) {
       updatePatient((d) => applyFeatureToModule({ data: d }, {
         moduleId, ctx, featureKey: s.featureKey,
         suggestedValue: s.suggestedValue, confidence: s.confidence,
-        processIds: processIds || [], analysisBundleVersion: MOCK_BUNDLE, appliedBy,
+        processIds: processIds || [], analysisJobIds, analysisBundleVersion: analysisBundle, appliedBy,
       }).patient.data);
       return;
     }
@@ -175,7 +216,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     try {
       const serverPatient = await applyVideoFeatureViaServer(
         activePatient,
-        { moduleId, ctx, featureKey: s.featureKey, suggestedValue: s.suggestedValue, confidence: s.confidence, processIds: processIds || [], analysisProfile },
+        { moduleId, ctx, featureKey: s.featureKey, suggestedValue: s.suggestedValue, confidence: s.confidence, processIds: processIds || [], analysisJobIds, analysisBundleVersion: analysisBundle, analysisProfile },
         { session, settings, appliedBy }
       );
       onServerApplied?.(serverPatient);
@@ -195,7 +236,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
       <section className="section pattern-surface form-section">
         <div className="section-header">
           <div className="section-title-row">
-            <h2 className="section-title"><span className="section-icon">🎥</span>작업 영상 인간공학 분석 (mock)</h2>
+            <h2 className="section-title"><span className="section-icon">🎥</span>작업 영상 인간공학 분석{serverMode && fixtureMode ? ' (fixture)' : serverMode ? '' : ' (mock)'}</h2>
             <p className="section-description">
               조사 서류 기반으로 공정을 정리하고 mock 분석을 실행합니다. 결과는 항상 <b>제안값</b>이며 전문의가 확정합니다.
               {serverMode && ' 적용은 서버에 기록됩니다(audit).'}
@@ -227,6 +268,12 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                   <input type="number" min="0" max="100" value={p.shiftSharePercent}
                     onChange={(e) => editProcess(p.id, { shiftSharePercent: Number(e.target.value) })} style={{ width: 70 }} />%
                 </label>
+                <label title="공정활동분/일(수기). per-day 환산 입력 — 비우면 모름(적용 불가).">활동시간
+                  <input type="number" min="0" max="1440" placeholder="분/일"
+                    value={p.activeMinutesPerDay ?? ''}
+                    onChange={(e) => editProcess(p.id, { activeMinutesPerDay: e.target.value === '' ? null : Number(e.target.value) })}
+                    style={{ width: 80 }} />분/일
+                </label>
                 <select value={p.analysisProfile} onChange={(e) => editProcess(p.id, { analysisProfile: e.target.value })}>
                   {PROFILES.map((pr) => <option key={pr.value} value={pr.value}>{pr.label}</option>)}
                 </select>
@@ -239,6 +286,10 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                     <select value={c.viewpoint} onChange={(e) => editClip(c.id, { viewpoint: e.target.value })}>
                       {VIEWPOINTS.map((vp) => <option key={vp.value} value={vp.value}>{vp.label}</option>)}
                     </select>
+                    {fixtureMode && (
+                      <input type="text" placeholder="fixture 파일명(dev)" value={c.fixtureClipName || ''}
+                        onChange={(e) => editClip(c.id, { fixtureClipName: e.target.value })} style={{ width: 150 }} />
+                    )}
                     <button type="button" onClick={() => removeClip(c.id)}>×</button>
                   </span>
                 ))}
@@ -250,9 +301,17 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
         })}
         <button type="button" onClick={addProcess}>+ 공정 추가</button>
 
-        {/* 2) mock 분석 */}
+        {/* 2) 분석 실행 (서버=fixture 실추론, 그 외=mock) */}
         <div style={{ marginTop: 16 }}>
-          <button type="button" onClick={runMockAnalysis} disabled={va.processes.length === 0}>mock 분석 실행</button>
+          <button type="button" onClick={runAnalysis} disabled={va.processes.length === 0 || analyzing}>
+            {analyzing ? '분석 중…' : (serverMode ? '분석 실행' : 'mock 분석 실행')}
+          </button>
+          {analysisError && <p className="muted" style={{ color: '#c62828' }}>분석 오류: {analysisError}</p>}
+          {Object.keys(missingActiveTime).length > 0 && (
+            <p className="muted" style={{ color: '#b26a00' }}>
+              ⚠ 일부 공정의 활동시간(분/일)이 비어 있어 per-day 제안을 만들지 못했습니다. 공정 "활동시간"을 입력 후 다시 분석하세요.
+            </p>
+          )}
         </div>
 
         {/* 3) 제안 검토 (job-scope) */}

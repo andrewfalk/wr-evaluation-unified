@@ -23,6 +23,7 @@ export function StepContent({
   errors, settings, session,
   presets, presetMeta, presetError,
   aiAvailable,
+  videoAnalysisFixtureMode,
   updatePatient, updateShared, updateModule, updateModuleById, updateDiagnoses, updateActiveModules,
   handlePresetSelect, setPresetModalJobId, setPresetBrowseJobId,
   onVideoServerApplied,
@@ -101,6 +102,7 @@ export function StepContent({
           activeModules={activeModules}
           session={session}
           settings={settings}
+          fixtureMode={videoAnalysisFixtureMode}
           onServerApplied={onVideoServerApplied}
         />
       );

@@ -118,7 +118,7 @@ export async function pushPatient(patient, { session, settings } = {}) {
 // ---------------------------------------------------------------------------
 export async function applyVideoAnalysisJob(
   jobId, patient, computedData,
-  { appliedInputsHash, appliedInputsCount, session, settings } = {}
+  { appliedInputsHash, appliedInputsCount, sourceAnalysisJobIds = [], session, settings } = {}
 ) {
   // synced 강제(serverId + syncStatus==='synced') — dirty/conflict/local-only 차단.
   requireSyncedServerId(patient);
@@ -133,7 +133,7 @@ export async function applyVideoAnalysisJob(
     method: 'POST',
     session,
     headers: { 'If-Match': String(revision) },
-    body: { data: computedData, appliedInputsHash, appliedInputsCount },
+    body: { data: computedData, appliedInputsHash, appliedInputsCount, sourceAnalysisJobIds },
   });
   // res = { patient } | { idempotent: true, patient }
   return applyServerSync(res.patient, patient.id, patient.meta);

@@ -3,6 +3,18 @@
  * All other modules import the default export.
  * Tests can call createConfig({ ... }) directly without module reloading.
  */
+import path from 'path';
+
+// 영상 분석 dev 도구 기본 경로: 서버는 server/에서 실행되므로 repo 루트는 cwd 상위로 가정.
+// 운영/컨테이너는 env로 명시(아래 VIDEO_ANALYSIS_* 참고) — 기본값 의존 금지.
+function poseInferenceRoot(): string {
+  return path.resolve(process.cwd(), '..', 'services', 'pose-inference');
+}
+function defaultPython(scriptsDir: string): string {
+  // venv 경로는 OS별로 다르다(Windows=Scripts/python.exe, POSIX=bin/python).
+  const rel = process.platform === 'win32' ? path.join('Scripts', 'python.exe') : path.join('bin', 'python');
+  return path.join(scriptsDir, '.venv', rel);
+}
 
 function required(env: NodeJS.ProcessEnv, key: string): string {
   const val = env[key];
@@ -165,6 +177,19 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
 
     // 작업 영상 인간공학 분석(v6.0.0). 검증(6.0-B2) 통과 전까지 운영 기본 비활성.
     videoAnalysisEnabled: bool(env, 'VIDEO_ANALYSIS_ENABLED', false),
+
+    video: Object.freeze((() => {
+      const scriptsDir = optional(env, 'VIDEO_ANALYSIS_SCRIPTS_DIR', poseInferenceRoot());
+      return {
+        // dev-only fixture 추론 워커 활성(운영 기본 off). enabled와 함께여야 워커가 돈다.
+        fixtureMode: bool(env, 'VIDEO_ANALYSIS_FIXTURE_MODE', false),
+        // fixture 영상 allowlist 디렉터리. 이 안의 파일만 분석 입력으로 허용(path traversal 차단).
+        fixtureDir: optional(env, 'VIDEO_ANALYSIS_FIXTURE_DIR', path.join(scriptsDir, 'samples')),
+        scriptsDir,
+        // Python 실행기. 운영/컨테이너는 env 명시 권장(기본값은 dev venv).
+        python: optional(env, 'VIDEO_ANALYSIS_PYTHON', defaultPython(scriptsDir)),
+      };
+    })()),
   });
 }
 

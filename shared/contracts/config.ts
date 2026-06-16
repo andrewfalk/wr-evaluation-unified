@@ -9,6 +9,8 @@ export const ServerPublicConfigSchema = z.object({
   localFallbackAllowed: z.boolean(),
   // 작업 영상 인간공학 분석(v6.0.0). 구버전 서버 응답 호환 위해 기본 false.
   videoAnalysisEnabled: z.boolean().default(false),
+  // dev-only fixture 입력 UI 노출 플래그(PR D1). 서버 경로는 노출하지 않는다. 구버전 호환 기본 false.
+  videoAnalysisFixtureMode: z.boolean().default(false),
   serverTime: z.string(),
 });
 

@@ -10,6 +10,7 @@ import { runMigrations } from './db/migrate';
 import { createAuthRouter } from './routes/auth';
 import { createConfigRouter } from './routes/config';
 import { createVideoAnalysisRouter } from './routes/videoAnalysis';
+import { createVideoAnalysisWorker } from './workers/videoAnalysisWorker';
 import { createDevicesRouter } from './routes/devices';
 import { createAdminRouter } from './routes/admin';
 import { createAuditRouter } from './routes/audit';
@@ -98,6 +99,12 @@ if (require.main === module) {
         };
         doRetention();
         setInterval(doRetention, 24 * 60 * 60 * 1000).unref();
+
+        // 영상 분석 fixture 워커(dev-only): 플래그 + fixtureMode가 모두 켜졌을 때만 큐 처리.
+        if (config.videoAnalysisEnabled && config.video.fixtureMode) {
+          createVideoAnalysisWorker(pool);
+          console.log('[wr-server] video-analysis fixture worker enabled (dev-only)');
+        }
       });
     })
     .catch((err) => {
