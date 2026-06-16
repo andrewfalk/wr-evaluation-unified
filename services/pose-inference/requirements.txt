@@ -1,0 +1,6 @@
+# 포즈 추정 PoC (6.0-5). CPU 전용. Python 3.10+ (dev 검증: 3.14).
+# 설치: python -m venv .venv && .venv/Scripts/python -m pip install -r requirements.txt
+onnxruntime>=1.20         # CPU EP
+opencv-python-headless>=4.10
+rtmlib>=0.0.15            # YOLOX 사람탐지 + RTMPose ONNX 래퍼(가중치 자동 다운로드)
+jsonschema>=4.0          # keypoints.json ↔ schema 검증(validate_keypoints.py)

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "keypointConvention": "coco17",
+  "coordinateSpace": "pixel",
+  "frameWidth": 768,
+  "frameHeight": 432,
+  "requestedFps": 5,
+  "sampledFps": 5,
+  "source": { "clipRef": "synthetic-sample", "originalFps": 30, "totalFrames": 60 },
+  "model": {
+    "detector": "yolox_tiny_humanart",
+    "pose": "rtmpose-s_body7",
+    "inputSize": [192, 256],
+    "modelName": "rtmlib:body:lightweight",
+    "modelVersion": "rtmlib-0.0.15",
+    "preprocessConfigHash": "synthetic0000fixture"
+  },
+  "frames": [
+    { "frameIndex": 0, "timestampMs": 0, "persons": [] },
+    {
+      "frameIndex": 6,
+      "timestampMs": 200,
+      "persons": [
+        {
+          "trackId": null,
+          "bbox": [320.0, 80.0, 140.0, 300.0],
+          "score": 0.71,
+          "keypoints": [
+            [390, 100, 0.93], [398, 92, 0.9], [382, 92, 0.9], [410, 95, 0.85], [370, 95, 0.85],
+            [430, 150, 0.88], [350, 150, 0.88], [445, 210, 0.8], [338, 210, 0.8],
+            [450, 265, 0.78], [332, 265, 0.78], [420, 270, 0.84], [360, 270, 0.84],
+            [425, 340, 0.8], [358, 340, 0.8], [428, 405, 0.72], [356, 405, 0.72]
+          ]
+        }
+      ]
+    }
+  ]
+}

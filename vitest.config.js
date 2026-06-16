@@ -34,6 +34,7 @@ export default defineConfig({
       'server/**',
       'node_modules/**',
       'shared/node_modules/**',
+      'services/**/.venv/**', // Python 추론 PoC venv는 스캔 제외(6.0-5)
     ],
   },
 });
