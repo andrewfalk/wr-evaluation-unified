@@ -11,6 +11,8 @@ export function createConfigRouter(): Router {
       aiEnabled:            config.ai.enabled,
       localFallbackAllowed: config.localFallbackAllowed,
       videoAnalysisEnabled: config.videoAnalysisEnabled,
+      // dev-only fixture 입력 UI 노출용 플래그만 공개. fixtureDir 등 서버 경로는 절대 노출하지 않는다.
+      videoAnalysisFixtureMode: config.video.fixtureMode,
       serverTime:           new Date().toISOString(),
     });
   });

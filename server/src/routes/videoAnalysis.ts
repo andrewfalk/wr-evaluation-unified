@@ -5,6 +5,7 @@ import config from '../config';
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { writeAuditLog } from '../middleware/audit';
+import { resolveFixtureClip } from '../workers/fixturePath';
 
 // ---------------------------------------------------------------------------
 // 작업 영상 인간공학 분석 — clip/job 라이프사이클 + apply(영속화) API (6.0-4, mock).
@@ -29,12 +30,16 @@ const CreateJobBody = z.object({
   processId: z.string().nullable().optional(),
   analysisProfile: z.string().nullable().optional(),
   requestedFeatures: z.array(z.string()).optional(),
+  // dev-only fixture 입력(VIDEO_ANALYSIS_FIXTURE_MODE=true일 때만). basename 기대.
+  fixtureClipName: z.string().optional(),
 });
 // apply: 클라가 applyFeatureToModule로 계산한 환자 data + 멱등 해시.
 const ApplyBody = z.object({
   data: z.object({}).passthrough(),
   appliedInputsHash: z.string().min(1),
   appliedInputsCount: z.number().int().nonnegative().optional(),
+  // 이 적용이 소비한 원본 분석 job id(추론 출처 추적·consumed 전이). 셸 적용 job과 구분(PR D1).
+  sourceAnalysisJobIds: z.array(z.string().uuid()).default([]),
 });
 
 interface SessionInfo {
@@ -138,6 +143,7 @@ interface VideoJobRow {
   analysis_profile: string | null;
   requested_features: unknown;
   result_features: unknown;
+  error_code: string | null;
   applied_at: Date | null;
   applied_revision: number | null;
   applied_inputs_hash: string | null;
@@ -153,6 +159,9 @@ function jobResponse(row: VideoJobRow): Record<string, unknown> {
     status: row.status,
     analysisProfile: row.analysis_profile,
     requestedFeatures: row.requested_features ?? [],
+    // 워커가 ClipFeatureSetSchema 검증 후 저장한 intrinsic clipFeatures(있으면). per-day 환산은 클라.
+    resultFeatures: row.result_features ?? null,
+    errorCode: row.error_code ?? null,
     appliedAt: row.applied_at ? row.applied_at.toISOString() : null,
     appliedRevision: row.applied_revision,
   };
@@ -228,15 +237,33 @@ async function createJob(pool: Pool, req: Request, res: Response): Promise<void>
   const clip = await loadAccessibleClip(pool, session, parse.data.clipId, res);
   if (!clip) return;
 
-  // mock: 실제 추론 큐가 없으므로 즉시 review_pending(검수 대기). 실제 처리는 M2.
+  // 분석 실행(fixture) vs 적용 셸 job 분기.
+  //  - fixture 모드 + fixtureClipName 검증 성공 → upload_path 기록 후 'queued'(워커가 실추론).
+  //  - 그 외(미지정/플래그 off) → 기존 mock 동작: 즉시 'review_pending' 셸(추론 없음, 적용 경로용).
+  const wantsFixture = config.video.fixtureMode && !!parse.data.fixtureClipName;
+  let initialStatus = 'review_pending';
+  if (wantsFixture) {
+    const fixturePath = resolveFixtureClip(parse.data.fixtureClipName, config.video.fixtureDir);
+    if (!fixturePath) {
+      res.status(400).json({ code: 'INVALID_FIXTURE', error: 'fixtureClipName is not an allowlisted fixture clip' });
+      return;
+    }
+    await pool.query(
+      `UPDATE video_analysis_clips SET upload_path = $2 WHERE id = $1`,
+      [clip.clipId, fixturePath]
+    );
+    initialStatus = 'queued';
+  }
+
   const { rows } = await pool.query<VideoJobRow>(
     `INSERT INTO video_analysis_jobs
        (organization_id, patient_record_id, clip_id, process_id, status, analysis_profile, requested_features)
-     VALUES ($1, $2, $3, $4, 'review_pending', $5, $6)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
     [
       clip.organizationId, clip.patientRecordId, clip.clipId,
       parse.data.processId ?? null,
+      initialStatus,
       parse.data.analysisProfile ?? null,
       JSON.stringify(parse.data.requestedFeatures ?? []),
     ]
@@ -302,7 +329,7 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
     res.status(400).json({ code: 'INVALID_BODY', error: parse.error.issues });
     return;
   }
-  const { data, appliedInputsHash, appliedInputsCount } = parse.data;
+  const { data, appliedInputsHash, appliedInputsCount, sourceAnalysisJobIds } = parse.data;
 
   const client: PoolClient = await pool.connect();
   try {
@@ -349,6 +376,26 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // sourceAnalysisJobIds 검증: 위조/타org/stale id + 적용 셸 job·실패/만료·결과없는 job 차단.
+    // "실제 결과를 낸 per-process 분석 job"만 provenance/audit에 들어가게 한다 — result_features 보유 +
+    // process_id 보유(셸 job 제외) + status review_pending|done(같은 직업 다중 feature는 done 가능) +
+    // 현재 적용 셸 job(job.id) 자신은 제외. 상태는 review_pending/done만 허용(consume은 review_pending만 전이).
+    const uniqueSourceIds = [...new Set(sourceAnalysisJobIds)];
+    if (uniqueSourceIds.length > 0) {
+      const { rows: srcRows } = await client.query<{ id: string }>(
+        `SELECT id FROM video_analysis_jobs
+         WHERE id = ANY($1) AND organization_id = $2 AND patient_record_id = $3
+           AND result_features IS NOT NULL AND process_id IS NOT NULL
+           AND status IN ('review_pending','done') AND id <> $4`,
+        [uniqueSourceIds, session.organizationId, job.patient_record_id, job.id]
+      );
+      if (srcRows.length !== uniqueSourceIds.length) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ code: 'INVALID_SOURCE_JOB', error: 'sourceAnalysisJobIds must reference completed analysis jobs of this patient' });
+        return;
+      }
+    }
+
     // ③ patient FOR UPDATE + revision(If-Match)
     const { rows: pats } = await client.query<PatientRowLite>(
       `SELECT id, revision, payload, created_at, updated_at FROM patient_records
@@ -392,13 +439,28 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
       [job.id, newRevision, appliedInputsHash]
     );
 
+    // 적용에 소비된 원본 분석 job(review_pending)을 done(consumed)으로 전이 — payload "적용함" ↔ DB 상태 정합.
+    // 동일 org·동일 환자의 review_pending만 대상(권한·교차참조 방지). TTL sweep은 review_pending 미대상.
+    if (uniqueSourceIds.length > 0) {
+      await client.query(
+        `UPDATE video_analysis_jobs
+         SET status = 'done', applied_at = now(), applied_revision = $4
+         WHERE id = ANY($1) AND organization_id = $2 AND patient_record_id = $3 AND status = 'review_pending'`,
+        [uniqueSourceIds, session.organizationId, job.patient_record_id, newRevision]
+      );
+    }
+
     await client.query('COMMIT');
 
     void writeAuditLog(pool, {
       actorUserId: session.userId, actorOrgId: session.organizationId,
       action: 'video_analysis_apply', targetType: 'patient', targetId: job.patient_record_id,
       outcome: 'success', ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null,
-      extra: { jobId: job.id, clipId: job.clip_id, appliedInputsCount: appliedInputsCount ?? null, appliedRevision: newRevision },
+      extra: {
+        jobId: job.id, clipId: job.clip_id, appliedInputsCount: appliedInputsCount ?? null,
+        appliedRevision: newRevision,
+        sourceAnalysisJobIds, // 실제 추론 출처 추적(셸 jobId와 구분)
+      },
     });
     res.status(200).json({ patient: patientApplyResponse(updated[0]) });
   } catch (err) {

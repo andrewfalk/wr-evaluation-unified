@@ -1,11 +1,11 @@
 import crypto from 'crypto';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 
 // 피처플래그를 테스트 중 토글하기 위해 hoisted 가변 상태 사용.
-const flagState = vi.hoisted(() => ({ enabled: true }));
+const flagState = vi.hoisted(() => ({ enabled: true, fixtureMode: false }));
 
 vi.mock('../../config', () => ({
   default: {
@@ -17,7 +17,19 @@ vi.mock('../../config', () => ({
       refreshTokenSecret: 'test-refresh-secret',
     },
     get videoAnalysisEnabled() { return flagState.enabled; },
+    video: {
+      get fixtureMode() { return flagState.fixtureMode; },
+      fixtureDir: '/tmp/va-fixtures',
+      scriptsDir: '/tmp/scripts',
+      python: '/tmp/python',
+    },
   },
+}));
+
+// fixture 경로 검증을 결정적으로: 'good.mp4'만 통과, 나머지(traversal 등)는 null.
+vi.mock('../../workers/fixturePath', () => ({
+  resolveFixtureClip: vi.fn((name: unknown) =>
+    name === 'good.mp4' ? '/tmp/va-fixtures/good.mp4' : null),
 }));
 
 vi.mock('../../middleware/audit', () => ({
@@ -155,8 +167,9 @@ describe('POST /jobs (denormalize org/patient from clip)', () => {
     expect(res.body.jobId).toBe(JOB_ID);
     // insert는 clip 조회로 얻은 patient/org를 사용한다(클라 body가 아님).
     const insertCall = q(pool).mock.calls.find((c) => String(c[0]).includes('INSERT INTO video_analysis_jobs'));
-    expect(insertCall[1]).toContain(ORG_ID);
-    expect(insertCall[1]).toContain(PAT_ID);
+    expect(insertCall).toBeDefined();
+    expect(insertCall?.[1]).toContain(ORG_ID);
+    expect(insertCall?.[1]).toContain(PAT_ID);
     expect(writeAuditLog).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'video_analysis_submit' }));
   });
 
@@ -172,6 +185,64 @@ describe('POST /jobs (denormalize org/patient from clip)', () => {
       .send({ clipId: CLIP_ID, processId: null, analysisProfile: 'posture-basic', requestedFeatures: ['overheadHours'] });
     expect(res.status).toBe(201);
     expect(res.body.jobId).toBe(JOB_ID);
+  });
+});
+
+describe('POST /jobs fixture mode (dev-only worker job)', () => {
+  beforeEach(() => { vi.clearAllMocks(); flagState.enabled = true; flagState.fixtureMode = true; });
+  afterEach(() => { flagState.fixtureMode = false; });
+
+  const clipLookup = (pool: Pool) =>
+    q(pool).mockResolvedValueOnce({ rows: [{ id: CLIP_ID, patient_record_id: PAT_ID, organization_id: ORG_ID, assigned_doctor_user_id: USER_ID }] });
+
+  it('fixtureMode + valid fixtureClipName → queued job + records upload_path', async () => {
+    const pool = makePool();
+    authOk(pool);
+    clipLookup(pool);
+    q(pool).mockResolvedValueOnce({ rows: [] }); // UPDATE clips SET upload_path
+    q(pool).mockResolvedValueOnce({ rows: [{ id: JOB_ID, clip_id: CLIP_ID, process_id: 'p1', status: 'queued', analysis_profile: 'posture-basic', requested_features: ['overheadHours'], applied_at: null, applied_revision: null }] });
+    const res = await request(makeApp(pool))
+      .post('/api/video-analysis/jobs')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ clipId: CLIP_ID, processId: 'p1', analysisProfile: 'posture-basic', requestedFeatures: ['overheadHours'], fixtureClipName: 'good.mp4' });
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe('queued');
+    const updateClip = q(pool).mock.calls.find((c) => String(c[0]).includes('UPDATE video_analysis_clips SET upload_path'));
+    expect(updateClip?.[1]).toContain('/tmp/va-fixtures/good.mp4');
+    const insertCall = q(pool).mock.calls.find((c) => String(c[0]).includes('INSERT INTO video_analysis_jobs'));
+    expect(insertCall?.[1]).toContain('queued');
+  });
+
+  it('fixtureMode + invalid fixtureClipName (traversal) → 400 INVALID_FIXTURE (no insert)', async () => {
+    const pool = makePool();
+    authOk(pool);
+    clipLookup(pool);
+    const res = await request(makeApp(pool))
+      .post('/api/video-analysis/jobs')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ clipId: CLIP_ID, fixtureClipName: '../../etc/passwd' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_FIXTURE');
+    expect(q(pool).mock.calls.find((c) => String(c[0]).includes('INSERT INTO video_analysis_jobs'))).toBeUndefined();
+  });
+
+  it('fixtureMode OFF + fixtureClipName → ignored, falls back to mock review_pending shell', async () => {
+    flagState.fixtureMode = false;
+    const pool = makePool();
+    authOk(pool);
+    clipLookup(pool);
+    q(pool).mockResolvedValueOnce({ rows: [{ id: JOB_ID, clip_id: CLIP_ID, process_id: null, status: 'review_pending', analysis_profile: null, requested_features: [], applied_at: null, applied_revision: null }] });
+    const res = await request(makeApp(pool))
+      .post('/api/video-analysis/jobs')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ clipId: CLIP_ID, fixtureClipName: 'good.mp4' });
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe('review_pending');
+    // upload_path UPDATE는 일어나지 않는다(fixture 경로 미사용).
+    expect(q(pool).mock.calls.find((c) => String(c[0]).includes('UPDATE video_analysis_clips SET upload_path'))).toBeUndefined();
   });
 });
 
@@ -268,6 +339,76 @@ describe('POST /jobs/:jobId/apply', () => {
       .send(body);
     expect(res.status).toBe(200);
     expect(res.body.idempotent).toBe(true);
+  });
+
+  it('consumes sourceAnalysisJobIds: marks source analysis jobs done + records in audit', async () => {
+    const SRC_JOB = '44444444-4444-4444-4444-444444444444';
+    const pool = makePool();
+    const cq = clientSetup(pool,
+      { rows: [] },                 // BEGIN
+      { rows: [jobRow()] },         // job FOR UPDATE
+      { rows: [{ id: SRC_JOB }] },  // source job existence/ownership validation
+      { rows: [patRow(1)] },        // patient FOR UPDATE
+      { rows: [patRow(2)] },        // UPDATE patient RETURNING
+      { rows: [] },                 // UPDATE shell job done
+      { rows: [] },                 // UPDATE source analysis jobs done
+      { rows: [] },                 // COMMIT
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/jobs/${JOB_ID}/apply`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('If-Match', '1')
+      .send({ ...body, sourceAnalysisJobIds: [SRC_JOB] });
+    expect(res.status).toBe(200);
+    // 검증 SELECT는 결과보유·per-process·셸 job 제외 가드를 포함한다.
+    const validateCall = cq.mock.calls.find((c) =>
+      String(c[0]).includes('result_features IS NOT NULL') && String(c[0]).includes('id <> $4'));
+    expect(validateCall).toBeDefined();
+    expect(validateCall?.[1]?.[3]).toBe(JOB_ID); // 현재 적용 셸 job 자신 제외
+    const consumeCall = cq.mock.calls.find((c) =>
+      String(c[0]).includes('WHERE id = ANY($1)') && String(c[0]).includes("status = 'review_pending'"));
+    expect(consumeCall).toBeDefined();
+    expect(consumeCall?.[1]?.[0]).toEqual([SRC_JOB]);
+    expect(writeAuditLog).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      extra: expect.objectContaining({ sourceAnalysisJobIds: [SRC_JOB] }),
+    }));
+  });
+
+  it('400 INVALID_SOURCE_JOB when a sourceAnalysisJobId does not belong to this patient', async () => {
+    const pool = makePool();
+    clientSetup(pool,
+      { rows: [] },              // BEGIN
+      { rows: [jobRow()] },      // job FOR UPDATE
+      { rows: [] },              // source validation: 0 found (forged/stale id)
+      { rows: [] },              // ROLLBACK
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/jobs/${JOB_ID}/apply`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('If-Match', '1')
+      .send({ ...body, sourceAnalysisJobIds: ['44444444-4444-4444-4444-444444444444'] });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_SOURCE_JOB');
+  });
+
+  it('400 INVALID_SOURCE_JOB when the apply shell job id is sent as source (id<>$4 guard)', async () => {
+    const pool = makePool();
+    clientSetup(pool,
+      { rows: [] },              // BEGIN
+      { rows: [jobRow()] },      // job FOR UPDATE
+      { rows: [] },              // source validation excludes shell job (id <> $4, no process_id/result) → 0 found
+      { rows: [] },              // ROLLBACK
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/jobs/${JOB_ID}/apply`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('If-Match', '1')
+      .send({ ...body, sourceAnalysisJobIds: [JOB_ID] }); // 셸 job 자신을 source로 → 거부
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_SOURCE_JOB');
   });
 
   it('409 when job is not review_pending (e.g. expired)', async () => {
