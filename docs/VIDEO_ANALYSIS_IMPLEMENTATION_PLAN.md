@@ -45,7 +45,7 @@
   - [x] Node 테스트 8건(fixture↔zod·strict·confidence·segment·featureKey·**posture_ratio 0..1** + feature_config↔contract 교차검증) / Python 골든 test_feature_calc.py
   - [x] Codex 반영: canonical schema featureKey **propertyNames enum**(typo 차단), zod **posture_ratio 0..1 superRefine**, validate_keypoints.py **clip_features post-check**(ratio 0..1·segment 순서) — 3중 방어
   - [x] 실 keypoints→clip_features schema VALID, bad 케이스(typo/ratio>1/역순seg) 모두 차단. 전체 609 / lint errors 0 / build·tsc·server build OK. *per-day 환산은 PR D1.*
-- [~] **PR D1 (6.0-6b)** 서버 job 워커(queued→processing→review_pending, FOR UPDATE SKIP LOCKED 단일 트랜잭션 claim) + `GET /jobs/:id` 폴링 실동작(fixture clip 입력) + **clipFeatures→per-day 환산은 클라이언트**(process.activeMinutesPerDay) — PR #22 🔄 리뷰 대기
+- [x] **PR D1 (6.0-6b)** 서버 job 워커(queued→processing→review_pending, FOR UPDATE SKIP LOCKED 단일 트랜잭션 claim) + `GET /jobs/:id` 폴링 실동작(fixture clip 입력) + **clipFeatures→per-day 환산은 클라이언트**(process.activeMinutesPerDay) — PR #22 ✅ 머지
   - [x] **설계 결정**: ① 환산=클라(서버는 intrinsic `ClipFeatureSet`만 `result_features`에 저장, 마이그레이션 불필요) ② `VideoProcessSchema.activeMinutesPerDay`(nullable, null=모름→적용불가, 0=정상) ③ fixture는 `VIDEO_ANALYSIS_FIXTURE_MODE`+allowlist(`resolveFixtureClip`, traversal/심볼릭/확장자 차단), 경로는 `clips.upload_path` 재사용
   - [x] **분석 실행 vs 적용 분리**(Codex): `runAnalysis`(공정별 createClip→createJob(fixture,queued)→pollJob→환산)만 추론, `applySuggestion`은 fixtureClipName 없는 셸 job으로 persist만(추론 미재실행)
   - [x] **provenance·수명주기**(Codex): `AppliedInput.analysisJobIds`+apply audit `sourceAnalysisJobIds`, 적용 시 원본 분석 job을 done(consumed) 전이, TTL sweep은 queued/processing만
