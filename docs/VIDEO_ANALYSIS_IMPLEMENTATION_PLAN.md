@@ -52,7 +52,13 @@
   - [x] **per-day 정합(Codex 2차)**: 서버 절대 per-day는 job 집계 시 share 재가중 없이 합산(`buildJobFeatures absolutePerDay`), 변환은 활성모듈 requested로 필터(고정 feature set 정리)
   - [x] **sourceAnalysisJobIds 방어(Codex 3차)**: 적용 셸 job·실패/만료·결과없는 job 차단 — `result_features IS NOT NULL` + `process_id IS NOT NULL` + `status IN(review_pending,done)` + `id<>현재 셸 job`. 위조/셸 job → 400 INVALID_SOURCE_JOB
   - [x] 테스트: 서버 403(워커 claim/SKIP LOCKED·중복방지·error·fixture traversal·apply consumed·INVALID_SOURCE_JOB·셸 job 거부) / 클라 632(환산 null≠0·필터·pollJob·run 오케스트레이션·provenance·absolutePerDay 합산). lint 0 / build·tsc·server build OK. *실영상 e2e는 로컬 venv(비커밋).*
-- [ ] **PR D2 (6.0-6b)** 대상자 선택/tracking(§8.7) 실제화
+- [x] **PR D2a (6.0-6b)** 다중 인물 트래킹 코어(§8.7) — 구현 완료, 커밋/PR 대기
+  - [x] **결정적 IoU 트래커**(`tracker.py`, 순수 파이썬·무상태·결정적 → synthetic fixture 단위테스트) — rtmlib PoseTracker 대신
+  - [x] `infer_clip.py` 프레임별 trackId 부여(트래커 파라미터를 preprocessConfigHash에 포함, 재현성)
+  - [x] `feature_calc.py` **대상 track 기준 산출** — `--target-track`(D2b 워커 주입) 또는 dominant-track 휴리스틱(최다 등장→면적→score→id), 트랙 없으면 `pick_person` 폴백(하위호환). track-loss → presenceRatio + `TARGET_TRACK_LOST` 경고
+  - [x] 계약: clip_features `tracking{targetTrackId,presenceRatio,trackCount}`(optional, PR C 하위호환) — `clipFeatures.ts`+canonical schema+`validate_keypoints.py` presenceRatio 0..1
+  - [x] 테스트: Python 골든(트래커 안정/결정/은퇴·dominant·track-loss·폴백) + Node 계약(tracking VALID·presenceRatio 범위·strict·하위호환). smoke 재실행 PASS(tracking 블록 산출). 클라 635/서버 403, lint 0, build·tsc·server build OK. **서버/워커/UI 무변경**
+- [ ] **PR D2b (6.0-6b)** 대상자 선택 UI(§8.7) — sample-detect 실제화 + select-target + 박스만 중립 캔버스(privacy_first) 클릭 + box→track IoU 매핑(`--target-track` 주입) + confidence.tracking 표면화
 - [ ] **PR D3 (6.0-6b)** 품질검사 + 시점 융합(§8.6.1) + confidence(§8.8)
 
 ### M3 — 업로드·검증·매핑 (6.0-7, 6.0-B2, 6.0-8)
