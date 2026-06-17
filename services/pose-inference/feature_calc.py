@@ -236,7 +236,7 @@ def main():
     features = {}
 
     def conf_for(names):
-        """관여 keypoint 평균 score(대상 가용 프레임)."""
+        """관여 keypoint 평균 score(대상 가용 프레임) = breakdown.keypoint."""
         vals = []
         for f in frames:
             p = select(f)
@@ -248,6 +248,43 @@ def main():
                     vals.append(p["keypoints"][i][2])
         return round(sum(vals) / len(vals), 4) if vals else 0.0
 
+    def visibility_for(names):
+        """가림 보정 = clamp(1 - missingRatio, 0, 1) = min_conf 이상인 관절 비율(0..1, '역수' 아님)."""
+        total = visible = 0
+        for f in frames:
+            p = select(f)
+            if not p:
+                continue
+            for nm in names:
+                i = idx[nm]
+                if i < len(p["keypoints"]):
+                    total += 1
+                    if p["keypoints"][i][2] >= min_conf:
+                        visible += 1
+        return round(visible / total, 4) if total else 0.0
+
+    # usableFrameRatio는 keypoints.quality에서 운반(있을 때만) — 정보용, overall(min) 제외(§8.8 D3a).
+    usable_fr = None
+    kq = kdoc.get("quality")
+    if isinstance(kq, dict) and isinstance(kq.get("usableFrameRatio"), (int, float)):
+        usable_fr = kq["usableFrameRatio"]
+
+    def make_conf(names):
+        """confidence scalar(overall) + confidenceBreakdown 동시 산출.
+        overall = min(keypoint, visibility, tracking?, viewpoint?) — usableFrameRatio 제외(정보용).
+        viewpoint 성분은 D3b(시점 융합)에서 채움 — 여기선 omit."""
+        kp = conf_for(names)
+        vis = visibility_for(names)
+        bd = {"keypoint": kp, "visibility": vis}
+        comps = [kp, vis]
+        if tracked:
+            tr = round(presence_ratio, 4)
+            bd["tracking"] = tr
+            comps.append(tr)
+        if usable_fr is not None:
+            bd["usableFrameRatio"] = round(float(usable_fr), 4)  # breakdown에만(min 제외)
+        return round(min(comps), 4), bd
+
     # squatDuration: knee angle < 90
     knee_raw = [(times[i], knee_min_angle(kps[i])) for i in range(len(frames))]
     knee_sm = smooth_series(knee_raw, euro)
@@ -255,9 +292,10 @@ def main():
     samples = [(t, (v is not None and v < thr)) for t, v in knee_sm if v is not None]
     if samples:
         ratio, segs, _ = posture_ratio(samples, max_gap, min_hold)
+        ov, bd = make_conf(["left_knee", "right_knee", "left_hip", "right_hip", "left_ankle", "right_ankle"])
         features["squatDuration"] = {
             "kind": "numeric", "metric": "posture_ratio", "value": round(ratio, 4), "unit": "ratio",
-            "confidence": conf_for(["left_knee", "right_knee", "left_hip", "right_hip", "left_ankle", "right_ankle"]),
+            "confidence": ov, "confidenceBreakdown": bd,
             "segments": segs, "warnings": list(track_warnings),
         }
 
@@ -266,9 +304,10 @@ def main():
     oh = [(times[i], overhead_active(kps[i], elev)) for i in range(len(frames)) if select(frames[i])]
     if oh:
         ratio, segs, _ = posture_ratio(oh, max_gap, min_hold)
+        ov, bd = make_conf(["left_shoulder", "right_shoulder", "left_wrist", "right_wrist", "left_elbow", "right_elbow"])
         features["overheadHours"] = {
             "kind": "numeric", "metric": "posture_ratio", "value": round(ratio, 4), "unit": "ratio",
-            "confidence": conf_for(["left_shoulder", "right_shoulder", "left_wrist", "right_wrist", "left_elbow", "right_elbow"]),
+            "confidence": ov, "confidenceBreakdown": bd,
             "segments": segs, "warnings": list(track_warnings),
         }
 
@@ -279,9 +318,10 @@ def main():
     nsamples = [(t, (v is not None and v > nthr)) for t, v in neck_sm if v is not None]
     if nsamples:
         ratio, segs, _ = posture_ratio(nsamples, max_gap, min_hold)
+        ov, bd = make_conf(["left_shoulder", "right_shoulder", "left_ear", "right_ear"])
         features["neckFlexionOver20HoursPerDay"] = {
             "kind": "numeric", "metric": "posture_ratio", "value": round(ratio, 4), "unit": "ratio",
-            "confidence": conf_for(["left_shoulder", "right_shoulder", "left_ear", "right_ear"]),
+            "confidence": ov, "confidenceBreakdown": bd,
             "segments": segs, "warnings": list(track_warnings),
         }
 
@@ -289,9 +329,10 @@ def main():
     trunk_raw = [(times[i], trunk_flexion_angle(kps[i])) for i in range(len(frames))]
     trunk_vals = [v for _, v in smooth_series(trunk_raw, euro) if v is not None]
     if trunk_vals:
+        ov, bd = make_conf(["left_hip", "right_hip", "left_shoulder", "right_shoulder"])
         features["trunkPostureG"] = {
             "kind": "numeric", "metric": "peak_angle", "value": round(max(trunk_vals), 2), "unit": "degrees",
-            "confidence": conf_for(["left_hip", "right_hip", "left_shoulder", "right_shoulder"]),
+            "confidence": ov, "confidenceBreakdown": bd,
             "segments": [], "warnings": ["POSTURE_G_MANUAL"] + track_warnings,
         }
 
@@ -310,6 +351,9 @@ def main():
             "presenceRatio": round(presence_ratio, 4),
             "trackCount": len(track_ids),
         }
+    # keypoints.quality(infer_clip 산출) → clip-global quality 복사(있을 때만, D3a). 없는 구 fixture는 미부착.
+    if isinstance(kq, dict):
+        doc["quality"] = kq
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(doc, indent=2), encoding="utf-8")

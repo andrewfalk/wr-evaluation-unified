@@ -7,6 +7,7 @@
 // (missingActiveTime) — 0으로 표시해 오적용하는 사고를 막는다. 0(0분 공정)은 정상값.
 import { ClipFeatureSetSchema, VIDEO_FEATURE_TARGETS } from '@contracts/index';
 import { CANDIDATE_REASONS } from './videoMock';
+import { resolveAutoSuggest, DEFAULT_CONFIDENCE_THRESHOLDS } from './videoConfidenceConfig';
 
 // 환산 규칙 버전(재현성). feature_config.json version과 함께 recipe를 이룬다(provenance).
 export const VIDEO_MAPPING_CONFIG_VERSION = 'pday-1.0.0';
@@ -35,11 +36,13 @@ function convertRatio(ratio, unit, activeMinutesPerDay) {
  * @param {string[]} [opts.allowedFeatureKeys] - 지정 시 이 featureKey만 변환(활성 모듈 requested 필터).
  *   worker/Python은 고정 feature set을 내므로, 활성 모듈과 무관한 키(예: 무릎만 켰는데 spine trunkPostureG)를
  *   걸러 mock 경로(requested만 생성)와 동작을 일치시킨다.
+ * @param {object} [opts.confidenceThresholds] - 저신뢰 게이팅 임계값(featureKey→{성분:값}). 기본 비활성
+ *   (DEFAULT_CONFIDENCE_THRESHOLDS, 6.0-B2 전까지 게이팅 없음). 임계 미만이면 autoSuggestAllowed=false.
  * @returns {{ features: object, missingActiveTime: string[], warnings: string[], mappingConfigVersion: string, featureConfigVersion: string }}
  *   features: VideoFeatureMap(featureKey → VideoFeatureValue)
  *   missingActiveTime: 활동시간 누락으로 만들지 못한 per-day featureKey 목록(UI 안내·적용 불가)
  */
-export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay, { allowedFeatureKeys } = {}) {
+export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay, { allowedFeatureKeys, confidenceThresholds = DEFAULT_CONFIDENCE_THRESHOLDS } = {}) {
   // 서버가 보낸 값이라도 계약으로 한 번 더 검증(신뢰 경계). 실패 시 throw → 호출측이 error 처리.
   const parsed = ClipFeatureSetSchema.parse(clipFeatureSet);
   const allowed = allowedFeatureKeys ? new Set(allowedFeatureKeys) : null;
@@ -72,6 +75,11 @@ export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay,
     }
 
     const flags = flagsForMode(target.mode);
+    // 저신뢰 게이팅(§8.8): 임계값 설정 시에만 autoSuggestAllowed=false + LOW_CONFIDENCE_* 사유(warnings).
+    // 기본 비활성(6.0-B2 전) → flags 그대로. 사유는 base warnings[]로 운반(candidate reason과 구분).
+    const gate = resolveAutoSuggest(featureKey, cf, flags, confidenceThresholds);
+    const gatedFlags = { autoSuggestAllowed: gate.autoSuggestAllowed, requiresManualReview: flags.requiresManualReview };
+    const gatedWarnings = gate.gateWarnings.length ? [...(cf.warnings || []), ...gate.gateWarnings] : (cf.warnings || []);
 
     // categorical clip feature(예: neckForcedFlexion) → categorical 통과(활동시간 불필요).
     if (cf.kind === 'categorical') {
@@ -79,8 +87,8 @@ export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay,
         kind: 'categorical',
         value: cf.value,
         confidence: cf.confidence,
-        ...flags,
-        warnings: cf.warnings || [],
+        ...gatedFlags,
+        warnings: gatedWarnings,
       };
       continue;
     }
@@ -90,8 +98,8 @@ export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay,
         kind: 'boolean',
         value: cf.value,
         confidence: cf.confidence,
-        ...flags,
-        warnings: cf.warnings || [],
+        ...gatedFlags,
+        warnings: gatedWarnings,
       };
       continue;
     }
@@ -113,8 +121,8 @@ export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay,
         value,
         unit: target.unit,
         confidence: cf.confidence,
-        ...flags,
-        warnings: cf.warnings || [],
+        ...gatedFlags,
+        warnings: gatedWarnings,
       };
       continue;
     }

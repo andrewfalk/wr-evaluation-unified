@@ -71,6 +71,42 @@ def clamp01(v):
     return max(0.0, min(1.0, float(v)))
 
 
+def summarize_blur(blur_values):
+    """Laplacian variance 분포 요약(raw metric, 6.0-6b D3a). threshold 무관하게 항상 산출."""
+    arr = np.array(blur_values, dtype=float)
+    return {
+        "mean": round(float(np.mean(arr)), 2),
+        "p10": round(float(np.percentile(arr, 10)), 2),
+        "median": round(float(np.median(arr)), 2),
+    }
+
+
+def drop_ratio_from_timestamps(timestamps):
+    """실제 timestamp 중앙값 간격 기준 frame-drop 비율(§8.8). 요청 fps 고정 step 오판 방지.
+    중앙값 대비 간격이 배수로 벌어진 만큼을 누락 프레임으로 추정."""
+    if len(timestamps) < 2:
+        return 0.0
+    diffs = [b - a for a, b in zip(timestamps[:-1], timestamps[1:]) if b > a]
+    if not diffs:
+        return 0.0
+    med = float(np.median(diffs))
+    if med <= 0:
+        return 0.0
+    missing = sum(max(0, int(round(d / med)) - 1) for d in diffs)
+    return round(missing / (missing + len(timestamps)), 4)
+
+
+def load_quality_blur_threshold():
+    """feature_config.json.quality.blurThreshold(있을 때만). 기본 None = threshold 파생값(blurRatio/
+    usableFrameRatio) 비활성(D3a: 검증 전 추정 금지). raw blurMetric/dropRatio는 threshold와 무관."""
+    try:
+        cfg = json.loads((HERE / "feature_config.json").read_text(encoding="utf-8"))
+        bt = cfg.get("quality", {}).get("blurThreshold")
+        return float(bt) if bt is not None else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True)
@@ -94,6 +130,8 @@ def main():
     tracker = IoUTracker(iou_threshold=track_iou, max_age=track_max_age)
 
     frames_out = []
+    blur_values = []   # 샘플 프레임별 Laplacian variance(품질검사, D3a)
+    sampled_ts = []    # 샘플 프레임 timestampMs(drop 추정용)
     sampled = 0
     idx = 0
     t0 = time.time()
@@ -102,6 +140,10 @@ def main():
         if not ok:
             break
         if idx % step == 0:
+            # 품질 메타: 픽셀 접근 가능한 여기(infer_clip)에서만 산출(feature_calc는 keypoints만 입력).
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            blur_values.append(float(cv2.Laplacian(gray, cv2.CV_64F).var()))
+            sampled_ts.append(round(idx / orig_fps * 1000))
             bboxes = body.det_model(frame)  # (N,4) xyxy
             # 매 샘플 프레임마다 트래커 갱신(탐지 0이어도 호출해 트랙 age를 진행). xyxy 그대로 매칭.
             xyxy = [[float(b[0]), float(b[1]), float(b[2]), float(b[3])] for b in bboxes]
@@ -135,6 +177,23 @@ def main():
     cap.release()
     elapsed = time.time() - t0
 
+    # 품질 메타(D3a): raw blurMetric/dropRatio는 항상, threshold 파생값은 config에 blurThreshold 있을 때만.
+    quality = None
+    if blur_values:
+        drop_ratio = drop_ratio_from_timestamps(sampled_ts)
+        quality = {
+            "blurMetric": summarize_blur(blur_values),
+            "dropRatio": drop_ratio,
+            "sampledFps": round(actual_sampled_fps, 4),
+        }
+        blur_threshold = load_quality_blur_threshold()
+        if blur_threshold is not None:
+            blur_ratio = round(sum(1 for b in blur_values if b < blur_threshold) / len(blur_values), 4)
+            quality["blurThreshold"] = blur_threshold
+            quality["blurRatio"] = blur_ratio
+            # usableFrameRatio = blur∪drop 제외 후 사용가능 비율(정보용 — overall·게이팅 미입력, 6.0-B2까지).
+            quality["usableFrameRatio"] = round(max(0.0, 1.0 - min(1.0, blur_ratio + drop_ratio)), 4)
+
     doc = {
         "schemaVersion": SCHEMA_VERSION,
         "keypointConvention": KEYPOINT_CONVENTION,
@@ -161,6 +220,8 @@ def main():
         },
         "frames": frames_out,
     }
+    if quality is not None:
+        doc["quality"] = quality  # optional — PR B/C/D2 산출 하위호환
 
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)

@@ -391,19 +391,24 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                   const analysisProfile = jobProcesses[0]?.analysisProfile;
                   return (
                     <ul key={moduleId} style={{ listStyle: 'none', paddingLeft: 12 }}>
-                      {suggestions.map((s) => (
+                      {suggestions.map((s) => {
+                        // 저신뢰 게이팅(§8.8 D3a): autoSuggestAllowed=false면 "참고만" — 자동제안 금지, 적용 버튼 비활성.
+                        const refOnly = s.autoSuggestAllowed === false;
+                        return (
                         <li key={s.featureKey} style={{ margin: '4px 0' }}>
                           <code>{s.featureKey}</code> → {String(s.suggestedValue)} {s.unit || ''}
                           <span style={{ marginLeft: 6, fontSize: 12, color: s.confidence >= 0.8 ? '#2e7d32' : '#b26a00' }}>
                             신뢰도 {Math.round(s.confidence * 100)}%
                           </span>
+                          {refOnly && <span style={{ marginLeft: 6, fontSize: 12, color: '#b26a00' }} title="저신뢰 — 수기 확인 필요">참고만</span>}
                           {s.requiresManualReview && <span style={{ marginLeft: 6, fontSize: 12, color: '#b26a00' }}>수기확인</span>}
-                          <button type="button" style={{ marginLeft: 8 }} disabled={busy || applyBlocked}
+                          <button type="button" style={{ marginLeft: 8 }} disabled={busy || applyBlocked || refOnly}
                             onClick={() => applySuggestion(moduleId, { sharedJobId: jf.sharedJobId }, s, procIds, analysisProfile)}>
                             {serverMode ? '서버 적용' : '적용'}
                           </button>
                         </li>
-                      ))}
+                        );
+                      })}
                     </ul>
                   );
                 })}
