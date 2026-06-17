@@ -246,6 +246,11 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     const analysisJobIds = (va.processFeatures || [])
       .filter((pf) => (processIds || []).includes(pf.processId))
       .flatMap((pf) => resolveAnalysisJobIds(pf));
+    // 서버 모드는 원본 분석 job 추적이 필수(D3b) — 빈 provenance면 적용 거부(로컬/mock은 예외).
+    if (serverMode && analysisJobIds.length === 0) {
+      setApplyError('이 제안의 원본 분석 정보를 찾을 수 없어 적용할 수 없습니다. 분석을 다시 실행해 주세요.');
+      return;
+    }
     if (!serverMode) {
       updatePatient((d) => applyFeatureToModule({ data: d }, {
         moduleId, ctx, featureKey: s.featureKey,
