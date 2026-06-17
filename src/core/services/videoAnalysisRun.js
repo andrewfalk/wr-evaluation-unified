@@ -58,7 +58,8 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
       }
       // 활성 모듈로 매핑되는 featureKey만 변환(고정 feature set → 무관 키 제거, mock 경로와 일치).
       const conv = convertClipFeaturesToPerDay(done.resultFeatures, p.activeMinutesPerDay, { allowedFeatureKeys: requested });
-      processFeatures.push({ processId: p.id, jobId: done.jobId, features: conv.features });
+      // analysisJobIds[]로 provenance 운반(D3b — 다중 시점 융합 시 복수 job). jobId는 하위호환 유지.
+      processFeatures.push({ processId: p.id, jobId: done.jobId, analysisJobIds: [done.jobId], features: conv.features });
       if (conv.missingActiveTime.length > 0) missingActiveTime[p.id] = conv.missingActiveTime;
       bundleVersion = buildRecipeVersion(conv.featureConfigVersion);
     } catch (e) {

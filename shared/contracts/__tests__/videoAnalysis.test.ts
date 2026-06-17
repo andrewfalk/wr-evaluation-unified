@@ -11,6 +11,7 @@ import {
   VideoAnalysisDataSchema,
   VideoProcessSchema,
   ProcessFeaturesSchema,
+  resolveAnalysisJobIds,
   SampleDetectResultSchema,
   VIDEO_FEATURE_TARGETS,
 } from '../videoAnalysis';
@@ -228,6 +229,19 @@ describe('PR D1 fields — activeMinutesPerDay / analysisJobIds / ProcessFeature
   it('ProcessFeaturesSchema: jobId optional', () => {
     expect(ProcessFeaturesSchema.parse({ processId: 'p', features: {} }).jobId).toBeUndefined();
     expect(ProcessFeaturesSchema.parse({ processId: 'p', jobId: 'job-1', features: {} }).jobId).toBe('job-1');
+  });
+
+  it('ProcessFeaturesSchema: analysisJobIds[] optional (D3b 다중 시점 융합)', () => {
+    expect(ProcessFeaturesSchema.parse({ processId: 'p', analysisJobIds: ['a', 'b'], features: {} }).analysisJobIds).toEqual(['a', 'b']);
+    expect(ProcessFeaturesSchema.parse({ processId: 'p', features: {} }).analysisJobIds).toBeUndefined();
+  });
+
+  it('resolveAnalysisJobIds: 정규화 — analysisJobIds 우선, 빈배열/undefined jobId에 [undefined] 방지 (D3b)', () => {
+    expect(resolveAnalysisJobIds({ analysisJobIds: ['a', 'b'], jobId: 'x' })).toEqual(['a', 'b']); // 배열 우선
+    expect(resolveAnalysisJobIds({ analysisJobIds: [], jobId: 'x' })).toEqual(['x']);              // 빈배열 → jobId 폴백
+    expect(resolveAnalysisJobIds({ jobId: 'x' })).toEqual(['x']);                                  // 폴백
+    expect(resolveAnalysisJobIds({})).toEqual([]);                                                 // 둘 다 없음 → [] ([undefined] 아님)
+    expect(resolveAnalysisJobIds(null)).toEqual([]);
   });
 });
 
