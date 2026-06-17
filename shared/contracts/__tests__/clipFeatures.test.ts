@@ -55,6 +55,26 @@ describe('ClipFeatureSetSchema — drift guard', () => {
   });
 });
 
+describe('ClipFeatureSetSchema — tracking block (PR D2a, §8.7)', () => {
+  it('accepts a valid tracking block (targetTrackId/presenceRatio/trackCount)', () => {
+    const r = ClipFeatureSetSchema.parse({ ...fixture, tracking: { targetTrackId: 't1', presenceRatio: 0.92, trackCount: 3 } });
+    expect(r.tracking?.targetTrackId).toBe('t1');
+    expect(r.tracking?.presenceRatio).toBeCloseTo(0.92, 5);
+  });
+
+  it('allows targetTrackId null (fallback) and omitting tracking (PR C 하위호환)', () => {
+    expect(ClipFeatureSetSchema.parse({ ...fixture, tracking: { targetTrackId: null, presenceRatio: 0, trackCount: 0 } }).tracking?.targetTrackId).toBeNull();
+    expect(ClipFeatureSetSchema.parse(fixture).tracking).toBeUndefined(); // tracking 없는 기존 fixture
+  });
+
+  it('rejects presenceRatio outside 0..1 and extra/missing fields (strict)', () => {
+    expect(() => ClipFeatureSetSchema.parse({ ...fixture, tracking: { targetTrackId: 't1', presenceRatio: 1.5, trackCount: 1 } })).toThrow();
+    expect(() => ClipFeatureSetSchema.parse({ ...fixture, tracking: { targetTrackId: 't1', presenceRatio: -0.1, trackCount: 1 } })).toThrow();
+    expect(() => ClipFeatureSetSchema.parse({ ...fixture, tracking: { targetTrackId: 't1', presenceRatio: 0.5, trackCount: 1, surprise: 1 } })).toThrow();
+    expect(() => ClipFeatureSetSchema.parse({ ...fixture, tracking: { targetTrackId: 't1', presenceRatio: 0.5 } })).toThrow(); // trackCount 누락
+  });
+});
+
 describe('feature_config.json ↔ contract cross-check (drift guard)', () => {
   it('all configured feature keys are valid FeatureKeys with valid unit', () => {
     const keys = Object.keys(featureConfig.features);

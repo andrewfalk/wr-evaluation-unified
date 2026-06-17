@@ -12,6 +12,16 @@
     "clipRef": { "type": "string", "minLength": 1 },
     "clipDurationMs": { "type": "number", "minimum": 0 },
     "analyzedFrames": { "type": "integer", "minimum": 0 },
+    "tracking": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targetTrackId", "presenceRatio", "trackCount"],
+      "properties": {
+        "targetTrackId": { "type": ["string", "null"] },
+        "presenceRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "trackCount": { "type": "integer", "minimum": 0 }
+      }
+    },
     "features": {
       "type": "object",
       "propertyNames": {

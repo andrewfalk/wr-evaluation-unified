@@ -58,11 +58,55 @@ class KP:
 
 
 def pick_person(frame):
-    """단일 인물 PoC: 최고 score 1명(tracking은 PR D2)."""
+    """trackId가 없는 입력(PR B fixture 등) 폴백: 최고 score 1명."""
     persons = frame.get("persons", [])
     if not persons:
         return None
     return max(persons, key=lambda p: p.get("score", 0))
+
+
+def pick_target_person(frame, target_id):
+    """대상 trackId person 반환. 그 프레임에 대상이 없으면 None(track-loss → gap)."""
+    for p in frame.get("persons", []):
+        if p.get("trackId") == target_id:
+            return p
+    return None
+
+
+def all_track_ids(frames):
+    """클립 전체에 등장한 trackId 집합(None 제외)."""
+    ids = set()
+    for f in frames:
+        for p in f.get("persons", []):
+            tid = p.get("trackId")
+            if tid is not None:
+                ids.add(tid)
+    return ids
+
+
+def choose_dominant_track(frames):
+    """대상 미지정 시 휴리스틱: 가장 많은 프레임에 등장한 trackId.
+    동률 → 평균 bbox 면적 큰 것 → 평균 score 큰 것 → id 사전순(결정성). 트랙 없으면 None."""
+    stats = {}  # id -> [frame_count, area_sum, score_sum, seen_in_frame]
+    for f in frames:
+        seen = set()
+        for p in f.get("persons", []):
+            tid = p.get("trackId")
+            if tid is None:
+                continue
+            s = stats.setdefault(tid, [0, 0.0, 0.0])
+            bbox = p.get("bbox") or [0, 0, 0, 0]
+            area = (bbox[2] if len(bbox) > 2 else 0) * (bbox[3] if len(bbox) > 3 else 0)
+            s[1] += float(area)
+            s[2] += float(p.get("score", 0))
+            if tid not in seen:
+                s[0] += 1
+                seen.add(tid)
+    if not stats:
+        return None
+    # frame_count desc, area desc, score desc, id asc
+    best = sorted(stats.items(), key=lambda kv: (-kv[1][0], -kv[1][1], -kv[1][2], kv[0]))
+    return best[0][0]
 
 
 # ── per-frame predicates/angles ───────────────────────────────────────────
@@ -155,6 +199,8 @@ def main():
     ap.add_argument("--keypoints", required=True)
     ap.add_argument("--output", required=True)
     ap.add_argument("--config", default=str(HERE / "feature_config.json"))
+    ap.add_argument("--target-track", default=None,
+                    help="대상 trackId(미지정 시 dominant-track 휴리스틱; D2b 워커가 주입)")
     args = ap.parse_args()
 
     kdoc = load_json(args.keypoints)
@@ -164,19 +210,36 @@ def main():
     max_gap = cfg["frameDropMaxGapMs"]
     min_hold = cfg["minHoldSec"] * 1000
     euro = cfg["oneEuro"]
+    min_presence = cfg.get("tracking", {}).get("minTargetPresenceRatio", 0.5)
 
     frames = kdoc["frames"]
     times = [f["timestampMs"] for f in frames]
-    kps = [KP(pick_person(f), idx, min_conf) for f in frames]
+
+    # 대상 track 결정(§8.7). 트랙이 있으면 target 기준, 없으면(구 fixture) 최고 score 폴백.
+    track_ids = all_track_ids(frames)
+    tracked = len(track_ids) > 0
+    target_id = args.target_track if args.target_track else (choose_dominant_track(frames) if tracked else None)
+
+    def select(frame):
+        if target_id is None:
+            return pick_person(frame)         # 폴백(트랙 없음)
+        return pick_target_person(frame, target_id)
+
+    kps = [KP(select(f), idx, min_conf) for f in frames]
     clip_ms = (max(times) - min(times)) if times else 0
+
+    # track-loss: 대상 등장 프레임 비율. 임계 미만이면 각 feature에 경고.
+    present = sum(1 for f in frames if select(f) is not None)
+    presence_ratio = (present / len(frames)) if frames else 0.0
+    track_warnings = ["TARGET_TRACK_LOST"] if (tracked and presence_ratio < min_presence) else []
 
     features = {}
 
     def conf_for(names):
-        """관여 keypoint 평균 score(가용 프레임)."""
+        """관여 keypoint 평균 score(대상 가용 프레임)."""
         vals = []
         for f in frames:
-            p = pick_person(f)
+            p = select(f)
             if not p:
                 continue
             for nm in names:
@@ -195,18 +258,18 @@ def main():
         features["squatDuration"] = {
             "kind": "numeric", "metric": "posture_ratio", "value": round(ratio, 4), "unit": "ratio",
             "confidence": conf_for(["left_knee", "right_knee", "left_hip", "right_hip", "left_ankle", "right_ankle"]),
-            "segments": segs, "warnings": [],
+            "segments": segs, "warnings": list(track_warnings),
         }
 
     # overheadHours: wrist>shoulder OR upperarm elevation >= deg
     elev = cfg["features"]["overheadHours"]["criteria"]["upperarmElevationDeg"]
-    oh = [(times[i], overhead_active(kps[i], elev)) for i in range(len(frames)) if pick_person(frames[i])]
+    oh = [(times[i], overhead_active(kps[i], elev)) for i in range(len(frames)) if select(frames[i])]
     if oh:
         ratio, segs, _ = posture_ratio(oh, max_gap, min_hold)
         features["overheadHours"] = {
             "kind": "numeric", "metric": "posture_ratio", "value": round(ratio, 4), "unit": "ratio",
             "confidence": conf_for(["left_shoulder", "right_shoulder", "left_wrist", "right_wrist", "left_elbow", "right_elbow"]),
-            "segments": segs, "warnings": [],
+            "segments": segs, "warnings": list(track_warnings),
         }
 
     # neckFlexionOver20: neck flexion > 20
@@ -219,7 +282,7 @@ def main():
         features["neckFlexionOver20HoursPerDay"] = {
             "kind": "numeric", "metric": "posture_ratio", "value": round(ratio, 4), "unit": "ratio",
             "confidence": conf_for(["left_shoulder", "right_shoulder", "left_ear", "right_ear"]),
-            "segments": segs, "warnings": [],
+            "segments": segs, "warnings": list(track_warnings),
         }
 
     # trunkPostureG: peak trunk flexion angle (candidate)
@@ -229,7 +292,7 @@ def main():
         features["trunkPostureG"] = {
             "kind": "numeric", "metric": "peak_angle", "value": round(max(trunk_vals), 2), "unit": "degrees",
             "confidence": conf_for(["left_hip", "right_hip", "left_shoulder", "right_shoulder"]),
-            "segments": [], "warnings": ["POSTURE_G_MANUAL"],
+            "segments": [], "warnings": ["POSTURE_G_MANUAL"] + track_warnings,
         }
 
     doc = {
@@ -240,10 +303,18 @@ def main():
         "analyzedFrames": len(frames),
         "features": features,
     }
+    # 트랙이 있을 때만 tracking 블록(트랙 없는 구 fixture는 PR C 출력과 동일 유지 — 하위호환).
+    if tracked:
+        doc["tracking"] = {
+            "targetTrackId": target_id,
+            "presenceRatio": round(presence_ratio, 4),
+            "trackCount": len(track_ids),
+        }
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(doc, indent=2), encoding="utf-8")
-    print(f"wrote {out} | features: {list(features.keys())}")
+    trk = f" | track={target_id} presence={round(presence_ratio, 3)} of {len(track_ids)} tracks" if tracked else ""
+    print(f"wrote {out} | features: {list(features.keys())}{trk}")
 
 
 if __name__ == "__main__":

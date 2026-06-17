@@ -39,8 +39,14 @@ def main():
                     print(f"INVALID: frame {f.get('frameIndex')} person has {len(p['keypoints'])} keypoints, expected {expected}")
                     sys.exit(1)
 
-    # clip_features cross-field 검증(Draft7로 어려운 부분): posture_ratio 0..1, segment 순서.
+    # clip_features cross-field 검증(Draft7로 어려운 부분): tracking presenceRatio 0..1, posture_ratio 0..1, segment 순서.
     if "featureConfigVersion" in doc and isinstance(doc.get("features"), dict):
+        trk = doc.get("tracking")
+        if isinstance(trk, dict):
+            pr = trk.get("presenceRatio")
+            if not (isinstance(pr, (int, float)) and 0.0 <= pr <= 1.0):
+                print(f"INVALID: tracking.presenceRatio {pr} out of 0..1")
+                sys.exit(1)
         for key, fv in doc["features"].items():
             if fv.get("metric") == "posture_ratio":
                 v = fv.get("value")
