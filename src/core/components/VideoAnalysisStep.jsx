@@ -16,7 +16,7 @@ import { applyVideoFeatureViaServer } from '../services/videoServerApply';
 import { runServerAnalysis } from '../services/videoAnalysisRun';
 import { TargetPicker } from './TargetPicker';
 import { getModule } from '../moduleRegistry';
-import { VIDEO_FEATURE_TARGETS } from '@contracts/index';
+import { VIDEO_FEATURE_TARGETS, resolveAnalysisJobIds } from '@contracts/index';
 
 const VIEWPOINTS = [
   { value: 'sagittal', label: '측면(sagittal)' },
@@ -241,10 +241,16 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
       setApplyError('서버에 저장·동기화된 환자만 적용할 수 있습니다. 먼저 저장하세요.');
       return;
     }
-    // 이 제안을 만든 원본 분석 job(들): 해당 공정들의 processFeatures.jobId. 셸 적용 job과 구분해 provenance에.
+    // 이 제안을 만든 원본 분석 job(들): 해당 공정들의 analysisJobIds(폴백: jobId). 셸 적용 job과 구분해 provenance에.
+    // D3b: 한 공정이 여러 시점 클립(여러 job)을 융합 → 배열을 모두 운반(정규화로 [undefined] 방지).
     const analysisJobIds = (va.processFeatures || [])
-      .filter((pf) => (processIds || []).includes(pf.processId) && pf.jobId)
-      .map((pf) => pf.jobId);
+      .filter((pf) => (processIds || []).includes(pf.processId))
+      .flatMap((pf) => resolveAnalysisJobIds(pf));
+    // 서버 모드는 원본 분석 job 추적이 필수(D3b) — 빈 provenance면 적용 거부(로컬/mock은 예외).
+    if (serverMode && analysisJobIds.length === 0) {
+      setApplyError('이 제안의 원본 분석 정보를 찾을 수 없어 적용할 수 없습니다. 분석을 다시 실행해 주세요.');
+      return;
+    }
     if (!serverMode) {
       updatePatient((d) => applyFeatureToModule({ data: d }, {
         moduleId, ctx, featureKey: s.featureKey,

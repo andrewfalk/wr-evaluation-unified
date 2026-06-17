@@ -211,9 +211,19 @@ export const SampleDetectResultSchema = z
 export const ProcessFeaturesSchema = z.object({
   processId: z.string(),
   // 이 공정 결과를 산출한 분석 job id(서버 실분석 시). provenance로 운반; mock/로컬 모드는 생략.
+  // D3b 시점 융합: 한 공정이 여러 시점 클립(여러 job)을 융합 → analysisJobIds[]로 운반.
+  // jobId는 단일 시점 하위호환용 deprecated(읽기 폴백: analysisJobIds ?? [jobId]). M3에서 제거.
   jobId: z.string().optional(),
+  analysisJobIds: z.array(z.string()).optional(),
   features: VideoFeatureMapSchema,
 });
+
+// processFeatures의 분석 job id 목록을 정규화(D3b). 빈 배열/undefined jobId에 [undefined] 생성 방지.
+export function resolveAnalysisJobIds(pf: { analysisJobIds?: string[]; jobId?: string } | null | undefined): string[] {
+  if (!pf) return [];
+  if (pf.analysisJobIds && pf.analysisJobIds.length > 0) return pf.analysisJobIds;
+  return pf.jobId ? [pf.jobId] : [];
+}
 
 // 직업 단위 집계(파생값 — 필요 시 재계산 가능, §8.6.2).
 export const JobFeaturesSchema = z.object({

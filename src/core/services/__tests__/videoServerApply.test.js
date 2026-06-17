@@ -14,6 +14,7 @@ const env = { session: { mode: 'intranet' }, settings: {}, appliedBy: 'doc1' };
 const opts = {
   moduleId: 'shoulder', ctx: { sharedJobId: 'job-1' }, featureKey: 'overheadHours',
   suggestedValue: 1.8, confidence: 0.82, processIds: ['pr1'], processId: 'pr1', analysisProfile: 'posture-basic',
+  analysisJobIds: ['src-job-1'], // 서버 적용은 원본 분석 provenance 필수(D3b)
 };
 
 beforeEach(() => { vi.clearAllMocks(); });
@@ -76,6 +77,13 @@ describe('applyVideoFeatureViaServer', () => {
       'shell-1', patient, { computed: true },
       expect.objectContaining({ sourceAnalysisJobIds: ['ja', 'jb'] })
     );
+  });
+
+  it('빈 provenance(analysisJobIds 없음) → EMPTY_PROVENANCE 거부, clip/job/apply 미호출 (D3b)', async () => {
+    await expect(applyVideoFeatureViaServer(patient, { ...opts, analysisJobIds: [] }, env))
+      .rejects.toMatchObject({ code: 'EMPTY_PROVENANCE' });
+    expect(createClip).not.toHaveBeenCalled();
+    expect(applyVideoAnalysisJob).not.toHaveBeenCalled();
   });
 
   it('blocks apply when the job is not review_pending (defensive guard)', async () => {

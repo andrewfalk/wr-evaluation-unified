@@ -25,6 +25,14 @@ export function computeAppliedInputsHash(jobId, appliedInput) {
  */
 export async function applyVideoFeatureViaServer(patient, opts, env) {
   const { session, settings, appliedBy } = env;
+  // 서버 적용은 원본 분석 job 추적이 필수(D3b) — 빈 provenance면 거부(이 경로는 서버모드 real-apply 전용,
+  // 로컬/mock은 updatePatient로 처리되어 여기 오지 않는다). UI에서도 1차 차단하나 직접 호출 방어.
+  const sourceAnalysisJobIds = opts.analysisJobIds || [];
+  if (sourceAnalysisJobIds.length === 0) {
+    const err = new Error('원본 분석 정보(provenance)가 없어 서버 적용을 거부합니다.');
+    err.code = 'EMPTY_PROVENANCE';
+    throw err;
+  }
   // 1) clip 생성(서버가 sync.serverId 추출·synced 강제)
   const clip = await createClip(patient, { session, settings });
   // 2) job 생성 → review_pending (mock 서버는 즉시 review_pending). org/patient는 서버가 clip 조회로 채움.
@@ -42,7 +50,6 @@ export async function applyVideoFeatureViaServer(patient, opts, env) {
   }
   // 3) 환자 data 로컬 계산(모듈 값 + appliedInputs) — 서버는 coerce를 모르므로 클라가 계산.
   //    analysisJobIds: 이 제안을 만든 원본 분석 job(들). 적용 셸 job(job.jobId)과 구분해 provenance에 기록.
-  const sourceAnalysisJobIds = opts.analysisJobIds || [];
   const { patient: nextLocal, appliedInput } = applyFeatureToModule(patient, {
     moduleId: opts.moduleId, ctx: opts.ctx, featureKey: opts.featureKey,
     suggestedValue: opts.suggestedValue, confidence: opts.confidence,

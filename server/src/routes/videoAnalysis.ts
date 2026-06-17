@@ -83,7 +83,7 @@ async function loadAccessiblePatient(
 }
 
 interface ClipCtx {
-  clipId: string; patientRecordId: string; organizationId: string;
+  clipId: string; patientRecordId: string; organizationId: string; processId: string | null;
   uploadPath: string | null; sampleDetectResult: unknown; targetPersonId: string | null;
 }
 // clipId → clip + 소속 환자 권한 확인. job-scoped guard의 clip 버전.
@@ -96,10 +96,10 @@ async function loadAccessibleClip(
   }
   const { rows } = await pool.query<{
     id: string; patient_record_id: string; organization_id: string; assigned_doctor_user_id: string | null;
-    upload_path: string | null; sample_detect_result: unknown; target_person_id: string | null;
+    process_id: string | null; upload_path: string | null; sample_detect_result: unknown; target_person_id: string | null;
   }>(
     `SELECT c.id, c.patient_record_id, c.organization_id, p.assigned_doctor_user_id,
-            c.upload_path, c.sample_detect_result, c.target_person_id
+            c.process_id, c.upload_path, c.sample_detect_result, c.target_person_id
      FROM video_analysis_clips c
      JOIN patient_records p ON p.id = c.patient_record_id AND p.deleted_at IS NULL
      WHERE c.id = $1 AND c.organization_id = $2`,
@@ -115,6 +115,7 @@ async function loadAccessibleClip(
   }
   return {
     clipId: rows[0].id, patientRecordId: rows[0].patient_record_id, organizationId: rows[0].organization_id,
+    processId: rows[0].process_id,
     uploadPath: rows[0].upload_path, sampleDetectResult: rows[0].sample_detect_result, targetPersonId: rows[0].target_person_id,
   };
 }
@@ -296,6 +297,14 @@ async function createJob(pool: Pool, req: Request, res: Response): Promise<void>
   const clip = await loadAccessibleClip(pool, session, parse.data.clipId, res);
   if (!clip) return;
 
+  // process_id도 clip 저장값이 source of truth(D2b createClip이 저장). body가 다른 공정을 가리키면
+  // p1 영상·target 분석이 p2 provenance로 새는 무결성 위반 → 거부. (clip.process_id null이면 body 폴백.)
+  if (clip.processId != null && parse.data.processId != null && parse.data.processId !== clip.processId) {
+    res.status(400).json({ code: 'PROCESS_MISMATCH', error: 'processId does not match the clip' });
+    return;
+  }
+  const processId = clip.processId ?? parse.data.processId ?? null;
+
   // 큐 결정은 clip.upload_path로 일원화(fixture는 createClip에서 resolve·저장, PR D2b).
   //  - fixtureMode && clip.upload_path → 'queued'(워커가 실추론). 워커는 fixtureMode일 때만 등록 → 정체 방지.
   //  - 그 외 → 'review_pending' 셸(추론 없음, 적용 경로).
@@ -308,7 +317,7 @@ async function createJob(pool: Pool, req: Request, res: Response): Promise<void>
      RETURNING *`,
     [
       clip.organizationId, clip.patientRecordId, clip.clipId,
-      parse.data.processId ?? null,
+      processId,
       initialStatus,
       parse.data.analysisProfile ?? null,
       JSON.stringify(parse.data.requestedFeatures ?? []),
