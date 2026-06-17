@@ -57,6 +57,13 @@ export const ClipFeatureValueSchema = z.discriminatedUnion('kind', [
 
 export const ClipFeatureMapSchema = z.record(FeatureKeySchema, ClipFeatureValueSchema);
 
+// 대상자 트래킹 요약(PR D2a, §8.7). 트랙이 있을 때만 산출 — PR C(트래킹 전) 출력 하위호환 위해 optional.
+export const ClipTrackingSchema = z.object({
+  targetTrackId: z.string().nullable(),
+  presenceRatio: z.number().min(0).max(1),  // 대상 등장 프레임 비율(track-loss 표면화)
+  trackCount: z.number().int().nonnegative(),
+}).strict();
+
 export const ClipFeatureSetSchema = z.object({
   schemaVersion: z.literal(1),
   featureConfigVersion: z.string().min(1),  // feature_config.json version — 재현성
@@ -64,6 +71,7 @@ export const ClipFeatureSetSchema = z.object({
   clipDurationMs: z.number().nonnegative(),
   analyzedFrames: z.number().int().nonnegative(),
   features: ClipFeatureMapSchema,
+  tracking: ClipTrackingSchema.optional(),
 }).strict().superRefine((doc, ctx) => {
   // posture_ratio는 비율(0~1) — 계약 수준에서 강제(후속 per-day 환산 이상값 방지).
   for (const [key, f] of Object.entries(doc.features)) {
@@ -81,4 +89,5 @@ export type ClipFeatureMetric = z.infer<typeof ClipFeatureMetricSchema>;
 export type ClipFeatureSegment = z.infer<typeof ClipFeatureSegmentSchema>;
 export type ClipFeatureValue = z.infer<typeof ClipFeatureValueSchema>;
 export type ClipFeatureMap = z.infer<typeof ClipFeatureMapSchema>;
+export type ClipTracking = z.infer<typeof ClipTrackingSchema>;
 export type ClipFeatureSet = z.infer<typeof ClipFeatureSetSchema>;
