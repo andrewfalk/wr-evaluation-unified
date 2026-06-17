@@ -181,6 +181,26 @@ export const VideoClipSchema = z
   })
   .passthrough();
 
+// sample-detect 결과(§8.7, PR D2b) — 대표 프레임 person box 후보. 원본 이미지 없이 bbox 좌표만(privacy_first).
+// bbox = xywh 픽셀(keypoints/워커 IoU와 동일 좌표계). DB JSONB로 저장되므로 신뢰 경계 — 저장/읽기 시 검증.
+export const SampleDetectPersonSchema = z
+  .object({
+    id: z.string().min(1),
+    bbox: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+    score: z.number().min(0).max(1),
+  })
+  .strict();
+export const SampleDetectResultSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    frameIndex: z.number().int().nonnegative(),
+    timestampMs: z.number().nonnegative(),
+    frameWidth: z.number().int().positive(),
+    frameHeight: z.number().int().positive(),
+    persons: z.array(SampleDetectPersonSchema),
+  })
+  .strict();
+
 // 공정 단위 fused feature(VideoFeatureMap, §8.6.1 시점 융합 결과).
 export const ProcessFeaturesSchema = z.object({
   processId: z.string(),
@@ -267,6 +287,8 @@ export type AppliedInput = z.infer<typeof AppliedInputSchema>;
 export type CandidateFeatureEntry = z.infer<typeof CandidateFeatureEntrySchema>;
 export type VideoProcess = z.infer<typeof VideoProcessSchema>;
 export type VideoClip = z.infer<typeof VideoClipSchema>;
+export type SampleDetectPerson = z.infer<typeof SampleDetectPersonSchema>;
+export type SampleDetectResult = z.infer<typeof SampleDetectResultSchema>;
 export type ProcessFeatures = z.infer<typeof ProcessFeaturesSchema>;
 export type JobFeatures = z.infer<typeof JobFeaturesSchema>;
 export type RetentionMode = z.infer<typeof RetentionModeSchema>;

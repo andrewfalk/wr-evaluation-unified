@@ -11,6 +11,7 @@ import {
   VideoAnalysisDataSchema,
   VideoProcessSchema,
   ProcessFeaturesSchema,
+  SampleDetectResultSchema,
   VIDEO_FEATURE_TARGETS,
 } from '../videoAnalysis';
 import { SharedDataSchema } from '../patient';
@@ -227,6 +228,22 @@ describe('PR D1 fields — activeMinutesPerDay / analysisJobIds / ProcessFeature
   it('ProcessFeaturesSchema: jobId optional', () => {
     expect(ProcessFeaturesSchema.parse({ processId: 'p', features: {} }).jobId).toBeUndefined();
     expect(ProcessFeaturesSchema.parse({ processId: 'p', jobId: 'job-1', features: {} }).jobId).toBe('job-1');
+  });
+});
+
+describe('SampleDetectResultSchema (§8.7, PR D2b)', () => {
+  const valid = {
+    schemaVersion: 1, frameIndex: 100, timestampMs: 8000, frameWidth: 640, frameHeight: 480,
+    persons: [{ id: 'p1', bbox: [10, 20, 100, 200], score: 0.9 }],
+  };
+  it('parses a valid sample-detect result', () => {
+    expect(SampleDetectResultSchema.parse(valid).persons[0].id).toBe('p1');
+  });
+  it('rejects bbox length ≠ 4, score>1, missing fields, extra fields', () => {
+    expect(() => SampleDetectResultSchema.parse({ ...valid, persons: [{ id: 'p1', bbox: [1, 2, 3], score: 0.5 }] })).toThrow();
+    expect(() => SampleDetectResultSchema.parse({ ...valid, persons: [{ id: 'p1', bbox: [1, 2, 3, 4], score: 1.5 }] })).toThrow();
+    expect(() => SampleDetectResultSchema.parse({ ...valid, frameWidth: 0 })).toThrow();
+    expect(() => SampleDetectResultSchema.parse({ ...valid, surprise: 1 })).toThrow();
   });
 });
 
