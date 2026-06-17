@@ -40,12 +40,13 @@ export function requireSyncedServerId(patient) {
 
 // 환자 객체를 받아 serverId를 추출(synced 강제)해 clip을 생성한다 — 로컬 id 오전송 방지.
 // processId: 분석 job은 어느 공정 클립인지 채운다(per-process). 적용 셸 경로는 생략(=null).
-export async function createClip(patient, { processId, session, settings } = {}) {
+// fixtureClipName(dev): fixtureMode 서버에서 여기서 resolve→upload_path 저장(PR D2b). 적용 경로는 생략.
+export async function createClip(patient, { processId, fixtureClipName, session, settings } = {}) {
   ensureIntranet(session);
   const serverPatientId = requireSyncedServerId(patient);
   return requestJson('/api/video-analysis/clips', {
     baseUrl: getBaseUrl(session, settings), method: 'POST', session,
-    body: { patientId: serverPatientId, processId: processId ?? null },
+    body: { patientId: serverPatientId, processId: processId ?? null, fixtureClipName },
   });
 }
 
@@ -63,13 +64,12 @@ export async function selectTarget(clipId, targetPersonId, { session, settings }
   });
 }
 
-// fixtureClipName: dev-only fixture 입력(서버 fixtureMode=true일 때만 의미). 분석 job은 전달,
-// 적용 셸 job은 생략(서버가 즉시 review_pending 셸로 처리, 추론 미트리거).
-export async function createJob({ clipId, processId, analysisProfile, requestedFeatures, fixtureClipName }, { session, settings } = {}) {
+// 큐 결정은 서버가 clip.upload_path로 일원화(PR D2b) — fixtureClipName은 createClip에만 전달, job에는 없음.
+export async function createJob({ clipId, processId, analysisProfile, requestedFeatures }, { session, settings } = {}) {
   ensureIntranet(session);
   return requestJson('/api/video-analysis/jobs', {
     baseUrl: getBaseUrl(session, settings), method: 'POST', session,
-    body: { clipId, processId, analysisProfile, requestedFeatures, fixtureClipName },
+    body: { clipId, processId, analysisProfile, requestedFeatures },
   });
 }
 

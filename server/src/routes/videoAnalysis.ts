@@ -5,7 +5,10 @@ import config from '../config';
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { writeAuditLog } from '../middleware/audit';
+import path from 'path';
+import { SampleDetectResultSchema } from '@wr/contracts';
 import { resolveFixtureClip } from '../workers/fixturePath';
+import { runSampleDetect } from '../workers/sampleDetect';
 
 // ---------------------------------------------------------------------------
 // 작업 영상 인간공학 분석 — clip/job 라이프사이클 + apply(영속화) API (6.0-4, mock).
@@ -22,6 +25,8 @@ const CreateClipBody = z.object({
   patientId: z.string().uuid(),
   // job-scope 집계는 특정 공정이 없어 null을 보낸다(컬럼도 nullable). null/undefined 모두 허용.
   processId: z.string().nullable().optional(),
+  // dev-only fixture 입력(fixtureMode일 때만). 여기서 resolve→upload_path 저장(sample-detect가 그 전 단계, PR D2b).
+  fixtureClipName: z.string().optional(),
 });
 const SelectTargetBody = z.object({ targetPersonId: z.string().min(1) });
 const CreateJobBody = z.object({
@@ -30,8 +35,7 @@ const CreateJobBody = z.object({
   processId: z.string().nullable().optional(),
   analysisProfile: z.string().nullable().optional(),
   requestedFeatures: z.array(z.string()).optional(),
-  // dev-only fixture 입력(VIDEO_ANALYSIS_FIXTURE_MODE=true일 때만). basename 기대.
-  fixtureClipName: z.string().optional(),
+  // fixtureClipName은 createClip으로 이관(PR D2b) — 큐 결정은 clip.upload_path로 일원화.
 });
 // apply: 클라가 applyFeatureToModule로 계산한 환자 data + 멱등 해시.
 const ApplyBody = z.object({
@@ -78,7 +82,10 @@ async function loadAccessiblePatient(
   return { id: rows[0].id };
 }
 
-interface ClipCtx { clipId: string; patientRecordId: string; organizationId: string; }
+interface ClipCtx {
+  clipId: string; patientRecordId: string; organizationId: string;
+  uploadPath: string | null; sampleDetectResult: unknown; targetPersonId: string | null;
+}
 // clipId → clip + 소속 환자 권한 확인. job-scoped guard의 clip 버전.
 async function loadAccessibleClip(
   pool: Pool, session: SessionInfo, clipId: string, res: Response
@@ -89,8 +96,10 @@ async function loadAccessibleClip(
   }
   const { rows } = await pool.query<{
     id: string; patient_record_id: string; organization_id: string; assigned_doctor_user_id: string | null;
+    upload_path: string | null; sample_detect_result: unknown; target_person_id: string | null;
   }>(
-    `SELECT c.id, c.patient_record_id, c.organization_id, p.assigned_doctor_user_id
+    `SELECT c.id, c.patient_record_id, c.organization_id, p.assigned_doctor_user_id,
+            c.upload_path, c.sample_detect_result, c.target_person_id
      FROM video_analysis_clips c
      JOIN patient_records p ON p.id = c.patient_record_id AND p.deleted_at IS NULL
      WHERE c.id = $1 AND c.organization_id = $2`,
@@ -104,7 +113,10 @@ async function loadAccessibleClip(
     res.status(403).json({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
     return null;
   }
-  return { clipId: rows[0].id, patientRecordId: rows[0].patient_record_id, organizationId: rows[0].organization_id };
+  return {
+    clipId: rows[0].id, patientRecordId: rows[0].patient_record_id, organizationId: rows[0].organization_id,
+    uploadPath: rows[0].upload_path, sampleDetectResult: rows[0].sample_detect_result, targetPersonId: rows[0].target_person_id,
+  };
 }
 
 // jobId → job + 소속 환자 권한 확인. (FOR UPDATE 없는 일반 조회용.)
@@ -181,27 +193,58 @@ async function createClip(pool: Pool, req: Request, res: Response): Promise<void
   const patient = await loadAccessiblePatient(pool, session, parse.data.patientId, res);
   if (!patient) return;
 
+  // dev fixture: 여기서 경로를 resolve해 upload_path에 저장(sample-detect/job이 그 경로를 재검증해 사용).
+  let uploadPath: string | null = null;
+  if (parse.data.fixtureClipName) {
+    if (!config.video.fixtureMode) {
+      res.status(400).json({ code: 'FIXTURE_MODE_OFF', error: 'fixtureClipName requires fixture mode' });
+      return;
+    }
+    uploadPath = resolveFixtureClip(parse.data.fixtureClipName, config.video.fixtureDir);
+    if (!uploadPath) {
+      res.status(400).json({ code: 'INVALID_FIXTURE', error: 'fixtureClipName is not an allowlisted fixture clip' });
+      return;
+    }
+  }
+
   const { rows } = await pool.query<{ id: string }>(
-    `INSERT INTO video_analysis_clips (organization_id, patient_record_id, process_id)
-     VALUES ($1, $2, $3) RETURNING id`,
-    [session.organizationId, patient.id, parse.data.processId ?? null]
+    `INSERT INTO video_analysis_clips (organization_id, patient_record_id, process_id, upload_path)
+     VALUES ($1, $2, $3, $4) RETURNING id`,
+    [session.organizationId, patient.id, parse.data.processId ?? null, uploadPath]
   );
   res.status(201).json({ clipId: rows[0].id });
 }
 
+// sample-detect = dev fixture 전용(§8.7, PR D2b). 대표 프레임 person box 후보를 실제 탐지.
 async function sampleDetect(pool: Pool, req: Request, res: Response): Promise<void> {
   const session = req.sessionInfo as unknown as SessionInfo;
   const clip = await loadAccessibleClip(pool, session, req.params.clipId, res);
   if (!clip) return;
 
-  // mock: 대표 프레임 person box 후보. 실제 RTMDet 탐지는 M2.
-  const result = {
-    status: 'detected',
-    persons: [
-      { id: 'person-1', box: [0.3, 0.2, 0.6, 0.9], score: 0.94 },
-      { id: 'person-2', box: [0.05, 0.4, 0.2, 0.85], score: 0.71 },
-    ],
-  };
+  // fixture 없는 clip(=실제 업로드는 M3)에선 미지원 — 명시 거부(기존 mock 제거).
+  if (!config.video.fixtureMode || !clip.uploadPath) {
+    res.status(409).json({ code: 'SAMPLE_DETECT_UNAVAILABLE', error: 'sample-detect requires a fixture clip (dev only)' });
+    return;
+  }
+  // DB upload_path는 신뢰 경계 밖 → basename을 allowlist 안에서 재검증(심층방어).
+  const clipPath = resolveFixtureClip(path.basename(clip.uploadPath), config.video.fixtureDir);
+  if (!clipPath) {
+    res.status(409).json({ code: 'SAMPLE_DETECT_UNAVAILABLE', error: 'clip source is no longer an allowlisted fixture' });
+    return;
+  }
+
+  // 깨진 출력(JSON/계약 검증 실패)은 일반 500이 아니라 INVALID_SAMPLE_DETECT 명시 응답(502: 하위 추론 프로세스가 잘못된 결과 산출).
+  // timeout/크래시 등 그 외 오류는 rethrow → wrap이 일반 500 처리.
+  let result;
+  try {
+    result = await runSampleDetect(clipPath); // SampleDetectResultSchema 검증 완료
+  } catch (err) {
+    if ((err as { code?: string })?.code === 'INVALID_SAMPLE_DETECT') {
+      res.status(502).json({ code: 'INVALID_SAMPLE_DETECT', error: 'sample-detect produced an invalid result' });
+      return;
+    }
+    throw err;
+  }
   await pool.query(
     `UPDATE video_analysis_clips SET sample_detect_result = $2 WHERE id = $1`,
     [clip.clipId, JSON.stringify(result)]
@@ -218,6 +261,22 @@ async function selectTarget(pool: Pool, req: Request, res: Response): Promise<vo
   }
   const clip = await loadAccessibleClip(pool, session, req.params.clipId, res);
   if (!clip) return;
+
+  // sample-detect 선행 필수.
+  if (clip.sampleDetectResult == null) {
+    res.status(409).json({ code: 'NO_SAMPLE_DETECT', error: 'run sample-detect before selecting a target' });
+    return;
+  }
+  // DB JSONB는 신뢰 경계 밖 → 계약 검증 후 후보 id 존재 확인(위조 거부).
+  const detect = SampleDetectResultSchema.safeParse(clip.sampleDetectResult);
+  if (!detect.success) {
+    res.status(502).json({ code: 'INVALID_SAMPLE_DETECT', error: 'stored sample-detect result is invalid' });
+    return;
+  }
+  if (!detect.data.persons.some((p) => p.id === parse.data.targetPersonId)) {
+    res.status(400).json({ code: 'INVALID_TARGET', error: 'targetPersonId is not among sample-detect candidates' });
+    return;
+  }
 
   await pool.query(
     `UPDATE video_analysis_clips SET target_person_id = $2 WHERE id = $1`,
@@ -237,23 +296,10 @@ async function createJob(pool: Pool, req: Request, res: Response): Promise<void>
   const clip = await loadAccessibleClip(pool, session, parse.data.clipId, res);
   if (!clip) return;
 
-  // 분석 실행(fixture) vs 적용 셸 job 분기.
-  //  - fixture 모드 + fixtureClipName 검증 성공 → upload_path 기록 후 'queued'(워커가 실추론).
-  //  - 그 외(미지정/플래그 off) → 기존 mock 동작: 즉시 'review_pending' 셸(추론 없음, 적용 경로용).
-  const wantsFixture = config.video.fixtureMode && !!parse.data.fixtureClipName;
-  let initialStatus = 'review_pending';
-  if (wantsFixture) {
-    const fixturePath = resolveFixtureClip(parse.data.fixtureClipName, config.video.fixtureDir);
-    if (!fixturePath) {
-      res.status(400).json({ code: 'INVALID_FIXTURE', error: 'fixtureClipName is not an allowlisted fixture clip' });
-      return;
-    }
-    await pool.query(
-      `UPDATE video_analysis_clips SET upload_path = $2 WHERE id = $1`,
-      [clip.clipId, fixturePath]
-    );
-    initialStatus = 'queued';
-  }
+  // 큐 결정은 clip.upload_path로 일원화(fixture는 createClip에서 resolve·저장, PR D2b).
+  //  - fixtureMode && clip.upload_path → 'queued'(워커가 실추론). 워커는 fixtureMode일 때만 등록 → 정체 방지.
+  //  - 그 외 → 'review_pending' 셸(추론 없음, 적용 경로).
+  const initialStatus = (config.video.fixtureMode && clip.uploadPath) ? 'queued' : 'review_pending';
 
   const { rows } = await pool.query<VideoJobRow>(
     `INSERT INTO video_analysis_jobs

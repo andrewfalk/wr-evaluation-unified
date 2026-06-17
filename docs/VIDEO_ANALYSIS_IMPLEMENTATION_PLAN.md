@@ -58,7 +58,14 @@
   - [x] `feature_calc.py` **대상 track 기준 산출** — `--target-track`(D2b 워커 주입) 또는 dominant-track 휴리스틱(최다 등장→면적→score→id), 트랙 없으면 `pick_person` 폴백(하위호환). track-loss → presenceRatio + `TARGET_TRACK_LOST` 경고
   - [x] 계약: clip_features `tracking{targetTrackId,presenceRatio,trackCount}`(optional, PR C 하위호환) — `clipFeatures.ts`+canonical schema+`validate_keypoints.py` presenceRatio 0..1
   - [x] 테스트: Python 골든(트래커 안정/결정/은퇴·dominant·track-loss·폴백) + Node 계약(tracking VALID·presenceRatio 범위·strict·하위호환). smoke 재실행 PASS(tracking 블록 산출). 클라 635/서버 403, lint 0, build·tsc·server build OK. **서버/워커/UI 무변경**
-- [ ] **PR D2b (6.0-6b)** 대상자 선택 UI(§8.7) — sample-detect 실제화 + select-target + 박스만 중립 캔버스(privacy_first) 클릭 + box→track IoU 매핑(`--target-track` 주입) + confidence.tracking 표면화
+- [x] **PR D2b (6.0-6b)** 대상자 선택 UI(§8.7) — PR #27 ✅ 머지
+  - [x] `sample_detect.py`(대표 프레임 detector-only, 사람 많은 프레임 스캔, 후보 id 결정적 정렬) + `SampleDetectResultSchema`(zod, 신뢰 경계)
+  - [x] 서버: createClip fixture 이관(upload_path), createJob 큐=clip.upload_path 일원화, **sample-detect=fixture 전용**(async execFile, off→409), select-target 강화(선행 detect 409·위조 id 400)
+  - [x] 워커 box→track: `runInference(targetSelection)` 내부에서 infer_clip→keypoints→**`iouXywh` 시간/IoU 허용 내 매핑**→`--target-track`. **선택+매핑 실패=job error `TARGET_TRACK_MAP_FAILED`(dominant 금지), track-loss=경고만**
+  - [x] 클라: `TargetPicker`(박스만 중립 SVG, privacy_first) + 2단계(탐지→선택) + detection stale 무효화(validDetection) + serverClipId 재사용
+  - [x] tracker 파라미터 단일 source(infer_clip이 feature_config.json.tracking 읽음, hash엔 실제 값)
+  - [x] 테스트: Python 골든 + 계약(SampleDetectResult) + 서버(createClip/createJob/sample-detect/select-target) + 워커(iouXywh·mapTargetTrack·MAP_FAILED) + 클라(run detection 재사용·TargetPicker geometry). 클라 642/서버 416, lint 0, build·tsc·server build OK, smoke PASS
+  - [x] **Codex 리뷰 반영(3건)**: ① 선택 있는데 `sample_detect_result` null이면 dominant 폴백 금지 → `INVALID_SAMPLE_DETECT` job error("선택=그 사람 or 실패") ② 깨진 sample-detect 출력(JSON/계약 parse 실패)만 태깅 → 라우트 **502 INVALID_SAMPLE_DETECT** 명시 응답(timeout/크래시는 500 유지), select-target 저장값도 500→502 ③ bbox: Python 0 하한 clamp + schema `nonnegative`(퇴화/위조 박스 차단). 회귀 테스트 3건. 클라 643/서버 418, lint 0
 - [ ] **PR D3 (6.0-6b)** 품질검사 + 시점 융합(§8.6.1) + confidence(§8.8)
 
 ### M3 — 업로드·검증·매핑 (6.0-7, 6.0-B2, 6.0-8)

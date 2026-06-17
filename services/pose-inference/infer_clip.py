@@ -33,9 +33,24 @@ KEYPOINT_CONVENTION = "coco17"  # rtmlib body = COCO 17점
 DETECTOR_NAME = "yolox_tiny_humanart"
 POSE_NAME = "rtmpose-s_body7"
 POSE_INPUT_SIZE = [192, 256]  # (w, h)
-# 트래커 파라미터(PR D2a). 재현성을 위해 preprocessConfigHash 입력에 포함한다.
+HERE = Path(__file__).parent
+# 트래커 파라미터 폴백(PR D2a). 단일 source는 feature_config.json.tracking(PR D2b) — config 미존재 시 이 값.
+# 재현성을 위해 실제 사용 값을 preprocessConfigHash 입력에 포함한다.
 TRACK_IOU_THRESHOLD = 0.3
 TRACK_MAX_AGE = 10
+
+
+def load_tracking_params():
+    """feature_config.json.tracking에서 트래커 파라미터를 읽는다(단일 source). 없으면 상수 폴백."""
+    iou, max_age = TRACK_IOU_THRESHOLD, TRACK_MAX_AGE
+    try:
+        cfg = json.loads((HERE / "feature_config.json").read_text(encoding="utf-8"))
+        trk = cfg.get("tracking", {})
+        iou = float(trk.get("iouThreshold", iou))
+        max_age = int(trk.get("maxAgeFrames", max_age))
+    except (OSError, ValueError, KeyError):
+        pass
+    return iou, max_age
 
 
 def preprocess_config_hash(fps, conv, det, pose, size, track):
@@ -75,7 +90,8 @@ def main():
     actual_sampled_fps = orig_fps / step  # 정수 step 때문에 요청값과 다를 수 있음 — 실제값을 기록
 
     body = Body(mode="lightweight", backend="onnxruntime", device="cpu")
-    tracker = IoUTracker(iou_threshold=TRACK_IOU_THRESHOLD, max_age=TRACK_MAX_AGE)
+    track_iou, track_max_age = load_tracking_params()
+    tracker = IoUTracker(iou_threshold=track_iou, max_age=track_max_age)
 
     frames_out = []
     sampled = 0
@@ -140,7 +156,7 @@ def main():
             "modelVersion": f"rtmlib-{RTMLIB_VERSION}",
             "preprocessConfigHash": preprocess_config_hash(
                 args.fps, KEYPOINT_CONVENTION, DETECTOR_NAME, POSE_NAME, POSE_INPUT_SIZE,
-                {"iou": TRACK_IOU_THRESHOLD, "maxAge": TRACK_MAX_AGE},
+                {"iou": track_iou, "maxAge": track_max_age},  # 실제 사용 값(재현성)
             ),
         },
         "frames": frames_out,
