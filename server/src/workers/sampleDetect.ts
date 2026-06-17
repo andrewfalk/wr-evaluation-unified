@@ -25,7 +25,17 @@ export async function runSampleDetect(clipPath: string): Promise<SampleDetectRes
       { timeout: SAMPLE_DETECT_TIMEOUT_MS },
     );
     const raw = fs.readFileSync(outPath, 'utf-8');
-    return SampleDetectResultSchema.parse(JSON.parse(raw)); // 계약 검증
+    // 출력 = 신뢰 경계. JSON/계약 검증 실패는 "깨진 출력"으로 태깅(라우트가 INVALID_SAMPLE_DETECT 명시 응답으로 매핑).
+    // timeout/python 크래시 등은 태깅하지 않음 → 일반 내부오류로 남김.
+    let parsed: SampleDetectResult;
+    try {
+      parsed = SampleDetectResultSchema.parse(JSON.parse(raw));
+    } catch (err) {
+      throw Object.assign(new Error(`sample-detect produced an invalid result: ${String((err as Error)?.message ?? err)}`), {
+        code: 'INVALID_SAMPLE_DETECT',
+      });
+    }
+    return parsed;
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }

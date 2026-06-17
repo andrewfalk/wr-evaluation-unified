@@ -48,6 +48,7 @@ vi.mock('../../middleware/audit', () => ({
 import { createVideoAnalysisRouter } from '../videoAnalysis';
 import { generateAccessToken } from '../../auth/tokens';
 import { writeAuditLog } from '../../middleware/audit';
+import { runSampleDetect } from '../../workers/sampleDetect';
 import type { Pool } from 'pg';
 
 const CSRF_TOKEN = 'ok';
@@ -309,6 +310,20 @@ describe('POST /clips/:id/sample-detect (fixture 전용, PR D2b)', () => {
       .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN).send({});
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('SAMPLE_DETECT_UNAVAILABLE');
+  });
+
+  it('깨진 sample-detect 출력 → 502 INVALID_SAMPLE_DETECT (일반 500 아님)', async () => {
+    vi.mocked(runSampleDetect).mockRejectedValueOnce(
+      Object.assign(new Error('sample-detect produced an invalid result'), { code: 'INVALID_SAMPLE_DETECT' }),
+    );
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [clipRow({ upload_path: '/tmp/va-fixtures/good.mp4' })] });
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/sample-detect`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN).send({});
+    expect(res.status).toBe(502);
+    expect(res.body.code).toBe('INVALID_SAMPLE_DETECT');
   });
 });
 

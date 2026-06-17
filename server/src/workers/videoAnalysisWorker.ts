@@ -172,7 +172,11 @@ async function resolveTargetSelection(pool: Pool, clipId: string): Promise<Targe
     [clipId],
   );
   const row = rows[0];
-  if (!row?.target_person_id || row.sample_detect_result == null) return null;
+  // 선택 없음 → dominant 폴백(null). 선택했는데 후보 데이터가 없으면 "선택=그 사람 or 실패" 원칙상 폴백 금지 → job error.
+  if (!row?.target_person_id) return null;
+  if (row.sample_detect_result == null) {
+    throw Object.assign(new Error('target selected but sample-detect result is missing'), { code: 'INVALID_SAMPLE_DETECT' });
+  }
   const parsed = SampleDetectResultSchema.safeParse(row.sample_detect_result);
   if (!parsed.success) {
     throw Object.assign(new Error('stored sample-detect result is invalid'), { code: 'INVALID_SAMPLE_DETECT' });

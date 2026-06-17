@@ -21,8 +21,13 @@ from rtmlib import Body
 
 
 def xyxy_to_xywh(b):
+    # detector가 프레임 밖(음수) 좌표를 낼 수 있으므로 0 하한 clamp → schema는 nonnegative로 받는다(신뢰 경계 정합).
     x1, y1, x2, y2 = [float(v) for v in b[:4]]
-    return [round(x1, 2), round(y1, 2), round(x2 - x1, 2), round(y2 - y1, 2)]
+    x1 = max(0.0, x1)
+    y1 = max(0.0, y1)
+    w = max(0.0, x2 - x1)
+    h = max(0.0, y2 - y1)
+    return [round(x1, 2), round(y1, 2), round(w, 2), round(h, 2)]
 
 
 def main():

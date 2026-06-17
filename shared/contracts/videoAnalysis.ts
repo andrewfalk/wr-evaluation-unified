@@ -186,7 +186,13 @@ export const VideoClipSchema = z
 export const SampleDetectPersonSchema = z
   .object({
     id: z.string().min(1),
-    bbox: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+    // bbox = xywh 픽셀. Python에서 음수 clamp 후 산출 → 신뢰 경계에서 nonnegative 강제(퇴화/위조 박스 차단).
+    bbox: z.tuple([
+      z.number().nonnegative(),
+      z.number().nonnegative(),
+      z.number().nonnegative(),
+      z.number().nonnegative(),
+    ]),
     score: z.number().min(0).max(1),
   })
   .strict();

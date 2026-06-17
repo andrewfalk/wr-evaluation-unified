@@ -152,4 +152,13 @@ describe('box→track 매핑 (PR D2b, §8.7)', () => {
     const upd = poolUpdate(query, 'error_code = $2');
     expect(upd?.[1]).toContain('TARGET_TRACK_MAP_FAILED');
   });
+
+  it('pollOnce: 선택은 있는데 sample_detect_result null → job error INVALID_SAMPLE_DETECT (dominant 폴백 금지)', async () => {
+    const { pool, query } = makePool({ sampleDetectResult: null, targetPersonId: 'p1' });
+    const runInference = vi.fn();
+    await pollOnce(pool, { runInference });
+    expect(runInference).not.toHaveBeenCalled();
+    const upd = poolUpdate(query, 'error_code = $2');
+    expect(upd?.[1]).toContain('INVALID_SAMPLE_DETECT');
+  });
 });

@@ -233,7 +233,18 @@ async function sampleDetect(pool: Pool, req: Request, res: Response): Promise<vo
     return;
   }
 
-  const result = await runSampleDetect(clipPath); // SampleDetectResultSchema 검증 완료
+  // 깨진 출력(JSON/계약 검증 실패)은 일반 500이 아니라 INVALID_SAMPLE_DETECT 명시 응답(502: 하위 추론 프로세스가 잘못된 결과 산출).
+  // timeout/크래시 등 그 외 오류는 rethrow → wrap이 일반 500 처리.
+  let result;
+  try {
+    result = await runSampleDetect(clipPath); // SampleDetectResultSchema 검증 완료
+  } catch (err) {
+    if ((err as { code?: string })?.code === 'INVALID_SAMPLE_DETECT') {
+      res.status(502).json({ code: 'INVALID_SAMPLE_DETECT', error: 'sample-detect produced an invalid result' });
+      return;
+    }
+    throw err;
+  }
   await pool.query(
     `UPDATE video_analysis_clips SET sample_detect_result = $2 WHERE id = $1`,
     [clip.clipId, JSON.stringify(result)]
@@ -259,7 +270,7 @@ async function selectTarget(pool: Pool, req: Request, res: Response): Promise<vo
   // DB JSONB는 신뢰 경계 밖 → 계약 검증 후 후보 id 존재 확인(위조 거부).
   const detect = SampleDetectResultSchema.safeParse(clip.sampleDetectResult);
   if (!detect.success) {
-    res.status(500).json({ code: 'INVALID_SAMPLE_DETECT', error: 'stored sample-detect result is invalid' });
+    res.status(502).json({ code: 'INVALID_SAMPLE_DETECT', error: 'stored sample-detect result is invalid' });
     return;
   }
   if (!detect.data.persons.some((p) => p.id === parse.data.targetPersonId)) {

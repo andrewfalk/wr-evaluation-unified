@@ -245,6 +245,10 @@ describe('SampleDetectResultSchema (§8.7, PR D2b)', () => {
     expect(() => SampleDetectResultSchema.parse({ ...valid, frameWidth: 0 })).toThrow();
     expect(() => SampleDetectResultSchema.parse({ ...valid, surprise: 1 })).toThrow();
   });
+  it('rejects negative bbox values (Python clamps to nonnegative)', () => {
+    expect(() => SampleDetectResultSchema.parse({ ...valid, persons: [{ id: 'p1', bbox: [-1, 20, 100, 200], score: 0.9 }] })).toThrow();
+    expect(() => SampleDetectResultSchema.parse({ ...valid, persons: [{ id: 'p1', bbox: [10, 20, -5, 200], score: 0.9 }] })).toThrow();
+  });
 });
 
 describe('VideoAnalysisDataSchema (§8.11)', () => {
