@@ -57,6 +57,23 @@ def main():
                 if seg.get("endMs", 0) < seg.get("startMs", 0):
                     print(f"INVALID: {key} segment endMs < startMs ({seg})")
                     sys.exit(1)
+            # confidenceBreakdown 성분 0..1 (6.0-6b D3a) — Draft7 minimum/maximum이 잡지만 명시 방어.
+            cb = fv.get("confidenceBreakdown")
+            if isinstance(cb, dict):
+                for comp in ("keypoint", "visibility", "tracking", "viewpoint", "usableFrameRatio"):
+                    cv = cb.get(comp)
+                    if cv is not None and not (isinstance(cv, (int, float)) and 0.0 <= cv <= 1.0):
+                        print(f"INVALID: {key} confidenceBreakdown.{comp} {cv} out of 0..1")
+                        sys.exit(1)
+
+    # quality 메타 0..1 (6.0-6b D3a) — keypoints.json / clip_features.json 공통.
+    q = doc.get("quality")
+    if isinstance(q, dict):
+        for ratio_key in ("dropRatio", "blurRatio", "usableFrameRatio"):
+            rv = q.get(ratio_key)
+            if rv is not None and not (isinstance(rv, (int, float)) and 0.0 <= rv <= 1.0):
+                print(f"INVALID: quality.{ratio_key} {rv} out of 0..1")
+                sys.exit(1)
 
     print(f"VALID: {args.input}")
 

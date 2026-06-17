@@ -22,6 +22,29 @@
         "trackCount": { "type": "integer", "minimum": 0 }
       }
     },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blurMetric", "dropRatio", "sampledFps"],
+      "description": "keypoints.quality 복사(clip-global, 6.0-6b D3a). PR C/D2 하위호환 optional.",
+      "properties": {
+        "blurMetric": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mean", "p10", "median"],
+          "properties": {
+            "mean": { "type": "number" },
+            "p10": { "type": "number" },
+            "median": { "type": "number" }
+          }
+        },
+        "dropRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "sampledFps": { "type": "number", "exclusiveMinimum": 0 },
+        "blurThreshold": { "type": "number" },
+        "blurRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "usableFrameRatio": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
     "features": {
       "type": "object",
       "propertyNames": {
@@ -44,6 +67,18 @@
               "value": { "type": "number" },
               "unit": { "enum": ["minutes_per_day", "hours_per_day", "cycles_per_minute", "cycles_per_day", "seconds_per_cycle", "ratio", "degrees"] },
               "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+              "confidenceBreakdown": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["keypoint", "visibility"],
+                "properties": {
+                  "keypoint": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "visibility": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "tracking": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "viewpoint": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "usableFrameRatio": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              },
               "segments": {
                 "type": "array",
                 "items": {
@@ -64,6 +99,18 @@
               "kind": { "const": "boolean" },
               "value": { "type": "boolean" },
               "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+              "confidenceBreakdown": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["keypoint", "visibility"],
+                "properties": {
+                  "keypoint": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "visibility": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "tracking": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "viewpoint": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "usableFrameRatio": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              },
               "warnings": { "type": "array", "items": { "type": "string" } }
             }
           },
@@ -75,6 +122,18 @@
               "kind": { "const": "categorical" },
               "value": { "type": "string" },
               "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+              "confidenceBreakdown": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["keypoint", "visibility"],
+                "properties": {
+                  "keypoint": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "visibility": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "tracking": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "viewpoint": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "usableFrameRatio": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              },
               "warnings": { "type": "array", "items": { "type": "string" } }
             }
           }
