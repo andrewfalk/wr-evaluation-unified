@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 import type { Pool, PoolClient } from 'pg';
-import { ClipFeatureSetSchema } from '@wr/contracts';
+import { ClipFeatureSetSchema, SampleDetectResultSchema } from '@wr/contracts';
 import config from '../config';
 import { resolveFixtureClip } from './fixturePath';
 
@@ -33,9 +33,16 @@ export interface InferenceResult {
   inputSha256: string | null;
 }
 
+// 사용자가 고른 대상자(§8.7, PR D2b). sample-detect 후보 bbox(xywh 픽셀) + 대표 프레임 시각.
+export interface TargetSelection {
+  id: string;
+  bbox: [number, number, number, number];
+  timestampMs: number;
+}
+
 export interface WorkerDeps {
-  // 추론 실행기(테스트에서 주입). 기본은 Python subprocess.
-  runInference: (clipPath: string, profile: string | null) => Promise<InferenceResult>;
+  // 추론 실행기(테스트에서 주입). 기본은 Python subprocess. targetSelection이 있으면 박스→트랙 매핑 후 --target-track.
+  runInference: (clipPath: string, profile: string | null, targetSelection: TargetSelection | null) => Promise<InferenceResult>;
 }
 
 interface ClaimedJob {
@@ -44,8 +51,47 @@ interface ClaimedJob {
   analysis_profile: string | null;
 }
 
-// 기본 추론기: infer_clip.py → keypoints, feature_calc.py → clip_features. ClipFeatureSetSchema로 검증.
-async function defaultRunInference(clipPath: string, profile: string | null): Promise<InferenceResult> {
+// box→track 매핑 허용치(worker 레이어 — xywh 픽셀 기준). sample-detect 프레임과 분석 샘플 프레임의 시각 차 허용.
+const MAX_TIME_GAP_MS = 500;
+const MIN_MATCH_IOU = 0.3;
+
+// xywh 픽셀 박스 IoU(D2a tracker의 xyxy `iou`와 구분 — 좌표계 혼동 방지).
+export function iouXywh(a: number[], b: number[]): number {
+  const ax2 = a[0] + a[2], ay2 = a[1] + a[3];
+  const bx2 = b[0] + b[2], by2 = b[1] + b[3];
+  const ix1 = Math.max(a[0], b[0]), iy1 = Math.max(a[1], b[1]);
+  const ix2 = Math.min(ax2, bx2), iy2 = Math.min(ay2, by2);
+  const iw = Math.max(0, ix2 - ix1), ih = Math.max(0, iy2 - iy1);
+  const inter = iw * ih;
+  const union = Math.max(0, a[2]) * Math.max(0, a[3]) + Math.max(0, b[2]) * Math.max(0, b[3]) - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+interface KpPerson { trackId?: string | null; bbox?: number[] }
+interface KpFrame { timestampMs: number; persons?: KpPerson[] }
+
+// 선택 박스를 keypoints 트랙에 매핑. |frame.ts − sampleTs| ≤ MAX_TIME_GAP_MS 프레임들 중 IoU ≥ MIN_MATCH_IOU 최대.
+// 매핑 실패 → throw TARGET_TRACK_MAP_FAILED(dominant 폴백 금지 — 다른 사람 분석 방지, §8.7).
+export function mapTargetTrack(kpDoc: { frames?: KpFrame[] }, sel: TargetSelection): string {
+  let best: { iou: number; trackId: string } | null = null;
+  for (const f of kpDoc.frames ?? []) {
+    if (Math.abs(f.timestampMs - sel.timestampMs) > MAX_TIME_GAP_MS) continue;
+    for (const p of f.persons ?? []) {
+      if (!p.trackId || !p.bbox) continue;
+      const score = iouXywh(p.bbox, sel.bbox);
+      if (score >= MIN_MATCH_IOU && (!best || score > best.iou)) best = { iou: score, trackId: p.trackId };
+    }
+  }
+  if (!best) {
+    throw Object.assign(new Error('selected target could not be mapped to a track'), { code: 'TARGET_TRACK_MAP_FAILED' });
+  }
+  return best.trackId;
+}
+
+// 기본 추론기: infer_clip.py → keypoints, (선택)박스→트랙 매핑, feature_calc.py → clip_features. ClipFeatureSetSchema 검증.
+async function defaultRunInference(
+  clipPath: string, profile: string | null, targetSelection: TargetSelection | null,
+): Promise<InferenceResult> {
   const fps = PROFILE_FPS[profile ?? 'posture-basic'] ?? 5;
   const scripts = config.video.scriptsDir;
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'va-job-'));
@@ -57,15 +103,16 @@ async function defaultRunInference(clipPath: string, profile: string | null): Pr
       [path.join(scripts, 'infer_clip.py'), '--input', clipPath, '--output', kpPath, '--fps', String(fps)],
       { timeout: PROCESSING_TIMEOUT_MS },
     );
-    await execFileAsync(
-      config.video.python,
-      [path.join(scripts, 'feature_calc.py'), '--keypoints', kpPath, '--output', cfPath],
-      { timeout: PROCESSING_TIMEOUT_MS },
-    );
+    // 매핑은 keypoints가 나와야 가능 → infer_clip 후에 처리. 선택 있으면 박스→트랙(실패 시 throw → job error).
     const kpRaw = fs.readFileSync(kpPath, 'utf-8');
+    const kpDoc = JSON.parse(kpRaw) as { model?: { preprocessConfigHash?: string }; frames?: KpFrame[] };
+    const featureArgs = [path.join(scripts, 'feature_calc.py'), '--keypoints', kpPath, '--output', cfPath];
+    if (targetSelection) {
+      featureArgs.push('--target-track', mapTargetTrack(kpDoc, targetSelection));
+    }
+    await execFileAsync(config.video.python, featureArgs, { timeout: PROCESSING_TIMEOUT_MS });
     const cfRaw = fs.readFileSync(cfPath, 'utf-8');
     const clipFeatures = ClipFeatureSetSchema.parse(JSON.parse(cfRaw)); // 신뢰 경계 — 계약 검증
-    const kpDoc = JSON.parse(kpRaw) as { model?: { preprocessConfigHash?: string } };
     return {
       clipFeatures,
       preprocessConfigHash: kpDoc?.model?.preprocessConfigHash ?? null,
@@ -117,6 +164,26 @@ async function resolveJobClipPath(pool: Pool, clipId: string): Promise<string | 
   return resolveFixtureClip(path.basename(uploadPath), config.video.fixtureDir);
 }
 
+// clip의 대상자 선택(target_person_id + sample_detect_result) → TargetSelection. 선택 없으면 null(dominant).
+// sample_detect_result는 신뢰 경계 밖 → 계약 검증. 선택했는데 후보가 없으면 매핑 실패로 본다(TARGET_TRACK_MAP_FAILED).
+async function resolveTargetSelection(pool: Pool, clipId: string): Promise<TargetSelection | null> {
+  const { rows } = await pool.query<{ sample_detect_result: unknown; target_person_id: string | null }>(
+    `SELECT sample_detect_result, target_person_id FROM video_analysis_clips WHERE id = $1`,
+    [clipId],
+  );
+  const row = rows[0];
+  if (!row?.target_person_id || row.sample_detect_result == null) return null;
+  const parsed = SampleDetectResultSchema.safeParse(row.sample_detect_result);
+  if (!parsed.success) {
+    throw Object.assign(new Error('stored sample-detect result is invalid'), { code: 'INVALID_SAMPLE_DETECT' });
+  }
+  const cand = parsed.data.persons.find((p) => p.id === row.target_person_id);
+  if (!cand) {
+    throw Object.assign(new Error('selected target is not among sample-detect candidates'), { code: 'TARGET_TRACK_MAP_FAILED' });
+  }
+  return { id: cand.id, bbox: cand.bbox, timestampMs: parsed.data.timestampMs };
+}
+
 // 정체/타임아웃 정리(최소 TTL): processing 타임아웃 → error, queued 정체 → expired.
 // review_pending은 검수 보존을 위해 자동 만료 제외(적용 시 done 전이는 apply 핸들러가 담당).
 async function sweepStale(pool: Pool): Promise<void> {
@@ -145,7 +212,8 @@ export async function pollOnce(pool: Pool, deps: WorkerDeps): Promise<boolean> {
     if (!clipPath) {
       throw Object.assign(new Error('fixture clip unavailable or outside allowlist'), { code: 'FIXTURE_UNAVAILABLE' });
     }
-    const result = await deps.runInference(clipPath, job.analysis_profile);
+    const targetSelection = await resolveTargetSelection(pool, job.clip_id);
+    const result = await deps.runInference(clipPath, job.analysis_profile, targetSelection);
     await pool.query(
       `UPDATE video_analysis_jobs
          SET status = 'review_pending', result_features = $2,

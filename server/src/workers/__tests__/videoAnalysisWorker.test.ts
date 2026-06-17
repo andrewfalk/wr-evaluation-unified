@@ -8,14 +8,19 @@ vi.mock('../fixturePath', () => ({
   resolveFixtureClip: vi.fn((name: unknown) => (name === 'good.mp4' ? '/fx/good.mp4' : null)),
 }));
 
-import { pollOnce } from '../videoAnalysisWorker';
+import { pollOnce, iouXywh, mapTargetTrack } from '../videoAnalysisWorker';
 
 const JOB = { id: 'job-1', clip_id: 'clip-1', analysis_profile: 'posture-basic' };
 
 // queued job 1건을 claim하도록 client/pool mock 구성.
-function makePool(opts: { job?: typeof JOB | null; uploadPath?: string | null } = {}) {
+function makePool(opts: {
+  job?: typeof JOB | null; uploadPath?: string | null;
+  sampleDetectResult?: unknown; targetPersonId?: string | null;
+} = {}) {
   const job = opts.job === undefined ? JOB : opts.job;
   const uploadPath = opts.uploadPath === undefined ? '/fx/good.mp4' : opts.uploadPath;
+  const sampleDetectResult = opts.sampleDetectResult ?? null;
+  const targetPersonId = opts.targetPersonId ?? null;
 
   const client = {
     query: vi.fn((sql: string) => {
@@ -30,11 +35,16 @@ function makePool(opts: { job?: typeof JOB | null; uploadPath?: string | null } 
     if (typeof sql === 'string' && sql.includes('SELECT upload_path')) {
       return Promise.resolve({ rows: [{ upload_path: uploadPath }] });
     }
+    if (typeof sql === 'string' && sql.includes('SELECT sample_detect_result')) {
+      return Promise.resolve({ rows: [{ sample_detect_result: sampleDetectResult, target_person_id: targetPersonId }] });
+    }
     return Promise.resolve({ rows: [] }); // sweeps + final update
   });
   const pool = { connect: vi.fn().mockResolvedValue(client), query } as unknown as Pool;
   return { pool, client, query };
 }
+
+const SDR = { schemaVersion: 1, frameIndex: 100, timestampMs: 8000, frameWidth: 640, frameHeight: 480, persons: [{ id: 'p1', bbox: [10, 20, 100, 200], score: 1 }] };
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const clientSql = (client: any): string[] =>
@@ -69,7 +79,7 @@ describe('videoAnalysisWorker.pollOnce', () => {
       clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: 'pch', inputSha256: 'sha',
     });
     expect(await pollOnce(pool, { runInference })).toBe(true);
-    expect(runInference).toHaveBeenCalledWith('/fx/good.mp4', 'posture-basic');
+    expect(runInference).toHaveBeenCalledWith('/fx/good.mp4', 'posture-basic', null);
     const upd = poolUpdate(query, "status = 'review_pending'");
     expect(upd).toBeDefined();
     expect(upd?.[1]).toContain('pch');
@@ -92,5 +102,54 @@ describe('videoAnalysisWorker.pollOnce', () => {
     expect(runInference).not.toHaveBeenCalled();
     const upd = poolUpdate(query, 'error_code = $2');
     expect(upd?.[1]).toContain('FIXTURE_UNAVAILABLE');
+  });
+});
+
+describe('box→track 매핑 (PR D2b, §8.7)', () => {
+  it('iouXywh: xywh 픽셀 박스 IoU', () => {
+    expect(iouXywh([0, 0, 10, 10], [0, 0, 10, 10])).toBe(1);
+    expect(iouXywh([0, 0, 10, 10], [100, 100, 10, 10])).toBe(0);
+    expect(iouXywh([0, 0, 10, 10], [5, 0, 10, 10])).toBeCloseTo(5 / 15, 5); // 교집합 50, 합집합 150
+  });
+
+  const kpDoc = (persons: Array<{ trackId: string; bbox: number[] }>, ts = 8000) => ({
+    frames: [
+      { timestampMs: 0, persons: [{ trackId: 'tX', bbox: [999, 999, 5, 5] }] },
+      { timestampMs: ts, persons },
+    ],
+  });
+  const sel = (bbox: [number, number, number, number]) => ({ id: 'p1', bbox, timestampMs: 8000 });
+
+  it('시간/IoU 허용 내 max-IoU person의 trackId 반환', () => {
+    const doc = kpDoc([{ trackId: 't1', bbox: [10, 20, 100, 200] }, { trackId: 't2', bbox: [300, 50, 80, 180] }]);
+    expect(mapTargetTrack(doc, sel([12, 22, 100, 200]))).toBe('t1'); // 선택 박스와 t1이 거의 겹침
+  });
+
+  it('IoU 미달 → TARGET_TRACK_MAP_FAILED (dominant 금지)', () => {
+    const doc = kpDoc([{ trackId: 't1', bbox: [0, 0, 10, 10] }]);
+    expect(() => mapTargetTrack(doc, sel([500, 500, 10, 10]))).toThrow(/map/i);
+    try { mapTargetTrack(doc, sel([500, 500, 10, 10])); } catch (e) {
+      expect((e as { code?: string }).code).toBe('TARGET_TRACK_MAP_FAILED');
+    }
+  });
+
+  it('시간 허용치 초과 프레임은 무시 → 매핑 실패', () => {
+    const doc = { frames: [{ timestampMs: 20000, persons: [{ trackId: 't1', bbox: [10, 20, 100, 200] }] }] };
+    expect(() => mapTargetTrack(doc, sel([10, 20, 100, 200]))).toThrow();
+  });
+
+  it('pollOnce: clip에 선택 있으면 runInference에 targetSelection 전달', async () => {
+    const { pool } = makePool({ sampleDetectResult: SDR, targetPersonId: 'p1' });
+    const runInference = vi.fn().mockResolvedValue({ clipFeatures: {}, preprocessConfigHash: null, inputSha256: null });
+    await pollOnce(pool, { runInference });
+    expect(runInference).toHaveBeenCalledWith('/fx/good.mp4', 'posture-basic',
+      expect.objectContaining({ id: 'p1', bbox: [10, 20, 100, 200], timestampMs: 8000 }));
+  });
+
+  it('pollOnce: 선택했는데 후보 id 불일치 → job error TARGET_TRACK_MAP_FAILED', async () => {
+    const { pool, query } = makePool({ sampleDetectResult: SDR, targetPersonId: 'pX' });
+    await pollOnce(pool, { runInference: vi.fn() });
+    const upd = poolUpdate(query, 'error_code = $2');
+    expect(upd?.[1]).toContain('TARGET_TRACK_MAP_FAILED');
   });
 });

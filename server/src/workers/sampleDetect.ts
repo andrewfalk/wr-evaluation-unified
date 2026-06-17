@@ -1,0 +1,32 @@
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { SampleDetectResultSchema, type SampleDetectResult } from '@wr/contracts';
+import config from '../config';
+
+// ---------------------------------------------------------------------------
+// sample-detect 러너 (6.0-6b, PR D2b, §8.7). 대표 프레임 person box 후보 탐지(dev fixture).
+// 워커의 defaultRunInference와 형제 — async execFile(promisified) + timeout + tmp cleanup.
+// 출력은 SampleDetectResultSchema로 검증(신뢰 경계). execFileSync 금지(이벤트 루프 차단).
+// ---------------------------------------------------------------------------
+
+const execFileAsync = promisify(execFile);
+const SAMPLE_DETECT_TIMEOUT_MS = 2 * 60 * 1000;
+
+export async function runSampleDetect(clipPath: string): Promise<SampleDetectResult> {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'va-sd-'));
+  try {
+    const outPath = path.join(work, 'cand.json');
+    await execFileAsync(
+      config.video.python,
+      [path.join(config.video.scriptsDir, 'sample_detect.py'), '--input', clipPath, '--output', outPath],
+      { timeout: SAMPLE_DETECT_TIMEOUT_MS },
+    );
+    const raw = fs.readFileSync(outPath, 'utf-8');
+    return SampleDetectResultSchema.parse(JSON.parse(raw)); // 계약 검증
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+}
