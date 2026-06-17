@@ -8,7 +8,9 @@ import math
 from feature_calc import (
     angle_at, angle_from_vertical, knee_min_angle, overhead_active,
     neck_flexion_angle, trunk_flexion_angle, posture_ratio, KP,
+    choose_dominant_track, pick_target_person, all_track_ids,
 )
+from tracker import IoUTracker, iou
 
 IDX = {
     "nose": 0, "left_eye": 1, "right_eye": 2, "left_ear": 3, "right_ear": 4,
@@ -86,10 +88,58 @@ def test_posture_ratio():
     print("ok: posture_ratio (min-hold + frame-drop)")
 
 
+def test_tracker():
+    t = IoUTracker(0.3, max_age=5)
+    assert iou([0, 0, 10, 10], [0, 0, 10, 10]) == 1.0
+    assert iou([0, 0, 10, 10], [100, 100, 110, 110]) == 0.0
+    # 2인 등장 → t1,t2. 약간 이동(높은 IoU)해도 id 유지.
+    assert t.update([[0, 0, 10, 10], [100, 100, 110, 110]]) == ["t1", "t2"]
+    assert t.update([[1, 1, 11, 11], [101, 101, 111, 111]]) == ["t1", "t2"]
+    # t2가 사라진 프레임 → t1만. (t2는 max_age 동안 생존하나 매칭 안 됨)
+    assert t.update([[2, 2, 12, 12]]) == ["t1"]
+    # 멀리 떨어진 새 인물 → 새 id(은퇴 전 t2 id 재사용 금지, 단조 증가).
+    assert t.update([[2, 2, 12, 12], [500, 500, 510, 510]]) == ["t1", "t3"]
+    print("ok: IoU tracker (stable ids, deterministic, no id reuse)")
+
+
+def _mkframe(persons):
+    """persons: [(trackId, bw, bh, score)] → frame dict(키포인트는 더미)."""
+    return {"persons": [
+        {"trackId": tid, "bbox": [0.0, 0.0, float(bw), float(bh)], "score": sc,
+         "keypoints": [[0.0, 0.0, 0.0] for _ in range(17)]}
+        for (tid, bw, bh, sc) in persons
+    ]}
+
+
+def test_target_selection():
+    frames = [
+        _mkframe([("t1", 10, 10, 0.9), ("t2", 10, 10, 0.5)]),
+        _mkframe([("t1", 10, 10, 0.9)]),                       # t2 track-loss
+        _mkframe([("t1", 10, 10, 0.9), ("t2", 10, 10, 0.5)]),
+    ]
+    assert all_track_ids(frames) == {"t1", "t2"}
+    # t1은 3프레임, t2는 2프레임 → dominant=t1.
+    assert choose_dominant_track(frames) == "t1"
+    # 대상 person 선택 + track-loss(없는 프레임 → None).
+    assert pick_target_person(frames[0], "t2")["trackId"] == "t2"
+    assert pick_target_person(frames[1], "t2") is None
+    # presenceRatio(t2) = 2/3.
+    present = sum(1 for f in frames if pick_target_person(f, "t2") is not None)
+    assert present == 2
+    # 등장 프레임수 동률 → 평균 bbox 면적 큰 트랙 채택(결정적 tie-break).
+    tie = [_mkframe([("a", 10, 10, 0.5), ("b", 20, 20, 0.5)])]
+    assert choose_dominant_track(tie) == "b"
+    # 트랙 없음(구 fixture) → None(폴백 트리거).
+    assert choose_dominant_track([_mkframe([(None, 10, 10, 0.9)])]) is None
+    print("ok: target track selection + dominant heuristic + track-loss")
+
+
 if __name__ == "__main__":
     test_angle_math()
     test_knee_squat_angle()
     test_overhead()
     test_trunk_neck()
     test_posture_ratio()
+    test_tracker()
+    test_target_selection()
     print("ALL PASS")

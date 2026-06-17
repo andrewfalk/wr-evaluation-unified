@@ -1,6 +1,12 @@
 {
-  "version": "feature-calc-2026-06-a",
-  "description": "feature 계산 규칙(6.0-6a). 각도 정의·임계값·OneEuro·품질 파라미터를 버전관리. 실제 임계값은 6.0-B2 검증으로 보정.",
+  "version": "feature-calc-2026-06-b",
+  "description": "feature 계산 규칙(6.0-6a~6b). 각도 정의·임계값·OneEuro·품질·tracking 파라미터를 버전관리. 실제 임계값은 6.0-B2 검증으로 보정.",
+  "tracking": {
+    "iouThreshold": 0.3,
+    "maxAgeFrames": 10,
+    "minTargetPresenceRatio": 0.5,
+    "note": "결정적 IoU 트래커(infer_clip) 파라미터 + 대상 등장 비율 임계(미만이면 TARGET_TRACK_LOST). PR D2a."
+  },
   "keypointConvention": "coco17",
   "keypointIndex": {
     "nose": 0, "left_eye": 1, "right_eye": 2, "left_ear": 3, "right_ear": 4,

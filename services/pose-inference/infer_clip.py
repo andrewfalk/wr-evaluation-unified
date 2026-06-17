@@ -19,6 +19,8 @@ import cv2
 import numpy as np
 from rtmlib import Body
 
+from tracker import IoUTracker
+
 try:
     RTMLIB_VERSION = pkg_version("rtmlib")  # 실제 설치 버전 기록(메타데이터 거짓 방지)
 except PackageNotFoundError:
@@ -31,10 +33,16 @@ KEYPOINT_CONVENTION = "coco17"  # rtmlib body = COCO 17점
 DETECTOR_NAME = "yolox_tiny_humanart"
 POSE_NAME = "rtmpose-s_body7"
 POSE_INPUT_SIZE = [192, 256]  # (w, h)
+# 트래커 파라미터(PR D2a). 재현성을 위해 preprocessConfigHash 입력에 포함한다.
+TRACK_IOU_THRESHOLD = 0.3
+TRACK_MAX_AGE = 10
 
 
-def preprocess_config_hash(fps, conv, det, pose, size):
-    raw = json.dumps({"fps": fps, "conv": conv, "det": det, "pose": pose, "inputSize": size}, sort_keys=True)
+def preprocess_config_hash(fps, conv, det, pose, size, track):
+    raw = json.dumps(
+        {"fps": fps, "conv": conv, "det": det, "pose": pose, "inputSize": size, "track": track},
+        sort_keys=True,
+    )
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
@@ -67,6 +75,7 @@ def main():
     actual_sampled_fps = orig_fps / step  # 정수 step 때문에 요청값과 다를 수 있음 — 실제값을 기록
 
     body = Body(mode="lightweight", backend="onnxruntime", device="cpu")
+    tracker = IoUTracker(iou_threshold=TRACK_IOU_THRESHOLD, max_age=TRACK_MAX_AGE)
 
     frames_out = []
     sampled = 0
@@ -78,6 +87,9 @@ def main():
             break
         if idx % step == 0:
             bboxes = body.det_model(frame)  # (N,4) xyxy
+            # 매 샘플 프레임마다 트래커 갱신(탐지 0이어도 호출해 트랙 age를 진행). xyxy 그대로 매칭.
+            xyxy = [[float(b[0]), float(b[1]), float(b[2]), float(b[3])] for b in bboxes]
+            track_ids = tracker.update(xyxy)
             persons = []
             # 탐지된 사람이 있을 때만 pose 추정 — 탐지 0이면 빈 프레임(전체이미지 fallback 방지).
             if len(bboxes) > 0:
@@ -90,7 +102,7 @@ def main():
                     kp_scores = [clamp01(scores[i, j]) for j in range(17)]
                     keypoints = [[round(float(kpts[i, j, 0]), 2), round(float(kpts[i, j, 1]), 2), round(kp_scores[j], 4)] for j in range(17)]
                     persons.append({
-                        "trackId": None,  # tracking은 PR D2
+                        "trackId": track_ids[i],  # 결정적 IoU 트래커 부여(PR D2a)
                         "bbox": [round(v, 2) for v in bbox],
                         "score": round(float(np.mean(kp_scores)), 4),
                         "keypoints": keypoints,
@@ -126,7 +138,10 @@ def main():
             "inputSize": POSE_INPUT_SIZE,
             "modelName": "rtmlib:body:lightweight",
             "modelVersion": f"rtmlib-{RTMLIB_VERSION}",
-            "preprocessConfigHash": preprocess_config_hash(args.fps, KEYPOINT_CONVENTION, DETECTOR_NAME, POSE_NAME, POSE_INPUT_SIZE),
+            "preprocessConfigHash": preprocess_config_hash(
+                args.fps, KEYPOINT_CONVENTION, DETECTOR_NAME, POSE_NAME, POSE_INPUT_SIZE,
+                {"iou": TRACK_IOU_THRESHOLD, "maxAge": TRACK_MAX_AGE},
+            ),
         },
         "frames": frames_out,
     }
