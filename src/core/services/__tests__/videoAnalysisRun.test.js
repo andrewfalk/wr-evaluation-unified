@@ -31,19 +31,34 @@ beforeEach(() => {
 });
 
 describe('runServerAnalysis', () => {
-  it('공정별 createClip(processId)→createJob(fixture)→poll→환산→processFeatures(jobId)', async () => {
+  it('선택 없음: createClip(processId,fixtureClipName)→createJob(clipId,no fixtureClipName)→poll→환산', async () => {
     const r = await runServerAnalysis(patient, vaWith(), env);
-    expect(createClip).toHaveBeenCalledWith(patient, expect.objectContaining({ processId: 'p1' }));
-    expect(createJob).toHaveBeenCalledWith(
-      expect.objectContaining({ clipId: 'srv-clip-1', processId: 'p1', fixtureClipName: 'good.mp4' }),
-      expect.anything(),
-    );
+    // fixtureClipName은 createClip에만(큐 결정은 서버 upload_path).
+    expect(createClip).toHaveBeenCalledWith(patient, expect.objectContaining({ processId: 'p1', fixtureClipName: 'good.mp4' }));
+    const jobArg = createJob.mock.calls[0][0];
+    expect(jobArg).toMatchObject({ clipId: 'srv-clip-1', processId: 'p1' });
+    expect(jobArg).not.toHaveProperty('fixtureClipName');
     expect(r.errors).toEqual([]);
     expect(r.processFeatures).toHaveLength(1);
     expect(r.processFeatures[0]).toMatchObject({ processId: 'p1', jobId: 'job-1' });
     // ratio 0.5 × 200분 = 100 minutes_per_day
     expect(r.processFeatures[0].features.squatDuration).toMatchObject({ value: 100, unit: 'minutes_per_day' });
     expect(r.bundleVersion).toContain('fc-1');
+  });
+
+  it('detection 있으면 serverClipId 재사용(새 clip 미생성 — 서버 보존 target)', async () => {
+    const va = vaWith();
+    const detections = { [va.clips[0].id]: { serverClipId: 'picked-clip', selectedId: 'p2' } };
+    await runServerAnalysis(patient, va, { ...env, detections });
+    expect(createClip).not.toHaveBeenCalled();
+    expect(createJob).toHaveBeenCalledWith(expect.objectContaining({ clipId: 'picked-clip' }), expect.anything());
+  });
+
+  it('job error(TARGET_TRACK_MAP_FAILED) → error 기록(적용 차단), processFeatures 없음', async () => {
+    pollJob.mockResolvedValue({ jobId: 'job-1', status: 'error', errorCode: 'TARGET_TRACK_MAP_FAILED' });
+    const r = await runServerAnalysis(patient, vaWith(), env);
+    expect(r.processFeatures).toEqual([]);
+    expect(r.errors[0].message).toContain('TARGET_TRACK_MAP_FAILED');
   });
 
   it('fixture 클립 없는 공정 → 추론 미실행 + error 기록', async () => {

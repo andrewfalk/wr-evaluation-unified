@@ -11,9 +11,10 @@ import {
   applyFeatureToModule,
   rollbackAppliedInput,
 } from '../services/videoProvenance';
-import { isVideoAnalysisSupported } from '../services/videoAnalysisClient';
+import { isVideoAnalysisSupported, createClip, sampleDetectClip, selectTarget } from '../services/videoAnalysisClient';
 import { applyVideoFeatureViaServer } from '../services/videoServerApply';
 import { runServerAnalysis } from '../services/videoAnalysisRun';
+import { TargetPicker } from './TargetPicker';
 import { getModule } from '../moduleRegistry';
 import { VIDEO_FEATURE_TARGETS } from '@contracts/index';
 
@@ -138,6 +139,15 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   // 서버 실분석 산출물: 적용 시 provenance recipe·누락 활동시간 안내에 사용.
   const [analysisBundle, setAnalysisBundle] = useState(MOCK_BUNDLE);
   const [missingActiveTime, setMissingActiveTime] = useState({}); // { processId: featureKey[] }
+  // 대상자 선택(§8.7, PR D2b): 클립별 { serverClipId, result, selectedId, fixtureClipName }. 환자 JSONB 미저장(전송 X).
+  const [detection, setDetection] = useState({}); // { [clipMetaId]: {...} }
+  const [detecting, setDetecting] = useState(null); // 진행 중 clipMetaId
+
+  // detection이 현재 클립과 일치할 때만 유효(fixtureClipName 변경/clip 삭제 시 stale → 무시). 무효화-at-use.
+  const validDetection = (clipMeta) => {
+    const d = detection[clipMeta.id];
+    return d && d.fixtureClipName === clipMeta.fixtureClipName ? d : null;
+  };
 
   const jobScopeModules = activeModules.filter((m) => getModule(m)?.videoMappingConfig?.scope === 'job');
   const shareTotals = useMemo(() => shareTotalsByJob(va.processes), [va.processes]);
@@ -150,7 +160,33 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   const removeProcess = (id) => updateVA((v) => removeProcessVA(v, id));
   const addClip = (processId) => updateVA((v) => addClipVA(v, processId));
   const editClip = (id, patch) => updateVA((v) => editClipVA(v, id, patch));
-  const removeClip = (id) => updateVA((v) => removeClipVA(v, id));
+  const dropDetection = (clipMetaId) => setDetection((d) => { const n = { ...d }; delete n[clipMetaId]; return n; });
+  const removeClip = (id) => { dropDetection(id); updateVA((v) => removeClipVA(v, id)); };
+
+  // ── 대상자 선택(§8.7, PR D2b) ── 대표 프레임 후보 탐지 → 박스 클릭 → select-target.
+  const detectTarget = async (clipMeta, processId) => {
+    setAnalysisError('');
+    setDetecting(clipMeta.id);
+    try {
+      const clip = await createClip(activePatient, { processId, fixtureClipName: clipMeta.fixtureClipName, session, settings });
+      const result = await sampleDetectClip(clip.clipId, { session, settings });
+      setDetection((d) => ({ ...d, [clipMeta.id]: { serverClipId: clip.clipId, result, selectedId: null, fixtureClipName: clipMeta.fixtureClipName } }));
+    } catch (e) {
+      setAnalysisError(e?.message || '대상자 탐지에 실패했습니다.');
+    } finally {
+      setDetecting(null);
+    }
+  };
+  const chooseTarget = async (clipMeta, personId) => {
+    const d = detection[clipMeta.id];
+    if (!d) return;
+    try {
+      await selectTarget(d.serverClipId, personId, { session, settings });
+      setDetection((prev) => ({ ...prev, [clipMeta.id]: { ...prev[clipMeta.id], selectedId: personId } }));
+    } catch (e) {
+      setAnalysisError(e?.message || '대상자 선택에 실패했습니다.');
+    }
+  };
 
   // 분석 산출(공통): processFeatures → jobFeatures/candidateFeatures 재구성 후 저장.
   // absolutePerDay: 서버 실분석은 절대 per-day(합산), mock은 공정점유율 가중.
@@ -178,8 +214,14 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     }
     setAnalyzing(true);
     try {
+      // 유효 detection(serverClipId+선택)만 전달 — stale(fixture 변경/삭제)은 validDetection이 거른다.
+      const detections = {};
+      for (const c of va.clips || []) {
+        const d = validDetection(c);
+        if (d?.serverClipId && d.selectedId) detections[c.id] = { serverClipId: d.serverClipId, selectedId: d.selectedId };
+      }
       const { processFeatures, missingActiveTime: missing, bundleVersion, errors } =
-        await runServerAnalysis(activePatient, va, { activeModules, session, settings });
+        await runServerAnalysis(activePatient, va, { activeModules, session, settings, detections });
       setAnalysisBundle(bundleVersion || MOCK_BUNDLE);
       setMissingActiveTime(missing);
       commitAnalysis(processFeatures, { absolutePerDay: true });
@@ -281,18 +323,37 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
               </div>
               {total !== 100 && <p className="muted" style={{ color: '#b26a00' }}>⚠ "{jobName(p.sharedJobId)}" 공정 점유율 합 {total}% (100% 권장)</p>}
               <div style={{ marginTop: 6 }}>
-                {clips.map((c) => (
-                  <span key={c.id} style={{ display: 'inline-flex', gap: 4, marginRight: 8, alignItems: 'center' }}>
-                    <select value={c.viewpoint} onChange={(e) => editClip(c.id, { viewpoint: e.target.value })}>
-                      {VIEWPOINTS.map((vp) => <option key={vp.value} value={vp.value}>{vp.label}</option>)}
-                    </select>
-                    {fixtureMode && (
-                      <input type="text" placeholder="fixture 파일명(dev)" value={c.fixtureClipName || ''}
-                        onChange={(e) => editClip(c.id, { fixtureClipName: e.target.value })} style={{ width: 150 }} />
-                    )}
-                    <button type="button" onClick={() => removeClip(c.id)}>×</button>
-                  </span>
-                ))}
+                {clips.map((c) => {
+                  const canDetect = fixtureMode && serverMode && !!c.fixtureClipName;
+                  const det = canDetect ? validDetection(c) : null;
+                  return (
+                    <div key={c.id} style={{ marginBottom: 6 }}>
+                      <span style={{ display: 'inline-flex', gap: 4, marginRight: 8, alignItems: 'center' }}>
+                        <select value={c.viewpoint} onChange={(e) => editClip(c.id, { viewpoint: e.target.value })}>
+                          {VIEWPOINTS.map((vp) => <option key={vp.value} value={vp.value}>{vp.label}</option>)}
+                        </select>
+                        {fixtureMode && (
+                          <input type="text" placeholder="fixture 파일명(dev)" value={c.fixtureClipName || ''}
+                            onChange={(e) => editClip(c.id, { fixtureClipName: e.target.value })} style={{ width: 150 }} />
+                        )}
+                        {canDetect && (
+                          <button type="button" disabled={detecting === c.id} onClick={() => detectTarget(c, p.id)}>
+                            {detecting === c.id ? '탐지 중…' : (det ? '재탐지' : '대상자 탐지')}
+                          </button>
+                        )}
+                        <button type="button" onClick={() => removeClip(c.id)}>×</button>
+                      </span>
+                      {det && (
+                        <div style={{ marginTop: 4 }}>
+                          <TargetPicker result={det.result} selectedId={det.selectedId} onSelect={(id) => chooseTarget(c, id)} />
+                          <p className="muted" style={{ fontSize: 12 }}>
+                            {det.selectedId ? `대상자: ${det.selectedId}` : '박스를 클릭해 대상 작업자를 선택하세요(미선택 시 자동=주요 인물).'}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
                 <button type="button" onClick={() => addClip(p.id)}>+ 클립</button>
                 {clips.length === 0 && <span className="muted"> 클립(시점) 미태깅</span>}
               </div>
