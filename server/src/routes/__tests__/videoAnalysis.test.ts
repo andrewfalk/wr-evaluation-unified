@@ -200,7 +200,37 @@ describe('POST /jobs (denormalize org/patient from clip)', () => {
 // loadAccessibleClip이 읽는 clip 행(추가 컬럼 포함).
 const clipRow = (over: Record<string, unknown> = {}) => ({
   id: CLIP_ID, patient_record_id: PAT_ID, organization_id: ORG_ID, assigned_doctor_user_id: USER_ID,
-  upload_path: null, sample_detect_result: null, target_person_id: null, ...over,
+  process_id: null, upload_path: null, sample_detect_result: null, target_person_id: null, ...over,
+});
+
+describe('POST /jobs process_id 무결성 (clip이 source of truth, PR D3b)', () => {
+  beforeEach(() => { vi.clearAllMocks(); flagState.enabled = true; });
+
+  it('body.processId ≠ clip.process_id → 400 PROCESS_MISMATCH (p1 분석이 p2 provenance로 새는 것 차단)', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [clipRow({ process_id: 'p1' })] });
+    const res = await request(makeApp(pool))
+      .post('/api/video-analysis/jobs')
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .send({ clipId: CLIP_ID, processId: 'p2', analysisProfile: 'posture-basic', requestedFeatures: [] });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('PROCESS_MISMATCH');
+  });
+
+  it('clip.process_id를 source of truth로 저장(body 일치 시 통과)', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [clipRow({ process_id: 'p1' })] });
+    q(pool).mockResolvedValueOnce({ rows: [{ id: JOB_ID, clip_id: CLIP_ID, process_id: 'p1', status: 'review_pending', analysis_profile: 'posture-basic', requested_features: [], applied_at: null, applied_revision: null }] });
+    const res = await request(makeApp(pool))
+      .post('/api/video-analysis/jobs')
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .send({ clipId: CLIP_ID, processId: 'p1', analysisProfile: 'posture-basic', requestedFeatures: [] });
+    expect(res.status).toBe(201);
+    const insertCall = q(pool).mock.calls.find((c) => String(c[0]).includes('INSERT INTO video_analysis_jobs'));
+    expect(insertCall?.[1]).toContain('p1'); // body가 아니라 clip의 process_id
+  });
 });
 
 describe('POST /clips fixture 이관 (createClip resolves upload_path, PR D2b)', () => {

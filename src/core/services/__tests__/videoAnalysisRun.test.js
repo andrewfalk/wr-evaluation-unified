@@ -96,4 +96,35 @@ describe('runServerAnalysis', () => {
     expect(r.processFeatures[0].features.squatDuration).toBeUndefined();
     expect(r.missingActiveTime.p1).toEqual(['squatDuration']);
   });
+
+  it('공정당 다중 시점 클립 → 각 클립 추론·시점 융합·analysisJobIds[] 복수 (D3b)', async () => {
+    createJob.mockResolvedValueOnce({ jobId: 'job-a', status: 'queued' })
+             .mockResolvedValueOnce({ jobId: 'job-b', status: 'queued' });
+    pollJob.mockResolvedValueOnce({ jobId: 'job-a', status: 'review_pending', resultFeatures: clipSet(0.5) })
+           .mockResolvedValueOnce({ jobId: 'job-b', status: 'review_pending', resultFeatures: clipSet(0.5) });
+    const va = vaWith();
+    va.clips = [
+      { id: 'c1', processId: 'p1', viewpoint: 'sagittal', fixtureClipName: 'a.mp4' },
+      { id: 'c2', processId: 'p1', viewpoint: 'frontal', fixtureClipName: 'b.mp4' },
+    ];
+    const r = await runServerAnalysis(patient, va, env);
+    expect(r.errors).toEqual([]);
+    expect(createJob).toHaveBeenCalledTimes(2);
+    expect(r.processFeatures).toHaveLength(1);
+    expect(r.processFeatures[0].analysisJobIds).toEqual(['job-a', 'job-b']); // 융합 → 복수 job provenance
+    expect(r.processFeatures[0].features.squatDuration).toMatchObject({ value: 100, unit: 'minutes_per_day' });
+  });
+
+  it('다중 시점 중 하나라도 실패 → 공정 전체 실패(error) + processFeatures 없음', async () => {
+    pollJob.mockResolvedValueOnce({ jobId: 'job-a', status: 'review_pending', resultFeatures: clipSet(0.5) })
+           .mockResolvedValueOnce({ jobId: 'job-b', status: 'error', errorCode: 'INFERENCE_ERROR' });
+    const va = vaWith();
+    va.clips = [
+      { id: 'c1', processId: 'p1', viewpoint: 'sagittal', fixtureClipName: 'a.mp4' },
+      { id: 'c2', processId: 'p1', viewpoint: 'frontal', fixtureClipName: 'b.mp4' },
+    ];
+    const r = await runServerAnalysis(patient, va, env);
+    expect(r.processFeatures).toEqual([]);
+    expect(r.errors[0].message).toContain('INFERENCE_ERROR');
+  });
 });
