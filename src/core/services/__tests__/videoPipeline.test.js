@@ -116,6 +116,23 @@ describe('aggregateProcessFeatures (§8.6.2)', () => {
     ]);
     expect(out.suspectedKneeTwist.value).toBe(true);
   });
+
+  it('저신뢰 게이트 전파(D3a): weighted 계열은 기여 공정 중 하나라도 false면 aggregate false (첫 contribution에 안 좌우)', () => {
+    const out = aggregateProcessFeatures([
+      { share: 60, features: { overheadHours: num(2.0) } },  // allowed=true (첫 contribution)
+      { share: 40, features: { overheadHours: { ...num(1.0), autoSuggestAllowed: false, warnings: ['LOW_CONFIDENCE_OVERALL'] } } },
+    ]);
+    expect(out.overheadHours.autoSuggestAllowed).toBe(false);
+    expect(out.overheadHours.warnings).toContain('LOW_CONFIDENCE_OVERALL'); // 사유 union 운반
+  });
+
+  it('게이트 전파(D3a): 모든 기여가 allowed면 aggregate도 allowed', () => {
+    const out = aggregateProcessFeatures([
+      { share: 60, features: { overheadHours: num(2.0) } },
+      { share: 40, features: { overheadHours: num(1.0) } },
+    ]);
+    expect(out.overheadHours.autoSuggestAllowed).toBe(true);
+  });
 });
 
 describe('videoMappingConfig manifest shape (registry safety net)', () => {

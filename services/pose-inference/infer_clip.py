@@ -53,9 +53,10 @@ def load_tracking_params():
     return iou, max_age
 
 
-def preprocess_config_hash(fps, conv, det, pose, size, track):
+def preprocess_config_hash(fps, conv, det, pose, size, track, quality):
     raw = json.dumps(
-        {"fps": fps, "conv": conv, "det": det, "pose": pose, "inputSize": size, "track": track},
+        {"fps": fps, "conv": conv, "det": det, "pose": pose, "inputSize": size,
+         "track": track, "quality": quality},  # quality(blurThreshold) 변경 시 재현성 hash 반영(D3a)
         sort_keys=True,
     )
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
@@ -128,22 +129,27 @@ def main():
     body = Body(mode="lightweight", backend="onnxruntime", device="cpu")
     track_iou, track_max_age = load_tracking_params()
     tracker = IoUTracker(iou_threshold=track_iou, max_age=track_max_age)
+    blur_threshold = load_quality_blur_threshold()  # config에 있을 때만(기본 None=파생값 비활성)
 
     frames_out = []
     blur_values = []   # 샘플 프레임별 Laplacian variance(품질검사, D3a)
-    sampled_ts = []    # 샘플 프레임 timestampMs(drop 추정용)
+    sampled_ts = []    # 샘플 프레임 timestampMs(drop 추정용 — 실제 캡처 timestamp)
     sampled = 0
     idx = 0
     t0 = time.time()
     while True:
+        # 실제 캡처 timestamp(VFR·프레임드롭 반영). read 전 위치 = 곧 읽을 프레임의 ts.
+        pos_msec = cap.get(cv2.CAP_PROP_POS_MSEC)
         ok, frame = cap.read()
         if not ok:
             break
         if idx % step == 0:
+            # POS_MSEC가 유효하면 실제 timestamp, 아니면(0/미지원) idx/orig_fps 폴백.
+            ts_ms = round(pos_msec) if (pos_msec and pos_msec > 0) else round(idx / orig_fps * 1000)
             # 품질 메타: 픽셀 접근 가능한 여기(infer_clip)에서만 산출(feature_calc는 keypoints만 입력).
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             blur_values.append(float(cv2.Laplacian(gray, cv2.CV_64F).var()))
-            sampled_ts.append(round(idx / orig_fps * 1000))
+            sampled_ts.append(ts_ms)
             bboxes = body.det_model(frame)  # (N,4) xyxy
             # 매 샘플 프레임마다 트래커 갱신(탐지 0이어도 호출해 트랙 age를 진행). xyxy 그대로 매칭.
             xyxy = [[float(b[0]), float(b[1]), float(b[2]), float(b[3])] for b in bboxes]
@@ -167,7 +173,7 @@ def main():
                     })
             frames_out.append({
                 "frameIndex": idx,
-                "timestampMs": round(idx / orig_fps * 1000),
+                "timestampMs": ts_ms,
                 "persons": persons,
             })
             sampled += 1
@@ -186,7 +192,6 @@ def main():
             "dropRatio": drop_ratio,
             "sampledFps": round(actual_sampled_fps, 4),
         }
-        blur_threshold = load_quality_blur_threshold()
         if blur_threshold is not None:
             blur_ratio = round(sum(1 for b in blur_values if b < blur_threshold) / len(blur_values), 4)
             quality["blurThreshold"] = blur_threshold
@@ -216,6 +221,7 @@ def main():
             "preprocessConfigHash": preprocess_config_hash(
                 args.fps, KEYPOINT_CONVENTION, DETECTOR_NAME, POSE_NAME, POSE_INPUT_SIZE,
                 {"iou": track_iou, "maxAge": track_max_age},  # 실제 사용 값(재현성)
+                {"blurThreshold": blur_threshold},  # quality threshold도 재현성 hash에 포함(D3a)
             ),
         },
         "frames": frames_out,
