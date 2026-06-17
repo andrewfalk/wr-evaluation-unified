@@ -95,3 +95,51 @@ describe('convertClipFeaturesToPerDay', () => {
     expect(r.features.trunkPostureG).toBeUndefined();
   });
 });
+
+describe('convertClipFeaturesToPerDay — confidence 게이팅 (PR D3a, §8.8)', () => {
+  const withBreakdown = (value, confidence, breakdown, warnings = []) => ({
+    kind: 'numeric', metric: 'posture_ratio', value, unit: 'ratio', confidence,
+    confidenceBreakdown: breakdown, segments: [], warnings,
+  });
+
+  it('기본(threshold 없음) → 게이팅 없음: autoSuggestAllowed 유지·LOW_CONFIDENCE 없음(하위호환)', () => {
+    const r = convertClipFeaturesToPerDay(clipSet({ squatDuration: withBreakdown(0.5, 0.4, { keypoint: 0.4, visibility: 0.5 }) }), 200);
+    expect(r.features.squatDuration.autoSuggestAllowed).toBe(true);
+    expect(r.features.squatDuration.warnings).toEqual([]);
+  });
+
+  it('주입 threshold(overall) 미만 → autoSuggestAllowed=false + LOW_CONFIDENCE_OVERALL', () => {
+    const r = convertClipFeaturesToPerDay(
+      clipSet({ squatDuration: withBreakdown(0.5, 0.6, { keypoint: 0.6, visibility: 0.9 }) }),
+      200, { confidenceThresholds: { squatDuration: { overall: 0.7 } } },
+    );
+    expect(r.features.squatDuration.autoSuggestAllowed).toBe(false);
+    expect(r.features.squatDuration.warnings).toContain('LOW_CONFIDENCE_OVERALL');
+  });
+
+  it('성분 threshold(visibility) 미만 → 차단(breakdown 기준)', () => {
+    const r = convertClipFeaturesToPerDay(
+      clipSet({ squatDuration: withBreakdown(0.5, 0.9, { keypoint: 0.9, visibility: 0.5 }) }),
+      200, { confidenceThresholds: { squatDuration: { visibility: 0.65 } } },
+    );
+    expect(r.features.squatDuration.autoSuggestAllowed).toBe(false);
+    expect(r.features.squatDuration.warnings).toContain('LOW_CONFIDENCE_VISIBILITY');
+  });
+
+  it('threshold 있어도 모든 성분 충족 → 차단 안 함', () => {
+    const r = convertClipFeaturesToPerDay(
+      clipSet({ squatDuration: withBreakdown(0.5, 0.9, { keypoint: 0.9, visibility: 0.9 }) }),
+      200, { confidenceThresholds: { squatDuration: { overall: 0.7, visibility: 0.65 } } },
+    );
+    expect(r.features.squatDuration.autoSuggestAllowed).toBe(true);
+    expect(r.features.squatDuration.warnings).toEqual([]);
+  });
+
+  it('게이팅 사유는 기존 warnings에 합쳐짐(union)', () => {
+    const r = convertClipFeaturesToPerDay(
+      clipSet({ squatDuration: withBreakdown(0.5, 0.6, { keypoint: 0.6, visibility: 0.9 }, ['TARGET_TRACK_LOST']) }),
+      200, { confidenceThresholds: { squatDuration: { overall: 0.7 } } },
+    );
+    expect(r.features.squatDuration.warnings).toEqual(['TARGET_TRACK_LOST', 'LOW_CONFIDENCE_OVERALL']);
+  });
+});

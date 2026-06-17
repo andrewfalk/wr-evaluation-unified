@@ -64,3 +64,22 @@ describe('PoseKeypointsSchema — drift guard', () => {
     expect(() => PoseKeypointsSchema.parse(badPerson)).toThrow();
   });
 });
+
+describe('PoseKeypointsSchema — quality meta (PR D3a, §8.8)', () => {
+  const validQuality = { blurMetric: { mean: 120, p10: 40, median: 110 }, dropRatio: 0.02, sampledFps: 2 };
+
+  it('accepts optional quality + threshold-derived fields', () => {
+    const r = PoseKeypointsSchema.parse({ ...fixture, quality: { ...validQuality, blurThreshold: 100, blurRatio: 0.1, usableFrameRatio: 0.88 } });
+    expect(r.quality?.blurMetric.mean).toBe(120);
+  });
+
+  it('allows omitting quality (PR B/C/D2 하위호환)', () => {
+    expect(PoseKeypointsSchema.parse(fixture).quality).toBeUndefined();
+  });
+
+  it('rejects quality with out-of-range ratio, missing blurMetric, or extra field (strict)', () => {
+    expect(() => PoseKeypointsSchema.parse({ ...fixture, quality: { ...validQuality, dropRatio: 2 } })).toThrow();
+    expect(() => PoseKeypointsSchema.parse({ ...fixture, quality: { dropRatio: 0.1, sampledFps: 2 } })).toThrow(); // blurMetric 누락
+    expect(() => PoseKeypointsSchema.parse({ ...fixture, quality: { ...validQuality, surprise: 1 } })).toThrow();
+  });
+});

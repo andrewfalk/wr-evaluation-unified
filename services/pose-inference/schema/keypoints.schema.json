@@ -37,6 +37,29 @@
         "preprocessConfigHash": { "type": "string", "minLength": 1 }
       }
     },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blurMetric", "dropRatio", "sampledFps"],
+      "description": "영상 품질 메타(6.0-6b, D3a). raw blurMetric/dropRatio는 항상, threshold 파생값은 설정 시에만. PR B/C/D2 하위호환 위해 optional.",
+      "properties": {
+        "blurMetric": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mean", "p10", "median"],
+          "properties": {
+            "mean": { "type": "number" },
+            "p10": { "type": "number" },
+            "median": { "type": "number" }
+          }
+        },
+        "dropRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "sampledFps": { "type": "number", "exclusiveMinimum": 0 },
+        "blurThreshold": { "type": "number" },
+        "blurRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "usableFrameRatio": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
     "frames": {
       "type": "array",
       "items": {

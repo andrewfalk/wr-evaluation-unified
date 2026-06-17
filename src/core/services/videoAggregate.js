@@ -39,25 +39,29 @@ function aggregateOne(featureKey, contributions) {
   const minConfidence = Math.min(...present.map((c) => c.value.confidence ?? 0));
   const warnings = [...new Set(present.flatMap((c) => c.value.warnings || []))];
   const sample = present[0].value;
+  // 저신뢰 게이트 전파(§8.8 D3a): 누적/병합 계열(weighted/or/max)은 기여 공정 중 하나라도
+  //  autoSuggestAllowed=false면 보수적으로 false(게이트 유실 방지). pick은 채택 contribution 기준.
+  //  (사유 LOW_CONFIDENCE_*는 warnings 합집합으로 운반. or/max의 '승리 contribution' 정밀화는 D3b.)
+  const aggAllowed = !present.some((c) => c.value.autoSuggestAllowed === false);
 
   if (method === 'or') {
     const value = present.some((c) => c.value.value === true);
-    return { ...sample, value, confidence: minConfidence, warnings };
+    return { ...sample, value, confidence: minConfidence, warnings, autoSuggestAllowed: aggAllowed };
   }
   if (method === 'pick') {
     const best = present.reduce((a, b) => (b.value.confidence > a.value.confidence ? b : a));
-    return { ...best.value, warnings };
+    return { ...best.value, warnings }; // 채택 contribution의 autoSuggestAllowed 유지
   }
   if (method === 'max') {
     const value = Math.max(...present.map((c) => Number(c.value.value) || 0));
-    return { ...sample, value, confidence: minConfidence, warnings };
+    return { ...sample, value, confidence: minConfidence, warnings, autoSuggestAllowed: aggAllowed };
   }
   if (method === 'weightedSum') {
     // 누적형: Σ(value × share/100). 시간점유율이 100% 미만이면 그만큼만 누적.
     const value = present.reduce(
       (acc, c) => acc + (Number(c.value.value) || 0) * shareFraction(c.share), 0
     );
-    return { ...sample, value, confidence: minConfidence, warnings };
+    return { ...sample, value, confidence: minConfidence, warnings, autoSuggestAllowed: aggAllowed };
   }
   // weightedAvg: 빈도/1회시간 — Σ(value × w)/Σw. 가중치 합 0이면 단순 평균으로 폴백.
   let num = 0;
@@ -70,7 +74,7 @@ function aggregateOne(featureKey, contributions) {
   const value = den > 0
     ? num / den
     : present.reduce((a, c) => a + (Number(c.value.value) || 0), 0) / present.length;
-  return { ...sample, value, confidence: minConfidence, warnings };
+  return { ...sample, value, confidence: minConfidence, warnings, autoSuggestAllowed: aggAllowed };
 }
 
 /**

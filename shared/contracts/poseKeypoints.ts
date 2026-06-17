@@ -12,6 +12,26 @@ import { z } from 'zod';
 export const KeypointConventionSchema = z.enum(['coco17', 'wholebody133']);
 export const CoordinateSpaceSchema = z.enum(['pixel', 'normalized']);
 
+// 영상 품질 메타 (6.0-6b, PR D3a, §8.8). infer_clip.py가 프레임 읽기 단계에서 산출.
+//   blurMetric: Laplacian variance 분포 요약(raw metric — threshold 무관, 항상 산출)
+//   dropRatio: 실제 sampledFps/timestamp 간격 기준 frame-drop 비율
+//   blurThreshold/blurRatio/usableFrameRatio: threshold 파생값 — threshold 설정 시에만(기본 비활성).
+//     usableFrameRatio는 정보용(B2 전까지 overall·게이팅에 미입력).
+export const BlurMetricSchema = z.object({
+  mean: z.number(),
+  p10: z.number(),
+  median: z.number(),
+}).strict();
+
+export const FrameQualitySchema = z.object({
+  blurMetric: BlurMetricSchema,
+  dropRatio: z.number().min(0).max(1),
+  sampledFps: z.number().positive(),
+  blurThreshold: z.number().optional(),
+  blurRatio: z.number().min(0).max(1).optional(),
+  usableFrameRatio: z.number().min(0).max(1).optional(),
+}).strict();
+
 // [x, y, score] — score(3번째)는 confidence 0~1.
 export const KeypointSchema = z.tuple([z.number(), z.number(), z.number().min(0).max(1)]);
 
@@ -52,6 +72,7 @@ export const PoseKeypointsSchema = z.object({
     modelVersion: z.string().min(1),
     preprocessConfigHash: z.string().min(1),
   }).strict(),
+  quality: FrameQualitySchema.optional(),  // PR D3a — PR B/C/D2 산출 하위호환 위해 optional
   frames: z.array(FramePoseSchema),
 }).strict().superRefine((doc, ctx) => {
   // convention에 맞는 keypoint 개수 강제(coco17=17) — 잘못된 모델/후처리 조기 검출.
@@ -70,6 +91,8 @@ export const PoseKeypointsSchema = z.object({
   });
 });
 
+export type BlurMetric = z.infer<typeof BlurMetricSchema>;
+export type FrameQuality = z.infer<typeof FrameQualitySchema>;
 export type KeypointConvention = z.infer<typeof KeypointConventionSchema>;
 export type CoordinateSpace = z.infer<typeof CoordinateSpaceSchema>;
 export type Keypoint = z.infer<typeof KeypointSchema>;

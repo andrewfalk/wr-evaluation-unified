@@ -3,7 +3,13 @@ feature_calc 골든 단위 테스트 (6.0-6a). 합성 keypoints(알려진 기하
 추론 재실행 없이 계산 로직만 검증 — 의존성: numpy 불필요(순수 파이썬).
 실행: .venv/Scripts/python test_feature_calc.py   (OK 출력 + 종료코드 0)
 """
+import json
 import math
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
 from feature_calc import (
     angle_at, angle_from_vertical, knee_min_angle, overhead_active,
@@ -11,6 +17,8 @@ from feature_calc import (
     choose_dominant_track, pick_target_person, all_track_ids,
 )
 from tracker import IoUTracker, iou
+
+HERE = Path(__file__).parent
 
 IDX = {
     "nose": 0, "left_eye": 1, "right_eye": 2, "left_ear": 3, "right_ear": 4,
@@ -134,6 +142,68 @@ def test_target_selection():
     print("ok: target track selection + dominant heuristic + track-loss")
 
 
+def _build_squat_keypoints(quality=None, track_id=None, n=40, dt=200):
+    """쪼그림 기하(무릎각<90)를 n프레임 — squatDuration 산출용 합성 keypoints 문서."""
+    squat = {
+        "left_hip": (100, 200), "left_knee": (100, 300), "left_ankle": (120, 260),
+        "right_hip": (140, 200), "right_knee": (140, 300), "right_ankle": (160, 260),
+    }
+    frames = []
+    for i in range(n):
+        p = person(squat)            # 관여 관절 score 0.9
+        p["trackId"] = track_id
+        p["bbox"] = [0.0, 0.0, 50.0, 100.0]
+        frames.append({"frameIndex": i, "timestampMs": i * dt, "persons": [p]})
+    doc = {
+        "schemaVersion": 1, "keypointConvention": "coco17", "coordinateSpace": "pixel",
+        "frameWidth": 640, "frameHeight": 480, "requestedFps": 5, "sampledFps": 5,
+        "source": {"clipRef": "synthetic-d3a", "originalFps": 30, "totalFrames": n},
+        "model": {"detector": "d", "pose": "p", "inputSize": [192, 256],
+                  "modelName": "test", "modelVersion": "test", "preprocessConfigHash": "test"},
+        "frames": frames,
+    }
+    if quality is not None:
+        doc["quality"] = quality
+    return doc
+
+
+def _run_feature_calc(kdoc):
+    with tempfile.TemporaryDirectory() as td:
+        kpath = os.path.join(td, "kp.json")
+        opath = os.path.join(td, "cf.json")
+        Path(kpath).write_text(json.dumps(kdoc), encoding="utf-8")
+        r = subprocess.run([sys.executable, str(HERE / "feature_calc.py"),
+                            "--keypoints", kpath, "--output", opath],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, f"feature_calc failed: {r.stderr}"
+        return json.loads(Path(opath).read_text(encoding="utf-8"))
+
+
+def test_d3a_breakdown_and_quality():
+    # (A) untracked + quality.usableFrameRatio=0.8 — 핵심 불변식: usableFrameRatio는
+    #     breakdown에만, overall(min)에서 제외 → confidence는 0.8이 아니라 min(keypoint,visibility).
+    quality = {"blurMetric": {"mean": 120.0, "p10": 40.0, "median": 110.0},
+               "dropRatio": 0.02, "sampledFps": 5, "usableFrameRatio": 0.8}
+    out = _run_feature_calc(_build_squat_keypoints(quality=quality, track_id=None))
+    assert out["quality"] == quality, "keypoints.quality가 clip_features.quality로 복사돼야 함"
+    sq = out["features"]["squatDuration"]
+    bd = sq["confidenceBreakdown"]
+    assert approx(bd["keypoint"], 0.9, 0.001), bd          # 관여 관절 score 0.9
+    assert bd["visibility"] == 1.0, bd                      # 모두 min_conf 이상 → 가림 없음
+    assert bd["usableFrameRatio"] == 0.8, bd                # breakdown에는 실림
+    assert "tracking" not in bd, bd                         # trackId null → untracked
+    assert "viewpoint" not in bd, bd                        # viewpoint는 D3b
+    assert approx(sq["confidence"], 0.9, 0.001), sq         # min(0.9,1.0)=0.9 (0.8 아님!)
+
+    # (B) tracked — tracking 성분이 breakdown+overall(min)에 포함.
+    out_b = _run_feature_calc(_build_squat_keypoints(quality=None, track_id="t1"))
+    bd_b = out_b["features"]["squatDuration"]["confidenceBreakdown"]
+    assert "tracking" in bd_b and bd_b["tracking"] == 1.0, bd_b   # 단일 트랙 항상 등장 → presence 1.0
+    assert "usableFrameRatio" not in bd_b, bd_b                   # quality 없으면 omit
+    assert "quality" not in out_b, out_b
+    print("ok: D3a confidenceBreakdown + quality copy + usableFrameRatio excluded from overall(min)")
+
+
 if __name__ == "__main__":
     test_angle_math()
     test_knee_squat_angle()
@@ -142,4 +212,5 @@ if __name__ == "__main__":
     test_posture_ratio()
     test_tracker()
     test_target_selection()
+    test_d3a_breakdown_and_quality()
     print("ALL PASS")

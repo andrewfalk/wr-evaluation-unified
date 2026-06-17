@@ -116,6 +116,23 @@ describe('aggregateProcessFeatures (§8.6.2)', () => {
     ]);
     expect(out.suspectedKneeTwist.value).toBe(true);
   });
+
+  it('저신뢰 게이트 전파(D3a): weighted 계열은 기여 공정 중 하나라도 false면 aggregate false (첫 contribution에 안 좌우)', () => {
+    const out = aggregateProcessFeatures([
+      { share: 60, features: { overheadHours: num(2.0) } },  // allowed=true (첫 contribution)
+      { share: 40, features: { overheadHours: { ...num(1.0), autoSuggestAllowed: false, warnings: ['LOW_CONFIDENCE_OVERALL'] } } },
+    ]);
+    expect(out.overheadHours.autoSuggestAllowed).toBe(false);
+    expect(out.overheadHours.warnings).toContain('LOW_CONFIDENCE_OVERALL'); // 사유 union 운반
+  });
+
+  it('게이트 전파(D3a): 모든 기여가 allowed면 aggregate도 allowed', () => {
+    const out = aggregateProcessFeatures([
+      { share: 60, features: { overheadHours: num(2.0) } },
+      { share: 40, features: { overheadHours: num(1.0) } },
+    ]);
+    expect(out.overheadHours.autoSuggestAllowed).toBe(true);
+  });
 });
 
 describe('videoMappingConfig manifest shape (registry safety net)', () => {
@@ -152,6 +169,18 @@ describe('getModuleSuggestions / collectCandidateFeatures', () => {
     const cands = collectCandidateFeatures(featureMap, { processIds: ['pr1'], clipIds: ['cl1'] });
     expect(cands.map((c) => c.featureKey).sort()).toEqual(['suspectedKneeTwist', 'trunkPostureG']);
     expect(cands[0].processIds).toEqual(['pr1']);
+  });
+
+  it('autoSuggestAllowed=false를 suggestion으로 전달(D3a 게이팅 → UI 참고만/버튼 비활성 입력)', () => {
+    const featureMap = {
+      squatDuration: {
+        kind: 'numeric', value: 100, unit: 'minutes_per_day', confidence: 0.5,
+        autoSuggestAllowed: false, requiresManualReview: false, warnings: ['LOW_CONFIDENCE_OVERALL'],
+      },
+    };
+    const knee = getModuleSuggestions(featureMap, 'knee');
+    expect(knee).toHaveLength(1);
+    expect(knee[0].autoSuggestAllowed).toBe(false);
   });
 });
 

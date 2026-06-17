@@ -1,5 +1,18 @@
 import { z } from 'zod';
 import { FeatureKeySchema, FeatureUnitSchema } from './videoAnalysis';
+import { FrameQualitySchema } from './poseKeypoints';
+
+// confidence 세분 지표 (6.0-6b, PR D3a, §8.8). per-feature, PR C/D2 출력 하위호환 위해 optional.
+//   keypoint/visibility는 항상, tracking은 트랙 있을 때, viewpoint는 시점 융합(D3b) 시.
+//   usableFrameRatio는 정보용(B2 전까지 overall·게이팅 미입력) — clip-global quality 미러.
+// overall(per-feature confidence scalar)은 = min(keypoint, visibility, tracking?, viewpoint?), usableFrameRatio 제외.
+export const ConfidenceBreakdownSchema = z.object({
+  keypoint: z.number().min(0).max(1),
+  visibility: z.number().min(0).max(1),
+  tracking: z.number().min(0).max(1).optional(),
+  viewpoint: z.number().min(0).max(1).optional(),
+  usableFrameRatio: z.number().min(0).max(1).optional(),
+}).strict();
 
 // ---------------------------------------------------------------------------
 // clipFeatures 계약 (6.0-6a, PR C). feature 계산기(services/pose-inference/feature_calc.py)가
@@ -31,6 +44,7 @@ const NumericClipFeature = z.object({
   value: z.number(),
   unit: FeatureUnitSchema,
   confidence: z.number().min(0).max(1),
+  confidenceBreakdown: ConfidenceBreakdownSchema.optional(),
   segments: z.array(ClipFeatureSegmentSchema).default([]),
   warnings: z.array(z.string()).default([]),
 }).strict();
@@ -39,6 +53,7 @@ const BooleanClipFeature = z.object({
   kind: z.literal('boolean'),
   value: z.boolean(),
   confidence: z.number().min(0).max(1),
+  confidenceBreakdown: ConfidenceBreakdownSchema.optional(),
   warnings: z.array(z.string()).default([]),
 }).strict();
 
@@ -46,6 +61,7 @@ const CategoricalClipFeature = z.object({
   kind: z.literal('categorical'),
   value: z.string(),
   confidence: z.number().min(0).max(1),
+  confidenceBreakdown: ConfidenceBreakdownSchema.optional(),
   warnings: z.array(z.string()).default([]),
 }).strict();
 
@@ -72,6 +88,7 @@ export const ClipFeatureSetSchema = z.object({
   analyzedFrames: z.number().int().nonnegative(),
   features: ClipFeatureMapSchema,
   tracking: ClipTrackingSchema.optional(),
+  quality: FrameQualitySchema.optional(),  // PR D3a — keypoints.quality 복사(clip-global). PR C/D2 하위호환 optional.
 }).strict().superRefine((doc, ctx) => {
   // posture_ratio는 비율(0~1) — 계약 수준에서 강제(후속 per-day 환산 이상값 방지).
   for (const [key, f] of Object.entries(doc.features)) {
@@ -85,6 +102,7 @@ export const ClipFeatureSetSchema = z.object({
   }
 });
 
+export type ConfidenceBreakdown = z.infer<typeof ConfidenceBreakdownSchema>;
 export type ClipFeatureMetric = z.infer<typeof ClipFeatureMetricSchema>;
 export type ClipFeatureSegment = z.infer<typeof ClipFeatureSegmentSchema>;
 export type ClipFeatureValue = z.infer<typeof ClipFeatureValueSchema>;
