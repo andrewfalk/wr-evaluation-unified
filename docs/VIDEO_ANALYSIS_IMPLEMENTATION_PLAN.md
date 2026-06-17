@@ -66,19 +66,22 @@
   - [x] tracker 파라미터 단일 source(infer_clip이 feature_config.json.tracking 읽음, hash엔 실제 값)
   - [x] 테스트: Python 골든 + 계약(SampleDetectResult) + 서버(createClip/createJob/sample-detect/select-target) + 워커(iouXywh·mapTargetTrack·MAP_FAILED) + 클라(run detection 재사용·TargetPicker geometry). 클라 642/서버 416, lint 0, build·tsc·server build OK, smoke PASS
   - [x] **Codex 리뷰 반영(3건)**: ① 선택 있는데 `sample_detect_result` null이면 dominant 폴백 금지 → `INVALID_SAMPLE_DETECT` job error("선택=그 사람 or 실패") ② 깨진 sample-detect 출력(JSON/계약 parse 실패)만 태깅 → 라우트 **502 INVALID_SAMPLE_DETECT** 명시 응답(timeout/크래시는 500 유지), select-target 저장값도 500→502 ③ bbox: Python 0 하한 clamp + schema `nonnegative`(퇴화/위조 박스 차단). 회귀 테스트 3건. 클라 643/서버 418, lint 0
-- [~] **PR D3 (6.0-6b)** 품질검사 + 시점 융합(§8.6.1) + confidence(§8.8) — 하위 분할(상세계획 확정)
+- [x] **PR D3 (6.0-6b)** 품질검사 + 시점 융합(§8.6.1) + confidence(§8.8) — 하위 분할 완료(D3a #29·D3b #30 머지)
   - [x] **D3a** confidence 세분화 + 품질검사 — **PR #29 ✅ 머지**
     - [x] 계약 선고정: poseKeypoints `quality{blurMetric{mean,p10,median}·dropRatio·sampledFps + threshold 파생값 optional}` + clipFeatures per-feature `confidenceBreakdown` + ClipFeatureSet `quality`(모두 optional, canonical JSON 미러 + validate post-check)
     - [x] Python: `infer_clip.py`가 blur(Laplacian)·drop 산출 → keypoints.quality / `feature_calc.py` breakdown(visibility=`clamp(1-missingRatio,0,1)`·tracking·`overall=min(존재 성분, usableFrameRatio 제외)`) + quality 복사
     - [x] 게이팅: `videoConfidenceConfig.js`(클라 번들, **기본 비활성**) → `convert`가 `autoSuggestAllowed=false`+base `warnings[]` 사유 → UI "참고만"+버튼 비활성. 실 threshold 6.0-B2
     - [x] **Codex 리뷰 반영(3건)**: dropRatio 실 `CAP_PROP_POS_MSEC` 기반 + 집계 게이트 전파(weighted/or/max any-false→false) + blurThreshold를 preprocessConfigHash에 포함
-  - [~] **D3b** 시점 융합(§8.6.1) — 구현 완료, 커밋/PR 대기
+  - [x] **D3b** 시점 융합(§8.6.1) — **PR #30 ✅ 머지**
     - [x] provenance 배열화: `ProcessFeaturesSchema.analysisJobIds[]` + `resolveAnalysisJobIds` 정규화(빈배열/`[undefined]` 방지), apply·producer 배열 기반
     - [x] `videoViewpointConfig.js`(클라 번들): featureKey별 preferredViewpoint + viewpoint 성분 결정적 매핑(preferred 1.0/known-non-preferred 0.5/other·선호없음 omit) + tier + conflictThreshold 기본 비활성
     - [x] `videoViewpointFusion.js`: featureKey별 1차 tier·2차 viewpoint 보정 overall 채택(other가 preferred 못 이김) + viewpoint breakdown 충전 + NON_PREFERRED_VIEWPOINT 경고 + INTER_VIEW_CONFLICT(임계값 설정 시만) + 단일=passthrough
     - [x] `videoAnalysisRun`: 공정당 클립 `.find`→`.filter` 그룹핑 → 클립별 추론 → 융합 → per-day, analysisJobIds[] 복수, 부분 실패=공정 실패
     - [x] **Codex 리뷰 반영**: ① 서버 `createJob` process_id를 clip source of truth로(body 불일치 400 `PROCESS_MISMATCH`) ② 빈 provenance 거부 — 서버모드 apply가 빈 `analysisJobIds`면 `VideoAnalysisStep` 1차 차단 + `videoServerApply` `EMPTY_PROVENANCE` throw(로컬/mock 예외) ③ 집계 규칙 문서 정리(breakdown은 per-day로 미운반 → job-scope 집계 불필요, autoSuggestAllowed는 weighted=any-false·pick=채택 전파)
     - [x] 테스트: 융합 7 + run 2(다중클립·부분실패) + 계약(analysisJobIds·resolveAnalysisJobIds) + 서버 PROCESS_MISMATCH 2. 클라 671/서버 420, lint 0, build OK
+- [x] **PR D 수동 검증 완료** (실영상 e2e — CI는 합성 fixture만)
+  - [x] **Tier 1** (`services/pose-inference/smoke_d.ps1`, standalone Python·venv·ONNX): 실영상→keypoints→clip_features. **quality{blurMetric·dropRatio·sampledFps} 존재 / confidenceBreakdown overall=min 불변식(성분별 binding 확인) / tracking trackId·presenceRatio / sample-detect 3인 후보 / `--target-track` 동작** 모두 PASS
+  - [x] **Tier 3** (네이티브 intranet 서버+워커+venv + 웹 UI 라이브): 플래그 on→공정/클립(fixture)→sample-detect→TargetPicker 선택→**서버 워커 실추론**(D1 워커→Python, 그동안 mock만 검증되던 경로)→제안/적용 e2e 동작 확인. *값 자체의 타당성은 6.0-B2(실 작업영상+수기검증) 몫 — 본 검증은 "전 구간 실동작" 확인.*
 
 ### M3 — 업로드·검증·매핑 (6.0-7, 6.0-B2, 6.0-8)
 - [ ] 6.0-7 multipart 업로드 + 임시저장·TTL·cleanup
