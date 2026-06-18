@@ -31,6 +31,7 @@ export interface InferenceResult {
   clipFeatures: unknown; // ClipFeatureSetSchema 통과값
   preprocessConfigHash: string | null;
   inputSha256: string | null;
+  keypointsJson: string | null; // keypoints 원문(좌표만). overlay 검수용 artifact로 영속(M3-7b).
 }
 
 // 사용자가 고른 대상자(§8.7, PR D2b). sample-detect 후보 bbox(xywh 픽셀) + 대표 프레임 시각.
@@ -117,6 +118,7 @@ async function defaultRunInference(
       clipFeatures,
       preprocessConfigHash: kpDoc?.model?.preprocessConfigHash ?? null,
       inputSha256: crypto.createHash('sha256').update(kpRaw).digest('hex'),
+      keypointsJson: kpRaw, // tmp work dir는 곧 삭제되므로 원문을 반환해 호출측이 artifact로 영속.
     };
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
@@ -152,24 +154,49 @@ async function claimJob(pool: Pool): Promise<ClaimedJob | null> {
   }
 }
 
-// clip 경로 로드 후 심층방어 재검증. 출처(source_type)별로 allowlist를 분기. 실패 시 null.
-async function resolveJobClipPath(pool: Pool, clipId: string): Promise<string | null> {
+// 조용한 unlink(존재 안 해도 무시).
+async function safeUnlink(p: string | null | undefined): Promise<void> {
+  if (!p) return;
+  await fs.promises.unlink(p).catch(() => {});
+}
+
+/** keypoints 원문을 uploadDir/artifacts/<jobId>.keypoints.json로 영속(uploadDir 없으면 skip). */
+async function persistKeypoints(
+  jobId: string, keypointsJson: string | null,
+): Promise<{ keypointsPath: string | null; keypointsSha: string | null }> {
+  if (!config.video.uploadDir || !keypointsJson) return { keypointsPath: null, keypointsSha: null };
+  const artDir = path.join(config.video.uploadDir, 'artifacts');
+  await fs.promises.mkdir(artDir, { recursive: true });
+  const keypointsPath = path.join(artDir, `${jobId}.keypoints.json`);
+  await fs.promises.writeFile(keypointsPath, keypointsJson);
+  const keypointsSha = crypto.createHash('sha256').update(keypointsJson).digest('hex');
+  return { keypointsPath, keypointsSha };
+}
+
+interface JobClip {
+  resolvedPath: string | null; // 심층방어 재검증된 실경로(추론 입력)
+  sourceType: string;
+  uploadPath: string | null;
+}
+// clip 메타 로드 + 출처(source_type)별 allowlist 재검증. 보존정책(원본 삭제) 판정에 sourceType/uploadPath도 반환.
+async function loadJobClip(pool: Pool, clipId: string): Promise<JobClip> {
   const { rows } = await pool.query<{ upload_path: string | null; source_type: string; file_state: string }>(
     `SELECT upload_path, source_type, file_state FROM video_analysis_clips WHERE id = $1`,
     [clipId],
   );
   const row = rows[0];
-  if (!row || !row.upload_path) return null;
-  if (row.source_type === 'fixture') {
-    // basename만 취해 fixtureDir 안에서 다시 검증(저장된 경로가 변조됐어도 allowlist 밖이면 거부).
-    return resolveFixtureClip(path.basename(row.upload_path), config.video.fixtureDir);
+  if (!row) return { resolvedPath: null, sourceType: 'unknown', uploadPath: null };
+  let resolvedPath: string | null = null;
+  if (row.upload_path) {
+    if (row.source_type === 'fixture') {
+      // basename만 취해 fixtureDir 안에서 다시 검증(저장된 경로가 변조됐어도 allowlist 밖이면 거부).
+      resolvedPath = resolveFixtureClip(path.basename(row.upload_path), config.video.fixtureDir);
+    } else if (row.source_type === 'upload' && row.file_state === 'present') {
+      // 원본이 이미 삭제(privacy_first)됐으면(file_state≠present) 재분석 불가.
+      resolvedPath = resolveUploadedClipPath(row.upload_path, config.video.uploadDir);
+    }
   }
-  if (row.source_type === 'upload') {
-    // 원본이 이미 삭제(privacy_first)됐으면 재분석 불가.
-    if (row.file_state !== 'present') return null;
-    return resolveUploadedClipPath(row.upload_path, config.video.uploadDir);
-  }
-  return null; // apply_shell 등은 큐 대상 아님.
+  return { resolvedPath, sourceType: row.source_type, uploadPath: row.upload_path };
 }
 
 // clip의 대상자 선택(target_person_id + sample_detect_result) → TargetSelection. 선택 없으면 null(dominant).
@@ -219,27 +246,56 @@ export async function pollOnce(pool: Pool, deps: WorkerDeps): Promise<boolean> {
   const job = await claimJob(pool);
   if (!job) return false;
 
+  // DB에 경로가 기록되기 전 예외 시 즉시 정리할 artifact(orphan 방지). 기록 성공 후 null로 비운다.
+  let pendingKeypointsPath: string | null = null;
+  let succeeded: { clip: JobClip } | null = null;
   try {
-    const clipPath = await resolveJobClipPath(pool, job.clip_id);
-    if (!clipPath) {
-      throw Object.assign(new Error('fixture clip unavailable or outside allowlist'), { code: 'FIXTURE_UNAVAILABLE' });
+    const clip = await loadJobClip(pool, job.clip_id);
+    if (!clip.resolvedPath) {
+      throw Object.assign(new Error('clip unavailable or outside allowlist'), { code: 'CLIP_UNAVAILABLE' });
     }
     const targetSelection = await resolveTargetSelection(pool, job.clip_id);
-    const result = await deps.runInference(clipPath, job.analysis_profile, targetSelection);
+    const result = await deps.runInference(clip.resolvedPath, job.analysis_profile, targetSelection);
+
+    // keypoints artifact 영속화(overlay 검수 입력, M3-7b). uploadDir 구성 시에만(좌표만, 원본 프레임 없음).
+    const { keypointsPath, keypointsSha } = await persistKeypoints(job.id, result.keypointsJson);
+    pendingKeypointsPath = keypointsPath;
+
     await pool.query(
       `UPDATE video_analysis_jobs
          SET status = 'review_pending', result_features = $2,
-             preprocess_config_hash = $3, analysis_input_sha256 = $4
+             preprocess_config_hash = $3, analysis_input_sha256 = $4,
+             keypoints_path = $5, keypoints_sha256 = $6
        WHERE id = $1`,
-      [job.id, JSON.stringify(result.clipFeatures), result.preprocessConfigHash, result.inputSha256],
+      [job.id, JSON.stringify(result.clipFeatures), result.preprocessConfigHash, result.inputSha256, keypointsPath, keypointsSha],
     );
+    pendingKeypointsPath = null; // DB에 경로 기록 완료 → 더 이상 orphan 아님.
+    succeeded = { clip }; // 분석 성공 확정 — 이후 보존정책 후처리 실패가 이 성공을 덮지 않게 한다.
   } catch (err) {
+    // DB에 경로가 기록되기 전 실패한 keypoints artifact는 즉시 정리(hourly orphan sweep 대기 없이).
+    if (pendingKeypointsPath) await safeUnlink(pendingKeypointsPath);
     const code = (err as { code?: string })?.code ?? 'INFERENCE_ERROR';
     const message = String((err as Error)?.message ?? err).slice(0, 500);
     await pool.query(
       `UPDATE video_analysis_jobs SET status = 'error', error_code = $2, error_message = $3 WHERE id = $1`,
       [job.id, code, message],
     );
+  }
+
+  // 보존 정책 A(privacy_first) 후처리 — 분석 성공 전이와 분리. 여기서 실패해도 job은 review_pending을 유지하고
+  // cleanup(orphan/TTL)이 안전망이 된다(이미 성공한 분석을 error로 되돌리지 않음). 실 업로드만 대상(fixture 미삭제).
+  // DB를 먼저 deleted로 전이한 뒤 unlink → "file_state='present'인데 파일 없음" 상태 방지.
+  if (succeeded && config.video.retentionPolicy === 'privacy_first' && succeeded.clip.sourceType === 'upload') {
+    try {
+      await pool.query(
+        `UPDATE video_analysis_clips SET upload_path = NULL, file_state = 'deleted'
+         WHERE id = $1 AND source_type = 'upload'`,
+        [job.clip_id],
+      );
+      if (succeeded.clip.resolvedPath) await safeUnlink(succeeded.clip.resolvedPath);
+    } catch (e) {
+      console.error('[wr-server] video retention cleanup failed (job kept review_pending)', { jobId: job.id, err: e });
+    }
   }
   return true;
 }

@@ -23,6 +23,7 @@ import { createOpsStatusRouter } from './routes/opsStatus';
 import { cspMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
 import { runWorkspaceRetention } from './jobs/workspaceRetention';
+import { runVideoClipCleanup } from './jobs/videoClipCleanup';
 
 export const app = express();
 app.set('trust proxy', config.trustProxy);
@@ -105,6 +106,18 @@ if (require.main === module) {
         if (config.videoAnalysisEnabled && (config.video.fixtureMode || config.video.uploadDir)) {
           createVideoAnalysisWorker(pool);
           console.log(`[wr-server] video-analysis worker enabled (fixture=${config.video.fixtureMode}, upload=${!!config.video.uploadDir})`);
+
+          // 영상 임시파일 회수(TTL·orphan): 시작 시 1회 + 1시간 간격. 비치명적.
+          const doVideoCleanup = () => {
+            runVideoClipCleanup(pool)
+              .then(({ clipsExpired, originalsDeleted, artifactsDeleted, orphansDeleted }) => {
+                const total = originalsDeleted + artifactsDeleted + orphansDeleted;
+                if (total > 0) console.log(`[wr-server] video-cleanup: clips=${clipsExpired} originals=${originalsDeleted} artifacts=${artifactsDeleted} orphans=${orphansDeleted}`);
+              })
+              .catch((err) => console.error('[wr-server] video-cleanup error', err));
+          };
+          doVideoCleanup();
+          setInterval(doVideoCleanup, 60 * 60 * 1000).unref();
         }
       });
     })

@@ -1,19 +1,17 @@
 import crypto from 'crypto';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 
 // 피처플래그를 테스트 중 토글하기 위해 hoisted 가변 상태 사용.
 const flagState = vi.hoisted(() => ({ enabled: true, fixtureMode: false }));
-// 업로드 테스트용 실제 temp uploadDir(buildUploadMiddleware가 tmp 하위를 mkdir).
-const uploadEnv = vi.hoisted(() => {
-  const os = require('os');
-  const path = require('path');
-  const fs = require('fs');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'va-upload-'));
-  return { dir };
-});
+// 업로드 테스트용 실제 temp uploadDir(buildUploadMiddleware가 tmp 하위를 mkdir). 경로는 beforeAll에서 채운다.
+const uploadEnv = vi.hoisted(() => ({ dir: '' }));
+beforeAll(() => { uploadEnv.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'va-upload-')); });
 
 vi.mock('../../config', () => ({
   default: {
@@ -30,7 +28,7 @@ vi.mock('../../config', () => ({
       fixtureDir: '/tmp/va-fixtures',
       scriptsDir: '/tmp/scripts',
       python: '/tmp/python',
-      uploadDir: uploadEnv.dir,
+      get uploadDir() { return uploadEnv.dir; },
       maxUploadBytes: 50 * 1024 * 1024,
       allowedExtensions: ['mp4', 'mov', 'webm', 'avi'],
       allowedMimeTypes: ['video/mp4', 'video/webm', 'video/x-msvideo'],
@@ -782,7 +780,6 @@ describe('POST /clips/:id/upload (M3-7a)', () => {
   });
 
   it('DB UPDATE 예외 → 500 + 최종 파일 orphan 미잔존', async () => {
-    const fs = require('fs');
     const countBin = () => fs.readdirSync(uploadEnv.dir).filter((f: string) => f.endsWith('.bin')).length;
     const before = countBin();
     const pool = makePool();
@@ -819,7 +816,7 @@ describe('POST /clips/:id/sample-detect 실 업로드 guard (M3-7a)', () => {
     q(pool).mockResolvedValueOnce({ rows: [clipRow({ source_type: 'upload', file_state: 'present', upload_path: `${uploadEnv.dir}/x.bin` })] });
     q(pool).mockResolvedValueOnce({ rows: [] }); // UPDATE
     // resolveUploadedClipPath는 실제 파일 검증 → 파일 생성.
-    require('fs').writeFileSync(`${uploadEnv.dir}/x.bin`, 'x');
+    fs.writeFileSync(`${uploadEnv.dir}/x.bin`, 'x');
     const res = await request(makeApp(pool))
       .post(`/api/video-analysis/clips/${CLIP_ID}/sample-detect`)
       .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN).send({});

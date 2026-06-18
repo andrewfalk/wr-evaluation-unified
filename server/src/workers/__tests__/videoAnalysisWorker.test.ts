@@ -1,8 +1,19 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import type { Pool } from 'pg';
 
+const videoCfg = vi.hoisted(() => ({ uploadDir: '', retentionPolicy: 'review_fidelity' }));
+beforeAll(() => { videoCfg.uploadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wk-up-')); });
 vi.mock('../../config', () => ({
-  default: { video: { fixtureDir: '/fx', uploadDir: '/uploads', scriptsDir: '/s', python: '/p' } },
+  default: {
+    video: {
+      fixtureDir: '/fx', scriptsDir: '/s', python: '/p',
+      get uploadDir() { return videoCfg.uploadDir; },
+      get retentionPolicy() { return videoCfg.retentionPolicy; },
+    },
+  },
 }));
 vi.mock('../fixturePath', () => ({
   resolveFixtureClip: vi.fn((name: unknown) => (name === 'good.mp4' ? '/fx/good.mp4' : null)),
@@ -99,13 +110,74 @@ describe('videoAnalysisWorker.pollOnce', () => {
     expect(upd?.[1]).toContain('INFERENCE_ERROR');
   });
 
-  it('fixture 경로 없음(upload_path null) → error FIXTURE_UNAVAILABLE (추론 미실행)', async () => {
+  it('clip 경로 없음(upload_path null) → error CLIP_UNAVAILABLE (추론 미실행)', async () => {
     const { pool, query } = makePool({ uploadPath: null });
     const runInference = vi.fn();
     await pollOnce(pool, { runInference });
     expect(runInference).not.toHaveBeenCalled();
     const upd = poolUpdate(query, 'error_code = $2');
-    expect(upd?.[1]).toContain('FIXTURE_UNAVAILABLE');
+    expect(upd?.[1]).toContain('CLIP_UNAVAILABLE');
+  });
+});
+
+describe('pollOnce keypoints artifact + 보존 정책 A (M3-7b)', () => {
+  beforeEach(() => { videoCfg.retentionPolicy = 'review_fidelity'; });
+
+  it('성공 시 keypoints artifact 저장 + keypoints_path/sha256 UPDATE', async () => {
+    const { pool, query } = makePool();
+    const runInference = vi.fn().mockResolvedValue({
+      clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: 'pch', inputSha256: 'sha',
+      keypointsJson: '{"frames":[]}',
+    });
+    await pollOnce(pool, { runInference });
+    const artPath = path.join(videoCfg.uploadDir, 'artifacts', 'job-1.keypoints.json');
+    expect(fs.existsSync(artPath)).toBe(true);
+    const upd = poolUpdate(query, 'keypoints_path = $5');
+    expect(upd?.[1]).toContain(artPath); // keypoints_path
+  });
+
+  it('privacy_first + 업로드 clip → 원본 unlink + file_state=deleted UPDATE', async () => {
+    videoCfg.retentionPolicy = 'privacy_first';
+    const orig = path.join(videoCfg.uploadDir, 'orig.bin');
+    fs.writeFileSync(orig, 'video');
+    const { pool, query } = makePool({ sourceType: 'upload', fileState: 'present', uploadPath: orig });
+    const runInference = vi.fn().mockResolvedValue({
+      clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: null, inputSha256: null, keypointsJson: '{}',
+    });
+    await pollOnce(pool, { runInference });
+    expect(fs.existsSync(orig)).toBe(false); // 원본 삭제
+    const upd = poolUpdate(query, "file_state = 'deleted'");
+    expect(upd).toBeDefined();
+  });
+
+  it('job row UPDATE 실패 시 keypoints artifact 즉시 정리(orphan 방지)', async () => {
+    const { pool } = makePool();
+    // review_pending UPDATE(keypoints_path 기록)만 실패시킨다.
+    (pool.query as ReturnType<typeof vi.fn>).mockImplementation((sql: string) => {
+      if (typeof sql === 'string' && sql.includes('SELECT upload_path')) {
+        return Promise.resolve({ rows: [{ upload_path: '/fx/good.mp4', source_type: 'fixture', file_state: 'present' }] });
+      }
+      if (typeof sql === 'string' && sql.includes("status = 'review_pending'")) {
+        return Promise.reject(new Error('db down'));
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const runInference = vi.fn().mockResolvedValue({
+      clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: null, inputSha256: null, keypointsJson: '{"k":1}',
+    });
+    await pollOnce(pool, { runInference });
+    const artPath = path.join(videoCfg.uploadDir, 'artifacts', 'job-1.keypoints.json');
+    expect(fs.existsSync(artPath)).toBe(false); // DB 기록 전 실패 → 즉시 unlink
+  });
+
+  it('privacy_first라도 fixture 원본은 삭제하지 않는다', async () => {
+    videoCfg.retentionPolicy = 'privacy_first';
+    const { pool, query } = makePool({ sourceType: 'fixture', fileState: 'present', uploadPath: '/fx/good.mp4' });
+    const runInference = vi.fn().mockResolvedValue({
+      clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: null, inputSha256: null, keypointsJson: '{}',
+    });
+    await pollOnce(pool, { runInference });
+    expect(poolUpdate(query, "file_state = 'deleted'")).toBeUndefined();
   });
 });
 

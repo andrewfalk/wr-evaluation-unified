@@ -13,7 +13,8 @@
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "seed:admin": "tsx src/cli/seedAdmin.ts",
-    "retention": "tsx src/cli/runRetention.ts"
+    "retention": "tsx src/cli/runRetention.ts",
+    "cleanup:video": "tsx src/cli/runVideoCleanup.ts"
   },
   "dependencies": {
     "@wr/contracts": "file:../shared",
