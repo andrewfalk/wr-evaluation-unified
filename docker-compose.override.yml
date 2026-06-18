@@ -5,3 +5,7 @@ services:
   app:
     environment:
       CORS_ORIGINS: "https://wr.hospital.local:8443,http://localhost:3000,http://localhost:3001"
+  # 6.0-7 스모크: 네이티브 서버(npm run dev)가 host에서 DB에 붙도록 postgres 포트 노출(dev 전용).
+  postgres:
+    ports:
+      - "5432:5432"
