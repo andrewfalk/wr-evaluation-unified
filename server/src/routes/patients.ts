@@ -363,8 +363,7 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
     return;
   }
 
-  const patientId   = clientId ?? randomUUID();
-  const fullPayload = { id: patientId, phase, createdAt: createdAt ?? new Date().toISOString(), data };
+  const patientId = clientId ?? randomUUID();
 
   const client = await pool.connect();
   try {
