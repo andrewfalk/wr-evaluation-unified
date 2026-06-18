@@ -45,7 +45,7 @@ describe('applyVideoFeatureViaServer', () => {
 
     const out = await applyVideoFeatureViaServer(patient, opts, env);
 
-    expect(createClip).toHaveBeenCalledWith(patient, { session: env.session, settings: env.settings });
+    expect(createClip).toHaveBeenCalledWith(patient, { purpose: 'apply_shell', session: env.session, settings: env.settings });
     expect(createJob).toHaveBeenCalledWith(
       { clipId: 'c1', processId: 'pr1', analysisProfile: 'posture-basic', requestedFeatures: ['overheadHours'] },
       { session: env.session, settings: env.settings }

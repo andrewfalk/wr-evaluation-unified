@@ -7,8 +7,12 @@ import { csrfMiddleware } from '../middleware/csrf';
 import { writeAuditLog } from '../middleware/audit';
 import path from 'path';
 import { SampleDetectResultSchema } from '@wr/contracts';
-import { resolveFixtureClip } from '../workers/fixturePath';
+import { resolveFixtureClip, resolveUploadedClipPath } from '../workers/fixturePath';
 import { runSampleDetect } from '../workers/sampleDetect';
+import { buildUploadMiddleware, runMulter, sniffVideoMime, hashFile, safeUnlink } from '../workers/videoUpload';
+import type { RequestHandler as ExpressRequestHandler } from 'express';
+import fs from 'fs';
+import crypto from 'crypto';
 
 // ---------------------------------------------------------------------------
 // 작업 영상 인간공학 분석 — clip/job 라이프사이클 + apply(영속화) API (6.0-4, mock).
@@ -25,8 +29,18 @@ const CreateClipBody = z.object({
   patientId: z.string().uuid(),
   // job-scope 집계는 특정 공정이 없어 null을 보낸다(컬럼도 nullable). null/undefined 모두 허용.
   processId: z.string().nullable().optional(),
+  // clip 출처 명시(M3-7a): analysis_upload(실 업로드 대기) | apply_shell(추론 없는 적용 셸) | fixture(dev).
+  purpose: z.enum(['analysis_upload', 'apply_shell', 'fixture']),
   // dev-only fixture 입력(fixtureMode일 때만). 여기서 resolve→upload_path 저장(sample-detect가 그 전 단계, PR D2b).
   fixtureClipName: z.string().optional(),
+}).superRefine((v, ctx) => {
+  // purpose↔fixtureClipName 조합 강제(잘못된 조합 차단).
+  if (v.purpose === 'fixture' && !v.fixtureClipName) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'fixture purpose requires fixtureClipName', path: ['fixtureClipName'] });
+  }
+  if (v.purpose !== 'fixture' && v.fixtureClipName) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'fixtureClipName is only allowed with fixture purpose', path: ['fixtureClipName'] });
+  }
 });
 const SelectTargetBody = z.object({ targetPersonId: z.string().min(1) });
 const CreateJobBody = z.object({
@@ -85,6 +99,7 @@ async function loadAccessiblePatient(
 interface ClipCtx {
   clipId: string; patientRecordId: string; organizationId: string; processId: string | null;
   uploadPath: string | null; sampleDetectResult: unknown; targetPersonId: string | null;
+  sourceType: string; fileState: string;
 }
 // clipId → clip + 소속 환자 권한 확인. job-scoped guard의 clip 버전.
 async function loadAccessibleClip(
@@ -97,9 +112,11 @@ async function loadAccessibleClip(
   const { rows } = await pool.query<{
     id: string; patient_record_id: string; organization_id: string; assigned_doctor_user_id: string | null;
     process_id: string | null; upload_path: string | null; sample_detect_result: unknown; target_person_id: string | null;
+    source_type: string; file_state: string;
   }>(
     `SELECT c.id, c.patient_record_id, c.organization_id, p.assigned_doctor_user_id,
-            c.process_id, c.upload_path, c.sample_detect_result, c.target_person_id
+            c.process_id, c.upload_path, c.sample_detect_result, c.target_person_id,
+            c.source_type, c.file_state
      FROM video_analysis_clips c
      JOIN patient_records p ON p.id = c.patient_record_id AND p.deleted_at IS NULL
      WHERE c.id = $1 AND c.organization_id = $2`,
@@ -117,6 +134,7 @@ async function loadAccessibleClip(
     clipId: rows[0].id, patientRecordId: rows[0].patient_record_id, organizationId: rows[0].organization_id,
     processId: rows[0].process_id,
     uploadPath: rows[0].upload_path, sampleDetectResult: rows[0].sample_detect_result, targetPersonId: rows[0].target_person_id,
+    sourceType: rows[0].source_type, fileState: rows[0].file_state,
   };
 }
 
@@ -186,6 +204,11 @@ function jobResponse(row: VideoJobRow): Record<string, unknown> {
 
 async function createClip(pool: Pool, req: Request, res: Response): Promise<void> {
   const session = req.sessionInfo as unknown as SessionInfo;
+  // purpose 누락은 임시 추론하지 않고 명시 거부(배포 중 혼선 차단).
+  if (req.body == null || (req.body as { purpose?: unknown }).purpose === undefined) {
+    res.status(400).json({ code: 'MISSING_PURPOSE', error: 'purpose is required (analysis_upload | apply_shell | fixture)' });
+    return;
+  }
   const parse = CreateClipBody.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ code: 'INVALID_BODY', error: parse.error.issues });
@@ -194,43 +217,160 @@ async function createClip(pool: Pool, req: Request, res: Response): Promise<void
   const patient = await loadAccessiblePatient(pool, session, parse.data.patientId, res);
   if (!patient) return;
 
-  // dev fixture: 여기서 경로를 resolve해 upload_path에 저장(sample-detect/job이 그 경로를 재검증해 사용).
+  // purpose → source_type / file_state / upload_path 결정.
+  let sourceType: 'fixture' | 'upload' | 'apply_shell';
+  let fileState: 'none' | 'present';
   let uploadPath: string | null = null;
-  if (parse.data.fixtureClipName) {
+  if (parse.data.purpose === 'fixture') {
+    // dev 전용: fixtureMode 꺼져 있으면 거부(운영에서 stale fixture clip 생성 방지).
     if (!config.video.fixtureMode) {
-      res.status(400).json({ code: 'FIXTURE_MODE_OFF', error: 'fixtureClipName requires fixture mode' });
+      res.status(409).json({ code: 'FIXTURE_MODE_OFF', error: 'fixture clips require fixture mode (dev only)' });
       return;
     }
-    uploadPath = resolveFixtureClip(parse.data.fixtureClipName, config.video.fixtureDir);
+    uploadPath = resolveFixtureClip(parse.data.fixtureClipName as string, config.video.fixtureDir);
     if (!uploadPath) {
       res.status(400).json({ code: 'INVALID_FIXTURE', error: 'fixtureClipName is not an allowlisted fixture clip' });
       return;
     }
+    sourceType = 'fixture';
+    fileState = 'present';
+  } else if (parse.data.purpose === 'analysis_upload') {
+    sourceType = 'upload';
+    fileState = 'none';
+  } else {
+    sourceType = 'apply_shell';
+    fileState = 'none';
   }
 
   const { rows } = await pool.query<{ id: string }>(
-    `INSERT INTO video_analysis_clips (organization_id, patient_record_id, process_id, upload_path)
-     VALUES ($1, $2, $3, $4) RETURNING id`,
-    [session.organizationId, patient.id, parse.data.processId ?? null, uploadPath]
+    `INSERT INTO video_analysis_clips (organization_id, patient_record_id, process_id, upload_path, source_type, file_state)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+    [session.organizationId, patient.id, parse.data.processId ?? null, uploadPath, sourceType, fileState]
   );
   res.status(201).json({ clipId: rows[0].id });
 }
 
-// sample-detect = dev fixture 전용(§8.7, PR D2b). 대표 프레임 person box 후보를 실제 탐지.
+// 실 영상 업로드(M3-7a). 사전 권한·상태 검사 → multer 스트리밍 → 확장자/MIME/hash 검증 → atomic rename → 짧은 단일 UPDATE.
+async function uploadClip(pool: Pool, uploadMw: ExpressRequestHandler, req: Request, res: Response): Promise<void> {
+  const session = req.sessionInfo as unknown as SessionInfo;
+
+  // ① 수신 전 사전 검사: 권한 없는/업로드 대상 아닌/이미 업로드된 clip에 최대 maxUploadBytes를
+  //    디스크/대역폭으로 받지 않도록 multer 이전에 차단. (수신 후 경쟁은 ④ 짧은 UPDATE가 재차 막는다.)
+  const pre = await loadAccessibleClip(pool, session, req.params.clipId, res);
+  if (!pre) return; // loadAccessibleClip이 이미 응답.
+  if (pre.sourceType !== 'upload') {
+    res.status(400).json({ code: 'CLIP_NOT_UPLOAD_TARGET', error: 'this clip does not accept uploads' });
+    return;
+  }
+  if (pre.fileState !== 'none' || pre.uploadPath) {
+    res.status(409).json({ code: 'CLIP_ALREADY_UPLOADED', error: 'clip already has an uploaded file' });
+    return;
+  }
+
+  // ② multer 수신(tmp 스트리밍). 크기 초과는 413, 그 외 multer 계열 오류(잘못된 필드·개수 초과 등)는 400.
+  try {
+    await runMulter(uploadMw, req, res);
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    if (code === 'LIMIT_FILE_SIZE') {
+      res.status(413).json({ code: 'FILE_TOO_LARGE', error: 'uploaded file exceeds the size limit' });
+      return;
+    }
+    // MulterError는 모두 code가 'LIMIT_*'. 클라 요청 문제이므로 400(라우트 wrapper의 500 방지).
+    if (typeof code === 'string' && code.startsWith('LIMIT_')) {
+      res.status(400).json({ code: 'INVALID_UPLOAD', error: 'invalid upload request' });
+      return;
+    }
+    throw err;
+  }
+  const file = (req as Request & { file?: { path: string; originalname?: string } }).file;
+  const tmpPath = file?.path;
+  let finalPath: string | null = null; // DB 반영 성공 전 예외 시 정리 대상.
+  try {
+    if (!tmpPath) {
+      res.status(400).json({ code: 'NO_FILE', error: 'no file field "file" in upload' });
+      return;
+    }
+    const clip = pre;
+
+    // ③ 원본 파일명 확장자 allowlist(1차) + 매직바이트 sniffing(2차, 확장자 위조 차단).
+    const ext = path.extname(file.originalname || '').replace('.', '').toLowerCase();
+    if (!ext || !config.video.allowedExtensions.includes(ext)) {
+      res.status(400).json({ code: 'INVALID_MEDIA_TYPE', error: 'file extension is not allowed' });
+      return;
+    }
+    const mime = await sniffVideoMime(tmpPath);
+    if (!mime || !config.video.allowedMimeTypes.includes(mime)) {
+      res.status(400).json({ code: 'INVALID_MEDIA_TYPE', error: 'file is not an allowed video type' });
+      return;
+    }
+    const sha256 = await hashFile(tmpPath);
+
+    // 최종 경로로 atomic rename(uploadDir 하위; 워커가 resolveUploadedClipPath로 재검증).
+    const uploadDir = config.video.uploadDir as string;
+    finalPath = path.join(uploadDir, `${clip.clipId}-${crypto.randomUUID()}.bin`);
+    await fs.promises.rename(tmpPath, finalPath);
+
+    // 짧은 단일 UPDATE — 목적+상태 동시 검증으로 경쟁 업로드 한쪽만 성공(긴 트랜잭션 회피).
+    const result = await pool.query(
+      `UPDATE video_analysis_clips
+         SET upload_path = $2, original_sha256 = $3, file_state = 'present',
+             expires_at = now() + make_interval(hours => $4)
+       WHERE id = $1 AND source_type = 'upload' AND file_state = 'none' AND upload_path IS NULL`,
+      [clip.clipId, finalPath, sha256, config.video.clipTtlHours]
+    );
+    if (result.rowCount === 0) {
+      await safeUnlink(finalPath);
+      finalPath = null; // 정리 완료 — finally 중복 unlink 방지.
+      res.status(409).json({ code: 'CLIP_ALREADY_UPLOADED', error: 'clip already has an uploaded file' });
+      return;
+    }
+    finalPath = null; // DB 반영 성공 — 파일은 유지(finally 정리 대상 아님).
+
+    void writeAuditLog(pool, {
+      actorUserId: session.userId, actorOrgId: session.organizationId,
+      action: 'video_analysis_upload', targetType: 'patient', targetId: clip.patientRecordId,
+      outcome: 'success', ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null,
+      extra: { clipId: clip.clipId, sha256 },
+    });
+    res.status(200).json({ clipId: clip.clipId, sha256 });
+  } finally {
+    // 검증 실패/예외로 최종 rename까지 못 간 tmp 잔여물 정리(rename 성공 시 tmp는 이미 없음).
+    if (tmpPath && fs.existsSync(tmpPath)) await safeUnlink(tmpPath);
+    // DB 반영 성공 전 예외(예: UPDATE 장애)로 남은 최종 파일 정리 — orphan 방지.
+    // 성공/경쟁 경로에서는 finalPath=null로 비워 두므로 여기서 지우지 않는다.
+    if (finalPath) await safeUnlink(finalPath);
+  }
+}
+
+// sample-detect (§8.7). 대표 프레임 person box 후보를 실제 탐지. 실 업로드(M3-7a) + dev fixture 지원.
 async function sampleDetect(pool: Pool, req: Request, res: Response): Promise<void> {
   const session = req.sessionInfo as unknown as SessionInfo;
   const clip = await loadAccessibleClip(pool, session, req.params.clipId, res);
   if (!clip) return;
 
-  // fixture 없는 clip(=실제 업로드는 M3)에선 미지원 — 명시 거부(기존 mock 제거).
-  if (!config.video.fixtureMode || !clip.uploadPath) {
-    res.status(409).json({ code: 'SAMPLE_DETECT_UNAVAILABLE', error: 'sample-detect requires a fixture clip (dev only)' });
-    return;
+  // 출처/파일상태 guard로 분석 가능한 clip만 통과 + 신뢰 경계 밖 경로 재검증.
+  let clipPath: string | null = null;
+  if (clip.sourceType === 'fixture') {
+    if (!config.video.fixtureMode) {
+      res.status(409).json({ code: 'FIXTURE_MODE_OFF', error: 'fixture clips require fixture mode (dev only)' });
+      return;
+    }
+    // DB upload_path는 신뢰 경계 밖 → basename을 allowlist 안에서 재검증(심층방어).
+    clipPath = clip.uploadPath ? resolveFixtureClip(path.basename(clip.uploadPath), config.video.fixtureDir) : null;
+  } else if (clip.sourceType === 'upload') {
+    if (clip.fileState === 'none') {
+      res.status(409).json({ code: 'NO_UPLOAD', error: 'upload the clip before running sample-detect' });
+      return;
+    }
+    if (clip.fileState !== 'present') {
+      res.status(409).json({ code: 'SAMPLE_DETECT_UNAVAILABLE', error: 'clip source is no longer available' });
+      return;
+    }
+    clipPath = resolveUploadedClipPath(clip.uploadPath, config.video.uploadDir);
   }
-  // DB upload_path는 신뢰 경계 밖 → basename을 allowlist 안에서 재검증(심층방어).
-  const clipPath = resolveFixtureClip(path.basename(clip.uploadPath), config.video.fixtureDir);
   if (!clipPath) {
-    res.status(409).json({ code: 'SAMPLE_DETECT_UNAVAILABLE', error: 'clip source is no longer an allowlisted fixture' });
+    res.status(409).json({ code: 'SAMPLE_DETECT_UNAVAILABLE', error: 'sample-detect is not available for this clip' });
     return;
   }
 
@@ -305,10 +445,33 @@ async function createJob(pool: Pool, req: Request, res: Response): Promise<void>
   }
   const processId = clip.processId ?? parse.data.processId ?? null;
 
-  // 큐 결정은 clip.upload_path로 일원화(fixture는 createClip에서 resolve·저장, PR D2b).
-  //  - fixtureMode && clip.upload_path → 'queued'(워커가 실추론). 워커는 fixtureMode일 때만 등록 → 정체 방지.
-  //  - 그 외 → 'review_pending' 셸(추론 없음, 적용 경로).
-  const initialStatus = (config.video.fixtureMode && clip.uploadPath) ? 'queued' : 'review_pending';
+  // 큐 결정 guard(M3-7a): "파일 없는 clip이 분석 job으로 둔갑" 방지. source_type/file_state 명시 검증.
+  //  - apply_shell → review_pending 셸(추론 없음, 적용 경로).
+  //  - upload + file_state='none' → 업로드 미완료(409), 'deleted' → privacy_first 삭제 후 재분석 불가(409).
+  //  - fixture는 dev 전용 → fixtureMode 꺼졌으면 큐 금지(운영 stale fixture 방지).
+  //  - (fixture|upload) + present + upload_path → 'queued'(워커 실추론).
+  let initialStatus: 'queued' | 'review_pending';
+  if (clip.sourceType === 'apply_shell') {
+    initialStatus = 'review_pending';
+  } else {
+    if (clip.sourceType === 'fixture' && !config.video.fixtureMode) {
+      res.status(409).json({ code: 'FIXTURE_MODE_OFF', error: 'fixture clips require fixture mode (dev only)' });
+      return;
+    }
+    if (clip.sourceType === 'upload' && clip.fileState === 'none') {
+      res.status(409).json({ code: 'NO_UPLOAD', error: 'upload the clip before creating an analysis job' });
+      return;
+    }
+    if (clip.sourceType === 'upload' && clip.fileState === 'deleted') {
+      res.status(409).json({ code: 'SOURCE_DELETED_REUPLOAD_REQUIRED', error: 'source video was deleted; re-upload to re-analyze' });
+      return;
+    }
+    if (clip.fileState !== 'present' || !clip.uploadPath) {
+      res.status(409).json({ code: 'CLIP_NOT_ANALYZABLE', error: 'clip is not in an analyzable state' });
+      return;
+    }
+    initialStatus = 'queued';
+  }
 
   const { rows } = await pool.query<VideoJobRow>(
     `INSERT INTO video_analysis_jobs
@@ -548,6 +711,15 @@ export function createVideoAnalysisRouter(pool: Pool): Router {
   router.use(flagGuard);
 
   router.post('/clips', auth, csrfMiddleware, wrap(createClip));
+  // 실 영상 업로드(M3-7a). uploadDir 미설정 시 라우트 비활성(UPLOAD_DISABLED).
+  const uploadMw = buildUploadMiddleware();
+  if (uploadMw) {
+    router.post('/clips/:clipId/upload', auth, csrfMiddleware,
+      (req: Request, res: Response) => uploadClip(pool, uploadMw, req, res).catch(() => res.status(500).json(internalError())));
+  } else {
+    router.post('/clips/:clipId/upload', auth, csrfMiddleware,
+      (_req: Request, res: Response) => res.status(503).json({ code: 'UPLOAD_DISABLED', error: 'video upload is not configured on this server' }));
+  }
   router.post('/clips/:clipId/sample-detect', auth, csrfMiddleware, wrap(sampleDetect));
   router.post('/clips/:clipId/select-target', auth, csrfMiddleware, wrap(selectTarget));
   router.post('/jobs', auth, csrfMiddleware, wrap(createJob));

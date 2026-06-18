@@ -2,10 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Pool } from 'pg';
 
 vi.mock('../../config', () => ({
-  default: { video: { fixtureDir: '/fx', scriptsDir: '/s', python: '/p' } },
+  default: { video: { fixtureDir: '/fx', uploadDir: '/uploads', scriptsDir: '/s', python: '/p' } },
 }));
 vi.mock('../fixturePath', () => ({
   resolveFixtureClip: vi.fn((name: unknown) => (name === 'good.mp4' ? '/fx/good.mp4' : null)),
+  resolveUploadedClipPath: vi.fn((p: unknown) => (typeof p === 'string' && p ? p : null)),
 }));
 
 import { pollOnce, iouXywh, mapTargetTrack } from '../videoAnalysisWorker';
@@ -15,10 +16,13 @@ const JOB = { id: 'job-1', clip_id: 'clip-1', analysis_profile: 'posture-basic' 
 // queued job 1건을 claim하도록 client/pool mock 구성.
 function makePool(opts: {
   job?: typeof JOB | null; uploadPath?: string | null;
+  sourceType?: string; fileState?: string;
   sampleDetectResult?: unknown; targetPersonId?: string | null;
 } = {}) {
   const job = opts.job === undefined ? JOB : opts.job;
   const uploadPath = opts.uploadPath === undefined ? '/fx/good.mp4' : opts.uploadPath;
+  const sourceType = opts.sourceType ?? 'fixture';
+  const fileState = opts.fileState ?? 'present';
   const sampleDetectResult = opts.sampleDetectResult ?? null;
   const targetPersonId = opts.targetPersonId ?? null;
 
@@ -33,7 +37,7 @@ function makePool(opts: {
   };
   const query = vi.fn((sql: string) => {
     if (typeof sql === 'string' && sql.includes('SELECT upload_path')) {
-      return Promise.resolve({ rows: [{ upload_path: uploadPath }] });
+      return Promise.resolve({ rows: [{ upload_path: uploadPath, source_type: sourceType, file_state: fileState }] });
     }
     if (typeof sql === 'string' && sql.includes('SELECT sample_detect_result')) {
       return Promise.resolve({ rows: [{ sample_detect_result: sampleDetectResult, target_person_id: targetPersonId }] });

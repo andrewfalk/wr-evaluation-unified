@@ -11,7 +11,7 @@ import {
   applyFeatureToModule,
   rollbackAppliedInput,
 } from '../services/videoProvenance';
-import { isVideoAnalysisSupported, createClip, sampleDetectClip, selectTarget } from '../services/videoAnalysisClient';
+import { isVideoAnalysisSupported, createClip, uploadClip, sampleDetectClip, selectTarget } from '../services/videoAnalysisClient';
 import { applyVideoFeatureViaServer } from '../services/videoServerApply';
 import { runServerAnalysis } from '../services/videoAnalysisRun';
 import { TargetPicker } from './TargetPicker';
@@ -31,6 +31,16 @@ const PROFILES = [
 const MOCK_BUNDLE = 'mock-6.0-2';
 
 // ── 순수 헬퍼(테스트 대상) ────────────────────────────────────────────────
+/**
+ * 대상자 탐지(sample-detect) 가능 여부. 서버 모드 전제.
+ * 실 업로드 완료 clip(upload.status==='done') 또는 dev fixture 파일명 보유 clip만 탐지 가능(M3-7a).
+ */
+export function canDetectClip({ serverMode, fixtureMode, clip, upload }) {
+  if (!serverMode) return false;
+  if (upload && upload.status === 'done' && upload.serverClipId) return true;
+  return !!(fixtureMode && clip.fixtureClipName);
+}
+
 /** 활성 모듈로 매핑되는 모든 featureKey(자동·candidate 포함). */
 export function requestedFeaturesForModules(activeModules = []) {
   return Object.keys(VIDEO_FEATURE_TARGETS).filter(
@@ -139,14 +149,18 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   // 서버 실분석 산출물: 적용 시 provenance recipe·누락 활동시간 안내에 사용.
   const [analysisBundle, setAnalysisBundle] = useState(MOCK_BUNDLE);
   const [missingActiveTime, setMissingActiveTime] = useState({}); // { processId: featureKey[] }
-  // 대상자 선택(§8.7, PR D2b): 클립별 { serverClipId, result, selectedId, fixtureClipName }. 환자 JSONB 미저장(전송 X).
+  // 대상자 선택(§8.7, PR D2b): 클립별 { serverClipId, result, selectedId, clipKey }. 환자 JSONB 미저장(전송 X).
   const [detection, setDetection] = useState({}); // { [clipMetaId]: {...} }
   const [detecting, setDetecting] = useState(null); // 진행 중 clipMetaId
+  // 실 업로드(M3-7a): 클립별 { serverClipId, fileName, progress, status }. UI 임시 상태(환자 JSONB·경로·Blob 미저장).
+  const [uploads, setUploads] = useState({}); // { [clipMetaId]: {...} }
 
-  // detection이 현재 클립과 일치할 때만 유효(fixtureClipName 변경/clip 삭제 시 stale → 무시). 무효화-at-use.
+  // 클립의 현재 "출처 키"(fixture 파일명 또는 업로드 serverClipId). 변경 시 detection이 stale이 된다.
+  const clipKeyOf = (clipMeta) => clipMeta.fixtureClipName || uploads[clipMeta.id]?.serverClipId || null;
+  // detection이 현재 클립 출처와 일치할 때만 유효(fixture명/업로드 변경·clip 삭제 시 stale → 무시). 무효화-at-use.
   const validDetection = (clipMeta) => {
     const d = detection[clipMeta.id];
-    return d && d.fixtureClipName === clipMeta.fixtureClipName ? d : null;
+    return d && d.clipKey === clipKeyOf(clipMeta) ? d : null;
   };
 
   const jobScopeModules = activeModules.filter((m) => getModule(m)?.videoMappingConfig?.scope === 'job');
@@ -161,16 +175,45 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   const addClip = (processId) => updateVA((v) => addClipVA(v, processId));
   const editClip = (id, patch) => updateVA((v) => editClipVA(v, id, patch));
   const dropDetection = (clipMetaId) => setDetection((d) => { const n = { ...d }; delete n[clipMetaId]; return n; });
-  const removeClip = (id) => { dropDetection(id); updateVA((v) => removeClipVA(v, id)); };
+  const dropUpload = (clipMetaId) => setUploads((u) => { const n = { ...u }; delete n[clipMetaId]; return n; });
+  const removeClip = (id) => { dropDetection(id); dropUpload(id); updateVA((v) => removeClipVA(v, id)); };
+
+  // ── 실 영상 업로드(M3-7a) ── createClip(analysis_upload) → uploadClip(진행률). 완료 시 serverClipId 보관.
+  const uploadClipFile = async (clipMeta, processId, file) => {
+    if (!file) return;
+    setAnalysisError('');
+    dropDetection(clipMeta.id); // 새 업로드 → 기존 detection 무효화.
+    setUploads((u) => ({ ...u, [clipMeta.id]: { fileName: file.name, progress: 0, status: 'uploading', serverClipId: null } }));
+    try {
+      const clip = await createClip(activePatient, { processId, purpose: 'analysis_upload', session, settings });
+      await uploadClip(clip.clipId, file, {
+        session, settings,
+        onProgress: ({ loaded, total }) =>
+          setUploads((u) => ({ ...u, [clipMeta.id]: { ...u[clipMeta.id], progress: total ? loaded / total : 0 } })),
+      });
+      setUploads((u) => ({ ...u, [clipMeta.id]: { ...u[clipMeta.id], serverClipId: clip.clipId, progress: 1, status: 'done' } }));
+    } catch (e) {
+      setUploads((u) => ({ ...u, [clipMeta.id]: { ...u[clipMeta.id], status: 'error' } }));
+      setAnalysisError(e?.message || '영상 업로드에 실패했습니다.');
+    }
+  };
 
   // ── 대상자 선택(§8.7, PR D2b) ── 대표 프레임 후보 탐지 → 박스 클릭 → select-target.
   const detectTarget = async (clipMeta, processId) => {
     setAnalysisError('');
     setDetecting(clipMeta.id);
     try {
-      const clip = await createClip(activePatient, { processId, fixtureClipName: clipMeta.fixtureClipName, session, settings });
-      const result = await sampleDetectClip(clip.clipId, { session, settings });
-      setDetection((d) => ({ ...d, [clipMeta.id]: { serverClipId: clip.clipId, result, selectedId: null, fixtureClipName: clipMeta.fixtureClipName } }));
+      // 업로드 완료 clip은 기존 serverClipId 재사용(새 clip 생성 금지). fixture만 여기서 clip 생성.
+      const up = uploads[clipMeta.id];
+      let clipId;
+      if (up?.serverClipId && up.status === 'done') {
+        clipId = up.serverClipId;
+      } else {
+        const clip = await createClip(activePatient, { processId, purpose: 'fixture', fixtureClipName: clipMeta.fixtureClipName, session, settings });
+        clipId = clip.clipId;
+      }
+      const result = await sampleDetectClip(clipId, { session, settings });
+      setDetection((d) => ({ ...d, [clipMeta.id]: { serverClipId: clipId, result, selectedId: null, clipKey: clipKeyOf(clipMeta) } }));
     } catch (e) {
       setAnalysisError(e?.message || '대상자 탐지에 실패했습니다.');
     } finally {
@@ -214,11 +257,17 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     }
     setAnalyzing(true);
     try {
-      // 유효 detection(serverClipId+선택)만 전달 — stale(fixture 변경/삭제)은 validDetection이 거른다.
+      // 분석에 쓸 serverClipId 전달: ① 유효 detection(선택까지) 우선, ② 없으면 업로드 완료 clip(대상=dominant).
+      // stale detection(fixture/업로드 변경·삭제)은 validDetection이 거른다.
       const detections = {};
       for (const c of va.clips || []) {
         const d = validDetection(c);
-        if (d?.serverClipId && d.selectedId) detections[c.id] = { serverClipId: d.serverClipId, selectedId: d.selectedId };
+        if (d?.serverClipId && d.selectedId) {
+          detections[c.id] = { serverClipId: d.serverClipId, selectedId: d.selectedId };
+        } else {
+          const up = uploads[c.id];
+          if (up?.serverClipId && up.status === 'done') detections[c.id] = { serverClipId: up.serverClipId };
+        }
       }
       const { processFeatures, missingActiveTime: missing, bundleVersion, errors } =
         await runServerAnalysis(activePatient, va, { activeModules, session, settings, detections });
@@ -330,17 +379,28 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
               {total !== 100 && <p className="muted" style={{ color: '#b26a00' }}>⚠ "{jobName(p.sharedJobId)}" 공정 점유율 합 {total}% (100% 권장)</p>}
               <div style={{ marginTop: 6 }}>
                 {clips.map((c) => {
-                  const canDetect = fixtureMode && serverMode && !!c.fixtureClipName;
+                  const up = uploads[c.id];
+                  const canDetect = canDetectClip({ serverMode, fixtureMode, clip: c, upload: up });
                   const det = canDetect ? validDetection(c) : null;
                   return (
                     <div key={c.id} style={{ marginBottom: 6 }}>
-                      <span style={{ display: 'inline-flex', gap: 4, marginRight: 8, alignItems: 'center' }}>
+                      <span style={{ display: 'inline-flex', gap: 4, marginRight: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                         <select value={c.viewpoint} onChange={(e) => editClip(c.id, { viewpoint: e.target.value })}>
                           {VIEWPOINTS.map((vp) => <option key={vp.value} value={vp.value}>{vp.label}</option>)}
                         </select>
                         {fixtureMode && (
                           <input type="text" placeholder="fixture 파일명(dev)" value={c.fixtureClipName || ''}
                             onChange={(e) => editClip(c.id, { fixtureClipName: e.target.value })} style={{ width: 150 }} />
+                        )}
+                        {/* 실 영상 업로드(서버 모드, fixture 파일명 미사용 클립) */}
+                        {serverMode && !c.fixtureClipName && (
+                          <>
+                            <input type="file" accept="video/*" disabled={up?.status === 'uploading'}
+                              onChange={(e) => uploadClipFile(c, p.id, e.target.files && e.target.files[0])} />
+                            {up?.status === 'uploading' && <span className="muted" style={{ fontSize: 12 }}>업로드 {Math.round((up.progress || 0) * 100)}%</span>}
+                            {up?.status === 'done' && <span className="muted" style={{ fontSize: 12, color: '#2e7d32' }}>업로드 완료</span>}
+                            {up?.status === 'error' && <span className="muted" style={{ fontSize: 12, color: '#c62828' }}>업로드 실패</span>}
+                          </>
                         )}
                         {canDetect && (
                           <button type="button" disabled={detecting === c.id} onClick={() => detectTarget(c, p.id)}>

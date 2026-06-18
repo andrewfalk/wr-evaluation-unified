@@ -1,7 +1,7 @@
 // 영상 분석 서버 API 클라이언트 (6.0-4). analysisClient.js의 형제 — 플랫폼 분기.
 // 영상 분석은 사실상 인트라넷 기능: 인트라넷에서만 서버 호출, 그 외(electron standalone/web)는
 // 미지원 stub(§8.2). 실제 업로드(multipart)는 M3에서 추가된다.
-import { requestJson } from './httpClient';
+import { requestJson, requestMultipart } from './httpClient';
 
 function getBaseUrl(session, settings) {
   return session?.apiBaseUrl || settings?.apiBaseUrl || '';
@@ -39,14 +39,25 @@ export function requireSyncedServerId(patient) {
 }
 
 // 환자 객체를 받아 serverId를 추출(synced 강제)해 clip을 생성한다 — 로컬 id 오전송 방지.
+// purpose(M3-7a 필수): 'analysis_upload'(실 업로드 대기) | 'apply_shell'(추론 없는 적용 셸) | 'fixture'(dev).
+//   서버가 source_type을 추론하지 않고 명시 설정 — 호출부가 반드시 지정.
 // processId: 분석 job은 어느 공정 클립인지 채운다(per-process). 적용 셸 경로는 생략(=null).
-// fixtureClipName(dev): fixtureMode 서버에서 여기서 resolve→upload_path 저장(PR D2b). 적용 경로는 생략.
-export async function createClip(patient, { processId, fixtureClipName, session, settings } = {}) {
+// fixtureClipName(dev): purpose='fixture'일 때만. fixtureMode 서버에서 resolve→upload_path 저장.
+export async function createClip(patient, { processId, purpose, fixtureClipName, session, settings } = {}) {
   ensureIntranet(session);
   const serverPatientId = requireSyncedServerId(patient);
   return requestJson('/api/video-analysis/clips', {
     baseUrl: getBaseUrl(session, settings), method: 'POST', session,
-    body: { patientId: serverPatientId, processId: processId ?? null, fixtureClipName },
+    body: { patientId: serverPatientId, processId: processId ?? null, purpose, fixtureClipName },
+  });
+}
+
+// 실 영상 업로드(M3-7a). createClip(purpose='analysis_upload')로 만든 clip에 파일을 multipart 전송.
+// onProgress({loaded,total})로 진행률, signal로 취소. 반환: { clipId, sha256 }.
+export async function uploadClip(clipId, file, { session, settings, onProgress, signal } = {}) {
+  ensureIntranet(session);
+  return requestMultipart(`/api/video-analysis/clips/${clipId}/upload`, {
+    baseUrl: getBaseUrl(session, settings), session, file, onProgress, signal,
   });
 }
 
