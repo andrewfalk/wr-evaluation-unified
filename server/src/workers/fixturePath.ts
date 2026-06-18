@@ -80,3 +80,46 @@ export function resolveUploadedClipPath(uploadPath: unknown, uploadDir: string |
   }
   return real;
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * 대표 프레임 썸네일 경로 전용 검증(서빙·삭제 공용). DB(sample_frame_path)는 신뢰 경계 밖이므로
+ * uploadDir/artifacts 하위 + basename이 정확히 `<clipId>.<uuid>.thumb.jpg`(uuid 엄격) + 존재 + symlink 탈출 차단.
+ * 통과한 경로만 image 스트리밍/unlink 해야 원본 업로드·keypoints·uploadDir 밖 파일 오접근을 막는다.
+ * @param p        DB 저장 경로
+ * @param clipId   소유 clip id(파일명 prefix 일치 강제)
+ * @param uploadDir config.video.uploadDir
+ */
+export function resolveSampleFramePath(p: unknown, clipId: string, uploadDir: string | null): string | null {
+  if (typeof p !== 'string' || p.trim() === '' || !uploadDir || !clipId) return null;
+
+  const artDir = path.resolve(uploadDir, 'artifacts');
+  const resolved = path.resolve(p);
+  if (!insideDir(artDir, resolved)) return null;
+
+  // basename 엄격 검증: <clipId>.<uuid>.thumb.jpg
+  const base = path.basename(resolved);
+  const prefix = `${clipId}.`;
+  const suffix = '.thumb.jpg';
+  if (!base.startsWith(prefix) || !base.endsWith(suffix)) return null;
+  const uuidPart = base.slice(prefix.length, base.length - suffix.length);
+  if (!UUID_RE.test(uuidPart)) return null;
+
+  let realDir: string;
+  let real: string;
+  try {
+    realDir = fs.realpathSync(artDir);
+    real = fs.realpathSync(resolved);
+  } catch {
+    return null;
+  }
+  if (!insideDir(realDir, real)) return null;
+
+  try {
+    if (!fs.statSync(real).isFile()) return null;
+  } catch {
+    return null;
+  }
+  return real;
+}

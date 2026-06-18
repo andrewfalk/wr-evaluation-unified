@@ -30,11 +30,29 @@ def xyxy_to_xywh(b):
     return [round(x1, 2), round(y1, 2), round(w, 2), round(h, 2)]
 
 
+def write_thumbnail(frame, path, max_width=640, quality=75):
+    """대표 프레임을 다운스케일 JPEG로 저장(부가기능, best-effort). 실패해도 예외를 던지지 않는다."""
+    try:
+        if frame is None:
+            return False
+        h, w = frame.shape[:2]
+        if w > max_width:
+            scale = max_width / float(w)
+            frame = cv2.resize(frame, (max_width, max(1, int(round(h * scale)))), interpolation=cv2.INTER_AREA)
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        return bool(cv2.imwrite(str(out), frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality]))
+    except Exception:
+        return False  # 썸네일은 부가기능 — sample-detect 본기능(JSON)은 영향 없음
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True)
     ap.add_argument("--output", required=True)
     ap.add_argument("--at-ms", type=float, default=None, help="대표 프레임 시각(ms). 미지정 시 클립 중앙.")
+    ap.add_argument("--thumbnail", default=None,
+                    help="(정책 예외) 대표 프레임 다운스케일 JPEG 저장 경로. 미지정 시 생성 안 함(privacy_first).")
     args = ap.parse_args()
 
     cap = cv2.VideoCapture(args.input)
@@ -79,6 +97,13 @@ def main():
             bboxes = body.det_model(frame) if frame is not None else []
         else:
             target_idx, bboxes = best[1], best[2]
+
+    # 썸네일(정책 예외): bbox와 정합하도록 **선택된 target_idx 프레임을 재독**해 인코딩
+    # (스캔 분기의 best엔 frame이 없어 그대로 쓰면 마지막 읽은 프레임이 저장돼 어긋남).
+    if args.thumbnail:
+        _, thumb_frame = read_at(target_idx)
+        write_thumbnail(thumb_frame, args.thumbnail)
+
     cap.release()
     dets = []
     for b in bboxes:

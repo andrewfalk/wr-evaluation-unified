@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { Pool } from 'pg';
 import config from '../config';
+import { resolveSampleFramePath } from '../workers/fixturePath';
 
 // ---------------------------------------------------------------------------
 // 영상 분석 임시파일 회수(M3-7b). cron/setInterval/CLI에서 호출(HTTP 라우트 아님).
@@ -44,10 +45,14 @@ async function sweepDir(dir: string, referenced: Set<string>, byAge: boolean): P
 
 async function sweepOrphans(pool: Pool, uploadDir: string): Promise<number> {
   const referenced = new Set<string>();
-  const clips = await pool.query<{ upload_path: string | null }>(
-    `SELECT upload_path FROM video_analysis_clips WHERE upload_path IS NOT NULL`,
+  const clips = await pool.query<{ upload_path: string | null; sample_frame_path: string | null }>(
+    `SELECT upload_path, sample_frame_path FROM video_analysis_clips
+     WHERE upload_path IS NOT NULL OR sample_frame_path IS NOT NULL`,
   );
-  for (const c of clips.rows) if (c.upload_path) referenced.add(path.resolve(c.upload_path));
+  for (const c of clips.rows) {
+    if (c.upload_path) referenced.add(path.resolve(c.upload_path));
+    if (c.sample_frame_path) referenced.add(path.resolve(c.sample_frame_path)); // 살아있는 썸네일 오삭제 방지
+  }
   const jobs = await pool.query<{ keypoints_path: string | null }>(
     `SELECT keypoints_path FROM video_analysis_jobs WHERE keypoints_path IS NOT NULL`,
   );
@@ -64,6 +69,7 @@ export interface VideoClipCleanupResult {
   clipsExpired: number;
   originalsDeleted: number;
   artifactsDeleted: number;
+  sampleFramesDeleted: number;
   orphansDeleted: number;
 }
 
@@ -71,6 +77,7 @@ export async function runVideoClipCleanup(pool: Pool): Promise<VideoClipCleanupR
   let clipsExpired = 0;
   let originalsDeleted = 0;
   let artifactsDeleted = 0;
+  let sampleFramesDeleted = 0;
 
   // 1) TTL 만료 clip 원본 회수. 원본 삭제는 실 업로드(source_type='upload')만 — fixture(dev allowlist)는 미삭제.
   //    DB 상태 전이를 먼저 하고(present→deleted), 그 다음 파일 unlink. unlink 실패는 orphan sweep이 회수해
@@ -103,8 +110,19 @@ export async function runVideoClipCleanup(pool: Pool): Promise<VideoClipCleanupR
     await safeUnlink(j.keypoints_path); artifactsDeleted += 1;
   }
 
-  // 3) orphan 파일 회수(uploadDir 구성 시).
+  // 3) TTL 만료 clip의 대표 프레임 썸네일 회수(식별 이미지). source 무관, resolver 통과 경로만 unlink.
+  const staleFrames = await pool.query<{ id: string; sample_frame_path: string | null }>(
+    `SELECT id, sample_frame_path FROM video_analysis_clips
+     WHERE sample_frame_path IS NOT NULL AND expires_at IS NOT NULL AND expires_at < now()`,
+  );
+  for (const c of staleFrames.rows) {
+    await pool.query(`UPDATE video_analysis_clips SET sample_frame_path = NULL WHERE id = $1`, [c.id]);
+    const real = resolveSampleFramePath(c.sample_frame_path, c.id, config.video.uploadDir);
+    if (real) { await safeUnlink(real); sampleFramesDeleted += 1; }
+  }
+
+  // 4) orphan 파일 회수(uploadDir 구성 시).
   const orphansDeleted = config.video.uploadDir ? await sweepOrphans(pool, config.video.uploadDir) : 0;
 
-  return { clipsExpired, originalsDeleted, artifactsDeleted, orphansDeleted };
+  return { clipsExpired, originalsDeleted, artifactsDeleted, sampleFramesDeleted, orphansDeleted };
 }

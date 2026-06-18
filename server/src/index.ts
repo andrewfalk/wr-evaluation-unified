@@ -110,9 +110,9 @@ if (require.main === module) {
           // 영상 임시파일 회수(TTL·orphan): 시작 시 1회 + 1시간 간격. 비치명적.
           const doVideoCleanup = () => {
             runVideoClipCleanup(pool)
-              .then(({ clipsExpired, originalsDeleted, artifactsDeleted, orphansDeleted }) => {
-                const total = originalsDeleted + artifactsDeleted + orphansDeleted;
-                if (total > 0) console.log(`[wr-server] video-cleanup: clips=${clipsExpired} originals=${originalsDeleted} artifacts=${artifactsDeleted} orphans=${orphansDeleted}`);
+              .then(({ clipsExpired, originalsDeleted, artifactsDeleted, sampleFramesDeleted, orphansDeleted }) => {
+                const total = originalsDeleted + artifactsDeleted + sampleFramesDeleted + orphansDeleted;
+                if (total > 0) console.log(`[wr-server] video-cleanup: clips=${clipsExpired} originals=${originalsDeleted} artifacts=${artifactsDeleted} frames=${sampleFramesDeleted} orphans=${orphansDeleted}`);
               })
               .catch((err) => console.error('[wr-server] video-cleanup error', err));
           };

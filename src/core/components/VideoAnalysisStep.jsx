@@ -2,7 +2,7 @@
 // 제안 검토 → 적용/무시 → provenance/rollback 흐름. 인트라넷+synced 환자는 적용을
 // 서버 경로(clip→job→apply, audit·영속화)로, 그 외는 로컬로 처리한다(§8.2/§8.12).
 // 실제 추론은 M2에서 서버 셸에 연결된다.
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import { generateMockFeatures } from '../services/videoMock';
 import { aggregateProcessFeatures } from '../services/videoAggregate';
 import {
@@ -11,7 +11,7 @@ import {
   applyFeatureToModule,
   rollbackAppliedInput,
 } from '../services/videoProvenance';
-import { isVideoAnalysisSupported, createClip, uploadClip, sampleDetectClip, selectTarget } from '../services/videoAnalysisClient';
+import { isVideoAnalysisSupported, createClip, uploadClip, sampleDetectClip, selectTarget, fetchSampleFrame } from '../services/videoAnalysisClient';
 import { applyVideoFeatureViaServer } from '../services/videoServerApply';
 import { runServerAnalysis } from '../services/videoAnalysisRun';
 import { TargetPicker } from './TargetPicker';
@@ -155,6 +155,16 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   // 실 업로드(M3-7a): 클립별 { serverClipId, fileName, progress, status }. UI 임시 상태(환자 JSONB·경로·Blob 미저장).
   const [uploads, setUploads] = useState({}); // { [clipMetaId]: {...} }
 
+  // 썸네일 objectURL 누수 방지: 언마운트 시 남은 frameUrl 모두 해제(detection 최신값을 ref로 추적).
+  const detectionRef = useRef(detection);
+  detectionRef.current = detection;
+  useEffect(() => () => {
+    Object.keys(detectionRef.current).forEach((k) => {
+      const u = detectionRef.current[k]?.frameUrl;
+      if (u) URL.revokeObjectURL(u);
+    });
+  }, []);
+
   // 클립의 현재 "출처 키"(fixture 파일명 또는 업로드 serverClipId). 변경 시 detection이 stale이 된다.
   const clipKeyOf = (clipMeta) => clipMeta.fixtureClipName || uploads[clipMeta.id]?.serverClipId || null;
   // detection이 현재 클립 출처와 일치할 때만 유효(fixture명/업로드 변경·clip 삭제 시 stale → 무시). 무효화-at-use.
@@ -174,7 +184,12 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   const removeProcess = (id) => updateVA((v) => removeProcessVA(v, id));
   const addClip = (processId) => updateVA((v) => addClipVA(v, processId));
   const editClip = (id, patch) => updateVA((v) => editClipVA(v, id, patch));
-  const dropDetection = (clipMetaId) => setDetection((d) => { const n = { ...d }; delete n[clipMetaId]; return n; });
+  const dropDetection = (clipMetaId) => setDetection((d) => {
+    const n = { ...d };
+    if (n[clipMetaId]?.frameUrl) URL.revokeObjectURL(n[clipMetaId].frameUrl); // objectURL 누수 방지
+    delete n[clipMetaId];
+    return n;
+  });
   const dropUpload = (clipMetaId) => setUploads((u) => { const n = { ...u }; delete n[clipMetaId]; return n; });
   const removeClip = (id) => { dropDetection(id); dropUpload(id); updateVA((v) => removeClipVA(v, id)); };
 
@@ -213,7 +228,14 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
         clipId = clip.clipId;
       }
       const result = await sampleDetectClip(clipId, { session, settings });
-      setDetection((d) => ({ ...d, [clipMeta.id]: { serverClipId: clipId, result, selectedId: null, clipKey: clipKeyOf(clipMeta) } }));
+      // 정책 예외(서버 게이트 on): 대표 프레임 썸네일 best-effort 취득(off/미생성이면 null → 박스-only).
+      let frameUrl = null;
+      try { frameUrl = await fetchSampleFrame(clipId, { session, settings }); } catch { frameUrl = null; }
+      setDetection((d) => {
+        const prev = d[clipMeta.id];
+        if (prev?.frameUrl && prev.frameUrl !== frameUrl) URL.revokeObjectURL(prev.frameUrl); // 이전 objectURL 해제
+        return { ...d, [clipMeta.id]: { serverClipId: clipId, result, selectedId: null, clipKey: clipKeyOf(clipMeta), frameUrl } };
+      });
     } catch (e) {
       setAnalysisError(e?.message || '대상자 탐지에 실패했습니다.');
     } finally {
@@ -411,7 +433,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                       </span>
                       {det && (
                         <div style={{ marginTop: 4 }}>
-                          <TargetPicker result={det.result} selectedId={det.selectedId} onSelect={(id) => chooseTarget(c, id)} />
+                          <TargetPicker result={det.result} selectedId={det.selectedId} frameUrl={det.frameUrl} onSelect={(id) => chooseTarget(c, id)} />
                           <p className="muted" style={{ fontSize: 12 }}>
                             {det.selectedId ? `대상자: ${det.selectedId}` : '박스를 클릭해 대상 작업자를 선택하세요(미선택 시 자동=주요 인물).'}
                           </p>

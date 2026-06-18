@@ -106,6 +106,41 @@ export function requestMultipart(path, {
   });
 }
 
+// 인증 바이너리 다운로드(이미지 등). requestJson과 동일한 세션 헤더·credentials·401 refresh를 공유한다
+// (raw fetch로 인증 갱신 흐름을 우회하지 않게). 200→Blob, 404→null, 그 외→throw. GET 전용.
+export async function requestBlob(path, { baseUrl = '', session, headers = {}, signal, _retry = false } = {}) {
+  const response = await fetch(buildUrl(baseUrl, path), {
+    method: 'GET',
+    credentials: 'include',
+    headers: { ...buildSessionHeaders(session), ...headers },
+    ...(signal !== undefined ? { signal } : {}),
+  });
+
+  if (response.status === 401 && !_retry && _onRefresh) {
+    let newSession;
+    try {
+      newSession = await _onRefresh({ baseUrl });
+    } catch (refreshErr) {
+      if (refreshErr?.retryable) {
+        const err = new Error('일시적인 인증 조율 오류입니다. 잠시 후 다시 시도해 주세요.');
+        err.status = 401; err.retryable = true; throw err;
+      }
+      _onLogout?.();
+      const err = new Error('인증이 만료되었습니다. 다시 로그인해 주세요.');
+      err.status = 401; throw err;
+    }
+    return requestBlob(path, { baseUrl, session: newSession, headers, signal, _retry: true });
+  }
+
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const error = new Error(`Request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
+  return response.blob();
+}
+
 export async function requestJson(path, {
   baseUrl = '',
   method = 'GET',

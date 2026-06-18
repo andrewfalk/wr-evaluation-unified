@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { requestMultipart } from '../httpClient.js';
-import { uploadClip } from '../videoAnalysisClient.js';
+import { requestMultipart, requestBlob, configureHttpClient } from '../httpClient.js';
+import { uploadClip, fetchSampleFrame } from '../videoAnalysisClient.js';
 import { canDetectClip } from '../../components/VideoAnalysisStep.jsx';
 
 // 제어 가능한 XMLHttpRequest 목. send() 후 테스트가 finish()로 응답을 흘린다.
@@ -95,6 +95,51 @@ describe('uploadClip', () => {
   it('비인트라넷 → VIDEO_UNSUPPORTED_MODE', async () => {
     await expect(uploadClip('c', 'F', { session: { mode: 'web' } }))
       .rejects.toMatchObject({ code: 'VIDEO_UNSUPPORTED_MODE' });
+  });
+});
+
+describe('requestBlob', () => {
+  beforeEach(() => { globalThis.fetch = vi.fn(); configureHttpClient({ onRefresh: null, onLogout: null }); });
+  afterEach(() => { delete globalThis.fetch; });
+
+  it('200 → blob 반환(인증 헤더 공유)', async () => {
+    const blob = { type: 'image/jpeg' };
+    globalThis.fetch.mockResolvedValueOnce({ status: 200, ok: true, blob: vi.fn(async () => blob) });
+    await expect(requestBlob('/api/x', { session: { accessToken: 't' } })).resolves.toBe(blob);
+    expect(globalThis.fetch).toHaveBeenCalledWith('/api/x', expect.objectContaining({ method: 'GET', credentials: 'include' }));
+  });
+
+  it('404 → null', async () => {
+    globalThis.fetch.mockResolvedValueOnce({ status: 404, ok: false });
+    await expect(requestBlob('/api/x')).resolves.toBeNull();
+  });
+
+  it('그 외 오류 → throw(status)', async () => {
+    globalThis.fetch.mockResolvedValueOnce({ status: 500, ok: false });
+    await expect(requestBlob('/api/x')).rejects.toMatchObject({ status: 500 });
+  });
+});
+
+describe('fetchSampleFrame', () => {
+  beforeEach(() => {
+    globalThis.fetch = vi.fn();
+    globalThis.URL = { createObjectURL: vi.fn(() => 'blob:abc'), revokeObjectURL: vi.fn() };
+    configureHttpClient({ onRefresh: null, onLogout: null });
+  });
+  afterEach(() => { delete globalThis.fetch; delete globalThis.URL; });
+
+  it('인트라넷 200 → objectURL', async () => {
+    globalThis.fetch.mockResolvedValueOnce({ status: 200, ok: true, blob: vi.fn(async () => ({})) });
+    await expect(fetchSampleFrame('c1', { session: { mode: 'intranet' } })).resolves.toBe('blob:abc');
+  });
+
+  it('404(게이트 off/미생성) → null', async () => {
+    globalThis.fetch.mockResolvedValueOnce({ status: 404, ok: false });
+    await expect(fetchSampleFrame('c1', { session: { mode: 'intranet' } })).resolves.toBeNull();
+  });
+
+  it('비인트라넷 → VIDEO_UNSUPPORTED_MODE', async () => {
+    await expect(fetchSampleFrame('c1', { session: { mode: 'web' } })).rejects.toMatchObject({ code: 'VIDEO_UNSUPPORTED_MODE' });
   });
 });
 

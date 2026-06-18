@@ -7,7 +7,7 @@ import { csrfMiddleware } from '../middleware/csrf';
 import { writeAuditLog } from '../middleware/audit';
 import path from 'path';
 import { SampleDetectResultSchema } from '@wr/contracts';
-import { resolveFixtureClip, resolveUploadedClipPath } from '../workers/fixturePath';
+import { resolveFixtureClip, resolveUploadedClipPath, resolveSampleFramePath } from '../workers/fixturePath';
 import { runSampleDetect } from '../workers/sampleDetect';
 import { buildUploadMiddleware, runMulter, sniffVideoMime, hashFile, safeUnlink } from '../workers/videoUpload';
 import type { RequestHandler as ExpressRequestHandler } from 'express';
@@ -99,7 +99,7 @@ async function loadAccessiblePatient(
 interface ClipCtx {
   clipId: string; patientRecordId: string; organizationId: string; processId: string | null;
   uploadPath: string | null; sampleDetectResult: unknown; targetPersonId: string | null;
-  sourceType: string; fileState: string;
+  sourceType: string; fileState: string; sampleFramePath: string | null;
 }
 // clipId → clip + 소속 환자 권한 확인. job-scoped guard의 clip 버전.
 async function loadAccessibleClip(
@@ -112,11 +112,11 @@ async function loadAccessibleClip(
   const { rows } = await pool.query<{
     id: string; patient_record_id: string; organization_id: string; assigned_doctor_user_id: string | null;
     process_id: string | null; upload_path: string | null; sample_detect_result: unknown; target_person_id: string | null;
-    source_type: string; file_state: string;
+    source_type: string; file_state: string; sample_frame_path: string | null;
   }>(
     `SELECT c.id, c.patient_record_id, c.organization_id, p.assigned_doctor_user_id,
             c.process_id, c.upload_path, c.sample_detect_result, c.target_person_id,
-            c.source_type, c.file_state
+            c.source_type, c.file_state, c.sample_frame_path
      FROM video_analysis_clips c
      JOIN patient_records p ON p.id = c.patient_record_id AND p.deleted_at IS NULL
      WHERE c.id = $1 AND c.organization_id = $2`,
@@ -134,7 +134,7 @@ async function loadAccessibleClip(
     clipId: rows[0].id, patientRecordId: rows[0].patient_record_id, organizationId: rows[0].organization_id,
     processId: rows[0].process_id,
     uploadPath: rows[0].upload_path, sampleDetectResult: rows[0].sample_detect_result, targetPersonId: rows[0].target_person_id,
-    sourceType: rows[0].source_type, fileState: rows[0].file_state,
+    sourceType: rows[0].source_type, fileState: rows[0].file_state, sampleFramePath: rows[0].sample_frame_path,
   };
 }
 
@@ -343,6 +343,13 @@ async function uploadClip(pool: Pool, uploadMw: ExpressRequestHandler, req: Requ
   }
 }
 
+// 대표 프레임 썸네일은 DB 신뢰 경계 밖 경로 → resolveSampleFramePath 통과한 것만 unlink(uploadDir 밖 삭제 방지).
+async function unlinkSampleFrameSafe(p: string | null | undefined, clipId: string): Promise<void> {
+  if (!p) return;
+  const real = resolveSampleFramePath(p, clipId, config.video.uploadDir);
+  if (real) await safeUnlink(real);
+}
+
 // sample-detect (§8.7). 대표 프레임 person box 후보를 실제 탐지. 실 업로드(M3-7a) + dev fixture 지원.
 async function sampleDetect(pool: Pool, req: Request, res: Response): Promise<void> {
   const session = req.sessionInfo as unknown as SessionInfo;
@@ -374,22 +381,42 @@ async function sampleDetect(pool: Pool, req: Request, res: Response): Promise<vo
     return;
   }
 
-  // 깨진 출력(JSON/계약 검증 실패)은 일반 500이 아니라 INVALID_SAMPLE_DETECT 명시 응답(502: 하위 추론 프로세스가 잘못된 결과 산출).
+  // 정책 예외(VIDEO_ANALYSIS_TARGET_THUMBNAIL): 대표 프레임 썸네일 생성. 매 탐지 고유 버전 파일명
+  // (기존 최종을 덮지 않음 → DB update 실패해도 직전 성공본·결과 정합 보존).
+  const thumbEnabled = config.video.targetThumbnail && !!config.video.uploadDir;
+  const newFramePath = thumbEnabled
+    ? path.join(config.video.uploadDir as string, 'artifacts', `${clip.clipId}.${crypto.randomUUID()}.thumb.jpg`)
+    : null;
+
+  // 깨진 출력(JSON/계약 검증 실패)은 일반 500이 아니라 INVALID_SAMPLE_DETECT 명시 응답(502).
   // timeout/크래시 등 그 외 오류는 rethrow → wrap이 일반 500 처리.
   let result;
   try {
-    result = await runSampleDetect(clipPath); // SampleDetectResultSchema 검증 완료
+    result = await runSampleDetect(clipPath, newFramePath ? { thumbnailPath: newFramePath } : {});
   } catch (err) {
+    // 실패 → 이번 실행 새 썸네일만 정리(옛 파일·DB는 불변).
+    await unlinkSampleFrameSafe(newFramePath, clip.clipId);
     if ((err as { code?: string })?.code === 'INVALID_SAMPLE_DETECT') {
       res.status(502).json({ code: 'INVALID_SAMPLE_DETECT', error: 'sample-detect produced an invalid result' });
       return;
     }
     throw err;
   }
-  await pool.query(
-    `UPDATE video_analysis_clips SET sample_detect_result = $2 WHERE id = $1`,
-    [clip.clipId, JSON.stringify(result)]
-  );
+
+  // 썸네일이 실제 생성됐는지(부가기능 실패 허용 → 없으면 sample_frame_path=null로 본기능만 저장).
+  const framePath = newFramePath && fs.existsSync(newFramePath) ? newFramePath : null;
+  try {
+    await pool.query(
+      `UPDATE video_analysis_clips SET sample_detect_result = $2, sample_frame_path = $3 WHERE id = $1`,
+      [clip.clipId, JSON.stringify(result), framePath]
+    );
+  } catch (err) {
+    await unlinkSampleFrameSafe(framePath, clip.clipId); // DB 실패 → 새 파일 정리(옛 파일 불변)
+    throw err;
+  }
+  // DB 성공(DB-first) → 더 이상 참조 안 되는 옛 식별 썸네일 회수.
+  await unlinkSampleFrameSafe(clip.sampleFramePath, clip.clipId);
+
   res.status(200).json(result);
 }
 
@@ -420,10 +447,39 @@ async function selectTarget(pool: Pool, req: Request, res: Response): Promise<vo
   }
 
   await pool.query(
-    `UPDATE video_analysis_clips SET target_person_id = $2 WHERE id = $1`,
+    `UPDATE video_analysis_clips SET target_person_id = $2, sample_frame_path = NULL WHERE id = $1`,
     [clip.clipId, parse.data.targetPersonId]
   );
+  // 선택 완료 → 대표 프레임 썸네일은 더 이상 불필요(식별 이미지) → DB-first 후 파일 회수.
+  await unlinkSampleFrameSafe(clip.sampleFramePath, clip.clipId);
   res.status(200).json({ ok: true, clipId: clip.clipId, targetPersonId: parse.data.targetPersonId });
+}
+
+// 대상자 선택용 대표 프레임 썸네일 스트리밍(정책 예외). sample_frame_path가 있고 전용 검증 통과 시 image/jpeg.
+async function getSampleFrame(pool: Pool, req: Request, res: Response): Promise<void> {
+  const session = req.sessionInfo as unknown as SessionInfo;
+  // opt-in 불변식: 게이트가 꺼지면 DB에 과거 sample_frame_path가 남아 있어도 노출 금지(404).
+  if (!config.video.targetThumbnail) {
+    const clip = await loadAccessibleClip(pool, session, req.params.clipId, res); // 권한 우선 적용(존재 누설 방지)
+    if (!clip) return;
+    res.status(404).json({ code: 'SAMPLE_FRAME_NOT_FOUND', error: 'No sample frame for this clip' });
+    return;
+  }
+  const clip = await loadAccessibleClip(pool, session, req.params.clipId, res);
+  if (!clip) return;
+  const framePath = resolveSampleFramePath(clip.sampleFramePath, clip.clipId, config.video.uploadDir);
+  if (!framePath) {
+    res.status(404).json({ code: 'SAMPLE_FRAME_NOT_FOUND', error: 'No sample frame for this clip' });
+    return;
+  }
+  // 식별 가능 이미지 → 캐시/스니핑 차단. objectURL 전용.
+  res.setHeader('Cache-Control', 'no-store, private');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Type', 'image/jpeg');
+  fs.createReadStream(framePath).on('error', () => {
+    if (!res.headersSent) res.status(404).json({ code: 'SAMPLE_FRAME_NOT_FOUND', error: 'No sample frame for this clip' });
+  }).pipe(res);
 }
 
 async function createJob(pool: Pool, req: Request, res: Response): Promise<void> {
@@ -721,6 +777,7 @@ export function createVideoAnalysisRouter(pool: Pool): Router {
       (_req: Request, res: Response) => res.status(503).json({ code: 'UPLOAD_DISABLED', error: 'video upload is not configured on this server' }));
   }
   router.post('/clips/:clipId/sample-detect', auth, csrfMiddleware, wrap(sampleDetect));
+  router.get('/clips/:clipId/sample-frame', auth, wrap(getSampleFrame));
   router.post('/clips/:clipId/select-target', auth, csrfMiddleware, wrap(selectTarget));
   router.post('/jobs', auth, csrfMiddleware, wrap(createJob));
   router.get('/jobs/:jobId', auth, wrap(getJob));

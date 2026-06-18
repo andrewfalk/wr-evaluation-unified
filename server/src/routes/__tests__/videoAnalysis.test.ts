@@ -8,7 +8,7 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 
 // 피처플래그를 테스트 중 토글하기 위해 hoisted 가변 상태 사용.
-const flagState = vi.hoisted(() => ({ enabled: true, fixtureMode: false }));
+const flagState = vi.hoisted(() => ({ enabled: true, fixtureMode: false, targetThumbnail: false }));
 // 업로드 테스트용 실제 temp uploadDir(buildUploadMiddleware가 tmp 하위를 mkdir). 경로는 beforeAll에서 채운다.
 const uploadEnv = vi.hoisted(() => ({ dir: '' }));
 beforeAll(() => { uploadEnv.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'va-upload-')); });
@@ -34,6 +34,7 @@ vi.mock('../../config', () => ({
       allowedMimeTypes: ['video/mp4', 'video/webm', 'video/x-msvideo'],
       clipTtlHours: 24,
       retentionPolicy: 'privacy_first',
+      get targetThumbnail() { return flagState.targetThumbnail; },
     },
   },
 }));
@@ -44,14 +45,23 @@ vi.mock('../../workers/fixturePath', () => ({
     name === 'good.mp4' ? '/tmp/va-fixtures/good.mp4' : null),
   // 업로드 경로는 truthy 문자열이면 통과(실 검증은 fixturePath 단위테스트가 담당).
   resolveUploadedClipPath: vi.fn((p: unknown) => (typeof p === 'string' && p ? p : null)),
+  // 썸네일 경로: .thumb.jpg 이고 실제 존재하면 통과(실 패턴검증은 fixturePath 단위테스트).
+  resolveSampleFramePath: vi.fn((p: unknown) =>
+    (typeof p === 'string' && p.endsWith('.thumb.jpg') && fs.existsSync(p) ? p : null)),
 }));
 
-// sample-detect Python 러너 mock(계약 형태 결과 반환).
+// sample-detect Python 러너 mock. thumbnailPath 주어지면(게이트 on) 더미 JPEG 생성(라우트 existsSync 통과).
 vi.mock('../../workers/sampleDetect', () => ({
-  runSampleDetect: vi.fn(async () => ({
-    schemaVersion: 1, frameIndex: 100, timestampMs: 8000, frameWidth: 640, frameHeight: 480,
-    persons: [{ id: 'p1', bbox: [10, 20, 100, 200], score: 1 }, { id: 'p2', bbox: [300, 50, 80, 180], score: 1 }],
-  })),
+  runSampleDetect: vi.fn(async (_clipPath: string, opts?: { thumbnailPath?: string }) => {
+    if (opts?.thumbnailPath) {
+      fs.mkdirSync(path.dirname(opts.thumbnailPath), { recursive: true });
+      fs.writeFileSync(opts.thumbnailPath, 'jpg');
+    }
+    return {
+      schemaVersion: 1, frameIndex: 100, timestampMs: 8000, frameWidth: 640, frameHeight: 480,
+      persons: [{ id: 'p1', bbox: [10, 20, 100, 200], score: 1 }, { id: 'p2', bbox: [300, 50, 80, 180], score: 1 }],
+    };
+  }),
 }));
 
 vi.mock('../../middleware/audit', () => ({
@@ -215,7 +225,7 @@ describe('POST /jobs (denormalize org/patient from clip)', () => {
 const clipRow = (over: Record<string, unknown> = {}) => ({
   id: CLIP_ID, patient_record_id: PAT_ID, organization_id: ORG_ID, assigned_doctor_user_id: USER_ID,
   process_id: null, upload_path: null, sample_detect_result: null, target_person_id: null,
-  source_type: 'apply_shell', file_state: 'none', ...over,
+  source_type: 'apply_shell', file_state: 'none', sample_frame_path: null, ...over,
 });
 
 describe('POST /jobs process_id 무결성 (clip이 source of truth, PR D3b)', () => {
@@ -833,5 +843,102 @@ describe('POST /clips/:id/sample-detect 실 업로드 guard (M3-7a)', () => {
       .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN).send({});
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('NO_UPLOAD');
+  });
+});
+
+describe('대상자 선택 썸네일 (정책 예외)', () => {
+  beforeEach(() => { vi.clearAllMocks(); flagState.enabled = true; flagState.targetThumbnail = false; });
+  afterEach(() => { flagState.targetThumbnail = false; });
+
+  const uploadClipRow = (over = {}) =>
+    clipRow({ source_type: 'upload', file_state: 'present', upload_path: `${uploadEnv.dir}/x.bin`, ...over });
+  // 실제 존재하는 더미 썸네일 파일 생성(resolveSampleFramePath mock = .thumb.jpg + 존재).
+  const makeFrameFile = () => {
+    const dir = path.join(uploadEnv.dir, 'artifacts');
+    fs.mkdirSync(dir, { recursive: true });
+    const p = path.join(dir, `${CLIP_ID}.${crypto.randomUUID()}.thumb.jpg`);
+    fs.writeFileSync(p, 'jpg');
+    return p;
+  };
+
+  it('게이트 on → sample-detect가 sample_frame_path(버전명) 저장', async () => {
+    flagState.targetThumbnail = true;
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadClipRow()] });
+    q(pool).mockResolvedValueOnce({ rows: [] }); // UPDATE
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/sample-detect`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN).send({});
+    expect(res.status).toBe(200);
+    const upd = q(pool).mock.calls.find((c) => String(c[0]).includes('sample_frame_path = $3'));
+    expect(String(upd?.[1]?.[2])).toMatch(new RegExp(`${CLIP_ID}\\.[0-9a-f-]{36}\\.thumb\\.jpg$`));
+  });
+
+  it('게이트 off → sample_frame_path null', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadClipRow()] });
+    q(pool).mockResolvedValueOnce({ rows: [] });
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/sample-detect`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN).send({});
+    expect(res.status).toBe(200);
+    const upd = q(pool).mock.calls.find((c) => String(c[0]).includes('sample_frame_path = $3'));
+    expect(upd?.[1]?.[2]).toBeNull();
+  });
+
+  it('GET /sample-frame → 200 image/jpeg + no-store', async () => {
+    flagState.targetThumbnail = true; // 게이트 on이어야 노출
+    const framePath = makeFrameFile();
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadClipRow({ sample_frame_path: framePath })] });
+    const res = await request(makeApp(pool))
+      .get(`/api/video-analysis/clips/${CLIP_ID}/sample-frame`)
+      .set('Authorization', `Bearer ${orgToken()}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('image/jpeg');
+    expect(res.headers['cache-control']).toContain('no-store');
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+  });
+
+  it('GET /sample-frame → 404 (sample_frame_path 없음)', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadClipRow({ sample_frame_path: null })] });
+    const res = await request(makeApp(pool))
+      .get(`/api/video-analysis/clips/${CLIP_ID}/sample-frame`)
+      .set('Authorization', `Bearer ${orgToken()}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('GET /sample-frame → 404 (게이트 off인데 과거 경로 잔존: opt-in 불변식)', async () => {
+    const framePath = makeFrameFile(); // 실제 파일 있어도
+    flagState.targetThumbnail = false;  // 게이트 off
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadClipRow({ sample_frame_path: framePath })] });
+    const res = await request(makeApp(pool))
+      .get(`/api/video-analysis/clips/${CLIP_ID}/sample-frame`)
+      .set('Authorization', `Bearer ${orgToken()}`);
+    expect(res.status).toBe(404); // 노출 금지
+  });
+
+  it('select-target 성공 → sample_frame_path NULL 회수', async () => {
+    const framePath = makeFrameFile();
+    const sdr = { schemaVersion: 1, frameIndex: 1, timestampMs: 1, frameWidth: 640, frameHeight: 480, persons: [{ id: 'p1', bbox: [1, 2, 3, 4], score: 1 }] };
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadClipRow({ sample_detect_result: sdr, sample_frame_path: framePath })] });
+    q(pool).mockResolvedValueOnce({ rows: [] }); // UPDATE
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/select-target`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .send({ targetPersonId: 'p1' });
+    expect(res.status).toBe(200);
+    const upd = q(pool).mock.calls.find((c) => String(c[0]).includes('sample_frame_path = NULL'));
+    expect(upd).toBeDefined();
+    expect(fs.existsSync(framePath)).toBe(false); // 파일도 회수
   });
 });
