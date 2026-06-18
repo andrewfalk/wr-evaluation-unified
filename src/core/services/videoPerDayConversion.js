@@ -20,6 +20,21 @@ function flagsForMode(mode) {
   };
 }
 
+// 근거(evidence) 1건: per-day 값이 "왜" 나왔는지 설명용 sidecar. feature 객체엔 붙이지 않고
+// 별도 map으로만 운반한다(영속화 차단 — shared.videoAnalysis에 저장되는 건 features뿐).
+// intrinsicValue=클립 측정 원값(예: posture_ratio 0.35), activeMinutesPerDay=환산에 쓴 수기 활동시간.
+function buildFeatureEvidence(cf, activeMinutesPerDay, warnings) {
+  const ev = {
+    intrinsicValue: cf.value,
+    intrinsicMetric: cf.metric ?? null,
+    activeMinutesPerDay: activeMinutesPerDay ?? null,
+    warnings: warnings || [],
+  };
+  if (cf.confidenceBreakdown) ev.confidenceBreakdown = cf.confidenceBreakdown;
+  if (cf.segments) ev.segments = cf.segments;
+  return ev;
+}
+
 // posture_ratio(0~1) → target 단위로 환산. 지원: minutes_per_day, hours_per_day.
 function convertRatio(ratio, unit, activeMinutesPerDay) {
   const minutes = ratio * activeMinutesPerDay;
@@ -38,8 +53,9 @@ function convertRatio(ratio, unit, activeMinutesPerDay) {
  *   걸러 mock 경로(requested만 생성)와 동작을 일치시킨다.
  * @param {object} [opts.confidenceThresholds] - 저신뢰 게이팅 임계값(featureKey→{성분:값}). 기본 비활성
  *   (DEFAULT_CONFIDENCE_THRESHOLDS, 6.0-B2 전까지 게이팅 없음). 임계 미만이면 autoSuggestAllowed=false.
- * @returns {{ features: object, missingActiveTime: string[], warnings: string[], mappingConfigVersion: string, featureConfigVersion: string }}
+ * @returns {{ features: object, evidenceByFeatureKey: object, missingActiveTime: string[], warnings: string[], mappingConfigVersion: string, featureConfigVersion: string }}
  *   features: VideoFeatureMap(featureKey → VideoFeatureValue)
+ *   evidenceByFeatureKey: featureKey → 근거 sidecar(영속화 안 함, "왜 이 값?" 패널 렌더 lookup용)
  *   missingActiveTime: 활동시간 누락으로 만들지 못한 per-day featureKey 목록(UI 안내·적용 불가)
  */
 export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay, { allowedFeatureKeys, confidenceThresholds = DEFAULT_CONFIDENCE_THRESHOLDS } = {}) {
@@ -48,6 +64,7 @@ export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay,
   const allowed = allowedFeatureKeys ? new Set(allowedFeatureKeys) : null;
   const hasActiveTime = activeMinutesPerDay != null; // null·undefined 모두 "모름"
   const features = {};
+  const evidenceByFeatureKey = {}; // featureKey → 근거 sidecar(영속화 안 함, 렌더 lookup용)
   const missingActiveTime = [];
   const warnings = [];
 
@@ -71,6 +88,7 @@ export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay,
         requiresManualReview: true,
         warnings: cf.warnings || [],
       };
+      evidenceByFeatureKey[featureKey] = buildFeatureEvidence(cf, null, cf.warnings || []);
       continue;
     }
 
@@ -90,6 +108,7 @@ export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay,
         ...gatedFlags,
         warnings: gatedWarnings,
       };
+      evidenceByFeatureKey[featureKey] = buildFeatureEvidence(cf, null, gatedWarnings);
       continue;
     }
 
@@ -101,6 +120,7 @@ export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay,
         ...gatedFlags,
         warnings: gatedWarnings,
       };
+      evidenceByFeatureKey[featureKey] = buildFeatureEvidence(cf, null, gatedWarnings);
       continue;
     }
 
@@ -124,6 +144,8 @@ export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay,
         ...gatedFlags,
         warnings: gatedWarnings,
       };
+      // 환산에 쓴 활동시간을 근거에 기록(예: 126분/일 = ratio 0.35 × 360분/일).
+      evidenceByFeatureKey[featureKey] = buildFeatureEvidence(cf, activeMinutesPerDay, gatedWarnings);
       continue;
     }
 
@@ -133,6 +155,7 @@ export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay,
 
   return {
     features,
+    evidenceByFeatureKey,
     missingActiveTime,
     warnings,
     mappingConfigVersion: VIDEO_MAPPING_CONFIG_VERSION,

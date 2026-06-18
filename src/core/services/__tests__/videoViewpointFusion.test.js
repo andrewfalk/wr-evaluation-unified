@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fuseClipFeatureSets, NON_PREFERRED_WARNING, CONFLICT_WARNING } from '../videoViewpointFusion.js';
+import { fuseClipFeatureSets, fuseClipFeatureSetsWithEvidence, NON_PREFERRED_WARNING, CONFLICT_WARNING } from '../videoViewpointFusion.js';
 import { ClipFeatureSetSchema } from '@contracts/index';
 
 const numFeat = (value, confidence, breakdown, warnings = []) => ({
@@ -78,5 +78,48 @@ describe('fuseClipFeatureSets (시점 융합 §8.6.1, PR D3b)', () => {
     expect(fused.analyzedFrames).toBe(100);
     // overheadHours preferred=frontal → frontal에서 vp=1.0
     expect(fused.features.overheadHours.confidenceBreakdown.viewpoint).toBe(1.0);
+  });
+});
+
+describe('fuseClipFeatureSetsWithEvidence (B2 선행 — 채택 클립/시점 provenance)', () => {
+  // evidence용 entry: clipMetaId/serverClipId/jobId 포함.
+  const evEntry = (viewpoint, features, meta = {}) => ({
+    viewpoint, clipFeatureSet: clipSet(meta.clipMetaId || viewpoint, features), ...meta,
+  });
+
+  it('빈 entries → { fused: null, evidenceByFeatureKey: {} }', () => {
+    expect(fuseClipFeatureSetsWithEvidence([])).toEqual({ fused: null, evidenceByFeatureKey: {} });
+  });
+
+  it('fused 출력은 fuseClipFeatureSets와 동일(winner 계산 공유 — drift 없음)', () => {
+    const entries = [
+      evEntry('frontal', { squatDuration: numFeat(0.7, 0.95, { keypoint: 0.95, visibility: 0.95 }) }, { clipMetaId: 'c1', jobId: 'j1' }),
+      evEntry('sagittal', { squatDuration: numFeat(0.5, 0.6, { keypoint: 0.6, visibility: 0.6 }) }, { clipMetaId: 'c2', jobId: 'j2' }),
+    ];
+    const plain = fuseClipFeatureSets(entries);
+    const withEv = fuseClipFeatureSetsWithEvidence(entries);
+    expect(withEv.fused).toEqual(plain);
+  });
+
+  it('단일 시점: evidence adopted=그 클립, candidates 1개', () => {
+    const r = fuseClipFeatureSetsWithEvidence([
+      evEntry('sagittal', { squatDuration: numFeat(0.5, 0.8, { keypoint: 0.8, visibility: 0.8 }) }, { clipMetaId: 'c1', serverClipId: 's1', jobId: 'j1' }),
+    ]);
+    const ev = r.evidenceByFeatureKey.squatDuration;
+    expect(ev.candidates).toHaveLength(1);
+    expect(ev.adopted).toMatchObject({ viewpoint: 'sagittal', clipMetaId: 'c1', serverClipId: 's1', jobId: 'j1', adopted: true });
+  });
+
+  it('경쟁: adopted=preferred(sagittal) 클립, candidates 2개·tier 반영', () => {
+    const r = fuseClipFeatureSetsWithEvidence([
+      evEntry('frontal', { squatDuration: numFeat(0.7, 0.95, { keypoint: 0.95, visibility: 0.95 }) }, { clipMetaId: 'cF', jobId: 'jF' }),
+      evEntry('sagittal', { squatDuration: numFeat(0.5, 0.6, { keypoint: 0.6, visibility: 0.6 }) }, { clipMetaId: 'cS', jobId: 'jS' }),
+    ]);
+    const ev = r.evidenceByFeatureKey.squatDuration;
+    expect(ev.candidates).toHaveLength(2);
+    expect(ev.adopted.clipMetaId).toBe('cS'); // sagittal(preferred) 채택
+    const adoptedCand = ev.candidates.find((c) => c.adopted);
+    expect(adoptedCand.clipMetaId).toBe('cS');
+    expect(ev.candidates.filter((c) => c.adopted)).toHaveLength(1); // 정확히 하나만 채택
   });
 });
