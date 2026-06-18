@@ -38,9 +38,17 @@ export class PatientIdentityConflictError extends Error {
   }
 }
 
-function dateOnly(value: string | Date | null | undefined): string | null {
+// pg의 DATE 컬럼은 type parser 없이 로컬 자정 JS Date로 온다. toISOString()(UTC)으로 자르면
+// UTC+ 타임존(예: KST)에서 하루 밀려(1961-02-15 → 1961-02-14) 생년월일 비교가 잘못 충돌한다
+// (운영 docker는 UTC라 잠복, 네이티브 비-UTC 실행에서 발현). 캘린더 날짜는 로컬 컴포넌트로 포맷한다.
+export function dateOnly(value: string | Date | null | undefined): string | null {
   if (!value) return null;
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (value instanceof Date) {
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
   return String(value).slice(0, 10);
 }
 
