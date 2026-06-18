@@ -100,10 +100,11 @@ if (require.main === module) {
         doRetention();
         setInterval(doRetention, 24 * 60 * 60 * 1000).unref();
 
-        // 영상 분석 fixture 워커(dev-only): 플래그 + fixtureMode가 모두 켜졌을 때만 큐 처리.
-        if (config.videoAnalysisEnabled && config.video.fixtureMode) {
+        // 영상 분석 워커: 플래그 on + (fixtureMode 또는 uploadDir 구성됨)일 때 큐 처리.
+        //  - fixtureMode: dev fixture clip 추론. uploadDir: 실 업로드 clip 추론(M3-7a).
+        if (config.videoAnalysisEnabled && (config.video.fixtureMode || config.video.uploadDir)) {
           createVideoAnalysisWorker(pool);
-          console.log('[wr-server] video-analysis fixture worker enabled (dev-only)');
+          console.log(`[wr-server] video-analysis worker enabled (fixture=${config.video.fixtureMode}, upload=${!!config.video.uploadDir})`);
         }
       });
     })

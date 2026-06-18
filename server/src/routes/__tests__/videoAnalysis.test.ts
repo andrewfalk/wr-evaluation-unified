@@ -6,6 +6,14 @@ import cookieParser from 'cookie-parser';
 
 // 피처플래그를 테스트 중 토글하기 위해 hoisted 가변 상태 사용.
 const flagState = vi.hoisted(() => ({ enabled: true, fixtureMode: false }));
+// 업로드 테스트용 실제 temp uploadDir(buildUploadMiddleware가 tmp 하위를 mkdir).
+const uploadEnv = vi.hoisted(() => {
+  const os = require('os');
+  const path = require('path');
+  const fs = require('fs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'va-upload-'));
+  return { dir };
+});
 
 vi.mock('../../config', () => ({
   default: {
@@ -22,6 +30,12 @@ vi.mock('../../config', () => ({
       fixtureDir: '/tmp/va-fixtures',
       scriptsDir: '/tmp/scripts',
       python: '/tmp/python',
+      uploadDir: uploadEnv.dir,
+      maxUploadBytes: 50 * 1024 * 1024,
+      allowedExtensions: ['mp4', 'mov', 'webm', 'avi'],
+      allowedMimeTypes: ['video/mp4', 'video/webm', 'video/x-msvideo'],
+      clipTtlHours: 24,
+      retentionPolicy: 'privacy_first',
     },
   },
 }));
@@ -30,6 +44,8 @@ vi.mock('../../config', () => ({
 vi.mock('../../workers/fixturePath', () => ({
   resolveFixtureClip: vi.fn((name: unknown) =>
     name === 'good.mp4' ? '/tmp/va-fixtures/good.mp4' : null),
+  // 업로드 경로는 truthy 문자열이면 통과(실 검증은 fixturePath 단위테스트가 담당).
+  resolveUploadedClipPath: vi.fn((p: unknown) => (typeof p === 'string' && p ? p : null)),
 }));
 
 // sample-detect Python 러너 mock(계약 형태 결과 반환).
@@ -92,7 +108,7 @@ describe('video-analysis feature flag (fail-closed)', () => {
       .post('/api/video-analysis/clips')
       .set('Authorization', `Bearer ${orgToken()}`)
       .set('x-csrf-token', CSRF_TOKEN)
-      .send({ patientId: PAT_ID });
+      .send({ patientId: PAT_ID, purpose: 'apply_shell' });
     expect(res.status).toBe(404);
     // 플래그 가드는 auth 이전에 차단하므로 DB 조회도 없다.
     expect(q(pool)).not.toHaveBeenCalled();
@@ -111,7 +127,7 @@ describe('POST /clips (body patientId access)', () => {
       .post('/api/video-analysis/clips')
       .set('Authorization', `Bearer ${orgToken()}`)
       .set('x-csrf-token', CSRF_TOKEN)
-      .send({ patientId: PAT_ID });
+      .send({ patientId: PAT_ID, purpose: 'apply_shell' });
     expect(res.status).toBe(201);
     expect(res.body.clipId).toBe(CLIP_ID);
   });
@@ -124,7 +140,7 @@ describe('POST /clips (body patientId access)', () => {
       .post('/api/video-analysis/clips')
       .set('Authorization', `Bearer ${orgToken()}`)
       .set('x-csrf-token', CSRF_TOKEN)
-      .send({ patientId: PAT_ID });
+      .send({ patientId: PAT_ID, purpose: 'apply_shell' });
     expect(res.status).toBe(404);
   });
 
@@ -136,7 +152,7 @@ describe('POST /clips (body patientId access)', () => {
       .post('/api/video-analysis/clips')
       .set('Authorization', `Bearer ${orgToken()}`)
       .set('x-csrf-token', CSRF_TOKEN)
-      .send({ patientId: PAT_ID });
+      .send({ patientId: PAT_ID, purpose: 'apply_shell' });
     expect(res.status).toBe(403);
   });
 
@@ -158,8 +174,8 @@ describe('POST /jobs (denormalize org/patient from clip)', () => {
   it('creates a review_pending job, filling patient/org from the clip (ignores spoofed body)', async () => {
     const pool = makePool();
     authOk(pool);
-    // clip access lookup → returns the authoritative patient/org
-    q(pool).mockResolvedValueOnce({ rows: [{ id: CLIP_ID, patient_record_id: PAT_ID, organization_id: ORG_ID, assigned_doctor_user_id: USER_ID }] });
+    // clip access lookup → returns the authoritative patient/org. apply_shell → review_pending.
+    q(pool).mockResolvedValueOnce({ rows: [{ id: CLIP_ID, patient_record_id: PAT_ID, organization_id: ORG_ID, assigned_doctor_user_id: USER_ID, process_id: null, upload_path: null, source_type: 'apply_shell', file_state: 'none' }] });
     // insert job
     q(pool).mockResolvedValueOnce({ rows: [{
       id: JOB_ID, clip_id: CLIP_ID, process_id: 'p1', status: 'review_pending',
@@ -185,7 +201,7 @@ describe('POST /jobs (denormalize org/patient from clip)', () => {
   it('accepts processId:null (job-scope aggregate) — regression for nullable schema', async () => {
     const pool = makePool();
     authOk(pool);
-    q(pool).mockResolvedValueOnce({ rows: [{ id: CLIP_ID, patient_record_id: PAT_ID, organization_id: ORG_ID, assigned_doctor_user_id: USER_ID }] });
+    q(pool).mockResolvedValueOnce({ rows: [{ id: CLIP_ID, patient_record_id: PAT_ID, organization_id: ORG_ID, assigned_doctor_user_id: USER_ID, process_id: null, upload_path: null, source_type: 'apply_shell', file_state: 'none' }] });
     q(pool).mockResolvedValueOnce({ rows: [{ id: JOB_ID, clip_id: CLIP_ID, process_id: null, status: 'review_pending', analysis_profile: 'posture-basic', requested_features: ['overheadHours'], applied_at: null, applied_revision: null }] });
     const res = await request(makeApp(pool))
       .post('/api/video-analysis/jobs')
@@ -197,10 +213,11 @@ describe('POST /jobs (denormalize org/patient from clip)', () => {
   });
 });
 
-// loadAccessibleClip이 읽는 clip 행(추가 컬럼 포함).
+// loadAccessibleClip이 읽는 clip 행(추가 컬럼 포함). 기본은 추론 없는 적용 셸(apply_shell/none).
 const clipRow = (over: Record<string, unknown> = {}) => ({
   id: CLIP_ID, patient_record_id: PAT_ID, organization_id: ORG_ID, assigned_doctor_user_id: USER_ID,
-  process_id: null, upload_path: null, sample_detect_result: null, target_person_id: null, ...over,
+  process_id: null, upload_path: null, sample_detect_result: null, target_person_id: null,
+  source_type: 'apply_shell', file_state: 'none', ...over,
 });
 
 describe('POST /jobs process_id 무결성 (clip이 source of truth, PR D3b)', () => {
@@ -245,13 +262,14 @@ describe('POST /clips fixture 이관 (createClip resolves upload_path, PR D2b)',
     const res = await request(makeApp(pool))
       .post('/api/video-analysis/clips')
       .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
-      .send({ patientId: PAT_ID, processId: 'p1', fixtureClipName: 'good.mp4' });
+      .send({ patientId: PAT_ID, processId: 'p1', purpose: 'fixture', fixtureClipName: 'good.mp4' });
     expect(res.status).toBe(201);
     const insert = q(pool).mock.calls.find((c) => String(c[0]).includes('INSERT INTO video_analysis_clips'));
     expect(insert?.[1]).toContain('/tmp/va-fixtures/good.mp4'); // upload_path
+    expect(insert?.[1]).toContain('fixture'); // source_type
   });
 
-  it('fixtureMode OFF + fixtureClipName → 400 FIXTURE_MODE_OFF', async () => {
+  it('fixtureMode OFF + purpose=fixture → 409 FIXTURE_MODE_OFF', async () => {
     flagState.fixtureMode = false;
     const pool = makePool();
     authOk(pool);
@@ -259,8 +277,8 @@ describe('POST /clips fixture 이관 (createClip resolves upload_path, PR D2b)',
     const res = await request(makeApp(pool))
       .post('/api/video-analysis/clips')
       .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
-      .send({ patientId: PAT_ID, fixtureClipName: 'good.mp4' });
-    expect(res.status).toBe(400);
+      .send({ patientId: PAT_ID, purpose: 'fixture', fixtureClipName: 'good.mp4' });
+    expect(res.status).toBe(409);
     expect(res.body.code).toBe('FIXTURE_MODE_OFF');
   });
 
@@ -271,7 +289,7 @@ describe('POST /clips fixture 이관 (createClip resolves upload_path, PR D2b)',
     const res = await request(makeApp(pool))
       .post('/api/video-analysis/clips')
       .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
-      .send({ patientId: PAT_ID, fixtureClipName: '../../etc/passwd' });
+      .send({ patientId: PAT_ID, purpose: 'fixture', fixtureClipName: '../../etc/passwd' });
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('INVALID_FIXTURE');
     expect(q(pool).mock.calls.find((c) => String(c[0]).includes('INSERT INTO video_analysis_clips'))).toBeUndefined();
@@ -287,10 +305,10 @@ describe('POST /jobs 큐 결정 (clip.upload_path 일원화, PR D2b)', () => {
     .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
     .send({ clipId: CLIP_ID, processId: 'p1', analysisProfile: 'posture-basic', requestedFeatures: ['overheadHours'] });
 
-  it('fixtureMode && clip.upload_path → queued', async () => {
+  it('fixture clip(present) + fixtureMode → queued', async () => {
     const pool = makePool();
     authOk(pool);
-    q(pool).mockResolvedValueOnce({ rows: [clipRow({ upload_path: '/tmp/va-fixtures/good.mp4' })] });
+    q(pool).mockResolvedValueOnce({ rows: [clipRow({ source_type: 'fixture', file_state: 'present', upload_path: '/tmp/va-fixtures/good.mp4' })] });
     q(pool).mockResolvedValueOnce({ rows: [{ id: JOB_ID, clip_id: CLIP_ID, process_id: 'p1', status: 'queued', analysis_profile: 'posture-basic', requested_features: [], applied_at: null, applied_revision: null }] });
     const res = await submit(pool);
     expect(res.status).toBe(201);
@@ -299,16 +317,44 @@ describe('POST /jobs 큐 결정 (clip.upload_path 일원화, PR D2b)', () => {
     expect(insert?.[1]).toContain('queued');
   });
 
-  it('fixtureMode OFF + clip.upload_path 존재 → review_pending(queued 아님 — 워커 미등록 정체 방지)', async () => {
+  it('upload clip(present) → queued (fixtureMode 무관)', async () => {
     flagState.fixtureMode = false;
     const pool = makePool();
     authOk(pool);
-    q(pool).mockResolvedValueOnce({ rows: [clipRow({ upload_path: '/tmp/va-fixtures/good.mp4' })] });
-    q(pool).mockResolvedValueOnce({ rows: [{ id: JOB_ID, clip_id: CLIP_ID, process_id: 'p1', status: 'review_pending', analysis_profile: 'posture-basic', requested_features: [], applied_at: null, applied_revision: null }] });
+    q(pool).mockResolvedValueOnce({ rows: [clipRow({ source_type: 'upload', file_state: 'present', upload_path: '/uploads/x.bin' })] });
+    q(pool).mockResolvedValueOnce({ rows: [{ id: JOB_ID, clip_id: CLIP_ID, process_id: 'p1', status: 'queued', analysis_profile: 'posture-basic', requested_features: [], applied_at: null, applied_revision: null }] });
     const res = await submit(pool);
     expect(res.status).toBe(201);
     const insert = q(pool).mock.calls.find((c) => String(c[0]).includes('INSERT INTO video_analysis_jobs'));
-    expect(insert?.[1]).toContain('review_pending');
+    expect(insert?.[1]).toContain('queued');
+  });
+
+  it('fixture clip + fixtureMode OFF → 409 FIXTURE_MODE_OFF', async () => {
+    flagState.fixtureMode = false;
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [clipRow({ source_type: 'fixture', file_state: 'present', upload_path: '/tmp/va-fixtures/good.mp4' })] });
+    const res = await submit(pool);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('FIXTURE_MODE_OFF');
+  });
+
+  it('upload clip + file_state none → 409 NO_UPLOAD', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [clipRow({ source_type: 'upload', file_state: 'none', upload_path: null })] });
+    const res = await submit(pool);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('NO_UPLOAD');
+  });
+
+  it('upload clip + file_state deleted → 409 SOURCE_DELETED_REUPLOAD_REQUIRED', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [clipRow({ source_type: 'upload', file_state: 'deleted', upload_path: null })] });
+    const res = await submit(pool);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('SOURCE_DELETED_REUPLOAD_REQUIRED');
   });
 });
 
@@ -319,7 +365,7 @@ describe('POST /clips/:id/sample-detect (fixture 전용, PR D2b)', () => {
   it('fixtureMode + upload_path → runs sample_detect, stores result', async () => {
     const pool = makePool();
     authOk(pool);
-    q(pool).mockResolvedValueOnce({ rows: [clipRow({ upload_path: '/tmp/va-fixtures/good.mp4' })] });
+    q(pool).mockResolvedValueOnce({ rows: [clipRow({ source_type: 'fixture', file_state: 'present', upload_path: '/tmp/va-fixtures/good.mp4' })] });
     q(pool).mockResolvedValueOnce({ rows: [] }); // UPDATE sample_detect_result
     const res = await request(makeApp(pool))
       .post(`/api/video-analysis/clips/${CLIP_ID}/sample-detect`)
@@ -348,7 +394,7 @@ describe('POST /clips/:id/sample-detect (fixture 전용, PR D2b)', () => {
     );
     const pool = makePool();
     authOk(pool);
-    q(pool).mockResolvedValueOnce({ rows: [clipRow({ upload_path: '/tmp/va-fixtures/good.mp4' })] });
+    q(pool).mockResolvedValueOnce({ rows: [clipRow({ source_type: 'fixture', file_state: 'present', upload_path: '/tmp/va-fixtures/good.mp4' })] });
     const res = await request(makeApp(pool))
       .post(`/api/video-analysis/clips/${CLIP_ID}/sample-detect`)
       .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN).send({});
@@ -596,5 +642,199 @@ describe('POST /jobs/:jobId/apply', () => {
       .set('If-Match', '1')
       .send(body);
     expect(res.status).toBe(403);
+  });
+});
+
+describe('POST /clips purpose 검증 (M3-7a)', () => {
+  beforeEach(() => { vi.clearAllMocks(); flagState.enabled = true; });
+
+  it('purpose 누락 → 400 MISSING_PURPOSE', async () => {
+    const pool = makePool();
+    authOk(pool);
+    const res = await request(makeApp(pool))
+      .post('/api/video-analysis/clips')
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .send({ patientId: PAT_ID });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('MISSING_PURPOSE');
+  });
+
+  it('purpose=analysis_upload + fixtureClipName → 400 (잘못된 조합)', async () => {
+    const pool = makePool();
+    authOk(pool);
+    const res = await request(makeApp(pool))
+      .post('/api/video-analysis/clips')
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .send({ patientId: PAT_ID, purpose: 'analysis_upload', fixtureClipName: 'good.mp4' });
+    expect(res.status).toBe(400);
+  });
+
+  it('purpose=fixture + fixtureClipName 없음 → 400 (잘못된 조합)', async () => {
+    const pool = makePool();
+    authOk(pool);
+    const res = await request(makeApp(pool))
+      .post('/api/video-analysis/clips')
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .send({ patientId: PAT_ID, purpose: 'fixture' });
+    expect(res.status).toBe(400);
+  });
+
+  it('purpose=analysis_upload → source_type=upload, file_state=none INSERT', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] });
+    q(pool).mockResolvedValueOnce({ rows: [{ id: CLIP_ID }] });
+    const res = await request(makeApp(pool))
+      .post('/api/video-analysis/clips')
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .send({ patientId: PAT_ID, purpose: 'analysis_upload' });
+    expect(res.status).toBe(201);
+    const insert = q(pool).mock.calls.find((c) => String(c[0]).includes('INSERT INTO video_analysis_clips'));
+    expect(insert?.[1]).toContain('upload');
+    expect(insert?.[1]).toContain('none');
+  });
+});
+
+describe('POST /clips/:id/upload (M3-7a)', () => {
+  // 'ftyp'(offset 4) 시그니처를 가진 최소 mp4 버퍼.
+  const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom'), Buffer.alloc(20)]);
+  const NOT_VIDEO = Buffer.from('this is definitely not a video!!');
+  beforeEach(() => { vi.clearAllMocks(); flagState.enabled = true; });
+
+  const uploadRow = (over = {}) => clipRow({ source_type: 'upload', file_state: 'none', upload_path: null, ...over });
+
+  it('정상 업로드 → 200 + file_state=present UPDATE + audit', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadRow()] });          // loadAccessibleClip
+    q(pool).mockResolvedValueOnce({ rows: [], rowCount: 1 });        // UPDATE present
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/upload`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .attach('file', MP4, { filename: 'clip.mp4', contentType: 'video/mp4' });
+    expect(res.status).toBe(200);
+    expect(res.body.clipId).toBe(CLIP_ID);
+    expect(res.body.sha256).toBeTruthy();
+    const upd = q(pool).mock.calls.find((c) => String(c[0]).includes("file_state = 'present'"));
+    expect(upd).toBeDefined();
+    expect(writeAuditLog).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'video_analysis_upload' }));
+  });
+
+  it('허용되지 않은 확장자 → 400 INVALID_MEDIA_TYPE (수신 후 sniff 전 차단)', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadRow()] });
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/upload`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .attach('file', MP4, { filename: 'clip.txt', contentType: 'video/mp4' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_MEDIA_TYPE');
+  });
+
+  it('MIME 위조(비영상) → 400 INVALID_MEDIA_TYPE', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadRow()] });
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/upload`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .attach('file', NOT_VIDEO, { filename: 'fake.mp4', contentType: 'video/mp4' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_MEDIA_TYPE');
+  });
+
+  it('업로드 대상 아님(apply_shell) → 400 CLIP_NOT_UPLOAD_TARGET', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [clipRow({ source_type: 'apply_shell', file_state: 'none' })] });
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/upload`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .attach('file', MP4, { filename: 'clip.mp4', contentType: 'video/mp4' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('CLIP_NOT_UPLOAD_TARGET');
+  });
+
+  it('이미 업로드됨(file_state=present) → 409 CLIP_ALREADY_UPLOADED', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadRow({ file_state: 'present', upload_path: '/uploads/x.bin' })] });
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/upload`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .attach('file', MP4, { filename: 'clip.mp4', contentType: 'video/mp4' });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('CLIP_ALREADY_UPLOADED');
+  });
+
+  it('경쟁 업로드(UPDATE 0행) → 409 CLIP_ALREADY_UPLOADED', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadRow()] });
+    q(pool).mockResolvedValueOnce({ rows: [], rowCount: 0 }); // 경쟁자가 먼저 성공
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/upload`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .attach('file', MP4, { filename: 'clip.mp4', contentType: 'video/mp4' });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('CLIP_ALREADY_UPLOADED');
+  });
+
+  it('DB UPDATE 예외 → 500 + 최종 파일 orphan 미잔존', async () => {
+    const fs = require('fs');
+    const countBin = () => fs.readdirSync(uploadEnv.dir).filter((f: string) => f.endsWith('.bin')).length;
+    const before = countBin();
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadRow()] });
+    q(pool).mockRejectedValueOnce(new Error('db down')); // UPDATE 장애
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/upload`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .attach('file', MP4, { filename: 'clip.mp4', contentType: 'video/mp4' });
+    expect(res.status).toBe(500);
+    expect(countBin()).toBe(before); // rename된 최종 파일이 finally에서 정리됨(orphan 없음).
+  });
+
+  it('잘못된 필드명(multer LIMIT_UNEXPECTED_FILE) → 400 INVALID_UPLOAD', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadRow()] }); // 사전검사 통과 후 multer가 거부
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/upload`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .attach('wrongfield', MP4, { filename: 'clip.mp4', contentType: 'video/mp4' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_UPLOAD');
+  });
+});
+
+describe('POST /clips/:id/sample-detect 실 업로드 guard (M3-7a)', () => {
+  beforeEach(() => { vi.clearAllMocks(); flagState.enabled = true; });
+
+  it('upload + present → sample-detect 실행', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [clipRow({ source_type: 'upload', file_state: 'present', upload_path: `${uploadEnv.dir}/x.bin` })] });
+    q(pool).mockResolvedValueOnce({ rows: [] }); // UPDATE
+    // resolveUploadedClipPath는 실제 파일 검증 → 파일 생성.
+    require('fs').writeFileSync(`${uploadEnv.dir}/x.bin`, 'x');
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/sample-detect`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN).send({});
+    expect(res.status).toBe(200);
+    expect(res.body.persons.map((p: { id: string }) => p.id)).toEqual(['p1', 'p2']);
+  });
+
+  it('upload + file_state none → 409 NO_UPLOAD', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [clipRow({ source_type: 'upload', file_state: 'none', upload_path: null })] });
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/sample-detect`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN).send({});
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('NO_UPLOAD');
   });
 });

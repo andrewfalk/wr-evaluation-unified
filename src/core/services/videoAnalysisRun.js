@@ -34,10 +34,13 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
   let bundleVersion = null;
 
   for (const p of va.processes || []) {
-    // 공정에 연결된 fixture 클립(들). D3b: 공정당 다중 시점 클립 허용(시점 융합).
-    const clipMetas = (va.clips || []).filter((c) => c.processId === p.id && c.fixtureClipName);
+    // 공정에 연결된 분석 가능 클립(들). D3b: 공정당 다중 시점 클립 허용(시점 융합).
+    // 분석 가능 = fixture 파일명 보유(dev) 또는 실 업로드 완료(serverClipId 보유, M3-7a).
+    const clipMetas = (va.clips || []).filter(
+      (c) => c.processId === p.id && (c.fixtureClipName || c.serverClipId || detections[c.id]?.serverClipId),
+    );
     if (clipMetas.length === 0) {
-      errors.push({ processId: p.id, message: `공정 "${p.name}"에 fixture 클립이 없습니다(클립에 파일명 입력 필요).` });
+      errors.push({ processId: p.id, message: `공정 "${p.name}"에 분석 가능한 클립이 없습니다(영상 업로드 또는 fixture 파일명 필요).` });
       continue;
     }
     try {
@@ -46,11 +49,11 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
       const jobIds = [];
       let failed = false;
       for (const clipMeta of clipMetas) {
-        // 대상자 선택(detection)이 있으면 그 serverClipId 재사용(서버 보존 target). 없으면 새 clip(dominant).
+        // 업로드 완료/대상자 선택 클립은 기존 serverClipId 재사용. 없으면(fixture만) 새 clip 생성.
         const det = detections[clipMeta.id];
-        let serverClipId = det?.serverClipId;
+        let serverClipId = det?.serverClipId || clipMeta.serverClipId;
         if (!serverClipId) {
-          const clip = await createClip(patient, { processId: p.id, fixtureClipName: clipMeta.fixtureClipName, session, settings });
+          const clip = await createClip(patient, { processId: p.id, purpose: 'fixture', fixtureClipName: clipMeta.fixtureClipName, session, settings });
           serverClipId = clip.clipId;
         }
         const job = await createJob(

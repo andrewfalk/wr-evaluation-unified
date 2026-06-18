@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import type { Pool, PoolClient } from 'pg';
 import { ClipFeatureSetSchema, SampleDetectResultSchema } from '@wr/contracts';
 import config from '../config';
-import { resolveFixtureClip } from './fixturePath';
+import { resolveFixtureClip, resolveUploadedClipPath } from './fixturePath';
 
 // ---------------------------------------------------------------------------
 // 작업 영상 분석 job 워커 (6.0-6b, PR D1). dev-only fixture 영상을 입력으로 실제 추론을 돌려
@@ -152,16 +152,24 @@ async function claimJob(pool: Pool): Promise<ClaimedJob | null> {
   }
 }
 
-// clip.upload_path(=fixture 절대경로) 로드 후 심층방어 재검증. 실패 시 null.
+// clip 경로 로드 후 심층방어 재검증. 출처(source_type)별로 allowlist를 분기. 실패 시 null.
 async function resolveJobClipPath(pool: Pool, clipId: string): Promise<string | null> {
-  const { rows } = await pool.query<{ upload_path: string | null }>(
-    `SELECT upload_path FROM video_analysis_clips WHERE id = $1`,
+  const { rows } = await pool.query<{ upload_path: string | null; source_type: string; file_state: string }>(
+    `SELECT upload_path, source_type, file_state FROM video_analysis_clips WHERE id = $1`,
     [clipId],
   );
-  const uploadPath = rows[0]?.upload_path;
-  if (!uploadPath) return null;
-  // basename만 취해 fixtureDir 안에서 다시 검증(저장된 경로가 변조됐어도 allowlist 밖이면 거부).
-  return resolveFixtureClip(path.basename(uploadPath), config.video.fixtureDir);
+  const row = rows[0];
+  if (!row || !row.upload_path) return null;
+  if (row.source_type === 'fixture') {
+    // basename만 취해 fixtureDir 안에서 다시 검증(저장된 경로가 변조됐어도 allowlist 밖이면 거부).
+    return resolveFixtureClip(path.basename(row.upload_path), config.video.fixtureDir);
+  }
+  if (row.source_type === 'upload') {
+    // 원본이 이미 삭제(privacy_first)됐으면 재분석 불가.
+    if (row.file_state !== 'present') return null;
+    return resolveUploadedClipPath(row.upload_path, config.video.uploadDir);
+  }
+  return null; // apply_shell 등은 큐 대상 아님.
 }
 
 // clip의 대상자 선택(target_person_id + sample_detect_result) → TargetSelection. 선택 없으면 null(dominant).

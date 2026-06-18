@@ -33,8 +33,8 @@ export async function applyVideoFeatureViaServer(patient, opts, env) {
     err.code = 'EMPTY_PROVENANCE';
     throw err;
   }
-  // 1) clip 생성(서버가 sync.serverId 추출·synced 강제)
-  const clip = await createClip(patient, { session, settings });
+  // 1) clip 생성(서버가 sync.serverId 추출·synced 강제). 추론 없는 적용 셸 → purpose='apply_shell'.
+  const clip = await createClip(patient, { purpose: 'apply_shell', session, settings });
   // 2) job 생성 → review_pending (mock 서버는 즉시 review_pending). org/patient는 서버가 clip 조회로 채움.
   //    processId는 job-scope 제안(여러 공정 집계)이라 의도적으로 null — 공정 추적은 provenance의
   //    appliedInputs.processIds에 남는다. 실제 추론·job 폴링(getJob 루프)은 M2에서 연결.

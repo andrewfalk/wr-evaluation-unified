@@ -47,3 +47,36 @@ export function resolveFixtureClip(name: unknown, fixtureDir: string): string | 
   }
   return real;
 }
+
+/**
+ * 실 업로드 clip의 저장 절대경로를 심층방어 재검증. 검증 실패 시 null.
+ * DB upload_path는 신뢰 경계 밖 → uploadDir 내부 + 심볼릭 링크 탈출 차단 + 파일 존재 확인.
+ * @param uploadPath DB에 저장된 절대경로(업로드 endpoint가 uploadDir 하위에 기록).
+ * @param uploadDir  허용 업로드 루트(config.video.uploadDir). 미설정이면 null.
+ */
+export function resolveUploadedClipPath(uploadPath: unknown, uploadDir: string | null): string | null {
+  if (typeof uploadPath !== 'string' || uploadPath.trim() === '' || !uploadDir) return null;
+
+  const dirResolved = path.resolve(uploadDir);
+  const resolved = path.resolve(uploadPath);
+  // 정규화 후 uploadDir escape 차단.
+  if (!insideDir(dirResolved, resolved)) return null;
+
+  // realpath로 심볼릭 링크 탈출 차단 + 존재 확인.
+  let realDir: string;
+  let real: string;
+  try {
+    realDir = fs.realpathSync(dirResolved);
+    real = fs.realpathSync(resolved);
+  } catch {
+    return null;
+  }
+  if (!insideDir(realDir, real)) return null;
+
+  try {
+    if (!fs.statSync(real).isFile()) return null;
+  } catch {
+    return null;
+  }
+  return real;
+}

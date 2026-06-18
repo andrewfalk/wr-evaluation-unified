@@ -180,6 +180,10 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
 
     video: Object.freeze((() => {
       const scriptsDir = optional(env, 'VIDEO_ANALYSIS_SCRIPTS_DIR', poseInferenceRoot());
+      const retention = optional(env, 'VIDEO_ANALYSIS_RETENTION', 'privacy_first');
+      if (retention !== 'privacy_first' && retention !== 'review_fidelity') {
+        throw new Error(`VIDEO_ANALYSIS_RETENTION must be 'privacy_first' or 'review_fidelity', got '${retention}'`);
+      }
       return {
         // dev-only fixture 추론 워커 활성(운영 기본 off). enabled와 함께여야 워커가 돈다.
         fixtureMode: bool(env, 'VIDEO_ANALYSIS_FIXTURE_MODE', false),
@@ -188,6 +192,17 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
         scriptsDir,
         // Python 실행기. 운영/컨테이너는 env 명시 권장(기본값은 dev venv).
         python: optional(env, 'VIDEO_ANALYSIS_PYTHON', defaultPython(scriptsDir)),
+        // M3-7a 실 업로드: Node·추론 공유 볼륨. 미설정이면 업로드 라우트 비활성(UPLOAD_DISABLED).
+        uploadDir: env['VIDEO_ANALYSIS_UPLOAD_DIR'] || null,
+        // 업로드 최대 크기(바이트). 기본 2GB.
+        maxUploadBytes: positiveInt(env, 'VIDEO_ANALYSIS_MAX_UPLOAD_BYTES', 2 * 1024 * 1024 * 1024),
+        // 허용 확장자/MIME(매직바이트 sniffing과 함께 검증).
+        allowedExtensions: Object.freeze(['mp4', 'mov', 'm4v', 'webm', 'avi', 'mkv']),
+        allowedMimeTypes: Object.freeze(['video/mp4', 'video/quicktime', 'video/x-m4v', 'video/webm', 'video/x-msvideo', 'video/x-matroska']),
+        // 보존 정책: privacy_first(원본 추론 후 삭제·skeleton만) | review_fidelity(원본 TTL 보존).
+        retentionPolicy: retention as 'privacy_first' | 'review_fidelity',
+        // 미확정 임시 영상 보존 시간(시간). TTL 경과 시 cleanup이 회수.
+        clipTtlHours: positiveInt(env, 'VIDEO_ANALYSIS_CLIP_TTL_HOURS', 24),
       };
     })()),
   });
