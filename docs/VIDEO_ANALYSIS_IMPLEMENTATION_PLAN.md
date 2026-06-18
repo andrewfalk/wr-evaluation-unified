@@ -101,6 +101,11 @@
   - [x] 테스트: 서버 450 통과(artifact 영속·보존A·fixture 미삭제·cleanup TTL/artifact/orphan/tmp-grace), lint(내 코드) 0, build OK
 - [ ] **PR M3-B2 (6.0-B2)** 파일럿 검증(오프라인 `validate_set.py`) + `CANDIDATE_CONFIDENCE_THRESHOLDS`(런타임 비활성 유지)
 - [ ] **PR M3-8 (6.0-8)** 저위험 모듈 자동제안 명시활성 + skeleton overlay 검수(keypoints artifact 기반) + close-review 엔드포인트
+- [~] **(후속 개선) 대상자 선택 대표 프레임 썸네일** — privacy 정책 예외(동의+인트라넷, `VIDEO_ANALYSIS_TARGET_THUMBNAIL` 기본 off). 박스-only로 작업자 식별 곤란 → 게이트 on 시 대표 프레임 위 선택. **구현 완료, PR 대기**
+  - [x] `0019`(clips.sample_frame_path) + `sample_detect.py --thumbnail`(target_idx 재독·다운스케일·best-effort) + config 게이트
+  - [x] 버전 파일명(`<clipId>.<uuid>.thumb.jpg`)·`resolveSampleFramePath`(전용 검증, 삭제도 경유) + `GET /sample-frame`(no-store·nosniff) + DB-first 옛 파일 회수
+  - [x] 수명: select-target/retention A/cleanup 회수(식별 이미지 단명) / 클라 `requestBlob`+`fetchSampleFrame`+`TargetPicker frameUrl`(objectURL 누수 해제)
+  - [x] 테스트 서버 464/클라 689 통과, lint 0, build OK (Python cv2 경로는 스모크 검증). Codex 리뷰 4회 반영
 
 ### M4 — 배포·고급 (6.0-9, 6.0-10)
 - [ ] 6.0-9 에어갭 Docker 배포 + recipe versioning

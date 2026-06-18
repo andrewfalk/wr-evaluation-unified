@@ -201,6 +201,8 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
         allowedMimeTypes: Object.freeze(['video/mp4', 'video/quicktime', 'video/x-m4v', 'video/webm', 'video/x-msvideo', 'video/x-matroska']),
         // 보존 정책: privacy_first(원본 추론 후 삭제·skeleton만) | review_fidelity(원본 TTL 보존).
         retentionPolicy: retention as 'privacy_first' | 'review_fidelity',
+        // 대상자 선택 시 대표 프레임 썸네일 노출(privacy 정책 예외, 기본 off). 동의+인트라넷 전제에서만 opt-in.
+        targetThumbnail: bool(env, 'VIDEO_ANALYSIS_TARGET_THUMBNAIL', false),
         // 미확정 임시 영상 보존 시간(시간). TTL 경과 시 cleanup이 회수.
         clipTtlHours: positiveInt(env, 'VIDEO_ANALYSIS_CLIP_TTL_HOURS', 24),
       };

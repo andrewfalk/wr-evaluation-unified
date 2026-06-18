@@ -1,7 +1,7 @@
 // 영상 분석 서버 API 클라이언트 (6.0-4). analysisClient.js의 형제 — 플랫폼 분기.
 // 영상 분석은 사실상 인트라넷 기능: 인트라넷에서만 서버 호출, 그 외(electron standalone/web)는
 // 미지원 stub(§8.2). 실제 업로드(multipart)는 M3에서 추가된다.
-import { requestJson, requestMultipart } from './httpClient';
+import { requestJson, requestMultipart, requestBlob } from './httpClient';
 
 function getBaseUrl(session, settings) {
   return session?.apiBaseUrl || settings?.apiBaseUrl || '';
@@ -66,6 +66,16 @@ export async function sampleDetectClip(clipId, { session, settings } = {}) {
   return requestJson(`/api/video-analysis/clips/${clipId}/sample-detect`, {
     baseUrl: getBaseUrl(session, settings), method: 'POST', session,
   });
+}
+
+// 대상자 선택용 대표 프레임 썸네일(정책 예외). 게이트 off/미생성이면 404→null. 200이면 objectURL 반환.
+// 호출측은 더 이상 안 쓸 때 URL.revokeObjectURL로 해제할 것(누수 방지).
+export async function fetchSampleFrame(clipId, { session, settings } = {}) {
+  ensureIntranet(session);
+  const blob = await requestBlob(`/api/video-analysis/clips/${clipId}/sample-frame`, {
+    baseUrl: getBaseUrl(session, settings), session,
+  });
+  return blob ? URL.createObjectURL(blob) : null;
 }
 
 export async function selectTarget(clipId, targetPersonId, { session, settings } = {}) {

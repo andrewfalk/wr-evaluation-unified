@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import type { Pool, PoolClient } from 'pg';
 import { ClipFeatureSetSchema, SampleDetectResultSchema } from '@wr/contracts';
 import config from '../config';
-import { resolveFixtureClip, resolveUploadedClipPath } from './fixturePath';
+import { resolveFixtureClip, resolveUploadedClipPath, resolveSampleFramePath } from './fixturePath';
 
 // ---------------------------------------------------------------------------
 // 작업 영상 분석 job 워커 (6.0-6b, PR D1). dev-only fixture 영상을 입력으로 실제 추론을 돌려
@@ -177,15 +177,16 @@ interface JobClip {
   resolvedPath: string | null; // 심층방어 재검증된 실경로(추론 입력)
   sourceType: string;
   uploadPath: string | null;
+  sampleFramePath: string | null;
 }
-// clip 메타 로드 + 출처(source_type)별 allowlist 재검증. 보존정책(원본 삭제) 판정에 sourceType/uploadPath도 반환.
+// clip 메타 로드 + 출처(source_type)별 allowlist 재검증. 보존정책(원본/썸네일 삭제) 판정에 sourceType/경로도 반환.
 async function loadJobClip(pool: Pool, clipId: string): Promise<JobClip> {
-  const { rows } = await pool.query<{ upload_path: string | null; source_type: string; file_state: string }>(
-    `SELECT upload_path, source_type, file_state FROM video_analysis_clips WHERE id = $1`,
+  const { rows } = await pool.query<{ upload_path: string | null; source_type: string; file_state: string; sample_frame_path: string | null }>(
+    `SELECT upload_path, source_type, file_state, sample_frame_path FROM video_analysis_clips WHERE id = $1`,
     [clipId],
   );
   const row = rows[0];
-  if (!row) return { resolvedPath: null, sourceType: 'unknown', uploadPath: null };
+  if (!row) return { resolvedPath: null, sourceType: 'unknown', uploadPath: null, sampleFramePath: null };
   let resolvedPath: string | null = null;
   if (row.upload_path) {
     if (row.source_type === 'fixture') {
@@ -196,7 +197,7 @@ async function loadJobClip(pool: Pool, clipId: string): Promise<JobClip> {
       resolvedPath = resolveUploadedClipPath(row.upload_path, config.video.uploadDir);
     }
   }
-  return { resolvedPath, sourceType: row.source_type, uploadPath: row.upload_path };
+  return { resolvedPath, sourceType: row.source_type, uploadPath: row.upload_path, sampleFramePath: row.sample_frame_path };
 }
 
 // clip의 대상자 선택(target_person_id + sample_detect_result) → TargetSelection. 선택 없으면 null(dominant).
@@ -295,6 +296,18 @@ export async function pollOnce(pool: Pool, deps: WorkerDeps): Promise<boolean> {
       if (succeeded.clip.resolvedPath) await safeUnlink(succeeded.clip.resolvedPath);
     } catch (e) {
       console.error('[wr-server] video retention cleanup failed (job kept review_pending)', { jobId: job.id, err: e });
+    }
+  }
+
+  // 분석 성공 시 대표 프레임 썸네일(선택용 식별 이미지)은 더 이상 불필요 → 회수(모든 source/retention,
+  // select 안 거친 dominant 경로 안전망). resolver 통과 경로만 unlink.
+  if (succeeded && succeeded.clip.sampleFramePath) {
+    try {
+      await pool.query(`UPDATE video_analysis_clips SET sample_frame_path = NULL WHERE id = $1`, [job.clip_id]);
+      const real = resolveSampleFramePath(succeeded.clip.sampleFramePath, job.clip_id, config.video.uploadDir);
+      if (real) await safeUnlink(real);
+    } catch (e) {
+      console.error('[wr-server] sample-frame reclaim failed', { jobId: job.id, err: e });
     }
   }
   return true;
