@@ -99,6 +99,13 @@
   - [x] 보존 정책 A(privacy_first): 실 업로드 원본은 추론 직후 unlink + `upload_path=NULL`+`file_state='deleted'`(fixture는 미삭제). keypoints artifact는 clip TTL까지 보존
   - [x] `videoClipCleanup.ts`: TTL 만료 clip 원본+artifact 회수 + orphan(미참조 파일·tmp 1h 잔여물) 회수. `index.ts` 1h 간격 + `npm run cleanup:video` CLI
   - [x] 테스트: 서버 450 통과(artifact 영속·보존A·fixture 미삭제·cleanup TTL/artifact/orphan/tmp-grace), lint(내 코드) 0, build OK
+- [~] **(B2 선행) 영상 분석 근거 패널 + 파이프라인 진행바** — 파일럿 검증 관찰 UX. "왜 이 값?"(산출식·집계방식·confidence breakdown·사용 클립/시점·근거 시점·warnings·source jobIds) 펼침 + coarse 진행바(`클립 준비→대상자 확인→분석 중→검수대기/제안생성`). **클라 한정, 서버·계약·DB 무변경.** 승인 계획 `purring-wishing-curry.md`. skeleton overlay/`GET /overlay`/close-review는 M3-8 유지. **PR #38 — Tier-3 라이브 수동 검증 ✅(2026-06-18, 에러 없음) · 머지 대기.**
+  - [x] 값/evidence **완전 분리**: evidence는 feature 객체에 미부착(영속화 차단) + 2단 keying(`jobEvidenceBySharedJobId`/`processEvidenceByProcessId`) — featureKey 단독 keying은 다직업 충돌
+  - [x] `convertClipFeaturesToPerDay` → `evidenceByFeatureKey` 별도 반환(features shape 무변경) / `fuseClipFeatureSetsWithEvidence` wrapper(기존 `fuseClipFeatureSets` 반환 계약 유지, `pickWinner` helper 공유)
+  - [x] `runServerAnalysis` → `processEvidence[]`(환산+융합 evidence 병합) / 신규 `buildJobEvidence`(aggregationMethod·contributions, aggregate는 evidence 미접촉)
+  - [x] UI transient `analysisEvidence` state(va/shared 저장 안 함) + reset 정책(runAnalysis 시작·`useEffect`(jobFeatures empty)·환자 전환·업로드/탐지/선택 `invalidateDerived`) + evidence 부재 fallback("다시 분석 필요") + experimental 라벨(게이팅 B2 전 비활성)
+  - [x] UX 오해방지 보정(Codex 4차): 진행바 재분석 중 `analyzing` 우선(hasAnalysis 덮어쓰기 방지)·환산식 hours/minutes 단위 분기(÷60 표기)·contribution `sharePercent`=실 공정 점유율(집계 가중치 100과 구분, "공정 점유율" 라벨)
+  - [x] 테스트: 클라 **703 통과**(evidence 반환·feature 누출 0·fusion provenance·2단 keying·다직업 비충돌·processEvidence·sharePercent·mock 비파손), `build:web`(win7) OK, lint 0(내 코드). Codex 리뷰 4회 반영(feature 미부착·overlay 범위·fuse 계약 유지·2단 keying·reset 정책·집계 설명·진행바 포괄·fallback·단위 분기·sharePercent)
 - [ ] **PR M3-B2 (6.0-B2)** 파일럿 검증(오프라인 `validate_set.py`) + `CANDIDATE_CONFIDENCE_THRESHOLDS`(런타임 비활성 유지)
 - [ ] **PR M3-8 (6.0-8)** 저위험 모듈 자동제안 명시활성 + skeleton overlay 검수(keypoints artifact 기반) + close-review 엔드포인트
 - [x] **(후속 개선) 대상자 선택 대표 프레임 썸네일** — privacy 정책 예외(동의+인트라넷, `VIDEO_ANALYSIS_TARGET_THUMBNAIL` 기본 off). 박스-only로 작업자 식별 곤란 → 게이트 on 시 대표 프레임 위 선택. **PR #36 ✅ 머지 · 라이브 스모크(게이트 on) 검증 완료**

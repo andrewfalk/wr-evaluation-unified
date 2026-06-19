@@ -6,7 +6,7 @@
 import { VIDEO_FEATURE_TARGETS } from '@contracts/index';
 import { createClip, createJob, pollJob } from './videoAnalysisClient';
 import { convertClipFeaturesToPerDay, buildRecipeVersion } from './videoPerDayConversion';
-import { fuseClipFeatureSets } from './videoViewpointFusion';
+import { fuseClipFeatureSetsWithEvidence } from './videoViewpointFusion';
 
 // 활성 모듈로 매핑되는 featureKey 목록(컴포넌트 헬퍼와 동일 정의 — 순환 import 회피 위해 인라인).
 function requestedFeaturesForModules(activeModules = []) {
@@ -21,14 +21,16 @@ function requestedFeaturesForModules(activeModules = []) {
  * @param {object} va - videoAnalysis 데이터(processes/clips)
  * @param {object} opts - { activeModules, session, settings, detections }
  *   detections: { [clipMetaId]: { serverClipId, selectedId } } — 대상자 선택된 클립은 그 serverClipId 재사용.
- * @returns {Promise<{ processFeatures: Array, missingActiveTime: object, bundleVersion: string|null, errors: Array }>}
+ * @returns {Promise<{ processFeatures: Array, processEvidence: Array, missingActiveTime: object, bundleVersion: string|null, errors: Array }>}
  *   processFeatures: [{ processId, jobId, features }]
+ *   processEvidence: [{ processId, analysisJobIds, evidenceByFeatureKey }] — "왜 이 값?" 근거(영속화 안 함)
  *   missingActiveTime: { [processId]: featureKey[] } — 활동시간 누락으로 못 만든 per-day feature
  *   errors: [{ processId, message }]
  */
 export async function runServerAnalysis(patient, va, { activeModules = [], session, settings, detections = {} } = {}) {
   const requested = requestedFeaturesForModules(activeModules);
   const processFeatures = [];
+  const processEvidence = []; // [{ processId, analysisJobIds, evidenceByFeatureKey }] — 영속화 안 함(렌더 lookup)
   const missingActiveTime = {};
   const errors = [];
   let bundleVersion = null;
@@ -67,14 +69,27 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
           break;
         }
         jobIds.push(done.jobId);
-        fusionEntries.push({ viewpoint: clipMeta.viewpoint, clipFeatureSet: done.resultFeatures });
+        // 융합 evidence가 채택/탈락 클립을 참조할 수 있도록 식별자를 함께 운반(clipMetaId/serverClipId/jobId).
+        fusionEntries.push({
+          viewpoint: clipMeta.viewpoint,
+          clipMetaId: clipMeta.id,
+          serverClipId,
+          jobId: done.jobId,
+          clipFeatureSet: done.resultFeatures,
+        });
       }
       if (failed) continue;
       // 시점 융합(§8.6.1, intrinsic 단계) → per-day 1회 환산(공정의 다중 시점 클립은 동일 activeMinutesPerDay).
-      const fused = fuseClipFeatureSets(fusionEntries);
+      const { fused, evidenceByFeatureKey: fusionEvidence } = fuseClipFeatureSetsWithEvidence(fusionEntries);
       const conv = convertClipFeaturesToPerDay(fused, p.activeMinutesPerDay, { allowedFeatureKeys: requested });
       // analysisJobIds[]로 provenance 운반(D3b — 융합 시 복수 job). jobId는 하위호환(첫 job).
       processFeatures.push({ processId: p.id, jobId: jobIds[0], analysisJobIds: jobIds, features: conv.features });
+      // 근거: 환산 evidence(산출식·breakdown·segments) + 융합 evidence(채택/탈락 클립·시점) 병합.
+      const evidenceByFeatureKey = {};
+      for (const [key, ev] of Object.entries(conv.evidenceByFeatureKey || {})) {
+        evidenceByFeatureKey[key] = fusionEvidence && fusionEvidence[key] ? { ...ev, fusion: fusionEvidence[key] } : ev;
+      }
+      processEvidence.push({ processId: p.id, analysisJobIds: jobIds, evidenceByFeatureKey });
       if (conv.missingActiveTime.length > 0) missingActiveTime[p.id] = conv.missingActiveTime;
       bundleVersion = buildRecipeVersion(conv.featureConfigVersion);
     } catch (e) {
@@ -82,5 +97,5 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
     }
   }
 
-  return { processFeatures, missingActiveTime, bundleVersion, errors };
+  return { processFeatures, processEvidence, missingActiveTime, bundleVersion, errors };
 }

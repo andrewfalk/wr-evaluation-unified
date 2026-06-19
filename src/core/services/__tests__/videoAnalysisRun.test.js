@@ -127,4 +127,30 @@ describe('runServerAnalysis', () => {
     expect(r.processFeatures).toEqual([]);
     expect(r.errors[0].message).toContain('INFERENCE_ERROR');
   });
+
+  it('processEvidence 반환: 환산 evidence(intrinsicValue·activeMinutesPerDay) + 융합 adopted 클립', async () => {
+    const r = await runServerAnalysis(patient, vaWith(), env);
+    expect(r.processEvidence).toHaveLength(1);
+    const pe = r.processEvidence[0];
+    expect(pe).toMatchObject({ processId: 'p1', analysisJobIds: ['job-1'] });
+    const ev = pe.evidenceByFeatureKey.squatDuration;
+    expect(ev).toMatchObject({ intrinsicValue: 0.5, intrinsicMetric: 'posture_ratio', activeMinutesPerDay: 200 });
+    // 단일 클립 융합 → adopted 클립 식별자(serverClipId·jobId) 운반
+    expect(ev.fusion.adopted).toMatchObject({ viewpoint: 'sagittal', serverClipId: 'srv-clip-1', jobId: 'job-1' });
+  });
+
+  it('다중 시점: processEvidence.fusion.candidates 복수(채택/탈락 추적)', async () => {
+    createJob.mockResolvedValueOnce({ jobId: 'job-a', status: 'queued' })
+             .mockResolvedValueOnce({ jobId: 'job-b', status: 'queued' });
+    pollJob.mockResolvedValueOnce({ jobId: 'job-a', status: 'review_pending', resultFeatures: clipSet(0.5) })
+           .mockResolvedValueOnce({ jobId: 'job-b', status: 'review_pending', resultFeatures: clipSet(0.5) });
+    const va = vaWith();
+    va.clips = [
+      { id: 'c1', processId: 'p1', viewpoint: 'sagittal', fixtureClipName: 'a.mp4' },
+      { id: 'c2', processId: 'p1', viewpoint: 'frontal', fixtureClipName: 'b.mp4' },
+    ];
+    const r = await runServerAnalysis(patient, va, env);
+    const ev = r.processEvidence[0].evidenceByFeatureKey.squatDuration;
+    expect(ev.fusion.candidates).toHaveLength(2);
+  });
 });

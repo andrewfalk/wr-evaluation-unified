@@ -143,3 +143,46 @@ describe('convertClipFeaturesToPerDay — confidence 게이팅 (PR D3a, §8.8)',
     expect(r.features.squatDuration.warnings).toEqual(['TARGET_TRACK_LOST', 'LOW_CONFIDENCE_OVERALL']);
   });
 });
+
+describe('convertClipFeaturesToPerDay — evidence sidecar (B2 선행 근거 패널)', () => {
+  const withBreakdown = (value, confidence, breakdown, warnings = []) => ({
+    kind: 'numeric', metric: 'posture_ratio', value, unit: 'ratio', confidence,
+    confidenceBreakdown: breakdown, segments: [], warnings,
+  });
+
+  it('numeric ratio → evidence에 intrinsicValue·intrinsicMetric·activeMinutesPerDay 운반(환산식 근거)', () => {
+    const r = convertClipFeaturesToPerDay(clipSet({ squatDuration: ratio(0.35) }), 360);
+    expect(r.evidenceByFeatureKey.squatDuration).toMatchObject({
+      intrinsicValue: 0.35, intrinsicMetric: 'posture_ratio', activeMinutesPerDay: 360,
+    });
+  });
+
+  it('feature 객체에는 evidence 키가 절대 누출되지 않음(영속화 회귀 — shared 저장 안전)', () => {
+    const r = convertClipFeaturesToPerDay(clipSet({ squatDuration: withBreakdown(0.5, 0.8, { keypoint: 0.8, visibility: 0.9 }) }), 200);
+    const f = r.features.squatDuration;
+    for (const leaked of ['intrinsicValue', 'intrinsicMetric', 'activeMinutesPerDay', 'confidenceBreakdown', 'segments', 'evidence', 'trace']) {
+      expect(f).not.toHaveProperty(leaked);
+    }
+    // evidence map에는 breakdown이 보존됨
+    expect(r.evidenceByFeatureKey.squatDuration.confidenceBreakdown).toEqual({ keypoint: 0.8, visibility: 0.9 });
+  });
+
+  it('breakdown/segments 없는 출력 → evidence는 graceful degrade(해당 키 생략)', () => {
+    const r = convertClipFeaturesToPerDay(clipSet({ squatDuration: ratio(0.5) }), 200);
+    const ev = r.evidenceByFeatureKey.squatDuration;
+    expect(ev).not.toHaveProperty('confidenceBreakdown');
+    expect(ev.intrinsicValue).toBe(0.5);
+  });
+
+  it('candidate도 evidence 운반(intrinsicValue=각도)', () => {
+    const cf = clipSet({ trunkPostureG: { kind: 'numeric', metric: 'peak_angle', value: 47.2, unit: 'degrees', confidence: 0.6, segments: [], warnings: [] } });
+    const r = convertClipFeaturesToPerDay(cf, null);
+    expect(r.evidenceByFeatureKey.trunkPostureG).toMatchObject({ intrinsicValue: 47.2, intrinsicMetric: 'peak_angle' });
+  });
+
+  it('활동시간 누락(missingActiveTime)인 numeric은 feature·evidence 둘 다 미생성', () => {
+    const r = convertClipFeaturesToPerDay(clipSet({ squatDuration: ratio(0.5) }), null);
+    expect(r.features.squatDuration).toBeUndefined();
+    expect(r.evidenceByFeatureKey.squatDuration).toBeUndefined();
+  });
+});

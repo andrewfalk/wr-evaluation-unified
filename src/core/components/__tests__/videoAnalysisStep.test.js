@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   requestedFeaturesForModules,
   buildJobFeatures,
+  buildJobEvidence,
   shareTotalsByJob,
   clearDerived,
   editProcessVA,
@@ -9,6 +10,7 @@ import {
   addClipVA,
   resolveApplyMode,
 } from '../VideoAnalysisStep.jsx';
+import { getAggregationMethod } from '../../services/videoAggregate.js';
 
 describe('requestedFeaturesForModules', () => {
   it('returns only featureKeys that map to active modules (incl. candidates)', () => {
@@ -71,6 +73,56 @@ describe('buildJobFeatures', () => {
     expect(buildJobFeatures(processes, processFeatures).find((j) => j.sharedJobId === 'jobA').features.overheadHours.value).toBeCloseTo(1.5, 5);
     // absolutePerDay: 2 + 1 = 3.0 (이중 차감 없음)
     expect(buildJobFeatures(processes, processFeatures, { absolutePerDay: true }).find((j) => j.sharedJobId === 'jobA').features.overheadHours.value).toBeCloseTo(3.0, 5);
+  });
+});
+
+describe('buildJobEvidence (B2 선행 — 값/근거 분리, 2단 keying)', () => {
+  const processes = [
+    { id: 'p1', sharedJobId: 'jobA', name: '공정A', shiftSharePercent: 60 },
+    { id: 'p2', sharedJobId: 'jobB', name: '공정B', shiftSharePercent: 100 },
+  ];
+  const processFeatures = [
+    { processId: 'p1', features: { squatDuration: { kind: 'numeric', value: 126 } } },
+    { processId: 'p2', features: { squatDuration: { kind: 'numeric', value: 40 } } },
+  ];
+  const processEvidence = [
+    { processId: 'p1', analysisJobIds: ['j1'], evidenceByFeatureKey: { squatDuration: { intrinsicValue: 0.35, intrinsicMetric: 'posture_ratio', activeMinutesPerDay: 360, warnings: [] } } },
+    { processId: 'p2', analysisJobIds: ['j2'], evidenceByFeatureKey: { squatDuration: { intrinsicValue: 0.1, intrinsicMetric: 'posture_ratio', activeMinutesPerDay: 400, warnings: [] } } },
+  ];
+
+  it('동일 featureKey 다직업 비충돌(2단 keying: sharedJobId → featureKey)', () => {
+    const byJob = buildJobEvidence(processes, processFeatures, processEvidence);
+    expect(byJob.jobA.squatDuration).toBeDefined();
+    expect(byJob.jobB.squatDuration).toBeDefined();
+    // 서로 다른 근거(다른 공정) — 덮어쓰기 없음
+    expect(byJob.jobA.squatDuration.contributions[0].processName).toBe('공정A');
+    expect(byJob.jobB.squatDuration.contributions[0].processName).toBe('공정B');
+    expect(byJob.jobA.squatDuration.contributions[0].evidence.activeMinutesPerDay).toBe(360);
+    expect(byJob.jobB.squatDuration.contributions[0].evidence.activeMinutesPerDay).toBe(400);
+  });
+
+  it('aggregationMethod + contributions(perDayValue·실 공정 점유율·evidence) + analysisJobIds 운반', () => {
+    const byJob = buildJobEvidence(processes, processFeatures, processEvidence);
+    const e = byJob.jobA.squatDuration;
+    expect(e.aggregationMethod).toBe(getAggregationMethod('squatDuration'));
+    // sharePercent=실 공정 점유율(60), 집계 가중치 100이 아님(검토자 오해 방지)
+    expect(e.contributions[0]).toMatchObject({ processId: 'p1', sharePercent: 60, perDayValue: 126 });
+    expect(e.analysisJobIds).toEqual(['j1']);
+  });
+
+  it('한 직업 다공정 → contributions 누적 + analysisJobIds 합집합', () => {
+    const procs = [
+      { id: 'p1', sharedJobId: 'jobA', name: 'A1', shiftSharePercent: 60 },
+      { id: 'p2', sharedJobId: 'jobA', name: 'A2', shiftSharePercent: 40 },
+    ];
+    const pe = [
+      { processId: 'p1', analysisJobIds: ['j1'], evidenceByFeatureKey: { squatDuration: { intrinsicValue: 0.3, warnings: [] } } },
+      { processId: 'p2', analysisJobIds: ['j2'], evidenceByFeatureKey: { squatDuration: { intrinsicValue: 0.2, warnings: [] } } },
+    ];
+    const byJob = buildJobEvidence(procs, [], pe);
+    expect(byJob.jobA.squatDuration.contributions).toHaveLength(2);
+    expect(byJob.jobA.squatDuration.contributions.map((c) => c.sharePercent)).toEqual([60, 40]);
+    expect(byJob.jobA.squatDuration.analysisJobIds).toEqual(['j1', 'j2']);
   });
 });
 

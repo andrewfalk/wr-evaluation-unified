@@ -4,7 +4,7 @@
 // 실제 추론은 M2에서 서버 셸에 연결된다.
 import { useMemo, useState, useRef, useEffect } from 'react';
 import { generateMockFeatures } from '../services/videoMock';
-import { aggregateProcessFeatures } from '../services/videoAggregate';
+import { aggregateProcessFeatures, getAggregationMethod } from '../services/videoAggregate';
 import {
   getModuleSuggestions,
   collectCandidateFeatures,
@@ -68,6 +68,44 @@ export function buildJobFeatures(processes = [], processFeatures = [], { absolut
     sharedJobId,
     features: aggregateProcessFeatures(byJob[sharedJobId]),
   }));
+}
+
+/**
+ * 공정별 근거(processEvidence)를 직업(sharedJobId) 단위로 묶어 "왜 이 값?" 패널 lookup map을 만든다.
+ * 값 집계(buildJobFeatures)와 **완전 분리** — evidence는 feature 객체에 미부착·shared에 영속화 안 함.
+ * 2단 keying: jobEvidenceBySharedJobId[sharedJobId][featureKey] (featureKey 단독은 다직업 충돌).
+ * @param {Array} processFeatures - per-day 값(공정별 per-feature value 참조용)
+ * @param {Array} processEvidence - [{ processId, analysisJobIds, evidenceByFeatureKey }]
+ * @returns {object} jobEvidenceBySharedJobId
+ */
+export function buildJobEvidence(processes = [], processFeatures = [], processEvidence = []) {
+  const featuresByProcess = {};
+  for (const pf of processFeatures) featuresByProcess[pf.processId] = pf.features || {};
+  const byJob = {};
+  for (const pe of processEvidence) {
+    const proc = processes.find((p) => p.id === pe.processId);
+    if (!proc) continue;
+    const jobMap = byJob[proc.sharedJobId] || (byJob[proc.sharedJobId] = {});
+    for (const [featureKey, ev] of Object.entries(pe.evidenceByFeatureKey || {})) {
+      const entry = jobMap[featureKey] || (jobMap[featureKey] = {
+        aggregationMethod: getAggregationMethod(featureKey),
+        contributions: [],
+        analysisJobIds: [],
+      });
+      entry.contributions.push({
+        processId: proc.id,
+        processName: proc.name,
+        // 실 공정 점유율(검토자 표시용). 집계 가중치(서버 absolute 경로의 내부 100%)와 구분 — 오해 방지.
+        sharePercent: proc.shiftSharePercent,
+        perDayValue: featuresByProcess[pe.processId]?.[featureKey]?.value,
+        evidence: ev,
+      });
+      for (const jid of pe.analysisJobIds || []) {
+        if (entry.analysisJobIds.indexOf(jid) < 0) entry.analysisJobIds.push(jid);
+      }
+    }
+  }
+  return byJob;
 }
 
 /** 공정 시간점유율 합(직업별). 100% 초과/미달 경고용. */
@@ -154,6 +192,11 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   const [detecting, setDetecting] = useState(null); // 진행 중 clipMetaId
   // 실 업로드(M3-7a): 클립별 { serverClipId, fileName, progress, status }. UI 임시 상태(환자 JSONB·경로·Blob 미저장).
   const [uploads, setUploads] = useState({}); // { [clipMetaId]: {...} }
+  // 근거 패널(B2 선행): "왜 이 값?" evidence. **transient만** — shared.videoAnalysis에 저장 안 함(영속화 차단).
+  // 새로고침/환자전환/입력변경 시 사라짐(의도) → 부재 제안행은 fallback 안내.
+  const [analysisEvidence, setAnalysisEvidence] = useState({ jobEvidenceBySharedJobId: {}, processEvidenceByProcessId: {} });
+  const [expandedEvidence, setExpandedEvidence] = useState(null); // 펼친 제안 키 `${sharedJobId}:${featureKey}`
+  const resetEvidence = () => { setAnalysisEvidence({ jobEvidenceBySharedJobId: {}, processEvidenceByProcessId: {} }); setExpandedEvidence(null); };
 
   // 썸네일 objectURL 누수 방지: 언마운트 시 남은 frameUrl 모두 해제(detection 최신값을 ref로 추적).
   const detectionRef = useRef(detection);
@@ -178,18 +221,34 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
 
   const updateVA = (mutator) => updateShared({ ...shared, videoAnalysis: mutator(va) });
 
+  // 업로드/대상자 등 컴포넌트 state 입력이 바뀌면 파생 분석결과(jobFeatures)가 stale이 된다(이들은
+  // clearDerived를 안 거침). 명시적으로 비운다 → jobFeatures useEffect가 evidence도 자동 reset(코덱스 3차 #1).
+  const invalidateDerived = () => {
+    if ((va.jobFeatures || []).length > 0 || (va.processFeatures || []).length > 0) {
+      updateVA((v) => clearDerived(v));
+    }
+  };
+
+  // evidence reset 정책: ① 환자 전환 시 무조건 reset(이전 환자 근거 잔존 방지),
+  //   ② jobFeatures가 비면(입력 편집·invalidateDerived) reset. evidence는 영속화 안 하므로 set은 runAnalysis에서만.
+  useEffect(() => { resetEvidence(); }, [activePatient?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if ((va.jobFeatures || []).length === 0) resetEvidence(); }, [va.jobFeatures]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── 공정/클립 편집 ── 입력 변경 시 파생 분석결과는 비워 stale 적용을 막는다(clearDerived).
   const addProcess = () => updateVA((v) => addProcessVA(v, jobs));
   const editProcess = (id, patch) => updateVA((v) => editProcessVA(v, id, patch));
   const removeProcess = (id) => updateVA((v) => removeProcessVA(v, id));
   const addClip = (processId) => updateVA((v) => addClipVA(v, processId));
   const editClip = (id, patch) => updateVA((v) => editClipVA(v, id, patch));
-  const dropDetection = (clipMetaId) => setDetection((d) => {
-    const n = { ...d };
-    if (n[clipMetaId]?.frameUrl) URL.revokeObjectURL(n[clipMetaId].frameUrl); // objectURL 누수 방지
-    delete n[clipMetaId];
-    return n;
-  });
+  const dropDetection = (clipMetaId) => {
+    invalidateDerived(); // 대상자 무효화 → 파생결과·evidence stale
+    setDetection((d) => {
+      const n = { ...d };
+      if (n[clipMetaId]?.frameUrl) URL.revokeObjectURL(n[clipMetaId].frameUrl); // objectURL 누수 방지
+      delete n[clipMetaId];
+      return n;
+    });
+  };
   const dropUpload = (clipMetaId) => setUploads((u) => { const n = { ...u }; delete n[clipMetaId]; return n; });
   const removeClip = (id) => { dropDetection(id); dropUpload(id); updateVA((v) => removeClipVA(v, id)); };
 
@@ -216,6 +275,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   // ── 대상자 선택(§8.7, PR D2b) ── 대표 프레임 후보 탐지 → 박스 클릭 → select-target.
   const detectTarget = async (clipMeta, processId) => {
     setAnalysisError('');
+    invalidateDerived(); // 재탐지 → 기존 분석결과·evidence stale
     setDetecting(clipMeta.id);
     try {
       // 업로드 완료 clip은 기존 serverClipId 재사용(새 clip 생성 금지). fixture만 여기서 clip 생성.
@@ -245,6 +305,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   const chooseTarget = async (clipMeta, personId) => {
     const d = detection[clipMeta.id];
     if (!d) return;
+    invalidateDerived(); // 대상자 재선택 → 기존 분석결과·evidence stale
     try {
       await selectTarget(d.serverClipId, personId, { session, settings });
       setDetection((prev) => ({ ...prev, [clipMeta.id]: { ...prev[clipMeta.id], selectedId: personId } }));
@@ -255,18 +316,25 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
 
   // 분석 산출(공통): processFeatures → jobFeatures/candidateFeatures 재구성 후 저장.
   // absolutePerDay: 서버 실분석은 절대 per-day(합산), mock은 공정점유율 가중.
-  const commitAnalysis = (processFeatures, { absolutePerDay = false } = {}) => {
+  // processEvidence: "왜 이 값?" 근거(서버 실분석만 제공, mock은 빈 배열). va에 저장 안 하고 별도 state로.
+  const commitAnalysis = (processFeatures, { absolutePerDay = false, processEvidence = [] } = {}) => {
     const jobFeatures = buildJobFeatures(va.processes, processFeatures, { absolutePerDay });
     const candidateFeatures = processFeatures.flatMap((pf) =>
       collectCandidateFeatures(pf.features, { processIds: [pf.processId] })
     );
     updateVA((v) => ({ ...v, processFeatures, jobFeatures, candidateFeatures }));
+    // evidence는 transient state(영속화 차단). buildJobEvidence로 직업단위 lookup map 구성.
+    const jobEvidenceBySharedJobId = buildJobEvidence(va.processes, processFeatures, processEvidence);
+    const processEvidenceByProcessId = {};
+    for (const pe of processEvidence) processEvidenceByProcessId[pe.processId] = pe.evidenceByFeatureKey || {};
+    setAnalysisEvidence({ jobEvidenceBySharedJobId, processEvidenceByProcessId });
   };
 
   // ── 분석 실행 ── 서버 모드=fixture 실추론+per-day 환산, 그 외=mock. 적용과 분리(추론은 여기서만).
   const runAnalysis = async () => {
     setAnalysisError('');
     setMissingActiveTime({});
+    resetEvidence(); // 새 분석 시작 → 이전 근거 비움(성공 시 commitAnalysis가 다시 채움)
     if (!serverMode) {
       const requested = requestedFeaturesForModules(activeModules);
       const processFeatures = va.processes.map((p) => ({
@@ -291,11 +359,11 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
           if (up?.serverClipId && up.status === 'done') detections[c.id] = { serverClipId: up.serverClipId };
         }
       }
-      const { processFeatures, missingActiveTime: missing, bundleVersion, errors } =
+      const { processFeatures, processEvidence, missingActiveTime: missing, bundleVersion, errors } =
         await runServerAnalysis(activePatient, va, { activeModules, session, settings, detections });
       setAnalysisBundle(bundleVersion || MOCK_BUNDLE);
       setMissingActiveTime(missing);
-      commitAnalysis(processFeatures, { absolutePerDay: true });
+      commitAnalysis(processFeatures, { absolutePerDay: true, processEvidence });
       if (errors.length > 0) setAnalysisError(errors.map((e) => e.message).join(' / '));
     } catch (e) {
       setAnalysisError(e?.message || '분석에 실패했습니다.');
@@ -349,6 +417,70 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   const rollback = (entry) => updatePatient((d) => rollbackAppliedInput({ data: d }, d.shared.videoAnalysis.appliedInputs.indexOf(entry)).data);
 
   const hasAnalysis = (va.jobFeatures || []).length > 0 || (va.processFeatures || []).length > 0;
+
+  // ── coarse 파이프라인 진행바(B2 선행) ── fixture/자동 dominant 경로도 포괄. queued→processing→
+  // review_pending 실시간 단계는 pollJob 내부라 미표시(이번 범위 제외).
+  const PIPELINE_STEPS = ['클립 준비', '대상자 확인', '분석 중', '검수대기/제안생성'];
+  const anyAnalyzableClip = (va.clips || []).some(
+    (c) => c.fixtureClipName || uploads[c.id]?.status === 'done' || validDetection(c)?.serverClipId,
+  );
+  const anyTargetChosen = (va.clips || []).some((c) => validDetection(c)?.selectedId);
+  let pipelineIndex = -1;
+  if (anyAnalyzableClip) pipelineIndex = 0;
+  if (anyTargetChosen) pipelineIndex = 1;
+  if (hasAnalysis) pipelineIndex = 3;
+  if (analyzing) pipelineIndex = 2; // 재분석 중에는 이전 결과(hasAnalysis)보다 "분석 중"을 우선 표시
+
+  // 한 contribution(공정)의 환산식 문자열(자세비율 × 활동시간). ratio metric만 표시. 단위별 분기.
+  const contribFormula = (ev, perDayValue, unit) => {
+    if (!ev || ev.intrinsicMetric !== 'posture_ratio' || ev.activeMinutesPerDay == null) return null;
+    const ratio = typeof ev.intrinsicValue === 'number' ? ev.intrinsicValue.toFixed(3) : ev.intrinsicValue;
+    const pd = typeof perDayValue === 'number' ? Math.round(perDayValue * 10) / 10 : perDayValue;
+    const pdStr = pd == null ? '?' : pd;
+    const am = ev.activeMinutesPerDay;
+    if (unit === 'hours_per_day') return `${pdStr} 시간/일 = 자세비율 ${ratio} × 활동 ${am}분/일 ÷ 60`;
+    if (unit === 'minutes_per_day') return `${pdStr} 분/일 = 자세비율 ${ratio} × 활동 ${am}분/일`;
+    return `${pdStr} ${unit || ''} = 자세비율 ${ratio} × 활동 ${am}분/일`;
+  };
+
+  // "왜 이 값?" 근거 패널. jobEv 없으면(mock·이전 세션) fallback 안내(영속화 안 하는 설계 표현).
+  const renderEvidencePanel = (jobEv, unit) => {
+    if (!jobEv) {
+      return (
+        <div className="muted" style={{ fontSize: 12, marginTop: 4, paddingLeft: 12 }}>
+          근거 정보는 현재 분석 세션에서만 표시됩니다. 다시 분석하면 확인할 수 있습니다.
+        </div>
+      );
+    }
+    return (
+      <div style={{ fontSize: 12, marginTop: 4, paddingLeft: 12, borderLeft: '2px solid var(--border, #ddd)' }}>
+        <div className="muted">집계 방식: <code>{jobEv.aggregationMethod}</code>{jobEv.analysisJobIds?.length > 0 && <> · 분석 job: {jobEv.analysisJobIds.join(', ')}</>}</div>
+        {(jobEv.contributions || []).map((c, i) => {
+          const ev = c.evidence || {};
+          const formula = contribFormula(ev, c.perDayValue, unit);
+          const bd = ev.confidenceBreakdown;
+          const adopted = ev.fusion?.adopted;
+          return (
+            <div key={i} style={{ marginTop: 4 }}>
+              <b>{c.processName || '(공정)'}</b> <span className="muted">공정 점유율 {c.sharePercent}%</span>
+              {formula && <div>· {formula}</div>}
+              {adopted && <div className="muted">· 채택 시점: {adopted.viewpoint || '미지정'}{adopted.jobId ? ` (job ${adopted.jobId})` : ''}{ev.fusion?.candidates?.length > 1 ? ` / 후보 ${ev.fusion.candidates.length}개` : ''}</div>}
+              {bd && (
+                <div className="muted">· 신뢰도 성분: {['keypoint', 'visibility', 'tracking', 'viewpoint', 'usableFrameRatio']
+                  .filter((k) => bd[k] != null)
+                  .map((k) => `${k} ${Math.round(bd[k] * 100)}%`).join(' / ')}</div>
+              )}
+              {ev.segments?.length > 0 && <div className="muted">· 근거 구간 {ev.segments.length}개</div>}
+              {ev.warnings?.length > 0 && <div style={{ color: '#b26a00' }}>· 경고: {ev.warnings.join(', ')}</div>}
+            </div>
+          );
+        })}
+        <div className="muted" style={{ marginTop: 4, fontStyle: 'italic' }}>
+          ※ 신뢰도·경고는 실험값입니다(자동제안 차단 임계값은 검증 전까지 비활성). 값은 전문의가 확정합니다.
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="panel">
@@ -450,6 +582,22 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
         })}
         <button type="button" onClick={addProcess}>+ 공정 추가</button>
 
+        {/* 파이프라인 진행바(coarse) */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 14 }}>
+          {PIPELINE_STEPS.map((label, i) => {
+            const done = i < pipelineIndex;
+            const active = i === pipelineIndex;
+            return (
+              <span key={label} style={{
+                fontSize: 12, padding: '2px 8px', borderRadius: 12,
+                border: `1px solid ${active ? '#2e7d32' : 'var(--border, #ddd)'}`,
+                background: done ? '#e8f5e9' : (active ? '#f1f8e9' : 'transparent'),
+                color: done || active ? '#2e7d32' : '#999',
+              }}>{done ? '✓ ' : (active ? '▶ ' : '')}{label}</span>
+            );
+          })}
+        </div>
+
         {/* 2) 분석 실행 (서버=fixture 실추론, 그 외=mock) */}
         <div style={{ marginTop: 16 }}>
           <button type="button" onClick={runAnalysis} disabled={va.processes.length === 0 || analyzing}>
@@ -482,6 +630,9 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                       {suggestions.map((s) => {
                         // 저신뢰 게이팅(§8.8 D3a): autoSuggestAllowed=false면 "참고만" — 자동제안 금지, 적용 버튼 비활성.
                         const refOnly = s.autoSuggestAllowed === false;
+                        const evKey = `${jf.sharedJobId}:${s.featureKey}`;
+                        const expanded = expandedEvidence === evKey;
+                        const jobEv = analysisEvidence.jobEvidenceBySharedJobId[jf.sharedJobId]?.[s.featureKey];
                         return (
                         <li key={s.featureKey} style={{ margin: '4px 0' }}>
                           <code>{s.featureKey}</code> → {String(s.suggestedValue)} {s.unit || ''}
@@ -490,10 +641,15 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                           </span>
                           {refOnly && <span style={{ marginLeft: 6, fontSize: 12, color: '#b26a00' }} title="저신뢰 — 수기 확인 필요">참고만</span>}
                           {s.requiresManualReview && <span style={{ marginLeft: 6, fontSize: 12, color: '#b26a00' }}>수기확인</span>}
+                          <button type="button" style={{ marginLeft: 6, fontSize: 12 }}
+                            onClick={() => setExpandedEvidence(expanded ? null : evKey)}>
+                            {expanded ? '근거 닫기' : '왜 이 값?'}
+                          </button>
                           <button type="button" style={{ marginLeft: 8 }} disabled={busy || applyBlocked || refOnly}
                             onClick={() => applySuggestion(moduleId, { sharedJobId: jf.sharedJobId }, s, procIds, analysisProfile)}>
                             {serverMode ? '서버 적용' : '적용'}
                           </button>
+                          {expanded && renderEvidencePanel(jobEv, s.unit)}
                         </li>
                         );
                       })}
