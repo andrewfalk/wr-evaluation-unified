@@ -48,6 +48,9 @@ vi.mock('../../workers/fixturePath', () => ({
   // 썸네일 경로: .thumb.jpg 이고 실제 존재하면 통과(실 패턴검증은 fixturePath 단위테스트).
   resolveSampleFramePath: vi.fn((p: unknown) =>
     (typeof p === 'string' && p.endsWith('.thumb.jpg') && fs.existsSync(p) ? p : null)),
+  // keypoints artifact 경로: .keypoints.json 이고 실제 존재하면 통과(실 패턴검증은 fixturePath 단위테스트).
+  resolveKeypointsArtifactPath: vi.fn((p: unknown) =>
+    (typeof p === 'string' && p.endsWith('.keypoints.json') && fs.existsSync(p) ? p : null)),
 }));
 
 // sample-detect Python 러너 mock. thumbnailPath 주어지면(게이트 on) 더미 JPEG 생성(라우트 existsSync 통과).
@@ -940,5 +943,172 @@ describe('대상자 선택 썸네일 (정책 예외)', () => {
     const upd = q(pool).mock.calls.find((c) => String(c[0]).includes('sample_frame_path = NULL'));
     expect(upd).toBeDefined();
     expect(fs.existsSync(framePath)).toBe(false); // 파일도 회수
+  });
+});
+
+// ── 6.0-8: GET /jobs/:jobId/overlay + POST /jobs/:jobId/close-review ──
+describe('GET /jobs/:jobId/overlay (검수 골격, 6.0-8)', () => {
+  beforeEach(() => { vi.clearAllMocks(); flagState.enabled = true; });
+
+  // coco17 17점 유효 PoseKeypoints 산출(검증 통과용).
+  const kpDoc = () => ({
+    schemaVersion: 1, keypointConvention: 'coco17', coordinateSpace: 'pixel',
+    frameWidth: 640, frameHeight: 480, requestedFps: 2, sampledFps: 2,
+    source: { clipRef: 'clip', originalFps: 30, totalFrames: 60 },
+    model: { detector: 'd', pose: 'p', inputSize: [192, 256], modelName: 'm', modelVersion: '1', preprocessConfigHash: 'h' },
+    frames: [{ frameIndex: 0, timestampMs: 0, persons: [{
+      trackId: 'trk-1', bbox: [10, 20, 100, 200], score: 0.9,
+      keypoints: Array.from({ length: 17 }, (_, i) => [i * 5, i * 4, 0.8]),
+    }] }],
+  });
+  // 임시 artifact 파일 작성 + sha256 반환. 본문은 route가 읽는 그대로(바이트 일치).
+  const writeArtifact = (doc: unknown) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'va-kp-'));
+    const p = path.join(dir, `${JOB_ID}.keypoints.json`);
+    const body = JSON.stringify(doc);
+    fs.writeFileSync(p, body);
+    return { path: p, sha: crypto.createHash('sha256').update(Buffer.from(body)).digest('hex') };
+  };
+  const jobRowKp = (over = {}) => ({
+    id: JOB_ID, organization_id: ORG_ID, patient_record_id: PAT_ID, clip_id: CLIP_ID,
+    process_id: 'p1', status: 'review_pending', analysis_profile: null,
+    requested_features: [], result_features: { tracking: { targetTrackId: 'trk-1' } },
+    error_code: null, applied_at: null, applied_revision: null, applied_inputs_hash: null,
+    keypoints_path: null, keypoints_sha256: null,
+    created_at: NOW, updated_at: NOW, assigned_doctor_user_id: USER_ID, ...over,
+  });
+  const getOverlay = (pool: Pool, role = 'doctor') => request(makeApp(pool))
+    .get(`/api/video-analysis/jobs/${JOB_ID}/overlay`).set('Authorization', `Bearer ${orgToken(role)}`);
+
+  it('200: sha256+schema 통과 → {jobId, clipId, targetTrackId, keypoints}', async () => {
+    const { path: kpPath, sha } = writeArtifact(kpDoc());
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [jobRowKp({ keypoints_path: kpPath, keypoints_sha256: sha })] });
+    const res = await getOverlay(pool);
+    expect(res.status).toBe(200);
+    expect(res.body.jobId).toBe(JOB_ID);
+    expect(res.body.clipId).toBe(CLIP_ID);
+    expect(res.body.targetTrackId).toBe('trk-1');
+    expect(res.body.keypoints.frames).toHaveLength(1);
+    expect(res.headers['cache-control']).toContain('no-store');
+  });
+
+  it('404 OVERLAY_NOT_AVAILABLE: keypoints_path 없음(검수 종료/미산출)', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [jobRowKp({ keypoints_path: null })] });
+    const res = await getOverlay(pool);
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe('OVERLAY_NOT_AVAILABLE');
+  });
+
+  it('403: 담당의 아님', async () => {
+    const { path: kpPath, sha } = writeArtifact(kpDoc());
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [jobRowKp({ keypoints_path: kpPath, keypoints_sha256: sha, assigned_doctor_user_id: OTHER_DOCTOR })] });
+    const res = await getOverlay(pool);
+    expect(res.status).toBe(403);
+  });
+
+  it('404: 플래그 off → 라우트 미존재', async () => {
+    flagState.enabled = false;
+    const pool = makePool();
+    const res = await getOverlay(pool);
+    expect(res.status).toBe(404);
+    expect(q(pool)).not.toHaveBeenCalled();
+  });
+
+  it('502 INVALID_KEYPOINTS_ARTIFACT: sha256 불일치(변조)', async () => {
+    const { path: kpPath } = writeArtifact(kpDoc());
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [jobRowKp({ keypoints_path: kpPath, keypoints_sha256: 'deadbeef' })] });
+    const res = await getOverlay(pool);
+    expect(res.status).toBe(502);
+    expect(res.body.code).toBe('INVALID_KEYPOINTS_ARTIFACT');
+  });
+
+  it('502: sha256 null인데 path 존재(비정상)', async () => {
+    const { path: kpPath } = writeArtifact(kpDoc());
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [jobRowKp({ keypoints_path: kpPath, keypoints_sha256: null })] });
+    const res = await getOverlay(pool);
+    expect(res.status).toBe(502);
+    expect(res.body.code).toBe('INVALID_KEYPOINTS_ARTIFACT');
+  });
+
+  it('502: 계약 위반(깨진 구조)', async () => {
+    const { path: kpPath, sha } = writeArtifact({ schemaVersion: 1, foo: 'bar' });
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [jobRowKp({ keypoints_path: kpPath, keypoints_sha256: sha })] });
+    const res = await getOverlay(pool);
+    expect(res.status).toBe(502);
+    expect(res.body.code).toBe('INVALID_KEYPOINTS_ARTIFACT');
+  });
+});
+
+describe('POST /jobs/:jobId/close-review (검수 종료, 6.0-8)', () => {
+  beforeEach(() => { vi.clearAllMocks(); flagState.enabled = true; });
+
+  const jobRowCr = (over = {}) => ({
+    id: JOB_ID, organization_id: ORG_ID, patient_record_id: PAT_ID, clip_id: CLIP_ID,
+    process_id: 'p1', status: 'review_pending', analysis_profile: null,
+    requested_features: [], result_features: null, error_code: null,
+    applied_at: null, applied_revision: null, applied_inputs_hash: null,
+    keypoints_path: null, keypoints_sha256: null,
+    created_at: NOW, updated_at: NOW, assigned_doctor_user_id: USER_ID, ...over,
+  });
+  const post = (pool: Pool) => request(makeApp(pool))
+    .post(`/api/video-analysis/jobs/${JOB_ID}/close-review`)
+    .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN);
+
+  it('200 cleared: artifact 회수 + 파일 unlink + audit', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'va-cr-'));
+    const kpPath = path.join(dir, `${JOB_ID}.keypoints.json`);
+    fs.writeFileSync(kpPath, '{}');
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [jobRowCr({ keypoints_path: kpPath, keypoints_sha256: 'x' })] }); // loadAccessibleJob
+    q(pool).mockResolvedValueOnce({ rows: [{ keypoints_path: kpPath }] }); // UPDATE RETURNING
+    const res = await post(pool);
+    expect(res.status).toBe(200);
+    expect(res.body.cleared).toBe(true);
+    expect(fs.existsSync(kpPath)).toBe(false); // 파일 회수
+    expect(writeAuditLog).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      action: 'video_analysis_close_review', targetType: 'patient', targetId: PAT_ID,
+    }));
+  });
+
+  it('409 JOB_NOT_READY: processing 중이면 차단(worker 경합)', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [jobRowCr({ status: 'processing', keypoints_path: 'x' })] });
+    const res = await post(pool);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('JOB_NOT_READY');
+    // UPDATE는 호출되지 않음(auth + loadAccessibleJob 2회뿐).
+    expect(q(pool)).toHaveBeenCalledTimes(2);
+  });
+
+  it('200 멱등: artifact 없으면 cleared:false', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [jobRowCr({ keypoints_path: null })] });
+    q(pool).mockResolvedValueOnce({ rows: [] }); // UPDATE 0행
+    const res = await post(pool);
+    expect(res.status).toBe(200);
+    expect(res.body.cleared).toBe(false);
+  });
+
+  it('403: 담당의 아님', async () => {
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [jobRowCr({ assigned_doctor_user_id: OTHER_DOCTOR })] });
+    const res = await post(pool);
+    expect(res.status).toBe(403);
   });
 });

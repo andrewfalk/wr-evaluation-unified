@@ -6,8 +6,8 @@ import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { writeAuditLog } from '../middleware/audit';
 import path from 'path';
-import { SampleDetectResultSchema } from '@wr/contracts';
-import { resolveFixtureClip, resolveUploadedClipPath, resolveSampleFramePath } from '../workers/fixturePath';
+import { SampleDetectResultSchema, PoseKeypointsSchema } from '@wr/contracts';
+import { resolveFixtureClip, resolveUploadedClipPath, resolveSampleFramePath, resolveKeypointsArtifactPath } from '../workers/fixturePath';
 import { runSampleDetect } from '../workers/sampleDetect';
 import { buildUploadMiddleware, runMulter, sniffVideoMime, hashFile, safeUnlink } from '../workers/videoUpload';
 import type { RequestHandler as ExpressRequestHandler } from 'express';
@@ -178,6 +178,8 @@ interface VideoJobRow {
   applied_at: Date | null;
   applied_revision: number | null;
   applied_inputs_hash: string | null;
+  keypoints_path: string | null;
+  keypoints_sha256: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -558,6 +560,105 @@ async function getJob(pool: Pool, req: Request, res: Response): Promise<void> {
   res.status(200).json(jobResponse(job.row));
 }
 
+// keypoints artifact를 검수용 골격 overlay로 반환(6.0-8, §8.6.1). 원본 프레임 없이 좌표만 →
+// 클라가 중립 배경 위 뼈대로 렌더. DB(keypoints_path/sha256)는 신뢰 경계 밖이므로 ① 전용 resolver로
+// 경로 재검증 ② sha256 무결성 ③ PoseKeypointsSchema 계약 검증을 모두 통과한 것만 응답(raw stream 금지 —
+// 변조/깨진 구조가 클라로 새지 않게). targetTrackId까지 함께 실어 UI가 payload만으로 그릴 수 있게 한다.
+async function getOverlay(pool: Pool, req: Request, res: Response): Promise<void> {
+  const session = req.sessionInfo as unknown as SessionInfo;
+  const job = await loadAccessibleJob(pool, session, req.params.jobId, res);
+  if (!job) return;
+
+  const row = job.row;
+  if (!row.keypoints_path) {
+    res.status(404).json({ code: 'OVERLAY_NOT_AVAILABLE', error: 'No keypoints artifact for this job (review closed or not produced)' });
+    return;
+  }
+  const artifactPath = resolveKeypointsArtifactPath(row.keypoints_path, row.id, config.video.uploadDir);
+  if (!artifactPath) {
+    res.status(404).json({ code: 'OVERLAY_NOT_AVAILABLE', error: 'No keypoints artifact for this job (review closed or not produced)' });
+    return;
+  }
+
+  let raw: Buffer;
+  try {
+    raw = await fs.promises.readFile(artifactPath);
+  } catch {
+    res.status(404).json({ code: 'OVERLAY_NOT_AVAILABLE', error: 'No keypoints artifact for this job (review closed or not produced)' });
+    return;
+  }
+
+  // ② 무결성: 워커는 keypoints 영속 시 sha256을 함께 기록(videoAnalysisWorker). sha 부재(path만 존재)는
+  //    비정상(레거시/손상)으로 보고, 불일치는 변조로 보고 502. 유효 JSON 형태 변조는 schema로 못 잡으므로 1차 방어.
+  if (!row.keypoints_sha256) {
+    res.status(502).json({ code: 'INVALID_KEYPOINTS_ARTIFACT', error: 'keypoints artifact has no integrity hash' });
+    return;
+  }
+  const actualSha = crypto.createHash('sha256').update(raw).digest('hex');
+  if (actualSha !== row.keypoints_sha256) {
+    res.status(502).json({ code: 'INVALID_KEYPOINTS_ARTIFACT', error: 'keypoints artifact integrity check failed' });
+    return;
+  }
+
+  // ③ 계약 검증: 깨진/예상 밖 구조 차단.
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.toString('utf8'));
+  } catch {
+    res.status(502).json({ code: 'INVALID_KEYPOINTS_ARTIFACT', error: 'keypoints artifact is not valid JSON' });
+    return;
+  }
+  const keypoints = PoseKeypointsSchema.safeParse(parsed);
+  if (!keypoints.success) {
+    res.status(502).json({ code: 'INVALID_KEYPOINTS_ARTIFACT', error: 'keypoints artifact does not match contract' });
+    return;
+  }
+
+  // 채택 track id(있으면) — result_features(intrinsic ClipFeatureSet).tracking.targetTrackId.
+  const rf = row.result_features as { tracking?: { targetTrackId?: string | null } } | null;
+  const targetTrackId = rf?.tracking?.targetTrackId ?? null;
+
+  // 환자 pose 좌표 → 캐시/스니핑 차단(썸네일과 달리 원본 프레임 없음 → 별도 게이트 불필요).
+  res.setHeader('Cache-Control', 'no-store, private');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.status(200).json({ jobId: row.id, clipId: row.clip_id, targetTrackId, keypoints: keypoints.data });
+}
+
+// 검수 종료(6.0-8): 해당 job의 keypoints artifact를 즉시 회수해 식별 가능성을 줄인다. artifact는
+// job당 1개(<jobId>.keypoints.json)라 job 단위로 좁혀 같은 clip의 다른 job 근거는 보존한다.
+async function closeReview(pool: Pool, req: Request, res: Response): Promise<void> {
+  const session = req.sessionInfo as unknown as SessionInfo;
+  const job = await loadAccessibleJob(pool, session, req.params.jobId, res);
+  if (!job) return;
+
+  // 진행 중 job은 차단: worker가 아직 keypoints artifact를 쓸 수 있어 "종료 직후 재생성" 경합 발생.
+  if (job.row.status === 'queued' || job.row.status === 'processing') {
+    res.status(409).json({ code: 'JOB_NOT_READY', error: 'cannot close review while the job is still running' });
+    return;
+  }
+
+  // DB-first: 먼저 참조를 끊고(미참조 → orphan sweep 안전망) 그 다음 파일 unlink.
+  const { rows } = await pool.query<{ keypoints_path: string | null }>(
+    `UPDATE video_analysis_jobs SET keypoints_path = NULL, keypoints_sha256 = NULL
+     WHERE id = $1 AND keypoints_path IS NOT NULL RETURNING keypoints_path`,
+    [job.row.id]
+  );
+  const cleared = rows.length > 0;
+  if (cleared && rows[0].keypoints_path) {
+    const real = resolveKeypointsArtifactPath(rows[0].keypoints_path, job.row.id, config.video.uploadDir);
+    if (real) await safeUnlink(real);
+  }
+
+  void writeAuditLog(pool, {
+    actorUserId: session.userId, actorOrgId: session.organizationId,
+    action: 'video_analysis_close_review', targetType: 'patient', targetId: job.row.patient_record_id,
+    outcome: 'success', ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null,
+    extra: { jobId: job.row.id, clipId: job.row.clip_id, cleared },
+  });
+  res.status(200).json({ ok: true, jobId: job.row.id, cleared });
+}
+
 // patient_records 행(부분) — apply에서 사용.
 interface PatientRowLite { id: string; revision: number; payload: unknown; created_at: Date; updated_at: Date; }
 
@@ -781,7 +882,9 @@ export function createVideoAnalysisRouter(pool: Pool): Router {
   router.post('/clips/:clipId/select-target', auth, csrfMiddleware, wrap(selectTarget));
   router.post('/jobs', auth, csrfMiddleware, wrap(createJob));
   router.get('/jobs/:jobId', auth, wrap(getJob));
+  router.get('/jobs/:jobId/overlay', auth, wrap(getOverlay));
   router.post('/jobs/:jobId/apply', auth, csrfMiddleware, wrap(applyJob));
+  router.post('/jobs/:jobId/close-review', auth, csrfMiddleware, wrap(closeReview));
 
   return router;
 }

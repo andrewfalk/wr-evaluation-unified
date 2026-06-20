@@ -9,6 +9,8 @@ import {
   getJob,
   pollJob,
   isVideoAnalysisSupported,
+  fetchOverlay,
+  closeReview,
 } from '../videoAnalysisClient.js';
 import { applyVideoAnalysisJob } from '../patientServerRepository.js';
 
@@ -120,5 +122,46 @@ describe('applyVideoAnalysisJob', () => {
     expect(out.id).toBe('local-1');
     expect(out.meta).toEqual({ source: 'x' });
     expect(out.sync.revision).toBe(4);
+  });
+});
+
+describe('fetchOverlay / closeReview (6.0-8)', () => {
+  it('fetchOverlay: 200 → payload 반환', async () => {
+    const payload = { jobId: 'j1', clipId: 'c1', targetTrackId: 't1', keypoints: { frames: [] } };
+    requestJson.mockResolvedValueOnce(payload);
+    const out = await fetchOverlay('j1', intranet);
+    expect(out).toEqual(payload);
+    expect(requestJson).toHaveBeenCalledWith('/api/video-analysis/jobs/j1/overlay', expect.objectContaining({ baseUrl: 'https://srv' }));
+  });
+
+  it('fetchOverlay: 404 OVERLAY_NOT_AVAILABLE → null(검수 자료 없음)', async () => {
+    const err = new Error('not found'); err.status = 404; err.data = { code: 'OVERLAY_NOT_AVAILABLE' };
+    requestJson.mockRejectedValueOnce(err);
+    expect(await fetchOverlay('j1', intranet)).toBeNull();
+  });
+
+  it('fetchOverlay: 404 data.error.code 형태도 null', async () => {
+    const err = new Error('not found'); err.status = 404; err.data = { error: { code: 'OVERLAY_NOT_AVAILABLE' } };
+    requestJson.mockRejectedValueOnce(err);
+    expect(await fetchOverlay('j1', intranet)).toBeNull();
+  });
+
+  it('fetchOverlay: 그 외 에러(502)는 rethrow', async () => {
+    const err = new Error('bad'); err.status = 502; err.data = { code: 'INVALID_KEYPOINTS_ARTIFACT' };
+    requestJson.mockRejectedValueOnce(err);
+    await expect(fetchOverlay('j1', intranet)).rejects.toBe(err);
+  });
+
+  it('fetchOverlay: 비인트라넷이면 차단', async () => {
+    await expect(fetchOverlay('j1', { session: { mode: 'web' }, settings: {} }))
+      .rejects.toMatchObject({ code: 'VIDEO_UNSUPPORTED_MODE' });
+    expect(requestJson).not.toHaveBeenCalled();
+  });
+
+  it('closeReview: POST close-review', async () => {
+    requestJson.mockResolvedValueOnce({ ok: true, jobId: 'j1', cleared: true });
+    const out = await closeReview('j1', intranet);
+    expect(out.cleared).toBe(true);
+    expect(requestJson).toHaveBeenCalledWith('/api/video-analysis/jobs/j1/close-review', expect.objectContaining({ method: 'POST' }));
   });
 });

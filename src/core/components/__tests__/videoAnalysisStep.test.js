@@ -9,8 +9,73 @@ import {
   removeProcessVA,
   addClipVA,
   resolveApplyMode,
+  resolveSourceJobs,
+  sourceJobLabel,
+  buildProcessEvidence,
+  tasksForJob,
+  resolveTargetTaskId,
 } from '../VideoAnalysisStep.jsx';
 import { getAggregationMethod } from '../../services/videoAggregate.js';
+import { getModuleSuggestions } from '../../services/videoProvenance.js';
+
+describe('resolveSourceJobs (6.0-8 — 골격 검수 source job 도출)', () => {
+  it('시점 융합: 채택(adopted) 먼저, 탈락은 비교 시점으로 구분', () => {
+    const jobEv = {
+      analysisJobIds: ['jb', 'ja'],
+      contributions: [{
+        processName: '공정A',
+        evidence: { fusion: {
+          adopted: { jobId: 'ja', viewpoint: 'sagittal', adopted: true },
+          candidates: [
+            { jobId: 'jb', viewpoint: 'frontal', adopted: false },
+            { jobId: 'ja', viewpoint: 'sagittal', adopted: true },
+          ],
+        } },
+      }],
+    };
+    const out = resolveSourceJobs(jobEv);
+    expect(out.map((s) => s.jobId)).toEqual(['ja', 'jb']); // 채택 먼저
+    expect(out[0]).toMatchObject({ jobId: 'ja', adopted: true, viewpoint: 'sagittal', processName: '공정A' });
+    expect(out[1]).toMatchObject({ jobId: 'jb', adopted: false, viewpoint: 'frontal' });
+  });
+
+  it('여러 공정 jobId 중복 제거', () => {
+    const jobEv = { contributions: [
+      { processName: 'A', evidence: { fusion: { candidates: [{ jobId: 'j1', viewpoint: 'sagittal', adopted: true }] } } },
+      { processName: 'B', evidence: { fusion: { candidates: [{ jobId: 'j1', viewpoint: 'sagittal', adopted: true }] } } },
+    ] };
+    expect(resolveSourceJobs(jobEv).map((s) => s.jobId)).toEqual(['j1']);
+  });
+
+  it('contribution에 fusion 없으면 그 contribution의 analysisJobIds로 fallback(누락 방지)', () => {
+    const jobEv = { contributions: [{ processName: '공정A', analysisJobIds: ['j9'], evidence: {} }] };
+    const out = resolveSourceJobs(jobEv);
+    expect(out).toEqual([{ jobId: 'j9', processName: '공정A', viewpoint: null, adopted: true }]);
+  });
+
+  it('혼합: fusion 있는 contribution + fusion 없는 contribution 모두 source에 포함', () => {
+    const jobEv = { contributions: [
+      { processName: 'A', evidence: { fusion: { candidates: [{ jobId: 'jf', viewpoint: 'sagittal', adopted: true }] } } },
+      { processName: 'B', analysisJobIds: ['jn'], evidence: {} },
+    ] };
+    expect(resolveSourceJobs(jobEv).map((s) => s.jobId).sort()).toEqual(['jf', 'jn']);
+  });
+
+  it('contribution 없는 구 데이터 → feature 레벨 analysisJobIds 최종 fallback', () => {
+    const jobEv = { analysisJobIds: ['j9'], contributions: [] };
+    expect(resolveSourceJobs(jobEv)).toEqual([{ jobId: 'j9', processName: null, viewpoint: null, adopted: true }]);
+  });
+
+  it('jobEv 없음 → 빈 배열', () => {
+    expect(resolveSourceJobs(null)).toEqual([]);
+  });
+
+  it('sourceJobLabel: 공정+시점+채택여부', () => {
+    expect(sourceJobLabel({ processName: '공정A', viewpoint: 'sagittal', adopted: true })).toBe('공정A 측면 (채택)');
+    expect(sourceJobLabel({ processName: '공정A', viewpoint: 'frontal', adopted: false })).toBe('공정A 정면 (비교 시점)');
+    expect(sourceJobLabel({ processName: null, viewpoint: null, adopted: true })).toBe('(채택)');
+  });
+});
 
 describe('requestedFeaturesForModules', () => {
   it('returns only featureKeys that map to active modules (incl. candidates)', () => {
@@ -126,6 +191,39 @@ describe('buildJobEvidence (B2 선행 — 값/근거 분리, 2단 keying)', () =
   });
 });
 
+describe('buildProcessEvidence (task-scope — 공정 단위, jobEv-like)', () => {
+  const processes = [
+    { id: 'p1', sharedJobId: 'jobA', name: '용접', shiftSharePercent: 60 },
+    { id: 'p2', sharedJobId: 'jobA', name: '연삭', shiftSharePercent: 40 },
+  ];
+  const processFeatures = [
+    { processId: 'p1', features: { neckFlexionOver20HoursPerDay: { kind: 'numeric', value: 2.4 } } },
+    { processId: 'p2', features: { neckFlexionOver20HoursPerDay: { kind: 'numeric', value: 1.0 } } },
+  ];
+  const processEvidence = [
+    { processId: 'p1', analysisJobIds: ['j1'], evidenceByFeatureKey: { neckFlexionOver20HoursPerDay: { intrinsicValue: 0.4, warnings: [] } } },
+    { processId: 'p2', analysisJobIds: ['j2'], evidenceByFeatureKey: { neckFlexionOver20HoursPerDay: { intrinsicValue: 0.2, warnings: [] } } },
+  ];
+
+  it('공정(processId) 단위 keying — 집계 없이 공정별로 분리', () => {
+    const byProc = buildProcessEvidence(processes, processFeatures, processEvidence);
+    expect(byProc.p1.neckFlexionOver20HoursPerDay).toBeDefined();
+    expect(byProc.p2.neckFlexionOver20HoursPerDay).toBeDefined();
+    expect(byProc.p1.neckFlexionOver20HoursPerDay.contributions[0].processName).toBe('용접');
+    expect(byProc.p2.neckFlexionOver20HoursPerDay.contributions[0].processName).toBe('연삭');
+  });
+
+  it('jobEv-like 형태(contributions 1개 + perDayValue + analysisJobIds) — renderEvidencePanel/resolveSourceJobs 재사용', () => {
+    const e = buildProcessEvidence(processes, processFeatures, processEvidence).p1.neckFlexionOver20HoursPerDay;
+    expect(e.aggregationMethod).toBe('task(1:1)');
+    expect(e.contributions).toHaveLength(1);
+    expect(e.contributions[0]).toMatchObject({ processId: 'p1', sharePercent: 60, perDayValue: 2.4 });
+    expect(e.analysisJobIds).toEqual(['j1']);
+    // resolveSourceJobs가 그대로 동작(fusion 없으면 contribution analysisJobIds fallback)
+    expect(resolveSourceJobs(e).map((s) => s.jobId)).toEqual(['j1']);
+  });
+});
+
 describe('shareTotalsByJob', () => {
   it('sums shiftSharePercent per job', () => {
     const totals = shareTotalsByJob([
@@ -188,5 +286,58 @@ describe('input edits invalidate stale analysis results (Codex finding)', () => 
     const out = addClipVA(analyzed(), 'p1');
     expect(out.clips).toHaveLength(2);
     expect(out.jobFeatures).toEqual([]);
+  });
+});
+
+describe('tasksForJob / resolveTargetTaskId (task-scope 적용 대상)', () => {
+  const moduleData = {
+    tasks: [
+      { id: 't1', name: '용접', sharedJobId: 'jobA' },
+      { id: 't2', name: '연삭', sharedJobId: 'jobA' },
+      { id: 't3', name: '레거시', sharedJobId: '' },
+    ],
+  };
+
+  it('직업 매칭 task만 반환(엄격, cervical 기본)', () => {
+    expect(tasksForJob(moduleData, 'jobA').map((t) => t.id)).toEqual(['t1', 't2']);
+    expect(tasksForJob(moduleData, 'jobB')).toEqual([]); // 매칭 없음 + fallback 미허용 → 빈
+  });
+
+  it('fallbackUnlinked(spine): 매칭 없을 때 미연결 레거시 task 허용', () => {
+    expect(tasksForJob(moduleData, 'jobB', { fallbackUnlinked: true }).map((t) => t.id)).toEqual(['t3']);
+    // 매칭이 있으면 fallback 안 씀(레거시로 새지 않음)
+    expect(tasksForJob(moduleData, 'jobA', { fallbackUnlinked: true }).map((t) => t.id)).toEqual(['t1', 't2']);
+  });
+
+  it('resolveTargetTaskId: 선택값이 후보에 있을 때만 유효(stale 방어)', () => {
+    const tasks = [{ id: 't1' }, { id: 't2' }];
+    expect(resolveTargetTaskId(tasks, 't2')).toBe('t2');        // 유효 선택
+    expect(resolveTargetTaskId(tasks, 'tX')).toBeNull();        // stale(삭제된 task) → 자동 안 됨(2개)
+    expect(resolveTargetTaskId([{ id: 't1' }], 'tX')).toBe('t1'); // stale이지만 후보 1개 → 자동
+    expect(resolveTargetTaskId([{ id: 't1' }])).toBe('t1');     // 미선택 + 1개 → 자동
+    expect(resolveTargetTaskId(tasks)).toBeNull();              // 미선택 + 다수 → 없음
+    expect(resolveTargetTaskId([])).toBeNull();                 // 후보 없음
+  });
+});
+
+describe('task-scope 제안 노출+적용 활성 회귀 (경추 neckFlexion이 안 보이던 버그)', () => {
+  it('cervical 활성 + processFeatures에 neckFlexion + task 1개 → 제안 렌더 + 적용 활성', () => {
+    // 1) 분석값이 cervical 제안으로 노출되는가 (getModuleSuggestions는 레지스트리 무관, 계약만 사용)
+    const features = {
+      neckFlexionOver20HoursPerDay: { kind: 'numeric', value: 2.4, confidence: 0.85, autoSuggestAllowed: true, requiresManualReview: false },
+    };
+    const suggestions = getModuleSuggestions(features, 'cervical');
+    expect(suggestions.map((s) => s.featureKey)).toContain('neckFlexionOver20HoursPerDay');
+    const s = suggestions[0];
+
+    // 2) 대상 task 1개 → 자동 지정 → 적용 비활성 아님(noTarget=false), 저신뢰 아님(refOnly=false)
+    const moduleData = { tasks: [{ id: 'tk1', name: '용접', sharedJobId: 'jobA' }] };
+    const tasks = tasksForJob(moduleData, 'jobA');
+    const targetTaskId = resolveTargetTaskId(tasks, undefined);
+    expect(targetTaskId).toBe('tk1');
+    const noTarget = !targetTaskId;
+    const refOnly = s.autoSuggestAllowed === false;
+    expect(noTarget).toBe(false);
+    expect(refOnly).toBe(false); // 적용 버튼 활성 조건(busy/applyBlocked 외)
   });
 });
