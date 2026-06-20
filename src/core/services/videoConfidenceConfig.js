@@ -50,3 +50,18 @@ export function resolveAutoSuggest(featureKey, cf, baseFlags, thresholds) {
   }
   return { autoSuggestAllowed: blocked ? false : baseFlags.autoSuggestAllowed, gateWarnings };
 }
+
+// ---------------------------------------------------------------------------
+// 6.0-B2 잠정 confidence 임계값 — 검증으로 채울 자리(런타임 비활성).
+//
+// 중요: 이 표는 DEFAULT_CONFIDENCE_THRESHOLDS와 **다른 객체**다. resolveAutoSuggest는 이 표를
+// 참조하지 않는다. 여기에 값을 넣어도 게이팅은 켜지지 않는다 — 게이팅을 켜려면 검증 통과 후
+// 별도 PR에서 DEFAULT_CONFIDENCE_THRESHOLDS(또는 호출부 confidenceThresholds 인자)에 명시 배선해야 한다.
+// 검증 전(6.0-B2 미완) 추측값으로 자동제안을 막지 않기 위한 분리다(§8.9).
+//
+// 채우는 방법: docs/VIDEO_VALIDATION_B2.md 6단계 — validate_set.py→videoValidateReport.mjs로 측정한
+// 오차가 §8.9 허용오차 + inter-rater 기준을 충족하는 변수에 한해 { featureKey: { overall, visibility, ... } }
+// 형태로 기입하고 결정 근거를 함께 남긴다. (예) squatDuration: { overall: 0.70, visibility: 0.65 }
+export const CANDIDATE_CONFIDENCE_THRESHOLDS = {
+  // 6.0-B2 측정 후 채움. 현재 비어 있음 = 잠정값 미확정.
+};

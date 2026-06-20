@@ -1,0 +1,41 @@
+{
+  "_README": [
+    "6.0-B2 검증셋 입력 manifest 템플릿. 이 파일을 복사해 비커밋 경로(예: ../../.video-validation/manifest.json)에",
+    "실제 영상/keypoints/clip_features 경로와 gold annotation id를 채워 사용한다. 실 데이터·경로는 절대 커밋 금지(§8.13).",
+    "videoRef/annotationId는 비식별 참조만. 각 clip 입력은 videoPath / keypointsPath / clipFeaturesPath 중 정확히 하나."
+  ],
+  "version": 1,
+  "cases": [
+    {
+      "caseId": "case-001",
+      "videoRef": "b2-001",
+      "annotationId": "ann-001",
+      "activeMinutesPerDay": 360,
+      "activeModules": ["spine"],
+      "clips": [
+        { "videoPath": "../../.video-validation/raw/b2-001-sagittal.mp4", "viewpoint": "sagittal", "targetTrackId": "t1", "fps": 5 },
+        { "videoPath": "../../.video-validation/raw/b2-001-frontal.mp4", "viewpoint": "frontal", "targetTrackId": "t1", "fps": 5 }
+      ]
+    },
+    {
+      "caseId": "case-002-precomputed",
+      "videoRef": "b2-002",
+      "annotationId": "ann-002",
+      "activeMinutesPerDay": 240,
+      "activeModules": ["spine", "cervical"],
+      "clips": [
+        { "keypointsPath": "../../.video-validation/keypoints/b2-002-sagittal.json", "viewpoint": "sagittal", "targetTrackId": "t1" }
+      ]
+    },
+    {
+      "caseId": "case-003-fixture-smoke",
+      "videoRef": "b2-smoke",
+      "annotationId": "ann-smoke",
+      "activeMinutesPerDay": null,
+      "activeModules": ["spine"],
+      "clips": [
+        { "clipFeaturesPath": "fixtures/clip_features.sample.json", "viewpoint": "sagittal", "targetTrackId": "t1" }
+      ]
+    }
+  ]
+}

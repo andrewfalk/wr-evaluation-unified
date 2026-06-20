@@ -1,0 +1,45 @@
+{
+  "_README": [
+    "6.0-B2 gold-standard annotation 템플릿(AnnotationSetSchema). 전문의·평가자가 영상에서 수기 판정한 정답.",
+    "이 파일을 복사해 비커밋 경로에 실제 case의 annotation을 채운다. videoRef/annotator는 비식별만(§8.13).",
+    "manifest의 annotationId가 여기 annotations[].id와 매칭된다. features의 단위는 VIDEO_FEATURE_TARGETS와 일치시킬 것.",
+    "(예: trunkFlexionOver45Duration=minutes_per_day, trunkPostureG=degrees, squatDuration=minutes_per_day)"
+  ],
+  "version": 1,
+  "annotations": [
+    {
+      "id": "ann-001",
+      "videoRef": "b2-001",
+      "annotator": "rater-A",
+      "annotatedAt": "2026-06-20T09:00:00Z",
+      "stratification": {
+        "viewpoint": "sagittal",
+        "occlusionLevel": "partial",
+        "multiplePeople": true,
+        "clothing": "heavy",
+        "cameraHeight": "eye",
+        "workType": "조립"
+      },
+      "features": {
+        "trunkFlexionOver45Duration": { "kind": "numeric", "value": 95, "unit": "minutes_per_day" },
+        "trunkPostureG": { "kind": "numeric", "value": 52, "unit": "degrees" }
+      },
+      "segments": [
+        { "featureKey": "trunkFlexionOver45Duration", "kind": "posture", "startMs": 2000, "endMs": 6200, "note": "허리 깊게 굽힘" }
+      ],
+      "notes": "정면 가림 일부, 측면 우세"
+    },
+    {
+      "id": "ann-smoke",
+      "videoRef": "b2-smoke",
+      "annotator": "rater-A",
+      "annotatedAt": "2026-06-20T09:10:00Z",
+      "stratification": { "viewpoint": "sagittal", "occlusionLevel": "none" },
+      "features": {
+        "trunkPostureG": { "kind": "numeric", "value": 47, "unit": "degrees" }
+      },
+      "segments": [],
+      "notes": "fixture 스모크용(활동시간 없음 → 시간형 비교 생략)"
+    }
+  ]
+}
