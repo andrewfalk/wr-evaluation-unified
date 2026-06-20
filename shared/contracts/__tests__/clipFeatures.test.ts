@@ -91,6 +91,16 @@ describe('feature_config.json ↔ contract cross-check (drift guard)', () => {
     expect(typeof featureConfig.version).toBe('string');
     expect(featureConfig.version.length).toBeGreaterThan(0);
   });
+
+  it('canonical JSON schema의 featureKey enum ↔ FeatureKeySchema 정합(양방향 — 신규 feature 누락 차단)', () => {
+    const schema = JSON.parse(readFileSync(path.join(svc, 'schema/clip_features.schema.json'), 'utf-8'));
+    const schemaKeys: string[] = schema.properties.features.propertyNames.enum;
+    const contractKeys = FeatureKeySchema.options as string[];
+    // schema enum의 모든 키는 계약 FeatureKey여야 한다.
+    for (const k of schemaKeys) expect(contractKeys).toContain(k);
+    // feature_config에 선언된 키는 schema enum에도 있어야 한다(Python 산출이 schema 검증 통과).
+    for (const k of Object.keys(featureConfig.features)) expect(schemaKeys).toContain(k);
+  });
 });
 
 describe('ClipFeatureSetSchema — confidenceBreakdown + quality (PR D3a, §8.8)', () => {

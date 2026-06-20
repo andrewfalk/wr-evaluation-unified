@@ -1,6 +1,6 @@
 {
-  "version": "feature-calc-2026-06-b",
-  "description": "feature 계산 규칙(6.0-6a~6b). 각도 정의·임계값·OneEuro·품질·tracking 파라미터를 버전관리. 실제 임계값은 6.0-B2 검증으로 보정.",
+  "version": "feature-calc-2026-06-d",
+  "description": "feature 계산 규칙(6.0-6a~6b). 각도 정의·임계값·OneEuro·품질·tracking 파라미터를 버전관리. 실제 임계값은 6.0-B2 검증으로 보정. (d) minHoldSec=0 — 임계 초과한 모든 프레임시간을 노출시간으로 합산(연속유지 요건 제거). peak는 순간 최대, duration은 노출 비율로 둘이 방향 일치. frame-drop(max_gap) 제외는 유지.",
   "tracking": {
     "iouThreshold": 0.3,
     "maxAgeFrames": 10,
@@ -15,7 +15,7 @@
     "left_knee": 13, "right_knee": 14, "left_ankle": 15, "right_ankle": 16
   },
   "minKeypointConfidence": 0.3,
-  "minHoldSec": 0.5,
+  "minHoldSec": 0,
   "frameDropMaxGapMs": 1000,
   "oneEuro": { "minCutoff": 1.0, "beta": 0.0, "dCutoff": 1.0 },
   "features": {
@@ -24,25 +24,31 @@
       "type": "joint_angle_posture",
       "joint": "knee", "side": "both", "reduce": "min",
       "condition": "lt", "thresholdDeg": 90,
-      "note": "무릎각(hip-knee-ankle) < 90°가 연속 minHoldSec 이상 유지된 시간 비율. 양 무릎 중 더 굽은 쪽(min)."
+      "note": "무릎각(hip-knee-ankle) < 90°인 시간 비율(연속유지 요건 없음, frame-drop 제외). 양 무릎 중 더 굽은 쪽(min)."
     },
     "overheadHours": {
       "kind": "numeric", "metric": "posture_ratio", "unit": "ratio", "mode": "auto",
       "type": "overhead",
       "side": "any",
       "criteria": { "wristAboveShoulder": true, "upperarmElevationDeg": 90 },
-      "note": "(손목 y < 어깨 y) OR (상완 거상각 >= 90°), 좌/우 어느 쪽이든. 연속 minHoldSec 이상 시간 비율."
+      "note": "(손목 y < 어깨 y) OR (상완 거상각 >= 90°), 좌/우 어느 쪽이든. 충족한 시간 비율(연속유지 요건 없음, frame-drop 제외)."
     },
     "neckFlexionOver20HoursPerDay": {
       "kind": "numeric", "metric": "posture_ratio", "unit": "ratio", "mode": "auto",
       "type": "neck_flexion",
       "condition": "gt", "thresholdDeg": 20,
-      "note": "목 굴곡각(어깨중점→귀중점 벡터의 수직 기준 전방 굴곡) > 20° 유지 시간 비율(PRD 20° 기준)."
+      "note": "목 굴곡각(어깨중점→귀중점 벡터의 수직 기준 전방 굴곡) > 20°인 시간 비율(PRD 20° 기준, 연속유지 요건 없음)."
     },
     "trunkPostureG": {
       "kind": "numeric", "metric": "peak_angle", "unit": "degrees", "mode": "candidate",
       "type": "trunk_flexion",
       "note": "체간 전굴각(엉덩이중점→어깨중점 벡터의 수직 기준) peak. G1~G11 매핑은 하중·작업유형 반영 필요 → candidate(수기 확인)."
+    },
+    "trunkFlexionOver45Duration": {
+      "kind": "numeric", "metric": "posture_ratio", "unit": "ratio", "mode": "candidate",
+      "type": "trunk_flexion",
+      "condition": "gt", "thresholdDeg": 45,
+      "note": "체간 전굴각 > 45°인 시간 비율(작업별 candidate, 연속유지 요건 없음). 분/일 환산은 활동시간×비율(클라 UI). neckFlexion 미러."
     }
   }
 }

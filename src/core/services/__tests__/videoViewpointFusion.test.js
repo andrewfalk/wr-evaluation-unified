@@ -49,6 +49,17 @@ describe('fuseClipFeatureSets (시점 융합 §8.6.1, PR D3b)', () => {
     expect(fused.features.squatDuration.value).toBe(0.5);    // sagittal 채택
   });
 
+  it('trunkFlexionOver45Duration: 측면(sagittal) preferred가 정면을 이김(체간 전굴)', () => {
+    const fused = fuseClipFeatureSets([
+      entry('frontal', { trunkFlexionOver45Duration: numFeat(0.7, 0.95, { keypoint: 0.95, visibility: 0.95 }) }),
+      entry('sagittal', { trunkFlexionOver45Duration: numFeat(0.4, 0.6, { keypoint: 0.6, visibility: 0.6 }) }),
+    ]);
+    const f = fused.features.trunkFlexionOver45Duration;
+    expect(f.value).toBe(0.4);                              // sagittal(preferred) 채택
+    expect(f.confidenceBreakdown.viewpoint).toBe(1.0);
+    expect(f.warnings).not.toContain(NON_PREFERRED_WARNING);
+  });
+
   it('INTER_VIEW_CONFLICT 기본 비활성(임계값 없음) → 경고 없음', () => {
     const fused = fuseClipFeatureSets([
       entry('sagittal', { trunkPostureG: angle(20) }),

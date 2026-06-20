@@ -19,6 +19,7 @@ const AGG = {
   cycleSeconds: 'weightedAvg',
   suspectedKneeTwist: 'or',
   trunkPostureG: 'pick',
+  trunkFlexionOver45Duration: 'pick',
   neckForcedFlexion: 'pick',
   neckCombinedFlexRot: 'pick',
   vibrationToolUseDurationCandidate: 'pick',

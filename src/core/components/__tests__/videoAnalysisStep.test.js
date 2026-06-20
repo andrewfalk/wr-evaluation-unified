@@ -14,9 +14,75 @@ import {
   buildProcessEvidence,
   tasksForJob,
   resolveTargetTaskId,
+  candidateMinutesPerDay,
+  excludeTaskScopeCandidates,
 } from '../VideoAnalysisStep.jsx';
 import { getAggregationMethod } from '../../services/videoAggregate.js';
-import { getModuleSuggestions } from '../../services/videoProvenance.js';
+import { getModuleSuggestions, getModuleCandidates } from '../../services/videoProvenance.js';
+
+describe('척추 45°↑ 굴곡 candidate (작업 단위 표시)', () => {
+  it('candidateMinutesPerDay: 비율×활동분 반올림, 활동시간 null → null', () => {
+    expect(candidateMinutesPerDay(0.35, 360)).toBe(126);
+    expect(candidateMinutesPerDay(0.5, 0)).toBe(0);
+    expect(candidateMinutesPerDay(0.35, null)).toBeNull();
+    expect(candidateMinutesPerDay(0.35, undefined)).toBeNull();
+  });
+
+  it('getModuleCandidates: spine candidate(trunkFlexionOver45Duration)만 반환(auto 제외, metric/unit 미반환)', () => {
+    const featureMap = {
+      cyclesPerDay: { kind: 'numeric', value: 1200, autoSuggestAllowed: true },        // auto
+      trunkFlexionOver45Duration: { kind: 'candidate', value: 0.32, reason: 'r', confidence: 0.55 },
+      trunkPostureG: { kind: 'candidate', value: 'G3', reason: 'g', confidence: 0.5 },
+      neckFlexionOver20HoursPerDay: { kind: 'numeric', value: 1.1, autoSuggestAllowed: true }, // cervical
+    };
+    const cands = getModuleCandidates(featureMap, 'spine');
+    expect(cands.map((c) => c.featureKey).sort()).toEqual(['trunkFlexionOver45Duration', 'trunkPostureG']);
+    const tf = cands.find((c) => c.featureKey === 'trunkFlexionOver45Duration');
+    expect(tf).toEqual({ featureKey: 'trunkFlexionOver45Duration', value: 0.32, reason: 'r', confidence: 0.55 });
+    expect('metric' in tf).toBe(false); // candidate feature엔 metric 없음
+  });
+
+  it('candidate만 있어도(auto 제안 0) 작업 단위 블록에 표시되어야 한다(블록 null 가드 회귀)', () => {
+    // spine에 auto(cyclesPerDay/cycleSeconds) 없이 candidate만 있는 processFeatures
+    const features = { trunkFlexionOver45Duration: { kind: 'candidate', value: 0.4, reason: 'r', confidence: 0.5 } };
+    const suggestions = getModuleSuggestions(features, 'spine');
+    const candidates = getModuleCandidates(features, 'spine');
+    expect(suggestions.length).toBe(0);
+    expect(candidates.length).toBe(1);
+    // 블록 가드: suggestions.length===0 && candidates.length===0 일 때만 null → 여기선 표시
+    expect(suggestions.length === 0 && candidates.length === 0).toBe(false);
+  });
+
+  it('활동시간 유무에 따른 표시값(비율 + 분/일)', () => {
+    const ratio = 0.35;
+    // 활동시간 있음 → "35% · 약 126 분/일"
+    expect(Math.round(ratio * 100)).toBe(35);
+    expect(candidateMinutesPerDay(ratio, 360)).toBe(126);
+    // 활동시간 없음 → 비율만(분/일 null)
+    expect(candidateMinutesPerDay(ratio, null)).toBeNull();
+  });
+
+  it('getModuleCandidates: 계약은 candidate인데 값 kind가 아니면 제외(malformed 방어)', () => {
+    const featureMap = {
+      trunkFlexionOver45Duration: { kind: 'numeric', value: 0.3 }, // mode candidate지만 kind 불일치
+    };
+    expect(getModuleCandidates(featureMap, 'spine')).toEqual([]);
+  });
+
+  it('excludeTaskScopeCandidates: flat 후보에서 spine/cervical(task-scope) 후보 제외, 그 외 보존', () => {
+    const candidates = [
+      { featureKey: 'trunkFlexionOver45Duration', value: 0.3 }, // spine(task-scope)
+      { featureKey: 'trunkPostureG', value: 'G3' },             // spine(task-scope)
+      { featureKey: 'neckCombinedFlexRot', value: 'x' },        // cervical(task-scope)
+      { featureKey: 'suspectedKneeTwist', value: true },        // knee(job-scope) → 유지
+      { featureKey: 'vibrationToolUseDurationCandidate', value: 1 }, // shoulder(job-scope) → 유지
+    ];
+    const out = excludeTaskScopeCandidates(candidates, ['spine', 'cervical']);
+    expect(out.map((c) => c.featureKey)).toEqual(['suspectedKneeTwist', 'vibrationToolUseDurationCandidate']);
+    // task-scope 모듈 비활성이면 제외 없음
+    expect(excludeTaskScopeCandidates(candidates, [])).toHaveLength(5);
+  });
+});
 
 describe('resolveSourceJobs (6.0-8 — 골격 검수 source job 도출)', () => {
   it('시점 융합: 채택(adopted) 먼저, 탈락은 비교 시점으로 구분', () => {

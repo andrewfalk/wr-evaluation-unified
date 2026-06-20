@@ -327,13 +327,26 @@ def main():
 
     # trunkPostureG: peak trunk flexion angle (candidate)
     trunk_raw = [(times[i], trunk_flexion_angle(kps[i])) for i in range(len(frames))]
-    trunk_vals = [v for _, v in smooth_series(trunk_raw, euro) if v is not None]
+    trunk_sm = smooth_series(trunk_raw, euro)
+    trunk_vals = [v for _, v in trunk_sm if v is not None]
     if trunk_vals:
         ov, bd = make_conf(["left_hip", "right_hip", "left_shoulder", "right_shoulder"])
         features["trunkPostureG"] = {
             "kind": "numeric", "metric": "peak_angle", "value": round(max(trunk_vals), 2), "unit": "degrees",
             "confidence": ov, "confidenceBreakdown": bd,
             "segments": [], "warnings": ["POSTURE_G_MANUAL"] + track_warnings,
+        }
+
+    # trunkFlexionOver45Duration: trunk flexion > 45° 유지 비율 (candidate, neckFlexion 미러)
+    tthr = cfg["features"]["trunkFlexionOver45Duration"]["thresholdDeg"]
+    tsamples = [(t, (v is not None and v > tthr)) for t, v in trunk_sm if v is not None]
+    if tsamples:
+        ratio, segs, _ = posture_ratio(tsamples, max_gap, min_hold)
+        ov, bd = make_conf(["left_hip", "right_hip", "left_shoulder", "right_shoulder"])
+        features["trunkFlexionOver45Duration"] = {
+            "kind": "numeric", "metric": "posture_ratio", "value": round(ratio, 4), "unit": "ratio",
+            "confidence": ov, "confidenceBreakdown": bd,
+            "segments": segs, "warnings": list(track_warnings),
         }
 
     doc = {
