@@ -1,0 +1,2 @@
+﻿caseId,videoRef,clipFileName,viewpoint,bodyPartFocus,clipDurationSec,activeMinutesPerDay,trunkPeakDeg,trunkOver45Sec,neckPeakDeg,neckNonNeutralSec,kneeMinDeg,squatSec,overheadSec,repetitionCount,occlusionLevel,multiplePeople,clothing,cameraHeight,workType,annotator,annotatedDate,notes
+case-001,b2-001,b2-001-side.mp4,sagittal,척추,48,360,52,18,28,12,,,,6,partial,Y,heavy,eye,조립,rater-A,2026-06-22,예시행 — 측정 후 이 줄을 지우고 실제 데이터로 채우세요
