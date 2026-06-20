@@ -206,6 +206,10 @@ def test_trunk_flexion_over45_candidate():
     assert tf["metric"] == "posture_ratio" and tf["unit"] == "ratio", tf
     assert approx(tf["value"], 1.0, 0.05), tf            # 전 구간 >45° → ratio ~1
     assert len(tf["segments"]) >= 1, tf                  # 유지 구간 존재
+    # trunkPostureG(peak_angle): peak 프레임 점-세그먼트(startMs==endMs) — overlay 별색 표시용.
+    tg = out["features"]["trunkPostureG"]
+    assert tg["metric"] == "peak_angle", tg
+    assert len(tg["segments"]) == 1 and tg["segments"][0]["startMs"] == tg["segments"][0]["endMs"], tg
     # candidate라도 Python은 metric/unit/segments만 — mode/candidate 판정은 클라(VIDEO_FEATURE_TARGETS).
     # 곧게 선 체간 → 45° 미만 → ratio 0 (feature는 생성되나 value 0).
     upright = {"left_hip": (80, 300), "right_hip": (120, 300),

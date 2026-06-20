@@ -16,6 +16,7 @@ import {
   resolveTargetTaskId,
   candidateMinutesPerDay,
   excludeTaskScopeCandidates,
+  segmentsForJob,
 } from '../VideoAnalysisStep.jsx';
 import { getAggregationMethod } from '../../services/videoAggregate.js';
 import { getModuleSuggestions, getModuleCandidates } from '../../services/videoProvenance.js';
@@ -140,6 +141,30 @@ describe('resolveSourceJobs (6.0-8 — 골격 검수 source job 도출)', () => 
     expect(sourceJobLabel({ processName: '공정A', viewpoint: 'sagittal', adopted: true })).toBe('공정A 측면 (채택)');
     expect(sourceJobLabel({ processName: '공정A', viewpoint: 'frontal', adopted: false })).toBe('공정A 정면 (비교 시점)');
     expect(sourceJobLabel({ processName: null, viewpoint: null, adopted: true })).toBe('(채택)');
+  });
+});
+
+describe('segmentsForJob (골격 overlay 활성-프레임 하이라이트)', () => {
+  const segs = [{ startMs: 2000, endMs: 6000 }];
+
+  it('단일 시점(fusion 없음): analysisJobIds 매칭 시 segments 반환', () => {
+    const jobEv = { contributions: [{ analysisJobIds: ['j1'], evidence: { segments: segs } }] };
+    expect(segmentsForJob(jobEv, 'j1')).toEqual(segs);
+    expect(segmentsForJob(jobEv, 'jX')).toEqual([]); // 미매칭
+  });
+
+  it('fusion: 채택(adopted) job일 때만 segments(비교 시점 job은 빈 배열)', () => {
+    const jobEv = { contributions: [{
+      analysisJobIds: ['ja', 'jb'],
+      evidence: { segments: segs, fusion: { adopted: { jobId: 'ja' }, candidates: [{ jobId: 'ja', adopted: true }, { jobId: 'jb', adopted: false }] } },
+    }] };
+    expect(segmentsForJob(jobEv, 'ja')).toEqual(segs); // 채택 시점 = ev.segments 소유
+    expect(segmentsForJob(jobEv, 'jb')).toEqual([]);   // 비교 시점은 구간 미보유
+  });
+
+  it('segments 없음/jobEv 없음 → 빈 배열', () => {
+    expect(segmentsForJob({ contributions: [{ analysisJobIds: ['j1'], evidence: {} }] }, 'j1')).toEqual([]);
+    expect(segmentsForJob(null, 'j1')).toEqual([]);
   });
 });
 

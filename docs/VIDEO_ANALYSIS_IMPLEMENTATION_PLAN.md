@@ -138,6 +138,12 @@
   - [x] 버전 파일명(`<clipId>.<uuid>.thumb.jpg`)·`resolveSampleFramePath`(전용 검증, 삭제도 경유) + `GET /sample-frame`(게이트 off면 과거 경로 잔존해도 404·no-store·nosniff) + DB-first 옛 파일 회수
   - [x] 수명: select-target/retention A/cleanup 회수(식별 이미지 단명) / 클라 `requestBlob`+`fetchSampleFrame`+`TargetPicker frameUrl`(objectURL 누수 해제)
   - [x] 테스트 서버 465/클라 689 통과, lint 0, build OK (Python cv2 경로는 스모크 검증). Codex 리뷰 6회 반영
+- [~] **(후속 개선) 골격 검수 활성-프레임 하이라이트** — M3-8 골격 overlay 검수 시 "그 변수 자세가 잡힌 프레임"을 골격 색으로 즉시 식별. 브랜치 `feat/video-skeleton-active-highlight`. **Tier-3 라이브 육안 확인 완료(호박색 강조 정상)**.
+  - [x] Python `feature_calc.py`: `trunkPostureG`(peak_angle)에 **peak 프레임 점-세그먼트**(`startMs==endMs`) emit → 지속 변수 segment와 동일 메커니즘으로 통일(스키마 변경 0, 실추론 e2e 확인 `segments:[{31917,31917}]`)
+  - [x] 클라 `SkeletonOverlay.jsx`: `frameActive`/`activeFrameIndices` 순수함수 + 활성 프레임 **호박색 골격**(대상 track) + 스크럽바 호박색 마커 + 안내문. `activeSegments` prop 추가
+  - [x] 클라 `VideoAnalysisStep.jsx`: `segmentsForJob`(overlay job ↔ 그 클립 segments 매칭, **채택 시점 job만** — 비교 시점은 segment 미보유라 미표시) → `activeSegments` 전달
+  - [x] 테스트: 클라 **759 통과**(frameActive 경계/peak·activeFrameIndices·segmentsForJob fusion 채택/비교) + Python golden(peak 점-세그먼트), build:web·lint 0
+  - **결정**: peak 변수도 별도 경로 없이 점-세그먼트로 표현(지속 변수와 한 메커니즘). 적용 범위 = 웹 SkeletonOverlay만(B2 `overlay_render.py`는 범위 밖).
 
 ### M4 — 배포·고급 (6.0-9, 6.0-10)
 - [ ] 6.0-9 에어갭 Docker 배포 + recipe versioning

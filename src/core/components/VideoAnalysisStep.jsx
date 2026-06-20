@@ -179,6 +179,20 @@ export function resolveSourceJobs(jobEv) {
   return out;
 }
 
+// 골격 overlay(특정 source job)에 그 변수의 근거 구간(segments)을 매칭한다. evidence.segments는 채택(또는
+// 단일) 클립 기준이라 그 job의 overlay일 때만 매칭 — 비교 시점 job은 구간 미보유라 빈 배열(하이라이트 없음).
+export function segmentsForJob(jobEv, jobId) {
+  if (!jobEv || !jobId) return [];
+  for (const c of jobEv.contributions || []) {
+    const ev = c.evidence || {};
+    if (!Array.isArray(ev.segments) || ev.segments.length === 0) continue;
+    const adoptedJobId = ev.fusion?.adopted?.jobId;
+    const owns = adoptedJobId != null ? adoptedJobId === jobId : (c.analysisJobIds || []).indexOf(jobId) >= 0;
+    if (owns) return ev.segments;
+  }
+  return [];
+}
+
 /**
  * task-scope 모듈의 적용 대상 task 후보(직업 기준). spine처럼 fallbackUnlinked면 매칭 task가 없을 때
  * 직업 미연결 레거시 task도 후보로 허용한다(모듈 extractFromModule fallback과 동일 규칙). cervical은 엄격.
@@ -669,7 +683,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
             {openOv.error && <p className="muted" style={{ fontSize: 12, color: '#b26a00' }}>{openOv.error}</p>}
             {openOv.data && (
               <>
-                <SkeletonOverlay overlay={openOv.data} />
+                <SkeletonOverlay overlay={openOv.data} activeSegments={segmentsForJob(jobEv, openSj.jobId)} />
                 <button type="button" style={{ marginTop: 4, fontSize: 12 }}
                   onClick={() => endReview(openSj.jobId)}>
                   이 분석 검수 종료(자료 회수)

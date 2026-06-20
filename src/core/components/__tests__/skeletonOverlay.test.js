@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scaledKeypoints, COCO17_BONES } from '../SkeletonOverlay.jsx';
+import { scaledKeypoints, COCO17_BONES, frameActive, activeFrameIndices } from '../SkeletonOverlay.jsx';
 
 const kps = [
   [100, 200, 0.9],
@@ -32,5 +32,36 @@ describe('scaledKeypoints (SkeletonOverlay geometry)', () => {
       expect(a).toBeGreaterThanOrEqual(0);
       expect(b).toBeLessThan(17);
     }
+  });
+});
+
+describe('frameActive / activeFrameIndices (자세 활성 프레임 하이라이트)', () => {
+  const durSeg = [{ startMs: 2000, endMs: 6000 }];
+  const peakSeg = [{ startMs: 3000, endMs: 3000 }]; // peak 변수 점-세그먼트
+
+  it('지속 구간: 구간 안 프레임만 active', () => {
+    expect(frameActive(1999, durSeg)).toBe(false);
+    expect(frameActive(2000, durSeg)).toBe(true);  // 경계 포함
+    expect(frameActive(6000, durSeg)).toBe(true);
+    expect(frameActive(6001, durSeg)).toBe(false);
+  });
+
+  it('peak 점-세그먼트: 정확히 그 프레임만 active', () => {
+    expect(frameActive(3000, peakSeg)).toBe(true);
+    expect(frameActive(2999, peakSeg)).toBe(false);
+    expect(frameActive(3001, peakSeg)).toBe(false);
+  });
+
+  it('segments 없음/널 → 항상 false', () => {
+    expect(frameActive(3000, [])).toBe(false);
+    expect(frameActive(3000, undefined)).toBe(false);
+    expect(frameActive(null, durSeg)).toBe(false);
+  });
+
+  it('activeFrameIndices: 활성 프레임 인덱스 목록', () => {
+    const frames = [{ timestampMs: 1000 }, { timestampMs: 3000 }, { timestampMs: 5000 }, { timestampMs: 7000 }];
+    expect(activeFrameIndices(frames, durSeg)).toEqual([1, 2]); // 3000·5000 ∈ [2000,6000]
+    expect(activeFrameIndices(frames, peakSeg)).toEqual([1]);   // 3000만
+    expect(activeFrameIndices(frames, [])).toEqual([]);
   });
 });

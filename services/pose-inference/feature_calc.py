@@ -331,10 +331,13 @@ def main():
     trunk_vals = [v for _, v in trunk_sm if v is not None]
     if trunk_vals:
         ov, bd = make_conf(["left_hip", "right_hip", "left_shoulder", "right_shoulder"])
+        # peak가 발생한 프레임 시각을 점-세그먼트로 기록 → 검수 overlay가 "최대 굴곡 프레임"을 별색 표시
+        # (지속 변수의 segment와 동일 메커니즘으로 통일; startMs==endMs).
+        peak_t, _ = max(((t, v) for t, v in trunk_sm if v is not None), key=lambda tv: tv[1])
         features["trunkPostureG"] = {
             "kind": "numeric", "metric": "peak_angle", "value": round(max(trunk_vals), 2), "unit": "degrees",
             "confidence": ov, "confidenceBreakdown": bd,
-            "segments": [], "warnings": ["POSTURE_G_MANUAL"] + track_warnings,
+            "segments": [{"startMs": peak_t, "endMs": peak_t}], "warnings": ["POSTURE_G_MANUAL"] + track_warnings,
         }
 
     # trunkFlexionOver45Duration: trunk flexion > 45° 유지 비율 (candidate, neckFlexion 미러)
