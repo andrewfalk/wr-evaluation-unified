@@ -41,9 +41,12 @@
   `missingActiveTime`/`no_active_time`으로 비교에서 빠진다.
 
 ### 3. gold annotation 작성
-- `annotations.template.json` 복사 → 전문의·평가자가 각도/자세시간/반복을 수기 판정.
-- 단위는 `VIDEO_FEATURE_TARGETS`와 일치(각도 `degrees`, 시간 `minutes_per_day`/`hours_per_day`, 반복 `cycles_per_day`).
-- `segments`로 "어느 구간"까지 기록(duration/반복 오차의 시간대 추적).
+- **전문의용 상세 가이드(프로젝트 모르는 분께 배포용)**: [`VIDEO_VALIDATION_B2_ANNOTATION_GUIDE.md`](./VIDEO_VALIDATION_B2_ANNOTATION_GUIDE.md)
+  — Kinovea 설치·측정법(각도 정의 = 시스템 산식 일치)·엑셀 기입까지 step-by-step.
+  엑셀 템플릿: [`templates/gold_annotation_template.csv`](./templates/gold_annotation_template.csv).
+- 전문의는 엑셀(클립 단위 raw: 각도°·누적초·횟수)만 채우고, **IT가 → `annotations.json`(`AnnotationSetSchema`) 변환**
+  (누적초/클립길이×activeMinutesPerDay = 분/일 등). 단위는 `VIDEO_FEATURE_TARGETS`와 일치.
+- `segments`로 "어느 구간"까지 기록(duration/반복 오차의 시간대 추적, 선택).
 
 ### 4. inter-rater 점검
 - 같은 영상 일부를 복수 평가자가 독립 annotation → gold 자체의 평가자 간 변동 확인.
@@ -51,6 +54,12 @@
 
 ### 5. 정확도 측정
 ```bash
+# (a0) 전문의 엑셀(CSV) → annotations.json + manifest 스켈레톤(퍼-데이 환산 자동). 가이드 §8 참고.
+npm run video:annotations-from-csv -- --csv .video-validation/gold.csv \
+  --out-annotations .video-validation/annotations.json \
+  --out-manifest .video-validation/manifest.skeleton.json
+# → manifest.skeleton.json에 실제 videoPath·targetTrackId 채워 manifest.json으로 저장.
+
 # (a) 추출값 bundle 생성 — Python venv(Tier-3) 필요. --overlay는 원본 대조 육안.
 python services/pose-inference/validate_set.py \
   --manifest .video-validation/manifest.json \
