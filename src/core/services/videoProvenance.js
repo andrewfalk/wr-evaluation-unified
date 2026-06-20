@@ -53,6 +53,24 @@ export function getModuleSuggestions(featureMap, moduleId) {
 }
 
 /**
+ * VideoFeatureMap에서 한 모듈의 candidate(관찰값) 목록을 만든다 — getModuleSuggestions의 candidate판.
+ * 작업 단위 informational 렌더용(공정별). metric/unit은 반환하지 않는다 — candidate feature 객체엔
+ * 없으므로(per-day 변환이 kind/value/reason/confidence/warnings만 생성). 단위/표기는 formatter가
+ * featureKey로 분기(필요 시 evidence.intrinsicUnit/intrinsicMetric 참조).
+ * @returns {Array<{featureKey,value,reason,confidence}>}
+ */
+export function getModuleCandidates(featureMap, moduleId) {
+  const out = [];
+  for (const [featureKey, fv] of Object.entries(featureMap || {})) {
+    const target = VIDEO_FEATURE_TARGETS[featureKey];
+    // 계약상 candidate-mode + 실제 값도 candidate kind일 때만(malformed/구캐시 오표시 방어, collectCandidateFeatures와 정합).
+    if (!target || target.moduleId !== moduleId || target.mode !== 'candidate' || fv.kind !== 'candidate') continue;
+    out.push({ featureKey, value: fv.value, reason: fv.reason, confidence: fv.confidence });
+  }
+  return out;
+}
+
+/**
  * candidate-mode feature들을 candidateFeatures 엔트리로 추출(모듈 필드에 쓰지 않음).
  */
 export function collectCandidateFeatures(featureMap, { processIds = [], clipIds = [] } = {}) {

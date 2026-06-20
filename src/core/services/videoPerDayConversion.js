@@ -8,6 +8,7 @@
 import { ClipFeatureSetSchema, VIDEO_FEATURE_TARGETS } from '@contracts/index';
 import { CANDIDATE_REASONS } from './videoMock';
 import { resolveAutoSuggest, DEFAULT_CONFIDENCE_THRESHOLDS } from './videoConfidenceConfig';
+import { VIDEO_VIEWPOINT_CONFIG_VERSION } from './videoViewpointConfig';
 
 // 환산 규칙 버전(재현성). feature_config.json version과 함께 recipe를 이룬다(provenance).
 export const VIDEO_MAPPING_CONFIG_VERSION = 'pday-1.0.0';
@@ -27,6 +28,7 @@ function buildFeatureEvidence(cf, activeMinutesPerDay, warnings) {
   const ev = {
     intrinsicValue: cf.value,
     intrinsicMetric: cf.metric ?? null,
+    intrinsicUnit: cf.unit ?? null,       // 원값 단위(예: degrees) — generic candidate 표시용
     activeMinutesPerDay: activeMinutesPerDay ?? null,
     warnings: warnings || [],
   };
@@ -77,8 +79,12 @@ export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay,
       continue;
     }
 
-    // candidate(trunkPostureG 등): 모듈 필드 미기입, 활동시간 불필요 — 각도/원자값을 그대로 후보로.
+    // candidate(trunkPostureG 등): 모듈 필드 미기입 — value는 원값(각도/비율)을 그대로 후보로.
+    // time 단위 candidate(예: trunkFlexionOver45Duration, 분/일)는 활동시간을 evidence에 실어
+    // 근거 패널이 "비율×활동분=분/일" 환산식을 보이게 한다(value 자체는 비율 유지, 분/일은 UI 계산).
     if (target.mode === 'candidate') {
+      const isTimeUnit = target.unit === 'minutes_per_day' || target.unit === 'hours_per_day';
+      const evActiveMin = isTimeUnit && hasActiveTime ? activeMinutesPerDay : null;
       features[featureKey] = {
         kind: 'candidate',
         value: cf.value,
@@ -88,7 +94,7 @@ export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay,
         requiresManualReview: true,
         warnings: cf.warnings || [],
       };
-      evidenceByFeatureKey[featureKey] = buildFeatureEvidence(cf, null, cf.warnings || []);
+      evidenceByFeatureKey[featureKey] = buildFeatureEvidence(cf, evActiveMin, cf.warnings || []);
       continue;
     }
 
@@ -163,7 +169,8 @@ export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay,
   };
 }
 
-// 분석 recipe(provenance analysisBundleVersion) — feature_config + mapping config 버전 결합.
+// 분석 recipe(provenance analysisBundleVersion) — feature_config + mapping + viewpoint 정책 버전 결합.
+// viewpoint 선호도(PREFERRED_VIEWPOINT)는 다중 시점 산출 선택에 영향 → 재현성 위해 recipe에 포함.
 export function buildRecipeVersion(featureConfigVersion) {
-  return `fc:${featureConfigVersion}+map:${VIDEO_MAPPING_CONFIG_VERSION}`;
+  return `fc:${featureConfigVersion}+map:${VIDEO_MAPPING_CONFIG_VERSION}+vp:${VIDEO_VIEWPOINT_CONFIG_VERSION}`;
 }

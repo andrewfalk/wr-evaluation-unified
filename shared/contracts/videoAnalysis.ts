@@ -26,6 +26,7 @@ export const FeatureKeySchema = z.enum([
   'cyclesPerDay',
   'cycleSeconds',
   'trunkPostureG',
+  'trunkFlexionOver45Duration',
   'neckFlexionOver20HoursPerDay',
   'neckForcedFlexion',
   'neckCombinedFlexRot',
@@ -277,6 +278,9 @@ export const VIDEO_FEATURE_TARGETS: Record<
   cyclesPerDay: { moduleId: 'spine', targetField: 'frequency', unit: 'cycles_per_day', mode: 'auto-review' },
   cycleSeconds: { moduleId: 'spine', targetField: 'timeValue', unit: 'seconds_per_cycle', mode: 'auto-review' },
   trunkPostureG: { moduleId: 'spine', targetField: null, unit: null, mode: 'candidate' },
+  // 척추 45°↑ 굴곡 시간(작업별 관찰값). candidate라 spine 필드 미기입; value는 비율(posture_ratio),
+  // 분/일 표시는 클라가 ratio×activeMinutesPerDay로 계산(unit은 그 표시 단위 — UI는 raw value+unit 미출력).
+  trunkFlexionOver45Duration: { moduleId: 'spine', targetField: null, unit: 'minutes_per_day', mode: 'candidate' },
   // 경추 (cervical.tasks[*], 공정 1개 = task 1개) — neck_* 문자열 저장
   neckFlexionOver20HoursPerDay: { moduleId: 'cervical', targetField: 'neck_nonneutral_hours_per_day', unit: 'hours_per_day', mode: 'auto' },
   neckForcedFlexion: { moduleId: 'cervical', targetField: 'forced_neck_posture', unit: null, mode: 'auto-review' },

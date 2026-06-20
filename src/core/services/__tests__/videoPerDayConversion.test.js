@@ -65,6 +65,24 @@ describe('convertClipFeaturesToPerDay', () => {
     expect(r.missingActiveTime).toEqual([]); // candidate는 활동시간 무관
   });
 
+  it('candidate(trunkFlexionOver45Duration, posture_ratio) → value=비율 유지, time-unit이라 evidence에 활동시간·intrinsicUnit 운반', () => {
+    const cf = clipSet({
+      trunkFlexionOver45Duration: { kind: 'numeric', metric: 'posture_ratio', value: 0.32, unit: 'ratio', confidence: 0.55, segments: [{ startMs: 0, endMs: 1000 }], warnings: [] },
+    });
+    // 활동시간 있음 → candidate value는 여전히 비율(0.32), 분/일은 UI 계산. evidence에 활동시간·원값단위.
+    const r = convertClipFeaturesToPerDay(cf, 300);
+    expect(r.features.trunkFlexionOver45Duration).toMatchObject({ kind: 'candidate', value: 0.32, autoSuggestAllowed: false });
+    expect(r.missingActiveTime).toEqual([]); // candidate는 누락 집계 안 함
+    const ev = r.evidenceByFeatureKey.trunkFlexionOver45Duration;
+    expect(ev.activeMinutesPerDay).toBe(300); // time-unit candidate → 활동시간 운반(근거 환산식용)
+    expect(ev.intrinsicUnit).toBe('ratio');
+    expect(ev.intrinsicValue).toBe(0.32);
+    // 활동시간 없음 → 통과하되 evidence 활동시간 null
+    const r2 = convertClipFeaturesToPerDay(cf, null);
+    expect(r2.features.trunkFlexionOver45Duration.value).toBe(0.32);
+    expect(r2.evidenceByFeatureKey.trunkFlexionOver45Duration.activeMinutesPerDay).toBeNull();
+  });
+
   it('categorical clip feature(neckForcedFlexion, auto-review) → categorical 통과 + 수기확인', () => {
     const cf = clipSet({ neckForcedFlexion: { kind: 'categorical', value: 'forward_flexion', confidence: 0.7, warnings: [] } });
     const r = convertClipFeaturesToPerDay(cf, 200);

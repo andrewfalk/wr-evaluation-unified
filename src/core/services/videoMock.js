@@ -15,6 +15,7 @@ const MOCK_VALUES = {
   neckForcedFlexion: 'forward_flexion', // categorical (forced_neck_posture 굴곡 성분)
   // candidate (모듈 자동입력 금지)
   trunkPostureG: 'G3',
+  trunkFlexionOver45Duration: 0.32, // 비율(클립 내 45°↑ 시간) — 분/일은 클라가 활동시간으로 환산
   neckCombinedFlexRot: 'flexion_rotation',
   vibrationToolUseDurationCandidate: 1.0,
   suspectedKneeTwist: true,
@@ -28,6 +29,7 @@ export const CANDIDATE_REASONS = {
   suspectedKneeTwist: '무릎 비틀림은 2D 영상에서 저신뢰 — 수기 확인 필요',
   vibrationToolUseDurationCandidate: '공구 사용시간 후보만 — 진동 가속도 측정 불가',
   trunkPostureG: 'G1~G11은 하중 위치·작업유형 반영 — 수기 확인 필수',
+  trunkFlexionOver45Duration: '척추 45°↑ 굴곡 시간은 관찰값 — 작업 부담 판정은 수기 확인',
   neckCombinedFlexRot: '회전·복합자세는 2D 저신뢰 — 임계 미만 제안 금지',
 };
 

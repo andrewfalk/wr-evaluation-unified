@@ -179,6 +179,70 @@ def _run_feature_calc(kdoc):
         return json.loads(Path(opath).read_text(encoding="utf-8"))
 
 
+def _build_trunk_keypoints(coords, n=40, dt=200):
+    """주어진 체간 기하를 n프레임 — trunkFlexion 산출용 합성 keypoints 문서."""
+    frames = []
+    for i in range(n):
+        p = person(coords)
+        p["trackId"] = None
+        p["bbox"] = [0.0, 0.0, 50.0, 100.0]
+        frames.append({"frameIndex": i, "timestampMs": i * dt, "persons": [p]})
+    return {
+        "schemaVersion": 1, "keypointConvention": "coco17", "coordinateSpace": "pixel",
+        "frameWidth": 640, "frameHeight": 480, "requestedFps": 5, "sampledFps": 5,
+        "source": {"clipRef": "synthetic-trunk", "originalFps": 30, "totalFrames": n},
+        "model": {"detector": "d", "pose": "p", "inputSize": [192, 256],
+                  "modelName": "test", "modelVersion": "test", "preprocessConfigHash": "test"},
+        "frames": frames,
+    }
+
+
+def test_trunk_flexion_over45_candidate():
+    # 전굴 >45° (hip mid (100,300) → shoulder mid (220,230): 약 60°) 전 구간 유지 → ratio ~1.
+    flexed = {"left_hip": (80, 300), "right_hip": (120, 300),
+              "left_shoulder": (200, 230), "right_shoulder": (240, 230)}
+    out = _run_feature_calc(_build_trunk_keypoints(flexed))
+    tf = out["features"]["trunkFlexionOver45Duration"]
+    assert tf["metric"] == "posture_ratio" and tf["unit"] == "ratio", tf
+    assert approx(tf["value"], 1.0, 0.05), tf            # 전 구간 >45° → ratio ~1
+    assert len(tf["segments"]) >= 1, tf                  # 유지 구간 존재
+    # candidate라도 Python은 metric/unit/segments만 — mode/candidate 판정은 클라(VIDEO_FEATURE_TARGETS).
+    # 곧게 선 체간 → 45° 미만 → ratio 0 (feature는 생성되나 value 0).
+    upright = {"left_hip": (80, 300), "right_hip": (120, 300),
+               "left_shoulder": (80, 150), "right_shoulder": (120, 150)}
+    out2 = _run_feature_calc(_build_trunk_keypoints(upright))
+    tf2 = out2["features"].get("trunkFlexionOver45Duration")
+    assert tf2 is None or tf2["value"] == 0.0, tf2
+    print("ok: trunkFlexionOver45Duration (candidate, posture_ratio >45°)")
+
+
+def test_minhold_disabled_policy():
+    # 정책(feature-calc-2026-06-d): minHoldSec=0 — 연속유지 요건 없이 임계 초과 프레임시간을 합산.
+    # config 락(되돌림 방지).
+    cfg = json.loads((HERE / "feature_config.json").read_text(encoding="utf-8"))
+    assert cfg["minHoldSec"] == 0, f"minHoldSec must be 0 (B 정책), got {cfg['minHoldSec']}"
+
+    # 대부분 직립 + 잠깐(2프레임)만 >45 굽힘 → min-hold 0이라 작게나마 ratio>0(이전 0.5초였으면 0).
+    flexed = {"left_hip": (80, 300), "right_hip": (120, 300),
+              "left_shoulder": (200, 230), "right_shoulder": (240, 230)}
+    upright = {"left_hip": (80, 300), "right_hip": (120, 300),
+               "left_shoulder": (80, 150), "right_shoulder": (120, 150)}
+    n, dt = 20, 200
+    frames = []
+    for i in range(n):
+        p = person(flexed if i in (8, 9) else upright)  # 8,9 프레임만 전굴
+        p["trackId"] = None
+        p["bbox"] = [0.0, 0.0, 50.0, 100.0]
+        frames.append({"frameIndex": i, "timestampMs": i * dt, "persons": [p]})
+    doc = _build_trunk_keypoints(upright)  # 래퍼 메타 재사용
+    doc["frames"] = frames
+    out = _run_feature_calc(doc)
+    tf = out["features"]["trunkFlexionOver45Duration"]
+    assert tf["value"] > 0, f"min-hold 0이면 짧은 크로싱도 시간으로 잡혀야 함, got {tf['value']}"
+    assert tf["value"] < 0.3, tf  # 전체의 일부분만(과대계상 아님)
+    print("ok: minHoldSec=0 policy - short crossing counted as exposure time")
+
+
 def test_d3a_breakdown_and_quality():
     # (A) untracked + quality.usableFrameRatio=0.8 — 핵심 불변식: usableFrameRatio는
     #     breakdown에만, overall(min)에서 제외 → confidence는 0.8이 아니라 min(keypoint,visibility).
@@ -212,5 +276,7 @@ if __name__ == "__main__":
     test_posture_ratio()
     test_tracker()
     test_target_selection()
+    test_trunk_flexion_over45_candidate()
+    test_minhold_disabled_policy()
     test_d3a_breakdown_and_quality()
     print("ALL PASS")

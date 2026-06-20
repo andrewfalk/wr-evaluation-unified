@@ -107,7 +107,7 @@
   - [x] UX 오해방지 보정(Codex 4차): 진행바 재분석 중 `analyzing` 우선(hasAnalysis 덮어쓰기 방지)·환산식 hours/minutes 단위 분기(÷60 표기)·contribution `sharePercent`=실 공정 점유율(집계 가중치 100과 구분, "공정 점유율" 라벨)
   - [x] 테스트: 클라 **703 통과**(evidence 반환·feature 누출 0·fusion provenance·2단 keying·다직업 비충돌·processEvidence·sharePercent·mock 비파손), `build:web`(win7) OK, lint 0(내 코드). Codex 리뷰 4회 반영(feature 미부착·overlay 범위·fuse 계약 유지·2단 keying·reset 정책·집계 설명·진행바 포괄·fallback·단위 분기·sharePercent)
 - [ ] **PR M3-B2 (6.0-B2)** 파일럿 검증(오프라인 `validate_set.py`) + `CANDIDATE_CONFIDENCE_THRESHOLDS`(런타임 비활성 유지)
-- [~] **PR M3-8 (6.0-8)** skeleton overlay 검수(keypoints artifact 기반) + close-review 엔드포인트 — **코드 완료, Tier-3 라이브 검증 대기** (브랜치 `feat/video-6.0-8-skeleton-overlay`). 승인 계획 `cheeky-booping-shore.md`(코덱스 리뷰 5라운드 반영).
+- [x] **PR M3-8 (6.0-8)** skeleton overlay 검수(keypoints artifact 기반) + close-review 엔드포인트 — **PR #40 ✅ 머지 · Tier-3 라이브 검증 완료**. 승인 계획 `cheeky-booping-shore.md`(코덱스 리뷰 7라운드 반영).
   - **범위 확정**: overlay 검수 인프라만. **저위험 모듈 자동제안 명시활성(`confidenceGatingEnabledByFeature`)은 검증된 임계값 전제 → B2 의존으로 별도 분리**(이 PR은 게이팅 동작 불변).
   - **DB 마이그레이션 없음** — `jobs.keypoints_path/keypoints_sha256`(0018)·`uploadDir/artifacts/` 재사용.
   - [x] 서버 `resolveKeypointsArtifactPath`(신뢰 경계, `<jobId>.keypoints.json` 정확 basename + uploadDir 하위 + symlink 탈출 차단) + 단위테스트(`fixturePath.test.ts` 3건)
@@ -121,7 +121,18 @@
   - **Codex 리뷰 6차 반영**: ① close-review 실패를 성공처럼 닫지 않음(200만 closed) ② 혼합 evidence contribution별 analysisJobIds fallback ③ overlay 패널 row+job 복합키로 중복 노출 제거
   - [x] **task-scope(경추·척추) 제안 검토 렌더 추가** — 라이브 검증 중 발견: 경추 굴곡 등 task-scope 값은 분석되지만 검토 UI가 **job-scope(무릎·어깨)만 렌더**(커밋 68752788, 기존 제약)해 안 보였음. "제안 검토 (작업 단위)" 섹션 신설(공정≈task 1:1, 집계 없이 공정별 렌더). **경추·척추는 작업 갯수·이름이 달라 모듈별 독립** 처리, 적용 대상 task는 process×module당 자동(1개)/드롭다운(여러개)/없으면 적용 비활성. `renderSuggestionRow` 공용 헬퍼로 job/task 행 통일(골격 검수·근거 패널 공유), `buildProcessEvidence`(per-process jobEv-like)로 근거·source job 재사용. apply 경로는 기존 `applyFeatureToModule`/`writeField`가 `ctx.taskId` 지원(무변경).
   - [x] **Codex 리뷰 7차 반영(task-scope 견고화)**: ① **stale task 방어** — `resolveTargetTaskId`가 선택값이 현재 후보에 실재할 때만 유효(삭제된 task 선택 후 적용 버튼 잘못 활성→writeField 실패 방지) ② **spine 레거시 fallback** — `tasksForJob` + spine config `taskFallbackUnlinked:true`로 직업 미연결 task도 후보 허용(extractFromModule과 동일 규칙, cervical은 엄격) ③ **렌더 회귀 테스트** — cervical 활성+neckFlexion processFeature+task 1개 → 제안 노출·적용 활성(getModuleSuggestions+tasksForJob+resolveTargetTaskId 조합, RTL 미설정이라 순수함수로). 클라 726 통과, build:web·lint 0
-  - [ ] Tier-3 라이브 검증(overlay 렌더·close-review 회수·다중 source job 보존) — **대기**
+  - [x] Tier-3 라이브 검증(overlay 렌더·close-review 회수·다중 source job 보존) — 실 mp4 업로드 e2e 완료
+- [~] **(신규 측정 변수) 척추 45°↑ 굴곡 시간(trunkFlexionOver45Duration)** — **코드 완료, Tier-3 라이브 재검증 대기** (브랜치 `feat/video-trunk-flexion-45`). 승인 계획 `cheeky-booping-shore.md`(코덱스 리뷰 5라운드 반영).
+  - **결정**: spine MDDM에 굴곡 시간 필드 없음 + "측정해서 보여주기" 의도 → **candidate(자동입력 없음)**, 작업(task) 단위 표시. 값 = 클립 내 45°↑ **비율 + 분/일**(활동시간 있을 때, ratio×activeMinutesPerDay). 임계값 45°(config).
+  - **재사용**: Python `trunk_flexion_angle()`·`trunk_raw`·`posture_ratio()`(neckFlexion 미러) + PR #40 task-scope 섹션/`buildProcessEvidence`/골격 검수. spine 데이터 모델·apply 무변경.
+  - [x] Python feature_config+feature_calc(neckFlexion 미러, gt 45°) + golden test
+  - [x] 계약 FeatureKey+TARGET(spine·candidate·minutes_per_day) + clip_features schema enum
+  - [x] per-day candidate evidence 보강(activeMinutes 조건부·intrinsicUnit) / 클라 getModuleCandidates(kind guard)·candidateMinutesPerDay·renderCandidateRow(value=비율·보조=분/일, apply 없음) + 골격 검수 sub-block 추출(renderSkeletonReview)
+  - [x] task-scope 블록 candidate 표시(null 가드·candidate-only 시 대상작업 경고 생략) + flat 중복 제거(excludeTaskScopeCandidates) + viewpoint sagittal/VVC bump/recipe vp 포함 + AGG pick
+  - [x] **Codex 리뷰 5라운드 반영**: candidate vs spine필드(candidate 확정)·시간vs비율표기(둘 다, 분/일)·getModuleCandidates metric 미반환·displayJobEv non-mutating·generic fallback intrinsicUnit·candidate-only 경고 생략·**stale 방어/spine fallback은 PR#40 자산 재사용**·getModuleCandidates kind guard·flat 제외 helper 추출·schema↔contract 양방향 drift
+  - [x] 테스트(Python golden·계약 drift 양방향·getModuleCandidates·candidateMinutesPerDay·블록 회귀·flat 제외·viewpoint 융합): 클라 **735**/서버 479 통과, build:web·server build·lint 0
+  - [ ] Tier-3 라이브 재검증(척추 작업단위 candidate 노출·분/일·골격 검수 + min-hold=0 후 peak/시간 일치) — **대기**
+  - **정책 변경(라이브 검증 중 결정)**: `minHoldSec` 0.5→**0**(feature-calc-2026-06-d). peak는 순간 최대인데 duration은 연속 0.5초 유지만 세어, 잠깐 깊게 굽힌 동작이 peak>45°인데 시간 0으로 모순돼 보임(실측 e1f7fdbb: peak 61.8°, >45° 3프레임 고립). **연속유지 요건 제거 → 임계 초과 모든 프레임시간을 노출시간으로 합산**(frame-drop max_gap 제외는 유지). posture_ratio는 본래 프레임수가 아니라 **타임스탬프 기반 시간비율**이라 분/일 환산은 그대로. **squat·overhead·neckFlexion·trunkFlexion 전부 동일 적용**(글로벌 config 1곳). config는 Python이 추론마다 새로 읽어 서버 재빌드 불필요.
 - [x] **(후속 개선) 대상자 선택 대표 프레임 썸네일** — privacy 정책 예외(동의+인트라넷, `VIDEO_ANALYSIS_TARGET_THUMBNAIL` 기본 off). 박스-only로 작업자 식별 곤란 → 게이트 on 시 대표 프레임 위 선택. **PR #36 ✅ 머지 · 라이브 스모크(게이트 on) 검증 완료**
   - [x] `0019`(clips.sample_frame_path) + `sample_detect.py --thumbnail`(target_idx 재독·다운스케일·best-effort) + config 게이트
   - [x] 버전 파일명(`<clipId>.<uuid>.thumb.jpg`)·`resolveSampleFramePath`(전용 검증, 삭제도 경유) + `GET /sample-frame`(게이트 off면 과거 경로 잔존해도 404·no-store·nosniff) + DB-first 옛 파일 회수
