@@ -2,12 +2,13 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { resolveFixtureClip, resolveUploadedClipPath, resolveSampleFramePath } from '../fixturePath';
+import { resolveFixtureClip, resolveUploadedClipPath, resolveSampleFramePath, resolveKeypointsArtifactPath } from '../fixturePath';
 
 let dir: string;
 let uploadDir: string;
 const CLIP = '11111111-1111-1111-1111-111111111111';
 const UUID = 'abcdef01-2345-6789-abcd-ef0123456789';
+const JOB = '33333333-3333-3333-3333-333333333333';
 
 beforeAll(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fx-test-'));
@@ -18,6 +19,7 @@ beforeAll(() => {
   fs.mkdirSync(path.join(uploadDir, 'artifacts'), { recursive: true });
   fs.writeFileSync(path.join(uploadDir, 'artifacts', `${CLIP}.${UUID}.thumb.jpg`), 'jpg');
   fs.writeFileSync(path.join(uploadDir, 'artifacts', `${CLIP}.keypoints.json`), '{}');
+  fs.writeFileSync(path.join(uploadDir, 'artifacts', `${JOB}.keypoints.json`), '{}');
   fs.writeFileSync(path.join(uploadDir, 'artifacts', `${CLIP}.bad.thumb.jpg`), 'x'); // uuid 아님
 });
 afterAll(() => {
@@ -102,5 +104,28 @@ describe('resolveSampleFramePath', () => {
     expect(resolveSampleFramePath(art(`../${CLIP}.${UUID}.thumb.jpg`), CLIP, uploadDir)).toBeNull();
     expect(resolveSampleFramePath(art(`${CLIP}.ffffffff-ffff-ffff-ffff-ffffffffffff.thumb.jpg`), CLIP, uploadDir)).toBeNull(); // 부재
     expect(resolveSampleFramePath(art(`${CLIP}.${UUID}.thumb.jpg`), CLIP, null)).toBeNull();
+  });
+});
+
+describe('resolveKeypointsArtifactPath', () => {
+  const art = (name: string) => path.join(uploadDir, 'artifacts', name);
+
+  it('artifacts/<jobId>.keypoints.json → 실경로 반환', () => {
+    const p = art(`${JOB}.keypoints.json`);
+    expect(resolveKeypointsArtifactPath(p, JOB, uploadDir)).toBe(fs.realpathSync(p));
+  });
+
+  it('다른 jobId/타파일(thumb)·artifacts 밖 → null', () => {
+    expect(resolveKeypointsArtifactPath(art(`${CLIP}.keypoints.json`), JOB, uploadDir)).toBeNull(); // jobId 불일치
+    expect(resolveKeypointsArtifactPath(art(`${CLIP}.${UUID}.thumb.jpg`), JOB, uploadDir)).toBeNull(); // 타파일
+    expect(resolveKeypointsArtifactPath(path.join(uploadDir, 'clip.bin'), JOB, uploadDir)).toBeNull(); // artifacts 밖
+  });
+
+  it('traversal·부재·uploadDir null·빈값 → null', () => {
+    expect(resolveKeypointsArtifactPath(art(`../${JOB}.keypoints.json`), JOB, uploadDir)).toBeNull();
+    expect(resolveKeypointsArtifactPath(art(`44444444-4444-4444-4444-444444444444.keypoints.json`), '44444444-4444-4444-4444-444444444444', uploadDir)).toBeNull(); // 부재
+    expect(resolveKeypointsArtifactPath(art(`${JOB}.keypoints.json`), JOB, null)).toBeNull();
+    expect(resolveKeypointsArtifactPath('', JOB, uploadDir)).toBeNull();
+    expect(resolveKeypointsArtifactPath(undefined, JOB, uploadDir)).toBeNull();
   });
 });

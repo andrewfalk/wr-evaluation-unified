@@ -114,3 +114,29 @@ export async function pollJob(jobId, { session, settings } = {}, { intervalMs = 
   }
   return last;
 }
+
+// 검수용 골격 overlay(6.0-8): 서버가 sha256+계약 검증한 keypoints를 반환.
+// → { jobId, clipId, targetTrackId, keypoints }. UI는 payload만으로 그릴 수 있다(별도 조회 불필요).
+// artifact가 없으면(검수 종료/미산출) 서버는 404 OVERLAY_NOT_AVAILABLE → 여기서 null로 흡수(호출부 fallback).
+// httpClient의 requestJson은 non-2xx에서 err.status·err.data만 붙인다(err.code 없음) → status+data로 판별.
+export async function fetchOverlay(jobId, { session, settings } = {}) {
+  ensureIntranet(session);
+  try {
+    return await requestJson(`/api/video-analysis/jobs/${jobId}/overlay`, {
+      baseUrl: getBaseUrl(session, settings), session,
+    });
+  } catch (err) {
+    const code = err?.data?.code || err?.data?.error?.code;
+    if (err?.status === 404 && code === 'OVERLAY_NOT_AVAILABLE') return null;
+    throw err;
+  }
+}
+
+// 검수 종료(6.0-8, job 단위): 해당 job의 keypoints artifact를 서버가 즉시 회수.
+// 반환: { ok, jobId, cleared }. 진행 중(queued/processing) job이면 서버가 409 JOB_NOT_READY로 거부.
+export async function closeReview(jobId, { session, settings } = {}) {
+  ensureIntranet(session);
+  return requestJson(`/api/video-analysis/jobs/${jobId}/close-review`, {
+    baseUrl: getBaseUrl(session, settings), method: 'POST', session,
+  });
+}

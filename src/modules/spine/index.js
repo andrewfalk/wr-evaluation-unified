@@ -26,6 +26,8 @@ registerModule({
     scope: 'task',
     featureKeys: ['cyclesPerDay', 'cycleSeconds'],
     coerce: numberCoerce, // frequency·timeValue는 숫자 저장
+    // 직업 미연결 레거시 task도 대상 후보로 허용(extractFromModule과 동일 fallback). cervical은 미적용(엄격).
+    taskFallbackUnlinked: true,
     writeField: (moduleData, ctx, featureKey, value) =>
       taskScopeWriteField('spine', moduleData, ctx, featureKey, value,
         (fk) => (fk === 'cycleSeconds' ? { timeUnit: 'sec' } : undefined)),

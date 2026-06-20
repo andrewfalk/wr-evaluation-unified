@@ -11,10 +11,11 @@ import {
   applyFeatureToModule,
   rollbackAppliedInput,
 } from '../services/videoProvenance';
-import { isVideoAnalysisSupported, createClip, uploadClip, sampleDetectClip, selectTarget, fetchSampleFrame } from '../services/videoAnalysisClient';
+import { isVideoAnalysisSupported, createClip, uploadClip, sampleDetectClip, selectTarget, fetchSampleFrame, fetchOverlay, closeReview } from '../services/videoAnalysisClient';
 import { applyVideoFeatureViaServer } from '../services/videoServerApply';
 import { runServerAnalysis } from '../services/videoAnalysisRun';
 import { TargetPicker } from './TargetPicker';
+import { SkeletonOverlay } from './SkeletonOverlay';
 import { getModule } from '../moduleRegistry';
 import { VIDEO_FEATURE_TARGETS, resolveAnalysisJobIds } from '@contracts/index';
 
@@ -98,6 +99,8 @@ export function buildJobEvidence(processes = [], processFeatures = [], processEv
         // 실 공정 점유율(검토자 표시용). 집계 가중치(서버 absolute 경로의 내부 100%)와 구분 — 오해 방지.
         sharePercent: proc.shiftSharePercent,
         perDayValue: featuresByProcess[pe.processId]?.[featureKey]?.value,
+        // 이 공정의 원본 분석 job(들) — fusion evidence 없는 contribution의 골격 검수 fallback(6.0-8).
+        analysisJobIds: (pe.analysisJobIds || []).slice(),
         evidence: ev,
       });
       for (const jid of pe.analysisJobIds || []) {
@@ -106,6 +109,101 @@ export function buildJobEvidence(processes = [], processFeatures = [], processEv
     }
   }
   return byJob;
+}
+
+/**
+ * task-scope(경추·척추): 공정별 근거를 공정(processId) 단위로 묶는다. 집계가 없으므로 contribution은
+ * 공정 1개뿐 — buildJobEvidence와 같은 jobEv-like 형태라 renderEvidencePanel·resolveSourceJobs를 그대로 쓴다.
+ * @returns {object} processEvidenceByProcessId[processId][featureKey] = { aggregationMethod, contributions, analysisJobIds }
+ */
+export function buildProcessEvidence(processes = [], processFeatures = [], processEvidence = []) {
+  const featuresByProcess = {};
+  for (const pf of processFeatures) featuresByProcess[pf.processId] = pf.features || {};
+  const byProc = {};
+  for (const pe of processEvidence) {
+    const proc = processes.find((p) => p.id === pe.processId);
+    if (!proc) continue;
+    const jobIds = (pe.analysisJobIds || []).slice();
+    const featMap = byProc[pe.processId] || (byProc[pe.processId] = {});
+    for (const [featureKey, ev] of Object.entries(pe.evidenceByFeatureKey || {})) {
+      featMap[featureKey] = {
+        aggregationMethod: 'task(1:1)',
+        analysisJobIds: jobIds.slice(),
+        contributions: [{
+          processId: proc.id,
+          processName: proc.name,
+          sharePercent: proc.shiftSharePercent,
+          perDayValue: featuresByProcess[pe.processId]?.[featureKey]?.value,
+          analysisJobIds: jobIds.slice(),
+          evidence: ev,
+        }],
+      };
+    }
+  }
+  return byProc;
+}
+
+const VIEWPOINT_LABEL = { sagittal: '측면', frontal: '정면', other: '기타' };
+
+/**
+ * feature 한 항목(jobEv)의 골격 검수 대상 source job 목록을 도출한다(6.0-8).
+ * feature 값은 공정 합산·시점 융합으로 N개 job에서 오므로 단일 jobId를 붙이면 안 된다.
+ * 우선순위: contribution.evidence.fusion.candidates(채택=adopted, 탈락=비교 시점) — 채택 job을 주 검수 대상으로,
+ * 탈락 후보는 "비교 시점"으로 구분. fusion이 없으면(구 데이터) jobEv.analysisJobIds로 fallback.
+ * @returns {Array<{jobId, processName, viewpoint, adopted}>} 채택 먼저 정렬, jobId 중복 제거.
+ */
+export function resolveSourceJobs(jobEv) {
+  if (!jobEv) return [];
+  const out = [];
+  const seen = new Set();
+  const pushJob = (jobId, processName, viewpoint, adopted) => {
+    if (!jobId || seen.has(jobId)) return;
+    seen.add(jobId);
+    out.push({ jobId, processName: processName || null, viewpoint: viewpoint || null, adopted: !!adopted });
+  };
+  for (const c of jobEv.contributions || []) {
+    const cands = c.evidence?.fusion?.candidates;
+    if (Array.isArray(cands) && cands.length > 0) {
+      for (const cand of cands) pushJob(cand?.jobId, c.processName, cand?.viewpoint, cand?.adopted);
+    } else {
+      // 이 contribution은 시점 융합 evidence가 없음(구/부분 evidence) → 공정 job으로 fallback(누락 방지).
+      for (const jid of c.analysisJobIds || []) pushJob(jid, c.processName, null, true);
+    }
+  }
+  // contribution이 전혀 없는 경우(구 데이터)만 feature 레벨 analysisJobIds로 최종 fallback.
+  if (out.length === 0) {
+    for (const jid of jobEv.analysisJobIds || []) pushJob(jid, null, null, true);
+  }
+  out.sort((a, b) => (b.adopted ? 1 : 0) - (a.adopted ? 1 : 0));
+  return out;
+}
+
+/**
+ * task-scope 모듈의 적용 대상 task 후보(직업 기준). spine처럼 fallbackUnlinked면 매칭 task가 없을 때
+ * 직업 미연결 레거시 task도 후보로 허용한다(모듈 extractFromModule fallback과 동일 규칙). cervical은 엄격.
+ */
+export function tasksForJob(moduleData, sharedJobId, { fallbackUnlinked = false } = {}) {
+  const all = (moduleData && moduleData.tasks) || [];
+  const linked = all.filter((t) => t.sharedJobId === sharedJobId);
+  if (!linked.length && fallbackUnlinked) return all.filter((t) => !t.sharedJobId);
+  return linked;
+}
+
+/**
+ * 적용 대상 taskId 해석: 선택값(selectedTaskId)이 **현재 후보 목록에 실제 존재**할 때만 유효(stale 방어).
+ * 없으면 후보가 1개일 때 자동 지정, 그 외 null(=대상 없음 → 적용 비활성).
+ */
+export function resolveTargetTaskId(tasks = [], selectedTaskId) {
+  if (selectedTaskId != null && tasks.some((t) => String(t.id) === String(selectedTaskId))) return selectedTaskId;
+  if (tasks.length === 1) return tasks[0].id;
+  return null;
+}
+
+// source job 버튼 라벨: "〈공정명〉 측면(채택)" 형태.
+export function sourceJobLabel(sj) {
+  const vp = sj.viewpoint ? (VIEWPOINT_LABEL[sj.viewpoint] || sj.viewpoint) : '';
+  const tag = sj.adopted ? '채택' : '비교 시점';
+  return `${sj.processName ? sj.processName + ' ' : ''}${vp ? vp + ' ' : ''}(${tag})`;
 }
 
 /** 공정 시간점유율 합(직업별). 100% 초과/미달 경고용. */
@@ -196,7 +294,51 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   // 새로고침/환자전환/입력변경 시 사라짐(의도) → 부재 제안행은 fallback 안내.
   const [analysisEvidence, setAnalysisEvidence] = useState({ jobEvidenceBySharedJobId: {}, processEvidenceByProcessId: {} });
   const [expandedEvidence, setExpandedEvidence] = useState(null); // 펼친 제안 키 `${sharedJobId}:${featureKey}`
-  const resetEvidence = () => { setAnalysisEvidence({ jobEvidenceBySharedJobId: {}, processEvidenceByProcessId: {} }); setExpandedEvidence(null); };
+  // 골격 검수 overlay(6.0-8): transient — overlay 데이터 캐시는 jobId→{loading,data,error,closed},
+  // 펼친 패널은 row+job 복합키 1개(같은 job을 쓰는 여러 feature 행에서 패널 중복 노출 방지). 영속화 안 함.
+  const [overlayByJob, setOverlayByJob] = useState({});
+  const [expandedOverlay, setExpandedOverlay] = useState(null); // `${rowKey}::${jobId}` | null
+  // task-scope 적용 대상 task: `${processId}:${moduleId}` → taskId. transient(같은 세션 내 적용용).
+  // 직업에 그 모듈 task가 1개면 자동, 여러 개면 사용자가 선택. 환자 전환 시 reset.
+  const [taskTargets, setTaskTargets] = useState({});
+  const resetEvidence = () => {
+    setAnalysisEvidence({ jobEvidenceBySharedJobId: {}, processEvidenceByProcessId: {} });
+    setExpandedEvidence(null);
+    setOverlayByJob({});
+    setExpandedOverlay(null);
+    setTaskTargets({});
+  };
+
+  // 골격 검수 열기/닫기(토글). 패널은 클릭한 행(overlayKey)에만, 데이터는 jobId로 캐시 공유.
+  // 처음 열 때 fetchOverlay로 적재(404=검수 자료 없음 → error 표시).
+  const toggleOverlay = async (overlayKey, jobId) => {
+    if (expandedOverlay === overlayKey) { setExpandedOverlay(null); return; }
+    setExpandedOverlay(overlayKey);
+    const cur = overlayByJob[jobId];
+    if (cur && (cur.data || cur.loading || cur.closed)) return; // 이미 적재/로딩/종료됨
+    setOverlayByJob((m) => ({ ...m, [jobId]: { loading: true } }));
+    try {
+      const payload = await fetchOverlay(jobId, { session, settings });
+      setOverlayByJob((m) => ({ ...m, [jobId]: payload ? { data: payload } : { error: '검수 자료가 없습니다(다시 분석 필요).' } }));
+    } catch (e) {
+      setOverlayByJob((m) => ({ ...m, [jobId]: { error: e?.message || '검수 자료를 불러오지 못했습니다.' } }));
+    }
+  };
+
+  // 검수 종료(6.0-8, job 단위): 서버 200(실제 회수)일 때만 closed 처리(다른 job 보존). 실패면 패널 유지+오류.
+  const endReview = async (jobId) => {
+    try {
+      await closeReview(jobId, { session, settings }); // 성공(2xx)만 아래로 진행
+    } catch (e) {
+      // requestJson 에러는 e.status·e.data만 갖는다(e.code 아님). 서버가 실제로 안 지웠으므로 닫지 않는다.
+      const code = e?.data?.code || e?.data?.error?.code;
+      const msg = code === 'JOB_NOT_READY' ? '분석이 진행 중이라 종료할 수 없습니다.' : '검수 종료에 실패했습니다. 잠시 후 다시 시도하세요.';
+      setOverlayByJob((m) => ({ ...m, [jobId]: { ...m[jobId], error: msg } })); // 패널 유지(자료 보존)
+      return;
+    }
+    setOverlayByJob((m) => ({ ...m, [jobId]: { closed: true } }));
+    setExpandedOverlay((k) => (k && k.endsWith(`::${jobId}`) ? null : k));
+  };
 
   // 썸네일 objectURL 누수 방지: 언마운트 시 남은 frameUrl 모두 해제(detection 최신값을 ref로 추적).
   const detectionRef = useRef(detection);
@@ -217,6 +359,9 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   };
 
   const jobScopeModules = activeModules.filter((m) => getModule(m)?.videoMappingConfig?.scope === 'job');
+  // task-scope(경추·척추): 공정≈task 1:1 → 집계 없이 공정별로 렌더하고 task에 직접 적용한다(§8.6.2).
+  // 경추·척추는 작업 갯수·이름이 서로 달라 묶지 않고 모듈별로 독립 처리한다.
+  const taskScopeModules = activeModules.filter((m) => getModule(m)?.videoMappingConfig?.scope === 'task');
   const shareTotals = useMemo(() => shareTotalsByJob(va.processes), [va.processes]);
 
   const updateVA = (mutator) => updateShared({ ...shared, videoAnalysis: mutator(va) });
@@ -323,10 +468,9 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
       collectCandidateFeatures(pf.features, { processIds: [pf.processId] })
     );
     updateVA((v) => ({ ...v, processFeatures, jobFeatures, candidateFeatures }));
-    // evidence는 transient state(영속화 차단). buildJobEvidence로 직업단위 lookup map 구성.
+    // evidence는 transient state(영속화 차단). job-scope=직업단위, task-scope=공정단위 lookup map.
     const jobEvidenceBySharedJobId = buildJobEvidence(va.processes, processFeatures, processEvidence);
-    const processEvidenceByProcessId = {};
-    for (const pe of processEvidence) processEvidenceByProcessId[pe.processId] = pe.evidenceByFeatureKey || {};
+    const processEvidenceByProcessId = buildProcessEvidence(va.processes, processFeatures, processEvidence);
     setAnalysisEvidence({ jobEvidenceBySharedJobId, processEvidenceByProcessId });
   };
 
@@ -482,6 +626,69 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     );
   };
 
+  // 제안 1건 행(job-scope·task-scope 공용). rowKey로 근거/overlay 패널을 행마다 고유하게 키잉.
+  // ctx=적용 컨텍스트({sharedJobId} | {taskId}), applyDisabled=대상 task 없음 등 추가 비활성.
+  const renderSuggestionRow = (s, { moduleId, ctx, processIds, analysisProfile, jobEv, rowKey, applyDisabled = false, applyDisabledTitle }) => {
+    const refOnly = s.autoSuggestAllowed === false; // 저신뢰 게이팅(§8.8 D3a) — 자동제안 금지·적용 비활성
+    const expanded = expandedEvidence === rowKey;
+    const sourceJobs = serverMode ? resolveSourceJobs(jobEv) : []; // 골격 검수 대상(서버 artifact 필요)
+    return (
+      <li key={rowKey} style={{ margin: '4px 0' }}>
+        <code>{s.featureKey}</code> → {String(s.suggestedValue)} {s.unit || ''}
+        <span style={{ marginLeft: 6, fontSize: 12, color: s.confidence >= 0.8 ? '#2e7d32' : '#b26a00' }}>
+          신뢰도 {Math.round(s.confidence * 100)}%
+        </span>
+        {refOnly && <span style={{ marginLeft: 6, fontSize: 12, color: '#b26a00' }} title="저신뢰 — 수기 확인 필요">참고만</span>}
+        {s.requiresManualReview && <span style={{ marginLeft: 6, fontSize: 12, color: '#b26a00' }}>수기확인</span>}
+        <button type="button" style={{ marginLeft: 6, fontSize: 12 }}
+          onClick={() => setExpandedEvidence(expanded ? null : rowKey)}>
+          {expanded ? '근거 닫기' : '왜 이 값?'}
+        </button>
+        <button type="button" style={{ marginLeft: 8 }} disabled={busy || applyBlocked || refOnly || applyDisabled}
+          title={applyDisabled ? applyDisabledTitle : undefined}
+          onClick={() => applySuggestion(moduleId, ctx, s, processIds, analysisProfile)}>
+          {serverMode ? '서버 적용' : '적용'}
+        </button>
+        {expanded && renderEvidencePanel(jobEv, s.unit)}
+        {sourceJobs.length > 0 && (() => {
+          // 펼친 패널은 이 행(rowKey) 소속 job만 — 같은 job을 쓰는 다른 행에는 안 뜬다(복합키).
+          const openSj = sourceJobs.find((sj) => expandedOverlay === `${rowKey}::${sj.jobId}`);
+          const openOv = openSj ? (overlayByJob[openSj.jobId] || {}) : null;
+          return (
+            <div style={{ marginTop: 4, paddingLeft: 12 }}>
+              {sourceJobs.map((sj) => {
+                const ov = overlayByJob[sj.jobId] || {};
+                const open = expandedOverlay === `${rowKey}::${sj.jobId}`;
+                return (
+                  <button key={sj.jobId} type="button" style={{ marginRight: 6, fontSize: 12 }}
+                    onClick={() => toggleOverlay(`${rowKey}::${sj.jobId}`, sj.jobId)} disabled={ov.closed}
+                    title={ov.closed ? '검수 자료 회수됨' : '중립 배경 골격으로 검수'}>
+                    {open ? '골격 닫기' : `골격 검수: ${sourceJobLabel(sj)}`}{ov.closed ? ' (회수됨)' : ''}
+                  </button>
+                );
+              })}
+              {openSj && (
+                <div style={{ marginTop: 6 }}>
+                  {openOv.loading && <p className="muted" style={{ fontSize: 12 }}>골격 불러오는 중…</p>}
+                  {openOv.error && <p className="muted" style={{ fontSize: 12, color: '#b26a00' }}>{openOv.error}</p>}
+                  {openOv.data && (
+                    <>
+                      <SkeletonOverlay overlay={openOv.data} />
+                      <button type="button" style={{ marginTop: 4, fontSize: 12 }}
+                        onClick={() => endReview(openSj.jobId)}>
+                        이 분석 검수 종료(자료 회수)
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </li>
+    );
+  };
+
   return (
     <div className="panel">
       <section className="section pattern-surface form-section">
@@ -627,37 +834,75 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                   const analysisProfile = jobProcesses[0]?.analysisProfile;
                   return (
                     <ul key={moduleId} style={{ listStyle: 'none', paddingLeft: 12 }}>
-                      {suggestions.map((s) => {
-                        // 저신뢰 게이팅(§8.8 D3a): autoSuggestAllowed=false면 "참고만" — 자동제안 금지, 적용 버튼 비활성.
-                        const refOnly = s.autoSuggestAllowed === false;
-                        const evKey = `${jf.sharedJobId}:${s.featureKey}`;
-                        const expanded = expandedEvidence === evKey;
-                        const jobEv = analysisEvidence.jobEvidenceBySharedJobId[jf.sharedJobId]?.[s.featureKey];
-                        return (
-                        <li key={s.featureKey} style={{ margin: '4px 0' }}>
-                          <code>{s.featureKey}</code> → {String(s.suggestedValue)} {s.unit || ''}
-                          <span style={{ marginLeft: 6, fontSize: 12, color: s.confidence >= 0.8 ? '#2e7d32' : '#b26a00' }}>
-                            신뢰도 {Math.round(s.confidence * 100)}%
-                          </span>
-                          {refOnly && <span style={{ marginLeft: 6, fontSize: 12, color: '#b26a00' }} title="저신뢰 — 수기 확인 필요">참고만</span>}
-                          {s.requiresManualReview && <span style={{ marginLeft: 6, fontSize: 12, color: '#b26a00' }}>수기확인</span>}
-                          <button type="button" style={{ marginLeft: 6, fontSize: 12 }}
-                            onClick={() => setExpandedEvidence(expanded ? null : evKey)}>
-                            {expanded ? '근거 닫기' : '왜 이 값?'}
-                          </button>
-                          <button type="button" style={{ marginLeft: 8 }} disabled={busy || applyBlocked || refOnly}
-                            onClick={() => applySuggestion(moduleId, { sharedJobId: jf.sharedJobId }, s, procIds, analysisProfile)}>
-                            {serverMode ? '서버 적용' : '적용'}
-                          </button>
-                          {expanded && renderEvidencePanel(jobEv, s.unit)}
-                        </li>
-                        );
-                      })}
+                      {suggestions.map((s) => renderSuggestionRow(s, {
+                        moduleId,
+                        ctx: { sharedJobId: jf.sharedJobId },
+                        processIds: procIds,
+                        analysisProfile,
+                        jobEv: analysisEvidence.jobEvidenceBySharedJobId[jf.sharedJobId]?.[s.featureKey],
+                        rowKey: `${jf.sharedJobId}:${s.featureKey}`,
+                      }))}
                     </ul>
                   );
                 })}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* 3-task) 제안 검토 (task-scope — 경추·척추, 공정≈task 1:1). 모듈별 독립 + 대상 task 선택. */}
+        {hasAnalysis && taskScopeModules.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <h3>제안 검토 (작업 단위)</h3>
+            {va.processes.map((p) => {
+              const pf = (va.processFeatures || []).find((f) => f.processId === p.id);
+              if (!pf) return null;
+              const blocks = taskScopeModules.map((moduleId) => {
+                const suggestions = getModuleSuggestions(pf.features, moduleId);
+                if (suggestions.length === 0) return null;
+                const mod = getModule(moduleId);
+                // 이 직업의 해당 모듈 task 목록(적용 대상). 경추·척추는 작업 갯수·이름이 달라 모듈별로 독립.
+                // spine은 미연결 레거시 task fallback 허용(taskFallbackUnlinked).
+                const tasks = tasksForJob(activePatient?.data?.modules?.[moduleId], p.sharedJobId,
+                  { fallbackUnlinked: !!mod?.videoMappingConfig?.taskFallbackUnlinked });
+                const targetKey = `${p.id}:${moduleId}`;
+                // 선택값이 현재 후보에 실제 존재할 때만 유효(stale 선택 → 적용 잘못 활성 방지).
+                const targetTaskId = resolveTargetTaskId(tasks, taskTargets[targetKey]);
+                const noTarget = !targetTaskId;
+                return (
+                  <ul key={moduleId} style={{ listStyle: 'none', paddingLeft: 12 }}>
+                    <div className="muted" style={{ fontSize: 12, marginBottom: 2 }}>
+                      <b>{mod?.name || moduleId}</b> 대상 작업:{' '}
+                      {tasks.length === 0 ? <span style={{ color: '#b26a00' }}>없음 — {mod?.name} 탭에서 작업을 추가한 뒤 적용 가능</span>
+                        : tasks.length === 1 ? (tasks[0].name || '작업')
+                          : (
+                            <select value={targetTaskId || ''} onChange={(e) => setTaskTargets((m) => ({ ...m, [targetKey]: e.target.value }))}>
+                              <option value="">(작업 선택)</option>
+                              {tasks.map((t) => <option key={t.id} value={t.id}>{t.name || t.id}</option>)}
+                            </select>
+                          )}
+                    </div>
+                    {suggestions.map((s) => renderSuggestionRow(s, {
+                      moduleId,
+                      ctx: { taskId: targetTaskId },
+                      processIds: [p.id],
+                      analysisProfile: p.analysisProfile,
+                      jobEv: analysisEvidence.processEvidenceByProcessId[p.id]?.[s.featureKey],
+                      rowKey: `${p.id}:${moduleId}:${s.featureKey}`,
+                      applyDisabled: noTarget,
+                      applyDisabledTitle: '적용할 대상 작업을 먼저 선택하세요',
+                    }))}
+                  </ul>
+                );
+              });
+              if (blocks.every((b) => b === null)) return null;
+              return (
+                <div key={p.id} style={{ marginBottom: 10 }}>
+                  <b>{p.name}</b> <span className="muted">({jobName(p.sharedJobId)})</span>
+                  {blocks}
+                </div>
+              );
+            })}
           </div>
         )}
 

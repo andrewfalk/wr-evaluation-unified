@@ -81,6 +81,42 @@ export function resolveUploadedClipPath(uploadPath: unknown, uploadDir: string |
   return real;
 }
 
+/**
+ * keypoints artifact 경로 전용 검증(overlay 서빙·close-review 삭제 공용). DB(jobs.keypoints_path)는
+ * 신뢰 경계 밖이므로 uploadDir/artifacts 하위 + basename이 정확히 `<jobId>.keypoints.json` + 존재 +
+ * symlink 탈출 차단. 통과한 경로만 read/unlink 해야 원본 업로드·썸네일·uploadDir 밖 파일 오접근을 막는다.
+ * @param p        DB 저장 경로(jobs.keypoints_path)
+ * @param jobId    소유 job id(파일명 강제)
+ * @param uploadDir config.video.uploadDir
+ */
+export function resolveKeypointsArtifactPath(p: unknown, jobId: string, uploadDir: string | null): string | null {
+  if (typeof p !== 'string' || p.trim() === '' || !uploadDir || !jobId) return null;
+
+  const artDir = path.resolve(uploadDir, 'artifacts');
+  const resolved = path.resolve(p);
+  if (!insideDir(artDir, resolved)) return null;
+
+  // basename 엄격 검증: <jobId>.keypoints.json (worker가 기록하는 정확한 형식)
+  if (path.basename(resolved) !== `${jobId}.keypoints.json`) return null;
+
+  let realDir: string;
+  let real: string;
+  try {
+    realDir = fs.realpathSync(artDir);
+    real = fs.realpathSync(resolved);
+  } catch {
+    return null;
+  }
+  if (!insideDir(realDir, real)) return null;
+
+  try {
+    if (!fs.statSync(real).isFile()) return null;
+  } catch {
+    return null;
+  }
+  return real;
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
