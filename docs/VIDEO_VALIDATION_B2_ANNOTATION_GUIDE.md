@@ -172,10 +172,12 @@
 1. 완성한 엑셀(.csv 또는 .xlsx)을 **IT 담당에게 전달**(비식별 확인). .xlsx면 IT가 CSV로 내보냅니다.
 2. 이후는 IT가 처리합니다(아래 명령):
    ```bash
-   # (1) 엑셀 CSV → annotations.json + manifest 스켈레톤 자동 변환(퍼-데이 환산 포함)
-   npm run video:annotations-from-csv -- --csv gold.csv \
-     --out-annotations annotations.json --out-manifest manifest.skeleton.json
-   # (2) manifest 스켈레톤에 실제 영상경로(videoPath)·대상자(targetTrackId) 채움 → validate_set.py로 AI 추출값
+   # (1) 엑셀 CSV → annotations.json + manifest 스켈레톤 자동 변환(퍼-데이 환산 포함).
+   #     --video-dir에 영상 폴더를 주면 manifest videoPath가 <폴더>/<파일명>으로 자동 채워짐(경로 수정 불필요).
+   npm run video:annotations-from-csv -- --csv gold.csv --video-dir ./영상폴더 \
+     --out-annotations annotations.json --out-manifest manifest.json
+   # (2) (보통 생략) 다인원 영상에서 비주인공을 측정한 case만 manifest의 targetTrackId 지정.
+   #     1인/주인공 영상은 빈칸이면 AI가 자동(dominant track)으로 선택.
    python services/pose-inference/validate_set.py --manifest manifest.json --output-dir out
    # (3) 사람 측정값 vs AI값 오차(§8.9) 리포트
    npm run video:validate-report -- --bundle out/validation_bundle.json --annotations annotations.json --out out/report.json

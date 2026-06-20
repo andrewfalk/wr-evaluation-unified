@@ -54,11 +54,13 @@
 
 ### 5. 정확도 측정
 ```bash
-# (a0) 전문의 엑셀(CSV) → annotations.json + manifest 스켈레톤(퍼-데이 환산 자동). 가이드 §8 참고.
+# (a0) 전문의 엑셀(CSV) → annotations.json + manifest(퍼-데이 환산 자동). 가이드 §8 참고.
+#      --video-dir로 영상폴더 주면 videoPath 자동 채움 → 경로 수동수정 불필요.
 npm run video:annotations-from-csv -- --csv .video-validation/gold.csv \
+  --video-dir .video-validation/raw \
   --out-annotations .video-validation/annotations.json \
-  --out-manifest .video-validation/manifest.skeleton.json
-# → manifest.skeleton.json에 실제 videoPath·targetTrackId 채워 manifest.json으로 저장.
+  --out-manifest .video-validation/manifest.json
+# → 다인원 비주인공 측정 case만 targetTrackId 지정(보통 빈칸=dominant 자동).
 
 # (a) 추출값 bundle 생성 — Python venv(Tier-3) 필요. --overlay는 원본 대조 육안.
 python services/pose-inference/validate_set.py \

@@ -4,7 +4,10 @@
 //
 // 실행: node scripts/b2AnnotationsFromCsv.mjs --csv <gold.csv>
 //          [--out-annotations annotations.json] [--out-manifest manifest.skeleton.json]
+//          [--video-dir <영상폴더>]
 //
+// --video-dir 주면 manifest videoPath = <영상폴더>/<clipFileName>으로 자동 채움(손으로 경로 수정 불필요).
+//   미지정 시 'TODO_실제경로/<파일명>' placeholder(IT가 수동 수정).
 // 환산(누적초 → 1일 노출): perDay = (postureSec / clipDurationSec) × activeMinutesPerDay.
 //   clipDurationSec·activeMinutesPerDay가 없으면 그 시간형 변수는 생략(비교 제외).
 
@@ -32,8 +35,9 @@ function parseArgs(argv) {
     if (argv[i] === '--csv') o.csv = argv[++i];
     else if (argv[i] === '--out-annotations') o.outAnnotations = argv[++i];
     else if (argv[i] === '--out-manifest') o.outManifest = argv[++i];
+    else if (argv[i] === '--video-dir') o.videoDir = argv[++i];
   }
-  if (!o.csv) { console.error('usage: node scripts/b2AnnotationsFromCsv.mjs --csv <gold.csv> [--out-annotations f] [--out-manifest f]'); process.exit(2); }
+  if (!o.csv) { console.error('usage: node scripts/b2AnnotationsFromCsv.mjs --csv <gold.csv> [--out-annotations f] [--out-manifest f] [--video-dir <dir>]'); process.exit(2); }
   return o;
 }
 
@@ -115,15 +119,20 @@ function main() {
       segments: [],
     });
 
-    // manifest 스켈레톤 case(IT가 videoPath 실경로·targetTrackId만 채우면 됨).
+    // manifest 스켈레톤 case. videoPath는 --video-dir 주면 자동, 아니면 TODO placeholder. targetTrackId는
+    // 보통 빈칸(AI가 dominant track 자동 선택); 다인원에서 비주인공 측정 시에만 IT가 채움.
     const modules = [...new Set(Object.keys(features).map((k) => FEATURE_MODULE[k]).filter(Boolean))];
+    const fileName = str(col(row, 'clipFileName')) || videoRef;
+    const videoPath = args.videoDir
+      ? `${args.videoDir.replace(/[\\/]+$/, '')}/${fileName}`
+      : `TODO_실제경로/${fileName}`;
     cases.push({
       caseId,
       videoRef,
       annotationId: videoRef,
       activeMinutesPerDay: activeMin,
       activeModules: modules,
-      clips: [{ videoPath: `TODO_실제경로/${str(col(row, 'clipFileName')) || videoRef}`, viewpoint: strat.viewpoint || 'sagittal', targetTrackId: '' }],
+      clips: [{ videoPath, viewpoint: strat.viewpoint || 'sagittal', targetTrackId: '' }],
     });
   }
 
