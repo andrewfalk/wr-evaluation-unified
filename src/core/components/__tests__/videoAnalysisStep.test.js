@@ -17,6 +17,7 @@ import {
   candidateMinutesPerDay,
   excludeTaskScopeCandidates,
   segmentsForJob,
+  buildVideoStatus,
 } from '../VideoAnalysisStep.jsx';
 import { getAggregationMethod } from '../../services/videoAggregate.js';
 import { getModuleSuggestions, getModuleCandidates } from '../../services/videoProvenance.js';
@@ -165,6 +166,42 @@ describe('segmentsForJob (골격 overlay 활성-프레임 하이라이트)', () 
   it('segments 없음/jobEv 없음 → 빈 배열', () => {
     expect(segmentsForJob({ contributions: [{ analysisJobIds: ['j1'], evidence: {} }] }, 'j1')).toEqual([]);
     expect(segmentsForJob(null, 'j1')).toEqual([]);
+  });
+});
+
+describe('buildVideoStatus (상태바 파생 수치)', () => {
+  const shoulderFeat = (value) => ({
+    kind: 'numeric', value, unit: 'hours_per_day', confidence: 0.8,
+    autoSuggestAllowed: true, requiresManualReview: false, warnings: [],
+  });
+
+  it('기본 카운트 + 분석상태', () => {
+    const va = { processes: [{ id: 'p1' }, { id: 'p2' }], clips: [{ id: 'c1' }] };
+    expect(buildVideoStatus(va, { analyzing: false, hasAnalysis: false }))
+      .toMatchObject({ processCount: 2, clipCount: 1, suggestionCount: 0, warningCount: 0, analysisState: '분석 전' });
+    expect(buildVideoStatus(va, { analyzing: true }).analysisState).toBe('분석 중');
+    expect(buildVideoStatus(va, { hasAnalysis: true }).analysisState).toBe('분석 완료');
+  });
+
+  it('suggestionCount = 직업단위 + 작업단위 getModuleSuggestions 합', () => {
+    const va = {
+      processes: [], clips: [],
+      jobFeatures: [{ sharedJobId: 'jA', features: { overheadHours: shoulderFeat(2) } }],
+      processFeatures: [{ processId: 'p1', features: { overheadHours: shoulderFeat(1) } }],
+    };
+    const out = buildVideoStatus(va, { jobScopeModules: ['shoulder'], taskScopeModules: ['shoulder'] });
+    expect(out.suggestionCount).toBe(2); // 직업1 + 작업1
+    // 모듈 미지정 → 0
+    expect(buildVideoStatus(va, {}).suggestionCount).toBe(0);
+  });
+
+  it('warningCount: 점유율≠100 직업 + 누락 feature 있는 공정만(빈 배열 방어)', () => {
+    const va = { processes: [], clips: [] };
+    const out = buildVideoStatus(va, {
+      shareTotals: { jA: 60, jB: 100 },                 // jA만 경고
+      missingActiveTime: { p1: ['squatDuration'], p2: [] }, // p1만(빈 배열 제외)
+    });
+    expect(out.warningCount).toBe(2);
   });
 });
 

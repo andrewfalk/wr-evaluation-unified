@@ -147,12 +147,19 @@
   - [x] 버전 파일명(`<clipId>.<uuid>.thumb.jpg`)·`resolveSampleFramePath`(전용 검증, 삭제도 경유) + `GET /sample-frame`(게이트 off면 과거 경로 잔존해도 404·no-store·nosniff) + DB-first 옛 파일 회수
   - [x] 수명: select-target/retention A/cleanup 회수(식별 이미지 단명) / 클라 `requestBlob`+`fetchSampleFrame`+`TargetPicker frameUrl`(objectURL 누수 해제)
   - [x] 테스트 서버 465/클라 689 통과, lint 0, build OK (Python cv2 경로는 스모크 검증). Codex 리뷰 6회 반영
-- [~] **(후속 개선) 골격 검수 활성-프레임 하이라이트** — M3-8 골격 overlay 검수 시 "그 변수 자세가 잡힌 프레임"을 골격 색으로 즉시 식별. 브랜치 `feat/video-skeleton-active-highlight`. **Tier-3 라이브 육안 확인 완료(호박색 강조 정상)**.
+- [x] **(후속 개선) 골격 검수 활성-프레임 하이라이트** — M3-8 골격 overlay 검수 시 "그 변수 자세가 잡힌 프레임"을 골격 색으로 즉시 식별. **PR #43 ✅ 머지 · Tier-3 라이브 육안 확인 완료(호박색 강조 정상)**.
   - [x] Python `feature_calc.py`: `trunkPostureG`(peak_angle)에 **peak 프레임 점-세그먼트**(`startMs==endMs`) emit → 지속 변수 segment와 동일 메커니즘으로 통일(스키마 변경 0, 실추론 e2e 확인 `segments:[{31917,31917}]`)
   - [x] 클라 `SkeletonOverlay.jsx`: `frameActive`/`activeFrameIndices` 순수함수 + 활성 프레임 **호박색 골격**(대상 track) + 스크럽바 호박색 마커 + 안내문. `activeSegments` prop 추가
   - [x] 클라 `VideoAnalysisStep.jsx`: `segmentsForJob`(overlay job ↔ 그 클립 segments 매칭, **채택 시점 job만** — 비교 시점은 segment 미보유라 미표시) → `activeSegments` 전달
   - [x] 테스트: 클라 **759 통과**(frameActive 경계/peak·activeFrameIndices·segmentsForJob fusion 채택/비교) + Python golden(peak 점-세그먼트), build:web·lint 0
   - **결정**: peak 변수도 별도 경로 없이 점-세그먼트로 표현(지속 변수와 한 메커니즘). 적용 범위 = 웹 SkeletonOverlay만(B2 `overlay_render.py`는 범위 밖).
+- [~] **(후속 개선) 영상 분석 UI 폴리싱 — 셋업↔검토 2열** — 영상 분석 스텝이 인라인 스타일+세로 1열이라 기존 톤과 따로 놂. 기존 디자인 시스템(`panel`/`job-card`/`result-detail-card`/dual-grid)으로 교체 + 2열(좌:공정·클립 셋업 / 우:제안 검토) + 상단 상태바. **순수 표현 리팩터(핸들러·DOM 의미 무변경)**, 상태바 수치만 helper 신규. 브랜치 `feat/video-ui-polish-2col`. 승인 plan `1-m3-b2-2-reactive-lollipop.md`(코덱스 리뷰 3라운드 반영).
+  - [x] CSS `.va-layout`/`.va-statusbar`/`.va-status-chip`/`.va-process-card`/`.va-clip-row`/`.va-suggest-card`(head/actions/details)/`.va-flag-pill`/`.va-pipeline` — **색은 CSS 변수만**(다크테마), overflow 가드(`min-width:0`), win7(`:has` 미의존)
+  - [x] `buildVideoStatus` 순수 helper(processCount·clipCount·suggestionCount·warningCount·analysisState) + 단위 테스트(3건)
+  - [x] return 2열 재구조화: 헤더 우측 분석버튼 단일 / 상태바 / 좌 셋업 / 우 검토 / 적용이력 전체폭
+  - [x] render 헬퍼 4개 마크업 교체(`<li>/<ul>` 의미 유지, flag pill, 카드 3분할) — 텍스트·핸들러·`SkeletonOverlay` 무변경
+  - [x] build:web·lint 0·test **762 통과**(신규 buildVideoStatus 3건)
+  - [ ] Tier-3 육안(2열·톤 일치·다크테마·900px↓ 1열·골격 하이라이트) — 대기
 
 ### M4 — 배포·고급 (6.0-9, 6.0-10)
 - [ ] 6.0-9 에어갭 Docker 배포 + recipe versioning
