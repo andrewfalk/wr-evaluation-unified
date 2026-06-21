@@ -159,7 +159,10 @@
   - [x] return 2열 재구조화: 헤더 우측 분석버튼 단일 / 상태바 / 좌 셋업 / 우 검토 / 적용이력 전체폭
   - [x] render 헬퍼 4개 마크업 교체(`<li>/<ul>` 의미 유지, flag pill, 카드 3분할) — 텍스트·핸들러·`SkeletonOverlay` 무변경
   - [x] build:web·lint 0·test **762 통과**(신규 buildVideoStatus 3건)
-  - [ ] Tier-3 육안(2열·톤 일치·다크테마·900px↓ 1열·골격 하이라이트) — 대기
+  - [x] **전체폭 수정**(App.jsx): 영상 스텝이 main-content-single(패널 50%)이라 우측 절반 미사용 → assessment처럼 전체폭으로(`videoAnalysis` id 추가). 내부 2열이 전 폭에 펼쳐짐
+  - [x] **후속 폴리싱**: 분석 실행 버튼 좌측 "+공정 추가" 옆 이동 / TargetPicker·SkeletonOverlay `.va-media-box`(4:3·패널폭·viewBox)로 세로영상 길이 제한 / `fmtNum` 지표 소수점 1자리 통일
+  - [ ] Tier-3 육안(2열 전체폭·톤 일치·다크테마·900px↓ 1열·미디어 4:3·골격 하이라이트) — 대기
+- [ ] **(후속·별도 게이트) 골격 검수에 실 영상 프레임 표시** — 검증 편의를 위해 중립배경 대신 원본 프레임을 골격 뒤에 표시. **프라이버시 정책 예외**라 썸네일(#36, `VIDEO_ANALYSIS_TARGET_THUMBNAIL`)처럼 **전용 게이트+보존정책+cleanup** 필요(서버가 프레임/영상 단명 보관·serving). 한시적 예외 운영 전제 → 별도 PR로 설계.
 
 ### M4 — 배포·고급 (6.0-9, 6.0-10)
 - [ ] 6.0-9 에어갭 Docker 배포 + recipe versioning
