@@ -1,8 +1,17 @@
-// 검수용 골격 overlay (6.0-8, §8.6.1). keypoints artifact(좌표만, 원본 프레임 없음)를 중립 배경 위
-// 뼈대로 렌더해 "그 값이 실제 자세에서 맞는지"를 눈으로 검수한다(privacy_first — 얼굴·작업장 미노출).
-// overlay payload = { jobId, clipId, targetTrackId, keypoints }(서버가 sha256+계약 검증). 대상 track은
-// 밝게, 나머지는 흐리게. TargetPicker의 SVG/순수함수 패턴을 따른다.
-import { memo, useState } from 'react';
+// 검수용 골격 overlay (6.0-8, §8.6.1). keypoints artifact(좌표만)를 중립 배경 위 뼈대로 렌더해
+// "그 값이 실제 자세에서 맞는지"를 눈으로 검수한다(privacy_first — 기본은 얼굴·작업장 미노출).
+// overlay payload = { jobId, clipId, targetTrackId, framesAvailable, keypoints }. 대상 track은 밝게.
+// 정책 예외(framesAvailable=서버 게이트 on): 실 프레임을 골격 뒤에 깔아 검수 편의(한시 예외).
+import { memo, useState, useEffect, useRef } from 'react';
+import { fetchOverlayFrame } from '../services/videoAnalysisClient';
+
+// 프레임 objectURL 캐시 trim — keepIdx(Set) 밖 항목은 revoke + 삭제(메모리 누수·식별이미지 누적 방지).
+// 순수 함수(테스트 대상): revoke 주입 가능.
+export function trimFrameCache(cache, keepIdx, revoke = URL.revokeObjectURL) {
+  for (const [k, url] of Array.from(cache.entries())) {
+    if (!keepIdx.has(k)) { revoke(url); cache.delete(k); }
+  }
+}
 
 // COCO17 골격 연결(뼈대). 인덱스는 keypoints 계약(coco17 17점) 기준.
 export const COCO17_BONES = [
@@ -68,13 +77,57 @@ function PersonSkeleton({ points, target, active, scale = 1 }) {
   );
 }
 
-function SkeletonOverlayImpl({ overlay, activeSegments = [] }) {
+function SkeletonOverlayImpl({ overlay, activeSegments = [], session, settings }) {
   const [frameIndex, setFrameIndex] = useState(0);
+  const [frameUrl, setFrameUrl] = useState(null);     // 현재 프레임 실영상 objectURL(게이트 on일 때만)
+  const cacheRef = useRef(new Map());                 // 원본 frameIndex → objectURL
+  const genRef = useRef(0);                            // 현재 프레임 요청 generation(race 가드)
+  const windowRef = useRef(new Set());                 // 현재 keep 윈도(원본 frameIndex)
+
   const kp = overlay?.keypoints;
   const frames = kp?.frames || [];
+  const framesOn = !!overlay?.framesAvailable;         // 서버 게이트 통과(실 프레임 가용)
+  const jobId = overlay?.jobId;
+  const idx = frames.length ? Math.min(frameIndex, frames.length - 1) : 0;
+  const curFi = frames[idx]?.frameIndex;
+
+  // 실 프레임 로드(privacy 게이트 예외): 현재±1만 캐시·trim, 늦게 온 응답은 window 밖이면 즉시 revoke(stale 부활 차단).
+  useEffect(() => {
+    if (!framesOn || !jobId || curFi == null || frames.length === 0) {
+      setFrameUrl(null);
+      windowRef.current = new Set();
+      trimFrameCache(cacheRef.current, new Set());
+      return;
+    }
+    const cache = cacheRef.current;
+    const positions = [idx - 1, idx, idx + 1].filter((i) => i >= 0 && i < frames.length);
+    const keep = new Set(positions.map((i) => frames[i].frameIndex));
+    windowRef.current = keep;
+    trimFrameCache(cache, keep); // 윈도 밖 누적 즉시 해제
+    for (const i of positions) {
+      const fi = frames[i].frameIndex;
+      const isCurrent = fi === curFi;
+      if (cache.has(fi)) { if (isCurrent) setFrameUrl(cache.get(fi)); continue; }
+      const gen = isCurrent ? ++genRef.current : genRef.current;
+      fetchOverlayFrame(jobId, fi, { session, settings }).then((blob) => {
+        if (!blob) { if (isCurrent && genRef.current === gen) setFrameUrl(null); return; }
+        const url = URL.createObjectURL(blob);
+        if (!windowRef.current.has(fi)) { URL.revokeObjectURL(url); return; } // 도착 시 window 밖 → 즉시 revoke
+        cache.set(fi, url);
+        if (isCurrent && genRef.current === gen) setFrameUrl(url);
+      }).catch(() => { if (isCurrent && genRef.current === gen) setFrameUrl(null); });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [framesOn, jobId, idx, curFi, frames.length, session, settings]);
+
+  // 언마운트 시 캐시 objectURL 전부 해제.
+  useEffect(() => {
+    const cache = cacheRef.current;
+    return () => { for (const url of cache.values()) URL.revokeObjectURL(url); cache.clear(); };
+  }, []);
+
   if (!kp || frames.length === 0) return <p className="muted">표시할 골격 프레임이 없습니다.</p>;
 
-  const idx = Math.min(frameIndex, frames.length - 1);
   const frame = frames[idx];
   const active = frameActive(frame.timestampMs, activeSegments);
   const activeIdxs = activeFrameIndices(frames, activeSegments);
@@ -97,6 +150,8 @@ function SkeletonOverlayImpl({ overlay, activeSegments = [] }) {
     <div>
       <div className="va-media-box">
         <svg viewBox={`0 0 ${fw} ${fh}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="검수 골격">
+          {/* 정책 예외(게이트 on): 실 프레임을 골격 뒤에. 네이티브 좌표(viewBox)라 골격과 정렬. */}
+          {frameUrl && <image href={frameUrl} x={0} y={0} width={fw} height={fh} preserveAspectRatio="none" />}
           {persons.map((person, i) => {
             const s = scaledKeypoints(person.keypoints, meta, fw); // scale=1 → 네이티브 좌표
             const isTarget = person.trackId === targetId;
@@ -104,6 +159,11 @@ function SkeletonOverlayImpl({ overlay, activeSegments = [] }) {
           })}
         </svg>
       </div>
+      {framesOn && (
+        <p style={{ fontSize: 11, margin: '3px 0 0', color: 'var(--color-warning)' }}>
+          ● 실 영상 표시 중(검수 편의 한시 예외 — 식별 가능, 외부 공유 금지)
+        </p>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
         {/* 스크럽바 위 호박색 마커 = 이 변수 자세가 잡힌 프레임(구간/peak) */}
         <div style={{ position: 'relative', flex: 1 }}>

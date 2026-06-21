@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import type { Pool } from 'pg';
 
-const videoCfg = vi.hoisted(() => ({ uploadDir: '', retentionPolicy: 'review_fidelity' }));
+const videoCfg = vi.hoisted(() => ({ uploadDir: '', retentionPolicy: 'review_fidelity', overlayFrames: false }));
 beforeAll(() => { videoCfg.uploadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wk-up-')); });
 vi.mock('../../config', () => ({
   default: {
@@ -12,6 +12,7 @@ vi.mock('../../config', () => ({
       fixtureDir: '/fx', scriptsDir: '/s', python: '/p',
       get uploadDir() { return videoCfg.uploadDir; },
       get retentionPolicy() { return videoCfg.retentionPolicy; },
+      get overlayFrames() { return videoCfg.overlayFrames; },
     },
   },
 }));
@@ -94,11 +95,38 @@ describe('videoAnalysisWorker.pollOnce', () => {
       clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: 'pch', inputSha256: 'sha',
     });
     expect(await pollOnce(pool, { runInference })).toBe(true);
-    expect(runInference).toHaveBeenCalledWith('/fx/good.mp4', 'posture-basic', null);
+    expect(runInference).toHaveBeenCalledWith('/fx/good.mp4', 'posture-basic', null, { framesDir: null });
     const upd = poolUpdate(query, "status = 'review_pending'");
     expect(upd).toBeDefined();
     expect(upd?.[1]).toContain('pch');
     expect(upd?.[1]).toContain('sha');
+  });
+
+  it('overlayFrames 게이트 on: runInference에 framesDir 전달 + .jpg 생성 시 frames_path 기록', async () => {
+    videoCfg.overlayFrames = true;
+    const { pool, query } = makePool();
+    const runInference = vi.fn(async (_c: string, _p: string | null, _t: unknown, opts?: { framesDir?: string | null }) => {
+      if (opts?.framesDir) { fs.mkdirSync(opts.framesDir, { recursive: true }); fs.writeFileSync(path.join(opts.framesDir, '0.jpg'), 'x'); }
+      return { clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: null, inputSha256: null, keypointsJson: '{}' };
+    });
+    expect(await pollOnce(pool, { runInference })).toBe(true);
+    const expectedDir = path.join(videoCfg.uploadDir, 'artifacts', 'job-1.frames');
+    expect(runInference).toHaveBeenCalledWith('/fx/good.mp4', 'posture-basic', null, { framesDir: expectedDir });
+    const upd = poolUpdate(query, "status = 'review_pending'");
+    expect(upd?.[1]).toContain(expectedDir); // frames_path 기록(.jpg 존재)
+    videoCfg.overlayFrames = false;
+  });
+
+  it('overlayFrames 게이트 on이나 프레임 미생성(빈 dir) → frames_path 미기록', async () => {
+    videoCfg.overlayFrames = true;
+    fs.rmSync(path.join(videoCfg.uploadDir, 'artifacts', 'job-1.frames'), { recursive: true, force: true }); // 이전 테스트 잔여 제거
+    const { pool, query } = makePool();
+    const runInference = vi.fn().mockResolvedValue({ clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: null, inputSha256: null, keypointsJson: '{}' });
+    expect(await pollOnce(pool, { runInference })).toBe(true);
+    const expectedDir = path.join(videoCfg.uploadDir, 'artifacts', 'job-1.frames');
+    const upd = poolUpdate(query, "status = 'review_pending'");
+    expect(upd?.[1]).not.toContain(expectedDir); // .jpg 없음 → frames_path=null
+    videoCfg.overlayFrames = false;
   });
 
   it('추론 실패 → error 상태 + error_code', async () => {
@@ -219,7 +247,7 @@ describe('box→track 매핑 (PR D2b, §8.7)', () => {
     const runInference = vi.fn().mockResolvedValue({ clipFeatures: {}, preprocessConfigHash: null, inputSha256: null });
     await pollOnce(pool, { runInference });
     expect(runInference).toHaveBeenCalledWith('/fx/good.mp4', 'posture-basic',
-      expect.objectContaining({ id: 'p1', bbox: [10, 20, 100, 200], timestampMs: 8000 }));
+      expect.objectContaining({ id: 'p1', bbox: [10, 20, 100, 200], timestampMs: 8000 }), { framesDir: null });
   });
 
   it('pollOnce: 선택했는데 후보 id 불일치 → job error TARGET_TRACK_MAP_FAILED', async () => {

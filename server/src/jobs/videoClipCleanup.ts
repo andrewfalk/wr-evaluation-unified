@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { Pool } from 'pg';
 import config from '../config';
-import { resolveSampleFramePath } from '../workers/fixturePath';
+import { resolveSampleFramePath, resolveOverlayFramesDir } from '../workers/fixturePath';
 
 // ---------------------------------------------------------------------------
 // 영상 분석 임시파일 회수(M3-7b). cron/setInterval/CLI에서 호출(HTTP 라우트 아님).
@@ -17,6 +17,34 @@ const TMP_GRACE_MS = 60 * 60 * 1000; // 진행 중 업로드와의 경합 방지
 async function safeUnlink(p: string | null | undefined): Promise<void> {
   if (!p) return;
   await fs.promises.unlink(p).catch(() => {});
+}
+
+async function safeRmDir(p: string | null | undefined): Promise<void> {
+  if (!p) return;
+  await fs.promises.rm(p, { recursive: true, force: true }).catch(() => {});
+}
+
+// overlay 실 프레임 디렉터리(정확히 `<id>.frames`)만 orphan sweep 대상으로 좁힌다(다른 디렉터리 오삭제 방지).
+function isOverlayFramesDirName(name: string): boolean {
+  return /^[^/\\]+\.frames$/.test(name);
+}
+
+// artifacts 하위에서 미참조 `*.frames` 디렉터리만 재귀삭제(sweepDir은 파일만 지우므로 디렉터리는 여기서).
+async function sweepOrphanFramesDirs(referencedDirs: Set<string>, artifactsDir: string): Promise<number> {
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(artifactsDir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  let n = 0;
+  for (const e of entries) {
+    if (!e.isDirectory() || !isOverlayFramesDirName(e.name)) continue;
+    const full = path.resolve(artifactsDir, e.name);
+    if (referencedDirs.has(full)) continue; // 살아있는(DB 참조) 프레임 디렉터리 보호
+    await safeRmDir(full); n += 1;
+  }
+  return n;
 }
 
 // 디렉터리의 파일을 회수. byAge=true면 mtime이 grace 초과한 파일만, 아니면 referenced 미포함 파일만.
@@ -53,14 +81,19 @@ async function sweepOrphans(pool: Pool, uploadDir: string): Promise<number> {
     if (c.upload_path) referenced.add(path.resolve(c.upload_path));
     if (c.sample_frame_path) referenced.add(path.resolve(c.sample_frame_path)); // 살아있는 썸네일 오삭제 방지
   }
-  const jobs = await pool.query<{ keypoints_path: string | null }>(
-    `SELECT keypoints_path FROM video_analysis_jobs WHERE keypoints_path IS NOT NULL`,
+  const jobs = await pool.query<{ keypoints_path: string | null; frames_path: string | null }>(
+    `SELECT keypoints_path, frames_path FROM video_analysis_jobs WHERE keypoints_path IS NOT NULL OR frames_path IS NOT NULL`,
   );
-  for (const j of jobs.rows) if (j.keypoints_path) referenced.add(path.resolve(j.keypoints_path));
+  const referencedDirs = new Set<string>(); // 살아있는 frames 디렉터리(파일이 아니라 디렉터리 단위)
+  for (const j of jobs.rows) {
+    if (j.keypoints_path) referenced.add(path.resolve(j.keypoints_path));
+    if (j.frames_path) referencedDirs.add(path.resolve(j.frames_path));
+  }
 
   let n = 0;
   n += await sweepDir(uploadDir, referenced, false);                       // 최종 원본(미참조)
-  n += await sweepDir(path.join(uploadDir, 'artifacts'), referenced, false); // keypoints artifact(미참조)
+  n += await sweepDir(path.join(uploadDir, 'artifacts'), referenced, false); // keypoints artifact(미참조 파일)
+  n += await sweepOrphanFramesDirs(referencedDirs, path.join(uploadDir, 'artifacts')); // 미참조 *.frames 디렉터리
   n += await sweepDir(path.join(uploadDir, 'tmp'), referenced, true);      // 미완료 업로드 잔여물(나이 기준)
   return n;
 }
@@ -70,6 +103,7 @@ export interface VideoClipCleanupResult {
   originalsDeleted: number;
   artifactsDeleted: number;
   sampleFramesDeleted: number;
+  framesDirsDeleted: number;
   orphansDeleted: number;
 }
 
@@ -78,6 +112,7 @@ export async function runVideoClipCleanup(pool: Pool): Promise<VideoClipCleanupR
   let originalsDeleted = 0;
   let artifactsDeleted = 0;
   let sampleFramesDeleted = 0;
+  let framesDirsDeleted = 0;
 
   // 1) TTL 만료 clip 원본 회수. 원본 삭제는 실 업로드(source_type='upload')만 — fixture(dev allowlist)는 미삭제.
   //    DB 상태 전이를 먼저 하고(present→deleted), 그 다음 파일 unlink. unlink 실패는 orphan sweep이 회수해
@@ -121,8 +156,20 @@ export async function runVideoClipCleanup(pool: Pool): Promise<VideoClipCleanupR
     if (real) { await safeUnlink(real); sampleFramesDeleted += 1; }
   }
 
+  // 3b) TTL 만료 clip에 속한 job의 overlay 실 프레임 디렉터리 회수(식별 이미지, keypoints와 같은 수명). DB-first.
+  const staleFramesDirs = await pool.query<{ id: string; frames_path: string | null }>(
+    `SELECT j.id, j.frames_path FROM video_analysis_jobs j
+     JOIN video_analysis_clips c ON c.id = j.clip_id
+     WHERE j.frames_path IS NOT NULL AND c.expires_at IS NOT NULL AND c.expires_at < now()`,
+  );
+  for (const j of staleFramesDirs.rows) {
+    await pool.query(`UPDATE video_analysis_jobs SET frames_path = NULL WHERE id = $1`, [j.id]);
+    const dir = resolveOverlayFramesDir(j.frames_path, j.id, config.video.uploadDir);
+    if (dir) { await safeRmDir(dir); framesDirsDeleted += 1; }
+  }
+
   // 4) orphan 파일 회수(uploadDir 구성 시).
   const orphansDeleted = config.video.uploadDir ? await sweepOrphans(pool, config.video.uploadDir) : 0;
 
-  return { clipsExpired, originalsDeleted, artifactsDeleted, sampleFramesDeleted, orphansDeleted };
+  return { clipsExpired, originalsDeleted, artifactsDeleted, sampleFramesDeleted, framesDirsDeleted, orphansDeleted };
 }

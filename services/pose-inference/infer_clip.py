@@ -108,12 +108,30 @@ def load_quality_blur_threshold():
         return None
 
 
+def write_overlay_frame(frame, frames_dir, frame_index, max_width=480, quality=70):
+    """샘플 프레임을 다운스케일 JPEG(<frameIndex>.jpg)로 저장 — overlay 검수 게이트(privacy 예외).
+    best-effort: mkdir/resize/imwrite 실패를 삼키고 bool 반환(추론 전체로 절대 전파 금지)."""
+    try:
+        h, w = frame.shape[:2]
+        out = frame
+        if w > max_width:
+            scale = max_width / float(w)
+            out = cv2.resize(frame, (max_width, max(1, int(round(h * scale)))), interpolation=cv2.INTER_AREA)
+        Path(frames_dir).mkdir(parents=True, exist_ok=True)
+        path = Path(frames_dir) / f"{frame_index}.jpg"
+        return bool(cv2.imwrite(str(path), out, [int(cv2.IMWRITE_JPEG_QUALITY), quality]))
+    except Exception:
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True)
     ap.add_argument("--output", required=True)
     ap.add_argument("--fps", type=float, default=5.0, help="target sampling fps")
     ap.add_argument("--max-frames", type=int, default=0, help="0 = all sampled frames")
+    ap.add_argument("--frames-dir", default=None,
+                    help="지정 시 각 샘플 프레임을 <frameIndex>.jpg로 저장(overlay 검수 게이트, best-effort)")
     args = ap.parse_args()
 
     cap = cv2.VideoCapture(args.input)
@@ -176,6 +194,9 @@ def main():
                 "timestampMs": ts_ms,
                 "persons": persons,
             })
+            # overlay 검수 게이트(privacy 예외): 디코드된 프레임을 frameIndex로 저장(best-effort, 실패 무전파).
+            if args.frames_dir:
+                write_overlay_frame(frame, args.frames_dir, idx)
             sampled += 1
             if args.max_frames and sampled >= args.max_frames:
                 break

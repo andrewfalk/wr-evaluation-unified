@@ -9,6 +9,7 @@ vi.mock('../../config', () => ({ default: { video: { get uploadDir() { return cf
 // 썸네일 resolver: .thumb.jpg면 경로 통과(실 패턴/존재 검증은 fixturePath 단위테스트). unlink는 부재 시 no-op.
 vi.mock('../../workers/fixturePath', () => ({
   resolveSampleFramePath: (p: unknown) => (typeof p === 'string' && p.endsWith('.thumb.jpg') ? p : null),
+  resolveOverlayFramesDir: (p: unknown) => (typeof p === 'string' && p.endsWith('.frames') ? p : null),
 }));
 
 import { runVideoClipCleanup } from '../videoClipCleanup';
@@ -27,12 +28,17 @@ function makePool(opts: {
   expiredClips?: { id: string; upload_path: string | null }[];
   staleArtifacts?: { id: string; keypoints_path: string | null }[];
   staleFrames?: { id: string; sample_frame_path: string | null }[];
+  staleFramesDirs?: { id: string; frames_path: string | null }[];
   referencedClips?: { upload_path?: string | null; sample_frame_path?: string | null }[];
-  referencedJobs?: string[];
+  referencedJobs?: string[];          // keypoints_path 참조
+  referencedFramesDirs?: string[];    // frames_path 참조(디렉터리)
 } = {}): Pool {
   const query = vi.fn((sql: string) => {
     if (sql.includes('file_state = \'present\'') && sql.includes('SELECT id, upload_path')) {
       return Promise.resolve({ rows: opts.expiredClips ?? [] });
+    }
+    if (sql.includes('j.frames_path')) { // 3b: TTL 만료 frames 디렉터리
+      return Promise.resolve({ rows: opts.staleFramesDirs ?? [] });
     }
     if (sql.includes('j.keypoints_path')) {
       return Promise.resolve({ rows: opts.staleArtifacts ?? [] });
@@ -43,8 +49,11 @@ function makePool(opts: {
     if (sql.includes('SELECT upload_path, sample_frame_path FROM video_analysis_clips')) {
       return Promise.resolve({ rows: opts.referencedClips ?? [] });
     }
-    if (sql.includes('SELECT keypoints_path FROM video_analysis_jobs')) {
-      return Promise.resolve({ rows: (opts.referencedJobs ?? []).map((p) => ({ keypoints_path: p })) });
+    if (sql.includes('keypoints_path, frames_path FROM video_analysis_jobs')) {
+      return Promise.resolve({ rows: [
+        ...(opts.referencedJobs ?? []).map((p) => ({ keypoints_path: p, frames_path: null })),
+        ...(opts.referencedFramesDirs ?? []).map((p) => ({ keypoints_path: null, frames_path: p })),
+      ] });
     }
     return Promise.resolve({ rows: [] }); // UPDATEs
   });
@@ -103,6 +112,32 @@ describe('runVideoClipCleanup', () => {
     const upd = (pool.query as ReturnType<typeof vi.fn>).mock.calls
       .map((c) => String(c[0])).some((s) => s.includes('SET sample_frame_path = NULL'));
     expect(upd).toBe(true);
+  });
+
+  it('TTL 만료 clip의 overlay 프레임 디렉터리 회수 + NULL UPDATE', async () => {
+    const fdir = path.join(dir, 'artifacts', 'job1.frames');
+    fs.mkdirSync(fdir, { recursive: true });
+    fs.writeFileSync(path.join(fdir, '0.jpg'), 'x');
+    const pool = makePool({ staleFramesDirs: [{ id: 'job1', frames_path: fdir }] });
+    const res = await runVideoClipCleanup(pool);
+    expect(fs.existsSync(fdir)).toBe(false);
+    expect(res.framesDirsDeleted).toBe(1);
+    const upd = (pool.query as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => String(c[0])).some((s) => s.includes('SET frames_path = NULL'));
+    expect(upd).toBe(true);
+  });
+
+  it('미참조 *.frames 디렉터리만 삭제, 참조 디렉터리는 보존', async () => {
+    const refDir = path.join(dir, 'artifacts', 'jobR.frames');
+    const orphanDir = path.join(dir, 'artifacts', 'jobO.frames');
+    fs.mkdirSync(refDir, { recursive: true });
+    fs.mkdirSync(orphanDir, { recursive: true });
+    fs.writeFileSync(path.join(refDir, '0.jpg'), 'x');
+    fs.writeFileSync(path.join(orphanDir, '0.jpg'), 'x');
+    const pool = makePool({ referencedFramesDirs: [refDir] });
+    await runVideoClipCleanup(pool);
+    expect(fs.existsSync(refDir)).toBe(true);     // DB 참조 → 보존
+    expect(fs.existsSync(orphanDir)).toBe(false); // 미참조 → 재귀삭제
   });
 
   it('tmp/ 잔여물은 grace(1h) 초과만 삭제', async () => {

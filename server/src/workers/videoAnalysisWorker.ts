@@ -41,9 +41,14 @@ export interface TargetSelection {
   timestampMs: number;
 }
 
+export interface RunInferenceOptions {
+  // 지정 시 infer_clip이 샘플 프레임을 <frameIndex>.jpg로 저장(overlay 검수 게이트, best-effort). 미지정/off면 미추출.
+  framesDir?: string | null;
+}
+
 export interface WorkerDeps {
   // 추론 실행기(테스트에서 주입). 기본은 Python subprocess. targetSelection이 있으면 박스→트랙 매핑 후 --target-track.
-  runInference: (clipPath: string, profile: string | null, targetSelection: TargetSelection | null) => Promise<InferenceResult>;
+  runInference: (clipPath: string, profile: string | null, targetSelection: TargetSelection | null, options?: RunInferenceOptions) => Promise<InferenceResult>;
 }
 
 interface ClaimedJob {
@@ -91,7 +96,7 @@ export function mapTargetTrack(kpDoc: { frames?: KpFrame[] }, sel: TargetSelecti
 
 // 기본 추론기: infer_clip.py → keypoints, (선택)박스→트랙 매핑, feature_calc.py → clip_features. ClipFeatureSetSchema 검증.
 async function defaultRunInference(
-  clipPath: string, profile: string | null, targetSelection: TargetSelection | null,
+  clipPath: string, profile: string | null, targetSelection: TargetSelection | null, options?: RunInferenceOptions,
 ): Promise<InferenceResult> {
   const fps = PROFILE_FPS[profile ?? 'posture-basic'] ?? 5;
   const scripts = config.video.scriptsDir;
@@ -99,11 +104,10 @@ async function defaultRunInference(
   try {
     const kpPath = path.join(work, 'keypoints.json');
     const cfPath = path.join(work, 'clip_features.json');
-    await execFileAsync(
-      config.video.python,
-      [path.join(scripts, 'infer_clip.py'), '--input', clipPath, '--output', kpPath, '--fps', String(fps)],
-      { timeout: PROCESSING_TIMEOUT_MS },
-    );
+    const inferArgs = [path.join(scripts, 'infer_clip.py'), '--input', clipPath, '--output', kpPath, '--fps', String(fps)];
+    // overlay 검수 게이트(privacy 예외): 샘플 프레임을 frameIndex별 JPEG로 저장(infer_clip best-effort).
+    if (options?.framesDir) inferArgs.push('--frames-dir', options.framesDir);
+    await execFileAsync(config.video.python, inferArgs, { timeout: PROCESSING_TIMEOUT_MS });
     // 매핑은 keypoints가 나와야 가능 → infer_clip 후에 처리. 선택 있으면 박스→트랙(실패 시 throw → job error).
     const kpRaw = fs.readFileSync(kpPath, 'utf-8');
     const kpDoc = JSON.parse(kpRaw) as { model?: { preprocessConfigHash?: string }; frames?: KpFrame[] };
@@ -171,6 +175,29 @@ async function persistKeypoints(
   await fs.promises.writeFile(keypointsPath, keypointsJson);
   const keypointsSha = crypto.createHash('sha256').update(keypointsJson).digest('hex');
   return { keypointsPath, keypointsSha };
+}
+
+/** overlay 프레임 디렉터리 경로(게이트 on + uploadDir일 때만). 실제 프레임 추출은 infer_clip이 --frames-dir로 수행. */
+function overlayFramesDir(jobId: string): string | null {
+  if (!config.video.overlayFrames || !config.video.uploadDir) return null;
+  return path.join(config.video.uploadDir, 'artifacts', `${jobId}.frames`);
+}
+
+/** 디렉터리에 .jpg가 1개 이상 있으면 그 경로 반환(없으면 null). Python best-effort라 빈 디렉터리 가능 → 빈 건 미기록. */
+async function framesPathIfPopulated(dir: string | null): Promise<string | null> {
+  if (!dir) return null;
+  try {
+    const entries = await fs.promises.readdir(dir);
+    return entries.some((e) => e.toLowerCase().endsWith('.jpg')) ? dir : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 조용한 재귀 디렉터리 삭제(존재 안 해도 무시). */
+async function safeRmDir(p: string | null | undefined): Promise<void> {
+  if (!p) return;
+  await fs.promises.rm(p, { recursive: true, force: true }).catch(() => {});
 }
 
 interface JobClip {
@@ -249,6 +276,7 @@ export async function pollOnce(pool: Pool, deps: WorkerDeps): Promise<boolean> {
 
   // DB에 경로가 기록되기 전 예외 시 즉시 정리할 artifact(orphan 방지). 기록 성공 후 null로 비운다.
   let pendingKeypointsPath: string | null = null;
+  let pendingFramesDir: string | null = null;
   let succeeded: { clip: JobClip } | null = null;
   try {
     const clip = await loadJobClip(pool, job.clip_id);
@@ -256,25 +284,34 @@ export async function pollOnce(pool: Pool, deps: WorkerDeps): Promise<boolean> {
       throw Object.assign(new Error('clip unavailable or outside allowlist'), { code: 'CLIP_UNAVAILABLE' });
     }
     const targetSelection = await resolveTargetSelection(pool, job.clip_id);
-    const result = await deps.runInference(clip.resolvedPath, job.analysis_profile, targetSelection);
+    // overlay 프레임 게이트(privacy 예외): on이면 추론이 프레임을 이 dir에 저장. 실패/error 시 즉시 정리 대상.
+    const framesDir = overlayFramesDir(job.id);
+    pendingFramesDir = framesDir;
+    const result = await deps.runInference(clip.resolvedPath, job.analysis_profile, targetSelection, { framesDir });
 
     // keypoints artifact 영속화(overlay 검수 입력, M3-7b). uploadDir 구성 시에만(좌표만, 원본 프레임 없음).
     const { keypointsPath, keypointsSha } = await persistKeypoints(job.id, result.keypointsJson);
     pendingKeypointsPath = keypointsPath;
+    // 프레임은 실제 .jpg가 생성된 경우에만 frames_path 기록(best-effort라 빈 디렉터리 가능).
+    const framesPath = await framesPathIfPopulated(framesDir);
 
     await pool.query(
       `UPDATE video_analysis_jobs
          SET status = 'review_pending', result_features = $2,
              preprocess_config_hash = $3, analysis_input_sha256 = $4,
-             keypoints_path = $5, keypoints_sha256 = $6
+             keypoints_path = $5, keypoints_sha256 = $6, frames_path = $7
        WHERE id = $1`,
-      [job.id, JSON.stringify(result.clipFeatures), result.preprocessConfigHash, result.inputSha256, keypointsPath, keypointsSha],
+      [job.id, JSON.stringify(result.clipFeatures), result.preprocessConfigHash, result.inputSha256, keypointsPath, keypointsSha, framesPath],
     );
     pendingKeypointsPath = null; // DB에 경로 기록 완료 → 더 이상 orphan 아님.
+    // 프레임: 기록됐으면 보존(orphan 아님), 빈 디렉터리면 즉시 제거.
+    if (framesPath) pendingFramesDir = null;
+    else { await safeRmDir(framesDir); pendingFramesDir = null; }
     succeeded = { clip }; // 분석 성공 확정 — 이후 보존정책 후처리 실패가 이 성공을 덮지 않게 한다.
   } catch (err) {
-    // DB에 경로가 기록되기 전 실패한 keypoints artifact는 즉시 정리(hourly orphan sweep 대기 없이).
+    // DB에 경로가 기록되기 전 실패한 artifact는 즉시 정리(hourly orphan sweep 대기 없이).
     if (pendingKeypointsPath) await safeUnlink(pendingKeypointsPath);
+    if (pendingFramesDir) await safeRmDir(pendingFramesDir);
     const code = (err as { code?: string })?.code ?? 'INFERENCE_ERROR';
     const message = String((err as Error)?.message ?? err).slice(0, 500);
     await pool.query(

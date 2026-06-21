@@ -78,6 +78,15 @@ export async function fetchSampleFrame(clipId, { session, settings } = {}) {
   return blob ? URL.createObjectURL(blob) : null;
 }
 
+// 골격 검수 overlay 실 프레임(privacy 게이트 예외). 게이트 off/미생성/검수종료면 404→null. 200이면 Blob 반환.
+// objectURL 생성·해제(스크럽 캐시·trim)는 호출측(SkeletonOverlay)이 관리한다.
+export async function fetchOverlayFrame(jobId, frameIndex, { session, settings } = {}) {
+  ensureIntranet(session);
+  return requestBlob(`/api/video-analysis/jobs/${jobId}/overlay-frame/${frameIndex}`, {
+    baseUrl: getBaseUrl(session, settings), session,
+  });
+}
+
 export async function selectTarget(clipId, targetPersonId, { session, settings } = {}) {
   ensureIntranet(session);
   return requestJson(`/api/video-analysis/clips/${clipId}/select-target`, {

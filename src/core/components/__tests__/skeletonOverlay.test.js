@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scaledKeypoints, COCO17_BONES, frameActive, activeFrameIndices } from '../SkeletonOverlay.jsx';
+import { scaledKeypoints, COCO17_BONES, frameActive, activeFrameIndices, trimFrameCache } from '../SkeletonOverlay.jsx';
 
 const kps = [
   [100, 200, 0.9],
@@ -63,5 +63,23 @@ describe('frameActive / activeFrameIndices (자세 활성 프레임 하이라이
     expect(activeFrameIndices(frames, durSeg)).toEqual([1, 2]); // 3000·5000 ∈ [2000,6000]
     expect(activeFrameIndices(frames, peakSeg)).toEqual([1]);   // 3000만
     expect(activeFrameIndices(frames, [])).toEqual([]);
+  });
+});
+
+describe('trimFrameCache (실 프레임 objectURL 메모리 가드)', () => {
+  it('keep 밖 항목만 revoke + 삭제, keep 안은 유지', () => {
+    const revoked = [];
+    const cache = new Map([[5, 'u5'], [6, 'u6'], [7, 'u7']]);
+    trimFrameCache(cache, new Set([6, 7]), (u) => revoked.push(u)); // 현재 6 ±1 = {6,7}(+5는 밖)
+    expect(revoked).toEqual(['u5']);
+    expect([...cache.keys()]).toEqual([6, 7]);
+  });
+
+  it('keep 비면 전부 revoke', () => {
+    const revoked = [];
+    const cache = new Map([[0, 'a'], [1, 'b']]);
+    trimFrameCache(cache, new Set(), (u) => revoked.push(u));
+    expect(revoked.sort()).toEqual(['a', 'b']);
+    expect(cache.size).toBe(0);
   });
 });
