@@ -48,26 +48,27 @@ export function scaledKeypoints(keypoints, meta, maxWidth = 360) {
   return { width: maxWidth, height: fh * scale, scale, points };
 }
 
-function PersonSkeleton({ points, target, active }) {
+function PersonSkeleton({ points, target, active, scale = 1 }) {
   // 대상 track이 "이 변수 자세" 활성 프레임이면 호박색으로 강조 → 검수자가 원인 프레임을 즉시 식별.
   const stroke = target ? (active ? '#ffa726' : '#90caf9') : 'rgba(255,255,255,0.18)';
   const fill = target ? (active ? '#e65100' : '#2e7d32') : 'rgba(255,255,255,0.25)';
+  // viewBox(네이티브 좌표) 안에서 선/점 굵기는 프레임 폭에 비례(scale)해 표시 크기와 무관하게 일정.
   return (
     <g>
       {COCO17_BONES.map(([a, b], i) => {
         const pa = points[a];
         const pb = points[b];
         if (!pa || !pb || pa.score < MIN_SCORE || pb.score < MIN_SCORE) return null;
-        return <line key={i} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} stroke={stroke} strokeWidth={target ? 2.5 : 1.5} />;
+        return <line key={i} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} stroke={stroke} strokeWidth={(target ? 2.5 : 1.5) * scale} />;
       })}
       {points.map((p, i) => (p.score < MIN_SCORE ? null : (
-        <circle key={i} cx={p.x} cy={p.y} r={target ? 3 : 2} fill={fill} />
+        <circle key={i} cx={p.x} cy={p.y} r={(target ? 3 : 2) * scale} fill={fill} />
       )))}
     </g>
   );
 }
 
-function SkeletonOverlayImpl({ overlay, maxWidth = 360, activeSegments = [] }) {
+function SkeletonOverlayImpl({ overlay, activeSegments = [] }) {
   const [frameIndex, setFrameIndex] = useState(0);
   const kp = overlay?.keypoints;
   const frames = kp?.frames || [];
@@ -78,7 +79,10 @@ function SkeletonOverlayImpl({ overlay, maxWidth = 360, activeSegments = [] }) {
   const active = frameActive(frame.timestampMs, activeSegments);
   const activeIdxs = activeFrameIndices(frames, activeSegments);
   const lastIdx = Math.max(frames.length - 1, 1);
-  const meta = { frameWidth: kp.frameWidth, frameHeight: kp.frameHeight, coordinateSpace: kp.coordinateSpace };
+  // 네이티브 프레임 좌표로 그리고(viewBox), 표시 크기는 CSS(.va-media-box 4:3)가 결정 → 세로 영상도 안 길어짐.
+  const fw = kp.frameWidth || 0;
+  const fh = kp.frameHeight || Math.round(fw * 0.75) || 0;
+  const meta = { frameWidth: fw, frameHeight: kp.frameHeight, coordinateSpace: kp.coordinateSpace };
   const targetId = overlay.targetTrackId ?? null;
   // 대상 track을 마지막에 그려 위로 오게(흐린 후보 위에 강조).
   const persons = (frame.persons || []).slice().sort((a, b) => {
@@ -87,18 +91,19 @@ function SkeletonOverlayImpl({ overlay, maxWidth = 360, activeSegments = [] }) {
     return at - bt;
   });
   const targetPresent = targetId == null || (frame.persons || []).some((p) => p.trackId === targetId);
-  const dims = scaledKeypoints([], meta, maxWidth); // 캔버스 크기만 산출(빈 입력)
+  const drawScale = fw ? fw / 360 : 1; // 선/점 굵기 프레임폭 비례
 
   return (
     <div>
-      <svg width={dims.width} height={dims.height} role="img" aria-label="검수 골격"
-        style={{ background: '#222', border: '1px solid #444', borderRadius: 6 }}>
-        {persons.map((person, i) => {
-          const s = scaledKeypoints(person.keypoints, meta, maxWidth);
-          const isTarget = person.trackId === targetId;
-          return <PersonSkeleton key={person.trackId ?? i} points={s.points} target={isTarget} active={isTarget && active} />;
-        })}
-      </svg>
+      <div className="va-media-box">
+        <svg viewBox={`0 0 ${fw} ${fh}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="검수 골격">
+          {persons.map((person, i) => {
+            const s = scaledKeypoints(person.keypoints, meta, fw); // scale=1 → 네이티브 좌표
+            const isTarget = person.trackId === targetId;
+            return <PersonSkeleton key={person.trackId ?? i} points={s.points} target={isTarget} active={isTarget && active} scale={drawScale} />;
+          })}
+        </svg>
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
         {/* 스크럽바 위 호박색 마커 = 이 변수 자세가 잡힌 프레임(구간/peak) */}
         <div style={{ position: 'relative', flex: 1 }}>
@@ -118,7 +123,7 @@ function SkeletonOverlayImpl({ overlay, maxWidth = 360, activeSegments = [] }) {
         </span>
       </div>
       {activeSegments.length > 0 && (
-        <p style={{ fontSize: 12, margin: '4px 0 0', color: active ? '#e65100' : '#888' }}>
+        <p style={{ fontSize: 12, margin: '4px 0 0', color: active ? '#e65100' : 'var(--text-muted)' }}>
           {active ? '● 이 프레임에서 해당 변수 자세가 잡혔습니다(호박색 골격).' : `○ 해당 변수 자세 프레임 ${activeIdxs.length}개 — 스크럽바 호박색 마커로 이동.`}
         </p>
       )}

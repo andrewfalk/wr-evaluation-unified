@@ -15,28 +15,33 @@ export function scaledCandidates(result, maxWidth = 360) {
   return { width: maxWidth, height: (result.frameHeight || 0) * scale, scale, boxes };
 }
 
-function TargetPickerImpl({ result, selectedId, onSelect, maxWidth = 360, frameUrl = null }) {
+function TargetPickerImpl({ result, selectedId, onSelect, frameUrl = null }) {
   if (!result) return null;
-  const { width, height, boxes } = scaledCandidates(result, maxWidth);
+  // 네이티브 프레임 좌표로 그리고(viewBox), 표시 크기는 CSS(.va-media-box 4:3)가 결정 → 세로 영상도 안 길어짐.
+  const W = result.frameWidth;
+  const H = result.frameHeight || Math.round(W * 0.75);
+  const { boxes } = scaledCandidates(result, W); // scale=1 → 네이티브 좌표
+  const sw = Math.max(2, W / 200);  // 표시 스케일 무관하게 선 굵기 유지(프레임 폭 비례)
+  const fs = Math.max(12, W / 28);
   return (
     <div>
-      <svg width={width} height={height} role="group" aria-label="대상자 선택"
-        style={{ background: '#222', border: '1px solid #444', borderRadius: 6 }}>
-        {/* 정책 예외: 대표 프레임 썸네일 배경(있을 때만). 박스는 동일 좌표·스케일로 위에 겹쳐 그린다. */}
-        {frameUrl && <image href={frameUrl} x={0} y={0} width={width} height={height} preserveAspectRatio="none" />}
-        {boxes.map((b) => {
-          const sel = b.id === selectedId;
-          return (
-            // 각 후보는 별도 rect — 클릭 hit-test는 SVG가 처리(커스텀 좌표 계산 불필요).
-            <g key={b.id} onClick={() => onSelect(b.id)} style={{ cursor: 'pointer' }}>
-              <rect x={b.x} y={b.y} width={b.w} height={b.h}
-                fill={sel ? 'rgba(46,125,50,0.35)' : 'rgba(255,255,255,0.06)'}
-                stroke={sel ? '#2e7d32' : '#90caf9'} strokeWidth={sel ? 3 : 2} />
-              <text x={b.x + 4} y={b.y + 14} fill="#fff" fontSize="12">{b.id}</text>
-            </g>
-          );
-        })}
-      </svg>
+      <div className="va-media-box">
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" role="group" aria-label="대상자 선택">
+          {/* 정책 예외: 대표 프레임 썸네일 배경(있을 때만). 박스는 동일 좌표로 위에 겹친다. */}
+          {frameUrl && <image href={frameUrl} x={0} y={0} width={W} height={H} preserveAspectRatio="none" />}
+          {boxes.map((b) => {
+            const sel = b.id === selectedId;
+            return (
+              <g key={b.id} onClick={() => onSelect(b.id)} style={{ cursor: 'pointer' }}>
+                <rect x={b.x} y={b.y} width={b.w} height={b.h}
+                  fill={sel ? 'rgba(46,125,50,0.35)' : 'rgba(255,255,255,0.06)'}
+                  stroke={sel ? '#2e7d32' : '#90caf9'} strokeWidth={sel ? sw * 1.5 : sw} />
+                <text x={b.x + fs * 0.3} y={b.y + fs} fill="#fff" fontSize={fs}>{b.id}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
       {boxes.length === 0 && <p className="muted">탐지된 사람이 없습니다(다른 클립/프레임 확인).</p>}
     </div>
   );

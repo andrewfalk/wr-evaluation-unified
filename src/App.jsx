@@ -578,7 +578,7 @@ function App() {
             )}
 
             {/* 콘텐츠 */}
-            <div className={`main-content ${currentStep.id === 'info' ? 'main-content-dual' : currentStep.id === 'assessment' ? '' : 'main-content-single'}`}>
+            <div className={`main-content ${currentStep.id === 'info' ? 'main-content-dual' : (currentStep.id === 'assessment' || currentStep.id === 'videoAnalysis') ? '' : 'main-content-single'}`}>
               <StepContent
                 currentStep={currentStep}
                 activePatient={activePatient}
