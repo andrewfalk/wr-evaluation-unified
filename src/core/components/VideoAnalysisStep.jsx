@@ -78,6 +78,11 @@ export function buildVideoStatus(va, {
   };
 }
 
+// 표시용 숫자 — 모든 지표를 소수점 1자리로 통일(정수·비숫자는 그대로). 부동소수 꼬리 제거.
+export function fmtNum(v) {
+  return (typeof v === 'number' && Number.isFinite(v)) ? Math.round(v * 10) / 10 : v;
+}
+
 /**
  * 공정별 feature를 직업(sharedJobId) 단위로 묶어 집계한다(job-scope).
  * @param {boolean} absolutePerDay - 서버 실분석 값은 ratio×activeMinutesPerDay로 이미 절대 per-day이므로
@@ -638,7 +643,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   // 한 contribution(공정)의 환산식 문자열(자세비율 × 활동시간). ratio metric만 표시. 단위별 분기.
   const contribFormula = (ev, perDayValue, unit) => {
     if (!ev || ev.intrinsicMetric !== 'posture_ratio' || ev.activeMinutesPerDay == null) return null;
-    const ratio = typeof ev.intrinsicValue === 'number' ? ev.intrinsicValue.toFixed(3) : ev.intrinsicValue;
+    const ratio = fmtNum(ev.intrinsicValue);
     const pd = typeof perDayValue === 'number' ? Math.round(perDayValue * 10) / 10 : perDayValue;
     const pdStr = pd == null ? '?' : pd;
     const am = ev.activeMinutesPerDay;
@@ -738,7 +743,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
       <li key={rowKey} className="va-suggest-card">
         <div className="va-suggest-head">
           <code className="va-suggest-key">{s.featureKey}</code>
-          <span className="va-suggest-value">→ {String(s.suggestedValue)} {s.unit || ''}</span>
+          <span className="va-suggest-value">→ {String(fmtNum(s.suggestedValue))} {s.unit || ''}</span>
           <span className={`va-flag-pill ${s.confidence >= 0.8 ? 'tone-positive' : 'tone-warning'}`}>신뢰도 {Math.round(s.confidence * 100)}%</span>
           {refOnly && <span className="va-flag-pill tone-warning" title="저신뢰 — 수기 확인 필요">참고만</span>}
           {s.requiresManualReview && <span className="va-flag-pill tone-info">수기확인</span>}
@@ -781,7 +786,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     } else {
       // generic candidate(trunkPostureG·neckCombinedFlexRot 등): 원값 + (evidence.intrinsicUnit) 표시.
       const unit = jobEv?.contributions?.[0]?.evidence?.intrinsicUnit || '';
-      label = <>{c.reason ? `${c.reason}: ` : ''}{String(c.value)}{unit ? ` ${unit}` : ''}</>;
+      label = <>{c.reason ? `${c.reason}: ` : ''}{String(fmtNum(c.value))}{unit ? ` ${unit}` : ''}</>;
     }
     const skeleton = renderSkeletonReview(rowKey, jobEv);
     return (
@@ -827,11 +832,6 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
               </p>
             )}
             {applyError && <p className="muted" style={{ color: 'var(--color-danger)' }}>오류: {applyError}</p>}
-          </div>
-          <div className="section-actions">
-            <button type="button" className="btn btn-primary" onClick={runAnalysis} disabled={va.processes.length === 0 || analyzing}>
-              {analyzing ? '분석 중…' : (serverMode ? '분석 실행' : 'mock 분석 실행')}
-            </button>
           </div>
         </div>
 
@@ -933,7 +933,12 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                 </div>
               );
             })}
-            <div><button type="button" className="btn btn-secondary btn-sm" onClick={addProcess}>+ 공정 추가</button></div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={addProcess}>+ 공정 추가</button>
+              <button type="button" className="btn btn-primary" onClick={runAnalysis} disabled={va.processes.length === 0 || analyzing}>
+                {analyzing ? '분석 중…' : (serverMode ? '분석 실행' : 'mock 분석 실행')}
+              </button>
+            </div>
 
             {/* 파이프라인 진행바(coarse) */}
             <div className="va-pipeline">
