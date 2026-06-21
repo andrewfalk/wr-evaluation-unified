@@ -6,10 +6,12 @@ import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { writeAuditLog } from '../middleware/audit';
 import path from 'path';
-import { SampleDetectResultSchema, PoseKeypointsSchema } from '@wr/contracts';
+import { SampleDetectResultSchema, PoseKeypointsSchema, AnalysisRecipeSchema, buildAnalysisBundleVersion } from '@wr/contracts';
+import type { AnalysisRecipe } from '@wr/contracts';
 import { resolveFixtureClip, resolveUploadedClipPath, resolveSampleFramePath, resolveKeypointsArtifactPath, resolveOverlayFramesDir, resolveOverlayFramePath } from '../workers/fixturePath';
 import { runSampleDetect } from '../workers/sampleDetect';
 import { buildUploadMiddleware, runMulter, sniffVideoMime, hashFile, safeUnlink } from '../workers/videoUpload';
+import { validateAppliedRecipes } from '../workers/recipeValidation';
 import type { RequestHandler as ExpressRequestHandler } from 'express';
 import fs from 'fs';
 import crypto from 'crypto';
@@ -174,6 +176,7 @@ interface VideoJobRow {
   analysis_profile: string | null;
   requested_features: unknown;
   result_features: unknown;
+  analysis_recipe: unknown; // recipe versioning(§8.11) — 워커가 저장. apply 검증의 서버 source of truth.
   error_code: string | null;
   applied_at: Date | null;
   applied_revision: number | null;
@@ -185,7 +188,23 @@ interface VideoJobRow {
   updated_at: Date;
 }
 
+// 저장된 analysis_recipe(JSONB, 신뢰 경계 밖이 아니라 서버 자작이지만 형태 방어)를 파싱한다.
+// 구 job(recipe 없음)이면 null. 형식 불량이면 null(클라가 recipe 없이 폴백 경로 — apply에서 차단).
+function parseStoredRecipe(raw: unknown): AnalysisRecipe | null {
+  if (raw == null) return null;
+  const parsed = AnalysisRecipeSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+// 환자 data에서 appliedInputs 배열을 안전하게 읽는다(recipe 검증 suffix diff용). 없으면 [].
+function readAppliedInputs(payloadData: unknown): unknown[] {
+  const va = (payloadData as { shared?: { videoAnalysis?: { appliedInputs?: unknown } } } | null | undefined)?.shared?.videoAnalysis;
+  const arr = va?.appliedInputs;
+  return Array.isArray(arr) ? arr : [];
+}
+
 function jobResponse(row: VideoJobRow): Record<string, unknown> {
+  const recipe = parseStoredRecipe(row.analysis_recipe);
   return {
     jobId: row.id,
     clipId: row.clip_id,
@@ -195,6 +214,9 @@ function jobResponse(row: VideoJobRow): Record<string, unknown> {
     requestedFeatures: row.requested_features ?? [],
     // 워커가 ClipFeatureSetSchema 검증 후 저장한 intrinsic clipFeatures(있으면). per-day 환산은 클라.
     resultFeatures: row.result_features ?? null,
+    // recipe versioning(§8.11) — 서버-기원 component. 클라는 이를 받아 map/vp(클라 상수)와 합쳐 appliedInputs에 기록.
+    recipe: recipe ?? null,
+    analysisBundleVersion: recipe ? buildAnalysisBundleVersion(recipe) : null,
     errorCode: row.error_code ?? null,
     appliedAt: row.applied_at ? row.applied_at.toISOString() : null,
     appliedRevision: row.applied_revision,
@@ -795,9 +817,11 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
     // process_id 보유(셸 job 제외) + status review_pending|done(같은 직업 다중 feature는 done 가능) +
     // 현재 적용 셸 job(job.id) 자신은 제외. 상태는 review_pending/done만 허용(consume은 review_pending만 전이).
     const uniqueSourceIds = [...new Set(sourceAnalysisJobIds)];
+    // 같은 SELECT에서 저장 recipe도 가져온다(추가 쿼리 없이 recipe 검증의 source of truth 확보).
+    const sourceRecipes = new Map<string, AnalysisRecipe | null>();
     if (uniqueSourceIds.length > 0) {
-      const { rows: srcRows } = await client.query<{ id: string }>(
-        `SELECT id FROM video_analysis_jobs
+      const { rows: srcRows } = await client.query<{ id: string; analysis_recipe: unknown }>(
+        `SELECT id, analysis_recipe FROM video_analysis_jobs
          WHERE id = ANY($1) AND organization_id = $2 AND patient_record_id = $3
            AND result_features IS NOT NULL AND process_id IS NOT NULL
            AND status IN ('review_pending','done') AND id <> $4`,
@@ -808,6 +832,7 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
         res.status(400).json({ code: 'INVALID_SOURCE_JOB', error: 'sourceAnalysisJobIds must reference completed analysis jobs of this patient' });
         return;
       }
+      for (const r of srcRows) sourceRecipes.set(r.id, parseStoredRecipe(r.analysis_recipe));
     }
 
     // ③ patient FOR UPDATE + revision(If-Match)
@@ -831,6 +856,23 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
     // ④ payload 갱신(클라가 계산한 data 영속화 — 영상 apply는 meta 컬럼 불변).
     const existingPayload = typeof pats[0].payload === 'object' && pats[0].payload !== null
       ? (pats[0].payload as Record<string, unknown>) : {};
+
+    // recipe 검증 게이트(§8.11, 6.0-9) — payload 무수정, 대조만. 서버가 source of truth.
+    // 새로 추가된 appliedInputs(suffix)만 검증: count·prefix 불변·exact-set·recipe field 대조·unverified fail-closed.
+    const recipeFail = validateAppliedRecipes({
+      oldAppliedInputs: readAppliedInputs((existingPayload as { data?: unknown }).data),
+      newAppliedInputs: readAppliedInputs(data),
+      appliedInputsCount,
+      sourceAnalysisJobIds: uniqueSourceIds,
+      sourceRecipes,
+      allowUnverified: config.video.allowUnverifiedRecipe,
+    });
+    if (recipeFail) {
+      await client.query('ROLLBACK');
+      res.status(400).json(recipeFail);
+      return;
+    }
+
     const newPayload = { ...existingPayload, data };
     const newRevision = expectedRevision + 1;
 

@@ -49,6 +49,32 @@ export const FramePoseSchema = z.object({
   persons: z.array(PersonPoseSchema),
 }).strict();
 
+// 가중치 .onnx sha256(recipe 재현성, 6.0-9). 미반입(PoC/dev)이면 null, 반입 시 소문자 64-hex.
+export const Sha256OrNullSchema = z.union([z.null(), z.string().regex(/^[0-9a-f]{64}$/)]);
+
+// model 메타 — recipe(§8.11)의 모델 component source. verified면 두 sha 필수(거짓 verified 방지).
+export const PoseModelSchema = z.object({
+  detector: z.string().min(1),
+  pose: z.string().min(1),
+  inputSize: z.array(z.number().int()).length(2),
+  modelName: z.string().min(1),
+  modelVersion: z.string().min(1),
+  detectorSha256: Sha256OrNullSchema,
+  poseSha256: Sha256OrNullSchema,
+  weightsComplete: z.boolean(),
+  preprocessConfigHash: z.string().min(1),
+}).strict().superRefine((m, ctx) => {
+  // weightsComplete=true(verified)면 두 가중치 sha가 모두 64-hex여야 한다(null 금지).
+  if (m.weightsComplete) {
+    if (m.detectorSha256 === null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['detectorSha256'], message: 'weightsComplete=true requires non-null detectorSha256' });
+    }
+    if (m.poseSha256 === null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['poseSha256'], message: 'weightsComplete=true requires non-null poseSha256' });
+    }
+  }
+});
+
 const KEYPOINT_COUNT = { coco17: 17, wholebody133: 133 };
 
 export const PoseKeypointsSchema = z.object({
@@ -64,14 +90,7 @@ export const PoseKeypointsSchema = z.object({
     originalFps: z.number().positive(),
     totalFrames: z.number().int().nonnegative(),
   }).strict(),
-  model: z.object({
-    detector: z.string().min(1),
-    pose: z.string().min(1),
-    inputSize: z.array(z.number().int()).length(2),
-    modelName: z.string().min(1),
-    modelVersion: z.string().min(1),
-    preprocessConfigHash: z.string().min(1),
-  }).strict(),
+  model: PoseModelSchema,
   quality: FrameQualitySchema.optional(),  // PR D3a — PR B/C/D2 산출 하위호환 위해 optional
   frames: z.array(FramePoseSchema),
 }).strict().superRefine((doc, ctx) => {
@@ -98,4 +117,5 @@ export type CoordinateSpace = z.infer<typeof CoordinateSpaceSchema>;
 export type Keypoint = z.infer<typeof KeypointSchema>;
 export type PersonPose = z.infer<typeof PersonPoseSchema>;
 export type FramePose = z.infer<typeof FramePoseSchema>;
+export type PoseModel = z.infer<typeof PoseModelSchema>;
 export type PoseKeypoints = z.infer<typeof PoseKeypointsSchema>;

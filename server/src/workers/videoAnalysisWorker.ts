@@ -6,6 +6,8 @@ import path from 'path';
 import crypto from 'crypto';
 import type { Pool, PoolClient } from 'pg';
 import { ClipFeatureSetSchema, SampleDetectResultSchema } from '@wr/contracts';
+import { VIDEO_MAPPING_CONFIG_VERSION, VIDEO_VIEWPOINT_CONFIG_VERSION } from '@wr/contracts';
+import type { AnalysisRecipe } from '@wr/contracts';
 import config from '../config';
 import { resolveFixtureClip, resolveUploadedClipPath, resolveSampleFramePath } from './fixturePath';
 
@@ -32,6 +34,12 @@ export interface InferenceResult {
   preprocessConfigHash: string | null;
   inputSha256: string | null;
   keypointsJson: string | null; // keypoints 원문(좌표만). overlay 검수용 artifact로 영속(M3-7b).
+  // recipe components(6.0-9, §8.11) — keypoints `model` + clip_features에서 추출. 워커가 analysis_recipe로 조립.
+  modelVersion: string | null;
+  detectorSha256: string | null;
+  poseSha256: string | null;
+  weightsComplete: boolean;
+  featureConfigVersion: string | null;
 }
 
 // 사용자가 고른 대상자(§8.7, PR D2b). sample-detect 후보 bbox(xywh 픽셀) + 대표 프레임 시각.
@@ -110,7 +118,16 @@ async function defaultRunInference(
     await execFileAsync(config.video.python, inferArgs, { timeout: PROCESSING_TIMEOUT_MS });
     // 매핑은 keypoints가 나와야 가능 → infer_clip 후에 처리. 선택 있으면 박스→트랙(실패 시 throw → job error).
     const kpRaw = fs.readFileSync(kpPath, 'utf-8');
-    const kpDoc = JSON.parse(kpRaw) as { model?: { preprocessConfigHash?: string }; frames?: KpFrame[] };
+    const kpDoc = JSON.parse(kpRaw) as {
+      model?: {
+        preprocessConfigHash?: string;
+        modelVersion?: string;
+        detectorSha256?: string | null;
+        poseSha256?: string | null;
+        weightsComplete?: boolean;
+      };
+      frames?: KpFrame[];
+    };
     const featureArgs = [path.join(scripts, 'feature_calc.py'), '--keypoints', kpPath, '--output', cfPath];
     if (targetSelection) {
       featureArgs.push('--target-track', mapTargetTrack(kpDoc, targetSelection));
@@ -118,11 +135,18 @@ async function defaultRunInference(
     await execFileAsync(config.video.python, featureArgs, { timeout: PROCESSING_TIMEOUT_MS });
     const cfRaw = fs.readFileSync(cfPath, 'utf-8');
     const clipFeatures = ClipFeatureSetSchema.parse(JSON.parse(cfRaw)); // 신뢰 경계 — 계약 검증
+    const m = kpDoc?.model ?? {};
     return {
       clipFeatures,
-      preprocessConfigHash: kpDoc?.model?.preprocessConfigHash ?? null,
+      preprocessConfigHash: m.preprocessConfigHash ?? null,
       inputSha256: crypto.createHash('sha256').update(kpRaw).digest('hex'),
       keypointsJson: kpRaw, // tmp work dir는 곧 삭제되므로 원문을 반환해 호출측이 artifact로 영속.
+      modelVersion: m.modelVersion ?? null,
+      detectorSha256: m.detectorSha256 ?? null,
+      poseSha256: m.poseSha256 ?? null,
+      weightsComplete: m.weightsComplete === true,
+      featureConfigVersion:
+        (clipFeatures as { featureConfigVersion?: string }).featureConfigVersion ?? null,
     };
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
@@ -175,6 +199,25 @@ async function persistKeypoints(
   await fs.promises.writeFile(keypointsPath, keypointsJson);
   const keypointsSha = crypto.createHash('sha256').update(keypointsJson).digest('hex');
   return { keypointsPath, keypointsSha };
+}
+
+/**
+ * 추론 결과에서 재현성 recipe(§8.11)를 조립한다(서버 source of truth). 가중치 sha가 모두 확정
+ * (weightsComplete)이어야 status='verified'. mapping/viewpoint 버전은 서버 상수(@wr/contracts)에서,
+ * code commit은 env WR_GIT_COMMIT(PR-B Dockerfile ARG→ENV)에서 채운다.
+ */
+export function buildJobRecipe(result: InferenceResult): AnalysisRecipe {
+  return {
+    status: result.weightsComplete ? 'verified' : 'unverified',
+    modelVersion: result.modelVersion ?? 'unknown',
+    detectorSha256: result.detectorSha256,
+    poseSha256: result.poseSha256,
+    preprocessConfigHash: result.preprocessConfigHash,
+    featureConfigVersion: result.featureConfigVersion ?? 'unknown',
+    mappingConfigVersion: VIDEO_MAPPING_CONFIG_VERSION,
+    viewpointConfigVersion: VIDEO_VIEWPOINT_CONFIG_VERSION,
+    codeCommit: process.env.WR_GIT_COMMIT || 'unknown',
+  };
 }
 
 /** overlay 프레임 디렉터리 경로(게이트 on + uploadDir일 때만). 실제 프레임 추출은 infer_clip이 --frames-dir로 수행. */
@@ -295,13 +338,15 @@ export async function pollOnce(pool: Pool, deps: WorkerDeps): Promise<boolean> {
     // 프레임은 실제 .jpg가 생성된 경우에만 frames_path 기록(best-effort라 빈 디렉터리 가능).
     const framesPath = await framesPathIfPopulated(framesDir);
 
+    const recipe = buildJobRecipe(result); // 재현성 recipe(§8.11) — apply 검증의 서버 source of truth.
     await pool.query(
       `UPDATE video_analysis_jobs
          SET status = 'review_pending', result_features = $2,
              preprocess_config_hash = $3, analysis_input_sha256 = $4,
-             keypoints_path = $5, keypoints_sha256 = $6, frames_path = $7
+             keypoints_path = $5, keypoints_sha256 = $6, frames_path = $7,
+             analysis_recipe = $8
        WHERE id = $1`,
-      [job.id, JSON.stringify(result.clipFeatures), result.preprocessConfigHash, result.inputSha256, keypointsPath, keypointsSha, framesPath],
+      [job.id, JSON.stringify(result.clipFeatures), result.preprocessConfigHash, result.inputSha256, keypointsPath, keypointsSha, framesPath, JSON.stringify(recipe)],
     );
     pendingKeypointsPath = null; // DB에 경로 기록 완료 → 더 이상 orphan 아님.
     // 프레임: 기록됐으면 보존(orphan 아님), 빈 디렉터리면 즉시 제거.

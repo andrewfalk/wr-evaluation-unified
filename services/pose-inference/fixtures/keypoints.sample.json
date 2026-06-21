@@ -13,6 +13,9 @@
     "inputSize": [192, 256],
     "modelName": "rtmlib:body:lightweight",
     "modelVersion": "rtmlib-0.0.15",
+    "detectorSha256": null,
+    "poseSha256": null,
+    "weightsComplete": false,
     "preprocessConfigHash": "synthetic0000fixture"
   },
   "frames": [

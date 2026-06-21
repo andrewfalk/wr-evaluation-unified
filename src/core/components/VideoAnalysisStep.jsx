@@ -18,7 +18,7 @@ import { runServerAnalysis } from '../services/videoAnalysisRun';
 import { TargetPicker } from './TargetPicker';
 import { SkeletonOverlay } from './SkeletonOverlay';
 import { getModule } from '../moduleRegistry';
-import { VIDEO_FEATURE_TARGETS, resolveAnalysisJobIds } from '@contracts/index';
+import { VIDEO_FEATURE_TARGETS, resolveAnalysisJobIds, buildAppliedRecipe } from '@contracts/index';
 
 const VIEWPOINTS = [
   { value: 'sagittal', label: '측면(sagittal)' },
@@ -349,6 +349,8 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   const [analysisError, setAnalysisError] = useState('');
   // 서버 실분석 산출물: 적용 시 provenance recipe·누락 활동시간 안내에 사용.
   const [analysisBundle, setAnalysisBundle] = useState(MOCK_BUNDLE);
+  // jobId → 서버 산출 recipe(§8.11, 6.0-9). 적용 시 source job들의 recipe로 entry recipe를 만든다(서버 검증 대조).
+  const [analysisRecipes, setAnalysisRecipes] = useState({});
   const [missingActiveTime, setMissingActiveTime] = useState({}); // { processId: featureKey[] }
   // 대상자 선택(§8.7, PR D2b): 클립별 { serverClipId, result, selectedId, clipKey }. 환자 JSONB 미저장(전송 X).
   const [detection, setDetection] = useState({}); // { [clipMetaId]: {...} }
@@ -551,6 +553,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
         features: generateMockFeatures(requested, p.analysisProfile),
       }));
       setAnalysisBundle(MOCK_BUNDLE);
+      setAnalysisRecipes({}); // mock 경로는 서버 recipe 없음(로컬 적용은 검증 게이트 미적용).
       commitAnalysis(processFeatures);
       return;
     }
@@ -568,9 +571,10 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
           if (up?.serverClipId && up.status === 'done') detections[c.id] = { serverClipId: up.serverClipId };
         }
       }
-      const { processFeatures, processEvidence, missingActiveTime: missing, bundleVersion, errors } =
+      const { processFeatures, processEvidence, missingActiveTime: missing, bundleVersion, recipesByJobId, errors } =
         await runServerAnalysis(activePatient, va, { activeModules, session, settings, detections });
       setAnalysisBundle(bundleVersion || MOCK_BUNDLE);
+      setAnalysisRecipes(recipesByJobId || {}); // 적용 시 source job recipe 대조용(§8.11).
       setMissingActiveTime(missing);
       commitAnalysis(processFeatures, { absolutePerDay: true, processEvidence });
       if (errors.length > 0) setAnalysisError(errors.map((e) => e.message).join(' / '));
@@ -599,11 +603,16 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
       setApplyError('이 제안의 원본 분석 정보를 찾을 수 없어 적용할 수 없습니다. 분석을 다시 실행해 주세요.');
       return;
     }
+    // source job들의 서버 recipe로 entry recipe·bundle 조립(§8.11, 6.0-9). map/vp는 클라 상수 overlay(stale 탐지).
+    // 서버 recipe가 없으면(mock/로컬) 기존 bundle 문자열 폴백.
+    const { recipe: appliedRecipe, analysisBundleVersion: recipeBundle } =
+      buildAppliedRecipe(analysisJobIds.map((id) => analysisRecipes[id]));
+    const bundleForApply = recipeBundle || analysisBundle;
     if (!serverMode) {
       updatePatient((d) => applyFeatureToModule({ data: d }, {
         moduleId, ctx, featureKey: s.featureKey,
         suggestedValue: s.suggestedValue, confidence: s.confidence,
-        processIds: processIds || [], analysisJobIds, analysisBundleVersion: analysisBundle, appliedBy,
+        processIds: processIds || [], analysisJobIds, analysisBundleVersion: bundleForApply, recipe: appliedRecipe, appliedBy,
       }).patient.data);
       return;
     }
@@ -612,7 +621,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     try {
       const serverPatient = await applyVideoFeatureViaServer(
         activePatient,
-        { moduleId, ctx, featureKey: s.featureKey, suggestedValue: s.suggestedValue, confidence: s.confidence, processIds: processIds || [], analysisJobIds, analysisBundleVersion: analysisBundle, analysisProfile },
+        { moduleId, ctx, featureKey: s.featureKey, suggestedValue: s.suggestedValue, confidence: s.confidence, processIds: processIds || [], analysisJobIds, analysisBundleVersion: bundleForApply, recipe: appliedRecipe, analysisProfile },
         { session, settings, appliedBy }
       );
       onServerApplied?.(serverPatient);

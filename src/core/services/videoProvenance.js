@@ -95,6 +95,7 @@ export function applyFeatureToModule(patient, {
   suggestedValue,
   confidence,
   analysisBundleVersion = 'mock-6.0-2',
+  recipe = null,  // 구조적 recipe(6.0-9, §8.11). 서버 apply 검증 게이트가 대조. 없으면 미기록(하위호환).
   appliedBy = 'unknown',
   processIds = [],
   clipIds = [],
@@ -137,6 +138,7 @@ export function applyFeatureToModule(patient, {
     analysisJobIds,
     confidence: confidence ?? 0,
     analysisBundleVersion,
+    ...(recipe ? { recipe } : {}),
     appliedAt: new Date().toISOString(),
     appliedBy,
   };

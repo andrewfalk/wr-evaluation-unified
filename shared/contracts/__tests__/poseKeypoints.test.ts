@@ -65,6 +65,44 @@ describe('PoseKeypointsSchema — drift guard', () => {
   });
 });
 
+describe('PoseKeypointsSchema — model weight sha / recipe (6.0-9)', () => {
+  const sha = 'a'.repeat(64);
+
+  it('fixture는 미반입(PoC): sha=null + weightsComplete=false', () => {
+    const r = PoseKeypointsSchema.parse(fixture);
+    expect(r.model.detectorSha256).toBeNull();
+    expect(r.model.poseSha256).toBeNull();
+    expect(r.model.weightsComplete).toBe(false);
+  });
+
+  it('verified(weightsComplete=true)면 두 sha 모두 64-hex 필수 — null이면 거부', () => {
+    const verified = structuredClone(fixture);
+    verified.model.weightsComplete = true;
+    verified.model.detectorSha256 = sha;
+    verified.model.poseSha256 = sha;
+    expect(() => PoseKeypointsSchema.parse(verified)).not.toThrow();
+
+    const missingPose = structuredClone(verified);
+    missingPose.model.poseSha256 = null;
+    expect(() => PoseKeypointsSchema.parse(missingPose)).toThrow();
+  });
+
+  it('sha는 소문자 64-hex만 허용(잘못된 길이/대문자 거부)', () => {
+    const badLen = structuredClone(fixture);
+    badLen.model.detectorSha256 = 'abc123';
+    expect(() => PoseKeypointsSchema.parse(badLen)).toThrow();
+    const upper = structuredClone(fixture);
+    upper.model.poseSha256 = 'A'.repeat(64);
+    expect(() => PoseKeypointsSchema.parse(upper)).toThrow();
+  });
+
+  it('model 신규 필드 누락(weightsComplete) 거부 — strict drift guard', () => {
+    const noFlag = structuredClone(fixture);
+    delete noFlag.model.weightsComplete;
+    expect(() => PoseKeypointsSchema.parse(noFlag)).toThrow();
+  });
+});
+
 describe('PoseKeypointsSchema — quality meta (PR D3a, §8.8)', () => {
   const validQuality = { blurMetric: { mean: 120, p10: 40, median: 110 }, dropRatio: 0.02, sampledFps: 2 };
 

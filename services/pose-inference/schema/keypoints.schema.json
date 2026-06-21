@@ -27,13 +27,25 @@
     "model": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["detector", "pose", "inputSize", "modelName", "modelVersion", "preprocessConfigHash"],
+      "required": ["detector", "pose", "inputSize", "modelName", "modelVersion", "detectorSha256", "poseSha256", "weightsComplete", "preprocessConfigHash"],
       "properties": {
         "detector": { "type": "string", "minLength": 1 },
         "pose": { "type": "string", "minLength": 1 },
         "inputSize": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
         "modelName": { "type": "string", "minLength": 1 },
         "modelVersion": { "type": "string", "minLength": 1 },
+        "detectorSha256": {
+          "description": "detector .onnx 가중치 sha256(recipe 재현성, 6.0-9). 미반입(PoC/dev)이면 null, 반입 시 64-hex.",
+          "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9a-f]{64}$" }]
+        },
+        "poseSha256": {
+          "description": "pose .onnx 가중치 sha256(recipe 재현성, 6.0-9). 미반입이면 null, 반입 시 64-hex.",
+          "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9a-f]{64}$" }]
+        },
+        "weightsComplete": {
+          "description": "두 가중치 sha가 모두 확정(에어갭 반입)되어 recipe가 verified 가능한지. false면 recipe status='unverified'.",
+          "type": "boolean"
+        },
         "preprocessConfigHash": { "type": "string", "minLength": 1 }
       }
     },

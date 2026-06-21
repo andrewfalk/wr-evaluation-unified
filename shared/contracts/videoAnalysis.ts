@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AnalysisRecipeSchema } from './videoRecipe';
 
 // ---------------------------------------------------------------------------
 // 작업 영상 인간공학 분석 (RTMPose) — Feature 표준 스키마·단위·신뢰도 계약
@@ -148,7 +149,10 @@ export const AppliedInputSchema = z.object({
   // 이 제안을 만든 원본 분석 job id(추론 출처 추적). 적용은 별도 셸 job을 쓰므로 audit jobId와 구분(§8.11/PR D1).
   analysisJobIds: z.array(z.string()).default([]),
   confidence: z.number().min(0).max(1),
-  analysisBundleVersion: z.string(), // = recipe (§8.11)
+  analysisBundleVersion: z.string(), // = recipe 요약 문자열 (§8.11)
+  // 구조적 recipe(6.0-9). 서버 apply 검증 게이트가 저장 job recipe·서버 상수와 대조한다.
+  // 하위호환: 구 클라/구 데이터는 미포함(string analysisBundleVersion만) → optional.
+  recipe: AnalysisRecipeSchema.optional(),
   appliedAt: z.string(),
   appliedBy: z.string(),
 });

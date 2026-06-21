@@ -8,3 +8,4 @@ export * from './videoAnalysis';
 export * from './videoAnnotation';
 export * from './poseKeypoints';
 export * from './clipFeatures';
+export * from './videoRecipe';

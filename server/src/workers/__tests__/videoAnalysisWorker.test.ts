@@ -107,7 +107,8 @@ describe('videoAnalysisWorker.pollOnce', () => {
     const { pool, query } = makePool();
     const runInference = vi.fn(async (_c: string, _p: string | null, _t: unknown, opts?: { framesDir?: string | null }) => {
       if (opts?.framesDir) { fs.mkdirSync(opts.framesDir, { recursive: true }); fs.writeFileSync(path.join(opts.framesDir, '0.jpg'), 'x'); }
-      return { clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: null, inputSha256: null, keypointsJson: '{}' };
+      return { clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: null, inputSha256: null, keypointsJson: '{}',
+        modelVersion: null, detectorSha256: null, poseSha256: null, weightsComplete: false, featureConfigVersion: null };
     });
     expect(await pollOnce(pool, { runInference })).toBe(true);
     const expectedDir = path.join(videoCfg.uploadDir, 'artifacts', 'job-1.frames');

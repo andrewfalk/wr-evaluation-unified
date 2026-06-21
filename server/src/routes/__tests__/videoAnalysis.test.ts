@@ -8,7 +8,7 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 
 // 피처플래그를 테스트 중 토글하기 위해 hoisted 가변 상태 사용.
-const flagState = vi.hoisted(() => ({ enabled: true, fixtureMode: false, targetThumbnail: false, overlayFrames: false }));
+const flagState = vi.hoisted(() => ({ enabled: true, fixtureMode: false, targetThumbnail: false, overlayFrames: false, allowUnverifiedRecipe: false }));
 // 업로드 테스트용 실제 temp uploadDir(buildUploadMiddleware가 tmp 하위를 mkdir). 경로는 beforeAll에서 채운다.
 const uploadEnv = vi.hoisted(() => ({ dir: '' }));
 beforeAll(() => { uploadEnv.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'va-upload-')); });
@@ -36,6 +36,7 @@ vi.mock('../../config', () => ({
       retentionPolicy: 'privacy_first',
       get targetThumbnail() { return flagState.targetThumbnail; },
       get overlayFrames() { return flagState.overlayFrames; },
+      get allowUnverifiedRecipe() { return flagState.allowUnverifiedRecipe; },
     },
   },
 }));
@@ -468,7 +469,7 @@ describe('POST /clips/:id/select-target (PR D2b)', () => {
 });
 
 describe('POST /jobs/:jobId/apply', () => {
-  beforeEach(() => { vi.clearAllMocks(); flagState.enabled = true; });
+  beforeEach(() => { vi.clearAllMocks(); flagState.enabled = true; flagState.allowUnverifiedRecipe = false; });
 
   const jobRow = (over = {}) => ({
     id: JOB_ID, organization_id: ORG_ID, patient_record_id: PAT_ID, clip_id: CLIP_ID,
@@ -481,7 +482,22 @@ describe('POST /jobs/:jobId/apply', () => {
     id: PAT_ID, revision, payload: { phase: 'evaluation', data: { shared: { name: 'Kim' }, modules: {}, activeModules: [] } },
     created_at: NOW, updated_at: NOW,
   });
-  const body = { data: { shared: { name: 'Kim' }, modules: {}, activeModules: [] }, appliedInputsHash: 'h1', appliedInputsCount: 1 };
+  // recipe 검증 게이트(6.0-9): 서버 상수와 일치해야 통과. map/vp는 실제 shared/contracts 값.
+  const RECIPE = {
+    status: 'verified', modelVersion: 'rtmlib-0.0.15',
+    detectorSha256: 'a'.repeat(64), poseSha256: 'b'.repeat(64),
+    preprocessConfigHash: 'pch', featureConfigVersion: 'fc-1',
+    mappingConfigVersion: 'pday-1.0.0', viewpointConfigVersion: 'vvc-0.1.0', codeCommit: 'abc1234',
+  };
+  const appliedEntry = (over: Record<string, unknown> = {}) => ({
+    moduleId: 'shoulder', targetPath: 'modules.shoulder.jobExtras[sharedJobId=j1].overheadHours',
+    suggestedValue: 1.8, appliedValue: 1.8, previousValue: null, unit: 'hours_per_day',
+    source: 'video', processIds: [], clipIds: [], analysisJobIds: [], confidence: 0.8,
+    analysisBundleVersion: 'b', appliedAt: '', appliedBy: 'u', ...over,
+  });
+  // 데이터에 1건 새 appliedInput을 포함(provenance 없음 → recipe 검증 skip). count·suffix 정합.
+  const dataWith = (entries: unknown[]) => ({ shared: { name: 'Kim', videoAnalysis: { appliedInputs: entries } }, modules: {}, activeModules: [] });
+  const body = { data: dataWith([appliedEntry()]), appliedInputsHash: 'h1', appliedInputsCount: 1 };
 
   function clientSetup(pool: Pool, ...clientResults: { rows: unknown[] }[]) {
     const clientMock = { query: vi.fn(), release: vi.fn() };
@@ -522,6 +538,7 @@ describe('POST /jobs/:jobId/apply', () => {
   });
 
   it('200 on success: persists payload, bumps revision, marks job done, audits', async () => {
+    flagState.allowUnverifiedRecipe = true; // 영속 메커니즘 검증(recipe 게이트는 별도 테스트) — provenance 없는 entry 허용.
     const pool = makePool();
     clientSetup(pool,
       { rows: [] },                         // BEGIN
@@ -568,19 +585,21 @@ describe('POST /jobs/:jobId/apply', () => {
     const cq = clientSetup(pool,
       { rows: [] },                 // BEGIN
       { rows: [jobRow()] },         // job FOR UPDATE
-      { rows: [{ id: SRC_JOB }] },  // source job existence/ownership validation
+      { rows: [{ id: SRC_JOB, analysis_recipe: RECIPE }] },  // source job existence + 저장 recipe(검증 게이트)
       { rows: [patRow(1)] },        // patient FOR UPDATE
       { rows: [patRow(2)] },        // UPDATE patient RETURNING
       { rows: [] },                 // UPDATE shell job done
       { rows: [] },                 // UPDATE source analysis jobs done
       { rows: [] },                 // COMMIT
     );
+    // 새 entry는 SRC_JOB을 참조하고 recipe가 저장본과 일치해야 게이트 통과(exact-set + field 대조).
+    const srcBody = { data: dataWith([appliedEntry({ analysisJobIds: [SRC_JOB], recipe: RECIPE })]), appliedInputsHash: 'h1', appliedInputsCount: 1 };
     const res = await request(makeApp(pool))
       .post(`/api/video-analysis/jobs/${JOB_ID}/apply`)
       .set('Authorization', `Bearer ${orgToken()}`)
       .set('x-csrf-token', CSRF_TOKEN)
       .set('If-Match', '1')
-      .send({ ...body, sourceAnalysisJobIds: [SRC_JOB] });
+      .send({ ...srcBody, sourceAnalysisJobIds: [SRC_JOB] });
     expect(res.status).toBe(200);
     // 검증 SELECT는 결과보유·per-process·셸 job 제외 가드를 포함한다.
     const validateCall = cq.mock.calls.find((c) =>
@@ -663,6 +682,64 @@ describe('POST /jobs/:jobId/apply', () => {
       .set('If-Match', '1')
       .send(body);
     expect(res.status).toBe(403);
+  });
+
+  // recipe 검증 게이트 통합(§8.11, 6.0-9) — 라우트가 게이트를 호출하고 실패 시 ROLLBACK+400 하는지.
+  it('400 when appliedInputsCount mismatches the payload (recipe gate)', async () => {
+    const pool = makePool();
+    clientSetup(pool,
+      { rows: [] },              // BEGIN
+      { rows: [jobRow()] },      // job FOR UPDATE
+      { rows: [patRow(1)] },     // patient FOR UPDATE
+      { rows: [] },              // ROLLBACK
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/jobs/${JOB_ID}/apply`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('If-Match', '1')
+      .send({ data: dataWith([appliedEntry()]), appliedInputsHash: 'h1', appliedInputsCount: 2 });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('APPLIED_INPUTS_COUNT_MISMATCH');
+  });
+
+  it('400 when a new video appliedInput has no provenance (allowUnverified=false)', async () => {
+    const pool = makePool();
+    clientSetup(pool,
+      { rows: [] },              // BEGIN
+      { rows: [jobRow()] },      // job FOR UPDATE
+      { rows: [patRow(1)] },     // patient FOR UPDATE
+      { rows: [] },              // ROLLBACK
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/jobs/${JOB_ID}/apply`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('If-Match', '1')
+      .send({ data: dataWith([appliedEntry()]), appliedInputsHash: 'h1', appliedInputsCount: 1 }); // analysisJobIds 빈
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('PROVENANCE_REQUIRED');
+  });
+
+  it('400 when a new appliedInput recipe does not match the stored source recipe (recipe gate)', async () => {
+    const SRC_JOB = '44444444-4444-4444-4444-444444444444';
+    const pool = makePool();
+    clientSetup(pool,
+      { rows: [] },                                          // BEGIN
+      { rows: [jobRow()] },                                  // job FOR UPDATE
+      { rows: [{ id: SRC_JOB, analysis_recipe: RECIPE }] },  // source existence + stored recipe
+      { rows: [patRow(1)] },                                 // patient FOR UPDATE
+      { rows: [] },                                          // ROLLBACK
+    );
+    const forged = { ...RECIPE, modelVersion: 'forged' };
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/jobs/${JOB_ID}/apply`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('If-Match', '1')
+      .send({ data: dataWith([appliedEntry({ analysisJobIds: [SRC_JOB], recipe: forged })]), appliedInputsHash: 'h1', appliedInputsCount: 1, sourceAnalysisJobIds: [SRC_JOB] });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('RECIPE_FIELD_MISMATCH');
   });
 });
 
@@ -966,7 +1043,7 @@ describe('GET /jobs/:jobId/overlay (검수 골격, 6.0-8)', () => {
     schemaVersion: 1, keypointConvention: 'coco17', coordinateSpace: 'pixel',
     frameWidth: 640, frameHeight: 480, requestedFps: 2, sampledFps: 2,
     source: { clipRef: 'clip', originalFps: 30, totalFrames: 60 },
-    model: { detector: 'd', pose: 'p', inputSize: [192, 256], modelName: 'm', modelVersion: '1', preprocessConfigHash: 'h' },
+    model: { detector: 'd', pose: 'p', inputSize: [192, 256], modelName: 'm', modelVersion: '1', detectorSha256: null, poseSha256: null, weightsComplete: false, preprocessConfigHash: 'h' },
     frames: [{ frameIndex: 0, timestampMs: 0, persons: [{
       trackId: 'trk-1', bbox: [10, 20, 100, 200], score: 0.9,
       keypoints: Array.from({ length: 17 }, (_, i) => [i * 5, i * 4, 0.8]),

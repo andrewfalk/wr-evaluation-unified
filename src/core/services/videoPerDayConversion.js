@@ -5,13 +5,13 @@
 //
 // null vs 0 (중요): activeMinutesPerDay == null(모름)이면 해당 per-day numeric을 만들지 않고 누락 처리
 // (missingActiveTime) — 0으로 표시해 오적용하는 사고를 막는다. 0(0분 공정)은 정상값.
-import { ClipFeatureSetSchema, VIDEO_FEATURE_TARGETS } from '@contracts/index';
+import { ClipFeatureSetSchema, VIDEO_FEATURE_TARGETS, VIDEO_MAPPING_CONFIG_VERSION, buildRecipeVersion } from '@contracts/index';
 import { CANDIDATE_REASONS } from './videoMock';
 import { resolveAutoSuggest, DEFAULT_CONFIDENCE_THRESHOLDS } from './videoConfidenceConfig';
-import { VIDEO_VIEWPOINT_CONFIG_VERSION } from './videoViewpointConfig';
 
-// 환산 규칙 버전(재현성). feature_config.json version과 함께 recipe를 이룬다(provenance).
-export const VIDEO_MAPPING_CONFIG_VERSION = 'pday-1.0.0';
+// 버전 상수·recipe 조립은 단일 source = shared/contracts/videoRecipe (서버 apply 검증 게이트와 공유, 6.0-9).
+// local import + re-export로 기존 import 경로(이 모듈에서 가져가던 코드)와 모듈 내부 사용을 모두 유지.
+export { VIDEO_MAPPING_CONFIG_VERSION, buildRecipeVersion };
 
 // mode → 자동제안/수기확인 플래그(계약 VIDEO_FEATURE_TARGETS.mode 기준). candidate는 별도 처리.
 function flagsForMode(mode) {
@@ -169,8 +169,5 @@ export function convertClipFeaturesToPerDay(clipFeatureSet, activeMinutesPerDay,
   };
 }
 
-// 분석 recipe(provenance analysisBundleVersion) — feature_config + mapping + viewpoint 정책 버전 결합.
-// viewpoint 선호도(PREFERRED_VIEWPOINT)는 다중 시점 산출 선택에 영향 → 재현성 위해 recipe에 포함.
-export function buildRecipeVersion(featureConfigVersion) {
-  return `fc:${featureConfigVersion}+map:${VIDEO_MAPPING_CONFIG_VERSION}+vp:${VIDEO_VIEWPOINT_CONFIG_VERSION}`;
-}
+// 분석 recipe(provenance analysisBundleVersion) 요약 = feature_config + mapping + viewpoint 버전 결합.
+// 구현은 shared/contracts/videoRecipe.buildRecipeVersion(단일 source) — 위에서 re-export.

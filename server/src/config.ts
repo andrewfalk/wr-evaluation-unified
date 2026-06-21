@@ -208,6 +208,9 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
         overlayFrames: bool(env, 'VIDEO_ANALYSIS_OVERLAY_FRAMES', false),
         // 미확정 임시 영상 보존 시간(시간). TTL 경과 시 cleanup이 회수.
         clipTtlHours: positiveInt(env, 'VIDEO_ANALYSIS_CLIP_TTL_HOURS', 24),
+        // recipe 미확정(가중치 sha 없음 → status='unverified')인데도 apply를 허용할지(fail-closed 기본 false).
+        // dev/test/fixture 전용 단일 노브(6.0-9). 운영(에어갭 baked 이미지)에선 절대 켜지 않는다.
+        allowUnverifiedRecipe: bool(env, 'VIDEO_ANALYSIS_ALLOW_UNVERIFIED_RECIPE', false),
       };
     })()),
   });

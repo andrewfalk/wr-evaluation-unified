@@ -34,6 +34,8 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
   const missingActiveTime = {};
   const errors = [];
   let bundleVersion = null;
+  // jobId → 서버 산출 recipe(§8.11). 적용 시 buildAppliedRecipe로 entry recipe를 만든다(서버 검증 대조).
+  const recipesByJobId = {};
 
   for (const p of va.processes || []) {
     // 공정에 연결된 분석 가능 클립(들). D3b: 공정당 다중 시점 클립 허용(시점 융합).
@@ -69,6 +71,7 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
           break;
         }
         jobIds.push(done.jobId);
+        if (done.recipe) recipesByJobId[done.jobId] = done.recipe; // 서버 source-of-truth recipe 보존.
         // 융합 evidence가 채택/탈락 클립을 참조할 수 있도록 식별자를 함께 운반(clipMetaId/serverClipId/jobId).
         fusionEntries.push({
           viewpoint: clipMeta.viewpoint,
@@ -97,5 +100,5 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
     }
   }
 
-  return { processFeatures, processEvidence, missingActiveTime, bundleVersion, errors };
+  return { processFeatures, processEvidence, missingActiveTime, bundleVersion, recipesByJobId, errors };
 }

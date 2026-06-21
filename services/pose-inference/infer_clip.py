@@ -53,6 +53,26 @@ def load_tracking_params():
     return iou, max_age
 
 
+def load_model_shas():
+    """models/manifest.json에서 detector/pose의 onnxSha256와 weightsComplete를 읽는다(recipe 재현성, 6.0-9).
+    가중치 미반입(PoC/dev — 자동 다운로드 캐시)이면 onnxSha256=null → weightsComplete=False.
+    에어갭 baked 이미지(PR-B)에선 manifest가 실 sha + weightsComplete=true."""
+    det_sha, pose_sha = None, None
+    complete = False
+    try:
+        mf = json.loads((HERE / "models" / "manifest.json").read_text(encoding="utf-8"))
+        for m in mf.get("models", []):
+            if m.get("role") == "detector":
+                det_sha = m.get("onnxSha256")
+            elif m.get("role") == "pose":
+                pose_sha = m.get("onnxSha256")
+        # weightsComplete는 manifest 플래그 + 실제 두 sha 존재를 모두 만족해야 True(거짓 verified 방지).
+        complete = bool(mf.get("weightsComplete")) and bool(det_sha) and bool(pose_sha)
+    except (OSError, ValueError, KeyError):
+        pass
+    return det_sha, pose_sha, complete
+
+
 def preprocess_config_hash(fps, conv, det, pose, size, track, quality):
     raw = json.dumps(
         {"fps": fps, "conv": conv, "det": det, "pose": pose, "inputSize": size,
@@ -220,6 +240,8 @@ def main():
             # usableFrameRatio = blur∪drop 제외 후 사용가능 비율(정보용 — overall·게이팅 미입력, 6.0-B2까지).
             quality["usableFrameRatio"] = round(max(0.0, 1.0 - min(1.0, blur_ratio + drop_ratio)), 4)
 
+    detector_sha256, pose_sha256, weights_complete = load_model_shas()
+
     doc = {
         "schemaVersion": SCHEMA_VERSION,
         "keypointConvention": KEYPOINT_CONVENTION,
@@ -239,6 +261,10 @@ def main():
             "inputSize": POSE_INPUT_SIZE,
             "modelName": "rtmlib:body:lightweight",
             "modelVersion": f"rtmlib-{RTMLIB_VERSION}",
+            # recipe 재현성(6.0-9): 실제 실행 .onnx 가중치 해시. 미반입(PoC/dev)이면 null + weightsComplete=False.
+            "detectorSha256": detector_sha256,
+            "poseSha256": pose_sha256,
+            "weightsComplete": weights_complete,
             "preprocessConfigHash": preprocess_config_hash(
                 args.fps, KEYPOINT_CONVENTION, DETECTOR_NAME, POSE_NAME, POSE_INPUT_SIZE,
                 {"iou": track_iou, "maxAge": track_max_age},  # 실제 사용 값(재현성)
