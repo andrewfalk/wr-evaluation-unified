@@ -44,7 +44,27 @@ python -m venv .venv
 
 ## 모델
 `models/manifest.json` 참조(detector=YOLOX-tiny, pose=RTMPose-s, COCO17). PRD의 RTMDet은 교체 가능
-어댑터로 후속 교체(§8.14). 가중치 sha256은 에어갭 반입(6.0-9) 시 확정.
+어댑터로 후속 교체(§8.14). sha는 `sourceArchiveSha256`(다운로드 zip)·`onnxSha256`(실행 .onnx, recipe에
+들어가는 값)으로 분리. 가중치 미반입(dev)이면 `weightsComplete=false` → recipe `status='unverified'`.
+
+### 에어갭 반입·컨테이너화 (6.0-9 PR-B)
+운영(에어갭)은 가중치를 이미지에 굽는다. dev는 rtmlib가 `~/.cache`로 자동 다운로드(폴백).
+`model_loader.build_body()`가 분기: `POSE_MODELS_DIR`(미설정 시 `./models`)에 manifest의 `.onnx`가
+모두 있으면 `Body(det=…, pose=…)`로 baked 경로 주입(인터넷 불필요), 없으면 `mode="lightweight"` 자동다운로드.
+
+```powershell
+# 1) 온라인 빌드 PC에서 1회: 가중치 다운로드 + manifest sha/weightsComplete 확정 (models/*.onnx는 커밋 금지)
+.\scripts\fetch-pose-weights.ps1
+
+# 2) 이미지 빌드(가중치 baked, code commit 주입)
+docker build -f server/Dockerfile --build-arg WR_GIT_COMMIT=$(git rev-parse HEAD) -t wr-app-server .
+
+# 3) 에어갭 검증(§8.14): 인터넷 없이 infer_clip + sample_detect 둘 다 성공해야 통과
+docker run --rm --network none -v ${PWD}/services/pose-inference/samples:/clips:ro wr-app-server `
+  /opt/pose-venv/bin/python /app/pose-inference/infer_clip.py --input /clips/clip.mp4 --output /tmp/k.json --fps 5
+docker run --rm --network none -v ${PWD}/services/pose-inference/samples:/clips:ro wr-app-server `
+  /opt/pose-venv/bin/python /app/pose-inference/sample_detect.py --input /clips/clip.mp4 --output /tmp/c.json
+```
 
 ## CI 정책
 - **상시(CI)**: 계약/스키마 검증(Node zod 테스트). 가중치·런타임 불필요.

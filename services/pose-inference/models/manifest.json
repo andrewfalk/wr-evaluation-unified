@@ -1,18 +1,21 @@
 {
-  "description": "포즈 추정 모델 manifest (6.0-5, sha 분리 6.0-9). 가중치 파일 자체는 커밋 금지(.gitignore) — 재현성·에어갭 반입(M4 6.0-9)·법적 방어가능성(§8.11)을 위해 출처/해시/입력크기만 버전관리한다. PoC는 rtmlib가 ~/.cache/rtmlib 로 자동 다운로드.",
+  "description": "포즈 추정 모델 manifest (6.0-5, sha 분리 6.0-9). 가중치 파일(.onnx)은 커밋 금지(.gitignore) — 출처/해시/입력크기만 버전관리(재현성·에어갭 반입·법적 방어가능성 §8.11). dev는 rtmlib가 ~/.cache로 자동 다운로드(폴백, recipe unverified). 운영(에어갭)은 scripts/fetch-pose-weights.ps1로 .onnx를 배치해 이미지에 굽고, 추론 시 실제 파일 sha256이 아래 onnxSha256과 일치할 때만 recipe verified가 된다(model_loader.verified_model_shas).",
   "backend": "onnxruntime-cpu",
   "source": "rtmlib==0.0.15 (mode=lightweight body)",
   "shaPolicy": "sourceArchiveSha256 = 다운로드 zip 무결성 검증용. onnxSha256 = 압축 해제 후 실제 추론에 쓰이는 .onnx 파일 해시(recipe analysisBundleVersion에 들어가는 값). 둘 다 null/TODO면 weightsComplete=false → recipe status='unverified'. 6.0-9 PR-B 에어갭 반입 시 실값으로 채운다.",
-  "weightsComplete": false,
+  "weightsComplete": true,
   "models": [
     {
       "role": "detector",
       "name": "yolox_tiny_8xb8-300e_humanart",
       "file": "yolox_tiny_8xb8-300e_humanart-6f3252f9.onnx",
       "sourceUrl": "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/yolox_tiny_8xb8-300e_humanart-6f3252f9.zip",
-      "sourceArchiveSha256": null,
-      "onnxSha256": null,
-      "inputSize": [416, 416],
+      "sourceArchiveSha256": "36e09ca555916253fa1b5d51bec01e48e98e1f0af966c51ce3e844d8c8fc4cfc",
+      "onnxSha256": "ceb11c07298f95c50d7c5abeb906d03340c85f23aa79e3e66966e7fb6c307250",
+      "inputSize": [
+        416,
+        416
+      ],
       "note": "PRD는 RTMDet을 명시하나 PoC는 rtmlib 기본 person detector(YOLOX-tiny) 사용 — detector는 교체 가능(어댑터)."
     },
     {
@@ -20,12 +23,15 @@
       "name": "rtmpose-s_simcc-body7",
       "file": "rtmpose-s_simcc-body7_pt-body7_420e-256x192-acd4a1ef_20230504.onnx",
       "sourceUrl": "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-s_simcc-body7_pt-body7_420e-256x192-acd4a1ef_20230504.zip",
-      "sourceArchiveSha256": null,
-      "onnxSha256": null,
-      "inputSize": [192, 256],
+      "sourceArchiveSha256": "7673922e531014906ca4f0f239b7e233b740146a10b632deaa2a28d45470d802",
+      "onnxSha256": "9aeb635b83f86aea45cf45d85798f7eba1a162de8e0d721c44e54fe5eebaf47d",
+      "inputSize": [
+        192,
+        256
+      ],
       "keypointConvention": "coco17",
       "postprocessing": "SimCC"
     }
   ],
-  "todo": "sourceArchiveSha256/onnxSha256는 6.0-9 PR-B 에어갭 반입 시 실제 다운로드 파일 해시로 채우고 weightsComplete=true로 전환(현재 PoC는 rtmlib 캐시 사용)."
+  "note": "onnxSha256/sourceArchiveSha256는 scripts/fetch-pose-weights.ps1로 확정됨(weightsComplete=true). 추론 런타임은 manifest 값을 맹신하지 않고 실제 baked .onnx 해시를 다시 계산해 이 값과 대조한다 — 불일치(오염·다른 모델) 시 recipe unverified(fail-closed)."
 }

@@ -36,3 +36,7 @@ coverage/
 # Claude / review tooling
 .claude/
 .code-review-graph/
+
+# pose-inference dev artifacts (6.0-9) — venv/캐시 제외. models/*.onnx(baked 가중치)는 포함해야 함.
+services/pose-inference/.venv/
+**/__pycache__/

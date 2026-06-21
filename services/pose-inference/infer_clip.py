@@ -17,8 +17,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from rtmlib import Body
 
+from model_loader import build_body
 from tracker import IoUTracker
 
 try:
@@ -54,23 +54,16 @@ def load_tracking_params():
 
 
 def load_model_shas():
-    """models/manifest.json에서 detector/pose의 onnxSha256와 weightsComplete를 읽는다(recipe 재현성, 6.0-9).
-    가중치 미반입(PoC/dev — 자동 다운로드 캐시)이면 onnxSha256=null → weightsComplete=False.
-    에어갭 baked 이미지(PR-B)에선 manifest가 실 sha + weightsComplete=true."""
-    det_sha, pose_sha = None, None
-    complete = False
+    """recipe(§8.11)에 들어갈 (detectorSha256, poseSha256, weightsComplete)를 만든다(6.0-9).
+
+    실제 baked .onnx 파일의 sha256을 계산해 manifest 기대값과 일치할 때만 verified로 본다
+    (model_loader.verified_model_shas). dev 자동다운로드/오염/다른 모델이면 (None, None, False) —
+    manifest의 '정상 해시'를 맹신해 거짓 verified로 만들지 않는다(서버 apply 게이트가 fail-closed)."""
     try:
-        mf = json.loads((HERE / "models" / "manifest.json").read_text(encoding="utf-8"))
-        for m in mf.get("models", []):
-            if m.get("role") == "detector":
-                det_sha = m.get("onnxSha256")
-            elif m.get("role") == "pose":
-                pose_sha = m.get("onnxSha256")
-        # weightsComplete는 manifest 플래그 + 실제 두 sha 존재를 모두 만족해야 True(거짓 verified 방지).
-        complete = bool(mf.get("weightsComplete")) and bool(det_sha) and bool(pose_sha)
-    except (OSError, ValueError, KeyError):
-        pass
-    return det_sha, pose_sha, complete
+        from model_loader import verified_model_shas
+        return verified_model_shas()
+    except (OSError, ValueError, ImportError):
+        return None, None, False
 
 
 def preprocess_config_hash(fps, conv, det, pose, size, track, quality):
@@ -164,7 +157,7 @@ def main():
     step = max(1, round(orig_fps / args.fps))
     actual_sampled_fps = orig_fps / step  # 정수 step 때문에 요청값과 다를 수 있음 — 실제값을 기록
 
-    body = Body(mode="lightweight", backend="onnxruntime", device="cpu")
+    body, _model_source = build_body()  # baked(에어갭) 우선, 없으면 dev 자동다운로드(6.0-9)
     track_iou, track_max_age = load_tracking_params()
     tracker = IoUTracker(iou_threshold=track_iou, max_age=track_max_age)
     blur_threshold = load_quality_blur_threshold()  # config에 있을 때만(기본 None=파생값 비활성)

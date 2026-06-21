@@ -17,7 +17,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from rtmlib import Body
+
+from model_loader import build_body
 
 
 def xyxy_to_xywh(b):
@@ -69,7 +70,7 @@ def main():
         ok, fr = cap.read()
         return (idx, fr) if ok else (idx, None)
 
-    body = Body(mode="lightweight", backend="onnxruntime", device="cpu")
+    body, _model_source = build_body()  # baked(에어갭) 우선, 없으면 dev 자동다운로드(6.0-9)
 
     if args.at_ms is not None:
         # 명시 시각: 그 프레임 그대로 사용.
