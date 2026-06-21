@@ -7,7 +7,7 @@ import { csrfMiddleware } from '../middleware/csrf';
 import { writeAuditLog } from '../middleware/audit';
 import path from 'path';
 import { SampleDetectResultSchema, PoseKeypointsSchema } from '@wr/contracts';
-import { resolveFixtureClip, resolveUploadedClipPath, resolveSampleFramePath, resolveKeypointsArtifactPath } from '../workers/fixturePath';
+import { resolveFixtureClip, resolveUploadedClipPath, resolveSampleFramePath, resolveKeypointsArtifactPath, resolveOverlayFramesDir, resolveOverlayFramePath } from '../workers/fixturePath';
 import { runSampleDetect } from '../workers/sampleDetect';
 import { buildUploadMiddleware, runMulter, sniffVideoMime, hashFile, safeUnlink } from '../workers/videoUpload';
 import type { RequestHandler as ExpressRequestHandler } from 'express';
@@ -180,6 +180,7 @@ interface VideoJobRow {
   applied_inputs_hash: string | null;
   keypoints_path: string | null;
   keypoints_sha256: string | null;
+  frames_path: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -618,11 +619,41 @@ async function getOverlay(pool: Pool, req: Request, res: Response): Promise<void
   const rf = row.result_features as { tracking?: { targetTrackId?: string | null } } | null;
   const targetTrackId = rf?.tracking?.targetTrackId ?? null;
 
-  // 환자 pose 좌표 → 캐시/스니핑 차단(썸네일과 달리 원본 프레임 없음 → 별도 게이트 불필요).
+  // 실 프레임 배경 가용 여부(privacy 게이트 예외): 게이트 on + frames_path + resolver까지 통과할 때만 true.
+  // (DB에 경로 잔존하나 파일 삭제된 stale 상태에서 UI 라벨이 "실 영상"으로 잘못 뜨는 것 방지.)
+  const framesAvailable = !!(config.video.overlayFrames && resolveOverlayFramesDir(row.frames_path, row.id, config.video.uploadDir));
+
+  // 환자 pose 좌표 → 캐시/스니핑 차단(썸네일과 달리 좌표는 별도 게이트 불필요. 실 프레임은 overlay-frame 라우트가 게이트).
   res.setHeader('Cache-Control', 'no-store, private');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.status(200).json({ jobId: row.id, clipId: row.clip_id, targetTrackId, keypoints: keypoints.data });
+  res.status(200).json({ jobId: row.id, clipId: row.clip_id, targetTrackId, framesAvailable, keypoints: keypoints.data });
+}
+
+// 골격 검수 overlay 실 프레임 스트리밍(privacy 정책 예외). 서빙 조건 = 게이트 on + DB frames_path + resolver 통과 셋 다.
+// getSampleFrame 미러: 게이트 off거나 frames_path NULL(close-review 후 등)이면 orphan 디렉터리가 남아도 무조건 404.
+async function getOverlayFrame(pool: Pool, req: Request, res: Response): Promise<void> {
+  const session = req.sessionInfo as unknown as SessionInfo;
+  const job = await loadAccessibleJob(pool, session, req.params.jobId, res); // 권한 우선(존재 누설 방지)
+  if (!job) return;
+  if (!config.video.overlayFrames) {
+    res.status(404).json({ code: 'OVERLAY_FRAME_NOT_FOUND', error: 'No overlay frame for this job' });
+    return;
+  }
+  // DB frames_path가 source of truth — NULL이면 파일이 남아 있어도 서빙 금지.
+  const framePath = resolveOverlayFramePath(job.row.frames_path, job.row.id, req.params.frameIndex, config.video.uploadDir);
+  if (!framePath) {
+    res.status(404).json({ code: 'OVERLAY_FRAME_NOT_FOUND', error: 'No overlay frame for this job' });
+    return;
+  }
+  // 식별 가능 이미지 → 캐시/스니핑 차단. objectURL 전용.
+  res.setHeader('Cache-Control', 'no-store, private');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Type', 'image/jpeg');
+  fs.createReadStream(framePath).on('error', () => {
+    if (!res.headersSent) res.status(404).json({ code: 'OVERLAY_FRAME_NOT_FOUND', error: 'No overlay frame for this job' });
+  }).pipe(res);
 }
 
 // 검수 종료(6.0-8): 해당 job의 keypoints artifact를 즉시 회수해 식별 가능성을 줄인다. artifact는
@@ -639,15 +670,23 @@ async function closeReview(pool: Pool, req: Request, res: Response): Promise<voi
   }
 
   // DB-first: 먼저 참조를 끊고(미참조 → orphan sweep 안전망) 그 다음 파일 unlink.
-  const { rows } = await pool.query<{ keypoints_path: string | null }>(
-    `UPDATE video_analysis_jobs SET keypoints_path = NULL, keypoints_sha256 = NULL
-     WHERE id = $1 AND keypoints_path IS NOT NULL RETURNING keypoints_path`,
+  // keypoints·frames는 **독립 회수** — 부분 실패(예: keypoints는 이미 NULL·frames만 잔존)에도 둘 다 끊고 지운다.
+  const { rows } = await pool.query<{ keypoints_path: string | null; frames_path: string | null }>(
+    `UPDATE video_analysis_jobs SET keypoints_path = NULL, keypoints_sha256 = NULL, frames_path = NULL
+     WHERE id = $1 AND (keypoints_path IS NOT NULL OR frames_path IS NOT NULL)
+     RETURNING keypoints_path, frames_path`,
     [job.row.id]
   );
   const cleared = rows.length > 0;
-  if (cleared && rows[0].keypoints_path) {
-    const real = resolveKeypointsArtifactPath(rows[0].keypoints_path, job.row.id, config.video.uploadDir);
-    if (real) await safeUnlink(real);
+  if (cleared) {
+    if (rows[0].keypoints_path) {
+      const real = resolveKeypointsArtifactPath(rows[0].keypoints_path, job.row.id, config.video.uploadDir);
+      if (real) await safeUnlink(real);
+    }
+    if (rows[0].frames_path) {
+      const dir = resolveOverlayFramesDir(rows[0].frames_path, job.row.id, config.video.uploadDir);
+      if (dir) await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 
   void writeAuditLog(pool, {
@@ -883,6 +922,7 @@ export function createVideoAnalysisRouter(pool: Pool): Router {
   router.post('/jobs', auth, csrfMiddleware, wrap(createJob));
   router.get('/jobs/:jobId', auth, wrap(getJob));
   router.get('/jobs/:jobId/overlay', auth, wrap(getOverlay));
+  router.get('/jobs/:jobId/overlay-frame/:frameIndex', auth, wrap(getOverlayFrame));
   router.post('/jobs/:jobId/apply', auth, csrfMiddleware, wrap(applyJob));
   router.post('/jobs/:jobId/close-review', auth, csrfMiddleware, wrap(closeReview));
 

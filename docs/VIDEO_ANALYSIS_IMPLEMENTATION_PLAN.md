@@ -162,7 +162,16 @@
   - [x] **전체폭 수정**(App.jsx): 영상 스텝이 main-content-single(패널 50%)이라 우측 절반 미사용 → assessment처럼 전체폭으로(`videoAnalysis` id 추가). 내부 2열이 전 폭에 펼쳐짐
   - [x] **후속 폴리싱**: 분석 실행 버튼 좌측 "+공정 추가" 옆 이동 / TargetPicker·SkeletonOverlay `.va-media-box`(4:3·패널폭·viewBox)로 세로영상 길이 제한 / `fmtNum` 지표 소수점 1자리 통일
   - [ ] Tier-3 육안(2열 전체폭·톤 일치·다크테마·900px↓ 1열·미디어 4:3·골격 하이라이트) — 대기
-- [ ] **(후속·별도 게이트) 골격 검수에 실 영상 프레임 표시** — 검증 편의를 위해 중립배경 대신 원본 프레임을 골격 뒤에 표시. **프라이버시 정책 예외**라 썸네일(#36, `VIDEO_ANALYSIS_TARGET_THUMBNAIL`)처럼 **전용 게이트+보존정책+cleanup** 필요(서버가 프레임/영상 단명 보관·serving). 한시적 예외 운영 전제 → 별도 PR로 설계.
+- [~] **(후속·별도 게이트) 골격 검수에 실 영상 프레임 표시** — 검증 편의를 위해 중립배경 대신 원본 프레임을 골격 뒤에 표시. **프라이버시 정책 예외**라 썸네일(#36)처럼 **전용 게이트+보존+cleanup**. 추론 시 샘플 프레임 다운스케일 JPEG 추출·게이트 보관(모든 프레임). 브랜치 `feat/video-overlay-frames`(ui-polish 위 stack — viewBox 의존). 승인 plan `1-m3-b2-2-reactive-lollipop.md`(코덱스 리뷰 4라운드 반영).
+  - [x] config `VIDEO_ANALYSIS_OVERLAY_FRAMES`(기본 off) + 마이그레이션 `0020_..._overlay_frames.sql`(`jobs.frames_path`)
+  - [x] Python `infer_clip.py --frames-dir`(write_overlay_frame best-effort, 실패 무전파) + 스모크 2건
+  - [x] 워커: runInference 옵션 인자(framesDir) + dir 비면 미기록 + DB 실패 시 pendingFramesDir 즉시 정리 + 기존 exact-call 테스트 갱신 + 게이트 on 테스트 2건
+  - [x] `fixturePath`: resolveOverlayFramesDir/Path(DB 경로 source of truth) + 단위테스트 4건
+  - [x] 라우트: `GET /jobs/:id/overlay-frame/:idx`(게이트+frames_path+resolver 셋 다라야 200, off/NULL→404) + getOverlay `framesAvailable`(resolver 통과 시만) + closeReview 독립회수 + 테스트 7건
+  - [x] cleanup: 미참조 `*.frames` 디렉터리 재귀삭제(isOverlayFramesDirName) + TTL/orphan 테스트 2건
+  - [x] 클라: fetchOverlayFrame + SkeletonOverlay 프레임 레이어(±1 trim·race guard) + VideoAnalysisStep 배선 + 테스트 4건
+  - [x] 서버 **494**·클라 **766** 통과·build:web·lint 0
+  - [ ] Tier-3 라이브(게이트 on 실프레임 정렬·close-review 회수) — 대기
 
 ### M4 — 배포·고급 (6.0-9, 6.0-10)
 - [ ] 6.0-9 에어갭 Docker 배포 + recipe versioning

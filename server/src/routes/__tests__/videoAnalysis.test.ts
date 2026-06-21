@@ -8,7 +8,7 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 
 // 피처플래그를 테스트 중 토글하기 위해 hoisted 가변 상태 사용.
-const flagState = vi.hoisted(() => ({ enabled: true, fixtureMode: false, targetThumbnail: false }));
+const flagState = vi.hoisted(() => ({ enabled: true, fixtureMode: false, targetThumbnail: false, overlayFrames: false }));
 // 업로드 테스트용 실제 temp uploadDir(buildUploadMiddleware가 tmp 하위를 mkdir). 경로는 beforeAll에서 채운다.
 const uploadEnv = vi.hoisted(() => ({ dir: '' }));
 beforeAll(() => { uploadEnv.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'va-upload-')); });
@@ -35,6 +35,7 @@ vi.mock('../../config', () => ({
       clipTtlHours: 24,
       retentionPolicy: 'privacy_first',
       get targetThumbnail() { return flagState.targetThumbnail; },
+      get overlayFrames() { return flagState.overlayFrames; },
     },
   },
 }));
@@ -51,6 +52,15 @@ vi.mock('../../workers/fixturePath', () => ({
   // keypoints artifact 경로: .keypoints.json 이고 실제 존재하면 통과(실 패턴검증은 fixturePath 단위테스트).
   resolveKeypointsArtifactPath: vi.fn((p: unknown) =>
     (typeof p === 'string' && p.endsWith('.keypoints.json') && fs.existsSync(p) ? p : null)),
+  // overlay 프레임 디렉터리/파일: .frames 디렉터리이고 실제 존재하면 통과(실 패턴검증은 fixturePath 단위테스트).
+  resolveOverlayFramesDir: vi.fn((p: unknown) =>
+    (typeof p === 'string' && p.endsWith('.frames') && fs.existsSync(p) ? p : null)),
+  resolveOverlayFramePath: vi.fn((p: unknown, _jobId: unknown, idx: unknown) => {
+    if (typeof p !== 'string' || !p.endsWith('.frames') || !fs.existsSync(p)) return null;
+    if (typeof idx !== 'string' || !/^\d+$/.test(idx)) return null;
+    const fp = path.join(p, `${idx}.jpg`);
+    return fs.existsSync(fp) ? fp : null;
+  }),
 }));
 
 // sample-detect Python 러너 mock. thumbnailPath 주어지면(게이트 on) 더미 JPEG 생성(라우트 existsSync 통과).
@@ -948,7 +958,8 @@ describe('대상자 선택 썸네일 (정책 예외)', () => {
 
 // ── 6.0-8: GET /jobs/:jobId/overlay + POST /jobs/:jobId/close-review ──
 describe('GET /jobs/:jobId/overlay (검수 골격, 6.0-8)', () => {
-  beforeEach(() => { vi.clearAllMocks(); flagState.enabled = true; });
+  beforeEach(() => { vi.clearAllMocks(); flagState.enabled = true; flagState.overlayFrames = false; });
+  afterEach(() => { flagState.overlayFrames = false; });
 
   // coco17 17점 유효 PoseKeypoints 산출(검증 통과용).
   const kpDoc = () => ({
@@ -974,7 +985,7 @@ describe('GET /jobs/:jobId/overlay (검수 골격, 6.0-8)', () => {
     process_id: 'p1', status: 'review_pending', analysis_profile: null,
     requested_features: [], result_features: { tracking: { targetTrackId: 'trk-1' } },
     error_code: null, applied_at: null, applied_revision: null, applied_inputs_hash: null,
-    keypoints_path: null, keypoints_sha256: null,
+    keypoints_path: null, keypoints_sha256: null, frames_path: null,
     created_at: NOW, updated_at: NOW, assigned_doctor_user_id: USER_ID, ...over,
   });
   const getOverlay = (pool: Pool, role = 'doctor') => request(makeApp(pool))
@@ -1049,6 +1060,90 @@ describe('GET /jobs/:jobId/overlay (검수 골격, 6.0-8)', () => {
     expect(res.status).toBe(502);
     expect(res.body.code).toBe('INVALID_KEYPOINTS_ARTIFACT');
   });
+
+  it('framesAvailable: 게이트 on + frames_path + resolver 통과 → true, off → false', async () => {
+    const { path: kpPath, sha } = writeArtifact(kpDoc());
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'va-fr-'));
+    const fdir = path.join(parent, `${JOB_ID}.frames`);
+    fs.mkdirSync(fdir, { recursive: true });
+    fs.writeFileSync(path.join(fdir, '0.jpg'), 'jpg');
+
+    flagState.overlayFrames = true;
+    const pool = makePool(); authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [jobRowKp({ keypoints_path: kpPath, keypoints_sha256: sha, frames_path: fdir })] });
+    let res = await getOverlay(pool);
+    expect(res.status).toBe(200);
+    expect(res.body.framesAvailable).toBe(true);
+
+    flagState.overlayFrames = false; // 게이트 off → false (경로 잔존해도)
+    const pool2 = makePool(); authOk(pool2);
+    q(pool2).mockResolvedValueOnce({ rows: [jobRowKp({ keypoints_path: kpPath, keypoints_sha256: sha, frames_path: fdir })] });
+    res = await getOverlay(pool2);
+    expect(res.body.framesAvailable).toBe(false);
+  });
+});
+
+describe('GET /jobs/:jobId/overlay-frame/:frameIndex (실 프레임, privacy 게이트 예외)', () => {
+  beforeEach(() => { vi.clearAllMocks(); flagState.enabled = true; flagState.overlayFrames = false; });
+  afterEach(() => { flagState.overlayFrames = false; });
+
+  const mkFrames = () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'va-ofr-'));
+    const fdir = path.join(parent, `${JOB_ID}.frames`);
+    fs.mkdirSync(fdir, { recursive: true });
+    fs.writeFileSync(path.join(fdir, '6.jpg'), 'jpgdata');
+    return fdir;
+  };
+  const row = (over = {}) => ({
+    id: JOB_ID, organization_id: ORG_ID, patient_record_id: PAT_ID, clip_id: CLIP_ID,
+    process_id: 'p1', status: 'review_pending', analysis_profile: null,
+    requested_features: [], result_features: null, error_code: null,
+    applied_at: null, applied_revision: null, applied_inputs_hash: null,
+    keypoints_path: null, keypoints_sha256: null, frames_path: null,
+    created_at: NOW, updated_at: NOW, assigned_doctor_user_id: USER_ID, ...over,
+  });
+  const get = (pool: Pool, idx = '6') => request(makeApp(pool))
+    .get(`/api/video-analysis/jobs/${JOB_ID}/overlay-frame/${idx}`).set('Authorization', `Bearer ${orgToken()}`);
+
+  it('게이트 off → 404 (frames_path 있어도)', async () => {
+    const fdir = mkFrames();
+    const pool = makePool(); authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [row({ frames_path: fdir })] });
+    const res = await get(pool);
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe('OVERLAY_FRAME_NOT_FOUND');
+  });
+
+  it('게이트 on + frames_path NULL → 404 (DB source of truth)', async () => {
+    flagState.overlayFrames = true;
+    const pool = makePool(); authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [row({ frames_path: null })] });
+    expect((await get(pool)).status).toBe(404);
+  });
+
+  it('게이트 on + frames_path + 파일 → 200 image/jpeg no-store', async () => {
+    const fdir = mkFrames();
+    flagState.overlayFrames = true;
+    const pool = makePool(); authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [row({ frames_path: fdir })] });
+    const res = await get(pool, '6');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('image/jpeg');
+    expect(res.headers['cache-control']).toContain('no-store');
+  });
+
+  it('잘못된 frameIndex(비정수) → 404', async () => {
+    const fdir = mkFrames();
+    flagState.overlayFrames = true;
+    const pool = makePool(); authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [row({ frames_path: fdir })] });
+    expect((await get(pool, 'abc')).status).toBe(404);
+  });
+
+  it('플래그 off → 라우트 미존재(404)', async () => {
+    flagState.enabled = false;
+    expect((await get(makePool())).status).toBe(404);
+  });
 });
 
 describe('POST /jobs/:jobId/close-review (검수 종료, 6.0-8)', () => {
@@ -1059,7 +1154,7 @@ describe('POST /jobs/:jobId/close-review (검수 종료, 6.0-8)', () => {
     process_id: 'p1', status: 'review_pending', analysis_profile: null,
     requested_features: [], result_features: null, error_code: null,
     applied_at: null, applied_revision: null, applied_inputs_hash: null,
-    keypoints_path: null, keypoints_sha256: null,
+    keypoints_path: null, keypoints_sha256: null, frames_path: null,
     created_at: NOW, updated_at: NOW, assigned_doctor_user_id: USER_ID, ...over,
   });
   const post = (pool: Pool) => request(makeApp(pool))
@@ -1081,6 +1176,21 @@ describe('POST /jobs/:jobId/close-review (검수 종료, 6.0-8)', () => {
     expect(writeAuditLog).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       action: 'video_analysis_close_review', targetType: 'patient', targetId: PAT_ID,
     }));
+  });
+
+  it('200: overlay 프레임 디렉터리도 독립 회수(keypoints 없고 frames만 잔존)', async () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'va-crf-'));
+    const fdir = path.join(parent, `${JOB_ID}.frames`);
+    fs.mkdirSync(fdir, { recursive: true });
+    fs.writeFileSync(path.join(fdir, '0.jpg'), 'jpg');
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [jobRowCr({ keypoints_path: null, frames_path: fdir })] }); // loadAccessibleJob
+    q(pool).mockResolvedValueOnce({ rows: [{ keypoints_path: null, frames_path: fdir }] });            // UPDATE RETURNING
+    const res = await post(pool);
+    expect(res.status).toBe(200);
+    expect(res.body.cleared).toBe(true);
+    expect(fs.existsSync(fdir)).toBe(false); // 프레임 디렉터리 재귀삭제
   });
 
   it('409 JOB_NOT_READY: processing 중이면 차단(worker 경합)', async () => {

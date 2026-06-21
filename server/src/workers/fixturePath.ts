@@ -117,6 +117,67 @@ export function resolveKeypointsArtifactPath(p: unknown, jobId: string, uploadDi
   return real;
 }
 
+const FRAME_IDX_RE = /^\d+$/;
+
+/**
+ * overlay 실 프레임 **디렉터리** 경로 전용 검증(서빙·삭제·cleanup 공용). DB(jobs.frames_path)는 신뢰 경계 밖이므로
+ * uploadDir/artifacts 하위 + basename이 정확히 `<jobId>.frames` + 존재(디렉터리) + symlink 탈출 차단.
+ * DB 경로가 source of truth — 파일 존재만으로 서빙 금지(orphan 디렉터리 노출 차단).
+ */
+export function resolveOverlayFramesDir(p: unknown, jobId: string, uploadDir: string | null): string | null {
+  if (typeof p !== 'string' || p.trim() === '' || !uploadDir || !jobId) return null;
+
+  const artDir = path.resolve(uploadDir, 'artifacts');
+  const resolved = path.resolve(p);
+  if (!insideDir(artDir, resolved)) return null;
+  if (path.basename(resolved) !== `${jobId}.frames`) return null;
+
+  let realDir: string;
+  let real: string;
+  try {
+    realDir = fs.realpathSync(artDir);
+    real = fs.realpathSync(resolved);
+  } catch {
+    return null;
+  }
+  if (!insideDir(realDir, real)) return null;
+
+  try {
+    if (!fs.statSync(real).isDirectory()) return null;
+  } catch {
+    return null;
+  }
+  return real;
+}
+
+/**
+ * overlay 실 프레임 **파일** 경로 전용 검증(서빙용). 디렉터리(resolveOverlayFramesDir) 통과 + 그 안의
+ * `<frameIndex>.jpg`(frameIndex 비음 정수) + isFile + symlink 탈출 차단. 통과한 경로만 image 스트리밍.
+ */
+export function resolveOverlayFramePath(framesPathFromDb: unknown, jobId: string, frameIndex: unknown, uploadDir: string | null): string | null {
+  const dir = resolveOverlayFramesDir(framesPathFromDb, jobId, uploadDir);
+  if (!dir) return null;
+  if (typeof frameIndex !== 'string' || !FRAME_IDX_RE.test(frameIndex)) return null;
+
+  const resolved = path.resolve(dir, `${frameIndex}.jpg`);
+  if (!insideDir(dir, resolved)) return null;
+
+  let real: string;
+  try {
+    real = fs.realpathSync(resolved);
+  } catch {
+    return null;
+  }
+  if (!insideDir(dir, real)) return null;
+
+  try {
+    if (!fs.statSync(real).isFile()) return null;
+  } catch {
+    return null;
+  }
+  return real;
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**

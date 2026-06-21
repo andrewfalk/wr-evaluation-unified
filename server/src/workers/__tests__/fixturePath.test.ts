@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { resolveFixtureClip, resolveUploadedClipPath, resolveSampleFramePath, resolveKeypointsArtifactPath } from '../fixturePath';
+import { resolveFixtureClip, resolveUploadedClipPath, resolveSampleFramePath, resolveKeypointsArtifactPath, resolveOverlayFramesDir, resolveOverlayFramePath } from '../fixturePath';
 
 let dir: string;
 let uploadDir: string;
@@ -21,6 +21,10 @@ beforeAll(() => {
   fs.writeFileSync(path.join(uploadDir, 'artifacts', `${CLIP}.keypoints.json`), '{}');
   fs.writeFileSync(path.join(uploadDir, 'artifacts', `${JOB}.keypoints.json`), '{}');
   fs.writeFileSync(path.join(uploadDir, 'artifacts', `${CLIP}.bad.thumb.jpg`), 'x'); // uuid 아님
+  // overlay 프레임 디렉터리(<JOB>.frames/<idx>.jpg)
+  fs.mkdirSync(path.join(uploadDir, 'artifacts', `${JOB}.frames`), { recursive: true });
+  fs.writeFileSync(path.join(uploadDir, 'artifacts', `${JOB}.frames`, '0.jpg'), 'jpg');
+  fs.writeFileSync(path.join(uploadDir, 'artifacts', `${JOB}.frames`, '6.jpg'), 'jpg');
 });
 afterAll(() => {
   fs.rmSync(dir, { recursive: true, force: true });
@@ -127,5 +131,33 @@ describe('resolveKeypointsArtifactPath', () => {
     expect(resolveKeypointsArtifactPath(art(`${JOB}.keypoints.json`), JOB, null)).toBeNull();
     expect(resolveKeypointsArtifactPath('', JOB, uploadDir)).toBeNull();
     expect(resolveKeypointsArtifactPath(undefined, JOB, uploadDir)).toBeNull();
+  });
+});
+
+describe('resolveOverlayFramesDir / resolveOverlayFramePath', () => {
+  const framesDir = (j: string) => path.join(uploadDir, 'artifacts', `${j}.frames`);
+
+  it('정상 디렉터리(<JOB>.frames) → 실경로', () => {
+    expect(resolveOverlayFramesDir(framesDir(JOB), JOB, uploadDir)).toBe(fs.realpathSync(framesDir(JOB)));
+  });
+  it('정상 프레임 파일(<idx>.jpg) → 실경로', () => {
+    const p = path.join(framesDir(JOB), '6.jpg');
+    expect(resolveOverlayFramePath(framesDir(JOB), JOB, '6', uploadDir)).toBe(fs.realpathSync(p));
+    expect(resolveOverlayFramePath(framesDir(JOB), JOB, '0', uploadDir)).not.toBeNull();
+  });
+  it('잘못된 frameIndex(비정수·traversal) → null', () => {
+    expect(resolveOverlayFramePath(framesDir(JOB), JOB, '6.jpg', uploadDir)).toBeNull();
+    expect(resolveOverlayFramePath(framesDir(JOB), JOB, '../6', uploadDir)).toBeNull();
+    expect(resolveOverlayFramePath(framesDir(JOB), JOB, 'a', uploadDir)).toBeNull();
+    expect(resolveOverlayFramePath(framesDir(JOB), JOB, '999', uploadDir)).toBeNull(); // 부재
+  });
+  it('jobId 불일치 / basename 불일치 / artifacts 밖 / 파일(디렉터리 아님) → null', () => {
+    expect(resolveOverlayFramesDir(framesDir(JOB), CLIP, uploadDir)).toBeNull();         // jobId 불일치
+    expect(resolveOverlayFramesDir(path.join(uploadDir, 'artifacts', `${JOB}.keypoints.json`), JOB, uploadDir)).toBeNull(); // 디렉터리 아님
+    expect(resolveOverlayFramesDir(path.join(uploadDir, 'clip.bin'), JOB, uploadDir)).toBeNull(); // artifacts 밖
+    expect(resolveOverlayFramesDir(framesDir(JOB), JOB, null)).toBeNull();
+    expect(resolveOverlayFramesDir('', JOB, uploadDir)).toBeNull();
+    // frames_path가 NULL/빈값이면 파일이 있어도 서빙 경로 산출 불가(DB source of truth).
+    expect(resolveOverlayFramePath('', JOB, '0', uploadDir)).toBeNull();
   });
 });

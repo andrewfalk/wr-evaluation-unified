@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../httpClient', () => ({ requestJson: vi.fn() }));
+vi.mock('../httpClient', () => ({ requestJson: vi.fn(), requestBlob: vi.fn() }));
 
-import { requestJson } from '../httpClient';
+import { requestJson, requestBlob } from '../httpClient';
 import {
   createClip,
   createJob,
@@ -10,6 +10,7 @@ import {
   pollJob,
   isVideoAnalysisSupported,
   fetchOverlay,
+  fetchOverlayFrame,
   closeReview,
 } from '../videoAnalysisClient.js';
 import { applyVideoAnalysisJob } from '../patientServerRepository.js';
@@ -122,6 +123,21 @@ describe('applyVideoAnalysisJob', () => {
     expect(out.id).toBe('local-1');
     expect(out.meta).toEqual({ source: 'x' });
     expect(out.sync.revision).toBe(4);
+  });
+});
+
+describe('fetchOverlayFrame (실 프레임, privacy 게이트)', () => {
+  it('200 → Blob 반환, 404/없음 → null', async () => {
+    const blob = { size: 1 };
+    requestBlob.mockResolvedValueOnce(blob);
+    expect(await fetchOverlayFrame('j1', 6, intranet)).toBe(blob);
+    expect(requestBlob).toHaveBeenCalledWith('/api/video-analysis/jobs/j1/overlay-frame/6', expect.objectContaining({ baseUrl: 'https://srv' }));
+    requestBlob.mockResolvedValueOnce(null);
+    expect(await fetchOverlayFrame('j1', 7, intranet)).toBeNull();
+  });
+
+  it('비인트라넷이면 차단', async () => {
+    await expect(fetchOverlayFrame('j1', 0, { session: { mode: 'web' }, settings: {} })).rejects.toThrow();
   });
 });
 

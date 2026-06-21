@@ -718,7 +718,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
             {openOv.error && <p className="muted" style={{ fontSize: 12, color: 'var(--color-warning)' }}>{openOv.error}</p>}
             {openOv.data && (
               <>
-                <SkeletonOverlay overlay={openOv.data} activeSegments={segmentsForJob(jobEv, openSj.jobId)} />
+                <SkeletonOverlay overlay={openOv.data} activeSegments={segmentsForJob(jobEv, openSj.jobId)} session={session} settings={settings} />
                 <div style={{ marginTop: 4 }}>
                   <button type="button" className="btn btn-secondary btn-xs"
                     onClick={() => endReview(openSj.jobId)}>

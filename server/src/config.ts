@@ -203,6 +203,9 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
         retentionPolicy: retention as 'privacy_first' | 'review_fidelity',
         // 대상자 선택 시 대표 프레임 썸네일 노출(privacy 정책 예외, 기본 off). 동의+인트라넷 전제에서만 opt-in.
         targetThumbnail: bool(env, 'VIDEO_ANALYSIS_TARGET_THUMBNAIL', false),
+        // 골격 검수 overlay에 실 프레임 표시(privacy 정책 예외, 기본 off). on일 때만 추론이 샘플 프레임을
+        // 다운스케일 JPEG로 추출·보관하고 서빙 허용. 검증 초기 한시 예외(동의+인트라넷 전제).
+        overlayFrames: bool(env, 'VIDEO_ANALYSIS_OVERLAY_FRAMES', false),
         // 미확정 임시 영상 보존 시간(시간). TTL 경과 시 cleanup이 회수.
         clipTtlHours: positiveInt(env, 'VIDEO_ANALYSIS_CLIP_TTL_HOURS', 24),
       };
