@@ -56,6 +56,7 @@ export async function applyVideoFeatureViaServer(patient, opts, env) {
     processIds: opts.processIds || [], analysisJobIds: sourceAnalysisJobIds,
     analysisBundleVersion: opts.analysisBundleVersion || MOCK_BUNDLE,
     recipe: opts.recipe || null, // 구조적 recipe(6.0-9) — 서버 검증 게이트 대조 대상.
+    editReason: opts.editReason, // 시범 운영 수정 사유 메모(정책 B) — provenance에 영속.
     appliedBy,
   });
   // 4) apply(영속화) — If-Match 단일 트랜잭션. 서버가 payload 저장·revision+1·audit + source job consumed.

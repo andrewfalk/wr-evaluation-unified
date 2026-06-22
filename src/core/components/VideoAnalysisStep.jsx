@@ -12,6 +12,7 @@ import {
   applyFeatureToModule,
   rollbackAppliedInput,
 } from '../services/videoProvenance';
+import { DEFAULT_CONFIDENCE_THRESHOLDS } from '../services/videoConfidenceConfig';
 import { isVideoAnalysisSupported, createClip, uploadClip, sampleDetectClip, selectTarget, fetchSampleFrame, fetchOverlay, closeReview } from '../services/videoAnalysisClient';
 import { applyVideoFeatureViaServer } from '../services/videoServerApply';
 import { runServerAnalysis } from '../services/videoAnalysisRun';
@@ -351,6 +352,8 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   const [analysisBundle, setAnalysisBundle] = useState(MOCK_BUNDLE);
   // jobId → 서버 산출 recipe(§8.11, 6.0-9). 적용 시 source job들의 recipe로 entry recipe를 만든다(서버 검증 대조).
   const [analysisRecipes, setAnalysisRecipes] = useState({});
+  // 제안 행별 수정 사유 메모(시범 운영 피드백, 정책 B). rowKey→text. 적용 시 appliedInputs.editReason으로 영속.
+  const [applyNotes, setApplyNotes] = useState({});
   const [missingActiveTime, setMissingActiveTime] = useState({}); // { processId: featureKey[] }
   // 대상자 선택(§8.7, PR D2b): 클립별 { serverClipId, result, selectedId, clipKey }. 환자 JSONB 미저장(전송 X).
   const [detection, setDetection] = useState({}); // { [clipMetaId]: {...} }
@@ -588,7 +591,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   // ── 제안 적용 / 되돌리기 ──
   // 서버 모드: clip→job→apply(영속화·audit) 후 서버 동기화 환자를 목록에 반영(per-field, apply마다 job).
   // 로컬 모드: updatePatient로 즉시 반영(standalone/web).
-  const applySuggestion = async (moduleId, ctx, s, processIds, analysisProfile) => {
+  const applySuggestion = async (moduleId, ctx, s, processIds, analysisProfile, editReason) => {
     if (applyBlocked) {
       setApplyError('서버에 저장·동기화된 환자만 적용할 수 있습니다. 먼저 저장하세요.');
       return;
@@ -612,7 +615,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
       updatePatient((d) => applyFeatureToModule({ data: d }, {
         moduleId, ctx, featureKey: s.featureKey,
         suggestedValue: s.suggestedValue, confidence: s.confidence,
-        processIds: processIds || [], analysisJobIds, analysisBundleVersion: bundleForApply, recipe: appliedRecipe, appliedBy,
+        processIds: processIds || [], analysisJobIds, analysisBundleVersion: bundleForApply, recipe: appliedRecipe, editReason, appliedBy,
       }).patient.data);
       return;
     }
@@ -621,7 +624,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     try {
       const serverPatient = await applyVideoFeatureViaServer(
         activePatient,
-        { moduleId, ctx, featureKey: s.featureKey, suggestedValue: s.suggestedValue, confidence: s.confidence, processIds: processIds || [], analysisJobIds, analysisBundleVersion: bundleForApply, recipe: appliedRecipe, analysisProfile },
+        { moduleId, ctx, featureKey: s.featureKey, suggestedValue: s.suggestedValue, confidence: s.confidence, processIds: processIds || [], analysisJobIds, analysisBundleVersion: bundleForApply, recipe: appliedRecipe, editReason, analysisProfile },
         { session, settings, appliedBy }
       );
       onServerApplied?.(serverPatient);
@@ -635,6 +638,9 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   const rollback = (entry) => updatePatient((d) => rollbackAppliedInput({ data: d }, d.shared.videoAnalysis.appliedInputs.indexOf(entry)).data);
 
   const hasAnalysis = (va.jobFeatures || []).length > 0 || (va.processFeatures || []).length > 0;
+  // 시범 운영(정책 B): confidence 임계값(6.0-B2)이 아직 배선 안 됨 = 정확도 미검증 상태.
+  // 임계값이 채워지면(검증 통과·별도 PR) 자동으로 배너가 사라진다.
+  const pilotMode = Object.keys(DEFAULT_CONFIDENCE_THRESHOLDS).length === 0;
 
   // ── coarse 파이프라인 진행바(B2 선행) ── fixture/자동 dominant 경로도 포괄. queued→processing→
   // review_pending 실시간 단계는 pollJob 내부라 미표시(이번 범위 제외).
@@ -762,9 +768,16 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
             onClick={() => setExpandedEvidence(expanded ? null : rowKey)}>
             {expanded ? '근거 닫기' : '왜 이 값?'}
           </button>
+          {/* 시범 운영(정책 B): 적용 시 선택 메모 → provenance editReason. 제안이 어긋날 때 사유 축적(B2 신호). */}
+          {!refOnly && !applyDisabled && (
+            <input type="text" className="va-note-input" placeholder="수정 사유(선택)"
+              value={applyNotes[rowKey] || ''}
+              onChange={(e) => setApplyNotes((m) => ({ ...m, [rowKey]: e.target.value }))}
+              style={{ fontSize: 12, padding: '2px 6px', minWidth: 140, flex: '1 1 140px' }} />
+          )}
           <button type="button" className="btn btn-primary btn-sm" disabled={busy || applyBlocked || refOnly || applyDisabled}
             title={applyDisabled ? applyDisabledTitle : undefined}
-            onClick={() => applySuggestion(moduleId, ctx, s, processIds, analysisProfile)}>
+            onClick={() => applySuggestion(moduleId, ctx, s, processIds, analysisProfile, (applyNotes[rowKey] || '').trim() || undefined)}>
             {serverMode ? '서버 적용' : '적용'}
           </button>
         </div>
@@ -843,6 +856,17 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
             {applyError && <p className="muted" style={{ color: 'var(--color-danger)' }}>오류: {applyError}</p>}
           </div>
         </div>
+
+        {pilotMode && (
+          <div role="note" style={{
+            margin: '4px 0 12px', padding: '8px 12px', fontSize: 13, lineHeight: 1.5,
+            border: '1px solid var(--color-warning)', borderRadius: 6,
+            background: 'rgba(240, 173, 78, 0.10)',
+          }}>
+            ⚠ <b>시범 운영</b> — 영상 분석값은 정확도 검증(6.0-B2) 전입니다. 모든 값은 <b>참고용</b>이며,
+            전문의가 직접 확인·확정해야 합니다. 어긋나거나 이상한 제안은 적용 시 <b>수정 사유 메모</b>로 남겨주시면 검증·개선에 활용됩니다.
+          </div>
+        )}
 
         {(() => {
           const st = buildVideoStatus(va, { shareTotals, missingActiveTime, jobScopeModules, taskScopeModules, analyzing, hasAnalysis });

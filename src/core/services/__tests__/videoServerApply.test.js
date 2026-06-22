@@ -68,10 +68,11 @@ describe('applyVideoFeatureViaServer', () => {
     applyFeatureToModule.mockReturnValueOnce({ patient: { data: { computed: true } }, appliedInput });
     applyVideoAnalysisJob.mockResolvedValueOnce({ id: 'local-1' });
 
-    await applyVideoFeatureViaServer(patient, { ...opts, analysisJobIds: ['ja', 'jb'], analysisBundleVersion: 'recipe-1' }, env);
+    await applyVideoFeatureViaServer(patient, { ...opts, analysisJobIds: ['ja', 'jb'], analysisBundleVersion: 'recipe-1', editReason: '과대추정 같아 보정' }, env);
 
     expect(applyFeatureToModule).toHaveBeenCalledWith(patient, expect.objectContaining({
       analysisJobIds: ['ja', 'jb'], analysisBundleVersion: 'recipe-1',
+      editReason: '과대추정 같아 보정', // 시범 운영 수정 사유(정책 B) provenance 전달
     }));
     expect(applyVideoAnalysisJob).toHaveBeenCalledWith(
       'shell-1', patient, { computed: true },
