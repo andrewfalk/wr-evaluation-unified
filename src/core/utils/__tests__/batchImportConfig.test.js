@@ -191,6 +191,18 @@ describe('parseConfirmedStatus / parseAssessmentLevel / parseReasonText', () => 
     expect(parseReasonText('누적 신체부담 낮음\r\n기타 (기타텍스트)'))
       .toEqual({ reasons: ['lowBurden', 'other'], other: '기타텍스트' });
   });
+
+  it('parseReasonText: 신규 분할 라벨 7종을 value로 복원한다', () => {
+    expect(parseReasonText('상병 미확인')).toEqual({ reasons: ['unconfirmed'], other: '' });
+    expect(parseReasonText('연령대비 경미')).toEqual({ reasons: ['ageMild'], other: '' });
+    expect(parseReasonText('부담 정도가 최소 문턱값을 넘지 못함'))
+      .toEqual({ reasons: ['belowThreshold'], other: '' });
+  });
+
+  it('parseReasonText: 구 export 라벨 "상병 미확인/연령대비 경미"는 레거시 mild로 복원한다', () => {
+    expect(parseReasonText('상병 미확인/연령대비 경미'))
+      .toEqual({ reasons: ['mild'], other: '' });
+  });
 });
 
 describe('generateBatchRows ↔ applyDiagnosisAssessment 라운드트립', () => {

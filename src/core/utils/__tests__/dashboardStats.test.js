@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   getDoctorPatientCounts,
+  getDoctorOptions,
   UNASSIGNED_GROUP_KEY,
   computeDashboardStats,
   computeAge,
   normalizeGender,
 } from '../dashboardStats.js';
+import { getOwnerGroupKey } from '../patientOwnership.js';
 
 function patient({ assignedTop, assignedMeta, createdBy, doctorName } = {}) {
   const p = { meta: {} };
@@ -67,6 +69,64 @@ describe('getDoctorPatientCounts', () => {
     const { top } = getDoctorPatientCounts(patients);
     expect(top).toHaveLength(5);
     expect(top.map(e => e.count)).toEqual([7, 6, 5, 4, 3]);
+  });
+});
+
+describe('getDoctorOptions (관리자 통계 드롭다운)', () => {
+  it('등록 환자를 가진 모든 의사를 count 내림차순으로 반환 (Top 5 제한 없음)', () => {
+    const patients = [];
+    for (let i = 1; i <= 7; i++) {
+      for (let n = 0; n < i; n++) patients.push(patient({ assignedTop: `D${i}` }));
+    }
+    const options = getDoctorOptions(patients);
+    expect(options).toHaveLength(7);
+    expect(options.map(o => o.count)).toEqual([7, 6, 5, 4, 3, 2, 1]);
+  });
+
+  it('미배정 그룹은 항상 마지막에 배치', () => {
+    const patients = [
+      patient({}),                    // 미배정
+      patient({ assignedTop: 'A' }),
+      patient({ assignedTop: 'A' }),
+      patient({ assignedTop: 'B' }),
+    ];
+    const options = getDoctorOptions(patients);
+    expect(options.map(o => o.key)).toEqual(['A', 'B', UNASSIGNED_GROUP_KEY]);
+    expect(options.at(-1).label).toBe('미배정/알 수 없음');
+  });
+
+  it('미배정 환자가 없으면 미배정 옵션을 포함하지 않음', () => {
+    const options = getDoctorOptions([patient({ assignedTop: 'A' })]);
+    expect(options.some(o => o.key === UNASSIGNED_GROUP_KEY)).toBe(false);
+  });
+});
+
+// Dashboard scopedPatients의 특정 의사/미배정 필터 로직 (scope = userId | UNASSIGNED_GROUP_KEY)
+describe('관리자 scope 필터 (getOwnerGroupKey 기반)', () => {
+  const filterByScope = (patients, scope) =>
+    patients.filter(p => {
+      const key = getOwnerGroupKey(p);
+      return scope === UNASSIGNED_GROUP_KEY ? key == null : key === scope;
+    });
+
+  it('특정 의사 userId로 그 의사 환자만 필터', () => {
+    const patients = [
+      patient({ assignedTop: 'A' }),
+      patient({ assignedMeta: 'A' }),
+      patient({ assignedTop: 'B' }),
+      patient({ createdBy: 'A' }),   // assigned 없음 → createdBy 폴백
+    ];
+    expect(filterByScope(patients, 'A')).toHaveLength(3);
+    expect(filterByScope(patients, 'B')).toHaveLength(1);
+  });
+
+  it('UNASSIGNED_GROUP_KEY는 소유자 키가 null인 환자만 필터', () => {
+    const patients = [
+      patient({}),                        // 미배정
+      patient({ assignedTop: null }),     // 명시적 null → 미배정
+      patient({ assignedTop: 'A' }),
+    ];
+    expect(filterByScope(patients, UNASSIGNED_GROUP_KEY)).toHaveLength(2);
   });
 });
 

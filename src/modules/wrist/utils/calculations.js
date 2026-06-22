@@ -190,9 +190,12 @@ export function getReasonText(reasons, other) {
 
   const reasonMap = {
     unrelated: '업무 노출과 직접 연결하기 어려운 상병',
-    mild: '병변 정도가 경미하거나 비특이적',
+    unconfirmed: '병변 미확인',
+    ageMild: '연령 대비 경미',
+    mild: '병변 정도가 경미하거나 비특이적', // 레거시(구 데이터 표시용)
     delayed: '업무 중단 후 상당 기간 경과',
     lowBurden: '누적 노출량이 낮음',
+    belowThreshold: '노출 정도가 최소 문턱값을 넘지 못함',
     other: `기타 (${other || ''})`,
   };
 

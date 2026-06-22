@@ -69,9 +69,11 @@ export const KLG_OPTIONS = [
 // 업무관련성 평가 낮음 사유 옵션
 export const LOW_REASON_OPTIONS = [
   { value: 'unrelated', label: '신체부담과 관련없는 상병' },
-  { value: 'mild', label: '상병 미확인/연령대비 경미' },
+  { value: 'unconfirmed', label: '상병 미확인' },
+  { value: 'ageMild', label: '연령대비 경미' },
   { value: 'delayed', label: '업무중단 후 상당기간 경과' },
   { value: 'lowBurden', label: '누적 신체부담 낮음' },
+  { value: 'belowThreshold', label: '부담 정도가 최소 문턱값을 넘지 못함' },
   { value: 'other', label: '기타' }
 ];
 
