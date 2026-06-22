@@ -59,9 +59,12 @@ export const getReasonText = (reasons, other) => {
   if (!reasons || reasons.length === 0) return '-';
   const reasonMap = {
     unrelated: '신체부담과 관련없는 상병',
-    mild: '상병 미확인/연령대비 경미',
+    unconfirmed: '상병 미확인',
+    ageMild: '연령대비 경미',
+    mild: '상병 미확인/연령대비 경미', // 레거시(구 데이터 표시용)
     delayed: '업무중단 후 상당기간 경과',
     lowBurden: '누적 신체부담 낮음',
+    belowThreshold: '부담 정도가 최소 문턱값을 넘지 못함',
     other: `기타 (${other || ''})`
   };
   return reasons.map(r => reasonMap[r] || r).join('\n');

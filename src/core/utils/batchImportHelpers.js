@@ -3,6 +3,12 @@ import { getModule } from '../moduleRegistry';
 import { createDiagnosis, createSharedJob } from './data';
 import { LOW_REASON_OPTIONS } from '../../modules/knee/utils/data';
 
+// 구 export 라벨 → 현재 value 별칭. 'mild'(상병 미확인/연령대비 경미)는 7개 분할 후
+// 체크리스트에서 제거됐지만, 기존 파일 라운드트립을 위해 레거시 'mild'로 복원한다.
+const LEGACY_REASON_LABEL_ALIASES = {
+  '상병 미확인/연령대비 경미': 'mild',
+};
+
 export function normalizeHeader(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -96,7 +102,13 @@ export function parseReasonText(value) {
       continue;
     }
     const option = LOW_REASON_OPTIONS.find(opt => opt.label === line);
-    reasons.push(option ? option.value : line);
+    if (option) {
+      reasons.push(option.value);
+    } else if (LEGACY_REASON_LABEL_ALIASES[line]) {
+      reasons.push(LEGACY_REASON_LABEL_ALIASES[line]);
+    } else {
+      reasons.push(line);
+    }
   }
   return { reasons, other };
 }

@@ -2765,6 +2765,11 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   min-width: 240px;
   margin-bottom: 0;
 }
+.dashboard-header-row .patient-scope-select {
+  width: auto;
+  min-width: 240px;
+  margin-bottom: 0;
+}
 .dashboard-user-badge {
   display: inline-flex;
   align-items: center;
@@ -2859,6 +2864,17 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .patient-scope-btn--active {
   background: var(--accent, #2563eb);
   color: #fff;
+}
+.patient-scope-select {
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  background: var(--bg-secondary, #f5f5f5);
+  color: var(--text-primary, #333);
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 6px;
+  cursor: pointer;
+  margin-bottom: 8px;
 }
 .patient-others-badge {
   display: inline-block;

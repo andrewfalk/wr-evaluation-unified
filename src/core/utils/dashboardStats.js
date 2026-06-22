@@ -4,10 +4,11 @@ import { formatBirthDate } from './data';
 
 export const UNASSIGNED_GROUP_KEY = '__unassigned__';
 
-// 의사별 환자 수 집계 (Top 5 + 미배정 별도)
-// 그룹 키: assignedDoctorUserId(top-level → meta) 우선, 없으면 meta.createdBy
-// null/undefined는 __unassigned__로 묶음
-export function getDoctorPatientCounts(patients, { topN = 5 } = {}) {
+// 환자를 소유자(의사) 그룹으로 집계.
+// 그룹 키: assignedDoctorUserId(top-level → meta) 우선, 없으면 meta.createdBy.
+// null/undefined는 __unassigned__로 묶음. 각 그룹의 라벨(doctorName 샘플)을 함께 산출.
+// 반환: [{ key, label, count }] (정렬 없음)
+function groupPatientsByOwner(patients) {
   const list = Array.isArray(patients) ? patients : [];
   const groups = new Map();
 
@@ -30,7 +31,12 @@ export function getDoctorPatientCounts(patients, { topN = 5 } = {}) {
     return id.length > 8 ? `${id.slice(0, 8)}…` : id;
   };
 
-  const all = [...groups.values()].map(e => ({ key: e.key, label: formatLabel(e), count: e.count }));
+  return [...groups.values()].map(e => ({ key: e.key, label: formatLabel(e), count: e.count }));
+}
+
+// 의사별 환자 수 집계 (Top 5 + 미배정 별도)
+export function getDoctorPatientCounts(patients, { topN = 5 } = {}) {
+  const all = groupPatientsByOwner(patients);
 
   const unassigned = all.find(e => e.key === UNASSIGNED_GROUP_KEY) || null;
   const assigned = all.filter(e => e.key !== UNASSIGNED_GROUP_KEY)
@@ -38,6 +44,19 @@ export function getDoctorPatientCounts(patients, { topN = 5 } = {}) {
     .slice(0, topN);
 
   return { top: assigned, unassigned };
+}
+
+// 등록 환자를 가진 모든 의사 옵션 (관리자 통계 드롭다운용).
+// count 내림차순 정렬, 미배정 그룹은 항상 마지막에 배치.
+// 반환: [{ key, label, count }]
+export function getDoctorOptions(patients) {
+  const all = groupPatientsByOwner(patients);
+
+  const assigned = all.filter(e => e.key !== UNASSIGNED_GROUP_KEY)
+    .sort((a, b) => b.count - a.count);
+  const unassigned = all.find(e => e.key === UNASSIGNED_GROUP_KEY);
+
+  return unassigned ? [...assigned, unassigned] : assigned;
 }
 
 

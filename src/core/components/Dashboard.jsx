@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
-import { computeDashboardStats, getDoctorPatientCounts } from '../utils/dashboardStats';
+import { useEffect, useMemo, useState } from 'react';
+import { computeDashboardStats, getDoctorPatientCounts, getDoctorOptions, UNASSIGNED_GROUP_KEY } from '../utils/dashboardStats';
 import { getAllModules } from '../moduleRegistry';
-import { isMyPatient } from '../utils/patientOwnership';
+import { isMyPatient, getOwnerGroupKey } from '../utils/patientOwnership';
 import { isRedactedPatientRecord } from '../services/patientRecords';
 import { isPatientComplete } from '../utils/patientCompletion';
 
@@ -265,25 +265,46 @@ const Dashboard = ({
     [allPatientsSafe]
   );
 
-  const scopedPatients = useMemo(
-    () => scope === 'mine'
-      ? nonRedactedPatients.filter(p => isMyPatient(p, session))
-      : nonRedactedPatients,
-    [nonRedactedPatients, scope, userId] // eslint-disable-line react-hooks/exhaustive-deps
+  const isAdmin = canUseScope && session?.user?.role === 'admin';
+
+  // 관리자 통계 드롭다운: 등록 환자를 가진 모든 의사 옵션
+  const doctorOptions = useMemo(
+    () => isAdmin ? getDoctorOptions(nonRedactedPatients) : [],
+    [isAdmin, nonRedactedPatients]
   );
+
+  const scopedPatients = useMemo(() => {
+    if (scope === 'all') return nonRedactedPatients;
+    if (scope === 'mine') return nonRedactedPatients.filter(p => isMyPatient(p, session));
+    // 특정 의사 userId 또는 미배정 키
+    return nonRedactedPatients.filter(p => {
+      const key = getOwnerGroupKey(p);
+      return scope === UNASSIGNED_GROUP_KEY ? key == null : key === scope;
+    });
+  }, [nonRedactedPatients, scope, userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stats = useMemo(
     () => computeDashboardStats(scopedPatients),
     [scopedPatients]
   );
 
-  // 'mine' 전용: 미완료 평가 건수
+  // 'all'을 제외한 포커스 뷰(내 환자 / 특정 의사) 전용: 미완료 평가 건수
   const incompleteCount = useMemo(
-    () => scope === 'mine'
+    () => scope !== 'all'
       ? scopedPatients.filter(p => !isPatientComplete(p)).length
       : 0,
     [scopedPatients, scope]
   );
+
+  // 동기화 후 선택한 의사가 옵션에서 사라지면 scope를 'all'로 되돌리는 가드 (role-aware).
+  // 관리자 UI에는 'mine' 옵션이 없으므로 admin 유효값 = 'all' + doctorOptions key.
+  useEffect(() => {
+    if (!canUseScope) return;
+    const validScopes = isAdmin
+      ? new Set(['all', ...doctorOptions.map(o => o.key)])
+      : new Set(['all', 'mine']);
+    if (!validScopes.has(scope)) onScopeChange?.('all');
+  }, [isAdmin, canUseScope, doctorOptions, scope, onScopeChange]);
 
   // 'all' 전용: 의사별 환자 수 Top 5
   const doctorCounts = useMemo(
@@ -332,7 +353,19 @@ const Dashboard = ({
       <div className="dashboard-header-spacer" />
       <div className="dashboard-header-center">{userBadge}</div>
       <div className="dashboard-header-right">
-        {canUseScope && (
+        {canUseScope && isAdmin && (
+          <select
+            className="patient-scope-select"
+            value={scope}
+            onChange={e => onScopeChange?.(e.target.value)}
+          >
+            <option value="all">전체 통계</option>
+            {doctorOptions.map(o => (
+              <option key={o.key} value={o.key}>{`${o.label} (${o.count}명)`}</option>
+            ))}
+          </select>
+        )}
+        {canUseScope && !isAdmin && (
           <div className="patient-scope-toggle">
             <button
               type="button"
@@ -465,14 +498,14 @@ const Dashboard = ({
           <div className="stat-label">평가 결과</div>
         </div>
 
-        {scope === 'mine' && (() => {
+        {scope !== 'all' && (() => {
           const total = scopedPatients.length;
           const completed = total - incompleteCount;
           const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
           return (
             <div className="dashboard-stat-card metric-card pattern-surface">
               <div className="stat-value stat-complete">{pct}<span className="stat-unit">%</span></div>
-              <div className="stat-label">내 환자 완료율</div>
+              <div className="stat-label">{scope === 'mine' ? '내 환자 완료율' : '선택 의사 완료율'}</div>
               <div className="stat-subnote">완료 {completed} / 총 {total}</div>
             </div>
           );
