@@ -105,6 +105,13 @@ COPY --from=server-builder /build/shared/dist ./node_modules/@wr/contracts/dist
 # Web SPA served at / for non-API routes
 COPY --from=web-builder /build/dist/web ./dist/web
 
+# 영상 업로드 공유 디렉터리(named volume `video_uploads` 마운트 대상). 부팅 시 비-root(node)가
+# 하위 tmp/를 만들므로(buildUploadMiddleware) 디렉터리를 미리 생성하고 소유권을 node에 준다.
+# 빈 named volume은 첫 마운트 때 이미지의 이 경로 소유권/권한을 상속하므로, 이게 있어야
+# fresh 볼륨이 node 소유가 되어 mkdir EACCES 부팅 크래시를 막는다(6.0-9).
+# (이미 root 소유로 생성된 기존 볼륨은 상속이 안 되므로 재배포 시 한 번 chown 필요.)
+RUN mkdir -p /app/.video-uploads && chown -R node:node /app/.video-uploads
+
 EXPOSE 3001
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
