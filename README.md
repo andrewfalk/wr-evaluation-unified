@@ -1,6 +1,6 @@
 # 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 5.1.8 | **Status:** 보안 점검 적용(AI 프록시 모델 allowlist + Electron IPC 보강 + PDF 푸터 이스케이프) + 코드 구조 리팩터링 + 종합소견 Excel 일괄입출력 / 인트라넷 운영 중
+> **Version:** 6.0.0 | **Status:** M4 영상분석 시범 운영(참고용, 미검증 배너) + 에어갭 오프라인 배포 패키지 / 인트라넷 운영 중
 
 직업환경의학 전문의가 **업무상 질병 인정 여부를 판단**할 때 사용하는 통합 평가 도구.
 무릎(슬관절), 척추(요추 MDDM(BK2108) + 전신진동 BK2110), 경추(목 BK2109), 팔꿈치(주관절 BK2101/2103/2105/2106), 어깨(견관절 BK2117), 손목(수관절 BK2113/2101/2103/2106) 평가를 지원하며, 향후 고관절 등을 플러그인 형태로 확장할 수 있다.
@@ -557,6 +557,17 @@ ICD 코드 기반 모듈 자동 추천:
 ---
 
 ## 변경 이력
+
+### v6.0.0 (2026-06-22) — M4 영상분석 시범 운영(참고용) + 에어갭 패키징
+
+근골격계 부담작업 영상분석(자세 추정 기반)을 "참고용 시범 운영"으로 활성화하고, 에어갭 인트라넷 서버용 오프라인 배포 패키지를 완성. (M4 6.0-9)
+
+- **레시피 버전관리(§8.11)**: 분석 산출물에 `analysis_recipe`(코드 commit·가중치 sha·키포인트 계약)를 기록. 서버가 apply 시 레시피를 권위 검증(suffix diff·canonical prefix 불변·exact-set·서버 상수 대조·provenance 필수)하고, 미검증(unverified)은 fail-closed로 차단.
+- **에어갭 컨테이너화**: Python 포즈 추론(rtmlib/onnxruntime-cpu)을 app 이미지에 동봉, baked 가중치의 실제 `.onnx` SHA256을 manifest와 대조해 불일치 시 fail-closed(`model_loader.verified_model_shas`). `server/Dockerfile` glibc(bookworm) 통일.
+- **오프라인 패키지**: `scripts/export-offline-package.ps1` — 실파일 sha 검증·dirty 가드·`WR_GIT_COMMIT` 주입·`release-manifest.json`(videoInference 출처) 생성. compose에 `video_uploads` 볼륨 + 추론 mem/cpu 제한.
+- **시범 운영 정책 B**: 영상분석 결과에 "미검증(참고용)" 배너 표시 + 제안 행 수정 시 수정사유(`editReason`) 입력 → 피드백 수집. 정확도 검증·임계값 배선 전까지 자동 게이팅은 비활성.
+- **대시보드**: 관리자 의사별 통계 드롭다운 + 위험도 '낮음' 사유 7항목 분할.
+- 검증: 서버 513 / 클라이언트 770 tests pass, `npm run build:web` 통과, docker build + `--network none` 추론 smoke 통과.
 
 ### v5.1.8 (2026-06-13) — 보안 점검 적용: AI 프록시 모델 allowlist + Electron IPC 보강 + PDF 푸터 이스케이프
 
