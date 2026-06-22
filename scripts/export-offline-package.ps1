@@ -48,7 +48,8 @@ param(
     [string]$ElectronInstallerPath = "",
     [switch]$SkipBuild             = $false,
     [switch]$ExcludeBaseImages     = $false,
-    [switch]$NoZip                 = $false
+    [switch]$NoZip                 = $false,
+    [switch]$AllowDirty            = $false
 )
 
 Set-StrictMode -Version Latest
@@ -87,7 +88,8 @@ if (-not $Version) {
     }
 }
 if (-not $Version) {
-    $gitTag = git -C $RepoRoot describe --tags --exact-match 2>$null
+    # -c core.excludesFile= : 릴리즈 PC 전역 excludesFile 권한 경고가 Stop 정책에서 스크립트를 죽이지 않게.
+    $gitTag = git -C $RepoRoot -c core.excludesFile= describe --tags --exact-match 2>$null
     if ($LASTEXITCODE -eq 0 -and $gitTag) {
         $Version = $gitTag.Trim() -replace '^v', ''
     }
@@ -102,6 +104,61 @@ if (-not $Version) {
 $APP_IMAGE     = "wr-app-server:$Version"
 $MONITOR_IMAGE = "wr-backup-monitor:$Version"
 $BACKUP_IMAGE  = "wr-backup:$Version"
+
+# ── Git commit (build-arg + manifest 동일 기록 — recipe code commit 출처 일치, 6.0-9) ──
+# 릴리즈 PC에 따라 git이 전역 excludesFile 권한 경고를 stderr로 낼 수 있고($ErrorActionPreference=Stop +
+# PSNativeCommandUseErrorActionPreference 환경에선 그게 스크립트를 죽임), -c core.excludesFile= 로 비활성화
+# + EAP를 잠시 Continue로 두고 stderr를 버려 안전 캡처한다.
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$gitCommit = git -C $RepoRoot -c core.excludesFile= rev-parse HEAD 2>$null
+$gitBranch = git -C $RepoRoot -c core.excludesFile= rev-parse --abbrev-ref HEAD 2>$null
+$dirty     = git -C $RepoRoot -c core.excludesFile= status --porcelain 2>$null
+$ErrorActionPreference = $prevEAP
+$gitCommitClean = if ($gitCommit) { ($gitCommit | Select-Object -First 1).Trim() } else { "unknown" }
+$gitBranchClean = if ($gitBranch) { ($gitBranch | Select-Object -First 1).Trim() } else { "unknown" }
+
+# dirty worktree 가드: build context는 uncommitted 변경까지 포함하므로 이미지=HEAD+dirty인데
+# recipe/manifest는 HEAD만 기록 → provenance 불일치. dirty면 중단(명시 -AllowDirty로만 진행).
+Write-Step "Git worktree clean check (recipe commit 정합)"
+if ($dirty) {
+    if ($AllowDirty) {
+        Write-Warn "Uncommitted 변경이 있으나 -AllowDirty로 진행 — 이미지 코드가 commit $gitCommitClean 과 다를 수 있음."
+    } else {
+        Write-Error "Uncommitted 변경이 있습니다. 릴리즈 패키지는 깨끗한 worktree에서 빌드해야 recipe code commit이 정확합니다.`n커밋/스태시 후 재실행하거나, 의도적이면 -AllowDirty 를 주세요.`n$dirty"
+        exit 1
+    }
+} else {
+    Write-Ok "worktree clean (HEAD = $gitCommitClean)"
+}
+
+# ── 영상 추론 가중치(baked) 실제 파일 검증 — manifest 플래그가 아니라 실 .onnx SHA256을 대조(6.0-9) ──
+# manifest.weightsComplete=true인데 실제 .onnx가 없거나 해시가 다르면 fail-closed(PR-B verified_model_shas와 동일 원칙).
+$poseManifestPath = Join-Path $RepoRoot "services\pose-inference\models\manifest.json"
+$poseModelsDir    = Split-Path $poseManifestPath -Parent
+$poseInfo = $null
+if (Test-Path $poseManifestPath) {
+    Write-Step "영상 추론 가중치 검증 (실 파일 SHA256 대조)"
+    $poseInfo = ([System.IO.File]::ReadAllText($poseManifestPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json)
+    if ($poseInfo.weightsComplete) {
+        foreach ($m in $poseInfo.models) {
+            $onnx = Join-Path $poseModelsDir $m.file
+            if (-not (Test-Path -LiteralPath $onnx)) {
+                Write-Error "weightsComplete=true 이나 가중치 파일 없음: $($m.file)`nscripts/fetch-pose-weights.ps1 을 먼저 실행하세요."
+                exit 1
+            }
+            $actual = (Get-FileHash -LiteralPath $onnx -Algorithm SHA256).Hash.ToLower()
+            if ($actual -ne ([string]$m.onnxSha256).ToLower()) {
+                Write-Error "가중치 SHA 불일치($($m.role)): manifest=$($m.onnxSha256) actual=$actual`n오염/다른 모델 — 재반입 필요(fetch-pose-weights.ps1)."
+                exit 1
+            }
+            Write-Ok "$($m.role) onnxSha256 검증 OK ($($m.file))"
+        }
+    } else {
+        Write-Warn "pose 가중치 미반입(weightsComplete=false) — scripts/fetch-pose-weights.ps1 먼저 실행 권장."
+        Write-Warn "이대로 app 이미지를 빌드하면 영상 추론 recipe가 unverified가 되어 운영 apply가 막힌다(fail-closed)."
+    }
+}
 
 $PackageName = "wr-evaluation-unified-$Version-intranet"
 $PackageDir  = Join-Path $RepoRoot "release\$PackageName"
@@ -128,8 +185,8 @@ Write-Ok "No secrets will be packaged"
 if (-not $SkipBuild) {
     Write-Step "Building Docker images (tag: $Version)"
 
-    Write-Host "  [1/3] $APP_IMAGE"
-    docker build -t $APP_IMAGE -f (Join-Path $RepoRoot "server\Dockerfile") $RepoRoot
+    Write-Host "  [1/3] $APP_IMAGE (Python 추론 동봉 + baked 가중치, WR_GIT_COMMIT 주입)"
+    docker build --build-arg WR_GIT_COMMIT=$gitCommitClean -t $APP_IMAGE -f (Join-Path $RepoRoot "server\Dockerfile") $RepoRoot
     Assert-DockerCmd "app image build"
     Write-Ok $APP_IMAGE
 
@@ -304,8 +361,7 @@ Write-Ok "images/wr-images.tar ($tarMB MB)"
 
 Write-Step "Generating release-manifest.json"
 
-$gitCommit = git -C $RepoRoot rev-parse HEAD 2>$null
-$gitBranch = git -C $RepoRoot rev-parse --abbrev-ref HEAD 2>$null
+# gitCommit/gitBranch는 이미지 build-arg와 동일 값을 쓴다(위에서 계산 — recipe code commit 출처 일치).
 
 function Get-ImageId([string]$img) {
     # Returns full sha256:... image ID for tamper-evidence. RepoDigests are only
@@ -316,10 +372,18 @@ function Get-ImageId([string]$img) {
     return "unknown"
 }
 
+# 영상 추론 가중치 출처/해시(재현성 §8.11) — app 이미지에 baked. .onnx 자체는 패키지에 별도 동봉 안 함(이미지 내장).
+$poseModelsManifest = @()
+if ($poseInfo) {
+    $poseModelsManifest = @($poseInfo.models | ForEach-Object {
+        [ordered]@{ role = $_.role; onnxSha256 = $_.onnxSha256; sourceArchiveSha256 = $_.sourceArchiveSha256 }
+    })
+}
+
 $manifest = [ordered]@{
     version              = $Version
-    gitCommit            = if ($gitCommit) { $gitCommit.Trim() } else { "unknown" }
-    gitBranch            = if ($gitBranch) { $gitBranch.Trim() } else { "unknown" }
+    gitCommit            = $gitCommitClean
+    gitBranch            = $gitBranchClean
     buildTime            = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     builderHost          = $env:COMPUTERNAME
     images               = @(
@@ -329,6 +393,12 @@ $manifest = [ordered]@{
     )
     baseImages           = @("postgres:16-alpine", "caddy:2-alpine")
     baseImagesIncluded   = [bool](-not $ExcludeBaseImages)
+    # 영상 추론(6.0-9): app 이미지에 Python 추론 + baked 가중치 동봉. recipe weight sha 출처.
+    videoInference       = [ordered]@{
+        bundledInAppImage = $true
+        weightsComplete   = if ($poseInfo) { [bool]$poseInfo.weightsComplete } else { $false }
+        poseModels        = $poseModelsManifest
+    }
     electronInstaller    = [ordered]@{
         included = [bool]$copiedInstallerName
         fileName = if ($copiedInstallerName) { $copiedInstallerName } else { $null }
@@ -337,7 +407,7 @@ $manifest = [ordered]@{
     checksum             = "SHA256SUMS"
 }
 
-Write-Utf8NoBom (Join-Path $PackageDir "release-manifest.json") ($manifest | ConvertTo-Json -Depth 5)
+Write-Utf8NoBom (Join-Path $PackageDir "release-manifest.json") ($manifest | ConvertTo-Json -Depth 6)
 Write-Ok "release-manifest.json"
 
 # ── SHA256SUMS ────────────────────────────────────────────────────────────────

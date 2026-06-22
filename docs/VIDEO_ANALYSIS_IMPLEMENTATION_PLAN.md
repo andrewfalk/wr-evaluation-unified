@@ -177,16 +177,17 @@
 - [ ] **6.0-9 에어갭 Docker 배포 + recipe versioning** — 착수(2026-06-21). 단일 app 이미지에
   Python+모델 동봉 확정(별도 pose 컨테이너 미채택 — execFile 구조 유지). 순서: recipe→Docker→패키지.
   실사용 활성화(`VIDEO_ANALYSIS_ENABLED`)는 6.0-B2 통과 시점. 상세는 아래 "M4 (상세)" 참고.
-  - [ ] **PR-A recipe versioning(§8.11)** — manifest sha 분리(sourceArchive/onnx) + keypoints
-    계약에 weight sha(nullable)·weightsComplete + 워커 `analysis_recipe`(0021) 조립·저장 +
-    jobResponse recipe 반환 + apply 라우트 **서버 검증 게이트**(suffix diff·exact-set·recipe
-    대조·mapping/viewpoint 서버 대조·다중 source 결합·unverified fail-closed). 모델 다운로드 불필요.
-  - [ ] **PR-B 컨테이너화** — server/Dockerfile bookworm 전환(ABI 정합) + Python 추론 동봉 +
-    가중치 baking(onnxSha256 확정) + `ARG/ENV WR_GIT_COMMIT` + infer_clip/sample_detect baked
-    경로 + `docker run --network none` 검증(둘 다). 선행: rtmlib 로컬 ONNX 주입 API 스파이크.
+  - [x] **PR-A recipe versioning(§8.11)** — manifest sha 분리 + keypoints 계약(weight sha
+    nullable·weightsComplete) + 워커 `analysis_recipe`(0021) + jobResponse recipe + apply 라우트
+    **서버 검증 게이트**(suffix diff·exact-set·recipe 대조·map/vp 서버 대조·다중 source 결합·
+    provenance 필수·unverified fail-closed). 서버 513·클라 770·계약 46 통과.
+  - [x] **PR-B 컨테이너화** — server/Dockerfile bookworm(ABI 정합) + Python 추론 동봉 + 가중치
+    baking(onnxSha256 확정) + `ARG/ENV WR_GIT_COMMIT` + baked 경로 + 실파일 해시 검증
+    (verified_model_shas, fail-closed). `docker build`(453MB) + `docker run --network none`
+    smoke(infer_clip·sample_detect 둘 다) 통과.
   - [ ] **PR-C 패키지/리허설** — export-offline-package(--build-arg WR_GIT_COMMIT, manifest
-    onnxSha256 기록) + compose app env/volume/mem·cpu + `.wslconfig` + 문서 + 운영 리허설
-    (WSL2 vs 네이티브 실측).
+    onnxSha256·weightsComplete 가드) + compose app upload volume·mem/cpu + `.wslconfig` 가이드 +
+    OFFLINE_DEPLOYMENT 14절. 운영 리허설(WSL2 vs 네이티브 실측)은 서버 환경 수행.
 - [ ] 6.0-10 (선택) hand 모델 손목/팔꿈치 + 손목 SI
 
 ---

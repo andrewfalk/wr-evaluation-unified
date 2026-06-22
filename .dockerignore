@@ -37,6 +37,8 @@ coverage/
 .claude/
 .code-review-graph/
 
-# pose-inference dev artifacts (6.0-9) — venv/캐시 제외. models/*.onnx(baked 가중치)는 포함해야 함.
+# pose-inference dev artifacts (6.0-9) — venv/캐시/샘플영상 제외. models/*.onnx(baked 가중치)는 포함해야 함.
+# samples/는 gitignore라 재현 불가 → 이미지에 굽지 않는다(검증은 운영자가 클립을 마운트해서 수행).
 services/pose-inference/.venv/
+services/pose-inference/samples/
 **/__pycache__/

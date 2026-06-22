@@ -24,6 +24,7 @@
 11. [release-manifest.json 명세](#11-release-manifestjson-명세)
 12. [Standalone 데이터 마이그레이션](#12-standalone-데이터-마이그레이션)
 13. [트러블슈팅](#13-트러블슈팅)
+14. [영상 분석 활성화 및 WSL2 메모리 (선택, 6.0-9)](#14-영상-분석-활성화-및-wsl2-메모리-선택-609)
 
 ---
 
@@ -1077,3 +1078,75 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 - `docs/BACKUP_RESTORE.md` — 백업·복구 상세
 - `docs/OPERATIONS_RUNBOOK.md` — 운영 중 발생하는 일반적인 문제
 - `docs/PRODUCTION_RELEASE_PLAN.md` — 릴리즈 및 업그레이드 절차
+
+---
+
+## 14. 영상 분석 활성화 및 WSL2 메모리 (선택, 6.0-9)
+
+작업 영상 인간공학 분석은 **`app` 이미지에 Python 추론(onnxruntime CPU)과 포즈 모델이 동봉**되어
+별도 컨테이너가 없습니다. GPU 없이 CPU로 동작하며 동시 1건씩 순차 처리합니다.
+
+> **활성화 시점**: 이 기능은 정확도 검증(6.0-B2)을 통과하기 전까지 **기본 비활성**입니다.
+> `.env.production`에 `VIDEO_ANALYSIS_ENABLED=true`를 넣기 전에는 업로드/분석이 동작하지 않습니다.
+> (인프라는 반입되어 있고, "켤 준비"만 된 상태입니다.)
+
+### 14-1. 이미지 크기
+
+추론 런타임(onnxruntime/opencv) + 포즈 가중치가 포함되어 `wr-app-server` 이미지가 수백 MB
+커집니다(대략 +0.4~0.5GB). `images/wr-images.tar`와 패키지 zip 용량이 그만큼 늘어납니다.
+
+### 14-2. 가중치 baked 확인
+
+`release-manifest.json`의 `videoInference.weightsComplete`가 `true`인지 확인하세요.
+`false`면 추론 결과 recipe가 `unverified`가 되어 **운영 적용(apply)이 차단**됩니다.
+(빌드 PC에서 `scripts/fetch-pose-weights.ps1`을 먼저 실행해야 가중치가 이미지에 구워집니다.)
+
+### 14-3. WSL2 메모리 상한 (.wslconfig) — Windows 서버
+
+이 서버 스택은 Docker가 WSL2(또는 Hyper-V) 백엔드의 Linux VM에서 돕니다. 추론이 더해지면 같은
+VM 메모리를 공유하므로, **`.wslconfig`로 WSL2 메모리 상한을 명시**해 추론 중 다른 서비스(PostgreSQL·
+Caddy)가 메모리 부족으로 흔들리지 않게 합니다. compose의 app `mem_limit`/`cpus`(기본 6g/4)와 함께 운용합니다.
+
+사용자 홈(`%USERPROFILE%\.wslconfig`)에 작성 후 `wsl --shutdown`으로 적용:
+
+```ini
+# %USERPROFILE%\.wslconfig  — 16GB 서버 예시(서비스 + 추론이 호스트를 고갈시키지 않게)
+[wsl2]
+memory=12GB     # WSL2 VM 상한(호스트 16GB 중 OS/기타에 4GB 남김)
+processors=6
+swap=4GB
+```
+
+- 적용: PowerShell에서 `wsl --shutdown` 후 Docker Desktop 재시작.
+- compose 한도 조정: `.env.production`에 `APP_MEM_LIMIT=6g`, `APP_CPUS=4`(기본값) 가감.
+
+### 14-4. WSL2 컨테이너 vs 네이티브 프로세스 (운영 표준 결정 — 실측)
+
+PRD §8.14에 따라 **추론을 WSL2 Linux 컨테이너로 둘지, 호스트 네이티브 Python 프로세스로 둘지**는
+실측(동시 사용·메모리 피크·1분 클립 처리시간)으로 결정합니다. 1차 산출물은 **컨테이너 동봉**(운영
+일관성)이며, 리허설에서 다음을 측정해 기록합니다:
+
+| 측정 항목 | 방법 |
+|---|---|
+| 1분 클립 처리시간 | `docker stats` + 분석 job 로그(처리 시작~review_pending) |
+| 메모리 피크 | `docker stats wr-prod-app-1` 추론 중 peak |
+| 동시 운용 안정성 | 분석 진행 중 일반 평가 저장/조회 응답성 |
+
+네이티브 프로세스가 WSL2 메모리 중복 점유를 없애 16GB를 더 효율적으로 쓸 수 있으나, 빌드·반입·버전
+고정의 운영 일관성은 컨테이너가 유리합니다. 실측 결과가 컨테이너로 충분하면 그대로 유지합니다.
+
+### 14-5. 에어갭 추론 동작 검증
+
+서버에서 인터넷 없이 추론이 도는지(가중치 baked) 확인합니다. 샘플 영상은 이미지에 포함되지 않으므로
+**운영자가 짧은 테스트 영상(mp4)을 마운트**해서 검증합니다(`C:\temp\verify-clip.mp4`는 예시 경로):
+
+```powershell
+docker run --rm --network none `
+  -v C:\temp\verify-clip.mp4:/tmp/clip.mp4:ro `
+  wr-app-server:5.0.1 `
+  /opt/pose-venv/bin/python /app/pose-inference/infer_clip.py --input /tmp/clip.mp4 --output /tmp/k.json --fps 5
+```
+
+`load /app/pose-inference/models/*.onnx with onnxruntime backend` 로그와 `wrote /tmp/k.json`이 보이면
+**인터넷 없이(`--network none`) baked 가중치로 추론이 동작**하는 것입니다. (이미지 태그는
+`release-manifest.json`의 `version`에 맞추세요.)

@@ -56,12 +56,22 @@ services:
       AI_PROVIDER:          ${AI_PROVIDER:-none}
       # 작업 영상 인간공학 분석(v6.0.0). 검증(6.0-B2) 전까지 기본 비활성.
       VIDEO_ANALYSIS_ENABLED: ${VIDEO_ANALYSIS_ENABLED:-false}
+      # 영상 업로드·추론 artifact 공유 경로(6.0-9). 추론은 app 이미지 내 Python(execFile)이 수행 —
+      # 별도 컨테이너 없음. 임시 영상은 PHI라 백업 대상 제외 볼륨(video_uploads)에 둔다.
+      # 리터럴 경로(컨테이너 내부, 마운트 타깃과 일치) — ${VAR:-/...} 보간 기본값은 Windows에서
+      # 경로가 C:\...로 변환되는 함정이 있어 리터럴로 둔다(BACKUPS_DIR와 동일 방식).
+      VIDEO_ANALYSIS_UPLOAD_DIR: /app/.video-uploads
       BACKUPS_DIR:          /backups
     ports:
       - "${DEV_PORT:-3001}:3001"
     volumes:
       - backup_data:/backups:ro
       - backup_alerts:/backups/_alerts
+      - video_uploads:/app/.video-uploads
+    # 추론(onnxruntime CPU)은 동시 1건 순차 처리. 16GB 서버에서 postgres/caddy와 공존하도록
+    # 메모리/CPU 상한을 건다(§8.14). WSL2 백엔드면 .wslconfig 상한과 함께 운용(docs 참고).
+    mem_limit: ${APP_MEM_LIMIT:-6g}
+    cpus: ${APP_CPUS:-4}
     depends_on:
       postgres:
         condition: service_healthy
@@ -202,3 +212,5 @@ volumes:
   backup_data:
   backup_alerts:
   backup_gnupg:
+  # 영상 업로드·추론 artifact(임시 영상=PHI, 백업 제외). TTL/orphan cleanup이 회수(§8.13).
+  video_uploads:
