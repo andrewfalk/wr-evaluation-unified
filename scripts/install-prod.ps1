@@ -49,6 +49,21 @@ function Write-Ok([string]$msg)   { Write-Host "   OK  $msg" -ForegroundColor Gr
 function Write-Warn([string]$msg) { Write-Host "   WARN $msg" -ForegroundColor Yellow }
 function Write-Fail([string]$msg) { Write-Host "   FAIL $msg" -ForegroundColor Red    }
 
+# Native commands (docker) can write warnings to stderr — e.g. the harmless
+# "WARNING: No blkio throttle.read_bps_device support" the daemon prints on
+# `docker info` / `docker compose up`. In Windows PowerShell 5.1 with
+# $ErrorActionPreference=Stop, the first native stderr write is escalated to a
+# terminating NativeCommandError and aborts the script even though $LASTEXITCODE
+# is 0 (a plain `2>$null` redirect does NOT prevent this under Stop). Run native
+# commands inside this helper, which temporarily relaxes EAP to Continue; failure
+# is still detected via the $LASTEXITCODE checks that follow each call.
+function Invoke-Native {
+    param([Parameter(Mandatory)][scriptblock]$Block)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $Block } finally { $ErrorActionPreference = $prev }
+}
+
 $Passed  = 0
 $Warned  = 0
 $Failed  = 0
@@ -57,14 +72,9 @@ $Failed  = 0
 
 Write-Step 1 "Prerequisites"
 
-# Docker daemon
-# Note: In Windows PowerShell 5.1, `*>$null` collects native command stderr into
-# the PS pipeline as ErrorRecords (NativeCommandError) and sets $? to $false even
-# on exit 0. With $ErrorActionPreference=Stop this terminates the script on harmless
-# Docker warnings (e.g. "WARNING: No blkio throttle.read_bps_device support").
-# Send stdout to $null and stderr to system null separately — this avoids the
-# ErrorRecord wrapping while still suppressing output. Rely on $LASTEXITCODE.
-$null = docker info 2>$null
+# Docker daemon — see Invoke-Native: harmless daemon warnings on stderr must not
+# abort the script under EAP=Stop in PowerShell 5.1. Rely on $LASTEXITCODE.
+Invoke-Native { docker info 2>$null } | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "Docker is not running. Start Docker Desktop (or the docker service) and retry."
     exit 1
@@ -73,7 +83,7 @@ Write-Ok "Docker daemon is running"
 $Passed++
 
 # Docker Compose v2
-$composeVersion = docker compose version --short 2>$null
+$composeVersion = Invoke-Native { docker compose version --short 2>$null }
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "Docker Compose v2 not found. Install Docker Engine 24+ which includes Compose v2."
     exit 1
@@ -105,7 +115,7 @@ if ($SkipImageLoad) {
         exit 1
     }
     Write-Host "   Loading images from ${tarPath}..."
-    docker load -i $tarPath
+    Invoke-Native { docker load -i $tarPath }
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "docker load failed"
         exit 1
@@ -176,7 +186,7 @@ $composeArgs = @(
     "config", "--quiet"
 )
 
-docker compose @composeArgs
+Invoke-Native { docker compose @composeArgs }
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "docker compose config validation failed. Fix the errors above and retry."
     exit 1
@@ -188,7 +198,7 @@ $Passed++
 
 Write-Step 5 "Volume isolation check"
 
-$existingProdVolumes = docker volume ls --format "{{.Name}}" 2>$null |
+$existingProdVolumes = Invoke-Native { docker volume ls --format "{{.Name}}" 2>$null } |
     Where-Object { $_ -like "${ProjectName}_*" }
 
 if ($existingProdVolumes.Count -gt 0) {
@@ -237,7 +247,7 @@ if ($DryRun) {
 
 Write-Host "  $cmdStr"
 Write-Host ""
-docker compose @upArgs
+Invoke-Native { docker compose @upArgs }
 
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "docker compose up failed (exit $LASTEXITCODE). Check logs above."
@@ -254,7 +264,7 @@ Write-Host "  $composePrefix ps"
 Write-Host "  $composePrefix logs app --tail=100"
 Write-Host ""
 Write-Host "Volumes created (or reused):" -ForegroundColor White
-docker volume ls --format "  {{.Name}}" 2>$null | Where-Object { $_ -match "${ProjectName}_" }
+Invoke-Native { docker volume ls --format "  {{.Name}}" 2>$null } | Where-Object { $_ -match "${ProjectName}_" }
 
 Write-Host ""
 Write-Host "Next steps (PRODUCTION_RELEASE_PLAN.md section 4):" -ForegroundColor White
