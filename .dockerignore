@@ -37,8 +37,16 @@ coverage/
 .claude/
 .code-review-graph/
 
-# pose-inference dev artifacts (6.0-9) — venv/캐시/샘플영상 제외. models/*.onnx(baked 가중치)는 포함해야 함.
-# samples/는 gitignore라 재현 불가 → 이미지에 굽지 않는다(검증은 운영자가 클립을 마운트해서 수행).
+# pose-inference dev artifacts (6.0-9) — venv/캐시/샘플영상/산출물 제외. models/*.onnx(baked 가중치)는 포함.
+# pose-inference/.gitignore의 privacy guard(§8.13)와 정합: out/(산출 keypoints는 실영상 파생 가능 → 반출 금지),
+# samples/·영상파일(재현 불가), _*.py(로컬 probe)는 이미지에 굽지 않는다(검증은 운영자 클립 마운트).
 services/pose-inference/.venv/
 services/pose-inference/samples/
+services/pose-inference/out/
+services/pose-inference/_*.py
+services/pose-inference/**/*.mp4
+services/pose-inference/**/*.mov
+services/pose-inference/**/*.avi
+services/pose-inference/**/*.mkv
+services/pose-inference/**/*.webm
 **/__pycache__/
