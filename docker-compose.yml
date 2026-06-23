@@ -61,6 +61,13 @@ services:
       # 리터럴 경로(컨테이너 내부, 마운트 타깃과 일치) — ${VAR:-/...} 보간 기본값은 Windows에서
       # 경로가 C:\...로 변환되는 함정이 있어 리터럴로 둔다(BACKUPS_DIR와 동일 방식).
       VIDEO_ANALYSIS_UPLOAD_DIR: /app/.video-uploads
+      # 프라이버시 예외 게이트(기본 false=식별 이미지 미노출). 동의+인트라넷 전제에서만 on.
+      # 이 키들이 environment에 없으면 .env에 넣어도 컨테이너에 전달되지 않아 항상 기본값으로 동작한다.
+      VIDEO_ANALYSIS_TARGET_THUMBNAIL: ${VIDEO_ANALYSIS_TARGET_THUMBNAIL:-false}
+      VIDEO_ANALYSIS_OVERLAY_FRAMES: ${VIDEO_ANALYSIS_OVERLAY_FRAMES:-false}
+      # 보존 정책(기본 privacy_first=원본 추론 후 삭제) / recipe 미검증 apply 허용(운영 절대 금지).
+      VIDEO_ANALYSIS_RETENTION: ${VIDEO_ANALYSIS_RETENTION:-privacy_first}
+      VIDEO_ANALYSIS_ALLOW_UNVERIFIED_RECIPE: ${VIDEO_ANALYSIS_ALLOW_UNVERIFIED_RECIPE:-false}
       BACKUPS_DIR:          /backups
     ports:
       - "${DEV_PORT:-3001}:3001"
