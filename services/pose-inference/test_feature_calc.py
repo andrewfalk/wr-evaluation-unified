@@ -15,6 +15,7 @@ from feature_calc import (
     angle_at, angle_from_vertical, knee_min_angle, overhead_active,
     neck_flexion_angle, trunk_flexion_angle, posture_ratio, KP,
     choose_dominant_track, pick_target_person, all_track_ids,
+    repetition_count, upperarm_elevation_angle, elbow_flexion_angle,
 )
 from tracker import IoUTracker, iou
 
@@ -272,6 +273,126 @@ def test_d3a_breakdown_and_quality():
     print("ok: D3a confidenceBreakdown + quality copy + usableFrameRatio excluded from overall(min)")
 
 
+# ── 6.0-11 반복빈도(cycles/min) ──────────────────────────────────────────────
+REP_PARAMS = {"minAmplitudeDeg": 15, "hysteresisDeg": 5, "minCycleMs": 300, "minObservationMs": 3000}
+
+
+def _sine_series(freq_hz, dur_s, fps, amp=30.0, mid=90.0):
+    """주파수 기지 사인파 각도 시계열 [(t_ms, angle)] — repetition_count 직접 검증용."""
+    n = int(dur_s * fps)
+    return [(round(i / fps * 1000), mid + amp * math.sin(2 * math.pi * freq_hz * (i / fps))) for i in range(n)]
+
+
+def test_repetition_count_synthetic():
+    # 1.0Hz·10초 → ~9.5 사이클(phase-independent half-swing/2), rate ~57/분(true 60에 근접).
+    cycles, rate, segs, active = repetition_count(_sine_series(1.0, 10, 30), 1000, REP_PARAMS)
+    assert 9.0 <= cycles <= 10.5, (cycles, rate)
+    assert 53 <= rate <= 63, rate
+    assert len(segs) == round(cycles * 2), (len(segs), cycles)   # segments = 유효 half-swing
+    assert active > 9000, active
+    print(f"ok: repetition_count synthetic 1Hz/10s -> cycles={cycles} rate={rate:.1f}/min")
+
+
+def test_repetition_fps_degradation():
+    # Nyquist 실증: 1.0Hz 신호를 fps 낮춰가며 언더카운트 시작점을 표로 출력.
+    print("  [fps degradation] freq=1.0Hz, 10s (expect ~9-10 cycles):")
+    counts = {}
+    for fps in (30, 20, 12, 8, 5, 3, 2):
+        c, r, _, _ = repetition_count(_sine_series(1.0, 10, fps), 1000, REP_PARAMS)
+        counts[fps] = c
+        print(f"    fps={fps:2d} (samples/cycle={fps:2d}) -> cycles={c} rate={r if r is None else round(r,1)}")
+    assert counts[30] >= 9, counts                 # 충분한 fps → true 10에 근접(~9.5)
+    assert counts[2] == 0, counts                  # 2fps = 2×freq(Nyquist) → 영점 샘플링, 0 카운트
+    assert counts[3] < counts[30], counts          # Nyquist 근방 언더카운트
+    print("ok: repetition fps degradation (Nyquist undercount demonstrated)")
+
+
+def test_repetition_amplitude_gate():
+    # 히스테리시스는 통과하나 사이클 진폭(20°) < minAmplitudeDeg(30°) → 0 카운트(거짓양성 제거).
+    params = {**REP_PARAMS, "minAmplitudeDeg": 30, "hysteresisDeg": 5}
+    cycles, _, _, _ = repetition_count(_sine_series(1.0, 10, 30, amp=10.0), 1000, params)  # peak-to-peak 20
+    assert cycles == 0, cycles
+    print("ok: repetition amplitude gate (sub-threshold swing → 0)")
+
+
+def test_repetition_gap_reset():
+    # 두 5초 구간 사이 3초 gap(>max_gap 1000) → gap 시간 미가산, 사이클이 gap을 가로지르지 않음.
+    seg1 = _sine_series(1.0, 5, 30)
+    last = seg1[-1][0]
+    seg2 = [(t + last + 3000, v) for (t, v) in _sine_series(1.0, 5, 30)]
+    cycles, rate, _, active = repetition_count(seg1 + seg2, 1000, REP_PARAMS)
+    assert cycles > 0, cycles
+    assert active < 11000, active   # ~2×5000ms (3000ms gap 제외) — gap 포함이면 >13000
+    print(f"ok: repetition gap reset (active={active:.0f}ms excludes gap)")
+
+
+def test_repetition_min_observation():
+    # 유효 관측 2초 < minObservationMs(3초) → rate None(짧은 클립 과대추정 방지).
+    cycles, rate, _, active = repetition_count(_sine_series(1.0, 2, 30), 1000, REP_PARAMS)
+    assert rate is None and active < 3000, (rate, active)
+    print("ok: repetition min observation guard (short clip → rate None)")
+
+
+def test_repetition_boundary_partial():
+    # 코덱스 Medium 회귀: 화면 중앙에서 시작 → peak → trough로 끝나는 반쪽 동작(완결 사이클 아님).
+    # 시작 anchor를 반전으로 세면 1로 잘못 셌음. 시작 anchor 제외 → 완결 trough-peak-trough 없음 → 0.
+    # 중앙에서 시작 → peak(0.5s) → trough(1.5s): 진짜 반전 2개 = half-swing 1개 = 0.5 사이클(정확).
+    # 시작 anchor를 반전으로 세면 1.0으로 부풀었음. 0.5로 나와야 phase-독립·경계 비편향.
+    s = _sine_series(0.5, 2, 30)   # 0.5Hz·2초: midline→peak→trough
+    cycles, _, _, _ = repetition_count(s, 1000, REP_PARAMS)
+    assert cycles == 0.5, cycles
+    print("ok: repetition boundary partial (mid-start up-down → 0.5 cycle, not inflated to 1)")
+
+
+def test_repetition_slow_realistic():
+    # 회귀(코덱스 High): 0.2Hz(=12회/분)·진폭35°·12fps → 프레임당 변화 ~3.7°(<hysteresis).
+    # anchor를 매 샘플 끌면 방향 초기화 실패로 0이 됐음. running min/max anchor면 정상 검출.
+    per_frame = 35.0 * 2 * math.pi * 0.2 / 12  # ~3.66°/frame < hyst(5)
+    assert per_frame < REP_PARAMS["hysteresisDeg"], per_frame
+    cycles, rate, _, _ = repetition_count(_sine_series(0.2, 30, 12, amp=35.0), 1000, REP_PARAMS)
+    assert 4.5 <= cycles <= 6.5, (cycles, rate)    # 30s×0.2Hz=6주기 → ~5.5 사이클(phase-독립)
+    assert 10 <= rate <= 13, rate                  # ~11~12회/분(true 12에 근접)
+    print(f"ok: repetition slow realistic 0.2Hz/12fps -> cycles={cycles} rate={rate:.1f}/min (per-frame {per_frame:.1f}°<hyst)")
+
+
+def _build_oscillating_arm_keypoints(freq, dur_s, fps, base_deg=45.0, amp_deg=35.0):
+    """좌측 상완 거상각을 base±amp로 진동시키는 합성 keypoints(shoulder/elbowRepetitionRate emit용).
+    elevation = base + amp·sin(2π·freq·t) (angle_from_vertical 정의상 정확히 일치)."""
+    sx, sy, r = 100.0, 200.0, 80.0
+    n, dt = int(dur_s * fps), round(1000 / fps)
+    frames = []
+    for i in range(n):
+        e = math.radians(base_deg + amp_deg * math.sin(2 * math.pi * freq * (i / fps)))
+        ex, ey = sx + r * math.sin(e), sy + r * math.cos(e)
+        p = person({"left_shoulder": (sx, sy), "left_elbow": (ex, ey), "left_wrist": (ex, ey + 80)})
+        p["trackId"] = None
+        p["bbox"] = [0.0, 0.0, 50.0, 100.0]
+        frames.append({"frameIndex": i, "timestampMs": i * dt, "persons": [p]})
+    return {
+        "schemaVersion": 1, "keypointConvention": "coco17", "coordinateSpace": "pixel",
+        "frameWidth": 640, "frameHeight": 480, "requestedFps": fps, "sampledFps": fps,
+        "source": {"clipRef": "synthetic-rep", "originalFps": 30, "totalFrames": n},
+        "model": {"detector": "d", "pose": "p", "inputSize": [192, 256],
+                  "modelName": "test", "modelVersion": "test", "preprocessConfigHash": "test"},
+        "frames": frames,
+    }
+
+
+def test_repetition_endtoend_emit():
+    # sampledFps=5 (<minFpsForReliableRate 10) → cycles/min 산출 + LOW_FPS 경고.
+    out = _run_feature_calc(_build_oscillating_arm_keypoints(0.5, 12, 5))
+    sr = out["features"]["shoulderRepetitionRate"]
+    assert sr["metric"] == "cycles_per_minute" and sr["unit"] == "cycles_per_minute", sr
+    assert sr["value"] > 0, sr
+    assert len(sr["segments"]) >= 1, sr
+    assert "LOW_FPS_FOR_REPETITION" in sr["warnings"], sr
+    # sampledFps=12 (>=10) → 경고 없음.
+    out2 = _run_feature_calc(_build_oscillating_arm_keypoints(0.5, 12, 12))
+    sr2 = out2["features"]["shoulderRepetitionRate"]
+    assert "LOW_FPS_FOR_REPETITION" not in sr2["warnings"], sr2
+    print(f"ok: repetition end-to-end emit (5fps value={sr['value']} +LOW_FPS, 12fps no warning)")
+
+
 if __name__ == "__main__":
     test_angle_math()
     test_knee_squat_angle()
@@ -283,4 +404,12 @@ if __name__ == "__main__":
     test_trunk_flexion_over45_candidate()
     test_minhold_disabled_policy()
     test_d3a_breakdown_and_quality()
+    test_repetition_count_synthetic()
+    test_repetition_fps_degradation()
+    test_repetition_amplitude_gate()
+    test_repetition_gap_reset()
+    test_repetition_min_observation()
+    test_repetition_boundary_partial()
+    test_repetition_slow_realistic()
+    test_repetition_endtoend_emit()
     print("ALL PASS")

@@ -153,6 +153,22 @@ def trunk_flexion_angle(kp):
     return angle_from_vertical((sh[0] - hip[0], sh[1] - hip[1]), upward=True)
 
 
+def upperarm_elevation_angle(kp, side):
+    """상완 거상각(어깨→팔꿈치 벡터의 수직 기준, 아래쪽 0). overhead_active와 동일 정의 — 반복 카운팅용."""
+    sh, el = kp.get(f"{side}_shoulder"), kp.get(f"{side}_elbow")
+    if not (sh and el):
+        return None
+    return angle_from_vertical((el[0] - sh[0], el[1] - sh[1]), upward=False)
+
+
+def elbow_flexion_angle(kp, side):
+    """팔꿈치 굴곡각(어깨-팔꿈치-손목). 펴면 ~180°, 굽히면 작아짐 — 반복 카운팅용(knee_min_angle 미러)."""
+    sh, el, wr = kp.get(f"{side}_shoulder"), kp.get(f"{side}_elbow"), kp.get(f"{side}_wrist")
+    if not (sh and el and wr):
+        return None
+    return angle_at(el, sh, wr)
+
+
 # ── 시계열 → posture_ratio (min-hold + frame-drop) ─────────────────────────
 def posture_ratio(samples, max_gap_ms, min_hold_ms):
     """samples: [(t_ms, active_bool)]. 반환 (ratio, segments[], total_ms)."""
@@ -185,6 +201,96 @@ def posture_ratio(samples, max_gap_ms, min_hold_ms):
     return ratio, [{"startMs": round(s), "endMs": round(e)} for (s, e) in qualifying], total
 
 
+def repetition_count(samples, max_gap_ms, params):
+    """smoothed 각도 시계열에서 반복 사이클을 세어 (cycles, ratePerMin, segments, activeMs) 반환.
+
+    samples: [(t_ms, angle|None)] (smooth_series 출력). **phase-independent**(어느 위상에서 시작·종료해도
+    편향 없음):
+      - 고정 중심선 대신 히스테리시스(hysteresisDeg)로 실제 turning-point(peak/trough)를 확정.
+      - 구간 시작 anchor는 관측 시작점일 뿐 반전이 아니므로 confirmed에서 제외 → 모든 confirmed는 진짜 반전.
+      - 연속한 두 반전 = **half-swing**(올라감 또는 내려감 1회). 진폭 >= minAmplitudeDeg, 길이 >= minCycleMs
+        일 때만 유효. cycles = 유효 half-swing 수 / 2 (1 사이클 = 올라감+내려감 = 2 half-swing).
+        → T-P-T만 세던 방식의 경계 ~0.5사이클 과소산출을 제거(rate를 lower-bound로 치우치지 않게).
+      - gap(dt > max_gap_ms): state reset(half-swing이 gap을 가로지르지 못함) + 그 dt는 activeMs 제외.
+      - activeMs < minObservationMs 면 rate=None(짧은 관측 과대추정 방지).
+    minCycleMs = 연속한 두 turning-point 사이 최소 간격(= half-swing 최소 길이; 떨림 중복 방지).
+    """
+    min_amp = float(params.get("minAmplitudeDeg", 15.0))
+    hyst = float(params.get("hysteresisDeg", 5.0))
+    min_cycle_ms = float(params.get("minCycleMs", 300))
+    min_obs_ms = float(params.get("minObservationMs", 3000))
+
+    valid = [(t, v) for t, v in samples if v is not None]
+    active_ms = 0.0
+    half_swings = 0       # 유효 half-swing(올라감/내려감) 수 — cycles = half_swings/2
+    segments = []
+    confirmed = []        # 현재 구간의 확정 turning-point (t, val, kind) — gap에서 clear
+    kind = None           # 추적 방향: 'peak'(상승 추적) | 'trough'(하강 추적) | None(초기/리셋)
+    cand_t, cand_v = None, None          # kind!=None일 때 추적 중 극값 anchor
+    lo_t = lo_v = hi_t = hi_v = None     # kind=None일 때 running min/max anchor
+    prev_t = None
+
+    def confirm(extreme_t, extreme_v, extreme_kind):
+        """turning-point를 확정하고, 직전 turning-point와의 half-swing이 유효하면 카운트."""
+        nonlocal half_swings
+        if confirmed:
+            a_t, a_v, _ = confirmed[-1]
+            if abs(extreme_v - a_v) >= min_amp and (extreme_t - a_t) >= min_cycle_ms:
+                half_swings += 1
+                segments.append({"startMs": round(a_t), "endMs": round(extreme_t)})
+        confirmed.append((extreme_t, extreme_v, extreme_kind))
+
+    for t, v in valid:
+        # gap/시간 누적 + 구간 시작(첫 샘플·gap 이후) 판정.
+        new_segment = False
+        if prev_t is None:
+            new_segment = True
+        else:
+            dt = t - prev_t
+            if dt <= 0 or dt > max_gap_ms:
+                confirmed.clear()      # half-swing이 gap을 가로지르지 못함
+                new_segment = True     # 그 dt는 active_ms에 미가산
+            else:
+                active_ms += dt
+        prev_t = t
+
+        if new_segment:
+            kind = None
+            lo_t, lo_v, hi_t, hi_v = t, v, t, v
+            continue
+
+        if kind is None:
+            # running min/max를 누적해 anchor에서 hyst만큼 벗어나면 '방향만' 확정한다.
+            # 시작 anchor(구간 첫 극값)는 진짜 반전이 아니라 관측 시작점일 뿐 → confirmed에 넣지 않는다.
+            # (매 샘플 anchor를 v로 끌면 프레임당 변화<hyst인 '느리지만 큰' 반복을 영영 초기화 못 함 → 누적 방식.)
+            if v < lo_v:
+                lo_t, lo_v = t, v
+            if v > hi_v:
+                hi_t, hi_v = t, v
+            if v >= lo_v + hyst:           # running min에서 상승 → 상승 추적 시작
+                kind, cand_t, cand_v = "peak", t, v
+            elif v <= hi_v - hyst:         # running max에서 하락 → 하강 추적 시작
+                kind, cand_t, cand_v = "trough", t, v
+        elif kind == "peak":
+            if v >= cand_v:
+                cand_t, cand_v = t, v          # 더 높은 peak 후보(극값 anchor 유지)
+            elif v < cand_v - hyst:
+                confirm(cand_t, cand_v, "peak")
+                kind, cand_t, cand_v = "trough", t, v
+        else:  # kind == 'trough'
+            if v <= cand_v:
+                cand_t, cand_v = t, v
+            elif v > cand_v + hyst:
+                confirm(cand_t, cand_v, "trough")
+                kind, cand_t, cand_v = "peak", t, v
+
+    cycles = half_swings / 2.0
+    if active_ms < min_obs_ms:
+        return cycles, None, segments, active_ms
+    rate = cycles / (active_ms / 60000.0) if active_ms > 0 else 0.0
+    return cycles, rate, segments, active_ms
+
+
 def smooth_series(samples, cfg):
     """samples: [(t_ms, value or None)]. OneEuro로 평활(None은 통과)."""
     f = OneEuroFilter(cfg["minCutoff"], cfg["beta"], cfg["dCutoff"])
@@ -211,6 +317,7 @@ def main():
     min_hold = cfg["minHoldSec"] * 1000
     euro = cfg["oneEuro"]
     min_presence = cfg.get("tracking", {}).get("minTargetPresenceRatio", 0.5)
+    sampled_fps = kdoc.get("sampledFps")  # 반복 feature Nyquist 가드(저fps 경고)용
 
     frames = kdoc["frames"]
     times = [f["timestampMs"] for f in frames]
@@ -351,6 +458,39 @@ def main():
             "confidence": ov, "confidenceBreakdown": bd,
             "segments": segs, "warnings": list(track_warnings),
         }
+
+    # 반복 빈도(cycles/min) — 어깨 상완거상·팔꿈치 굴곡(candidate, 6.0-11). 좌/우 중 사이클 많은 쪽 채택.
+    def emit_repetition(feat_key, angle_fn, conf_names):
+        fcfg = cfg["features"].get(feat_key)
+        if not fcfg:
+            return  # 구 config 하위호환 — 블록 없으면 산출 안 함.
+        best = None  # (cycles, rate, segs, side)
+        for side in ("left", "right"):
+            raw = [(times[i], angle_fn(kps[i], side)) for i in range(len(frames))]
+            sm = smooth_series(raw, euro)
+            cycles, rate, segs, _active = repetition_count(sm, max_gap, fcfg)
+            if rate is None:
+                continue
+            if best is None or cycles > best[0]:
+                best = (cycles, rate, segs, side)
+        if best is None:
+            return  # 유효 관측 부족(minObservationMs 미달) — 미산출.
+        cycles, rate, segs, side = best
+        warnings = list(track_warnings)
+        min_fps = fcfg.get("minFpsForReliableRate")
+        if min_fps is not None and sampled_fps is not None and sampled_fps < float(min_fps):
+            warnings.append("LOW_FPS_FOR_REPETITION")
+        ov, bd = make_conf(conf_names(side))
+        features[feat_key] = {
+            "kind": "numeric", "metric": "cycles_per_minute", "value": round(rate, 2),
+            "unit": "cycles_per_minute", "confidence": ov, "confidenceBreakdown": bd,
+            "segments": segs, "warnings": warnings,
+        }
+
+    emit_repetition("shoulderRepetitionRate", upperarm_elevation_angle,
+                    lambda s: [f"{s}_shoulder", f"{s}_elbow"])
+    emit_repetition("elbowRepetitionRate", elbow_flexion_angle,
+                    lambda s: [f"{s}_shoulder", f"{s}_elbow", f"{s}_wrist"])
 
     doc = {
         "schemaVersion": 1,

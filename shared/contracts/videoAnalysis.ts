@@ -33,6 +33,8 @@ export const FeatureKeySchema = z.enum([
   'neckCombinedFlexRot',
   'vibrationToolUseDurationCandidate',
   'suspectedKneeTwist',
+  'shoulderRepetitionRate', // 6.0-11: 상완거상 반복(cycles/min) candidate
+  'elbowRepetitionRate', // 6.0-11: 팔꿈치 굴곡 반복(cycles/min) candidate
 ]);
 
 // JSONB 저장 가능 값으로 제한 — candidate.value는 unknown 금지(§8.4).
@@ -260,7 +262,7 @@ export const VideoAnalysisDataSchema = z.object({
 // ---------------------------------------------------------------------------
 export type FeatureMappingMode = 'auto' | 'auto-review' | 'candidate';
 export type FeatureMappingTarget = {
-  moduleId: 'knee' | 'shoulder' | 'spine' | 'cervical';
+  moduleId: 'knee' | 'shoulder' | 'spine' | 'cervical' | 'elbow';
   targetField: string | null; // null = 모듈 필드 미기입(candidate)
   unit: z.infer<typeof FeatureUnitSchema> | null;
   mode: FeatureMappingMode;
@@ -278,6 +280,10 @@ export const VIDEO_FEATURE_TARGETS: Record<
   repetitiveMediumHours: { moduleId: 'shoulder', targetField: 'repetitiveMediumHours', unit: 'hours_per_day', mode: 'auto' },
   repetitiveFastHours: { moduleId: 'shoulder', targetField: 'repetitiveFastHours', unit: 'hours_per_day', mode: 'auto' },
   vibrationToolUseDurationCandidate: { moduleId: 'shoulder', targetField: null, unit: 'hours_per_day', mode: 'candidate' },
+  // 6.0-11 어깨·팔꿈치 반복빈도(cycles/min) — 영상이 직접 재는 intrinsic 값, 모듈 자동입력 없이 candidate.
+  // 팔꿈치 모듈은 videoMappingConfig가 없어 flat "참고 후보"로 표시(elbow targetField=null).
+  shoulderRepetitionRate: { moduleId: 'shoulder', targetField: null, unit: 'cycles_per_minute', mode: 'candidate' },
+  elbowRepetitionRate: { moduleId: 'elbow', targetField: null, unit: 'cycles_per_minute', mode: 'candidate' },
   // 척추 MDDM (spine.tasks[*], 공정 1개 = task 1개) — frequency/timeValue는 숫자 저장
   cyclesPerDay: { moduleId: 'spine', targetField: 'frequency', unit: 'cycles_per_day', mode: 'auto-review' },
   cycleSeconds: { moduleId: 'spine', targetField: 'timeValue', unit: 'seconds_per_cycle', mode: 'auto-review' },

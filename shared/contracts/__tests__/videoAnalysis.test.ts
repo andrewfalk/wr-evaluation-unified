@@ -288,7 +288,7 @@ describe('VIDEO_FEATURE_TARGETS ↔ FeatureKey consistency (§8.10.2-1)', () => 
       if (t.mode === 'candidate') expect(t.targetField).toBeNull();
       // 비-candidate → 실제 필드 지정
       if (t.mode !== 'candidate') expect(typeof t.targetField).toBe('string');
-      expect(['knee', 'shoulder', 'spine', 'cervical']).toContain(t.moduleId);
+      expect(['knee', 'shoulder', 'spine', 'cervical', 'elbow']).toContain(t.moduleId);
       expect(key.length).toBeGreaterThan(0);
     }
   });
