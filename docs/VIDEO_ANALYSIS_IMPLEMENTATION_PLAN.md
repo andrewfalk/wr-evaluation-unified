@@ -190,7 +190,7 @@
     onnxSha256·weightsComplete 가드) + compose app upload volume·mem/cpu + `.wslconfig` 가이드 +
     OFFLINE_DEPLOYMENT 14절. **에어갭 실배포 + 운영 성공 확인**(서버 환경 리허설 완료, v6.0.0).
 - [ ] 6.0-10 (선택) hand 모델 손목/팔꿈치 + 손목 SI
-- [~] **6.0-11 어깨·팔꿈치 반복빈도(cycles/min) candidate** (신규 변수 — SI efforts/min·OCRA 계열).
+- [x] **6.0-11 어깨·팔꿈치 반복빈도(cycles/min) candidate** (신규 변수 — SI efforts/min·OCRA 계열).
   영상이 직접 재는 intrinsic cycles/min을 **candidate(참고용, 모듈 자동입력 없음)** 로 노출. body17 기반
   (손목은 6.0-10 wholebody 선행 필요 → 범위 밖). 게이팅은 다른 feature와 동일하게 B2 전 참고용.
   - [x] **Phase 1** — feature_calc `repetition_count`(drift-robust 히스테리시스·**phase-independent
@@ -199,8 +199,11 @@
     clip_features.schema enum + zod 계약(featureKey 2 + moduleId `'elbow'` + VIDEO_FEATURE_TARGETS
     candidate 2) + Python/계약 테스트. **합성 1Hz/10s→~9.5사이클·~57/분(true 60 근접), fps 저하표:
     12fps까지 정확·5fps부터 언더카운트·2fps=0(Nyquist) 실증.** 파라미터는 6.0-B2 미검증(잠정).
-  - [ ] **Phase 2** — UI candidate(회/분) `renderCandidateRow` 분기 + `process.analysisProfile ∈
-    {repetition-upper-limb, hand-wrist}` 노출 필터 + mock/클라 테스트.
+  - [x] **Phase 2** — flat "참고 후보"에 `flatCandidateLabel`(어깨/팔꿈치 반복 약 N 회/분, raw cycles_per_minute
+    노출 차단) + commitAnalysis가 `process.analysisProfile ∈ {repetition-upper-limb, hand-wrist}` 공정의
+    candidate만 노출(REPETITION_PROFILES 필터) + videoMock(MOCK_VALUES·CANDIDATE_REASONS·profile 게이팅) +
+    클라 테스트. 어깨·팔꿈치는 job-scope라 모듈 섹션(task-scope 전용 getModuleCandidates) 아닌 flat에 표시.
+    검증: npm test 780 통과·build:web·lint 0 errors(기존 warning 6).
 
 ---
 

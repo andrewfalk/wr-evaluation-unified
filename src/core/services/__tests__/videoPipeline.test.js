@@ -72,6 +72,20 @@ describe('generateMockFeatures', () => {
     const map = generateMockFeatures(['notAKey']);
     expect(map).toEqual({});
   });
+
+  it('repetition features (6.0-11) only in repetition/hand profiles, candidate kind, contract-valid', () => {
+    const req = ['overheadHours', 'shoulderRepetitionRate', 'elbowRepetitionRate'];
+    // 자세 profile → 반복 feature 제외(저fps Nyquist 미신뢰).
+    const posture = generateMockFeatures(req, 'posture-basic');
+    expect(posture.shoulderRepetitionRate).toBeUndefined();
+    expect(posture.elbowRepetitionRate).toBeUndefined();
+    // 상지반복 profile → 포함(candidate, cycles_per_minute), 손목 profile도 동일.
+    const rep = generateMockFeatures(req, 'repetition-upper-limb');
+    expect(rep.shoulderRepetitionRate.kind).toBe('candidate');
+    expect(rep.shoulderRepetitionRate.autoSuggestAllowed).toBe(false);
+    expect(() => VideoFeatureValueSchema.parse(rep.shoulderRepetitionRate)).not.toThrow();
+    expect(generateMockFeatures(req, 'hand-wrist').elbowRepetitionRate.kind).toBe('candidate');
+  });
 });
 
 describe('aggregateProcessFeatures (§8.6.2)', () => {

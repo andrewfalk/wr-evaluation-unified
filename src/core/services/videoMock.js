@@ -19,7 +19,14 @@ const MOCK_VALUES = {
   neckCombinedFlexRot: 'flexion_rotation',
   vibrationToolUseDurationCandidate: 1.0,
   suspectedKneeTwist: true,
+  shoulderRepetitionRate: 14, // cycles/min (6.0-11 candidate)
+  elbowRepetitionRate: 22, // cycles/min
 };
+
+// 반복빈도 feature는 fps가 높은 상지반복/손목 profile에서만 의미 있음(저fps는 Nyquist 언더카운트).
+// 그 외 profile(자세시간)에서는 산출·표시하지 않는다(6.0-11). 단일 source — UI 필터도 이 상수를 쓴다.
+export const REPETITION_FEATURE_KEYS = new Set(['shoulderRepetitionRate', 'elbowRepetitionRate']);
+export const REPETITION_PROFILES = new Set(['repetition-upper-limb', 'hand-wrist']);
 
 // 신뢰도: auto(높음) / auto-review(중간) / candidate(낮음). 결정적 placeholder —
 // 실제 임계값은 6.0-B2 검증으로 확정(§8.9).
@@ -31,6 +38,8 @@ export const CANDIDATE_REASONS = {
   trunkPostureG: 'G1~G11은 하중 위치·작업유형 반영 — 수기 확인 필수',
   trunkFlexionOver45Duration: '척추 45°↑ 굴곡 시간은 관찰값 — 작업 부담 판정은 수기 확인',
   neckCombinedFlexRot: '회전·복합자세는 2D 저신뢰 — 임계 미만 제안 금지',
+  shoulderRepetitionRate: '어깨 상완거상 반복 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
+  elbowRepetitionRate: '팔꿈치 굴곡 반복 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
 };
 
 function buildFeatureValue(featureKey) {
@@ -69,13 +78,15 @@ function buildFeatureValue(featureKey) {
 /**
  * 한 클립/공정에 대해 요청된 feature들의 mock VideoFeatureMap을 생성한다.
  * @param {string[]} requestedFeatures - FeatureKey 배열
- * @param {string} [profile] - analysisProfile (현재 mock은 값에 영향 없음; 계약 호환용)
+ * @param {string} [profile] - analysisProfile. 반복빈도 feature(6.0-11)는 repetition-upper-limb/
+ *   hand-wrist profile에서만 산출한다(REPETITION_PROFILES). 그 외 feature는 profile 무관.
  * @returns {Object} VideoFeatureMap (featureKey → VideoFeatureValue)
  */
 export function generateMockFeatures(requestedFeatures = [], profile = 'posture-basic') {
-  void profile; // mock 단계에서는 미사용 — 실제 계산기에서 fps 프로파일 반영
+  const repOk = REPETITION_PROFILES.has(profile); // 반복 feature는 상지반복/손목 profile에서만
   const map = {};
   for (const key of requestedFeatures) {
+    if (REPETITION_FEATURE_KEYS.has(key) && !repOk) continue;
     const value = buildFeatureValue(key);
     if (value) map[key] = value;
   }

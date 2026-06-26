@@ -3,7 +3,7 @@
 // 서버 경로(clip→job→apply, audit·영속화)로, 그 외는 로컬로 처리한다(§8.2/§8.12).
 // 실제 추론은 M2에서 서버 셸에 연결된다.
 import { useMemo, useState, useRef, useEffect } from 'react';
-import { generateMockFeatures } from '../services/videoMock';
+import { generateMockFeatures, REPETITION_FEATURE_KEYS, REPETITION_PROFILES } from '../services/videoMock';
 import { aggregateProcessFeatures, getAggregationMethod } from '../services/videoAggregate';
 import {
   getModuleSuggestions,
@@ -263,6 +263,19 @@ export function candidateMinutesPerDay(ratio, activeMinutesPerDay) {
  */
 export function excludeTaskScopeCandidates(candidateFeatures = [], taskScopeModuleIds = []) {
   return candidateFeatures.filter((c) => !taskScopeModuleIds.includes(VIDEO_FEATURE_TARGETS[c.featureKey]?.moduleId));
+}
+
+/**
+ * flat "참고 후보" 표시 라벨. 반복빈도(6.0-11)는 raw featureKey/value 대신 "어깨/팔꿈치 반복: 약 N 회/분"으로.
+ * 알 수 없는 featureKey는 null 반환 → 호출측이 기존 generic 렌더(featureKey: value) 유지.
+ */
+export function flatCandidateLabel(c) {
+  if (REPETITION_FEATURE_KEYS.has(c.featureKey)) {
+    const part = c.featureKey === 'shoulderRepetitionRate' ? '어깨' : '팔꿈치';
+    const n = Math.round((Number(c.value) || 0) * 10) / 10;
+    return `${part} 반복: 약 ${n} 회/분`;
+  }
+  return null;
 }
 
 // source job 버튼 라벨: "〈공정명〉 측면(채택)" 형태.
@@ -534,9 +547,13 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   // processEvidence: "왜 이 값?" 근거(서버 실분석만 제공, mock은 빈 배열). va에 저장 안 하고 별도 state로.
   const commitAnalysis = (processFeatures, { absolutePerDay = false, processEvidence = [] } = {}) => {
     const jobFeatures = buildJobFeatures(va.processes, processFeatures, { absolutePerDay });
-    const candidateFeatures = processFeatures.flatMap((pf) =>
-      collectCandidateFeatures(pf.features, { processIds: [pf.processId] })
-    );
+    const candidateFeatures = processFeatures.flatMap((pf) => {
+      const cands = collectCandidateFeatures(pf.features, { processIds: [pf.processId] });
+      // 반복빈도 candidate는 해당 공정 profile이 상지반복/손목일 때만 노출(저fps 자세 profile은 미신뢰).
+      const profile = (va.processes.find((p) => p.id === pf.processId) || {}).analysisProfile;
+      if (REPETITION_PROFILES.has(profile)) return cands;
+      return cands.filter((c) => !REPETITION_FEATURE_KEYS.has(c.featureKey));
+    });
     updateVA((v) => ({ ...v, processFeatures, jobFeatures, candidateFeatures }));
     // evidence는 transient state(영속화 차단). job-scope=직업단위, task-scope=공정단위 lookup map.
     const jobEvidenceBySharedJobId = buildJobEvidence(va.processes, processFeatures, processEvidence);
@@ -1100,9 +1117,16 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
           <div className="va-suggest-group">
             <div className="va-suggest-group-title">참고 후보 (자동입력 금지)</div>
             <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {flatCandidates.map((c, i) => (
-                <li key={`${c.featureKey}-${i}`}><code>{c.featureKey}</code>: {String(c.value)} — <span className="muted">{c.reason}</span></li>
-              ))}
+              {flatCandidates.map((c, i) => {
+                const label = flatCandidateLabel(c);
+                return (
+                  <li key={`${c.featureKey}-${i}`}>
+                    {label !== null
+                      ? <>{label} — <span className="muted">{c.reason}</span></>
+                      : <><code>{c.featureKey}</code>: {String(c.value)} — <span className="muted">{c.reason}</span></>}
+                  </li>
+                );
+              })}
             </ul>
           </div>
           );

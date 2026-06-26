@@ -16,6 +16,7 @@ import {
   resolveTargetTaskId,
   candidateMinutesPerDay,
   excludeTaskScopeCandidates,
+  flatCandidateLabel,
   segmentsForJob,
   buildVideoStatus,
 } from '../VideoAnalysisStep.jsx';
@@ -83,6 +84,15 @@ describe('척추 45°↑ 굴곡 candidate (작업 단위 표시)', () => {
     expect(out.map((c) => c.featureKey)).toEqual(['suspectedKneeTwist', 'vibrationToolUseDurationCandidate']);
     // task-scope 모듈 비활성이면 제외 없음
     expect(excludeTaskScopeCandidates(candidates, [])).toHaveLength(5);
+  });
+
+  it('flatCandidateLabel: 반복빈도(6.0-11)는 회/분 라벨, 그 외는 null(generic 렌더 유지)', () => {
+    expect(flatCandidateLabel({ featureKey: 'shoulderRepetitionRate', value: 14 })).toBe('어깨 반복: 약 14 회/분');
+    expect(flatCandidateLabel({ featureKey: 'elbowRepetitionRate', value: 21.7 })).toBe('팔꿈치 반복: 약 21.7 회/분');
+    // raw cycles_per_minute가 그대로 노출되지 않아야 함
+    expect(flatCandidateLabel({ featureKey: 'shoulderRepetitionRate', value: 30.456 })).not.toContain('cycles_per_minute');
+    // 반복이 아닌 후보는 null → 호출측 generic 렌더 유지
+    expect(flatCandidateLabel({ featureKey: 'suspectedKneeTwist', value: true })).toBeNull();
   });
 });
 
