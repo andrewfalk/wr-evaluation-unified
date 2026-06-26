@@ -53,6 +53,18 @@ describe('ClipFeatureSetSchema — drift guard', () => {
     bad.features.notAFeature = { kind: 'numeric', metric: 'posture_ratio', value: 0.1, unit: 'ratio', confidence: 0.5 };
     expect(() => ClipFeatureSetSchema.parse(bad)).toThrow();
   });
+
+  it('accepts a cycles_per_minute repetition feature (6.0-11; value may exceed 1, unlike posture_ratio)', () => {
+    // 워커가 Python 산출물에 하는 검증과 동일 경로. cycles_per_minute는 superRefine 0..1 제약 비대상.
+    const c = structuredClone(fixture);
+    c.features.shoulderRepetitionRate = {
+      kind: 'numeric', metric: 'cycles_per_minute', value: 30.5, unit: 'cycles_per_minute',
+      confidence: 0.7, segments: [{ startMs: 0, endMs: 2000 }], warnings: ['LOW_FPS_FOR_REPETITION'],
+    };
+    const r = ClipFeatureSetSchema.parse(c);
+    expect(r.features.shoulderRepetitionRate?.kind).toBe('numeric');
+    expect((r.features.shoulderRepetitionRate as { value: number }).value).toBe(30.5);
+  });
 });
 
 describe('ClipFeatureSetSchema — tracking block (PR D2a, §8.7)', () => {

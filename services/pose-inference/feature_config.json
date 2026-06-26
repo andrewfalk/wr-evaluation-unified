@@ -1,6 +1,6 @@
 {
-  "version": "feature-calc-2026-06-d",
-  "description": "feature 계산 규칙(6.0-6a~6b). 각도 정의·임계값·OneEuro·품질·tracking 파라미터를 버전관리. 실제 임계값은 6.0-B2 검증으로 보정. (d) minHoldSec=0 — 임계 초과한 모든 프레임시간을 노출시간으로 합산(연속유지 요건 제거). peak는 순간 최대, duration은 노출 비율로 둘이 방향 일치. frame-drop(max_gap) 제외는 유지.",
+  "version": "feature-calc-2026-06-e",
+  "description": "feature 계산 규칙(6.0-6a~6b, 6.0-11). 각도 정의·임계값·OneEuro·품질·tracking 파라미터를 버전관리. 실제 임계값은 6.0-B2 검증으로 보정. (d) minHoldSec=0 — 임계 초과한 모든 프레임시간을 노출시간으로 합산(연속유지 요건 제거). peak는 순간 최대, duration은 노출 비율로 둘이 방향 일치. frame-drop(max_gap) 제외는 유지. (e) 어깨·팔꿈치 반복빈도(cycles/min) candidate 추가 — repetition_count 파라미터는 6.0-B2 미검증(잠정).",
   "tracking": {
     "iouThreshold": 0.3,
     "maxAgeFrames": 10,
@@ -49,6 +49,22 @@
       "type": "trunk_flexion",
       "condition": "gt", "thresholdDeg": 45,
       "note": "체간 전굴각 > 45°인 시간 비율(작업별 candidate, 연속유지 요건 없음). 분/일 환산은 활동시간×비율(클라 UI). neckFlexion 미러."
+    },
+    "shoulderRepetitionRate": {
+      "kind": "numeric", "metric": "cycles_per_minute", "unit": "cycles_per_minute", "mode": "candidate",
+      "type": "repetition",
+      "joint": "shoulder", "angle": "upperarm_elevation", "reduce": "max",
+      "minAmplitudeDeg": 20, "hysteresisDeg": 6, "minCycleMs": 350, "minObservationMs": 3000,
+      "minFpsForReliableRate": 10,
+      "note": "어깨 상완거상 각의 반복 사이클/분(phase-independent: 유효 half-swing 수/2). 좌/우 중 사이클 많은 쪽. minCycleMs=인접 turning-point 간 최소 간격(half-swing 최소 길이). 진폭·히스테리시스·관측하한·Nyquist(저fps 경고) 파라미터는 6.0-B2 미검증(잠정)."
+    },
+    "elbowRepetitionRate": {
+      "kind": "numeric", "metric": "cycles_per_minute", "unit": "cycles_per_minute", "mode": "candidate",
+      "type": "repetition",
+      "joint": "elbow", "angle": "elbow_flexion", "reduce": "max",
+      "minAmplitudeDeg": 25, "hysteresisDeg": 6, "minCycleMs": 300, "minObservationMs": 3000,
+      "minFpsForReliableRate": 10,
+      "note": "팔꿈치 굴곡각(어깨-팔꿈치-손목)의 반복 사이클/분(phase-independent: 유효 half-swing 수/2). 좌/우 중 사이클 많은 쪽. minCycleMs=인접 turning-point 간 최소 간격. 파라미터는 6.0-B2 미검증(잠정)."
     }
   }
 }

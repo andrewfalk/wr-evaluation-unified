@@ -52,7 +52,8 @@
           "squatDuration", "overheadHours", "repetitiveMediumHours", "repetitiveFastHours",
           "cyclesPerDay", "cycleSeconds", "trunkPostureG", "trunkFlexionOver45Duration",
           "neckFlexionOver20HoursPerDay", "neckForcedFlexion", "neckCombinedFlexRot",
-          "vibrationToolUseDurationCandidate", "suspectedKneeTwist"
+          "vibrationToolUseDurationCandidate", "suspectedKneeTwist",
+          "shoulderRepetitionRate", "elbowRepetitionRate"
         ]
       },
       "additionalProperties": {
