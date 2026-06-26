@@ -31,7 +31,7 @@ def main():
         sys.exit(1)
 
     # convention별 keypoint 개수 추가 검증(JSON Schema로는 cross-field 어려움).
-    expected = {"coco17": 17, "wholebody133": 133}.get(doc.get("keypointConvention"))
+    expected = {"coco17": 17, "wholebody133": 133, "wholebody133-trimmed": 59}.get(doc.get("keypointConvention"))
     if expected:
         for f in doc.get("frames", []):
             for p in f.get("persons", []):

@@ -189,7 +189,33 @@
   - [x] **PR-C 패키지/리허설** — export-offline-package(--build-arg WR_GIT_COMMIT, manifest
     onnxSha256·weightsComplete 가드) + compose app upload volume·mem/cpu + `.wslconfig` 가이드 +
     OFFLINE_DEPLOYMENT 14절. **에어갭 실배포 + 운영 성공 확인**(서버 환경 리허설 완료, v6.0.0).
-- [ ] 6.0-10 (선택) hand 모델 손목/팔꿈치 + 손목 SI
+- [ ] **6.0-10 손목 영상분석 — wholebody pose + 손목 반복/각도 candidate** — 구현 계획 승인(코덱스 9라운드).
+  hand-wrist(20fps) profile 클립만 **wholebody pose(rtmw-dw-l-m, 133점) on-demand** 교체(나머지 body17 유지),
+  **손목 반복빈도(cycles/min) + 손목 굴곡/편위 peak angle**을 candidate(참고용·자동입력 없음)로 노출. SI 복합지표는
+  후속(6.0-10b). 게이팅 활성은 B2 통과 후 — 본 작업은 candidate 표시까지. 단계 분리 PR(계약→모델/feature→UI→에어갭).
+  - [x] **Stage A 계약·manifest·recipe 호환성**(동작 변화 0 · 브랜치 `feat/m4-6.0-10-wrist-stage-a`):
+    - [x] A1 `FeatureMappingTarget.moduleId` union에 `'wrist'` 추가.
+    - [x] A2 새 convention `wholebody133-trimmed`(body17+hand42=59) — zod enum+`KEYPOINT_COUNT` + canonical
+      JSON Schema enum + `validate_keypoints.py` count표 동시. **단일 source `keypoint_layout.py`**
+      (`WHOLEBODY_TRIMMED_INDEX`·`TRIMMED_SOURCE_INDICES`, 원래 91-132→trimmed 17-58) — feature_config.json에
+      wholebody 인덱스 **중복 미정의**(정적 JSON↔코드 drift 원천 차단). `test_keypoint_layout.py`(개수·재매핑·
+      coco17==feature_config.keypointIndex equality 가드).
+    - [x] A3 manifest pose role `pose-body`/`pose-wholebody` 분리(+레거시 `pose`=body alias 하위호환) /
+      `model_loader` variant-aware(`build_pose(variant)`·`_select_models`·`resolve_model_paths`/`verified_model_shas`에
+      `variant` 인자, `Wholebody` import) / pose-wholebody는 file·sha null(Stage D fetch가 확정) /
+      `test_model_loader.py` variant 케이스 3건. recipe 스키마 무변경(variant=poseSha256·model.pose로 식별).
+    - [x] **검증**: Python(keypoint_layout·feature_calc·model_loader) PASS, TS typecheck 신규 0(기존 3건 pre-existing),
+      vitest 계약 157 PASS, body17 회귀 0.
+  - [ ] **Stage B 모델 variant + 손목 feature**: rtmlib `Wholebody` smoke test 선행 / `build_pose(variant)` /
+    infer_clip `--pose-variant`(저장 시 face·feet drop, trimmed 직렬화) / 워커 `PROFILE_POSE_VARIANT` /
+    convention별 keypointIndex + 모든 keypoint 접근 missing-safe / `wrist_flexion_angle`·`wrist_deviation_angle` +
+    emit / feature_config 손목 블록 / featureKey·target 3종 candidate / mapping·feature_config 버전 bump.
+  - [ ] **Stage C UI profile 게이트·후보**: HAND_WRIST_FEATURE_KEYS 묶음 게이트 / flat 라벨(손목 반복·굴곡) /
+    hand-wrist 옵션은 wrist 모듈 활성 시만+고부담 힌트 / 시점 하드 게이트(융합 단계: flexion=sagittal·deviation=frontal,
+    non-preferred 드롭) / process-level `suppressedCandidates`(transient processEvidence) + UI 안내 / vvc 버전 bump.
+  - [ ] **Stage D 에어갭 재패키징**: fetch-pose-weights 두 pose baking / 이미지 +114MB / export-offline-package
+    재빌드 / 운영 리허설(hand-wrist ~7× 실측·타임아웃·동시성).
+  - [ ] **병행 트랙**: bench_pose.py 컨테이너화(RAM OS분기·--pose-path·docker cpus) 서버 절대 실측.
 - [x] **6.0-11 어깨·팔꿈치 반복빈도(cycles/min) candidate** (신규 변수 — SI efforts/min·OCRA 계열).
   영상이 직접 재는 intrinsic cycles/min을 **candidate(참고용, 모듈 자동입력 없음)** 로 노출. body17 기반
   (손목은 6.0-10 wholebody 선행 필요 → 범위 밖). 게이팅은 다른 feature와 동일하게 B2 전 참고용.

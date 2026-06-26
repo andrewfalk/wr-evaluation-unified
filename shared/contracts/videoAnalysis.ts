@@ -262,7 +262,7 @@ export const VideoAnalysisDataSchema = z.object({
 // ---------------------------------------------------------------------------
 export type FeatureMappingMode = 'auto' | 'auto-review' | 'candidate';
 export type FeatureMappingTarget = {
-  moduleId: 'knee' | 'shoulder' | 'spine' | 'cervical' | 'elbow';
+  moduleId: 'knee' | 'shoulder' | 'spine' | 'cervical' | 'elbow' | 'wrist';
   targetField: string | null; // null = 모듈 필드 미기입(candidate)
   unit: z.infer<typeof FeatureUnitSchema> | null;
   mode: FeatureMappingMode;
