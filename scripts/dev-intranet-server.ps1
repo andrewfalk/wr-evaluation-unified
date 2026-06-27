@@ -12,6 +12,8 @@
 #
 # 사용: pwsh -File scripts/dev-intranet-server.ps1
 #       (서버는 :3001. 웹 클라는 별도 터미널에서 `npm run dev` → :3000, /api 프록시)
+#       -SkipSharedBuild: 공유 계약(shared/dist) 재빌드 생략(dev-stack-up이 이미 빌드한 경우).
+param([switch]$SkipSharedBuild)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -47,6 +49,15 @@ Write-Host "[dev-intranet] DEPLOYMENT_MODE=$($env:DEPLOYMENT_MODE) VIDEO_ANALYSI
 Write-Host "[dev-intranet] uploadDir=$($env:VIDEO_ANALYSIS_UPLOAD_DIR)"
 Write-Host "[dev-intranet] DB=$($env:DATABASE_URL)"
 Write-Host "[dev-intranet] building + starting native server on :$($env:PORT) (auto-migrate on boot)…"
+
+# 3.5) 공유 계약(shared → dist) 재빌드. @contracts(shared/dist)는 gitignore라 pull로 안 바뀌고
+#      server 빌드·런타임이 이걸 물기 때문에, 계약 변경이 반영되려면 먼저 빌드해야 한다.
+#      dev-stack-up 경유 시엔 이미 빌드됐으므로 -SkipSharedBuild로 생략.
+if (-not $SkipSharedBuild) {
+  Write-Host "[dev-intranet] building shared contracts (shared → dist)…"
+  node (Join-Path $root 'scripts/prebuild-shared.mjs')
+  if ($LASTEXITCODE -ne 0) { throw 'prebuild-shared 실패 — 공유 계약(shared/dist) 빌드 오류' }
+}
 
 # 4) 네이티브 서버 기동: build(tsc) → node dist/index.js.
 #    tsx watch는 tsconfig paths로 @wr/contracts를 .d.cts(타입)로 잘못 해석해 런타임 크래시하므로,
