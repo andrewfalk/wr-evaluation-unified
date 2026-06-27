@@ -247,7 +247,12 @@
       14-4 리허설에 "손목·손" 클립 별도 측정(타임아웃·동시성) 추가.
     - [ ] **운영(실환경·B2 게이트, 미실행)**: docker 이미지 재빌드(+114MB) · export-offline-package zip · 서버 재배포 ·
       hand-wrist 클립 ~7× 처리시간·피크 RAM 실측. 이 sandbox에서 검증 불가 → 배포 시점에 수행.
-  - [ ] **병행 트랙**: bench_pose.py 컨테이너화(RAM OS분기·--pose-path·docker cpus) 서버 절대 실측.
+  - [~] **병행 트랙**: bench_pose.py 컨테이너화(브랜치 `feat/m4-6.0-10-bench-containerize`) — 코드 prep 완료, 실측은 운영:
+    - [x] RAM 측정 OS 분기(Windows psapi는 win32 가드, Linux는 `/proc` VmRSS/VmHWM·ru_maxrss 폴백) +
+      `model_loader.build_pose` 재사용(에어갭 baked, 자동 다운로드 제거) + `--models-dir`(POSE_MODELS_DIR) +
+      docker exec 런북(운영 cpu/mem 제한 하 실행). 출력에 modelSource·platform·peakRssMB.
+    - [x] 검증: Windows body/wholebody 실행(modelSource=baked, dev 배율 pose ~3×·peakRss ~2.4×), py_compile 양 분기 OK.
+    - [ ] **운영(미실행)**: Linux 컨테이너에서 docker exec로 hand-wrist 절대 ms/peakRss 실측 → Stage D 리허설 입력.
 - [x] **6.0-11 어깨·팔꿈치 반복빈도(cycles/min) candidate** (신규 변수 — SI efforts/min·OCRA 계열).
   영상이 직접 재는 intrinsic cycles/min을 **candidate(참고용, 모듈 자동입력 없음)** 로 노출. body17 기반
   (손목은 6.0-10 wholebody 선행 필요 → 범위 밖). 게이팅은 다른 feature와 동일하게 B2 전 참고용.
