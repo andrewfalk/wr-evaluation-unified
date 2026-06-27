@@ -12,7 +12,8 @@
 import { z } from 'zod';
 
 // per-day 환산 규칙 버전(featureConfig.json version과 함께 recipe를 이룬다).
-export const VIDEO_MAPPING_CONFIG_VERSION = 'pday-1.0.0';
+// pday-1.1.0: 6.0-10 손목 candidate 3종(wristRepetitionRate·wristFlexion/DeviationPeakAngle) VIDEO_FEATURE_TARGETS 추가.
+export const VIDEO_MAPPING_CONFIG_VERSION = 'pday-1.1.0';
 
 // 시점 융합 정책 버전(preferredViewpoint·viewpoint 성분이 다중 시점 산출 선택에 영향 → 재현성).
 export const VIDEO_VIEWPOINT_CONFIG_VERSION = 'vvc-0.1.0';

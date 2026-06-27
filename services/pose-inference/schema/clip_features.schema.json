@@ -53,7 +53,8 @@
           "cyclesPerDay", "cycleSeconds", "trunkPostureG", "trunkFlexionOver45Duration",
           "neckFlexionOver20HoursPerDay", "neckForcedFlexion", "neckCombinedFlexRot",
           "vibrationToolUseDurationCandidate", "suspectedKneeTwist",
-          "shoulderRepetitionRate", "elbowRepetitionRate"
+          "shoulderRepetitionRate", "elbowRepetitionRate",
+          "wristRepetitionRate", "wristFlexionPeakAngle", "wristDeviationPeakAngle"
         ]
       },
       "additionalProperties": {

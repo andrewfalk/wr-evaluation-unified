@@ -43,15 +43,15 @@ def angle_from_vertical(vec, upward=True):
 
 
 class KP:
-    """프레임의 keypoint 접근자(coco17)."""
+    """프레임의 keypoint 접근자(convention별 idx_map). 이름이 맵에 없거나(타 convention) 범위 밖이면 None."""
     def __init__(self, person, idx_map, min_conf):
         self.kpts = person["keypoints"] if person else []
         self.idx = idx_map
         self.min_conf = min_conf
 
     def get(self, name):
-        i = self.idx[name]
-        if i >= len(self.kpts):
+        i = self.idx.get(name)  # body convention에 없는 hand key 등은 None — KeyError 방지(자연 미산출).
+        if i is None or i >= len(self.kpts):
             return None
         x, y, s = self.kpts[i]
         return (x, y) if s >= self.min_conf else None
@@ -167,6 +167,28 @@ def elbow_flexion_angle(kp, side):
     if not (sh and el and wr):
         return None
     return angle_at(el, sh, wr)
+
+
+def _wrist_bend_magnitude(kp, side):
+    """손목 굽힘 크기(중립=0°, 굽힐수록 큼). 전완(손목→팔꿈치) vs 손축(손목→중지 MCP)의 일직선(180°)
+    으로부터 편차 = 180 - angle. wholebody(hand) keypoint 필요 — body 클립은 middle1 부재로 None(자연 미산출).
+    ⚠ 2D 단일 평면 측정이라 굴곡/요척측편위가 같은 기하 → 라벨 구분은 클립 시점이 결정(6.0-10 Stage C 하드 게이트)."""
+    el = kp.get(f"{side}_elbow")
+    wr = kp.get(f"{side}_wrist")
+    mc = kp.get(f"{side}_middle1")  # 중지 MCP(wholebody133-trimmed hand)
+    if not (el and wr and mc):
+        return None
+    return 180.0 - angle_at(wr, el, mc)
+
+
+def wrist_flexion_angle(kp, side):
+    """손목 굴곡 크기(sagittal 클립에서 의미). 반복·peak 공용. deviation과 동일 기하 — 시점이 라벨 결정."""
+    return _wrist_bend_magnitude(kp, side)
+
+
+def wrist_deviation_angle(kp, side):
+    """손목 요/척측 편위 크기(frontal 클립에서 의미). flexion과 동일 기하 — 시점이 라벨 결정."""
+    return _wrist_bend_magnitude(kp, side)
 
 
 # ── 시계열 → posture_ratio (min-hold + frame-drop) ─────────────────────────
@@ -311,7 +333,10 @@ def main():
 
     kdoc = load_json(args.keypoints)
     cfg = load_json(args.config)
-    idx = cfg["keypointIndex"]
+    # keypoint 이름→인덱스: convention별 단일 source(keypoint_layout). wholebody133-trimmed면 hand 인덱스 포함.
+    # coco17은 layout==feature_config.keypointIndex(test_keypoint_layout equality 가드). 미지의 convention은 cfg 폴백.
+    from keypoint_layout import KEYPOINT_INDEX_BY_CONVENTION
+    idx = KEYPOINT_INDEX_BY_CONVENTION.get(kdoc.get("keypointConvention"), cfg["keypointIndex"])
     min_conf = cfg["minKeypointConfidence"]
     max_gap = cfg["frameDropMaxGapMs"]
     min_hold = cfg["minHoldSec"] * 1000
@@ -350,8 +375,8 @@ def main():
             if not p:
                 continue
             for nm in names:
-                i = idx[nm]
-                if i < len(p["keypoints"]):
+                i = idx.get(nm)
+                if i is not None and i < len(p["keypoints"]):
                     vals.append(p["keypoints"][i][2])
         return round(sum(vals) / len(vals), 4) if vals else 0.0
 
@@ -363,8 +388,8 @@ def main():
             if not p:
                 continue
             for nm in names:
-                i = idx[nm]
-                if i < len(p["keypoints"]):
+                i = idx.get(nm)
+                if i is not None and i < len(p["keypoints"]):
                     total += 1
                     if p["keypoints"][i][2] >= min_conf:
                         visible += 1
@@ -491,6 +516,39 @@ def main():
                     lambda s: [f"{s}_shoulder", f"{s}_elbow"])
     emit_repetition("elbowRepetitionRate", elbow_flexion_angle,
                     lambda s: [f"{s}_shoulder", f"{s}_elbow", f"{s}_wrist"])
+
+    # 손목 반복·굴곡/편위 peak(candidate, 6.0-10) — wholebody 클립만(hand keypoint 필요). body 클립은
+    # middle1 부재 → angle_fn None → 자연 미산출. 굴곡/편위는 동일 기하라 같은 값 — 클라가 시점으로 가른다.
+    _wrist_conf = lambda s: [f"{s}_elbow", f"{s}_wrist", f"{s}_middle1"]  # noqa: E731
+    emit_repetition("wristRepetitionRate", wrist_flexion_angle, _wrist_conf)
+
+    def emit_wrist_peak(feat_key, angle_fn, conf_names):
+        """손목 굽힘 크기 peak(trunkPostureG 미러). 좌/우 중 최대. 블록 없거나 hand keypoint 없으면 미산출."""
+        fcfg = cfg["features"].get(feat_key)
+        if not fcfg:
+            return
+        best = None  # (peak_val, peak_t, side)
+        for side in ("left", "right"):
+            raw = [(times[i], angle_fn(kps[i], side)) for i in range(len(frames))]
+            sm = smooth_series(raw, euro)
+            vals = [(t, v) for t, v in sm if v is not None]
+            if not vals:
+                continue
+            pt, pv = max(vals, key=lambda tv: tv[1])
+            if best is None or pv > best[0]:
+                best = (pv, pt, side)
+        if best is None:
+            return
+        pv, pt, side = best
+        ov, bd = make_conf(conf_names(side))
+        features[feat_key] = {
+            "kind": "numeric", "metric": "peak_angle", "value": round(pv, 2), "unit": "degrees",
+            "confidence": ov, "confidenceBreakdown": bd,
+            "segments": [{"startMs": pt, "endMs": pt}], "warnings": list(track_warnings),
+        }
+
+    emit_wrist_peak("wristFlexionPeakAngle", wrist_flexion_angle, _wrist_conf)
+    emit_wrist_peak("wristDeviationPeakAngle", wrist_deviation_angle, _wrist_conf)
 
     doc = {
         "schemaVersion": 1,

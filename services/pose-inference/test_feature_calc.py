@@ -16,7 +16,9 @@ from feature_calc import (
     neck_flexion_angle, trunk_flexion_angle, posture_ratio, KP,
     choose_dominant_track, pick_target_person, all_track_ids,
     repetition_count, upperarm_elevation_angle, elbow_flexion_angle,
+    wrist_flexion_angle,
 )
+from keypoint_layout import WHOLEBODY_TRIMMED_INDEX
 from tracker import IoUTracker, iou
 
 HERE = Path(__file__).parent
@@ -393,6 +395,72 @@ def test_repetition_endtoend_emit():
     print(f"ok: repetition end-to-end emit (5fps value={sr['value']} +LOW_FPS, 12fps no warning)")
 
 
+def _wb_person(coords):
+    """coords: {name: (x,y)} → wholebody133-trimmed(59점) keypoints[[x,y,score]] (score 0.9)."""
+    kpts = [[0.0, 0.0, 0.0] for _ in range(59)]
+    for name, (x, y) in coords.items():
+        kpts[WHOLEBODY_TRIMMED_INDEX[name]] = [float(x), float(y), 0.9]
+    return {"keypoints": kpts, "score": 0.9}
+
+
+def _build_oscillating_wrist_keypoints(freq, dur_s, fps, base_deg=30.0, amp_deg=25.0):
+    """손목 굽힘각 θ(=중립으로부터 편차)를 진동시키는 wholebody-trimmed 합성 keypoints.
+    전완은 수직 고정(elbow 위, wrist 아래), 손축(중지 MCP)을 θ만큼 회전 → magnitude == θ."""
+    n = int(dur_s * fps)
+    dt = 1000.0 / fps
+    frames = []
+    ex, ey, wx, wy, L = 100.0, 100.0, 100.0, 200.0, 50.0  # elbow 위, wrist 아래(전완 수직)
+    for i in range(n):
+        theta = math.radians(base_deg + amp_deg * math.sin(2 * math.pi * freq * (i / fps)))
+        mc = (wx + L * math.sin(theta), wy + L * math.cos(theta))  # 손축을 θ 회전
+        p = _wb_person({"left_elbow": (ex, ey), "left_wrist": (wx, wy), "left_middle1": mc})
+        p["trackId"] = None
+        p["bbox"] = [0.0, 0.0, 50.0, 100.0]
+        frames.append({"frameIndex": i, "timestampMs": round(i * dt), "persons": [p]})
+    return {
+        "schemaVersion": 1, "keypointConvention": "wholebody133-trimmed", "coordinateSpace": "pixel",
+        "frameWidth": 640, "frameHeight": 480, "requestedFps": fps, "sampledFps": fps,
+        "source": {"clipRef": "synthetic-wrist", "originalFps": 30, "totalFrames": n},
+        "model": {"detector": "d", "pose": "rtmw-dw-l-m", "inputSize": [192, 256],
+                  "modelName": "test", "modelVersion": "test", "preprocessConfigHash": "test"},
+        "frames": frames,
+    }
+
+
+def test_wrist_angle_math():
+    # 전완 수직(아래), 손축 일직선 아래 → 중립 magnitude 0.
+    kp = KP(_wb_person({"left_elbow": (100, 100), "left_wrist": (100, 200), "left_middle1": (100, 300)}),
+            WHOLEBODY_TRIMMED_INDEX, 0.3)
+    assert approx(wrist_flexion_angle(kp, "left"), 0.0, 1.0), wrist_flexion_angle(kp, "left")
+    # 손축 45° 굽힘 → magnitude ~45.
+    kp2 = KP(_wb_person({"left_elbow": (100, 100), "left_wrist": (100, 200),
+                         "left_middle1": (100 + 50 * math.sin(math.radians(45)), 200 + 50 * math.cos(math.radians(45)))}),
+             WHOLEBODY_TRIMMED_INDEX, 0.3)
+    assert approx(wrist_flexion_angle(kp2, "left"), 45.0, 2.0), wrist_flexion_angle(kp2, "left")
+    # coco17(hand 없음) → middle1 부재 → None (KeyError 없이 자연 미산출).
+    kp3 = KP(person({"left_elbow": (100, 100), "left_wrist": (100, 200)}), IDX, 0.3)
+    assert wrist_flexion_angle(kp3, "left") is None
+    print("ok: wrist angle math (중립 0·45°, coco17 None)")
+
+
+def test_wrist_endtoend_emit():
+    # wholebody-trimmed 클립(20fps) → 손목 반복·굴곡/편위 peak 산출.
+    out = _run_feature_calc(_build_oscillating_wrist_keypoints(1.0, 8, 20))
+    wr = out["features"]["wristRepetitionRate"]
+    assert wr["metric"] == "cycles_per_minute" and wr["value"] > 0, wr
+    assert "LOW_FPS_FOR_REPETITION" not in wr["warnings"], wr  # 20fps >= 15
+    fp = out["features"]["wristFlexionPeakAngle"]
+    dv = out["features"]["wristDeviationPeakAngle"]
+    assert fp["metric"] == "peak_angle" and fp["unit"] == "degrees" and fp["value"] > 0, fp
+    # 굴곡·편위는 동일 기하 → 같은 값(시점이 라벨 결정, 클라 하드 게이트).
+    assert fp["value"] == dv["value"], (fp["value"], dv["value"])
+    # body17(coco17) 클립 → 손목 feature 조용히 미산출(KeyError 없이).
+    out_body = _run_feature_calc(_build_oscillating_arm_keypoints(0.5, 12, 12))
+    assert "wristRepetitionRate" not in out_body["features"]
+    assert "wristFlexionPeakAngle" not in out_body["features"]
+    print(f"ok: wrist end-to-end emit (rep={wr['value']}/min, peak={fp['value']}°, body17 미산출)")
+
+
 if __name__ == "__main__":
     test_angle_math()
     test_knee_squat_angle()
@@ -412,4 +480,6 @@ if __name__ == "__main__":
     test_repetition_boundary_partial()
     test_repetition_slow_realistic()
     test_repetition_endtoend_emit()
+    test_wrist_angle_math()
+    test_wrist_endtoend_emit()
     print("ALL PASS")
