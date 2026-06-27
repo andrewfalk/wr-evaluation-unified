@@ -99,7 +99,7 @@ describe('fuseClipFeatureSetsWithEvidence (B2 선행 — 채택 클립/시점 pr
   });
 
   it('빈 entries → { fused: null, evidenceByFeatureKey: {} }', () => {
-    expect(fuseClipFeatureSetsWithEvidence([])).toEqual({ fused: null, evidenceByFeatureKey: {} });
+    expect(fuseClipFeatureSetsWithEvidence([])).toEqual({ fused: null, evidenceByFeatureKey: {}, suppressedCandidates: [] });
   });
 
   it('fused 출력은 fuseClipFeatureSets와 동일(winner 계산 공유 — drift 없음)', () => {
@@ -132,5 +132,49 @@ describe('fuseClipFeatureSetsWithEvidence (B2 선행 — 채택 클립/시점 pr
     const adoptedCand = ev.candidates.find((c) => c.adopted);
     expect(adoptedCand.clipMetaId).toBe('cS');
     expect(ev.candidates.filter((c) => c.adopted)).toHaveLength(1); // 정확히 하나만 채택
+  });
+});
+
+describe('손목 각도 시점 하드 게이트 (6.0-10): 굴곡=sagittal·편위=frontal에서만', () => {
+  it('sagittal 클립만 → 굴곡 유지, 편위 드롭+suppressed', () => {
+    const r = fuseClipFeatureSetsWithEvidence([
+      entry('sagittal', { wristFlexionPeakAngle: angle(40), wristDeviationPeakAngle: angle(40) }),
+    ]);
+    expect(r.fused.features.wristFlexionPeakAngle.value).toBe(40);
+    expect(r.fused.features.wristDeviationPeakAngle).toBeUndefined();
+    expect(r.suppressedCandidates).toEqual([
+      { featureKey: 'wristDeviationPeakAngle', reason: NON_PREFERRED_WARNING, preferred: 'frontal' },
+    ]);
+  });
+
+  it('frontal 클립만 → 편위 유지, 굴곡 드롭+suppressed', () => {
+    const r = fuseClipFeatureSetsWithEvidence([
+      entry('frontal', { wristFlexionPeakAngle: angle(40), wristDeviationPeakAngle: angle(20) }),
+    ]);
+    expect(r.fused.features.wristDeviationPeakAngle.value).toBe(20);
+    expect(r.fused.features.wristFlexionPeakAngle).toBeUndefined();
+    expect(r.suppressedCandidates).toEqual([
+      { featureKey: 'wristFlexionPeakAngle', reason: NON_PREFERRED_WARNING, preferred: 'sagittal' },
+    ]);
+  });
+
+  it('sagittal+frontal 둘 다 → 굴곡(sagittal)·편위(frontal) 각각 채택, suppressed 없음', () => {
+    const r = fuseClipFeatureSetsWithEvidence([
+      entry('sagittal', { wristFlexionPeakAngle: angle(42), wristDeviationPeakAngle: angle(99) }),
+      entry('frontal', { wristFlexionPeakAngle: angle(99), wristDeviationPeakAngle: angle(18) }),
+    ]);
+    expect(r.fused.features.wristFlexionPeakAngle.value).toBe(42);   // sagittal 채택
+    expect(r.fused.features.wristDeviationPeakAngle.value).toBe(18); // frontal 채택
+    expect(r.suppressedCandidates).toEqual([]);
+  });
+
+  it('무대체 정책: 굴곡이 frontal 클립에만 있어도 비-preferred라 숨김(대체 안 함)', () => {
+    const r = fuseClipFeatureSetsWithEvidence([
+      entry('frontal', { wristFlexionPeakAngle: angle(55) }), // preferred=sagittal인데 frontal만 존재
+    ]);
+    expect(r.fused.features.wristFlexionPeakAngle).toBeUndefined(); // frontal 값으로 대체하지 않음
+    expect(r.suppressedCandidates).toEqual([
+      { featureKey: 'wristFlexionPeakAngle', reason: NON_PREFERRED_WARNING, preferred: 'sagittal' },
+    ]);
   });
 });

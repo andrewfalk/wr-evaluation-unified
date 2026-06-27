@@ -4,7 +4,8 @@
 // 융합은 per-day 환산 **전**(intrinsic 단계)에 한다 — 한 공정의 다중 시점 클립은 동일 activeMinutesPerDay를
 // 공유하므로 융합 후 1회 환산하면 되고, confidenceBreakdown 보존이 깔끔하다.
 import {
-  viewpointComponent, viewpointTier, isNonPreferred, DEFAULT_CONFLICT_THRESHOLDS,
+  viewpointComponent, viewpointTier, isNonPreferred, isViewpointDropped,
+  VIEWPOINT_HARD_GATED_KEYS, PREFERRED_VIEWPOINT, DEFAULT_CONFLICT_THRESHOLDS,
 } from './videoViewpointConfig';
 
 export const NON_PREFERRED_WARNING = 'NON_PREFERRED_VIEWPOINT';
@@ -72,11 +73,24 @@ function fuseInternal(entries, conflictThresholds) {
   const valid = (entries || []).filter((e) => e && e.clipFeatureSet);
   if (valid.length === 0) return null;
 
-  // featureKey별 후보 수집(시점 보정).
+  // featureKey별 후보 수집(시점 보정). 하드 게이트(6.0-10): 손목 굴곡/편위는 preferred 시점 클립에서만
+  // 융합에 기여하고 non-preferred 시점 entry에선 드롭(같은 2D 값이 두 라벨로 보이는 것 방지).
   const byKey = {};
+  const gatedSeen = new Set(); // 게이트 대상 feature가 어떤 entry에든 등장했는지(드롭 안내 판정용).
   for (const e of valid) {
     for (const [key, cf] of Object.entries(e.clipFeatureSet.features || {})) {
+      if (VIEWPOINT_HARD_GATED_KEYS.has(key)) {
+        gatedSeen.add(key);
+        if (isViewpointDropped(e.viewpoint, key)) continue; // non-preferred 시점 → 드롭(소프트 가중 아님).
+      }
       (byKey[key] || (byKey[key] = [])).push(adjusted(e, key, cf));
+    }
+  }
+  // 드롭 안내: 게이트 feature가 등장했으나 preferred 시점 클립이 없어 융합에서 사라진 것 → suppressed.
+  const suppressedCandidates = [];
+  for (const key of gatedSeen) {
+    if (!byKey[key]) {
+      suppressedCandidates.push({ featureKey: key, reason: NON_PREFERRED_WARNING, preferred: PREFERRED_VIEWPOINT[key] });
     }
   }
   const features = {};
@@ -99,7 +113,7 @@ function fuseInternal(entries, conflictThresholds) {
         analyzedFrames: valid.reduce((a, e) => a + e.clipFeatureSet.analyzedFrames, 0),
         features,
       };
-  return { fused: fusedSet, evidenceByFeatureKey };
+  return { fused: fusedSet, evidenceByFeatureKey, suppressedCandidates };
 }
 
 /**
@@ -117,10 +131,11 @@ export function fuseClipFeatureSets(entries, { conflictThresholds = DEFAULT_CONF
 /**
  * fuseClipFeatureSets와 동일 융합 + featureKey별 근거(채택/탈락 클립·시점·jobId)를 함께 반환.
  * entries에 clipMetaId/serverClipId/jobId가 있으면 evidence가 그 식별자를 담는다(없으면 undefined).
- * @returns {{ fused: object|null, evidenceByFeatureKey: object }}
+ * suppressedCandidates: 시점 하드 게이트로 드롭된 손목 각도 feature(process-level 안내용, 6.0-10).
+ * @returns {{ fused: object|null, evidenceByFeatureKey: object, suppressedCandidates: Array }}
  */
 export function fuseClipFeatureSetsWithEvidence(entries, { conflictThresholds = DEFAULT_CONFLICT_THRESHOLDS } = {}) {
   const r = fuseInternal(entries, conflictThresholds);
-  if (!r) return { fused: null, evidenceByFeatureKey: {} };
-  return { fused: r.fused, evidenceByFeatureKey: r.evidenceByFeatureKey };
+  if (!r) return { fused: null, evidenceByFeatureKey: {}, suppressedCandidates: [] };
+  return { fused: r.fused, evidenceByFeatureKey: r.evidenceByFeatureKey, suppressedCandidates: r.suppressedCandidates };
 }

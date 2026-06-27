@@ -224,9 +224,19 @@
     - [x] **검증**: Python(model_loader 8·keypoint_layout·feature_calc+wrist·wholebody_smoke) PASS, 실클립 e2e
       (body 17pt/coco17/손목없음, wholebody 59pt/trimmed/손목3 — 둘 다 schema valid), TS typecheck 신규 0,
       vitest 계약 157·서버 91·클라 341 PASS, body17 회귀 0.
-  - [ ] **Stage C UI profile 게이트·후보**: HAND_WRIST_FEATURE_KEYS 묶음 게이트 / flat 라벨(손목 반복·굴곡) /
-    hand-wrist 옵션은 wrist 모듈 활성 시만+고부담 힌트 / 시점 하드 게이트(융합 단계: flexion=sagittal·deviation=frontal,
-    non-preferred 드롭) / process-level `suppressedCandidates`(transient processEvidence) + UI 안내 / vvc 버전 bump.
+  - [x] **Stage C UI profile 게이트·후보**(브랜치 `feat/m4-6.0-10-wrist-stage-c`):
+    - [x] C1 `HAND_WRIST_FEATURE_KEYS`(반복+각도) — videoMock MOCK_VALUES·CANDIDATE_REASONS 손목 3 + `generateMockFeatures`
+      hand-wrist profile 게이트 + commitAnalysis 후보 필터(손목=hand-wrist만). mock도 `gateFeaturesByViewpoint`로
+      공정 클립 시점 집합 기준 하드 게이트 + `commitAnalysis(_, { processEvidence })` 배선.
+    - [x] C2 `flatCandidateLabel` 손목 라벨(반복 회/분·굴곡/편위 °).
+    - [x] C3 PROFILES 셀렉터: hand-wrist 옵션은 `activeModules.includes('wrist')`(또는 이미 선택됨 폴백) 시만 노출
+      + 선택 시 "고부담(처리 느림·서버 부하)" 경고 힌트.
+    - [x] C4 시점 하드 게이트: `PREFERRED_VIEWPOINT`(굴곡=sagittal·편위=frontal) + `VIEWPOINT_HARD_GATED_KEYS` +
+      `fuseInternal`이 non-preferred entry에서 드롭하고 preferred 클립 없으면 `suppressedCandidates` 반환 →
+      `videoAnalysisRun`/mock이 process-level(transient)로 운반 → `analysisEvidence.suppressedCandidates` 집계 →
+      flat "참고 후보"에 "측면=굴곡·정면=편위" 안내. **무대체 정책**(비-preferred 값으로 대체 안 함). `VIDEO_VIEWPOINT_CONFIG_VERSION` `vvc-0.1.0`→`0.2.0`.
+    - [x] **검증**: typecheck 신규 0, build:web OK, vitest **789**(fusion 하드게이트 4·mock 시점 4·손목 pipeline 1 신규
+      포함)·서버 91, lint 0 error(기존 warning 6), win7 호환(Array.includes/Set/Object.entries 베이스라인 내).
   - [ ] **Stage D 에어갭 재패키징**: fetch-pose-weights 두 pose baking / 이미지 +114MB / export-offline-package
     재빌드 / 운영 리허설(hand-wrist ~7× 실측·타임아웃·동시성).
   - [ ] **병행 트랙**: bench_pose.py 컨테이너화(RAM OS분기·--pose-path·docker cpus) 서버 절대 실측.

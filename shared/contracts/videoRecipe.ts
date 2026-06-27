@@ -16,7 +16,8 @@ import { z } from 'zod';
 export const VIDEO_MAPPING_CONFIG_VERSION = 'pday-1.1.0';
 
 // 시점 융합 정책 버전(preferredViewpoint·viewpoint 성분이 다중 시점 산출 선택에 영향 → 재현성).
-export const VIDEO_VIEWPOINT_CONFIG_VERSION = 'vvc-0.1.0';
+// vvc-0.2.0: 6.0-10 손목 굴곡/편위 preferredViewpoint + 하드 게이트(non-preferred 시점 드롭) 추가.
+export const VIDEO_VIEWPOINT_CONFIG_VERSION = 'vvc-0.2.0';
 
 // recipe 요약 문자열(클라-기원 component: featureConfig + mapping + viewpoint) — 하위호환 유지.
 // 서버-기원 component(model weight sha·preprocessConfigHash·commit)는 analysis_recipe 구조에 별도.
