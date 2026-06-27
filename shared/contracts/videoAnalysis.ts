@@ -35,6 +35,9 @@ export const FeatureKeySchema = z.enum([
   'suspectedKneeTwist',
   'shoulderRepetitionRate', // 6.0-11: 상완거상 반복(cycles/min) candidate
   'elbowRepetitionRate', // 6.0-11: 팔꿈치 굴곡 반복(cycles/min) candidate
+  'wristRepetitionRate', // 6.0-10: 손목 굽힘 반복(cycles/min) candidate (wholebody 클립만)
+  'wristFlexionPeakAngle', // 6.0-10: 손목 굴곡 peak(°) candidate — sagittal 클립에서만 노출
+  'wristDeviationPeakAngle', // 6.0-10: 손목 요/척측 편위 peak(°) candidate — frontal 클립에서만 노출
 ]);
 
 // JSONB 저장 가능 값으로 제한 — candidate.value는 unknown 금지(§8.4).
@@ -284,6 +287,11 @@ export const VIDEO_FEATURE_TARGETS: Record<
   // 팔꿈치 모듈은 videoMappingConfig가 없어 flat "참고 후보"로 표시(elbow targetField=null).
   shoulderRepetitionRate: { moduleId: 'shoulder', targetField: null, unit: 'cycles_per_minute', mode: 'candidate' },
   elbowRepetitionRate: { moduleId: 'elbow', targetField: null, unit: 'cycles_per_minute', mode: 'candidate' },
+  // 6.0-10 손목(wholebody 클립만) — intrinsic candidate, 모듈 자동입력 없음. wrist 모듈은 videoMappingConfig가
+  // 없어 flat "참고 후보"로 표시. 굴곡/편위 peak는 클라 융합이 시점(sagittal/frontal)으로 하드 게이트.
+  wristRepetitionRate: { moduleId: 'wrist', targetField: null, unit: 'cycles_per_minute', mode: 'candidate' },
+  wristFlexionPeakAngle: { moduleId: 'wrist', targetField: null, unit: 'degrees', mode: 'candidate' },
+  wristDeviationPeakAngle: { moduleId: 'wrist', targetField: null, unit: 'degrees', mode: 'candidate' },
   // 척추 MDDM (spine.tasks[*], 공정 1개 = task 1개) — frequency/timeValue는 숫자 저장
   cyclesPerDay: { moduleId: 'spine', targetField: 'frequency', unit: 'cycles_per_day', mode: 'auto-review' },
   cycleSeconds: { moduleId: 'spine', targetField: 'timeValue', unit: 'seconds_per_cycle', mode: 'auto-review' },

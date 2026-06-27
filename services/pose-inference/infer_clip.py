@@ -27,13 +27,30 @@ except PackageNotFoundError:
     RTMLIB_VERSION = "unknown"
 
 SCHEMA_VERSION = 1
-KEYPOINT_CONVENTION = "coco17"  # rtmlib body = COCO 17점
+KEYPOINT_CONVENTION = "coco17"  # rtmlib body = COCO 17점 (body variant 기본)
 # rtmlib lightweight body 백엔드 모델(자동 다운로드). detector는 yolox-tiny(사람탐지),
 # pose는 rtmpose-s. PRD의 RTMDet은 교체 가능 — 계약은 detector-agnostic.
 DETECTOR_NAME = "yolox_tiny_humanart"
 POSE_NAME = "rtmpose-s_body7"
 POSE_INPUT_SIZE = [192, 256]  # (w, h)
 HERE = Path(__file__).parent
+
+# pose variant 정의(6.0-10). hand-wrist 클립만 wholebody on-demand(나머지 body17).
+# wholebody는 133점 추출 후 body17+hand42=59만 저장(face·feet drop) — sourceIndices로 슬라이스.
+# body 값은 기존과 동일(회귀 0): modelVersion·convention·pose·hash 무변경.
+from keypoint_layout import TRIMMED_SOURCE_INDICES  # noqa: E402 — 단일 source(trimmed 레이아웃)
+POSE_VARIANTS = {
+    "body": {
+        "convention": "coco17", "nKpts": 17, "sourceIndices": None,
+        "detector": DETECTOR_NAME, "pose": POSE_NAME, "inputSize": POSE_INPUT_SIZE,
+        "modelName": "rtmlib:body:lightweight",
+    },
+    "wholebody": {
+        "convention": "wholebody133-trimmed", "nKpts": 133, "sourceIndices": TRIMMED_SOURCE_INDICES,
+        "detector": DETECTOR_NAME, "pose": "rtmw-dw-l-m", "inputSize": [192, 256],
+        "modelName": "rtmlib:wholebody:lightweight",
+    },
+}
 # 트래커 파라미터 폴백(PR D2a). 단일 source는 feature_config.json.tracking(PR D2b) — config 미존재 시 이 값.
 # 재현성을 위해 실제 사용 값을 preprocessConfigHash 입력에 포함한다.
 TRACK_IOU_THRESHOLD = 0.3
@@ -53,15 +70,14 @@ def load_tracking_params():
     return iou, max_age
 
 
-def load_model_shas():
+def load_model_shas(variant="body"):
     """recipe(§8.11)에 들어갈 (detectorSha256, poseSha256, weightsComplete)를 만든다(6.0-9).
-
-    실제 baked .onnx 파일의 sha256을 계산해 manifest 기대값과 일치할 때만 verified로 본다
-    (model_loader.verified_model_shas). dev 자동다운로드/오염/다른 모델이면 (None, None, False) —
-    manifest의 '정상 해시'를 맹신해 거짓 verified로 만들지 않는다(서버 apply 게이트가 fail-closed)."""
+    variant별 pose 모델(body→pose-body, wholebody→pose-wholebody)의 실제 baked .onnx sha256을
+    manifest 기대값과 대조해 일치할 때만 verified. dev 자동다운로드/오염/다른 모델이면 (None, None, False)
+    — manifest의 '정상 해시'를 맹신해 거짓 verified로 만들지 않는다(서버 apply 게이트가 fail-closed)."""
     try:
         from model_loader import verified_model_shas
-        return verified_model_shas()
+        return verified_model_shas(variant=variant)
     except (OSError, ValueError, ImportError):
         return None, None, False
 
@@ -145,7 +161,15 @@ def main():
     ap.add_argument("--max-frames", type=int, default=0, help="0 = all sampled frames")
     ap.add_argument("--frames-dir", default=None,
                     help="지정 시 각 샘플 프레임을 <frameIndex>.jpg로 저장(overlay 검수 게이트, best-effort)")
+    ap.add_argument("--pose-variant", choices=list(POSE_VARIANTS), default="body",
+                    help="body=coco17(기본) | wholebody=133점 추출→body17+hand42=59 저장(손목분석, 6.0-10)")
     args = ap.parse_args()
+    variant = args.pose_variant
+    vcfg = POSE_VARIANTS[variant]
+    convention = vcfg["convention"]
+    n_raw = vcfg["nKpts"]
+    # 저장 인덱스: wholebody는 trimmed(body17+hand42), body는 전체(0..16). 출력 keypoints 순서·개수를 결정.
+    store_idx = vcfg["sourceIndices"] if vcfg["sourceIndices"] is not None else list(range(n_raw))
 
     cap = cv2.VideoCapture(args.input)
     if not cap.isOpened():
@@ -157,7 +181,8 @@ def main():
     step = max(1, round(orig_fps / args.fps))
     actual_sampled_fps = orig_fps / step  # 정수 step 때문에 요청값과 다를 수 있음 — 실제값을 기록
 
-    body, _model_source = build_body()  # baked(에어갭) 우선, 없으면 dev 자동다운로드(6.0-9)
+    from model_loader import build_pose
+    body, _model_source = build_pose(variant)  # variant별 baked(에어갭) 우선, 없으면 dev 자동다운로드(6.0-9)
     track_iou, track_max_age = load_tracking_params()
     tracker = IoUTracker(iou_threshold=track_iou, max_age=track_max_age)
     blur_threshold = load_quality_blur_threshold()  # config에 있을 때만(기본 None=파생값 비활성)
@@ -189,13 +214,15 @@ def main():
             # 탐지된 사람이 있을 때만 pose 추정 — 탐지 0이면 빈 프레임(전체이미지 fallback 방지).
             if len(bboxes) > 0:
                 kpts, scores = body.pose_model(frame, bboxes=bboxes)
-                kpts = np.array(kpts).reshape(-1, 17, 2)
-                scores = np.array(scores).reshape(-1, 17)
+                kpts = np.array(kpts).reshape(-1, n_raw, 2)
+                scores = np.array(scores).reshape(-1, n_raw)
                 n = min(len(bboxes), kpts.shape[0])
                 for i in range(n):
                     bbox = xyxy_to_xywh(bboxes[i])
-                    kp_scores = [clamp01(scores[i, j]) for j in range(17)]
-                    keypoints = [[round(float(kpts[i, j, 0]), 2), round(float(kpts[i, j, 1]), 2), round(kp_scores[j], 4)] for j in range(17)]
+                    # store_idx로 슬라이스 — wholebody는 body17+hand42(face·feet drop), body는 0..16 전체.
+                    kp_scores = [clamp01(scores[i, j]) for j in store_idx]
+                    keypoints = [[round(float(kpts[i, j, 0]), 2), round(float(kpts[i, j, 1]), 2), round(sc, 4)]
+                                 for j, sc in zip(store_idx, kp_scores)]
                     persons.append({
                         "trackId": track_ids[i],  # 결정적 IoU 트래커 부여(PR D2a)
                         "bbox": [round(v, 2) for v in bbox],
@@ -233,11 +260,14 @@ def main():
             # usableFrameRatio = blur∪drop 제외 후 사용가능 비율(정보용 — overall·게이팅 미입력, 6.0-B2까지).
             quality["usableFrameRatio"] = round(max(0.0, 1.0 - min(1.0, blur_ratio + drop_ratio)), 4)
 
-    detector_sha256, pose_sha256, weights_complete = load_model_shas()
+    detector_sha256, pose_sha256, weights_complete = load_model_shas(variant)
+
+    # modelVersion: body는 기존값 유지(회귀 0), wholebody만 variant 접미사(bundle mdl: 구분 강화, 6.0-10).
+    model_version = f"rtmlib-{RTMLIB_VERSION}" if variant == "body" else f"rtmlib-{RTMLIB_VERSION}/{variant}"
 
     doc = {
         "schemaVersion": SCHEMA_VERSION,
-        "keypointConvention": KEYPOINT_CONVENTION,
+        "keypointConvention": convention,
         "coordinateSpace": "pixel",
         "frameWidth": width,
         "frameHeight": height,
@@ -249,17 +279,17 @@ def main():
             "totalFrames": total,
         },
         "model": {
-            "detector": DETECTOR_NAME,
-            "pose": POSE_NAME,
-            "inputSize": POSE_INPUT_SIZE,
-            "modelName": "rtmlib:body:lightweight",
-            "modelVersion": f"rtmlib-{RTMLIB_VERSION}",
+            "detector": vcfg["detector"],
+            "pose": vcfg["pose"],
+            "inputSize": vcfg["inputSize"],
+            "modelName": vcfg["modelName"],
+            "modelVersion": model_version,
             # recipe 재현성(6.0-9): 실제 실행 .onnx 가중치 해시. 미반입(PoC/dev)이면 null + weightsComplete=False.
             "detectorSha256": detector_sha256,
             "poseSha256": pose_sha256,
             "weightsComplete": weights_complete,
             "preprocessConfigHash": preprocess_config_hash(
-                args.fps, KEYPOINT_CONVENTION, DETECTOR_NAME, POSE_NAME, POSE_INPUT_SIZE,
+                args.fps, convention, vcfg["detector"], vcfg["pose"], vcfg["inputSize"],
                 {"iou": track_iou, "maxAge": track_max_age},  # 실제 사용 값(재현성)
                 {"blurThreshold": blur_threshold},  # quality threshold도 재현성 hash에 포함(D3a)
             ),

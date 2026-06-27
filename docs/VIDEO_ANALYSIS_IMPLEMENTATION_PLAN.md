@@ -206,10 +206,24 @@
       `test_model_loader.py` variant 케이스 3건. recipe 스키마 무변경(variant=poseSha256·model.pose로 식별).
     - [x] **검증**: Python(keypoint_layout·feature_calc·model_loader) PASS, TS typecheck 신규 0(기존 3건 pre-existing),
       vitest 계약 157 PASS, body17 회귀 0.
-  - [ ] **Stage B 모델 variant + 손목 feature**: rtmlib `Wholebody` smoke test 선행 / `build_pose(variant)` /
-    infer_clip `--pose-variant`(저장 시 face·feet drop, trimmed 직렬화) / 워커 `PROFILE_POSE_VARIANT` /
-    convention별 keypointIndex + 모든 keypoint 접근 missing-safe / `wrist_flexion_angle`·`wrist_deviation_angle` +
-    emit / feature_config 손목 블록 / featureKey·target 3종 candidate / mapping·feature_config 버전 bump.
+  - [x] **Stage B 모델 variant + 손목 feature**(브랜치 `feat/m4-6.0-10-wrist-stage-b`):
+    - [x] B0 rtmlib `Wholebody` smoke test(`test_wholebody_smoke.py`) — `pose_model(frame,bboxes=)`이 Body와 동일
+      인터페이스·`(N,133,*)` 확인(가중치 캐시 0.6s). `build_pose(variant)` 사용.
+    - [x] B0 infer_clip `--pose-variant {body,wholebody}`: variant별 convention·reshape(17|133), wholebody는
+      `TRIMMED_SOURCE_INDICES`로 슬라이스해 59점(body17+hand42)만 저장(face·feet drop), model.pose·modelVersion
+      (`rtmlib-x/wholebody`)·convention 기록. body 출력 무변경(회귀 0). 워커 `PROFILE_POSE_VARIANT`(hand-wrist→wholebody)
+      + `--pose-variant` 전달.
+    - [x] B1 feature_calc keypointIndex를 `keypoint_layout.KEYPOINT_INDEX_BY_CONVENTION`로 convention 선택 +
+      `KP.get`·`conf_for`·`visibility_for` 전부 `.get` missing-safe(body 클립의 hand key 부재 시 KeyError 없이 미산출).
+    - [x] B2 `wrist_flexion_angle`·`wrist_deviation_angle`(동일 2D 기하=`_wrist_bend_magnitude`, 중립 0°·굽힐수록 큼,
+      전완 vs 중지 MCP). 시점이 라벨 결정(Stage C 하드 게이트).
+    - [x] B3 feature_config 손목 3블록(반복 minCycleMs 200·minFps 15, 굴곡/편위 peak) + emit(`emit_repetition` 재사용 +
+      `emit_wrist_peak`). feature_config.version `e`→`f`.
+    - [x] B4 `FeatureKeySchema`·`VIDEO_FEATURE_TARGETS` 손목 3종(candidate, moduleId:'wrist') + clip_features.schema
+      enum + `VIDEO_MAPPING_CONFIG_VERSION` `pday-1.0.0`→`1.1.0` + shared/dist 재빌드.
+    - [x] **검증**: Python(model_loader 8·keypoint_layout·feature_calc+wrist·wholebody_smoke) PASS, 실클립 e2e
+      (body 17pt/coco17/손목없음, wholebody 59pt/trimmed/손목3 — 둘 다 schema valid), TS typecheck 신규 0,
+      vitest 계약 157·서버 91·클라 341 PASS, body17 회귀 0.
   - [ ] **Stage C UI profile 게이트·후보**: HAND_WRIST_FEATURE_KEYS 묶음 게이트 / flat 라벨(손목 반복·굴곡) /
     hand-wrist 옵션은 wrist 모듈 활성 시만+고부담 힌트 / 시점 하드 게이트(융합 단계: flexion=sagittal·deviation=frontal,
     non-preferred 드롭) / process-level `suppressedCandidates`(transient processEvidence) + UI 안내 / vvc 버전 bump.

@@ -27,6 +27,13 @@ const PROFILE_FPS: Record<string, number> = {
   'repetition-upper-limb': 12,
   'hand-wrist': 20,
 };
+// pose variant: hand-wrist 클립만 wholebody(133→trimmed 59) on-demand, 나머지는 body17(6.0-10).
+// 무거운 비용(CPU ~7x·RAM 2.2x)을 손목 클립에만 부과 — 추론은 클립당 별도 subprocess라 모델 매번 새 로드.
+const PROFILE_POSE_VARIANT: Record<string, string> = {
+  'posture-basic': 'body',
+  'repetition-upper-limb': 'body',
+  'hand-wrist': 'wholebody',
+};
 const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000;
 
 export interface InferenceResult {
@@ -107,12 +114,14 @@ async function defaultRunInference(
   clipPath: string, profile: string | null, targetSelection: TargetSelection | null, options?: RunInferenceOptions,
 ): Promise<InferenceResult> {
   const fps = PROFILE_FPS[profile ?? 'posture-basic'] ?? 5;
+  const poseVariant = PROFILE_POSE_VARIANT[profile ?? 'posture-basic'] ?? 'body';
   const scripts = config.video.scriptsDir;
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'va-job-'));
   try {
     const kpPath = path.join(work, 'keypoints.json');
     const cfPath = path.join(work, 'clip_features.json');
-    const inferArgs = [path.join(scripts, 'infer_clip.py'), '--input', clipPath, '--output', kpPath, '--fps', String(fps)];
+    const inferArgs = [path.join(scripts, 'infer_clip.py'), '--input', clipPath, '--output', kpPath,
+      '--fps', String(fps), '--pose-variant', poseVariant];
     // overlay 검수 게이트(privacy 예외): 샘플 프레임을 frameIndex별 JPEG로 저장(infer_clip best-effort).
     if (options?.framesDir) inferArgs.push('--frames-dir', options.framesDir);
     await execFileAsync(config.video.python, inferArgs, { timeout: PROCESSING_TIMEOUT_MS });

@@ -1,6 +1,6 @@
 {
-  "version": "feature-calc-2026-06-e",
-  "description": "feature 계산 규칙(6.0-6a~6b, 6.0-11). 각도 정의·임계값·OneEuro·품질·tracking 파라미터를 버전관리. 실제 임계값은 6.0-B2 검증으로 보정. (d) minHoldSec=0 — 임계 초과한 모든 프레임시간을 노출시간으로 합산(연속유지 요건 제거). peak는 순간 최대, duration은 노출 비율로 둘이 방향 일치. frame-drop(max_gap) 제외는 유지. (e) 어깨·팔꿈치 반복빈도(cycles/min) candidate 추가 — repetition_count 파라미터는 6.0-B2 미검증(잠정).",
+  "version": "feature-calc-2026-06-f",
+  "description": "feature 계산 규칙(6.0-6a~6b, 6.0-11, 6.0-10). 각도 정의·임계값·OneEuro·품질·tracking 파라미터를 버전관리. 실제 임계값은 6.0-B2 검증으로 보정. (d) minHoldSec=0 — 임계 초과한 모든 프레임시간을 노출시간으로 합산(연속유지 요건 제거). peak는 순간 최대, duration은 노출 비율로 둘이 방향 일치. frame-drop(max_gap) 제외는 유지. (e) 어깨·팔꿈치 반복빈도(cycles/min) candidate 추가 — repetition_count 파라미터는 6.0-B2 미검증(잠정). (f) 6.0-10 손목 반복빈도·굴곡/편위 peak candidate(wholebody 클립만, hand keypoint 필요) — 파라미터·정확도 6.0-B2 미검증.",
   "tracking": {
     "iouThreshold": 0.3,
     "maxAgeFrames": 10,
@@ -65,6 +65,24 @@
       "minAmplitudeDeg": 25, "hysteresisDeg": 6, "minCycleMs": 300, "minObservationMs": 3000,
       "minFpsForReliableRate": 10,
       "note": "팔꿈치 굴곡각(어깨-팔꿈치-손목)의 반복 사이클/분(phase-independent: 유효 half-swing 수/2). 좌/우 중 사이클 많은 쪽. minCycleMs=인접 turning-point 간 최소 간격. 파라미터는 6.0-B2 미검증(잠정)."
+    },
+    "wristRepetitionRate": {
+      "kind": "numeric", "metric": "cycles_per_minute", "unit": "cycles_per_minute", "mode": "candidate",
+      "type": "repetition",
+      "joint": "wrist", "angle": "wrist_flexion", "reduce": "max",
+      "minAmplitudeDeg": 15, "hysteresisDeg": 6, "minCycleMs": 200, "minObservationMs": 3000,
+      "minFpsForReliableRate": 15,
+      "note": "손목 굽힘각(전완 vs 손축, 중립=0°)의 반복 사이클/분(phase-independent). 손은 빠른 반복이라 minCycleMs·minAmplitudeDeg를 어깨/팔꿈치보다 작게, minFpsForReliableRate=15(hand-wrist 20fps). wholebody 클립에서만 산출(hand keypoint 필요). 파라미터·정확도는 6.0-B2 미검증(잠정)."
+    },
+    "wristFlexionPeakAngle": {
+      "kind": "numeric", "metric": "peak_angle", "unit": "degrees", "mode": "candidate",
+      "type": "wrist_bend",
+      "note": "손목 굴곡 크기 peak(중립=0°). 굴곡은 sagittal(측면) 클립에서 의미 → 클라 융합이 sagittal 시점에서만 노출(하드 게이트). 2D 단일평면이라 deviation과 동일 기하. 6.0-B2 미검증(잠정)."
+    },
+    "wristDeviationPeakAngle": {
+      "kind": "numeric", "metric": "peak_angle", "unit": "degrees", "mode": "candidate",
+      "type": "wrist_bend",
+      "note": "손목 요/척측 편위 크기 peak(중립=0°). 편위는 frontal(정면) 클립에서 의미 → 클라 융합이 frontal 시점에서만 노출(하드 게이트). flexion과 동일 기하 — 시점이 라벨 결정. 6.0-B2 미검증(잠정)."
     }
   }
 }
