@@ -36,17 +36,17 @@
     {
       "role": "pose-wholebody",
       "name": "rtmw-dw-l-m",
-      "file": null,
-      "sourceUrl": null,
-      "sourceArchiveSha256": null,
-      "onnxSha256": null,
+      "file": "rtmw-dw-l-m_simcc-cocktail14_270e-256x192_20231122.onnx",
+      "sourceUrl": "https://download.openmmlab.com/mmpose/v1/projects/rtmw/onnx_sdk/rtmw-dw-l-m_simcc-cocktail14_270e-256x192_20231122.zip",
+      "sourceArchiveSha256": "a6d08a575c9d8b8da7ce6c13e1c7341047fca35594a6d35de04b739eba51139c",
+      "onnxSha256": "68db326c5c6f3273456f803eae0faf5440478369f2c3ee67258d2f36512e8d76",
       "inputSize": [
         192,
         256
       ],
       "keypointConvention": "wholebody133-trimmed",
       "postprocessing": "SimCC",
-      "note": "6.0-10 손목분석 on-demand pose(hand-wrist 클립만). 추출 133점 중 body17+hand42=59만 저장(face·feet drop). file/sourceUrl/onnxSha256은 Stage D fetch-pose-weights.ps1로 확정(검증된 URL·해시 baking). 미반입 dev는 rtmlib Wholebody lightweight 자동 다운로드(recipe unverified)."
+      "note": "6.0-10 손목분석 on-demand pose(hand-wrist 클립만, rtmlib Wholebody lightweight). 추출 133점 중 body17+hand42=59만 저장(face·feet drop). detector는 pose-body와 공용(yolox_tiny 416). onnxSha256/sourceArchiveSha256은 scripts/fetch-pose-weights.ps1로 확정(에어갭 baking 전 온라인 PC 1회). 미반입 dev는 rtmlib가 ~/.cache로 자동 다운로드(recipe unverified)."
     }
   ],
   "note": "onnxSha256/sourceArchiveSha256는 scripts/fetch-pose-weights.ps1로 확정됨(weightsComplete=true). 추론 런타임은 manifest 값을 맹신하지 않고 실제 baked .onnx 해시를 다시 계산해 이 값과 대조한다 — 불일치(오염·다른 모델) 시 recipe unverified(fail-closed)."
