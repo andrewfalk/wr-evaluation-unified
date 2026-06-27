@@ -237,8 +237,16 @@
       flat "참고 후보"에 "측면=굴곡·정면=편위" 안내. **무대체 정책**(비-preferred 값으로 대체 안 함). `VIDEO_VIEWPOINT_CONFIG_VERSION` `vvc-0.1.0`→`0.2.0`.
     - [x] **검증**: typecheck 신규 0, build:web OK, vitest **789**(fusion 하드게이트 4·mock 시점 4·손목 pipeline 1 신규
       포함)·서버 91, lint 0 error(기존 warning 6), win7 호환(Array.includes/Set/Object.entries 베이스라인 내).
-  - [ ] **Stage D 에어갭 재패키징**: fetch-pose-weights 두 pose baking / 이미지 +114MB / export-offline-package
-    재빌드 / 운영 리허설(hand-wrist ~7× 실측·타임아웃·동시성).
+  - [~] **Stage D 에어갭 재패키징**(브랜치 `feat/m4-6.0-10-wrist-stage-d`) — 코드/가중치 prep 완료, 운영(docker/배포/리허설)은 실환경·B2 게이트:
+    - [x] D1 manifest `pose-wholebody` 실 file·sourceUrl(rtmw-dw-l-m, openmmlab) 기재. detector는 pose-body와 공용.
+    - [x] D2 `fetch-pose-weights.ps1` 실행 → detector·pose-body·pose-wholebody 셋 다 다운로드·sha 확정
+      (wholebody onnxSha256 `68db326c…`), `weightsComplete=true`, models/ 배치(gitignore). `build_pose('wholebody')`
+      baked·`verified_model_shas('wholebody')` verified=True 확인 + 실클립 infer recipe verified(modelVersion `rtmlib-0.0.15/wholebody`).
+      `export-offline-package.ps1` weightsComplete 가드는 models[] 제너릭 순회 → wholebody 자동 커버(코드 변경 0).
+    - [x] D3 `OFFLINE_DEPLOYMENT_PACKAGE.md` §14-1a(wholebody on-demand·+114MB·~7×·RAM 2.2×·.wslconfig) +
+      14-4 리허설에 "손목·손" 클립 별도 측정(타임아웃·동시성) 추가.
+    - [ ] **운영(실환경·B2 게이트, 미실행)**: docker 이미지 재빌드(+114MB) · export-offline-package zip · 서버 재배포 ·
+      hand-wrist 클립 ~7× 처리시간·피크 RAM 실측. 이 sandbox에서 검증 불가 → 배포 시점에 수행.
   - [ ] **병행 트랙**: bench_pose.py 컨테이너화(RAM OS분기·--pose-path·docker cpus) 서버 절대 실측.
 - [x] **6.0-11 어깨·팔꿈치 반복빈도(cycles/min) candidate** (신규 변수 — SI efforts/min·OCRA 계열).
   영상이 직접 재는 intrinsic cycles/min을 **candidate(참고용, 모듈 자동입력 없음)** 로 노출. body17 기반
