@@ -21,12 +21,20 @@ const MOCK_VALUES = {
   suspectedKneeTwist: true,
   shoulderRepetitionRate: 14, // cycles/min (6.0-11 candidate)
   elbowRepetitionRate: 22, // cycles/min
+  // 6.0-10 손목(wholebody=hand-wrist profile만). 굴곡/편위는 시점이 라벨 결정 → 보기용 다른 값.
+  wristRepetitionRate: 28, // cycles/min
+  wristFlexionPeakAngle: 42, // degrees (sagittal 클립에서만 노출)
+  wristDeviationPeakAngle: 18, // degrees (frontal 클립에서만 노출)
 };
 
 // 반복빈도 feature는 fps가 높은 상지반복/손목 profile에서만 의미 있음(저fps는 Nyquist 언더카운트).
 // 그 외 profile(자세시간)에서는 산출·표시하지 않는다(6.0-11). 단일 source — UI 필터도 이 상수를 쓴다.
 export const REPETITION_FEATURE_KEYS = new Set(['shoulderRepetitionRate', 'elbowRepetitionRate']);
 export const REPETITION_PROFILES = new Set(['repetition-upper-limb', 'hand-wrist']);
+// 손목 feature(반복+굴곡/편위)는 wholebody pose가 필요 → hand-wrist profile에서만 산출(6.0-10).
+export const HAND_WRIST_FEATURE_KEYS = new Set([
+  'wristRepetitionRate', 'wristFlexionPeakAngle', 'wristDeviationPeakAngle',
+]);
 
 // 신뢰도: auto(높음) / auto-review(중간) / candidate(낮음). 결정적 placeholder —
 // 실제 임계값은 6.0-B2 검증으로 확정(§8.9).
@@ -40,6 +48,9 @@ export const CANDIDATE_REASONS = {
   neckCombinedFlexRot: '회전·복합자세는 2D 저신뢰 — 임계 미만 제안 금지',
   shoulderRepetitionRate: '어깨 상완거상 반복 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
   elbowRepetitionRate: '팔꿈치 굴곡 반복 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
+  wristRepetitionRate: '손목 굽힘 반복 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
+  wristFlexionPeakAngle: '손목 굴곡 peak 추정(참고용·측면 클립) — 자동입력 금지, 임계 6.0-B2 미검증',
+  wristDeviationPeakAngle: '손목 요/척측 편위 peak 추정(참고용·정면 클립) — 자동입력 금지, 임계 6.0-B2 미검증',
 };
 
 function buildFeatureValue(featureKey) {
@@ -83,10 +94,12 @@ function buildFeatureValue(featureKey) {
  * @returns {Object} VideoFeatureMap (featureKey → VideoFeatureValue)
  */
 export function generateMockFeatures(requestedFeatures = [], profile = 'posture-basic') {
-  const repOk = REPETITION_PROFILES.has(profile); // 반복 feature는 상지반복/손목 profile에서만
+  const repOk = REPETITION_PROFILES.has(profile); // 반복(어깨/팔꿈치)은 상지반복/손목 profile에서만
+  const handWristOk = profile === 'hand-wrist';   // 손목(wholebody)은 hand-wrist profile에서만(6.0-10)
   const map = {};
   for (const key of requestedFeatures) {
     if (REPETITION_FEATURE_KEYS.has(key) && !repOk) continue;
+    if (HAND_WRIST_FEATURE_KEYS.has(key) && !handWristOk) continue;
     const value = buildFeatureValue(key);
     if (value) map[key] = value;
   }

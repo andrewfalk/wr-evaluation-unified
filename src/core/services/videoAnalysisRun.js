@@ -83,7 +83,7 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
       }
       if (failed) continue;
       // 시점 융합(§8.6.1, intrinsic 단계) → per-day 1회 환산(공정의 다중 시점 클립은 동일 activeMinutesPerDay).
-      const { fused, evidenceByFeatureKey: fusionEvidence } = fuseClipFeatureSetsWithEvidence(fusionEntries);
+      const { fused, evidenceByFeatureKey: fusionEvidence, suppressedCandidates } = fuseClipFeatureSetsWithEvidence(fusionEntries);
       const conv = convertClipFeaturesToPerDay(fused, p.activeMinutesPerDay, { allowedFeatureKeys: requested });
       // analysisJobIds[]로 provenance 운반(D3b — 융합 시 복수 job). jobId는 하위호환(첫 job).
       processFeatures.push({ processId: p.id, jobId: jobIds[0], analysisJobIds: jobIds, features: conv.features });
@@ -92,7 +92,8 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
       for (const [key, ev] of Object.entries(conv.evidenceByFeatureKey || {})) {
         evidenceByFeatureKey[key] = fusionEvidence && fusionEvidence[key] ? { ...ev, fusion: fusionEvidence[key] } : ev;
       }
-      processEvidence.push({ processId: p.id, analysisJobIds: jobIds, evidenceByFeatureKey });
+      // suppressedCandidates: 시점 하드 게이트로 드롭된 손목 각도(process-level 안내, 6.0-10). transient — 영속 안 함.
+      processEvidence.push({ processId: p.id, analysisJobIds: jobIds, evidenceByFeatureKey, suppressedCandidates });
       if (conv.missingActiveTime.length > 0) missingActiveTime[p.id] = conv.missingActiveTime;
       bundleVersion = buildRecipeVersion(conv.featureConfigVersion);
     } catch (e) {

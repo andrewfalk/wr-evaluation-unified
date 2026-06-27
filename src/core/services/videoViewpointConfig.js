@@ -21,7 +21,46 @@ export const PREFERRED_VIEWPOINT = {
   overheadHours: 'frontal',
   neckCombinedFlexRot: 'frontal',
   suspectedKneeTwist: 'frontal',
+  // 6.0-10 손목: 굴곡=측면(sagittal), 요/척측 편위=정면(frontal). 둘은 동일 2D 기하라 시점이 라벨을 가른다.
+  wristFlexionPeakAngle: 'sagittal',
+  wristDeviationPeakAngle: 'frontal',
 };
+
+// 시점 하드 게이트(6.0-10): 이 featureKey들은 소프트 viewpointComponent 가중이 아니라, preferred 시점
+// 클립에서만 융합에 기여하고 non-preferred 시점에선 **드롭**한다(같은 2D 값이 굴곡·편위 둘로 보이는 것 방지).
+// 일반 feature(어깨/체간 등)는 여기에 없으므로 기존 소프트 시점 로직 그대로.
+export const VIEWPOINT_HARD_GATED_KEYS = new Set(['wristFlexionPeakAngle', 'wristDeviationPeakAngle']);
+
+/** 이 featureKey가 시점 하드 게이트 대상이고, 이 시점이 preferred가 아니면 true(융합에서 드롭). */
+export function isViewpointDropped(viewpoint, featureKey) {
+  if (!VIEWPOINT_HARD_GATED_KEYS.has(featureKey)) return false;
+  const pref = PREFERRED_VIEWPOINT[featureKey];
+  return !!pref && viewpoint !== pref;
+}
+
+/**
+ * mock 경로용 시점 하드 게이트(서버 융합과 동형). 공정의 클립 시점 집합 기준으로, 하드 게이트 feature는
+ * preferred 시점 클립이 있을 때만 유지하고 없으면 드롭 + suppressed로 보고한다(같은 2D 값의 이중 노출 방지).
+ * @param {object} features - featureKey → VideoFeatureValue
+ * @param {string[]} availableViewpoints - 그 공정 클립들의 시점 목록
+ * @returns {{ features: object, suppressedCandidates: Array<{featureKey,reason,preferred}> }}
+ */
+export function gateFeaturesByViewpoint(features, availableViewpoints) {
+  const avail = new Set(availableViewpoints || []);
+  const kept = {};
+  const suppressedCandidates = [];
+  for (const [key, val] of Object.entries(features || {})) {
+    if (VIEWPOINT_HARD_GATED_KEYS.has(key)) {
+      const pref = PREFERRED_VIEWPOINT[key];
+      if (pref && !avail.has(pref)) {
+        suppressedCandidates.push({ featureKey: key, reason: 'NON_PREFERRED_VIEWPOINT', preferred: pref });
+        continue;
+      }
+    }
+    kept[key] = val;
+  }
+  return { features: kept, suppressedCandidates };
+}
 
 // featureKey별 INTER_VIEW_CONFLICT 임계값(같은 featureKey 두 시점 값 차이). 기본 전부 비활성(null).
 // 실값은 6.0-B2 검증으로 확정 — 검증 전 추측값으로 경고/저신뢰 처리하지 않는다.

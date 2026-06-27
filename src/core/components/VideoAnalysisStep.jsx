@@ -3,7 +3,8 @@
 // 서버 경로(clip→job→apply, audit·영속화)로, 그 외는 로컬로 처리한다(§8.2/§8.12).
 // 실제 추론은 M2에서 서버 셸에 연결된다.
 import { useMemo, useState, useRef, useEffect } from 'react';
-import { generateMockFeatures, REPETITION_FEATURE_KEYS, REPETITION_PROFILES } from '../services/videoMock';
+import { generateMockFeatures, REPETITION_FEATURE_KEYS, REPETITION_PROFILES, HAND_WRIST_FEATURE_KEYS } from '../services/videoMock';
+import { gateFeaturesByViewpoint } from '../services/videoViewpointConfig';
 import { aggregateProcessFeatures, getAggregationMethod } from '../services/videoAggregate';
 import {
   getModuleSuggestions,
@@ -270,11 +271,15 @@ export function excludeTaskScopeCandidates(candidateFeatures = [], taskScopeModu
  * 알 수 없는 featureKey는 null 반환 → 호출측이 기존 generic 렌더(featureKey: value) 유지.
  */
 export function flatCandidateLabel(c) {
+  const n = Math.round((Number(c.value) || 0) * 10) / 10;
   if (REPETITION_FEATURE_KEYS.has(c.featureKey)) {
     const part = c.featureKey === 'shoulderRepetitionRate' ? '어깨' : '팔꿈치';
-    const n = Math.round((Number(c.value) || 0) * 10) / 10;
     return `${part} 반복: 약 ${n} 회/분`;
   }
+  // 6.0-10 손목: 반복(회/분)·굴곡/편위(°).
+  if (c.featureKey === 'wristRepetitionRate') return `손목 반복: 약 ${n} 회/분`;
+  if (c.featureKey === 'wristFlexionPeakAngle') return `손목 굴곡(최대): 약 ${n}°`;
+  if (c.featureKey === 'wristDeviationPeakAngle') return `손목 요/척측 편위(최대): 약 ${n}°`;
   return null;
 }
 
@@ -375,7 +380,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   const [uploads, setUploads] = useState({}); // { [clipMetaId]: {...} }
   // 근거 패널(B2 선행): "왜 이 값?" evidence. **transient만** — shared.videoAnalysis에 저장 안 함(영속화 차단).
   // 새로고침/환자전환/입력변경 시 사라짐(의도) → 부재 제안행은 fallback 안내.
-  const [analysisEvidence, setAnalysisEvidence] = useState({ jobEvidenceBySharedJobId: {}, processEvidenceByProcessId: {} });
+  const [analysisEvidence, setAnalysisEvidence] = useState({ jobEvidenceBySharedJobId: {}, processEvidenceByProcessId: {}, suppressedCandidates: [] });
   const [expandedEvidence, setExpandedEvidence] = useState(null); // 펼친 제안 키 `${sharedJobId}:${featureKey}`
   // 골격 검수 overlay(6.0-8): transient — overlay 데이터 캐시는 jobId→{loading,data,error,closed},
   // 펼친 패널은 row+job 복합키 1개(같은 job을 쓰는 여러 feature 행에서 패널 중복 노출 방지). 영속화 안 함.
@@ -385,7 +390,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   // 직업에 그 모듈 task가 1개면 자동, 여러 개면 사용자가 선택. 환자 전환 시 reset.
   const [taskTargets, setTaskTargets] = useState({});
   const resetEvidence = () => {
-    setAnalysisEvidence({ jobEvidenceBySharedJobId: {}, processEvidenceByProcessId: {} });
+    setAnalysisEvidence({ jobEvidenceBySharedJobId: {}, processEvidenceByProcessId: {}, suppressedCandidates: [] });
     setExpandedEvidence(null);
     setOverlayByJob({});
     setExpandedOverlay(null);
@@ -549,16 +554,30 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     const jobFeatures = buildJobFeatures(va.processes, processFeatures, { absolutePerDay });
     const candidateFeatures = processFeatures.flatMap((pf) => {
       const cands = collectCandidateFeatures(pf.features, { processIds: [pf.processId] });
-      // 반복빈도 candidate는 해당 공정 profile이 상지반복/손목일 때만 노출(저fps 자세 profile은 미신뢰).
+      // 반복빈도(어깨/팔꿈치)는 상지반복/손목 profile에서만, 손목(반복+각도)은 손목 profile에서만 노출
+      // (저fps·비-wholebody profile은 미신뢰). 6.0-11/6.0-10.
       const profile = (va.processes.find((p) => p.id === pf.processId) || {}).analysisProfile;
-      if (REPETITION_PROFILES.has(profile)) return cands;
-      return cands.filter((c) => !REPETITION_FEATURE_KEYS.has(c.featureKey));
+      return cands.filter((c) => {
+        if (REPETITION_FEATURE_KEYS.has(c.featureKey)) return REPETITION_PROFILES.has(profile);
+        if (HAND_WRIST_FEATURE_KEYS.has(c.featureKey)) return profile === 'hand-wrist';
+        return true;
+      });
     });
     updateVA((v) => ({ ...v, processFeatures, jobFeatures, candidateFeatures }));
     // evidence는 transient state(영속화 차단). job-scope=직업단위, task-scope=공정단위 lookup map.
     const jobEvidenceBySharedJobId = buildJobEvidence(va.processes, processFeatures, processEvidence);
     const processEvidenceByProcessId = buildProcessEvidence(va.processes, processFeatures, processEvidence);
-    setAnalysisEvidence({ jobEvidenceBySharedJobId, processEvidenceByProcessId });
+    // 시점 하드 게이트로 드롭된 손목 각도 안내(process-level → flat 집계, featureKey 중복 제거). transient.
+    const suppressedCandidates = [];
+    const seenSuppressed = new Set();
+    for (const pe of processEvidence) {
+      for (const s of pe.suppressedCandidates || []) {
+        if (seenSuppressed.has(s.featureKey)) continue;
+        seenSuppressed.add(s.featureKey);
+        suppressedCandidates.push(s);
+      }
+    }
+    setAnalysisEvidence({ jobEvidenceBySharedJobId, processEvidenceByProcessId, suppressedCandidates });
   };
 
   // ── 분석 실행 ── 서버 모드=fixture 실추론+per-day 환산, 그 외=mock. 적용과 분리(추론은 여기서만).
@@ -568,13 +587,19 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     resetEvidence(); // 새 분석 시작 → 이전 근거 비움(성공 시 commitAnalysis가 다시 채움)
     if (!serverMode) {
       const requested = requestedFeaturesForModules(activeModules);
-      const processFeatures = va.processes.map((p) => ({
-        processId: p.id,
-        features: generateMockFeatures(requested, p.analysisProfile),
-      }));
+      // mock도 서버 융합과 동형으로 공정의 클립 시점 집합 기준 손목 각도 하드 게이트(6.0-10).
+      const processFeatures = [];
+      const processEvidence = [];
+      for (const p of va.processes) {
+        const raw = generateMockFeatures(requested, p.analysisProfile);
+        const viewpoints = (va.clips || []).filter((c) => c.processId === p.id).map((c) => c.viewpoint);
+        const { features, suppressedCandidates } = gateFeaturesByViewpoint(raw, viewpoints);
+        processFeatures.push({ processId: p.id, features });
+        if (suppressedCandidates.length > 0) processEvidence.push({ processId: p.id, analysisJobIds: [], suppressedCandidates });
+      }
       setAnalysisBundle(MOCK_BUNDLE);
       setAnalysisRecipes({}); // mock 경로는 서버 recipe 없음(로컬 적용은 검증 게이트 미적용).
-      commitAnalysis(processFeatures);
+      commitAnalysis(processFeatures, { processEvidence });
       return;
     }
     setAnalyzing(true);
@@ -928,9 +953,18 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                       <input type="number" min="0" max="1440" placeholder="분/일" value={p.activeMinutesPerDay ?? ''}
                         onChange={(e) => editProcess(p.id, { activeMinutesPerDay: e.target.value === '' ? null : Number(e.target.value) })} /></div>
                     <div className="form-group"><label>분석 프로필</label>
+                      {/* 손목·손(고프레임)은 wholebody 추론이 무거워(처리 느림·서버 부하) 손목 모듈 활성 시에만 노출.
+                          단, 이미 그 프로필로 저장된 공정은 폴백으로 옵션 유지(선택 보존). 6.0-10. */}
                       <select value={p.analysisProfile} onChange={(e) => editProcess(p.id, { analysisProfile: e.target.value })}>
-                        {PROFILES.map((pr) => <option key={pr.value} value={pr.value}>{pr.label}</option>)}
-                      </select></div>
+                        {PROFILES.filter((pr) => pr.value !== 'hand-wrist'
+                          || activeModules.includes('wrist') || p.analysisProfile === 'hand-wrist')
+                          .map((pr) => <option key={pr.value} value={pr.value}>{pr.label}</option>)}
+                      </select>
+                      {p.analysisProfile === 'hand-wrist' && (
+                        <p className="muted" style={{ fontSize: 11, marginTop: 2, color: 'var(--color-warning)' }}>
+                          ⚠ 고부담(처리 느림·서버 부하) — 손목·손 분석이 필요한 공정에만 사용
+                        </p>
+                      )}</div>
                     <div className="form-group"><label>&nbsp;</label>
                       <button type="button" className="btn btn-secondary btn-sm" onClick={() => removeProcess(p.id)}>공정 삭제</button></div>
                   </div>
@@ -1113,9 +1147,11 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
         {/* 4) candidate (참고만) — task-scope 모듈(경추·척추) candidate는 위 "작업 단위"에서 표시하므로 제외 */}
         {(() => {
           const flatCandidates = excludeTaskScopeCandidates(va.candidateFeatures || [], taskScopeModules);
-          return flatCandidates.length > 0 && (
+          const suppressed = analysisEvidence.suppressedCandidates || [];
+          return (flatCandidates.length > 0 || suppressed.length > 0) && (
           <div className="va-suggest-group">
             <div className="va-suggest-group-title">참고 후보 (자동입력 금지)</div>
+            {flatCandidates.length > 0 && (
             <ul style={{ margin: 0, paddingLeft: 18 }}>
               {flatCandidates.map((c, i) => {
                 const label = flatCandidateLabel(c);
@@ -1128,6 +1164,13 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                 );
               })}
             </ul>
+            )}
+            {/* 시점 하드 게이트 안내(6.0-10): 손목 굴곡/편위는 같은 2D 값이라 시점별로만 노출 */}
+            {suppressed.length > 0 && (
+              <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
+                손목 각도는 측면 클립에서 굴곡만, 정면 클립에서 편위만 표시됩니다 — 해당 시점 클립이 없어 일부 후보는 숨겨졌습니다.
+              </p>
+            )}
           </div>
           );
         })()}

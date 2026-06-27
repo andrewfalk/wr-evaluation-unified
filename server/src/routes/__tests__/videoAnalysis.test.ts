@@ -487,7 +487,7 @@ describe('POST /jobs/:jobId/apply', () => {
     status: 'verified', modelVersion: 'rtmlib-0.0.15',
     detectorSha256: 'a'.repeat(64), poseSha256: 'b'.repeat(64),
     preprocessConfigHash: 'pch', featureConfigVersion: 'fc-1',
-    mappingConfigVersion: 'pday-1.1.0', viewpointConfigVersion: 'vvc-0.1.0', codeCommit: 'abc1234',
+    mappingConfigVersion: 'pday-1.1.0', viewpointConfigVersion: 'vvc-0.2.0', codeCommit: 'abc1234',
   };
   const appliedEntry = (over: Record<string, unknown> = {}) => ({
     moduleId: 'shoulder', targetPath: 'modules.shoulder.jobExtras[sharedJobId=j1].overheadHours',

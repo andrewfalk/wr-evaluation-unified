@@ -14,6 +14,7 @@ import '../../../modules/spine';
 import '../../../modules/cervical';
 
 import { generateMockFeatures } from '../videoMock.js';
+import { gateFeaturesByViewpoint } from '../videoViewpointConfig.js';
 import { aggregateProcessFeatures, getAggregationMethod } from '../videoAggregate.js';
 import {
   getModuleSuggestions,
@@ -85,6 +86,56 @@ describe('generateMockFeatures', () => {
     expect(rep.shoulderRepetitionRate.autoSuggestAllowed).toBe(false);
     expect(() => VideoFeatureValueSchema.parse(rep.shoulderRepetitionRate)).not.toThrow();
     expect(generateMockFeatures(req, 'hand-wrist').elbowRepetitionRate.kind).toBe('candidate');
+  });
+
+  it('손목 feature(6.0-10)는 hand-wrist profile에서만, candidate kind, contract-valid', () => {
+    const req = ['overheadHours', 'wristRepetitionRate', 'wristFlexionPeakAngle', 'wristDeviationPeakAngle'];
+    // 자세·상지반복 profile → 손목 feature 제외(wholebody 미사용).
+    expect(generateMockFeatures(req, 'posture-basic').wristRepetitionRate).toBeUndefined();
+    expect(generateMockFeatures(req, 'repetition-upper-limb').wristFlexionPeakAngle).toBeUndefined();
+    // hand-wrist profile → 포함(candidate).
+    const hw = generateMockFeatures(req, 'hand-wrist');
+    expect(hw.wristRepetitionRate.kind).toBe('candidate');
+    expect(hw.wristRepetitionRate.autoSuggestAllowed).toBe(false);
+    expect(() => VideoFeatureValueSchema.parse(hw.wristFlexionPeakAngle)).not.toThrow();
+  });
+});
+
+describe('gateFeaturesByViewpoint (6.0-10 mock 시점 하드 게이트)', () => {
+  const wristFeatures = () => ({
+    wristRepetitionRate: { kind: 'candidate', value: 28, reason: 'r', confidence: 0.5, autoSuggestAllowed: false, requiresManualReview: true, warnings: [] },
+    wristFlexionPeakAngle: { kind: 'candidate', value: 42, reason: 'r', confidence: 0.5, autoSuggestAllowed: false, requiresManualReview: true, warnings: [] },
+    wristDeviationPeakAngle: { kind: 'candidate', value: 18, reason: 'r', confidence: 0.5, autoSuggestAllowed: false, requiresManualReview: true, warnings: [] },
+  });
+
+  it('sagittal 클립만 → 굴곡 유지·편위 드롭(suppressed), 반복은 시점 무관 유지', () => {
+    const { features, suppressedCandidates } = gateFeaturesByViewpoint(wristFeatures(), ['sagittal']);
+    expect(features.wristFlexionPeakAngle).toBeDefined();
+    expect(features.wristRepetitionRate).toBeDefined();
+    expect(features.wristDeviationPeakAngle).toBeUndefined();
+    expect(suppressedCandidates).toEqual([{ featureKey: 'wristDeviationPeakAngle', reason: 'NON_PREFERRED_VIEWPOINT', preferred: 'frontal' }]);
+  });
+
+  it('frontal 클립만 → 편위 유지·굴곡 드롭', () => {
+    const { features, suppressedCandidates } = gateFeaturesByViewpoint(wristFeatures(), ['frontal']);
+    expect(features.wristDeviationPeakAngle).toBeDefined();
+    expect(features.wristFlexionPeakAngle).toBeUndefined();
+    expect(suppressedCandidates).toEqual([{ featureKey: 'wristFlexionPeakAngle', reason: 'NON_PREFERRED_VIEWPOINT', preferred: 'sagittal' }]);
+  });
+
+  it('sagittal+frontal → 둘 다 유지, suppressed 없음', () => {
+    const { features, suppressedCandidates } = gateFeaturesByViewpoint(wristFeatures(), ['sagittal', 'frontal']);
+    expect(features.wristFlexionPeakAngle).toBeDefined();
+    expect(features.wristDeviationPeakAngle).toBeDefined();
+    expect(suppressedCandidates).toEqual([]);
+  });
+
+  it('other/unknown 시점만 → 굴곡·편위 둘 다 드롭(반복만 유지)', () => {
+    const { features, suppressedCandidates } = gateFeaturesByViewpoint(wristFeatures(), ['other']);
+    expect(features.wristRepetitionRate).toBeDefined();
+    expect(features.wristFlexionPeakAngle).toBeUndefined();
+    expect(features.wristDeviationPeakAngle).toBeUndefined();
+    expect(suppressedCandidates.map((s) => s.featureKey).sort()).toEqual(['wristDeviationPeakAngle', 'wristFlexionPeakAngle']);
   });
 });
 
