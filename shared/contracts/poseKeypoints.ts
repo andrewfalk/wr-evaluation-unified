@@ -9,7 +9,8 @@ import { z } from 'zod';
 //   - Python: schema/keypoints.schema.json으로 산출물 검증(validate_keypoints.py, opt-in)
 // ---------------------------------------------------------------------------
 
-export const KeypointConventionSchema = z.enum(['coco17', 'wholebody133']);
+// wholebody133-trimmed(59점) = body17 + hand42 — face68·feet6은 추출 후 drop(privacy + 손목분석 무용, 6.0-10).
+export const KeypointConventionSchema = z.enum(['coco17', 'wholebody133', 'wholebody133-trimmed']);
 export const CoordinateSpaceSchema = z.enum(['pixel', 'normalized']);
 
 // 영상 품질 메타 (6.0-6b, PR D3a, §8.8). infer_clip.py가 프레임 읽기 단계에서 산출.
@@ -75,7 +76,8 @@ export const PoseModelSchema = z.object({
   }
 });
 
-const KEYPOINT_COUNT = { coco17: 17, wholebody133: 133 };
+// 저장 keypoint 개수(=superRefine 강제값). wholebody133-trimmed는 body17(17)+hand42(42)=59.
+export const KEYPOINT_COUNT = { coco17: 17, wholebody133: 133, 'wholebody133-trimmed': 59 };
 
 export const PoseKeypointsSchema = z.object({
   schemaVersion: z.literal(1),

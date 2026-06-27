@@ -8,7 +8,7 @@
   "required": ["schemaVersion", "keypointConvention", "coordinateSpace", "frameWidth", "frameHeight", "requestedFps", "sampledFps", "source", "model", "frames"],
   "properties": {
     "schemaVersion": { "const": 1 },
-    "keypointConvention": { "enum": ["coco17", "wholebody133"] },
+    "keypointConvention": { "enum": ["coco17", "wholebody133", "wholebody133-trimmed"] },
     "coordinateSpace": { "enum": ["pixel", "normalized"] },
     "frameWidth": { "type": "integer", "exclusiveMinimum": 0 },
     "frameHeight": { "type": "integer", "exclusiveMinimum": 0 },
