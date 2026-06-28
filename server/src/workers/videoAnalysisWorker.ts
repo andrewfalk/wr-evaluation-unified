@@ -34,7 +34,10 @@ const PROFILE_POSE_VARIANT: Record<string, string> = {
   'repetition-upper-limb': 'body',
   'hand-wrist': 'wholebody',
 };
-const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000;
+// feature_calc subprocess가 의미있게 돌 최소 잔여시간(ms). deadline에서 infer_clip 소요를 뺀 잔여가
+// 이보다 작으면 feature_calc를 시작하지 않고 즉시 DEADLINE_EXCEEDED 처리한다(6.0-12). 두 subprocess 합이
+// jobDeadlineMs를 넘지 않도록 보장. 2초는 큰 keypoints 출력에서 빠듯할 수 있어 5초.
+const FEATURE_PHASE_MIN_MS = 5000;
 
 export interface InferenceResult {
   clipFeatures: unknown; // ClipFeatureSetSchema 통과값
@@ -120,11 +123,14 @@ async function defaultRunInference(
   try {
     const kpPath = path.join(work, 'keypoints.json');
     const cfPath = path.join(work, 'clip_features.json');
+    // 전체 job deadline(6.0-12). infer_clip + feature_calc 두 subprocess의 합이 이를 넘지 않도록 잔여시간을 분배한다.
+    const deadlineMs = config.video.jobDeadlineMs;
+    const phaseStart = Date.now();
     const inferArgs = [path.join(scripts, 'infer_clip.py'), '--input', clipPath, '--output', kpPath,
       '--fps', String(fps), '--pose-variant', poseVariant];
     // overlay 검수 게이트(privacy 예외): 샘플 프레임을 frameIndex별 JPEG로 저장(infer_clip best-effort).
     if (options?.framesDir) inferArgs.push('--frames-dir', options.framesDir);
-    await execFileAsync(config.video.python, inferArgs, { timeout: PROCESSING_TIMEOUT_MS });
+    await execFileAsync(config.video.python, inferArgs, { timeout: deadlineMs });
     // 매핑은 keypoints가 나와야 가능 → infer_clip 후에 처리. 선택 있으면 박스→트랙(실패 시 throw → job error).
     const kpRaw = fs.readFileSync(kpPath, 'utf-8');
     const kpDoc = JSON.parse(kpRaw) as {
@@ -137,11 +143,16 @@ async function defaultRunInference(
       };
       frames?: KpFrame[];
     };
+    // 잔여 deadline을 feature_calc에 부여. 충분히 안 남았으면 시작 자체를 막아 deadline 초과를 차단(6.0-12).
+    const remainingMs = deadlineMs - (Date.now() - phaseStart);
+    if (remainingMs <= FEATURE_PHASE_MIN_MS) {
+      throw Object.assign(new Error('job deadline exceeded before feature calculation'), { code: 'DEADLINE_EXCEEDED' });
+    }
     const featureArgs = [path.join(scripts, 'feature_calc.py'), '--keypoints', kpPath, '--output', cfPath];
     if (targetSelection) {
       featureArgs.push('--target-track', mapTargetTrack(kpDoc, targetSelection));
     }
-    await execFileAsync(config.video.python, featureArgs, { timeout: PROCESSING_TIMEOUT_MS });
+    await execFileAsync(config.video.python, featureArgs, { timeout: remainingMs });
     const cfRaw = fs.readFileSync(cfPath, 'utf-8');
     const clipFeatures = ClipFeatureSetSchema.parse(JSON.parse(cfRaw)); // 신뢰 경계 — 계약 검증
     const m = kpDoc?.model ?? {};
@@ -306,10 +317,13 @@ async function resolveTargetSelection(pool: Pool, clipId: string): Promise<Targe
 // 정체/타임아웃 정리(최소 TTL): processing 타임아웃 → error, queued 정체 → expired.
 // review_pending은 검수 보존을 위해 자동 만료 제외(적용 시 done 전이는 apply 핸들러가 담당).
 async function sweepStale(pool: Pool): Promise<void> {
+  // 6.0-12: sweep 임계 = jobDeadlineMs + sweepGraceMs(단일 진실원천에서 파생). 추론 subprocess가 deadline까지
+  // 정상 처리 중인 job을 조기에 죽이지 않도록 grace를 더한다. SQL 리터럴 대신 바인딩 파라미터.
   await pool.query(
     `UPDATE video_analysis_jobs
        SET status = 'error', error_code = 'TIMEOUT', error_message = 'processing exceeded timeout'
-     WHERE status = 'processing' AND updated_at < now() - interval '5 minutes'`,
+     WHERE status = 'processing' AND updated_at < now() - ($1 * interval '1 millisecond')`,
+    [config.video.jobDeadlineMs + config.video.sweepGraceMs],
   );
   await pool.query(
     `UPDATE video_analysis_jobs SET status = 'expired'

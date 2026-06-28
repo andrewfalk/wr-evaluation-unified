@@ -80,16 +80,28 @@ describe('videoAnalysisClient — platform gating', () => {
       .mockResolvedValueOnce({ jobId: 'j1', status: 'queued' })
       .mockResolvedValueOnce({ jobId: 'j1', status: 'processing' })
       .mockResolvedValueOnce({ jobId: 'j1', status: 'review_pending', resultFeatures: { features: {} } });
-    const out = await pollJob('j1', intranet, { intervalMs: 0, maxAttempts: 10 });
+    const out = await pollJob('j1', intranet, { intervalMs: 0 });
     expect(out.status).toBe('review_pending');
     expect(requestJson).toHaveBeenCalledTimes(3);
   });
 
   it('pollJob stops on error status', async () => {
     requestJson.mockResolvedValueOnce({ jobId: 'j1', status: 'error', errorCode: 'INFERENCE_ERROR' });
-    const out = await pollJob('j1', intranet, { intervalMs: 0, maxAttempts: 5 });
+    const out = await pollJob('j1', intranet, { intervalMs: 0 });
     expect(out.status).toBe('error');
     expect(requestJson).toHaveBeenCalledTimes(1);
+  });
+
+  it('pollJob throws POLL_TIMEOUT(queued) when queue wait budget is exhausted', async () => {
+    requestJson.mockResolvedValue({ jobId: 'j1', status: 'queued' });
+    await expect(pollJob('j1', intranet, { intervalMs: 0, queueWaitMs: -1 }))
+      .rejects.toMatchObject({ code: 'POLL_TIMEOUT', timeoutPhase: 'queued' });
+  });
+
+  it('pollJob throws POLL_TIMEOUT(processing) when processing deadline is exceeded', async () => {
+    requestJson.mockResolvedValue({ jobId: 'j1', status: 'processing' });
+    await expect(pollJob('j1', intranet, { intervalMs: 0, processingDeadlineMs: -1, processingGraceMs: 0 }))
+      .rejects.toMatchObject({ code: 'POLL_TIMEOUT', timeoutPhase: 'processing' });
   });
 });
 

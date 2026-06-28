@@ -348,7 +348,7 @@ export function resolveApplyMode(serverSupported, isSynced) {
 }
 
 // ── 컴포넌트 ──────────────────────────────────────────────────────────────
-export function VideoAnalysisStep({ shared, updateShared, updatePatient, activePatient, activeModules = [], session, settings, fixtureMode = false, onServerApplied }) {
+export function VideoAnalysisStep({ shared, updateShared, updatePatient, activePatient, activeModules = [], session, settings, fixtureMode = false, serverConfig = null, onServerApplied }) {
   const va = shared?.videoAnalysis || {
     processes: [], clips: [], processFeatures: [], jobFeatures: [], candidateFeatures: [], appliedInputs: [],
   };
@@ -617,7 +617,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
         }
       }
       const { processFeatures, processEvidence, missingActiveTime: missing, bundleVersion, recipesByJobId, errors } =
-        await runServerAnalysis(activePatient, va, { activeModules, session, settings, detections });
+        await runServerAnalysis(activePatient, va, { activeModules, session, settings, detections, serverConfig });
       setAnalysisBundle(bundleVersion || MOCK_BUNDLE);
       setAnalysisRecipes(recipesByJobId || {}); // 적용 시 source job recipe 대조용(§8.11).
       setMissingActiveTime(missing);

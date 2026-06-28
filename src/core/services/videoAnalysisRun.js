@@ -27,7 +27,12 @@ function requestedFeaturesForModules(activeModules = []) {
  *   missingActiveTime: { [processId]: featureKey[] } — 활동시간 누락으로 못 만든 per-day feature
  *   errors: [{ processId, message }]
  */
-export async function runServerAnalysis(patient, va, { activeModules = [], session, settings, detections = {} } = {}) {
+export async function runServerAnalysis(patient, va, { activeModules = [], session, settings, detections = {}, serverConfig = null } = {}) {
+  // 6.0-12: 폴링 상한을 서버 deadline에서 파생(공개 config). 미전달 시 pollJob 기본값(안전 600s)으로 폴백.
+  const pollOpts = {
+    ...(serverConfig?.videoAnalysisQueueWaitMs ? { queueWaitMs: serverConfig.videoAnalysisQueueWaitMs } : {}),
+    ...(serverConfig?.videoAnalysisJobDeadlineMs ? { processingDeadlineMs: serverConfig.videoAnalysisJobDeadlineMs } : {}),
+  };
   const requested = requestedFeaturesForModules(activeModules);
   const processFeatures = [];
   const processEvidence = []; // [{ processId, analysisJobIds, evidenceByFeatureKey }] — 영속화 안 함(렌더 lookup)
@@ -64,7 +69,7 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
           { clipId: serverClipId, processId: p.id, analysisProfile: p.analysisProfile, requestedFeatures: requested },
           { session, settings }
         );
-        const done = await pollJob(job.jobId, { session, settings });
+        const done = await pollJob(job.jobId, { session, settings }, pollOpts);
         if (!done || done.status !== 'review_pending') {
           errors.push({ processId: p.id, message: `분석 실패(${done?.status || 'no-response'}${done?.errorCode ? `: ${done.errorCode}` : ''}).` });
           failed = true;
@@ -97,7 +102,15 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
       if (conv.missingActiveTime.length > 0) missingActiveTime[p.id] = conv.missingActiveTime;
       bundleVersion = buildRecipeVersion(conv.featureConfigVersion);
     } catch (e) {
-      errors.push({ processId: p.id, message: e?.message || '분석 중 오류가 발생했습니다.' });
+      // 6.0-12: 폴링 타임아웃은 status로 뭉개지 않고 phase별 명확한 메시지로 안내(서버는 계속 처리 중일 수 있음).
+      if (e?.code === 'POLL_TIMEOUT') {
+        const msg = e.timeoutPhase === 'queued'
+          ? `공정 "${p.name}" 대기열 적체 — 분석이 큐에서 대기 중입니다. 잠시 후 다시 시도하세요.`
+          : `공정 "${p.name}" 분석 시간 초과 — 서버 처리가 지연되고 있습니다(영상이 길거나 부하). 잠시 후 다시 시도하세요.`;
+        errors.push({ processId: p.id, message: msg });
+      } else {
+        errors.push({ processId: p.id, message: e?.message || '분석 중 오류가 발생했습니다.' });
+      }
     }
   }
 

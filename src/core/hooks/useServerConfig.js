@@ -7,6 +7,9 @@ const FAIL_CLOSED_CONFIG = {
   localFallbackAllowed: false,
   videoAnalysisEnabled: false,
   videoAnalysisFixtureMode: false,
+  // 6.0-12: config fetch 실패 시에도 폴링이 조기 포기하지 않도록 안전 기본값(서버 기본과 동일 600s).
+  videoAnalysisJobDeadlineMs: 600000,
+  videoAnalysisQueueWaitMs: 600000,
   serverTime: null,
 };
 
