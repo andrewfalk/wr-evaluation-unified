@@ -2060,6 +2060,15 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 
 ## 변경 이력
 
+### v6.1.1 (2026-06-28) — 영상분석 처리시간 안정화 + 추론 디바이스(GPU) 토글 + overlay 가독성 (6.0-12)
+
+손목(wholebody) 라이브 검증에서 "분석 실패(processing)"로 끝나던 문제 해결(클라이언트 폴링이 wholebody CPU 추론보다 먼저 포기 → 서버 deadline 기반으로 일관화) + 조직별 추론 디바이스 토글 + 검수 overlay 손 keypoint 가독성 개선.
+
+- **처리시간 deadline 일관화(Part A)**: `config.video.jobDeadlineMs`(기본 600s)·`sweepGraceMs`·`queueWaitMs` 단일 진실원천. 워커가 전체 job deadline을 infer/feature subprocess에 엄격 분배(합이 deadline 초과 불가, 2×timeout 버그 차단), `sweepStale`도 동일 값에서 파생. 클라 `pollJob`을 queued/processing 예산 분리 + `POLL_TIMEOUT` 구조화(상태로 뭉개지 않고 phase별 메시지). `/api/config/public`로 노출.
+- **추론 디바이스(GPU) 토글(Part B)**: 조직 설정 `inference_device`(auto/cpu/cuda) — auto=GPU 가능 시 사용·실패 시 CPU 폴백, cuda=강제(실패 시 job error). python `infer_clip --device` + `probe_device.py`(GPU 감지, Node가 아닌 추론 Python 환경에서). 워커가 실행 디바이스를 job에 기록, 관리자 콘솔 "추론 디바이스" 탭 + 검수 화면 공정별 실행 배지(GPU/CPU/CPU폴백). 기본 auto·동작 변경 없는 opt-in.
+- **검수 overlay 가독성**: wholebody 손 keypoint(한 손 21점)가 몸 점과 같은 크기로 그려져 뭉치던 것을 ~1/3로 축소(손가락 관절 식별).
+- 검증: 서버 517 / 클라 794 / poseKeypoints 18 tests pass, 마이그레이션 0022(추론 디바이스 컬럼), `build:web`·typecheck·lint 0 errors. 라이브 스택(마이그레이션·워커 claim·브라우저) 통과. **Electron 셸 무변경 → 인트라넷 설치본 재배포 불필요(서버 이미지만 갱신).**
+
 ### v6.1.0 (2026-06-28) — 영상분석 손목(wholebody) + 상지 반복빈도 candidate
 
 근골격계 부담작업 영상분석에 손목/손가락(wholebody 포즈)과 상지 반복빈도를 "참고용 candidate"로 추가. 손목은 전부 candidate(자동입력 없음) — 게이팅 활성(자동제안)은 정확도 검증(6.0-B2) 통과 후. (M4 6.0-10·6.0-11)
