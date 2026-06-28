@@ -267,6 +267,24 @@
     candidate만 노출(REPETITION_PROFILES 필터) + videoMock(MOCK_VALUES·CANDIDATE_REASONS·profile 게이팅) +
     클라 테스트. 어깨·팔꿈치는 job-scope라 모듈 섹션(task-scope 전용 getModuleCandidates) 아닌 flat에 표시.
     검증: npm test 780 통과·build:web·lint 0 errors(기존 warning 6).
+- [~] **6.0-12 영상분석 처리시간 안정화(deadline 일관화) + 추론 디바이스(GPU) 토글** — 손목(wholebody) 라이브
+  검증이 "분석 실패(processing)"로 끝나던 문제(클라 pollJob 120초가 wholebody CPU 추론보다 먼저 포기) 해결 +
+  GPU 토글. 브랜치 `feat/video-6.0-12-timeout-gpu`. Stage D 리허설의 "타임아웃·동시성"(위 line 247)과 직결.
+  - [x] **Part A 타임아웃 일관화**(독립 커밋): `config.video.jobDeadlineMs`(기본 600s)·`sweepGraceMs`·`queueWaitMs`
+    단일 진실원천. 워커 `PROCESSING_TIMEOUT_MS` 제거 → 전체 job deadline **엄격 분배**(infer=deadline,
+    feature=잔여, `FEATURE_PHASE_MIN_MS` 미만 시 `DEADLINE_EXCEEDED` — 2×timeout 차단). `sweepStale`을
+    `jobDeadlineMs+grace` 바인딩 파라미터화. `/api/config/public` 노출. 클라 `pollJob` queued/processing 예산
+    분리 + `POLL_TIMEOUT` 구조화 throw(status 뭉갬 방지) → phase별 메시지. serverConfig 배선. **§Range: 권장
+    600~900s(=서버 5분 상한도 같이 늘려야 의미, env로 조정).** 검증: 서버 513·클라 36/791 통과·build·lint 0.
+  - [x] **Part B GPU 토글**: 마이그레이션 0022(org `inference_device` auto/cpu/cuda + job `inference_device_used/
+    fallback/reason`, 컬럼·CHECK 분리 idempotent). python `--device`(auto=GPU감지+CPU폴백, cuda=강제·실패 시
+    `__CUDA_UNAVAILABLE__` 마커+nonzero exit) + `probe_device.py` + keypoints model 4필드. 워커가 org device
+    조회→`--device` 전달→실행 디바이스 job 기록→stderr 마커로 `CUDA_UNAVAILABLE` 매핑. contracts(`InferenceDevice`
+    enum·`OrgInferenceSettings`). admin `GET/PATCH /api/admin/org-settings`(org 없는 admin 403, GPU는 python
+    probe). AdminConsoleModal "추론 디바이스" 탭. 검토 UI 공정별 실행 배지(GPU/CPU/CPU폴백). 검증: 서버 558·클라
+    791 통과·py_compile·build·lint 0.
+  - [ ] **운영(실환경·미실행)**: `npm run migrate`(0022) · 라이브 검증으로 손목 클립 재현(분석 실패 해소 확인) ·
+    GPU 장착 PC에서 auto→cuda 실측(처리시간 단축). bench(`bench_pose.py --model wholebody`)로 jobDeadlineMs 최종값 확정.
 
 ---
 

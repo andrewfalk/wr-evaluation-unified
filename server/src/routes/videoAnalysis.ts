@@ -178,6 +178,9 @@ interface VideoJobRow {
   result_features: unknown;
   analysis_recipe: unknown; // recipe versioning(§8.11) — 워커가 저장. apply 검증의 서버 source of truth.
   error_code: string | null;
+  inference_device_used: string | null;        // 6.0-12: 실제 실행 디바이스(cpu|cuda) — 검토 UI 배지.
+  inference_device_fallback: boolean | null;    // auto에서 cuda→cpu 폴백 여부.
+  inference_device_fallback_reason: string | null;
   applied_at: Date | null;
   applied_revision: number | null;
   applied_inputs_hash: string | null;
@@ -218,6 +221,10 @@ function jobResponse(row: VideoJobRow): Record<string, unknown> {
     recipe: recipe ?? null,
     analysisBundleVersion: recipe ? buildAnalysisBundleVersion(recipe) : null,
     errorCode: row.error_code ?? null,
+    // 6.0-12: 실제 실행 디바이스·폴백(검토 UI 배지). 구 job은 컬럼 NULL → null로 내려감.
+    inferenceDeviceUsed: row.inference_device_used ?? null,
+    inferenceDeviceFallback: row.inference_device_fallback ?? null,
+    inferenceDeviceFallbackReason: row.inference_device_fallback_reason ?? null,
     appliedAt: row.applied_at ? row.applied_at.toISOString() : null,
     appliedRevision: row.applied_revision,
   };

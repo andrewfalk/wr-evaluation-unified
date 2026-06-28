@@ -2,12 +2,19 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import path from 'path';
 import type { Pool, PoolClient } from 'pg';
+import { OrgInferenceSettingsSchema } from '@wr/contracts';
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { adminOnly } from '../middleware/adminOnly';
 import { writeAuditLog } from '../middleware/audit';
 import { checkPasswordPolicy, appendPasswordHistory } from '../auth/passwordPolicy';
+import config from '../config';
+
+const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // GET /api/admin/devices
@@ -806,6 +813,78 @@ async function rejectSignupRequest(pool: Pool, req: Request, res: Response): Pro
 }
 
 // ---------------------------------------------------------------------------
+// GET/PATCH /api/admin/org-settings — 조직 단위 추론 디바이스 설정(6.0-12).
+// GPU 감지는 Node가 직접 못 하므로(추론은 Python venv/컨테이너) config.video.python으로 probe_device.py 실행.
+// ---------------------------------------------------------------------------
+async function probeGpu(): Promise<{ cudaAvailable: boolean; providers: string[]; error?: string }> {
+  try {
+    const script = path.join(config.video.scriptsDir, 'probe_device.py');
+    const { stdout } = await execFileAsync(config.video.python, [script], { timeout: 15000 });
+    const parsed = JSON.parse(stdout) as { cudaAvailable?: boolean; providers?: string[] };
+    return {
+      cudaAvailable: parsed.cudaAvailable === true,
+      providers: Array.isArray(parsed.providers) ? parsed.providers : [],
+    };
+  } catch (err) {
+    // onnxruntime 미설치·python 미구성 등 — UI가 "감지 불가"로 표시(분석 자체는 auto가 CPU로 동작).
+    return { cudaAvailable: false, providers: [], error: String((err as Error)?.message ?? err).slice(0, 200) };
+  }
+}
+
+// 시스템 관리자(organizationId 없음)는 대상 조직이 불명확 → 403. 다조직 운용 필요 시 별도 superadmin 경로로 분리.
+function requireOrg(req: Request, res: Response): string | null {
+  const orgId = req.sessionInfo?.organizationId ?? null;
+  if (!orgId) {
+    res.status(403).json({ code: 'ORG_REQUIRED', error: 'Organization-scoped admin required for org settings' });
+    return null;
+  }
+  return orgId;
+}
+
+async function getOrgSettings(pool: Pool, req: Request, res: Response): Promise<void> {
+  const orgId = requireOrg(req, res);
+  if (!orgId) return;
+  const { rows } = await pool.query<{ inference_device: string }>(
+    `SELECT inference_device FROM organizations WHERE id = $1`, [orgId],
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ code: 'ORG_NOT_FOUND', error: 'Organization not found' });
+    return;
+  }
+  const gpu = await probeGpu();
+  res.status(200).json({ inferenceDevice: rows[0].inference_device, gpu });
+}
+
+async function updateOrgSettings(pool: Pool, req: Request, res: Response): Promise<void> {
+  const orgId = requireOrg(req, res);
+  if (!orgId) return;
+  const parsed = OrgInferenceSettingsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ code: 'INVALID_BODY', error: 'inferenceDevice must be one of auto|cpu|cuda' });
+    return;
+  }
+  const { rows } = await pool.query<{ inference_device: string }>(
+    `UPDATE organizations SET inference_device = $2 WHERE id = $1 RETURNING inference_device`,
+    [orgId, parsed.data.inferenceDevice],
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ code: 'ORG_NOT_FOUND', error: 'Organization not found' });
+    return;
+  }
+  writeAuditLog(pool, {
+    actorUserId: req.sessionInfo!.userId,
+    actorOrgId:  orgId,
+    action:      'org_settings_update',
+    targetType:  'organization',
+    targetId:    orgId,
+    outcome:     'success',
+    ip:          req.ip ?? null,
+    userAgent:   req.headers['user-agent'] ?? null,
+  });
+  res.status(200).json({ inferenceDevice: rows[0].inference_device });
+}
+
+// ---------------------------------------------------------------------------
 // Router factory
 // ---------------------------------------------------------------------------
 const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
@@ -875,6 +954,18 @@ export function createAdminRouter(pool: Pool, auditPool: Pool): Router {
     '/users/:id/enable',
     auth, admin, csrfMiddleware,
     (req, res) => enableUser(pool, req, res).catch(() => res.status(500).json(internalError()))
+  );
+
+  router.get(
+    '/org-settings',
+    auth, admin,
+    (req, res) => getOrgSettings(pool, req, res).catch(() => res.status(500).json(internalError()))
+  );
+
+  router.patch(
+    '/org-settings',
+    auth, admin, csrfMiddleware,
+    (req, res) => updateOrgSettings(pool, req, res).catch(() => res.status(500).json(internalError()))
   );
 
   router.get(

@@ -23,7 +23,7 @@ vi.mock('../fixturePath', () => ({
 
 import { pollOnce, iouXywh, mapTargetTrack } from '../videoAnalysisWorker';
 
-const JOB = { id: 'job-1', clip_id: 'clip-1', analysis_profile: 'posture-basic' };
+const JOB = { id: 'job-1', clip_id: 'clip-1', analysis_profile: 'posture-basic', inference_device: 'auto' };
 
 // queued job 1건을 claim하도록 client/pool mock 구성.
 function makePool(opts: {
@@ -40,7 +40,7 @@ function makePool(opts: {
 
   const client = {
     query: vi.fn((sql: string) => {
-      if (typeof sql === 'string' && sql.includes('FOR UPDATE SKIP LOCKED')) {
+      if (typeof sql === 'string' && sql.includes('SKIP LOCKED')) {
         return Promise.resolve({ rows: job ? [job] : [] });
       }
       return Promise.resolve({ rows: [] }); // BEGIN/UPDATE processing/COMMIT
@@ -84,7 +84,7 @@ describe('videoAnalysisWorker.pollOnce', () => {
     await pollOnce(pool, { runInference: vi.fn().mockResolvedValue({ clipFeatures: {}, preprocessConfigHash: null, inputSha256: null }) });
     const sqls = clientSql(client);
     expect(sqls.some((s) => s === 'BEGIN')).toBe(true);
-    expect(sqls.some((s) => s.includes('FOR UPDATE SKIP LOCKED'))).toBe(true);
+    expect(sqls.some((s) => s.includes('FOR UPDATE OF j SKIP LOCKED'))).toBe(true);
     expect(sqls.some((s) => s.includes("status = 'processing'"))).toBe(true);
     expect(sqls.some((s) => s === 'COMMIT')).toBe(true);
   });
@@ -95,7 +95,7 @@ describe('videoAnalysisWorker.pollOnce', () => {
       clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: 'pch', inputSha256: 'sha',
     });
     expect(await pollOnce(pool, { runInference })).toBe(true);
-    expect(runInference).toHaveBeenCalledWith('/fx/good.mp4', 'posture-basic', null, { framesDir: null });
+    expect(runInference).toHaveBeenCalledWith('/fx/good.mp4', 'posture-basic', null, { framesDir: null, device: 'auto' });
     const upd = poolUpdate(query, "status = 'review_pending'");
     expect(upd).toBeDefined();
     expect(upd?.[1]).toContain('pch');
@@ -112,7 +112,7 @@ describe('videoAnalysisWorker.pollOnce', () => {
     });
     expect(await pollOnce(pool, { runInference })).toBe(true);
     const expectedDir = path.join(videoCfg.uploadDir, 'artifacts', 'job-1.frames');
-    expect(runInference).toHaveBeenCalledWith('/fx/good.mp4', 'posture-basic', null, { framesDir: expectedDir });
+    expect(runInference).toHaveBeenCalledWith('/fx/good.mp4', 'posture-basic', null, { framesDir: expectedDir, device: 'auto' });
     const upd = poolUpdate(query, "status = 'review_pending'");
     expect(upd?.[1]).toContain(expectedDir); // frames_path 기록(.jpg 존재)
     videoCfg.overlayFrames = false;
@@ -248,7 +248,7 @@ describe('box→track 매핑 (PR D2b, §8.7)', () => {
     const runInference = vi.fn().mockResolvedValue({ clipFeatures: {}, preprocessConfigHash: null, inputSha256: null });
     await pollOnce(pool, { runInference });
     expect(runInference).toHaveBeenCalledWith('/fx/good.mp4', 'posture-basic',
-      expect.objectContaining({ id: 'p1', bbox: [10, 20, 100, 200], timestampMs: 8000 }), { framesDir: null });
+      expect.objectContaining({ id: 'p1', bbox: [10, 20, 100, 200], timestampMs: 8000 }), { framesDir: null, device: 'auto' });
   });
 
   it('pollOnce: 선택했는데 후보 id 불일치 → job error TARGET_TRACK_MAP_FAILED', async () => {

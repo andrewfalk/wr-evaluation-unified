@@ -380,7 +380,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   const [uploads, setUploads] = useState({}); // { [clipMetaId]: {...} }
   // 근거 패널(B2 선행): "왜 이 값?" evidence. **transient만** — shared.videoAnalysis에 저장 안 함(영속화 차단).
   // 새로고침/환자전환/입력변경 시 사라짐(의도) → 부재 제안행은 fallback 안내.
-  const [analysisEvidence, setAnalysisEvidence] = useState({ jobEvidenceBySharedJobId: {}, processEvidenceByProcessId: {}, suppressedCandidates: [] });
+  const [analysisEvidence, setAnalysisEvidence] = useState({ jobEvidenceBySharedJobId: {}, processEvidenceByProcessId: {}, suppressedCandidates: [], deviceByProcessId: {} });
   const [expandedEvidence, setExpandedEvidence] = useState(null); // 펼친 제안 키 `${sharedJobId}:${featureKey}`
   // 골격 검수 overlay(6.0-8): transient — overlay 데이터 캐시는 jobId→{loading,data,error,closed},
   // 펼친 패널은 row+job 복합키 1개(같은 job을 쓰는 여러 feature 행에서 패널 중복 노출 방지). 영속화 안 함.
@@ -390,7 +390,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   // 직업에 그 모듈 task가 1개면 자동, 여러 개면 사용자가 선택. 환자 전환 시 reset.
   const [taskTargets, setTaskTargets] = useState({});
   const resetEvidence = () => {
-    setAnalysisEvidence({ jobEvidenceBySharedJobId: {}, processEvidenceByProcessId: {}, suppressedCandidates: [] });
+    setAnalysisEvidence({ jobEvidenceBySharedJobId: {}, processEvidenceByProcessId: {}, suppressedCandidates: [], deviceByProcessId: {} });
     setExpandedEvidence(null);
     setOverlayByJob({});
     setExpandedOverlay(null);
@@ -570,14 +570,17 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     // 시점 하드 게이트로 드롭된 손목 각도 안내(process-level → flat 집계, featureKey 중복 제거). transient.
     const suppressedCandidates = [];
     const seenSuppressed = new Set();
+    // 6.0-12: 공정별 실제 실행 디바이스(검토 UI 배지). transient.
+    const deviceByProcessId = {};
     for (const pe of processEvidence) {
       for (const s of pe.suppressedCandidates || []) {
         if (seenSuppressed.has(s.featureKey)) continue;
         seenSuppressed.add(s.featureKey);
         suppressedCandidates.push(s);
       }
+      if (pe.inferenceDevice) deviceByProcessId[pe.processId] = pe.inferenceDevice;
     }
-    setAnalysisEvidence({ jobEvidenceBySharedJobId, processEvidenceByProcessId, suppressedCandidates });
+    setAnalysisEvidence({ jobEvidenceBySharedJobId, processEvidenceByProcessId, suppressedCandidates, deviceByProcessId });
   };
 
   // ── 분석 실행 ── 서버 모드=fixture 실추론+per-day 환산, 그 외=mock. 적용과 분리(추론은 여기서만).
@@ -968,6 +971,17 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                     <div className="form-group"><label>&nbsp;</label>
                       <button type="button" className="btn btn-secondary btn-sm" onClick={() => removeProcess(p.id)}>공정 삭제</button></div>
                   </div>
+                  {/* 6.0-12: 실제 실행된 추론 디바이스 배지(분석 후). auto에서 cuda→cpu 폴백 시 사유 tooltip. */}
+                  {(() => {
+                    const dev = analysisEvidence.deviceByProcessId[p.id];
+                    if (!dev) return null;
+                    const label = dev.used === 'cuda' ? 'GPU(CUDA)' : (dev.fallback ? 'CPU(폴백)' : 'CPU');
+                    return (
+                      <p className="muted" style={{ fontSize: 11, marginTop: 4 }} title={dev.reason || ''}>
+                        실행: <b>{label}</b>
+                      </p>
+                    );
+                  })()}
                   {total !== 100 && <p className="muted" style={{ color: 'var(--color-warning)', marginTop: 6 }}>⚠ "{jobName(p.sharedJobId)}" 공정 점유율 합 {total}% (100% 권장)</p>}
                   <div className="va-process-clips">
                     {clips.map((c) => {

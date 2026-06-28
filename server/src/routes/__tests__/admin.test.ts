@@ -267,6 +267,64 @@ const AUDIT_ROW = {
   created_at:    new Date('2026-01-01T00:00:00Z'),
 };
 
+describe('PATCH /api/admin/org-settings', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  function tokenNoOrg(): string {
+    return generateAccessToken({
+      sub: 'admin-1', sessionId: 'sess-1', orgId: null as unknown as string,
+      role: 'admin', name: 'Admin User', mustChangePassword: false, csrfHash: CSRF_HASH,
+    }).token;
+  }
+
+  it('returns 403 for non-admin', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    const res = await request(makeApp(pool))
+      .patch('/api/admin/org-settings')
+      .set('Authorization', `Bearer ${token('doctor')}`)
+      .set('x-csrf-token', 'ok')
+      .send({ inferenceDevice: 'cpu' });
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 403 ORG_REQUIRED when admin has no organization', async () => {
+    const pool = makePool();
+    wireQueries(pool); // auth only
+    const res = await request(makeApp(pool))
+      .patch('/api/admin/org-settings')
+      .set('Authorization', `Bearer ${tokenNoOrg()}`)
+      .set('x-csrf-token', 'ok')
+      .send({ inferenceDevice: 'cpu' });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('ORG_REQUIRED');
+  });
+
+  it('returns 400 for invalid device value', async () => {
+    const pool = makePool();
+    wireQueries(pool); // auth only — validation fails before any DB write
+    const res = await request(makeApp(pool))
+      .patch('/api/admin/org-settings')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', 'ok')
+      .send({ inferenceDevice: 'tpu' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_BODY');
+  });
+
+  it('updates inference device and returns it', async () => {
+    const pool = makePool();
+    wireQueries(pool, [{ inference_device: 'cuda' }]); // auth, then UPDATE RETURNING
+    const res = await request(makeApp(pool))
+      .patch('/api/admin/org-settings')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', 'ok')
+      .send({ inferenceDevice: 'cuda' });
+    expect(res.status).toBe(200);
+    expect(res.body.inferenceDevice).toBe('cuda');
+  });
+});
+
 describe('GET /api/admin/audit', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 

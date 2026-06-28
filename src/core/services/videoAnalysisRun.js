@@ -57,6 +57,8 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
       const fusionEntries = [];
       const jobIds = [];
       let failed = false;
+      // 6.0-12: 실제 실행 디바이스(검토 UI 배지). 공정 내 클립은 동일 org 설정 → fallback은 하나라도 있으면 true.
+      let inferenceDevice = null;
       for (const clipMeta of clipMetas) {
         // 업로드 완료/대상자 선택 클립은 기존 serverClipId 재사용. 없으면(fixture만) 새 clip 생성.
         const det = detections[clipMeta.id];
@@ -77,6 +79,13 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
         }
         jobIds.push(done.jobId);
         if (done.recipe) recipesByJobId[done.jobId] = done.recipe; // 서버 source-of-truth recipe 보존.
+        if (done.inferenceDeviceUsed) {
+          inferenceDevice = {
+            used: done.inferenceDeviceUsed,
+            fallback: (inferenceDevice?.fallback || done.inferenceDeviceFallback === true),
+            reason: done.inferenceDeviceFallbackReason || inferenceDevice?.reason || null,
+          };
+        }
         // 융합 evidence가 채택/탈락 클립을 참조할 수 있도록 식별자를 함께 운반(clipMetaId/serverClipId/jobId).
         fusionEntries.push({
           viewpoint: clipMeta.viewpoint,
@@ -98,7 +107,7 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
         evidenceByFeatureKey[key] = fusionEvidence && fusionEvidence[key] ? { ...ev, fusion: fusionEvidence[key] } : ev;
       }
       // suppressedCandidates: 시점 하드 게이트로 드롭된 손목 각도(process-level 안내, 6.0-10). transient — 영속 안 함.
-      processEvidence.push({ processId: p.id, analysisJobIds: jobIds, evidenceByFeatureKey, suppressedCandidates });
+      processEvidence.push({ processId: p.id, analysisJobIds: jobIds, evidenceByFeatureKey, suppressedCandidates, inferenceDevice });
       if (conv.missingActiveTime.length > 0) missingActiveTime[p.id] = conv.missingActiveTime;
       bundleVersion = buildRecipeVersion(conv.featureConfigVersion);
     } catch (e) {

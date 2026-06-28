@@ -46,7 +46,23 @@
           "description": "두 가중치 sha가 모두 확정(에어갭 반입)되어 recipe가 verified 가능한지. false면 recipe status='unverified'.",
           "type": "boolean"
         },
-        "preprocessConfigHash": { "type": "string", "minLength": 1 }
+        "preprocessConfigHash": { "type": "string", "minLength": 1 },
+        "requestedDevice": {
+          "description": "요청된 추론 디바이스 정책(6.0-12). optional — 구 artifact 하위호환.",
+          "enum": ["auto", "cpu", "cuda"]
+        },
+        "deviceUsed": {
+          "description": "실제 추론에 쓰인 디바이스(6.0-12). optional — 구 artifact 하위호환.",
+          "enum": ["cpu", "cuda"]
+        },
+        "deviceFallback": {
+          "description": "auto에서 cuda→cpu로 폴백했으면 true(6.0-12). optional.",
+          "type": "boolean"
+        },
+        "fallbackReason": {
+          "description": "폴백/감지 사유(6.0-12). 없으면 null. optional.",
+          "oneOf": [{ "type": "null" }, { "type": "string" }]
+        }
       }
     },
     "quality": {

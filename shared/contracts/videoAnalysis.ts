@@ -244,6 +244,15 @@ export const JobFeaturesSchema = z.object({
 // 검수 보존 정책(§8.12). privacy_first 기본.
 export const RetentionModeSchema = z.enum(['privacy_first', 'review_fidelity']);
 
+// 추론 디바이스 정책(6.0-12, 조직 단위 설정). auto=GPU 가능 시 사용·실패 시 CPU 폴백, cuda=강제(실패 시 job error).
+export const InferenceDeviceSchema = z.enum(['auto', 'cpu', 'cuda']);
+// job이 실제 실행한 디바이스(검토 UI 배지). 미실행 job은 null.
+export const InferenceDeviceUsedSchema = z.enum(['cpu', 'cuda']);
+// admin 조직 설정 GET/PATCH 바디(추론 디바이스).
+export const OrgInferenceSettingsSchema = z.object({ inferenceDevice: InferenceDeviceSchema });
+export type InferenceDevice = z.infer<typeof InferenceDeviceSchema>;
+export type OrgInferenceSettings = z.infer<typeof OrgInferenceSettingsSchema>;
+
 // 환자 JSONB(영구·UI용) 구조(§8.11). 임시파일 경로는 절대 포함하지 않는다.
 export const VideoAnalysisDataSchema = z.object({
   processes: z.array(VideoProcessSchema).default([]),
