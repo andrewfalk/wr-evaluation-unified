@@ -101,6 +101,30 @@ describe('PoseKeypointsSchema — model weight sha / recipe (6.0-9)', () => {
     delete noFlag.model.weightsComplete;
     expect(() => PoseKeypointsSchema.parse(noFlag)).toThrow();
   });
+
+  // 6.0-12: 추론 디바이스 필드. JSON Schema와 Zod 미러가 모두 알고 있어야 overlay safeParse가 새 artifact를 통과시킨다.
+  it('추론 디바이스 필드(requestedDevice/deviceUsed/deviceFallback/fallbackReason)를 허용한다', () => {
+    const r = PoseKeypointsSchema.parse(fixture); // fixture에 device 필드 포함
+    expect(r.model.requestedDevice).toBe('auto');
+    expect(r.model.deviceUsed).toBe('cpu');
+    expect(r.model.deviceFallback).toBe(false);
+    expect(r.model.fallbackReason).toBeNull();
+  });
+
+  it('device 필드 부재(구 artifact)도 허용 — optional 하위호환', () => {
+    const legacy = structuredClone(fixture);
+    delete legacy.model.requestedDevice;
+    delete legacy.model.deviceUsed;
+    delete legacy.model.deviceFallback;
+    delete legacy.model.fallbackReason;
+    expect(() => PoseKeypointsSchema.parse(legacy)).not.toThrow();
+  });
+
+  it('잘못된 deviceUsed 값(auto/임의문자열)은 거부', () => {
+    const bad = structuredClone(fixture);
+    bad.model.deviceUsed = 'auto'; // deviceUsed는 실행 결과라 cpu|cuda만(auto 금지)
+    expect(() => PoseKeypointsSchema.parse(bad)).toThrow();
+  });
 });
 
 describe('PoseKeypointsSchema — quality meta (PR D3a, §8.8)', () => {

@@ -16,7 +16,11 @@
     "detectorSha256": null,
     "poseSha256": null,
     "weightsComplete": false,
-    "preprocessConfigHash": "synthetic0000fixture"
+    "preprocessConfigHash": "synthetic0000fixture",
+    "requestedDevice": "auto",
+    "deviceUsed": "cpu",
+    "deviceFallback": false,
+    "fallbackReason": null
   },
   "frames": [
     { "frameIndex": 0, "timestampMs": 0, "persons": [] },

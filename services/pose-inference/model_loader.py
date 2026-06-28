@@ -124,3 +124,17 @@ def build_pose(variant="body", device="cpu", backend="onnxruntime"):
 def build_body(device="cpu", backend="onnxruntime"):
     """하위호환 — body(coco17) 추정기. 신규 코드는 build_pose('body', ...) 사용."""
     return build_pose("body", device=device, backend=backend)
+
+
+def available_providers():
+    """onnxruntime EP 목록(GPU 감지용, 6.0-12). onnxruntime 미설치 시 빈 리스트."""
+    try:
+        import onnxruntime as ort  # lazy: 환경에 따라 무거울 수 있어 호출 시 import
+        return list(ort.get_available_providers())
+    except Exception:
+        return []
+
+
+def cuda_available():
+    """CUDAExecutionProvider 사용 가능 여부(onnxruntime-gpu 설치+CUDA 런타임). 미설치면 False(6.0-12)."""
+    return "CUDAExecutionProvider" in available_providers()

@@ -112,16 +112,42 @@ export async function getJob(jobId, { session, settings } = {}) {
 
 const TERMINAL_STATUSES = new Set(['review_pending', 'done', 'error', 'expired', 'cancelled']);
 
+// 폴링 기본값(6.0-12). 서버 deadline을 모를 때의 안전값(fail-closed config와 동일 600s).
+export const POLL_INTERVAL_MS = 2000;            // 폴링 간격(요청 수 절감).
+export const PROCESSING_POLL_GRACE_MS = 15000;   // processing deadline 위 클라 전용 grace(폴링 지연·시계 오차).
+const DEFAULT_QUEUE_WAIT_MS = 600000;            // queued 대기 상한.
+const DEFAULT_PROCESSING_DEADLINE_MS = 600000;   // processing 대기 상한(서버 jobDeadlineMs와 정렬).
+
+function pollTimeoutError(phase) {
+  // 마지막 status로 "분석 실패(processing/queued)" 뭉개지 않도록 구조화 신호(호출측이 phase별 메시지 매핑).
+  return Object.assign(new Error(`job poll timed out while ${phase}`), { code: 'POLL_TIMEOUT', timeoutPhase: phase });
+}
+
 // job이 종료 상태에 도달할 때까지 getJob을 간격 폴링한다(분석 실행 → review_pending 대기).
-// 타임아웃/최대 시도 초과 시 마지막 job을 반환(호출측이 status로 판단).
-export async function pollJob(jobId, { session, settings } = {}, { intervalMs = 1000, maxAttempts = 120 } = {}) {
-  let last = null;
-  for (let i = 0; i < maxAttempts; i += 1) {
-    last = await getJob(jobId, { session, settings });
+// queued와 processing 예산을 분리한다(직렬 큐: 앞선 손목 job 때문에 뒤 job이 queued에 오래 머물 수 있음).
+//  - queued(및 전이 전 상태): queueWaitMs 예산. 처리 deadline 카운트다운은 아직 시작 안 함.
+//  - processing: 첫 진입 시점부터 processingDeadlineMs + processingGraceMs 예산.
+// 예산 소진 시 마지막 job을 반환하지 않고 POLL_TIMEOUT(timeoutPhase)을 throw한다(6.0-12).
+export async function pollJob(jobId, { session, settings } = {}, {
+  intervalMs = POLL_INTERVAL_MS,
+  queueWaitMs = DEFAULT_QUEUE_WAIT_MS,
+  processingDeadlineMs = DEFAULT_PROCESSING_DEADLINE_MS,
+  processingGraceMs = PROCESSING_POLL_GRACE_MS,
+} = {}) {
+  const queueDeadlineAt = Date.now() + queueWaitMs;
+  let processingStartedAt = null;
+  for (;;) {
+    const last = await getJob(jobId, { session, settings });
     if (last && TERMINAL_STATUSES.has(last.status)) return last;
+    const now = Date.now();
+    if (last && last.status === 'processing') {
+      if (processingStartedAt == null) processingStartedAt = now;
+      if (now - processingStartedAt > processingDeadlineMs + processingGraceMs) throw pollTimeoutError('processing');
+    } else if (now > queueDeadlineAt) {
+      throw pollTimeoutError('queued');
+    }
     await new Promise((r) => setTimeout(r, intervalMs));
   }
-  return last;
 }
 
 // 검수용 골격 overlay(6.0-8): 서버가 sha256+계약 검증한 keypoints를 반환.

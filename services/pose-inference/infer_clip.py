@@ -11,6 +11,7 @@ rtmlib(YOLOX 사람탐지 + RTMPose-s 포즈)로 클립을 profile별 fps로 샘
 import argparse
 import hashlib
 import json
+import sys
 import time
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
@@ -163,6 +164,8 @@ def main():
                     help="지정 시 각 샘플 프레임을 <frameIndex>.jpg로 저장(overlay 검수 게이트, best-effort)")
     ap.add_argument("--pose-variant", choices=list(POSE_VARIANTS), default="body",
                     help="body=coco17(기본) | wholebody=133점 추출→body17+hand42=59 저장(손목분석, 6.0-10)")
+    ap.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto",
+                    help="추론 디바이스(6.0-12): auto(GPU 가능 시 사용·실패 시 CPU 폴백) | cpu | cuda(강제, 실패 시 에러)")
     args = ap.parse_args()
     variant = args.pose_variant
     vcfg = POSE_VARIANTS[variant]
@@ -181,8 +184,38 @@ def main():
     step = max(1, round(orig_fps / args.fps))
     actual_sampled_fps = orig_fps / step  # 정수 step 때문에 요청값과 다를 수 있음 — 실제값을 기록
 
-    from model_loader import build_pose
-    body, _model_source = build_pose(variant)  # variant별 baked(에어갭) 우선, 없으면 dev 자동다운로드(6.0-9)
+    from model_loader import build_pose, cuda_available, available_providers
+    # 디바이스 해석(6.0-12): auto=GPU 가능 시 사용·init 실패 시 CPU 폴백, cuda=강제(불가/실패 시 마커+nonzero exit).
+    requested_device = args.device
+    device_used = "cpu"
+    device_fallback = False
+    fallback_reason = None
+    if requested_device == "cpu":
+        body, _model_source = build_pose(variant, device="cpu")
+    elif requested_device == "cuda":
+        if not cuda_available():
+            sys.stderr.write(f"__CUDA_UNAVAILABLE__: CUDAExecutionProvider not available (providers={available_providers()})\n")
+            raise SystemExit(3)
+        try:
+            body, _model_source = build_pose(variant, device="cuda")
+            device_used = "cuda"
+        except Exception as e:  # noqa: BLE001 — 강제 cuda 실패는 명확 마커로 워커가 CUDA_UNAVAILABLE 매핑
+            sys.stderr.write(f"__CUDA_UNAVAILABLE__: cuda init failed: {e}\n")
+            raise SystemExit(3)
+    else:  # auto
+        if cuda_available():
+            try:
+                body, _model_source = build_pose(variant, device="cuda")
+                device_used = "cuda"
+            except Exception as e:  # noqa: BLE001 — auto는 분석을 죽이지 않고 CPU로 폴백
+                body, _model_source = build_pose(variant, device="cpu")
+                device_used = "cpu"
+                device_fallback = True
+                fallback_reason = f"cuda init failed, fell back to cpu: {e}"
+        else:
+            # GPU 자체가 없는 환경 → CPU가 정상 결과(폴백 아님). 사유만 기록.
+            body, _model_source = build_pose(variant, device="cpu")
+            fallback_reason = "no CUDAExecutionProvider available"
     track_iou, track_max_age = load_tracking_params()
     tracker = IoUTracker(iou_threshold=track_iou, max_age=track_max_age)
     blur_threshold = load_quality_blur_threshold()  # config에 있을 때만(기본 None=파생값 비활성)
@@ -288,6 +321,11 @@ def main():
             "detectorSha256": detector_sha256,
             "poseSha256": pose_sha256,
             "weightsComplete": weights_complete,
+            # 추론 디바이스(6.0-12): 워커가 읽어 job에 기록 → 검토 UI 실행 모드 배지.
+            "requestedDevice": requested_device,
+            "deviceUsed": device_used,
+            "deviceFallback": device_fallback,
+            "fallbackReason": fallback_reason,
             "preprocessConfigHash": preprocess_config_hash(
                 args.fps, convention, vcfg["detector"], vcfg["pose"], vcfg["inputSize"],
                 {"iou": track_iou, "maxAge": track_max_age},  # 실제 사용 값(재현성)

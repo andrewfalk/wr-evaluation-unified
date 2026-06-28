@@ -211,6 +211,16 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
         // recipe 미확정(가중치 sha 없음 → status='unverified')인데도 apply를 허용할지(fail-closed 기본 false).
         // dev/test/fixture 전용 단일 노브(6.0-9). 운영(에어갭 baked 이미지)에선 절대 켜지 않는다.
         allowUnverifiedRecipe: bool(env, 'VIDEO_ANALYSIS_ALLOW_UNVERIFIED_RECIPE', false),
+        // 전체 job 처리 deadline(ms, 6.0-12). 추론(infer_clip+feature_calc) subprocess의 합이 이를 넘지 않도록
+        // 엄격 분배하고, sweepStale·클라이언트 폴링 상한이 모두 이 값에서 파생된다(단일 진실원천).
+        // 손목(wholebody)은 CPU에서 1~2분 클립도 오래 걸려 기본 600000(10분). GPU면 더 줄여도 됨(§Range).
+        jobDeadlineMs: positiveInt(env, 'VIDEO_ANALYSIS_JOB_DEADLINE_MS', 600000),
+        // sweepStale이 정체 job을 error로 정리하는 여유(ms). sweep 임계 = jobDeadlineMs + sweepGraceMs라
+        // claim·IO·persist 오버헤드로 정상 job이 조기에 죽지 않게 한다.
+        sweepGraceMs: positiveInt(env, 'VIDEO_ANALYSIS_SWEEP_GRACE_MS', 30000),
+        // 클라이언트가 job을 queued 상태로 기다리는 상한(ms). 직렬 큐(동시 1건)라 앞선 job 때문에 대기할 수
+        // 있어 별도 예산으로 둔다. 서버 queued stale(1시간)보다 짧게(기본 10분) — UI가 과도하게 매달리지 않게.
+        queueWaitMs: positiveInt(env, 'VIDEO_ANALYSIS_QUEUE_WAIT_MS', 600000),
       };
     })()),
   });

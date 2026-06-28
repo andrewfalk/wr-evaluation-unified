@@ -8,7 +8,7 @@ vi.mock('../../config', () => ({
     ai:                  { enabled: false },
     localFallbackAllowed: false,
     videoAnalysisEnabled: false,
-    video:               { fixtureMode: false },
+    video:               { fixtureMode: false, jobDeadlineMs: 600000, queueWaitMs: 600000 },
   },
 }));
 
@@ -30,6 +30,8 @@ describe('GET /api/config/public', () => {
       localFallbackAllowed: false,
       videoAnalysisEnabled: false,
       videoAnalysisFixtureMode: false,
+      videoAnalysisJobDeadlineMs: 600000,
+      videoAnalysisQueueWaitMs: 600000,
     });
     expect(res.body).toHaveProperty('serverTime');
     expect(new Date(res.body.serverTime).getTime()).not.toBeNaN();

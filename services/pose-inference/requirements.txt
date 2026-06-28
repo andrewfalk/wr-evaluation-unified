@@ -1,6 +1,10 @@
-# 포즈 추정 PoC (6.0-5). CPU 전용. Python 3.10+ (dev 검증: 3.14).
+# 포즈 추정 PoC (6.0-5). 기본 CPU. Python 3.10+ (dev 검증: 3.14).
 # 설치: python -m venv .venv && .venv/Scripts/python -m pip install -r requirements.txt
-onnxruntime>=1.20         # CPU EP
+onnxruntime>=1.20         # CPU EP (기본)
+# GPU(6.0-12): CUDA 환경에서 추론 가속을 쓰려면 onnxruntime 대신 아래로 교체 설치(둘 다 깔지 말 것).
+#   onnxruntime 제거 후: pip install onnxruntime-gpu>=1.20  (+ 해당 CUDA/cuDNN 런타임 필요)
+# 관리자 설정 '추론 디바이스=자동/GPU'는 CUDAExecutionProvider가 감지될 때만 GPU를 쓴다(probe_device.py).
+# 에어갭 실서버 baking(onnxruntime-gpu + CUDA 라이브러리 동봉)은 별도 배포 작업 — 본 변경 범위 밖.
 opencv-python-headless>=4.10
 rtmlib>=0.0.15            # YOLOX 사람탐지 + RTMPose ONNX 래퍼(가중치 자동 다운로드)
 jsonschema>=4.0          # keypoints.json ↔ schema 검증(validate_keypoints.py)

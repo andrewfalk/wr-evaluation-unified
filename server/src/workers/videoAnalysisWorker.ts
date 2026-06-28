@@ -34,7 +34,10 @@ const PROFILE_POSE_VARIANT: Record<string, string> = {
   'repetition-upper-limb': 'body',
   'hand-wrist': 'wholebody',
 };
-const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000;
+// feature_calc subprocess가 의미있게 돌 최소 잔여시간(ms). deadline에서 infer_clip 소요를 뺀 잔여가
+// 이보다 작으면 feature_calc를 시작하지 않고 즉시 DEADLINE_EXCEEDED 처리한다(6.0-12). 두 subprocess 합이
+// jobDeadlineMs를 넘지 않도록 보장. 2초는 큰 keypoints 출력에서 빠듯할 수 있어 5초.
+const FEATURE_PHASE_MIN_MS = 5000;
 
 export interface InferenceResult {
   clipFeatures: unknown; // ClipFeatureSetSchema 통과값
@@ -47,6 +50,10 @@ export interface InferenceResult {
   poseSha256: string | null;
   weightsComplete: boolean;
   featureConfigVersion: string | null;
+  // 추론 디바이스 결과(6.0-12) — keypoints `model`에서 추출. job 컬럼에 기록 → 검토 UI 배지. optional(구 추론기 호환).
+  deviceUsed?: 'cpu' | 'cuda' | null;
+  deviceFallback?: boolean;
+  fallbackReason?: string | null;
 }
 
 // 사용자가 고른 대상자(§8.7, PR D2b). sample-detect 후보 bbox(xywh 픽셀) + 대표 프레임 시각.
@@ -59,6 +66,8 @@ export interface TargetSelection {
 export interface RunInferenceOptions {
   // 지정 시 infer_clip이 샘플 프레임을 <frameIndex>.jpg로 저장(overlay 검수 게이트, best-effort). 미지정/off면 미추출.
   framesDir?: string | null;
+  // 추론 디바이스 정책(6.0-12, org 설정). infer_clip --device로 전달. 미지정 시 'auto'.
+  device?: 'auto' | 'cpu' | 'cuda';
 }
 
 export interface WorkerDeps {
@@ -70,6 +79,7 @@ interface ClaimedJob {
   id: string;
   clip_id: string;
   analysis_profile: string | null;
+  inference_device: string; // org 설정(6.0-12): 'auto'|'cpu'|'cuda'.
 }
 
 // box→track 매핑 허용치(worker 레이어 — xywh 픽셀 기준). sample-detect 프레임과 분석 샘플 프레임의 시각 차 허용.
@@ -120,11 +130,14 @@ async function defaultRunInference(
   try {
     const kpPath = path.join(work, 'keypoints.json');
     const cfPath = path.join(work, 'clip_features.json');
+    // 전체 job deadline(6.0-12). infer_clip + feature_calc 두 subprocess의 합이 이를 넘지 않도록 잔여시간을 분배한다.
+    const deadlineMs = config.video.jobDeadlineMs;
+    const phaseStart = Date.now();
     const inferArgs = [path.join(scripts, 'infer_clip.py'), '--input', clipPath, '--output', kpPath,
-      '--fps', String(fps), '--pose-variant', poseVariant];
+      '--fps', String(fps), '--pose-variant', poseVariant, '--device', options?.device ?? 'auto'];
     // overlay 검수 게이트(privacy 예외): 샘플 프레임을 frameIndex별 JPEG로 저장(infer_clip best-effort).
     if (options?.framesDir) inferArgs.push('--frames-dir', options.framesDir);
-    await execFileAsync(config.video.python, inferArgs, { timeout: PROCESSING_TIMEOUT_MS });
+    await execFileAsync(config.video.python, inferArgs, { timeout: deadlineMs });
     // 매핑은 keypoints가 나와야 가능 → infer_clip 후에 처리. 선택 있으면 박스→트랙(실패 시 throw → job error).
     const kpRaw = fs.readFileSync(kpPath, 'utf-8');
     const kpDoc = JSON.parse(kpRaw) as {
@@ -134,14 +147,22 @@ async function defaultRunInference(
         detectorSha256?: string | null;
         poseSha256?: string | null;
         weightsComplete?: boolean;
+        deviceUsed?: 'cpu' | 'cuda';
+        deviceFallback?: boolean;
+        fallbackReason?: string | null;
       };
       frames?: KpFrame[];
     };
+    // 잔여 deadline을 feature_calc에 부여. 충분히 안 남았으면 시작 자체를 막아 deadline 초과를 차단(6.0-12).
+    const remainingMs = deadlineMs - (Date.now() - phaseStart);
+    if (remainingMs <= FEATURE_PHASE_MIN_MS) {
+      throw Object.assign(new Error('job deadline exceeded before feature calculation'), { code: 'DEADLINE_EXCEEDED' });
+    }
     const featureArgs = [path.join(scripts, 'feature_calc.py'), '--keypoints', kpPath, '--output', cfPath];
     if (targetSelection) {
       featureArgs.push('--target-track', mapTargetTrack(kpDoc, targetSelection));
     }
-    await execFileAsync(config.video.python, featureArgs, { timeout: PROCESSING_TIMEOUT_MS });
+    await execFileAsync(config.video.python, featureArgs, { timeout: remainingMs });
     const cfRaw = fs.readFileSync(cfPath, 'utf-8');
     const clipFeatures = ClipFeatureSetSchema.parse(JSON.parse(cfRaw)); // 신뢰 경계 — 계약 검증
     const m = kpDoc?.model ?? {};
@@ -156,6 +177,9 @@ async function defaultRunInference(
       weightsComplete: m.weightsComplete === true,
       featureConfigVersion:
         (clipFeatures as { featureConfigVersion?: string }).featureConfigVersion ?? null,
+      deviceUsed: m.deviceUsed ?? null,
+      deviceFallback: m.deviceFallback === true,
+      fallbackReason: m.fallbackReason ?? null,
     };
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
@@ -167,12 +191,14 @@ async function claimJob(pool: Pool): Promise<ClaimedJob | null> {
   const client: PoolClient = await pool.connect();
   try {
     await client.query('BEGIN');
+    // org의 inference_device를 함께 읽어 추론 디바이스를 결정(6.0-12). FOR UPDATE OF j로 job 행만 잠근다(org 미잠금).
     const { rows } = await client.query<ClaimedJob>(
-      `SELECT id, clip_id, analysis_profile
-       FROM video_analysis_jobs
-       WHERE status = 'queued'
-       ORDER BY created_at
-       FOR UPDATE SKIP LOCKED
+      `SELECT j.id, j.clip_id, j.analysis_profile, o.inference_device
+       FROM video_analysis_jobs j
+       JOIN organizations o ON o.id = j.organization_id
+       WHERE j.status = 'queued'
+       ORDER BY j.created_at
+       FOR UPDATE OF j SKIP LOCKED
        LIMIT 1`,
     );
     if (rows.length === 0) {
@@ -306,10 +332,13 @@ async function resolveTargetSelection(pool: Pool, clipId: string): Promise<Targe
 // 정체/타임아웃 정리(최소 TTL): processing 타임아웃 → error, queued 정체 → expired.
 // review_pending은 검수 보존을 위해 자동 만료 제외(적용 시 done 전이는 apply 핸들러가 담당).
 async function sweepStale(pool: Pool): Promise<void> {
+  // 6.0-12: sweep 임계 = jobDeadlineMs + sweepGraceMs(단일 진실원천에서 파생). 추론 subprocess가 deadline까지
+  // 정상 처리 중인 job을 조기에 죽이지 않도록 grace를 더한다. SQL 리터럴 대신 바인딩 파라미터.
   await pool.query(
     `UPDATE video_analysis_jobs
        SET status = 'error', error_code = 'TIMEOUT', error_message = 'processing exceeded timeout'
-     WHERE status = 'processing' AND updated_at < now() - interval '5 minutes'`,
+     WHERE status = 'processing' AND updated_at < now() - ($1 * interval '1 millisecond')`,
+    [config.video.jobDeadlineMs + config.video.sweepGraceMs],
   );
   await pool.query(
     `UPDATE video_analysis_jobs SET status = 'expired'
@@ -339,7 +368,8 @@ export async function pollOnce(pool: Pool, deps: WorkerDeps): Promise<boolean> {
     // overlay 프레임 게이트(privacy 예외): on이면 추론이 프레임을 이 dir에 저장. 실패/error 시 즉시 정리 대상.
     const framesDir = overlayFramesDir(job.id);
     pendingFramesDir = framesDir;
-    const result = await deps.runInference(clip.resolvedPath, job.analysis_profile, targetSelection, { framesDir });
+    const device = (['auto', 'cpu', 'cuda'].includes(job.inference_device) ? job.inference_device : 'auto') as 'auto' | 'cpu' | 'cuda';
+    const result = await deps.runInference(clip.resolvedPath, job.analysis_profile, targetSelection, { framesDir, device });
 
     // keypoints artifact 영속화(overlay 검수 입력, M3-7b). uploadDir 구성 시에만(좌표만, 원본 프레임 없음).
     const { keypointsPath, keypointsSha } = await persistKeypoints(job.id, result.keypointsJson);
@@ -353,9 +383,11 @@ export async function pollOnce(pool: Pool, deps: WorkerDeps): Promise<boolean> {
          SET status = 'review_pending', result_features = $2,
              preprocess_config_hash = $3, analysis_input_sha256 = $4,
              keypoints_path = $5, keypoints_sha256 = $6, frames_path = $7,
-             analysis_recipe = $8
+             analysis_recipe = $8,
+             inference_device_used = $9, inference_device_fallback = $10, inference_device_fallback_reason = $11
        WHERE id = $1`,
-      [job.id, JSON.stringify(result.clipFeatures), result.preprocessConfigHash, result.inputSha256, keypointsPath, keypointsSha, framesPath, JSON.stringify(recipe)],
+      [job.id, JSON.stringify(result.clipFeatures), result.preprocessConfigHash, result.inputSha256, keypointsPath, keypointsSha, framesPath, JSON.stringify(recipe),
+        result.deviceUsed ?? null, result.deviceFallback ?? false, result.fallbackReason ?? null],
     );
     pendingKeypointsPath = null; // DB에 경로 기록 완료 → 더 이상 orphan 아님.
     // 프레임: 기록됐으면 보존(orphan 아님), 빈 디렉터리면 즉시 제거.
@@ -366,7 +398,13 @@ export async function pollOnce(pool: Pool, deps: WorkerDeps): Promise<boolean> {
     // DB에 경로가 기록되기 전 실패한 artifact는 즉시 정리(hourly orphan sweep 대기 없이).
     if (pendingKeypointsPath) await safeUnlink(pendingKeypointsPath);
     if (pendingFramesDir) await safeRmDir(pendingFramesDir);
-    const code = (err as { code?: string })?.code ?? 'INFERENCE_ERROR';
+    // cuda 강제 실패는 infer_clip이 stderr에 __CUDA_UNAVAILABLE__ 마커 + nonzero exit으로 알린다(6.0-12). execFile의
+    // err.code는 exit code 숫자라 원인을 못 살리므로 stderr 마커로 CUDA_UNAVAILABLE를 매핑(운영자·UI가 원인 식별).
+    const stderr = String((err as { stderr?: unknown })?.stderr ?? '');
+    const rawCode = (err as { code?: unknown })?.code;
+    const code = stderr.includes('__CUDA_UNAVAILABLE__')
+      ? 'CUDA_UNAVAILABLE'
+      : (typeof rawCode === 'string' ? rawCode : 'INFERENCE_ERROR');
     const message = String((err as Error)?.message ?? err).slice(0, 500);
     await pool.query(
       `UPDATE video_analysis_jobs SET status = 'error', error_code = $2, error_message = $3 WHERE id = $1`,

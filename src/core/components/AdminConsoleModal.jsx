@@ -831,6 +831,104 @@ function OpsTab({ session }) {
   );
 }
 
+// ── Inference Device Tab (6.0-12) ───────────────────────────────────────────────
+const DEVICE_OPTIONS = [
+  { value: 'auto', label: '자동 (GPU 우선)', hint: 'GPU 사용 가능하면 GPU, 아니면 CPU로 자동 폴백(권장).' },
+  { value: 'cpu',  label: 'CPU 강제',        hint: '항상 CPU로 추론.' },
+  { value: 'cuda', label: 'GPU 강제 (CUDA)', hint: 'GPU(CUDA)로만 추론. 사용 불가 시 분석 실패(에러).' },
+];
+
+function InferenceDeviceTab({ session }) {
+  const [device, setDevice]   = useState(null);   // 서버 저장값
+  const [draft, setDraft]     = useState(null);    // 편집값
+  const [gpu, setGpu]         = useState(null);     // { cudaAvailable, providers, error }
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState(null);
+  const [savedMsg, setSavedMsg] = useState(null);
+  const baseUrl = session?.apiBaseUrl || '';
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    setSavedMsg(null);
+    try {
+      const data = await requestJson('/api/admin/org-settings', { baseUrl, session });
+      setDevice(data.inferenceDevice);
+      setDraft(data.inferenceDevice);
+      setGpu(data.gpu || null);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    setSavedMsg(null);
+    try {
+      const data = await requestJson('/api/admin/org-settings', {
+        baseUrl, method: 'PATCH', body: { inferenceDevice: draft }, session,
+      });
+      setDevice(data.inferenceDevice);
+      setDraft(data.inferenceDevice);
+      setSavedMsg('저장되었습니다.');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="admin-tab-content">
+      <div className="admin-filter-row">
+        <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
+          {loading ? '로딩 중…' : '새로고침'}
+        </button>
+      </div>
+      {error && <div className="admin-error">{error}</div>}
+
+      {/* 서버 GPU 감지 상태(Python probe). onnxruntime-gpu 미설치면 감지 불가. */}
+      <div className="admin-cell-hint" style={{ marginBottom: 8 }}>
+        {gpu == null ? 'GPU 상태 확인 중…'
+          : gpu.cudaAvailable
+            ? '서버 GPU: CUDA 사용 가능 ✓'
+            : `서버 GPU: CUDA provider 미설치/감지 불가${gpu.error ? ` (${gpu.error})` : ''}`}
+      </div>
+
+      <fieldset style={{ border: 'none', padding: 0, margin: 0 }} disabled={loading || saving}>
+        {DEVICE_OPTIONS.map(opt => (
+          <label key={opt.value} style={{ display: 'block', marginBottom: 6 }}>
+            <input type="radio" name="inferenceDevice" value={opt.value}
+              checked={draft === opt.value}
+              onChange={() => { setDraft(opt.value); setSavedMsg(null); }} />
+            {' '}<b>{opt.label}</b>
+            <div className="admin-cell-hint" style={{ marginLeft: 22 }}>
+              {opt.hint}
+              {opt.value === 'cuda' && gpu && !gpu.cudaAvailable && (
+                <span style={{ color: 'var(--color-warning)' }}> — 현재 서버에서 CUDA 미감지(선택 시 분석 실패)</span>
+              )}
+            </div>
+          </label>
+        ))}
+      </fieldset>
+
+      <div style={{ marginTop: 10 }}>
+        <button className="btn btn-primary btn-sm" onClick={save}
+          disabled={loading || saving || draft == null || draft === device}>
+          {saving ? '저장 중…' : '저장'}
+        </button>
+        {savedMsg && <span className="admin-cell-hint" style={{ marginLeft: 8 }}>{savedMsg}</span>}
+      </div>
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 const TABS = [
   { id: 'audit',      label: '감사 로그' },
@@ -838,6 +936,7 @@ const TABS = [
   { id: 'users',      label: '사용자 관리' },
   { id: 'requests',   label: '가입 요청' },
   { id: 'assignment', label: '환자 배정' },
+  { id: 'inference',  label: '추론 디바이스' },
   { id: 'ops',        label: '운영 상태' },
 ];
 
@@ -871,6 +970,7 @@ export function AdminConsoleModal({ session, onClose, onPatientAssignmentChanged
         {activeTab === 'users'      && <UsersTab              session={session} />}
         {activeTab === 'requests'   && <SignupRequestsTab     session={session} />}
         {activeTab === 'assignment' && <PatientAssignmentTab  session={session} onPatientAssignmentChanged={onPatientAssignmentChanged} />}
+        {activeTab === 'inference'  && <InferenceDeviceTab    session={session} />}
         {activeTab === 'ops'        && <OpsTab                session={session} />}
 
         <div className="modal-actions">
