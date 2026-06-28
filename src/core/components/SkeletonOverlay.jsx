@@ -24,6 +24,16 @@ export const COCO17_BONES = [
 
 const MIN_SCORE = 0.2; // 이 미만 keypoint는 가림/미검출로 보고 점·선 생략.
 
+// wholebody133-trimmed(59점) 레이아웃에서 손 키포인트 시작 인덱스(0~16 body, 17~37 왼손, 38~58 오른손).
+// coco17(17점)은 17 이상이 없어 자동으로 전부 body로 처리된다(keypoint_layout.py 단일 정의처와 일치).
+const HAND_START_INDEX = 17;
+// 점 반지름(base, 렌더 시 ×scale). 손은 한 손에 21점이 좁게 밀집 → 몸 점과 같은 크기면 뭉쳐 구분 불가하므로
+// 몸 점의 ~1/3로 축소(검수 시 손가락 관절 식별). [target][body|hand].
+const DOT_RADIUS = {
+  body: { target: 3, other: 2 },
+  hand: { target: 1, other: 0.7 },
+};
+
 // 프레임 timestampMs가 변수의 근거 구간(segments) 중 하나에 들면 true. peak 변수의 점-세그먼트
 // (startMs==endMs)는 그 프레임만 매칭. 순수 함수(테스트 대상).
 export function frameActive(timestampMs, segments) {
@@ -70,9 +80,13 @@ function PersonSkeleton({ points, target, active, scale = 1 }) {
         if (!pa || !pb || pa.score < MIN_SCORE || pb.score < MIN_SCORE) return null;
         return <line key={i} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} stroke={stroke} strokeWidth={(target ? 2.5 : 1.5) * scale} />;
       })}
-      {points.map((p, i) => (p.score < MIN_SCORE ? null : (
-        <circle key={i} cx={p.x} cy={p.y} r={(target ? 3 : 2) * scale} fill={fill} />
-      )))}
+      {points.map((p, i) => {
+        if (p.score < MIN_SCORE) return null;
+        // 손 점(인덱스 17+)은 몸 점보다 훨씬 작게 — 밀집된 손가락 관절이 뭉치지 않게.
+        const group = i >= HAND_START_INDEX ? DOT_RADIUS.hand : DOT_RADIUS.body;
+        const r = (target ? group.target : group.other) * scale;
+        return <circle key={i} cx={p.x} cy={p.y} r={r} fill={fill} />;
+      })}
     </g>
   );
 }
