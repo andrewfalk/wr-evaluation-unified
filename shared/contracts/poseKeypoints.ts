@@ -64,6 +64,12 @@ export const PoseModelSchema = z.object({
   poseSha256: Sha256OrNullSchema,
   weightsComplete: z.boolean(),
   preprocessConfigHash: z.string().min(1),
+  // 추론 디바이스(6.0-12). 신규 artifact는 항상 포함, 구 artifact 하위호환 위해 optional.
+  // (JSON Schema keypoints.schema.json의 model 필드와 미러 — 둘 다 갱신해야 overlay safeParse 통과.)
+  requestedDevice: z.enum(['auto', 'cpu', 'cuda']).optional(),
+  deviceUsed: z.enum(['cpu', 'cuda']).optional(),
+  deviceFallback: z.boolean().optional(),
+  fallbackReason: z.string().nullable().optional(),
 }).strict().superRefine((m, ctx) => {
   // weightsComplete=true(verified)면 두 가중치 sha가 모두 64-hex여야 한다(null 금지).
   if (m.weightsComplete) {
