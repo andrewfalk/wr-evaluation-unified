@@ -1,6 +1,6 @@
 # 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 6.0.0 | **Status:** M4 영상분석 시범 운영(참고용, 미검증 배너) + 에어갭 오프라인 배포 패키지 / 인트라넷 운영 중
+> **Version:** 6.1.0 | **Status:** M4 영상분석 시범 운영(참고용, 미검증 배너) + 손목(wholebody)·상지 반복빈도 candidate / 인트라넷 운영 중
 
 직업환경의학 전문의가 **업무상 질병 인정 여부를 판단**할 때 사용하는 통합 평가 도구.
 무릎(슬관절), 척추(요추 MDDM(BK2108) + 전신진동 BK2110), 경추(목 BK2109), 팔꿈치(주관절 BK2101/2103/2105/2106), 어깨(견관절 BK2117), 손목(수관절 BK2113/2101/2103/2106) 평가를 지원하며, 향후 고관절 등을 플러그인 형태로 확장할 수 있다.
@@ -557,6 +557,15 @@ ICD 코드 기반 모듈 자동 추천:
 ---
 
 ## 변경 이력
+
+### v6.1.0 (2026-06-28) — 영상분석 손목(wholebody) + 상지 반복빈도 candidate
+
+근골격계 부담작업 영상분석에 손목/손가락(wholebody 포즈)과 상지 반복빈도를 "참고용 candidate"로 추가. 손목은 전부 candidate(자동입력 없음) — 게이팅 활성(자동제안)은 정확도 검증(6.0-B2) 통과 후. (M4 6.0-10·6.0-11)
+
+- **손목 영상분석(6.0-10)**: "손목·손(고프레임)" 프로필 클립만 wholebody 포즈(rtmw-dw-l-m, 133점 추출 → body17+hand42=59점 저장, face·feet drop) on-demand 추론. 손목 굽힘 반복(cycles/min)·굴곡/편위 peak 각도를 candidate로 노출하되, **굴곡=측면·편위=정면 클립에서만**(시점 하드 게이트). body17 경로·기존 feature 무변경(회귀 0).
+- **상지 반복빈도(6.0-11)**: 어깨 상완거상·팔꿈치 굴곡 반복(cycles/min) candidate — phase-independent half-swing 카운팅 + 저fps Nyquist 경고.
+- **에어갭 모델 교체**: manifest pose role 분리(`pose-body`/`pose-wholebody`, 레거시 `pose`=body 하위호환), recipe가 클립별 사용 모델 식별(`poseSha256`·`modelVersion`). app 이미지 +약 114MB(wholebody 가중치 baking).
+- 검증: 서버 91+ / 클라이언트 789 tests pass, `npm run build:web`·typecheck 통과, body17 회귀 0.
 
 ### v6.0.0 (2026-06-22) — M4 영상분석 시범 운영(참고용) + 에어갭 패키징
 
