@@ -11,6 +11,7 @@ export const ServerPresetSchema = z.object({
   revision:    z.number().int().min(1),
   modules:     PresetModulesSchema,
   ownerUserId: z.string().uuid(),
+  ownerName:   z.string().nullable().optional(),
   source:      z.literal('custom'),
   createdAt:   z.string(),
   updatedAt:   z.string(),

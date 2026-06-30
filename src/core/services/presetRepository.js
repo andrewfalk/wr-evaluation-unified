@@ -57,6 +57,37 @@ export function normalizePresetRecord(preset = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Ownership / source helpers
+// ---------------------------------------------------------------------------
+
+export function getPresetOwnerName(preset) {
+  return preset?._customOwnerName ?? preset?.ownerName ?? null;
+}
+
+export function getPresetVisibility(preset) {
+  return preset?._customVisibility ?? preset?.visibility ?? null;
+}
+
+// Whether the current session may edit/delete this preset (server enforces the
+// same rule). Intranet: only the owner; an unknown owner is never "mine".
+// Local mode is single-user, so a missing owner is treated as own.
+export function isOwnPreset(preset, session) {
+  if (preset?.source === 'builtin' && !preset?._customId) return false;
+  const ownerId = preset?.ownerUserId ?? preset?._customOwnerUserId ?? null;
+  if (session?.mode === 'intranet') {
+    return !!ownerId && ownerId === session?.user?.id;
+  }
+  return ownerId == null || ownerId === session?.user?.id;
+}
+
+// 'builtin' | 'own' | 'shared' — single source of truth for list badges.
+export function getPresetSourceKind(preset, session) {
+  const isCustom = preset?.source === 'custom' || preset?._customId;
+  if (!isCustom) return 'builtin';
+  return isOwnPreset(preset, session) ? 'own' : 'shared';
+}
+
+// ---------------------------------------------------------------------------
 // Local storage helpers
 // ---------------------------------------------------------------------------
 
@@ -186,6 +217,7 @@ async function saveServerCustomPreset(preset, options, session) {
       jobName:        normalized.jobName,
       category:       normalized.category,
       description:    normalized.description,
+      visibility:     normalized.visibility,
       modules:        normalized.modules,
       replaceModules: !!options.replaceModules,
     }, session);
@@ -315,6 +347,9 @@ export function mergePresets(builtins, customs) {
         _customRevision:    customPreset.revision,
         _customCategory:    customPreset.category,
         _customDescription: customPreset.description,
+        _customOwnerUserId: customPreset.ownerUserId,
+        _customOwnerName:   customPreset.ownerName,
+        _customVisibility:  customPreset.visibility,
       };
       continue;
     }

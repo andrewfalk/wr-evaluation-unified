@@ -24,6 +24,7 @@ function toClient(row: PresetRow) {
     revision:    row['revision'],
     modules:     row['modules'] ?? {},
     ownerUserId: row['owner_user_id'],
+    ownerName:   (row['owner_name'] as string | null) ?? null,
     source:      'custom',
     createdAt:   toIso(row['created_at']),
     updatedAt:   toIso(row['updated_at']),
@@ -44,11 +45,13 @@ async function listPresets(pool: Pool, req: Request, res: Response): Promise<voi
   }
 
   const { rows } = await pool.query(
-    `SELECT * FROM custom_presets
-     WHERE deleted_at IS NULL
-       AND organization_id = $1
-       AND (owner_user_id = $2 OR visibility = 'organization')
-     ORDER BY updated_at DESC`,
+    `SELECT cp.*, u.name AS owner_name
+     FROM custom_presets cp
+     LEFT JOIN users u ON u.id = cp.owner_user_id
+     WHERE cp.deleted_at IS NULL
+       AND cp.organization_id = $1
+       AND (cp.owner_user_id = $2 OR cp.visibility = 'organization')
+     ORDER BY cp.updated_at DESC`,
     [organizationId, userId],
   );
 

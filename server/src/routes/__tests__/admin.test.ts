@@ -1034,3 +1034,129 @@ describe('DELETE /api/admin/workspaces/:id/purge', () => {
     }));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Preset sharing manager
+// ---------------------------------------------------------------------------
+const PRESET_ID_1 = '11111111-1111-1111-1111-111111111111';
+const PRESET_ID_2 = '22222222-2222-2222-2222-222222222222';
+const PRESET_ID_3 = '33333333-3333-3333-3333-333333333333';
+
+function adminPresetRow(overrides = {}) {
+  return {
+    id:              PRESET_ID_1,
+    organization_id: 'org-1',
+    job_name:        '토공',
+    category:        '건설업',
+    description:     '',
+    visibility:      'private',
+    revision:        1,
+    owner_user_id:   'user-9',
+    owner_name:      '홍길동',
+    updated_at:      new Date('2025-01-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+describe('GET /api/admin/presets', () => {
+  it('returns org presets with owner name and organizationId for admin', async () => {
+    const pool = makePool();
+    wireQueries(pool, [adminPresetRow()]);
+
+    const res = await request(makeApp(pool))
+      .get('/api/admin/presets')
+      .set('Authorization', `Bearer ${token('admin')}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.presets).toHaveLength(1);
+    expect(res.body.presets[0].ownerName).toBe('홍길동');
+    expect(res.body.presets[0].organizationId).toBe('org-1');
+    expect(res.body.presets[0].jobName).toBe('토공');
+    expect(res.body.presets[0]).not.toHaveProperty('modules');
+  });
+
+  it('returns 403 for non-admin', async () => {
+    const pool = makePool();
+    wireQueries(pool);
+
+    const res = await request(makeApp(pool))
+      .get('/api/admin/presets')
+      .set('Authorization', `Bearer ${token('doctor')}`);
+
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('POST /api/admin/presets/visibility', () => {
+  it('returns 403 without CSRF token', async () => {
+    const pool = makePool();
+    wireQueries(pool);
+
+    const res = await request(makeApp(pool))
+      .post('/api/admin/presets/visibility')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .send({ ids: [PRESET_ID_1], visibility: 'organization' });
+
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 400 for empty ids', async () => {
+    const pool = makePool();
+    wireQueries(pool);
+
+    const res = await request(makeApp(pool))
+      .post('/api/admin/presets/visibility')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ ids: [], visibility: 'organization' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_BODY');
+  });
+
+  it('dedupes ids and returns requested/updated counts', async () => {
+    const { writeAuditLog } = await import('../../middleware/audit');
+    const pool = makePool();
+    // UPDATE … RETURNING id → 2 rows updated.
+    wireQueries(pool, [{ id: PRESET_ID_1 }, { id: PRESET_ID_2 }]);
+
+    const res = await request(makeApp(pool))
+      .post('/api/admin/presets/visibility')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      // PRESET_ID_2 repeated → deduped to 2 distinct requested.
+      .send({ ids: [PRESET_ID_1, PRESET_ID_2, PRESET_ID_2], visibility: 'organization' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.requested).toBe(2);
+    expect(res.body.updated).toBe(2);
+    expect(writeAuditLog).toHaveBeenCalledWith(pool, expect.objectContaining({
+      action:     'admin_presets_set_visibility',
+      targetType: 'custom_preset',
+      targetId:   null,
+      extra: expect.objectContaining({
+        requested: 2,
+        updated: 2,
+        visibility: 'organization',
+        requestedPresetIds: [PRESET_ID_1, PRESET_ID_2],
+        updatedPresetIds: [PRESET_ID_1, PRESET_ID_2],
+      }),
+    }));
+  });
+
+  it('reports updated < requested when some rows are already at target', async () => {
+    const pool = makePool();
+    // 3 requested, but UPDATE (visibility <> $2 + org scope) returns only 1.
+    wireQueries(pool, [{ id: PRESET_ID_1 }]);
+
+    const res = await request(makeApp(pool))
+      .post('/api/admin/presets/visibility')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ ids: [PRESET_ID_1, PRESET_ID_2, PRESET_ID_3], visibility: 'private' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.requested).toBe(3);
+    expect(res.body.updated).toBe(1);
+  });
+});
