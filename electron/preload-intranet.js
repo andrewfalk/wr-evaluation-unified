@@ -39,7 +39,7 @@ if (!originAllowed) {
 
     // EMR direct input (C# EmrHelper → IE DOM injection, Windows only)
     injectEMR:           (data)      => ipcRenderer.invoke('emr-inject',              data),
-    extractRecord:       (patientNo) => ipcRenderer.invoke('emr-extract-record',       patientNo),
+    extractRecord:       (patientNo, injuryDate) => ipcRenderer.invoke('emr-extract-record',       patientNo, injuryDate),
     extractConsultation: ()          => ipcRenderer.invoke('emr-extract-consultation'),
 
     // Access token bridge — main process stores the token in memory for device audit signing.

@@ -65,14 +65,18 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
     if (!ok) return;
 
     let successCount = 0, failCount = 0;
+    const warnings = [];
     setExtractProgress({ current: 0, total: targets.length, currentName: '', status: 'running' });
 
     for (let i = 0; i < targets.length; i++) {
       const p = targets[i];
       setExtractProgress({ current: i + 1, total: targets.length, currentName: p.data.shared.name || p.data.shared.patientNo, status: 'running' });
 
+      const hadInjuryDate = !!p.data.shared.injuryDate;
+      const patientLabel = p.data.shared.name || p.data.shared.patientNo;
+
       try {
-        const result = await window.electron.extractRecord(p.data.shared.patientNo);
+        const result = await window.electron.extractRecord(p.data.shared.patientNo, p.data.shared.injuryDate || '');
         if (result.success) {
           // patientNo 교차검증: EMR이 다른 환자 데이터를 반환한 경우 skip
           if (result.patientNo && result.patientNo !== p.data.shared.patientNo) {
@@ -80,9 +84,17 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
             continue;
           }
           successCount++;
+          // 재해일자별 신청건 매칭 결과 경고 누적
+          if (!hadInjuryDate && result.multipleEntries) {
+            warnings.push(`${patientLabel}: 재해일자가 다른 신청건이 있습니다 (1번 항목을 불러왔습니다)`);
+          }
+          if (hadInjuryDate && result.injuryDateMismatch) {
+            warnings.push(`${patientLabel}: 일치하는 재해일자의 신청건이 없어 1번 항목을 불러왔습니다`);
+          }
           const updated = { ...p.data.shared };
           if (result.patientName) updated.name = result.patientName;
           if (result.birthDate) updated.birthDate = result.birthDate;
+          if (result.gender) updated.gender = result.gender;
           if (result.accidentDate) updated.injuryDate = result.accidentDate;
           if (result.medicalRecord) updated.medicalRecord = result.medicalRecord;
           if (result.highBloodPressure) updated.highBloodPressure = result.highBloodPressure;
@@ -120,7 +132,11 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
     }
 
     setExtractProgress(null);
-    await showAlert(`EMR 추출 완료: ${targets.length}명 중 성공 ${successCount}명, 실패 ${failCount}명`);
+    let doneMsg = `EMR 추출 완료: ${targets.length}명 중 성공 ${successCount}명, 실패 ${failCount}명`;
+    if (warnings.length > 0) {
+      doneMsg += `\n\n⚠ 확인 필요:\n${warnings.join('\n')}`;
+    }
+    await showAlert(doneMsg);
   };
 
   // 다학제회신 추출 (현재 환자, 진료메인 페이지 대상)

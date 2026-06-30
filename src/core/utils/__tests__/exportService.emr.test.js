@@ -67,3 +67,28 @@ describe('generateEMRFieldData — txtJobCusCont 소제목 구조', () => {
     expect(occurrences).toBe(1);
   });
 });
+
+describe('generateEMRFieldData — txtMrecMedPovCont CP949 바이트 절단', () => {
+  // 테스트도 구현과 동일한 CP949 근사(ASCII=1, 그 외=2)로 바이트를 계산
+  const cp949Bytes = (s) => [...s].reduce((n, ch) => n + (ch.codePointAt(0) <= 0x7F ? 1 : 2), 0);
+
+  it('CP949 3950바이트(한글 1975자) 이하는 자르지 않는다', () => {
+    const text = '가'.repeat(1975); // 1975 × 2 = 3950 bytes (한도와 정확히 일치)
+    const patient = makePatient();
+    patient.data.shared.medicalRecord = text;
+    const { txtMrecMedPovCont, _truncatedFields } = generateEMRFieldData(patient);
+    expect(txtMrecMedPovCont).toBe(text);
+    expect(_truncatedFields).not.toContain('txtMrec_Med_Pov_Cont');
+  });
+
+  it('CP949 3950바이트 초과 시 suffix를 붙이고 한도 이내로 자른다', () => {
+    const text = '가'.repeat(2200); // 4400 bytes > 3950
+    const patient = makePatient();
+    patient.data.shared.medicalRecord = text;
+    const { txtMrecMedPovCont, _truncatedFields } = generateEMRFieldData(patient);
+    expect(txtMrecMedPovCont).toContain('...(이하 생략)');
+    expect(txtMrecMedPovCont).not.toBe(text);
+    expect(cp949Bytes(txtMrecMedPovCont)).toBeLessThanOrEqual(3950);
+    expect(_truncatedFields).toContain('txtMrec_Med_Pov_Cont');
+  });
+});

@@ -45,7 +45,7 @@ contextBridge.exposeInMainWorld('electron', {
   injectEMR: (data) => ipcRenderer.invoke('emr-inject', data),
 
   // EMR 데이터 추출 (진료기록분석지 → 환자 데이터)
-  extractRecord: (patientNo) => ipcRenderer.invoke('emr-extract-record', patientNo),
+  extractRecord: (patientNo, injuryDate) => ipcRenderer.invoke('emr-extract-record', patientNo, injuryDate),
 
   // 다학제회신 추출 (진료메인 → 과별 회신)
   extractConsultation: () => ipcRenderer.invoke('emr-extract-consultation'),

@@ -909,14 +909,16 @@ ipcMain.handle('emr-inject', async (event, fieldData) => {
 });
 
 // IPC: 진료기록 데이터 추출 (단건 — App.jsx가 환자별 루프 수행)
-ipcMain.handle('emr-extract-record', async (event, patientNo) => {
+ipcMain.handle('emr-extract-record', async (event, patientNo, injuryDate) => {
   const denied = emrGate(event, 'emr_extract_record');
   if (denied) return { success: false, error: denied.message };
 
   if (process.platform !== 'win32') {
     return { success: false, error: 'EMR extraction is Windows-only.' };
   }
-  const result   = await runHelper(['--extract-record', String(patientNo)], 30000);
+  // 재해일자 매칭으로 입력내역 행을 순회할 수 있어 타임아웃을 120초로 둠
+  // (조회 witness 폴링 8s + 그리드 준비 6s + 행 스캔 최악 ~86s 여유).
+  const result   = await runHelper(['--extract-record', String(patientNo), '--injury-date', String(injuryDate || '')], 120000);
   const targetId = patientNo
     ? crypto.createHash('sha256').update(String(patientNo)).digest('hex')
     : undefined;
