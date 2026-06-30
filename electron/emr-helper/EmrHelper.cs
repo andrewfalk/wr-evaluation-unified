@@ -772,7 +772,9 @@ namespace EmrHelper
 
         // ── RecordExtractor: Module1 VBA → C# ──
 
-        static string ExtractRecord(List<IntPtr> handles, string patientNo)
+        const int MAX_SCAN = 20; // 입력내역 그리드 스캔 상한 (비정상적으로 많은 행 방지)
+
+        static string ExtractRecord(List<IntPtr> handles, string patientNo, string targetInjuryDate)
         {
             var doc = FindDocumentByMatch(handles, "CREATEDUTYANLYNEW", null);
             if (doc == null)
@@ -783,34 +785,56 @@ namespace EmrHelper
             if (txtPtNo == null)
                 return "{\"success\":false,\"error\":\"txtPtNo 필드를 찾을 수 없습니다.\"}";
 
+            object pw = null;
             COM.SetProp(txtPtNo, "value", patientNo);
             try
             {
-                object parentWindow = COM.GetProp(doc, "parentWindow");
-                COM.Invoke(parentWindow, "execScript", "PtInfoSetting()", "vbscript");
+                pw = COM.GetProp(doc, "parentWindow");
+                COM.Invoke(pw, "execScript", "PtInfoSetting()", "vbscript");
             }
             catch (Exception ex)
             {
                 return string.Format("{{\"success\":false,\"error\":\"execScript 실패: {0}\"}}", Json.Escape(ex.Message));
             }
 
-            Thread.Sleep(4000); // Wait for patient data to load
+            // PtInfoSetting()은 시작 시 txtSsnNo 등 기본정보를 동기적으로 비운 뒤,
+            // 새 환자 조회 결과(비동기 서버 응답)로 다시 채운다. 따라서 배치 모드에서
+            // 이전 환자의 잔상 그리드(MaxRows>0)를 새 환자로 오인하지 않도록, witness 필드
+            // (txtSsnNo)가 다시 채워질 때(=조회 완료)까지 먼저 폴링한다. (최대 8s)
+            WaitFieldNonEmpty(doc, "txtSsnNo", 8000);
 
-            // Read input grid (SSRHPLANLIST)
-            object spreadObj = FindElement(doc, "SSRHPLANLIST");
-            if (spreadObj != null)
+            // 그 다음 입력내역 그리드(SSRHPLANLIST)가 채워질 때까지 폴링 (최대 6s)
+            object spreadObj = WaitGridReady(doc, "SSRHPLANLIST", 6000);
+
+            // ── 입력내역(SSRHPLANLIST) 행 선택: 재해일자 매칭 ──
+            bool multipleEntries = false;
+            bool injuryDateMismatch = false;
+            int recordCount = (spreadObj != null) ? COM.GetIntProp(spreadObj, "MaxRows") : 0;
+            multipleEntries = recordCount > 1;
+            string normTarget = NormalizeDate(targetInjuryDate);
+
+            if (recordCount > 0)
             {
-                int recordCount = COM.GetIntProp(spreadObj, "MaxRows");
-                if (recordCount > 0)
+                int scanCount = Math.Min(recordCount, MAX_SCAN);
+
+                // row 0 먼저 로드 (재해일자 미입력 시 기존과 동일하게 1번 항목 사용)
+                string row0Date = SelectRowAndReadDate(doc, pw, 0, 4000);
+
+                if (!string.IsNullOrEmpty(normTarget) && NormalizeDate(row0Date) != normTarget)
                 {
-                    // Double-click first record to load details
-                    try
+                    // row 0 불일치 → 1번부터 순회하며 일치 행 탐색
+                    bool found = false;
+                    for (int r = 1; r < scanCount; r++)
                     {
-                        object pw = COM.GetProp(doc, "parentWindow");
-                        COM.Invoke(pw, "execScript", "Call SSRHPLANLIST_DblClick(0, 1)", "vbscript");
+                        string rowDate = SelectRowAndReadDate(doc, pw, r, 4000);
+                        if (NormalizeDate(rowDate) == normTarget) { found = true; break; }
                     }
-                    catch { }
-                    Thread.Sleep(4000); // Wait for record to load
+                    if (!found)
+                    {
+                        // 일치 건 없음 → row 0 재로드 + 플래그 (renderer 경고)
+                        SelectRowAndReadDate(doc, pw, 0, 4000);
+                        injuryDateMismatch = true;
+                    }
                 }
             }
 
@@ -819,8 +843,10 @@ namespace EmrHelper
             string idacDate = ReadField(doc, "txtIdac_Dte");
             string sickCont = ReadField(doc, "txtSick_Cont");
 
-            // Parse birth date from SSN
-            string birthDate = ParseBirthDate(ReadField(doc, "txtSsnNo"));
+            // Parse birth date / gender from SSN (한 번만 읽어 공용)
+            string ssnRaw = ReadField(doc, "txtSsnNo");
+            string birthDate = ParseBirthDate(ssnRaw);
+            string gender = DeriveGender(ReadField(doc, "txtSex"), ssnRaw);
 
             // Read medical records
             string sptCont = ReadField(doc, "txtSpt_Cont").Trim();
@@ -959,6 +985,9 @@ namespace EmrHelper
             sb.AppendFormat(",\"highBloodPressure\":\"{0}\"", Json.Escape(highBP));
             sb.AppendFormat(",\"diabetes\":\"{0}\"", Json.Escape(diabetes));
             sb.AppendFormat(",\"visitHistory\":\"{0}\"", Json.Escape(visitHistory));
+            sb.AppendFormat(",\"gender\":\"{0}\"", Json.Escape(gender));
+            sb.AppendFormat(",\"multipleEntries\":{0}", multipleEntries ? "true" : "false");
+            sb.AppendFormat(",\"injuryDateMismatch\":{0}", injuryDateMismatch ? "true" : "false");
             sb.Append(",\"diseases\":[");
             for (int i = 0; i < diseases.Count; i++)
             {
@@ -967,6 +996,100 @@ namespace EmrHelper
             }
             sb.Append("]}");
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// 필드(witness)가 비어있지 않게 될 때까지 ~150ms 간격 폴링(최대 maxMs). 현재 값 반환.
+        /// PtInfoSetting()이 동기적으로 비운 필드가 새 환자 조회 결과로 다시 채워졌는지 확인하는 용도.
+        /// </summary>
+        static string WaitFieldNonEmpty(object doc, string fieldId, int maxMs)
+        {
+            int waited = 0;
+            string cur = "";
+            while (waited < maxMs)
+            {
+                cur = ReadField(doc, fieldId);
+                if (!string.IsNullOrEmpty(cur)) return cur;
+                Thread.Sleep(150);
+                waited += 150;
+            }
+            return cur;
+        }
+
+        /// <summary>
+        /// SSRHPLANLIST 등 FarPoint Spread 그리드가 채워질 때까지(MaxRows>0) 폴링.
+        /// 고정 Sleep 대신 사용. 최대 maxMs까지 대기 후 그리드 객체(채워지지 않았으면 그대로) 반환.
+        /// </summary>
+        static object WaitGridReady(object doc, string id, int maxMs)
+        {
+            int waited = 0;
+            object grid = null;
+            while (waited < maxMs)
+            {
+                grid = FindElement(doc, id);
+                if (grid != null && COM.GetIntProp(grid, "MaxRows") > 0) return grid;
+                Thread.Sleep(150);
+                waited += 150;
+            }
+            return grid;
+        }
+
+        /// <summary>
+        /// 입력내역 그리드의 row행을 더블클릭해 상세를 로드하고 재해일자(txtIdac_Dte)를 반환.
+        /// 고정 4초 Sleep 대신, 더블클릭 전 값에서 바뀔 때까지 ~150ms 간격 폴링(최대 maxMs).
+        /// 변경이 감지되면 나머지 상세 필드 로드를 위해 짧게 더 대기. 변경이 없으면(이미 동일 건 로드)
+        /// 현재 값을 반환 → 정상 케이스는 행당 1초 미만.
+        /// </summary>
+        static string SelectRowAndReadDate(object doc, object pw, int row, int maxMs)
+        {
+            string before = ReadField(doc, "txtIdac_Dte");
+            try
+            {
+                COM.Invoke(pw, "execScript", "Call SSRHPLANLIST_DblClick(" + row + ", 1)", "vbscript");
+            }
+            catch { }
+
+            int waited = 0;
+            while (waited < maxMs)
+            {
+                Thread.Sleep(150);
+                waited += 150;
+                if (ReadField(doc, "txtIdac_Dte") != before)
+                {
+                    Thread.Sleep(300); // 나머지 상세 필드(신청상병·의무기록 등) 로드 여유
+                    break;
+                }
+            }
+            return ReadField(doc, "txtIdac_Dte");
+        }
+
+        /// <summary>날짜 문자열에서 숫자만 추출 (2023-07-31 / 2023.07.31 → 20230731).</summary>
+        static string NormalizeDate(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            var sb = new StringBuilder();
+            foreach (char c in s) if (c >= '0' && c <= '9') sb.Append(c);
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// 성별을 앱 형식("male"/"female"/"")으로 산출.
+        /// txtSex 값(남/여 등) 정확 매칭 우선, 비어 있으면 주민번호 7번째 숫자(1·3·5·7=남, 2·4·6·8=여)로 판정.
+        /// </summary>
+        static string DeriveGender(string sexRaw, string ssn)
+        {
+            string s = (sexRaw ?? "").Trim().ToLowerInvariant();
+            if (s == "남" || s == "남자" || s == "남성" || s == "m" || s == "male") return "male";
+            if (s == "여" || s == "여자" || s == "여성" || s == "f" || s == "female") return "female";
+
+            string digits = NormalizeDate(ssn);
+            if (digits.Length >= 7)
+            {
+                char g = digits[6];
+                if (g == '1' || g == '3' || g == '5' || g == '7') return "male";
+                if (g == '2' || g == '4' || g == '6' || g == '8') return "female";
+            }
+            return "";
         }
 
         static string ParseBirthDate(string ssn)
@@ -1197,7 +1320,7 @@ namespace EmrHelper
 
             if (args.Length == 0)
             {
-                _result.Message = "Usage: EmrHelper.exe --probe | --json <path> | --extract-record <ptNo> | --extract-consultation";
+                _result.Message = "Usage: EmrHelper.exe --probe | --json <path> | --extract-record <ptNo> [--injury-date <date>] | --extract-consultation";
                 Console.WriteLine(_result.ToJson());
                 return 1;
             }
@@ -1205,6 +1328,7 @@ namespace EmrHelper
             bool probeOnly = false;
             string jsonPath = null;
             string extractRecordPtNo = null;
+            string extractInjuryDate = null;
             bool extractConsultation = false;
 
             for (int i = 0; i < args.Length; i++)
@@ -1213,6 +1337,7 @@ namespace EmrHelper
                 else if (args[i] == "--diagnose") _diagnose = true;
                 else if (args[i] == "--json" && i + 1 < args.Length) jsonPath = args[++i];
                 else if (args[i] == "--extract-record" && i + 1 < args.Length) extractRecordPtNo = args[++i];
+                else if (args[i] == "--injury-date" && i + 1 < args.Length) extractInjuryDate = args[++i];
                 else if (args[i] == "--extract-consultation") extractConsultation = true;
             }
 
@@ -1231,7 +1356,7 @@ namespace EmrHelper
             // ── New commands: extract-record, extract-consultation ──
             if (extractRecordPtNo != null)
             {
-                string json = ExtractRecord(handles, extractRecordPtNo);
+                string json = ExtractRecord(handles, extractRecordPtNo, extractInjuryDate);
                 Console.WriteLine(json);
                 return json.Contains("\"success\":true") ? 0 : 1;
             }

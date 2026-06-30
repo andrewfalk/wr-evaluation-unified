@@ -716,18 +716,30 @@ export function exportBatchFormatAll(patients) {
   XLSX.writeFile(buildBatchWorkbook(valid), `일괄입력_${valid.length}명_${date}.xlsx`);
 }
 
+// EMR 필드는 CP949(EUC-KR) 기준 바이트 한도를 쓴다(한글 등 2바이트, ASCII 1바이트).
+// UTF-8(Blob) 기준으로 세면 한글이 3바이트라 실제 EMR 한도보다 일찍 잘린다 → CP949 근사로 계산.
+// 한계: emoji 등 CP949 미지원 문자는 실제 EMR 처리와 다를 수 있으나, 소견서 텍스트(한글+숫자+기호)에선 무관.
+function cp949CharBytes(ch) {
+  return ch.codePointAt(0) <= 0x7F ? 1 : 2;
+}
+
+function cp949Bytes(str) {
+  let n = 0;
+  for (const ch of str) n += cp949CharBytes(ch);
+  return n;
+}
+
 function truncateBytes(str, maxBytes, suffix = '\n...(이하 생략)') {
   if (!str) return { text: '', truncated: false };
 
-  const suffixBytes = new Blob([suffix]).size;
-  const totalBytes = new Blob([str]).size;
+  const totalBytes = cp949Bytes(str);
   if (totalBytes <= maxBytes) return { text: str, truncated: false };
 
-  const limit = maxBytes - suffixBytes;
+  const limit = maxBytes - cp949Bytes(suffix);
   let bytes = 0;
   let cutIndex = 0;
   for (const ch of str) {
-    const charBytes = new Blob([ch]).size;
+    const charBytes = cp949CharBytes(ch);
     if (bytes + charBytes > limit) break;
     bytes += charBytes;
     cutIndex += ch.length;
@@ -741,13 +753,13 @@ export function generateEMRFieldData(patient) {
   const shared = patient.data.shared || {};
 
   const truncatedFields = [];
-  const tMrec = truncateBytes(shared.medicalRecord || '', 4000);
+  const tMrec = truncateBytes(shared.medicalRecord || '', 3950);
   if (tMrec.truncated) truncatedFields.push('txtMrec_Med_Pov_Cont');
-  const t6 = truncateBytes(b6, 4000);
+  const t6 = truncateBytes(b6, 3950);
   if (t6.truncated) truncatedFields.push('txtJobCusCont');
-  const t7 = truncateBytes(b7, 4000);
+  const t7 = truncateBytes(b7, 3950);
   if (t7.truncated) truncatedFields.push('txtPerCusCont');
-  const t8 = truncateBytes(b8, 4000);
+  const t8 = truncateBytes(b8, 3950);
   if (t8.truncated) truncatedFields.push('txtSyth1Cont');
 
   return {
@@ -770,9 +782,9 @@ export function generateConsultReplyFieldData(patient) {
   const consultSlots = buildConsultReplySlots(shared);
 
   const truncatedFields = [];
-  const tSyth2 = truncateBytes(consultSlots.slot2, 4000);
+  const tSyth2 = truncateBytes(consultSlots.slot2, 3950);
   if (tSyth2.truncated) truncatedFields.push('txtSyth2Cont');
-  const tSyth3 = truncateBytes(consultSlots.slot3, 4000);
+  const tSyth3 = truncateBytes(consultSlots.slot3, 3950);
   if (tSyth3.truncated) truncatedFields.push('txtSyth3Cont');
 
   return {
