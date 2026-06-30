@@ -55,6 +55,14 @@ export function useExportHandlers({ activePatient, patients, selectedIds }) {
     } catch (err) { await showAlert(err.message); }
   };
 
+  // 헤더만 있는 빈 일괄입력 양식 — 환자 수와 무관하게 항상 사용 가능
+  const handleExportBatchTemplate = async () => {
+    try {
+      const { exportBatchTemplate } = await import('../utils/exportService');
+      exportBatchTemplate();
+    } catch (err) { await showAlert(err.message); }
+  };
+
   return {
     exportDropdown,
     setExportDropdown,
@@ -64,5 +72,6 @@ export function useExportHandlers({ activePatient, patients, selectedIds }) {
     handleExportBatchFormatSingle,
     handleExportBatchFormatSelected,
     handleExportBatchFormatAll,
+    handleExportBatchTemplate,
   };
 }

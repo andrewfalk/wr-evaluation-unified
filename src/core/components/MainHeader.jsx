@@ -38,12 +38,19 @@ function ExportMenu({ activePatient, activeModules, selectedIds, patients, expor
     onExportSingle, onExportBatchFormatSingle,
     onExportSelected, onExportBatchFormatSelected,
     onExportBatch, onExportBatchFormatAll,
+    onExportBatchTemplate,
   } = exportHandlers;
-
-  if (!((activePatient && activeModules.length > 0) || selectedIds.size > 0 || patients.length > 0)) return null;
 
   return (
     <>
+      {/* 일괄입력 빈 양식 — 환자 수와 무관하게 항상 노출 (처음 사용자가 양식을 받을 수 있게) */}
+      <button
+        className="btn btn-success btn-sm"
+        onClick={e => { e.stopPropagation(); onExportBatchTemplate(); }}
+        title="헤더만 있는 빈 일괄입력 엑셀 양식을 내려받습니다"
+      >
+        일괄입력 양식
+      </button>
       {activePatient && activeModules.length > 0 && (
         <div className="action-menu">
           <button className="btn btn-success btn-sm" onClick={e => { e.stopPropagation(); setExportDropdown(v => v === 'single' ? null : 'single'); }}>Excel(현재) ▾</button>

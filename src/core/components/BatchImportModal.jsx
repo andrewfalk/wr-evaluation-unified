@@ -145,6 +145,13 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
   const [dragover, setDragover] = useState(false);
   const fileRef = useRef();
 
+  const handleDownloadTemplate = async () => {
+    try {
+      const { exportBatchTemplate } = await import('../utils/exportService');
+      exportBatchTemplate();
+    } catch (err) { await showAlert(err.message); }
+  };
+
   const handleFile = (selectedFile) => {
     if (!selectedFile) return;
     setFile(selectedFile);
@@ -278,8 +285,9 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
           <div className="modal-section-header">
             <div>
               <h3 className="modal-section-title">파일 업로드</h3>
-              <p className="modal-section-description">첫 행은 컬럼명, 두 번째 행부터 실제 데이터로 해석합니다.</p>
+              <p className="modal-section-description">첫 행은 컬럼명, 두 번째 행부터 실제 데이터로 해석합니다. 형식이 처음이면 빈 양식을 받아 작성하세요.</p>
             </div>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={handleDownloadTemplate}>빈 양식 다운로드</button>
             {file && <span className="modal-section-badge">{file.name}</span>}
           </div>
 

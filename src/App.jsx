@@ -126,6 +126,7 @@ function App() {
     exportDropdown, setExportDropdown,
     handleExportSingle, handleExportSelected, handleExportBatch,
     handleExportBatchFormatSingle, handleExportBatchFormatSelected, handleExportBatchFormatAll,
+    handleExportBatchTemplate,
   } = useExportHandlers({ activePatient, patients, selectedIds });
 
   const {
@@ -534,6 +535,7 @@ function App() {
             onExportBatchFormatSingle: handleExportBatchFormatSingle,
             onExportBatchFormatSelected: handleExportBatchFormatSelected,
             onExportBatchFormatAll: handleExportBatchFormatAll,
+            onExportBatchTemplate: handleExportBatchTemplate,
           }}
           emrHandlers={{
             onEmrExtractBatch: handleEmrExtractBatch,
