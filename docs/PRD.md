@@ -2060,6 +2060,16 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 
 ## 변경 이력
 
+### v6.1.2 (2026-06-30) — 직업 프리셋 조직 공유
+
+직업 노출 프리셋을 개인(private) 저장에서 **조직 공유(organization)** 로 확장. 신규 사용자가 동료의 프리셋을 검색·적용해 바로 활용할 수 있게 한다.
+
+- **저장 토글**: 저장 모달에 공개범위 선택(인트라넷 기본=조직 공유, 로컬/Electron은 숨김·private 고정). 소유 기반 "수정 vs 신규" 매칭으로 동료 행을 PATCH하다 403 나는 것을 차단, 비소유 프리셋 편집 진입 시 읽기전용.
+- **목록 UI**: 검색 드롭다운·조회 모달에 `own/shared/builtin` 소스 분류 → 소유자 배지("조직 공유 · 이름")·읽기전용(비소유는 적용/복제만)·소스 필터·정렬. 서버 `listPresets`에 `users` 조인으로 소유자명 노출, `presetRepository` PATCH `visibility` 갱신 갭 수정.
+- **관리자 '프리셋 공유' 탭**: 조직 전체 프리셋을 보고 **선택형 양방향**(조직 공유 ↔ 비공개)으로 일괄/개별 전환(`GET/POST /api/admin/presets[/visibility]`, ids dedupe·`visibility<>target` skip·org-scope·감사 로그에 requested/updated id 분리).
+- **마이그레이션 0023**: 기존 private 프리셋을 일괄 조직 공유로 백필(직전까지 visibility가 하드코딩 private였으므로 "선택이 아닌 강제"였던 데이터를 소급 전환). ⚠️ 토글 UI와 **동일 릴리스로만** 배포(주석 명시).
+- 검증: 클라 테스트(presetRepository 10 신규 포함) + 서버 라우트 테스트(presets/admin 신규 포함) pass, `build:web`·server build·lint 0 errors. 라이브 dev 스택에서 2계정 공유·0023 백필·관리자 전환 검증. **Electron 셸 무변경 → 인트라넷 설치본 재배포 불필요(서버 이미지만 갱신).**
+
 ### v6.1.1 (2026-06-28) — 영상분석 처리시간 안정화 + 추론 디바이스(GPU) 토글 + overlay 가독성 (6.0-12)
 
 손목(wholebody) 라이브 검증에서 "분석 실패(processing)"로 끝나던 문제 해결(클라이언트 폴링이 wholebody CPU 추론보다 먼저 포기 → 서버 deadline 기반으로 일관화) + 조직별 추론 디바이스 토글 + 검수 overlay 손 keypoint 가독성 개선.
