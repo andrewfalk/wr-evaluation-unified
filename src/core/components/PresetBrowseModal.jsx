@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { getModule } from '../moduleRegistry';
-import { getPresetCategory, getPresetDescription } from '../services/presetRepository';
+import { getPresetCategory, getPresetDescription, getPresetOwnerName, getPresetSourceKind } from '../services/presetRepository';
 
 function normalizeText(value) {
   return String(value || '').trim().toLowerCase();
@@ -25,7 +25,7 @@ function getPresetKey(preset) {
   return preset?._customId || preset?.id;
 }
 
-export function PresetBrowseModal({ job, presets, onSelect, onDelete, onEdit, onClose }) {
+export function PresetBrowseModal({ job, presets, onSelect, onDelete, onEdit, onClose, session }) {
   const [selectedId, setSelectedId] = useState(null);
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -67,13 +67,13 @@ export function PresetBrowseModal({ job, presets, onSelect, onDelete, onEdit, on
       .filter(preset => {
         const category = getPresetCategory(preset) || '';
         const description = getPresetDescription(preset) || '';
-        const source = preset.source === 'custom' || preset._customId ? 'custom' : 'builtin';
+        const sourceKind = getPresetSourceKind(preset, session);
         const moduleIds = Object.keys(preset.modules || {});
         const haystack = [preset.jobName, category, description].map(normalizeText).join(' ');
 
         if (normalizedQuery && !haystack.includes(normalizedQuery)) return false;
         if (categoryFilter !== 'all' && category !== categoryFilter) return false;
-        if (sourceFilter !== 'all' && source !== sourceFilter) return false;
+        if (sourceFilter !== 'all' && sourceKind !== sourceFilter) return false;
         if (moduleFilter.length > 0 && !moduleFilter.every(moduleId => moduleIds.includes(moduleId))) return false;
 
         return true;
@@ -83,13 +83,15 @@ export function PresetBrowseModal({ job, presets, onSelect, onDelete, onEdit, on
         const rightExact = normalizeText(right.jobName) === normalizedJobName ? 1 : 0;
         if (rightExact !== leftExact) return rightExact - leftExact;
 
-        const leftCustom = left.source === 'custom' || left._customId ? 1 : 0;
-        const rightCustom = right.source === 'custom' || right._customId ? 1 : 0;
-        if (rightCustom !== leftCustom) return rightCustom - leftCustom;
+        // 내 프리셋 → 조직 공유 → 기본 순
+        const rank = { own: 0, shared: 1, builtin: 2 };
+        const leftRank = rank[getPresetSourceKind(left, session)];
+        const rightRank = rank[getPresetSourceKind(right, session)];
+        if (leftRank !== rightRank) return leftRank - rightRank;
 
         return left.jobName.localeCompare(right.jobName, 'ko');
       });
-  }, [categoryFilter, moduleFilter, normalizedJobName, normalizedQuery, presets, sourceFilter]);
+  }, [categoryFilter, moduleFilter, normalizedJobName, normalizedQuery, presets, session, sourceFilter]);
 
   const selectedPreset = browseItems.find(item => getPresetKey(item) === selectedId) || null;
   const exactMatchCount = browseItems.filter(item => normalizeText(item.jobName) === normalizedJobName).length;
@@ -132,7 +134,8 @@ export function PresetBrowseModal({ job, presets, onSelect, onDelete, onEdit, on
               <label>{"\uC18C\uC2A4"}</label>
               <select value={sourceFilter} onChange={e => setSourceFilter(e.target.value)}>
                 <option value="all">{"\uC804\uCCB4"}</option>
-                <option value="custom">{"\uB0B4 \uD504\uB9AC\uC14B"}</option>
+                <option value="own">{"\uB0B4 \uD504\uB9AC\uC14B"}</option>
+                <option value="shared">{"\uC870\uC9C1 \uACF5\uC720"}</option>
                 <option value="builtin">{"\uAE30\uBCF8 \uD504\uB9AC\uC14B"}</option>
               </select>
             </div>
@@ -182,7 +185,7 @@ export function PresetBrowseModal({ job, presets, onSelect, onDelete, onEdit, on
             )}
           </div>
           <div className="settings-inline-hint">
-            {"\uD604\uC7AC \uC9C1\uC885\uBA85\uACFC \uAC19\uC740 \uD504\uB9AC\uC14B, \uADF8 \uB2E4\uC74C \uB0B4 \uD504\uB9AC\uC14B \uC21C\uC73C\uB85C \uC704\uC5D0 \uBC30\uCE58\uD569\uB2C8\uB2E4."}
+            {"\uD604\uC7AC \uC9C1\uC885\uBA85 \u2192 \uB0B4 \uD504\uB9AC\uC14B \u2192 \uC870\uC9C1 \uACF5\uC720 \u2192 \uAE30\uBCF8 \uD504\uB9AC\uC14B \uC21C\uC73C\uB85C \uC704\uC5D0 \uBC30\uCE58\uD569\uB2C8\uB2E4."}
           </div>
         </div>
 
@@ -193,7 +196,8 @@ export function PresetBrowseModal({ job, presets, onSelect, onDelete, onEdit, on
               {browseItems.map(preset => {
                 const isSelected = getPresetKey(preset) === selectedId;
                 const isExact = normalizeText(preset.jobName) === normalizedJobName;
-                const isCustom = preset.source === 'custom' || preset._customId;
+                const sourceKind = getPresetSourceKind(preset, session);
+                const canManage = sourceKind === 'own';
 
                 return (
                   <div
@@ -209,7 +213,10 @@ export function PresetBrowseModal({ job, presets, onSelect, onDelete, onEdit, on
                         <span className="preset-list-name">{preset.jobName}</span>
                         <div className="preset-browse-badges">
                           {isExact && <span className="preset-badge">{"\uD604\uC7AC \uC9C1\uB825"}</span>}
-                          {isCustom && <span className="preset-custom-tag">{"\uB0B4 \uD504\uB9AC\uC14B"}</span>}
+                          {sourceKind === 'own' && <span className="preset-custom-tag">{"\uB0B4 \uD504\uB9AC\uC14B"}</span>}
+                          {sourceKind === 'shared' && (
+                            <span className="preset-shared-tag">{`\uC870\uC9C1 \uACF5\uC720 \u00B7 ${getPresetOwnerName(preset) || '\uC54C \uC218 \uC5C6\uC74C'}`}</span>
+                          )}
                         </div>
                       </div>
                       <div className="preset-list-category">{getPresetCategory(preset)}</div>
@@ -218,7 +225,7 @@ export function PresetBrowseModal({ job, presets, onSelect, onDelete, onEdit, on
                       )}
                       <PresetModules modules={preset.modules} />
                     </button>
-                    {isCustom && onDelete && (
+                    {canManage && onDelete && (
                       <div className="preset-browse-item-actions">
                         {onEdit && (
                           <button

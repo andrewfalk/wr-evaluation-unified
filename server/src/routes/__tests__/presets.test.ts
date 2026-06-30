@@ -106,6 +106,19 @@ describe('GET /api/presets', () => {
     expect(res.body.presets[0].revision).toBe(1);
   });
 
+  it('exposes owner display name from the joined users table', async () => {
+    const pool = makePool();
+    wireQueries(pool, { rows: [presetRow({ owner_user_id: 'other-user-id', visibility: 'organization', owner_name: '홍길동' })] });
+
+    const res = await request(makeApp(pool))
+      .get('/api/presets')
+      .set('Authorization', `Bearer ${orgToken()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.presets[0].ownerName).toBe('홍길동');
+    expect(res.body.presets[0].ownerUserId).toBe('other-user-id');
+  });
+
   it('returns 401 without token', async () => {
     const pool = makePool();
     const res = await request(makeApp(pool)).get('/api/presets');
@@ -134,6 +147,23 @@ describe('POST /api/presets', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.preset.jobName).toBe('건설 근로자');
+  });
+
+  it('creates a new owner-scoped row even when another user shares the same identity', async () => {
+    const pool = makePool();
+    // The idempotency SELECT is scoped to owner_user_id = current user, so a
+    // colleague's org-shared preset with the same identity is NOT returned →
+    // INSERT proceeds and the preset is owned by the current user.
+    wireQueries(pool, { rows: [] }, { rows: [presetRow()] });
+
+    const res = await request(makeApp(pool))
+      .post('/api/presets')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-CSRF-Token', CSRF_TOKEN)
+      .send({ ...body, visibility: 'organization' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.preset.ownerUserId).toBe(USER_ID);
   });
 
   it('returns 200 (idempotent) when preset already exists', async () => {

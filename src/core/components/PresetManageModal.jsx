@@ -5,6 +5,9 @@ import {
   DEFAULT_CATEGORY,
   getPresetCategory,
   getPresetDescription,
+  getPresetOwnerName,
+  getPresetVisibility,
+  isOwnPreset,
   normalizePresetIdentityPart,
 } from '../services/presetRepository';
 
@@ -110,11 +113,18 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
     [presets]
   );
 
+  // Only my own presets count for "update vs create" — a colleague's shared
+  // preset with the same identity must never become the PATCH target (403).
+  const ownCustomPresets = useMemo(
+    () => customPresets.filter(preset => isOwnPreset(preset, session)),
+    [customPresets, session]
+  );
+
   const sameNameCustomPresets = useMemo(
-    () => customPresets.filter(
+    () => ownCustomPresets.filter(
       preset => normalizeSearchText(preset.jobName) === normalizeSearchText(job?.jobName || '')
     ),
-    [customPresets, job?.jobName]
+    [ownCustomPresets, job?.jobName]
   );
 
   const initialPreset = editingPreset || (sameNameCustomPresets.length === 1 ? sameNameCustomPresets[0] : null);
@@ -130,6 +140,15 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
   const [selectedModules, setSelectedModules] = useState(() => (
     new Set(editingPreset ? Object.keys(editingPreset.modules || {}) : Object.keys(moduleExtracts))
   ));
+
+  const isIntranet = session?.mode === 'intranet';
+  const defaultVisibility = isIntranet ? 'organization' : 'private';
+  const [visibility, setVisibility] = useState(
+    editingPreset ? (getPresetVisibility(editingPreset) ?? defaultVisibility) : defaultVisibility
+  );
+  // Editing a preset that isn't mine (shouldn't normally be reachable via UI) —
+  // show read-only and block save; the server would reject it with 403 anyway.
+  const isReadOnly = Boolean(editingPreset) && isIntranet && !isOwnPreset(editingPreset, session);
 
   const toggleModule = (moduleId) => {
     setSelectedModules(prev => {
@@ -154,8 +173,8 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
 
   const existingCustom = useMemo(() => {
     if (editingPreset) return editingPreset;
-    return customPresets.find(preset => buildPresetIdentity(getPresetDraft(preset)) === draftIdentity);
-  }, [customPresets, draftIdentity, editingPreset]);
+    return ownCustomPresets.find(preset => buildPresetIdentity(getPresetDraft(preset)) === draftIdentity);
+  }, [ownCustomPresets, draftIdentity, editingPreset]);
 
   const storedModules = existingCustom?.modules || {};
   const moduleIdsToRender = useMemo(
@@ -199,7 +218,7 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
       .slice(0, 5);
   }, [customPresets, draftIdentity, draftPreset, editingPreset, finalCategory, normalizedDescription, normalizedJobName]);
 
-  const canSave = normalizedJobName && selectedModuleIds.length > 0;
+  const canSave = normalizedJobName && selectedModuleIds.length > 0 && !isReadOnly;
 
   const renderModuleSummary = (moduleIds) => {
     if (!moduleIds.length) return '없음';
@@ -219,7 +238,7 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
     onSave({
       id:          existingCustom?._customId || existingCustom?.id || undefined,
       revision:    existingCustom?._customRevision || existingCustom?.revision || undefined,
-      visibility:  'private',
+      visibility,
       jobName:     normalizedJobName,
       category:    finalCategory || DEFAULT_CATEGORY,
       description: normalizedDescription,
@@ -352,10 +371,19 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
           <p className="modal-section-description">현재 입력한 직무 부담 데이터를 직업 프리셋으로 저장합니다.</p>
         </div>
 
-        {session?.mode === 'intranet' && (
+        {isIntranet && (
           <div className="form-meta-card preset-phi-notice">
-            이 프리셋은 현재 로그인한 계정의 내 프리셋으로 서버에 저장됩니다.
+            이 프리셋은 기본적으로 같은 조직 사용자에게 공유됩니다(아래에서 변경 가능).
             환자 식별 정보가 아닌 직업 노출 정보만 포함하세요.
+          </div>
+        )}
+
+        {isReadOnly && (
+          <div className="form-meta-card preset-match-card">
+            <strong>다른 사용자가 공유한 프리셋입니다.</strong>
+            <div className="preset-match-copy">
+              조직에 공유된 프리셋이라 적용은 할 수 있지만 수정·삭제는 소유자만 가능합니다.
+            </div>
           </div>
         )}
 
@@ -404,6 +432,44 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
             </div>
           </div>
 
+          {isIntranet && (
+            <div className="form-row">
+              <div className="form-group form-group-wide">
+                <label>공개 범위</label>
+                <div className="preset-visibility-options">
+                  <label className="preset-visibility-option">
+                    <input
+                      type="radio"
+                      name="preset-visibility"
+                      value="organization"
+                      checked={visibility === 'organization'}
+                      disabled={isReadOnly}
+                      onChange={() => setVisibility('organization')}
+                    />
+                    <span>
+                      <strong>조직 공유</strong>
+                      <span className="settings-inline-hint">같은 조직 사용자가 검색·적용할 수 있습니다. 수정/삭제는 나만 가능합니다.</span>
+                    </span>
+                  </label>
+                  <label className="preset-visibility-option">
+                    <input
+                      type="radio"
+                      name="preset-visibility"
+                      value="private"
+                      checked={visibility === 'private'}
+                      disabled={isReadOnly}
+                      onChange={() => setVisibility('private')}
+                    />
+                    <span>
+                      <strong>나만 보기</strong>
+                      <span className="settings-inline-hint">내 계정에서만 검색됩니다.</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          )}
+
           {existingCustom && !editingPreset && (
             <div className="form-meta-card preset-match-card">
               <strong>같은 프리셋이 이미 있습니다.</strong>
@@ -437,6 +503,11 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
                       <span className="preset-list-modules">
                         {Object.keys(preset.modules || {}).map(moduleId => getModule(moduleId)?.icon || moduleId).join(' ')}
                       </span>
+                      {!isOwnPreset(preset, session) && (preset.source === 'custom' || preset._customId) && (
+                        <span className="preset-list-description">
+                          조직 공유 · {getPresetOwnerName(preset) || '알 수 없음'} (참고용)
+                        </span>
+                      )}
                     </div>
                     <span className="preset-badge">유사도 {score}</span>
                   </div>

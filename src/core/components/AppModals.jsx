@@ -143,6 +143,7 @@ export function AppModals({
             setPresetBrowseJobId(null);
           }}
           onClose={() => setPresetBrowseJobId(null)}
+          session={session}
         />
       )}
     </>

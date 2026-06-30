@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { getPresetCategory, getPresetDescription } from '../services/presetRepository';
+import { getPresetCategory, getPresetDescription, getPresetOwnerName, getPresetSourceKind } from '../services/presetRepository';
 
 const MODULE_LABELS = {
   knee: '무릎',
@@ -24,7 +24,7 @@ function ModuleBadges({ modules }) {
   );
 }
 
-export function PresetSearch({ presets, onSelect, value, onChange }) {
+export function PresetSearch({ presets, onSelect, value, onChange, session }) {
   const [query, setQuery] = useState(value || '');
   const [showResults, setShowResults] = useState(false);
   const [results, setResults] = useState([]);
@@ -136,14 +136,16 @@ export function PresetSearch({ presets, onSelect, value, onChange }) {
       />
       {showResults && (
         <div className="search-results" id={listboxId} role="listbox">
-          {results.map((preset, index) => (
+          {results.map((preset, index) => {
+            const sourceKind = getPresetSourceKind(preset, session);
+            return (
             <div
               key={preset.id}
               id={`${baseId}-option-${index}`}
               ref={el => {
                 itemRefs.current[index] = el;
               }}
-              className={`search-item preset-search-item ${activeIndex === index ? 'is-active' : ''} ${preset.source === 'custom' || preset._customId ? 'is-custom' : ''}`}
+              className={`search-item preset-search-item ${activeIndex === index ? 'is-active' : ''} ${sourceKind !== 'builtin' ? 'is-custom' : ''}`}
               onMouseEnter={() => setActiveIndex(index)}
               onClick={() => selectPreset(preset)}
               role="option"
@@ -151,19 +153,26 @@ export function PresetSearch({ presets, onSelect, value, onChange }) {
             >
               <div className="search-item-name">
                 {preset.jobName}
-                {(preset.source === 'custom' || preset._customId) && (
+                {sourceKind === 'own' && (
                   <span className="preset-custom-tag">{"\uB0B4 \uD504\uB9AC\uC14B"}</span>
+                )}
+                {sourceKind === 'shared' && (
+                  <span className="preset-shared-tag">{"\uC870\uC9C1 \uACF5\uC720"}</span>
                 )}
               </div>
               <div className="search-item-info">
                 {getPresetCategory(preset)}
                 <ModuleBadges modules={preset.modules} />
               </div>
+              {sourceKind === 'shared' && (
+                <div className="search-item-info">{`\uC18C\uC720\uC790: ${getPresetOwnerName(preset) || '\uC54C \uC218 \uC5C6\uC74C'}`}</div>
+              )}
               {!!getPresetDescription(preset) && (
                 <div className="search-item-info">{getPresetDescription(preset)}</div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

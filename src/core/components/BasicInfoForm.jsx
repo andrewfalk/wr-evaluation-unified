@@ -181,6 +181,7 @@ export function BasicInfoForm({
                     value={job.jobName}
                     onChange={v => handleJob(i, 'jobName', v)}
                     onSelect={p => handlePresetSelectInternal(i, p)}
+                    session={session}
                   />
                 ) : (
                   <input value={job.jobName} onChange={e => handleJob(i, 'jobName', e.target.value)} placeholder="직종명을 입력하세요" />
