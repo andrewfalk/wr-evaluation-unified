@@ -201,7 +201,7 @@ export function MddmEvaluation({ patient, updateModule, methodTabs }) {
                     className={`btn btn-sm ${isActive ? 'btn-primary' : 'btn-secondary'}`}
                     onClick={() => handleJobChange(job.id)}
                   >
-                    직력{i + 1}: {job.jobName || '(미입력)'} ({getEffectiveWorkPeriodText(job)})
+                    직력{i + 1}: {job.jobName || '(미입력)'} · {getEffectiveWorkPeriodText(job)}
                     <span style={{ marginLeft: 4, opacity: 0.7 }}>[{jobTaskCount}]</span>
                   </button>
                 );

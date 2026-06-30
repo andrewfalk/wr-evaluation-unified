@@ -419,7 +419,12 @@ function App() {
           isIntranetMode={session?.mode === 'intranet'}
           session={session}
           dashboardScope={effectiveDashboardScope}
-          onDashboardScopeChange={setDashboardScope}
+          onDashboardScopeChange={(s) => {
+            setDashboardScope(s);
+            // 비-'mine' 범위(전체/특정 의사) 선택 시 조직 전체 환자 목록을 로드해야
+            // 드롭다운 옵션·의사별 집계가 정확해진다 (usePatientSync가 scope 변경 시 재pull).
+            if (s !== 'mine' && canUseMinePatientScope) setPatientScope('all');
+          }}
           canUseDashboardScope={canUseDashboardScope}
           patientListScope={effectivePatientScope}
           onShowPatientList={showPatientList}

@@ -35,6 +35,10 @@ export function getWorkPeriodYearMonth(job) {
 }
 
 export function getEffectiveWorkPeriodText(job) {
-  if (job.workPeriodOverride) return job.workPeriodOverride;
-  return formatWorkPeriod(job.startDate, job.endDate);
+  const duration = job.workPeriodOverride || formatWorkPeriod(job.startDate, job.endDate);
+  // 시작·종료일이 모두 있으면 근무 기간 범위를 앞에 붙인다: "2020-10-20 ~ 2024-06-01 (5년 2개월)"
+  if (job.startDate && job.endDate) {
+    return `${job.startDate} ~ ${job.endDate} (${duration})`;
+  }
+  return duration;
 }
