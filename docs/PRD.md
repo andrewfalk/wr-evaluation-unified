@@ -1,8 +1,8 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 6.1.0
-> **Last Updated:** 2026-06-28
-> **Status:** M4 영상분석 시범 운영(참고용, 미검증 배너) + 손목(wholebody)·상지 반복빈도 candidate / 인트라넷 운영 중
+> **Version:** 6.1.4
+> **Last Updated:** 2026-06-30
+> **Status:** 인트라넷 운영 중 · EMR 추출(재해일자별 신청건 매칭·성별 자동입력)/직접입력 개선 · 일괄입력 빈 양식 상시 제공 · M4 영상분석 시범 운영(참고용, 미검증 배너 — 상세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md`)
 
 ---
 
@@ -812,8 +812,11 @@ ZIP명: `업무관련성평가_{N}명_{날짜}.zip` (동명 파일은 인덱스 
 | 현재 환자 | `exportBatchFormatSingle(patient)` | 단일 .xlsx |
 | 선택 환자 | `exportBatchFormatSelected(patients, selectedIds)` | 단일 .xlsx |
 | 전체 환자 | `exportBatchFormatAll(patients)` | 단일 .xlsx |
+| **빈 양식(상시)** | `exportBatchTemplate()` | 헤더만 있는 빈 .xlsx |
 
-파일명: `일괄입력용_{이름 또는 N명}_{날짜}.xlsx`
+파일명: `일괄입력용_{이름 또는 N명}_{날짜}.xlsx` / 빈 양식은 `일괄입력_양식_{날짜}.xlsx`
+
+**빈 양식 상시 제공 (v6.1.4):** 기존 내보내기 메뉴는 환자가 있을 때만 노출되어 처음 사용자가 작성용 양식을 받을 수 없었다. `exportBatchTemplate()`은 `buildBatchWorkbook([])`로 `BATCH_HEADERS`만 담긴 빈 양식을 만들며, **상단 툴바 "일괄입력 양식" 버튼**(환자 수와 무관하게 항상 노출 — `MainHeader`의 `ExportMenu`)과 **일괄 Import 모달의 "빈 양식 다운로드"** 두 곳에서 받을 수 있다. 받은 양식의 헤더는 일괄입력용 export와 동일하여 그대로 Import 가능.
 
 **컬럼 구성 (75열):**
 - 기본정보(6): 이름, 생년월일, 재해일자, 키, 몸무게, 성별
@@ -2060,6 +2063,24 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 
 ## 변경 이력
 
+### v6.1.4 (2026-06-30) — EMR 재해일자 매칭 회귀 수정 + 일괄입력 빈 양식 다운로드
+
+v6.1.3 라이브 검증에서 발견된 재해일자 매칭 회귀를 수정하고, 처음 사용자를 위한 일괄입력 빈 양식 다운로드를 상시 노출.
+
+- **EMR 재해일자 매칭 회귀 수정**: EMR 페이지 VBScript 핸들러 시그니처는 `SSRHPLANLIST_DblClick(iCol, iRow)`=(열, 행)이고 행은 1-based인데, v6.1.3 리팩터에서 `(row, 1)`로 호출해 **iRow가 항상 1로 고정** → 매 반복 행 1만 재로딩, 행 2·3은 한 번도 선택하지 못해 일치 재해일자를 못 찾고 1번으로 폴백했음. `SelectRowAndReadDate`의 execScript를 `SSRHPLANLIST_DblClick(0, row)`로 복구(원본 파라미터 순서) + 행 스캔을 1-based로(행 1 먼저 → 불일치 시 행 2..scanCount 순회 → 폴백 행 1).
+- **사용자 입력 재해일자 보존**: renderer(`useEMRIntegration`)가 추출 결과의 `accidentDate`를 `injuryDate`에 항상 덮어쓰던 것을 **미입력 시에만 자동 채움**으로 변경 — 매칭 기준으로 입력한 재해일자가 불일치 폴백(1번 항목)으로 덮어써지지 않도록.
+- **일괄입력 빈 양식 상시 제공**: `exportBatchTemplate()`(헤더만 있는 빈 양식)을 상단 툴바 "일괄입력 양식" 버튼 + 일괄 Import 모달 "빈 양식 다운로드"에 추가. `ExportMenu`의 early-return 제거로 환자 0명에서도 노출(§7.2-B 참조).
+- 검증: C# 빌드 0 errors / 0 warnings, 클라이언트 812 tests pass. 오프라인 패키지(906MB·v6.1.4) 빌드. **Electron/C# 헬퍼 변경 포함 → 인트라넷 설치본 재배포 필요.**
+
+### v6.1.3 (2026-06-30) — EMR 추출 재해일자별 신청건 매칭 + 성별 자동입력 + 직접입력 바이트 한도 완화
+
+같은 환자라도 재해일자가 다른 여러 신청건이 EMR 입력내역에 존재할 수 있어, 환자 재해일자와 일치하는 건만 가져오도록 추출 로직을 개선. (이후 v6.1.4에서 회귀 수정)
+
+- **재해일자별 신청건 매칭**: EMR 추출 시 입력내역 그리드(`SSRHPLANLIST`)를 순회해 환자 재해일자와 일치하는 행만 로드. 재해일자 미입력 시 1번 항목 + "재해일자가 다른 신청건이 있습니다" 경고, 일치 건 없으면 1번 항목 + 경고(`multipleEntries`/`injuryDateMismatch` 플래그). `renderer → preload → main → C# helper` 4단에 재해일자 전달. 배치 모드 stale-grid 방지 witness(`txtSsnNo` — `PtInfoSetting()`이 동기적으로 비우는 필드가 새 환자 조회로 다시 채워질 때까지 폴링) + 고정 Sleep 대신 변경감지 폴링. 추출 IPC 타임아웃 30s→120s.
+- **성별 자동 추출**: `txtSex`(남/여 정확 매칭) 우선, 비어 있으면 주민번호 7번째 숫자(1·3·5·7=남, 2·4·6·8=여)로 파생 → 앱 `male`/`female` 매핑.
+- **직접입력 바이트 한도 완화**: 소견서 필드 주입(`generateEMRFieldData`/`generateConsultReplyFieldData`)의 절단을 UTF-8(`Blob`, 한글 3바이트)에서 **CP949 근사(ASCII=1·그 외=2)·한도 3950**으로 교체. EMR 필드 실제 한도가 CP949 4000바이트라 UTF-8 기준 4000은 한글을 ~2,600바이트에서 잘랐으나, 이제 4000 한도 내에서 더 많이 들어감(전송 문자열은 동일 — 측정 방식만 변경).
+- 검증: C# 빌드 0 errors, 클라이언트 812 tests pass(바이트 절단 테스트 포함).
+
 ### v6.1.2 (2026-06-30) — 직업 프리셋 조직 공유
 
 직업 노출 프리셋을 개인(private) 저장에서 **조직 공유(organization)** 로 확장. 신규 사용자가 동료의 프리셋을 검색·적용해 바로 활용할 수 있게 한다.
@@ -2070,34 +2091,24 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 - **마이그레이션 0023**: 기존 private 프리셋을 일괄 조직 공유로 백필(직전까지 visibility가 하드코딩 private였으므로 "선택이 아닌 강제"였던 데이터를 소급 전환). ⚠️ 토글 UI와 **동일 릴리스로만** 배포(주석 명시).
 - 검증: 클라 테스트(presetRepository 10 신규 포함) + 서버 라우트 테스트(presets/admin 신규 포함) pass, `build:web`·server build·lint 0 errors. 라이브 dev 스택에서 2계정 공유·0023 백필·관리자 전환 검증. **Electron 셸 무변경 → 인트라넷 설치본 재배포 불필요(서버 이미지만 갱신).**
 
+> **영상분석(M4) 상세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md` 참조.** 아래 v6.0.0~v6.1.1 항목은 요약이며, 추론 파이프라인·레시피 검증·키포인트 계약·게이팅 정책의 전체 명세는 해당 문서에 있다.
+
 ### v6.1.1 (2026-06-28) — 영상분석 처리시간 안정화 + 추론 디바이스(GPU) 토글 + overlay 가독성 (6.0-12)
 
-손목(wholebody) 라이브 검증에서 "분석 실패(processing)"로 끝나던 문제 해결(클라이언트 폴링이 wholebody CPU 추론보다 먼저 포기 → 서버 deadline 기반으로 일관화) + 조직별 추론 디바이스 토글 + 검수 overlay 손 keypoint 가독성 개선.
-
-- **처리시간 deadline 일관화(Part A)**: `config.video.jobDeadlineMs`(기본 600s)·`sweepGraceMs`·`queueWaitMs` 단일 진실원천. 워커가 전체 job deadline을 infer/feature subprocess에 엄격 분배(합이 deadline 초과 불가, 2×timeout 버그 차단), `sweepStale`도 동일 값에서 파생. 클라 `pollJob`을 queued/processing 예산 분리 + `POLL_TIMEOUT` 구조화(상태로 뭉개지 않고 phase별 메시지). `/api/config/public`로 노출.
-- **추론 디바이스(GPU) 토글(Part B)**: 조직 설정 `inference_device`(auto/cpu/cuda) — auto=GPU 가능 시 사용·실패 시 CPU 폴백, cuda=강제(실패 시 job error). python `infer_clip --device` + `probe_device.py`(GPU 감지, Node가 아닌 추론 Python 환경에서). 워커가 실행 디바이스를 job에 기록, 관리자 콘솔 "추론 디바이스" 탭 + 검수 화면 공정별 실행 배지(GPU/CPU/CPU폴백). 기본 auto·동작 변경 없는 opt-in.
-- **검수 overlay 가독성**: wholebody 손 keypoint(한 손 21점)가 몸 점과 같은 크기로 그려져 뭉치던 것을 ~1/3로 축소(손가락 관절 식별).
-- 검증: 서버 517 / 클라 794 / poseKeypoints 18 tests pass, 마이그레이션 0022(추론 디바이스 컬럼), `build:web`·typecheck·lint 0 errors. 라이브 스택(마이그레이션·워커 claim·브라우저) 통과. **Electron 셸 무변경 → 인트라넷 설치본 재배포 불필요(서버 이미지만 갱신).**
+손목(wholebody) 추론 처리시간 deadline 일관화(클라 폴링이 추론보다 먼저 포기하던 "분석 실패" 해결 — 서버 deadline 단일 진실원천 `config.video.jobDeadlineMs`) + 조직별 추론 디바이스 토글(`inference_device` auto/cpu/cuda, 관리자 콘솔 탭 + 공정별 실행 배지) + 검수 overlay 손 keypoint 가독성 개선. 마이그레이션 0022. 검증: 서버 517 / 클라 794 tests pass. **Electron 셸 무변경 → 서버 이미지만 갱신.**
 
 ### v6.1.0 (2026-06-28) — 영상분석 손목(wholebody) + 상지 반복빈도 candidate
 
-근골격계 부담작업 영상분석에 손목/손가락(wholebody 포즈)과 상지 반복빈도를 "참고용 candidate"로 추가. 손목은 전부 candidate(자동입력 없음) — 게이팅 활성(자동제안)은 정확도 검증(6.0-B2) 통과 후. (M4 6.0-10·6.0-11)
-
-- **손목 영상분석(6.0-10)**: "손목·손(고프레임)" 프로필 클립만 wholebody 포즈(rtmw-dw-l-m, 133점 추출 → body17+hand42=59점 저장, face·feet drop) on-demand 추론. 손목 굽힘 반복(cycles/min)·굴곡/편위 peak 각도를 candidate로 노출하되, **굴곡=측면·편위=정면 클립에서만**(시점 하드 게이트). body17 경로·기존 feature 무변경(회귀 0).
-- **상지 반복빈도(6.0-11)**: 어깨 상완거상·팔꿈치 굴곡 반복(cycles/min) candidate — phase-independent half-swing 카운팅 + 저fps Nyquist 경고.
-- **에어갭 모델 교체**: manifest pose role 분리(`pose-body`/`pose-wholebody`, 레거시 `pose`=body 하위호환), recipe가 클립별 사용 모델 식별(`poseSha256`·`modelVersion`). app 이미지 +약 114MB(wholebody 가중치 baking).
-- 검증: 서버 91+ / 클라이언트 789 tests pass, `npm run build:web`·typecheck 통과, body17 회귀 0.
+근골격계 부담작업 영상분석에 손목/손가락(wholebody 포즈)·상지 반복빈도를 "참고용 candidate"(자동입력 없음, 게이팅은 6.0-B2 검증 후)로 추가. 손목은 "손목·손" 프로필 클립만 on-demand wholebody 추론(rtmw-dw-l-m, body17+hand42=59점; 굴곡=측면·편위=정면 시점 하드 게이트), 어깨/팔꿈치 반복빈도(cycles/min) candidate. 에어갭 manifest pose role 분리(`pose-body`/`pose-wholebody`), app 이미지 +약 114MB. body17 경로 회귀 0. 검증: 서버 91+ / 클라 789 tests pass. (M4 6.0-10·6.0-11)
 
 ### v6.0.0 (2026-06-22) — M4 영상분석 시범 운영(참고용) + 에어갭 패키징
 
-근골격계 부담작업 영상분석(자세 추정 기반)을 "참고용 시범 운영"으로 활성화하고, 에어갭 인트라넷 서버용 오프라인 배포 패키지를 완성. (M4 6.0-9)
+근골격계 부담작업 영상분석(자세 추정)을 "참고용 시범 운영"으로 활성화하고 에어갭 오프라인 배포 패키지를 완성. (M4 6.0-9)
 
-- **레시피 버전관리(§8.11)**: 분석 산출물에 `analysis_recipe`(코드 commit·가중치 sha·키포인트 계약)를 기록. 서버가 apply 시 레시피를 권위 검증(suffix diff·canonical prefix 불변·exact-set·서버 상수 대조·provenance 필수)하고, 미검증(unverified)은 fail-closed로 차단.
-- **에어갭 컨테이너화**: Python 포즈 추론(rtmlib/onnxruntime-cpu)을 app 이미지에 동봉, baked 가중치의 실제 `.onnx` SHA256을 manifest와 대조해 불일치 시 fail-closed(`model_loader.verified_model_shas`). `server/Dockerfile` glibc(bookworm) 통일.
+- **영상분석 요약**: 레시피 버전관리(`analysis_recipe` — 코드 commit·가중치 sha·키포인트 계약 기록, 서버 apply 시 권위 검증, 미검증은 fail-closed) + Python 포즈 추론(rtmlib/onnxruntime-cpu)을 app 이미지에 동봉(`.onnx` SHA256 대조). 시범 정책 B(미검증 배너 + 수정사유 `editReason` 피드백, 자동 게이팅 비활성). 전체 명세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md`.
 - **오프라인 패키지**: `scripts/export-offline-package.ps1` — 실파일 sha 검증·dirty 가드·`WR_GIT_COMMIT` 주입·`release-manifest.json`(videoInference 출처) 생성. compose에 `video_uploads` 볼륨 + 추론 mem/cpu 제한.
-- **시범 운영 정책 B**: 영상분석 결과에 "미검증(참고용)" 배너 표시 + 제안 행 수정 시 수정사유(`editReason`) 입력 → 피드백 수집. 정확도 검증·임계값 배선 전까지 자동 게이팅은 비활성.
 - **대시보드**: 관리자 의사별 통계 드롭다운 + 위험도 '낮음' 사유 7항목 분할.
-- 검증: 서버 513 / 클라이언트 770 tests pass, `npm run build:web` 통과, docker build + `--network none` 추론 smoke 통과.
+- 검증: 서버 513 / 클라이언트 770 tests pass, docker build + `--network none` 추론 smoke 통과.
 
 ### v5.1.8 (2026-06-13) — 보안 점검 적용: AI 프록시 모델 allowlist + Electron IPC 보강 + PDF 푸터 이스케이프
 
