@@ -265,12 +265,10 @@ const Dashboard = ({
     [allPatientsSafe]
   );
 
-  const isAdmin = canUseScope && session?.user?.role === 'admin';
-
-  // 관리자 통계 드롭다운: 등록 환자를 가진 모든 의사 옵션
+  // 통계 드롭다운: 등록 환자를 가진 모든 의사 옵션 (로그인 사용자 전원 사용 가능)
   const doctorOptions = useMemo(
-    () => isAdmin ? getDoctorOptions(nonRedactedPatients) : [],
-    [isAdmin, nonRedactedPatients]
+    () => canUseScope ? getDoctorOptions(nonRedactedPatients) : [],
+    [canUseScope, nonRedactedPatients]
   );
 
   const scopedPatients = useMemo(() => {
@@ -296,15 +294,13 @@ const Dashboard = ({
     [scopedPatients, scope]
   );
 
-  // 동기화 후 선택한 의사가 옵션에서 사라지면 scope를 'all'로 되돌리는 가드 (role-aware).
-  // 관리자 UI에는 'mine' 옵션이 없으므로 admin 유효값 = 'all' + doctorOptions key.
+  // 동기화 후 선택한 의사가 옵션에서 사라지면 scope를 'all'로 되돌리는 가드.
+  // 유효값 = 'all' + 'mine' + 현재 로드된 의사 옵션 key.
   useEffect(() => {
     if (!canUseScope) return;
-    const validScopes = isAdmin
-      ? new Set(['all', ...doctorOptions.map(o => o.key)])
-      : new Set(['all', 'mine']);
+    const validScopes = new Set(['all', 'mine', ...doctorOptions.map(o => o.key)]);
     if (!validScopes.has(scope)) onScopeChange?.('all');
-  }, [isAdmin, canUseScope, doctorOptions, scope, onScopeChange]);
+  }, [canUseScope, doctorOptions, scope, onScopeChange]);
 
   // 'all' 전용: 의사별 환자 수 Top 5
   const doctorCounts = useMemo(
@@ -353,35 +349,18 @@ const Dashboard = ({
       <div className="dashboard-header-spacer" />
       <div className="dashboard-header-center">{userBadge}</div>
       <div className="dashboard-header-right">
-        {canUseScope && isAdmin && (
+        {canUseScope && (
           <select
             className="patient-scope-select"
             value={scope}
             onChange={e => onScopeChange?.(e.target.value)}
           >
             <option value="all">전체 통계</option>
+            <option value="mine">내 환자 통계</option>
             {doctorOptions.map(o => (
               <option key={o.key} value={o.key}>{`${o.label} (${o.count}명)`}</option>
             ))}
           </select>
-        )}
-        {canUseScope && !isAdmin && (
-          <div className="patient-scope-toggle">
-            <button
-              type="button"
-              className={`patient-scope-btn${scope === 'mine' ? ' patient-scope-btn--active' : ''}`}
-              onClick={() => onScopeChange?.('mine')}
-            >
-              내 환자 통계
-            </button>
-            <button
-              type="button"
-              className={`patient-scope-btn${scope === 'all' ? ' patient-scope-btn--active' : ''}`}
-              onClick={() => onScopeChange?.('all')}
-            >
-              전체 통계
-            </button>
-          </div>
         )}
       </div>
     </div>
@@ -505,7 +484,7 @@ const Dashboard = ({
           return (
             <div className="dashboard-stat-card metric-card pattern-surface">
               <div className="stat-value stat-complete">{pct}<span className="stat-unit">%</span></div>
-              <div className="stat-label">{scope === 'mine' ? '내 환자 완료율' : '선택 의사 완료율'}</div>
+              <div className="stat-label">{scope === 'mine' ? '내 환자 완료율' : '선택 범위 완료율'}</div>
               <div className="stat-subnote">완료 {completed} / 총 {total}</div>
             </div>
           );

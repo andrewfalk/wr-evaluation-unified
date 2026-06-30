@@ -416,7 +416,7 @@ export async function exportBatch(patients) {
 }
 
 export const BATCH_HEADERS = [
-  '이름', '등록번호', '생년월일', '재해일자', '키', '체중', '성별',
+  '등록번호', '이름', '성별', '생년월일', '재해일자', '키', '체중',
   '병원명', '진료과', '담당의', '특이사항', '복귀고려사항',
   '진단코드', '진단명', '방향', 'KLG(우)', 'KLG(좌)', 'Ellman(우)', 'Ellman(좌)',
   '상병상태(우)', '상병상태(좌)', '업무관련성(우)', '업무관련성(좌)',
@@ -537,13 +537,13 @@ export function generateBatchRows(patientList) {
       const elbowEntry = elbowPair?.entry || null;
       const wristEntry = wristPair?.entry || null;
 
-      row.push(shared.name || '');
-      row.push(shared.patientNo || '');
-      row.push(shared.birthDate || '');
-      row.push(shared.injuryDate || '');
-      row.push(isFirst ? (shared.height || '') : '');
-      row.push(isFirst ? (shared.weight || '') : '');
-      row.push(isFirst ? (GENDER_REVERSE[shared.gender] || '') : '');
+      row.push(shared.patientNo || '');                              // A 등록번호
+      row.push(shared.name || '');                                   // B 이름
+      row.push(isFirst ? (GENDER_REVERSE[shared.gender] || '') : ''); // C 성별
+      row.push(shared.birthDate || '');                              // D 생년월일
+      row.push(shared.injuryDate || '');                             // E 재해일자
+      row.push(isFirst ? (shared.height || '') : '');                // F 키
+      row.push(isFirst ? (shared.weight || '') : '');                // G 체중
       row.push(isFirst ? (shared.hospitalName || '') : '');
       row.push(isFirst ? (shared.department || '') : '');
       row.push(isFirst ? (shared.doctorName || '') : '');
