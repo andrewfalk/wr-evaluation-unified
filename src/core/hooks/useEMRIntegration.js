@@ -95,7 +95,9 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
           if (result.patientName) updated.name = result.patientName;
           if (result.birthDate) updated.birthDate = result.birthDate;
           if (result.gender) updated.gender = result.gender;
-          if (result.accidentDate) updated.injuryDate = result.accidentDate;
+          // 재해일자: 사용자가 입력하지 않은 경우에만 자동 채움.
+          // 입력했으면(매칭 기준값) 보존 — 불일치 폴백으로 1번 항목을 불러와도 입력값을 덮어쓰지 않음.
+          if (!hadInjuryDate && result.accidentDate) updated.injuryDate = result.accidentDate;
           if (result.medicalRecord) updated.medicalRecord = result.medicalRecord;
           if (result.highBloodPressure) updated.highBloodPressure = result.highBloodPressure;
           if (result.diabetes) updated.diabetes = result.diabetes;

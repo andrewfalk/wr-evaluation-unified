@@ -815,24 +815,24 @@ namespace EmrHelper
 
             if (recordCount > 0)
             {
-                int scanCount = Math.Min(recordCount, MAX_SCAN);
+                int scanCount = Math.Min(recordCount, MAX_SCAN); // 유효 행 1..scanCount (1-based)
 
-                // row 0 먼저 로드 (재해일자 미입력 시 기존과 동일하게 1번 항목 사용)
-                string row0Date = SelectRowAndReadDate(doc, pw, 0, 4000);
+                // 행 1 먼저 로드 (재해일자 미입력 시 기존과 동일하게 1번 항목 사용)
+                string row1Date = SelectRowAndReadDate(doc, pw, 1, 4000);
 
-                if (!string.IsNullOrEmpty(normTarget) && NormalizeDate(row0Date) != normTarget)
+                if (!string.IsNullOrEmpty(normTarget) && NormalizeDate(row1Date) != normTarget)
                 {
-                    // row 0 불일치 → 1번부터 순회하며 일치 행 탐색
+                    // 행 1 불일치 → 2번부터 순회하며 일치 행 탐색
                     bool found = false;
-                    for (int r = 1; r < scanCount; r++)
+                    for (int r = 2; r <= scanCount; r++)
                     {
                         string rowDate = SelectRowAndReadDate(doc, pw, r, 4000);
                         if (NormalizeDate(rowDate) == normTarget) { found = true; break; }
                     }
                     if (!found)
                     {
-                        // 일치 건 없음 → row 0 재로드 + 플래그 (renderer 경고)
-                        SelectRowAndReadDate(doc, pw, 0, 4000);
+                        // 일치 건 없음 → 행 1 재로드 + 플래그 (renderer 경고)
+                        SelectRowAndReadDate(doc, pw, 1, 4000);
                         injuryDateMismatch = true;
                     }
                 }
@@ -1035,7 +1035,9 @@ namespace EmrHelper
         }
 
         /// <summary>
-        /// 입력내역 그리드의 row행을 더블클릭해 상세를 로드하고 재해일자(txtIdac_Dte)를 반환.
+        /// 입력내역 그리드의 row행(1-based)을 더블클릭해 상세를 로드하고 재해일자(txtIdac_Dte)를 반환.
+        /// 핸들러 시그니처는 SSRHPLANLIST_DblClick(iCol, iRow) = (열, 행)이며 행은 1-based —
+        /// 따라서 열 0 고정, 행에 row를 넘긴다(iCol 미사용). 원본 호출 SSRHPLANLIST_DblClick(0, 1)과 동일 순서.
         /// 고정 4초 Sleep 대신, 더블클릭 전 값에서 바뀔 때까지 ~150ms 간격 폴링(최대 maxMs).
         /// 변경이 감지되면 나머지 상세 필드 로드를 위해 짧게 더 대기. 변경이 없으면(이미 동일 건 로드)
         /// 현재 값을 반환 → 정상 케이스는 행당 1초 미만.
@@ -1045,7 +1047,7 @@ namespace EmrHelper
             string before = ReadField(doc, "txtIdac_Dte");
             try
             {
-                COM.Invoke(pw, "execScript", "Call SSRHPLANLIST_DblClick(" + row + ", 1)", "vbscript");
+                COM.Invoke(pw, "execScript", "Call SSRHPLANLIST_DblClick(0, " + row + ")", "vbscript");
             }
             catch { }
 
