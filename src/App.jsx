@@ -195,10 +195,20 @@ function App() {
 
   // 대시보드 스코프 드롭다운용 의사 명부(경량 집계, PHI 미포함) 로드.
   // 초기 + 매 동기화 완료(lastSyncedAt) 후 갱신 → 옵션·카운트 최신 유지.
+  const rosterIdentityRef = useRef(null);
   useEffect(() => {
     if (!canUseDashboardScope || !isAuthenticated || !sessionVerified) {
       setDoctorRoster({ doctors: [], unassignedCount: 0 });
+      rosterIdentityRef.current = null;
       return undefined;
+    }
+    // 세션/조직 경계가 바뀌면(로그아웃→다른 계정/조직) 이전 조직의 명부를 즉시 비운다.
+    // 새 fetch가 지연·실패해도 이전 조직 의사 이름/카운트가 드롭다운에 남지 않도록 방지.
+    // (routine 재조회 = lastSyncedAt만 변경 시엔 비우지 않아 깜빡임 없음)
+    const identity = `${session?.user?.id ?? ''}:${session?.user?.organizationId ?? ''}`;
+    if (rosterIdentityRef.current !== identity) {
+      rosterIdentityRef.current = identity;
+      setDoctorRoster({ doctors: [], unassignedCount: 0 });
     }
     let cancelled = false;
     fetchDoctorCounts({ session, settings })
@@ -206,7 +216,7 @@ function App() {
       .catch(() => { /* 명부 조회 실패는 조용히 무시 (드롭다운만 비워짐) */ });
     return () => { cancelled = true; };
     // session/settings 객체는 deps에서 제외(식별자 변동으로 인한 재조회 루프 방지)
-  }, [canUseDashboardScope, isAuthenticated, sessionVerified, session?.user?.id, syncState.lastSyncedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [canUseDashboardScope, isAuthenticated, sessionVerified, session?.user?.id, session?.user?.organizationId, syncState.lastSyncedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 대시보드 스코프 변경 pull이 진행 중인지 판정.
   // status==='syncing' AND 조건을 반드시 유지 — loadedScope 단독 비교는 실패/오프라인 시 영구 로딩처럼 보임.
