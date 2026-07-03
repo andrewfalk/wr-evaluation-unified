@@ -145,6 +145,10 @@ export function usePatientSync({
     lastError: null,
     serverUnassignedCount: null,
     serverPatientCount: null,
+    // Scope of the patient data currently loaded into `patients`. Updated only after a
+    // successful pull swaps the data — used to detect an in-flight dashboard scope change
+    // (see Dashboard loading state). null until the first successful pull.
+    loadedScope: null,
   });
 
   const patientsRef = useRef(patients || []);
@@ -243,11 +247,13 @@ export function usePatientSync({
 
       let serverUnassignedCount;
       let serverPatientCount;
+      let pulledScope;
       if (pull) {
+        pulledScope = scopeRef.current;
         const { items: pulledItems, unassignedCount, orgPatientCount } = await pullAllPatients({
           session:  sessionRef.current,
           settings: settingsRef.current,
-          scope:    scopeRef.current,
+          scope:    pulledScope,
         });
         if (typeof unassignedCount === 'number') serverUnassignedCount = unassignedCount;
         if (typeof orgPatientCount === 'number') serverPatientCount = orgPatientCount;
@@ -280,6 +286,8 @@ export function usePatientSync({
         lastError: null,
         ...(typeof serverUnassignedCount === 'number' ? { serverUnassignedCount } : {}),
         ...(typeof serverPatientCount    === 'number' ? { serverPatientCount }    : {}),
+        // Only after a successful pull does `patients` reflect the pulled scope.
+        ...(pull ? { loadedScope: pulledScope } : {}),
         ...(permissionDeniedCount > 0
           ? { lastPermissionDeniedCount: permissionDeniedCount, lastPermissionDeniedAt: lastSyncedAt }
           : (prev.lastPermissionDeniedCount

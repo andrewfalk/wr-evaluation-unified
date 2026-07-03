@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   getDoctorPatientCounts,
   getDoctorOptions,
+  getDoctorOptionsFromRoster,
   UNASSIGNED_GROUP_KEY,
   computeDashboardStats,
   computeAge,
@@ -98,6 +99,57 @@ describe('getDoctorOptions (관리자 통계 드롭다운)', () => {
   it('미배정 환자가 없으면 미배정 옵션을 포함하지 않음', () => {
     const options = getDoctorOptions([patient({ assignedTop: 'A' })]);
     expect(options.some(o => o.key === UNASSIGNED_GROUP_KEY)).toBe(false);
+  });
+});
+
+describe('getDoctorOptionsFromRoster (서버 명부 기반 드롭다운)', () => {
+  const roster = {
+    doctors: [
+      { userId: 'me', name: '김호길', count: 406 },
+      { userId: 'B', name: '이영희', count: 312 },
+      { userId: 'A', name: '박철수', count: 198 },
+    ],
+    unassignedCount: 57,
+  };
+
+  it('본인(currentUserId)은 옵션에서 제외하고 myCount로 반환', () => {
+    const { options, myCount } = getDoctorOptionsFromRoster(roster, { currentUserId: 'me' });
+    expect(myCount).toBe(406);
+    expect(options.some(o => o.key === 'me')).toBe(false);
+  });
+
+  it('count 내림차순 정렬, 미배정은 마지막', () => {
+    const { options } = getDoctorOptionsFromRoster(roster, { currentUserId: 'me' });
+    expect(options.map(o => o.key)).toEqual(['B', 'A', UNASSIGNED_GROUP_KEY]);
+    expect(options.at(-1).label).toBe('미배정/알 수 없음');
+    expect(options.at(-1).count).toBe(57);
+  });
+
+  it('unassignedCount가 0이면 미배정 옵션 없음', () => {
+    const { options } = getDoctorOptionsFromRoster(
+      { doctors: [{ userId: 'A', name: '박철수', count: 3 }], unassignedCount: 0 },
+      { currentUserId: 'me' }
+    );
+    expect(options.some(o => o.key === UNASSIGNED_GROUP_KEY)).toBe(false);
+  });
+
+  it('이름이 없으면(계정 삭제 등) id 축약 라벨로 폴백', () => {
+    const { options } = getDoctorOptionsFromRoster(
+      { doctors: [{ userId: 'xyzlongidvalue999', name: null, count: 5 }], unassignedCount: 0 },
+      { currentUserId: 'me' }
+    );
+    expect(options[0].label).toBe('xyzlongi…');
+  });
+
+  it('본인이 명부에 없으면 myCount=0, 옵션 전부 유지', () => {
+    const { options, myCount } = getDoctorOptionsFromRoster(roster, { currentUserId: 'nobody' });
+    expect(myCount).toBe(0);
+    expect(options.filter(o => o.key !== UNASSIGNED_GROUP_KEY)).toHaveLength(3);
+  });
+
+  it('빈/누락 roster는 빈 옵션', () => {
+    expect(getDoctorOptionsFromRoster(undefined, {}).options).toEqual([]);
+    expect(getDoctorOptionsFromRoster({ doctors: [] }, {}).options).toEqual([]);
   });
 });
 

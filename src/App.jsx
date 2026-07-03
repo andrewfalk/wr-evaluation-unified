@@ -34,6 +34,7 @@ import { buildSteps } from './core/utils/steps';
 import { isRedactedPatientRecord } from './core/services/patientRecords';
 import { canEditPatient } from './core/utils/patientOwnership';
 import { clearAutoSavedWorkspace } from './core/services/workspaceRepository';
+import { fetchDoctorCounts } from './core/services/patientServerRepository';
 import { LoginModal } from './core/components/LoginModal';
 import { ChangePasswordModal } from './core/components/ChangePasswordModal';
 import { SwitchToLocalButton } from './core/components/SwitchToLocalButton';
@@ -55,6 +56,19 @@ function getDefaultPatientScope(session) {
   return session?.mode === 'intranet' && session?.user?.role !== 'doctor'
     ? 'all'
     : 'mine';
+}
+
+// 환자 로드(동기화) 스코프를 세션에 맞게 정규화.
+// - admin(인트라넷 비-doctor): 'all' / doctor-id / '__unassigned__' 허용, 'mine'만 'all'로 치환
+//   (admin은 "내 환자" 개념이 없음)
+// - doctor / 로컬: 'mine' / 'all' / doctor-id / '__unassigned__' 그대로 통과
+// - 그 외/빈 값: 'all'
+function normalizePatientScopeForSession(session, scope) {
+  const canUseMine = session?.mode !== 'intranet' || session?.user?.role === 'doctor';
+  if (scope === 'all' || scope === '__unassigned__') return scope;
+  if (scope === 'mine') return canUseMine ? 'mine' : 'all';
+  if (typeof scope === 'string' && scope) return scope; // 특정 의사 userId (서버가 검증)
+  return 'all';
 }
 
 // 모듈 등록 (사이드이펙트 import)
@@ -93,9 +107,10 @@ function App() {
   const isIntranetMode =
     session?.mode === 'intranet' || settings?.integrationMode === 'intranet';
   const canUseMinePatientScope = session?.mode !== 'intranet' || session?.user?.role === 'doctor';
-  const effectivePatientScope = canUseMinePatientScope ? patientScope : 'all';
+  const effectivePatientScope = normalizePatientScopeForSession(session, patientScope);
   const canUseDashboardScope = session?.mode === 'intranet' && !!session?.user?.id;
   const effectiveDashboardScope = canUseDashboardScope ? dashboardScope : 'all';
+  const [doctorRoster, setDoctorRoster] = useState({ doctors: [], unassignedCount: 0 });
   const { status: integrationStatus } = useIntegrationStatus({ session, settings });
   const activePatient = patients.find(p => p.id === activeId);
   const conflictPatient = patients.find(
@@ -177,6 +192,28 @@ function App() {
       !configError &&
       !patientSyncPaused,
   });
+
+  // 대시보드 스코프 드롭다운용 의사 명부(경량 집계, PHI 미포함) 로드.
+  // 초기 + 매 동기화 완료(lastSyncedAt) 후 갱신 → 옵션·카운트 최신 유지.
+  useEffect(() => {
+    if (!canUseDashboardScope || !isAuthenticated || !sessionVerified) {
+      setDoctorRoster({ doctors: [], unassignedCount: 0 });
+      return undefined;
+    }
+    let cancelled = false;
+    fetchDoctorCounts({ session, settings })
+      .then(roster => { if (!cancelled) setDoctorRoster(roster); })
+      .catch(() => { /* 명부 조회 실패는 조용히 무시 (드롭다운만 비워짐) */ });
+    return () => { cancelled = true; };
+    // session/settings 객체는 deps에서 제외(식별자 변동으로 인한 재조회 루프 방지)
+  }, [canUseDashboardScope, isAuthenticated, sessionVerified, session?.user?.id, syncState.lastSyncedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 대시보드 스코프 변경 pull이 진행 중인지 판정.
+  // status==='syncing' AND 조건을 반드시 유지 — loadedScope 단독 비교는 실패/오프라인 시 영구 로딩처럼 보임.
+  const isDashboardScopeLoading =
+    canUseDashboardScope &&
+    syncState.status === 'syncing' &&
+    syncState.loadedScope !== effectiveDashboardScope;
 
   const {
     savedItems, setSavedItems, saveName, setSaveName, lastAutoSave, legacyItems,
@@ -422,12 +459,14 @@ function App() {
           dashboardScope={effectiveDashboardScope}
           onDashboardScopeChange={(s) => {
             setDashboardScope(s);
-            // 비-'mine' 범위(전체/특정 의사) 선택 시 조직 전체 환자 목록을 로드해야
-            // 드롭다운 옵션·의사별 집계가 정확해진다 (usePatientSync가 scope 변경 시 재pull).
-            if (s !== 'mine' && canUseMinePatientScope) setPatientScope('all');
+            // 로드 스코프를 대시보드 선택과 일치시킨다. 특정 의사/미배정은 그 범위만,
+            // 'all'은 조직 전체만 로드(정규화는 effectivePatientScope에서 처리).
+            // usePatientSync가 scope 변경 시 해당 범위로 재pull → 전체 payload는 'all'일 때만.
+            setPatientScope(s);
           }}
           canUseDashboardScope={canUseDashboardScope}
-          patientListScope={effectivePatientScope}
+          doctorRoster={doctorRoster}
+          isDashboardScopeLoading={isDashboardScopeLoading}
           onShowPatientList={showPatientList}
           canShowPatientList={
             session?.mode === 'intranet' &&
@@ -497,7 +536,11 @@ function App() {
         scope={effectivePatientScope}
         onScopeChange={scope => {
           setPatientSyncPaused(false);
-          setPatientScope(canUseMinePatientScope ? scope : 'all');
+          const next = canUseMinePatientScope ? scope : 'all';
+          setPatientScope(next);
+          // 대시보드 스코프도 함께 맞춰 로드된 데이터와 통계 뷰가 어긋나지 않게 한다
+          // (예: 대시보드에서 특정 의사를 보던 중 사이드바를 토글한 경우).
+          setDashboardScope(next);
         }}
         session={session}
         serverUnassignedCount={syncState?.serverUnassignedCount ?? null}

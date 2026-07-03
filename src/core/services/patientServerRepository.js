@@ -49,6 +49,19 @@ export async function pullPatients({ session, settings, params = {} } = {}) {
   };
 }
 
+// Lightweight per-doctor patient-count roster for the dashboard scope dropdown.
+// Returns { doctors: [{ userId, name, count }], unassignedCount } — no PHI / payloads.
+export async function fetchDoctorCounts({ session, settings } = {}) {
+  const data = await requestJson('/api/patients/doctor-counts', {
+    baseUrl: getBaseUrl(session, settings),
+    session,
+  });
+  return {
+    doctors: Array.isArray(data.doctors) ? data.doctors : [],
+    unassignedCount: typeof data.unassignedCount === 'number' ? data.unassignedCount : 0,
+  };
+}
+
 export async function fetchPatient(serverId, { session, settings } = {}) {
   const data = await requestJson(`/api/patients/${serverId}`, {
     baseUrl: getBaseUrl(session, settings),

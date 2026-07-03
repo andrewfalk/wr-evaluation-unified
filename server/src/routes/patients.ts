@@ -199,6 +199,76 @@ function toResponse(
   };
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type ListScope = 'all' | 'mine' | 'unassigned' | 'invalid' | { doctorId: string };
+
+// Resolve the ?scope= query param to a strict, validated scope.
+// A specific doctorId is accepted only when that user actually owns patients in the
+// organisation — this keeps the roster (GET /doctor-counts) and selectable scopes
+// consistent, including inactive/former doctors who still have assigned patients.
+async function resolveListScope(
+  pool: Pool,
+  orgId: string,
+  session: { role: string; userId: string },
+  requested: unknown
+): Promise<ListScope> {
+  const rs = typeof requested === 'string' ? requested : '';
+  if (rs === '')            return session.role === 'doctor' ? 'mine' : 'all';
+  if (rs === 'all')         return 'all';
+  if (rs === 'mine')        return 'mine';
+  if (rs === '__unassigned__') return 'unassigned';
+  // Anything else must look like a userId AND own patients in this org, else invalid.
+  if (!UUID_RE.test(rs)) return 'invalid';
+  const { rows } = await pool.query(
+    `SELECT 1 FROM patient_records
+     WHERE organization_id = $1 AND deleted_at IS NULL AND assigned_doctor_user_id = $2
+     LIMIT 1`,
+    [orgId, rs]
+  );
+  return rows.length > 0 ? { doctorId: rs } : 'invalid';
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/patients/doctor-counts
+// Lightweight per-doctor patient-count roster for the dashboard scope dropdown.
+// Returns only { userId, name, count } + unassignedCount — no PHI / payloads.
+// ---------------------------------------------------------------------------
+async function getDoctorCounts(pool: Pool, req: Request, res: Response): Promise<void> {
+  const session = req.sessionInfo!;
+  const orgId   = session.organizationId;
+
+  if (orgId === null) {
+    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
+    return;
+  }
+
+  const { rows } = await pool.query<{ user_id: string | null; name: string | null; count: number }>(
+    `SELECT pr.assigned_doctor_user_id AS user_id, u.name AS name, COUNT(*)::int AS count
+     FROM patient_records pr
+     LEFT JOIN users u
+       ON u.id = pr.assigned_doctor_user_id
+      AND u.organization_id = pr.organization_id
+     WHERE pr.organization_id = $1 AND pr.deleted_at IS NULL
+     GROUP BY pr.assigned_doctor_user_id, u.name`,
+    [orgId]
+  );
+
+  let unassignedCount = 0;
+  const doctors: { userId: string; name: string | null; count: number }[] = [];
+  for (const row of rows) {
+    const count = Number(row.count);
+    if (row.user_id === null) {
+      unassignedCount += count;
+      continue;
+    }
+    doctors.push({ userId: row.user_id, name: row.name ?? null, count });
+  }
+  doctors.sort((a, b) => b.count - a.count);
+
+  res.status(200).json({ doctors, unassignedCount });
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/patients
 // Supports: q (name/patientNo ILIKE), diagnosesCode, jobName, module,
@@ -217,10 +287,10 @@ async function listPatients(pool: Pool, req: Request, res: Response): Promise<vo
   const diagCode     = typeof req.query['diagnosesCode'] === 'string' ? req.query['diagnosesCode'].trim() : '';
   const jobName      = typeof req.query['jobName']       === 'string' ? req.query['jobName'].trim()       : '';
   const moduleFilter = typeof req.query['module']        === 'string' ? req.query['module'].trim()        : '';
-  const requestedScope = req.query['scope'];
-  const scope = requestedScope === 'all' || requestedScope === 'mine'
-    ? requestedScope
-    : (session.role === 'doctor' ? 'mine' : 'all');
+  // Resolve the requested scope with strict validation. Invalid/unknown scopes must
+  // NOT silently fall back to 'all' — they resolve to an empty result set instead.
+  // Allowed: 'all' | 'mine' | '__unassigned__' | a valid org doctor userId.
+  const scope = await resolveListScope(pool, orgId, session, req.query['scope']);
 
   const rawLimit  = Number(req.query['limit']  ?? 20);
   const rawOffset = Number(req.query['offset'] ?? 0);
@@ -230,11 +300,22 @@ async function listPatients(pool: Pool, req: Request, res: Response): Promise<vo
   const filterParams: unknown[] = [orgId];
   const conditions: string[] = ['organization_id = $1', 'deleted_at IS NULL'];
 
-  // Default: only show patients assigned to the current user.
-  // Pass scope=all to retrieve all patients in the organisation.
+  // scope filter:
+  //  - 'all'          → no extra condition (whole organisation)
+  //  - 'mine'         → assigned to the current user
+  //  - 'unassigned'   → no assigned doctor
+  //  - { doctorId }   → assigned to a specific (validated) doctor
+  //  - 'invalid'      → match nothing (never falls back to 'all')
   if (scope === 'mine') {
     filterParams.push(session.userId);
     conditions.push(`assigned_doctor_user_id = $${filterParams.length}`);
+  } else if (scope === 'unassigned') {
+    conditions.push('assigned_doctor_user_id IS NULL');
+  } else if (typeof scope === 'object') {
+    filterParams.push(scope.doctorId);
+    conditions.push(`assigned_doctor_user_id = $${filterParams.length}`);
+  } else if (scope === 'invalid') {
+    conditions.push('FALSE');
   }
 
   if (q) {
@@ -807,6 +888,14 @@ export function createPatientsRouter(pool: Pool): Router {
     '/',
     auth, audit('patient_list'),
     (req, res) => listPatients(pool, req, res).catch(() => res.status(500).json(internalError()))
+  );
+
+  // MUST be registered before '/:id' or Express resolves 'doctor-counts' as a patient id.
+  // Org patient distribution is not PHI but is audited at the same level as the list.
+  router.get(
+    '/doctor-counts',
+    auth, audit('patient_list'),
+    (req, res) => getDoctorCounts(pool, req, res).catch(() => res.status(500).json(internalError()))
   );
 
   router.get(

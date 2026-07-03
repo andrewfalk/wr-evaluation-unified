@@ -59,6 +59,38 @@ export function getDoctorOptions(patients) {
   return unassigned ? [...assigned, unassigned] : assigned;
 }
 
+// 서버 명부(fetchDoctorCounts 결과)로부터 대시보드 드롭다운 옵션 생성.
+// - 본인(currentUserId)은 옵션에서 제외하되, 그 count는 myCount로 따로 반환
+//   ("내 환자 통계 (N명)" 라벨용).
+// - count 내림차순 정렬, 미배정(unassignedCount>0)은 마지막.
+// - 이름이 없으면(계정 삭제 등) id 축약 라벨로 폴백 (groupPatientsByOwner와 동일 규칙).
+// 반환: { options: [{ key, label, count }], myCount }
+export function getDoctorOptionsFromRoster(roster, { currentUserId } = {}) {
+  const doctors = Array.isArray(roster?.doctors) ? roster.doctors : [];
+  const unassignedCount = Number(roster?.unassignedCount) || 0;
+
+  let myCount = 0;
+  const options = [];
+  for (const d of doctors) {
+    const count = Number(d?.count) || 0;
+    if (currentUserId && d?.userId === currentUserId) {
+      myCount = count; // 제외 전에 캡처
+      continue;        // 본인 제외 (Issue 1)
+    }
+    const name = d?.name && String(d.name).trim() ? String(d.name) : null;
+    const id = String(d?.userId ?? '');
+    const label = name || (id.length > 8 ? `${id.slice(0, 8)}…` : id);
+    options.push({ key: d.userId, label, count });
+  }
+  options.sort((a, b) => b.count - a.count);
+
+  if (unassignedCount > 0) {
+    options.push({ key: UNASSIGNED_GROUP_KEY, label: '미배정/알 수 없음', count: unassignedCount });
+  }
+
+  return { options, myCount };
+}
+
 
 // 로컬 시간대 기준으로 Date 객체 반환. ISO와 YYYY-MM-DD 형식 모두 처리
 function parseDateLocal(dateStr) {
