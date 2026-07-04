@@ -285,6 +285,26 @@
     791 통과·py_compile·build·lint 0.
   - [ ] **운영(실환경·미실행)**: `npm run migrate`(0022) · 라이브 검증으로 손목 클립 재현(분석 실패 해소 확인) ·
     GPU 장착 PC에서 auto→cuda 실측(처리시간 단축). bench(`bench_pose.py --model wholebody`)로 jobDeadlineMs 최종값 확정.
+- [~] **6.0-13 GPU 실측 0단계 (dev RTX 4060) — A안(모델 업그레이드) 판단용 벤치**. 6.0-12에서 EP만 CUDA로
+  바꿔서는 이득이 없었음(모델이 작아 프레임당 고정 비용이 지배) → "상위 body 모델 GPU가 현행 CPU와 동급/이상인가"
+  + "현행 wholebody GPU가 deadline(600s)에 충분한가"를 실측. 운영 코드·manifest 무수정(bench_pose.py만).
+  브랜치 `feat/video-6.0-13-gpu-bench`. 상세 계획·외삽 공식·smoke 가드는 §"6.0-13 GPU 실측 0단계 계획",
+  **결과는 `VIDEO_GPU_BENCH_6013.md`** 참고. 6.0-12 운영 잔여 항목("GPU 장착 PC에서 auto→cuda 실측")의 dev 선행 실측.
+  - [x] **0-1** bench_pose.py `--device auto|cpu|cuda`(기본 cpu=기존 동작) + providers/requestedDevice/deviceUsed/
+    deviceFallback/fallbackReason/sessionProviders. **+세션 실제 EP 2단 검증(로드 직후·워밍업 후)** — ORT가
+    ①세션 생성 시 ②첫 추론 시 예외 없이 CPU로 무성 폴백하는 것을 실측으로 확인(infer_clip의 deviceUsed 기록도
+    같은 맹점 — A안 본구현 시 이식 필요, "지난번 GPU 이득 없음"도 이것일 가능성).
+  - [x] **0-2** 현행 × cpu/cuda ×3회: body 26.4→27.0ms/f(**이득 0** — det 20ms가 CPU 고정 병목),
+    wholebody 39.4→31.1ms/f(**25%↓**, pose 21→12ms). 환경 pin: ORT-GPU **1.26**(1.27=CUDA13, 드라이버 12.9 불가)
+    + cuDNN **9.10.2**(9.23은 첫 추론 시 CUDNN_FE 실패→무성 폴백) + preload_dlls().
+  - [x] **0-3** 오버라이드+smoke 가드(후보 3종 통과). 매트릭스: tiny+m GPU **26.6**, tiny+l GPU **28.9**
+    (≈현행 CPU 26.4 — **속도 손해 없이 pose s→m/l 가능 = A안 성립**), yolox-s GPU 37.9(det 31ms — **탈락**).
+  - [x] **0-4** e2e(60s 클립·298프레임): body 12.5(CPU)/12.7s(GPU), wholebody 16.5/17.5s(mean) — **60s 클립에선
+    GPU 이득 미관측**(CUDA init 2~3s 상쇄 + run 편차 ±20%가 기대절감 2.5s와 동자릿수). cuda 실사용은 e2e 로그
+    12건 전수 폴백패턴 0건으로 사후 검증. 상위 후보 외삽: tiny+l e2e ≈13.3s(≈현행 CPU 12.5s).
+  - [x] 실측표 보고서 `VIDEO_GPU_BENCH_6013.md`(직접/외삽 분리, VRAM은 WDDM 한계로 미확보 — 대체 증적 3종).
+  - [ ] **사용자 결정 대기**: A안 진행 여부·모델 선택(m vs l). 서버 GPU 시사점: 워커가 job마다 python 신규
+    기동이라 CUDA init 반복 — 상주화 또는 1분+ 클립 위주로 기대효과 계산.
 
 ---
 
@@ -715,3 +735,50 @@ docker stats wr-rehearsal-app-1                         # 메모리 peak, CPU
   - [x] keypoints artifact 보존 — `done`·`review_pending` job 모두 `keypoints_path` + `.video-uploads/artifacts/*.keypoints.json`(좌표만). done이어도 유지(clip TTL까지).
   - [x] `apply_shell` 클립 = `none`·파일 없음. `tmp/` 잔여 0.
 - **발견된 별건 버그(영상 무관)**: 네이티브 서버를 호스트 로컬(KST)로 띄우면 `dateOnly()`가 pg DATE→`toISOString()`(UTC)로 하루 밀려 환자 식별(생년월일) 비교가 깨져 모든 저장이 409 `PATIENT_IDENTITY_CONFLICT`. 운영 docker(UTC)는 잠복. → **별도 PR로 수정**(스모크는 TZ=UTC로 우회).
+
+### 6.0-13 GPU 실측 0단계 계획 (dev RTX 4060, A안 판단용)
+
+**진단 — 6.0-12 GPU 토글이 이득이 없었던 이유**: 현행 YOLOX-tiny(416×416)+RTMPose-s(192×256)는 GPU 순수
+연산이 1~3ms 수준으로 작아, 프레임당 고정 비용(호스트↔GPU 메모리 왕복·커널 런치·rtmlib CPU 전/후처리·
+OpenCV 디코드·Python 루프)이 전체 시간을 지배. batch=1 순차 구조에서 EP 교체만으로는 구조적으로 못 빨라짐.
+GPU 이득 경로는 (A) 연산력→정확도 환전(상위 모델), (B) 왕복 비용 제거(배치+TensorRT — 후순위),
+(C) 추론 횟수 절감(RTMO one-stage — body17만·손 키포인트 없음, 별도 spike). **0단계는 A안 판단용 실측만.**
+RTMO·TensorRT·배치·fps 상향·wholebody 상위 후보(RTMW 상위)는 범위 제외 — 현행 wholebody(rtmw-dw-l-m)는
+이미 l급이라 "현행 그대로 GPU 충분성"만 판단.
+
+**핵심 질문 2개**: ① 상위 body 모델 GPU가 현행 tiny+s CPU와 동급/이상 속도인가(→A안 진행·모델 선택 근거)
+② 현행 wholebody GPU가 운영 deadline(jobDeadlineMs 600s)에 충분한가.
+
+**작업**(운영 코드·manifest 무수정, `bench_pose.py`만):
+- **0-1 `--device auto|cpu|cuda`**: 기본 `cpu`(미지정 시 기존 하드코딩과 동일 동작 — docker exec 런북 호환.
+  infer_clip 기본 auto와 다름). 해석·폴백은 `infer_clip.py`의 6.0-12 로직과 동일(`cuda_available()` 재사용).
+  출력 JSON에 `providers/requestedDevice/deviceUsed/deviceFallback/fallbackReason`.
+- **0-3 오버라이드 + smoke**: `--det-onnx/--det-size/--pose-onnx/--pose-size` 지정 시 rtmlib
+  `Body(det=..., pose=...)` 직접 생성(build_pose의 baked 경로와 동일 형태). **크기 인자는 (w,h)** —
+  manifest `[192,256]`=(w,h)와 동일 규약, OpenMMLab 파일명 "256x192"는 H×W이므로 `--pose-size 192,256`.
+  smoke 가드(벤치 전 1회, 최소 1명 검출되는 프레임으로): bbox shape·좌표 finite·x2>x1·y2>y1·score∈[0,1](bbox만),
+  pose `kpts.shape==(-1,17,2)`·score finite만(SimCC는 1 초과 가능 — infer_clip.py clamp01 주석 근거).
+  전 프레임 0명이면 smoke 실패. 계약 불일치 시 즉시 실패(조용한 무의미 벤치 방지).
+- **매트릭스(4조합 고정)**: tiny+s(기준) / tiny+m / tiny+l / yolox-s+s. detector 품질 이슈 관찰 시에만 yolox-s+m/l.
+  후보 .onnx는 OpenMMLab 배포본 수동 다운로드·스크래치 보관(레포 미커밋).
+- **0-4 e2e**: infer_clip.py 무수정 실행으로 현행 body·wholebody cpu/cuda 실측. 상위 후보 e2e는 **외삽 추정**:
+  `estimated_e2e = current_e2e_cuda + (candidate_infer_ms − current_infer_ms) × sampled_frames`
+  (기준값은 둘 다 **CUDA** per-frame total(det+pose) — CPU 값 혼입 금지. 디코드/JSON/feature/overlay 비용
+  동일 가정. 모델 로드/CUDA init 차이는 제외한 per-frame 처리 구간 추정임을 보고서에 명시).
+
+**환경(dev 전용, 운영 requirements 무수정)**: 별도 venv에 `onnxruntime-gpu`+`rtmlib`+`opencv-python-headless`.
+버전 pin은 ORT CUDA EP 공식 호환표(CUDA 12.x↔cuDNN 9.x) 기준. Windows DLL preload 확인은
+`onnxruntime.print_debug_info()`/`preload_dlls()`(단순 PATH 확인 아님). `probe_device.py`로 EP 인식 확인 후 진행.
+
+**GPU 실사용 증적(providers 목록만으론 불충분)**: `deviceUsed=cuda`+워밍업 성공 +
+`nvidia-smi --query-gpu=timestamp,utilization.gpu,memory.used --format=csv -l 1` CSV 로그 파일 첨부.
+벤치 시간이 짧으면 `--max-frames` 상향(200+)으로 수십 초 확보(1초 샘플링이 피크를 놓치지 않게).
+per-op CPU 폴백 프로파일링(ORT session profiling)은 범위 제외 — GPU/CPU 시간이 동일하면 그때 추가 검토.
+
+**산출물(실측표)**: 직접측정/외삽추정 컬럼 분리. VRAM은 peakRss(프로세스 RAM)와 별도로
+`gpuMemoryUsedMB`(nvidia-smi max memory.used) 컬럼. 결론은 body(①)와 wholebody(②) 분리. A/B/C 결정은 사용자.
+
+**A안 본구현 시 선결 과제(0단계 범위 아님)**: manifest 티어 축 설계(`_select_models`가 role별 첫 항목만
+채택 — 같은 role 추가는 조용히 무시됨), CPU 폴백 시 상위 티어 자동 강등("cuda일 때만 상위 티어"),
+정확도 지표 확장(지터 단독 금지 — overlay 육안·confidence 분포·track loss/ID switch·각도 미분·손목 별도),
+fps 상향(5→10~15)은 반복수/스무딩/임계값 민감도 검증 후 별도.
