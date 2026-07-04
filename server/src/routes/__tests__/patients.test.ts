@@ -360,6 +360,153 @@ describe('GET /api/patients', () => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/patients — scope 확장 (특정 의사 / 미배정 / invalid)
+// ---------------------------------------------------------------------------
+describe('GET /api/patients — scope 확장', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('scope=<doctorId> (담당 환자 보유) → 그 의사로 필터', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });   // auth
+    mock.mockResolvedValueOnce({ rows: [{ '?column?': 1 }] }); // scope 검증: 담당 환자 있음
+    mock.mockResolvedValueOnce({ rows: [PAT_ROW] });          // items
+    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] });   // count
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] });   // unassignedCount
+    mock.mockResolvedValueOnce({ rows: [{ total: '5' }] });   // orgPatientCount
+
+    const res = await request(makeApp(pool))
+      .get(`/api/patients?scope=${DOCTOR_ID}`)
+      .set('Authorization', `Bearer ${adminToken()}`);
+
+    expect(res.status).toBe(200);
+    // 검증 쿼리가 assigned_doctor_user_id로 조회됐는지
+    const validateCall = mock.mock.calls[1] as unknown[];
+    expect(validateCall[0] as string).toContain('assigned_doctor_user_id');
+    expect(validateCall[1] as unknown[]).toEqual([ORG_ID, DOCTOR_ID]);
+    // items 쿼리가 해당 의사로 필터됐는지
+    const itemsCall = mock.mock.calls[2] as unknown[];
+    expect(itemsCall[0] as string).toContain('assigned_doctor_user_id');
+    expect(itemsCall[1] as unknown[]).toContain(DOCTOR_ID);
+  });
+
+  it('scope=<doctorId> (담당 환자 없음) → invalid, 전체로 fallback 안 함 (빈 결과)', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });   // auth
+    mock.mockResolvedValueOnce({ rows: [] });                // scope 검증: 담당 환자 없음 → invalid
+    mock.mockResolvedValueOnce({ rows: [] });                // items
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] });  // count
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] });  // unassignedCount
+    mock.mockResolvedValueOnce({ rows: [{ total: '5' }] });  // orgPatientCount
+
+    const res = await request(makeApp(pool))
+      .get(`/api/patients?scope=${DOCTOR_ID}`)
+      .set('Authorization', `Bearer ${adminToken()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(0);
+    const itemsCall = mock.mock.calls[2] as unknown[];
+    expect(itemsCall[0] as string).toContain('FALSE');
+    // 전체(all)로 새지 않았음: assigned 필터도 아니고 조건 없음도 아님
+    expect(itemsCall[0] as string).not.toMatch(/AND\s+assigned_doctor_user_id\s*=/);
+  });
+
+  it('scope=__unassigned__ → assigned NULL 필터 (검증 쿼리 없음)', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });  // auth
+    mock.mockResolvedValueOnce({ rows: [] });               // items
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // count
+    mock.mockResolvedValueOnce({ rows: [{ total: '3' }] }); // unassignedCount
+    mock.mockResolvedValueOnce({ rows: [{ total: '5' }] }); // orgPatientCount
+
+    const res = await request(makeApp(pool))
+      .get('/api/patients?scope=__unassigned__')
+      .set('Authorization', `Bearer ${adminToken()}`);
+
+    expect(res.status).toBe(200);
+    // 검증 쿼리 없이 바로 items가 두 번째 호출
+    const itemsCall = mock.mock.calls[1] as unknown[];
+    expect(itemsCall[0] as string).toContain('assigned_doctor_user_id IS NULL');
+  });
+
+  it('scope=아무문자열(비-UUID) → invalid, FALSE 조건 (전체 fallback 금지)', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });  // auth
+    mock.mockResolvedValueOnce({ rows: [] });               // items
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // count
+    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // unassignedCount
+    mock.mockResolvedValueOnce({ rows: [{ total: '5' }] }); // orgPatientCount
+
+    const res = await request(makeApp(pool))
+      .get('/api/patients?scope=not-a-scope')
+      .set('Authorization', `Bearer ${adminToken()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(0);
+    const itemsCall = mock.mock.calls[1] as unknown[];
+    expect(itemsCall[0] as string).toContain('FALSE');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/patients/doctor-counts — 의사별 환자 수 명부
+// ---------------------------------------------------------------------------
+describe('GET /api/patients/doctor-counts', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('/:id 라우트에 먹히지 않고 명부를 반환 (라우트 순서)', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    mock.mockResolvedValueOnce({ rows: [
+      { user_id: USER_ID, name: 'Dr. Kim', count: 5 },
+      { user_id: null,    name: null,      count: 3 },
+    ] });
+
+    const res = await request(makeApp(pool))
+      .get('/api/patients/doctor-counts')
+      .set('Authorization', `Bearer ${adminToken()}`);
+
+    expect(res.status).toBe(200);
+    // getPatient(:id)였다면 doctors 필드가 없고 404였을 것
+    expect(Array.isArray(res.body.doctors)).toBe(true);
+    expect(res.body.doctors).toEqual([{ userId: USER_ID, name: 'Dr. Kim', count: 5 }]);
+    expect(res.body.unassignedCount).toBe(3);
+  });
+
+  it('count 내림차순 정렬, 미배정은 doctors에서 분리', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    mock.mockResolvedValueOnce({ rows: [
+      { user_id: 'A', name: '박철수', count: 2 },
+      { user_id: 'B', name: '이영희', count: 9 },
+      { user_id: null, name: null, count: 4 },
+    ] });
+
+    const res = await request(makeApp(pool))
+      .get('/api/patients/doctor-counts')
+      .set('Authorization', `Bearer ${adminToken()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.doctors.map((d: { userId: string }) => d.userId)).toEqual(['B', 'A']);
+    expect(res.body.unassignedCount).toBe(4);
+  });
+
+  it('returns 403 for superadmin (null org)', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
+    const res = await request(makeApp(pool))
+      .get('/api/patients/doctor-counts')
+      .set('Authorization', `Bearer ${superToken()}`);
+    expect(res.status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/patients/:id
 // ---------------------------------------------------------------------------
 describe('GET /api/patients/:id', () => {

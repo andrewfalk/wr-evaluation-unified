@@ -16,7 +16,8 @@ export function LandingScreen({
   dashboardScope,
   onDashboardScopeChange,
   canUseDashboardScope,
-  patientListScope,
+  doctorRoster,
+  isDashboardScopeLoading,
   onShowPatientList,
   canShowPatientList,
 }) {
@@ -70,7 +71,8 @@ export function LandingScreen({
         scope={dashboardScope}
         onScopeChange={onDashboardScopeChange}
         canUseScope={canUseDashboardScope}
-        patientListScope={patientListScope}
+        doctorRoster={doctorRoster}
+        isScopeLoading={isDashboardScopeLoading}
       />
     </div>
   );

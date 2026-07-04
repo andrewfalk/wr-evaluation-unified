@@ -35,7 +35,7 @@ function token(): string {
 }
 
 describe('POST /clips/:id/upload — uploadDir 미설정', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); });
 
   it('uploadDir 없음 → 503 UPLOAD_DISABLED', async () => {
     const pool = { connect: vi.fn(), query: vi.fn().mockResolvedValue({ rows: [{ exists: 1 }] }) } as unknown as Pool;

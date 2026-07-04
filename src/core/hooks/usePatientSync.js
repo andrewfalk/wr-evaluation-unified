@@ -145,6 +145,10 @@ export function usePatientSync({
     lastError: null,
     serverUnassignedCount: null,
     serverPatientCount: null,
+    // Scope of the patient data currently loaded into `patients`. Updated only after a
+    // successful pull swaps the data — used to detect an in-flight dashboard scope change
+    // (see Dashboard loading state). null until the first successful pull.
+    loadedScope: null,
   });
 
   const patientsRef = useRef(patients || []);
@@ -243,11 +247,13 @@ export function usePatientSync({
 
       let serverUnassignedCount;
       let serverPatientCount;
+      let appliedScope; // pull 결과가 실제로 `patients`에 반영된 스코프 (stale이면 미반영)
       if (pull) {
+        const pulledScope = scopeRef.current;
         const { items: pulledItems, unassignedCount, orgPatientCount } = await pullAllPatients({
           session:  sessionRef.current,
           settings: settingsRef.current,
-          scope:    scopeRef.current,
+          scope:    pulledScope,
         });
         if (typeof unassignedCount === 'number') serverUnassignedCount = unassignedCount;
         if (typeof orgPatientCount === 'number') serverPatientCount = orgPatientCount;
@@ -255,18 +261,26 @@ export function usePatientSync({
           setSyncState(prev => ({ ...prev, status: 'idle' }));
           return null;
         }
-        setPatients(prev => {
-          const next = reconcilePulledPatients(prev, pulledItems, { authoritativeDeletes: scopeRef.current === 'all' });
-          ensureActivePatient(prev, next);
-          if (activeIdRef.current && !next.some(p => p.id === activeIdRef.current)) {
-            queueMicrotask(() => {
-              if (activeIdRef.current && !next.some(p => p.id === activeIdRef.current)) {
-                setActiveId?.(next[0]?.id || null);
-              }
-            });
-          }
-          return next;
-        });
+        // Stale-pull 가드: pull 진행 중 스코프가 바뀌었으면(A→B) A 결과를 B 기준으로
+        // 적용하지 않는다. 특히 좁은 pull(mine/doctor-id)이 all 화면의 synced 환자를
+        // out-of-scope로 축출하는 사고를 막는다. 스코프 변경 시 queued sync가
+        // 현재 스코프로 재-pull하므로 skip해도 안전하다.
+        // authoritativeDeletes도 live scopeRef가 아니라 pulledScope로 판정(방어).
+        if (pulledScope === scopeRef.current) {
+          appliedScope = pulledScope;
+          setPatients(prev => {
+            const next = reconcilePulledPatients(prev, pulledItems, { authoritativeDeletes: pulledScope === 'all' });
+            ensureActivePatient(prev, next);
+            if (activeIdRef.current && !next.some(p => p.id === activeIdRef.current)) {
+              queueMicrotask(() => {
+                if (activeIdRef.current && !next.some(p => p.id === activeIdRef.current)) {
+                  setActiveId?.(next[0]?.id || null);
+                }
+              });
+            }
+            return next;
+          });
+        }
       }
 
       const lastSyncedAt = new Date().toISOString();
@@ -280,6 +294,8 @@ export function usePatientSync({
         lastError: null,
         ...(typeof serverUnassignedCount === 'number' ? { serverUnassignedCount } : {}),
         ...(typeof serverPatientCount    === 'number' ? { serverPatientCount }    : {}),
+        // 실제로 반영된 pull에 대해서만 loadedScope 갱신 (stale pull은 제외).
+        ...(appliedScope !== undefined ? { loadedScope: appliedScope } : {}),
         ...(permissionDeniedCount > 0
           ? { lastPermissionDeniedCount: permissionDeniedCount, lastPermissionDeniedAt: lastSyncedAt }
           : (prev.lastPermissionDeniedCount

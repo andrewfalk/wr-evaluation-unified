@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { computeDashboardStats, getDoctorPatientCounts, getDoctorOptions, UNASSIGNED_GROUP_KEY } from '../utils/dashboardStats';
+import { computeDashboardStats, getDoctorPatientCounts, getDoctorOptionsFromRoster, UNASSIGNED_GROUP_KEY } from '../utils/dashboardStats';
 import { getAllModules } from '../moduleRegistry';
 import { isMyPatient, getOwnerGroupKey } from '../utils/patientOwnership';
 import { isRedactedPatientRecord } from '../services/patientRecords';
@@ -252,12 +252,14 @@ const Dashboard = ({
   scope = 'all',
   onScopeChange,
   canUseScope = false,
-  patientListScope,
+  doctorRoster,
+  isScopeLoading = false,
 }) => {
   const [period, setPeriod] = useState('monthly');
   const [showJobStats, setShowJobStats] = useState(false);
 
   const userId = session?.user?.id;
+  const isDoctor = session?.user?.role === 'doctor';
   const allPatientsSafe = Array.isArray(patients) ? patients : [];
 
   const nonRedactedPatients = useMemo(
@@ -265,10 +267,13 @@ const Dashboard = ({
     [allPatientsSafe]
   );
 
-  // 통계 드롭다운: 등록 환자를 가진 모든 의사 옵션 (로그인 사용자 전원 사용 가능)
-  const doctorOptions = useMemo(
-    () => canUseScope ? getDoctorOptions(nonRedactedPatients) : [],
-    [canUseScope, nonRedactedPatients]
+  // 통계 드롭다운 옵션은 서버 명부(doctorRoster) 기반 — 로드된 환자와 무관하게 항상 완전.
+  // 본인(userId)은 옵션에서 제외하고 그 count는 myCount로 받아 "내 환자 통계 (N명)"에 사용.
+  const { options: doctorOptions, myCount } = useMemo(
+    () => canUseScope
+      ? getDoctorOptionsFromRoster(doctorRoster, { currentUserId: userId })
+      : { options: [], myCount: 0 },
+    [canUseScope, doctorRoster, userId]
   );
 
   const scopedPatients = useMemo(() => {
@@ -294,13 +299,13 @@ const Dashboard = ({
     [scopedPatients, scope]
   );
 
-  // 동기화 후 선택한 의사가 옵션에서 사라지면 scope를 'all'로 되돌리는 가드.
-  // 유효값 = 'all' + 'mine' + 현재 로드된 의사 옵션 key.
+  // 명부 갱신 후 선택한 의사가 옵션에서 사라지면 scope를 'all'로 되돌리는 가드.
+  // 유효값 = 'all' + (doctor일 때만)'mine' + 현재 명부의 의사/미배정 key.
   useEffect(() => {
     if (!canUseScope) return;
-    const validScopes = new Set(['all', 'mine', ...doctorOptions.map(o => o.key)]);
+    const validScopes = new Set(['all', ...(isDoctor ? ['mine'] : []), ...doctorOptions.map(o => o.key)]);
     if (!validScopes.has(scope)) onScopeChange?.('all');
-  }, [canUseScope, doctorOptions, scope, onScopeChange]);
+  }, [canUseScope, doctorOptions, scope, onScopeChange, isDoctor]);
 
   // 'all' 전용: 의사별 환자 수 Top 5
   const doctorCounts = useMemo(
@@ -328,7 +333,6 @@ const Dashboard = ({
   };
 
   const allModules = getAllModules();
-  const showSyncMismatchBanner = canUseScope && scope === 'all' && patientListScope === 'mine';
 
   const userBadge = (() => {
     if (session?.mode !== 'intranet' || !session?.user) return null;
@@ -356,7 +360,8 @@ const Dashboard = ({
             onChange={e => onScopeChange?.(e.target.value)}
           >
             <option value="all">전체 통계</option>
-            <option value="mine">내 환자 통계</option>
+            {/* "내 환자 통계"는 의사에게만 (admin은 본인 환자 개념 없음). 본인 count 표시. */}
+            {isDoctor && <option value="mine">{`내 환자 통계 (${myCount}명)`}</option>}
             {doctorOptions.map(o => (
               <option key={o.key} value={o.key}>{`${o.label} (${o.count}명)`}</option>
             ))}
@@ -366,10 +371,9 @@ const Dashboard = ({
     </div>
   );
 
-  const banner = showSyncMismatchBanner ? (
-    <div className="dashboard-banner dashboard-banner-warning">
-      사이드바가 본인 환자만 동기화 중이라 전체 통계가 부정확할 수 있습니다.
-      사이드바에서 [전체]로 전환하세요.
+  const banner = isScopeLoading ? (
+    <div className="dashboard-banner dashboard-banner-info">
+      선택한 범위의 환자를 불러오는 중입니다…
     </div>
   ) : null;
 
