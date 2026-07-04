@@ -292,8 +292,10 @@
   **결과는 `VIDEO_GPU_BENCH_6013.md`** 참고. 6.0-12 운영 잔여 항목("GPU 장착 PC에서 auto→cuda 실측")의 dev 선행 실측.
   - [x] **0-1** bench_pose.py `--device auto|cpu|cuda`(기본 cpu=기존 동작) + providers/requestedDevice/deviceUsed/
     deviceFallback/fallbackReason/sessionProviders. **+세션 실제 EP 2단 검증(로드 직후·워밍업 후)** — ORT가
-    ①세션 생성 시 ②첫 추론 시 예외 없이 CPU로 무성 폴백하는 것을 실측으로 확인(infer_clip의 deviceUsed 기록도
-    같은 맹점 — A안 본구현 시 이식 필요, "지난번 GPU 이득 없음"도 이것일 가능성).
+    ①세션 생성 시 ②첫 추론 시 예외 없이 CPU로 무성 폴백하는 것을 실측으로 확인("지난번 GPU 이득 없음"도
+    이것일 가능성). infer_clip의 동일 맹점은 후속 PR `fix/video-infer-clip-silent-fallback`에서 해소 —
+    `model_loader.cuda_session_active()` 공용화 + 더미 워밍업 포함 2단 검증 + preload_dlls(cuda 강제 무성폴백은
+    기존 계약대로 `__CUDA_UNAVAILABLE__`+exit 3, auto는 CPU 재빌드+fallbackReason 기록).
   - [x] **0-2** 현행 × cpu/cuda ×3회: body 26.4→27.0ms/f(**이득 0** — det 20ms가 CPU 고정 병목),
     wholebody 39.4→31.1ms/f(**25%↓**, pose 21→12ms). 환경 pin: ORT-GPU **1.26**(1.27=CUDA13, 드라이버 12.9 불가)
     + cuDNN **9.10.2**(9.23은 첫 추론 시 CUDNN_FE 실패→무성 폴백) + preload_dlls().

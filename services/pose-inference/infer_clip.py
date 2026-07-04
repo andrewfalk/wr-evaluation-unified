@@ -184,12 +184,39 @@ def main():
     step = max(1, round(orig_fps / args.fps))
     actual_sampled_fps = orig_fps / step  # 정수 step 때문에 요청값과 다를 수 있음 — 실제값을 기록
 
-    from model_loader import build_pose, cuda_available, available_providers
+    from model_loader import build_pose, cuda_available, available_providers, cuda_session_active
+
+    def verify_cuda_or_reason(est):
+        """(6.0-13) cuda 세션 실사용 검증. ORT는 ①세션 생성 시 ②**첫 추론 시**(cudnn frontend 그래프
+        빌드 실패 등) EP 실패를 예외 없이 CPU 폴백으로 처리 — build_pose 성공만으로는 GPU 실행 보장이
+        안 된다. 더미 프레임+전체 bbox로 det/pose를 1회씩 실제 실행한 뒤 세션 EP를 재확인한다.
+        반환: None(진짜 CUDA) 또는 폴백 사유 문자열."""
+        ok, sp = cuda_session_active(est)
+        if not ok:
+            return f"cuda session init fell back to CPU (sessionProviders={sp})"
+        dummy = np.zeros((320, 320, 3), dtype=np.uint8)
+        try:
+            est.det_model(dummy)
+            est.pose_model(dummy, bboxes=np.array([[0.0, 0.0, 320.0, 320.0]]))
+        except Exception as e:  # noqa: BLE001 — 워밍업 실패도 폴백 사유로 수렴(분석 자체는 CPU로 가능)
+            return f"cuda warmup inference failed: {e}"
+        ok, sp = cuda_session_active(est)
+        if not ok:
+            return f"cuda fell back to CPU at first inference (sessionProviders={sp})"
+        return None
+
     # 디바이스 해석(6.0-12): auto=GPU 가능 시 사용·init 실패 시 CPU 폴백, cuda=강제(불가/실패 시 마커+nonzero exit).
     requested_device = args.device
     device_used = "cpu"
     device_fallback = False
     fallback_reason = None
+    if requested_device != "cpu":
+        try:
+            import onnxruntime as _ort
+            if hasattr(_ort, "preload_dlls"):
+                _ort.preload_dlls()  # pip nvidia-* 휠의 CUDA/cuDNN DLL 로드(Windows PATH 미등록 대비, ORT>=1.21).
+        except Exception:  # noqa: BLE001 — preload 불가 환경(구버전/Linux 시스템 CUDA)은 기존 경로로 진행
+            pass
     if requested_device == "cpu":
         body, _model_source = build_pose(variant, device="cpu")
     elif requested_device == "cuda":
@@ -202,6 +229,11 @@ def main():
         except Exception as e:  # noqa: BLE001 — 강제 cuda 실패는 명확 마커로 워커가 CUDA_UNAVAILABLE 매핑
             sys.stderr.write(f"__CUDA_UNAVAILABLE__: cuda init failed: {e}\n")
             raise SystemExit(3)
+        silent_fallback = verify_cuda_or_reason(body)
+        if silent_fallback is not None:
+            # 강제 cuda인데 무성 폴백 → CPU로 계속하면 GPU 배지가 거짓이 됨. 기존 계약대로 마커+exit 3.
+            sys.stderr.write(f"__CUDA_UNAVAILABLE__: {silent_fallback}\n")
+            raise SystemExit(3)
     else:  # auto
         if cuda_available():
             try:
@@ -212,6 +244,14 @@ def main():
                 device_used = "cpu"
                 device_fallback = True
                 fallback_reason = f"cuda init failed, fell back to cpu: {e}"
+            if device_used == "cuda":
+                silent_fallback = verify_cuda_or_reason(body)
+                if silent_fallback is not None:
+                    # 무성 폴백 상태의 추정기는 이미 CPU 세션이지만, 명시적으로 CPU 재빌드해 상태를 확정.
+                    body, _model_source = build_pose(variant, device="cpu")
+                    device_used = "cpu"
+                    device_fallback = True
+                    fallback_reason = f"{silent_fallback}; fell back to cpu"
         else:
             # GPU 자체가 없는 환경 → CPU가 정상 결과(폴백 아님). 사유만 기록.
             body, _model_source = build_pose(variant, device="cpu")

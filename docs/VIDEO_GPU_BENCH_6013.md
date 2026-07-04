@@ -22,8 +22,9 @@ ORT는 두 시점에 예외 없이 CPU로 폴백한다: ① 세션 생성 시 EP
 실패(stdout "Falling back to CPUExecutionProvider" 후 세션 재생성). `cuda_available()`(EP 목록)과 세션 생성
 성공만 믿으면 **CPU 실행을 GPU로 오인**한다. bench_pose.py는 로드 직후+워밍업 후 2단으로
 `session.get_providers()`를 검사해 차단하지만, **infer_clip.py의 `deviceUsed=cuda` 기록은 같은 맹점을
-가짐**(운영 코드 무수정 원칙으로 이번 범위 제외) — "지난번 GPU 이득 없음" 관찰도 이 무성 폴백(실제 CPU 실행)
-이었을 가능성이 높음. A안 본구현 시 infer_clip에 동일한 2단 검증 이식 필요.
+가짐**(0단계에서는 운영 코드 무수정 원칙으로 제외) — "지난번 GPU 이득 없음" 관찰도 이 무성 폴백(실제 CPU 실행)
+이었을 가능성이 높음. **→ 해소됨: 후속 PR(`fix/video-infer-clip-silent-fallback`)에서 검증 로직을
+`model_loader.cuda_session_active()`로 공용화해 infer_clip에 2단 검증(더미 워밍업 포함)+preload_dlls 이식.**
 
 ## 직접 측정 ① — 프레임당 추론 ms (bench_pose.py, 200프레임×3회, 5fps 샘플링, persons/frame 0.86)
 

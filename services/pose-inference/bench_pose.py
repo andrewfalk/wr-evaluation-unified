@@ -89,18 +89,6 @@ def parse_size(s):
         raise SystemExit(f"invalid size {s!r} (expected 'w,h' e.g. 192,256)")
 
 
-def session_providers(est):
-    """(6.0-13) rtmlib BaseTool.session(ort.InferenceSession)의 **실제** EP 목록.
-    ORT는 CUDA EP 초기화가 실패해도 예외 없이 경고만 내고 CPU로 세션을 만든다(무성 폴백) —
-    cuda_available()/요청값만 믿으면 CPU 실행을 GPU 실측으로 오인하므로 세션에서 직접 읽는다."""
-    out = {}
-    for name in ("det_model", "pose_model"):
-        sess = getattr(getattr(est, name, None), "session", None)
-        if sess is not None and hasattr(sess, "get_providers"):
-            out[name] = list(sess.get_providers())
-    return out
-
-
 def smoke_check(m, frames, nk):
     """(6.0-13) 오버라이드 모델의 rtmlib 출력 계약 검증 — 조용한 무의미 벤치 방지.
     최소 1명 검출되는 프레임을 찾아 bbox 좌표(finite, x2>x1, y2>y1)·kpts shape·score 유한성을 확인한다.
@@ -185,7 +173,8 @@ def main():
 
     # 2) 모델 로드 — build_pose: baked 우선(에어갭), 없으면 dev 자동 다운로드. nk = 저장 전 추출 키포인트 수.
     nk = 17 if args.model == "body" else 133
-    from model_loader import build_pose, resolve_model_paths, cuda_available, available_providers
+    from model_loader import (build_pose, resolve_model_paths, cuda_available,
+                              available_providers, cuda_session_active)
 
     def build(device):
         if not override:
@@ -243,12 +232,7 @@ def main():
         (경고만 내고 CPU 세션), ② **첫 추론 시** EP 실행 실패(stdout 'Falling back to ...' 후 CPU 세션
         재생성). 따라서 로드 직후와 워밍업 후 두 번 검사해, 요청이 아닌 실측 디바이스를 기록/강제한다."""
         nonlocal device_used, device_fallback, fallback_reason
-        sp = session_providers(m)
-        # strict 판정 2조건: ① det/pose **두 세션 모두** 읽혀야 함(rtmlib 내부 변화로 한쪽 session을 못
-        # 읽으면 나머지만으로 통과하는 구멍 방지) ② 포함 여부가 아니라 **첫 provider**가 CUDA — ORT
-        # provider 순서는 실행 우선순위라서 ['CPU...', 'CUDA...'] 같은 세션은 CPU로 돈다.
-        ok = set(sp) == {"det_model", "pose_model"} and all(
-            p and p[0] == "CUDAExecutionProvider" for p in sp.values())
+        ok, sp = cuda_session_active(m)  # strict 판정(두 세션 + 첫 provider=CUDA)은 model_loader 공용
         if device_used == "cuda" and not ok:
             if requested_device == "cuda":
                 raise SystemExit(

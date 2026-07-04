@@ -138,3 +138,24 @@ def available_providers():
 def cuda_available():
     """CUDAExecutionProvider 사용 가능 여부(onnxruntime-gpu 설치+CUDA 런타임). 미설치면 False(6.0-12)."""
     return "CUDAExecutionProvider" in available_providers()
+
+
+def session_providers(est):
+    """rtmlib 추정기(det_model/pose_model의 ort .session)의 **실제** EP 목록(6.0-13).
+    ORT는 ①세션 생성 시 ②첫 추론 시 EP 실패를 예외 없이 CPU 폴백으로 처리(무성 폴백)하므로,
+    cuda_available()/요청값이 아니라 세션에서 직접 읽어야 CPU 실행을 GPU로 오인하지 않는다."""
+    out = {}
+    for name in ("det_model", "pose_model"):
+        sess = getattr(getattr(est, name, None), "session", None)
+        if sess is not None and hasattr(sess, "get_providers"):
+            out[name] = list(sess.get_providers())
+    return out
+
+
+def cuda_session_active(est):
+    """(활성 여부, 세션 EP dict). strict 판정 2조건 — ① det/pose **두 세션 모두** 읽혀야 함
+    ② 포함이 아니라 각 세션의 **첫 provider**가 CUDA(ORT provider 순서 = 실행 우선순위)."""
+    sp = session_providers(est)
+    ok = set(sp) == {"det_model", "pose_model"} and all(
+        p and p[0] == "CUDAExecutionProvider" for p in sp.values())
+    return ok, sp

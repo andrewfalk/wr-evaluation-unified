@@ -122,6 +122,36 @@ def run():
     except ValueError:
         print("ok: 알 수 없는 variant → ValueError fail-fast")
 
+    # 9) cuda_session_active(6.0-13) — 세션 **실측** EP strict 판정(ORT 무성 폴백 오인 차단)
+    class _Sess:
+        def __init__(self, providers):
+            self._p = providers
+
+        def get_providers(self):
+            return self._p
+
+    class _Tool:
+        def __init__(self, providers):
+            self.session = _Sess(providers)
+
+    class _Est:
+        def __init__(self, det, pose):
+            if det is not None:
+                self.det_model = _Tool(det)
+            if pose is not None:
+                self.pose_model = _Tool(pose)
+
+    cuda_first = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    ok, sp = model_loader.cuda_session_active(_Est(cuda_first, cuda_first))
+    assert ok is True and set(sp) == {"det_model", "pose_model"}, sp
+    ok, _ = model_loader.cuda_session_active(_Est(["CPUExecutionProvider"], cuda_first))
+    assert ok is False  # 한쪽만 CPU 폴백(cudnn 첫 추론 실패 케이스 실측 재현) → 불통과
+    ok, _ = model_loader.cuda_session_active(_Est(["CPUExecutionProvider", "CUDAExecutionProvider"], cuda_first))
+    assert ok is False  # CPU-first 세션(provider 순서=실행 우선순위) → CUDA 아님
+    ok, _ = model_loader.cuda_session_active(_Est(None, cuda_first))
+    assert ok is False  # det 세션 미노출이면 나머지만으로 통과 금지
+    print("ok: cuda_session_active - 두 세션 + 첫 provider=CUDA strict 판정")
+
     print("ALL PASS")
 
 
