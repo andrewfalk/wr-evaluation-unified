@@ -79,6 +79,60 @@ def pct(vals, p):
     return round(float(np.percentile(np.array(vals, dtype=float), p)), 1)
 
 
+def parse_size(s):
+    """"192,256" → (192, 256). rtmlib 입력크기 인자는 (w, h) — manifest [192,256] 규약과 동일.
+    주의: OpenMMLab 파일명 "256x192"는 H×W 표기 → 이 인자에는 192,256으로 넣어야 한다(6.0-13)."""
+    try:
+        w, h = (int(v) for v in s.split(","))
+        return (w, h)
+    except ValueError:
+        raise SystemExit(f"invalid size {s!r} (expected 'w,h' e.g. 192,256)")
+
+
+def session_providers(est):
+    """(6.0-13) rtmlib BaseTool.session(ort.InferenceSession)의 **실제** EP 목록.
+    ORT는 CUDA EP 초기화가 실패해도 예외 없이 경고만 내고 CPU로 세션을 만든다(무성 폴백) —
+    cuda_available()/요청값만 믿으면 CPU 실행을 GPU 실측으로 오인하므로 세션에서 직접 읽는다."""
+    out = {}
+    for name in ("det_model", "pose_model"):
+        sess = getattr(getattr(est, name, None), "session", None)
+        if sess is not None and hasattr(sess, "get_providers"):
+            out[name] = list(sess.get_providers())
+    return out
+
+
+def smoke_check(m, frames, nk):
+    """(6.0-13) 오버라이드 모델의 rtmlib 출력 계약 검증 — 조용한 무의미 벤치 방지.
+    최소 1명 검출되는 프레임을 찾아 bbox 좌표(finite, x2>x1, y2>y1)·kpts shape·score 유한성을 확인한다.
+    bbox는 (N,4)만 허용 — 측정 루프·운영 infer_clip 모두 det 출력을 그대로 pose에 넘기는 (N,4) 계약이라,
+    다른 포맷(예: score 포함 (N,5))은 슬라이스로 우회하지 않고 즉시 실패시킨다.
+    pose score는 [0,1] 체크 금지(RTMPose SimCC는 1을 살짝 초과 가능 — infer_clip clamp01 참고)."""
+    for fr in frames:
+        raw = m.det_model(fr)
+        b = np.asarray(raw, dtype=float)
+        if b.size == 0:
+            continue
+        if b.ndim != 2 or b.shape[1] != 4:
+            raise SystemExit(f"smoke: unexpected bbox shape {b.shape} (expected (N,4))")
+        if not np.all(np.isfinite(b)):
+            raise SystemExit("smoke: non-finite bbox values")
+        if not (np.all(b[:, 2] > b[:, 0]) and np.all(b[:, 3] > b[:, 1])):
+            raise SystemExit("smoke: degenerate bbox (x2<=x1 or y2<=y1)")
+        # 측정 루프와 동일한 입력 경로: det 출력을 가공 없이 pose에 전달.
+        kpts, scores = m.pose_model(fr, bboxes=raw)
+        k = np.asarray(kpts, dtype=float)
+        s = np.asarray(scores, dtype=float)
+        # reshape(-1,...)는 총 원소 수만 맞으면 통과하므로 금지 — 원 shape를 명시적으로 검사한다.
+        if k.ndim != 3 or k.shape[1:] != (nk, 2):
+            raise SystemExit(f"smoke: unexpected kpts shape {k.shape} (expected (N, {nk}, 2))")
+        if s.shape != k.shape[:2]:
+            raise SystemExit(f"smoke: scores shape {s.shape} != persons x kpts {k.shape[:2]}")
+        if not np.all(np.isfinite(k)) or not np.all(np.isfinite(s)):
+            raise SystemExit("smoke: non-finite keypoints/scores")
+        return {"personsInSmokeFrame": int(b.shape[0]), "bboxCols": int(b.shape[1])}
+    raise SystemExit("smoke: no person detected in any sampled frame — use a clip with a visible person")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", default="samples/people-detection.mp4")
@@ -88,7 +142,22 @@ def main():
     ap.add_argument("--fps", type=float, default=5.0)
     ap.add_argument("--max-frames", type=int, default=40)
     ap.add_argument("--warmup", type=int, default=3)
+    # (6.0-13) 디바이스: 기본 cpu = 기존 하드코딩과 동일 동작(docker exec 런북 호환 — infer_clip 기본 auto와 다름).
+    ap.add_argument("--device", choices=["auto", "cpu", "cuda"], default="cpu",
+                    help="auto=CUDA 가능 시 사용·init 실패 시 CPU 폴백 | cpu(기본, 기존 동작) | cuda(강제, 불가 시 에러)")
+    # (6.0-13) 벤치 전용 모델 오버라이드 — manifest·운영 로더 무수정으로 상위 후보(tiny+m/l, yolox-s+s) 측정.
+    # 크기 인자는 (w,h): OpenMMLab 파일명 "256x192"(H×W) 모델은 --pose-size 192,256.
+    ap.add_argument("--det-onnx", default=None, help="detector .onnx 경로 오버라이드(미지정 시 baked)")
+    ap.add_argument("--det-size", default=None, help="detector 입력크기 w,h (예 640,640). --det-onnx 지정 시 필수")
+    ap.add_argument("--pose-onnx", default=None, help="pose .onnx 경로 오버라이드(미지정 시 baked). body 전용")
+    ap.add_argument("--pose-size", default=None, help="pose 입력크기 w,h (예 192,256). --pose-onnx 지정 시 필수")
     args = ap.parse_args()
+
+    override = bool(args.det_onnx or args.pose_onnx)
+    if override and args.model != "body":
+        raise SystemExit("--det-onnx/--pose-onnx는 --model body 전용(0단계 상위 후보는 body17만 — wholebody 상위 후보는 범위 제외)")
+    if (args.det_onnx and not args.det_size) or (args.pose_onnx and not args.pose_size):
+        raise SystemExit("오버라이드 .onnx에는 대응 --det-size/--pose-size(w,h)가 필요")
 
     # build_pose가 참조하는 baked 디렉터리 지정(에어갭 — 자동 다운로드 없이 구운 가중치 사용).
     if args.models_dir:
@@ -116,17 +185,94 @@ def main():
 
     # 2) 모델 로드 — build_pose: baked 우선(에어갭), 없으면 dev 자동 다운로드. nk = 저장 전 추출 키포인트 수.
     nk = 17 if args.model == "body" else 133
+    from model_loader import build_pose, resolve_model_paths, cuda_available, available_providers
+
+    def build(device):
+        if not override:
+            return build_pose(args.model, device=device, backend="onnxruntime")
+        # (6.0-13) 부분 오버라이드: 미지정 쪽은 baked 경로를 그대로 사용(예: tiny+m은 det=baked, pose=오버라이드).
+        from rtmlib import Body
+        det_path, det_size, pose_path, pose_size, baked_ok = resolve_model_paths(args.models_dir, args.model)
+        det = args.det_onnx or (str(det_path) if baked_ok else None)
+        pose = args.pose_onnx or (str(pose_path) if baked_ok else None)
+        if not det or not pose:
+            raise SystemExit("오버라이드 벤치에는 baked 모델 또는 양쪽 .onnx 지정이 필요(부분 오버라이드는 baked 전제)")
+        dsize = parse_size(args.det_size) if args.det_size else tuple(det_size or (416, 416))
+        psize = parse_size(args.pose_size) if args.pose_size else tuple(pose_size or (192, 256))
+        est = Body(det=det, det_input_size=dsize, pose=pose, pose_input_size=psize,
+                   backend="onnxruntime", device=device)
+        return est, "override"
+
+    # 디바이스 해석(6.0-13) — infer_clip.py의 6.0-12 로직과 동일 의미(cuda=강제·실패 시 에러, auto=CPU 폴백).
+    requested_device = args.device
+    device_used = "cpu"
+    device_fallback = False
+    fallback_reason = None
+    if requested_device != "cpu":
+        try:
+            import onnxruntime as _ort
+            if hasattr(_ort, "preload_dlls"):
+                _ort.preload_dlls()  # pip nvidia-* 휠의 CUDA/cuDNN DLL 로드(Windows PATH 미등록 대비, ORT>=1.21)
+        except Exception:
+            pass
     t_load = time.time()
-    from model_loader import build_pose
-    m, model_source = build_pose(args.model, device="cpu", backend="onnxruntime")
+    if requested_device == "cpu":
+        m, model_source = build("cpu")
+    elif requested_device == "cuda":
+        if not cuda_available():
+            raise SystemExit(f"cuda unavailable: CUDAExecutionProvider not in providers={available_providers()}")
+        m, model_source = build("cuda")
+        device_used = "cuda"
+    else:  # auto
+        if cuda_available():
+            try:
+                m, model_source = build("cuda")
+                device_used = "cuda"
+            except Exception as e:  # noqa: BLE001 — auto는 벤치를 죽이지 않고 CPU 폴백(사유 기록)
+                m, model_source = build("cpu")
+                device_fallback = True
+                fallback_reason = f"cuda init failed, fell back to cpu: {e}"
+        else:
+            m, model_source = build("cpu")
+            fallback_reason = "no CUDAExecutionProvider available"
     load_s = time.time() - t_load
     rss_loaded, _ = mem_mb()
 
-    # 3) 워밍업(ONNX runtime 첫 추론은 비정상적으로 느림 — 측정 제외).
+    def enforce_actual_device(stage):
+        """(6.0-13) 세션 **실제** EP 검증. ORT는 두 시점에 무성 폴백한다 — ① 세션 생성 시 EP init 실패
+        (경고만 내고 CPU 세션), ② **첫 추론 시** EP 실행 실패(stdout 'Falling back to ...' 후 CPU 세션
+        재생성). 따라서 로드 직후와 워밍업 후 두 번 검사해, 요청이 아닌 실측 디바이스를 기록/강제한다."""
+        nonlocal device_used, device_fallback, fallback_reason
+        sp = session_providers(m)
+        # strict 판정 2조건: ① det/pose **두 세션 모두** 읽혀야 함(rtmlib 내부 변화로 한쪽 session을 못
+        # 읽으면 나머지만으로 통과하는 구멍 방지) ② 포함 여부가 아니라 **첫 provider**가 CUDA — ORT
+        # provider 순서는 실행 우선순위라서 ['CPU...', 'CUDA...'] 같은 세션은 CPU로 돈다.
+        ok = set(sp) == {"det_model", "pose_model"} and all(
+            p and p[0] == "CUDAExecutionProvider" for p in sp.values())
+        if device_used == "cuda" and not ok:
+            if requested_device == "cuda":
+                raise SystemExit(
+                    f"cuda silently fell back to CPU at {stage} (sessionProviders={sp}) — "
+                    "CUDA/cuDNN 런타임 미충족. ORT 호환표 기준 버전 확인 필요")
+            device_used = "cpu"
+            device_fallback = True
+            fallback_reason = f"cuda fell back to CPU at {stage} (sessionProviders={sp})"
+        return sp
+
+    # 2a) 로드 직후 EP 검증(생성 시점 무성 폴백 차단).
+    sess_providers = enforce_actual_device("session init")
+
+    # 2b) (6.0-13) 오버라이드 모델은 벤치 전 출력 계약 smoke 필수 — 실패 시 즉시 종료.
+    smoke = smoke_check(m, frames, nk) if override else None
+
+    # 3) 워밍업(ONNX runtime 첫 추론은 비정상적으로 느림 — 측정 제외. CUDA init/엔진 준비도 여기서 흡수).
     for fr in frames[:args.warmup]:
         b = m.det_model(fr)
         if len(b) > 0:
             m.pose_model(fr, bboxes=b)
+
+    # 3b) 워밍업 후 EP 재검증(실행 시점 무성 폴백 차단 — cudnn frontend 그래프 빌드 실패 등은 여기서 드러남).
+    sess_providers = enforce_actual_device("first inference (warmup)")
 
     # 4) 측정 루프 — det / pose 분리.
     det_ms, pose_ms, total_ms, npersons = [], [], [], []
@@ -146,6 +292,12 @@ def main():
     _, peak = mem_mb()
     out = {
         "model": args.model, "modelSource": model_source, "platform": sys.platform, "keypoints": nk,
+        # (6.0-13) 디바이스 메타데이터 — 실측표 신뢰성(providers 목록 + 실제 사용 디바이스 + 폴백 사유).
+        "providers": available_providers(),
+        "requestedDevice": requested_device, "deviceUsed": device_used,
+        "deviceFallback": device_fallback, "fallbackReason": fallback_reason,
+        "sessionProviders": sess_providers,
+        "detOverride": args.det_onnx, "poseOverride": args.pose_onnx, "smoke": smoke,
         "framesMeasured": len(total_ms), "avgPersonsPerFrame": round(float(np.mean(npersons)), 2),
         "loadSec": round(load_s, 2),
         "rssAfterLoadMB": round(rss_loaded, 0), "rssBeforeLoadMB": round(rss0, 0),
