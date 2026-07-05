@@ -44,6 +44,10 @@ if (-not $env:TZ)                 { $env:TZ = 'UTC' }
 # 분석된다(검증 실패·GPU 없음이면 s로 자동 강등 — CPU-l 경로 없음이라 무해). .env의 값이 우선.
 # 기존과 동일 비교가 필요하면 .env에 VIDEO_POSE_TIER=standard. 허용값 standard|auto(그 외 기동 실패).
 if (-not $env:VIDEO_POSE_TIER)    { $env:VIDEO_POSE_TIER = 'auto' }
+# det 빈도 감소(6.0-15): dev 기본 1초 — det는 초당 1회, 사이 샘플 프레임은 pose 역산 박스 재사용
+# (A/B 검증: 스왑 0·target 매핑 동일·손목 wholebody CPU 약 2배, docs/VIDEO_DET_INTERVAL_6015.md).
+# 기존과 동일 비교가 필요하면 .env에 VIDEO_DET_INTERVAL_SEC=0. 허용 범위 [0,1.0](그 외 기동 실패).
+if (-not $env:VIDEO_DET_INTERVAL_SEC) { $env:VIDEO_DET_INTERVAL_SEC = '1' }
 
 # 3) 업로드 디렉터리 보장(서버도 tmp/를 mkdir하지만 명시 생성).
 if (-not $env:VIDEO_ANALYSIS_UPLOAD_DIR) { throw 'VIDEO_ANALYSIS_UPLOAD_DIR not set in .env' }
@@ -51,6 +55,7 @@ New-Item -ItemType Directory -Force -Path $env:VIDEO_ANALYSIS_UPLOAD_DIR | Out-N
 
 Write-Host "[dev-intranet] DEPLOYMENT_MODE=$($env:DEPLOYMENT_MODE) VIDEO_ANALYSIS_ENABLED=$($env:VIDEO_ANALYSIS_ENABLED)"
 Write-Host "[dev-intranet] VIDEO_POSE_TIER=$($env:VIDEO_POSE_TIER) (auto=GPU 검증 시 body를 rtmpose-l로 — 사용 모델은 검토 recipe의 modelVersion으로 확인)"
+Write-Host "[dev-intranet] VIDEO_DET_INTERVAL_SEC=$($env:VIDEO_DET_INTERVAL_SEC) (det 빈도 감소 6.0-15 — 0이면 매 프레임 det)"
 Write-Host "[dev-intranet] uploadDir=$($env:VIDEO_ANALYSIS_UPLOAD_DIR)"
 Write-Host "[dev-intranet] DB=$($env:DATABASE_URL)"
 Write-Host "[dev-intranet] building + starting native server on :$($env:PORT) (auto-migrate on boot)…"

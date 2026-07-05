@@ -137,6 +137,8 @@ async function defaultRunInference(
       '--fps', String(fps), '--pose-variant', poseVariant, '--device', options?.device ?? 'auto',
       // pose 티어(6.0-14): standard|auto만 운영 허용(config가 검증). 티어 결정은 python이 device와 함께 해석.
       '--pose-tier', config.video.poseTier];
+    // det 빈도 감소(6.0-15): 활성(>0)일 때만 전달 — 미전달이면 python이 feature_config 기본(0=off) 사용.
+    if (config.video.detIntervalSec > 0) inferArgs.push('--det-interval-sec', String(config.video.detIntervalSec));
     // overlay 검수 게이트(privacy 예외): 샘플 프레임을 frameIndex별 JPEG로 저장(infer_clip best-effort).
     if (options?.framesDir) inferArgs.push('--frames-dir', options.framesDir);
     await execFileAsync(config.video.python, inferArgs, { timeout: deadlineMs });

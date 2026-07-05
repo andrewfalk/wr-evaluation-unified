@@ -52,6 +52,10 @@ TRIMMED_SOURCE_INDICES = (
 
 TRIMMED_KEYPOINT_COUNT = len(TRIMMED_SOURCE_INDICES)  # 59
 
+# 원본 wholebody133 배열 기준 hand42 인덱스(좌21+우21). det 빈도 감소(6.0-15)의 hand subset
+# score gate가 사용 — raw 인덱스를 여기서만 정의(하드코딩 금지, trimmed와 혼동 방지).
+WHOLEBODY_HAND_SOURCE_INDICES = TRIMMED_SOURCE_INDICES[len(COCO17_NAMES):]
+
 
 def _build_trimmed_index():
     idx = dict(COCO17_INDEX)  # body17 → 0..16

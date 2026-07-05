@@ -36,8 +36,14 @@ class IoUTracker:
         self._tracks = []   # [{ "id": "t1", "bbox": [x1,y1,x2,y2], "age": int }]
         self._next = 1
 
-    def update(self, bboxes):
-        """bboxes: [[x1,y1,x2,y2], ...] (xyxy). 입력 순서에 정렬된 trackId 리스트 반환."""
+    def update(self, bboxes, iou_threshold=None):
+        """bboxes: [[x1,y1,x2,y2], ...] (xyxy). 입력 순서에 정렬된 trackId 리스트 반환.
+
+        iou_threshold: det 재동기화 프레임 전용 오버라이드(6.0-15). carry 프레임 동안 트랙 bbox는
+        키포인트 역산 박스(타이트)라 det 박스(여유)와 모양이 달라 기본 임계보다 낮게 매칭해야
+        ID 신규발급(대상 데이터 단절)을 막는다. None이면 기존 임계(회귀 0).
+        """
+        threshold = self.iou_threshold if iou_threshold is None else iou_threshold
         # 1) 모든 활성 트랙 age 증가(이번 프레임 매칭되면 0으로 리셋).
         for t in self._tracks:
             t["age"] += 1
@@ -51,7 +57,7 @@ class IoUTracker:
         for di, box in enumerate(bboxes):
             for t in self._tracks:
                 score = iou(box, t["bbox"])
-                if score >= self.iou_threshold:
+                if score >= threshold:
                     pairs.append((score, t["id"], di))
         # IoU desc, 동률은 track id asc → det idx asc (결정성).
         pairs.sort(key=lambda p: (-p[0], p[1], p[2]))
@@ -79,3 +85,22 @@ class IoUTracker:
         # 4) 오래 미매칭된 트랙 은퇴.
         self._tracks = [t for t in self._tracks if t["age"] <= self.max_age]
         return out
+
+    def refresh(self, id_to_bbox, advance_age):
+        """det 없이 트랙 bbox만 갱신(6.0-15 det 빈도 감소). 매칭·신규발급 없음 — 미지의 id는 무시.
+
+        advance_age=True(carry 프레임): update()와 동일하게 전체 트랙 age를 진행한 뒤 갱신된
+          트랙만 리셋 — 미상속 트랙(score gate 탈락 등)은 age가 쌓여 기존 은퇴 로직으로 정리.
+        advance_age=False(det 프레임 pose 후): update()가 이미 age를 진행했으므로 bbox 교체만 —
+          한 프레임에 age가 2회 증가해 조기 은퇴하는 것을 막는다.
+        """
+        if advance_age:
+            for t in self._tracks:
+                t["age"] += 1
+        for t in self._tracks:
+            if t["id"] in id_to_bbox:
+                t["bbox"] = list(id_to_bbox[t["id"]])
+                if advance_age:
+                    t["age"] = 0
+        if advance_age:
+            self._tracks = [t for t in self._tracks if t["age"] <= self.max_age]

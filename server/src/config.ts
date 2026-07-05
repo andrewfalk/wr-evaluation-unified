@@ -221,6 +221,18 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
           }
           return tier as 'standard' | 'auto';
         })(),
+        // det 실행 간격 초(6.0-15 det 빈도 감소). 0(기본)=매 샘플 프레임 det(현행 무변경).
+        // >0이면 워커가 infer_clip --det-interval-sec으로 전달 — 사이 프레임은 pose 역산 박스 재사용.
+        // 상한 1.0: mapTargetTrack이 선택시각 ±500ms 창에서 매칭하므로 det 간격이 1초를 넘으면
+        // target 매핑이 창을 벗어날 수 있다. 범위 밖 값은 조용한 무시 대신 기동 실패(fail-fast, 6.0-14식).
+        detIntervalSec: (() => {
+          const raw = optional(env, 'VIDEO_DET_INTERVAL_SEC', '0');
+          const sec = Number(raw);
+          if (!Number.isFinite(sec) || sec < 0 || sec > 1.0) {
+            throw new Error(`VIDEO_DET_INTERVAL_SEC must be a number in [0, 1.0] (0 disables), got '${raw}'`);
+          }
+          return sec;
+        })(),
         // 전체 job 처리 deadline(ms, 6.0-12). 추론(infer_clip+feature_calc) subprocess의 합이 이를 넘지 않도록
         // 엄격 분배하고, sweepStale·클라이언트 폴링 상한이 모두 이 값에서 파생된다(단일 진실원천).
         // 손목(wholebody)은 CPU에서 1~2분 클립도 오래 걸려 기본 600000(10분). GPU면 더 줄여도 됨(§Range).
