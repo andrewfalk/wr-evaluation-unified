@@ -1121,9 +1121,10 @@ body 포즈에 상위 모델 `pose-body-l`(rtmpose-l)이 이미지에 함께 bak
 `fetch-pose-weights.ps1`이 4모델 전부 sha 확정). **기본값은 기존 그대로 rtmpose-s** — env를 켜기 전까지
 동작 변화가 없습니다.
 
-- **활성화**: app 컨테이너 env `VIDEO_POSE_TIER=auto` (compose `environment:`에 `${VIDEO_POSE_TIER:-standard}`
-  나열 필요 — 14-0의 게이트 env 미전달 함정과 동일). 허용값은 `standard|auto`뿐이며 그 외 값은 **서버 기동
-  실패**(설정 실수 조기 노출). `high`는 dev CLI 디버그 전용.
+- **활성화**: `.env.production`에 `VIDEO_POSE_TIER=auto` (compose `environment:`에
+  `${VIDEO_POSE_TIER:-standard}` **나열되어 있음**(6.0-15 PR에서 추가 — 그 이전 compose로 배포한 서버는
+  compose 갱신 필요, 14-0의 게이트 env 미전달 함정과 동일). 허용값은 `standard|auto`뿐이며 그 외 값은
+  **서버 기동 실패**(설정 실수 조기 노출). `high`는 dev CLI 디버그 전용.
 - **GPU 서버에서만 auto 권장**: auto는 "l 추정기 자체의 CUDA 세션 2단 검증"을 통과한 경우에만 l을 쓰고,
   실패하면 s로 자동 강등합니다(CPU-l 경로 없음 — CPU에서 l은 s 대비 ~40% 느림). CPU 서버에서 auto를 켜도
   항상 s로 동작하므로 무해하지만 의미가 없습니다.
@@ -1131,6 +1132,23 @@ body 포즈에 상위 모델 `pose-body-l`(rtmpose-l)이 이미지에 함께 bak
   `analysisBundleVersion`에 반영됩니다. 같은 분석의 클립들이 s/l로 섞이면(배치 중 GPU 장애 등) apply 시
   recipe 일관성 검사가 **의도적으로 차단**합니다 — 해당 클립 재분석으로 해소.
 - **B2 주의**: gold 검증(6.0-B2)은 운영에서 실제 쓰는 티어 기준으로 수행하세요(모델이 다르면 산출값이 다름).
+
+### 14-1c. det 빈도 감소 — CPU 서버 성능 opt-in (6.0-15)
+
+det(사람 탐지)를 초당 1회만 실행하고 사이 샘플 프레임은 pose 키포인트 역산 박스를 재사용합니다
+(trackId 상속·score/sanity gate 위반 시 즉시 det 복귀). det는 GPU에서도 CPU 고정 병목이라 **GPU 없는
+서버가 최대 수혜**: 손목(wholebody) 75s급 클립 실측 CPU 201→91s(2.22×). **기본값 0(off) — env를 켜기
+전까지 동작 변화·recipe 변화가 전혀 없습니다**(상세: `VIDEO_DET_INTERVAL_6015.md`).
+
+- **활성화**: `.env.production`에 `VIDEO_DET_INTERVAL_SEC=1` (compose `environment:`에
+  `${VIDEO_DET_INTERVAL_SEC:-0}` 나열되어 있음). 허용 범위 **[0, 1.0]** — 1초 초과는 대상자 선택(target)
+  매핑의 ±500ms 창을 벗어날 수 있어 **서버 기동 실패**로 차단.
+- **활성 전제(권장 게이트)**: ①촬영 프로토콜(작업자 1–2명) 정착 — 다인 출입 영상에선 이득이 급감하고
+  대상 미선택(dominant) 추적이 흔들림 ②B2에서 실작업 손목 영상 재확인(6.0-15 실측은 대체 클립).
+- **켠 뒤 주의**: 활성 상태로 분석한 클립은 `preprocessConfigHash`가 달라져 **기존 분석과 같은 분석에
+  섞이면 apply 시 recipe 일관성 검사가 의도적으로 차단**(해당 분석 클립 전체 재분석으로 해소 — 14-1b의
+  s/l 혼합과 동일 정책). 반복수 계열 candidate 값도 이전 분석 대비 달라질 수 있음(과대계수 완화 방향).
+- **끄기/롤백**: `VIDEO_DET_INTERVAL_SEC=0`(또는 제거) 후 재기동 — 즉시 현행 동작·기존 해시로 복귀.
 
 ### 14-2. 가중치 baked 확인
 

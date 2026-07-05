@@ -4,7 +4,9 @@ import os from 'os';
 import path from 'path';
 import type { Pool } from 'pg';
 
-const videoCfg = vi.hoisted(() => ({ uploadDir: '', retentionPolicy: 'review_fidelity', overlayFrames: false }));
+const videoCfg = vi.hoisted(() => ({
+  uploadDir: '', retentionPolicy: 'review_fidelity', overlayFrames: false, detIntervalSec: 0,
+}));
 beforeAll(() => { videoCfg.uploadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wk-up-')); });
 vi.mock('../../config', () => ({
   default: {
@@ -13,6 +15,7 @@ vi.mock('../../config', () => ({
       get uploadDir() { return videoCfg.uploadDir; },
       get retentionPolicy() { return videoCfg.retentionPolicy; },
       get overlayFrames() { return videoCfg.overlayFrames; },
+      get detIntervalSec() { return videoCfg.detIntervalSec; },
     },
   },
 }));
@@ -21,7 +24,7 @@ vi.mock('../fixturePath', () => ({
   resolveUploadedClipPath: vi.fn((p: unknown) => (typeof p === 'string' && p ? p : null)),
 }));
 
-import { pollOnce, iouXywh, mapTargetTrack } from '../videoAnalysisWorker';
+import { pollOnce, iouXywh, mapTargetTrack, buildInferArgs } from '../videoAnalysisWorker';
 
 const JOB = { id: 'job-1', clip_id: 'clip-1', analysis_profile: 'posture-basic', inference_device: 'auto' };
 
@@ -207,6 +210,32 @@ describe('pollOnce keypoints artifact + 보존 정책 A (M3-7b)', () => {
     });
     await pollOnce(pool, { runInference });
     expect(poolUpdate(query, "file_state = 'deleted'")).toBeUndefined();
+  });
+});
+
+describe('buildInferArgs — infer_clip spawn 인자 (config 노브 전달 고정)', () => {
+  const build = (framesDir?: string | null) =>
+    buildInferArgs('/s', '/clips/c.mp4', '/w/kp.json', 20, 'wholebody', 'auto', framesDir);
+
+  beforeEach(() => { videoCfg.detIntervalSec = 0; });
+
+  it('기본(detIntervalSec=0): --det-interval-sec 미전달 — python이 feature_config 기본(off) 사용', () => {
+    const args = build();
+    expect(args).toContain('--pose-tier');
+    expect(args[args.indexOf('--pose-tier') + 1]).toBe('standard');
+    expect(args).not.toContain('--det-interval-sec');
+  });
+
+  it('활성(detIntervalSec>0): --det-interval-sec 값 전달 (6.0-15)', () => {
+    videoCfg.detIntervalSec = 0.5;
+    const args = build();
+    expect(args[args.indexOf('--det-interval-sec') + 1]).toBe('0.5');
+  });
+
+  it('framesDir 지정 시에만 --frames-dir 전달(overlay 게이트)', () => {
+    expect(build(null)).not.toContain('--frames-dir');
+    const args = build('/w/frames');
+    expect(args[args.indexOf('--frames-dir') + 1]).toBe('/w/frames');
   });
 });
 

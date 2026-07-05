@@ -482,6 +482,11 @@ def main():
                 kpts = np.array(kpts).reshape(-1, n_raw, 2)
                 scores = np.array(scores).reshape(-1, n_raw)
                 n = min(len(bboxes), kpts.shape[0])
+                if det_interval > 1 and n < len(bboxes):
+                    # pose가 bbox보다 적게 반환(부분 실패): 누락 인물은 carry 후보가 없어 조용히
+                    # 사라질 수 있다(현행 매 프레임 det는 다음 샘플에서 자동 복구되지만 간격 활성 시
+                    # 최대 다음 스케줄 det까지 공백). 다음 프레임 det로 전원 재동기화.
+                    force_det = True
                 for i in range(n):
                     # person.bbox 기록은 "실제 pose 입력 박스"(det 프레임=det box, carry 프레임=직전 역산 박스).
                     bbox = xyxy_to_xywh(xyxy[i])

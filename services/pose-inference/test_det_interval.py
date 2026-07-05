@@ -214,6 +214,27 @@ def test_score_gate_forces_det():
     print("ok: score gate - 폐기 다음 프레임 det 강제, 재동기화에서도 t1 유지")
 
 
+class _PartialPoseFake(_FakeEstimator):
+    """det 2박스인데 pose가 1명만 반환(부분 실패) — rtmlib 계약 밖 상황 방어 검증."""
+
+    def det_model(self, frame):
+        self.det_ordinals.append(self.pose_calls)
+        return np.array([[100.0, 100.0, 200.0, 300.0], [10.0, 10.0, 60.0, 160.0]])
+
+
+def test_partial_pose_failure_forces_det():
+    """pose 결과 수 < bbox 수 → 누락 인물이 carry에서 조용히 사라지지 않도록 다음 프레임 det 강제.
+    항상 부분 실패인 fake라 interval 활성이어도 매 샘플 프레임 det가 되어야 한다."""
+    with tempfile.TemporaryDirectory() as d:
+        clip = Path(d) / "clip.mp4"
+        _write_video(clip)
+        fake = _PartialPoseFake()
+        doc = _run_main(clip, Path(d) / "kp.json", ["--fps", "15", "--det-interval-sec", "1.0"], fake)
+    assert fake.det_ordinals == list(range(45)), fake.det_ordinals[:10]
+    assert all(len(f["persons"]) == 1 for f in doc["frames"])  # 처리된 1명만 기록(기존 방어 유지)
+    print("ok: partial pose 실패 - 누락 인물 방치 없이 매 프레임 det 강제")
+
+
 def test_interval_off_default_regression():
     """interval 미지정(config 기본 0) → 매 샘플 프레임 det(현행), 해시는 활성 실행과 다름."""
     with tempfile.TemporaryDirectory() as d:
@@ -241,5 +262,6 @@ if __name__ == "__main__":
     test_hash_default_preserved_and_active_changes()
     test_det_schedule_and_inheritance()
     test_score_gate_forces_det()
+    test_partial_pose_failure_forces_det()
     test_interval_off_default_regression()
     print("ALL PASS")
