@@ -342,21 +342,33 @@
     wholebody·cuda(tier 무관, 설계대로). keypoints artifacts로 확인.
   - [ ] **운영(실환경·미실행)**: 에어갭 이미지 재빌드(+105MB) 후 GPU 서버에서 `VIDEO_POSE_TIER=auto` 활성
     (§14-1b). 배포 세션 런북은 `OFFLINE_DEPLOYMENT_PACKAGE.md` §14-4-2. B2 gold 검증은 최종 채택 티어(l) 기준.
-- [ ] **6.0-15 det 빈도 감소 스파이크 — 착수 예정(2026-07-05 사용자 우선순위 상향, B안 1순위)**. 트리거:
+- [x] **6.0-15 det 빈도 감소 — 구현·실측 완료(2026-07-05, 브랜치 `feat/video-6.0-15-det-interval`)**. 트리거:
   손목 클립 체감 지연 실측 확인. **진단(dev 실측)**: 손목·손 프로필은 20fps 샘플링인데 30fps 원본에서 정수
   step=round(30/20)=1로 **전 프레임 처리**(실례: 75s 클립 2,263프레임 → 2분+). 이 조건에선 GPU pose(12ms)보다
-  **det 18ms가 지배 비용**(클립당 det만 ~41s) + overlay JPEG 저장(`OVERLAY_FRAMES=true`, 2,263장)도 가산.
-  촬영 통제(작업자 1~2명) 전제라 det 품질 요구 낮음 — 6.0-13 결정 참조.
-  - **설계 방향**: ① det를 N샘플프레임당 1회(예: 초당 1회) + 사이 프레임은 각 트랙의 pose 키포인트 역산
-    박스(+마진 10~20%)를 pose 입력으로. **trackId는 사이 프레임에서 매칭이 아니라 상속**(역산 박스는 정의상
-    그 트랙의 것 — IoU 매칭은 det 재동기화 프레임에서만, 역산박스↔det박스는 모양이 달라 임계 별도 조정 필요.
-    실패 모드: ID 신규발급=대상 데이터 단절, 2인 근접 시 ID 스왑=무성 오염). ② pose 평균 score 임계 미달 시
-    해당 박스 폐기+다음 프레임 det 강제(퇴장/드리프트 안전장치). ③ `detIntervalFrames`는 feature_config
-    (기본 1=현행 무변경, 6.0-14식 opt-in 롤아웃) + **preprocessConfigHash에 포함**(재현성).
-  - **별도 항목(같은 스파이크에서 수치만 확보)**: step 반올림 보정(20fps 요청이 30fps 원본에서 30fps로
-    처리되는 1.5× 낭비 — step 내림이면 15fps) — 손목 반복수 Nyquist 민감도 검증 전제라 산출값 영향 실측 후 결정.
-  - **검증 필수**: 동일 클립 detInterval 1 vs N 키포인트 시계열 편차·반복수 일치, **2인 클립 트랙ID 연속성**
-    (스왑/신규발급 0), target-track 매핑 불변, wholebody·body 양쪽. 기대효과: 손목 클립 2분+ → 40s~1분.
+  **det 18ms가 지배 비용**(클립당 det만 ~41s). 촬영 통제(작업자 1~2명) 전제라 det 품질 요구 낮음(6.0-13 결정).
+  - [x] **구현(기본 off=현행 무변경, 회귀 0 실증)**: `detection.intervalSec`(feature_config, **초 단위** —
+    프로필 fps 적응, version bump 없음) + CLI `--det-interval-sec` + 서버 env `VIDEO_DET_INTERVAL_SEC`
+    ([0,1.0] 밖 기동 실패 — 1초 초과는 mapTargetTrack ±500ms 창 이탈 위험). N=floor(sec×sampled_fps).
+    carry 프레임=직전 pose 역산 확장 박스(마진 15%)+trackId **상속**(매칭 금지), 재동기화 매칭은 별도 임계
+    (resyncIou 0.2), score/hand-subset(42점, keypoint_layout 단일 source)/bbox-sanity gate 위반 시 다음
+    프레임 det 강제. tracker `refresh(advance_age)`로 det 프레임 이중 aging 금지. 활성 시에만
+    preprocessConfigHash에 `detInterval`(config 동일 필드명 전체) 추가 — 기본 off는 해시까지 완전 보존
+    (main 대비 keypoints·clip_features **diff 0** 실증). 테스트: test_det_interval.py 9종(스케줄 off-by-one
+    [0,15,30] 고정·score gate 강제 det·이중 aging·해시 보존) + 서버 config 4종(541 통과).
+  - [x] **A/B 실측**(`compare_det_interval.py` 하네스, 보고서 **`VIDEO_DET_INTERVAL_6015.md`**): 통제 1인
+    wholebody(29.97fps→step1 재현, 2,299프레임) **CPU 201→90.7s(2.22×)·GPU 114.9→68.6s(1.68×)**, det
+    2,299→101, **스왑/초과 신규발급 0, target 매핑 50/50 동일(간격 중간 최악 포함), dominant 동일(실클립)**,
+    posture 비율 피처 Δ≤0.017, hand conf·손목 kp loss는 carry가 **개선**(44→12프레임). 반복·peak 계열
+    (candidate 모드)은 Δ-7.3cycles/min·+7.2° — off의 지터 과대계수 정황(15fps 처리와 동일 값), 참값 판정은
+    B2 gold로 이관. 비통제 10인 클립(전제 위반)은 강제 det 333회로 이득 급감(1.47×)+dominant 불일치 —
+    촬영 통제 전제의 실측 근거. 마진 스윕 10/15/20% 전부 gate 통과, 0.15 유지.
+  - [x] **dev-stack 기본 활성**: `dev-intranet-server.ps1` 기본 `VIDEO_DET_INTERVAL_SEC=1`(비교 필요 시
+    .env로 0). **운영은 기본 off 유지** — 활성은 §14-4-2 배포 게이트에서 B2·촬영 프로토콜과 함께 결정.
+  - [x] **별도 항목(수치만, 행동 변경 없음)**: step 반올림 보정 — `--fps 15`(step=2) 실측: e2e 반감,
+    posture Δ≤0.017·peak Δ0이나 **반복수 −25~−33%**(wrist minFps=15 Nyquist 경계 민감 실재). 채택 여부는
+    6.0-B2 정답 라벨 검증과 함께 별도 결정.
+  - [ ] **잔여**: B2 게이트에서 실작업 손목 영상으로 carry 열화·반복수 참값 재확인(측정 클립은 대체본 —
+    보고서 §측정 클립 참조). 운영 활성 결정.
 
 ---
 
