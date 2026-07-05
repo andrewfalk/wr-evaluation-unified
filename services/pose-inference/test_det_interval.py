@@ -65,6 +65,22 @@ def test_tracker_update_threshold_override():
     print("ok: update(iou_threshold=...) 재동기화 임계 오버라이드")
 
 
+def test_tracker_det_bbox_memory_prevents_resync_split():
+    """재동기화 매칭은 max(역산박스 IoU, 마지막 det박스 IoU) — 역산 박스가 타이트해져(예: 하반신
+    가림·상체만 추정) det 박스와 IoU가 임계 밑이어도, 제자리 인물은 det↔det 비교로 ID 유지.
+    (실영상 회귀: 재활치료 클립에서 t1→t4 스왑 → TARGET_TRACK_LOST — 이 테스트가 그 기전 고정.)"""
+    det_box = [100, 100, 200, 300]
+    tight = [130, 120, 170, 180]  # IoU vs det_box = 2400/20000 = 0.12 < resync 임계 0.2
+    tr = IoUTracker(iou_threshold=0.3, max_age=10)
+    assert tr.update([det_box]) == ["t1"]
+    for _ in range(3):
+        tr.refresh({"t1": tight}, advance_age=True)  # carry 구간: 역산 박스만 갱신
+    assert tr.update([det_box], iou_threshold=0.2) == ["t1"]  # detBbox 기억으로 유지(수정 전엔 t2)
+    # detBbox는 update에서만 갱신 — 이번 det 박스가 새 detBbox가 됨(다음 재동기화 대비).
+    assert [t["detBbox"] for t in tr._tracks if t["id"] == "t1"] == [det_box]
+    print("ok: detBbox 기억 - 타이트 역산 박스여도 재동기화 ID 단절/스왑 방지")
+
+
 # ---------------------------------------------------------------- bbox helpers
 
 def test_bbox_from_keypoints():
@@ -257,6 +273,7 @@ if __name__ == "__main__":
     test_tracker_refresh_carry_aging()
     test_tracker_refresh_no_double_aging()
     test_tracker_update_threshold_override()
+    test_tracker_det_bbox_memory_prevents_resync_split()
     test_bbox_from_keypoints()
     test_carry_bbox_sane()
     test_hash_default_preserved_and_active_changes()

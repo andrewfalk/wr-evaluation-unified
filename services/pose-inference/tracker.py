@@ -53,10 +53,18 @@ class IoUTracker:
         used_track = set()                 # 이번 프레임 매칭된 track id
 
         # 2) 모든 (det, track) 후보 쌍을 결정적 순서로 greedy 배정.
+        # 매칭 점수 = max(현재 bbox IoU, 마지막 det 박스 IoU). det 빈도 감소(6.0-15) 활성 시 현재
+        # bbox는 키포인트 역산 박스(타이트)라 det 박스(전신·여유)와 모양이 달라 IoU가 낮아지는데,
+        # 마지막 det 박스와의 비교를 함께 쓰면 제자리 인물은 det↔det 비교가 살아나 재동기화에서
+        # ID 단절·2인 근접 스왑을 막는다(실영상 재현: 재활치료 클립 t1→t4 스왑 → TARGET_TRACK_LOST).
+        # 매 프레임 det(현행 기본)에서는 detBbox==bbox라 점수·동작이 기존과 완전 동일하다.
         pairs = []
         for di, box in enumerate(bboxes):
             for t in self._tracks:
                 score = iou(box, t["bbox"])
+                det_bbox = t.get("detBbox")
+                if det_bbox is not None:
+                    score = max(score, iou(box, det_bbox))
                 if score >= threshold:
                     pairs.append((score, t["id"], di))
         # IoU desc, 동률은 track id asc → det idx asc (결정성).
@@ -67,7 +75,8 @@ class IoUTracker:
             assigned_det[di] = tid
             used_track.add(tid)
 
-        # 3) 매칭된 트랙 갱신 + 미매칭 detection은 새 트랙.
+        # 3) 매칭된 트랙 갱신 + 미매칭 detection은 새 트랙. detBbox=마지막 det 박스(재동기화 매칭용
+        #    — refresh()는 건드리지 않아 carry 구간 동안 det 모양 기억이 유지된다).
         by_id = {t["id"]: t for t in self._tracks}
         out = []
         for di, box in enumerate(bboxes):
@@ -75,10 +84,11 @@ class IoUTracker:
             if tid is None:
                 tid = "t%d" % self._next
                 self._next += 1
-                self._tracks.append({"id": tid, "bbox": list(box), "age": 0})
+                self._tracks.append({"id": tid, "bbox": list(box), "detBbox": list(box), "age": 0})
             else:
                 tr = by_id[tid]
                 tr["bbox"] = list(box)
+                tr["detBbox"] = list(box)
                 tr["age"] = 0
             out.append(tid)
 
