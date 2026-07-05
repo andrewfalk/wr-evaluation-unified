@@ -203,6 +203,26 @@ describe('config — video.poseTier (6.0-14)', () => {
   });
 });
 
+describe('config — video.detIntervalSec (6.0-15)', () => {
+  it('defaults to 0 — env 미설정 배포에서 동작 변화 0(매 프레임 det)', () => {
+    expect(make().video.detIntervalSec).toBe(0);
+  });
+
+  it('accepts values in (0, 1.0] (det 빈도 감소 opt-in)', () => {
+    expect(make({ VIDEO_DET_INTERVAL_SEC: '0.5' }).video.detIntervalSec).toBe(0.5);
+    expect(make({ VIDEO_DET_INTERVAL_SEC: '1' }).video.detIntervalSec).toBe(1);
+  });
+
+  it('rejects >1.0 — target 매핑 ±500ms 창 이탈 위험은 조용한 수용 없이 기동 실패', () => {
+    expect(() => make({ VIDEO_DET_INTERVAL_SEC: '1.5' })).toThrow(/VIDEO_DET_INTERVAL_SEC/);
+  });
+
+  it('rejects negative and non-numeric (fail-fast)', () => {
+    expect(() => make({ VIDEO_DET_INTERVAL_SEC: '-1' })).toThrow(/VIDEO_DET_INTERVAL_SEC/);
+    expect(() => make({ VIDEO_DET_INTERVAL_SEC: 'fast' })).toThrow(/VIDEO_DET_INTERVAL_SEC/);
+  });
+});
+
 describe('config — CORS origins', () => {
   it('parses comma-separated origins', () => {
     const c = make({ CORS_ORIGINS: 'https://wr.hospital.local:8443, https://wr2.hospital.local:8443' });

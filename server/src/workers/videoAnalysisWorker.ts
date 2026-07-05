@@ -119,6 +119,22 @@ export function mapTargetTrack(kpDoc: { frames?: KpFrame[] }, sel: TargetSelecti
   return best.trackId;
 }
 
+// infer_clip spawn 인자 조립 — 테스트로 고정(config 노브 --pose-tier/--det-interval-sec 전달 누락 방지).
+export function buildInferArgs(
+  scripts: string, clipPath: string, kpPath: string, fps: number, poseVariant: string, device: string,
+  framesDir?: string | null,
+): string[] {
+  const args = [path.join(scripts, 'infer_clip.py'), '--input', clipPath, '--output', kpPath,
+    '--fps', String(fps), '--pose-variant', poseVariant, '--device', device,
+    // pose 티어(6.0-14): standard|auto만 운영 허용(config가 검증). 티어 결정은 python이 device와 함께 해석.
+    '--pose-tier', config.video.poseTier];
+  // det 빈도 감소(6.0-15): 활성(>0)일 때만 전달 — 미전달이면 python이 feature_config 기본(0=off) 사용.
+  if (config.video.detIntervalSec > 0) args.push('--det-interval-sec', String(config.video.detIntervalSec));
+  // overlay 검수 게이트(privacy 예외): 샘플 프레임을 frameIndex별 JPEG로 저장(infer_clip best-effort).
+  if (framesDir) args.push('--frames-dir', framesDir);
+  return args;
+}
+
 // 기본 추론기: infer_clip.py → keypoints, (선택)박스→트랙 매핑, feature_calc.py → clip_features. ClipFeatureSetSchema 검증.
 async function defaultRunInference(
   clipPath: string, profile: string | null, targetSelection: TargetSelection | null, options?: RunInferenceOptions,
@@ -133,12 +149,8 @@ async function defaultRunInference(
     // 전체 job deadline(6.0-12). infer_clip + feature_calc 두 subprocess의 합이 이를 넘지 않도록 잔여시간을 분배한다.
     const deadlineMs = config.video.jobDeadlineMs;
     const phaseStart = Date.now();
-    const inferArgs = [path.join(scripts, 'infer_clip.py'), '--input', clipPath, '--output', kpPath,
-      '--fps', String(fps), '--pose-variant', poseVariant, '--device', options?.device ?? 'auto',
-      // pose 티어(6.0-14): standard|auto만 운영 허용(config가 검증). 티어 결정은 python이 device와 함께 해석.
-      '--pose-tier', config.video.poseTier];
-    // overlay 검수 게이트(privacy 예외): 샘플 프레임을 frameIndex별 JPEG로 저장(infer_clip best-effort).
-    if (options?.framesDir) inferArgs.push('--frames-dir', options.framesDir);
+    const inferArgs = buildInferArgs(scripts, clipPath, kpPath, fps, poseVariant,
+      options?.device ?? 'auto', options?.framesDir);
     await execFileAsync(config.video.python, inferArgs, { timeout: deadlineMs });
     // 매핑은 keypoints가 나와야 가능 → infer_clip 후에 처리. 선택 있으면 박스→트랙(실패 시 throw → job error).
     const kpRaw = fs.readFileSync(kpPath, 'utf-8');

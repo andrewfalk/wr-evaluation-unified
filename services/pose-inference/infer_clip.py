@@ -39,7 +39,7 @@ HERE = Path(__file__).parent
 # pose variant 정의(6.0-10). hand-wrist 클립만 wholebody on-demand(나머지 body17).
 # wholebody는 133점 추출 후 body17+hand42=59만 저장(face·feet drop) — sourceIndices로 슬라이스.
 # body 값은 기존과 동일(회귀 0): modelVersion·convention·pose·hash 무변경.
-from keypoint_layout import TRIMMED_SOURCE_INDICES  # noqa: E402 — 단일 source(trimmed 레이아웃)
+from keypoint_layout import TRIMMED_SOURCE_INDICES, WHOLEBODY_HAND_SOURCE_INDICES  # noqa: E402 — 단일 source(trimmed 레이아웃)
 POSE_VARIANTS = {
     "body": {
         "convention": "coco17", "nKpts": 17, "sourceIndices": None,
@@ -57,6 +57,15 @@ POSE_VARIANTS = {
 TRACK_IOU_THRESHOLD = 0.3
 TRACK_MAX_AGE = 10
 
+# det 빈도 감소 폴백(6.0-15). 단일 source는 feature_config.json.detection — config 미존재 시 이 값.
+# intervalSec 0 = 매 샘플 프레임 det(현행 무변경, 기본 off). 활성(N>1) 시에만 실제 사용 값을
+# preprocessConfigHash에 포함한다(기본 off는 기존 해시 완전 보존).
+DET_INTERVAL_SEC = 0.0
+DET_BBOX_MARGIN_RATIO = 0.15
+DET_REDETECT_MIN_SCORE = 0.3
+DET_RESYNC_IOU_THRESHOLD = 0.2
+DET_BBOX_SANITY = {"maxAreaRatio": 0.9, "aspectRange": [0.15, 6.0], "maxCenterJumpDiagRatio": 0.5}
+
 
 def load_tracking_params():
     """feature_config.json.tracking에서 트래커 파라미터를 읽는다(단일 source). 없으면 상수 폴백."""
@@ -69,6 +78,81 @@ def load_tracking_params():
     except (OSError, ValueError, KeyError):
         pass
     return iou, max_age
+
+
+def load_detection_params():
+    """feature_config.json.detection에서 det 빈도 감소 파라미터(6.0-15)를 읽는다(단일 source).
+    없으면 상수 폴백(intervalSec 0 = 현행 매 프레임 det)."""
+    out = {
+        "intervalSec": DET_INTERVAL_SEC,
+        "bboxMarginRatio": DET_BBOX_MARGIN_RATIO,
+        "redetectMinScore": DET_REDETECT_MIN_SCORE,
+        "resyncIouThreshold": DET_RESYNC_IOU_THRESHOLD,
+        "bboxSanity": dict(DET_BBOX_SANITY),
+    }
+    try:
+        cfg = json.loads((HERE / "feature_config.json").read_text(encoding="utf-8"))
+        det = cfg.get("detection", {})
+        out["intervalSec"] = float(det.get("intervalSec", out["intervalSec"]))
+        out["bboxMarginRatio"] = float(det.get("bboxMarginRatio", out["bboxMarginRatio"]))
+        out["redetectMinScore"] = float(det.get("redetectMinScore", out["redetectMinScore"]))
+        out["resyncIouThreshold"] = float(det.get("resyncIouThreshold", out["resyncIouThreshold"]))
+        sanity = det.get("bboxSanity", {})
+        out["bboxSanity"] = {
+            "maxAreaRatio": float(sanity.get("maxAreaRatio", DET_BBOX_SANITY["maxAreaRatio"])),
+            "aspectRange": [float(v) for v in sanity.get("aspectRange", DET_BBOX_SANITY["aspectRange"])][:2],
+            "maxCenterJumpDiagRatio": float(sanity.get("maxCenterJumpDiagRatio", DET_BBOX_SANITY["maxCenterJumpDiagRatio"])),
+        }
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return out
+
+
+def bbox_from_keypoints(kpts, scores, min_conf, margin_ratio, frame_w, frame_h):
+    """pose 키포인트 역산 박스(xyxy, 6.0-15). conf>=min_conf 점들의 extent에 변별 마진을 더해
+    프레임에 클램프. raw 전체 키포인트(body17/wholebody133 — trimmed 아님) 기준으로 호출할 것.
+    유효점 <2 또는 퇴화 박스 → None(호출자가 폐기+다음 프레임 det 강제)."""
+    xs, ys = [], []
+    for (x, y), s in zip(kpts, scores):
+        if float(s) >= min_conf:
+            xs.append(float(x))
+            ys.append(float(y))
+    if len(xs) < 2:
+        return None
+    x1, x2, y1, y2 = min(xs), max(xs), min(ys), max(ys)
+    mx = (x2 - x1) * margin_ratio
+    my = (y2 - y1) * margin_ratio
+    x1 = max(0.0, x1 - mx)
+    y1 = max(0.0, y1 - my)
+    x2 = min(float(frame_w), x2 + mx)
+    y2 = min(float(frame_h), y2 + my)
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return [x1, y1, x2, y2]
+
+
+def carry_bbox_sane(bbox, prev_bbox, frame_w, frame_h, sanity):
+    """역산 carry 박스 sanity guard(6.0-15). wholebody는 손/얼굴/발 outlier 1점이 박스를 크게 흔들 수
+    있어, 비정상 박스는 carry하지 않고 다음 프레임 det로 복구한다. 검사: ①프레임 대비 과대 면적
+    ②종횡비(h/w) 정상범위 ③직전 박스(이 프레임 pose 입력) 대비 급격한 중심 이동."""
+    x1, y1, x2, y2 = bbox
+    w, h = x2 - x1, y2 - y1
+    if w <= 0 or h <= 0:
+        return False
+    if w * h > sanity["maxAreaRatio"] * frame_w * frame_h:
+        return False
+    aspect = h / w
+    if not (sanity["aspectRange"][0] <= aspect <= sanity["aspectRange"][1]):
+        return False
+    if prev_bbox is not None:
+        px1, py1, px2, py2 = prev_bbox
+        pw, ph = px2 - px1, py2 - py1
+        diag = (pw * pw + ph * ph) ** 0.5
+        dx = (x1 + x2) / 2 - (px1 + px2) / 2
+        dy = (y1 + y2) / 2 - (py1 + py2) / 2
+        if (dx * dx + dy * dy) ** 0.5 > sanity["maxCenterJumpDiagRatio"] * diag:
+            return False
+    return True
 
 
 def load_model_shas(variant="body", tier="standard"):
@@ -84,12 +168,15 @@ def load_model_shas(variant="body", tier="standard"):
         return None, None, False
 
 
-def preprocess_config_hash(fps, conv, det, pose, size, track, quality):
-    raw = json.dumps(
-        {"fps": fps, "conv": conv, "det": det, "pose": pose, "inputSize": size,
-         "track": track, "quality": quality},  # quality(blurThreshold) 변경 시 재현성 hash 반영(D3a)
-        sort_keys=True,
-    )
+def preprocess_config_hash(fps, conv, det, pose, size, track, quality, det_interval=None):
+    payload = {"fps": fps, "conv": conv, "det": det, "pose": pose, "inputSize": size,
+               "track": track, "quality": quality}  # quality(blurThreshold) 변경 시 재현성 hash 반영(D3a)
+    if det_interval is not None:
+        # det 빈도 감소 활성(N>1) 시에만 — 행동을 바꾸는 모든 effective detection 파라미터를
+        # config와 동일한 필드명으로 포함. 기본(off)은 payload 불변 = 기존 해시 완전 보존(6.0-15).
+        # 키는 "detInterval" — 기존 "det"(detector 모델명)와 충돌 금지.
+        payload["detInterval"] = det_interval
+    raw = json.dumps(payload, sort_keys=True)
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
@@ -172,6 +259,11 @@ def main():
                          "standard(기본, rtmpose-s=기존 동작) | "
                          "auto(l/cuda 2단 검증 통과 시에만 rtmpose-l, 실패 시 tier만 강등·디바이스 계약 유지) | "
                          "high(dev 디버그 전용: l+cuda 강제, 불가 시 에러 exit — CPU-l 경로 금지)")
+    ap.add_argument("--det-interval-sec", type=float, default=None,
+                    help="det 실행 간격 초(6.0-15). 사이 샘플 프레임은 pose 키포인트 역산 박스 재사용 + "
+                         "trackId 상속. 미지정=feature_config.json.detection.intervalSec(기본 0=매 프레임 det, "
+                         "현행). 명시 시 config 오버라이드(A/B 벤치·dev용). 1 초과 값은 target 매핑 "
+                         "±500ms 창을 벗어날 수 있어 서버는 (0,1.0]만 허용.")
     args = ap.parse_args()
     variant = args.pose_variant
     vcfg = POSE_VARIANTS[variant]
@@ -329,11 +421,22 @@ def main():
     tracker = IoUTracker(iou_threshold=track_iou, max_age=track_max_age)
     blur_threshold = load_quality_blur_threshold()  # config에 있을 때만(기본 None=파생값 비활성)
 
+    # det 빈도 감소(6.0-15): CLI 오버라이드 > feature_config.detection.intervalSec > 폴백 0(off).
+    # N은 샘플 프레임 단위 간격. floor(int 절사) — round면 29.97fps에서 N=30→1001ms로 target 매핑
+    # ±500ms 창을 벗어난다. N<=1이면 코드 경로·해시 모두 현행과 동일(회귀 0).
+    det_cfg = load_detection_params()
+    det_interval_sec = det_cfg["intervalSec"] if args.det_interval_sec is None else args.det_interval_sec
+    det_interval = max(1, int(det_interval_sec * actual_sampled_fps)) if det_interval_sec > 0 else 1
+
     frames_out = []
     blur_values = []   # 샘플 프레임별 Laplacian variance(품질검사, D3a)
     sampled_ts = []    # 샘플 프레임 timestampMs(drop 추정용 — 실제 캡처 timestamp)
     sampled = 0
     idx = 0
+    det_runs = 0           # det 실행 횟수(벤치·검증 추적)
+    frames_since_det = 0   # 마지막 det 이후 샘플 프레임 수
+    force_det = False      # score gate/sanity 폐기 발생 시 다음 샘플 프레임 det 강제
+    carry = []             # [(trackId, xyxy)] — 직전 프레임 pose 역산 확장 박스(다음 프레임 pose 입력)
     t0 = time.time()
     while True:
         # 실제 캡처 timestamp(VFR·프레임드롭 반영). read 전 위치 = 곧 읽을 프레임의 ts.
@@ -348,29 +451,82 @@ def main():
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             blur_values.append(float(cv2.Laplacian(gray, cv2.CV_64F).var()))
             sampled_ts.append(ts_ms)
-            bboxes = body.det_model(frame)  # (N,4) xyxy
-            # 매 샘플 프레임마다 트래커 갱신(탐지 0이어도 호출해 트랙 age를 진행). xyxy 그대로 매칭.
-            xyxy = [[float(b[0]), float(b[1]), float(b[2]), float(b[3])] for b in bboxes]
-            track_ids = tracker.update(xyxy)
+            # det 실행 여부(6.0-15): 간격 미활성(N<=1)이면 항상 det(현행). 활성이면 N샘플프레임마다,
+            # 또는 score gate/sanity 폐기·carry 소진 시 강제. force/carry 조건이 스케줄보다 우선.
+            use_det = (det_interval <= 1 or force_det or not carry
+                       or frames_since_det + 1 >= det_interval)
+            if use_det:
+                bboxes = body.det_model(frame)  # (N,4) xyxy
+                # det 프레임마다 트래커 갱신(탐지 0이어도 호출해 트랙 age를 진행). xyxy 그대로 매칭.
+                # 간격 활성 시 트랙 bbox는 키포인트 역산 박스(타이트)라 det 박스(여유)와 모양이 달라
+                # 재동기화 전용 임계(resyncIouThreshold)로 매칭 — ID 신규발급(대상 데이터 단절) 방지.
+                xyxy = [[float(b[0]), float(b[1]), float(b[2]), float(b[3])] for b in bboxes]
+                track_ids = tracker.update(
+                    xyxy, iou_threshold=det_cfg["resyncIouThreshold"] if det_interval > 1 else None)
+                det_runs += 1
+                frames_since_det = 0
+                force_det = False
+            else:
+                # carry 프레임(6.0-15): det 생략 — 직전 프레임 pose 역산 확장 박스를 pose 입력으로,
+                # trackId는 매칭 없이 상속(역산 박스는 정의상 그 트랙의 것 — 매칭은 스왑/신규발급 위험).
+                xyxy = [list(b) for _tid, b in carry]
+                track_ids = [tid for tid, _b in carry]
+                bboxes = np.asarray(xyxy, dtype=np.float32)
+                frames_since_det += 1
             persons = []
+            next_carry = []    # 다음 프레임 pose 입력 후보: 현재 프레임 pose 역산 박스(stale 방지)
+            refresh_map = {}   # tracker state도 동일 박스로 갱신 — 재동기화 IoU 안정화
             # 탐지된 사람이 있을 때만 pose 추정 — 탐지 0이면 빈 프레임(전체이미지 fallback 방지).
             if len(bboxes) > 0:
                 kpts, scores = body.pose_model(frame, bboxes=bboxes)
                 kpts = np.array(kpts).reshape(-1, n_raw, 2)
                 scores = np.array(scores).reshape(-1, n_raw)
                 n = min(len(bboxes), kpts.shape[0])
+                if det_interval > 1 and n < len(bboxes):
+                    # pose가 bbox보다 적게 반환(부분 실패): 누락 인물은 carry 후보가 없어 조용히
+                    # 사라질 수 있다(현행 매 프레임 det는 다음 샘플에서 자동 복구되지만 간격 활성 시
+                    # 최대 다음 스케줄 det까지 공백). 다음 프레임 det로 전원 재동기화.
+                    force_det = True
                 for i in range(n):
-                    bbox = xyxy_to_xywh(bboxes[i])
+                    # person.bbox 기록은 "실제 pose 입력 박스"(det 프레임=det box, carry 프레임=직전 역산 박스).
+                    bbox = xyxy_to_xywh(xyxy[i])
                     # store_idx로 슬라이스 — wholebody는 body17+hand42(face·feet drop), body는 0..16 전체.
                     kp_scores = [clamp01(scores[i, j]) for j in store_idx]
                     keypoints = [[round(float(kpts[i, j, 0]), 2), round(float(kpts[i, j, 1]), 2), round(sc, 4)]
                                  for j, sc in zip(store_idx, kp_scores)]
+                    person_score = round(float(np.mean(kp_scores)), 4)
                     persons.append({
-                        "trackId": track_ids[i],  # 결정적 IoU 트래커 부여(PR D2a)
+                        "trackId": track_ids[i],  # 결정적 IoU 트래커 부여(PR D2a) / carry 프레임은 상속(6.0-15)
                         "bbox": [round(v, 2) for v in bbox],
-                        "score": round(float(np.mean(kp_scores)), 4),
+                        "score": person_score,
                         "keypoints": keypoints,
                     })
+                    if det_interval > 1:
+                        # carry 후보 게이트: 역산 실패·평균 score 미달·sanity 위반·(wholebody) 손 붕괴는
+                        # carry하지 않고 다음 프레임 det 강제 — 문제 프레임 자체는 복구 불가(본질적 비용,
+                        # A/B 하네스가 열화 지표로 게이트).
+                        inv = bbox_from_keypoints(kpts[i], scores[i], det_cfg["redetectMinScore"],
+                                                  det_cfg["bboxMarginRatio"], width, height)
+                        ok_carry = (inv is not None
+                                    and person_score >= det_cfg["redetectMinScore"]
+                                    and carry_bbox_sane(inv, xyxy[i], width, height, det_cfg["bboxSanity"]))
+                        if ok_carry and variant == "wholebody":
+                            # hand subset gate: 몸통 conf가 높으면 평균이 손 붕괴를 가린다(손목 분석 보호).
+                            hand_mean = float(np.mean(
+                                [clamp01(scores[i, j]) for j in WHOLEBODY_HAND_SOURCE_INDICES]))
+                            ok_carry = hand_mean >= det_cfg["redetectMinScore"]
+                        if ok_carry:
+                            next_carry.append((track_ids[i], inv))
+                            refresh_map[track_ids[i]] = inv
+                        else:
+                            force_det = True
+            if det_interval > 1:
+                # carry 프레임은 refresh가 age 진행 담당(update 미호출), det 프레임은 update가 이미
+                # 진행했으므로 bbox 교체만(advance_age=False) — 한 프레임 age 2회 증가(조기 은퇴) 금지.
+                tracker.refresh(refresh_map, advance_age=not use_det)
+                if not next_carry:
+                    force_det = True
+                carry = next_carry
             frames_out.append({
                 "frameIndex": idx,
                 "timestampMs": ts_ms,
@@ -452,6 +608,14 @@ def main():
                 args.fps, convention, vcfg["detector"], pose_name, pose_input_size,
                 {"iou": track_iou, "maxAge": track_max_age},  # 실제 사용 값(재현성)
                 {"blurThreshold": blur_threshold},  # quality threshold도 재현성 hash에 포함(D3a)
+                # det 빈도 감소(6.0-15) 활성 시에만 — 행동을 바꾸는 모든 파라미터, config와 동일 필드명.
+                det_interval={
+                    "intervalFrames": det_interval,
+                    "bboxMarginRatio": det_cfg["bboxMarginRatio"],
+                    "resyncIouThreshold": det_cfg["resyncIouThreshold"],
+                    "redetectMinScore": det_cfg["redetectMinScore"],
+                    "bboxSanity": det_cfg["bboxSanity"],
+                } if det_interval > 1 else None,
             ),
         },
         "frames": frames_out,
@@ -462,7 +626,8 @@ def main():
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(doc, indent=2), encoding="utf-8")
-    print(f"wrote {out} | sampled {sampled} frames | {elapsed:.1f}s | {elapsed / max(1, sampled) * 1000:.0f}ms/frame")
+    print(f"wrote {out} | sampled {sampled} frames | det {det_runs}/{sampled} (intervalFrames={det_interval})"
+          f" | {elapsed:.1f}s | {elapsed / max(1, sampled) * 1000:.0f}ms/frame")
 
 
 if __name__ == "__main__":

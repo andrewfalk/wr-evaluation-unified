@@ -7,6 +7,13 @@
     "minTargetPresenceRatio": 0.5,
     "note": "결정적 IoU 트래커(infer_clip) 파라미터 + 대상 등장 비율 임계(미만이면 TARGET_TRACK_LOST). PR D2a."
   },
+  "detection": {
+    "intervalSec": 0,
+    "bboxMarginRatio": 0.15,
+    "redetectMinScore": 0.3,
+    "resyncIouThreshold": 0.2,
+    "bboxSanity": { "maxAreaRatio": 0.9, "aspectRange": [0.15, 6.0], "maxCenterJumpDiagRatio": 0.5 }
+  },
   "keypointConvention": "coco17",
   "keypointIndex": {
     "nose": 0, "left_eye": 1, "right_eye": 2, "left_ear": 3, "right_ear": 4,

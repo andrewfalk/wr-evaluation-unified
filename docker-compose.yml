@@ -68,6 +68,11 @@ services:
       # 보존 정책(기본 privacy_first=원본 추론 후 삭제) / recipe 미검증 apply 허용(운영 절대 금지).
       VIDEO_ANALYSIS_RETENTION: ${VIDEO_ANALYSIS_RETENTION:-privacy_first}
       VIDEO_ANALYSIS_ALLOW_UNVERIFIED_RECIPE: ${VIDEO_ANALYSIS_ALLOW_UNVERIFIED_RECIPE:-false}
+      # 성능 노브(기본=현행 동작). poseTier(6.0-14): GPU 서버에서만 auto. detIntervalSec(6.0-15):
+      # det 초당 1회+역산 박스 carry — CPU 서버 최대 수혜(실측 2.22×), 활성은 §14-4-2 배포 게이트에서
+      # B2·촬영 프로토콜(작업자 1–2명)과 함께 결정. 허용 [0,1.0] 밖은 기동 실패.
+      VIDEO_POSE_TIER: ${VIDEO_POSE_TIER:-standard}
+      VIDEO_DET_INTERVAL_SEC: ${VIDEO_DET_INTERVAL_SEC:-0}
       BACKUPS_DIR:          /backups
     ports:
       - "${DEV_PORT:-3001}:3001"
