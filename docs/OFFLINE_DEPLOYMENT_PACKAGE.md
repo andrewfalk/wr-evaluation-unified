@@ -1115,6 +1115,23 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
   가벼운 프로필). UI는 손목 모듈 활성 시에만 이 옵션을 노출하고 "고부담" 힌트를 표시합니다.
 - **WSL2 메모리 상한**: ~7×·RAM 2.2×를 감안해 14-3의 `.wslconfig` 여유를 확보하세요(동시 손목 분석 시 특히).
 
+### 14-1b. body 상위 티어(RTMPose-l) — GPU 서버 전용 opt-in (6.0-14)
+
+body 포즈에 상위 모델 `pose-body-l`(rtmpose-l)이 이미지에 함께 baking됩니다(**이미지 +약 105MB**,
+`fetch-pose-weights.ps1`이 4모델 전부 sha 확정). **기본값은 기존 그대로 rtmpose-s** — env를 켜기 전까지
+동작 변화가 없습니다.
+
+- **활성화**: app 컨테이너 env `VIDEO_POSE_TIER=auto` (compose `environment:`에 `${VIDEO_POSE_TIER:-standard}`
+  나열 필요 — 14-0의 게이트 env 미전달 함정과 동일). 허용값은 `standard|auto`뿐이며 그 외 값은 **서버 기동
+  실패**(설정 실수 조기 노출). `high`는 dev CLI 디버그 전용.
+- **GPU 서버에서만 auto 권장**: auto는 "l 추정기 자체의 CUDA 세션 2단 검증"을 통과한 경우에만 l을 쓰고,
+  실패하면 s로 자동 강등합니다(CPU-l 경로 없음 — CPU에서 l은 s 대비 ~40% 느림). CPU 서버에서 auto를 켜도
+  항상 s로 동작하므로 무해하지만 의미가 없습니다.
+- **추적성**: 사용 모델은 keypoints/recipe의 `modelVersion`(`rtmlib-…/body-l`)·`poseSha256`으로 기록되어
+  `analysisBundleVersion`에 반영됩니다. 같은 분석의 클립들이 s/l로 섞이면(배치 중 GPU 장애 등) apply 시
+  recipe 일관성 검사가 **의도적으로 차단**합니다 — 해당 클립 재분석으로 해소.
+- **B2 주의**: gold 검증(6.0-B2)은 운영에서 실제 쓰는 티어 기준으로 수행하세요(모델이 다르면 산출값이 다름).
+
 ### 14-2. 가중치 baked 확인
 
 `release-manifest.json`의 `videoInference.weightsComplete`가 `true`인지 확인하세요.

@@ -134,7 +134,9 @@ async function defaultRunInference(
     const deadlineMs = config.video.jobDeadlineMs;
     const phaseStart = Date.now();
     const inferArgs = [path.join(scripts, 'infer_clip.py'), '--input', clipPath, '--output', kpPath,
-      '--fps', String(fps), '--pose-variant', poseVariant, '--device', options?.device ?? 'auto'];
+      '--fps', String(fps), '--pose-variant', poseVariant, '--device', options?.device ?? 'auto',
+      // pose 티어(6.0-14): standard|auto만 운영 허용(config가 검증). 티어 결정은 python이 device와 함께 해석.
+      '--pose-tier', config.video.poseTier];
     // overlay 검수 게이트(privacy 예외): 샘플 프레임을 frameIndex별 JPEG로 저장(infer_clip best-effort).
     if (options?.framesDir) inferArgs.push('--frames-dir', options.framesDir);
     await execFileAsync(config.video.python, inferArgs, { timeout: deadlineMs });

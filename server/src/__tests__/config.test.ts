@@ -185,6 +185,24 @@ describe('config — NODE_ENV validation', () => {
   });
 });
 
+describe('config — video.poseTier (6.0-14)', () => {
+  it('defaults to standard — env 미설정 배포에서 동작 변화 0', () => {
+    expect(make().video.poseTier).toBe('standard');
+  });
+
+  it('accepts auto (GPU 서버에서 l 자동 사용 opt-in)', () => {
+    expect(make({ VIDEO_POSE_TIER: 'auto' }).video.poseTier).toBe('auto');
+  });
+
+  it("rejects 'high' — dev CLI 전용, 운영 env에선 조용한 강등 없이 기동 실패", () => {
+    expect(() => make({ VIDEO_POSE_TIER: 'high' })).toThrow(/VIDEO_POSE_TIER/);
+  });
+
+  it('rejects unknown values (오타도 fail-fast)', () => {
+    expect(() => make({ VIDEO_POSE_TIER: 'ultra' })).toThrow(/VIDEO_POSE_TIER/);
+  });
+});
+
 describe('config — CORS origins', () => {
   it('parses comma-separated origins', () => {
     const c = make({ CORS_ORIGINS: 'https://wr.hospital.local:8443, https://wr2.hospital.local:8443' });

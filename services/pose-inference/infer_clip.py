@@ -71,14 +71,15 @@ def load_tracking_params():
     return iou, max_age
 
 
-def load_model_shas(variant="body"):
+def load_model_shas(variant="body", tier="standard"):
     """recipe(§8.11)에 들어갈 (detectorSha256, poseSha256, weightsComplete)를 만든다(6.0-9).
-    variant별 pose 모델(body→pose-body, wholebody→pose-wholebody)의 실제 baked .onnx sha256을
-    manifest 기대값과 대조해 일치할 때만 verified. dev 자동다운로드/오염/다른 모델이면 (None, None, False)
+    variant(+tier, 6.0-14)별 pose 모델(body→pose-body, body+high→pose-body-l, wholebody→pose-wholebody)의
+    실제 baked .onnx sha256을 manifest 기대값과 대조해 일치할 때만 verified.
+    dev 자동다운로드/오염/다른 모델이면 (None, None, False)
     — manifest의 '정상 해시'를 맹신해 거짓 verified로 만들지 않는다(서버 apply 게이트가 fail-closed)."""
     try:
         from model_loader import verified_model_shas
-        return verified_model_shas(variant=variant)
+        return verified_model_shas(variant=variant, tier=tier)
     except (OSError, ValueError, ImportError):
         return None, None, False
 
@@ -166,6 +167,11 @@ def main():
                     help="body=coco17(기본) | wholebody=133점 추출→body17+hand42=59 저장(손목분석, 6.0-10)")
     ap.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto",
                     help="추론 디바이스(6.0-12): auto(GPU 가능 시 사용·실패 시 CPU 폴백) | cpu | cuda(강제, 실패 시 에러)")
+    ap.add_argument("--pose-tier", choices=["standard", "high", "auto"], default="standard",
+                    help="pose 모델 티어(6.0-14, **body 전용 — wholebody에서는 경고 후 무시**): "
+                         "standard(기본, rtmpose-s=기존 동작) | "
+                         "auto(l/cuda 2단 검증 통과 시에만 rtmpose-l, 실패 시 tier만 강등·디바이스 계약 유지) | "
+                         "high(dev 디버그 전용: l+cuda 강제, 불가 시 에러 exit — CPU-l 경로 금지)")
     args = ap.parse_args()
     variant = args.pose_variant
     vcfg = POSE_VARIANTS[variant]
@@ -184,7 +190,17 @@ def main():
     step = max(1, round(orig_fps / args.fps))
     actual_sampled_fps = orig_fps / step  # 정수 step 때문에 요청값과 다를 수 있음 — 실제값을 기록
 
-    from model_loader import build_pose, cuda_available, available_providers, cuda_session_active
+    from model_loader import (build_pose, cuda_available, available_providers,
+                              cuda_session_active, resolve_model_paths, selected_pose_info)
+
+    # 티어 정규화(6.0-14): tier는 body 전용 — wholebody는 standard로 동작(에러 아님, 의도).
+    # fallbackReason은 device 폴백 전용 의미라 오염시키지 않고 stderr 경고만 남긴다.
+    requested_tier = args.pose_tier
+    tier = requested_tier
+    if variant != "body" and requested_tier != "standard":
+        sys.stderr.write(f"warning: --pose-tier {requested_tier} is body-only; "
+                         "wholebody uses its single model (tier ignored)\n")
+        tier = "standard"
 
     def verify_cuda_or_reason(est):
         """(6.0-13) cuda 세션 실사용 검증. ORT는 ①세션 생성 시 ②**첫 추론 시**(cudnn frontend 그래프
@@ -205,11 +221,16 @@ def main():
             return f"cuda fell back to CPU at first inference (sessionProviders={sp})"
         return None
 
-    # 디바이스 해석(6.0-12): auto=GPU 가능 시 사용·init 실패 시 CPU 폴백, cuda=강제(불가/실패 시 마커+nonzero exit).
+    # 디바이스×티어 통합 해석(6.0-12 + 6.0-14). 두 축은 **독립적으로 강등**된다:
+    #   - l 실패는 tier만 포기(standard로), --device cuda의 "CPU 금지·불가 시 exit 3" 계약은 불변.
+    #   - CPU-l 경로는 어떤 조합에서도 열지 않는다(l은 CUDA 2단 검증과 한 몸).
+    # 조합 상태표(계획 문서 6.0-14 §3)가 이 블록의 단일 기준. tier 강등 사유는 stderr 경고만
+    # (fallbackReason은 device 폴백 전용 의미 유지 — UI 배지·워커 매핑이 그 의미로 소비).
     requested_device = args.device
     device_used = "cpu"
     device_fallback = False
     fallback_reason = None
+    tier_used = "standard"
     if requested_device != "cpu":
         try:
             import onnxruntime as _ort
@@ -217,43 +238,91 @@ def main():
                 _ort.preload_dlls()  # pip nvidia-* 휠의 CUDA/cuDNN DLL 로드(Windows PATH 미등록 대비, ORT>=1.21).
         except Exception:  # noqa: BLE001 — preload 불가 환경(구버전/Linux 시스템 CUDA)은 기존 경로로 진행
             pass
-    if requested_device == "cpu":
+
+    def try_build_cuda_high():
+        """l 추정기 자체를 cuda로 build + 2단 검증(6.0-14). 성공 (est, None) | 실패 (None, 사유).
+        판단 기준은 's의 CUDA 검증'이 아니라 'l 세션의 CUDA 검증' — 모델별로 EP 실패 양상이 다를 수 있다."""
+        if not resolve_model_paths(variant=variant, tier="high")[4]:
+            return None, "pose-body-l not baked"
+        try:
+            est, _src = build_pose(variant, device="cuda", tier="high")
+        except Exception as e:  # noqa: BLE001 — 강등/exit 판단은 호출자
+            return None, f"l cuda init failed: {e}"
+        why = verify_cuda_or_reason(est)
+        if why is not None:
+            return None, f"l {why}"
+        return est, None
+
+    body = None
+    if tier == "high":
+        # high = l+cuda 강제(dev 디버그 전용): device 인자와 무관하게 l/cuda 성공만 허용.
+        if requested_device == "cpu":
+            raise SystemExit("--pose-tier high requires cuda (l+cuda 강제, CPU-l 금지) — --device cpu와 함께 쓸 수 없음")
+        if not cuda_available():
+            sys.stderr.write(f"__CUDA_UNAVAILABLE__: CUDAExecutionProvider not available (providers={available_providers()})\n")
+            raise SystemExit(3)
+        body, why = try_build_cuda_high()
+        if body is None:
+            sys.stderr.write(f"__CUDA_UNAVAILABLE__: high tier(l+cuda) failed: {why}\n")
+            raise SystemExit(3)
+        device_used = "cuda"
+        tier_used = "high"
+    elif requested_device == "cpu":
+        # tier auto여도 CPU 확정이면 l 시도 자체가 없다(상태표 — CPU-l 금지).
         body, _model_source = build_pose(variant, device="cpu")
     elif requested_device == "cuda":
         if not cuda_available():
             sys.stderr.write(f"__CUDA_UNAVAILABLE__: CUDAExecutionProvider not available (providers={available_providers()})\n")
             raise SystemExit(3)
-        try:
-            body, _model_source = build_pose(variant, device="cuda")
-            device_used = "cuda"
-        except Exception as e:  # noqa: BLE001 — 강제 cuda 실패는 명확 마커로 워커가 CUDA_UNAVAILABLE 매핑
-            sys.stderr.write(f"__CUDA_UNAVAILABLE__: cuda init failed: {e}\n")
-            raise SystemExit(3)
-        silent_fallback = verify_cuda_or_reason(body)
-        if silent_fallback is not None:
-            # 강제 cuda인데 무성 폴백 → CPU로 계속하면 GPU 배지가 거짓이 됨. 기존 계약대로 마커+exit 3.
-            sys.stderr.write(f"__CUDA_UNAVAILABLE__: {silent_fallback}\n")
-            raise SystemExit(3)
-    else:  # auto
-        if cuda_available():
+        if tier == "auto":
+            body, why = try_build_cuda_high()
+            if body is not None:
+                device_used = "cuda"
+                tier_used = "high"
+            else:
+                sys.stderr.write(f"warning: pose tier auto — {why}; using standard tier (device contract kept)\n")
+        if body is None:
+            # 기존 6.0-12 강제 cuda 경로(standard) — 실패 시 CPU 폴백 없이 exit 3.
             try:
                 body, _model_source = build_pose(variant, device="cuda")
                 device_used = "cuda"
-            except Exception as e:  # noqa: BLE001 — auto는 분석을 죽이지 않고 CPU로 폴백
-                body, _model_source = build_pose(variant, device="cpu")
-                device_used = "cpu"
-                device_fallback = True
-                fallback_reason = f"cuda init failed, fell back to cpu: {e}"
-            if device_used == "cuda":
-                silent_fallback = verify_cuda_or_reason(body)
-                if silent_fallback is not None:
-                    # 무성 폴백 상태의 추정기는 이미 CPU 세션이지만, 명시적으로 CPU 재빌드해 상태를 확정.
+            except Exception as e:  # noqa: BLE001 — 강제 cuda 실패는 명확 마커로 워커가 CUDA_UNAVAILABLE 매핑
+                sys.stderr.write(f"__CUDA_UNAVAILABLE__: cuda init failed: {e}\n")
+                raise SystemExit(3)
+            silent_fallback = verify_cuda_or_reason(body)
+            if silent_fallback is not None:
+                # 강제 cuda인데 무성 폴백 → CPU로 계속하면 GPU 배지가 거짓이 됨. 기존 계약대로 마커+exit 3.
+                sys.stderr.write(f"__CUDA_UNAVAILABLE__: {silent_fallback}\n")
+                raise SystemExit(3)
+    else:  # device auto
+        if cuda_available():
+            if tier == "auto":
+                body, why = try_build_cuda_high()
+                if body is not None:
+                    device_used = "cuda"
+                    tier_used = "high"
+                else:
+                    sys.stderr.write(f"warning: pose tier auto — {why}; using standard tier\n")
+            if body is None:
+                # 기존 device auto 경로(standard): cuda 시도+검증 → 실패 시 CPU 폴백(deviceFallback 기록).
+                try:
+                    body, _model_source = build_pose(variant, device="cuda")
+                    device_used = "cuda"
+                except Exception as e:  # noqa: BLE001 — auto는 분석을 죽이지 않고 CPU로 폴백
                     body, _model_source = build_pose(variant, device="cpu")
                     device_used = "cpu"
                     device_fallback = True
-                    fallback_reason = f"{silent_fallback}; fell back to cpu"
+                    fallback_reason = f"cuda init failed, fell back to cpu: {e}"
+                if device_used == "cuda":
+                    silent_fallback = verify_cuda_or_reason(body)
+                    if silent_fallback is not None:
+                        # 무성 폴백 상태의 추정기는 이미 CPU 세션이지만, 명시적으로 CPU 재빌드해 상태를 확정.
+                        body, _model_source = build_pose(variant, device="cpu")
+                        device_used = "cpu"
+                        device_fallback = True
+                        fallback_reason = f"{silent_fallback}; fell back to cpu"
         else:
-            # GPU 자체가 없는 환경 → CPU가 정상 결과(폴백 아님). 사유만 기록.
+            # GPU 자체가 없는 환경 → CPU가 정상 결과(폴백 아님). 사유만 기록. (tier auto여도 l 시도 없음.)
             body, _model_source = build_pose(variant, device="cpu")
             fallback_reason = "no CUDAExecutionProvider available"
     track_iou, track_max_age = load_tracking_params()
@@ -333,10 +402,22 @@ def main():
             # usableFrameRatio = blur∪drop 제외 후 사용가능 비율(정보용 — overall·게이팅 미입력, 6.0-B2까지).
             quality["usableFrameRatio"] = round(max(0.0, 1.0 - min(1.0, blur_ratio + drop_ratio)), 4)
 
-    detector_sha256, pose_sha256, weights_complete = load_model_shas(variant)
+    detector_sha256, pose_sha256, weights_complete = load_model_shas(variant, tier=tier_used)
 
-    # modelVersion: body는 기존값 유지(회귀 0), wholebody만 variant 접미사(bundle mdl: 구분 강화, 6.0-10).
+    # modelVersion: body(standard)는 기존값 유지(회귀 0), wholebody는 variant 접미사(6.0-10),
+    # body+l(6.0-14)은 "/body-l" 접미사 — recipe·analysisBundleVersion(mdl:)에 티어가 실려 추적된다.
     model_version = f"rtmlib-{RTMLIB_VERSION}" if variant == "body" else f"rtmlib-{RTMLIB_VERSION}/{variant}"
+    # pose 기록 필드: standard는 vcfg 고정값 그대로(기존 출력·preprocessConfigHash 완전 보존 — 기존 분석과의
+    # recipe 일관성 유지). high일 때만 실제 선택된 manifest 항목(pose-body-l) 기준으로 교체.
+    pose_name = vcfg["pose"]
+    pose_input_size = vcfg["inputSize"]
+    model_name = vcfg["modelName"]
+    if tier_used == "high":
+        pinfo = selected_pose_info(variant=variant, tier="high") or {}
+        pose_name = pinfo.get("name") or "rtmpose-l_simcc-body7"
+        pose_input_size = list(pinfo.get("inputSize") or POSE_INPUT_SIZE)
+        model_name = "rtmlib:body:performance-l"
+        model_version = f"rtmlib-{RTMLIB_VERSION}/body-l"
 
     doc = {
         "schemaVersion": SCHEMA_VERSION,
@@ -353,9 +434,9 @@ def main():
         },
         "model": {
             "detector": vcfg["detector"],
-            "pose": vcfg["pose"],
-            "inputSize": vcfg["inputSize"],
-            "modelName": vcfg["modelName"],
+            "pose": pose_name,
+            "inputSize": pose_input_size,
+            "modelName": model_name,
             "modelVersion": model_version,
             # recipe 재현성(6.0-9): 실제 실행 .onnx 가중치 해시. 미반입(PoC/dev)이면 null + weightsComplete=False.
             "detectorSha256": detector_sha256,
@@ -366,8 +447,9 @@ def main():
             "deviceUsed": device_used,
             "deviceFallback": device_fallback,
             "fallbackReason": fallback_reason,
+            # l 사용 시 pose 이름이 바뀌어 hash도 달라진다 — 의도(재현성·recipe 일관성 검사의 근거, 6.0-14).
             "preprocessConfigHash": preprocess_config_hash(
-                args.fps, convention, vcfg["detector"], vcfg["pose"], vcfg["inputSize"],
+                args.fps, convention, vcfg["detector"], pose_name, pose_input_size,
                 {"iou": track_iou, "maxAge": track_max_age},  # 실제 사용 값(재현성)
                 {"blurThreshold": blur_threshold},  # quality threshold도 재현성 hash에 포함(D3a)
             ),

@@ -185,4 +185,24 @@ describe('validateAppliedRecipes — exact-set / recipe 대조', () => {
     });
     expect(fail?.code).toBe('RECIPE_AGGREGATE_MISMATCH');
   });
+
+  it('mixed-tier fusion(s와 body-l 혼합, 6.0-14) → 조용히 통과하지 않음(fail-closed 회귀 고정)', () => {
+    // 같은 분석의 클립들이 티어가 섞이면(예: 배치 중 GPU 장애로 일부만 l) modelVersion이
+    // 'rtmlib-…'와 'rtmlib-…/body-l'로 갈린다 — 클라가 단일 티어 기준으로 만든 bundle 문자열은
+    // aggregate 대조에서 반드시 걸려야 한다(모델이 섞인 융합을 무검증 통과시키지 않는 계약).
+    const rs = recipe();
+    const rl = recipe({ modelVersion: 'rtmlib-0.0.15/body-l' });
+    const fail = validateAppliedRecipes({
+      ...base,
+      newAppliedInputs: [entry({
+        analysisJobIds: ['j1', 'j2'],
+        // 단일 티어(s)만 반영한 bundle — 혼합 실제와 불일치.
+        analysisBundleVersion: 'mdl:rtmlib-0.0.15|pch|fc-1',
+      })],
+      appliedInputsCount: 1,
+      sourceAnalysisJobIds: ['j1', 'j2'],
+      sourceRecipes: new Map([['j1', rs], ['j2', rl]]),
+    });
+    expect(fail?.code).toBe('RECIPE_AGGREGATE_MISMATCH');
+  });
 });

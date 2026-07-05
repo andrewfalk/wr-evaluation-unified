@@ -309,8 +309,35 @@
     요구 낮음 — **det는 YOLOX-tiny 고정, yolox-s 재검토 단서 종결**. 부수 효과: "det 빈도 감소"(예: 1초 1회
     검출 + 이전 박스 재사용 — det 20ms가 지배 비용이므로 CPU 서버에서도 프레임당 26→8~10ms 잠재)가 배치/
     TensorRT를 제치고 **B안 1순위 후보로 부상**(GPU와 독립). 주의점: 프레임 출입 순간·target-track 안정성.
-  - [ ] **사용자 결정 대기**: A안 진행 여부·모델 선택(m vs l). 서버 GPU 시사점: 워커가 job마다 python 신규
-    기동이라 CUDA init 반복 — 상주화 또는 1분+ 클립 위주로 기대효과 계산.
+  - [x] **결정(2026-07-04, 사용자)**: A안 진행 + **모델 l 확정** — 정성 비교(보행자 샘플 + 실작업영상
+    유로폼 설치작업2.mp4, 동일 det bbox·IoU 인물고정)에서 실작업영상 기준 **l이 전 지표 우위**(각도 지터
+    4관절 13~32%↓, confidence 0.677 vs s 0.636). m은 무릎=l급·팔꿈치L=s급 중간. 구현은 6.0-14.
+    서버 GPU 시사점(별건): 워커가 job마다 python 신규 기동이라 CUDA init 반복 — 상주화(또는 같은 분석
+    6~8클립 배치 상주)는 서버 GPU 도입 시 후속 과제.
+- [~] **6.0-14 A안 본구현 — pose-body 상위 티어(RTMPose-l), CUDA 검증 시에만** (브랜치
+  `feat/video-6.0-14-pose-tier-l`). 원칙 2개: ①CPU-l 경로는 어떤 조합에서도 금지(l은 CUDA 2단 검증과 한 몸)
+  ②`--device cuda`의 "CPU 금지·불가 시 exit 3" 계약은 tier가 깨지 않음 — **두 축 독립 강등**(l 실패는 tier만
+  포기). 디바이스×티어 3×3 상태표가 구현·테스트 단일 기준(플랜 파일·PR 본문 참조).
+  - [x] manifest `pose-body-l`(rtmpose-l 256x192, sha 확정 — fetch-pose-weights 재실행, 기존 3모델 sha 불변,
+    weightsComplete=true). fetch/export 스크립트는 제너릭 순회라 코드 변경 0. baked +105MB.
+  - [x] model_loader: `_pose_roles(variant, tier)`(body+high→`pose-body-l` 단독·엄격) + `_select_models/
+    resolve_model_paths/verified_model_shas/build_pose`에 `tier="standard"` 기본 파라미터(기존 호출 무변경) +
+    `selected_pose_info()` helper(기존 튜플 시그니처 불변). high 미반입 build는 RuntimeError(무성 s 대체 금지).
+    테스트 케이스 10(tier 선택 엄격성·tier별 sha·fail-fast) ALL PASS.
+  - [x] infer_clip `--pose-tier standard|high|auto`(기본 standard=기존 동작): l 판단은 **l 추정기 자체의
+    cuda 2단 검증**(try_build_cuda_high). high=l+cuda 강제(실패 시 exit·CPU-l 금지, dev 전용). 기록은 high일
+    때만 manifest 항목 기준(pose/inputSize/modelName `performance-l`/modelVersion `…/body-l`/hash 변화 —
+    standard는 기존 문자열·hash 완전 보존). fallbackReason은 device 폴백 전용 유지(tier 강등은 stderr만).
+    wholebody는 tier 무시+경고(help 명시). **3×3 상태표 라이브 전수 검증**(RTX 4060): std/cpu 회귀 diff 0,
+    auto/auto→l/cuda(5개 메타필드 전부 변화), cuda+auto+l미반입→s/cuda 강등(deviceUsed=cuda 유지·
+    fallbackReason 비오염), high/cpu 에러, wholebody 경고. s vs l 산출 sanity는 6.0-13 정성비교와 동일
+    onnx(sha 일치 확인)라 그 결과로 갈음.
+  - [x] 서버: config `video.poseTier`(env `VIDEO_POSE_TIER`, **standard|auto만** — high·오타는 기동 실패
+    fail-fast) + 워커 spawn `--pose-tier` 전달. DB·contracts·UI 무변경(티어는 modelVersion으로 recipe/
+    analysisBundleVersion에 자동 기록). 테스트: config 4케이스 + **mixed-tier fusion fail-closed**(s와
+    body-l 혼합 → RECIPE_AGGREGATE_MISMATCH — 의도된 차단, 발생 시 해당 클립 재분석으로 해소) — 서버 537 통과.
+  - [ ] **운영(실환경·미실행)**: 에어갭 이미지 재빌드(+105MB) 후 GPU 서버에서 `VIDEO_POSE_TIER=auto` 활성.
+    B2 gold 검증은 최종 채택 티어(l) 기준으로 수행.
 
 ---
 

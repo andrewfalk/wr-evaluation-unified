@@ -152,6 +152,53 @@ def run():
     assert ok is False  # det 세션 미노출이면 나머지만으로 통과 금지
     print("ok: cuda_session_active - 두 세션 + 첫 provider=CUDA strict 판정")
 
+    # 10) tier 축(6.0-14) — body+high는 pose-body-l 단독(엄격), standard는 기존 role 순서.
+    with tempfile.TemporaryDirectory() as t:
+        d = Path(t)
+        s_b, l_b = b"POSE-S-BYTES", b"POSE-L-BYTES"
+        (d / "det.onnx").write_bytes(b"DET")
+        (d / "pose_s.onnx").write_bytes(s_b)
+        (d / "pose_l.onnx").write_bytes(l_b)
+        (d / "manifest.json").write_text(json.dumps({
+            "weightsComplete": True,
+            "models": [
+                {"role": "detector", "file": "det.onnx", "onnxSha256": sha(b"DET"), "inputSize": [416, 416]},
+                {"role": "pose-body", "name": "rtmpose-s", "file": "pose_s.onnx", "onnxSha256": sha(s_b), "inputSize": [192, 256]},
+                {"role": "pose-body-l", "name": "rtmpose-l", "file": "pose_l.onnx", "onnxSha256": sha(l_b), "inputSize": [192, 256]},
+            ],
+        }), encoding="utf-8")
+        info_s = model_loader.selected_pose_info(str(d), "body")                  # 기본 standard
+        info_l = model_loader.selected_pose_info(str(d), "body", tier="high")
+        assert info_s["name"] == "rtmpose-s" and info_l["name"] == "rtmpose-l", (info_s, info_l)
+        # verified_model_shas가 tier별로 다른 pose sha를 반환
+        _, ps, vs = model_loader.verified_model_shas(str(d), "body")
+        _, pl, vl = model_loader.verified_model_shas(str(d), "body", tier="high")
+        assert vs is True and vl is True and ps == sha(s_b) and pl == sha(l_b), (ps, pl)
+        # wholebody는 tier 무시(high여도 pose-wholebody role — 이 manifest엔 없으므로 None)
+        assert model_loader.selected_pose_info(str(d), "wholebody", tier="high") is None
+        # 알 수 없는 tier → fail-fast
+        try:
+            model_loader.selected_pose_info(str(d), "body", tier="ultra")
+            assert False, "expected ValueError for unknown tier"
+        except ValueError:
+            pass
+    # l 항목이 없는 manifest에서 high는 조용히 s로 대체되지 않음(엄격) + build_pose fail-fast
+    with tempfile.TemporaryDirectory() as t:
+        mdir = make_models_dir(t, b"D", b"P", sha(b"D"), sha(b"P"))  # pose-body-l 없음
+        assert model_loader.selected_pose_info(mdir, "body", tier="high") is None
+        _, _, v = model_loader.verified_model_shas(mdir, "body", tier="high")
+        assert v is False
+        import os
+        os.environ["POSE_MODELS_DIR"] = mdir
+        try:
+            model_loader.build_pose("body", tier="high")
+            assert False, "expected RuntimeError for high tier without baked l"
+        except RuntimeError:
+            pass
+        finally:
+            del os.environ["POSE_MODELS_DIR"]
+    print("ok: tier 축 - high=pose-body-l 단독(엄격)·verified tier별 sha·미반입 fail-fast")
+
     print("ALL PASS")
 
 

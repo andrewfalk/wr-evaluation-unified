@@ -34,6 +34,21 @@
       "note": "기본 pose(자세시간·상지반복). 레거시 role 'pose'도 model_loader가 body로 인식(하위호환)."
     },
     {
+      "role": "pose-body-l",
+      "name": "rtmpose-l_simcc-body7",
+      "file": "rtmpose-l_simcc-body7_pt-body7_420e-256x192-4dba18fc_20230504.onnx",
+      "sourceUrl": "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-l_simcc-body7_pt-body7_420e-256x192-4dba18fc_20230504.zip",
+      "sourceArchiveSha256": "121f42bf3f3e28f2cf254696ae649e58459513f65d2b4580959b688c0b2c8302",
+      "onnxSha256": "cff059fd58a2c0d5fabaddcd66a96abcfb327563bcb0149ea59c9de4a8990fe2",
+      "inputSize": [
+        192,
+        256
+      ],
+      "keypointConvention": "coco17",
+      "postprocessing": "SimCC",
+      "note": "6.0-14 상위 티어 pose(body 전용, --pose-tier high|auto). CUDA 세션 2단 검증 통과 시에만 사용(CPU-l 경로 금지 — CPU에선 s 대비 ~40% 느림). 근거: 6.0-13 실측(GPU에서 현행 s CPU와 동급 28.9ms/f) + 실작업영상 정성비교 전지표 우위(VIDEO_GPU_BENCH_6013.md)."
+    },
+    {
       "role": "pose-wholebody",
       "name": "rtmw-dw-l-m",
       "file": "rtmw-dw-l-m_simcc-cocktail14_270e-256x192_20231122.onnx",
