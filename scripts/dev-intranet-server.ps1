@@ -40,12 +40,17 @@ if (-not $env:NODE_ENV)           { $env:NODE_ENV = 'development' }
 # 운영 docker 컨테이너와 동일하게 UTC로 고정. 미설정 시 호스트 로컬(KST)로 돌아
 # pg DATE→JS Date의 toISOString() 변환이 하루 밀려 patient 식별(생년월일) 비교가 깨진다.
 if (-not $env:TZ)                 { $env:TZ = 'UTC' }
+# pose 티어(6.0-14): dev PC(RTX 4060)는 auto 기본 — body 클립이 l/cuda 2단 검증 통과 시 rtmpose-l로
+# 분석된다(검증 실패·GPU 없음이면 s로 자동 강등 — CPU-l 경로 없음이라 무해). .env의 값이 우선.
+# 기존과 동일 비교가 필요하면 .env에 VIDEO_POSE_TIER=standard. 허용값 standard|auto(그 외 기동 실패).
+if (-not $env:VIDEO_POSE_TIER)    { $env:VIDEO_POSE_TIER = 'auto' }
 
 # 3) 업로드 디렉터리 보장(서버도 tmp/를 mkdir하지만 명시 생성).
 if (-not $env:VIDEO_ANALYSIS_UPLOAD_DIR) { throw 'VIDEO_ANALYSIS_UPLOAD_DIR not set in .env' }
 New-Item -ItemType Directory -Force -Path $env:VIDEO_ANALYSIS_UPLOAD_DIR | Out-Null
 
 Write-Host "[dev-intranet] DEPLOYMENT_MODE=$($env:DEPLOYMENT_MODE) VIDEO_ANALYSIS_ENABLED=$($env:VIDEO_ANALYSIS_ENABLED)"
+Write-Host "[dev-intranet] VIDEO_POSE_TIER=$($env:VIDEO_POSE_TIER) (auto=GPU 검증 시 body를 rtmpose-l로 — 사용 모델은 검토 recipe의 modelVersion으로 확인)"
 Write-Host "[dev-intranet] uploadDir=$($env:VIDEO_ANALYSIS_UPLOAD_DIR)"
 Write-Host "[dev-intranet] DB=$($env:DATABASE_URL)"
 Write-Host "[dev-intranet] building + starting native server on :$($env:PORT) (auto-migrate on boot)…"

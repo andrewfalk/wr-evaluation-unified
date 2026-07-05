@@ -39,4 +39,6 @@ Write-Host ""
 Write-Host "[dev-stack] 기동 트리거 완료. 새 창 2개(서버/웹)의 로그를 확인하세요." -ForegroundColor Green
 Write-Host "  - 서버 헬스체크: http://localhost:3001/api/config/public  (videoAnalysisEnabled:true)" -ForegroundColor Green
 Write-Host "  - 웹 접속:       http://localhost:3000" -ForegroundColor Green
+Write-Host "  - GPU 티어:      dev 기본 VIDEO_POSE_TIER=auto (6.0-14) — body 클립이 rtmpose-l/cuda로 분석" -ForegroundColor Green
+Write-Host "                   (기존 s와 동일 비교가 필요하면 .env에 VIDEO_POSE_TIER=standard)" -ForegroundColor Green
 Write-Host "  - 종료:          pwsh -File scripts/dev-stack-down.ps1" -ForegroundColor Green
