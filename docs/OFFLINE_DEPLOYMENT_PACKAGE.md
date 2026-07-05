@@ -1213,10 +1213,50 @@ PRD §8.14에 따라 **추론을 WSL2 Linux 컨테이너로 둘지, 호스트 �
    - **메모리 피크**: `docker stats` 창에서 분석 도중 MEM USAGE 최고값
    - **동시 안정성**: 분석 도는 동안 다른 PC에서 일반 평가 저장·조회가 버벅이는지
    - **(6.0-10) "손목·손" 프로필 클립도 1회 별도 측정**: wholebody는 ~7×·RAM 2.2×라 처리시간이
-     `PROCESSING_TIMEOUT_MS`(기본 5분) 안에 드는지, 피크 메모리가 `.wslconfig` 상한에 여유 있는지,
-     동시 1건 순차 처리에서 큐 적체가 없는지 확인(초과 시 타임아웃·동시성 조정 검토).
+     `jobDeadlineMs`(6.0-12에서 `PROCESSING_TIMEOUT_MS` 5분을 대체 — env
+     `VIDEO_ANALYSIS_JOB_DEADLINE_MS`, 기본 600초) 안에 드는지, 피크 메모리가 `.wslconfig` 상한에 여유
+     있는지, 동시 1건 순차 처리에서 큐 적체가 없는지 확인(초과 시 14-4-2(c)로 조정).
 3. **기록 남기기** — 세 숫자를 인수인계 노트에 적음. 컨테이너로 충분하면(메모리 안 터지고 처리시간 납득)
    **아무것도 바꾸지 않고 그대로 유지**.
+
+#### 14-4-2. 6.0-12 운영 잔여 런북 — 첫 6.1.x+ 배포 세션에서 a→b→c 순서로 (30분~1시간)
+
+6.0-12(타임아웃 일관화+GPU 토글)·6.0-13/14(GPU 실측·l 티어)는 코드로는 머지됐지만 운영 확인이
+남아 있습니다. **다음 이미지 교체 배포 때 아래를 순서대로** 처리하고 결과를 인수인계 노트에 남기세요.
+
+**전제(빌드 PC)**: v6.1.4 이전에 만든 패키지에는 6.0-12~14가 없습니다. `git pull` 후
+`export-offline-package.ps1` 재실행(가중치는 fetch 완료 상태면 재실행 불필요 — l 포함 4모델 baked,
+이미지 +105MB) → 반입 → `import-images.ps1` → 기존 절차대로 교체·재기동.
+
+**(a) 마이그레이션 0022 적용 확인 — 재기동 직후.** 부팅 시 자동 적용되므로 확인만:
+```powershell
+docker logs wr-prod-app-1 2>&1 | Select-String "migrat|0022"
+docker exec -it wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -c "\d organizations" | Select-String "inference_device"
+docker exec -it wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -c "\d video_analysis_jobs" | Select-String "inference_device"
+```
+통과: 두 테이블에 `inference_device*` 컬럼 존재 + 관리자 콘솔 "추론 디바이스" 탭에서 저장 동작.
+(컨테이너 이름은 `docker ps`로 확인.)
+
+**(b) 손목 클립 "분석 실패" 해소 확인.** v6.0.0에서 실패했던 조건 재현: "손목·손" 프로필로 1~2분
+실 클립 업로드 → 분석. 예전 증상은 ~2분에 클라가 "분석 실패(processing)" 표시(폴링 120초 상한이
+wholebody CPU 추론보다 먼저 포기). 통과: **"분석 실패" 없이 review_pending(제안 검토)까지 완주** +
+실행 배지(CPU) 표시. 실패 시 `docker logs`에서 error_code 확인 후 (c)에서 deadline 조정.
+
+**(c) jobDeadlineMs 최종값 확정 — 운영 실측 기반.** 기본 600초는 dev 추정치이므로 compose CPU 제한이
+걸린 실제 조건에서 잽니다:
+```powershell
+docker cp C:\temp\clip.mp4 wr-prod-app-1:/tmp/clip.mp4      # (b)의 클립 재사용 가능
+docker exec -e POSE_MODELS_DIR=/app/services/pose-inference/models wr-prod-app-1 `
+  python /app/pose-inference/bench_pose.py --model wholebody --input /tmp/clip.mp4 --max-frames 200
+```
+`totalMsPerFrame.mean`으로 계산: **예상 처리시간 ≈ ms/frame × (클립 분수×300) ÷ 1000 × 1.5**
+(5fps 샘플링, ×1.5는 디코드·JSON·feature 오버헤드 — dev 실측 프레임당 +15~25ms 근거).
+예: 60ms/frame·2분 클립 → 60×600÷1000×1.5 ≈ 54초 → 기본 600초 충분.
+- 계산×2 여유가 600초를 넘으면 `.env.production`의 `VIDEO_ANALYSIS_JOB_DEADLINE_MS` 상향
+  (compose `environment:`에 `${VIDEO_ANALYSIS_JOB_DEADLINE_MS:-600000}` 나열 필수 — 14-0 env 미전달 함정).
+- **일괄 업로드 패턴(분석당 6~8클립) 점검**: 직렬 큐라 마지막 클립 대기 ≈ (클립 수−1)×클립당 시간.
+  이것이 `VIDEO_ANALYSIS_QUEUE_WAIT_MS`(기본 10분) 안에 드는지 같이 계산·기록.
+- GPU를 나중에 설치하면 같은 명령에 `--device cuda`만 붙여 GPU 기준으로 재산정(14-1b 참고).
 
 ### 14-5. 에어갭 추론 동작 검증
 

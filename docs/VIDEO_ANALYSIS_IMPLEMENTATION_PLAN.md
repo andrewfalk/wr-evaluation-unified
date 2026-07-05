@@ -283,8 +283,9 @@
     enum·`OrgInferenceSettings`). admin `GET/PATCH /api/admin/org-settings`(org 없는 admin 403, GPU는 python
     probe). AdminConsoleModal "추론 디바이스" 탭. 검토 UI 공정별 실행 배지(GPU/CPU/CPU폴백). 검증: 서버 558·클라
     791 통과·py_compile·build·lint 0.
-  - [ ] **운영(실환경·미실행)**: `npm run migrate`(0022) · 라이브 검증으로 손목 클립 재현(분석 실패 해소 확인) ·
-    GPU 장착 PC에서 auto→cuda 실측(처리시간 단축). bench(`bench_pose.py --model wholebody`)로 jobDeadlineMs 최종값 확정.
+  - [ ] **운영(실환경·미실행)**: 0022 적용 확인 · 손목 클립 재현(분석 실패 해소 확인) · bench로 jobDeadlineMs
+    최종값 확정 — **절차는 `OFFLINE_DEPLOYMENT_PACKAGE.md` §14-4-2 런북(a→b→c)** 참고. GPU auto→cuda 실측은
+    dev에서 6.0-13으로 선행 완료(서버 GPU 설치 시 §14-1b로 활성).
 - [~] **6.0-13 GPU 실측 0단계 (dev RTX 4060) — A안(모델 업그레이드) 판단용 벤치**. 6.0-12에서 EP만 CUDA로
   바꿔서는 이득이 없었음(모델이 작아 프레임당 고정 비용이 지배) → "상위 body 모델 GPU가 현행 CPU와 동급/이상인가"
   + "현행 wholebody GPU가 deadline(600s)에 충분한가"를 실측. 운영 코드·manifest 무수정(bench_pose.py만).
@@ -336,8 +337,26 @@
     fail-fast) + 워커 spawn `--pose-tier` 전달. DB·contracts·UI 무변경(티어는 modelVersion으로 recipe/
     analysisBundleVersion에 자동 기록). 테스트: config 4케이스 + **mixed-tier fusion fail-closed**(s와
     body-l 혼합 → RECIPE_AGGREGATE_MISMATCH — 의도된 차단, 발생 시 해당 클립 재분석으로 해소) — 서버 537 통과.
-  - [ ] **운영(실환경·미실행)**: 에어갭 이미지 재빌드(+105MB) 후 GPU 서버에서 `VIDEO_POSE_TIER=auto` 활성.
-    B2 gold 검증은 최종 채택 티어(l) 기준으로 수행.
+  - [x] **dev 라이브 종단 검증(2026-07-05)**: dev-stack 스크립트에 `VIDEO_POSE_TIER=auto` 기본값 반영 후
+    실 업로드·분석 — body 클립 2건 `rtmlib-0.0.15/body-l`·`performance-l`·deviceUsed=cuda, 손목 클립은
+    wholebody·cuda(tier 무관, 설계대로). keypoints artifacts로 확인.
+  - [ ] **운영(실환경·미실행)**: 에어갭 이미지 재빌드(+105MB) 후 GPU 서버에서 `VIDEO_POSE_TIER=auto` 활성
+    (§14-1b). 배포 세션 런북은 `OFFLINE_DEPLOYMENT_PACKAGE.md` §14-4-2. B2 gold 검증은 최종 채택 티어(l) 기준.
+- [ ] **6.0-15 det 빈도 감소 스파이크 — 착수 예정(2026-07-05 사용자 우선순위 상향, B안 1순위)**. 트리거:
+  손목 클립 체감 지연 실측 확인. **진단(dev 실측)**: 손목·손 프로필은 20fps 샘플링인데 30fps 원본에서 정수
+  step=round(30/20)=1로 **전 프레임 처리**(실례: 75s 클립 2,263프레임 → 2분+). 이 조건에선 GPU pose(12ms)보다
+  **det 18ms가 지배 비용**(클립당 det만 ~41s) + overlay JPEG 저장(`OVERLAY_FRAMES=true`, 2,263장)도 가산.
+  촬영 통제(작업자 1~2명) 전제라 det 품질 요구 낮음 — 6.0-13 결정 참조.
+  - **설계 방향**: ① det를 N샘플프레임당 1회(예: 초당 1회) + 사이 프레임은 각 트랙의 pose 키포인트 역산
+    박스(+마진 10~20%)를 pose 입력으로. **trackId는 사이 프레임에서 매칭이 아니라 상속**(역산 박스는 정의상
+    그 트랙의 것 — IoU 매칭은 det 재동기화 프레임에서만, 역산박스↔det박스는 모양이 달라 임계 별도 조정 필요.
+    실패 모드: ID 신규발급=대상 데이터 단절, 2인 근접 시 ID 스왑=무성 오염). ② pose 평균 score 임계 미달 시
+    해당 박스 폐기+다음 프레임 det 강제(퇴장/드리프트 안전장치). ③ `detIntervalFrames`는 feature_config
+    (기본 1=현행 무변경, 6.0-14식 opt-in 롤아웃) + **preprocessConfigHash에 포함**(재현성).
+  - **별도 항목(같은 스파이크에서 수치만 확보)**: step 반올림 보정(20fps 요청이 30fps 원본에서 30fps로
+    처리되는 1.5× 낭비 — step 내림이면 15fps) — 손목 반복수 Nyquist 민감도 검증 전제라 산출값 영향 실측 후 결정.
+  - **검증 필수**: 동일 클립 detInterval 1 vs N 키포인트 시계열 편차·반복수 일치, **2인 클립 트랙ID 연속성**
+    (스왑/신규발급 0), target-track 매핑 불변, wholebody·body 양쪽. 기대효과: 손목 클립 2분+ → 40s~1분.
 
 ---
 
