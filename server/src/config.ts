@@ -211,6 +211,16 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
         // recipe 미확정(가중치 sha 없음 → status='unverified')인데도 apply를 허용할지(fail-closed 기본 false).
         // dev/test/fixture 전용 단일 노브(6.0-9). 운영(에어갭 baked 이미지)에선 절대 켜지 않는다.
         allowUnverifiedRecipe: bool(env, 'VIDEO_ANALYSIS_ALLOW_UNVERIFIED_RECIPE', false),
+        // pose 모델 티어(6.0-14): standard(기본, rtmpose-s=기존 동작) | auto(l/CUDA 세션 2단 검증 통과 시에만
+        // rtmpose-l, 실패 시 tier만 강등 — CPU-l 경로 없음). 'high'(l+cuda 강제)는 dev CLI 디버그 전용이라
+        // 운영 env로 들어오면 설정 실수 — 조용한 강등 대신 기동 실패로 드러낸다(fail-fast).
+        poseTier: (() => {
+          const tier = optional(env, 'VIDEO_POSE_TIER', 'standard');
+          if (tier !== 'standard' && tier !== 'auto') {
+            throw new Error(`VIDEO_POSE_TIER must be 'standard' or 'auto' ('high' is dev CLI-only), got '${tier}'`);
+          }
+          return tier as 'standard' | 'auto';
+        })(),
         // 전체 job 처리 deadline(ms, 6.0-12). 추론(infer_clip+feature_calc) subprocess의 합이 이를 넘지 않도록
         // 엄격 분배하고, sweepStale·클라이언트 폴링 상한이 모두 이 값에서 파생된다(단일 진실원천).
         // 손목(wholebody)은 CPU에서 1~2분 클립도 오래 걸려 기본 600000(10분). GPU면 더 줄여도 됨(§Range).

@@ -47,6 +47,19 @@ python -m venv .venv
 어댑터로 후속 교체(§8.14). sha는 `sourceArchiveSha256`(다운로드 zip)·`onnxSha256`(실행 .onnx, recipe에
 들어가는 값)으로 분리. 가중치 미반입(dev)이면 `weightsComplete=false` → recipe `status='unverified'`.
 
+### body 상위 티어 (6.0-14, `--pose-tier`)
+`infer_clip.py --pose-tier standard|high|auto` (기본 standard=기존 rtmpose-s 그대로, **body 전용** —
+wholebody는 경고 후 무시):
+
+- `auto`(운영 권장, GPU 서버): **l 추정기 자체를 cuda로 build해 2단 검증(세션 EP + 더미 워밍업)** 통과 시에만
+  `pose-body-l`(rtmpose-l) 사용. 실패·미반입 시 tier만 s로 강등하고 `--device` 계약은 유지
+  (`--device cuda`면 s/cuda, CPU 폴백 없음). **CPU-l 경로는 어떤 조합에서도 없음**(CPU에서 l은 s 대비 ~40% 느림).
+- `high`(dev 디버그 전용): l+cuda 강제 — 불가 시 에러 exit. 운영 env(`VIDEO_POSE_TIER`)는 standard|auto만 허용.
+- **운영 디버깅 — "지금 s인지 l인지"**: tier 강등 사유는 keypoints JSON에 남지 않고 stderr 경고뿐이다
+  (`fallbackReason`은 device 폴백 전용). 사용 모델 확인은 keypoints/recipe의 `modelName`
+  (`rtmlib:body:performance-l`)·`modelVersion`(`rtmlib-…/body-l`)·`poseSha256`으로 한다.
+- 근거·실측: `docs/VIDEO_GPU_BENCH_6013.md`(l/cuda ≈ s/cpu 속도, 실작업영상 정성비교 l 전지표 우위).
+
 ### 에어갭 반입·컨테이너화 (6.0-9 PR-B)
 운영(에어갭)은 가중치를 이미지에 굽는다. dev는 rtmlib가 `~/.cache`로 자동 다운로드(폴백).
 `model_loader.build_body()`가 분기: `POSE_MODELS_DIR`(미설정 시 `./models`)에 manifest의 `.onnx`가

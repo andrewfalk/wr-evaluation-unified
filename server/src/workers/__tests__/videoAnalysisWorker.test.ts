@@ -9,7 +9,7 @@ beforeAll(() => { videoCfg.uploadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wk
 vi.mock('../../config', () => ({
   default: {
     video: {
-      fixtureDir: '/fx', scriptsDir: '/s', python: '/p',
+      fixtureDir: '/fx', scriptsDir: '/s', python: '/p', poseTier: 'standard',
       get uploadDir() { return videoCfg.uploadDir; },
       get retentionPolicy() { return videoCfg.retentionPolicy; },
       get overlayFrames() { return videoCfg.overlayFrames; },
