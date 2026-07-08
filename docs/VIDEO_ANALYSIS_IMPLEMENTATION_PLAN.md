@@ -376,7 +376,7 @@
     테스트 11종(단절 기전 고정 포함) ALL PASS. 보고서 §실작업 클립 라이브 검증.
   - [ ] **잔여**: B2 게이트에서 gold 라벨 기준 반복수 참값 재확인. 운영 활성 결정(§14-1c — compose
     passthrough·롤백 절차 반영됨).
-- [~] **6.0-16 어깨 반복 시간합 계산기 — 구현·검증 완료, 머지 대기(브랜치 `feat/video-6.0-16-rep-band-hours`)**.
+- [x] **6.0-16 어깨 반복 시간합 계산기 — 구현·검증·머지 완료(PR #70, 브랜치 `feat/video-6.0-16-rep-band-hours`)**.
   트리거: 사용자 테스트 중 발견 — `repetitiveMediumHours`/`repetitiveFastHours`(상완거상 반복 4~14회·15회↑
   시간합)가 계약·모듈 필드·집계·환산까지 전부 배선돼 있는데 계산기만 없었음(mock만 동작).
   - [x] **밴딩 설계**: 기존 `repetition_count`의 half-swing 세그먼트를 2개씩 묶어 사이클로 취급, 사이클
@@ -402,8 +402,43 @@
     `repetitiveMediumHours→2h/일`·`FastHours→0.5h/일`(MOCK_VALUES 그대로) + Left/Right 4개 참고 후보 정상
     표시. profile을 자세시간(posture-basic)으로 바꾸면 6키 전부(기존 `shoulderRepetitionRate` 포함) 미표시,
     `overheadHours`는 그대로 유지(과잉 차단 아님 확인). 콘솔 에러 0.
-  - [ ] **잔여**: PR 리뷰·머지 대기. 파라미터(minAmplitudeDeg 등, shoulderRepetitionRate와 동일 시작값)는
-    B2 미검증 잠정. 후속 6.0-17(공정별 값 UI 표시)은 이 PR 머지 후 별도 브랜치로 진행.
+  - [ ] **잔여**: 파라미터(minAmplitudeDeg 등, shoulderRepetitionRate와 동일 시작값)는 B2 미검증 잠정.
+- [~] **6.0-17 공정별 값 표시 — 구현·검증 완료, 머지 대기(브랜치 `feat/video-6.0-17-per-process-display`)**.
+  트리거: 사용자 확인 — 결과 패널이 직업 단위 공정 가중합 1개 값만 보여줘 공정(작업)별 값 병기 요청.
+  - [x] **기여값 helper 단일화**: `videoAggregate.js`에 `contributionValue(featureKey, value, share)` 신설 —
+    weightedSum 계열만 `value×share/100`(집계와 동일 산식, 재구현 금지) 반환하고 weightedAvg·max·or·pick은
+    지분 개념이 없어 null(호출측이 공정 원값으로 폴백). `VideoAnalysisStep.jsx`에 `effectiveShare(mode,
+    shiftSharePercent)` 신설(`absolutePerDay`→100, `shareWeighted`→점유율 그대로) — `buildJobFeatures`
+    (집계)와 서브행 렌더가 이 하나의 함수로 항상 같은 share를 쓰도록 통일.
+  - [x] **provenance 영속화**: `VideoAnalysisDataSchema`에 optional `processFeatureAggregationMode`
+    (`'shareWeighted'|'absolutePerDay'`) 신설 — 기존 `absolutePerDay`는 `buildJobFeatures` 호출 인자일
+    뿐 저장되지 않아 리로드 후 서브행 기여값 재계산이 틀어지는 문제를 해결. `commitAnalysis`가
+    분석 소스(mock/서버) 기준으로 저장. **구 데이터(필드 부재)는 기여값 서브행 생략, 원값만 + fallback
+    안내문구**(fail-safe — 잘못된 합산 표시 금지).
+  - [x] **job-scope 서브행**: 직업 단위 제안(무릎·어깨) 각 행 아래 공정별 분해 추가 — 기여값(원값) 병기,
+    서브행 합 = 직업 합계 정합(실측: 1.2+0.8=2.0 등 오차 없이 일치).
+  - [x] **flat 참고 후보 재구성**: featureKey별로 그룹핑해 헤더 1개 + 공정별 값 서브행으로 표시(이전엔
+    공정마다 라벨이 중복 노출됐음 — 어깨·팔꿈치·손목 반복/peak + 신규 Left/Right 4키 전부 대상).
+    `candidateHoursPerDay`(비율×활동분/60, 시간/일) 신규 — unit이 아니라 **featureKey로 명시 분기**한
+    `RATIO_HOURS_CANDIDATE_KEYS`(Left/Right 4키만) 전용(리뷰 반영: `vibrationToolUseDurationCandidate`도
+    unit은 같은 hours_per_day지만 Python 계산 블록이 없는 mock 전용 placeholder라 value가 ratio가
+    아님 — unit만으로 분기하면 잘못 부풀려짐, 회귀 테스트로 고정). `formatCandidateSubValue`가 이 분기
+    기준으로 시간/일·회/분·°·원값을 나눔. `flatCandidateLabel`에 Left/Right 카테고리 라벨 추가(공정마다
+    값이 달라 단일 숫자로 대표 불가 — 라벨은 카테고리명만, 숫자는 서브행에).
+  - [x] **테스트**: `contributionValue`·`effectiveShare`·`candidateHoursPerDay`·`formatCandidateSubValue`
+    단위 테스트(vibrationToolUseDurationCandidate 미환산 회귀 포함) + `processFeatureAggregationMode`
+    계약 테스트(optional·enum 제약·**JSON 직렬화 왕복 후 필드 보존** 확인) + 기존
+    `buildJobFeatures(absolutePerDay)` 테스트를 신규 옵션명으로 갱신. root 836/836·server 544/544 PASS.
+    `build:web`·`lint`(0 errors) 통과.
+  - [x] **dev 라이브(Playwright, mock intranet 서버)**: 같은 직업에 공정 2개(60%/240분, 40%/180분,
+    둘 다 상지반복 프로필) 구성 → job-scope 서브행 기여값이 정확히 산술 일치(예: repetitiveMediumHours
+    공정1 1.2h+공정2 0.8h=직업합계 2h), flat 후보도 공정별 다른 활동시간 기준 시간/일 값이 각각 표시.
+    콘솔 에러 0. **리로드 영속성**: mock-intranet-server가 `/api/patients` CRUD 미구현(워크스페이스
+    스냅샷만 지원)+intranet 모드는 autosave 비활성이라 "테스트" 픽스처 데이터 자체가 서버에 저장되지
+    않음(기존 dev 도구 한계, 이번 변경과 무관) — 브라우저 새로고침 E2E 대신 **JSON 직렬화 왕복 스키마
+    테스트**로 대체 검증(저장 시 최종 경로와 동일한 stringify→parse 후 필드·값 보존 확인).
+  - [ ] **잔여**: PR 리뷰·머지 대기. 실 서버(PostgreSQL 백엔드) 통한 완전한 브라우저 리로드 E2E는
+    미실행 — 필요 시 Tier-3 스택(`reference_tier3_verify_stack`)으로 별도 확인 권장.
 
 ---
 

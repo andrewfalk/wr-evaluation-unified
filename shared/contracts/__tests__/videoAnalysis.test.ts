@@ -272,6 +272,33 @@ describe('VideoAnalysisDataSchema (§8.11)', () => {
     expect(r.appliedInputs).toEqual([]);
     expect(r.settings.retentionMode).toBe('privacy_first');
   });
+
+  it('6.0-17: processFeatureAggregationMode는 optional — 구 데이터(필드 부재)도 통과(undefined)', () => {
+    const r = VideoAnalysisDataSchema.parse({});
+    expect(r.processFeatureAggregationMode).toBeUndefined();
+  });
+
+  it('6.0-17: processFeatureAggregationMode는 shareWeighted|absolutePerDay만 허용', () => {
+    expect(VideoAnalysisDataSchema.parse({ processFeatureAggregationMode: 'shareWeighted' }).processFeatureAggregationMode).toBe('shareWeighted');
+    expect(VideoAnalysisDataSchema.parse({ processFeatureAggregationMode: 'absolutePerDay' }).processFeatureAggregationMode).toBe('absolutePerDay');
+    expect(() => VideoAnalysisDataSchema.parse({ processFeatureAggregationMode: 'other' })).toThrow();
+  });
+
+  it('6.0-17: JSON 직렬화 왕복(저장→리로드 재현) 후에도 processFeatureAggregationMode·processFeatures가 그대로 보존된다', () => {
+    // 실제 저장 경로(로컬스토리지/서버 JSONB)는 JSON.stringify → 나중에 JSON.parse → 스키마 재검증이라,
+    // 이 왕복이 6.0-17 신규 필드에 값 유실을 일으키지 않는지가 "리로드 후 영속" 요구의 핵심 리스크다.
+    const original = VideoAnalysisDataSchema.parse({
+      processes: [{ id: 'p1', sharedJobId: 'j1', name: '공정1', shiftSharePercent: 60 }],
+      processFeatures: [{ processId: 'p1', features: { overheadHours: {
+        kind: 'numeric', value: 1.8, unit: 'hours_per_day', confidence: 0.82,
+        autoSuggestAllowed: true, requiresManualReview: false, warnings: [],
+      } } }],
+      processFeatureAggregationMode: 'shareWeighted',
+    });
+    const roundTripped = VideoAnalysisDataSchema.parse(JSON.parse(JSON.stringify(original)));
+    expect(roundTripped.processFeatureAggregationMode).toBe('shareWeighted');
+    expect(roundTripped.processFeatures[0].features.overheadHours.value).toBe(1.8);
+  });
 });
 
 describe('VIDEO_FEATURE_TARGETS ↔ FeatureKey consistency (§8.10.2-1)', () => {
