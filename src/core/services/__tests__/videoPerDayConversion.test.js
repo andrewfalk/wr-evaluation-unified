@@ -112,6 +112,47 @@ describe('convertClipFeaturesToPerDay', () => {
     expect(r.features.squatDuration).toBeDefined();
     expect(r.features.trunkPostureG).toBeUndefined();
   });
+
+  it('6.0-16: sideKeys 요청 경계 — allowedFeatureKeys가 main/sideKey를 독립적으로 걸러낸다(raw엔 6키 전부 존재)', () => {
+    // Python은 profile을 모른 채 6키를 항상 raw emit할 수 있음(§"검증된 사실") — 여기(allowedFeatureKeys)가
+    // 실질적 강한 보장 지점. raw clipFeatureSet에 6키가 모두 있어도 allowedFeatureKeys가 지정한 만큼만 통과.
+    const cf = clipSet({
+      repetitiveMediumHours: ratio(0.2),
+      repetitiveFastHours: ratio(0.1),
+      repetitiveMediumHoursLeft: ratio(0.15),
+      repetitiveMediumHoursRight: ratio(0.2),
+      repetitiveFastHoursLeft: ratio(0.05),
+      repetitiveFastHoursRight: ratio(0.1),
+    });
+    const allSix = [
+      'repetitiveMediumHours', 'repetitiveFastHours',
+      'repetitiveMediumHoursLeft', 'repetitiveMediumHoursRight',
+      'repetitiveFastHoursLeft', 'repetitiveFastHoursRight',
+    ];
+    // main 2키만 요청 → sideKeys는 미출력.
+    const mainOnly = convertClipFeaturesToPerDay(cf, 200, { allowedFeatureKeys: ['repetitiveMediumHours', 'repetitiveFastHours'] });
+    expect(mainOnly.features.repetitiveMediumHours).toBeDefined();
+    expect(mainOnly.features.repetitiveFastHours).toBeDefined();
+    expect(mainOnly.features.repetitiveMediumHoursLeft).toBeUndefined();
+    expect(mainOnly.features.repetitiveMediumHoursRight).toBeUndefined();
+    expect(mainOnly.features.repetitiveFastHoursLeft).toBeUndefined();
+    expect(mainOnly.features.repetitiveFastHoursRight).toBeUndefined();
+    // sideKey만 요청 → main은 미출력(같이 emit 금지).
+    const sideOnly = convertClipFeaturesToPerDay(cf, 200, { allowedFeatureKeys: ['repetitiveMediumHoursLeft'] });
+    expect(sideOnly.features.repetitiveMediumHoursLeft).toBeDefined();
+    expect(sideOnly.features.repetitiveMediumHours).toBeUndefined();
+    expect(sideOnly.features.repetitiveMediumHoursRight).toBeUndefined();
+    // 둘 다 요청 → 요청된 키만 전부 출력.
+    const both = convertClipFeaturesToPerDay(cf, 200, { allowedFeatureKeys: allSix });
+    for (const k of allSix) expect(both.features[k]).toBeDefined();
+    // sideKey는 candidate(raw ratio 보존) — per-day 환산 없이 value 그대로.
+    expect(both.features.repetitiveMediumHoursLeft).toMatchObject({ kind: 'candidate', value: 0.15 });
+    expect(both.features.repetitiveMediumHoursRight).toMatchObject({ kind: 'candidate', value: 0.2 });
+    // main은 auto(posture_ratio→hours_per_day 환산): 0.2 × 200min / 60 ≈ 0.6667h
+    expect(both.features.repetitiveMediumHours.kind).toBe('numeric');
+    expect(both.features.repetitiveMediumHours.unit).toBe('hours_per_day');
+    expect(both.features.repetitiveMediumHours.value).toBeCloseTo((0.2 * 200) / 60, 5);
+  });
 });
 
 describe('convertClipFeaturesToPerDay — confidence 게이팅 (PR D3a, §8.8)', () => {

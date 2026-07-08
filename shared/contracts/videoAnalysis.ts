@@ -24,6 +24,10 @@ export const FeatureKeySchema = z.enum([
   'overheadHours',
   'repetitiveMediumHours',
   'repetitiveFastHours',
+  'repetitiveMediumHoursLeft', // 6.0-16: 좌측 medium 밴드(4~15회/분) 시간 비율 candidate
+  'repetitiveMediumHoursRight', // 6.0-16: 우측 medium 밴드 시간 비율 candidate
+  'repetitiveFastHoursLeft', // 6.0-16: 좌측 fast 밴드(15회/분↑) 시간 비율 candidate
+  'repetitiveFastHoursRight', // 6.0-16: 우측 fast 밴드 시간 비율 candidate
   'cyclesPerDay',
   'cycleSeconds',
   'trunkPostureG',
@@ -291,6 +295,12 @@ export const VIDEO_FEATURE_TARGETS: Record<
   overheadHours: { moduleId: 'shoulder', targetField: 'overheadHours', unit: 'hours_per_day', mode: 'auto' },
   repetitiveMediumHours: { moduleId: 'shoulder', targetField: 'repetitiveMediumHours', unit: 'hours_per_day', mode: 'auto' },
   repetitiveFastHours: { moduleId: 'shoulder', targetField: 'repetitiveFastHours', unit: 'hours_per_day', mode: 'auto' },
+  // 6.0-16: 좌/우 개별 표시용(참고 후보만 — 모듈 적용값은 위 main 2키의 max(좌,우)). raw ratio 보존
+  // (candidate는 convertClipFeaturesToPerDay가 per-day 환산 없이 그대로 통과 — UI가 표시 시점에 시간/일 계산).
+  repetitiveMediumHoursLeft: { moduleId: 'shoulder', targetField: null, unit: 'hours_per_day', mode: 'candidate' },
+  repetitiveMediumHoursRight: { moduleId: 'shoulder', targetField: null, unit: 'hours_per_day', mode: 'candidate' },
+  repetitiveFastHoursLeft: { moduleId: 'shoulder', targetField: null, unit: 'hours_per_day', mode: 'candidate' },
+  repetitiveFastHoursRight: { moduleId: 'shoulder', targetField: null, unit: 'hours_per_day', mode: 'candidate' },
   vibrationToolUseDurationCandidate: { moduleId: 'shoulder', targetField: null, unit: 'hours_per_day', mode: 'candidate' },
   // 6.0-11 어깨·팔꿈치 반복빈도(cycles/min) — 영상이 직접 재는 intrinsic 값, 모듈 자동입력 없이 candidate.
   // 팔꿈치 모듈은 videoMappingConfig가 없어 flat "참고 후보"로 표시(elbow targetField=null).

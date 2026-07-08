@@ -376,6 +376,34 @@
     테스트 11종(단절 기전 고정 포함) ALL PASS. 보고서 §실작업 클립 라이브 검증.
   - [ ] **잔여**: B2 게이트에서 gold 라벨 기준 반복수 참값 재확인. 운영 활성 결정(§14-1c — compose
     passthrough·롤백 절차 반영됨).
+- [~] **6.0-16 어깨 반복 시간합 계산기 — 구현·검증 완료, 머지 대기(브랜치 `feat/video-6.0-16-rep-band-hours`)**.
+  트리거: 사용자 테스트 중 발견 — `repetitiveMediumHours`/`repetitiveFastHours`(상완거상 반복 4~14회·15회↑
+  시간합)가 계약·모듈 필드·집계·환산까지 전부 배선돼 있는데 계산기만 없었음(mock만 동작).
+  - [x] **밴딩 설계**: 기존 `repetition_count`의 half-swing 세그먼트를 2개씩 묶어 사이클로 취급, 사이클
+    온셋 간격(다음 사이클 시작 turning-point까지)을 순간빈도 r=60000/간격ms로 medium(4≤r<15)/fast(r≥15)
+    분류·귀속(마지막 사이클은 자체 구간). 순수함수 `band_ratios_from_segments`로 분리(feature_calc.py) —
+    버스트-휴지 워크스루(1s 사이클×2+9s 휴지)로 "medium 100% 아님(fast 소량+medium 다수)" 정확히 검증.
+    좌/우 독립 계산 후 main 2키(mode auto, 기존 계약 키)는 밴드별 독립 max(좌,우), 신규 Left/Right 4키
+    (mode candidate)는 raw ratio 그대로. Nyquist(`minFpsForReliableRate:10`) 미달 시 6키 전부 미방출
+    (경고 대체 없음). feature_config version `-f`→`-g`.
+  - [x] **프로필 게이트(3곳)**: 신규 `videoFeatureProfiles.js`(REPETITION_* 상수 단일 source로 이관)의
+    `REPETITION_BAND_FEATURE_KEYS`를 ①`videoAnalysisRun.js`(공정별 requestedFeatures 재필터 — 요청 생성
+    지점부터 차단) ②`videoMock.js`(`generateMockFeatures` profile 게이트) ③`VideoAnalysisStep.jsx`
+    (`commitAnalysis` candidate 필터, defense-in-depth) 세 곳에 적용. **주의**: 서버 워커(`feature_calc.py`
+    호출부)는 profile/requestedFeatures를 전달하지 않아 raw `result_features`는 profile 무관 값을 포함할 수
+    있음(기존 `shoulderRepetitionRate`와 동일 특성) — 실질적 강한 보장은 `convertClipFeaturesToPerDay`의
+    `allowedFeatureKeys`.
+  - [x] **테스트**: Python(band_ratios 순수함수 5종+end-to-end 3종+canonical schema 검증) ALL PASS·
+    클라(convertClipFeaturesToPerDay 요청교집합·generateMockFeatures profile 게이트·공정별 요청필터·candidate
+    파이프라인) root 825/825·server 544/544 PASS. `build:web` 통과.
+  - [x] **실클립 sanity**: 실 재활치료 클립(`--pose-variant body --fps 12`) — `shoulderRepetitionRate`
+    0.41회/분(half-swing 1개, 미완성 사이클)에 밴드 6키 전부 0.0으로 정합 확인, canonical schema VALID.
+  - [x] **dev 라이브(Playwright, mock intranet 서버)**: 공정 profile=상지반복(10~15fps)·share=100% →
+    `repetitiveMediumHours→2h/일`·`FastHours→0.5h/일`(MOCK_VALUES 그대로) + Left/Right 4개 참고 후보 정상
+    표시. profile을 자세시간(posture-basic)으로 바꾸면 6키 전부(기존 `shoulderRepetitionRate` 포함) 미표시,
+    `overheadHours`는 그대로 유지(과잉 차단 아님 확인). 콘솔 에러 0.
+  - [ ] **잔여**: PR 리뷰·머지 대기. 파라미터(minAmplitudeDeg 등, shoulderRepetitionRate와 동일 시작값)는
+    B2 미검증 잠정. 후속 6.0-17(공정별 값 UI 표시)은 이 PR 머지 후 별도 브랜치로 진행.
 
 ---
 

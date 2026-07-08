@@ -99,6 +99,35 @@ describe('generateMockFeatures', () => {
     expect(hw.wristRepetitionRate.autoSuggestAllowed).toBe(false);
     expect(() => VideoFeatureValueSchema.parse(hw.wristFlexionPeakAngle)).not.toThrow();
   });
+
+  it('6.0-16: 어깨 반복 밴드별 시간합(main 2키+Left/Right 4키)은 repetition-upper-limb에서만(hand-wrist도 제외)', () => {
+    const req = [
+      'overheadHours', 'repetitiveMediumHours', 'repetitiveFastHours',
+      'repetitiveMediumHoursLeft', 'repetitiveMediumHoursRight',
+      'repetitiveFastHoursLeft', 'repetitiveFastHoursRight',
+    ];
+    // posture-basic·hand-wrist 둘 다 제외(REPETITION_PROFILES와 달리 hand-wrist도 불허 — 별도 판정).
+    for (const profile of ['posture-basic', 'hand-wrist']) {
+      const map = generateMockFeatures(req, profile);
+      expect(map.repetitiveMediumHours).toBeUndefined();
+      expect(map.repetitiveFastHours).toBeUndefined();
+      expect(map.repetitiveMediumHoursLeft).toBeUndefined();
+      expect(map.repetitiveMediumHoursRight).toBeUndefined();
+      expect(map.repetitiveFastHoursLeft).toBeUndefined();
+      expect(map.repetitiveFastHoursRight).toBeUndefined();
+    }
+    // repetition-upper-limb → 포함. main 2키는 auto(numeric), sideKeys는 candidate.
+    const rep = generateMockFeatures(req, 'repetition-upper-limb');
+    expect(rep.repetitiveMediumHours.kind).toBe('numeric');
+    expect(rep.repetitiveMediumHours.unit).toBe('hours_per_day');
+    expect(rep.repetitiveMediumHoursLeft.kind).toBe('candidate');
+    expect(rep.repetitiveMediumHoursLeft.autoSuggestAllowed).toBe(false);
+    for (const k of ['repetitiveMediumHours', 'repetitiveFastHours',
+      'repetitiveMediumHoursLeft', 'repetitiveMediumHoursRight',
+      'repetitiveFastHoursLeft', 'repetitiveFastHoursRight']) {
+      expect(() => VideoFeatureValueSchema.parse(rep[k])).not.toThrow();
+    }
+  });
 });
 
 describe('gateFeaturesByViewpoint (6.0-10 mock 시점 하드 게이트)', () => {

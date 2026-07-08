@@ -113,6 +113,21 @@ describe('feature_config.json ↔ contract cross-check (drift guard)', () => {
     // feature_config에 선언된 키는 schema enum에도 있어야 한다(Python 산출이 schema 검증 통과).
     for (const k of Object.keys(featureConfig.features)) expect(schemaKeys).toContain(k);
   });
+
+  it('6.0-16: feature_config의 sideKeys(파생 Left/Right)도 FeatureKey·schema enum 양쪽에 등록돼야 한다', () => {
+    const schema = JSON.parse(readFileSync(path.join(svc, 'schema/clip_features.schema.json'), 'utf-8'));
+    const schemaKeys: string[] = schema.properties.features.propertyNames.enum;
+    const contractKeys = FeatureKeySchema.options as string[];
+    const featuresWithSideKeys = Object.values(featureConfig.features as Record<string, { sideKeys?: Record<string, string> }>)
+      .filter((f) => f.sideKeys);
+    expect(featuresWithSideKeys.length).toBeGreaterThan(0); // drift로 sideKeys가 통째로 사라지는 것도 차단
+    for (const f of featuresWithSideKeys) {
+      for (const sideKey of Object.values(f.sideKeys!)) {
+        expect(contractKeys).toContain(sideKey);
+        expect(schemaKeys).toContain(sideKey);
+      }
+    }
+  });
 });
 
 describe('ClipFeatureSetSchema — confidenceBreakdown + quality (PR D3a, §8.8)', () => {
@@ -155,5 +170,32 @@ describe('ClipFeatureSetSchema — confidenceBreakdown + quality (PR D3a, §8.8)
     expect(() => ClipFeatureSetSchema.parse({ ...fixture, quality: { ...validQuality, usableFrameRatio: -0.1 } })).toThrow();
     expect(() => ClipFeatureSetSchema.parse({ ...fixture, quality: { dropRatio: 0.1, sampledFps: 2 } })).toThrow(); // blurMetric 누락
     expect(() => ClipFeatureSetSchema.parse({ ...fixture, quality: { ...validQuality, surprise: 1 } })).toThrow();
+  });
+});
+
+describe('6.0-16 repetitiveMedium/FastHours + Left/Right sideKeys — fixture 직렬화', () => {
+  it('main 2키 + sideKeys 4개가 포함된 clip_features 샘플이 zod ClipFeatureSetSchema를 통과한다', () => {
+    const numeric = (value: number) => ({
+      kind: 'numeric' as const, metric: 'posture_ratio' as const, value, unit: 'ratio' as const,
+      confidence: 0.8, segments: [], warnings: [],
+    });
+    const withSideKeys = {
+      ...fixture,
+      features: {
+        ...fixture.features,
+        repetitiveMediumHours: numeric(0.12),
+        repetitiveFastHours: numeric(0.05),
+        repetitiveMediumHoursLeft: numeric(0.1),
+        repetitiveMediumHoursRight: numeric(0.12),
+        repetitiveFastHoursLeft: numeric(0.05),
+        repetitiveFastHoursRight: numeric(0.02),
+      },
+    };
+    const r = ClipFeatureSetSchema.parse(withSideKeys);
+    expect(r.features.repetitiveMediumHours?.value).toBeCloseTo(0.12, 5);
+    expect(r.features.repetitiveMediumHoursLeft?.value).toBeCloseTo(0.1, 5);
+    expect(r.features.repetitiveMediumHoursRight?.value).toBeCloseTo(0.12, 5);
+    expect(r.features.repetitiveFastHoursLeft?.value).toBeCloseTo(0.05, 5);
+    expect(r.features.repetitiveFastHoursRight?.value).toBeCloseTo(0.02, 5);
   });
 });

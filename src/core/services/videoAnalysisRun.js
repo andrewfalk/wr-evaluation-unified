@@ -7,12 +7,21 @@ import { VIDEO_FEATURE_TARGETS } from '@contracts/index';
 import { createClip, createJob, pollJob } from './videoAnalysisClient';
 import { convertClipFeaturesToPerDay, buildRecipeVersion } from './videoPerDayConversion';
 import { fuseClipFeatureSetsWithEvidence } from './videoViewpointFusion';
+import { REPETITION_BAND_FEATURE_KEYS } from './videoFeatureProfiles';
 
 // 활성 모듈로 매핑되는 featureKey 목록(컴포넌트 헬퍼와 동일 정의 — 순환 import 회피 위해 인라인).
 function requestedFeaturesForModules(activeModules = []) {
   return Object.keys(VIDEO_FEATURE_TARGETS).filter(
     (k) => activeModules.includes(VIDEO_FEATURE_TARGETS[k].moduleId)
   );
+}
+
+// 6.0-16: 어깨 반복 밴드별 시간합(main 2키+Left/Right 4키)은 repetition-upper-limb 공정에서만 요청한다.
+// 활성 모듈 기준 requested는 공정 profile과 무관하게 전역 1회 계산되므로, 여기서 공정별로 한 번 더 걸러
+// posture-basic/hand-wrist 공정이 6키를 requested로 보내지 않도록 한다(요청 생성 지점의 프로필 게이트).
+function requestedFeaturesForProcess(requested, profile) {
+  if (profile === 'repetition-upper-limb') return requested;
+  return requested.filter((k) => !REPETITION_BAND_FEATURE_KEYS.has(k));
 }
 
 /**
@@ -52,6 +61,9 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
       errors.push({ processId: p.id, message: `공정 "${p.name}"에 분석 가능한 클립이 없습니다(영상 업로드 또는 fixture 파일명 필요).` });
       continue;
     }
+    // 6.0-16: 공정 profile 기준으로 어깨 반복 밴드별 시간합 6키를 요청/환산 대상에서 제외(posture-basic·
+    // hand-wrist 공정은 요청하지 않음 — Nyquist gate는 이 게이트의 대체가 아니다).
+    const requestedForProcess = requestedFeaturesForProcess(requested, p.analysisProfile);
     try {
       // 클립별 추론(시점별) → fusionEntries. 하나라도 실패하면 공정 전체 실패 처리.
       const fusionEntries = [];
@@ -68,7 +80,7 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
           serverClipId = clip.clipId;
         }
         const job = await createJob(
-          { clipId: serverClipId, processId: p.id, analysisProfile: p.analysisProfile, requestedFeatures: requested },
+          { clipId: serverClipId, processId: p.id, analysisProfile: p.analysisProfile, requestedFeatures: requestedForProcess },
           { session, settings }
         );
         const done = await pollJob(job.jobId, { session, settings }, pollOpts);
@@ -98,7 +110,7 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
       if (failed) continue;
       // 시점 융합(§8.6.1, intrinsic 단계) → per-day 1회 환산(공정의 다중 시점 클립은 동일 activeMinutesPerDay).
       const { fused, evidenceByFeatureKey: fusionEvidence, suppressedCandidates } = fuseClipFeatureSetsWithEvidence(fusionEntries);
-      const conv = convertClipFeaturesToPerDay(fused, p.activeMinutesPerDay, { allowedFeatureKeys: requested });
+      const conv = convertClipFeaturesToPerDay(fused, p.activeMinutesPerDay, { allowedFeatureKeys: requestedForProcess });
       // analysisJobIds[]로 provenance 운반(D3b — 융합 시 복수 job). jobId는 하위호환(첫 job).
       processFeatures.push({ processId: p.id, jobId: jobIds[0], analysisJobIds: jobIds, features: conv.features });
       // 근거: 환산 evidence(산출식·breakdown·segments) + 융합 evidence(채택/탈락 클립·시점) 병합.

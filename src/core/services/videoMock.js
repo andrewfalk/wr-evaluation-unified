@@ -2,6 +2,9 @@
 // 세로조각을 검증하기 위한 임시 구현 — M2(6.0-5/6.0-6)에서 실제 계산기로 교체된다.
 // 계약(VideoFeatureValue/VIDEO_FEATURE_TARGETS)은 동일하게 유지하므로 교체 시 소비측 무변경.
 import { VIDEO_FEATURE_TARGETS } from '@contracts/index';
+import {
+  REPETITION_FEATURE_KEYS, REPETITION_PROFILES, HAND_WRIST_FEATURE_KEYS, REPETITION_BAND_FEATURE_KEYS,
+} from './videoFeatureProfiles';
 
 // featureKey별 대표 mock 값(결정적 — 테스트 안정성). 단위·종류는 VIDEO_FEATURE_TARGETS 기준.
 const MOCK_VALUES = {
@@ -9,6 +12,12 @@ const MOCK_VALUES = {
   overheadHours: 1.8, // hours/day
   repetitiveMediumHours: 2.0,
   repetitiveFastHours: 0.5,
+  // 6.0-16: candidate는 raw ratio(0~1) 보존(trunkFlexionOver45Duration과 동일 패턴) — 분/일이 아니라
+  // 클립 내 밴드 시간 비율. 좌/우 상이 값으로 UI에서 좌우 분리 확인 용이하게.
+  repetitiveMediumHoursLeft: 0.12,
+  repetitiveMediumHoursRight: 0.18,
+  repetitiveFastHoursLeft: 0.07,
+  repetitiveFastHoursRight: 0.03,
   cyclesPerDay: 1200,
   cycleSeconds: 6,
   neckFlexionOver20HoursPerDay: 1.2,
@@ -27,15 +36,6 @@ const MOCK_VALUES = {
   wristDeviationPeakAngle: 18, // degrees (frontal 클립에서만 노출)
 };
 
-// 반복빈도 feature는 fps가 높은 상지반복/손목 profile에서만 의미 있음(저fps는 Nyquist 언더카운트).
-// 그 외 profile(자세시간)에서는 산출·표시하지 않는다(6.0-11). 단일 source — UI 필터도 이 상수를 쓴다.
-export const REPETITION_FEATURE_KEYS = new Set(['shoulderRepetitionRate', 'elbowRepetitionRate']);
-export const REPETITION_PROFILES = new Set(['repetition-upper-limb', 'hand-wrist']);
-// 손목 feature(반복+굴곡/편위)는 wholebody pose가 필요 → hand-wrist profile에서만 산출(6.0-10).
-export const HAND_WRIST_FEATURE_KEYS = new Set([
-  'wristRepetitionRate', 'wristFlexionPeakAngle', 'wristDeviationPeakAngle',
-]);
-
 // 신뢰도: auto(높음) / auto-review(중간) / candidate(낮음). 결정적 placeholder —
 // 실제 임계값은 6.0-B2 검증으로 확정(§8.9).
 const CONFIDENCE_BY_MODE = { auto: 0.82, 'auto-review': 0.7, candidate: 0.5 };
@@ -51,6 +51,10 @@ export const CANDIDATE_REASONS = {
   wristRepetitionRate: '손목 굽힘 반복 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
   wristFlexionPeakAngle: '손목 굴곡 peak 추정(참고용·측면 클립) — 자동입력 금지, 임계 6.0-B2 미검증',
   wristDeviationPeakAngle: '손목 요/척측 편위 peak 추정(참고용·정면 클립) — 자동입력 금지, 임계 6.0-B2 미검증',
+  repetitiveMediumHoursLeft: '어깨 상완거상 반복(중간속도, 좌측) 시간 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
+  repetitiveMediumHoursRight: '어깨 상완거상 반복(중간속도, 우측) 시간 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
+  repetitiveFastHoursLeft: '어깨 상완거상 반복(빠른속도, 좌측) 시간 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
+  repetitiveFastHoursRight: '어깨 상완거상 반복(빠른속도, 우측) 시간 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
 };
 
 function buildFeatureValue(featureKey) {
@@ -90,16 +94,19 @@ function buildFeatureValue(featureKey) {
  * 한 클립/공정에 대해 요청된 feature들의 mock VideoFeatureMap을 생성한다.
  * @param {string[]} requestedFeatures - FeatureKey 배열
  * @param {string} [profile] - analysisProfile. 반복빈도 feature(6.0-11)는 repetition-upper-limb/
- *   hand-wrist profile에서만 산출한다(REPETITION_PROFILES). 그 외 feature는 profile 무관.
+ *   hand-wrist profile에서만 산출한다(REPETITION_PROFILES). 어깨 반복 밴드별 시간합(6.0-16)은
+ *   repetition-upper-limb에서만(REPETITION_BAND_FEATURE_KEYS). 그 외 feature는 profile 무관.
  * @returns {Object} VideoFeatureMap (featureKey → VideoFeatureValue)
  */
 export function generateMockFeatures(requestedFeatures = [], profile = 'posture-basic') {
   const repOk = REPETITION_PROFILES.has(profile); // 반복(어깨/팔꿈치)은 상지반복/손목 profile에서만
   const handWristOk = profile === 'hand-wrist';   // 손목(wholebody)은 hand-wrist profile에서만(6.0-10)
+  const bandOk = profile === 'repetition-upper-limb'; // 6.0-16: 밴드별 시간합은 상지반복 profile에서만
   const map = {};
   for (const key of requestedFeatures) {
     if (REPETITION_FEATURE_KEYS.has(key) && !repOk) continue;
     if (HAND_WRIST_FEATURE_KEYS.has(key) && !handWristOk) continue;
+    if (REPETITION_BAND_FEATURE_KEYS.has(key) && !bandOk) continue;
     const value = buildFeatureValue(key);
     if (value) map[key] = value;
   }

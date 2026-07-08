@@ -224,7 +224,7 @@ def posture_ratio(samples, max_gap_ms, min_hold_ms):
 
 
 def repetition_count(samples, max_gap_ms, params):
-    """smoothed 각도 시계열에서 반복 사이클을 세어 (cycles, ratePerMin, segments, activeMs) 반환.
+    """smoothed 각도 시계열에서 반복 사이클을 세어 (cycles, ratePerMin, segments, activeMs, runStarts) 반환.
 
     samples: [(t_ms, angle|None)] (smooth_series 출력). **phase-independent**(어느 위상에서 시작·종료해도
     편향 없음):
@@ -236,6 +236,9 @@ def repetition_count(samples, max_gap_ms, params):
       - gap(dt > max_gap_ms): state reset(half-swing이 gap을 가로지르지 못함) + 그 dt는 activeMs 제외.
       - activeMs < minObservationMs 면 rate=None(짧은 관측 과대추정 방지).
     minCycleMs = 연속한 두 turning-point 사이 최소 간격(= half-swing 최소 길이; 떨림 중복 방지).
+    runStarts: `segments`의 인덱스 중 "새 연속 관측 구간(gap 이후)의 첫 half-swing" 위치 목록(항상 0 포함,
+    segments가 비어있으면 빈 리스트). 6.0-16 밴딩이 gap 경계를 넘어 서로 다른 구간의 half-swing 2개를
+    하나의 사이클로 잘못 묶지 않도록 band_ratios_from_segments가 이 경계로 그룹을 먼저 나눈다.
     """
     min_amp = float(params.get("minAmplitudeDeg", 15.0))
     hyst = float(params.get("hysteresisDeg", 5.0))
@@ -246,6 +249,8 @@ def repetition_count(samples, max_gap_ms, params):
     active_ms = 0.0
     half_swings = 0       # 유효 half-swing(올라감/내려감) 수 — cycles = half_swings/2
     segments = []
+    run_starts = []        # segments 인덱스 중 새 연속 관측 구간의 시작점(gap 경계 마킹)
+    pending_run_start = True  # 다음에 append될 segment가 새 구간의 첫 half-swing인지
     confirmed = []        # 현재 구간의 확정 turning-point (t, val, kind) — gap에서 clear
     kind = None           # 추적 방향: 'peak'(상승 추적) | 'trough'(하강 추적) | None(초기/리셋)
     cand_t, cand_v = None, None          # kind!=None일 때 추적 중 극값 anchor
@@ -254,11 +259,14 @@ def repetition_count(samples, max_gap_ms, params):
 
     def confirm(extreme_t, extreme_v, extreme_kind):
         """turning-point를 확정하고, 직전 turning-point와의 half-swing이 유효하면 카운트."""
-        nonlocal half_swings
+        nonlocal half_swings, pending_run_start
         if confirmed:
             a_t, a_v, _ = confirmed[-1]
             if abs(extreme_v - a_v) >= min_amp and (extreme_t - a_t) >= min_cycle_ms:
                 half_swings += 1
+                if pending_run_start:
+                    run_starts.append(len(segments))
+                    pending_run_start = False
                 segments.append({"startMs": round(a_t), "endMs": round(extreme_t)})
         confirmed.append((extreme_t, extreme_v, extreme_kind))
 
@@ -279,6 +287,7 @@ def repetition_count(samples, max_gap_ms, params):
         if new_segment:
             kind = None
             lo_t, lo_v, hi_t, hi_v = t, v, t, v
+            pending_run_start = True   # gap(또는 첫 샘플) 이후 — 다음 half-swing은 새 구간의 시작
             continue
 
         if kind is None:
@@ -308,9 +317,55 @@ def repetition_count(samples, max_gap_ms, params):
 
     cycles = half_swings / 2.0
     if active_ms < min_obs_ms:
-        return cycles, None, segments, active_ms
+        return cycles, None, segments, active_ms, run_starts
     rate = cycles / (active_ms / 60000.0) if active_ms > 0 else 0.0
-    return cycles, rate, segments, active_ms
+    return cycles, rate, segments, active_ms, run_starts
+
+
+def band_ratios_from_segments(segments, run_starts, active_ms, band_specs):
+    """6.0-16: repetition_count가 반환한 유효 half-swing `segments`를 2개씩 묶어 사이클로 취급하고,
+    사이클 온셋(연속 half-swing 2개의 시작 turning-point) 간격을 밴딩해 밴드별 누적시간 비율을 구한다.
+
+    segments: [{"startMs","endMs"}] (half-swing 시작~끝, repetition_count 산출 그대로).
+    run_starts: repetition_count가 반환한 연속 관측 구간(gap으로 분리된 run) 경계 — segments 인덱스 목록.
+    **사이클 그룹핑은 run 경계를 넘지 않는다**(리뷰 반영 — gap 전후 half-swing 2개를 하나의 사이클로
+    잘못 묶으면 그 사이의 큰 간격이 엉뚱한 밴드로 계산됨). 각 run 안에서만 2개씩 묶고(홀수 잔여는 그
+    run 안에서 미완성 사이클로 제외), **각 run의 마지막 사이클은 (다음 run과 무관하게) 자체 구간
+    (시작→끝)을 쓴다** — 다음 run은 별도 gap 뒤라 온셋 간격 계산 대상이 아님.
+    band_specs: [(key, minPerMin, maxPerMin_or_None), ...] — 서로 겹치지 않아야 함(겹치면 먼저
+    나열된 항목이 우선 매치).
+    각 사이클 i의 "간격"은 **다음 사이클 온셋까지**(onset[i+1]-onset[i], 같은 run 안에서만) — run의
+    마지막 사이클은 다음 온셋이 없어 자체 구간을 쓴다. r=60000/간격ms인 순간 빈도로 그 간격 **전체**를
+    band_specs 중 `minPerMin <= r < maxPerMin`(maxPerMin=None이면 상한 없음)인 첫 밴드에 가산한다 —
+    어느 밴드의 하한도 못 채우면(r < 모든 minPerMin) 미귀속(장기 정지·저빈도 휴지 구간).
+
+    반환: {key: {"ratio": 밴드누적시간/active_ms, "segs": [{"startMs","endMs"}, ...]}}.
+    active_ms<=0이면 ratio=0.0(호출측이 관측 충분성은 별도로 판단 — 이 함수는 순수 계산만 담당).
+    """
+    band_ms = {k: 0.0 for k, _, _ in band_specs}
+    band_segs = {k: [] for k, _, _ in band_specs}
+    boundaries = list(run_starts) + [len(segments)]  # run 경계(끝 인덱스 포함)
+    for run_idx in range(len(boundaries) - 1):
+        run_seg = segments[boundaries[run_idx]:boundaries[run_idx + 1]]
+        n_cycles = len(run_seg) // 2
+        onsets = [run_seg[2 * i]["startMs"] for i in range(n_cycles)]
+        ends = [run_seg[2 * i + 1]["endMs"] for i in range(n_cycles)]
+        for i in range(n_cycles):
+            is_last = i == n_cycles - 1
+            interval = (ends[i] - onsets[i]) if is_last else (onsets[i + 1] - onsets[i])
+            if interval <= 0:
+                continue
+            r = 60000.0 / interval
+            seg_end = ends[i] if is_last else onsets[i + 1]
+            for k, lo, hi in band_specs:
+                if r >= lo and (hi is None or r < hi):
+                    band_ms[k] += interval
+                    band_segs[k].append({"startMs": round(onsets[i]), "endMs": round(seg_end)})
+                    break  # 겹치지 않는 밴드 가정 — 매치 시 다음 밴드는 확인 안 함.
+    return {
+        k: {"ratio": (band_ms[k] / active_ms if active_ms > 0 else 0.0), "segs": band_segs[k]}
+        for k, _, _ in band_specs
+    }
 
 
 def smooth_series(samples, cfg):
@@ -493,7 +548,7 @@ def main():
         for side in ("left", "right"):
             raw = [(times[i], angle_fn(kps[i], side)) for i in range(len(frames))]
             sm = smooth_series(raw, euro)
-            cycles, rate, segs, _active = repetition_count(sm, max_gap, fcfg)
+            cycles, rate, segs, _active, _run_starts = repetition_count(sm, max_gap, fcfg)
             if rate is None:
                 continue
             if best is None or cycles > best[0]:
@@ -516,6 +571,61 @@ def main():
                     lambda s: [f"{s}_shoulder", f"{s}_elbow"])
     emit_repetition("elbowRepetitionRate", elbow_flexion_angle,
                     lambda s: [f"{s}_shoulder", f"{s}_elbow", f"{s}_wrist"])
+
+    # 어깨 반복 '밴드별 시간합'(6.0-16, repetitiveMedium/FastHours). 사이클(연속 half-swing 2개)의 온셋
+    # 간격(이 사이클 시작 turning-point → 다음 사이클 시작 turning-point)을 순간 빈도 r=60000/간격ms로
+    # 분류해 그 간격 전체를 medium(4<=r<15)/fast(r>=15) 밴드에 귀속(r<4는 미귀속 — 평균 템포가 아니라
+    # 온셋 간격별 귀속이라 휴지가 낀 간격은 낮은 밴드로 잡힘). 마지막 사이클은 다음 온셋이 없어 자체
+    # 구간(시작→끝)으로 계산. 좌/우 각각 계산 후 main 2키는 밴드별 독립 max(좌,우), sideKeys 4개
+    # (Left/Right)는 그대로 노출. Python은 requestedFeatures/profile을 모른 채 config 블록이 있으면
+    # 항상 계산·emit한다(emit_repetition과 동일 패턴) — 요청/프로필 필터는 클라이언트
+    # convertClipFeaturesToPerDay의 allowedFeatureKeys가 담당(서버 워커는 profile을 여기 전달하지 않음).
+    def emit_repetition_bands(angle_fn, conf_names):
+        band_keys = ("repetitiveMediumHours", "repetitiveFastHours")
+        fcfgs = {k: cfg["features"].get(k) for k in band_keys}
+        if not all(fcfgs.values()):
+            return  # 구 config 하위호환 — 두 블록 모두 있어야 산출.
+        fcfg = fcfgs[band_keys[0]]  # 사이클 검출 파라미터는 두 블록이 공유(동일값 기대).
+        min_fps = fcfg.get("minFpsForReliableRate")
+        if min_fps is not None and sampled_fps is not None and sampled_fps < float(min_fps):
+            return  # Nyquist 게이트 — 경고 없이 6키 전부 미방출(candidate라도 예외 없음).
+        band_specs = [(k, fcfgs[k]["minPerMin"], fcfgs[k]["maxPerMin"]) for k in band_keys]
+
+        per_side = {}  # side -> {band_key: {"ratio", "segs"}} | None(minObservationMs 미달 — 미방출)
+        conf_by_side = {}
+        for side in ("left", "right"):
+            raw = [(times[i], angle_fn(kps[i], side)) for i in range(len(frames))]
+            sm = smooth_series(raw, euro)
+            _cycles, rate, segs, active_ms, run_starts = repetition_count(sm, max_gap, fcfg)
+            if rate is None:
+                per_side[side] = None
+                continue
+            per_side[side] = band_ratios_from_segments(segs, run_starts, active_ms, band_specs)
+            conf_by_side[side] = make_conf(conf_names(side))
+
+        valid_sides = [s for s in ("left", "right") if per_side.get(s) is not None]
+        if not valid_sides:
+            return  # 양쪽 다 관측 부족(minObservationMs 미달) — 전부 미방출.
+
+        for k in band_keys:
+            best_side = max(valid_sides, key=lambda s: per_side[s][k]["ratio"])
+            ov, bd = conf_by_side[best_side]
+            features[k] = {
+                "kind": "numeric", "metric": "posture_ratio", "value": round(per_side[best_side][k]["ratio"], 4),
+                "unit": "ratio", "confidence": ov, "confidenceBreakdown": bd,
+                "segments": per_side[best_side][k]["segs"], "warnings": list(track_warnings),
+            }
+            for side, side_key in fcfgs[k].get("sideKeys", {}).items():
+                if side not in valid_sides:
+                    continue
+                ov_s, bd_s = conf_by_side[side]
+                features[side_key] = {
+                    "kind": "numeric", "metric": "posture_ratio", "value": round(per_side[side][k]["ratio"], 4),
+                    "unit": "ratio", "confidence": ov_s, "confidenceBreakdown": bd_s,
+                    "segments": per_side[side][k]["segs"], "warnings": list(track_warnings),
+                }
+
+    emit_repetition_bands(upperarm_elevation_angle, lambda s: [f"{s}_shoulder", f"{s}_elbow"])
 
     # 손목 반복·굴곡/편위 peak(candidate, 6.0-10) — wholebody 클립만(hand keypoint 필요). body 클립은
     # middle1 부재 → angle_fn None → 자연 미산출. 굴곡/편위는 동일 기하라 같은 값 — 클라가 시점으로 가른다.
