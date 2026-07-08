@@ -15,7 +15,7 @@ import '../../../modules/cervical';
 
 import { generateMockFeatures } from '../videoMock.js';
 import { gateFeaturesByViewpoint } from '../videoViewpointConfig.js';
-import { aggregateProcessFeatures, getAggregationMethod } from '../videoAggregate.js';
+import { aggregateProcessFeatures, getAggregationMethod, contributionValue } from '../videoAggregate.js';
 import {
   getModuleSuggestions,
   collectCandidateFeatures,
@@ -226,6 +226,25 @@ describe('aggregateProcessFeatures (§8.6.2)', () => {
       { share: 40, features: { overheadHours: num(1.0) } },
     ]);
     expect(out.overheadHours.autoSuggestAllowed).toBe(true);
+  });
+});
+
+describe('contributionValue (6.0-17 공정별 서브행 기여값)', () => {
+  it('weightedSum 계열은 value × share/100을 반환(집계와 동일 산식)', () => {
+    expect(contributionValue('overheadHours', 2.0, 60)).toBeCloseTo(1.2, 5);
+    expect(contributionValue('repetitiveMediumHours', 2.0, 100)).toBeCloseTo(2.0, 5);
+    expect(contributionValue('repetitiveFastHours', 0.5, 0)).toBe(0);
+  });
+
+  it('weightedAvg·max·or·pick 등 지분 개념 없는 방식은 null(호출측이 원값 표시로 폴백)', () => {
+    expect(contributionValue('cycleSeconds', 6, 50)).toBeNull(); // weightedAvg
+    expect(contributionValue('trunkPostureG', 'G3', 100)).toBeNull(); // pick
+    expect(contributionValue('suspectedKneeTwist', true, 100)).toBeNull(); // or
+  });
+
+  it('value가 null/undefined면 null(원값 자체가 없음)', () => {
+    expect(contributionValue('overheadHours', null, 100)).toBeNull();
+    expect(contributionValue('overheadHours', undefined, 100)).toBeNull();
   });
 });
 

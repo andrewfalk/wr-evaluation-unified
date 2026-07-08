@@ -15,6 +15,9 @@ import {
   tasksForJob,
   resolveTargetTaskId,
   candidateMinutesPerDay,
+  candidateHoursPerDay,
+  formatCandidateSubValue,
+  effectiveShare,
   excludeTaskScopeCandidates,
   flatCandidateLabel,
   segmentsForJob,
@@ -110,6 +113,39 @@ describe('척추 45°↑ 굴곡 candidate (작업 단위 표시)', () => {
     expect(flatCandidateLabel({ featureKey: 'shoulderRepetitionRate', value: 30.456 })).not.toContain('cycles_per_minute');
     // 반복이 아닌 후보는 null → 호출측 generic 렌더 유지
     expect(flatCandidateLabel({ featureKey: 'suspectedKneeTwist', value: true })).toBeNull();
+  });
+
+  it('6.0-17: flatCandidateLabel — Left/Right 4키는 값 없는 카테고리 라벨(공정마다 값이 달라 대표 못 함)', () => {
+    expect(flatCandidateLabel({ featureKey: 'repetitiveMediumHoursLeft', value: 0.12 })).toBe('어깨 반복(중간속도, 좌측)');
+    expect(flatCandidateLabel({ featureKey: 'repetitiveMediumHoursRight', value: 0.18 })).toBe('어깨 반복(중간속도, 우측)');
+    expect(flatCandidateLabel({ featureKey: 'repetitiveFastHoursLeft', value: 0.07 })).toBe('어깨 반복(빠른속도, 좌측)');
+    expect(flatCandidateLabel({ featureKey: 'repetitiveFastHoursRight', value: 0.03 })).toBe('어깨 반복(빠른속도, 우측)');
+  });
+
+  it('6.0-17: candidateHoursPerDay — 비율×활동분/60 반올림(1자리), 활동시간 없으면 null', () => {
+    expect(candidateHoursPerDay(0.2, 200)).toBeCloseTo((200 * 0.2) / 60, 1); // 40분=0.7h
+    expect(candidateHoursPerDay(0.2, null)).toBeNull();
+    expect(candidateHoursPerDay(0.2, undefined)).toBeNull();
+  });
+
+  it('6.0-17: formatCandidateSubValue — featureKey 기준 분기(ratio→시간/일은 신규 L/R 4키만, cycles_per_minute/degrees/그 외)', () => {
+    expect(formatCandidateSubValue({ featureKey: 'repetitiveMediumHoursLeft', value: 0.2 }, 200)).toBe('약 0.7 시간/일');
+    expect(formatCandidateSubValue({ featureKey: 'repetitiveMediumHoursLeft', value: 0.2 }, null))
+      .toBe('(활동시간 입력 시 시간/일 표시)');
+    expect(formatCandidateSubValue({ featureKey: 'shoulderRepetitionRate', value: 14.36 }, null)).toBe('약 14.4 회/분');
+    expect(formatCandidateSubValue({ featureKey: 'wristFlexionPeakAngle', value: 42 }, null)).toBe('약 42°');
+    expect(formatCandidateSubValue({ featureKey: 'suspectedKneeTwist', value: true }, null)).toBe('true');
+  });
+
+  it('6.0-17 회귀: vibrationToolUseDurationCandidate는 unit이 같은 hours_per_day지만 ratio가 아니므로(Python 계산 블록 없는 mock 전용) 환산하지 않고 원값 그대로 표시', () => {
+    expect(formatCandidateSubValue({ featureKey: 'vibrationToolUseDurationCandidate', value: 1.0 }, 240)).toBe('1');
+    expect(formatCandidateSubValue({ featureKey: 'vibrationToolUseDurationCandidate', value: 1.0 }, null)).toBe('1');
+  });
+
+  it('6.0-17: effectiveShare — absolutePerDay는 100%, shareWeighted(기본)는 공정 점유율 그대로', () => {
+    expect(effectiveShare('absolutePerDay', 37)).toBe(100);
+    expect(effectiveShare('shareWeighted', 37)).toBe(37);
+    expect(effectiveShare(undefined, 37)).toBe(37); // 기본값 취급
   });
 });
 
@@ -292,7 +328,7 @@ describe('buildJobFeatures', () => {
     // 기본(mock): 2*0.5 + 1*0.5 = 1.5
     expect(buildJobFeatures(processes, processFeatures).find((j) => j.sharedJobId === 'jobA').features.overheadHours.value).toBeCloseTo(1.5, 5);
     // absolutePerDay: 2 + 1 = 3.0 (이중 차감 없음)
-    expect(buildJobFeatures(processes, processFeatures, { absolutePerDay: true }).find((j) => j.sharedJobId === 'jobA').features.overheadHours.value).toBeCloseTo(3.0, 5);
+    expect(buildJobFeatures(processes, processFeatures, { processFeatureAggregationMode: 'absolutePerDay' }).find((j) => j.sharedJobId === 'jobA').features.overheadHours.value).toBeCloseTo(3.0, 5);
   });
 });
 

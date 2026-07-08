@@ -258,6 +258,12 @@ export type InferenceDevice = z.infer<typeof InferenceDeviceSchema>;
 export type OrgInferenceSettings = z.infer<typeof OrgInferenceSettingsSchema>;
 
 // 환자 JSONB(영구·UI용) 구조(§8.11). 임시파일 경로는 절대 포함하지 않는다.
+// 6.0-17: job-scope 집계 시 공정 share를 어떻게 반영했는지(처리 당시 기록, 재계산 방지용).
+// shareWeighted=공정점유율 가중(mock 기본), absolutePerDay=서버 실분석(이미 절대 per-day라 share=100
+// 취급, 재가중 금지). 공정별 서브행 "기여값"을 리로드 후에도 정확히 재현하려면 이 모드가 필요하다 —
+// absolutePerDay는 현재 buildJobFeatures 호출 인자로만 쓰이고 저장되지 않아 리로드 시 유실됐었다.
+export const ProcessFeatureAggregationModeSchema = z.enum(['shareWeighted', 'absolutePerDay']);
+
 export const VideoAnalysisDataSchema = z.object({
   processes: z.array(VideoProcessSchema).default([]),
   clips: z.array(VideoClipSchema).default([]),
@@ -265,6 +271,8 @@ export const VideoAnalysisDataSchema = z.object({
   jobFeatures: z.array(JobFeaturesSchema).default([]),
   candidateFeatures: z.array(CandidateFeatureEntrySchema).default([]),
   appliedInputs: z.array(AppliedInputSchema).default([]),
+  // optional — 구 데이터(필드 부재)는 공정별 기여값 서브행을 생략하고 원값만 표시(fail-safe).
+  processFeatureAggregationMode: ProcessFeatureAggregationModeSchema.optional(),
   settings: z
     .object({ retentionMode: RetentionModeSchema.default('privacy_first') })
     .default({ retentionMode: 'privacy_first' }),
@@ -350,3 +358,4 @@ export type ProcessFeatures = z.infer<typeof ProcessFeaturesSchema>;
 export type JobFeatures = z.infer<typeof JobFeaturesSchema>;
 export type RetentionMode = z.infer<typeof RetentionModeSchema>;
 export type VideoAnalysisData = z.infer<typeof VideoAnalysisDataSchema>;
+export type ProcessFeatureAggregationMode = z.infer<typeof ProcessFeatureAggregationModeSchema>;

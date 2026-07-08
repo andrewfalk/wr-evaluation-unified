@@ -8,7 +8,7 @@ import {
   REPETITION_FEATURE_KEYS, REPETITION_PROFILES, HAND_WRIST_FEATURE_KEYS, REPETITION_BAND_FEATURE_KEYS,
 } from '../services/videoFeatureProfiles';
 import { gateFeaturesByViewpoint } from '../services/videoViewpointConfig';
-import { aggregateProcessFeatures, getAggregationMethod } from '../services/videoAggregate';
+import { aggregateProcessFeatures, getAggregationMethod, contributionValue } from '../services/videoAggregate';
 import {
   getModuleSuggestions,
   getModuleCandidates,
@@ -89,18 +89,27 @@ export function fmtNum(v) {
 }
 
 /**
- * 공정별 feature를 직업(sharedJobId) 단위로 묶어 집계한다(job-scope).
- * @param {boolean} absolutePerDay - 서버 실분석 값은 ratio×activeMinutesPerDay로 이미 절대 per-day이므로
- *   share로 재가중하지 않고 합산한다(share=100). mock 값은 "공정 100% 가정" 값이라 share 가중(기본).
- *   둘을 섞으면 per-day가 이중 차감되므로 경로별로 분리한다(PR D1).
+ * 공정의 effective share(%)를 결정한다 — job-scope 집계(buildJobFeatures)와 공정별 서브행 기여값
+ * (renderJobScopeSuggestions)이 항상 같은 값을 쓰도록 단일화(6.0-17, 재구현 금지).
+ * @param {'shareWeighted'|'absolutePerDay'} mode - processFeatureAggregationMode.
+ *   absolutePerDay: 서버 실분석 값은 ratio×activeMinutesPerDay로 이미 절대 per-day이므로 share로
+ *   재가중하지 않고 100%로 취급(이중 차감 방지). shareWeighted(mock 기본): 공정 점유율 그대로.
  */
-export function buildJobFeatures(processes = [], processFeatures = [], { absolutePerDay = false } = {}) {
+export function effectiveShare(mode, shiftSharePercent) {
+  return mode === 'absolutePerDay' ? 100 : shiftSharePercent;
+}
+
+/**
+ * 공정별 feature를 직업(sharedJobId) 단위로 묶어 집계한다(job-scope).
+ * @param {'shareWeighted'|'absolutePerDay'} [processFeatureAggregationMode] - effectiveShare 참고.
+ */
+export function buildJobFeatures(processes = [], processFeatures = [], { processFeatureAggregationMode = 'shareWeighted' } = {}) {
   const byJob = {};
   for (const pf of processFeatures) {
     const proc = processes.find((p) => p.id === pf.processId);
     if (!proc) continue;
     (byJob[proc.sharedJobId] = byJob[proc.sharedJobId] || []).push({
-      share: absolutePerDay ? 100 : proc.shiftSharePercent,
+      share: effectiveShare(processFeatureAggregationMode, proc.shiftSharePercent),
       features: pf.features,
     });
   }
@@ -262,6 +271,42 @@ export function candidateMinutesPerDay(ratio, activeMinutesPerDay) {
 }
 
 /**
+ * candidate 비율(posture_ratio 0~1)을 공정 활동시간(분/일)으로 환산한 **시간/일**(candidateMinutesPerDay의
+ * 시간 단위 버전, 6.0-17). unit이 hours_per_day인 candidate(예: repetitiveMedium/FastHoursLeft/Right)에
+ * 사용 — candidate는 raw ratio를 보존하므로(convertClipFeaturesToPerDay) 표시 시점에 환산한다.
+ */
+export function candidateHoursPerDay(ratio, activeMinutesPerDay) {
+  const minutes = candidateMinutesPerDay(ratio, activeMinutesPerDay);
+  return minutes == null ? null : Math.round((minutes / 60) * 10) / 10;
+}
+
+// 6.0-16 Left/Right 4키만 raw ratio(posture_ratio, convertClipFeaturesToPerDay가 그대로 보존)라
+// candidateHoursPerDay 환산 대상. vibrationToolUseDurationCandidate도 unit은 같은 hours_per_day지만
+// Python 계산 블록 자체가 없는 mock 전용 placeholder라 value가 ratio가 아님(리뷰 반영) — unit만으로
+// 분기하면 이 값이 ratio×활동시간/60으로 잘못 부풀려진다. 그래서 unit이 아니라 featureKey로 명시 분기.
+const RATIO_HOURS_CANDIDATE_KEYS = new Set([
+  'repetitiveMediumHoursLeft', 'repetitiveMediumHoursRight',
+  'repetitiveFastHoursLeft', 'repetitiveFastHoursRight',
+]);
+
+/**
+ * flat 참고 후보의 공정별 서브행 값 문자열(6.0-17). RATIO_HOURS_CANDIDATE_KEYS(신규 Left/Right 4키)만
+ * candidateHoursPerDay로 시간/일 환산, cycles_per_minute·degrees는 기존처럼 원값+단위, 그 외
+ * (vibrationToolUseDurationCandidate·categorical·boolean 등)는 원값 그대로(환산 없음).
+ */
+export function formatCandidateSubValue(c, activeMinutesPerDay) {
+  if (RATIO_HOURS_CANDIDATE_KEYS.has(c.featureKey)) {
+    const h = candidateHoursPerDay(c.value, activeMinutesPerDay);
+    return h != null ? `약 ${h} 시간/일` : '(활동시간 입력 시 시간/일 표시)';
+  }
+  const unit = VIDEO_FEATURE_TARGETS[c.featureKey]?.unit;
+  const n = Math.round((Number(c.value) || 0) * 10) / 10;
+  if (unit === 'cycles_per_minute') return `약 ${n} 회/분`;
+  if (unit === 'degrees') return `약 ${n}°`;
+  return String(fmtNum(c.value));
+}
+
+/**
  * flat "참고 후보"에서 task-scope 모듈(경추·척추) candidate를 제외한다(작업 단위 섹션에서 표시하므로 중복 방지).
  * 렌더와 동일 경로를 테스트가 검증하도록 순수 함수로 분리.
  */
@@ -273,6 +318,15 @@ export function excludeTaskScopeCandidates(candidateFeatures = [], taskScopeModu
  * flat "참고 후보" 표시 라벨. 반복빈도(6.0-11)는 raw featureKey/value 대신 "어깨/팔꿈치 반복: 약 N 회/분"으로.
  * 알 수 없는 featureKey는 null 반환 → 호출측이 기존 generic 렌더(featureKey: value) 유지.
  */
+// 6.0-17: 어깨 반복 밴드별 시간합 Left/Right — raw ratio라 값은 공정별 서브행(candidateHoursPerDay)에서
+// 표시하고, 여기 라벨은 값 없는 카테고리명만(단일 숫자로 대표할 수 없음 — 공정마다 다름).
+const BAND_SIDE_LABEL = {
+  repetitiveMediumHoursLeft: '어깨 반복(중간속도, 좌측)',
+  repetitiveMediumHoursRight: '어깨 반복(중간속도, 우측)',
+  repetitiveFastHoursLeft: '어깨 반복(빠른속도, 좌측)',
+  repetitiveFastHoursRight: '어깨 반복(빠른속도, 우측)',
+};
+
 export function flatCandidateLabel(c) {
   const n = Math.round((Number(c.value) || 0) * 10) / 10;
   if (REPETITION_FEATURE_KEYS.has(c.featureKey)) {
@@ -283,6 +337,7 @@ export function flatCandidateLabel(c) {
   if (c.featureKey === 'wristRepetitionRate') return `손목 반복: 약 ${n} 회/분`;
   if (c.featureKey === 'wristFlexionPeakAngle') return `손목 굴곡(최대): 약 ${n}°`;
   if (c.featureKey === 'wristDeviationPeakAngle') return `손목 요/척측 편위(최대): 약 ${n}°`;
+  if (BAND_SIDE_LABEL[c.featureKey]) return BAND_SIDE_LABEL[c.featureKey];
   return null;
 }
 
@@ -554,7 +609,10 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   // absolutePerDay: 서버 실분석은 절대 per-day(합산), mock은 공정점유율 가중.
   // processEvidence: "왜 이 값?" 근거(서버 실분석만 제공, mock은 빈 배열). va에 저장 안 하고 별도 state로.
   const commitAnalysis = (processFeatures, { absolutePerDay = false, processEvidence = [] } = {}) => {
-    const jobFeatures = buildJobFeatures(va.processes, processFeatures, { absolutePerDay });
+    // 6.0-17: absolutePerDay(집계 시점 인자, 저장 안 됨)를 processFeatureAggregationMode(저장됨)로
+    // 변환 — 리로드 후에도 공정별 서브행 기여값을 이 분석과 같은 방식으로 재계산할 수 있게 한다.
+    const processFeatureAggregationMode = absolutePerDay ? 'absolutePerDay' : 'shareWeighted';
+    const jobFeatures = buildJobFeatures(va.processes, processFeatures, { processFeatureAggregationMode });
     const candidateFeatures = processFeatures.flatMap((pf) => {
       const cands = collectCandidateFeatures(pf.features, { processIds: [pf.processId] });
       // 반복빈도(어깨/팔꿈치)는 상지반복/손목 profile에서만, 손목(반복+각도)은 손목 profile에서만,
@@ -569,7 +627,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
         return true;
       });
     });
-    updateVA((v) => ({ ...v, processFeatures, jobFeatures, candidateFeatures }));
+    updateVA((v) => ({ ...v, processFeatures, jobFeatures, candidateFeatures, processFeatureAggregationMode }));
     // evidence는 transient state(영속화 차단). job-scope=직업단위, task-scope=공정단위 lookup map.
     const jobEvidenceBySharedJobId = buildJobEvidence(va.processes, processFeatures, processEvidence);
     const processEvidenceByProcessId = buildProcessEvidence(va.processes, processFeatures, processEvidence);
@@ -888,6 +946,33 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     );
   };
 
+  // 6.0-17: job-scope 제안(직업 합계) 아래 공정별 분해 서브행 — 적용 없는 읽기 전용 표시.
+  // 기여값 = contributionValue(집계와 동일 산식, 재구현 금지). va.processFeatureAggregationMode가
+  // 없는 구 데이터는 기여값 계산을 생략(fail-safe)하고 원값만 표시 + fallback 안내.
+  const renderJobScopeProcessBreakdown = (s, { jobProcesses }) => {
+    const mode = va.processFeatureAggregationMode;
+    const rows = jobProcesses.map((p) => {
+      const pf = (va.processFeatures || []).find((f) => f.processId === p.id);
+      const raw = pf?.features?.[s.featureKey]?.value;
+      if (raw == null) return null;
+      const contrib = mode ? contributionValue(s.featureKey, raw, effectiveShare(mode, p.shiftSharePercent)) : null;
+      return (
+        <div key={p.id} className="muted" style={{ fontSize: 12 }}>
+          {p.name}: {contrib != null
+            ? <>{fmtNum(contrib)} {s.unit || ''} <span style={{ opacity: 0.7 }}>(원값 {fmtNum(raw)} {s.unit || ''})</span></>
+            : <>{fmtNum(raw)} {s.unit || ''}</>}
+        </div>
+      );
+    }).filter(Boolean);
+    if (rows.length === 0) return null;
+    return (
+      <li key={`${s.featureKey}:breakdown`} className="va-suggest-breakdown" style={{ listStyle: 'none', paddingLeft: 16 }}>
+        {!mode && <div className="muted" style={{ fontSize: 11 }}>이전 분석은 공정 기여값 정보 없음 — 재분석 시 표시</div>}
+        {rows}
+      </li>
+    );
+  };
+
   return (
     <div className="panel">
       <section className="section pattern-surface form-section">
@@ -1079,14 +1164,17 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                   const analysisProfile = jobProcesses[0]?.analysisProfile;
                   return (
                     <ul key={moduleId} className="va-suggest-list">
-                      {suggestions.map((s) => renderSuggestionRow(s, {
-                        moduleId,
-                        ctx: { sharedJobId: jf.sharedJobId },
-                        processIds: procIds,
-                        analysisProfile,
-                        jobEv: analysisEvidence.jobEvidenceBySharedJobId[jf.sharedJobId]?.[s.featureKey],
-                        rowKey: `${jf.sharedJobId}:${s.featureKey}`,
-                      }))}
+                      {suggestions.map((s) => [
+                        renderSuggestionRow(s, {
+                          moduleId,
+                          ctx: { sharedJobId: jf.sharedJobId },
+                          processIds: procIds,
+                          analysisProfile,
+                          jobEv: analysisEvidence.jobEvidenceBySharedJobId[jf.sharedJobId]?.[s.featureKey],
+                          rowKey: `${jf.sharedJobId}:${s.featureKey}`,
+                        }),
+                        renderJobScopeProcessBreakdown(s, { jobProcesses }),
+                      ])}
                     </ul>
                   );
                 })}
@@ -1171,20 +1259,39 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
           return (flatCandidates.length > 0 || suppressed.length > 0) && (
           <div className="va-suggest-group">
             <div className="va-suggest-group-title">참고 후보 (자동입력 금지)</div>
-            {flatCandidates.length > 0 && (
-            <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {flatCandidates.map((c, i) => {
-                const label = flatCandidateLabel(c);
-                return (
-                  <li key={`${c.featureKey}-${i}`}>
-                    {label !== null
-                      ? <>{label} — <span className="muted">{c.reason}</span></>
-                      : <><code>{c.featureKey}</code>: {String(c.value)} — <span className="muted">{c.reason}</span></>}
-                  </li>
-                );
-              })}
-            </ul>
-            )}
+            {flatCandidates.length > 0 && (() => {
+              // 6.0-17: featureKey별로 묶어 헤더 1개 + 공정별 값 서브행으로 표시(이전엔 공정마다 개별
+              // 항목이라 여러 공정이 같은 후보를 내면 라벨이 중복 노출됨).
+              const grouped = new Map();
+              for (const c of flatCandidates) {
+                (grouped.get(c.featureKey) || grouped.set(c.featureKey, []).get(c.featureKey)).push(c);
+              }
+              return (
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  {[...grouped.entries()].map(([featureKey, entries]) => {
+                    const first = entries[0];
+                    const label = flatCandidateLabel(first);
+                    return (
+                      <li key={featureKey}>
+                        {label !== null
+                          ? <>{label} — <span className="muted">{first.reason}</span></>
+                          : <><code>{featureKey}</code>: {String(first.value)} — <span className="muted">{first.reason}</span></>}
+                        <ul style={{ listStyle: 'none', paddingLeft: 16, marginTop: 2 }}>
+                          {entries.map((c, idx) => {
+                            const p = va.processes.find((pp) => pp.id === (c.processIds || [])[0]);
+                            return (
+                              <li key={(c.processIds || [])[0] || idx} className="muted" style={{ fontSize: 12 }}>
+                                {p?.name || '(공정 미상)'}: {formatCandidateSubValue(c, p?.activeMinutesPerDay)}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </li>
+                    );
+                  })}
+                </ul>
+              );
+            })()}
             {/* 시점 하드 게이트 안내(6.0-10): 손목 굴곡/편위는 같은 2D 값이라 시점별로만 노출 */}
             {suppressed.length > 0 && (
               <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>

@@ -104,6 +104,23 @@ export function getAggregationMethod(featureKey) {
   return aggMethod(featureKey);
 }
 
+/**
+ * 한 공정의 "기여값"(직업 합계에 이 공정이 보탠 몫)을 계산한다(6.0-17, 공정별 서브행 표시용).
+ * weightedSum(누적형: 시간·횟수)일 때만 의미가 있음 — value × share/100. 집계와 동일 산식을 재사용해
+ * 서브행 합이 항상 직업 합계와 정합하도록 한다(재구현 금지).
+ * weightedAvg·max·or·pick은 "기여값" 개념이 없어(1회시간 평균·최댓값·대표값 등은 지분 개념과 무관)
+ * null을 반환 — 호출측(서브행 렌더)이 기여값 대신 공정 원값(per-day, share 미반영)을 표시해야 한다.
+ * @param {string} featureKey
+ * @param {number|null|undefined} value - 공정의 per-day 원값(VideoFeatureValue.value)
+ * @param {number} share - 이 계산에 쓸 유효 share(0~100) — absolutePerDay면 100, 아니면 shiftSharePercent
+ * @returns {number|null}
+ */
+export function contributionValue(featureKey, value, share) {
+  if (aggMethod(featureKey) !== 'weightedSum') return null;
+  if (value == null) return null;
+  return (Number(value) || 0) * shareFraction(share);
+}
+
 /** 해당 featureKey가 어느 모듈/scope로 가는지(VIDEO_FEATURE_TARGETS 기반). */
 export function getFeatureTarget(featureKey) {
   return VIDEO_FEATURE_TARGETS[featureKey] || null;
