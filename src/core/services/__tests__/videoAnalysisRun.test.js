@@ -91,6 +91,45 @@ describe('runServerAnalysis', () => {
     expect(r.processFeatures[0].features.trunkPostureG).toBeUndefined();
   });
 
+  it('6.0-16: shoulder 활성이어도 posture-basic 공정은 요청·환산 양쪽에서 밴드 6키를 제외한다', async () => {
+    const shoulderEnv = { ...env, activeModules: ['shoulder'] };
+    const cf = {
+      schemaVersion: 1, featureConfigVersion: 'fc-1', clipRef: 'c.mp4', clipDurationMs: 1000, analyzedFrames: 10,
+      features: {
+        overheadHours: { kind: 'numeric', metric: 'posture_ratio', value: 0.3, unit: 'ratio', confidence: 0.8, segments: [], warnings: [] },
+        repetitiveMediumHours: { kind: 'numeric', metric: 'posture_ratio', value: 0.2, unit: 'ratio', confidence: 0.8, segments: [], warnings: [] },
+        repetitiveMediumHoursLeft: { kind: 'numeric', metric: 'posture_ratio', value: 0.15, unit: 'ratio', confidence: 0.8, segments: [], warnings: [] },
+      },
+    };
+    pollJob.mockResolvedValue({ jobId: 'job-1', status: 'review_pending', resultFeatures: cf });
+    const r = await runServerAnalysis(patient, vaWith({ analysisProfile: 'posture-basic' }), shoulderEnv);
+    // 요청 생성 지점(createJob)에서부터 6키가 빠져 있어야 한다.
+    const jobArg = createJob.mock.calls[0][0];
+    expect(jobArg.requestedFeatures).toContain('overheadHours');
+    expect(jobArg.requestedFeatures).not.toEqual(expect.arrayContaining(['repetitiveMediumHours', 'repetitiveMediumHoursLeft']));
+    // raw result_features에 6키가 있어도(profile 무관 emit) 환산 결과(processFeatures)엔 절대 없어야 한다.
+    expect(r.processFeatures[0].features.overheadHours).toBeDefined();
+    expect(r.processFeatures[0].features.repetitiveMediumHours).toBeUndefined();
+    expect(r.processFeatures[0].features.repetitiveMediumHoursLeft).toBeUndefined();
+  });
+
+  it('6.0-16: repetition-upper-limb 공정은 밴드 6키를 요청·환산 양쪽에 포함한다', async () => {
+    const shoulderEnv = { ...env, activeModules: ['shoulder'] };
+    const cf = {
+      schemaVersion: 1, featureConfigVersion: 'fc-1', clipRef: 'c.mp4', clipDurationMs: 1000, analyzedFrames: 10,
+      features: {
+        repetitiveMediumHours: { kind: 'numeric', metric: 'posture_ratio', value: 0.2, unit: 'ratio', confidence: 0.8, segments: [], warnings: [] },
+        repetitiveMediumHoursLeft: { kind: 'numeric', metric: 'posture_ratio', value: 0.15, unit: 'ratio', confidence: 0.8, segments: [], warnings: [] },
+      },
+    };
+    pollJob.mockResolvedValue({ jobId: 'job-1', status: 'review_pending', resultFeatures: cf });
+    const r = await runServerAnalysis(patient, vaWith({ analysisProfile: 'repetition-upper-limb', activeMinutesPerDay: 200 }), shoulderEnv);
+    const jobArg = createJob.mock.calls[0][0];
+    expect(jobArg.requestedFeatures).toEqual(expect.arrayContaining(['repetitiveMediumHours', 'repetitiveMediumHoursLeft']));
+    expect(r.processFeatures[0].features.repetitiveMediumHours).toBeDefined();
+    expect(r.processFeatures[0].features.repetitiveMediumHoursLeft).toMatchObject({ kind: 'candidate', value: 0.15 });
+  });
+
   it('activeMinutesPerDay null → per-day feature 누락 + missingActiveTime 기록', async () => {
     const r = await runServerAnalysis(patient, vaWith({ activeMinutesPerDay: null }), env);
     expect(r.processFeatures[0].features.squatDuration).toBeUndefined();

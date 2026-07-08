@@ -1,6 +1,6 @@
 {
-  "version": "feature-calc-2026-06-f",
-  "description": "feature 계산 규칙(6.0-6a~6b, 6.0-11, 6.0-10). 각도 정의·임계값·OneEuro·품질·tracking 파라미터를 버전관리. 실제 임계값은 6.0-B2 검증으로 보정. (d) minHoldSec=0 — 임계 초과한 모든 프레임시간을 노출시간으로 합산(연속유지 요건 제거). peak는 순간 최대, duration은 노출 비율로 둘이 방향 일치. frame-drop(max_gap) 제외는 유지. (e) 어깨·팔꿈치 반복빈도(cycles/min) candidate 추가 — repetition_count 파라미터는 6.0-B2 미검증(잠정). (f) 6.0-10 손목 반복빈도·굴곡/편위 peak candidate(wholebody 클립만, hand keypoint 필요) — 파라미터·정확도 6.0-B2 미검증.",
+  "version": "feature-calc-2026-06-g",
+  "description": "feature 계산 규칙(6.0-6a~6b, 6.0-11, 6.0-10, 6.0-16). 각도 정의·임계값·OneEuro·품질·tracking 파라미터를 버전관리. 실제 임계값은 6.0-B2 검증으로 보정. (d) minHoldSec=0 — 임계 초과한 모든 프레임시간을 노출시간으로 합산(연속유지 요건 제거). peak는 순간 최대, duration은 노출 비율로 둘이 방향 일치. frame-drop(max_gap) 제외는 유지. (e) 어깨·팔꿈치 반복빈도(cycles/min) candidate 추가 — repetition_count 파라미터는 6.0-B2 미검증(잠정). (f) 6.0-10 손목 반복빈도·굴곡/편위 peak candidate(wholebody 클립만, hand keypoint 필요) — 파라미터·정확도 6.0-B2 미검증. (g) 6.0-16 어깨 반복 시간합(repetitiveMedium/FastHours) — 사이클 온셋 간격 기반 밴딩(4≤r<15 medium, r>=15 fast), 좌/우 sideKeys는 config가 소유(sideKeys). 파라미터는 shoulderRepetitionRate와 동일 시작값(6.0-B2 미검증, 잠정).",
   "tracking": {
     "iouThreshold": 0.3,
     "maxAgeFrames": 10,
@@ -56,6 +56,26 @@
       "type": "trunk_flexion",
       "condition": "gt", "thresholdDeg": 45,
       "note": "체간 전굴각 > 45°인 시간 비율(작업별 candidate, 연속유지 요건 없음). 분/일 환산은 활동시간×비율(클라 UI). neckFlexion 미러."
+    },
+    "repetitiveMediumHours": {
+      "kind": "numeric", "metric": "posture_ratio", "unit": "ratio", "mode": "auto",
+      "type": "repetition_band",
+      "joint": "shoulder", "angle": "upperarm_elevation", "reduce": "max",
+      "minPerMin": 4, "maxPerMin": 15,
+      "minAmplitudeDeg": 20, "hysteresisDeg": 6, "minCycleMs": 350, "minObservationMs": 3000,
+      "minFpsForReliableRate": 10,
+      "sideKeys": { "left": "repetitiveMediumHoursLeft", "right": "repetitiveMediumHoursRight" },
+      "note": "6.0-16: 어깨 상완거상 반복의 '중간 속도'(4~15회/분) 온셋 간격 누적시간 비율. 사이클(half-swing 2개) 온셋→다음 온셋 간격 전체를 그 순간 빈도(r=60000/간격ms)로 분류·귀속(평균 템포 아님 — 휴지도 낮은 밴드로 귀속됨). 값=밴드별 독립 max(좌,우). sideKeys(Left/Right)는 이 블록 파라미터에서 파생. 파라미터는 shoulderRepetitionRate와 동일 시작값, 6.0-B2 미검증(잠정)."
+    },
+    "repetitiveFastHours": {
+      "kind": "numeric", "metric": "posture_ratio", "unit": "ratio", "mode": "auto",
+      "type": "repetition_band",
+      "joint": "shoulder", "angle": "upperarm_elevation", "reduce": "max",
+      "minPerMin": 15, "maxPerMin": null,
+      "minAmplitudeDeg": 20, "hysteresisDeg": 6, "minCycleMs": 350, "minObservationMs": 3000,
+      "minFpsForReliableRate": 10,
+      "sideKeys": { "left": "repetitiveFastHoursLeft", "right": "repetitiveFastHoursRight" },
+      "note": "6.0-16: 어깨 상완거상 반복의 '빠른 속도'(15회/분↑) 온셋 간격 누적시간 비율. repetitiveMediumHours와 동일 사이클·온셋 간격 계산을 공유(밴드 임계만 다름). 값=밴드별 독립 max(좌,우). sideKeys(Left/Right)는 이 블록 파라미터에서 파생. 6.0-B2 미검증(잠정)."
     },
     "shoulderRepetitionRate": {
       "kind": "numeric", "metric": "cycles_per_minute", "unit": "cycles_per_minute", "mode": "candidate",

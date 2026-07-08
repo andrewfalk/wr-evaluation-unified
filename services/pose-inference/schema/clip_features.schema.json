@@ -50,6 +50,8 @@
       "propertyNames": {
         "enum": [
           "squatDuration", "overheadHours", "repetitiveMediumHours", "repetitiveFastHours",
+          "repetitiveMediumHoursLeft", "repetitiveMediumHoursRight",
+          "repetitiveFastHoursLeft", "repetitiveFastHoursRight",
           "cyclesPerDay", "cycleSeconds", "trunkPostureG", "trunkFlexionOver45Duration",
           "neckFlexionOver20HoursPerDay", "neckForcedFlexion", "neckCombinedFlexRot",
           "vibrationToolUseDurationCandidate", "suspectedKneeTwist",

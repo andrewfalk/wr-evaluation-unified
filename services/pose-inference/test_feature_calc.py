@@ -16,7 +16,7 @@ from feature_calc import (
     neck_flexion_angle, trunk_flexion_angle, posture_ratio, KP,
     choose_dominant_track, pick_target_person, all_track_ids,
     repetition_count, upperarm_elevation_angle, elbow_flexion_angle,
-    wrist_flexion_angle,
+    wrist_flexion_angle, band_ratios_from_segments,
 )
 from keypoint_layout import WHOLEBODY_TRIMMED_INDEX
 from tracker import IoUTracker, iou
@@ -287,7 +287,7 @@ def _sine_series(freq_hz, dur_s, fps, amp=30.0, mid=90.0):
 
 def test_repetition_count_synthetic():
     # 1.0Hz·10초 → ~9.5 사이클(phase-independent half-swing/2), rate ~57/분(true 60에 근접).
-    cycles, rate, segs, active = repetition_count(_sine_series(1.0, 10, 30), 1000, REP_PARAMS)
+    cycles, rate, segs, active, _run_starts = repetition_count(_sine_series(1.0, 10, 30), 1000, REP_PARAMS)
     assert 9.0 <= cycles <= 10.5, (cycles, rate)
     assert 53 <= rate <= 63, rate
     assert len(segs) == round(cycles * 2), (len(segs), cycles)   # segments = 유효 half-swing
@@ -300,7 +300,7 @@ def test_repetition_fps_degradation():
     print("  [fps degradation] freq=1.0Hz, 10s (expect ~9-10 cycles):")
     counts = {}
     for fps in (30, 20, 12, 8, 5, 3, 2):
-        c, r, _, _ = repetition_count(_sine_series(1.0, 10, fps), 1000, REP_PARAMS)
+        c, r, _, _, _ = repetition_count(_sine_series(1.0, 10, fps), 1000, REP_PARAMS)
         counts[fps] = c
         print(f"    fps={fps:2d} (samples/cycle={fps:2d}) -> cycles={c} rate={r if r is None else round(r,1)}")
     assert counts[30] >= 9, counts                 # 충분한 fps → true 10에 근접(~9.5)
@@ -312,7 +312,7 @@ def test_repetition_fps_degradation():
 def test_repetition_amplitude_gate():
     # 히스테리시스는 통과하나 사이클 진폭(20°) < minAmplitudeDeg(30°) → 0 카운트(거짓양성 제거).
     params = {**REP_PARAMS, "minAmplitudeDeg": 30, "hysteresisDeg": 5}
-    cycles, _, _, _ = repetition_count(_sine_series(1.0, 10, 30, amp=10.0), 1000, params)  # peak-to-peak 20
+    cycles, _, _, _, _ = repetition_count(_sine_series(1.0, 10, 30, amp=10.0), 1000, params)  # peak-to-peak 20
     assert cycles == 0, cycles
     print("ok: repetition amplitude gate (sub-threshold swing → 0)")
 
@@ -322,7 +322,7 @@ def test_repetition_gap_reset():
     seg1 = _sine_series(1.0, 5, 30)
     last = seg1[-1][0]
     seg2 = [(t + last + 3000, v) for (t, v) in _sine_series(1.0, 5, 30)]
-    cycles, rate, _, active = repetition_count(seg1 + seg2, 1000, REP_PARAMS)
+    cycles, rate, _, active, _run_starts = repetition_count(seg1 + seg2, 1000, REP_PARAMS)
     assert cycles > 0, cycles
     assert active < 11000, active   # ~2×5000ms (3000ms gap 제외) — gap 포함이면 >13000
     print(f"ok: repetition gap reset (active={active:.0f}ms excludes gap)")
@@ -330,7 +330,7 @@ def test_repetition_gap_reset():
 
 def test_repetition_min_observation():
     # 유효 관측 2초 < minObservationMs(3초) → rate None(짧은 클립 과대추정 방지).
-    cycles, rate, _, active = repetition_count(_sine_series(1.0, 2, 30), 1000, REP_PARAMS)
+    cycles, rate, _, active, _run_starts = repetition_count(_sine_series(1.0, 2, 30), 1000, REP_PARAMS)
     assert rate is None and active < 3000, (rate, active)
     print("ok: repetition min observation guard (short clip → rate None)")
 
@@ -341,7 +341,7 @@ def test_repetition_boundary_partial():
     # 중앙에서 시작 → peak(0.5s) → trough(1.5s): 진짜 반전 2개 = half-swing 1개 = 0.5 사이클(정확).
     # 시작 anchor를 반전으로 세면 1.0으로 부풀었음. 0.5로 나와야 phase-독립·경계 비편향.
     s = _sine_series(0.5, 2, 30)   # 0.5Hz·2초: midline→peak→trough
-    cycles, _, _, _ = repetition_count(s, 1000, REP_PARAMS)
+    cycles, _, _, _, _ = repetition_count(s, 1000, REP_PARAMS)
     assert cycles == 0.5, cycles
     print("ok: repetition boundary partial (mid-start up-down → 0.5 cycle, not inflated to 1)")
 
@@ -351,10 +351,103 @@ def test_repetition_slow_realistic():
     # anchor를 매 샘플 끌면 방향 초기화 실패로 0이 됐음. running min/max anchor면 정상 검출.
     per_frame = 35.0 * 2 * math.pi * 0.2 / 12  # ~3.66°/frame < hyst(5)
     assert per_frame < REP_PARAMS["hysteresisDeg"], per_frame
-    cycles, rate, _, _ = repetition_count(_sine_series(0.2, 30, 12, amp=35.0), 1000, REP_PARAMS)
+    cycles, rate, _, _, _ = repetition_count(_sine_series(0.2, 30, 12, amp=35.0), 1000, REP_PARAMS)
     assert 4.5 <= cycles <= 6.5, (cycles, rate)    # 30s×0.2Hz=6주기 → ~5.5 사이클(phase-독립)
     assert 10 <= rate <= 13, rate                  # ~11~12회/분(true 12에 근접)
     print(f"ok: repetition slow realistic 0.2Hz/12fps -> cycles={cycles} rate={rate:.1f}/min (per-frame {per_frame:.1f}°<hyst)")
+
+
+# ── 6.0-16 반복 밴드별 시간합(repetitiveMedium/FastHours) — band_ratios_from_segments 순수함수 ──────
+BAND_SPECS = [("repetitiveMediumHours", 4, 15), ("repetitiveFastHours", 15, None)]
+
+
+def _seg(a, b):
+    return {"startMs": a, "endMs": b}
+
+
+def test_band_ratios_medium_only():
+    # 사이클마다 온셋 간격 6000ms(r=10/분, medium) 4회 반복 → fast는 0, medium은 거의 전체.
+    segs = [_seg(0, 3000), _seg(3000, 6000), _seg(6000, 9000), _seg(9000, 12000),
+            _seg(12000, 15000), _seg(15000, 18000), _seg(18000, 21000), _seg(21000, 24000)]
+    out = band_ratios_from_segments(segs, run_starts=[0], active_ms=24000, band_specs=BAND_SPECS)
+    assert out["repetitiveFastHours"]["ratio"] == 0.0, out
+    assert 0.99 <= out["repetitiveMediumHours"]["ratio"] <= 1.0, out
+    print("ok: band_ratios medium-only (r=10/min 전체 medium)")
+
+
+def test_band_ratios_fast_only():
+    # 온셋 간격 1000ms(r=60/분, fast) 4회 반복 → medium은 0, fast는 거의 전체.
+    segs = [_seg(0, 500), _seg(500, 1000), _seg(1000, 1500), _seg(1500, 2000),
+            _seg(2000, 2500), _seg(2500, 3000), _seg(3000, 3500), _seg(3500, 4000)]
+    out = band_ratios_from_segments(segs, run_starts=[0], active_ms=4000, band_specs=BAND_SPECS)
+    assert out["repetitiveMediumHours"]["ratio"] == 0.0, out
+    assert 0.99 <= out["repetitiveFastHours"]["ratio"] <= 1.0, out
+    print("ok: band_ratios fast-only (r=60/min 전체 fast)")
+
+
+def test_band_ratios_burst_rest_mixed():
+    # 계획서 워크스루 그대로: 1s 사이클 2번 + 9s 휴지, 2블록 반복.
+    # c1(0-1000) c2(1000-2000) [rest 9000ms] c3(11000-12000) c4(12000-13000, 마지막=자체구간).
+    # c1->c2 간격=1000ms(r=60,fast) / c2->c3 간격=10000ms(r=6,medium) / c3->c4 간격=1000ms(r=60,fast)
+    # / c4(마지막) 자체구간=1000ms(r=60,fast) → fast=3000ms, medium=10000ms (medium 100%가 아님).
+    segs = [_seg(0, 500), _seg(500, 1000), _seg(1000, 1500), _seg(1500, 2000),
+            _seg(11000, 11500), _seg(11500, 12000), _seg(12000, 12500), _seg(12500, 13000)]
+    out = band_ratios_from_segments(segs, run_starts=[0], active_ms=13000, band_specs=BAND_SPECS)
+    assert approx(out["repetitiveFastHours"]["ratio"], 3000 / 13000, 1e-9), out
+    assert approx(out["repetitiveMediumHours"]["ratio"], 10000 / 13000, 1e-9), out
+    print(f"ok: band_ratios burst-rest mixed (fast={out['repetitiveFastHours']['ratio']:.4f} "
+          f"medium={out['repetitiveMediumHours']['ratio']:.4f}, medium 100% 아님)")
+
+
+def test_band_ratios_boundary_and_unassigned():
+    # r=4 정확히(간격 15000ms) → medium 하한 포함. r=15 정확히(간격 4000ms) → fast 하한 포함(medium 상한 배타).
+    # r<4(간격 15001ms, r≈3.9998) → 어느 밴드에도 미귀속.
+    segs_medium_edge = [_seg(0, 7500), _seg(7500, 15000), _seg(15000, 22500), _seg(22500, 30000)]
+    out1 = band_ratios_from_segments(segs_medium_edge, run_starts=[0], active_ms=30000, band_specs=BAND_SPECS)
+    assert approx(out1["repetitiveMediumHours"]["ratio"], 1.0, 1e-9), out1
+    assert out1["repetitiveFastHours"]["ratio"] == 0.0, out1
+
+    segs_fast_edge = [_seg(0, 2000), _seg(2000, 4000), _seg(4000, 6000), _seg(6000, 8000)]
+    out2 = band_ratios_from_segments(segs_fast_edge, run_starts=[0], active_ms=8000, band_specs=BAND_SPECS)
+    assert approx(out2["repetitiveFastHours"]["ratio"], 1.0, 1e-9), out2
+    assert out2["repetitiveMediumHours"]["ratio"] == 0.0, out2
+
+    segs_unassigned = [_seg(0, 7500.5), _seg(7500.5, 15001), _seg(15001, 22501.5), _seg(22501.5, 30002)]
+    out3 = band_ratios_from_segments(segs_unassigned, run_starts=[0], active_ms=30002, band_specs=BAND_SPECS)
+    assert out3["repetitiveMediumHours"]["ratio"] == 0.0, out3
+    assert out3["repetitiveFastHours"]["ratio"] == 0.0, out3
+    print("ok: band_ratios boundary(r=4/r=15 경계 포함) + r<4 미귀속")
+
+
+def test_band_ratios_odd_leftover_half_swing():
+    # 홀수 half-swing(5개) → 마지막 1개는 미완성 사이클로 그룹핑에서 제외(4개 케이스와 동일 결과).
+    segs4 = [_seg(0, 500), _seg(500, 1000), _seg(1000, 1500), _seg(1500, 2000)]
+    segs5 = segs4 + [_seg(2000, 2500)]
+    out4 = band_ratios_from_segments(segs4, run_starts=[0], active_ms=2500, band_specs=BAND_SPECS)
+    out5 = band_ratios_from_segments(segs5, run_starts=[0], active_ms=2500, band_specs=BAND_SPECS)
+    assert out4["repetitiveFastHours"]["ratio"] == out5["repetitiveFastHours"]["ratio"], (out4, out5)
+    assert out4["repetitiveMediumHours"]["ratio"] == out5["repetitiveMediumHours"]["ratio"], (out4, out5)
+    print("ok: band_ratios 홀수 잔여 half-swing 제외(그룹핑 불변)")
+
+
+def test_band_ratios_does_not_pair_across_run_boundary():
+    # 리뷰 회귀: run A(gap 이전)에 half-swing 1개(홀수 잔여)만 있고, run B(gap 이후)에 4개(2사이클)가
+    # 있을 때 — 전역 flat 리스트 기준으로 2개씩 묶으면 run A의 잔여와 run B의 첫 half-swing이 잘못
+    # 한 사이클로 묶여(간격 100500ms, r≈0.6→미귀속) run B의 마지막 half-swing(idx4)이 통째로 버려진다.
+    # run_starts로 run 경계를 지키면: run A는 기여 없음(단일 잔여), run B만 2사이클 모두 fast로 정상 계산.
+    segs = [
+        _seg(0, 1000),               # run A: half-swing 1개(홀수 잔여, gap 이전)
+        _seg(100000, 100500), _seg(100500, 101000),   # run B: 사이클1(온셋간격 1000ms, r=60, fast)
+        _seg(101000, 101500), _seg(101500, 102000),   # run B: 사이클2(마지막=자체구간 1000ms, r=60, fast)
+    ]
+    run_starts = [0, 1]  # idx0=run A 시작, idx1=run B 시작(gap 경계)
+    out = band_ratios_from_segments(segs, run_starts=run_starts, active_ms=4000, band_specs=BAND_SPECS)
+    # 올바른 계산: run B의 사이클 2개 모두 fast(각 1000ms) = 2000ms/4000ms = 0.5.
+    # 버그(run 경계 무시) 시: run A 잔여와 run B 첫 half-swing이 잘못 묶여 사이클1이 미귀속 처리되고
+    # run B 마지막 half-swing(idx4)이 버려져 fast=1000ms/4000ms=0.25로 나옴 — 이 값이면 실패.
+    assert approx(out["repetitiveFastHours"]["ratio"], 0.5, 1e-9), out
+    assert out["repetitiveMediumHours"]["ratio"] == 0.0, out
+    print(f"ok: band_ratios gap 경계 넘어 사이클 안 묶임(fast={out['repetitiveFastHours']['ratio']})")
 
 
 def _build_oscillating_arm_keypoints(freq, dur_s, fps, base_deg=45.0, amp_deg=35.0):
@@ -393,6 +486,93 @@ def test_repetition_endtoend_emit():
     sr2 = out2["features"]["shoulderRepetitionRate"]
     assert "LOW_FPS_FOR_REPETITION" not in sr2["warnings"], sr2
     print(f"ok: repetition end-to-end emit (5fps value={sr['value']} +LOW_FPS, 12fps no warning)")
+
+
+def _build_oscillating_both_arms_keypoints(freq_left, freq_right, dur_s, fps, base_deg=45.0, amp_deg=35.0):
+    """좌우 상완 거상각을 각각 다른 주파수로 독립 진동시키는 합성 keypoints(좌우 밴드 상이 검증용)."""
+    n, dt = int(dur_s * fps), round(1000 / fps)
+    frames = []
+    for i in range(n):
+        e_l = math.radians(base_deg + amp_deg * math.sin(2 * math.pi * freq_left * (i / fps)))
+        e_r = math.radians(base_deg + amp_deg * math.sin(2 * math.pi * freq_right * (i / fps)))
+        lx, ly, rr = 100.0, 200.0, 80.0
+        rx, ry = 300.0, 200.0
+        lex, ley = lx + rr * math.sin(e_l), ly + rr * math.cos(e_l)
+        rex, rey = rx + rr * math.sin(e_r), ry + rr * math.cos(e_r)
+        p = person({
+            "left_shoulder": (lx, ly), "left_elbow": (lex, ley), "left_wrist": (lex, ley + 80),
+            "right_shoulder": (rx, ry), "right_elbow": (rex, rey), "right_wrist": (rex, rey + 80),
+        })
+        p["trackId"] = None
+        p["bbox"] = [0.0, 0.0, 250.0, 100.0]
+        frames.append({"frameIndex": i, "timestampMs": i * dt, "persons": [p]})
+    return {
+        "schemaVersion": 1, "keypointConvention": "coco17", "coordinateSpace": "pixel",
+        "frameWidth": 640, "frameHeight": 480, "requestedFps": fps, "sampledFps": fps,
+        "source": {"clipRef": "synthetic-rep-both", "originalFps": 30, "totalFrames": n},
+        "model": {"detector": "d", "pose": "p", "inputSize": [192, 256],
+                  "modelName": "test", "modelVersion": "test", "preprocessConfigHash": "test"},
+        "frames": frames,
+    }
+
+
+def test_band_hours_endtoend_leftright_different():
+    # 좌=1.0Hz(60/분→fast 지배), 우=0.1Hz(6/분→medium 지배) — 밴드마다 다른 쪽이 max로 채택됨을 검증.
+    out = _run_feature_calc(_build_oscillating_both_arms_keypoints(1.0, 0.1, 30, 30))
+    f = out["features"]
+    assert f["repetitiveFastHoursLeft"]["value"] > 0.5, f["repetitiveFastHoursLeft"]
+    assert f["repetitiveMediumHoursLeft"]["value"] < 0.3, f["repetitiveMediumHoursLeft"]
+    assert f["repetitiveMediumHoursRight"]["value"] > 0.5, f["repetitiveMediumHoursRight"]
+    assert f["repetitiveFastHoursRight"]["value"] < 0.3, f["repetitiveFastHoursRight"]
+    # main 2키는 밴드별 독립 max(좌,우) — fast는 좌측이, medium은 우측이 지배.
+    assert approx(f["repetitiveFastHours"]["value"], f["repetitiveFastHoursLeft"]["value"], 1e-6), f
+    assert approx(f["repetitiveMediumHours"]["value"], f["repetitiveMediumHoursRight"]["value"], 1e-6), f
+    print(f"ok: band-hours 좌우 상이 (fast←L={f['repetitiveFastHoursLeft']['value']:.2f}, "
+          f"medium←R={f['repetitiveMediumHoursRight']['value']:.2f})")
+
+
+def test_band_hours_zero_vs_unassigned_observation():
+    # 관측 충분(active>=3000ms)한데 진동 없음(사이클 0) → 0 방출(미방출 아님).
+    out_zero = _run_feature_calc(_build_oscillating_arm_keypoints(0.0, 5, 30, amp_deg=0.0))
+    fz = out_zero["features"]
+    assert fz["repetitiveMediumHours"]["value"] == 0.0, fz["repetitiveMediumHours"]
+    assert fz["repetitiveFastHours"]["value"] == 0.0, fz["repetitiveFastHours"]
+    assert fz["repetitiveMediumHoursLeft"]["value"] == 0.0, fz["repetitiveMediumHoursLeft"]
+    assert "repetitiveMediumHoursRight" not in fz  # 우측 keypoint 자체가 없어 관측 불가 → 미방출
+    # 관측 자체 불충분(<3000ms) → 6키 전부 미방출(0 아님).
+    out_short = _run_feature_calc(_build_oscillating_arm_keypoints(0.0, 2, 30, amp_deg=0.0))
+    fs = out_short["features"]
+    for k in ("repetitiveMediumHours", "repetitiveFastHours",
+              "repetitiveMediumHoursLeft", "repetitiveMediumHoursRight",
+              "repetitiveFastHoursLeft", "repetitiveFastHoursRight"):
+        assert k not in fs, (k, fs)
+    print("ok: band-hours 0(관측충분+사이클0) vs 미방출(관측불충분) 분리")
+
+
+def test_band_hours_nyquist_gate():
+    # sampledFps=5 (<minFpsForReliableRate 10) → 6키 전부 미방출(경고로 대체 안 함).
+    out_low = _run_feature_calc(_build_oscillating_arm_keypoints(1.0, 10, 5))
+    fl = out_low["features"]
+    for k in ("repetitiveMediumHours", "repetitiveFastHours",
+              "repetitiveMediumHoursLeft", "repetitiveFastHoursLeft"):
+        assert k not in fl, (k, fl)
+    # sampledFps=12 (>=10) → 정상 방출(관측 충분한 fast 진동이므로 두 키 모두 존재).
+    out_ok = _run_feature_calc(_build_oscillating_arm_keypoints(0.5, 12, 12))
+    fo = out_ok["features"]
+    assert "repetitiveMediumHours" in fo and "repetitiveFastHours" in fo, fo
+    print("ok: band-hours Nyquist gate (5fps 전부 미방출, 12fps 정상 방출)")
+
+
+def test_band_hours_canonical_schema_validation():
+    # sideKeys(Left/Right)가 포함된 실제 Python 산출물이 canonical JSON schema(clip_features.schema.json)를
+    # 통과하는지 검증(6.0-16 fixture 직렬화 테스트 — Python/jsonschema 측. zod 측은 clipFeatures.test.ts).
+    from jsonschema import Draft7Validator
+    schema = json.loads((HERE / "schema" / "clip_features.schema.json").read_text(encoding="utf-8"))
+    out = _run_feature_calc(_build_oscillating_both_arms_keypoints(1.0, 0.1, 30, 30))
+    assert "repetitiveMediumHoursLeft" in out["features"] and "repetitiveFastHoursLeft" in out["features"], out
+    errors = list(Draft7Validator(schema).iter_errors(out))
+    assert not errors, [f"{'/'.join(str(p) for p in e.path)}: {e.message}" for e in errors]
+    print("ok: band-hours canonical JSON schema 검증(sideKeys 포함 실 산출물)")
 
 
 def _wb_person(coords):
@@ -480,6 +660,16 @@ if __name__ == "__main__":
     test_repetition_boundary_partial()
     test_repetition_slow_realistic()
     test_repetition_endtoend_emit()
+    test_band_ratios_medium_only()
+    test_band_ratios_fast_only()
+    test_band_ratios_burst_rest_mixed()
+    test_band_ratios_boundary_and_unassigned()
+    test_band_ratios_odd_leftover_half_swing()
+    test_band_ratios_does_not_pair_across_run_boundary()
+    test_band_hours_endtoend_leftright_different()
+    test_band_hours_zero_vs_unassigned_observation()
+    test_band_hours_nyquist_gate()
+    test_band_hours_canonical_schema_validation()
     test_wrist_angle_math()
     test_wrist_endtoend_emit()
     print("ALL PASS")

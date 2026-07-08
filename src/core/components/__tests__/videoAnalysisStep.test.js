@@ -21,7 +21,9 @@ import {
   buildVideoStatus,
 } from '../VideoAnalysisStep.jsx';
 import { getAggregationMethod } from '../../services/videoAggregate.js';
-import { getModuleSuggestions, getModuleCandidates } from '../../services/videoProvenance.js';
+import { getModuleSuggestions, getModuleCandidates, collectCandidateFeatures } from '../../services/videoProvenance.js';
+import { gateFeaturesByViewpoint } from '../../services/videoViewpointConfig.js';
+import { generateMockFeatures } from '../../services/videoMock.js';
 
 describe('척추 45°↑ 굴곡 candidate (작업 단위 표시)', () => {
   it('candidateMinutesPerDay: 비율×활동분 반올림, 활동시간 null → null', () => {
@@ -84,6 +86,21 @@ describe('척추 45°↑ 굴곡 candidate (작업 단위 표시)', () => {
     expect(out.map((c) => c.featureKey)).toEqual(['suspectedKneeTwist', 'vibrationToolUseDurationCandidate']);
     // task-scope 모듈 비활성이면 제외 없음
     expect(excludeTaskScopeCandidates(candidates, [])).toHaveLength(5);
+  });
+
+  it('6.0-16: Left/Right 4키가 candidate 파이프라인(mock→viewpoint fusion→collect→excludeTaskScope)을 탈락 없이 통과', () => {
+    const req = ['repetitiveMediumHoursLeft', 'repetitiveMediumHoursRight', 'repetitiveFastHoursLeft', 'repetitiveFastHoursRight'];
+    const raw = generateMockFeatures(req, 'repetition-upper-limb');
+    expect(Object.keys(raw).sort()).toEqual([...req].sort()); // profile 게이트 통과(mock 경로)
+    // viewpoint 하드게이트 대상 아님(VIEWPOINT_HARD_GATED_KEYS는 wrist 각도뿐) → 시점 무관 유지.
+    const { features, suppressedCandidates } = gateFeaturesByViewpoint(raw, []);
+    expect(Object.keys(features).sort()).toEqual([...req].sort());
+    expect(suppressedCandidates).toEqual([]);
+    // candidate 수집 → shoulder는 job-scope라 excludeTaskScopeCandidates(spine/cervical 제외)에서도 안 걸림.
+    const cands = collectCandidateFeatures(features, { processIds: ['p1'] });
+    expect(cands.map((c) => c.featureKey).sort()).toEqual([...req].sort());
+    const flat = excludeTaskScopeCandidates(cands, ['spine', 'cervical']);
+    expect(flat.map((c) => c.featureKey).sort()).toEqual([...req].sort());
   });
 
   it('flatCandidateLabel: 반복빈도(6.0-11)는 회/분 라벨, 그 외는 null(generic 렌더 유지)', () => {

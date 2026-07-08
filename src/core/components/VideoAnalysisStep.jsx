@@ -3,7 +3,10 @@
 // 서버 경로(clip→job→apply, audit·영속화)로, 그 외는 로컬로 처리한다(§8.2/§8.12).
 // 실제 추론은 M2에서 서버 셸에 연결된다.
 import { useMemo, useState, useRef, useEffect } from 'react';
-import { generateMockFeatures, REPETITION_FEATURE_KEYS, REPETITION_PROFILES, HAND_WRIST_FEATURE_KEYS } from '../services/videoMock';
+import { generateMockFeatures } from '../services/videoMock';
+import {
+  REPETITION_FEATURE_KEYS, REPETITION_PROFILES, HAND_WRIST_FEATURE_KEYS, REPETITION_BAND_FEATURE_KEYS,
+} from '../services/videoFeatureProfiles';
 import { gateFeaturesByViewpoint } from '../services/videoViewpointConfig';
 import { aggregateProcessFeatures, getAggregationMethod } from '../services/videoAggregate';
 import {
@@ -554,12 +557,15 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     const jobFeatures = buildJobFeatures(va.processes, processFeatures, { absolutePerDay });
     const candidateFeatures = processFeatures.flatMap((pf) => {
       const cands = collectCandidateFeatures(pf.features, { processIds: [pf.processId] });
-      // 반복빈도(어깨/팔꿈치)는 상지반복/손목 profile에서만, 손목(반복+각도)은 손목 profile에서만 노출
-      // (저fps·비-wholebody profile은 미신뢰). 6.0-11/6.0-10.
+      // 반복빈도(어깨/팔꿈치)는 상지반복/손목 profile에서만, 손목(반복+각도)은 손목 profile에서만,
+      // 어깨 반복 밴드별 시간합 Left/Right(6.0-16)는 상지반복 profile에서만 노출(저fps·비매칭 profile은
+      // 미신뢰). 6.0-11/6.0-10/6.0-16. 정상 경로에서는 이미 요청 생성·mock 단계에서 걸러지지만, raw
+      // result_features는 profile 무관하게 값을 포함할 수 있어(§"검증된 사실") 여기서 한 번 더 방어한다.
       const profile = (va.processes.find((p) => p.id === pf.processId) || {}).analysisProfile;
       return cands.filter((c) => {
         if (REPETITION_FEATURE_KEYS.has(c.featureKey)) return REPETITION_PROFILES.has(profile);
         if (HAND_WRIST_FEATURE_KEYS.has(c.featureKey)) return profile === 'hand-wrist';
+        if (REPETITION_BAND_FEATURE_KEYS.has(c.featureKey)) return profile === 'repetition-upper-limb';
         return true;
       });
     });
