@@ -18,6 +18,13 @@ let _state = {
 };
 let _getAccessToken = () => null;
 let _apiBaseUrl = '';
+let _lastRegisterAttempt = 0;
+
+// Server caps device registration at 5/hour per user (see server/src/middleware/rateLimit.ts).
+// The 5-minute flushQueue interval alone would send 12 attempts/hour, blowing through that
+// budget and (before this backoff existed) causing tryRegister to misread 429 as a hard
+// failure. Spacing retries out keeps steady-state polling comfortably under the server limit.
+const REGISTER_RETRY_INTERVAL_MS = 20 * 60 * 1000;
 
 // ── File helpers ─────────────────────────────────────────────────────────────
 
@@ -122,6 +129,10 @@ async function tryRegister() {
   const token = _getAccessToken();
   if (!token || !_state.publicKeyB64 || !_apiBaseUrl) return false;
 
+  const now = Date.now();
+  if (now - _lastRegisterAttempt < REGISTER_RETRY_INTERVAL_MS) return false;
+  _lastRegisterAttempt = now;
+
   try {
     const { data } = await httpPost(
       `${_apiBaseUrl}/api/devices/register`,
@@ -135,6 +146,15 @@ async function tryRegister() {
     console.log('[audit] device registration status:', newStatus);
     return newStatus === 'active';
   } catch (err) {
+    // 429 means the server is still reachable and the device may already be
+    // pending/approved — treat it as "try again later", not a hard failure.
+    // Demoting to 'error' here previously surfaced a misleading "device
+    // registration required" message even for devices already awaiting
+    // (or holding) admin approval.
+    if (err.status === 429) {
+      console.warn('[audit] tryRegister rate-limited, will retry in', REGISTER_RETRY_INTERVAL_MS / 60000, 'min:', err.message);
+      return false;
+    }
     console.error('[audit] tryRegister failed:', err.message);
     _state.status = 'error';
     return false;
@@ -232,8 +252,8 @@ async function recordAudit(entry) {
 
 // Attempt to flush the pending queue. Handles corrupt file gracefully.
 // Retries device registration for pending/error/unregistered statuses so
-// that admin approvals and transient network failures self-heal within the
-// 5-minute interval without requiring an app restart.
+// that admin approvals and transient network failures self-heal (within
+// REGISTER_RETRY_INTERVAL_MS) without requiring an app restart.
 async function flushQueue() {
   if (_state.status !== 'active') {
     await tryRegister(); // covers pending, error, unregistered
