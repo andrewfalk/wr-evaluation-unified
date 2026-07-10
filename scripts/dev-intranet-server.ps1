@@ -18,6 +18,15 @@ param([switch]$SkipSharedBuild)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 
+# PATH 방어: dev-stack-up.ps1이 이미 보강했으면 중복 없이 통과하고, 이 스크립트를 단독 기동
+# (pwsh -File scripts/dev-intranet-server.ps1)했는데 그 셸의 PATH가 오래돼 Node가 안 잡히는
+# 경우에도 npm run build/node dist/index.js가 실패하지 않도록 표준 설치 경로를 보강한다.
+$nodeDir = 'C:\Program Files\nodejs'
+if ((Test-Path $nodeDir) -and (($env:Path -split ';') -notcontains $nodeDir)) {
+  Write-Host "[dev-intranet] PATH에 Node.js 없음 — 보강: $nodeDir" -ForegroundColor Yellow
+  $env:Path = "$nodeDir;$env:Path"
+}
+
 # 1) 루트 .env 로드 → 현재 프로세스 환경에 주입(주석/빈 줄 무시).
 $envFile = Join-Path $root '.env'
 if (-not (Test-Path $envFile)) { throw ".env not found at $envFile" }

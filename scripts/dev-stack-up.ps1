@@ -13,6 +13,16 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 
+# PATH 방어: 이 스크립트를 실행한 셸이 오래 떠 있어 Node 설치 이후로 PATH가 갱신 안 됐어도
+# node/npm이 잡히도록 표준 설치 경로를 보강한다(이미 PATH에 있으면 중복 추가 안 함). 아래에서
+# 새 창(server/web)을 Start-Process로 띄울 때 이 프로세스의 $env:Path를 그대로 물려받으므로,
+# 여기서 한 번만 고치면 두 자식 창 모두에 적용된다.
+$nodeDir = 'C:\Program Files\nodejs'
+if ((Test-Path $nodeDir) -and (($env:Path -split ';') -notcontains $nodeDir)) {
+  Write-Host "[dev-stack] PATH에 Node.js 없음 — 보강: $nodeDir" -ForegroundColor Yellow
+  $env:Path = "$nodeDir;$env:Path"
+}
+
 # 공유 계약(shared → dist) 먼저 빌드. @contracts(shared/dist)는 gitignore라 pull로 갱신 안 되고
 # 서버/웹 둘 다 import하므로 계약 변경 반영엔 선빌드가 필수. 두 창 띄우기 전에 동기 1회 빌드해
 # 레이스(두 창이 동시에 shared/dist를 쓰는 것)를 막고, 서버 창엔 -SkipSharedBuild로 중복 빌드 생략.
@@ -31,8 +41,12 @@ Start-Process pwsh -ArgumentList @(
 ) -WorkingDirectory $root
 
 Write-Host "[dev-stack] 4/4 웹 클라 :3000 (새 창)…" -ForegroundColor Cyan
+# 서버 창(-File)과 달리 이건 inline -Command라 파일 기반 PATH 방어 스니펫을 못 쓴다. 부모 프로세스의
+# 고친 $env:Path가 Start-Process 자식에 항상 그대로 상속된다는 보장이 이 환경에서 깨지는 걸 실측
+# 했으므로(서버 창은 되는데 이 창만 안 됨 — 원인 미상), 자식이 스스로 한 번 더 PATH를 보강하게 한다.
+$webCommand = "if ((`$env:Path -split ';') -notcontains '$nodeDir') { `$env:Path = '$nodeDir;' + `$env:Path }; npm run dev"
 Start-Process pwsh -ArgumentList @(
-  '-NoExit', '-Command', 'npm run dev'
+  '-NoExit', '-Command', $webCommand
 ) -WorkingDirectory $root
 
 Write-Host ""

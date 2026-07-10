@@ -1,8 +1,8 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 6.1.4
-> **Last Updated:** 2026-06-30
-> **Status:** 인트라넷 운영 중 · EMR 추출(재해일자별 신청건 매칭·성별 자동입력)/직접입력 개선 · 일괄입력 빈 양식 상시 제공 · M4 영상분석 시범 운영(참고용, 미검증 배너 — 상세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md`)
+> **Version:** 6.1.5
+> **Last Updated:** 2026-07-10
+> **Status:** 인트라넷 운영 중 · EMR 추출(재해일자별 신청건 매칭·성별 자동입력)/직접입력 개선 · 일괄입력 빈 양식 상시 제공 · M4 영상분석 시범 운영(참고용, 미검증 배너 — 어깨 반복 시간합 계산기 + 공정별 값 표시 추가, 상세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md`)
 
 ---
 
@@ -2062,6 +2062,15 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 ---
 
 ## 변경 이력
+
+### v6.1.5 (2026-07-10) — 영상분석 어깨 반복 시간합 계산기 + 공정별 값 표시 (6.0-16·6.0-17)
+
+사용자 테스트 중 발견된 두 요청 반영: ①`repetitiveMediumHours`/`repetitiveFastHours`가 계약·모듈 필드·집계·환산까지 전부 배선돼 있는데 계산기만 없던 문제 ②결과 패널이 직업 단위 공정 가중합 1개 값만 보여줘 공정(작업)별 분해값을 원하는 요청.
+
+- **6.0-16 어깨 반복 시간합 계산기**: 사이클(연속 half-swing 2개)의 온셋 간격(이 사이클 시작 turning-point → 다음 사이클 시작 turning-point)을 순간빈도 r=60000/간격ms로 medium(4≤r<15)/fast(r≥15)로 밴딩·귀속(마지막 사이클은 자체 구간). `feature_calc.py`에 순수함수 `band_ratios_from_segments` 분리, 연속 관측 구간(run) 경계를 넘어 half-swing이 잘못 한 사이클로 묶이지 않도록 `repetition_count`가 run 경계를 함께 반환. 좌/우 독립 계산 후 기존 계약 키인 main 2키(mode auto)는 밴드별 독립 max(좌,우), 신규 candidate 4키(Left/Right)는 raw ratio 그대로 노출. 어깨 반복 계열 6키 전부 "상지반복(10~15fps)" 프로필에서만 요청·생성·표시되도록 신규 `videoFeatureProfiles.js`가 프로필 정책 단일 source로 요청 생성·mock 생성·candidate 필터 세 지점에 배선.
+- **6.0-17 공정별 값 표시**: 직업 단위 제안(무릎·어깨) 각 행 아래 공정별 분해 서브행 추가 — 기여값(직업 합계에 이 공정이 보탠 몫, 집계와 동일 산식 재사용) + 원값(공정 자체 per-day) 병기, 서브행 합은 항상 직업 합계와 정합. flat 참고 후보(어깨·팔꿈치·손목 반복/peak + 신규 Left/Right 4키)는 featureKey별로 그룹핑해 헤더 1개 + 공정별 서브행으로 재구성(이전엔 공정마다 라벨이 중복 노출). `VideoAnalysisDataSchema`에 optional `processFeatureAggregationMode`(`shareWeighted`|`absolutePerDay`) 신규 — 기존에는 집계 호출 인자일 뿐 저장되지 않아 리로드 후 서브행 기여값 재계산이 틀어지는 문제를 해결(구 데이터는 서브행 생략 + fallback 안내로 fail-safe).
+- 검증: Python(services/pose-inference) 전체 PASS(버스트-휴지 혼합귀속·gap 경계 회귀 포함) + 클라이언트 836 tests pass + server 544 tests pass, `build:web`/`lint`(0 errors) 통과. dev 라이브(Playwright, mock intranet 서버)로 공정 2개(점유율·활동시간 상이) 구성 시 서브행 기여값 합이 직업 합계와 정확히 산술 일치함을 실측(예: 1.2h+0.8h=2h). 브라우저 리로드 E2E는 mock 서버가 patients CRUD 미구현이라 JSON 직렬화 왕복 스키마 테스트로 대체.
+- 파라미터(minAmplitudeDeg 등, 기존 shoulderRepetitionRate와 동일 시작값)는 6.0-B2 정확도 검증 전까지 잠정. 상세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md` 6.0-16/6.0-17 항목. **Electron 셸 무변경 → 인트라넷 설치본 재배포 불필요(서버 이미지만 갱신)** — `repetitiveMediumHours`/`FastHours` 메인 2키는 계약에 이미 등록돼 있던 기존 키라 구버전 Electron 클라이언트도 이미 요청 중이었고(값만 새로 채워짐), 신규 Left/Right 4키·서브행 UI·`processFeatureAggregationMode`는 구버전 클라가 모르는 채로 안전하게 무시됨(zod 기본 동작 — 알 수 없는 필드는 strip). 오프라인 패키지의 `electron/` 폴더는 v6.1.4 인스톨러를 그대로 재사용.
 
 ### v6.1.4 (2026-06-30) — EMR 재해일자 매칭 회귀 수정 + 일괄입력 빈 양식 다운로드
 

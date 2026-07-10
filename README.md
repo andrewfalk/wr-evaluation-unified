@@ -1,6 +1,6 @@
 # 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 6.1.4 | **Status:** 인트라넷 운영 중 · EMR 추출(재해일자별 신청건 매칭·성별 자동입력)/직접입력 개선 · 일괄입력 빈 양식 상시 제공 · M4 영상분석 시범 운영(참고용, 미검증 배너 — 상세는 [docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md](docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md))
+> **Version:** 6.1.5 | **Status:** 인트라넷 운영 중 · EMR 추출(재해일자별 신청건 매칭·성별 자동입력)/직접입력 개선 · 일괄입력 빈 양식 상시 제공 · M4 영상분석 시범 운영(참고용, 미검증 배너 — 어깨 반복 시간합 계산기 + 공정별 값 표시 추가, 상세는 [docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md](docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md))
 
 직업환경의학 전문의가 **업무상 질병 인정 여부를 판단**할 때 사용하는 통합 평가 도구.
 무릎(슬관절), 척추(요추 MDDM(BK2108) + 전신진동 BK2110), 경추(목 BK2109), 팔꿈치(주관절 BK2101/2103/2105/2106), 어깨(견관절 BK2117), 손목(수관절 BK2113/2101/2103/2106) 평가를 지원하며, 향후 고관절 등을 플러그인 형태로 확장할 수 있다.
@@ -560,6 +560,12 @@ ICD 코드 기반 모듈 자동 추천:
 ---
 
 ## 변경 이력
+
+### v6.1.5 (2026-07-10) — 영상분석 어깨 반복 시간합 계산기 + 공정별 값 표시 (6.0-16·6.0-17)
+
+- **어깨 반복 시간합 계산기(6.0-16)**: 계약·모듈 필드·집계·환산까지 배선만 돼 있고 계산기가 없던 `repetitiveMediumHours`/`repetitiveFastHours`(상완거상 반복 4~14회·15회↑ 시간합) 구현 — 사이클(half-swing 2개) 온셋 간격을 순간빈도로 밴딩(medium 4~15회/분, fast 15회/분↑). 좌/우 개별 표시용 candidate 4키(`repetitiveMedium/FastHoursLeft/Right`) 신규. 어깨 반복 계열 6키 전부 "상지반복" 프로필에서만 요청·생성·표시(신규 `videoFeatureProfiles.js`가 프로필 정책 단일 source).
+- **공정별 값 표시(6.0-17)**: 직업 단위 제안(무릎·어깨) 각 행 아래 공정별 기여값+원값 서브행 병기(서브행 합=직업 합계 정합). flat 참고 후보는 featureKey별로 그룹핑해 헤더 1개 + 공정별 서브행으로 재구성(이전엔 공정마다 라벨이 중복 노출). `processFeatureAggregationMode` 계약 필드 신규 — 리로드 후에도 공정별 기여값 재계산이 정확하도록 분석 소스(mock/서버)를 영속화.
+- 검증: Python(services/pose-inference) 전체 PASS(버스트-휴지·gap 경계 회귀 포함), 클라이언트 836 tests pass, `build:web`/`lint` 통과. dev 라이브(Playwright)로 공정별 기여값 합=직업 합계 수치 정합 확인. **Electron 셸 무변경 → 인트라넷 설치본 재배포 불필요(서버 이미지만 갱신, 오프라인 패키지의 `electron/` 폴더는 v6.1.4 인스톨러 재사용)**. 상세는 [docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md](docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md) 6.0-16/6.0-17 항목.
 
 ### v6.1.4 (2026-06-30) — EMR 재해일자 매칭 회귀 수정 + 일괄입력 빈 양식 다운로드
 
