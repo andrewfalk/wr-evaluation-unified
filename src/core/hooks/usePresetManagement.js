@@ -3,9 +3,10 @@ import { loadAllPresets, normalizeBuiltinPreset, saveCustomPreset, deleteCustomP
 import { getModule } from '../moduleRegistry';
 import { touchPatientRecord } from '../services/patientRecords';
 import { showAlert, showConfirm } from '../utils/platform';
+import { canEditPatient } from '../utils/patientOwnership';
 import { FALLBACK_PRESETS } from '../../modules/knee/utils/data';
 
-export function usePresetManagement({ activeId, activeModules, session, setPatients }) {
+export function usePresetManagement({ activeId, activePatient, activeModules, session, setPatients }) {
   const [presets, setPresets] = useState([]);
   const [presetMeta, setPresetMeta] = useState(null);
   const [presetError, setPresetError] = useState(null);
@@ -34,13 +35,22 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
   ), []);
 
   const handlePresetSelect = useCallback(async (jobId, preset) => {
+    // 1차 방어: 비담당 환자에는 프리셋을 적용하지 않는다. StepContent의 UI 차단(클릭/키보드)이
+    // 정상 흐름에서 이 함수 호출 자체를 막지만, 여기 도달했다면(우회 경로) 조용히 무시하지 않고
+    // 거짓 성공 알림("프리셋이 적용되었습니다") 없이 명확히 알린다.
+    if (!canEditPatient(activePatient, session)) {
+      await showAlert('담당 의사가 아니므로 프리셋을 적용할 수 없습니다.');
+      return;
+    }
+
     const applicableModuleIds = (activeModules || []).filter(moduleId => {
       const mod = getModule(moduleId);
       return mod?.presetConfig?.applyToModule && preset.modules?.[moduleId];
     });
 
     setPatients(prev => prev.map(p => {
-      if (p.id !== activeId) return p;
+      // 2차 방어: 초입 검사와 setState 실행 사이의 레이스(그 사이 환자 전환 등) 대비.
+      if (p.id !== activeId || !canEditPatient(p, session)) return p;
       const newModules = { ...p.data.modules };
       for (const moduleId of (p.data.activeModules || [])) {
         const mod = getModule(moduleId);
@@ -63,7 +73,7 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
     } else {
       await showAlert(`프리셋 "${preset.jobName}"을 선택했지만 현재 활성 모듈과 겹치는 저장 데이터가 없습니다.`);
     }
-  }, [activeId, activeModules, formatModuleNames, session, setPatients]);
+  }, [activeId, activePatient, activeModules, formatModuleNames, session, setPatients]);
 
   const handleSaveCustomPreset = useCallback(async (preset, feedback = {}) => {
     const savedPreset = await saveCustomPreset(preset, { replaceModules: feedback.replaceModules }, session);

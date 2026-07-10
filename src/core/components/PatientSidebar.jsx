@@ -4,6 +4,7 @@ import { isPatientComplete } from '../utils/patientCompletion';
 import { formatBirthDate } from '../utils/data';
 import { isRedactedPatientRecord } from '../services/patientRecords';
 import { canDeletePatient } from '../utils/patientOwnership';
+import { getDoctorOptionsFromRoster } from '../utils/dashboardStats';
 
 const DEFAULT_SORT_DIRECTION = {
   default: 'asc',
@@ -55,7 +56,9 @@ export function getUnassignedBadgeInfo(patient) {
 
 export function buildAssignmentBannerMessage(unassignedCount, scope) {
   if (!unassignedCount) return null;
-  const hint = scope === 'mine'
+  // 'all'/'__unassigned__' 이외(내 담당·특정 의사)에서는 미배정 환자가 목록에 없으므로
+  // "전체 보기로 전환" 힌트가 유효 — 의사별 필터 도입으로 'mine' 외의 특정 의사 스코프도 포함.
+  const hint = (scope !== 'all' && scope !== '__unassigned__')
     ? '전체 보기로 전환하여 확인하세요.'
     : '목록에서 미배정 배지를 확인하세요.';
   return `담당의 배정이 필요한 환자 ${unassignedCount}건이 있습니다. ${hint}`;
@@ -213,6 +216,7 @@ export function PatientSidebar({
   onResolveConflict,
   scope = 'mine',
   onScopeChange,
+  doctorRoster = { doctors: [], unassignedCount: 0 },
   session,
   serverUnassignedCount = null,
 }) {
@@ -220,6 +224,10 @@ export function PatientSidebar({
   const allModules = useMemo(() => getAllModules(), []);
   const nameWarningMap = useMemo(() => buildPatientNameWarningMap(patients), [patients]);
   const canUseMineScope = session?.user?.role === 'doctor';
+  const { options: doctorOptions, myCount } = useMemo(
+    () => getDoctorOptionsFromRoster(doctorRoster, { currentUserId: session?.user?.id }),
+    [doctorRoster, session?.user?.id]
+  );
 
   const {
     searchQuery = '',
@@ -282,18 +290,22 @@ export function PatientSidebar({
 
         <div className="sidebar-filter">
           {session?.mode === 'intranet' && (
-            <div className="patient-scope-toggle">
-              {canUseMineScope && (
-                <button
-                  className={`patient-scope-btn${scope === 'mine' ? ' patient-scope-btn--active' : ''}`}
-                  onClick={() => onScopeChange?.('mine')}
-                >내 담당</button>
+            <select
+              className="patient-scope-select patient-scope-select--sidebar"
+              value={scope}
+              onChange={e => onScopeChange?.(e.target.value)}
+              aria-label="담당 의사별 환자 필터"
+            >
+              {canUseMineScope && <option value="mine">{`내 담당 (${myCount}명)`}</option>}
+              <option value="all">전체 환자</option>
+              {doctorOptions.map(o => (
+                <option key={o.key} value={o.key}>{`${o.label} (${o.count}명)`}</option>
+              ))}
+              {/* roster 미로드 시점에 scope가 아직 옵션에 없으면 select 공백을 방지하는 폴백 */}
+              {scope !== 'all' && scope !== 'mine' && !doctorOptions.some(o => o.key === scope) && (
+                <option value={scope} hidden>불러오는 중…</option>
               )}
-              <button
-                className={`patient-scope-btn${scope === 'all' ? ' patient-scope-btn--active' : ''}`}
-                onClick={() => onScopeChange?.('all')}
-              >전체</button>
-            </div>
+            </select>
           )}
 
           <input

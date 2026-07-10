@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { computeDashboardStats, getDoctorPatientCounts, getDoctorOptionsFromRoster, UNASSIGNED_GROUP_KEY } from '../utils/dashboardStats';
 import { getAllModules } from '../moduleRegistry';
 import { isMyPatient, getOwnerGroupKey } from '../utils/patientOwnership';
@@ -299,13 +299,8 @@ const Dashboard = ({
     [scopedPatients, scope]
   );
 
-  // 명부 갱신 후 선택한 의사가 옵션에서 사라지면 scope를 'all'로 되돌리는 가드.
-  // 유효값 = 'all' + (doctor일 때만)'mine' + 현재 명부의 의사/미배정 key.
-  useEffect(() => {
-    if (!canUseScope) return;
-    const validScopes = new Set(['all', ...(isDoctor ? ['mine'] : []), ...doctorOptions.map(o => o.key)]);
-    if (!validScopes.has(scope)) onScopeChange?.('all');
-  }, [canUseScope, doctorOptions, scope, onScopeChange, isDoctor]);
+  // scope 유효성 가드는 App.jsx에서 사이드바(patientScope)와 함께 통합 관리한다
+  // (여기서 별도로 'all' 복귀시키면 App의 'mine' 복귀 정책과 충돌하므로 제거).
 
   // 'all' 전용: 의사별 환자 수 Top 5
   const doctorCounts = useMemo(

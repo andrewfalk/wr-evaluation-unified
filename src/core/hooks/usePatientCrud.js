@@ -19,7 +19,9 @@ export function usePatientCrud({
   const updatePatient = (updater) => {
     // 권한 없는 환자에는 silent guard. UI(fieldset disabled)와 사이드바 게이팅이
     // 정상 흐름에서 호출 자체를 차단하므로, 여기에 도달하면 우회 경로(EMR import,
-    // preset select, conflict resolve 등) — 조용히 무시해 잘못된 setState/sync 방지.
+    // conflict resolve 등) — 조용히 무시해 잘못된 setState/sync 방지.
+    // (참고: preset select는 이 함수를 거치지 않는 별도 경로 — usePresetManagement.js의
+    // handlePresetSelect가 자체적으로 canEditPatient 가드를 갖는다.)
     const activePatient = patients.find(p => p.id === activeId);
     if (!canEditPatient(activePatient, session)) return;
 

@@ -1,8 +1,8 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 6.1.5
+> **Version:** 6.1.6
 > **Last Updated:** 2026-07-10
-> **Status:** 인트라넷 운영 중 · EMR 추출(재해일자별 신청건 매칭·성별 자동입력)/직접입력 개선 · 일괄입력 빈 양식 상시 제공 · M4 영상분석 시범 운영(참고용, 미검증 배너 — 어깨 반복 시간합 계산기 + 공정별 값 표시 추가, 상세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md`)
+> **Status:** 인트라넷 운영 중 · 환자 목록 의사별 필터 + 비담당 환자 열람성(복사/스크롤) 개선 · EMR 추출(재해일자별 신청건 매칭·성별 자동입력)/직접입력 개선 · 일괄입력 빈 양식 상시 제공 · M4 영상분석 시범 운영(참고용, 미검증 배너 — 어깨 반복 시간합 계산기 + 공정별 값 표시 추가, 상세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md`)
 
 ---
 
@@ -58,7 +58,7 @@
 | AI | Google Gemini API + Claude API (Vercel 서버리스 / Electron IPC / 인트라넷 서버 프록시) |
 | 내보내기 | xlsx (엑셀), html2pdf.js (PDF), jszip |
 | 폰트 | Pretendard (CDN), Noto Sans KR (fallback) |
-| 테스트 | Vitest (renderer + electron) |
+| 테스트 | Vitest (renderer + electron), node 환경 기본 + jsdom·@testing-library/react·user-event로 컴포넌트/훅 렌더링 테스트 (v6.1.6+) |
 
 #### 백엔드 / 인프라 (인트라넷 모드, v5.0.0 신규)
 
@@ -1273,7 +1273,7 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 - **클라이언트 헬퍼** `canEditPatient` / `canDeletePatient` — 로컬 모드는 단일 사용자라 항상 true, redacted는 항상 false
 - 신규 환자 생성 시 doctor 세션이면 `assignedDoctorUserId` 자동 mirroring → sync 전에도 본인 환자 정상 수정
 - 동기화 시 403 받은 환자는 빨간 배너 표시, 정상 sync 시 자동 해제
-- StepContent 평가 영역을 HTML `inert`로 감싸 비담당 환자의 키보드/포커스/스크린리더 접근 차단
+- StepContent 평가 영역: 비담당 환자는 capture-phase 이벤트 핸들러(클릭/키보드/입력/붙여넣기/드롭)로 편집 상호작용만 차단 — 텍스트 선택(복사)·스크롤은 허용 (v6.1.6, 이전엔 HTML `inert`로 감싸 복사·스크롤까지 막았음)
 
 ### 12.A.10-B Workspace Autosave 정책 (v5.1.1 추가)
 
@@ -2062,6 +2062,16 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 ---
 
 ## 변경 이력
+
+### v6.1.6 (2026-07-10) — 환자 목록 의사별 필터 + 비담당 환자 열람성(복사/스크롤) 개선
+
+인트라넷 다중 사용자 환경에서 보고된 두 가지 불편 반영: ① 환자 목록 필터가 "내 담당"/"전체" 둘뿐이라 특정 동료 의사의 환자만 골라 볼 수 없음(대시보드 통계는 이미 의사별 드롭다운 지원) ② 비담당 환자를 조회할 때 HTML `inert` 속성이 텍스트 선택(복사)과 스크롤까지 막아, 내용이 길면 아예 읽을 수조차 없었음.
+
+- **환자 목록 의사별 필터 드롭다운**: `PatientSidebar`의 "내 담당"/"전체" 버튼 토글을 `Dashboard`와 동일한 패턴의 `<select>`(전체/내 담당/의사별/미배정)로 교체. 서버 `GET /api/patients?scope=<의사UUID>`·`GET /api/patients/doctor-counts`(의사 명부)는 이미 완비돼 있어 프론트만 수정. `App.jsx`의 `onScopeChange` 정규화 로직이 admin의 의사별/미배정 선택을 무조건 `all`로 되돌리던 기존 버그를 `normalizePatientScopeForSession`으로 교체해 수정. 명부 로딩 상태를 `doctorRosterStatus: 'loading' | 'ready' | 'error'`로 명시적으로 구분해(기존엔 빈 배열 하나로 로딩 전/정상 빈 결과/조회 실패를 구분 못함) scope 유효성 가드가 정상 빈 명부(마지막 의사의 환자 전원 재배정 등)를 로딩 중으로 오인하지 않게 함. `Dashboard.jsx`의 자체 가드(→`all` 복귀)를 제거하고 `App.jsx`의 통합 가드(→`getDefaultPatientScope` 복귀)로 일원화해 두 컴포넌트 간 정책 충돌을 없앰. roster 가드 로직은 `src/core/utils/patientScope.js`로 순수 함수 분리.
+- **비담당 환자 복사·스크롤 허용**: `StepContent.jsx`가 비담당 환자 조회 시 전체 콘텐츠를 `<div inert>`로 감싸던 것을 capture-phase 이벤트 핸들러(`onClickCapture`/`onKeyDownCapture`/`onBeforeInputCapture`/`onInputCapture`/`onChangeCapture`/`onPasteCapture`/`onCutCapture`/`onDropCapture`/`onSubmitCapture`)로 교체 — 편집 상호작용(클릭, 폼 컨트롤 값 변경, 붙여넣기, 드롭)만 차단하고 텍스트 선택(복사)·스크롤(휠/키보드)은 그대로 허용. `<select>`/숫자·날짜 input의 방향키·증감 키처럼 click이나 beforeinput 없이 값이 바뀌는 경로는 keydown 단계에서 선제 차단. `data-readonly-allow` 속성으로 향후 조회 전용 컨트롤 예외 통로 마련. 서버(`assignedDoctorOrAdmin` 403)와 `usePatientCrud`의 silent guard가 실제 데이터 변경의 최종 방어선은 그대로 유지.
+- **프리셋 적용 권한 가드 보강**: `usePresetManagement`의 `handlePresetSelect`가 `canEditPatient` 검사 없이 `setPatients`를 직접 호출해(UI 차단을 우회하면 비담당 환자에도 프리셋이 적용될 수 있던 경로) 담당의 권한 가드를 함수 초입 + `setPatients` 내부 2단으로 추가. 비담당 환자에 적용 시도하면 거짓 성공 알림("프리셋이 적용되었습니다") 없이 명확한 차단 알림을 표시.
+- **테스트 인프라 신규 도입**: 이 저장소에 컴포넌트/훅을 실제 렌더링해 검증하는 테스트가 없었음(기존 관례는 컴포넌트에서 export한 순수 함수만 테스트) — `jsdom` + `@testing-library/react`/`user-event`를 devDependency로 추가하고 `vitest.config.js`에 `@vitejs/plugin-react` + `.test.jsx` 포함을 추가(파일별 `// @vitest-environment jsdom` opt-in, 기존 순수 함수 테스트는 계속 빠른 `node` 환경 유지). jsdom이 `<select>` 방향키·number input 스피너 같은 네이티브 위젯 동작 자체를 구현하지 않는다는 걸 실측으로 확인해, 그런 경우엔 "DOM 표시값 불변"이 아니라 `event.defaultPrevented`를 직접 검증하는 방식으로 테스트를 설계(로직을 일부러 깨서 실패하는지까지 검증). `patientScope.js`/`StepContent`/`PatientSidebar`/`usePresetManagement`에 대한 신규 테스트 36건 추가.
+- 검증: 클라이언트 `npx vitest run` 872 tests pass(신규 36건 포함), `npm run build:web` 통과. 서버 라우트·Electron 셸(`electron/*.js`) 모두 무변경 — 인트라넷 Electron 클라이언트는 서버를 `loadURL`로 로드하는 구조라(프론트 번들을 자체 포함하지 않음) **인트라넷 설치본 재배포 불필요, 서버 이미지만 재배포하면 프론트엔드 변경이 즉시 반영됨.**
 
 ### v6.1.5 (2026-07-10) — 영상분석 어깨 반복 시간합 계산기 + 공정별 값 표시 (6.0-16·6.0-17)
 
