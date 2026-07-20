@@ -309,7 +309,7 @@ MDDM (Mainz-Dortmund Dose Model) 독일 직업성 요추 질환 평가 모델 �
 
 ## 디렉토리 구조
 
-> **v5.0.0 기준** — 인트라넷 백엔드, 디바이스 감사, 동기화 hooks/services, 배포 스크립트 등이 추가됨.
+> **v6.1.6 기준** — 인트라넷 백엔드, 6개 신체 부위 평가 모듈, 영상 분석 파이프라인, EMR 연동 및 운영·배포 구성을 반영함.
 
 ```
 wr-evaluation-unified/
@@ -317,19 +317,21 @@ wr-evaluation-unified/
 ├── docker-compose.prod.yml             # 프로덕션 오버레이 (포트 미노출, healthcheck)
 ├── .env.production.example             # 프로덕션 env 템플릿
 │
-├── server/                             # API 백엔드 (v5.0.0 신규)
+├── server/                             # 인트라넷 API 백엔드
 │   ├── Dockerfile
-│   ├── migrations/                     # 15개 SQL migration
-│   │   ├── 0001_initial.sql ... 0015_backfill_assigned_doctor_from_payload.sql
+│   ├── migrations/                     # 0001~0023 SQL migration
+│   │   └── 0001_init.sql ... 0023_share_existing_presets.sql
 │   ├── src/
-│   │   ├── index.ts                    # Express 진입점, 두 개의 pool (메인 + audit reader)
+│   │   ├── index.ts                    # Express 진입점
 │   │   ├── config.ts                   # 환경변수 검증
 │   │   ├── middleware/
 │   │   │   ├── auth.ts                 # JWT 검증
 │   │   │   ├── audit.ts                # writeAuditLog 헬퍼
 │   │   │   ├── corsMiddleware.ts
 │   │   │   ├── rateLimit.ts
-│   │   │   └── security.ts
+│   │   │   ├── patientAccess.ts        # 환자 접근 권한 검사
+│   │   │   ├── csrf.ts, csp.ts         # CSRF/CSP 보안 정책
+│   │   │   └── adminOnly.ts
 │   │   ├── routes/
 │   │   │   ├── auth.ts                 # /api/auth (login, refresh, signup-request, change-password)
 │   │   │   ├── patients.ts             # /api/patients (CRUD + 충돌 감지)
@@ -339,8 +341,10 @@ wr-evaluation-unified/
 │   │   │   ├── audit.ts                # /api/audit (POST 서명된 감사 로그 수신)
 │   │   │   ├── devices.ts              # /api/devices/register
 │   │   │   ├── ai.ts                   # /api/ai (Gemini/Claude 프록시)
-│   │   │   └── opsStatus.ts            # /api/ops/* (백업 상태, alert)
-│   │   ├── jobs/                       # 백그라운드 잡 (workspace retention 등)
+│   │   │   ├── opsStatus.ts            # /api/ops/* (백업 상태, alert)
+│   │   │   └── videoAnalysis.ts        # 영상 업로드·분석·결과 API
+│   │   ├── jobs/                       # 보존 정책·영상 클립 정리 잡
+│   │   ├── workers/                    # 영상 업로드, 레시피 검증, 분석 worker
 │   │   ├── db/                         # patient_persons, assigned_doctor 해결 등
 │   │   └── cli/                        # seedAdmin, runRetention
 │   └── package.json
@@ -367,18 +371,20 @@ wr-evaluation-unified/
 │   ├── install-prod.ps1                # Windows 자동 설치
 │   ├── set-build-target.mjs            # standalone/intranet 빌드 타깃 토글
 │   ├── verify-csp.mjs                  # CSP 헤더 검증
-│   └── mock-intranet-server.mjs        # 개발용 mock 서버
+│   ├── mock-intranet-server.mjs        # 개발용 mock 서버
+│   ├── fetch-pose-weights.ps1          # pose inference 모델 준비
+│   └── videoValidateReport.mjs         # 영상 분석 검증 보고서
 │
 ├── shared/                             # contracts (server ↔ client 공유 타입, v5.0.0 신규)
 │   └── contracts/
 │       ├── auth.ts, patient.ts, preset.ts
 │       └── index.ts
 │
-├── electron/                           # Electron 데스크톱 (v5.0.0 분기 빌드)
+├── electron/                           # standalone/intranet Electron 데스크톱
 │   ├── main.js                         # 메인 프로세스
 │   ├── preload-standalone.js           # standalone 빌드용 preload
 │   ├── preload-intranet.js             # intranet 빌드용 preload (device 등록 IPC 등)
-│   ├── audit.js                        # device 키페어 + Ed25519 서명 + 큐 (v5.0.0)
+│   ├── audit.js                        # device 키페어 + Ed25519 서명
 │   ├── auditQueue.js                   # 감사 로그 디스크 큐
 │   ├── migrationGate.js                # 인트라넷 모드 첫 진입 시 마이그레이션 게이트
 │   ├── migrationDataReader.js          # standalone 데이터 → 서버 마이그레이션
@@ -390,35 +396,40 @@ wr-evaluation-unified/
 │   ├── index.css
 │   ├── core/
 │   │   ├── moduleRegistry.js
-│   │   ├── auth/                       # AuthContext, authChannel, session (v5.0.0 신규)
+│   │   ├── auth/                       # AuthContext, authChannel, session
 │   │   ├── components/
 │   │   │   ├── LandingScreen, IntakeWizard, PatientSidebar, MainHeader, ...
-│   │   │   ├── LoginModal, ChangePasswordModal, AccountProfileModal     # v5.0.0
-│   │   │   ├── AdminConsoleModal, SignupRequestModal                    # v5.0.0
-│   │   │   ├── ConflictResolveModal, MigrationReportModal               # v5.0.0
+│   │   │   ├── LoginModal, ChangePasswordModal, AccountProfileModal
+│   │   │   ├── AdminConsoleModal, SignupRequestModal
+│   │   │   ├── ConflictResolveModal, MigrationReportModal
+│   │   │   ├── VideoAnalysisStep, TargetPicker, SkeletonOverlay
 │   │   │   ├── PresetSearch, PresetManageModal, PresetsSection
 │   │   │   ├── BatchImportModal, SettingsModal, ...
 │   │   ├── hooks/
 │   │   │   ├── useAIAnalysis, useAIAvailable
 │   │   │   ├── usePatientList, usePatientCrud
-│   │   │   ├── usePatientSync (v5.0.0)        # 인트라넷 환자 동기화
-│   │   │   ├── useMigration (v5.0.0)          # standalone → 서버 마이그레이션
-│   │   │   ├── useServerConfig, useOpsStatus  # v5.0.0
+│   │   │   ├── usePatientSync                 # 인트라넷 환자 동기화
+│   │   │   ├── useMigration                   # standalone → 서버 마이그레이션
+│   │   │   ├── useServerConfig, useOpsStatus
 │   │   │   ├── useWorkspacePersistence, ...
 │   │   ├── services/
 │   │   │   ├── presetRepository, patientRecords, workspaceRepository
-│   │   │   ├── patientServerRepository (v5.0.0)            # 서버 CRUD
-│   │   │   ├── intranetWorkspaceRepository (v5.0.0)        # 서버 workspace
-│   │   │   ├── patientConflictResolution (v5.0.0)
-│   │   │   ├── localToServerMigrator (v5.0.0)
+│   │   │   ├── patientServerRepository, intranetWorkspaceRepository
+│   │   │   ├── patientConflictResolution, localToServerMigrator
 │   │   │   ├── httpClient, analysisClient, integrationStatus
+│   │   │   ├── videoAnalysisClient, videoAnalysisRun, videoServerApply
+│   │   │   └── videoValidation*, videoViewpoint*, videoProvenance
 │   │   ├── utils/
 │   │   │   ├── steps, data, diagnosisMapping, reportGenerator
 │   │   │   ├── exportService, storage, platform, common
-│   │   │   └── csrfCookie (v5.0.0)
+│   │   │   ├── csrfCookie, videoMapping
+│   │   │   └── workspaceAutosavePolicy
 │   ├── modules/
 │   │   ├── knee, spine, shoulder, elbow, wrist, cervical
-│   └── api/analyze.js                  # Vercel 서버리스 (standalone 모드)
+│   │   └── 각 모듈: Evaluation + components + utils + index.js
+│
+├── api/
+│   └── analyze.js                      # Vercel 서버리스 AI 프록시
 │
 ├── public/
 │   ├── images/                         # G1~G11 자세 이미지
@@ -437,7 +448,7 @@ wr-evaluation-unified/
     └── BACKUP_RESTORE.md
 ```
 
-기존 모듈/유틸 세부 구조는 PRD.md 11절을 참조하세요.
+프론트엔드 모듈의 세부 구조는 다음과 같습니다.
 
 ```
 src/  # (기존 standalone 부분만 발췌)
@@ -453,13 +464,13 @@ src/  # (기존 standalone 부분만 발췌)
 │   │   ├── StepContent.jsx          # 활성 스텝 콘텐츠 렌더러
 │   │   ├── StepIndicator.jsx        # 위자드 진행 표시기
 │   │   ├── SaveLoadModals.jsx       # 저장/로드 모달
-│   │   ├── BasicInfoForm/           # 기본정보 입력 & 사이드패널
-│   │   ├── DiagnosisForm/           # 상병 입력
-│   │   ├── AssessmentStep/          # 모듈별 평가 스텝
-│   │   ├── PresetSearch/            # 프리셋 검색/적용
-│   │   ├── PresetManageModal/       # 프리셋 저장/삭제
-│   │   ├── BatchImportModal/        # 일괄입력 (드래그&드롭)
-│   │   ├── SettingsModal/           # 설정 모달 (AI 키, 폰트 등)
+│   │   ├── BasicInfoForm.jsx        # 기본정보 입력 & 사이드패널
+│   │   ├── DiagnosisForm.jsx        # 상병 입력
+│   │   ├── AssessmentStep.jsx       # 모듈별 평가 스텝
+│   │   ├── PresetSearch.jsx         # 프리셋 검색/적용
+│   │   ├── PresetManageModal.jsx    # 프리셋 저장/삭제
+│   │   ├── BatchImportModal.jsx     # 일괄입력 (드래그&드롭)
+│   │   ├── SettingsModal.jsx        # 설정 모달 (AI 키, 폰트 등)
 │   │   └── ...
 │   ├── hooks/                       # 사용자 정의 훅
 │   │   ├── useEMRIntegration.js     # EMR 통합 상태 & 동기화
@@ -487,7 +498,7 @@ src/  # (기존 standalone 부분만 발췌)
 │   │   ├── storage.js               # localStorage/Electron FS 추상화
 │   │   ├── platform.js              # 웹/Electron 플랫폼 분기
 │   │   └── common.js                # 공통 상수 & 헬퍼
-│   └── auth/                        # 인증 (향후 사용)
+│   └── auth/                        # 인증 컨텍스트·세션·탭 동기화
 ├── modules/
 │   ├── knee/                        # 무릎 모듈 (한국 산재 기준)
 │   │   ├── KneeEvaluation.jsx       # 메인 컴포넌트
@@ -519,17 +530,6 @@ src/  # (기존 standalone 부분만 발췌)
 │       ├── components/              # TaskManager, TaskEditor, CervicalResultPanel
 │       ├── utils/                   # calculations, data, exportHandlers
 │       └── index.js                 # 모듈 등록
-├── api/
-│   └── analyze.js                   # Vercel 서버리스 (Gemini/Claude API 프록시)
-├── electron/                        # Electron 데스크톱 앱
-│   ├── main.js                      # 메인 프로세스 (윈도우/메뉴 관리)
-│   ├── preload-intranet.js          # 프리로드 스크립트 (인트라넷 빌드, IPC 브릿지)
-│   ├── preload-standalone.js        # 프리로드 스크립트 (스탠드얼론 빌드, IPC 브릿지)
-│   └── emr-helper/                  # EMR 데이터 추출 헬퍼 (C#)
-├── public/
-│   ├── images/                      # G1~G11 자세 이미지
-│   ├── job-presets.json             # 직업 프리셋 (builtin)
-│   └── index.html                   # HTML 진입점
 ```
 
 ## 상병 자동 매핑
