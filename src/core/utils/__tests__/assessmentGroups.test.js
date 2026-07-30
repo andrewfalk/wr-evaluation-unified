@@ -180,7 +180,7 @@ describe('mergeDisplayTags: 우/좌 병합 표시', () => {
     const diag = makeDiag({ ...KNEE, side: 'both', confirmedRight: 'confirmed', assessmentRight: 'high', confirmedLeft: 'confirmed', assessmentLeft: 'high' });
     const info = buildAssessmentGroups([diag], []);
     const tags = mergeDisplayTags(info.groups[0].units, info.byId);
-    expect(tags).toEqual([{ label: '#1(양측)', unitIds: [`${diag.id}:right`, `${diag.id}:left`], diagId: diag.id, both: true, index: 0 }]);
+    expect(tags).toEqual([{ label: '#1(양측)', sideLabel: '양측', unitIds: [`${diag.id}:right`, `${diag.id}:left`], diagId: diag.id, both: true, index: 0 }]);
   });
 
   it('우/좌가 다른 그룹으로 갈라지면 각각 "(우)"/"(좌)"로 표시', () => {
@@ -193,8 +193,8 @@ describe('mergeDisplayTags: 우/좌 병합 표시', () => {
     expect(info.groups).toHaveLength(2);
     const highGroup = info.groups.find(g => g.meta.assessment === 'high');
     const lowGroup = info.groups.find(g => g.meta.assessment === 'low');
-    expect(mergeDisplayTags(highGroup.units, info.byId)).toEqual([{ label: '#1(우)', unitIds: [`${diag.id}:right`], diagId: diag.id, both: false, index: 0 }]);
-    expect(mergeDisplayTags(lowGroup.units, info.byId)).toEqual([{ label: '#1(좌)', unitIds: [`${diag.id}:left`], diagId: diag.id, both: false, index: 0 }]);
+    expect(mergeDisplayTags(highGroup.units, info.byId)).toEqual([{ label: '#1(우)', sideLabel: '우측', unitIds: [`${diag.id}:right`], diagId: diag.id, both: false, index: 0 }]);
+    expect(mergeDisplayTags(lowGroup.units, info.byId)).toEqual([{ label: '#1(좌)', sideLabel: '좌측', unitIds: [`${diag.id}:left`], diagId: diag.id, both: false, index: 0 }]);
   });
 
   it('축성 평가단위는 "(평가)"로 표시', () => {
@@ -317,7 +317,7 @@ describe('buildAssessmentBlocks: 개별 형식 문구 (기존 reportGenerator/ex
 });
 
 describe('formatGroupedAssessment: 그룹 형식 문구', () => {
-  it('완료 그룹을 먼저, 미완료를 마지막에 배치하고 대상 번호를 나열한다', () => {
+  it('완료 그룹을 먼저, 미완료를 마지막에 배치하고 상병별로 한 줄씩(코드+이름+방향) 나열한다', () => {
     const diagnoses = [
       makeDiag({ id: 'a', ...KNEE, side: 'both', confirmedRight: 'confirmed', assessmentRight: 'high', confirmedLeft: 'confirmed', assessmentLeft: 'high' }),
       makeDiag({ id: 'b', ...KNEE, side: 'right', confirmedRight: 'confirmed', assessmentRight: 'low', reasonRight: ['lowBurden'] }),
@@ -325,9 +325,9 @@ describe('formatGroupedAssessment: 그룹 형식 문구', () => {
     ];
     const text = formatGroupedAssessment(diagnoses, []);
     expect(text).toBe(
-      '[확인 · 업무관련성 높음] 2개\n대상: #1(양측)\n\n' +
-      '[확인 · 업무관련성 낮음] 1개\n낮음 사유: 누적 신체부담 낮음\n대상: #2(우)\n\n' +
-      '[미입력/검토 필요] 1개\n대상: #3(좌)'
+      '[확인 · 업무관련성 높음] 2개\n#1 M17.0 무릎 관절증 (양측)\n\n' +
+      '[확인 · 업무관련성 낮음] 1개\n낮음 사유: 누적 신체부담 낮음\n#2 M17.0 무릎 관절증 (우측)\n\n' +
+      '[미입력/검토 필요] 1개\n#3 M17.0 무릎 관절증 (좌측)'
     );
   });
 
@@ -337,24 +337,28 @@ describe('formatGroupedAssessment: 그룹 형식 문구', () => {
       makeDiag({ id: 'b', ...KNEE, side: '' }), // 방향 미선택 — 평가단위가 없어 그룹/미완료 둘 다 원래는 못 잡음
     ];
     const text = formatGroupedAssessment(diagnoses, []);
-    expect(text).toContain('[미입력/검토 필요] 1개\n대상: #2(방향 미선택)');
+    expect(text).toContain('[미입력/검토 필요] 1개\n#2 M17.0 무릎 관절증 (방향 미선택)');
   });
 
-  it('평가단위 미완료와 방향 미선택이 섞이면 원본 순서대로 나열된다', () => {
+  it('평가단위 미완료와 방향 미선택이 섞이면 원본 순서대로 한 줄씩 나열된다', () => {
     const diagnoses = [
       makeDiag({ id: 'a', ...KNEE, side: '' }), // 방향 미선택 (index 0)
       makeDiag({ id: 'b', ...KNEE, side: 'right' }), // 평가단위 미완료 (index 1)
     ];
     const text = formatGroupedAssessment(diagnoses, []);
-    expect(text).toBe('[미입력/검토 필요] 2개\n대상: #1(방향 미선택), #2(우)');
+    expect(text).toBe(
+      '[미입력/검토 필요] 2개\n' +
+      '#1 M17.0 무릎 관절증 (방향 미선택)\n' +
+      '#2 M17.0 무릎 관절증 (우측)'
+    );
   });
 
-  it('양측 모두 미완료인 상병은 대상에서 "#1(양측)" 하나로 합쳐 보여주되, 헤더 개수는 평가단위 2개로 센다', () => {
-    // mergeDisplayTags가 우/좌를 태그 1개로 합치므로, 태그 배열 길이가 아니라
+  it('양측 모두 미완료인 상병은 한 줄(양측)로 합쳐 보여주되, 헤더 개수는 평가단위 2개로 센다', () => {
+    // mergeDisplayTags가 우/좌를 한 줄로 합치므로, 줄 수가 아니라
     // info.stats.incompleteCount(평가단위 기준)를 헤더에 써야 한다 — 회귀 방지.
     const diagnoses = [makeDiag({ ...KNEE, side: 'both' })]; // 우/좌 둘 다 미입력
     const text = formatGroupedAssessment(diagnoses, []);
-    expect(text).toBe('[미입력/검토 필요] 2개\n대상: #1(양측)');
+    expect(text).toBe('[미입력/검토 필요] 2개\n#1 M17.0 무릎 관절증 (양측)');
   });
 
   it('양측 중 한쪽만 미완료면 평가단위 1개로 정확히 센다', () => {
@@ -363,8 +367,8 @@ describe('formatGroupedAssessment: 그룹 형식 문구', () => {
     ];
     const text = formatGroupedAssessment(diagnoses, []);
     expect(text).toBe(
-      '[확인 · 업무관련성 높음] 1개\n대상: #1(우)\n\n' +
-      '[미입력/검토 필요] 1개\n대상: #1(좌)'
+      '[확인 · 업무관련성 높음] 1개\n#1 M17.0 무릎 관절증 (우측)\n\n' +
+      '[미입력/검토 필요] 1개\n#1 M17.0 무릎 관절증 (좌측)'
     );
   });
 });

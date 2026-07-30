@@ -56,7 +56,7 @@ describe('generateUnifiedReport — [업무관련성 평가 결과] 배선(asses
     });
     const text = generateUnifiedReport(patient);
     expect(text).toContain('[확인 · 업무관련성 높음] 2개');
-    expect(text).toContain('대상: #1(우), #2(좌)');
+    expect(text).toContain('#1 M17.0 무릎 관절증 (우측)\n#2 M17.0 무릎 관절증 (좌측)');
     expect(text).not.toContain('#1: M17.0');
   });
 
@@ -67,7 +67,7 @@ describe('generateUnifiedReport — [업무관련성 평가 결과] 배선(asses
       reportOptions: { groupAssessmentResults: true },
     });
     const text = generateUnifiedReport(patient);
-    expect(text).toContain('[미입력/검토 필요] 1개\n대상: #1(우)');
+    expect(text).toContain('[미입력/검토 필요] 1개\n#1 M17.0 무릎 관절증 (우측)');
   });
 
   it('방향 미선택 상병은 그룹 형식에서도 문서에서 사라지지 않고 [미입력/검토 필요]에 남는다', () => {
@@ -77,6 +77,6 @@ describe('generateUnifiedReport — [업무관련성 평가 결과] 배선(asses
       reportOptions: { groupAssessmentResults: true },
     });
     const text = generateUnifiedReport(patient);
-    expect(text).toContain('[미입력/검토 필요] 1개\n대상: #1(방향 미선택)');
+    expect(text).toContain('[미입력/검토 필요] 1개\n#1 M17.0 무릎 관절증 (방향 미선택)');
   });
 });

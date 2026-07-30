@@ -24,7 +24,7 @@ function summarizeBefore(units, byId, isIncomplete) {
 }
 
 function GroupCard({
-  groupKey, title, isIncomplete, reasonText, units, byId,
+  groupKey, patternNumber, title, isIncomplete, reasonText, units, byId,
   expanded, onToggleExpand, splitDiagIds, onToggleSplit,
   selection, onToggleUnit, onToggleAll, onEditGroup, onEditSelection, onJumpToDiagnosis,
 }) {
@@ -41,7 +41,10 @@ function GroupCard({
   return (
     <div className={`assessment-group-card${isIncomplete ? ' incomplete' : ''}`}>
       <div className="assessment-group-card-head">
-        <span className="assessment-group-card-title">{isIncomplete ? '⚠ ' : ''}{title}</span>
+        <span className="assessment-group-card-title">
+          {patternNumber != null && <span className="assessment-group-card-number">{patternNumber}</span>}
+          {isIncomplete ? '⚠ ' : ''}{title}
+        </span>
         <span className="assessment-group-card-count">{units.length}개</span>
       </div>
       {reasonText && <div className="assessment-group-reason">낮음 사유: {reasonText}</div>}
@@ -225,13 +228,14 @@ export function AssessmentGroupView({ diagnoses, activeModules, onDiagnosesRepla
     setUndoState(null);
   }
 
-  function renderCard(groupKey, title, isIncomplete, reasonText, units) {
+  function renderCard(groupKey, title, isIncomplete, reasonText, units, patternNumber = null) {
     const selection = selectionMap.get(groupKey) || new Set();
     const splitDiagIds = splitMap.get(groupKey) || new Set();
     return (
       <GroupCard
         key={groupKey}
         groupKey={groupKey}
+        patternNumber={patternNumber}
         title={title}
         isIncomplete={isIncomplete}
         reasonText={reasonText}
@@ -256,52 +260,55 @@ export function AssessmentGroupView({ diagnoses, activeModules, onDiagnosesRepla
 
   return (
     <div className="assessment-group-view">
-      <div className="assessment-group-stats">
-        상병 {info.stats.diagnosisCount}건 · 평가단위 {info.stats.unitCount}개 · 패턴 {info.stats.groupCount}개 · 미완료 {info.stats.incompleteCount}개
+      <div className="assessment-groups-panel">
+        <div className="assessment-groups-panel-head">📦 그룹 입력 항목</div>
+        <div className="assessment-group-stats">
+          상병 {info.stats.diagnosisCount}건 · 평가단위 {info.stats.unitCount}개 · 패턴 {info.stats.groupCount}개 · 미완료 {info.stats.incompleteCount}개
+        </div>
+
+        {unassignedSideDiagnoses.length > 0 && (
+          <div className="assessment-group-card incomplete">
+            <div className="assessment-group-card-head">
+              <span className="assessment-group-card-title">⚠ 방향 미선택 — 상병 입력에서 우측/좌측/양측을 먼저 선택하세요</span>
+              <span className="assessment-group-card-count">{unassignedSideDiagnoses.length}건</span>
+            </div>
+            <div className="assessment-group-chips">
+              {unassignedSideDiagnoses.map(({ diag, index }) => (
+                <button
+                  key={diag.id}
+                  type="button"
+                  className="assessment-chip"
+                  onClick={() => onJumpToDiagnosis(diag.id)}
+                  title="개별 카드로 이동"
+                >
+                  #{index + 1} {diag.code} {diag.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {info.incomplete.length > 0 && renderCard('__incomplete__', '미입력 · 조치 필요', true, null, info.incomplete)}
+
+        {info.groups.map((group, index) => {
+          const title = `${getStatusText(group.meta.confirmed)} · 업무관련성 ${assessmentLabel(group.meta.assessment)}`;
+          const reasonText = group.meta.assessment === 'low'
+            ? group.meta.reasons.map(r => lowReasonLabel(r)).join(', ') + (group.meta.other ? ` / 기타: ${group.meta.other}` : '')
+            : null;
+          return renderCard(group.key, title, false, reasonText, group.units, index + 1);
+        })}
+
+        {!info.incomplete.length && !info.groups.length && !unassignedSideDiagnoses.length && (
+          <div className="evaluation-empty-state">표시할 상병이 없습니다.</div>
+        )}
+
+        {undoState && (
+          <div className="assessment-undo-bar">
+            <span>↩ 방금 {undoState.count}개 평가단위를 변경했습니다.</span>
+            <button type="button" className="btn btn-sm" onClick={handleUndo}>실행 취소</button>
+          </div>
+        )}
       </div>
-
-      {unassignedSideDiagnoses.length > 0 && (
-        <div className="assessment-group-card incomplete">
-          <div className="assessment-group-card-head">
-            <span className="assessment-group-card-title">⚠ 방향 미선택 — 상병 입력에서 우측/좌측/양측을 먼저 선택하세요</span>
-            <span className="assessment-group-card-count">{unassignedSideDiagnoses.length}건</span>
-          </div>
-          <div className="assessment-group-chips">
-            {unassignedSideDiagnoses.map(({ diag, index }) => (
-              <button
-                key={diag.id}
-                type="button"
-                className="assessment-chip"
-                onClick={() => onJumpToDiagnosis(diag.id)}
-                title="개별 카드로 이동"
-              >
-                #{index + 1} {diag.code} {diag.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {info.incomplete.length > 0 && renderCard('__incomplete__', '미입력 · 조치 필요', true, null, info.incomplete)}
-
-      {info.groups.map(group => {
-        const title = `${getStatusText(group.meta.confirmed)} · 업무관련성 ${assessmentLabel(group.meta.assessment)}`;
-        const reasonText = group.meta.assessment === 'low'
-          ? group.meta.reasons.map(r => lowReasonLabel(r)).join(', ') + (group.meta.other ? ` / 기타: ${group.meta.other}` : '')
-          : null;
-        return renderCard(group.key, title, false, reasonText, group.units);
-      })}
-
-      {!info.incomplete.length && !info.groups.length && !unassignedSideDiagnoses.length && (
-        <div className="evaluation-empty-state">표시할 상병이 없습니다.</div>
-      )}
-
-      {undoState && (
-        <div className="assessment-undo-bar">
-          <span>↩ 방금 {undoState.count}개 평가단위를 변경했습니다.</span>
-          <button type="button" className="btn btn-sm" onClick={handleUndo}>실행 취소</button>
-        </div>
-      )}
 
       {editorState && (
         <AssessmentPatternEditor

@@ -146,7 +146,9 @@ export function buildAssessmentGroups(diagnoses, activeModules = []) {
 }
 
 // 우/좌 평가단위가 같은 그룹(또는 같은 units 배열)에 함께 있으면 표시상 "#N(양측)"으로
-// 합친다. 그 외에는 개별 단위마다 "#N(우)" / "#N(좌)" / "#N(평가)"로 표기한다.
+// 합친다. 그 외에는 개별 단위마다 "#N(우)" / "#N(좌)" / "#N(평가)"로 표기한다. sideLabel은
+// 같은 방향을 풀네임(우측/좌측/양측/평가)으로 담아 문서 출력(formatAssessmentTargetLines)에서
+// 쓴다 — label은 화면 칩처럼 압축된 표기가 필요한 곳 전용.
 // byId는 호환을 위해 인자로 남겨두지만 diagIndex는 diag가 아니라 unit에 실려 있어서
 // 실제로는 사용하지 않는다.
 export function mergeDisplayTags(units, byId) { // eslint-disable-line no-unused-vars
@@ -165,15 +167,27 @@ export function mergeDisplayTags(units, byId) { // eslint-disable-line no-unused
     const index = diagUnits[0].diagIndex;
     const label = index + 1;
     if (diagUnits.length === 2) {
-      return { label: `#${label}(양측)`, unitIds: diagUnits.map(u => u.id), diagId, both: true, index };
+      return { label: `#${label}(양측)`, sideLabel: '양측', unitIds: diagUnits.map(u => u.id), diagId, both: true, index };
     }
     const unit = diagUnits[0];
     const suffix = unit.side === 'right' ? '우' : unit.side === 'left' ? '좌' : '평가';
-    return { label: `#${label}(${suffix})`, unitIds: [unit.id], diagId, both: false, index };
+    const sideLabel = unit.side === 'right' ? '우측' : unit.side === 'left' ? '좌측' : '평가';
+    return { label: `#${label}(${suffix})`, sideLabel, unitIds: [unit.id], diagId, both: false, index };
   });
 
   tags.sort((a, b) => a.index - b.index);
   return tags;
+}
+
+// formatGroupedAssessment용 — "#N 코드 상병명 (방향)"을 상병 1건당 한 줄씩 사람이 읽기
+// 편한 형태로 나열한다. entries는 { diagId, index, sideLabel } 모양(mergeDisplayTags의
+// 반환값 또는 방향 미선택 항목)이면 된다.
+function formatAssessmentTargetLines(entries, byId) {
+  return entries.map(entry => {
+    const diag = byId.get(entry.diagId);
+    const name = `${diag?.code || ''} ${diag?.name || ''}`.trim();
+    return `#${entry.index + 1} ${name} (${entry.sideLabel})`;
+  }).join('\n');
 }
 
 function cloneDiagnoses(diagnoses) {
@@ -263,28 +277,28 @@ export function buildAssessmentBlocks(diagnoses, activeModules = [], { reasonInd
 export function formatGroupedAssessment(diagnoses, activeModules = []) {
   const info = buildAssessmentGroups(diagnoses, activeModules);
   const sections = info.groups.map(group => {
-    const tags = mergeDisplayTags(group.units, info.byId).map(t => t.label).join(', ');
+    const targetLines = formatAssessmentTargetLines(mergeDisplayTags(group.units, info.byId), info.byId);
     let section = `[${getStatusText(group.meta.confirmed)} · 업무관련성 ${assessmentLabel(group.meta.assessment)}] ${group.units.length}개`;
     if (group.meta.assessment === 'low') {
       const reasonText = getReasonText(group.meta.reasons, group.meta.other).split('\n').join(', ');
       section += `\n낮음 사유: ${reasonText}`;
     }
-    section += `\n대상: ${tags}`;
+    section += `\n${targetLines}`;
     return section;
   });
 
   const incompleteEntries = [
     ...mergeDisplayTags(info.incomplete, info.byId),
-    ...info.unassignedSideDiagnoses.map(({ index }) => ({ label: `#${index + 1}(방향 미선택)`, index })),
+    ...info.unassignedSideDiagnoses.map(({ diag, index }) => ({ diagId: diag.id, index, sideLabel: '방향 미선택' })),
   ].sort((a, b) => a.index - b.index);
 
   if (incompleteEntries.length) {
     // 헤더 개수는 완료 그룹 섹션과 동일하게 "평가단위" 기준(양측 미완료 1건 = 2개)을
-    // 쓰고, "대상:" 목록만 mergeDisplayTags로 병합된 표시용 태그(#N(양측))를 쓴다.
-    // incompleteEntries.length(태그 개수)를 그대로 쓰면 양측 모두 미완료인 상병이
+    // 쓰고, 목록만 mergeDisplayTags로 병합된 대상(우/좌 합쳐 #N(양측) 한 줄)을 쓴다.
+    // incompleteEntries.length(줄 수)를 그대로 쓰면 양측 모두 미완료인 상병이
     // 1개로 축소 표시된다.
-    const tags = incompleteEntries.map(t => t.label).join(', ');
-    sections.push(`[미입력/검토 필요] ${info.stats.incompleteCount}개\n대상: ${tags}`);
+    const targetLines = formatAssessmentTargetLines(incompleteEntries, info.byId);
+    sections.push(`[미입력/검토 필요] ${info.stats.incompleteCount}개\n${targetLines}`);
   }
 
   return sections.join('\n\n');

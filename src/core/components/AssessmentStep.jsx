@@ -7,7 +7,7 @@ import { EMR_TEXT_LIMIT_BYTES, cp949ByteLength, classifyEmrByteStatus } from '..
 export function AssessmentStep({ patient, activeModules, updateDiagnoses, updateModuleById, updateShared }) {
   const shared = patient.data.shared;
   const diagnoses = shared.diagnoses || [];
-  const [previewTab, setPreviewTab] = useState('report');
+  const [previewTab, setPreviewTab] = useState('emr');
 
   const handleDiagnosisUpdate = (index, field, value) => {
     const updated = [...diagnoses];
@@ -87,27 +87,27 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
             <button
               type="button"
               role="tab"
+              aria-selected={previewTab === 'emr'}
+              className={previewTab === 'emr' ? 'active' : ''}
+              onClick={() => setPreviewTab('emr')}
+            >
+              EMR 종합소견
+            </button>
+            <button
+              type="button"
+              role="tab"
               aria-selected={previewTab === 'report'}
               className={previewTab === 'report' ? 'active' : ''}
               onClick={() => setPreviewTab('report')}
             >
               통합 리포트 초안
             </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={previewTab === 'emr'}
-              className={previewTab === 'emr' ? 'active' : ''}
-              onClick={() => setPreviewTab('emr')}
-            >
-              EMR 종합소견(6번)
-            </button>
           </div>
 
           {previewTab === 'emr' && (
             <div className="emr-gauge">
               <div className="emr-gauge-top">
-                <span className="emr-gauge-label">EMR 6번 종합소견</span>
+                <span className="emr-gauge-label">EMR 종합소견</span>
                 <span className="emr-gauge-value">
                   {emrBytes.toLocaleString()} / {EMR_TEXT_LIMIT_BYTES.toLocaleString()} byte
                   <span className={`emr-gauge-status emr-gauge-status-${emrStatus}`}>
@@ -122,7 +122,7 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
           )}
 
           <div className="report-preview-toolbar">
-            <span className="report-preview-label">{previewTab === 'report' ? '통합 리포트 초안' : 'EMR 종합소견(6번)'}</span>
+            <span className="report-preview-label">{previewTab === 'report' ? '통합 리포트 초안' : 'EMR 종합소견'}</span>
             <span className="report-preview-hint">상병 {diagnoses.length}건 기준 자동 생성</span>
           </div>
           <div className="preview-section">{previewTab === 'report' ? previewText : emrText}</div>
