@@ -32,3 +32,12 @@ export function truncateCp949Bytes(str, maxBytes, suffix = '\n...(이하 생략)
 
   return { text: str.slice(0, cutIndex) + suffix, truncated: true };
 }
+
+// 미리보기 byte 게이지 상태. bytes > limit(초과)를 반올림한 백분율이 아니라 실제 byte로
+// 판정한다 — 예: 3,951byte(한도 3,950)는 반올림하면 100%라 "주의"로 보이지만 실제로는
+// truncateCp949Bytes가 이미 자르는 초과 상태다.
+export function classifyEmrByteStatus(bytes, limit = EMR_TEXT_LIMIT_BYTES) {
+  if (bytes > limit) return 'danger';
+  if (bytes / limit >= 0.9) return 'warn';
+  return 'ok';
+}

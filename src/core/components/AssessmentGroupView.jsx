@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { getStatusText } from '../../modules/knee/utils/calculations';
 import { LOW_REASON_OPTIONS } from '../../modules/knee/utils/data';
+import { resolveDiagnosisModule } from '../utils/diagnosisMapping';
 import {
   assessmentLabel,
   buildAssessmentGroups,
@@ -145,8 +146,23 @@ function GroupCard({
   );
 }
 
+// 비축성 상병 중 방향(우/좌/양측)을 아직 선택하지 않은 것들 — buildAssessmentUnits는
+// 이런 진단에 대해 평가단위를 0개 생성하므로 패턴 그룹 계산에서 완전히 빠진다. 그룹
+// 화면에서도 안 보이면 사용자가 놓치기 쉬워 별도로 찾아내 조치 필요 카드로 보여준다.
+function findUnassignedSideDiagnoses(diagnoses, activeModules) {
+  return (diagnoses || []).filter(diag => {
+    if (!(diag.code || diag.name) || diag.side) return false;
+    const moduleId = resolveDiagnosisModule(diag, activeModules)?.moduleId;
+    return moduleId !== 'spine' && moduleId !== 'cervical';
+  });
+}
+
 export function AssessmentGroupView({ diagnoses, activeModules, onDiagnosesReplace, onJumpToDiagnosis }) {
   const info = useMemo(() => buildAssessmentGroups(diagnoses, activeModules), [diagnoses, activeModules]);
+  const unassignedSideDiagnoses = useMemo(
+    () => findUnassignedSideDiagnoses(diagnoses, activeModules),
+    [diagnoses, activeModules]
+  );
 
   const [expandedKeys, setExpandedKeys] = useState(() => new Set());
   const [splitMap, setSplitMap] = useState(() => new Map()); // groupKey -> Set(diagId)
@@ -186,10 +202,25 @@ export function AssessmentGroupView({ diagnoses, activeModules, onDiagnosesRepla
   function openEditor(key, isIncomplete, units, contextLabel) {
     if (!units.length) return;
     const diagCount = new Set(units.map(u => u.diagId)).size;
+    // 완료 그룹(및 그 부분집합)은 그룹 정의상 값이 이미 동일하므로 폼을 그 값으로
+    // 채워 넣는다 — 한 항목만 바꾸려고 나머지 값을 처음부터 다시 고르지 않도록.
+    let initialValues = { confirmed: '', assessment: '', reasons: [], other: '' };
+    if (!isIncomplete) {
+      const first = units[0];
+      const diag = info.byId.get(first.diagId);
+      const assessment = diag[first.assessmentKey] || '';
+      initialValues = {
+        confirmed: diag[first.confirmedKey] || '',
+        assessment,
+        reasons: assessment === 'low' ? (diag[first.reasonKey] || []) : [],
+        other: assessment === 'low' ? (diag[first.reasonOtherKey] || '') : '',
+      };
+    }
     setEditorState({
       key, isIncomplete, units, diagCount,
       contextLabel,
       beforeText: summarizeBefore(units, info.byId, isIncomplete),
+      initialValues,
     });
   }
 
@@ -242,6 +273,28 @@ export function AssessmentGroupView({ diagnoses, activeModules, onDiagnosesRepla
         상병 {info.stats.diagnosisCount}건 · 평가단위 {info.stats.unitCount}개 · 패턴 {info.stats.groupCount}개 · 미완료 {info.stats.incompleteCount}개
       </div>
 
+      {unassignedSideDiagnoses.length > 0 && (
+        <div className="assessment-group-card incomplete">
+          <div className="assessment-group-card-head">
+            <span className="assessment-group-card-title">⚠ 방향 미선택 — 상병 입력에서 우측/좌측/양측을 먼저 선택하세요</span>
+            <span className="assessment-group-card-count">{unassignedSideDiagnoses.length}건</span>
+          </div>
+          <div className="assessment-group-chips">
+            {unassignedSideDiagnoses.map(diag => (
+              <button
+                key={diag.id}
+                type="button"
+                className="assessment-chip"
+                onClick={() => onJumpToDiagnosis(diag.id)}
+                title="개별 카드로 이동"
+              >
+                {diag.code} {diag.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {info.incomplete.length > 0 && renderCard('__incomplete__', '미입력 · 조치 필요', true, null, info.incomplete)}
 
       {info.groups.map(group => {
@@ -252,7 +305,7 @@ export function AssessmentGroupView({ diagnoses, activeModules, onDiagnosesRepla
         return renderCard(group.key, title, false, reasonText, group.units);
       })}
 
-      {!info.incomplete.length && !info.groups.length && (
+      {!info.incomplete.length && !info.groups.length && !unassignedSideDiagnoses.length && (
         <div className="evaluation-empty-state">표시할 상병이 없습니다.</div>
       )}
 
@@ -270,6 +323,7 @@ export function AssessmentGroupView({ diagnoses, activeModules, onDiagnosesRepla
           unitCount={editorState.units.length}
           beforeText={editorState.beforeText}
           isIncomplete={editorState.isIncomplete}
+          initialValues={editorState.initialValues}
           onCancel={() => setEditorState(null)}
           onApply={applyEditor}
         />

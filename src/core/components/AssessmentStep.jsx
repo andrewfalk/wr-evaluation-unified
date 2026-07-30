@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { AssessmentTab } from './AssessmentTab';
 import { generateUnifiedReport } from '../utils/reportGenerator';
 import { generateUnifiedEMR } from '../utils/emrReport';
-import { EMR_TEXT_LIMIT_BYTES, cp949ByteLength } from '../utils/emrText';
+import { EMR_TEXT_LIMIT_BYTES, cp949ByteLength, classifyEmrByteStatus } from '../utils/emrText';
 
 export function AssessmentStep({ patient, activeModules, updateDiagnoses, updateModuleById, updateShared }) {
   const shared = patient.data.shared;
@@ -58,7 +58,7 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
   const { b8: emrText } = generateUnifiedEMR(patient);
   const emrBytes = cp949ByteLength(emrText);
   const emrPct = Math.min(140, Math.round((emrBytes / EMR_TEXT_LIMIT_BYTES) * 100));
-  const emrStatus = emrPct < 90 ? 'ok' : emrPct <= 100 ? 'warn' : 'danger';
+  const emrStatus = classifyEmrByteStatus(emrBytes, EMR_TEXT_LIMIT_BYTES);
   const emrStatusLabel = emrStatus === 'ok' ? '정상' : emrStatus === 'warn' ? '주의' : '초과';
 
   return (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMR_TEXT_LIMIT_BYTES, cp949ByteLength, truncateCp949Bytes } from '../emrText.js';
+import { EMR_TEXT_LIMIT_BYTES, cp949ByteLength, truncateCp949Bytes, classifyEmrByteStatus } from '../emrText.js';
 
 describe('cp949ByteLength: CP949 근사 바이트 계산', () => {
   it('빈 문자열/undefined는 0바이트', () => {
@@ -48,5 +48,25 @@ describe('truncateCp949Bytes: 3,950byte 경계와 절단', () => {
     // suffix '…'(U+2026)는 2바이트 취급 → 남는 8바이트만큼 'a' 8개 + suffix
     expect(result.text).toBe('a'.repeat(8) + '…');
     expect(cp949ByteLength(result.text)).toBeLessThanOrEqual(10);
+  });
+});
+
+describe('classifyEmrByteStatus: 게이지 상태 판정 (반올림이 아닌 실제 byte 비교)', () => {
+  it('90% 미만이면 정상', () => {
+    expect(classifyEmrByteStatus(3000, EMR_TEXT_LIMIT_BYTES)).toBe('ok'); // 75.9%
+  });
+
+  it('90% 이상 ~ 한도 이하면 주의', () => {
+    expect(classifyEmrByteStatus(3555, EMR_TEXT_LIMIT_BYTES)).toBe('warn'); // 90.0%
+    expect(classifyEmrByteStatus(EMR_TEXT_LIMIT_BYTES, EMR_TEXT_LIMIT_BYTES)).toBe('warn'); // 정확히 한도(100%, 아직 초과 아님)
+  });
+
+  it('한도를 1byte라도 넘으면 반올림 결과와 무관하게 초과로 판정한다', () => {
+    // 3951/3950 = 100.0253...% → Math.round()면 100%라 예전 로직은 "주의"로 오판했다.
+    expect(classifyEmrByteStatus(EMR_TEXT_LIMIT_BYTES + 1, EMR_TEXT_LIMIT_BYTES)).toBe('danger');
+  });
+
+  it('큰 폭으로 초과해도 초과로 판정한다', () => {
+    expect(classifyEmrByteStatus(5000, EMR_TEXT_LIMIT_BYTES)).toBe('danger');
   });
 });

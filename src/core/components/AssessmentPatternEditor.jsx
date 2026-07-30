@@ -6,11 +6,11 @@ import { assessmentLabel } from '../utils/assessmentGroups';
 // 그룹(또는 그룹 내 선택 항목)에 상병 상태·업무관련성·낮음 사유를 일괄 입력하는 모달.
 // 실제 diagnoses 배열 조작은 부모(AssessmentGroupView)의 onApply가 담당한다 — 이 컴포넌트는
 // 순수 폼 상태만 갖는다.
-export function AssessmentPatternEditor({ contextLabel, diagCount, unitCount, beforeText, isIncomplete, onCancel, onApply }) {
-  const [confirmed, setConfirmed] = useState('');
-  const [assessment, setAssessment] = useState('');
-  const [reasons, setReasons] = useState([]);
-  const [other, setOther] = useState('');
+export function AssessmentPatternEditor({ contextLabel, diagCount, unitCount, beforeText, isIncomplete, initialValues, onCancel, onApply }) {
+  const [confirmed, setConfirmed] = useState(initialValues?.confirmed || '');
+  const [assessment, setAssessment] = useState(initialValues?.assessment || '');
+  const [reasons, setReasons] = useState(initialValues?.reasons || []);
+  const [other, setOther] = useState(initialValues?.other || '');
 
   useEffect(() => {
     const handleKeyDown = e => { if (e.key === 'Escape') onCancel(); };
