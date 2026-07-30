@@ -8,6 +8,7 @@ import {
   revertPatch,
   buildAssessmentBlocks,
   formatGroupedAssessment,
+  findUnassignedSideDiagnoses,
 } from '../assessmentGroups.js';
 
 function makeDiag(overrides = {}) {
@@ -143,12 +144,43 @@ describe('buildAssessmentGroups: 그룹 구성과 정렬', () => {
   });
 });
 
+describe('findUnassignedSideDiagnoses: 방향 미선택 비축성 상병', () => {
+  it('비축성 진단 중 side가 비어있는 것만 골라 원본 index와 함께 반환한다', () => {
+    const diagnoses = [
+      makeDiag({ id: 'a', ...KNEE, side: 'right' }),
+      makeDiag({ id: 'b', ...KNEE, side: '' }),
+      makeDiag({ id: 'c', ...SPINE, side: '' }), // 축성은 side 없어도 대상 아님
+    ];
+    const result = findUnassignedSideDiagnoses(diagnoses, []);
+    expect(result).toEqual([{ diag: diagnoses[1], index: 1 }]);
+  });
+
+  it('코드/이름이 모두 없는 빈 진단은 제외한다', () => {
+    const diagnoses = [makeDiag({ code: '', name: '', side: '' })];
+    expect(findUnassignedSideDiagnoses(diagnoses, [])).toEqual([]);
+  });
+});
+
+describe('buildAssessmentGroups: 방향 미선택 진단이 통계에 반영된다', () => {
+  it('unassignedSideDiagnoses를 반환하고 incompleteCount에 합산한다', () => {
+    const diagnoses = [
+      makeDiag({ id: 'a', ...KNEE, side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' }),
+      makeDiag({ id: 'b', ...KNEE, side: '' }), // 방향 미선택 — 평가단위 0개
+      makeDiag({ id: 'c', ...KNEE, side: 'left' }), // 방향은 선택했지만 미입력 — 평가단위 1개(미완료)
+    ];
+    const info = buildAssessmentGroups(diagnoses, []);
+    expect(info.unassignedSideDiagnoses).toEqual([{ diag: diagnoses[1], index: 1 }]);
+    expect(info.incomplete).toHaveLength(1); // c만 (b는 애초에 평가단위가 없음)
+    expect(info.stats.incompleteCount).toBe(2); // incomplete(1) + unassignedSideDiagnoses(1)
+  });
+});
+
 describe('mergeDisplayTags: 우/좌 병합 표시', () => {
   it('같은 그룹에 우/좌 평가단위가 모두 있으면 "#N(양측)"으로 합친다', () => {
     const diag = makeDiag({ ...KNEE, side: 'both', confirmedRight: 'confirmed', assessmentRight: 'high', confirmedLeft: 'confirmed', assessmentLeft: 'high' });
     const info = buildAssessmentGroups([diag], []);
     const tags = mergeDisplayTags(info.groups[0].units, info.byId);
-    expect(tags).toEqual([{ label: '#1(양측)', unitIds: [`${diag.id}:right`, `${diag.id}:left`], diagId: diag.id, both: true }]);
+    expect(tags).toEqual([{ label: '#1(양측)', unitIds: [`${diag.id}:right`, `${diag.id}:left`], diagId: diag.id, both: true, index: 0 }]);
   });
 
   it('우/좌가 다른 그룹으로 갈라지면 각각 "(우)"/"(좌)"로 표시', () => {
@@ -161,14 +193,28 @@ describe('mergeDisplayTags: 우/좌 병합 표시', () => {
     expect(info.groups).toHaveLength(2);
     const highGroup = info.groups.find(g => g.meta.assessment === 'high');
     const lowGroup = info.groups.find(g => g.meta.assessment === 'low');
-    expect(mergeDisplayTags(highGroup.units, info.byId)).toEqual([{ label: '#1(우)', unitIds: [`${diag.id}:right`], diagId: diag.id, both: false }]);
-    expect(mergeDisplayTags(lowGroup.units, info.byId)).toEqual([{ label: '#1(좌)', unitIds: [`${diag.id}:left`], diagId: diag.id, both: false }]);
+    expect(mergeDisplayTags(highGroup.units, info.byId)).toEqual([{ label: '#1(우)', unitIds: [`${diag.id}:right`], diagId: diag.id, both: false, index: 0 }]);
+    expect(mergeDisplayTags(lowGroup.units, info.byId)).toEqual([{ label: '#1(좌)', unitIds: [`${diag.id}:left`], diagId: diag.id, both: false, index: 0 }]);
   });
 
   it('축성 평가단위는 "(평가)"로 표시', () => {
     const diag = makeDiag({ ...SPINE, confirmedRight: 'confirmed', assessmentRight: 'high' });
     const info = buildAssessmentGroups([diag], []);
     expect(mergeDisplayTags(info.groups[0].units, info.byId)[0].label).toBe('#1(평가)');
+  });
+
+  it('한 그룹 안에 여러 상병이 섞여도 원본 배열 순서(diagIndex)대로 정렬된다', () => {
+    // d1(index0)=높음, d2(index1)=낮음(다른 그룹), d3(index2)=높음(d1과 같은 그룹) →
+    // 같은 그룹인 d1·d3의 태그가 등장 순서(0, 2)대로 나와야 한다.
+    const diagnoses = [
+      makeDiag({ id: 'd1', ...KNEE, side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' }),
+      makeDiag({ id: 'd2', ...KNEE, side: 'right', confirmedRight: 'confirmed', assessmentRight: 'low', reasonRight: ['lowBurden'] }),
+      makeDiag({ id: 'd3', ...KNEE, side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' }),
+    ];
+    const info = buildAssessmentGroups(diagnoses, []);
+    const highGroup = info.groups.find(g => g.meta.assessment === 'high');
+    const tags = mergeDisplayTags(highGroup.units, info.byId);
+    expect(tags.map(t => t.label)).toEqual(['#1(우)', '#3(우)']);
   });
 });
 
@@ -283,5 +329,23 @@ describe('formatGroupedAssessment: 그룹 형식 문구', () => {
       '[확인 · 업무관련성 낮음] 1개\n낮음 사유: 누적 신체부담 낮음\n대상: #2(우)\n\n' +
       '[미입력/검토 필요] 1개\n대상: #3(좌)'
     );
+  });
+
+  it('방향 미선택 상병도 [미입력/검토 필요]에 포함된다(문서에서 사라지지 않는다)', () => {
+    const diagnoses = [
+      makeDiag({ id: 'a', ...KNEE, side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' }),
+      makeDiag({ id: 'b', ...KNEE, side: '' }), // 방향 미선택 — 평가단위가 없어 그룹/미완료 둘 다 원래는 못 잡음
+    ];
+    const text = formatGroupedAssessment(diagnoses, []);
+    expect(text).toContain('[미입력/검토 필요] 1개\n대상: #2(방향 미선택)');
+  });
+
+  it('평가단위 미완료와 방향 미선택이 섞이면 원본 순서대로 나열된다', () => {
+    const diagnoses = [
+      makeDiag({ id: 'a', ...KNEE, side: '' }), // 방향 미선택 (index 0)
+      makeDiag({ id: 'b', ...KNEE, side: 'right' }), // 평가단위 미완료 (index 1)
+    ];
+    const text = formatGroupedAssessment(diagnoses, []);
+    expect(text).toBe('[미입력/검토 필요] 2개\n대상: #1(방향 미선택), #2(우)');
   });
 });

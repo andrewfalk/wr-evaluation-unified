@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { getStatusText } from '../../modules/knee/utils/calculations';
 import { LOW_REASON_OPTIONS } from '../../modules/knee/utils/data';
-import { resolveDiagnosisModule } from '../utils/diagnosisMapping';
 import {
   assessmentLabel,
   buildAssessmentGroups,
@@ -146,23 +145,11 @@ function GroupCard({
   );
 }
 
-// 비축성 상병 중 방향(우/좌/양측)을 아직 선택하지 않은 것들 — buildAssessmentUnits는
-// 이런 진단에 대해 평가단위를 0개 생성하므로 패턴 그룹 계산에서 완전히 빠진다. 그룹
-// 화면에서도 안 보이면 사용자가 놓치기 쉬워 별도로 찾아내 조치 필요 카드로 보여준다.
-function findUnassignedSideDiagnoses(diagnoses, activeModules) {
-  return (diagnoses || []).filter(diag => {
-    if (!(diag.code || diag.name) || diag.side) return false;
-    const moduleId = resolveDiagnosisModule(diag, activeModules)?.moduleId;
-    return moduleId !== 'spine' && moduleId !== 'cervical';
-  });
-}
-
 export function AssessmentGroupView({ diagnoses, activeModules, onDiagnosesReplace, onJumpToDiagnosis }) {
   const info = useMemo(() => buildAssessmentGroups(diagnoses, activeModules), [diagnoses, activeModules]);
-  const unassignedSideDiagnoses = useMemo(
-    () => findUnassignedSideDiagnoses(diagnoses, activeModules),
-    [diagnoses, activeModules]
-  );
+  // 방향(우/좌/양측) 미선택 진단 — buildAssessmentGroups.stats.incompleteCount에 이미
+  // 합산되어 있으므로(assessmentGroups.js), 상단 통계 숫자와 아래 카드가 항상 일치한다.
+  const unassignedSideDiagnoses = info.unassignedSideDiagnoses;
 
   const [expandedKeys, setExpandedKeys] = useState(() => new Set());
   const [splitMap, setSplitMap] = useState(() => new Map()); // groupKey -> Set(diagId)
@@ -280,7 +267,7 @@ export function AssessmentGroupView({ diagnoses, activeModules, onDiagnosesRepla
             <span className="assessment-group-card-count">{unassignedSideDiagnoses.length}건</span>
           </div>
           <div className="assessment-group-chips">
-            {unassignedSideDiagnoses.map(diag => (
+            {unassignedSideDiagnoses.map(({ diag, index }) => (
               <button
                 key={diag.id}
                 type="button"
@@ -288,7 +275,7 @@ export function AssessmentGroupView({ diagnoses, activeModules, onDiagnosesRepla
                 onClick={() => onJumpToDiagnosis(diag.id)}
                 title="개별 카드로 이동"
               >
-                {diag.code} {diag.name}
+                #{index + 1} {diag.code} {diag.name}
               </button>
             ))}
           </div>

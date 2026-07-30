@@ -50,6 +50,20 @@ describe('AssessmentGroupView — 방향 미선택 상병 노출 (finding #1)', 
     );
     expect(screen.queryByText(/방향 미선택/)).toBeNull();
   });
+
+  it('상단 통계의 "미완료" 수는 방향 미선택 카드까지 합산해 실제 카드 수와 일치한다 (finding #2)', () => {
+    // 방향 미선택 1건뿐이고 평가단위 기반 미완료는 0건 — 통계가 0으로 나오면 아래 카드(1건)와 모순된다.
+    const diag = makeDiag({ ...KNEE, side: '' });
+    render(
+      <AssessmentGroupView
+        diagnoses={[diag]}
+        activeModules={['knee']}
+        onDiagnosesReplace={vi.fn()}
+        onJumpToDiagnosis={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/미완료 1개/)).toBeTruthy();
+  });
 });
 
 describe('AssessmentGroupView — 그룹 수정 모달 초기값 (finding #3)', () => {

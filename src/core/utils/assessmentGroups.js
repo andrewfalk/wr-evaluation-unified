@@ -57,6 +57,20 @@ export function buildAssessmentUnits(diagnoses, activeModules = []) {
   return units;
 }
 
+// 비축성 진단 중 방향(우/좌/양측)을 아직 선택하지 않은 것 — unitsForDiagnosis가 평가단위를
+// 0개 생성하므로 buildAssessmentGroups의 groups/incomplete 어디에도 잡히지 않는다. 그룹
+// 화면과 그룹 형식 출력(formatGroupedAssessment) 양쪽에서 똑같이 찾아내 쓸 수 있도록 단일
+// 함수로 둔다 — 화면 표시용 판정과 출력용 판정이 따로 놀면(중복 구현) 둘이 어긋나기 쉽다.
+export function findUnassignedSideDiagnoses(diagnoses, activeModules = []) {
+  return (diagnoses || [])
+    .map((diag, index) => ({ diag, index }))
+    .filter(({ diag }) => {
+      if (!(diag.code || diag.name) || diag.side) return false;
+      const moduleId = resolveDiagnosisModule(diag, activeModules)?.moduleId;
+      return moduleId !== 'spine' && moduleId !== 'cervical';
+    });
+}
+
 // null = 평가단위가 미완료(조치 필요) 상태라는 뜻 — 그룹 키가 아니라 판정 결과다.
 export function patternKeyOf(diag, unit) {
   const confirmed = diag[unit.confirmedKey];
@@ -80,6 +94,7 @@ export function isUnitComplete(diag, unit) {
 export function buildAssessmentGroups(diagnoses, activeModules = []) {
   const byId = new Map((diagnoses || []).map(diag => [diag.id, diag]));
   const units = buildAssessmentUnits(diagnoses, activeModules);
+  const unassignedSideDiagnoses = findUnassignedSideDiagnoses(diagnoses, activeModules);
   const incomplete = [];
   const groupMap = new Map();
   const groupOrder = [];
@@ -116,19 +131,25 @@ export function buildAssessmentGroups(diagnoses, activeModules = []) {
     byId,
     units,
     incomplete,
+    unassignedSideDiagnoses,
     groups,
     stats: {
       diagnosisCount: (diagnoses || []).filter(d => d.code || d.name).length,
       unitCount: units.length,
       groupCount: groups.length,
-      incompleteCount: incomplete.length,
+      // 방향 미선택 진단은 평가단위가 0개라 incomplete 배열엔 안 잡히지만, 여전히
+      // "조치가 필요한" 항목이므로 미완료 수치에 합산한다(화면 요약과 실제 카드 수가
+      // 어긋나지 않도록).
+      incompleteCount: incomplete.length + unassignedSideDiagnoses.length,
     },
   };
 }
 
 // 우/좌 평가단위가 같은 그룹(또는 같은 units 배열)에 함께 있으면 표시상 "#N(양측)"으로
 // 합친다. 그 외에는 개별 단위마다 "#N(우)" / "#N(좌)" / "#N(평가)"로 표기한다.
-export function mergeDisplayTags(units, byId) {
+// byId는 호환을 위해 인자로 남겨두지만 diagIndex는 diag가 아니라 unit에 실려 있어서
+// 실제로는 사용하지 않는다.
+export function mergeDisplayTags(units, byId) { // eslint-disable-line no-unused-vars
   const byDiag = new Map();
   const order = [];
   units.forEach(unit => {
@@ -141,18 +162,17 @@ export function mergeDisplayTags(units, byId) {
 
   const tags = order.map(diagId => {
     const diagUnits = byDiag.get(diagId);
-    const diag = byId.get(diagId);
-    const n = diag.diagIndex ?? diagUnits[0].diagIndex;
-    const label = n + 1;
+    const index = diagUnits[0].diagIndex;
+    const label = index + 1;
     if (diagUnits.length === 2) {
-      return { label: `#${label}(양측)`, unitIds: diagUnits.map(u => u.id), diagId, both: true };
+      return { label: `#${label}(양측)`, unitIds: diagUnits.map(u => u.id), diagId, both: true, index };
     }
     const unit = diagUnits[0];
     const suffix = unit.side === 'right' ? '우' : unit.side === 'left' ? '좌' : '평가';
-    return { label: `#${label}(${suffix})`, unitIds: [unit.id], diagId, both: false };
+    return { label: `#${label}(${suffix})`, unitIds: [unit.id], diagId, both: false, index };
   });
 
-  tags.sort((a, b) => byId.get(a.diagId).diagIndex - byId.get(b.diagId).diagIndex);
+  tags.sort((a, b) => a.index - b.index);
   return tags;
 }
 
@@ -253,9 +273,14 @@ export function formatGroupedAssessment(diagnoses, activeModules = []) {
     return section;
   });
 
-  if (info.incomplete.length) {
-    const tags = mergeDisplayTags(info.incomplete, info.byId).map(t => t.label).join(', ');
-    sections.push(`[미입력/검토 필요] ${info.incomplete.length}개\n대상: ${tags}`);
+  const incompleteEntries = [
+    ...mergeDisplayTags(info.incomplete, info.byId),
+    ...info.unassignedSideDiagnoses.map(({ index }) => ({ label: `#${index + 1}(방향 미선택)`, index })),
+  ].sort((a, b) => a.index - b.index);
+
+  if (incompleteEntries.length) {
+    const tags = incompleteEntries.map(t => t.label).join(', ');
+    sections.push(`[미입력/검토 필요] ${incompleteEntries.length}개\n대상: ${tags}`);
   }
 
   return sections.join('\n\n');

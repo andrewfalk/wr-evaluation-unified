@@ -123,6 +123,17 @@ describe('generateEMRFieldData — b8(txtSyth1Cont) 요약본 + b5(txtAppvSickCo
     expect(txtSyth1Cont).toContain('[확인 · 업무관련성 높음] 1개');
     expect(txtSyth1Cont).toContain('대상: #1(우)');
   });
+
+  it('방향 미선택 상병은 그룹 형식(txtSyth1Cont)에서도 사라지지 않고 [미입력/검토 필요]에 남는다', () => {
+    const patient = makeAssessmentPatient({
+      diagnoses: [kneeDiag({ side: '' })],
+      activeModules: ['knee'],
+      modules: { knee: {} },
+      reportOptions: { groupAssessmentResults: true },
+    });
+    const { txtSyth1Cont } = generateEMRFieldData(patient);
+    expect(txtSyth1Cont).toContain('[미입력/검토 필요] 1개\n대상: #1(방향 미선택)');
+  });
 });
 
 describe('generateEMRFieldData — txtMrecMedPovCont CP949 바이트 절단', () => {
