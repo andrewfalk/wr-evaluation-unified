@@ -11,6 +11,23 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
     if (!ok) return;
     try {
       const { generateEMRFieldData } = await import('../utils/exportService');
+      const { generateUnifiedEMR } = await import('../utils/emrReport');
+      const { EMR_TEXT_LIMIT_BYTES, cp949ByteLength } = await import('../utils/emrText');
+
+      const { b8 } = generateUnifiedEMR(activePatient);
+      const bytes = cp949ByteLength(b8);
+      if (bytes > EMR_TEXT_LIMIT_BYTES) {
+        const over = bytes - EMR_TEXT_LIMIT_BYTES;
+        const proceed = await showConfirm(
+          `⚠ 6.종합소견이 EMR 한도를 초과합니다.\n`
+          + `${bytes.toLocaleString()} / ${EMR_TEXT_LIMIT_BYTES.toLocaleString()} byte (${over.toLocaleString()} byte 초과)\n\n`
+          + `그대로 전송하면 끝부분이 "...(이하 생략)"으로 잘립니다.\n`
+          + `종합평가 스텝에서 "패턴 그룹 사용"을 켜면 byte를 줄일 수 있습니다.\n\n`
+          + `잘린 상태로 계속 전송하시겠습니까?`
+        );
+        if (!proceed) return;
+      }
+
       const fieldData = generateEMRFieldData(activePatient);
       const result = await window.electron.injectEMR(fieldData);
       if (result.success) {

@@ -64,6 +64,50 @@ export function buildSpineSectionText(calc = {}) {
   return buildMddmSectionText(calc) + buildVibrationSectionText(vibration);
 }
 
+// buildSpineSectionText의 요약본 — 작업별 분석(반복 행)은 빼고 종합·기준치 대비 결론만
+// 남긴다. EMR 종합소견(b8) byte 절감용. 전문은 buildSpineSectionText가 그대로 담당한다.
+export function buildSpineSectionSummary(calc = {}) {
+  const vibration = calc?.vibration || (calc?.evalMethod === 'wbv' ? calc : {});
+  return buildMddmSectionSummary(calc) + buildVibrationSectionSummary(vibration);
+}
+
+function buildMddmSectionSummary(calc = {}) {
+  const mddmStatus = calc?.mddmStatus || 'present';
+  if (mddmStatus !== 'present') return '';
+
+  const { lifetimeDose, comparison, maxForce, weightedDailyDose, dailyDose, gender } = calc || {};
+  const dailyKNh = weightedDailyDose?.value ?? dailyDose?.dailyDoseKNh ?? 0;
+  const severityLabel = classifySpineSeverity(dailyKNh, maxForce || 0, gender);
+
+  let text = `\n< 허리(요추) >\n`;
+  text += `- 최대 압박력: ${(maxForce || 0).toLocaleString()} N | 일일 노출량: ${dailyKNh.toFixed(2)} kN·h (${severityLabel})\n`;
+  const excludedSuffix = lifetimeDose?.excluded ? ` ${EXCLUDED_NOTE}` : '';
+  text += `- 누적 노출량: ${lifetimeDose?.lifetimeDoseMNh?.toFixed(2) || '0.00'} MN·h${excludedSuffix}\n`;
+
+  if (comparison) {
+    text += `- 법원(BSG) 기준 대비 ${formatSpinePercent(comparison.court)}%(${getSpineThresholdStatus(comparison.court)}) / MDDM 기준 대비 ${formatSpinePercent(comparison.mddm)}%(${getSpineThresholdStatus(comparison.mddm)})\n`;
+    text += `${getSpineInterpretation(comparison)}\n`;
+  }
+
+  return text;
+}
+
+function buildVibrationSectionSummary(calc = {}) {
+  const exposureStatus = calc?.exposureStatus || 'unknown';
+  if (exposureStatus !== 'present') return '';
+
+  const { amax8, dv, comparison, risk } = calc || {};
+  let text = `\n< 허리(요추) - 전신진동(BK 2110) >\n`;
+  text += `- Amax(8): ${formatSpineNumber(amax8?.min)} ~ ${formatSpineNumber(amax8?.max)} m/s² (기준 0.63) | 평생 DV: ${formatSpineNumber(dv?.min, 0)} ~ ${formatSpineNumber(dv?.max, 0)} (기준 1400)\n`;
+
+  if (comparison) {
+    text += `- 일일 기준 대비 ${formatSpineNumber(comparison.daily?.percent?.min, 0)}~${formatSpineNumber(comparison.daily?.percent?.max, 0)}%(${vibStatusLabel(comparison.daily?.status)}) / 평생 기준 대비 ${formatSpineNumber(comparison.lifetime?.percent?.min, 0)}~${formatSpineNumber(comparison.lifetime?.percent?.max, 0)}%(${vibStatusLabel(comparison.lifetime?.status)})\n`;
+  }
+  if (risk?.description) text += `- ${risk.description}\n`;
+
+  return text;
+}
+
 // MDDM 섹션 텍스트. 'present'일 때만 출력. unknown(미평가)·none(노출없음)은 빈 문자열(공간 절약).
 function buildMddmSectionText(calc = {}) {
   const mddmStatus = calc?.mddmStatus || 'present'; // 구형 calc(상태 없음)는 결과 출력

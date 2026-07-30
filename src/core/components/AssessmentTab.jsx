@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { KLG_OPTIONS, LOW_REASON_OPTIONS } from '../../modules/knee/utils/data';
 import { getSideText } from '../../modules/knee/utils/calculations';
-import { resolveDiagnosisModule } from '../utils/diagnosisMapping';
+import { resolveDiagnosisModule, supportsKlGrade, supportsEllmanClass } from '../utils/diagnosisMapping';
 import { normalizeSpineAssessmentFields } from '../utils/spineAssessmentMigration';
+import { buildAssessmentUnits } from '../utils/assessmentGroups';
+import { AssessmentGroupView } from './AssessmentGroupView';
+import { AssessmentIndividualFields } from './AssessmentIndividualFields';
 
-const ELLMAN_OPTIONS = [
+export const ELLMAN_OPTIONS = [
   { value: '', label: '선택' },
   { value: 'N/A', label: '해당없음' },
   { value: 'Grade 1', label: 'Grade 1' },
@@ -87,12 +90,36 @@ function SideAssessment({ diag, index, side, onUpdate, label }) {
   );
 }
 
-export function AssessmentTab({ diagnoses, onDiagnosisUpdate, onDiagnosesReplace, returnConsiderations, onReturnChange, activeModules }) {
+export function AssessmentTab({
+  diagnoses, onDiagnosisUpdate, onDiagnosesReplace, returnConsiderations, onReturnChange, activeModules,
+  reportOptions, onReportOptionsChange,
+}) {
   const hasKnee = (activeModules || []).includes('knee');
   const hasWrist = (activeModules || []).includes('wrist');
   const hasShoulder = (activeModules || []).includes('shoulder');
   const hasElbow = (activeModules || []).includes('elbow');
   const hasCervical = (activeModules || []).includes('cervical');
+
+  const [view, setView] = useState('card');
+  const [pendingScrollId, setPendingScrollId] = useState(null);
+  const groupOutput = !!reportOptions?.groupAssessmentResults;
+  const unitCount = useMemo(() => buildAssessmentUnits(diagnoses, activeModules).length, [diagnoses, activeModules]);
+
+  const handleJumpToDiagnosis = useCallback(diagId => {
+    setView('card');
+    setPendingScrollId(diagId);
+  }, []);
+
+  useEffect(() => {
+    if (view !== 'card' || !pendingScrollId) return;
+    const el = document.getElementById(`assessment-diag-${pendingScrollId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('assessment-card-flash');
+      setTimeout(() => el.classList.remove('assessment-card-flash'), 1600);
+    }
+    setPendingScrollId(null);
+  }, [view, pendingScrollId]);
 
   // 수직분포/동반 척추증: spine 진단 중 첫 번째에만 표시 + 기존 데이터 통합 마이그레이션
   const isSpineDiagnosis = useCallback(
@@ -118,7 +145,48 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, onDiagnosesReplace
         </div>
       </div>
 
-      {diagnoses.map((diag, index) => {
+      {diagnoses.length > 0 && (
+        <div className="assessment-output-toggle">
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={groupOutput}
+              onChange={e => onReportOptionsChange?.({ ...reportOptions, groupAssessmentResults: e.target.checked })}
+            />
+            패턴 그룹 사용 — 미리보기·내보내기 포함
+          </label>
+          <div className="assessment-view-toggle" role="group" aria-label="보기 전환">
+            <button type="button" className={view === 'group' ? 'active' : ''} onClick={() => setView('group')}>패턴 그룹</button>
+            <button type="button" className={view === 'card' ? 'active' : ''} onClick={() => setView('card')}>개별 카드</button>
+          </div>
+        </div>
+      )}
+      {view === 'card' && unitCount >= 10 && (
+        <div className="assessment-view-hint">
+          평가단위가 {unitCount}개입니다.{' '}
+          <button type="button" className="assessment-view-hint-link" onClick={() => setView('group')}>패턴 그룹 보기로 전환</button>
+          하면 같은 패턴을 한 번에 입력할 수 있습니다.
+        </div>
+      )}
+
+      {view === 'group' && (
+        <>
+          <AssessmentIndividualFields
+            diagnoses={diagnoses}
+            activeModules={activeModules}
+            onDiagnosisUpdate={onDiagnosisUpdate}
+            onJumpToDiagnosis={handleJumpToDiagnosis}
+          />
+          <AssessmentGroupView
+            diagnoses={diagnoses}
+            activeModules={activeModules}
+            onDiagnosesReplace={onDiagnosesReplace}
+            onJumpToDiagnosis={handleJumpToDiagnosis}
+          />
+        </>
+      )}
+
+      {view === 'card' && diagnoses.map((diag, index) => {
         const resolvedModule = resolveDiagnosisModule(diag, activeModules);
         const isSpine = resolvedModule?.moduleId === 'spine';
         const isCervical = resolvedModule?.moduleId === 'cervical';
@@ -129,12 +197,12 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, onDiagnosesReplace
         const isElbow = resolvedModule?.moduleId === 'elbow';
 
         return (
-          <div key={diag.id} className="assessment-card">
+          <div key={diag.id} id={`assessment-diag-${diag.id}`} className="assessment-card">
             <div className="assessment-card-header">
               <div className="assessment-card-header-top">
                 <div className="assessment-card-title">상병 #{index + 1}: {diag.code} {diag.name}</div>
 
-                {!isSpine && isShoulder && diag.side && (
+                {!isAxial && isShoulder && diag.side && supportsEllmanClass(diag) && (
                   <div className="klg-inline">
                     <span className="klg-inline-label">Ellman Class</span>
                     {(diag.side === 'right' || diag.side === 'both') && (
@@ -150,7 +218,7 @@ export function AssessmentTab({ diagnoses, onDiagnosisUpdate, onDiagnosesReplace
                   </div>
                 )}
 
-                {!isSpine && isKnee && diag.side && (
+                {!isAxial && isKnee && diag.side && supportsKlGrade(diag) && (
                   <div className="klg-inline">
                     <span className="klg-inline-label">K-L Grade</span>
                     {(diag.side === 'right' || diag.side === 'both') && (
