@@ -15,7 +15,15 @@ export function TaskManager({ tasks, selectedIndex, onSelect, onAdd, onRemove })
         <button type="button" className="btn btn-primary btn-sm" onClick={onAdd}>+ 작업 추가</button>
       </div>
 
-      {tasks.length === 0 ? null : (
+      {tasks.length === 0 ? (
+        <div className="task-list">
+          <div className="task-item task-item-placeholder">
+            <div className="task-item-main">
+              <div className="task-item-title">경추 부담 작업 없음</div>
+            </div>
+          </div>
+        </div>
+      ) : (
         <div className="task-list">
           {tasks.map((task, index) => (
             <div

@@ -337,11 +337,11 @@ function buildJobSummary({ job, diagnoses, tasks }) {
   const burdenGrade = getCervicalBurdenGrade(flags);
   const riskFactorItems = buildRiskFactorItems(flags);
   const completedTaskCount = taskSummaries.filter(task => task.missingFields.length === 0).length;
-  const missingFields = taskSummaries.length === 0
-    ? ['작업 정보']
-    : taskSummaries
-      .filter(task => task.missingFields.length > 0)
-      .map(task => `${task.displayName}: ${task.missingFields.join(', ')}`);
+  // 작업이 하나도 없는 것은 "경추 부담 작업 없음"이라는 유효한 상태이지, 입력 누락이 아니다 —
+  // 실제로 작업이 있는데 필드가 비어있는 경우에만 입력 누락으로 표시한다.
+  const missingFields = taskSummaries
+    .filter(task => task.missingFields.length > 0)
+    .map(task => `${task.displayName}: ${task.missingFields.join(', ')}`);
 
   const aggregate = {
     cumulativeKgHours,

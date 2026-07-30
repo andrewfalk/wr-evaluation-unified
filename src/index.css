@@ -593,6 +593,12 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   transition: all 0.2s;
 }
 .task-item:hover { border-color: rgba(96, 165, 250, 0.24); background: var(--hover-bg); }
+.task-item-placeholder {
+  cursor: default;
+  color: var(--text-muted);
+  border-style: dashed;
+}
+.task-item-placeholder:hover { border-color: rgba(148, 163, 184, 0.16); background: var(--card-bg); }
 .task-item.active {
   border-color: var(--accent);
   background: rgba(59,130,246,0.07);
