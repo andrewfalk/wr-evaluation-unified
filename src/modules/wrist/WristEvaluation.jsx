@@ -65,8 +65,9 @@ export function WristEvaluation({ patient, calc, updateModule }) {
             ...jobEvaluation,
             diagnosisEntries: jobEvaluation.diagnosisEntries.map(entry => {
               if (entry.diagnosisId !== diagnosisId) return entry;
+              const { bkAutoSyncedFrom: _cleared, ...rest } = entry;
               return {
-                ...entry,
+                ...rest,
                 ...patch,
                 diagnosisId,
               };

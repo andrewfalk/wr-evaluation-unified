@@ -616,7 +616,7 @@ export function isWristAssessmentComplete(patientData) {
 
 // ── BK 유형별 그룹화 helper ──
 
-const BK_META_FIELDS = new Set(['diagnosisId', 'selectedBkType', 'bkSelectionMode']);
+const BK_META_FIELDS = new Set(['diagnosisId', 'selectedBkType', 'bkSelectionMode', 'bkAutoSyncedFrom']);
 
 function scoreEntry(entry) {
   if (!entry) return 0;

@@ -83,12 +83,41 @@ function getSideLabel(side) {
   return side === 'right' ? '우측' : side === 'left' ? '좌측' : side === 'both' ? '양측' : '-';
 }
 
+const BK_META_FIELDS = new Set(['diagnosisId', 'selectedBkType', 'bkSelectionMode', 'bkAutoSyncedFrom']);
+
+function scoreEntryFields(entry) {
+  if (!entry) return 0;
+  return Object.entries(entry).filter(([key, value]) =>
+    !BK_META_FIELDS.has(key) &&
+    value !== '' && value !== null &&
+    !(Array.isArray(value) && value.length === 0)
+  ).length;
+}
+
+// 어떤 BK유형을 선택(또는 재선택)했을 때, 이미 그 유형으로 입력된 다른 상병이 있으면
+// 그중 가장 많이 채워진 entry를 "기증자"로 찾는다. EntryCard(개별 선택)와 BkGroupCard(그룹 전환) 양쪽에서 공용으로 사용한다.
+function findGroupDonorEntry(allGroups, bkType, excludeDiagnosisId) {
+  if (!bkType) return null;
+  const group = allGroups.find(g => g.bkType === bkType);
+  if (!group) return null;
+  let best = null;
+  let bestScore = 0;
+  group.items.forEach(({ diagnosis, entry }) => {
+    if (!entry || diagnosis.id === excludeDiagnosisId) return;
+    const score = scoreEntryFields(entry);
+    if (score > bestScore) {
+      best = entry;
+      bestScore = score;
+    }
+  });
+  return best;
+}
+
 function hasEntryMismatch(items) {
   if (items.length < 2) return false;
   const first = items[0]?.entry;
   if (!first) return false;
-  const SKIP = new Set(['diagnosisId', 'selectedBkType', 'bkSelectionMode']);
-  const keys = Object.keys(first).filter(k => !SKIP.has(k));
+  const keys = Object.keys(first).filter(k => !BK_META_FIELDS.has(k));
   return items.slice(1).some(({ entry }) =>
     entry && keys.some(k => JSON.stringify(first[k]) !== JSON.stringify(entry[k]))
   );
@@ -101,19 +130,34 @@ function BkGroupCard({ jobId, bkType, items, allGroups, onChangeEntry }) {
   const selectionModeLabel = representativeEntry.bkSelectionMode === 'manual' ? '수동 선택' : (representativeEntry.selectedBkType ? '자동 제안' : '자동 제안 없음');
   const diagSubtitle = items.map(({ diagnosis }) => `${diagnosis.code || '-'} ${diagnosis.name || ''}`.trim()).join(' / ');
   const mismatch = hasEntryMismatch(items);
+  const autoSyncedNotes = items
+    .filter(({ entry }) => entry?.bkAutoSyncedFrom)
+    .map(({ diagnosis, entry }) => {
+      const donor = items.find(i => i.diagnosis.id === entry.bkAutoSyncedFrom)?.diagnosis;
+      return {
+        key: diagnosis.id,
+        diagnosisLabel: `${diagnosis.code || '-'} ${diagnosis.name || ''}`.trim(),
+        donorLabel: donor ? `${donor.code || '-'} ${donor.name || ''}`.trim() : '다른 상병',
+      };
+    });
 
   const patchAll = (patch) => {
     items.forEach(({ diagnosis }) => onChangeEntry(jobId, diagnosis.id, patch));
   };
 
+  const applyRepresentativeToAll = () => {
+    const copied = Object.fromEntries(
+      Object.entries(representativeEntry).filter(([k]) => !BK_META_FIELDS.has(k))
+    );
+    items.forEach(({ diagnosis }) => onChangeEntry(jobId, diagnosis.id, copied));
+  };
+
   const handleBkChange = (nextBk) => {
-    const existingGroup = nextBk && allGroups.find(g => g.bkType === nextBk && g.bkType !== bkType);
-    if (existingGroup) {
-      const repEntry = pickRepresentativeEntry(existingGroup.items);
-      const SKIP = new Set(['diagnosisId', 'selectedBkType', 'bkSelectionMode']);
-      const copied = Object.fromEntries(Object.entries(repEntry).filter(([k]) => !SKIP.has(k)));
+    const donor = findGroupDonorEntry(allGroups, nextBk, null);
+    if (donor) {
+      const copied = Object.fromEntries(Object.entries(donor).filter(([k]) => !BK_META_FIELDS.has(k)));
       items.forEach(({ diagnosis }) =>
-        onChangeEntry(jobId, diagnosis.id, { ...copied, selectedBkType: nextBk, bkSelectionMode: 'manual' })
+        onChangeEntry(jobId, diagnosis.id, { ...copied, selectedBkType: nextBk, bkSelectionMode: 'manual', bkAutoSyncedFrom: donor.diagnosisId })
       );
     } else {
       items.forEach(({ diagnosis }) => {
@@ -147,9 +191,17 @@ function BkGroupCard({ jobId, bkType, items, allGroups, onChangeEntry }) {
       </div>
       {mismatch && (
         <div className="result-note" style={{ color: 'var(--warning-color, #b45309)' }}>
-          ⚠ 기존 상병별 입력값이 통합되었습니다. 대표값(가장 많이 입력된 값)으로 표시됩니다.
+          ⚠ 상병별 실제 저장값이 서로 다릅니다. 화면에는 대표값(가장 많이 입력된 값)만 표시되고 있어 실제 저장값과 다를 수 있습니다.{' '}
+          <button type="button" className="btn btn-outline btn-xs" onClick={applyRepresentativeToAll}>
+            표시된 대표값을 전체 상병에 적용
+          </button>
         </div>
       )}
+      {autoSyncedNotes.map(note => (
+        <div key={note.key} className="result-note" style={{ color: 'var(--warning-color, #b45309)' }}>
+          ⚠ "{note.diagnosisLabel}" 상병에 "{note.donorLabel}" 상병과 동일한 입력값이 자동 적용되었습니다. 내용을 확인 후 실제와 다르면 직접 수정해 주세요.
+        </div>
+      ))}
       {items.length > 1 && (
         <div className="result-note">BK 유형 변경 시 {items.length}개 상병 전체에 적용됩니다.</div>
       )}
@@ -259,7 +311,7 @@ function BkGroupCard({ jobId, bkType, items, allGroups, onChangeEntry }) {
   );
 }
 
-function EntryCard({ jobId, diagnosis, entry, onChangeEntry }) {
+function EntryCard({ jobId, diagnosis, entry, onChangeEntry, allGroups }) {
   const inputKey = `${jobId}_${diagnosis.id}`;
   const shouldShowExposureFields = entry.direct_anatomic_link === 'yes';
   const selectionModeLabel = entry.bkSelectionMode === 'manual'
@@ -304,6 +356,19 @@ function EntryCard({ jobId, diagnosis, entry, onChangeEntry }) {
             value={entry.selectedBkType}
             onChange={e => {
               const nextValue = e.target.value;
+              const donor = findGroupDonorEntry(allGroups, nextValue, diagnosis.id);
+              if (donor) {
+                const copied = Object.fromEntries(
+                  Object.entries(donor).filter(([k]) => !BK_META_FIELDS.has(k))
+                );
+                patchEntry({
+                  ...copied,
+                  selectedBkType: nextValue,
+                  bkSelectionMode: 'manual',
+                  bkAutoSyncedFrom: donor.diagnosisId,
+                });
+                return;
+              }
               const nextEntry = resetWristBranchFields(entry, nextValue);
               patchEntry({
                 ...nextEntry,
@@ -493,6 +558,7 @@ export function ExposureForm({
               diagnosis={diagnosis}
               entry={entry}
               onChangeEntry={onChangeEntry}
+              allGroups={groups}
             />
           );
         })}

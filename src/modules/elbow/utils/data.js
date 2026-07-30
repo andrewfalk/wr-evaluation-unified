@@ -251,6 +251,17 @@ function normalizeDiagnosisEntry(existingEntry, diagnosis) {
   return baseEntry;
 }
 
+const BK_GROUP_META_FIELDS = new Set(['diagnosisId', 'selectedBkType', 'bkSelectionMode', 'bkAutoSyncedFrom']);
+
+function scoreDiagnosisEntry(entry) {
+  if (!entry) return 0;
+  return Object.entries(entry).filter(([key, value]) =>
+    !BK_GROUP_META_FIELDS.has(key) &&
+    value !== '' && value !== null &&
+    !(Array.isArray(value) && value.length === 0)
+  ).length;
+}
+
 export function syncElbowModuleData(moduleData = {}, jobs = [], diagnoses = [], activeModules = []) {
   const elbowDiagnoses = (diagnoses || []).filter(diag => isElbowDiagnosis(diag, activeModules));
   const temporalSequence = normalizeTemporalSequence(moduleData);
@@ -277,7 +288,28 @@ export function syncElbowModuleData(moduleData = {}, jobs = [], diagnoses = [], 
           }
         }
       }
-      return entry;
+      // 신규 생성 entry뿐 아니라, 진단 코드 변경으로 자동추론 BK유형이 바뀐 기존 entry도 동기화 대상에 포함한다.
+      const bkTypeJustChanged = !!existingEntry && existingEntry.selectedBkType !== entry.selectedBkType;
+      return { entry, autoSyncEligible: !existingEntry || bkTypeJustChanged };
+    });
+
+    // 아직 아무 값도 입력되지 않은 entry가 이미 값이 채워진 동일 BK유형 entry와 같은 그룹으로 묶이면
+    // (화면엔 대표값이 채워진 것처럼 보이지만 실제 저장값은 비어있는 상태를 방지하기 위해) 대표값을 즉시 복사한다.
+    diagnosisEntries.forEach(({ entry, autoSyncEligible }) => {
+      if (!autoSyncEligible || !entry.selectedBkType || scoreDiagnosisEntry(entry) > 0) return;
+      const donor = diagnosisEntries.reduce((best, other) => {
+        if (other.entry === entry || other.entry.selectedBkType !== entry.selectedBkType) return best;
+        const score = scoreDiagnosisEntry(other.entry);
+        if (score === 0) return best;
+        if (!best || score > scoreDiagnosisEntry(best.entry)) return other;
+        return best;
+      }, null);
+      if (!donor) return;
+      Object.entries(donor.entry).forEach(([key, value]) => {
+        if (BK_GROUP_META_FIELDS.has(key)) return;
+        entry[key] = Array.isArray(value) ? [...value] : value;
+      });
+      entry.bkAutoSyncedFrom = donor.entry.diagnosisId;
     });
 
     const { _pendingPreset, ...restJobEval } = (existingJobEvaluation || {});
@@ -285,7 +317,7 @@ export function syncElbowModuleData(moduleData = {}, jobs = [], diagnoses = [], 
       ...createElbowJobEvaluation(job.id),
       ...restJobEval,
       sharedJobId: job.id,
-      diagnosisEntries,
+      diagnosisEntries: diagnosisEntries.map(({ entry }) => entry),
     };
   });
 
