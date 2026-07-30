@@ -279,8 +279,12 @@ export function formatGroupedAssessment(diagnoses, activeModules = []) {
   ].sort((a, b) => a.index - b.index);
 
   if (incompleteEntries.length) {
+    // 헤더 개수는 완료 그룹 섹션과 동일하게 "평가단위" 기준(양측 미완료 1건 = 2개)을
+    // 쓰고, "대상:" 목록만 mergeDisplayTags로 병합된 표시용 태그(#N(양측))를 쓴다.
+    // incompleteEntries.length(태그 개수)를 그대로 쓰면 양측 모두 미완료인 상병이
+    // 1개로 축소 표시된다.
     const tags = incompleteEntries.map(t => t.label).join(', ');
-    sections.push(`[미입력/검토 필요] ${incompleteEntries.length}개\n대상: ${tags}`);
+    sections.push(`[미입력/검토 필요] ${info.stats.incompleteCount}개\n대상: ${tags}`);
   }
 
   return sections.join('\n\n');

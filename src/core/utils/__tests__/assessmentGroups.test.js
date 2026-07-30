@@ -348,4 +348,23 @@ describe('formatGroupedAssessment: 그룹 형식 문구', () => {
     const text = formatGroupedAssessment(diagnoses, []);
     expect(text).toBe('[미입력/검토 필요] 2개\n대상: #1(방향 미선택), #2(우)');
   });
+
+  it('양측 모두 미완료인 상병은 대상에서 "#1(양측)" 하나로 합쳐 보여주되, 헤더 개수는 평가단위 2개로 센다', () => {
+    // mergeDisplayTags가 우/좌를 태그 1개로 합치므로, 태그 배열 길이가 아니라
+    // info.stats.incompleteCount(평가단위 기준)를 헤더에 써야 한다 — 회귀 방지.
+    const diagnoses = [makeDiag({ ...KNEE, side: 'both' })]; // 우/좌 둘 다 미입력
+    const text = formatGroupedAssessment(diagnoses, []);
+    expect(text).toBe('[미입력/검토 필요] 2개\n대상: #1(양측)');
+  });
+
+  it('양측 중 한쪽만 미완료면 평가단위 1개로 정확히 센다', () => {
+    const diagnoses = [
+      makeDiag({ ...KNEE, side: 'both', confirmedRight: 'confirmed', assessmentRight: 'high' }), // 좌만 미완료
+    ];
+    const text = formatGroupedAssessment(diagnoses, []);
+    expect(text).toBe(
+      '[확인 · 업무관련성 높음] 1개\n대상: #1(우)\n\n' +
+      '[미입력/검토 필요] 1개\n대상: #1(좌)'
+    );
+  });
 });
