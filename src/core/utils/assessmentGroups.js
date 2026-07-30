@@ -4,13 +4,29 @@
 
 import { resolveDiagnosisModule } from './diagnosisMapping';
 import { getStatusText, getReasonText } from '../../modules/knee/utils/calculations';
+import { LOW_REASON_OPTIONS } from '../../modules/knee/utils/data';
 
 function normalizeOtherText(value) {
   return String(value || '').trim().replace(/\r\n/g, '\n');
 }
 
+// 낮음 사유는 선택한 순서와 무관하게 항상 LOW_REASON_OPTIONS 정의 순서(기타는 항상 맨 뒤)로
+// 표시한다 — 그래야 같은 사유 집합이면 그룹 키도 항상 같은 문자열로 만들어지고, 화면에도
+// 매번 같은 순서로 보인다.
+const REASON_ORDER = LOW_REASON_OPTIONS.map(o => o.value);
+function sortReasons(reasons) {
+  return Array.from(new Set(reasons)).sort((a, b) => REASON_ORDER.indexOf(a) - REASON_ORDER.indexOf(b));
+}
+
 export function assessmentLabel(value) {
   return value === 'high' ? '높음' : value === 'low' ? '낮음' : '-';
+}
+
+// knee/calculations.js의 getStatusText("확인"/"미확인")는 "상병 상태(...)"처럼 감싸는
+// 문맥에서만 뜻이 분명하다. 그룹 카드 제목·패턴 에디터·문서 헤더처럼 단독으로 나오는
+// 곳은 "상병 확인"/"상병 미확인"으로 풀어써야 오해가 없다.
+export function statusText(status) {
+  return status === 'confirmed' ? '상병 확인' : status === 'unconfirmed' ? '상병 미확인' : '-';
 }
 
 // 축성(척추/경추) 진단은 side 값과 무관하게 Right 키를 단일 "평가" 슬롯으로 쓴다
@@ -80,7 +96,7 @@ export function patternKeyOf(diag, unit) {
   if (assessment === 'low') {
     const reasons = diag[unit.reasonKey] || [];
     if (!reasons.length) return null;
-    const sortedReasons = Array.from(new Set(reasons)).sort();
+    const sortedReasons = sortReasons(reasons);
     const other = sortedReasons.includes('other') ? normalizeOtherText(diag[unit.reasonOtherKey]) : '';
     return `${confirmed}|${assessment}|${sortedReasons.join(',')}|${other}`;
   }
@@ -111,7 +127,7 @@ export function buildAssessmentGroups(diagnoses, activeModules = []) {
       const assessment = diag[unit.assessmentKey];
       const meta = { confirmed, assessment, reasons: [], other: '' };
       if (assessment === 'low') {
-        meta.reasons = Array.from(new Set(diag[unit.reasonKey] || [])).sort();
+        meta.reasons = sortReasons(diag[unit.reasonKey] || []);
         meta.other = meta.reasons.includes('other') ? normalizeOtherText(diag[unit.reasonOtherKey]) : '';
       }
       groupMap.set(key, { key, meta, units: [] });
@@ -181,12 +197,15 @@ export function mergeDisplayTags(units, byId) { // eslint-disable-line no-unused
 
 // formatGroupedAssessment용 — "#N 코드 상병명 (방향)"을 상병 1건당 한 줄씩 사람이 읽기
 // 편한 형태로 나열한다. entries는 { diagId, index, sideLabel } 모양(mergeDisplayTags의
-// 반환값 또는 방향 미선택 항목)이면 된다.
+// 반환값 또는 방향 미선택 항목)이면 된다. 척추/경추처럼 방향 개념이 없는 "평가" 항목은
+// 굳이 "(평가)"를 붙이지 않는다 — 우측/좌측/양측과 달리 실제 방향 정보가 아니라서
+// 옆에 있으면 오히려 헷갈린다.
 function formatAssessmentTargetLines(entries, byId) {
   return entries.map(entry => {
     const diag = byId.get(entry.diagId);
     const name = `${diag?.code || ''} ${diag?.name || ''}`.trim();
-    return `#${entry.index + 1} ${name} (${entry.sideLabel})`;
+    const suffix = entry.sideLabel === '평가' ? '' : ` (${entry.sideLabel})`;
+    return `#${entry.index + 1}. ${name}${suffix}`;
   }).join('\n');
 }
 
@@ -278,12 +297,14 @@ export function formatGroupedAssessment(diagnoses, activeModules = []) {
   const info = buildAssessmentGroups(diagnoses, activeModules);
   const sections = info.groups.map(group => {
     const targetLines = formatAssessmentTargetLines(mergeDisplayTags(group.units, info.byId), info.byId);
-    let section = `[${getStatusText(group.meta.confirmed)} · 업무관련성 ${assessmentLabel(group.meta.assessment)}] ${group.units.length}개`;
-    if (group.meta.assessment === 'low') {
-      const reasonText = getReasonText(group.meta.reasons, group.meta.other).split('\n').join(', ');
-      section += `\n낮음 사유: ${reasonText}`;
-    }
+    let section = `[${statusText(group.meta.confirmed)} · 업무관련성 ${assessmentLabel(group.meta.assessment)}] ${group.units.length}개`;
     section += `\n${targetLines}`;
+    if (group.meta.assessment === 'low') {
+      // 사유를 한 줄에 쉼표로 몰아 쓰지 않고 항목당 한 줄씩 불릿으로 — 사람이 읽는 최종
+      // 문서(EMR 종합소견)이므로 buildAssessmentBlocks의 개별 형식과 같은 방식으로 맞춘다.
+      const reasonLines = getReasonText(group.meta.reasons, group.meta.other).split('\n').map(r => `  - ${r}`).join('\n');
+      section += `\n낮음 사유:\n${reasonLines}`;
+    }
     return section;
   });
 

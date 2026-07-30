@@ -74,7 +74,7 @@ export function TaskEditor({ task, onChange }) {
           </div>
         </div>
 
-        <div className="form-group">
+        <div className="form-group cervical-exposure-group">
           <div className="result-section-title">노출 유형</div>
           <div className="result-section-caption">한 작업에서 해당되는 경추 부담 노출을 모두 선택합니다.</div>
           <div className="checkbox-group">

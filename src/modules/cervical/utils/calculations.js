@@ -247,6 +247,8 @@ function getCervicalConclusionText(burdenGrade) {
 }
 
 function generateJobNarrative({ taskSummaries, aggregate }) {
+  if (taskSummaries.length === 0) return '경추부담 작업 없음';
+
   const referenceRatio = aggregate.cumulativeKgHours > 0
     ? (aggregate.cumulativeKgHours / BK2109_REFERENCE_KG_HOURS) * 100
     : 0;
@@ -282,14 +284,12 @@ function generateJobNarrative({ taskSummaries, aggregate }) {
     }
   });
 
-  if (taskSummaries.length > 0) {
-    lines.push('직업 합산');
-    lines.push(
-      ` - BK2109 누적 총부하량 합계 : ${formatNumber(aggregate.cumulativeKgHours)} kg·h (참고치 ${formatNumber(BK2109_REFERENCE_KG_HOURS)} kg·h, 참고치 대비 ${formatNumber(referenceRatio, 1)}%)`
-    );
-    lines.push(` - 일일 대표 노출시간 합계 : ${formatHours(aggregate.representativeHours)}`);
-    lines.push(` - 비중립 정적 자세 시간 합계 : ${formatHours(aggregate.totalAwkwardHours)}`);
-  }
+  lines.push('직업 합산');
+  lines.push(
+    ` - BK2109 누적 총부하량 합계 : ${formatNumber(aggregate.cumulativeKgHours)} kg·h (참고치 ${formatNumber(BK2109_REFERENCE_KG_HOURS)} kg·h, 참고치 대비 ${formatNumber(referenceRatio, 1)}%)`
+  );
+  lines.push(` - 일일 대표 노출시간 합계 : ${formatHours(aggregate.representativeHours)}`);
+  lines.push(` - 비중립 정적 자세 시간 합계 : ${formatHours(aggregate.totalAwkwardHours)}`);
 
   return lines.join('\n');
 }

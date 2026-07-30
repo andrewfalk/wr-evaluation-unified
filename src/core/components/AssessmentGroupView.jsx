@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import { getStatusText } from '../../modules/knee/utils/calculations';
 import { LOW_REASON_OPTIONS } from '../../modules/knee/utils/data';
 import {
   assessmentLabel,
+  statusText,
   buildAssessmentGroups,
   mergeDisplayTags,
   applyPatternToUnits,
@@ -20,7 +20,7 @@ function summarizeBefore(units, byId, isIncomplete) {
   }));
   if (combos.size !== 1) return '혼합 (여러 값 존재)';
   const [confirmed, assessment] = [...combos][0].split('|');
-  return `${getStatusText(confirmed)} / ${assessmentLabel(assessment)}`;
+  return `${statusText(confirmed)} / ${assessmentLabel(assessment)}`;
 }
 
 function GroupCard({
@@ -291,7 +291,7 @@ export function AssessmentGroupView({ diagnoses, activeModules, onDiagnosesRepla
         {info.incomplete.length > 0 && renderCard('__incomplete__', '미입력 · 조치 필요', true, null, info.incomplete)}
 
         {info.groups.map((group, index) => {
-          const title = `${getStatusText(group.meta.confirmed)} · 업무관련성 ${assessmentLabel(group.meta.assessment)}`;
+          const title = `${statusText(group.meta.confirmed)} · 업무관련성 ${assessmentLabel(group.meta.assessment)}`;
           const reasonText = group.meta.assessment === 'low'
             ? group.meta.reasons.map(r => lowReasonLabel(r)).join(', ') + (group.meta.other ? ` / 기타: ${group.meta.other}` : '')
             : null;

@@ -100,15 +100,21 @@ export function AssessmentTab({
   const hasElbow = (activeModules || []).includes('elbow');
   const hasCervical = (activeModules || []).includes('cervical');
 
-  const [view, setView] = useState('card');
+  // "패턴 그룹"/"개별 카드" 보기 토글을 곧 출력 형식 스위치로도 쓴다 — 별도 체크박스를
+  // 두지 않고, 지금 보고 있는 화면 그대로가 미리보기·EMR·엑셀에 나가는 형식이 되도록
+  // 하나로 합쳤다. reportOptions.groupAssessmentResults가 사실상의 view 상태.
   const [pendingScrollId, setPendingScrollId] = useState(null);
   const groupOutput = !!reportOptions?.groupAssessmentResults;
+  const view = groupOutput ? 'group' : 'card';
+  const setGroupOutput = useCallback(next => {
+    onReportOptionsChange?.({ ...reportOptions, groupAssessmentResults: next });
+  }, [onReportOptionsChange, reportOptions]);
   const unitCount = useMemo(() => buildAssessmentUnits(diagnoses, activeModules).length, [diagnoses, activeModules]);
 
   const handleJumpToDiagnosis = useCallback(diagId => {
-    setView('card');
+    setGroupOutput(false);
     setPendingScrollId(diagId);
-  }, []);
+  }, [setGroupOutput]);
 
   useEffect(() => {
     if (view !== 'card' || !pendingScrollId) return;
@@ -147,24 +153,17 @@ export function AssessmentTab({
 
       {diagnoses.length > 0 && (
         <div className="assessment-output-toggle">
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={groupOutput}
-              onChange={e => onReportOptionsChange?.({ ...reportOptions, groupAssessmentResults: e.target.checked })}
-            />
-            패턴 그룹 사용 — 미리보기·내보내기 포함
-          </label>
+          <span className="assessment-output-hint">패턴 그룹을 선택하면 미리보기·EMR·엑셀 출력도 그룹 형식으로 나갑니다.</span>
           <div className="assessment-view-toggle" role="group" aria-label="보기 전환">
-            <button type="button" className={view === 'group' ? 'active' : ''} onClick={() => setView('group')}>패턴 그룹</button>
-            <button type="button" className={view === 'card' ? 'active' : ''} onClick={() => setView('card')}>개별 카드</button>
+            <button type="button" className={view === 'group' ? 'active' : ''} onClick={() => setGroupOutput(true)}>패턴 그룹</button>
+            <button type="button" className={view === 'card' ? 'active' : ''} onClick={() => setGroupOutput(false)}>개별 카드</button>
           </div>
         </div>
       )}
       {view === 'card' && unitCount >= 10 && (
         <div className="assessment-view-hint">
           평가단위가 {unitCount}개입니다.{' '}
-          <button type="button" className="assessment-view-hint-link" onClick={() => setView('group')}>패턴 그룹 보기로 전환</button>
+          <button type="button" className="assessment-view-hint-link" onClick={() => setGroupOutput(true)}>패턴 그룹 보기로 전환</button>
           하면 같은 패턴을 한 번에 입력할 수 있습니다.
         </div>
       )}

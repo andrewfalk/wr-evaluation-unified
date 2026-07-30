@@ -408,7 +408,6 @@ export function generateUnifiedEMR(patient) {
     : buildAssessmentBlocks(diagnoses, activeModules, { reasonIndent: '    ' }).join('\n\n');
 
   const b8 = [
-    '[ 신체부담 평가 요약 ]\n※ 상세 내용은 4.직업적 요인 항목 참조',
     buildExposureSummary(shared, modules, activeModules),
     '[ 업무관련성 평가 결과 ]',
     assessmentText,

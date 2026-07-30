@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { LOW_REASON_OPTIONS } from '../../modules/knee/utils/data';
-import { getStatusText } from '../../modules/knee/utils/calculations';
-import { assessmentLabel } from '../utils/assessmentGroups';
+import { assessmentLabel, statusText } from '../utils/assessmentGroups';
 
 // 그룹(또는 그룹 내 선택 항목)에 상병 상태·업무관련성·낮음 사유를 일괄 입력하는 모달.
 // 실제 diagnoses 배열 조작은 부모(AssessmentGroupView)의 onApply가 담당한다 — 이 컴포넌트는
@@ -25,7 +24,7 @@ export function AssessmentPatternEditor({ contextLabel, diagCount, unitCount, be
   const canApply = !!confirmed && !!assessment && (assessment !== 'low' || reasons.length > 0);
 
   const afterParts = [];
-  if (confirmed) afterParts.push(getStatusText(confirmed));
+  if (confirmed) afterParts.push(statusText(confirmed));
   if (assessment) afterParts.push(assessmentLabel(assessment));
   let afterText = afterParts.length ? afterParts.join(' / ') : '(선택 필요)';
   if (assessment === 'low' && reasons.length) {

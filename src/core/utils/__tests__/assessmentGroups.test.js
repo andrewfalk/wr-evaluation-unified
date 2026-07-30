@@ -325,9 +325,9 @@ describe('formatGroupedAssessment: 그룹 형식 문구', () => {
     ];
     const text = formatGroupedAssessment(diagnoses, []);
     expect(text).toBe(
-      '[확인 · 업무관련성 높음] 2개\n#1 M17.0 무릎 관절증 (양측)\n\n' +
-      '[확인 · 업무관련성 낮음] 1개\n낮음 사유: 누적 신체부담 낮음\n#2 M17.0 무릎 관절증 (우측)\n\n' +
-      '[미입력/검토 필요] 1개\n#3 M17.0 무릎 관절증 (좌측)'
+      '[상병 확인 · 업무관련성 높음] 2개\n#1. M17.0 무릎 관절증 (양측)\n\n' +
+      '[상병 확인 · 업무관련성 낮음] 1개\n#2. M17.0 무릎 관절증 (우측)\n낮음 사유:\n  - 누적 신체부담 낮음\n\n' +
+      '[미입력/검토 필요] 1개\n#3. M17.0 무릎 관절증 (좌측)'
     );
   });
 
@@ -337,7 +337,7 @@ describe('formatGroupedAssessment: 그룹 형식 문구', () => {
       makeDiag({ id: 'b', ...KNEE, side: '' }), // 방향 미선택 — 평가단위가 없어 그룹/미완료 둘 다 원래는 못 잡음
     ];
     const text = formatGroupedAssessment(diagnoses, []);
-    expect(text).toContain('[미입력/검토 필요] 1개\n#2 M17.0 무릎 관절증 (방향 미선택)');
+    expect(text).toContain('[미입력/검토 필요] 1개\n#2. M17.0 무릎 관절증 (방향 미선택)');
   });
 
   it('평가단위 미완료와 방향 미선택이 섞이면 원본 순서대로 한 줄씩 나열된다', () => {
@@ -348,8 +348,8 @@ describe('formatGroupedAssessment: 그룹 형식 문구', () => {
     const text = formatGroupedAssessment(diagnoses, []);
     expect(text).toBe(
       '[미입력/검토 필요] 2개\n' +
-      '#1 M17.0 무릎 관절증 (방향 미선택)\n' +
-      '#2 M17.0 무릎 관절증 (우측)'
+      '#1. M17.0 무릎 관절증 (방향 미선택)\n' +
+      '#2. M17.0 무릎 관절증 (우측)'
     );
   });
 
@@ -358,7 +358,7 @@ describe('formatGroupedAssessment: 그룹 형식 문구', () => {
     // info.stats.incompleteCount(평가단위 기준)를 헤더에 써야 한다 — 회귀 방지.
     const diagnoses = [makeDiag({ ...KNEE, side: 'both' })]; // 우/좌 둘 다 미입력
     const text = formatGroupedAssessment(diagnoses, []);
-    expect(text).toBe('[미입력/검토 필요] 2개\n#1 M17.0 무릎 관절증 (양측)');
+    expect(text).toBe('[미입력/검토 필요] 2개\n#1. M17.0 무릎 관절증 (양측)');
   });
 
   it('양측 중 한쪽만 미완료면 평가단위 1개로 정확히 센다', () => {
@@ -367,8 +367,37 @@ describe('formatGroupedAssessment: 그룹 형식 문구', () => {
     ];
     const text = formatGroupedAssessment(diagnoses, []);
     expect(text).toBe(
-      '[확인 · 업무관련성 높음] 1개\n#1 M17.0 무릎 관절증 (우측)\n\n' +
-      '[미입력/검토 필요] 1개\n#1 M17.0 무릎 관절증 (좌측)'
+      '[상병 확인 · 업무관련성 높음] 1개\n#1. M17.0 무릎 관절증 (우측)\n\n' +
+      '[미입력/검토 필요] 1개\n#1. M17.0 무릎 관절증 (좌측)'
     );
+  });
+
+  it('대상 목록이 먼저, 낮음 사유는 뒤에 "낮음 사유:" 다음 줄부터 사유 1개당 한 줄씩 불릿으로 나온다', () => {
+    const diagnoses = [
+      makeDiag({
+        ...KNEE, side: 'right',
+        confirmedRight: 'confirmed', assessmentRight: 'low',
+        reasonRight: ['lowBurden', 'ageMild', 'other'], reasonRightOther: '노출 기간 짧음',
+      }),
+    ];
+    const text = formatGroupedAssessment(diagnoses, []);
+    expect(text).toBe(
+      '[상병 확인 · 업무관련성 낮음] 1개\n' +
+      '#1. M17.0 무릎 관절증 (우측)\n' +
+      '낮음 사유:\n' +
+      '  - 연령대비 경미\n' +
+      '  - 누적 신체부담 낮음\n' +
+      '  - 기타 (노출 기간 짧음)'
+    );
+  });
+
+  it('척추/경추(축성)는 방향 개념이 없으므로 대상 줄에 "(평가)"를 붙이지 않는다', () => {
+    const diagnoses = [
+      makeDiag({ ...SPINE, confirmedRight: 'confirmed', assessmentRight: 'high' }),
+      makeDiag({ id: 'c', ...CERVICAL, confirmedRight: 'confirmed', assessmentRight: 'high' }),
+    ];
+    const text = formatGroupedAssessment(diagnoses, []);
+    expect(text).toContain('#1. M51.2 요추간판 전위\n#2. M50.1 경추간판장애');
+    expect(text).not.toContain('(평가)');
   });
 });

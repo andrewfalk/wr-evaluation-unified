@@ -10,14 +10,12 @@ export function TaskManager({ tasks, selectedIndex, onSelect, onAdd, onRemove })
       <div className="task-toolbar">
         <div>
           <div className="task-toolbar-title">작업 목록 ({tasks.length})</div>
-          <div className="task-toolbar-subtitle">경추 부담 작업을 추가하고, 각 작업의 노출 특성을 입력합니다.</div>
+          <div className="task-toolbar-subtitle">경추 부담 작업이 있다면 작업을 추가하세요.</div>
         </div>
         <button type="button" className="btn btn-primary btn-sm" onClick={onAdd}>+ 작업 추가</button>
       </div>
 
-      {tasks.length === 0 ? (
-        <div className="evaluation-empty-state">작업을 추가하세요.</div>
-      ) : (
+      {tasks.length === 0 ? null : (
         <div className="task-list">
           {tasks.map((task, index) => (
             <div
