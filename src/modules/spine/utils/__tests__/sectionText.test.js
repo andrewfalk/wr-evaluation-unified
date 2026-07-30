@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildSpineSectionText,
+  buildSpineSectionSummary,
   getSpineInterpretation,
 } from '../sectionText';
 
@@ -118,6 +119,72 @@ describe('buildSpineSectionText - 단일 소스 출력', () => {
     };
     const text = buildSpineSectionText(calc);
     expect(text).not.toContain('(일 임계값 미만으로');
+  });
+});
+
+describe('buildSpineSectionSummary - EMR 종합소견용 요약본 (b8 byte 절감)', () => {
+  const calc = {
+    mddmStatus: 'present',
+    tasks: [{ name: '작업1', posture: '전방굴곡', weight: 20, frequency: 30, force: 4000 }],
+    dailyDose: { dailyDoseKNh: 6.0 },
+    lifetimeDose: { lifetimeDoseMNh: 8.0, excluded: false },
+    comparison: mkComparison({ courtPct: 64, mddmPct: 32 }),
+    maxForce: 5000,
+    gender: 'male',
+  };
+
+  it('빈 calc 호출도 throw 없이 안전한 문자열 반환', () => {
+    const text = buildSpineSectionSummary({});
+    expect(typeof text).toBe('string');
+    expect(text).toContain('< 허리(요추) >');
+  });
+
+  it('null/undefined calc도 안전하게 처리', () => {
+    expect(() => buildSpineSectionSummary(null)).not.toThrow();
+    expect(() => buildSpineSectionSummary(undefined)).not.toThrow();
+  });
+
+  it('결론(최대 압박력·일일 노출량·누적 노출량·기준치 대비 판정)은 유지된다', () => {
+    const text = buildSpineSectionSummary(calc);
+    expect(text).toContain('최대 압박력');
+    expect(text).toContain('일일 노출량');
+    expect(text).toContain('누적 노출량');
+    expect(text).toContain('법원(BSG) 기준 대비');
+    expect(text).toContain('모두 미달하여'); // getSpineInterpretation 결론 문장
+  });
+
+  it('작업별 분석(반복 행)은 빠진다 — buildSpineSectionText 대비 짧다', () => {
+    const full = buildSpineSectionText(calc);
+    const summary = buildSpineSectionSummary(calc);
+    expect(full).toContain('작업별 분석');
+    expect(full).toContain('작업 1. 작업1');
+    expect(summary).not.toContain('작업별 분석');
+    expect(summary).not.toContain('작업 1.');
+    expect(summary.length).toBeLessThan(full.length);
+  });
+
+  it('mddmStatus가 present가 아니면 MDDM 섹션 미출력 (전문과 동일 게이트)', () => {
+    const text = buildSpineSectionSummary({ ...calc, mddmStatus: 'unknown' });
+    expect(text).not.toContain('< 허리(요추) >');
+  });
+
+  it('vibration.exposureStatus가 present일 때만 전신진동 요약이 붙는다', () => {
+    const vibration = {
+      exposureStatus: 'present',
+      amax8: { min: 0.7, max: 0.7 },
+      dv: { min: 1724.8, max: 1724.8 },
+      comparison: {
+        daily: { percent: { min: 111, max: 111 }, status: 'danger' },
+        lifetime: { percent: { min: 123, max: 123 }, status: 'danger' },
+      },
+      risk: { description: 'BK2110 생애누적 기준 도달/초과 가능' },
+    };
+    const withVibration = buildSpineSectionSummary({ ...calc, vibration });
+    const withoutVibration = buildSpineSectionSummary({ ...calc, vibration: { exposureStatus: 'none' } });
+    expect(withVibration).toContain('전신진동(BK 2110)');
+    expect(withVibration).toContain('Amax(8)');
+    expect(withVibration).toContain('BK2110 생애누적 기준 도달/초과 가능');
+    expect(withoutVibration).not.toContain('전신진동(BK 2110)');
   });
 });
 

@@ -1,13 +1,22 @@
+import { useState } from 'react';
 import { AssessmentTab } from './AssessmentTab';
 import { generateUnifiedReport } from '../utils/reportGenerator';
+import { generateUnifiedEMR } from '../utils/emrReport';
+import { EMR_TEXT_LIMIT_BYTES, cp949ByteLength, classifyEmrByteStatus } from '../utils/emrText';
 
-export function AssessmentStep({ patient, activeModules, updateDiagnoses, updateModuleById }) {
-  const diagnoses = patient.data.shared.diagnoses || [];
+export function AssessmentStep({ patient, activeModules, updateDiagnoses, updateModuleById, updateShared }) {
+  const shared = patient.data.shared;
+  const diagnoses = shared.diagnoses || [];
+  const [previewTab, setPreviewTab] = useState('emr');
 
   const handleDiagnosisUpdate = (index, field, value) => {
     const updated = [...diagnoses];
     updated[index] = { ...updated[index], [field]: value };
     updateDiagnoses(updated);
+  };
+
+  const handleReportOptionsChange = nextReportOptions => {
+    updateShared?.({ ...shared, reportOptions: nextReportOptions });
   };
 
   const hasKnee = activeModules.includes('knee');
@@ -46,6 +55,11 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
   };
 
   const previewText = generateUnifiedReport(patient);
+  const { b8: emrText } = generateUnifiedEMR(patient);
+  const emrBytes = cp949ByteLength(emrText);
+  const emrPct = Math.min(140, Math.round((emrBytes / EMR_TEXT_LIMIT_BYTES) * 100));
+  const emrStatus = classifyEmrByteStatus(emrBytes, EMR_TEXT_LIMIT_BYTES);
+  const emrStatusLabel = emrStatus === 'ok' ? '정상' : emrStatus === 'warn' ? '주의' : '초과';
 
   return (
     <div className="assessment-step-layout">
@@ -58,6 +72,8 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
             returnConsiderations={returnConsiderations}
             onReturnChange={handleReturnChange}
             activeModules={activeModules}
+            reportOptions={shared.reportOptions}
+            onReportOptionsChange={handleReportOptionsChange}
           />
         )}
       </div>
@@ -67,11 +83,49 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
           입력 내용은 오른쪽 미리보기 패널에 즉시 반영됩니다.
         </p>
         <div className="report-preview">
+          <div className="preview-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={previewTab === 'emr'}
+              className={previewTab === 'emr' ? 'active' : ''}
+              onClick={() => setPreviewTab('emr')}
+            >
+              EMR 종합소견
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={previewTab === 'report'}
+              className={previewTab === 'report' ? 'active' : ''}
+              onClick={() => setPreviewTab('report')}
+            >
+              통합 리포트 초안
+            </button>
+          </div>
+
+          {previewTab === 'emr' && (
+            <div className="emr-gauge">
+              <div className="emr-gauge-top">
+                <span className="emr-gauge-label">EMR 종합소견</span>
+                <span className="emr-gauge-value">
+                  {emrBytes.toLocaleString()} / {EMR_TEXT_LIMIT_BYTES.toLocaleString()} byte
+                  <span className={`emr-gauge-status emr-gauge-status-${emrStatus}`}>
+                    {emrStatusLabel}{emrStatus === 'danger' ? ` · ${(emrBytes - EMR_TEXT_LIMIT_BYTES).toLocaleString()} byte 초과` : ''}
+                  </span>
+                </span>
+              </div>
+              <div className="emr-gauge-bar">
+                <div className={`emr-gauge-fill emr-gauge-fill-${emrStatus}`} style={{ width: `${Math.min(100, emrPct)}%` }} />
+              </div>
+            </div>
+          )}
+
           <div className="report-preview-toolbar">
-            <span className="report-preview-label">통합 리포트 초안</span>
+            <span className="report-preview-label">{previewTab === 'report' ? '통합 리포트 초안' : 'EMR 종합소견'}</span>
             <span className="report-preview-hint">상병 {diagnoses.length}건 기준 자동 생성</span>
           </div>
-          <div className="preview-section">{previewText}</div>
+          <div className="preview-section">{previewTab === 'report' ? previewText : emrText}</div>
         </div>
       </div>
     </div>

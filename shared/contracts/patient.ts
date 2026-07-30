@@ -43,6 +43,10 @@ export const SharedDataSchema = z.object({
   jobs: z.array(SharedJobSchema),
   // 작업 영상 인간공학 분석(§8.11). 구파일 parse 호환 위해 optional — 런타임은 ensureSharedDefaults로 보강(PR2).
   videoAnalysis: VideoAnalysisDataSchema.optional(),
+  // 종합소견 출력 옵션(패턴 그룹화 등). 없으면(구파일) 전부 false로 취급 — 기존 출력 불변.
+  reportOptions: z.object({
+    groupAssessmentResults: z.boolean().optional(),
+  }).optional(),
 });
 
 export const PatientDataSchema = z.object({

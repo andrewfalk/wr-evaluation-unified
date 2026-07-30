@@ -100,6 +100,27 @@ export function getDiagnosisModuleHint(diag) {
   return null;
 }
 
+// 코드는 점·공백을 제거하고 대문자로 비교(M17.0 / m170 / "M17.0 " 모두 매칭).
+function normalizedCode(diag) {
+  return String(diag?.code || '').replace(/[.\s]/g, '').toUpperCase();
+}
+
+const KLG_CODE_PATTERN = /^M17(0|9)/;
+const KLG_NAME_PATTERN = /무릎\s*관절증|무릎\s*골관절염/;
+const ELLMAN_CODE_PATTERN = /^M751/;
+const ELLMAN_NAME_PATTERN = /회전근개\s*증후군|회전근개\s*파열/;
+
+// 무릎 상병 중 K-L Grade 입력이 필요한 것(M170/M179 또는 무릎 관절증·무릎 골관절염)만
+// true. 조건 미충족 상병은 입력창만 숨기고 기존 klgRight/klgLeft 값은 그대로 보존한다.
+export function supportsKlGrade(diag) {
+  return KLG_CODE_PATTERN.test(normalizedCode(diag)) || KLG_NAME_PATTERN.test(diag?.name || '');
+}
+
+// 어깨 상병 중 Ellman Class 입력이 필요한 것(M751 또는 회전근개 증후군·회전근개 파열)만 true.
+export function supportsEllmanClass(diag) {
+  return ELLMAN_CODE_PATTERN.test(normalizedCode(diag)) || ELLMAN_NAME_PATTERN.test(diag?.name || '');
+}
+
 export const MODULE_LABELS = {
   knee: '무릎',
   wrist: '손목/손가락',

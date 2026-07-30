@@ -247,6 +247,8 @@ function getCervicalConclusionText(burdenGrade) {
 }
 
 function generateJobNarrative({ taskSummaries, aggregate }) {
+  if (taskSummaries.length === 0) return '경추부담 작업 없음';
+
   const referenceRatio = aggregate.cumulativeKgHours > 0
     ? (aggregate.cumulativeKgHours / BK2109_REFERENCE_KG_HOURS) * 100
     : 0;
@@ -282,14 +284,12 @@ function generateJobNarrative({ taskSummaries, aggregate }) {
     }
   });
 
-  if (taskSummaries.length > 0) {
-    lines.push('직업 합산');
-    lines.push(
-      ` - BK2109 누적 총부하량 합계 : ${formatNumber(aggregate.cumulativeKgHours)} kg·h (참고치 ${formatNumber(BK2109_REFERENCE_KG_HOURS)} kg·h, 참고치 대비 ${formatNumber(referenceRatio, 1)}%)`
-    );
-    lines.push(` - 일일 대표 노출시간 합계 : ${formatHours(aggregate.representativeHours)}`);
-    lines.push(` - 비중립 정적 자세 시간 합계 : ${formatHours(aggregate.totalAwkwardHours)}`);
-  }
+  lines.push('직업 합산');
+  lines.push(
+    ` - BK2109 누적 총부하량 합계 : ${formatNumber(aggregate.cumulativeKgHours)} kg·h (참고치 ${formatNumber(BK2109_REFERENCE_KG_HOURS)} kg·h, 참고치 대비 ${formatNumber(referenceRatio, 1)}%)`
+  );
+  lines.push(` - 일일 대표 노출시간 합계 : ${formatHours(aggregate.representativeHours)}`);
+  lines.push(` - 비중립 정적 자세 시간 합계 : ${formatHours(aggregate.totalAwkwardHours)}`);
 
   return lines.join('\n');
 }
@@ -337,11 +337,11 @@ function buildJobSummary({ job, diagnoses, tasks }) {
   const burdenGrade = getCervicalBurdenGrade(flags);
   const riskFactorItems = buildRiskFactorItems(flags);
   const completedTaskCount = taskSummaries.filter(task => task.missingFields.length === 0).length;
-  const missingFields = taskSummaries.length === 0
-    ? ['작업 정보']
-    : taskSummaries
-      .filter(task => task.missingFields.length > 0)
-      .map(task => `${task.displayName}: ${task.missingFields.join(', ')}`);
+  // 작업이 하나도 없는 것은 "경추 부담 작업 없음"이라는 유효한 상태이지, 입력 누락이 아니다 —
+  // 실제로 작업이 있는데 필드가 비어있는 경우에만 입력 누락으로 표시한다.
+  const missingFields = taskSummaries
+    .filter(task => task.missingFields.length > 0)
+    .map(task => `${task.displayName}: ${task.missingFields.join(', ')}`);
 
   const aggregate = {
     cumulativeKgHours,

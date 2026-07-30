@@ -116,6 +116,7 @@ export function StepContent({
           activeModules={activeModules}
           updateDiagnoses={updateDiagnoses}
           updateModuleById={updateModuleById}
+          updateShared={updateShared}
         />
       );
     }

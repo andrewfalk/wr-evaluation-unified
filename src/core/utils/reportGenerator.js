@@ -1,8 +1,8 @@
 import { getModule } from '../moduleRegistry';
-import { getSideText, getStatusText, getReasonText } from '../../modules/knee/utils/calculations';
+import { getSideText } from '../../modules/knee/utils/calculations';
 import { AUX_LABELS } from '../../modules/knee/utils/data';
 import { buildSpineSectionText } from '../../modules/spine/utils/sectionText';
-import { resolveDiagnosisModule } from './diagnosisMapping';
+import { buildAssessmentBlocks, formatGroupedAssessment } from './assessmentGroups';
 import { calculateAge, calculateBMI } from './common';
 import { getEffectiveWorkPeriodText } from './workPeriod';
 import { groupSummariesByBkType as groupElbowSummaries, mergeBkGroupSummaries as mergeElbowGroups } from '../../modules/elbow/utils/calculations';
@@ -258,34 +258,13 @@ export function generateUnifiedReport(patient) {
   }
 
   text += `\n[업무관련성 평가 결과]\n`;
-  diagnoses.forEach((diag, index) => {
-    if (!(diag.code || diag.name)) return;
-
-    const resolvedModule = resolveDiagnosisModule(diag, activeModules);
-    text += `\n#${index + 1}: ${diag.code || ''} ${diag.name || ''}\n`;
-
-    if (resolvedModule?.moduleId === 'spine' || resolvedModule?.moduleId === 'cervical') {
-      text += `  평가: 상병 상태(${getStatusText(diag.confirmedRight)}) / 업무관련성(${diag.assessmentRight === 'high' ? '높음' : diag.assessmentRight === 'low' ? '낮음' : '-'})\n`;
-      if (diag.assessmentRight === 'low') {
-        text += `  낮음 사유:\n  - ${getReasonText(diag.reasonRight, diag.reasonRightOther).split('\n').join('\n  - ')}\n`;
-      }
-      return;
-    }
-
-    if (diag.side === 'right' || diag.side === 'both') {
-      text += `  우측: 상병 상태(${getStatusText(diag.confirmedRight)}) / 업무관련성(${diag.assessmentRight === 'high' ? '높음' : diag.assessmentRight === 'low' ? '낮음' : '-'})\n`;
-      if (diag.assessmentRight === 'low') {
-        text += `  낮음 사유:\n  - ${getReasonText(diag.reasonRight, diag.reasonRightOther).split('\n').join('\n  - ')}\n`;
-      }
-    }
-
-    if (diag.side === 'left' || diag.side === 'both') {
-      text += `  좌측: 상병 상태(${getStatusText(diag.confirmedLeft)}) / 업무관련성(${diag.assessmentLeft === 'high' ? '높음' : diag.assessmentLeft === 'low' ? '낮음' : '-'})\n`;
-      if (diag.assessmentLeft === 'low') {
-        text += `  낮음 사유:\n  - ${getReasonText(diag.reasonLeft, diag.reasonLeftOther).split('\n').join('\n  - ')}\n`;
-      }
-    }
-  });
+  if (shared.reportOptions?.groupAssessmentResults) {
+    text += `\n${formatGroupedAssessment(diagnoses, activeModules)}\n`;
+  } else {
+    text += buildAssessmentBlocks(diagnoses, activeModules, { reasonIndent: '  ' })
+      .map(block => `\n${block}\n`)
+      .join('');
+  }
 
   const returnConsiderations = modules.knee?.returnConsiderations
     || modules.wrist?.returnConsiderations
