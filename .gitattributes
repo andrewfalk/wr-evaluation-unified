@@ -1,3 +1,12 @@
+# Normalize every text file to LF in the repository, regardless of what ends
+# up on disk in a given working tree. This machine has a system-level
+# git.core.autocrlf=true (Git for Windows installer default) conflicting with
+# a user-level core.autocrlf=false, which over time left many files checked
+# out with CRLF while HEAD stores LF. `text=auto` makes git auto-detect
+# binaries (images, fonts, .onnx weights, etc.) via its own heuristic and
+# leave them untouched; only real text files get the eol=lf treatment.
+* text=auto eol=lf
+
 # Shell scripts and crontab files must be LF in the working tree so that
 # Linux Docker containers can execute them via bind mount. Windows git.core.autocrlf
 # would otherwise check out CRLF, breaking shebang lines and `set -o pipefail`.

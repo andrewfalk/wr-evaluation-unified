@@ -1,8 +1,8 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 6.1.6
-> **Last Updated:** 2026-07-10
-> **Status:** 인트라넷 운영 중 · 환자 목록 의사별 필터 + 비담당 환자 열람성(복사/스크롤) 개선 · EMR 추출(재해일자별 신청건 매칭·성별 자동입력)/직접입력 개선 · 일괄입력 빈 양식 상시 제공 · M4 영상분석 시범 운영(참고용, 미검증 배너 — 어깨 반복 시간합 계산기 + 공정별 값 표시 추가, 상세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md`)
+> **Version:** 6.2.1
+> **Last Updated:** 2026-07-30
+> **Status:** 인트라넷 운영 중 · 종합평가 패턴 그룹화(상병 50건↑ 우/좌 일괄 처리) + EMR byte 절감 + K-L/Ellman 조건부 표시 · 손목/팔꿈치 BK유형 그룹 합류 시 진단별 저장값 자동 동기화 수정 · 환자 목록 의사별 필터 + 비담당 환자 열람성(복사/스크롤) 개선 · EMR 디바이스 등록 rate-limit 자기악순환 방지 · EMR 추출(재해일자별 신청건 매칭·성별 자동입력)/직접입력 개선 · 일괄입력 빈 양식 상시 제공 · M4 영상분석 시범 운영(참고용, 미검증 배너 — 어깨 반복 시간합 계산기 + 공정별 값 표시 추가, 상세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md`)
 
 ---
 
@@ -241,17 +241,29 @@ migratePatient(patient)
 모든 모듈의 평가 결과를 **좌우 2패널 레이아웃**으로 표시한다:
 
 **좌측 패널 — 입력:**
-- **무릎 상병:** KLG 등급 입력 (좌/우) + 상태 확인 + 업무관련성 평가
+- **무릎 상병:** KLG 등급 입력 (좌/우, `supportsKlGrade`가 true인 상병만 — v6.2.0) + 상태 확인 + 업무관련성 평가
 - **팔꿈치/손목 상병:** BK 유형(자동 제안/수동) + 공통 시간적 선후관계 + 상태 확인 + 업무관련성 평가
-- **어깨 상병:** Ellman Class 입력 (좌/우) + 상태 확인 + 업무관련성 평가
+- **어깨 상병:** Ellman Class 입력 (좌/우, `supportsEllmanClass`가 true인 상병만 — v6.2.0) + 상태 확인 + 업무관련성 평가
 - **척추 상병:** 수직분포원리(확인/미확인) + 동반성 척추증(확인/미확인) 드롭다운 + 상태 확인 + 업무관련성 평가 (좌우 구분 없음)
 - **경추 상병:** 척추와 동일하게 좌우 구분 없는 축(Axial) 상병으로 처리 + 상태 확인 + 업무관련성 평가
 - 복귀 고려사항 (무릎/팔꿈치/손목/어깨/경추 모듈 활성 시)
 
 **우측 패널 — 미리보기:**
 - 전체 모듈 결과를 텍스트 보고서로 통합 표시 (패널 높이를 꽉 채움)
+- EMR 종합소견(txtSyth1Cont) byte 게이지 탭 — CP949 3,950byte 한도 대비 현재 사용량 표시 (v6.2.0)
 
 상병별로 `getDiagnosisModuleHint()`를 사용하여 무릎/척추를 자동 구분하고, 해당 모듈에 맞는 입력 UI를 렌더링한다.
+
+#### 3.3.1 종합평가 패턴 그룹화 (v6.2.0)
+
+상병이 50건을 넘어가면 좌측 패널에서 우/좌 개별 클릭이 과도해지는 문제를 해결하기 위해, 상병+방향(평가단위) 단위로 **동일한 상태·업무관련성 패턴**을 자동으로 묶어 그룹 단위로 일괄 입력할 수 있는 뷰를 제공한다.
+
+- **`assessmentGroups.js`**: 상병+방향(평가단위) 단위 패턴 그룹 엔진. 그룹 계산·일괄 적용·Undo·개별/그룹 형식 텍스트 생성을 매번 진단 데이터에서 재계산(별도 저장 상태 없음).
+- **`AssessmentGroupView`**: 패턴 그룹 카드 목록(연번 배지) — 완료 그룹은 클릭 시 이미 채워진 값으로 수정 모달이 열림(빈 값으로 시작하지 않음). 방향(우/좌/양측) 미선택 비축성 상병은 "방향 미선택" 카드로 별도 노출되어 개별 카드로 이동 가능.
+- **`AssessmentPatternEditor`**: 그룹 전체에 상병 상태·업무관련성·낮음 사유를 한 번에 적용하는 일괄 입력 에디터.
+- **`AssessmentIndividualFields`**: K-L Grade/Ellman Class/척추 공통 항목(수직분포원리·동반성 척추증) 개별 입력 패널.
+- **출력 형식 전환**: `shared.reportOptions.groupAssessmentResults` 옵션(개별/그룹 단일 토글)에 따라 통합 미리보기·EMR 종합소견의 상병별 서술 형식이 전환된다. 기존 환자는 이 옵션 미설정 시 출력이 개별 형식 그대로 유지되며, 그룹 뷰 자체는 이 옵션과 무관하게 항상 열려 있어 기존 환자의 미완료 건도 그룹 화면에서 바로 일괄 입력할 수 있다.
+- **b6 신체부담 평가 요약본**: `buildExposureSummary`(비척추)/`buildSpineSectionSummary`(척추)가 신체부담 섹션을 요약해 b8(종합소견)로 넘어가는 분량을 줄인다. 이 요약은 `groupAssessmentResults` 옵션과 무관하게 항상 적용된다.
 
 ### 3.4 환자 전환
 
@@ -431,6 +443,10 @@ ICD 코드 우선 → 상병명 키워드 순:
 
 사용자는 `bkSelectionMode = 'manual'`로 수동 덮어쓰기 가능.
 
+#### BK유형 그룹 자동 동기화 (v6.2.1)
+
+같은 직업 내에서 `selectedBkType`이 동일한 상병 엔트리들은 화면에서 하나의 카드(`BkGroupCard`)로 묶여 대표값(가장 많이 채워진 entry)만 표시된다. 신규 진단이 그룹에 합류(자동추론)하거나, 개별 카드에서 BK유형을 처음 수동 선택하거나, 진단코드 수정으로 자동추론 BK유형이 바뀌는 세 경로 모두에서 `syncElbowModuleData`/그룹 UI가 그룹 내 최고 점수(가장 많이 채워진) entry를 donor로 찾아 해당 진단의 **실제 저장값**을 즉시 동기화한다(`bkAutoSyncedFrom` 마커). 이 동기화가 없으면 화면은 대표값이 채워진 것처럼 보이지만 개별 진단의 저장값은 비어있어 `isElbowAssessmentComplete`가 미완료로 판정하는 불일치가 발생한다.
+
 ---
 
 ### 4.5 손목 모듈 (wrist)
@@ -462,6 +478,8 @@ ICD 코드 우선 → 상병명 키워드 순:
 | ICD `^M65\.(3\|4\|8)` / 방아쇠수지, 건초염 | BK2101 |
 | ICD `^M19\.04` / 진동성, 관절염 | BK2103 |
 | Guyon, 척골신경 병변 | BK2106 |
+
+BK유형 그룹 자동 동기화(`syncWristModuleData`)는 팔꿈치 모듈(§4.4)과 동일하게 동작한다 (v6.2.1).
 
 ---
 
@@ -785,7 +803,7 @@ Gemini 2.5 Pro는 thinking(추론) 기능이 기본 활성화되어 비활성화
 | 3.최종 확인 상병명 | 상병별 확인 상태 + 업무관련성 |
 | 4.직업적 요인 | 직업력 + 모듈별 신체부담평가 통합 |
 | 5.개인적 요인 | 키/몸무게/BMI/나이/특이사항 |
-| 6.종합소견 | 기여도 + 상병별 종합소견 통합 |
+| 6.종합소견 | 기여도 + 상병별 종합소견 통합 (`txtSyth1Cont`, CP949 3,950byte 한도 — 초과 시 절단 + 전송 전 확인창, v6.2.0) |
 | 7.복귀 관련 고려사항 | 복귀 고려사항 |
 
 **내보내기 형식 2종:**
@@ -2063,15 +2081,37 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 
 ## 변경 이력
 
-### v6.1.6 (2026-07-10) — 환자 목록 의사별 필터 + 비담당 환자 열람성(복사/스크롤) 개선
+### v6.2.1 (2026-07-30) — 손목/팔꿈치 BK유형 그룹 자동 동기화 수정
 
-인트라넷 다중 사용자 환경에서 보고된 두 가지 불편 반영: ① 환자 목록 필터가 "내 담당"/"전체" 둘뿐이라 특정 동료 의사의 환자만 골라 볼 수 없음(대시보드 통계는 이미 의사별 드롭다운 지원) ② 비담당 환자를 조회할 때 HTML `inert` 속성이 텍스트 선택(복사)과 스크롤까지 막아, 내용이 길면 아예 읽을 수조차 없었음.
+동일 `selectedBkType`으로 묶인 상병 카드(`BkGroupCard`)가 대표값(`pickRepresentativeEntry`)만 화면에 보여주고, 개별 진단의 실제 저장 entry는 비어있는 채로 남을 수 있는 구조적 결함을 수정. 입력 순서(① 신규 상병이 기존 필드 그룹에 자동 합류 ② 개별 카드(`EntryCard`)에서 BK유형을 처음 수동 선택 ③ 진단코드 수정으로 자동추론 BK유형이 바뀜)에 따라 화면은 다 채운 것처럼 보여도 `isElbowAssessmentComplete`/`isWristAssessmentComplete`가 미완료로 판정하는 불일치가 발생했다.
+
+- **세 경로 모두 동기화 대상 포함**: `syncElbowModuleData`/`syncWristModuleData`의 신규 entry 판정을 `isNew`(entry가 새로 생성됨) 하나에서 `isNew || bkTypeJustChanged`(자동추론 BK유형이 기존 값에서 바뀌었고 아직 아무 필드도 채워지지 않음)로 확장. `EntryCard`의 BK유형 select `onChange`에도 `findGroupDonorEntry`(그룹 내 최고점수 entry 탐색) 공용 헬퍼를 배선 — 기존에는 `resetElbowBranchFields`만 호출해 그룹 합류를 감지하지 못했다.
+- **donor 선택 기준 정합화**: 데이터 계층(`syncXxxModuleData`)의 donor 선택을 `.find()`(첫 매치) → 최고 점수(`scoreDiagnosisEntry` 최댓값) 기준으로 변경, UI의 `pickRepresentativeEntry`와 동일 기준으로 정렬. 동기화 발생 시 `bkAutoSyncedFrom` 마커를 저장하고 그룹 카드에 "○○ 상병에 △△ 상병과 동일한 값이 자동 적용되었습니다" 안내 배너 표시(사용자가 해당 진단 필드를 직접 편집하면 `updateDiagnosisEntry`가 마커를 자동 제거).
+- **mismatch 경고 정정**: 기존 "기존 상병별 입력값이 통합되었습니다"(사실과 다른 과거형 단정, 실제로는 화면 표시만 대표값이고 저장값은 그대로 다름)를 "실제 저장값이 서로 다릅니다"로 정정하고, "표시된 대표값을 전체 상병에 적용" 복구 버튼(`applyRepresentativeToAll`) 추가.
+- **변경 파일**: `elbow/utils/data.js`, `wrist/utils/data.js`(동기화 로직), `ElbowEvaluation.jsx`/`WristEvaluation.jsx`(마커 제거), `elbow/components/ExposureForm.jsx`, `wrist/components/ExposureForm.jsx`(`findGroupDonorEntry` 공용 헬퍼 + UI 배선), `elbow/utils/calculations.js`/`wrist/utils/calculations.js`(`BK_META_FIELDS`에 `bkAutoSyncedFrom` 추가 — 오탐 방지).
+- 검증: `npm run lint` 0 errors, `npm run build:web` 통과, 클라이언트 953 tests pass. Electron/서버 무변경.
+
+### v6.2.0 (2026-07-30) — 종합평가 패턴 그룹화 + EMR byte 절감 + K-L/Ellman 조건부 표시 (#72)
+
+상병이 50건을 넘어가면 종합소견 좌측 패널에서 우/좌 개별 클릭이 과도해지고, EMR 종합소견(`txtSyth1Cont`)이 CP949 3,950byte 한도를 넘어 잘리는 문제를 해결.
+
+- **종합평가 패턴 그룹화** (§3.3.1): `assessmentGroups.js` — 상병+방향(평가단위) 단위 패턴 그룹 계산/일괄 적용/Undo/개별·그룹 형식 텍스트 생성을 매번 진단 데이터에서 재계산하는 엔진 신설. `AssessmentGroupView`(그룹 카드 목록, 방향 미선택 상병 별도 카드) + `AssessmentPatternEditor`(그룹 일괄 입력) + `AssessmentIndividualFields`(K-L/Ellman/척추 공통 항목 개별 입력) 신규 컴포넌트, `AssessmentTab`/`AssessmentStep`/`StepContent` 배선.
+- **EMR byte 절감**: `emrText.js`로 CP949 byte 계산/절단 유틸을 `exportService.js`에서 분리(중복 제거) + `emrReport.js`로 EMR 텍스트 생성 레이어를 분리(xlsx 의존성 없이 미리보기 화면이 가볍게 import 가능). `reportGenerator.js`/`emrReport.js`가 `shared.reportOptions.groupAssessmentResults` 옵션에 따라 개별/그룹 출력 포매터를 통합, b6 신체부담 평가 요약본(`buildExposureSummary`, 척추 `buildSpineSectionSummary`)을 추가해 b8(종합소견) 분량을 축소. `useEMRIntegration.js`에 EMR 전송 전 종합소견이 한도를 초과하면 확인창 추가.
+- **K-L/Ellman 조건부 표시**: `diagnosisMapping.js`의 `supportsKlGrade`/`supportsEllmanClass` — 무릎관절증(M17.0/M17.9)·회전근개(M75.1) 등 조건에 맞는 상병에만 K-L Grade/Ellman Class 입력창을 표시.
+- **하위호환**: 기존 환자는 `reportOptions` 미설정 시 출력이 그대로 유지(불변 회귀 테스트로 고정), 그룹 뷰 자체는 이 옵션과 무관하게 항상 열려 있어 기존 환자의 미완료 건도 그룹 화면에서 바로 일괄 입력 가능.
+- **후속 수정 (같은 PR 내 리뷰 반영)**: 방향 미선택 비축성 상병이 그룹 화면엔 잡히는데 실제 출력(`formatGroupedAssessment`)에서는 통째로 빠지던 결함(`findUnassignedSideDiagnoses` 단일 소스화), 양측 미완료 상병이 그룹 출력 헤더에 1개로 축소 표시되던 회귀(헤더 개수를 `stats.incompleteCount` 기준으로 통일), EMR byte 게이지가 반올림 판정으로 3,951byte(한도 초과)를 100%="주의"로 오판정하던 문제(`classifyEmrByteStatus`가 실제 byte로 직접 비교), 완료 그룹 재수정 모달이 항상 빈 값으로 열리던 문제(완료 그룹은 균일한 값으로 폼 프리필) 등을 함께 수정.
+- 검증: 상세는 커밋 이력(PR #72) 참조.
+
+### v6.1.6 (2026-07-10) — 환자 목록 의사별 필터 + 비담당 환자 열람성(복사/스크롤) 개선 + EMR 디바이스 rate-limit 수정
+
+인트라넷 다중 사용자 환경에서 보고된 세 가지 불편 반영: ① 환자 목록 필터가 "내 담당"/"전체" 둘뿐이라 특정 동료 의사의 환자만 골라 볼 수 없음(대시보드 통계는 이미 의사별 드롭다운 지원) ② 비담당 환자를 조회할 때 HTML `inert` 속성이 텍스트 선택(복사)과 스크롤까지 막아, 내용이 길면 아예 읽을 수조차 없었음 ③ EMR 디바이스 rate-limit이 관리자 승인 후에도 "장치 등록 필요"를 계속 표시.
 
 - **환자 목록 의사별 필터 드롭다운**: `PatientSidebar`의 "내 담당"/"전체" 버튼 토글을 `Dashboard`와 동일한 패턴의 `<select>`(전체/내 담당/의사별/미배정)로 교체. 서버 `GET /api/patients?scope=<의사UUID>`·`GET /api/patients/doctor-counts`(의사 명부)는 이미 완비돼 있어 프론트만 수정. `App.jsx`의 `onScopeChange` 정규화 로직이 admin의 의사별/미배정 선택을 무조건 `all`로 되돌리던 기존 버그를 `normalizePatientScopeForSession`으로 교체해 수정. 명부 로딩 상태를 `doctorRosterStatus: 'loading' | 'ready' | 'error'`로 명시적으로 구분해(기존엔 빈 배열 하나로 로딩 전/정상 빈 결과/조회 실패를 구분 못함) scope 유효성 가드가 정상 빈 명부(마지막 의사의 환자 전원 재배정 등)를 로딩 중으로 오인하지 않게 함. `Dashboard.jsx`의 자체 가드(→`all` 복귀)를 제거하고 `App.jsx`의 통합 가드(→`getDefaultPatientScope` 복귀)로 일원화해 두 컴포넌트 간 정책 충돌을 없앰. roster 가드 로직은 `src/core/utils/patientScope.js`로 순수 함수 분리.
 - **비담당 환자 복사·스크롤 허용**: `StepContent.jsx`가 비담당 환자 조회 시 전체 콘텐츠를 `<div inert>`로 감싸던 것을 capture-phase 이벤트 핸들러(`onClickCapture`/`onKeyDownCapture`/`onBeforeInputCapture`/`onInputCapture`/`onChangeCapture`/`onPasteCapture`/`onCutCapture`/`onDropCapture`/`onSubmitCapture`)로 교체 — 편집 상호작용(클릭, 폼 컨트롤 값 변경, 붙여넣기, 드롭)만 차단하고 텍스트 선택(복사)·스크롤(휠/키보드)은 그대로 허용. `<select>`/숫자·날짜 input의 방향키·증감 키처럼 click이나 beforeinput 없이 값이 바뀌는 경로는 keydown 단계에서 선제 차단. `data-readonly-allow` 속성으로 향후 조회 전용 컨트롤 예외 통로 마련. 서버(`assignedDoctorOrAdmin` 403)와 `usePatientCrud`의 silent guard가 실제 데이터 변경의 최종 방어선은 그대로 유지.
 - **프리셋 적용 권한 가드 보강**: `usePresetManagement`의 `handlePresetSelect`가 `canEditPatient` 검사 없이 `setPatients`를 직접 호출해(UI 차단을 우회하면 비담당 환자에도 프리셋이 적용될 수 있던 경로) 담당의 권한 가드를 함수 초입 + `setPatients` 내부 2단으로 추가. 비담당 환자에 적용 시도하면 거짓 성공 알림("프리셋이 적용되었습니다") 없이 명확한 차단 알림을 표시.
+- **EMR 디바이스 등록 rate-limit 자기악순환 방지**: `electron/audit.js`의 `tryRegister()`가 5분 flush 주기 그대로 서버에 재등록 확인을 보내 시간당 12회로 서버 한도(5회/시간/사용자)를 항상 초과했고, 429 응답을 하드 실패로 오인해 상태를 `error`로 강등 — 관리자가 승인해도 클라이언트가 "장치 등록 필요"를 계속 표시했다. 재시도 간격을 20분으로 늘려 한도 안에 들어오게 하고, 429는 상태를 유지한 채 조용히 재시도하도록 수정.
 - **테스트 인프라 신규 도입**: 이 저장소에 컴포넌트/훅을 실제 렌더링해 검증하는 테스트가 없었음(기존 관례는 컴포넌트에서 export한 순수 함수만 테스트) — `jsdom` + `@testing-library/react`/`user-event`를 devDependency로 추가하고 `vitest.config.js`에 `@vitejs/plugin-react` + `.test.jsx` 포함을 추가(파일별 `// @vitest-environment jsdom` opt-in, 기존 순수 함수 테스트는 계속 빠른 `node` 환경 유지). jsdom이 `<select>` 방향키·number input 스피너 같은 네이티브 위젯 동작 자체를 구현하지 않는다는 걸 실측으로 확인해, 그런 경우엔 "DOM 표시값 불변"이 아니라 `event.defaultPrevented`를 직접 검증하는 방식으로 테스트를 설계(로직을 일부러 깨서 실패하는지까지 검증). `patientScope.js`/`StepContent`/`PatientSidebar`/`usePresetManagement`에 대한 신규 테스트 36건 추가.
-- 검증: 클라이언트 `npx vitest run` 872 tests pass(신규 36건 포함), `npm run build:web` 통과. 서버 라우트·Electron 셸(`electron/*.js`) 모두 무변경 — 인트라넷 Electron 클라이언트는 서버를 `loadURL`로 로드하는 구조라(프론트 번들을 자체 포함하지 않음) **인트라넷 설치본 재배포 불필요, 서버 이미지만 재배포하면 프론트엔드 변경이 즉시 반영됨.**
+- 검증: 클라이언트 `npx vitest run` 872 tests pass(신규 36건 포함), `npm run build:web` 통과. 서버 라우트 무변경 — 인트라넷 Electron 클라이언트는 서버를 `loadURL`로 로드하는 구조라(프론트 번들을 자체 포함하지 않음) **인트라넷 설치본 재배포 불필요, 서버 이미지만 재배포하면 프론트엔드 변경이 즉시 반영됨.** (EMR rate-limit 수정은 `electron/audit.js` 변경 포함 → 해당 항목만 인트라넷 설치본 재배포 시 반영됨.)
 
 ### v6.1.5 (2026-07-10) — 영상분석 어깨 반복 시간합 계산기 + 공정별 값 표시 (6.0-16·6.0-17)
 
