@@ -449,7 +449,8 @@ export function isCervicalAssessmentComplete(patientData) {
   const diagnosisComplete = cervicalDiagnoses.every(diag => isDiagnosisAssessmentComplete(diag));
   if (!diagnosisComplete) return false;
 
+  // 작업이 0건인 것은 "경추부담 작업 없음"이라는 유효한 상태이지 미완료가 아니다 —
+  // buildJobSummary의 missingFields 판정과 동일한 기준(0건은 입력 누락에서 제외)을 따른다.
   const jobsWithTasks = calc.jobSummaries.filter(jobSummary => jobSummary.totalTaskCount > 0);
-  if (jobsWithTasks.length === 0) return false;
   return jobsWithTasks.every(jobSummary => jobSummary.missingFields.length === 0);
 }
