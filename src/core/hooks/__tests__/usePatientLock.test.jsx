@@ -172,6 +172,45 @@ describe('usePatientLock — stuck-state retry (focus/visibility/interval safety
       vi.useRealTimers();
     }
   });
+
+  // 회귀: 세션/CSRF 자체가 깨져 acquire가 계속 실패하는 상황에서, 백오프 없이 매번 같은
+  // 주기로 재시도하면 인증 갱신처럼 IP당 rate limit이 걸린 엔드포인트를 소진시켜 스스로
+  // 폭주할 수 있다 — 실제 두 브라우저 동시 테스트 중 재현된 증상.
+  it('doubles the retry interval after each repeated failure (exponential backoff)', async () => {
+    vi.useFakeTimers();
+    try {
+      acquirePatientLock.mockRejectedValue(new Error('network down')); // 계속 실패
+      const { result } = renderHook(() => usePatientLock({ activeId: 'local-1', activePatient: syncedPatient(), session: SESSION }));
+      await vi.waitFor(() => expect(result.current.lockState.status).toBe('lost'));
+      expect(acquirePatientLock).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(30000); // 1차 재시도(기본 간격) — 실패
+      expect(acquirePatientLock).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(30000); // 아직 60초 안 지남 — 다음 재시도는 60초 뒤여야 함
+      expect(acquirePatientLock).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(30000); // 총 60초 경과 — 2차 재시도(백오프 2배) — 실패
+      expect(acquirePatientLock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('debounces focus and visibilitychange firing back-to-back into a single retry', async () => {
+    acquirePatientLock.mockRejectedValueOnce(new Error('network down'));
+    const { result } = renderHook(() => usePatientLock({ activeId: 'local-1', activePatient: syncedPatient(), session: SESSION }));
+    await waitFor(() => expect(result.current.lockState.status).toBe('lost'));
+    expect(acquirePatientLock).toHaveBeenCalledTimes(1);
+
+    acquirePatientLock.mockResolvedValue({ leaseToken: 'tok-recovered', expiresAt: 'x', ttlMs: 100000 });
+    // 창 전환 시 focus와 visibilitychange가 거의 동시에 발화하는 상황을 재현.
+    window.dispatchEvent(new Event('focus'));
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    await waitFor(() => expect(result.current.lockState.status).toBe('held'));
+    expect(acquirePatientLock).toHaveBeenCalledTimes(2); // 두 이벤트가 겹쳤어도 재시도는 한 번만
+  });
 });
 
 describe('usePatientLock — renew heartbeat', () => {

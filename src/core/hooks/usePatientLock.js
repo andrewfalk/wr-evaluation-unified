@@ -12,11 +12,17 @@ const CLIENT_INSTANCE_STORAGE_KEY = 'wrEvalUnified.lockClientInstanceId';
 const DEFAULT_TTL_MS = 100_000;
 const RENEW_DIVISOR = 4; // heartbeat = ttlMs / 4 (서버 TTL의 여유 4배와 대응)
 const MIN_RENEW_DELAY_MS = 1000;
-// 'lost'/'held-by-other'로 멈춰있는 동안의 재시도 주기. session.accessToken이 실제로
-// 바뀌는 경우(재로그인 등)는 메인 effect가 이미 자동으로 재시도하므로, 이 주기는 그 외의
-// "일시적 실패가 스스로 해소됐는데 아무 이벤트도 없어서 아무도 재시도를 안 트리거하는" 경우의
-// 안전망이다 — 락 TTL(기본 100s)보다 짧게 잡아 다른 사람의 락이 만료됐을 때도 비교적 빨리 감지.
-const STUCK_RETRY_INTERVAL_MS = 30_000;
+// 'lost'/'held-by-other'로 멈춰있는 동안의 재시도 안전망 설정. session.accessToken이 실제로
+// 바뀌는 경우(재로그인 등)는 메인 effect가 이미 자동으로 재시도하므로, 이 안전망은 그 외의
+// "일시적 실패가 스스로 해소됐는데 아무 이벤트도 없어서 아무도 재시도를 안 트리거하는" 경우를
+// 담당한다. 실패가 계속되면(예: 세션/CSRF 자체가 깨진 상태) 지수 백오프로 간격을 늘려간다 —
+// 그렇지 않으면 focus/visibilitychange가 반복 발화할 때(예: 두 창을 번갈아 테스트)마다 매번
+// acquire를 재시도해 인증 갱신(특히 /api/auth/csrf처럼 IP당 rate limit이 걸린 엔드포인트)에
+// 부하를 얹고, 실패 자체도 계속 재발화시켜 스스로 악화되는 재시도 폭주를 만들 수 있다.
+const STUCK_RETRY_BASE_MS = 30_000;
+const STUCK_RETRY_MAX_MS = 5 * 60_000; // 반복 실패 시 상한 5분
+// focus + visibilitychange가 거의 동시에 발화(창 전환 등)해도 실질적으로 한 번만 재시도.
+const STUCK_RETRY_MIN_GAP_MS = 5_000;
 
 // 같은 환자에 대해 acquire가 이미 진행 중이면 새 HTTP 요청을 또 쏘지 않고 그 Promise를
 // 그대로 재사용한다. React.StrictMode(개발 모드)는 effect를 "설정→정리→재설정" 순서로 한
@@ -123,25 +129,29 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
   // isStale()이 generationRef만 검사해도 충분한 이유: 메인 effect의 cleanup이 언마운트/의존성
   // 변경 시 반드시 세대번호를 한 번 더 올리므로(다음 effect가 없는 순수 언마운트까지 포함),
   // "이 시도를 무효화해야 하는 모든 경우"가 세대 불일치 하나로 수렴한다.
+  // 결과 상태 문자열을 반환한다(호출자가 백오프를 판단할 때, lockState가 실제로 갱신되는
+  // 다음 렌더까지 기다리지 않고 이 반환값으로 즉시 성공/실패를 판정할 수 있도록).
   const attemptAcquire = useCallback(async (myGeneration) => {
-    if (!serverId) return;
+    if (!serverId) return null;
     setLockState({ status: 'acquiring', holder: null, expiresAt: null });
     try {
       const result = await acquireOnce(
         inFlightAcquireRef.current, activeId, serverId, clientInstanceIdRef.current, session, settings
       );
-      if (generationRef.current !== myGeneration) return;
+      if (generationRef.current !== myGeneration) return null;
       setLockToken(activeId, result.leaseToken, result.expiresAt);
       setLockState({ status: 'held', holder: null, expiresAt: result.expiresAt });
       startRenewLoop(myGeneration, result.ttlMs);
+      return 'held';
     } catch (err) {
-      if (generationRef.current !== myGeneration) return;
+      if (generationRef.current !== myGeneration) return null;
       if (isLockError(err)) {
         setLockState({ status: 'held-by-other', holder: err.data?.holder || null, expiresAt: null });
-      } else {
-        // 네트워크 오류 등 acquire 자체가 실패한 경우 — 낙관적으로 'held'를 가정하지 않는다.
-        setLockState({ status: 'lost', holder: null, expiresAt: null });
+        return 'held-by-other';
       }
+      // 네트워크 오류 등 acquire 자체가 실패한 경우 — 낙관적으로 'held'를 가정하지 않는다.
+      setLockState({ status: 'lost', holder: null, expiresAt: null });
+      return 'lost';
     }
   }, [activeId, serverId, session, settings, startRenewLoop]);
 
@@ -176,15 +186,49 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
   // 'lost'/'held-by-other'로 멈춰있을 때의 재시도 안전망. 세션 토큰이 실제로 바뀌는 경우는
   // 위 메인 effect가 이미 처리하므로, 여기는 그 외의 회복 신호(창 포커스 복귀, 탭 활성화,
   // 또는 아무 신호도 없이 시간만 흐른 경우)를 담당한다 — usePatientSync의 focus/visibility
-  // 재동기화 트리거와 같은 패턴.
+  // 재동기화 트리거와 같은 패턴이되, 반복 실패 시 지수 백오프를 적용한다(실패가 계속되는
+  // 상황 — 세션/CSRF 자체가 깨진 경우 등 — 에서 재시도 자체가 인증 갱신 엔드포인트의
+  // rate limit을 소진시켜 스스로 폭주하는 것을 막기 위함).
   useEffect(() => {
     if (!serverId) return undefined;
+
+    let backoffMs = STUCK_RETRY_BASE_MS;
+    let lastAttemptAt = 0;
+    let timer = null;
+
+    const clearTimer = () => {
+      if (timer) { window.clearTimeout(timer); timer = null; }
+    };
+
+    const scheduleNext = () => {
+      clearTimer();
+      timer = window.setTimeout(tick, backoffMs);
+    };
+
+    async function tick() {
+      const status = lockStateRef.current.status;
+      if (status === 'lost' || status === 'held-by-other') {
+        lastAttemptAt = Date.now();
+        const myGeneration = ++generationRef.current;
+        const outcome = await attemptAcquire(myGeneration);
+        backoffMs = outcome === 'held'
+          ? STUCK_RETRY_BASE_MS // 성공하면 백오프 초기화
+          : Math.min(backoffMs * 2, STUCK_RETRY_MAX_MS);
+      }
+      scheduleNext();
+    }
 
     const retryIfStuck = () => {
       const status = lockStateRef.current.status;
       if (status !== 'lost' && status !== 'held-by-other') return;
+      // focus + visibilitychange가 거의 동시에 발화(창 전환 등)해도 실질적으로 한 번만.
+      if (Date.now() - lastAttemptAt < STUCK_RETRY_MIN_GAP_MS) return;
+      lastAttemptAt = Date.now();
       const myGeneration = ++generationRef.current;
-      attemptAcquire(myGeneration);
+      attemptAcquire(myGeneration).then(outcome => {
+        backoffMs = outcome === 'held' ? STUCK_RETRY_BASE_MS : Math.min(backoffMs * 2, STUCK_RETRY_MAX_MS);
+      });
+      scheduleNext(); // 다음 예정된 주기 재시도를 지금 시점 기준으로 다시 미룸(중복 방지)
     };
     const onFocus = () => retryIfStuck();
     const onVisibilityChange = () => {
@@ -193,12 +237,12 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
 
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibilityChange);
-    const interval = window.setInterval(retryIfStuck, STUCK_RETRY_INTERVAL_MS);
+    scheduleNext();
 
     return () => {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      window.clearInterval(interval);
+      clearTimer();
     };
   }, [serverId, attemptAcquire]);
 
