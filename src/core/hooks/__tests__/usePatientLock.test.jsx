@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { StrictMode } from 'react';
 import { cleanup, renderHook, waitFor } from '@testing-library/react';
-import { usePatientLock, requiresLock } from '../usePatientLock.js';
+import { usePatientLock, requiresLock, acquireOnce } from '../usePatientLock.js';
 
 vi.mock('../../services/patientServerRepository', () => ({
   acquirePatientLock: vi.fn(),
@@ -165,6 +166,65 @@ describe('usePatientLock — forceAcquire', () => {
     await waitFor(() => expect(result.current.lockState.status).toBe('held'));
     expect(forcePatientLock).toHaveBeenCalledWith('server-1', expect.any(String), expect.objectContaining({ session: SESSION }));
     expect(getLockToken('local-1')).toBe('forced-tok');
+  });
+});
+
+describe('acquireOnce — in-flight dedupe', () => {
+  it('reuses the same in-flight promise for a second call before the first resolves (no duplicate HTTP call)', async () => {
+    let resolveFirst;
+    acquirePatientLock.mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve; }));
+    const map = new Map();
+
+    const p1 = acquireOnce(map, 'patient-1', 'server-1', 'client-a', SESSION, {});
+    const p2 = acquireOnce(map, 'patient-1', 'server-1', 'client-a', SESSION, {});
+
+    expect(acquirePatientLock).toHaveBeenCalledTimes(1);
+    expect(p1).toBe(p2); // 정확히 같은 Promise 인스턴스를 반환 — 새 요청을 만들지 않음
+
+    resolveFirst({ leaseToken: 'tok', expiresAt: 'x', ttlMs: 100000 });
+    await expect(p1).resolves.toEqual({ leaseToken: 'tok', expiresAt: 'x', ttlMs: 100000 });
+    await expect(p2).resolves.toEqual({ leaseToken: 'tok', expiresAt: 'x', ttlMs: 100000 });
+  });
+
+  it('removes the entry once settled, so a later genuine re-acquire fires a fresh HTTP call', async () => {
+    acquirePatientLock.mockResolvedValueOnce({ leaseToken: 'tok-1', expiresAt: 'x', ttlMs: 100000 });
+    acquirePatientLock.mockResolvedValueOnce({ leaseToken: 'tok-2', expiresAt: 'y', ttlMs: 100000 });
+    const map = new Map();
+
+    await acquireOnce(map, 'patient-1', 'server-1', 'client-a', SESSION, {});
+    expect(map.has('patient-1')).toBe(false); // settle 후 정리됨
+
+    const second = await acquireOnce(map, 'patient-1', 'server-1', 'client-a', SESSION, {});
+    expect(acquirePatientLock).toHaveBeenCalledTimes(2);
+    expect(second.leaseToken).toBe('tok-2');
+  });
+
+  it('does not dedupe across different patient ids', async () => {
+    acquirePatientLock.mockResolvedValue({ leaseToken: 'tok', expiresAt: 'x', ttlMs: 100000 });
+    const map = new Map();
+
+    acquireOnce(map, 'patient-1', 's1', 'client-a', SESSION, {});
+    acquireOnce(map, 'patient-2', 's2', 'client-a', SESSION, {});
+
+    expect(acquirePatientLock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('usePatientLock — StrictMode double-invoke does not double-acquire (regression)', () => {
+  it('fires exactly one acquirePatientLock call even though the effect runs twice under StrictMode', async () => {
+    let resolveAcquire;
+    acquirePatientLock.mockImplementationOnce(() => new Promise(resolve => { resolveAcquire = resolve; }));
+
+    const { result } = renderHook(
+      () => usePatientLock({ activeId: 'local-1', activePatient: syncedPatient(), session: SESSION }),
+      { wrapper: StrictMode }
+    );
+
+    resolveAcquire({ leaseToken: 'tok-1', expiresAt: 'e', ttlMs: 100000 });
+    await waitFor(() => expect(result.current.lockState.status).toBe('held'));
+
+    expect(acquirePatientLock).toHaveBeenCalledTimes(1);
+    expect(getLockToken('local-1')).toBe('tok-1');
   });
 });
 

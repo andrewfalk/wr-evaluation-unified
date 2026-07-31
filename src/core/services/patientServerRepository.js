@@ -255,6 +255,10 @@ export function isLockError(error) {
 export async function pushPendingPatients(patients, { session, settings } = {}) {
   const pending = patients.filter(p => {
     if (isRedactedPatientRecord(p)) return false;
+    // usePatientSync가 호출 전에 이미 syncPaused 환자를 걸러내지만("저장하지 않고 이동"),
+    // 이 함수 자체가 그 불변조건을 스스로 지키도록 방어적으로 다시 확인한다 — 호출부가
+    // 실수로 필터링 없이 넘겨도 paused 환자가 조용히 push되는 일이 없어야 한다.
+    if (p.sync?.syncPaused) return false;
     const s = p.sync?.syncStatus;
     return s === 'local-only' || s === 'dirty';
   });

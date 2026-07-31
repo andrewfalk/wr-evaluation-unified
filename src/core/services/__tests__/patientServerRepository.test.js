@@ -416,6 +416,24 @@ describe('pushPendingPatients', () => {
     expect(failed).toHaveLength(0);
     expect(requestJson).toHaveBeenCalledTimes(1);
   });
+
+  // 방어적 이중 확인: usePatientSync가 호출 전에 이미 syncPaused 환자를 걸러내지만("저장하지
+  // 않고 이동"), 이 함수 자체도 그 불변조건을 스스로 지켜야 한다 — 호출부가 실수로 걸러내지
+  // 않은 채 넘겨도 paused 환자가 조용히 push되면 안 된다.
+  it('skips a syncPaused patient even though its syncStatus is still dirty', async () => {
+    const patients = [
+      makeLocalPatient({ id: 'paused', sync: { syncStatus: 'dirty', serverId: 's1', revision: 1, syncPaused: true, lastSyncedAt: null } }),
+      makeLocalPatient({ id: 'p1' }),
+    ];
+    requestJson.mockResolvedValueOnce(makeServerPatient({ id: 'p1' }));
+
+    const { synced, failed } = await pushPendingPatients(patients, { session: SESSION });
+
+    expect(synced).toHaveLength(1);
+    expect(synced[0].patient.id).toBe('p1');
+    expect(failed).toHaveLength(0);
+    expect(requestJson).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ---------------------------------------------------------------------------

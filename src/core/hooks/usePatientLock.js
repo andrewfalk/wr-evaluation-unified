@@ -13,6 +13,22 @@ const DEFAULT_TTL_MS = 100_000;
 const RENEW_DIVISOR = 4; // heartbeat = ttlMs / 4 (서버 TTL의 여유 4배와 대응)
 const MIN_RENEW_DELAY_MS = 1000;
 
+// 같은 환자에 대해 acquire가 이미 진행 중이면 새 HTTP 요청을 또 쏘지 않고 그 Promise를
+// 그대로 재사용한다. React.StrictMode(개발 모드)는 effect를 "설정→정리→재설정" 순서로 한
+// 번 더 실행하는데, 이 재실행이 cleanup을 기다리지 않고 곧바로 일어나므로 dedupe 없이는
+// 실제 acquire 요청이 두 번 나간다(세대번호 덕분에 최종 저장되는 토큰은 항상 하나로
+// 수렴하지만, 불필요한 토큰 회전과 감사 로그 중복이 남는다). 완료되면 맵에서 제거해 다음
+// 번 "진짜" acquire까지 막지 않는다.
+export function acquireOnce(inFlightMap, patientId, serverId, clientInstanceId, session, settings) {
+  const existing = inFlightMap.get(patientId);
+  if (existing) return existing;
+  const promise = acquirePatientLock(serverId, clientInstanceId, { session, settings }).finally(() => {
+    if (inFlightMap.get(patientId) === promise) inFlightMap.delete(patientId);
+  });
+  inFlightMap.set(patientId, promise);
+  return promise;
+}
+
 function generateClientInstanceId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   // crypto.randomUUID 미지원 환경(구형 브라우저) 폴백 — 소유권 증명이 아니라 탭 식별용이라
@@ -57,6 +73,7 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
   // 빠른 A→B→C 전환에서 늦게 도착한 응답이 최신 상태를 덮지 않도록 하는 세대번호.
   const generationRef = useRef(0);
   const renewTimerRef = useRef(null);
+  const inFlightAcquireRef = useRef(new Map()); // patientId -> in-flight acquire Promise
 
   const serverId = requiresLock(activePatient, session) ? activePatient.sync.serverId : null;
 
@@ -110,7 +127,9 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
     (async () => {
       setLockState({ status: 'acquiring', holder: null, expiresAt: null });
       try {
-        const result = await acquirePatientLock(serverId, clientInstanceIdRef.current, { session, settings });
+        const result = await acquireOnce(
+          inFlightAcquireRef.current, activeId, serverId, clientInstanceIdRef.current, session, settings
+        );
         if (isStale()) return;
         setLockToken(activeId, result.leaseToken, result.expiresAt);
         setLockState({ status: 'held', holder: null, expiresAt: result.expiresAt });

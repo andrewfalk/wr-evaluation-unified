@@ -8,6 +8,7 @@ import { createClip, createJob } from '../videoAnalysisClient';
 import { applyVideoAnalysisJob } from '../patientServerRepository';
 import { applyFeatureToModule } from '../videoProvenance';
 import { applyVideoFeatureViaServer, computeAppliedInputsHash } from '../videoServerApply.js';
+import { setLockToken, clearAllLockTokens } from '../lockTokenStore.js';
 
 const patient = { id: 'local-1', sync: { serverId: 'srv-1', revision: 2, syncStatus: 'synced' } };
 const env = { session: { mode: 'intranet' }, settings: {}, appliedBy: 'doc1' };
@@ -17,7 +18,10 @@ const opts = {
   analysisJobIds: ['src-job-1'], // 서버 적용은 원본 분석 provenance 필수(D3b)
 };
 
-beforeEach(() => { vi.clearAllMocks(); });
+beforeEach(() => {
+  vi.clearAllMocks();
+  clearAllLockTokens();
+});
 
 describe('computeAppliedInputsHash', () => {
   it('is deterministic and excludes previousValue', () => {
@@ -100,5 +104,36 @@ describe('applyVideoFeatureViaServer', () => {
     await expect(applyVideoFeatureViaServer(patient, opts, env)).rejects.toMatchObject({ code: 'PATIENT_NOT_SYNCED' });
     expect(createJob).not.toHaveBeenCalled();
     expect(applyVideoAnalysisJob).not.toHaveBeenCalled();
+  });
+
+  // 리뷰 지적: 환자 단위 편집 락이 held여도 최종 apply 호출에 leaseToken이 실리지 않으면
+  // enforce 모드에서 423으로 거부된다 — clip/job은 이미 생성된 뒤라 불필요한 잔여 레코드가 남는다.
+  it('passes the stored lease token for this patient to the final apply call', async () => {
+    setLockToken('local-1', 'lease-abc');
+    createClip.mockResolvedValueOnce({ clipId: 'c1' });
+    createJob.mockResolvedValueOnce({ jobId: 'j1', status: 'review_pending' });
+    applyFeatureToModule.mockReturnValueOnce({ patient: { data: { computed: true } }, appliedInput: { targetPath: 'tp', appliedValue: '1.8' } });
+    applyVideoAnalysisJob.mockResolvedValueOnce({ id: 'local-1' });
+
+    await applyVideoFeatureViaServer(patient, opts, env);
+
+    expect(applyVideoAnalysisJob).toHaveBeenCalledWith(
+      'j1', patient, { computed: true },
+      expect.objectContaining({ leaseToken: 'lease-abc' })
+    );
+  });
+
+  it('passes leaseToken: null when nothing is stored (opt-in — server still allows if unlocked)', async () => {
+    createClip.mockResolvedValueOnce({ clipId: 'c1' });
+    createJob.mockResolvedValueOnce({ jobId: 'j1', status: 'review_pending' });
+    applyFeatureToModule.mockReturnValueOnce({ patient: { data: { computed: true } }, appliedInput: { targetPath: 'tp', appliedValue: '1.8' } });
+    applyVideoAnalysisJob.mockResolvedValueOnce({ id: 'local-1' });
+
+    await applyVideoFeatureViaServer(patient, opts, env);
+
+    expect(applyVideoAnalysisJob).toHaveBeenCalledWith(
+      'j1', patient, { computed: true },
+      expect.objectContaining({ leaseToken: null })
+    );
   });
 });

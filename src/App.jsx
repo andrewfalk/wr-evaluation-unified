@@ -106,13 +106,25 @@ function App() {
   );
   const activeModules = isRedactedPatientRecord(activePatient) ? [] : (activePatient?.data?.activeModules || []);
 
+  // 환자를 여는 것 자체가 편집 세션의 시작 — 서버 측 TTL lease lock을 자동으로 acquire/renew한다.
+  // usePatientSync/usePresetManagement는 이 lockState(또는 그로부터 합성한 canMutateActivePatient)를
+  // 읽기 전용으로만 받는다(콜백을 주고받지 않음). 두 훅과의 연결(브리지)은 아래 별도 effect가
+  // lockState 전이를 관찰해 담당한다.
+  const { lockState, forceAcquire } = usePatientLock({ activeId, activePatient, session, settings });
+  // 프리셋 모달은 StepContent의 read-only 이벤트 차단 바깥에서 열리므로(§리뷰), 담당의 권한만으로는
+  // "모달이 열려있는 동안 락을 상실"하는 레이스를 못 막는다 — canEditPatient AND 락 보유를 합성해
+  // usePatientCrud/usePresetManagement/StepContent 모두가 이 값 하나만 신뢰하게 한다.
+  const canMutateActivePatient =
+    canEditPatient(activePatient, session) &&
+    (!requiresLock(activePatient, session) || lockState.status === 'held');
+
   const {
     presets, presetMeta, presetError,
     presetModalJobId, presetEditingPreset, presetBrowseJobId,
     setPresetModalJobId, setPresetEditingPreset, setPresetBrowseJobId,
     reloadPresets,
     handlePresetSelect, handleSaveCustomPreset, closePresetManageModal, handleDeleteCustomPreset,
-  } = usePresetManagement({ activeId, activePatient, activeModules, session, setPatients });
+  } = usePresetManagement({ activeId, activeModules, session, setPatients, canMutateActivePatient });
 
   const {
     status: migrationStatus,
@@ -163,14 +175,6 @@ function App() {
     }
   }, [patients.length, intakeShared]);
 
-  // 환자를 여는 것 자체가 편집 세션의 시작 — 서버 측 TTL lease lock을 자동으로 acquire/renew한다.
-  // usePatientSync는 이 lockState를 읽기 전용으로만 받는다(콜백을 주고받지 않음). 두 훅의
-  // 연결(브리지)은 아래 별도 effect가 lockState 전이를 관찰해 담당한다.
-  const { lockState, forceAcquire } = usePatientLock({ activeId, activePatient, session, settings });
-  const canMutateActivePatient =
-    canEditPatient(activePatient, session) &&
-    (!requiresLock(activePatient, session) || lockState.status === 'held');
-
   const { syncState, syncNow, flushPatient, notifyLockOutcome } = usePatientSync({
     patients,
     setPatients,
@@ -197,6 +201,9 @@ function App() {
     if (prevLockStatusRef.current === lockState.status) return;
     prevLockStatusRef.current = lockState.status;
     if (lockState.status === 'held') {
+      // "저장하지 않고 이동"으로 걸어둔 일시정지(syncPaused) 해제는 usePatientSync 내부의
+      // 전용 effect가 담당한다(activeId/lockState.status 변화를 직접 관찰) — local-only
+      // 환자처럼 lockState가 절대 'held'가 되지 않는 경우까지 한 곳에서 처리하기 위함.
       flushPatient(activeId);
     } else if (lockState.status === 'held-by-other' || lockState.status === 'lost') {
       notifyLockOutcome(activeId, 'lock-lost');

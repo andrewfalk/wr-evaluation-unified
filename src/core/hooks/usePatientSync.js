@@ -8,6 +8,7 @@ import {
 } from '../services/patientServerRepository';
 import { isRedactedPatientRecord } from '../services/patientRecords';
 import { getLockToken } from '../services/lockTokenStore';
+import { requiresLock } from './usePatientLock';
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const PUSH_DEBOUNCE_MS = 1000;
@@ -16,6 +17,7 @@ const PULL_PAGE_SIZE = 100;
 function hasPendingPatients(patients = []) {
   return patients.some(p => {
     if (isRedactedPatientRecord(p)) return false;
+    if (p?.sync?.syncPaused) return false; // "저장하지 않고 이동" — 자동저장 대상에서 제외
     const status = p?.sync?.syncStatus;
     return status === 'local-only' || status === 'dirty';
   });
@@ -69,14 +71,18 @@ function applyPushFailures(localPatients, failures) {
 // 활성 환자에 한해서만 락 상태를 근거로 push 허용 여부를 판정한다(비활성 dirty 환자는 항상
 // allowed:true — opt-in 호환. 토큰이 없어도 서버가 그 환자에 활성 락이 없으면 통과시킨다).
 //
+// syncPaused는 activeId 여부와 무관하게 최우선으로 확인한다 — "저장하지 않고 이동"은 정확히
+// 그 환자가 활성 상태가 아니게 된 시점에 거는 플래그라서, activeId 분기보다 뒤에 두면 비활성
+// 환자에게는 이 게이트가 아예 적용되지 않는 버그가 된다.
+//
 // lockState.status === 'none'은 usePatientLock이 "이 환자는 애초에 락 대상이 아니다"라고
 // 이미 판정한 결과(로컬 전용이거나 비인트라넷 세션)이므로, 여기서 다시 session/serverId를
 // 확인하지 않고 그대로 신뢰한다.
 export function getPushEligibility(patientId, { activeId, lockState, patient } = {}) {
+  if (patient?.sync?.syncPaused) return { allowed: false, reason: 'sync-paused' };
   if (patientId !== activeId) return { allowed: true };
   const status = lockState?.status;
   if (status === 'none') return { allowed: true };
-  if (patient?.sync?.syncPaused) return { allowed: false, reason: 'sync-paused' };
   if (status === 'held') {
     // 'held'인데 레지스트리에 토큰이 아직 없는(레이스로 setLockToken 전인) 순간을 방어적으로
     // 걸러 토큰 없는 PATCH가 나가는 걸 막는다.
@@ -259,19 +265,16 @@ export function usePatientSync({
       if (push) {
         const snapshot = patientsRef.current;
         if (hasPendingPatients(snapshot)) {
-          // 활성 환자만 락 상태로 게이트한다 — 비활성 dirty 환자는 항상 opt-in 그대로 시도.
-          const activeSnapshot = snapshot.find(p => p.id === activeIdRef.current);
-          const eligibility = getPushEligibility(activeIdRef.current, {
+          // 환자마다 개별 판정한다 — 활성 환자는 락 상태로, 비활성 환자는 opt-in 그대로
+          // 허용하되 syncPaused("저장하지 않고 이동")만은 활성 여부와 무관하게 제외한다.
+          const pushTargets = snapshot.filter(p => getPushEligibility(p.id, {
             activeId: activeIdRef.current,
             lockState: lockStateRef.current,
-            patient: activeSnapshot,
-          });
-          const pushTargets = eligibility.allowed
-            ? snapshot
-            : snapshot.filter(p => p.id !== activeIdRef.current);
+            patient: p,
+          }).allowed);
 
-          // 활성 환자가 유일한 dirty 환자인데 이번엔 게이트로 제외된 경우 — 보낼 게 아예
-          // 없으니 네트워크 호출 자체를 생략한다(사이클 번호도 소모하지 않음).
+          // 보낼 게 아예 없으면(예: 유일한 dirty 환자가 게이트로 제외됨) 네트워크 호출 자체를
+          // 생략한다(사이클 번호도 소모하지 않음).
           if (pushTargets.length > 0) {
             const myCycleId = ++cycleCounterRef.current;
             const { synced, failed } = await pushPendingPatients(pushTargets, {
@@ -441,6 +444,29 @@ export function usePatientSync({
     }, PUSH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [canSync, patients, runSync]);
+
+  // "저장하지 않고 이동"으로 걸어둔 syncPaused는, 그 환자를 다시 열었을 때(activeId가 그
+  // 환자가 됨) 다음 중 하나면 해제해야 한다 — 그렇지 않으면 재진입 후에도 영구히 자동저장
+  // 대상에서 빠진 채로 남는다(특히 local-only 환자: requiresLock이 애초에 false라
+  // lockState가 절대 'held'로 전이하지 않으므로, 'held' 전이만 기다리는 방식으로는 이
+  // 경우를 절대 처리할 수 없다):
+  //   (a) 이 환자가 애초에 락 대상이 아님(local-only/비인트라넷) — requiresLock() === false
+  //   (b) 락 대상이지만 재획득에 성공함 — lockState.status === 'held'
+  // patients/activeId를 deps에 직접 두지 않고 updater 안에서 최신 prev를 읽는다 — 아무 것도
+  // 안 바뀌면 prev를 그대로 반환해(참조 동일) React가 리렌더 자체를 건너뛰게 한다.
+  useEffect(() => {
+    if (!activeId) return;
+    const lockStatus = lockStateRef.current?.status;
+    setPatients(prev => {
+      const current = prev.find(p => p.id === activeId);
+      if (!current?.sync?.syncPaused) return prev;
+      const stillBlocked = requiresLock(current, sessionRef.current) && lockStatus !== 'held';
+      if (stillBlocked) return prev;
+      return prev.map(p => (
+        p.id === activeId ? { ...p, sync: { ...p.sync, syncPaused: false } } : p
+      ));
+    });
+  }, [activeId, lockState?.status, setPatients]);
 
   // post-commit: 이번 렌더의 patients(=committed state)를 근거로 대기 중인 flushPatient
   // 호출들을 확정 판정한다. runSync의 setPatients updater 내부에서 직접 resolve하지 않는

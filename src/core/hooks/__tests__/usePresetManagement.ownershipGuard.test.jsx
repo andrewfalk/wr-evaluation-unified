@@ -41,58 +41,49 @@ function doctorSession(id = 'doc-me') {
   return { mode: 'intranet', user: { id, role: 'doctor' } };
 }
 
-const notOwnedPatient = {
-  id: 'p1',
-  assignedDoctorUserId: 'someone-else',
-  data: { shared: {}, modules: {}, activeModules: [] },
-};
-
-const ownedPatient = {
-  id: 'p1',
-  assignedDoctorUserId: 'doc-me',
-  data: { shared: {}, modules: {}, activeModules: [] },
-};
-
-function setup(activePatient) {
+// App.jsx가 canEditPatient(담당의/admin) AND 락 보유 여부를 합성해 canMutateActivePatient
+// 하나로 넘긴다(usePresetManagement는 더 이상 activePatient를 직접 받아 자체 계산하지 않음).
+// 이 테스트 파일에서는 락 관련 조건은 관여하지 않으므로 canMutateActivePatient가 그대로
+// canEditPatient(activePatient, session)와 동치인 시나리오만 다룬다.
+function setup(canMutateActivePatient) {
   const setPatients = vi.fn();
   const { result } = renderHook(() => usePresetManagement({
     activeId: 'p1',
-    activePatient,
     activeModules: [],
     session: doctorSession(),
     setPatients,
+    canMutateActivePatient,
   }));
   return { result, setPatients };
 }
 
-describe('usePresetManagement — handlePresetSelect ownership guard', () => {
-  it('blocks a non-owned patient: no setPatients call, no false success alert', async () => {
-    const { result, setPatients } = setup(notOwnedPatient);
+describe('usePresetManagement — handlePresetSelect ownership/lock guard', () => {
+  it('blocks a non-owned patient (or lock held by someone else): no setPatients call, no false success alert', async () => {
+    const { result, setPatients } = setup(false);
 
     await result.current.handlePresetSelect('job-1', { jobName: '테스트 프리셋', modules: {} });
 
     expect(setPatients).not.toHaveBeenCalled();
     expect(showAlert).toHaveBeenCalledTimes(1);
-    expect(showAlert).toHaveBeenCalledWith(expect.stringContaining('담당 의사가 아니므로'));
+    expect(showAlert).toHaveBeenCalledWith(expect.stringContaining('담당 의사가 아니거나'));
     expect(showAlert).not.toHaveBeenCalledWith(expect.stringContaining('적용되었습니다'));
   });
 
-  it('does not block the owning doctor (regression: guard must not over-block legitimate use)', async () => {
-    const { result, setPatients } = setup(ownedPatient);
+  it('does not block when canMutateActivePatient is true (regression: guard must not over-block legitimate use)', async () => {
+    const { result, setPatients } = setup(true);
 
     await result.current.handlePresetSelect('job-1', { jobName: '테스트 프리셋', modules: {} });
 
     expect(setPatients).toHaveBeenCalledTimes(1);
     expect(showAlert).toHaveBeenCalledTimes(1);
-    expect(showAlert).not.toHaveBeenCalledWith(expect.stringContaining('담당 의사가 아니므로'));
+    expect(showAlert).not.toHaveBeenCalledWith(expect.stringContaining('담당 의사가 아니거나'));
   });
 
-  it('blocks when activePatient is missing entirely (defensive: undefined must not be treated as editable)', async () => {
+  it('defaults to allowed when canMutateActivePatient is omitted (legacy/local-mode callers)', async () => {
     const { result, setPatients } = setup(undefined);
 
     await result.current.handlePresetSelect('job-1', { jobName: '테스트 프리셋', modules: {} });
 
-    expect(setPatients).not.toHaveBeenCalled();
-    expect(showAlert).toHaveBeenCalledWith(expect.stringContaining('담당 의사가 아니므로'));
+    expect(setPatients).toHaveBeenCalledTimes(1);
   });
 });
