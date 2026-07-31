@@ -3419,6 +3419,47 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   cursor: pointer;
   flex-shrink: 0;
 }
+/* 동기화 상태 배너 — activePatient 존재 여부와 무관하게 항상 보임(App.jsx 최상단).
+   이슈 종류별 배지를 나열한다(단일 우선순위 승자를 고르지 않음 — useSyncStatusSummary). */
+.sync-status-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 16px;
+  background: var(--warning-light, #fff3cd);
+  border-bottom: 1px solid var(--warning, #ffc107);
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+.sync-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-weight: 600;
+  cursor: default;
+  background: none;
+}
+.sync-status-badge--conflict,
+.sync-status-badge--lock {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border-color: rgba(201, 42, 42, 0.3);
+  cursor: pointer;
+}
+.sync-status-badge--pending {
+  color: var(--warning-dark, #856404);
+  background: rgba(255, 193, 7, 0.15);
+  border-color: var(--warning, #ffc107);
+}
+.sync-status-badge--offline {
+  color: var(--text-secondary, #666);
+  background: var(--card-bg);
+  border-color: var(--card-border);
+}
 .ops-alert-banner:hover {
   background: rgba(201, 42, 42, 0.15);
 }

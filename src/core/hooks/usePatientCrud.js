@@ -2,8 +2,9 @@ import { useCallback } from 'react';
 import { getModule } from '../moduleRegistry';
 import { touchPatientRecord, migratePatientRecords } from '../services/patientRecords';
 import { deletePatientOnServer, isConflictError } from '../services/patientServerRepository';
+import { getLockToken } from '../services/lockTokenStore';
 import { showAlert, showConfirm } from '../utils/platform';
-import { canEditPatient, canDeletePatient } from '../utils/patientOwnership';
+import { canDeletePatient } from '../utils/patientOwnership';
 import { preserveDeletedSpineCommonFields } from '../utils/spineAssessmentMigration';
 import { isValidDiagnosisModuleId, resolveDiagnosisModule } from '../utils/diagnosisMapping';
 
@@ -15,15 +16,18 @@ export function usePatientCrud({
   setActiveId, setCurrentStepIndex,
   setIntakeShared, setShowHome,
   handleStartIntake,
+  // App.jsx가 canEditPatient(담당의/admin 여부) AND 락 보유 여부를 함께 계산해 넘긴다 —
+  // 로컬 전용/비인트라넷은 requiresLock이 false라 canEditPatient와 동일하게 동작한다.
+  canMutateActivePatient = true,
 }) {
   const updatePatient = (updater) => {
-    // 권한 없는 환자에는 silent guard. UI(fieldset disabled)와 사이드바 게이팅이
-    // 정상 흐름에서 호출 자체를 차단하므로, 여기에 도달하면 우회 경로(EMR import,
-    // conflict resolve 등) — 조용히 무시해 잘못된 setState/sync 방지.
+    // 권한 없는 환자 또는 락 미보유(다른 사용자가 편집 중/락 상실)에는 silent guard.
+    // UI(fieldset disabled)와 사이드바 게이팅이 정상 흐름에서 호출 자체를 차단하므로,
+    // 여기에 도달하면 우회 경로(EMR import, conflict resolve 등) — 조용히 무시해 잘못된
+    // setState/sync 방지.
     // (참고: preset select는 이 함수를 거치지 않는 별도 경로 — usePresetManagement.js의
     // handlePresetSelect가 자체적으로 canEditPatient 가드를 갖는다.)
-    const activePatient = patients.find(p => p.id === activeId);
-    if (!canEditPatient(activePatient, session)) return;
+    if (!canMutateActivePatient) return;
 
     setPatients(prev => prev.map(p =>
       p.id === activeId
@@ -156,7 +160,7 @@ export function usePatientCrud({
         await deletePatientOnServer(
           patient.sync.serverId,
           patient.sync.revision,
-          { session, settings }
+          { session, settings, leaseToken: getLockToken(patient.id) }
         );
         deletedIds.add(patient.id);
       } catch (error) {

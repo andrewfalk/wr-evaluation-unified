@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   pullPatients,
   fetchPatient,
@@ -8,7 +8,16 @@ import {
   mergeServerPatient,
   mergePushedPatientAck,
   mergePulledPatients,
+  acquirePatientLock,
+  renewPatientLock,
+  forcePatientLock,
+  peekPatientLock,
+  releasePatientLock,
+  isLockError,
+  isNetworkError,
+  computeCommittedFlushOutcomes,
 } from '../patientServerRepository.js';
+import { setLockToken, clearAllLockTokens } from '../lockTokenStore.js';
 
 vi.mock('../httpClient.js', () => ({
   requestJson: vi.fn(),
@@ -44,6 +53,10 @@ function makeLocalPatient(overrides = {}) {
 
 beforeEach(() => {
   requestJson.mockReset();
+});
+
+afterEach(() => {
+  clearAllLockTokens();
 });
 
 // ---------------------------------------------------------------------------
@@ -313,6 +326,59 @@ describe('pushPendingPatients', () => {
     expect(synced).toHaveLength(0);
     expect(failed).toHaveLength(1);
     expect(failed[0].kind).toBe('conflict');
+  });
+
+  it('marks 423 failures as lock kind', async () => {
+    const err = new Error('Locked');
+    err.status = 423;
+    err.data = { code: 'LOCK_HELD', holder: { holderName: 'Dr. Lee' } };
+    requestJson.mockRejectedValue(err);
+
+    const patients = [makeLocalPatient({
+      id: 'p1',
+      sync: { syncStatus: 'dirty', serverId: 's1', revision: 1, lastSyncedAt: null },
+    })];
+    const { failed } = await pushPendingPatients(patients, { session: SESSION });
+
+    expect(failed).toHaveLength(1);
+    expect(failed[0].kind).toBe('lock');
+  });
+
+  it('marks fetch-level TypeError (no HTTP response) as offline kind', async () => {
+    requestJson.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    const patients = [makeLocalPatient({ id: 'p1' })];
+    const { failed } = await pushPendingPatients(patients, { session: SESSION });
+
+    expect(failed).toHaveLength(1);
+    expect(failed[0].kind).toBe('offline');
+  });
+
+  it('reads the stored lease token for the pushed patient and sends it as X-Lock-Token', async () => {
+    setLockToken('p1', 'lease-abc');
+    requestJson.mockResolvedValueOnce(makeServerPatient({ id: 'p1' }));
+
+    const patients = [makeLocalPatient({
+      id: 'p1',
+      sync: { syncStatus: 'dirty', serverId: 's1', revision: 1, lastSyncedAt: null },
+    })];
+    await pushPendingPatients(patients, { session: SESSION });
+
+    const [, opts] = requestJson.mock.calls[0];
+    expect(opts.headers['X-Lock-Token']).toBe('lease-abc');
+  });
+
+  it('omits X-Lock-Token entirely when no token is stored for that patient', async () => {
+    requestJson.mockResolvedValueOnce(makeServerPatient({ id: 'p1' }));
+
+    const patients = [makeLocalPatient({
+      id: 'p1',
+      sync: { syncStatus: 'dirty', serverId: 's1', revision: 1, lastSyncedAt: null },
+    })];
+    await pushPendingPatients(patients, { session: SESSION });
+
+    const [, opts] = requestJson.mock.calls[0];
+    expect(opts.headers).not.toHaveProperty('X-Lock-Token');
   });
 
   it('returns empty results for an all-synced list', async () => {
@@ -661,5 +727,181 @@ describe('mergePulledPatients', () => {
     const local  = [makeLocalPatient()];
     const result = mergePulledPatients(local, []);
     expect(result).toEqual(local);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 환자 단위 편집 락 — acquire/renew/force/peek/release 클라이언트 함수
+// ---------------------------------------------------------------------------
+
+describe('acquirePatientLock', () => {
+  it('POSTs to /:id/lock with clientInstanceId, no X-Lock-Token header', async () => {
+    requestJson.mockResolvedValue({ leaseToken: 'tok', expiresAt: '2024-01-01T00:00:00Z', ttlMs: 100000 });
+
+    await acquirePatientLock('server-1', 'client-a', { session: SESSION });
+
+    const [path, opts] = requestJson.mock.calls[0];
+    expect(path).toBe('/api/patients/server-1/lock');
+    expect(opts.method).toBe('POST');
+    expect(opts.body).toEqual({ clientInstanceId: 'client-a' });
+    expect(opts.headers?.['X-Lock-Token']).toBeUndefined();
+  });
+
+  it('propagates 423 with holder info on conflict', async () => {
+    const err = new Error('Locked');
+    err.status = 423;
+    err.data = { code: 'LOCK_HELD', holder: { holderName: 'Dr. Lee' } };
+    requestJson.mockRejectedValue(err);
+
+    await expect(acquirePatientLock('server-1', 'client-a', { session: SESSION }))
+      .rejects.toMatchObject({ status: 423, data: { code: 'LOCK_HELD' } });
+  });
+});
+
+describe('renewPatientLock', () => {
+  it('POSTs with X-Lock-Token header and empty body, no clientInstanceId', async () => {
+    requestJson.mockResolvedValue({ expiresAt: '2024-01-01T00:01:40Z', ttlMs: 100000 });
+
+    await renewPatientLock('server-1', 'lease-abc', { session: SESSION });
+
+    const [path, opts] = requestJson.mock.calls[0];
+    expect(path).toBe('/api/patients/server-1/lock');
+    expect(opts.headers['X-Lock-Token']).toBe('lease-abc');
+    expect(opts.body).toEqual({});
+  });
+});
+
+describe('forcePatientLock', () => {
+  it('POSTs to /:id/lock?force=true and always resolves', async () => {
+    requestJson.mockResolvedValue({ leaseToken: 'new-tok', expiresAt: '2024-01-01T00:01:40Z', ttlMs: 100000 });
+
+    const result = await forcePatientLock('server-1', 'client-a', { session: SESSION });
+
+    const [path] = requestJson.mock.calls[0];
+    expect(path).toBe('/api/patients/server-1/lock?force=true');
+    expect(result.leaseToken).toBe('new-tok');
+  });
+});
+
+describe('peekPatientLock', () => {
+  it('GETs /:id/lock and unwraps the { lock } envelope', async () => {
+    requestJson.mockResolvedValue({ lock: { holderName: 'Dr. Kim', acquiredAt: 'x', expiresAt: 'y' } });
+
+    const result = await peekPatientLock('server-1', { session: SESSION });
+
+    const [path, opts] = requestJson.mock.calls[0];
+    expect(path).toBe('/api/patients/server-1/lock');
+    expect(opts.method ?? 'GET').toBe('GET');
+    expect(result.holderName).toBe('Dr. Kim');
+  });
+
+  it('returns null when nobody holds the lock', async () => {
+    requestJson.mockResolvedValue({ lock: null });
+    const result = await peekPatientLock('server-1', { session: SESSION });
+    expect(result).toBeNull();
+  });
+});
+
+describe('releasePatientLock', () => {
+  it('DELETEs with X-Lock-Token header', async () => {
+    requestJson.mockResolvedValue(null);
+
+    await releasePatientLock('server-1', 'lease-abc', { session: SESSION });
+
+    const [path, opts] = requestJson.mock.calls[0];
+    expect(path).toBe('/api/patients/server-1/lock');
+    expect(opts.method).toBe('DELETE');
+    expect(opts.headers['X-Lock-Token']).toBe('lease-abc');
+  });
+
+  it('is a no-op (does not call the server) when no token is given', async () => {
+    await releasePatientLock('server-1', null, { session: SESSION });
+    expect(requestJson).not.toHaveBeenCalled();
+  });
+});
+
+describe('isLockError', () => {
+  it('is true only for status 423', () => {
+    expect(isLockError({ status: 423 })).toBe(true);
+    expect(isLockError({ status: 409 })).toBe(false);
+    expect(isLockError(null)).toBe(false);
+  });
+});
+
+describe('isNetworkError', () => {
+  it('is true for a fetch-level TypeError without a status', () => {
+    expect(isNetworkError(new TypeError('Failed to fetch'))).toBe(true);
+  });
+
+  it('is false for a TypeError that already carries an HTTP status (defensive)', () => {
+    const err = new TypeError('weird');
+    err.status = 500;
+    expect(isNetworkError(err)).toBe(false);
+  });
+
+  it('is false for a plain Error without a status (unclassified, not necessarily offline)', () => {
+    expect(isNetworkError(new Error('something else'))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeCommittedFlushOutcomes
+// ---------------------------------------------------------------------------
+
+describe('computeCommittedFlushOutcomes', () => {
+  it('reads the already-committed syncStatus for a synced pair rather than re-comparing', () => {
+    const pushed = makeLocalPatient({ id: 'p1' });
+    // Committed state is a *different* object (server ACK replaced it) — must not be treated
+    // as "changed" just because of that. mergePushedPatientAck already decided 'synced'.
+    const committed = { ...pushed, updatedAt: 'server-set', sync: { syncStatus: 'synced', revision: 2 } };
+
+    const outcomes = computeCommittedFlushOutcomes([committed], { synced: [{ patient: pushed }], failed: [] });
+
+    expect(outcomes.get('p1')).toBe('synced');
+  });
+
+  it('maps a committed dirty status (edited during push) to still-dirty', () => {
+    const pushed = makeLocalPatient({ id: 'p1' });
+    const committed = { ...pushed, sync: { syncStatus: 'dirty', revision: 2 } };
+
+    const outcomes = computeCommittedFlushOutcomes([committed], { synced: [{ patient: pushed }], failed: [] });
+
+    expect(outcomes.get('p1')).toBe('still-dirty');
+  });
+
+  it('maps a committed conflict status to conflict', () => {
+    const pushed = makeLocalPatient({ id: 'p1' });
+    const committed = { ...pushed, sync: { syncStatus: 'conflict', revision: 2 } };
+
+    const outcomes = computeCommittedFlushOutcomes([committed], { synced: [{ patient: pushed }], failed: [] });
+
+    expect(outcomes.get('p1')).toBe('conflict');
+  });
+
+  it('falls back to error when the committed patient cannot be found (e.g. deleted mid-flight)', () => {
+    const pushed = makeLocalPatient({ id: 'gone' });
+
+    const outcomes = computeCommittedFlushOutcomes([], { synced: [{ patient: pushed }], failed: [] });
+
+    expect(outcomes.get('gone')).toBe('error');
+  });
+
+  it('maps failed entries by kind: conflict/permission/lock/offline/other', () => {
+    const outcomes = computeCommittedFlushOutcomes([], {
+      synced: [],
+      failed: [
+        { patient: { id: 'a' }, kind: 'conflict' },
+        { patient: { id: 'b' }, kind: 'permission' },
+        { patient: { id: 'c' }, kind: 'lock' },
+        { patient: { id: 'd' }, kind: 'offline' },
+        { patient: { id: 'e' }, kind: 'error' },
+      ],
+    });
+
+    expect(outcomes.get('a')).toBe('conflict');
+    expect(outcomes.get('b')).toBe('permission');
+    expect(outcomes.get('c')).toBe('lock-lost');
+    expect(outcomes.get('d')).toBe('offline');
+    expect(outcomes.get('e')).toBe('error');
   });
 });

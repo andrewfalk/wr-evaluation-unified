@@ -27,8 +27,10 @@ import { useMigration } from './core/hooks/useMigration';
 import { useOpsStatus } from './core/hooks/useOpsStatus';
 import { usePatientCrud } from './core/hooks/usePatientCrud';
 import { usePatientSync } from './core/hooks/usePatientSync';
+import { usePatientLock, requiresLock } from './core/hooks/usePatientLock';
+import { useSyncStatusSummary } from './core/hooks/useSyncStatusSummary';
 import { suggestModules } from './core/utils/diagnosisMapping';
-import { showConfirm } from './core/utils/platform';
+import { showAlert, showConfirm } from './core/utils/platform';
 import { generateUnifiedReport } from './core/utils/reportGenerator';
 import { buildSteps } from './core/utils/steps';
 import { isRedactedPatientRecord } from './core/services/patientRecords';
@@ -36,6 +38,7 @@ import { canEditPatient } from './core/utils/patientOwnership';
 import { getDefaultPatientScope, normalizePatientScopeForSession, getValidPatientScopes } from './core/utils/patientScope';
 import { clearAutoSavedWorkspace } from './core/services/workspaceRepository';
 import { fetchDoctorCounts } from './core/services/patientServerRepository';
+import { clearAllLockTokens } from './core/services/lockTokenStore';
 import { LoginModal } from './core/components/LoginModal';
 import { ChangePasswordModal } from './core/components/ChangePasswordModal';
 import { SwitchToLocalButton } from './core/components/SwitchToLocalButton';
@@ -160,7 +163,15 @@ function App() {
     }
   }, [patients.length, intakeShared]);
 
-  const { syncState, syncNow } = usePatientSync({
+  // 환자를 여는 것 자체가 편집 세션의 시작 — 서버 측 TTL lease lock을 자동으로 acquire/renew한다.
+  // usePatientSync는 이 lockState를 읽기 전용으로만 받는다(콜백을 주고받지 않음). 두 훅의
+  // 연결(브리지)은 아래 별도 effect가 lockState 전이를 관찰해 담당한다.
+  const { lockState, forceAcquire } = usePatientLock({ activeId, activePatient, session, settings });
+  const canMutateActivePatient =
+    canEditPatient(activePatient, session) &&
+    (!requiresLock(activePatient, session) || lockState.status === 'held');
+
+  const { syncState, syncNow, flushPatient, notifyLockOutcome } = usePatientSync({
     patients,
     setPatients,
     activeId,
@@ -168,6 +179,7 @@ function App() {
     session,
     settings,
     scope: effectivePatientScope,
+    lockState,
     enabled:
       isIntranetMode &&
       isAuthenticated &&
@@ -177,6 +189,40 @@ function App() {
       !configError &&
       !patientSyncPaused,
   });
+
+  // lockState 전이를 관찰해 필요한 시점에만 usePatientSync 쪽 함수를 호출한다 — 두 훅은
+  // 서로를 모른다(usePatientLock은 sync 콜백을 아예 받지 않음).
+  const prevLockStatusRef = useRef(lockState.status);
+  useEffect(() => {
+    if (prevLockStatusRef.current === lockState.status) return;
+    prevLockStatusRef.current = lockState.status;
+    if (lockState.status === 'held') {
+      flushPatient(activeId);
+    } else if (lockState.status === 'held-by-other' || lockState.status === 'lost') {
+      notifyLockOutcome(activeId, 'lock-lost');
+    }
+  }, [lockState.status, activeId, flushPatient, notifyLockOutcome]);
+
+  // 세션 identity(로그인/로그아웃/서버 URL/계정/조직 변경)가 바뀌면 이전 계정의 leaseToken이
+  // 다음 계정으로 넘어가지 않도록 일괄 초기화한다. accessToken/refreshedAt은 순수 토큰
+  // refresh(회전)만으로는 안 바뀌는 값이라 여기 포함하지 않는다 — 어떤 함수가 그 변화를
+  // 일으켰는지와 무관하게 identity 자체의 변화만 포착한다.
+  const lockIdentity = `${session?.mode ?? ''}|${session?.apiBaseUrl || ''}|${session?.user?.id || ''}|${session?.user?.organizationId || ''}`;
+  const prevLockIdentityRef = useRef(lockIdentity);
+  useEffect(() => {
+    if (prevLockIdentityRef.current === lockIdentity) return;
+    prevLockIdentityRef.current = lockIdentity;
+    clearAllLockTokens();
+  }, [lockIdentity]);
+
+  const syncSummary = useSyncStatusSummary(patients, syncState);
+
+  const handleForceTakeover = useCallback(async () => {
+    const holderName = lockState.holder?.holderName || '다른 사용자';
+    const ok = await showConfirm(`${holderName}이(가) 편집 중인 환자입니다. 강제로 편집 권한을 가져오시겠습니까?`);
+    if (!ok) return;
+    await forceAcquire();
+  }, [lockState.holder, forceAcquire]);
 
   // 대시보드 스코프 드롭다운용 의사 명부(경량 집계, PHI 미포함) 로드.
   // 초기 + 매 동기화 완료(lastSyncedAt) 후 갱신 → 옵션·카운트 최신 유지.
@@ -256,7 +302,62 @@ function App() {
     setActiveId, setCurrentStepIndex,
     setIntakeShared, setShowHome,
     handleStartIntake,
+    canMutateActivePatient,
   });
+
+  // 환자 전환 게이팅(§5-3): synced면 즉시 전환, conflict면 push 자체를 시도하지 않고 확인 후
+  // 이동, dirty/local-only면 flushPatient로 기존 autosync 큐에 합류해 저장을 기다린 뒤 전환.
+  const handleSwitchPatient = useCallback(async (patientId) => {
+    if (patientId === activeId) { switchPatient(patientId); return; }
+
+    const current = patients.find(p => p.id === activeId);
+    const status = current?.sync?.syncStatus;
+
+    if (!current || status === 'synced') {
+      switchPatient(patientId);
+      return;
+    }
+
+    const proceedUnresolved = (message) => async () => {
+      const ok = await showConfirm(message);
+      if (!ok) return false;
+      setPatients(prev => prev.map(p => (
+        p.id === current.id ? { ...p, sync: { ...(p.sync || {}), syncPaused: true } } : p
+      )));
+      switchPatient(patientId);
+      return true;
+    };
+
+    if (status === 'conflict') {
+      await proceedUnresolved('현재 환자가 충돌 상태입니다. 해결하지 않고 이동하시겠습니까?')();
+      return;
+    }
+
+    if (status === 'dirty' || status === 'local-only') {
+      const ok = await showConfirm('저장되지 않은 변경사항이 있습니다. 저장 후 이동하시겠습니까?');
+      if (!ok) return;
+
+      let outcome = 'still-dirty';
+      for (let attempt = 0; attempt < 3 && outcome === 'still-dirty'; attempt += 1) {
+        outcome = await flushPatient(current.id);
+      }
+
+      if (outcome === 'synced') { switchPatient(patientId); return; }
+      if (outcome === 'conflict') {
+        await proceedUnresolved('저장 중 충돌이 발생했습니다. 해결하지 않고 이동하시겠습니까?')();
+        return;
+      }
+      if (outcome === 'still-dirty') {
+        await showAlert('아직 저장 중입니다. 잠시 후 다시 시도해 주세요.');
+        return;
+      }
+      // lock-lost / permission / offline / error
+      await proceedUnresolved('저장에 실패했습니다(권한 변경 또는 통신 오류). 저장하지 않고 이동하시겠습니까?')();
+      return;
+    }
+
+    switchPatient(patientId);
+  }, [activeId, patients, switchPatient, flushPatient, setPatients]);
 
   // 영상 분석 서버 적용 후 서버 동기화 환자를 목록에 반영(로컬 id 보존 → id로 교체).
   const onVideoServerApplied = useCallback((serverPatient) => {
@@ -541,7 +642,7 @@ function App() {
         setSelectedIds={setSelectedIds}
         onAddPatient={addPatient}
         onShowBatchImport={() => setShowBatchImport(true)}
-        onSwitchPatient={switchPatient}
+        onSwitchPatient={handleSwitchPatient}
         onRemovePatient={removePatient}
         onRemoveSelectedPatients={removeSelectedPatients}
         onResolveConflict={setConflictPatientId}
@@ -563,6 +664,32 @@ function App() {
 
       {/* 메인 영역 */}
       <div className="main-area">
+        {isIntranetMode && (syncSummary.conflictCount > 0 || syncSummary.lockLostCount > 0 || syncSummary.pendingCount > 0 || syncSummary.offline) && (
+          <div className="sync-status-banner" role="status">
+            {syncSummary.conflictCount > 0 && (
+              <button
+                type="button"
+                className="sync-status-badge sync-status-badge--conflict"
+                onClick={() => setShowSidebar(true)}
+                title="사이드바에서 충돌 환자의 Resolve 버튼으로 해결하세요"
+              >충돌 {syncSummary.conflictCount}건</button>
+            )}
+            {syncSummary.lockLostCount > 0 && (
+              <button
+                type="button"
+                className="sync-status-badge sync-status-badge--lock"
+                onClick={() => setShowSidebar(true)}
+                title="다른 사용자가 편집 중이어서 저장되지 못한 환자가 있습니다"
+              >락 상실 {syncSummary.lockLostCount}건</button>
+            )}
+            {syncSummary.pendingCount > 0 && (
+              <span className="sync-status-badge sync-status-badge--pending">저장 대기 {syncSummary.pendingCount}건</span>
+            )}
+            {syncSummary.offline && (
+              <span className="sync-status-badge sync-status-badge--offline">동기화 오류(오프라인 등) — 잠시 후 재시도됩니다</span>
+            )}
+          </div>
+        )}
         <MainHeader
           title={headerTitle}
           lastAutoSave={lastAutoSave}
@@ -635,6 +762,21 @@ function App() {
               </div>
             )}
 
+            {/* 편집 권한은 있지만 다른 사용자가 활발히 편집 중이거나(락 선점), 락을 상실한 경우 */}
+            {canEditPatient(activePatient, session) && lockState.status === 'held-by-other' && (
+              <div className="read-only-banner" role="status">
+                {lockState.holder?.holderName ? `${lockState.holder.holderName}님이` : '다른 사용자가'} 편집 중입니다. 조회만 가능합니다.
+                <button type="button" className="btn btn-secondary btn-xs" style={{ marginLeft: 8 }} onClick={handleForceTakeover}>
+                  강제로 편집 권한 가져오기
+                </button>
+              </div>
+            )}
+            {canEditPatient(activePatient, session) && lockState.status === 'lost' && (
+              <div className="read-only-banner" role="status">
+                편집 권한을 상실했습니다(세션 만료 또는 담당의 변경). 새로고침 후 다시 시도하세요.
+              </div>
+            )}
+
             {/* 동기화 권한 거부 알림: 다른 디바이스에서 만든 dirty 환자가 더 이상 본인 담당이 아닐 때 */}
             {syncState?.lastPermissionDeniedCount > 0 && (
               <div className="read-only-banner" role="status" style={{ background: '#fde2e2', color: '#9b1c1c', borderColor: '#f5b5b5' }}>
@@ -675,6 +817,7 @@ function App() {
                 handlePresetSelect={handlePresetSelect}
                 setPresetModalJobId={setPresetModalJobId}
                 setPresetBrowseJobId={setPresetBrowseJobId}
+                canMutate={canMutateActivePatient}
               />
             </div>
 

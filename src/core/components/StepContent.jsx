@@ -4,7 +4,6 @@ import { AssessmentStep } from './AssessmentStep';
 import { AIAnalysisPanel } from './AIAnalysisPanel';
 import { VideoAnalysisStep } from './VideoAnalysisStep';
 import { createDiagnosis } from '../utils/data';
-import { canEditPatient } from '../utils/patientOwnership';
 
 const UNIFIED_AI_SYSTEM_PROMPT = `당신은 직업성 근골격계 질환 업무관련성 평가 전문 직업환경의학 전문의입니다.
 무릎(슬관절) 및 척추(요추) 평가 모두에 전문성을 갖추고 있습니다.
@@ -28,6 +27,7 @@ export function StepContent({
   updatePatient, updateShared, updateModule, updateModuleById, updateDiagnoses, updateActiveModules,
   handlePresetSelect, setPresetModalJobId, setPresetBrowseJobId,
   onVideoServerApplied,
+  canMutate = true,
 }) {
   if (!currentStep || !activePatient) return null;
 
@@ -157,7 +157,7 @@ export function StepContent({
   };
 
   const content = renderStepContent();
-  const readOnly = !canEditPatient(activePatient, session);
+  const readOnly = !canMutate;
   if (!readOnly) return content;
   // read-only: 자식을 그대로 노출(display: contents)해 부모 grid/flex 레이아웃 보존.
   // banner는 부모(App.jsx)에서 스텝 탭 아래에 직접 렌더.
