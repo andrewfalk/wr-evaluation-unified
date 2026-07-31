@@ -12,6 +12,11 @@ const CLIENT_INSTANCE_STORAGE_KEY = 'wrEvalUnified.lockClientInstanceId';
 const DEFAULT_TTL_MS = 100_000;
 const RENEW_DIVISOR = 4; // heartbeat = ttlMs / 4 (서버 TTL의 여유 4배와 대응)
 const MIN_RENEW_DELAY_MS = 1000;
+// 'lost'/'held-by-other'로 멈춰있는 동안의 재시도 주기. session.accessToken이 실제로
+// 바뀌는 경우(재로그인 등)는 메인 effect가 이미 자동으로 재시도하므로, 이 주기는 그 외의
+// "일시적 실패가 스스로 해소됐는데 아무 이벤트도 없어서 아무도 재시도를 안 트리거하는" 경우의
+// 안전망이다 — 락 TTL(기본 100s)보다 짧게 잡아 다른 사람의 락이 만료됐을 때도 비교적 빨리 감지.
+const STUCK_RETRY_INTERVAL_MS = 30_000;
 
 // 같은 환자에 대해 acquire가 이미 진행 중이면 새 HTTP 요청을 또 쏘지 않고 그 Promise를
 // 그대로 재사용한다. React.StrictMode(개발 모드)는 effect를 "설정→정리→재설정" 순서로 한
@@ -76,6 +81,8 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
   const inFlightAcquireRef = useRef(new Map()); // patientId -> in-flight acquire Promise
 
   const serverId = requiresLock(activePatient, session) ? activePatient.sync.serverId : null;
+  const lockStateRef = useRef(lockState);
+  useEffect(() => { lockStateRef.current = lockState; }, [lockState]);
 
   const clearRenewTimer = useCallback(() => {
     if (renewTimerRef.current) {
@@ -112,9 +119,34 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
     }, delay);
   }, [activeId, serverId, session, settings, clearRenewTimer]);
 
+  // 한 세대에 속한 acquire 시도 — 최초 진입과 (아래) 정체 복구 재시도가 모두 이 함수를 공유한다.
+  // isStale()이 generationRef만 검사해도 충분한 이유: 메인 effect의 cleanup이 언마운트/의존성
+  // 변경 시 반드시 세대번호를 한 번 더 올리므로(다음 effect가 없는 순수 언마운트까지 포함),
+  // "이 시도를 무효화해야 하는 모든 경우"가 세대 불일치 하나로 수렴한다.
+  const attemptAcquire = useCallback(async (myGeneration) => {
+    if (!serverId) return;
+    setLockState({ status: 'acquiring', holder: null, expiresAt: null });
+    try {
+      const result = await acquireOnce(
+        inFlightAcquireRef.current, activeId, serverId, clientInstanceIdRef.current, session, settings
+      );
+      if (generationRef.current !== myGeneration) return;
+      setLockToken(activeId, result.leaseToken, result.expiresAt);
+      setLockState({ status: 'held', holder: null, expiresAt: result.expiresAt });
+      startRenewLoop(myGeneration, result.ttlMs);
+    } catch (err) {
+      if (generationRef.current !== myGeneration) return;
+      if (isLockError(err)) {
+        setLockState({ status: 'held-by-other', holder: err.data?.holder || null, expiresAt: null });
+      } else {
+        // 네트워크 오류 등 acquire 자체가 실패한 경우 — 낙관적으로 'held'를 가정하지 않는다.
+        setLockState({ status: 'lost', holder: null, expiresAt: null });
+      }
+    }
+  }, [activeId, serverId, session, settings, startRenewLoop]);
+
   useEffect(() => {
     const myGeneration = ++generationRef.current;
-    let cancelled = false;
     clearRenewTimer();
 
     if (!serverId) {
@@ -122,31 +154,13 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
       return undefined;
     }
 
-    const isStale = () => cancelled || generationRef.current !== myGeneration;
-
-    (async () => {
-      setLockState({ status: 'acquiring', holder: null, expiresAt: null });
-      try {
-        const result = await acquireOnce(
-          inFlightAcquireRef.current, activeId, serverId, clientInstanceIdRef.current, session, settings
-        );
-        if (isStale()) return;
-        setLockToken(activeId, result.leaseToken, result.expiresAt);
-        setLockState({ status: 'held', holder: null, expiresAt: result.expiresAt });
-        startRenewLoop(myGeneration, result.ttlMs);
-      } catch (err) {
-        if (isStale()) return;
-        if (isLockError(err)) {
-          setLockState({ status: 'held-by-other', holder: err.data?.holder || null, expiresAt: null });
-        } else {
-          // 네트워크 오류 등 acquire 자체가 실패한 경우 — 낙관적으로 'held'를 가정하지 않는다.
-          setLockState({ status: 'lost', holder: null, expiresAt: null });
-        }
-      }
-    })();
+    attemptAcquire(myGeneration);
 
     return () => {
-      cancelled = true;
+      // 이 effect가 소유한 세대를 무효화한다 — 의존성 변경으로 새 effect가 뒤이어 실행되면
+      // 거기서 또 한 번 올리므로(중복 무해), 순수 언마운트(다음 effect 없음)에도 이 시도가
+      // 확실히 stale 처리된다.
+      generationRef.current += 1;
       clearRenewTimer();
       // best-effort 해제 — 응답을 기다리지 않는다(사용자 조작을 막을 이유가 없음).
       // 서버는 opt-in(락 없음=통과)이라 해제 실패해도 TTL 만료로 자연 정리된다.
@@ -157,7 +171,36 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId, serverId, session?.apiBaseUrl, session?.accessToken, settings, clearRenewTimer, startRenewLoop]);
+  }, [activeId, serverId, session?.apiBaseUrl, session?.accessToken, settings, clearRenewTimer, attemptAcquire]);
+
+  // 'lost'/'held-by-other'로 멈춰있을 때의 재시도 안전망. 세션 토큰이 실제로 바뀌는 경우는
+  // 위 메인 effect가 이미 처리하므로, 여기는 그 외의 회복 신호(창 포커스 복귀, 탭 활성화,
+  // 또는 아무 신호도 없이 시간만 흐른 경우)를 담당한다 — usePatientSync의 focus/visibility
+  // 재동기화 트리거와 같은 패턴.
+  useEffect(() => {
+    if (!serverId) return undefined;
+
+    const retryIfStuck = () => {
+      const status = lockStateRef.current.status;
+      if (status !== 'lost' && status !== 'held-by-other') return;
+      const myGeneration = ++generationRef.current;
+      attemptAcquire(myGeneration);
+    };
+    const onFocus = () => retryIfStuck();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') retryIfStuck();
+    };
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    const interval = window.setInterval(retryIfStuck, STUCK_RETRY_INTERVAL_MS);
+
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.clearInterval(interval);
+    };
+  }, [serverId, attemptAcquire]);
 
   // 사용자가 명시적으로 동의한 뒤에만 호출 — 다른 사람이 보유한 락을 무조건 선점한다.
   const forceAcquire = useCallback(async () => {

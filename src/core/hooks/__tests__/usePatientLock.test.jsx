@@ -117,6 +117,63 @@ describe('usePatientLock — acquire', () => {
   });
 });
 
+describe('usePatientLock — stuck-state retry (focus/visibility/interval safety net)', () => {
+  it('retries on window focus while lockState is "lost"', async () => {
+    acquirePatientLock.mockRejectedValueOnce(new Error('network down'));
+    const { result } = renderHook(() => usePatientLock({ activeId: 'local-1', activePatient: syncedPatient(), session: SESSION }));
+    await waitFor(() => expect(result.current.lockState.status).toBe('lost'));
+    expect(acquirePatientLock).toHaveBeenCalledTimes(1);
+
+    acquirePatientLock.mockResolvedValueOnce({ leaseToken: 'tok-recovered', expiresAt: 'x', ttlMs: 100000 });
+    window.dispatchEvent(new Event('focus'));
+
+    await waitFor(() => expect(result.current.lockState.status).toBe('held'));
+    expect(acquirePatientLock).toHaveBeenCalledTimes(2);
+    expect(getLockToken('local-1')).toBe('tok-recovered');
+  });
+
+  it('retries when the tab becomes visible while lockState is "held-by-other"', async () => {
+    const err = Object.assign(new Error('locked'), { status: 423, data: { holder: { holderName: 'Dr. Lee' } } });
+    acquirePatientLock.mockRejectedValueOnce(err);
+    const { result } = renderHook(() => usePatientLock({ activeId: 'local-1', activePatient: syncedPatient(), session: SESSION }));
+    await waitFor(() => expect(result.current.lockState.status).toBe('held-by-other'));
+
+    acquirePatientLock.mockResolvedValueOnce({ leaseToken: 'tok-recovered', expiresAt: 'x', ttlMs: 100000 });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    await waitFor(() => expect(result.current.lockState.status).toBe('held'));
+    expect(acquirePatientLock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT retry on focus while already held (no unnecessary token rotation)', async () => {
+    acquirePatientLock.mockResolvedValueOnce({ leaseToken: 'tok-1', expiresAt: 'x', ttlMs: 100000 });
+    const { result } = renderHook(() => usePatientLock({ activeId: 'local-1', activePatient: syncedPatient(), session: SESSION }));
+    await waitFor(() => expect(result.current.lockState.status).toBe('held'));
+
+    window.dispatchEvent(new Event('focus'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(acquirePatientLock).toHaveBeenCalledTimes(1); // still just the original acquire
+  });
+
+  it('retries periodically while stuck, even without any focus/visibility signal', async () => {
+    vi.useFakeTimers();
+    try {
+      acquirePatientLock.mockRejectedValueOnce(new Error('network down'));
+      const { result } = renderHook(() => usePatientLock({ activeId: 'local-1', activePatient: syncedPatient(), session: SESSION }));
+      await vi.waitFor(() => expect(result.current.lockState.status).toBe('lost'));
+
+      acquirePatientLock.mockResolvedValueOnce({ leaseToken: 'tok-recovered', expiresAt: 'x', ttlMs: 100000 });
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(result.current.lockState.status).toBe('held');
+      expect(acquirePatientLock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('usePatientLock — renew heartbeat', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
