@@ -1619,6 +1619,25 @@ describe('POST /api/patients/:id/lock', () => {
     expect(res.status).toBe(404);
     expect(res.body.code).toBe('PATIENT_NOT_FOUND');
   });
+
+  // TOCTOU 재검증(2라운드 외부 리뷰 반영) — assignedDoctorOrAdmin 미들웨어는 여기서 host가
+  // 여전히 담당의(USER_ID)라고 통과시켰지만(withAccessCheck: {}), 그 직후 트랜잭션 안에서
+  // 앵커가 실제로 조회한 담당의는 다른 사람이다(미들웨어 확인과 앵커 획득 사이에 재배정된
+  // 상황을 흉내). assertAssignedOrAdmin이 이를 잡아 403을 반환해야 한다.
+  it('미들웨어 통과 후 트랜잭션 안에서 담당의가 이미 바뀌었으면 403(TOCTOU 재검증)', async () => {
+    const pool = makePool();
+    makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },                                                          // BEGIN
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: 'other-doctor-id' }] }, // anchor — 재배정된 담당의
+      { rows: [] },                                                          // ROLLBACK
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/lock`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ clientInstanceId: CLIENT_INSTANCE_ID });
+    expect(res.status).toBe(403);
+  });
 });
 
 describe('DELETE /api/patients/:id/lock', () => {

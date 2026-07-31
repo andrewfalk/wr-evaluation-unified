@@ -90,14 +90,14 @@ export function assertAssignedOrAdmin(
   if (anchor.assignedDoctorUserId !== session.userId) throw new PatientLockForbiddenError();
 }
 
-// 최초 획득 또는 "같은 탭의 재획득"(client_instance_id + user_id + organization_id 자기매칭,
-// F5 복구 포함) 전용. 항상 새 leaseToken을 발급한다. 다른 탭이 살아있는 락을 쥐고 있으면 실패
-// — 실패 시 현재 보유자 정보를 조회해 heldBy로 반환한다(호출자가 423 바디를 구성할 수 있게).
-// 호출 전 lockPatientAnchor()로 앵커를 잡아둔 상태여야 한다.
-export async function acquireLock(
+type AcquireAttemptResult =
+  | { ok: true; leaseToken: string; lock: LockRow }
+  | { ok: false; heldBy: LockRow | null };
+
+async function attemptAcquireOnce(
   runner: QueryRunner,
   params: { patientId: string; orgId: string; userId: string; holderName: string; clientInstanceId: string }
-): Promise<{ ok: true; leaseToken: string; lock: LockRow } | { ok: false; heldBy: LockRow }> {
+): Promise<AcquireAttemptResult> {
   const { patientId, orgId, userId, holderName, clientInstanceId } = params;
   const leaseToken = generateLeaseToken();
   const leaseTokenHash = hashToken(leaseToken);
@@ -134,9 +134,33 @@ export async function acquireLock(
   }
 
   const heldBy = await peekLock(runner, { patientId, orgId });
-  // heldBy는 앵커로 patient_records를 이미 FOR UPDATE로 잡은 상태에서 조회하므로 반드시 존재한다
-  // (그렇지 않다면 위 UPSERT의 WHERE expires_at<=now() 분기에 걸려 성공했을 것이다).
-  return { ok: false, heldBy: heldBy as LockRow };
+  return { ok: false, heldBy };
+}
+
+// 최초 획득 또는 "같은 탭의 재획득"(client_instance_id + user_id + organization_id 자기매칭,
+// F5 복구 포함) 전용. 항상 새 leaseToken을 발급한다. 다른 탭이 살아있는 락을 쥐고 있으면 실패
+// — 실패 시 현재 보유자 정보를 조회해 heldBy로 반환한다(호출자가 423 바디를 구성할 수 있게).
+// 호출 전 lockPatientAnchor()로 앵커를 잡아둔 상태여야 한다.
+export async function acquireLock(
+  runner: QueryRunner,
+  params: { patientId: string; orgId: string; userId: string; holderName: string; clientInstanceId: string }
+): Promise<{ ok: true; leaseToken: string; lock: LockRow } | { ok: false; heldBy: LockRow }> {
+  const first = await attemptAcquireOnce(runner, params);
+  if (first.ok) return first;
+  if (first.heldBy) return { ok: false, heldBy: first.heldBy };
+
+  // heldBy가 null이라는 것은: 위 UPSERT의 WHERE 평가 시점엔 아직 살아있던 락이, 곧이어 실행한
+  // peekLock() 조회 시점 사이에 실제로 만료된 좁은 레이스다(3라운드 외부 리뷰 지적). 앵커가
+  // patient_records를 FOR UPDATE로 잡고 있는 동안엔 다른 트랜잭션이 patient_locks를 건드릴 수
+  // 없으므로, 지금 시점엔 "만료됐다"는 사실이 이미 확정돼 있다 — 같은 UPSERT를 한 번 더
+  // 실행하면 WHERE expires_at<=clock_timestamp() 분기로 반드시 성공해야 한다.
+  const retry = await attemptAcquireOnce(runner, params);
+  if (retry.ok) return retry;
+  if (retry.heldBy) return { ok: false, heldBy: retry.heldBy };
+
+  // 이론상 도달 불가능 — null을 LockRow로 강제 캐스팅해 호출부의 heldBy.holderName 등에서
+  // 조용히 500이 나게 두는 대신, 여기서 명시적으로 실패시켜 원인을 드러낸다.
+  throw new Error(`acquireLock: unexpected empty lock state for patient ${params.patientId} after retry`);
 }
 
 // 본인 소유 확인(토큰 일치) 후 expires_at만 연장한다. 토큰을 절대 회전시키지 않으므로

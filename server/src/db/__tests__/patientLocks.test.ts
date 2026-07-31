@@ -106,6 +106,30 @@ describe('acquireLock', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.heldBy.holderName).toBe('Dr. Kim');
   });
+
+  // 3라운드 외부 리뷰 지적: UPSERT의 WHERE 평가 시점엔 락이 아직 살아있어 실패했는데, 곧이어
+  // 실행한 peekLock() 조회 시점 사이에 실제로 만료돼버리면(TTL 경계의 좁은 레이스) peekLock이
+  // null을 반환한다. 이를 LockRow로 강제 캐스팅해 반환하면 호출부의 heldBy.holderName 등에서
+  // 조용히 TypeError/500이 난다 — 앵커가 잡혀있는 동안엔 그 사이 값이 바뀔 수 없으므로, 한 번
+  // 더 같은 UPSERT를 재시도하면(이번엔 이미 만료됐다는 게 확정이므로) 반드시 성공해야 한다.
+  it('만료 경계 레이스: UPSERT 실패 후 peekLock이 null이면 재시도해 성공한다', async () => {
+    // 1st: UPSERT 실패(0 rows) / 2nd: peekLock이 null(그 사이 만료) / 3rd: 재시도 UPSERT 성공
+    const runner = makeRunner({ rows: [] }, { rows: [] }, { rows: [LOCK_DB_ROW] });
+    const result = await acquireLock(runner, {
+      patientId: PATIENT_ID, orgId: ORG_ID, userId: USER_ID, holderName: 'Dr. Kim', clientInstanceId: CLIENT_INSTANCE_ID,
+    });
+    expect(result.ok).toBe(true);
+    expect(runner.query).toHaveBeenCalledTimes(3);
+  });
+
+  it('만료 경계 레이스가 재시도에서도 재현되면(이론상 불가능) null을 LockRow로 위장하지 않고 던진다', async () => {
+    const runner = makeRunner({ rows: [] }, { rows: [] }, { rows: [] }, { rows: [] });
+    await expect(
+      acquireLock(runner, {
+        patientId: PATIENT_ID, orgId: ORG_ID, userId: USER_ID, holderName: 'Dr. Kim', clientInstanceId: CLIENT_INSTANCE_ID,
+      })
+    ).rejects.toThrow(/unexpected empty lock state/);
+  });
 });
 
 describe('renewLock', () => {
