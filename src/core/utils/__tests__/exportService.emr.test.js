@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { generateEMRFieldData } from '../exportService.js';
+import { generateUnifiedEMR } from '../emrReport.js';
 import { cp949ByteLength } from '../emrText.js';
 
 function makePatient({ activeModules = [], jobs = [], modules = {} } = {}) {
@@ -133,6 +134,31 @@ describe('generateEMRFieldData — b8(txtSyth1Cont) 요약본 + b5(txtAppvSickCo
     });
     const { txtSyth1Cont } = generateEMRFieldData(patient);
     expect(txtSyth1Cont).toContain('[미입력/검토 필요] 1개\n#1. M17.0 무릎 관절증 (방향 미선택)');
+  });
+});
+
+describe('generateUnifiedEMR — groupOutputOverride 파라미터 (미리보기의 그룹/개별 동시 계산용)', () => {
+  it('override를 생략하면 reportOptions.groupAssessmentResults를 그대로 따른다', () => {
+    const patientGroupOn = makeAssessmentPatient({
+      diagnoses: [kneeDiag()], activeModules: ['knee'], modules: { knee: {} },
+      reportOptions: { groupAssessmentResults: true },
+    });
+    const patientGroupOff = makeAssessmentPatient({
+      diagnoses: [kneeDiag()], activeModules: ['knee'], modules: { knee: {} },
+    });
+    expect(generateUnifiedEMR(patientGroupOn).b8).toContain('[상병 확인 · 업무관련성 높음] 1개');
+    expect(generateUnifiedEMR(patientGroupOff).b8).toContain('#1: M17.0 무릎 관절증');
+  });
+
+  it('override를 명시하면 저장된 reportOptions 값과 무관하게 그룹/개별 형식을 강제한다', () => {
+    const patient = makeAssessmentPatient({
+      diagnoses: [kneeDiag()], activeModules: ['knee'], modules: { knee: {} },
+      reportOptions: { groupAssessmentResults: false },
+    });
+    expect(generateUnifiedEMR(patient, true).b8).toContain('[상병 확인 · 업무관련성 높음] 1개');
+    expect(generateUnifiedEMR(patient, false).b8).toContain('#1: M17.0 무릎 관절증');
+    // 저장된 값(false)이 그대로면 override=false와 동일한 결과여야 한다
+    expect(generateUnifiedEMR(patient).b8).toBe(generateUnifiedEMR(patient, false).b8);
   });
 });
 

@@ -47,7 +47,7 @@ function GroupCard({
         </span>
         <span className="assessment-group-card-count">{units.length}개</span>
       </div>
-      {reasonText && <div className="assessment-group-reason">낮음 사유: {reasonText}</div>}
+      {reasonText && <div className="assessment-group-reason">낮음 사유 상세: {reasonText}</div>}
       <div className="assessment-group-chips">
         {visibleTags.map(tag => (
           <button
@@ -154,13 +154,15 @@ export function AssessmentGroupView({ diagnoses, activeModules, onDiagnosesRepla
   // 합산되어 있으므로(assessmentGroups.js), 상단 통계 숫자와 아래 카드가 항상 일치한다.
   const unassignedSideDiagnoses = info.unassignedSideDiagnoses;
 
-  const [expandedKeys, setExpandedKeys] = useState(() => new Set());
+  // 기본값은 "전체 펼침"이다 — 사용자가 명시적으로 접은 그룹만 이 Set에 담는다(반전 표기).
+  // 그래야 새로 생기는 그룹도 별도 초기화 없이 항상 펼쳐진 상태로 시작한다.
+  const [collapsedKeys, setCollapsedKeys] = useState(() => new Set());
   const [splitMap, setSplitMap] = useState(() => new Map()); // groupKey -> Set(diagId)
   const [selectionMap, setSelectionMap] = useState(() => new Map()); // groupKey -> Set(unitId)
   const [editorState, setEditorState] = useState(null); // { key, isIncomplete, units, contextLabel }
   const [undoState, setUndoState] = useState(null); // { undoPatch, count }
 
-  const toggleExpand = key => setExpandedKeys(prev => {
+  const toggleExpand = key => setCollapsedKeys(prev => {
     const next = new Set(prev);
     if (next.has(key)) next.delete(key); else next.add(key);
     return next;
@@ -241,7 +243,7 @@ export function AssessmentGroupView({ diagnoses, activeModules, onDiagnosesRepla
         reasonText={reasonText}
         units={units}
         byId={info.byId}
-        expanded={expandedKeys.has(groupKey)}
+        expanded={!collapsedKeys.has(groupKey)}
         onToggleExpand={() => toggleExpand(groupKey)}
         splitDiagIds={splitDiagIds}
         onToggleSplit={diagId => toggleSplit(groupKey, diagId)}
@@ -290,13 +292,24 @@ export function AssessmentGroupView({ diagnoses, activeModules, onDiagnosesRepla
 
         {info.incomplete.length > 0 && renderCard('__incomplete__', '미입력 · 조치 필요', true, null, info.incomplete)}
 
-        {info.groups.map((group, index) => {
-          const title = `${statusText(group.meta.confirmed)} · 업무관련성 ${assessmentLabel(group.meta.assessment)}`;
-          const reasonText = group.meta.assessment === 'low'
-            ? group.meta.reasons.map(r => lowReasonLabel(r)).join(', ') + (group.meta.other ? ` / 기타: ${group.meta.other}` : '')
-            : null;
-          return renderCard(group.key, title, false, reasonText, group.units, index + 1);
-        })}
+        {(() => {
+          // "상병 확인 · 업무관련성 낮음"처럼 낮음 사유만 다른 그룹은 제목이 서로
+          // 똑같아 보여 혼동을 준다 — 같은 제목이 반복될 때마다 "낮음 사유 N"을
+          // 이어 붙여 서로 다른 그룹임을 명확히 한다.
+          const lowReasonCounters = {};
+          return info.groups.map((group, index) => {
+            const baseTitle = `${statusText(group.meta.confirmed)} · 업무관련성 ${assessmentLabel(group.meta.assessment)}`;
+            let title = baseTitle;
+            if (group.meta.assessment === 'low') {
+              lowReasonCounters[baseTitle] = (lowReasonCounters[baseTitle] || 0) + 1;
+              title = `${baseTitle} · 낮음 사유 ${lowReasonCounters[baseTitle]}`;
+            }
+            const reasonText = group.meta.assessment === 'low'
+              ? group.meta.reasons.map(r => lowReasonLabel(r)).join(', ') + (group.meta.other ? ` / 기타: ${group.meta.other}` : '')
+              : null;
+            return renderCard(group.key, title, false, reasonText, group.units, index + 1);
+          });
+        })()}
 
         {!info.incomplete.length && !info.groups.length && !unassignedSideDiagnoses.length && (
           <div className="evaluation-empty-state">표시할 상병이 없습니다.</div>

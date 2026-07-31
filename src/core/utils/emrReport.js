@@ -248,6 +248,8 @@ function buildExposureSummary(shared, modules, activeModules) {
     text += '\n<손목/손가락>\n';
     (calc?.jobSummaries || []).forEach(jobSummary => {
       const wristGroups = groupWristSummaries(jobSummary.diagnosisSummaries || []);
+      if (wristGroups.length === 0) return;
+      text += `\n[${jobSummary.jobName || '직업 미입력'}]\n`;
       wristGroups.forEach(group => {
         const merged = mergeWristGroups(group.summaries);
         const diagList = group.summaries
@@ -274,6 +276,8 @@ function buildExposureSummary(shared, modules, activeModules) {
     text += '\n<팔꿈치(주관절)>\n';
     (calc?.jobSummaries || []).forEach(jobSummary => {
       const elbowGroups = groupElbowSummaries(jobSummary.diagnosisSummaries || []);
+      if (elbowGroups.length === 0) return;
+      text += `\n[${jobSummary.jobName || '직업 미입력'}]\n`;
       elbowGroups.forEach(group => {
         const merged = mergeElbowGroups(group.summaries);
         const diagList = group.summaries
@@ -378,12 +382,17 @@ function buildConsultReplySlots(shared) {
   return { slot2, slot3 };
 }
 
-export function generateUnifiedEMR(patient) {
+// groupOutputOverride: 생략하면 shared.reportOptions.groupAssessmentResults를 따른다.
+// true/false를 명시하면 저장된 설정과 무관하게 그룹/개별 형식을 강제한다 — 미리보기에서
+// 두 형식을 동시에 계산해 보여줄 때 사용한다(AssessmentStep.jsx).
+export function generateUnifiedEMR(patient, groupOutputOverride) {
   const shared = patient.data.shared || {};
   const modules = patient.data.modules || {};
   const activeModules = patient.data.activeModules || [];
   const diagnoses = shared.diagnoses || [];
-  const groupOutput = !!shared.reportOptions?.groupAssessmentResults;
+  const groupOutput = groupOutputOverride === undefined
+    ? !!shared.reportOptions?.groupAssessmentResults
+    : !!groupOutputOverride;
 
   const age = calculateAge(shared.birthDate, shared.injuryDate);
   const bmi = calculateBMI(shared.height, shared.weight);

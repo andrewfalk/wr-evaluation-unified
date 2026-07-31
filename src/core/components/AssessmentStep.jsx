@@ -1,13 +1,28 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AssessmentTab } from './AssessmentTab';
-import { generateUnifiedReport } from '../utils/reportGenerator';
 import { generateUnifiedEMR } from '../utils/emrReport';
 import { EMR_TEXT_LIMIT_BYTES, cp949ByteLength, classifyEmrByteStatus } from '../utils/emrText';
+
+const EMR_STATUS_LABELS = { ok: '정상', warn: '주의', danger: '초과' };
+
+function emrGaugeInfo(text) {
+  const bytes = cp949ByteLength(text);
+  const pct = Math.min(140, Math.round((bytes / EMR_TEXT_LIMIT_BYTES) * 100));
+  const status = classifyEmrByteStatus(bytes, EMR_TEXT_LIMIT_BYTES);
+  return { bytes, pct, status, statusLabel: EMR_STATUS_LABELS[status] };
+}
 
 export function AssessmentStep({ patient, activeModules, updateDiagnoses, updateModuleById, updateShared }) {
   const shared = patient.data.shared;
   const diagnoses = shared.diagnoses || [];
-  const [previewTab, setPreviewTab] = useState('emr');
+  const groupOutput = !!shared.reportOptions?.groupAssessmentResults;
+  const [previewTab, setPreviewTab] = useState(groupOutput ? 'group' : 'individual');
+
+  // 패턴 그룹/개별 카드 토글이 바뀔 때마다 미리보기 탭도 함께 따라간다 — 토글을
+  // 그대로 둔 채 사용자가 수동으로 다른 탭을 눌러 비교하는 것은 계속 허용한다.
+  useEffect(() => {
+    setPreviewTab(groupOutput ? 'group' : 'individual');
+  }, [groupOutput]);
 
   const handleDiagnosisUpdate = (index, field, value) => {
     const updated = [...diagnoses];
@@ -54,12 +69,15 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
     }
   };
 
-  const previewText = generateUnifiedReport(patient);
-  const { b8: emrText } = generateUnifiedEMR(patient);
-  const emrBytes = cp949ByteLength(emrText);
-  const emrPct = Math.min(140, Math.round((emrBytes / EMR_TEXT_LIMIT_BYTES) * 100));
-  const emrStatus = classifyEmrByteStatus(emrBytes, EMR_TEXT_LIMIT_BYTES);
-  const emrStatusLabel = emrStatus === 'ok' ? '정상' : emrStatus === 'warn' ? '주의' : '초과';
+  // 그룹/개별 두 형식을 항상 같이 계산해 둔다 — 저장된 토글 값과 무관하게 두 탭을
+  // 각각 미리 보여주고, byte 게이지도 탭별로 따로 표시하기 위함.
+  const { b8: emrTextGroup } = generateUnifiedEMR(patient, true);
+  const { b8: emrTextIndividual } = generateUnifiedEMR(patient, false);
+  const gaugeGroup = emrGaugeInfo(emrTextGroup);
+  const gaugeIndividual = emrGaugeInfo(emrTextIndividual);
+  const emrText = previewTab === 'group' ? emrTextGroup : emrTextIndividual;
+  const gauge = previewTab === 'group' ? gaugeGroup : gaugeIndividual;
+  const previewLabel = previewTab === 'group' ? '종합소견(그룹)' : '종합소견(개별)';
 
   return (
     <div className="assessment-step-layout">
@@ -87,45 +105,43 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
             <button
               type="button"
               role="tab"
-              aria-selected={previewTab === 'emr'}
-              className={previewTab === 'emr' ? 'active' : ''}
-              onClick={() => setPreviewTab('emr')}
+              aria-selected={previewTab === 'group'}
+              className={previewTab === 'group' ? 'active' : ''}
+              onClick={() => setPreviewTab('group')}
             >
-              EMR 종합소견
+              종합소견(그룹)
             </button>
             <button
               type="button"
               role="tab"
-              aria-selected={previewTab === 'report'}
-              className={previewTab === 'report' ? 'active' : ''}
-              onClick={() => setPreviewTab('report')}
+              aria-selected={previewTab === 'individual'}
+              className={previewTab === 'individual' ? 'active' : ''}
+              onClick={() => setPreviewTab('individual')}
             >
-              통합 리포트 초안
+              종합소견(개별)
             </button>
           </div>
 
-          {previewTab === 'emr' && (
-            <div className="emr-gauge">
-              <div className="emr-gauge-top">
-                <span className="emr-gauge-label">EMR 종합소견</span>
-                <span className="emr-gauge-value">
-                  {emrBytes.toLocaleString()} / {EMR_TEXT_LIMIT_BYTES.toLocaleString()} byte
-                  <span className={`emr-gauge-status emr-gauge-status-${emrStatus}`}>
-                    {emrStatusLabel}{emrStatus === 'danger' ? ` · ${(emrBytes - EMR_TEXT_LIMIT_BYTES).toLocaleString()} byte 초과` : ''}
-                  </span>
+          <div className="emr-gauge">
+            <div className="emr-gauge-top">
+              <span className="emr-gauge-label">{previewLabel}</span>
+              <span className="emr-gauge-value">
+                {gauge.bytes.toLocaleString()} / {EMR_TEXT_LIMIT_BYTES.toLocaleString()} byte
+                <span className={`emr-gauge-status emr-gauge-status-${gauge.status}`}>
+                  {gauge.statusLabel}{gauge.status === 'danger' ? ` · ${(gauge.bytes - EMR_TEXT_LIMIT_BYTES).toLocaleString()} byte 초과` : ''}
                 </span>
-              </div>
-              <div className="emr-gauge-bar">
-                <div className={`emr-gauge-fill emr-gauge-fill-${emrStatus}`} style={{ width: `${Math.min(100, emrPct)}%` }} />
-              </div>
+              </span>
             </div>
-          )}
+            <div className="emr-gauge-bar">
+              <div className={`emr-gauge-fill emr-gauge-fill-${gauge.status}`} style={{ width: `${Math.min(100, gauge.pct)}%` }} />
+            </div>
+          </div>
 
           <div className="report-preview-toolbar">
-            <span className="report-preview-label">{previewTab === 'report' ? '통합 리포트 초안' : 'EMR 종합소견'}</span>
+            <span className="report-preview-label">{previewLabel}</span>
             <span className="report-preview-hint">상병 {diagnoses.length}건 기준 자동 생성</span>
           </div>
-          <div className="preview-section">{previewTab === 'report' ? previewText : emrText}</div>
+          <div className="preview-section">{emrText}</div>
         </div>
       </div>
     </div>

@@ -113,3 +113,52 @@ describe('AssessmentGroupView — 그룹 수정 모달 초기값 (finding #3)', 
     expect(selects[1].value).toBe('');
   });
 });
+
+describe('AssessmentGroupView — 구성원 기본 펼침 상태', () => {
+  it('그룹 카드는 별도 클릭 없이 구성원이 기본으로 펼쳐져 있고, 접기 버튼을 누르면 숨겨진다', async () => {
+    const user = userEvent.setup();
+    const diag = makeDiag({ ...KNEE, side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' });
+    render(
+      <AssessmentGroupView
+        diagnoses={[diag]}
+        activeModules={['knee']}
+        onDiagnosesReplace={vi.fn()}
+        onJumpToDiagnosis={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: '▴ 구성원 접기' })).toBeTruthy();
+    expect(screen.getByText('무릎 관절증')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '▴ 구성원 접기' }));
+    expect(screen.getByRole('button', { name: '▾ 구성원 펼치기' })).toBeTruthy();
+    expect(screen.queryByText('무릎 관절증')).toBeNull();
+  });
+});
+
+describe('AssessmentGroupView — 낮음 사유가 다른 그룹의 제목 구분', () => {
+  it('낮음 사유만 다른 두 그룹은 제목 뒤에 "낮음 사유 1" / "낮음 사유 2"가 붙어 구분된다', () => {
+    const diagnoses = [
+      makeDiag({
+        id: 'd1', ...KNEE, side: 'right',
+        confirmedRight: 'confirmed', assessmentRight: 'low', reasonRight: ['lowBurden'],
+      }),
+      makeDiag({
+        id: 'd2', ...KNEE, side: 'left',
+        confirmedLeft: 'confirmed', assessmentLeft: 'low', reasonLeft: ['ageMild'],
+      }),
+    ];
+    render(
+      <AssessmentGroupView
+        diagnoses={diagnoses}
+        activeModules={['knee']}
+        onDiagnosesReplace={vi.fn()}
+        onJumpToDiagnosis={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/상병 확인 · 업무관련성 낮음 · 낮음 사유 1/)).toBeTruthy();
+    expect(screen.getByText(/상병 확인 · 업무관련성 낮음 · 낮음 사유 2/)).toBeTruthy();
+    expect(screen.getAllByText(/낮음 사유 상세:/).length).toBe(2);
+  });
+});
