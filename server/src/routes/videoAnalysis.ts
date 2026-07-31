@@ -15,6 +15,13 @@ import { validateAppliedRecipes } from '../workers/recipeValidation';
 import type { RequestHandler as ExpressRequestHandler } from 'express';
 import fs from 'fs';
 import crypto from 'crypto';
+import { checkLockForWrite } from '../db/patientLocks';
+import type { QueryRunner } from '../db/patientPersons';
+
+function getLockTokenHeader(req: Request): string | null {
+  const v = req.headers['x-lock-token'];
+  return typeof v === 'string' && v ? v : null;
+}
 
 // ---------------------------------------------------------------------------
 // 작업 영상 인간공학 분석 — clip/job 라이프사이클 + apply(영속화) API (6.0-4, mock).
@@ -854,6 +861,30 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
       res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
       return;
     }
+
+    // 환자 단위 TTL lease lock 게이트 — patchPatient와 동일한 If-Match 계약을 쓰므로 동일하게
+    // 보호한다. 멱등 replay(②)는 이 체크보다 앞서 이미 처리·반환됐으므로, 안전한 네트워크
+    // 재시도가 이 게이트 때문에 불필요하게 423을 받는 일은 없다.
+    if (config.lockEnforcementMode !== 'off') {
+      const lockCheck = await checkLockForWrite(client as unknown as QueryRunner, {
+        patientId: job.patient_record_id, orgId: session.organizationId, leaseToken: getLockTokenHeader(req),
+      });
+      if (!lockCheck.ok) {
+        if (config.lockEnforcementMode === 'enforce') {
+          await client.query('ROLLBACK');
+          res.status(423).json({
+            code: 'LOCK_NOT_HELD',
+            error: `Currently being edited by ${lockCheck.heldBy.holderName}`,
+            holder: { holderName: lockCheck.heldBy.holderName, acquiredAt: lockCheck.heldBy.acquiredAt.toISOString(), expiresAt: lockCheck.heldBy.expiresAt.toISOString() },
+          });
+          return;
+        }
+        console.warn('[patient-lock] observe-mode: video-analysis apply would have been blocked', {
+          patientId: job.patient_record_id, holderName: lockCheck.heldBy.holderName,
+        });
+      }
+    }
+
     if (pats[0].revision !== expectedRevision) {
       await client.query('ROLLBACK');
       res.status(409).json({ code: 'CONFLICT', error: 'Revision mismatch. Fetch the latest version before retrying.', currentRevision: pats[0].revision });
