@@ -28,7 +28,9 @@ import {
   deleteLockForPatient,
   checkLockForWrite,
   lockPatientAnchor,
+  assertAssignedOrAdmin,
   PatientLockTargetNotFoundError,
+  PatientLockForbiddenError,
   LOCK_TTL_MS,
   type LockRow,
 } from '../db/patientLocks';
@@ -161,8 +163,9 @@ function lockHeldResponse(lock: LockRow): { code: string; error: string; holder:
 
 // patchPatient/deletePatient/assignPatient의 쓰기 게이트. 호출 전 lockPatientAnchor()로
 // 앵커(FOR UPDATE)를 이미 잡아둔 상태여야 한다.
-// off: 항상 통과(구버전 배포 호환). observe: 평가·로그만, 절대 막지 않음. enforce: 실제 차단.
+// off: 항상 통과(구버전 배포 호환). observe: 평가·감사로그만, 절대 막지 않음. enforce: 실제 차단.
 async function evaluateLockGate(
+  pool: Pool,
   client: QueryRunner,
   req: Request,
   patientId: string,
@@ -174,16 +177,22 @@ async function evaluateLockGate(
   const result = await checkLockForWrite(client, { patientId, orgId, leaseToken });
   if (result.ok) return null;
 
+  const session = req.sessionInfo!;
   if (config.lockEnforcementMode === 'observe') {
-    console.warn('[patient-lock] observe-mode: write would have been blocked', {
-      patientId, holderName: result.heldBy.holderName,
+    // observe 모드는 console.warn이 아니라 감사 로그로 남긴다 — 운영에서 통계·추적 가능해야
+    // "관찰"이 의미가 있다. 절대 요청을 막지 않는다(계속 진행).
+    void writeAuditLog(pool, {
+      actorUserId: session.userId, actorOrgId: orgId, action: 'patient_lock_observed_block',
+      targetType: 'patient', targetId: patientId, outcome: 'success',
+      ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null,
+      extra: { holderName: result.heldBy.holderName },
     });
     return null;
   }
 
   return {
     status: 423,
-    body: { code: 'LOCK_NOT_HELD', error: `Currently being edited by ${result.heldBy.holderName}`, holder: lockHolderResponse(result.heldBy) },
+    body: { code: 'LOCK_HELD', error: `Currently being edited by ${result.heldBy.holderName}`, holder: lockHolderResponse(result.heldBy) },
   };
 }
 
@@ -672,6 +681,11 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
       return;
     }
 
+    // assignedDoctorOrAdmin 미들웨어는 이 트랜잭션 밖에서(그리고 FOR UPDATE 없이) 담당의를
+    // 확인했다 — 그 확인과 지금 사이에 관리자가 다른 의사로 재배정했을 수 있으므로, 앵커를
+    // 이미 쥔 이 시점에 최신 담당의로 다시 확인한다(최종 권한 방어선).
+    assertAssignedOrAdmin({ id: current[0].id, assignedDoctorUserId: current[0].assigned_doctor_user_id }, session);
+
     if (current[0].revision !== expectedRevision) {
       await client.query('ROLLBACK');
       res.status(409).json({
@@ -682,7 +696,7 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
       return;
     }
 
-    const lockBlock = await evaluateLockGate(client as QueryRunner, req, id, orgId);
+    const lockBlock = await evaluateLockGate(pool, client as QueryRunner, req, id, orgId);
     if (lockBlock) {
       await client.query('ROLLBACK');
       res.status(lockBlock.status).json(lockBlock.body);
@@ -751,6 +765,10 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
     res.status(200).json(toResponse(updated[0], warnings));
   } catch (err: unknown) {
     await client.query('ROLLBACK').catch(() => {});
+    if (err instanceof PatientLockForbiddenError) {
+      res.status(403).json({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
+      return;
+    }
     if (err instanceof PatientIdentityConflictError) {
       res.status(409).json(identityConflictResponse());
       return;
@@ -797,18 +815,21 @@ async function deletePatient(pool: Pool, req: Request, res: Response): Promise<v
   try {
     await client.query('BEGIN');
 
-    // off 모드에서는 기존 동작과 완전히 동일(추가 쿼리 없음) — 앵커·게이트 모두 건너뛴다.
-    // observe/enforce에서만 앵커(FOR UPDATE)를 잡는다(존재하지 않거나 이미 삭제된 환자면
-    // 여기서 던진다 — catch에서 404 처리. off일 때는 아래 기존 UPDATE...WHERE 로직이
-    // 그대로 not-found/revision-mismatch를 판정한다).
-    if (config.lockEnforcementMode !== 'off') {
-      await lockPatientAnchor(client as QueryRunner, { patientId: id, orgId });
-      const lockBlock = await evaluateLockGate(client as QueryRunner, req, id, orgId);
-      if (lockBlock) {
-        await client.query('ROLLBACK');
-        res.status(lockBlock.status).json(lockBlock.body);
-        return;
-      }
+    // 앵커(FOR UPDATE)는 락 기능(off/observe/enforce)과 무관하게 항상 잡는다 — 이유는 두 가지:
+    // (1) assignedDoctorOrAdmin 미들웨어는 이 트랜잭션 밖에서(FOR UPDATE 없이) 담당의를
+    //     확인했으므로, 그 확인과 지금 사이에 재배정된 최신 담당의를 여기서 재확인해야
+    //     한다(TOCTOU, 락 기능 on/off와 무관한 일반 권한 방어선). 존재하지 않거나 이미
+    //     삭제된 환자면 여기서 던진다(catch에서 404 처리).
+    // (2) 락 기능이 켜져 있을 때는 이 행 락이 곧 patient_locks 검사의 직렬화 지점이다.
+    const anchor = await lockPatientAnchor(client as QueryRunner, { patientId: id, orgId });
+    assertAssignedOrAdmin(anchor, session);
+
+    // 락 기능 자체(patient_locks 검사)는 lockEnforcementMode가 off면 내부적으로 즉시 통과한다.
+    const lockBlock = await evaluateLockGate(pool, client as QueryRunner, req, id, orgId);
+    if (lockBlock) {
+      await client.query('ROLLBACK');
+      res.status(lockBlock.status).json(lockBlock.body);
+      return;
     }
 
     const result = await client.query(
@@ -872,6 +893,10 @@ async function deletePatient(pool: Pool, req: Request, res: Response): Promise<v
     await client.query('ROLLBACK').catch(() => {});
     if (err instanceof PatientLockTargetNotFoundError) {
       res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
+      return;
+    }
+    if (err instanceof PatientLockForbiddenError) {
+      res.status(403).json({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
       return;
     }
     throw err;
@@ -942,8 +967,11 @@ async function assignPatient(pool: Pool, req: Request, res: Response): Promise<v
       const lockCheck = await checkLockForWrite(client as QueryRunner, { patientId: id, orgId, leaseToken: null });
       if (!lockCheck.ok) {
         if (config.lockEnforcementMode === 'observe') {
-          console.warn('[patient-lock] observe-mode: assignment would have been blocked', {
-            patientId: id, holderName: lockCheck.heldBy.holderName,
+          void writeAuditLog(pool, {
+            actorUserId: session.userId, actorOrgId: orgId, action: 'patient_lock_observed_block',
+            targetType: 'patient', targetId: id, outcome: 'success',
+            ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null,
+            extra: { holderName: lockCheck.heldBy.holderName, context: 'assignment' },
           });
         } else if (!force) {
           await client.query('ROLLBACK');
@@ -1045,7 +1073,9 @@ async function acquireOrRenewPatientLock(pool: Pool, req: Request, res: Response
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await lockPatientAnchor(client as QueryRunner, { patientId: id, orgId });
+    const anchor = await lockPatientAnchor(client as QueryRunner, { patientId: id, orgId });
+    // assignedDoctorOrAdmin 미들웨어의 확인과 이 시점 사이에 재배정됐을 수 있으므로 재확인.
+    assertAssignedOrAdmin(anchor, session);
 
     // renew: 토큰이 제출됐고 force가 아니면 renew 경로. 토큰을 절대 회전시키지 않는다.
     if (presentedToken && !force) {
@@ -1069,6 +1099,9 @@ async function acquireOrRenewPatientLock(pool: Pool, req: Request, res: Response
     const { clientInstanceId } = parse.data;
 
     if (force) {
+      // 감사 로그에는 "누구를 밀어냈는지"가 의미 있는 정보다 — forceLock은 무조건 덮어써서
+      // 이전 보유자를 반환하지 않으므로, 덮어쓰기 전에 peekLock으로 먼저 조회해둔다.
+      const previousHolder = await peekLock(client as QueryRunner, { patientId: id, orgId });
       const { leaseToken, lock } = await forceLock(client as QueryRunner, {
         patientId: id, orgId, userId: session.userId, holderName: session.name, clientInstanceId,
       });
@@ -1077,7 +1110,7 @@ async function acquireOrRenewPatientLock(pool: Pool, req: Request, res: Response
         actorUserId: session.userId, actorOrgId: orgId, action: 'patient_lock_takeover',
         targetType: 'patient', targetId: id, outcome: 'success',
         ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null,
-        extra: { holderName: lock.holderName },
+        extra: { previousHolderName: previousHolder?.holderName ?? null, newHolderName: lock.holderName },
       });
       res.status(200).json({ leaseToken, expiresAt: lock.expiresAt.toISOString(), ttlMs: LOCK_TTL_MS });
       return;
@@ -1103,6 +1136,10 @@ async function acquireOrRenewPatientLock(pool: Pool, req: Request, res: Response
     await client.query('ROLLBACK').catch(() => {});
     if (err instanceof PatientLockTargetNotFoundError) {
       res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
+      return;
+    }
+    if (err instanceof PatientLockForbiddenError) {
+      res.status(403).json({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
       return;
     }
     throw err;

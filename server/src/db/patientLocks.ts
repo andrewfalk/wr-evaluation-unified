@@ -51,15 +51,43 @@ export class PatientLockTargetNotFoundError extends Error {
   }
 }
 
+// assignedDoctorOrAdmin 미들웨어는 핸들러 트랜잭션 "밖"에서 담당의를 확인하므로, 미들웨어
+// 통과와 앵커 획득 사이에 담당의가 재배정되면(TOCTOU) 낡은 권한으로 쓰기가 진행될 수 있다.
+// 이 에러는 앵커를 잡은 트랜잭션 "안"에서 담당의를 재확인(assertAssignedOrAdmin)할 때 던져진다
+// — 미들웨어는 빠른 거절용이고, 이 재확인이 최종 권한 방어선이다.
+export class PatientLockForbiddenError extends Error {
+  constructor() {
+    super('Only the assigned doctor can modify this patient');
+    this.name = 'PatientLockForbiddenError';
+  }
+}
+
+export interface PatientAnchor {
+  id: string;
+  assignedDoctorUserId: string | null;
+}
+
 export async function lockPatientAnchor(
   runner: QueryRunner,
   { patientId, orgId }: { patientId: string; orgId: string }
-): Promise<void> {
-  const { rows } = await runner.query(
-    `SELECT id FROM patient_records WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE`,
+): Promise<PatientAnchor> {
+  const { rows } = await runner.query<{ id: string; assigned_doctor_user_id: string | null }>(
+    `SELECT id, assigned_doctor_user_id FROM patient_records
+     WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE`,
     [patientId, orgId]
   );
   if (rows.length === 0) throw new PatientLockTargetNotFoundError();
+  return { id: rows[0].id, assignedDoctorUserId: rows[0].assigned_doctor_user_id };
+}
+
+// 앵커로 patient_records를 잠근 "이후"에 담당의를 재확인한다 — 미들웨어 통과 시점과 지금
+// 사이에 재배정이 끼어들었으면 여기서 걸러진다. admin은 항상 통과.
+export function assertAssignedOrAdmin(
+  anchor: PatientAnchor,
+  session: { role: string; userId: string }
+): void {
+  if (session.role === 'admin') return;
+  if (anchor.assignedDoctorUserId !== session.userId) throw new PatientLockForbiddenError();
 }
 
 // 최초 획득 또는 "같은 탭의 재획득"(client_instance_id + user_id + organization_id 자기매칭,
@@ -84,16 +112,22 @@ export async function acquireLock(
            client_instance_id = EXCLUDED.client_instance_id,
            user_id = EXCLUDED.user_id,
            holder_name = EXCLUDED.holder_name,
-           acquired_at = now(),
+           acquired_at = clock_timestamp(),
            expires_at = EXCLUDED.expires_at,
-           updated_at = now()
-     WHERE patient_locks.expires_at <= now()
+           updated_at = clock_timestamp()
+     WHERE patient_locks.expires_at <= clock_timestamp()
         OR (patient_locks.client_instance_id = EXCLUDED.client_instance_id
             AND patient_locks.user_id = EXCLUDED.user_id
             AND patient_locks.organization_id = EXCLUDED.organization_id)
      RETURNING *`,
     [patientId, leaseTokenHash, clientInstanceId, userId, orgId, holderName, expiresAt]
   );
+  // clock_timestamp()를 쓰는 이유: PostgreSQL의 now()는 트랜잭션 시작 시각에 고정된다.
+  // 이 함수는 항상 lockPatientAnchor()의 FOR UPDATE 이후에 호출되는데, 그 FOR UPDATE가
+  // 다른 트랜잭션 때문에 오래 대기했다면 같은 트랜잭션의 now()는 실제보다 과거를 가리켜
+  // 이미 만료된 락을 살아있다고 오판할 수 있다(실측: BEGIN 후 pg_sleep(2)해도 now()는
+  // 그대로, clock_timestamp()만 실제 시각 반영). clock_timestamp()는 호출 시점의 실제
+  // 벽시계 시각을 반환하므로 이 문제가 없다.
 
   if (rows.length > 0) {
     return { ok: true, leaseToken, lock: mapRow(rows[0]) };
@@ -118,8 +152,8 @@ export async function renewLock(
 
   const { rows } = await runner.query<{ expires_at: Date }>(
     `UPDATE patient_locks
-     SET expires_at = $1, updated_at = now()
-     WHERE patient_id = $2 AND organization_id = $3 AND lease_token_hash = $4 AND expires_at > now()
+     SET expires_at = $1, updated_at = clock_timestamp()
+     WHERE patient_id = $2 AND organization_id = $3 AND lease_token_hash = $4 AND expires_at > clock_timestamp()
      RETURNING expires_at`,
     [expiresAt, patientId, orgId, leaseTokenHash]
   );
@@ -148,9 +182,9 @@ export async function forceLock(
            client_instance_id = EXCLUDED.client_instance_id,
            user_id = EXCLUDED.user_id,
            holder_name = EXCLUDED.holder_name,
-           acquired_at = now(),
+           acquired_at = clock_timestamp(),
            expires_at = EXCLUDED.expires_at,
-           updated_at = now()
+           updated_at = clock_timestamp()
      RETURNING *`,
     [patientId, leaseTokenHash, clientInstanceId, userId, orgId, holderName, expiresAt]
   );
@@ -158,7 +192,7 @@ export async function forceLock(
   return { leaseToken, lock: mapRow(rows[0]) };
 }
 
-// 조회 전용, 부작용 없음. 살아있는(expires_at > now()) 락이 없으면 null.
+// 조회 전용, 부작용 없음. 살아있는(expires_at > clock_timestamp()) 락이 없으면 null.
 export async function peekLock(
   runner: QueryRunner,
   params: { patientId: string; orgId: string }
@@ -166,7 +200,7 @@ export async function peekLock(
   const { rows } = await runner.query<PatientLockDbRow>(
     `SELECT patient_id, client_instance_id, user_id, holder_name, acquired_at, expires_at
      FROM patient_locks
-     WHERE patient_id = $1 AND organization_id = $2 AND expires_at > now()`,
+     WHERE patient_id = $1 AND organization_id = $2 AND expires_at > clock_timestamp()`,
     [params.patientId, params.orgId]
   );
   return rows.length > 0 ? mapRow(rows[0]) : null;
@@ -210,7 +244,7 @@ export async function checkLockForWrite(
   const { rows } = await runner.query<PatientLockDbRow>(
     `SELECT patient_id, client_instance_id, user_id, holder_name, acquired_at, expires_at, lease_token_hash
      FROM patient_locks
-     WHERE patient_id = $1 AND organization_id = $2 AND expires_at > now()`,
+     WHERE patient_id = $1 AND organization_id = $2 AND expires_at > clock_timestamp()`,
     [params.patientId, params.orgId]
   );
   if (rows.length === 0) return { ok: true }; // 락 없음 — opt-in, 통과

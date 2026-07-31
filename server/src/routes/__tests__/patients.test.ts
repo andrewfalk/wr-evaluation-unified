@@ -999,6 +999,7 @@ describe('DELETE /api/patients/:id', () => {
     const pool = makePool();
     makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] },                                                    // BEGIN
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },    // lockPatientAnchor
       { rows: [], rowCount: 0 },                                       // UPDATE patient (no match)
       { rows: [{ revision: 3, deleted_at: null }] },                   // SELECT → rev 3
       { rows: [] },                                                    // ROLLBACK
@@ -1015,7 +1016,8 @@ describe('DELETE /api/patients/:id', () => {
   it('returns 204 and redacts snapshot on successful soft-delete', async () => {
     const pool = makePool();
     const cq = makeClientSetup(pool, { withAccessCheck: {} },
-      { rows: [] },                           // BEGIN
+      { rows: [] },                                                    // BEGIN
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },    // lockPatientAnchor
       { rows: [], rowCount: 1 },              // UPDATE patient (soft-delete succeeds)
       { rows: [] },                           // UPDATE workspaces (snapshot redaction)
       { rows: [] },                           // DELETE patient_locks (cleanup)
@@ -1046,7 +1048,8 @@ describe('DELETE /api/patients/:id', () => {
   it('issues soft-delete UPDATE with correct id, org, and revision', async () => {
     const pool = makePool();
     const cq = makeClientSetup(pool, { withAccessCheck: {} },
-      { rows: [] },                           // BEGIN
+      { rows: [] },                                                    // BEGIN
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },    // lockPatientAnchor
       { rows: [], rowCount: 1 },              // UPDATE patient
       { rows: [] },                           // UPDATE workspaces
       { rows: [] },                           // DELETE patient_locks (cleanup)
@@ -1169,7 +1172,9 @@ describe('DELETE /api/patients/:id — 권한 정책', () => {
   it('담당 의사면 204', async () => {
     const pool = makePool();
     makeClientSetup(pool, { withAccessCheck: { assigned: USER_ID } },
-      { rows: [] }, { rows: [], rowCount: 1 }, { rows: [] }, { rows: [] }, { rows: [] },
+      { rows: [] },
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] }, // lockPatientAnchor
+      { rows: [], rowCount: 1 }, { rows: [] }, { rows: [] }, { rows: [] },
     );
     const res = await request(makeApp(pool))
       .delete(`/api/patients/${PAT_ID}?revision=1`)
@@ -1192,7 +1197,9 @@ describe('DELETE /api/patients/:id — 권한 정책', () => {
   it('admin이면 204, 미들웨어가 DB 조회 없이 통과', async () => {
     const pool = makePool();
     makeClientSetup(pool,
-      { rows: [] }, { rows: [], rowCount: 1 }, { rows: [] }, { rows: [] }, { rows: [] },
+      { rows: [] },
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: DOCTOR_ID }] }, // lockPatientAnchor — admin은 담당의 무관 통과
+      { rows: [], rowCount: 1 }, { rows: [] }, { rows: [] }, { rows: [] },
     );
     const res = await request(makeApp(pool))
       .delete(`/api/patients/${PAT_ID}?revision=1`)
@@ -1206,8 +1213,7 @@ describe('DELETE /api/patients/:id — 권한 정책', () => {
     const pool = makePool();
     makeClientSetup(pool,
       { rows: [] },                  // BEGIN
-      { rows: [], rowCount: 0 },     // UPDATE patient no match
-      { rows: [] },                  // SELECT empty (다른 org)
+      { rows: [] },                  // lockPatientAnchor — 다른 org라 못 찾음(PatientLockTargetNotFoundError)
       { rows: [] },                  // ROLLBACK
     );
     const res = await request(makeApp(pool))
@@ -1498,7 +1504,7 @@ describe('POST /api/patients/:id/lock', () => {
     const pool = makePool();
     makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] },          // BEGIN
-      { rows: [{ id: PAT_ID }] }, // anchor
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] }, // anchor
       { rows: [LOCK_ROW] },  // acquireLock INSERT...RETURNING
       { rows: [] },          // COMMIT
     );
@@ -1519,7 +1525,7 @@ describe('POST /api/patients/:id/lock', () => {
     const pool = makePool();
     makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] },              // BEGIN
-      { rows: [{ id: PAT_ID }] }, // anchor
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] }, // anchor
       { rows: [] },              // acquireLock UPSERT — WHERE 불만족(다른 세션이 보유)
       { rows: [LOCK_ROW] },      // peekLock (heldBy 조회)
       { rows: [] },              // ROLLBACK
@@ -1539,7 +1545,7 @@ describe('POST /api/patients/:id/lock', () => {
     const pool = makePool();
     makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] },                              // BEGIN
-      { rows: [{ id: PAT_ID }] },                // anchor
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },                // anchor
       { rows: [{ expires_at: LATER }] },         // renewLock UPDATE...RETURNING
       { rows: [] },                              // COMMIT
     );
@@ -1558,7 +1564,7 @@ describe('POST /api/patients/:id/lock', () => {
     const pool = makePool();
     makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] },                // BEGIN
-      { rows: [{ id: PAT_ID }] },  // anchor
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },  // anchor
       { rows: [] },                // renewLock UPDATE — 0 rows
       { rows: [] },                // ROLLBACK
     );
@@ -1576,7 +1582,8 @@ describe('POST /api/patients/:id/lock', () => {
     const pool = makePool();
     makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] },              // BEGIN
-      { rows: [{ id: PAT_ID }] }, // anchor
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] }, // anchor
+      { rows: [LOCK_ROW] },      // peekLock — 감사 로그용 이전 보유자 조회
       { rows: [LOCK_ROW] },      // forceLock INSERT...RETURNING — 항상 성공
       { rows: [] },              // COMMIT
     );
@@ -1587,6 +1594,14 @@ describe('POST /api/patients/:id/lock', () => {
       .send({ clientInstanceId: CLIENT_INSTANCE_ID });
     expect(res.status).toBe(200);
     expect(typeof res.body.leaseToken).toBe('string');
+    // 감사 로그는 새로 획득한 사람이 아니라 "밀려난 이전 보유자"를 기록해야 의미가 있다.
+    expect(writeAuditLog).toHaveBeenCalledWith(
+      pool,
+      expect.objectContaining({
+        action: 'patient_lock_takeover',
+        extra: expect.objectContaining({ previousHolderName: 'Dr. Kim' }),
+      })
+    );
   });
 
   it('환자가 없거나 삭제됐으면 404', async () => {
@@ -1711,7 +1726,7 @@ describe('PATCH /api/patients/:id — 락 게이팅 (lockEnforcementMode=enforce
       .set('if-match', '1')
       .send({ data: VALID_DATA });
     expect(res.status).toBe(423);
-    expect(res.body.code).toBe('LOCK_NOT_HELD');
+    expect(res.body.code).toBe('LOCK_HELD');
     const updateCall = (cq.mock.calls as unknown[][]).find(
       (c) => typeof c[0] === 'string' && (c[0] as string).includes('SET') && (c[0] as string).includes('revision')
     );

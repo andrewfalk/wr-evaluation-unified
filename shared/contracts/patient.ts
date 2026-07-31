@@ -110,6 +110,13 @@ export const PatientLockInfoSchema = z.object({
   expiresAt: z.string(),
 }).nullable();
 
+// GET /api/patients/:id/lock의 실제 응답 envelope은 { lock: PatientLockInfo|null } —
+// PatientLockInfoSchema 자체는 그 안쪽(lock 값)만 모델링하므로, 응답 전체를 검증/타입화할
+// 때는 이 래핑된 스키마를 사용한다.
+export const PatientLockResponseSchema = z.object({
+  lock: PatientLockInfoSchema,
+});
+
 export type Diagnosis = z.infer<typeof DiagnosisSchema>;
 export type SharedJob = z.infer<typeof SharedJobSchema>;
 export type SharedData = z.infer<typeof SharedDataSchema>;
@@ -120,3 +127,4 @@ export type PatientSync = z.infer<typeof PatientSyncSchema>;
 export type PatientMeta = z.infer<typeof PatientMetaSchema>;
 export type Patient = z.infer<typeof PatientSchema>;
 export type PatientLockInfo = z.infer<typeof PatientLockInfoSchema>;
+export type PatientLockResponse = z.infer<typeof PatientLockResponseSchema>;

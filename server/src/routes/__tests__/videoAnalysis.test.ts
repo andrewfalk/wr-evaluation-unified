@@ -484,7 +484,7 @@ describe('POST /jobs/:jobId/apply', () => {
   });
   const patRow = (revision: number) => ({
     id: PAT_ID, revision, payload: { phase: 'evaluation', data: { shared: { name: 'Kim' }, modules: {}, activeModules: [] } },
-    created_at: NOW, updated_at: NOW,
+    created_at: NOW, updated_at: NOW, assigned_doctor_user_id: USER_ID,
   });
   // recipe 검증 게이트(6.0-9): 서버 상수와 일치해야 통과. map/vp는 실제 shared/contracts 값.
   const RECIPE = {
@@ -588,7 +588,7 @@ describe('POST /jobs/:jobId/apply', () => {
         .set('If-Match', '1')
         .send(body);
       expect(res.status).toBe(423);
-      expect(res.body.code).toBe('LOCK_NOT_HELD');
+      expect(res.body.code).toBe('LOCK_HELD');
       const updateCall = cq.mock.calls.find((c) => String(c[0]).includes('UPDATE patient_records'));
       expect(updateCall).toBeUndefined();
     });

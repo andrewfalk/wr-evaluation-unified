@@ -8,7 +8,9 @@ import {
   deleteLockForPatient,
   checkLockForWrite,
   lockPatientAnchor,
+  assertAssignedOrAdmin,
   PatientLockTargetNotFoundError,
+  PatientLockForbiddenError,
 } from '../patientLocks';
 import type { QueryRunner } from '../patientPersons';
 
@@ -35,9 +37,10 @@ function makeRunner(...results: { rows: unknown[] }[]): QueryRunner & { query: R
 }
 
 describe('lockPatientAnchor', () => {
-  it('환자가 존재하면 통과(반환값 없음)', async () => {
-    const runner = makeRunner({ rows: [{ id: PATIENT_ID }] });
-    await expect(lockPatientAnchor(runner, { patientId: PATIENT_ID, orgId: ORG_ID })).resolves.toBeUndefined();
+  it('환자가 존재하면 id와 담당의를 반환한다(TOCTOU 재검증용)', async () => {
+    const runner = makeRunner({ rows: [{ id: PATIENT_ID, assigned_doctor_user_id: USER_ID }] });
+    await expect(lockPatientAnchor(runner, { patientId: PATIENT_ID, orgId: ORG_ID }))
+      .resolves.toEqual({ id: PATIENT_ID, assignedDoctorUserId: USER_ID });
     expect(runner.query.mock.calls[0][0]).toMatch(/FOR UPDATE/);
   });
 
@@ -45,6 +48,29 @@ describe('lockPatientAnchor', () => {
     const runner = makeRunner({ rows: [] });
     await expect(lockPatientAnchor(runner, { patientId: PATIENT_ID, orgId: ORG_ID }))
       .rejects.toBeInstanceOf(PatientLockTargetNotFoundError);
+  });
+});
+
+describe('assertAssignedOrAdmin — TOCTOU 재검증 (2라운드 외부 리뷰 반영)', () => {
+  const anchor = { id: PATIENT_ID, assignedDoctorUserId: USER_ID };
+
+  it('담당의 본인이면 통과', () => {
+    expect(() => assertAssignedOrAdmin(anchor, { role: 'doctor', userId: USER_ID })).not.toThrow();
+  });
+
+  it('admin이면 담당의 일치 여부와 무관하게 통과', () => {
+    expect(() => assertAssignedOrAdmin(anchor, { role: 'admin', userId: 'someone-else' })).not.toThrow();
+  });
+
+  it('담당의가 아니면(재배정 등) PatientLockForbiddenError', () => {
+    expect(() => assertAssignedOrAdmin(anchor, { role: 'doctor', userId: 'other-doctor' }))
+      .toThrow(PatientLockForbiddenError);
+  });
+
+  it('미배정(assignedDoctorUserId=null)이면 admin 외 누구도 통과 못 함', () => {
+    const unassigned = { id: PATIENT_ID, assignedDoctorUserId: null };
+    expect(() => assertAssignedOrAdmin(unassigned, { role: 'doctor', userId: USER_ID }))
+      .toThrow(PatientLockForbiddenError);
   });
 });
 

@@ -11,7 +11,7 @@
 // 전부 삭제한다 — 기존 dev DB의 다른 데이터를 절대 건드리지 않는다.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Pool } from 'pg';
-import { acquireLock, forceLock, lockPatientAnchor, peekLock } from '../patientLocks';
+import { acquireLock, forceLock, renewLock, lockPatientAnchor, peekLock } from '../patientLocks';
 import type { QueryRunner } from '../patientPersons';
 
 const TEST_DB_URL = process.env.TEST_DATABASE_URL;
@@ -117,18 +117,20 @@ describe.skipIf(!TEST_DB_URL)('patientLocks — 실제 동시 DB 커넥션 (inte
       const forced = await forceLock(clientA as unknown as QueryRunner, {
         patientId, orgId, userId, holderName: 'Serializer A', clientInstanceId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       });
-      expect(forced.lock.holderName).toBe('Serializer A');
       aCommitted = true;
-      await clientA.query('COMMIT');
+      await clientA.query('COMMIT'); // 단언보다 먼저 — 실패해도 트랜잭션이 열린 채 release되지 않도록
 
       const bSawCommittedFirst = await bPromise;
-      expect(bSawCommittedFirst).toBe(true);
-
       // B가 앵커를 잡은 뒤 보는 patient_locks 상태는 A가 커밋한 최신 상태여야 한다.
       const seenByB = await peekLock(clientB as unknown as QueryRunner, { patientId, orgId });
-      expect(seenByB?.holderName).toBe('Serializer A');
+      await clientB.query('ROLLBACK'); // 역시 단언보다 먼저
 
-      await clientB.query('ROLLBACK');
+      // 모든 트랜잭션이 안전하게 닫힌 뒤에만 단언한다 — assert가 여기보다 앞에서 실패하면
+      // 트랜잭션이 열린 채로 client.release()가 호출돼 커넥션이 풀에 반납되고, 이후 그
+      // 커넥션을 재사용하는 다른 쿼리(cleanup 포함)가 조용히 묻힐 수 있다.
+      expect(forced.lock.holderName).toBe('Serializer A');
+      expect(bSawCommittedFirst).toBe(true);
+      expect(seenByB?.holderName).toBe('Serializer A');
     } finally {
       clientA.release();
       clientB.release();
@@ -155,17 +157,75 @@ describe.skipIf(!TEST_DB_URL)('patientLocks — 실제 동시 DB 커넥션 (inte
       await pool.query(`UPDATE patient_locks SET expires_at = now() - interval '1 second' WHERE patient_id = $1`, [patientId]);
 
       const client2 = await pool.connect();
+      let resultOk = false;
       try {
         await client2.query('BEGIN');
         await lockPatientAnchor(client2 as unknown as QueryRunner, { patientId, orgId });
         const result = await acquireLock(client2 as unknown as QueryRunner, {
           patientId, orgId, userId, holderName: 'New Holder', clientInstanceId: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
         });
-        expect(result.ok).toBe(true);
-        await client2.query(result.ok ? 'COMMIT' : 'ROLLBACK');
+        resultOk = result.ok;
+        await client2.query(result.ok ? 'COMMIT' : 'ROLLBACK'); // 단언보다 먼저
       } finally {
         client2.release();
       }
+      expect(resultOk).toBe(true);
+    } finally {
+      await pool.query('DELETE FROM patient_records WHERE id = $1', [patientId]);
+    }
+  });
+
+  it('TTL 판정은 트랜잭션 시작 시각이 아니라 실제 벽시계 시각 기준이다(clock_timestamp 회귀)', async () => {
+    // PostgreSQL now()는 트랜잭션 시작 시각에 고정된다 — BEGIN 후 오래 대기(예: FOR UPDATE
+    // 앵커 경합)한 트랜잭션이 now()로 TTL을 판정하면, 실제로는 이미 만료된 락을 살아있다고
+    // 오판할 수 있다. 이 테스트는 pg_sleep으로 그 지연을 흉내 내 clock_timestamp()가 실제로
+    // 쓰이고 있는지 증명한다 — now()로 되돌리면 이 테스트는 실패해야 한다.
+    const patientId = await createTestPatient('Race Patient — clock_timestamp regression');
+    try {
+      const client1 = await pool.connect();
+      let leaseToken = '';
+      let acquiredOk = false;
+      try {
+        await client1.query('BEGIN');
+        await lockPatientAnchor(client1 as unknown as QueryRunner, { patientId, orgId });
+        const acquired = await acquireLock(client1 as unknown as QueryRunner, {
+          patientId, orgId, userId, holderName: 'Clock Test Holder', clientInstanceId: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+        });
+        acquiredOk = acquired.ok;
+        if (acquired.ok) leaseToken = acquired.leaseToken;
+        // 트랜잭션을 먼저 확실히 끝낸 뒤에 단언한다 — 단언이 여기서 먼저 실행되고 실패하면
+        // COMMIT 없이 client.release()가 호출되어 트랜잭션이 열린 채로 커넥션이 풀에
+        // 반납되고, 이후 pool.query()가 그 커넥션을 재사용할 때 DELETE 등이 커밋되지 않는
+        // 채로 조용히 묻혀버릴 수 있다(이번에 실제로 겪은 fixture 잔존 원인).
+        await client1.query('COMMIT');
+      } finally {
+        client1.release();
+      }
+      expect(acquiredOk).toBe(true);
+
+      // 실제 만료 임박 상황을 만든다: 지금부터 500ms 후 만료.
+      await pool.query(
+        `UPDATE patient_locks SET expires_at = clock_timestamp() + interval '500 milliseconds' WHERE patient_id = $1`,
+        [patientId]
+      );
+
+      const client2 = await pool.connect();
+      let renewedOk = true;
+      try {
+        await client2.query('BEGIN');
+        // "FOR UPDATE 앵커 대기가 길었다"를 흉내 — 이 트랜잭션의 now()는 지금(만료 전)에
+        // 고정되지만, pg_sleep 이후 실제 벽시계는 위에서 설정한 500ms TTL을 이미 넘긴다.
+        await client2.query('SELECT pg_sleep(1)');
+        const renewed = await renewLock(client2 as unknown as QueryRunner, { patientId, orgId, leaseToken });
+        renewedOk = renewed.ok;
+        // 단언보다 먼저 트랜잭션을 확실히 끝낸다(위 client1과 동일한 이유).
+        await client2.query('ROLLBACK');
+      } finally {
+        client2.release();
+      }
+      // clock_timestamp() 기준이므로 이미 만료된 락은 renew가 실패해야 한다.
+      // (now()를 썼다면 트랜잭션 시작 시각 기준 "아직 안 지남"으로 오판해 성공했을 것.)
+      expect(renewedOk).toBe(false);
     } finally {
       await pool.query('DELETE FROM patient_records WHERE id = $1', [patientId]);
     }

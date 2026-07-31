@@ -850,8 +850,8 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
     }
 
     // ③ patient FOR UPDATE + revision(If-Match)
-    const { rows: pats } = await client.query<PatientRowLite>(
-      `SELECT id, revision, payload, created_at, updated_at FROM patient_records
+    const { rows: pats } = await client.query<PatientRowLite & { assigned_doctor_user_id: string | null }>(
+      `SELECT id, revision, payload, created_at, updated_at, assigned_doctor_user_id FROM patient_records
        WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
        FOR UPDATE`,
       [job.patient_record_id, session.organizationId]
@@ -859,6 +859,15 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
     if (pats.length === 0) {
       await client.query('ROLLBACK');
       res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
+      return;
+    }
+
+    // ①의 canAccess는 job+patient를 JOIN한 스냅샷(FOR UPDATE OF j — patient_records는 안 잠금)
+    // 기준이었다 — 그 확인과 지금 사이에 담당의가 재배정됐을 수 있으므로, patient_records를
+    // 실제로 FOR UPDATE로 잠근 이 시점에 다시 확인한다(TOCTOU 최종 방어선).
+    if (!canAccess(session, pats[0].assigned_doctor_user_id)) {
+      await client.query('ROLLBACK');
+      res.status(403).json({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
       return;
     }
 
@@ -873,14 +882,17 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
         if (config.lockEnforcementMode === 'enforce') {
           await client.query('ROLLBACK');
           res.status(423).json({
-            code: 'LOCK_NOT_HELD',
+            code: 'LOCK_HELD',
             error: `Currently being edited by ${lockCheck.heldBy.holderName}`,
             holder: { holderName: lockCheck.heldBy.holderName, acquiredAt: lockCheck.heldBy.acquiredAt.toISOString(), expiresAt: lockCheck.heldBy.expiresAt.toISOString() },
           });
           return;
         }
-        console.warn('[patient-lock] observe-mode: video-analysis apply would have been blocked', {
-          patientId: job.patient_record_id, holderName: lockCheck.heldBy.holderName,
+        void writeAuditLog(pool, {
+          actorUserId: session.userId, actorOrgId: session.organizationId, action: 'patient_lock_observed_block',
+          targetType: 'patient', targetId: job.patient_record_id, outcome: 'success',
+          ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null,
+          extra: { holderName: lockCheck.heldBy.holderName, context: 'video_analysis_apply' },
         });
       }
     }
