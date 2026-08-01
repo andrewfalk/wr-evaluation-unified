@@ -20,6 +20,20 @@ export function calculateAge(b, r) {
   return age;
 }
 
+// 키 순서에 무관하게 안정적인 JSON 문자열 생성 (PostgreSQL JSONB 등은 객체 키 삽입 순서를 보존하지 않으므로,
+// 이 함수 없이 JSON.stringify로 비교하면 값이 같아도 키 순서만 달라져 "변경됨"으로 오판할 수 있음)
+export function stableStringify(value) {
+  return JSON.stringify(value, (_key, val) => {
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      return Object.keys(val).sort().reduce((sorted, k) => {
+        sorted[k] = val[k];
+        return sorted;
+      }, {});
+    }
+    return val;
+  });
+}
+
 // XSS 방지
 export function escapeHtml(str) {
   if (typeof str !== 'string') return str;

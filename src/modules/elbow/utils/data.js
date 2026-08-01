@@ -1,4 +1,5 @@
 import { resolveDiagnosisModule } from '../../../core/utils/diagnosisMapping';
+import { stableStringify } from '../../../core/utils/common';
 
 export const BK_TYPE_OPTIONS = [
   { value: '', label: '선택' },
@@ -81,7 +82,7 @@ export const ELBOW_BRANCH_FIELDS = {
 };
 
 function serialize(value) {
-  return JSON.stringify(value || null);
+  return stableStringify(value || null);
 }
 
 export function createElbowTemporalSequence() {
