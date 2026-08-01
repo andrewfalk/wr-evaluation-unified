@@ -99,6 +99,24 @@ export const PatientSchema = z.object({
   assignedDoctorUserId: z.string().uuid().nullable().optional(),
 });
 
+// GET /api/patients/:id/lock 전용 응답 스키마 — 일시적인 편집 락 상태를 나타낸다.
+// 의도적으로 PatientSchema에는 포함하지 않는다: 여기 넣으면 toResponse()를 통해
+// pull/merge/workspace 스냅샷에 락 상태가 환자 데이터처럼 영속화될 수 있다. 락은 항상
+// 이 별도 엔드포인트로만 조회한다. leaseToken/clientInstanceId/sessionId/userId는
+// 절대 노출하지 않는다(holderName/acquiredAt/expiresAt만).
+export const PatientLockInfoSchema = z.object({
+  holderName: z.string(),
+  acquiredAt: z.string(),
+  expiresAt: z.string(),
+}).nullable();
+
+// GET /api/patients/:id/lock의 실제 응답 envelope은 { lock: PatientLockInfo|null } —
+// PatientLockInfoSchema 자체는 그 안쪽(lock 값)만 모델링하므로, 응답 전체를 검증/타입화할
+// 때는 이 래핑된 스키마를 사용한다.
+export const PatientLockResponseSchema = z.object({
+  lock: PatientLockInfoSchema,
+});
+
 export type Diagnosis = z.infer<typeof DiagnosisSchema>;
 export type SharedJob = z.infer<typeof SharedJobSchema>;
 export type SharedData = z.infer<typeof SharedDataSchema>;
@@ -108,3 +126,5 @@ export type PatientSyncWarning = z.infer<typeof PatientSyncWarningSchema>;
 export type PatientSync = z.infer<typeof PatientSyncSchema>;
 export type PatientMeta = z.infer<typeof PatientMetaSchema>;
 export type Patient = z.infer<typeof PatientSchema>;
+export type PatientLockInfo = z.infer<typeof PatientLockInfoSchema>;
+export type PatientLockResponse = z.infer<typeof PatientLockResponseSchema>;

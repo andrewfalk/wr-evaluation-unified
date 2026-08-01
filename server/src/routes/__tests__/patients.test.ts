@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
@@ -16,6 +16,9 @@ vi.mock('../../config', () => ({
       accessTokenSecret:  'test-access-secret',
       refreshTokenSecret: 'test-refresh-secret',
     },
+    // 'off'가 기본값 — 기존 PATCH/DELETE/assignment 테스트들이 락 게이트 쿼리를 추가로
+    // 목킹하지 않아도 되도록. 락 게이팅 자체를 검증하는 테스트는 이 값을 'enforce'로 덮어쓴다.
+    lockEnforcementMode: 'off',
   },
 }));
 
@@ -27,6 +30,13 @@ vi.mock('../../middleware/audit', () => ({
 import { createPatientsRouter } from '../patients';
 import { generateAccessToken } from '../../auth/tokens';
 import { writeAuditLog } from '../../middleware/audit';
+import config from '../../config';
+
+// 실제 config.ts의 반환 타입은 Object.freeze로 readonly로 추론되지만, 이 목(mock)은 얼려있지
+// 않은 평범한 객체다 — 테스트에서 lockEnforcementMode를 바꿔치기 하기 위한 타입 우회 헬퍼.
+function setLockEnforcementMode(mode: 'off' | 'observe' | 'enforce'): void {
+  (config as unknown as { lockEnforcementMode: string }).lockEnforcementMode = mode;
+}
 import type { Pool } from 'pg';
 
 // ---------------------------------------------------------------------------
@@ -989,6 +999,7 @@ describe('DELETE /api/patients/:id', () => {
     const pool = makePool();
     makeClientSetup(pool, { withAccessCheck: {} },
       { rows: [] },                                                    // BEGIN
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },    // lockPatientAnchor
       { rows: [], rowCount: 0 },                                       // UPDATE patient (no match)
       { rows: [{ revision: 3, deleted_at: null }] },                   // SELECT → rev 3
       { rows: [] },                                                    // ROLLBACK
@@ -1005,9 +1016,11 @@ describe('DELETE /api/patients/:id', () => {
   it('returns 204 and redacts snapshot on successful soft-delete', async () => {
     const pool = makePool();
     const cq = makeClientSetup(pool, { withAccessCheck: {} },
-      { rows: [] },                           // BEGIN
+      { rows: [] },                                                    // BEGIN
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },    // lockPatientAnchor
       { rows: [], rowCount: 1 },              // UPDATE patient (soft-delete succeeds)
       { rows: [] },                           // UPDATE workspaces (snapshot redaction)
+      { rows: [] },                           // DELETE patient_locks (cleanup)
       { rows: [] },                           // COMMIT
     );
 
@@ -1035,9 +1048,11 @@ describe('DELETE /api/patients/:id', () => {
   it('issues soft-delete UPDATE with correct id, org, and revision', async () => {
     const pool = makePool();
     const cq = makeClientSetup(pool, { withAccessCheck: {} },
-      { rows: [] },                           // BEGIN
+      { rows: [] },                                                    // BEGIN
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },    // lockPatientAnchor
       { rows: [], rowCount: 1 },              // UPDATE patient
       { rows: [] },                           // UPDATE workspaces
+      { rows: [] },                           // DELETE patient_locks (cleanup)
       { rows: [] },                           // COMMIT
     );
 
@@ -1157,7 +1172,9 @@ describe('DELETE /api/patients/:id — 권한 정책', () => {
   it('담당 의사면 204', async () => {
     const pool = makePool();
     makeClientSetup(pool, { withAccessCheck: { assigned: USER_ID } },
-      { rows: [] }, { rows: [], rowCount: 1 }, { rows: [] }, { rows: [] },
+      { rows: [] },
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] }, // lockPatientAnchor
+      { rows: [], rowCount: 1 }, { rows: [] }, { rows: [] }, { rows: [] },
     );
     const res = await request(makeApp(pool))
       .delete(`/api/patients/${PAT_ID}?revision=1`)
@@ -1180,7 +1197,9 @@ describe('DELETE /api/patients/:id — 권한 정책', () => {
   it('admin이면 204, 미들웨어가 DB 조회 없이 통과', async () => {
     const pool = makePool();
     makeClientSetup(pool,
-      { rows: [] }, { rows: [], rowCount: 1 }, { rows: [] }, { rows: [] },
+      { rows: [] },
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: DOCTOR_ID }] }, // lockPatientAnchor — admin은 담당의 무관 통과
+      { rows: [], rowCount: 1 }, { rows: [] }, { rows: [] }, { rows: [] },
     );
     const res = await request(makeApp(pool))
       .delete(`/api/patients/${PAT_ID}?revision=1`)
@@ -1194,8 +1213,7 @@ describe('DELETE /api/patients/:id — 권한 정책', () => {
     const pool = makePool();
     makeClientSetup(pool,
       { rows: [] },                  // BEGIN
-      { rows: [], rowCount: 0 },     // UPDATE patient no match
-      { rows: [] },                  // SELECT empty (다른 org)
+      { rows: [] },                  // lockPatientAnchor — 다른 org라 못 찾음(PatientLockTargetNotFoundError)
       { rows: [] },                  // ROLLBACK
     );
     const res = await request(makeApp(pool))
@@ -1229,6 +1247,24 @@ describe('DELETE /api/patients/:id — 권한 정책', () => {
 // ---------------------------------------------------------------------------
 // POST /api/patients/:id/assignment
 // ---------------------------------------------------------------------------
+// assignPatient는 (a) 유저 검증까지는 pool.query, (b) 이후 전체(앵커/락체크/조회/UPDATE)는
+// pool.connect()가 반환하는 client.query로 진행하는 트랜잭션이다. userLookupResult가 null이면
+// assignedUserId:null 요청(유저 조회 자체를 안 함)을 뜻한다.
+function assignClientSetup(
+  pool: Pool,
+  userLookupResult: { rows: unknown[] } | null,
+  ...clientResults: { rows: unknown[]; rowCount?: number }[]
+): ReturnType<typeof vi.fn> {
+  const clientMock = { query: vi.fn(), release: vi.fn() };
+  (pool.connect as ReturnType<typeof vi.fn>).mockResolvedValueOnce(clientMock);
+  const pq = pool.query as ReturnType<typeof vi.fn>;
+  pq.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+  if (userLookupResult) pq.mockResolvedValueOnce(userLookupResult);
+  const cq = clientMock.query as ReturnType<typeof vi.fn>;
+  for (const r of clientResults) cq.mockResolvedValueOnce(r);
+  return cq;
+}
+
 describe('POST /api/patients/:id/assignment', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
@@ -1285,9 +1321,11 @@ describe('POST /api/patients/:id/assignment', () => {
 
   it('returns 404 when patient not found', async () => {
     const pool = makePool();
-    wireQueries(pool,
+    assignClientSetup(pool,
       { rows: [{ id: DOCTOR_ID, role: 'doctor', name: 'Dr. Lee' }] }, // user ok
-      { rows: [] },                                   // patient not found (old value read)
+      { rows: [] },             // BEGIN
+      { rows: [] },             // oldRows SELECT — patient not found
+      { rows: [] },             // ROLLBACK
     );
     const res = await request(makeApp(pool))
       .post(`/api/patients/${PAT_ID}/assignment`)
@@ -1300,10 +1338,12 @@ describe('POST /api/patients/:id/assignment', () => {
 
   it('returns 200 and records previous/new doctor names in audit log', async () => {
     const pool = makePool();
-    wireQueries(pool,
+    assignClientSetup(pool,
       { rows: [{ id: DOCTOR_ID, role: 'doctor', name: 'Dr. Lee' }] },
-      { rows: [{ assigned_doctor_user_id: USER_ID, previous_doctor_name: 'Dr. Kim' }] },
-      { rows: [{ id: PAT_ID, revision: 2 }] },
+      { rows: [] },                                                                     // BEGIN
+      { rows: [{ assigned_doctor_user_id: USER_ID, previous_doctor_name: 'Dr. Kim' }] }, // oldRows
+      { rows: [{ id: PAT_ID, revision: 2 }] },                                           // UPDATE
+      { rows: [] },                                                                     // COMMIT
     );
     const res = await request(makeApp(pool))
       .post(`/api/patients/${PAT_ID}/assignment`)
@@ -1323,6 +1363,7 @@ describe('POST /api/patients/:id/assignment', () => {
           previousDoctorName:   'Dr. Kim',
           assignedUserId:       DOCTOR_ID,
           newDoctorName:        'Dr. Lee',
+          forcedLockHolder:     null,
         },
       })
     );
@@ -1330,10 +1371,12 @@ describe('POST /api/patients/:id/assignment', () => {
 
   it('accepts null assignedUserId to unassign a patient', async () => {
     const pool = makePool();
-    wireQueries(pool,
-      // no user lookup (assignedUserId is null, so user verification is skipped)
-      { rows: [{ assigned_doctor_user_id: DOCTOR_ID, previous_doctor_name: 'Dr. Kim' }] }, // old row
-      { rows: [{ id: PAT_ID, revision: 3 }] },                                             // update result
+    assignClientSetup(pool,
+      null, // no user lookup (assignedUserId is null, so user verification is skipped)
+      { rows: [] },                                                                       // BEGIN
+      { rows: [{ assigned_doctor_user_id: DOCTOR_ID, previous_doctor_name: 'Dr. Kim' }] }, // oldRows
+      { rows: [{ id: PAT_ID, revision: 3 }] },                                             // UPDATE
+      { rows: [] },                                                                       // COMMIT
     );
     const res = await request(makeApp(pool))
       .post(`/api/patients/${PAT_ID}/assignment`)
@@ -1357,11 +1400,13 @@ describe('POST /api/patients/:id/assignment', () => {
 
   it('uses assigned_doctor_user_id (not owner_user_id) for the update', async () => {
     const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    mock.mockResolvedValueOnce({ rows: [{ id: DOCTOR_ID, role: 'doctor', name: 'Dr. Lee' }] });
-    mock.mockResolvedValueOnce({ rows: [{ assigned_doctor_user_id: null, previous_doctor_name: null }] });
-    mock.mockResolvedValueOnce({ rows: [{ id: PAT_ID, revision: 2 }] });
+    const cq = assignClientSetup(pool,
+      { rows: [{ id: DOCTOR_ID, role: 'doctor', name: 'Dr. Lee' }] },
+      { rows: [] },                                                        // BEGIN
+      { rows: [{ assigned_doctor_user_id: null, previous_doctor_name: null }] }, // oldRows
+      { rows: [{ id: PAT_ID, revision: 2 }] },                             // UPDATE
+      { rows: [] },                                                        // COMMIT
+    );
 
     await request(makeApp(pool))
       .post(`/api/patients/${PAT_ID}/assignment`)
@@ -1369,12 +1414,367 @@ describe('POST /api/patients/:id/assignment', () => {
       .set('x-csrf-token', CSRF_TOKEN)
       .send({ assignedUserId: DOCTOR_ID });
 
-    const updateCall = (mock.mock.calls as unknown[][]).find(
+    const updateCall = (cq.mock.calls as unknown[][]).find(
       (c) => typeof c[0] === 'string' && (c[0] as string).includes('UPDATE patient_records')
     );
     expect(updateCall).toBeDefined();
     expect((updateCall![0] as string)).toMatch(/assigned_doctor_user_id/);
     expect((updateCall![0] as string)).not.toMatch(/SET owner_user_id/);
     expect((updateCall![0] as string)).toMatch(/jsonb_set/);
+  });
+
+  // ---------------------------------------------------------------------------
+  // 락 게이팅(enforce 모드) — 일반 재배정과 force 재배정 둘 다 앵커+락 확인을 거친다.
+  // ---------------------------------------------------------------------------
+  describe('락 게이팅 (lockEnforcementMode=enforce)', () => {
+    beforeEach(() => { setLockEnforcementMode('enforce'); });
+    afterEach(() => { setLockEnforcementMode('off'); });
+
+    it('활성 락이 있으면 일반(non-force) 재배정은 423', async () => {
+      const pool = makePool();
+      const cq = assignClientSetup(pool,
+        null,
+        { rows: [] },                    // BEGIN
+        { rows: [{ id: PAT_ID }] },      // lockPatientAnchor
+        { rows: [{                       // checkLockForWrite — 활성 락 있음
+            patient_id: PAT_ID, client_instance_id: 'ci', user_id: DOCTOR_ID,
+            holder_name: 'Dr. Lee', acquired_at: NOW, expires_at: LATER, lease_token_hash: 'h',
+          }] },
+        { rows: [] },                    // ROLLBACK
+      );
+      const res = await request(makeApp(pool))
+        .post(`/api/patients/${PAT_ID}/assignment`)
+        .set('Authorization', `Bearer ${adminToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .send({ assignedUserId: null });
+      expect(res.status).toBe(423);
+      expect(res.body.code).toBe('LOCK_HELD');
+      void cq;
+    });
+
+    it('force=true면 활성 락을 폐기하고 재배정을 진행, patient_assignment_force로 감사 기록', async () => {
+      const pool = makePool();
+      assignClientSetup(pool,
+        null,
+        { rows: [] },                    // BEGIN
+        { rows: [{ id: PAT_ID }] },      // lockPatientAnchor
+        { rows: [{                       // checkLockForWrite — 활성 락 있음
+            patient_id: PAT_ID, client_instance_id: 'ci', user_id: DOCTOR_ID,
+            holder_name: 'Dr. Lee', acquired_at: NOW, expires_at: LATER, lease_token_hash: 'h',
+          }] },
+        { rows: [] },                    // deleteLockForPatient
+        { rows: [{ assigned_doctor_user_id: null, previous_doctor_name: null }] }, // oldRows
+        { rows: [{ id: PAT_ID, revision: 2 }] }, // UPDATE
+        { rows: [] },                    // COMMIT
+      );
+      const res = await request(makeApp(pool))
+        .post(`/api/patients/${PAT_ID}/assignment?force=true`)
+        .set('Authorization', `Bearer ${adminToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .send({ assignedUserId: null });
+      expect(res.status).toBe(200);
+      expect(writeAuditLog).toHaveBeenCalledWith(
+        pool,
+        expect.objectContaining({
+          action: 'patient_assignment_force',
+          extra:  expect.objectContaining({ forcedLockHolder: 'Dr. Lee' }),
+        })
+      );
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 환자 단위 TTL lease lock 엔드포인트
+// ---------------------------------------------------------------------------
+const CLIENT_INSTANCE_ID = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+const LOCK_ROW = {
+  patient_id: PAT_ID,
+  client_instance_id: CLIENT_INSTANCE_ID,
+  user_id: USER_ID,
+  holder_name: 'Dr. Kim',
+  acquired_at: NOW,
+  expires_at: LATER,
+};
+
+describe('POST /api/patients/:id/lock', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('토큰 없음 + force 없음 → acquire, 잠겨있지 않으면 200 + leaseToken 발급', async () => {
+    const pool = makePool();
+    makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },          // BEGIN
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] }, // anchor
+      { rows: [LOCK_ROW] },  // acquireLock INSERT...RETURNING
+      { rows: [] },          // COMMIT
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/lock`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ clientInstanceId: CLIENT_INSTANCE_ID });
+    expect(res.status).toBe(200);
+    expect(typeof res.body.leaseToken).toBe('string');
+    expect(res.body.ttlMs).toBeTypeOf('number');
+    // holder 정보 외 내부 식별자가 응답에 노출되지 않아야 한다.
+    expect(res.body).not.toHaveProperty('clientInstanceId');
+    expect(res.body).not.toHaveProperty('userId');
+  });
+
+  it('다른 클라이언트가 살아있는 락을 쥐고 있으면 423 + holder 정보', async () => {
+    const pool = makePool();
+    makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },              // BEGIN
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] }, // anchor
+      { rows: [] },              // acquireLock UPSERT — WHERE 불만족(다른 세션이 보유)
+      { rows: [LOCK_ROW] },      // peekLock (heldBy 조회)
+      { rows: [] },              // ROLLBACK
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/lock`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ clientInstanceId: CLIENT_INSTANCE_ID });
+    expect(res.status).toBe(423);
+    expect(res.body.code).toBe('LOCK_HELD');
+    expect(res.body.holder.holderName).toBe('Dr. Kim');
+    expect(res.body.holder).not.toHaveProperty('leaseToken');
+  });
+
+  it('X-Lock-Token 헤더가 있으면 renew — 토큰을 회전시키지 않고 expires_at만 반환', async () => {
+    const pool = makePool();
+    makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },                              // BEGIN
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },                // anchor
+      { rows: [{ expires_at: LATER }] },         // renewLock UPDATE...RETURNING
+      { rows: [] },                              // COMMIT
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/lock`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('x-lock-token', 'sometoken')
+      .send({});
+    expect(res.status).toBe(200);
+    expect(res.body.leaseToken).toBeUndefined(); // renew는 토큰을 새로 주지 않는다
+    expect(res.body.expiresAt).toBe(LATER.toISOString());
+  });
+
+  it('renew인데 토큰이 유효하지 않으면 423 LOCK_LOST', async () => {
+    const pool = makePool();
+    makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },                // BEGIN
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },  // anchor
+      { rows: [] },                // renewLock UPDATE — 0 rows
+      { rows: [] },                // ROLLBACK
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/lock`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('x-lock-token', 'expired-or-wrong')
+      .send({});
+    expect(res.status).toBe(423);
+    expect(res.body.code).toBe('LOCK_LOST');
+  });
+
+  it('force=true면 다른 클라이언트가 보유 중이어도 항상 200 + 새 leaseToken', async () => {
+    const pool = makePool();
+    makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },              // BEGIN
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] }, // anchor
+      { rows: [LOCK_ROW] },      // peekLock — 감사 로그용 이전 보유자 조회
+      { rows: [LOCK_ROW] },      // forceLock INSERT...RETURNING — 항상 성공
+      { rows: [] },              // COMMIT
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/lock?force=true`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ clientInstanceId: CLIENT_INSTANCE_ID });
+    expect(res.status).toBe(200);
+    expect(typeof res.body.leaseToken).toBe('string');
+    // 감사 로그는 새로 획득한 사람이 아니라 "밀려난 이전 보유자"를 기록해야 의미가 있다.
+    expect(writeAuditLog).toHaveBeenCalledWith(
+      pool,
+      expect.objectContaining({
+        action: 'patient_lock_takeover',
+        extra: expect.objectContaining({ previousHolderName: 'Dr. Kim' }),
+      })
+    );
+  });
+
+  it('환자가 없거나 삭제됐으면 404', async () => {
+    const pool = makePool();
+    makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] }, // BEGIN
+      { rows: [] }, // anchor — 존재하지 않음
+      { rows: [] }, // ROLLBACK
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/lock`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ clientInstanceId: CLIENT_INSTANCE_ID });
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe('PATIENT_NOT_FOUND');
+  });
+
+  // TOCTOU 재검증(2라운드 외부 리뷰 반영) — assignedDoctorOrAdmin 미들웨어는 여기서 host가
+  // 여전히 담당의(USER_ID)라고 통과시켰지만(withAccessCheck: {}), 그 직후 트랜잭션 안에서
+  // 앵커가 실제로 조회한 담당의는 다른 사람이다(미들웨어 확인과 앵커 획득 사이에 재배정된
+  // 상황을 흉내). assertAssignedOrAdmin이 이를 잡아 403을 반환해야 한다.
+  it('미들웨어 통과 후 트랜잭션 안에서 담당의가 이미 바뀌었으면 403(TOCTOU 재검증)', async () => {
+    const pool = makePool();
+    makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },                                                          // BEGIN
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: 'other-doctor-id' }] }, // anchor — 재배정된 담당의
+      { rows: [] },                                                          // ROLLBACK
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/lock`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ clientInstanceId: CLIENT_INSTANCE_ID });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('DELETE /api/patients/:id/lock', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('토큰 없이 호출하면 DB 접근 없이 204 no-op', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ rows: [{ exists: 1 }] }) // auth
+      .mockResolvedValueOnce({ rows: [{ assigned_doctor_user_id: USER_ID }] }); // middleware
+    const res = await request(makeApp(pool))
+      .delete(`/api/patients/${PAT_ID}/lock`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+    expect(res.status).toBe(204);
+    expect((pool.connect as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+  });
+
+  it('토큰이 일치하면 204, patient_locks에서 삭제', async () => {
+    const pool = makePool();
+    const cq = makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },             // BEGIN
+      { rows: [{ id: PAT_ID }] }, // anchor
+      { rows: [] },             // releaseLock DELETE
+      { rows: [] },             // COMMIT
+    );
+    const res = await request(makeApp(pool))
+      .delete(`/api/patients/${PAT_ID}/lock`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('x-lock-token', 'mytoken');
+    expect(res.status).toBe(204);
+    const deleteCall = (cq.mock.calls as unknown[][]).find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('DELETE FROM patient_locks')
+    );
+    expect(deleteCall).toBeDefined();
+  });
+
+  it('환자가 없어도(anchor 실패) 204 no-op으로 처리', async () => {
+    const pool = makePool();
+    makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] }, // BEGIN
+      { rows: [] }, // anchor — 존재하지 않음 → PatientLockTargetNotFoundError
+      { rows: [] }, // ROLLBACK
+    );
+    const res = await request(makeApp(pool))
+      .delete(`/api/patients/${PAT_ID}/lock`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('x-lock-token', 'mytoken');
+    expect(res.status).toBe(204);
+  });
+});
+
+describe('GET /api/patients/:id/lock', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('잠겨있지 않으면 { lock: null } — assignedDoctorOrAdmin 미들웨어 없이 auth만으로 조회', async () => {
+    const pool = makePool();
+    wireQueries(pool, { rows: [] }); // peekLock — 살아있는 락 없음
+    const res = await request(makeApp(pool))
+      .get(`/api/patients/${PAT_ID}/lock`)
+      .set('Authorization', `Bearer ${orgToken()}`);
+    expect(res.status).toBe(200);
+    expect(res.body.lock).toBeNull();
+  });
+
+  it('잠겨있으면 holder 정보만 반환(내부 식별자 미노출)', async () => {
+    const pool = makePool();
+    wireQueries(pool, { rows: [LOCK_ROW] });
+    const res = await request(makeApp(pool))
+      .get(`/api/patients/${PAT_ID}/lock`)
+      .set('Authorization', `Bearer ${orgToken()}`);
+    expect(res.status).toBe(200);
+    expect(res.body.lock).toEqual({
+      holderName: 'Dr. Kim',
+      acquiredAt: NOW.toISOString(),
+      expiresAt:  LATER.toISOString(),
+    });
+  });
+});
+
+describe('PATCH /api/patients/:id — 락 게이팅 (lockEnforcementMode=enforce)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setLockEnforcementMode('enforce');
+  });
+  afterEach(() => { setLockEnforcementMode('off'); });
+
+  it('다른 클라이언트가 활성 락을 쥐고 있으면 423, UPDATE는 시도되지 않는다', async () => {
+    const pool = makePool();
+    const cq = makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },          // BEGIN
+      { rows: [PAT_ROW] },   // SELECT (FOR UPDATE) — revision 1 일치
+      { rows: [{             // checkLockForWrite — 활성 락 있음, 토큰 미제출
+          patient_id: PAT_ID, client_instance_id: 'ci', user_id: DOCTOR_ID,
+          holder_name: 'Dr. Lee', acquired_at: NOW, expires_at: LATER, lease_token_hash: 'h',
+        }] },
+      { rows: [] },          // ROLLBACK
+    );
+    const res = await request(makeApp(pool))
+      .patch(`/api/patients/${PAT_ID}`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('if-match', '1')
+      .send({ data: VALID_DATA });
+    expect(res.status).toBe(423);
+    expect(res.body.code).toBe('LOCK_HELD');
+    const updateCall = (cq.mock.calls as unknown[][]).find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('SET') && (c[0] as string).includes('revision')
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+  it('본인 토큰이 일치하면 정상 통과(200)', async () => {
+    const updatedRow = { ...PAT_ROW, revision: 2, updated_at: LATER };
+    const pool = makePool();
+    makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },        // BEGIN
+      { rows: [PAT_ROW] }, // SELECT
+      { rows: [{           // checkLockForWrite — 본인 토큰과 일치
+          patient_id: PAT_ID, client_instance_id: 'ci', user_id: USER_ID,
+          holder_name: 'Dr. Kim', acquired_at: NOW, expires_at: LATER,
+          lease_token_hash: crypto.createHash('sha256').update('my-token').digest('hex'),
+        }] },
+      { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, // person lookup
+      { rows: [] },        // person update
+      { rows: [updatedRow] }, // UPDATE RETURNING
+      { rows: [] },        // COMMIT
+    );
+    const res = await request(makeApp(pool))
+      .patch(`/api/patients/${PAT_ID}`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('if-match', '1')
+      .set('x-lock-token', 'my-token')
+      .send({ data: VALID_DATA });
+    expect(res.status).toBe(200);
   });
 });

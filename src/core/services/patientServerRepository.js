@@ -1,9 +1,16 @@
 import { requestJson } from './httpClient';
 import { isRedactedPatientRecord } from './patientRecords';
 import { requireSyncedServerId } from './videoAnalysisClient';
+import { getLockToken } from './lockTokenStore';
 
 function getBaseUrl(session, settings) {
   return session?.apiBaseUrl || settings?.apiBaseUrl || '';
+}
+
+// leaseToken이 있으면 X-Lock-Token 헤더로 실어보낸다. 없어도(opt-in) 정상 동작 —
+// 서버 쪽에 그 환자의 활성 락이 없으면 그대로 통과한다.
+function lockTokenHeaders(leaseToken) {
+  return leaseToken ? { 'X-Lock-Token': leaseToken } : {};
 }
 
 // ---------------------------------------------------------------------------
@@ -75,7 +82,7 @@ export async function fetchPatient(serverId, { session, settings } = {}) {
 // Returns the updated patient with server sync fields applied.
 // Throws with error.status === 409 on revision conflict or identity conflict.
 // ---------------------------------------------------------------------------
-export async function pushPatient(patient, { session, settings } = {}) {
+export async function pushPatient(patient, { session, settings, leaseToken } = {}) {
   if (isRedactedPatientRecord(patient)) {
     throw new Error('Cannot push a redacted patient snapshot stub.');
   }
@@ -113,7 +120,7 @@ export async function pushPatient(patient, { session, settings } = {}) {
     baseUrl: base,
     method:  'PATCH',
     session,
-    headers: { 'If-Match': String(revision) },
+    headers: { 'If-Match': String(revision), ...lockTokenHeaders(leaseToken) },
     body: {
       phase: patient.phase,
       data:  patient.data,
@@ -131,7 +138,7 @@ export async function pushPatient(patient, { session, settings } = {}) {
 // ---------------------------------------------------------------------------
 export async function applyVideoAnalysisJob(
   jobId, patient, computedData,
-  { appliedInputsHash, appliedInputsCount, sourceAnalysisJobIds = [], session, settings } = {}
+  { appliedInputsHash, appliedInputsCount, sourceAnalysisJobIds = [], session, settings, leaseToken } = {}
 ) {
   // synced 강제(serverId + syncStatus==='synced') — dirty/conflict/local-only 차단.
   requireSyncedServerId(patient);
@@ -145,7 +152,7 @@ export async function applyVideoAnalysisJob(
     baseUrl: getBaseUrl(session, settings),
     method: 'POST',
     session,
-    headers: { 'If-Match': String(revision) },
+    headers: { 'If-Match': String(revision), ...lockTokenHeaders(leaseToken) },
     body: { data: computedData, appliedInputsHash, appliedInputsCount, sourceAnalysisJobIds },
   });
   // res = { patient } | { idempotent: true, patient }
@@ -158,7 +165,7 @@ export async function applyVideoAnalysisJob(
 // just remove from local state without calling the server.
 // Throws with status 409 on revision mismatch.
 // ---------------------------------------------------------------------------
-export async function deletePatientOnServer(serverId, revision, { session, settings } = {}) {
+export async function deletePatientOnServer(serverId, revision, { session, settings, leaseToken } = {}) {
   if (!serverId) {
     const err = new Error('DELETE /api/patients requires a serverId.');
     err.status = 400;
@@ -173,7 +180,70 @@ export async function deletePatientOnServer(serverId, revision, { session, setti
     baseUrl: getBaseUrl(session, settings),
     method:  'DELETE',
     session,
+    headers: lockTokenHeaders(leaseToken),
   });
+}
+
+// ---------------------------------------------------------------------------
+// 환자 단위 편집 락 — POST/DELETE/GET /api/patients/:id/lock
+// acquire(토큰 미제출)/renew(X-Lock-Token 제출)/force(force=true)는 서버가 요청 형태로
+// 구분하므로 클라이언트 함수도 그 형태를 그대로 반영한다. 실패(423)는 requestJson이 그대로
+// throw하며 err.status===423, err.data가 {code, holder?}를 담는다 — 호출부(usePatientLock)가
+// 판정한다.
+// ---------------------------------------------------------------------------
+export async function acquirePatientLock(serverId, clientInstanceId, { session, settings } = {}) {
+  return requestJson(`/api/patients/${serverId}/lock`, {
+    baseUrl: getBaseUrl(session, settings),
+    method:  'POST',
+    session,
+    body:    { clientInstanceId },
+  });
+}
+
+// 토큰을 절대 회전시키지 않는다 — 응답에는 leaseToken이 없다({expiresAt, ttlMs}만).
+export async function renewPatientLock(serverId, leaseToken, { session, settings } = {}) {
+  return requestJson(`/api/patients/${serverId}/lock`, {
+    baseUrl: getBaseUrl(session, settings),
+    method:  'POST',
+    session,
+    headers: { 'X-Lock-Token': leaseToken },
+    body:    {},
+  });
+}
+
+// 무조건 선점 — 다른 사람이 보유 중이어도 항상 성공(사용자가 명시적으로 동의한 뒤에만 호출).
+export async function forcePatientLock(serverId, clientInstanceId, { session, settings } = {}) {
+  return requestJson(`/api/patients/${serverId}/lock?force=true`, {
+    baseUrl: getBaseUrl(session, settings),
+    method:  'POST',
+    session,
+    body:    { clientInstanceId },
+  });
+}
+
+// 조회 전용, 부작용 없음. null | { holderName, acquiredAt, expiresAt }.
+export async function peekPatientLock(serverId, { session, settings } = {}) {
+  const data = await requestJson(`/api/patients/${serverId}/lock`, {
+    baseUrl: getBaseUrl(session, settings),
+    session,
+  });
+  return data?.lock ?? null;
+}
+
+// 토큰 불일치/락 없음도 서버가 204 no-op으로 처리 — 여기서도 에러를 던지지 않는다.
+export async function releasePatientLock(serverId, leaseToken, { session, settings } = {}) {
+  if (!leaseToken) return;
+  await requestJson(`/api/patients/${serverId}/lock`, {
+    baseUrl: getBaseUrl(session, settings),
+    method:  'DELETE',
+    session,
+    headers: { 'X-Lock-Token': leaseToken },
+  });
+}
+
+// 423(락 충돌: 획득 실패/renew 상실 모두 이 상태 코드를 씀 — 구분은 호출 맥락으로 한다).
+export function isLockError(error) {
+  return error?.status === 423;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,12 +255,16 @@ export async function deletePatientOnServer(serverId, revision, { session, setti
 export async function pushPendingPatients(patients, { session, settings } = {}) {
   const pending = patients.filter(p => {
     if (isRedactedPatientRecord(p)) return false;
+    // usePatientSync가 호출 전에 이미 syncPaused 환자를 걸러내지만("저장하지 않고 이동"),
+    // 이 함수 자체가 그 불변조건을 스스로 지키도록 방어적으로 다시 확인한다 — 호출부가
+    // 실수로 필터링 없이 넘겨도 paused 환자가 조용히 push되는 일이 없어야 한다.
+    if (p.sync?.syncPaused) return false;
     const s = p.sync?.syncStatus;
     return s === 'local-only' || s === 'dirty';
   });
 
   const results = await Promise.allSettled(
-    pending.map(p => pushPatient(p, { session, settings }))
+    pending.map(p => pushPatient(p, { session, settings, leaseToken: getLockToken(p.id) }))
   );
 
   const synced = [];
@@ -199,13 +273,10 @@ export async function pushPendingPatients(patients, { session, settings } = {}) 
     if (r.status === 'fulfilled') {
       synced.push({ patient: pending[i], serverPatient: r.value });
     } else {
-      let kind = 'error';
-      if (isConflictError(r.reason)) kind = 'conflict';
-      else if (isPermissionDeniedError(r.reason)) kind = 'permission';
       failed.push({
         patient: pending[i],
         error:   r.reason,
-        kind,
+        kind:    classifyPushFailureKind(r.reason),
       });
     }
   });
@@ -221,6 +292,58 @@ export function isConflictError(error) {
 // 일반 네트워크 에러와 구분해 사용자에게 "권한 없음" 메시지 표시용.
 export function isPermissionDeniedError(error) {
   return error?.status === 403;
+}
+
+// 네트워크 자체 실패(오프라인 등): 브라우저 fetch()는 응답을 아예 받지 못하면 TypeError로
+// reject한다(status 없음). TypeError로 좁혀 검사하는 이유: requestJson이 던지는 모든 HTTP
+// 에러는 항상 error.status를 명시적으로 채우므로, status가 없는 "일반 Error"까지 전부
+// offline으로 재분류하면 진짜 미분류 오류(kind: 'error')와 구분이 안 된다.
+export function isNetworkError(error) {
+  return error instanceof TypeError && typeof error.status !== 'number';
+}
+
+function classifyPushFailureKind(error) {
+  if (isConflictError(error)) return 'conflict';
+  if (isPermissionDeniedError(error)) return 'permission';
+  if (isLockError(error)) return 'lock';
+  if (isNetworkError(error)) return 'offline';
+  return 'error';
+}
+
+// pushPendingPatients/flushPatient의 실패 kind → 환자 전환 판정에 쓰는 outcome 이름으로 매핑.
+// (§7의 kind 분류를 여기서 재사용 — 새 분류 체계를 만들지 않는다.)
+function classifyFailureKind(kind) {
+  switch (kind) {
+    case 'conflict':   return 'conflict';
+    case 'permission': return 'permission';
+    case 'lock':        return 'lock-lost';
+    case 'offline':     return 'offline';
+    default:            return 'error';
+  }
+}
+
+// push 사이클이 커밋된 뒤(setPatients 반영 후)에만 호출해야 한다 — 커밋된 patient는
+// mergePushedPatientAck가 서버 ACK로 이미 교체했으므로, 여기서 다시 "달라졌는지" 비교하지
+// 않고 그 결과(syncStatus)를 그대로 읽기만 한다. 재비교하면 정상 저장까지 "다르다"고
+// 오판한다(참조도, updatedAt도 항상 다르므로).
+export function computeCommittedFlushOutcomes(committedPatients, { synced = [], failed = [] } = {}) {
+  const outcomes = new Map();
+  for (const { patient: pushedPatient } of synced) {
+    const committed = committedPatients.find(p => p.id === pushedPatient.id);
+    const status = committed?.sync?.syncStatus;
+    outcomes.set(
+      pushedPatient.id,
+      status === 'synced' ? 'synced'
+        : (status === 'dirty' || status === 'local-only') ? 'still-dirty'
+        : status === 'conflict' ? 'conflict'
+        : 'error'
+    );
+  }
+  for (const f of failed) {
+    if (!f.patient?.id) continue;
+    outcomes.set(f.patient.id, classifyFailureKind(f.kind));
+  }
+  return outcomes;
 }
 
 // ---------------------------------------------------------------------------

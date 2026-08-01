@@ -9,6 +9,7 @@ import cookieParser from 'cookie-parser';
 
 // 피처플래그를 테스트 중 토글하기 위해 hoisted 가변 상태 사용.
 const flagState = vi.hoisted(() => ({ enabled: true, fixtureMode: false, targetThumbnail: false, overlayFrames: false, allowUnverifiedRecipe: false }));
+const lockFlagState = vi.hoisted(() => ({ mode: 'off' as 'off' | 'observe' | 'enforce' }));
 // 업로드 테스트용 실제 temp uploadDir(buildUploadMiddleware가 tmp 하위를 mkdir). 경로는 beforeAll에서 채운다.
 const uploadEnv = vi.hoisted(() => ({ dir: '' }));
 beforeAll(() => { uploadEnv.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'va-upload-')); });
@@ -38,6 +39,9 @@ vi.mock('../../config', () => ({
       get overlayFrames() { return flagState.overlayFrames; },
       get allowUnverifiedRecipe() { return flagState.allowUnverifiedRecipe; },
     },
+    // 'off'가 기본값 — 이 파일의 기존 apply 테스트들은 락 게이트 쿼리를 추가로 목킹하지
+    // 않는다. 락 게이팅 자체를 검증하는 테스트는 lockFlagState.mode를 별도로 override한다.
+    get lockEnforcementMode() { return lockFlagState.mode; },
   },
 }));
 
@@ -480,7 +484,7 @@ describe('POST /jobs/:jobId/apply', () => {
   });
   const patRow = (revision: number) => ({
     id: PAT_ID, revision, payload: { phase: 'evaluation', data: { shared: { name: 'Kim' }, modules: {}, activeModules: [] } },
-    created_at: NOW, updated_at: NOW,
+    created_at: NOW, updated_at: NOW, assigned_doctor_user_id: USER_ID,
   });
   // recipe 검증 게이트(6.0-9): 서버 상수와 일치해야 통과. map/vp는 실제 shared/contracts 값.
   const RECIPE = {
@@ -559,6 +563,54 @@ describe('POST /jobs/:jobId/apply', () => {
     expect(writeAuditLog).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       action: 'video_analysis_apply', targetType: 'patient', targetId: PAT_ID,
     }));
+  });
+
+  describe('환자 단위 TTL lease lock 게이팅 (lockEnforcementMode=enforce)', () => {
+    beforeEach(() => { lockFlagState.mode = 'enforce'; });
+    afterEach(() => { lockFlagState.mode = 'off'; });
+
+    it('다른 클라이언트가 활성 락을 쥐고 있으면 423, patient UPDATE는 시도되지 않는다', async () => {
+      const pool = makePool();
+      const cq = clientSetup(pool,
+        { rows: [] },                         // BEGIN
+        { rows: [jobRow()] },                 // job FOR UPDATE
+        { rows: [patRow(1)] },                // patient FOR UPDATE
+        { rows: [{                            // checkLockForWrite — 활성 락 있음, 토큰 미제출
+            patient_id: PAT_ID, client_instance_id: 'ci', user_id: 'other-user',
+            holder_name: 'Dr. Lee', acquired_at: NOW, expires_at: new Date('2024-06-01T10:01:40Z'), lease_token_hash: 'h',
+          }] },
+        { rows: [] },                         // ROLLBACK
+      );
+      const res = await request(makeApp(pool))
+        .post(`/api/video-analysis/jobs/${JOB_ID}/apply`)
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('If-Match', '1')
+        .send(body);
+      expect(res.status).toBe(423);
+      expect(res.body.code).toBe('LOCK_HELD');
+      const updateCall = cq.mock.calls.find((c) => String(c[0]).includes('UPDATE patient_records'));
+      expect(updateCall).toBeUndefined();
+    });
+
+    it('멱등 replay(이미 동일 hash로 적용됨)는 락 체크보다 먼저 통과한다 — 락 상태와 무관하게 200', async () => {
+      const pool = makePool();
+      clientSetup(pool,
+        { rows: [] },                                                   // BEGIN
+        { rows: [jobRow({ status: 'done', applied_at: NOW, applied_inputs_hash: 'h1' })] }, // job FOR UPDATE
+        { rows: [patRow(2)] },                                          // current patient (idempotent 응답)
+        { rows: [] },                                                   // COMMIT
+        // 멱등 replay는 락 체크 쿼리 자체를 절대 실행하지 않는다(추가 mock 없이도 통과해야 함).
+      );
+      const res = await request(makeApp(pool))
+        .post(`/api/video-analysis/jobs/${JOB_ID}/apply`)
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('If-Match', '1')
+        .send(body);
+      expect(res.status).toBe(200);
+      expect(res.body.idempotent).toBe(true);
+    });
   });
 
   it('idempotent: already applied with same hash returns stored patient (no re-apply)', async () => {

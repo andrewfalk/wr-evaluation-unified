@@ -4,6 +4,7 @@
 import { applyFeatureToModule } from './videoProvenance';
 import { createClip, createJob } from './videoAnalysisClient';
 import { applyVideoAnalysisJob } from './patientServerRepository';
+import { getLockToken } from './lockTokenStore';
 
 const MOCK_BUNDLE = 'mock-6.0-2';
 
@@ -63,5 +64,6 @@ export async function applyVideoFeatureViaServer(patient, opts, env) {
   const hash = computeAppliedInputsHash(job.jobId, appliedInput);
   return applyVideoAnalysisJob(job.jobId, patient, nextLocal.data, {
     appliedInputsHash: hash, appliedInputsCount: 1, sourceAnalysisJobIds, session, settings,
+    leaseToken: getLockToken(patient.id),
   });
 }
