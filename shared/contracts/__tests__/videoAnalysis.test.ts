@@ -297,7 +297,7 @@ describe('VideoAnalysisDataSchema (§8.11)', () => {
     });
     const roundTripped = VideoAnalysisDataSchema.parse(JSON.parse(JSON.stringify(original)));
     expect(roundTripped.processFeatureAggregationMode).toBe('shareWeighted');
-    expect(roundTripped.processFeatures[0].features.overheadHours.value).toBe(1.8);
+    expect(roundTripped.processFeatures[0].features.overheadHours!.value).toBe(1.8);
   });
 });
 
