@@ -17,7 +17,7 @@ vi.mock('../../auth/sessionStore', () => ({
   createSession:       vi.fn(),
   verifySession:       vi.fn(),
   rotateSession:       vi.fn(),
-  revokeSession:       vi.fn(),
+  revokeSessionFamily: vi.fn(),
   hashToken:           vi.fn((t: string) => `hash:${t}`),
 }));
 vi.mock('../../auth/csrf', async (importOriginal) => {
@@ -49,7 +49,7 @@ import {
   createSession,
   verifySession,
   rotateSession,
-  revokeSession,
+  revokeSessionFamily,
 } from '../../auth/sessionStore';
 import { validateCsrf } from '../../auth/csrf';
 import { createAuthRouter } from '../auth';
@@ -65,6 +65,7 @@ const SESSION_ROW = {
   csrfTokenHash: 'hash:csrf-tok',
   userId:        'user-1',
   expiresAt:     new Date(Date.now() + 3_600_000),
+  familyId:      'fam-1',
 };
 
 function makePool(overrides: Partial<Pool> = {}): Pool {
@@ -138,10 +139,11 @@ describe('POST /api/auth/login', () => {
       }),
     }) as never);
     vi.mocked(createSession).mockResolvedValue({
-      sessionId:    'sess-1',
-      refreshToken: 'raw-refresh',
-      csrfToken:    'raw-csrf',
-      expiresAt:    new Date(Date.now() + 3_600_000),
+      sessionId:        'sess-1',
+      refreshToken:     'raw-refresh',
+      csrfToken:        'raw-csrf',
+      expiresAt:        new Date(Date.now() + 3_600_000),
+      persistentCookie: true,
     } as never);
 
     const client = (await pool.connect()) as unknown as { query: ReturnType<typeof vi.fn> };
@@ -157,6 +159,44 @@ describe('POST /api/auth/login', () => {
     const cookie = res.headers['set-cookie'] as string[] | string;
     const cookieStr = Array.isArray(cookie) ? cookie.join(';') : String(cookie ?? '');
     expect(cookieStr).toContain('wr_refresh');
+    // rememberMe omitted → defaults to true → persistent cookie with Expires.
+    expect(cookieStr).toContain('Expires=');
+    expect(vi.mocked(createSession).mock.calls[0][4]).toBe(true);
+  });
+
+  it('issues a session cookie (no Expires) when rememberMe is false', async () => {
+    const pool = makePool();
+    vi.mocked(LocalDbAuthProvider).mockImplementation(() => ({
+      verifyCredentials: vi.fn().mockResolvedValue({
+        userId:             'user-1',
+        organizationId:     'org-1',
+        role:               'doctor',
+        name:               'Dr. Kim',
+        mustChangePassword: false,
+      }),
+    }) as never);
+    vi.mocked(createSession).mockResolvedValue({
+      sessionId:        'sess-1',
+      refreshToken:     'raw-refresh',
+      csrfToken:        'raw-csrf',
+      expiresAt:        new Date(Date.now() + 3_600_000),
+      persistentCookie: false,
+    } as never);
+
+    const client = (await pool.connect()) as unknown as { query: ReturnType<typeof vi.fn> };
+    client.query.mockResolvedValue({ rows: [] });
+
+    const res = await request(makeApp(pool))
+      .post('/api/auth/login')
+      .send({ loginId: 'doc1', password: 'pass123', rememberMe: false });
+
+    expect(res.status).toBe(200);
+    const cookie = res.headers['set-cookie'] as string[] | string;
+    const cookieStr = Array.isArray(cookie) ? cookie.join(';') : String(cookie ?? '');
+    expect(cookieStr).toContain('wr_refresh');
+    expect(cookieStr).not.toContain('Expires=');
+    // rememberMe=false is forwarded to createSession as the persistentCookie arg.
+    expect(vi.mocked(createSession).mock.calls[0][4]).toBe(false);
   });
 });
 
@@ -226,10 +266,11 @@ describe('POST /api/auth/refresh', () => {
     vi.mocked(verifySession).mockResolvedValue(SESSION_ROW as never);
     vi.mocked(validateCsrf).mockReturnValue(true);
     vi.mocked(rotateSession).mockResolvedValue({
-      sessionId:    'sess-2',
-      refreshToken: 'new-refresh',
-      csrfToken:    'new-csrf',
-      expiresAt:    new Date(Date.now() + 3_600_000),
+      sessionId:        'sess-2',
+      refreshToken:     'new-refresh',
+      csrfToken:        'new-csrf',
+      expiresAt:        new Date(Date.now() + 3_600_000),
+      persistentCookie: true,
     } as never);
 
     // pool.connect().query for user lookup
@@ -254,6 +295,38 @@ describe('POST /api/auth/refresh', () => {
       organizationId:     'org-1',
       mustChangePassword: false,
     });
+  });
+
+  it('keeps a session cookie (no Expires) on refresh when the session policy is non-persistent', async () => {
+    const pool   = makePool();
+    vi.mocked(verifySession).mockResolvedValue(SESSION_ROW as never);
+    vi.mocked(validateCsrf).mockReturnValue(true);
+    vi.mocked(rotateSession).mockResolvedValue({
+      sessionId:        'sess-2',
+      refreshToken:     'new-refresh',
+      csrfToken:        'new-csrf',
+      expiresAt:        new Date(Date.now() + 3_600_000),
+      persistentCookie: false,
+    } as never);
+
+    const client = (await pool.connect()) as unknown as { query: ReturnType<typeof vi.fn> };
+    client.query.mockResolvedValue({
+      rows: [{
+        user_id: 'user-1', role: 'doctor', name: 'Dr. Kim',
+        organization_id: 'org-1', must_change_password: false, disabled_at: null,
+      }],
+    });
+
+    const res = await request(makeApp(pool))
+      .post('/api/auth/refresh')
+      .set('Cookie', 'wr_refresh=valid-token')
+      .set('x-csrf-token', 'ok');
+
+    expect(res.status).toBe(200);
+    const cookie = res.headers['set-cookie'] as string[] | string;
+    const cookieStr = Array.isArray(cookie) ? cookie.join(';') : String(cookie ?? '');
+    expect(cookieStr).toContain('wr_refresh');
+    expect(cookieStr).not.toContain('Expires=');
   });
 
   it('returns 401 and does not rotate when the user account is disabled', async () => {
@@ -327,32 +400,67 @@ describe('GET /api/auth/me', () => {
 // ------------------------------------------------------------------
 // POST /api/auth/logout — after logout, /me must be blocked
 // ------------------------------------------------------------------
+// logout authenticates via the wr_refresh cookie + manual CSRF check (like /refresh),
+// NOT the Bearer access token — it must work even with an expired/absent access token.
 describe('POST /api/auth/logout', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it('returns 401 when not authenticated', async () => {
+  it('is idempotent (200) when no refresh cookie is present — nothing to revoke', async () => {
     const pool = makePool();
     const res  = await request(makeApp(pool)).post('/api/auth/logout');
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(revokeSessionFamily).not.toHaveBeenCalled();
   });
 
-  it('returns 200 and revokes session when authenticated', async () => {
-    const token     = validToken();
-    const innerPool = makePool();
-    vi.mocked(innerPool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    vi.mocked(revokeSession).mockResolvedValue(undefined);
+  it('is idempotent (200) when the refresh cookie is invalid/expired — nothing to revoke', async () => {
+    const pool = makePool();
+    vi.mocked(revokeSessionFamily).mockResolvedValue({ status: 'not_found' });
 
-    const client = (await innerPool.connect()) as unknown as { query: ReturnType<typeof vi.fn> };
-    client.query.mockResolvedValue({ rows: [] });
-
-    const res = await request(makeApp(innerPool))
+    const res = await request(makeApp(pool))
       .post('/api/auth/logout')
-      .set('Authorization', `Bearer ${token}`)
-      .set('x-csrf-token', 'ok');
+      .set('Cookie', 'wr_refresh=stale-token');
 
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    expect(revokeSession).toHaveBeenCalled();
+  });
+
+  it('returns 403 when CSRF is invalid — does not revoke', async () => {
+    // CSRF is now validated inside revokeSessionFamily itself (same transaction
+    // as the revoke), not as a separate route-level pre-check — see auth.ts.
+    const pool = makePool();
+    vi.mocked(revokeSessionFamily).mockResolvedValue({ status: 'csrf_invalid' });
+
+    const res = await request(makeApp(pool))
+      .post('/api/auth/logout')
+      .set('Cookie', 'wr_refresh=valid-token')
+      .set('x-csrf-token', 'bad-csrf');
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('CSRF_INVALID');
+  });
+
+  it('returns 200 and revokes the session family when the refresh cookie + CSRF are valid — no access token needed', async () => {
+    const pool = makePool();
+    vi.mocked(revokeSessionFamily).mockResolvedValue({
+      status:    'revoked',
+      sessionId: SESSION_ROW.sessionId,
+      userId:    SESSION_ROW.userId,
+      familyId:  SESSION_ROW.familyId,
+    });
+
+    const client = (await pool.connect()) as unknown as { query: ReturnType<typeof vi.fn> };
+    client.query.mockResolvedValue({ rows: [{ organization_id: 'org-1' }] });
+
+    const res = await request(makeApp(pool))
+      .post('/api/auth/logout')
+      .set('Cookie', 'wr_refresh=valid-token')
+      .set('x-csrf-token', 'ok');
+      // Deliberately no Authorization header — logout must not require one.
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(revokeSessionFamily).toHaveBeenCalledWith(expect.anything(), 'valid-token', 'ok');
   });
 
   it('blocks /me after session is revoked in DB', async () => {

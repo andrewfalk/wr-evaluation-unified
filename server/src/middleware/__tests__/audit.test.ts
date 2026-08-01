@@ -188,18 +188,29 @@ describe('auditLogin', () => {
 });
 
 describe('auditLogout', () => {
-  it('writes auth_logout with sessionId', async () => {
+  it('writes auth_logout with the explicitly-passed sessionId', async () => {
     const pool = makePool();
-    const req  = makeReq({
-      sessionInfo: { userId: 'u1', organizationId: 'o1', sessionId: 'sess-1' },
-    } as Partial<Request>);
+    const req  = makeReq();
+    auditLogout(pool, req, 'u1', 'o1', 'sess-1');
+    await new Promise((r) => setTimeout(r, 0));
+
+    const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
+    expect(params[0]).toBe('u1');   // actor_user_id
+    expect(params[1]).toBe('o1');   // actor_org_id
+    expect(params[2]).toBe('auth_logout');
+    expect(params[4]).toBe('sess-1'); // target_id = sessionId
+    expect(params[5]).toBe('success');
+  });
+
+  it('writes nulls when no session was found (idempotent logout with no/invalid refresh cookie)', async () => {
+    const pool = makePool();
+    const req  = makeReq();
     auditLogout(pool, req);
     await new Promise((r) => setTimeout(r, 0));
 
     const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
-    expect(params[2]).toBe('auth_logout');
-    expect(params[4]).toBe('sess-1'); // target_id = sessionId
-    expect(params[5]).toBe('success');
+    expect(params[0]).toBeNull();
+    expect(params[4]).toBeNull();
   });
 });
 

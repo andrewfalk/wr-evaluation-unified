@@ -117,14 +117,23 @@ export function auditLogin(
   });
 }
 
-export function auditLogout(pool: Pool, req: Request): void {
-  const session = req.sessionInfo;
+// logout no longer sits behind the Bearer-auth middleware (it authenticates
+// via the refresh cookie instead, so it still works with an expired access
+// token — see auth.ts), so req.sessionInfo isn't populated here. Callers pass
+// the identity explicitly, resolved from verifySession().
+export function auditLogout(
+  pool:       Pool,
+  req:        Request,
+  userId?:    string | null,
+  orgId?:     string | null,
+  sessionId?: string | null,
+): void {
   writeAuditLog(pool, {
-    actorUserId: session?.userId         ?? null,
-    actorOrgId:  session?.organizationId ?? null,
+    actorUserId: userId    ?? null,
+    actorOrgId:  orgId     ?? null,
     action:      'auth_logout',
     targetType:  'session',
-    targetId:    session?.sessionId      ?? null,
+    targetId:    sessionId ?? null,
     outcome:     'success',
     ip:          req.ip ?? null,
     userAgent:   req.headers['user-agent'] ?? null,

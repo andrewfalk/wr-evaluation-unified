@@ -8,7 +8,7 @@ import {
   createSession,
   verifySession,
   rotateSession,
-  revokeSession,
+  revokeSessionFamily,
 } from '../auth/sessionStore';
 import { hashToken } from '../auth/sessionStore';
 import { generateAccessToken } from '../auth/tokens';
@@ -54,13 +54,15 @@ function toUserPayload(user: {
   };
 }
 
-function setRefreshCookie(res: Response, rawToken: string, expiresAt: Date): void {
+function setRefreshCookie(res: Response, rawToken: string, expiresAt: Date, persistentCookie: boolean): void {
   res.cookie(REFRESH_COOKIE, rawToken, {
     httpOnly: true,
     secure: isSecure,
     sameSite: 'strict',
     path: '/',
-    expires: expiresAt,
+    // Electron logins (rememberMe=false) get a session cookie (no expires) so
+    // the app forces re-login whenever a new Electron session starts.
+    ...(persistentCookie ? { expires: expiresAt } : {}),
   });
 }
 
@@ -74,8 +76,11 @@ function clearAuthCookies(res: Response): void {
 // Route: POST /api/auth/login
 // ---------------------------------------------------------------------------
 const LoginBody = z.object({
-  loginId:  z.string().min(1),
-  password: z.string().min(1),
+  loginId:    z.string().min(1),
+  password:   z.string().min(1),
+  // Electron intranet build sends false so the refresh cookie is issued as a
+  // session cookie (cleared when the app closes). Web keeps the default true.
+  rememberMe: z.boolean().default(true),
 });
 
 async function login(pool: Pool, req: Request, res: Response): Promise<void> {
@@ -102,7 +107,8 @@ async function login(pool: Pool, req: Request, res: Response): Promise<void> {
       client,
       creds.userId,
       { userAgent: req.headers['user-agent'], ip: req.ip },
-      config.auth.refreshTokenTtl
+      config.auth.refreshTokenTtl,
+      parsed.data.rememberMe
     );
 
     // Record last login
@@ -120,7 +126,7 @@ async function login(pool: Pool, req: Request, res: Response): Promise<void> {
       csrfHash:           hashToken(session.csrfToken),
     });
 
-    setRefreshCookie(res, session.refreshToken, session.expiresAt);
+    setRefreshCookie(res, session.refreshToken, session.expiresAt, session.persistentCookie);
     setCsrfCookie(res, session.csrfToken, isSecure);
 
     auditLogin(pool, req, 'success', creds.userId, creds.organizationId);
@@ -229,7 +235,7 @@ async function refresh(pool: Pool, req: Request, res: Response): Promise<void> {
     csrfHash:           hashToken(newSession.csrfToken),
   });
 
-  setRefreshCookie(res, newSession.refreshToken, newSession.expiresAt);
+  setRefreshCookie(res, newSession.refreshToken, newSession.expiresAt, newSession.persistentCookie);
   setCsrfCookie(res, newSession.csrfToken, isSecure);
 
   auditRefreshSuccess(pool, req, userRow.user_id, userRow.organization_id, newSession.sessionId);
@@ -243,18 +249,63 @@ async function refresh(pool: Pool, req: Request, res: Response): Promise<void> {
 
 // ---------------------------------------------------------------------------
 // Route: POST /api/auth/logout
+//
+// Authenticates via the wr_refresh cookie (like /refresh and /csrf), not the
+// Bearer access token — logout must work even when the access token has
+// already expired, without needing a token refresh first. Refreshing just to
+// log out creates a race: a slow refresh can complete after the client gave
+// up waiting and reset locally, silently reviving the very session logout
+// was trying to kill (or, worse, landing after a subsequent re-login and
+// clobbering a different session's cookies/token). Not requiring a fresh
+// access token here removes that whole class of race — see auth epoch
+// guards in useAuthSync.js for the (now secondary) client-side backstop.
+//
+// Idempotent: a missing or already-invalid refresh cookie is treated as
+// "already logged out" (200), not an error — there's nothing to revoke.
+//
+// The actual revoke goes through revokeSessionFamily() rather than a plain
+// "find session, then revoke that id" — a concurrent /refresh (e.g. another
+// tab, or a different generation of the same lineage) can otherwise leave a
+// newly-rotated session untouched and fully valid. CSRF is also validated
+// inside that same call/transaction rather than as a separate pre-check
+// here — see its comment in sessionStore.ts for why both matter.
 // ---------------------------------------------------------------------------
 async function logout(pool: Pool, req: Request, res: Response): Promise<void> {
-  const sessionId = req.sessionInfo?.sessionId;
-  if (sessionId) {
-    const client = await pool.connect();
-    try {
-      await revokeSession(client, sessionId);
-    } finally {
-      client.release();
-    }
+  const rawRefreshToken: string | undefined = req.cookies?.[REFRESH_COOKIE];
+  if (!rawRefreshToken) {
+    auditLogout(pool, req);
+    clearAuthCookies(res);
+    res.status(200).json({ ok: true });
+    return;
   }
-  auditLogout(pool, req);
+
+  const result = await revokeSessionFamily(pool, rawRefreshToken, req.headers[CSRF_HEADER]);
+
+  if (result.status === 'csrf_invalid') {
+    res.status(403).json({ code: 'CSRF_INVALID', error: 'Invalid or missing CSRF token' });
+    return;
+  }
+
+  if (result.status === 'not_found') {
+    auditLogout(pool, req);
+    clearAuthCookies(res);
+    res.status(200).json({ ok: true });
+    return;
+  }
+
+  const userClient = await pool.connect();
+  let organizationId: string | null = null;
+  try {
+    const { rows } = await userClient.query<{ organization_id: string | null }>(
+      `SELECT organization_id FROM users WHERE id = $1`,
+      [result.userId]
+    );
+    organizationId = rows[0]?.organization_id ?? null;
+  } finally {
+    userClient.release();
+  }
+
+  auditLogout(pool, req, result.userId, organizationId, result.sessionId);
   clearAuthCookies(res);
   res.status(200).json({ ok: true });
 }
@@ -582,8 +633,9 @@ export function createAuthRouter(pool: Pool): Router {
   // Requires valid access token + live DB session check
   router.get('/me', auth, (req, res) => me(pool, req, res).catch(() => res.status(500).json(internalError())));
 
-  // logout: auth + CSRF (mutating POST)
-  router.post('/logout', auth, csrfMiddleware, (req, res) => logout(pool, req, res).catch(() => res.status(500).json(internalError())));
+  // logout: cookie + manual CSRF check inside logout() itself (see comment there) —
+  // deliberately NOT behind `auth`/`csrfMiddleware`, which require a live access token.
+  router.post('/logout', (req, res) => logout(pool, req, res).catch(() => res.status(500).json(internalError())));
 
   // change-password: auth + CSRF (mutating POST)
   router.post('/change-password', auth, csrfMiddleware, (req, res) => changePassword(pool, req, res).catch(() => res.status(500).json(internalError())));

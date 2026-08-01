@@ -19,7 +19,7 @@ export function applyAuthUpdate(currentSession, authUpdate) {
 }
 
 // 인증 토큰 리프레시 + 멀티탭 브로드캐스트 와이어링
-export function useAuthSync({ session, setSession, resetToLocalSession }) {
+export function useAuthSync({ session, setSession, resetToLocalSession, getAuthEpoch }) {
   // Keep a stable ref to the latest session so the refresh handler never
   // captures a stale closure value.
   const sessionRef = useRef(session);
@@ -30,8 +30,16 @@ export function useAuthSync({ session, setSession, resetToLocalSession }) {
     configureHttpClient({
       // baseUrl comes from the original failed request so we always hit the
       // same server, even if session.apiBaseUrl is momentarily out of sync.
-      onRefresh: ({ baseUrl: requestBaseUrl, forceCsrf = false } = {}) =>
-        runRefreshWithBroadcast(
+      onRefresh: ({ baseUrl: requestBaseUrl, forceCsrf = false } = {}) => {
+        // Captured once per refresh attempt. If resetToLocalSession() runs
+        // (e.g. a caller gave up waiting and logged out locally) before this
+        // refresh finishes, the epoch will have moved on — the result below
+        // is then applied to authChannel's cross-tab broadcast only, never
+        // to this tab's own session, so it can't resurrect a logged-out tab.
+        const epoch = getAuthEpoch?.();
+        const isStale = () => epoch !== undefined && getAuthEpoch?.() !== epoch;
+
+        return runRefreshWithBroadcast(
           // doRefresh: this tab won the lock and performs the actual refresh.
           async () => {
             const current = sessionRef.current;
@@ -53,7 +61,7 @@ export function useAuthSync({ session, setSession, resetToLocalSession }) {
               if (!csrfRes.ok) throw new Error('CSRF renewal failed');
               const csrfData = await csrfRes.json();
               const newSession = applyAuthUpdate(sessionRef.current, csrfData);
-              setSession(newSession);
+              if (!isStale()) setSession(newSession);
               return newSession;
             }
 
@@ -68,17 +76,18 @@ export function useAuthSync({ session, setSession, resetToLocalSession }) {
             if (!res.ok) throw new Error('Refresh failed');
             const data = await res.json();
             const newSession = applyAuthUpdate(sessionRef.current, data);
-            setSession(newSession);
+            if (!isStale()) setSession(newSession);
             return newSession;
           },
           // applyToken: another tab broadcast REFRESH_SUCCESS — update this
           // tab's session without a server round-trip.
           (authUpdate) => {
             const newSession = applyAuthUpdate(sessionRef.current, authUpdate);
-            setSession(newSession);
+            if (!isStale()) setSession(newSession);
             return newSession;
           },
-        ),
+        );
+      },
       onLogout: () => { broadcastLogout(); resetToLocalSession(); },
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -86,7 +95,12 @@ export function useAuthSync({ session, setSession, resetToLocalSession }) {
   // Sync session state when another tab refreshes or logs out.
   useEffect(() => {
     return onAuthBroadcast((msg) => {
-      if (msg?.type === 'REFRESH_SUCCESS' && msg.accessToken) {
+      // Guard against a REFRESH_SUCCESS that was broadcast by another tab's
+      // refresh but arrives after THIS tab already logged out locally (e.g.
+      // it processed an earlier LOGOUT broadcast, or its own logout timed
+      // out and reset). Applying it here would silently resurrect this tab's
+      // session right after the user logged out.
+      if (msg?.type === 'REFRESH_SUCCESS' && msg.accessToken && sessionRef.current?.mode === 'intranet') {
         setSession(prev => applyAuthUpdate(prev, msg));
       } else if (msg?.type === 'LOGOUT') {
         resetToLocalSession();

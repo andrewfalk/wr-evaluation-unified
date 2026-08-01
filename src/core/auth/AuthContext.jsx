@@ -11,6 +11,8 @@ import { requestJson } from '../services/httpClient';
 
 const AuthContext = createContext(null);
 
+const REVOKE_TIMEOUT_MS = 2500;
+
 export function AuthProvider({ children }) {
   const [session, setSessionState] = useState(() => loadStoredSession());
   // Boot-time flag: false for persisted intranet sessions until /api/auth/csrf confirms
@@ -20,6 +22,10 @@ export function AuthProvider({ children }) {
   );
   // Ref that shadows session state so callbacks don't close over stale values.
   const sessionRef = useRef(session);
+  // Bumped every time resetToLocalSession() runs. useAuthSync captures this
+  // before starting a refresh and re-checks it before applying the result —
+  // see resetToLocalSession's comment for why this exists.
+  const authEpochRef = useRef(0);
 
   // Verify a persisted intranet session on mount. Uses plain fetch (not httpClient)
   // to avoid triggering the refresh interceptor before configureHttpClient is wired.
@@ -88,6 +94,12 @@ export function AuthProvider({ children }) {
   }, []);
 
   const resetToLocalSession = useCallback(() => {
+    // Invalidate any refresh that was already in flight when this reset was
+    // triggered — without this, a refresh that finally succeeds after we've
+    // reset (e.g. past revokeServerSession's timeout backstop) would call
+    // setSession() with a fresh accessToken/user and silently resurrect an
+    // intranet session right after the user logged out.
+    authEpochRef.current += 1;
     clearStoredSession();
     const fallback = saveStoredSession(createLocalSession());
     sessionRef.current = fallback;
@@ -97,6 +109,8 @@ export function AuthProvider({ children }) {
     setSessionVerified(true);
     return fallback;
   }, []);
+
+  const getAuthEpoch = useCallback(() => authEpochRef.current, []);
 
   // Called after a successful server login. serverResponse = { user, accessToken, accessExpiresAt }.
   const login = useCallback((serverResponse, apiBaseUrl = '') => {
@@ -117,23 +131,68 @@ export function AuthProvider({ children }) {
     return next;
   }, []);
 
-  // Calls /api/auth/logout, then resets to local session regardless of server response.
-  const logout = useCallback(async () => {
-    const snap = sessionRef.current; // capture via ref before state is cleared
-    broadcastLogout();
-    resetToLocalSession();
+  // Calls /api/auth/logout with an explicit session snapshot. Local session
+  // state is left untouched — callers decide when (or whether) to reset.
+  //
+  // _retry: true skips httpClient's 401-refresh-and-retry interceptor.
+  // /api/auth/logout authenticates via the refresh cookie, not the Bearer
+  // access token (see server/src/routes/auth.ts), so it works even with an
+  // expired access token and never needs a refresh first. Letting it through
+  // the interceptor would trigger a refresh whose result races this
+  // function's own timeout: a slow refresh could finish after we've already
+  // given up and reset locally, resurrecting the just-logged-out session (or
+  // worse, landing after a subsequent re-login and clobbering that new
+  // session's cookies). Skipping refresh entirely removes that race instead
+  // of just narrowing it.
+  const revokeServerSession = useCallback(async (snap) => {
+    if (snap?.mode !== 'intranet') return;
+    let raceTimer;
+    const raceTimeout = new Promise((resolve) => {
+      raceTimer = setTimeout(resolve, REVOKE_TIMEOUT_MS);
+    });
     try {
-      if (snap?.mode === 'intranet') {
-        await requestJson('/api/auth/logout', {
+      await Promise.race([
+        requestJson('/api/auth/logout', {
           baseUrl: snap.apiBaseUrl || '',
           method: 'POST',
           session: snap,
-        });
-      }
+          _retry: true,
+        }),
+        raceTimeout,
+      ]);
     } catch {
-      // Server logout is best-effort; local state is already cleared.
+      // Server logout is best-effort.
+    } finally {
+      clearTimeout(raceTimer);
     }
-  }, [resetToLocalSession]);
+  }, []);
+
+  // Revokes the server session first (while sessionRef still points at the
+  // live intranet session), then clears local state.
+  const logout = useCallback(async () => {
+    const snap = sessionRef.current;
+    try {
+      await revokeServerSession(snap);
+    } finally {
+      broadcastLogout();
+      resetToLocalSession();
+    }
+  }, [resetToLocalSession, revokeServerSession]);
+
+  // Electron: main process asks the renderer to log out before the window
+  // actually closes (X button / menu / Ctrl+Q). No local reset here — the
+  // app is quitting, and resetting first would race useAuthSync's sessionRef
+  // (see revokeServerSession's note above).
+  useEffect(() => {
+    if (!window.electron?.onQuitRequested) return;
+    return window.electron.onQuitRequested(async () => {
+      try {
+        await revokeServerSession(sessionRef.current);
+      } finally {
+        window.electron.notifyQuitLogoutDone();
+      }
+    });
+  }, [revokeServerSession]);
 
   // Propagate the current access token to the Electron main process so the
   // audit module can sign EMR audit entries without going through the renderer.
@@ -152,9 +211,10 @@ export function AuthProvider({ children }) {
     sessionVerified,
     setSession,
     resetToLocalSession,
+    getAuthEpoch,
     login,
     logout,
-  }), [session, sessionVerified, setSession, resetToLocalSession, login, logout]);
+  }), [session, sessionVerified, setSession, resetToLocalSession, getAuthEpoch, login, logout]);
 
   return (
     <AuthContext.Provider value={value}>
