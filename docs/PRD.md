@@ -1,8 +1,8 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 6.2.3
-> **Last Updated:** 2026-07-30
-> **Status:** 인트라넷 운영 중 · 경추 모듈 부담 작업 0건 시 완료 배지 오판정 수정 · 종합소견 미리보기 그룹/개별 탭 명칭 정리 + 토글 연동 자동전환 + 낮음 사유 그룹 제목 구분 표시 + 손목/팔꿈치 직업별 요약 가독성 개선 · 종합평가 패턴 그룹화(상병 50건↑ 우/좌 일괄 처리) + EMR byte 절감 + K-L/Ellman 조건부 표시 · 손목/팔꿈치 BK유형 그룹 합류 시 진단별 저장값 자동 동기화 수정 · 환자 목록 의사별 필터 + 비담당 환자 열람성(복사/스크롤) 개선 · EMR 디바이스 등록 rate-limit 자기악순환 방지 · EMR 추출(재해일자별 신청건 매칭·성별 자동입력)/직접입력 개선 · 일괄입력 빈 양식 상시 제공 · M4 영상분석 시범 운영(참고용, 미검증 배너 — 어깨 반복 시간합 계산기 + 공정별 값 표시 추가, 상세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md`)
+> **Version:** 6.3.2
+> **Last Updated:** 2026-08-01
+> **Status:** 인트라넷 운영 중 · zod record 타입 optional 처리에 맞춘 테스트 정리 · Electron 종료 후 로그인 유지 문제 + 서버 세션(logout/refresh) 동시성 경쟁조건 수정 · 환자 단위 편집 락(TTL lease lock, LOCK_ENFORCEMENT_MODE 롤아웃) 구현 · 경추/팔꿈치/손목 모듈 저장 무한루프 수정(stableStringify) · 경추 모듈 부담 작업 0건 시 완료 배지 오판정 수정 · 종합소견 미리보기 그룹/개별 탭 명칭 정리 + 토글 연동 자동전환 + 낮음 사유 그룹 제목 구분 표시 + 손목/팔꿈치 직업별 요약 가독성 개선 · 종합평가 패턴 그룹화(상병 50건↑ 우/좌 일괄 처리) + EMR byte 절감 + K-L/Ellman 조건부 표시 · 손목/팔꿈치 BK유형 그룹 합류 시 진단별 저장값 자동 동기화 수정 · 환자 목록 의사별 필터 + 비담당 환자 열람성(복사/스크롤) 개선 · EMR 디바이스 등록 rate-limit 자기악순환 방지 · EMR 추출(재해일자별 신청건 매칭·성별 자동입력)/직접입력 개선 · 일괄입력 빈 양식 상시 제공 · M4 영상분석 시범 운영(참고용, 미검증 배너 — 어깨 반복 시간합 계산기 + 공정별 값 표시 추가, 상세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md`)
 
 ---
 
@@ -1054,7 +1054,7 @@ public/
 ```
 server/                                  # API 백엔드 — Node 20 + TS + Express
 ├── Dockerfile
-├── migrations/                          # 15개 SQL migration
+├── migrations/                          # 26개 SQL migration
 ├── src/
 │   ├── index.ts                         # Express 진입점, 두 개의 pg pool
 │   ├── config.ts                        # env 검증
@@ -2082,6 +2082,33 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 ---
 
 ## 변경 이력
+
+### v6.3.2 (2026-08-01) — zod record 타입 optional 처리에 맞춘 테스트 수정 (#80)
+
+zod 3.x는 enum 키 `z.record()`라도 값 타입에 `| undefined`를 포함해 추론한다(런타임 파싱 결과가 모든 enum 키를 다 갖는다는 보장이 없어서 — 실제로 안전한 설계). `squatDuration`/`overheadHours` 같은 features 접근이 항상 존재를 가정하고 있어 `tsc --noEmit`에서 possibly undefined 오류가 나던 것을 두 테스트 파일에 non-null assertion을 추가해 해소. CI에 typecheck 게이트가 없어 그동안 방치돼 있었다.
+
+### v6.3.1 (2026-08-01) — Electron 종료 후 로그인 유지 문제 + logout 동시성 경쟁 조건 수정 (#79)
+
+Electron 앱을 X 버튼/메뉴 종료/Ctrl+Q로 닫아도 재실행 시 자동 로그인되던 문제와, 그 과정에서 발견된 서버 세션 동시성 버그들을 함께 수정.
+
+- **클라이언트**: 로그인 시 `rememberMe` 플래그 전송(Electron=false, 웹=true 유지) → 서버가 Electron 세션은 리프레시 쿠키를 세션 쿠키(만료시각 없음)로 발급해 앱 재시작 시 자동 로그인되지 않게 함. 앱 시작 시 레거시(업데이트 이전) 영구 쿠키 정리. 정상 종료(X/메뉴/Ctrl+Q) 시 렌더러 경유 IPC 핸드셰이크로 서버 로그아웃 시도(single-flight, 3초 타임아웃 백스톱). `logout()`이 `_retry:true`로 401-refresh 인터셉터를 타지 않도록 함(서버가 refresh 쿠키만으로 revoke하므로 액세스 토큰 refresh 불필요). `useAuthSync`에 auth epoch 가드 추가 — 로그아웃 이후 뒤늦게 도착한 refresh 결과나 크로스탭 브로드캐스트가 세션을 되살리지 못하도록 방어.
+- **서버**: `POST /api/auth/logout`을 refresh 쿠키 기반 인증으로 재작성(auth/csrf 미들웨어 제거) — 액세스 토큰 없이도 동작, 만료된 세션도 즉시 revoke 가능. `sessions.family_id` 도입 + `rotateSession`/`revokeSessionFamily` 모두 family 단위 advisory lock(`pg_advisory_xact_lock`) 적용 — 동시 refresh 두 개가 같은 토큰으로 경합하거나, logout이 예전 세대 토큰을 든 채 동시 refresh가 새 세대 세션을 만드는 경우에도 세션이 살아남지 않도록 직렬화. CSRF 검증을 `revokeSessionFamily` 트랜잭션 안으로 이동 — 별도 사전조회의 grace window 불일치로 오래된 토큰이 CSRF 검증 없이 family를 revoke할 수 있던 구멍을 닫음. `hashToken`/`generateToken`을 `tokenHash.ts`로 분리(`csrf.ts` ↔ `sessionStore.ts` 순환 참조 회피).
+- 검증: 클라이언트 AuthContext/useAuthSync/LoginModal 신규 테스트 포함 전체 vitest 통과(3회 연속 확인), 서버 mock 유닛 테스트 전체 통과 + 실제 Postgres 동시 커넥션 통합 테스트(`sessionStore.integration.test.ts`) 신규 — 두 경쟁 조건(같은 토큰 동시 rotation, 이전/현재 세대 간 logout↔refresh 경합) 모두 수정 전 상태로 되돌려 실패 재현 후 수정 복원해 통과까지 확인. 서버/루트 typecheck 클린, lint 0 errors.
+
+### v6.3.0 (2026-08-01) — 환자 단위 편집 락(TTL lease lock) 구현 (#78)
+
+동일 계정 다중 클라이언트 동시 편집 시 "저장 안 됨" 사고에 대응하는, 서버가 실제로 강제하는 환자 단위 편집 락(§2, §12.A 인트라넷 아키텍처 확장). 기존 revision 기반 optimistic lock은 최종 안전망으로 그대로 유지한다.
+
+- **서버**: `patient_locks` 테이블(migration 0024) — `lease_token_hash`로만 소유권 판정, `client_instance_id` 자기매칭으로 F5 복구 지원, TTL 만료로 스윕 잡 없이 자연 정리. `server/src/db/patientLocks.ts` — acquire/renew/force/peek/release + 쓰기 게이트(`checkLockForWrite`), `patient_records` FOR UPDATE 앵커로 락 관련 트랜잭션 전체를 직렬화. `patients.ts`(§Server 라우터)에 `POST`/`DELETE`/`GET /:id/lock` 신설, patch/delete/assignPatient에 앵커+게이팅 배선, 소프트 삭제 시 락 행 정리. `videoAnalysis.ts` applyJob에도 동일 게이팅. `LOCK_ENFORCEMENT_MODE`(off/observe/enforce) 3단계 롤아웃 플래그 — off는 기존 동작과 완전 동일(추가 쿼리 없음).
+- **프론트**: `usePatientLock`(신규) — 환자를 열면 즉시 acquire 시도(별도 peek 불필요, 423 응답 자체에 holder 정보 포함), `ttlMs/4` renew 하트비트, force-takeover, 세대번호로 stale 응답 방지, 창 포커스/탭 활성화/30초 주기 안전망 + 지수 백오프(30초~5분)·연타 방지로 'lost'/'held-by-other' 상태 재시도. `usePatientSync`가 `getPushEligibility`로 락 상태에 따라 활성 환자만 push 게이팅, `flushPatient`는 독자 PATCH 대신 기존 autosync 큐에 합류(cycleId 태깅 + 커밋 배리어로 stale snapshot 재전송 방지). `useSyncStatusSummary`(신규) — 충돌/락상실/저장대기/오프라인 건수를 동시에 반환하는 전역 동기화 배너용 훅. `App.jsx`에 usePatientLock↔usePatientSync 브리지, 세션 identity 변화 시 토큰 일괄 초기화, 환자 전환 가드, held-by-other/lost 배너 + 강제 획득 버튼. `StepContent`/`usePatientCrud`/`usePresetManagement`는 자체 계산 대신 `canMutateActivePatient`(권한 AND 락 보유)를 신뢰.
+- **외부(코덱스) 리뷰 3라운드**로 배포(enforce 모드) 전 발견·수정한 결함: TOCTOU 권한 검사 레이스, `clock_timestamp()` 미사용(TTL이 트랜잭션 시작 시각에 고정), observe 모드 감사로그 누락과 force-takeover 이전 보유자 미기록, GET .../lock 응답 스키마 미포장, 만료 경계 레이스에서 `peekLock()`의 `null`을 LockRow로 위장하던 버그(호출부 TypeError/500 유발 가능), 영상 분석 최종 apply에 leaseToken 누락(423 오탐), `syncPaused`가 실제로는 자동 push를 막지 못하던 문제, 프리셋 모달이 락 가드 바깥에서 열리던 문제, local-only 환자의 `syncPaused` 재진입 영구 정지, `<StrictMode>` 중복 acquire.
+- 검증: mock 단위 테스트 90건 + 실제 두 DB 커넥션으로 acquire 경합·FOR UPDATE 직렬화를 검증하는 통합 테스트(`TEST_DATABASE_URL` 있을 때만 실행), 실 브라우저 두 개 동시 편집 수동 검증.
+
+### v6.2.4 (2026-08-01) — 경추/팔꿈치/손목 모듈 저장 무한루프 수정 (#77)
+
+`syncCervicalModuleData`/`syncElbowModuleData`/`syncWristModuleData`(§4.4, §4.5, §4.6)가 `JSON.stringify`로 변경 여부를 비교하는데, 정규화 과정에서 객체 키가 고정 순서로 재정렬되면서 원본과 키 순서만 달라도 `changed=true`로 오판했다. PostgreSQL JSONB는 키 삽입 순서를 보존하지 않아 서버 왕복 시마다 이 오판이 반복되어 동일 payload가 계속 재저장되는 무한 루프가 발생했다.
+
+- 키 순서에 무관한 `stableStringify()`를 `core/utils/common.js`에 추가하고 세 모듈의 `serialize()`에 적용. 회귀 테스트 추가.
 
 ### v6.2.3 (2026-07-30) — 경추 모듈 부담 작업 0건 시 완료 배지 오판정 수정
 
