@@ -32,6 +32,11 @@ if (!originAllowed) {
       ipcRenderer.on('goto-module', callback);
       return () => ipcRenderer.removeListener('goto-module', callback);
     },
+    onQuitRequested: (callback) => {
+      ipcRenderer.on('app-quit-requested', callback);
+      return () => ipcRenderer.removeListener('app-quit-requested', callback);
+    },
+    notifyQuitLogoutDone: () => ipcRenderer.send('quit-logout-done'),
 
     // Native alert/confirm
     showAlert:   (message) => ipcRenderer.invoke('show-alert',   message),

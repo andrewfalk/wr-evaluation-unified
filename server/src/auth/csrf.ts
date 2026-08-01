@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import type { Response } from 'express';
 import type { Pool } from 'pg';
-import { hashToken } from './sessionStore';
+import { hashToken } from './tokenHash';
 
 export const CSRF_COOKIE = 'wr_csrf';
 export const CSRF_HEADER = 'x-csrf-token';

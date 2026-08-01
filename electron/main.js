@@ -87,6 +87,49 @@ function createWindow() {
     icon: path.join(__dirname, '../public/icon.ico'),
     title: '근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미'
   });
+  const win = mainWindow; // 이 창 인스턴스에 고정 — 아래 콜백들은 전역 mainWindow 대신 이걸 참조
+
+  // ─ 정상 종료 시 렌더러 경유 서버 로그아웃 (창별 상태, single-flight) ──────
+  let allowWindowClose = false;
+  let logoutInFlight = null;
+
+  function requestRendererLogout() {
+    if (logoutInFlight) return logoutInFlight; // single-flight: 연속 클릭 방지
+    logoutInFlight = new Promise((resolve) => {
+      if (win.isDestroyed() || win.webContents.isDestroyed()) { resolve(); return; }
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        ipcMain.removeListener('quit-logout-done', onDone);
+        resolve();
+      };
+      const onDone = (event) => {
+        if (event.sender !== win.webContents) return; // 다른 창에서 온 메시지 무시
+        finish();
+      };
+      const timer = setTimeout(finish, 3000); // 렌더러 응답 없으면 3초 후 강제 진행
+      ipcMain.on('quit-logout-done', onDone);
+      try {
+        win.webContents.send('app-quit-requested');
+      } catch {
+        finish();
+      }
+    });
+    return logoutInFlight;
+  }
+
+  win.on('close', (event) => {
+    if (allowWindowClose || !IS_INTRANET_BUILD) return;
+    event.preventDefault();
+    requestRendererLogout().then(() => {
+      allowWindowClose = true;
+      if (!win.isDestroyed()) win.close();
+    });
+  });
+
+  win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
 
   if (IS_INTRANET_BUILD) {
     if (!INTRANET_URL) {
@@ -138,7 +181,7 @@ function createWindow() {
       submenu: [
         { label: '새로 만들기', accelerator: 'CmdOrCtrl+N', click: () => mainWindow.webContents.send('menu-new') },
         { type: 'separator' },
-        { label: '종료', accelerator: 'CmdOrCtrl+Q', click: () => app.quit() }
+        { label: '종료', accelerator: 'CmdOrCtrl+Q', click: () => mainWindow?.close() }
       ]
     },
     {
@@ -186,8 +229,22 @@ function createWindow() {
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
+}
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+// 이번 변경(Electron 로그인 = 세션 쿠키) 이전에 발급된 영구 wr_refresh 쿠키를 정리한다.
+// session === false(만료시각이 있는 영구 쿠키)일 때만 제거한다 — 이미 session === true
+// (세션 쿠키)인 경우는 건드리지 않는다. 다른 실행 중인 인스턴스의 정상 세션이거나
+// 이미 새 정책으로 로그인된 세션일 수 있기 때문이다.
+async function clearLegacyPersistentRefreshCookie() {
+  if (!IS_INTRANET_BUILD || !INTRANET_URL) return;
+  try {
+    const cookies = await session.defaultSession.cookies.get({ url: INTRANET_URL, name: 'wr_refresh' });
+    if (cookies.some(c => c.session === false)) {
+      await session.defaultSession.cookies.remove(INTRANET_URL, 'wr_refresh');
+    }
+  } catch (e) {
+    console.warn('[auth] legacy wr_refresh cookie cleanup failed:', e instanceof Error ? e.message : String(e));
+  }
 }
 
 app.whenReady().then(async () => {
@@ -211,6 +268,7 @@ app.whenReady().then(async () => {
     }
   }
 
+  await clearLegacyPersistentRefreshCookie();
   createWindow();
 
   if (IS_INTRANET_BUILD) {

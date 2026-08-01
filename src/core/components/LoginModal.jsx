@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { requestJson } from '../services/httpClient';
+import { isElectron } from '../utils/platform';
 import { SignupRequestModal } from './SignupRequestModal';
 
 export function LoginModal({ apiBaseUrl = '' }) {
@@ -20,7 +21,7 @@ export function LoginModal({ apiBaseUrl = '' }) {
       const data = await requestJson('/api/auth/login', {
         baseUrl: apiBaseUrl,
         method: 'POST',
-        body: { loginId: loginId.trim(), password },
+        body: { loginId: loginId.trim(), password, rememberMe: !isElectron() },
         _retry: true, // login 401 = wrong credentials, not token expiry — skip refresh interceptor
       });
       login(data, apiBaseUrl);

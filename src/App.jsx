@@ -65,7 +65,7 @@ import './modules/elbow';
 import './modules/wrist';
 
 function App() {
-  const { session, setSession, resetToLocalSession, isAuthenticated, sessionVerified, logout } = useAuth();
+  const { session, setSession, resetToLocalSession, getAuthEpoch, isAuthenticated, sessionVerified, logout } = useAuth();
   const [patients, setPatients] = useState([]);
   const [patientScope, setPatientScope] = useState(() => getDefaultPatientScope(session));
   const [dashboardScope, setDashboardScope] = useState(() => getDefaultPatientScope(session));
@@ -78,7 +78,7 @@ function App() {
   const [patientFilters, setPatientFilters] = useState(DEFAULT_PATIENT_FILTERS);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const { settings, handleSaveSettings, switchToLocalMode } = useAppSettings({ session, setSession, resetToLocalSession });
-  useAuthSync({ session, setSession, resetToLocalSession });
+  useAuthSync({ session, setSession, resetToLocalSession, getAuthEpoch });
   const [showSettings, setShowSettings] = useState(false);
   const [showAdminConsole, setShowAdminConsole] = useState(false);
   const [showAccountProfile, setShowAccountProfile] = useState(false);
