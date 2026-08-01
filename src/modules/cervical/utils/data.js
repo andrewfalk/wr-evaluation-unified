@@ -1,4 +1,5 @@
 import { resolveDiagnosisModule } from '../../../core/utils/diagnosisMapping';
+import { stableStringify } from '../../../core/utils/common';
 
 export const EXPOSURE_TYPE_OPTIONS = [
   { value: 'shoulder_heavy_load', label: '어깨에 무거운 하중 운반' },
@@ -10,7 +11,7 @@ export const EXPOSURE_TYPE_LABELS = Object.fromEntries(
 );
 
 function serialize(value) {
-  return JSON.stringify(value || null);
+  return stableStringify(value || null);
 }
 
 function normalizeExposureTypes(exposureTypes = []) {
