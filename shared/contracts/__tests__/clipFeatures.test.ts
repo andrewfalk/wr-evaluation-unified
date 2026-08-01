@@ -140,13 +140,13 @@ describe('ClipFeatureSetSchema — confidenceBreakdown + quality (PR D3a, §8.8)
 
   it('accepts a valid confidenceBreakdown (keypoint/visibility + optional tracking/viewpoint/usableFrameRatio)', () => {
     const r = ClipFeatureSetSchema.parse(withBreakdown({ keypoint: 0.9, visibility: 0.8, tracking: 0.95, viewpoint: 1, usableFrameRatio: 0.83 }));
-    expect(r.features.squatDuration.confidenceBreakdown?.keypoint).toBeCloseTo(0.9, 5);
+    expect(r.features.squatDuration!.confidenceBreakdown?.keypoint).toBeCloseTo(0.9, 5);
   });
 
   it('allows omitting confidenceBreakdown and its optional components (PR C/D2 하위호환)', () => {
-    expect(ClipFeatureSetSchema.parse(fixture).features.squatDuration.confidenceBreakdown).toBeUndefined();
+    expect(ClipFeatureSetSchema.parse(fixture).features.squatDuration!.confidenceBreakdown).toBeUndefined();
     const r = ClipFeatureSetSchema.parse(withBreakdown({ keypoint: 0.9, visibility: 0.8 }));
-    expect(r.features.squatDuration.confidenceBreakdown?.tracking).toBeUndefined();
+    expect(r.features.squatDuration!.confidenceBreakdown?.tracking).toBeUndefined();
   });
 
   it('rejects breakdown out of 0..1, missing required component, or extra field (strict)', () => {
