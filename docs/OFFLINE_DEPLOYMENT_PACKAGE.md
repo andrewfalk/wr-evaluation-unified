@@ -25,6 +25,7 @@
 12. [Standalone 데이터 마이그레이션](#12-standalone-데이터-마이그레이션)
 13. [트러블슈팅](#13-트러블슈팅)
 14. [영상 분석 활성화 및 WSL2 메모리 (선택, 6.0-9)](#14-영상-분석-활성화-및-wsl2-메모리-선택-609)
+15. [환자 단위 편집 락 활성화 (선택)](#15-환자-단위-편집-락-활성화-선택)
 
 ---
 
@@ -1291,3 +1292,48 @@ docker run --rm --network none `
 `load /app/pose-inference/models/*.onnx with onnxruntime backend` 로그와 `wrote /tmp/k.json`이 보이면
 **인터넷 없이(`--network none`) baked 가중치로 추론이 동작**하는 것입니다. (이미지 태그는
 `release-manifest.json`의 `version`에 맞추세요.)
+
+---
+
+## 15. 환자 단위 편집 락 활성화 (선택)
+
+동일 계정으로 여러 클라이언트(예: 진료실 PC + 원무과 PC)가 같은 환자를 동시에 열어 편집할 때,
+나중에 저장한 쪽이 앞서 저장된 내용을 덮어쓰는 것을 막기 위한 TTL lease lock 기능입니다.
+서버 코드·API는 이미지에 항상 포함되어 있고, 실제 활성화 단계는 `LOCK_ENFORCEMENT_MODE`
+환경변수로 3단계 롤아웃합니다(compose `environment:`에 `${LOCK_ENFORCEMENT_MODE:-off}`로
+이미 배선되어 있어 별도 compose 수정은 필요 없습니다).
+
+| 값 | 동작 |
+|---|---|
+| `off` (기본값, **`.env.production`에 미설정 시 이 값**) | 락 획득/갱신/"OO님이 편집 중" 표시 같은 클라이언트 UI는 정상 동작하지만, 서버 쓰기 엔드포인트(환자 수정/삭제/담당의 배정)는 락 보유 여부를 **검사하지 않고 그대로 저장을 받아줍니다**. 즉 동시 편집을 실질적으로 막지 못합니다. |
+| `observe` | 락 위반을 감사 로그(`patient_lock_observed_block`)에만 남기고 저장은 계속 허용합니다. 실 운영 전 관찰 단계용. |
+| `enforce` | 락을 보유하지 않은 클라이언트의 쓰기 요청을 `423 LOCK_HELD`로 실제 차단합니다. |
+
+> ⚠️ **`.env.production`에 아무것도 넣지 않으면 `off`로 조용히 동작합니다.** 동시 편집 방지를
+> 실제로 쓰려면 `LOCK_ENFORCEMENT_MODE=observe`(며칠간 감사 로그로 확인) →
+> `LOCK_ENFORCEMENT_MODE=enforce` 순서로 **반드시 명시적으로 올려야 합니다.** 구버전 클라이언트와의
+> 호환을 위해 단계를 건너뛰지 말 것을 권장합니다.
+
+### 15-1. 활성화 절차
+
+1. `.env.production`에 추가(또는 기존 주석 해제):
+   ```
+   LOCK_ENFORCEMENT_MODE=observe
+   ```
+2. 서비스 재기동:
+   ```powershell
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod up -d
+   ```
+3. 며칠간 관찰합니다. 관리자 콘솔 감사 로그 조회 또는 아래 쿼리로 `patient_lock_observed_block`
+   이벤트가 남는지 확인:
+   ```powershell
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod `
+     exec postgres psql -U wr_user -d wr_evaluation `
+     -c "SELECT created_at, actor_user_id, target_id FROM audit_logs WHERE action = 'patient_lock_observed_block' ORDER BY created_at DESC LIMIT 20;"
+   ```
+4. 문제가 없으면 `.env.production`의 값을 `enforce`로 바꾸고 3단계와 동일하게 재기동합니다.
+
+### 15-2. 되돌리기
+
+`.env.production`의 값을 `off`로 바꾸고 재기동하면 즉시 검사가 비활성화됩니다(기존 락 row는
+DB에 남아있지만 이후 쓰기 요청에서 더 이상 참조되지 않습니다).
