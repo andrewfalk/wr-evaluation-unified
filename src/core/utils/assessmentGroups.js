@@ -293,12 +293,16 @@ export function buildAssessmentBlocks(diagnoses, activeModules = [], { reasonInd
 
 // 그룹(패턴) 형식 문구 — 미완료는 맨 뒤에 붙인다(그룹 화면 UI는 반대로 미완료를 맨
 // 앞에 두지만, 문서 출력은 완료된 평가 결과를 먼저 읽히는 편이 자연스럽다).
+// 완료 그룹 섹션은 개별 형식(buildAssessmentBlocks)과 같은 문장 형태를 쓴다 — 대상
+// 상병을 먼저 나열하고 "상병 상태(...) / 업무관련성(...)"을 뒤에 붙인다. 다만 그룹 안의
+// 모든 대상이 같은 판정(같은 패턴 키)이라 우측/좌측을 상태 줄 앞에 반복 표시하지 않는다
+// — 방향 정보는 이미 대상 줄의 "(우측)"/"(좌측)"에 나와 있다.
 export function formatGroupedAssessment(diagnoses, activeModules = []) {
   const info = buildAssessmentGroups(diagnoses, activeModules);
   const sections = info.groups.map(group => {
     const targetLines = formatAssessmentTargetLines(mergeDisplayTags(group.units, info.byId), info.byId);
-    let section = `[${statusText(group.meta.confirmed)} · 업무관련성 ${assessmentLabel(group.meta.assessment)}] ${group.units.length}개`;
-    section += `\n${targetLines}`;
+    let section = targetLines;
+    section += `\n상병 상태(${getStatusText(group.meta.confirmed)}) / 업무관련성(${assessmentLabel(group.meta.assessment)})`;
     if (group.meta.assessment === 'low') {
       // 사유를 한 줄에 쉼표로 몰아 쓰지 않고 항목당 한 줄씩 불릿으로 — 사람이 읽는 최종
       // 문서(EMR 종합소견)이므로 buildAssessmentBlocks의 개별 형식과 같은 방식으로 맞춘다.

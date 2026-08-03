@@ -109,7 +109,7 @@ describe('generateEMRFieldData — b8(txtSyth1Cont) 요약본 + b5(txtAppvSickCo
     const { txtAppvSickCont, txtSyth1Cont } = generateEMRFieldData(patient);
     expect(txtAppvSickCont).toBe('M17.0 무릎 관절증');
     expect(txtSyth1Cont).toContain('#1: M17.0 무릎 관절증'); // 개별 형식 고유 헤더(콜론)
-    expect(txtSyth1Cont).not.toContain('[상병 확인 · 업무관련성 높음]');
+    expect(txtSyth1Cont).not.toContain('#1. M17.0 무릎 관절증 ('); // 그룹 형식 고유 헤더(마침표+방향)는 없어야 함
   });
 
   it('reportOptions.groupAssessmentResults가 켜지면 b5에 번호가 붙고 b8은 그룹 형식이 된다', () => {
@@ -121,8 +121,7 @@ describe('generateEMRFieldData — b8(txtSyth1Cont) 요약본 + b5(txtAppvSickCo
     });
     const { txtAppvSickCont, txtSyth1Cont } = generateEMRFieldData(patient);
     expect(txtAppvSickCont).toBe('#1. M17.0 무릎 관절증');
-    expect(txtSyth1Cont).toContain('[상병 확인 · 업무관련성 높음] 1개');
-    expect(txtSyth1Cont).toContain('#1. M17.0 무릎 관절증 (우측)');
+    expect(txtSyth1Cont).toContain('#1. M17.0 무릎 관절증 (우측)\n상병 상태(확인) / 업무관련성(높음)');
   });
 
   it('방향 미선택 상병은 그룹 형식(txtSyth1Cont)에서도 사라지지 않고 [미입력/검토 필요]에 남는다', () => {
@@ -146,7 +145,7 @@ describe('generateUnifiedEMR — groupOutputOverride 파라미터 (미리보기�
     const patientGroupOff = makeAssessmentPatient({
       diagnoses: [kneeDiag()], activeModules: ['knee'], modules: { knee: {} },
     });
-    expect(generateUnifiedEMR(patientGroupOn).b8).toContain('[상병 확인 · 업무관련성 높음] 1개');
+    expect(generateUnifiedEMR(patientGroupOn).b8).toContain('상병 상태(확인) / 업무관련성(높음)');
     expect(generateUnifiedEMR(patientGroupOff).b8).toContain('#1: M17.0 무릎 관절증');
   });
 
@@ -155,7 +154,7 @@ describe('generateUnifiedEMR — groupOutputOverride 파라미터 (미리보기�
       diagnoses: [kneeDiag()], activeModules: ['knee'], modules: { knee: {} },
       reportOptions: { groupAssessmentResults: false },
     });
-    expect(generateUnifiedEMR(patient, true).b8).toContain('[상병 확인 · 업무관련성 높음] 1개');
+    expect(generateUnifiedEMR(patient, true).b8).toContain('상병 상태(확인) / 업무관련성(높음)');
     expect(generateUnifiedEMR(patient, false).b8).toContain('#1: M17.0 무릎 관절증');
     // 저장된 값(false)이 그대로면 override=false와 동일한 결과여야 한다
     expect(generateUnifiedEMR(patient).b8).toBe(generateUnifiedEMR(patient, false).b8);
