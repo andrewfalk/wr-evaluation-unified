@@ -204,6 +204,13 @@ describe('computeDashboardStats recentActivity ordering', () => {
     expect(recentActivity.map(r => r.id)).toEqual(['b', 'c', 'a']);
   });
 
+  it('registrationDate는 createdAt을 로컬(KST) 캘린더 날짜로 변환한다(UTC 자정 이전도 정확히)', () => {
+    // 2026-08-02T23:47:00Z == 2026-08-03 08:47 KST — UTC로 자르면 8/2로 하루 밀리던 회귀
+    const patients = [rapPatient({ id: 'a', createdAt: '2026-08-02T23:47:00.000Z' })];
+    const { recentActivity } = computeDashboardStats(patients);
+    expect(recentActivity[0].registrationDate).toBe('2026-08-03');
+  });
+
   it('updatedAt 없으면 _savedAt → createdAt 폴백', () => {
     const patients = [
       rapPatient({ id: 'a', createdAt: '2025-01-01T00:00:00Z' }),

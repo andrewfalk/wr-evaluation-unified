@@ -5,6 +5,7 @@ import { formatBirthDate } from '../utils/data';
 import { isRedactedPatientRecord } from '../services/patientRecords';
 import { canDeletePatient } from '../utils/patientOwnership';
 import { getDoctorOptionsFromRoster } from '../utils/dashboardStats';
+import { toLocalDateString } from '../utils/common';
 
 const DEFAULT_SORT_DIRECTION = {
   default: 'asc',
@@ -28,8 +29,7 @@ const DATE_INPUT_MIN = '1900-01-01';
 const DATE_INPUT_MAX = '2099-12-31';
 
 function formatShortDate(value) {
-  if (!value) return '-';
-  return String(value).slice(0, 10);
+  return toLocalDateString(value) || '-';
 }
 
 function normalizeWarningText(value) {

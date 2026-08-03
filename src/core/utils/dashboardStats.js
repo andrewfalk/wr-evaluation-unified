@@ -1,6 +1,7 @@
 import { isPatientComplete } from './patientCompletion';
 import { getOwnerGroupKey } from './patientOwnership';
 import { formatBirthDate } from './data';
+import { toLocalDateString } from './common';
 
 export const UNASSIGNED_GROUP_KEY = '__unassigned__';
 
@@ -436,7 +437,7 @@ export const computeDashboardStats = (currentPatients) => {
       patientNo: p.data?.shared?.patientNo || '',
       name: p.data?.shared?.name || '이름 없음',
       jobName: p.data?.shared?.jobs?.[0]?.jobName || '',
-      registrationDate: registrationTimestamp?.split('T')[0] || '',
+      registrationDate: toLocalDateString(registrationTimestamp),
       completionDate: p.data?.shared?.evaluationDate || '',
       moduleIds: p.data?.activeModules || [],
       status: complete ? '완료' : '진행중',
