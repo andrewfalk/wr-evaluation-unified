@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canShowCorrectServerButton,
   canShowUseServerButton,
+  getBirthDate,
   getIdentityConflictMessage,
   isUseServerActionDisabled,
 } from '../PatientIdentityConflictModal.jsx';
@@ -29,6 +31,44 @@ describe('canShowUseServerButton', () => {
     expect(canShowUseServerButton({ sync: { serverId: null } })).toBe(false);
     expect(canShowUseServerButton({ sync: {} })).toBe(false);
     expect(canShowUseServerButton(null)).toBe(false);
+  });
+});
+
+describe('canShowCorrectServerButton', () => {
+  const identityConflict = (extra = {}) => ({
+    sync: { serverId: 'server-1', conflict: { kind: 'push', code: 'PATIENT_IDENTITY_CONFLICT' }, ...extra },
+  });
+
+  it('shows for a birth-date mismatch on a server-backed patient', () => {
+    expect(canShowCorrectServerButton(identityConflict())).toBe(true);
+  });
+
+  it('hides for PATIENT_PERSON_CONFLICT (등록번호 중복이지 생년월일 문제가 아님)', () => {
+    expect(canShowCorrectServerButton({
+      sync: { serverId: 'server-1', conflict: { kind: 'push', code: 'PATIENT_PERSON_CONFLICT' } },
+    })).toBe(false);
+  });
+
+  it('hides on a first-POST conflict — 서버 값을 조회조차 못 해 비교 근거가 없다', () => {
+    expect(canShowCorrectServerButton({
+      sync: { serverId: null, conflict: { kind: 'push', code: 'PATIENT_IDENTITY_CONFLICT' } },
+    })).toBe(false);
+  });
+
+  it('hides when there is no conflict at all', () => {
+    expect(canShowCorrectServerButton({ sync: { serverId: 'server-1' } })).toBe(false);
+    expect(canShowCorrectServerButton(null)).toBe(false);
+  });
+});
+
+describe('getBirthDate', () => {
+  it('reads shared.birthDate', () => {
+    expect(getBirthDate({ data: { shared: { birthDate: '1980-05-05' } } })).toBe('1980-05-05');
+  });
+
+  it('returns empty string when missing', () => {
+    expect(getBirthDate({ data: { shared: {} } })).toBe('');
+    expect(getBirthDate(null)).toBe('');
   });
 });
 

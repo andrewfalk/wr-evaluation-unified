@@ -432,7 +432,7 @@ function App() {
   };
   handleResetPatientsRef.current = handleResetPatients;
 
-  const { markRemoteDeleteConflict, handleResolveConflict } = useConflictResolution({
+  const { markRemoteDeleteConflict, handleResolveConflict, handleCorrectServerIdentity } = useConflictResolution({
     setPatients, activeId, setActiveId, setCurrentStepIndex, session, settings, setConflictPatientId,
   });
 
@@ -456,7 +456,7 @@ function App() {
 
     showBatchImport, setShowBatchImport, handleBatchImport,
 
-    conflictPatient, setConflictPatientId, handleResolveConflict, markRemoteDeleteConflict,
+    conflictPatient, setConflictPatientId, handleResolveConflict, handleCorrectServerIdentity, markRemoteDeleteConflict,
 
     presetModalJobId, setPresetModalJobId, presetEditingPreset, setPresetEditingPreset,
     presetBrowseJobId, setPresetBrowseJobId,

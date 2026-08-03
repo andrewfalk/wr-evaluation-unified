@@ -3,11 +3,12 @@ import * as XLSX from 'xlsx';
 import { useAuth } from '../auth/AuthContext';
 import { suggestModules, resolveDiagnosisModule } from '../utils/diagnosisMapping';
 import { getModule, getAllModules } from '../moduleRegistry';
-import { showAlert } from '../utils/platform';
+import { showAlert, showConfirm } from '../utils/platform';
 import { createManagedPatient, touchPatientRecord } from '../services/patientRecords';
 import {
   normalizeHeader, parseDate, parseGender, parseSide, getCell, buildColMap,
   ensureDiagnosis, ensureSharedJob, applyReturnConsiderations, applyDiagnosisAssessment,
+  collectImportDateErrors,
 } from '../utils/batchImportHelpers';
 
 function clonePatients(existingPatients = []) {
@@ -143,7 +144,14 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
   const [preview, setPreview] = useState(null);
   const [columns, setColumns] = useState([]);
   const [dragover, setDragover] = useState(false);
+  // 미리보기 단계에서 검출한 날짜 오류. 기본적으로 가져오기를 차단하고,
+  // 사용자가 명시적으로 확인한 경우에만(allowPartialImport) 정상 행만 반영한다.
+  const [rowErrors, setRowErrors] = useState([]);
+  const [allowPartialImport, setAllowPartialImport] = useState(false);
   const fileRef = useRef();
+
+  const errorRowIndexes = new Set(rowErrors.map(e => e.rowIndex));
+  const blockedByErrors = rowErrors.length > 0 && !allowPartialImport;
 
   const handleDownloadTemplate = async () => {
     try {
@@ -155,6 +163,9 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
   const handleFile = (selectedFile) => {
     if (!selectedFile) return;
     setFile(selectedFile);
+    // 새 파일을 고르면 이전 파일의 오류/부분허용 상태가 남지 않도록 초기화한다.
+    setRowErrors([]);
+    setAllowPartialImport(false);
 
     const reader = new FileReader();
     reader.onload = event => {
@@ -166,6 +177,9 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
         if (rows.length > 0) {
           setPreview(rows);
           setColumns(rows[0]);
+          // 사전검증은 반드시 여기서 — handleImport는 정상 행이 있으면 곧바로 모달을
+          // 닫으므로 그 안에서 오류를 setState 해도 사용자가 볼 수 없다.
+          setRowErrors(collectImportDateErrors(rows));
         }
       } catch (error) {
         showAlert(`파일 읽기 오류: ${error.message}`);
@@ -174,9 +188,22 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
     reader.readAsArrayBuffer(selectedFile);
   };
 
+  const handleAllowPartial = async () => {
+    const ok = await showConfirm(
+      `날짜 오류가 있는 ${rowErrors.length}개 항목을 제외하고 정상 행만 가져옵니다.\n`
+      + `제외된 행의 데이터는 반영되지 않습니다.\n\n계속하시겠습니까?`
+    );
+    if (ok) setAllowPartialImport(true);
+  };
+
   const handleImport = async () => {
     if (!preview || preview.length < 2) {
       await showAlert('가져올 데이터가 없습니다.');
+      return;
+    }
+    // 방어적 재확인 — 버튼이 비활성화돼 있지만 호출부가 바뀌어도 오염 데이터가 새지 않게.
+    if (blockedByErrors) {
+      await showAlert('날짜 오류가 있는 행이 있습니다. 파일을 수정하거나 "정상 행만 가져오기"를 선택하세요.');
       return;
     }
 
@@ -199,6 +226,12 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
 
       const name = String(getCell(row, colMap.name) || '').trim();
       if (!name) continue;
+
+      // 사전검증에서 날짜 오류로 표시된 행은 건너뛴다(allowPartialImport 확인을 거친 경우).
+      if (errorRowIndexes.has(rowIndex)) {
+        stats.skipped += 1;
+        continue;
+      }
 
       const birthDate = parseDate(getCell(row, colMap.birthDate));
       const injuryDate = parseDate(getCell(row, colMap.injuryDate));
@@ -353,11 +386,41 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
                 {columns.join(' | ')}
               </div>
             </div>
+
+            {rowErrors.length > 0 && (
+              <div className="conflict-notice conflict-notice-warning">
+                <strong>날짜 오류 {rowErrors.length}건 — 가져오기가 차단되었습니다.</strong>
+                <p className="modal-section-description">
+                  엑셀에서 생년월일/재해일자 셀이 날짜가 아닌 텍스트 서식이면 잘못된 값이 그대로 저장돼
+                  이후 수정이 막힐 수 있습니다. 파일을 수정한 뒤 다시 선택하세요.
+                </p>
+                <ul className="import-reference-list">
+                  {rowErrors.map(err => (
+                    <li key={`${err.rowIndex}-${err.field}`}>
+                      {err.rowLabel}행: {err.name} — {err.field} &lsquo;{err.rawValue}&rsquo; ({err.message})
+                    </li>
+                  ))}
+                </ul>
+                {allowPartialImport
+                  ? <p className="modal-section-description">위 행을 제외하고 가져옵니다.</p>
+                  : (
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={handleAllowPartial}>
+                      오류 행 제외하고 정상 행만 가져오기
+                    </button>
+                  )}
+              </div>
+            )}
           </section>
         )}
 
         <div className="modal-actions">
-          <button className="btn btn-primary" onClick={handleImport} disabled={!preview}>가져오기</button>
+          <button
+            className="btn btn-primary"
+            onClick={handleImport}
+            disabled={!preview || blockedByErrors}
+          >
+            가져오기
+          </button>
           <button className="btn btn-secondary" onClick={onClose}>취소</button>
         </div>
       </div>

@@ -298,21 +298,61 @@ describe('POST /api/workspaces', () => {
     expect(res.status).toBe(400);
   });
 
+  // snapshot을 커밋하기 *전에* 막아야 한다. patient upsert는 커밋 이후 best-effort로
+  // 돌면서 오류를 삼키므로, 거기서 검증하면 API는 201을 반환하고 오염된 생년월일은
+  // 이미 snapshot_payload에 저장된 뒤가 된다.
+  it('오염된 생년월일이 있으면 400이고 workspace 행을 만들지 않는다', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+
+    const badPatient = {
+      ...PATIENT_SNAPSHOT,
+      data: {
+        ...PATIENT_SNAPSHOT.data,
+        shared: { ...PATIENT_SNAPSHOT.data.shared, birthDate: '4110-02-12' },
+      },
+    };
+
+    const res = await request(makeApp(pool))
+      .post('/api/workspaces')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ name: 'Bad Visit', patients: [badPatient] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_BIRTH_DATE');
+    expect(res.body.fields[0]).toMatchObject({ field: 'birthDate', reason: 'future' });
+
+    // snapshot 트랜잭션 자체가 열리지 않아야 한다
+    expect(pool.connect).not.toHaveBeenCalled();
+    const insertWs = (mock.mock.calls as unknown[][]).find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO workspaces')
+    );
+    expect(insertWs).toBeUndefined();
+    // 날짜 값 자체는 PHI이므로 응답에 되싣지 않는다
+    expect(JSON.stringify(res.body)).not.toContain('4110-02-12');
+  });
+
   it('returns 201 with updated list on success', async () => {
     const pool   = makePool();
     const newRow = { ...WS_ROW, id: '33333333-3333-3333-3333-333333333333', name: 'New Visit' };
     const mock   = pool.query as ReturnType<typeof vi.fn>;
-    // Call order: auth -> BEGIN -> deleted check -> INSERT workspace -> COMMIT -> existing record lookup
-    // -> person lookup/insert -> upsert patient_records -> list
+    // Call order: auth -> BEGIN -> deleted check -> INSERT workspace -> COMMIT
+    // -> [환자별 트랜잭션] BEGIN -> existing record lookup -> person lookup/insert
+    //    -> upsert patient_records -> COMMIT
+    // -> list
     mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });   // auth
     mock.mockResolvedValueOnce({ rows: [] });                  // BEGIN
     mock.mockResolvedValueOnce({ rows: [] });                  // deleted patient check
     mock.mockResolvedValueOnce({ rows: [] });                  // INSERT workspace
     mock.mockResolvedValueOnce({ rows: [] });                  // COMMIT
+    mock.mockResolvedValueOnce({ rows: [] });                  // BEGIN (환자 트랜잭션)
     mock.mockResolvedValueOnce({ rows: [] });                  // SELECT existing patient_records
     mock.mockResolvedValueOnce({ rows: [] });                  // SELECT patient_persons
     mock.mockResolvedValueOnce({ rows: [{ id: PERSON_ID }] }); // INSERT patient_persons
     mock.mockResolvedValueOnce({ rows: [] });                  // upsert patient_records
+    mock.mockResolvedValueOnce({ rows: [] });                  // COMMIT (환자 트랜잭션)
     mock.mockResolvedValueOnce({ rows: [newRow, WS_ROW] });   // list query
 
     const res = await request(makeApp(pool))
@@ -365,7 +405,9 @@ describe('POST /api/workspaces', () => {
   it('upserts patient_records after workspace insert', async () => {
     const pool = makePool();
     const mock  = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValue({ rows: [{ exists: 1 }] });   // all queries succeed
+    // rowCount: 1 — updateExistingPerson은 실제 갱신 여부를 rowCount로 확인한다
+    // (0이면 경합으로 person이 사라진 것으로 보고 던진다).
+    mock.mockResolvedValue({ rows: [{ exists: 1 }], rowCount: 1 });   // all queries succeed
 
     await request(makeApp(pool))
       .post('/api/workspaces')
@@ -413,9 +455,11 @@ describe('POST /api/workspaces', () => {
     mock.mockResolvedValueOnce({ rows: [] }); // deleted patient check
     mock.mockResolvedValueOnce({ rows: [] }); // INSERT workspace
     mock.mockResolvedValueOnce({ rows: [] }); // COMMIT
+    mock.mockResolvedValueOnce({ rows: [] }); // BEGIN (환자 트랜잭션)
     mock.mockResolvedValueOnce({ rows: [{ patient_person_id: ANON_PERSON_ID }] }); // existing record lookup
-    mock.mockResolvedValueOnce({ rows: [] }); // UPDATE existing person
+    mock.mockResolvedValueOnce({ rows: [], rowCount: 1 }); // UPDATE existing person
     mock.mockResolvedValueOnce({ rows: [] }); // upsert patient_records
+    mock.mockResolvedValueOnce({ rows: [] }); // COMMIT (환자 트랜잭션)
     mock.mockResolvedValueOnce({ rows: [WS_ROW] }); // list query
 
     const res = await request(makeApp(pool))
@@ -446,7 +490,7 @@ describe('POST /api/workspaces', () => {
     };
     const pool = makePool();
     const mock  = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValue({ rows: [{ exists: 1 }] });
+    mock.mockResolvedValue({ rows: [{ exists: 1 }], rowCount: 1 });
 
     await request(makeApp(pool))
       .post('/api/workspaces')
@@ -502,10 +546,12 @@ describe('POST /api/workspaces', () => {
     mock.mockResolvedValueOnce({ rows: [] });                // deleted patient check
     mock.mockResolvedValueOnce({ rows: [] });                // INSERT workspace
     mock.mockResolvedValueOnce({ rows: [] });                // COMMIT
+    mock.mockResolvedValueOnce({ rows: [] });                // BEGIN (환자 트랜잭션)
     mock.mockResolvedValueOnce({ rows: [] });                // SELECT existing patient_records
     mock.mockResolvedValueOnce({ rows: [] });                // SELECT patient_persons
     mock.mockResolvedValueOnce({ rows: [{ id: PERSON_ID }] }); // INSERT patient_persons
     mock.mockRejectedValueOnce(new Error('DB error'));       // upsert fails
+    mock.mockResolvedValueOnce({ rows: [] });                // ROLLBACK (환자 트랜잭션)
     mock.mockResolvedValueOnce({ rows: [WS_ROW] });         // list query
 
     const res = await request(makeApp(pool))
@@ -564,10 +610,12 @@ describe('PUT /api/workspaces/:id', () => {
     mock.mockResolvedValueOnce({ rows: [] }); // deleted patient check
     mock.mockResolvedValueOnce({ rows: [], rowCount: 1 }); // UPDATE workspace
     mock.mockResolvedValueOnce({ rows: [] }); // COMMIT
+    mock.mockResolvedValueOnce({ rows: [] }); // BEGIN (환자 트랜잭션)
     mock.mockResolvedValueOnce({ rows: [] }); // SELECT existing patient_records
     mock.mockResolvedValueOnce({ rows: [] }); // SELECT patient_persons
     mock.mockResolvedValueOnce({ rows: [{ id: PERSON_ID }] }); // INSERT patient_persons
     mock.mockResolvedValueOnce({ rows: [] }); // upsert patient_records
+    mock.mockResolvedValueOnce({ rows: [] }); // COMMIT (환자 트랜잭션)
     mock.mockResolvedValueOnce({ rows: [updatedRow] }); // list query
 
     const res = await request(makeApp(pool))

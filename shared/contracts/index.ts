@@ -3,6 +3,7 @@ export * from './autosave';
 export * from './auth';
 export * from './config';
 export * from './patient';
+export * from './patientDates';
 export * from './preset';
 export * from './videoAnalysis';
 export * from './videoAnnotation';

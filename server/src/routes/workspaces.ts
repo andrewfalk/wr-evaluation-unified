@@ -6,6 +6,7 @@ import { csrfMiddleware } from '../middleware/csrf';
 import { auditMiddleware } from '../middleware/audit';
 import { resolvePatientPersonId, type QueryRunner } from '../db/patientPersons';
 import { resolveAssignedDoctor } from '../db/resolveAssignedDoctor';
+import { validatePastDate } from '@wr/contracts';
 
 // ---------------------------------------------------------------------------
 // POST /api/workspaces body schema
@@ -152,18 +153,88 @@ function extractPatientMeta(p: unknown): PatientMeta | null {
   };
 }
 
+// ---------------------------------------------------------------------------
+// 날짜 사전검증 — snapshot을 커밋하기 전에 수행해야 한다.
+//
+// saveWorkspace는 snapshot을 먼저 COMMIT한 뒤 patient upsert를 best-effort로 돌리고
+// 실패를 삼킨다. 따라서 upsertPatientRecord 안에서만 검증하면 API는 200을 반환하고
+// 오염된 생년월일은 이미 snapshot_payload에 저장된 뒤다. 유일하게 400을 돌려줄 수 있는
+// 지점은 SaveBody 파싱 직후 · client.connect() 이전이다.
+//
+// SaveBody.patients가 z.array(z.unknown())이라 zod는 아무것도 걸러주지 않는다.
+// ---------------------------------------------------------------------------
+export interface WorkspaceDateFailure {
+  patientId: string | null;
+  field:     string;
+  reason:    string;
+}
+
+export function collectWorkspaceDateFailures(patients: unknown[]): WorkspaceDateFailure[] {
+  const failures: WorkspaceDateFailure[] = [];
+
+  for (const p of patients) {
+    if (typeof p !== 'object' || p === null) continue;
+    const raw    = p as Record<string, unknown>;
+    const data   = typeof raw['data'] === 'object' && raw['data'] !== null
+      ? raw['data'] as Record<string, unknown> : null;
+    const shared = data && typeof data['shared'] === 'object' && data['shared'] !== null
+      ? data['shared'] as Record<string, unknown> : null;
+    if (!shared) continue;
+
+    for (const field of ['birthDate', 'injuryDate'] as const) {
+      const result = validatePastDate(shared[field]);
+      if (!result.valid) {
+        failures.push({
+          patientId: resolvePatientId(p),
+          field,
+          // 사유 코드만 — 날짜 값 자체는 PHI이므로 응답에 되싣지 않는다.
+          reason: result.reason ?? 'format',
+        });
+      }
+    }
+  }
+
+  return failures;
+}
+
 // Upsert a single patient into patient_records. Errors are logged but not thrown
 // so that a single malformed patient does not block the whole workspace save.
 // The WHERE clause on ON CONFLICT ensures we never overwrite another org's patient.
 // On conflict, assigned_doctor_user_id is kept if already set (COALESCE), so existing
 // assignments are never overwritten by a workspace re-save.
+//
+// 트랜잭션 단위는 "환자 1명" — 호출부가 Promise.allSettled로 병렬 실행하므로 하나의
+// client를 공유하면 여러 BEGIN/COMMIT이 한 연결에 인터리브돼 트랜잭션 경계가 깨진다.
+// 각 호출이 전용 client를 잡고 BEGIN → resolve → upsert → COMMIT 한다.
+//
+// 트랜잭션이 필요한 이유: resolvePatientPersonId가 person 행을 FOR UPDATE로 잡는데,
+// pool.query로 실행하면 statement가 끝나는 즉시 잠금이 풀려 잠금 규약이 무효가 된다.
 async function upsertPatientRecord(
   pool: Pool,
   orgId: string,
   user: { id: string; role: string },
   meta: PatientMeta,
 ): Promise<void> {
-  const existing = await pool.query<{ patient_person_id: string | null; deleted_at: Date | null }>(
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await upsertPatientRecordInTx(client as unknown as QueryRunner, orgId, user, meta);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function upsertPatientRecordInTx(
+  db: QueryRunner,
+  orgId: string,
+  user: { id: string; role: string },
+  meta: PatientMeta,
+): Promise<void> {
+  const existing = await db.query<{ patient_person_id: string | null; deleted_at: Date | null }>(
     `SELECT patient_person_id, deleted_at
      FROM patient_records
      WHERE id = $1 AND organization_id = $2`,
@@ -173,10 +244,10 @@ async function upsertPatientRecord(
   if (existingRow?.deleted_at !== null && existingRow?.deleted_at !== undefined) return;
 
   const existingPersonId = existingRow?.patient_person_id ?? null;
-  const { personId } = await resolvePatientPersonId(pool as QueryRunner, orgId, meta, existingPersonId);
+  const { personId } = await resolvePatientPersonId(db, orgId, meta, existingPersonId);
 
   const { assignedDoctorUserId, assignmentWarnings } = await resolveAssignedDoctor(
-    pool as unknown as QueryRunner,
+    db,
     { orgId, currentUser: user, requestedDoctorName: meta.doctorName }
   );
   if (assignmentWarnings.length > 0) {
@@ -184,7 +255,7 @@ async function upsertPatientRecord(
       assignmentWarnings.map(w => `${w.code}: ${w.message}`).join('; '));
   }
 
-  await pool.query(
+  await db.query(
     `INSERT INTO patient_records
        (id, organization_id, patient_person_id, owner_user_id, assigned_doctor_user_id,
         name, patient_no, birth_date, injury_date, evaluation_date,
@@ -361,6 +432,20 @@ async function saveWorkspace(
     return;
   }
   const { name, patients } = parse.data;
+
+  // snapshot을 커밋하기 전에 검증한다 — 아래 patient upsert는 커밋 이후 best-effort로
+  // 돌면서 오류를 삼키므로, 거기서 던지면 API는 200을 반환하고 오염된 값은 이미
+  // snapshot_payload에 남는다.
+  const dateFailures = collectWorkspaceDateFailures(patients);
+  if (dateFailures.length > 0) {
+    res.status(400).json({
+      code:  'INVALID_BIRTH_DATE',
+      error: 'One or more patients have a date field that is not a valid calendar date within the allowed range',
+      fields: dateFailures,
+    });
+    return;
+  }
+
   const rawPatientIds = extractPatientIds(patients);
   let snapshotPatients: unknown[] = patients;
 

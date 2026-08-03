@@ -130,6 +130,45 @@ export async function pushPatient(patient, { session, settings, leaseToken } = {
 }
 
 // ---------------------------------------------------------------------------
+// 생년월일 정정 — POST /api/patients/:id/identity-correction
+//
+// 서버에 잘못 저장된 person 생년월일을 사용자 확인을 거쳐 덮어쓴다.
+// PATCH의 일반 저장 경로로는 불가능하다 — 서버가 assertCompatibleBirthDate로 409를
+// 던지기 때문이며, 그 안전장치는 등록번호 오타로 남의 기록을 오염시키는 것을 막으므로
+// 그대로 둔다. 이 엔드포인트만 담당의/관리자 확인 + 감사 기록을 조건으로 우회한다.
+//
+// serverId가 있는 환자에만 호출할 것(최초 POST 충돌에는 정정 대상 서버 기록이 없다).
+// 응답: { ...patient, affectedPatientIds } — 복수 case 정정 시 revision이 오른 전체 목록.
+// ---------------------------------------------------------------------------
+export async function correctPatientIdentity(
+  patient, { birthDate, reasonCode, session, settings, leaseToken } = {}
+) {
+  const serverId = patient?.sync?.serverId;
+  if (!serverId) {
+    const err = new Error('identity-correction requires a server-backed patient (sync.serverId).');
+    err.status = 400;
+    throw err;
+  }
+  const revision = patient?.sync?.revision;
+  if (!Number.isInteger(revision) || revision < 1) {
+    const err = new Error(`identity-correction requires a positive integer revision for If-Match (got ${revision}).`);
+    err.status = 400;
+    throw err;
+  }
+
+  const data = await requestJson(`/api/patients/${serverId}/identity-correction`, {
+    baseUrl: getBaseUrl(session, settings),
+    method:  'POST',
+    session,
+    headers: { 'If-Match': String(revision), ...lockTokenHeaders(leaseToken) },
+    body:    { birthDate, reasonCode },
+  });
+
+  const affectedPatientIds = Array.isArray(data?.affectedPatientIds) ? data.affectedPatientIds : [];
+  return { patient: applyServerSync(data, patient.id, patient.meta), affectedPatientIds };
+}
+
+// ---------------------------------------------------------------------------
 // Apply video-analysis job — POST /api/video-analysis/jobs/:jobId/apply
 // 클라가 applyFeatureToModule로 계산한 환자 data를 If-Match(현재 revision)와 함께 보내
 // 서버가 단일 트랜잭션으로 영속화한다. 서버 응답(갱신 patient)을 로컬 sync에 반영해

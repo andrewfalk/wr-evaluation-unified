@@ -23,7 +23,9 @@ vi.mock('../../config', () => ({
 }));
 
 vi.mock('../../middleware/audit', () => ({
-  writeAuditLog:   vi.fn(),
+  writeAuditLog:       vi.fn(),
+  writeAuditLogStrict: vi.fn(),
+  auditFailuresOnly:   (ctx: { status: number }) => ctx.status >= 400,
   auditMiddleware: vi.fn(() => (_req: unknown, _res: unknown, next: () => void) => next()),
 }));
 
@@ -644,7 +646,7 @@ describe('POST /api/patients', () => {
       { rows: [] },                           // DELETE expired
       { rows: [], rowCount: 1 },              // INSERT slot (won)
       { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, // existing person
-      { rows: [] },                           // UPDATE existing person
+      { rows: [], rowCount: 1 },              // UPDATE existing person
       { rows: [] },                           // INSERT patient_records
       { rows: [PAT_ROW] },                    // SELECT after INSERT
       { rows: [] },                           // UPDATE slot to status=201
@@ -674,7 +676,7 @@ describe('POST /api/patients', () => {
       { rows: [] },                           // DELETE expired
       { rows: [], rowCount: 1 },              // INSERT slot (won)
       { rows: [{ id: PERSON_ID, name: 'Old Name', birth_date: '1980-01-01' }] }, // existing person
-      { rows: [] },                           // UPDATE existing person
+      { rows: [], rowCount: 1 },              // UPDATE existing person
       { rows: [] },                           // INSERT patient_records
       { rows: [PAT_ROW] },                    // SELECT after INSERT
       { rows: [] },                           // UPDATE slot to status=201
@@ -845,7 +847,7 @@ describe('PATCH /api/patients/:id', () => {
       { rows: [] }, // BEGIN
       { rows: [PAT_ROW] }, // SELECT (rev 1 matches)
       { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, // person lookup
-      { rows: [] }, // person update
+      { rows: [], rowCount: 1 }, // person update
       { rows: [] }, // UPDATE RETURNING (race -> 0 rows)
       { rows: [] }, // ROLLBACK
     );
@@ -866,7 +868,7 @@ describe('PATCH /api/patients/:id', () => {
       { rows: [] }, // BEGIN
       { rows: [PAT_ROW] }, // SELECT (rev 1)
       { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, // person lookup
-      { rows: [] }, // person update
+      { rows: [], rowCount: 1 }, // person update
       { rows: [updatedRow] }, // UPDATE RETURNING
       { rows: [] }, // COMMIT
     );
@@ -891,7 +893,7 @@ describe('PATCH /api/patients/:id', () => {
       { rows: [] }, // BEGIN
       { rows: [PAT_ROW] }, // SELECT (rev 1)
       { rows: [{ id: PERSON_ID, name: 'Old Name', birth_date: '1980-01-01' }] }, // person lookup
-      { rows: [] }, // person update
+      { rows: [], rowCount: 1 }, // person update
       { rows: [updatedRow] }, // UPDATE RETURNING
       { rows: [] }, // COMMIT
     );
@@ -939,7 +941,7 @@ describe('PATCH /api/patients/:id', () => {
       { rows: [] }, // BEGIN
       { rows: [PAT_ROW] },
       { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] },
-      { rows: [] },
+      { rows: [], rowCount: 1 }, // person update
       { rows: [{ ...PAT_ROW, revision: 2, updated_at: LATER }] },
       { rows: [] }, // COMMIT
     );
@@ -1082,7 +1084,7 @@ describe('PATCH /api/patients/:id — 권한 정책', () => {
     const pool = makePool();
     makeClientSetup(pool, { withAccessCheck: { assigned: USER_ID } },
       { rows: [] }, { rows: [PAT_ROW] },
-      { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, { rows: [] },
+      { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, { rows: [], rowCount: 1 },
       { rows: [updatedRow] }, { rows: [] },
     );
     const res = await request(makeApp(pool))
@@ -1113,7 +1115,7 @@ describe('PATCH /api/patients/:id — 권한 정책', () => {
     // admin은 미들웨어가 즉시 통과하므로 withAccessCheck 없음 — auth + client.query만
     makeClientSetup(pool,
       { rows: [] }, { rows: [PAT_ROW] },
-      { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, { rows: [] },
+      { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, { rows: [], rowCount: 1 },
       { rows: [updatedRow] }, { rows: [] },
     );
     const res = await request(makeApp(pool))
@@ -1764,7 +1766,7 @@ describe('PATCH /api/patients/:id — 락 게이팅 (lockEnforcementMode=enforce
           lease_token_hash: crypto.createHash('sha256').update('my-token').digest('hex'),
         }] },
       { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, // person lookup
-      { rows: [] },        // person update
+      { rows: [], rowCount: 1 },        // person update
       { rows: [updatedRow] }, // UPDATE RETURNING
       { rows: [] },        // COMMIT
     );
@@ -1776,5 +1778,397 @@ describe('PATCH /api/patients/:id — 락 게이팅 (lockEnforcementMode=enforce
       .set('x-lock-token', 'my-token')
       .send({ data: VALID_DATA });
     expect(res.status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 생년월일 서버 검증 (INVALID_BIRTH_DATE)
+// 클라이언트를 우회한 요청도 막아야 한다 — CreateBody.data.shared가
+// z.record(z.unknown())이라 zod는 아무 값이나 통과시킨다.
+// ---------------------------------------------------------------------------
+describe('생년월일 서버 검증', () => {
+  const withBirthDate = (birthDate: string) => ({
+    ...VALID_DATA,
+    shared: { ...SHARED, birthDate },
+  });
+
+  function authOnly(pool: Pool) {
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+  }
+
+  function postWith(pool: Pool, data: unknown) {
+    return request(makeApp(pool))
+      .post('/api/patients')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('idempotency-key', IDEMP_KEY)
+      .send({ ...CREATE_BODY, data });
+  }
+
+  it('POST: 실제 사고 값 4110-02-12를 400으로 거부하고 DB를 건드리지 않는다', async () => {
+    const pool = makePool();
+    authOnly(pool);
+
+    const res = await postWith(pool, withBirthDate('4110-02-12'));
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_BIRTH_DATE');
+    expect(res.body.fields[0]).toMatchObject({ field: 'birthDate', reason: 'future' });
+    // idempotency 슬롯 예약조차 하지 않아야 한다
+    expect(pool.connect).not.toHaveBeenCalled();
+  });
+
+  it('POST: 실재하지 않는 날짜(2월 30일)를 거부한다', async () => {
+    const pool = makePool();
+    authOnly(pool);
+    const res = await postWith(pool, withBirthDate('1980-02-30'));
+    expect(res.status).toBe(400);
+    expect(res.body.fields[0].reason).toBe('not_a_calendar_date');
+  });
+
+  it('POST: 1900 이전을 거부한다', async () => {
+    const pool = makePool();
+    authOnly(pool);
+    const res = await postWith(pool, withBirthDate('1899-12-31'));
+    expect(res.status).toBe(400);
+    expect(res.body.fields[0].reason).toBe('too_old');
+  });
+
+  it('POST: 응답에 생년월일 값 자체를 되싣지 않는다 (PHI)', async () => {
+    const pool = makePool();
+    authOnly(pool);
+    const res = await postWith(pool, withBirthDate('4110-02-12'));
+    expect(JSON.stringify(res.body)).not.toContain('4110-02-12');
+  });
+
+  it('POST: 2020/01/02를 canonical 형식으로 정규화해 DB 컬럼과 payload 양쪽에 저장한다', async () => {
+    const pool = makePool();
+    const cq = makeClientSetup(pool,
+      { rows: [] },                              // BEGIN
+      { rows: [] },                              // DELETE expired
+      { rows: [], rowCount: 1 },                 // INSERT slot (won)
+      { rows: [] },                              // SELECT patient_persons
+      { rows: [{ id: PERSON_ID }] },             // INSERT patient_persons
+      { rows: [] },                              // INSERT patient_records
+      { rows: [PAT_ROW] },                       // SELECT after INSERT
+      { rows: [] },                              // UPDATE slot
+      { rows: [] },                              // COMMIT
+    );
+
+    const res = await postWith(pool, withBirthDate('2020/01/02'));
+    expect(res.status).toBe(201);
+
+    const insertCall = (cq.mock.calls as unknown[][]).find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO patient_records')
+    );
+    expect(insertCall).toBeDefined();
+    // birth_date 컬럼 (8번째 파라미터)
+    expect((insertCall![1] as unknown[])[7]).toBe('2020-01-02');
+    // payload JSON도 함께 정규화돼야 한다 — 갈리면 dateOnly 비교에서 다시 충돌한다
+    const payload = JSON.parse((insertCall![1] as unknown[])[13] as string);
+    expect((payload.data.shared as { birthDate: string }).birthDate).toBe('2020-01-02');
+  });
+
+  it('POST: 빈 생년월일은 허용한다 (생년월일 미상 환자)', async () => {
+    const pool = makePool();
+    makeClientSetup(pool,
+      { rows: [] }, { rows: [] }, { rows: [], rowCount: 1 },
+      { rows: [] }, { rows: [{ id: PERSON_ID }] },
+      { rows: [] }, { rows: [PAT_ROW] }, { rows: [] }, { rows: [] },
+    );
+
+    const res = await postWith(pool, withBirthDate(''));
+    expect(res.status).toBe(201);
+  });
+
+  it('PATCH: 잘못된 생년월일을 400으로 거부한다', async () => {
+    const pool = makePool();
+    makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },        // BEGIN
+      { rows: [PAT_ROW] }, // SELECT
+      { rows: [] },        // ROLLBACK
+    );
+
+    const res = await request(makeApp(pool))
+      .patch(`/api/patients/${PAT_ID}`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('if-match', '1')
+      .send({ data: withBirthDate('4110-02-12') });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_BIRTH_DATE');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE — 마지막 활성 case가 사라지면 등록번호를 해제한다 ("유령 환자" 방지).
+// 이것이 없으면 person 행이 살아남아 (organization_id, patient_no)를 계속 점유하고,
+// 삭제 후 재입력 시 옛 birth_date와 비교돼 PATIENT_IDENTITY_CONFLICT가 재발한다.
+// ---------------------------------------------------------------------------
+describe('DELETE /api/patients/:id — person 해제', () => {
+  function deleteSetup(pool: Pool, personRelease: { rows: unknown[]; rowCount?: number }) {
+    return makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },                                                  // BEGIN
+      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },   // anchor FOR UPDATE
+      { rows: [{ patient_person_id: PERSON_ID }], rowCount: 1 },      // soft-delete RETURNING
+      { rows: [] },                                                  // workspace redaction
+      { rows: [] },                                                  // delete lock
+      { rows: [{ id: PERSON_ID }] },                                 // person SELECT FOR UPDATE
+      personRelease,                                                 // person soft-delete
+      { rows: [] },                                                  // COMMIT
+    );
+  }
+
+  it('soft-delete가 person id를 RETURNING 하고, 해제 UPDATE를 실행한다', async () => {
+    const pool = makePool();
+    const cq = deleteSetup(pool, { rows: [], rowCount: 1 });
+
+    const res = await request(makeApp(pool))
+      .delete(`/api/patients/${PAT_ID}?revision=1`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+
+    expect(res.status).toBe(204);
+    const calls = cq.mock.calls as unknown[][];
+
+    const softDelete = calls.find(
+      (c) => typeof c[0] === 'string'
+        && (c[0] as string).includes('UPDATE patient_records')
+        && (c[0] as string).includes('RETURNING patient_person_id')
+    );
+    expect(softDelete).toBeDefined();
+
+    // 해제는 "살아있는 참조 0건"을 조건으로만 일어나야 한다
+    const release = calls.find(
+      (c) => typeof c[0] === 'string'
+        && (c[0] as string).includes('UPDATE patient_persons')
+        && (c[0] as string).includes('NOT EXISTS')
+    );
+    expect(release).toBeDefined();
+    expect((release![1] as unknown[])[0]).toBe(PERSON_ID);
+
+    // 경합 방지를 위해 person 행을 먼저 FOR UPDATE로 잡아야 한다
+    const personLock = calls.find(
+      (c) => typeof c[0] === 'string'
+        && (c[0] as string).includes('FROM patient_persons')
+        && (c[0] as string).includes('FOR UPDATE')
+    );
+    expect(personLock).toBeDefined();
+  });
+
+  it('살아있는 case가 남아 있어 해제되지 않아도 삭제는 성공한다', async () => {
+    const pool = makePool();
+    deleteSetup(pool, { rows: [], rowCount: 0 }); // NOT EXISTS가 걸러 0행
+
+    const res = await request(makeApp(pool))
+      .delete(`/api/patients/${PAT_ID}?revision=1`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN);
+
+    expect(res.status).toBe(204);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/patients/:id/identity-correction
+// ---------------------------------------------------------------------------
+describe('POST /api/patients/:id/identity-correction', () => {
+  const PAT_ID_2 = '77777777-7777-7777-7777-777777777777';
+  const CORRECTED = '1957-12-13';
+
+  function correctionSetup(
+    pool: Pool,
+    opts: {
+      caseIds?: string[];
+      assigned?: string | null;
+      lockedBy?: string | null;
+      // 2회차 집합 조회 결과를 다르게 만들어 경합을 흉내낸다
+      secondCaseIds?: string[];
+    } = {},
+  ) {
+    const caseIds = opts.caseIds ?? [PAT_ID];
+    const secondCaseIds = opts.secondCaseIds ?? caseIds;
+    const assigned = opts.assigned === undefined ? USER_ID : opts.assigned;
+    const targetRow = { id: PAT_ID, patient_person_id: PERSON_ID, revision: 1, assigned_doctor_user_id: assigned };
+
+    return makeClientSetup(pool, { withAccessCheck: { assigned } },
+      { rows: [] },                                     // BEGIN
+      { rows: [targetRow] },                            // 1) probe (무잠금)
+      { rows: caseIds.map(id => ({ id })) },            // 2) 활성 case FOR UPDATE
+      { rows: [targetRow] },                            // 3) 대상 재검증
+      { rows: [{ id: PERSON_ID }] },                    // 4) person FOR UPDATE
+      { rows: secondCaseIds.map(id => ({ id })) },      // 5) 집합 재확인
+      { rows: opts.lockedBy ? [{ holder_name: opts.lockedBy }] : [] }, // 편집 락 확인
+      { rows: [] },                                     // UPDATE patient_persons
+      { rows: secondCaseIds.map(id => ({ id })) },      // UPDATE patient_records RETURNING
+      { rows: [{ ...PAT_ROW, revision: 2 }] },          // SELECT 응답용
+      { rows: [] },                                     // COMMIT
+    );
+  }
+
+  function correct(pool: Pool, body: unknown, token = orgToken(), revision = '1') {
+    return request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/identity-correction`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('if-match', revision)
+      .send(body);
+  }
+
+  it('단일 활성 case면 담당의가 정정할 수 있고 person과 record가 함께 갱신된다', async () => {
+    const pool = makePool();
+    const cq = correctionSetup(pool);
+
+    const res = await correct(pool, { birthDate: CORRECTED, reasonCode: 'batch_import_typo' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.affectedPatientIds).toEqual([PAT_ID]);
+
+    const calls = cq.mock.calls as unknown[][];
+    const personUpdate = calls.find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('UPDATE patient_persons')
+    );
+    expect(personUpdate).toBeDefined();
+    expect((personUpdate![1] as unknown[])[2]).toBe(CORRECTED);
+
+    // record는 birth_date 컬럼과 payload JSON, revision을 함께 갱신해야 한다
+    const recordUpdate = calls.find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('UPDATE patient_records')
+    );
+    expect(recordUpdate).toBeDefined();
+    expect(recordUpdate![0]).toContain('jsonb_set');
+    expect(recordUpdate![0]).toContain('revision   = revision + 1');
+  });
+
+  it('활성 case를 ID 오름차순으로 잠그고, person 잠금은 그 뒤에 온다 (데드락 회피)', async () => {
+    const pool = makePool();
+    const cq = correctionSetup(pool);
+    await correct(pool, { birthDate: CORRECTED, reasonCode: 'other' });
+
+    const texts = (cq.mock.calls as unknown[][]).map(c => String(c[0]));
+    const caseLockIdx = texts.findIndex(t => t.includes('FROM patient_records') && t.includes('ORDER BY id') && t.includes('FOR UPDATE'));
+    const personLockIdx = texts.findIndex(t => t.includes('FROM patient_persons') && t.includes('FOR UPDATE'));
+
+    expect(caseLockIdx).toBeGreaterThanOrEqual(0);
+    expect(personLockIdx).toBeGreaterThan(caseLockIdx);
+  });
+
+  it('활성 case가 여럿이면 담당의는 403 (관리자 전용)', async () => {
+    const pool = makePool();
+    correctionSetup(pool, { caseIds: [PAT_ID, PAT_ID_2] });
+
+    const res = await correct(pool, { birthDate: CORRECTED, reasonCode: 'other' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('IDENTITY_CORRECTION_REQUIRES_ADMIN');
+  });
+
+  it('활성 case가 여럿이어도 관리자는 성공하고 전체 case id를 돌려준다', async () => {
+    const pool = makePool();
+    correctionSetup(pool, { caseIds: [PAT_ID, PAT_ID_2], assigned: null });
+
+    const res = await correct(pool, { birthDate: CORRECTED, reasonCode: 'other' }, adminToken());
+
+    expect(res.status).toBe(200);
+    expect(res.body.affectedPatientIds).toEqual([PAT_ID, PAT_ID_2]);
+  });
+
+  it('관련 case에 편집 락이 걸려 있으면 423으로 차단한다', async () => {
+    const pool = makePool();
+    correctionSetup(pool, { caseIds: [PAT_ID, PAT_ID_2], assigned: null, lockedBy: 'Dr. Lee' });
+
+    const res = await correct(pool, { birthDate: CORRECTED, reasonCode: 'other' }, adminToken());
+
+    expect(res.status).toBe(423);
+    expect(res.body.code).toBe('LOCK_HELD');
+  });
+
+  it('잠금 사이에 활성 case 집합이 바뀌면 재시도하고, 계속 바뀌면 409', async () => {
+    const pool = makePool();
+    // 3번의 시도 모두 집합 불일치를 보게 만든다 (재시도 상한 = 3)
+    for (let i = 0; i < 3; i += 1) {
+      correctionSetup(pool, { caseIds: [PAT_ID], secondCaseIds: [PAT_ID, PAT_ID_2] });
+    }
+
+    const res = await correct(pool, { birthDate: CORRECTED, reasonCode: 'other' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('IDENTITY_SET_CHANGED');
+    expect(res.body.retriable).toBe(true);
+    // 무한 루프 없이 상한만큼만 시도했는지
+    expect((pool.connect as ReturnType<typeof vi.fn>).mock.calls.length).toBe(3);
+  });
+
+  it('빈 birthDate를 거부한다 (person 생년월일을 지워 안전장치를 무력화할 수 없다)', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ assigned_doctor_user_id: USER_ID }] });
+
+    const res = await correct(pool, { birthDate: '', reasonCode: 'other' });
+    expect(res.status).toBe(400);
+  });
+
+  it('잘못된 birthDate는 일반 입력과 같은 달력 규칙으로 거부한다', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ assigned_doctor_user_id: USER_ID }] });
+
+    const res = await correct(pool, { birthDate: '4110-02-12', reasonCode: 'other' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_BIRTH_DATE');
+  });
+
+  it('허용되지 않은 reasonCode를 거부한다', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ assigned_doctor_user_id: USER_ID }] });
+
+    const res = await correct(pool, { birthDate: CORRECTED, reasonCode: 'made_up_reason' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_BODY');
+  });
+
+  it('If-Match가 없으면 400', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ assigned_doctor_user_id: USER_ID }] });
+
+    const res = await request(makeApp(pool))
+      .post(`/api/patients/${PAT_ID}/identity-correction`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ birthDate: CORRECTED, reasonCode: 'other' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('IF_MATCH_REQUIRED');
+  });
+
+  it('revision이 어긋나면 409와 현재 revision을 돌려준다', async () => {
+    const pool = makePool();
+    const targetRow = { id: PAT_ID, patient_person_id: PERSON_ID, revision: 5, assigned_doctor_user_id: USER_ID };
+    makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },
+      { rows: [targetRow] },
+      { rows: [{ id: PAT_ID }] },
+      { rows: [targetRow] },
+      { rows: [] }, // ROLLBACK
+    );
+
+    const res = await correct(pool, { birthDate: CORRECTED, reasonCode: 'other' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.currentRevision).toBe(5);
+  });
+
+  it('담당의도 관리자도 아니면 미들웨어가 403으로 막는다', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      rows: [{ assigned_doctor_user_id: DOCTOR_ID }],  // 다른 의사 담당
+    });
+
+    const res = await correct(pool, { birthDate: CORRECTED, reasonCode: 'other' });
+    expect(res.status).toBe(403);
   });
 });
