@@ -432,8 +432,8 @@ function App() {
   };
   handleResetPatientsRef.current = handleResetPatients;
 
-  const { markRemoteDeleteConflict, handleResolveConflict } = useConflictResolution({
-    setPatients, activeId, setActiveId, setCurrentStepIndex, session, settings, setConflictPatientId,
+  const { markRemoteDeleteConflict, handleResolveConflict, handleCorrectServerIdentity } = useConflictResolution({
+    setPatients, activeId, setActiveId, setCurrentStepIndex, session, settings, setConflictPatientId, syncNow,
   });
 
   // 공통 모달 props (AppModals)
@@ -456,7 +456,7 @@ function App() {
 
     showBatchImport, setShowBatchImport, handleBatchImport,
 
-    conflictPatient, setConflictPatientId, handleResolveConflict, markRemoteDeleteConflict,
+    conflictPatient, setConflictPatientId, handleResolveConflict, handleCorrectServerIdentity, markRemoteDeleteConflict,
 
     presetModalJobId, setPresetModalJobId, presetEditingPreset, setPresetEditingPreset,
     presetBrowseJobId, setPresetBrowseJobId,

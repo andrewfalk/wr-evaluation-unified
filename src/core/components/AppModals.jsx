@@ -31,7 +31,7 @@ export function AppModals({
 
   showBatchImport, setShowBatchImport, handleBatchImport,
 
-  conflictPatient, setConflictPatientId, handleResolveConflict, markRemoteDeleteConflict,
+  conflictPatient, setConflictPatientId, handleResolveConflict, handleCorrectServerIdentity, markRemoteDeleteConflict,
 
   presetModalJobId, setPresetModalJobId, presetEditingPreset, setPresetEditingPreset,
   presetBrowseJobId, setPresetBrowseJobId,
@@ -97,6 +97,9 @@ export function AppModals({
           settings={settings}
           onUseServer={(serverPatient) =>
             handleResolveConflict('use-server', { patient: conflictPatient, serverPatient })
+          }
+          onCorrectServer={({ birthDate, reasonCode }) =>
+            handleCorrectServerIdentity({ patient: conflictPatient, birthDate, reasonCode })
           }
           onEditIdentity={() => {
             setConflictPatientId(null);

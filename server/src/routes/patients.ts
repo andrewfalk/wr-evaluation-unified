@@ -7,13 +7,24 @@ import { createAuthMiddleware } from '../middleware/auth';
 import { adminOnly } from '../middleware/adminOnly';
 import { assignedDoctorOrAdmin } from '../middleware/patientAccess';
 import { csrfMiddleware } from '../middleware/csrf';
-import { auditMiddleware, writeAuditLog } from '../middleware/audit';
+import { auditMiddleware, auditFailuresOnly, writeAuditLog, writeAuditLogStrict } from '../middleware/audit';
+import {
+  correctPatientIdentity,
+  IdentityCaseLockedError,
+  IdentityForbiddenError,
+  IdentityRevisionMismatchError,
+  IdentitySetChangedError,
+  IdentityTargetNotFoundError,
+} from '../db/patientIdentityCorrection';
 import {
   PatientIdentityConflictError,
+  PatientPersonVanishedError,
   resolvePatientPersonId,
+  releasePersonIfOrphaned,
   type PatientPersonWarning,
   type QueryRunner,
 } from '../db/patientPersons';
+import { validatePastDate } from '@wr/contracts';
 import {
   resolveAssignedDoctor,
   type AssignmentWarning,
@@ -117,6 +128,29 @@ function isUniqueViolation(err: unknown): err is PgErrorLike {
   return (err as PgErrorLike | null)?.code === '23505';
 }
 
+// PostgreSQL deadlock_detected. 두 환자가 서로 등록번호를 맞바꾸면
+// 〈T1: 새 person B 보유 → 옛 person A 대기〉 vs 〈T2: B 보유 → A 대기〉로 순환 대기가
+// 생길 수 있다(새 person은 resolve 시점에 INSERT될 수도 있어 UUID 정렬 선점이 불가능).
+// PostgreSQL이 한쪽을 희생시켜 중단하므로, 희생된 쪽만 다시 돌리면 성공한다.
+export function isDeadlock(err: unknown): boolean {
+  return (err as PgErrorLike | null)?.code === '40P01';
+}
+
+const DEADLOCK_MAX_ATTEMPTS = 3;
+
+// 핸들러가 deadlock으로 던지면 제한 횟수만큼 다시 실행한다.
+// deadlock은 트랜잭션 내부 query에서 발생하고 그 시점엔 응답을 쓰기 전이므로 재실행이 안전하다.
+// 상한을 넘으면 마지막 오류를 그대로 올려 라우트의 500 핸들러가 받는다.
+export async function withDeadlockRetry<T>(run: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await run();
+    } catch (err) {
+      if (!isDeadlock(err) || attempt >= DEADLOCK_MAX_ATTEMPTS) throw err;
+    }
+  }
+}
+
 function uniqueConflictResponse(err: PgErrorLike): { code: string; error: string } {
   if (err.constraint === 'patient_persons_org_patient_no_uniq') {
     return {
@@ -131,6 +165,16 @@ function identityConflictResponse(): { code: string; error: string } {
   return {
     code:  'PATIENT_IDENTITY_CONFLICT',
     error: 'This patient number belongs to an existing patient with a different birth date',
+  };
+}
+
+// 저장 도중 다른 트랜잭션이 같은 person을 해제(soft-delete)한 경우. 데이터 문제가 아니라
+// 순수한 타이밍 경합이므로 클라이언트가 그대로 다시 보내면 성공한다.
+function personVanishedResponse(): { code: string; error: string; retriable: boolean } {
+  return {
+    code:      'PATIENT_PERSON_VANISHED',
+    error:     'The patient identity was modified concurrently. Please retry.',
+    retriable: true,
   };
 }
 
@@ -230,6 +274,61 @@ function extractMeta(data: Record<string, unknown>): ExtractedMeta {
       .filter((j): j is Record<string, unknown> => typeof j === 'object' && j !== null)
       .map((j) => j['jobName'])
       .filter((n): n is string => typeof n === 'string'),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 달력 날짜 검증 · canonical 정규화
+//
+// 클라이언트(BatchImportModal)에서 이미 걸러도 서버는 독립적으로 방어해야 한다 —
+// CreateBody.data.shared가 z.record(z.unknown())이라 zod는 어떤 값이든 통과시킨다.
+//
+// 정규화 결과를 DB 컬럼과 payload JSON 양쪽에 써야 한다. `2020/01/02`를 유효로만
+// 판정하고 원본을 payload에 남기면 DB DATE 컬럼(2020-01-02)과 payload(2020/01/02)가
+// 갈려 dateOnly() 비교에서 다시 충돌한다.
+// ---------------------------------------------------------------------------
+const DATE_FIELDS = ['birthDate', 'injuryDate'] as const;
+
+export interface DateFieldFailure {
+  field:  string;
+  reason: string;
+}
+
+type NormalizeDatesResult =
+  | { ok: true;  data: Record<string, unknown> }
+  | { ok: false; failures: DateFieldFailure[] };
+
+function normalizePatientDates(data: Record<string, unknown>): NormalizeDatesResult {
+  const shared = typeof data['shared'] === 'object' && data['shared'] !== null
+    ? (data['shared'] as Record<string, unknown>) : null;
+  if (!shared) return { ok: true, data };
+
+  const failures: DateFieldFailure[] = [];
+  const patched: Record<string, unknown> = {};
+
+  for (const field of DATE_FIELDS) {
+    const raw = shared[field];
+    const result = validatePastDate(raw);
+    if (!result.valid) {
+      failures.push({ field, reason: result.reason ?? 'format' });
+      continue;
+    }
+    // 빈 값은 ''로, 유효 값은 canonical YYYY-MM-DD로 통일한다.
+    if (raw !== result.normalized) patched[field] = result.normalized;
+  }
+
+  if (failures.length > 0) return { ok: false, failures };
+  if (Object.keys(patched).length === 0) return { ok: true, data };
+
+  return { ok: true, data: { ...data, shared: { ...shared, ...patched } } };
+}
+
+function invalidBirthDateResponse(failures: DateFieldFailure[]): Record<string, unknown> {
+  return {
+    code:  'INVALID_BIRTH_DATE',
+    error: 'One or more date fields are not a valid calendar date within the allowed range',
+    // 사유 코드만 — 날짜 값 자체는 PHI이므로 응답 본문에 되싣지 않는다.
+    fields: failures,
   };
 }
 
@@ -514,8 +613,16 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
     return;
   }
 
-  const { id: clientId, phase, createdAt, data } = parse.data;
-  const meta = extractMeta(data as Record<string, unknown>);
+  const { id: clientId, phase, createdAt, data: rawData } = parse.data;
+
+  // DB를 건드리기 전에 검증 — 잘못된 날짜가 payload와 DATE 컬럼 어디에도 남지 않게.
+  const dates = normalizePatientDates(rawData as Record<string, unknown>);
+  if (!dates.ok) {
+    res.status(400).json(invalidBirthDateResponse(dates.failures));
+    return;
+  }
+  const data = dates.data;
+  const meta = extractMeta(data);
 
   if (!meta.name) {
     res.status(400).json({ code: 'NAME_REQUIRED', error: 'Patient name (data.shared.name) is required' });
@@ -620,6 +727,10 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
       res.status(409).json(identityConflictResponse());
       return;
     }
+    if (err instanceof PatientPersonVanishedError) {
+      res.status(409).json(personVanishedResponse());
+      return;
+    }
     if (isUniqueViolation(err)) {
       res.status(409).json(uniqueConflictResponse(err));
       return;
@@ -714,8 +825,19 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
       ...(data  !== undefined ? { data }   : {}),
     };
 
-    const mergedData = typeof newPayload['data'] === 'object' && newPayload['data'] !== null
+    const rawMergedData = typeof newPayload['data'] === 'object' && newPayload['data'] !== null
       ? (newPayload['data'] as Record<string, unknown>) : {};
+
+    // POST와 동일하게 서버가 독립적으로 검증·정규화한다. 정규화된 값은 아래에서
+    // DB DATE 컬럼(meta)과 payload(newPayload['data']) 양쪽에 함께 반영된다.
+    const dates = normalizePatientDates(rawMergedData);
+    if (!dates.ok) {
+      await client.query('ROLLBACK');
+      res.status(400).json(invalidBirthDateResponse(dates.failures));
+      return;
+    }
+    const mergedData = dates.data;
+    newPayload['data'] = mergedData;
     const meta = extractMeta(mergedData);
 
     if (!meta.name) {
@@ -761,6 +883,15 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
       return;
     }
 
+    // 등록번호를 바꾸면(OLD-001 → NEW-001, 또는 빈 값으로) 이 record는 새 person에 붙고
+    // 옛 person은 참조가 사라진다. 해제하지 않으면 그 person이 계속 활성 상태로
+    // (organization_id, patient_no)를 점유해 삭제 때와 똑같은 "유령 등록번호"가 된다.
+    // 같은 트랜잭션 안에서 정리해야 부분 성공이 남지 않는다.
+    const previousPersonId = current[0].patient_person_id;
+    if (previousPersonId && previousPersonId !== personId) {
+      await releasePersonIfOrphaned(client as QueryRunner, previousPersonId, orgId);
+    }
+
     await client.query('COMMIT');
     res.status(200).json(toResponse(updated[0], warnings));
   } catch (err: unknown) {
@@ -771,6 +902,10 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
     }
     if (err instanceof PatientIdentityConflictError) {
       res.status(409).json(identityConflictResponse());
+      return;
+    }
+    if (err instanceof PatientPersonVanishedError) {
+      res.status(409).json(personVanishedResponse());
       return;
     }
     if (isUniqueViolation(err)) {
@@ -832,10 +967,11 @@ async function deletePatient(pool: Pool, req: Request, res: Response): Promise<v
       return;
     }
 
-    const result = await client.query(
+    const result = await client.query<{ patient_person_id: string | null }>(
       `UPDATE patient_records
        SET deleted_at = now()
-       WHERE id = $1 AND organization_id = $2 AND revision = $3 AND deleted_at IS NULL`,
+       WHERE id = $1 AND organization_id = $2 AND revision = $3 AND deleted_at IS NULL
+       RETURNING patient_person_id`,
       [id, orgId, revision]
     );
 
@@ -887,6 +1023,13 @@ async function deletePatient(pool: Pool, req: Request, res: Response): Promise<v
     // 소프트 삭제는 deleted_at 갱신일 뿐이라 ON DELETE CASCADE가 발동하지 않으므로 명시적으로 정리.
     await deleteLockForPatient(client as QueryRunner, { patientId: id, orgId });
 
+    // 이 환자가 그 person의 마지막 활성 case였다면 등록번호를 해제한다.
+    // 이것이 없으면 person 행이 살아남아 (organization_id, patient_no)를 계속 점유하고,
+    // 같은 등록번호로 재입력할 때 옛 birth_date와 비교돼 PATIENT_IDENTITY_CONFLICT가 재발한다
+    // ("유령 환자"). 0006 인덱스 주석의 "Soft-deleted patients do not reserve the number"가
+    // 실제로 성립하게 만드는 지점.
+    await releasePersonIfOrphaned(client as QueryRunner, result.rows[0]?.patient_person_id, orgId);
+
     await client.query('COMMIT');
     res.status(204).end();
   } catch (err) {
@@ -902,6 +1045,155 @@ async function deletePatient(pool: Pool, req: Request, res: Response): Promise<v
     throw err;
   } finally {
     client.release();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/patients/:id/identity-correction
+//
+// 서버에 잘못 저장된 생년월일을 정정한다. POST /api/patients에는 이 기능을 절대
+// 두지 않는다 — 그 라우트에는 assignedDoctorOrAdmin이 없어서, 본문 플래그만으로
+// override를 허용하면 조직 내 임의 사용자가 남의 person을 고칠 수 있다.
+//
+// 요구사항: If-Match(대상 revision) + 편집 락 게이트 + 담당의/관리자.
+// 활성 case가 여러 개면 관리자만 가능하며, 그 person의 모든 활성 case가 함께 갱신된다.
+// ---------------------------------------------------------------------------
+const IdentityCorrectionBody = z.object({
+  // 빈 값 금지 — null로 person 생년월일을 지우면 identity 안전장치가 무력화된다.
+  birthDate:  z.string().min(1),
+  reasonCode: z.enum(['batch_import_typo', 'emr_mismatch', 'other']),
+});
+
+// 활성 case 집합이 계속 바뀌면 무한 재시도로 커넥션을 묶지 않고 포기한다.
+const IDENTITY_CORRECTION_MAX_ATTEMPTS = 3;
+
+async function correctPatientIdentityRoute(pool: Pool, req: Request, res: Response): Promise<void> {
+  const session = req.sessionInfo!;
+  const orgId   = session.organizationId;
+  const { id }  = req.params;
+
+  if (orgId === null) {
+    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
+    return;
+  }
+
+  const ifMatch = req.headers['if-match'];
+  if (!ifMatch) {
+    res.status(400).json({ code: 'IF_MATCH_REQUIRED', error: 'If-Match header with current revision is required' });
+    return;
+  }
+  const expectedRevision = parsePositiveInt(ifMatch);
+  if (expectedRevision === null) {
+    res.status(400).json({ code: 'INVALID_IF_MATCH', error: 'If-Match must be a positive integer revision' });
+    return;
+  }
+
+  const parse = IdentityCorrectionBody.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ code: 'INVALID_BODY', error: parse.error.issues });
+    return;
+  }
+
+  // 정정 값도 일반 입력과 같은 달력 규칙을 따르되 빈 값은 허용하지 않는다.
+  const checked = validatePastDate(parse.data.birthDate, { allowEmpty: false });
+  if (!checked.valid) {
+    res.status(400).json(invalidBirthDateResponse([{ field: 'birthDate', reason: checked.reason ?? 'format' }]));
+    return;
+  }
+  const { reasonCode } = parse.data;
+
+  for (let attempt = 1; attempt <= IDENTITY_CORRECTION_MAX_ATTEMPTS; attempt += 1) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const lockBlock = await evaluateLockGate(pool, client as QueryRunner, req, id, orgId);
+      if (lockBlock) {
+        await client.query('ROLLBACK');
+        res.status(lockBlock.status).json(lockBlock.body);
+        return;
+      }
+
+      const result = await correctPatientIdentity(client as QueryRunner, {
+        targetId: id,
+        orgId,
+        expectedRevision,
+        birthDate: checked.normalized,
+        session: { userId: session.userId, role: session.role },
+        // 권위 있는 락 판정은 correctPatientIdentity가 활성 case를 잠근 뒤 수행한다.
+        // 위 evaluateLockGate는 앵커 없이 도는 값싼 조기 차단일 뿐이다.
+        leaseToken: getLockTokenHeader(req),
+      });
+
+      // 감사 기록은 변경과 같은 트랜잭션에서 — 기록이 남지 않으면 변경도 남지 않아야 한다.
+      // 라우터의 attempt 미들웨어는 실패/거부만 남기므로 여기서 중복되지 않는다.
+      await writeAuditLogStrict(client as unknown as { query(t: string, p?: unknown[]): Promise<unknown> }, {
+        actorUserId: session.userId,
+        actorOrgId:  orgId,
+        action:      'patient_identity_correct',
+        targetType:  'patient_person',
+        targetId:    result.personId,
+        outcome:     'success',
+        ip:          req.ip ?? null,
+        userAgent:   req.headers['user-agent'] ?? null,
+        // 생년월일은 PHI이므로 기록하지 않는다. person UUID는 targetId에 이미 있다.
+        extra:       { reasonCode, affectedCaseCount: result.caseCount },
+      });
+
+      const { rows } = await client.query<PatientRow>(
+        `SELECT ${SELECT_COLS} FROM patient_records WHERE id = $1`,
+        [id]
+      );
+
+      await client.query('COMMIT');
+      res.status(200).json({
+        ...toResponse(rows[0]),
+        // 복수 case 정정 시 나머지 로컬 case의 revision이 뒤처지므로 클라이언트가
+        // 이 목록으로 pull sync를 돌려 후속 revision conflict를 예방한다.
+        affectedPatientIds: result.affectedPatientIds,
+      });
+      return;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+
+      if (err instanceof IdentitySetChangedError) {
+        if (attempt < IDENTITY_CORRECTION_MAX_ATTEMPTS) continue;
+        res.status(409).json({
+          code:      'IDENTITY_SET_CHANGED',
+          error:     'Related cases kept changing while applying the correction. Please retry.',
+          retriable: true,
+        });
+        return;
+      }
+      if (err instanceof IdentityTargetNotFoundError || err instanceof PatientLockTargetNotFoundError) {
+        res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
+        return;
+      }
+      if (err instanceof IdentityRevisionMismatchError) {
+        res.status(409).json({ code: 'CONFLICT', error: 'Revision mismatch.', currentRevision: err.currentRevision });
+        return;
+      }
+      if (err instanceof IdentityForbiddenError) {
+        res.status(403).json({
+          code:  err.requiresAdmin ? 'IDENTITY_CORRECTION_REQUIRES_ADMIN' : 'FORBIDDEN',
+          error: err.requiresAdmin
+            ? 'This patient number has multiple active cases; only an administrator can correct it'
+            : 'Only the assigned doctor can modify this patient',
+        });
+        return;
+      }
+      if (err instanceof IdentityCaseLockedError) {
+        res.status(423).json({ code: 'LOCK_HELD', error: err.message });
+        return;
+      }
+      if (err instanceof PatientLockForbiddenError) {
+        res.status(403).json({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
+        return;
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 }
 
@@ -1246,7 +1538,8 @@ export function createPatientsRouter(pool: Pool): Router {
   router.patch(
     '/:id',
     auth, csrfMiddleware, assignedDoctorOrAdmin(pool), audit('patient_update'),
-    (req, res) => patchPatient(pool, req, res).catch(() => res.status(500).json(internalError()))
+    (req, res) => withDeadlockRetry(() => patchPatient(pool, req, res))
+      .catch(() => res.status(500).json(internalError()))
   );
 
   router.delete(
@@ -1282,6 +1575,22 @@ export function createPatientsRouter(pool: Pool): Router {
     '/:id/lock',
     auth,
     (req, res) => peekPatientLock(pool, req, res).catch(() => res.status(500).json(internalError()))
+  );
+
+  // 감사 미들웨어가 assignedDoctorOrAdmin **앞**에 온다는 점이 중요하다. 다른 라우트처럼
+  // 뒤에 두면 권한 미들웨어가 403을 반환할 때 res.on('finish') 등록 전에 응답이 끝나
+  // 거부 시도가 감사에 전혀 남지 않는다. 정정은 거부 사실 자체가 감사 대상이다.
+  // 성공은 핸들러가 트랜잭션 안에서 patient_identity_correct로 남기므로,
+  // 여기서는 auditFailuresOnly로 좁혀 중복 기록을 막는다.
+  router.post(
+    '/:id/identity-correction',
+    auth,
+    csrfMiddleware,
+    auditMiddleware(pool, 'patient_identity_correct_attempt', 'patient', undefined, {
+      shouldWrite: auditFailuresOnly,
+    }),
+    assignedDoctorOrAdmin(pool),
+    (req, res) => correctPatientIdentityRoute(pool, req, res).catch(() => res.status(500).json(internalError()))
   );
 
   return router;
