@@ -128,6 +128,29 @@ function isUniqueViolation(err: unknown): err is PgErrorLike {
   return (err as PgErrorLike | null)?.code === '23505';
 }
 
+// PostgreSQL deadlock_detected. 두 환자가 서로 등록번호를 맞바꾸면
+// 〈T1: 새 person B 보유 → 옛 person A 대기〉 vs 〈T2: B 보유 → A 대기〉로 순환 대기가
+// 생길 수 있다(새 person은 resolve 시점에 INSERT될 수도 있어 UUID 정렬 선점이 불가능).
+// PostgreSQL이 한쪽을 희생시켜 중단하므로, 희생된 쪽만 다시 돌리면 성공한다.
+export function isDeadlock(err: unknown): boolean {
+  return (err as PgErrorLike | null)?.code === '40P01';
+}
+
+const DEADLOCK_MAX_ATTEMPTS = 3;
+
+// 핸들러가 deadlock으로 던지면 제한 횟수만큼 다시 실행한다.
+// deadlock은 트랜잭션 내부 query에서 발생하고 그 시점엔 응답을 쓰기 전이므로 재실행이 안전하다.
+// 상한을 넘으면 마지막 오류를 그대로 올려 라우트의 500 핸들러가 받는다.
+export async function withDeadlockRetry<T>(run: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await run();
+    } catch (err) {
+      if (!isDeadlock(err) || attempt >= DEADLOCK_MAX_ATTEMPTS) throw err;
+    }
+  }
+}
+
 function uniqueConflictResponse(err: PgErrorLike): { code: string; error: string } {
   if (err.constraint === 'patient_persons_org_patient_no_uniq') {
     return {
@@ -1097,6 +1120,9 @@ async function correctPatientIdentityRoute(pool: Pool, req: Request, res: Respon
         expectedRevision,
         birthDate: checked.normalized,
         session: { userId: session.userId, role: session.role },
+        // 권위 있는 락 판정은 correctPatientIdentity가 활성 case를 잠근 뒤 수행한다.
+        // 위 evaluateLockGate는 앵커 없이 도는 값싼 조기 차단일 뿐이다.
+        leaseToken: getLockTokenHeader(req),
       });
 
       // 감사 기록은 변경과 같은 트랜잭션에서 — 기록이 남지 않으면 변경도 남지 않아야 한다.
@@ -1512,7 +1538,8 @@ export function createPatientsRouter(pool: Pool): Router {
   router.patch(
     '/:id',
     auth, csrfMiddleware, assignedDoctorOrAdmin(pool), audit('patient_update'),
-    (req, res) => patchPatient(pool, req, res).catch(() => res.status(500).json(internalError()))
+    (req, res) => withDeadlockRetry(() => patchPatient(pool, req, res))
+      .catch(() => res.status(500).json(internalError()))
   );
 
   router.delete(

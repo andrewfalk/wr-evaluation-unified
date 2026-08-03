@@ -5,6 +5,7 @@ import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { auditMiddleware } from '../middleware/audit';
 import { resolvePatientPersonId, releasePersonIfOrphaned, type QueryRunner } from '../db/patientPersons';
+import { withDeadlockRetry } from './patients';
 import { resolveAssignedDoctor } from '../db/resolveAssignedDoctor';
 import { validatePastDate } from '@wr/contracts';
 
@@ -237,17 +238,21 @@ async function upsertPatientRecord(
   user: { id: string; role: string },
   meta: PatientMeta,
 ): Promise<void> {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await upsertPatientRecordInTx(client as unknown as QueryRunner, orgId, user, meta);
-    await client.query('COMMIT');
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    throw err;
-  } finally {
-    client.release();
-  }
+  // 병렬 upsert끼리도 person 잠금 순서가 엇갈릴 수 있다(등록번호 교환 등).
+  // deadlock은 PostgreSQL이 한쪽만 중단시키므로 제한 횟수만큼 재시도하면 해소된다.
+  await withDeadlockRetry(async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await upsertPatientRecordInTx(client as unknown as QueryRunner, orgId, user, meta);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  });
 }
 
 async function upsertPatientRecordInTx(

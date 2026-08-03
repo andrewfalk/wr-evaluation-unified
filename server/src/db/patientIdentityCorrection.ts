@@ -1,4 +1,5 @@
 import type { QueryRunner } from './patientPersons';
+import { checkLockForWrite } from './patientLocks';
 
 // ---------------------------------------------------------------------------
 // 생년월일 정정 — 범용 resolver와 의도적으로 분리된 경로.
@@ -52,6 +53,8 @@ export interface CorrectIdentityParams {
   expectedRevision: number;
   birthDate:     string;   // canonical YYYY-MM-DD, 빈 값 불가(호출부에서 검증)
   session:       { userId: string; role: string };
+  /** 호출자가 대상 환자에 들고 있는 lease token. 본인 락을 통과시키는 데만 쓴다. */
+  leaseToken:    string | null;
 }
 
 export interface CorrectIdentityResult {
@@ -88,7 +91,7 @@ export async function correctPatientIdentity(
   db: QueryRunner,
   params: CorrectIdentityParams,
 ): Promise<CorrectIdentityResult> {
-  const { targetId, orgId, expectedRevision, birthDate, session } = params;
+  const { targetId, orgId, expectedRevision, birthDate, session, leaseToken } = params;
 
   // 1) 무잠금 읽기 — person id만 얻는다. 이 값은 3)에서 반드시 재검증한다.
   const probe = await db.query<TargetRow>(
@@ -148,12 +151,20 @@ export async function correctPatientIdentity(
     throw new IdentityForbiddenError(true);
   }
 
-  // 관련 case 중 하나라도 편집 락이 걸려 있으면 차단한다.
-  // evaluateLockGate는 요청 대상 한 건만 보므로 나머지는 여기서 확인해야 한다.
+  // 편집 락 검사 — 반드시 활성 case를 모두 잠근 *이후*에 해야 한다.
   //
-  // 대상 case는 제외한다 — 그건 이미 evaluateLockGate가 lease token을 검증해 통과시킨
-  // 건이다. 여기서 다시 보면 "환자를 편집 중인 본인"이 자기 락 때문에 정정하지 못한다
-  // (편집 중에 충돌을 만나 정정하는 것이 가장 흔한 경로인데 그게 막힌다).
+  // 라우트의 evaluateLockGate는 record 앵커를 잡기 전에 실행되므로 그것만 믿으면
+  // TOCTOU가 열린다: 〈게이트 통과〉 → 〈다른 사용자가 대상 락 획득〉 → 〈우리가 record 잠금〉
+  // 순서가 가능하다. 락 획득 경로(acquireOrRenewPatientLock)는 lockPatientAnchor로
+  // patient_records를 FOR UPDATE 하므로, 우리가 활성 case를 전부 잡은 뒤에는 새 락이
+  // 들어올 수 없다 — 그래서 여기서의 재검사가 권위를 갖는다.
+  //
+  // 대상 case는 "제외"가 아니라 "본인 토큰이면 허용"이다. 제외해 버리면 위 경합으로
+  // 들어온 타인 락을 그대로 무시하게 된다. checkLockForWrite가 토큰 일치를 판정한다.
+  const targetLock = await checkLockForWrite(db, { patientId: targetId, orgId, leaseToken });
+  if (!targetLock.ok) throw new IdentityCaseLockedError(targetLock.heldBy.holderName);
+
+  // 나머지 case는 어떤 활성 락도 허용하지 않는다(우리 토큰은 대상 case의 것이므로).
   await assertNoActiveLocks(db, currentIds.filter(cid => cid !== targetId), orgId);
 
   // 6) person + 모든 활성 case 갱신.

@@ -512,6 +512,9 @@ describe('POST /api/workspaces', () => {
     mock.mockResolvedValueOnce({ rows: [] }); // COMMIT
     mock.mockResolvedValueOnce({ rows: [] }); // BEGIN (환자 트랜잭션)
     mock.mockResolvedValueOnce({ rows: [{ patient_person_id: ANON_PERSON_ID }] }); // existing record lookup
+    // 기존 person이 이미 익명(patient_no NULL)이므로 그대로 재사용한다.
+    // 옛 번호가 남아 있었다면 새 익명 person으로 옮겨야 한다(번호 점유 해제).
+    mock.mockResolvedValueOnce({ rows: [{ patient_no: null }] }); // SELECT patient_no FOR UPDATE
     mock.mockResolvedValueOnce({ rows: [], rowCount: 1 }); // UPDATE existing person
     mock.mockResolvedValueOnce({ rows: [], rowCount: 1 }); // upsert patient_records
     mock.mockResolvedValueOnce({ rows: [] }); // COMMIT (환자 트랜잭션)

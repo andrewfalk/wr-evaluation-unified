@@ -164,6 +164,27 @@ export async function resolvePatientPersonId(
 ): Promise<ResolvePatientPersonResult> {
   if (!meta.patientNo) {
     if (existingPersonId) {
+      // 기존 person이 등록번호를 갖고 있는데 새 값이 공란이면 그 person을 재사용하면 안 된다.
+      // 재사용하면 record의 patient_no만 비고 patient_persons.patient_no에는 옛 번호가
+      // 그대로 남아 계속 점유된다(호출부의 "person이 바뀌었나" 판정도 발동하지 않는다).
+      // 익명 person을 새로 만들어 record를 옮기고, 옛 person은 호출부가 해제한다.
+      const current = await db.query<{ patient_no: string | null }>(
+        `SELECT patient_no FROM patient_persons
+         WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
+         FOR UPDATE`,
+        [existingPersonId, orgId]
+      );
+
+      if (current.rows.length > 0 && current.rows[0].patient_no !== null) {
+        const moved = await db.query<{ id: string }>(
+          `INSERT INTO patient_persons (organization_id, patient_no, name, birth_date)
+           VALUES ($1, NULL, $2, $3)
+           RETURNING id`,
+          [orgId, meta.name, meta.birthDate]
+        );
+        return { personId: moved.rows[0].id, warnings: [] };
+      }
+
       const personId = await updateExistingPerson(db, existingPersonId, orgId, meta);
       return { personId, warnings: [] };
     }

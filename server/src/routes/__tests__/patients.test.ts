@@ -2014,6 +2014,51 @@ describe('PATCH /api/patients/:id — 등록번호 변경 시 옛 person 해제'
     expect((release![1] as unknown[])[0]).toBe(OLD_PERSON);
   });
 
+  // 공란 전환은 person을 재사용해서는 안 된다 — 재사용하면 record의 patient_no만 비고
+  // patient_persons.patient_no에는 옛 번호가 남아 계속 점유된다.
+  it('등록번호를 공란으로 바꾸면 익명 person으로 옮기고 옛 person을 해제한다', async () => {
+    const pool = makePool();
+    const ANON = '66666666-6666-6666-6666-666666666666';
+    const row = { ...PAT_ROW, patient_person_id: OLD_PERSON };
+    const cq = makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },                                       // BEGIN
+      { rows: [row] },                                    // SELECT current
+      { rows: [{ patient_no: 'OLD-001' }] },              // 기존 person이 번호를 갖고 있음
+      { rows: [{ id: ANON }] },                           // INSERT 익명 patient_persons
+      { rows: [{ ...row, patient_person_id: ANON, revision: 2 }] }, // UPDATE RETURNING
+      { rows: [{ id: OLD_PERSON }] },                     // 옛 person SELECT FOR UPDATE
+      { rows: [], rowCount: 1 },                          // 옛 person soft-delete
+      { rows: [] },                                       // COMMIT
+    );
+
+    const res = await request(makeApp(pool))
+      .patch(`/api/patients/${PAT_ID}`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('if-match', '1')
+      .send({ data: { ...VALID_DATA, shared: { ...SHARED, patientNo: '' } } });
+
+    expect(res.status).toBe(200);
+    const calls = cq.mock.calls as unknown[][];
+
+    // 익명 person을 새로 만들어야 한다 (기존 person 재사용 금지)
+    const insertAnon = calls.find(
+      (c) => typeof c[0] === 'string'
+        && (c[0] as string).includes('INSERT INTO patient_persons')
+        && (c[0] as string).includes('NULL')
+    );
+    expect(insertAnon).toBeDefined();
+
+    // 옛 person이 해제돼 OLD-001이 풀려야 한다
+    const release = calls.find(
+      (c) => typeof c[0] === 'string'
+        && (c[0] as string).includes('UPDATE patient_persons')
+        && (c[0] as string).includes('NOT EXISTS')
+    );
+    expect(release).toBeDefined();
+    expect((release![1] as unknown[])[0]).toBe(OLD_PERSON);
+  });
+
   it('person이 그대로면 해제를 시도하지 않는다', async () => {
     const pool = makePool();
     const row = { ...PAT_ROW, patient_person_id: PERSON_ID };
@@ -2063,10 +2108,10 @@ describe('POST /api/patients/:id/identity-correction', () => {
     const assigned = opts.assigned === undefined ? USER_ID : opts.assigned;
     const targetRow = { id: PAT_ID, patient_person_id: PERSON_ID, revision: 1, assigned_doctor_user_id: assigned };
 
-    // 대상 case를 제외한 나머지가 있을 때만 편집 락 조회가 일어난다 —
-    // 본인 락으로 자기 정정이 막히지 않도록 대상을 제외하기 때문(assertNoActiveLocks).
+    // 대상 case 락 재검사는 항상 일어난다(TOCTOU 차단 — 잠근 뒤 권위 있게 다시 본다).
+    // 대상 외 case가 있을 때만 그 케이스들의 락 조회가 추가된다.
     const othersExist = secondCaseIds.filter(id => id !== PAT_ID).length > 0;
-    const lockCheck = othersExist
+    const otherLockCheck = othersExist
       ? [{ rows: opts.lockedBy ? [{ holder_name: opts.lockedBy }] : [] }]
       : [];
 
@@ -2077,7 +2122,8 @@ describe('POST /api/patients/:id/identity-correction', () => {
       { rows: [targetRow] },                            // 3) 대상 재검증
       { rows: [{ id: PERSON_ID }] },                    // 4) person FOR UPDATE
       { rows: secondCaseIds.map(id => ({ id })) },      // 5) 집합 재확인
-      ...lockCheck,                                     // 편집 락 확인 (대상 외 case가 있을 때만)
+      { rows: [] },                                     // 6) 대상 case 락 재검사 (락 없음)
+      ...otherLockCheck,                                // 7) 나머지 case 락 확인
       { rows: [] },                                     // UPDATE patient_persons
       { rows: secondCaseIds.map(id => ({ id })) },      // UPDATE patient_records RETURNING
       { rows: [{ ...PAT_ROW, revision: 2 }] },          // SELECT 응답용
@@ -2132,6 +2178,44 @@ describe('POST /api/patients/:id/identity-correction', () => {
     expect(personLockIdx).toBeGreaterThan(caseLockIdx);
   });
 
+  // 게이트 통과 직후 타인이 대상 락을 잡는 경합. 재검사가 없으면 그대로 정정돼버린다.
+  it('게이트 통과 후 타인이 대상 락을 잡으면 재검사에서 423으로 잡는다 (TOCTOU)', async () => {
+    setLockEnforcementMode('enforce');
+    try {
+      const pool = makePool();
+      const targetRow = { id: PAT_ID, patient_person_id: PERSON_ID, revision: 1, assigned_doctor_user_id: USER_ID };
+      makeClientSetup(pool, { withAccessCheck: {} },
+        { rows: [] },                                   // BEGIN
+        { rows: [] },                                   // evaluateLockGate — 이 시점엔 락 없음
+        { rows: [targetRow] },                          // probe
+        { rows: [{ id: PAT_ID }] },                     // 활성 case FOR UPDATE
+        { rows: [targetRow] },                          // 재검증
+        { rows: [{ id: PERSON_ID }] },                  // person FOR UPDATE
+        { rows: [{ id: PAT_ID }] },                     // 집합 재확인
+        // 그 사이 다른 사용자가 락을 획득한 상태 — 우리 토큰과 다르다
+        { rows: [{
+          patient_id: PAT_ID, client_instance_id: 'ci', user_id: DOCTOR_ID,
+          holder_name: 'Dr. Lee', acquired_at: NOW, expires_at: LATER,
+          lease_token_hash: crypto.createHash('sha256').update('someone-else').digest('hex'),
+        }] },
+        { rows: [] },                                   // ROLLBACK
+      );
+
+      const res = await request(makeApp(pool))
+        .post(`/api/patients/${PAT_ID}/identity-correction`)
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('if-match', '1')
+        .set('x-lock-token', 'my-token')
+        .send({ birthDate: CORRECTED, reasonCode: 'other' });
+
+      expect(res.status).toBe(423);
+      expect(res.body.code).toBe('LOCK_HELD');
+    } finally {
+      setLockEnforcementMode('off');
+    }
+  });
+
   it('활성 case가 여럿이면 담당의는 403 (관리자 전용)', async () => {
     const pool = makePool();
     correctionSetup(pool, { caseIds: [PAT_ID, PAT_ID_2] });
@@ -2169,20 +2253,20 @@ describe('POST /api/patients/:id/identity-correction', () => {
     try {
       const pool = makePool();
       const targetRow = { id: PAT_ID, patient_person_id: PERSON_ID, revision: 1, assigned_doctor_user_id: USER_ID };
+      const ownLockRow = {
+        patient_id: PAT_ID, client_instance_id: 'ci', user_id: USER_ID,
+        holder_name: 'Dr. Kim', acquired_at: NOW, expires_at: LATER,
+        lease_token_hash: crypto.createHash('sha256').update('my-token').digest('hex'),
+      };
       const cq = makeClientSetup(pool, { withAccessCheck: {} },
         { rows: [] },                                   // BEGIN
-        // evaluateLockGate — 본인 토큰이 일치하는 락
-        { rows: [{
-          patient_id: PAT_ID, client_instance_id: 'ci', user_id: USER_ID,
-          holder_name: 'Dr. Kim', acquired_at: NOW, expires_at: LATER,
-          lease_token_hash: crypto.createHash('sha256').update('my-token').digest('hex'),
-        }] },
+        { rows: [ownLockRow] },                         // evaluateLockGate — 본인 토큰 일치
         { rows: [targetRow] },                          // probe
         { rows: [{ id: PAT_ID }] },                     // 활성 case FOR UPDATE (대상 1건뿐)
         { rows: [targetRow] },                          // 재검증
         { rows: [{ id: PERSON_ID }] },                  // person FOR UPDATE
         { rows: [{ id: PAT_ID }] },                     // 집합 재확인
-        // 대상을 제외하면 남는 case가 없으므로 편집 락 조회 자체가 일어나지 않는다
+        { rows: [ownLockRow] },                         // 대상 락 재검사 — 본인 토큰이므로 통과
         { rows: [] },                                   // UPDATE patient_persons
         { rows: [{ id: PAT_ID }] },                     // UPDATE patient_records RETURNING
         { rows: [{ ...PAT_ROW, revision: 2 }] },        // SELECT 응답용
@@ -2198,11 +2282,12 @@ describe('POST /api/patients/:id/identity-correction', () => {
         .send({ birthDate: CORRECTED, reasonCode: 'batch_import_typo' });
 
       expect(res.status).toBe(200);
-      // patient_locks 조회는 게이트 1회뿐 — 전체 case 락 검사가 대상을 다시 보지 않는다
+      // 게이트 1회 + 활성 case 잠근 뒤 권위 있는 재검사 1회.
+      // 재검사를 빼면 〈게이트 통과 → 타인이 락 획득 → 우리가 잠금〉 TOCTOU가 열린다.
       const lockScans = (cq.mock.calls as unknown[][]).filter(
         (c) => typeof c[0] === 'string' && (c[0] as string).includes('FROM patient_locks')
       );
-      expect(lockScans).toHaveLength(1);
+      expect(lockScans).toHaveLength(2);
     } finally {
       setLockEnforcementMode('off');
     }
