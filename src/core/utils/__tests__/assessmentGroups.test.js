@@ -325,8 +325,8 @@ describe('formatGroupedAssessment: 그룹 형식 문구', () => {
     ];
     const text = formatGroupedAssessment(diagnoses, []);
     expect(text).toBe(
-      '[상병 확인 · 업무관련성 높음] 2개\n#1. M17.0 무릎 관절증 (양측)\n\n' +
-      '[상병 확인 · 업무관련성 낮음] 1개\n#2. M17.0 무릎 관절증 (우측)\n낮음 사유:\n  - 누적 신체부담 낮음\n\n' +
+      '#1. M17.0 무릎 관절증 (양측)\n상병 상태(확인) / 업무관련성(높음)\n\n' +
+      '#2. M17.0 무릎 관절증 (우측)\n상병 상태(확인) / 업무관련성(낮음)\n낮음 사유:\n  - 누적 신체부담 낮음\n\n' +
       '[미입력/검토 필요] 1개\n#3. M17.0 무릎 관절증 (좌측)'
     );
   });
@@ -367,7 +367,7 @@ describe('formatGroupedAssessment: 그룹 형식 문구', () => {
     ];
     const text = formatGroupedAssessment(diagnoses, []);
     expect(text).toBe(
-      '[상병 확인 · 업무관련성 높음] 1개\n#1. M17.0 무릎 관절증 (우측)\n\n' +
+      '#1. M17.0 무릎 관절증 (우측)\n상병 상태(확인) / 업무관련성(높음)\n\n' +
       '[미입력/검토 필요] 1개\n#1. M17.0 무릎 관절증 (좌측)'
     );
   });
@@ -382,8 +382,8 @@ describe('formatGroupedAssessment: 그룹 형식 문구', () => {
     ];
     const text = formatGroupedAssessment(diagnoses, []);
     expect(text).toBe(
-      '[상병 확인 · 업무관련성 낮음] 1개\n' +
       '#1. M17.0 무릎 관절증 (우측)\n' +
+      '상병 상태(확인) / 업무관련성(낮음)\n' +
       '낮음 사유:\n' +
       '  - 연령대비 경미\n' +
       '  - 누적 신체부담 낮음\n' +

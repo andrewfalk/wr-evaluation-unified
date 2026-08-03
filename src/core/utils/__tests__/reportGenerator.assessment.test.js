@@ -55,8 +55,7 @@ describe('generateUnifiedReport — [업무관련성 평가 결과] 배선(asses
       reportOptions: { groupAssessmentResults: true },
     });
     const text = generateUnifiedReport(patient);
-    expect(text).toContain('[상병 확인 · 업무관련성 높음] 2개');
-    expect(text).toContain('#1. M17.0 무릎 관절증 (우측)\n#2. M17.0 무릎 관절증 (좌측)');
+    expect(text).toContain('#1. M17.0 무릎 관절증 (우측)\n#2. M17.0 무릎 관절증 (좌측)\n상병 상태(확인) / 업무관련성(높음)');
     expect(text).not.toContain('#1: M17.0');
   });
 
