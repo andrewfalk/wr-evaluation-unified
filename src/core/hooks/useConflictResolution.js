@@ -1,12 +1,13 @@
 import { useCallback } from 'react';
 import { resolvePatientConflictInList } from '../services/patientConflictResolution';
 import { correctPatientIdentity, deletePatientOnServer } from '../services/patientServerRepository';
+import { getLockToken } from '../services/lockTokenStore';
 import { showAlert, showConfirm } from '../utils/platform';
 
 // 환자 동기화 충돌 해결 핸들러
 export function useConflictResolution({
   setPatients, activeId, setActiveId, setCurrentStepIndex,
-  session, settings, setConflictPatientId,
+  session, settings, setConflictPatientId, syncNow,
 }) {
   const applyResolvedConflict = (patientId, resolution, options = {}) => {
     setPatients(prev => {
@@ -60,6 +61,10 @@ export function useConflictResolution({
     try {
       const { patient: corrected, affectedPatientIds } = await correctPatientIdentity(patient, {
         birthDate, reasonCode, session, settings,
+        // enforce 모드에서는 본인이 들고 있는 lease token을 같이 보내야 통과한다.
+        // 편집 중 충돌을 만나 정정하는 것이 가장 흔한 경로이므로 이게 없으면 정상 사용자가
+        // 자기 락 때문에 423으로 막힌다.
+        leaseToken: getLockToken(patient.id),
       });
 
       // 서버 응답으로 통째 교체 — dirty로 되돌리지 않는다.
@@ -69,10 +74,13 @@ export function useConflictResolution({
       setConflictPatientId(null);
 
       // 복수 case가 갱신됐으면 나머지 로컬 case의 revision이 뒤처진다.
+      // 알림만 띄우고 끝내면 그 case들은 구 revision을 들고 있다가 다음 저장에서 409가 난다.
+      // 실제로 pull을 돌려 최신 revision을 받아온다.
       if (affectedPatientIds.length > 1) {
+        await syncNow?.({ pull: true, reason: 'identity-correction' });
         await showAlert(
-          `생년월일을 정정했습니다.\n같은 환자의 다른 평가 ${affectedPatientIds.length - 1}건도 함께 갱신되었으므로,\n`
-          + `해당 건은 새로고침 후 편집하세요.`
+          `생년월일을 정정했습니다.\n`
+          + `같은 환자의 다른 평가 ${affectedPatientIds.length - 1}건도 함께 갱신되어 최신 상태로 동기화했습니다.`
         );
       }
     } catch (error) {
@@ -87,7 +95,7 @@ export function useConflictResolution({
       }
       await showAlert(`생년월일 정정에 실패했습니다. ${error?.message || '다시 시도해 주세요.'}`);
     }
-  }, [session, settings, setPatients, setConflictPatientId]);
+  }, [session, settings, setPatients, setConflictPatientId, syncNow]);
 
   const handleResolveConflict = async (resolution, { patient, serverPatient, mergedData } = {}) => {
     if (!patient) return;

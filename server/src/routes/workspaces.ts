@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { auditMiddleware } from '../middleware/audit';
-import { resolvePatientPersonId, type QueryRunner } from '../db/patientPersons';
+import { resolvePatientPersonId, releasePersonIfOrphaned, type QueryRunner } from '../db/patientPersons';
 import { resolveAssignedDoctor } from '../db/resolveAssignedDoctor';
 import { validatePastDate } from '@wr/contracts';
 
@@ -169,18 +169,33 @@ export interface WorkspaceDateFailure {
   reason:    string;
 }
 
-export function collectWorkspaceDateFailures(patients: unknown[]): WorkspaceDateFailure[] {
+export type NormalizeWorkspaceResult =
+  | { ok: true;  patients: unknown[] }
+  | { ok: false; failures: WorkspaceDateFailure[] };
+
+/**
+ * 날짜를 검증하고 **canonical 형식으로 정규화한 환자 배열**을 돌려준다.
+ *
+ * 검증만 하고 원본을 그대로 저장하면 안 된다: `2020/01/02`가 유효 판정을 받아도
+ * DB DATE 컬럼에는 2020-01-02로, snapshot/payload에는 2020/01/02로 저장돼
+ * dateOnly() 비교(앞은 '2020-01-02', 뒤는 slice로 '2020/01/02')에서 어긋나
+ * 존재하지도 않는 생년월일 충돌이 발생한다.
+ * 반환된 배열을 snapshot과 patient_records upsert 양쪽에 써야 한다.
+ */
+export function normalizeWorkspacePatients(patients: unknown[]): NormalizeWorkspaceResult {
   const failures: WorkspaceDateFailure[] = [];
+  const normalized: unknown[] = [];
 
   for (const p of patients) {
-    if (typeof p !== 'object' || p === null) continue;
+    if (typeof p !== 'object' || p === null) { normalized.push(p); continue; }
     const raw    = p as Record<string, unknown>;
     const data   = typeof raw['data'] === 'object' && raw['data'] !== null
       ? raw['data'] as Record<string, unknown> : null;
     const shared = data && typeof data['shared'] === 'object' && data['shared'] !== null
       ? data['shared'] as Record<string, unknown> : null;
-    if (!shared) continue;
+    if (!shared) { normalized.push(p); continue; }
 
+    const patched: Record<string, unknown> = {};
     for (const field of ['birthDate', 'injuryDate'] as const) {
       const result = validatePastDate(shared[field]);
       if (!result.valid) {
@@ -190,11 +205,18 @@ export function collectWorkspaceDateFailures(patients: unknown[]): WorkspaceDate
           // 사유 코드만 — 날짜 값 자체는 PHI이므로 응답에 되싣지 않는다.
           reason: result.reason ?? 'format',
         });
+        continue;
       }
+      if (shared[field] !== result.normalized) patched[field] = result.normalized;
     }
+
+    normalized.push(Object.keys(patched).length === 0
+      ? p
+      : { ...raw, data: { ...data, shared: { ...shared, ...patched } } });
   }
 
-  return failures;
+  if (failures.length > 0) return { ok: false, failures };
+  return { ok: true, patients: normalized };
 }
 
 // Upsert a single patient into patient_records. Errors are logged but not thrown
@@ -234,10 +256,17 @@ async function upsertPatientRecordInTx(
   user: { id: string; role: string },
   meta: PatientMeta,
 ): Promise<void> {
+  // FOR UPDATE 필수: 이 조회와 아래 upsert 사이에 DELETE가 끼어들면
+  //   (1) DELETE가 record와 person을 soft-delete하고
+  //   (2) 우리는 새 person을 만들지만
+  //   (3) ON CONFLICT의 `deleted_at IS NULL` 조건 때문에 record 갱신은 0행이 되어
+  // 아무도 참조하지 않는 활성 person만 새로 생긴다 — 새 유령 등록번호.
+  // 행을 잡아두면 DELETE가 우리 커밋까지 대기한다.
   const existing = await db.query<{ patient_person_id: string | null; deleted_at: Date | null }>(
     `SELECT patient_person_id, deleted_at
      FROM patient_records
-     WHERE id = $1 AND organization_id = $2`,
+     WHERE id = $1 AND organization_id = $2
+     FOR UPDATE`,
     [meta.id, orgId]
   );
   const existingRow = existing.rows[0];
@@ -255,7 +284,7 @@ async function upsertPatientRecordInTx(
       assignmentWarnings.map(w => `${w.code}: ${w.message}`).join('; '));
   }
 
-  await db.query(
+  const upserted = await db.query(
     `INSERT INTO patient_records
        (id, organization_id, patient_person_id, owner_user_id, assigned_doctor_user_id,
         name, patient_no, birth_date, injury_date, evaluation_date,
@@ -288,6 +317,19 @@ async function upsertPatientRecordInTx(
       JSON.stringify(meta.payload),
     ]
   );
+
+  // upsert가 0행이면(동시 삭제 등으로 WHERE 조건 탈락) 방금 만들었을 수도 있는 person을
+  // 아무도 참조하지 않는다 → 활성 고아. 같은 트랜잭션에서 정리한다.
+  if ((upserted.rowCount ?? 0) === 0) {
+    await releasePersonIfOrphaned(db, personId, orgId);
+    return;
+  }
+
+  // 등록번호가 바뀌어 다른 person으로 옮겨 붙은 경우, 옛 person이 고아로 남지 않게 해제한다
+  // (patchPatient와 동일한 이유 — 안 하면 옛 등록번호가 계속 점유된다).
+  if (existingPersonId && existingPersonId !== personId) {
+    await releasePersonIfOrphaned(db, existingPersonId, orgId);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -431,20 +473,22 @@ async function saveWorkspace(
     res.status(400).json({ code: 'INVALID_BODY', error: parse.error.issues });
     return;
   }
-  const { name, patients } = parse.data;
+  const { name, patients: rawPatients } = parse.data;
 
-  // snapshot을 커밋하기 전에 검증한다 — 아래 patient upsert는 커밋 이후 best-effort로
-  // 돌면서 오류를 삼키므로, 거기서 던지면 API는 200을 반환하고 오염된 값은 이미
-  // snapshot_payload에 남는다.
-  const dateFailures = collectWorkspaceDateFailures(patients);
-  if (dateFailures.length > 0) {
+  // snapshot을 커밋하기 전에 검증·정규화한다 — 아래 patient upsert는 커밋 이후
+  // best-effort로 돌면서 오류를 삼키므로, 거기서 던지면 API는 200을 반환하고 오염된 값은
+  // 이미 snapshot_payload에 남는다.
+  const dates = normalizeWorkspacePatients(rawPatients);
+  if (!dates.ok) {
     res.status(400).json({
       code:  'INVALID_BIRTH_DATE',
       error: 'One or more patients have a date field that is not a valid calendar date within the allowed range',
-      fields: dateFailures,
+      fields: dates.failures,
     });
     return;
   }
+  // 이후 모든 경로(snapshot 저장 · patient_records upsert)는 정규화된 배열만 쓴다.
+  const patients = dates.patients;
 
   const rawPatientIds = extractPatientIds(patients);
   let snapshotPatients: unknown[] = patients;

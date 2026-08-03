@@ -39,6 +39,18 @@ describe('checkImportDate', () => {
     expect(checkImportDate('', { now: NOW }).valid).toBe(true);
     expect(checkImportDate(undefined, { now: NOW }).valid).toBe(true);
   });
+
+  // parseDate의 정규식은 anchor가 없어 부분 문자열에서도 날짜를 뽑아낸다.
+  // checkImportDate가 그걸 거치면 anchor된 검증이 무력화되므로 문자열은 원본을 그대로 넘긴다.
+  it('부분 문자열에 날짜가 섞인 셀을 형식 오류로 잡는다', () => {
+    const r = checkImportDate('abc2020-01-02xyz', { now: NOW });
+    expect(r.valid).toBe(false);
+    expect(r.reason).toBe('format');
+  });
+
+  it('날짜 뒤에 주석이 붙은 셀도 거부한다', () => {
+    expect(checkImportDate('1980-01-01 (추정)', { now: NOW }).valid).toBe(false);
+  });
 });
 
 describe('isPlausibleBirthDate', () => {

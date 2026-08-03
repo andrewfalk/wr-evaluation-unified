@@ -433,7 +433,7 @@ function App() {
   handleResetPatientsRef.current = handleResetPatients;
 
   const { markRemoteDeleteConflict, handleResolveConflict, handleCorrectServerIdentity } = useConflictResolution({
-    setPatients, activeId, setActiveId, setCurrentStepIndex, session, settings, setConflictPatientId,
+    setPatients, activeId, setActiveId, setCurrentStepIndex, session, settings, setConflictPatientId, syncNow,
   });
 
   // 공통 모달 props (AppModals)

@@ -860,6 +860,15 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
       return;
     }
 
+    // 등록번호를 바꾸면(OLD-001 → NEW-001, 또는 빈 값으로) 이 record는 새 person에 붙고
+    // 옛 person은 참조가 사라진다. 해제하지 않으면 그 person이 계속 활성 상태로
+    // (organization_id, patient_no)를 점유해 삭제 때와 똑같은 "유령 등록번호"가 된다.
+    // 같은 트랜잭션 안에서 정리해야 부분 성공이 남지 않는다.
+    const previousPersonId = current[0].patient_person_id;
+    if (previousPersonId && previousPersonId !== personId) {
+      await releasePersonIfOrphaned(client as QueryRunner, previousPersonId, orgId);
+    }
+
     await client.query('COMMIT');
     res.status(200).json(toResponse(updated[0], warnings));
   } catch (err: unknown) {

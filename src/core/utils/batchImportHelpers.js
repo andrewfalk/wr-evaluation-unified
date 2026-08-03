@@ -34,8 +34,12 @@ export function parseDate(value) {
 // 통과해 서버 patient_persons.birth_date에 고착되고, 이후 모든 저장이 409로 막힌다.
 // 반환: { valid, normalized, reason, message } — 호출부는 normalized를 저장해야 한다.
 export function checkImportDate(value, options = {}) {
-  const parsed = parseDate(value);
-  const result = validatePastDate(parsed, options);
+  // 숫자(엑셀 serial)만 parseDate로 1차 변환하고, 문자열은 원본 그대로 넘긴다.
+  // parseDate의 정규식은 anchor가 없어 'abc2020-01-02xyz'에서도 날짜를 뽑아내므로,
+  // 그걸 거치면 anchor된 validatePastDate가 무력화된다. parseDate 자체는 직종 시작/종료일 등
+  // 다른 호출부가 기대하는 느슨한 동작이라 그대로 두고, 여기서만 우회한다.
+  const input = typeof value === 'number' ? parseDate(value) : value;
+  const result = validatePastDate(input, options);
   return {
     valid: result.valid,
     normalized: result.normalized,

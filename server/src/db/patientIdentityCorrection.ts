@@ -150,7 +150,11 @@ export async function correctPatientIdentity(
 
   // 관련 case 중 하나라도 편집 락이 걸려 있으면 차단한다.
   // evaluateLockGate는 요청 대상 한 건만 보므로 나머지는 여기서 확인해야 한다.
-  await assertNoActiveLocks(db, currentIds, orgId);
+  //
+  // 대상 case는 제외한다 — 그건 이미 evaluateLockGate가 lease token을 검증해 통과시킨
+  // 건이다. 여기서 다시 보면 "환자를 편집 중인 본인"이 자기 락 때문에 정정하지 못한다
+  // (편집 중에 충돌을 만나 정정하는 것이 가장 흔한 경로인데 그게 막힌다).
+  await assertNoActiveLocks(db, currentIds.filter(cid => cid !== targetId), orgId);
 
   // 6) person + 모든 활성 case 갱신.
   await db.query(

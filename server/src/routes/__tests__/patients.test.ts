@@ -1971,6 +1971,77 @@ describe('DELETE /api/patients/:id — person 해제', () => {
 });
 
 // ---------------------------------------------------------------------------
+// PATCH — 등록번호를 바꾸면 옛 person도 해제해야 한다.
+// 안 하면 삭제 때와 똑같이 옛 등록번호가 활성 person에 계속 묶여 유령이 된다.
+// ---------------------------------------------------------------------------
+describe('PATCH /api/patients/:id — 등록번호 변경 시 옛 person 해제', () => {
+  const OLD_PERSON = '88888888-8888-8888-8888-888888888888';
+
+  function patchSetup(pool: Pool, newPersonId: string, oldPersonId: string) {
+    const row = { ...PAT_ROW, patient_person_id: oldPersonId };
+    return makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },                                       // BEGIN
+      { rows: [row] },                                    // SELECT current
+      { rows: [] },                                       // SELECT patient_persons (새 번호 → 없음)
+      { rows: [{ id: newPersonId }] },                    // INSERT patient_persons
+      { rows: [{ ...row, patient_person_id: newPersonId, revision: 2 }] }, // UPDATE RETURNING
+      { rows: [{ id: oldPersonId }] },                    // 옛 person SELECT FOR UPDATE
+      { rows: [], rowCount: 1 },                          // 옛 person soft-delete
+      { rows: [] },                                       // COMMIT
+    );
+  }
+
+  it('다른 등록번호로 바꾸면 옛 person을 해제한다', async () => {
+    const pool = makePool();
+    const cq = patchSetup(pool, PERSON_ID, OLD_PERSON);
+
+    const res = await request(makeApp(pool))
+      .patch(`/api/patients/${PAT_ID}`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('if-match', '1')
+      .send({ data: { ...VALID_DATA, shared: { ...SHARED, patientNo: 'NEW-001' } } });
+
+    expect(res.status).toBe(200);
+
+    const release = (cq.mock.calls as unknown[][]).find(
+      (c) => typeof c[0] === 'string'
+        && (c[0] as string).includes('UPDATE patient_persons')
+        && (c[0] as string).includes('NOT EXISTS')
+    );
+    expect(release).toBeDefined();
+    // 해제 대상은 반드시 *옛* person이어야 한다
+    expect((release![1] as unknown[])[0]).toBe(OLD_PERSON);
+  });
+
+  it('person이 그대로면 해제를 시도하지 않는다', async () => {
+    const pool = makePool();
+    const row = { ...PAT_ROW, patient_person_id: PERSON_ID };
+    const cq = makeClientSetup(pool, { withAccessCheck: {} },
+      { rows: [] },                                        // BEGIN
+      { rows: [row] },                                     // SELECT current
+      { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] }, // person lookup (동일)
+      { rows: [], rowCount: 1 },                           // person update
+      { rows: [{ ...row, revision: 2 }] },                 // UPDATE RETURNING
+      { rows: [] },                                        // COMMIT
+    );
+
+    const res = await request(makeApp(pool))
+      .patch(`/api/patients/${PAT_ID}`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('if-match', '1')
+      .send({ data: VALID_DATA });
+
+    expect(res.status).toBe(200);
+    const release = (cq.mock.calls as unknown[][]).find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('NOT EXISTS')
+    );
+    expect(release).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/patients/:id/identity-correction
 // ---------------------------------------------------------------------------
 describe('POST /api/patients/:id/identity-correction', () => {
@@ -1992,6 +2063,13 @@ describe('POST /api/patients/:id/identity-correction', () => {
     const assigned = opts.assigned === undefined ? USER_ID : opts.assigned;
     const targetRow = { id: PAT_ID, patient_person_id: PERSON_ID, revision: 1, assigned_doctor_user_id: assigned };
 
+    // 대상 case를 제외한 나머지가 있을 때만 편집 락 조회가 일어난다 —
+    // 본인 락으로 자기 정정이 막히지 않도록 대상을 제외하기 때문(assertNoActiveLocks).
+    const othersExist = secondCaseIds.filter(id => id !== PAT_ID).length > 0;
+    const lockCheck = othersExist
+      ? [{ rows: opts.lockedBy ? [{ holder_name: opts.lockedBy }] : [] }]
+      : [];
+
     return makeClientSetup(pool, { withAccessCheck: { assigned } },
       { rows: [] },                                     // BEGIN
       { rows: [targetRow] },                            // 1) probe (무잠금)
@@ -1999,7 +2077,7 @@ describe('POST /api/patients/:id/identity-correction', () => {
       { rows: [targetRow] },                            // 3) 대상 재검증
       { rows: [{ id: PERSON_ID }] },                    // 4) person FOR UPDATE
       { rows: secondCaseIds.map(id => ({ id })) },      // 5) 집합 재확인
-      { rows: opts.lockedBy ? [{ holder_name: opts.lockedBy }] : [] }, // 편집 락 확인
+      ...lockCheck,                                     // 편집 락 확인 (대상 외 case가 있을 때만)
       { rows: [] },                                     // UPDATE patient_persons
       { rows: secondCaseIds.map(id => ({ id })) },      // UPDATE patient_records RETURNING
       { rows: [{ ...PAT_ROW, revision: 2 }] },          // SELECT 응답용
@@ -2007,7 +2085,7 @@ describe('POST /api/patients/:id/identity-correction', () => {
     );
   }
 
-  function correct(pool: Pool, body: unknown, token = orgToken(), revision = '1') {
+  function correct(pool: Pool, body: object, token = orgToken(), revision = '1') {
     return request(makeApp(pool))
       .post(`/api/patients/${PAT_ID}/identity-correction`)
       .set('Authorization', `Bearer ${token}`)
@@ -2082,6 +2160,52 @@ describe('POST /api/patients/:id/identity-correction', () => {
 
     expect(res.status).toBe(423);
     expect(res.body.code).toBe('LOCK_HELD');
+  });
+
+  // enforce 모드에서 "환자를 편집 중이던 본인"이 충돌을 만나 정정하는 것이 가장 흔한 경로다.
+  // 대상 case를 전체 락 검사에서 제외하지 않으면 자기 락 때문에 스스로 막힌다.
+  it('본인이 대상 환자 락을 들고 있어도 정정할 수 있다 (자기 락으로 막히지 않음)', async () => {
+    setLockEnforcementMode('enforce');
+    try {
+      const pool = makePool();
+      const targetRow = { id: PAT_ID, patient_person_id: PERSON_ID, revision: 1, assigned_doctor_user_id: USER_ID };
+      const cq = makeClientSetup(pool, { withAccessCheck: {} },
+        { rows: [] },                                   // BEGIN
+        // evaluateLockGate — 본인 토큰이 일치하는 락
+        { rows: [{
+          patient_id: PAT_ID, client_instance_id: 'ci', user_id: USER_ID,
+          holder_name: 'Dr. Kim', acquired_at: NOW, expires_at: LATER,
+          lease_token_hash: crypto.createHash('sha256').update('my-token').digest('hex'),
+        }] },
+        { rows: [targetRow] },                          // probe
+        { rows: [{ id: PAT_ID }] },                     // 활성 case FOR UPDATE (대상 1건뿐)
+        { rows: [targetRow] },                          // 재검증
+        { rows: [{ id: PERSON_ID }] },                  // person FOR UPDATE
+        { rows: [{ id: PAT_ID }] },                     // 집합 재확인
+        // 대상을 제외하면 남는 case가 없으므로 편집 락 조회 자체가 일어나지 않는다
+        { rows: [] },                                   // UPDATE patient_persons
+        { rows: [{ id: PAT_ID }] },                     // UPDATE patient_records RETURNING
+        { rows: [{ ...PAT_ROW, revision: 2 }] },        // SELECT 응답용
+        { rows: [] },                                   // COMMIT
+      );
+
+      const res = await request(makeApp(pool))
+        .post(`/api/patients/${PAT_ID}/identity-correction`)
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('if-match', '1')
+        .set('x-lock-token', 'my-token')
+        .send({ birthDate: CORRECTED, reasonCode: 'batch_import_typo' });
+
+      expect(res.status).toBe(200);
+      // patient_locks 조회는 게이트 1회뿐 — 전체 case 락 검사가 대상을 다시 보지 않는다
+      const lockScans = (cq.mock.calls as unknown[][]).filter(
+        (c) => typeof c[0] === 'string' && (c[0] as string).includes('FROM patient_locks')
+      );
+      expect(lockScans).toHaveLength(1);
+    } finally {
+      setLockEnforcementMode('off');
+    }
   });
 
   it('잠금 사이에 활성 case 집합이 바뀌면 재시도하고, 계속 바뀌면 409', async () => {
