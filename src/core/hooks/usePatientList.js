@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { isPatientComplete } from '../utils/patientCompletion';
 import { isRedactedPatientRecord } from '../services/patientRecords';
+import { toLocalDateString } from '../utils/common';
 
 const DEFAULT_FILTERS = {
   searchQuery: '',
@@ -26,7 +27,7 @@ function getShared(patient) {
 }
 
 function getRegistrationDate(patient) {
-  return String(patient?.createdAt || patient?._savedAt || '').slice(0, 10);
+  return toLocalDateString(patient?.createdAt || patient?._savedAt || '');
 }
 
 function inDateRange(dateValue, from, to) {

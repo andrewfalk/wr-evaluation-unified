@@ -49,6 +49,20 @@ describe('usePatientList', () => {
     expect(result).toEqual([spine]);
   });
 
+  it('등록일 필터는 UTC 자정 이전(KST 오전) 타임스탬프도 로컬 날짜 기준으로 매칭한다', () => {
+    // 2026-08-02T23:47:00Z == 2026-08-03 08:47 KST — UTC로는 8/2지만 KST로는 8/3 등록건
+    const earlyMorningKst = {
+      id: 'active-1',
+      createdAt: '2026-08-02T23:47:00.000Z',
+      data: { shared: { name: 'Kim', jobs: [] }, activeModules: ['knee'] },
+    };
+
+    expect(runList([earlyMorningKst], { registrationFrom: '2026-08-03', registrationTo: '2026-08-03' }))
+      .toEqual([earlyMorningKst]);
+    expect(runList([earlyMorningKst], { registrationFrom: '2026-08-02', registrationTo: '2026-08-02' }))
+      .toEqual([]);
+  });
+
   it('searches by patient identity fields', () => {
     const patient = {
       id: 'active-1',
