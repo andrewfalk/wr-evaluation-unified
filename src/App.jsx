@@ -305,7 +305,7 @@ function App() {
     activeId, activeModuleId, session, settings,
     patients, setPatients,
     selectedIds, setSelectedIds,
-    errors, setErrors,
+    setErrors,
     setActiveId, setCurrentStepIndex,
     setIntakeShared, setShowHome,
     handleStartIntake,

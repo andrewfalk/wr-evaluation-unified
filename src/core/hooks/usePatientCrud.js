@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useLayoutEffect, useRef } from 'react';
 import { getModule } from '../moduleRegistry';
 import { touchPatientRecord, migratePatientRecords } from '../services/patientRecords';
 import { deletePatientOnServer, isConflictError } from '../services/patientServerRepository';
@@ -12,7 +12,7 @@ export function usePatientCrud({
   activeId, activeModuleId, session, settings,
   patients, setPatients,
   selectedIds, setSelectedIds,
-  errors, setErrors,
+  setErrors,
   setActiveId, setCurrentStepIndex,
   setIntakeShared, setShowHome,
   handleStartIntake,
@@ -20,6 +20,17 @@ export function usePatientCrud({
   // 로컬 전용/비인트라넷은 requiresLock이 false라 canEditPatient와 동일하게 동작한다.
   canMutateActivePatient = true,
 }) {
+  // updateModuleById/updateActiveModules는 useCallback([activeId, session])로 메모이즈되어
+  // 그 시점의 updatePatient를 붙잡는다. 락 취득/해제는 usePatientLock의 useEffect에서
+  // 비동기로 일어나므로(await acquireOnce), activeId가 바뀐 렌더에서는 아직 이전 판정값이
+  // 캡처된 채로 이 클로저가 오래 살아남을 수 있다 — canMutateActivePatient를 그대로 캡처하면
+  // 락 취득 완료 후에도 "여전히 false"로 오판(입력 불가)하거나, 락 상실 후에도 "여전히
+  // true"로 오판(락 없이 수정 통과, 더 위험)한다. ref로 우회해 항상 최신값을 읽는다.
+  const canMutateRef = useRef(canMutateActivePatient);
+  useLayoutEffect(() => {
+    canMutateRef.current = canMutateActivePatient;
+  }, [canMutateActivePatient]);
+
   const updatePatient = (updater) => {
     // 권한 없는 환자 또는 락 미보유(다른 사용자가 편집 중/락 상실)에는 silent guard.
     // UI(fieldset disabled)와 사이드바 게이팅이 정상 흐름에서 호출 자체를 차단하므로,
@@ -27,7 +38,7 @@ export function usePatientCrud({
     // setState/sync 방지.
     // (참고: preset select는 이 함수를 거치지 않는 별도 경로 — usePresetManagement.js의
     // handlePresetSelect가 자체적으로 canEditPatient 가드를 갖는다.)
-    if (!canMutateActivePatient) return;
+    if (!canMutateRef.current) return;
 
     setPatients(prev => prev.map(p =>
       p.id === activeId
@@ -41,7 +52,7 @@ export function usePatientCrud({
         )
         : p
     ));
-    if (Object.keys(errors).length) setErrors({});
+    setErrors(prev => (Object.keys(prev).length ? {} : prev));
   };
 
   const updateShared = (newShared) => {
