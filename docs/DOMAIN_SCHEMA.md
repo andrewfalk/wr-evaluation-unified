@@ -366,7 +366,7 @@ Each module payload must follow these rules:
 | Field | Type | Meaning |
 |---|---|---|
 | `jobExtras` | `KneeJobExtra[]` | Knee-specific workload factors linked to `shared.jobs[]` |
-| `returnConsiderations` | `string` | Return-to-work considerations |
+| `returnConsiderations` | `string` | Free-text notes. Saved with the record but never sent to EMR (excluded from `generateEMRFieldData`); still included in Excel/text report exports |
 
 #### `modules.spine`
 
@@ -385,13 +385,15 @@ Each module payload must follow these rules:
       "force": 0,
       "sharedJobId": "uuid"
     }
-  ]
+  ],
+  "returnConsiderations": ""
 }
 ```
 
 | Field | Type | Meaning |
 |---|---|---|
 | `tasks` | `SpineTask[]` | Spine-specific MDDM tasks, optionally linked to `shared.jobs[]` |
+| `returnConsiderations` | `string` | Same free-text notes field as `modules.knee` (see above) |
 
 ## 11. Workspace Snapshot
 

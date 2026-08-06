@@ -142,14 +142,29 @@ export function getCell(row, index) {
   return index >= 0 ? row[index] : undefined;
 }
 
+// 단순 부분일치만으로는 헤더 하나가 여러 필드 후보에 동시에 걸릴 수 있다(예: '특이사항메모'가
+// specialNotes 후보 '특이사항'과 returnConsiderations 후보 '특이사항메모' 모두에 부분일치).
+// 그래서 전역 2단계로 배정한다: 1) 모든 필드에 대해 정확일치를 먼저 찾아 그 열을 예약,
+// 2) 아직 못 찾은 필드만 예약되지 않은 열에서 부분일치로 찾는다. 같은 key가 여러 그룹에
+// 등장하면 뒤 그룹이 이긴다(Map이 나중 값으로 덮어씀 — 기존 동작 보존).
 export function buildColMap(headerRow, columnGroups) {
-  const findCol = (...names) => headerRow.findIndex(header => names.some(name => header.includes(name)));
-  const colMap = {};
+  const entries = new Map();
   for (const group of columnGroups) {
-    for (const [key, candidates] of Object.entries(group)) {
-      colMap[key] = findCol(...candidates);
-    }
+    for (const [key, candidates] of Object.entries(group)) entries.set(key, candidates);
   }
+
+  const colMap = {};
+  const reserved = new Set();
+  const claim = (match) => {
+    for (const [key, candidates] of entries) {
+      if (colMap[key] !== undefined && colMap[key] !== -1) continue;
+      const idx = headerRow.findIndex((header, i) => !reserved.has(i) && candidates.some(name => match(header, name)));
+      colMap[key] = idx;
+      if (idx !== -1) reserved.add(idx);
+    }
+  };
+  claim((header, name) => header === name);        // 1단계: 정확일치
+  claim((header, name) => header.includes(name));   // 2단계: 미배정 필드만 부분일치
   return colMap;
 }
 

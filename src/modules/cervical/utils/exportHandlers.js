@@ -12,7 +12,7 @@ function buildWorkbook(patientData, calc) {
     ['요약', (c.jobSummaries || []).map(summary =>
       `${summary.jobName || '-'} / ${summary.conclusionText}`
     ).join('\n')],
-    ['복귀 고려사항', patientData.module?.returnConsiderations || ''],
+    ['특이 사항 메모', patientData.module?.returnConsiderations || ''],
   ];
 
   const wb = XLSX.utils.book_new();

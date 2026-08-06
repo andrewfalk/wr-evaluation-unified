@@ -98,7 +98,7 @@ function buildWorkbook(emrData) {
     ['4. 직업력/노출 소견', b6],
     ['5. 개인력/특이사항', b7],
     ['6. 종합평가', b8],
-    ['7. 복귀 관련 고려사항', b9],
+    ['7. 특이 사항 메모', b9],
   ];
   const ws = XLSX.utils.aoa_to_sheet(wsData);
   ws['!cols'] = [{ wch: 25 }, { wch: 90 }];

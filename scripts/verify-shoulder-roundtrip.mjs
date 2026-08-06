@@ -109,7 +109,7 @@ function importRowsFromWorkbook(rows) {
     department: findCol(['진료과', 'department', 'dept']),
     doctorName: findCol(['담당의', 'doctor']),
     specialNotes: findCol(['특이사항', 'special', 'note']),
-    returnConsiderations: findCol(['복귀', 'return', 'consideration']),
+    returnConsiderations: findCol(['특이사항메모', '복귀', 'return', 'consideration']),
     diagCode: findCol(['진단코드', 'code']),
     diagName: findCol(['진단명', 'diag']),
     side: findCol(['방향', 'side']),
@@ -260,7 +260,7 @@ function main() {
   assert(shoulderJob?.repetitiveMediumHours === '1.5', '반복중간 시간이 보존되지 않았습니다.', shoulderJob);
   assert(shoulderJob?.heavyLoadCount === '30', '중량물 횟수가 보존되지 않았습니다.', shoulderJob);
   assert(shoulderJob?.vibrationHours === '1.25', '진동 시간이 보존되지 않았습니다.', shoulderJob);
-  assert(importedPatient.data.modules.shoulder?.returnConsiderations === '어깨 위 작업 제한', '복귀 고려사항이 어깨 모듈에 보존되지 않았습니다.', importedPatient.data.modules.shoulder);
+  assert(importedPatient.data.modules.shoulder?.returnConsiderations === '어깨 위 작업 제한', '특이 사항 메모가 어깨 모듈에 보존되지 않았습니다.', importedPatient.data.modules.shoulder);
 
   console.log(JSON.stringify({
     ok: true,

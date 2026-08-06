@@ -5,6 +5,7 @@ import { buildSpineSectionText } from '../../modules/spine/utils/sectionText';
 import { buildAssessmentBlocks, formatGroupedAssessment } from './assessmentGroups';
 import { calculateAge, calculateBMI } from './common';
 import { getEffectiveWorkPeriodText } from './workPeriod';
+import { selectModuleNote } from './moduleNotes';
 import { groupSummariesByBkType as groupElbowSummaries, mergeBkGroupSummaries as mergeElbowGroups } from '../../modules/elbow/utils/calculations';
 import { BK_TYPE_LABELS as ELBOW_BK_LABELS } from '../../modules/elbow/utils/data';
 import { groupSummariesByBkType as groupWristSummaries, mergeBkGroupSummaries as mergeWristGroups } from '../../modules/wrist/utils/calculations';
@@ -266,15 +267,10 @@ export function generateUnifiedReport(patient) {
       .join('');
   }
 
-  const returnConsiderations = modules.knee?.returnConsiderations
-    || modules.wrist?.returnConsiderations
-    || modules.shoulder?.returnConsiderations
-    || modules.elbow?.returnConsiderations
-    || modules.cervical?.returnConsiderations
-    || '';
+  const returnConsiderations = selectModuleNote(modules, activeModules);
 
   if (returnConsiderations) {
-    text += `\n[복귀 관련 고려사항]\n${returnConsiderations}\n`;
+    text += `\n[특이 사항 메모]\n${returnConsiderations}\n`;
   }
 
   text += `\n${'-'.repeat(50)}\n${shared.evaluationDate || '-'}\n${shared.hospitalName || '-'} ${shared.department || ''}\n담당의 ${shared.doctorName || '-'}`;

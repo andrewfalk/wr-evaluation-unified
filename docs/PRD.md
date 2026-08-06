@@ -142,18 +142,19 @@ Patient
     │   │   │   └── { sharedJobId, weight, squatting,
     │   │   │         stairs, kneeTwist, startStop,
     │   │   │         tightSpace, kneeContact, jumpDown }
-    │   │   └── returnConsiderations    ← 복귀 고려사항
+    │   │   └── returnConsiderations    ← 특이 사항 메모
     │   ├── spine                       ← 척추 전용
-    │   │   └── tasks[]                 ← MDDM 작업 목록
-    │   │       └── { id, name, posture, weight, frequency,
-    │   │             timeValue, timeUnit, correctionFactor, force,
-    │   │             sharedJobId }     ← 직업력 연결 (shared.jobs[].id)
+    │   │   ├── tasks[]                 ← MDDM 작업 목록
+    │   │   │   └── { id, name, posture, weight, frequency,
+    │   │   │         timeValue, timeUnit, correctionFactor, force,
+    │   │   │         sharedJobId }     ← 직업력 연결 (shared.jobs[].id)
+    │   │   └── returnConsiderations    ← 특이 사항 메모
     │   ├── shoulder                    ← 어깨 전용
     │   │   ├── jobExtras[]             ← 직종별 신체부담 (sharedJobId로 연결)
     │   │   │   └── { sharedJobId, overheadHours, repetitiveMediumHours,
     │   │   │         repetitiveFastHours, heavyLoadCount, heavyLoadSeconds,
     │   │   │         vibrationHours, evidenceSources[] }
-    │   │   └── returnConsiderations    ← 복귀 고려사항
+    │   │   └── returnConsiderations    ← 특이 사항 메모
     │   └── elbow                       ← 팔꿈치 전용 (Job × Diagnosis 2차원)
     │       ├── temporalSequence        ← 공통 시간적 선후관계 (모듈 전체 1회 입력)
     │       │   └── { recent_task_change, task_change_date,
@@ -164,19 +165,20 @@ Patient
     │       │           diagnosisId, selectedBkType, bkSelectionMode,
     │       │           main_task_name, direct_anatomic_link,
     │       │           exposure_types[], 공통지표..., BK분기필드... }] }
-    │       └── returnConsiderations    ← 복귀 고려사항
+    │       └── returnConsiderations    ← 특이 사항 메모
     │   ├── wrist                       ← 손목 전용 (Job × Diagnosis 2차원)
     │   │   ├── temporalSequence        ← 공통 시간적 선후관계 (모듈 전체 1회 입력)
     │   │   ├── jobEvaluations[]        ← 직업별 × 상병별 엔트리
-    │   │   └── returnConsiderations    ← 복귀 고려사항
+    │   │   └── returnConsiderations    ← 특이 사항 메모
     │   └── cervical                    ← 경추 전용 (spine 패턴과 동일)
-    │       └── tasks[]                 ← 경추 작업 목록
-    │           └── { id, name, exposure_types[], load_weight_kg,
-    │                 carry_hours_per_shift, forced_neck_posture,
-    │                 neck_nonneutral_hours_per_day,
-    │                 combined_flexion_rotation_posture,
-    │                 precision_work, notes,
-    │                 sharedJobId }     ← 직업력 연결 (shared.jobs[].id)
+    │       ├── tasks[]                 ← 경추 작업 목록
+    │       │   └── { id, name, exposure_types[], load_weight_kg,
+    │       │         carry_hours_per_shift, forced_neck_posture,
+    │       │         neck_nonneutral_hours_per_day,
+    │       │         combined_flexion_rotation_posture,
+    │       │         precision_work, notes,
+    │       │         sharedJobId }     ← 직업력 연결 (shared.jobs[].id)
+    │       └── returnConsiderations    ← 특이 사항 메모
     └── activeModules: ['knee', 'spine', 'shoulder', 'elbow', 'wrist', 'cervical']
 ```
 
@@ -246,7 +248,7 @@ migratePatient(patient)
 - **어깨 상병:** Ellman Class 입력 (좌/우, `supportsEllmanClass`가 true인 상병만 — v6.2.0) + 상태 확인 + 업무관련성 평가
 - **척추 상병:** 수직분포원리(확인/미확인) + 동반성 척추증(확인/미확인) 드롭다운 + 상태 확인 + 업무관련성 평가 (좌우 구분 없음)
 - **경추 상병:** 척추와 동일하게 좌우 구분 없는 축(Axial) 상병으로 처리 + 상태 확인 + 업무관련성 평가
-- 복귀 고려사항 (무릎/팔꿈치/손목/어깨/경추 모듈 활성 시)
+- 특이 사항 메모 (활성 모듈이 하나라도 있으면 표시 — 척추 포함 전 모듈 공통. 평가 기록에는 저장되나 EMR로는 전송되지 않음)
 
 **우측 패널 — 미리보기:**
 - 전체 모듈 결과를 텍스트 보고서로 통합 표시 (패널 높이를 꽉 채움)
@@ -782,7 +784,7 @@ Gemini 2.5 Pro는 thinking(추론) 기능이 기본 활성화되어 비활성화
 [종합소견]
 상병별 판정 (무릎 활성 시 KLG/업무관련성 포함)
 
-[복귀 관련 고려사항]
+[특이 사항 메모]
 ...
 ```
 
@@ -806,7 +808,7 @@ Gemini 2.5 Pro는 thinking(추론) 기능이 기본 활성화되어 비활성화
 | 4.직업적 요인 | 직업력 + 모듈별 신체부담평가 통합 |
 | 5.개인적 요인 | 키/몸무게/BMI/나이/특이사항 |
 | 6.종합소견 | 기여도 + 상병별 종합소견 통합 (`txtSyth1Cont`, CP949 3,950byte 한도 — 초과 시 절단 + 전송 전 확인창, v6.2.0) |
-| 7.복귀 관련 고려사항 | 복귀 고려사항 |
+| 7.특이 사항 메모 | 특이 사항 메모 (`returnConsiderations`) — 이 엑셀 행에만 실리고, EMR 직접입력(`generateEMRFieldData`/`txtArrv1Cont`)으로는 전송되지 않는다 |
 
 **내보내기 형식 2종:**
 
@@ -841,7 +843,7 @@ ZIP명: `업무관련성평가_{N}명_{날짜}.zip` (동명 파일은 인덱스 
 **컬럼 구성 (75열):**
 - 기본정보(6): 이름, 생년월일, 재해일자, 키, 몸무게, 성별
 - 기관정보(3): 병원명, 진료과, 담당의
-- 기타(2): 특이사항, 복귀고려사항
+- 기타(2): 특이사항, 특이사항메모
 - 상병(7): 진단코드, 진단명, 부위, KLG(우측), KLG(좌측), Ellman(우측), Ellman(좌측)
 - 직업(7): 직종명, 시작일, 종료일, 근무기간(년), 근무기간(개월), 중량물(kg), 쪼그려앉기(분)
 - 무릎 보조변수(6): 계단오르내리기, 무릎비틀림, 출발정지반복, 좁은공간, 무릎접촉충격, 뛰어내리기

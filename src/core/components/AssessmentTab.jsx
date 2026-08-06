@@ -94,12 +94,6 @@ export function AssessmentTab({
   diagnoses, onDiagnosisUpdate, onDiagnosesReplace, returnConsiderations, onReturnChange, activeModules,
   reportOptions, onReportOptionsChange,
 }) {
-  const hasKnee = (activeModules || []).includes('knee');
-  const hasWrist = (activeModules || []).includes('wrist');
-  const hasShoulder = (activeModules || []).includes('shoulder');
-  const hasElbow = (activeModules || []).includes('elbow');
-  const hasCervical = (activeModules || []).includes('cervical');
-
   // "패턴 그룹"/"개별 카드" 보기 토글을 곧 출력 형식 스위치로도 쓴다 — 별도 체크박스를
   // 두지 않고, 지금 보고 있는 화면 그대로가 미리보기·EMR·엑셀에 나가는 형식이 되도록
   // 하나로 합쳤다. reportOptions.groupAssessmentResults가 사실상의 view 상태.
@@ -147,7 +141,7 @@ export function AssessmentTab({
       <div className="section-header">
         <div className="section-title-row">
           <h2 className="section-title"><span className="section-icon">&#x1F4CB;</span>종합평가</h2>
-          <p className="section-description">상병별 확인 상태와 업무관련성을 정리하고 복귀 관련 고려사항을 기록합니다.</p>
+          <p className="section-description">상병별 확인 상태와 업무관련성을 정리하고 특이 사항 메모를 기록합니다.</p>
         </div>
       </div>
 
@@ -285,12 +279,12 @@ export function AssessmentTab({
         );
       })}
 
-      {(hasKnee || hasWrist || hasShoulder || hasElbow || hasCervical) && (
+      {(activeModules || []).length > 0 && (
         <section className="assessment-return-section">
           <div className="section-header">
             <div className="section-title-row">
-              <h2 className="section-title"><span className="section-icon">&#x1F4BC;</span>복귀 고려사항</h2>
-              <p className="section-description">업무 복귀 시 필요한 제한이나 주의사항을 기록합니다.</p>
+              <h2 className="section-title"><span className="section-icon">&#x1F4BC;</span>특이 사항 메모</h2>
+              <p className="section-description">평가 기록에는 저장되나 EMR로는 전송되지 않습니다.</p>
             </div>
           </div>
           <textarea
@@ -298,7 +292,7 @@ export function AssessmentTab({
             className="assessment-return-textarea"
             value={returnConsiderations}
             onChange={e => onReturnChange(e.target.value)}
-            placeholder="업무 복귀 시 고려사항..."
+            placeholder="특이 사항 메모..."
           />
         </section>
       )}

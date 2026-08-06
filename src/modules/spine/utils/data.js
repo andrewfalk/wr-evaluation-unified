@@ -36,5 +36,6 @@ export const createSpineModuleData = () => ({
   tasks: [createTask(0)],      // MDDM 작업 — 편집 편의상 1개로 시작(출력/완료는 mddmStatus로 게이트)
   vibrationIntervals: [],      // WBV 노출 구간 — '노출있음' 전환 시 UI가 첫 구간 seed
   aiAnalysisResult: null,
-  formulaVersion: SPINE_FORMULA_V513
+  formulaVersion: SPINE_FORMULA_V513,
+  returnConsiderations: ''
 });
