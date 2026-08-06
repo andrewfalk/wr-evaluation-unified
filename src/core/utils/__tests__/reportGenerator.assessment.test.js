@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { generateUnifiedReport } from '../reportGenerator.js';
 
-function makePatient({ diagnoses = [], activeModules = [], reportOptions } = {}) {
+function makePatient({ diagnoses = [], activeModules = [], reportOptions, modules = {} } = {}) {
   return {
     id: 'p1',
     data: {
@@ -11,7 +11,7 @@ function makePatient({ diagnoses = [], activeModules = [], reportOptions } = {})
         hospitalName: '', department: '', doctorName: '', evaluationDate: '',
         ...(reportOptions ? { reportOptions } : {}),
       },
-      modules: {},
+      modules,
       activeModules,
     },
   };
@@ -77,5 +77,22 @@ describe('generateUnifiedReport — [업무관련성 평가 결과] 배선(asses
     });
     const text = generateUnifiedReport(patient);
     expect(text).toContain('[미입력/검토 필요] 1개\n#1. M17.0 무릎 관절증 (방향 미선택)');
+  });
+});
+
+describe('generateUnifiedReport — [특이 사항 메모]는 척추 단독 환자에서도 나온다', () => {
+  it('spine만 활성이어도 메모 절이 텍스트에 포함된다', () => {
+    const patient = makePatient({
+      activeModules: ['spine'],
+      modules: { spine: { returnConsiderations: '허리 보호대 착용 권장' } },
+    });
+    const text = generateUnifiedReport(patient);
+    expect(text).toContain('[특이 사항 메모]\n허리 보호대 착용 권장');
+  });
+
+  it('메모가 비어 있으면 절 자체가 나오지 않는다', () => {
+    const patient = makePatient({ activeModules: ['spine'], modules: { spine: {} } });
+    const text = generateUnifiedReport(patient);
+    expect(text).not.toContain('[특이 사항 메모]');
   });
 });

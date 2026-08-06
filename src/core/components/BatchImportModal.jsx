@@ -19,7 +19,7 @@ const IMPORT_FIELD_GROUPS = [
   {
     title: '기본정보',
     description: '환자 기본 정보와 평가 문서 정보',
-    fields: ['이름', '등록번호', '생년월일', '재해일자', '키', '체중', '성별', '병원명', '진료과', '담당의', '특이사항', '복귀고려사항'],
+    fields: ['이름', '등록번호', '생년월일', '재해일자', '키', '체중', '성별', '병원명', '진료과', '담당의', '특이사항', '특이사항메모'],
   },
   {
     title: '진단',
@@ -119,7 +119,7 @@ const BASE_COLUMNS = {
   department: ['진료과', 'department'],
   doctorName: ['담당의', 'doctor'],
   specialNotes: ['특이사항', 'special'],
-  returnConsiderations: ['복귀고려사항', 'return'],
+  returnConsiderations: ['특이사항메모', '복귀고려사항', 'return'],
   diagCode: ['진단코드', 'code'],
   diagName: ['진단명', 'diag'],
   side: ['방향', 'side'],

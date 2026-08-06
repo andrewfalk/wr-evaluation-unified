@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AssessmentTab } from './AssessmentTab';
 import { generateUnifiedEMR } from '../utils/emrReport';
 import { EMR_TEXT_LIMIT_BYTES, cp949ByteLength, classifyEmrByteStatus } from '../utils/emrText';
+import { selectModuleNote } from '../utils/moduleNotes';
 
 const EMR_STATUS_LABELS = { ok: '정상', warn: '주의', danger: '초과' };
 
@@ -34,39 +35,15 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
     updateShared?.({ ...shared, reportOptions: nextReportOptions });
   };
 
-  const hasKnee = activeModules.includes('knee');
-  const hasWrist = activeModules.includes('wrist');
-  const hasShoulder = activeModules.includes('shoulder');
-  const hasElbow = activeModules.includes('elbow');
-  const hasCervical = activeModules.includes('cervical');
-  const kneeData = patient.data.modules?.knee || {};
-  const wristData = patient.data.modules?.wrist || {};
-  const shoulderData = patient.data.modules?.shoulder || {};
-  const elbowData = patient.data.modules?.elbow || {};
-  const cervicalData = patient.data.modules?.cervical || {};
-  const returnConsiderations = kneeData.returnConsiderations
-    || wristData.returnConsiderations
-    || shoulderData.returnConsiderations
-    || elbowData.returnConsiderations
-    || cervicalData.returnConsiderations
-    || '';
+  // 메모는 활성 모듈 전체에 같은 값을 팬아웃 저장한다(모듈 하나만 붙잡지 않으므로
+  // 향후 모듈 추가 시에도 이 컴포넌트를 손댈 필요가 없다). 읽기는 selectModuleNote가
+  // 우선순위를 결정한다.
+  const returnConsiderations = selectModuleNote(patient.data.modules, activeModules);
 
   const handleReturnChange = (value) => {
-    if (hasKnee) {
-      updateModuleById('knee', current => ({ ...current, returnConsiderations: value }));
-    }
-    if (hasWrist) {
-      updateModuleById('wrist', current => ({ ...current, returnConsiderations: value }));
-    }
-    if (hasShoulder) {
-      updateModuleById('shoulder', current => ({ ...current, returnConsiderations: value }));
-    }
-    if (hasElbow) {
-      updateModuleById('elbow', current => ({ ...current, returnConsiderations: value }));
-    }
-    if (hasCervical) {
-      updateModuleById('cervical', current => ({ ...current, returnConsiderations: value }));
-    }
+    activeModules.forEach(id =>
+      updateModuleById(id, current => ({ ...current, returnConsiderations: value }))
+    );
   };
 
   // 그룹/개별 두 형식을 항상 같이 계산해 둔다 — 저장된 토글 값과 무관하게 두 탭을
@@ -82,7 +59,7 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
   return (
     <div className="assessment-step-layout">
       <div className="panel pattern-surface assessment-panel">
-        {(hasKnee || hasWrist || hasShoulder || hasElbow || hasCervical || activeModules.includes('spine')) && (
+        {activeModules.length > 0 && (
           <AssessmentTab
             diagnoses={diagnoses}
             onDiagnosisUpdate={handleDiagnosisUpdate}

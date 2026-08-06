@@ -82,6 +82,7 @@ function generateSpineReport(patientData, calc) {
   t += `${workRelatedness.detail}\n`;
   // 전신진동 섹션 append (exposureStatus unknown이면 빈 문자열)
   t += buildVibrationSectionText(c.vibration || {});
+  if (mod.returnConsiderations) t += `\n[특이 사항 메모]\n${mod.returnConsiderations}\n`;
   t += `\n${'─'.repeat(50)}\n${shared.evaluationDate}\n${shared.hospitalName} ${shared.department}\n담당의: ${shared.doctorName}`;
   return t;
 }
@@ -154,6 +155,14 @@ export const spineExportHandlers = {
     if (wb.SheetNames.length === 0) {
       const ws = XLSX.utils.aoa_to_sheet([['척추 평가', '해당 없음 / 미평가']]);
       XLSX.utils.book_append_sheet(wb, ws, '척추 평가');
+    }
+
+    // 특이 사항 메모는 MDDM·전신진동 어느 시트에도 속하지 않으므로(그리고 둘 다
+    // 미평가일 수도 있으므로), 모든 시트 생성이 끝난 뒤 첫 시트 말미에 한 번만 덧붙인다.
+    const note = mod.returnConsiderations || '';
+    if (note) {
+      const firstWs = wb.Sheets[wb.SheetNames[0]];
+      XLSX.utils.sheet_add_aoa(firstWs, [['', ''], ['특이 사항 메모', note]], { origin: -1 });
     }
 
     XLSX.writeFile(wb, `MDDM평가_${shared.name || '미입력'}_${new Date().toISOString().split('T')[0]}.xlsx`);

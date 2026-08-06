@@ -6,6 +6,7 @@ import { resolveMddmStatus } from '../../modules/spine/utils/calculations';
 import { EXPOSURE_TYPE_LABELS as CERVICAL_EXPOSURE_TYPE_LABELS } from '../../modules/cervical/utils/data';
 import { getWorkPeriodYearMonth } from './workPeriod';
 import { generateUnifiedEMR } from './emrReport';
+import { selectModuleNote } from './moduleNotes';
 
 export { generateEMRFieldData, generateConsultReplyFieldData } from './emrReport';
 
@@ -29,7 +30,7 @@ function buildUnifiedWorkbook(patient) {
     ['4.직업적 요인', b6],
     ['5.개인적 요인', b7],
     ['6.종합소견', b8Full],
-    ['7.복귀 관련 고려사항', b9]
+    ['7.특이 사항 메모', b9]
   ];
   const ws = XLSX.utils.aoa_to_sheet(wsData);
   ws['!cols'] = [{ wch: 25 }, { wch: 90 }];
@@ -91,7 +92,7 @@ export async function exportBatch(patients) {
 
 export const BATCH_HEADERS = [
   '등록번호', '이름', '성별', '생년월일', '재해일자', '키', '체중',
-  '병원명', '진료과', '담당의', '특이사항', '복귀고려사항',
+  '병원명', '진료과', '담당의', '특이사항', '특이사항메모',
   '진단코드', '진단명', '방향', 'KLG(우)', 'KLG(좌)', 'Ellman(우)', 'Ellman(좌)',
   '상병상태(우)', '상병상태(좌)', '업무관련성(우)', '업무관련성(좌)',
   '업무관련성낮음사유(우)', '업무관련성낮음사유(좌)', '수직분포원리', '동반척추증',
@@ -222,7 +223,7 @@ export function generateBatchRows(patientList) {
       row.push(isFirst ? (shared.department || '') : '');
       row.push(isFirst ? (shared.doctorName || '') : '');
       row.push(isFirst ? (shared.specialNotes || '') : '');
-      row.push(isFirst ? (modules.knee?.returnConsiderations || modules.wrist?.returnConsiderations || modules.shoulder?.returnConsiderations || modules.elbow?.returnConsiderations || modules.cervical?.returnConsiderations || '') : '');
+      row.push(isFirst ? selectModuleNote(modules, patient.data.activeModules || []) : '');
 
       row.push(diag?.code || '');
       row.push(diag?.name || '');

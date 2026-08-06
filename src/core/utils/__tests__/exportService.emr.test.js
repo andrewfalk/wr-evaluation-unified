@@ -161,6 +161,25 @@ describe('generateUnifiedEMR — groupOutputOverride 파라미터 (미리보기�
   });
 });
 
+describe('generateEMRFieldData — 특이 사항 메모(returnConsiderations)는 EMR로 전송하지 않는다', () => {
+  it('메모 값이 있어도 txtArrv1Cont 키를 반환 객체에 포함하지 않는다', () => {
+    const patient = makePatient({
+      activeModules: ['knee'],
+      modules: { knee: { returnConsiderations: '무릎 보호대 착용 권장' } },
+    });
+    const fieldData = generateEMRFieldData(patient);
+    expect(fieldData).not.toHaveProperty('txtArrv1Cont');
+  });
+
+  it('generateUnifiedEMR().b9는 여전히 계산된다 — 엑셀 내보내기가 독립적으로 소비한다', () => {
+    const patient = makePatient({
+      activeModules: ['knee'],
+      modules: { knee: { returnConsiderations: '무릎 보호대 착용 권장' } },
+    });
+    expect(generateUnifiedEMR(patient).b9).toBe('무릎 보호대 착용 권장');
+  });
+});
+
 describe('generateEMRFieldData — txtMrecMedPovCont CP949 바이트 절단', () => {
   it('CP949 3950바이트(한글 1975자) 이하는 자르지 않는다', () => {
     const text = '가'.repeat(1975); // 1975 × 2 = 3950 bytes (한도와 정확히 일치)

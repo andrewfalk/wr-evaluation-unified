@@ -25,7 +25,8 @@ const BASE_COLUMNS = {
   diagCode: ['진단코드', 'code'],
   diagName: ['진단명', 'diag'],
   side: ['방향', 'side'],
-  returnConsiderations: ['복귀고려사항', 'return'],
+  specialNotes: ['특이사항', 'special'],
+  returnConsiderations: ['특이사항메모', '복귀고려사항', 'return'],
   jobName: ['직종명', 'job'],
   jobStart: ['시작일', 'start'],
   jobEnd: ['종료일', 'end'],
@@ -55,7 +56,7 @@ describe('registerModule batchImportConfig (6개 모듈 일괄 import 회귀)', 
   });
 
   const headerRow = [
-    '이름', '진단코드', '진단명', '방향', '복귀고려사항', '직종명', '시작일', '종료일',
+    '이름', '진단코드', '진단명', '방향', '특이사항메모', '직종명', '시작일', '종료일',
     'klg(우)', 'ellman(좌)',
     '중량물(kg)', '쪼그려앉기',
     '오버헤드', '반복중간',
@@ -151,10 +152,41 @@ describe('registerModule batchImportConfig (6개 모듈 일괄 import 회귀)', 
     expect(entry.main_task_name).toBe('드라이버작업');
   });
 
-  it('복귀고려사항을 import 대상이 된 모든 모듈에 전파한다', () => {
+  it('특이사항메모를 import 대상이 된 모든 모듈에 전파한다', () => {
     for (const mod of moduleConfigs) {
       expect(patient.data.modules[mod.id].returnConsiderations).toBe('복귀시 중량물 제한');
     }
+  });
+});
+
+describe('buildColMap — 특이사항/특이사항메모 헤더 충돌 방지 (전역 2단계 배정)', () => {
+  // findCol이 단순 부분일치였을 때는 '특이사항메모' 헤더가 specialNotes 후보 '특이사항'에도
+  // 걸려 한 열이 두 필드에 동시 매핑될 수 있었다. 정확일치를 먼저 전부 배정하고 그 열을
+  // 예약한 뒤, 남은 필드만 부분일치로 채우도록 고쳤다 — 그 전역 배정 순서를 검증한다.
+  const COLUMNS = {
+    specialNotes: ['특이사항', 'special'],
+    returnConsiderations: ['특이사항메모', '복귀고려사항', 'return'],
+  };
+
+  it('특이사항메모가 특이사항보다 앞에 있어도 각자 제자리로 매핑된다', () => {
+    const headerRow = ['특이사항메모', '특이사항'].map(normalizeHeader);
+    const colMap = buildColMap(headerRow, [COLUMNS]);
+    expect(colMap.returnConsiderations).toBe(0);
+    expect(colMap.specialNotes).toBe(1);
+  });
+
+  it('특이사항메모만 있고 특이사항 열이 없으면 returnConsiderations만 매핑되고 specialNotes는 -1', () => {
+    const headerRow = ['특이사항메모'].map(normalizeHeader);
+    const colMap = buildColMap(headerRow, [COLUMNS]);
+    expect(colMap.returnConsiderations).toBe(0);
+    expect(colMap.specialNotes).toBe(-1);
+  });
+
+  it('옛 헤더 복귀고려사항만 있으면 returnConsiderations에 매핑되고 specialNotes는 -1 (하위호환)', () => {
+    const headerRow = ['복귀고려사항'].map(normalizeHeader);
+    const colMap = buildColMap(headerRow, [COLUMNS]);
+    expect(colMap.returnConsiderations).toBe(0);
+    expect(colMap.specialNotes).toBe(-1);
   });
 });
 

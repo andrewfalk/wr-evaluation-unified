@@ -12,6 +12,7 @@ import { EXPOSURE_TYPE_LABELS as CERVICAL_EXPOSURE_TYPE_LABELS } from '../../mod
 import { buildSpineSectionText, buildSpineSectionSummary } from '../../modules/spine/utils/sectionText';
 import { AUX_LABELS } from '../../modules/knee/utils/data';
 import { calculateAge, calculateBMI } from './common';
+import { selectModuleNote } from './moduleNotes';
 import { getEffectiveWorkPeriodText } from './workPeriod';
 import { EMR_TEXT_LIMIT_BYTES, truncateCp949Bytes } from './emrText';
 import { buildAssessmentBlocks, formatGroupedAssessment } from './assessmentGroups';
@@ -421,18 +422,17 @@ export function generateUnifiedEMR(patient, groupOutputOverride) {
     '[ 업무관련성 평가 결과 ]',
     assessmentText,
   ].filter(Boolean).join('\n\n');
-  const b9 = modules.knee?.returnConsiderations
-    || modules.wrist?.returnConsiderations
-    || modules.shoulder?.returnConsiderations
-    || modules.elbow?.returnConsiderations
-    || modules.cervical?.returnConsiderations
-    || '';
+  const b9 = selectModuleNote(modules, activeModules);
 
   return { b5, b6, b7, b8, b9, consultReplySummary };
 }
 
 export function generateEMRFieldData(patient) {
-  const { b5, b6, b7, b8, b9 } = generateUnifiedEMR(patient);
+  // b9(특이 사항 메모/returnConsiderations)는 의도적으로 EMR에 보내지 않는다 — 엑셀·텍스트
+  // 리포트는 generateUnifiedEMR()의 b9를 독립적으로 계속 소비한다(exportService.js 등).
+  // txtArrv1Cont 키를 아예 빼면, EmrHelper.cs의 SetField()가 빈 값에서 early-return하는
+  // 동작 덕에 EMR 쪽 기존 값이 지워지지 않고 그대로 유지된다(C# 재빌드 불필요).
+  const { b5, b6, b7, b8 } = generateUnifiedEMR(patient);
   const shared = patient.data.shared || {};
 
   const truncatedFields = [];
@@ -451,7 +451,6 @@ export function generateEMRFieldData(patient) {
     txtJobCusCont: t6.text,
     txtPerCusCont: t7.text,
     txtSyth1Cont: t8.text,
-    txtArrv1Cont: b9 || '',
     txtIdacDte: shared.injuryDate || '',
     txtCpnyNm: '',
     rdoHcreTypeCd: '2',

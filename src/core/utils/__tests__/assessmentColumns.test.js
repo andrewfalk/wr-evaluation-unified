@@ -62,3 +62,17 @@ describe('generateBatchRows: 상병 상태/업무관련성/수직분포 컬럼',
     expect(row[col('동반척추증')]).toBe('미확인');
   });
 });
+
+describe('generateBatchRows: 특이사항메모(returnConsiderations) — 척추 단독 환자도 값을 잃지 않는다', () => {
+  it('spine만 활성이어도 특이사항메모 컬럼에 값이 들어간다', () => {
+    const patient = {
+      data: {
+        shared: { name: '척추단독', diagnoses: [{ code: 'M51.1', name: '요추간판장애', moduleId: 'spine' }], jobs: [] },
+        modules: { spine: { returnConsiderations: '허리 보호대 착용 권장' } },
+        activeModules: ['spine'],
+      },
+    };
+    const rows = generateBatchRows([patient]);
+    expect(rows[0][col('특이사항메모')]).toBe('허리 보호대 착용 권장');
+  });
+});

@@ -50,7 +50,7 @@ export const genKneeReport = (patientData, c) => {
     }
   });
 
-  if (mod.returnConsiderations) t += `\n[복귀 관련 고려사항]\n${mod.returnConsiderations}\n`;
+  if (mod.returnConsiderations) t += `\n[특이 사항 메모]\n${mod.returnConsiderations}\n`;
   t += `\n${'─'.repeat(50)}\n${shared.evaluationDate}\n${shared.hospitalName} ${shared.department}\n담당의: ${shared.doctorName}`;
   return t;
 };
@@ -118,7 +118,7 @@ const buildWorkbook = (emrData) => {
     ['4.직업적 요인', b6],
     ['5.개인적 요인', b7],
     ['6.종합소견', b8],
-    ['7.복귀 관련 고려사항', b9]
+    ['7.특이 사항 메모', b9]
   ];
   const ws = XLSX.utils.aoa_to_sheet(wsData);
   ws['!cols'] = [{ wch: 25 }, { wch: 80 }];
