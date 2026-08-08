@@ -38,6 +38,10 @@ if (!originAllowed) {
     },
     notifyQuitLogoutDone: () => ipcRenderer.send('quit-logout-done'),
 
+    // 미저장 종합소견 편집 draft 여부 — main의 창 닫기/새로고침 가드가 참조한다.
+    // PHI 없이 boolean만 전달(환자 ID는 렌더러에만 유지).
+    setHasUnsavedDraft: (hasUnsavedDraft) => ipcRenderer.send('set-has-unsaved-draft', hasUnsavedDraft),
+
     // Native alert/confirm
     showAlert:   (message) => ipcRenderer.invoke('show-alert',   message),
     showConfirm: (message) => ipcRenderer.invoke('show-confirm', message),

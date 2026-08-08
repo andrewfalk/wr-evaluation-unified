@@ -8,6 +8,8 @@ const audit = require('./audit');
 const { getDataPaths } = require('./paths');
 const { readMigrationSnapshot } = require('./migrationDataReader');
 const { evaluateMigrationGate } = require('./migrationGate');
+const { splitInjectPayload } = require('./emrPayload');
+const { decideExitAction } = require('./exitFlow');
 const aiModels = require('../ai-models.config.cjs');
 
 // ---------------------------------------------------------------------------
@@ -38,6 +40,17 @@ ipcMain.on('set-access-token', (event, token) => {
   if (IS_INTRANET_BUILD && _accessToken) {
     audit.tryRegister().catch(e => console.error('[audit] register on token set:', e.message));
   }
+});
+
+// ---------------------------------------------------------------------------
+// 미저장 종합소견 편집 draft 여부 — 렌더러가 dirty 상태가 바뀔 때마다 갱신한다.
+// PHI(환자 식별 정보) 없이 boolean만 주고받는다 — 어떤 환자인지는 main이 알 필요가 없다.
+// 창 닫기/새로고침 가드(win.on('close'), requestSafeReload)가 이 값을 참조한다.
+// ---------------------------------------------------------------------------
+let _hasUnsavedDraft = false;
+ipcMain.on('set-has-unsaved-draft', (event, hasUnsavedDraft) => {
+  if (!isAllowedSender(event.senderFrame?.url ?? event.sender.getURL())) return;
+  _hasUnsavedDraft = !!hasUnsavedDraft;
 });
 
 // Allowed origin for intranet build — derived from WR_INTRANET_URL.
@@ -92,6 +105,24 @@ function createWindow() {
   // ─ 정상 종료 시 렌더러 경유 서버 로그아웃 (창별 상태, single-flight) ──────
   let allowWindowClose = false;
   let logoutInFlight = null;
+  // 종료·새로고침 confirm 다이얼로그 공유 상태 — 중복 다이얼로그 방지(exitFlowInFlight).
+  let exitFlowInFlight = false;
+
+  function confirmUnsavedDraftExit(message) {
+    exitFlowInFlight = true;
+    return dialog.showMessageBox(win, {
+      type: 'warning',
+      buttons: ['취소', '계속'],
+      defaultId: 0,
+      cancelId: 0,
+      title: '저장되지 않은 편집 내용',
+      message,
+      detail: '계속하면 편집 중인 종합소견 내용은 저장되지 않고 사라집니다.',
+    }).then(({ response }) => {
+      exitFlowInFlight = false;
+      return response === 1; // '계속' 선택 여부
+    });
+  }
 
   function requestRendererLogout() {
     if (logoutInFlight) return logoutInFlight; // single-flight: 연속 클릭 방지
@@ -120,14 +151,33 @@ function createWindow() {
     return logoutInFlight;
   }
 
-  win.on('close', (event) => {
-    if (allowWindowClose || !IS_INTRANET_BUILD) return;
-    event.preventDefault();
+  function proceedToClose() {
     requestRendererLogout().then(() => {
       allowWindowClose = true;
       if (!win.isDestroyed()) win.close();
     });
+  }
+
+  win.on('close', (event) => {
+    if (allowWindowClose || !IS_INTRANET_BUILD) return;
+    event.preventDefault();
+    const action = decideExitAction({ hasUnsavedDraft: _hasUnsavedDraft, exitFlowInFlight });
+    if (action === 'ignore') return;
+    if (action === 'proceed') { proceedToClose(); return; }
+    confirmUnsavedDraftExit('저장하지 않은 종합소견 편집 내용이 있습니다. 그래도 종료하시겠습니까?')
+      .then(shouldProceed => { if (shouldProceed) proceedToClose(); });
   });
+
+  // 메뉴 "새로고침"(Ctrl+R) — mainWindow.reload()를 직접 호출하면 종료 가드와
+  // 무관하게 draft를 잃는다. 같은 exitFlowInFlight 상태를 공유해 종료 confirm과
+  // 중복으로 뜨지 않게 한다.
+  function requestSafeReload() {
+    const action = decideExitAction({ hasUnsavedDraft: _hasUnsavedDraft, exitFlowInFlight });
+    if (action === 'ignore') return;
+    if (action === 'proceed') { win.reload(); return; }
+    confirmUnsavedDraftExit('저장하지 않은 종합소견 편집 내용이 있습니다. 그래도 새로고침하시겠습니까?')
+      .then(shouldProceed => { if (shouldProceed) win.reload(); });
+  }
 
   win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
 
@@ -205,7 +255,7 @@ function createWindow() {
     {
       label: '보기',
       submenu: [
-        { label: '새로고침', accelerator: 'CmdOrCtrl+R', click: () => mainWindow.reload() },
+        { label: '새로고침', accelerator: 'CmdOrCtrl+R', click: () => requestSafeReload() },
         { label: '전체 화면', accelerator: 'F11', click: () => mainWindow.setFullScreen(!mainWindow.isFullScreen()) },
         { type: 'separator' },
         { label: '확대', accelerator: 'CmdOrCtrl+Plus', click: () => mainWindow.webContents.setZoomLevel(mainWindow.webContents.getZoomLevel() + 0.5) },
@@ -953,14 +1003,16 @@ ipcMain.handle('emr-inject', async (event, fieldData) => {
     return { success: false, message: 'EMR direct input is Windows-only.' };
   }
 
-  const result   = await execEmrInject(fieldData);
-  const targetId = fieldData?.patientNo
-    ? crypto.createHash('sha256').update(String(fieldData.patientNo)).digest('hex')
+  const { emrFields, source } = splitInjectPayload(fieldData);
+  const result   = await execEmrInject(emrFields);
+  const targetId = emrFields?.patientNo
+    ? crypto.createHash('sha256').update(String(emrFields.patientNo)).digest('hex')
     : undefined;
   if (IS_INTRANET_BUILD) {
     audit.recordAudit({
       action: 'emr_inject', outcome: result?.success ? 'success' : 'failure',
       ...(targetId ? { targetId } : {}),
+      ...(source ? { extra: { source } } : {}),
     }).catch(() => {});
   }
   return result;
