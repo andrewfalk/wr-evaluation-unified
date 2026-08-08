@@ -107,7 +107,10 @@ function App() {
   // guardedSelectPatient()로 모으지 못한 직접 setActiveId 호출부(랜딩 화면의 "이어서 작업",
   // 충돌 모달의 "정정 화면으로 이동")가 개별적으로 재구현하지 않도록 공용 가드를 둔다.
   const guardedSelectPatient = useCallback((patientId, { stepIndex = 0 } = {}) => {
-    if (dirtyAssessmentPatientId && patientId !== activeId) {
+    // 이미 활성인 환자를 다시 선택했으면 스텝을 건드리지 않는다(useStepNavigation의
+    // switchPatient와 동일한 이유 — dirty 여부와 무관하게 항상 no-op이어야 한다).
+    if (patientId === activeId) { setShowHome(false); return true; }
+    if (dirtyAssessmentPatientId) {
       blockedByUnsavedDraftAlert();
       return false;
     }
@@ -427,10 +430,15 @@ function App() {
     window.electron?.setHasUnsavedDraft?.(!!dirtyAssessmentPatientId);
   }, [dirtyAssessmentPatientId]);
 
-  // 웹으로 실행 중일 때 탭 닫기·새로고침 경고 — Electron은 win.on('close')/Ctrl+R 가드가
-  // 대신하지만, BrowserWindow도 페이지의 beforeunload를 기본적으로 존중하므로 standalone
-  // 빌드(창 닫기 가로채기가 없음)에서도 이 핸들러가 그대로 안전망 역할을 한다.
+  // 웹 탭 닫기·새로고침 경고 — Electron 인트라넷 빌드는 setHasUnsavedDraft 채널이 있고
+  // win.on('close')/Ctrl+R이 이미 main.js에서 네이티브 confirm으로 가드한다(A-1). 그 경우
+  // 여기서도 beforeunload를 등록하면, 사용자가 그 네이티브 confirm에서 "계속"을 선택해
+  // win.close()/reload()가 실행돼도 renderer에 남아있는 beforeunload가 다시 개입해
+  // Electron이 페이지의 beforeunload를 존중하는 특성상 종료가 조용히 취소되거나 confirm이
+  // 이중으로 뜰 수 있다. 그래서 그 채널이 없는 웹/standalone 빌드에서만 폴백으로 등록한다
+  // (standalone은 close 가로채기가 없어 beforeunload가 유일한 안전망).
   useEffect(() => {
+    if (window.electron?.setHasUnsavedDraft) return;
     const handleBeforeUnload = (e) => {
       if (!dirtyAssessmentPatientId) return;
       e.preventDefault();
