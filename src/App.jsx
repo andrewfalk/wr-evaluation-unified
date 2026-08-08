@@ -87,6 +87,39 @@ function App() {
   const [showBatchImport, setShowBatchImport] = useState(false);
   const [showHome, setShowHome] = useState(false);
   const [conflictPatientId, setConflictPatientId] = useState(null);
+
+  // 종합소견 직접 편집 dirty 가드 — 불리언이 아니라 환자 ID를 담는다. 환자를 전환해도
+  // dirty가 잘못 따라붙지 않게 하기 위함(AssessmentStep이 재마운트 없이 patient prop만
+  // 바뀌는 구조라 patient.id를 직접 대조해야 한다).
+  const [dirtyAssessmentPatientId, setDirtyAssessmentPatientId] = useState(null);
+  const blockedByUnsavedDraftAlert = useCallback(() => {
+    showAlert('저장하지 않은 종합소견 편집 내용이 있습니다.\n"편집 완료" 또는 "취소"로 마무리한 뒤 다시 시도하세요.');
+  }, []);
+  // AssessmentStep이 편집 모드 진입/종료를 알려올 때 호출한다. prev===patientId 가드는
+  // 종료(false) 신호가 다른(이미 전환된) 환자의 낡은 신호로 잘못 도착해도 활성 dirty를
+  // 지우지 않게 한다.
+  const handleAssessmentEditingChange = useCallback((patientId, isEditing) => {
+    setDirtyAssessmentPatientId(prev => {
+      if (isEditing) return patientId;
+      return prev === patientId ? null : prev;
+    });
+  }, []);
+  // guardedSelectPatient()로 모으지 못한 직접 setActiveId 호출부(랜딩 화면의 "이어서 작업",
+  // 충돌 모달의 "정정 화면으로 이동")가 개별적으로 재구현하지 않도록 공용 가드를 둔다.
+  const guardedSelectPatient = useCallback((patientId, { stepIndex = 0 } = {}) => {
+    // 이미 활성인 환자를 다시 선택했으면 스텝을 건드리지 않는다(useStepNavigation의
+    // switchPatient와 동일한 이유 — dirty 여부와 무관하게 항상 no-op이어야 한다).
+    if (patientId === activeId) { setShowHome(false); return true; }
+    if (dirtyAssessmentPatientId) {
+      blockedByUnsavedDraftAlert();
+      return false;
+    }
+    setActiveId(patientId);
+    setCurrentStepIndex(stepIndex);
+    setShowHome(false);
+    return true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirtyAssessmentPatientId, activeId, blockedByUnsavedDraftAlert]);
   const { serverConfig, configLoading, configError } = useServerConfig({ session, settings });
   const { aiAvailable } = useAIAvailable({ serverConfig, session });
   const isIntranetMode =
@@ -142,13 +175,13 @@ function App() {
     handleExportSingle, handleExportSelected, handleExportBatch,
     handleExportBatchFormatSingle, handleExportBatchFormatSelected, handleExportBatchFormatAll,
     handleExportBatchTemplate,
-  } = useExportHandlers({ activePatient, patients, selectedIds });
+  } = useExportHandlers({ activePatient, patients, selectedIds, dirtyAssessmentPatientId });
 
   const {
     extractProgress, setExtractProgress,
     handleInjectEMR, handleInjectConsultReply,
     handleEmrExtractBatch, handleExtractConsultation,
-  } = useEMRIntegration({ activePatient, patients, selectedIds, session, setPatients });
+  } = useEMRIntegration({ activePatient, patients, selectedIds, session, setPatients, dirtyAssessmentPatientId });
 
   const handleStartIntakeRef = useRef(null);
   const handleResetPatientsRef = useRef(null);
@@ -159,8 +192,14 @@ function App() {
     () => buildSteps(activeModules, { videoAnalysisEnabled }),
     [activeModules, videoAnalysisEnabled]
   );
-  const { currentStepIndex, setCurrentStepIndex, goToStep, goNext, goPrev, switchPatient } = useStepNavigation({ steps, activeId, setActiveId, setShowSidebar });
-  const { intakeShared, setIntakeShared, handleStartIntake, handleIntakeComplete } = useIntakeWizard({ settings, session, setPatients, setActiveId, setCurrentStepIndex, setShowHome, videoAnalysisEnabled });
+  const { currentStepIndex, setCurrentStepIndex, goToStep, goNext, goPrev, switchPatient } = useStepNavigation({
+    steps, activeId, setActiveId, setShowSidebar,
+    hasUnsavedAssessmentDraft: !!dirtyAssessmentPatientId, onBlockedByUnsavedDraft: blockedByUnsavedDraftAlert,
+  });
+  const { intakeShared, setIntakeShared, handleStartIntake, handleIntakeComplete } = useIntakeWizard({
+    settings, session, setPatients, setActiveId, setCurrentStepIndex, setShowHome, videoAnalysisEnabled,
+    hasUnsavedAssessmentDraft: !!dirtyAssessmentPatientId, onBlockedByUnsavedDraft: blockedByUnsavedDraftAlert,
+  });
   handleStartIntakeRef.current = handleStartIntake;
 
   useEffect(() => {
@@ -289,6 +328,7 @@ function App() {
     setActiveId, setCurrentStepIndex, setIntakeShared, setShowHome,
     setShowSaveModal, setShowLoadModal,
     disabled: isIntranetMode && (configLoading || !!configError),
+    dirtyAssessmentPatientId, onBlockedByUnsavedDraft: blockedByUnsavedDraftAlert,
   });
   const currentStep = steps[currentStepIndex] || steps[0];
 
@@ -310,12 +350,16 @@ function App() {
     setIntakeShared, setShowHome,
     handleStartIntake,
     canMutateActivePatient,
+    dirtyAssessmentPatientId, onBlockedByUnsavedDraft: blockedByUnsavedDraftAlert,
   });
 
   // 환자 전환 게이팅(§5-3): synced면 즉시 전환, conflict면 push 자체를 시도하지 않고 확인 후
   // 이동, dirty/local-only면 flushPatient로 기존 autosync 큐에 합류해 저장을 기다린 뒤 전환.
   const handleSwitchPatient = useCallback(async (patientId) => {
     if (patientId === activeId) { switchPatient(patientId); return; }
+    // switchPatient(useStepNavigation)도 같은 조건으로 다시 막지만, 여기서 먼저 막아야
+    // 아래 동기화 상태 확인 다이얼로그("저장되지 않은 변경사항이…")가 무관하게 뜨지 않는다.
+    if (dirtyAssessmentPatientId) { blockedByUnsavedDraftAlert(); return; }
 
     const current = patients.find(p => p.id === activeId);
     const status = current?.sync?.syncStatus;
@@ -364,7 +408,7 @@ function App() {
     }
 
     switchPatient(patientId);
-  }, [activeId, patients, switchPatient, flushPatient, setPatients]);
+  }, [activeId, patients, switchPatient, flushPatient, setPatients, dirtyAssessmentPatientId, blockedByUnsavedDraftAlert]);
 
   // 영상 분석 서버 적용 후 서버 동기화 환자를 목록에 반영(로컬 id 보존 → id로 교체).
   const onVideoServerApplied = useCallback((serverPatient) => {
@@ -377,6 +421,32 @@ function App() {
 
   // Electron 메뉴 이벤트
   useElectronMenuEvents({ handleResetPatientsRef, handleStartIntakeRef });
+
+  // 종합소견 편집 dirty 상태를 Electron main에 동기화한다 — 창 닫기(win.on('close'))와
+  // 메뉴 새로고침(Ctrl+R)이 이 값을 보고 네이티브 confirm을 띄운다. PHI(환자 ID)는 절대
+  // 넘기지 않고 boolean만 전달한다(main.js의 set-has-unsaved-draft 채널).
+  // preload가 채널을 노출하지 않는 빌드(standalone/웹)에서는 optional chaining으로 조용히 no-op.
+  useEffect(() => {
+    window.electron?.setHasUnsavedDraft?.(!!dirtyAssessmentPatientId);
+  }, [dirtyAssessmentPatientId]);
+
+  // 웹 탭 닫기·새로고침 경고 — Electron 인트라넷 빌드는 setHasUnsavedDraft 채널이 있고
+  // win.on('close')/Ctrl+R이 이미 main.js에서 네이티브 confirm으로 가드한다(A-1). 그 경우
+  // 여기서도 beforeunload를 등록하면, 사용자가 그 네이티브 confirm에서 "계속"을 선택해
+  // win.close()/reload()가 실행돼도 renderer에 남아있는 beforeunload가 다시 개입해
+  // Electron이 페이지의 beforeunload를 존중하는 특성상 종료가 조용히 취소되거나 confirm이
+  // 이중으로 뜰 수 있다. 그래서 그 채널이 없는 웹/standalone 빌드에서만 폴백으로 등록한다
+  // (standalone은 close 가로채기가 없어 beforeunload가 유일한 안전망).
+  useEffect(() => {
+    if (window.electron?.setHasUnsavedDraft) return;
+    const handleBeforeUnload = (e) => {
+      if (!dirtyAssessmentPatientId) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [dirtyAssessmentPatientId]);
 
   const displayPatients = usePatientList(patients, patientFilters);
 
@@ -417,6 +487,7 @@ function App() {
   );
 
   const handleResetPatients = async () => {
+    if (dirtyAssessmentPatientId) { blockedByUnsavedDraftAlert(); return; }
     const ok = await showConfirm('현재 작업 중인 환자 목록을 모두 삭제하시겠습니까?');
     if (!ok) return;
     setPatientSyncPaused(true);
@@ -434,13 +505,27 @@ function App() {
 
   const { markRemoteDeleteConflict, handleResolveConflict, handleCorrectServerIdentity } = useConflictResolution({
     setPatients, activeId, setActiveId, setCurrentStepIndex, session, settings, setConflictPatientId, syncNow,
+    dirtyAssessmentPatientId, onBlockedByUnsavedDraft: blockedByUnsavedDraftAlert,
   });
+
+  // 로그아웃은 렌더러 세션만 정리하는 게 아니라(Electron은 서버 세션까지 정리) 화면을
+  // 완전히 떠나므로 dirty 편집 중이면 막는다.
+  const handleLogout = () => {
+    if (dirtyAssessmentPatientId) { blockedByUnsavedDraftAlert(); return; }
+    logout();
+  };
+
+  const handleShowHome = () => {
+    if (dirtyAssessmentPatientId) { blockedByUnsavedDraftAlert(); return; }
+    setShowHome(true);
+  };
 
   // 공통 모달 props (AppModals)
   const modalsProps = {
-    session, settings, integrationStatus, syncState, syncNow, logout,
+    session, settings, integrationStatus, syncState, syncNow, logout: handleLogout,
     patients, activePatient, steps,
     setActiveId, setCurrentStepIndex, setShowHome,
+    hasUnsavedAssessmentDraft: !!dirtyAssessmentPatientId, onBlockedByUnsavedDraft: blockedByUnsavedDraftAlert,
 
     showAdminConsole, setShowAdminConsole,
     showAccountProfile, setShowAccountProfile,
@@ -573,7 +658,7 @@ function App() {
           onShowSettings={() => setShowSettings(true)}
           onGoBack={() => setShowHome(false)}
           onResetPatients={handleResetPatients}
-          onSelectPatient={(id) => { setActiveId(id); setCurrentStepIndex(0); setShowHome(false); }}
+          onSelectPatient={(id) => guardedSelectPatient(id)}
           isIntranetMode={session?.mode === 'intranet'}
           session={session}
           dashboardScope={effectiveDashboardScope}
@@ -703,7 +788,7 @@ function App() {
           integrationStatus={integrationStatus}
           session={session}
           onShowAdminConsole={() => setShowAdminConsole(true)}
-          onLogout={logout}
+          onLogout={handleLogout}
           onChangePassword={() => setShowChangePassword(true)}
           onShowAccountProfile={() => setShowAccountProfile(true)}
           patients={patients}
@@ -714,7 +799,7 @@ function App() {
           setExtractProgress={setExtractProgress}
           exportDropdown={exportDropdown}
           setExportDropdown={setExportDropdown}
-          onShowHome={() => setShowHome(true)}
+          onShowHome={handleShowHome}
           onResetPatients={handleResetPatients}
           onToggleSidebar={() => setShowSidebar(v => !v)}
           onShowSaveModal={() => setShowSaveModal(true)}
@@ -822,6 +907,7 @@ function App() {
                 updateDiagnoses={updateDiagnoses}
                 updateActiveModules={updateActiveModules}
                 handlePresetSelect={handlePresetSelect}
+                onAssessmentEditingChange={handleAssessmentEditingChange}
                 setPresetModalJobId={setPresetModalJobId}
                 setPresetBrowseJobId={setPresetBrowseJobId}
                 canMutate={canMutateActivePatient}

@@ -2,34 +2,53 @@ import { useState } from 'react';
 import { showAlert, showConfirm } from '../utils/platform';
 import { touchPatientRecord } from '../services/patientRecords';
 
-export function useEMRIntegration({ activePatient, patients, selectedIds, session, setPatients }) {
+export function useEMRIntegration({ activePatient, patients, selectedIds, session, setPatients, dirtyAssessmentPatientId }) {
   const [extractProgress, setExtractProgress] = useState(null);
 
   const handleInjectEMR = async () => {
     if (!activePatient || !window.electron?.injectEMR) return;
+    if (dirtyAssessmentPatientId === activePatient.id) {
+      await showAlert('저장하지 않은 종합소견 편집 내용이 있습니다.\n"편집 완료"로 저장한 뒤 다시 시도하세요.');
+      return;
+    }
     const ok = await showConfirm('EMR 소견서에 현재 환자 데이터를 직접 입력합니다.\nEMR 업무관련성 특별진찰소견서가 열려있는지 확인하세요.\n\n계속하시겠습니까?');
     if (!ok) return;
     try {
-      const { generateEMRFieldData } = await import('../utils/exportService');
-      const { generateUnifiedEMR } = await import('../utils/emrReport');
-      const { EMR_TEXT_LIMIT_BYTES, cp949ByteLength } = await import('../utils/emrText');
+      const { prepareEmrInjection } = await import('../utils/emrReport');
+      const { EMR_TEXT_LIMIT_BYTES } = await import('../utils/emrText');
 
-      const { b8 } = generateUnifiedEMR(activePatient);
-      const bytes = cp949ByteLength(b8);
+      const { fieldData, effective, bytes } = prepareEmrInjection(activePatient);
+
+      if (effective.hasInvalidOverride) {
+        await showAlert('저장된 종합소견 편집 데이터가 손상되어 전송할 수 없습니다.\n종합평가 화면에서 "깨진 편집 데이터 삭제" 후 다시 시도하세요.');
+        return;
+      }
+      // isStale은 오버라이드가 유효할 때만 true(resolveAssessment) — 차단하지 않고 전송
+      // 직전에 한 번 더 확인만 한다(정책: 화면 경고 배너 + 전송 직전 재확인).
+      if (effective.isStale) {
+        const proceedStale = await showConfirm(
+          '⚠ 직접 편집한 종합소견 이후 상병·직업·평가 데이터가 변경되었습니다.\n'
+          + '전송될 내용은 편집 시점 그대로이며 최신 데이터와 다를 수 있습니다.\n\n'
+          + '편집본을 그대로 전송하시겠습니까?'
+        );
+        if (!proceedStale) return;
+      }
       if (bytes > EMR_TEXT_LIMIT_BYTES) {
         const over = bytes - EMR_TEXT_LIMIT_BYTES;
+        const reduceHint = effective.isOverride
+          ? '직접 편집한 내용을 줄이면 byte를 줄일 수 있습니다.\n\n'
+          : '종합평가 스텝에서 "패턴 그룹 사용"을 켜면 byte를 줄일 수 있습니다.\n\n';
         const proceed = await showConfirm(
           `⚠ 6.종합소견이 EMR 한도를 초과합니다.\n`
           + `${bytes.toLocaleString()} / ${EMR_TEXT_LIMIT_BYTES.toLocaleString()} byte (${over.toLocaleString()} byte 초과)\n\n`
           + `그대로 전송하면 끝부분이 "...(이하 생략)"으로 잘립니다.\n`
-          + `종합평가 스텝에서 "패턴 그룹 사용"을 켜면 byte를 줄일 수 있습니다.\n\n`
+          + reduceHint
           + `잘린 상태로 계속 전송하시겠습니까?`
         );
         if (!proceed) return;
       }
 
-      const fieldData = generateEMRFieldData(activePatient);
-      const result = await window.electron.injectEMR(fieldData);
+      const result = await window.electron.injectEMR({ ...fieldData, _source: effective.isOverride ? 'edited' : 'auto' });
       if (result.success) {
         let msg = `${result.message}`;
         if (result.truncatedFields?.length > 0) {

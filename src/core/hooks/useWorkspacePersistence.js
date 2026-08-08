@@ -48,6 +48,7 @@ export function useWorkspacePersistence({
   setActiveId, setCurrentStepIndex, setIntakeShared, setShowHome,
   setShowSaveModal, setShowLoadModal,
   disabled = false,
+  dirtyAssessmentPatientId, onBlockedByUnsavedDraft,
 }) {
   const [savedItems, setSavedItems] = useState([]);
   const [saveName, setSaveName] = useState('');
@@ -179,6 +180,9 @@ export function useWorkspacePersistence({
   };
 
   const handleLoad = async (item, mode = 'overwrite') => {
+    // 저장된 스냅샷을 불러오면 환자 목록·활성 환자가 통째로 바뀐다 — 지금 종합소견을
+    // 편집 중이면 어느 환자 기준으로 저장될지 불명확해지므로 먼저 마무리하게 한다.
+    if (dirtyAssessmentPatientId) { onBlockedByUnsavedDraft?.(); return; }
     let loadResultForNotice = null;
     if (mode === 'overwrite') {
       const confirmed = await showConfirm('현재 데이터를 덮어쓰시겠습니까?');

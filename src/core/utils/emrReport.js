@@ -14,7 +14,7 @@ import { AUX_LABELS } from '../../modules/knee/utils/data';
 import { calculateAge, calculateBMI } from './common';
 import { selectModuleNote } from './moduleNotes';
 import { getEffectiveWorkPeriodText } from './workPeriod';
-import { EMR_TEXT_LIMIT_BYTES, truncateCp949Bytes } from './emrText';
+import { EMR_TEXT_LIMIT_BYTES, cp949ByteLength, truncateCp949Bytes } from './emrText';
 import { buildAssessmentBlocks, formatGroupedAssessment } from './assessmentGroups';
 
 function buildSpineExposureText(calc) {
@@ -427,12 +427,40 @@ export function generateUnifiedEMR(patient, groupOutputOverride) {
   return { b5, b6, b7, b8, b9, consultReplySummary };
 }
 
-export function generateEMRFieldData(patient) {
-  // b9(특이 사항 메모/returnConsiderations)는 의도적으로 EMR에 보내지 않는다 — 엑셀·텍스트
-  // 리포트는 generateUnifiedEMR()의 b9를 독립적으로 계속 소비한다(exportService.js 등).
-  // txtArrv1Cont 키를 아예 빼면, EmrHelper.cs의 SetField()가 빈 값에서 early-return하는
-  // 동작 덕에 EMR 쪽 기존 값이 지워지지 않고 그대로 유지된다(C# 재빌드 불필요).
-  const { b5, b6, b7, b8 } = generateUnifiedEMR(patient);
+// ── 종합소견(b8) 직접 편집 오버라이드 ──────────────────────────────────────
+// 저장된 shared.reportOptions.assessmentOverride를 검증하고, 자동 생성본(generatedB8)과
+// 비교해 낡음(isStale) 여부를 판정하는 접근자. 서버는 계약을 런타임에 참조하지 않고
+// shared를 통째로 passthrough 저장하므로(patients.ts), 빈 문자열·깨진 형태에 대한
+// 진짜 방어선은 여기다 — 계약의 .refine()은 저장 시점 보조 방어선일 뿐이다.
+//
+// Object.hasOwn은 Win7 구형 Chrome에서 지원하지 않는다([project_win7_browser_compat]) —
+// hasOwnProperty.call을 사용한다.
+export function resolveAssessment(patient, generatedB8) {
+  const ro = patient.data.shared?.reportOptions;
+  const hasKey = !!ro && Object.prototype.hasOwnProperty.call(ro, 'assessmentOverride');
+  const ov = hasKey ? ro.assessmentOverride : undefined; // null도 hasKey=true → invalid로 잡힌다
+  const valid = !!ov
+    && typeof ov.text === 'string' && ov.text.trim().length > 0
+    && typeof ov.baseText === 'string'
+    && typeof ov.updatedAt === 'string' && !Number.isNaN(Date.parse(ov.updatedAt));
+  if (!valid) {
+    return {
+      text: generatedB8, generated: generatedB8, isOverride: false, isStale: false,
+      hasInvalidOverride: hasKey, // 키는 있는데 형태가 깨진 경우만 true
+    };
+  }
+  return {
+    text: ov.text, generated: generatedB8, isOverride: true,
+    isStale: ov.baseText !== generatedB8, hasInvalidOverride: false,
+  };
+}
+
+// b9(특이 사항 메모/returnConsiderations)는 의도적으로 EMR에 보내지 않는다 — 엑셀·텍스트
+// 리포트는 generateUnifiedEMR()의 b9를 독립적으로 계속 소비한다(exportService.js 등).
+// txtArrv1Cont 키를 아예 빼면, EmrHelper.cs의 SetField()가 빈 값에서 early-return하는
+// 동작 덕에 EMR 쪽 기존 값이 지워지지 않고 그대로 유지된다(C# 재빌드 불필요).
+function buildEmrFieldData(patient, unified, b8Text) {
+  const { b5, b6, b7 } = unified;
   const shared = patient.data.shared || {};
 
   const truncatedFields = [];
@@ -442,7 +470,7 @@ export function generateEMRFieldData(patient) {
   if (t6.truncated) truncatedFields.push('txtJobCusCont');
   const t7 = truncateCp949Bytes(b7, EMR_TEXT_LIMIT_BYTES);
   if (t7.truncated) truncatedFields.push('txtPerCusCont');
-  const t8 = truncateCp949Bytes(b8, EMR_TEXT_LIMIT_BYTES);
+  const t8 = truncateCp949Bytes(b8Text, EMR_TEXT_LIMIT_BYTES);
   if (t8.truncated) truncatedFields.push('txtSyth1Cont');
 
   return {
@@ -457,6 +485,20 @@ export function generateEMRFieldData(patient) {
     rdoCls: 'M',
     _truncatedFields: truncatedFields,
   };
+}
+
+// EMR 전송 준비 — generateUnifiedEMR을 1회만 호출해 이전에 경고용 b8과 실제 페이로드를
+// 각각 독립 계산하던 이중 계산을 해소한다. effective는 오버라이드 적용 여부·낡음 상태를
+// 함께 담아 호출자(useEMRIntegration)가 재확인·차단 판단에 그대로 쓸 수 있게 한다.
+export function prepareEmrInjection(patient) {
+  const unified = generateUnifiedEMR(patient);
+  const effective = resolveAssessment(patient, unified.b8);
+  const fieldData = buildEmrFieldData(patient, unified, effective.text);
+  return { fieldData, effective, bytes: cp949ByteLength(effective.text) };
+}
+
+export function generateEMRFieldData(patient) { // 기존 시그니처 유지 — exportService.js 등 소비자 불변
+  return prepareEmrInjection(patient).fieldData;
 }
 
 export function generateConsultReplyFieldData(patient) {

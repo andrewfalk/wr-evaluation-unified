@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { generateEMRFieldData } from '../exportService.js';
-import { generateUnifiedEMR } from '../emrReport.js';
-import { cp949ByteLength } from '../emrText.js';
+import { generateUnifiedEMR, resolveAssessment, prepareEmrInjection } from '../emrReport.js';
+import { cp949ByteLength, EMR_TEXT_LIMIT_BYTES } from '../emrText.js';
 
 function makePatient({ activeModules = [], jobs = [], modules = {} } = {}) {
   return {
@@ -199,5 +199,104 @@ describe('generateEMRFieldData — txtMrecMedPovCont CP949 바이트 절단', ()
     expect(txtMrecMedPovCont).not.toBe(text);
     expect(cp949ByteLength(txtMrecMedPovCont)).toBeLessThanOrEqual(3950);
     expect(_truncatedFields).toContain('txtMrec_Med_Pov_Cont');
+  });
+});
+
+function overridePatient(overrideOverrides = {}, patientOverrides = {}) {
+  const patient = makeAssessmentPatient({
+    diagnoses: [kneeDiag()], activeModules: ['knee'], modules: { knee: {} },
+    ...patientOverrides,
+  });
+  const generated = generateUnifiedEMR(patient).b8;
+  patient.data.shared.reportOptions = {
+    ...patient.data.shared.reportOptions,
+    assessmentOverride: {
+      text: '의사가 직접 다듬은 종합소견 문장',
+      baseText: generated,
+      updatedAt: '2024-01-10T09:00:00.000Z',
+      ...overrideOverrides,
+    },
+  };
+  return { patient, generated };
+}
+
+describe('resolveAssessment — 종합소견 직접 편집 오버라이드 접근자', () => {
+  it('오버라이드가 없으면(구 환자) 자동 생성본을 그대로 쓰고 isOverride=false', () => {
+    const patient = makeAssessmentPatient({ diagnoses: [kneeDiag()], activeModules: ['knee'], modules: { knee: {} } });
+    const generated = generateUnifiedEMR(patient).b8;
+    const effective = resolveAssessment(patient, generated);
+    expect(effective).toEqual({
+      text: generated, generated, isOverride: false, isStale: false, hasInvalidOverride: false,
+    });
+  });
+
+  it('유효한 오버라이드가 있으면 편집본을 우선하고 isOverride=true', () => {
+    const { patient, generated } = overridePatient();
+    const effective = resolveAssessment(patient, generated);
+    expect(effective.text).toBe('의사가 직접 다듬은 종합소견 문장');
+    expect(effective.isOverride).toBe(true);
+    expect(effective.hasInvalidOverride).toBe(false);
+  });
+
+  it('baseText가 현재 자동 생성본과 같으면 isStale=false', () => {
+    const { patient, generated } = overridePatient();
+    expect(resolveAssessment(patient, generated).isStale).toBe(false);
+  });
+
+  it('baseText가 현재 자동 생성본과 다르면(상병 변경 등) isStale=true', () => {
+    const { patient } = overridePatient();
+    const changedGenerated = generateUnifiedEMR(
+      makeAssessmentPatient({ diagnoses: [kneeDiag(), kneeDiag({ id: 'd2', code: 'M17.1' })], activeModules: ['knee'], modules: { knee: {} } })
+    ).b8;
+    expect(resolveAssessment(patient, changedGenerated).isStale).toBe(true);
+  });
+
+  it.each([
+    ['공백-only text', { text: '   \n\t' }],
+    ['baseText 누락', { baseText: undefined }],
+    ['updatedAt 누락', { updatedAt: undefined }],
+    ['updatedAt이 파싱 불가', { updatedAt: 'not-a-date' }],
+  ])('%s → hasInvalidOverride=true, 자동 생성본으로 폴백', (_label, overrideOverrides) => {
+    const { patient, generated } = overridePatient(overrideOverrides);
+    const effective = resolveAssessment(patient, generated);
+    expect(effective.hasInvalidOverride).toBe(true);
+    expect(effective.isOverride).toBe(false);
+    expect(effective.text).toBe(generated);
+  });
+
+  it('assessmentOverride가 null이면(키는 있음) hasInvalidOverride=true', () => {
+    const patient = makeAssessmentPatient({ diagnoses: [kneeDiag()], activeModules: ['knee'], modules: { knee: {} } });
+    const generated = generateUnifiedEMR(patient).b8;
+    patient.data.shared.reportOptions = { assessmentOverride: null };
+    const effective = resolveAssessment(patient, generated);
+    expect(effective.hasInvalidOverride).toBe(true);
+    expect(effective.text).toBe(generated);
+  });
+});
+
+describe('prepareEmrInjection — 편집본 CP949 절단 + 생성 1회 통일', () => {
+  it('오버라이드 미설정 시 generateEMRFieldData의 기존 출력과 완전히 동일하다 (회귀)', () => {
+    const patient = makeAssessmentPatient({
+      diagnoses: [kneeDiag()], activeModules: ['knee'], modules: { knee: {} },
+      reportOptions: { groupAssessmentResults: true },
+    });
+    expect(prepareEmrInjection(patient).fieldData).toEqual(generateEMRFieldData(patient));
+  });
+
+  it('편집본이 있으면 txtSyth1Cont에 편집본이 실린다', () => {
+    const { patient } = overridePatient();
+    const { fieldData, effective } = prepareEmrInjection(patient);
+    expect(fieldData.txtSyth1Cont).toBe('의사가 직접 다듬은 종합소견 문장');
+    expect(effective.isOverride).toBe(true);
+  });
+
+  it('편집본이 CP949 한도를 넘으면 잘리고 _truncatedFields에 표시된다', () => {
+    const longText = '가'.repeat(3000); // 6000 bytes > 3950
+    const { patient } = overridePatient({ text: longText, baseText: longText });
+    const { fieldData, bytes } = prepareEmrInjection(patient);
+    expect(fieldData.txtSyth1Cont).toContain('...(이하 생략)');
+    expect(cp949ByteLength(fieldData.txtSyth1Cont)).toBeLessThanOrEqual(EMR_TEXT_LIMIT_BYTES);
+    expect(fieldData._truncatedFields).toContain('txtSyth1Cont');
+    expect(bytes).toBe(cp949ByteLength(longText)); // bytes는 절단 전 편집본 기준(byte 경고용)
   });
 });

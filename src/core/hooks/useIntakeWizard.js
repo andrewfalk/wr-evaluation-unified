@@ -4,13 +4,15 @@ import { createSharedData } from '../utils/data';
 import { createManagedPatient } from '../services/patientRecords';
 import { buildSteps } from '../utils/steps';
 
-export function useIntakeWizard({ settings, session, setPatients, setActiveId, setCurrentStepIndex, setShowHome, videoAnalysisEnabled = false }) {
+export function useIntakeWizard({ settings, session, setPatients, setActiveId, setCurrentStepIndex, setShowHome, videoAnalysisEnabled = false, hasUnsavedAssessmentDraft = false, onBlockedByUnsavedDraft }) {
   const [intakeShared, setIntakeShared] = useState(null);
 
   const settingsRef = useRef(settings);
   useEffect(() => { settingsRef.current = settings; }, [settings]);
 
   const handleStartIntake = useCallback(() => {
+    // 신규 접수 위자드로 전환하면 현재 작업 화면(AssessmentStep 포함)이 완전히 언마운트된다.
+    if (hasUnsavedAssessmentDraft) { onBlockedByUnsavedDraft?.(); return; }
     const s = settingsRef.current;
     const newShared = createSharedData();
     newShared.hospitalName = s.hospitalName;
@@ -21,7 +23,7 @@ export function useIntakeWizard({ settings, session, setPatients, setActiveId, s
     newShared.doctorName = intranetName || s.doctorName;
     setIntakeShared(newShared);
     setShowHome(false);
-  }, [session, setShowHome]);
+  }, [session, setShowHome, hasUnsavedAssessmentDraft, onBlockedByUnsavedDraft]);
 
   const handleIntakeComplete = (selectedModuleIds) => {
     const modulesData = {};

@@ -8,8 +8,21 @@ import { showAlert, showConfirm } from '../utils/platform';
 export function useConflictResolution({
   setPatients, activeId, setActiveId, setCurrentStepIndex,
   session, settings, setConflictPatientId, syncNow,
+  dirtyAssessmentPatientId, onBlockedByUnsavedDraft,
 }) {
+  // 지금 종합소견을 편집 중인 환자를 충돌 해결/생년월일 정정으로 교체·삭제하면 draft가
+  // 어느 데이터를 기준으로 저장될지 불명확해진다 — 편집 완료/취소로 먼저 마무리하게 한다.
+  // useCallback으로 고정해 handleCorrectServerIdentity의 deps에 안전하게 넣는다.
+  const isDirtyBlocked = useCallback((patientId) => {
+    if (dirtyAssessmentPatientId && dirtyAssessmentPatientId === patientId) {
+      onBlockedByUnsavedDraft?.();
+      return true;
+    }
+    return false;
+  }, [dirtyAssessmentPatientId, onBlockedByUnsavedDraft]);
+
   const applyResolvedConflict = (patientId, resolution, options = {}) => {
+    if (isDirtyBlocked(patientId)) return;
     setPatients(prev => {
       const next = resolvePatientConflictInList(prev, patientId, resolution, options);
       if (activeId === patientId && !next.some(p => p.id === patientId)) {
@@ -50,6 +63,7 @@ export function useConflictResolution({
   // 정정 API가 돌려준 최신 서버 환자로 교체해 새 revision과 'synced'를 그대로 반영한다.
   const handleCorrectServerIdentity = useCallback(async ({ patient, birthDate, reasonCode }) => {
     if (!patient || !birthDate) return;
+    if (isDirtyBlocked(patient.id)) return;
 
     const ok = await showConfirm(
       `서버에 저장된 생년월일을 '${birthDate}'로 정정합니다.\n`
@@ -95,10 +109,11 @@ export function useConflictResolution({
       }
       await showAlert(`생년월일 정정에 실패했습니다. ${error?.message || '다시 시도해 주세요.'}`);
     }
-  }, [session, settings, setPatients, setConflictPatientId, syncNow]);
+  }, [session, settings, setPatients, setConflictPatientId, syncNow, isDirtyBlocked]);
 
   const handleResolveConflict = async (resolution, { patient, serverPatient, mergedData } = {}) => {
     if (!patient) return;
+    if (isDirtyBlocked(patient.id)) return;
     const conflict = patient.sync?.conflict || {};
     const conflictKind = conflict.kind;
 
