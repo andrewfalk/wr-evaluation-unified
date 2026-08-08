@@ -32,6 +32,7 @@ export function AppModals({
   showBatchImport, setShowBatchImport, handleBatchImport,
 
   conflictPatient, setConflictPatientId, handleResolveConflict, handleCorrectServerIdentity, markRemoteDeleteConflict,
+  hasUnsavedAssessmentDraft = false, onBlockedByUnsavedDraft,
 
   presetModalJobId, setPresetModalJobId, presetEditingPreset, setPresetEditingPreset,
   presetBrowseJobId, setPresetBrowseJobId,
@@ -102,6 +103,9 @@ export function AppModals({
             handleCorrectServerIdentity({ patient: conflictPatient, birthDate, reasonCode })
           }
           onEditIdentity={() => {
+            // 정정 화면(기본정보 스텝)으로 강제 이동한다 — 지금 다른 환자의 종합소견을
+            // 편집 중이면 그 draft가 통째로 사라지므로 먼저 마무리하게 한다.
+            if (hasUnsavedAssessmentDraft) { onBlockedByUnsavedDraft?.(); return; }
             setConflictPatientId(null);
             setActiveId(conflictPatient.id);
             setShowHome(false);

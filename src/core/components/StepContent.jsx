@@ -27,6 +27,7 @@ export function StepContent({
   updatePatient, updateShared, updateModule, updateModuleById, updateDiagnoses, updateActiveModules,
   handlePresetSelect, setPresetModalJobId, setPresetBrowseJobId,
   onVideoServerApplied,
+  onAssessmentEditingChange,
   canMutate = true,
 }) {
   if (!currentStep || !activePatient) return null;
@@ -117,6 +118,8 @@ export function StepContent({
           updateDiagnoses={updateDiagnoses}
           updateModuleById={updateModuleById}
           updateShared={updateShared}
+          canMutate={canMutate}
+          onEditingChange={onAssessmentEditingChange}
         />
       );
     }
@@ -158,29 +161,34 @@ export function StepContent({
 
   const content = renderStepContent();
   const readOnly = !canMutate;
-  if (!readOnly) return content;
-  // read-only: 자식을 그대로 노출(display: contents)해 부모 grid/flex 레이아웃 보존.
-  // banner는 부모(App.jsx)에서 스텝 탭 아래에 직접 렌더.
+  // readOnly 여부와 무관하게 항상 같은 래퍼 요소를 렌더한다(핸들러/클래스만 조건부) —
+  // 이전에는 read-only일 때만 <div>로 감싸서 반환했는데, 잠금 상실 등으로 readOnly가
+  // 바뀌면 이 위치의 루트 요소 구조가 달라져 자식(AssessmentStep 등)이 재마운트되고
+  // 편집 중이던 로컬 draft가 통째로 사라지는 문제가 있었다. .step-content-shell이
+  // display: contents라 두 상태의 레이아웃은 동일하다(index.css).
   //
   // 이전에는 HTML inert 속성으로 전체를 막았으나, inert는 텍스트 선택(복사)과 스크롤까지
   // 차단해버려 비담당 환자의 내용을 읽을 수조차 없었다. 대신 capture-phase 이벤트 핸들러로
   // "상호작용(클릭/입력/붙여넣기/드롭)"만 막고, 텍스트 선택·복사·스크롤은 그대로 허용한다.
   // 서버(assignedDoctorOrAdmin 403)와 usePatientCrud silent guard가 실제 데이터 변경의
   // 최종 방어선이므로, 여기서는 UI 상호작용을 명확히 차단하는 역할만 한다.
+  // banner는 부모(App.jsx)에서 스텝 탭 아래에 직접 렌더.
+  const readOnlyProps = readOnly ? {
+    'aria-disabled': 'true',
+    onClickCapture: blockInteraction,
+    onKeyDownCapture: blockMutatingKeys,
+    onBeforeInputCapture: blockInteraction,
+    onInputCapture: blockInteraction,
+    onChangeCapture: blockInteraction,
+    onPasteCapture: blockInteraction,
+    onCutCapture: blockInteraction,
+    onDropCapture: blockInteraction,
+    onSubmitCapture: blockInteraction,
+  } : {};
   return (
-    <div
-      className="read-only-content"
-      aria-disabled="true"
-      onClickCapture={blockInteraction}
-      onKeyDownCapture={blockMutatingKeys}
-      onBeforeInputCapture={blockInteraction}
-      onInputCapture={blockInteraction}
-      onChangeCapture={blockInteraction}
-      onPasteCapture={blockInteraction}
-      onCutCapture={blockInteraction}
-      onDropCapture={blockInteraction}
-      onSubmitCapture={blockInteraction}
-    >{content}</div>
+    <div className={`step-content-shell${readOnly ? ' read-only-content' : ''}`} {...readOnlyProps}>
+      {content}
+    </div>
   );
 }
 

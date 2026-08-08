@@ -115,6 +115,55 @@ describe('SharedDataSchema', () => {
     expect(result.diagnoses).toHaveLength(0);
     expect(result.jobs).toHaveLength(0);
   });
+
+  it('parses shared data without reportOptions (legacy files unchanged)', () => {
+    const result = SharedDataSchema.parse(validShared);
+    expect(result.reportOptions).toBeUndefined();
+  });
+
+  it('round-trips a valid assessmentOverride', () => {
+    const withOverride = {
+      ...validShared,
+      reportOptions: {
+        groupAssessmentResults: false,
+        assessmentOverride: {
+          text: '편집된 종합소견 본문',
+          baseText: '자동 생성된 종합소견 본문',
+          updatedAt: '2024-01-10T09:00:00.000Z',
+        },
+      },
+    };
+    const result = SharedDataSchema.parse(withOverride);
+    expect(result.reportOptions?.assessmentOverride).toEqual(withOverride.reportOptions.assessmentOverride);
+  });
+
+  it('rejects an empty-string assessmentOverride.text', () => {
+    expect(() => SharedDataSchema.parse({
+      ...validShared,
+      reportOptions: { assessmentOverride: { text: '', baseText: '', updatedAt: '2024-01-10T09:00:00.000Z' } },
+    })).toThrow();
+  });
+
+  it('rejects a whitespace-only assessmentOverride.text', () => {
+    expect(() => SharedDataSchema.parse({
+      ...validShared,
+      reportOptions: { assessmentOverride: { text: '   \n\t', baseText: '', updatedAt: '2024-01-10T09:00:00.000Z' } },
+    })).toThrow();
+  });
+
+  it('rejects assessmentOverride missing baseText', () => {
+    expect(() => SharedDataSchema.parse({
+      ...validShared,
+      reportOptions: { assessmentOverride: { text: 'a', updatedAt: '2024-01-10T09:00:00.000Z' } },
+    })).toThrow();
+  });
+
+  it('rejects assessmentOverride with a non-ISO updatedAt', () => {
+    expect(() => SharedDataSchema.parse({
+      ...validShared,
+      reportOptions: { assessmentOverride: { text: 'a', baseText: 'b', updatedAt: 'not-a-date' } },
+    })).toThrow();
+  });
 });
 
 describe('PatientSchema', () => {

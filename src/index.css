@@ -330,13 +330,13 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .emr-progress-close:hover { color: var(--text-primary); }
 .main-content { flex: 1; min-height: 0; overflow: visible; width: 100%; }
 .main-content.main-content-dual { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-.main-content.main-content-dual > * { min-width: 0; }
+.main-content.main-content-dual > .step-content-shell > * { min-width: 0; }
 .main-content.main-content-single { display: flex; }
-.main-content.main-content-single > .panel { width: 50%; }
+.main-content.main-content-single > .step-content-shell > .panel { width: 50%; }
 
 @media (max-width: 900px) {
   .main-content.main-content-dual { grid-template-columns: 1fr; }
-  .main-content.main-content-single > .panel { width: 100%; }
+  .main-content.main-content-single > .step-content-shell > .panel { width: 100%; }
 }
 @media (max-width: 900px) { .app-layout { flex-direction: column; } .sidebar { width: 100%; height: auto; flex-direction: row; flex-wrap: wrap; } .patient-list { flex-basis: 100%; max-height: 150px; } }
 
@@ -437,6 +437,56 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   color: var(--accent-dark);
 }
 .report-preview-hint { font-size: 0.76rem; color: var(--text-muted); }
+
+/* ── 종합소견 직접 편집(오버라이드) ──────────────────────────────────────── */
+.report-preview-format-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  background: var(--accent-light);
+  color: var(--accent-dark);
+  vertical-align: middle;
+}
+.assessment-override-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 10px 16px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  background: var(--warning-light, #fff3cd);
+  color: var(--warning-dark, #856404);
+  border: 1px solid var(--warning, #ffc107);
+}
+.assessment-override-banner-danger {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+.assessment-edit-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.preview-textarea {
+  flex: 1 1 auto;
+  min-height: 300px;
+  padding: 20px 22px;
+  border: none;
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 0.85rem;
+  line-height: 1.75;
+  background: transparent;
+  color: var(--text-primary);
+}
+.preview-textarea:focus { background: var(--input-bg); }
+.preview-textarea[readonly] { color: var(--text-muted); cursor: not-allowed; }
+.assessment-override-hint { margin: 0 16px 12px; }
 
 .form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px; }
 .form-group { display: flex; flex-direction: column; margin-bottom: 12px; }
@@ -2223,7 +2273,7 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   }
   .patient-list { flex: 1 1 auto; max-height: none; min-height: 140px; }
   .main-content.main-content-dual { gap: 12px; }
-  .main-content.main-content-single > .panel { width: 100%; }
+  .main-content.main-content-single > .step-content-shell > .panel { width: 100%; }
   .header { padding: 12px 15px; margin-bottom: 8px; }
   .header h1 { font-size: 1.1rem; }
   .header-actions { margin-top: 8px; }
@@ -3123,9 +3173,18 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   border: 1px solid var(--warning, #ffc107);
 }
 
+/* ── 스텝 콘텐츠 래퍼(StepContent.jsx) ───────────────────────────────────── */
+/* readOnly 여부와 무관하게 항상 같은 래퍼 요소를 렌더한다 — 잠금 상실 등으로 readOnly가
+   바뀔 때 루트 요소 구조가 달라지면 자식(AssessmentStep 등)이 재마운트되어 편집 중이던
+   draft가 통째로 사라진다. display: contents로 부모(.main-content 등)의 grid/flex 자식
+   자리는 차지하지 않으므로 두 상태의 레이아웃은 동일하다. */
+.step-content-shell {
+  display: contents;
+}
+
 /* ── Read-only mode (담당 아닌 환자 조회 시) ─────────────────────────────── */
-/* read-only-content는 부모(.main-content 등)의 grid/flex 자식 자리를 차지하지 않도록
-   display: contents로 자식들을 그대로 노출.
+/* read-only-content는 .step-content-shell에 추가로 붙는 수식 클래스 — display:contents는
+   위에서 이미 상시 적용되므로 여기서는 시각 신호(약화·not-allowed)만 담당.
    상호작용 차단은 StepContent.jsx의 capture-phase 이벤트 핸들러(click/keydown/input 등)가
    담당한다 — 이전에는 HTML inert 속성을 썼으나 inert는 텍스트 선택(복사)과 스크롤까지
    막아버려 제거함. 여기서는 시각적 약화 + 복사 허용만 담당. */

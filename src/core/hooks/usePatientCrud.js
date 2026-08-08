@@ -19,6 +19,10 @@ export function usePatientCrud({
   // App.jsx가 canEditPatient(담당의/admin 여부) AND 락 보유 여부를 함께 계산해 넘긴다 —
   // 로컬 전용/비인트라넷은 requiresLock이 false라 canEditPatient와 동일하게 동작한다.
   canMutateActivePatient = true,
+  // 종합소견 직접 편집 dirty 가드 — 편집 중인 환자를 삭제하거나, 목록 전체를 갈아치우는
+  // 일괄 가져오기/테스트 데이터 로드가 draft를 조용히 날리지 않도록 막는다.
+  dirtyAssessmentPatientId,
+  onBlockedByUnsavedDraft,
 }) {
   // updateModuleById/updateActiveModules는 useCallback([activeId, session])로 메모이즈되어
   // 그 시점의 updatePatient를 붙잡는다. 락 취득/해제는 usePatientLock의 useEffect에서
@@ -55,8 +59,14 @@ export function usePatientCrud({
     setErrors(prev => (Object.keys(prev).length ? {} : prev));
   };
 
-  const updateShared = (newShared) => {
-    updatePatient(d => ({ ...d, shared: newShared }));
+  // 함수형 업데이터도 받는다(updateModule/updateModuleById와 동일한 형태) — 오래된 shared
+  // 스냅샷으로 통째 교체하면 그 사이 편집된 상병·직업·회신이 되돌아가는 stale write를 막는다.
+  // 기존 호출자는 전부 객체를 넘기므로 하위호환이다.
+  const updateShared = (updater) => {
+    updatePatient(d => ({
+      ...d,
+      shared: typeof updater === 'function' ? updater(d.shared) : updater,
+    }));
   };
 
   // 모듈 선택 변경 (환자정보 > 모듈 선택 스텝에서)
@@ -205,6 +215,7 @@ export function usePatientCrud({
   };
 
   const removePatient = async (id) => {
+    if (dirtyAssessmentPatientId && dirtyAssessmentPatientId === id) { onBlockedByUnsavedDraft?.(); return; }
     const patient = patients.find(p => p.id === id);
     if (!canDeletePatient(patient, session)) {
       await showAlert('이 환자를 삭제할 권한이 없습니다.');
@@ -224,6 +235,7 @@ export function usePatientCrud({
 
   const removeSelectedPatients = async () => {
     if (selectedIds.size === 0) return;
+    if (dirtyAssessmentPatientId && selectedIds.has(dirtyAssessmentPatientId)) { onBlockedByUnsavedDraft?.(); return; }
     const selected = patients.filter(p => selectedIds.has(p.id));
     if (!selected.every(p => canDeletePatient(p, session))) {
       await showAlert('선택 항목 중 권한 없는 환자가 있어 일괄 삭제할 수 없습니다.');
@@ -240,6 +252,8 @@ export function usePatientCrud({
   };
 
   const handleBatchImport = (importedPatients, stats) => {
+    // 일괄 가져오기는 환자 목록 전체를 갈아치운다 — 편집 중인 환자가 무엇이든 영향을 받는다.
+    if (dirtyAssessmentPatientId) { onBlockedByUnsavedDraft?.(); return; }
     const nextPatients = migratePatientRecords(importedPatients, { session });
     setPatients(nextPatients);
     if (nextPatients.length > 0) {
@@ -258,6 +272,7 @@ export function usePatientCrud({
   };
 
   const handleLoadTestData = async () => {
+    if (dirtyAssessmentPatientId) { onBlockedByUnsavedDraft?.(); return; }
     const isIntranet = session?.mode === 'intranet';
     const isAdmin = session?.user?.role === 'admin';
     if (isIntranet && !isAdmin) return;

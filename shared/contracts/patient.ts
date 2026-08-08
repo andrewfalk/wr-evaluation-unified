@@ -46,6 +46,15 @@ export const SharedDataSchema = z.object({
   // 종합소견 출력 옵션(패턴 그룹화 등). 없으면(구파일) 전부 false로 취급 — 기존 출력 불변.
   reportOptions: z.object({
     groupAssessmentResults: z.boolean().optional(),
+    // 6.종합소견(b8) 직접 편집본. 없으면 자동 생성본을 그대로 사용 — 기존 출력 불변.
+    // 빈 문자열 저장 방지는 계약(.refine)과 emrReport.js의 resolveAssessment 접근자
+    // 이중 방어 — 서버는 passthrough라 런타임 진짜 방어선은 접근자 쪽이다.
+    assessmentOverride: z.object({
+      text: z.string().refine(v => v.trim().length > 0),
+      // 편집 진입 시점의 자동 생성본 원문 — 현재 자동 생성본과 다르면 낡음(isStale) 판정.
+      baseText: z.string(),
+      updatedAt: z.string().datetime(),
+    }).optional(),
   }).optional(),
 });
 

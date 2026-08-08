@@ -35,19 +35,21 @@ function patient(overrides = {}) {
 
 // canMutateActivePatient를 renderHook props로 넘긴다 — 훅 본문에서 지역값으로 캡처하면
 // rerender()를 호출해도 값이 안 바뀌어 락 전이(취득/상실)를 재현할 수 없다.
-function setup({ canMutateActivePatient = true, patients = [patient()] } = {}) {
+function setup({ canMutateActivePatient = true, patients = [patient()], selectedIds = new Set(), dirtyAssessmentPatientId, onBlockedByUnsavedDraft = vi.fn() } = {}) {
   const setPatients = vi.fn();
   const { result, rerender } = renderHook(props => usePatientCrud({
     activeId: 'p1', activeModuleId: null, session: SESSION, settings: {},
     patients, setPatients,
-    selectedIds: new Set(), setSelectedIds: vi.fn(),
+    selectedIds, setSelectedIds: vi.fn(),
     errors: {}, setErrors: vi.fn(),
     setActiveId: vi.fn(), setCurrentStepIndex: vi.fn(),
     setIntakeShared: vi.fn(), setShowHome: vi.fn(),
     handleStartIntake: vi.fn(),
     canMutateActivePatient: props.canMutateActivePatient,
+    dirtyAssessmentPatientId,
+    onBlockedByUnsavedDraft,
   }), { initialProps: { canMutateActivePatient } });
-  return { result, rerender, setPatients };
+  return { result, rerender, setPatients, onBlockedByUnsavedDraft };
 }
 
 beforeEach(() => {
@@ -130,6 +132,74 @@ describe('usePatientCrud — 락 상태 전이 후에도 가드가 최신값을 
 
     expect(result.current.updateModuleById).toBe(beforeModule);
     expect(result.current.updateActiveModules).toBe(beforeActive);
+  });
+});
+
+describe('usePatientCrud — updateShared 함수형 업데이터 (stale write 방지)', () => {
+  it('객체를 넘기면 기존 동작대로 shared를 통째 교체한다', () => {
+    const initial = patient({ data: { shared: { name: 'old' }, modules: {}, activeModules: [] } });
+    const { result, setPatients } = setup({ patients: [initial] });
+
+    result.current.updateShared({ name: 'new' });
+
+    const updater = setPatients.mock.calls[0][0];
+    const next = updater([initial]);
+    expect(next[0].data.shared).toEqual({ name: 'new' });
+  });
+
+  it('함수형 업데이터는 setPatients 반영 시점의 최신 shared를 기준으로 병합된다(stale 스냅샷 덮어쓰기 방지)', () => {
+    const initial = patient({ data: { shared: { name: 'stale', diagnoses: ['stale-diag'] }, modules: {}, activeModules: [] } });
+    const { result, setPatients } = setup({ patients: [initial] });
+
+    result.current.updateShared(prevShared => ({ ...prevShared, name: 'edited' }));
+
+    const updater = setPatients.mock.calls[0][0];
+    // setPatients가 실제로 반영되는 시점에는 diagnoses가 다른 경로로 이미 바뀌어 있을 수
+    // 있다 — 함수형 업데이터는 호출 당시 캡처값이 아니라 이 최신 prev를 기준으로 병합돼야 한다.
+    const latestPrev = [patient({ data: { shared: { name: 'stale', diagnoses: ['fresh-diag'] }, modules: {}, activeModules: [] } })];
+    const next = updater(latestPrev);
+    expect(next[0].data.shared).toEqual({ name: 'edited', diagnoses: ['fresh-diag'] });
+  });
+});
+
+describe('usePatientCrud — 종합소견 편집 dirty 가드', () => {
+  it('removePatient: 삭제 대상이 dirty 환자면 삭제하지 않는다', async () => {
+    const { result, setPatients, onBlockedByUnsavedDraft } = setup({ dirtyAssessmentPatientId: 'p1' });
+    await result.current.removePatient('p1');
+    expect(setPatients).not.toHaveBeenCalled();
+    expect(onBlockedByUnsavedDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it('removePatient: dirty가 다른 환자를 가리키면 정상 삭제된다', async () => {
+    deletePatientOnServer.mockResolvedValue(undefined);
+    const { result, setPatients } = setup({ dirtyAssessmentPatientId: 'other', patients: [patient()] });
+    await result.current.removePatient('p1');
+    expect(setPatients).toHaveBeenCalled();
+  });
+
+  it('removeSelectedPatients: 선택 집합에 dirty 환자가 포함되면 차단한다', async () => {
+    const { result, setPatients, onBlockedByUnsavedDraft } = setup({
+      dirtyAssessmentPatientId: 'p1',
+      patients: [patient(), patient({ id: 'p2' })],
+      selectedIds: new Set(['p1', 'p2']),
+    });
+    await result.current.removeSelectedPatients();
+    expect(setPatients).not.toHaveBeenCalled();
+    expect(onBlockedByUnsavedDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it('handleBatchImport: dirty면 목록을 갈아치우지 않는다', () => {
+    const { result, setPatients, onBlockedByUnsavedDraft } = setup({ dirtyAssessmentPatientId: 'p1' });
+    result.current.handleBatchImport([], { newPatients: 0, newDiagnoses: 0, newJobs: 0, skipped: 0, updatedAssessments: 0, withDoctorName: 0 });
+    expect(setPatients).not.toHaveBeenCalled();
+    expect(onBlockedByUnsavedDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it('handleLoadTestData: dirty면 목록을 갈아치우지 않는다', async () => {
+    const { result, setPatients, onBlockedByUnsavedDraft } = setup({ dirtyAssessmentPatientId: 'p1' });
+    await result.current.handleLoadTestData();
+    expect(setPatients).not.toHaveBeenCalled();
+    expect(onBlockedByUnsavedDraft).toHaveBeenCalledTimes(1);
   });
 });
 

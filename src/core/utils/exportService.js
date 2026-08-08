@@ -5,7 +5,7 @@ import { getBk2101RepetitionPerHour } from '../../modules/elbow/utils/calculatio
 import { resolveMddmStatus } from '../../modules/spine/utils/calculations';
 import { EXPOSURE_TYPE_LABELS as CERVICAL_EXPOSURE_TYPE_LABELS } from '../../modules/cervical/utils/data';
 import { getWorkPeriodYearMonth } from './workPeriod';
-import { generateUnifiedEMR } from './emrReport';
+import { generateUnifiedEMR, resolveAssessment } from './emrReport';
 import { selectModuleNote } from './moduleNotes';
 
 export { generateEMRFieldData, generateConsultReplyFieldData } from './emrReport';
@@ -19,7 +19,10 @@ function formatCervicalExposureTypes(exposureTypes = []) {
 function buildUnifiedWorkbook(patient) {
   const shared = patient.data.shared || {};
   const { b5, b6, b7, b8, b9, consultReplySummary } = generateUnifiedEMR(patient);
-  const b8Full = consultReplySummary ? b8 + '\n\n' + consultReplySummary : b8;
+  // 직접 편집 오버라이드가 있으면 그 본문을 6.종합소견에 반영한다 — 다학제 회신 append는
+  // 오버라이드와 무관하게 유지(미리보기에 보인 적 없는 별도 데이터라 편집 대상이 아니다).
+  const effectiveB8 = resolveAssessment(patient, b8).text;
+  const b8Full = consultReplySummary ? effectiveB8 + '\n\n' + consultReplySummary : effectiveB8;
   const wb = XLSX.utils.book_new();
   const wsData = [
     ['업무관련성특별진찰소견서(근골격계질병)', ''],
