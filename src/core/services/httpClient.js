@@ -12,6 +12,18 @@ export function configureHttpClient({ onRefresh, onLogout }) {
   _onLogout = onLogout;
 }
 
+// A local (non-intranet) session has no server auth state to renew, so an auth
+// failure on one cannot be fixed by refreshing — and the failed refresh calls
+// onLogout, which resets session state and can re-trigger whatever issued the
+// request in the first place. Skipping refresh here keeps an unauthenticated probe
+// (e.g. the pre-login integration-status check hitting /api/auth/me) from
+// cascading into that cycle.
+// Only skip when the session positively declares a non-intranet mode; callers that
+// pass no session — or one without a mode — keep the previous behaviour.
+function canRefreshSession(session) {
+  return !session?.mode || session.mode === 'intranet';
+}
+
 function normalizeBaseUrl(baseUrl = '') {
   return String(baseUrl || '').trim().replace(/\/$/, '');
 }
@@ -116,7 +128,7 @@ export async function requestBlob(path, { baseUrl = '', session, headers = {}, s
     ...(signal !== undefined ? { signal } : {}),
   });
 
-  if (response.status === 401 && !_retry && _onRefresh) {
+  if (response.status === 401 && !_retry && _onRefresh && canRefreshSession(session)) {
     let newSession;
     try {
       newSession = await _onRefresh({ baseUrl });
@@ -168,7 +180,7 @@ export async function requestJson(path, {
     try { data = await response.json(); } catch { data = null; }
   }
 
-  if (response.status === 401 && !_retry && _onRefresh) {
+  if (response.status === 401 && !_retry && _onRefresh && canRefreshSession(session)) {
     // Skip refresh for domain errors where a fresh token won't help.
     const errCode = data?.code || data?.error?.code;
     if (errCode === 'WRONG_CURRENT_PASSWORD') {
@@ -203,7 +215,13 @@ export async function requestJson(path, {
   }
 
   const errCode = data?.code || data?.error?.code;
-  if (response.status === 403 && errCode === 'CSRF_INVALID' && !_retry && _onRefresh) {
+  if (
+    response.status === 403
+    && errCode === 'CSRF_INVALID'
+    && !_retry
+    && _onRefresh
+    && canRefreshSession(session)
+  ) {
     let newSession;
     try {
       newSession = await _onRefresh({ baseUrl, forceCsrf: true });
