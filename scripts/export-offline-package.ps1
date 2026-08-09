@@ -22,9 +22,26 @@
 
 .PARAMETER ElectronInstallerPath
     Explicit path to the intranet Electron installer .exe (recommended).
-    If omitted, the script searches dist\electron\ for the newest .exe and warns.
-    Use this when both intranet and standalone builds exist in dist\electron\ to
-    prevent accidentally packaging the wrong build.
+    If omitted, the script searches release\ (electron-builder's directories.output)
+    for the .exe referenced by the chosen -UpdateChannel's metadata file
+    (latest.yml/canary.yml) — NOT simply the newest .exe by timestamp, since stale
+    artifacts left in release\ from a previous build could otherwise be paired with
+    the wrong metadata file. When -ElectronInstallerPath IS given, its containing
+    directory is used as the search directory for the matching metadata/blockmap.
+
+.PARAMETER UpdateChannel
+    Which electron-updater channel's metadata file to package: "latest" (default)
+    or "canary". Determines whether latest.yml or canary.yml (plus its installer
+    and .blockmap) gets copied into electron/ — see docs/INTRANET_DEPLOYMENT.md
+    "자동 업데이트" section for the full canary rollout procedure.
+
+.PARAMETER AllowMissingElectronInstaller
+    Opt-out escape hatch: by default the script FAILS if -UpdateChannel's metadata
+    file (latest.yml/canary.yml) isn't found, since electron-updater is now a
+    required runtime dependency and a package silently missing its installer
+    defeats the point of air-gapped delivery. Pass this switch only for
+    intentionally server-only exports (e.g. a hotfix that doesn't touch the
+    Electron shell) — in that case a PLACEHOLDER.txt is written instead.
 
 .PARAMETER NoZip
     Create the package directory but skip the .zip archive.
@@ -33,8 +50,14 @@
     # Standard: includes ALL images (app + base), suitable for air-gapped install
     .\scripts\export-offline-package.ps1
 
-    # Explicit installer path (recommended when both build targets exist)
-    .\scripts\export-offline-package.ps1 -ElectronInstallerPath "dist\electron\직업성 질환 통합 평가 프로그램 Setup 5.0.0.exe"
+    # Explicit installer directory (recommended when both build targets exist)
+    .\scripts\export-offline-package.ps1 -ElectronInstallerPath "release\직업성 질환 통합 평가 프로그램 Setup 6.5.0.exe"
+
+    # Canary channel package
+    .\scripts\export-offline-package.ps1 -UpdateChannel canary
+
+    # Server-only export — no Electron shell change this release
+    .\scripts\export-offline-package.ps1 -AllowMissingElectronInstaller
 
     # Exclude base images (target has Docker Hub access)
     .\scripts\export-offline-package.ps1 -ExcludeBaseImages
@@ -46,14 +69,22 @@
 param(
     [string]$Version               = "",
     [string]$ElectronInstallerPath = "",
+    [string]$UpdateChannel         = "latest",
     [switch]$SkipBuild             = $false,
     [switch]$ExcludeBaseImages     = $false,
     [switch]$NoZip                 = $false,
-    [switch]$AllowDirty            = $false
+    [switch]$AllowDirty            = $false,
+    [switch]$AllowMissingElectronInstaller = $false
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ($UpdateChannel -ne "latest" -and $UpdateChannel -ne "canary") {
+    Write-Error "-UpdateChannel must be 'latest' or 'canary' (got '$UpdateChannel')"
+    exit 1
+}
+$UpdateMetadataFileName = "$UpdateChannel.yml"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -290,44 +321,86 @@ foreach ($f in $docFiles) {
 
 # ── Electron installer ────────────────────────────────────────────────────────
 
-Write-Step "Electron installer"
+Write-Step "Electron installer ($UpdateChannel channel)"
 $electronDest = Join-Path $PackageDir "electron"
 New-Item -ItemType Directory -Force $electronDest | Out-Null
 
 # electron-builder default artifact name: "${productName} Setup ${version}.exe"
-# productName = "직업성 질환 통합 평가 프로그램" (no artifactName override in package.json)
+# productName = "직업성 질환 통합 평가 프로그램" (no artifactName override in package.json).
+# Output directory is release\ (package.json build.directories.output via
+# electron-builder.base.yml) — NOT dist\electron\, which only holds the
+# pre-packaging Vite renderer bundle, not the final installer/yml/blockmap.
 #
-# Prefer -ElectronInstallerPath when specified; otherwise search dist\electron\ for *.exe.
-# WARNING: if both intranet and standalone builds exist, use -ElectronInstallerPath to
-#          specify the intranet installer explicitly — do NOT rely on LastWriteTime alone.
+# We locate the channel's metadata file (latest.yml/canary.yml) FIRST and let
+# scripts/verify-update-artifacts.mjs pick + verify the installer it references —
+# never "newest .exe by timestamp" independently, since stale artifacts left in
+# release\ from a previous build could otherwise pair a fresh installer with a
+# stale yml (or vice versa) and ship a mismatched combination into the air-gapped
+# package. -ElectronInstallerPath (if given) only selects the search directory;
+# the actual filenames always come from the verified metadata.
+$artifactDir  = if ($ElectronInstallerPath) { Split-Path $ElectronInstallerPath -Parent } else { Join-Path $RepoRoot "release" }
+$metadataPath = Join-Path $artifactDir $UpdateMetadataFileName
+
 $copiedInstallerName = $null
-if ($ElectronInstallerPath) {
-    if (Test-Path $ElectronInstallerPath) {
-        Copy-Item $ElectronInstallerPath $electronDest
-        $copiedInstallerName = Split-Path $ElectronInstallerPath -Leaf
-        Write-Ok "electron/$copiedInstallerName (from -ElectronInstallerPath)"
-    } else {
-        Write-Fail "-ElectronInstallerPath not found: $ElectronInstallerPath"
+if (Test-Path $metadataPath) {
+    Write-Host "    verifying $UpdateMetadataFileName against installer + blockmap in $artifactDir ..." -ForegroundColor Gray
+    $verifyStdout = & node (Join-Path $RepoRoot "scripts\verify-update-artifacts.mjs") --artifact-dir $artifactDir --metadata-file $UpdateMetadataFileName
+    if ($LASTEXITCODE -ne 0) {
+        # verify-update-artifacts.mjs already printed the reason via console.error above.
+        Write-Error "Update artifact verification failed — refusing to package a possibly-mismatched installer+metadata pair."
         exit 1
     }
-} else {
-    $installerSrc = Get-ChildItem (Join-Path $RepoRoot "dist\electron") -Filter "*.exe" -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -notlike "*.blockmap" } |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -First 1
-    if ($installerSrc) {
-        Copy-Item $installerSrc.FullName $electronDest
-        $copiedInstallerName = $installerSrc.Name
-        Write-Ok "electron/$copiedInstallerName"
-        Write-Warn "Auto-selected newest *.exe — verify this is the intranet build. Use -ElectronInstallerPath to be explicit."
-    } else {
-        $placeholder  = "Electron intranet installer not yet available.`r`n"
-        $placeholder += "Build with: npm run electron:build:intranet`r`n"
-        $placeholder += "Then re-run: export-offline-package.ps1 -ElectronInstallerPath <path-to-installer.exe>"
-        Write-Utf8NoBom (Join-Path $electronDest "PLACEHOLDER.txt") $placeholder
-        Write-Warn "Installer not found — PLACEHOLDER.txt added"
+    $verified = $verifyStdout | ConvertFrom-Json
+
+    Copy-Item (Join-Path $artifactDir $verified.installerFile) $electronDest
+    Copy-Item (Join-Path $artifactDir $verified.blockmapFile)  $electronDest
+    Copy-Item $metadataPath $electronDest
+    $copiedInstallerName = $verified.installerFile
+
+    Write-Ok "electron/$($verified.installerFile)"
+    Write-Ok "electron/$($verified.blockmapFile)"
+    Write-Ok "electron/$UpdateMetadataFileName (SHA-512 verified against installer)"
+
+    $UpdateArtifactManifest = [ordered]@{
+        channel        = $verified.channel
+        metadataFile   = $verified.metadataFile
+        installerFile  = $verified.installerFile
+        blockmapFile   = $verified.blockmapFile
+        sha512Verified = $verified.sha512Verified
     }
+} elseif ($AllowMissingElectronInstaller) {
+    $placeholder  = "Electron intranet installer ($UpdateChannel channel) not yet available.`r`n"
+    $placeholder += "Build with: npm run electron:build:intranet`r`n"
+    $placeholder += "Then re-run: export-offline-package.ps1 -UpdateChannel $UpdateChannel -ElectronInstallerPath <path-to-installer.exe>"
+    Write-Utf8NoBom (Join-Path $electronDest "PLACEHOLDER.txt") $placeholder
+    Write-Warn "$UpdateMetadataFileName not found in $artifactDir — PLACEHOLDER.txt added (-AllowMissingElectronInstaller was passed)"
+
+    $UpdateArtifactManifest = [ordered]@{
+        channel        = $UpdateChannel
+        metadataFile   = $null
+        installerFile  = $null
+        blockmapFile   = $null
+        sha512Verified = $false
+    }
+} else {
+    # 기본 동작은 실패다 — electron-updater 도입 이후 에어갭 패키지는 설치본을 반드시
+    # 포함해야 한다는 것이 트랙 2의 전제다. 서버 전용(Electron 셸 무변경) 릴리스처럼
+    # 의도적으로 빠뜨리는 경우에만 -AllowMissingElectronInstaller로 명시적으로 허용한다.
+    Write-Error "$UpdateMetadataFileName not found in $artifactDir. Build with 'npm run electron:build:intranet' first, or pass -AllowMissingElectronInstaller for an intentional server-only export."
+    exit 1
 }
+
+# G절 관리자 스위치(update-policy.json)의 존재·형식을 운영자가 알 수 있도록 템플릿만 동봉한다.
+# 실제 /updates/update-policy.json으로 자동 배치하지는 않는다 — 그러면 설치 직후부터 업데이터가
+# 켜진 채로 나가 "평상시 기본 휴면" 전제가 깨진다. 배치는 운영자가 롤아웃 시점에 수동으로 한다.
+$policyTemplate = @'
+{
+  "enabled": false,
+  "channels": ["latest"]
+}
+'@
+Write-Utf8NoBom (Join-Path $electronDest "update-policy.example.json") $policyTemplate
+Write-Ok "electron/update-policy.example.json (템플릿 — 실제 배치는 운영자가 롤아웃 시점에 수동으로)"
 
 # ── Docker image tar ──────────────────────────────────────────────────────────
 
@@ -400,9 +473,13 @@ $manifest = [ordered]@{
         poseModels        = $poseModelsManifest
     }
     electronInstaller    = [ordered]@{
-        included = [bool]$copiedInstallerName
-        fileName = if ($copiedInstallerName) { $copiedInstallerName } else { $null }
-        note     = if (-not $copiedInstallerName) { "인트라넷 Electron 빌드 미완성 — 별도 빌드 후 -ElectronInstallerPath로 재실행 필요" } else { $null }
+        included       = [bool]$copiedInstallerName
+        channel        = $UpdateArtifactManifest.channel
+        metadataFile   = $UpdateArtifactManifest.metadataFile
+        installerFile  = $UpdateArtifactManifest.installerFile
+        blockmapFile   = $UpdateArtifactManifest.blockmapFile
+        sha512Verified = $UpdateArtifactManifest.sha512Verified
+        note           = if (-not $copiedInstallerName) { "인트라넷 Electron 빌드($UpdateChannel 채널) 미완성 — 별도 빌드 후 -ElectronInstallerPath로 재실행 필요" } else { $null }
     }
     checksum             = "SHA256SUMS"
 }
