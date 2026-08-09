@@ -20,6 +20,7 @@ import { createAutosaveRouter } from './routes/autosave';
 import { createAIRouter } from './routes/ai';
 import { createPresetsRouter } from './routes/presets';
 import { createOpsStatusRouter } from './routes/opsStatus';
+import { createUpdatesRouter } from './routes/updates';
 import { cspMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
 import { runWorkspaceRetention } from './jobs/workspaceRetention';
@@ -49,6 +50,11 @@ app.use('/api/autosave',  createAutosaveRouter(pool));
 app.use('/api/ai',        createAIRouter(pool));
 app.use('/api/presets',   createPresetsRouter(pool));
 app.use('/api/video-analysis', createVideoAnalysisRouter(pool));
+
+// 트랙 2 — electron-updater 정적 배포 경로(설치본/latest.yml/canary.yml/blockmap/정책 파일).
+// /api/* 는 아니지만 반드시 아래 SPA catch-all보다 먼저 등록해야 한다 — 순서가 바뀌면
+// /updates/* 요청이 catch-all에 잡혀 index.html(200 OK)을 받는, 원인 파악이 어려운 버그가 된다.
+app.use('/updates', createUpdatesRouter());
 
 // ---------------------------------------------------------------------------
 // Static web SPA (dist/web/) — registered after API routes so API paths win.

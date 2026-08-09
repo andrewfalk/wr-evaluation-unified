@@ -9,7 +9,12 @@ const { getDataPaths } = require('./paths');
 const { readMigrationSnapshot } = require('./migrationDataReader');
 const { evaluateMigrationGate } = require('./migrationGate');
 const { splitInjectPayload } = require('./emrPayload');
-const { decideExitAction } = require('./exitFlow');
+const { decideExitAction, decideUpdatePromptAction, withExitFlowMutex, installAfterLogout } = require('./exitFlow');
+const {
+  resolveUpdateChannel, buildUpdateFeedConfig, shouldCheckForUpdates,
+  shouldSkipUpdateCheck, decideUpdatePhaseTransition,
+} = require('./updateFeed');
+const { autoUpdater } = require('electron-updater');
 const aiModels = require('../ai-models.config.cjs');
 
 // ---------------------------------------------------------------------------
@@ -67,6 +72,198 @@ function isAllowedSender(url) {
   try { return new URL(url).origin === ALLOWED_ORIGIN; } catch { return false; }
 }
 
+// =============================================================================
+// electron-updater — 트랙 2. 관리자가 /updates/update-policy.json 스위치를 켠 상태에서만
+// 실제로 checkForUpdates()를 부른다(G절) — 대부분의 기능 업데이트는 서버 배포만으로
+// 끝나 Electron 셸 업데이트 자체가 드물기 때문에, 평상시엔 이 기계가 아예 잠들어 있어야
+// 한다. 아래는 창을 몰라도 되는 모듈 레벨 로직만 — 설치 실행(quitAndInstall)과 그 실패
+// 복구는 win.on('close') 가드와 같은 상태(allowWindowClose)를 공유해야 해서
+// createWindow() 내부(D-3)에 있다.
+// =============================================================================
+
+const WR_UPDATE_CHANNEL = resolveUpdateChannel(process.env.WR_UPDATE_CHANNEL);
+
+// 'idle' | 'checking' | 'downloading' | 'ready' | 'installing'
+// 'error' 이벤트 하나에 메타데이터 확인 실패·다운로드 실패·설치 실행 실패가 전부 섞여
+// 들어오므로, 어느 단계에서 실패했는지는 이 phase로 구분한다(E-1).
+let updatePhase = 'idle';
+const PHASE_LABEL = {
+  checking:    '업데이트 확인 실패',
+  downloading: '업데이트 다운로드 실패',
+  installing:  '업데이트 설치 실패',
+};
+
+const STABLE_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4시간
+let consecutiveFailures = 0;
+let checkTimer = null;
+
+const MAX_LOG_BYTES = 256 * 1024;
+
+// 패키지 실행 시 콘솔은 운영자가 볼 수 없으므로 로컬 파일에도 남긴다. download-progress처럼
+// 초당 여러 번 발생하는 이벤트는 절대 연결하지 않는다(동기 I/O로 메인 프로세스가 막힘) —
+// 상태 전이(checking/available/not-available/downloaded/error)만 기록한다.
+function rotateUpdaterLog(logPath) {
+  const backup = `${logPath}.1`;
+  try { fs.unlinkSync(backup); } catch {} // Windows는 대상이 있으면 rename 실패 — 먼저 지운다
+  fs.renameSync(logPath, backup);         // 백업은 1세대만 유지
+}
+
+function logUpdateEvent(line) {
+  console.log(line);
+  const logPath = path.join(app.getPath('userData'), 'updater.log');
+  try {
+    if (fs.existsSync(logPath) && fs.statSync(logPath).size > MAX_LOG_BYTES) rotateUpdaterLog(logPath);
+  } catch {
+    // 회전 실패(파일 잠김 등)는 무시 — 아래에서 현재 로그에 계속 기록한다.
+  }
+  try {
+    fs.appendFileSync(logPath, `${new Date().toISOString()} ${line}\n`, 'utf-8');
+  } catch {
+    // 로깅 실패가 앱 동작을 방해하지 않게 흡수.
+  }
+}
+
+// 메뉴는 Windows에서 앱 전역이라(창 클로저 캡처 불필요) Menu.getApplicationMenu()로 조회한다.
+// update-status(표시 전용)와 install-update(실행)를 분리 — 하나의 라벨에 "실패 상태"와
+// "설치 실행"을 겹쳐 쓰면 설치본이 이미 준비된 상태에서 후속 확인이 실패했을 때 의미가 섞인다.
+function setUpdateMenuStatusLabel(text) {
+  const item = Menu.getApplicationMenu()?.getMenuItemById('update-status');
+  if (item) { item.label = text || '업데이트 상태'; item.visible = !!text; }
+}
+function setInstallUpdateEnabled(enabled) {
+  const item = Menu.getApplicationMenu()?.getMenuItemById('install-update');
+  if (item) item.enabled = !!enabled;
+}
+
+// main 프로세스에서 서버로 보내는 유일한 GET 요청 — 기존 netRequest()/audit.js의
+// httpPost()는 전부 POST 하드코딩이라 재사용 불가. single-flight finish()로 타임아웃·
+// request error·response error의 중복 resolve와 타이머 정리를 한 곳에서 처리한다.
+const POLICY_MAX_BYTES = 64 * 1024;
+
+function fetchUpdatePolicy() {   // 실패 시 null(throw하지 않음) — 정책을 못 읽으면 비활성으로 간주
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer = null;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const req = net.request({ url: `${INTRANET_URL}/updates/update-policy.json?t=${Date.now()}`, method: 'GET' });
+    timer = setTimeout(() => { try { req.abort(); } catch {} finish(null); }, 10000);
+    req.on('response', (res) => {
+      if (res.statusCode !== 200) { res.resume(); finish(null); return; }
+      const chunks = [];
+      let received = 0;
+      res.on('data', (c) => {
+        const buf = Buffer.isBuffer(c) ? c : Buffer.from(c);
+        received += buf.length; // 문자열 length가 아니라 실제 바이트 수
+        if (received > POLICY_MAX_BYTES) { try { req.abort(); } catch {} finish(null); return; }
+        chunks.push(buf);
+      });
+      res.on('end', () => { try { finish(JSON.parse(Buffer.concat(chunks).toString('utf-8'))); } catch { finish(null); } });
+      res.on('error', () => finish(null));
+    });
+    req.on('error', () => finish(null));
+    req.end();
+  });
+}
+
+// updateFeed.js의 decideUpdatePhaseTransition이 돌려준 timerAction을 실제로 실행한다 —
+// 타이머를 소유하는 건 main.js뿐이라 이 매핑만 여기 있고, 어떤 전이가 어떤 액션을 내는지는
+// 순수 함수(테이블)로 분리돼 있어 mock 없이 단위테스트 가능하다(E-1).
+function applyUpdatePhaseTransition(event) {
+  const { phase, timerAction } = decideUpdatePhaseTransition(event);
+  updatePhase = phase;
+  if (timerAction === 'clear') clearTimeout(checkTimer);
+  else if (timerAction === 'scheduleStable') scheduleNextCheck(STABLE_INTERVAL_MS);
+  return phase;
+}
+
+// 실패 집계는 'error' 이벤트 하나에서만 한다 — checkForUpdates()의 Promise도 별도로
+// reject하지만 그쪽은 unhandled rejection 방지용 빈 catch만 둔다(이중 집계 방지, E-1).
+function handleUpdaterFailure(err) {
+  const failedPhase = updatePhase;
+  consecutiveFailures += 1;
+  logUpdateEvent(`[updater] ${failedPhase} failed (${consecutiveFailures}): ${err?.message || err}`);
+  setUpdateMenuStatusLabel(`${PHASE_LABEL[failedPhase] || '업데이트 처리 실패'} (${consecutiveFailures}회)`);
+  if (failedPhase === 'installing') { applyUpdatePhaseTransition('installFail'); return; }
+  updatePhase = 'idle';
+  scheduleNextCheck(consecutiveFailures === 1 ? 15 * 60 * 1000 : 60 * 60 * 1000); // 15분 → 1시간
+}
+function clearUpdaterFailureStatus() {
+  if (consecutiveFailures > 0) { consecutiveFailures = 0; setUpdateMenuStatusLabel(''); }
+}
+
+function scheduleNextCheck(ms) { clearTimeout(checkTimer); checkTimer = setTimeout(runCheck, ms); }
+
+async function runCheck() {
+  // 다운로드·설치 대기·설치 중이면 재확인하지 않는다(타이머 수명주기 이중 안전장치).
+  if (shouldSkipUpdateCheck(updatePhase)) return;
+  try {
+    const policy = await fetchUpdatePolicy();
+    if (!shouldCheckForUpdates({ policy, channel: WR_UPDATE_CHANNEL })) {
+      scheduleNextCheck(STABLE_INTERVAL_MS); // 정책만 주기적으로 다시 확인, autoUpdater는 안 건드림
+      return;
+    }
+    autoUpdater.checkForUpdates().catch(() => {}); // unhandled rejection 방지용(집계는 'error'에서만)
+  } catch (err) {
+    // fetchUpdatePolicy는 설계상 reject하지 않지만, net.request()/req.end()가 동기 throw할
+    // 여지가 있어 타이머에서 호출된 runCheck가 unhandled rejection을 만들지 않도록 최종 방어.
+    logUpdateEvent(`[updater] policy check failed: ${err?.message || err}`);
+    scheduleNextCheck(STABLE_INTERVAL_MS);
+  }
+}
+
+// netSession 프록시 설정을 기다린 뒤에야 첫 checkForUpdates()가 나가도록 순서를 보장한다.
+// 이전 버전은 setProxy()를 fire-and-forget으로 시작만 하고 곧바로 runCheck()를 불러,
+// 정책 조회가 빨리 끝나면(특히 캐시된 DNS 등) updater의 latest.yml 요청이 프록시 설정
+// 완료보다 먼저 나갈 수 있었다 — PAC 환경에서 간헐적인 첫 확인 실패로 나타나는 레이스였다.
+async function initAutoUpdater() {
+  const feed = buildUpdateFeedConfig({ isIntranetBuild: IS_INTRANET_BUILD, intranetUrl: INTRANET_URL, channel: WR_UPDATE_CHANNEL });
+  if (!feed) return;
+
+  autoUpdater.autoInstallOnAppQuit = false; // 이 커스텀 흐름(D-3)이 유일한 설치 경로
+  autoUpdater.autoDownload = true;
+  autoUpdater.setFeedURL(feed);
+
+  // TODO(update-CA-trust): 내부 CA HTTPS 신뢰 확인 실패 시(docs/INTRANET_DEPLOYMENT.md CA절
+  // 참고) 여기서 전용 session에 setCertificateVerifyProc을 끼워넣는다. 실측 전 미리 구현 안 함.
+
+  autoUpdater.on('checking-for-update', () => {
+    applyUpdatePhaseTransition('checking');
+    logUpdateEvent('[updater] checking-for-update');
+  });
+  autoUpdater.on('update-available', (info) => {
+    applyUpdatePhaseTransition('available');
+    clearUpdaterFailureStatus();
+    logUpdateEvent(`[updater] update-available: ${info?.version ?? 'unknown'}`);
+  });
+  autoUpdater.on('update-not-available', () => {
+    applyUpdatePhaseTransition('notAvailable'); // 정상 주기 재예약은 여기서만(전이 테이블의 scheduleStable)
+    clearUpdaterFailureStatus();
+    logUpdateEvent('[updater] update-not-available');
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    applyUpdatePhaseTransition('downloaded'); // 준비 완료 후에도 재확인 불필요 — 설치는 메뉴/프롬프트로
+    logUpdateEvent(`[updater] update-downloaded: ${info?.version ?? 'unknown'}`);
+  });
+  autoUpdater.on('error', (err) => handleUpdaterFailure(err)); // 유일한 집계·로깅 지점(창 스코프 리스너는 별도 관심사, D-3)
+
+  // updater 전용 세션에도 PAC 우회를 적용 — 안 하면 정책 조회(기본 세션)는 성공하는데
+  // latest.yml/설치본 다운로드(updater 세션)만 원인 파악이 어렵게 실패한다(G-3-b).
+  // 반드시 runCheck() "전에" 완료돼야 한다(위 레이스 설명 참고).
+  try {
+    if (autoUpdater.netSession) await autoUpdater.netSession.setProxy({ mode: 'direct' });
+  } catch (e) {
+    logUpdateEvent(`[updater] netSession proxy setup failed: ${e?.message || e}`);
+    // 실패해도 계속 진행 — PAC 없는 환경에선 무해하고, 있으면 다운로드 실패로 드러나 수동 설치로 유도.
+  }
+
+  await runCheck();
+}
+
 // Windows 7/8 호환성 (Electron 22 — 마지막 Win7 지원 버전)
 if (process.platform === 'win32') {
   const ver = os.release();
@@ -108,8 +305,7 @@ function createWindow() {
   // 종료·새로고침 confirm 다이얼로그 공유 상태 — 중복 다이얼로그 방지(exitFlowInFlight).
   let exitFlowInFlight = false;
 
-  function confirmUnsavedDraftExit(message) {
-    exitFlowInFlight = true;
+  function showUnsavedDraftDialog(message) {
     return dialog.showMessageBox(win, {
       type: 'warning',
       buttons: ['취소', '계속'],
@@ -118,10 +314,17 @@ function createWindow() {
       title: '저장되지 않은 편집 내용',
       message,
       detail: '계속하면 편집 중인 종합소견 내용은 저장되지 않고 사라집니다.',
-    }).then(({ response }) => {
-      exitFlowInFlight = false;
-      return response === 1; // '계속' 선택 여부
-    });
+    }).then(({ response }) => response === 1); // '계속' 선택 여부
+  }
+  const setExitFlowInFlight = (v) => { exitFlowInFlight = v; };
+
+  // close/reload 확인창이 떠 있는 동안(exitFlowInFlight)뿐 아니라, 업데이트 설치 승인 후
+  // 로그아웃 대기(최대 3초, installFlowInFlight — 아래 설치 관련 상태 블록) 동안에도
+  // 재진입(메뉴 재클릭·창 닫기·Ctrl+R)을 막아야 한다 — 트랙 2 계획 D-3.
+  const isExitFlowBusy = () => exitFlowInFlight || installFlowInFlight;
+
+  function confirmUnsavedDraftExit(message) {   // 기존 이름/시그니처 유지 — close/reload 호출부 무변경
+    return withExitFlowMutex(() => showUnsavedDraftDialog(message), setExitFlowInFlight);
   }
 
   function requestRendererLogout() {
@@ -161,7 +364,7 @@ function createWindow() {
   win.on('close', (event) => {
     if (allowWindowClose || !IS_INTRANET_BUILD) return;
     event.preventDefault();
-    const action = decideExitAction({ hasUnsavedDraft: _hasUnsavedDraft, exitFlowInFlight });
+    const action = decideExitAction({ hasUnsavedDraft: _hasUnsavedDraft, exitFlowInFlight: isExitFlowBusy() });
     if (action === 'ignore') return;
     if (action === 'proceed') { proceedToClose(); return; }
     confirmUnsavedDraftExit('저장하지 않은 종합소견 편집 내용이 있습니다. 그래도 종료하시겠습니까?')
@@ -172,11 +375,84 @@ function createWindow() {
   // 무관하게 draft를 잃는다. 같은 exitFlowInFlight 상태를 공유해 종료 confirm과
   // 중복으로 뜨지 않게 한다.
   function requestSafeReload() {
-    const action = decideExitAction({ hasUnsavedDraft: _hasUnsavedDraft, exitFlowInFlight });
+    const action = decideExitAction({ hasUnsavedDraft: _hasUnsavedDraft, exitFlowInFlight: isExitFlowBusy() });
     if (action === 'ignore') return;
     if (action === 'proceed') { win.reload(); return; }
     confirmUnsavedDraftExit('저장하지 않은 종합소견 편집 내용이 있습니다. 그래도 새로고침하시겠습니까?')
       .then(shouldProceed => { if (shouldProceed) win.reload(); });
+  }
+
+  // ── 업데이트 설치 관련 창 스코프 상태·흐름 (트랙 2, D-3) ────────────────────
+  // allowWindowClose는 이 함수의 지역 변수라 모듈 레벨 initAutoUpdater()의 'error'
+  // 핸들러에서는 접근할 수 없다 — 설치 실패 복구 로직 전체를 여기 창 스코프에 둔다.
+  let updateReady = false;             // 설치본 다운로드 완료 여부(한 번 true면 유지)
+  let installFlowInFlight = false;     // 설치 승인~로그아웃 완료 구간 재진입 잠금
+  let installAttemptInFlight = false;  // quitAndInstall 호출 시도 중
+
+  function recoverInstallAttempt(err) {          // 동기/비동기 실패 공통 복구
+    if (!installFlowInFlight && !installAttemptInFlight) return;
+    installAttemptInFlight = false;
+    installFlowInFlight = false;                 // 재진입 잠금 해제
+    allowWindowClose = false;                    // 종료 가드 복구 — 안 하면 미저장 draft 확인 없이 종료됨
+    setInstallUpdateEnabled(updateReady);        // 설치본은 그대로 준비돼 있으니 재시도 경로 유지
+    logUpdateEvent(`[updater] install attempt failed: ${err?.message || err}`);
+  }
+
+  function proceedToInstallUpdate() {
+    if (installFlowInFlight) return Promise.resolve();
+    installFlowInFlight = true;                  // 로그아웃 시작 "전에" 잠근다 — 다이얼로그가 닫히며
+    setInstallUpdateEnabled(false);              // exitFlowInFlight가 풀리는 순간부터 로그아웃 완료까지의
+                                                  // 공백(최대 3초)에 재진입이 없도록.
+    return installAfterLogout(requestRendererLogout(), () => {
+      installAttemptInFlight = true;
+      applyUpdatePhaseTransition('installStart');  // E-1 단계별 오류 분류용
+      allowWindowClose = true;
+      try {
+        autoUpdater.quitAndInstall();
+      } catch (err) {
+        // 동기 throw 경로: 'error' 이벤트가 안 올 수 있어 phase를 여기서 직접 되돌린다.
+        // 이벤트가 먼저 왔다면 이미 'ready'로 바뀌어 있어 이 분기는 건너뛰고 중복 집계도 없다.
+        if (updatePhase === 'installing') handleUpdaterFailure(err);
+        recoverInstallAttempt(err);
+        throw err;
+      }
+    })
+      .catch(err => { recoverInstallAttempt(err); })   // installAfterLogout(로그아웃) 자체 실패도 흡수
+      .finally(() => { if (!installAttemptInFlight) installFlowInFlight = false; });
+  }
+
+  function promptInstallUpdate() {
+    if (decideUpdatePromptAction({ exitFlowInFlight: isExitFlowBusy() }) === 'ignore') return;
+    const flow = _hasUnsavedDraft
+      ? confirmUnsavedDraftExit('저장하지 않은 종합소견 편집 내용이 있습니다. 그래도 업데이트를 설치하시겠습니까?')
+      : withExitFlowMutex(() => dialog.showMessageBox(win, {
+          type: 'info', buttons: ['나중에', '지금 설치'], defaultId: 1, cancelId: 0,
+          title: '업데이트 준비됨', message: '업데이트가 준비되었습니다. 지금 설치하시겠습니까?',
+          detail: '설치 시 프로그램이 재시작됩니다.',
+        }).then(({ response }) => response === 1), setExitFlowInFlight);
+
+    flow
+      .then(shouldInstall => { if (shouldInstall) proceedToInstallUpdate(); /* 아니면 메뉴는 이미 활성 */ })
+      .catch(err => { logUpdateEvent(`[updater] prompt failed: ${err?.message || err}`); setInstallUpdateEnabled(updateReady); });
+  }
+
+  if (IS_INTRANET_BUILD) {
+    // update-downloaded는 한 번만 오는 이벤트다 — 그 순간 종료/새로고침 확인창이 떠 있으면
+    // promptInstallUpdate()가 'ignore'로 반환하는데, 준비 상태를 먼저 반영해두지 않으면
+    // 다시는 알림이 안 오고 메뉴도 비활성인 채로 남아 다운로드된 업데이트가 영구 유실된다.
+    const onUpdateDownloaded = () => {
+      updateReady = true;
+      setInstallUpdateEnabled(true);
+      promptInstallUpdate();
+    };
+    autoUpdater.on('update-downloaded', onUpdateDownloaded);
+    win.once('closed', () => { autoUpdater.removeListener('update-downloaded', onUpdateDownloaded); });
+
+    // 비동기 설치 실패 경로(창 전용). 실패 횟수는 여기서 올리지 않는다 — 모듈 레벨
+    // handleUpdaterFailure가 유일한 집계 지점(E-1 이중 집계 방지 원칙 유지).
+    const onUpdaterError = (err) => recoverInstallAttempt(err);
+    autoUpdater.on('error', onUpdaterError);
+    win.once('closed', () => { autoUpdater.removeListener('error', onUpdaterError); });
   }
 
   win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
@@ -266,6 +542,13 @@ function createWindow() {
     {
       label: '도움말',
       submenu: [
+        // 트랙 2 — update-status(표시 전용, 실패 시에만 노출)와 install-update(실행,
+        // update-downloaded 시점에 활성화)를 분리(main.js 상단 setUpdateMenuStatusLabel 참고).
+        ...(IS_INTRANET_BUILD ? [
+          { id: 'update-status', label: '업데이트 상태', enabled: false, visible: false },
+          { id: 'install-update', label: '업데이트 설치 (재시작)', enabled: false, click: () => promptInstallUpdate() },
+          { type: 'separator' },
+        ] : []),
         { label: '버전 정보', click: () => {
           dialog.showMessageBox(mainWindow, {
             type: 'info',
@@ -331,6 +614,12 @@ app.whenReady().then(async () => {
     setInterval(() => {
       audit.flushQueue().catch(e => console.error('[audit] flush interval:', e.message));
     }, 5 * 60 * 1000);
+
+    // app.isPackaged 가드 — electron-updater는 언패키지 실행(electron:dev:intranet)에서
+    // 부르면 throw한다. dev-app-update.yml/forceDevUpdateConfig는 의도적으로 도입하지 않음.
+    // await — initAutoUpdater 내부에서 netSession 프록시 설정이 첫 checkForUpdates()보다
+    // 먼저 끝나야 하므로(레이스 방지), 호출부도 완료를 기다린다.
+    if (app.isPackaged) await initAutoUpdater();
   }
 });
 

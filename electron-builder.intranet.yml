@@ -1,0 +1,6 @@
+extends: electron-builder.base.yml
+publish:
+  provider: generic
+  url: https://wr.hospital.local:8443/updates
+# certificateFile 없음 — 코드서명은 후속 과제로 연기(트랙 2 계획 항목 ④).
+# 서명 인증서를 도입할 때 여기에 certificateFile/certificatePassword를 추가한다.

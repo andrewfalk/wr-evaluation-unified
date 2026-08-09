@@ -12,7 +12,8 @@
 4. [Electron 앱 인증서 처리](#4-electron-앱-인증서-처리)
 5. [인증서 갱신 절차](#5-인증서-갱신-절차)
 6. [1년 만료 알림 설정](#6-1년-만료-알림-설정)
-7. [트러블슈팅](#7-트러블슈팅)
+7. [자동 업데이트(electron-updater) 배포 절차](#7-자동-업데이트electron-updater-배포-절차)
+8. [트러블슈팅](#8-트러블슈팅)
 
 ---
 
@@ -249,7 +250,85 @@ fi
 
 ---
 
-## 7. 트러블슈팅
+## 7. 자동 업데이트(electron-updater) 배포 절차
+
+Electron 셸(main.js) 자체를 바꿔야 하는 릴리스는 드뭅니다 — 대부분의 기능 업데이트는 인트라넷 서버가 화면 전체를 내려주므로(`loadURL`) 서버 재배포만으로 끝납니다. Electron 셸 업데이트가 실제로 필요할 때만 아래 절차로 배포합니다.
+
+### 7-1. `/updates/` 디렉터리 구성
+
+`docker-compose.yml`의 `app.volumes`가 호스트의 `./updates/`를 컨테이너 `/app/updates`에 읽기 전용으로 마운트합니다(운영자가 `docker exec`/`docker cp` 없이 파일 복사만으로 배포할 수 있게 하기 위함 — `./caddy/Caddyfile` 마운트와 동일 패턴). 서버 리포지터리 루트에 다음과 같이 둡니다:
+
+```
+updates/
+├── 직업성 질환 통합 평가 프로그램 Setup 6.5.0.exe
+├── 직업성 질환 통합 평가 프로그램 Setup 6.5.0.exe.blockmap
+├── latest.yml                    # 정식 채널 메타데이터
+├── canary.yml                    # canary 채널 메타데이터(canary 롤아웃 중에만 존재)
+└── update-policy.json            # 관리자 on/off 스위치(아래 7-3)
+```
+
+`scripts/export-offline-package.ps1 -UpdateChannel latest|canary`가 설치본+`.blockmap`+메타데이터 3종을 SHA-512까지 검증한 뒤 패키지의 `electron/`에 담아줍니다(`scripts/verify-update-artifacts.mjs`). 이 3종은 함께 `updates/`에 올립니다. `update-policy.json`은 별도로 관리 — 패키지에는 `electron/update-policy.example.json` **템플릿만** 동봉되고 실제 위치로 자동 배치되지 않습니다(설치 직후부터 업데이터가 켜진 채 나가는 것을 막기 위해서입니다).
+
+기본적으로 이 3종이 없으면 export 자체가 **실패**합니다(에어갭 패키지에 설치본이 빠지는 것을 막기 위함). Electron 셸을 건드리지 않은 **서버 전용 릴리스**에서만 `-AllowMissingElectronInstaller`로 이 검사를 명시적으로 건너뛸 수 있으며, 이 경우 `release-manifest.json`의 `electronInstaller.included`/`sha512Verified`가 `false`로 기록됩니다. **Electron 셸이 바뀐 롤아웃 패키지에는 이 플래그를 쓰지 마세요.**
+
+### 7-2. 업로드 순서(필수)
+
+**설치본 + `.blockmap` 먼저 → 메타데이터(`latest.yml`/`canary.yml`) 마지막.** 가능하면 메타데이터 파일을 임시 파일명으로 올린 뒤 원자적 rename으로 교체하세요(반쯤 올라간 상태에서 클라이언트가 읽는 것을 방지). 순서를 반대로 하면, 클라이언트가 메타데이터는 새 버전을 가리키는데 설치본이 아직 없는 상태를 순간적으로 볼 수 있습니다.
+
+### 7-3. 관리자 on/off 스위치 — `update-policy.json`
+
+```json
+{ "enabled": true, "channels": ["canary"] }
+```
+
+- **`enabled: false` 또는 파일 없음/파싱 실패 → 업데이트 체크 자체를 안 함(평상시 기본 상태).** 이게 기본값이어야 합니다.
+- **`channels`는 필수이며 명시적 배열이어야 합니다.** 문자열(`"channels": "canary"` 같은 오타)이나 생략, 빈 배열, 알 수 없는 채널값이 하나라도 섞이면 **전체가 비활성으로 처리**됩니다 — 안전 경계이므로 형식이 조금이라도 어긋나면 무조건 꺼지는 쪽으로 설계돼 있습니다. "생략하면 전체 허용" 같은 관대한 해석은 없습니다.
+- 클라이언트는 이 파일을 15분~4시간 주기로 폴링합니다(첫 확인은 앱 시작 시 즉시). **정책을 켜도 바로 반영되지 않을 수 있습니다** — canary 검증처럼 빠른 반영이 필요하면 대상 PC의 앱을 재시작하세요.
+- 정책을 `enabled:false`로 되돌려도 **이미 진행 중인 다운로드나 이미 표시된 설치 확인 다이얼로그는 취소되지 않습니다.** 롤아웃을 즉시 중단해야 한다면 메타데이터 파일 자체를 내리세요.
+
+### 7-4. 배포 사이클(canary → 전체 → 휴면)
+
+0. **평상시**: `update-policy.json` 없음 또는 `{"enabled": false}` — 전 PC 휴면, 로그·경고 없음.
+1. canary 릴리스는 **prerelease 태그**로 빌드(예: `npm version 6.5.0-canary.0` 후 `electron:build:intranet`) — electron-builder가 `latest.yml`이 아니라 `canary.yml`을 생성합니다.
+2. `export-offline-package.ps1 -UpdateChannel canary`로 canary 설치본+blockmap+`canary.yml`을 `updates/`에 추가(**기존 `latest.yml`은 그대로 둠** — 같은 디렉터리에 두 채널이 공존).
+3. canary로 지정한 PC에서 `WR_UPDATE_CHANNEL=canary` 환경변수를 설정하고 앱을 재시작합니다(예: 시스템 환경변수 또는 서비스/바로가기의 실행 환경에 설정).
+4. `update-policy.json`을 `{"enabled": true, "channels": ["canary"]}`로 올립니다(가장 마지막에). 반영을 즉시 확인하려면 canary PC를 한 번 더 재시작하세요.
+5. canary PC에서 업데이트 수신·설치·정상 동작을 확인합니다.
+6. 검증 통과 시 정식 버전(prerelease 태그 없음, 예: `6.5.0`)을 빌드해 `-UpdateChannel latest`로 `latest.yml`을 `updates/`에 올리고, 정책을 `{"enabled": true, "channels": ["latest"]}`로 교체합니다. 전체 PC는 각자의 폴링 주기(최대 4시간)에 걸쳐 순차적으로 반영됩니다 — 전 PC가 동시에 다운로드를 시작하지 않으므로 재시작을 강제하지 않습니다.
+7. **롤아웃 완료 후 `update-policy.json`을 `{"enabled": false}`로 되돌립니다.**
+8. **canary PC 원복(필수)** — `WR_UPDATE_CHANNEL=canary`를 계속 남겨두면 그 PC는 이후 `latest.yml` 갱신을 영원히 받지 못합니다. 검증이 끝나면 해당 PC들에서 환경변수를 제거하고 앱을 재시작해 일반 채널로 복귀시키세요.
+
+### 7-5. 롤백 정책
+
+electron-updater는 **더 낮은 버전을 설치하지 않습니다.** 장애 버전을 되돌려야 한다면 더 높은 hotfix 버전을 다시 게시하는 방식으로 대응하세요. 이전 설치본은 수동 복구용으로 별도 보관합니다.
+
+### 7-6. 코드서명 — 현재 미서명, 정확한 보안 함의
+
+**현재 설치본은 미서명입니다**(`electron-builder.intranet.yml`에 `certificateFile` 없음 — 후속 과제로 연기). sha512 무결성 검증(electron-updater 기본 동작, 서명과 무관)은 항상 켜져 있어 전송 손상은 잡아냅니다.
+
+**"UAC 경고 문구가 뜨는 정도의 차이"로 축소해서 이해하면 안 됩니다.** 정확히는:
+- sha512는 `latest.yml`/`canary.yml` **자체가 신뢰됨을 전제**로 설치본과의 정합성만 검증합니다.
+- **설치본 발행자 검증 단계 자체가 생략됩니다**(비활성화되는 게 아니라 애초에 그 단계가 없습니다).
+- `/updates/` 쓰기 권한을 가진 공격자가 설치본과 메타데이터 파일을 **함께** 교체하면 이 방어를 우회할 수 있습니다.
+
+**따라서 canary 롤아웃을 처음 실사용하기 전에 반드시 다음을 완료하세요(코드 구현과 별개의 승인 절차입니다):**
+1. `/updates/` 디렉터리(호스트 `./updates/`)의 **쓰기 권한을 최소 인원으로 제한**.
+2. 해당 디렉터리에 대한 **접근 감사**(누가 언제 파일을 올렸는지 기록/확인 가능하게).
+3. 미서명 상태에 대한 **명시적 보안 예외 승인**을 병원 보안 담당/책임자로부터 받아 문서로 남길 것.
+
+코드서명 인증서 도입(자체 PKI 구축 포함 가능 — 3절의 Caddy CA와는 완전히 별개의 인증서/절차 필요)은 후속 과제로, 도입 시 `electron-builder.intranet.yml`에 `certificateFile`/`certificatePassword`를 추가합니다.
+
+### 7-7. 내부 CA 신뢰 확인
+
+브라우저 창(`loadURL`)은 Chromium 스택이라 3절에서 설치한 Windows 신뢰 저장소의 CA를 자동으로 신뢰하지만, **electron-updater는 자체 세션(`autoUpdater.netSession`)으로 통신**하므로 별도 확인이 필요합니다. `electron/main.js`의 `initAutoUpdater()`가 이 세션에도 `setProxy({mode:'direct'})`를 적용해 PAC 우회까지 맞춰주지만(§8.14 PAC 이슈와 동일한 문제), **내부 CA 인증서 신뢰 자체**는 실기기에서 직접 확인해야 합니다:
+
+1. canary PC에서 정책 조회(`GET /updates/update-policy.json`, 기본 세션)가 성공하는지 확인.
+2. 같은 PC에서 실제 업데이트 다운로드(`latest.yml`/`canary.yml`/설치본, updater 세션)가 성공하는지 **별도로** 확인 — ①만 되고 ②가 실패하면 updater 세션이 CA를 인식하지 못하는 것입니다.
+3. 실패하면 `electron/main.js`의 `initAutoUpdater()` 안 `TODO(update-CA-trust)` 주석 위치에 `setCertificateVerifyProc`을 내부 CA에 한정해 추가하는 것을 검토하세요(전체 인증서 허용은 금지).
+
+---
+
+## 8. 트러블슈팅
 
 ### 브라우저에서 "인증서가 신뢰할 수 없음" 오류
 
