@@ -123,16 +123,27 @@ function logUpdateEvent(line) {
   }
 }
 
-// 메뉴는 Windows에서 앱 전역이라(창 클로저 캡처 불필요) Menu.getApplicationMenu()로 조회한다.
 // update-status(표시 전용)와 install-update(실행)를 분리 — 하나의 라벨에 "실패 상태"와
 // "설치 실행"을 겹쳐 쓰면 설치본이 이미 준비된 상태에서 후속 확인이 실패했을 때 의미가 섞인다.
+//
+// ⚠️ Windows/Linux 네이티브 메뉴는 이미 렌더링된 뒤 MenuItem.label/.visible/.enabled를
+// 직접 바꿔도 화면에 반영되지 않는다(macOS의 NSMenu와 달리 "굳어서" 라이브 반영이 안 됨 —
+// Electron 공식 문서가 명시하는 플랫폼 차이). 반드시 Menu.setApplicationMenu()를 다시 호출해야
+// 실제로 갱신된다. 그래서 상태는 여기 모듈 레벨 변수로 들고, createWindow()가 등록해두는
+// rebuildAppMenu()를 매번 호출해 메뉴 전체를 다시 빌드·적용한다.
+let updateStatusLabelText = '';
+let updateStatusVisible = false;
+let installUpdateEnabled = false;
+let rebuildAppMenu = null; // createWindow()가 등록
+
 function setUpdateMenuStatusLabel(text) {
-  const item = Menu.getApplicationMenu()?.getMenuItemById('update-status');
-  if (item) { item.label = text || '업데이트 상태'; item.visible = !!text; }
+  updateStatusLabelText = text || '업데이트 상태';
+  updateStatusVisible = !!text;
+  rebuildAppMenu?.();
 }
 function setInstallUpdateEnabled(enabled) {
-  const item = Menu.getApplicationMenu()?.getMenuItemById('install-update');
-  if (item) item.enabled = !!enabled;
+  installUpdateEnabled = !!enabled;
+  rebuildAppMenu?.();
 }
 
 // main 프로세스에서 서버로 보내는 유일한 GET 요청 — 기존 netRequest()/audit.js의
@@ -501,67 +512,77 @@ function createWindow() {
     }
   }
 
-  const menuTemplate = [
-    {
-      label: '파일',
-      submenu: [
-        { label: '새로 만들기', accelerator: 'CmdOrCtrl+N', click: () => mainWindow.webContents.send('menu-new') },
-        { type: 'separator' },
-        { label: '종료', accelerator: 'CmdOrCtrl+Q', click: () => mainWindow?.close() }
-      ]
-    },
-    {
-      label: '평가',
-      submenu: [
-        { label: '무릎 (슬관절) 평가', click: () => mainWindow.webContents.send('goto-module', 'knee') },
-        { label: '척추 (요추) 평가', click: () => mainWindow.webContents.send('goto-module', 'spine') },
-      ]
-    },
-    {
-      label: '편집',
-      submenu: [
-        { label: '실행 취소', accelerator: 'CmdOrCtrl+Z', role: 'undo' },
-        { label: '다시 실행', accelerator: 'CmdOrCtrl+Y', role: 'redo' },
-        { type: 'separator' },
-        { label: '잘라내기', accelerator: 'CmdOrCtrl+X', role: 'cut' },
-        { label: '복사', accelerator: 'CmdOrCtrl+C', role: 'copy' },
-        { label: '붙여넣기', accelerator: 'CmdOrCtrl+V', role: 'paste' }
-      ]
-    },
-    {
-      label: '보기',
-      submenu: [
-        { label: '새로고침', accelerator: 'CmdOrCtrl+R', click: () => requestSafeReload() },
-        { label: '전체 화면', accelerator: 'F11', click: () => mainWindow.setFullScreen(!mainWindow.isFullScreen()) },
-        { type: 'separator' },
-        { label: '확대', accelerator: 'CmdOrCtrl+Plus', click: () => mainWindow.webContents.setZoomLevel(mainWindow.webContents.getZoomLevel() + 0.5) },
-        { label: '축소', accelerator: 'CmdOrCtrl+-', click: () => mainWindow.webContents.setZoomLevel(mainWindow.webContents.getZoomLevel() - 0.5) },
-        { label: '기본 크기', accelerator: 'CmdOrCtrl+0', click: () => mainWindow.webContents.setZoomLevel(0) }
-      ]
-    },
-    {
-      label: '도움말',
-      submenu: [
-        // 트랙 2 — update-status(표시 전용, 실패 시에만 노출)와 install-update(실행,
-        // update-downloaded 시점에 활성화)를 분리(main.js 상단 setUpdateMenuStatusLabel 참고).
-        ...(IS_INTRANET_BUILD ? [
-          { id: 'update-status', label: '업데이트 상태', enabled: false, visible: false },
-          { id: 'install-update', label: '업데이트 설치 (재시작)', enabled: false, click: () => promptInstallUpdate() },
+  // 함수로 두는 이유: 트랙 2 update-status/install-update 항목의 label/visible/enabled가
+  // 런타임에 바뀌는데, Windows/Linux 네이티브 메뉴는 이미 세팅된 후 속성만 바꿔서는 화면에
+  // 반영되지 않는다 — 매번 템플릿을 다시 만들어 Menu.setApplicationMenu()를 재호출해야 한다
+  // (main.js 상단 setUpdateMenuStatusLabel/setInstallUpdateEnabled 주석 참고).
+  function buildAppMenu() {
+    const menuTemplate = [
+      {
+        label: '파일',
+        submenu: [
+          { label: '새로 만들기', accelerator: 'CmdOrCtrl+N', click: () => mainWindow.webContents.send('menu-new') },
           { type: 'separator' },
-        ] : []),
-        { label: '버전 정보', click: () => {
-          dialog.showMessageBox(mainWindow, {
-            type: 'info',
-            title: '버전 정보',
-            message: '근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미',
-            detail: `버전: ${app.getVersion()}\n\n직업환경의학 전문의를 위한 통합 평가 도구\n(무릎/척추 평가 지원)`
-          });
-        }}
-      ]
-    }
-  ];
+          { label: '종료', accelerator: 'CmdOrCtrl+Q', click: () => mainWindow?.close() }
+        ]
+      },
+      {
+        label: '평가',
+        submenu: [
+          { label: '무릎 (슬관절) 평가', click: () => mainWindow.webContents.send('goto-module', 'knee') },
+          { label: '척추 (요추) 평가', click: () => mainWindow.webContents.send('goto-module', 'spine') },
+        ]
+      },
+      {
+        label: '편집',
+        submenu: [
+          { label: '실행 취소', accelerator: 'CmdOrCtrl+Z', role: 'undo' },
+          { label: '다시 실행', accelerator: 'CmdOrCtrl+Y', role: 'redo' },
+          { type: 'separator' },
+          { label: '잘라내기', accelerator: 'CmdOrCtrl+X', role: 'cut' },
+          { label: '복사', accelerator: 'CmdOrCtrl+C', role: 'copy' },
+          { label: '붙여넣기', accelerator: 'CmdOrCtrl+V', role: 'paste' }
+        ]
+      },
+      {
+        label: '보기',
+        submenu: [
+          { label: '새로고침', accelerator: 'CmdOrCtrl+R', click: () => requestSafeReload() },
+          { label: '전체 화면', accelerator: 'F11', click: () => mainWindow.setFullScreen(!mainWindow.isFullScreen()) },
+          { type: 'separator' },
+          { label: '확대', accelerator: 'CmdOrCtrl+Plus', click: () => mainWindow.webContents.setZoomLevel(mainWindow.webContents.getZoomLevel() + 0.5) },
+          { label: '축소', accelerator: 'CmdOrCtrl+-', click: () => mainWindow.webContents.setZoomLevel(mainWindow.webContents.getZoomLevel() - 0.5) },
+          { label: '기본 크기', accelerator: 'CmdOrCtrl+0', click: () => mainWindow.webContents.setZoomLevel(0) }
+        ]
+      },
+      {
+        label: '도움말',
+        submenu: [
+          // 트랙 2 — update-status(표시 전용, 실패 시에만 노출)와 install-update(실행,
+          // update-downloaded 시점에 활성화)를 분리(main.js 상단 setUpdateMenuStatusLabel 참고).
+          ...(IS_INTRANET_BUILD ? [
+            { id: 'update-status', label: updateStatusLabelText || '업데이트 상태', enabled: false, visible: updateStatusVisible },
+            { id: 'install-update', label: '업데이트 설치 (재시작)', enabled: installUpdateEnabled, click: () => promptInstallUpdate() },
+            { type: 'separator' },
+          ] : []),
+          { label: '버전 정보', click: () => {
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: '버전 정보',
+              message: '근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미',
+              detail: `버전: ${app.getVersion()}\n\n직업환경의학 전문의를 위한 통합 평가 도구\n(무릎/척추 평가 지원)`
+            });
+          }}
+        ]
+      }
+    ];
 
-  Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
+    Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
+  }
+
+  rebuildAppMenu = buildAppMenu;
+  win.once('closed', () => { if (rebuildAppMenu === buildAppMenu) rebuildAppMenu = null; });
+  buildAppMenu();
 }
 
 // 이번 변경(Electron 로그인 = 세션 쿠키) 이전에 발급된 영구 wr_refresh 쿠키를 정리한다.
