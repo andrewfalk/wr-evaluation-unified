@@ -101,7 +101,30 @@ export function AuthProvider({ children }) {
     // intranet session right after the user logged out.
     authEpochRef.current += 1;
     clearStoredSession();
-    const fallback = saveStoredSession(createLocalSession());
+    // Idempotent when already local: reuse the existing session object instead of
+    // minting a new one. createLocalSession() returns a fresh object with a fresh
+    // refreshedAt on every call, so replacing an equivalent local session still
+    // changes its identity, and anything keyed on the session object re-runs.
+    // That turns a single auth failure into an unbounded request loop: a probe
+    // 401s → httpClient auto-refreshes → the refresh fails → onLogout lands here
+    // → a new session object re-triggers the probe → repeat as fast as the network
+    // allows. Reusing the object makes setSessionState a no-op (Object.is bailout),
+    // so the cycle terminates after one pass.
+    const current = sessionRef.current;
+    const cleanLocal = createLocalSession();
+    // Reuse only a canonical, unauthenticated local identity. A malformed or
+    // partially refreshed local session can contain a server token/user while
+    // still declaring mode='local'; reset must scrub that state, not preserve it.
+    const canReuseCurrent = (
+      current?.mode === 'local'
+      && !current?.accessToken
+      && !current?.accessExpiresAt
+      && current?.user?.authProvider === cleanLocal.user.authProvider
+      && current?.user?.id === cleanLocal.user.id
+      && current?.user?.organizationId === cleanLocal.user.organizationId
+    );
+    const fallback = canReuseCurrent ? current : cleanLocal;
+    saveStoredSession(fallback);
     sessionRef.current = fallback;
     setSessionState(fallback);
     // Local sessions need no server verification — mark as verified immediately

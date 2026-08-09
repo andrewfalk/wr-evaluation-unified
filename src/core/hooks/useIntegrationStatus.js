@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getIntegrationStatus,
   markLocalIntegrationStatus,
@@ -34,10 +34,18 @@ export function useIntegrationStatus({ session, settings }) {
     }
   }, [session, settings]);
 
+  // Held in a ref so the probe effect below is keyed ONLY on the identity fields
+  // it enumerates. `refresh` closes over the whole session/settings objects, so
+  // depending on it directly would re-probe on every object identity change even
+  // when none of those fields moved — and since a failing probe can itself
+  // replace the session object (401 → refresh fails → resetToLocalSession), that
+  // made the effect self-triggering and produced an unbounded request loop.
+  const refreshRef = useRef(refresh);
+  useEffect(() => { refreshRef.current = refresh; }, [refresh]);
+
   useEffect(() => {
-    refresh({ source: 'mode-change' }).catch(() => {});
+    refreshRef.current({ source: 'mode-change' }).catch(() => {});
   }, [
-    refresh,
     session?.mode,
     session?.apiBaseUrl,
     session?.user?.id,

@@ -92,6 +92,77 @@ describe('logout()', () => {
   });
 });
 
+describe('resetToLocalSession()', () => {
+  it('replaces an intranet session with a local one', () => {
+    const { result } = renderAuth();
+    loginAsIntranet(result);
+    expect(result.current.session.mode).toBe('intranet');
+
+    act(() => { result.current.resetToLocalSession(); });
+    expect(result.current.session.mode).toBe('local');
+  });
+
+  // Regression: repeated calls used to mint a brand-new local session object each
+  // time (createLocalSession() also stamps a fresh refreshedAt). Anything keyed on
+  // the session object then re-ran on every call — and since a failing auth probe
+  // calls back into here (401 → refresh fails → onLogout → reset), that identity
+  // churn turned one auth failure into an unbounded request loop at boot.
+  it('keeps the same session object when already local, so repeat calls cannot churn identity', () => {
+    const { result } = renderAuth();
+    expect(result.current.session.mode).toBe('local');
+
+    const first = result.current.session;
+    act(() => { result.current.resetToLocalSession(); });
+    const second = result.current.session;
+    act(() => { result.current.resetToLocalSession(); });
+    const third = result.current.session;
+
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+  });
+
+  it('scrubs server auth data instead of reusing a tainted local session', () => {
+    const { result } = renderAuth();
+    act(() => {
+      result.current.setSession({
+        ...result.current.session,
+        accessToken: 'server-token',
+        accessExpiresAt: new Date().toISOString(),
+        user: {
+          ...result.current.session.user,
+          id: 'remote-user',
+          organizationId: 'remote-org',
+        },
+      });
+    });
+    const tainted = result.current.session;
+
+    act(() => { result.current.resetToLocalSession(); });
+
+    expect(result.current.session).not.toBe(tainted);
+    expect(result.current.session).toMatchObject({
+      mode: 'local',
+      accessToken: null,
+      user: {
+        id: 'web-user',
+        organizationId: 'local-web-workspace',
+        authProvider: 'local-fallback',
+      },
+    });
+    expect(result.current.session.accessExpiresAt).toBeUndefined();
+  });
+
+  it('still bumps the auth epoch on every call so in-flight refreshes stay invalidated', () => {
+    const { result } = renderAuth();
+    const before = result.current.getAuthEpoch();
+
+    act(() => { result.current.resetToLocalSession(); });
+    act(() => { result.current.resetToLocalSession(); });
+
+    expect(result.current.getAuthEpoch()).toBe(before + 2);
+  });
+});
+
 describe('Electron quit handshake', () => {
   function setupElectronMocks() {
     let quitCallback = null;

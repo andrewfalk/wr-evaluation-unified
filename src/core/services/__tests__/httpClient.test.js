@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { configureHttpClient, requestJson } from '../httpClient.js';
+import { configureHttpClient, requestBlob, requestJson } from '../httpClient.js';
 
 function jsonResponse(status, body) {
   return {
@@ -49,5 +49,69 @@ describe('requestJson CSRF recovery', () => {
     const retryHeaders = globalThis.fetch.mock.calls[1][1].headers;
     expect(retryHeaders.Authorization).toBe('Bearer new-token');
     expect(retryHeaders['X-CSRF-Token']).toBe('new-csrf');
+  });
+});
+
+describe('local-session auth failures', () => {
+  beforeEach(() => {
+    globalThis.document = { cookie: '' };
+    globalThis.fetch = vi.fn();
+    configureHttpClient({ onRefresh: null, onLogout: null });
+  });
+
+  it('returns a JSON 401 without attempting refresh or logout', async () => {
+    const onRefresh = vi.fn();
+    const onLogout = vi.fn();
+    configureHttpClient({ onRefresh, onLogout });
+    globalThis.fetch.mockResolvedValueOnce(jsonResponse(401, {
+      code: 'UNAUTHORIZED',
+      error: 'Authentication required',
+    }));
+
+    await expect(requestJson('/api/auth/me', {
+      session: { mode: 'local' },
+    })).rejects.toMatchObject({ status: 401 });
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(onRefresh).not.toHaveBeenCalled();
+    expect(onLogout).not.toHaveBeenCalled();
+  });
+
+  it('returns a Blob 401 without attempting refresh or logout', async () => {
+    const onRefresh = vi.fn();
+    const onLogout = vi.fn();
+    configureHttpClient({ onRefresh, onLogout });
+    globalThis.fetch.mockResolvedValueOnce(jsonResponse(401, {
+      code: 'UNAUTHORIZED',
+      error: 'Authentication required',
+    }));
+
+    await expect(requestBlob('/api/patients/p1/image', {
+      session: { mode: 'local' },
+    })).rejects.toMatchObject({ status: 401 });
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(onRefresh).not.toHaveBeenCalled();
+    expect(onLogout).not.toHaveBeenCalled();
+  });
+
+  it('does not renew CSRF for a local-session CSRF_INVALID response', async () => {
+    const onRefresh = vi.fn();
+    const onLogout = vi.fn();
+    configureHttpClient({ onRefresh, onLogout });
+    globalThis.fetch.mockResolvedValueOnce(jsonResponse(403, {
+      code: 'CSRF_INVALID',
+      error: 'Invalid or missing CSRF token',
+    }));
+
+    await expect(requestJson('/api/patients', {
+      method: 'PATCH',
+      body: { name: 'Kim' },
+      session: { mode: 'local' },
+    })).rejects.toMatchObject({ status: 403 });
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(onRefresh).not.toHaveBeenCalled();
+    expect(onLogout).not.toHaveBeenCalled();
   });
 });
