@@ -1,8 +1,8 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 6.4.0
-> **Last Updated:** 2026-08-03
-> **Status:** 인트라넷 운영 중 · 환자 등록일 표시 KST 타임존 버그 수정 · 등록번호 "유령 충돌" 해소 + 생년월일 정정 경로(정정 API·고아 person 해제·데드락 재시도) · 종합소견 그룹 형식 미리보기를 개별 형식과 통일 · zod record 타입 optional 처리에 맞춘 테스트 정리 · Electron 종료 후 로그인 유지 문제 + 서버 세션(logout/refresh) 동시성 경쟁조건 수정 · 환자 단위 편집 락(TTL lease lock, LOCK_ENFORCEMENT_MODE 롤아웃) 구현 · 경추/팔꿈치/손목 모듈 저장 무한루프 수정(stableStringify) · 경추 모듈 부담 작업 0건 시 완료 배지 오판정 수정 · 종합소견 미리보기 그룹/개별 탭 명칭 정리 + 토글 연동 자동전환 + 낮음 사유 그룹 제목 구분 표시 + 손목/팔꿈치 직업별 요약 가독성 개선 · 종합평가 패턴 그룹화(상병 50건↑ 우/좌 일괄 처리) + EMR byte 절감 + K-L/Ellman 조건부 표시 · 손목/팔꿈치 BK유형 그룹 합류 시 진단별 저장값 자동 동기화 수정 · 환자 목록 의사별 필터 + 비담당 환자 열람성(복사/스크롤) 개선 · EMR 디바이스 등록 rate-limit 자기악순환 방지 · EMR 추출(재해일자별 신청건 매칭·성별 자동입력)/직접입력 개선 · 일괄입력 빈 양식 상시 제공 · M4 영상분석 시범 운영(참고용, 미검증 배너 — 어깨 반복 시간합 계산기 + 공정별 값 표시 추가, 상세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md`)
+> **Version:** 6.5.0
+> **Last Updated:** 2026-08-09
+> **Status:** 인트라넷 운영 중 · Electron 셸 자동 업데이트(electron-updater) 도입 — 관리자 on/off 스위치 + canary 채널, 평상시 휴면(트랙 2) · 환자 등록일 표시 KST 타임존 버그 수정 · 등록번호 "유령 충돌" 해소 + 생년월일 정정 경로(정정 API·고아 person 해제·데드락 재시도) · 종합소견 그룹 형식 미리보기를 개별 형식과 통일 · zod record 타입 optional 처리에 맞춘 테스트 정리 · Electron 종료 후 로그인 유지 문제 + 서버 세션(logout/refresh) 동시성 경쟁조건 수정 · 환자 단위 편집 락(TTL lease lock, LOCK_ENFORCEMENT_MODE 롤아웃) 구현 · 경추/팔꿈치/손목 모듈 저장 무한루프 수정(stableStringify) · 경추 모듈 부담 작업 0건 시 완료 배지 오판정 수정 · 종합소견 미리보기 그룹/개별 탭 명칭 정리 + 토글 연동 자동전환 + 낮음 사유 그룹 제목 구분 표시 + 손목/팔꿈치 직업별 요약 가독성 개선 · 종합평가 패턴 그룹화(상병 50건↑ 우/좌 일괄 처리) + EMR byte 절감 + K-L/Ellman 조건부 표시 · 손목/팔꿈치 BK유형 그룹 합류 시 진단별 저장값 자동 동기화 수정 · 환자 목록 의사별 필터 + 비담당 환자 열람성(복사/스크롤) 개선 · EMR 디바이스 등록 rate-limit 자기악순환 방지 · EMR 추출(재해일자별 신청건 매칭·성별 자동입력)/직접입력 개선 · 일괄입력 빈 양식 상시 제공 · M4 영상분석 시범 운영(참고용, 미검증 배너 — 어깨 반복 시간합 계산기 + 공정별 값 표시 추가, 상세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md`)
 
 ---
 
@@ -2084,6 +2084,18 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 ---
 
 ## 변경 이력
+
+### v6.5.0 (2026-08-09) — Electron 셸 자동 업데이트(electron-updater) 도입 — 트랙 2 (#93)
+
+인트라넷 빌드가 화면 전체를 서버에서 받아오는(`loadURL`) 구조라 대부분의 기능 업데이트는 서버 재배포만으로 끝나지만, Electron 셸 자체를 바꿔야 하는 드문 릴리스에서 병원 PC를 일일이 수동 재설치해야 했던 문제를 해소.
+
+- **electron-updater(6.1.9, generic provider) 도입**: `canary`/`latest` 두 채널 지원, electron-builder 설정을 `electron-builder.base.yml`+`electron-builder.intranet.yml`로 분리해 standalone 빌드가 구조적으로 `publish` 설정을 갖지 않도록 함.
+- **관리자 on/off 스위치**: `/updates/update-policy.json`을 서버가 서빙 — 파일 없음/파싱 실패/형식 오류는 전부 비활성으로 처리(fail-closed). 평상시엔 전 PC가 완전히 휴면해 업데이트가 없는 기간에는 체크 자체를 하지 않음.
+- **종료/새로고침 draft 보호와 통합**: 업데이트 설치 확인 다이얼로그가 기존 뮤텍스(트랙 1)에 편입되어 미저장 종합소견 편집 중 설치가 끼어들지 않음, 동기 throw까지 포함한 예외 안전성 확보.
+- **Windows 네이티브 메뉴 실시간 갱신**: `MenuItem` 속성 직접 변경이 Windows에서 반영되지 않는 문제를 발견해 메뉴 전체 재빌드 방식으로 수정.
+- **에어갭(오프라인) export 스크립트**: `scripts/verify-update-artifacts.mjs`로 설치본·`.blockmap`·메타데이터 yml의 SHA-512 정합성을 실제 YAML 파싱 기반으로 검증 — 불일치 시 패키징 자체를 중단. `docs/PRODUCTION_RELEASE_PLAN.md`에 `/updates/` 스테이징 절차 반영.
+- **코드서명은 후속 과제로 연기** — 미서명 상태의 정확한 보안 함의(발행자 검증 생략)와 canary 실사용 전 필요한 보안 예외 승인 절차를 `docs/INTRANET_DEPLOYMENT.md` 7절에 명시.
+- 검증: 단위테스트 전수 + 로컬 풀스택 Docker 실측(정책 휴면/on/off, PAC 우회, 메뉴 갱신) + 실제 패키지 설치본으로 E2E 전체 사이클(감지→다운로드→설치→재시작→재확인) 확인. 실제 병원 PAC 환경·Win7/ia32 실기기·canary 실사용은 서버 배포 후 별도 진행.
 
 ### v6.4.0 (2026-08-03) — 등록번호 "유령 충돌" 해소 + 생년월일 정정 경로 + 등록일 KST 타임존 표시 수정 (#85, #86)
 
