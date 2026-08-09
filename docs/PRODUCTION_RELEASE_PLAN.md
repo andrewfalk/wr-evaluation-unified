@@ -134,6 +134,27 @@ docker images | grep wr-
 # wr-backup           4.2.1   ...
 ```
 
+### 3-1-1. (선택) Electron 자동 업데이트용 `/updates/` 스테이징
+
+트랙 2(electron-updater) 도입 이후 오프라인 패키지의 `electron/` 디렉터리는 설치본(.exe) 외에
+`.blockmap` + `latest.yml`(또는 `canary.yml`) + `update-policy.example.json` 템플릿을 함께 담고
+있다. **이 단계는 최초 설치 자체에는 필요 없다** — 클라이언트 PC 설치는 여전히 5-2-1의 수동
+인스톨러 실행 방식 그대로다. 다만 **지금 서버에 올리는 이 버전을, 이후 이미 설치된 PC들에게
+자동 업데이트로 배포할 계획이라면** 이미지 로드와 함께 아래도 수행한다:
+
+```powershell
+# 패키지 루트에서, 서버 리포지터리의 updates/ 로 3종 파일 복사
+# (docker-compose.yml이 ./updates 를 컨테이너 /app/updates 에 read-only 마운트)
+Copy-Item ".\electron\*.exe" "<서버 리포 경로>\updates\"
+Copy-Item ".\electron\*.blockmap" "<서버 리포 경로>\updates\"
+Copy-Item ".\electron\latest.yml" "<서버 리포 경로>\updates\"   # 또는 canary.yml
+```
+
+**`update-policy.json`(관리자 on/off 스위치)은 여기서 배치하지 않는다** — 템플릿(`update-policy.example.json`)만
+동봉되어 있으며, 기본은 비활성 상태를 유지해야 한다. 실제 롤아웃(canary → 전체 → 휴면 복귀) 절차는
+`INTRANET_DEPLOYMENT.md` 7절을 그대로 따른다. 최초 배포(빈 DB에서 처음 설치하는 리허설)에서는
+아직 배포된 클라이언트가 없으므로 보통 이 단계를 건너뛰어도 무방하다.
+
 ### 3-2. 서비스 기동
 
 ```powershell
@@ -469,6 +490,9 @@ Electron 앱 → 로그인 → POST /api/devices/register (publicKey, buildTarge
 1. 인스톨러 실행 (electron-builder `productName` 기준 파일명):
    - 기본: `직업성 질환 통합 평가 프로그램 Setup {VERSION}.exe`
    - 오프라인 패키지의 `electron/` 디렉터리에서 `.exe` 파일을 찾아 실행
+   - (트랙 2 이후) 같은 디렉터리에 `.blockmap`/`latest.yml`(또는 `canary.yml`)/
+     `update-policy.example.json`이 함께 있으나, **첫 설치에는 `.exe`만 사용**한다 —
+     나머지는 3-1-1의 서버 측 자동 업데이트 스테이징용이다.
 2. 서버 URL `https://wr.hospital.local` 입력 후 저장
 3. 일반 사용자 계정으로 로그인 (section 4-4에서 생성한 계정)
 
@@ -1032,4 +1056,5 @@ $env:WR_VERSION = ""  # 원복
 - [ ] 사용자 정의 프리셋은 계정별 `private` 저장으로 동작함
 - [ ] GPG 공개키 등록 및 백업 1회 성공
 - [ ] 클라이언트 PC CA 인증서 설치 확인 (INTRANET_DEPLOYMENT.md 3절)
+- [ ] (Electron 셸이 바뀐 릴리스인 경우) `/updates/` 스테이징 + `update-policy.json` 롤아웃 절차 확인 (3-1-1, INTRANET_DEPLOYMENT.md 7절)
 - [ ] T46 Go/No-Go 결과표 PASS (docs/T46_GO_NO_GO.md)
