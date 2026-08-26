@@ -38,7 +38,7 @@ export function AssessmentIndividualFields({ diagnoses, activeModules, onDiagnos
       <div className="assessment-ifield-list">
         {rows.map(row => (
           <div className="assessment-ifield-row" key={`${row.type}-${row.diag.id}`}>
-            <button type="button" className="assessment-ifield-meta" onClick={() => onJumpToDiagnosis(row.diag.id)}>
+            <button type="button" className="assessment-ifield-meta" data-readonly-allow onClick={() => onJumpToDiagnosis(row.diag.id)}>
               <span className="assessment-ifield-tag">#{row.index + 1}</span>
               <span className="assessment-ifield-name">{row.diag.code} {row.diag.name}</span>
               {row.type !== 'spine' && <span className="assessment-ifield-side">({getSideText(row.diag.side)})</span>}

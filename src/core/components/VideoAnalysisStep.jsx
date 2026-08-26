@@ -829,6 +829,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
             const open = expandedOverlay === `${rowKey}::${sj.jobId}`;
             return (
               <button key={sj.jobId} type="button" className="btn btn-secondary btn-xs"
+                data-readonly-allow
                 onClick={() => toggleOverlay(`${rowKey}::${sj.jobId}`, sj.jobId)} disabled={ov.closed}
                 title={ov.closed ? '검수 자료 회수됨' : '중립 배경 골격으로 검수'}>
                 {open ? '골격 닫기' : `골격 검수: ${sourceJobLabel(sj)}`}{ov.closed ? ' (회수됨)' : ''}
@@ -874,6 +875,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
         </div>
         <div className="va-suggest-actions">
           <button type="button" className="btn btn-secondary btn-sm"
+            data-readonly-allow
             onClick={() => setExpandedEvidence(expanded ? null : rowKey)}>
             {expanded ? '근거 닫기' : '왜 이 값?'}
           </button>
@@ -932,6 +934,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
         </div>
         <div className="va-suggest-actions">
           <button type="button" className="btn btn-secondary btn-sm"
+            data-readonly-allow
             onClick={() => setExpandedEvidence(expanded ? null : rowKey)}>
             {expanded ? '근거 닫기' : '왜 이 값?'}
           </button>

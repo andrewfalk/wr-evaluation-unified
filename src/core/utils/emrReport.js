@@ -8,7 +8,6 @@ import { groupSummariesByBkType as groupElbowSummaries, mergeBkGroupSummaries as
 import { BK_TYPE_LABELS as ELBOW_BK_LABELS } from '../../modules/elbow/utils/data';
 import { groupSummariesByBkType as groupWristSummaries, mergeBkGroupSummaries as mergeWristGroups } from '../../modules/wrist/utils/calculations';
 import { BK_TYPE_LABELS as WRIST_BK_LABELS } from '../../modules/wrist/utils/data';
-import { EXPOSURE_TYPE_LABELS as CERVICAL_EXPOSURE_TYPE_LABELS } from '../../modules/cervical/utils/data';
 import { buildSpineSectionText, buildSpineSectionSummary } from '../../modules/spine/utils/sectionText';
 import { AUX_LABELS } from '../../modules/knee/utils/data';
 import { calculateAge, calculateBMI } from './common';
@@ -27,7 +26,7 @@ function buildCervicalExposureText(calc) {
   (calc?.jobSummaries || []).forEach(jobSummary => {
     text += `- ${jobSummary.jobName || '-'}\n`;
     const burdenIndicatorText = jobSummary.flagItems?.length > 0
-      ? jobSummary.flagItems.map(type => CERVICAL_EXPOSURE_TYPE_LABELS[type] || type).join(', ')
+      ? jobSummary.flagItems.map(flag => flag.label || flag.key).join(', ')
       : '확인된 부담 요인 없음';
     text += `  부담 요인: ${burdenIndicatorText}\n`;
   });

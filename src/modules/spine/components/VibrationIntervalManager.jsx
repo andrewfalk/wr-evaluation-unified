@@ -32,7 +32,7 @@ export function VibrationIntervalManager({ intervals, selectedIndex, onSelect, o
             const classes = ['task-item', i === selectedIndex ? 'active' : ''].filter(Boolean).join(' ');
             return (
               <div key={iv.id} className={classes} onClick={() => onSelect(i)}>
-                <div className="task-item-main">
+                <div className="task-item-main" data-readonly-allow>
                   <div className="task-item-title">
                     {iv.name}
                     {!valid && <span style={{ color: 'var(--color-danger)', marginLeft: 6 }}>⚠ 입력 오류</span>}

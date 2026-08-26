@@ -126,6 +126,7 @@ export function CervicalEvaluation({ patient, calc, updateModule }) {
                   key={job.id}
                   type="button"
                   className={`btn btn-sm ${isActive ? 'btn-primary' : 'btn-secondary'}`}
+                  data-readonly-allow
                   onClick={() => handleJobChange(job.id)}
                 >
                   직력{index + 1}: {job.jobName || '(미입력)'} · {getEffectiveWorkPeriodText(job)}

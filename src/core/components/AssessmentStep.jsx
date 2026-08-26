@@ -178,6 +178,7 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
       <div className="panel pattern-surface assessment-panel">
         {activeModules.length > 0 && (
           <AssessmentTab
+            key={patient.id}
             diagnoses={diagnoses}
             onDiagnosisUpdate={handleDiagnosisUpdate}
             onDiagnosesReplace={updateDiagnoses}
@@ -186,6 +187,7 @@ export function AssessmentStep({ patient, activeModules, updateDiagnoses, update
             activeModules={activeModules}
             reportOptions={shared.reportOptions}
             onReportOptionsChange={handleReportOptionsChange}
+            canMutate={canMutate}
           />
         )}
       </div>

@@ -54,6 +54,7 @@ function GroupCard({
             key={tag.unitIds.join(',')}
             type="button"
             className="assessment-chip"
+            data-readonly-allow
             onClick={() => onJumpToDiagnosis(tag.diagId)}
             title="개별 카드로 이동"
           >
@@ -63,7 +64,7 @@ function GroupCard({
         {restCount > 0 && <span className="assessment-chip more">+{restCount}</span>}
       </div>
       <div className="assessment-group-actions">
-        <button type="button" className="btn btn-sm btn-secondary" onClick={onToggleExpand}>
+        <button type="button" className="btn btn-sm btn-secondary" data-readonly-allow onClick={onToggleExpand}>
           {expanded ? '▴ 구성원 접기' : '▾ 구성원 펼치기'}
         </button>
         <button type="button" className={`btn btn-sm ${isIncomplete ? 'btn-primary' : 'btn-secondary'}`} onClick={onEditGroup}>
@@ -99,7 +100,7 @@ function GroupCard({
                     />
                     <span className="assessment-member-code">{diag.code}</span>
                     <span className="assessment-member-name">{diag.name}</span>
-                    <button type="button" className="assessment-side-badge both" onClick={() => onToggleSplit(tag.diagId)} title="우/좌 분리">
+                    <button type="button" className="assessment-side-badge both" data-readonly-allow onClick={() => onToggleSplit(tag.diagId)} title="우/좌 분리">
                       양측(우+좌)
                     </button>
                   </div>
@@ -280,6 +281,7 @@ export function AssessmentGroupView({ diagnoses, activeModules, onDiagnosesRepla
                   key={diag.id}
                   type="button"
                   className="assessment-chip"
+                  data-readonly-allow
                   onClick={() => onJumpToDiagnosis(diag.id)}
                   title="개별 카드로 이동"
                 >

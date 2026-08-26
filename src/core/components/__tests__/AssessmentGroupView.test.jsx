@@ -3,8 +3,24 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AssessmentGroupView } from '../AssessmentGroupView.jsx';
+import { blockInteraction, blockMutatingKeys } from '../StepContent.jsx';
 
 afterEach(cleanup);
+
+// StepContent가 read-only(비담당 환자 조회)일 때 씌우는 것과 동일한 capture-phase 핸들러를
+// 재현한다 — 실제 버그는 이 래퍼 안에서만 나타나므로(단독 렌더 후 클릭하면 data-readonly-allow가
+// 빠져도 통과해버려 무의미) 반드시 이 래퍼로 감싸 검증해야 한다.
+function ReadOnlyWrapper({ children }) {
+  return (
+    <div
+      onClickCapture={blockInteraction}
+      onKeyDownCapture={blockMutatingKeys}
+      onChangeCapture={blockInteraction}
+    >
+      {children}
+    </div>
+  );
+}
 
 function makeDiag(overrides = {}) {
   return {
@@ -160,5 +176,107 @@ describe('AssessmentGroupView — 낮음 사유가 다른 그룹의 제목 구�
     expect(screen.getByText(/상병 확인 · 업무관련성 낮음 · 낮음 사유 1/)).toBeTruthy();
     expect(screen.getByText(/상병 확인 · 업무관련성 낮음 · 낮음 사유 2/)).toBeTruthy();
     expect(screen.getAllByText(/낮음 사유 상세:/).length).toBe(2);
+  });
+});
+
+describe('AssessmentGroupView — read-only(비담당 환자) 래퍼 안에서의 조회 전용 토글', () => {
+  it('구성원 펼치기/접기 버튼은 read-only 래퍼 안에서도 정상 동작한다', async () => {
+    const user = userEvent.setup();
+    const diag = makeDiag({ ...KNEE, side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' });
+    render(
+      <ReadOnlyWrapper>
+        <AssessmentGroupView
+          diagnoses={[diag]}
+          activeModules={['knee']}
+          onDiagnosesReplace={vi.fn()}
+          onJumpToDiagnosis={vi.fn()}
+        />
+      </ReadOnlyWrapper>
+    );
+
+    expect(screen.getByRole('button', { name: '▴ 구성원 접기' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '▴ 구성원 접기' }));
+    expect(screen.getByRole('button', { name: '▾ 구성원 펼치기' })).toBeTruthy();
+  });
+
+  it('우/좌 분리 뱃지는 read-only 래퍼 안에서도 정상 동작한다', async () => {
+    const user = userEvent.setup();
+    const diag = makeDiag({
+      ...KNEE, side: 'both',
+      confirmedRight: 'confirmed', assessmentRight: 'high',
+      confirmedLeft: 'confirmed', assessmentLeft: 'high',
+    });
+    render(
+      <ReadOnlyWrapper>
+        <AssessmentGroupView
+          diagnoses={[diag]}
+          activeModules={['knee']}
+          onDiagnosesReplace={vi.fn()}
+          onJumpToDiagnosis={vi.fn()}
+        />
+      </ReadOnlyWrapper>
+    );
+
+    const splitBadge = screen.getByRole('button', { name: '양측(우+좌)' });
+    await user.click(splitBadge);
+    // 분리되면 "양측(우+좌)" 뱃지 대신 우/좌 각각의 행으로 바뀐다.
+    expect(screen.queryByRole('button', { name: '양측(우+좌)' })).toBeNull();
+  });
+
+  it('상병 칩("개별 카드로 이동")은 read-only 래퍼 안에서도 onJumpToDiagnosis를 호출한다', async () => {
+    const user = userEvent.setup();
+    const diag = makeDiag({ ...KNEE, side: '' });
+    const onJump = vi.fn();
+    render(
+      <ReadOnlyWrapper>
+        <AssessmentGroupView
+          diagnoses={[diag]}
+          activeModules={['knee']}
+          onDiagnosesReplace={vi.fn()}
+          onJumpToDiagnosis={onJump}
+        />
+      </ReadOnlyWrapper>
+    );
+
+    await user.click(screen.getByRole('button', { name: /M17.0 무릎 관절증/ }));
+    expect(onJump).toHaveBeenCalledWith('d1');
+  });
+
+  it('"그룹 전체 수정" 버튼은 read-only 래퍼 안에서는 여전히 막힌다(회귀 방지)', async () => {
+    const user = userEvent.setup();
+    const diag = makeDiag({ ...KNEE, side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' });
+    render(
+      <ReadOnlyWrapper>
+        <AssessmentGroupView
+          diagnoses={[diag]}
+          activeModules={['knee']}
+          onDiagnosesReplace={vi.fn()}
+          onJumpToDiagnosis={vi.fn()}
+        />
+      </ReadOnlyWrapper>
+    );
+
+    await user.click(screen.getByRole('button', { name: '그룹 전체 수정' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('멤버 선택 체크박스("전체 선택")는 read-only 래퍼 안에서는 여전히 막힌다(회귀 방지)', async () => {
+    const user = userEvent.setup();
+    const diag = makeDiag({ ...KNEE, side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' });
+    render(
+      <ReadOnlyWrapper>
+        <AssessmentGroupView
+          diagnoses={[diag]}
+          activeModules={['knee']}
+          onDiagnosesReplace={vi.fn()}
+          onJumpToDiagnosis={vi.fn()}
+        />
+      </ReadOnlyWrapper>
+    );
+
+    const selectAll = screen.getByRole('checkbox', { name: '전체 선택' });
+    expect(selectAll.checked).toBe(false);
+    await user.click(selectAll);
+    expect(selectAll.checked).toBe(false);
   });
 });

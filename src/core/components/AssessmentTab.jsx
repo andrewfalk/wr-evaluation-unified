@@ -92,17 +92,32 @@ function SideAssessment({ diag, index, side, onUpdate, label }) {
 
 export function AssessmentTab({
   diagnoses, onDiagnosisUpdate, onDiagnosesReplace, returnConsiderations, onReturnChange, activeModules,
-  reportOptions, onReportOptionsChange,
+  reportOptions, onReportOptionsChange, canMutate = true,
 }) {
   // "패턴 그룹"/"개별 카드" 보기 토글을 곧 출력 형식 스위치로도 쓴다 — 별도 체크박스를
   // 두지 않고, 지금 보고 있는 화면 그대로가 미리보기·EMR·엑셀에 나가는 형식이 되도록
   // 하나로 합쳤다. reportOptions.groupAssessmentResults가 사실상의 view 상태.
+  //
+  // 담당 아닌 환자(비담당·락 미보유) 조회 시에는 이 토글이 곧 데이터 쓰기라 실제로는
+  // usePatientCrud의 silent guard에 막혀 저장되지 않는다 — 그대로 두면 "눌러도 화면이 안
+  // 바뀌는" 버그가 된다. canMutate=false일 때는 저장을 시도하는 대신 로컬 오버라이드로만
+  // 화면을 전환한다(값은 저장되지 않고, 화면을 벗어나면 사라진다). canMutate/groupOutput이
+  // 바뀌면(권한·락 변화, 다른 사용자의 실제 저장) 오버라이드를 리셋한다 — 환자 전환은
+  // 호출부의 key={patient.id}가 이 컴포넌트를 통째로 재마운트시켜 처리한다.
   const [pendingScrollId, setPendingScrollId] = useState(null);
+  const [readOnlyViewOverride, setReadOnlyViewOverride] = useState(null);
   const groupOutput = !!reportOptions?.groupAssessmentResults;
-  const view = groupOutput ? 'group' : 'card';
+  useEffect(() => {
+    setReadOnlyViewOverride(null);
+  }, [canMutate, groupOutput]);
+  const view = (!canMutate && readOnlyViewOverride) ? readOnlyViewOverride : (groupOutput ? 'group' : 'card');
   const setGroupOutput = useCallback(next => {
+    if (!canMutate) {
+      setReadOnlyViewOverride(next ? 'group' : 'card');
+      return;
+    }
     onReportOptionsChange?.({ ...reportOptions, groupAssessmentResults: next });
-  }, [onReportOptionsChange, reportOptions]);
+  }, [canMutate, onReportOptionsChange, reportOptions]);
   const unitCount = useMemo(() => buildAssessmentUnits(diagnoses, activeModules).length, [diagnoses, activeModules]);
 
   const handleJumpToDiagnosis = useCallback(diagId => {
@@ -147,17 +162,21 @@ export function AssessmentTab({
 
       {diagnoses.length > 0 && (
         <div className="assessment-output-toggle">
-          <span className="assessment-output-hint">패턴 그룹을 선택하면 미리보기·EMR·엑셀 출력도 그룹 형식으로 나갑니다.</span>
+          <span className="assessment-output-hint">
+            {canMutate
+              ? '패턴 그룹을 선택하면 미리보기·EMR·엑셀 출력도 그룹 형식으로 나갑니다.'
+              : '현재 화면 보기만 전환되며, 실제 출력 형식은 바뀌지 않습니다.'}
+          </span>
           <div className="assessment-view-toggle" role="group" aria-label="보기 전환">
-            <button type="button" className={view === 'group' ? 'active' : ''} onClick={() => setGroupOutput(true)}>패턴 그룹</button>
-            <button type="button" className={view === 'card' ? 'active' : ''} onClick={() => setGroupOutput(false)}>개별 카드</button>
+            <button type="button" data-readonly-allow className={view === 'group' ? 'active' : ''} onClick={() => setGroupOutput(true)}>패턴 그룹</button>
+            <button type="button" data-readonly-allow className={view === 'card' ? 'active' : ''} onClick={() => setGroupOutput(false)}>개별 카드</button>
           </div>
         </div>
       )}
       {view === 'card' && unitCount >= 10 && (
         <div className="assessment-view-hint">
           평가단위가 {unitCount}개입니다.{' '}
-          <button type="button" className="assessment-view-hint-link" onClick={() => setGroupOutput(true)}>패턴 그룹 보기로 전환</button>
+          <button type="button" data-readonly-allow className="assessment-view-hint-link" onClick={() => setGroupOutput(true)}>패턴 그룹 보기로 전환</button>
           하면 같은 패턴을 한 번에 입력할 수 있습니다.
         </div>
       )}

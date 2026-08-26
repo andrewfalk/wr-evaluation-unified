@@ -17,11 +17,20 @@ const MDDM_STATUS_OPTIONS = [
   { value: 'present', label: '노출있음' },
 ];
 
-export function MddmEvaluation({ patient, updateModule, methodTabs }) {
+export function MddmEvaluation({ patient, updateModule, methodTabs, canMutate = true }) {
   const shared = patient.data.shared;
   const mod = patient.data.module;
   const jobs = shared.jobs || [];
-  const mddmStatus = resolveMddmStatus(mod);
+  const savedMddmStatus = resolveMddmStatus(mod);
+  // 노출 여부(미평가/노출없음/노출있음)는 실제 저장되는 임상 데이터인 동시에 아래 작업 목록의
+  // 표시 여부를 결정하는 게이트이기도 하다 — mddmStatus가 'present'가 아니면 이미 입력된
+  // 작업이 있어도 안내문만 보인다. 비담당 환자 조회 시 저장은 막혀야 하지만, 그렇다고 실제
+  // 저장된 작업 데이터를 볼 수 없게 되면 안 되므로 로컬 오버라이드로만 미리보기 전환한다.
+  const [readOnlyStatusOverride, setReadOnlyStatusOverride] = useState(null);
+  useEffect(() => {
+    setReadOnlyStatusOverride(null);
+  }, [patient.id, canMutate, savedMddmStatus]);
+  const mddmStatus = (!canMutate && readOnlyStatusOverride) ? readOnlyStatusOverride : savedMddmStatus;
   const [selectedJobId, setSelectedJobId] = useState(jobs[0]?.id || '');
   const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
   const [pendingSelectId, setPendingSelectId] = useState(null);
@@ -155,6 +164,10 @@ export function MddmEvaluation({ patient, updateModule, methodTabs }) {
   }, [visibleTasks, pendingSelectId]);
 
   const handleStatusChange = (next) => {
+    if (!canMutate) {
+      setReadOnlyStatusOverride(next);
+      return;
+    }
     updateModule(m => ({ ...m, mddmStatus: next }));
   };
 
@@ -175,12 +188,16 @@ export function MddmEvaluation({ patient, updateModule, methodTabs }) {
           <button
             key={opt.value}
             className={`btn btn-sm ${mddmStatus === opt.value ? 'btn-primary' : 'btn-secondary'}`}
+            data-readonly-allow
             onClick={() => handleStatusChange(opt.value)}
           >
             {opt.label}
           </button>
         ))}
       </div>
+      {!canMutate && (
+        <p className="assessment-output-hint" style={{ marginBottom: 12 }}>조회 화면만 전환되며, 저장된 노출 상태는 변경되지 않습니다.</p>
+      )}
 
       {mddmStatus !== 'present' ? (
         <div className="evaluation-empty-state">
@@ -199,6 +216,7 @@ export function MddmEvaluation({ patient, updateModule, methodTabs }) {
                   <button
                     key={job.id}
                     className={`btn btn-sm ${isActive ? 'btn-primary' : 'btn-secondary'}`}
+                    data-readonly-allow
                     onClick={() => handleJobChange(job.id)}
                   >
                     직력{i + 1}: {job.jobName || '(미입력)'} · {getEffectiveWorkPeriodText(job)}
