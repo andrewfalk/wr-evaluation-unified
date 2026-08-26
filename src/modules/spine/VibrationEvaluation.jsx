@@ -11,11 +11,18 @@ const WBV_STATUS_OPTIONS = [
   { value: 'present', label: '노출있음' },
 ];
 
-export function VibrationEvaluation({ patient, updateModule, methodTabs }) {
+export function VibrationEvaluation({ patient, updateModule, methodTabs, canMutate = true }) {
   const shared = patient.data.shared;
   const mod = patient.data.module;
   const jobs = shared.jobs || [];
-  const status = resolveVibrationStatus(mod);
+  const savedStatus = resolveVibrationStatus(mod);
+  // MddmEvaluation과 동일한 이유 — 노출 여부는 저장 데이터인 동시에 아래 구간 목록의 표시
+  // 게이트라, 비담당 환자 조회 시에도 로컬 오버라이드로만 미리보기 전환한다.
+  const [readOnlyStatusOverride, setReadOnlyStatusOverride] = useState(null);
+  useEffect(() => {
+    setReadOnlyStatusOverride(null);
+  }, [patient.id, canMutate, savedStatus]);
+  const status = (!canMutate && readOnlyStatusOverride) ? readOnlyStatusOverride : savedStatus;
   const [selectedJobId, setSelectedJobId] = useState(jobs[0]?.id || '');
   const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -91,6 +98,10 @@ export function VibrationEvaluation({ patient, updateModule, methodTabs }) {
   }, [globalIndex, updateModule]);
 
   const handleStatusChange = useCallback((next) => {
+    if (!canMutate) {
+      setReadOnlyStatusOverride(next);
+      return;
+    }
     updateModule(m => {
       const base = { ...m, vibrationExposureStatus: next };
       // '노출있음'으로 켤 때 구간이 없으면 첫 구간 seed
@@ -99,7 +110,7 @@ export function VibrationEvaluation({ patient, updateModule, methodTabs }) {
       }
       return base;
     });
-  }, [updateModule, jobs]);
+  }, [canMutate, updateModule, jobs]);
 
   return (
     <div className="panel">
@@ -118,12 +129,16 @@ export function VibrationEvaluation({ patient, updateModule, methodTabs }) {
           <button
             key={opt.value}
             className={`btn btn-sm ${status === opt.value ? 'btn-primary' : 'btn-secondary'}`}
+            data-readonly-allow
             onClick={() => handleStatusChange(opt.value)}
           >
             {opt.label}
           </button>
         ))}
       </div>
+      {!canMutate && (
+        <p className="assessment-output-hint" style={{ marginBottom: 12 }}>조회 화면만 전환되며, 저장된 노출 상태는 변경되지 않습니다.</p>
+      )}
 
       {status !== 'present' ? (
         <div className="evaluation-empty-state">
@@ -142,6 +157,7 @@ export function VibrationEvaluation({ patient, updateModule, methodTabs }) {
                   <button
                     key={job.id}
                     className={`btn btn-sm ${isActive ? 'btn-primary' : 'btn-secondary'}`}
+                    data-readonly-allow
                     onClick={() => handleJobChange(job.id)}
                   >
                     직력{i + 1}: {job.jobName || '(미입력)'} · {getEffectiveWorkPeriodText(job)}

@@ -153,6 +153,7 @@ export function StepContent({
           errors={errors}
           settings={settings}
           previewText={unifiedPreviewText}
+          canMutate={canMutate}
         />
       );
     }
@@ -174,7 +175,6 @@ export function StepContent({
   // 최종 방어선이므로, 여기서는 UI 상호작용을 명확히 차단하는 역할만 한다.
   // banner는 부모(App.jsx)에서 스텝 탭 아래에 직접 렌더.
   const readOnlyProps = readOnly ? {
-    'aria-disabled': 'true',
     onClickCapture: blockInteraction,
     onKeyDownCapture: blockMutatingKeys,
     onBeforeInputCapture: blockInteraction,

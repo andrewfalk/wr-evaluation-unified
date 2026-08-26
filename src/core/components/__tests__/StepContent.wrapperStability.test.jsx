@@ -69,4 +69,16 @@ describe('StepContent — 래퍼 상시화(잠금 상실 시 재마운트 방지
     expect(shell).toBeTruthy();
     expect(shell.classList.contains('read-only-content')).toBe(true);
   });
+
+  // WAI-ARIA 명세상 컨테이너의 aria-disabled는 모든 focusable descendant에 적용되는 것으로
+  // 간주된다 — 조회 전용 토글 일부만 실제로는 활성인 혼합 컨테이너에 컨테이너 레벨
+  // aria-disabled를 다는 것은 안티패턴이라 제거했다(개별 허용 버튼에 aria-disabled={false}를
+  // 얹어 상쇄하는 방식 대신). read-only 안내는 배너 문구와 시각 스타일만으로 한다.
+  it('canMutate=false여도 래퍼(.step-content-shell)에 aria-disabled 속성이 없다', () => {
+    const { container } = render(
+      <StepContent currentStep={currentStep} activePatient={activePatient} EvaluationComponent={StatefulProbe} canMutate={false} />
+    );
+    const shell = container.querySelector('.step-content-shell');
+    expect(shell.hasAttribute('aria-disabled')).toBe(false);
+  });
 });

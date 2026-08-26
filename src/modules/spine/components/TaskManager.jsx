@@ -81,14 +81,14 @@ export function TaskManager({ tasks, selectedIndex, onSelect, onAdd, onRemove, o
                 onDragEnd={handleDragEnd}
                 onClick={() => onSelect(i)}
               >
-                <div className="task-item-main">
+                <div className="task-item-main" data-readonly-allow>
                   <div className="task-item-title">{task.name}</div>
                   <div className="task-item-meta">
                     {task.posture} ({formula?.name}) | {task.weight}kg | {task.frequency}회/일
                   </div>
                 </div>
                 <div className="task-item-side">
-                  <span className="task-item-force" style={{ color: forceColor }}>{task.force.toLocaleString()} N</span>
+                  <span className="task-item-force" data-readonly-allow style={{ color: forceColor }}>{task.force.toLocaleString()} N</span>
                   {tasks.length > 0 && (
                     <button className="btn btn-danger btn-xs" onClick={e => { e.stopPropagation(); onRemove(i); }}>삭제</button>
                   )}

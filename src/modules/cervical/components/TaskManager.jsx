@@ -31,12 +31,12 @@ export function TaskManager({ tasks, selectedIndex, onSelect, onAdd, onRemove })
               className={`task-item ${index === selectedIndex ? 'active' : ''}`}
               onClick={() => onSelect(index)}
             >
-              <div className="task-item-main">
+              <div className="task-item-main" data-readonly-allow>
                 <div className="task-item-title">{task.name || `작업 ${index + 1}`}</div>
                 <div className="task-item-meta">{formatExposureTypes(task)}</div>
               </div>
               <div className="task-item-side">
-                <span className="task-item-force">
+                <span className="task-item-force" data-readonly-allow>
                   운반 {task.carry_hours_per_shift || '-'}h / 비중립 {task.neck_nonneutral_hours_per_day || '-'}h
                 </span>
                 <button

@@ -659,7 +659,7 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .task-item--dragging { opacity: 0.4; }
 .task-item--drag-over-before { box-shadow: inset 0 2px 0 0 var(--accent); }
 .task-item--drag-over-after { box-shadow: inset 0 -2px 0 0 var(--accent); }
-.task-item-main { min-width: 0; }
+.task-item-main { min-width: 0; flex: 1; }
 .task-item-title {
   font-size: 0.88rem;
   font-weight: 600;
@@ -3202,6 +3202,12 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .read-only-content input[type="checkbox"],
 .read-only-content input[type="radio"] {
   cursor: not-allowed;
+}
+/* data-readonly-allow 통로로 실제 클릭이 허용되는 조회 전용 버튼은 커서도 정상 표시 —
+   StepContent.jsx의 blockInteraction 예외 규칙과 짝을 이룬다. :not(:disabled) 예외 —
+   골격 검수 회수(disabled={ov.closed}) 등 그 자체로 비활성인 버튼은 not-allowed를 유지. */
+.read-only-content button[data-readonly-allow]:not(:disabled) {
+  cursor: pointer;
 }
 /* range는 드래그로 시각적 값 이동이 가능해 keydown/change 차단만으로 부족 — pointer-events로 차단 */
 .read-only-content input[type="range"] {
