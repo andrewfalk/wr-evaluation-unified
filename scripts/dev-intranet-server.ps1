@@ -58,6 +58,32 @@ if (-not $env:VIDEO_POSE_TIER)    { $env:VIDEO_POSE_TIER = 'auto' }
 # 기존과 동일 비교가 필요하면 .env에 VIDEO_DET_INTERVAL_SEC=0. 허용 범위 [0,1.0](그 외 기동 실패).
 if (-not $env:VIDEO_DET_INTERVAL_SEC) { $env:VIDEO_DET_INTERVAL_SEC = '1' }
 
+# 2.5) 포트 사전 점검. 과거 이 포트를 도커 app 컨테이너가 선점한 채로 이 스크립트를 띄우면
+# node가 EADDRINUSE로 즉시 죽는데(-NoExit라 창은 안 닫힘) 별다른 에러 표시 없이 방치되기 쉬웠다
+# (실제로 겪음 — 창은 몇 시간째 열려있는데 서버는 처음부터 안 뜬 상태). 기동 전에 명시 점검한다.
+$portNum = [int]$env:PORT
+$existing = Get-NetTCPConnection -LocalPort $portNum -State Listen -ErrorAction SilentlyContinue
+if ($existing) {
+  $containerName = $null
+  try { $containerName = (docker ps --filter "publish=$portNum" --format '{{.Names}}' 2>$null | Select-Object -First 1) } catch {}
+  if ($containerName) {
+    # 흔한 케이스: 이전에 남아있던 도커 app 컨테이너가 같은 포트를 씀 — 자동으로 내리고 재확인(포트는 그대로).
+    Write-Host "[dev-intranet] :$portNum 을 도커 컨테이너 '$containerName' 이 이미 쓰고 있음 — 중지 후 재확인…" -ForegroundColor Yellow
+    docker stop $containerName | Out-Null
+    Start-Sleep -Seconds 1
+    if (Get-NetTCPConnection -LocalPort $portNum -State Listen -ErrorAction SilentlyContinue) {
+      throw "컨테이너 '$containerName' 중지 후에도 :$portNum 이 여전히 사용 중 — 수동 확인 필요."
+    }
+    Write-Host "[dev-intranet] :$portNum 반납 확인." -ForegroundColor Green
+  } else {
+    $ownerPid = ($existing | Select-Object -First 1).OwningProcess
+    $procName = (Get-Process -Id $ownerPid -ErrorAction SilentlyContinue).ProcessName
+    if (-not $procName) { $procName = 'unknown' }
+    throw "포트 :$portNum 이 이미 PID $ownerPid ($procName) 에서 사용 중입니다. 어떤 프로세스가 응답할지 불명확한 채로 " +
+      "기동하지 않도록 중단합니다 — 수동으로 확인 후(Stop-Process -Id $ownerPid) 재시도하세요."
+  }
+}
+
 # 3) 업로드 디렉터리 보장(서버도 tmp/를 mkdir하지만 명시 생성).
 if (-not $env:VIDEO_ANALYSIS_UPLOAD_DIR) { throw 'VIDEO_ANALYSIS_UPLOAD_DIR not set in .env' }
 New-Item -ItemType Directory -Force -Path $env:VIDEO_ANALYSIS_UPLOAD_DIR | Out-Null

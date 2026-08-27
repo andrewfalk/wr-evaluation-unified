@@ -142,6 +142,20 @@ describe('videoAnalysisWorker.pollOnce', () => {
     expect(upd?.[1]).toContain('INFERENCE_ERROR');
   });
 
+  it('execFile timeout으로 kill됨 → error DEADLINE_EXCEEDED (INFERENCE_ERROR로 뭉뚱그리지 않음)', async () => {
+    const { pool, query } = makePool();
+    const runInference = vi.fn().mockRejectedValue(Object.assign(
+      new Error('Command failed: /p /s/infer_clip.py --input x'),
+      { killed: true, signal: 'SIGTERM', cmd: '/p /s/infer_clip.py --input x', code: null },
+    ));
+    await pollOnce(pool, { runInference });
+    const upd = poolUpdate(query, 'error_code = $2');
+    expect(upd).toBeDefined();
+    const params = upd?.[1] as unknown[];
+    expect(params).toContain('DEADLINE_EXCEEDED');
+    expect(params[2]).toMatch(/infer_clip/);
+  });
+
   it('clip 경로 없음(upload_path null) → error CLIP_UNAVAILABLE (추론 미실행)', async () => {
     const { pool, query } = makePool({ uploadPath: null });
     const runInference = vi.fn();
