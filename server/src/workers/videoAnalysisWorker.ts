@@ -416,10 +416,21 @@ export async function pollOnce(pool: Pool, deps: WorkerDeps): Promise<boolean> {
     // err.code는 exit code 숫자라 원인을 못 살리므로 stderr 마커로 CUDA_UNAVAILABLE를 매핑(운영자·UI가 원인 식별).
     const stderr = String((err as { stderr?: unknown })?.stderr ?? '');
     const rawCode = (err as { code?: unknown })?.code;
+    // execFile timeout(deadlineMs/remainingMs) 만료 시 child가 signal로 kill되어 err.killed=true, err.code는
+    // exit code가 아니라 null/undefined다(위 typeof string 체크를 통과 못 해 기존엔 INFERENCE_ERROR로 뭉뚱그려짐 —
+    // stderr도 ONNX 경고로 500자를 다 채워 진짜 원인(시간초과)이 안 보였다). killed를 먼저 식별해 명확히 표시.
+    const killed = (err as { killed?: unknown })?.killed === true;
+    const signal = (err as { signal?: unknown })?.signal;
+    const cmd = String((err as { cmd?: unknown })?.cmd ?? '');
+    const phase = cmd.includes('feature_calc.py') ? 'feature_calc' : cmd.includes('infer_clip.py') ? 'infer_clip' : 'unknown';
     const code = stderr.includes('__CUDA_UNAVAILABLE__')
       ? 'CUDA_UNAVAILABLE'
-      : (typeof rawCode === 'string' ? rawCode : 'INFERENCE_ERROR');
-    const message = String((err as Error)?.message ?? err).slice(0, 500);
+      : killed
+        ? 'DEADLINE_EXCEEDED'
+        : (typeof rawCode === 'string' ? rawCode : 'INFERENCE_ERROR');
+    const message = killed
+      ? `inference subprocess (${phase}) exceeded the job deadline and was killed (signal ${signal ?? 'unknown'})`
+      : String((err as Error)?.message ?? err).slice(0, 500);
     await pool.query(
       `UPDATE video_analysis_jobs SET status = 'error', error_code = $2, error_message = $3 WHERE id = $1`,
       [job.id, code, message],
