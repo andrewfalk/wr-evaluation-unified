@@ -439,6 +439,51 @@
     테스트**로 대체 검증(저장 시 최종 경로와 동일한 stringify→parse 후 필드·값 보존 확인).
   - [ ] **잔여**: PR 리뷰·머지 대기. 실 서버(PostgreSQL 백엔드) 통한 완전한 브라우저 리로드 E2E는
     미실행 — 필요 시 Tier-3 스택(`reference_tier3_verify_stack`)으로 별도 확인 권장.
+- [x] **6.0-18 flat 참고 후보 골격 검수·근거 배선** — 트리거: 손목 모듈만 활성화한 전문의가 "참고 후보"의
+  손목 반복/굴곡/편위 행에 골격 검수(6.0-8) 버튼이 안 뜨는 걸 발견·문의. 조사 결과 손목 고유 문제가
+  아니라 **flat 후보 UI 전체의 배선 공백** — 골격 검수는 job-scope 제안행·task-scope 제안/후보행에만
+  배선됐고, 이후 추가된 6.0-10(손목)·6.0-11(어깨·팔꿈치 반복)·6.0-16(밴드 Left/Right) candidate는 전부
+  flat 리스트로 렌더되는데 그 블록이 `analysisEvidence.*` lookup을 한 번도 안 함(`elbow`/`wrist`는
+  `videoMappingConfig`가 없어 job/task scope 어디에도 안 걸리고, `shoulder`는 job-scope지만 candidate를
+  안 렌더해 역시 flat行). 데이터는 이미 서버 경로(`videoPerDayConversion.js`의 candidate 분기, `videoViewpointFusion.js`의
+  `fusion.candidates`/`segments`)에 전부 있었음 — 렌더가 안 읽어서 버려지던 것.
+  - **설계**: flat 후보의 공정별 서브행(processId 단위)이 `processEvidenceByProcessId[processId][featureKey]`와
+    1:1 대응하는 유일한 부착점(그룹 헤더는 여러 공정 jobEv 합성이 필요해 금지 — `aggregationMethod`가
+    무의미해짐). 신규 순수 헬퍼 `flatCandidateRowRef(c, processEvidenceByProcessId)` → `{processId, rowKey, jobEv}`,
+    `rowKey = flat:${processId}:${featureKey}`(기존 rowKey는 전부 UUID로 시작해 네임스페이스 충돌 불가).
+    `hasAnyFlatEvidence`로 "세션 한정" 안내(블록당 1회, transient evidence라 새로고침·환자 재진입 후
+    사라지는 걸 버그로 오인하지 않게).
+  - **mock 게이트**: mock은 서버 artifact가 없어 골격 검수 불가능 + 근거 패널을 열어도 사실과 다른
+    안내만 나옴 → 버튼·상세 영역·안내 문구 전부 `serverMode` 전용. task-scope 후보행(`renderCandidateRow`)은
+    mock에서도 "왜 이 값?"이 뜨는 기존 동작을 유지(변경 안 함) — flat 행만 골격 검수와 짝을 이루는
+    서버 전용 검수 도구로 취급하는 의도된 비대칭. `expandedEvidence`가 부모 state라 서버→mock 전환 후
+    stale rowKey가 남을 수 있어 상세 영역(`renderEvidencePanel` 호출 자체)도 `serverMode &&`로 이중 차단.
+  - **손목 각도 하드게이트**: `wristFlexionPeakAngle`/`wristDeviationPeakAngle`은 non-preferred 시점
+    entry가 융합 **이전** 단계에서 드롭돼(`videoViewpointFusion.js:82-87`) `fusion.candidates`에 adopted
+    시점만 남는다 — "비교 시점" 버튼이 안 뜨는 게 정상 동작(버그 아님).
+  - **리팩터**: flat 블록(IIFE 인라인 JSX)을 `export function FlatCandidateList(...)`로 추출 — 순수 함수
+    테스트만으로는 이번 버그(JSX 배선 누락)를 원리적으로 검출할 수 없어서(헬퍼가 옳아도 호출을 빠뜨리면
+    통과), `renderEvidencePanel`/`renderSkeletonReview`(VideoAnalysisStep의 state 클로저라 이동 불가)를
+    render prop으로 주입하고 jsdom 렌더 테스트로 stub 호출 여부·인자를 직접 검증. 6.0-17 그룹핑
+    로직·라벨·값 포맷은 그대로 이동만(수정 0).
+  - **후속 수정(리뷰 발견)**: Left/Right 반복시간 후보 4종(`repetitiveMediumHoursLeft/Right`,
+    `repetitiveFastHoursLeft/Right`)은 candidate value가 raw ratio(`convertClipFeaturesToPerDay`가
+    비율을 그대로 보존, 6.0-16)라 `buildProcessEvidence`가 만드는 `jobEv.contributions[].perDayValue`도
+    ratio 그대로였다. `contribFormula`(`:882`)가 이를 "환산 완료값"으로 보고 그대로 찍어(예: 비율 0.2·
+    활동 200분/일 → "0.2 시간/일 = 자세비율 0.2 × 활동 200분/일 ÷ 60") 서브행(`formatCandidateSubValue`
+    — 정상 "약 0.7 시간/일")과 근거 패널이 서로 다른 값을 보였다. task-scope 후보의
+    `trunkFlexionOver45Duration` `displayJobEv` 클론 패치(`:1023-1032`)와 동일하게, 근거 패널에 넘기기
+    직전에만 해당 4키의 `perDayValue`를 `candidateHoursPerDay(c.value, activeMinutesPerDay)` 결과로
+    보정(원본 jobEv는 골격 검수에 그대로 사용 — segments/fusion엔 영향 없음).
+  - [x] **테스트**: 순수 헬퍼 `flatCandidateRowRef`/`hasAnyFlatEvidence` 단위 테스트 9건(`videoAnalysisStep.test.js`,
+    하드게이트 회귀 포함) + `FlatCandidateList` jsdom 렌더 테스트 12건(신규 `flatCandidateList.test.jsx`
+    — 서버/mock/모드 전환 stale/toggle 열기·닫기/2공정 독립성/6.0-17 표시 불변 회귀/Left-Right perDayValue
+    보정). **회귀 검출력 검증**: 배선을 일시적으로 제거해 6/11건이, 이후 perDayValue 보정을 제거해
+    신규 1건이 각각 실제로 실패하는 것을 확인 후 원복(테스트가 이번 버그들을 잡는다는 것을 직접 증명).
+    root 1326/1326·`lint` 0 errors·`build:web`·`typecheck` 통과.
+  - [ ] **잔여**: 라이브 확인(인트라넷 fixture 모드) 미실행 — 손목 profile 공정에서 골격 클릭 시 실제
+    프레임·마커 렌더, 검수 종료 파급(같은 job 참조 행 전부 회수됨 처리), read-only 모드에서 토글은
+    눌리고 검수 종료는 차단되는지 확인 필요. Tier-3 스택(`reference_tier3_verify_stack`) 권장.
 
 ---
 

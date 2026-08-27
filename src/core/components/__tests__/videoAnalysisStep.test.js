@@ -22,11 +22,14 @@ import {
   flatCandidateLabel,
   segmentsForJob,
   buildVideoStatus,
+  flatCandidateRowRef,
+  hasAnyFlatEvidence,
 } from '../VideoAnalysisStep.jsx';
 import { getAggregationMethod } from '../../services/videoAggregate.js';
 import { getModuleSuggestions, getModuleCandidates, collectCandidateFeatures } from '../../services/videoProvenance.js';
 import { gateFeaturesByViewpoint } from '../../services/videoViewpointConfig.js';
 import { generateMockFeatures } from '../../services/videoMock.js';
+import { frameActive } from '../SkeletonOverlay.jsx';
 
 describe('척추 45°↑ 굴곡 candidate (작업 단위 표시)', () => {
   it('candidateMinutesPerDay: 비율×활동분 반올림, 활동시간 null → null', () => {
@@ -530,5 +533,118 @@ describe('task-scope 제안 노출+적용 활성 회귀 (경추 neckFlexion이 �
     const refOnly = s.autoSuggestAllowed === false;
     expect(noTarget).toBe(false);
     expect(refOnly).toBe(false); // 적용 버튼 활성 조건(busy/applyBlocked 외)
+  });
+});
+
+describe('flatCandidateRowRef / hasAnyFlatEvidence (6.0-18 — flat 참고 후보 골격 검수 배선)', () => {
+  const processes = [
+    { id: 'p1', sharedJobId: 'jobA', name: '조립', shiftSharePercent: 60, activeMinutesPerDay: 300 },
+    { id: 'p2', sharedJobId: 'jobA', name: '포장', shiftSharePercent: 40, activeMinutesPerDay: 180 },
+  ];
+  const processFeatures = [
+    { processId: 'p1', features: { wristFlexionPeakAngle: { kind: 'candidate', value: 42 } } },
+    { processId: 'p2', features: { wristFlexionPeakAngle: { kind: 'candidate', value: 38 } } },
+  ];
+  // 손목 각도(하드게이트 대상): non-preferred 시점 드롭이 융합 이전 단계라 fusion.candidates에
+  // adopted 시점만 남는다(videoViewpointFusion.js:82-87) — "비교 시점" 후보가 없는 게 정상 동작.
+  const wristPeakEv = {
+    intrinsicValue: 42, intrinsicMetric: 'peak_angle', intrinsicUnit: 'degrees',
+    activeMinutesPerDay: null, warnings: [],
+    segments: [{ startMs: 5200, endMs: 5200 }], // peak = 점-세그먼트(startMs==endMs)
+    fusion: {
+      adopted: { jobId: 'job-sag', viewpoint: 'sagittal', adopted: true },
+      candidates: [{ jobId: 'job-sag', viewpoint: 'sagittal', adopted: true }],
+    },
+  };
+  const processEvidence = [
+    { processId: 'p1', analysisJobIds: ['job-sag'], evidenceByFeatureKey: { wristFlexionPeakAngle: wristPeakEv } },
+  ];
+  const entry = { featureKey: 'wristFlexionPeakAngle', value: 42, processIds: ['p1'], clipIds: [] };
+
+  it('① lookup 성공 — rowKey·jobEv 도출', () => {
+    const map = buildProcessEvidence(processes, processFeatures, processEvidence);
+    const { processId, rowKey, jobEv } = flatCandidateRowRef(entry, map);
+    expect(processId).toBe('p1');
+    expect(rowKey).toBe('flat:p1:wristFlexionPeakAngle');
+    expect(jobEv.contributions[0].evidence.segments).toEqual([{ startMs: 5200, endMs: 5200 }]);
+  });
+
+  it('② evidence 빈 map(mock·리로드) → jobEv=null, resolveSourceJobs(null)=[]', () => {
+    const { jobEv } = flatCandidateRowRef(entry, {});
+    expect(jobEv).toBeNull();
+    expect(resolveSourceJobs(jobEv)).toEqual([]);
+  });
+
+  it('③ stale processId(공정 삭제 후) → jobEv=null', () => {
+    const map = buildProcessEvidence(processes, processFeatures, processEvidence);
+    const staleEntry = { ...entry, processIds: ['p-deleted'] };
+    const { jobEv } = flatCandidateRowRef(staleEntry, map);
+    expect(jobEv).toBeNull();
+  });
+
+  it('④ processIds 빈 배열 → processId=null, rowKey=flat:noproc:...', () => {
+    const { processId, rowKey, jobEv } = flatCandidateRowRef({ ...entry, processIds: [] }, {});
+    expect(processId).toBeNull();
+    expect(rowKey).toBe('flat:noproc:wristFlexionPeakAngle');
+    expect(jobEv).toBeNull();
+  });
+
+  it('⑤ rowKey 네임스페이스 충돌 없음 — job/task-scope 키와 구분, overlay 키 구분자 정합', () => {
+    const { rowKey } = flatCandidateRowRef(entry, {});
+    expect(rowKey).not.toBe('jobA:wristFlexionPeakAngle'); // job-scope 제안 rowKey 형태
+    expect(rowKey).not.toBe('p1:cervical:cand:wristFlexionPeakAngle'); // task-scope candidate rowKey 형태
+    const overlayKey = `${rowKey}::job-sag`; // expandedOverlay 키 형식(`${rowKey}::${jobId}`)
+    expect((overlayKey.match(/::/g) || []).length).toBe(1);
+  });
+
+  it('⑥ e2e 순수 경로 — buildProcessEvidence→flatCandidateRowRef→resolveSourceJobs→segmentsForJob→frameActive', () => {
+    const map = buildProcessEvidence(processes, processFeatures, processEvidence);
+    const { jobEv } = flatCandidateRowRef(entry, map);
+    const sourceJobs = resolveSourceJobs(jobEv);
+    expect(sourceJobs).toHaveLength(1);
+    expect(sourceJobLabel(sourceJobs[0])).toBe('조립 측면 (채택)');
+    const segs = segmentsForJob(jobEv, 'job-sag');
+    expect(segs).toEqual([{ startMs: 5200, endMs: 5200 }]);
+    expect(frameActive(5200, segs)).toBe(true);
+    expect(frameActive(5100, segs)).toBe(false);
+  });
+
+  it('⑦ 손목 각도 하드게이트 회귀 — candidates에 adopted만 남음("비교 시점" 버튼 없음이 정상)', () => {
+    const map = buildProcessEvidence(processes, processFeatures, processEvidence);
+    const { jobEv } = flatCandidateRowRef(entry, map);
+    const sourceJobs = resolveSourceJobs(jobEv);
+    expect(sourceJobs).toHaveLength(1);
+    expect(sourceJobs[0].adopted).toBe(true);
+  });
+
+  it('⑦b 대비군(어깨 반복, 하드게이트 대상 아님) — 비교 시점 후보 보존 + 채택 우선 정렬', () => {
+    const shoulderEv = {
+      intrinsicValue: 12.3, intrinsicMetric: 'cycles_per_minute', intrinsicUnit: 'cycles_per_minute',
+      activeMinutesPerDay: null, warnings: [],
+      fusion: {
+        adopted: { jobId: 'job-a', viewpoint: 'frontal', adopted: true },
+        candidates: [
+          { jobId: 'job-b', viewpoint: 'sagittal', adopted: false },
+          { jobId: 'job-a', viewpoint: 'frontal', adopted: true },
+        ],
+      },
+    };
+    const shoulderProcessEvidence = [
+      { processId: 'p1', analysisJobIds: ['job-a', 'job-b'], evidenceByFeatureKey: { shoulderRepetitionRate: shoulderEv } },
+    ];
+    const map = buildProcessEvidence(processes, processFeatures, shoulderProcessEvidence);
+    const shoulderEntry = { featureKey: 'shoulderRepetitionRate', value: 12.3, processIds: ['p1'], clipIds: [] };
+    const { jobEv } = flatCandidateRowRef(shoulderEntry, map);
+    const sourceJobs = resolveSourceJobs(jobEv);
+    expect(sourceJobs.map((s) => s.jobId)).toEqual(['job-a', 'job-b']); // 채택 먼저
+    expect(sourceJobs[0].adopted).toBe(true);
+    expect(sourceJobs[1].adopted).toBe(false);
+  });
+
+  it('⑧ hasAnyFlatEvidence — 하나라도 evidence 있으면 true, 전부 없으면 false', () => {
+    const map = buildProcessEvidence(processes, processFeatures, processEvidence);
+    expect(hasAnyFlatEvidence([entry], map)).toBe(true);
+    expect(hasAnyFlatEvidence([entry], {})).toBe(false);
+    expect(hasAnyFlatEvidence([], map)).toBe(false);
   });
 });
