@@ -60,9 +60,9 @@
     "jsdom": "^24.1.3",
     "playwright": "^1.61.1",
     "terser": "^5.46.0",
-    "typescript": "^5.4.0",
+    "typescript": "^7.0.2",
     "vite": "^5.0.0",
-    "vitest": "^1.6.0"
+    "vitest": "^4.1.11"
   },
   "build": {
     "extends": "electron-builder.base.yml"
