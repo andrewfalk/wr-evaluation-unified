@@ -105,15 +105,28 @@ function normalizedCode(diag) {
   return String(diag?.code || '').replace(/[.\s]/g, '').toUpperCase();
 }
 
-const KLG_CODE_PATTERN = /^M17(0|9)/;
-const KLG_NAME_PATTERN = /무릎\s*관절증|무릎\s*골관절염/;
+// 상병명은 공백을 제거하고 비교("무릎 관절증" / "무릎관절증" / "슬관절 골관절염" 동일 취급).
+function normalizedName(diag) {
+  return String(diag?.name || '').replace(/\s/g, '');
+}
+
+// M17은 하위코드 전체가 무릎관절증(gonarthrosis)이다 — M17.0/M17.9뿐 아니라
+// M17.1~M17.5(원발성·외상후·이차성 / 편측·양측)도 모두 K-L Grade 대상.
+const KLG_CODE_PATTERN = /^M17/;
+// 무릎·슬관절 + (조사 의) + (골|퇴행성) + 관절증|관절염 표기 변형을 모두 수용
+// (무릎관절증 / 무릎의 관절증 / 무릎 관절염 / 슬관절염 / 퇴행성 슬관절 골관절염 ...).
+const KLG_NAME_PATTERN = /(무릎|슬관절|슬)의?(골|퇴행성)?관절(증|염)/;
+const KLG_NAME_EN_PATTERN = /gonarthrosis|knee\s*(osteo)?arthr|(osteo)?arthr\w*\s+of\s+(the\s+)?knee/i;
 const ELLMAN_CODE_PATTERN = /^M751/;
 const ELLMAN_NAME_PATTERN = /회전근개\s*증후군|회전근개\s*파열/;
 
-// 무릎 상병 중 K-L Grade 입력이 필요한 것(M170/M179 또는 무릎 관절증·무릎 골관절염)만
-// true. 조건 미충족 상병은 입력창만 숨기고 기존 klgRight/klgLeft 값은 그대로 보존한다.
+// 무릎 상병 중 K-L Grade 입력이 필요한 것(M17 하위코드 전체 또는 무릎·슬관절
+// 관절증·관절염 표기)만 true. 조건 미충족 상병은 입력창만 숨기고 기존
+// klgRight/klgLeft 값은 그대로 보존한다.
 export function supportsKlGrade(diag) {
-  return KLG_CODE_PATTERN.test(normalizedCode(diag)) || KLG_NAME_PATTERN.test(diag?.name || '');
+  return KLG_CODE_PATTERN.test(normalizedCode(diag))
+    || KLG_NAME_PATTERN.test(normalizedName(diag))
+    || KLG_NAME_EN_PATTERN.test(String(diag?.name || ''));
 }
 
 // 어깨 상병 중 Ellman Class 입력이 필요한 것(M751 또는 회전근개 증후군·회전근개 파열)만 true.
