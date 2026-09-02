@@ -216,6 +216,35 @@ describe('POST /api/capabilities/grants', () => {
     expect(q.mock.calls.some(c => String(c[0]).startsWith('INSERT'))).toBe(false);
   });
 
+  it('returns 400 (not 500) when the DB grant_ttl CHECK rejects a near-future expiresAt', async () => {
+    // 앱단 검사(Date.now() 기준)는 통과하지만, INSERT 시점에는 DB의 granted_at(now())이
+    // 이미 expiresAt을 넘어선 경쟁 상황을 흉내낸다 — PHI 조회·FOR UPDATE 대기·시계 차이 등.
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    const ttlViolation = Object.assign(new Error('check constraint violated'), {
+      code: '23514', constraint: 'grant_ttl',
+    });
+    const clientMock = { query: vi.fn(), release: vi.fn() } as unknown as PoolClient;
+    const q = clientMock.query as ReturnType<typeof vi.fn>;
+    q.mockResolvedValueOnce(undefined)      // BEGIN
+      .mockResolvedValueOnce({ rows: [] })  // SELECT open — none
+      .mockRejectedValueOnce(ttlViolation)  // INSERT rejected by DB — grant_ttl
+      .mockResolvedValue(undefined);        // ROLLBACK
+    (pool.connect as ReturnType<typeof vi.fn>).mockResolvedValueOnce(clientMock);
+
+    const res = await request(makeApp(pool))
+      .post('/api/capabilities/grants')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({
+        userId: '11111111-1111-4111-8111-111111111111', capability: 'stats.view', reason: 'race',
+        expiresAt: new Date(Date.now() + 1000).toISOString(),
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_EXPIRES_AT');
+    expect(q.mock.calls.some(c => c[0] === 'ROLLBACK')).toBe(true);
+  });
+
   it('returns 409 (not 500) when INSERT loses the open-grant unique-index race', async () => {
     const pool = makePool();
     (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth

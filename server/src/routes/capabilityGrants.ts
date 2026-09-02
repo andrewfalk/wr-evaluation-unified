@@ -214,6 +214,14 @@ async function createGrant(pool: Pool, req: Request, res: Response): Promise<voi
       res.status(409).json({ code: 'GRANT_ALREADY_ACTIVE', error: 'An active grant for this capability already exists' });
       return;
     }
+    // 위의 앱단 expiresAt 검사는 Node의 Date.now() 기준이고, grant_ttl CHECK는 실제 INSERT
+    // 시점의 DB now()(= granted_at) 기준이다 — PHI 조회·FOR UPDATE 대기·앱/DB 시계 차이로
+    // 그 사이 시간이 흐르면, 아주 가까운 미래로 고른 expiresAt이 앱단 검사는 통과하고 여기서
+    // 뒤늦게 걸릴 수 있다. 그 경쟁을 500이 아니라 400으로 정상 응답한다.
+    if (pgErr.code === '23514' && pgErr.constraint === 'grant_ttl') {
+      res.status(400).json({ code: 'INVALID_EXPIRES_AT', error: 'expiresAt must be in the future' });
+      return;
+    }
     throw err;
   } finally {
     client.release();
