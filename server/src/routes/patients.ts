@@ -26,6 +26,12 @@ import {
 } from '../db/patientPersons';
 import { validatePastDate } from '@wr/contracts';
 import {
+  CompletionReportFields,
+  requireCompletionVersions,
+  nextCompletionColumns,
+  DRAFT_COMPLETION_COLUMNS,
+} from '../completionTracking';
+import {
   resolveAssignedDoctor,
   type AssignmentWarning,
   type ResolveAssignedDoctorResult,
@@ -50,28 +56,6 @@ import {
 // Schemas — defined locally, mirroring shared/contracts/patient.ts structure
 // without a hard runtime dependency on the built contracts package.
 // ---------------------------------------------------------------------------
-
-// PR0-A: 완료 보고 3필드. modulesCompleteObserved는 3상태(undefined/true/false) —
-// undefined면 기존 완료 상태를 건드리지 않는다(구버전 클라이언트 호환). true일 때만
-// 실제로 새 값을 쓰므로 버전 필드는 그때만 필수.
-const CompletionReportFields = {
-  modulesCompleteObserved:        z.boolean().optional(),
-  completionClientBuildVersion:   z.string().max(64).optional(),
-  completionClientSchemaVersion:  z.number().int().nonnegative().optional(),
-};
-
-function requireCompletionVersions<T extends { modulesCompleteObserved?: boolean; completionClientBuildVersion?: string; completionClientSchemaVersion?: number }>(
-  data: T,
-  ctx: z.RefinementCtx
-): void {
-  if (data.modulesCompleteObserved !== true) return;
-  if (data.completionClientBuildVersion === undefined) {
-    ctx.addIssue({ code: 'custom', path: ['completionClientBuildVersion'], message: 'Required when modulesCompleteObserved is true' });
-  }
-  if (data.completionClientSchemaVersion === undefined) {
-    ctx.addIssue({ code: 'custom', path: ['completionClientSchemaVersion'], message: 'Required when modulesCompleteObserved is true' });
-  }
-}
 
 const CreateBody = z.object({
   id:        z.string().uuid().optional(),
@@ -130,39 +114,6 @@ const SELECT_COLS = `
   diagnoses_codes, jobs_names, revision, created_at, updated_at, payload,
   completion_status, server_observed_modules_complete_at, completion_source,
   completion_client_build_version, completion_client_schema_version`;
-
-// PR0-A: PATCH/POST 공통 완료 필드 계산. 3상태 규칙(§5.5) — undefined는 무변경,
-// true는 최초 전이에만 타임스탬프·source·버전 기록(이후 불변), false는 status만 되돌림.
-interface CompletionColumns {
-  completion_status:                   string;
-  server_observed_modules_complete_at: Date | null;
-  completion_source:                   string | null;
-  completion_client_build_version:     string | null;
-  completion_client_schema_version:    number | null;
-}
-
-function nextCompletionColumns(
-  current: CompletionColumns,
-  report: { modulesCompleteObserved?: boolean; completionClientBuildVersion?: string; completionClientSchemaVersion?: number }
-): CompletionColumns {
-  if (report.modulesCompleteObserved === undefined) return current;
-
-  if (report.modulesCompleteObserved === false) {
-    return { ...current, completion_status: 'draft' };
-  }
-
-  // true — first false→true transition stamps provenance; later transitions only flip status.
-  if (current.server_observed_modules_complete_at !== null) {
-    return { ...current, completion_status: 'modules_complete' };
-  }
-  return {
-    completion_status:                   'modules_complete',
-    server_observed_modules_complete_at: new Date(),
-    completion_source:                   'client_reported',
-    completion_client_build_version:     report.completionClientBuildVersion ?? null,
-    completion_client_schema_version:    report.completionClientSchemaVersion ?? null,
-  };
-}
 
 interface PgErrorLike {
   code?:       string;
@@ -777,7 +728,7 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
         ...(() => {
           // 신규 행이라 "보존할 이전 값"이 없다 — 초기값(전부 NULL/draft)에서 시작해 계산.
           const c = nextCompletionColumns(
-            { completion_status: 'draft', server_observed_modules_complete_at: null, completion_source: null, completion_client_build_version: null, completion_client_schema_version: null },
+            DRAFT_COMPLETION_COLUMNS,
             { modulesCompleteObserved, completionClientBuildVersion, completionClientSchemaVersion }
           );
           return [c.completion_status, c.server_observed_modules_complete_at, c.completion_source, c.completion_client_build_version, c.completion_client_schema_version];

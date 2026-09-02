@@ -123,6 +123,13 @@ async function createGrant(pool: Pool, req: Request, res: Response): Promise<voi
   }
   const { userId, capability, reason, expiresAt } = parsed.data;
 
+  // grant_ttl CHECK(expires_at > granted_at, §7.2)를 애플리케이션 레벨에서 먼저 걸러
+  // 과거 시각을 DB 500(제약 위반)이 아니라 400으로 명확히 거부한다.
+  if (expiresAt !== undefined && new Date(expiresAt).getTime() <= Date.now()) {
+    res.status(400).json({ code: 'INVALID_EXPIRES_AT', error: 'expiresAt must be in the future' });
+    return;
+  }
+
   // stats.export_phi는 §7.1이 "admin 역할 + 활성 grant + step-up + 사유 모두 필요"라고
   // 규정한다 — grant 자체를 non-admin에게 부여하는 요청은 착오이므로 즉시 차단한다.
   // (사용자 확정: 부여 시점 차단. 실행 시점 게이트는 별도로 requireCapability + adminOnly가 담당.)
@@ -188,9 +195,14 @@ async function createGrant(pool: Pool, req: Request, res: Response): Promise<voi
       extra:       { userId, capability, expiresAt: expiresAt ?? null, reason, selfGrant: userId === session.userId },
     });
 
+    // 응답용 조회를 커밋 *전에* 같은 트랜잭션에서 한다 — 커밋 후 별도 쿼리로 다시 읽으면,
+    // DB 변경과 감사 기록은 이미 확정됐는데 그 재조회만 일시적으로 실패해 클라이언트가
+    // 500을 받는 상황이 생긴다(재시도 시 GRANT_ALREADY_ACTIVE로 되돌아옴). 트랜잭션 안에서
+    // 실패하면 그냥 롤백되어 "커밋 안 됨 + 500"이 정확히 일치한다.
+    const { rows: created } = await client.query<GrantRow>(`${GRANT_SELECT} WHERE g.id = $1`, [inserted[0].id]);
+
     await client.query('COMMIT');
 
-    const { rows: created } = await pool.query<GrantRow>(`${GRANT_SELECT} WHERE g.id = $1`, [inserted[0].id]);
     res.status(201).json(toGrantResponse(created[0]));
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -271,9 +283,11 @@ async function revokeGrant(pool: Pool, req: Request, res: Response): Promise<voi
       extra:       { capability: grant.capability, selfRevoke: isSelf, reason: parsed.data.reason ?? null },
     });
 
+    // createGrant와 동일한 이유로 커밋 전에 같은 트랜잭션에서 응답용 조회를 한다.
+    const { rows: updated } = await client.query<GrantRow>(`${GRANT_SELECT} WHERE g.id = $1`, [id]);
+
     await client.query('COMMIT');
 
-    const { rows: updated } = await pool.query<GrantRow>(`${GRANT_SELECT} WHERE g.id = $1`, [id]);
     res.status(200).json(toGrantResponse(updated[0]));
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});

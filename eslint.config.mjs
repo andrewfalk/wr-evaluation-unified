@@ -14,6 +14,8 @@ export default [
       globals: {
         ...globals.browser,
         ...globals.node,
+        // vite.config.js가 define으로 빌드 시점에 주입하는 상수(PR0-A, appVersion.js).
+        __APP_GIT_COMMIT__: 'readonly',
       },
     },
     settings: {

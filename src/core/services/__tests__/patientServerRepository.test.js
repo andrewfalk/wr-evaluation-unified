@@ -3,6 +3,7 @@ import {
   pullPatients,
   fetchPatient,
   pushPatient,
+  applyVideoAnalysisJob,
   deletePatientOnServer,
   pushPendingPatients,
   mergeServerPatient,
@@ -151,6 +152,10 @@ describe('pushPatient — POST (no serverId)', () => {
     expect(opts.headers['Idempotency-Key']).toBe('local-uuid');
     expect(opts.body.id).toBe('local-uuid');
     expect(opts.body.data).toEqual(patient.data);
+    // PR0-A: 완료 보고 3필드도 함께 실려야 한다(activeModules가 비어 있어 false).
+    expect(opts.body.modulesCompleteObserved).toBe(false);
+    expect(typeof opts.body.completionClientBuildVersion).toBe('string');
+    expect(typeof opts.body.completionClientSchemaVersion).toBe('number');
   });
 
   it('preserves local id in the returned patient', async () => {
@@ -195,6 +200,10 @@ describe('pushPatient — PATCH (has serverId)', () => {
     expect(path).toBe('/api/patients/server-1');
     expect(opts.method).toBe('PATCH');
     expect(opts.headers['If-Match']).toBe('3');
+    // PR0-A: PATCH도 POST와 동일하게 완료 보고 3필드를 실어보낸다.
+    expect(opts.body.modulesCompleteObserved).toBe(false);
+    expect(typeof opts.body.completionClientBuildVersion).toBe('string');
+    expect(typeof opts.body.completionClientSchemaVersion).toBe('number');
   });
 
   it('preserves local id even though server id differs', async () => {
@@ -237,6 +246,36 @@ describe('pushPatient — PATCH (has serverId)', () => {
     });
     await expect(pushPatient(patient, { session: SESSION }))
       .rejects.toMatchObject({ status: 409 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyVideoAnalysisJob — POST /api/video-analysis/jobs/:jobId/apply
+// ---------------------------------------------------------------------------
+
+describe('applyVideoAnalysisJob', () => {
+  it('computes the completion report from computedData, not the pre-apply patient', async () => {
+    requestJson.mockResolvedValue({ patient: makeServerPatient({ id: 'server-1' }) });
+
+    const patient = makeLocalPatient({
+      id: 'local-uuid',
+      sync: { serverId: 'server-1', revision: 2, syncStatus: 'synced', lastSyncedAt: null },
+    });
+    // computedData가 patient.data와 다른 activeModules를 가질 수 있다(§video apply가 만든
+    // 새 data) — 완료 여부는 이 값 기준이어야 한다.
+    const computedData = { shared: { name: 'Kim' }, modules: {}, activeModules: [] };
+
+    await applyVideoAnalysisJob('job-1', patient, computedData, {
+      appliedInputsHash: 'hash-1', appliedInputsCount: 1, sourceAnalysisJobIds: ['src-1'],
+      session: SESSION,
+    });
+
+    const [path, opts] = requestJson.mock.calls[0];
+    expect(path).toBe('/api/video-analysis/jobs/job-1/apply');
+    expect(opts.body.data).toBe(computedData);
+    expect(opts.body.modulesCompleteObserved).toBe(false);
+    expect(typeof opts.body.completionClientBuildVersion).toBe('string');
+    expect(typeof opts.body.completionClientSchemaVersion).toBe('number');
   });
 });
 

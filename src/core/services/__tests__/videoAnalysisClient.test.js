@@ -129,7 +129,13 @@ describe('applyVideoAnalysisJob', () => {
     expect(requestJson).toHaveBeenCalledWith('/api/video-analysis/jobs/j1/apply', expect.objectContaining({
       method: 'POST',
       headers: { 'If-Match': '3' },
-      body: { data: computedData, appliedInputsHash: 'h1', appliedInputsCount: 2, sourceAnalysisJobIds: [] },
+      body: {
+        data: computedData, appliedInputsHash: 'h1', appliedInputsCount: 2, sourceAnalysisJobIds: [],
+        // PR0-A: computedData(activeModules: []) 기준 완료 보고가 함께 실린다.
+        modulesCompleteObserved: false,
+        completionClientBuildVersion: expect.any(String),
+        completionClientSchemaVersion: expect.any(Number),
+      },
     }));
     // applyServerSync는 로컬 id/meta를 보존하고 서버 revision을 반영한다.
     expect(out.id).toBe('local-1');

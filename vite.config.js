@@ -5,8 +5,12 @@ import { execSync } from 'child_process';
 
 // PR0-A: 완료 보고(completionClientBuildVersion)에 쓰는 빌드 식별자. package.json 버전만으로는
 // 같은 버전으로 여러 코드가 배포될 수 있어 부족 — server/src/workers/videoAnalysisWorker.ts의
-// WR_GIT_COMMIT(Docker ARG→ENV) 선례와 대칭되게, 클라이언트도 빌드 시점 커밋을 함께 새긴다.
+// WR_GIT_COMMIT(Docker ARG→ENV) 선례와 동일한 env var를 먼저 본다. Docker web-builder 스테이지는
+// .git이 복사되지 않으므로(.dockerignore) `git rev-parse`가 실패한다 — WR_GIT_COMMIT이 실제
+// 소스다(export-offline-package.ps1이 --build-arg로 주입, Dockerfile web-builder 스테이지가
+// ARG/ENV로 받는다). 로컬 `vite build`/`vite dev`처럼 그 env var가 없을 때만 git 명령으로 폴백한다.
 function getGitCommit() {
+  if (process.env.WR_GIT_COMMIT) return process.env.WR_GIT_COMMIT;
   try {
     return execSync('git rev-parse --short HEAD').toString().trim();
   } catch {

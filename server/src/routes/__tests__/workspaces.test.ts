@@ -491,6 +491,58 @@ describe('POST /api/workspaces', () => {
     expect(upsertCall![0]).toContain('patient_records.deleted_at IS NULL');
   });
 
+  // PR0-A: workspace 수동 저장도 patients.ts의 PATCH/POST와 같은 3상태 완료 규칙을 따라야
+  // 한다 — 이 upsert가 patient_records를 직접 갱신하는 또 다른 경로이므로, 클라이언트가 각
+  // 환자 객체 최상위에 실어보내는 modulesCompleteObserved를 여기서도 읽어 반영해야 한다.
+  it('완료 보고(modulesCompleteObserved=true)를 workspace 저장에도 반영한다', async () => {
+    const ANON_PERSON_ID = '66666666-6666-6666-6666-666666666666';
+    const completePatient = {
+      ...PATIENT_SNAPSHOT,
+      data: { ...PATIENT_SNAPSHOT.data, shared: { ...PATIENT_SNAPSHOT.data.shared, patientNo: '' } },
+      modulesCompleteObserved: true,
+      completionClientBuildVersion: '6.6.0+abc123',
+      completionClientSchemaVersion: 1,
+    };
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    mock.mockResolvedValueOnce({ rows: [] }); // BEGIN (ws tx)
+    mock.mockResolvedValueOnce({ rows: [] }); // deleted patient check
+    mock.mockResolvedValueOnce({ rows: [] }); // INSERT workspace
+    mock.mockResolvedValueOnce({ rows: [] }); // COMMIT (ws tx)
+    mock.mockResolvedValueOnce({ rows: [] }); // BEGIN (환자 트랜잭션)
+    mock.mockResolvedValueOnce({
+      rows: [{
+        patient_person_id: ANON_PERSON_ID, deleted_at: null,
+        completion_status: 'draft', server_observed_modules_complete_at: null,
+        completion_source: null, completion_client_build_version: null, completion_client_schema_version: null,
+      }],
+    }); // existing record lookup (FOR UPDATE) — draft, never observed
+    mock.mockResolvedValueOnce({ rows: [{ patient_no: null }] }); // SELECT patient_no FOR UPDATE
+    mock.mockResolvedValueOnce({ rows: [], rowCount: 1 }); // UPDATE existing person
+    mock.mockResolvedValueOnce({ rows: [], rowCount: 1 }); // upsert patient_records
+    mock.mockResolvedValueOnce({ rows: [] }); // COMMIT (환자 트랜잭션)
+    mock.mockResolvedValueOnce({ rows: [WS_ROW] }); // list query
+
+    const res = await request(makeApp(pool))
+      .post('/api/workspaces')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ name: 'Completed Visit', patients: [completePatient] });
+
+    expect(res.status).toBe(201);
+    const upsertCall = (mock.mock.calls as unknown[][]).find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO patient_records')
+    );
+    expect(upsertCall).toBeDefined();
+    const params = upsertCall![1] as unknown[];
+    expect(params[14]).toBe('modules_complete');
+    expect(params[15]).toBeInstanceOf(Date);
+    expect(params[16]).toBe('client_reported');
+    expect(params[17]).toBe('6.6.0+abc123');
+    expect(params[18]).toBe(1);
+  });
+
   it('reuses existing anonymous patient_person when patientNo is blank', async () => {
     const ANON_PERSON_ID = '55555555-5555-5555-5555-555555555555';
     const anonymousPatient = {

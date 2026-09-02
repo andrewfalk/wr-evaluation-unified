@@ -40,12 +40,16 @@ export const UserCapabilityGrantSchema = z.object({
 export const CreateCapabilityGrantRequestSchema = z.object({
   userId:     z.string().uuid(),
   capability: StatsCapabilityKeySchema,
-  reason:     z.string().min(1),
-  expiresAt:  z.string().optional(),
+  // trim: 공백만 있는 사유가 grant_revocation_state 등 DB 감사 목적의 "사유"로 저장되면
+  // 사실상 빈 값이다. max: reason은 audit_logs.extra(jsonb)에도 실리므로 과도한 길이를 막는다.
+  reason:     z.string().trim().min(1).max(500),
+  // ISO 8601 문자열만 허용 — 임의 문자열을 받으면 잘못된 날짜가 grant_ttl CHECK 위반으로
+  // DB 500이 되거나(§7.2), 파싱 불가능한 값이 조용히 NaN Date로 저장될 수 있다.
+  expiresAt:  z.string().datetime({ offset: true }).optional(),
 });
 
 export const RevokeCapabilityGrantRequestSchema = z.object({
-  reason: z.string().optional(),
+  reason: z.string().trim().max(500).optional(),
 });
 
 export type StatsCapabilityKey            = z.infer<typeof StatsCapabilityKeySchema>;

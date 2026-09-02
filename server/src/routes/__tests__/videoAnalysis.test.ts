@@ -565,6 +565,57 @@ describe('POST /jobs/:jobId/apply', () => {
     }));
   });
 
+  // PR0-A: apply도 patient_records를 직접 갱신하는 경로라 patients.ts와 동일한 완료 보고
+  // 계약(3상태)을 따라야 한다 — 안 그러면 영상분석 적용으로 완료된 환자가 'draft'로 남는다.
+  it('완료 보고(modulesCompleteObserved=true)를 apply에도 반영한다', async () => {
+    flagState.allowUnverifiedRecipe = true;
+    const draftPatRow = { ...patRow(1), completion_status: 'draft', server_observed_modules_complete_at: null };
+    const pool = makePool();
+    const cq = clientSetup(pool,
+      { rows: [] },                 // BEGIN
+      { rows: [jobRow()] },         // job FOR UPDATE
+      { rows: [draftPatRow] },      // patient FOR UPDATE — draft, never observed
+      { rows: [{ ...patRow(2), completion_status: 'modules_complete', server_observed_modules_complete_at: NOW }] }, // UPDATE RETURNING
+      { rows: [] },                 // UPDATE job
+      { rows: [] },                 // COMMIT
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/jobs/${JOB_ID}/apply`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('If-Match', '1')
+      .send({
+        ...body,
+        modulesCompleteObserved: true,
+        completionClientBuildVersion: '6.6.0+abc123',
+        completionClientSchemaVersion: 1,
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.patient.completionStatus).toBe('modules_complete');
+    expect(res.body.patient.serverObservedModulesCompleteAt).toBe(NOW.toISOString());
+
+    const updateCall = cq.mock.calls.find((c) => String(c[0]).includes('UPDATE patient_records'));
+    const params = updateCall![1] as unknown[];
+    expect(params[4]).toBe('modules_complete');
+    expect(params[5]).toBeInstanceOf(Date);
+    expect(params[6]).toBe('client_reported');
+    expect(params[7]).toBe('6.6.0+abc123');
+    expect(params[8]).toBe(1);
+  });
+
+  it('modulesCompleteObserved=true인데 버전 필드가 없으면 400을 반환한다', async () => {
+    const pool = makePool();
+    authOk(pool);
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/jobs/${JOB_ID}/apply`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('If-Match', '1')
+      .send({ ...body, modulesCompleteObserved: true });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_BODY');
+  });
+
   describe('환자 단위 TTL lease lock 게이팅 (lockEnforcementMode=enforce)', () => {
     beforeEach(() => { lockFlagState.mode = 'enforce'; });
     afterEach(() => { lockFlagState.mode = 'off'; });

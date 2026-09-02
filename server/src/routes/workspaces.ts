@@ -8,6 +8,7 @@ import { resolvePatientPersonId, releasePersonIfOrphaned, type QueryRunner } fro
 import { withDeadlockRetry } from './patients';
 import { resolveAssignedDoctor } from '../db/resolveAssignedDoctor';
 import { validatePastDate } from '@wr/contracts';
+import { nextCompletionColumns, DRAFT_COMPLETION_COLUMNS, type CompletionColumns } from '../completionTracking';
 
 // ---------------------------------------------------------------------------
 // POST /api/workspaces body schema
@@ -109,6 +110,13 @@ interface PatientMeta {
   diagnosesCodes:  string[];
   jobsNames:       string[];
   payload:         unknown;
+  // PR0-A: 클라이언트가 워크스페이스 저장 시점에 계산해 각 환자 객체에 실어보내는 완료
+  // 보고. patientServerRepository.js가 PATCH/POST에 붙이는 것과 동일한 필드를 여기서는
+  // patient 객체 최상위(payload 밖)에서 읽는다 — patients는 z.unknown()이라 스키마로
+  // 강제할 수 없어 방어적으로 타입 검사한다.
+  modulesCompleteObserved?:       boolean;
+  completionClientBuildVersion?:  string;
+  completionClientSchemaVersion?: number;
 }
 
 // Safely pull metadata fields out of an unknown patient object.
@@ -133,6 +141,21 @@ function extractPatientMeta(p: unknown): PatientMeta | null {
   const jobs      = Array.isArray(shared?.['jobs'])      ? shared!['jobs']      as unknown[] : [];
   const mods      = Array.isArray(data?.['activeModules']) ? data!['activeModules'] as unknown[] : [];
 
+  const completionClientBuildVersion = typeof raw['completionClientBuildVersion'] === 'string'
+    ? raw['completionClientBuildVersion'] as string : undefined;
+  const completionClientSchemaVersion = typeof raw['completionClientSchemaVersion'] === 'number'
+    ? raw['completionClientSchemaVersion'] as number : undefined;
+  // true인데 버전이 없으면 손상된 보고로 보고 "보고 없음"으로 낮춘다(zod가 없는 경로라
+  // patients.ts의 requireCompletionVersions 같은 400 거부가 불가능 — 이 파일 전체가
+  // "환자 1명 실패는 나머지를 막지 않는다"는 best-effort 철학이라 조용히 무시가 맞다).
+  const modulesCompleteObservedRaw = typeof raw['modulesCompleteObserved'] === 'boolean'
+    ? raw['modulesCompleteObserved'] as boolean : undefined;
+  const modulesCompleteObserved =
+    modulesCompleteObservedRaw === true &&
+    (completionClientBuildVersion === undefined || completionClientSchemaVersion === undefined)
+      ? undefined
+      : modulesCompleteObservedRaw;
+
   return {
     id,
     name,
@@ -151,6 +174,9 @@ function extractPatientMeta(p: unknown): PatientMeta | null {
       .map((j) => j['jobName'])
       .filter((n): n is string => typeof n === 'string'),
     payload: p,
+    modulesCompleteObserved,
+    completionClientBuildVersion,
+    completionClientSchemaVersion,
   };
 }
 
@@ -267,8 +293,12 @@ async function upsertPatientRecordInTx(
   //   (3) ON CONFLICT의 `deleted_at IS NULL` 조건 때문에 record 갱신은 0행이 되어
   // 아무도 참조하지 않는 활성 person만 새로 생긴다 — 새 유령 등록번호.
   // 행을 잡아두면 DELETE가 우리 커밋까지 대기한다.
-  const existing = await db.query<{ patient_person_id: string | null; deleted_at: Date | null }>(
-    `SELECT patient_person_id, deleted_at
+  const existing = await db.query<
+    { patient_person_id: string | null; deleted_at: Date | null } & CompletionColumns
+  >(
+    `SELECT patient_person_id, deleted_at,
+            completion_status, server_observed_modules_complete_at, completion_source,
+            completion_client_build_version, completion_client_schema_version
      FROM patient_records
      WHERE id = $1 AND organization_id = $2
      FOR UPDATE`,
@@ -279,6 +309,17 @@ async function upsertPatientRecordInTx(
 
   const existingPersonId = existingRow?.patient_person_id ?? null;
   const { personId } = await resolvePatientPersonId(db, orgId, meta, existingPersonId);
+
+  // PR0-A: PATCH/POST와 동일한 3상태 규칙(§5.5) — workspace 수동 저장도 patient_records를
+  // 직접 갱신하므로 여기서 빠지면 이 경로로만 저장된 환자는 완료돼도 'draft'로 남는다.
+  const nextCompletion = nextCompletionColumns(
+    existingRow ? existingRow : DRAFT_COMPLETION_COLUMNS,
+    {
+      modulesCompleteObserved: meta.modulesCompleteObserved,
+      completionClientBuildVersion: meta.completionClientBuildVersion,
+      completionClientSchemaVersion: meta.completionClientSchemaVersion,
+    }
+  );
 
   const { assignedDoctorUserId, assignmentWarnings } = await resolveAssignedDoctor(
     db,
@@ -293,8 +334,10 @@ async function upsertPatientRecordInTx(
     `INSERT INTO patient_records
        (id, organization_id, patient_person_id, owner_user_id, assigned_doctor_user_id,
         name, patient_no, birth_date, injury_date, evaluation_date,
-        active_modules, diagnoses_codes, jobs_names, revision, payload)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14)
+        active_modules, diagnoses_codes, jobs_names, revision, payload,
+        completion_status, server_observed_modules_complete_at, completion_source,
+        completion_client_build_version, completion_client_schema_version)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14,$15,$16,$17,$18,$19)
      ON CONFLICT (id) DO UPDATE SET
        patient_person_id       = EXCLUDED.patient_person_id,
        name                    = EXCLUDED.name,
@@ -307,7 +350,12 @@ async function upsertPatientRecordInTx(
        jobs_names              = EXCLUDED.jobs_names,
        assigned_doctor_user_id = COALESCE(patient_records.assigned_doctor_user_id, EXCLUDED.assigned_doctor_user_id),
        revision                = patient_records.revision + 1,
-       payload                 = EXCLUDED.payload
+       payload                 = EXCLUDED.payload,
+       completion_status                   = EXCLUDED.completion_status,
+       server_observed_modules_complete_at = EXCLUDED.server_observed_modules_complete_at,
+       completion_source                   = EXCLUDED.completion_source,
+       completion_client_build_version     = EXCLUDED.completion_client_build_version,
+       completion_client_schema_version    = EXCLUDED.completion_client_schema_version
      WHERE patient_records.organization_id = EXCLUDED.organization_id
        AND patient_records.deleted_at IS NULL`,
     [
@@ -320,6 +368,11 @@ async function upsertPatientRecordInTx(
       meta.diagnosesCodes,
       meta.jobsNames,
       JSON.stringify(meta.payload),
+      nextCompletion.completion_status,
+      nextCompletion.server_observed_modules_complete_at,
+      nextCompletion.completion_source,
+      nextCompletion.completion_client_build_version,
+      nextCompletion.completion_client_schema_version,
     ]
   );
 

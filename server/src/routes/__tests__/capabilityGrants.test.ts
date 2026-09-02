@@ -107,6 +107,45 @@ describe('POST /api/capabilities/grants', () => {
     expect(res.body.code).toBe('INVALID_BODY');
   });
 
+  it('returns 400 for a whitespace-only reason', async () => {
+    const pool = makePool();
+    wireQueries(pool);
+    const res = await request(makeApp(pool))
+      .post('/api/capabilities/grants')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ userId: '11111111-1111-4111-8111-111111111111', capability: 'stats.view', reason: '   ' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_BODY');
+  });
+
+  it('returns 400 for a non-ISO expiresAt', async () => {
+    const pool = makePool();
+    wireQueries(pool);
+    const res = await request(makeApp(pool))
+      .post('/api/capabilities/grants')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ userId: '11111111-1111-4111-8111-111111111111', capability: 'stats.view', reason: 'x', expiresAt: 'next tuesday' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_BODY');
+  });
+
+  it('returns 400 when expiresAt is in the past (grant_ttl CHECK precondition)', async () => {
+    const pool = makePool();
+    wireQueries(pool);
+    const res = await request(makeApp(pool))
+      .post('/api/capabilities/grants')
+      .set('Authorization', `Bearer ${token('admin')}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({
+        userId: '11111111-1111-4111-8111-111111111111', capability: 'stats.view', reason: 'x',
+        expiresAt: new Date(Date.now() - 60_000).toISOString(),
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_EXPIRES_AT');
+  });
+
   it('blocks stats.export_phi grants to a non-admin target user', async () => {
     const pool = makePool();
     wireQueries(pool, [{ role: 'doctor' }]); // auth, then PHI target-role lookup
@@ -123,10 +162,10 @@ describe('POST /api/capabilities/grants', () => {
     const pool = makePool();
     const q = wireTxClient(
       pool,
-      { rows: [] },                // SELECT open grant — none
-      { rows: [{ id: 'grant-1' }] } // INSERT ... RETURNING id
+      { rows: [] },                 // SELECT open grant — none
+      { rows: [{ id: 'grant-1' }] }, // INSERT ... RETURNING id
+      { rows: [{ ...GRANT_ROW, id: 'grant-1' }] }, // 커밋 전 응답용 재조회(같은 트랜잭션)
     );
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [GRANT_ROW] }); // post-commit re-fetch
     const res = await request(makeApp(pool))
       .post('/api/capabilities/grants')
       .set('Authorization', `Bearer ${token('admin')}`)
@@ -147,9 +186,9 @@ describe('POST /api/capabilities/grants', () => {
       pool,
       { rows: [{ id: 'old-grant', expires_at: pastExpiry }] }, // SELECT open — expired
       { rows: [] },                                            // UPDATE close
-      { rows: [{ id: 'grant-2' }] }                             // INSERT RETURNING id
+      { rows: [{ id: 'grant-2' }] },                            // INSERT RETURNING id
+      { rows: [{ ...GRANT_ROW, id: 'grant-2' }] },              // 커밋 전 응답용 재조회
     );
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [GRANT_ROW] });
     const res = await request(makeApp(pool))
       .post('/api/capabilities/grants')
       .set('Authorization', `Bearer ${token('admin')}`)
@@ -227,9 +266,10 @@ describe('POST /api/capabilities/grants/:id/revoke', () => {
     const pool = makePool();
     const q = wireTxClient(
       pool,
-      { rows: [{ id: 'grant-1', user_id: 'user-1', capability: 'stats.view', revoked_at: null }] },
+      { rows: [{ id: 'grant-1', user_id: 'user-1', capability: 'stats.view', revoked_at: null }] }, // SELECT grant
+      { rows: [] },           // UPDATE revoke
+      { rows: [GRANT_ROW] },  // 커밋 전 응답용 재조회
     );
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [GRANT_ROW] });
     const res = await request(makeApp(pool))
       .post('/api/capabilities/grants/grant-1/revoke')
       .set('Authorization', `Bearer ${token('doctor', 'user-1')}`)
