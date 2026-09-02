@@ -2,6 +2,19 @@ import { requestJson } from './httpClient';
 import { isRedactedPatientRecord } from './patientRecords';
 import { requireSyncedServerId } from './videoAnalysisClient';
 import { getLockToken } from './lockTokenStore';
+import { isPatientComplete } from '../utils/patientCompletion';
+import { APP_BUILD_VERSION, COMPLETION_SCHEMA_VERSION } from '../constants/appVersion';
+
+// PR0-A: PATCH/POST 공통 완료 보고 필드. 클라이언트는 항상 현재 계산값을 보낸다(undefined로
+// 두지 않음) — 서버는 true일 때만 최초 관측 시각을 stamp하고, false는 status만 되돌리며,
+// 관측시각/버전은 건드리지 않는다(§5.5 3상태 규칙).
+function completionReportFields(patient) {
+  return {
+    modulesCompleteObserved:       isPatientComplete(patient),
+    completionClientBuildVersion:  APP_BUILD_VERSION,
+    completionClientSchemaVersion: COMPLETION_SCHEMA_VERSION,
+  };
+}
 
 function getBaseUrl(session, settings) {
   return session?.apiBaseUrl || settings?.apiBaseUrl || '';
@@ -106,6 +119,7 @@ export async function pushPatient(patient, { session, settings, leaseToken } = {
         phase:     patient.phase,
         createdAt: patient.createdAt,
         data:      patient.data,
+        ...completionReportFields(patient),
       },
     });
     return applyServerSync(data, patient.id, patient.meta);
@@ -124,6 +138,7 @@ export async function pushPatient(patient, { session, settings, leaseToken } = {
     body: {
       phase: patient.phase,
       data:  patient.data,
+      ...completionReportFields(patient),
     },
   });
   return applyServerSync(data, patient.id, patient.meta);

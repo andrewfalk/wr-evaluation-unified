@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import config from '../config';
+import { getStatsWorkbenchAvailability } from '../statsWorkbenchRuntimeState';
 
 export function createConfigRouter(): Router {
   const router = Router();
@@ -16,6 +17,10 @@ export function createConfigRouter(): Router {
       // 6.0-12: 클라이언트 폴링 상한을 서버 deadline에서 파생시키기 위한 공개 값(ms). 경로/비밀 아님.
       videoAnalysisJobDeadlineMs: config.video.jobDeadlineMs,
       videoAnalysisQueueWaitMs:   config.video.queueWaitMs,
+      // PR0-A: 통계 워크벤치 노출 플래그만 공개(boolean만 — 비활성 사유 문자열은
+      // 내부 인프라 상태를 드러낼 수 있어 노출하지 않는다).
+      statsWorkbenchEnabled:      config.statsWorkbenchEnabled,
+      statsWorkbenchAvailable:    getStatsWorkbenchAvailability().available,
       serverTime:           new Date().toISOString(),
     });
   });

@@ -1,10 +1,25 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { execSync } from 'child_process';
+
+// PR0-A: 완료 보고(completionClientBuildVersion)에 쓰는 빌드 식별자. package.json 버전만으로는
+// 같은 버전으로 여러 코드가 배포될 수 있어 부족 — server/src/workers/videoAnalysisWorker.ts의
+// WR_GIT_COMMIT(Docker ARG→ENV) 선례와 대칭되게, 클라이언트도 빌드 시점 커밋을 함께 새긴다.
+function getGitCommit() {
+  try {
+    return execSync('git rev-parse --short HEAD').toString().trim();
+  } catch {
+    return 'unknown';
+  }
+}
 
 export default defineConfig({
   plugins: [react()],
   base: './',
+  define: {
+    __APP_GIT_COMMIT__: JSON.stringify(getGitCommit()),
+  },
   resolve: {
     alias: {
       '@contracts': path.resolve('./shared/dist'),

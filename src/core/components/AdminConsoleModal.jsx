@@ -1096,6 +1096,164 @@ function PresetsTab({ session }) {
   );
 }
 
+// ── Capabilities Tab (PR0-A) ─────────────────────────────────────────────────
+// 통계 워크벤치 권한(capability) 부여/회수. default_all_roles인 capability는 목록에
+// 나오지만 grant 없이도 모든 사용자가 통과하므로 부여 폼에서는 안내만 하고 막지 않는다
+// — 서버가 최종 판정을 하고, 여기선 grant가 필요한 capability 운용을 돕는 용도.
+function GrantStatusBadge({ status }) {
+  const map = { active: ['connected', '활성'], expired: ['fallback', '만료'], revoked: ['local', '회수됨'] };
+  const [tone, label] = map[status] ?? ['local', status];
+  return <span className={`admin-badge admin-badge--${tone}`}>{label}</span>;
+}
+
+const EMPTY_GRANT_FORM = { userId: '', capability: '', reason: '', expiresAt: '' };
+
+function CapabilitiesTab({ session }) {
+  const [catalog, setCatalog]         = useState([]);
+  const [grants, setGrants]           = useState([]);
+  const [users, setUsers]             = useState([]);
+  const [loading, setLoading]         = useState(false);
+  const [error, setError]             = useState(null);
+  const [status, setStatus]           = useState(null);
+  const [form, setForm]               = useState(EMPTY_GRANT_FORM);
+  const [formError, setFormError]     = useState(null);
+  const [creating, setCreating]       = useState(false);
+  const [actioning, setActioning]     = useState(null);
+  const baseUrl = session?.apiBaseUrl || '';
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [catalogData, grantsData, usersData] = await Promise.all([
+        requestJson('/api/capabilities/catalog', { baseUrl, session }),
+        requestJson('/api/capabilities/grants',  { baseUrl, session }),
+        requestJson('/api/admin/users',          { baseUrl, session }),
+      ]);
+      setCatalog(catalogData.capabilities || []);
+      setGrants(grantsData.grants || []);
+      setUsers(usersData.users || []);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const capabilityLabel = (key) => catalog.find(c => c.key === key)?.label ?? key;
+
+  const handleCreate = async () => {
+    setFormError(null);
+    setStatus(null);
+    if (!form.userId || !form.capability || !form.reason.trim()) {
+      setFormError('사용자, 권한, 사유는 필수입니다.');
+      return;
+    }
+    setCreating(true);
+    try {
+      await requestJson('/api/capabilities/grants', {
+        baseUrl, method: 'POST', session,
+        body: {
+          userId:     form.userId,
+          capability: form.capability,
+          reason:     form.reason.trim(),
+          ...(form.expiresAt ? { expiresAt: new Date(form.expiresAt).toISOString() } : {}),
+        },
+      });
+      setForm(EMPTY_GRANT_FORM);
+      setStatus('권한을 부여했습니다.');
+      await load();
+    } catch (e) {
+      setFormError(e.message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleRevoke = async (grant) => {
+    setActioning(grant.id);
+    setError(null);
+    try {
+      await requestJson(`/api/capabilities/grants/${grant.id}/revoke`, { baseUrl, method: 'POST', session });
+      await load();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setActioning(null);
+    }
+  };
+
+  return (
+    <div className="admin-tab-content">
+      <div className="admin-form-row">
+        <select value={form.userId} onChange={e => setForm(f => ({ ...f, userId: e.target.value }))}>
+          <option value="">사용자 선택</option>
+          {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.loginId})</option>)}
+        </select>
+        <select value={form.capability} onChange={e => setForm(f => ({ ...f, capability: e.target.value }))}>
+          <option value="">권한 선택</option>
+          {catalog.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+        </select>
+        <input
+          className="admin-search"
+          placeholder="부여 사유(필수)"
+          value={form.reason}
+          onChange={e => setForm(f => ({ ...f, reason: e.target.value }))}
+        />
+        <input
+          type="date"
+          value={form.expiresAt}
+          onChange={e => setForm(f => ({ ...f, expiresAt: e.target.value }))}
+          title="만료일(선택, 비워두면 무기한)"
+        />
+        <button className="btn btn-primary btn-sm" onClick={handleCreate} disabled={creating}>
+          {creating ? '부여 중…' : '부여'}
+        </button>
+        <span className="admin-toolbar-spacer" />
+        <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>새로 고침</button>
+      </div>
+
+      {formError && <div className="admin-error">{formError}</div>}
+      {status && <div className="admin-status">{status}</div>}
+      {error && <div className="admin-error">{error}</div>}
+
+      <div className="admin-table-wrap">
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>사용자</th><th>권한</th><th>상태</th><th>부여자</th>
+              <th>사유</th><th>만료일</th><th>액션</th>
+            </tr>
+          </thead>
+          <tbody>
+            {grants.map(g => (
+              <tr key={g.id}>
+                <td>{g.userName}</td>
+                <td>{capabilityLabel(g.capability)}</td>
+                <td><GrantStatusBadge status={g.status} /></td>
+                <td>{g.grantedByName || '-'}</td>
+                <td>{g.reason}</td>
+                <td>{fmt(g.expiresAt)}</td>
+                <td className="admin-actions-cell">
+                  {g.status === 'active' && (
+                    <button className="btn btn-danger btn-sm" disabled={actioning === g.id}
+                      onClick={() => handleRevoke(g)}>회수</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {!loading && grants.length === 0 && (
+              <tr><td colSpan={7} className="admin-empty">부여된 권한이 없습니다.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 const TABS = [
   { id: 'audit',      label: '감사 로그' },
@@ -1105,6 +1263,7 @@ const TABS = [
   { id: 'presets',    label: '프리셋 공유' },
   { id: 'assignment', label: '환자 배정' },
   { id: 'inference',  label: '추론 디바이스' },
+  { id: 'capabilities', label: '통계 권한' },
   { id: 'ops',        label: '운영 상태' },
 ];
 
@@ -1140,6 +1299,7 @@ export function AdminConsoleModal({ session, onClose, onPatientAssignmentChanged
         {activeTab === 'presets'    && <PresetsTab            session={session} />}
         {activeTab === 'assignment' && <PatientAssignmentTab  session={session} onPatientAssignmentChanged={onPatientAssignmentChanged} />}
         {activeTab === 'inference'  && <InferenceDeviceTab    session={session} />}
+        {activeTab === 'capabilities' && <CapabilitiesTab     session={session} />}
         {activeTab === 'ops'        && <OpsTab                session={session} />}
 
         <div className="modal-actions">
