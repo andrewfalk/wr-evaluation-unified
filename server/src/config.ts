@@ -179,6 +179,10 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
     // 작업 영상 인간공학 분석(v6.0.0). 검증(6.0-B2) 통과 전까지 운영 기본 비활성.
     videoAnalysisEnabled: bool(env, 'VIDEO_ANALYSIS_ENABLED', false),
 
+    // 통계분석 워크벤치(PR0-A). 화면·엔진이 아직 없어 기본 비활성 — 최종 활성화 여부는
+    // statsWorkbenchRuntimeState.ts가 이 값과 deploymentMode를 함께 본다(§7.6).
+    statsWorkbenchEnabled: bool(env, 'STATS_WORKBENCH_ENABLED', false),
+
     // 환자 단위 TTL lease lock 롤아웃 플래그(3단계). off: 락 API는 존재하되 쓰기 엔드포인트가
     // 락을 확인 안 함(기본, 구버전 클라이언트와 100% 호환) → observe: 락 체크는 평가·로그만
     // 남기고 막지 않음(프론트가 정상적으로 acquire/renew하는지 관찰) → enforce: 실제 게이팅.

@@ -17,6 +17,12 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { checkLockForWrite } from '../db/patientLocks';
 import type { QueryRunner } from '../db/patientPersons';
+import {
+  CompletionReportFields,
+  requireCompletionVersions,
+  nextCompletionColumns,
+  type CompletionColumns,
+} from '../completionTracking';
 
 function getLockTokenHeader(req: Request): string | null {
   const v = req.headers['x-lock-token'];
@@ -67,7 +73,10 @@ const ApplyBody = z.object({
   appliedInputsCount: z.number().int().nonnegative().optional(),
   // 이 적용이 소비한 원본 분석 job id(추론 출처 추적·consumed 전이). 셸 적용 job과 구분(PR D1).
   sourceAnalysisJobIds: z.array(z.string().uuid()).default([]),
-});
+  // PR0-A: apply도 patient_records.payload를 직접 갱신하는 경로라 patients.ts의 PATCH/POST와
+  // 동일한 완료 보고 계약을 따른다 — 안 그러면 영상분석 적용으로 완료된 환자가 'draft'로 남는다.
+  ...CompletionReportFields,
+}).superRefine(requireCompletionVersions);
 
 interface SessionInfo {
   userId: string;
@@ -735,7 +744,9 @@ async function closeReview(pool: Pool, req: Request, res: Response): Promise<voi
 }
 
 // patient_records 행(부분) — apply에서 사용.
-interface PatientRowLite { id: string; revision: number; payload: unknown; created_at: Date; updated_at: Date; }
+interface PatientRowLite extends CompletionColumns {
+  id: string; revision: number; payload: unknown; created_at: Date; updated_at: Date;
+}
 
 function patientApplyResponse(row: PatientRowLite): Record<string, unknown> {
   const base = typeof row.payload === 'object' && row.payload !== null
@@ -744,6 +755,8 @@ function patientApplyResponse(row: PatientRowLite): Record<string, unknown> {
     ...base,
     id: row.id,
     updatedAt: row.updated_at.toISOString(),
+    completionStatus: row.completion_status,
+    serverObservedModulesCompleteAt: row.server_observed_modules_complete_at?.toISOString() ?? null,
     sync: {
       serverId: row.id,
       revision: row.revision,
@@ -779,7 +792,10 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
     res.status(400).json({ code: 'INVALID_BODY', error: parse.error.issues });
     return;
   }
-  const { data, appliedInputsHash, appliedInputsCount, sourceAnalysisJobIds } = parse.data;
+  const {
+    data, appliedInputsHash, appliedInputsCount, sourceAnalysisJobIds,
+    modulesCompleteObserved, completionClientBuildVersion, completionClientSchemaVersion,
+  } = parse.data;
 
   const client: PoolClient = await pool.connect();
   try {
@@ -809,7 +825,10 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
     // ② 멱등: 이미 적용 + 동일 hash면 저장된(현재) 환자 상태를 그대로 반환.
     if (job.applied_at && job.applied_inputs_hash === appliedInputsHash) {
       const { rows: cur } = await client.query<PatientRowLite>(
-        `SELECT id, revision, payload, created_at, updated_at FROM patient_records
+        `SELECT id, revision, payload, created_at, updated_at,
+                completion_status, server_observed_modules_complete_at, completion_source,
+                completion_client_build_version, completion_client_schema_version
+         FROM patient_records
          WHERE id = $1 AND organization_id = $2`,
         [job.patient_record_id, session.organizationId]
       );
@@ -851,7 +870,10 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
 
     // ③ patient FOR UPDATE + revision(If-Match)
     const { rows: pats } = await client.query<PatientRowLite & { assigned_doctor_user_id: string | null }>(
-      `SELECT id, revision, payload, created_at, updated_at, assigned_doctor_user_id FROM patient_records
+      `SELECT id, revision, payload, created_at, updated_at, assigned_doctor_user_id,
+              completion_status, server_observed_modules_complete_at, completion_source,
+              completion_client_build_version, completion_client_schema_version
+       FROM patient_records
        WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
        FOR UPDATE`,
       [job.patient_record_id, session.organizationId]
@@ -926,11 +948,33 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
     const newPayload = { ...existingPayload, data };
     const newRevision = expectedRevision + 1;
 
+    // PR0-A: patients.ts와 동일한 3상태 규칙 — 이미 FOR UPDATE로 잠근 pats[0]을 기준으로
+    // 계산해 같은 UPDATE 문장에 얹는다. revision 충돌 시(아래 WHERE revision = $4) 완료
+    // 보고도 자동으로 함께 거부된다.
+    const nextCompletion = nextCompletionColumns(pats[0], {
+      modulesCompleteObserved, completionClientBuildVersion, completionClientSchemaVersion,
+    });
+
     const { rows: updated } = await client.query<PatientRowLite>(
-      `UPDATE patient_records SET payload = $3, revision = revision + 1
+      `UPDATE patient_records SET
+         payload = $3, revision = revision + 1,
+         completion_status                   = $5,
+         server_observed_modules_complete_at = $6,
+         completion_source                   = $7,
+         completion_client_build_version     = $8,
+         completion_client_schema_version    = $9
        WHERE id = $1 AND organization_id = $2 AND revision = $4 AND deleted_at IS NULL
-       RETURNING id, revision, payload, created_at, updated_at`,
-      [job.patient_record_id, session.organizationId, JSON.stringify(newPayload), expectedRevision]
+       RETURNING id, revision, payload, created_at, updated_at,
+                 completion_status, server_observed_modules_complete_at, completion_source,
+                 completion_client_build_version, completion_client_schema_version`,
+      [
+        job.patient_record_id, session.organizationId, JSON.stringify(newPayload), expectedRevision,
+        nextCompletion.completion_status,
+        nextCompletion.server_observed_modules_complete_at,
+        nextCompletion.completion_source,
+        nextCompletion.completion_client_build_version,
+        nextCompletion.completion_client_schema_version,
+      ]
     );
     if (updated.length === 0) {
       await client.query('ROLLBACK');

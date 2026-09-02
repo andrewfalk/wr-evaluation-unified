@@ -37,6 +37,15 @@ const PATIENT = {
   data: { shared: { name: 'Kim' }, modules: {}, activeModules: [] },
 };
 
+// PR0-A: saveRemoteWorkspace가 각 환자에 완료 보고 필드를 붙인다(activeModules가 비어
+// 있으므로 isPatientComplete는 항상 false).
+const PATIENT_WITH_COMPLETION = {
+  ...PATIENT,
+  modulesCompleteObserved: false,
+  completionClientBuildVersion: expect.any(String),
+  completionClientSchemaVersion: expect.any(Number),
+};
+
 beforeEach(() => {
   requestJson.mockReset();
 });
@@ -53,7 +62,7 @@ describe('saveRemoteWorkspace', () => {
 
     expect(requestJson).toHaveBeenCalledWith('/api/workspaces', expect.objectContaining({
       method: 'POST',
-      body: { name: 'Snapshot', patients: [PATIENT] },
+      body: { name: 'Snapshot', patients: [PATIENT_WITH_COMPLETION] },
     }));
   });
 
@@ -84,7 +93,7 @@ describe('saveRemoteWorkspace', () => {
 
     expect(requestJson).toHaveBeenCalledWith('/api/workspaces/workspace-1', expect.objectContaining({
       method: 'PUT',
-      body: { name: 'Snapshot', patients: [PATIENT] },
+      body: { name: 'Snapshot', patients: [PATIENT_WITH_COMPLETION] },
     }));
   });
 });

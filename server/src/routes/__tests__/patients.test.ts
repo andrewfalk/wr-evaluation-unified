@@ -188,6 +188,11 @@ const PAT_ROW: Record<string, unknown> = {
   created_at:      NOW,
   updated_at:      NOW,
   payload:         { id: PAT_ID, phase: 'evaluation', createdAt: NOW.toISOString(), data: VALID_DATA },
+  completion_status: 'draft',
+  server_observed_modules_complete_at: null,
+  completion_source: null,
+  completion_client_build_version: null,
+  completion_client_schema_version: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -772,6 +777,119 @@ describe('POST /api/patients', () => {
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('IDEMPOTENCY_IN_PROGRESS');
   });
+
+  // PR0-A: 신규 환자도 생성 시점에 이미 모든 모듈이 완료돼 있을 수 있다 — PATCH 경로에만
+  // 완료 추적을 넣으면 이후 수정이 없는 한 완료시각이 영구히 비게 된다(§Context).
+  // INSERT INTO patient_records 바인드 파라미터 인덱스(0-based): 14=completion_status,
+  // 15=server_observed_modules_complete_at, 16=completion_source, 17=build_version, 18=schema_version.
+  describe('완료시각 추적 (modulesCompleteObserved)', () => {
+    it('생성 시점에 modulesCompleteObserved=true면 즉시 관측시각을 기록한다', async () => {
+      const completeRow = {
+        ...PAT_ROW, completion_status: 'modules_complete', server_observed_modules_complete_at: NOW,
+        completion_source: 'client_reported', completion_client_build_version: '6.6.0+abc123',
+        completion_client_schema_version: 1,
+      };
+      const pool = makePool();
+      const cq = makeClientSetup(pool,
+        { rows: [] }, { rows: [] }, { rows: [], rowCount: 1 },
+        { rows: [] }, { rows: [{ id: PERSON_ID }] },
+        { rows: [] }, // INSERT patient_records
+        { rows: [completeRow] }, // SELECT after INSERT
+        { rows: [] }, { rows: [] },
+      );
+
+      const res = await request(makeApp(pool))
+        .post('/api/patients')
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('idempotency-key', IDEMP_KEY)
+        .send({
+          ...CREATE_BODY, modulesCompleteObserved: true,
+          completionClientBuildVersion: '6.6.0+abc123', completionClientSchemaVersion: 1,
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.completionStatus).toBe('modules_complete');
+      expect(res.body.serverObservedModulesCompleteAt).toBe(NOW.toISOString());
+
+      const insertCall = (cq.mock.calls as unknown[][]).find(
+        (c) => typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO patient_records')
+      );
+      const params = insertCall![1] as unknown[];
+      expect(params[14]).toBe('modules_complete');
+      expect(params[15]).toBeInstanceOf(Date);
+      expect(params[16]).toBe('client_reported');
+      expect(params[17]).toBe('6.6.0+abc123');
+      expect(params[18]).toBe(1);
+    });
+
+    it('modulesCompleteObserved가 false/미지정이면 완료 필드는 전부 NULL로 생성된다', async () => {
+      const pool = makePool();
+      const cq = makeClientSetup(pool,
+        { rows: [] }, { rows: [] }, { rows: [], rowCount: 1 },
+        { rows: [] }, { rows: [{ id: PERSON_ID }] },
+        { rows: [] },
+        { rows: [PAT_ROW] },
+        { rows: [] }, { rows: [] },
+      );
+
+      const res = await request(makeApp(pool))
+        .post('/api/patients')
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('idempotency-key', IDEMP_KEY)
+        .send(CREATE_BODY); // no modulesCompleteObserved
+
+      expect(res.status).toBe(201);
+      const insertCall = (cq.mock.calls as unknown[][]).find(
+        (c) => typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO patient_records')
+      );
+      const params = insertCall![1] as unknown[];
+      expect(params[14]).toBe('draft');
+      expect(params[15]).toBeNull();
+      expect(params[16]).toBeNull();
+      expect(params[17]).toBeNull();
+      expect(params[18]).toBeNull();
+    });
+
+    it('idempotency replay는 완료 필드를 포함한 저장된 응답을 그대로 재현한다', async () => {
+      const cachedBody = {
+        id: PAT_ID,
+        completionStatus: 'modules_complete', serverObservedModulesCompleteAt: NOW.toISOString(),
+        sync: { serverId: PAT_ID, revision: 1, syncStatus: 'synced', lastSyncedAt: NOW.toISOString() },
+      };
+      const pool = makePool();
+      makeClientSetup(pool,
+        { rows: [] }, { rows: [] }, { rows: [], rowCount: 0 },
+        { rows: [{ status: 201, body: cachedBody }] },
+        { rows: [] },
+      );
+
+      const res = await request(makeApp(pool))
+        .post('/api/patients')
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('idempotency-key', IDEMP_KEY)
+        .send(CREATE_BODY);
+
+      expect(res.status).toBe(201);
+      expect(res.body.completionStatus).toBe('modules_complete');
+      expect(res.body.serverObservedModulesCompleteAt).toBe(NOW.toISOString());
+    });
+
+    it('modulesCompleteObserved=true인데 버전 필드가 없으면 400을 반환한다', async () => {
+      const pool = makePool();
+      (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+      const res = await request(makeApp(pool))
+        .post('/api/patients')
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('idempotency-key', IDEMP_KEY)
+        .send({ ...CREATE_BODY, modulesCompleteObserved: true });
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('INVALID_BODY');
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -960,6 +1078,195 @@ describe('PATCH /api/patients/:id', () => {
     expect(updateCall).toBeDefined();
     const payload = JSON.parse((updateCall![1] as unknown[])[11] as string) as Record<string, unknown>;
     expect(payload['phase']).toBe('intake');
+  });
+
+  // PR0-A: completion tracking (§5.5). UPDATE patient_records bind param indices
+  // (0-based): 13=completion_status, 14=server_observed_modules_complete_at,
+  // 15=completion_source, 16=completion_client_build_version, 17=completion_client_schema_version.
+  describe('완료시각 추적 (modulesCompleteObserved)', () => {
+    it('최초 false→true 전이에서 관측시각·source·버전을 기록한다', async () => {
+      const updatedRow = {
+        ...PAT_ROW, revision: 2, updated_at: LATER,
+        completion_status: 'modules_complete', server_observed_modules_complete_at: LATER,
+        completion_source: 'client_reported', completion_client_build_version: '6.6.0+abc123',
+        completion_client_schema_version: 1,
+      };
+      const pool = makePool();
+      const cq = makeClientSetup(pool, { withAccessCheck: {} },
+        { rows: [] }, // BEGIN
+        { rows: [PAT_ROW] }, // SELECT (draft, timestamp null)
+        { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] },
+        { rows: [], rowCount: 1 },
+        { rows: [updatedRow] }, // UPDATE RETURNING
+        { rows: [] }, // COMMIT
+      );
+
+      const res = await request(makeApp(pool))
+        .patch(`/api/patients/${PAT_ID}`)
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('if-match', '1')
+        .send({
+          data: VALID_DATA, modulesCompleteObserved: true,
+          completionClientBuildVersion: '6.6.0+abc123', completionClientSchemaVersion: 1,
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.completionStatus).toBe('modules_complete');
+      expect(res.body.serverObservedModulesCompleteAt).toBe(LATER.toISOString());
+
+      const updateCall = (cq.mock.calls as unknown[][]).find(
+        (c) => typeof c[0] === 'string' && (c[0] as string).startsWith('UPDATE patient_records')
+      );
+      const params = updateCall![1] as unknown[];
+      expect(params[13]).toBe('modules_complete');
+      expect(params[14]).toBeInstanceOf(Date);
+      expect(params[15]).toBe('client_reported');
+      expect(params[16]).toBe('6.6.0+abc123');
+      expect(params[17]).toBe(1);
+    });
+
+    it('이미 관측시각이 있으면 재차 true 보고해도 시각·source·버전을 덮어쓰지 않는다', async () => {
+      const alreadyObserved = {
+        ...PAT_ROW, completion_status: 'draft', server_observed_modules_complete_at: NOW,
+        completion_source: 'client_reported', completion_client_build_version: 'old-build',
+        completion_client_schema_version: 1,
+      };
+      const updatedRow = { ...alreadyObserved, revision: 2, updated_at: LATER, completion_status: 'modules_complete' };
+      const pool = makePool();
+      const cq = makeClientSetup(pool, { withAccessCheck: {} },
+        { rows: [] },
+        { rows: [alreadyObserved] },
+        { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] },
+        { rows: [], rowCount: 1 },
+        { rows: [updatedRow] },
+        { rows: [] },
+      );
+
+      await request(makeApp(pool))
+        .patch(`/api/patients/${PAT_ID}`)
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('if-match', '1')
+        .send({
+          data: VALID_DATA, modulesCompleteObserved: true,
+          completionClientBuildVersion: '6.7.0+def456', completionClientSchemaVersion: 1,
+        });
+
+      const updateCall = (cq.mock.calls as unknown[][]).find(
+        (c) => typeof c[0] === 'string' && (c[0] as string).startsWith('UPDATE patient_records')
+      );
+      const params = updateCall![1] as unknown[];
+      expect(params[13]).toBe('modules_complete'); // status still flips
+      expect(params[14]).toBe(NOW);                // timestamp unchanged — not LATER, not a new Date
+      expect(params[16]).toBe('old-build');         // build version NOT overwritten
+    });
+
+    it('true→false는 status만 draft로 되돌리고 관측시각·source·버전은 보존한다', async () => {
+      const wasComplete = {
+        ...PAT_ROW, completion_status: 'modules_complete', server_observed_modules_complete_at: NOW,
+        completion_source: 'client_reported', completion_client_build_version: 'b1',
+        completion_client_schema_version: 1,
+      };
+      const updatedRow = { ...wasComplete, revision: 2, updated_at: LATER, completion_status: 'draft' };
+      const pool = makePool();
+      const cq = makeClientSetup(pool, { withAccessCheck: {} },
+        { rows: [] },
+        { rows: [wasComplete] },
+        { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] },
+        { rows: [], rowCount: 1 },
+        { rows: [updatedRow] },
+        { rows: [] },
+      );
+
+      const res = await request(makeApp(pool))
+        .patch(`/api/patients/${PAT_ID}`)
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('if-match', '1')
+        .send({ data: VALID_DATA, modulesCompleteObserved: false });
+
+      expect(res.status).toBe(200);
+      const updateCall = (cq.mock.calls as unknown[][]).find(
+        (c) => typeof c[0] === 'string' && (c[0] as string).startsWith('UPDATE patient_records')
+      );
+      const params = updateCall![1] as unknown[];
+      expect(params[13]).toBe('draft');
+      expect(params[14]).toBe(NOW);
+      expect(params[15]).toBe('client_reported');
+      expect(params[16]).toBe('b1');
+    });
+
+    it('modulesCompleteObserved 필드 자체가 없으면(구버전 클라이언트) 완료 상태를 전혀 건드리지 않는다', async () => {
+      const wasComplete = {
+        ...PAT_ROW, completion_status: 'modules_complete', server_observed_modules_complete_at: NOW,
+        completion_source: 'client_reported', completion_client_build_version: 'b1',
+        completion_client_schema_version: 1,
+      };
+      const updatedRow = { ...wasComplete, revision: 2, updated_at: LATER };
+      const pool = makePool();
+      const cq = makeClientSetup(pool, { withAccessCheck: {} },
+        { rows: [] },
+        { rows: [wasComplete] },
+        { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] },
+        { rows: [], rowCount: 1 },
+        { rows: [updatedRow] },
+        { rows: [] },
+      );
+
+      await request(makeApp(pool))
+        .patch(`/api/patients/${PAT_ID}`)
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('if-match', '1')
+        .send({ data: VALID_DATA }); // no modulesCompleteObserved at all
+
+      const updateCall = (cq.mock.calls as unknown[][]).find(
+        (c) => typeof c[0] === 'string' && (c[0] as string).startsWith('UPDATE patient_records')
+      );
+      const params = updateCall![1] as unknown[];
+      expect(params[13]).toBe('modules_complete'); // untouched
+      expect(params[14]).toBe(NOW);
+      expect(params[16]).toBe('b1');
+    });
+
+    it('stale revision이면 완료 보고를 포함한 PATCH 전체가 거부된다', async () => {
+      const pool = makePool();
+      makeClientSetup(pool, { withAccessCheck: {} },
+        { rows: [] },
+        { rows: [PAT_ROW] }, // rev 1
+        { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] },
+        { rows: [], rowCount: 1 },
+        { rows: [] }, // UPDATE ... WHERE revision = $13 → 0 rows (stale)
+        { rows: [] }, // ROLLBACK
+      );
+      const res = await request(makeApp(pool))
+        .patch(`/api/patients/${PAT_ID}`)
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('if-match', '1')
+        .send({
+          data: VALID_DATA, modulesCompleteObserved: true,
+          completionClientBuildVersion: '6.6.0+abc123', completionClientSchemaVersion: 1,
+        });
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('CONFLICT');
+    });
+
+    it('modulesCompleteObserved=true인데 버전 필드가 없으면 400을 반환한다', async () => {
+      const pool = makePool();
+      (pool.query as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ rows: [{ exists: 1 }] }) // auth
+        .mockResolvedValueOnce({ rows: [{ assigned_doctor_user_id: USER_ID }] }); // middleware
+      const res = await request(makeApp(pool))
+        .patch(`/api/patients/${PAT_ID}`)
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('if-match', '1')
+        .send({ data: VALID_DATA, modulesCompleteObserved: true });
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('INVALID_BODY');
+    });
   });
 });
 

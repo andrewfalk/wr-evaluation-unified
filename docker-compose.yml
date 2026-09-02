@@ -13,6 +13,13 @@
 #   PORT                  — internal app container port (default: 3001, rarely changed)
 #   TRUST_PROXY           — Express trust proxy setting (default: 1 in intranet)
 #   AI_PROVIDER           — none | internal | external (default: none)
+#   WR_GIT_COMMIT         — code commit stamped into recipe provenance(§8.11) and the
+#                           client's completionClientBuildVersion(PR0-A). Without it the
+#                           build falls back to 'unknown' — set before building:
+#                             WR_GIT_COMMIT=$(git rev-parse HEAD) docker compose up -d --build
+#                           (the offline-package path already injects this automatically —
+#                           see scripts/export-offline-package.ps1 — this only affects a
+#                           plain build-from-source `docker compose up -d --build`.)
 
 services:
   # ---------------------------------------------------------------------------
@@ -43,6 +50,8 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
+      args:
+        WR_GIT_COMMIT: ${WR_GIT_COMMIT:-unknown}
     environment:
       DATABASE_URL:         postgres://wr_user:${POSTGRES_PASSWORD:-changeme_for_dev_only}@postgres:5432/wr_evaluation
       AUDIT_DATABASE_URL:   postgres://wr_audit_reader:${AUDIT_DB_PASSWORD:-changeme_audit_reader}@postgres:5432/wr_evaluation

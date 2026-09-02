@@ -27,6 +27,12 @@
 FROM node:20-alpine AS web-builder
 WORKDIR /build
 
+# PR0-A: 클라이언트 완료 보고(completionClientBuildVersion)의 빌드 식별자 출처. 이 스테이지엔
+# .git이 없어(.dockerignore) vite.config.js의 `git rev-parse` 폴백이 항상 'unknown'이 된다 —
+# production 스테이지의 WR_GIT_COMMIT(§8.11 recipe code commit)과 같은 값을 여기도 받는다.
+ARG WR_GIT_COMMIT=unknown
+ENV WR_GIT_COMMIT=$WR_GIT_COMMIT
+
 COPY package*.json ./
 COPY scripts/ ./scripts/
 COPY shared/ ./shared/

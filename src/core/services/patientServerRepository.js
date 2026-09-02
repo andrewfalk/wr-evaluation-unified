@@ -2,6 +2,7 @@ import { requestJson } from './httpClient';
 import { isRedactedPatientRecord } from './patientRecords';
 import { requireSyncedServerId } from './videoAnalysisClient';
 import { getLockToken } from './lockTokenStore';
+import { completionReportFields } from '../utils/patientCompletion';
 
 function getBaseUrl(session, settings) {
   return session?.apiBaseUrl || settings?.apiBaseUrl || '';
@@ -106,6 +107,7 @@ export async function pushPatient(patient, { session, settings, leaseToken } = {
         phase:     patient.phase,
         createdAt: patient.createdAt,
         data:      patient.data,
+        ...completionReportFields(patient),
       },
     });
     return applyServerSync(data, patient.id, patient.meta);
@@ -124,6 +126,7 @@ export async function pushPatient(patient, { session, settings, leaseToken } = {
     body: {
       phase: patient.phase,
       data:  patient.data,
+      ...completionReportFields(patient),
     },
   });
   return applyServerSync(data, patient.id, patient.meta);
@@ -192,7 +195,11 @@ export async function applyVideoAnalysisJob(
     method: 'POST',
     session,
     headers: { 'If-Match': String(revision), ...lockTokenHeaders(leaseToken) },
-    body: { data: computedData, appliedInputsHash, appliedInputsCount, sourceAnalysisJobIds },
+    body: {
+      data: computedData, appliedInputsHash, appliedInputsCount, sourceAnalysisJobIds,
+      // computedData는 이 apply가 만드는 새 data — 완료 여부도 그 기준으로 판단한다.
+      ...completionReportFields({ data: computedData }),
+    },
   });
   // res = { patient } | { idempotent: true, patient }
   return applyServerSync(res.patient, patient.id, patient.meta);

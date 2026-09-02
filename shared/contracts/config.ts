@@ -11,6 +11,9 @@ export const ServerPublicConfigSchema = z.object({
   videoAnalysisEnabled: z.boolean().default(false),
   // dev-only fixture 입력 UI 노출 플래그(PR D1). 서버 경로는 노출하지 않는다. 구버전 호환 기본 false.
   videoAnalysisFixtureMode: z.boolean().default(false),
+  // 통계분석 워크벤치(PR0-A). 구버전 서버 응답 호환 위해 기본 false.
+  statsWorkbenchEnabled: z.boolean().default(false),
+  statsWorkbenchAvailable: z.boolean().default(false),
   serverTime: z.string(),
 });
 

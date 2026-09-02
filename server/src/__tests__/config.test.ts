@@ -51,6 +51,16 @@ describe('config — deployment mode', () => {
   });
 });
 
+describe('config — statsWorkbenchEnabled (PR0-A)', () => {
+  it('defaults to false', () => {
+    expect(make().statsWorkbenchEnabled).toBe(false);
+  });
+
+  it('enables via STATS_WORKBENCH_ENABLED=true', () => {
+    expect(make({ STATS_WORKBENCH_ENABLED: 'true' }).statsWorkbenchEnabled).toBe(true);
+  });
+});
+
 describe('config — AI gate', () => {
   it('AI disabled by default (provider=none)', () => {
     const c = make();

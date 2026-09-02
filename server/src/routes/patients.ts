@@ -26,6 +26,12 @@ import {
 } from '../db/patientPersons';
 import { validatePastDate } from '@wr/contracts';
 import {
+  CompletionReportFields,
+  requireCompletionVersions,
+  nextCompletionColumns,
+  DRAFT_COMPLETION_COLUMNS,
+} from '../completionTracking';
+import {
   resolveAssignedDoctor,
   type AssignmentWarning,
   type ResolveAssignedDoctorResult,
@@ -60,7 +66,8 @@ const CreateBody = z.object({
     modules:       z.record(z.string(), z.unknown()).default({}),
     activeModules: z.array(z.string()).default([]),
   }),
-});
+  ...CompletionReportFields,
+}).superRefine(requireCompletionVersions);
 
 const PatchBody = z.object({
   phase: z.enum(['intake', 'evaluation']).optional(),
@@ -69,7 +76,8 @@ const PatchBody = z.object({
     modules:       z.record(z.string(), z.unknown()),
     activeModules: z.array(z.string()),
   }).optional(),
-});
+  ...CompletionReportFields,
+}).superRefine(requireCompletionVersions);
 
 // ---------------------------------------------------------------------------
 // DB row interface
@@ -93,12 +101,19 @@ interface PatientRow {
   created_at:              Date;
   updated_at:              Date;
   payload:                 unknown;
+  completion_status:                    string;
+  server_observed_modules_complete_at:  Date | null;
+  completion_source:                    string | null;
+  completion_client_build_version:      string | null;
+  completion_client_schema_version:     number | null;
 }
 
 const SELECT_COLS = `
   id, organization_id, patient_person_id, owner_user_id, assigned_doctor_user_id,
   name, patient_no, birth_date, injury_date, evaluation_date, active_modules,
-  diagnoses_codes, jobs_names, revision, created_at, updated_at, payload`;
+  diagnoses_codes, jobs_names, revision, created_at, updated_at, payload,
+  completion_status, server_observed_modules_complete_at, completion_source,
+  completion_client_build_version, completion_client_schema_version`;
 
 interface PgErrorLike {
   code?:       string;
@@ -365,6 +380,8 @@ function toResponse(
     assignedDoctorUserId: row.assigned_doctor_user_id ?? null,
     createdAt:            baseCreatedAt,
     updatedAt:            row.updated_at.toISOString(),
+    completionStatus:                  row.completion_status,
+    serverObservedModulesCompleteAt:   row.server_observed_modules_complete_at?.toISOString() ?? null,
     sync: {
       serverId:    row.id,
       revision:    row.revision,
@@ -613,7 +630,10 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
     return;
   }
 
-  const { id: clientId, phase, createdAt, data: rawData } = parse.data;
+  const {
+    id: clientId, phase, createdAt, data: rawData,
+    modulesCompleteObserved, completionClientBuildVersion, completionClientSchemaVersion,
+  } = parse.data;
 
   // DB를 건드리기 전에 검증 — 잘못된 날짜가 payload와 DATE 컬럼 어디에도 남지 않게.
   const dates = normalizePatientDates(rawData as Record<string, unknown>);
@@ -695,14 +715,24 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
       `INSERT INTO patient_records
          (id, organization_id, patient_person_id, owner_user_id, assigned_doctor_user_id,
           name, patient_no, birth_date, injury_date, evaluation_date,
-          active_modules, diagnoses_codes, jobs_names, revision, payload)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14)`,
+          active_modules, diagnoses_codes, jobs_names, revision, payload,
+          completion_status, server_observed_modules_complete_at, completion_source,
+          completion_client_build_version, completion_client_schema_version)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14,$15,$16,$17,$18,$19)`,
       [
         patientId, orgId, personId, session.userId, assignedDoctorUserId,
         meta.name, meta.patientNo,
         meta.birthDate, meta.injuryDate, meta.evaluationDate,
         meta.activeModules, meta.diagnosesCodes, meta.jobsNames,
         JSON.stringify(storedPayload),
+        ...(() => {
+          // 신규 행이라 "보존할 이전 값"이 없다 — 초기값(전부 NULL/draft)에서 시작해 계산.
+          const c = nextCompletionColumns(
+            DRAFT_COMPLETION_COLUMNS,
+            { modulesCompleteObserved, completionClientBuildVersion, completionClientSchemaVersion }
+          );
+          return [c.completion_status, c.server_observed_modules_complete_at, c.completion_source, c.completion_client_build_version, c.completion_client_schema_version];
+        })(),
       ]
     );
 
@@ -814,7 +844,7 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
       return;
     }
 
-    const { phase, data } = parse.data;
+    const { phase, data, modulesCompleteObserved, completionClientBuildVersion, completionClientSchemaVersion } = parse.data;
 
     const existingPayload = typeof current[0].payload === 'object' && current[0].payload !== null
       ? (current[0].payload as Record<string, unknown>) : {};
@@ -848,6 +878,13 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
 
     const { personId, warnings } = await resolvePatientPersonId(client as QueryRunner, orgId, meta, current[0].patient_person_id);
 
+    // PR0-A: 완료 필드는 이미 FOR UPDATE로 잠근 current[0]을 기준으로 계산해 같은
+    // UPDATE 문장에 얹는다 — 별도 SQL 분기가 없으므로 revision 충돌 시 완료 보고도
+    // 자동으로 함께 거부된다(아래 WHERE revision = $13이 0행이면 완료 필드도 반영 안 됨).
+    const nextCompletion = nextCompletionColumns(current[0], {
+      modulesCompleteObserved, completionClientBuildVersion, completionClientSchemaVersion,
+    });
+
     // WHERE clause includes revision to catch concurrent modification between read and write.
     const { rows: updated } = await client.query<PatientRow>(
       `UPDATE patient_records SET
@@ -861,7 +898,12 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
          diagnoses_codes   = $10,
          jobs_names        = $11,
          revision          = revision + 1,
-         payload           = $12
+         payload           = $12,
+         completion_status                   = $14,
+         server_observed_modules_complete_at = $15,
+         completion_source                   = $16,
+         completion_client_build_version     = $17,
+         completion_client_schema_version    = $18
        WHERE id = $1 AND organization_id = $2 AND revision = $13 AND deleted_at IS NULL
        RETURNING ${SELECT_COLS}`,
       [
@@ -871,6 +913,11 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
         meta.activeModules, meta.diagnosesCodes, meta.jobsNames,
         JSON.stringify(newPayload),
         expectedRevision,
+        nextCompletion.completion_status,
+        nextCompletion.server_observed_modules_complete_at,
+        nextCompletion.completion_source,
+        nextCompletion.completion_client_build_version,
+        nextCompletion.completion_client_schema_version,
       ]
     );
 

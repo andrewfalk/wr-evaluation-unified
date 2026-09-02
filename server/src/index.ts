@@ -19,6 +19,7 @@ import { createPatientsRouter } from './routes/patients';
 import { createAutosaveRouter } from './routes/autosave';
 import { createAIRouter } from './routes/ai';
 import { createPresetsRouter } from './routes/presets';
+import { createCapabilityGrantsRouter } from './routes/capabilityGrants';
 import { createOpsStatusRouter } from './routes/opsStatus';
 import { createUpdatesRouter } from './routes/updates';
 import { cspMiddleware } from './middleware/csp';
@@ -49,6 +50,7 @@ app.use('/api/patients',  createPatientsRouter(pool));
 app.use('/api/autosave',  createAutosaveRouter(pool));
 app.use('/api/ai',        createAIRouter(pool));
 app.use('/api/presets',   createPresetsRouter(pool));
+app.use('/api/capabilities', createCapabilityGrantsRouter(pool));
 app.use('/api/video-analysis', createVideoAnalysisRouter(pool));
 
 // 트랙 2 — electron-updater 정적 배포 경로(설치본/latest.yml/canary.yml/blockmap/정책 파일).
