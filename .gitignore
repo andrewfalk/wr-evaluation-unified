@@ -1,6 +1,9 @@
 node_modules/
 dist/
 release/
+# Playwright(§9 browser parity) 실행 산출물
+test-results/
+playwright-report/
 # 트랙 2 — electron-updater 배포 디렉터리(운영자가 설치본/yml/정책 파일을 두는 곳,
 # docker-compose.yml의 app.volumes가 마운트). 대용량 바이너리라 git에 안 올림.
 updates/

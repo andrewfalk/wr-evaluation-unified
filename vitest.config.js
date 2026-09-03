@@ -20,6 +20,10 @@ export default defineConfig({
   resolve: {
     alias: {
       '@contracts': path.resolve(__dirname, 'shared/contracts'),
+      // '@contracts'와 동일한 이유(주석 위 참고) — 소스를 직접 가리켜 prebuild 없이 테스트가
+      // 돈다. 앱 빌드(vite.config.js)는 '@analytics-core'를 packages/analytics-core/dist로
+      // 별도 alias한다 — 관심사 분리, export는 동일.
+      '@analytics-core': path.resolve(__dirname, 'packages/analytics-core'),
     },
   },
   test: {
@@ -32,6 +36,8 @@ export default defineConfig({
       'src/**/__tests__/**/*.{js,jsx,ts}',
       'shared/**/*.test.{js,ts}',
       'shared/**/__tests__/**/*.{js,ts}',
+      'packages/**/*.test.{js,ts}',
+      'packages/**/__tests__/**/*.{js,ts}',
       'electron/**/*.test.{js,ts}',
       'electron/**/__tests__/**/*.{js,ts}',
       'services/**/*.test.{js,ts}',
@@ -42,6 +48,9 @@ export default defineConfig({
       'server/**',
       'node_modules/**',
       'shared/node_modules/**',
+      'packages/**/node_modules/**',
+      'packages/analytics-core/dist/**',
+      'packages/analytics-core/__tests__/browserParity/**', // Playwright 전용(§9) — vitest 대상 아님
       'services/**/.venv/**', // Python 추론 PoC venv는 스캔 제외(6.0-5)
     ],
   },
