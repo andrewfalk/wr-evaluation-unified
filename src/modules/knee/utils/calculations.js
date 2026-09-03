@@ -1,50 +1,17 @@
-import { calculateAge, calculateBMI } from '../../../core/utils/common';
-import { calculateWorkPeriod, formatWorkPeriod, parseWorkPeriodOverride, getEffectiveWorkPeriod, getEffectiveWorkPeriodText } from '../../../core/utils/workPeriod';
-import { resolveDiagnosisModule } from '../../../core/utils/diagnosisMapping';
+// PR0-B1: 계산 함수 7개는 packages/analytics-core/modules/knee로 이동했다(클라이언트·서버
+// 공유). 이 파일은 옛 import 경로를 유지하기 위한 shim이다 — registerModule() 호출부와
+// JobTab.jsx 등 기존 소비자는 무변경.
+export {
+  calculatePhysicalBurden,
+  calculateWorkRelatedness,
+  evaluateCumulativeBurden,
+  mergeJobsWithExtras,
+  resolveKneeCalculationJobs,
+  computeKneeCalc,
+  isKneeAssessmentComplete,
+} from '@analytics-core/modules/knee/index';
 
-// re-export for any external consumers
-export { calculateWorkPeriod, formatWorkPeriod, parseWorkPeriodOverride, getEffectiveWorkPeriod, getEffectiveWorkPeriodText };
-
-// 신체부담정도 계산
-export function calculatePhysicalBurden(w, t) {
-  const W = parseFloat(w) || 0;
-  const T = parseFloat(t) || 0;
-
-  // Simplified equivalent ranges to keep the original burden thresholds unchanged.
-  if ((W >= 3000 && T >= 120) || (W >= 2000 && T >= 180)) {
-    return { level: '고도', minScore: 6.0, maxScore: 9.0 };
-  }
-  if ((W >= 3000 && T >= 60) || T >= 120) {
-    return { level: '중등도상', minScore: 3.0, maxScore: 6.0 };
-  }
-  if ((W >= 2000 && T < 120) || (W < 2000 && T >= 60)) {
-    return { level: '중등도하', minScore: 2.0, maxScore: 4.0 };
-  }
-  return { level: '경도', minScore: 1.0, maxScore: 2.0 };
-}
-
-// 업무관련성 계산
-export function calculateWorkRelatedness(jobs, age) {
-  if (!jobs?.length || age <= 30) return { min: 0, max: 0 };
-  let sumMin = 0, sumMax = 0;
-  jobs.forEach(j => {
-    const b = calculatePhysicalBurden(j.weight, j.squatting);
-    const p = getEffectiveWorkPeriod(j);
-    sumMin += (b.minScore - 1) * p;
-    sumMax += (b.maxScore - 1) * p;
-  });
-  const af = age - 30;
-  return {
-    min: Math.max(0, (sumMin / (af + sumMin)) * 100).toFixed(1),
-    max: Math.max(0, (sumMax / (af + sumMax)) * 100).toFixed(1)
-  };
-}
-
-export function evaluateCumulativeBurden(min, max) {
-  return ((parseFloat(min) + parseFloat(max)) / 2) >= 50 ? '충분함' : '불충분함';
-}
-
-// 텍스트 헬퍼
+// UI 라벨 매핑 — analytics-core로 이동하지 않음(통계 분석에 쓰이지 않는 순수 표시용).
 export const getSideText = (side) =>
   side === 'right' ? '우측' : side === 'left' ? '좌측' : side === 'both' ? '양측' : '-';
 
@@ -69,70 +36,3 @@ export const getReasonText = (reasons, other) => {
   };
   return reasons.map(r => reasonMap[r] || r).join('\n');
 };
-
-// shared.jobs + knee.jobExtras를 합성하여 계산용 job 배열 생성
-function mergeJobsWithExtras(sharedJobs, kneeExtras) {
-  return (sharedJobs || []).map(sj => {
-    const extra = (kneeExtras || []).find(e => e.sharedJobId === sj.id) || {};
-    return {
-      ...sj,
-      weight: extra.weight || '',
-      squatting: extra.squatting || '',
-      evidenceSources: extra.evidenceSources || [],
-      stairs: extra.stairs || false,
-      kneeTwist: extra.kneeTwist || false,
-      startStop: extra.startStop || false,
-      tightSpace: extra.tightSpace || false,
-      kneeContact: extra.kneeContact || false,
-      jumpDown: extra.jumpDown || false,
-    };
-  });
-}
-
-// 종합소견 완료 여부 판정 (무릎 상병만 체크)
-export function isKneeAssessmentComplete(patientData) {
-  const diagnoses = patientData.shared?.diagnoses || [];
-  if (!diagnoses.length) return false;
-  // 무릎 상병만 필터링하여 체크
-  const kneeDiags = diagnoses.filter(dx =>
-    resolveDiagnosisModule(dx, patientData.activeModules || [])?.moduleId === 'knee'
-  );
-  if (!kneeDiags.length) return false;
-  return kneeDiags.every(dx => {
-    if (!dx.side) return false;
-    const needRight = dx.side === 'right' || dx.side === 'both';
-    const needLeft = dx.side === 'left' || dx.side === 'both';
-    if (needRight) {
-      if (!dx.confirmedRight || !dx.assessmentRight) return false;
-      if (dx.assessmentRight === 'low' && (!dx.reasonRight?.length)) return false;
-    }
-    if (needLeft) {
-      if (!dx.confirmedLeft || !dx.assessmentLeft) return false;
-      if (dx.assessmentLeft === 'low' && (!dx.reasonLeft?.length)) return false;
-    }
-    return true;
-  });
-}
-
-// 환자 데이터로부터 전체 계산 결과 산출
-export function computeKneeCalc(patientData) {
-  const shared = patientData.shared || {};
-  const mod = patientData.module || {};
-  const age = calculateAge(shared.birthDate, shared.injuryDate);
-  const bmi = calculateBMI(shared.height, shared.weight);
-
-  // 신형식: shared.jobs + mod.jobExtras 합성
-  // 구형식 호환: mod.jobs가 있으면 그대로 사용
-  const jobs = mod.jobs
-    ? mod.jobs
-    : mergeJobsWithExtras(shared.jobs, mod.jobExtras);
-
-  const relatedness = calculateWorkRelatedness(jobs, age);
-  const cumulativeBurden = evaluateCumulativeBurden(relatedness.min, relatedness.max);
-  const jobBurdens = jobs.map(j => ({
-    ...j,
-    burden: calculatePhysicalBurden(j.weight, j.squatting),
-    period: getEffectiveWorkPeriodText(j)
-  }));
-  return { age, bmi, relatedness, cumulativeBurden, jobBurdens };
-}
