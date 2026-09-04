@@ -48,7 +48,9 @@ export interface DeterministicMigrateOptions {
   createdAtFallbackIso: string;
 }
 
-function isPlainObject(v: unknown): v is Record<string, unknown> {
+// PR0-B2: exported so completion.ts can apply the same fail-closed narrowing when building
+// CompletionContext from AnalysisPatient.data.modules[moduleId] (typed unknown per index signature).
+export function isPlainObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 

@@ -117,7 +117,7 @@ describe('computeKneeCalc', () => {
 
 describe('isKneeAssessmentComplete', () => {
   it('is false when there are no diagnoses', () => {
-    expect(isKneeAssessmentComplete({ shared: { diagnoses: [] } })).toBe(false);
+    expect(isKneeAssessmentComplete({ shared: { diagnoses: [] }, module: {}, activeModules: [] })).toBe(false);
   });
 
   it('is true when the knee diagnosis has confirmed status and assessment on the affected side', () => {
@@ -128,6 +128,7 @@ describe('isKneeAssessmentComplete', () => {
             { code: 'M17.1', side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' },
           ],
         },
+        module: {},
         activeModules: ['knee'],
       }),
     ).toBe(true);

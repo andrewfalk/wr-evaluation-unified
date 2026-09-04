@@ -7,6 +7,7 @@ export default defineConfig({
     workPeriod: 'workPeriod.ts',
     diagnosisMapping: 'diagnosisMapping.ts',
     'modules/knee/index': 'modules/knee/index.ts',
+    'modules/shoulder/index': 'modules/shoulder/index.ts',
     'migration/deterministicMigrate': 'migration/deterministicMigrate.ts',
   },
   format: ['esm', 'cjs'],

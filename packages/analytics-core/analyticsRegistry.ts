@@ -9,16 +9,32 @@ export interface AnalyticsVariableMetadataLike {
   key: string;
 }
 
+// PR0-B2 §1-2: 서버 완료판정(completion.ts)이 6개 모듈의 isComplete를 공통 시그니처로
+// 호출하기 위한 계약. strict TS의 strictFunctionTypes 아래서 각 모듈 함수의 좁은 파라미터
+// 타입(예: knee는 shared만, module 없음)을 그대로 registry 필드에 대입할 수 없으므로,
+// 각 모듈은 이 타입을 파라미터로 직접 받고 함수 본문 안에서 필요한 필드를 좁혀 쓴다.
+export interface CompletionContext {
+  shared: Record<string, unknown>;
+  module: Record<string, unknown>;
+  activeModules: string[];
+}
+
 export interface AnalyticsModuleRegistration {
   moduleId: string;
   metadata: AnalyticsVariableMetadataLike[];
   extractors: Record<string, (...args: never[]) => unknown>;
+  isComplete: (ctx: CompletionContext) => boolean;
 }
 
 const registeredKeys = new Map<string, string>(); // variable key → moduleId(디버깅용)
+const registeredModules = new Map<string, AnalyticsModuleRegistration>();
 
 export function registerAnalyticsModule(registration: AnalyticsModuleRegistration): void {
   const { moduleId, metadata, extractors } = registration;
+
+  if (registeredModules.has(moduleId)) {
+    throw new Error(`analyticsRegistry: duplicate moduleId "${moduleId}"`);
+  }
 
   const seenInThisCall = new Set<string>();
   for (const entry of metadata) {
@@ -55,13 +71,20 @@ export function registerAnalyticsModule(registration: AnalyticsModuleRegistratio
   for (const entry of metadata) {
     registeredKeys.set(entry.key, moduleId);
   }
+  registeredModules.set(moduleId, registration);
 }
 
 export function getRegisteredVariableKeys(): string[] {
   return Array.from(registeredKeys.keys());
 }
 
+/** PR0-B2 §1-2: completion.ts가 모듈별 isComplete를 조회하는 데 쓴다. */
+export function getAnalyticsModule(moduleId: string): AnalyticsModuleRegistration | undefined {
+  return registeredModules.get(moduleId);
+}
+
 /** 테스트 전용 — 등록 상태를 초기화해 각 테스트가 격리된 registry를 갖게 한다. */
 export function __resetAnalyticsRegistryForTests(): void {
   registeredKeys.clear();
+  registeredModules.clear(); // 기존엔 registeredKeys만 초기화했음 — 누락되면 테스트 간 오염
 }
