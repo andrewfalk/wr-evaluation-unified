@@ -1,10 +1,3 @@
-// 시간 단위 변환 leaf 유틸.
-// calculations.js / sectionText.js / vibrationCalc.js가 공용으로 import하며,
-// 순환참조를 피하기 위해 다른 spine 유틸을 import하지 않는다.
-export function convertTimeToSeconds(value, unit) {
-  switch (unit) {
-    case 'min': return value * 60;
-    case 'hr': return value * 3600;
-    default: return value;
-  }
-}
+// PR0-B2: 시간 단위 변환은 packages/analytics-core/modules/spine로 이관됐다(계산 단일
+// 소스 원칙, §리뷰 지적). 이 파일은 옛 import 경로를 그대로 유지하기 위한 re-export shim이다.
+export { convertTimeToSeconds } from '@analytics-core/modules/spine/index';

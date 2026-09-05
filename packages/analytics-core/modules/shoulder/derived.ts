@@ -7,6 +7,14 @@ import { getEffectiveWorkPeriod, type JobLike } from '../../workPeriod';
 import { resolveDiagnosisModule, type DiagnosisLike } from '../../diagnosisMapping';
 import type { CompletionContext } from '../../analyticsRegistry';
 
+// 원본(j.workDaysPerYear || 250)처럼 숫자 강제 변환 없이 그대로 산술에 흘려보내므로,
+// 입력·출력 타입 모두 실제 런타임 값(문자열일 수 있음)을 정직하게 표현한다.
+export interface ShoulderJobLike extends JobLike {
+  id?: string;
+  workDaysPerYear?: string | number;
+  [key: string]: unknown;
+}
+
 export interface ShoulderJobExtras {
   sharedJobId?: string;
   overheadHours?: string | number;
@@ -55,7 +63,7 @@ export interface JobExposure {
 export function computeJobExposures(
   extras: ShoulderJobExtras,
   periodYears: number,
-  workDaysPerYear: number,
+  workDaysPerYear: string | number,
 ): JobExposure[] {
   const wdpy = workDaysPerYear || 250;
   const years = periodYears || 0;
@@ -74,18 +82,20 @@ export function computeJobExposures(
 
   return fields.map(({ key, value }) => {
     const def = EXPOSURE_LIMITS[key];
-    const cumulativeHours = value * wdpy * years;
+    // wdpy는 원본처럼 문자열일 수 있다 — Number()로 바꾸면 'abc' 같은 값의 결과가 달라지므로
+    // (리뷰에서 지적된 회귀) 여기서는 타입만 단언하고 JS의 산술 강제변환(NaN 전파)에 맡긴다.
+    const cumulativeHours = value * (wdpy as number) * years;
     return { key, label: def.label, dailyHours: value, cumulativeHours, limit: def.limit, unit: def.unit };
   });
 }
 
 // shared.jobs + shoulder.jobExtras 합성. knee의 mergeJobsWithExtras와 동형 패턴.
 export function mergeJobsWithExtras(
-  sharedJobs: JobLike[] | undefined,
+  sharedJobs: ShoulderJobLike[] | undefined,
   shoulderExtras: ShoulderJobExtras[] | undefined,
-): Array<JobLike & ShoulderJobExtras> {
+): Array<ShoulderJobLike & ShoulderJobExtras> {
   return (sharedJobs || []).map((sj) => {
-    const extra = (shoulderExtras || []).find((e) => e.sharedJobId === (sj as { id?: string }).id) || {};
+    const extra = (shoulderExtras || []).find((e) => e.sharedJobId === sj.id) || {};
     return {
       ...sj,
       overheadHours: extra.overheadHours || '',
@@ -150,7 +160,9 @@ export interface ShoulderExposureTotal {
 export interface ShoulderCalcResult {
   age: number;
   bmi: string | number;
-  jobBurdens: Array<JobLike & ShoulderJobExtras & { periodYears: number; workDaysPerYear: number; exposures: JobExposure[] }>;
+  jobBurdens: Array<
+    ShoulderJobLike & ShoulderJobExtras & { periodYears: number; workDaysPerYear: string | number; exposures: JobExposure[] }
+  >;
   totals: ShoulderExposureTotal[];
   anyExceeded: boolean;
   anyRepetitiveExceeded: boolean;
@@ -158,7 +170,7 @@ export interface ShoulderCalcResult {
 
 // 전체 계산 — 원본과 동일 로직.
 export function computeShoulderCalc(patientData: {
-  shared?: Record<string, unknown> & { jobs?: JobLike[]; birthDate?: unknown; injuryDate?: unknown; height?: unknown; weight?: unknown };
+  shared?: Record<string, unknown> & { jobs?: ShoulderJobLike[]; birthDate?: unknown; injuryDate?: unknown; height?: unknown; weight?: unknown };
   module?: Record<string, unknown> & { jobExtras?: ShoulderJobExtras[] };
 }): ShoulderCalcResult {
   const shared = patientData.shared || {};
@@ -170,7 +182,10 @@ export function computeShoulderCalc(patientData: {
 
   const jobBurdens = jobs.map((j) => {
     const periodYears = getEffectiveWorkPeriod(j);
-    const workDaysPerYear = Number((j as { workDaysPerYear?: unknown }).workDaysPerYear) || 250;
+    // 원본(j.workDaysPerYear || 250)과 동일 — Number()로 강제 변환하지 않는다. 비어있지 않은
+    // 비숫자 문자열('abc')은 원본처럼 raw 그대로 두어 이후 산술 연산에서 NaN → 0으로 흡수되게
+    // 한다(Number('abc')||250처럼 250일로 대체되면 결과가 달라짐 — 리뷰에서 지적된 회귀).
+    const workDaysPerYear: string | number = j.workDaysPerYear || 250;
     const exposures = computeJobExposures(j, periodYears, workDaysPerYear);
     return { ...j, periodYears, workDaysPerYear, exposures };
   });
