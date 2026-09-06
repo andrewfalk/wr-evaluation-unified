@@ -516,6 +516,7 @@ describe('POST /api/workspaces', () => {
         patient_person_id: ANON_PERSON_ID, deleted_at: null,
         completion_status: 'draft', server_observed_modules_complete_at: null,
         completion_source: null, completion_client_build_version: null, completion_client_schema_version: null,
+        server_verified_modules_complete_at: null, completion_verification_engine_version: null,
       }],
     }); // existing record lookup (FOR UPDATE) — draft, never observed
     mock.mockResolvedValueOnce({ rows: [{ patient_no: null }] }); // SELECT patient_no FOR UPDATE
@@ -541,6 +542,112 @@ describe('POST /api/workspaces', () => {
     expect(params[16]).toBe('client_reported');
     expect(params[17]).toBe('6.6.0+abc123');
     expect(params[18]).toBe(1);
+  });
+
+  // PR0-B2 §5.5: server_verified_modules_complete_at은 client_reported와 완전히 별도 컬럼
+  // — workspace 저장도 patient_records를 직접 갱신하는 경로라 이 재검증이 여기서도 빠지면
+  // 안 된다. INSERT 바인드 파라미터 인덱스(0-based): 19=server_verified_modules_complete_at,
+  // 20=completion_verification_engine_version.
+  it('서버 재검증(server_verified)은 실제 완료 조건을 만족하는 진단이 있을 때만 별도 컬럼에 기록된다', async () => {
+    const ANON_PERSON_ID = '66666666-6666-6666-6666-666666666666';
+    const completePatient = {
+      ...PATIENT_SNAPSHOT,
+      data: {
+        ...PATIENT_SNAPSHOT.data,
+        // modules.knee가 없으면(undefined) analytics-core의 §P1 방어(모듈 데이터가 구조적
+        // 으로 유효하지 않으면 isComplete를 호출하지 않고 미완료로 차단)에 걸린다.
+        modules: { knee: {} },
+        shared: {
+          ...PATIENT_SNAPSHOT.data.shared,
+          // 위 완료 보고 테스트와 동일하게 anonymous person 흐름(patientNo 빈 값)을 그대로
+          // 써서 mock 쿼리 시퀀스를 맞춘다 — 이 테스트가 검증하려는 건 person 해석이 아니라
+          // 완료 재검증이다. M17.0은 analytics-core에서 무릎으로 확정 매핑되는 코드이고,
+          // side/confirmedRight/assessmentRight까지 갖춰 isKneeAssessmentComplete가 실제로
+          // true를 낸다 — 기본 fixture의 M54.5(척추로 매핑됨)와 달리 서버가 스스로 완료를
+          // 판정할 수 있다.
+          patientNo: '',
+          diagnoses: [{ code: 'M17.0', side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' }],
+        },
+      },
+    };
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    mock.mockResolvedValueOnce({ rows: [] }); // BEGIN (ws tx)
+    mock.mockResolvedValueOnce({ rows: [] }); // deleted patient check
+    mock.mockResolvedValueOnce({ rows: [] }); // INSERT workspace
+    mock.mockResolvedValueOnce({ rows: [] }); // COMMIT (ws tx)
+    mock.mockResolvedValueOnce({ rows: [] }); // BEGIN (환자 트랜잭션)
+    mock.mockResolvedValueOnce({
+      rows: [{
+        patient_person_id: ANON_PERSON_ID, deleted_at: null,
+        completion_status: 'draft', server_observed_modules_complete_at: null,
+        completion_source: null, completion_client_build_version: null, completion_client_schema_version: null,
+        server_verified_modules_complete_at: null, completion_verification_engine_version: null,
+      }],
+    }); // existing record lookup (FOR UPDATE) — draft, never verified
+    mock.mockResolvedValueOnce({ rows: [{ patient_no: null }] }); // SELECT patient_no FOR UPDATE
+    mock.mockResolvedValueOnce({ rows: [], rowCount: 1 }); // UPDATE existing person
+    mock.mockResolvedValueOnce({ rows: [], rowCount: 1 }); // upsert patient_records
+    mock.mockResolvedValueOnce({ rows: [] }); // COMMIT (환자 트랜잭션)
+    mock.mockResolvedValueOnce({ rows: [WS_ROW] }); // list query
+
+    const res = await request(makeApp(pool))
+      .post('/api/workspaces')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ name: 'Completed Visit', patients: [completePatient] });
+
+    expect(res.status).toBe(201);
+    const upsertCall = (mock.mock.calls as unknown[][]).find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO patient_records')
+    );
+    const params = upsertCall![1] as unknown[];
+    expect(params[19]).toBeInstanceOf(Date);
+    expect(params[20]).toBe('v1');
+  });
+
+  // §리뷰 지적(P2, 2026-09-06): 신규 환자를 두 요청이 동시에 저장하면 SELECT ... FOR UPDATE가
+  // 둘 다 빈 결과를 받을 수 있어(아직 없는 행엔 잠금이 안 걸림) JS 레벨 existingRow로는
+  // 경합을 못 막는다 — 실제 방어는 SQL의 COALESCE뿐이다. 여기서는 실제 동시성 재현이
+  // 아니라(pg mock으로는 불가), 그 COALESCE 절이 SQL 텍스트에 실제로 있는지만 고정한다
+  // (assigned_doctor_user_id와 동일한 first-write-wins 패턴). client_reported 계열
+  // (server_observed_modules_complete_at 등)도 같은 경합이 있어 함께 COALESCE로 바꿨다 —
+  // 단 completion_status 자체는 "현재 상태"라 COALESCE 대상이 아니라 그대로 EXCLUDED다.
+  it('upsert SQL은 provenance 컬럼(client_reported+server_verified 둘 다) 전부에 COALESCE를 써서 나중 트랜잭션이 먼저 기록된 값을 덮어쓰지 못하게 한다', async () => {
+    const pool = makePool();
+    const mock = pool.query as ReturnType<typeof vi.fn>;
+    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    mock.mockResolvedValueOnce({ rows: [] });
+    mock.mockResolvedValueOnce({ rows: [] });
+    mock.mockResolvedValueOnce({ rows: [] });
+    mock.mockResolvedValueOnce({ rows: [] });
+    mock.mockResolvedValueOnce({ rows: [] });
+    mock.mockResolvedValueOnce({ rows: [] }); // existing record lookup — 새 환자라 빈 결과
+    mock.mockResolvedValueOnce({ rows: [{ patient_no: null }] });
+    mock.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mock.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mock.mockResolvedValueOnce({ rows: [] });
+    mock.mockResolvedValueOnce({ rows: [WS_ROW] });
+
+    await request(makeApp(pool))
+      .post('/api/workspaces')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .send({ name: 'Visit', patients: [PATIENT_SNAPSHOT] });
+
+    const upsertCall = (mock.mock.calls as unknown[][]).find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO patient_records')
+    );
+    const sql = upsertCall![0] as string;
+    expect(sql).toContain('server_verified_modules_complete_at    = COALESCE(patient_records.server_verified_modules_complete_at, EXCLUDED.server_verified_modules_complete_at)');
+    expect(sql).toContain('completion_verification_engine_version = COALESCE(patient_records.completion_verification_engine_version, EXCLUDED.completion_verification_engine_version)');
+    expect(sql).toContain('server_observed_modules_complete_at = COALESCE(patient_records.server_observed_modules_complete_at, EXCLUDED.server_observed_modules_complete_at)');
+    expect(sql).toContain('completion_source                   = COALESCE(patient_records.completion_source, EXCLUDED.completion_source)');
+    expect(sql).toContain('completion_client_build_version     = COALESCE(patient_records.completion_client_build_version, EXCLUDED.completion_client_build_version)');
+    expect(sql).toContain('completion_client_schema_version    = COALESCE(patient_records.completion_client_schema_version, EXCLUDED.completion_client_schema_version)');
+    // completion_status는 "현재 상태"라 COALESCE 대상이 아니다 — EXCLUDED 그대로.
+    expect(sql).toContain('completion_status                   = EXCLUDED.completion_status');
   });
 
   it('reuses existing anonymous patient_person when patientNo is blank', async () => {

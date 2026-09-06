@@ -13,6 +13,7 @@ export default defineConfig({
     'modules/cervical/index': 'modules/cervical/index.ts',
     'modules/spine/index': 'modules/spine/index.ts',
     'migration/deterministicMigrate': 'migration/deterministicMigrate.ts',
+    completion: 'completion.ts',
   },
   format: ['esm', 'cjs'],
   outDir: 'dist',

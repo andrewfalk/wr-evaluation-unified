@@ -80,6 +80,14 @@ export const WRIST_METADATA: AnalyticsVariableMetadata[] = [
       'modules.wrist.diagnosisEvaluations[].diagnosisId',
       'modules.wrist.diagnosisEvaluations[].linkedJobId',
       'modules.wrist.diagnosisEvaluations[].selectedBkType',
+      // bkSelectionMode는 여기 의도적으로 없다 — buildLegacyEntryMap(legacyNormalize.ts)이
+      // `{...createWristDiagnosisEntry(diagnosis), ...legacyEntry}`로 스프레드는 하지만
+      // 바로 다음 줄에서 `bkSelectionMode: legacyEntry.selectedBkType ? 'manual' : 'auto'`로
+      // 무조건 재계산해 덮어쓴다 — legacyEntry.bkSelectionMode 원래 값은 결과에 전혀
+      // 반영되지 않는다(§coverage inventory 재검토, 2026-09-06 — 처음엔 elbow와 맞추려
+      // 추가했었으나 elbow도 legacyNormalize.ts:196에 동일한 무조건 덮어쓰기가 있어 elbow
+      // 쪽 선언도 근거가 약하다는 게 드러났다. elbow는 이미 리뷰를 통과한 기존 선언이라
+      // 이번 범위에서 되돌리지 않고 사용자에게 별도 보고).
       'modules.wrist.diagnosisEvaluations[].main_task_name',
       'modules.wrist.diagnosisEvaluations[].direct_anatomic_link',
       'modules.wrist.diagnosisEvaluations[].exposure_types',

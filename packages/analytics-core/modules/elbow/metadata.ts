@@ -87,7 +87,12 @@ export const ELBOW_METADATA: AnalyticsVariableMetadata[] = [
       'modules.elbow.diagnosisEvaluations[].diagnosisId',
       'modules.elbow.diagnosisEvaluations[].linkedJobId',
       'modules.elbow.diagnosisEvaluations[].selectedBkType',
-      'modules.elbow.diagnosisEvaluations[].bkSelectionMode',
+      // bkSelectionMode는 여기 의도적으로 없다 — buildLegacyEntryMap(legacyNormalize.ts:196)이
+      // `{...createElbowDiagnosisEntry(diagnosis), ...legacyEntry}`로 스프레드한 바로
+      // 다음 줄에서 `bkSelectionMode: legacyEntry.selectedBkType ? 'manual' : 'auto'`로
+      // 무조건 재계산해 legacyEntry.bkSelectionMode 원래 값을 덮어쓴다 — 저장된 값이
+      // 무엇이었든 결과에 반영되지 않는다(§coverage inventory 재검토, 2026-09-06 —
+      // wrist에서 먼저 발견돼 동일 구조인 elbow도 함께 바로잡음).
       'modules.elbow.diagnosisEvaluations[].main_task_name',
       'modules.elbow.diagnosisEvaluations[].direct_anatomic_link',
       'modules.elbow.diagnosisEvaluations[].exposure_types',

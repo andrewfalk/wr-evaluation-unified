@@ -11,7 +11,9 @@
     "baseUrl": ".",
     "paths": {
       "@wr/contracts": ["node_modules/@wr/contracts/dist/index.d.cts"],
-      "@wr/contracts/*": ["node_modules/@wr/contracts/dist/*.d.cts"]
+      "@wr/contracts/*": ["node_modules/@wr/contracts/dist/*.d.cts"],
+      "@wr/analytics-core": ["node_modules/@wr/analytics-core/dist/index.d.cts"],
+      "@wr/analytics-core/*": ["node_modules/@wr/analytics-core/dist/*.d.cts"]
     }
   },
   "include": ["src/**/*.ts"]

@@ -603,6 +603,86 @@ describe('POST /jobs/:jobId/apply', () => {
     expect(params[8]).toBe(1);
   });
 
+  // PR0-B2 §5.5: server_verified_modules_complete_at은 client_reported와 완전히 별도
+  // 컬럼 — apply도 patient_records를 직접 갱신하는 경로라 이 재검증이 여기서도 빠지면
+  // 안 된다. UPDATE 바인드 파라미터 인덱스(0-based): 9=server_verified_modules_complete_at,
+  // 10=completion_verification_engine_version.
+  it('서버 재검증(server_verified)은 실제 완료 조건을 만족하는 진단이 있을 때만 별도 컬럼에 기록된다', async () => {
+    flagState.allowUnverifiedRecipe = true;
+    const neverVerifiedPatRow = {
+      ...patRow(1),
+      server_verified_modules_complete_at: null, completion_verification_engine_version: null,
+    };
+    // M17.0은 analytics-core에서 무릎으로 확정 매핑되는 코드이고, side/confirmedRight/
+    // assessmentRight까지 갖춰 isKneeAssessmentComplete가 실제로 true를 낸다. videoAnalysis.
+    // appliedInputs는 기존 body와 동일하게 유지해 recipe 검증 게이트에 영향을 주지 않는다.
+    const knees = dataWith([appliedEntry()]);
+    const verifiableBody = {
+      ...body,
+      data: {
+        ...knees,
+        activeModules: ['knee'],
+        // modules.knee가 없으면(undefined) analytics-core의 §P1 방어(모듈 데이터가 구조적
+        // 으로 유효하지 않으면 isComplete를 호출하지 않고 미완료로 차단)에 걸린다.
+        modules: { knee: {} },
+        shared: {
+          ...knees.shared,
+          diagnoses: [{ code: 'M17.0', side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' }],
+        },
+      },
+    };
+    const pool = makePool();
+    const cq = clientSetup(pool,
+      { rows: [] },                 // BEGIN
+      { rows: [jobRow()] },         // job FOR UPDATE
+      { rows: [neverVerifiedPatRow] }, // patient FOR UPDATE
+      { rows: [patRow(2)] },        // UPDATE patient RETURNING
+      { rows: [] },                 // UPDATE job
+      { rows: [] },                 // COMMIT
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/jobs/${JOB_ID}/apply`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('If-Match', '1')
+      .send(verifiableBody);
+    expect(res.status).toBe(200);
+
+    const updateCall = cq.mock.calls.find((c) => String(c[0]).includes('UPDATE patient_records'));
+    const params = updateCall![1] as unknown[];
+    expect(params[9]).toBeInstanceOf(Date);
+    expect(params[10]).toBe('v1');
+  });
+
+  it('완료 조건을 만족하지 못하면(기본 body, activeModules 없음) server_verified 컬럼은 NULL로 유지된다', async () => {
+    flagState.allowUnverifiedRecipe = true;
+    const neverVerifiedPatRow = {
+      ...patRow(1),
+      server_verified_modules_complete_at: null, completion_verification_engine_version: null,
+    };
+    const pool = makePool();
+    const cq = clientSetup(pool,
+      { rows: [] },
+      { rows: [jobRow()] },
+      { rows: [neverVerifiedPatRow] },
+      { rows: [patRow(2)] },
+      { rows: [] },
+      { rows: [] },
+    );
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/jobs/${JOB_ID}/apply`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('If-Match', '1')
+      .send(body); // activeModules: [] — 기본 body는 검증 대상 모듈 자체가 없다
+
+    expect(res.status).toBe(200);
+    const updateCall = cq.mock.calls.find((c) => String(c[0]).includes('UPDATE patient_records'));
+    const params = updateCall![1] as unknown[];
+    expect(params[9]).toBeNull();
+    expect(params[10]).toBeNull();
+  });
+
   it('modulesCompleteObserved=true인데 버전 필드가 없으면 400을 반환한다', async () => {
     const pool = makePool();
     authOk(pool);
