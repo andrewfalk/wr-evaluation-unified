@@ -8,7 +8,10 @@ import { resolvePatientPersonId, releasePersonIfOrphaned, type QueryRunner } fro
 import { withDeadlockRetry } from './patients';
 import { resolveAssignedDoctor } from '../db/resolveAssignedDoctor';
 import { validatePastDate } from '@wr/contracts';
-import { nextCompletionColumns, DRAFT_COMPLETION_COLUMNS, type CompletionColumns } from '../completionTracking';
+import {
+  nextCompletionColumns, DRAFT_COMPLETION_COLUMNS, type CompletionColumns,
+  verifyModulesComplete, logCompletionMismatchIfAny, nextVerificationColumns, DRAFT_VERIFICATION_COLUMNS, type VerificationColumns,
+} from '../completionTracking';
 
 // ---------------------------------------------------------------------------
 // POST /api/workspaces body schema
@@ -110,6 +113,9 @@ interface PatientMeta {
   diagnosesCodes:  string[];
   jobsNames:       string[];
   payload:         unknown;
+  // PR0-B2: 서버 완료 재검증(verifyModulesComplete)에 필요한 원본 data(shared/modules/
+  // activeModules). shared/jobs 등 개별 필드만 뽑아둔 위 필드들과 달리 이건 통째로 필요하다.
+  data:            Record<string, unknown> | null;
   // PR0-A: 클라이언트가 워크스페이스 저장 시점에 계산해 각 환자 객체에 실어보내는 완료
   // 보고. patientServerRepository.js가 PATCH/POST에 붙이는 것과 동일한 필드를 여기서는
   // patient 객체 최상위(payload 밖)에서 읽는다 — patients는 z.unknown()이라 스키마로
@@ -174,6 +180,7 @@ function extractPatientMeta(p: unknown): PatientMeta | null {
       .map((j) => j['jobName'])
       .filter((n): n is string => typeof n === 'string'),
     payload: p,
+    data,
     modulesCompleteObserved,
     completionClientBuildVersion,
     completionClientSchemaVersion,
@@ -294,11 +301,12 @@ async function upsertPatientRecordInTx(
   // 아무도 참조하지 않는 활성 person만 새로 생긴다 — 새 유령 등록번호.
   // 행을 잡아두면 DELETE가 우리 커밋까지 대기한다.
   const existing = await db.query<
-    { patient_person_id: string | null; deleted_at: Date | null } & CompletionColumns
+    { patient_person_id: string | null; deleted_at: Date | null } & CompletionColumns & VerificationColumns
   >(
     `SELECT patient_person_id, deleted_at,
             completion_status, server_observed_modules_complete_at, completion_source,
-            completion_client_build_version, completion_client_schema_version
+            completion_client_build_version, completion_client_schema_version,
+            server_verified_modules_complete_at, completion_verification_engine_version
      FROM patient_records
      WHERE id = $1 AND organization_id = $2
      FOR UPDATE`,
@@ -321,6 +329,19 @@ async function upsertPatientRecordInTx(
     }
   );
 
+  // PR0-B2: 클라이언트 신고와 별개로 서버가 analytics-core로 직접 재검증한다 — 위와
+  // 동일한 FOR UPDATE 잠금 하에서 계산해 같은 upsert 문장에 얹는다.
+  const verified = verifyModulesComplete({
+    shared: (meta.data?.['shared'] as Record<string, unknown>) ?? {},
+    modules: (meta.data?.['modules'] as Record<string, unknown>) ?? {},
+    activeModules: (meta.data?.['activeModules'] as string[]) ?? meta.activeModules,
+  });
+  logCompletionMismatchIfAny(meta.id, meta.modulesCompleteObserved, verified);
+  const nextVerification = nextVerificationColumns(
+    existingRow ? existingRow : DRAFT_VERIFICATION_COLUMNS,
+    verified.allComplete,
+  );
+
   const { assignedDoctorUserId, assignmentWarnings } = await resolveAssignedDoctor(
     db,
     { orgId, currentUser: user, requestedDoctorName: meta.doctorName }
@@ -330,14 +351,28 @@ async function upsertPatientRecordInTx(
       assignmentWarnings.map(w => `${w.code}: ${w.message}`).join('; '));
   }
 
+  // §리뷰 지적(P2): 신규 환자를 두 요청이 동시에 저장하면 위 SELECT ... FOR UPDATE가
+  // 양쪽 다 빈 결과를 받을 수 있다(아직 없는 행에는 잠금이 걸리지 않는다) — 이 JS 레벨의
+  // existingRow는 그 시점 이후 다른 트랜잭션이 무엇을 커밋했는지 볼 수 없으므로, 여기서
+  // nextVerificationColumns가 계산한 값만으로는 경합을 못 막는다. 실제 방어는 아래 SQL의
+  // COALESCE뿐이다 — INSERT..ON CONFLICT는 원자적이라, 먼저 커밋된 트랜잭션이 이미
+  // server_verified_modules_complete_at을 채웠다면 나중 트랜잭션의 UPDATE는 그 값을
+  // 그대로 보존한다(EXCLUDED로 덮어쓰지 않음). assigned_doctor_user_id도 같은 이유로
+  // COALESCE를 쓴다. client_reported 계열도 동일한 경합이 있었다(PR0-A부터, 이번에 함께
+  // 수정) — 단 completion_status 자체는 COALESCE 대상이 아니다: 이 컬럼은 "최초 관측"이
+  // 아니라 "현재 상태"를 나타내므로(모듈이 다시 불완전해지면 draft로 되돌아가야 한다,
+  // §5.5) name/payload 등 다른 일반 컬럼처럼 EXCLUDED(마지막에 반영된 데이터 기준)를
+  // 그대로 쓴다. COALESCE는 "최초 한 번 찍히면 불변이어야 하는" provenance 필드
+  // (server_observed_modules_complete_at·completion_source·빌드/스키마 버전)에만 건다.
   const upserted = await db.query(
     `INSERT INTO patient_records
        (id, organization_id, patient_person_id, owner_user_id, assigned_doctor_user_id,
         name, patient_no, birth_date, injury_date, evaluation_date,
         active_modules, diagnoses_codes, jobs_names, revision, payload,
         completion_status, server_observed_modules_complete_at, completion_source,
-        completion_client_build_version, completion_client_schema_version)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14,$15,$16,$17,$18,$19)
+        completion_client_build_version, completion_client_schema_version,
+        server_verified_modules_complete_at, completion_verification_engine_version)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14,$15,$16,$17,$18,$19,$20,$21)
      ON CONFLICT (id) DO UPDATE SET
        patient_person_id       = EXCLUDED.patient_person_id,
        name                    = EXCLUDED.name,
@@ -352,10 +387,12 @@ async function upsertPatientRecordInTx(
        revision                = patient_records.revision + 1,
        payload                 = EXCLUDED.payload,
        completion_status                   = EXCLUDED.completion_status,
-       server_observed_modules_complete_at = EXCLUDED.server_observed_modules_complete_at,
-       completion_source                   = EXCLUDED.completion_source,
-       completion_client_build_version     = EXCLUDED.completion_client_build_version,
-       completion_client_schema_version    = EXCLUDED.completion_client_schema_version
+       server_observed_modules_complete_at = COALESCE(patient_records.server_observed_modules_complete_at, EXCLUDED.server_observed_modules_complete_at),
+       completion_source                   = COALESCE(patient_records.completion_source, EXCLUDED.completion_source),
+       completion_client_build_version     = COALESCE(patient_records.completion_client_build_version, EXCLUDED.completion_client_build_version),
+       completion_client_schema_version    = COALESCE(patient_records.completion_client_schema_version, EXCLUDED.completion_client_schema_version),
+       server_verified_modules_complete_at    = COALESCE(patient_records.server_verified_modules_complete_at, EXCLUDED.server_verified_modules_complete_at),
+       completion_verification_engine_version = COALESCE(patient_records.completion_verification_engine_version, EXCLUDED.completion_verification_engine_version)
      WHERE patient_records.organization_id = EXCLUDED.organization_id
        AND patient_records.deleted_at IS NULL`,
     [
@@ -373,6 +410,8 @@ async function upsertPatientRecordInTx(
       nextCompletion.completion_source,
       nextCompletion.completion_client_build_version,
       nextCompletion.completion_client_schema_version,
+      nextVerification.server_verified_modules_complete_at,
+      nextVerification.completion_verification_engine_version,
     ]
   );
 

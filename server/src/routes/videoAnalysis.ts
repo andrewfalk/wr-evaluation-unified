@@ -22,6 +22,10 @@ import {
   requireCompletionVersions,
   nextCompletionColumns,
   type CompletionColumns,
+  verifyModulesComplete,
+  logCompletionMismatchIfAny,
+  nextVerificationColumns,
+  type VerificationColumns,
 } from '../completionTracking';
 
 function getLockTokenHeader(req: Request): string | null {
@@ -744,7 +748,7 @@ async function closeReview(pool: Pool, req: Request, res: Response): Promise<voi
 }
 
 // patient_records 행(부분) — apply에서 사용.
-interface PatientRowLite extends CompletionColumns {
+interface PatientRowLite extends CompletionColumns, VerificationColumns {
   id: string; revision: number; payload: unknown; created_at: Date; updated_at: Date;
 }
 
@@ -757,6 +761,7 @@ function patientApplyResponse(row: PatientRowLite): Record<string, unknown> {
     updatedAt: row.updated_at.toISOString(),
     completionStatus: row.completion_status,
     serverObservedModulesCompleteAt: row.server_observed_modules_complete_at?.toISOString() ?? null,
+    serverVerifiedModulesCompleteAt: row.server_verified_modules_complete_at?.toISOString() ?? null,
     sync: {
       serverId: row.id,
       revision: row.revision,
@@ -827,7 +832,8 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
       const { rows: cur } = await client.query<PatientRowLite>(
         `SELECT id, revision, payload, created_at, updated_at,
                 completion_status, server_observed_modules_complete_at, completion_source,
-                completion_client_build_version, completion_client_schema_version
+                completion_client_build_version, completion_client_schema_version,
+                server_verified_modules_complete_at, completion_verification_engine_version
          FROM patient_records
          WHERE id = $1 AND organization_id = $2`,
         [job.patient_record_id, session.organizationId]
@@ -872,7 +878,8 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
     const { rows: pats } = await client.query<PatientRowLite & { assigned_doctor_user_id: string | null }>(
       `SELECT id, revision, payload, created_at, updated_at, assigned_doctor_user_id,
               completion_status, server_observed_modules_complete_at, completion_source,
-              completion_client_build_version, completion_client_schema_version
+              completion_client_build_version, completion_client_schema_version,
+              server_verified_modules_complete_at, completion_verification_engine_version
        FROM patient_records
        WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
        FOR UPDATE`,
@@ -955,6 +962,17 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
       modulesCompleteObserved, completionClientBuildVersion, completionClientSchemaVersion,
     });
 
+    // PR0-B2: 클라이언트 신고와 별개로 서버가 analytics-core로 직접 재검증한다 — apply가
+    // 갱신하는 새 data(위 `data`)를 기준으로, 같은 FOR UPDATE 잠금 하에 계산해 같은
+    // UPDATE 문장에 얹는다.
+    const verified = verifyModulesComplete({
+      shared: (data as Record<string, unknown>)['shared'] as Record<string, unknown> ?? {},
+      modules: (data as Record<string, unknown>)['modules'] as Record<string, unknown> ?? {},
+      activeModules: (data as Record<string, unknown>)['activeModules'] as string[] ?? [],
+    });
+    logCompletionMismatchIfAny(job.patient_record_id, modulesCompleteObserved, verified);
+    const nextVerification = nextVerificationColumns(pats[0], verified.allComplete);
+
     const { rows: updated } = await client.query<PatientRowLite>(
       `UPDATE patient_records SET
          payload = $3, revision = revision + 1,
@@ -962,11 +980,14 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
          server_observed_modules_complete_at = $6,
          completion_source                   = $7,
          completion_client_build_version     = $8,
-         completion_client_schema_version    = $9
+         completion_client_schema_version    = $9,
+         server_verified_modules_complete_at    = $10,
+         completion_verification_engine_version = $11
        WHERE id = $1 AND organization_id = $2 AND revision = $4 AND deleted_at IS NULL
        RETURNING id, revision, payload, created_at, updated_at,
                  completion_status, server_observed_modules_complete_at, completion_source,
-                 completion_client_build_version, completion_client_schema_version`,
+                 completion_client_build_version, completion_client_schema_version,
+                 server_verified_modules_complete_at, completion_verification_engine_version`,
       [
         job.patient_record_id, session.organizationId, JSON.stringify(newPayload), expectedRevision,
         nextCompletion.completion_status,
@@ -974,6 +995,8 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
         nextCompletion.completion_source,
         nextCompletion.completion_client_build_version,
         nextCompletion.completion_client_schema_version,
+        nextVerification.server_verified_modules_complete_at,
+        nextVerification.completion_verification_engine_version,
       ]
     );
     if (updated.length === 0) {

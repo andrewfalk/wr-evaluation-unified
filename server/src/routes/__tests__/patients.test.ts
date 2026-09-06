@@ -193,6 +193,8 @@ const PAT_ROW: Record<string, unknown> = {
   completion_source: null,
   completion_client_build_version: null,
   completion_client_schema_version: null,
+  server_verified_modules_complete_at: null,
+  completion_verification_engine_version: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -852,6 +854,82 @@ describe('POST /api/patients', () => {
       expect(params[18]).toBeNull();
     });
 
+    // PR0-B2 §5.5: server_verified_modules_complete_at은 client_reported와 완전히 별도
+    // 컬럼이고, 클라이언트 신고 여부와 무관하게 서버가 analytics-core로 직접 재검증해
+    // 계산한다. INSERT 바인드 파라미터 인덱스(0-based): 19=server_verified_modules_complete_at,
+    // 20=completion_verification_engine_version.
+    it('서버 재검증(server_verified)은 실제 완료 조건을 만족하는 진단이 있을 때만 별도 컬럼에 기록된다', async () => {
+      const pool = makePool();
+      const cq = makeClientSetup(pool,
+        { rows: [] }, { rows: [] }, { rows: [], rowCount: 1 },
+        { rows: [] }, { rows: [{ id: PERSON_ID }] },
+        { rows: [] }, // INSERT patient_records
+        { rows: [PAT_ROW] }, // SELECT after INSERT
+        { rows: [] }, { rows: [] },
+      );
+
+      // M17.0은 무릎으로 확정 매핑되는 코드이고, side/confirmedRight/assessmentRight까지
+      // 갖춰 실제로 isKneeAssessmentComplete가 true를 내는 최소 fixture다 — CREATE_BODY의
+      // 기본 진단(M54.5, 척추로 매핑됨)과 달리 클라이언트 신고 없이도 서버가 스스로 완료를
+      // 판정할 수 있는 경우를 재현한다.
+      await request(makeApp(pool))
+        .post('/api/patients')
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('idempotency-key', IDEMP_KEY)
+        .send({
+          ...CREATE_BODY,
+          data: {
+            ...VALID_DATA,
+            // modules.knee가 없으면(undefined) analytics-core의 §P1 방어(모듈 데이터가
+            // 구조적으로 유효하지 않으면 완료로 오판하지 않게 isComplete 호출 자체를
+            // 차단)에 걸려 항상 미완료로 처리된다 — 유효한 빈 객체를 채워야 한다.
+            modules: { knee: {} },
+            shared: {
+              ...VALID_DATA.shared,
+              diagnoses: [{ code: 'M17.0', side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' }],
+            },
+          },
+        }); // modulesCompleteObserved 자체를 안 보내도(구버전 클라 흉내) 서버 재검증은 독립적으로 돈다
+
+      const insertCall = (cq.mock.calls as unknown[][]).find(
+        (c) => typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO patient_records')
+      );
+      const params = insertCall![1] as unknown[];
+      expect(params[19]).toBeInstanceOf(Date);
+      expect(params[20]).toBe('v1');
+    });
+
+    it('완료 조건을 만족하지 못하면(기본 fixture) server_verified 컬럼은 NULL로 생성된다', async () => {
+      const pool = makePool();
+      const cq = makeClientSetup(pool,
+        { rows: [] }, { rows: [] }, { rows: [], rowCount: 1 },
+        { rows: [] }, { rows: [{ id: PERSON_ID }] },
+        { rows: [] },
+        { rows: [PAT_ROW] },
+        { rows: [] }, { rows: [] },
+      );
+
+      await request(makeApp(pool))
+        .post('/api/patients')
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('idempotency-key', IDEMP_KEY)
+        // 클라이언트는 완료로 신고하지만(M54.5는 knee로 매핑되지 않음) 서버 재검증은 이를
+        // 그대로 믿지 않고 독립적으로 false를 낸다.
+        .send({
+          ...CREATE_BODY, modulesCompleteObserved: true,
+          completionClientBuildVersion: '6.6.0+abc123', completionClientSchemaVersion: 1,
+        });
+
+      const insertCall = (cq.mock.calls as unknown[][]).find(
+        (c) => typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO patient_records')
+      );
+      const params = insertCall![1] as unknown[];
+      expect(params[19]).toBeNull();
+      expect(params[20]).toBeNull();
+    });
+
     it('idempotency replay는 완료 필드를 포함한 저장된 응답을 그대로 재현한다', async () => {
       const cachedBody = {
         id: PAT_ID,
@@ -1228,6 +1306,75 @@ describe('PATCH /api/patients/:id', () => {
       expect(params[13]).toBe('modules_complete'); // untouched
       expect(params[14]).toBe(NOW);
       expect(params[16]).toBe('b1');
+    });
+
+    // PR0-B2 §5.5: UPDATE 바인드 파라미터 인덱스(0-based): 18=server_verified_modules_complete_at,
+    // 19=completion_verification_engine_version. POST와 동일하게 client_reported와 완전히
+    // 독립적으로 계산된다.
+    it('서버 재검증(server_verified)은 실제 완료 조건을 만족하는 진단이 있을 때만 별도 컬럼에 기록된다', async () => {
+      const updatedRow = { ...PAT_ROW, revision: 2, updated_at: LATER };
+      const pool = makePool();
+      const cq = makeClientSetup(pool, { withAccessCheck: {} },
+        { rows: [] },
+        { rows: [PAT_ROW] },
+        { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] },
+        { rows: [], rowCount: 1 },
+        { rows: [updatedRow] },
+        { rows: [] },
+      );
+
+      await request(makeApp(pool))
+        .patch(`/api/patients/${PAT_ID}`)
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('if-match', '1')
+        .send({
+          data: {
+            ...VALID_DATA,
+            modules: { knee: {} }, // §P1 방어: modules.knee가 없으면 항상 미완료로 차단됨
+            shared: {
+              ...VALID_DATA.shared,
+              diagnoses: [{ code: 'M17.0', side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' }],
+            },
+          },
+        }); // modulesCompleteObserved 없이도 서버 재검증은 독립적으로 돈다
+
+      const updateCall = (cq.mock.calls as unknown[][]).find(
+        (c) => typeof c[0] === 'string' && (c[0] as string).startsWith('UPDATE patient_records')
+      );
+      const params = updateCall![1] as unknown[];
+      expect(params[18]).toBeInstanceOf(Date);
+      expect(params[19]).toBe('v1');
+    });
+
+    it('완료 조건을 만족하지 못하면(기본 fixture, M54.5) server_verified 컬럼은 NULL로 유지된다', async () => {
+      const updatedRow = { ...PAT_ROW, revision: 2, updated_at: LATER, completion_status: 'modules_complete' };
+      const pool = makePool();
+      const cq = makeClientSetup(pool, { withAccessCheck: {} },
+        { rows: [] },
+        { rows: [PAT_ROW] },
+        { rows: [{ id: PERSON_ID, birth_date: '1980-01-01' }] },
+        { rows: [], rowCount: 1 },
+        { rows: [updatedRow] },
+        { rows: [] },
+      );
+
+      await request(makeApp(pool))
+        .patch(`/api/patients/${PAT_ID}`)
+        .set('Authorization', `Bearer ${orgToken()}`)
+        .set('x-csrf-token', CSRF_TOKEN)
+        .set('if-match', '1')
+        .send({
+          data: VALID_DATA, modulesCompleteObserved: true,
+          completionClientBuildVersion: '6.6.0+abc123', completionClientSchemaVersion: 1,
+        });
+
+      const updateCall = (cq.mock.calls as unknown[][]).find(
+        (c) => typeof c[0] === 'string' && (c[0] as string).startsWith('UPDATE patient_records')
+      );
+      const params = updateCall![1] as unknown[];
+      expect(params[18]).toBeNull();
+      expect(params[19]).toBeNull();
     });
 
     it('stale revision이면 완료 보고를 포함한 PATCH 전체가 거부된다', async () => {

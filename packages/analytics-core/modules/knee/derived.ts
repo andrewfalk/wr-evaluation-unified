@@ -4,6 +4,7 @@
 import { calculateAge, calculateBMI } from '../../common';
 import { getEffectiveWorkPeriod, getEffectiveWorkPeriodText, type JobLike } from '../../workPeriod';
 import { resolveDiagnosisModule, type DiagnosisLike } from '../../diagnosisMapping';
+import type { CompletionContext } from '../../analyticsRegistry';
 
 export interface KneeJobExtras {
   sharedJobId?: string;
@@ -139,15 +140,19 @@ export interface KneeDiagnosis extends DiagnosisLike {
   reasonLeft?: unknown[];
 }
 
-/** 종합소견 완료 여부 판정(무릎 상병만 체크) — 원본과 동일 로직. */
-export function isKneeAssessmentComplete(patientData: {
-  shared?: { diagnoses?: KneeDiagnosis[] };
-  activeModules?: string[];
-}): boolean {
-  const diagnoses = patientData.shared?.diagnoses || [];
+/**
+ * 종합소견 완료 여부 판정(무릎 상병만 체크) — 원본과 동일 로직.
+ *
+ * PR0-B2 §1-2: 파라미터 타입을 CompletionContext(analyticsRegistry.ts)로 통일한다 — strict
+ * TS의 strictFunctionTypes 아래서 이 함수를 그대로 `registerAnalyticsModule({ isComplete })`에
+ * 넘기려면 registry 계약과 정확히 같은(더 좁지 않은) 파라미터 타입이어야 한다. `module`은 이
+ * 판정에서 쓰지 않으므로 무시한다.
+ */
+export function isKneeAssessmentComplete(patientData: CompletionContext): boolean {
+  const diagnoses = (patientData.shared.diagnoses as KneeDiagnosis[] | undefined) ?? [];
   if (!diagnoses.length) return false;
   const kneeDiags = diagnoses.filter(
-    (dx) => resolveDiagnosisModule(dx, patientData.activeModules || [])?.moduleId === 'knee',
+    (dx) => resolveDiagnosisModule(dx, patientData.activeModules)?.moduleId === 'knee',
   );
   if (!kneeDiags.length) return false;
   return kneeDiags.every((dx) => {

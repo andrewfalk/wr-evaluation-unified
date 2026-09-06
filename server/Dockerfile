@@ -36,6 +36,7 @@ ENV WR_GIT_COMMIT=$WR_GIT_COMMIT
 COPY package*.json ./
 COPY scripts/ ./scripts/
 COPY shared/ ./shared/
+COPY packages/ ./packages/
 COPY vite.config.js index.html ./
 COPY src/ ./src/
 COPY public/ ./public/
@@ -55,6 +56,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 make g+
 
 # Copy built shared contracts so the file: dependency resolves at npm ci
 COPY --from=web-builder /build/shared /build/shared
+# Same for analytics-core — server/package.json now depends on it (file:../packages/analytics-core).
+COPY --from=web-builder /build/packages/analytics-core /build/packages/analytics-core
 
 COPY server/package*.json ./
 RUN npm ci
@@ -107,6 +110,12 @@ COPY server/migrations ./migrations
 RUN rm -rf ./node_modules/@wr/contracts && mkdir -p ./node_modules/@wr/contracts
 COPY --from=server-builder /build/shared/package.json ./node_modules/@wr/contracts/package.json
 COPY --from=server-builder /build/shared/dist ./node_modules/@wr/contracts/dist
+
+# Same vendor treatment for @wr/analytics-core (PR0-B2 — server_verified_modules_complete_at
+# verification calls into packages/analytics-core/completion.ts).
+RUN rm -rf ./node_modules/@wr/analytics-core && mkdir -p ./node_modules/@wr/analytics-core
+COPY --from=server-builder /build/packages/analytics-core/package.json ./node_modules/@wr/analytics-core/package.json
+COPY --from=server-builder /build/packages/analytics-core/dist ./node_modules/@wr/analytics-core/dist
 
 # Web SPA served at / for non-API routes
 COPY --from=web-builder /build/dist/web ./dist/web

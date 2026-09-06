@@ -3,23 +3,10 @@
 // case grain으로 올리려면 다중 상병 축약(reducer) 규칙이 필요한데, 그건 그 grain이
 // 실제로 생기는 PR(PR0-B2 이후)에서 grain 의미론과 함께 정한다.
 
-export interface AnalyticsVariableMetadata {
-  key: string;
-  label: string;
-  group: string;
-  moduleId: string;
-  grain: 'person' | 'case' | 'diagnosis_side' | 'job' | 'job_diagnosis' | 'task' | 'vibration_interval';
-  type: 'continuous' | 'categorical' | 'ordinal' | 'date' | 'high_cardinality' | 'boolean';
-  unit?: string;
-  provenance: 'raw' | 'derived' | 'clinician_judgment';
-  dependsOn: string[];
-  availableAt: 'pre_assessment' | 'assessment' | 'post_decision';
-  shownToAssessor: boolean;
-  allowedAnalysisPurposes: Array<'association' | 'prediction' | 'formula_audit'>;
-  sensitivity: 'non_sensitive' | 'clinical_sensitive' | 'quasi_identifier' | 'staff_identifier' | 'direct_identifier' | 'free_text';
-  formulaFamily: string;
-  supportedFormulaPolicies: Array<'recompute_recorded_version' | 'recompute_current' | 'stratify_by_version'>;
-}
+// PR0-B2: 6개 모듈 공통 스키마라 ../../types.ts로 옮겼다 — re-export해서 이 파일과
+// index.ts(`export * from './metadata'`)를 통해 기존 import 경로를 그대로 유지한다.
+export type { AnalyticsVariableMetadata } from '../../types';
+import type { AnalyticsVariableMetadata } from '../../types';
 
 export const KNEE_METADATA: AnalyticsVariableMetadata[] = [
   {

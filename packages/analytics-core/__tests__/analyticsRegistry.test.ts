@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { registerAnalyticsModule, getRegisteredVariableKeys, __resetAnalyticsRegistryForTests } from '../analyticsRegistry';
+import {
+  registerAnalyticsModule,
+  getRegisteredVariableKeys,
+  getAnalyticsModule,
+  __resetAnalyticsRegistryForTests,
+} from '../analyticsRegistry';
+
+const noopIsComplete = () => false;
 
 describe('registerAnalyticsModule', () => {
   beforeEach(() => {
@@ -11,6 +18,7 @@ describe('registerAnalyticsModule', () => {
       moduleId: 'fixture',
       metadata: [{ key: 'fixture.a' }, { key: 'fixture.b' }],
       extractors: { 'fixture.a': () => null, 'fixture.b': () => null },
+      isComplete: noopIsComplete,
     });
     expect(getRegisteredVariableKeys().sort()).toEqual(['fixture.a', 'fixture.b']);
   });
@@ -23,6 +31,7 @@ describe('registerAnalyticsModule', () => {
         moduleId: 'fixture',
         metadata: [{ key: 'fixture.dup' }, { key: 'fixture.dup' }],
         extractors: { 'fixture.dup': () => null },
+        isComplete: noopIsComplete,
       }),
     ).toThrow(/duplicate variable key/);
     expect(getRegisteredVariableKeys()).toEqual([]); // 실패한 등록은 아무것도 안 남긴다
@@ -33,12 +42,14 @@ describe('registerAnalyticsModule', () => {
       moduleId: 'fixture-1',
       metadata: [{ key: 'shared.key' }],
       extractors: { 'shared.key': () => null },
+      isComplete: noopIsComplete,
     });
     expect(() =>
       registerAnalyticsModule({
         moduleId: 'fixture-2',
         metadata: [{ key: 'shared.key' }],
         extractors: { 'shared.key': () => null },
+        isComplete: noopIsComplete,
       }),
     ).toThrow(/duplicate variable key/);
   });
@@ -49,6 +60,7 @@ describe('registerAnalyticsModule', () => {
         moduleId: 'fixture',
         metadata: [{ key: 'fixture.orphanMetadata' }],
         extractors: {},
+        isComplete: noopIsComplete,
       }),
     ).toThrow(/has no matching extractor/);
   });
@@ -59,6 +71,7 @@ describe('registerAnalyticsModule', () => {
         moduleId: 'fixture',
         metadata: [],
         extractors: { 'fixture.orphanExtractor': () => null },
+        isComplete: noopIsComplete,
       }),
     ).toThrow(/has no matching metadata entry/);
   });
@@ -69,9 +82,51 @@ describe('registerAnalyticsModule', () => {
         moduleId: 'fixture',
         metadata: [{ key: 'fixture.ok' }, { key: 'fixture.missingExtractor' }],
         extractors: { 'fixture.ok': () => null },
+        isComplete: noopIsComplete,
       }),
     ).toThrow();
     expect(getRegisteredVariableKeys()).toEqual([]);
+  });
+
+  it('throws on duplicate moduleId even if the metadata keys differ', () => {
+    registerAnalyticsModule({
+      moduleId: 'fixture',
+      metadata: [{ key: 'fixture.a' }],
+      extractors: { 'fixture.a': () => null },
+      isComplete: noopIsComplete,
+    });
+    expect(() =>
+      registerAnalyticsModule({
+        moduleId: 'fixture',
+        metadata: [{ key: 'fixture.c' }],
+        extractors: { 'fixture.c': () => null },
+        isComplete: noopIsComplete,
+      }),
+    ).toThrow(/duplicate moduleId/);
+  });
+
+  it('getAnalyticsModule returns the registration by moduleId, undefined otherwise', () => {
+    const isComplete = () => true;
+    registerAnalyticsModule({
+      moduleId: 'fixture',
+      metadata: [{ key: 'fixture.a' }],
+      extractors: { 'fixture.a': () => null },
+      isComplete,
+    });
+    expect(getAnalyticsModule('fixture')?.isComplete).toBe(isComplete);
+    expect(getAnalyticsModule('unknown-module')).toBeUndefined();
+  });
+
+  it('__resetAnalyticsRegistryForTests clears both the key map and the module map', () => {
+    registerAnalyticsModule({
+      moduleId: 'fixture',
+      metadata: [{ key: 'fixture.a' }],
+      extractors: { 'fixture.a': () => null },
+      isComplete: noopIsComplete,
+    });
+    __resetAnalyticsRegistryForTests();
+    expect(getRegisteredVariableKeys()).toEqual([]);
+    expect(getAnalyticsModule('fixture')).toBeUndefined();
   });
 });
 

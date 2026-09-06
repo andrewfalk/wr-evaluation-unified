@@ -30,6 +30,10 @@ import {
   requireCompletionVersions,
   nextCompletionColumns,
   DRAFT_COMPLETION_COLUMNS,
+  verifyModulesComplete,
+  logCompletionMismatchIfAny,
+  nextVerificationColumns,
+  DRAFT_VERIFICATION_COLUMNS,
 } from '../completionTracking';
 import {
   resolveAssignedDoctor,
@@ -106,6 +110,8 @@ interface PatientRow {
   completion_source:                    string | null;
   completion_client_build_version:      string | null;
   completion_client_schema_version:     number | null;
+  server_verified_modules_complete_at:    Date | null;
+  completion_verification_engine_version: string | null;
 }
 
 const SELECT_COLS = `
@@ -113,7 +119,8 @@ const SELECT_COLS = `
   name, patient_no, birth_date, injury_date, evaluation_date, active_modules,
   diagnoses_codes, jobs_names, revision, created_at, updated_at, payload,
   completion_status, server_observed_modules_complete_at, completion_source,
-  completion_client_build_version, completion_client_schema_version`;
+  completion_client_build_version, completion_client_schema_version,
+  server_verified_modules_complete_at, completion_verification_engine_version`;
 
 interface PgErrorLike {
   code?:       string;
@@ -382,6 +389,7 @@ function toResponse(
     updatedAt:            row.updated_at.toISOString(),
     completionStatus:                  row.completion_status,
     serverObservedModulesCompleteAt:   row.server_observed_modules_complete_at?.toISOString() ?? null,
+    serverVerifiedModulesCompleteAt:   row.server_verified_modules_complete_at?.toISOString() ?? null,
     sync: {
       serverId:    row.id,
       revision:    row.revision,
@@ -717,8 +725,9 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
           name, patient_no, birth_date, injury_date, evaluation_date,
           active_modules, diagnoses_codes, jobs_names, revision, payload,
           completion_status, server_observed_modules_complete_at, completion_source,
-          completion_client_build_version, completion_client_schema_version)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14,$15,$16,$17,$18,$19)`,
+          completion_client_build_version, completion_client_schema_version,
+          server_verified_modules_complete_at, completion_verification_engine_version)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14,$15,$16,$17,$18,$19,$20,$21)`,
       [
         patientId, orgId, personId, session.userId, assignedDoctorUserId,
         meta.name, meta.patientNo,
@@ -732,6 +741,18 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
             { modulesCompleteObserved, completionClientBuildVersion, completionClientSchemaVersion }
           );
           return [c.completion_status, c.server_observed_modules_complete_at, c.completion_source, c.completion_client_build_version, c.completion_client_schema_version];
+        })(),
+        ...(() => {
+          // PR0-B2: 클라이언트 신고와 무관하게 서버가 독립적으로(analytics-core) 완료를
+          // 재검증한다. 신규 행이라 "보존할 이전 값"이 없다 — DRAFT에서 시작.
+          const verified = verifyModulesComplete({
+            shared: (resolvedData['shared'] as Record<string, unknown>) ?? {},
+            modules: (resolvedData['modules'] as Record<string, unknown>) ?? {},
+            activeModules: (resolvedData['activeModules'] as string[]) ?? [],
+          });
+          logCompletionMismatchIfAny(patientId, modulesCompleteObserved, verified);
+          const v = nextVerificationColumns(DRAFT_VERIFICATION_COLUMNS, verified.allComplete);
+          return [v.server_verified_modules_complete_at, v.completion_verification_engine_version];
         })(),
       ]
     );
@@ -885,6 +906,16 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
       modulesCompleteObserved, completionClientBuildVersion, completionClientSchemaVersion,
     });
 
+    // PR0-B2: 클라이언트 신고와 별개로 서버가 analytics-core로 직접 재검증한다 — 같은
+    // revision 잠금 하에 같은 UPDATE 문장에 얹으므로 위와 동일한 동시성 보장을 받는다.
+    const verified = verifyModulesComplete({
+      shared: (mergedData['shared'] as Record<string, unknown>) ?? {},
+      modules: (mergedData['modules'] as Record<string, unknown>) ?? {},
+      activeModules: (mergedData['activeModules'] as string[]) ?? [],
+    });
+    logCompletionMismatchIfAny(id, modulesCompleteObserved, verified);
+    const nextVerification = nextVerificationColumns(current[0], verified.allComplete);
+
     // WHERE clause includes revision to catch concurrent modification between read and write.
     const { rows: updated } = await client.query<PatientRow>(
       `UPDATE patient_records SET
@@ -903,7 +934,9 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
          server_observed_modules_complete_at = $15,
          completion_source                   = $16,
          completion_client_build_version     = $17,
-         completion_client_schema_version    = $18
+         completion_client_schema_version    = $18,
+         server_verified_modules_complete_at    = $19,
+         completion_verification_engine_version = $20
        WHERE id = $1 AND organization_id = $2 AND revision = $13 AND deleted_at IS NULL
        RETURNING ${SELECT_COLS}`,
       [
@@ -918,6 +951,8 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
         nextCompletion.completion_source,
         nextCompletion.completion_client_build_version,
         nextCompletion.completion_client_schema_version,
+        nextVerification.server_verified_modules_complete_at,
+        nextVerification.completion_verification_engine_version,
       ]
     );
 

@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "cd ../shared && npm run build",
+    "predev": "cd ../shared && npm run build && cd ../packages/analytics-core && npm run build",
     "dev": "tsx watch src/index.ts",
     "migrate": "tsx src/db/migrate.ts",
-    "prebuild": "cd ../shared && npm run build",
+    "prebuild": "cd ../shared && npm run build && cd ../packages/analytics-core && npm run build",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "test": "vitest run --config vitest.config.ts --passWithNoTests",
@@ -17,6 +17,7 @@
     "cleanup:video": "tsx src/cli/runVideoCleanup.ts"
   },
   "dependencies": {
+    "@wr/analytics-core": "file:../packages/analytics-core",
     "@wr/contracts": "file:../shared",
     "bcrypt": "^5.1.1",
     "cookie-parser": "^1.4.6",

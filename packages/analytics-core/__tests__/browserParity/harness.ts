@@ -5,11 +5,13 @@
 // 빌드된 dist를 가리키게 설정한다(소스가 아니라 실제 산출물을 테스트해야 "번들 parity"가
 // 증명된다).
 import { computeKneeCalc, classifyKneeJob } from '@analytics-core/modules/knee/index';
+import { computeShoulderCalc } from '@analytics-core/modules/shoulder/index';
 import { deterministicMigrate } from '@analytics-core/migration/deterministicMigrate';
 
 declare global {
   interface Window {
     __parity_computeKneeCalc: (fixtureJson: string) => string;
+    __parity_computeShoulderCalc: (fixtureJson: string) => string;
     __parity_migrate: (fixtureJson: string, optsJson: string) => string;
     __parity_classifyKneeJob: (jobJson: string) => string;
     __parity_timezone: () => string;
@@ -19,6 +21,11 @@ declare global {
 window.__parity_computeKneeCalc = (fixtureJson: string) => {
   const fixture = JSON.parse(fixtureJson);
   return JSON.stringify(computeKneeCalc(fixture));
+};
+
+window.__parity_computeShoulderCalc = (fixtureJson: string) => {
+  const fixture = JSON.parse(fixtureJson);
+  return JSON.stringify(computeShoulderCalc(fixture));
 };
 
 window.__parity_migrate = (fixtureJson: string, optsJson: string) => {
