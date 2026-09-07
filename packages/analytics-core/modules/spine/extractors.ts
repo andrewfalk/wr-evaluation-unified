@@ -5,7 +5,7 @@
 import type { ExtractedValue, MissingReason, MigrationResult, QualityFlag } from '../../types';
 import { isPlainObject } from '../../migration/deterministicMigrate';
 import { formulaDB } from './constants';
-import { computeMddmCalc, resolveMddmStatus, type SpineTask } from './mddm';
+import { computeMddmCalc, resolveMddmStatus, type SpineTask, type MddmFormulaPolicy } from './mddm';
 import { computeVibrationCalc, resolveVibrationStatus, type SpineVibrationInterval } from './vibration';
 import type { SpineDiagnosis, SpineJobLike, SpineModuleShape } from './types';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
@@ -46,6 +46,7 @@ function scanTaskQuality(tasks: SpineTask[], qualityFlagSet: Set<QualityFlag>): 
 
 export function extractSpineMddmLifetimeDoseMNh(
   migrationResult: MigrationResult<AnalysisPatient>,
+  opts?: { formulaPolicy?: MddmFormulaPolicy },
 ): ExtractedValue<number> {
   const { payload } = migrationResult;
 
@@ -77,7 +78,10 @@ export function extractSpineMddmLifetimeDoseMNh(
     return { value: null, missing: 'not_applicable', qualityFlags: [] };
   }
 
-  const result = computeMddmCalc({ shared: sanitizedShared, module: sanitizedModule });
+  const result = computeMddmCalc(
+    { shared: sanitizedShared, module: sanitizedModule },
+    { formulaPolicy: opts?.formulaPolicy },
+  );
 
   // 순서 3: present인데 job/task 정보가 부족해 lifetimeDose가 제외됨.
   if (result.lifetimeDose.excluded) {

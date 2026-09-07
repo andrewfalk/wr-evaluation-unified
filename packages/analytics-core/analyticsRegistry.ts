@@ -83,6 +83,35 @@ export function getAnalyticsModule(moduleId: string): AnalyticsModuleRegistratio
   return registeredModules.get(moduleId);
 }
 
+/**
+ * PR0-C: catalog.ts의 getExtractorForKey()가 key → extractor 역방향 조회를 위해 내부적으로만
+ * 순회한다. **메타데이터 조회 용도가 아니다** — `metadata`의 타입은 `AnalyticsVariableMetadataLike`
+ * (={key})뿐이라 grain/sensitivity 등 나머지 필드가 없다. 전체 카탈로그가 필요하면 각 모듈의
+ * `<X>_METADATA`(타입 완전함)를 직접 import해서 합칠 것 — catalog.ts가 그렇게 한다.
+ */
+export function getAllModuleRegistrations(): AnalyticsModuleRegistration[] {
+  return Array.from(registeredModules.values());
+}
+
+/**
+ * PR0-C: 변수 key → 그 key를 등록한 모듈의 extractor 함수. `extractor`의 타입은
+ * `(...args: never[]) => unknown`이라 반환값은 물론 호출 자체도 이 타입 그대로는 불가능하다
+ * (인자가 `never`에 대입되지 않아 TS2345) — 호출부(catalog.ts)가 함수 전체를 `as unknown as
+ * ConcreteExtractorFn`으로 이중 캐스트해야 한다. registerAnalyticsModule()이 등록 시점에
+ * key↔함수 존재를 이미 검증했으므로, 이 함수가 반환하는 값은 항상 실제 함수다.
+ */
+export function getExtractorForKey(
+  key: string,
+): { moduleId: string; extractor: (...args: never[]) => unknown } | undefined {
+  const moduleId = registeredKeys.get(key);
+  if (!moduleId) return undefined;
+  const registration = registeredModules.get(moduleId);
+  if (!registration) return undefined;
+  const extractor = registration.extractors[key];
+  if (typeof extractor !== 'function') return undefined;
+  return { moduleId, extractor };
+}
+
 /** 테스트 전용 — 등록 상태를 초기화해 각 테스트가 격리된 registry를 갖게 한다. */
 export function __resetAnalyticsRegistryForTests(): void {
   registeredKeys.clear();

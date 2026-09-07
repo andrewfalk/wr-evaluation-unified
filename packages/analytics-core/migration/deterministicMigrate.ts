@@ -178,3 +178,8 @@ export function deterministicMigrate(
 
   return { payload, issues };
 }
+
+// PR0-C run manifest(§1.2)의 migrationVersion. deterministicMigrate의 마이그레이션 규칙이
+// 바뀌면(신규 sourceSchemaVersion 분기 추가 등) 이 값을 올린다 — COMPLETION_ENGINE_VERSION과
+// 같은 "수동 올림" 관례.
+export const DETERMINISTIC_MIGRATION_VERSION = 'v1';
