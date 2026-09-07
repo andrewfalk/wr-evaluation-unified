@@ -103,6 +103,12 @@
 | `video_analysis_close_review` | `videoAnalysis.ts:730` |
 | `video_analysis_apply` | `videoAnalysis.ts:963` |
 
+### 통계 워크벤치
+| action | 파일:라인 | 비고 |
+|---|---|---|
+| `stats_access_denied` | `middleware/requireCapability.ts:46` | capability 없음(PR0-A, 이 문서에 그동안 누락돼 있었음 — PR0-C에서 보강) |
+| `stats_preview` | `routes/stats.ts` | `POST /preview`. `extra`에 recipeDigest/sourceDigest/resultDigest/reasonCode 등(raw filter 값은 절대 안 남김, §7.4). 코호트 미달·differencing 초과로 억제된 응답도 `outcome:'denied'`로 기록됨. `GET /catalog`는 감사하지 않음(정적 메타데이터) |
+
 ### EMR (Electron → 서버, 화이트리스트 강제)
 | action | 파일:라인 |
 |---|---|

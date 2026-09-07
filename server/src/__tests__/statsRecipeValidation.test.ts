@@ -1,0 +1,201 @@
+import { describe, it, expect } from 'vitest';
+import { validateRecipe } from '../statsRecipeValidation';
+import type { StatsAnalysisRecipe } from '@wr/contracts';
+
+const CATALOG_KEYS = [
+  'knee.relatedness.max',
+  'shoulder.exposure.anyExceeded',
+  'elbow.assessment.burdenGradeMax',
+  'wrist.assessment.burdenGradeMax',
+  'cervical.case.maxJobCumulativeKgHours',
+  'spine.mddm.lifetimeDoseMNh',
+  'spine.vibration.dvMax',
+];
+
+function baseRecipe(overrides: Partial<StatsAnalysisRecipe> = {}): StatsAnalysisRecipe {
+  return {
+    grain: 'case',
+    variableKeys: ['knee.relatedness.max'],
+    filters: [],
+    analysisPurpose: 'association',
+    formulaPolicies: {},
+    ...overrides,
+  };
+}
+
+describe('validateRecipe — grain', () => {
+  it('case가 아니면 GRAIN_NOT_YET_SUPPORTED 하나만 반환한다', () => {
+    const result = validateRecipe(baseRecipe({ grain: 'person' }));
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].code).toBe('GRAIN_NOT_YET_SUPPORTED');
+    }
+  });
+});
+
+// spine.mddm.lifetimeDoseMNh는 formulaFamily가 정책 2개를 지원해 formulaPolicies 명시가
+// 필수다(다른 6개는 단일 정책이라 생략 가능) — 일반 루프 테스트에서 이 변수만 예외 처리.
+function formulaPoliciesFor(key: string): StatsAnalysisRecipe['formulaPolicies'] {
+  return key === 'spine.mddm.lifetimeDoseMNh' ? { spine_mddm: 'recompute_current' } : {};
+}
+
+describe('validateRecipe — 카탈로그 키 존재', () => {
+  it('7개 변수 전부 유효한 grain=case 레시피를 통과시킨다', () => {
+    for (const key of CATALOG_KEYS) {
+      const result = validateRecipe(baseRecipe({ variableKeys: [key], formulaPolicies: formulaPoliciesFor(key) }));
+      expect(result.valid, `key=${key}: ${!result.valid ? JSON.stringify(result.errors) : ''}`).toBe(true);
+    }
+  });
+
+  it('존재하지 않는 키는 UNKNOWN_VARIABLE로 거부한다', () => {
+    const result = validateRecipe(baseRecipe({ variableKeys: ['not.a.real.key'] }));
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'UNKNOWN_VARIABLE')).toBe(true);
+  });
+});
+
+describe('validateRecipe — 분석 목적(§실측: 7개 변수 전부 prediction 불허)', () => {
+  it.each(CATALOG_KEYS)('%s는 analysisPurpose=prediction을 항상 거부한다', (key) => {
+    const result = validateRecipe(baseRecipe({ variableKeys: [key], analysisPurpose: 'prediction' }));
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'PURPOSE_NOT_ALLOWED')).toBe(true);
+  });
+
+  it('association/formula_audit는 7개 변수 전부 허용한다', () => {
+    for (const key of CATALOG_KEYS) {
+      for (const purpose of ['association', 'formula_audit'] as const) {
+        const result = validateRecipe(
+          baseRecipe({ variableKeys: [key], analysisPurpose: purpose, formulaPolicies: formulaPoliciesFor(key) }),
+        );
+        expect(result.valid, `key=${key} purpose=${purpose}`).toBe(true);
+      }
+    }
+  });
+});
+
+describe('validateRecipe — formulaPolicy', () => {
+  it('spine.mddm.lifetimeDoseMNh는 formulaPolicies.spine_mddm 없이는 거부된다(정책 혼재)', () => {
+    const result = validateRecipe(baseRecipe({ variableKeys: ['spine.mddm.lifetimeDoseMNh'] }));
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'FORMULA_POLICY_REQUIRED')).toBe(true);
+  });
+
+  it('spine.mddm.lifetimeDoseMNh에 stratify_by_version을 주면 UNSUPPORTED_FORMULA_POLICY(실제 지원은 2개뿐)', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['spine.mddm.lifetimeDoseMNh'],
+        formulaPolicies: { spine_mddm: 'stratify_by_version' },
+      }),
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'UNSUPPORTED_FORMULA_POLICY')).toBe(true);
+  });
+
+  it('spine.mddm.lifetimeDoseMNh에 recompute_current를 주면 통과한다', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['spine.mddm.lifetimeDoseMNh'],
+        formulaPolicies: { spine_mddm: 'recompute_current' },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('단일 정책 family(knee_relatedness)는 정책을 생략해도 통과한다', () => {
+    const result = validateRecipe(baseRecipe({ variableKeys: ['knee.relatedness.max'] }));
+    expect(result.valid).toBe(true);
+  });
+});
+
+describe('validateRecipe — 필터 연산자/값 형태', () => {
+  it('ordinal 변수(elbow.assessment.burdenGradeMax)에 gt 연산자는 거부된다(문자열 순위 비교 버그 방지)', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['elbow.assessment.burdenGradeMax'],
+        filters: [{ key: 'elbow.assessment.burdenGradeMax', operator: 'gt', value: '경도' }],
+      }),
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'OPERATOR_NOT_ALLOWED')).toBe(true);
+  });
+
+  it('boolean 변수(shoulder.exposure.anyExceeded)에 문자열 "false"를 주면 거부된다', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['shoulder.exposure.anyExceeded'],
+        filters: [{ key: 'shoulder.exposure.anyExceeded', operator: 'eq', value: 'false' }],
+      }),
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'INVALID_FILTER_VALUE')).toBe(true);
+  });
+
+  it('boolean 변수에 실제 boolean 값을 주면 통과한다', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['shoulder.exposure.anyExceeded'],
+        filters: [{ key: 'shoulder.exposure.anyExceeded', operator: 'eq', value: false }],
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('between은 2개 원소 배열이어야 하고 하한>상한이면 거부된다', () => {
+    const tooFew = validateRecipe(
+      baseRecipe({
+        variableKeys: ['knee.relatedness.max'],
+        filters: [{ key: 'knee.relatedness.max', operator: 'between', value: [10] }],
+      }),
+    );
+    expect(tooFew.valid).toBe(false);
+
+    const reversed = validateRecipe(
+      baseRecipe({
+        variableKeys: ['knee.relatedness.max'],
+        filters: [{ key: 'knee.relatedness.max', operator: 'between', value: [10, 5] }],
+      }),
+    );
+    expect(reversed.valid).toBe(false);
+    if (!reversed.valid) expect(reversed.errors.some((e) => e.code === 'INVALID_FILTER_RANGE')).toBe(true);
+
+    const ok = validateRecipe(
+      baseRecipe({
+        variableKeys: ['knee.relatedness.max'],
+        filters: [{ key: 'knee.relatedness.max', operator: 'between', value: [5, 10] }],
+      }),
+    );
+    expect(ok.valid).toBe(true);
+  });
+
+  it('in은 비어있지 않은 배열이어야 한다', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['elbow.assessment.burdenGradeMax'],
+        filters: [{ key: 'elbow.assessment.burdenGradeMax', operator: 'in', value: [] }],
+      }),
+    );
+    expect(result.valid).toBe(false);
+  });
+
+  it('is_missing/not_missing에 value가 있으면 거부된다', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['knee.relatedness.max'],
+        filters: [{ key: 'knee.relatedness.max', operator: 'is_missing', value: 1 }],
+      }),
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'UNEXPECTED_FILTER_VALUE')).toBe(true);
+  });
+
+  it('is_missing에 value가 없으면 통과한다', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['knee.relatedness.max'],
+        filters: [{ key: 'knee.relatedness.max', operator: 'is_missing' }],
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+});

@@ -14,6 +14,7 @@ export default defineConfig({
     'modules/spine/index': 'modules/spine/index.ts',
     'migration/deterministicMigrate': 'migration/deterministicMigrate.ts',
     completion: 'completion.ts',
+    catalog: 'catalog.ts',
   },
   format: ['esm', 'cjs'],
   outDir: 'dist',

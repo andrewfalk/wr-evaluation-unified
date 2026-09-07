@@ -22,6 +22,7 @@ import { createPresetsRouter } from './routes/presets';
 import { createCapabilityGrantsRouter } from './routes/capabilityGrants';
 import { createOpsStatusRouter } from './routes/opsStatus';
 import { createUpdatesRouter } from './routes/updates';
+import { createStatsRouter } from './routes/stats';
 import { cspMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
 import { runWorkspaceRetention } from './jobs/workspaceRetention';
@@ -52,6 +53,7 @@ app.use('/api/ai',        createAIRouter(pool));
 app.use('/api/presets',   createPresetsRouter(pool));
 app.use('/api/capabilities', createCapabilityGrantsRouter(pool));
 app.use('/api/video-analysis', createVideoAnalysisRouter(pool));
+app.use('/api/stats', createStatsRouter(pool));
 
 // 트랙 2 — electron-updater 정적 배포 경로(설치본/latest.yml/canary.yml/blockmap/정책 파일).
 // /api/* 는 아니지만 반드시 아래 SPA catch-all보다 먼저 등록해야 한다 — 순서가 바뀌면
