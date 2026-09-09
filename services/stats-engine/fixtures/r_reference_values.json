@@ -1,0 +1,75 @@
+{
+  "_note": "n2/n3/n4/n8_skewed/n10_wide 시나리오. mean/sd(ddof=1)/median/q1/q3(선형보간, R quantile type=7과 동일)/skewness(e1071 type=2)/kurtosis(e1071 type=2, excess). 2026-09-09 Docker r-base:latest(R 4.6.1 'Happy Hop') + e1071 1.7-17로 generate_r_reference.R을 실제 실행해 대조 완료 — 모든 케이스가 rtol=1e-6, atol=1e-9 이내로 일치(표시 자릿수 차이는 Python json.dumps와 R toJSON(digits=16)의 직렬화 방식 차이일 뿐, 동일 float64 값). 이 파일의 값은 실제 R 실행 결과와 검증된 상태다.",
+  "cases": [
+    {
+      "label": "n2",
+      "values": [4.0, 10.0],
+      "n": 2,
+      "mean": 7.0,
+      "sd": 4.242640687119285,
+      "median": 7.0,
+      "q1": 5.5,
+      "q3": 8.5,
+      "min": 4.0,
+      "max": 10.0,
+      "skewness": null,
+      "kurtosis": null
+    },
+    {
+      "label": "n3",
+      "values": [1.0, 2.0, 6.0],
+      "n": 3,
+      "mean": 3.0,
+      "sd": 2.6457513110645907,
+      "median": 2.0,
+      "q1": 1.5,
+      "q3": 4.0,
+      "min": 1.0,
+      "max": 6.0,
+      "skewness": 1.4578629673213046,
+      "kurtosis": null
+    },
+    {
+      "label": "n4",
+      "values": [2.0, 4.0, 4.0, 8.0],
+      "n": 4,
+      "mean": 4.5,
+      "sd": 2.516611478423583,
+      "median": 4.0,
+      "q1": 3.5,
+      "q3": 5.0,
+      "min": 2.0,
+      "max": 8.0,
+      "skewness": 1.1293381149712478,
+      "kurtosis": 2.2271468144044335
+    },
+    {
+      "label": "n8_skewed",
+      "values": [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0],
+      "n": 8,
+      "mean": 5.0,
+      "sd": 2.138089935299395,
+      "median": 4.5,
+      "q1": 4.0,
+      "q3": 5.5,
+      "min": 2.0,
+      "max": 9.0,
+      "skewness": 0.8184875533567997,
+      "kurtosis": 0.940625
+    },
+    {
+      "label": "n10_wide",
+      "values": [12.4, 8.1, 41.0, 22.5, 3.3, 55.7, 19.9, 27.2, 6.6, 33.3],
+      "n": 10,
+      "mean": 23.0,
+      "sd": 16.727555443372804,
+      "median": 21.2,
+      "q1": 9.175,
+      "q3": 31.775,
+      "min": 3.3,
+      "max": 55.7,
+      "skewness": 0.7530978714852319,
+      "kurtosis": -0.0327541122611232
+    }
+  ]
+}

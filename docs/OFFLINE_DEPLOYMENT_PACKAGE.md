@@ -1337,3 +1337,67 @@ docker run --rm --network none `
 
 `.env.production`의 값을 `off`로 바꾸고 재기동하면 즉시 검사가 비활성화됩니다(기존 락 row는
 DB에 남아있지만 이후 쓰기 요청에서 더 이상 참조되지 않습니다).
+
+---
+
+## 16. 통계분석 워크벤치 — Python 통계 엔진 (선택, PR1)
+
+PR1부터 `wr-app-server` 이미지에 기술통계 계산용 Python subprocess 엔진(`/opt/stats-venv`,
+`services/stats-engine/`)이 함께 baking됩니다. 화면(PR2)이 아직 없어 `STATS_WORKBENCH_ENABLED`가
+꺼져 있으면(기본값) 관련 라우트(`/api/stats/*`)가 전부 404로 잠깁니다 — 영상 분석의
+`VIDEO_ANALYSIS_ENABLED`와 같은 게이팅 원칙입니다.
+
+### 16-1. 이미지 크기
+
+`/opt/stats-venv`(numpy+scipy+jsonschema, `requirements.txt`에 정확한 버전 고정)가 이미지에
+**+약 246MB** 추가됩니다(실측, `du -sh /opt/stats-venv` 기준) — 이전 계획서 초안의 "+80~120MB"
+추정치보다 실제로는 큽니다(manylinux wheel이 자체 BLAS 라이브러리를 함께 포함하기 때문). 영상
+추론(`/opt/pose-venv`, +약 570MB)과는 완전히 별도 venv입니다.
+
+### 16-2. 에어갭 동작 검증
+
+에어갭 배포 전, 빌드한 이미지에서 `--network none`으로 실제 Python subprocess가 도는지 확인합니다:
+
+```powershell
+docker run --rm --network none `
+  wr-app-server:<version> `
+  /opt/stats-venv/bin/python /app/stats-engine/analyze.py --selfcheck
+```
+
+`stats-engine selfcheck OK`가 stderr에 찍히고 exit code 0이면 통과입니다. 실제 stdin/stdout
+계산(한글 값 포함)까지 확인하려면:
+
+```powershell
+'{"protocolVersion":1,"variables":[{"key":"v1","kind":"continuous","values":[10,20,30]},{"key":"g","kind":"discrete","values":["\uacbd\ub3c4","\uace0\ub3c4"]}]}' | `
+  docker run --rm -i --network none wr-app-server:<version> `
+  /opt/stats-venv/bin/python /app/stats-engine/analyze.py
+```
+
+> ⚠️ **한글(경도/고도)을 원문 그대로 붙여넣지 말고 위처럼 JSON `\uXXXX` 이스케이프
+> (`경도`=경도, `고도`=고도)를 쓸 것.** Windows PowerShell(5.1)은
+> `$OutputEncoding` 기본값이 UTF-8이 아니라, 파이프로 넘어가는 멀티바이트 문자가 `??`로
+> 깨져 "경도"와 "고도"가 구분 안 되는 하나의 범주로 뭉개지는 것을 실측으로 확인했습니다
+> (`$OutputEncoding = [Text.Encoding]::ASCII`로 재현). `\uXXXX` 이스케이프는 순수 ASCII
+> 문자만 파이프를 지나가므로 `$OutputEncoding` 설정과 무관하게 항상 안전합니다 — JSON
+> 표준 문법이라 `analyze.py`가 그대로 정상 디코딩합니다(실측 확인: 위 이스케이프가
+> 정확히 "경도"/"고도"로 디코딩됨, `d['g'][0]=='경도'` 등). 대안으로
+> `$OutputEncoding = New-Object System.Text.UTF8Encoding $false`를 명령 앞에 추가해도
+> 되지만, **BOM이 포함되는 `[Text.Encoding]::UTF8`을 그대로 쓰면 안 된다** — 그 BOM이
+> JSON 맨 앞에 섞여 들어가 `json.loads`가 `Unexpected UTF-8 BOM` 오류로 실패하는 것도
+> 실측으로 확인했습니다. 이스케이프 방식은 이런 함정 자체가 없어 더 안전합니다.
+
+정상 JSON 결과(예: `"mean": 20.0`, `discrete[0].levels`에 두 level 각 1건)가 stdout에 그대로
+출력되면 **인터넷 없이 baked venv로 계산이 동작**하는 것입니다. (PR1 구현 중 이 두 명령을 실제로
+`wr-app-server-pr1-test` 이미지에 대해 실행해 통과를 확인함 — Git Bash에서 실행할 경우
+절대경로 인자가 MSYS 경로변환으로 깨질 수 있어 `MSYS_NO_PATHCONV=1`을 앞에 붙여야 함,
+PowerShell에서는 해당 없음.)
+
+### 16-3. 활성화
+
+```
+STATS_WORKBENCH_ENABLED=true
+```
+
+`.env.production`에 추가하고 재기동. `STATS_ENGINE_TIMEOUT_MS`/`STATS_ENGINE_MAX_CONCURRENCY` 등
+나머지 `STATS_ENGINE_*` 노브는 `.env.production.example`의 주석과 기본값을 참고하세요. PR1은
+`POST /analyze` API까지만 제공하며 화면은 없습니다(PR2에서 추가 예정).

@@ -30,7 +30,11 @@ export interface DatasetResult {
 // 같은데 실제 매치 결과는 다른 경우가 생긴다(예: 필터값 '고도'가 NFD로 들어오면 NFC로
 // 저장된 관측값과 코드유닛이 달라 값이 실제로 같은데도 eq가 false를 낸다). 숫자/불린은
 // 정규화 대상이 아니므로 그대로 통과시킨다.
-function normalizeForCompare(value: unknown): unknown {
+// PR1(statsDescriptiveSuppression.ts)이 Python에 보낼 문자열 값을 같은 규칙으로
+// 정규화하고, level별 person count를 재계산할 때도 이 규칙으로 그룹핑해야 Python이
+// 그룹화한 level 식별자와 일치한다 — 그래서 이 함수 자체를 export한다(matchesFilter만
+// export하던 것에서 확장).
+export function normalizeForCompare(value: unknown): unknown {
   return typeof value === 'string' ? value.normalize('NFC') : value;
 }
 

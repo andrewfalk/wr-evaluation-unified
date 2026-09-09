@@ -4,7 +4,7 @@
 // 뒤에만 호출된다는 전제로 동작한다.
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
 import type { DatasetRow } from './statsDatasetBuilder';
-import { MINIMUM_COHORT } from './statsPolicy';
+import { isSmallCell } from './statsSmallCell';
 
 export interface EventNonEventEntry {
   variableKey: string;
@@ -18,11 +18,6 @@ export interface EstimabilityResult {
   missingRatesByVariable: Record<string, number | null>;
   candidateParameterCount: null;
   eventNonEvent: EventNonEventEntry[];
-}
-
-// §C 원칙 — 소수 셀 억제는 사례 수가 아니라 그 셀에 기여한 고유 person 수로 판정한다.
-function isSmallCell(personCount: number): boolean {
-  return personCount > 0 && personCount < MINIMUM_COHORT;
 }
 
 function distinctPersons(rows: DatasetRow[]): number {

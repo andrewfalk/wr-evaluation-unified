@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "seed:admin": "tsx src/cli/seedAdmin.ts",
     "retention": "tsx src/cli/runRetention.ts",
-    "cleanup:video": "tsx src/cli/runVideoCleanup.ts"
+    "cleanup:video": "tsx src/cli/runVideoCleanup.ts",
+    "cleanup:stats-runs": "tsx src/cli/runStatsRunCleanup.ts"
   },
   "dependencies": {
     "@wr/analytics-core": "file:../packages/analytics-core",

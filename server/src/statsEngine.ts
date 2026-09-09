@@ -1,0 +1,419 @@
+// PR1 — Python subprocess worker spawn wrapper. 계획서(pr1-giggly-treehouse.md) §2 참고.
+// 6차례 검토를 거친 프로세스 생명주기 설계를 그대로 구현한다 — 핵심 불변식:
+//   1) 완료 판정은 오직 'close' 이벤트에서만 한다(stdout 유실 방지, exit는 쓰지 않음).
+//   2) 모든 종료 시도는 requestTermination() 하나로 모은다(kill() 재귀 방지).
+//   3) 세마포어 슬롯 반환은 오직 'close'(정상) 또는 최종 안전 타이머(비정상, 미반환)에서만.
+//   4) requestSettled(호출자에게 확정 알림)와 processClosed(OS가 실제 종료 확인)를 분리한다.
+import { spawn } from 'child_process';
+import path from 'path';
+import { z } from 'zod';
+import config from './config';
+import { MAX_STRING_LENGTH, MAX_TOTAL_VALUES, MAX_VALUES_PER_VARIABLE } from './statsEngineLimits';
+
+export type StatsEngineVariableKind = 'continuous' | 'discrete';
+
+export interface StatsEngineVariable {
+  key: string;
+  kind: StatsEngineVariableKind;
+  values: Array<number | string | boolean>;
+}
+
+export interface StatsEngineRequest {
+  variables: StatsEngineVariable[];
+}
+
+const StatsEngineNullReasonSchema = z.enum(['insufficient_data', 'undefined_zero_variance', 'non_finite_result']);
+
+// 7차 검토 필수 수정 — .finite()가 빠져 있으면 JSON.parse('1e400') 같은 값이 Infinity로
+// 파싱돼 z.number()를 그대로 통과한다(typeof Infinity === 'number'). 이후 canonicalDigest가
+// NaN/Infinity에서 throw하는데 그 지점이 실패 분류 try/catch 밖이라 감사·failed 기록이
+// 누락되는 경로로 이어졌다 — 여기서 막아 정상적으로 RESULT_SCHEMA_INVALID로 분류되게 한다.
+const finiteNullable = () => z.number().finite().nullable();
+
+const StatsEngineContinuousResultSchema = z.object({
+  variableKey: z.string(),
+  n: z.number().int().nonnegative(),
+  mean: finiteNullable(),
+  sd: finiteNullable(),
+  median: finiteNullable(),
+  q1: finiteNullable(),
+  q3: finiteNullable(),
+  iqr: finiteNullable(),
+  skewness: finiteNullable(),
+  kurtosis: finiteNullable(),
+  min: finiteNullable(),
+  max: finiteNullable(),
+  nullReasons: z.record(z.string(), StatsEngineNullReasonSchema),
+});
+
+const StatsEngineDiscreteLevelSchema = z.object({
+  level: z.union([z.string(), z.boolean()]),
+  count: z.number().int().nonnegative(),
+});
+
+const StatsEngineDiscreteResultSchema = z.object({
+  variableKey: z.string(),
+  n: z.number().int().nonnegative(),
+  levels: z.array(StatsEngineDiscreteLevelSchema),
+});
+
+const StatsEngineRawResultSchema = z.object({
+  protocolVersion: z.literal(1),
+  continuous: z.array(StatsEngineContinuousResultSchema),
+  discrete: z.array(StatsEngineDiscreteResultSchema),
+});
+
+export type StatsEngineContinuousResult = z.infer<typeof StatsEngineContinuousResultSchema>;
+export type StatsEngineDiscreteResult   = z.infer<typeof StatsEngineDiscreteResultSchema>;
+export interface StatsEngineRawResult {
+  continuous: StatsEngineContinuousResult[];
+  discrete: StatsEngineDiscreteResult[];
+}
+
+export class StatsEngineBusyError extends Error {
+  constructor() { super('stats engine worker slot is busy'); this.name = 'StatsEngineBusyError'; }
+}
+export class StatsEngineTimeoutError extends Error {
+  constructor() { super('stats engine process timed out'); this.name = 'StatsEngineTimeoutError'; }
+}
+export class StatsEngineOutputTooLargeError extends Error {
+  constructor() { super('stats engine process output exceeded size limit'); this.name = 'StatsEngineOutputTooLargeError'; }
+}
+export class StatsEngineProcessError extends Error {
+  public code: 'PROCESS_ERROR' | 'INVALID_OUTPUT';
+  constructor(code: 'PROCESS_ERROR' | 'INVALID_OUTPUT', message: string) {
+    super(message);
+    this.name = 'StatsEngineProcessError';
+    this.code = code;
+  }
+}
+export class StatsEngineResultInvalidError extends Error {
+  constructor(message: string) { super(message); this.name = 'StatsEngineResultInvalidError'; }
+}
+// §2.1 최종 안전 타이머가 발동한 뒤 — 엔진 상태가 불확실해 신뢰 회복까지(서버 재시작)
+// 신규 작업을 받지 않는다. 자동 복구는 PR1 범위 밖(PR2 검토 대상).
+export class StatsEngineDegradedError extends Error {
+  constructor() { super('stats engine is degraded — process termination could not be confirmed'); this.name = 'StatsEngineDegradedError'; }
+}
+// §7.4 — spawn 전 입력 상한 위반(변수당/총합/문자열길이/전체 바이트). 세마포어를 건드리지
+// 않는 순수 입력 검증 실패라 §5 표의 INPUT_TOO_LARGE(감사만, stats_runs 행 없음)로 매핑된다.
+export class StatsEngineInputTooLargeError extends Error {
+  constructor(message: string) { super(message); this.name = 'StatsEngineInputTooLargeError'; }
+}
+
+function assertWithinLimits(request: StatsEngineRequest): void {
+  let total = 0;
+  for (const v of request.variables) {
+    if (v.values.length > MAX_VALUES_PER_VARIABLE) {
+      throw new StatsEngineInputTooLargeError(
+        `variable '${v.key}' has ${v.values.length} values, exceeds MAX_VALUES_PER_VARIABLE(${MAX_VALUES_PER_VARIABLE})`,
+      );
+    }
+    for (const value of v.values) {
+      if (typeof value === 'string' && value.length > MAX_STRING_LENGTH) {
+        throw new StatsEngineInputTooLargeError(
+          `variable '${v.key}' has a string value exceeding MAX_STRING_LENGTH(${MAX_STRING_LENGTH})`,
+        );
+      }
+    }
+    total += v.values.length;
+  }
+  if (total > MAX_TOTAL_VALUES) {
+    throw new StatsEngineInputTooLargeError(`total values (${total}) exceeds MAX_TOTAL_VALUES(${MAX_TOTAL_VALUES})`);
+  }
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 1, variables: request.variables }), 'utf8');
+  if (byteLength > config.stats.maxInputBytes) {
+    throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 모듈 레벨 상태(가드C 세마포어 + degraded 플래그) — 의도적으로 프로세스 전역이다.
+// ---------------------------------------------------------------------------
+let inFlightCount = 0;
+let engineDegraded = false;
+
+/** 테스트 전용 — 모듈 상태를 초기화한다. */
+export function __resetStatsEngineForTests(): void {
+  inFlightCount = 0;
+  engineDegraded = false;
+}
+
+/** §2.2 — zod shape 통과 후 추가 의미 검증. 위반 시 StatsEngineResultInvalidError. */
+function validateSemantics(request: StatsEngineRequest, raw: z.infer<typeof StatsEngineRawResultSchema>): void {
+  const requestedByKind = new Map<string, StatsEngineVariableKind>();
+  const requestedLength = new Map<string, number>();
+  for (const v of request.variables) {
+    requestedByKind.set(v.key, v.kind);
+    requestedLength.set(v.key, v.values.length);
+  }
+
+  // 7차 검토 필수 수정 — seen.add()만 하고 has() 검사가 없으면 같은 변수 결과가 두 번
+  // 와도 최종 집합 크기(size)만 비교하는 아래 검사를 우회한다(중복 2개=1개로 뭉개짐).
+  const seen = new Set<string>();
+  for (const c of raw.continuous) {
+    if (requestedByKind.get(c.variableKey) !== 'continuous') {
+      throw new StatsEngineResultInvalidError(`unexpected or kind-mismatched key in continuous result: ${c.variableKey}`);
+    }
+    if (seen.has(c.variableKey)) {
+      throw new StatsEngineResultInvalidError(`duplicate result for variable: ${c.variableKey}`);
+    }
+    if (c.n !== requestedLength.get(c.variableKey)) {
+      throw new StatsEngineResultInvalidError(`n mismatch for ${c.variableKey}: expected ${requestedLength.get(c.variableKey)}, got ${c.n}`);
+    }
+    seen.add(c.variableKey);
+  }
+  for (const d of raw.discrete) {
+    if (requestedByKind.get(d.variableKey) !== 'discrete') {
+      throw new StatsEngineResultInvalidError(`unexpected or kind-mismatched key in discrete result: ${d.variableKey}`);
+    }
+    if (seen.has(d.variableKey)) {
+      throw new StatsEngineResultInvalidError(`duplicate result for variable: ${d.variableKey}`);
+    }
+    if (d.n !== requestedLength.get(d.variableKey)) {
+      throw new StatsEngineResultInvalidError(`n mismatch for ${d.variableKey}: expected ${requestedLength.get(d.variableKey)}, got ${d.n}`);
+    }
+    const levelKeys = new Set<string>();
+    let sum = 0;
+    for (const lvl of d.levels) {
+      const levelKey = `${typeof lvl.level}:${String(lvl.level)}`;
+      if (levelKeys.has(levelKey)) {
+        throw new StatsEngineResultInvalidError(`duplicate level for ${d.variableKey}: ${String(lvl.level)}`);
+      }
+      levelKeys.add(levelKey);
+      sum += lvl.count;
+    }
+    if (sum !== d.n) {
+      throw new StatsEngineResultInvalidError(`levels count sum (${sum}) !== n (${d.n}) for ${d.variableKey}`);
+    }
+    seen.add(d.variableKey);
+  }
+
+  if (seen.size !== requestedByKind.size) {
+    const missing = [...requestedByKind.keys()].filter((k) => !seen.has(k));
+    throw new StatsEngineResultInvalidError(`missing variable(s) in result: ${missing.join(', ')}`);
+  }
+}
+
+interface RecordedOutcome {
+  kind: 'spawn_error' | 'stdin_error' | 'timeout' | 'output_too_large';
+  detail?: string;
+}
+
+export async function runStatsEngine(request: StatsEngineRequest): Promise<StatsEngineRawResult> {
+  assertWithinLimits(request);
+  if (engineDegraded) {
+    throw new StatsEngineDegradedError();
+  }
+  if (inFlightCount >= config.stats.maxConcurrency) {
+    throw new StatsEngineBusyError();
+  }
+  inFlightCount += 1;
+
+  let slotReleased = false;
+  const releaseSlot = () => {
+    if (slotReleased) return;
+    slotReleased = true;
+    inFlightCount = Math.max(0, inFlightCount - 1);
+  };
+
+  return new Promise<StatsEngineRawResult>((resolve, reject) => {
+    const scriptPath = path.join(config.stats.scriptsDir, 'analyze.py');
+    const env = {
+      ...process.env,
+      OMP_NUM_THREADS: '1',
+      OPENBLAS_NUM_THREADS: '1',
+      MKL_NUM_THREADS: '1',
+      NUMEXPR_NUM_THREADS: '1',
+      VECLIB_MAXIMUM_THREADS: '1',
+    };
+
+    // 7차 검토 필수 수정 — spawn() 자체가 동기적으로 throw할 수 있다(예: 잘못된 옵션,
+    // 플랫폼별 ENOENT가 비동기 'error' 대신 동기 예외로 오는 경우). 이 시점엔 아직 아무
+    // 리스너도 등록 전이라 'close'가 절대 오지 않으므로, 여기서 못 잡으면 슬롯이 영구
+    // 누수되고 이후 모든 요청이 StatsEngineBusyError로 막힌다(실제 재현됨).
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(config.stats.python, [scriptPath], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    } catch (err) {
+      releaseSlot();
+      reject(new StatsEngineProcessError('PROCESS_ERROR', err instanceof Error ? err.message : 'spawn 실패'));
+      return;
+    }
+
+    let recordedOutcome: RecordedOutcome | null = null;
+    let requestSettled = false;
+    let processClosed = false;
+    let terminationRequested = false;
+    let graceTimer: NodeJS.Timeout | null = null;
+    let timeoutTimer: NodeJS.Timeout | null = null;
+    let safetyTimer: NodeJS.Timeout | null = null;
+
+    let stdoutChunks: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderrChunks: Buffer[] = [];
+    let stderrBytes = 0;
+
+    const clearAllTimers = () => {
+      if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
+      if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+      if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null; }
+    };
+
+    const removeAllListeners = () => {
+      child.removeAllListeners();
+      child.stdin?.removeAllListeners();
+      child.stdout?.removeAllListeners();
+      child.stderr?.removeAllListeners();
+    };
+
+    // §2.1 — 모든 종료 시도의 단일 진입점. terminationRequested를 kill() 호출 '전에'
+    // 세워 재귀(kill 실패로 인한 동기 'error' 재발생 포함)를 끊는다.
+    function requestTermination(signal: 'SIGTERM' | 'SIGKILL') {
+      if (terminationRequested) return;
+      terminationRequested = true;
+      try { child.kill(signal); } catch { /* 동기 throw 무시 — 별도 기록 불필요 */ }
+      graceTimer = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch { /* 무시 */ }
+      }, config.stats.killGraceMs);
+    }
+
+    // 정상 확정(오직 'close'에서만 호출) — recordedOutcome/exitCode로 분기.
+    function finish(exitCode: number | null) {
+      requestSettled = true;
+      clearAllTimers();
+      releaseSlot();
+      removeAllListeners();
+
+      if (recordedOutcome) {
+        switch (recordedOutcome.kind) {
+          case 'timeout':
+            reject(new StatsEngineTimeoutError());
+            return;
+          case 'output_too_large':
+            reject(new StatsEngineOutputTooLargeError());
+            return;
+          case 'spawn_error':
+          case 'stdin_error':
+            reject(new StatsEngineProcessError('PROCESS_ERROR', recordedOutcome.detail ?? recordedOutcome.kind));
+            return;
+        }
+      }
+
+      if (exitCode === 0) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(Buffer.concat(stdoutChunks).toString('utf8'));
+        } catch {
+          reject(new StatsEngineProcessError('INVALID_OUTPUT', 'stdout이 유효한 JSON이 아님'));
+          return;
+        }
+        const shapeResult = StatsEngineRawResultSchema.safeParse(parsed);
+        if (!shapeResult.success) {
+          reject(new StatsEngineResultInvalidError(`결과 schema 재검증 실패: ${shapeResult.error.message}`));
+          return;
+        }
+        try {
+          validateSemantics(request, shapeResult.data);
+        } catch (err) {
+          reject(err instanceof Error ? err : new StatsEngineResultInvalidError(String(err)));
+          return;
+        }
+        resolve({ continuous: shapeResult.data.continuous, discrete: shapeResult.data.discrete });
+        return;
+      }
+
+      // 비정상 종료 — stderr의 STATS_ENGINE_ERROR 마커를 파싱(진단용 detail은 서버
+      // 로그로만 남기고 이 에러 객체를 통해 호출자에게 원문을 노출하지 않는다).
+      const stderrText = Buffer.concat(stderrChunks).toString('utf8');
+      const markerMatch = stderrText.match(/STATS_ENGINE_ERROR (\{.*\})/);
+      if (markerMatch) {
+        console.error('[stats-engine] process error marker:', markerMatch[1]);
+      } else if (stderrText) {
+        console.error('[stats-engine] process exited non-zero with stderr:', stderrText.slice(0, 2000));
+      }
+      reject(new StatsEngineProcessError('PROCESS_ERROR', `stats-engine 프로세스가 code ${exitCode}로 종료됨`));
+    }
+
+    child.on('error', (err) => {
+      recordedOutcome ??= { kind: 'spawn_error', detail: err.message };
+      requestTermination('SIGTERM');
+    });
+
+    child.stdin?.on('error', (err) => {
+      recordedOutcome ??= { kind: 'stdin_error', detail: err.message };
+      requestTermination('SIGTERM');
+    });
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      if (recordedOutcome?.kind === 'output_too_large') return;
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > config.stats.stdoutMaxBytes) {
+        recordedOutcome ??= { kind: 'output_too_large' };
+        stdoutChunks = [];
+        requestTermination('SIGTERM');
+        return;
+      }
+      stdoutChunks.push(chunk);
+    });
+
+    // 7차 검토 필수 수정 — 이전 판은 상한 초과 시 조용히 버리기만 하고 종료를 시도하지
+    // 않아, stderr를 계속 흘려보내는 프로세스가 stdout만 정상이면 그대로 성공 처리됐다
+    // (kill 없이 성공하는 게 실제 재현됨). stdout과 동일하게 kill+output_too_large로
+    // 승격한다. 또한 문턱을 넘기는 그 chunk 자체를 통째로 저장하지 않는다 — 이전 판은
+    // "누적 전 체크"라 문턱을 막 넘긴 큰 chunk가 그대로 들어가 실제 보관량이 상한을
+    // 크게 초과할 수 있었다.
+    child.stderr?.on('data', (chunk: Buffer) => {
+      if (recordedOutcome?.kind === 'output_too_large') return;
+      stderrBytes += chunk.length;
+      if (stderrBytes > config.stats.stderrMaxBytes) {
+        recordedOutcome ??= { kind: 'output_too_large' };
+        stderrChunks = [];
+        requestTermination('SIGTERM');
+        return;
+      }
+      stderrChunks.push(chunk);
+    });
+
+    timeoutTimer = setTimeout(() => {
+      recordedOutcome ??= { kind: 'timeout' };
+      requestTermination('SIGTERM');
+    }, config.stats.timeoutMs);
+
+    // §2.1 최종 안전 타이머 — 'close'가 끝내 안 오면 요청을 실패로 1회 확정하되 슬롯은
+    // 반환하지 않는다(프로세스가 실제로 끝났는지 모르므로) — 대신 엔진 전체를 격리한다.
+    safetyTimer = setTimeout(() => {
+      if (processClosed) return;
+      requestSettled = true;
+      clearAllTimers();
+      engineDegraded = true;
+      // 슬롯은 의도적으로 반환하지 않는다 — releaseSlot() 호출 없음.
+      reject(new StatsEngineProcessError('PROCESS_ERROR', '프로세스 종료를 확인하지 못함(안전 타이머 발동)'));
+      // 리스너는 해제하지 않는다 — 늦게 오는 'close'를 계속 듣고 아래에서 정리한다.
+    }, config.stats.timeoutMs + config.stats.killGraceMs + 5000);
+
+    child.once('close', (code) => {
+      processClosed = true;
+      if (requestSettled) {
+        // 안전 타이머가 이미 확정한 뒤 늦게 온 close — Promise·슬롯·DB 저장은 다시
+        // 만들지 않되 정리 작업(타이머·리스너)은 반드시 수행한다.
+        clearAllTimers();
+        console.warn('[stats-engine] degraded 유발 프로세스가 뒤늦게 실제로 종료됨(late close), engineDegraded는 유지됨');
+        removeAllListeners();
+        return;
+      }
+      finish(code);
+    });
+
+    try {
+      const payload = JSON.stringify({
+        protocolVersion: 1,
+        variables: request.variables,
+      });
+      child.stdin?.end(payload, 'utf8');
+    } catch (err) {
+      recordedOutcome ??= { kind: 'stdin_error', detail: err instanceof Error ? err.message : String(err) };
+      requestTermination('SIGTERM');
+    }
+  });
+}

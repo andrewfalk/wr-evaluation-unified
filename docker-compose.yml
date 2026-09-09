@@ -84,6 +84,16 @@ services:
       # B2·촬영 프로토콜(작업자 1–2명)과 함께 결정. 허용 [0,1.0] 밖은 기동 실패.
       VIDEO_POSE_TIER: ${VIDEO_POSE_TIER:-standard}
       VIDEO_DET_INTERVAL_SEC: ${VIDEO_DET_INTERVAL_SEC:-0}
+      # 통계분석 워크벤치(PR0-A~PR1). 화면이 아직 없어(PR2) 기본 비활성.
+      STATS_WORKBENCH_ENABLED: ${STATS_WORKBENCH_ENABLED:-false}
+      # PR1 — Python subprocess 기술통계 엔진. 별도 컨테이너 없음(영상분석과 동일 패턴,
+      # app 이미지 내 /opt/stats-venv를 execFile로 spawn). 동시성 1이라 컨테이너 격리
+      # 없이도 위 mem_limit/cpus로 충분히 통제 가능(계획서 §7.1).
+      STATS_ENGINE_TIMEOUT_MS: ${STATS_ENGINE_TIMEOUT_MS:-30000}
+      STATS_ENGINE_KILL_GRACE_MS: ${STATS_ENGINE_KILL_GRACE_MS:-2000}
+      STATS_ENGINE_MAX_CONCURRENCY: ${STATS_ENGINE_MAX_CONCURRENCY:-1}
+      STATS_MAX_CONCURRENT_ANALYZE_REQUESTS: ${STATS_MAX_CONCURRENT_ANALYZE_REQUESTS:-4}
+      STATS_RUNS_RESULT_TTL_HOURS: ${STATS_RUNS_RESULT_TTL_HOURS:-168}
       BACKUPS_DIR:          /backups
       # 트랙 2 — electron-updater 정적 배포 경로(설치본/latest.yml/canary.yml/blockmap/
       # update-policy.json). 리터럴 경로(BACKUPS_DIR와 동일 이유 — Windows에서

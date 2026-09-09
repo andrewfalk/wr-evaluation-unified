@@ -1,0 +1,6 @@
+# stats-engine (PR1) — pandas/statsmodels 의도적으로 제외(회귀·이변량은 PR4-A/PR3 이후).
+# 정확한 버전 고정(==) — 오프라인 wheel 캐시 관리 시 이 버전을 기준으로 wheel을 받는다.
+# 버전을 올릴 때는 test_descriptive.py의 R 참조값 비교(rtol/atol)가 여전히 통과하는지 확인할 것.
+numpy==1.26.4
+scipy==1.13.0
+jsonschema==4.22.0

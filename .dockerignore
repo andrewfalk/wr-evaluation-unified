@@ -52,3 +52,8 @@ services/pose-inference/**/*.avi
 services/pose-inference/**/*.mkv
 services/pose-inference/**/*.webm
 **/__pycache__/
+
+# PR1 stats-engine dev artifacts — venv/캐시는 이미지에 굽지 않는다(요구사항은
+# Dockerfile이 별도로 pip install한다). fixtures/(R 참조값·pytest 전용)는 런타임에
+# 불필요하지만 크기가 무의미해 제외하지 않는다.
+services/stats-engine/.venv/
