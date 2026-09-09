@@ -364,7 +364,7 @@ function App() {
     const current = patients.find(p => p.id === activeId);
     const status = current?.sync?.syncStatus;
 
-    if (!current || status === 'synced') {
+    if (!isIntranetMode || !current || status === 'synced') {
       switchPatient(patientId);
       return;
     }
@@ -408,7 +408,7 @@ function App() {
     }
 
     switchPatient(patientId);
-  }, [activeId, patients, switchPatient, flushPatient, setPatients, dirtyAssessmentPatientId, blockedByUnsavedDraftAlert]);
+  }, [activeId, patients, switchPatient, flushPatient, setPatients, dirtyAssessmentPatientId, blockedByUnsavedDraftAlert, isIntranetMode]);
 
   // 영상 분석 서버 적용 후 서버 동기화 환자를 목록에 반영(로컬 id 보존 → id로 교체).
   const onVideoServerApplied = useCallback((serverPatient) => {
