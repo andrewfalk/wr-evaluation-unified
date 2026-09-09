@@ -27,6 +27,7 @@ import { cspMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
 import { runWorkspaceRetention } from './jobs/workspaceRetention';
 import { runVideoClipCleanup } from './jobs/videoClipCleanup';
+import { runStatsRunCleanup } from './jobs/statsRunCleanup';
 
 export const app = express();
 app.set('trust proxy', config.trustProxy);
@@ -128,6 +129,22 @@ if (require.main === module) {
           };
           doVideoCleanup();
           setInterval(doVideoCleanup, 60 * 60 * 1000).unref();
+        }
+
+        // PR1 §8 — stats_runs 저장공간 정리. 플래그 꺼져 있으면 행 자체가 안 쌓이므로
+        // 무의미한 폴링을 안 만든다(video 워커가 videoAnalysisEnabled 조건부 등록하는
+        // 것과 동일 논리). 정확성에는 불필요한 job(§8) — TTL 준수는 요청 시점에 이미
+        // 보장되므로 이 job이 늦게 돌거나 꺼져 있어도 idempotency 캐시는 안 깨진다.
+        if (config.statsWorkbenchEnabled) {
+          const doStatsRunCleanup = () => {
+            runStatsRunCleanup(pool)
+              .then(({ deleted }) => {
+                if (deleted > 0) console.log(`[wr-server] stats-run-cleanup: removed ${deleted} expired stats_runs row(s)`);
+              })
+              .catch((err) => console.error('[wr-server] stats-run-cleanup error', err));
+          };
+          doStatsRunCleanup();
+          setInterval(doStatsRunCleanup, 60 * 60 * 1000).unref();
         }
       });
     })

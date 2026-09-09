@@ -60,3 +60,17 @@ export function deviceRegisterUserRateLimit(): RequestHandler {
     message:         { code: 'RATE_LIMITED', error: 'Device registration limit reached for this account' },
   });
 }
+
+// PR1 — POST /analyze: 20 per minute per authenticated user. Python subprocess를 실제로
+// 스폰할 수 있는 유일한 엔드포인트라 volume을 얕게 통제한다(가드A/가드C와는 별개 레이어 —
+// 계획서 §4.0). deviceRegisterUserRateLimit()와 동일 패턴(userId 키).
+export function analyzeRateLimit(): RequestHandler {
+  return rateLimit({
+    windowMs:        60 * 1000,
+    limit:           20,
+    standardHeaders: 'draft-7',
+    legacyHeaders:   false,
+    keyGenerator:    (req: Request) => req.sessionInfo!.userId,
+    message:         { code: 'RATE_LIMITED', error: 'Too many analysis requests, please try again later' },
+  });
+}

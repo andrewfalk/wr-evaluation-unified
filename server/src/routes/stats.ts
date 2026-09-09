@@ -1,11 +1,12 @@
-// PR0-C — GET /catalog + POST /preview. §D-6 통합 파이프라인: 코호트 미달이든 differencing
-// 초과든 같은 마스킹 페이로드로 응답하고, 감사·resultDigest 계산은 예외 없이 거친다.
+// PR0-C — GET /catalog + POST /preview. PR1 — POST /analyze(동기). §D-6 통합 파이프라인:
+// 코호트 미달이든 differencing 초과든 같은 마스킹 페이로드로 응답하고, 감사·resultDigest
+// 계산은 예외 없이 거친다. handlePostPreview/handlePostAnalyze는 statsAnalysisContext.ts의
+// buildAnalysisContext()를 공유한다(순수 추출, 계획서 pr1-giggly-treehouse.md §4.1).
 import { Router, type Request, type Response } from 'express';
 import type { Pool } from 'pg';
 import { getFullVariableCatalog, CATALOG_VERSION } from '@wr/analytics-core/catalog';
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
 import {
-  StatsAnalysisRecipeSchema,
   type CatalogResponse,
   type CatalogVariable,
   type PreviewResponse,
@@ -15,15 +16,14 @@ import {
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { requireCapability } from '../middleware/requireCapability';
+import { analyzeRateLimit } from '../middleware/rateLimit';
 import { writeAuditLogStrict } from '../middleware/audit';
 import { canonicalDigest } from '../canonicalSerializer';
 import { MINIMUM_COHORT, ESTIMABILITY_POLICY_VERSION, DIFFERENCING_POLICY } from '../statsPolicy';
-import { validateRecipe } from '../statsRecipeValidation';
-import { readSnapshot } from '../statsSnapshot';
-import { buildDataset } from '../statsDatasetBuilder';
 import { computeEstimability } from '../statsEstimability';
-import { computeQueryFamilyDigest, checkAndRecordDifferencing } from '../statsDifferencingGuard';
 import { buildRunManifest } from '../statsRunManifest';
+import { buildAnalysisContext } from '../statsAnalysisContext';
+import { handlePostAnalyze } from '../statsAnalyzeHandler';
 
 const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
@@ -95,58 +95,25 @@ function buildSuppressedPreviewPayload(
 }
 
 async function handlePostPreview(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
-  const orgId = session.organizationId!;
-
-  const parsed = StatsAnalysisRecipeSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ code: 'INVALID_RECIPE', errors: parsed.error.issues });
+  const built = await buildAnalysisContext(pool, req);
+  if (!built.ok) {
+    res.status(built.status).json(built.body);
     return;
   }
-  const recipe = parsed.data;
-
-  // §A — 레시피 검증(카탈로그 존재·식별자·목적·필터 형태·formulaPolicy 유효성).
-  const validation = validateRecipe(recipe);
-  if (!validation.valid) {
-    res.status(400).json({ code: 'INVALID_RECIPE', errors: validation.errors });
-    return;
-  }
-  const { catalogByKey } = validation;
-
-  // §E — recipeDigest는 검증·정규화(zod 기본값 채움) 후 recipe를 배열 순서 그대로 해시한다.
-  const recipeDigest = canonicalDigest(recipe);
-  const queryFamilyDigest = computeQueryFamilyDigest(recipe);
-
-  // §D-6 ② differencing 게이트 — 이후 ③ 계산은 결과와 무관하게 항상 실행한다(감사·
-  // resultDigest 계산이 억제 여부와 무관하게 항상 일어나야 하므로).
-  const differencing = checkAndRecordDifferencing(orgId, session.userId, recipe, queryFamilyDigest);
-
-  // §D-6 ③ snapshot + dataset builder + estimability.
-  const snapshot = await readSnapshot(pool, orgId);
-  const dataset = buildDataset(snapshot.rows, recipe, recipeDigest, catalogByKey);
-
-  const minCohortExceeded = dataset.personCount < MINIMUM_COHORT;
-  // §D-6 — 사유 우선순위: MIN_COHORT_NOT_MET이 DIFFERENCING_RATE_LIMIT보다 우선한다(코호트
-  // 자체가 작으면 아무리 기다려도 안 되므로 더 근본적이고 정확한 사유).
-  const reasonCode: 'MIN_COHORT_NOT_MET' | 'DIFFERENCING_RATE_LIMIT' | null = minCohortExceeded
-    ? 'MIN_COHORT_NOT_MET'
-    : differencing.forceSuppress
-      ? 'DIFFERENCING_RATE_LIMIT'
-      : null;
-  const suppressed = reasonCode !== null;
+  const ctx = built.ctx;
 
   let counts: PreviewCounts;
   let estimability: PreviewEstimability;
 
-  if (suppressed) {
-    ({ counts, estimability } = buildSuppressedPreviewPayload(recipe.variableKeys, catalogByKey, reasonCode!));
+  if (ctx.requestSuppressed) {
+    ({ counts, estimability } = buildSuppressedPreviewPayload(ctx.recipe.variableKeys, ctx.catalogByKey, ctx.reasonCode!));
   } else {
     // §C 1단계 게이트를 통과했을 때만 §C 2단계(person 단위 소수 셀 억제)를 계산한다.
-    const est = computeEstimability(dataset.rows, recipe.variableKeys, catalogByKey);
+    const est = computeEstimability(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey);
     counts = {
-      personCount: dataset.personCount,
-      caseCount: dataset.caseCount,
-      observationCount: dataset.observationCount,
+      personCount: ctx.dataset.personCount,
+      caseCount: ctx.dataset.caseCount,
+      observationCount: ctx.dataset.observationCount,
       suppressed: false,
       minimumCohort: MINIMUM_COHORT,
       reasonCode: null,
@@ -154,7 +121,7 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
     estimability = {
       completeCaseN: est.completeCaseN,
       missingRatesByVariable: est.missingRatesByVariable,
-      distinctAssignedDoctorClusters: dataset.distinctAssignedDoctorClusters,
+      distinctAssignedDoctorClusters: ctx.dataset.distinctAssignedDoctorClusters,
       candidateParameterCount: est.candidateParameterCount,
       eventNonEvent: est.eventNonEvent,
       estimabilityPolicyVersion: ESTIMABILITY_POLICY_VERSION,
@@ -166,11 +133,11 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
   const resultDigest = canonicalDigest({ counts, estimability });
 
   const runManifest = buildRunManifest({
-    recipeDigest,
-    sourceDigest: snapshot.sourceDigest,
+    recipeDigest: ctx.recipeDigest,
+    sourceDigest: ctx.snapshot.sourceDigest,
     resultDigest,
-    snapshotAsOf: snapshot.snapshotAsOf,
-    formulaPolicies: recipe.formulaPolicies,
+    snapshotAsOf: ctx.snapshot.snapshotAsOf,
+    formulaPolicies: ctx.recipe.formulaPolicies,
   });
 
   const response: PreviewResponse = {
@@ -180,39 +147,39 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
     availableMethods: [],
     methodCatalogVersion: null,
     differencing: {
-      queryFamilyDigest,
+      queryFamilyDigest: ctx.queryFamilyDigest,
       windowMinutes: DIFFERENCING_POLICY.windowMinutes,
-      remaining: differencing.remaining,
+      remaining: ctx.differencing.remaining,
     },
   };
 
   // §D-6 ⑥ — 감사 기록은 억제 여부와 무관하게 항상 남기고, 실패하면 요청 자체를 500으로
   // 실패시킨다(이번 PR은 감사로그가 유일한 영속 provenance 저장소이므로, §Context 확정사항 2).
   await writeAuditLogStrict(pool, {
-    actorUserId: session.userId,
-    actorOrgId: orgId,
+    actorUserId: ctx.userId,
+    actorOrgId: ctx.orgId,
     action: 'stats_preview',
     targetType: 'analysis_recipe',
-    targetId: recipeDigest,
-    outcome: suppressed ? 'denied' : 'success',
+    targetId: ctx.recipeDigest,
+    outcome: ctx.requestSuppressed ? 'denied' : 'success',
     ip: req.ip ?? null,
     userAgent: req.headers['user-agent'] ?? null,
     extra: {
       analysisRunId: runManifest.analysisRunId,
-      recipeDigest,
-      sourceDigest: snapshot.sourceDigest,
+      recipeDigest: ctx.recipeDigest,
+      sourceDigest: ctx.snapshot.sourceDigest,
       resultDigest,
-      internalResultDigest: dataset.internalResultDigest,
-      grain: recipe.grain,
-      variableKeys: recipe.variableKeys,
-      filterKeys: recipe.filters.map((f) => f.key),
-      filterOperators: recipe.filters.map((f) => f.operator),
-      filterCount: recipe.filters.length,
-      analysisPurpose: recipe.analysisPurpose,
-      formulaPolicies: recipe.formulaPolicies,
-      suppressed,
-      reasonCode,
-      queryFamilyDigest,
+      internalResultDigest: ctx.dataset.internalResultDigest,
+      grain: ctx.recipe.grain,
+      variableKeys: ctx.recipe.variableKeys,
+      filterKeys: ctx.recipe.filters.map((f) => f.key),
+      filterOperators: ctx.recipe.filters.map((f) => f.operator),
+      filterCount: ctx.recipe.filters.length,
+      analysisPurpose: ctx.recipe.analysisPurpose,
+      formulaPolicies: ctx.recipe.formulaPolicies,
+      suppressed: ctx.requestSuppressed,
+      reasonCode: ctx.reasonCode,
+      queryFamilyDigest: ctx.queryFamilyDigest,
       catalogVersion: runManifest.catalogVersion,
       extractorVersion: runManifest.extractorVersion,
       migrationVersion: runManifest.migrationVersion,
@@ -234,6 +201,12 @@ export function createStatsRouter(pool: Pool) {
 
   router.post('/preview', auth, requireCapability(pool, 'stats.view'), csrfMiddleware, (req, res) =>
     handlePostPreview(pool, req, res).catch(() => res.status(500).json(internalError())),
+  );
+
+  // PR1 — stats.regression은 0028_capability_grants.sql에서 이미 default_all_roles=true로
+  // 정의돼 있다(§4.1) — 별도 user_capability_grants 부여가 새로 필요해지지 않는다.
+  router.post('/analyze', auth, requireCapability(pool, 'stats.regression'), analyzeRateLimit(), csrfMiddleware, (req, res) =>
+    handlePostAnalyze(pool, req, res).catch(() => res.status(500).json(internalError())),
   );
 
   return router;

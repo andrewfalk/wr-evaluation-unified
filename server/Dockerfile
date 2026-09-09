@@ -99,6 +99,22 @@ ENV VIDEO_ANALYSIS_PYTHON=/opt/pose-venv/bin/python \
     POSE_MODELS_DIR=/app/pose-inference/models \
     ORT_DISABLE_TELEMETRY=1
 
+# PR1 — stats-engine Python venv(격리, pose venv와 완전히 별도). numpy+scipy+jsonschema만
+# 필요(pandas/statsmodels는 PR1 범위 밖) — opencv 의존(libgl1/libglib2.0-0)도 procps도
+# 불필요(계획서 §2.3 — analyze.py는 shell:true 없이 직접 spawn되고 BLAS 스레드 제한으로
+# 프로세스를 추가로 fork하지 않는 단일 프로세스 트리 전제, tree-kill 미도입).
+COPY services/stats-engine/requirements.txt /app/stats-engine/requirements.txt
+RUN python3 -m venv /opt/stats-venv \
+    && /opt/stats-venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/stats-venv/bin/pip install --no-cache-dir -r /app/stats-engine/requirements.txt
+
+# fixtures/(R 참조값·pytest용)는 런타임에 불필요 — .dockerignore로 제외하지 않았다면 여기서
+# 스크립트만 명시 복사해도 되지만, 이미지 크기 영향이 미미해 디렉터리 전체를 그대로 복사한다.
+COPY services/stats-engine/ /app/stats-engine/
+
+ENV STATS_ENGINE_PYTHON=/opt/stats-venv/bin/python \
+    STATS_ENGINE_SCRIPTS_DIR=/app/stats-engine
+
 # Server compiled JS + production node_modules (bookworm builder와 ABI 정합)
 COPY --from=server-builder /build/server/dist        ./dist
 COPY --from=server-builder /build/server/node_modules ./node_modules

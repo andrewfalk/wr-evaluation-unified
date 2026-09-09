@@ -190,6 +190,115 @@ export const PreviewResponseSchema = z.object({
   }),
 });
 
+// ============================================================================
+// PR1: Python subprocess worker + stats_runs + POST /analyze(동기) 계약.
+// 계획서(pr1-giggly-treehouse.md) §4.5/§5 참고.
+// ============================================================================
+
+// stats_runs.manifest 컬럼 저장 전용 — 기존 RunManifestSchema(위, /preview·성공
+// /analyze의 HTTP 응답 계약)는 손대지 않는다(§4.5). 성공 행은 RunManifest 그대로
+// (resultDigest 필수 문자열), 실패 행은 resultDigest 필드 자체가 없다(생략, null 아님).
+export const StatsRunManifestSucceededSchema = RunManifestSchema.extend({
+  outcome: z.literal('succeeded'),
+});
+export const StatsRunManifestFailedSchema = RunManifestSchema.omit({ resultDigest: true }).extend({
+  outcome: z.literal('failed'),
+});
+export const StatsRunManifestSchema = z.discriminatedUnion('outcome', [
+  StatsRunManifestSucceededSchema,
+  StatsRunManifestFailedSchema,
+]);
+
+export type StatsRunManifestSucceeded = z.infer<typeof StatsRunManifestSucceededSchema>;
+export type StatsRunManifestFailed    = z.infer<typeof StatsRunManifestFailedSchema>;
+export type StatsRunManifest          = z.infer<typeof StatsRunManifestSchema>;
+
+// Python 엔진이 null로 만드는 이유 — 억제(§4.2)와는 다른 축(계산 불능 vs 정책적 은닉).
+export const StatsNullReasonSchema = z.enum(['insufficient_data', 'undefined_zero_variance', 'non_finite_result']);
+
+export const AnalyzeMissingPatternEntrySchema = z.object({
+  reasonCode: z.enum(['not_entered', 'not_assessed', 'not_applicable', 'structural_missing']),
+  count: z.number().int().nonnegative(),
+});
+
+// 억제된 변수는 이 두 필드 외에는 아무것도 담지 않는다(§4.2 — nullReasons 등 부가정보가
+// 남으면 그 자체로 데이터 특성이 새어나간다는 1차 검토 지적 반영).
+const AnalyzeContinuousSuppressedSchema = z.object({
+  variableKey: z.string(),
+  kind: z.literal('continuous'),
+  suppressed: z.literal(true),
+});
+const AnalyzeContinuousRevealedSchema = z.object({
+  variableKey: z.string(),
+  kind: z.literal('continuous'),
+  suppressed: z.literal(false),
+  n: z.number().int().nonnegative(),
+  missingCount: z.number().int().nonnegative(),
+  // reasonCode 중 하나라도 소수 셀이면 전체 생략(부분억제 금지, §4.2) — null이면 생략됐다는 뜻.
+  missingPatterns: z.array(AnalyzeMissingPatternEntrySchema).nullable(),
+  mean: z.number().nullable(),
+  sd: z.number().nullable(),
+  median: z.number().nullable(),
+  q1: z.number().nullable(),
+  q3: z.number().nullable(),
+  iqr: z.number().nullable(),
+  skewness: z.number().nullable(),
+  kurtosis: z.number().nullable(),
+  min: z.number().nullable(),
+  max: z.number().nullable(),
+  nullReasons: z.record(z.string(), StatsNullReasonSchema),
+});
+export const AnalyzeContinuousResultSchema = z.discriminatedUnion('suppressed', [
+  AnalyzeContinuousSuppressedSchema,
+  AnalyzeContinuousRevealedSchema,
+]);
+
+const AnalyzeDiscreteSuppressedSchema = z.object({
+  variableKey: z.string(),
+  kind: z.literal('discrete'),
+  suppressed: z.literal(true),
+});
+export const AnalyzeDiscreteLevelSchema = z.object({
+  level: z.union([z.string(), z.boolean()]),
+  count: z.number().int().nonnegative(),
+  proportion: z.number(),
+});
+const AnalyzeDiscreteRevealedSchema = z.object({
+  variableKey: z.string(),
+  kind: z.literal('discrete'),
+  suppressed: z.literal(false),
+  n: z.number().int().nonnegative(),
+  missingCount: z.number().int().nonnegative(),
+  missingPatterns: z.array(AnalyzeMissingPatternEntrySchema).nullable(),
+  levels: z.array(AnalyzeDiscreteLevelSchema),
+  mode: z.union([z.string(), z.boolean()]).nullable(),
+});
+export const AnalyzeDiscreteResultSchema = z.discriminatedUnion('suppressed', [
+  AnalyzeDiscreteSuppressedSchema,
+  AnalyzeDiscreteRevealedSchema,
+]);
+
+export const AnalyzeResultSchema = z.object({
+  continuous: z.array(AnalyzeContinuousResultSchema),
+  discrete:   z.array(AnalyzeDiscreteResultSchema),
+});
+
+export const AnalyzeRequestSchema = StatsAnalysisRecipeSchema;
+
+export const AnalyzeResponseSchema = z.object({
+  runManifest: RunManifestSchema,
+  result:      AnalyzeResultSchema,
+});
+
+export type StatsNullReason               = z.infer<typeof StatsNullReasonSchema>;
+export type AnalyzeMissingPatternEntry    = z.infer<typeof AnalyzeMissingPatternEntrySchema>;
+export type AnalyzeContinuousResult       = z.infer<typeof AnalyzeContinuousResultSchema>;
+export type AnalyzeDiscreteLevel          = z.infer<typeof AnalyzeDiscreteLevelSchema>;
+export type AnalyzeDiscreteResult         = z.infer<typeof AnalyzeDiscreteResultSchema>;
+export type AnalyzeResult                 = z.infer<typeof AnalyzeResultSchema>;
+export type AnalyzeRequest                = z.infer<typeof AnalyzeRequestSchema>;
+export type AnalyzeResponse               = z.infer<typeof AnalyzeResponseSchema>;
+
 export type StatsGrain            = z.infer<typeof StatsGrainSchema>;
 export type CatalogVariable          = z.infer<typeof CatalogVariableSchema>;
 export type CatalogResponse          = z.infer<typeof CatalogResponseSchema>;

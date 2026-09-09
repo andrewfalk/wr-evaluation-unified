@@ -16,6 +16,16 @@ function defaultPython(scriptsDir: string): string {
   return path.join(scriptsDir, '.venv', rel);
 }
 
+// PR1: stats-engine dev 도구 기본 경로. video의 poseInferenceRoot()와 같은 패턴을 복제한다
+// (pose venv와 완전히 독립된 경로로 두기 위해 공용 헬퍼로 묶지 않는다 — 계획서 §7.3).
+function statsEngineRoot(): string {
+  return path.resolve(process.cwd(), '..', 'services', 'stats-engine');
+}
+function defaultStatsPython(scriptsDir: string): string {
+  const rel = process.platform === 'win32' ? path.join('Scripts', 'python.exe') : path.join('bin', 'python');
+  return path.join(scriptsDir, '.venv', rel);
+}
+
 function required(env: NodeJS.ProcessEnv, key: string): string {
   const val = env[key];
   if (!val) throw new Error(`Missing required env var: ${key}`);
@@ -259,6 +269,37 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
         // 클라이언트가 job을 queued 상태로 기다리는 상한(ms). 직렬 큐(동시 1건)라 앞선 job 때문에 대기할 수
         // 있어 별도 예산으로 둔다. 서버 queued stale(1시간)보다 짧게(기본 10분) — UI가 과도하게 매달리지 않게.
         queueWaitMs: positiveInt(env, 'VIDEO_ANALYSIS_QUEUE_WAIT_MS', 600000),
+      };
+    })()),
+
+    // PR1 — Python subprocess 기술통계 엔진. maxValuesPerVariable/maxTotalValues/
+    // maxStringLength는 여기 없다 — server/src/statsEngineLimits.ts의 하드코딩 상수를
+    // 그대로 쓴다(env로 바꿀 수 있게 하면 Python jsonschema의 하드코딩 값과 어긋난다,
+    // 계획서 §7.3). 바꾸려면 그 파일과 services/stats-engine/protocol.py를 함께 코드
+    // 변경+재배포해야 한다.
+    stats: Object.freeze((() => {
+      const scriptsDir = optional(env, 'STATS_ENGINE_SCRIPTS_DIR', statsEngineRoot());
+      return {
+        scriptsDir,
+        python: optional(env, 'STATS_ENGINE_PYTHON', defaultStatsPython(scriptsDir)),
+        // Python 프로세스 계산 타임아웃(ms). 프로세스 안전 타이머는 이 값+killGraceMs+5000ms —
+        // 리버스 프록시/Express 요청 타임아웃은 그보다도 커야 하고 추가로 snapshot·전처리·
+        // DB 저장 여유(권장 +5000ms)를 더해야 한다(계획서 §7.4의 정확한 부등식 참고).
+        timeoutMs: positiveInt(env, 'STATS_ENGINE_TIMEOUT_MS', 30000),
+        // SIGTERM 이후 SIGKILL까지 유예(ms).
+        killGraceMs: positiveInt(env, 'STATS_ENGINE_KILL_GRACE_MS', 2000),
+        // Python worker 동시 실행 상한(가드C, runStatsEngine 내부 세마포어).
+        maxConcurrency: positiveInt(env, 'STATS_ENGINE_MAX_CONCURRENCY', 1),
+        // POST /analyze 핸들러 전체(snapshot+buildDataset+Python+DB저장)의 동시 처리 상한
+        // (가드A) — Python 세마포어(가드C)와 독립된, Node 측 전처리 비용 통제용.
+        maxConcurrentAnalyzeRequests: positiveInt(env, 'STATS_MAX_CONCURRENT_ANALYZE_REQUESTS', 4),
+        stdoutMaxBytes: positiveInt(env, 'STATS_ENGINE_STDOUT_MAX_BYTES', 10 * 1024 * 1024),
+        stderrMaxBytes: positiveInt(env, 'STATS_ENGINE_STDERR_MAX_BYTES', 64 * 1024),
+        // stdin으로 보낼 JSON 문자열 바이트 상한 — maxValuesPerVariable/maxTotalValues(값
+        // 개수 상한)와 별개로 문자열 총량도 이중 검사한다(계획서 §7.4).
+        maxInputBytes: positiveInt(env, 'STATS_ENGINE_MAX_INPUT_BYTES', 2 * 1024 * 1024),
+        // 성공한 stats_runs 결과의 TTL(시간) — idempotency 캐시 유효기간.
+        resultTtlHours: positiveInt(env, 'STATS_RUNS_RESULT_TTL_HOURS', 24 * 7),
       };
     })()),
   });
