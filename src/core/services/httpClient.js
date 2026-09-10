@@ -251,3 +251,82 @@ export async function requestJson(path, {
 
   return data;
 }
+
+// PR2 §9 — POST 바디 + CSRF를 실어 보내야 하는 다운로드(예: 통계 집계결과 CSV 내보내기).
+// requestJson은 성공 응답에도 항상 response.json()을 호출하므로 바이너리/CSV를 못 받고,
+// requestBlob(위)은 GET 전용이라 POST 바디·CSRF가 안 된다 — requestJson과 동일한 인증
+// 갱신·CSRF 재시도 로직을 그대로 따르되, 성공 응답만 response.blob()으로 받는다(에러
+// 응답은 JSON 본문을 기대하므로 그쪽만 json()으로 파싱).
+export async function requestBlobPost(path, {
+  baseUrl = '',
+  body,
+  session,
+  headers = {},
+  signal,
+  _retry = false,
+} = {}) {
+  const method = 'POST';
+  const response = await fetch(buildUrl(baseUrl, path), {
+    method,
+    credentials: 'include',
+    headers: buildHeaders(method, session, headers),
+    body: body === undefined ? undefined : JSON.stringify(body),
+    ...(signal !== undefined ? { signal } : {}),
+  });
+
+  let data = null;
+  if (!response.ok) {
+    try { data = await response.json(); } catch { data = null; }
+  }
+
+  if (response.status === 401 && !_retry && _onRefresh && canRefreshSession(session)) {
+    let newSession;
+    try {
+      newSession = await _onRefresh({ baseUrl });
+    } catch (refreshErr) {
+      if (refreshErr?.retryable) {
+        const err = new Error('일시적인 인증 조율 오류입니다. 잠시 후 다시 시도해 주세요.');
+        err.status = 401;
+        err.retryable = true;
+        throw err;
+      }
+      _onLogout?.();
+      const err = new Error('인증이 만료되었습니다. 다시 로그인해 주세요.');
+      err.status = 401;
+      throw err;
+    }
+    return requestBlobPost(path, { baseUrl, body, session: newSession, headers, signal, _retry: true });
+  }
+
+  const errCode = data?.code || data?.error?.code;
+  if (
+    response.status === 403
+    && errCode === 'CSRF_INVALID'
+    && !_retry
+    && _onRefresh
+    && canRefreshSession(session)
+  ) {
+    let newSession;
+    try {
+      newSession = await _onRefresh({ baseUrl, forceCsrf: true });
+    } catch {
+      const err = new Error('CSRF token renewal failed');
+      err.status = 403;
+      err.data = data;
+      throw err;
+    }
+    return requestBlobPost(path, { baseUrl, body, session: newSession, headers, signal, _retry: true });
+  }
+
+  if (!response.ok) {
+    const message = data?.error?.message
+      || (typeof data?.error === 'string' ? data.error : null)
+      || `Request failed (${response.status})`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+
+  return response.blob();
+}

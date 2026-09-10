@@ -108,6 +108,7 @@
 |---|---|---|
 | `stats_access_denied` | `middleware/requireCapability.ts:46` | capability 없음(PR0-A, 이 문서에 그동안 누락돼 있었음 — PR0-C에서 보강) |
 | `stats_preview` | `routes/stats.ts` | `POST /preview`. `extra`에 recipeDigest/sourceDigest/resultDigest/reasonCode 등(raw filter 값은 절대 안 남김, §7.4). 코호트 미달·differencing 초과로 억제된 응답도 `outcome:'denied'`로 기록됨. `GET /catalog`는 감사하지 않음(정적 메타데이터) |
+| `stats_export_aggregate` | `statsExportHandler.ts` | `POST /export`(PR2). 저장된 `stats_runs` 행(이미 억제 적용됨)을 CSV로 포맷해 내보낼 때만 기록 — recipe 재계산 없음. `outcome:'denied'`는 run 조회 실패(존재하지 않음/만료/미완료) 시. 이 감사 INSERT가 실패하면 CSV는 한 바이트도 전송되지 않는다(§7.4 원칙을 aggregate 등급에도 적용) |
 
 ### EMR (Electron → 서버, 화이트리스트 강제)
 | action | 파일:라인 |

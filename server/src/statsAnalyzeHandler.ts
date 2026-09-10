@@ -239,10 +239,11 @@ async function computeAndPersist(
       await client.query(
         `INSERT INTO stats_runs (
            organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
-           requested_disclosure_profile, cacheable, manifest, result, error_code, expires_at, finished_at
-         ) VALUES ($1,$2,'failed',$3,$4,$5,'aggregate',true,$6,NULL,$7,$8,now())`,
+           requested_disclosure_profile, cacheable, manifest, result, error_code, expires_at, finished_at,
+           analysis_run_id
+         ) VALUES ($1,$2,'failed',$3,$4,$5,'aggregate',true,$6,NULL,$7,$8,now(),$9)`,
         [ctx.orgId, ctx.userId, ctx.recipeDigest, ctx.snapshot.sourceDigest, executionDigest,
-          JSON.stringify(failedManifest), errorCode, expiresAt()],
+          JSON.stringify(failedManifest), errorCode, expiresAt(), failedManifest.analysisRunId],
       );
       await writeAuditLogStrict(client, {
         actorUserId: ctx.userId,
@@ -272,13 +273,14 @@ async function computeAndPersist(
       const insertResult = await client.query<{ id: string; manifest: StatsRunManifestSucceeded; result: AnalyzeResult }>(
         `INSERT INTO stats_runs (
            organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
-           requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at
-         ) VALUES ($1,$2,'succeeded',$3,$4,$5,'aggregate',true,$6,$7,$8,now())
+           requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at,
+           analysis_run_id
+         ) VALUES ($1,$2,'succeeded',$3,$4,$5,'aggregate',true,$6,$7,$8,now(),$9)
          ON CONFLICT (organization_id, execution_digest) WHERE status = 'succeeded' AND cacheable
          DO NOTHING
          RETURNING id, manifest, result`,
         [ctx.orgId, ctx.userId, ctx.recipeDigest, ctx.snapshot.sourceDigest, executionDigest,
-          JSON.stringify(manifest), JSON.stringify(finalResult), expiresAt()],
+          JSON.stringify(manifest), JSON.stringify(finalResult), expiresAt(), manifest.analysisRunId],
       );
       if (insertResult.rows.length > 0) {
         manifest = insertResult.rows[0].manifest;
@@ -378,10 +380,11 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
         await client.query(
           `INSERT INTO stats_runs (
              organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
-             requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at
-           ) VALUES ($1,$2,'succeeded',$3,$4,$5,'aggregate',false,$6,$7,$8,now())`,
+             requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at,
+             analysis_run_id
+           ) VALUES ($1,$2,'succeeded',$3,$4,$5,'aggregate',false,$6,$7,$8,now(),$9)`,
           [ctx.orgId, ctx.userId, ctx.recipeDigest, ctx.snapshot.sourceDigest, executionDigest,
-            JSON.stringify(manifest), JSON.stringify(suppressedResult), expiresAt()],
+            JSON.stringify(manifest), JSON.stringify(suppressedResult), expiresAt(), manifest.analysisRunId],
         );
         await writeAuditLogStrict(client, {
           actorUserId: ctx.userId,
