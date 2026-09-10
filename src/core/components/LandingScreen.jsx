@@ -20,6 +20,8 @@ export function LandingScreen({
   isDashboardScopeLoading,
   onShowPatientList,
   canShowPatientList,
+  onShowStatistics,
+  statsAvailable,
 }) {
   return (
     <div className="panel landing-panel pattern-surface pattern-surface-hero">
@@ -51,6 +53,9 @@ export function LandingScreen({
           <button className="btn btn-warning landing-action-btn" onClick={onLoadTestData}>테스트</button>
         )}
         <button className="btn btn-secondary landing-action-btn" onClick={onShowSettings}>설정</button>
+        {statsAvailable && (
+          <button className="btn btn-secondary landing-action-btn" onClick={onShowStatistics}>통계분석</button>
+        )}
         {patients.length > 0 && (
           <>
             <button className="btn btn-secondary btn-sm" onClick={onGoBack}>

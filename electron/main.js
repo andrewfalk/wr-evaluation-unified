@@ -58,6 +58,20 @@ ipcMain.on('set-has-unsaved-draft', (event, hasUnsavedDraft) => {
   _hasUnsavedDraft = !!hasUnsavedDraft;
 });
 
+// ---------------------------------------------------------------------------
+// PR2 §3 — 통계분석 워크벤치 가용성. main은 서버 설정을 모르므로 renderer가 매번 알려주고,
+// 메뉴는 rebuildAppMenu()로 다시 그려야 반영된다(윈도우/리눅스는 메뉴 속성 라이브 갱신이 안 됨,
+// 위 주석 참고). 기본은 숨김 — 가용성이 확인되기 전까지 메뉴에 노출하지 않는다.
+// ---------------------------------------------------------------------------
+let _statsAvailable = false;
+ipcMain.on('set-stats-available', (event, available) => {
+  if (!isAllowedSender(event.senderFrame?.url ?? event.sender.getURL())) return;
+  const next = !!available;
+  if (next === _statsAvailable) return;
+  _statsAvailable = next;
+  rebuildAppMenu?.();
+});
+
 // Allowed origin for intranet build — derived from WR_INTRANET_URL.
 // EMR ipc handlers reject requests from any other origin.
 function getAllowedOrigin() {
@@ -531,6 +545,12 @@ function createWindow() {
         submenu: [
           { label: '무릎 (슬관절) 평가', click: () => mainWindow.webContents.send('goto-module', 'knee') },
           { label: '척추 (요추) 평가', click: () => mainWindow.webContents.send('goto-module', 'spine') },
+          { type: 'separator' },
+          {
+            label: '통계분석 워크벤치',
+            enabled: _statsAvailable,
+            click: () => mainWindow.webContents.send('open-statistics'),
+          },
         ]
       },
       {

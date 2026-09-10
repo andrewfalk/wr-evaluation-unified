@@ -38,6 +38,14 @@ if (!originAllowed) {
     },
     notifyQuitLogoutDone: () => ipcRenderer.send('quit-logout-done'),
 
+    // PR2 §3 — 통계분석 워크벤치 메뉴 클릭 + 가용성 전파(renderer는 서버 설정을 알고,
+    // main은 그걸 모르므로 바뀔 때마다 알려줘야 메뉴를 켜고 끌 수 있다).
+    onOpenStatistics: (callback) => {
+      ipcRenderer.on('open-statistics', callback);
+      return () => ipcRenderer.removeListener('open-statistics', callback);
+    },
+    setStatsAvailable: (available) => ipcRenderer.send('set-stats-available', !!available),
+
     // 미저장 종합소견 편집 draft 여부 — main의 창 닫기/새로고침 가드가 참조한다.
     // PHI 없이 boolean만 전달(환자 ID는 렌더러에만 유지).
     setHasUnsavedDraft: (hasUnsavedDraft) => ipcRenderer.send('set-has-unsaved-draft', hasUnsavedDraft),

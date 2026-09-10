@@ -10,6 +10,7 @@ export default defineConfig({
     patient: 'contracts/patient.ts',
     patientDates: 'contracts/patientDates.ts',
     preset: 'contracts/preset.ts',
+    stats: 'contracts/stats.ts',
   },
   format: ['esm', 'cjs'],
   outDir: 'dist',

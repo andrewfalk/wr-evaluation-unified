@@ -1,0 +1,303 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { fetchStatsCatalog, previewStatsAnalysis, runStatsAnalysis, exportStatsAggregate } from '../../services/statsRepository';
+import { CatalogPanel } from './CatalogPanel';
+import { RecipePanel } from './RecipePanel';
+import { ResultPanel } from './ResultPanel';
+import { InspectorReportPanel } from './InspectorReportPanel';
+import { useViewportWidth } from './useViewportWidth';
+import { describeStatsApiError } from './describeStatsError';
+import './statistics-workbench.css';
+
+function buildConditionKey(variableKeys, analysisPurpose, formulaPolicies, appliedFilters) {
+  return JSON.stringify({
+    variableKeys: [...variableKeys].sort(),
+    analysisPurpose,
+    formulaPolicies,
+    appliedFilters,
+  });
+}
+
+function buildRecipe(variableKeys, analysisPurpose, formulaPolicies, appliedFilters) {
+  return { grain: 'case', variableKeys, filters: appliedFilters, analysisPurpose, formulaPolicies };
+}
+
+function isRecipeComplete(variableKeys, formulaPolicies, catalogByKey, appliedFilters) {
+  if (variableKeys.length === 0) return false;
+  const neededKeys = Array.from(new Set([...variableKeys, ...appliedFilters.map((f) => f.key)]));
+  const seenFamilies = new Set();
+  for (const key of neededKeys) {
+    const v = catalogByKey.get(key);
+    if (!v || seenFamilies.has(v.formulaFamily)) continue;
+    seenFamilies.add(v.formulaFamily);
+    if (v.supportedFormulaPolicies.length > 1 && !formulaPolicies[v.formulaFamily]) return false;
+  }
+  return true;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function isFeatureUnavailableError(err) {
+  return err?.status === 404 && err?.data?.code === 'NOT_FOUND';
+}
+
+// PR2 — 통계분석 워크벤치 화면. 계획서(pr2-dreamy-frog.md) §1~§10의 최종 설계를 그대로
+// 구현한다: 4열 레이아웃, draft/appliedFilters/committed 3단 상태, 조건-key+요청세대
+// 조합으로 판정하는 preview 유효성, 재조회와 초기적재의 분리(§4).
+export function StatisticsWorkbench({
+  session, serverConfig, statsAvailable, refetchConfig, configRefreshing, configRefreshError, onClose,
+}) {
+  const [catalogState, setCatalogState] = useState({ status: 'loading', data: null, error: null });
+  const [featureUnavailableDetected, setFeatureUnavailableDetected] = useState(false);
+
+  // 1차 리뷰가 잡은 결함 — statsAvailable "값"만 보고 배너를 내리면, config가 이미 true로
+  // 저장된 상태에서(일시적 404 → 배너 표시 → 서버 복구 → 재조회도 true) true→true라
+  // effect가 재실행되지 않아 배너가 안 내려가고, 카탈로그·preview도 마운트/조건 변경 시에만
+  // 재요청되므로 최초 실패가 그대로 남는다. "재조회가 방금 끝났다"는 사건(configRefreshing의
+  // true→false 하강 엣지) 자체를 감지해 recoveryToken을 올리고, 카탈로그·preview 둘 다 이
+  // 토큰을 의존성에 포함시켜 값이 안 바뀌어도 재시도되게 한다.
+  //
+  // 2차 리뷰가 잡은 결함 — useServerConfig.js의 refetchConfig()는 실패 시 state.config를
+  // 그대로 둔다(§4 설계 — 오래된 응답이 최신 상태를 덮지 않게). 즉 statsAvailable이 true인
+  // 채로 재조회가 "실패"해도(configRefreshing: true→false는 성공·실패 모두에서 일어남)
+  // statsAvailable 값만 보면 여전히 true라 그 실패까지 복구로 오인했다 — 재조회가 실제로
+  // 성공했을 때(configRefreshError가 비어있을 때)만 복구로 인정한다.
+  const [recoveryToken, setRecoveryToken] = useState(0);
+  const wasRefreshingRef = useRef(configRefreshing);
+  useEffect(() => {
+    const wasRefreshing = wasRefreshingRef.current;
+    wasRefreshingRef.current = configRefreshing;
+    if (wasRefreshing && !configRefreshing && statsAvailable && !configRefreshError) {
+      setFeatureUnavailableDetected(false);
+      setRecoveryToken((t) => t + 1);
+    }
+  }, [configRefreshing, statsAvailable, configRefreshError]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    setCatalogState({ status: 'loading', data: null, error: null });
+    fetchStatsCatalog(session, { signal: controller.signal })
+      .then((data) => { if (!cancelled) setCatalogState({ status: 'ready', data, error: null }); })
+      .catch((err) => {
+        if (cancelled) return;
+        if (isFeatureUnavailableError(err)) setFeatureUnavailableDetected(true);
+        setCatalogState({ status: 'error', data: null, error: err });
+      });
+    return () => { cancelled = true; controller.abort(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recoveryToken]);
+
+  const catalogByKey = useMemo(
+    () => new Map((catalogState.data?.variables ?? []).map((v) => [v.key, v])),
+    [catalogState.data],
+  );
+
+  // ---- draft recipe state ----
+  const [variableKeys, setVariableKeys] = useState([]);
+  const [analysisPurpose, setAnalysisPurpose] = useState('association');
+  const [formulaPolicies, setFormulaPolicies] = useState({});
+  const [filterDraft, setFilterDraft] = useState([]);
+  const [appliedFilters, setAppliedFilters] = useState([]);
+
+  function toggleVariable(key) {
+    setVariableKeys((prev) => {
+      if (prev.includes(key)) return prev.filter((k) => k !== key);
+      if (prev.length >= 20) return prev; // 서버 상한(§ recipe 계약) — 조용히 무시
+      return [...prev, key];
+    });
+  }
+
+  // ---- preview: 조건-key(무엇을 위한 결과인가) + 요청세대(그 요청 인스턴스가 최신인가) ----
+  const currentConditionKey = buildConditionKey(variableKeys, analysisPurpose, formulaPolicies, appliedFilters);
+  const [previewState, setPreviewState] = useState({ key: null, status: 'idle', result: null, error: null });
+  const previewGenRef = useRef(0);
+
+  useEffect(() => {
+    const key = currentConditionKey;
+    const gen = ++previewGenRef.current;
+    if (!isRecipeComplete(variableKeys, formulaPolicies, catalogByKey, appliedFilters)) {
+      setPreviewState({ key, status: 'idle', result: null, error: null });
+      return undefined;
+    }
+    setPreviewState({ key, status: 'loading', result: null, error: null });
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const recipe = buildRecipe(variableKeys, analysisPurpose, formulaPolicies, appliedFilters);
+        const res = await previewStatsAnalysis(recipe, session, { signal: controller.signal });
+        if (gen !== previewGenRef.current) return;
+        setPreviewState((prev) => (prev.key === key ? { key, status: 'ready', result: res, error: null } : prev));
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+        if (isFeatureUnavailableError(err)) setFeatureUnavailableDetected(true);
+        if (gen !== previewGenRef.current) return;
+        setPreviewState((prev) => (prev.key === key ? { key, status: 'error', result: null, error: err } : prev));
+      }
+    }, 500);
+    return () => { clearTimeout(timer); controller.abort(); };
+    // recoveryToken도 의존성에 넣는다 — 조건은 그대로인데 이전 preview가 기능비가용으로
+    // 실패했을 때, 재조회 성공 이후 재시도할 유일한 트리거가 이것이다(조건 자체는 안 바뀌므로
+    // currentConditionKey만으로는 재실행되지 않는다).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentConditionKey, recoveryToken]);
+
+  const isPreviewCurrent = previewState.key === currentConditionKey;
+
+  // ---- analyze: committed snapshot(요청 전송 시점) ----
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState(null);
+  const [committedRecipe, setCommittedRecipe] = useState(null);
+  const [committedResult, setCommittedResult] = useState(null);
+  const analyzeInFlightRef = useRef(false);
+
+  // 2차 리뷰가 잡은 결함 — featureUnavailableDetected가 실행/내보내기 잠금 조건에 빠져 있어,
+  // 배너가 떠 있는 동안에도 캐시된 statsAvailable=true·이전 preview=ready로 버튼이 활성화될
+  // 수 있었다. 실행·내보내기 공통 잠금 조건을 하나로 묶는다. configRefreshError도 포함 —
+  // 재조회가 실패해 가용성을 다시 확인 못 한 상태를 방어적으로 함께 잠근다(3차 리뷰).
+  const actionsLocked = featureUnavailableDetected || configRefreshing || !!configRefreshError || !statsAvailable;
+
+  const canExecute =
+    isPreviewCurrent &&
+    previewState.status === 'ready' &&
+    !previewState.result?.counts?.suppressed &&
+    !isAnalyzing &&
+    !actionsLocked;
+
+  async function handleRunAnalyze() {
+    if (!canExecute || analyzeInFlightRef.current) return;
+    analyzeInFlightRef.current = true;
+    const recipeAtSubmit = buildRecipe(variableKeys, analysisPurpose, formulaPolicies, appliedFilters);
+    setIsAnalyzing(true);
+    setAnalyzeError(null);
+    try {
+      const res = await runStatsAnalysis(recipeAtSubmit, session);
+      setCommittedRecipe(recipeAtSubmit);
+      setCommittedResult(res);
+    } catch (err) {
+      if (isFeatureUnavailableError(err)) setFeatureUnavailableDetected(true);
+      setAnalyzeError(err);
+    } finally {
+      analyzeInFlightRef.current = false;
+      setIsAnalyzing(false);
+    }
+  }
+
+  const recipeChanged = committedRecipe
+    ? JSON.stringify(buildRecipe(variableKeys, analysisPurpose, formulaPolicies, appliedFilters)) !== JSON.stringify(committedRecipe)
+    : false;
+
+  // ---- export ----
+  const [exportState, setExportState] = useState({ status: 'idle', error: null });
+  async function handleExport() {
+    if (!committedResult || actionsLocked) return; // 버튼 disabled와 별개로 핸들러 자체도 잠금을 지킨다
+    setExportState({ status: 'exporting', error: null });
+    try {
+      const blob = await exportStatsAggregate(committedResult.runManifest.analysisRunId, session);
+      downloadBlob(blob, `stats-export-${committedResult.runManifest.analysisRunId}.csv`);
+      setExportState({ status: 'idle', error: null });
+    } catch (err) {
+      if (isFeatureUnavailableError(err)) setFeatureUnavailableDetected(true);
+      setExportState({ status: 'error', error: err });
+    }
+  }
+
+  // ---- 반응형 접힘(§10) ----
+  const viewportWidth = useViewportWidth();
+  const [catalogCollapsed, setCatalogCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [recipeCollapsed, setRecipeCollapsed] = useState(false);
+  const userOverrodeCatalog = useRef(false);
+  const userOverrodeRight = useRef(false);
+
+  useEffect(() => {
+    if (!userOverrodeCatalog.current) setCatalogCollapsed(viewportWidth < 1280);
+    if (!userOverrodeRight.current) setRightCollapsed(viewportWidth < 1536);
+  }, [viewportWidth]);
+
+  return (
+    <div className="swb-root">
+      <header className="swb-header">
+        <h1>통계분석 워크벤치</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {committedResult && <span className="swb-header-status">run {committedResult.runManifest.analysisRunId.slice(0, 8)}</span>}
+          <button type="button" className="swb-btn swb-btn--sm" onClick={onClose}>닫기</button>
+        </div>
+      </header>
+
+      {(featureUnavailableDetected || configRefreshError) && (
+        <div className="swb-banner">
+          <span>{featureUnavailableDetected ? '기능을 사용할 수 없게 되었습니다.' : `새로고침 실패: ${configRefreshError}`}</span>
+          <button type="button" className="swb-btn swb-btn--sm" onClick={refetchConfig} disabled={configRefreshing}>
+            {configRefreshing ? '확인 중…' : '새로고침'}
+          </button>
+        </div>
+      )}
+
+      {catalogState.status === 'loading' && <div className="swb-empty">카탈로그를 불러오는 중…</div>}
+      {catalogState.status === 'error' && !featureUnavailableDetected && (
+        <div className="swb-banner" style={{ whiteSpace: 'pre-wrap' }}>카탈로그를 불러오지 못했습니다: {describeStatsApiError(catalogState.error)}</div>
+      )}
+
+      {catalogState.status === 'ready' && (
+        <div className="swb-row">
+          <CatalogPanel
+            catalog={catalogState.data}
+            selectedKeys={variableKeys}
+            onToggleVariable={toggleVariable}
+            collapsed={catalogCollapsed}
+            onToggleCollapse={() => { userOverrodeCatalog.current = true; setCatalogCollapsed((v) => !v); }}
+          />
+          <RecipePanel
+            catalog={catalogState.data}
+            selectedKeys={variableKeys}
+            onRemoveVariable={toggleVariable}
+            analysisPurpose={analysisPurpose}
+            onAnalysisPurposeChange={setAnalysisPurpose}
+            formulaPolicies={formulaPolicies}
+            onFormulaPolicyChange={(family, policy) => setFormulaPolicies((prev) => ({ ...prev, [family]: policy }))}
+            filterDraft={filterDraft}
+            onFilterDraftChange={setFilterDraft}
+            appliedFilters={appliedFilters}
+            onApplyFilters={() => setAppliedFilters(filterDraft)}
+            previewState={previewState}
+            isPreviewCurrent={isPreviewCurrent}
+            canExecute={canExecute}
+            isAnalyzing={isAnalyzing}
+            onRunAnalyze={handleRunAnalyze}
+            collapsed={recipeCollapsed}
+            onToggleCollapse={() => setRecipeCollapsed((v) => !v)}
+          />
+          <ResultPanel
+            catalog={catalogState.data}
+            committedRecipe={committedRecipe}
+            committedResult={committedResult}
+            recipeChanged={recipeChanged}
+            onExport={handleExport}
+            exportState={exportState}
+            actionsLocked={actionsLocked}
+          />
+          <InspectorReportPanel
+            catalog={catalogState.data}
+            committedRecipe={committedRecipe}
+            committedResult={committedResult}
+            collapsed={rightCollapsed}
+            onToggleCollapse={() => { userOverrodeRight.current = true; setRightCollapsed((v) => !v); }}
+          />
+        </div>
+      )}
+
+      {analyzeError && (
+        <div className="swb-banner" style={{ whiteSpace: 'pre-wrap' }}>분석 실행 실패: {describeStatsApiError(analyzeError)}</div>
+      )}
+    </div>
+  );
+}

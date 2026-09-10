@@ -42,6 +42,7 @@ import { clearAllLockTokens } from './core/services/lockTokenStore';
 import { LoginModal } from './core/components/LoginModal';
 import { ChangePasswordModal } from './core/components/ChangePasswordModal';
 import { SwitchToLocalButton } from './core/components/SwitchToLocalButton';
+import { StatisticsWorkbench } from './core/components/statistics/StatisticsWorkbench';
 
 const DEFAULT_PATIENT_FILTERS = {
   searchQuery: '',
@@ -85,7 +86,16 @@ function App() {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showMigrationReport, setShowMigrationReport] = useState(false);
   const [showBatchImport, setShowBatchImport] = useState(false);
-  const [showHome, setShowHome] = useState(false);
+  // PR2 §1 — 화면 상태 단일 진실원. showHome/setShowHome은 21곳 호출부(App 내부 + 4개
+  // 훅/컴포넌트에 props로 전달됨)를 그대로 유지하기 위한 호환 shim이다. 이 shim 덕분에
+  // 기존 호출부가 그대로 동작하면서도(예: Electron "새로 만들기" → setShowHome(true)) 통계
+  // 화면(activeScreen==='statistics')이 자동으로 닫힌다 — 별도 boolean이었다면 이 전환이
+  // 보장되지 않았다(계획서 pr2-dreamy-frog.md §1).
+  const [activeScreen, setActiveScreen] = useState('workspace'); // 'workspace' | 'dashboard' | 'statistics'
+  const showHome = activeScreen === 'dashboard';
+  const setShowHome = useCallback((value) => {
+    setActiveScreen(value ? 'dashboard' : 'workspace');
+  }, []);
   const [conflictPatientId, setConflictPatientId] = useState(null);
 
   // 종합소견 직접 편집 dirty 가드 — 불리언이 아니라 환자 ID를 담는다. 환자를 전환해도
@@ -120,8 +130,12 @@ function App() {
     return true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirtyAssessmentPatientId, activeId, blockedByUnsavedDraftAlert]);
-  const { serverConfig, configLoading, configError } = useServerConfig({ session, settings });
+  const { serverConfig, configLoading, configError, refetchConfig, refreshing: statsConfigRefreshing, refreshError: statsConfigRefreshError } =
+    useServerConfig({ session, settings });
   const { aiAvailable } = useAIAvailable({ serverConfig, session });
+  // PR2 §4 — 통계 워크벤치 가용성. videoAnalysisEnabled(:190)와 같은 단순 boolean 패턴 —
+  // 별도 훅 없이 statsWorkbenchAvailable 플래그 하나로 메뉴 노출을 결정한다.
+  const statsAvailable = !!serverConfig?.statsWorkbenchAvailable;
   const isIntranetMode =
     session?.mode === 'intranet' || settings?.integrationMode === 'intranet';
   const canUseMinePatientScope = session?.mode !== 'intranet' || session?.user?.role === 'doctor';
@@ -185,6 +199,7 @@ function App() {
 
   const handleStartIntakeRef = useRef(null);
   const handleResetPatientsRef = useRef(null);
+  const handleOpenStatisticsRef = useRef(null); // PR2 §3 — Electron 메뉴가 구독
 
   // 현재 환자의 스텝 목록
   const videoAnalysisEnabled = !!serverConfig?.videoAnalysisEnabled;
@@ -420,7 +435,7 @@ function App() {
   useEvaluationDateSync({ activeId, patients, setPatients, session });
 
   // Electron 메뉴 이벤트
-  useElectronMenuEvents({ handleResetPatientsRef, handleStartIntakeRef });
+  useElectronMenuEvents({ handleResetPatientsRef, handleStartIntakeRef, handleOpenStatisticsRef });
 
   // 종합소견 편집 dirty 상태를 Electron main에 동기화한다 — 창 닫기(win.on('close'))와
   // 메뉴 새로고침(Ctrl+R)이 이 값을 보고 네이티브 confirm을 띄운다. PHI(환자 ID)는 절대
@@ -520,6 +535,29 @@ function App() {
     setShowHome(true);
   };
 
+  // PR2 §1 — 통계 워크벤치 진입/이탈. 헤더 버튼·랜딩 화면 버튼·Electron 메뉴가 전부 이 하나의
+  // 함수를 호출한다(경로별로 다른 가드를 만들지 않는다). returnScreenRef는 'workspace' 아니면
+  // 'dashboard'만 담는다 — 아래 얼리리턴이 이미 통계 화면인 경우를 걸러내므로, 이 함수가 실행될
+  // 때의 activeScreen은 항상 그 둘 중 하나다.
+  const returnScreenRef = useRef('workspace');
+  const handleOpenStatistics = useCallback(() => {
+    if (activeScreen === 'statistics') return; // 이미 통계 화면 — 메뉴 재클릭이 복귀값을 오염시키지 않게
+    if (dirtyAssessmentPatientId) { blockedByUnsavedDraftAlert(); return; }
+    if (!statsAvailable) { showAlert('통계분석 워크벤치를 사용할 수 없습니다.'); return; }
+    returnScreenRef.current = activeScreen;
+    setActiveScreen('statistics');
+  }, [activeScreen, dirtyAssessmentPatientId, statsAvailable]);
+  const handleCloseStatistics = useCallback(() => {
+    setActiveScreen(returnScreenRef.current);
+  }, []);
+  handleOpenStatisticsRef.current = handleOpenStatistics;
+
+  // 렌더러가 아는 가용성을 Electron main에 전파해 메뉴를 켜고 끈다(main은 서버 설정을 모름) —
+  // set-has-unsaved-draft와 같은 renderer→main IPC 패턴.
+  useEffect(() => {
+    window.electron?.setStatsAvailable?.(statsAvailable);
+  }, [statsAvailable]);
+
   // 공통 모달 props (AppModals)
   const modalsProps = {
     session, settings, integrationStatus, syncState, syncNow, logout: handleLogout,
@@ -612,6 +650,26 @@ function App() {
   }
 
   // ===========================================
+  // 통계분석 워크벤치 (PR2 §1) — 로그인/비밀번호변경 가드 다음, 환자 동기화 로딩·자동 랜딩
+  // 판정보다 먼저 온다. 이 화면은 patients/activeId/patientScope를 전혀 안 쓰므로 그 판정들이
+  // 이 화면을 가리면 안 된다(계획서 §1 "환자 없음에 따른 자동 랜딩과 환자 동기화 로딩이
+  // 통계 화면을 덮지 않도록 분기 순서 조정").
+  // ===========================================
+  if (activeScreen === 'statistics') {
+    return (
+      <StatisticsWorkbench
+        session={session}
+        serverConfig={serverConfig}
+        statsAvailable={statsAvailable}
+        refetchConfig={refetchConfig}
+        configRefreshing={statsConfigRefreshing}
+        configRefreshError={statsConfigRefreshError}
+        onClose={handleCloseStatistics}
+      />
+    );
+  }
+
+  // ===========================================
   // 인트라넷 초기 부팅: pull 중이거나 서버에 환자가 존재하면 랜딩 억제
   // ===========================================
   // pull 중: 아직 응답 전 → 로딩 화면
@@ -656,6 +714,8 @@ function App() {
           onShowBatchImport={() => setShowBatchImport(true)}
           onLoadTestData={handleLoadTestData}
           onShowSettings={() => setShowSettings(true)}
+          onShowStatistics={handleOpenStatistics}
+          statsAvailable={statsAvailable}
           onGoBack={() => setShowHome(false)}
           onResetPatients={handleResetPatients}
           onSelectPatient={(id) => guardedSelectPatient(id)}
@@ -800,6 +860,8 @@ function App() {
           exportDropdown={exportDropdown}
           setExportDropdown={setExportDropdown}
           onShowHome={handleShowHome}
+          onShowStatistics={handleOpenStatistics}
+          statsAvailable={statsAvailable}
           onResetPatients={handleResetPatients}
           onToggleSidebar={() => setShowSidebar(v => !v)}
           onShowSaveModal={() => setShowSaveModal(true)}

@@ -12,6 +12,13 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.on('goto-module', callback);
     return () => ipcRenderer.removeListener('goto-module', callback);
   },
+  // PR2 §3 — 통계분석 워크벤치(인트라넷 전용 기능이라 standalone에서는 항상 false지만,
+  // 채널 자체는 노출해 App.jsx가 빌드 종류를 분기하지 않게 한다).
+  onOpenStatistics: (callback) => {
+    ipcRenderer.on('open-statistics', callback);
+    return () => ipcRenderer.removeListener('open-statistics', callback);
+  },
+  setStatsAvailable: (available) => ipcRenderer.send('set-stats-available', !!available),
 
   // native alert/confirm
   showAlert: (message) => ipcRenderer.invoke('show-alert', message),

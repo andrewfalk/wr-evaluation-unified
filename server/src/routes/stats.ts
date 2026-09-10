@@ -24,6 +24,7 @@ import { computeEstimability } from '../statsEstimability';
 import { buildRunManifest } from '../statsRunManifest';
 import { buildAnalysisContext } from '../statsAnalysisContext';
 import { handlePostAnalyze } from '../statsAnalyzeHandler';
+import { handlePostExport } from '../statsExportHandler';
 
 const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
@@ -207,6 +208,12 @@ export function createStatsRouter(pool: Pool) {
   // 정의돼 있다(§4.1) — 별도 user_capability_grants 부여가 새로 필요해지지 않는다.
   router.post('/analyze', auth, requireCapability(pool, 'stats.regression'), analyzeRateLimit(), csrfMiddleware, (req, res) =>
     handlePostAnalyze(pool, req, res).catch(() => res.status(500).json(internalError())),
+  );
+
+  // PR2 §7 — 집계 결과 내보내기. recipe를 다시 안 받고 analysisRunId로 저장된 결과를 그대로
+  // CSV로 포맷한다(재계산 없음) — stats.export_results는 이미 0028에서 default_all_roles=true.
+  router.post('/export', auth, requireCapability(pool, 'stats.export_results'), csrfMiddleware, (req, res) =>
+    handlePostExport(pool, req, res).catch(() => res.status(500).json(internalError())),
   );
 
   return router;

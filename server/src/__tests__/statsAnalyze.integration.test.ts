@@ -40,15 +40,16 @@ describe.skipIf(!TEST_DB_URL)('stats_runs DDL — 실제 Postgres (integration)'
   });
 
   function insertSucceeded(digest: string, cacheable: boolean, manifestOutcome = 'succeeded') {
-    const manifest = JSON.stringify({ analysisRunId: crypto.randomUUID(), outcome: manifestOutcome, resultDigest: 'd' });
+    const analysisRunId = crypto.randomUUID();
+    const manifest = JSON.stringify({ analysisRunId, outcome: manifestOutcome, resultDigest: 'd' });
     return pool.query<{ id: string }>(
       `INSERT INTO stats_runs (organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
-         requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at)
-       VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',$4,$5,'{}'::jsonb, now() + interval '1 day', now())
+         requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at, analysis_run_id)
+       VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',$4,$5,'{}'::jsonb, now() + interval '1 day', now(), $6)
        ON CONFLICT (organization_id, execution_digest) WHERE status = 'succeeded' AND cacheable
        DO NOTHING
        RETURNING id`,
-      [orgId, userId, digest, cacheable, manifest],
+      [orgId, userId, digest, cacheable, manifest, analysisRunId],
     );
   }
 
@@ -69,21 +70,23 @@ describe.skipIf(!TEST_DB_URL)('stats_runs DDL — 실제 Postgres (integration)'
   });
 
   it('run_result_error_pairing — succeeded는 result 필수, failed는 error_code 필수', async () => {
+    // analysis_run_id는 이 CHECK 위반 자체와 무관하지만 NOT NULL이라 채워야
+    // 원래 검증하려는 23514(check_violation)에 도달한다 — manifest는 여전히 '{}'::jsonb.
     await expect(
       pool.query(
         `INSERT INTO stats_runs (organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
-           requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at)
-         VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',true,'{}'::jsonb, NULL, now() + interval '1 day', now())`,
-        [orgId, userId, `digest-bad-succeeded-${Date.now()}`],
+           requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at, analysis_run_id)
+         VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',true,'{}'::jsonb, NULL, now() + interval '1 day', now(), $4)`,
+        [orgId, userId, `digest-bad-succeeded-${Date.now()}`, crypto.randomUUID()],
       ),
     ).rejects.toMatchObject({ code: '23514' }); // check_violation
 
     await expect(
       pool.query(
         `INSERT INTO stats_runs (organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
-           requested_disclosure_profile, cacheable, manifest, result, error_code, expires_at, finished_at)
-         VALUES ($1,$2,'failed','r','s',$3,'aggregate',true,'{}'::jsonb, '{}'::jsonb, NULL, now() + interval '1 day', now())`,
-        [orgId, userId, `digest-bad-failed-${Date.now()}`],
+           requested_disclosure_profile, cacheable, manifest, result, error_code, expires_at, finished_at, analysis_run_id)
+         VALUES ($1,$2,'failed','r','s',$3,'aggregate',true,'{}'::jsonb, '{}'::jsonb, NULL, now() + interval '1 day', now(), $4)`,
+        [orgId, userId, `digest-bad-failed-${Date.now()}`, crypto.randomUUID()],
       ),
     ).rejects.toMatchObject({ code: '23514' });
   });
@@ -92,9 +95,9 @@ describe.skipIf(!TEST_DB_URL)('stats_runs DDL — 실제 Postgres (integration)'
     await expect(
       pool.query(
         `INSERT INTO stats_runs (organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
-           requested_disclosure_profile, cacheable, manifest, result, expires_at)
-         VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',true,'{}'::jsonb,'{}'::jsonb, now() + interval '1 day')`,
-        [orgId, userId, `digest-no-finished-${Date.now()}`],
+           requested_disclosure_profile, cacheable, manifest, result, expires_at, analysis_run_id)
+         VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',true,'{}'::jsonb,'{}'::jsonb, now() + interval '1 day', $4)`,
+        [orgId, userId, `digest-no-finished-${Date.now()}`, crypto.randomUUID()],
       ),
     ).rejects.toMatchObject({ code: '23514' });
   });
@@ -107,13 +110,14 @@ describe.skipIf(!TEST_DB_URL)('stats_runs DDL — 실제 Postgres (integration)'
     );
     const throwawayUserId = throwawayUser.rows[0].id;
     const digest = `digest-user-delete-${Date.now()}`;
-    const manifest = JSON.stringify({ analysisRunId: crypto.randomUUID(), outcome: 'succeeded', resultDigest: 'd' });
+    const analysisRunId = crypto.randomUUID();
+    const manifest = JSON.stringify({ analysisRunId, outcome: 'succeeded', resultDigest: 'd' });
     const ins = await pool.query<{ id: string }>(
       `INSERT INTO stats_runs (organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
-         requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at)
-       VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',true,$4,'{}'::jsonb, now() + interval '1 day', now())
+         requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at, analysis_run_id)
+       VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',true,$4,'{}'::jsonb, now() + interval '1 day', now(), $5)
        RETURNING id`,
-      [orgId, throwawayUserId, digest, manifest],
+      [orgId, throwawayUserId, digest, manifest, analysisRunId],
     );
     const runId = ins.rows[0].id;
 
@@ -130,12 +134,13 @@ describe.skipIf(!TEST_DB_URL)('stats_runs DDL — 실제 Postgres (integration)'
 
   it('DELETE-then-INSERT — 만료된 cacheable 행은 새 성공 결과로 교체된다', async () => {
     const digest = `digest-expired-${Date.now()}`;
-    const oldManifest = JSON.stringify({ analysisRunId: crypto.randomUUID(), outcome: 'succeeded', resultDigest: 'old' });
+    const oldAnalysisRunId = crypto.randomUUID();
+    const oldManifest = JSON.stringify({ analysisRunId: oldAnalysisRunId, outcome: 'succeeded', resultDigest: 'old' });
     await pool.query(
       `INSERT INTO stats_runs (organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
-         requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at)
-       VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',true,$4,'{"old":true}'::jsonb, now() - interval '1 hour', now())`,
-      [orgId, userId, digest, oldManifest],
+         requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at, analysis_run_id)
+       VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',true,$4,'{"old":true}'::jsonb, now() - interval '1 hour', now(), $5)`,
+      [orgId, userId, digest, oldManifest, oldAnalysisRunId],
     );
 
     // 캐시 조회는 expires_at > now()라 이 행을 무시해야 한다.
@@ -150,15 +155,46 @@ describe.skipIf(!TEST_DB_URL)('stats_runs DDL — 실제 Postgres (integration)'
       `DELETE FROM stats_runs WHERE organization_id=$1 AND execution_digest=$2 AND status='succeeded' AND cacheable AND expires_at <= now()`,
       [orgId, digest],
     );
-    const newManifest = JSON.stringify({ analysisRunId: crypto.randomUUID(), outcome: 'succeeded', resultDigest: 'new' });
+    const newAnalysisRunId = crypto.randomUUID();
+    const newManifest = JSON.stringify({ analysisRunId: newAnalysisRunId, outcome: 'succeeded', resultDigest: 'new' });
     const reinsert = await pool.query<{ id: string }>(
       `INSERT INTO stats_runs (organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
-         requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at)
-       VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',true,$4,'{"new":true}'::jsonb, now() + interval '1 day', now())
+         requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at, analysis_run_id)
+       VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',true,$4,'{"new":true}'::jsonb, now() + interval '1 day', now(), $5)
        ON CONFLICT (organization_id, execution_digest) WHERE status='succeeded' AND cacheable DO NOTHING
        RETURNING id`,
-      [orgId, userId, digest, newManifest],
+      [orgId, userId, digest, newManifest, newAnalysisRunId],
     );
     expect(reinsert.rows).toHaveLength(1);
+  });
+
+  it('stats_runs_analysis_run_id_uniq — 같은 조직에서 analysis_run_id 중복 INSERT는 거부된다 (PR2 §7)', async () => {
+    const analysisRunId = crypto.randomUUID();
+    const manifest = JSON.stringify({ analysisRunId, outcome: 'succeeded', resultDigest: 'd' });
+    await pool.query(
+      `INSERT INTO stats_runs (organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
+         requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at, analysis_run_id)
+       VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',true,$4,'{}'::jsonb, now() + interval '1 day', now(), $5)`,
+      [orgId, userId, `digest-arid-uniq-a-${Date.now()}`, manifest, analysisRunId],
+    );
+    await expect(
+      pool.query(
+        `INSERT INTO stats_runs (organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
+           requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at, analysis_run_id)
+         VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',true,$4,'{}'::jsonb, now() + interval '1 day', now(), $5)`,
+        [orgId, userId, `digest-arid-uniq-b-${Date.now()}`, manifest, analysisRunId],
+      ),
+    ).rejects.toMatchObject({ code: '23505' }); // unique_violation
+  });
+
+  it('analysis_run_id는 NOT NULL이다 — 빠뜨리면 INSERT가 거부된다 (PR2 §7)', async () => {
+    await expect(
+      pool.query(
+        `INSERT INTO stats_runs (organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
+           requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at)
+         VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',true,'{}'::jsonb,'{}'::jsonb, now() + interval '1 day', now())`,
+        [orgId, userId, `digest-arid-missing-${Date.now()}`],
+      ),
+    ).rejects.toMatchObject({ code: '23502' }); // not_null_violation
   });
 });

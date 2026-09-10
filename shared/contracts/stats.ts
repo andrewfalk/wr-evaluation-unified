@@ -299,6 +299,18 @@ export type AnalyzeResult                 = z.infer<typeof AnalyzeResultSchema>;
 export type AnalyzeRequest                = z.infer<typeof AnalyzeRequestSchema>;
 export type AnalyzeResponse               = z.infer<typeof AnalyzeResponseSchema>;
 
+// ============================================================================
+// PR2: 집계 결과 내보내기 계약. `stats_runs`에 이미 억제 적용 후 저장된 manifest/result를
+// 그대로 CSV로 포맷할 뿐이라 recipe를 다시 받지 않는다 — analysisRunId 하나만 필요하다
+// (계획서 §7 "aggregate export는 저장된 결과를 그대로 내보낸다").
+// ============================================================================
+
+export const ExportAggregateRequestSchema = z.object({
+  analysisRunId: z.string().uuid(),
+});
+
+export type ExportAggregateRequest = z.infer<typeof ExportAggregateRequestSchema>;
+
 export type StatsGrain            = z.infer<typeof StatsGrainSchema>;
 export type CatalogVariable          = z.infer<typeof CatalogVariableSchema>;
 export type CatalogResponse          = z.infer<typeof CatalogResponseSchema>;
