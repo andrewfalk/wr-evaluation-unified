@@ -19,13 +19,29 @@ const FIXED_MESSAGES = {
   NOT_FOUND: '기능을 사용할 수 없습니다.',
   FORBIDDEN: '이 작업을 수행할 권한이 없습니다.',
   UNAUTHORIZED: '인증이 만료되었습니다. 다시 로그인해 주세요.',
+  // PR3-A — 이변량 관련 HTTP 에러(계획서 §"에러 코드").
+  METHOD_NOT_AVAILABLE: '선택한 분석 방법을 현재 데이터로 실행할 수 없습니다.',
+  BIVARIATE_EXPORT_NOT_SUPPORTED: '이변량 분석 결과는 아직 CSV 내보내기를 지원하지 않습니다.',
+};
+
+// PR3-A — zod superRefine 커스텀 이슈(StatsAnalysisRecipeSchema)는 code가 항상
+// 'custom' 고정이고 실제 의미는 message 필드에 실린다(예: 'SAME_VARIABLE_SELECTED_TWICE')
+// — validateRecipe(비-zod)의 {code,path,message}와 message 자리에 코드 문자열이
+// 오는 형태가 겹치므로, 같은 테이블로 둘 다 처리한다.
+const RECIPE_ERROR_MESSAGE_LABELS = {
+  BIVARIATE_REQUIRES_EXACTLY_TWO_VARIABLES: '이변량 분석은 변수를 정확히 2개 선택해야 합니다.',
+  SAME_VARIABLE_SELECTED_TWICE: '같은 변수를 두 번 선택할 수 없습니다.',
+  BIVARIATE_REQUIRES_METHOD: '이변량 분석은 방법을 선택해야 합니다.',
+  METHOD_TYPE_MISMATCH: '선택한 방법이 변수 타입 조합과 맞지 않습니다.',
+  PAIRED_TEST_REQUIRES_EXPLICIT_PAIRING: '현재 카탈로그에는 좌우 대응(짝) 변수가 없어 지원하지 않습니다.',
 };
 
 function describeRecipeError(entry) {
   // 커스텀 RecipeValidationError({code,path,message})와 원시 zod issue({path:[], message})
   // 둘 다 올 수 있다(server/src/statsAnalysisContext.ts §9) — path 형태만 다르고 필드명은 같다.
   const path = Array.isArray(entry?.path) ? entry.path.join('.') : entry?.path;
-  const message = entry?.message || '유효하지 않은 값';
+  // PR3-A — message 자체가 알려진 코드 문자열이면(위 두 경로 모두 해당 가능) 번역한다.
+  const message = RECIPE_ERROR_MESSAGE_LABELS[entry?.message] || entry?.message || '유효하지 않은 값';
   return path ? `${path}: ${message}` : message;
 }
 

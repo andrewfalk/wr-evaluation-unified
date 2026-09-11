@@ -253,6 +253,31 @@
 .swb-card--muted { background: #f8fafc; }
 [data-theme="dark"] .swb-card--muted { background: #0f172a; }
 
+/* PR3-A — 방법 선택기(MethodPicker). 기존 --swb-* 로컬 토큰 관례를 그대로 따른다. */
+.swb-method-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.swb-method-card {
+  border: 1px solid var(--swb-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--swb-panel);
+}
+.swb-method-card--selected { border-color: var(--swb-accent); background: var(--swb-accent-soft); }
+.swb-method-card--disabled { opacity: 0.6; }
+.swb-method-card-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.swb-method-card-main:disabled { cursor: not-allowed; }
+
 .swb-metric-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
