@@ -70,7 +70,7 @@ describe.skipIf(!AVAILABLE)('statsEngine <-> analyze.py 실제 프로세스 (smo
 
   it('실제 stdin JSON을 받아 실제 stdout JSON을 반환한다(mock 없음)', () => {
     const request = {
-      protocolVersion: 1,
+      protocolVersion: 2,
       variables: [
         { key: 'v1', kind: 'continuous', values: [10, 20, 30, 40, 50] },
         { key: 'v2', kind: 'discrete', values: ['a', 'b', 'a'] },
@@ -87,7 +87,7 @@ describe.skipIf(!AVAILABLE)('statsEngine <-> analyze.py 실제 프로세스 (smo
 
   it('한글 ordinal 값이 UTF-8로 손상 없이 왕복한다(§9-item3 요구)', () => {
     const request = {
-      protocolVersion: 1,
+      protocolVersion: 2,
       variables: [{ key: 'grade', kind: 'discrete', values: ['중등도', '경도', '고도', '중등도'] }],
     };
     const { code, stdout } = runReal(JSON.stringify(request));

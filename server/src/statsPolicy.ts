@@ -10,6 +10,11 @@ export const MINIMUM_COHORT = 10;
 // 대상이 없다). 정책이 바뀌면(계산 규칙 변경) 이 값을 올린다.
 export const ESTIMABILITY_POLICY_VERSION = 'v0-preview-counts';
 
+// PR3-A — §6.1 반복측정 게이트(personCount<rowCount면 추론 차단) 정책 버전. §6.1
+// 게이트 규칙이 바뀌면(예: 다른 grain 지원 추가) 이 값을 올린다 — estimability와는
+// 독립된 정책 축이라 별도 버전으로 캐시 무효화를 관리한다(계획서 §버전 상수).
+export const INFERENCE_GATE_POLICY_VERSION = 'v1-repeated-measures-gate';
+
 // §D-1 — family 내부 값-다양성 제한. 이 창(windowMinutes) 안에서 같은 queryFamilyDigest의
 // 요청 수가 maxQueriesPerFamily를 넘거나, 어느 필터 키든 서로 다른 값의 수가
 // maxDistinctFilterValuesPerKey를 넘으면 forceSuppress.

@@ -192,6 +192,17 @@ export async function handlePostExport(pool: Pool, req: Request, res: Response):
     return;
   }
 
+  // PR3-A §"결과 계약 불변조건" — CSV export 거부는 result.bivariate 존재 여부가
+  // 아니라 manifest.analysisMode 기준으로 판정한다(조기억제 경로 등 result.bivariate가
+  // 없는 응답도 있을 수 있어 판정이 샐 수 있음 — manifest는 저장 시점에 항상 채워짐).
+  // 구버전 저장 결과는 analysisMode 필드 자체가 없어(optional) undefined이고, 그
+  // 경우는 기존 동작 그대로 descriptive로 취급해 export를 허용한다.
+  if (manifestParsed.data.analysisMode === 'bivariate') {
+    await auditDenied('BIVARIATE_EXPORT_NOT_SUPPORTED');
+    res.status(400).json({ code: 'BIVARIATE_EXPORT_NOT_SUPPORTED', error: '이변량 분석 결과는 아직 CSV 내보내기를 지원하지 않습니다.' });
+    return;
+  }
+
   const csv = buildCsv(manifestParsed.data, resultParsed.data);
 
   // §7.4 원칙을 aggregate 등급에도 적용 — 감사 INSERT가 실패하면 CSV는 한 바이트도 안 나간다.

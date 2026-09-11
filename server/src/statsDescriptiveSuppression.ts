@@ -3,8 +3,7 @@
 // continuous(present/missing 연결)·discrete(모든 level+missing 연결)·결측사유 분포까지
 // 일반화한다). mode 계산·ordinal 순서 재배열도 여기서 한다(Python은 카탈로그를 모른다).
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
-import { ELBOW_BURDEN_GRADE_ORDER } from '@wr/analytics-core/modules/elbow/index';
-import { WRIST_BURDEN_GRADE_ORDER } from '@wr/analytics-core/modules/wrist/index';
+import { getOrdinalOrder } from './statsOrdinalOrder';
 import type {
   AnalyzeContinuousResult,
   AnalyzeDiscreteLevel,
@@ -25,12 +24,6 @@ function mapCatalogTypeToKind(type: AnalyticsVariableMetadata['type'] | undefine
 
 function distinctPersons(rows: DatasetRow[]): number {
   return new Set(rows.map((r) => r.personClusterKey)).size;
-}
-
-function getOrdinalOrder(variableKey: string): readonly string[] | null {
-  if (variableKey === 'elbow.assessment.burdenGradeMax') return ELBOW_BURDEN_GRADE_ORDER;
-  if (variableKey === 'wrist.assessment.burdenGradeMax') return WRIST_BURDEN_GRADE_ORDER;
-  return null;
 }
 
 // §4.2 — mode 동점 처리: ordinal은 심각도 순서에서 더 낮은(경한) 레벨, 그 외는 값의

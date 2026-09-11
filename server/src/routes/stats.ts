@@ -96,7 +96,7 @@ function buildSuppressedPreviewPayload(
 }
 
 async function handlePostPreview(pool: Pool, req: Request, res: Response): Promise<void> {
-  const built = await buildAnalysisContext(pool, req);
+  const built = await buildAnalysisContext(pool, req, 'preview');
   if (!built.ok) {
     res.status(built.status).json(built.body);
     return;
@@ -130,8 +130,16 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
   }
 
   // §E — resultDigest는 억제 적용 "후" 실제 공개 페이로드의 해시. 억제 전 원값을 해시하면
-  // 무차별대입으로 역산될 수 있어 절대 쓰지 않는다.
-  const resultDigest = canonicalDigest({ counts, estimability });
+  // 무차별대입으로 역산될 수 있어 절대 쓰지 않는다. PR3-A — availableMethods/
+  // methodCatalogVersion도 이 preview가 실제로 공개하는 페이로드이므로 해시에 포함한다
+  // (계획서 §"resultDigest에 availableMethods 누락 복원" — 3차 리뷰에서 지적됐다가
+  // 누락됐던 것을 v7에서 복원).
+  const resultDigest = canonicalDigest({
+    counts,
+    estimability,
+    availableMethods: ctx.availableMethods,
+    methodCatalogVersion: ctx.methodCatalogVersion,
+  });
 
   const runManifest = buildRunManifest({
     recipeDigest: ctx.recipeDigest,
@@ -139,14 +147,15 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
     resultDigest,
     snapshotAsOf: ctx.snapshot.snapshotAsOf,
     formulaPolicies: ctx.recipe.formulaPolicies,
+    analysisMode: ctx.recipe.analysisMode,
   });
 
   const response: PreviewResponse = {
     runManifest,
     counts,
     estimability,
-    availableMethods: [],
-    methodCatalogVersion: null,
+    availableMethods: ctx.availableMethods,
+    methodCatalogVersion: ctx.methodCatalogVersion,
     differencing: {
       queryFamilyDigest: ctx.queryFamilyDigest,
       windowMinutes: DIFFERENCING_POLICY.windowMinutes,

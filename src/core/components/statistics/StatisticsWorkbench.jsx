@@ -8,21 +8,45 @@ import { useViewportWidth } from './useViewportWidth';
 import { describeStatsApiError } from './describeStatsError';
 import './statistics-workbench.css';
 
-function buildConditionKey(variableKeys, analysisPurpose, formulaPolicies, appliedFilters) {
+// PR3-A — 이변량 모드는 정렬하지 않는다(계획서 §클라이언트배선): variableKeys 순서가
+// x/y 역할을 정하므로 [a,b]와 [b,a]는 서로 다른 조건이어야 한다. requestedMethod도
+// 조건 키에 포함 — method를 바꾸면 preview가 재실행돼야 새 availableMethods 판정을
+// 받을 수 있다(단, requestedMethod가 아직 없어도(undefined) 유효한 조건 키를 만들어야
+// 최초 preview가 발사된다 — 순환의존 방지, 계획서 §"이슈1 — 필수수정, 재발 방지").
+function buildConditionKey(analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters) {
   return JSON.stringify({
-    variableKeys: [...variableKeys].sort(),
+    analysisMode,
+    variableKeys: analysisMode === 'bivariate' ? variableKeys : [...variableKeys].sort(),
+    requestedMethod: requestedMethod ?? null,
     analysisPurpose,
     formulaPolicies,
     appliedFilters,
   });
 }
 
-function buildRecipe(variableKeys, analysisPurpose, formulaPolicies, appliedFilters) {
-  return { grain: 'case', variableKeys, filters: appliedFilters, analysisPurpose, formulaPolicies };
+function buildRecipe(analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters) {
+  return {
+    grain: 'case',
+    variableKeys,
+    filters: appliedFilters,
+    analysisPurpose,
+    formulaPolicies,
+    analysisMode,
+    ...(analysisMode === 'bivariate' && requestedMethod ? { requestedMethod } : {}),
+  };
 }
 
-function isRecipeComplete(variableKeys, formulaPolicies, catalogByKey, appliedFilters) {
-  if (variableKeys.length === 0) return false;
+// PR3-A — 이변량이면 "변수 정확히 2개 + formula policy 완료"까지만 본다. method
+// 선택 여부는 절대 여기서 보지 않는다 — 여기서 보면 method 미선택 상태에서 preview
+// 자체가 안 나가 availableMethods를 받아올 수 없다(1차 초안의 순환의존 버그가
+// 클라이언트에서 재발했던 지점, 계획서 §"이슈1"). method 실행 가능 여부는 오직
+// canExecute(실행 버튼)에서만 본다.
+function isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters) {
+  if (analysisMode === 'bivariate') {
+    if (variableKeys.length !== 2 || variableKeys[0] === variableKeys[1]) return false;
+  } else if (variableKeys.length === 0) {
+    return false;
+  }
   const neededKeys = Array.from(new Set([...variableKeys, ...appliedFilters.map((f) => f.key)]));
   const seenFamilies = new Set();
   for (const key of neededKeys) {
@@ -107,24 +131,45 @@ export function StatisticsWorkbench({
   const [formulaPolicies, setFormulaPolicies] = useState({});
   const [filterDraft, setFilterDraft] = useState([]);
   const [appliedFilters, setAppliedFilters] = useState([]);
+  // PR3-A — 이변량 모드 draft state(계획서 §클라이언트배선).
+  const [analysisMode, setAnalysisMode] = useState('descriptive');
+  const [requestedMethod, setRequestedMethod] = useState(null);
+  const [modeChangeBlockedNotice, setModeChangeBlockedNotice] = useState(false);
 
   function toggleVariable(key) {
     setVariableKeys((prev) => {
       if (prev.includes(key)) return prev.filter((k) => k !== key);
-      if (prev.length >= 20) return prev; // 서버 상한(§ recipe 계약) — 조용히 무시
+      const cap = analysisMode === 'bivariate' ? 2 : 20; // 서버 상한(§ recipe 계약) — 조용히 무시
+      if (prev.length >= cap) return prev;
       return [...prev, key];
     });
+    // 변수 구성이 바뀌면 이전에 고른 method가 새 쌍에 더 이상 안 맞을 수 있어 초기화한다
+    // (계획서 §클라이언트배선 "변수 변경 시 requestedMethod 초기화" — 조용히 유지하면
+    // 사용자가 뭘 실행했는지 오해할 수 있음).
+    setRequestedMethod(null);
+  }
+
+  function handleAnalysisModeChange(nextMode) {
+    if (nextMode === 'bivariate' && variableKeys.length > 2) {
+      // 계획서 §클라이언트배선 — 3개 이상 선택된 채로 전환 시도하면 자동 축소하지
+      // 않고 전환 자체를 막는다(암묵적 선택 손실 방지).
+      setModeChangeBlockedNotice(true);
+      return;
+    }
+    setModeChangeBlockedNotice(false);
+    setRequestedMethod(null);
+    setAnalysisMode(nextMode);
   }
 
   // ---- preview: 조건-key(무엇을 위한 결과인가) + 요청세대(그 요청 인스턴스가 최신인가) ----
-  const currentConditionKey = buildConditionKey(variableKeys, analysisPurpose, formulaPolicies, appliedFilters);
+  const currentConditionKey = buildConditionKey(analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters);
   const [previewState, setPreviewState] = useState({ key: null, status: 'idle', result: null, error: null });
   const previewGenRef = useRef(0);
 
   useEffect(() => {
     const key = currentConditionKey;
     const gen = ++previewGenRef.current;
-    if (!isRecipeComplete(variableKeys, formulaPolicies, catalogByKey, appliedFilters)) {
+    if (!isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters)) {
       setPreviewState({ key, status: 'idle', result: null, error: null });
       return undefined;
     }
@@ -132,7 +177,10 @@ export function StatisticsWorkbench({
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        const recipe = buildRecipe(variableKeys, analysisPurpose, formulaPolicies, appliedFilters);
+        // PR3-A — preview는 requestedMethod를 참고만 하고 유효성을 검사하지 않는다
+        // (서버가 관대함, 계획서 §파이프라인 "preview는 관대하다") — method 미선택
+        // 상태에서도 이 호출은 정상적으로 나가야 availableMethods를 받아올 수 있다.
+        const recipe = buildRecipe(analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters);
         const res = await previewStatsAnalysis(recipe, session, { signal: controller.signal });
         if (gen !== previewGenRef.current) return;
         setPreviewState((prev) => (prev.key === key ? { key, status: 'ready', result: res, error: null } : prev));
@@ -165,17 +213,27 @@ export function StatisticsWorkbench({
   // 재조회가 실패해 가용성을 다시 확인 못 한 상태를 방어적으로 함께 잠근다(3차 리뷰).
   const actionsLocked = featureUnavailableDetected || configRefreshing || !!configRefreshError || !statsAvailable;
 
+  // PR3-A — 이변량이면 requestedMethod가 존재하고 그 상태가 available/conditional인지
+  // 추가로 확인한다. `selectedMethod?.status !== 'unsupported'`는 쓰지 않는다 —
+  // requestedMethod가 목록에 아예 없을 때(존재 안 함) undefined !== 'unsupported'가
+  // true로 새기 때문이다(계획서 §클라이언트배선 이슈1). 존재 여부를 명시적으로 확인한다.
+  const selectedMethod = previewState.result?.availableMethods?.find((m) => m.id === requestedMethod);
+  const methodExecutable =
+    analysisMode !== 'bivariate' ||
+    (selectedMethod != null && (selectedMethod.status === 'available' || selectedMethod.status === 'conditional'));
+
   const canExecute =
     isPreviewCurrent &&
     previewState.status === 'ready' &&
     !previewState.result?.counts?.suppressed &&
+    methodExecutable &&
     !isAnalyzing &&
     !actionsLocked;
 
   async function handleRunAnalyze() {
     if (!canExecute || analyzeInFlightRef.current) return;
     analyzeInFlightRef.current = true;
-    const recipeAtSubmit = buildRecipe(variableKeys, analysisPurpose, formulaPolicies, appliedFilters);
+    const recipeAtSubmit = buildRecipe(analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters);
     setIsAnalyzing(true);
     setAnalyzeError(null);
     try {
@@ -192,13 +250,18 @@ export function StatisticsWorkbench({
   }
 
   const recipeChanged = committedRecipe
-    ? JSON.stringify(buildRecipe(variableKeys, analysisPurpose, formulaPolicies, appliedFilters)) !== JSON.stringify(committedRecipe)
+    ? JSON.stringify(buildRecipe(analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters)) !== JSON.stringify(committedRecipe)
     : false;
 
   // ---- export ----
   const [exportState, setExportState] = useState({ status: 'idle', error: null });
+  // PR3-A §"결과 계약 불변조건" — 내보내기 잠금은 activeScreen이나 현재 활성 탭이
+  // 아니라 저장된 실행의 analysisMode 기준(committedRecipe)으로 판정한다. 탭을
+  // 바꿔도 내보내기 가능 여부는 바뀌면 안 된다. 서버도 manifest.analysisMode 기준으로
+  // 같은 판정을 하므로(statsExportHandler.ts) 여기서도 동일 기준으로 미리 막는다.
+  const exportUnsupported = committedRecipe?.analysisMode === 'bivariate';
   async function handleExport() {
-    if (!committedResult || actionsLocked) return; // 버튼 disabled와 별개로 핸들러 자체도 잠금을 지킨다
+    if (!committedResult || actionsLocked || exportUnsupported) return; // 버튼 disabled와 별개로 핸들러 자체도 잠금을 지킨다
     setExportState({ status: 'exporting', error: null });
     try {
       const blob = await exportStatsAggregate(committedResult.runManifest.analysisRunId, session);
@@ -260,6 +323,11 @@ export function StatisticsWorkbench({
             catalog={catalogState.data}
             selectedKeys={variableKeys}
             onRemoveVariable={toggleVariable}
+            analysisMode={analysisMode}
+            onAnalysisModeChange={handleAnalysisModeChange}
+            modeChangeBlockedNotice={modeChangeBlockedNotice}
+            requestedMethod={requestedMethod}
+            onRequestedMethodChange={setRequestedMethod}
             analysisPurpose={analysisPurpose}
             onAnalysisPurposeChange={setAnalysisPurpose}
             formulaPolicies={formulaPolicies}
@@ -284,6 +352,7 @@ export function StatisticsWorkbench({
             onExport={handleExport}
             exportState={exportState}
             actionsLocked={actionsLocked}
+            exportUnsupported={exportUnsupported}
           />
           <InspectorReportPanel
             catalog={catalogState.data}

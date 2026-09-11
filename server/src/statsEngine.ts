@@ -22,7 +22,39 @@ export interface StatsEngineRequest {
   variables: StatsEngineVariable[];
 }
 
+// PR3-A — 이변량 3-shape 요청(계획서 §"Node→Python 3-shape"). Node가 그룹핑/
+// 교차집계까지 전부 끝낸 뒤 보낸다 — Python은 카탈로그를 모른다는 기존 원칙 확장.
+export type BivariateMethodId =
+  | 'welch_t' | 'mann_whitney' | 'anova' | 'kruskal_wallis'
+  | 'chi_square' | 'fisher_exact'
+  | 'pearson_correlation' | 'spearman_correlation';
+  // paired_t/wilcoxon_signed_rank는 이 엔진에 절대 보내지 않는다 — Node의
+  // statsMethodCatalog A-사유(PAIRED_TEST_REQUIRES_EXPLICIT_PAIRING)가 항상
+  // 사전에 막는다(현재 카탈로그에 대응 메타데이터가 없음).
+
+export interface BivariateGroupsRequest {
+  method: 'welch_t' | 'mann_whitney' | 'anova' | 'kruskal_wallis';
+  groups: Array<{ label: string | boolean; values: number[] }>;
+}
+export interface BivariateTableRequest {
+  method: 'chi_square' | 'fisher_exact';
+  table: number[][];
+  rowLabels: Array<string | boolean>;
+  colLabels: Array<string | boolean>;
+}
+export interface BivariateCorrelationRequest {
+  method: 'pearson_correlation' | 'spearman_correlation';
+  x: number[];
+  y: number[];
+}
+export type BivariateEngineRequest = BivariateGroupsRequest | BivariateTableRequest | BivariateCorrelationRequest;
+
 const StatsEngineNullReasonSchema = z.enum(['insufficient_data', 'undefined_zero_variance', 'non_finite_result']);
+// PR3-A — bivariate.py의 nullReasons는 기존 3종 + 이변량 전용 2종(계획서 §Python엔진).
+const StatsEngineBivariateNullReasonSchema = z.enum([
+  'insufficient_data', 'undefined_zero_variance', 'non_finite_result',
+  'constant_variable', 'insufficient_group_data',
+]);
 
 // 7차 검토 필수 수정 — .finite()가 빠져 있으면 JSON.parse('1e400') 같은 값이 Infinity로
 // 파싱돼 z.number()를 그대로 통과한다(typeof Infinity === 'number'). 이후 canonicalDigest가
@@ -58,10 +90,10 @@ const StatsEngineDiscreteResultSchema = z.object({
 });
 
 const StatsEngineRawResultSchema = z.object({
-  protocolVersion: z.literal(1),
+  protocolVersion: z.literal(2),
   continuous: z.array(StatsEngineContinuousResultSchema),
   discrete: z.array(StatsEngineDiscreteResultSchema),
-});
+}).strict();
 
 export type StatsEngineContinuousResult = z.infer<typeof StatsEngineContinuousResultSchema>;
 export type StatsEngineDiscreteResult   = z.infer<typeof StatsEngineDiscreteResultSchema>;
@@ -69,6 +101,46 @@ export interface StatsEngineRawResult {
   continuous: StatsEngineContinuousResult[];
   discrete: StatsEngineDiscreteResult[];
 }
+
+// PR3-A — bivariate.py의 공통 envelope(계획서 §Python엔진 "공통 결과 envelope").
+// 원시 x/y·caseId·personClusterKey 필드는 이 스키마 어디에도 선언하지 않는다 —
+// Python이 실수로 그런 필드를 되돌려도 구조적으로 통과할 수 없다(defense-in-depth,
+// 계획서 §"새 프로토콜의 입력상한·의미검증" "결과" 행).
+const StatsEngineEffectSizeSchema = z.object({
+  name: z.string(),
+  value: z.number().finite().nullable(),
+  ci: z.tuple([z.number().finite(), z.number().finite()]).nullable(),
+  ciUnavailableReason: z.enum(['not_supported_v1', 'undefined_at_n', 'perfect_correlation']).nullable(),
+});
+
+const StatsEngineBivariateRawResultSchema = z.object({
+  protocolVersion: z.literal(2),
+  bivariate: z.object({
+    method: z.enum([
+      'welch_t', 'mann_whitney', 'anova', 'kruskal_wallis',
+      'chi_square', 'fisher_exact',
+      'pearson_correlation', 'spearman_correlation',
+    ]),
+    n: z.number().int().nonnegative(),
+    statistic: z.number().finite().nullable(),
+    df: z.union([
+      z.number().finite(),
+      z.object({ numerator: z.number().finite(), denominator: z.number().finite() }).strict(),
+    ]).nullable(),
+    pValue: z.number().finite().nullable(),
+    effectSizes: z.array(StatsEngineEffectSizeSchema),
+    nullReasons: z.record(z.string(), StatsEngineBivariateNullReasonSchema),
+    multipleTesting: z.object({
+      method: z.literal('none'),
+      adjustedP: z.number().finite().nullable(),
+    }).strict(),
+    qualityFlags: z.array(z.enum(['low_expected_count', 'haldane_anscombe_applied'])),
+    extra: z.record(z.string(), StatsEngineEffectSizeSchema),
+  }).strict(),
+}).strict();
+
+export type StatsEngineEffectSize = z.infer<typeof StatsEngineEffectSizeSchema>;
+export type StatsEngineBivariateRawResult = z.infer<typeof StatsEngineBivariateRawResultSchema>['bivariate'];
 
 export class StatsEngineBusyError extends Error {
   constructor() { super('stats engine worker slot is busy'); this.name = 'StatsEngineBusyError'; }
@@ -121,9 +193,68 @@ function assertWithinLimits(request: StatsEngineRequest): void {
   if (total > MAX_TOTAL_VALUES) {
     throw new StatsEngineInputTooLargeError(`total values (${total}) exceeds MAX_TOTAL_VALUES(${MAX_TOTAL_VALUES})`);
   }
-  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 1, variables: request.variables }), 'utf8');
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 2, variables: request.variables }), 'utf8');
   if (byteLength > config.stats.maxInputBytes) {
     throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
+  }
+}
+
+// PR3-A — 계획서 §"새 프로토콜의 입력상한·의미검증" 표를 그대로 구현. groups는
+// "그룹 전체 합"(그룹당이 아님 — 이변량은 그룹들 합쳐서 변수 하나 취급),
+// table은 "sum(모든 셀)"에 같은 상한을 적용(작은 JSON으로 큰 관측수를 표현할 수
+// 있어 상한 자체가 필요, 정합성 검사와는 별개).
+function assertBivariateWithinLimits(request: BivariateEngineRequest): void {
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 2, bivariate: request }), 'utf8');
+  if (byteLength > config.stats.maxInputBytes) {
+    throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
+  }
+
+  if ('groups' in request) {
+    const total = request.groups.reduce((sum, g) => sum + g.values.length, 0);
+    if (total > MAX_VALUES_PER_VARIABLE) {
+      throw new StatsEngineInputTooLargeError(
+        `groups 전체 값 개수 합(${total})이 상한(${MAX_VALUES_PER_VARIABLE})을 초과`,
+      );
+    }
+    return;
+  }
+  if ('table' in request) {
+    const cellSum = request.table.reduce((sum, row) => sum + row.reduce((s, c) => s + c, 0), 0);
+    if (cellSum > MAX_VALUES_PER_VARIABLE) {
+      throw new StatsEngineInputTooLargeError(
+        `table 셀 합계(${cellSum})가 상한(${MAX_VALUES_PER_VARIABLE})을 초과`,
+      );
+    }
+    return;
+  }
+  // x/y(상관) — 길이가 이미 같다는 전제는 호출자(buildBivariateEngineRequest)가 보장.
+  if (request.x.length > MAX_VALUES_PER_VARIABLE) {
+    throw new StatsEngineInputTooLargeError(
+      `x/y 값 개수(${request.x.length})가 상한(${MAX_VALUES_PER_VARIABLE})을 초과`,
+    );
+  }
+}
+
+/** §Python엔진 의미검증(descriptive의 validateSemantics와 대칭) — method/n이
+ * 요청과 일치하는지, 그룹/셀 합계가 요청과 일치하는지 확인한다. */
+function validateBivariateSemantics(
+  request: BivariateEngineRequest,
+  raw: z.infer<typeof StatsEngineBivariateRawResultSchema>,
+): void {
+  const b = raw.bivariate;
+  if (b.method !== request.method) {
+    throw new StatsEngineResultInvalidError(`method mismatch: requested ${request.method}, got ${b.method}`);
+  }
+  let expectedN: number;
+  if ('groups' in request) {
+    expectedN = request.groups.reduce((sum, g) => sum + g.values.length, 0);
+  } else if ('table' in request) {
+    expectedN = request.table.reduce((sum, row) => sum + row.reduce((s, c) => s + c, 0), 0);
+  } else {
+    expectedN = request.x.length;
+  }
+  if (b.n !== expectedN) {
+    throw new StatsEngineResultInvalidError(`n mismatch: expected ${expectedN}, got ${b.n}`);
   }
 }
 
@@ -200,8 +331,20 @@ interface RecordedOutcome {
   detail?: string;
 }
 
-export async function runStatsEngine(request: StatsEngineRequest): Promise<StatsEngineRawResult> {
-  assertWithinLimits(request);
+// PR3-A — descriptive/bivariate 두 경로가 spawn·타이머·세마포어·listener 생명주기를
+// 전부 동일하게 공유한다(6차례 검토를 거친 로직, 변경 없음). 달라지는 3가지(입력상한
+// 검사·stdin payload·stdout 성공 파싱)만 파라미터로 뺀다 — 로직을 복제하면 한쪽만
+// 고치는 버그가 생기기 쉽다.
+interface EngineRunConfig<T> {
+  assertLimits: () => void;
+  buildStdinPayload: () => unknown;
+  /** zod shape + 의미검증까지 끝내고 최종 반환값을 만든다. 실패 시 throw
+   * (StatsEngineResultInvalidError 권장 — 그대로 reject된다). */
+  parseSuccess: (parsed: unknown) => T;
+}
+
+async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
+  cfg.assertLimits();
   if (engineDegraded) {
     throw new StatsEngineDegradedError();
   }
@@ -217,7 +360,7 @@ export async function runStatsEngine(request: StatsEngineRequest): Promise<Stats
     inFlightCount = Math.max(0, inFlightCount - 1);
   };
 
-  return new Promise<StatsEngineRawResult>((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     const scriptPath = path.join(config.stats.scriptsDir, 'analyze.py');
     const env = {
       ...process.env,
@@ -308,18 +451,11 @@ export async function runStatsEngine(request: StatsEngineRequest): Promise<Stats
           reject(new StatsEngineProcessError('INVALID_OUTPUT', 'stdout이 유효한 JSON이 아님'));
           return;
         }
-        const shapeResult = StatsEngineRawResultSchema.safeParse(parsed);
-        if (!shapeResult.success) {
-          reject(new StatsEngineResultInvalidError(`결과 schema 재검증 실패: ${shapeResult.error.message}`));
-          return;
-        }
         try {
-          validateSemantics(request, shapeResult.data);
+          resolve(cfg.parseSuccess(parsed));
         } catch (err) {
           reject(err instanceof Error ? err : new StatsEngineResultInvalidError(String(err)));
-          return;
         }
-        resolve({ continuous: shapeResult.data.continuous, discrete: shapeResult.data.discrete });
         return;
       }
 
@@ -406,14 +542,41 @@ export async function runStatsEngine(request: StatsEngineRequest): Promise<Stats
     });
 
     try {
-      const payload = JSON.stringify({
-        protocolVersion: 1,
-        variables: request.variables,
-      });
+      const payload = JSON.stringify(cfg.buildStdinPayload());
       child.stdin?.end(payload, 'utf8');
     } catch (err) {
       recordedOutcome ??= { kind: 'stdin_error', detail: err instanceof Error ? err.message : String(err) };
       requestTermination('SIGTERM');
     }
+  });
+}
+
+export async function runStatsEngine(request: StatsEngineRequest): Promise<StatsEngineRawResult> {
+  return runEngineProcess<StatsEngineRawResult>({
+    assertLimits: () => assertWithinLimits(request),
+    buildStdinPayload: () => ({ protocolVersion: 2, variables: request.variables }),
+    parseSuccess: (parsed) => {
+      const shapeResult = StatsEngineRawResultSchema.safeParse(parsed);
+      if (!shapeResult.success) {
+        throw new StatsEngineResultInvalidError(`결과 schema 재검증 실패: ${shapeResult.error.message}`);
+      }
+      validateSemantics(request, shapeResult.data);
+      return { continuous: shapeResult.data.continuous, discrete: shapeResult.data.discrete };
+    },
+  });
+}
+
+export async function runBivariateStatsEngine(request: BivariateEngineRequest): Promise<StatsEngineBivariateRawResult> {
+  return runEngineProcess<StatsEngineBivariateRawResult>({
+    assertLimits: () => assertBivariateWithinLimits(request),
+    buildStdinPayload: () => ({ protocolVersion: 2, bivariate: request }),
+    parseSuccess: (parsed) => {
+      const shapeResult = StatsEngineBivariateRawResultSchema.safeParse(parsed);
+      if (!shapeResult.success) {
+        throw new StatsEngineResultInvalidError(`결과 schema 재검증 실패: ${shapeResult.error.message}`);
+      }
+      validateBivariateSemantics(request, shapeResult.data);
+      return shapeResult.data.bivariate;
+    },
   });
 }

@@ -48,7 +48,7 @@ const req: StatsEngineRequest = {
 
 function validStdoutPayload() {
   return JSON.stringify({
-    protocolVersion: 1,
+    protocolVersion: 2,
     continuous: [{
       variableKey: 'v1', n: 3, mean: 2, sd: 1, median: 2, q1: 1.5, q3: 2.5, iqr: 1,
       skewness: null, kurtosis: null, min: 1, max: 3, nullReasons: {},
@@ -166,7 +166,7 @@ describe('runStatsEngine', () => {
     const promise = runStatsEngine(req);
     const assertion = expect(promise).rejects.toBeInstanceOf(StatsEngineResultInvalidError);
     const badPayload = JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       continuous: [{ variableKey: 'v1', n: 999, mean: 2, sd: 1, median: 2, q1: 1.5, q3: 2.5, iqr: 1, skewness: null, kurtosis: null, min: 1, max: 3, nullReasons: {} }],
       discrete: [],
     });
@@ -180,7 +180,7 @@ describe('runStatsEngine', () => {
     const promise = runStatsEngine(discreteReq);
     const assertion = expect(promise).rejects.toBeInstanceOf(StatsEngineResultInvalidError);
     const badPayload = JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       continuous: [],
       discrete: [{ variableKey: 'd1', n: 3, levels: [{ level: 'a', count: 2 }, { level: 'b', count: 5 }] }], // 합 7 != n 3
     });

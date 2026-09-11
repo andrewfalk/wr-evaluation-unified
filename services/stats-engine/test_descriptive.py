@@ -186,7 +186,7 @@ def test_max_total_values_rejects_when_per_variable_ok_but_sum_exceeds():
     # 변수의 합이 MAX_TOTAL_VALUES를 넘는 입력 — 변수 수를 늘려 합만 상한을 넘긴다.
     num_vars = MAX_TOTAL_VALUES // MAX_VALUES_PER_VARIABLE + 2
     request = {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "variables": [
             {"key": f"v{i}", "kind": "continuous", "values": [1.0] * MAX_VALUES_PER_VARIABLE}
             for i in range(num_vars)
@@ -205,7 +205,7 @@ def test_invalid_json_raises_invalid_input():
 
 def test_schema_violation_raises_invalid_input():
     with pytest.raises(ProtocolError) as exc_info:
-        parse_and_validate_request(json.dumps({"protocolVersion": 1, "variables": [{"key": "x"}]}))
+        parse_and_validate_request(json.dumps({"protocolVersion": 2, "variables": [{"key": "x"}]}))
     assert exc_info.value.code == "INVALID_INPUT"
 
 
@@ -222,7 +222,7 @@ def _run_analyze(stdin_text: str) -> subprocess.CompletedProcess:
 
 def test_analyze_process_success_stdout_only():
     request = {
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "variables": [{"key": "v", "kind": "continuous", "values": [1.0, 2.0, 3.0]}],
     }
     proc = _run_analyze(json.dumps(request))

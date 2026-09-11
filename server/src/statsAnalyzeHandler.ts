@@ -27,6 +27,7 @@ import {
   StatsEngineTimeoutError,
 } from './statsEngine';
 import { buildRunManifest, buildFailedStatsRunManifest, toStatsRunManifestSucceeded } from './statsRunManifest';
+import { computeBivariateAnalyzeResult } from './statsBivariateSuppression';
 import { writeAuditLogStrict, type AuditOutcome } from './middleware/audit';
 import config from './config';
 
@@ -114,7 +115,14 @@ function toPublicRunManifest(manifest: StatsRunManifestSucceeded): RunManifest {
   return rest;
 }
 
+// PR3-A — analysisMode==='bivariate'면 continuous/discrete 대신 bivariate 스텁을
+// 만든다(계획서 §"결과 계약 불변조건" — 조기억제 경로에서도 bivariate 필드가 항상
+// 존재해야 함). requestedMethod는 이 시점에 항상 존재한다(validateRecipe(analyze)가
+// analysisMode==='bivariate'일 때 이미 보장 — buildAnalysisContext가 그 전에 실패함).
 function buildSuppressedAnalyzeResult(ctx: AnalysisContext): AnalyzeResult {
+  if (ctx.recipe.analysisMode === 'bivariate') {
+    return { continuous: [], discrete: [], bivariate: { method: ctx.recipe.requestedMethod!, suppressed: true } };
+  }
   return {
     continuous: ctx.recipe.variableKeys
       .filter((k) => ctx.catalogByKey.get(k)?.type === 'continuous')
@@ -198,9 +206,14 @@ async function computeAndPersist(
   let succeededManifest: ReturnType<typeof toStatsRunManifestSucceeded>;
   let result: AnalyzeResult;
   try {
-    const request = buildStatsEngineRequest(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey);
-    const raw = await runStatsEngine(request);
-    result = computeDescriptiveSuppression(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey, raw);
+    if (ctx.recipe.analysisMode === 'bivariate') {
+      const bivariate = await computeBivariateAnalyzeResult(ctx);
+      result = { continuous: [], discrete: [], bivariate };
+    } else {
+      const request = buildStatsEngineRequest(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey);
+      const raw = await runStatsEngine(request);
+      result = computeDescriptiveSuppression(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey, raw);
+    }
     const resultDigest = canonicalDigest({ result });
     const runManifestBase = buildRunManifest({
       recipeDigest: ctx.recipeDigest,
@@ -208,6 +221,7 @@ async function computeAndPersist(
       resultDigest,
       snapshotAsOf: ctx.snapshot.snapshotAsOf,
       formulaPolicies: ctx.recipe.formulaPolicies,
+      analysisMode: ctx.recipe.analysisMode,
     });
     succeededManifest = toStatsRunManifestSucceeded(runManifestBase);
   } catch (err) {
@@ -233,6 +247,7 @@ async function computeAndPersist(
       sourceDigest: ctx.snapshot.sourceDigest,
       snapshotAsOf: ctx.snapshot.snapshotAsOf,
       formulaPolicies: ctx.recipe.formulaPolicies,
+      analysisMode: ctx.recipe.analysisMode,
     });
     const errorCode = errorCodeForFailure(err);
     await withWriteTransaction(pool, async (client) => {
@@ -347,7 +362,7 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
   activeAnalyzeRequests += 1;
 
   try {
-    const built = await buildAnalysisContext(pool, req);
+    const built = await buildAnalysisContext(pool, req, 'analyze');
     if (!built.ok) {
       res.status(built.status).json(built.body);
       return;
@@ -363,7 +378,12 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
       sourceDigest: ctx.snapshot.sourceDigest,
     });
 
-    if (ctx.requestSuppressed) {
+    // PR3-A §"파이프라인" — 기존 request-level 억제(전체 데이터셋 MIN_COHORT·
+    // differencing)와 새 쌍-level 억제(레이어1, ctx.pairDisclosed)를 OR로 합친다.
+    // 이변량이 아니면 pairDisclosed는 항상 false지만 requestSuppressed로만 판정하므로
+    // 영향 없다.
+    const bivariatePairSuppressed = ctx.recipe.analysisMode === 'bivariate' && !ctx.pairDisclosed;
+    if (ctx.requestSuppressed || bivariatePairSuppressed) {
       const suppressedResult = buildSuppressedAnalyzeResult(ctx);
       const resultDigest = canonicalDigest({ result: suppressedResult });
       const manifest = toStatsRunManifestSucceeded(
@@ -373,6 +393,7 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
           resultDigest,
           snapshotAsOf: ctx.snapshot.snapshotAsOf,
           formulaPolicies: ctx.recipe.formulaPolicies,
+          analysisMode: ctx.recipe.analysisMode,
         }),
       );
 
@@ -393,13 +414,37 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
           targetType: 'analysis_recipe',
           targetId: ctx.recipeDigest,
           outcome: 'denied' as AuditOutcome,
-          extra: auditExtra(ctx, executionDigest, { analysisRunId: manifest.analysisRunId, reasonCode: ctx.reasonCode }),
+          extra: auditExtra(ctx, executionDigest, {
+            analysisRunId: manifest.analysisRunId,
+            reasonCode: ctx.reasonCode ?? (bivariatePairSuppressed ? 'MIN_COHORT_NOT_MET' : null),
+          }),
         });
       });
 
       const response: AnalyzeResponse = { runManifest: toPublicRunManifest(manifest), result: suppressedResult };
       res.status(200).json(response);
       return;
+    }
+
+    // PR3-A — 파이프라인 3단계: A-사유로 unsupported이거나 아예 목록에 없는 method면
+    // 400(§"방법 가용성 판정" — B-사유는 여기서 절대 걸리지 않는다, 이미 위에서
+    // pairDisclosed 검사로 다 걸러졌거나 그룹/셀 단위 소수셀이라 여기 도달하지 않음).
+    if (ctx.recipe.analysisMode === 'bivariate') {
+      const selected = ctx.availableMethods.find((m) => m.id === ctx.recipe.requestedMethod);
+      const executable = selected != null && (selected.status === 'available' || selected.status === 'conditional');
+      if (!executable) {
+        await writeAuditLogStrict(pool, {
+          actorUserId: ctx.userId,
+          actorOrgId: ctx.orgId,
+          action: 'stats_analyze',
+          targetType: 'analysis_recipe',
+          targetId: ctx.recipeDigest,
+          outcome: 'denied' as AuditOutcome,
+          extra: auditExtra(ctx, executionDigest, { reasonCode: 'METHOD_NOT_AVAILABLE' }),
+        });
+        res.status(400).json({ code: 'METHOD_NOT_AVAILABLE', error: '선택한 분석 방법을 현재 데이터로 실행할 수 없습니다.' });
+        return;
+      }
     }
 
     const { promise, joined } = getOrCompute(executionDigest, () => computeAndPersist(pool, ctx, executionDigest));

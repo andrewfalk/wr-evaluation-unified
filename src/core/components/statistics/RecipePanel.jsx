@@ -1,5 +1,24 @@
 import { useMemo, useState } from 'react';
 import { describeStatsApiError } from './describeStatsError';
+import { describeMethodReasonCode } from './describeMethodReasonCode';
+
+// PR3-A — StatsMethodIdSchema(shared/contracts/stats.ts)와 동일 순서·목록. 실행
+// 가능 8종 + 예약된 unsupported 2종(대응검정, 계획서 §"실행 가능한 방법은 8종").
+const METHOD_LABELS = {
+  welch_t: 'Welch t 검정',
+  mann_whitney: 'Mann-Whitney U 검정',
+  anova: '일원분산분석(Welch)',
+  kruskal_wallis: 'Kruskal-Wallis 검정',
+  chi_square: '카이제곱 검정',
+  fisher_exact: 'Fisher 정확검정',
+  pearson_correlation: 'Pearson 상관',
+  spearman_correlation: 'Spearman 상관',
+  paired_t: '대응 t 검정',
+  wilcoxon_signed_rank: 'Wilcoxon 부호순위검정',
+};
+const METHOD_ORDER = Object.keys(METHOD_LABELS);
+
+const STATUS_LABELS = { available: '실행 가능', conditional: '주의', unsupported: '불가' };
 
 // server/src/statsRecipeValidation.ts의 TYPE_ALLOWED_OPERATORS와 동일 — 서버가 최종 판정하므로
 // 여기서 어긋나도 안전하지만(400으로 드러남), UI가 애초에 무효한 조합을 안 보여주기 위해 미러링.
@@ -191,6 +210,8 @@ function FilterEditor({ catalogByKey, onAdd }) {
 export function RecipePanel({
   catalog,
   selectedKeys, onRemoveVariable,
+  analysisMode, onAnalysisModeChange, modeChangeBlockedNotice,
+  requestedMethod, onRequestedMethodChange,
   analysisPurpose, onAnalysisPurposeChange,
   formulaPolicies, onFormulaPolicyChange,
   filterDraft, onFilterDraftChange, appliedFilters, onApplyFilters,
@@ -250,6 +271,25 @@ export function RecipePanel({
           <p className="swb-suppressed-note">나머지 6종은 아직 지원하지 않습니다.</p>
         )}
 
+        {/* PR3-A — 분석 모드. 전환은 부모(StatisticsWorkbench.handleAnalysisModeChange)가
+            3개 이상 선택 시 막는다(암묵적 선택 손실 방지, 계획서 §클라이언트배선). */}
+        <div className="swb-section-label">분석 모드</div>
+        <div className="swb-seg">
+          <button
+            type="button"
+            className={`swb-seg-opt${analysisMode === 'descriptive' ? ' swb-seg-opt--active' : ''}`}
+            onClick={() => onAnalysisModeChange('descriptive')}
+          >기술통계</button>
+          <button
+            type="button"
+            className={`swb-seg-opt${analysisMode === 'bivariate' ? ' swb-seg-opt--active' : ''}`}
+            onClick={() => onAnalysisModeChange('bivariate')}
+          >이변량</button>
+        </div>
+        {modeChangeBlockedNotice && analysisMode !== 'bivariate' && (
+          <p className="swb-status-warn">이변량 모드는 변수를 2개까지만 지원합니다 — 먼저 2개로 줄여주세요.</p>
+        )}
+
         <div className="swb-section-label">분석 목적</div>
         <div className="swb-seg">
           {['association', 'formula_audit', 'prediction'].map((p) => (
@@ -263,13 +303,28 @@ export function RecipePanel({
             >{PURPOSE_LABELS[p]}</button>
           ))}
         </div>
-        <p className="swb-suppressed-note">목적을 골라도 지금 제공하는 분석은 기술통계뿐입니다.</p>
+        {analysisMode === 'descriptive' && (
+          <p className="swb-suppressed-note">목적을 골라도 지금 제공하는 분석은 기술통계뿐입니다.</p>
+        )}
 
-        <div className="swb-section-label">선택 변수 ({selectedKeys.length})</div>
+        {analysisMode === 'bivariate' && (
+          <MethodPicker
+            previewState={previewState}
+            isPreviewCurrent={isPreviewCurrent}
+            requestedMethod={requestedMethod}
+            onRequestedMethodChange={onRequestedMethodChange}
+            onApplyRemedy={(patch) => { if (patch?.requestedMethod) onRequestedMethodChange(patch.requestedMethod); }}
+          />
+        )}
+
+        <div className="swb-section-label">
+          선택 변수 ({selectedKeys.length}{analysisMode === 'bivariate' ? '/2' : ''})
+        </div>
         <div>
           {selectedKeys.length === 0 && <p className="swb-suppressed-note">좌측 카탈로그에서 변수를 선택하세요.</p>}
-          {selectedKeys.map((k) => (
+          {selectedKeys.map((k, i) => (
             <span key={k} className="swb-recipe-chip">
+              {analysisMode === 'bivariate' && <strong style={{ marginRight: 4 }}>{i === 0 ? 'x' : 'y'}</strong>}
               {catalogByKey.get(k)?.label || k}
               <button type="button" onClick={() => onRemoveVariable(k)} aria-label={`${k} 제거`}>×</button>
             </span>
@@ -332,6 +387,73 @@ export function RecipePanel({
         </button>
       </div>
     </aside>
+  );
+}
+
+// PR3-A §6.9.4 — "분석 목적 아코디언 안"에 방법 선택기를 둔다. availableMethods는
+// /preview 응답에서 온다(§파이프라인 — preview는 method 미선택이어도 정상 응답).
+// 인원수 관련 차단 사유(B)는 서버가 애초에 세분화해서 안 보낸다 — 그래서 이 UI는
+// "왜 안 되는지" 대신 결과가 표본 크기에 따라 표시되지 않을 수 있다는 고정 문구만
+// 상시 노출한다(데이터 의존 아님, 계획서 §"방법 가용성 판정").
+function MethodPicker({ previewState, isPreviewCurrent, requestedMethod, onRequestedMethodChange, onApplyRemedy }) {
+  const ready = isPreviewCurrent && previewState.status === 'ready' && !previewState.result?.counts?.suppressed;
+  const methods = ready ? (previewState.result?.availableMethods ?? []) : [];
+  const byId = new Map(methods.map((m) => [m.id, m]));
+  const orderedMethods = METHOD_ORDER.map((id) => byId.get(id)).filter(Boolean);
+
+  return (
+    <>
+      <div className="swb-section-label">분석 방법</div>
+      {!ready && <p className="swb-suppressed-note">변수를 2개 선택하면 사용 가능한 방법이 표시됩니다.</p>}
+      {ready && orderedMethods.length === 0 && (
+        <p className="swb-suppressed-note">표본 수가 부족해 이용 가능한 방법을 표시할 수 없습니다.</p>
+      )}
+      {ready && orderedMethods.length > 0 && (
+        <div className="swb-method-list">
+          {orderedMethods.map((m) => {
+            const selected = requestedMethod === m.id;
+            const clickable = m.status !== 'unsupported';
+            return (
+              <div
+                key={m.id}
+                className={`swb-method-card${selected ? ' swb-method-card--selected' : ''}${clickable ? '' : ' swb-method-card--disabled'}`}
+              >
+                <button
+                  type="button"
+                  className="swb-method-card-main"
+                  disabled={!clickable}
+                  onClick={() => clickable && onRequestedMethodChange(m.id)}
+                  title={m.status === 'unsupported' ? describeMethodReasonCode(m.reasonCode) : undefined}
+                >
+                  <span>{METHOD_LABELS[m.id] || m.label}</span>
+                  <span
+                    className={
+                      m.status === 'available' ? 'swb-status-ok'
+                        : m.status === 'conditional' ? 'swb-status-warn'
+                          : 'swb-suppressed-note'
+                    }
+                  >{STATUS_LABELS[m.status] || m.status}</span>
+                </button>
+                {m.status === 'conditional' && (
+                  <p className="swb-status-warn" style={{ margin: '2px 0 0' }}>{describeMethodReasonCode(m.reasonCode)}</p>
+                )}
+                {m.status === 'unsupported' && m.reasonCode && (
+                  <p className="swb-suppressed-note" style={{ margin: '2px 0 0' }}>{describeMethodReasonCode(m.reasonCode)}</p>
+                )}
+                {m.remedy && m.remedyRecipePatch && (
+                  <button type="button" className="swb-btn swb-btn--sm" style={{ marginTop: 4 }} onClick={() => onApplyRemedy(m.remedyRecipePatch)}>
+                    {m.remedy}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {/* 데이터 의존 아님 — B(그룹/셀 소수셀·값상수)는 절대 세분화해서 노출하지 않는다는
+          설계상, 이 문구는 항상 같은 형태로 상시 표시한다(계획서 §"방법 가용성 판정"). */}
+      <p className="swb-suppressed-note">결과가 표본 크기에 따라 표시되지 않을 수 있습니다.</p>
+    </>
   );
 }
 

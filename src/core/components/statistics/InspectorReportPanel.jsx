@@ -71,6 +71,11 @@ export function InspectorReportPanel({ catalog, committedRecipe, committedResult
                 <tr><th>engineVersion</th><td>{manifest.engineVersion}</td></tr>
                 <tr><th>serializerVersion</th><td>{manifest.serializerVersion}</td></tr>
                 <tr><th>estimabilityPolicyVersion</th><td>{manifest.estimabilityPolicyVersion}</td></tr>
+                {/* PR3-A 신규 필드 — 둘 다 optional(구버전 저장 결과엔 없을 수 있음). */}
+                {manifest.analysisMode && <tr><th>analysisMode</th><td>{manifest.analysisMode}</td></tr>}
+                {manifest.inferenceGatePolicyVersion && (
+                  <tr><th>inferenceGatePolicyVersion</th><td>{manifest.inferenceGatePolicyVersion}</td></tr>
+                )}
                 <tr>
                   <th>formulaPolicies</th>
                   <td>
@@ -97,7 +102,17 @@ export function InspectorReportPanel({ catalog, committedRecipe, committedResult
             {/* 5차 리뷰가 잡은 누락 — 일반 설명뿐이고 실제 이번 실행에서 어떤 변수가 억제됐는지가 없었다. */}
             <SuppressedVariablesList catalogByKey={catalogByKey} committedResult={committedResult} />
             <div className="swb-section-label">다중검정 보정</div>
-            <p className="swb-suppressed-note">현재는 검정이 없어 해당 없음(기술통계만 제공).</p>
+            {/* PR3-A §"BH-FDR/Holm 범위 정직화" — 레시피가 항상 변수 2개(p값 1개)만
+                만들므로 "다중검정 보정을 지원한다"고 말하지 않는다. bh_fdr/holm
+                함수는 구현·검증됐지만 이 레시피 구조에선 실제로 m=1로만 호출된다. */}
+            {committedResult?.result?.bivariate && !committedResult.result.bivariate.suppressed ? (
+              <p className="swb-suppressed-note">
+                단일 검정(보정 없음) — raw p = adjusted p = {committedResult.result.bivariate.pValue ?? '—'}
+                (method: {committedResult.result.bivariate.multipleTesting?.method ?? 'none'})
+              </p>
+            ) : (
+              <p className="swb-suppressed-note">현재는 검정이 1개뿐이라 다중검정 보정이 적용되지 않습니다.</p>
+            )}
             <div className="swb-section-label">반출 형식</div>
             <p>현재 제공되는 반출 형식: 집계 결과(aggregate). 실제 권한 여부는 내보내기 버튼을 눌러야 서버가 최종 확인합니다.</p>
             <table className="swb-table">

@@ -13,10 +13,22 @@ import json
 import sys
 from typing import Any
 
+import bivariate
 from descriptive import compute_continuous, compute_discrete
 from protocol import ProtocolError, parse_and_validate_request
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
+
+_BIVARIATE_DISPATCH = {
+    "welch_t": lambda b: bivariate.welch_t(b["groups"]),
+    "mann_whitney": lambda b: bivariate.mann_whitney(b["groups"]),
+    "anova": lambda b: bivariate.anova(b["groups"]),
+    "kruskal_wallis": lambda b: bivariate.kruskal_wallis(b["groups"]),
+    "chi_square": lambda b: bivariate.chi_square(b["table"]),
+    "fisher_exact": lambda b: bivariate.fisher_exact(b["table"]),
+    "pearson_correlation": lambda b: bivariate.pearson_correlation(b["x"], b["y"]),
+    "spearman_correlation": lambda b: bivariate.spearman_correlation(b["x"], b["y"]),
+}
 
 
 def _emit_error(code: str, detail: str) -> None:
@@ -24,7 +36,7 @@ def _emit_error(code: str, detail: str) -> None:
     print(f"STATS_ENGINE_ERROR {json.dumps(marker, ensure_ascii=False)}", file=sys.stderr)
 
 
-def run_analysis(request: dict[str, Any]) -> dict[str, Any]:
+def run_descriptive(request: dict[str, Any]) -> dict[str, Any]:
     continuous: list[dict[str, Any]] = []
     discrete: list[dict[str, Any]] = []
 
@@ -40,6 +52,19 @@ def run_analysis(request: dict[str, Any]) -> dict[str, Any]:
             discrete.append({"variableKey": key, **stat})
 
     return {"protocolVersion": PROTOCOL_VERSION, "continuous": continuous, "discrete": discrete}
+
+
+def run_bivariate(request: dict[str, Any]) -> dict[str, Any]:
+    b = request["bivariate"]
+    method = b["method"]
+    result = _BIVARIATE_DISPATCH[method](b)
+    return {"protocolVersion": PROTOCOL_VERSION, "bivariate": {"method": method, **result}}
+
+
+def run_analysis(request: dict[str, Any]) -> dict[str, Any]:
+    if "bivariate" in request:
+        return run_bivariate(request)
+    return run_descriptive(request)
 
 
 def main() -> int:
@@ -66,7 +91,7 @@ def _selfcheck() -> int:
     """numpy/scipy import 확인 + 고정 픽스처 1건을 실제로 돌려 응답 shape을 확인."""
     try:
         fixture = {
-            "protocolVersion": 1,
+            "protocolVersion": PROTOCOL_VERSION,
             "variables": [
                 {"key": "selfcheck.continuous", "kind": "continuous", "values": [1.0, 2.0, 3.0, 4.0, 5.0]},
                 {"key": "selfcheck.discrete", "kind": "discrete", "values": ["a", "b", "a"]},
