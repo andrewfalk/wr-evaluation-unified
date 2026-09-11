@@ -20,7 +20,12 @@ const METHOD_LABELS = {
   paired_t: '대응 t 검정', wilcoxon_signed_rank: 'Wilcoxon 부호순위검정',
 };
 const GROUP_COMPARISON_METHODS = new Set(['welch_t', 'mann_whitney', 'anova', 'kruskal_wallis', 'paired_t', 'wilcoxon_signed_rank']);
+// [코드리뷰 2026-09-12 2차] η²(anova)·ε²(kruskal_wallis)는 부호 있는 "차이" 개념이
+// 없다 — "뒤−앞" 방향 설명은 2-그룹 검정(welch_t/mann_whitney, 그리고 지금은 항상
+// unsupported인 paired_t/wilcoxon_signed_rank)에만 의미가 있다.
+const DIRECTIONAL_GROUP_METHODS = new Set(['welch_t', 'mann_whitney', 'paired_t', 'wilcoxon_signed_rank']);
 const CONTINGENCY_METHODS = new Set(['chi_square', 'fisher_exact']);
+const GROUPING_TYPES = new Set(['boolean', 'ordinal', 'categorical']);
 const QUALITY_FLAG_LABELS = {
   low_expected_count: '일부 칸의 기대도수가 작아 근사의 타당성이 낮습니다.',
   haldane_anscombe_applied: '0이 포함된 셀이 있어 Haldane-Anscombe 보정(+0.5)을 적용했습니다.',
@@ -28,6 +33,31 @@ const QUALITY_FLAG_LABELS = {
 
 function variableLabel(catalogByKey, key) {
   return catalogByKey.get(key)?.label || key;
+}
+
+// [코드리뷰 2026-09-12 2차] 결과 카드만 보고도 어떤 변수의 행/열·그룹/값인지
+// 식별할 수 있어야 한다. **committedRecipe**(실행 당시 조건)만 읽는다 — 현재
+// 편집 중인 draft 선택값을 쓰면 이전 실행 결과에 지금 고른 변수 이름이 잘못
+// 붙는다(§6 "실행된 결과-조건 연결은 절대 안 바뀜"과 같은 원칙).
+// Node의 statsAnalysisContext.ts:92 `const [keyX, keyY] = recipe.variableKeys`와
+// statsBivariateRoles.ts의 역할판정(타입으로 그룹/값을 가른다, 선택 순서 아님)을
+// 그대로 재현한다 — 서버가 실제로 쓰는 규칙과 갈리면 표시가 실제 응답과 어긋난다.
+function resolveBivariateVariableLabels(catalogByKey, committedRecipe) {
+  const [keyX, keyY] = committedRecipe?.variableKeys ?? [];
+  const xLabel = keyX ? variableLabel(catalogByKey, keyX) : null;
+  const yLabel = keyY ? variableLabel(catalogByKey, keyY) : null;
+  const typeX = keyX ? catalogByKey.get(keyX)?.type : undefined;
+  const typeY = keyY ? catalogByKey.get(keyY)?.type : undefined;
+  let groupLabel = null;
+  let valueLabel = null;
+  if (GROUPING_TYPES.has(typeX) && typeY === 'continuous') {
+    groupLabel = xLabel;
+    valueLabel = yLabel;
+  } else if (GROUPING_TYPES.has(typeY) && typeX === 'continuous') {
+    groupLabel = yLabel;
+    valueLabel = xLabel;
+  }
+  return { xLabel, yLabel, groupLabel, valueLabel };
 }
 
 function missingPatternsText(patterns) {
@@ -146,23 +176,33 @@ function BivariateFooter({ bivariate }) {
 // 해석할 수 있다(계획서 §방향규칙: 차이 = 뒤 그룹 − 앞 그룹, groupBreakdown은
 // 그 순서 그대로 옴). 응답에 도달했다는 것 자체가 이미 소수셀 사전검사를 통과한
 // 상태라 그룹별 n을 공개해도 안전하다.
-function GroupBreakdownTable({ groupBreakdown }) {
+// [코드리뷰 2026-09-12 2차] "앞(기준)/뒤(비교)" 역할·방향 설명은 부호 있는
+// 효과크기(mean_difference/rank_biserial)를 쓰는 2-그룹 검정에만 의미가 있다 —
+// anova/kruskal_wallis(η²/ε²)는 그룹이 3개 이상일 수 있고 효과크기에 방향이
+// 없으므로 그룹명·n만 보여준다.
+function GroupBreakdownTable({ groupBreakdown, method }) {
   if (!groupBreakdown || groupBreakdown.length === 0) return null;
+  const directional = DIRECTIONAL_GROUP_METHODS.has(method) && groupBreakdown.length === 2;
   return (
     <>
       <table className="swb-table">
-        <thead><tr><th>역할</th><th>그룹</th><th>n</th></tr></thead>
+        <thead>
+          <tr>
+            {directional && <th>역할</th>}
+            <th>그룹</th><th>n</th>
+          </tr>
+        </thead>
         <tbody>
           {groupBreakdown.map((g, i) => (
             <tr key={String(g.label)}>
-              <td>{i === 0 ? '앞(기준)' : '뒤(비교)'}</td>
+              {directional && <td>{i === 0 ? '앞(기준)' : '뒤(비교)'}</td>}
               <td>{String(g.label)}</td>
               <td>{g.n}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      {groupBreakdown.length === 2 && (
+      {directional && (
         <p className="swb-suppressed-note">
           평균차·효과크기 방향 = {String(groupBreakdown[1].label)} − {String(groupBreakdown[0].label)}
         </p>
@@ -171,11 +211,17 @@ function GroupBreakdownTable({ groupBreakdown }) {
   );
 }
 
-function GroupComparisonCard({ bivariate }) {
+function GroupComparisonCard({ bivariate, catalogByKey, committedRecipe }) {
+  const { groupLabel, valueLabel } = resolveBivariateVariableLabels(catalogByKey, committedRecipe);
   return (
     <div className="swb-card">
       <strong>{METHOD_LABELS[bivariate.method] || bivariate.method}</strong>
-      <GroupBreakdownTable groupBreakdown={bivariate.groupBreakdown} />
+      {(groupLabel || valueLabel) && (
+        <p className="swb-card-subtitle">
+          결과변수: {valueLabel || '—'} · 그룹변수: {groupLabel || '—'}
+        </p>
+      )}
+      <GroupBreakdownTable groupBreakdown={bivariate.groupBreakdown} method={bivariate.method} />
       <table className="swb-table">
         <tbody>
           <tr><th>n</th><td>{bivariate.n}</td><th>통계량</th><td>{fmt(bivariate.statistic)}</td></tr>
@@ -205,14 +251,17 @@ function GroupComparisonCard({ bivariate }) {
 // 셀이 0 또는 ≥MINIMUM_COHORT라는 뜻이라(B-1 사전검사 통과), 실제 셀 값을 표로
 // 보여줘도 안전하다 — "개별 칸 수치는 표시하지 않는다"는 1차 구현의 실수였다
 // (계획서 §5 "분할표 전체연결억제"는 억제 아니면 표까지 공개하는 게 원래 설계).
-function ContingencyTable({ table }) {
+// [코드리뷰 2026-09-12 2차] "x (행)"/"y (열)"만으로는 두 변수가 같은 범주명을
+// 쓸 때 어느 변수의 행/열인지 구분할 수 없다 — 실제 변수 라벨(xLabel/yLabel,
+// Node의 x=행/y=열 규칙 그대로)을 헤더에 넣는다.
+function ContingencyTable({ table, xLabel, yLabel }) {
   if (!table) return null;
   const { rowLabels, colLabels, cells } = table;
   return (
     <table className="swb-table">
       <thead>
-        <tr><th /><th colSpan={colLabels.length}>y (열)</th></tr>
-        <tr><th>x (행)</th>{colLabels.map((c) => <th key={String(c)}>{String(c)}</th>)}</tr>
+        <tr><th /><th colSpan={colLabels.length}>{yLabel || 'y'} (열)</th></tr>
+        <tr><th>{xLabel || 'x'} (행)</th>{colLabels.map((c) => <th key={String(c)}>{String(c)}</th>)}</tr>
       </thead>
       <tbody>
         {rowLabels.map((r, i) => (
@@ -226,12 +275,16 @@ function ContingencyTable({ table }) {
   );
 }
 
-function ContingencyCard({ bivariate }) {
+function ContingencyCard({ bivariate, catalogByKey, committedRecipe }) {
   const cramersV = bivariate.extra?.cramersV;
+  const { xLabel, yLabel } = resolveBivariateVariableLabels(catalogByKey, committedRecipe);
   return (
     <div className="swb-card">
       <strong>{METHOD_LABELS[bivariate.method] || bivariate.method}</strong>
-      <ContingencyTable table={bivariate.contingencyTable} />
+      {(xLabel || yLabel) && (
+        <p className="swb-card-subtitle">행: {xLabel || '—'} · 열: {yLabel || '—'}</p>
+      )}
+      <ContingencyTable table={bivariate.contingencyTable} xLabel={xLabel} yLabel={yLabel} />
       <table className="swb-table">
         <tbody>
           <tr><th>n</th><td>{bivariate.n}</td><th>통계량</th><td>{fmt(bivariate.statistic)}</td></tr>
@@ -255,11 +308,15 @@ function ContingencyCard({ bivariate }) {
   );
 }
 
-function CorrelationCard({ bivariate }) {
+function CorrelationCard({ bivariate, catalogByKey, committedRecipe }) {
   const es = bivariate.effectSizes[0];
+  const { xLabel, yLabel } = resolveBivariateVariableLabels(catalogByKey, committedRecipe);
   return (
     <div className="swb-card">
       <strong>{METHOD_LABELS[bivariate.method] || bivariate.method}</strong>
+      {(xLabel || yLabel) && (
+        <p className="swb-card-subtitle">x: {xLabel || '—'} · y: {yLabel || '—'}</p>
+      )}
       <table className="swb-table">
         <tbody>
           <tr><th>n</th><td>{bivariate.n}</td><th>계수</th><td>{es ? fmt(es.value) : '—'}</td></tr>
@@ -277,11 +334,15 @@ function CorrelationCard({ bivariate }) {
   );
 }
 
-function BivariateResultCard({ bivariate }) {
+function BivariateResultCard({ bivariate, catalogByKey, committedRecipe }) {
   if (bivariate.suppressed) return <BivariateSuppressedCard bivariate={bivariate} />;
-  if (CONTINGENCY_METHODS.has(bivariate.method)) return <ContingencyCard bivariate={bivariate} />;
-  if (GROUP_COMPARISON_METHODS.has(bivariate.method)) return <GroupComparisonCard bivariate={bivariate} />;
-  return <CorrelationCard bivariate={bivariate} />;
+  if (CONTINGENCY_METHODS.has(bivariate.method)) {
+    return <ContingencyCard bivariate={bivariate} catalogByKey={catalogByKey} committedRecipe={committedRecipe} />;
+  }
+  if (GROUP_COMPARISON_METHODS.has(bivariate.method)) {
+    return <GroupComparisonCard bivariate={bivariate} catalogByKey={catalogByKey} committedRecipe={committedRecipe} />;
+  }
+  return <CorrelationCard bivariate={bivariate} catalogByKey={catalogByKey} committedRecipe={committedRecipe} />;
 }
 
 // PR3-B(차트 프리미티브)까지는 distribution 탭을 열지 않는다 — 이 계획 범위 밖.
@@ -347,7 +408,11 @@ export function ResultPanel({
 
         {committedResult && activeTab === 'association' && (
           isBivariateRun && committedResult.result.bivariate ? (
-            <BivariateResultCard bivariate={committedResult.result.bivariate} />
+            <BivariateResultCard
+              bivariate={committedResult.result.bivariate}
+              catalogByKey={catalogByKey}
+              committedRecipe={committedRecipe}
+            />
           ) : (
             <p className="swb-suppressed-note">이변량 모드로 분석을 실행하면 여기에 결과가 표시됩니다.</p>
           )

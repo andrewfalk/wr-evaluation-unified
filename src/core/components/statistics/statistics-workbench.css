@@ -328,4 +328,8 @@
 
 .swb-suppressed-note { color: var(--swb-ink-muted); font-style: italic; }
 
+/* [코드리뷰 2026-09-12 2차] 이변량 결과 카드의 변수 식별 줄(그룹/결과변수,
+   행/열, x/y) — 억제·경고가 아니라 사실 정보라 italic 아닌 별도 톤. */
+.swb-card-subtitle { color: var(--swb-ink-muted); font-size: 12px; margin: 2px 0 8px; }
+
 .swb-empty { color: var(--swb-ink-muted); font-size: 12px; padding: 24px; text-align: center; }
