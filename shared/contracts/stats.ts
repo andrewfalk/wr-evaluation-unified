@@ -406,6 +406,22 @@ const AnalyzeBivariateRevealedSchema = z.object({
   // 이미 레이어1에서 보장됨), exclusions 상세는 사유별 소수셀이면 null(B-2, 독립 판정).
   excludedCaseCount: z.number().int().nonnegative(),
   exclusions: z.array(AnalyzeBivariateExclusionEntrySchema).nullable(),
+  // [코드리뷰 2026-09-12] 억제(suppressed=false)에 도달했다는 것 자체가 이미
+  // B-1(그룹/셀 소수셀) 사전검사를 통과했다는 뜻이므로, 그룹 라벨·그룹별 n·분할표
+  // 셀 값을 공개해도 안전하다(전부 0 또는 ≥MINIMUM_COHORT) — §5 "분할표 전체연결
+  // 억제"가 애초에 "억제 아니면 표를 포함해 공개"를 의도했는데 1차 구현에서 값
+  // 자체를 응답에 담는 배선이 누락됐었다. groupBreakdown=그룹비교 전용(뒤-앞
+  // 방향규칙과 같은 순서), contingencyTable=분할표 전용 — method에 따라 정확히
+  // 하나만 채워진다(상관은 둘 다 없음).
+  groupBreakdown: z.array(z.object({
+    label: z.union([z.string(), z.boolean()]),
+    n: z.number().int().nonnegative(),
+  })).optional(),
+  contingencyTable: z.object({
+    rowLabels: z.array(z.union([z.string(), z.boolean()])),
+    colLabels: z.array(z.union([z.string(), z.boolean()])),
+    cells: z.array(z.array(z.number().int().nonnegative())),
+  }).optional(),
 });
 export const AnalyzeBivariateResultSchema = z.discriminatedUnion('suppressed', [
   AnalyzeBivariateSuppressedSchema,

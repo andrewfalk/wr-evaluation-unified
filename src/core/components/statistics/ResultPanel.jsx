@@ -142,10 +142,40 @@ function BivariateFooter({ bivariate }) {
   );
 }
 
+// [코드리뷰 2026-09-12] 그룹 라벨·그룹별 n이 있어야 평균차/효과크기의 부호를
+// 해석할 수 있다(계획서 §방향규칙: 차이 = 뒤 그룹 − 앞 그룹, groupBreakdown은
+// 그 순서 그대로 옴). 응답에 도달했다는 것 자체가 이미 소수셀 사전검사를 통과한
+// 상태라 그룹별 n을 공개해도 안전하다.
+function GroupBreakdownTable({ groupBreakdown }) {
+  if (!groupBreakdown || groupBreakdown.length === 0) return null;
+  return (
+    <>
+      <table className="swb-table">
+        <thead><tr><th>역할</th><th>그룹</th><th>n</th></tr></thead>
+        <tbody>
+          {groupBreakdown.map((g, i) => (
+            <tr key={String(g.label)}>
+              <td>{i === 0 ? '앞(기준)' : '뒤(비교)'}</td>
+              <td>{String(g.label)}</td>
+              <td>{g.n}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {groupBreakdown.length === 2 && (
+        <p className="swb-suppressed-note">
+          평균차·효과크기 방향 = {String(groupBreakdown[1].label)} − {String(groupBreakdown[0].label)}
+        </p>
+      )}
+    </>
+  );
+}
+
 function GroupComparisonCard({ bivariate }) {
   return (
     <div className="swb-card">
       <strong>{METHOD_LABELS[bivariate.method] || bivariate.method}</strong>
+      <GroupBreakdownTable groupBreakdown={bivariate.groupBreakdown} />
       <table className="swb-table">
         <tbody>
           <tr><th>n</th><td>{bivariate.n}</td><th>통계량</th><td>{fmt(bivariate.statistic)}</td></tr>
@@ -171,11 +201,37 @@ function GroupComparisonCard({ bivariate }) {
   );
 }
 
+// [코드리뷰 2026-09-12] 억제(suppressed=false) 응답에 도달했다는 것 자체가 모든
+// 셀이 0 또는 ≥MINIMUM_COHORT라는 뜻이라(B-1 사전검사 통과), 실제 셀 값을 표로
+// 보여줘도 안전하다 — "개별 칸 수치는 표시하지 않는다"는 1차 구현의 실수였다
+// (계획서 §5 "분할표 전체연결억제"는 억제 아니면 표까지 공개하는 게 원래 설계).
+function ContingencyTable({ table }) {
+  if (!table) return null;
+  const { rowLabels, colLabels, cells } = table;
+  return (
+    <table className="swb-table">
+      <thead>
+        <tr><th /><th colSpan={colLabels.length}>y (열)</th></tr>
+        <tr><th>x (행)</th>{colLabels.map((c) => <th key={String(c)}>{String(c)}</th>)}</tr>
+      </thead>
+      <tbody>
+        {rowLabels.map((r, i) => (
+          <tr key={String(r)}>
+            <th>{String(r)}</th>
+            {cells[i].map((cell, j) => <td key={j}>{cell}</td>)}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 function ContingencyCard({ bivariate }) {
   const cramersV = bivariate.extra?.cramersV;
   return (
     <div className="swb-card">
       <strong>{METHOD_LABELS[bivariate.method] || bivariate.method}</strong>
+      <ContingencyTable table={bivariate.contingencyTable} />
       <table className="swb-table">
         <tbody>
           <tr><th>n</th><td>{bivariate.n}</td><th>통계량</th><td>{fmt(bivariate.statistic)}</td></tr>
@@ -191,7 +247,9 @@ function ContingencyCard({ bivariate }) {
           ))}
         </tbody>
       </table>
-      <p className="swb-suppressed-note">개별 칸(셀) 수치는 표시하지 않습니다 — 집계 통계량만 공개됩니다.</p>
+      {!bivariate.contingencyTable && (
+        <p className="swb-suppressed-note">개별 칸(셀) 수치는 표시하지 않습니다 — 집계 통계량만 공개됩니다.</p>
+      )}
       <BivariateFooter bivariate={bivariate} />
     </div>
   );

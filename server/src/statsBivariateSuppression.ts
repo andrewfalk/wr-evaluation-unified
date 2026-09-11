@@ -119,6 +119,17 @@ export async function computeBivariateAnalyzeResult(ctx: AnalysisContext): Promi
     return { method, suppressed: true };
   }
 
+  // [코드리뷰 2026-09-12] 여기 도달했다는 것 자체가 hasSmallCellInRequest()를
+  // 통과했다는 뜻이므로(그룹/셀 전부 0 또는 ≥MINIMUM_COHORT), request에 이미
+  // 들어있는 그룹 라벨·n·분할표를 그대로 응답에 실어도 안전하다 — 새로 계산하지
+  // 않고 request를 그대로 재사용한다(중복 계산·불일치 위험 방지).
+  const groupBreakdown = 'groups' in request
+    ? request.groups.map((g) => ({ label: g.label, n: g.values.length }))
+    : undefined;
+  const contingencyTable = 'table' in request
+    ? { rowLabels: request.rowLabels, colLabels: request.colLabels, cells: request.table }
+    : undefined;
+
   return {
     method,
     suppressed: false,
@@ -133,5 +144,7 @@ export async function computeBivariateAnalyzeResult(ctx: AnalysisContext): Promi
     extra: raw.extra.cramersV ? { cramersV: raw.extra.cramersV } : {},
     excludedCaseCount,
     exclusions,
+    ...(groupBreakdown ? { groupBreakdown } : {}),
+    ...(contingencyTable ? { contingencyTable } : {}),
   };
 }
