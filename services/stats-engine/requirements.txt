@@ -1,6 +1,11 @@
-# stats-engine (PR1) — pandas/statsmodels 의도적으로 제외(회귀·이변량은 PR4-A/PR3 이후).
+# stats-engine (PR1, 이변량은 PR3-A) — pandas/statsmodels 의도적으로 제외(회귀는
+# PR4-A 이후 — HC3 robust SE 때문에 그때 statsmodels 도입 예정, BH-FDR/Holm은
+# multiple_testing.py에 순수 numpy로 직접 구현했다).
 # 정확한 버전 고정(==) — 오프라인 wheel 캐시 관리 시 이 버전을 기준으로 wheel을 받는다.
-# 버전을 올릴 때는 test_descriptive.py의 R 참조값 비교(rtol/atol)가 여전히 통과하는지 확인할 것.
+# 버전을 올릴 때는 test_descriptive.py/test_bivariate.py의 R 참조값 비교(rtol/atol)가
+# 여전히 통과하는지 확인할 것. scipy==1.13.0엔 Welch ANOVA API가 없어 bivariate.py의
+# anova()가 공식을 직접 구현한다 — 버전을 올려도 이 구현은 그대로 유지한다(불필요한
+# scipy API 의존을 새로 만들지 않기 위함).
 numpy==1.26.4
 scipy==1.13.0
 jsonschema==4.22.0
