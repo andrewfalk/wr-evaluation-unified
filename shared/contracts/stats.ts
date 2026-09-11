@@ -118,6 +118,18 @@ export const StatsFilterSchema = z.object({
   ]).optional(),
 });
 
+// PR3-A — 이변량 검정 10종(실행 가능 8종 + 예약된 unsupported 2종, 계획서
+// pr3-swift-waterfall.md § "실행 가능한 방법은 8종"). 대응검정 2종도 스키마
+// enum에는 포함시킨다 — 그래야 zod가 generic INVALID_RECIPE로 뭉개지 않고
+// statsMethodCatalog이 `PAIRED_TEST_REQUIRES_EXPLICIT_PAIRING`라는 구체적
+// reasonCode를 낼 수 있다.
+export const StatsMethodIdSchema = z.enum([
+  'welch_t', 'mann_whitney', 'anova', 'kruskal_wallis',
+  'chi_square', 'fisher_exact',
+  'pearson_correlation', 'spearman_correlation',
+  'paired_t', 'wilcoxon_signed_rank',
+]);
+
 export const StatsAnalysisRecipeSchema = z.object({
   grain:           StatsGrainSchema,
   variableKeys:    z.array(z.string().min(1)).min(1).max(20),
@@ -128,8 +140,34 @@ export const StatsAnalysisRecipeSchema = z.object({
     z.string(),
     z.enum(['recompute_recorded_version', 'recompute_current', 'stratify_by_version']),
   ).default({}),
+  // PR3-A — analysisMode 기본값 'descriptive'는 순수 additive: PR1/PR2가 이미 보내는
+  // 요청(이 필드 자체가 없음)을 그대로 기술통계로 해석한다. requestedMethod는 완전
+  // optional — /preview는 이 값의 유효성을 검사하지 않는다(계획서 § "preview는
+  // 관대하다" — 방법을 아직 안 고른 최초 preview도 정상 응답해야 availableMethods를
+  // 볼 수 있다). /analyze에서만 statsRecipeValidation.ts(context='analyze')가
+  // 엄격하게 검사한다.
+  analysisMode:    z.enum(['descriptive', 'bivariate']).default('descriptive'),
+  requestedMethod: StatsMethodIdSchema.optional(),
   // encoding/options/rollups(마스터 계획서 §1)는 PR0-C 범위 밖 — .strict()로 보내면 400.
-}).strict();
+}).strict().superRefine((recipe, ctx) => {
+  // 카탈로그 조회가 필요 없는 순수 구조검사만 여기서 한다(컨텍스트 무관 — preview·
+  // analyze 둘 다 항상 참). 타입정합성·paired영구거부·method필수여부(컨텍스트별로
+  // 다름)는 카탈로그가 필요해 statsRecipeValidation.ts(context 인자)가 담당한다.
+  if (recipe.analysisMode !== 'bivariate') return;
+  if (recipe.variableKeys.length !== 2) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'BIVARIATE_REQUIRES_EXACTLY_TWO_VARIABLES',
+      path: ['variableKeys'],
+    });
+  } else if (recipe.variableKeys[0] === recipe.variableKeys[1]) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'SAME_VARIABLE_SELECTED_TWICE',
+      path: ['variableKeys'],
+    });
+  }
+});
 
 export const RunManifestSchema = z.object({
   analysisRunId: z.string().uuid(),
@@ -145,6 +183,13 @@ export const RunManifestSchema = z.object({
   estimabilityPolicyVersion: z.string(),
   engineVersion:             z.string(),
   serializerVersion:         z.string(),
+  // PR3-A — 신규 필드는 전부 optional(구버전 stats_runs.manifest/result JSONB
+  // 재파싱 호환, statsExportHandler.ts의 safeParse가 이 필드 없는 구행도 깨지지
+  // 않아야 함). inferenceGatePolicyVersion은 §6.1 게이트 정책 버전, analysisMode는
+  // CSV export 거부 판정의 단일 진실원(result.bivariate 존재 여부로 판정하지
+  // 않는다 — 계획서 §"결과 계약 불변조건").
+  inferenceGatePolicyVersion: z.string().optional(),
+  analysisMode:               z.enum(['descriptive', 'bivariate']).optional(),
 });
 
 export const PreviewCountsSchema = z.object({
@@ -176,13 +221,48 @@ export const PreviewEstimabilitySchema = z.object({
 
 export const PreviewRequestSchema = StatsAnalysisRecipeSchema;
 
+// PR3-A §6.9.1 — availableMethods[] 방법 카탈로그. A-1(항상 안전: 카탈로그
+// 메타데이터·§6.1 게이트·쌍 전체 0건)과 A-2(그룹/표 브레이크다운이 소수셀 없이
+// 깨끗할 때만 계산·노출 — 계획서 § "개수 정보도 소수셀 검사를 통과해야 노출
+// 가능하다") 둘 다 이 스키마 하나로 표현한다. B(그룹/셀 소수셀·값상수·제외사유
+// 소수셀)는 절대 별도 reasonCode를 만들지 않으므로 이 enum에 없다.
+export const StatsMethodReasonCodeSchema = z.enum([
+  'METHOD_TYPE_MISMATCH',
+  'PAIRED_TEST_REQUIRES_EXPLICIT_PAIRING',
+  'REPEATED_MEASURES_NOT_ALIGNED',
+  'INSUFFICIENT_DATA',
+  'REQUIRES_EXACTLY_TWO_GROUPS',
+  'REQUIRES_AT_LEAST_TWO_GROUPS',
+  'REQUIRES_AT_LEAST_TWO_LEVELS',
+  'TABLE_NOT_2X2',
+  'LOW_EXPECTED_COUNT',
+]);
+
+export const AvailableMethodSchema = z.object({
+  id:      StatsMethodIdSchema,
+  label:   z.string(),
+  purpose: z.enum(['association', 'prediction', 'formula_audit']),
+  status:  z.enum(['available', 'conditional', 'unsupported']),
+  reasonCode: StatsMethodReasonCodeSchema.nullable(),
+  observed: z.object({
+    personCount: z.number().int().nullable(),
+    rowCount:    z.number().int().nullable(),
+  }),
+  required: z.object({ rule: z.string() }).nullable(),
+  // "실제로 실행 가능할 때만" 채운다(§6.9.1) — 현재 유일한 remedy 경로는 chi_square
+  // 기대도수 부족 시 fisher_exact 전환 제안(표가 이미 2×2일 때만).
+  remedy:             z.string().nullable(),
+  remedyRecipePatch:  z.object({ requestedMethod: StatsMethodIdSchema }).nullable(),
+  methodPolicyVersion: z.string(),
+});
+
 export const PreviewResponseSchema = z.object({
   runManifest:   RunManifestSchema,
   counts:        PreviewCountsSchema,
   estimability:  PreviewEstimabilitySchema,
-  // PR3의 방법 카탈로그가 아직 없어 항상 빈 배열 — 지어내지 않는다.
-  availableMethods:    z.array(z.never()).length(0),
-  methodCatalogVersion: z.null(),
+  // descriptive 모드거나 쌍이 억제 상태(§"통합 공개통제 게이트")면 빈 배열 — 지어내지 않는다.
+  availableMethods:     z.array(AvailableMethodSchema),
+  methodCatalogVersion: z.string().nullable(),
   differencing: z.object({
     queryFamilyDigest: z.string(),
     windowMinutes:     z.number(),
@@ -214,7 +294,12 @@ export type StatsRunManifestFailed    = z.infer<typeof StatsRunManifestFailedSch
 export type StatsRunManifest          = z.infer<typeof StatsRunManifestSchema>;
 
 // Python 엔진이 null로 만드는 이유 — 억제(§4.2)와는 다른 축(계산 불능 vs 정책적 은닉).
-export const StatsNullReasonSchema = z.enum(['insufficient_data', 'undefined_zero_variance', 'non_finite_result']);
+// PR3-A가 이변량 전용 2종(constant_variable/insufficient_group_data)을 추가했다
+// (계획서 §Python엔진 공통 envelope) — 기존 기술통계 결과는 여전히 앞 3종만 쓴다.
+export const StatsNullReasonSchema = z.enum([
+  'insufficient_data', 'undefined_zero_variance', 'non_finite_result',
+  'constant_variable', 'insufficient_group_data',
+]);
 
 export const AnalyzeMissingPatternEntrySchema = z.object({
   reasonCode: z.enum(['not_entered', 'not_assessed', 'not_applicable', 'structural_missing']),
@@ -278,9 +363,63 @@ export const AnalyzeDiscreteResultSchema = z.discriminatedUnion('suppressed', [
   AnalyzeDiscreteRevealedSchema,
 ]);
 
+// PR3-A — 이변량 결과. §"방법 가용성 판정" A/B 원칙을 그대로 반영: 억제 시
+// {method, suppressed:true}뿐(수치·CI·제외상세 일절 없음, B-1 그룹/셀소수셀·값상수
+// 전부 이 형태로 수렴). 공개 시에도 exclusions는 독립 판정(B-2, §"결과 계약
+// 불변조건" — excludedCaseCount는 억제 여부와 무관하게 유지, exclusions 상세만
+// 별도로 null일 수 있음).
+export const StatsMethodEffectSizeSchema = z.object({
+  name:  z.string(),
+  value: z.number().nullable(),
+  ci:    z.tuple([z.number(), z.number()]).nullable(),
+  ciUnavailableReason: z.enum(['not_supported_v1', 'undefined_at_n', 'perfect_correlation']).nullable(),
+});
+
+export const AnalyzeBivariateExclusionEntrySchema = z.object({
+  reasonCode: z.enum(['x_missing', 'y_missing', 'both_missing']),
+  count: z.number().int().nonnegative(),
+});
+
+const AnalyzeBivariateSuppressedSchema = z.object({
+  method: StatsMethodIdSchema,
+  suppressed: z.literal(true),
+});
+const AnalyzeBivariateRevealedSchema = z.object({
+  method: StatsMethodIdSchema,
+  suppressed: z.literal(false),
+  n: z.number().int().nonnegative(),
+  statistic: z.number().nullable(),
+  df: z.union([
+    z.number(),
+    z.object({ numerator: z.number(), denominator: z.number() }),
+  ]).nullable(),
+  pValue: z.number().nullable(),
+  effectSizes: z.array(StatsMethodEffectSizeSchema),
+  nullReasons: z.record(z.string(), StatsNullReasonSchema),
+  multipleTesting: z.object({
+    method: z.literal('none'),
+    adjustedP: z.number().nullable(),
+  }),
+  qualityFlags: z.array(z.enum(['low_expected_count', 'haldane_anscombe_applied'])),
+  extra: z.object({ cramersV: StatsMethodEffectSizeSchema.optional() }).default({}),
+  // §"결과 계약 불변조건" — excludedCaseCount는 항상 공개(0 또는 ≥MINIMUM_COHORT임이
+  // 이미 레이어1에서 보장됨), exclusions 상세는 사유별 소수셀이면 null(B-2, 독립 판정).
+  excludedCaseCount: z.number().int().nonnegative(),
+  exclusions: z.array(AnalyzeBivariateExclusionEntrySchema).nullable(),
+});
+export const AnalyzeBivariateResultSchema = z.discriminatedUnion('suppressed', [
+  AnalyzeBivariateSuppressedSchema,
+  AnalyzeBivariateRevealedSchema,
+]);
+
 export const AnalyzeResultSchema = z.object({
   continuous: z.array(AnalyzeContinuousResultSchema),
   discrete:   z.array(AnalyzeDiscreteResultSchema),
+  // PR3-A — analysisMode==='bivariate'인 신규 실행 결과는 억제 여부와 무관하게
+  // 항상 존재(계획서 §"결과 계약 불변조건"). optional인 이유는 구버전 저장 결과
+  // (PR1/PR2가 만든, 이 필드 자체가 없는 stats_runs.result) 재파싱 호환뿐이다 —
+  // "선택적 기능"이라는 뜻이 아니다.
+  bivariate: AnalyzeBivariateResultSchema.optional(),
 });
 
 export const AnalyzeRequestSchema = StatsAnalysisRecipeSchema;
@@ -295,6 +434,12 @@ export type AnalyzeMissingPatternEntry    = z.infer<typeof AnalyzeMissingPattern
 export type AnalyzeContinuousResult       = z.infer<typeof AnalyzeContinuousResultSchema>;
 export type AnalyzeDiscreteLevel          = z.infer<typeof AnalyzeDiscreteLevelSchema>;
 export type AnalyzeDiscreteResult         = z.infer<typeof AnalyzeDiscreteResultSchema>;
+export type StatsMethodId                 = z.infer<typeof StatsMethodIdSchema>;
+export type StatsMethodReasonCode         = z.infer<typeof StatsMethodReasonCodeSchema>;
+export type AvailableMethod               = z.infer<typeof AvailableMethodSchema>;
+export type StatsMethodEffectSize         = z.infer<typeof StatsMethodEffectSizeSchema>;
+export type AnalyzeBivariateExclusionEntry = z.infer<typeof AnalyzeBivariateExclusionEntrySchema>;
+export type AnalyzeBivariateResult        = z.infer<typeof AnalyzeBivariateResultSchema>;
 export type AnalyzeResult                 = z.infer<typeof AnalyzeResultSchema>;
 export type AnalyzeRequest                = z.infer<typeof AnalyzeRequestSchema>;
 export type AnalyzeResponse               = z.infer<typeof AnalyzeResponseSchema>;
