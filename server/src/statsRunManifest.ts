@@ -6,10 +6,11 @@ import { CATALOG_VERSION } from '@wr/analytics-core/catalog';
 import { DETERMINISTIC_MIGRATION_VERSION } from '@wr/analytics-core/migration/deterministicMigrate';
 import type { RunManifest, StatsRunManifestFailed, StatsRunManifestSucceeded } from '@wr/contracts';
 import { SERIALIZER_VERSION } from './canonicalSerializer';
-import { ESTIMABILITY_POLICY_VERSION } from './statsPolicy';
+import { ESTIMABILITY_POLICY_VERSION, INFERENCE_GATE_POLICY_VERSION } from './statsPolicy';
 
-// PR1 — Python subprocess 기술통계 엔진이 실제로 붙었다(services/stats-engine/analyze.py).
-export const STATS_ENGINE_VERSION = 'v1-python-descriptive';
+// PR3-A — Python subprocess 엔진이 이변량 8종을 지원하게 됐다(services/stats-engine
+// /bivariate.py, protocolVersion 2).
+export const STATS_ENGINE_VERSION = 'v2-python-bivariate';
 
 export interface BuildRunManifestInput {
   recipeDigest: string;
@@ -17,6 +18,9 @@ export interface BuildRunManifestInput {
   resultDigest: string;
   snapshotAsOf: string;
   formulaPolicies: Record<string, string>;
+  // PR3-A — 신규, RunManifestSchema에선 optional이지만(구버전 저장결과 재파싱 호환)
+  // 여기 buildRunManifest()는 항상 채운다 — 새로 만드는 manifest는 전부 신버전이므로.
+  analysisMode: 'descriptive' | 'bivariate';
 }
 
 export function buildRunManifest(input: BuildRunManifestInput): RunManifest {
@@ -36,6 +40,8 @@ export function buildRunManifest(input: BuildRunManifestInput): RunManifest {
     estimabilityPolicyVersion: ESTIMABILITY_POLICY_VERSION,
     engineVersion: STATS_ENGINE_VERSION,
     serializerVersion: SERIALIZER_VERSION,
+    inferenceGatePolicyVersion: INFERENCE_GATE_POLICY_VERSION,
+    analysisMode: input.analysisMode,
   };
 }
 
@@ -51,6 +57,7 @@ export interface BuildFailedStatsRunManifestInput {
   sourceDigest: string;
   snapshotAsOf: string;
   formulaPolicies: Record<string, string>;
+  analysisMode: 'descriptive' | 'bivariate';
 }
 
 // 실패 행의 manifest는 resultDigest 필드 자체가 없다(null이 아니라 생략) — 계산 결과가
@@ -68,6 +75,8 @@ export function buildFailedStatsRunManifest(input: BuildFailedStatsRunManifestIn
     estimabilityPolicyVersion: ESTIMABILITY_POLICY_VERSION,
     engineVersion: STATS_ENGINE_VERSION,
     serializerVersion: SERIALIZER_VERSION,
+    inferenceGatePolicyVersion: INFERENCE_GATE_POLICY_VERSION,
+    analysisMode: input.analysisMode,
     outcome: 'failed',
   };
 }

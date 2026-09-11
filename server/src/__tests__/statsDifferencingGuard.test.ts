@@ -13,6 +13,7 @@ function recipe(overrides: Partial<StatsAnalysisRecipe> = {}): StatsAnalysisReci
     filters: [],
     analysisPurpose: 'association',
     formulaPolicies: {},
+    analysisMode: 'descriptive',
     ...overrides,
   };
 }
