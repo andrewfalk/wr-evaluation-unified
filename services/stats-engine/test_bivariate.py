@@ -62,6 +62,26 @@ def test_welch_t_hedges_g_uses_pooled_sd():
     assert g["value"] == pytest.approx(expected_g, rel=1e-9)
 
 
+def test_welch_t_hedges_g_ci_matches_effsize_reference():
+    """코드리뷰(2026-09-12)가 R effsize::cohen.d(hedges.correction=TRUE,
+    noncentral=FALSE)를 손으로 옮겨 계산해 대조한 값 — Var(d) 분모가 2(n1+n2-2)가
+    아니라 2(n1+n2)이고, 임계값이 z가 아니라 t(df=n1+n2-2)여야 이 값과 일치한다.
+    R을 직접 실행한 것은 아니므로(§구현순서 1단계 — 운영 고정버전 Docker 검증과
+    별개로 남아 있는 항목), 이 테스트는 "손계산 참조값과의 회귀 방지"이지 R
+    자체 검증을 대체하지 않는다. 참조값 자체도 손계산이라(코드리뷰도 "R 실행
+    결과를 직접 얻은 것은 아니다"라고 명시) 완전한 부동소수 일치는 기대하지
+    않는다 — abs=1e-3은 "올바른 공식(t-crit, 분모 2(n1+n2))을 썼는지" 확인이
+    목적이고(틀린 공식인 z-crit을 쓰면 약 0.06 차이가 나 확실히 걸러짐), 참조값
+    자체의 반올림 오차까지 완전히 흡수하려는 것은 아니다."""
+    x1 = list(range(10))       # 0..9
+    x2 = list(range(1, 11))    # 1..10
+    result = bv.welch_t(_groups(x1, x2))
+    g = result["effectSizes"][1]
+    assert g["value"] == pytest.approx(0.316333, abs=1e-5)
+    assert g["ci"][0] == pytest.approx(-0.589138, abs=1e-3)
+    assert g["ci"][1] == pytest.approx(1.221805, abs=1e-3)
+
+
 def test_welch_t_zero_variance_group_returns_null():
     result = bv.welch_t(_groups([5.0, 5.0, 5.0], [1.0, 2.0, 3.0]))
     assert result["statistic"] is None

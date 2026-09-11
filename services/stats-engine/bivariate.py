@@ -121,16 +121,22 @@ def welch_t(groups: list[dict[str, Any]]) -> dict[str, Any]:
     diff_ci = (mean_diff - t_crit * se, mean_diff + t_crit * se)
 
     # Hedges' g — pooled SD 분모(관례), classical(비-noncentral) 대표본 근사 CI
-    # (Hedges & Olkin 1985 / Borenstein et al. 2009 §4).
+    # (Hedges & Olkin 1985 / Borenstein et al. 2009 eq.4.20~4.24: Var(d)의 분모는
+    # n1+n2-2가 아니라 n1+n2 — 코드리뷰가 손으로 옮겨 계산한 effsize::cohen.d
+    # (hedges.correction=TRUE, noncentral=FALSE) 참조값과 대조해 정정함(2026-09-12).
+    # CI 임계값도 z가 아니라 t(df=n1+n2-2, pooled df)를 쓴다 — z를 쓰면 검정 통계량
+    # (Welch t)이나 점추정(pooled SD 기반 d) 어느 쪽 df 관례와도 안 맞고, 실측
+    # 대조에서도 t가 일치했다.
     df_pooled = n1 + n2 - 2
     sp = math.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / df_pooled)
     d = mean_diff / sp
     j = 1 - 3 / (4 * df_pooled - 1)
     g = d * j
-    var_d = (n1 + n2) / (n1 * n2) + (d ** 2) / (2 * (n1 + n2 - 2))
+    var_d = (n1 + n2) / (n1 * n2) + (d ** 2) / (2 * (n1 + n2))
     var_g = (j ** 2) * var_d
     se_g = math.sqrt(var_g)
-    g_ci = (g - _Z_CRIT * se_g, g + _Z_CRIT * se_g)
+    g_t_crit = float(scipy_stats.t.ppf(1 - (1 - CI_CONFIDENCE_LEVEL) / 2, df_pooled))
+    g_ci = (g - g_t_crit * se_g, g + g_t_crit * se_g)
 
     return _envelope(
         n, t_stat, df, p_value,
