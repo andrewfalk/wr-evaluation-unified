@@ -120,21 +120,21 @@ def welch_t(groups: list[dict[str, Any]]) -> dict[str, Any]:
     t_crit = float(scipy_stats.t.ppf(1 - (1 - CI_CONFIDENCE_LEVEL) / 2, df))
     diff_ci = (mean_diff - t_crit * se, mean_diff + t_crit * se)
 
-    # Hedges' g — pooled SD 분모(관례), classical(비-noncentral) 대표본 근사 CI
-    # (Hedges & Olkin 1985 / Borenstein et al. 2009 eq.4.20~4.24: Var(d)의 분모는
-    # n1+n2-2가 아니라 n1+n2 — 코드리뷰가 손으로 옮겨 계산한 effsize::cohen.d
-    # (hedges.correction=TRUE, noncentral=FALSE) 참조값과 대조해 정정함(2026-09-12).
-    # CI 임계값도 z가 아니라 t(df=n1+n2-2, pooled df)를 쓴다 — z를 쓰면 검정 통계량
-    # (Welch t)이나 점추정(pooled SD 기반 d) 어느 쪽 df 관례와도 안 맞고, 실측
-    # 대조에서도 t가 일치했다.
+    # Hedges' g — pooled SD 분모(관례), classical(비-noncentral) 대표본 근사 CI.
+    # R effsize::cohen.d(hedges.correction=TRUE, noncentral=FALSE) 소스(2026-09-11,
+    # Docker r-base로 getAnywhere("cohen.d.default")를 직접 열람해 확인)를 그대로
+    # 옮긴다 — SE 공식의 제곱항은 **보정 전 d가 아니라 보정 후 g**를 쓰고
+    # (`S_d = sqrt((n1+n2)/(n1n2) + g²/(2(n1+n2)))`), 그 다음 J를 한 번 더 곱한다
+    # (`S_d = S_d * J`, 제곱해서 J²을 곱하는 게 아니라 sqrt 밖에서 J를 한 번만
+    # 곱함). 이전 구현은 g² 대신 d²를 썼다가 R 실측 대조(rel≈8.6e-4 차이)로
+    # 잡혔다. CI 임계값은 z가 아니라 t(df=n1+n2-2, pooled df) — R 소스도 noncentral
+    # 분기를 타지 않는 한 df를 재대입하지 않아 동일 df를 그대로 쓴다.
     df_pooled = n1 + n2 - 2
     sp = math.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / df_pooled)
     d = mean_diff / sp
-    j = 1 - 3 / (4 * df_pooled - 1)
+    j = 1 - 3 / (4 * (n1 + n2) - 9)
     g = d * j
-    var_d = (n1 + n2) / (n1 * n2) + (d ** 2) / (2 * (n1 + n2))
-    var_g = (j ** 2) * var_d
-    se_g = math.sqrt(var_g)
+    se_g = j * math.sqrt((n1 + n2) / (n1 * n2) + (g ** 2) / (2 * (n1 + n2)))
     g_t_crit = float(scipy_stats.t.ppf(1 - (1 - CI_CONFIDENCE_LEVEL) / 2, df_pooled))
     g_ci = (g - g_t_crit * se_g, g + g_t_crit * se_g)
 

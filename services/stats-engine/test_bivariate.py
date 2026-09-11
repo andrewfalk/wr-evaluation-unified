@@ -1,25 +1,34 @@
 """bivariate.py 단위테스트.
 
-R 참조값 대조(PR1이 test_descriptive.py에서 했던 Docker r-base:latest + 실행
-방식)는 이 세션에서 수행하지 않았다 — 계획서(pr3-swift-waterfall.md) §구현순서
-1단계 "운영 고정버전(scipy 1.13.0) Docker pytest 통과가 병합 전 필수 게이트"는
-별도로 남아 있는 작업이다. 이 파일은 그때까지의 회귀 방지용으로:
+R 참조값 대조는 2026-09-11에 Docker r-base:latest(R 4.6.1 "Happy Hop") +
+effsize 0.8.1로 실제 실행해 완료했다(PR1이 test_descriptive.py에서 한 방식과
+동일 — `fixtures/generate_r_reference_bivariate.R` 실행 결과가
+`fixtures/r_reference_values_bivariate.json`). 이 파일은:
   1) scipy 함수를 직접 호출해 통계량·p값을 교차검증(같은 scipy 안에서지만
      bivariate.py가 값을 왜곡 없이 그대로 전달하는지 확인)
   2) 손으로 계산 가능한 값(OR, 상관계수 CI 등)을 수식대로 재계산해 대조
   3) 수학적 항등식(Welch ANOVA k=2일 때 F=t², Welch t와 동일 df)으로 anova()
      구현을 독립적으로 검증(R 없이도 신뢰 가능한 회귀 앵커)
-로 구성한다.
+  4) `test_r_reference_*`: 위 R 실행 결과와 직접 대조(scipy 자기교차검증이
+     아니라 독립 구현체와의 교차검증)
+로 구성한다. 운영 고정버전(numpy==1.26.4/scipy==1.13.0) 자체의 Docker pytest
+검증은 별도 게이트(README 참고)로 수행한다.
 """
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
 from scipy import stats as scipy_stats
 
 import bivariate as bv
+
+_R_REFERENCE = json.loads(
+    (Path(__file__).parent / "fixtures" / "r_reference_values_bivariate.json").read_text(encoding="utf-8")
+)
 
 
 def _groups(*value_lists, labels=None):
@@ -66,13 +75,13 @@ def test_welch_t_hedges_g_ci_matches_effsize_reference():
     """코드리뷰(2026-09-12)가 R effsize::cohen.d(hedges.correction=TRUE,
     noncentral=FALSE)를 손으로 옮겨 계산해 대조한 값 — Var(d) 분모가 2(n1+n2-2)가
     아니라 2(n1+n2)이고, 임계값이 z가 아니라 t(df=n1+n2-2)여야 이 값과 일치한다.
-    R을 직접 실행한 것은 아니므로(§구현순서 1단계 — 운영 고정버전 Docker 검증과
-    별개로 남아 있는 항목), 이 테스트는 "손계산 참조값과의 회귀 방지"이지 R
-    자체 검증을 대체하지 않는다. 참조값 자체도 손계산이라(코드리뷰도 "R 실행
-    결과를 직접 얻은 것은 아니다"라고 명시) 완전한 부동소수 일치는 기대하지
-    않는다 — abs=1e-3은 "올바른 공식(t-crit, 분모 2(n1+n2))을 썼는지" 확인이
-    목적이고(틀린 공식인 z-crit을 쓰면 약 0.06 차이가 나 확실히 걸러짐), 참조값
-    자체의 반올림 오차까지 완전히 흡수하려는 것은 아니다."""
+    당시엔 R을 직접 실행한 것은 아니었으나, 이후 Docker r-base로 같은 입력을
+    실제 실행해(`test_r_reference_welch_t_hedges_g_matches_r_effsize_cohen_d`)
+    rel=1e-9까지 정확히 일치함을 확인했다(그 과정에서 SE 공식의 제곱항이 보정
+    전 d가 아니라 보정 후 g여야 한다는 걸 추가로 잡아냄 — bivariate.py 주석
+    참고). 아래 두 테스트가 사실상 같은 걸 검증하지만, 이 테스트는 "공식이
+    맞는지" abs 허용오차로 남겨둔다(틀린 공식인 z-crit을 쓰면 약 0.06 차이가 나
+    확실히 걸러진다)."""
     x1 = list(range(10))       # 0..9
     x2 = list(range(1, 11))    # 1..10
     result = bv.welch_t(_groups(x1, x2))
@@ -275,3 +284,112 @@ def test_spearman_correlation_matches_scipy_and_bonett_wright_ci():
     ci = result["effectSizes"][0]["ci"]
     assert ci[0] == pytest.approx(expected_ci[0], rel=1e-9)
     assert ci[1] == pytest.approx(expected_ci[1], rel=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# R 참조값 교차검증 (Docker r-base:latest R 4.6.1 + effsize 0.8.1, 2026-09-11 실측)
+#
+# 위의 scipy 자기교차검증과 달리, 이 절은 scipy와 무관한 독립 구현(R)과 대조한다.
+# fisher_exact의 OR·ANOVA의 eta-squared처럼 R과 정의 자체가 달라 대조 불가능한
+# 값은 설계표(pr3-swift-waterfall.md §검정별 세부 스펙)가 명시한 대로 p값만 비교한다.
+# ---------------------------------------------------------------------------
+
+def test_r_reference_welch_t_matches_r_stats_t_test():
+    ref = _R_REFERENCE["welch_t_basic"]
+    x1 = [4.0, 5.0, 6.0, 5.0, 7.0, 6.0]
+    x2 = [8.0, 9.0, 7.0, 10.0, 9.0, 8.0, 11.0]
+    result = bv.welch_t(_groups(x1, x2))
+    assert result["statistic"] == pytest.approx(ref["statistic"], rel=1e-6)
+    assert result["pValue"] == pytest.approx(ref["p_value"], rel=1e-6)
+    assert result["df"] == pytest.approx(ref["df"], rel=1e-6)
+    assert result["effectSizes"][0]["value"] == pytest.approx(ref["mean_difference"], rel=1e-9)
+
+
+def test_r_reference_welch_t_hedges_g_matches_r_effsize_cohen_d():
+    ref = _R_REFERENCE["welch_t_hedges_g"]
+    x1 = list(range(10))
+    x2 = list(range(1, 11))
+    result = bv.welch_t(_groups(x1, x2))
+    g = result["effectSizes"][1]
+    assert g["value"] == pytest.approx(ref["estimate"], rel=1e-9)
+    assert g["ci"][0] == pytest.approx(ref["ci_lower"], rel=1e-9)
+    assert g["ci"][1] == pytest.approx(ref["ci_upper"], rel=1e-9)
+
+
+def test_r_reference_mann_whitney_pvalue_matches_r_wilcox_test():
+    ref = _R_REFERENCE["mann_whitney"]
+    m1 = [1.0, 2.0, 3.0, 4.0, 5.0]
+    m2 = [6.0, 7.0, 8.0, 9.0, 10.0]
+    result = bv.mann_whitney(_groups(m1, m2))
+    assert result["pValue"] == pytest.approx(ref["p_value"], rel=1e-6)
+
+
+def test_r_reference_anova_welch_matches_r_oneway_test():
+    ref = _R_REFERENCE["anova_welch_three_groups"]
+    x1, x2, x3 = [1.0, 2.0, 3.0], [10.0, 11.0, 12.0], [20.0, 22.0, 24.0]
+    result = bv.anova(_groups(x1, x2, x3))
+    assert result["statistic"] == pytest.approx(ref["statistic"], rel=1e-6)
+    assert result["pValue"] == pytest.approx(ref["p_value"], rel=1e-6)
+    assert result["df"]["numerator"] == ref["df1"]
+    assert result["df"]["denominator"] == pytest.approx(ref["df2"], rel=1e-6)
+
+
+def test_r_reference_kruskal_wallis_matches_r_kruskal_test():
+    ref = _R_REFERENCE["kruskal_wallis"]
+    x1, x2, x3 = [1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]
+    result = bv.kruskal_wallis(_groups(x1, x2, x3))
+    assert result["statistic"] == pytest.approx(ref["statistic"], rel=1e-6)
+    assert result["pValue"] == pytest.approx(ref["p_value"], rel=1e-6)
+
+
+def test_r_reference_chi_square_matches_r_chisq_test():
+    ref = _R_REFERENCE["chi_square_50_30_20_60"]
+    table = [[50, 30], [20, 60]]
+    result = bv.chi_square(table)
+    assert result["statistic"] == pytest.approx(ref["statistic"], rel=1e-6)
+    assert result["pValue"] == pytest.approx(ref["p_value"], rel=1e-6)
+    assert result["df"] == ref["df"]
+
+
+def test_r_reference_chi_square_low_expected_count_matches_r_chisq_test():
+    # [[1,19],[19,61]] — 8차 계획 리뷰가 지목한 "주변합은 충분해도 내부 셀이 작은"
+    # 반례와 같은 표. R의 chisq.test도 같은 표에서 같은 경고(근사 부정확)를 낸다.
+    ref = _R_REFERENCE["chi_square_1_19_19_61"]
+    table = [[1, 19], [19, 61]]
+    result = bv.chi_square(table)
+    assert result["statistic"] == pytest.approx(ref["statistic"], rel=1e-6)
+    assert result["pValue"] == pytest.approx(ref["p_value"], rel=1e-6)
+
+
+def test_r_reference_fisher_exact_pvalue_matches_r_fisher_test():
+    ref = _R_REFERENCE["fisher_exact_10_5_3_12"]
+    table = [[10, 5], [3, 12]]
+    result = bv.fisher_exact(table)
+    assert result["pValue"] == pytest.approx(ref["p_value"], rel=1e-6)
+
+
+def test_r_reference_fisher_exact_zero_cell_pvalue_matches_r_fisher_test():
+    ref = _R_REFERENCE["fisher_exact_0_10_10_10"]
+    table = [[0, 10], [10, 10]]
+    result = bv.fisher_exact(table)
+    assert result["pValue"] == pytest.approx(ref["p_value"], rel=1e-6)
+
+
+def test_r_reference_pearson_correlation_matches_r_cor_test():
+    ref = _R_REFERENCE["pearson_correlation"]
+    x = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
+    y = [2.1, 3.9, 6.2, 7.8, 10.1, 11.9, 14.2, 15.8, 18.1, 19.9]
+    result = bv.pearson_correlation(x, y)
+    assert result["effectSizes"][0]["value"] == pytest.approx(ref["r"], rel=1e-6)
+    assert result["pValue"] == pytest.approx(ref["p_value"], rel=1e-4)
+    assert result["effectSizes"][0]["ci"][0] == pytest.approx(ref["ci_lower"], rel=1e-3)
+    assert result["effectSizes"][0]["ci"][1] == pytest.approx(ref["ci_upper"], rel=1e-3)
+
+
+def test_r_reference_spearman_correlation_matches_r_cor_test():
+    ref = _R_REFERENCE["spearman_correlation"]
+    x = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
+    y = [2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0, 7.0, 10.0, 9.0]
+    result = bv.spearman_correlation(x, y)
+    assert result["effectSizes"][0]["value"] == pytest.approx(ref["rho"], rel=1e-6)
+    assert result["pValue"] == pytest.approx(ref["p_value"], rel=1e-4)
