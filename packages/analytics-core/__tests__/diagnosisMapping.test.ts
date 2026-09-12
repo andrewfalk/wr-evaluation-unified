@@ -1,18 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import { getDiagnosisModuleHint, resolveDiagnosisModule, supportsKlGrade } from '../diagnosisMapping';
 
-describe('getDiagnosisModuleHint — KNOWN BUG characterization (do not fix in this PR)', () => {
-  // diagnosisMapping.ts의 NAME_MODULE_MAP 요추 패턴이 끝에 빈 대안(|)을 가진 채로
-  // 이동됐다(원본 src/core/utils/diagnosisMapping.js와 동일 — 계획서 §2 "known issue").
-  // 이 테스트는 그 동작(버그 포함)이 이동 전후 동일함을 고정한다 — "옳다"가 아니라
-  // "지금 이렇다"를 검증하는 characterization test다. 별도 이슈로 분리해 수정할 것.
-  it('KNOWN BUG(별도 이슈 필요, 수정 금지): 어떤 모듈 패턴에도 안 걸리는 임의 상병명이 요추로 잘못 분류된다', () => {
+describe('getDiagnosisModuleHint — 요추 정규식 빈 대안 버그 수정(PR0-B3 Part C, 2026-09-12)', () => {
+  // NAME_MODULE_MAP의 요추 패턴 끝에 있던 빈 대안(|)을 제거했다 — 이전엔 어떤 모듈
+  // 패턴에도 안 걸리는 임의 상병명이 전부 요추로 잘못 분류됐다(이 테스트가 그 버그를
+  // characterization하고 있었음). 이제는 미매칭이면 null을 반환해야 한다.
+  it('어떤 모듈 패턴에도 안 걸리는 임의 상병명은 null(더 이상 요추로 잘못 분류되지 않는다)', () => {
     const hint = getDiagnosisModuleHint({ code: '', name: '완전히 무관한 임의의 상병명 텍스트' });
-    expect(hint).toEqual({ moduleId: 'spine', label: '요추(허리)' });
+    expect(hint).toBeNull();
   });
 
-  it('무릎처럼 실제로 매치되는 이름은 정상적으로 해당 모듈로 분류된다(버그의 영향을 안 받음)', () => {
+  it('무릎처럼 실제로 매치되는 이름은 정상적으로 해당 모듈로 분류된다(회귀 없음)', () => {
     expect(getDiagnosisModuleHint({ name: '무릎 관절증' })?.moduleId).toBe('knee');
+  });
+
+  it('요추 키워드는 여전히 정상적으로 매치된다(빈 대안 제거가 정상 매칭까지 지우지 않았는지 확인)', () => {
+    expect(getDiagnosisModuleHint({ name: '요추간판탈출증' })?.moduleId).toBe('spine');
+    expect(getDiagnosisModuleHint({ name: '허리 통증' })?.moduleId).toBe('spine');
+    expect(getDiagnosisModuleHint({ name: 'lumbar strain' })?.moduleId).toBe('spine');
+    expect(getDiagnosisModuleHint({ code: 'M51.2' })?.moduleId).toBe('spine');
   });
 });
 

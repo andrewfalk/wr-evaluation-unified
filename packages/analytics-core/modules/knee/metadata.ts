@@ -8,6 +8,13 @@
 export type { AnalyticsVariableMetadata } from '../../types';
 import type { AnalyticsVariableMetadata } from '../../types';
 
+// getKlGrade(AssessmentIndividualFields.jsx/AssessmentTab.jsx의 klgRight/klgLeft select,
+// KLG_OPTIONS)가 실제로 제공하는 4개 등급의 심각도 순서 — 오름차순. "N/A"(해당없음)는
+// 등급이 아니라 "이 side에는 적용되지 않음"이라는 임상 판단이라 extractor가 missing:
+// 'not_applicable'로 흡수하고, 이 순서에는 절대 끼워넣지 않는다(statsBivariateRoles.ts의
+// resolveLevelOrder가 이 배열을 그대로 순위로 쓴다).
+export const KNEE_KLG_ORDER = ['1', '2', '3', '4'] as const;
+
 export const KNEE_METADATA: AnalyticsVariableMetadata[] = [
   {
     key: 'knee.relatedness.max',
@@ -47,5 +54,81 @@ export const KNEE_METADATA: AnalyticsVariableMetadata[] = [
     // formulaVersion 필드/버전 dispatcher가 무릎 module data·computeKneeCalc 어디에도
     // 없어(data.js:54, calculations.js:118) recompute_recorded_version은 선언 불가.
     supportedFormulaPolicies: ['recompute_current'],
+  },
+  {
+    // PR0-B3 Part B — diagnosis_side grain 1호 변수. K-L Grade는 무릎 진단의 좌/우 각각에
+    // 저장되는 임상 판단값이라 이 grain에 속한다(이 파일 헤더 주석이 예고한 그 PR).
+    key: 'knee.diagnosisSide.klGrade',
+    label: 'K-L Grade',
+    group: '무릎 · 진단별 판정',
+    moduleId: 'knee',
+    grain: 'diagnosis_side',
+    type: 'ordinal',
+    provenance: 'clinician_judgment',
+    dependsOn: [
+      'activeModules',
+      'shared.diagnoses[].id',
+      'shared.diagnoses[].code',
+      'shared.diagnoses[].name',
+      'shared.diagnoses[].moduleId',
+      'shared.diagnoses[].side',
+      'shared.diagnoses[].klgRight',
+      'shared.diagnoses[].klgLeft',
+    ],
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association', 'formula_audit'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'knee_kl_grade_side',
+    supportedFormulaPolicies: [],
+  },
+  {
+    key: 'knee.diagnosisSide.confirmedStatus',
+    label: '상병 상태(확인/미확인)',
+    group: '무릎 · 진단별 판정',
+    moduleId: 'knee',
+    grain: 'diagnosis_side',
+    type: 'boolean',
+    provenance: 'clinician_judgment',
+    dependsOn: [
+      'activeModules',
+      'shared.diagnoses[].id',
+      'shared.diagnoses[].code',
+      'shared.diagnoses[].name',
+      'shared.diagnoses[].moduleId',
+      'shared.diagnoses[].side',
+      'shared.diagnoses[].confirmedRight',
+      'shared.diagnoses[].confirmedLeft',
+    ],
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association', 'formula_audit'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'knee_confirmed_status_side',
+    supportedFormulaPolicies: [],
+  },
+  {
+    key: 'knee.diagnosisSide.appliedConfirmedMismatch',
+    label: '신청≠확정 여부',
+    group: '무릎 · 진단별 판정',
+    moduleId: 'knee',
+    grain: 'diagnosis_side',
+    type: 'boolean',
+    provenance: 'derived',
+    dependsOn: [
+      'activeModules',
+      'shared.diagnoses[].id',
+      'shared.diagnoses[].code',
+      'shared.diagnoses[].name',
+      'shared.diagnoses[].moduleId',
+      'shared.diagnoses[].confirmedCode',
+      'shared.diagnoses[].confirmedName',
+    ],
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association', 'formula_audit'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'knee_applied_confirmed_mismatch_side',
+    supportedFormulaPolicies: [],
   },
 ];

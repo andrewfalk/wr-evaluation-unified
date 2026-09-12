@@ -17,6 +17,28 @@ export interface ExtractedValue<T> {
   qualityFlags: QualityFlag[];
 }
 
+// PR0-B3 Part A — 반복 grain(diagnosis_side/job/job_diagnosis/task/vibration_interval) 계약.
+// case ID를 포함하지 않는다 — extractor/enumerator는 case ID를 모른다(AnalysisPatient에
+// 없음, migration/deterministicMigrate.ts:33-44). 서버가 [row.id, ...localKey]로 전역
+// 키를 만든다(계획 pr0-b3-shimmying-magpie.md "핵심 아키텍처" 절).
+export type LocalEntityKey = readonly string[];
+
+// grain별 "행 모집단"을 변수와 무관하게 결정하는 canonical 엔터티. TSource는 그 엔터티의
+// 원본 참조(예: 진단 객체 + side)를 담아, extractor가 값을 뽑을 때 재조회하지 않게 한다 —
+// 재조회는 결측/중복 id를 보정한 뒤에는 원본을 다시 못 찾을 수 있어 폐기된 설계.
+export interface GrainEntity<TSource> {
+  entityKey: LocalEntityKey;
+  source: TSource;
+  qualityFlags: QualityFlag[];
+}
+
+export interface RepeatedObservation<T> {
+  entityKey: LocalEntityKey;
+  value: T | null;
+  missing: MissingReason | null;
+  qualityFlags: QualityFlag[];
+}
+
 // deterministicMigrate(§5)의 반환형 — 계층에 따라 다른 shape을 섞어 반환하지 않는다.
 // migration은 항상 이 하나의 shape만 반환하고, ExtractedValue로의 해석은 항상 extractor 몫이다.
 export interface MigrationIssue {
@@ -51,4 +73,9 @@ export interface AnalyticsVariableMetadata {
   // 4라운드 필수 보완: 마스터 계획서 §5 예시엔 있었으나 knee(formulaVersion 필드가 없는 모듈)
   // 이관 시 안 써도 돼서 빠졌다. spine.mddm부터 실제로 필요(§2.3, modules.spine.formulaVersion).
   formulaVersionKey?: string;
+  // PR0-B3 Part C — 필터 전용 변수 계약. 미지정이면 'analyzable'로 취급한다(shared/contracts/
+  // stats.ts의 CatalogVariableSchema와 동일한 기본값 — 서버 DTO 변환(toCatalogVariableDto)이
+  // 두 곳을 일치시킨다). 등록일처럼 분석 변수로는 부적절하지만(date 타입 — 기술통계 예외
+  // 경로에 걸림) 필터로는 유용한 변수에 쓴다.
+  analysisRole?: 'analyzable' | 'filter_only';
 }

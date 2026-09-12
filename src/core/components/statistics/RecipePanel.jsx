@@ -40,6 +40,17 @@ const PURPOSE_LABELS = {
   association: '연관성', prediction: '예측', formula_audit: '공식 감사',
 };
 
+// PR0-B3 Part A — grain 선택 UI. §2 grain표(마스터 계획서)의 한국어 표기.
+const GRAIN_LABELS = {
+  person: '사람(person)',
+  case: '사례(case)',
+  diagnosis_side: '진단측',
+  job: '직업력',
+  job_diagnosis: '직업력×진단',
+  task: '작업',
+  vibration_interval: '진동구간',
+};
+
 function needsValue(operator) {
   return operator !== 'is_missing' && operator !== 'not_missing';
 }
@@ -101,6 +112,16 @@ function emptyRawValueFor(operator) {
   return operator === 'between' ? ['', ''] : '';
 }
 
+// 등록일처럼 date 타입 필터는 자유 텍스트로 두면 "2024/01/15"·"2024-01-15T00:00:00Z" 같은
+// 형식이 섞여 들어온다 — 서버(statsRecipeValidation.ts)는 YYYY-MM-DD만 엄격히 허용하므로
+// (실제 값 비교도 그 형식 기준), 브라우저 네이티브 <input type="date">로 입력 자체를 그
+// 형식으로 고정한다(네이티브 date input의 value는 항상 YYYY-MM-DD).
+function inputTypeFor(variableType) {
+  if (variableType === 'continuous') return 'number';
+  if (variableType === 'date') return 'date';
+  return 'text';
+}
+
 function FilterValueInput({ variable, operator, raw, onChange }) {
   if (!needsValue(operator)) return null;
 
@@ -120,14 +141,14 @@ function FilterValueInput({ variable, operator, raw, onChange }) {
       <span style={{ display: 'inline-flex', gap: 4, width: '100%' }}>
         <input
           className="swb-search"
-          type={variable.type === 'continuous' ? 'number' : 'text'}
+          type={inputTypeFor(variable.type)}
           placeholder="하한"
           value={lower}
           onChange={(e) => onChange([e.target.value, upper])}
         />
         <input
           className="swb-search"
-          type={variable.type === 'continuous' ? 'number' : 'text'}
+          type={inputTypeFor(variable.type)}
           placeholder="상한"
           value={upper}
           onChange={(e) => onChange([lower, e.target.value])}
@@ -151,7 +172,7 @@ function FilterValueInput({ variable, operator, raw, onChange }) {
   return (
     <input
       className="swb-search"
-      type={variable.type === 'continuous' ? 'number' : 'text'}
+      type={inputTypeFor(variable.type)}
       placeholder="값"
       value={raw ?? ''}
       onChange={(e) => onChange(e.target.value)}
@@ -209,6 +230,7 @@ function FilterEditor({ catalogByKey, onAdd }) {
 // 계산해 내려준다 — 이 컴포넌트는 그 값을 그대로 표시만 한다(계획서 §6 render 시점 판정 원칙).
 export function RecipePanel({
   catalog,
+  grain = 'case', supportedGrains = ['case'], unsupportedGrains = [], onGrainChange = () => {},
   selectedKeys, onRemoveVariable,
   analysisMode, onAnalysisModeChange, modeChangeBlockedNotice,
   requestedMethod, onRequestedMethodChange,
@@ -222,6 +244,13 @@ export function RecipePanel({
   const catalogByKey = useMemo(
     () => new Map((catalog?.variables ?? []).map((v) => [v.key, v])),
     [catalog],
+  );
+
+  // PR0-B3 Part A — 필터 후보 = 현재 grain 전체(analysisRole 계약은 Part C). 분석 변수
+  // 선택은 CatalogPanel이 이미 grain으로 거르므로 여기서는 필터 후보만 별도로 좁힌다.
+  const grainCatalogByKey = useMemo(
+    () => new Map(Array.from(catalogByKey.entries()).filter(([, v]) => v.grain === grain)),
+    [catalogByKey, grain],
   );
 
   const neededKeys = useMemo(
@@ -265,10 +294,19 @@ export function RecipePanel({
       <div className="swb-panel-body">
         <div className="swb-section-label">그레인</div>
         <div className="swb-seg">
-          <button type="button" className="swb-seg-opt swb-seg-opt--active">사례(case)</button>
+          {supportedGrains.map((g) => (
+            <button
+              key={g}
+              type="button"
+              className={`swb-seg-opt${grain === g ? ' swb-seg-opt--active' : ''}`}
+              onClick={() => onGrainChange(g)}
+            >{GRAIN_LABELS[g] || g}</button>
+          ))}
         </div>
-        {catalog?.unsupportedGrains?.length > 0 && (
-          <p className="swb-suppressed-note">나머지 6종은 아직 지원하지 않습니다.</p>
+        {unsupportedGrains?.length > 0 && (
+          <p className="swb-suppressed-note">
+            나머지 {unsupportedGrains.length}종은 아직 지원하지 않습니다: {unsupportedGrains.map((u) => GRAIN_LABELS[u.grain] || u.grain).join(', ')}
+          </p>
         )}
 
         {/* PR3-A — 분석 모드. 전환은 부모(StatisticsWorkbench.handleAnalysisModeChange)가
@@ -378,8 +416,13 @@ export function RecipePanel({
           </span>
         ))}
         {filterDraft.length < 10 && (
+          // key={grain} — FilterEditor는 key/operator/raw/error를 내부 useState로 갖고
+          // 있어 catalogByKey prop만 바뀌는 것으로는 초기화되지 않는다(grain 전환 후
+          // 이전 grain의 key가 남아 variable이 undefined가 되고 필터 추가가 조용히
+          // 무동작이 될 수 있음) — grain이 바뀌면 컴포넌트를 통째로 재마운트한다.
           <FilterEditor
-            catalogByKey={catalogByKey}
+            key={grain}
+            catalogByKey={grainCatalogByKey}
             onAdd={(f) => onFilterDraftChange([...filterDraft, f])}
           />
         )}

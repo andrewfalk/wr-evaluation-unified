@@ -4,7 +4,6 @@
 import type { CoverageInventory } from '../types';
 
 const FREE_TEXT = '자유 서술 텍스트 — 계산에 관여하지 않음';
-const TECHNICAL = '기술 ID — 계산값이 아니라 참조용';
 const DERIVED_CACHE = '파생/캐시값 — 원시 입력이 아니라 계산 결과를 저장해두는 필드';
 
 export const SPINE_INVENTORY: CoverageInventory = {
@@ -26,7 +25,10 @@ export const SPINE_INVENTORY: CoverageInventory = {
   // shared.jobs[].jobName과는 별개의 구형 단일 필드다.
   'modules.spine.jobName': { included: true },
 
-  'modules.spine.tasks[].id': { included: false, reason: TECHNICAL },
+  // PR0-B3 Part C-2 — spine.task.weightKg/frequencyPerDay(task grain)의 entityKey를
+  // 구성하므로 더는 "계산에 안 쓰이는 기술 ID"가 아니다(vibrationIntervals[].id와 동일한
+  // 사유 — task grain 자체가 이 필드로 행을 식별한다).
+  'modules.spine.tasks[].id': { included: true },
   'modules.spine.tasks[].sharedJobId': { included: true },
   'modules.spine.tasks[].name': { included: false, reason: FREE_TEXT },
   'modules.spine.tasks[].posture': { included: true },
@@ -39,7 +41,10 @@ export const SPINE_INVENTORY: CoverageInventory = {
   // 입력이 아니라 계산 결과이므로 dependsOn 대상이 아니다(입력 필드들이 이미 나열돼 있음).
   'modules.spine.tasks[].force': { included: false, reason: DERIVED_CACHE },
 
-  'modules.spine.vibrationIntervals[].id': { included: false, reason: TECHNICAL },
+  // PR0-B3 Part A — spine.vibration.intervalA8Max(vibration_interval grain)의 entityKey를
+  // 구성하므로 더는 "계산에 안 쓰이는 기술 ID"가 아니다(vibration_interval grain 자체가
+  // 이 필드로 행을 식별한다).
+  'modules.spine.vibrationIntervals[].id': { included: true },
   'modules.spine.vibrationIntervals[].sharedJobId': { included: true },
   'modules.spine.vibrationIntervals[].name': { included: false, reason: FREE_TEXT },
   'modules.spine.vibrationIntervals[].awMin': { included: true },

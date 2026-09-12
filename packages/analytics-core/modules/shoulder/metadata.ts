@@ -3,6 +3,12 @@
 
 import type { AnalyticsVariableMetadata } from '../../types';
 
+// ELLMAN_OPTIONS(AssessmentTab.jsx)가 실제로 제공하는 4개 등급의 심각도 순서 — 오름차순.
+// Ellman 분류의 임상 관례상 Grade 1~3은 회전근개 부분층 파열의 깊이 등급, Full은 전층
+// 파열(부분층보다 중증)이라 등급 순서의 맨 끝에 둔다. "N/A"는 klGrade와 동일한 이유로
+// 이 순서에 끼워넣지 않는다(knee/metadata.ts KNEE_KLG_ORDER 주석 참고).
+export const SHOULDER_ELLMAN_ORDER = ['Grade 1', 'Grade 2', 'Grade 3', 'Full'] as const;
+
 export const SHOULDER_METADATA: AnalyticsVariableMetadata[] = [
   {
     key: 'shoulder.exposure.anyExceeded',
@@ -36,5 +42,31 @@ export const SHOULDER_METADATA: AnalyticsVariableMetadata[] = [
     // BK2117 임계값(EXPOSURE_LIMITS, derived.ts)에는 버전 개념이 없다 — 과거 구현이 보존된
     // 대체 버전이 없어 recompute_recorded_version 선언 불가(knee.relatedness.max와 같은 사유).
     supportedFormulaPolicies: ['recompute_current'],
+  },
+  {
+    // PR0-B3 Part B — diagnosis_side grain. knee.diagnosisSide.klGrade와 동일한 패턴.
+    key: 'shoulder.diagnosisSide.ellmanClass',
+    label: 'Ellman Class',
+    group: '어깨 · 진단별 판정',
+    moduleId: 'shoulder',
+    grain: 'diagnosis_side',
+    type: 'ordinal',
+    provenance: 'clinician_judgment',
+    dependsOn: [
+      'activeModules',
+      'shared.diagnoses[].id',
+      'shared.diagnoses[].code',
+      'shared.diagnoses[].name',
+      'shared.diagnoses[].moduleId',
+      'shared.diagnoses[].side',
+      'shared.diagnoses[].ellmanRight',
+      'shared.diagnoses[].ellmanLeft',
+    ],
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association', 'formula_audit'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'shoulder_ellman_class_side',
+    supportedFormulaPolicies: [],
   },
 ];

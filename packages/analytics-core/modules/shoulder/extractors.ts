@@ -1,11 +1,14 @@
 // Raw extractor — shoulder.exposure.anyExceeded 1개 변수(§1-1). §1-1a 공통 0단계 +
 // shoulder 전용 우선순위(모듈 비활성 → shared.jobs 비어있음 → 정상 계산)를 구현한다.
 
-import type { ExtractedValue, MissingReason, MigrationResult, QualityFlag } from '../../types';
+import type { ExtractedValue, MissingReason, MigrationResult, QualityFlag, RepeatedObservation } from '../../types';
 import { isPlainObject } from '../../migration/deterministicMigrate';
 import { computeShoulderCalc, type ShoulderJobExtras } from './derived';
 import { getEffectiveWorkPeriod } from '../../workPeriod';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
+import { enumerateDiagnosisSideEntities } from '../../grainEntities';
+import { resolveDiagnosisModule, supportsEllmanClass } from '../../diagnosisMapping';
+import { SHOULDER_ELLMAN_ORDER } from './metadata';
 
 function isBlank(x: unknown): boolean {
   return x === null || x === undefined || String(x).trim() === '';
@@ -99,4 +102,45 @@ export function extractShoulderExposureAnyExceeded(
   const sanitizedModule = { ...(shoulderModule as Record<string, unknown>), jobExtras };
   const result = computeShoulderCalc({ shared: sanitizedShared, module: sanitizedModule });
   return { value: result.anyExceeded, missing: null, qualityFlags: Array.from(qualityFlagSet) };
+}
+
+// PR0-B3 Part B — diagnosis_side grain. Ellman Class는 회전근개 진단(M751 등)에 좌/우 각각
+// 저장되는 임상 판단값이다 — knee의 K-L Grade와 완전히 같은 패턴(entity.source 재사용,
+// side==='unspecified'는 not_entered, "N/A"는 not_applicable로 흡수).
+export function extractShoulderDiagnosisSideEllmanClass(
+  migrationResult: MigrationResult<AnalysisPatient>,
+): RepeatedObservation<string>[] {
+  const activeModules = migrationResult.payload.data.activeModules ?? [];
+  return enumerateDiagnosisSideEntities(migrationResult).map((entity) => {
+    const { diagnosis, side } = entity.source;
+    const moduleId = resolveDiagnosisModule(diagnosis, activeModules)?.moduleId;
+    if (moduleId !== 'shoulder' || !supportsEllmanClass(diagnosis)) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_applicable', qualityFlags: entity.qualityFlags };
+    }
+    if (side === 'unspecified') {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
+    }
+    const raw = side === 'right' ? diagnosis.ellmanRight : diagnosis.ellmanLeft;
+    if (isBlank(raw)) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
+    }
+    // ELLMAN_OPTIONS의 "N/A"(해당없음)도 K-L Grade와 동일하게 등급이 아니라 "이 side에는
+    // 적용되지 않는다"는 임상 판단이다 — 순서(Grade 1<2<3<Full)에 끼워넣지 않는다.
+    if (raw === 'N/A') {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_applicable', qualityFlags: entity.qualityFlags };
+    }
+    // 3차 리뷰 P1 — knee.diagnosisSideKlGrade와 동일한 결함(공백·N/A 외 값을 검증 없이
+    // String()으로 통과)이 재현됐다. ELLMAN_OPTIONS가 실제로 제공하는 값은 ''·'N/A'·
+    // SHOULDER_ELLMAN_ORDER뿐이다 — 그 외는 groupPairsByLevel()이 조용히 버리므로
+    // 결측으로 명시해야 한다.
+    if (typeof raw === 'string' && (SHOULDER_ELLMAN_ORDER as readonly string[]).includes(raw)) {
+      return { entityKey: entity.entityKey, value: raw, missing: null, qualityFlags: entity.qualityFlags };
+    }
+    return {
+      entityKey: entity.entityKey,
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: [...entity.qualityFlags, 'invalid'],
+    };
+  });
 }

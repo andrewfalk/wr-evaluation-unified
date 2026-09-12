@@ -1,10 +1,13 @@
 // src/core/utils/diagnosisMapping.js에서 전체 이동. 진단 코드/이름 기반 평가 모듈 자동 매핑.
 //
-// KNOWN BUG(별도 이슈 필요, 이 PR에서 수정 금지): 아래 NAME_MODULE_MAP의 요추 패턴이
-// `요추 협착|` 로 끝나 빈 대안(empty alternation)을 갖는다 — 앞선 5개 모듈 패턴에
-// 안 걸린 비어있지 않은 모든 상병명이 요추로 잘못 분류될 수 있다. 무릎 범위 밖(5개
-// 모듈 분류에 영향)이라 이 PR은 고치지 않는다. __tests__/diagnosisMapping.test.ts의
-// characterization test가 이 동작(버그 포함)을 이동 전후 동일하게 고정한다.
+// 수정 이력(PR0-B3 Part C, 2026-09-12) — 아래 NAME_MODULE_MAP의 요추 패턴이 `요추 협착|`로
+// 끝나 빈 대안(empty alternation)을 가져, 앞선 5개 모듈 패턴에 안 걸린 비어있지 않은 모든
+// 상병명이 요추로 잘못 분류되는 버그가 있었다(PR0-B1이 "무릎 범위 밖"이라 명시적으로
+// 보존해뒀던 것). PR0-B3이 이 함수로 "신청상병 부위군" 통계 변수를 직접 파생하면서 더는
+// 범위 밖으로 미룰 수 없어 이번에 수정했다 — 사용자 확인 후 반영(빈 대안 제거). 이 함수는
+// 진단 입력 화면의 모듈 자동 제안(suggestModules/resolveDiagnosisModule)에도 쓰이므로,
+// 수정 후 그 화면의 동작도 함께 바뀐다(이전엔 미매칭 상병명이 요추로 자동 제안되던 것이,
+// 이제는 제안 없음으로 바뀐다 — 더 정확한 동작).
 
 export interface DiagnosisLike {
   code?: string;
@@ -84,8 +87,8 @@ const NAME_MODULE_MAP = [
     label: '경추(목)',
   },
   {
-    // KNOWN BUG — 끝의 빈 대안(|)을 그대로 유지한다(위 파일 헤더 참고). 이 PR에서 수정 금지.
-    pattern: /요추|허리|허리통증|요통|lumbar|요추간판|요추협착|요추 협착|/i,
+    // 수정됨(PR0-B3 Part C) — 끝의 빈 대안(|)을 제거했다(위 파일 헤더 참고).
+    pattern: /요추|허리|허리통증|요통|lumbar|요추간판|요추협착|요추 협착/i,
     moduleId: 'spine',
     label: '요추(허리)',
   },

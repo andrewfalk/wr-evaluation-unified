@@ -9,7 +9,7 @@ vi.mock('../statsEngine', async (importOriginal) => {
   return { ...actual, runBivariateStatsEngine: (...args: unknown[]) => runBivariateStatsEngine(...args) };
 });
 
-import { computeBivariateAnalyzeResult } from '../statsBivariateSuppression';
+import { computeBivariateAnalyzeResult, resolveGroupComparisonGroups, buildBivariateEngineRequest } from '../statsBivariateSuppression';
 import type { AnalysisContext } from '../statsAnalysisContext';
 import type { PairedRow } from '../statsBivariateDataset';
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
@@ -67,6 +67,35 @@ function makeGroupPairs(counts: Array<{ label: boolean; n: number }>): PairedRow
 }
 
 beforeEach(() => { vi.clearAllMocks(); });
+
+// 2026-09-12 리뷰 재현 — B 계층(실행 시점)도 A-2와 동일한 resolveLevelOrder를 쓰므로,
+// categorical 수정이 A-2뿐 아니라 실제 실행 경로에서도 GROUP_ORDER_UNDEFINED 없이
+// 동작하는지 직접 확인한다(엔진 mock 없이 순수 조립 함수만 검증 — computeBivariateAnalyzeResult
+// 전체를 돌릴 필요가 없다).
+describe('resolveGroupComparisonGroups/buildBivariateEngineRequest — categorical(담당의, 값 집합 동적)', () => {
+  const DOCTOR_CONTINUOUS_CATALOG = new Map<string, AnalyticsVariableMetadata>([
+    ['case.staff.assignedDoctorUserId', makeVariable('case.staff.assignedDoctorUserId', 'categorical')],
+    ['val', makeVariable('val', 'continuous')],
+  ]);
+
+  it('resolveGroupComparisonGroups가 GROUP_ORDER_UNDEFINED를 던지지 않고 관측된 담당의로 그룹을 만든다', () => {
+    const pairs: PairedRow[] = [
+      { caseId: 'c1', personClusterKey: 'p1', x: 'doctor-b', y: 10 },
+      { caseId: 'c2', personClusterKey: 'p2', x: 'doctor-a', y: 20 },
+    ];
+    const { groupedPairs } = resolveGroupComparisonGroups(pairs, DOCTOR_CONTINUOUS_CATALOG, 'case.staff.assignedDoctorUserId', 'val');
+    expect([...groupedPairs.keys()]).toEqual(['doctor-a', 'doctor-b']); // 결정적 정렬
+  });
+
+  it('buildBivariateEngineRequest(welch_t)가 담당의 그룹 요청을 정상 조립한다', () => {
+    const pairs: PairedRow[] = [
+      { caseId: 'c1', personClusterKey: 'p1', x: 'doctor-a', y: 10 },
+      { caseId: 'c2', personClusterKey: 'p2', x: 'doctor-b', y: 20 },
+    ];
+    const request = buildBivariateEngineRequest('welch_t', pairs, DOCTOR_CONTINUOUS_CATALOG, 'case.staff.assignedDoctorUserId', 'val');
+    expect('groups' in request && request.groups.map((g) => g.label)).toEqual(['doctor-a', 'doctor-b']);
+  });
+});
 
 describe('computeBivariateAnalyzeResult — B-1 소수셀 사전검사', () => {
   it('그룹 하나라도 소수(1~9)면 엔진을 호출하지 않고 즉시 suppressed를 반환한다', async () => {

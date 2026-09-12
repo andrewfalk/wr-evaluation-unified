@@ -33,6 +33,107 @@ describe('validateRecipe — grain', () => {
       expect(result.errors[0].code).toBe('GRAIN_NOT_YET_SUPPORTED');
     }
   });
+
+  // PR0-B3 Part C-2 — task grain 추가.
+  it('grain=task는 GRAIN_NOT_YET_SUPPORTED로 거부되지 않는다', () => {
+    const result = validateRecipe(
+      baseRecipe({ grain: 'task', variableKeys: ['spine.task.weightKg'] }),
+      'analyze',
+    );
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.code === 'GRAIN_NOT_YET_SUPPORTED')).toBe(false);
+    }
+  });
+});
+
+// PR0-B3 Part C — 필터 전용 변수 계약. 등록일(case.meta.registeredAt)은 filter_only다.
+// 2026-09-12 리뷰 재현 — Date.parse()는 '2024/01/15'·'2024-01-15T00:00:00Z' 등도 통과시켰지만
+// 실제 데이터셋 값(statsSnapshotColumnVariables.ts)은 항상 'YYYY-MM-DD'라 검증 통과와 실제
+// 매치가 어긋났다(검증은 통과하는데 대상 사례가 조용히 0건이 됨). 이제 이 형식만 허용한다.
+describe('validateRecipe — 등록일(date) 필터 값 형식', () => {
+  it.each([
+    ['YYYY-MM-DD'],
+  ])('%s 형식은 통과한다', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['knee.relatedness.max'],
+        filters: [{ key: 'case.meta.registeredAt', operator: 'eq', value: '2024-01-15' }],
+      }),
+      'analyze',
+    );
+    expect(result.valid, !result.valid ? JSON.stringify(result.errors) : '').toBe(true);
+  });
+
+  it.each([
+    ['슬래시 구분(2024/01/15)', '2024/01/15'],
+    ['ISO 타임스탬프(2024-01-15T00:00:00Z)', '2024-01-15T00:00:00Z'],
+    ['존재하지 않는 달력 날짜(2024-02-30)', '2024-02-30'],
+    ['월 두 자리 아님(2024-1-15)', '2024-1-15'],
+  ])('%s는 INVALID_FILTER_VALUE로 거부된다(데이터셋과 형식이 어긋나 조용히 0건이 되는 것을 막는다)', (_label, value) => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['knee.relatedness.max'],
+        filters: [{ key: 'case.meta.registeredAt', operator: 'eq', value } ],
+      }),
+      'analyze',
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'INVALID_FILTER_VALUE')).toBe(true);
+  });
+
+  it('between도 두 값 모두 엄격한 YYYY-MM-DD여야 한다', () => {
+    const ok = validateRecipe(
+      baseRecipe({
+        variableKeys: ['knee.relatedness.max'],
+        filters: [{ key: 'case.meta.registeredAt', operator: 'between', value: ['2024-01-01', '2024-12-31'] }],
+      }),
+      'analyze',
+    );
+    expect(ok.valid, !ok.valid ? JSON.stringify(ok.errors) : '').toBe(true);
+
+    const bad = validateRecipe(
+      baseRecipe({
+        variableKeys: ['knee.relatedness.max'],
+        filters: [{ key: 'case.meta.registeredAt', operator: 'between', value: ['2024/01/01', '2024-12-31'] }],
+      }),
+      'analyze',
+    );
+    expect(bad.valid).toBe(false);
+  });
+});
+
+describe('validateRecipe — 필터 전용 변수 계약(analysisRole)', () => {
+  it('filter_only 변수를 variableKeys에 넣으면 FILTER_ONLY_VARIABLE_NOT_ANALYZABLE로 거부한다', () => {
+    const result = validateRecipe(
+      baseRecipe({ variableKeys: ['case.meta.registeredAt'] }),
+      'analyze',
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.code === 'FILTER_ONLY_VARIABLE_NOT_ANALYZABLE')).toBe(true);
+    }
+  });
+
+  it('filter_only 변수를 filters[]에 넣는 것은 허용한다(등록일로 거르기)', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['knee.relatedness.max'],
+        filters: [{ key: 'case.meta.registeredAt', operator: 'gte', value: '2024-01-01' }],
+      }),
+      'analyze',
+    );
+    expect(result.valid, !result.valid ? JSON.stringify(result.errors) : '').toBe(true);
+  });
+
+  it('담당의(analyzable)는 variableKeys에 넣어도 거부되지 않는다', () => {
+    const result = validateRecipe(
+      baseRecipe({ variableKeys: ['case.staff.assignedDoctorUserId'] }),
+      'analyze',
+    );
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.code === 'FILTER_ONLY_VARIABLE_NOT_ANALYZABLE')).toBe(false);
+    }
+  });
 });
 
 // spine.mddm.lifetimeDoseMNh는 formulaFamily가 정책 2개를 지원해 formulaPolicies 명시가
@@ -291,6 +392,23 @@ describe('validateRecipe — PR3-A 이변량(§B)', () => {
   it('descriptive 모드는 requestedMethod가 있어도 §B 검사를 건너뛴다', () => {
     const result = validateRecipe(
       baseRecipe({ variableKeys: ['knee.relatedness.max'], requestedMethod: 'welch_t' }),
+      'analyze',
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  // PR0-B3 Part B — grain:diagnosis_side에서도 이변량이 그대로 동작하는지(§B 판정은 카탈로그
+  // type/grain 메타데이터만 보는 순수 정적 검사라 grain-agnostic이어야 한다). K-L Grade
+  // (ordinal)×확정상병상태(boolean) 조합은 elbow×wrist(ordinal×ordinal) 테스트로는
+  // 못 잡는, 지금까지 카탈로그에 없던 새 타입쌍이라 별도로 검증한다.
+  it('analyze 컨텍스트는 diagnosis_side grain의 ordinal(K-L Grade)×boolean(확정상병상태)에 chi_square를 허용한다', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        grain: 'diagnosis_side',
+        analysisMode: 'bivariate',
+        variableKeys: ['knee.diagnosisSide.klGrade', 'knee.diagnosisSide.confirmedStatus'],
+        requestedMethod: 'chi_square',
+      }),
       'analyze',
     );
     expect(result.valid).toBe(true);

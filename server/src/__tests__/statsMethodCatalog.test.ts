@@ -243,3 +243,49 @@ describe('computeCorrelationMatrixAvailableMethods', () => {
     }
   });
 });
+
+// 2026-09-12 리뷰 재현 — resolveLevelOrder(statsBivariateRoles.ts)가 categorical에 항상
+// null을 반환해, 신청상병 부위군(고정 순서 선언됨)과 담당의(값 집합이 조직마다 다름) 둘 다
+// 그룹비교/분할표 분석이 METHOD_TYPE_MISMATCH로 전부 막혀 있었다. 담당의별 20명씩 40명
+// 독립 관측을 넣어도 welch_t/mann_whitney/anova가 막히는 것을 재현했던 그 시나리오를
+// 그대로 고정한다.
+describe('computeAvailableMethods — categorical 그룹비교/분할표(2026-09-12 리뷰 보완)', () => {
+  const DOCTOR_CONTINUOUS_CATALOG = new Map<string, AnalyticsVariableMetadata>([
+    ['case.staff.assignedDoctorUserId', makeVariable('case.staff.assignedDoctorUserId', 'categorical')],
+    ['val', makeVariable('val', 'continuous')],
+  ]);
+
+  it('담당의(값 집합이 고정돼 있지 않은 categorical) × continuous — welch_t/mann_whitney/anova가 더는 METHOD_TYPE_MISMATCH가 아니다', () => {
+    const pairs = makeGroupPairs([
+      { label: 'doctor-a', n: 20 },
+      { label: 'doctor-b', n: 20 },
+    ]);
+    const methods = computeAvailableMethods(
+      'case.staff.assignedDoctorUserId', 'val', DOCTOR_CONTINUOUS_CATALOG, pairedResult(pairs), METHOD_POLICY_VERSION,
+    );
+    for (const id of ['welch_t', 'mann_whitney', 'anova', 'kruskal_wallis'] as const) {
+      const m = methods.find((x) => x.id === id)!;
+      expect(m.reasonCode, `${id}: ${JSON.stringify(m)}`).not.toBe('METHOD_TYPE_MISMATCH');
+      expect(m.status).toBe('available');
+    }
+  });
+
+  const DOCTOR_MODULEGROUP_CATALOG = new Map<string, AnalyticsVariableMetadata>([
+    ['case.staff.assignedDoctorUserId', makeVariable('case.staff.assignedDoctorUserId', 'categorical')],
+    ['diagnosis.identity.moduleGroup', makeVariable('diagnosis.identity.moduleGroup', 'categorical')],
+  ]);
+
+  it('담당의(동적) × 신청상병 부위군(고정 순서 선언됨) 분할표 — chi_square/fisher_exact가 더는 METHOD_TYPE_MISMATCH가 아니다', () => {
+    const pairs: PairedRow[] = [
+      { caseId: 'c1', personClusterKey: 'p1', x: 'doctor-a', y: 'knee' },
+      { caseId: 'c2', personClusterKey: 'p2', x: 'doctor-a', y: 'spine' },
+      { caseId: 'c3', personClusterKey: 'p3', x: 'doctor-b', y: 'knee' },
+      { caseId: 'c4', personClusterKey: 'p4', x: 'doctor-b', y: 'spine' },
+    ];
+    const methods = computeAvailableMethods(
+      'case.staff.assignedDoctorUserId', 'diagnosis.identity.moduleGroup', DOCTOR_MODULEGROUP_CATALOG, pairedResult(pairs), METHOD_POLICY_VERSION,
+    );
+    const chiSquare = methods.find((m) => m.id === 'chi_square')!;
+    expect(chiSquare.reasonCode).not.toBe('METHOD_TYPE_MISMATCH');
+  });
+});

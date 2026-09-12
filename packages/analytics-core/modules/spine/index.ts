@@ -6,7 +6,16 @@ export * from './metadata';
 
 import { registerAnalyticsModule } from '../../analyticsRegistry';
 import { SPINE_METADATA } from './metadata';
-import { extractSpineMddmLifetimeDoseMNh, extractSpineVibrationDvMax } from './extractors';
+import {
+  extractSpineMddmLifetimeDoseMNh,
+  extractSpineVibrationDvMax,
+  extractSpineVibrationIntervalA8Max,
+  extractSpineVibrationIntervalExposureHours,
+  extractSpineDiagnosisVerticalDistribution,
+  extractSpineDiagnosisConcomitantSpondylosis,
+  extractSpineTaskWeightKg,
+  extractSpineTaskFrequencyPerDay,
+} from './extractors';
 import { isSpineAssessmentComplete } from './derived';
 
 registerAnalyticsModule({
@@ -15,6 +24,12 @@ registerAnalyticsModule({
   extractors: {
     'spine.mddm.lifetimeDoseMNh': extractSpineMddmLifetimeDoseMNh,
     'spine.vibration.dvMax': extractSpineVibrationDvMax,
+    'spine.vibration.intervalA8Max': extractSpineVibrationIntervalA8Max,
+    'spine.vibration.intervalExposureHours': extractSpineVibrationIntervalExposureHours,
+    'spine.diagnosis.verticalDistribution': extractSpineDiagnosisVerticalDistribution,
+    'spine.diagnosis.concomitantSpondylosis': extractSpineDiagnosisConcomitantSpondylosis,
+    'spine.task.weightKg': extractSpineTaskWeightKg,
+    'spine.task.frequencyPerDay': extractSpineTaskFrequencyPerDay,
   },
   isComplete: isSpineAssessmentComplete,
 });

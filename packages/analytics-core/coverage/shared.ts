@@ -46,19 +46,26 @@ export const SHARED_INVENTORY: CoverageInventory = {
   'shared.diagnoses[].code': { included: true }, // elbow/wrist dependsOn
   'shared.diagnoses[].name': { included: true }, // elbow/wrist dependsOn
   'shared.diagnoses[].moduleId': { included: true }, // elbow/wrist dependsOn(라우팅 힌트)
-  'shared.diagnoses[].side': { included: false, reason: DEFERRED + ' — isXAssessmentComplete가 읽지만 대표 변수 dependsOn에는 없음(knee/elbow 전례와 동일한 경계)' },
+  // PR0-B3 Part B — diagnosis_side grain 엔터티 열거(enumerateDiagnosisSideEntities)가
+  // side==='both'를 우/좌로 explode하는 데 직접 쓴다.
+  'shared.diagnoses[].side': { included: true },
 
   // --- knee/shoulder 전용 진단 확장(createKneeDiagnosis/createShoulderDiagnosis) ---
-  'shared.diagnoses[].confirmedCode': { included: false, reason: DEFERRED + ' — 계획서 §5.5 "신청≠확정 여부" 후보 파생변수의 원천' },
-  'shared.diagnoses[].confirmedName': { included: false, reason: DEFERRED + ' — 계획서 §5.5 "신청≠확정 여부" 후보 파생변수의 원천' },
-  'shared.diagnoses[].klgRight': { included: false, reason: DEFERRED },
-  'shared.diagnoses[].klgLeft': { included: false, reason: DEFERRED },
-  'shared.diagnoses[].ellmanRight': { included: false, reason: DEFERRED },
-  'shared.diagnoses[].ellmanLeft': { included: false, reason: DEFERRED },
+  // PR0-B3 Part B — knee.diagnosisSide.appliedConfirmedMismatch("신청≠확정 여부") dependsOn.
+  'shared.diagnoses[].confirmedCode': { included: true },
+  'shared.diagnoses[].confirmedName': { included: true },
+  // knee.diagnosisSide.klGrade dependsOn.
+  'shared.diagnoses[].klgRight': { included: true },
+  'shared.diagnoses[].klgLeft': { included: true },
+  // shoulder.diagnosisSide.ellmanClass dependsOn.
+  'shared.diagnoses[].ellmanRight': { included: true },
+  'shared.diagnoses[].ellmanLeft': { included: true },
 
   // --- 판정 공통 필드(AssessmentTab.jsx의 SideAssessment) ---
-  'shared.diagnoses[].confirmedRight': { included: false, reason: DEFERRED + ' — isXAssessmentComplete가 읽지만 대표 변수 dependsOn에는 없음' },
-  'shared.diagnoses[].confirmedLeft': { included: false, reason: DEFERRED + ' — isXAssessmentComplete가 읽지만 대표 변수 dependsOn에는 없음' },
+  // knee.diagnosisSide.confirmedStatus dependsOn. assessmentRight/Left("업무관련성")와
+  // reasonRight/Left(낮음 사유)는 이번 Part B 범위에 없는 별개 변수 후보라 그대로 DEFERRED.
+  'shared.diagnoses[].confirmedRight': { included: true },
+  'shared.diagnoses[].confirmedLeft': { included: true },
   'shared.diagnoses[].assessmentRight': { included: false, reason: DEFERRED + ' — isXAssessmentComplete가 읽지만 대표 변수 dependsOn에는 없음' },
   'shared.diagnoses[].assessmentLeft': { included: false, reason: DEFERRED + ' — isXAssessmentComplete가 읽지만 대표 변수 dependsOn에는 없음' },
   'shared.diagnoses[].reasonRight': { included: false, reason: DEFERRED },
@@ -67,10 +74,11 @@ export const SHARED_INVENTORY: CoverageInventory = {
   'shared.diagnoses[].reasonLeftOther': { included: false, reason: FREE_TEXT },
 
   // --- 척추 전용(AssessmentTab.jsx — spineAssessmentMigration.js의 SPINE_COMMON_FIELDS) ---
-  // §리뷰 함정(계획서 §5.5): 실제 grain은 case인데 diagnosis_side grain 저장 위치에 있다 —
-  // 미래에 카탈로그에 올릴 때는 이 사실을 그대로 반영해야 한다(현재는 미포함이라 안전).
-  'shared.diagnoses[].verticalDistribution': { included: false, reason: DEFERRED + ' — case grain 값이 diagnosis 행에 저장됨(§5.5 함정), 카탈로그 편입 시 주의' },
-  'shared.diagnoses[].concomitantSpondylosis': { included: false, reason: DEFERRED + ' — case grain 값이 diagnosis 행에 저장됨(§5.5 함정), 카탈로그 편입 시 주의' },
+  // PR0-B3 Part B — spine.diagnosis.verticalDistribution/concomitantSpondylosis(case grain)
+  // dependsOn. §5.5가 경고한 "case grain 값이 diagnosis 행에 저장됨" 함정은 extractor가
+  // 그 case의 spine 진단 전체를 취합하고 값이 갈리면 conflicting_common_field로 반영해 해소했다.
+  'shared.diagnoses[].verticalDistribution': { included: true },
+  'shared.diagnoses[].concomitantSpondylosis': { included: true },
 
   // --- shared.jobs[] (createSharedJob) ---
   'shared.jobs[].id': { included: true },

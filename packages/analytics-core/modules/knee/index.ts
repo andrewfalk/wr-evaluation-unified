@@ -4,7 +4,12 @@ export * from './metadata';
 
 import { registerAnalyticsModule } from '../../analyticsRegistry';
 import { KNEE_METADATA } from './metadata';
-import { extractKneeRelatednessMax } from './extractors';
+import {
+  extractKneeRelatednessMax,
+  extractKneeDiagnosisSideKlGrade,
+  extractKneeDiagnosisSideConfirmedStatus,
+  extractKneeDiagnosisSideAppliedConfirmedMismatch,
+} from './extractors';
 import { isKneeAssessmentComplete } from './derived';
 
 registerAnalyticsModule({
@@ -12,6 +17,9 @@ registerAnalyticsModule({
   metadata: KNEE_METADATA,
   extractors: {
     'knee.relatedness.max': extractKneeRelatednessMax,
+    'knee.diagnosisSide.klGrade': extractKneeDiagnosisSideKlGrade,
+    'knee.diagnosisSide.confirmedStatus': extractKneeDiagnosisSideConfirmedStatus,
+    'knee.diagnosisSide.appliedConfirmedMismatch': extractKneeDiagnosisSideAppliedConfirmedMismatch,
   },
   isComplete: isKneeAssessmentComplete,
 });

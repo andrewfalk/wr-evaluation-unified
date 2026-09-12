@@ -38,7 +38,7 @@ export function resolveGroupComparisonGroups(
   const typeY = catalogByKey.get(keyY)?.type;
   const roles = resolveGroupComparisonRoles(typeX, typeY, keyX, keyY);
   if (!roles) throw new Error('resolveGroupComparisonGroups: 그룹/값 역할을 찾을 수 없음');
-  const order = resolveLevelOrder(roles.groupType, roles.groupKey);
+  const order = resolveLevelOrder(roles.groupType, roles.groupKey, pairs.map((p) => p[roles.groupRoleKey] as string | boolean));
   if (order === null) throw new Error(`resolveGroupComparisonGroups: ${roles.groupKey}의 레벨 순서를 알 수 없음(GROUP_ORDER_UNDEFINED)`);
   const valueRoleKey: 'x' | 'y' = roles.groupRoleKey === 'x' ? 'y' : 'x';
   const { groups } = groupPairsByLevel(pairs, roles.groupRoleKey, order);
@@ -70,8 +70,8 @@ export function buildBivariateEngineRequest(
   }
 
   if (CONTINGENCY_METHODS.has(method)) {
-    const xOrder = resolveLevelOrder(typeX, keyX);
-    const yOrder = resolveLevelOrder(typeY, keyY);
+    const xOrder = resolveLevelOrder(typeX, keyX, pairs.map((p) => p.x as string | boolean));
+    const yOrder = resolveLevelOrder(typeY, keyY, pairs.map((p) => p.y as string | boolean));
     if (xOrder === null || yOrder === null) throw new Error(`buildBivariateEngineRequest: ${method}의 축 순서를 알 수 없음(GROUP_ORDER_UNDEFINED)`);
     const { groups: xGroups } = groupPairsByLevel(pairs, 'x', xOrder);
     const { groups: yGroups } = groupPairsByLevel(pairs, 'y', yOrder);

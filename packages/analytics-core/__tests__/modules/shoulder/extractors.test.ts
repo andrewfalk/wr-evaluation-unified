@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractShoulderExposureAnyExceeded } from '../../../modules/shoulder/extractors';
+import { extractShoulderExposureAnyExceeded, extractShoulderDiagnosisSideEllmanClass } from '../../../modules/shoulder/extractors';
 import { deterministicMigrate } from '../../../migration/deterministicMigrate';
 
 const FALLBACK = '2024-01-01T00:00:00.000Z';
@@ -201,5 +201,63 @@ describe('extractShoulderExposureAnyExceeded — 우선순위 사슬(§1-1a)', (
         ),
       ),
     ).not.toThrow();
+  });
+});
+
+// PR0-B3 Part B — diagnosis_side grain. knee.diagnosisSide.klGrade와 완전히 동일한 패턴
+// (packages/analytics-core/__tests__/modules/knee/extractors.test.ts 참고).
+function diagnosesMigration(diagnoses: unknown[]) {
+  return migrate({ data: { shared: { diagnoses }, modules: {}, activeModules: [] } });
+}
+
+describe('extractShoulderDiagnosisSideEllmanClass — diagnosis_side grain', () => {
+  it('어깨 진단이 아니면 not_applicable', () => {
+    const dx = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'right' };
+    const result = extractShoulderDiagnosisSideEllmanClass(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_applicable', qualityFlags: [] }]);
+  });
+
+  it('어깨 진단이지만 회전근개 파열이 아니면(supportsEllmanClass=false) not_applicable', () => {
+    const dx = { id: 'dx-1', code: 'M75', name: '어깨 충돌증후군', side: 'right' }; // shoulder지만 회전근개 아님
+    const result = extractShoulderDiagnosisSideEllmanClass(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_applicable', qualityFlags: [] }]);
+  });
+
+  it('side가 unspecified면 not_entered', () => {
+    const dx = { id: 'dx-1', code: 'M751', name: '회전근개 증후군', side: '', ellmanRight: 'Grade 2' };
+    const result = extractShoulderDiagnosisSideEllmanClass(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'unspecified'], value: null, missing: 'not_entered', qualityFlags: [] }]);
+  });
+
+  it('ellmanRight/Left가 공백이면 not_entered', () => {
+    const dx = { id: 'dx-1', code: 'M751', name: '회전근개 증후군', side: 'right' };
+    const result = extractShoulderDiagnosisSideEllmanClass(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_entered', qualityFlags: [] }]);
+  });
+
+  it('"N/A"는 등급이 아니라 not_applicable', () => {
+    const dx = { id: 'dx-1', code: 'M751', name: '회전근개 증후군', side: 'right', ellmanRight: 'N/A' };
+    const result = extractShoulderDiagnosisSideEllmanClass(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_applicable', qualityFlags: [] }]);
+  });
+
+  it('정상 입력 — side==="both"면 ellmanRight/Left를 각각 읽어 두 행으로 반환한다', () => {
+    const dx = { id: 'dx-1', code: 'M751', name: '회전근개 증후군', side: 'both', ellmanRight: 'Grade 2', ellmanLeft: 'Full' };
+    const result = extractShoulderDiagnosisSideEllmanClass(diagnosesMigration([dx]));
+    expect(result).toEqual([
+      { entityKey: ['dx-1', 'right'], value: 'Grade 2', missing: null, qualityFlags: [] },
+      { entityKey: ['dx-1', 'left'], value: 'Full', missing: null, qualityFlags: [] },
+    ]);
+  });
+
+  // 3차 리뷰 P1 — knee.diagnosisSide.klGrade와 동일한 결함 재현. ELLMAN_OPTIONS가 실제로
+  // 제공하는 값(''·'N/A'·SHOULDER_ELLMAN_ORDER)이 아니면 not_entered + invalid여야 한다.
+  it.each([
+    ['파싱 불가 문자열', 'bad'],
+    ['boolean', true],
+  ])('ellmanRight가 %s(%j)이면 not_entered + invalid — 정상 등급으로 새지 않는다', (_label, ellmanRight) => {
+    const dx = { id: 'dx-1', code: 'M751', name: '회전근개 증후군', side: 'right', ellmanRight };
+    const result = extractShoulderDiagnosisSideEllmanClass(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] }]);
   });
 });

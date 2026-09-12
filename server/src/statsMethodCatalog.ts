@@ -65,7 +65,7 @@ function evaluateGroupComparison(
   if (!roles) {
     return resultUnsupported('METHOD_TYPE_MISMATCH');
   }
-  const order = resolveLevelOrder(roles.groupType, roles.groupKey);
+  const order = resolveLevelOrder(roles.groupType, roles.groupKey, pairs.map((p) => p[roles.groupRoleKey] as string | boolean));
   if (order === null) {
     return resultUnsupported('METHOD_TYPE_MISMATCH');
   }
@@ -97,8 +97,8 @@ function evaluateContingency(
   if (!isGroupingType(typeX) || !isGroupingType(typeY)) {
     return resultUnsupported('METHOD_TYPE_MISMATCH');
   }
-  const xOrder = resolveLevelOrder(typeX, keyX);
-  const yOrder = resolveLevelOrder(typeY, keyY);
+  const xOrder = resolveLevelOrder(typeX, keyX, pairs.map((p) => p.x as string | boolean));
+  const yOrder = resolveLevelOrder(typeY, keyY, pairs.map((p) => p.y as string | boolean));
   if (xOrder === null || yOrder === null) {
     return resultUnsupported('METHOD_TYPE_MISMATCH');
   }

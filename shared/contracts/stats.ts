@@ -85,6 +85,11 @@ export const CatalogVariableSchema = z.object({
   formulaFamily:            z.string(),
   supportedFormulaPolicies: z.array(z.enum(['recompute_recorded_version', 'recompute_current', 'stratify_by_version'])),
   formulaVersionKey:        z.string().nullable(),
+  // PR0-B3 Part C — 필터 전용 변수 계약(계획 "필터 전용 변수 계약" 절). .default()로 기존
+  // 변수는 스키마 변경 없이 'analyzable'로 해석된다. 'filter_only'는 분석 변수 후보에서는
+  // 빠지지만(CatalogPanel.jsx) 현재 grain 안에서는 여전히 필터로 선택 가능하다(RecipePanel.jsx
+  // FilterEditor는 grain만 거르고 analysisRole은 보지 않음 — 등록일이 대표 사례).
+  analysisRole:             z.enum(['analyzable', 'filter_only']).default('analyzable'),
 });
 
 export const CatalogResponseSchema = z.object({
