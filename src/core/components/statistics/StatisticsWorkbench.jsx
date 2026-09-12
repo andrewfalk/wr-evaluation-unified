@@ -7,6 +7,7 @@ import { InspectorReportPanel } from './InspectorReportPanel';
 import { useViewportWidth } from './useViewportWidth';
 import { describeStatsApiError } from './describeStatsError';
 import './statistics-workbench.css';
+import '../charts/charts.css';
 
 // PR3-A — 이변량 모드는 정렬하지 않는다(계획서 §클라이언트배선): variableKeys 순서가
 // x/y 역할을 정하므로 [a,b]와 [b,a]는 서로 다른 조건이어야 한다. requestedMethod도
@@ -32,7 +33,8 @@ function buildRecipe(analysisMode, variableKeys, requestedMethod, analysisPurpos
     analysisPurpose,
     formulaPolicies,
     analysisMode,
-    ...(analysisMode === 'bivariate' && requestedMethod ? { requestedMethod } : {}),
+    // PR3-B — 상관행렬도 requestedMethod(pearson/spearman)가 필요하다(계획서 §4/§7).
+    ...((analysisMode === 'bivariate' || analysisMode === 'correlation_matrix') && requestedMethod ? { requestedMethod } : {}),
   };
 }
 
@@ -44,6 +46,10 @@ function buildRecipe(analysisMode, variableKeys, requestedMethod, analysisPurpos
 function isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters) {
   if (analysisMode === 'bivariate') {
     if (variableKeys.length !== 2 || variableKeys[0] === variableKeys[1]) return false;
+  } else if (analysisMode === 'correlation_matrix') {
+    // PR3-B §4 — 3개 이상 + 중복 없음(zod superRefine과 동일 조건, 클라이언트도
+    // 미리 막아야 preview가 400 없이 매끄럽게 나간다).
+    if (variableKeys.length < 3 || new Set(variableKeys).size !== variableKeys.length) return false;
   } else if (variableKeys.length === 0) {
     return false;
   }
@@ -218,8 +224,12 @@ export function StatisticsWorkbench({
   // requestedMethod가 목록에 아예 없을 때(존재 안 함) undefined !== 'unsupported'가
   // true로 새기 때문이다(계획서 §클라이언트배선 이슈1). 존재 여부를 명시적으로 확인한다.
   const selectedMethod = previewState.result?.availableMethods?.find((m) => m.id === requestedMethod);
+  // PR3-B — 상관행렬도 이변량과 동일하게 requestedMethod가 available/conditional
+  // 이어야 실행 가능하다(서버 handlePostAnalyze의 METHOD_NOT_AVAILABLE 판정과
+  // 동일 기준 — statsAnalyzeHandler.ts).
+  const requiresMethodCheck = analysisMode === 'bivariate' || analysisMode === 'correlation_matrix';
   const methodExecutable =
-    analysisMode !== 'bivariate' ||
+    !requiresMethodCheck ||
     (selectedMethod != null && (selectedMethod.status === 'available' || selectedMethod.status === 'conditional'));
 
   const canExecute =
@@ -259,7 +269,7 @@ export function StatisticsWorkbench({
   // 아니라 저장된 실행의 analysisMode 기준(committedRecipe)으로 판정한다. 탭을
   // 바꿔도 내보내기 가능 여부는 바뀌면 안 된다. 서버도 manifest.analysisMode 기준으로
   // 같은 판정을 하므로(statsExportHandler.ts) 여기서도 동일 기준으로 미리 막는다.
-  const exportUnsupported = committedRecipe?.analysisMode === 'bivariate';
+  const exportUnsupported = committedRecipe?.analysisMode === 'bivariate' || committedRecipe?.analysisMode === 'correlation_matrix';
   async function handleExport() {
     if (!committedResult || actionsLocked || exportUnsupported) return; // 버튼 disabled와 별개로 핸들러 자체도 잠금을 지킨다
     setExportState({ status: 'exporting', error: null });

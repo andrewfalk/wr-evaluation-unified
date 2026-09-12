@@ -186,7 +186,7 @@ def test_max_total_values_rejects_when_per_variable_ok_but_sum_exceeds():
     # 변수의 합이 MAX_TOTAL_VALUES를 넘는 입력 — 변수 수를 늘려 합만 상한을 넘긴다.
     num_vars = MAX_TOTAL_VALUES // MAX_VALUES_PER_VARIABLE + 2
     request = {
-        "protocolVersion": 2,
+        "protocolVersion": 3,
         "variables": [
             {"key": f"v{i}", "kind": "continuous", "values": [1.0] * MAX_VALUES_PER_VARIABLE}
             for i in range(num_vars)
@@ -205,7 +205,7 @@ def test_invalid_json_raises_invalid_input():
 
 def test_schema_violation_raises_invalid_input():
     with pytest.raises(ProtocolError) as exc_info:
-        parse_and_validate_request(json.dumps({"protocolVersion": 2, "variables": [{"key": "x"}]}))
+        parse_and_validate_request(json.dumps({"protocolVersion": 3, "variables": [{"key": "x"}]}))
     assert exc_info.value.code == "INVALID_INPUT"
 
 
@@ -222,7 +222,7 @@ def _run_analyze(stdin_text: str) -> subprocess.CompletedProcess:
 
 def test_analyze_process_success_stdout_only():
     request = {
-        "protocolVersion": 2,
+        "protocolVersion": 3,
         "variables": [{"key": "v", "kind": "continuous", "values": [1.0, 2.0, 3.0]}],
     }
     proc = _run_analyze(json.dumps(request))
@@ -230,6 +230,37 @@ def test_analyze_process_success_stdout_only():
     assert proc.stderr == ""
     payload = json.loads(proc.stdout)
     assert payload["continuous"][0]["variableKey"] == "v"
+
+
+def test_analyze_process_continuous_includes_histogram_and_boxplot():
+    # PR3-B — descriptive 경로가 histogram/boxplot을 실제로 배선했는지(analyze.py
+    # 내부 조립 지점, 계획서 §2/§3).
+    request = {
+        "protocolVersion": 3,
+        "variables": [
+            {"key": "v", "kind": "continuous", "values": [1.0, 2.0, 3.0, 4.0, 5.0, 100.0]},
+        ],
+    }
+    proc = _run_analyze(json.dumps(request))
+    assert proc.returncode == 0
+    payload = json.loads(proc.stdout)
+    stat = payload["continuous"][0]
+    assert stat["histogram"]["bins"]
+    assert stat["boxplot"]["outlierCount"] == 1
+    assert stat["boxplot"]["outlierValues"] == [100.0]
+
+
+def test_analyze_process_continuous_n0_histogram_and_boxplot_are_none():
+    request = {
+        "protocolVersion": 3,
+        "variables": [{"key": "empty", "kind": "continuous", "values": []}],
+    }
+    proc = _run_analyze(json.dumps(request))
+    assert proc.returncode == 0
+    payload = json.loads(proc.stdout)
+    stat = payload["continuous"][0]
+    assert stat["histogram"] is None
+    assert stat["boxplot"] is None
 
 
 def test_analyze_process_failure_stdout_empty_stderr_has_marker():

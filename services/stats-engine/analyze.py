@@ -14,10 +14,13 @@ import sys
 from typing import Any
 
 import bivariate
+import correlation_matrix as correlation_matrix_module
+from boxplot import compute_boxplot
 from descriptive import compute_continuous, compute_discrete
+from histogram import compute_histogram
 from protocol import ProtocolError, parse_and_validate_request
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 
 _BIVARIATE_DISPATCH = {
     "welch_t": lambda b: bivariate.welch_t(b["groups"]),
@@ -46,6 +49,14 @@ def run_descriptive(request: dict[str, Any]) -> dict[str, Any]:
         values = variable["values"]
         if kind == "continuous":
             stat = compute_continuous(values)
+            # PR3-B — q1/q3/median이 계산 가능할 때만(n>=1) histogram/boxplot을
+            # 만든다. n=0이면 둘 다 None(계획서 §2/§3 — Q1/Q3 재사용 원칙).
+            if stat["q1"] is not None and stat["q3"] is not None and stat["median"] is not None:
+                stat["histogram"] = compute_histogram(values, stat["q1"], stat["q3"])
+                stat["boxplot"] = compute_boxplot(values, stat["q1"], stat["median"], stat["q3"])
+            else:
+                stat["histogram"] = None
+                stat["boxplot"] = None
             continuous.append({"variableKey": key, **stat})
         else:
             stat = compute_discrete(values)
@@ -61,7 +72,15 @@ def run_bivariate(request: dict[str, Any]) -> dict[str, Any]:
     return {"protocolVersion": PROTOCOL_VERSION, "bivariate": {"method": method, **result}}
 
 
+def run_correlation_matrix(request: dict[str, Any]) -> dict[str, Any]:
+    cm = request["correlationMatrix"]
+    result = correlation_matrix_module.compute_correlation_matrix(cm["method"], cm["variables"])
+    return {"protocolVersion": PROTOCOL_VERSION, "correlationMatrix": result}
+
+
 def run_analysis(request: dict[str, Any]) -> dict[str, Any]:
+    if "correlationMatrix" in request:
+        return run_correlation_matrix(request)
     if "bivariate" in request:
         return run_bivariate(request)
     return run_descriptive(request)

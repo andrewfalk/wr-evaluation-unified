@@ -13,6 +13,7 @@
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "seed:admin": "tsx src/cli/seedAdmin.ts",
+    "seed:stats-test-patients": "tsx src/cli/seedStatsTestPatients.ts",
     "retention": "tsx src/cli/runRetention.ts",
     "cleanup:video": "tsx src/cli/runVideoCleanup.ts",
     "cleanup:stats-runs": "tsx src/cli/runStatsRunCleanup.ts"

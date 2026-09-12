@@ -393,3 +393,81 @@ def test_r_reference_spearman_correlation_matches_r_cor_test():
     result = bv.spearman_correlation(x, y)
     assert result["effectSizes"][0]["value"] == pytest.approx(ref["rho"], rel=1e-6)
     assert result["pValue"] == pytest.approx(ref["p_value"], rel=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# PR3-B — 그룹별 박스플롯(§5) + 상관 적합선(§7) 배선.
+# ---------------------------------------------------------------------------
+
+def test_group_boxplots_present_for_all_four_group_comparison_methods():
+    groups = [
+        {"label": "a", "values": [1.0, 2.0, 3.0, 4.0, 5.0]},
+        {"label": "b", "values": [10.0, 11.0, 12.0, 13.0, 14.0]},
+    ]
+    for fn in (bv.welch_t, bv.mann_whitney):
+        result = fn(groups)
+        assert len(result["groupBoxplots"]) == 2
+        assert result["groupBoxplots"][0]["label"] == "a"
+        assert result["groupBoxplots"][0]["boxplot"]["q1"] is not None
+        assert result["groupBoxplots"][1]["label"] == "b"
+
+    three_groups = groups + [{"label": "c", "values": [20.0, 21.0, 22.0, 23.0, 24.0]}]
+    for fn in (bv.anova, bv.kruskal_wallis):
+        result = fn(three_groups)
+        assert len(result["groupBoxplots"]) == 3
+
+
+def test_group_boxplots_present_even_on_early_return_insufficient_data():
+    # welch_t는 n1<2 또는 n2<2면 조기 반환 — 그 경로에서도 groupBoxplots가 있어야
+    # 한다(계획서 §5 — Python은 disclosure와 무관하게 항상 정직하게 계산).
+    groups = [
+        {"label": "a", "values": [1.0]},  # n1=1 < 2
+        {"label": "b", "values": [10.0, 11.0, 12.0]},
+    ]
+    result = bv.welch_t(groups)
+    assert result["statistic"] is None
+    assert len(result["groupBoxplots"]) == 2
+    assert result["groupBoxplots"][0]["boxplot"] is not None  # n=1이어도 단일값 boxplot
+
+
+def test_group_boxplot_matches_standalone_boxplot_computation():
+    from boxplot import compute_boxplot
+    from descriptive import compute_continuous
+
+    values = [1.0, 2.0, 3.0, 4.0, 5.0, 100.0]
+    groups = [
+        {"label": "x", "values": values},
+        {"label": "y", "values": [1.0, 2.0, 3.0]},
+    ]
+    result = bv.mann_whitney(groups)
+    stat = compute_continuous(values)
+    expected = compute_boxplot(values, stat["q1"], stat["median"], stat["q3"])
+    assert result["groupBoxplots"][0]["boxplot"] == expected
+
+
+def test_pearson_regression_line_slope_matches_manual_ols():
+    x = [1.0, 2.0, 3.0, 4.0, 5.0]
+    y = [2.1, 3.9, 6.2, 7.8, 10.1]
+    result = bv.pearson_correlation(x, y)
+    r = result["statistic"]
+    import numpy as np
+    sd_x, sd_y = float(np.std(x, ddof=1)), float(np.std(y, ddof=1))
+    expected_slope = r * sd_y / sd_x
+    assert result["regressionLine"]["slope"] == pytest.approx(expected_slope)
+    expected_intercept = float(np.mean(y)) - expected_slope * float(np.mean(x))
+    assert result["regressionLine"]["intercept"] == pytest.approx(expected_intercept)
+
+
+def test_spearman_has_no_regression_line():
+    x = [1.0, 2.0, 3.0, 4.0, 5.0]
+    y = [5.0, 3.0, 1.0, 2.0, 4.0]
+    result = bv.spearman_correlation(x, y)
+    assert result["regressionLine"] is None
+
+
+def test_pearson_regression_line_none_when_constant_variable():
+    x = [1.0, 1.0, 1.0, 1.0]
+    y = [1.0, 2.0, 3.0, 4.0]
+    result = bv.pearson_correlation(x, y)
+    assert result["statistic"] is None
+    assert result["regressionLine"] is None

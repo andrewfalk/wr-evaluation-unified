@@ -1,0 +1,1956 @@
+[
+  {
+    "id": "04d63274-9738-4768-989d-1e6cd05242e8",
+    "patient_person_id": "05671e5c-6837-4900-824f-3c4dfd944814",
+    "assigned_doctor_user_id": "c8ba12ad-78c3-4fb5-a745-c0191e2e1813",
+    "created_at": "2026-09-11T15:09:13.810026+00:00",
+    "payload": {
+      "id": "04d63274-9738-4768-989d-1e6cd05242e8",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "b35e2bc1-4107-4ecb-96ad-ef68367297f1",
+              "endDate": "2025-09-14",
+              "jobName": "자동차 정비 보조원",
+              "presetId": null,
+              "startDate": "2023-01-14",
+              "workDaysPerYear": 232,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "테스트환자226",
+          "gender": "male",
+          "height": "169",
+          "weight": "67",
+          "diabetes": "no",
+          "birthDate": "1967-04-25",
+          "diagnoses": [
+            {
+              "id": "4d500bbd-e99f-459a-876d-90c9954e7cd8",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "klgRight": "4",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            },
+            {
+              "id": "90654110-d847-4e74-bc89-1466056554d6",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "klgLeft": "4",
+              "reasonLeft": [
+                "lowBurden"
+              ],
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "low",
+              "reasonLeftOther": ""
+            },
+            {
+              "id": "5505b7ac-026c-40d3-ba54-74670dd20619",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": "",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            }
+          ],
+          "patientNo": "STh9ng9z-0226",
+          "department": "",
+          "doctorName": "",
+          "injuryDate": "2025-09-14",
+          "hospitalName": "",
+          "specialNotes": "",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "evaluationDate": "2025-10-09",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": "no"
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "stairs": true,
+                "weight": "868",
+                "jumpDown": false,
+                "kneeTwist": false,
+                "squatting": "16",
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": false,
+                "sharedJobId": "b35e2bc1-4107-4ecb-96ad-ef68367297f1",
+                "evidenceSources": []
+              }
+            ],
+            "returnConsiderations": ""
+          },
+          "spine": {
+            "tasks": [
+              {
+                "id": 1,
+                "name": "환자 체위 변경",
+                "force": 0,
+                "weight": 32,
+                "posture": "G3",
+                "timeUnit": "sec",
+                "frequency": 48,
+                "timeValue": 7,
+                "sharedJobId": "b35e2bc1-4107-4ecb-96ad-ef68367297f1",
+                "correctionFactor": 1.2
+              },
+              {
+                "id": 2,
+                "name": "상자 상하차",
+                "force": 0,
+                "weight": 26,
+                "posture": "G4",
+                "timeUnit": "sec",
+                "frequency": 48,
+                "timeValue": 9,
+                "sharedJobId": "b35e2bc1-4107-4ecb-96ad-ef68367297f1",
+                "correctionFactor": 1.1
+              }
+            ],
+            "formulaVersion": "v5.1.3",
+            "vibrationIntervals": [
+              {
+                "id": 1,
+                "name": "진동 공구 사용",
+                "awMax": 1.52,
+                "awMin": 0.48,
+                "timeUnit": "hr",
+                "timeValue": 2,
+                "sharedJobId": "b35e2bc1-4107-4ecb-96ad-ef68367297f1"
+              }
+            ],
+            "vibrationExposureStatus": "present"
+          }
+        },
+        "activeModules": [
+          "knee",
+          "spine"
+        ]
+      },
+      "phase": "evaluation",
+      "createdAt": "2025-09-14T09:45:00.000Z"
+    }
+  },
+  {
+    "id": "0a63c254-aaf9-4fe8-9b53-b494689c6150",
+    "patient_person_id": "b297eaec-9cf9-4aae-8cab-36283a7c63cb",
+    "assigned_doctor_user_id": "c8ba12ad-78c3-4fb5-a745-c0191e2e1813",
+    "created_at": "2026-09-11T15:04:07.012493+00:00",
+    "payload": {
+      "id": "0a63c254-aaf9-4fe8-9b53-b494689c6150",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "4292f418-4f8d-40f9-a4a0-e69a219fa2e5",
+              "endDate": "2007-08-24",
+              "jobName": "고객센터 상담원",
+              "presetId": null,
+              "startDate": "2000-05-24",
+              "workDaysPerYear": 259,
+              "workPeriodOverride": ""
+            },
+            {
+              "id": "a501e41a-13af-4e23-8cfa-5e4d7a580b34",
+              "endDate": "2024-02-25",
+              "jobName": "재가요양보호사",
+              "presetId": null,
+              "startDate": "2007-08-25",
+              "workDaysPerYear": 234,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "테스트환자282",
+          "gender": "male",
+          "height": "169",
+          "weight": "83",
+          "diabetes": "yes",
+          "birthDate": "1962-03-17",
+          "diagnoses": [
+            {
+              "id": "d8bcbba6-68ac-46b2-86c9-a01ed6386a0a",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "klgRight": "2",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            },
+            {
+              "id": "ff8baa92-a4d8-4885-b82b-57671bbf94f9",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "klgLeft": "1",
+              "reasonLeft": [
+                "lowBurden"
+              ],
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "low",
+              "reasonLeftOther": ""
+            },
+            {
+              "id": "0d6dfb79-9c8c-4333-827e-1a611c99f83c",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": "",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            }
+          ],
+          "patientNo": "ST2q2xg3-0282",
+          "department": "",
+          "doctorName": "",
+          "injuryDate": "2024-02-25",
+          "hospitalName": "",
+          "specialNotes": "",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "evaluationDate": "2024-03-29",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": "no"
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "stairs": false,
+                "weight": "3010",
+                "jumpDown": false,
+                "kneeTwist": true,
+                "squatting": "43",
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": true,
+                "sharedJobId": "4292f418-4f8d-40f9-a4a0-e69a219fa2e5",
+                "evidenceSources": []
+              },
+              {
+                "stairs": true,
+                "weight": "644",
+                "jumpDown": false,
+                "kneeTwist": false,
+                "squatting": "29",
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": false,
+                "sharedJobId": "a501e41a-13af-4e23-8cfa-5e4d7a580b34",
+                "evidenceSources": []
+              }
+            ],
+            "returnConsiderations": ""
+          },
+          "spine": {
+            "tasks": [
+              {
+                "id": 1,
+                "name": "부품 상자 이동",
+                "force": 0,
+                "weight": 13,
+                "posture": "G6",
+                "timeUnit": "sec",
+                "frequency": 29,
+                "timeValue": 12,
+                "sharedJobId": "4292f418-4f8d-40f9-a4a0-e69a219fa2e5",
+                "correctionFactor": 1.2
+              },
+              {
+                "id": 2,
+                "name": "중량 자재 운반",
+                "force": 0,
+                "weight": 25,
+                "posture": "G7",
+                "timeUnit": "sec",
+                "frequency": 38,
+                "timeValue": 14,
+                "sharedJobId": "4292f418-4f8d-40f9-a4a0-e69a219fa2e5",
+                "correctionFactor": 1
+              },
+              {
+                "id": 3,
+                "name": "환자 체위 변경",
+                "force": 0,
+                "weight": 17,
+                "posture": "G3",
+                "timeUnit": "sec",
+                "frequency": 42,
+                "timeValue": 6,
+                "sharedJobId": "4292f418-4f8d-40f9-a4a0-e69a219fa2e5",
+                "correctionFactor": 1
+              },
+              {
+                "id": 101,
+                "name": "상자 상하차",
+                "force": 0,
+                "weight": 32,
+                "posture": "G7",
+                "timeUnit": "sec",
+                "frequency": 32,
+                "timeValue": 11,
+                "sharedJobId": "a501e41a-13af-4e23-8cfa-5e4d7a580b34",
+                "correctionFactor": 1.3
+              },
+              {
+                "id": 102,
+                "name": "부품 상자 이동",
+                "force": 0,
+                "weight": 21,
+                "posture": "G5",
+                "timeUnit": "sec",
+                "frequency": 42,
+                "timeValue": 10,
+                "sharedJobId": "a501e41a-13af-4e23-8cfa-5e4d7a580b34",
+                "correctionFactor": 1.2
+              }
+            ],
+            "formulaVersion": "v5.1.3",
+            "vibrationExposureStatus": "none"
+          }
+        },
+        "activeModules": [
+          "knee",
+          "spine"
+        ]
+      },
+      "phase": "evaluation",
+      "createdAt": "2024-02-25T09:41:00.000Z"
+    }
+  },
+  {
+    "id": "0a708326-bc85-4e62-be4d-2042fc9e8289",
+    "patient_person_id": "3b8ff960-06c8-4f2f-87ee-c4262732c989",
+    "assigned_doctor_user_id": "c8ba12ad-78c3-4fb5-a745-c0191e2e1813",
+    "created_at": "2026-09-11T13:27:51.115101+00:00",
+    "payload": {
+      "id": "0a708326-bc85-4e62-be4d-2042fc9e8289",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "0c6fe392-efab-4493-b67b-83d241c4d7ba",
+              "endDate": "2014-01-07",
+              "jobName": "병원 행정 사무원",
+              "presetId": null,
+              "startDate": "2008-02-07",
+              "workDaysPerYear": 247,
+              "workPeriodOverride": ""
+            },
+            {
+              "id": "58883e20-67a8-4a0f-997c-301d4bd76dbe",
+              "endDate": "2024-04-08",
+              "jobName": "대형마트 진열 담당",
+              "presetId": null,
+              "startDate": "2014-01-08",
+              "workDaysPerYear": 243,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "테스트환자288",
+          "gender": "female",
+          "height": "159",
+          "weight": "49",
+          "diabetes": "no",
+          "birthDate": "1965-01-10",
+          "diagnoses": [
+            {
+              "id": "50d4bec3-d6c0-490e-9bc9-5d988c0eeadd",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "klgRight": "2",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            },
+            {
+              "id": "516aa446-05fc-4da5-91b6-72a669585e41",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "klgLeft": "4",
+              "reasonLeft": [
+                "lowBurden"
+              ],
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "low",
+              "reasonLeftOther": ""
+            },
+            {
+              "id": "18795e74-eddc-4ea0-9d9d-5aa97d2fca8f",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": "",
+              "reasonRight": [
+                "lowBurden"
+              ],
+              "confirmedRight": "confirmed",
+              "assessmentRight": "low",
+              "reasonRightOther": ""
+            }
+          ],
+          "patientNo": "STm42peg-0288",
+          "department": "",
+          "doctorName": "",
+          "injuryDate": "2024-04-08",
+          "hospitalName": "",
+          "specialNotes": "",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "evaluationDate": "2024-05-11",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": "no"
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "stairs": true,
+                "weight": "1703",
+                "jumpDown": false,
+                "kneeTwist": false,
+                "squatting": "7",
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "sharedJobId": "0c6fe392-efab-4493-b67b-83d241c4d7ba",
+                "evidenceSources": []
+              },
+              {
+                "stairs": true,
+                "weight": "3057",
+                "jumpDown": false,
+                "kneeTwist": false,
+                "squatting": "58",
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": false,
+                "sharedJobId": "58883e20-67a8-4a0f-997c-301d4bd76dbe",
+                "evidenceSources": []
+              }
+            ],
+            "returnConsiderations": ""
+          },
+          "spine": {
+            "tasks": [
+              {
+                "id": 1,
+                "name": "적재물 정리",
+                "force": 0,
+                "weight": 29,
+                "posture": "G6",
+                "timeUnit": "sec",
+                "frequency": 48,
+                "timeValue": 8,
+                "sharedJobId": "0c6fe392-efab-4493-b67b-83d241c4d7ba",
+                "correctionFactor": 1.2
+              },
+              {
+                "id": 2,
+                "name": "중량 자재 운반",
+                "force": 0,
+                "weight": 21,
+                "posture": "G6",
+                "timeUnit": "sec",
+                "frequency": 65,
+                "timeValue": 9,
+                "sharedJobId": "0c6fe392-efab-4493-b67b-83d241c4d7ba",
+                "correctionFactor": 1
+              },
+              {
+                "id": 3,
+                "name": "적재물 정리",
+                "force": 0,
+                "weight": 13,
+                "posture": "G4",
+                "timeUnit": "sec",
+                "frequency": 63,
+                "timeValue": 11,
+                "sharedJobId": "0c6fe392-efab-4493-b67b-83d241c4d7ba",
+                "correctionFactor": 1
+              },
+              {
+                "id": 101,
+                "name": "중량 자재 운반",
+                "force": 0,
+                "weight": 14,
+                "posture": "G5",
+                "timeUnit": "sec",
+                "frequency": 63,
+                "timeValue": 11,
+                "sharedJobId": "58883e20-67a8-4a0f-997c-301d4bd76dbe",
+                "correctionFactor": 1.1
+              },
+              {
+                "id": 102,
+                "name": "환자 체위 변경",
+                "force": 0,
+                "weight": 24,
+                "posture": "G5",
+                "timeUnit": "sec",
+                "frequency": 27,
+                "timeValue": 6,
+                "sharedJobId": "58883e20-67a8-4a0f-997c-301d4bd76dbe",
+                "correctionFactor": 1.1
+              }
+            ],
+            "formulaVersion": "v5.1.3",
+            "vibrationExposureStatus": "none"
+          }
+        },
+        "activeModules": [
+          "knee",
+          "spine"
+        ]
+      },
+      "phase": "evaluation",
+      "createdAt": "2024-04-08T09:47:00.000Z"
+    }
+  },
+  {
+    "id": "0e4d345d-7b00-4b9d-9325-87058af27e25",
+    "patient_person_id": "e1ea2893-4d98-487e-896d-af1b204d7c7d",
+    "assigned_doctor_user_id": "c8ba12ad-78c3-4fb5-a745-c0191e2e1813",
+    "created_at": "2026-09-11T15:09:13.810026+00:00",
+    "payload": {
+      "id": "0e4d345d-7b00-4b9d-9325-87058af27e25",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "6dda7ae5-4af4-4d91-b2b7-3bed0138787c",
+              "endDate": "2024-07-21",
+              "jobName": "반도체 장비 오퍼레이터",
+              "presetId": null,
+              "startDate": "2017-04-21",
+              "workDaysPerYear": 249,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "테스트환자276",
+          "gender": "male",
+          "height": "178",
+          "weight": "89",
+          "diabetes": "no",
+          "birthDate": "1988-09-11",
+          "diagnoses": [
+            {
+              "id": "0d4b6a14-7127-49e4-a250-e2ab23eeeeae",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right"
+            },
+            {
+              "id": "ed511f58-331d-4107-a613-73f65cdda092",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left"
+            },
+            {
+              "id": "72a51e7b-b85b-4509-a77b-c1d9d8c61697",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": ""
+            },
+            {
+              "id": "db92216c-6af7-45b8-8c60-106c3d80ca63",
+              "code": "M50.1",
+              "name": "경추간판장애",
+              "side": ""
+            }
+          ],
+          "patientNo": "STh9ng9z-0276",
+          "department": "",
+          "doctorName": "",
+          "injuryDate": "2024-07-21",
+          "hospitalName": "",
+          "specialNotes": "",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "evaluationDate": "",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": "yes"
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "stairs": false,
+                "weight": "1723",
+                "jumpDown": true,
+                "kneeTwist": true,
+                "squatting": "11",
+                "startStop": false,
+                "tightSpace": true,
+                "kneeContact": true,
+                "sharedJobId": "6dda7ae5-4af4-4d91-b2b7-3bed0138787c",
+                "evidenceSources": []
+              }
+            ],
+            "returnConsiderations": ""
+          },
+          "spine": {
+            "tasks": [
+              {
+                "id": 1,
+                "name": "상자 상하차",
+                "force": 0,
+                "weight": 28,
+                "posture": "G7",
+                "timeUnit": "sec",
+                "frequency": 67,
+                "timeValue": 8,
+                "sharedJobId": "6dda7ae5-4af4-4d91-b2b7-3bed0138787c",
+                "correctionFactor": 1.1
+              },
+              {
+                "id": 2,
+                "name": "부품 상자 이동",
+                "force": 0,
+                "weight": 22,
+                "posture": "G4",
+                "timeUnit": "sec",
+                "frequency": 56,
+                "timeValue": 13,
+                "sharedJobId": "6dda7ae5-4af4-4d91-b2b7-3bed0138787c",
+                "correctionFactor": 1.1
+              },
+              {
+                "id": 3,
+                "name": "환자 체위 변경",
+                "force": 0,
+                "weight": 20,
+                "posture": "G4",
+                "timeUnit": "sec",
+                "frequency": 35,
+                "timeValue": 9,
+                "sharedJobId": "6dda7ae5-4af4-4d91-b2b7-3bed0138787c",
+                "correctionFactor": 1.2
+              }
+            ],
+            "formulaVersion": "v5.1.3",
+            "vibrationExposureStatus": "none"
+          },
+          "cervical": {
+            "tasks": [
+              {
+                "id": 1,
+                "name": "중량물 어깨 운반",
+                "notes": "",
+                "sharedJobId": "6dda7ae5-4af4-4d91-b2b7-3bed0138787c",
+                "exposure_types": [
+                  "shoulder_heavy_load"
+                ],
+                "load_weight_kg": "15",
+                "precision_work": "",
+                "forced_neck_posture": "no",
+                "carry_hours_per_shift": "0.7",
+                "neck_nonneutral_hours_per_day": "",
+                "combined_flexion_rotation_posture": ""
+              },
+              {
+                "id": 2,
+                "name": "상방 주시 및 목 고정 작업",
+                "notes": "",
+                "sharedJobId": "6dda7ae5-4af4-4d91-b2b7-3bed0138787c",
+                "exposure_types": [
+                  "awkward_static_neck_load"
+                ],
+                "load_weight_kg": "",
+                "precision_work": "no",
+                "forced_neck_posture": "",
+                "carry_hours_per_shift": "",
+                "neck_nonneutral_hours_per_day": "1.6",
+                "combined_flexion_rotation_posture": "yes"
+              }
+            ],
+            "returnConsiderations": ""
+          }
+        },
+        "activeModules": [
+          "knee",
+          "spine",
+          "cervical"
+        ]
+      },
+      "phase": "evaluation",
+      "createdAt": "2024-07-21T09:35:00.000Z"
+    }
+  },
+  {
+    "id": "0e75cee3-5d95-40d1-96c5-c60be1c26529",
+    "patient_person_id": "373fc128-a15e-468a-a8a9-e0270b68daeb",
+    "assigned_doctor_user_id": "c8ba12ad-78c3-4fb5-a745-c0191e2e1813",
+    "created_at": "2026-09-11T15:04:07.012493+00:00",
+    "payload": {
+      "id": "0e75cee3-5d95-40d1-96c5-c60be1c26529",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "f96de983-ded6-4a63-8b92-819d82bbe0e2",
+              "endDate": "2008-10-01",
+              "jobName": "대형마트 진열 담당",
+              "presetId": null,
+              "startDate": "2006-09-01",
+              "workDaysPerYear": 242,
+              "workPeriodOverride": ""
+            },
+            {
+              "id": "8de6b978-d147-4dd6-b2b9-a45baab86917",
+              "endDate": "2025-05-02",
+              "jobName": "요양병원 간호조무사",
+              "presetId": null,
+              "startDate": "2008-10-02",
+              "workDaysPerYear": 231,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "테스트환자128",
+          "gender": "male",
+          "height": "182",
+          "weight": "77",
+          "diabetes": "no",
+          "birthDate": "1985-12-08",
+          "diagnoses": [
+            {
+              "id": "0bd9ed96-8e0b-41b1-b027-7de4649576b1",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "klgRight": "2",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            },
+            {
+              "id": "5d614498-1353-4510-a4dc-97b4d421c67c",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "klgLeft": "2",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high"
+            },
+            {
+              "id": "e02fbef4-6b9c-4c0e-8330-c81a9d45e8c1",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": "",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            }
+          ],
+          "patientNo": "ST2q2xg3-0128",
+          "department": "",
+          "doctorName": "",
+          "injuryDate": "2025-05-02",
+          "hospitalName": "",
+          "specialNotes": "",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "evaluationDate": "2025-05-12",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": "no"
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "stairs": false,
+                "weight": "1901",
+                "jumpDown": false,
+                "kneeTwist": false,
+                "squatting": "90",
+                "startStop": true,
+                "tightSpace": true,
+                "kneeContact": false,
+                "sharedJobId": "f96de983-ded6-4a63-8b92-819d82bbe0e2",
+                "evidenceSources": []
+              },
+              {
+                "stairs": true,
+                "weight": "3485",
+                "jumpDown": true,
+                "kneeTwist": true,
+                "squatting": "83",
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": true,
+                "sharedJobId": "8de6b978-d147-4dd6-b2b9-a45baab86917",
+                "evidenceSources": []
+              }
+            ],
+            "returnConsiderations": ""
+          },
+          "spine": {
+            "tasks": [
+              {
+                "id": 1,
+                "name": "환자 체위 변경",
+                "force": 0,
+                "weight": 23,
+                "posture": "G3",
+                "timeUnit": "sec",
+                "frequency": 62,
+                "timeValue": 12,
+                "sharedJobId": "f96de983-ded6-4a63-8b92-819d82bbe0e2",
+                "correctionFactor": 1.1
+              },
+              {
+                "id": 101,
+                "name": "환자 체위 변경",
+                "force": 0,
+                "weight": 23,
+                "posture": "G7",
+                "timeUnit": "sec",
+                "frequency": 50,
+                "timeValue": 12,
+                "sharedJobId": "8de6b978-d147-4dd6-b2b9-a45baab86917",
+                "correctionFactor": 1
+              }
+            ],
+            "formulaVersion": "v5.1.3",
+            "vibrationExposureStatus": "none"
+          }
+        },
+        "activeModules": [
+          "knee",
+          "spine"
+        ]
+      },
+      "phase": "evaluation",
+      "createdAt": "2025-05-02T09:07:00.000Z"
+    }
+  },
+  {
+    "id": "0f3b31f4-9817-4aac-af7a-0cfd603cc950",
+    "patient_person_id": "2e1c06c0-3603-4acf-a516-54bcb6195dcb",
+    "assigned_doctor_user_id": "c8ba12ad-78c3-4fb5-a745-c0191e2e1813",
+    "created_at": "2026-09-11T15:09:13.810026+00:00",
+    "payload": {
+      "id": "0f3b31f4-9817-4aac-af7a-0cfd603cc950",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "f2bbfc24-f90b-4a47-831e-0087892e67d8",
+              "endDate": "2008-12-01",
+              "jobName": "공작기계 조작원",
+              "presetId": null,
+              "startDate": "1996-03-01",
+              "workDaysPerYear": 258,
+              "workPeriodOverride": ""
+            },
+            {
+              "id": "236a6753-01c4-43be-a128-3d70168acefe",
+              "endDate": "2025-10-02",
+              "jobName": "물류센터 상하차원",
+              "presetId": null,
+              "startDate": "2008-12-02",
+              "workDaysPerYear": 249,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "테스트환자240",
+          "gender": "female",
+          "height": "159",
+          "weight": "59",
+          "diabetes": "no",
+          "birthDate": "1965-02-17",
+          "diagnoses": [
+            {
+              "id": "7bfb39fa-f226-4de7-84d9-8081880d384f",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "klgRight": "1",
+              "reasonRight": [
+                "lowBurden"
+              ],
+              "confirmedRight": "confirmed",
+              "assessmentRight": "low",
+              "reasonRightOther": ""
+            },
+            {
+              "id": "9b5a3d61-b2b7-40a4-8aad-580a4635d70c",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "klgLeft": "2",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high"
+            },
+            {
+              "id": "563e159d-b595-4835-891d-8ee328d64aeb",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": "",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            }
+          ],
+          "patientNo": "STh9ng9z-0240",
+          "department": "",
+          "doctorName": "",
+          "injuryDate": "2025-10-02",
+          "hospitalName": "",
+          "specialNotes": "",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "evaluationDate": "2025-10-15",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": "no"
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "stairs": true,
+                "weight": "660",
+                "jumpDown": false,
+                "kneeTwist": false,
+                "squatting": "93",
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": false,
+                "sharedJobId": "f2bbfc24-f90b-4a47-831e-0087892e67d8",
+                "evidenceSources": []
+              },
+              {
+                "stairs": false,
+                "weight": "1010",
+                "jumpDown": false,
+                "kneeTwist": false,
+                "squatting": "11",
+                "startStop": false,
+                "tightSpace": true,
+                "kneeContact": false,
+                "sharedJobId": "236a6753-01c4-43be-a128-3d70168acefe",
+                "evidenceSources": []
+              }
+            ],
+            "returnConsiderations": ""
+          },
+          "spine": {
+            "tasks": [
+              {
+                "id": 1,
+                "name": "적재물 정리",
+                "force": 0,
+                "weight": 12,
+                "posture": "G3",
+                "timeUnit": "sec",
+                "frequency": 69,
+                "timeValue": 8,
+                "sharedJobId": "f2bbfc24-f90b-4a47-831e-0087892e67d8",
+                "correctionFactor": 1.3
+              },
+              {
+                "id": 2,
+                "name": "부품 상자 이동",
+                "force": 0,
+                "weight": 31,
+                "posture": "G4",
+                "timeUnit": "sec",
+                "frequency": 37,
+                "timeValue": 6,
+                "sharedJobId": "f2bbfc24-f90b-4a47-831e-0087892e67d8",
+                "correctionFactor": 1.2
+              },
+              {
+                "id": 101,
+                "name": "적재물 정리",
+                "force": 0,
+                "weight": 14,
+                "posture": "G6",
+                "timeUnit": "sec",
+                "frequency": 30,
+                "timeValue": 7,
+                "sharedJobId": "236a6753-01c4-43be-a128-3d70168acefe",
+                "correctionFactor": 1.2
+              }
+            ],
+            "formulaVersion": "v5.1.3",
+            "vibrationIntervals": [
+              {
+                "id": 1,
+                "name": "진동 공구 사용",
+                "awMax": 1.22,
+                "awMin": 0.55,
+                "timeUnit": "hr",
+                "timeValue": 3,
+                "sharedJobId": "f2bbfc24-f90b-4a47-831e-0087892e67d8"
+              },
+              {
+                "id": 2,
+                "name": "진동 공구 사용",
+                "awMax": 1.05,
+                "awMin": 0.58,
+                "timeUnit": "hr",
+                "timeValue": 1,
+                "sharedJobId": "236a6753-01c4-43be-a128-3d70168acefe"
+              }
+            ],
+            "vibrationExposureStatus": "present"
+          }
+        },
+        "activeModules": [
+          "knee",
+          "spine"
+        ]
+      },
+      "phase": "evaluation",
+      "createdAt": "2025-10-02T09:59:00.000Z"
+    }
+  },
+  {
+    "id": "127f7e38-effe-45da-8678-84a48894cc3f",
+    "patient_person_id": "f1f18929-449b-4fdc-b4f0-e5dbee9b3e2b",
+    "assigned_doctor_user_id": "c8ba12ad-78c3-4fb5-a745-c0191e2e1813",
+    "created_at": "2026-09-11T13:27:51.115101+00:00",
+    "payload": {
+      "id": "127f7e38-effe-45da-8678-84a48894cc3f",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "83b7f90a-1c45-4583-9d4b-e8f92b466526",
+              "endDate": "2009-03-23",
+              "jobName": "요양병원 간호조무사",
+              "presetId": null,
+              "startDate": "2005-02-23",
+              "workDaysPerYear": 241,
+              "workPeriodOverride": ""
+            },
+            {
+              "id": "597ce710-90ac-4cea-aa0a-095d8ec11c20",
+              "endDate": "2025-07-24",
+              "jobName": "재가요양보호사",
+              "presetId": null,
+              "startDate": "2009-03-24",
+              "workDaysPerYear": 242,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "테스트환자68",
+          "gender": "male",
+          "height": "171",
+          "weight": "60",
+          "diabetes": "no",
+          "birthDate": "1977-03-21",
+          "diagnoses": [
+            {
+              "id": "bd53f693-50ae-4acc-b119-361a928ce72b",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "klgRight": "2",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            },
+            {
+              "id": "44a3d563-e3a6-4e00-9d31-1c681effff61",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "klgLeft": "3",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high"
+            },
+            {
+              "id": "ad67450e-2758-414e-b926-1d7ea482f836",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": "",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            }
+          ],
+          "patientNo": "STm42peg-0068",
+          "department": "",
+          "doctorName": "",
+          "injuryDate": "2025-07-24",
+          "hospitalName": "",
+          "specialNotes": "",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "evaluationDate": "2025-08-05",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": "no"
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "stairs": false,
+                "weight": "1900",
+                "jumpDown": false,
+                "kneeTwist": false,
+                "squatting": "26",
+                "startStop": true,
+                "tightSpace": true,
+                "kneeContact": false,
+                "sharedJobId": "83b7f90a-1c45-4583-9d4b-e8f92b466526",
+                "evidenceSources": []
+              },
+              {
+                "stairs": false,
+                "weight": "2774",
+                "jumpDown": false,
+                "kneeTwist": true,
+                "squatting": "53",
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": true,
+                "sharedJobId": "597ce710-90ac-4cea-aa0a-095d8ec11c20",
+                "evidenceSources": []
+              }
+            ],
+            "returnConsiderations": ""
+          },
+          "spine": {
+            "tasks": [
+              {
+                "id": 1,
+                "name": "환자 체위 변경",
+                "force": 0,
+                "weight": 33,
+                "posture": "G7",
+                "timeUnit": "sec",
+                "frequency": 45,
+                "timeValue": 8,
+                "sharedJobId": "83b7f90a-1c45-4583-9d4b-e8f92b466526",
+                "correctionFactor": 1.1
+              },
+              {
+                "id": 101,
+                "name": "적재물 정리",
+                "force": 0,
+                "weight": 21,
+                "posture": "G7",
+                "timeUnit": "sec",
+                "frequency": 65,
+                "timeValue": 8,
+                "sharedJobId": "597ce710-90ac-4cea-aa0a-095d8ec11c20",
+                "correctionFactor": 1.2
+              },
+              {
+                "id": 102,
+                "name": "환자 체위 변경",
+                "force": 0,
+                "weight": 15,
+                "posture": "G4",
+                "timeUnit": "sec",
+                "frequency": 48,
+                "timeValue": 9,
+                "sharedJobId": "597ce710-90ac-4cea-aa0a-095d8ec11c20",
+                "correctionFactor": 1.1
+              },
+              {
+                "id": 103,
+                "name": "상자 상하차",
+                "force": 0,
+                "weight": 27,
+                "posture": "G4",
+                "timeUnit": "sec",
+                "frequency": 40,
+                "timeValue": 6,
+                "sharedJobId": "597ce710-90ac-4cea-aa0a-095d8ec11c20",
+                "correctionFactor": 1.2
+              }
+            ],
+            "formulaVersion": "v5.1.3",
+            "vibrationExposureStatus": "none"
+          }
+        },
+        "activeModules": [
+          "knee",
+          "spine"
+        ]
+      },
+      "phase": "evaluation",
+      "createdAt": "2025-07-24T09:07:00.000Z"
+    }
+  },
+  {
+    "id": "169b30be-7594-4132-ab6b-bc43d1b72efe",
+    "patient_person_id": "33bbc6ab-b46b-45fc-916d-38ffbdcf1a7a",
+    "assigned_doctor_user_id": "cdcc574c-c6fa-4c80-92aa-a4bcce75353c",
+    "created_at": "2026-09-11T13:27:51.115101+00:00",
+    "payload": {
+      "id": "169b30be-7594-4132-ab6b-bc43d1b72efe",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "5942ddd3-6b92-4aa7-a42d-2955f67dc1ec",
+              "endDate": "2025-07-05",
+              "jobName": "가구 조립 설치원",
+              "presetId": null,
+              "startDate": "2019-03-05",
+              "workDaysPerYear": 256,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "테스트환자299",
+          "gender": "female",
+          "height": "158",
+          "weight": "59",
+          "diabetes": "no",
+          "birthDate": "1964-03-24",
+          "diagnoses": [
+            {
+              "id": "72cc9bb3-7951-413a-b394-05bfcd592574",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "klgRight": "1",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            },
+            {
+              "id": "a01d6a00-6e31-4b70-8aa4-2684f5dcb2ff",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "klgLeft": "3",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high"
+            },
+            {
+              "id": "81a06011-914f-4c8b-a32e-7acf7bc6b440",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": "",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            }
+          ],
+          "patientNo": "STm42peg-0299",
+          "department": "",
+          "doctorName": "",
+          "injuryDate": "2025-07-05",
+          "hospitalName": "",
+          "specialNotes": "",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "evaluationDate": "2025-08-01",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": "yes"
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "stairs": true,
+                "weight": "2626",
+                "jumpDown": false,
+                "kneeTwist": true,
+                "squatting": "74",
+                "startStop": false,
+                "tightSpace": true,
+                "kneeContact": false,
+                "sharedJobId": "5942ddd3-6b92-4aa7-a42d-2955f67dc1ec",
+                "evidenceSources": []
+              }
+            ],
+            "returnConsiderations": ""
+          },
+          "spine": {
+            "tasks": [
+              {
+                "id": 1,
+                "name": "적재물 정리",
+                "force": 0,
+                "weight": 14,
+                "posture": "G6",
+                "timeUnit": "sec",
+                "frequency": 66,
+                "timeValue": 12,
+                "sharedJobId": "5942ddd3-6b92-4aa7-a42d-2955f67dc1ec",
+                "correctionFactor": 1.1
+              }
+            ],
+            "formulaVersion": "v5.1.3",
+            "vibrationExposureStatus": "none"
+          }
+        },
+        "activeModules": [
+          "knee",
+          "spine"
+        ]
+      },
+      "phase": "evaluation",
+      "createdAt": "2025-07-05T09:58:00.000Z"
+    }
+  },
+  {
+    "id": "176e6b97-a503-453a-9387-bea80c54b8bc",
+    "patient_person_id": "3a0bb2e9-0a42-427c-bc59-c121fe0e5a2f",
+    "assigned_doctor_user_id": "c8ba12ad-78c3-4fb5-a745-c0191e2e1813",
+    "created_at": "2026-09-11T15:09:13.810026+00:00",
+    "payload": {
+      "id": "176e6b97-a503-453a-9387-bea80c54b8bc",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "c6d3deb6-7211-4703-b6ae-9959f5ebfd14",
+              "endDate": "2025-09-10",
+              "jobName": "공작기계 조작원",
+              "presetId": null,
+              "startDate": "2012-03-10",
+              "workDaysPerYear": 231,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "테스트환자156",
+          "gender": "male",
+          "height": "163",
+          "weight": "58",
+          "diabetes": "yes",
+          "birthDate": "1980-01-19",
+          "diagnoses": [
+            {
+              "id": "c89c81d5-cdc1-467e-886c-08e1a251127f",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "klgRight": "2",
+              "reasonRight": [
+                "lowBurden"
+              ],
+              "confirmedRight": "confirmed",
+              "assessmentRight": "low",
+              "reasonRightOther": ""
+            },
+            {
+              "id": "e8ef948e-09c1-4ef9-84d5-4dd43aab7818",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "klgLeft": "3",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high"
+            },
+            {
+              "id": "f0c9dd84-c778-4415-9afd-7ed26f776206",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": "",
+              "reasonRight": [
+                "lowBurden"
+              ],
+              "confirmedRight": "confirmed",
+              "assessmentRight": "low",
+              "reasonRightOther": ""
+            }
+          ],
+          "patientNo": "STh9ng9z-0156",
+          "department": "",
+          "doctorName": "",
+          "injuryDate": "2025-09-10",
+          "hospitalName": "",
+          "specialNotes": "",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "evaluationDate": "2025-10-24",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": "no"
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "stairs": true,
+                "weight": "2414",
+                "jumpDown": false,
+                "kneeTwist": false,
+                "squatting": "15",
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": false,
+                "sharedJobId": "c6d3deb6-7211-4703-b6ae-9959f5ebfd14",
+                "evidenceSources": []
+              }
+            ],
+            "returnConsiderations": ""
+          },
+          "spine": {
+            "tasks": [
+              {
+                "id": 1,
+                "name": "적재물 정리",
+                "force": 0,
+                "weight": 18,
+                "posture": "G5",
+                "timeUnit": "sec",
+                "frequency": 43,
+                "timeValue": 14,
+                "sharedJobId": "c6d3deb6-7211-4703-b6ae-9959f5ebfd14",
+                "correctionFactor": 1.3
+              },
+              {
+                "id": 2,
+                "name": "환자 체위 변경",
+                "force": 0,
+                "weight": 12,
+                "posture": "G4",
+                "timeUnit": "sec",
+                "frequency": 64,
+                "timeValue": 9,
+                "sharedJobId": "c6d3deb6-7211-4703-b6ae-9959f5ebfd14",
+                "correctionFactor": 1.3
+              },
+              {
+                "id": 3,
+                "name": "적재물 정리",
+                "force": 0,
+                "weight": 12,
+                "posture": "G4",
+                "timeUnit": "sec",
+                "frequency": 46,
+                "timeValue": 11,
+                "sharedJobId": "c6d3deb6-7211-4703-b6ae-9959f5ebfd14",
+                "correctionFactor": 1.1
+              }
+            ],
+            "formulaVersion": "v5.1.3",
+            "vibrationExposureStatus": "none"
+          }
+        },
+        "activeModules": [
+          "knee",
+          "spine"
+        ]
+      },
+      "phase": "evaluation",
+      "createdAt": "2025-09-10T09:35:00.000Z"
+    }
+  },
+  {
+    "id": "18c1dfe2-ceb0-4ee5-852d-9d813a3390d9",
+    "patient_person_id": "db108517-58d4-4982-b878-e68341b63359",
+    "assigned_doctor_user_id": "c8ba12ad-78c3-4fb5-a745-c0191e2e1813",
+    "created_at": "2026-09-11T15:04:07.012493+00:00",
+    "payload": {
+      "id": "18c1dfe2-ceb0-4ee5-852d-9d813a3390d9",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "b7c2121d-03f2-49de-9747-e530d8377160",
+              "endDate": "2015-05-09",
+              "jobName": "요양병원 간호조무사",
+              "presetId": null,
+              "startDate": "2012-02-09",
+              "workDaysPerYear": 240,
+              "workPeriodOverride": ""
+            },
+            {
+              "id": "631ea6d2-90a6-4fce-a3b5-1692ae00e232",
+              "endDate": "2024-12-10",
+              "jobName": "반도체 장비 오퍼레이터",
+              "presetId": null,
+              "startDate": "2015-05-10",
+              "workDaysPerYear": 237,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "테스트환자16",
+          "gender": "male",
+          "height": "181",
+          "weight": "87",
+          "diabetes": "no",
+          "birthDate": "1986-08-26",
+          "diagnoses": [
+            {
+              "id": "1eff0db9-055c-425d-b80a-e8d2c6ca10fc",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "klgRight": "3",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            },
+            {
+              "id": "948fd6ce-aaf3-49b5-b3ec-543c6bb126bd",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "klgLeft": "1",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high"
+            },
+            {
+              "id": "2fe05ec0-1dda-4501-a40b-a252725ace7d",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": "",
+              "reasonRight": [
+                "lowBurden"
+              ],
+              "confirmedRight": "confirmed",
+              "assessmentRight": "low",
+              "reasonRightOther": ""
+            }
+          ],
+          "patientNo": "ST2q2xg3-0016",
+          "department": "",
+          "doctorName": "",
+          "injuryDate": "2024-12-10",
+          "hospitalName": "",
+          "specialNotes": "",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "evaluationDate": "2024-12-26",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": "no"
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "stairs": false,
+                "weight": "3337",
+                "jumpDown": false,
+                "kneeTwist": true,
+                "squatting": "54",
+                "startStop": true,
+                "tightSpace": true,
+                "kneeContact": false,
+                "sharedJobId": "b7c2121d-03f2-49de-9747-e530d8377160",
+                "evidenceSources": []
+              },
+              {
+                "stairs": false,
+                "weight": "2907",
+                "jumpDown": false,
+                "kneeTwist": true,
+                "squatting": "72",
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": false,
+                "sharedJobId": "631ea6d2-90a6-4fce-a3b5-1692ae00e232",
+                "evidenceSources": []
+              }
+            ],
+            "returnConsiderations": ""
+          },
+          "spine": {
+            "tasks": [
+              {
+                "id": 1,
+                "name": "부품 상자 이동",
+                "force": 0,
+                "weight": 28,
+                "posture": "G5",
+                "timeUnit": "sec",
+                "frequency": 66,
+                "timeValue": 7,
+                "sharedJobId": "b7c2121d-03f2-49de-9747-e530d8377160",
+                "correctionFactor": 1.1
+              },
+              {
+                "id": 2,
+                "name": "환자 체위 변경",
+                "force": 0,
+                "weight": 17,
+                "posture": "G4",
+                "timeUnit": "sec",
+                "frequency": 51,
+                "timeValue": 10,
+                "sharedJobId": "b7c2121d-03f2-49de-9747-e530d8377160",
+                "correctionFactor": 1.2
+              },
+              {
+                "id": 3,
+                "name": "부품 상자 이동",
+                "force": 0,
+                "weight": 19,
+                "posture": "G3",
+                "timeUnit": "sec",
+                "frequency": 49,
+                "timeValue": 13,
+                "sharedJobId": "b7c2121d-03f2-49de-9747-e530d8377160",
+                "correctionFactor": 1
+              },
+              {
+                "id": 101,
+                "name": "부품 상자 이동",
+                "force": 0,
+                "weight": 24,
+                "posture": "G7",
+                "timeUnit": "sec",
+                "frequency": 47,
+                "timeValue": 13,
+                "sharedJobId": "631ea6d2-90a6-4fce-a3b5-1692ae00e232",
+                "correctionFactor": 1.2
+              },
+              {
+                "id": 102,
+                "name": "적재물 정리",
+                "force": 0,
+                "weight": 16,
+                "posture": "G5",
+                "timeUnit": "sec",
+                "frequency": 63,
+                "timeValue": 7,
+                "sharedJobId": "631ea6d2-90a6-4fce-a3b5-1692ae00e232",
+                "correctionFactor": 1.2
+              }
+            ],
+            "formulaVersion": "v5.1.3",
+            "vibrationIntervals": [
+              {
+                "id": 1,
+                "name": "진동 공구 사용",
+                "awMax": 1.53,
+                "awMin": 0.55,
+                "timeUnit": "hr",
+                "timeValue": 2,
+                "sharedJobId": "b7c2121d-03f2-49de-9747-e530d8377160"
+              },
+              {
+                "id": 2,
+                "name": "진동 공구 사용",
+                "awMax": 1.24,
+                "awMin": 0.41,
+                "timeUnit": "hr",
+                "timeValue": 2,
+                "sharedJobId": "631ea6d2-90a6-4fce-a3b5-1692ae00e232"
+              }
+            ],
+            "vibrationExposureStatus": "present"
+          }
+        },
+        "activeModules": [
+          "knee",
+          "spine"
+        ]
+      },
+      "phase": "evaluation",
+      "createdAt": "2024-12-10T09:15:00.000Z"
+    }
+  },
+  {
+    "id": "1958c4a0-126c-4422-9a50-db7a24e029af",
+    "patient_person_id": "d3bf28ad-416a-4041-b2e3-90df61ff24b5",
+    "assigned_doctor_user_id": "c8ba12ad-78c3-4fb5-a745-c0191e2e1813",
+    "created_at": "2026-09-11T15:09:13.810026+00:00",
+    "payload": {
+      "id": "1958c4a0-126c-4422-9a50-db7a24e029af",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "fad0d3b6-d91c-437f-96cb-e47be88feeb2",
+              "endDate": "2025-07-25",
+              "jobName": "재가요양보호사",
+              "presetId": null,
+              "startDate": "2010-09-25",
+              "workDaysPerYear": 243,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "테스트환자44",
+          "gender": "female",
+          "height": "155",
+          "weight": "47",
+          "diabetes": "yes",
+          "birthDate": "1986-08-05",
+          "diagnoses": [
+            {
+              "id": "280c5f50-7bba-4771-a8c0-4d83c0307914",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "klgRight": "1",
+              "reasonRight": [
+                "lowBurden"
+              ],
+              "confirmedRight": "confirmed",
+              "assessmentRight": "low",
+              "reasonRightOther": ""
+            },
+            {
+              "id": "262cb379-4475-44d3-a27c-5d2bde2f7b5e",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "klgLeft": "1",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high"
+            },
+            {
+              "id": "7061c909-d848-4b1d-90d3-0ad04f5c872a",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": "",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            }
+          ],
+          "patientNo": "STh9ng9z-0044",
+          "department": "",
+          "doctorName": "",
+          "injuryDate": "2025-07-25",
+          "hospitalName": "",
+          "specialNotes": "",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "evaluationDate": "2025-09-12",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": "yes"
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "stairs": false,
+                "weight": "1338",
+                "jumpDown": false,
+                "kneeTwist": true,
+                "squatting": "70",
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": false,
+                "sharedJobId": "fad0d3b6-d91c-437f-96cb-e47be88feeb2",
+                "evidenceSources": []
+              }
+            ],
+            "returnConsiderations": ""
+          },
+          "spine": {
+            "tasks": [
+              {
+                "id": 1,
+                "name": "환자 체위 변경",
+                "force": 0,
+                "weight": 29,
+                "posture": "G4",
+                "timeUnit": "sec",
+                "frequency": 49,
+                "timeValue": 11,
+                "sharedJobId": "fad0d3b6-d91c-437f-96cb-e47be88feeb2",
+                "correctionFactor": 1.2
+              },
+              {
+                "id": 2,
+                "name": "적재물 정리",
+                "force": 0,
+                "weight": 13,
+                "posture": "G7",
+                "timeUnit": "sec",
+                "frequency": 36,
+                "timeValue": 11,
+                "sharedJobId": "fad0d3b6-d91c-437f-96cb-e47be88feeb2",
+                "correctionFactor": 1
+              },
+              {
+                "id": 3,
+                "name": "적재물 정리",
+                "force": 0,
+                "weight": 33,
+                "posture": "G5",
+                "timeUnit": "sec",
+                "frequency": 41,
+                "timeValue": 14,
+                "sharedJobId": "fad0d3b6-d91c-437f-96cb-e47be88feeb2",
+                "correctionFactor": 1.1
+              }
+            ],
+            "formulaVersion": "v5.1.3",
+            "vibrationExposureStatus": "none"
+          }
+        },
+        "activeModules": [
+          "knee",
+          "spine"
+        ]
+      },
+      "phase": "evaluation",
+      "createdAt": "2025-07-25T09:43:00.000Z"
+    }
+  },
+  {
+    "id": "1c8e5f90-3200-4ccb-bc21-95737e1c9c3c",
+    "patient_person_id": "6ef45c5f-132f-4619-b45b-7f28dd4bc489",
+    "assigned_doctor_user_id": "c8ba12ad-78c3-4fb5-a745-c0191e2e1813",
+    "created_at": "2026-09-11T15:04:07.012493+00:00",
+    "payload": {
+      "id": "1c8e5f90-3200-4ccb-bc21-95737e1c9c3c",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "86cdd4d9-001e-47dc-aff1-b689d983ae12",
+              "endDate": "2024-04-15",
+              "jobName": "조선소 용접공",
+              "presetId": null,
+              "startDate": "2014-07-15",
+              "workDaysPerYear": 230,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "테스트환자30",
+          "gender": "female",
+          "height": "164",
+          "weight": "59",
+          "diabetes": "no",
+          "birthDate": "1966-11-06",
+          "diagnoses": [
+            {
+              "id": "4c6c7774-b0c8-4a3e-909d-c45033bfd289",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right"
+            },
+            {
+              "id": "c7b716d8-37de-4b8a-816c-a0f861239082",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left"
+            },
+            {
+              "id": "a58d642f-44ae-4467-a8e2-f49625d99301",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": ""
+            }
+          ],
+          "patientNo": "ST2q2xg3-0030",
+          "department": "",
+          "doctorName": "",
+          "injuryDate": "2024-04-15",
+          "hospitalName": "",
+          "specialNotes": "",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "evaluationDate": "",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": "no"
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "stairs": false,
+                "weight": "2784",
+                "jumpDown": false,
+                "kneeTwist": true,
+                "squatting": "7",
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": true,
+                "sharedJobId": "86cdd4d9-001e-47dc-aff1-b689d983ae12",
+                "evidenceSources": []
+              }
+            ],
+            "returnConsiderations": ""
+          },
+          "spine": {
+            "tasks": [
+              {
+                "id": 1,
+                "name": "환자 체위 변경",
+                "force": 0,
+                "weight": 22,
+                "posture": "G3",
+                "timeUnit": "sec",
+                "frequency": 63,
+                "timeValue": 11,
+                "sharedJobId": "86cdd4d9-001e-47dc-aff1-b689d983ae12",
+                "correctionFactor": 1.1
+              },
+              {
+                "id": 2,
+                "name": "상자 상하차",
+                "force": 0,
+                "weight": 15,
+                "posture": "G6",
+                "timeUnit": "sec",
+                "frequency": 69,
+                "timeValue": 14,
+                "sharedJobId": "86cdd4d9-001e-47dc-aff1-b689d983ae12",
+                "correctionFactor": 1.3
+              },
+              {
+                "id": 3,
+                "name": "부품 상자 이동",
+                "force": 0,
+                "weight": 23,
+                "posture": "G3",
+                "timeUnit": "sec",
+                "frequency": 47,
+                "timeValue": 6,
+                "sharedJobId": "86cdd4d9-001e-47dc-aff1-b689d983ae12",
+                "correctionFactor": 1.1
+              }
+            ],
+            "formulaVersion": "v5.1.3",
+            "vibrationIntervals": [
+              {
+                "id": 1,
+                "name": "진동 공구 사용",
+                "awMax": 1.01,
+                "awMin": 0.55,
+                "timeUnit": "hr",
+                "timeValue": 3,
+                "sharedJobId": "86cdd4d9-001e-47dc-aff1-b689d983ae12"
+              }
+            ],
+            "vibrationExposureStatus": "present"
+          }
+        },
+        "activeModules": [
+          "knee",
+          "spine"
+        ]
+      },
+      "phase": "evaluation",
+      "createdAt": "2024-04-15T09:29:00.000Z"
+    }
+  }
+]

@@ -282,6 +282,37 @@ export function validateRecipe(
     }
   }
 
+  // PR3-B §4/§7 — 상관행렬 타입정합성(전부 continuous)·method필수여부. zod
+  // superRefine(shared/contracts/stats.ts)은 variableKeys 개수·중복만 구조적으로
+  // 검사한다 — "전부 continuous"는 카탈로그 조회가 필요해 여기(의미 계층)의
+  // 책임이다. context==='analyze'일 때만 엄격하게 검사(preview는 관대함).
+  if (recipe.analysisMode === 'correlation_matrix' && context === 'analyze') {
+    if (!recipe.requestedMethod) {
+      errors.push({
+        code: 'CORRELATION_MATRIX_REQUIRES_METHOD',
+        path: 'requestedMethod',
+        message: '상관행렬 모드에서는 requestedMethod를 지정해야 한다',
+      });
+    } else if (!CORRELATION_METHODS.has(recipe.requestedMethod)) {
+      errors.push({
+        code: 'CORRELATION_MATRIX_METHOD_NOT_SUPPORTED',
+        path: 'requestedMethod',
+        message: `상관행렬은 pearson_correlation/spearman_correlation만 지원한다(요청: ${recipe.requestedMethod})`,
+      });
+    }
+    for (const key of recipe.variableKeys) {
+      const variable = catalogByKey.get(key);
+      // variable이 undefined면 UNKNOWN_VARIABLE로 이미 보고됨 — 중복 보고 방지.
+      if (variable && !isContinuousType(variable.type)) {
+        errors.push({
+          code: 'METHOD_TYPE_MISMATCH',
+          path: key,
+          message: `상관행렬은 연속형 변수만 지원한다(${key}는 type=${variable.type})`,
+        });
+      }
+    }
+  }
+
   if (errors.length > 0) {
     return { valid: false, errors };
   }

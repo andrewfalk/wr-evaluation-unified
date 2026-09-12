@@ -1,5 +1,11 @@
 import { useState } from 'react';
 import { describeStatsApiError } from './describeStatsError';
+import { Histogram } from '../charts/Histogram';
+import { BoxPlot } from '../charts/BoxPlot';
+import { HorizontalBarChart } from '../charts/HorizontalBarChart';
+import { StackedBarChart100 } from '../charts/StackedBarChart100';
+import { ScatterPlot } from '../charts/ScatterPlot';
+import { CorrelationHeatmap } from '../charts/CorrelationHeatmap';
 
 const NULL_REASON_LABELS = {
   insufficient_data: '자료 부족',
@@ -134,6 +140,46 @@ function DiscreteCard({ catalogByKey, row }) {
   );
 }
 
+// PR3-B — "분포" 탭 전용 차트 카드. summary 탭의 표 카드(ContinuousCard/
+// DiscreteCard)와 데이터 원본은 같지만 표시 형식만 다르다(계획서 §6.8 "모든
+// 분석 결과는 표와 그래프를 함께 낸다").
+function ContinuousDistributionCard({ catalogByKey, row }) {
+  if (row.suppressed) {
+    return (
+      <div className="swb-card">
+        <strong>{variableLabel(catalogByKey, row.variableKey)}</strong>
+        <p className="swb-suppressed-note">공개 정책에 따라 표시되지 않음</p>
+      </div>
+    );
+  }
+  return (
+    <div className="swb-card">
+      <strong>{variableLabel(catalogByKey, row.variableKey)}</strong>
+      <div className="swb-section-label">히스토그램</div>
+      <Histogram histogram={row.histogram} />
+      <div className="swb-section-label">박스플롯</div>
+      <BoxPlot boxplot={row.boxplot} />
+    </div>
+  );
+}
+
+function DiscreteDistributionCard({ catalogByKey, row }) {
+  if (row.suppressed) {
+    return (
+      <div className="swb-card">
+        <strong>{variableLabel(catalogByKey, row.variableKey)}</strong>
+        <p className="swb-suppressed-note">공개 정책에 따라 표시되지 않음</p>
+      </div>
+    );
+  }
+  return (
+    <div className="swb-card">
+      <strong>{variableLabel(catalogByKey, row.variableKey)}</strong>
+      <HorizontalBarChart levels={row.levels} />
+    </div>
+  );
+}
+
 // PR3-A — 이변량 결과 카드 공통 부분(억제·제외건수·품질플래그·다중검정 라벨).
 // method별로 다른 부분(GroupComparisonCard/ContingencyCard/CorrelationCard)만
 // 갈라서 렌더링한다 — 응답 shape 자체는 셋 다 동일하다(statistic/df/pValue/
@@ -207,6 +253,16 @@ function GroupBreakdownTable({ groupBreakdown, method }) {
           평균차·효과크기 방향 = {String(groupBreakdown[1].label)} − {String(groupBreakdown[0].label)}
         </p>
       )}
+      {/* PR3-B 계획서 §5/§6.8.2 — 연속×범주 기본 그래프(그룹별 박스플롯). boxplot이
+          없는 그룹(§1 게이트 실패 등)은 각자 억제 문구만 보여준다. */}
+      <div className="swb-group-boxplots">
+        {groupBreakdown.map((g) => (
+          <div key={String(g.label)} className="swb-group-boxplot">
+            <p className="swb-card-subtitle">{String(g.label)}</p>
+            <BoxPlot boxplot={g.boxplot} />
+          </div>
+        ))}
+      </div>
     </>
   );
 }
@@ -285,6 +341,8 @@ function ContingencyCard({ bivariate, catalogByKey, committedRecipe }) {
         <p className="swb-card-subtitle">행: {xLabel || '—'} · 열: {yLabel || '—'}</p>
       )}
       <ContingencyTable table={bivariate.contingencyTable} xLabel={xLabel} yLabel={yLabel} />
+      {/* PR3-B 계획서 §6.8.2 — 범주×범주 기본 그래프. */}
+      <StackedBarChart100 table={bivariate.contingencyTable} />
       <table className="swb-table">
         <tbody>
           <tr><th>n</th><td>{bivariate.n}</td><th>통계량</th><td>{fmt(bivariate.statistic)}</td></tr>
@@ -300,9 +358,6 @@ function ContingencyCard({ bivariate, catalogByKey, committedRecipe }) {
           ))}
         </tbody>
       </table>
-      {!bivariate.contingencyTable && (
-        <p className="swb-suppressed-note">개별 칸(셀) 수치는 표시하지 않습니다 — 집계 통계량만 공개됩니다.</p>
-      )}
       <BivariateFooter bivariate={bivariate} />
     </div>
   );
@@ -317,6 +372,8 @@ function CorrelationCard({ bivariate, catalogByKey, committedRecipe }) {
       {(xLabel || yLabel) && (
         <p className="swb-card-subtitle">x: {xLabel || '—'} · y: {yLabel || '—'}</p>
       )}
+      {/* PR3-B 계획서 §2/§6.8.2 — 연속×연속 기본 그래프(산점도+적합선). */}
+      <ScatterPlot scatter={bivariate.scatter} regressionLine={bivariate.regressionLine} />
       <table className="swb-table">
         <tbody>
           <tr><th>n</th><td>{bivariate.n}</td><th>계수</th><td>{es ? fmt(es.value) : '—'}</td></tr>
@@ -345,10 +402,33 @@ function BivariateResultCard({ bivariate, catalogByKey, committedRecipe }) {
   return <CorrelationCard bivariate={bivariate} catalogByKey={catalogByKey} committedRecipe={committedRecipe} />;
 }
 
-// PR3-B(차트 프리미티브)까지는 distribution 탭을 열지 않는다 — 이 계획 범위 밖.
+// PR3-B — 상관행렬(계획서 §4) 전용 결과 카드. 히트맵의 발산형 색은 r값(§6.8.3),
+// suppressed 셀은 사유 없이 불투명 처리(§4의 3단계 게이트가 이미 판정 완료).
+function CorrelationMatrixResultCard({ correlationMatrix, catalogByKey }) {
+  const labelOf = (key) => variableLabel(catalogByKey, key);
+  return (
+    <div className="swb-card">
+      <strong>상관행렬 — {METHOD_LABELS[correlationMatrix.method] || correlationMatrix.method}</strong>
+      <p className="swb-card-subtitle">
+        변수 {correlationMatrix.variableKeys.length}개 · {correlationMatrix.variableKeys.map(labelOf).join(', ')}
+      </p>
+      <CorrelationHeatmap
+        variableKeys={correlationMatrix.variableKeys}
+        cells={correlationMatrix.cells}
+        labelOf={labelOf}
+      />
+      <p className="swb-suppressed-note">
+        {correlationMatrix.adjustedPWithheld
+          ? '일부 쌍이 억제되어 다중검정 보정값(BH-FDR)은 행렬 전체에서 비공개 처리됩니다.'
+          : '다중검정 보정: BH-FDR(raw p와 보정 p 병기, 데이터 보기에서 확인)'}
+      </p>
+    </div>
+  );
+}
+
 const TABS = [
   { id: 'summary', label: '요약', enabled: true },
-  { id: 'distribution', label: '분포', enabled: false },
+  { id: 'distribution', label: '분포', enabled: true },
   { id: 'association', label: '연관성', enabled: true },
   { id: 'regression', label: '회귀', enabled: false },
 ];
@@ -363,6 +443,10 @@ export function ResultPanel({
   const catalogByKey = new Map((catalog?.variables ?? []).map((v) => [v.key, v]));
   const [activeTab, setActiveTab] = useState('summary');
   const isBivariateRun = committedRecipe?.analysisMode === 'bivariate';
+  // PR3-B — 상관행렬도 descriptive의 continuous/discrete 표를 안 쓰므로 이변량과
+  // 같은 분기 처리가 필요하다(요약 탭 메시지, export 잠금 등).
+  const isCorrelationMatrixRun = committedRecipe?.analysisMode === 'correlation_matrix';
+  const isDescriptiveRun = !isBivariateRun && !isCorrelationMatrixRun;
 
   return (
     <section className="swb-result" aria-label="결과">
@@ -387,9 +471,7 @@ export function ResultPanel({
         {!committedResult && <div className="swb-empty">좌측에서 변수를 선택하고 "분석 실행"을 눌러주세요.</div>}
 
         {committedResult && activeTab === 'summary' && (
-          isBivariateRun ? (
-            <p className="swb-suppressed-note">이변량 분석 결과는 "연관성" 탭에서 확인하세요.</p>
-          ) : (
+          isDescriptiveRun ? (
             <>
               <div className="swb-section-label">연속형</div>
               {committedResult.result.continuous.length === 0 && <p className="swb-suppressed-note">선택된 연속형 변수 없음</p>}
@@ -403,6 +485,30 @@ export function ResultPanel({
                 <DiscreteCard key={row.variableKey} catalogByKey={catalogByKey} row={row} />
               ))}
             </>
+          ) : (
+            <p className="swb-suppressed-note">
+              {isBivariateRun ? '이변량' : '상관행렬'} 분석 결과는 "연관성" 탭에서 확인하세요.
+            </p>
+          )
+        )}
+
+        {committedResult && activeTab === 'distribution' && (
+          isDescriptiveRun ? (
+            <>
+              <div className="swb-section-label">연속형 분포</div>
+              {committedResult.result.continuous.length === 0 && <p className="swb-suppressed-note">선택된 연속형 변수 없음</p>}
+              {committedResult.result.continuous.map((row) => (
+                <ContinuousDistributionCard key={row.variableKey} catalogByKey={catalogByKey} row={row} />
+              ))}
+
+              <div className="swb-section-label">이산형 분포</div>
+              {committedResult.result.discrete.length === 0 && <p className="swb-suppressed-note">선택된 이산형 변수 없음</p>}
+              {committedResult.result.discrete.map((row) => (
+                <DiscreteDistributionCard key={row.variableKey} catalogByKey={catalogByKey} row={row} />
+              ))}
+            </>
+          ) : (
+            <p className="swb-suppressed-note">기술통계(단변량) 모드로 분석을 실행하면 여기에 분포가 표시됩니다.</p>
           )
         )}
 
@@ -413,12 +519,17 @@ export function ResultPanel({
               catalogByKey={catalogByKey}
               committedRecipe={committedRecipe}
             />
+          ) : isCorrelationMatrixRun && committedResult.result.correlationMatrix ? (
+            <CorrelationMatrixResultCard
+              correlationMatrix={committedResult.result.correlationMatrix}
+              catalogByKey={catalogByKey}
+            />
           ) : (
-            <p className="swb-suppressed-note">이변량 모드로 분석을 실행하면 여기에 결과가 표시됩니다.</p>
+            <p className="swb-suppressed-note">이변량 또는 상관행렬 모드로 분석을 실행하면 여기에 결과가 표시됩니다.</p>
           )
         )}
 
-        {committedResult && !isBivariateRun && (
+        {committedResult && isDescriptiveRun && (
           <button
             type="button"
             className="swb-btn"
@@ -430,8 +541,10 @@ export function ResultPanel({
             {exportState.status === 'exporting' ? '내보내는 중…' : '집계 결과 내보내기 (CSV)'}
           </button>
         )}
-        {committedResult && isBivariateRun && (
-          <p className="swb-suppressed-note" style={{ marginTop: 12 }}>이변량 결과는 아직 CSV 내보내기를 지원하지 않습니다.</p>
+        {committedResult && !isDescriptiveRun && (
+          <p className="swb-suppressed-note" style={{ marginTop: 12 }}>
+            {isBivariateRun ? '이변량' : '상관행렬'} 결과는 아직 CSV 내보내기를 지원하지 않습니다.
+          </p>
         )}
         {exportState.status === 'error' && (
           <p className="swb-status-danger" style={{ whiteSpace: 'pre-wrap' }}>내보내기 실패: {describeStatsApiError(exportState.error)}</p>

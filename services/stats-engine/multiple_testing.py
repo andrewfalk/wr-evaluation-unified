@@ -40,3 +40,24 @@ def holm(pvalues: np.ndarray) -> np.ndarray:
     out = np.empty(m, dtype=np.float64)
     out[order] = adj_sorted
     return out
+
+
+def bh_fdr_with_missing(pvalues: list[float | None]) -> list[float | None]:
+    """PR3-B(상관행렬) 전용 — 계산 불가(None) pValue를 검정 집합에서 제외한 뒤
+    순수 bh_fdr()을 적용하고, 원래 위치에 다시 None을 채워 되돌린다(R
+    p.adjust()가 NA를 자동 제외하는 관례와 동일 — 계획서 §4 "BH 검정집합 정의").
+
+    이 함수는 person·반복측정 등 disclosure를 전혀 모른다 — Python이 자기 자신의
+    계산 가능 여부(pValue not None)만으로 판단한 m을 대상으로 한다. Node가 사후에
+    person 단위 소수셀·§6.1 게이트로 결정하는 억제는 이 계산에 관여하지 않는다
+    (계획서 §4의 3단계 순서 — Python은 disclosure를 모른 채 정직하게만 계산).
+    """
+    indices = [i for i, p in enumerate(pvalues) if p is not None]
+    if not indices:
+        return [None] * len(pvalues)
+    subset = np.array([pvalues[i] for i in indices], dtype=np.float64)
+    adjusted_subset = bh_fdr(subset)
+    result: list[float | None] = [None] * len(pvalues)
+    for idx, adj in zip(indices, adjusted_subset):
+        result[idx] = float(adj)
+    return result

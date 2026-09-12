@@ -10,6 +10,13 @@ PR3-A — protocolVersion을 2로 상향하고 이변량 요청 shape(`bivariate
 `variables`와 상호배타(oneOf)로 추가했다(계획서 § "Node→Python 3-shape").
 Node가 그룹핑/교차집계까지 전부 끝낸 뒤 보내므로, 이 파일은 여전히 person 단위
 소수 셀 판정이나 카탈로그 조회를 하지 않는다 — 순수 shape·상한 검증뿐이다.
+
+PR3-B — protocolVersion을 3으로 상향하고 상관행렬 요청 shape(`correlationMatrix`)
+을 기존 두 shape과 상호배타(oneOf)로 추가했다(계획서 §4 "Node-Python 연결계층").
+`_validate_bivariate_semantics`와 동일하게, oneOf 스키마가 표현 못 하는 교차필드
+검증(변수 키 중복·길이 일치 등)은 `_validate_correlation_matrix_semantics`로
+분리한다 — jsonschema의 `uniqueItems`는 객체 전체 비교라 "같은 key, 다른 values"
+를 못 잡으므로 `key`만 뽑아 별도로 중복 검사한다.
 """
 from __future__ import annotations
 
@@ -39,7 +46,7 @@ _VARIABLES_REQUEST_SCHEMA: dict[str, Any] = {
     "required": ["protocolVersion", "variables"],
     "additionalProperties": False,
     "properties": {
-        "protocolVersion": {"const": 2},
+        "protocolVersion": {"const": 3},
         "variables": {
             "type": "array",
             "items": {
@@ -71,7 +78,7 @@ _BIVARIATE_REQUEST_SCHEMA: dict[str, Any] = {
     "required": ["protocolVersion", "bivariate"],
     "additionalProperties": False,
     "properties": {
-        "protocolVersion": {"const": 2},
+        "protocolVersion": {"const": 3},
         "bivariate": {
             "type": "object",
             "required": ["method"],
@@ -104,7 +111,47 @@ _BIVARIATE_REQUEST_SCHEMA: dict[str, Any] = {
     },
 }
 
-REQUEST_SCHEMA: dict[str, Any] = {"oneOf": [_VARIABLES_REQUEST_SCHEMA, _BIVARIATE_REQUEST_SCHEMA]}
+_CORRELATION_MATRIX_METHODS = ("pearson_correlation", "spearman_correlation")
+
+_CORRELATION_MATRIX_REQUEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["protocolVersion", "correlationMatrix"],
+    "additionalProperties": False,
+    "properties": {
+        "protocolVersion": {"const": 3},
+        "correlationMatrix": {
+            "type": "object",
+            "required": ["method", "variables"],
+            "additionalProperties": False,
+            "properties": {
+                "method": {"enum": list(_CORRELATION_MATRIX_METHODS)},
+                "variables": {
+                    "type": "array",
+                    "minItems": 3,
+                    "items": {
+                        "type": "object",
+                        "required": ["key", "values"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "key": {"type": "string", "minLength": 1},
+                            "values": {
+                                # row-aligned — 결측은 null(pairwise-complete
+                                # 필터링은 Python이 pair마다 수행한다).
+                                "type": "array",
+                                "maxItems": MAX_VALUES_PER_VARIABLE,
+                                "items": {"anyOf": [{"type": "number"}, {"type": "null"}]},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+}
+
+REQUEST_SCHEMA: dict[str, Any] = {
+    "oneOf": [_VARIABLES_REQUEST_SCHEMA, _BIVARIATE_REQUEST_SCHEMA, _CORRELATION_MATRIX_REQUEST_SCHEMA],
+}
 
 
 class ProtocolError(Exception):
@@ -138,8 +185,43 @@ def parse_and_validate_request(raw: str) -> dict[str, Any]:
             )
         return data
 
+    if "correlationMatrix" in data:
+        _validate_correlation_matrix_semantics(data["correlationMatrix"])
+        return data
+
     _validate_bivariate_semantics(data["bivariate"])
     return data
+
+
+def _validate_correlation_matrix_semantics(correlation_matrix: dict[str, Any]) -> None:
+    """oneOf 스키마가 표현 못 하는 교차필드 검증(PR3-B 계획서 §4/§7) —
+    `_validate_bivariate_semantics`와 같은 구조/의미 분리 패턴. jsonschema의
+    `uniqueItems`는 객체 전체를 비교하므로 "같은 key, 다른 values" 조합을 못
+    잡는다 — `key`만 뽑아 `set()`으로 별도 검사한다."""
+    variables = correlation_matrix["variables"]
+
+    keys = [v["key"] for v in variables]
+    if len(keys) != len(set(keys)):
+        raise ProtocolError("INVALID_INPUT", "correlationMatrix.variables의 key가 중복된다")
+
+    lengths = {len(v["values"]) for v in variables}
+    if len(lengths) > 1:
+        raise ProtocolError("INVALID_INPUT", "correlationMatrix.variables의 값 배열 길이가 서로 다르다")
+
+    # 값 개수 상한은 기존 "variables" shape와 동일한 MAX_TOTAL_VALUES를 재사용한다
+    # (계획서 §8 — 상관행렬 전용 새 상수를 두지 않는다). 바이트 길이 상한은
+    # server/src/statsEngine.ts가 stdin 전송 전에 이미 검사한다(§8, 이중 검사).
+    total_values = sum(len(v["values"]) for v in variables)
+    if total_values > MAX_TOTAL_VALUES:
+        raise ProtocolError(
+            "LIMIT_EXCEEDED",
+            f"correlationMatrix 전체 값 개수 합({total_values})이 상한({MAX_TOTAL_VALUES})을 초과",
+        )
+
+    for v in variables:
+        for value in v["values"]:
+            if value is not None and not _is_finite_number(value):
+                raise ProtocolError("INVALID_INPUT", "correlationMatrix.variables 값에 유한하지 않은 수가 있다")
 
 
 def _validate_bivariate_semantics(bivariate: dict[str, Any]) -> None:

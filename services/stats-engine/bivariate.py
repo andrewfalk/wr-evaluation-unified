@@ -23,6 +23,10 @@
       "extra": {...}   # cramers_v 등 검정별 부속 지표
     }
 
+pearson_correlation/spearman_correlation은 위 envelope에 형제 필드
+"regressionLine": {"slope": float, "intercept": float} | None 을 추가로 얹는다
+(PR3-B, extra 안에 넣지 않음 — extra는 효과크기 shape 전용). spearman은 항상 None.
+
 CI_CONFIDENCE_LEVEL=0.95 고정(계획서 §Python엔진).
 """
 from __future__ import annotations
@@ -32,6 +36,8 @@ from typing import Any
 
 import numpy as np
 from scipy import stats as scipy_stats
+
+from boxplot import compute_boxplot
 
 CI_CONFIDENCE_LEVEL = 0.95
 _Z_CRIT = float(scipy_stats.norm.ppf(1 - (1 - CI_CONFIDENCE_LEVEL) / 2))  # ≈1.959964
@@ -90,6 +96,35 @@ def _group_arrays(groups: list[dict[str, Any]]) -> list[np.ndarray]:
     return [np.asarray(g["values"], dtype=np.float64) for g in groups]
 
 
+def _group_boxplot(values: list[float]) -> dict[str, Any] | None:
+    """그룹비교 카드의 그룹별 박스플롯(PR3-B 계획서 §5) — descriptive.py의
+    compute_continuous()와 동일한 method="linear" Q1/Q3로 boxplot.py::
+    compute_boxplot()를 재사용 호출한다(재구현 아님). n==0은 이론상 안 옴
+    (groupPairsByLevel이 관측 0건 레벨을 애초에 groups에 안 넣음)이지만 방어적으로
+    None 처리."""
+    n = len(values)
+    if n == 0:
+        return None
+    x = np.asarray(values, dtype=np.float64)
+    if n == 1:
+        v = float(x[0])
+        return compute_boxplot(values, v, v, v)
+    q1, median, q3 = (float(v) for v in np.percentile(x, [25, 50, 75], method="linear"))
+    return compute_boxplot(values, q1, median, q3)
+
+
+def _group_boxplots(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{"label": g["label"], "boxplot": _group_boxplot(g["values"])} for g in groups]
+
+
+def _with_group_boxplots(result: dict[str, Any], groups: list[dict[str, Any]]) -> dict[str, Any]:
+    """그룹비교 4개 함수(welch_t/mann_whitney/anova/kruskal_wallis)의 모든 반환
+    지점(조기 반환 포함)에 groupBoxplots를 형제 필드로 얹는다 — 억제 여부(§B-1/B-2)
+    와 무관하게 Python은 항상 정직하게 계산만 하고, 노출 여부는 Node가 결정한다."""
+    result["groupBoxplots"] = _group_boxplots(groups)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # 그룹비교 — 정확히 2그룹
 # ---------------------------------------------------------------------------
@@ -103,11 +138,11 @@ def welch_t(groups: list[dict[str, Any]]) -> dict[str, Any]:
     n = n1 + n2
 
     if n1 < 2 or n2 < 2:
-        return _envelope(n, None, None, None, [], {"statistic": INSUFFICIENT_GROUP_DATA})
+        return _with_group_boxplots(_envelope(n, None, None, None, [], {"statistic": INSUFFICIENT_GROUP_DATA}), groups)
 
     var1, var2 = float(np.var(x1, ddof=1)), float(np.var(x2, ddof=1))
     if var1 == 0.0 or var2 == 0.0:
-        return _envelope(n, None, None, None, [], {"statistic": CONSTANT_VARIABLE})
+        return _with_group_boxplots(_envelope(n, None, None, None, [], {"statistic": CONSTANT_VARIABLE}), groups)
 
     mean1, mean2 = float(np.mean(x1)), float(np.mean(x2))
     mean_diff = mean2 - mean1
@@ -138,14 +173,14 @@ def welch_t(groups: list[dict[str, Any]]) -> dict[str, Any]:
     g_t_crit = float(scipy_stats.t.ppf(1 - (1 - CI_CONFIDENCE_LEVEL) / 2, df_pooled))
     g_ci = (g - g_t_crit * se_g, g + g_t_crit * se_g)
 
-    return _envelope(
+    return _with_group_boxplots(_envelope(
         n, t_stat, df, p_value,
         [
             _effect_size("mean_difference", mean_diff, diff_ci),
             _effect_size("hedges_g", g, g_ci),
         ],
         {},
-    )
+    ), groups)
 
 
 def mann_whitney(groups: list[dict[str, Any]]) -> dict[str, Any]:
@@ -155,7 +190,7 @@ def mann_whitney(groups: list[dict[str, Any]]) -> dict[str, Any]:
     n = n1 + n2
 
     if n1 < 1 or n2 < 1:
-        return _envelope(n, None, None, None, [], {"statistic": INSUFFICIENT_GROUP_DATA})
+        return _with_group_boxplots(_envelope(n, None, None, None, [], {"statistic": INSUFFICIENT_GROUP_DATA}), groups)
 
     u_stat, p_value = scipy_stats.mannwhitneyu(
         x2, x1, alternative="two-sided", method="asymptotic", use_continuity=True,
@@ -165,11 +200,11 @@ def mann_whitney(groups: list[dict[str, Any]]) -> dict[str, Any]:
     # §방향규칙 "뒤-앞"과 부호를 일치시킴, welch_t의 mean_difference와 동일 방향).
     rank_biserial = (2 * float(u_stat)) / (n1 * n2) - 1
 
-    return _envelope(
+    return _with_group_boxplots(_envelope(
         n, float(u_stat), None, float(p_value),
         [_effect_size("rank_biserial", rank_biserial)],
         {},
-    )
+    ), groups)
 
 
 def anova(groups: list[dict[str, Any]]) -> dict[str, Any]:
@@ -181,16 +216,16 @@ def anova(groups: list[dict[str, Any]]) -> dict[str, Any]:
     n = sum(len(a) for a in arrays)
 
     if k < 2:
-        return _envelope(n, None, None, None, [], {"statistic": INSUFFICIENT_GROUP_DATA})
+        return _with_group_boxplots(_envelope(n, None, None, None, [], {"statistic": INSUFFICIENT_GROUP_DATA}), groups)
     if any(len(a) < 2 for a in arrays):
-        return _envelope(n, None, None, None, [], {"statistic": INSUFFICIENT_GROUP_DATA})
+        return _with_group_boxplots(_envelope(n, None, None, None, [], {"statistic": INSUFFICIENT_GROUP_DATA}), groups)
 
     ns = np.array([len(a) for a in arrays], dtype=np.float64)
     means = np.array([float(np.mean(a)) for a in arrays])
     variances = np.array([float(np.var(a, ddof=1)) for a in arrays])
 
     if np.any(variances == 0.0):
-        return _envelope(n, None, None, None, [], {"statistic": CONSTANT_VARIABLE})
+        return _with_group_boxplots(_envelope(n, None, None, None, [], {"statistic": CONSTANT_VARIABLE}), groups)
 
     weights = ns / variances
     w_sum = float(np.sum(weights))
@@ -214,11 +249,11 @@ def anova(groups: list[dict[str, Any]]) -> dict[str, Any]:
     ss_total = float(np.sum((all_values - grand_mean) ** 2))
     eta_squared = ss_between / ss_total if ss_total > 0 else None
 
-    return _envelope(
+    return _with_group_boxplots(_envelope(
         n, f_stat, {"numerator": df1, "denominator": df2}, p_value,
         [_effect_size("eta_squared", eta_squared, ci_unavailable_reason="not_supported_v1")],
         {},
-    )
+    ), groups)
 
 
 def kruskal_wallis(groups: list[dict[str, Any]]) -> dict[str, Any]:
@@ -227,20 +262,20 @@ def kruskal_wallis(groups: list[dict[str, Any]]) -> dict[str, Any]:
     n = sum(len(a) for a in arrays)
 
     if k < 2:
-        return _envelope(n, None, None, None, [], {"statistic": INSUFFICIENT_GROUP_DATA})
+        return _with_group_boxplots(_envelope(n, None, None, None, [], {"statistic": INSUFFICIENT_GROUP_DATA}), groups)
 
     all_values = np.concatenate(arrays)
     if np.all(all_values == all_values[0]):
-        return _envelope(n, None, None, None, [], {"statistic": CONSTANT_VARIABLE})
+        return _with_group_boxplots(_envelope(n, None, None, None, [], {"statistic": CONSTANT_VARIABLE}), groups)
 
     h_stat, p_value = scipy_stats.kruskal(*arrays)
     epsilon_squared = float(h_stat) / ((n ** 2 - 1) / (n + 1))
 
-    return _envelope(
+    return _with_group_boxplots(_envelope(
         n, float(h_stat), k - 1, float(p_value),
         [_effect_size("epsilon_squared", epsilon_squared, ci_unavailable_reason="not_supported_v1")],
         {},
-    )
+    ), groups)
 
 
 # ---------------------------------------------------------------------------
@@ -324,17 +359,32 @@ def pearson_correlation(x: list[float], y: list[float]) -> dict[str, Any]:
 
     if n < 3 or np.all(xa == xa[0]) or np.all(ya == ya[0]):
         reason = CONSTANT_VARIABLE if n >= 3 else INSUFFICIENT_DATA
-        return _envelope(n, None, None, None, [], {"statistic": reason})
+        result = _envelope(n, None, None, None, [], {"statistic": reason})
+        result["regressionLine"] = None
+        return result
 
     r, p_value = scipy_stats.pearsonr(xa, ya)
     r = float(r)
     ci, ci_reason = _correlation_ci(r, n, lambda _r, _n: 1 / math.sqrt(_n - 3))
 
-    return _envelope(
+    # 산점도 적합선(PR3-B 계획서 §7/§11) — slope = r * sd_y/sd_x, intercept는
+    # 평균점을 지나도록 역산. r/sd가 이미 계산돼 있어 추가 비용이 거의 없다.
+    # CI band는 v1 범위 밖(계획서 §7 — band 폭 자체가 점 밀도를 간접 노출할
+    # 수 있어 새 공개통제 검토가 필요하므로 후속 PR로 이연). regressionLine은
+    # extra(효과크기 record) 안이 아니라 형제 필드다 — extra는 모든 값이
+    # {name,value,ci,ciUnavailableReason} shape이어야 해서 {slope,intercept}를
+    # 그대로 넣을 수 없다(statsEngine.ts의 StatsEngineEffectSizeSchema 확인).
+    sd_x, sd_y = float(np.std(xa, ddof=1)), float(np.std(ya, ddof=1))
+    slope = (r * sd_y / sd_x) if sd_x > 0 else None
+    intercept = (float(np.mean(ya)) - slope * float(np.mean(xa))) if slope is not None else None
+
+    result = _envelope(
         n, r, n - 2, float(p_value),
         [_effect_size("pearson_r", r, ci, ci_reason)],
         {},
     )
+    result["regressionLine"] = {"slope": slope, "intercept": intercept} if slope is not None else None
+    return result
 
 
 def spearman_correlation(x: list[float], y: list[float]) -> dict[str, Any]:
@@ -343,7 +393,9 @@ def spearman_correlation(x: list[float], y: list[float]) -> dict[str, Any]:
 
     if n < 3 or np.all(xa == xa[0]) or np.all(ya == ya[0]):
         reason = CONSTANT_VARIABLE if n >= 3 else INSUFFICIENT_DATA
-        return _envelope(n, None, None, None, [], {"statistic": reason})
+        result = _envelope(n, None, None, None, [], {"statistic": reason})
+        result["regressionLine"] = None
+        return result
 
     rho, p_value = scipy_stats.spearmanr(xa, ya)
     rho = float(rho)
@@ -352,8 +404,11 @@ def spearman_correlation(x: list[float], y: list[float]) -> dict[str, Any]:
         rho, n, lambda _r, _n: math.sqrt((1 + (_r ** 2) / 2) / (_n - 3)),
     )
 
-    return _envelope(
+    result = _envelope(
         n, rho, n - 2, float(p_value),
         [_effect_size("spearman_rho", rho, ci, ci_reason)],
         {},
     )
+    # 순위 기반이라 선형 적합의 해석이 애매 — 적합선을 아예 안 만든다(계획서 §7).
+    result["regressionLine"] = None
+    return result
