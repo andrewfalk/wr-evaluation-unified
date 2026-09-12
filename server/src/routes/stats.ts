@@ -4,8 +4,9 @@
 // buildAnalysisContext()를 공유한다(순수 추출, 계획서 pr1-giggly-treehouse.md §4.1).
 import { Router, type Request, type Response } from 'express';
 import type { Pool } from 'pg';
-import { getFullVariableCatalog, CATALOG_VERSION } from '@wr/analytics-core/catalog';
+import { INTEGRATED_CATALOG_VERSION } from '../statsCatalogVersion';
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
+import { getIntegratedCatalog } from '../statsCatalog';
 import {
   type CatalogResponse,
   type CatalogVariable,
@@ -29,7 +30,21 @@ import { handlePostExport } from '../statsExportHandler';
 const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
 const CASE_GRAIN = 'case' as const;
+// PR0-B3 Part A는 vibration_interval을, Part B는 diagnosis_side를, Part C는 job을
+// 추가했다. job_diagnosis는 계획상 이번 확장에서 전부 제외, task는 Part C의 다음
+// 슬라이스에서 추가한다(statsRecipeValidation.ts의 SUPPORTED_GRAINS와 반드시 같은 목록을 유지할 것).
+const VIBRATION_INTERVAL_GRAIN = 'vibration_interval' as const;
+const DIAGNOSIS_SIDE_GRAIN = 'diagnosis_side' as const;
+const JOB_GRAIN = 'job' as const;
+const TASK_GRAIN = 'task' as const;
 const ALL_GRAINS = ['person', 'case', 'diagnosis_side', 'job', 'job_diagnosis', 'task', 'vibration_interval'] as const;
+const SUPPORTED_GRAINS_SET = new Set<(typeof ALL_GRAINS)[number]>([
+  CASE_GRAIN,
+  VIBRATION_INTERVAL_GRAIN,
+  DIAGNOSIS_SIDE_GRAIN,
+  JOB_GRAIN,
+  TASK_GRAIN,
+]);
 
 function toCatalogVariableDto(v: AnalyticsVariableMetadata): CatalogVariable {
   return {
@@ -49,16 +64,17 @@ function toCatalogVariableDto(v: AnalyticsVariableMetadata): CatalogVariable {
     formulaFamily: v.formulaFamily,
     supportedFormulaPolicies: v.supportedFormulaPolicies,
     formulaVersionKey: v.formulaVersionKey ?? null,
+    analysisRole: v.analysisRole ?? 'analyzable',
   };
 }
 
 async function handleGetCatalog(_req: Request, res: Response): Promise<void> {
-  const variables = getFullVariableCatalog().map(toCatalogVariableDto);
+  const variables = getIntegratedCatalog().map(toCatalogVariableDto);
   const response: CatalogResponse = {
-    catalogVersion: CATALOG_VERSION,
+    catalogVersion: INTEGRATED_CATALOG_VERSION,
     variables,
-    supportedGrains: [CASE_GRAIN],
-    unsupportedGrains: ALL_GRAINS.filter((g) => g !== CASE_GRAIN).map((grain) => ({
+    supportedGrains: Array.from(SUPPORTED_GRAINS_SET),
+    unsupportedGrains: ALL_GRAINS.filter((g) => !SUPPORTED_GRAINS_SET.has(g)).map((grain) => ({
       grain,
       reasonCode: 'GRAIN_NOT_YET_SUPPORTED' as const,
     })),

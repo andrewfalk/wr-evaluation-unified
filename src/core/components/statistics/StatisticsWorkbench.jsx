@@ -14,8 +14,12 @@ import '../charts/charts.css';
 // 조건 키에 포함 — method를 바꾸면 preview가 재실행돼야 새 availableMethods 판정을
 // 받을 수 있다(단, requestedMethod가 아직 없어도(undefined) 유효한 조건 키를 만들어야
 // 최초 preview가 발사된다 — 순환의존 방지, 계획서 §"이슈1 — 필수수정, 재발 방지").
-function buildConditionKey(analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters) {
+// PR0-B3 Part A — grain을 조건 키에 추가한다. 안 하면 grain을 바꿔도(예: case →
+// vibration_interval) 다른 필드가 전부 동일할 경우 조건 키가 안 바뀌어 preview가
+// 재실행되지 않는다(계획 pr0-b3-shimmying-magpie.md "Grain 선택 UI" 절).
+function buildConditionKey(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters) {
   return JSON.stringify({
+    grain,
     analysisMode,
     variableKeys: analysisMode === 'bivariate' ? variableKeys : [...variableKeys].sort(),
     requestedMethod: requestedMethod ?? null,
@@ -25,9 +29,9 @@ function buildConditionKey(analysisMode, variableKeys, requestedMethod, analysis
   });
 }
 
-function buildRecipe(analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters) {
+function buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters) {
   return {
-    grain: 'case',
+    grain,
     variableKeys,
     filters: appliedFilters,
     analysisPurpose,
@@ -131,7 +135,12 @@ export function StatisticsWorkbench({
     [catalogState.data],
   );
 
+  // PR0-B3 Part A — GET /catalog가 실제로 지원한다고 응답한 grain만 선택지로 노출한다.
+  // 아직 로딩 중이면 'case'만 있다고 가정(기존 동작과 동일하게 안전한 기본값).
+  const supportedGrains = catalogState.data?.supportedGrains ?? ['case'];
+
   // ---- draft recipe state ----
+  const [grain, setGrain] = useState('case');
   const [variableKeys, setVariableKeys] = useState([]);
   const [analysisPurpose, setAnalysisPurpose] = useState('association');
   const [formulaPolicies, setFormulaPolicies] = useState({});
@@ -141,6 +150,18 @@ export function StatisticsWorkbench({
   const [analysisMode, setAnalysisMode] = useState('descriptive');
   const [requestedMethod, setRequestedMethod] = useState(null);
   const [modeChangeBlockedNotice, setModeChangeBlockedNotice] = useState(false);
+
+  // PR0-B3 Part A — grain을 바꾸면 이전 grain에서 고른 변수·필터·method가 새 grain에는
+  // 안 맞을 수 있어 전부 초기화한다(후보 목록을 grain으로 거르는 것과는 별개 — 후보를
+  // 숨기는 것만으로는 이미 선택된 상태가 지워지지 않는다).
+  function handleGrainChange(nextGrain) {
+    if (nextGrain === grain) return;
+    setGrain(nextGrain);
+    setVariableKeys([]);
+    setFilterDraft([]);
+    setAppliedFilters([]);
+    setRequestedMethod(null);
+  }
 
   function toggleVariable(key) {
     setVariableKeys((prev) => {
@@ -168,7 +189,7 @@ export function StatisticsWorkbench({
   }
 
   // ---- preview: 조건-key(무엇을 위한 결과인가) + 요청세대(그 요청 인스턴스가 최신인가) ----
-  const currentConditionKey = buildConditionKey(analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters);
+  const currentConditionKey = buildConditionKey(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters);
   const [previewState, setPreviewState] = useState({ key: null, status: 'idle', result: null, error: null });
   const previewGenRef = useRef(0);
 
@@ -186,7 +207,7 @@ export function StatisticsWorkbench({
         // PR3-A — preview는 requestedMethod를 참고만 하고 유효성을 검사하지 않는다
         // (서버가 관대함, 계획서 §파이프라인 "preview는 관대하다") — method 미선택
         // 상태에서도 이 호출은 정상적으로 나가야 availableMethods를 받아올 수 있다.
-        const recipe = buildRecipe(analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters);
+        const recipe = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters);
         const res = await previewStatsAnalysis(recipe, session, { signal: controller.signal });
         if (gen !== previewGenRef.current) return;
         setPreviewState((prev) => (prev.key === key ? { key, status: 'ready', result: res, error: null } : prev));
@@ -243,7 +264,7 @@ export function StatisticsWorkbench({
   async function handleRunAnalyze() {
     if (!canExecute || analyzeInFlightRef.current) return;
     analyzeInFlightRef.current = true;
-    const recipeAtSubmit = buildRecipe(analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters);
+    const recipeAtSubmit = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters);
     setIsAnalyzing(true);
     setAnalyzeError(null);
     try {
@@ -260,7 +281,7 @@ export function StatisticsWorkbench({
   }
 
   const recipeChanged = committedRecipe
-    ? JSON.stringify(buildRecipe(analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters)) !== JSON.stringify(committedRecipe)
+    ? JSON.stringify(buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters)) !== JSON.stringify(committedRecipe)
     : false;
 
   // ---- export ----
@@ -324,6 +345,7 @@ export function StatisticsWorkbench({
         <div className="swb-row">
           <CatalogPanel
             catalog={catalogState.data}
+            grain={grain}
             selectedKeys={variableKeys}
             onToggleVariable={toggleVariable}
             collapsed={catalogCollapsed}
@@ -331,6 +353,10 @@ export function StatisticsWorkbench({
           />
           <RecipePanel
             catalog={catalogState.data}
+            grain={grain}
+            supportedGrains={supportedGrains}
+            unsupportedGrains={catalogState.data?.unsupportedGrains ?? []}
+            onGrainChange={handleGrainChange}
             selectedKeys={variableKeys}
             onRemoveVariable={toggleVariable}
             analysisMode={analysisMode}

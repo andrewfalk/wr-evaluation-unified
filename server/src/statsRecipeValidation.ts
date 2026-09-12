@@ -2,9 +2,19 @@
 // 식별자 제한·분석 목적·필터 연산자/값 형태/타입 일치·formulaPolicy 유효성을 검사한다.
 // zod(shared/contracts/stats.ts)는 구조만 검사하고, 여기서는 카탈로그 메타데이터를
 // 참조해야 하는 동적 검사(변수 type별 허용 연산자·값 타입 등)를 한다.
-import { getFullVariableCatalog } from '@wr/analytics-core/catalog';
+import { getIntegratedCatalog } from './statsCatalog';
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
 import type { StatsAnalysisRecipe, StatsFilter, StatsFilterOperator } from '@wr/contracts';
+
+// PR0-B3 Part A는 vibration_interval을, Part B는 diagnosis_side를, Part C는 job/task를
+// 추가했다. job_diagnosis는 계획상 이번 확장에서 전부 제외한다(계획 pr0-b3-shimmying-magpie.md).
+const SUPPORTED_GRAINS: ReadonlySet<StatsAnalysisRecipe['grain']> = new Set([
+  'case',
+  'vibration_interval',
+  'diagnosis_side',
+  'job',
+  'task',
+]);
 
 export interface RecipeValidationError {
   code: string;
@@ -29,16 +39,28 @@ const TYPE_ALLOWED_OPERATORS: Record<AnalyticsVariableMetadata['type'], StatsFil
   boolean: ['eq', 'neq', 'is_missing', 'not_missing'],
 };
 
+// §A-5 date 계약(2026-09-12 리뷰 보완) — Date.parse는 '2024/01/15'·'2024-01-15T00:00:00Z'
+// 등 여러 형식을 느슨하게 통과시키는데, 실제 데이터셋 값(statsSnapshotColumnVariables.ts의
+// toIsoDateOnly)은 항상 'YYYY-MM-DD'다. 검증과 실제 비교(statsDatasetBuilder.ts의
+// matchesFilter, 문자열 그대로 비교)가 서로 다른 형식 기준을 쓰면 검증은 통과했는데 실제
+// 매치는 0건이 되는 조용한 오탐이 생긴다(제거해야 할 사례가 그대로 남거나, 있어야 할
+// 결과가 사라짐) — 형식을 이 한 가지로 고정하고, 존재하지 않는 달력 날짜(예: 2024-02-30)
+// 도 실제 날짜 왕복으로 걸러낸다.
+const ISO_DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+function isValidIsoDateOnly(value: string): boolean {
+  if (!ISO_DATE_ONLY_RE.test(value)) return false;
+  const [y, m, d] = value.split('-').map(Number);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
+}
+
 function isValueOfType(type: AnalyticsVariableMetadata['type'], value: unknown): boolean {
   switch (type) {
     case 'continuous':
       return typeof value === 'number' && Number.isFinite(value);
     case 'date':
-      // §A-5 date 캐비엇 — Date.parse 성공만으로는 형식·타임존을 고정하지 못한다. 현재
-      // 카탈로그에 date 타입 변수가 0개라 이 분기는 실행되지 않는 죽은 코드다. 실제로
-      // date 변수가 추가되기 전에 엄격한 날짜 계약(고정 포맷·명시적 타임존)을 먼저
-      // 정의해야 한다.
-      return typeof value === 'string' && !Number.isNaN(Date.parse(value));
+      return typeof value === 'string' && isValidIsoDateOnly(value);
     case 'categorical':
     case 'ordinal':
     case 'high_cardinality':
@@ -159,15 +181,19 @@ export function validateRecipe(
 ): RecipeValidationResult {
   const errors: RecipeValidationError[] = [];
 
-  // §A-1 grain — case 아니면 조기 반환(이후 검증은 case grain을 전제하므로 의미가 없다).
-  if (recipe.grain !== 'case') {
+  // §A-1 grain — 미지원 grain이면 조기 반환(이후 검증은 지원 grain을 전제하므로 의미가 없다).
+  if (!SUPPORTED_GRAINS.has(recipe.grain)) {
     return {
       valid: false,
-      errors: [{ code: 'GRAIN_NOT_YET_SUPPORTED', path: 'grain', message: `grain "${recipe.grain}"은 아직 지원하지 않는다 — 지원: case` }],
+      errors: [{
+        code: 'GRAIN_NOT_YET_SUPPORTED',
+        path: 'grain',
+        message: `grain "${recipe.grain}"은 아직 지원하지 않는다 — 지원: ${Array.from(SUPPORTED_GRAINS).join(', ')}`,
+      }],
     };
   }
 
-  const catalog = getFullVariableCatalog();
+  const catalog = getIntegratedCatalog();
   const catalogByKey = new Map(catalog.map((v) => [v.key, v]));
 
   const filterKeys = recipe.filters.map((f) => f.key);
@@ -180,11 +206,40 @@ export function validateRecipe(
     }
   }
 
+  // PR0-B3 Part A — VARIABLE_GRAIN_MISMATCH: 분석 변수뿐 아니라 필터 키도 grain이 다르면
+  // 거절한다(neededKeys는 variableKeys ∪ filters[].key 합집합, §A-2와 동일 대상). 한
+  // recipe는 한 grain만 다룬다 — 교차 grain은 §2.1 roll-up으로 올려서 참여해야 하며 이번
+  // 범위 밖이다.
+  for (const key of neededKeys) {
+    const variable = catalogByKey.get(key);
+    if (variable && variable.grain !== recipe.grain) {
+      errors.push({
+        code: 'VARIABLE_GRAIN_MISMATCH',
+        path: key,
+        message: `${key}는 grain "${variable.grain}"인데 recipe.grain은 "${recipe.grain}"이다`,
+      });
+    }
+  }
+
   // §A-3 식별자 제한(방어적 — 현재 카탈로그엔 direct_identifier가 0건)
   for (const key of neededKeys) {
     const variable = catalogByKey.get(key);
     if (variable && variable.sensitivity === 'direct_identifier') {
       errors.push({ code: 'IDENTIFIER_NOT_ALLOWED', path: key, message: `직접식별자 변수는 어떤 grain에서도 사용할 수 없다: ${key}` });
+    }
+  }
+
+  // PR0-B3 Part C — 필터 전용 변수 계약. filter_only 변수(예: 등록일)는 filters[]에서만
+  // 쓸 수 있고 variableKeys(분석 대상)에는 올 수 없다 — grain 검사와 별개 축이라 위
+  // VARIABLE_GRAIN_MISMATCH 검사와 독립적으로 검사한다.
+  for (const key of recipe.variableKeys) {
+    const variable = catalogByKey.get(key);
+    if (variable && variable.analysisRole === 'filter_only') {
+      errors.push({
+        code: 'FILTER_ONLY_VARIABLE_NOT_ANALYZABLE',
+        path: key,
+        message: `${key}는 필터 전용 변수라 분석 변수(variableKeys)로 쓸 수 없다 — 필터로만 사용하라`,
+      });
     }
   }
 

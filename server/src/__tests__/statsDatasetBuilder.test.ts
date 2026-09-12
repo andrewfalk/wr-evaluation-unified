@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { buildDataset, matchesFilter } from '../statsDatasetBuilder';
 import { getFullVariableCatalog } from '@wr/analytics-core/catalog';
+import { getIntegratedCatalog } from '../statsCatalog';
 import type { SnapshotRow } from '../statsSnapshot';
 import type { StatsAnalysisRecipe, StatsFilter } from '@wr/contracts';
 import type { ExtractedValue } from '@wr/analytics-core';
 
 const CATALOG_BY_KEY = new Map(getFullVariableCatalog().map((v) => [v.key, v]));
+const INTEGRATED_CATALOG_BY_KEY = new Map(getIntegratedCatalog().map((v) => [v.key, v]));
 const RECIPE_DIGEST = 'test-recipe-digest';
 
 function makeSnapshotRow(id: string, personId: string, overrides: Partial<SnapshotRow['payload']> = {}): SnapshotRow {
@@ -142,6 +144,71 @@ describe('buildDataset — 담당의 cluster 수', () => {
     ];
     const result = buildDataset(rows, recipe(), RECIPE_DIGEST, CATALOG_BY_KEY);
     expect(result.distinctAssignedDoctorClusters).toBe(2);
+  });
+});
+
+// PR0-B3 Part C-2 — 담당의(case.staff.assignedDoctorUserId)·등록일(case.meta.registeredAt)은
+// payload가 아니라 SnapshotRow 컬럼에서 직접 온다(analytics-core를 거치지 않음). 일반
+// analytics-core 전용 카탈로그(CATALOG_BY_KEY)가 아니라 통합 카탈로그를 써야 한다
+// (실제 서버 경로가 validateRecipe→getIntegratedCatalog()로 만드는 catalogByKey를 그대로
+// 넘기는 것과 동일한 전제).
+describe('buildDataset — SnapshotRow 컬럼 변수(담당의·등록일)', () => {
+  it('담당의는 SnapshotRow.assignedDoctorUserId를 그대로 값으로 반환한다', () => {
+    const rows: SnapshotRow[] = [{ ...makeSnapshotRow('case-1', 'person-1'), assignedDoctorUserId: 'doctor-a' }];
+    const result = buildDataset(
+      rows,
+      recipe({ variableKeys: ['case.staff.assignedDoctorUserId'] }),
+      RECIPE_DIGEST,
+      INTEGRATED_CATALOG_BY_KEY,
+    );
+    expect(result.rows[0].values['case.staff.assignedDoctorUserId']).toEqual({
+      value: 'doctor-a',
+      missing: null,
+      qualityFlags: [],
+    });
+  });
+
+  it('담당의 미배정(null)은 not_entered다', () => {
+    const rows = [makeSnapshotRow('case-1', 'person-1')]; // assignedDoctorUserId: null(기본값)
+    const result = buildDataset(
+      rows,
+      recipe({ variableKeys: ['case.staff.assignedDoctorUserId'] }),
+      RECIPE_DIGEST,
+      INTEGRATED_CATALOG_BY_KEY,
+    );
+    expect(result.rows[0].values['case.staff.assignedDoctorUserId'].missing).toBe('not_entered');
+  });
+
+  it('등록일은 SnapshotRow.createdAt을 ISO 날짜 문자열로 반환하고, 필터(gte)에도 정상 매치된다', () => {
+    const rows: SnapshotRow[] = [
+      { ...makeSnapshotRow('case-1', 'person-1'), createdAt: new Date('2024-01-01T00:00:00.000Z') },
+      { ...makeSnapshotRow('case-2', 'person-2'), createdAt: new Date('2024-06-01T00:00:00.000Z') },
+    ];
+    const result = buildDataset(
+      rows,
+      recipe({
+        variableKeys: ['knee.relatedness.max'],
+        filters: [{ key: 'case.meta.registeredAt', operator: 'gte', value: '2024-03-01' }],
+      }),
+      RECIPE_DIGEST,
+      INTEGRATED_CATALOG_BY_KEY,
+    );
+    expect(result.caseCount).toBe(1);
+    expect(result.rows[0].caseId).toBe('case-2');
+  });
+
+  it('등록일은 filter_only라 variableKeys 결과 행에는 값이 노출되지 않는다(필터로만 쓰였을 때)', () => {
+    const rows = [makeSnapshotRow('case-1', 'person-1')];
+    const result = buildDataset(
+      rows,
+      recipe({
+        variableKeys: ['knee.relatedness.max'],
+        filters: [{ key: 'case.meta.registeredAt', operator: 'not_missing' }],
+      }),
+      RECIPE_DIGEST,
+      INTEGRATED_CATALOG_BY_KEY,
+    );
+    expect(result.rows[0].values['case.meta.registeredAt']).toBeUndefined();
   });
 });
 

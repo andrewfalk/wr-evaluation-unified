@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { classifyKneeJob, isBlank, parseNonNegativeNumber, extractKneeRelatednessMax } from '../../../modules/knee/extractors';
+import {
+  classifyKneeJob,
+  isBlank,
+  parseNonNegativeNumber,
+  extractKneeRelatednessMax,
+  extractKneeDiagnosisSideKlGrade,
+  extractKneeDiagnosisSideConfirmedStatus,
+  extractKneeDiagnosisSideAppliedConfirmedMismatch,
+} from '../../../modules/knee/extractors';
 import { deterministicMigrate } from '../../../migration/deterministicMigrate';
 import type { KneeCalculationJob } from '../../../modules/knee/derived';
 
@@ -251,5 +259,138 @@ describe('extractKneeRelatednessMax — §4.3 결측 우선순위', () => {
     const result = extractKneeRelatednessMax(migrated);
     expect(result.missing).toBeNull();
     expect(result.value).toBeGreaterThan(0);
+  });
+});
+
+// PR0-B3 Part B — diagnosis_side grain 3종. shared.diagnoses[]만 필요하다(knee 모듈
+// 활성 여부와 무관 — resolveDiagnosisModule이 code/name 패턴으로 knee를 판정한다).
+function diagnosesMigration(diagnoses: unknown[]) {
+  return migrate({ data: { shared: { diagnoses }, modules: {}, activeModules: [] } });
+}
+
+describe('extractKneeDiagnosisSideKlGrade — diagnosis_side grain', () => {
+  it('무릎 진단이 아니면(예: 요추) not_applicable', () => {
+    const dx = { id: 'dx-1', code: 'M51.1', name: '요추간판장애', side: 'right' };
+    const result = extractKneeDiagnosisSideKlGrade(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_applicable', qualityFlags: [] }]);
+  });
+
+  it('무릎 진단이지만 supportsKlGrade가 false면(예: 비관절증 코드) not_applicable', () => {
+    const dx = { id: 'dx-1', code: 'S83.1', name: '무릎 인대손상', side: 'right' }; // knee ICD지만 관절증 아님
+    const result = extractKneeDiagnosisSideKlGrade(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_applicable', qualityFlags: [] }]);
+  });
+
+  it('side가 unspecified면 klgRight/klgLeft 중 무엇을 읽을지 알 수 없어 not_entered', () => {
+    const dx = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: '', klgRight: '2' };
+    const result = extractKneeDiagnosisSideKlGrade(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'unspecified'], value: null, missing: 'not_entered', qualityFlags: [] }]);
+  });
+
+  it('klgRight/klgLeft가 공백이면 not_entered(무플래그)', () => {
+    const dx = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'right', klgRight: '' };
+    const result = extractKneeDiagnosisSideKlGrade(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_entered', qualityFlags: [] }]);
+  });
+
+  it('"N/A"(해당없음)는 등급이 아니라 not_applicable — 순서에 끼워넣지 않는다', () => {
+    const dx = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'right', klgRight: 'N/A' };
+    const result = extractKneeDiagnosisSideKlGrade(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_applicable', qualityFlags: [] }]);
+  });
+
+  it('정상 입력 — side==="both"면 klgRight/klgLeft를 각각 읽어 두 행으로 반환한다', () => {
+    const dx = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'both', klgRight: '2', klgLeft: '3' };
+    const result = extractKneeDiagnosisSideKlGrade(diagnosesMigration([dx]));
+    expect(result).toEqual([
+      { entityKey: ['dx-1', 'right'], value: '2', missing: null, qualityFlags: [] },
+      { entityKey: ['dx-1', 'left'], value: '3', missing: null, qualityFlags: [] },
+    ]);
+  });
+
+  // 3차 리뷰 P1 — KLG_OPTIONS가 실제로 제공하는 값(''·'N/A'·1~4)이 아닌데도 String(raw)로
+  // 그대로 통과시키면, 이변량의 groupPairsByLevel()이 KNEE_KLG_ORDER 밖 값을 조용히 버려서
+  // 기술통계(별도 범주로 집계)와 이변량(제외)의 유효 관측 수가 달라진다. 공백·N/A 외의 모든
+  // 값은 not_entered + invalid여야 한다.
+  it.each([
+    ['범위 밖 숫자 문자열', '5'],
+    ['파싱 불가 문자열', 'bad'],
+    ['boolean', true],
+    ['object', { x: 1 }],
+    ['트레일링 공백이 붙은 유효값', '2 '],
+  ])('klgRight가 %s(%j)이면 not_entered + invalid — 정상 등급으로 새지 않는다', (_label, klgRight) => {
+    const dx = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'right', klgRight };
+    const result = extractKneeDiagnosisSideKlGrade(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] }]);
+  });
+});
+
+describe('extractKneeDiagnosisSideConfirmedStatus — diagnosis_side grain', () => {
+  it('무릎 진단이 아니면 not_applicable', () => {
+    const dx = { id: 'dx-1', code: 'M51.1', name: '요추간판장애', side: 'right', confirmedRight: 'confirmed' };
+    const result = extractKneeDiagnosisSideConfirmedStatus(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_applicable', qualityFlags: [] }]);
+  });
+
+  it('side가 unspecified면 not_entered', () => {
+    const dx = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: '', confirmedRight: 'confirmed' };
+    const result = extractKneeDiagnosisSideConfirmedStatus(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'unspecified'], value: null, missing: 'not_entered', qualityFlags: [] }]);
+  });
+
+  it('confirmedRight/Left가 공백이면 not_entered', () => {
+    const dx = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'right' };
+    const result = extractKneeDiagnosisSideConfirmedStatus(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_entered', qualityFlags: [] }]);
+  });
+
+  it('"confirmed"→true, "unconfirmed"→false', () => {
+    const dx = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'both', confirmedRight: 'confirmed', confirmedLeft: 'unconfirmed' };
+    const result = extractKneeDiagnosisSideConfirmedStatus(diagnosesMigration([dx]));
+    expect(result).toEqual([
+      { entityKey: ['dx-1', 'right'], value: true, missing: null, qualityFlags: [] },
+      { entityKey: ['dx-1', 'left'], value: false, missing: null, qualityFlags: [] },
+    ]);
+  });
+
+  it('confirmed/unconfirmed가 아닌 값(손상 데이터)은 not_entered + invalid', () => {
+    const dx = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'right', confirmedRight: 'garbage' };
+    const result = extractKneeDiagnosisSideConfirmedStatus(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] }]);
+  });
+});
+
+describe('extractKneeDiagnosisSideAppliedConfirmedMismatch — diagnosis_side grain', () => {
+  it('무릎 진단이 아니면 not_applicable', () => {
+    const dx = { id: 'dx-1', code: 'M51.1', name: '요추간판장애', side: 'right', confirmedCode: 'M51.1', confirmedName: '요추간판장애' };
+    const result = extractKneeDiagnosisSideAppliedConfirmedMismatch(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_applicable', qualityFlags: [] }]);
+  });
+
+  it('확정상병(confirmedCode/confirmedName)이 아직 입력되지 않으면 not_entered(비교 대상 없음)', () => {
+    const dx = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'right' };
+    const result = extractKneeDiagnosisSideAppliedConfirmedMismatch(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_entered', qualityFlags: [] }]);
+  });
+
+  it('신청상병과 확정상병이 같으면 false', () => {
+    const dx = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'right', confirmedCode: 'M17.1', confirmedName: '무릎관절증' };
+    const result = extractKneeDiagnosisSideAppliedConfirmedMismatch(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: false, missing: null, qualityFlags: [] }]);
+  });
+
+  it('신청상병과 확정상병(code 또는 name)이 다르면 true', () => {
+    const dx = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'right', confirmedCode: 'M17.2', confirmedName: '무릎관절증' };
+    const result = extractKneeDiagnosisSideAppliedConfirmedMismatch(diagnosesMigration([dx]));
+    expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: true, missing: null, qualityFlags: [] }]);
+  });
+
+  it('side와 무관한 진단 레벨 값이라 both explode된 두 행에 동일한 값이 반복된다', () => {
+    const dx = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'both', confirmedCode: 'M17.2', confirmedName: '무릎관절증' };
+    const result = extractKneeDiagnosisSideAppliedConfirmedMismatch(diagnosesMigration([dx]));
+    expect(result).toEqual([
+      { entityKey: ['dx-1', 'right'], value: true, missing: null, qualityFlags: [] },
+      { entityKey: ['dx-1', 'left'], value: true, missing: null, qualityFlags: [] },
+    ]);
   });
 });
