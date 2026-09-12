@@ -39,7 +39,9 @@
     "typecheck:analytics-core": "npm --prefix packages/analytics-core run typecheck",
     "lint": "eslint src/",
     "server:seed:admin": "cd server && npm run seed:admin",
-    "verify:csp": "node scripts/verify-csp.mjs"
+    "server:seed:stats-test-patients": "cd server && npm run seed:stats-test-patients --",
+    "verify:csp": "node scripts/verify-csp.mjs",
+    "verify:chart-compat": "node scripts/verify-chart-compat.mjs"
   },
   "dependencies": {
     "electron-updater": "6.1.9",

@@ -28,6 +28,10 @@ import {
 } from './statsEngine';
 import { buildRunManifest, buildFailedStatsRunManifest, toStatsRunManifestSucceeded } from './statsRunManifest';
 import { computeBivariateAnalyzeResult } from './statsBivariateSuppression';
+import { computeCorrelationMatrixAnalyzeResult } from './statsCorrelationMatrixSuppression';
+import { allCorrelationMatrixPairs } from './statsCorrelationMatrixDataset';
+import { attachLimitedRowFields } from './statsLimitedRowMerge';
+import { hasCapability } from './middleware/requireCapability';
 import { writeAuditLogStrict, type AuditOutcome } from './middleware/audit';
 import config from './config';
 
@@ -123,6 +127,25 @@ function buildSuppressedAnalyzeResult(ctx: AnalysisContext): AnalyzeResult {
   if (ctx.recipe.analysisMode === 'bivariate') {
     return { continuous: [], discrete: [], bivariate: { method: ctx.recipe.requestedMethod!, suppressed: true } };
   }
+  if (ctx.recipe.analysisMode === 'correlation_matrix') {
+    // PR3-B §4 — 요청 전체가 억제돼도 cells는 항상 C(k,2)개(전부 suppressed:true,
+    // 절대 빈 배열이 아님 — "결과 계약 불변조건"을 상관행렬에도 동일하게 적용).
+    const method = ctx.recipe.requestedMethod as 'pearson_correlation' | 'spearman_correlation';
+    const cells = allCorrelationMatrixPairs(ctx.recipe.variableKeys).map(({ xKey, yKey }) => ({
+      suppressed: true as const, xKey, yKey,
+    }));
+    // 코드리뷰 수정(2026-09-11) — 이 경로(코호트 미달/differencing rate limit로
+    // 요청 전체가 조기 억제됨)는 cells 전부가 suppressed:true다. §4.1 불변조건
+    // ("매트릭스에 억제 셀이 하나라도 있으면 adjustedPWithheld:true", 실제 계산
+    // 경로 — statsCorrelationMatrixSuppression.ts — 가 지키는 것과 동일)을 여기서도
+    // 지켜야 하는데, 이전엔 false로 하드코딩돼 있어 "전부 억제"인데도 "보정값이
+    // 전부 정상 공개됨"을 뜻하는 값이 나갔다. 억제 셀이 하나라도 있으면(여기선
+    // 전부) true.
+    return {
+      continuous: [], discrete: [],
+      correlationMatrix: { method, variableKeys: ctx.recipe.variableKeys, cells, adjustedPWithheld: true },
+    };
+  }
   return {
     continuous: ctx.recipe.variableKeys
       .filter((k) => ctx.catalogByKey.get(k)?.type === 'continuous')
@@ -209,6 +232,9 @@ async function computeAndPersist(
     if (ctx.recipe.analysisMode === 'bivariate') {
       const bivariate = await computeBivariateAnalyzeResult(ctx);
       result = { continuous: [], discrete: [], bivariate };
+    } else if (ctx.recipe.analysisMode === 'correlation_matrix') {
+      const correlationMatrix = await computeCorrelationMatrixAnalyzeResult(ctx);
+      result = { continuous: [], discrete: [], correlationMatrix };
     } else {
       const request = buildStatsEngineRequest(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey);
       const raw = await runStatsEngine(request);
@@ -335,6 +361,48 @@ async function computeAndPersist(
   return { runManifest: toPublicRunManifest(persisted.manifest), result: persisted.result };
 }
 
+// PR3-B §9 — 캐시-권한 드리프트 방지. 신규계산·캐시hit·in-flight조인 3경로 전부
+// 이 단일 지점을 거쳐야 한다(각 분기마다 따로 구현하지 않음). limited_row 필드
+// (boxplot outlierValues·scatter 원시 points)가 실제로 붙을 때만 기존 stats_analyze
+// 감사와 별개인 신규 감사 단계를 추가하고, 그 감사가 실패하면 500을 반환한다
+// (aggregate로 강등하지 않는다 — §7.4 "제한데이터 export는 감사 실패 시 다운로드도
+// 실패"와 가장 단순하게 정합).
+async function finalizeAnalyzeResponse(
+  pool: Pool,
+  ctx: AnalysisContext,
+  executionDigest: string,
+  outcome: { runManifest: RunManifest; result: AnalyzeResult },
+): Promise<{ status: number; body: unknown }> {
+  const hasLimitedRowAccess = await hasCapability(pool, 'stats.export_limited_rows', ctx.userId, ctx.orgId);
+  const { result: finalResult, attached } = attachLimitedRowFields(ctx, outcome.result, hasLimitedRowAccess);
+
+  if (attached) {
+    // "실제로 받은 최종 바이트"를 증명하는 게 아니라, 이번 조회에 한해 실제로
+    // 구성해 응답 body에 넣은 result 객체의 canonical digest다(§9) — resultDigest
+    // (manifest, aggregate-only 저장 페이로드 전용)와는 대상이 다르다.
+    const deliveredResultDigest = canonicalDigest({ result: finalResult });
+    try {
+      await writeAuditLogStrict(pool, {
+        actorUserId: ctx.userId,
+        actorOrgId: ctx.orgId,
+        action: 'stats_analyze',
+        targetType: 'analysis_recipe',
+        targetId: ctx.recipeDigest,
+        outcome: 'success' as AuditOutcome,
+        extra: auditExtra(ctx, executionDigest, {
+          analysisRunId: outcome.runManifest.analysisRunId,
+          limitedRowFieldsAttached: true,
+          deliveredResultDigest,
+        }),
+      });
+    } catch {
+      return { status: 500, body: internalError() };
+    }
+  }
+
+  return { status: 200, body: { runManifest: outcome.runManifest, result: finalResult } satisfies AnalyzeResponse };
+}
+
 export async function handlePostAnalyze(pool: Pool, req: Request, res: Response): Promise<void> {
   if (activeAnalyzeRequests >= config.stats.maxConcurrentAnalyzeRequests) {
     const session = req.sessionInfo;
@@ -426,10 +494,12 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
       return;
     }
 
-    // PR3-A — 파이프라인 3단계: A-사유로 unsupported이거나 아예 목록에 없는 method면
-    // 400(§"방법 가용성 판정" — B-사유는 여기서 절대 걸리지 않는다, 이미 위에서
-    // pairDisclosed 검사로 다 걸러졌거나 그룹/셀 단위 소수셀이라 여기 도달하지 않음).
-    if (ctx.recipe.analysisMode === 'bivariate') {
+    // PR3-A/B — 파이프라인 3단계: A-사유로 unsupported이거나 아예 목록에 없는
+    // method면 400(§"방법 가용성 판정" — B-사유는 여기서 절대 걸리지 않는다, 이미
+    // 위에서 pairDisclosed 검사로 다 걸러졌거나 그룹/셀 단위 소수셀이라 여기
+    // 도달하지 않음). 상관행렬은 셀별 세부판정이 없어 이 체크가 "선택한 method
+    // 자체가 목록에 있는가"만 본다(계획서 §4/§7).
+    if (ctx.recipe.analysisMode === 'bivariate' || ctx.recipe.analysisMode === 'correlation_matrix') {
       const selected = ctx.availableMethods.find((m) => m.id === ctx.recipe.requestedMethod);
       const executable = selected != null && (selected.status === 'available' || selected.status === 'conditional');
       if (!executable) {
@@ -452,8 +522,8 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
     if (!joined) {
       try {
         const outcome = await promise;
-        const response: AnalyzeResponse = { runManifest: outcome.runManifest, result: outcome.result };
-        res.status(200).json(response);
+        const finalized = await finalizeAnalyzeResponse(pool, ctx, executionDigest, outcome);
+        res.status(finalized.status).json(finalized.body);
       } catch (err) {
         res.status(httpStatusFor(err)).json(errorBodyFor(err));
       }
@@ -507,8 +577,8 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
     }
 
     if (sharedOutcome.kind === 'success') {
-      const response: AnalyzeResponse = { runManifest: sharedOutcome.value.runManifest, result: sharedOutcome.value.result };
-      res.status(200).json(response);
+      const finalized = await finalizeAnalyzeResponse(pool, ctx, executionDigest, sharedOutcome.value);
+      res.status(finalized.status).json(finalized.body);
     } else {
       res.status(httpStatusFor(sharedOutcome.err)).json(errorBodyFor(sharedOutcome.err));
     }

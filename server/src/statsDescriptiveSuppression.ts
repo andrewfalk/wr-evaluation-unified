@@ -14,6 +14,7 @@ import type {
 import type { DatasetRow } from './statsDatasetBuilder';
 import { normalizeForCompare } from './statsDatasetBuilder';
 import { isSmallCell } from './statsSmallCell';
+import { isHistogramDisclosable, isOutlierCountDisclosable } from './statsChartDisclosure';
 import type { StatsEngineRawResult, StatsEngineRequest, StatsEngineVariableKind } from './statsEngine';
 
 function mapCatalogTypeToKind(type: AnalyticsVariableMetadata['type'] | undefined, key: string): StatsEngineVariableKind {
@@ -111,6 +112,37 @@ export function computeDescriptiveSuppression(
       }
       const rawStat = rawContinuousByKey.get(key);
       if (!rawStat) throw new Error(`missing continuous engine result for '${key}'`);
+
+      // PR3-B §3 — 히스토그램은 Python이 만든 bin 경계로 Node가 presentRows를
+      // 재순회해 person 단위 전체연결억제를 판정한다(row-count가 아니라 person
+      // count 기준). 소수셀이면 히스토그램 전체를 생략(null).
+      const valueOf = (row: DatasetRow): number | null => {
+        const extracted = row.values[key];
+        if (!extracted || extracted.missing !== null) return null;
+        return typeof extracted.value === 'number' ? extracted.value : null;
+      };
+      const histogram = rawStat.histogram && isHistogramDisclosable(presentRows, rawStat.histogram.bins, valueOf)
+        ? { bins: rawStat.histogram.bins }
+        : null;
+
+      // PR3-B §1 — 박스플롯의 q1/median/q3/lowerWhisker/upperWhisker는 histogram과
+      // 같은 부모 게이트(linkedSuppressed)만 통과하면 그대로 노출(범위값 자체는
+      // 집단 크기를 드러내지 않음). outlierCount는 **완전히 별개의** 독립 게이트
+      // (이상치·비이상치 양쪽 partition의 person 고유 인원)를 추가로 통과해야
+      // 한다 — histogram 게이트를 전부 통과해도 이상치가 소수집단일 수 있다
+      // (계획서 §1 반례로 확인됨). outlierValues(정확한 좌표)는 여기서 절대
+      // 만들지 않는다 — limited_row라 응답시점에만 별도로 merge된다(§9).
+      const boxplot = rawStat.boxplot === null ? null : {
+        q1: rawStat.boxplot.q1,
+        median: rawStat.boxplot.median,
+        q3: rawStat.boxplot.q3,
+        lowerWhisker: rawStat.boxplot.lowerWhisker,
+        upperWhisker: rawStat.boxplot.upperWhisker,
+        ...(isOutlierCountDisclosable(presentRows, rawStat.boxplot, valueOf)
+          ? { outlierCount: rawStat.boxplot.outlierCount }
+          : {}),
+      };
+
       continuous.push({
         variableKey: key,
         kind: 'continuous',
@@ -129,6 +161,8 @@ export function computeDescriptiveSuppression(
         min: rawStat.min,
         max: rawStat.max,
         nullReasons: rawStat.nullReasons,
+        histogram,
+        boxplot,
       });
       continue;
     }

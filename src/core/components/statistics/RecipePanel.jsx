@@ -285,6 +285,13 @@ export function RecipePanel({
             className={`swb-seg-opt${analysisMode === 'bivariate' ? ' swb-seg-opt--active' : ''}`}
             onClick={() => onAnalysisModeChange('bivariate')}
           >이변량</button>
+          {/* PR3-B — 상관행렬(계획서 §4). 3개 이상의 연속형 변수를 골라 모든 쌍의
+              상관계수를 계산한다. */}
+          <button
+            type="button"
+            className={`swb-seg-opt${analysisMode === 'correlation_matrix' ? ' swb-seg-opt--active' : ''}`}
+            onClick={() => onAnalysisModeChange('correlation_matrix')}
+          >상관행렬</button>
         </div>
         {modeChangeBlockedNotice && analysisMode !== 'bivariate' && (
           <p className="swb-status-warn">이변량 모드는 변수를 2개까지만 지원합니다 — 먼저 2개로 줄여주세요.</p>
@@ -307,21 +314,30 @@ export function RecipePanel({
           <p className="swb-suppressed-note">목적을 골라도 지금 제공하는 분석은 기술통계뿐입니다.</p>
         )}
 
-        {analysisMode === 'bivariate' && (
+        {(analysisMode === 'bivariate' || analysisMode === 'correlation_matrix') && (
           <MethodPicker
             previewState={previewState}
             isPreviewCurrent={isPreviewCurrent}
             requestedMethod={requestedMethod}
             onRequestedMethodChange={onRequestedMethodChange}
             onApplyRemedy={(patch) => { if (patch?.requestedMethod) onRequestedMethodChange(patch.requestedMethod); }}
+            notReadyMessage={analysisMode === 'correlation_matrix'
+              ? '연속형 변수를 3개 이상 선택하면 사용 가능한 방법이 표시됩니다.'
+              : '변수를 2개 선택하면 사용 가능한 방법이 표시됩니다.'}
           />
         )}
 
         <div className="swb-section-label">
-          선택 변수 ({selectedKeys.length}{analysisMode === 'bivariate' ? '/2' : ''})
+          선택 변수 ({selectedKeys.length}
+          {analysisMode === 'bivariate' ? '/2' : analysisMode === 'correlation_matrix' ? ', 3개 이상' : ''})
         </div>
         <div>
-          {selectedKeys.length === 0 && <p className="swb-suppressed-note">좌측 카탈로그에서 변수를 선택하세요.</p>}
+          {selectedKeys.length === 0 && (
+            <p className="swb-suppressed-note">
+              좌측 카탈로그에서 변수를 선택하세요.
+              {analysisMode === 'correlation_matrix' && ' (연속형 변수만 3개 이상)'}
+            </p>
+          )}
           {selectedKeys.map((k, i) => (
             <span key={k} className="swb-recipe-chip">
               {analysisMode === 'bivariate' && <strong style={{ marginRight: 4 }}>{i === 0 ? 'x' : 'y'}</strong>}
@@ -395,7 +411,7 @@ export function RecipePanel({
 // 인원수 관련 차단 사유(B)는 서버가 애초에 세분화해서 안 보낸다 — 그래서 이 UI는
 // "왜 안 되는지" 대신 결과가 표본 크기에 따라 표시되지 않을 수 있다는 고정 문구만
 // 상시 노출한다(데이터 의존 아님, 계획서 §"방법 가용성 판정").
-function MethodPicker({ previewState, isPreviewCurrent, requestedMethod, onRequestedMethodChange, onApplyRemedy }) {
+function MethodPicker({ previewState, isPreviewCurrent, requestedMethod, onRequestedMethodChange, onApplyRemedy, notReadyMessage }) {
   const ready = isPreviewCurrent && previewState.status === 'ready' && !previewState.result?.counts?.suppressed;
   const methods = ready ? (previewState.result?.availableMethods ?? []) : [];
   const byId = new Map(methods.map((m) => [m.id, m]));
@@ -404,7 +420,7 @@ function MethodPicker({ previewState, isPreviewCurrent, requestedMethod, onReque
   return (
     <>
       <div className="swb-section-label">분석 방법</div>
-      {!ready && <p className="swb-suppressed-note">변수를 2개 선택하면 사용 가능한 방법이 표시됩니다.</p>}
+      {!ready && <p className="swb-suppressed-note">{notReadyMessage || '변수를 2개 선택하면 사용 가능한 방법이 표시됩니다.'}</p>}
       {ready && orderedMethods.length === 0 && (
         <p className="swb-suppressed-note">표본 수가 부족해 이용 가능한 방법을 표시할 수 없습니다.</p>
       )}

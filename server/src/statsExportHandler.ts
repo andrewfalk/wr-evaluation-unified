@@ -202,6 +202,13 @@ export async function handlePostExport(pool: Pool, req: Request, res: Response):
     res.status(400).json({ code: 'BIVARIATE_EXPORT_NOT_SUPPORTED', error: '이변량 분석 결과는 아직 CSV 내보내기를 지원하지 않습니다.' });
     return;
   }
+  // PR3-B — 상관행렬도 CSV export 미지원(PR5 범위). 위와 동일한 판정 축(manifest.
+  // analysisMode)을 재사용한다.
+  if (manifestParsed.data.analysisMode === 'correlation_matrix') {
+    await auditDenied('CORRELATION_MATRIX_EXPORT_NOT_SUPPORTED');
+    res.status(400).json({ code: 'CORRELATION_MATRIX_EXPORT_NOT_SUPPORTED', error: '상관행렬 분석 결과는 아직 CSV 내보내기를 지원하지 않습니다.' });
+    return;
+  }
 
   const csv = buildCsv(manifestParsed.data, resultParsed.data);
 

@@ -1,0 +1,71 @@
+/* PR3-B 계획서 §6.8.6 — 차트 프리미티브 스타일. statistics-workbench.css의 --swb-*
+   토큰을 그대로 재사용한다(.swb-root 스코프 안에서만 유효). 신규 파일이라
+   color-mix()/:has()를 쓰지 않는다(§11 호환성 — statistics-workbench.css:3과 동일 관례). */
+
+.swb-root {
+  --chart-box-fill: #9dbbdd;
+  --chart-box-stroke: #3b5f8a;
+  --chart-diagonal-fill: #e5e7eb;
+  --chart-suppressed-fill: #f3f4f6;
+  --chart-tooltip-bg: #1f2937;
+  --chart-tooltip-text: #f9fafb;
+}
+
+[data-theme="dark"] .swb-root {
+  --chart-box-fill: #33507a;
+  --chart-box-stroke: #7fa3d6;
+  --chart-diagonal-fill: #334155;
+  --chart-suppressed-fill: #1e293b;
+  --chart-tooltip-bg: #e5e7eb;
+  --chart-tooltip-text: #111827;
+}
+
+.chart-container { width: 100%; }
+.chart-container svg { display: block; }
+
+.chart-gridline { stroke: var(--swb-border); stroke-width: 1; }
+.chart-axis-line { stroke: var(--swb-ink-muted); stroke-width: 1; }
+.chart-axis-label { font-size: 10px; fill: var(--swb-ink-muted); }
+.chart-value-label { font-size: 10px; fill: var(--swb-ink); }
+
+.chart-box-fill { fill: var(--chart-box-fill); stroke: var(--chart-box-stroke); stroke-width: 2; }
+.chart-box-median { stroke: var(--chart-box-stroke); stroke-width: 2; }
+
+.chart-heatmap-value { font-size: 11px; fill: var(--swb-ink); }
+.chart-heatmap-suppressed { font-size: 12px; fill: var(--swb-ink-muted); }
+
+.chart-toggle-row { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+.chart-toggle-btn {
+  font-size: 11px;
+  padding: 3px 10px;
+  border: 1px solid var(--swb-border);
+  border-radius: 6px;
+  background: var(--swb-panel);
+  color: var(--swb-ink);
+  cursor: pointer;
+}
+.chart-toggle-btn:hover { background: var(--swb-accent-soft); }
+.chart-toggle-btn:focus-visible { outline: 2px solid var(--swb-accent); outline-offset: 1px; }
+
+.chart-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 10px; padding: 0; margin: 0 0 6px; }
+.chart-legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--swb-ink-muted); }
+.chart-legend-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+.chart-suppression-notice { padding: 12px 0; }
+
+/* PR3-B §6.8.5 — 키보드 포커스로도 작동하는 툴팁(ChartTooltip.jsx). 포커스
+   기본 outline은 그대로 두되(접근성상 절대 없애면 안 됨) 살짝 다듬는다. */
+.chart-tooltip-target { cursor: default; }
+.chart-tooltip-target:focus { outline: 2px solid var(--swb-accent); outline-offset: 2px; }
+.chart-tooltip-bubble { pointer-events: none; }
+.chart-tooltip-bg { fill: var(--chart-tooltip-bg); }
+.chart-tooltip-text { font-size: 11px; fill: var(--chart-tooltip-text); }
+
+.swb-group-boxplots { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px; }
+.swb-group-boxplot { flex: 1 1 220px; min-width: 200px; }
+
+.swb-table-scroll { overflow-x: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .chart-toggle-btn { transition: none; }
+}

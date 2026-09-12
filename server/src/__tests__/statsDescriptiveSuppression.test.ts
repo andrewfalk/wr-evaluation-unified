@@ -88,6 +88,7 @@ describe('computeDescriptiveSuppression — 변수 전체 연결 억제', () => 
       continuous: [{
         variableKey: key, n: 80, mean: 50, sd: 10, median: 50, q1: 40, q3: 60, iqr: 20,
         skewness: 0, kurtosis: 0, min: 10, max: 89, nullReasons: {},
+        histogram: null, boxplot: null,
       }],
       discrete: [],
     };
@@ -100,6 +101,83 @@ describe('computeDescriptiveSuppression — 변수 전체 연결 억제', () => 
       // A만 남기고 B만 가리면 20-17=3으로 역산되므로 부분억제는 절대 금지.
       expect(c.missingPatterns).toBeNull();
     }
+  });
+});
+
+describe('computeDescriptiveSuppression — PR3-B 히스토그램/박스플롯 배선', () => {
+  it('§1 반례 — 히스토그램은 공개되지만 outlierCount/outlierValues는 억제된다', () => {
+    const key = 'spine.mddm.lifetimeDoseMNh';
+    const values = [
+      ...Array.from({ length: 50 }, () => 0),
+      ...Array.from({ length: 26 }, () => 1),
+      ...Array.from({ length: 23 }, () => 2.49),
+      2.51,
+    ];
+    const entries = values.map((value) => ({ value }));
+    const catalogByKey = new Map([[key, meta(key, 'continuous')]]);
+    const w = 2.51 / 6;
+    const edges = [0, w, 2 * w, 3 * w, 4 * w, 5 * w, 2.51];
+    const raw: StatsEngineRawResult = {
+      continuous: [{
+        variableKey: key, n: 100, mean: 1, sd: 1, median: 0.5, q1: 0, q3: 1, iqr: 1,
+        skewness: 0, kurtosis: 0, min: 0, max: 2.51, nullReasons: {},
+        histogram: {
+          bins: [
+            { lower: edges[0], upper: edges[1], count: 50 },
+            { lower: edges[1], upper: edges[2], count: 0 },
+            { lower: edges[2], upper: edges[3], count: 26 },
+            { lower: edges[3], upper: edges[4], count: 0 },
+            { lower: edges[4], upper: edges[5], count: 0 },
+            { lower: edges[5], upper: edges[6], count: 24 },
+          ],
+        },
+        boxplot: {
+          q1: 0, median: 0.5, q3: 1, lowerWhisker: 0, upperWhisker: 2.49,
+          lowerFence: -1.5, upperFence: 2.5, outlierCount: 1, outlierValues: [2.51],
+        },
+      }],
+      discrete: [],
+    };
+    const result = computeDescriptiveSuppression(rows(key, entries), [key], catalogByKey, raw);
+    const c = result.continuous[0];
+    expect(c.suppressed).toBe(false);
+    if (c.suppressed) return;
+    // 히스토그램 게이트는 전부 통과(bin 빈도 50/0/26/0/0/24, 전부 0 또는 ≥10명).
+    expect(c.histogram?.bins).toHaveLength(6);
+    expect(c.histogram?.bins.reduce((s, b) => s + b.count, 0)).toBe(100);
+    // 박스플롯 범위값은 그대로 노출.
+    expect(c.boxplot?.q1).toBe(0);
+    expect(c.boxplot?.upperWhisker).toBe(2.49);
+    // 이상치 게이트는 실패(이상치 1명) — outlierCount/outlierValues 키 자체가 없어야 한다.
+    expect(c.boxplot && 'outlierCount' in c.boxplot).toBe(false);
+    expect(c.boxplot && 'outlierValues' in c.boxplot).toBe(false);
+  });
+
+  it('n=0(변수 자체가 계산 불가)이면 histogram/boxplot 둘 다 null', () => {
+    const key = 'spine.mddm.lifetimeDoseMNh';
+    const entries = Array.from({ length: 20 }, () => ({ value: null, missing: 'not_entered' as const }));
+    const catalogByKey = new Map([[key, meta(key, 'continuous')]]);
+    // 전부 결측이면 애초에 linkedSuppressed(presentPersonCount=0은 isSmallCell 통과,
+    // missingPersonCount=20은 통과)라 변수 전체가 억제되는 경로를 타므로, 대신
+    // "값이 있지만 histogram/boxplot 자체가 Python에서 null로 온" 경우를 재현한다.
+    const presentEntries = Array.from({ length: 15 }, () => ({ value: 5 }));
+    const raw: StatsEngineRawResult = {
+      continuous: [{
+        variableKey: key, n: 15, mean: 5, sd: 0, median: 5, q1: 5, q3: 5, iqr: 0,
+        skewness: null, kurtosis: null, min: 5, max: 5, nullReasons: {},
+        histogram: null, boxplot: null,
+      }],
+      discrete: [],
+    };
+    const result = computeDescriptiveSuppression(
+      [...rows(key, presentEntries), ...rows(key, entries.slice(0, 15))],
+      [key], catalogByKey, raw,
+    );
+    const c = result.continuous[0];
+    expect(c.suppressed).toBe(false);
+    if (c.suppressed) return;
+    expect(c.histogram).toBeNull();
+    expect(c.boxplot).toBeNull();
   });
 });
 

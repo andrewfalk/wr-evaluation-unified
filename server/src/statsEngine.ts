@@ -49,6 +49,18 @@ export interface BivariateCorrelationRequest {
 }
 export type BivariateEngineRequest = BivariateGroupsRequest | BivariateTableRequest | BivariateCorrelationRequest;
 
+// PR3-B — 상관행렬 3-shape 추가(계획서 §4). row-aligned 배열을 변수당 1개씩만
+// 보낸다 — pair마다 복제 전송하지 않는다(payload O(k·n), 복제 시 O(k²·n)이 되는
+// 것을 피함). Python이 pair마다 pairwise-complete 필터링을 수행한다.
+export interface CorrelationMatrixEngineVariable {
+  key: string;
+  values: Array<number | null>;
+}
+export interface CorrelationMatrixEngineRequest {
+  method: 'pearson_correlation' | 'spearman_correlation';
+  variables: CorrelationMatrixEngineVariable[];
+}
+
 const StatsEngineNullReasonSchema = z.enum(['insufficient_data', 'undefined_zero_variance', 'non_finite_result']);
 // PR3-A — bivariate.py의 nullReasons는 기존 3종 + 이변량 전용 2종(계획서 §Python엔진).
 const StatsEngineBivariateNullReasonSchema = z.enum([
@@ -61,6 +73,30 @@ const StatsEngineBivariateNullReasonSchema = z.enum([
 // NaN/Infinity에서 throw하는데 그 지점이 실패 분류 try/catch 밖이라 감사·failed 기록이
 // 누락되는 경로로 이어졌다 — 여기서 막아 정상적으로 RESULT_SCHEMA_INVALID로 분류되게 한다.
 const finiteNullable = () => z.number().finite().nullable();
+
+// PR3-B — 히스토그램/박스플롯(계획서 §2/§3). Python은 person을 모른 채 정직하게
+// 전부 계산해 반환한다 — 소수셀 판정(person 단위)은 statsChartDisclosure.ts가
+// 이 원시 결과를 받은 뒤 별도로 수행한다. n=0(계산 불가)이면 Python이 둘 다
+// null로 반환하므로 nullable(optional 아님 — 키는 항상 존재).
+const StatsEngineHistogramBinSchema = z.object({
+  lower: z.number().finite(),
+  upper: z.number().finite(),
+  count: z.number().int().nonnegative(),
+});
+const StatsEngineHistogramSchema = z.object({
+  bins: z.array(StatsEngineHistogramBinSchema),
+});
+const StatsEngineBoxplotSchema = z.object({
+  q1: z.number().finite(),
+  median: z.number().finite(),
+  q3: z.number().finite(),
+  lowerWhisker: z.number().finite(),
+  upperWhisker: z.number().finite(),
+  lowerFence: z.number().finite(),
+  upperFence: z.number().finite(),
+  outlierCount: z.number().int().nonnegative(),
+  outlierValues: z.array(z.number().finite()),
+});
 
 const StatsEngineContinuousResultSchema = z.object({
   variableKey: z.string(),
@@ -76,6 +112,8 @@ const StatsEngineContinuousResultSchema = z.object({
   min: finiteNullable(),
   max: finiteNullable(),
   nullReasons: z.record(z.string(), StatsEngineNullReasonSchema),
+  histogram: StatsEngineHistogramSchema.nullable(),
+  boxplot: StatsEngineBoxplotSchema.nullable(),
 });
 
 const StatsEngineDiscreteLevelSchema = z.object({
@@ -90,7 +128,7 @@ const StatsEngineDiscreteResultSchema = z.object({
 });
 
 const StatsEngineRawResultSchema = z.object({
-  protocolVersion: z.literal(2),
+  protocolVersion: z.literal(3),
   continuous: z.array(StatsEngineContinuousResultSchema),
   discrete: z.array(StatsEngineDiscreteResultSchema),
 }).strict();
@@ -114,7 +152,7 @@ const StatsEngineEffectSizeSchema = z.object({
 });
 
 const StatsEngineBivariateRawResultSchema = z.object({
-  protocolVersion: z.literal(2),
+  protocolVersion: z.literal(3),
   bivariate: z.object({
     method: z.enum([
       'welch_t', 'mann_whitney', 'anova', 'kruskal_wallis',
@@ -136,6 +174,20 @@ const StatsEngineBivariateRawResultSchema = z.object({
     }).strict(),
     qualityFlags: z.array(z.enum(['low_expected_count', 'haldane_anscombe_applied'])),
     extra: z.record(z.string(), StatsEngineEffectSizeSchema),
+    // PR3-B — pearson_correlation/spearman_correlation만 이 키를 채운다(형제
+    // 필드, extra 안이 아님 — extra는 효과크기 shape 전용). 다른 6개 method는
+    // 이 키 자체를 안 만들므로 optional(부재 허용, .strict()와 충돌 안 함).
+    regressionLine: z.object({
+      slope: z.number().finite(),
+      intercept: z.number().finite(),
+    }).nullable().optional(),
+    // PR3-B — 그룹비교 4개 method(welch_t/mann_whitney/anova/kruskal_wallis)만
+    // 이 키를 채운다(계획서 §5). 억제 여부와 무관하게 Python은 항상 정직하게
+    // 계산 — 노출은 statsBivariateSuppression.ts가 기존 그룹 게이트로 결정한다.
+    groupBoxplots: z.array(z.object({
+      label: z.union([z.string(), z.boolean()]),
+      boxplot: StatsEngineBoxplotSchema.nullable(),
+    })).optional(),
   }).strict(),
 }).strict();
 
@@ -193,7 +245,7 @@ function assertWithinLimits(request: StatsEngineRequest): void {
   if (total > MAX_TOTAL_VALUES) {
     throw new StatsEngineInputTooLargeError(`total values (${total}) exceeds MAX_TOTAL_VALUES(${MAX_TOTAL_VALUES})`);
   }
-  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 2, variables: request.variables }), 'utf8');
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 3, variables: request.variables }), 'utf8');
   if (byteLength > config.stats.maxInputBytes) {
     throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
   }
@@ -204,7 +256,7 @@ function assertWithinLimits(request: StatsEngineRequest): void {
 // table은 "sum(모든 셀)"에 같은 상한을 적용(작은 JSON으로 큰 관측수를 표현할 수
 // 있어 상한 자체가 필요, 정합성 검사와는 별개).
 function assertBivariateWithinLimits(request: BivariateEngineRequest): void {
-  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 2, bivariate: request }), 'utf8');
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 3, bivariate: request }), 'utf8');
   if (byteLength > config.stats.maxInputBytes) {
     throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
   }
@@ -235,6 +287,31 @@ function assertBivariateWithinLimits(request: BivariateEngineRequest): void {
   }
 }
 
+// PR3-B — 상관행렬 입력상한(계획서 §8). 값 개수 상한은 기존 "variables" shape과
+// 동일한 MAX_TOTAL_VALUES를 재사용한다(상관행렬 전용 새 상수를 두지 않는다).
+// 바이트 길이 상한(config.stats.maxInputBytes)은 그것과 완전히 별개로 항상
+// 이중 검사한다 — 20변수×17,500행처럼 값 개수 상한은 통과해도 직렬화 바이트가
+// 기본 2MiB를 넘는 조합이 실제로 있다(리뷰로 확인). 검사 순서는 기존
+// assertWithinLimits와 동일하게 값 개수 → 바이트 길이.
+function assertCorrelationMatrixWithinLimits(request: CorrelationMatrixEngineRequest): void {
+  let total = 0;
+  for (const v of request.variables) {
+    if (v.values.length > MAX_VALUES_PER_VARIABLE) {
+      throw new StatsEngineInputTooLargeError(
+        `variable '${v.key}' has ${v.values.length} values, exceeds MAX_VALUES_PER_VARIABLE(${MAX_VALUES_PER_VARIABLE})`,
+      );
+    }
+    total += v.values.length;
+  }
+  if (total > MAX_TOTAL_VALUES) {
+    throw new StatsEngineInputTooLargeError(`total values (${total}) exceeds MAX_TOTAL_VALUES(${MAX_TOTAL_VALUES})`);
+  }
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 3, correlationMatrix: request }), 'utf8');
+  if (byteLength > config.stats.maxInputBytes) {
+    throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
+  }
+}
+
 /** §Python엔진 의미검증(descriptive의 validateSemantics와 대칭) — method/n이
  * 요청과 일치하는지, 그룹/셀 합계가 요청과 일치하는지 확인한다. */
 function validateBivariateSemantics(
@@ -255,6 +332,83 @@ function validateBivariateSemantics(
   }
   if (b.n !== expectedN) {
     throw new StatsEngineResultInvalidError(`n mismatch: expected ${expectedN}, got ${b.n}`);
+  }
+}
+
+// PR3-B — 상관행렬 결과(계획서 §4, 4차 코드리뷰로 단순화). r/pValue/adjustedP는
+// Python이 계산 불가(상수·표본부족)면 null — 이 raw 스키마 단계에서는 아직
+// disclosure(소수셀·§6.1 반복측정 게이트) 적용 전이다. statsCorrelationMatrixSuppression.ts
+// 가 이 raw 결과를 받아 공개 여부를 최종 결정한다.
+const StatsEngineCorrelationMatrixCellSchema = z.object({
+  xKey: z.string(),
+  yKey: z.string(),
+  n: z.number().int().nonnegative(),
+  r: z.number().finite().nullable(),
+  pValue: z.number().finite().nullable(),
+  adjustedP: z.number().finite().nullable(),
+});
+const StatsEngineCorrelationMatrixRawResultSchema = z.object({
+  protocolVersion: z.literal(3),
+  correlationMatrix: z.object({
+    method: z.enum(['pearson_correlation', 'spearman_correlation']),
+    cells: z.array(StatsEngineCorrelationMatrixCellSchema),
+  }).strict(),
+}).strict();
+
+export type StatsEngineCorrelationMatrixCell = z.infer<typeof StatsEngineCorrelationMatrixCellSchema>;
+export type StatsEngineCorrelationMatrixRawResult = z.infer<typeof StatsEngineCorrelationMatrixRawResultSchema>['correlationMatrix'];
+
+/** Node-Python 연결계층 의미검증(계획서 §4/§7) — protocol.py의 구조/의미 분리
+ * 패턴과 대칭. Python 응답이 요청한 모든 쌍과 정확히 1:1 대응하는지(누락·중복·
+ * 미요청 없음), 각 셀의 n이 Node가 독립적으로 계산한 pairwise-complete count와
+ * 일치하는지(Python 버그를 Node가 교차검증), r/pValue 범위가 유효한지 검사한다. */
+function validateCorrelationMatrixSemantics(
+  request: CorrelationMatrixEngineRequest,
+  raw: z.infer<typeof StatsEngineCorrelationMatrixRawResultSchema>,
+): void {
+  const cm = raw.correlationMatrix;
+  if (cm.method !== request.method) {
+    throw new StatsEngineResultInvalidError(`method mismatch: requested ${request.method}, got ${cm.method}`);
+  }
+
+  const keys = request.variables.map((v) => v.key);
+  const expectedPairs = new Set<string>();
+  for (let i = 0; i < keys.length; i += 1) {
+    for (let j = i + 1; j < keys.length; j += 1) {
+      expectedPairs.add(`${keys[i]}::${keys[j]}`);
+    }
+  }
+  const valuesByKey = new Map(request.variables.map((v) => [v.key, v.values] as const));
+
+  const seenPairs = new Set<string>();
+  for (const cell of cm.cells) {
+    const pairKey = `${cell.xKey}::${cell.yKey}`;
+    if (!expectedPairs.has(pairKey)) {
+      throw new StatsEngineResultInvalidError(`unexpected pair in correlation matrix result: ${cell.xKey}/${cell.yKey}`);
+    }
+    if (seenPairs.has(pairKey)) {
+      throw new StatsEngineResultInvalidError(`duplicate pair in correlation matrix result: ${cell.xKey}/${cell.yKey}`);
+    }
+    seenPairs.add(pairKey);
+
+    const xValues = valuesByKey.get(cell.xKey)!;
+    const yValues = valuesByKey.get(cell.yKey)!;
+    let expectedN = 0;
+    for (let i = 0; i < xValues.length; i += 1) {
+      if (xValues[i] !== null && yValues[i] !== null) expectedN += 1;
+    }
+    if (cell.n !== expectedN) {
+      throw new StatsEngineResultInvalidError(`n mismatch for pair ${cell.xKey}/${cell.yKey}: expected ${expectedN}, got ${cell.n}`);
+    }
+    if (cell.r !== null && (cell.r < -1.0000001 || cell.r > 1.0000001)) {
+      throw new StatsEngineResultInvalidError(`r out of range for pair ${cell.xKey}/${cell.yKey}: ${cell.r}`);
+    }
+    if (cell.pValue !== null && (cell.pValue < 0 || cell.pValue > 1)) {
+      throw new StatsEngineResultInvalidError(`pValue out of range for pair ${cell.xKey}/${cell.yKey}: ${cell.pValue}`);
+    }
+  }
+  if (seenPairs.size !== expectedPairs.size) {
+    throw new StatsEngineResultInvalidError('missing pair(s) in correlation matrix result');
   }
 }
 
@@ -554,7 +708,7 @@ async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
 export async function runStatsEngine(request: StatsEngineRequest): Promise<StatsEngineRawResult> {
   return runEngineProcess<StatsEngineRawResult>({
     assertLimits: () => assertWithinLimits(request),
-    buildStdinPayload: () => ({ protocolVersion: 2, variables: request.variables }),
+    buildStdinPayload: () => ({ protocolVersion: 3, variables: request.variables }),
     parseSuccess: (parsed) => {
       const shapeResult = StatsEngineRawResultSchema.safeParse(parsed);
       if (!shapeResult.success) {
@@ -569,7 +723,7 @@ export async function runStatsEngine(request: StatsEngineRequest): Promise<Stats
 export async function runBivariateStatsEngine(request: BivariateEngineRequest): Promise<StatsEngineBivariateRawResult> {
   return runEngineProcess<StatsEngineBivariateRawResult>({
     assertLimits: () => assertBivariateWithinLimits(request),
-    buildStdinPayload: () => ({ protocolVersion: 2, bivariate: request }),
+    buildStdinPayload: () => ({ protocolVersion: 3, bivariate: request }),
     parseSuccess: (parsed) => {
       const shapeResult = StatsEngineBivariateRawResultSchema.safeParse(parsed);
       if (!shapeResult.success) {
@@ -577,6 +731,23 @@ export async function runBivariateStatsEngine(request: BivariateEngineRequest): 
       }
       validateBivariateSemantics(request, shapeResult.data);
       return shapeResult.data.bivariate;
+    },
+  });
+}
+
+export async function runCorrelationMatrixStatsEngine(
+  request: CorrelationMatrixEngineRequest,
+): Promise<StatsEngineCorrelationMatrixRawResult> {
+  return runEngineProcess<StatsEngineCorrelationMatrixRawResult>({
+    assertLimits: () => assertCorrelationMatrixWithinLimits(request),
+    buildStdinPayload: () => ({ protocolVersion: 3, correlationMatrix: request }),
+    parseSuccess: (parsed) => {
+      const shapeResult = StatsEngineCorrelationMatrixRawResultSchema.safeParse(parsed);
+      if (!shapeResult.success) {
+        throw new StatsEngineResultInvalidError(`결과 schema 재검증 실패: ${shapeResult.error.message}`);
+      }
+      validateCorrelationMatrixSemantics(request, shapeResult.data);
+      return shapeResult.data.correlationMatrix;
     },
   });
 }

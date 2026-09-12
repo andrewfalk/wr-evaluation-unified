@@ -11,14 +11,23 @@
 // ≥MINIMUM_COHORT일 때만 계산·노출한다.
 import { isSmallCell } from './statsSmallCell';
 import { MINIMUM_COHORT } from './statsPolicy';
-import type { PairedDatasetResult } from './statsBivariateDataset';
 
 export interface BivariateDisclosureResult {
   disclose: boolean;
   reasonCode: 'MIN_COHORT_NOT_MET' | null;
 }
 
-export function evaluateBivariateDisclosure(paired: PairedDatasetResult): BivariateDisclosureResult {
+// PairedDatasetResult 전체가 아니라 이 두 카운트만 구조적으로 요구한다 — 상관행렬
+// (statsCorrelationMatrixDataset.ts)은 매 쌍마다 원시 행 배열(pairs)까지 담은
+// PairedDatasetResult 전체를 만들 여유가 없어(C(k,2)개 전부 메모리에 유지) 카운트만
+// 담은 경량 요약을 쓴다 — PairedDatasetResult도 이 필드들을 가지므로 기존 이변량
+// 호출부는 그대로 통과한다(구조적 타이핑, 하위호환).
+export interface BivariateDisclosureCounts {
+  includedPersonCount: number;
+  excludedPersonCount: number;
+}
+
+export function evaluateBivariateDisclosure(paired: BivariateDisclosureCounts): BivariateDisclosureResult {
   const suppressed = isSmallCell(paired.includedPersonCount) || isSmallCell(paired.excludedPersonCount);
   return { disclose: !suppressed, reasonCode: suppressed ? 'MIN_COHORT_NOT_MET' : null };
 }

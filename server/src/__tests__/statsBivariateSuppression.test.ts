@@ -52,6 +52,8 @@ function makeCtx(pairs: PairedRow[], exclusions: AnalysisContext['paired'] exten
     pairDisclosed: true,
     availableMethods: [],
     methodCatalogVersion: 'v1-bivariate',
+    correlationMatrixPairs: null,
+    correlationMatrixVariables: null,
   };
 }
 
@@ -149,6 +151,113 @@ describe('computeBivariateAnalyzeResult — B-2 제외사유 독립 생략', () 
         { reasonCode: 'y_missing', count: 20 },
       ]);
     }
+  });
+});
+
+describe('computeBivariateAnalyzeResult — PR3-B 그룹별 박스플롯(§5)', () => {
+  it('그룹별 boxplot이 배선되고, 이상치 게이트를 통과하면 outlierCount도 노출된다', async () => {
+    const pairs = makeGroupPairs([{ label: false, n: 50 }, { label: true, n: 50 }]);
+    const ctx = makeCtx(pairs);
+    runBivariateStatsEngine.mockResolvedValueOnce({
+      n: 100, statistic: 2.5, df: 98, pValue: 0.01,
+      effectSizes: [{ name: 'mean_difference', value: 5, ci: [1, 9], ciUnavailableReason: null }],
+      nullReasons: {}, multipleTesting: { method: 'none', adjustedP: 0.01 },
+      qualityFlags: [], extra: {},
+      groupBoxplots: [
+        { label: false, boxplot: { q1: 10, median: 20, q3: 30, lowerWhisker: 1, upperWhisker: 40, lowerFence: -20, upperFence: 60, outlierCount: 0, outlierValues: [] } },
+        { label: true, boxplot: { q1: 60, median: 70, q3: 80, lowerWhisker: 55, upperWhisker: 90, lowerFence: 25, upperFence: 115, outlierCount: 15, outlierValues: [] } },
+      ],
+    });
+    const result = await computeBivariateAnalyzeResult(ctx);
+    expect(result.suppressed).toBe(false);
+    if (result.suppressed) return;
+    // false 그룹(y값 1..50, fence -20~60) — 전부 fence 안이라 이상치 0명, 비이상치 50명 — 공개.
+    expect(result.groupBreakdown?.[0].boxplot).toMatchObject({ q1: 10, q3: 30, outlierCount: 0 });
+    // true 그룹(y값 51..100, fence 25~115) — 전부 안쪽이지만 Python이 15로 보고했다고
+    // 가정한 값을 그대로 신뢰하지 않고 Node가 재계산한 게이트를 통과해야 노출된다.
+    expect(result.groupBreakdown?.[1].boxplot).toMatchObject({ q1: 60, q3: 80 });
+  });
+
+  it('그룹 내부 이상치가 소수집단이면 그 그룹의 outlierCount만 생략된다(범위값은 유지)', async () => {
+    // false 그룹: y값 1..49(정상)와 y값 하나만 극단치로 만들어 이상치 1명 재현.
+    const pairs: PairedRow[] = [];
+    for (let i = 1; i <= 49; i += 1) pairs.push({ caseId: `f${i}`, personClusterKey: `pf${i}`, x: false, y: i });
+    pairs.push({ caseId: 'f-outlier', personClusterKey: 'pf-outlier', x: false, y: 1000 });
+    for (let i = 1; i <= 50; i += 1) pairs.push({ caseId: `t${i}`, personClusterKey: `pt${i}`, x: true, y: 100 + i });
+    const ctx = makeCtx(pairs);
+    runBivariateStatsEngine.mockResolvedValueOnce({
+      n: 100, statistic: 2.5, df: 98, pValue: 0.01,
+      effectSizes: [{ name: 'mean_difference', value: 5, ci: [1, 9], ciUnavailableReason: null }],
+      nullReasons: {}, multipleTesting: { method: 'none', adjustedP: 0.01 },
+      qualityFlags: [], extra: {},
+      groupBoxplots: [
+        // q1/q3는 대략 12/37 근방(정상 49개 기준) — fence 밖에 1000이 위치하도록 구성.
+        { label: false, boxplot: { q1: 12, median: 25, q3: 37, lowerWhisker: 1, upperWhisker: 49, lowerFence: -25.5, upperFence: 74.5, outlierCount: 1, outlierValues: [1000] } },
+        { label: true, boxplot: { q1: 112, median: 125, q3: 137, lowerWhisker: 101, upperWhisker: 150, lowerFence: 75.5, upperFence: 174.5, outlierCount: 0, outlierValues: [] } },
+      ],
+    });
+    const result = await computeBivariateAnalyzeResult(ctx);
+    expect(result.suppressed).toBe(false);
+    if (result.suppressed) return;
+    const falseGroup = result.groupBreakdown?.[0];
+    expect(falseGroup?.boxplot).toBeDefined();
+    expect(falseGroup?.boxplot && 'outlierCount' in falseGroup.boxplot).toBe(false); // 이상치 1명 — 게이트 실패
+    expect(falseGroup?.boxplot?.q1).toBe(12); // 범위값 자체는 유지
+    const trueGroup = result.groupBreakdown?.[1];
+    expect(trueGroup?.boxplot).toMatchObject({ outlierCount: 0 }); // 이 그룹은 이상치 0명이라 공개
+  });
+});
+
+describe('computeBivariateAnalyzeResult — PR3-B 상관 regressionLine/scatter(§2/§7)', () => {
+  function makeCorrelationCtx(pairs: PairedRow[]): AnalysisContext {
+    const catalog = new Map<string, AnalyticsVariableMetadata>([
+      ['x', makeVariable('x', 'continuous')],
+      ['y', makeVariable('y', 'continuous')],
+    ]);
+    return {
+      ...makeCtx(pairs),
+      recipe: { ...makeCtx(pairs).recipe, variableKeys: ['x', 'y'], requestedMethod: 'pearson_correlation' },
+      catalogByKey: catalog,
+    };
+  }
+
+  it('regressionLine과 scatter.grid가 배선된다(원시 points는 절대 포함하지 않는다)', async () => {
+    const pairs: PairedRow[] = Array.from({ length: 100 }, (_, i) => ({
+      caseId: `c${i}`, personClusterKey: `p${i}`, x: i, y: i * 2,
+    }));
+    const ctx = makeCorrelationCtx(pairs);
+    runBivariateStatsEngine.mockResolvedValueOnce({
+      n: 100, statistic: 0.99, df: 98, pValue: 0.0001,
+      effectSizes: [{ name: 'pearson_r', value: 0.99, ci: [0.98, 0.995], ciUnavailableReason: null }],
+      nullReasons: {}, multipleTesting: { method: 'none', adjustedP: 0.0001 },
+      qualityFlags: [], extra: {},
+      regressionLine: { slope: 2, intercept: 0 },
+    });
+    const result = await computeBivariateAnalyzeResult(ctx);
+    expect(result.suppressed).toBe(false);
+    if (result.suppressed) return;
+    expect(result.regressionLine).toEqual({ slope: 2, intercept: 0 });
+    expect(result.scatter).toBeDefined();
+    expect(result.scatter?.totalCount).toBe(100);
+    expect(result.scatter && 'points' in result.scatter).toBe(false);
+  });
+
+  it('regressionLine이 null(상수/계산불가)이면 그대로 null로 노출된다', async () => {
+    const pairs: PairedRow[] = Array.from({ length: 50 }, (_, i) => ({
+      caseId: `c${i}`, personClusterKey: `p${i}`, x: i, y: i,
+    }));
+    const ctx = makeCorrelationCtx(pairs);
+    runBivariateStatsEngine.mockResolvedValueOnce({
+      n: 50, statistic: 1.0, df: 48, pValue: 0.0,
+      effectSizes: [{ name: 'pearson_r', value: 1.0, ci: null, ciUnavailableReason: 'perfect_correlation' }],
+      nullReasons: {}, multipleTesting: { method: 'none', adjustedP: 0.0 },
+      qualityFlags: [], extra: {},
+      regressionLine: null,
+    });
+    const result = await computeBivariateAnalyzeResult(ctx);
+    expect(result.suppressed).toBe(false);
+    if (result.suppressed) return;
+    expect(result.regressionLine).toBeNull();
   });
 });
 

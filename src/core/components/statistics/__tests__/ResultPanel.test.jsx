@@ -91,9 +91,11 @@ describe('ResultPanel — 이변량 결과 카드 방향성 표시(η²/ε² vs 
     expect(screen.queryByText('역할')).toBeNull();
     expect(screen.queryByText('앞(기준)')).toBeNull();
     expect(screen.queryByText(/평균차·효과크기 방향/)).toBeNull();
-    expect(screen.getByText('경도')).toBeTruthy();
-    expect(screen.getByText('중등도')).toBeTruthy();
-    expect(screen.getByText('고도')).toBeTruthy();
+    // PR3-B — 그룹별 박스플롯 캡션이 표 셀과 별개로 그룹명을 한 번 더 보여준다
+    // (계획서 §5) — 그래서 각 그룹명이 최소 1곳(표) 이상 존재하는지만 확인한다.
+    expect(screen.getAllByText('경도').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('중등도').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('고도').length).toBeGreaterThan(0);
   });
 
   it('mann_whitney(2그룹, rank_biserial)도 역할·방향 설명을 보여준다', async () => {
@@ -232,5 +234,87 @@ describe('ResultPanel — 이변량 결과 카드 변수 식별(committedRecipe+
     expect(screen.getByText(/공개 정책에 따라 결과가 표시되지 않음/)).toBeTruthy();
     expect(screen.queryByText(/그룹변수/)).toBeNull();
     expect(screen.queryByText(/작업군/)).toBeNull();
+  });
+});
+
+describe('ResultPanel — PR3-B 상관행렬 결과 카드', () => {
+  it('연관성 탭에 히트맵과 변수 라벨이 표시된다', async () => {
+    const user = userEvent.setup();
+    const committedRecipe = {
+      analysisMode: 'correlation_matrix',
+      variableKeys: ['val', 'grade'],
+      requestedMethod: 'pearson_correlation',
+    };
+    const committedResult = {
+      runManifest: baseRunManifest(),
+      result: {
+        correlationMatrix: {
+          method: 'pearson_correlation',
+          variableKeys: ['val', 'grade'],
+          cells: [{ suppressed: false, xKey: 'val', yKey: 'grade', n: 50, r: 0.4, pValue: 0.01, adjustedP: 0.02 }],
+          adjustedPWithheld: false,
+        },
+      },
+    };
+    render(
+      <ResultPanel
+        catalog={catalogFixture()} committedRecipe={committedRecipe} committedResult={committedResult}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported
+      />,
+    );
+    await openAssociationTab(user);
+
+    expect(screen.getByText(/상관행렬 — Pearson 상관/)).toBeTruthy();
+    // 변수 라벨은 부제(subtitle)와 히트맵 축 라벨 양쪽에 나온다.
+    expect(screen.getAllByText(/신체부담기여도\(최대\)/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/부담작업등급/).length).toBeGreaterThan(0);
+  });
+
+  it('adjustedPWithheld면 보정값 비공개 안내 문구를 보여준다', async () => {
+    const user = userEvent.setup();
+    const committedRecipe = { analysisMode: 'correlation_matrix', variableKeys: ['val', 'grade', 'grp'], requestedMethod: 'pearson_correlation' };
+    const committedResult = {
+      runManifest: baseRunManifest(),
+      result: {
+        correlationMatrix: {
+          method: 'pearson_correlation',
+          variableKeys: ['val', 'grade', 'grp'],
+          cells: [
+            { suppressed: false, xKey: 'val', yKey: 'grade', n: 50, r: 0.4, pValue: 0.01, adjustedP: null },
+            { suppressed: true, xKey: 'val', yKey: 'grp' },
+            { suppressed: true, xKey: 'grade', yKey: 'grp' },
+          ],
+          adjustedPWithheld: true,
+        },
+      },
+    };
+    render(
+      <ResultPanel
+        catalog={catalogFixture()} committedRecipe={committedRecipe} committedResult={committedResult}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported
+      />,
+    );
+    await openAssociationTab(user);
+
+    expect(screen.getByText(/다중검정 보정값\(BH-FDR\)은 행렬 전체에서 비공개 처리됩니다/)).toBeTruthy();
+  });
+
+  it('상관행렬 결과는 CSV 내보내기 버튼 대신 안내 문구를 보여준다', () => {
+    const committedRecipe = { analysisMode: 'correlation_matrix', variableKeys: ['val', 'grade', 'grp'], requestedMethod: 'pearson_correlation' };
+    const committedResult = {
+      runManifest: baseRunManifest(),
+      result: { correlationMatrix: { method: 'pearson_correlation', variableKeys: ['val', 'grade', 'grp'], cells: [], adjustedPWithheld: false } },
+    };
+    render(
+      <ResultPanel
+        catalog={catalogFixture()} committedRecipe={committedRecipe} committedResult={committedResult}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported
+      />,
+    );
+    expect(screen.getByText(/상관행렬 결과는 아직 CSV 내보내기를 지원하지 않습니다/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /집계 결과 내보내기/ })).toBeNull();
   });
 });

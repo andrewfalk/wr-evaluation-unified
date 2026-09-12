@@ -254,6 +254,54 @@ describe('POST /export — 조직 공유 캐시 정책 (§7 [필수 수정 2])',
   });
 });
 
+describe('POST /export — analysisMode별 CSV export 차단', () => {
+  it('bivariate 결과는 400 BIVARIATE_EXPORT_NOT_SUPPORTED + denied 감사(기존 동작 회귀 방지)', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    wireRunRow(pool, {
+      manifest: baseManifest({ analysisMode: 'bivariate' }),
+      result: { continuous: [], discrete: [], bivariate: { method: 'welch_t', suppressed: true } },
+      status: 'succeeded', requested_disclosure_profile: 'aggregate',
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+    });
+    const res = await postExport(pool);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('BIVARIATE_EXPORT_NOT_SUPPORTED');
+    expect(writeAuditLogStrict).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: 'denied' }));
+  });
+
+  it('correlation_matrix 결과는 400 CORRELATION_MATRIX_EXPORT_NOT_SUPPORTED + denied 감사(PR3-B)', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    wireRunRow(pool, {
+      manifest: baseManifest({ analysisMode: 'correlation_matrix' }),
+      result: {
+        continuous: [], discrete: [],
+        correlationMatrix: { method: 'pearson_correlation', variableKeys: ['a', 'b', 'c'], cells: [], adjustedPWithheld: false },
+      },
+      status: 'succeeded', requested_disclosure_profile: 'aggregate',
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+    });
+    const res = await postExport(pool);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('CORRELATION_MATRIX_EXPORT_NOT_SUPPORTED');
+    expect(writeAuditLogStrict).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: 'denied' }));
+  });
+
+  it('analysisMode가 없는 구버전 저장 결과는 descriptive로 취급해 export를 허용한다(하위호환)', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    wireRunRow(pool, {
+      manifest: baseManifest(), // analysisMode 필드 자체가 없음
+      result: baseResult(),
+      status: 'succeeded', requested_disclosure_profile: 'aggregate',
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+    });
+    const res = await postExport(pool);
+    expect(res.status).toBe(200);
+  });
+});
+
 describe('POST /export — 성공 경로 + CSV 포맷', () => {
   it('성공하면 200 + CSV(BOM, analysisRunId 메타헤더) + success 감사', async () => {
     const pool = makePool();

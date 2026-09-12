@@ -15,6 +15,16 @@ export const ESTIMABILITY_POLICY_VERSION = 'v0-preview-counts';
 // 독립된 정책 축이라 별도 버전으로 캐시 무효화를 관리한다(계획서 §버전 상수).
 export const INFERENCE_GATE_POLICY_VERSION = 'v1-repeated-measures-gate';
 
+// PR3-B — 상관행렬 다중검정 보정 방법(계획서 §4). 토글 없이 BH-FDR 고정.
+export const CORRELATION_MATRIX_MULTIPLE_TESTING_METHOD = 'bh_fdr' as const;
+export const CORRELATION_MATRIX_POLICY_VERSION = 'v1-pairwise-gates-bh-fdr';
+
+// PR3-B — 차트 데이터(히스토그램 bin·박스플롯 이상치·산점도 그리드) 억제 정책
+// 버전(계획서 §1/§3). 히스토그램/그리드는 person 단위 전체연결억제, 박스플롯
+// 이상치는 이상치·비이상치 양쪽 partition의 person 고유 인원 게이트가 독립
+// 적용된다 — 이 판정 로직이 바뀌면 이 값을 올린다.
+export const CHART_DISCLOSURE_POLICY_VERSION = 'v1-outlier-partition-gate';
+
 // §D-1 — family 내부 값-다양성 제한. 이 창(windowMinutes) 안에서 같은 queryFamilyDigest의
 // 요청 수가 maxQueriesPerFamily를 넘거나, 어느 필터 키든 서로 다른 값의 수가
 // maxDistinctFilterValuesPerKey를 넘으면 forceSuppress.

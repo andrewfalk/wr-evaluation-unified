@@ -163,6 +163,56 @@ function evaluateCorrelation(
   return resultAvailable();
 }
 
+// PR3-B §4/§7 — 상관행렬 전용 방법 카탈로그. 2변수 이변량과 달리 "방법 하나의
+// 실행가능 여부"가 이진적이지 않다(pair마다 다르다) — 여기서는 "선택 가능/불가능"
+// 까지만 판정하고, 실제 노출은 /analyze 응답의 셀별 suppressed가 담당한다
+// (statsCorrelationMatrixSuppression.ts). §6.9.1 "availableMethods[]에 상관행렬
+// 모드도 포함"을 이걸로 충족한다.
+const CORRELATION_MATRIX_METHOD_IDS: StatsMethodId[] = ['pearson_correlation', 'spearman_correlation'];
+
+// 코드리뷰 수정(2026-09-11) — 원래는 personCount만 보고 pearson/spearman을 항상
+// available로 보고했다. 그런데 statsRecipeValidation.ts는 상관행렬의 "전부
+// continuous"를 context==='analyze'일 때만(§4/§7 "preview는 관대하다") 검사해
+// METHOD_TYPE_MISMATCH로 거부한다 — 그 결과 boolean/ordinal 변수를 섞어 선택해도
+// /preview는 두 방법 다 available로 보여주고, 실행(/analyze) 버튼을 눌러야만
+// 400을 받는 모순이 생겼다. 2변수 이변량(computeAvailableMethods/evaluateCorrelation,
+// 위 §156)은 이미 preview·analyze 양쪽이 공유하는 이 카탈로그 함수 안에서 타입
+// 검사를 하므로 이 모순이 없다 — 상관행렬도 같은 원칙으로 맞춘다(타입 자체는
+// "아직 method를 안 골랐다"와 무관한 정적 사실이라 preview에서 관대할 이유가
+// 없다 — "method 미선택 허용"과 "타입 불일치 허용"은 별개).
+export function computeCorrelationMatrixAvailableMethods(
+  datasetPersonCount: number,
+  variableKeys: string[],
+  catalogByKey: Map<string, AnalyticsVariableMetadata>,
+  methodPolicyVersion: string,
+): AvailableMethod[] {
+  const observed = { personCount: datasetPersonCount, rowCount: datasetPersonCount };
+  let status: MethodResult['status'];
+  let reasonCode: StatsMethodReasonCode | null;
+  if (datasetPersonCount === 0) {
+    status = 'unsupported';
+    reasonCode = 'INSUFFICIENT_DATA';
+  } else if (variableKeys.some((key) => !isContinuousType(catalogByKey.get(key)?.type))) {
+    status = 'unsupported';
+    reasonCode = 'METHOD_TYPE_MISMATCH';
+  } else {
+    status = 'available';
+    reasonCode = null;
+  }
+  return CORRELATION_MATRIX_METHOD_IDS.map((id) => ({
+    id,
+    label: METHOD_LABELS[id],
+    purpose: 'association',
+    status,
+    reasonCode,
+    observed,
+    required: null,
+    remedy: null,
+    remedyRecipePatch: null,
+    methodPolicyVersion,
+  }));
+}
+
 export function computeAvailableMethods(
   keyX: string,
   keyY: string,

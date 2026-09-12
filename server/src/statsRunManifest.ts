@@ -10,7 +10,8 @@ import { ESTIMABILITY_POLICY_VERSION, INFERENCE_GATE_POLICY_VERSION } from './st
 
 // PR3-A — Python subprocess 엔진이 이변량 8종을 지원하게 됐다(services/stats-engine
 // /bivariate.py, protocolVersion 2).
-export const STATS_ENGINE_VERSION = 'v2-python-bivariate';
+// PR3-B — protocolVersion 3(히스토그램·박스플롯·상관행렬 추가, 계획서 §2/§3/§4).
+export const STATS_ENGINE_VERSION = 'v3-python-charts-correlation-matrix';
 
 export interface BuildRunManifestInput {
   recipeDigest: string;
@@ -20,7 +21,7 @@ export interface BuildRunManifestInput {
   formulaPolicies: Record<string, string>;
   // PR3-A — 신규, RunManifestSchema에선 optional이지만(구버전 저장결과 재파싱 호환)
   // 여기 buildRunManifest()는 항상 채운다 — 새로 만드는 manifest는 전부 신버전이므로.
-  analysisMode: 'descriptive' | 'bivariate';
+  analysisMode: 'descriptive' | 'bivariate' | 'correlation_matrix';
 }
 
 export function buildRunManifest(input: BuildRunManifestInput): RunManifest {
@@ -57,7 +58,7 @@ export interface BuildFailedStatsRunManifestInput {
   sourceDigest: string;
   snapshotAsOf: string;
   formulaPolicies: Record<string, string>;
-  analysisMode: 'descriptive' | 'bivariate';
+  analysisMode: 'descriptive' | 'bivariate' | 'correlation_matrix';
 }
 
 // 실패 행의 manifest는 resultDigest 필드 자체가 없다(null이 아니라 생략) — 계산 결과가

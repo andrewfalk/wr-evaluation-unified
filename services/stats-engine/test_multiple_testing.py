@@ -1,15 +1,28 @@
 """bh_fdr/holm 단위테스트 — 표준 교과서 예제(Benjamini-Hochberg 1995 예시 p값
 집합, 여러 통계 강의에서 R p.adjust() 결과로 인용되는 값)로 대조한다.
 
-이 파일은 R을 직접 실행하지 않는다(로컬 개발환경에 R 없음, PR1이 했던 Docker
-r-base 실행은 이 세션에서 별도로 하지 않았다 — 계획서의 "운영 고정버전 검증"
-게이트는 병합 전 별도 확인 필요)."""
+R 참조값 대조는 2026-09-11에 Docker r-base:latest(R 4.6.1)로 실제 실행해
+완료했다(`fixtures/generate_r_reference_correlation_matrix.R`의
+`bh_fdr_standard_example` 블록 — correlation_matrix.py R 검증과 같은 스크립트를
+재사용해 p.adjust(method="BH")로 이 파일의 _P/_BH_EXPECTED를 직접 대조한다).
+아래 하드코딩된 _BH_EXPECTED/_HOLM_EXPECTED 자체는 여러 통계 강의에서 인용되는
+값이라 이전부터 신뢰해 왔으나, R을 직접 실행해 _BH_EXPECTED만큼은 이제 그
+인용이 아니라 실측으로 확인된 상태다(Holm은 R 미실행 — p.adjust(method="holm")
+대조는 범위 밖으로 남겨둠)."""
 from __future__ import annotations
+
+import json
+import math
+from pathlib import Path
 
 import numpy as np
 import pytest
 
-from multiple_testing import bh_fdr, holm
+from multiple_testing import bh_fdr, bh_fdr_with_missing, holm
+
+_R_REFERENCE = json.loads(
+    (Path(__file__).parent / "fixtures" / "r_reference_values_correlation_matrix.json").read_text(encoding="utf-8")
+)
 
 # Benjamini & Hochberg(1995)식 예시 — 여러 통계 교재/강의에서 R
 # p.adjust(method="BH"/"holm")의 표준 예시로 인용되는 값.
@@ -21,6 +34,13 @@ _HOLM_EXPECTED = [0.03, 0.055, 0.08, 0.12, 0.26, 0.5]
 def test_bh_fdr_matches_known_example():
     result = bh_fdr(np.array(_P))
     np.testing.assert_allclose(result, _BH_EXPECTED, rtol=1e-6, atol=1e-9)
+
+
+def test_r_reference_bh_fdr_matches_r_p_adjust():
+    ref = _R_REFERENCE["bh_fdr_standard_example"]
+    assert ref["raw_p"] == pytest.approx(_P)
+    result = bh_fdr(np.array(_P))
+    np.testing.assert_allclose(result, ref["adjusted_p"], rtol=1e-6, atol=1e-9)
 
 
 def test_holm_matches_known_example():
@@ -65,3 +85,49 @@ def test_adjusted_p_is_monotonic_nondecreasing_in_sorted_order():
         adjusted = adjust_fn(p)
         sorted_adjusted = adjusted[order]
         assert all(sorted_adjusted[i] <= sorted_adjusted[i + 1] + 1e-12 for i in range(len(sorted_adjusted) - 1))
+
+
+# ---------------------------------------------------------------------------
+# bh_fdr_with_missing — PR3-B(상관행렬) 전용. None(계산 불가) 처리.
+# ---------------------------------------------------------------------------
+
+def test_bh_fdr_with_missing_excludes_none_from_correction_set():
+    # 계획서 §4 반례 — p=[0.04, 0.05, 0.9]에서 가운데를 None(계산 불가)으로 두면,
+    # 나머지 두 값은 m=2 기준으로 보정돼야 한다(m=3 기준인 순수 bh_fdr()과 달라야
+    # 함 — None을 억제된 셀로 오인해 그대로 넣으면 안 된다는 것과는 별개로, 애초에
+    # "계산 자체가 안 된" 값이므로 m에서 제외하는 게 R p.adjust()의 NA 처리 관례).
+    result = bh_fdr_with_missing([0.04, None, 0.9])
+    assert result[1] is None
+    two_value_bh = bh_fdr(np.array([0.04, 0.9]))
+    assert result[0] == pytest.approx(float(two_value_bh[0]))
+    assert result[2] == pytest.approx(float(two_value_bh[1]))
+
+
+def test_bh_fdr_with_missing_none_does_not_contaminate_others_with_nan():
+    # multiple_testing.bh_fdr()에 None이 섞인 배열을 그대로 넣으면 float64 변환
+    # 시 NaN이 되고, argsort가 NaN을 최댓값으로 취급해 역방향 누적최솟값이 배열
+    # 전체를 NaN으로 오염시킨다(계획서 §4에서 직접 재현한 결함) — 이 회귀를 고정.
+    result = bh_fdr_with_missing([0.01, 0.02, None, 0.03, 0.5])
+    for i, p in enumerate([0.01, 0.02, None, 0.03, 0.5]):
+        if p is None:
+            assert result[i] is None
+        else:
+            assert result[i] is not None
+            assert not math.isnan(result[i])
+
+
+def test_bh_fdr_with_missing_all_none_returns_all_none():
+    result = bh_fdr_with_missing([None, None, None])
+    assert result == [None, None, None]
+
+
+def test_bh_fdr_with_missing_empty_returns_empty():
+    assert bh_fdr_with_missing([]) == []
+
+
+def test_bh_fdr_with_missing_no_none_matches_plain_bh_fdr():
+    p = [0.005, 0.011, 0.02, 0.04, 0.13, 0.5]
+    result = bh_fdr_with_missing(list(p))
+    expected = bh_fdr(np.array(p))
+    for actual, exp in zip(result, expected):
+        assert actual == pytest.approx(float(exp))

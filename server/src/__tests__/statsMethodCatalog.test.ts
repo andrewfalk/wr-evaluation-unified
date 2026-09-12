@@ -182,3 +182,64 @@ describe('computeAvailableMethods — 타입 불일치', () => {
     expect(methods.find((m) => m.id === 'pearson_correlation')!.status).toBe('available');
   });
 });
+
+// ---------------------------------------------------------------------------
+// PR3-B — computeCorrelationMatrixAvailableMethods(§4/§7).
+// ---------------------------------------------------------------------------
+import { computeCorrelationMatrixAvailableMethods } from '../statsMethodCatalog';
+
+describe('computeCorrelationMatrixAvailableMethods', () => {
+  const allContinuous = new Map<string, AnalyticsVariableMetadata>([
+    ['a', makeVariable('a', 'continuous')],
+    ['b', makeVariable('b', 'continuous')],
+    ['c', makeVariable('c', 'continuous')],
+  ]);
+
+  it('personCount>0이고 전부 continuous면 pearson/spearman 둘 다 available', () => {
+    const result = computeCorrelationMatrixAvailableMethods(50, ['a', 'b', 'c'], allContinuous, METHOD_POLICY_VERSION);
+    expect(result).toHaveLength(2);
+    expect(result.map((m) => m.id).sort()).toEqual(['pearson_correlation', 'spearman_correlation']);
+    for (const m of result) {
+      expect(m.status).toBe('available');
+      expect(m.reasonCode).toBeNull();
+    }
+  });
+
+  it('personCount===0이면 둘 다 INSUFFICIENT_DATA', () => {
+    const result = computeCorrelationMatrixAvailableMethods(0, ['a', 'b', 'c'], allContinuous, METHOD_POLICY_VERSION);
+    for (const m of result) {
+      expect(m.status).toBe('unsupported');
+      expect(m.reasonCode).toBe('INSUFFICIENT_DATA');
+    }
+  });
+
+  it('methodPolicyVersion을 그대로 stamp한다', () => {
+    const result = computeCorrelationMatrixAvailableMethods(10, ['a', 'b', 'c'], allContinuous, 'v9-test');
+    expect(result.every((m) => m.methodPolicyVersion === 'v9-test')).toBe(true);
+  });
+
+  // 코드리뷰 수정(2026-09-11) — boolean/ordinal 변수가 하나라도 섞이면 preview
+  // 시점에도 METHOD_TYPE_MISMATCH로 unsupported여야 한다. 이전엔 personCount만
+  // 보고 항상 available을 반환해, /preview에서는 실행 가능해 보이다가 /analyze
+  // (statsRecipeValidation.ts)에서만 뒤늦게 400으로 거부되는 모순이 있었다.
+  it('변수 중 하나라도 non-continuous(boolean 등)면 둘 다 METHOD_TYPE_MISMATCH — preview에서도 analyze와 동일하게 미리 드러난다', () => {
+    const mixed = new Map<string, AnalyticsVariableMetadata>([
+      ['a', makeVariable('a', 'continuous')],
+      ['b', makeVariable('b', 'continuous')],
+      ['flag', makeVariable('flag', 'boolean')],
+    ]);
+    const result = computeCorrelationMatrixAvailableMethods(50, ['a', 'b', 'flag'], mixed, METHOD_POLICY_VERSION);
+    for (const m of result) {
+      expect(m.status).toBe('unsupported');
+      expect(m.reasonCode).toBe('METHOD_TYPE_MISMATCH');
+    }
+  });
+
+  it('알 수 없는 변수 키(카탈로그에 없음)도 타입 불일치와 동일하게 처리한다(크래시 없음)', () => {
+    const result = computeCorrelationMatrixAvailableMethods(50, ['a', 'b', 'unknown-key'], allContinuous, METHOD_POLICY_VERSION);
+    for (const m of result) {
+      expect(m.status).toBe('unsupported');
+      expect(m.reasonCode).toBe('METHOD_TYPE_MISMATCH');
+    }
+  });
+});
