@@ -289,3 +289,68 @@ describe('computeAvailableMethods — categorical 그룹비교/분할표(2026-09
     expect(chiSquare.reasonCode).not.toBe('METHOD_TYPE_MISMATCH');
   });
 });
+
+// PR0-B4 Slice 8b — 9차 검토 P1 재현. job_diagnosis ordinal 변수 8개(repetitionLevel/
+// forceLevel/awkwardPostureLevel/restDistribution × elbow/wrist)가 statsOrdinalOrder.ts에
+// 등록되지 않아 resolveLevelOrder가 null을 반환, 그룹비교·분할표가 전부
+// METHOD_TYPE_MISMATCH로 거부됐다 — 리뷰가 지적한 40명(20/20) 시나리오를 그대로 고정한다.
+describe('computeAvailableMethods — job_diagnosis ordinal 변수(PR0-B4 Slice 8b, 9차 검토 보완)', () => {
+  const REPETITION_CONTINUOUS_CATALOG = new Map<string, AnalyticsVariableMetadata>([
+    ['elbow.jobDiagnosis.repetitionLevel', makeVariable('elbow.jobDiagnosis.repetitionLevel', 'ordinal')],
+    ['elbow.jobDiagnosis.dailyExposureHours', makeVariable('elbow.jobDiagnosis.dailyExposureHours', 'continuous')],
+  ]);
+
+  it('elbow.jobDiagnosis.repetitionLevel(ordinal) × dailyExposureHours(continuous) — welch_t/mann_whitney/anova/kruskal_wallis가 더는 METHOD_TYPE_MISMATCH가 아니다', () => {
+    const pairs = makeGroupPairs([
+      { label: 'occasional', n: 20 },
+      { label: 'frequent', n: 20 },
+    ]);
+    const methods = computeAvailableMethods(
+      'elbow.jobDiagnosis.repetitionLevel', 'elbow.jobDiagnosis.dailyExposureHours', REPETITION_CONTINUOUS_CATALOG, pairedResult(pairs), METHOD_POLICY_VERSION,
+    );
+    for (const id of ['welch_t', 'mann_whitney', 'anova', 'kruskal_wallis'] as const) {
+      const m = methods.find((x) => x.id === id)!;
+      expect(m.reasonCode, `${id}: ${JSON.stringify(m)}`).not.toBe('METHOD_TYPE_MISMATCH');
+      expect(m.status).toBe('available');
+    }
+  });
+
+  const REPETITION_RESTDIST_CATALOG = new Map<string, AnalyticsVariableMetadata>([
+    ['elbow.jobDiagnosis.repetitionLevel', makeVariable('elbow.jobDiagnosis.repetitionLevel', 'ordinal')],
+    ['elbow.jobDiagnosis.restDistribution', makeVariable('elbow.jobDiagnosis.restDistribution', 'ordinal')],
+  ]);
+
+  it('elbow.jobDiagnosis.repetitionLevel × restDistribution(둘 다 ordinal) 분할표 — chi_square/fisher_exact가 더는 METHOD_TYPE_MISMATCH가 아니다', () => {
+    const pairs: PairedRow[] = [
+      { caseId: 'c1', personClusterKey: 'p1', x: 'occasional', y: 'adequate' },
+      { caseId: 'c2', personClusterKey: 'p2', x: 'occasional', y: 'insufficient' },
+      { caseId: 'c3', personClusterKey: 'p3', x: 'frequent', y: 'adequate' },
+      { caseId: 'c4', personClusterKey: 'p4', x: 'frequent', y: 'insufficient' },
+    ];
+    const methods = computeAvailableMethods(
+      'elbow.jobDiagnosis.repetitionLevel', 'elbow.jobDiagnosis.restDistribution', REPETITION_RESTDIST_CATALOG, pairedResult(pairs), METHOD_POLICY_VERSION,
+    );
+    const chiSquare = methods.find((m) => m.id === 'chi_square')!;
+    expect(chiSquare.reasonCode).not.toBe('METHOD_TYPE_MISMATCH');
+  });
+
+  const WRIST_FORCE_CONTINUOUS_CATALOG = new Map<string, AnalyticsVariableMetadata>([
+    ['wrist.jobDiagnosis.forceLevel', makeVariable('wrist.jobDiagnosis.forceLevel', 'ordinal')],
+    ['wrist.jobDiagnosis.dailyExposureHours', makeVariable('wrist.jobDiagnosis.dailyExposureHours', 'continuous')],
+  ]);
+
+  it('wrist.jobDiagnosis.forceLevel(ordinal, 3단계) × dailyExposureHours — anova/kruskal_wallis가 더는 METHOD_TYPE_MISMATCH가 아니다', () => {
+    const pairs = makeGroupPairs([
+      { label: 'mild', n: 15 },
+      { label: 'moderate', n: 15 },
+      { label: 'high', n: 10 },
+    ]);
+    const methods = computeAvailableMethods(
+      'wrist.jobDiagnosis.forceLevel', 'wrist.jobDiagnosis.dailyExposureHours', WRIST_FORCE_CONTINUOUS_CATALOG, pairedResult(pairs), METHOD_POLICY_VERSION,
+    );
+    for (const id of ['anova', 'kruskal_wallis'] as const) {
+      const m = methods.find((x) => x.id === id)!;
+      expect(m.reasonCode, `${id}: ${JSON.stringify(m)}`).not.toBe('METHOD_TYPE_MISMATCH');
+    }
+  });
+});

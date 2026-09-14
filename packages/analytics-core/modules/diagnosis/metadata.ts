@@ -35,4 +35,93 @@ export const DIAGNOSIS_METADATA: AnalyticsVariableMetadata[] = [
     formulaFamily: 'diagnosis_module_group',
     supportedFormulaPolicies: [],
   },
+
+  // PR0-B4 Slice 6 — coverage 잔여 필드(매핑표 §1 shared.diagnoses[]).
+  {
+    key: 'diagnosis.identity.code',
+    label: '신청상병 코드',
+    group: '신청상병 · 공통',
+    moduleId: 'diagnosis',
+    grain: 'diagnosis_side',
+    type: 'high_cardinality',
+    provenance: 'raw',
+    dependsOn: ['shared.diagnoses[].id', 'shared.diagnoses[].code'],
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'diagnosis_identity_raw',
+    supportedFormulaPolicies: [],
+  },
+  {
+    key: 'diagnosis.identity.name',
+    label: '신청상병명',
+    group: '신청상병 · 공통',
+    moduleId: 'diagnosis',
+    grain: 'diagnosis_side',
+    type: 'high_cardinality',
+    provenance: 'raw',
+    dependsOn: ['shared.diagnoses[].id', 'shared.diagnoses[].name'],
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'diagnosis_identity_raw',
+    supportedFormulaPolicies: [],
+  },
+  {
+    key: 'diagnosis.assessment.status',
+    label: '업무관련성',
+    group: '신청상병 · 판정',
+    moduleId: 'diagnosis',
+    grain: 'diagnosis_side',
+    type: 'categorical',
+    provenance: 'clinician_judgment',
+    dependsOn: ['shared.diagnoses[].id', 'shared.diagnoses[].side', 'shared.diagnoses[].assessmentRight', 'shared.diagnoses[].assessmentLeft'],
+    availableAt: 'post_decision',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'diagnosis_assessment_status',
+    supportedFormulaPolicies: [],
+  },
 ];
+
+// §매핑표 확정 — 낮음 사유 7개 옵션(AssessmentTab.jsx LOW_REASON_OPTIONS와 값 동일).
+// 옵션별 boolean 키로 분해한다(다중선택 계약). assessment!=='low'면 배열 내용과 무관하게
+// not_applicable — extractDiagnosisAssessmentLowReasonOption(extractors.ts)이 강제한다.
+const LOW_REASON_METADATA_ENTRIES: Array<[key: string, label: string]> = [
+  ['unrelated', '신체부담과 관련없는 상병'],
+  ['unconfirmed', '상병 미확인'],
+  ['ageMild', '연령대비 경미'],
+  ['delayed', '업무중단 후 상당기간 경과'],
+  ['lowBurden', '누적 신체부담 낮음'],
+  ['belowThreshold', '부담 정도가 최소 문턱값을 넘지 못함'],
+  ['other', '기타'],
+];
+
+for (const [optionKey, label] of LOW_REASON_METADATA_ENTRIES) {
+  DIAGNOSIS_METADATA.push({
+    key: `diagnosis.assessment.lowReason.${optionKey}`,
+    label: `업무관련성 낮음 사유 · ${label}`,
+    group: '신청상병 · 판정',
+    moduleId: 'diagnosis',
+    grain: 'diagnosis_side',
+    type: 'boolean',
+    provenance: 'clinician_judgment',
+    dependsOn: [
+      'shared.diagnoses[].id',
+      'shared.diagnoses[].side',
+      'shared.diagnoses[].assessmentRight',
+      'shared.diagnoses[].assessmentLeft',
+      'shared.diagnoses[].reasonRight',
+      'shared.diagnoses[].reasonLeft',
+    ],
+    availableAt: 'post_decision',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'diagnosis_assessment_low_reason',
+    supportedFormulaPolicies: [],
+  });
+}

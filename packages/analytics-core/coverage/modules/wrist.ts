@@ -64,7 +64,9 @@ export const WRIST_INVENTORY: CoverageInventory = {
 
   'modules.wrist.jobEvaluations[].sharedJobId': { included: true },
   'modules.wrist.jobEvaluations[]._pendingPreset': { included: false, reason: TECHNICAL + ' — 프리셋 적용 대기 중인 임시 상태, 저장 직전 제거됨' },
-  'modules.wrist.jobEvaluations[].diagnosisEntries[].bkAutoSyncedFrom': { included: false, reason: TECHNICAL + ' — BK유형 자동복사 출처 진단ID(provenance), 계산에 관여하지 않음' },
+  // PR0-B4 Slice 8b — job_diagnosis grain 공통 필드 변수들이 이제 이 값을 읽는다(elbow와
+  // 동일 사유 — inferred_link 품질 플래그 판정).
+  'modules.wrist.jobEvaluations[].diagnosisEntries[].bkAutoSyncedFrom': { included: true },
   ...diagnosisEntryInventory('modules.wrist.jobEvaluations[].diagnosisEntries[]'),
 
   // 레거시(구형식, job별이 아니라 진단별 flat 저장) — linkedJobId만 이 구조 전용.

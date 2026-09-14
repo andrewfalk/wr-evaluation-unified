@@ -8,6 +8,21 @@ import {
   extractSpineDiagnosisConcomitantSpondylosis,
   extractSpineTaskWeightKg,
   extractSpineTaskFrequencyPerDay,
+  extractSpineCaseMddmStatus,
+  extractSpineCaseVibrationExposureStatus,
+  extractSpineCaseFormulaVersion,
+  extractSpineCaseEvalMethod,
+  extractSpineCaseCareerYears,
+  extractSpineCaseCareerMonths,
+  extractSpineCaseWorkDaysPerYear,
+  extractSpineTaskPosture,
+  extractSpineTaskTimeValue,
+  extractSpineTaskTimeUnit,
+  extractSpineTaskCorrectionFactor,
+  extractSpineVibrationIntervalAwMin,
+  extractSpineVibrationIntervalAwMax,
+  extractSpineVibrationIntervalTimeValue,
+  extractSpineVibrationIntervalTimeUnit,
 } from '../../../modules/spine/extractors';
 import { deterministicMigrate } from '../../../migration/deterministicMigrate';
 
@@ -791,5 +806,191 @@ describe('extractSpineDiagnosisConcomitantSpondylosis — case grain(진단 행�
       missing: null,
       qualityFlags: ['conflicting_common_field'],
     });
+  });
+});
+
+// PR0-B4 Slice 1 — coverage 잔여 필드(매핑표 §4). raw 필드 그대로 노출 — 파생 계산 없음.
+describe('spine.case.* raw 필드 4종(문자열) — mddmStatus/vibrationExposureStatus/formulaVersion/evalMethod', () => {
+  it.each([
+    ['extractSpineCaseMddmStatus', extractSpineCaseMddmStatus, 'mddmStatus'],
+    ['extractSpineCaseVibrationExposureStatus', extractSpineCaseVibrationExposureStatus, 'vibrationExposureStatus'],
+    ['extractSpineCaseFormulaVersion', extractSpineCaseFormulaVersion, 'formulaVersion'],
+    ['extractSpineCaseEvalMethod', extractSpineCaseEvalMethod, 'evalMethod'],
+  ] as const)('%s — 모듈 비활성이면 structural_missing, blank는 not_entered, 정상값 통과, 비문자열은 invalid', (_label, fn, field) => {
+    expect(fn(migrate(baseCase({ activeModules: [] })))).toEqual({ value: null, missing: 'structural_missing', qualityFlags: [] });
+    expect(fn(migrate(baseCase({ includeSpineModule: false })))).toEqual({ value: null, missing: 'structural_missing', qualityFlags: [] });
+    expect(fn(migrate(baseCase({ spineModule: {} })))).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+    expect(fn(migrate(baseCase({ spineModule: { [field]: 'present' } })))).toEqual({ value: 'present', missing: null, qualityFlags: [] });
+    expect(fn(migrate(baseCase({ spineModule: { [field]: ['present'] } })))).toEqual({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: ['invalid'],
+    });
+  });
+});
+
+describe('spine.case.* raw 필드 3종(숫자) — careerYears/careerMonths/workDaysPerYear', () => {
+  it.each([
+    ['extractSpineCaseCareerYears', extractSpineCaseCareerYears, 'careerYears'],
+    ['extractSpineCaseCareerMonths', extractSpineCaseCareerMonths, 'careerMonths'],
+    ['extractSpineCaseWorkDaysPerYear', extractSpineCaseWorkDaysPerYear, 'workDaysPerYear'],
+  ] as const)('%s — 모듈 비활성이면 structural_missing, blank는 not_entered, 정상값 통과(0/음수 허용 — 유한성만 검증), 파싱 불가는 invalid', (_label, fn, field) => {
+    expect(fn(migrate(baseCase({ activeModules: [] })))).toEqual({ value: null, missing: 'structural_missing', qualityFlags: [] });
+    expect(fn(migrate(baseCase({ spineModule: {} })))).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+    expect(fn(migrate(baseCase({ spineModule: { [field]: 5 } })))).toEqual({ value: 5, missing: null, qualityFlags: [] });
+    expect(fn(migrate(baseCase({ spineModule: { [field]: 0 } })))).toEqual({ value: 0, missing: null, qualityFlags: [] });
+    expect(fn(migrate(baseCase({ spineModule: { [field]: 'bad' } })))).toEqual({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: ['invalid'],
+    });
+    expect(fn(migrate(baseCase({ spineModule: { [field]: [5] } })))).toEqual({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: ['invalid'],
+    });
+  });
+});
+
+describe('spine.task.posture/timeValue/timeUnit/correctionFactor — 반복 관측치', () => {
+  const TASK_BASE = { id: 'task-1', sharedJobId: 'job-1' };
+
+  it('spine 모듈이 비활성이면 4종 전부 빈 배열', () => {
+    for (const fn of [extractSpineTaskPosture, extractSpineTaskTimeValue, extractSpineTaskTimeUnit, extractSpineTaskCorrectionFactor]) {
+      expect(fn(migrate(baseCase({ activeModules: [] })))).toEqual([]);
+    }
+  });
+
+  it('mddmStatus가 unknown/none이면 4종 전부 not_assessed/not_applicable(값이 새지 않는다)', () => {
+    const unknownCase = baseCase({ spineModule: { evalMethod: 'wbv', tasks: [TASK_BASE] } });
+    const noneCase = baseCase({ spineModule: { mddmStatus: 'none', tasks: [TASK_BASE] } });
+    for (const fn of [extractSpineTaskPosture, extractSpineTaskTimeValue, extractSpineTaskTimeUnit, extractSpineTaskCorrectionFactor]) {
+      expect(fn(migrate(unknownCase))).toEqual([{ entityKey: ['job-1', 'task-1'], value: null, missing: 'not_assessed', qualityFlags: [] }]);
+      expect(fn(migrate(noneCase))).toEqual([{ entityKey: ['job-1', 'task-1'], value: null, missing: 'not_applicable', qualityFlags: [] }]);
+    }
+  });
+
+  it('posture — 정상 코드(G3) 통과, 미입력은 not_entered, formulaDB에 없는 코드는 not_entered+invalid', () => {
+    const present = (task: Record<string, unknown>) => baseCase({ spineModule: { mddmStatus: 'present', tasks: [task] } });
+    expect(extractSpineTaskPosture(migrate(present({ ...TASK_BASE, posture: 'G3' })))).toEqual([
+      { entityKey: ['job-1', 'task-1'], value: 'G3', missing: null, qualityFlags: [] },
+    ]);
+    expect(extractSpineTaskPosture(migrate(present({ ...TASK_BASE })))).toEqual([
+      { entityKey: ['job-1', 'task-1'], value: null, missing: 'not_entered', qualityFlags: [] },
+    ]);
+    expect(extractSpineTaskPosture(migrate(present({ ...TASK_BASE, posture: 'G99' })))).toEqual([
+      { entityKey: ['job-1', 'task-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
+    ]);
+  });
+
+  it('timeValue — 양수만 허용(0·음수·파싱불가는 not_entered+invalid, 미입력은 flag 없이 not_entered)', () => {
+    const present = (task: Record<string, unknown>) => baseCase({ spineModule: { mddmStatus: 'present', tasks: [task] } });
+    expect(extractSpineTaskTimeValue(migrate(present({ ...TASK_BASE, timeValue: 5 })))).toEqual([
+      { entityKey: ['job-1', 'task-1'], value: 5, missing: null, qualityFlags: [] },
+    ]);
+    expect(extractSpineTaskTimeValue(migrate(present({ ...TASK_BASE })))).toEqual([
+      { entityKey: ['job-1', 'task-1'], value: null, missing: 'not_entered', qualityFlags: [] },
+    ]);
+    expect(extractSpineTaskTimeValue(migrate(present({ ...TASK_BASE, timeValue: 0 })))).toEqual([
+      { entityKey: ['job-1', 'task-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
+    ]);
+    expect(extractSpineTaskTimeValue(migrate(present({ ...TASK_BASE, timeValue: -1 })))).toEqual([
+      { entityKey: ['job-1', 'task-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
+    ]);
+  });
+
+  it('timeUnit — VALID_TIME_UNITS만 허용(sec/min/hr), 미지원 값은 not_entered+invalid', () => {
+    const present = (task: Record<string, unknown>) => baseCase({ spineModule: { mddmStatus: 'present', tasks: [task] } });
+    expect(extractSpineTaskTimeUnit(migrate(present({ ...TASK_BASE, timeUnit: 'hr' })))).toEqual([
+      { entityKey: ['job-1', 'task-1'], value: 'hr', missing: null, qualityFlags: [] },
+    ]);
+    expect(extractSpineTaskTimeUnit(migrate(present({ ...TASK_BASE, timeUnit: 'day' })))).toEqual([
+      { entityKey: ['job-1', 'task-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
+    ]);
+  });
+
+  it('correctionFactor — 0/음수도 허용(유한성만 검증, scanTaskQuality와 동일 원칙), 파싱불가만 invalid', () => {
+    const present = (task: Record<string, unknown>) => baseCase({ spineModule: { mddmStatus: 'present', tasks: [task] } });
+    expect(extractSpineTaskCorrectionFactor(migrate(present({ ...TASK_BASE, correctionFactor: 0 })))).toEqual([
+      { entityKey: ['job-1', 'task-1'], value: 0, missing: null, qualityFlags: [] },
+    ]);
+    expect(extractSpineTaskCorrectionFactor(migrate(present({ ...TASK_BASE, correctionFactor: 'bad' })))).toEqual([
+      { entityKey: ['job-1', 'task-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
+    ]);
+  });
+});
+
+describe('spine.vibration.intervalAwMin/AwMax/TimeValue/TimeUnit — 반복 관측치', () => {
+  const IV_BASE = { id: 'iv-1', sharedJobId: 'job-1' };
+  const present = (interval: Record<string, unknown>) =>
+    baseCase({ spineModule: { vibrationExposureStatus: 'present', vibrationIntervals: [interval] } });
+
+  it('spine 모듈이 비활성이면 4종 전부 빈 배열', () => {
+    for (const fn of [
+      extractSpineVibrationIntervalAwMin,
+      extractSpineVibrationIntervalAwMax,
+      extractSpineVibrationIntervalTimeValue,
+      extractSpineVibrationIntervalTimeUnit,
+    ]) {
+      expect(fn(migrate(baseCase({ activeModules: [] })))).toEqual([]);
+    }
+  });
+
+  it('vibrationExposureStatus가 unknown/none이면 4종 전부 not_assessed/not_applicable', () => {
+    const unknownCase = baseCase({ spineModule: { vibrationIntervals: [IV_BASE] } });
+    const noneCase = baseCase({ spineModule: { vibrationExposureStatus: 'none', vibrationIntervals: [IV_BASE] } });
+    for (const fn of [
+      extractSpineVibrationIntervalAwMin,
+      extractSpineVibrationIntervalAwMax,
+      extractSpineVibrationIntervalTimeValue,
+      extractSpineVibrationIntervalTimeUnit,
+    ]) {
+      expect(fn(migrate(unknownCase))).toEqual([{ entityKey: ['job-1', 'iv-1'], value: null, missing: 'not_assessed', qualityFlags: [] }]);
+      expect(fn(migrate(noneCase))).toEqual([{ entityKey: ['job-1', 'iv-1'], value: null, missing: 'not_applicable', qualityFlags: [] }]);
+    }
+  });
+
+  // isIntervalValid 도메인 규칙(vibration.ts:29) — awMin>=0이면 유효하다. awMax/timeValue와
+  // 달리 0을 배제하지 않는다.
+  it('awMin — 0은 정상값(양수 강제 아님), 음수는 not_entered+invalid, 미입력은 flag 없이 not_entered', () => {
+    expect(extractSpineVibrationIntervalAwMin(migrate(present({ ...IV_BASE, awMin: 0 })))).toEqual([
+      { entityKey: ['job-1', 'iv-1'], value: 0, missing: null, qualityFlags: [] },
+    ]);
+    expect(extractSpineVibrationIntervalAwMin(migrate(present({ ...IV_BASE, awMin: 1.2 })))).toEqual([
+      { entityKey: ['job-1', 'iv-1'], value: 1.2, missing: null, qualityFlags: [] },
+    ]);
+    expect(extractSpineVibrationIntervalAwMin(migrate(present({ ...IV_BASE, awMin: -1 })))).toEqual([
+      { entityKey: ['job-1', 'iv-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
+    ]);
+    expect(extractSpineVibrationIntervalAwMin(migrate(present({ ...IV_BASE })))).toEqual([
+      { entityKey: ['job-1', 'iv-1'], value: null, missing: 'not_entered', qualityFlags: [] },
+    ]);
+  });
+
+  it('awMax — 양수만 허용(0·음수·파싱불가는 not_entered+invalid)', () => {
+    expect(extractSpineVibrationIntervalAwMax(migrate(present({ ...IV_BASE, awMax: 1.5 })))).toEqual([
+      { entityKey: ['job-1', 'iv-1'], value: 1.5, missing: null, qualityFlags: [] },
+    ]);
+    expect(extractSpineVibrationIntervalAwMax(migrate(present({ ...IV_BASE, awMax: 0 })))).toEqual([
+      { entityKey: ['job-1', 'iv-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
+    ]);
+  });
+
+  it('timeValue — 양수만 허용(0·음수·파싱불가는 not_entered+invalid)', () => {
+    expect(extractSpineVibrationIntervalTimeValue(migrate(present({ ...IV_BASE, timeValue: 4 })))).toEqual([
+      { entityKey: ['job-1', 'iv-1'], value: 4, missing: null, qualityFlags: [] },
+    ]);
+    expect(extractSpineVibrationIntervalTimeValue(migrate(present({ ...IV_BASE, timeValue: -1 })))).toEqual([
+      { entityKey: ['job-1', 'iv-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
+    ]);
+  });
+
+  it('timeUnit — VALID_TIME_UNITS만 허용, 미지원 값은 not_entered+invalid', () => {
+    expect(extractSpineVibrationIntervalTimeUnit(migrate(present({ ...IV_BASE, timeUnit: 'min' })))).toEqual([
+      { entityKey: ['job-1', 'iv-1'], value: 'min', missing: null, qualityFlags: [] },
+    ]);
+    expect(extractSpineVibrationIntervalTimeUnit(migrate(present({ ...IV_BASE, timeUnit: 'day' })))).toEqual([
+      { entityKey: ['job-1', 'iv-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
+    ]);
   });
 });

@@ -14,6 +14,7 @@ export default defineConfig({
     'modules/spine/index': 'modules/spine/index.ts',
     'modules/job/index': 'modules/job/index.ts',
     'modules/diagnosis/index': 'modules/diagnosis/index.ts',
+    'modules/patient/index': 'modules/patient/index.ts',
     'migration/deterministicMigrate': 'migration/deterministicMigrate.ts',
     completion: 'completion.ts',
     catalog: 'catalog.ts',

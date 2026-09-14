@@ -76,7 +76,12 @@ export const ELBOW_INVENTORY: CoverageInventory = {
 
   'modules.elbow.jobEvaluations[].sharedJobId': { included: true },
   'modules.elbow.jobEvaluations[]._pendingPreset': { included: false, reason: TECHNICAL + ' — 프리셋 적용 대기 중인 임시 상태, 저장 직전 제거됨(data.js normalizeElbowModuleData)' },
-  'modules.elbow.jobEvaluations[].diagnosisEntries[].bkAutoSyncedFrom': { included: false, reason: TECHNICAL + ' — BK유형 자동복사 출처 진단ID(provenance), 계산에 관여하지 않음' },
+  // PR0-B4 Slice 8b — job_diagnosis grain 공통 필드 변수들이 이제 이 값을 읽는다: 존재하면
+  // "자동 복사 표식이 아직 남아있다"는 뜻으로 inferred_link 품질 플래그를 붙인다(계획
+  // §job_diagnosis 계약 "auto-copy(donor) provenance" 절) — burdenGradeMax(case grain
+  // 롤업) 계산 자체에는 여전히 관여하지 않지만, 개별 job_diagnosis 변수의 qualityFlags
+  // 판정에는 관여하므로 included:true로 갱신한다.
+  'modules.elbow.jobEvaluations[].diagnosisEntries[].bkAutoSyncedFrom': { included: true },
   ...diagnosisEntryInventory('modules.elbow.jobEvaluations[].diagnosisEntries[]'),
 
   // 레거시(구형식, job별이 아니라 진단별 flat 저장) — linkedJobId만 이 구조 전용.

@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { extractCervicalCaseMaxJobCumulativeKgHours } from '../../../modules/cervical/extractors';
+import {
+  extractCervicalCaseMaxJobCumulativeKgHours,
+  extractCervicalTaskName,
+  extractCervicalTaskExposureTypeShoulderHeavyLoad,
+  extractCervicalTaskExposureTypeAwkwardStaticNeckLoad,
+  extractCervicalTaskLoadWeightKg,
+  extractCervicalTaskCarryHoursPerShift,
+  extractCervicalTaskForcedNeckPosture,
+  extractCervicalTaskNeckNonneutralHoursPerDay,
+  extractCervicalTaskCombinedFlexionRotationPosture,
+  extractCervicalTaskPrecisionWork,
+} from '../../../modules/cervical/extractors';
 import { deterministicMigrate } from '../../../migration/deterministicMigrate';
 
 const FALLBACK = '2024-01-01T00:00:00.000Z';
@@ -32,6 +43,7 @@ function baseCase(overrides: {
 }
 
 const CORE_TASK = {
+  id: 'task-1',
   sharedJobId: 'job-1',
   name: '박스 운반',
   exposure_types: ['shoulder_heavy_load'],
@@ -156,5 +168,249 @@ describe('extractCervicalCaseMaxJobCumulativeKgHours — 우선순위 사슬(§1
   it('필드 타입 방어: exposure_types가 배열이 아니라 문자열이어도 예외를 던지지 않는다', () => {
     const malformedTask = { ...CORE_TASK, exposure_types: 'shoulder_heavy_load' as unknown as string[] };
     expect(() => extractCervicalCaseMaxJobCumulativeKgHours(migrate(baseCase({ tasks: [malformedTask] })))).not.toThrow();
+  });
+});
+
+// PR0-B4 Slice 7 — 신설 cervical_task grain. spine의 task grain과 완전히 분리된 별도
+// grain(계획 결정)이라 별도 테스트 스위트로 검증한다.
+describe('cervical_task grain — 모듈 비활성/작업 0건이면 행이 0개(structural_missing 행을 만들지 않는다)', () => {
+  it('cervical 모듈이 비활성이면 빈 배열', () => {
+    expect(extractCervicalTaskName(migrate(baseCase({ activeModules: [], tasks: [CORE_TASK] })))).toEqual([]);
+  });
+
+  it('작업이 0건이면 빈 배열', () => {
+    expect(extractCervicalTaskName(migrate(baseCase({ tasks: [] })))).toEqual([]);
+  });
+
+  it('entityKey는 [jobId, taskId] 형태다', () => {
+    const task = { ...CORE_TASK, id: 'task-1' };
+    const result = extractCervicalTaskName(migrate(baseCase({ tasks: [task] })));
+    expect(result).toEqual([{ entityKey: ['job-1', 'task-1'], value: '박스 운반', missing: null, qualityFlags: [] }]);
+  });
+});
+
+describe('extractCervicalTaskName — cervical_task grain(게이트 없음)', () => {
+  it('미입력은 not_entered', () => {
+    const task = { ...CORE_TASK, name: '' };
+    expect(extractCervicalTaskName(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: [],
+    });
+  });
+
+  it('문자열이 아니면 not_entered + invalid', () => {
+    const task = { ...CORE_TASK, name: 123 as unknown as string };
+    expect(extractCervicalTaskName(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: ['invalid'],
+    });
+  });
+
+  it('배열로 감싼 값이어도 강제변환으로 통과시키지 않는다', () => {
+    const task = { ...CORE_TASK, name: ['박스 운반'] as unknown as string };
+    expect(extractCervicalTaskName(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: ['invalid'],
+    });
+  });
+});
+
+describe('extractCervicalTaskExposureType* — §다중선택 배열 계약(옵션 2개뿐)', () => {
+  it('exposure_types가 undefined면 structural_missing', () => {
+    const task = { id: 'task-1', sharedJobId: 'job-1', name: 'x' };
+    expect(extractCervicalTaskExposureTypeShoulderHeavyLoad(migrate(baseCase({ tasks: [task] })))).toEqual([
+      { entityKey: ['job-1', 'task-1'], value: null, missing: 'structural_missing', qualityFlags: [] },
+    ]);
+  });
+
+  it('배열이 아니면 not_entered + invalid', () => {
+    const task = { ...CORE_TASK, exposure_types: 'shoulder_heavy_load' as unknown };
+    const result = extractCervicalTaskExposureTypeShoulderHeavyLoad(migrate(baseCase({ tasks: [task] })));
+    expect(result[0]).toMatchObject({ value: null, missing: 'not_entered', qualityFlags: ['invalid'] });
+  });
+
+  it('배열 원소 중 문자열이 아닌 게 있으면 배열 전체를 거부 — not_entered + invalid', () => {
+    const task = { ...CORE_TASK, exposure_types: ['shoulder_heavy_load', 123] as unknown };
+    const result = extractCervicalTaskExposureTypeShoulderHeavyLoad(migrate(baseCase({ tasks: [task] })));
+    expect(result[0]).toMatchObject({ value: null, missing: 'not_entered', qualityFlags: ['invalid'] });
+  });
+
+  it('빈 배열(명시적으로 둘 다 미선택)이면 옵션별 false', () => {
+    const task = { ...CORE_TASK, exposure_types: [] };
+    expect(extractCervicalTaskExposureTypeShoulderHeavyLoad(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+      value: false,
+      missing: null,
+      qualityFlags: [],
+    });
+  });
+
+  it('정상 배열이면 옵션별 boolean으로 분해된다(선택 안 된 옵션은 false)', () => {
+    const task = { ...CORE_TASK, exposure_types: ['shoulder_heavy_load'] };
+    expect(extractCervicalTaskExposureTypeShoulderHeavyLoad(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+      value: true,
+      missing: null,
+      qualityFlags: [],
+    });
+    expect(extractCervicalTaskExposureTypeAwkwardStaticNeckLoad(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+      value: false,
+      missing: null,
+      qualityFlags: [],
+    });
+  });
+
+  it('미지원 옵션값이 섞여 있으면 legacy_unknown 플래그가 붙는다(옵션은 2개뿐)', () => {
+    const task = { ...CORE_TASK, exposure_types: ['shoulder_heavy_load', 'retired_option'] };
+    expect(extractCervicalTaskExposureTypeShoulderHeavyLoad(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+      value: true,
+      missing: null,
+      qualityFlags: ['legacy_unknown'],
+    });
+  });
+});
+
+describe('extractCervicalTaskLoadWeightKg/CarryHoursPerShift — shoulder_heavy_load 게이트', () => {
+  it('exposure_types에 shoulder_heavy_load가 없으면 게이트가 닫혀 not_applicable', () => {
+    const task = { ...CORE_TASK, exposure_types: ['awkward_static_neck_load'], load_weight_kg: '45' };
+    expect(extractCervicalTaskLoadWeightKg(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+      value: null,
+      missing: 'not_applicable',
+      qualityFlags: [],
+    });
+  });
+
+  it('exposure_types가 손상돼도(배열 아님) 런타임과 동일하게 게이트가 닫힌 것으로 본다', () => {
+    const task = { ...CORE_TASK, exposure_types: 'not-an-array' as unknown, load_weight_kg: '45' };
+    expect(extractCervicalTaskLoadWeightKg(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+      value: null,
+      missing: 'not_applicable',
+    });
+  });
+
+  it('게이트가 열려 있는데 미입력이면 not_entered(무플래그)', () => {
+    const task = { ...CORE_TASK, load_weight_kg: '' };
+    expect(extractCervicalTaskLoadWeightKg(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: [],
+    });
+  });
+
+  it('정상 숫자 문자열은 그대로 통과', () => {
+    const task = { ...CORE_TASK, load_weight_kg: '45' };
+    expect(extractCervicalTaskLoadWeightKg(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+      value: 45,
+      missing: null,
+      qualityFlags: [],
+    });
+  });
+
+  it('0은 유효한 값이다(물리량 하한)', () => {
+    const task = { ...CORE_TASK, load_weight_kg: 0 };
+    expect(extractCervicalTaskLoadWeightKg(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+      value: 0,
+      missing: null,
+      qualityFlags: [],
+    });
+  });
+
+  it('음수·숫자 접두부만 있는 문자열은 invalid', () => {
+    const negative = { ...CORE_TASK, load_weight_kg: -5 };
+    expect(extractCervicalTaskLoadWeightKg(migrate(baseCase({ tasks: [negative] })))[0]).toMatchObject({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: ['invalid'],
+    });
+    const partial = { ...CORE_TASK, carry_hours_per_shift: '2kg' };
+    expect(extractCervicalTaskCarryHoursPerShift(migrate(baseCase({ tasks: [partial] })))[0]).toMatchObject({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: ['invalid'],
+    });
+  });
+
+  it('배열로 감싼 유효 숫자·빈 배열([])·[null] 모두 강제변환으로 통과시키지 않는다', () => {
+    for (const bad of [[45], [], [null]]) {
+      const task = { ...CORE_TASK, load_weight_kg: bad as unknown };
+      expect(extractCervicalTaskLoadWeightKg(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+        value: null,
+        missing: 'not_entered',
+        qualityFlags: ['invalid'],
+      });
+    }
+  });
+});
+
+describe('extractCervicalTaskForcedNeckPosture — shoulder_heavy_load 게이트, yes/no 문자열', () => {
+  it('게이트가 닫혀 있으면 not_applicable', () => {
+    const task = { ...CORE_TASK, exposure_types: [], forced_neck_posture: 'yes' };
+    expect(extractCervicalTaskForcedNeckPosture(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+      value: null,
+      missing: 'not_applicable',
+    });
+  });
+
+  it('게이트가 열려 있는데 미입력이면 not_entered(무플래그)', () => {
+    const task = { ...CORE_TASK, forced_neck_posture: '' };
+    expect(extractCervicalTaskForcedNeckPosture(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: [],
+    });
+  });
+
+  it('"yes"/"no"는 boolean으로 변환된다', () => {
+    expect(extractCervicalTaskForcedNeckPosture(migrate(baseCase({ tasks: [{ ...CORE_TASK, forced_neck_posture: 'yes' }] })))[0]).toMatchObject({
+      value: true,
+      missing: null,
+    });
+    expect(extractCervicalTaskForcedNeckPosture(migrate(baseCase({ tasks: [{ ...CORE_TASK, forced_neck_posture: 'no' }] })))[0]).toMatchObject({
+      value: false,
+      missing: null,
+    });
+  });
+
+  it('도메인 밖 값(boolean true 등)은 강제변환하지 않고 invalid', () => {
+    const task = { ...CORE_TASK, forced_neck_posture: true as unknown as string };
+    expect(extractCervicalTaskForcedNeckPosture(migrate(baseCase({ tasks: [task] })))[0]).toMatchObject({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: ['invalid'],
+    });
+  });
+});
+
+describe('awkward_static_neck_load 게이트 필드 3종 — neckNonneutralHoursPerDay/combinedFlexionRotationPosture/precisionWork', () => {
+  const AWKWARD_TASK = {
+    sharedJobId: 'job-1',
+    name: '조립',
+    exposure_types: ['awkward_static_neck_load'],
+    neck_nonneutral_hours_per_day: '3',
+    combined_flexion_rotation_posture: 'yes',
+    precision_work: 'no',
+  };
+
+  it('게이트가 닫혀 있으면(shoulder_heavy_load만 선택) 셋 다 not_applicable', () => {
+    const task = { ...AWKWARD_TASK, exposure_types: ['shoulder_heavy_load'] };
+    const mr = migrate(baseCase({ tasks: [task] }));
+    expect(extractCervicalTaskNeckNonneutralHoursPerDay(mr)[0]).toMatchObject({ value: null, missing: 'not_applicable' });
+    expect(extractCervicalTaskCombinedFlexionRotationPosture(mr)[0]).toMatchObject({ value: null, missing: 'not_applicable' });
+    expect(extractCervicalTaskPrecisionWork(mr)[0]).toMatchObject({ value: null, missing: 'not_applicable' });
+  });
+
+  it('게이트가 열려 있으면 정상 추출된다', () => {
+    const mr = migrate(baseCase({ tasks: [AWKWARD_TASK] }));
+    expect(extractCervicalTaskNeckNonneutralHoursPerDay(mr)[0]).toMatchObject({ value: 3, missing: null });
+    expect(extractCervicalTaskCombinedFlexionRotationPosture(mr)[0]).toMatchObject({ value: true, missing: null });
+    expect(extractCervicalTaskPrecisionWork(mr)[0]).toMatchObject({ value: false, missing: null });
+  });
+
+  it('두 노출유형이 동시에 선택되면 두 게이트 모두 열린다(상호 배타 아님)', () => {
+    const task = { ...CORE_TASK, ...AWKWARD_TASK, exposure_types: ['shoulder_heavy_load', 'awkward_static_neck_load'] };
+    const mr = migrate(baseCase({ tasks: [task] }));
+    expect(extractCervicalTaskLoadWeightKg(mr)[0].missing).toBeNull();
+    expect(extractCervicalTaskNeckNonneutralHoursPerDay(mr)[0].missing).toBeNull();
   });
 });

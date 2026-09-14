@@ -3,10 +3,12 @@
 // → 정상 계산)를 구현한다. 작업이 0건인 job/case는 결측이 아니라 유효한 값 0으로 흘러간다
 // (계획서 §1-1a cervical 행, buildJobSummary의 "작업 없음=유효 상태" 주석과 동일 원칙).
 
-import type { ExtractedValue, MissingReason, MigrationResult, QualityFlag } from '../../types';
+import type { ExtractedValue, MissingReason, MigrationResult, QualityFlag, RepeatedObservation } from '../../types';
 import { isPlainObject } from '../../migration/deterministicMigrate';
 import { computeCervicalCalc, type CervicalDiagnosis, type CervicalJobLike, type CervicalModuleShape } from './derived';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
+import { enumerateCervicalTaskEntities } from '../../grainEntities';
+import type { CervicalTask } from './legacyNormalize';
 
 function isBlank(x: unknown): boolean {
   return x === null || x === undefined || String(x).trim() === '';
@@ -106,4 +108,181 @@ export function extractCervicalCaseMaxJobCumulativeKgHours(
   }
 
   return { value: maxCumulativeKgHours, missing: null, qualityFlags: Array.from(qualityFlagSet) };
+}
+
+// ── PR0-B4 Slice 7 — 신설 cervical_task grain(coverage 매핑표 §5). enumerateCervicalTaskEntities
+// 자체가 cervical 모듈 비활성 시 빈 배열을 반환하므로(spine의 task/vibration_interval과 동일
+// 설계 — grainEntities.ts 참고) 여기서 별도로 structural_missing 행을 만들 필요가 없다:
+// 모듈이 꺼져 있으면 이 grain은 "행이 0개"로 표현된다.
+
+function isBlankScalar(x: unknown): boolean {
+  return x === null || x === undefined || (typeof x === 'string' && x.trim() === '');
+}
+
+export function extractCervicalTaskName(migrationResult: MigrationResult<AnalysisPatient>): RepeatedObservation<string>[] {
+  const entities = enumerateCervicalTaskEntities(migrationResult);
+  if (entities.length === 0) return [];
+  return entities.map((entity) => {
+    const raw = entity.source.name;
+    if (isBlankScalar(raw)) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
+    }
+    if (typeof raw !== 'string') {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: [...entity.qualityFlags, 'invalid'] };
+    }
+    return { entityKey: entity.entityKey, value: raw, missing: null, qualityFlags: entity.qualityFlags };
+  });
+}
+
+// exposure_types → 옵션별 boolean. §다중선택 배열 계약(계획서) 순서 그대로 적용 —
+// diagnosis.assessment.lowReason.*와 동일 원칙: undefined→structural_missing,
+// 비배열/원소손상→invalid, 정상 배열(빈 배열 포함)→옵션별 true/false, 미지원 옵션값이
+// 섞여 있으면 legacy_unknown(EXPOSURE_TYPE_OPTIONS는 2개뿐이라 그 외 문자열은 전부 미지원).
+const CERVICAL_EXPOSURE_TYPE_OPTIONS = ['shoulder_heavy_load', 'awkward_static_neck_load'] as const;
+
+type ExposureTypeState =
+  | { kind: 'structural_missing' }
+  | { kind: 'invalid' }
+  | { kind: 'ok'; selected: Set<string>; legacyUnknown: boolean };
+
+function resolveExposureTypeState(task: CervicalTask): ExposureTypeState {
+  const raw = task.exposure_types;
+  if (raw === undefined) return { kind: 'structural_missing' };
+  if (!Array.isArray(raw)) return { kind: 'invalid' };
+  if (!raw.every((v): v is string => typeof v === 'string')) return { kind: 'invalid' };
+  const known: readonly string[] = CERVICAL_EXPOSURE_TYPE_OPTIONS;
+  const legacyUnknown = raw.some((v) => !known.includes(v));
+  return { kind: 'ok', selected: new Set(raw), legacyUnknown };
+}
+
+function extractCervicalTaskExposureTypeOption(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  option: (typeof CERVICAL_EXPOSURE_TYPE_OPTIONS)[number],
+): RepeatedObservation<boolean>[] {
+  const entities = enumerateCervicalTaskEntities(migrationResult);
+  if (entities.length === 0) return [];
+  return entities.map((entity) => {
+    const state = resolveExposureTypeState(entity.source);
+    if (state.kind === 'structural_missing') {
+      return { entityKey: entity.entityKey, value: null, missing: 'structural_missing', qualityFlags: entity.qualityFlags };
+    }
+    if (state.kind === 'invalid') {
+      const qualityFlags: QualityFlag[] = [...entity.qualityFlags, 'invalid'];
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags };
+    }
+    const qualityFlags: QualityFlag[] = state.legacyUnknown ? [...entity.qualityFlags, 'legacy_unknown'] : entity.qualityFlags;
+    return { entityKey: entity.entityKey, value: state.selected.has(option), missing: null, qualityFlags };
+  });
+}
+
+export function extractCervicalTaskExposureTypeShoulderHeavyLoad(
+  mr: MigrationResult<AnalysisPatient>,
+): RepeatedObservation<boolean>[] {
+  return extractCervicalTaskExposureTypeOption(mr, 'shoulder_heavy_load');
+}
+
+export function extractCervicalTaskExposureTypeAwkwardStaticNeckLoad(
+  mr: MigrationResult<AnalysisPatient>,
+): RepeatedObservation<boolean>[] {
+  return extractCervicalTaskExposureTypeOption(mr, 'awkward_static_neck_load');
+}
+
+// TaskEditor.jsx:95,127의 실제 게이트 판정과 정확히 동일 — `(task.exposure_types || []).includes(...)`.
+// 손상된(배열이 아닌) exposure_types도 빈 배열과 똑같이 게이트가 닫힌 것으로 본다(런타임과
+// 일치) — 이건 exposure_types 자체의 통계 결측 판정(위 resolveExposureTypeState, invalid를
+// 구분해 통계 안전성을 우선함)과는 별개 문제다: 여기서는 "UI가 실제로 이 필드를 보여줬는가"만
+// 그대로 재현한다.
+function isExposureTypeSelected(
+  task: CervicalTask,
+  option: (typeof CERVICAL_EXPOSURE_TYPE_OPTIONS)[number],
+): boolean {
+  const raw = task.exposure_types;
+  return Array.isArray(raw) && raw.includes(option);
+}
+
+// loadWeightKg/carryHoursPerShift/neckNonneutralHoursPerDay — 물리량(kg·시간)이라 음수
+// 불가(knee.job.weight/squatting·shoulder.job.*와 동일 규칙). 빈 값 판정은 null/undefined/
+// 공백 문자열로 한정한 뒤 typeof를 검사한다(9차 검토에서 확립된 isBlank 우회 방지 원칙).
+function extractCervicalTaskGatedNumericField(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  field: 'load_weight_kg' | 'carry_hours_per_shift' | 'neck_nonneutral_hours_per_day',
+  gateOption: (typeof CERVICAL_EXPOSURE_TYPE_OPTIONS)[number],
+): RepeatedObservation<number>[] {
+  const entities = enumerateCervicalTaskEntities(migrationResult);
+  if (entities.length === 0) return [];
+  return entities.map((entity) => {
+    const task = entity.source;
+    if (!isExposureTypeSelected(task, gateOption)) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_applicable', qualityFlags: entity.qualityFlags };
+    }
+    const raw = task[field];
+    if (isBlankScalar(raw)) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
+    }
+    if (typeof raw !== 'number' && typeof raw !== 'string') {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: [...entity.qualityFlags, 'invalid'] };
+    }
+    const n = Number(String(raw).trim());
+    if (!Number.isFinite(n) || n < 0) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: [...entity.qualityFlags, 'invalid'] };
+    }
+    return { entityKey: entity.entityKey, value: n, missing: null, qualityFlags: entity.qualityFlags };
+  });
+}
+
+export function extractCervicalTaskLoadWeightKg(mr: MigrationResult<AnalysisPatient>): RepeatedObservation<number>[] {
+  return extractCervicalTaskGatedNumericField(mr, 'load_weight_kg', 'shoulder_heavy_load');
+}
+
+export function extractCervicalTaskCarryHoursPerShift(mr: MigrationResult<AnalysisPatient>): RepeatedObservation<number>[] {
+  return extractCervicalTaskGatedNumericField(mr, 'carry_hours_per_shift', 'shoulder_heavy_load');
+}
+
+export function extractCervicalTaskNeckNonneutralHoursPerDay(
+  mr: MigrationResult<AnalysisPatient>,
+): RepeatedObservation<number>[] {
+  return extractCervicalTaskGatedNumericField(mr, 'neck_nonneutral_hours_per_day', 'awkward_static_neck_load');
+}
+
+// forcedNeckPosture/combinedFlexionRotationPosture/precisionWork — YesNoField, 값 도메인은
+// ''/'yes'/'no'뿐(boolean 아님, TaskEditor.jsx). ''는 게이트가 열려 있는데도 미입력이면
+// not_entered, 게이트 자체가 닫혀있으면 not_applicable(위 로직이 먼저 처리).
+function extractCervicalTaskGatedYesNoField(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  field: 'forced_neck_posture' | 'combined_flexion_rotation_posture' | 'precision_work',
+  gateOption: (typeof CERVICAL_EXPOSURE_TYPE_OPTIONS)[number],
+): RepeatedObservation<boolean>[] {
+  const entities = enumerateCervicalTaskEntities(migrationResult);
+  if (entities.length === 0) return [];
+  return entities.map((entity) => {
+    const task = entity.source;
+    if (!isExposureTypeSelected(task, gateOption)) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_applicable', qualityFlags: entity.qualityFlags };
+    }
+    const raw = task[field];
+    if (isBlankScalar(raw)) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
+    }
+    if (raw === 'yes') {
+      return { entityKey: entity.entityKey, value: true, missing: null, qualityFlags: entity.qualityFlags };
+    }
+    if (raw === 'no') {
+      return { entityKey: entity.entityKey, value: false, missing: null, qualityFlags: entity.qualityFlags };
+    }
+    return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: [...entity.qualityFlags, 'invalid'] };
+  });
+}
+
+export function extractCervicalTaskForcedNeckPosture(mr: MigrationResult<AnalysisPatient>): RepeatedObservation<boolean>[] {
+  return extractCervicalTaskGatedYesNoField(mr, 'forced_neck_posture', 'shoulder_heavy_load');
+}
+
+export function extractCervicalTaskCombinedFlexionRotationPosture(
+  mr: MigrationResult<AnalysisPatient>,
+): RepeatedObservation<boolean>[] {
+  return extractCervicalTaskGatedYesNoField(mr, 'combined_flexion_rotation_posture', 'awkward_static_neck_load');
+}
+
+export function extractCervicalTaskPrecisionWork(mr: MigrationResult<AnalysisPatient>): RepeatedObservation<boolean>[] {
+  return extractCervicalTaskGatedYesNoField(mr, 'precision_work', 'awkward_static_neck_load');
 }

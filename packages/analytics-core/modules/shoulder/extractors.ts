@@ -6,7 +6,7 @@ import { isPlainObject } from '../../migration/deterministicMigrate';
 import { computeShoulderCalc, type ShoulderJobExtras } from './derived';
 import { getEffectiveWorkPeriod } from '../../workPeriod';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
-import { enumerateDiagnosisSideEntities } from '../../grainEntities';
+import { enumerateDiagnosisSideEntities, enumerateJobEntities } from '../../grainEntities';
 import { resolveDiagnosisModule, supportsEllmanClass } from '../../diagnosisMapping';
 import { SHOULDER_ELLMAN_ORDER } from './metadata';
 
@@ -143,4 +143,72 @@ export function extractShoulderDiagnosisSideEllmanClass(
       qualityFlags: [...entity.qualityFlags, 'invalid'],
     };
   });
+}
+
+// ── PR0-B4 Slice 3 — coverage 잔여 필드(매핑표 §3). anyExceeded(boolean)에만 흡수됐던
+// jobExtras 6종 raw 값을 job grain에 독립 노출한다 — enumerateJobEntities(shared.jobs[]
+// 기준, 모듈 무관 범용)가 만든 job 엔터티에, sharedJobId로 이 모듈의 jobExtras 레코드를
+// 찾아 투영한다("job 레벨 값 투영" — jobExtras 자체를 엔터티로 열거하지 않는다, job
+// grain의 행 모집단은 여전히 shared.jobs[] 하나로 고정).
+function extractShoulderJobExtraField(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  field: keyof ShoulderJobExtras,
+): RepeatedObservation<number>[] {
+  const entities = enumerateJobEntities(migrationResult);
+  if (entities.length === 0) return [];
+
+  const activeModules = migrationResult.payload.data.activeModules ?? [];
+  const shoulderModule = (migrationResult.payload.data.modules as Record<string, unknown> | undefined)?.shoulder;
+  if (!activeModules.includes('shoulder') || !isPlainObject(shoulderModule)) {
+    return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'structural_missing', qualityFlags: entity.qualityFlags }));
+  }
+
+  const rawJobExtras = Array.isArray((shoulderModule as { jobExtras?: unknown }).jobExtras)
+    ? ((shoulderModule as { jobExtras?: unknown[] }).jobExtras as unknown[])
+    : [];
+  const jobExtras = rawJobExtras.filter(isPlainObject) as unknown as ShoulderJobExtras[];
+
+  return entities.map((entity) => {
+    const extra = jobExtras.find((e) => e.sharedJobId === entity.source.id);
+    const raw = extra?.[field];
+    // isBlank(이 파일 다른 곳에서도 쓰임)는 String(x)로 감싸 [] · [null]도 빈 문자열로
+    // 만들어버려 typeof 검사보다 먼저 걸리면 손상 배열이 invalid 없이 조용히 not_entered로
+    // 빠진다(9차 검토 P2) — null·undefined·공백 문자열만 여기서 빈 값으로 본다.
+    if (raw === null || raw === undefined || (typeof raw === 'string' && raw.trim() === '')) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
+    }
+    // typeof 먼저(강제변환 우회 방지) — 실제 계산(computeJobExposures)은 parseFloat(x)||0을
+    // 쓰지만, 배열 등은 String() 강제변환으로 우연히 통과시키지 않는다(§리뷰 확립 원칙).
+    if (typeof raw !== 'number' && typeof raw !== 'string') {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: [...entity.qualityFlags, 'invalid'] };
+    }
+    // parseFloat는 "12kg" 같은 숫자-접두 문자열도 12로 통과시키고 음수도 그대로 허용한다
+    // (8차 검토 P2) — Number()로 전체 문자열이 숫자인지 확인하고, 전부 시간·횟수·초 단위라
+    // 물리적으로 음수가 불가능하므로 0 이상만 허용한다(knee.job.weight/squatting의
+    // parseNonNegativeNumber와 동일 규칙).
+    const n = Number(String(raw).trim());
+    if (!Number.isFinite(n) || n < 0) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: [...entity.qualityFlags, 'invalid'] };
+    }
+    return { entityKey: entity.entityKey, value: n, missing: null, qualityFlags: entity.qualityFlags };
+  });
+}
+
+export function extractShoulderJobOverheadHours(mr: MigrationResult<AnalysisPatient>) {
+  return extractShoulderJobExtraField(mr, 'overheadHours');
+}
+export function extractShoulderJobRepetitiveMediumHours(mr: MigrationResult<AnalysisPatient>) {
+  return extractShoulderJobExtraField(mr, 'repetitiveMediumHours');
+}
+export function extractShoulderJobRepetitiveFastHours(mr: MigrationResult<AnalysisPatient>) {
+  return extractShoulderJobExtraField(mr, 'repetitiveFastHours');
+}
+export function extractShoulderJobHeavyLoadCount(mr: MigrationResult<AnalysisPatient>) {
+  return extractShoulderJobExtraField(mr, 'heavyLoadCount');
+}
+export function extractShoulderJobHeavyLoadSeconds(mr: MigrationResult<AnalysisPatient>) {
+  return extractShoulderJobExtraField(mr, 'heavyLoadSeconds');
+}
+export function extractShoulderJobVibrationHours(mr: MigrationResult<AnalysisPatient>) {
+  return extractShoulderJobExtraField(mr, 'vibrationHours');
 }

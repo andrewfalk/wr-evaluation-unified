@@ -8,6 +8,11 @@ import type { GrainEntity, MigrationResult, QualityFlag } from './types';
 import type { SpineJobLike, SpineModuleShape } from './modules/spine/types';
 import type { SpineVibrationInterval } from './modules/spine/vibration';
 import type { SpineTask } from './modules/spine/mddm';
+import type { CervicalTask, CervicalJobLike } from './modules/cervical/legacyNormalize';
+import { normalizeElbowModuleData } from './modules/elbow/legacyNormalize';
+import type { ElbowDiagnosis, ElbowJobLike, ElbowModuleShape } from './modules/elbow/legacyNormalize';
+import { normalizeWristModuleData } from './modules/wrist/legacyNormalize';
+import type { WristDiagnosis, WristJobLike, WristModuleShape } from './modules/wrist/legacyNormalize';
 import type { DiagnosisLike } from './diagnosisMapping';
 import type { JobLike } from './workPeriod';
 
@@ -138,6 +143,47 @@ export function enumerateTaskEntities(mr: MigrationResult<AnalysisPatient>): Gra
   return out;
 }
 
+/**
+ * cervical_task grain(§2 키: (case, jobId, taskId)) 엔터티 열거. spine의 task grain과
+ * 정확히 같은 job 귀속 규칙(sharedJobId 우선, 없으면 첫 직력)과 orphan_reference 판정을
+ * 공유하지만, spine의 `task` grain과는 별도 grain이다(PR0-B4 Slice 7 — "spine task와
+ * 완전 분리" 계획 결정) — 두 모듈의 작업 목록은 서로 다른 개념이라 같은 grain으로
+ * 묶으면 entityKey가 우연히 같은 (jobId, taskId) 조합을 가리키는 서로 다른 작업을
+ * 혼동시킬 위험이 있다.
+ */
+export function enumerateCervicalTaskEntities(mr: MigrationResult<AnalysisPatient>): GrainEntity<CervicalTask>[] {
+  const { payload } = mr;
+  const activeModules = payload.data.activeModules ?? [];
+  const cervicalModule = (payload.data.modules as Record<string, unknown> | undefined)?.cervical;
+  if (!activeModules.includes('cervical') || !isPlainObject(cervicalModule)) return [];
+
+  const shared = (payload.data.shared as Record<string, unknown>) ?? {};
+  const rawJobs = Array.isArray(shared.jobs) ? shared.jobs : [];
+  const jobs = rawJobs.filter(isPlainObject) as unknown as CervicalJobLike[];
+  const jobIds = new Set(jobs.map((j) => j.id).filter((id): id is string => typeof id === 'string' && id !== ''));
+  const firstJobId = jobs.length > 0 && typeof jobs[0].id === 'string' ? jobs[0].id : '';
+
+  const rawTasks = Array.isArray((cervicalModule as { tasks?: unknown }).tasks)
+    ? (cervicalModule as { tasks?: unknown[] }).tasks!
+    : [];
+  const tasks = rawTasks.filter(isPlainObject) as unknown as CervicalTask[];
+
+  const out: GrainEntity<CervicalTask>[] = [];
+  const seenIds = new Set<string>();
+  tasks.forEach((task, index) => {
+    const { id, flags } = resolveUniqueLocalId(task.id, index, seenIds);
+
+    const rawSharedJobId = typeof task.sharedJobId === 'string' ? task.sharedJobId : '';
+    const resolvedJobId = rawSharedJobId || firstJobId;
+    if (rawSharedJobId && !jobIds.has(rawSharedJobId)) flags.push('orphan_reference');
+
+    out.push({ entityKey: [resolvedJobId, id], source: task, qualityFlags: flags });
+  });
+
+  assertUniqueEntityKeys(out, 'cervical_task');
+  return out;
+}
+
 // diagnosis_side grain(§2 키: (case, diagnosisId, side)) 엔터티의 원본 참조 — extractor가
 // side를 다시 판정하지 않고 이 shape을 그대로 쓴다(§핵심 아키텍처 "엔터티가 원본 참조를
 // 담는다" 원칙, Part A vibration_interval과 동일한 설계).
@@ -215,5 +261,204 @@ export function enumerateJobEntities(mr: MigrationResult<AnalysisPatient>): Grai
   });
 
   assertUniqueEntityKeys(out, 'job');
+  return out;
+}
+
+// job_diagnosis grain(§2 키: (case, jobId, diagnosisId)) 엔터티 원본 참조 — PR0-B4 Slice
+// 8b. elbow/wrist 두 모듈이 공유하는 단일 grain이라 source에 moduleId를 담아, 각 모듈
+// 전용 extractor가 다른 모듈 origin entity를 받으면 not_applicable을 반환하도록 강제한다
+// (§job_diagnosis 계약 "elbow/wrist 공유 모집단" 절). entry는 정규화된 엔트리
+// (normalizeElbowModuleData/normalizeWristModuleData의 출력)라 exposure_types 등은 이미
+// 배열 여부·옵션값이 보정된 상태다 — exposure_types는 계약 문서가 "손상값 invalid
+// 플래그"를 저위험으로 격하해도 된다고 명시했지만(행 포함 판정에 더 이상 raw 조회가
+// 필요 없음), BK 다중선택 필드(bk2105/2106_pressure_source 등)는 계약을 그대로 적용해야
+// 해서 정규화가 `_corruptedArrayFields` 마커를 entry에 남겨 손상 여부를 보존한다
+// (§Slice 8c 리뷰 지적 — legacyNormalize.ts의 normalizeDiagnosisEntry 참고).
+export interface JobDiagnosisCommonEntry {
+  diagnosisId?: string;
+  selectedBkType?: string;
+  bkSelectionMode?: string;
+  bkAutoSyncedFrom?: string;
+  main_task_name?: string;
+  direct_anatomic_link?: string;
+  exposure_types?: string[];
+  repetition_level?: string;
+  force_level?: string;
+  awkward_posture_level?: string;
+  work_pattern?: string;
+  rest_distribution?: string;
+  daily_exposure_hours?: string | number;
+  shift_share_percent?: string | number;
+  days_per_week?: string | number;
+  [key: string]: unknown;
+}
+
+export interface JobDiagnosisSource {
+  moduleId: 'elbow' | 'wrist';
+  entry: JobDiagnosisCommonEntry;
+}
+
+// 값 계산 단계에서 프로덕션이 여전히 내부적으로 `${sharedJobId}:${diagnosisId}` 콜론
+// 결합 키를 쓴다(레거시 병합 로직 자체, legacyNormalize.ts의 buildLegacyEntryMap) —
+// entityKey는 배열이라 안전해도, 그 값을 만들어내는 프로덕션 로직 내부는 여전히 이
+// 충돌에 노출될 수 있어 애초에 ':' 포함 id를 분석 대상에서 제외한다.
+function isUsableEntityId(id: unknown): id is string {
+  return typeof id === 'string' && id.length > 0 && !id.includes(':');
+}
+
+// 11차 검토 P2 재현 — 10차 수정은 firstJobId가 "위험할 때만" linkedJobId 없는 항목을
+// 걸렀을 뿐, (1) linkedJobId가 명시돼 있어도 그 값 자체의 타입/형식은 전혀 검사하지
+// 않았고 (2) diagnosisId는 아예 검사 대상이 아니었다. buildLegacyEntryMap이
+// `${sharedJobId}:${diagnosisId}` 문자열 템플릿으로 키를 만드는 한, 숫자 linkedJobId나
+// 숫자 diagnosisId도 문자열 job/진단 id와 똑같이 충돌할 수 있다(예: linkedJobId:123 →
+// 문자열 '123' 직력과 충돌, diagnosisId:7 → 문자열 '7' 진단과 충돌).
+//
+// 13차 검토 P2 재현 — 11차 수정은 `record.linkedJobId || firstJobId`로 effectiveJobId를
+// 구했는데, `||`는 0·false처럼 "값은 있지만 falsy인" 손상 타입도 "미입력"과 똑같이
+// 취급해 firstJobId로 조용히 재위임해버린다. buildLegacyEntryMap 자체도 같은 `||`를
+// 쓰지만(재구현 금지 대상, 프로덕션 계산 로직) 우리 쪽 사전 검증(sanitize)은 그 결함을
+// 그대로 물려받으면 안 된다 — "진짜 미입력"(undefined/null/빈 문자열, legacyNormalize.ts
+// 의 폴백이 의도한 자연스러운 상태)과 "명시적으로 값이 있지만 타입이 손상됨"(0·false·
+// 숫자·':' 포함 문자열 등)을 truthy 여부가 아니라 이 구분으로 갈라야 한다 — 후자는
+// firstJobId 유효성과 무관하게 무조건 제외한다(첫 직력으로 재위임 금지).
+function isBlankLinkedReference(id: unknown): boolean {
+  return id === undefined || id === null || id === '';
+}
+
+// firstJobId의 위험 여부와 무관하게 매 레거시 항목마다 "이 항목이 실제로 연결될 최종
+// job id"(linkedJobId 우선, 없으면 firstJobId — buildLegacyEntryMap과 동일한 우선순위)
+// 와 diagnosisId를 각각 검사한다: 값이 존재하는데 usable 문자열이 아니면 그 항목 전체를
+// 제거한다. 값이 아예 없으면(진짜 미입력) legacyNormalize.ts 자체의 `!sharedJobId`/
+// `!legacyEntry.diagnosisId` 가드가 이미 안전하게 드롭하므로 손대지 않는다 —
+// "명시적 참조가 손상됐으면 첫 직력으로 재위임하지 않고 제외, 손상되지 않은 값은
+// 그대로 우선순위 유지"라는 계약을 그대로 구현한다.
+function sanitizeLegacyDiagnosisEvaluations(
+  moduleData: Record<string, unknown> | undefined,
+  firstJobId: unknown,
+): Record<string, unknown> | undefined {
+  if (!isPlainObject(moduleData)) return moduleData;
+
+  const rawDiagnosisEvaluations = (moduleData as { diagnosisEvaluations?: unknown }).diagnosisEvaluations;
+  if (!Array.isArray(rawDiagnosisEvaluations)) return moduleData;
+
+  const sanitizedDiagnosisEvaluations = rawDiagnosisEvaluations.filter((entry) => {
+    if (!isPlainObject(entry)) return true; // 비객체 원소는 그대로 둬서 기존 정규화의 방어 로직이 처리하게 한다.
+    const record = entry as { linkedJobId?: unknown; diagnosisId?: unknown };
+
+    if (isBlankLinkedReference(record.linkedJobId)) {
+      // 진짜 미입력 — buildLegacyEntryMap과 동일하게 firstJobId로 폴백한다. firstJobId
+      // 자체가 위험하면(숫자·':' 포함 등) 여기서 제외한다(10~11차 수정과 동일).
+      if (firstJobId && !isUsableEntityId(firstJobId)) return false;
+    } else {
+      // 명시적으로 값이 있다(0·false 포함) — 타입이 손상됐으면 firstJobId 유효성과
+      // 무관하게 무조건 제외한다(첫 직력으로 재위임 금지).
+      if (!isUsableEntityId(record.linkedJobId)) return false;
+    }
+
+    if (record.diagnosisId && !isUsableEntityId(record.diagnosisId)) return false;
+
+    return true;
+  });
+
+  return { ...moduleData, diagnosisEvaluations: sanitizedDiagnosisEvaluations };
+}
+
+/**
+ * job_diagnosis grain 엔터티 열거 — 마스터 계획 §2가 이미 cross join으로 확정해둔 대로
+ * (데이터 모델에 job↔diagnosis 명시적 링크 필드가 없다) 행 포함 필터링을 하지 않는다.
+ * normalizeElbowModuleData/normalizeWristModuleData가 이미 이 cross join을 만들어주므로
+ * (nextJobEvaluations[].diagnosisEntries[]) 그대로 재사용한다(재구현 금지 원칙).
+ *
+ * ID 유효성 필터(':' 미포함 등)와 dedup(첫 등장 채택)은 elbow/wrist로 나누기 전에
+ * jobs/diagnoses 각각 한 번만 수행한다 — 같은 diagnosis는 resolveDiagnosisModule이
+ * 정확히 하나의 moduleId만 반환하므로(또는 어느 쪽도 아님), 사전 dedup 이후에는
+ * elbow 쪽 cross join과 wrist 쪽 cross join의 진단 id 집합이 서로 겹칠 수 없다 —
+ * entityKey 충돌은 구조적으로 발생하지 않는다(assertUniqueEntityKeys는 안전망).
+ */
+export function enumerateJobDiagnosisEntities(mr: MigrationResult<AnalysisPatient>): GrainEntity<JobDiagnosisSource>[] {
+  const { payload } = mr;
+  const activeModules = payload.data.activeModules ?? [];
+  const shared = (payload.data.shared as Record<string, unknown>) ?? {};
+
+  const rawJobs = Array.isArray(shared.jobs) ? shared.jobs : [];
+  const allJobs = rawJobs.filter(isPlainObject) as unknown as Array<{ id?: unknown } & Record<string, unknown>>;
+  const rawDiagnoses = Array.isArray(shared.diagnoses) ? shared.diagnoses : [];
+  const allDiagnoses = rawDiagnoses.filter(isPlainObject) as unknown as Array<{ id?: unknown } & Record<string, unknown>>;
+
+  // job은 유효성(문자열·비었는지·':' 포함 여부) 배제를 여기서 전혀 하지 않는다(10차
+  // 검토 P2 — 9차 수정은 ':' 포함 id만 옮겼을 뿐, 숫자·빈 문자열·undefined id는 여전히
+  // 여기서 제거해 같은 버그를 재현시켰다). buildLegacyEntryMap(legacyNormalize.ts)이
+  // linkedJobId 없는 레거시 항목을 `jobs[0]?.id`(첫 직력, 원본 배열의 실제 0번 원소)에
+  // 귀속시키므로, 원본 배열의 0번 위치를 어떤 이유로든 정규화 호출 *전에* 바꾸면(제거든
+  // 필터든) 그 폴백이 실제로는 다른 직력을 가리키게 되어 값이 옮겨 붙는다. 그래서 유효한
+  // 문자열 id를 가진 job만 dedup(첫 등장 채택)하고, 그 외(숫자·빈 문자열·undefined 등)는
+  // 원본 위치 그대로 통과시킨다 — 이런 job은 출력 엔터티 자체를 만들 수 없어(entityKey
+  // 구성 불가) 아래 isUsableEntityId 필터가 결국 걸러내므로 여기서 미리 배제할 필요가
+  // 없고, 배제하면 오히려 firstJobId 폴백만 어긋난다.
+  const seenJobIds = new Set<string>();
+  const dedupedJobs = allJobs.filter((job) => {
+    if (typeof job.id !== 'string' || job.id === '') return true;
+    if (seenJobIds.has(job.id)) return false;
+    seenJobIds.add(job.id);
+    return true;
+  });
+
+  // diagnosis는 legacyEntryMap이 diagnosisId로 직접 조회할 뿐 위치(첫 번째/순서)에
+  // 의존하지 않으므로(§리뷰 확인 — job의 firstJobId 같은 포지셔널 폴백이 없음), 여기서
+  // ':' 포함 id까지 미리 배제해도 다른 진단으로 값이 새는 위험이 없다.
+  const seenDiagnosisIds = new Set<string>();
+  const diagnoses = allDiagnoses.filter((dx) => {
+    if (!isUsableEntityId(dx.id)) return false;
+    if (seenDiagnosisIds.has(dx.id)) return false;
+    seenDiagnosisIds.add(dx.id);
+    return true;
+  });
+
+  // buildLegacyEntryMap(legacyNormalize.ts)과 정확히 같은 규칙으로 firstJobId를 미리
+  // 계산한다(`jobs[0]?.id || ''`) — dedupedJobs는 0번 위치를 절대 건드리지 않으므로
+  // allJobs[0]과 항상 같다.
+  const firstJobId = dedupedJobs[0]?.id ?? '';
+
+  const out: GrainEntity<JobDiagnosisSource>[] = [];
+  const modules = payload.data.modules as Record<string, unknown> | undefined;
+
+  const elbowModule = modules?.elbow;
+  if (activeModules.includes('elbow') && isPlainObject(elbowModule)) {
+    const synced = normalizeElbowModuleData(
+      sanitizeLegacyDiagnosisEvaluations(elbowModule as Record<string, unknown>, firstJobId) as ElbowModuleShape,
+      dedupedJobs as unknown as ElbowJobLike[],
+      diagnoses as unknown as ElbowDiagnosis[],
+      activeModules,
+    );
+    for (const jobEvaluation of synced.moduleData.jobEvaluations) {
+      const jobId = jobEvaluation.sharedJobId;
+      // ':' 포함 등 손상된 job id는 분석 엔터티로 만들지 않는다 — 레거시 귀속은 이미
+      // 정규화 단계에서 (손상됐더라도) 원래 job으로 정확히 끝났으므로, 여기서 걸러내도
+      // 다른 job으로 값이 새지 않는다.
+      if (!isUsableEntityId(jobId)) continue;
+      for (const entry of jobEvaluation.diagnosisEntries || []) {
+        out.push({ entityKey: [jobId, entry.diagnosisId as string], source: { moduleId: 'elbow', entry }, qualityFlags: [] });
+      }
+    }
+  }
+
+  const wristModule = modules?.wrist;
+  if (activeModules.includes('wrist') && isPlainObject(wristModule)) {
+    const synced = normalizeWristModuleData(
+      sanitizeLegacyDiagnosisEvaluations(wristModule as Record<string, unknown>, firstJobId) as WristModuleShape,
+      dedupedJobs as unknown as WristJobLike[],
+      diagnoses as unknown as WristDiagnosis[],
+      activeModules,
+    );
+    for (const jobEvaluation of synced.moduleData.jobEvaluations) {
+      const jobId = jobEvaluation.sharedJobId;
+      if (!isUsableEntityId(jobId)) continue;
+      for (const entry of jobEvaluation.diagnosisEntries || []) {
+        out.push({ entityKey: [jobId, entry.diagnosisId as string], source: { moduleId: 'wrist', entry }, qualityFlags: [] });
+      }
+    }
+  }
+
+  assertUniqueEntityKeys(out, 'job_diagnosis');
   return out;
 }

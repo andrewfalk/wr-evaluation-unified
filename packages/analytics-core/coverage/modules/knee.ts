@@ -16,10 +16,12 @@ export const KNEE_INVENTORY: CoverageInventory = {
   'modules.knee.jobExtras[].weight': { included: true },
   'modules.knee.jobExtras[].squatting': { included: true },
   'modules.knee.jobExtras[].evidenceSources': { included: false, reason: '근거 출처 인용 태그 — 계산에 관여하지 않음' },
-  'modules.knee.jobExtras[].stairs': { included: false, reason: DEFERRED },
-  'modules.knee.jobExtras[].kneeTwist': { included: false, reason: DEFERRED },
-  'modules.knee.jobExtras[].startStop': { included: false, reason: DEFERRED },
-  'modules.knee.jobExtras[].tightSpace': { included: false, reason: DEFERRED },
-  'modules.knee.jobExtras[].kneeContact': { included: false, reason: DEFERRED },
-  'modules.knee.jobExtras[].jumpDown': { included: false, reason: DEFERRED },
+  // PR0-B4 Slice 4 — knee.job.stairs/kneeTwist/startStop/tightSpace/kneeContact/jumpDown로
+  // 독립 등록 완료(더 이상 DEFERRED 아님).
+  'modules.knee.jobExtras[].stairs': { included: true },
+  'modules.knee.jobExtras[].kneeTwist': { included: true },
+  'modules.knee.jobExtras[].startStop': { included: true },
+  'modules.knee.jobExtras[].tightSpace': { included: true },
+  'modules.knee.jobExtras[].kneeContact': { included: true },
+  'modules.knee.jobExtras[].jumpDown': { included: true },
 };

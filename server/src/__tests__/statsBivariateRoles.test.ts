@@ -14,6 +14,21 @@ describe('resolveLevelOrder', () => {
     expect(resolveLevelOrder('ordinal', 'not.a.real.ordinal.key')).toBeNull();
   });
 
+  // PR0-B4 Slice 8b — 9차 검토 P1 재현: job_diagnosis ordinal 변수 8개가 등록 누락돼
+  // 그룹비교/분할표가 전부 METHOD_TYPE_MISMATCH로 막혀 있었다.
+  it.each([
+    ['elbow.jobDiagnosis.repetitionLevel', ['occasional', 'frequent']],
+    ['elbow.jobDiagnosis.forceLevel', ['mild', 'moderate', 'high']],
+    ['elbow.jobDiagnosis.awkwardPostureLevel', ['occasional', 'frequent']],
+    ['elbow.jobDiagnosis.restDistribution', ['adequate', 'moderate', 'insufficient']],
+    ['wrist.jobDiagnosis.repetitionLevel', ['occasional', 'frequent']],
+    ['wrist.jobDiagnosis.forceLevel', ['mild', 'moderate', 'high']],
+    ['wrist.jobDiagnosis.awkwardPostureLevel', ['occasional', 'frequent']],
+    ['wrist.jobDiagnosis.restDistribution', ['adequate', 'moderate', 'insufficient']],
+  ] as const)('%s의 순서가 등록돼 있다', (key, expected) => {
+    expect(resolveLevelOrder('ordinal', key)).toEqual(expected);
+  });
+
   it('categorical — 고정 순서가 선언된 변수(신청상병 부위군)는 observedValues 없이도 그 순서를 쓴다', () => {
     const order = resolveLevelOrder('categorical', 'diagnosis.identity.moduleGroup');
     expect(order).toEqual(['knee', 'wrist', 'elbow', 'shoulder', 'spine', 'cervical']);

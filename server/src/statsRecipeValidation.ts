@@ -7,13 +7,16 @@ import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
 import type { StatsAnalysisRecipe, StatsFilter, StatsFilterOperator } from '@wr/contracts';
 
 // PR0-B3 Part A는 vibration_interval을, Part B는 diagnosis_side를, Part C는 job/task를
-// 추가했다. job_diagnosis는 계획상 이번 확장에서 전부 제외한다(계획 pr0-b3-shimmying-magpie.md).
+// 추가했다. PR0-B4 Slice 7이 cervical_task를, Slice 8b가 job_diagnosis를 추가한다
+// (계획 pr0-b3-shimmying-magpie.md).
 const SUPPORTED_GRAINS: ReadonlySet<StatsAnalysisRecipe['grain']> = new Set([
   'case',
   'vibration_interval',
   'diagnosis_side',
   'job',
   'task',
+  'cervical_task',
+  'job_diagnosis',
 ]);
 
 export interface RecipeValidationError {

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { getFullVariableCatalog, computeVariableValue, computeRepeatedVariableValue, CATALOG_VERSION } from '../catalog';
 import { deterministicMigrate } from '../migration/deterministicMigrate';
+import { PR0_B4_FIELD_MAPPING } from '../coverage/pr0B4FieldMapping';
 
 const FALLBACK = '2024-01-01T00:00:00.000Z';
 
@@ -9,27 +10,19 @@ function migrate(payload: unknown, caseId = 'case-1') {
 }
 
 describe('getFullVariableCatalog', () => {
-  // PR0-B3 Part A는 vibration_interval grain 2개, Part B는 diagnosis_side grain 4개 +
-  // case grain 2개(spine.diagnosis.*)를 추가했다 — "전부 case grain"이던 회귀 방지 고정이
-  // 이미 Part A에서 깨졌다. case grain 9개는 그대로 non_sensitive를 유지하는지만 계속
-  // 고정하고, 반복 grain 변수는 별도로 grain 값만 확인한다. vibration_interval 변수가
-  // 2개인 이유(계약 증명 1개로는 부족) — "변수 추가/제거해도 엔터티 모집단이 불변"이라는
-  // 계약을 실제로 검증하려면 같은 grain에 변수가 최소 2개 필요하다
-  // (statsDatasetBuilder.repeatedGrain.test.ts).
-  // PR0-B3 Part C — job.rollup.longestTenureJobNameNormalized(case grain)가 처음으로
-  // sensitivity:quasi_identifier인 case grain 변수라 "case grain 전부 non_sensitive"
-  // 고정이 여기서 깨진다 — 그 변수만 제외하고 나머지 9개는 계속 고정한다.
-  // Part C-2 — task grain 2개(spine.task.*) + diagnosis_side grain 1개(diagnosis.identity.
-  // moduleGroup)를 추가해 18→21개. 둘 다 case grain이 아니라 caseVariables 개수는 그대로다.
-  it('21개 변수를 반환하고, case grain 10개 중 9개는 sensitivity:non_sensitive다(회귀 방지 고정)', () => {
+  // PR0-B4 — job.rollup.longestTenureJobNameNormalized(case grain)가 sensitivity:
+  // quasi_identifier인 유일한 case grain 변수라는 사실은 개수와 무관하게 계속 유효하다.
+  // 이후 슬라이스가 case grain에 quasi_identifier 변수를 추가로 등록하면 이 목록에
+  // 명시적으로 추가할 것 — "그 외 전부 non_sensitive"라는 암묵적 가정이 조용히 깨지지
+  // 않게 한다.
+  it('case grain 변수는 job.rollup.longestTenureJobNameNormalized(quasi_identifier)를 제외하면 전부 sensitivity:non_sensitive다(회귀 방지 고정)', () => {
     const catalog = getFullVariableCatalog();
-    expect(catalog).toHaveLength(21);
+    const KNOWN_NON_NON_SENSITIVE_CASE_KEYS = new Set(['job.rollup.longestTenureJobNameNormalized']);
     const caseVariables = catalog.filter((v) => v.grain === 'case');
-    expect(caseVariables).toHaveLength(10);
-    const nonSensitiveCaseVariables = caseVariables.filter((v) => v.key !== 'job.rollup.longestTenureJobNameNormalized');
-    expect(nonSensitiveCaseVariables).toHaveLength(9);
-    for (const variable of nonSensitiveCaseVariables) {
-      expect(variable.sensitivity).toBe('non_sensitive');
+    expect(caseVariables.length).toBeGreaterThan(0); // 루프가 조용히 텅 비지 않게
+    for (const variable of caseVariables) {
+      if (KNOWN_NON_NON_SENSITIVE_CASE_KEYS.has(variable.key)) continue;
+      expect(variable.sensitivity, `key=${variable.key}`).toBe('non_sensitive');
     }
     const rollup = caseVariables.find((v) => v.key === 'job.rollup.longestTenureJobNameNormalized');
     expect(rollup?.sensitivity).toBe('quasi_identifier');
@@ -58,33 +51,32 @@ describe('getFullVariableCatalog', () => {
     }
   });
 
-  it('키 목록이 정확히 21개 대표 변수와 일치한다', () => {
-    const keys = getFullVariableCatalog().map((v) => v.key).sort();
-    expect(keys).toEqual(
-      [
-        'cervical.case.maxJobCumulativeKgHours',
-        'elbow.assessment.burdenGradeMax',
-        'knee.relatedness.max',
-        'knee.diagnosisSide.klGrade',
-        'knee.diagnosisSide.confirmedStatus',
-        'knee.diagnosisSide.appliedConfirmedMismatch',
-        'shoulder.exposure.anyExceeded',
-        'shoulder.diagnosisSide.ellmanClass',
-        'spine.mddm.lifetimeDoseMNh',
-        'spine.vibration.dvMax',
-        'spine.vibration.intervalA8Max',
-        'spine.vibration.intervalExposureHours',
-        'spine.diagnosis.verticalDistribution',
-        'spine.diagnosis.concomitantSpondylosis',
-        'wrist.assessment.burdenGradeMax',
-        'job.identity.jobNameNormalized',
-        'job.identity.tenureYears',
-        'job.rollup.longestTenureJobNameNormalized',
-        'spine.task.weightKg',
-        'spine.task.frequencyPerDay',
-        'diagnosis.identity.moduleGroup',
-      ].sort(),
-    );
+  // PR0-B4 Slice 0 — 하드코딩된 키 목록 대신 매핑표 fixture(coverage/pr0B4FieldMapping.ts,
+  // 근거는 coverage/PR0-B4-field-mapping.md) 기반 누적 검증으로 대체한다. 슬라이스가
+  // 늘어나도 이 테스트 파일은 손대지 않고 fixture만 갱신한다(계획 "Slice 0" 절 참고).
+  //
+  // 세 방향 다 성립해야 "카탈로그 = 매핑표에서 done:true로 표시된 것"이 보장된다:
+  // (1) 카탈로그의 모든 키는 매핑표에 정의돼 있다(정의 안 된 유령 키 금지)
+  // (2) 매핑표에서 done:true인 키는 전부 실제 카탈로그에 존재한다
+  // (3) 개수까지 일치해야 (1)+(2)가 "부분집합"이 아니라 "정확히 같은 집합"임을 보장한다
+  it('카탈로그의 모든 키는 PR0-B4 매핑표에 정의돼 있다(유령 키 금지)', () => {
+    const catalog = getFullVariableCatalog();
+    const mappedKeys = new Set(PR0_B4_FIELD_MAPPING.map((entry) => entry.key));
+    for (const variable of catalog) {
+      expect(mappedKeys.has(variable.key), `카탈로그 키 "${variable.key}"가 매핑표에 없음 — coverage/pr0B4FieldMapping.ts에 추가할 것`).toBe(true);
+    }
+  });
+
+  it('PR0-B4 매핑표에서 done:true인 키는 전부 카탈로그에 존재하고, 개수도 정확히 일치한다', () => {
+    const catalog = getFullVariableCatalog();
+    const catalogKeys = new Set(catalog.map((v) => v.key));
+    const doneEntries = PR0_B4_FIELD_MAPPING.filter((entry) => entry.done);
+
+    for (const entry of doneEntries) {
+      expect(catalogKeys.has(entry.key), `매핑표가 done:true로 표시한 "${entry.key}"가 카탈로그에 없음`).toBe(true);
+    }
+    // 위 두 테스트(카탈로그⊆매핑표, done:true⊆카탈로그) + 개수 일치 = 정확히 같은 집합.
+    expect(catalog.length).toBe(doneEntries.length);
   });
 
   it('job.identity.*는 grain:job, job.rollup.longestTenureJobNameNormalized는 grain:case로 등록돼 있다', () => {
@@ -184,13 +176,19 @@ describe('computeVariableValue', () => {
     // 읽지 않고 shared.jobs[]에만 의존한다(job은 activeModules로 게이트되지 않는 공유
     // 개념) — "유효한 근속기간을 가진 job이 없음"이라 missing 사유가 not_entered다. 그래서
     // 아래 "전부 structural_missing" 회귀 고정 루프에서는 이 셋을 제외하고 별도로 검증한다.
+    // PR0-B4 Slice 5 — patient pseudo-module(moduleId:'patient')도 job/diagnosis와 같은
+    // 이유로 activeModules 게이트가 없다(어느 임상 모듈이 활성이든 shared.* 인적사항은
+    // 항상 존재하는 개념) — moduleId 기준으로 통째로 제외한다(개별 key 나열 대신, 향후
+    // patient 변수가 늘어도 이 목록을 안 건드리게).
     const NON_STRUCTURAL_CASE_KEYS = new Set([
       'spine.diagnosis.verticalDistribution',
       'spine.diagnosis.concomitantSpondylosis',
       'job.rollup.longestTenureJobNameNormalized',
     ]);
-    const caseVariables = getFullVariableCatalog().filter((v) => v.grain === 'case' && !NON_STRUCTURAL_CASE_KEYS.has(v.key));
-    expect(caseVariables).toHaveLength(7); // 회귀 방지 — 이 루프가 조용히 텅 비지 않게
+    const caseVariables = getFullVariableCatalog().filter(
+      (v) => v.grain === 'case' && v.moduleId !== 'patient' && !NON_STRUCTURAL_CASE_KEYS.has(v.key),
+    );
+    expect(caseVariables.length).toBeGreaterThan(0); // 회귀 방지 — 이 루프가 조용히 텅 비지 않게(PR0-B4부터 정확한 개수는 매핑표 fixture가 대신 고정)
 
     for (const variable of caseVariables) {
       const result = computeVariableValue(variable.key, emptyMr);
@@ -252,7 +250,7 @@ describe('computeRepeatedVariableValue', () => {
   it('카탈로그 반복 grain 키 전부에서 배열을 반환한다(모듈 비활성/진단·직력 없음이면 빈 배열)', () => {
     const emptyMr = migrate({ data: { shared: {}, modules: {}, activeModules: [] } });
     const repeatedVariables = getFullVariableCatalog().filter((v) => v.grain !== 'case' && v.grain !== 'person');
-    expect(repeatedVariables).toHaveLength(11); // 회귀 방지 — 이 루프가 조용히 텅 비지 않게
+    expect(repeatedVariables.length).toBeGreaterThan(0); // 회귀 방지 — 이 루프가 조용히 텅 비지 않게(PR0-B4부터 정확한 개수는 매핑표 fixture가 대신 고정)
 
     for (const variable of repeatedVariables) {
       const result = computeRepeatedVariableValue(variable.key, emptyMr);

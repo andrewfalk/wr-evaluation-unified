@@ -65,7 +65,7 @@ export type RevokeCapabilityGrantRequest  = z.infer<typeof RevokeCapabilityGrant
 // ============================================================================
 
 export const StatsGrainSchema = z.enum([
-  'person', 'case', 'diagnosis_side', 'job', 'job_diagnosis', 'task', 'vibration_interval',
+  'person', 'case', 'diagnosis_side', 'job', 'job_diagnosis', 'task', 'cervical_task', 'vibration_interval',
 ]);
 
 export const CatalogVariableSchema = z.object({

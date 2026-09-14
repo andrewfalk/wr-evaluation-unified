@@ -570,3 +570,209 @@ export function extractSpineTaskFrequencyPerDay(
     return { entityKey: entity.entityKey, value: frequency, missing: null, qualityFlags: Array.from(flagSet) };
   });
 }
+
+// ── PR0-B4 Slice 1 — coverage 잔여 필드(매핑표 §4). 전부 raw 필드 그대로 노출한다(파생
+// 계산 없음) — 기존 lifetimeDoseMNh/dvMax의 dependsOn에는 이미 있었지만 독립 변수로는
+// 없던 필드들. 공통 원칙: 모듈 비활성 → structural_missing, blank → not_entered, 타입
+// 불일치·미지원 값 → not_entered + invalid(K-L Grade/Ellman과 동일하게 "값이 있는데
+// 못 쓴다"는 못 쓴 값 자체를 보존하지 않고 결측+플래그로 처리 — 잘못된 값이 정상 범주와
+// 섞여 빈도표를 오염시키지 않게 한다).
+
+function getActiveSpineModule(migrationResult: MigrationResult<AnalysisPatient>): SpineModuleShape | null {
+  const { payload } = migrationResult;
+  const activeModules = payload.data.activeModules ?? [];
+  const spineModule = (payload.data.modules as Record<string, unknown> | undefined)?.spine;
+  if (!activeModules.includes('spine') || !isPlainObject(spineModule)) return null;
+  return spineModule as SpineModuleShape;
+}
+
+function extractSpineCaseStringField(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  field: 'mddmStatus' | 'vibrationExposureStatus' | 'formulaVersion' | 'evalMethod',
+): ExtractedValue<string> {
+  const spineModule = getActiveSpineModule(migrationResult);
+  if (!spineModule) return { value: null, missing: 'structural_missing', qualityFlags: [] };
+
+  const raw = spineModule[field];
+  if (isBlank(raw)) return { value: null, missing: 'not_entered', qualityFlags: [] };
+  if (typeof raw !== 'string') return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  return { value: raw, missing: null, qualityFlags: [] };
+}
+
+export function extractSpineCaseMddmStatus(migrationResult: MigrationResult<AnalysisPatient>): ExtractedValue<string> {
+  return extractSpineCaseStringField(migrationResult, 'mddmStatus');
+}
+
+export function extractSpineCaseVibrationExposureStatus(migrationResult: MigrationResult<AnalysisPatient>): ExtractedValue<string> {
+  return extractSpineCaseStringField(migrationResult, 'vibrationExposureStatus');
+}
+
+export function extractSpineCaseFormulaVersion(migrationResult: MigrationResult<AnalysisPatient>): ExtractedValue<string> {
+  return extractSpineCaseStringField(migrationResult, 'formulaVersion');
+}
+
+export function extractSpineCaseEvalMethod(migrationResult: MigrationResult<AnalysisPatient>): ExtractedValue<string> {
+  return extractSpineCaseStringField(migrationResult, 'evalMethod');
+}
+
+// careerYears/careerMonths/workDaysPerYear(case 자체) — scanTaskQuality와 동일하게 양수
+// 강제 없이 유한성만 검증한다(구형식 legacy 호환 필드, 기존 계산도 finite 여부만 본다).
+function extractSpineCaseNumericField(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  field: 'careerYears' | 'careerMonths' | 'workDaysPerYear',
+): ExtractedValue<number> {
+  const spineModule = getActiveSpineModule(migrationResult);
+  if (!spineModule) return { value: null, missing: 'structural_missing', qualityFlags: [] };
+
+  const raw = spineModule[field];
+  if (isBlank(raw)) return { value: null, missing: 'not_entered', qualityFlags: [] };
+  const n = parseStrictNumber(raw);
+  if (n === null) return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  return { value: n, missing: null, qualityFlags: [] };
+}
+
+export function extractSpineCaseCareerYears(migrationResult: MigrationResult<AnalysisPatient>): ExtractedValue<number> {
+  return extractSpineCaseNumericField(migrationResult, 'careerYears');
+}
+
+export function extractSpineCaseCareerMonths(migrationResult: MigrationResult<AnalysisPatient>): ExtractedValue<number> {
+  return extractSpineCaseNumericField(migrationResult, 'careerMonths');
+}
+
+export function extractSpineCaseWorkDaysPerYear(migrationResult: MigrationResult<AnalysisPatient>): ExtractedValue<number> {
+  return extractSpineCaseNumericField(migrationResult, 'workDaysPerYear');
+}
+
+// task grain raw 필드 4종 — 기존 weightKg/frequencyPerDay와 동일하게 mddmStatus 게이트를
+// 반복 grain에도 적용한다.
+function extractSpineTaskField<T>(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  compute: (task: SpineTask, flagSet: Set<QualityFlag>) => { value: T | null; missing: MissingReason | null },
+): RepeatedObservation<T>[] {
+  const entities = enumerateTaskEntities(migrationResult);
+  if (entities.length === 0) return [];
+
+  const spineModule = (migrationResult.payload.data.modules as Record<string, unknown> | undefined)?.spine as SpineModuleShape;
+  const status = resolveMddmStatus(spineModule);
+  if (status === 'unknown') {
+    return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'not_assessed', qualityFlags: entity.qualityFlags }));
+  }
+  if (status === 'none') {
+    return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'not_applicable', qualityFlags: entity.qualityFlags }));
+  }
+
+  return entities.map((entity) => {
+    const flagSet = new Set<QualityFlag>(entity.qualityFlags);
+    const { value, missing } = compute(entity.source, flagSet);
+    return { entityKey: entity.entityKey, value, missing, qualityFlags: Array.from(flagSet) };
+  });
+}
+
+export function extractSpineTaskPosture(migrationResult: MigrationResult<AnalysisPatient>): RepeatedObservation<string>[] {
+  return extractSpineTaskField(migrationResult, (task, flagSet) => {
+    if (isBlank(task.posture)) return { value: null, missing: 'not_entered' };
+    if (typeof task.posture !== 'string' || !formulaDB[task.posture]) {
+      flagSet.add('invalid');
+      return { value: null, missing: 'not_entered' };
+    }
+    return { value: task.posture, missing: null };
+  });
+}
+
+export function extractSpineTaskTimeValue(migrationResult: MigrationResult<AnalysisPatient>): RepeatedObservation<number>[] {
+  return extractSpineTaskField(migrationResult, (task, flagSet) => {
+    const check = checkNumericField(task.timeValue, { requirePositive: true });
+    if (check === 'invalid_type') flagSet.add('invalid');
+    if (check !== 'ok') return { value: null, missing: 'not_entered' };
+    return { value: parseStrictNumber(task.timeValue)!, missing: null };
+  });
+}
+
+export function extractSpineTaskTimeUnit(migrationResult: MigrationResult<AnalysisPatient>): RepeatedObservation<string>[] {
+  return extractSpineTaskField(migrationResult, (task, flagSet) => {
+    const check = checkTimeUnitField(task.timeUnit);
+    if (check === 'invalid_type') flagSet.add('invalid');
+    if (check !== 'ok') return { value: null, missing: 'not_entered' };
+    return { value: task.timeUnit as string, missing: null };
+  });
+}
+
+// correctionFactor는 scanTaskQuality와 동일하게 양수 강제 없이 유한성만 검증한다(applyCorrectionFactor
+// 여부에 따라 아예 안 쓰이는 posture도 있어 도메인상 0 이하를 배제할 근거가 코드에 없다).
+export function extractSpineTaskCorrectionFactor(migrationResult: MigrationResult<AnalysisPatient>): RepeatedObservation<number>[] {
+  return extractSpineTaskField(migrationResult, (task, flagSet) => {
+    if (isBlank(task.correctionFactor)) return { value: null, missing: 'not_entered' };
+    const n = parseStrictNumber(task.correctionFactor);
+    if (n === null) {
+      flagSet.add('invalid');
+      return { value: null, missing: 'not_entered' };
+    }
+    return { value: n, missing: null };
+  });
+}
+
+// vibration_interval grain raw 필드 4종 — 기존 intervalA8Max/intervalExposureHours와
+// 동일하게 vibrationExposureStatus 게이트를 반복 grain에도 적용한다.
+function extractSpineVibrationIntervalField<T>(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  compute: (interval: SpineVibrationInterval, flagSet: Set<QualityFlag>) => { value: T | null; missing: MissingReason | null },
+): RepeatedObservation<T>[] {
+  const entities = enumerateVibrationIntervalEntities(migrationResult);
+  if (entities.length === 0) return [];
+
+  const spineModule = (migrationResult.payload.data.modules as Record<string, unknown> | undefined)?.spine as SpineModuleShape;
+  const status = resolveVibrationStatus(spineModule);
+  if (status === 'unknown') {
+    return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'not_assessed', qualityFlags: entity.qualityFlags }));
+  }
+  if (status === 'none') {
+    return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'not_applicable', qualityFlags: entity.qualityFlags }));
+  }
+
+  return entities.map((entity) => {
+    const flagSet = new Set<QualityFlag>(entity.qualityFlags);
+    const { value, missing } = compute(entity.source, flagSet);
+    return { entityKey: entity.entityKey, value, missing, qualityFlags: Array.from(flagSet) };
+  });
+}
+
+// awMin은 isIntervalValid 도메인 규칙상 0 이상이면 유효하다(vibration.ts:29, "awMin>=0") —
+// awMax/timeValue와 달리 0을 배제하지 않는다(requirePositive를 쓰면 0을 잘못 결측 처리한다).
+export function extractSpineVibrationIntervalAwMin(migrationResult: MigrationResult<AnalysisPatient>): RepeatedObservation<number>[] {
+  return extractSpineVibrationIntervalField(migrationResult, (interval, flagSet) => {
+    if (isBlank(interval.awMin)) return { value: null, missing: 'not_entered' };
+    const n = parseStrictNumber(interval.awMin);
+    if (n === null || n < 0) {
+      flagSet.add('invalid');
+      return { value: null, missing: 'not_entered' };
+    }
+    return { value: n, missing: null };
+  });
+}
+
+export function extractSpineVibrationIntervalAwMax(migrationResult: MigrationResult<AnalysisPatient>): RepeatedObservation<number>[] {
+  return extractSpineVibrationIntervalField(migrationResult, (interval, flagSet) => {
+    const check = checkNumericField(interval.awMax, { requirePositive: true });
+    if (check === 'invalid_type') flagSet.add('invalid');
+    if (check !== 'ok') return { value: null, missing: 'not_entered' };
+    return { value: parseStrictNumber(interval.awMax)!, missing: null };
+  });
+}
+
+export function extractSpineVibrationIntervalTimeValue(migrationResult: MigrationResult<AnalysisPatient>): RepeatedObservation<number>[] {
+  return extractSpineVibrationIntervalField(migrationResult, (interval, flagSet) => {
+    const check = checkNumericField(interval.timeValue, { requirePositive: true });
+    if (check === 'invalid_type') flagSet.add('invalid');
+    if (check !== 'ok') return { value: null, missing: 'not_entered' };
+    return { value: parseStrictNumber(interval.timeValue)!, missing: null };
+  });
+}
+
+export function extractSpineVibrationIntervalTimeUnit(migrationResult: MigrationResult<AnalysisPatient>): RepeatedObservation<string>[] {
+  return extractSpineVibrationIntervalField(migrationResult, (interval, flagSet) => {
+    const check = checkTimeUnitField(interval.timeUnit);
+    if (check === 'invalid_type') flagSet.add('invalid');
+    if (check !== 'ok') return { value: null, missing: 'not_entered' };
+    return { value: interval.timeUnit as string, missing: null };
+  });
+}

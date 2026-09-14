@@ -48,6 +48,7 @@ const GRAIN_LABELS = {
   job: '직업력',
   job_diagnosis: '직업력×진단',
   task: '작업',
+  cervical_task: '경추 작업',
   vibration_interval: '진동구간',
 };
 

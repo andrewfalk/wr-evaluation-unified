@@ -67,6 +67,7 @@ import { generateAccessToken } from '../../auth/tokens';
 import { __resetDifferencingGuardForTests, computeQueryFamilyDigest } from '../../statsDifferencingGuard';
 import { __resetInFlightForTests } from '../../statsAnalyzeInFlight';
 import { StatsAnalysisRecipeSchema } from '@wr/contracts';
+import { getFullVariableCatalog } from '@wr/analytics-core/catalog';
 
 // ---------------------------------------------------------------------------
 // Constants / helpers
@@ -173,16 +174,19 @@ describe('requireCapability 게이트(기존 미들웨어 재사용 확인)', ()
 describe('GET /catalog', () => {
   // PR0-B3 Part A는 vibration_interval(7→9), Part B는 diagnosis_side(9→15), Part C-1은
   // job(15→18) 추가. Part C-2는 task grain(analytics-core 21개) + SNAPSHOT_COLUMN_VARIABLES
-  // (담당의·등록일, +2, analytics-core 밖) 추가로 18→23. supportedGrains에 task 추가,
-  // unsupportedGrains는 3→2(person/job_diagnosis만 남음).
-  it('200 + 23개 변수, case+vibration_interval+diagnosis_side+job+task 지원, 감사 로그를 남기지 않는다', async () => {
+  // (담당의·등록일, +2, analytics-core 밖) 추가로 18→23. PR0-B4 Slice 7이 cervical_task를,
+  // Slice 8b가 job_diagnosis를 추가(supportedGrains 5→7, unsupportedGrains는 1 — person만
+  // 남음). analytics-core 카탈로그 개수를 직접 import해서 대조한다(매 슬라이스 하드코딩
+  // 갱신 방지 — analytics-core 쪽 정확한 개수는 coverage/pr0B4FieldMapping.ts fixture가
+  // 이미 고정한다).
+  it('200 + 정확한 변수 개수, case+vibration_interval+diagnosis_side+job+task+cervical_task+job_diagnosis 지원, 감사 로그를 남기지 않는다', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
     const res = await request(makeApp(pool)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
-    expect(res.body.variables).toHaveLength(23);
-    expect(res.body.supportedGrains).toEqual(['case', 'vibration_interval', 'diagnosis_side', 'job', 'task']);
-    expect(res.body.unsupportedGrains).toHaveLength(2);
+    expect(res.body.variables).toHaveLength(getFullVariableCatalog().length + 2);
+    expect(res.body.supportedGrains).toEqual(['case', 'vibration_interval', 'diagnosis_side', 'job', 'task', 'cervical_task', 'job_diagnosis']);
+    expect(res.body.unsupportedGrains).toHaveLength(1);
     expect(writeAuditLogStrict).not.toHaveBeenCalled();
   });
 
@@ -336,6 +340,158 @@ describe('POST /preview — vibration_interval grain(PR0-B3 Part A)', () => {
     expect(res.body.runManifest).toBeDefined();
     expect(res.body.result.continuous[0].variableKey).toBe('spine.vibration.intervalA8Max');
     expect(res.body.result.continuous[0].n).toBe(12);
+  });
+});
+
+// PR0-B4 Slice 7 — cervical_task grain end-to-end. vibration_interval(Part A) 블록과 같은
+// 패턴 — snapshot→migrate→반복 관측치 추출→estimability까지 실제로 도는지 실측한다. spine의
+// 기존 task grain과 완전히 분리된 별도 grain이므로 GRAIN_NOT_YET_SUPPORTED 없이 처리되는지가
+// 핵심 확인 대상이다.
+describe('POST /preview — cervical_task grain(PR0-B4 Slice 7)', () => {
+  function cervicalTaskCaseRow(id: string, personId: string, taskCount: number) {
+    return {
+      id,
+      patient_person_id: personId,
+      assigned_doctor_user_id: null,
+      created_at: new Date('2024-01-01T00:00:00.000Z'),
+      payload: {
+        data: {
+          shared: { jobs: [{ id: 'job-1', jobName: '조립공' }] },
+          modules: {
+            cervical: {
+              tasks: Array.from({ length: taskCount }, (_, i) => ({
+                id: `${id}-task-${i}`,
+                sharedJobId: 'job-1',
+                name: '박스 운반',
+                exposure_types: ['shoulder_heavy_load'],
+                load_weight_kg: '45',
+              })),
+            },
+          },
+          activeModules: ['cervical'],
+        },
+      },
+    };
+  }
+
+  it('grain=cervical_task를 GRAIN_NOT_YET_SUPPORTED 없이 처리하고, caseCount!==observationCount일 수 있다', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    const rows = [
+      ...Array.from({ length: 11 }, (_, i) => cervicalTaskCaseRow(`case-${i}`, `person-${i}`, 1)),
+      cervicalTaskCaseRow('case-11', 'person-11', 2),
+    ];
+    wireSnapshot(pool, rows);
+    const res = await request(makeApp(pool))
+      .post('/api/stats/preview')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-CSRF-Token', CSRF_TOKEN)
+      .send({
+        grain: 'cervical_task',
+        variableKeys: ['cervical.task.loadWeightKg'],
+        filters: [],
+        analysisPurpose: 'association',
+        formulaPolicies: {},
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.counts.suppressed).toBe(false);
+    expect(res.body.counts.personCount).toBe(12);
+    expect(res.body.counts.caseCount).toBe(12);
+    expect(res.body.counts.observationCount).toBe(13);
+  });
+
+  it('grain과 변수의 grain이 다르면(case 변수를 cervical_task grain에) VARIABLE_GRAIN_MISMATCH 400', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    const res = await request(makeApp(pool))
+      .post('/api/stats/preview')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-CSRF-Token', CSRF_TOKEN)
+      .send({
+        grain: 'cervical_task',
+        variableKeys: ['knee.relatedness.max'], // case grain 변수
+        filters: [],
+        analysisPurpose: 'association',
+        formulaPolicies: {},
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.errors.some((e: { code: string }) => e.code === 'VARIABLE_GRAIN_MISMATCH')).toBe(true);
+    expect(pool.connect).not.toHaveBeenCalled();
+  });
+});
+
+// PR0-B4 Slice 8b — job_diagnosis grain end-to-end. elbow/wrist가 공유하는 단일 grain이라
+// GRAIN_NOT_YET_SUPPORTED 없이 처리되는지, cross join(job×진단 전체)이 실제로 도는지가
+// 핵심 확인 대상이다.
+describe('POST /preview — job_diagnosis grain(PR0-B4 Slice 8b)', () => {
+  function jobDiagnosisCaseRow(id: string, personId: string, diagnosisCount: number) {
+    return {
+      id,
+      patient_person_id: personId,
+      assigned_doctor_user_id: null,
+      created_at: new Date('2024-01-01T00:00:00.000Z'),
+      payload: {
+        data: {
+          shared: {
+            jobs: [{ id: 'job-1', jobName: '조립공' }],
+            diagnoses: Array.from({ length: diagnosisCount }, (_, i) => ({
+              id: `${id}-dx-${i}`,
+              code: 'M770',
+              name: '',
+              moduleId: 'elbow',
+              side: 'right',
+            })),
+          },
+          modules: { elbow: { jobEvaluations: [] } },
+          activeModules: ['elbow'],
+        },
+      },
+    };
+  }
+
+  it('grain=job_diagnosis를 GRAIN_NOT_YET_SUPPORTED 없이 처리하고, caseCount!==observationCount일 수 있다', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    const rows = [
+      ...Array.from({ length: 11 }, (_, i) => jobDiagnosisCaseRow(`case-${i}`, `person-${i}`, 1)),
+      jobDiagnosisCaseRow('case-11', 'person-11', 2),
+    ];
+    wireSnapshot(pool, rows);
+    const res = await request(makeApp(pool))
+      .post('/api/stats/preview')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-CSRF-Token', CSRF_TOKEN)
+      .send({
+        grain: 'job_diagnosis',
+        variableKeys: ['elbow.jobDiagnosis.selectedBkType'],
+        filters: [],
+        analysisPurpose: 'association',
+        formulaPolicies: {},
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.counts.suppressed).toBe(false);
+    expect(res.body.counts.personCount).toBe(12);
+    expect(res.body.counts.caseCount).toBe(12);
+    expect(res.body.counts.observationCount).toBe(13);
+  });
+
+  it('grain과 변수의 grain이 다르면(case 변수를 job_diagnosis grain에) VARIABLE_GRAIN_MISMATCH 400', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    const res = await request(makeApp(pool))
+      .post('/api/stats/preview')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-CSRF-Token', CSRF_TOKEN)
+      .send({
+        grain: 'job_diagnosis',
+        variableKeys: ['knee.relatedness.max'], // case grain 변수
+        filters: [],
+        analysisPurpose: 'association',
+        formulaPolicies: {},
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.errors.some((e: { code: string }) => e.code === 'VARIABLE_GRAIN_MISMATCH')).toBe(true);
+    expect(pool.connect).not.toHaveBeenCalled();
   });
 });
 

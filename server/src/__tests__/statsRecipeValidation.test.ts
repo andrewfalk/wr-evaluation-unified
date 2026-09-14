@@ -44,6 +44,28 @@ describe('validateRecipe — grain', () => {
       expect(result.errors.some((e) => e.code === 'GRAIN_NOT_YET_SUPPORTED')).toBe(false);
     }
   });
+
+  // PR0-B4 Slice 7 — cervical_task grain 추가.
+  it('grain=cervical_task는 GRAIN_NOT_YET_SUPPORTED로 거부되지 않는다', () => {
+    const result = validateRecipe(
+      baseRecipe({ grain: 'cervical_task', variableKeys: ['cervical.task.name'] }),
+      'analyze',
+    );
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.code === 'GRAIN_NOT_YET_SUPPORTED')).toBe(false);
+    }
+  });
+
+  // PR0-B4 Slice 8b — job_diagnosis grain 활성화.
+  it('grain=job_diagnosis는 GRAIN_NOT_YET_SUPPORTED로 거부되지 않는다', () => {
+    const result = validateRecipe(
+      baseRecipe({ grain: 'job_diagnosis', variableKeys: ['elbow.jobDiagnosis.selectedBkType'] }),
+      'analyze',
+    );
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.code === 'GRAIN_NOT_YET_SUPPORTED')).toBe(false);
+    }
+  });
 });
 
 // PR0-B3 Part C — 필터 전용 변수 계약. 등록일(case.meta.registeredAt)은 filter_only다.

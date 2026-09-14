@@ -3,11 +3,13 @@
 import type { CoverageInventory } from '../types';
 
 const FREE_TEXT = '자유 서술 텍스트 — 계산에 관여하지 않음';
-const TECHNICAL = '기술 ID — 계산값이 아니라 참조용';
 
 export const CERVICAL_INVENTORY: CoverageInventory = {
   'modules.cervical.returnConsiderations': { included: false, reason: FREE_TEXT },
-  'modules.cervical.tasks[].id': { included: false, reason: TECHNICAL },
+  // PR0-B4 Slice 7 — cervical_task grain 엔터티 키(entityKey 구성용)로 9개 신규 변수의
+  // dependsOn에 포함됐다(spine.tasks[].id와 동일 선례). 독립 카탈로그 키로는 등록하지
+  // 않는다(매핑표 §5 "제외" 결정 — 기술 ID 자체는 분석 변수 가치가 없음).
+  'modules.cervical.tasks[].id': { included: true },
   'modules.cervical.tasks[].sharedJobId': { included: true },
   'modules.cervical.tasks[].name': { included: true },
   'modules.cervical.tasks[].exposure_types': { included: true },

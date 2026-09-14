@@ -28,6 +28,13 @@ import { ELBOW_METADATA } from '../modules/elbow/metadata';
 import { WRIST_METADATA } from '../modules/wrist/metadata';
 import { CERVICAL_METADATA } from '../modules/cervical/metadata';
 import { SPINE_METADATA } from '../modules/spine/metadata';
+// PR0-B4 Slice 6 — job/diagnosis(PR0-B3 Part C) + patient(Slice 5) pseudo-module
+// metadata가 ALL_METADATA에서 빠져 있던 기존 결함을 여기서 함께 고친다. job/diagnosis는
+// 이번 슬라이스 전까지 dependsOn이 전부 이미 included:true인 경로만 참조해서 이 누락이
+// 드러나지 않았을 뿐이다(patient.identity.height 등을 등록하며 처음 노출됨).
+import { JOB_METADATA } from '../modules/job/metadata';
+import { DIAGNOSIS_METADATA } from '../modules/diagnosis/metadata';
+import { PATIENT_METADATA } from '../modules/patient/metadata';
 
 import { createSharedData, createDiagnosis } from '../../../src/core/utils/data';
 import { createKneeModuleData, createKneeJobExtras } from '../../../src/modules/knee/utils/data';
@@ -51,6 +58,7 @@ import { normalizeHeader, parseDate, parseSide, getCell, buildColMap, ensureDiag
 const ALL_METADATA = [
   ...KNEE_METADATA, ...SHOULDER_METADATA, ...ELBOW_METADATA,
   ...WRIST_METADATA, ...CERVICAL_METADATA, ...SPINE_METADATA,
+  ...JOB_METADATA, ...DIAGNOSIS_METADATA, ...PATIENT_METADATA,
 ];
 
 // ---------------------------------------------------------------------------

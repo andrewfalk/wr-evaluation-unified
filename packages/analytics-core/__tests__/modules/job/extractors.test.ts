@@ -3,6 +3,9 @@ import {
   extractJobIdentityJobNameNormalized,
   extractJobIdentityTenureYears,
   extractJobRollupLongestTenureJobNameNormalized,
+  extractJobRawStartDate,
+  extractJobRawEndDate,
+  extractJobRawWorkDaysPerYear,
 } from '../../../modules/job/extractors';
 import { deterministicMigrate } from '../../../migration/deterministicMigrate';
 
@@ -217,5 +220,54 @@ describe('extractJobRollupLongestTenureJobNameNormalized — case grain(§2.1 �
     const first = extractJobRollupLongestTenureJobNameNormalized(migrate(payload));
     const second = extractJobRollupLongestTenureJobNameNormalized(migrate(payload));
     expect(first).toEqual(second);
+  });
+});
+
+// PR0-B4 Slice 2 — coverage 잔여 필드(매핑표 §1 shared.jobs[]).
+describe('extractJobRawStartDate/extractJobRawEndDate — job grain(카탈로그 최초 date 타입)', () => {
+  it.each([
+    ['extractJobRawStartDate', extractJobRawStartDate, 'startDate'],
+    ['extractJobRawEndDate', extractJobRawEndDate, 'endDate'],
+  ] as const)('%s — 미입력은 not_entered, 정상 ISO 날짜는 그대로 통과, 형식 불일치는 invalid', (_label, fn, field) => {
+    // jobName을 채워 enumerateJobEntities의 "4개 필드 전부 공백=placeholder" 배제 규칙을
+    // 피한다(테스트 대상 필드 자체는 비워서 검증).
+    expect(fn(jobsMigration([{ id: 'job-1', jobName: '용접공' }]))).toEqual([
+      { entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: [] },
+    ]);
+    expect(fn(jobsMigration([{ id: 'job-1', jobName: '용접공', [field]: '2020-01-01' }]))).toEqual([
+      { entityKey: ['job-1'], value: '2020-01-01', missing: null, qualityFlags: [] },
+    ]);
+    expect(fn(jobsMigration([{ id: 'job-1', jobName: '용접공', [field]: '2020/01/01' }]))).toEqual([
+      { entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
+    ]);
+    expect(fn(jobsMigration([{ id: 'job-1', jobName: '용접공', [field]: ['2020-01-01'] }]))).toEqual([
+      { entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
+    ]);
+  });
+});
+
+describe('extractJobRawWorkDaysPerYear — job grain', () => {
+  it('미입력은 not_entered', () => {
+    expect(extractJobRawWorkDaysPerYear(jobsMigration([{ id: 'job-1', jobName: '용접공' }]))).toEqual([
+      { entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: [] },
+    ]);
+  });
+
+  it('정상 숫자는 그대로 통과(0도 허용 — 유한성만 검증)', () => {
+    expect(extractJobRawWorkDaysPerYear(jobsMigration([{ id: 'job-1', jobName: '용접공', workDaysPerYear: 250 }]))).toEqual([
+      { entityKey: ['job-1'], value: 250, missing: null, qualityFlags: [] },
+    ]);
+    expect(extractJobRawWorkDaysPerYear(jobsMigration([{ id: 'job-1', jobName: '용접공', workDaysPerYear: 0 }]))).toEqual([
+      { entityKey: ['job-1'], value: 0, missing: null, qualityFlags: [] },
+    ]);
+  });
+
+  it('파싱 불가·배열은 not_entered + invalid', () => {
+    expect(extractJobRawWorkDaysPerYear(jobsMigration([{ id: 'job-1', jobName: '용접공', workDaysPerYear: 'bad' }]))).toEqual([
+      { entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
+    ]);
+    expect(extractJobRawWorkDaysPerYear(jobsMigration([{ id: 'job-1', jobName: '용접공', workDaysPerYear: [250] }]))).toEqual([
+      { entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
+    ]);
   });
 });

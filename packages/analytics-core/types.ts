@@ -59,7 +59,7 @@ export interface AnalyticsVariableMetadata {
   label: string;
   group: string;
   moduleId: string;
-  grain: 'person' | 'case' | 'diagnosis_side' | 'job' | 'job_diagnosis' | 'task' | 'vibration_interval';
+  grain: 'person' | 'case' | 'diagnosis_side' | 'job' | 'job_diagnosis' | 'task' | 'cervical_task' | 'vibration_interval';
   type: 'continuous' | 'categorical' | 'ordinal' | 'date' | 'high_cardinality' | 'boolean';
   unit?: string;
   provenance: 'raw' | 'derived' | 'clinician_judgment';

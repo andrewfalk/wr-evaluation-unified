@@ -9,6 +9,14 @@ import {
   extractKneeDiagnosisSideKlGrade,
   extractKneeDiagnosisSideConfirmedStatus,
   extractKneeDiagnosisSideAppliedConfirmedMismatch,
+  extractKneeJobWeight,
+  extractKneeJobSquatting,
+  extractKneeJobStairs,
+  extractKneeJobKneeTwist,
+  extractKneeJobStartStop,
+  extractKneeJobTightSpace,
+  extractKneeJobKneeContact,
+  extractKneeJobJumpDown,
 } from './extractors';
 import { isKneeAssessmentComplete } from './derived';
 
@@ -20,6 +28,14 @@ registerAnalyticsModule({
     'knee.diagnosisSide.klGrade': extractKneeDiagnosisSideKlGrade,
     'knee.diagnosisSide.confirmedStatus': extractKneeDiagnosisSideConfirmedStatus,
     'knee.diagnosisSide.appliedConfirmedMismatch': extractKneeDiagnosisSideAppliedConfirmedMismatch,
+    'knee.job.dailyLoadKg': extractKneeJobWeight,
+    'knee.job.squattingMinutesPerDay': extractKneeJobSquatting,
+    'knee.job.stairs': extractKneeJobStairs,
+    'knee.job.kneeTwist': extractKneeJobKneeTwist,
+    'knee.job.startStop': extractKneeJobStartStop,
+    'knee.job.tightSpace': extractKneeJobTightSpace,
+    'knee.job.kneeContact': extractKneeJobKneeContact,
+    'knee.job.jumpDown': extractKneeJobJumpDown,
   },
   isComplete: isKneeAssessmentComplete,
 });

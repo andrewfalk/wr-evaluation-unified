@@ -6,7 +6,7 @@
 // 넘겨준다).
 import { deterministicMigrate } from '@wr/analytics-core/migration/deterministicMigrate';
 import { computeVariableValue, computeRepeatedVariableValue } from '@wr/analytics-core/catalog';
-import { enumerateVibrationIntervalEntities, enumerateDiagnosisSideEntities, enumerateJobEntities, enumerateTaskEntities } from '@wr/analytics-core/grainEntities';
+import { enumerateVibrationIntervalEntities, enumerateDiagnosisSideEntities, enumerateJobEntities, enumerateTaskEntities, enumerateCervicalTaskEntities, enumerateJobDiagnosisEntities } from '@wr/analytics-core/grainEntities';
 import type { AnalyticsVariableMetadata, ExtractedValue, GrainEntity, MigrationResult, RepeatedObservation } from '@wr/analytics-core';
 import type { AnalysisPatient } from '@wr/analytics-core/migration/deterministicMigrate';
 import type { StatsAnalysisRecipe, StatsFilter } from '@wr/contracts';
@@ -197,8 +197,10 @@ function buildCaseGradeDataset(
 }
 
 // PR0-B3 Part A는 vibration_interval을, Part B는 diagnosis_side를, Part C는 job/task를
-// 등록했다. job_diagnosis는 계획상 이번 확장에서 전부 제외한다. 여기 없는 grain으로 이
-// 함수가 호출되면(= statsRecipeValidation.ts의 SUPPORTED_GRAINS와 어긋난 상태) 구현
+// 등록했다. PR0-B4 Slice 7이 cervical_task를 등록한다(spine의 task grain과 완전 분리 —
+// 계획 결정). Slice 8b가 job_diagnosis를 활성화한다 — enumerateJobDiagnosisEntities가
+// elbow/wrist 두 모듈의 cross join을 하나의 grain으로 합쳐 반환한다. 여기 없는 grain으로
+// 이 함수가 호출되면(= statsRecipeValidation.ts의 SUPPORTED_GRAINS와 어긋난 상태) 구현
 // 버그이므로 조용히 넘기지 않고 던진다.
 type Enumerator = (mr: MigrationResult<AnalysisPatient>) => GrainEntity<unknown>[];
 const GRAIN_ENTITY_ENUMERATORS: Partial<Record<StatsAnalysisRecipe['grain'], Enumerator>> = {
@@ -206,6 +208,8 @@ const GRAIN_ENTITY_ENUMERATORS: Partial<Record<StatsAnalysisRecipe['grain'], Enu
   diagnosis_side: enumerateDiagnosisSideEntities as Enumerator,
   job: enumerateJobEntities as Enumerator,
   task: enumerateTaskEntities as Enumerator,
+  cervical_task: enumerateCervicalTaskEntities as Enumerator,
+  job_diagnosis: enumerateJobDiagnosisEntities as Enumerator,
 };
 
 /**

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { extractShoulderExposureAnyExceeded, extractShoulderDiagnosisSideEllmanClass } from '../../../modules/shoulder/extractors';
+import {
+  extractShoulderExposureAnyExceeded,
+  extractShoulderDiagnosisSideEllmanClass,
+  extractShoulderJobOverheadHours,
+  extractShoulderJobVibrationHours,
+} from '../../../modules/shoulder/extractors';
 import { deterministicMigrate } from '../../../migration/deterministicMigrate';
 
 const FALLBACK = '2024-01-01T00:00:00.000Z';
@@ -259,5 +264,69 @@ describe('extractShoulderDiagnosisSideEllmanClass — diagnosis_side grain', () 
     const dx = { id: 'dx-1', code: 'M751', name: '회전근개 증후군', side: 'right', ellmanRight };
     const result = extractShoulderDiagnosisSideEllmanClass(diagnosesMigration([dx]));
     expect(result).toEqual([{ entityKey: ['dx-1', 'right'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] }]);
+  });
+});
+
+// PR0-B4 Slice 3 — coverage 잔여 필드(매핑표 §3). anyExceeded(boolean)에만 흡수됐던
+// jobExtras 원시값을 job grain에 독립 노출.
+describe('extractShoulderJobOverheadHours/VibrationHours — job grain(jobExtras 원시값 투영)', () => {
+  it('shoulder 모듈이 비활성이면 structural_missing', () => {
+    const result = extractShoulderJobOverheadHours(migrate(baseCase({ activeModules: [] })));
+    expect(result).toEqual([{ entityKey: ['job-1'], value: null, missing: 'structural_missing', qualityFlags: [] }]);
+  });
+
+  it('jobExtras에 매칭 레코드가 없으면 not_entered', () => {
+    const result = extractShoulderJobOverheadHours(migrate(baseCase({ jobExtras: [] })));
+    expect(result).toEqual([{ entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: [] }]);
+  });
+
+  it('정상 입력 — 그대로 통과', () => {
+    const result = extractShoulderJobOverheadHours(
+      migrate(baseCase({ jobExtras: [{ sharedJobId: 'job-1', overheadHours: 3 }] })),
+    );
+    expect(result).toEqual([{ entityKey: ['job-1'], value: 3, missing: null, qualityFlags: [] }]);
+  });
+
+  it('배열 등 강제변환으로 우연히 통과시키지 않는다 — not_entered + invalid', () => {
+    const result = extractShoulderJobOverheadHours(
+      migrate(baseCase({ jobExtras: [{ sharedJobId: 'job-1', overheadHours: [3] }] })),
+    );
+    expect(result).toEqual([{ entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] }]);
+  });
+
+  it('vibrationHours도 동일 패턴으로 동작한다', () => {
+    const result = extractShoulderJobVibrationHours(
+      migrate(baseCase({ jobExtras: [{ sharedJobId: 'job-1', vibrationHours: 1.5 }] })),
+    );
+    expect(result).toEqual([{ entityKey: ['job-1'], value: 1.5, missing: null, qualityFlags: [] }]);
+  });
+
+  // 8차 검토 P2 재현 — parseFloat는 문자열 전체가 숫자인지 확인하지 않고 숫자 접두부만
+  // 읽는다("12kg" → 12). Number()로 바꿔 전체 문자열 검증이 실제로 걸리는지 확인한다.
+  it('숫자 접두부만 있는 손상 문자열은 부분 파싱으로 통과시키지 않는다 — not_entered + invalid', () => {
+    const result = extractShoulderJobOverheadHours(
+      migrate(baseCase({ jobExtras: [{ sharedJobId: 'job-1', overheadHours: '12kg' }] })),
+    );
+    expect(result).toEqual([{ entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] }]);
+  });
+
+  // 시간·횟수·초 단위 필드는 전부 물리적으로 음수가 불가능하다(knee.job.weight/squatting의
+  // parseNonNegativeNumber와 동일 규칙) — parseFloat만으로는 음수도 그대로 통과했다.
+  it('음수는 물리적으로 불가능하므로 통과시키지 않는다 — not_entered + invalid', () => {
+    const result = extractShoulderJobOverheadHours(
+      migrate(baseCase({ jobExtras: [{ sharedJobId: 'job-1', overheadHours: -5 }] })),
+    );
+    expect(result).toEqual([{ entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] }]);
+  });
+
+  // 9차 검토 P2 재현 — isBlank(이 파일 다른 곳에서도 쓰임)는 String(x)로 감싸
+  // String([])===''·String([null])===''가 돼 typeof 검사보다 먼저 "빈 값"으로 오인했다.
+  it('빈 배열·[null] 등 String() 강제변환으로 빈 문자열이 되는 배열은 빈 값이 아니라 손상값으로 처리한다 — invalid', () => {
+    expect(
+      extractShoulderJobOverheadHours(migrate(baseCase({ jobExtras: [{ sharedJobId: 'job-1', overheadHours: [] }] }))),
+    ).toEqual([{ entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] }]);
+    expect(
+      extractShoulderJobOverheadHours(migrate(baseCase({ jobExtras: [{ sharedJobId: 'job-1', overheadHours: [null] }] }))),
+    ).toEqual([{ entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] }]);
   });
 });
