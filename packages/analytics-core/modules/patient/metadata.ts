@@ -146,4 +146,27 @@ export const PATIENT_METADATA: AnalyticsVariableMetadata[] = [
     formulaFamily: 'patient_identity',
     supportedFormulaPolicies: [],
   },
+  {
+    // PR0-B4 개정 — 신규 추가. 공식은 packages/analytics-core/common.ts의
+    // calculateBMI와 동일(W/(H/100)²)하되, 그 함수의 "결측 시 0 반환" UI 폴백은 쓰지
+    // 않는다(extractPatientIdentityBmi 참고 — 결측/손상을 0으로 뭉개지 않고
+    // not_entered/invalid로 구분한다).
+    key: 'patient.identity.bmi',
+    label: 'BMI(체질량지수)',
+    group: '인적사항 · 파생지표',
+    moduleId: 'patient',
+    grain: 'case',
+    type: 'continuous',
+    unit: 'kg/m²',
+    provenance: 'derived',
+    dependsOn: ['shared.height', 'shared.weight'],
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'patient_bmi',
+    // calculateBMI에는 버전 개념이 없다 — 과거 구현이 보존된 대체 버전이 없어
+    // recompute_recorded_version 선언 불가(elbow burdenGradeMax 등과 동일 원칙).
+    supportedFormulaPolicies: ['recompute_current'],
+  },
 ];

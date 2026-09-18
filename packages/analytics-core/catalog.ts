@@ -88,7 +88,7 @@ export function computeVariableValue(
   const found = getExtractorForKey(key);
   if (!found) return undefined;
   const metadata = getVariableMetadata(key);
-  if (metadata && metadata.grain !== 'case' && metadata.grain !== 'person') {
+  if (metadata && metadata.grain !== 'case') {
     throw new Error(
       `computeVariableValue: "${key}"는 grain "${metadata.grain}"(반복 grain)이라 스칼라 API로 호출할 수 없다 — computeRepeatedVariableValue를 쓸 것`,
     );
@@ -97,7 +97,7 @@ export function computeVariableValue(
   return fn(migrationResult, opts);
 }
 
-/** computeVariableValue의 반복 grain 대응 — grain이 'case'/'person'이면 반대로 거부한다. */
+/** computeVariableValue의 반복 grain 대응 — grain이 'case'면 반대로 거부한다. */
 export function computeRepeatedVariableValue(
   key: string,
   migrationResult: MigrationResult<AnalysisPatient>,
@@ -106,7 +106,7 @@ export function computeRepeatedVariableValue(
   const found = getExtractorForKey(key);
   if (!found) return undefined;
   const metadata = getVariableMetadata(key);
-  if (metadata && (metadata.grain === 'case' || metadata.grain === 'person')) {
+  if (metadata && metadata.grain === 'case') {
     throw new Error(
       `computeRepeatedVariableValue: "${key}"는 grain "${metadata.grain}"(스칼라 grain)이라 반복 API로 호출할 수 없다 — computeVariableValue를 쓸 것`,
     );
@@ -215,4 +215,26 @@ export function computeRepeatedVariableValue(
 // 값의 신뢰성이 회복되지 않는다"). donor-copy 루프에서 필드별로 도너의 손상 여부를 함께
 // 전달하도록 수정 — 손상 필드를 물려받으면 손상 표시도 같이 옮기고, 정상 필드로 덮어쓰면
 // 수신자의 이전 손상 표시를 지운다.
-export const CATALOG_VERSION = 'v19-pr0-b4-slice8c-donor-copy-corruption-propagation';
+//
+// grain 단순화 + 공통변수 브로드캐스트(PR0-B4 개정) — 7개 grain(person/case/diagnosis_side/
+// job/job_diagnosis/task/cervical_task/vibration_interval)을 4개(person/case/job/disease)로
+// 축소. job_diagnosis(87)/task(6)/cervical_task(9)/vibration_interval(6) 총 108개 변수를
+// 소스코드까지 완전 삭제, diagnosis_side→disease로 rename(15개, 행 단위는 "상병×측" 그대로
+// 불변), patient 모듈 6개(gender/heightCm/weightKg/birthDate/highBloodPressure/diabetes)를
+// case→person으로 재배치, 신규 patient.identity.bmi(person) 추가, spine.case.{careerYears,
+// careerMonths,evalMethod} 3개 삭제. 카탈로그 65개(person 7/case 24/job 19/disease 15) +
+// 서버 전용 meta 2개(통합 카탈로그 67개). person/case↔job/disease 방향(그리고 person↔case
+// 상호간)으로 브로드캐스트 안전 변수(quasi_identifier·high_cardinality 제외) 선택 허용 —
+// statsRecipeValidation.ts/statsDatasetBuilder.ts/CatalogPanel.jsx/RecipePanel.jsx가
+// analytics-core/common.ts의 isGrainCompatible을 공유.
+//
+// person grain 삭제(PR0-B4 후속, v20 대비) — v20에서 활성화했던 person grain을 다시
+// 삭제하고 최종 3개(case/job/disease)로 확정. person은 case와 행 구성이 완전히 동일했고
+// (buildDataset이 같은 함수로 라우팅) 브로드캐스트가 양방향이라 case 변수도 그대로
+// 보였다 — person을 골라도 case를 고른 것과 계산 결과가 완전히 같았고 유일한 차이는
+// 브로드캐스트 제외 3개 변수를 person에서 못 쓴다는 것뿐이라, 실익이 없다고 판단해
+// 제거했다. person 소속이던 7개 변수(gender/heightCm/weightKg/birthDate/
+// highBloodPressure/diabetes/bmi)는 삭제하지 않고 case로 되돌렸다(변수 자체는 유효,
+// grain 소속만 원상복구) — 카탈로그 65개(case 31/job 19/disease 15)는 그대로, 통합
+// 카탈로그 67개도 그대로. 브로드캐스트는 이제 case→job/disease 단방향뿐이다.
+export const CATALOG_VERSION = 'v21-person-grain-removed';

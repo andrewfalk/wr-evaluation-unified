@@ -5,6 +5,9 @@ import type { CoverageInventory } from '../types';
 
 const FREE_TEXT = '자유 서술 텍스트 — 계산에 관여하지 않음';
 const DERIVED_CACHE = '파생/캐시값 — 원시 입력이 아니라 계산 결과를 저장해두는 필드';
+// grain 단순화 개정(PR0-B4) — task/vibration_interval grain 자체가 소스코드까지 완전
+// 삭제되면서 이 필드를 읽던 유일한 소비처(entityKey 구성)도 함께 사라졌다.
+const GRAIN_DELETED = 'task/vibration_interval grain 삭제(PR0-B4 grain 단순화)로 이 필드를 읽던 유일한 소비처가 사라짐';
 
 export const SPINE_INVENTORY: CoverageInventory = {
   'modules.spine.mddmStatus': { included: true },
@@ -25,10 +28,10 @@ export const SPINE_INVENTORY: CoverageInventory = {
   // shared.jobs[].jobName과는 별개의 구형 단일 필드다.
   'modules.spine.jobName': { included: true },
 
-  // PR0-B3 Part C-2 — spine.task.weightKg/frequencyPerDay(task grain)의 entityKey를
-  // 구성하므로 더는 "계산에 안 쓰이는 기술 ID"가 아니다(vibrationIntervals[].id와 동일한
-  // 사유 — task grain 자체가 이 필드로 행을 식별한다).
-  'modules.spine.tasks[].id': { included: true },
+  // grain 단순화 개정(PR0-B4) — 이 필드로 행을 식별하던 task grain 자체가 소스코드까지
+  // 완전 삭제됐다. lifetimeDoseMNh(case grain, 살아남음) 계산은 task의 내용(posture/
+  // weight 등)만 읽고 id는 읽지 않는다.
+  'modules.spine.tasks[].id': { included: false, reason: GRAIN_DELETED },
   'modules.spine.tasks[].sharedJobId': { included: true },
   'modules.spine.tasks[].name': { included: false, reason: FREE_TEXT },
   'modules.spine.tasks[].posture': { included: true },
@@ -41,10 +44,10 @@ export const SPINE_INVENTORY: CoverageInventory = {
   // 입력이 아니라 계산 결과이므로 dependsOn 대상이 아니다(입력 필드들이 이미 나열돼 있음).
   'modules.spine.tasks[].force': { included: false, reason: DERIVED_CACHE },
 
-  // PR0-B3 Part A — spine.vibration.intervalA8Max(vibration_interval grain)의 entityKey를
-  // 구성하므로 더는 "계산에 안 쓰이는 기술 ID"가 아니다(vibration_interval grain 자체가
-  // 이 필드로 행을 식별한다).
-  'modules.spine.vibrationIntervals[].id': { included: true },
+  // grain 단순화 개정(PR0-B4) — 이 필드로 행을 식별하던 vibration_interval grain 자체가
+  // 소스코드까지 완전 삭제됐다. dvMax(case grain, 살아남음) 계산은 interval의 내용(awMax/
+  // timeValue 등)만 읽고 id는 읽지 않는다.
+  'modules.spine.vibrationIntervals[].id': { included: false, reason: GRAIN_DELETED },
   'modules.spine.vibrationIntervals[].sharedJobId': { included: true },
   'modules.spine.vibrationIntervals[].name': { included: false, reason: FREE_TEXT },
   'modules.spine.vibrationIntervals[].awMin': { included: true },

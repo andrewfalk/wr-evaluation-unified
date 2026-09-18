@@ -64,9 +64,7 @@ export type RevokeCapabilityGrantRequest  = z.infer<typeof RevokeCapabilityGrant
 // 계획서(pr0-c-snapshot-dataset-builder-sharded-rivest.md) §2 참고.
 // ============================================================================
 
-export const StatsGrainSchema = z.enum([
-  'person', 'case', 'diagnosis_side', 'job', 'job_diagnosis', 'task', 'cervical_task', 'vibration_interval',
-]);
+export const StatsGrainSchema = z.enum(['case', 'disease', 'job']);
 
 export const CatalogVariableSchema = z.object({
   key:                      z.string(),
@@ -349,11 +347,13 @@ const AnalyzeContinuousSuppressedSchema = z.object({
   kind: z.literal('continuous'),
   suppressed: z.literal(true),
 });
-// PR3-B — 히스토그램 bin(계획서 §2). disclosureClass=aggregate: 어느 한 bin이라도
-// person 소수셀이면(Node가 이 경계로 DatasetRow[]를 재순회해 판정, Python의
-// row-count가 아니라 person count 기준) histogram 전체가 생략된다(전체연결억제,
-// §3). 경계 포함규칙은 numpy.histogram과 동일 — 마지막 bin만 양끝 포함(right
-// closed), 나머지는 왼쪽 포함/오른쪽 배제.
+// PR3-B — 히스토그램 bin(계획서 §2). disclosureClass=aggregate: person 소수셀이면
+// (Node가 이 경계로 DatasetRow[]를 재순회해 판정, Python의 row-count가 아니라
+// person count 기준) B안(적응형 해상도 축소)이 정해진 후보 해상도로 재분할해
+// 공개 가능한 가장 세밀한 것을 채택한다 — 그마저 전부 실패해야 histogram 전체가
+// 생략된다(AnalyzeContinuousRevealedSchema.histogramReasonCode 참고). 경계
+// 포함규칙은 numpy.histogram과 동일 — 마지막 bin만 양끝 포함(right closed),
+// 나머지는 왼쪽 포함/오른쪽 배제.
 export const AnalyzeHistogramBinSchema = z.object({
   lower: z.number(),
   upper: z.number(),
@@ -361,6 +361,10 @@ export const AnalyzeHistogramBinSchema = z.object({
 });
 export const AnalyzeHistogramSchema = z.object({
   bins: z.array(AnalyzeHistogramBinSchema),
+  // B안 — 원본(Python) bin보다 구간 수를 줄여 재분할했으면 true. 정확한 원본 bin
+  // 개수는 일부러 넣지 않는다 — bin 개수 자체가 person_count 기반 공식과 조합되면
+  // 지금 결과 어디에도 없는 presentPersonCount를 역산하는 실마리가 될 수 있다.
+  merged: z.boolean().optional(),
 });
 
 // PR3-B — 박스플롯(계획서 §1/§3). q1/median/q3/lowerWhisker/upperWhisker는 이
@@ -413,6 +417,11 @@ const AnalyzeContinuousRevealedSchema = z.object({
   // PR3-B — n=0(계산 불가) 또는 히스토그램/박스플롯 자체가 전체연결억제로
   // 생략됐으면 null(필드는 존재, 값이 null — "이 변수 자체가 아예 없음"과 구분).
   histogram: AnalyzeHistogramSchema.nullable().optional(),
+  // B안 — histogram이 null인 이유를 구분한다: n=0이라 애초에 히스토그램 자체가
+  // 없던 경우엔 null(기존과 동일), B안의 폴백 후보를 전부 시도해도 공개 가능한
+  // 해상도가 없던 경우에만 이 값이 채워진다(PreviewCountsSchema.reasonCode와
+  // 동일한 네이밍 패턴).
+  histogramReasonCode: z.enum(['INSUFFICIENT_DISCLOSABLE_RESOLUTION']).nullable().optional(),
   boxplot: AnalyzeBoxplotSchema.nullable().optional(),
 });
 export const AnalyzeContinuousResultSchema = z.discriminatedUnion('suppressed', [

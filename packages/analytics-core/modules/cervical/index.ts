@@ -6,18 +6,7 @@ export * from './metadata';
 
 import { registerAnalyticsModule } from '../../analyticsRegistry';
 import { CERVICAL_METADATA } from './metadata';
-import {
-  extractCervicalCaseMaxJobCumulativeKgHours,
-  extractCervicalTaskName,
-  extractCervicalTaskExposureTypeShoulderHeavyLoad,
-  extractCervicalTaskExposureTypeAwkwardStaticNeckLoad,
-  extractCervicalTaskLoadWeightKg,
-  extractCervicalTaskCarryHoursPerShift,
-  extractCervicalTaskForcedNeckPosture,
-  extractCervicalTaskNeckNonneutralHoursPerDay,
-  extractCervicalTaskCombinedFlexionRotationPosture,
-  extractCervicalTaskPrecisionWork,
-} from './extractors';
+import { extractCervicalCaseMaxJobCumulativeKgHours } from './extractors';
 import { isCervicalAssessmentComplete } from './derived';
 
 registerAnalyticsModule({
@@ -25,15 +14,6 @@ registerAnalyticsModule({
   metadata: CERVICAL_METADATA,
   extractors: {
     'cervical.case.maxJobCumulativeKgHours': extractCervicalCaseMaxJobCumulativeKgHours,
-    'cervical.task.name': extractCervicalTaskName,
-    'cervical.task.exposureType.shoulderHeavyLoad': extractCervicalTaskExposureTypeShoulderHeavyLoad,
-    'cervical.task.exposureType.awkwardStaticNeckLoad': extractCervicalTaskExposureTypeAwkwardStaticNeckLoad,
-    'cervical.task.loadWeightKg': extractCervicalTaskLoadWeightKg,
-    'cervical.task.carryHoursPerShift': extractCervicalTaskCarryHoursPerShift,
-    'cervical.task.forcedNeckPosture': extractCervicalTaskForcedNeckPosture,
-    'cervical.task.neckNonneutralHoursPerDay': extractCervicalTaskNeckNonneutralHoursPerDay,
-    'cervical.task.combinedFlexionRotationPosture': extractCervicalTaskCombinedFlexionRotationPosture,
-    'cervical.task.precisionWork': extractCervicalTaskPrecisionWork,
   },
   isComplete: isCervicalAssessmentComplete,
 });

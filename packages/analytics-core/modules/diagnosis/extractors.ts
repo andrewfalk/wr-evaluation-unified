@@ -1,7 +1,7 @@
 // Raw extractor — diagnosis grain 1호 슬라이스(§5.5 ④ "신청상병 부위군").
 
 import type { MissingReason, MigrationResult, QualityFlag, RepeatedObservation } from '../../types';
-import { enumerateDiagnosisSideEntities, type DiagnosisSideSource } from '../../grainEntities';
+import { enumerateDiseaseEntities, type DiagnosisSideSource } from '../../grainEntities';
 import { resolveDiagnosisModule, isValidDiagnosisModuleId } from '../../diagnosisMapping';
 import type { GrainEntity } from '../../types';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
@@ -17,7 +17,7 @@ function isBlank(x: unknown): boolean {
 export function extractDiagnosisIdentityModuleGroup(
   migrationResult: MigrationResult<AnalysisPatient>,
 ): RepeatedObservation<string>[] {
-  return enumerateDiagnosisSideEntities(migrationResult).map((entity) => {
+  return enumerateDiseaseEntities(migrationResult).map((entity) => {
     const { diagnosis } = entity.source;
 
     // 명시적으로 "해당 모듈 없음"을 선택한 진단(예: 참고용으로만 기재) — 결측이 아니라
@@ -52,7 +52,7 @@ function extractDiagnosisIdentityStringField(
   migrationResult: MigrationResult<AnalysisPatient>,
   field: 'code' | 'name',
 ): RepeatedObservation<string>[] {
-  return enumerateDiagnosisSideEntities(migrationResult).map((entity) => {
+  return enumerateDiseaseEntities(migrationResult).map((entity) => {
     const raw = entity.source.diagnosis[field];
     if (isBlank(raw)) {
       return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
@@ -106,7 +106,7 @@ function resolveAssessmentSide(
 export function extractDiagnosisAssessmentStatus(
   migrationResult: MigrationResult<AnalysisPatient>,
 ): RepeatedObservation<string>[] {
-  return enumerateDiagnosisSideEntities(migrationResult).map((entity) => {
+  return enumerateDiseaseEntities(migrationResult).map((entity) => {
     const effectiveSide = resolveAssessmentSide(migrationResult, entity);
     if (effectiveSide === null) {
       return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
@@ -168,7 +168,7 @@ function extractDiagnosisAssessmentLowReasonOption(
   migrationResult: MigrationResult<AnalysisPatient>,
   option: (typeof LOW_REASON_OPTIONS)[number],
 ): RepeatedObservation<boolean>[] {
-  return enumerateDiagnosisSideEntities(migrationResult).map((entity) => {
+  return enumerateDiseaseEntities(migrationResult).map((entity) => {
     const state = resolveLowReasonState(migrationResult, entity);
     const missingByKind: Record<'not_entered' | 'not_applicable' | 'structural_missing', MissingReason> = {
       not_entered: 'not_entered',

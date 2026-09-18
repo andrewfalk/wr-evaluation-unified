@@ -62,7 +62,7 @@ export const KNEE_METADATA: AnalyticsVariableMetadata[] = [
     label: 'K-L Grade',
     group: '무릎 · 진단별 판정',
     moduleId: 'knee',
-    grain: 'diagnosis_side',
+    grain: 'disease',
     type: 'ordinal',
     provenance: 'clinician_judgment',
     dependsOn: [
@@ -87,7 +87,7 @@ export const KNEE_METADATA: AnalyticsVariableMetadata[] = [
     label: '상병 상태(확인/미확인)',
     group: '무릎 · 진단별 판정',
     moduleId: 'knee',
-    grain: 'diagnosis_side',
+    grain: 'disease',
     type: 'boolean',
     provenance: 'clinician_judgment',
     dependsOn: [
@@ -112,7 +112,7 @@ export const KNEE_METADATA: AnalyticsVariableMetadata[] = [
     label: '신청≠확정 여부',
     group: '무릎 · 진단별 판정',
     moduleId: 'knee',
-    grain: 'diagnosis_side',
+    grain: 'disease',
     type: 'boolean',
     provenance: 'derived',
     dependsOn: [

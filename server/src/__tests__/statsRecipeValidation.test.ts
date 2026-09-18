@@ -25,41 +25,30 @@ function baseRecipe(overrides: Partial<StatsAnalysisRecipe> = {}): StatsAnalysis
 }
 
 describe('validateRecipe — grain', () => {
-  it('case가 아니면 GRAIN_NOT_YET_SUPPORTED 하나만 반환한다', () => {
-    const result = validateRecipe(baseRecipe({ grain: 'person' }), 'analyze');
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.errors).toHaveLength(1);
-      expect(result.errors[0].code).toBe('GRAIN_NOT_YET_SUPPORTED');
+  // grain 단순화 개정(PR0-B4, person grain 삭제 후속) — StatsAnalysisRecipe['grain']
+  // 타입 자체가 이제 case/job/disease 3개뿐이라 "타입은 유효한데 미지원인 grain"을
+  // 리터럴로 만들 수 없다. job_diagnosis/task/cervical_task/vibration_interval처럼
+  // 실제로 삭제된(=한때 유효했던) grain 문자열과, person(한때 활성화됐다가 다시 삭제된
+  // grain — case와 실질적으로 구분되지 않아 제거)이 여전히 SUPPORTED_GRAINS 런타임 Set
+  // 체크에서 거부되는지로 대체한다 — 오래된 캐시된 요청이나 클라이언트 재배포 지연으로
+  // 이런 값이 실제로 올 수 있다.
+  it('삭제된 grain(job_diagnosis/task/cervical_task/vibration_interval/person)은 GRAIN_NOT_YET_SUPPORTED 하나만 반환한다', () => {
+    for (const removedGrain of ['job_diagnosis', 'task', 'cervical_task', 'vibration_interval', 'person']) {
+      const result = validateRecipe(
+        baseRecipe({ grain: removedGrain as StatsAnalysisRecipe['grain'] }),
+        'analyze',
+      );
+      expect(result.valid, removedGrain).toBe(false);
+      if (!result.valid) {
+        expect(result.errors, removedGrain).toHaveLength(1);
+        expect(result.errors[0].code, removedGrain).toBe('GRAIN_NOT_YET_SUPPORTED');
+      }
     }
   });
 
-  // PR0-B3 Part C-2 — task grain 추가.
-  it('grain=task는 GRAIN_NOT_YET_SUPPORTED로 거부되지 않는다', () => {
+  it('disease grain(구 diagnosis_side)은 GRAIN_NOT_YET_SUPPORTED로 거부되지 않는다', () => {
     const result = validateRecipe(
-      baseRecipe({ grain: 'task', variableKeys: ['spine.task.weightKg'] }),
-      'analyze',
-    );
-    if (!result.valid) {
-      expect(result.errors.some((e) => e.code === 'GRAIN_NOT_YET_SUPPORTED')).toBe(false);
-    }
-  });
-
-  // PR0-B4 Slice 7 — cervical_task grain 추가.
-  it('grain=cervical_task는 GRAIN_NOT_YET_SUPPORTED로 거부되지 않는다', () => {
-    const result = validateRecipe(
-      baseRecipe({ grain: 'cervical_task', variableKeys: ['cervical.task.name'] }),
-      'analyze',
-    );
-    if (!result.valid) {
-      expect(result.errors.some((e) => e.code === 'GRAIN_NOT_YET_SUPPORTED')).toBe(false);
-    }
-  });
-
-  // PR0-B4 Slice 8b — job_diagnosis grain 활성화.
-  it('grain=job_diagnosis는 GRAIN_NOT_YET_SUPPORTED로 거부되지 않는다', () => {
-    const result = validateRecipe(
-      baseRecipe({ grain: 'job_diagnosis', variableKeys: ['elbow.jobDiagnosis.selectedBkType'] }),
+      baseRecipe({ grain: 'disease', variableKeys: ['knee.diagnosisSide.klGrade'] }),
       'analyze',
     );
     if (!result.valid) {
@@ -419,14 +408,14 @@ describe('validateRecipe — PR3-A 이변량(§B)', () => {
     expect(result.valid).toBe(true);
   });
 
-  // PR0-B3 Part B — grain:diagnosis_side에서도 이변량이 그대로 동작하는지(§B 판정은 카탈로그
-  // type/grain 메타데이터만 보는 순수 정적 검사라 grain-agnostic이어야 한다). K-L Grade
-  // (ordinal)×확정상병상태(boolean) 조합은 elbow×wrist(ordinal×ordinal) 테스트로는
-  // 못 잡는, 지금까지 카탈로그에 없던 새 타입쌍이라 별도로 검증한다.
-  it('analyze 컨텍스트는 diagnosis_side grain의 ordinal(K-L Grade)×boolean(확정상병상태)에 chi_square를 허용한다', () => {
+  // PR0-B3 Part B — grain:disease(구 diagnosis_side)에서도 이변량이 그대로 동작하는지
+  // (§B 판정은 카탈로그 type/grain 메타데이터만 보는 순수 정적 검사라 grain-agnostic이어야
+  // 한다). K-L Grade(ordinal)×확정상병상태(boolean) 조합은 elbow×wrist(ordinal×ordinal)
+  // 테스트로는 못 잡는, 지금까지 카탈로그에 없던 새 타입쌍이라 별도로 검증한다.
+  it('analyze 컨텍스트는 disease grain의 ordinal(K-L Grade)×boolean(확정상병상태)에 chi_square를 허용한다', () => {
     const result = validateRecipe(
       baseRecipe({
-        grain: 'diagnosis_side',
+        grain: 'disease',
         analysisMode: 'bivariate',
         variableKeys: ['knee.diagnosisSide.klGrade', 'knee.diagnosisSide.confirmedStatus'],
         requestedMethod: 'chi_square',

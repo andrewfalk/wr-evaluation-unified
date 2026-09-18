@@ -172,21 +172,18 @@ describe('requireCapability 게이트(기존 미들웨어 재사용 확인)', ()
 });
 
 describe('GET /catalog', () => {
-  // PR0-B3 Part A는 vibration_interval(7→9), Part B는 diagnosis_side(9→15), Part C-1은
-  // job(15→18) 추가. Part C-2는 task grain(analytics-core 21개) + SNAPSHOT_COLUMN_VARIABLES
-  // (담당의·등록일, +2, analytics-core 밖) 추가로 18→23. PR0-B4 Slice 7이 cervical_task를,
-  // Slice 8b가 job_diagnosis를 추가(supportedGrains 5→7, unsupportedGrains는 1 — person만
-  // 남음). analytics-core 카탈로그 개수를 직접 import해서 대조한다(매 슬라이스 하드코딩
-  // 갱신 방지 — analytics-core 쪽 정확한 개수는 coverage/pr0B4FieldMapping.ts fixture가
-  // 이미 고정한다).
-  it('200 + 정확한 변수 개수, case+vibration_interval+diagnosis_side+job+task+cervical_task+job_diagnosis 지원, 감사 로그를 남기지 않는다', async () => {
+  // grain 단순화(PR0-B4 개정, person grain 삭제 후속) — case/job/disease 3개 전부
+  // 지원한다(unsupportedGrains는 빈 배열). analytics-core 카탈로그 개수를 직접
+  // import해서 대조한다(매 슬라이스 하드코딩 갱신 방지 — analytics-core 쪽 정확한
+  // 개수는 coverage/pr0B4FieldMapping.ts fixture가 이미 고정한다).
+  it('200 + 정확한 변수 개수, case+job+disease 전부 지원, 감사 로그를 남기지 않는다', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
     const res = await request(makeApp(pool)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
     expect(res.body.variables).toHaveLength(getFullVariableCatalog().length + 2);
-    expect(res.body.supportedGrains).toEqual(['case', 'vibration_interval', 'diagnosis_side', 'job', 'task', 'cervical_task', 'job_diagnosis']);
-    expect(res.body.unsupportedGrains).toHaveLength(1);
+    expect(res.body.supportedGrains).toEqual(['case', 'job', 'disease']);
+    expect(res.body.unsupportedGrains).toHaveLength(0);
     expect(writeAuditLogStrict).not.toHaveBeenCalled();
   });
 
@@ -207,7 +204,11 @@ describe('GET /catalog', () => {
 });
 
 describe('POST /preview — 레시피 검증', () => {
-  it('grain=person은 400 GRAIN_NOT_YET_SUPPORTED을 반환하고 DB에 접근하지 않는다', async () => {
+  // person grain 삭제 후속 — 'person'은 이제 StatsAnalysisRecipeSchema의 zod enum
+  // 자체에 없으므로, validateRecipe(SUPPORTED_GRAINS 로직)에 도달하기도 전에 zod
+  // parse 단계에서 먼저 거부된다(statsAnalysisContext.ts:72, code: 'INVALID_RECIPE').
+  // 단순 삭제 대신 이 실제 거부 경로를 HTTP 레벨로 확인한다(리뷰 권장 지적).
+  it('grain=person은 이제 유효한 스키마 값이 아니라 400 INVALID_RECIPE로 거부되고 DB에 접근하지 않는다', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
     const res = await request(makeApp(pool))
@@ -216,289 +217,15 @@ describe('POST /preview — 레시피 검증', () => {
       .set('X-CSRF-Token', CSRF_TOKEN)
       .send({ ...BASE_BODY, grain: 'person' });
     expect(res.status).toBe(400);
-    expect(res.body.errors.some((e: { code: string }) => e.code === 'GRAIN_NOT_YET_SUPPORTED')).toBe(true);
+    expect(res.body.code).toBe('INVALID_RECIPE');
     expect(pool.connect).not.toHaveBeenCalled();
   });
 });
 
-// PR0-B3 Part A — vibration_interval grain end-to-end. GRAIN_NOT_YET_SUPPORTED이 아니라
-// 실제로 snapshot→migrate→반복 관측치 추출→필터→estimability까지 도는지 실측한다.
-describe('POST /preview — vibration_interval grain(PR0-B3 Part A)', () => {
-  function vibrationCaseRow(id: string, personId: string, intervalCount: number) {
-    return {
-      id,
-      patient_person_id: personId,
-      assigned_doctor_user_id: null,
-      created_at: new Date('2024-01-01T00:00:00.000Z'),
-      payload: {
-        data: {
-          shared: { jobs: [{ id: 'job-1', jobName: '조립공' }] },
-          modules: {
-            spine: {
-              vibrationIntervals: Array.from({ length: intervalCount }, (_, i) => ({
-                id: `${id}-iv-${i}`,
-                sharedJobId: 'job-1',
-                awMin: 1.0,
-                awMax: 1.5,
-                timeValue: 4,
-                timeUnit: 'hr',
-              })),
-            },
-          },
-          activeModules: ['spine'],
-        },
-      },
-    };
-  }
-
-  it('grain=vibration_interval을 GRAIN_NOT_YET_SUPPORTED 없이 처리하고, caseCount!==observationCount일 수 있다(§2.2)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    // 11개 case는 구간 1개, 1개 case는 구간 2개 — caseCount=12, observationCount=13,
-    // personCount=12(각 case가 다른 person) — §2.2 "반복 grain에서는 caseCount!==
-    // observationCount"를 실제로 만든다.
-    const rows = [
-      ...Array.from({ length: 11 }, (_, i) => vibrationCaseRow(`case-${i}`, `person-${i}`, 1)),
-      vibrationCaseRow('case-11', 'person-11', 2),
-    ];
-    wireSnapshot(pool, rows);
-    const res = await request(makeApp(pool))
-      .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
-      .send({
-        grain: 'vibration_interval',
-        variableKeys: ['spine.vibration.intervalA8Max'],
-        filters: [],
-        analysisPurpose: 'association',
-        formulaPolicies: {},
-      });
-    expect(res.status).toBe(200);
-    expect(res.body.counts.suppressed).toBe(false);
-    expect(res.body.counts.personCount).toBe(12);
-    expect(res.body.counts.caseCount).toBe(12);
-    expect(res.body.counts.observationCount).toBe(13);
-  });
-
-  it('grain과 변수의 grain이 다르면(case 변수를 vibration_interval grain에) VARIABLE_GRAIN_MISMATCH 400', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const res = await request(makeApp(pool))
-      .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
-      .send({
-        grain: 'vibration_interval',
-        variableKeys: ['knee.relatedness.max'], // case grain 변수
-        filters: [],
-        analysisPurpose: 'association',
-        formulaPolicies: {},
-      });
-    expect(res.status).toBe(400);
-    expect(res.body.errors.some((e: { code: string }) => e.code === 'VARIABLE_GRAIN_MISMATCH')).toBe(true);
-    expect(pool.connect).not.toHaveBeenCalled();
-  });
-
-  it('POST /analyze도 vibration_interval grain을 끝까지 처리한다(엔진 호출까지 grain-agnostic 배선 확인)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireSnapshot(pool, Array.from({ length: 12 }, (_, i) => vibrationCaseRow(`case-${i}`, `person-${i}`, 1)));
-    // FAKE_RAW_ENGINE_RESULT/FAKE_ANALYZE_RESULT는 'knee.relatedness.max' 전용 fixture라
-    // 재사용할 수 없다(엔진 결과 매핑이 요청된 variableKey와 일치하는 항목을 찾으므로) —
-    // 이 변수 전용의 최소 fixture를 직접 만든다.
-    runStatsEngine.mockResolvedValueOnce({
-      continuous: [{
-        variableKey: 'spine.vibration.intervalA8Max', n: 12, mean: 1.1, sd: 0.2, median: 1.1,
-        q1: 0.9, q3: 1.3, iqr: 0.4, skewness: 0, kurtosis: 0, min: 0.7, max: 1.5, nullReasons: {},
-        histogram: null, boxplot: null,
-      }],
-      discrete: [],
-    });
-    wireAnalyzeCacheMissSuccess(pool, false, {
-      continuous: [{
-        variableKey: 'spine.vibration.intervalA8Max', kind: 'continuous', suppressed: false,
-        n: 12, missingCount: 0, missingPatterns: [],
-        mean: 1.1, sd: 0.2, median: 1.1, q1: 0.9, q3: 1.3, iqr: 0.4, skewness: 0, kurtosis: 0,
-        min: 0.7, max: 1.5, nullReasons: {},
-      }],
-      discrete: [],
-    });
-
-    const res = await request(makeApp(pool))
-      .post('/api/stats/analyze')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
-      .send({
-        grain: 'vibration_interval',
-        variableKeys: ['spine.vibration.intervalA8Max'],
-        filters: [],
-        analysisPurpose: 'association',
-        formulaPolicies: {},
-      });
-
-    expect(res.status).toBe(200);
-    expect(res.body.runManifest).toBeDefined();
-    expect(res.body.result.continuous[0].variableKey).toBe('spine.vibration.intervalA8Max');
-    expect(res.body.result.continuous[0].n).toBe(12);
-  });
-});
-
-// PR0-B4 Slice 7 — cervical_task grain end-to-end. vibration_interval(Part A) 블록과 같은
-// 패턴 — snapshot→migrate→반복 관측치 추출→estimability까지 실제로 도는지 실측한다. spine의
-// 기존 task grain과 완전히 분리된 별도 grain이므로 GRAIN_NOT_YET_SUPPORTED 없이 처리되는지가
-// 핵심 확인 대상이다.
-describe('POST /preview — cervical_task grain(PR0-B4 Slice 7)', () => {
-  function cervicalTaskCaseRow(id: string, personId: string, taskCount: number) {
-    return {
-      id,
-      patient_person_id: personId,
-      assigned_doctor_user_id: null,
-      created_at: new Date('2024-01-01T00:00:00.000Z'),
-      payload: {
-        data: {
-          shared: { jobs: [{ id: 'job-1', jobName: '조립공' }] },
-          modules: {
-            cervical: {
-              tasks: Array.from({ length: taskCount }, (_, i) => ({
-                id: `${id}-task-${i}`,
-                sharedJobId: 'job-1',
-                name: '박스 운반',
-                exposure_types: ['shoulder_heavy_load'],
-                load_weight_kg: '45',
-              })),
-            },
-          },
-          activeModules: ['cervical'],
-        },
-      },
-    };
-  }
-
-  it('grain=cervical_task를 GRAIN_NOT_YET_SUPPORTED 없이 처리하고, caseCount!==observationCount일 수 있다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const rows = [
-      ...Array.from({ length: 11 }, (_, i) => cervicalTaskCaseRow(`case-${i}`, `person-${i}`, 1)),
-      cervicalTaskCaseRow('case-11', 'person-11', 2),
-    ];
-    wireSnapshot(pool, rows);
-    const res = await request(makeApp(pool))
-      .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
-      .send({
-        grain: 'cervical_task',
-        variableKeys: ['cervical.task.loadWeightKg'],
-        filters: [],
-        analysisPurpose: 'association',
-        formulaPolicies: {},
-      });
-    expect(res.status).toBe(200);
-    expect(res.body.counts.suppressed).toBe(false);
-    expect(res.body.counts.personCount).toBe(12);
-    expect(res.body.counts.caseCount).toBe(12);
-    expect(res.body.counts.observationCount).toBe(13);
-  });
-
-  it('grain과 변수의 grain이 다르면(case 변수를 cervical_task grain에) VARIABLE_GRAIN_MISMATCH 400', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const res = await request(makeApp(pool))
-      .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
-      .send({
-        grain: 'cervical_task',
-        variableKeys: ['knee.relatedness.max'], // case grain 변수
-        filters: [],
-        analysisPurpose: 'association',
-        formulaPolicies: {},
-      });
-    expect(res.status).toBe(400);
-    expect(res.body.errors.some((e: { code: string }) => e.code === 'VARIABLE_GRAIN_MISMATCH')).toBe(true);
-    expect(pool.connect).not.toHaveBeenCalled();
-  });
-});
-
-// PR0-B4 Slice 8b — job_diagnosis grain end-to-end. elbow/wrist가 공유하는 단일 grain이라
-// GRAIN_NOT_YET_SUPPORTED 없이 처리되는지, cross join(job×진단 전체)이 실제로 도는지가
-// 핵심 확인 대상이다.
-describe('POST /preview — job_diagnosis grain(PR0-B4 Slice 8b)', () => {
-  function jobDiagnosisCaseRow(id: string, personId: string, diagnosisCount: number) {
-    return {
-      id,
-      patient_person_id: personId,
-      assigned_doctor_user_id: null,
-      created_at: new Date('2024-01-01T00:00:00.000Z'),
-      payload: {
-        data: {
-          shared: {
-            jobs: [{ id: 'job-1', jobName: '조립공' }],
-            diagnoses: Array.from({ length: diagnosisCount }, (_, i) => ({
-              id: `${id}-dx-${i}`,
-              code: 'M770',
-              name: '',
-              moduleId: 'elbow',
-              side: 'right',
-            })),
-          },
-          modules: { elbow: { jobEvaluations: [] } },
-          activeModules: ['elbow'],
-        },
-      },
-    };
-  }
-
-  it('grain=job_diagnosis를 GRAIN_NOT_YET_SUPPORTED 없이 처리하고, caseCount!==observationCount일 수 있다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const rows = [
-      ...Array.from({ length: 11 }, (_, i) => jobDiagnosisCaseRow(`case-${i}`, `person-${i}`, 1)),
-      jobDiagnosisCaseRow('case-11', 'person-11', 2),
-    ];
-    wireSnapshot(pool, rows);
-    const res = await request(makeApp(pool))
-      .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
-      .send({
-        grain: 'job_diagnosis',
-        variableKeys: ['elbow.jobDiagnosis.selectedBkType'],
-        filters: [],
-        analysisPurpose: 'association',
-        formulaPolicies: {},
-      });
-    expect(res.status).toBe(200);
-    expect(res.body.counts.suppressed).toBe(false);
-    expect(res.body.counts.personCount).toBe(12);
-    expect(res.body.counts.caseCount).toBe(12);
-    expect(res.body.counts.observationCount).toBe(13);
-  });
-
-  it('grain과 변수의 grain이 다르면(case 변수를 job_diagnosis grain에) VARIABLE_GRAIN_MISMATCH 400', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const res = await request(makeApp(pool))
-      .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
-      .send({
-        grain: 'job_diagnosis',
-        variableKeys: ['knee.relatedness.max'], // case grain 변수
-        filters: [],
-        analysisPurpose: 'association',
-        formulaPolicies: {},
-      });
-    expect(res.status).toBe(400);
-    expect(res.body.errors.some((e: { code: string }) => e.code === 'VARIABLE_GRAIN_MISMATCH')).toBe(true);
-    expect(pool.connect).not.toHaveBeenCalled();
-  });
-});
-
-// PR0-B3 Part B — diagnosis_side grain end-to-end. vibration_interval(Part A) 블록과
-// 대칭 구조 — side==='both' explode가 이 grain 특유의 모집단 규칙이라는 점만 다르다.
-describe('POST /preview — diagnosis_side grain(PR0-B3 Part B)', () => {
-  function diagnosisSideCaseRow(id: string, personId: string, side: 'right' | 'both') {
+// PR0-B3 Part B(PR0-B4 개정 — diagnosis_side→disease rename) — disease grain end-to-end.
+// side==='both' explode가 이 grain 특유의 모집단 규칙이라는 점이 핵심 확인 대상이다.
+describe('POST /preview — disease grain(PR0-B3 Part B, PR0-B4 rename)', () => {
+  function diseaseCaseRow(id: string, personId: string, side: 'right' | 'both') {
     return {
       id,
       patient_person_id: personId,
@@ -516,14 +243,14 @@ describe('POST /preview — diagnosis_side grain(PR0-B3 Part B)', () => {
     };
   }
 
-  it('grain=diagnosis_side를 GRAIN_NOT_YET_SUPPORTED 없이 처리하고, side===both인 case는 행 2개를 낸다(§2.2)', async () => {
+  it('grain=disease를 GRAIN_NOT_YET_SUPPORTED 없이 처리하고, side===both인 case는 행 2개를 낸다(§2.2, 상병×측 단위)', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
     // 11개 case는 side=right(행 1개), 1개 case는 side=both(행 2개) — caseCount=12,
     // observationCount=13, personCount=12(각 case가 다른 person).
     const rows = [
-      ...Array.from({ length: 11 }, (_, i) => diagnosisSideCaseRow(`case-${i}`, `person-${i}`, 'right')),
-      diagnosisSideCaseRow('case-11', 'person-11', 'both'),
+      ...Array.from({ length: 11 }, (_, i) => diseaseCaseRow(`case-${i}`, `person-${i}`, 'right')),
+      diseaseCaseRow('case-11', 'person-11', 'both'),
     ];
     wireSnapshot(pool, rows);
     const res = await request(makeApp(pool))
@@ -531,7 +258,7 @@ describe('POST /preview — diagnosis_side grain(PR0-B3 Part B)', () => {
       .set('Authorization', `Bearer ${orgToken()}`)
       .set('X-CSRF-Token', CSRF_TOKEN)
       .send({
-        grain: 'diagnosis_side',
+        grain: 'disease',
         variableKeys: ['knee.diagnosisSide.klGrade'],
         filters: [],
         analysisPurpose: 'association',
@@ -544,7 +271,7 @@ describe('POST /preview — diagnosis_side grain(PR0-B3 Part B)', () => {
     expect(res.body.counts.observationCount).toBe(13);
   });
 
-  it('grain과 변수의 grain이 다르면(case 변수를 diagnosis_side grain에) VARIABLE_GRAIN_MISMATCH 400', async () => {
+  it('grain과 변수의 grain이 다르고 브로드캐스트 대상도 아니면(quasi_identifier 변수를 disease grain에) VARIABLE_GRAIN_MISMATCH 400', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
     const res = await request(makeApp(pool))
@@ -552,8 +279,8 @@ describe('POST /preview — diagnosis_side grain(PR0-B3 Part B)', () => {
       .set('Authorization', `Bearer ${orgToken()}`)
       .set('X-CSRF-Token', CSRF_TOKEN)
       .send({
-        grain: 'diagnosis_side',
-        variableKeys: ['knee.relatedness.max'], // case grain 변수
+        grain: 'disease',
+        variableKeys: ['job.rollup.longestTenureJobNameNormalized'], // case grain, quasi_identifier — 브로드캐스트 제외
         filters: [],
         analysisPurpose: 'association',
         formulaPolicies: {},
@@ -563,10 +290,10 @@ describe('POST /preview — diagnosis_side grain(PR0-B3 Part B)', () => {
     expect(pool.connect).not.toHaveBeenCalled();
   });
 
-  it('POST /analyze도 diagnosis_side grain을 끝까지 처리한다(엔진 호출까지 grain-agnostic 배선 확인)', async () => {
+  it('POST /analyze도 disease grain을 끝까지 처리한다(엔진 호출까지 grain-agnostic 배선 확인)', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
-    wireSnapshot(pool, Array.from({ length: 12 }, (_, i) => diagnosisSideCaseRow(`case-${i}`, `person-${i}`, 'right')));
+    wireSnapshot(pool, Array.from({ length: 12 }, (_, i) => diseaseCaseRow(`case-${i}`, `person-${i}`, 'right')));
     // FAKE_RAW_ENGINE_RESULT/FAKE_ANALYZE_RESULT는 'knee.relatedness.max' 전용 fixture라
     // 재사용할 수 없다 — 이 변수 전용의 최소 fixture를 직접 만든다(discrete/ordinal 타입,
     // shared/contracts/stats.ts의 StatsEngineRawResult.discrete/AnalyzeDiscreteResultSchema
@@ -589,7 +316,7 @@ describe('POST /preview — diagnosis_side grain(PR0-B3 Part B)', () => {
       .set('Authorization', `Bearer ${orgToken()}`)
       .set('X-CSRF-Token', CSRF_TOKEN)
       .send({
-        grain: 'diagnosis_side',
+        grain: 'disease',
         variableKeys: ['knee.diagnosisSide.klGrade'],
         filters: [],
         analysisPurpose: 'association',
@@ -603,9 +330,8 @@ describe('POST /preview — diagnosis_side grain(PR0-B3 Part B)', () => {
   });
 });
 
-// PR0-B3 Part C — job grain end-to-end. vibration_interval(Part A)/diagnosis_side(Part B)
-// 블록과 대칭 구조 — job은 그 둘과 달리 어떤 모듈에도 속하지 않는 공유 필드(shared.jobs[])
-// 라 activeModules 게이트가 없다는 점이 다르다.
+// PR0-B3 Part C — job grain end-to-end. disease(Part B) 블록과 대칭 구조 — job은 어떤
+// 모듈에도 속하지 않는 공유 필드(shared.jobs[])라 activeModules 게이트가 없다는 점이 다르다.
 describe('POST /preview — job grain(PR0-B3 Part C)', () => {
   function jobCaseRow(id: string, personId: string, jobCount: number) {
     return {
@@ -656,7 +382,7 @@ describe('POST /preview — job grain(PR0-B3 Part C)', () => {
     expect(res.body.counts.observationCount).toBe(13);
   });
 
-  it('grain과 변수의 grain이 다르면(case 변수를 job grain에) VARIABLE_GRAIN_MISMATCH 400', async () => {
+  it('grain과 변수의 grain이 다르고 브로드캐스트 대상도 아니면(quasi_identifier 변수를 job grain에) VARIABLE_GRAIN_MISMATCH 400', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
     const res = await request(makeApp(pool))
@@ -665,7 +391,7 @@ describe('POST /preview — job grain(PR0-B3 Part C)', () => {
       .set('X-CSRF-Token', CSRF_TOKEN)
       .send({
         grain: 'job',
-        variableKeys: ['knee.relatedness.max'], // case grain 변수
+        variableKeys: ['job.rollup.longestTenureJobNameNormalized'], // case grain, quasi_identifier — 브로드캐스트 제외
         filters: [],
         analysisPurpose: 'association',
         formulaPolicies: {},
@@ -673,6 +399,25 @@ describe('POST /preview — job grain(PR0-B3 Part C)', () => {
     expect(res.status).toBe(400);
     expect(res.body.errors.some((e: { code: string }) => e.code === 'VARIABLE_GRAIN_MISMATCH')).toBe(true);
     expect(pool.connect).not.toHaveBeenCalled();
+  });
+
+  it('브로드캐스트 안전 case 변수(knee.relatedness.max)는 job grain에서도 허용된다(공통변수 브로드캐스트)', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    wireSnapshot(pool, Array.from({ length: 12 }, (_, i) => jobCaseRow(`case-${i}`, `person-${i}`, 1)));
+    const res = await request(makeApp(pool))
+      .post('/api/stats/preview')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-CSRF-Token', CSRF_TOKEN)
+      .send({
+        grain: 'job',
+        variableKeys: ['knee.relatedness.max'],
+        filters: [],
+        analysisPurpose: 'association',
+        formulaPolicies: {},
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.counts.suppressed).toBe(false);
   });
 
   it('POST /analyze도 job grain을 끝까지 처리한다(엔진 호출까지 grain-agnostic 배선 확인)', async () => {
@@ -708,6 +453,164 @@ describe('POST /preview — job grain(PR0-B3 Part C)', () => {
     expect(res.body.runManifest).toBeDefined();
     expect(res.body.result.discrete[0].variableKey).toBe('job.identity.jobNameNormalized');
     expect(res.body.result.discrete[0].n).toBe(12);
+  });
+});
+
+// 리뷰 지적 — statsDatasetBuilder.broadcast.test.ts의 단위테스트는 엔진에 들어가는 값
+// 배열과 personCount 숫자까지만 확인했지, 실제 /analyze 응답(suppressed·억제된 레벨)과
+// 이변량 REPEATED_MEASURES_NOT_ALIGNED까지는 실제 파이프라인으로 검증하지 않았다.
+// 여기서는 실제 HTTP 라우트 + 실제 프로덕션 코드(buildAnalysisContext→buildDataset→
+// computeAvailableMethods/computeDescriptiveSuppression)로 그 지적을 메운다 — 이 파일의
+// 기존 관례대로 DB(snapshot)와 Python subprocess(runStatsEngine)만 mock한다.
+describe('POST /preview·POST /analyze — 공통변수 브로드캐스트 통합 검증(계획 §5 Tier-3 등가 fixture)', () => {
+  const WELD_JOB = { id: 'job-1', jobName: '용접공', startDate: '2015-01-01', endDate: '2020-01-01' };
+
+  function genderedJobCaseRow(id: string, personId: string, gender: 'male' | 'female', jobCount: number) {
+    return {
+      id,
+      patient_person_id: personId,
+      assigned_doctor_user_id: null,
+      created_at: new Date('2024-01-01T00:00:00.000Z'),
+      payload: {
+        data: {
+          shared: {
+            gender,
+            jobs: Array.from({ length: jobCount }, (_, i) => ({ ...WELD_JOB, id: `${id}-job-${i}` })),
+          },
+          modules: {},
+          activeModules: [],
+        },
+      },
+    };
+  }
+
+  it('남성 10명(job 3개씩)·여성 10명(job 1개씩) — /preview counts가 personCount=20/caseCount=20/observationCount=40, 억제 없음', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    const rows = [
+      ...Array.from({ length: 10 }, (_, i) => genderedJobCaseRow(`male-case-${i}`, `male-person-${i}`, 'male', 3)),
+      ...Array.from({ length: 10 }, (_, i) => genderedJobCaseRow(`female-case-${i}`, `female-person-${i}`, 'female', 1)),
+    ];
+    wireSnapshot(pool, rows);
+    const res = await request(makeApp(pool))
+      .post('/api/stats/preview')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-CSRF-Token', CSRF_TOKEN)
+      .send({
+        grain: 'job',
+        variableKeys: ['patient.identity.gender'],
+        filters: [],
+        analysisPurpose: 'association',
+        formulaPolicies: {},
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.counts).toMatchObject({ suppressed: false, personCount: 20, caseCount: 20, observationCount: 40 });
+  });
+
+  it('/analyze 실제 응답 — 브로드캐스트된 성별 discrete 결과가 행 기준 30:10으로 억제 없이 나온다(실제 computeDescriptiveSuppression 경로)', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    const rows = [
+      ...Array.from({ length: 10 }, (_, i) => genderedJobCaseRow(`male-case-${i}`, `male-person-${i}`, 'male', 3)),
+      ...Array.from({ length: 10 }, (_, i) => genderedJobCaseRow(`female-case-${i}`, `female-person-${i}`, 'female', 1)),
+    ];
+    wireSnapshot(pool, rows);
+    // Python subprocess만 mock — raw discrete 결과는 엔진이 실제로 셀 값(male 30/female 10,
+    // 행 기준)을 그대로 흉내낸다. statsAnalyzeHandler.ts의 INSERT 문은 실제로
+    // computeDescriptiveSuppression()이 계산한 최종 AnalyzeResult를 JSON.stringify해
+    // params[6]으로 넘긴다 — mock이 그 값을 그대로 캡처해 RETURNING처럼 돌려주면(하드코딩
+    // 스텁이 아니라), 이 테스트가 실제로 그 계산 결과를 검증하게 된다(리뷰 지적 — 이전
+    // 버전은 result를 하드코딩 스텁으로 돌려줘 실제 계산을 전혀 확인하지 못했다).
+    runStatsEngine.mockResolvedValueOnce({
+      continuous: [],
+      discrete: [{ variableKey: 'patient.identity.gender', n: 40, levels: [{ level: 'male', count: 30 }, { level: 'female', count: 10 }] }],
+    });
+    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [] }); // cache-check SELECT
+    const client = { query: vi.fn(), release: vi.fn() };
+    (pool.connect as ReturnType<typeof vi.fn>).mockResolvedValueOnce(client);
+    (client.query as ReturnType<typeof vi.fn>).mockImplementation(async (sql: string, params?: unknown[]) => {
+      if (sql.includes('BEGIN')) return { rows: [] };
+      if (sql.includes('DELETE FROM stats_runs')) return { rowCount: 0 };
+      if (sql.includes('INSERT INTO stats_runs')) {
+        const realResult = JSON.parse((params as string[])[6]);
+        return { rows: [{ id: 'run-1', manifest: fakeManifest('succeeded'), result: realResult }] };
+      }
+      if (sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
+      throw new Error(`unexpected client.query — ${sql}`);
+    });
+    wireNoLimitedRowAccess(pool); // finalizeAnalyzeResponse의 hasCapability 조회
+
+    const res = await request(makeApp(pool))
+      .post('/api/stats/analyze')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-CSRF-Token', CSRF_TOKEN)
+      .send({
+        grain: 'job',
+        variableKeys: ['patient.identity.gender'],
+        filters: [],
+        analysisPurpose: 'association',
+        formulaPolicies: {},
+      });
+    expect(res.status).toBe(200);
+    const genderResult = res.body.result.discrete[0];
+    expect(genderResult.suppressed).toBe(false);
+    expect(genderResult.n).toBe(40);
+    const male = genderResult.levels.find((l: { level: string }) => l.level === 'male');
+    const female = genderResult.levels.find((l: { level: string }) => l.level === 'female');
+    expect(male.count).toBe(30);
+    expect(female.count).toBe(10);
+  });
+
+  it('대조군 — 1명이 job 20개를 가지면 observationCount=20이어도 personCount=1이라 /preview 전체가 MIN_COHORT_NOT_MET으로 억제된다', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    wireSnapshot(pool, [genderedJobCaseRow('solo-case', 'solo-person', 'male', 20)]);
+    const res = await request(makeApp(pool))
+      .post('/api/stats/preview')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-CSRF-Token', CSRF_TOKEN)
+      .send({
+        grain: 'job',
+        variableKeys: ['patient.identity.gender'],
+        filters: [],
+        analysisPurpose: 'association',
+        formulaPolicies: {},
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.counts.suppressed).toBe(true);
+    expect(res.body.counts.reasonCode).toBe('MIN_COHORT_NOT_MET');
+    expect(res.body.counts.personCount).toBeNull();
+  });
+
+  it('브로드캐스트로 personCount≠observationCount가 되면(job 3개인 사람들 섞임) 이변량 추론 검정이 REPEATED_MEASURES_NOT_ALIGNED로 차단된다', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    const rows = [
+      ...Array.from({ length: 10 }, (_, i) => genderedJobCaseRow(`male-case-${i}`, `male-person-${i}`, 'male', 3)),
+      ...Array.from({ length: 10 }, (_, i) => genderedJobCaseRow(`female-case-${i}`, `female-person-${i}`, 'female', 1)),
+    ];
+    wireSnapshot(pool, rows);
+    const res = await request(makeApp(pool))
+      .post('/api/stats/preview')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-CSRF-Token', CSRF_TOKEN)
+      .send({
+        grain: 'job',
+        variableKeys: ['patient.identity.gender', 'job.identity.tenureYears'],
+        filters: [],
+        analysisPurpose: 'association',
+        formulaPolicies: {},
+        analysisMode: 'bivariate',
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.counts.personCount).toBe(20);
+    expect(res.body.counts.observationCount).toBe(40);
+    expect(res.body.availableMethods.length).toBeGreaterThan(0);
+    for (const method of res.body.availableMethods) {
+      if (method.status === 'available') continue;
+      expect(['REPEATED_MEASURES_NOT_ALIGNED', 'PAIRED_TEST_REQUIRES_EXPLICIT_PAIRING']).toContain(method.reasonCode);
+    }
+    expect(res.body.availableMethods.some((m: { reasonCode: string }) => m.reasonCode === 'REPEATED_MEASURES_NOT_ALIGNED')).toBe(true);
   });
 });
 

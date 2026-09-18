@@ -8,6 +8,7 @@ import {
   extractPatientIdentityEvaluationDate,
   extractPatientIdentityHighBloodPressure,
   extractPatientIdentityDiabetes,
+  extractPatientIdentityBmi,
 } from '../../../modules/patient/extractors';
 import { deterministicMigrate } from '../../../migration/deterministicMigrate';
 
@@ -74,6 +75,91 @@ describe('extractPatientIdentityHeightCm/WeightKg — case grain(물리량, 0 �
       missing: 'not_entered',
       qualityFlags: ['invalid'],
     });
+  });
+
+  // 리뷰 지적 회귀 — String([])===''이라 isBlank가 손상된 빈 배열을 정상 미입력으로
+  // 오판했었다. [170]처럼 내용이 있는 배열은 이미 위에서 잡혔지만, 빈 배열·[null]처럼
+  // String() 변환 결과가 빈 문자열이 되는 경우는 별도로 확인해야 한다.
+  it('빈 배열·[null]처럼 String() 변환 시 빈 문자열이 되는 손상값도 invalid로 잡는다(공백과 구분)', () => {
+    expect(extractPatientIdentityHeightCm(patientCase({ height: [] }))).toEqual({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: ['invalid'],
+    });
+    expect(extractPatientIdentityWeightKg(patientCase({ weight: [null] }))).toEqual({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: ['invalid'],
+    });
+  });
+});
+
+describe('extractPatientIdentityBmi — case grain(파생, height×weight 조합)', () => {
+  it('둘 다 정상이면 체질량지수를 계산한다(W / (H/100)²)', () => {
+    const result = extractPatientIdentityBmi(patientCase({ height: 170, weight: 63.665 }));
+    expect(result.missing).toBeNull();
+    expect(result.qualityFlags).toEqual([]);
+    expect(result.value).toBeCloseTo(22.03, 1);
+  });
+
+  it('둘 다 미입력이면 not_entered(무플래그)', () => {
+    expect(extractPatientIdentityBmi(patientCase({}))).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+  });
+
+  it('하나만 미입력이면(나머지는 정상) 계산 불가로 not_entered(무플래그) — invalid 아님', () => {
+    expect(extractPatientIdentityBmi(patientCase({ height: 170 }))).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+    expect(extractPatientIdentityBmi(patientCase({ weight: 65 }))).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+  });
+
+  it('하나 이상 손상값(공백 아님)이면 invalid를 보존한다 — 공백처럼 조용히 넘기지 않는다', () => {
+    expect(extractPatientIdentityBmi(patientCase({ height: [170], weight: 65 }))).toEqual({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: ['invalid'],
+    });
+    expect(extractPatientIdentityBmi(patientCase({ height: 0, weight: 65 }))).toEqual({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: ['invalid'],
+    });
+  });
+
+  it('공백 하나 + 손상값 하나 — invalid를 보존한다(공백만 있는 것처럼 뭉개지 않는다)', () => {
+    // 리뷰 지적 — height:[]는 isBlank([])가 아니라 numeric field의 typeof 검사에서
+    // 곧바로 invalid로 잡히므로 "손상값+정상값" 조합이지 "공백+손상"이 아니었다.
+    // 진짜 공백(height:'')과 진짜 손상값(weight:[])을 각각 하나씩 넣어야 한다.
+    expect(extractPatientIdentityBmi(patientCase({ height: '', weight: [] }))).toEqual({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: ['invalid'],
+    });
+  });
+
+  it('계산 결과가 비유한이거나 0 이하면 invalid(경계값 — 실제로 도달 가능함, 극단값으로 재현)', () => {
+    // 리뷰 지적 — "이 분기는 도달 불가능하다"는 이전 주석이 틀렸다. height가 물리적으로는
+    // 0 이하가 걸러지지만, 극단적으로 작은/큰 양수는 여전히 통과하고 나눗셈 과정에서
+    // 부동소수점 언더플로/오버플로로 Infinity·0을 만들 수 있다.
+    // height=1e-200(극소): heightM²=1e-404가 배정밀도 최솟값 밑으로 언더플로해 0이
+    // 되고, weight/0=Infinity → !Number.isFinite(bmi) 분기.
+    expect(extractPatientIdentityBmi(patientCase({ height: 1e-200, weight: 70 }))).toEqual({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: ['invalid'],
+    });
+    // height=1e200(극대): heightM²=1e396이 배정밀도 최댓값을 넘어 오버플로해
+    // Infinity가 되고, weight/Infinity=0 → bmi<=0 분기.
+    expect(extractPatientIdentityBmi(patientCase({ height: 1e200, weight: 70 }))).toEqual({
+      value: null,
+      missing: 'not_entered',
+      qualityFlags: ['invalid'],
+    });
+  });
+
+  it('통상 범위를 벗어난 큰 값이어도 유한 양수 결과면 정상 계산된다(경계값과 구분)', () => {
+    const result = extractPatientIdentityBmi(patientCase({ height: 300, weight: 500 }));
+    expect(result.missing).toBeNull();
+    expect(result.qualityFlags).toEqual([]);
+    expect(Number.isFinite(result.value)).toBe(true);
   });
 });
 

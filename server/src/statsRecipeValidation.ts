@@ -3,20 +3,17 @@
 // zod(shared/contracts/stats.ts)는 구조만 검사하고, 여기서는 카탈로그 메타데이터를
 // 참조해야 하는 동적 검사(변수 type별 허용 연산자·값 타입 등)를 한다.
 import { getIntegratedCatalog } from './statsCatalog';
+import { isGrainCompatible } from '@wr/analytics-core';
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
 import type { StatsAnalysisRecipe, StatsFilter, StatsFilterOperator } from '@wr/contracts';
 
-// PR0-B3 Part A는 vibration_interval을, Part B는 diagnosis_side를, Part C는 job/task를
-// 추가했다. PR0-B4 Slice 7이 cervical_task를, Slice 8b가 job_diagnosis를 추가한다
-// (계획 pr0-b3-shimmying-magpie.md).
+// grain 단순화(PR0-B4 개정) — case/job/disease 3개만 지원한다. job_diagnosis/task/
+// cervical_task/vibration_interval은 소스코드까지 완전히 삭제됐고, person은 case와
+// 실질적으로 구분되지 않아 이후 다시 삭제됐다(변수 자체는 case로 되돌려 존치).
 const SUPPORTED_GRAINS: ReadonlySet<StatsAnalysisRecipe['grain']> = new Set([
   'case',
-  'vibration_interval',
-  'diagnosis_side',
   'job',
-  'task',
-  'cervical_task',
-  'job_diagnosis',
+  'disease',
 ]);
 
 export interface RecipeValidationError {
@@ -209,13 +206,15 @@ export function validateRecipe(
     }
   }
 
-  // PR0-B3 Part A — VARIABLE_GRAIN_MISMATCH: 분석 변수뿐 아니라 필터 키도 grain이 다르면
-  // 거절한다(neededKeys는 variableKeys ∪ filters[].key 합집합, §A-2와 동일 대상). 한
-  // recipe는 한 grain만 다룬다 — 교차 grain은 §2.1 roll-up으로 올려서 참여해야 하며 이번
-  // 범위 밖이다.
+  // VARIABLE_GRAIN_MISMATCH: 분석 변수뿐 아니라 필터 키도 대상이다(neededKeys는
+  // variableKeys ∪ filters[].key 합집합, §A-2와 동일 대상). 원칙은 "한 recipe는 한
+  // grain만 다룬다"지만, case의 브로드캐스트 안전 변수는 job/disease에도 그대로 복제
+  // 가능하므로 isGrainCompatible(analytics-core/common.ts, 클라이언트 CatalogPanel.jsx/
+  // RecipePanel.jsx와 동일 규칙 공유)로 판정한다 — 세부 grain(job/disease) 변수를
+  // case에 쓰는 역방향, 그리고 job↔disease는 여전히 거부된다.
   for (const key of neededKeys) {
     const variable = catalogByKey.get(key);
-    if (variable && variable.grain !== recipe.grain) {
+    if (variable && !isGrainCompatible(variable, recipe.grain)) {
       errors.push({
         code: 'VARIABLE_GRAIN_MISMATCH',
         path: key,

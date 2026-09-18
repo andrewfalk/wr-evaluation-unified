@@ -1,4 +1,4 @@
-// PR0-B3 Part B — buildDataset의 반복 grain(diagnosis_side) 경로 전용 테스트.
+// PR0-B3 Part B — buildDataset의 반복 grain(disease) 경로 전용 테스트.
 // statsDatasetBuilder.repeatedGrain.test.ts(vibration_interval)와 대칭 구조 — 이 grain은
 // side==='both' explode라는 vibration_interval에는 없는 특유의 모집단 규칙이 있어 별도로
 // 검증한다.
@@ -32,7 +32,7 @@ function diagnosisSnapshotRow(id: string, personId: string, diagnoses: Array<Rec
 
 function recipe(overrides: Partial<StatsAnalysisRecipe> = {}): StatsAnalysisRecipe {
   return {
-    grain: 'diagnosis_side',
+    grain: 'disease',
     variableKeys: ['knee.diagnosisSide.klGrade'],
     filters: [],
     analysisPurpose: 'association',
@@ -44,7 +44,7 @@ function recipe(overrides: Partial<StatsAnalysisRecipe> = {}): StatsAnalysisReci
 
 const KNEE_BOTH = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'both', klgRight: '2', klgLeft: '3' };
 
-describe('buildDataset(grain=diagnosis_side) — side===both explode', () => {
+describe('buildDataset(grain=disease) — side===both explode', () => {
   it('한 case의 진단 1개가 side=both면 행 2개(우/좌)를 낸다 — observationCount>caseCount', () => {
     const rows = [diagnosisSnapshotRow('case-1', 'person-1', [KNEE_BOTH])];
     const result = buildDataset(rows, recipe(), RECIPE_DIGEST, CATALOG_BY_KEY);
@@ -71,7 +71,7 @@ describe('buildDataset(grain=diagnosis_side) — side===both explode', () => {
   });
 });
 
-describe('buildDataset(grain=diagnosis_side) — 변수 선택과 무관하게 엔터티 모집단 불변', () => {
+describe('buildDataset(grain=disease) — 변수 선택과 무관하게 엔터티 모집단 불변', () => {
   it('klGrade만 요청·confirmedStatus만 요청·둘 다 요청 — 세 경우 모두 행 개수·entityKey가 같다', () => {
     const rows = [diagnosisSnapshotRow('case-1', 'person-1', [KNEE_BOTH])];
 
@@ -96,7 +96,7 @@ describe('buildDataset(grain=diagnosis_side) — 변수 선택과 무관하게 �
   });
 });
 
-describe('buildDataset(grain=diagnosis_side) — 결정성', () => {
+describe('buildDataset(grain=disease) — 결정성', () => {
   it('동일 입력을 2회 실행하면 fact rows와 digest가 완전히 동일하다(byte-identical)', () => {
     const rows = [diagnosisSnapshotRow('case-1', 'person-1', [KNEE_BOTH])];
     const r = recipe();
@@ -107,8 +107,8 @@ describe('buildDataset(grain=diagnosis_side) — 결정성', () => {
   });
 });
 
-describe('buildDataset(grain=diagnosis_side) — 필터', () => {
-  it('diagnosis_side grain 필터도 정상적으로 AND 결합된다', () => {
+describe('buildDataset(grain=disease) — 필터', () => {
+  it('disease grain 필터도 정상적으로 AND 결합된다', () => {
     const rows = [
       diagnosisSnapshotRow('case-1', 'person-1', [{ id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'right', klgRight: '3' }]),
       diagnosisSnapshotRow('case-2', 'person-2', [{ id: 'dx-2', code: 'M17.1', name: '무릎관절증', side: 'right', klgRight: '1' }]),
@@ -136,7 +136,7 @@ describe('buildDataset(grain=diagnosis_side) — 필터', () => {
 // bivariate 검증도 statsBivariateHttp.integration.test.ts의 실 Postgres+실 Python
 // Tier-3 전용이다 — mocked HTTP 인프라는 이 목적으로 없음, 이 파일 위쪽 §9 주석 참고),
 // groupPairsByLevel()을 직접 호출해 실제 분할표 셀 값까지는 이 세션에서 검증한다.
-describe('buildDataset(grain=diagnosis_side) — 이변량 경로 실측(계획 §11 "검증" 1·2번)', () => {
+describe('buildDataset(grain=disease) — 이변량 경로 실측(계획 §11 "검증" 1·2번)', () => {
   it('K-L Grade(ordinal) × 신청≠확정 여부(boolean) — personCount===rowCount면 실제 분할표가 KNEE_KLG_ORDER 순서로 정확히 만들어지고 chi_square/fisher_exact가 available이다', () => {
     const rows = [
       // klGrade='2' & mismatch=false(신청=확정) 10명, klGrade='3' & mismatch=true(신청≠확정) 10명.

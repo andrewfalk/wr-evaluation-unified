@@ -28,16 +28,7 @@ describe('getFullVariableCatalog', () => {
     expect(rollup?.sensitivity).toBe('quasi_identifier');
   });
 
-  it('spine.vibration.intervalA8Max/intervalExposureHours는 grain:vibration_interval로 등록돼 있다', () => {
-    const catalog = getFullVariableCatalog();
-    for (const key of ['spine.vibration.intervalA8Max', 'spine.vibration.intervalExposureHours']) {
-      const variable = catalog.find((v) => v.key === key);
-      expect(variable, `key=${key}`).toBeDefined();
-      expect(variable!.grain).toBe('vibration_interval');
-    }
-  });
-
-  it('knee.diagnosisSide.*/shoulder.diagnosisSide.ellmanClass는 grain:diagnosis_side로 등록돼 있다', () => {
+  it('knee.diagnosisSide.*/shoulder.diagnosisSide.ellmanClass는 grain:disease로 등록돼 있다(grain 단순화 개정 — 구 diagnosis_side)', () => {
     const catalog = getFullVariableCatalog();
     for (const key of [
       'knee.diagnosisSide.klGrade',
@@ -47,7 +38,7 @@ describe('getFullVariableCatalog', () => {
     ]) {
       const variable = catalog.find((v) => v.key === key);
       expect(variable, `key=${key}`).toBeDefined();
-      expect(variable!.grain).toBe('diagnosis_side');
+      expect(variable!.grain).toBe('disease');
     }
   });
 
@@ -90,15 +81,10 @@ describe('getFullVariableCatalog', () => {
     expect(rollup?.grain).toBe('case');
   });
 
-  it('spine.task.*는 grain:task, diagnosis.identity.moduleGroup는 grain:diagnosis_side로 등록돼 있다', () => {
+  it('diagnosis.identity.moduleGroup는 grain:disease로 등록돼 있다(grain 단순화 개정 — 구 diagnosis_side, spine.task.*는 삭제됨)', () => {
     const catalog = getFullVariableCatalog();
-    for (const key of ['spine.task.weightKg', 'spine.task.frequencyPerDay']) {
-      const variable = catalog.find((v) => v.key === key);
-      expect(variable, `key=${key}`).toBeDefined();
-      expect(variable!.grain).toBe('task');
-    }
     const moduleGroup = catalog.find((v) => v.key === 'diagnosis.identity.moduleGroup');
-    expect(moduleGroup?.grain).toBe('diagnosis_side');
+    expect(moduleGroup?.grain).toBe('disease');
   });
 
   it('CATALOG_VERSION은 비어있지 않은 문자열이다', () => {
@@ -228,7 +214,7 @@ describe('computeVariableValue', () => {
 
   it('반복 grain 키를 스칼라 API로 호출하면 명확히 throw한다', () => {
     const emptyMr = migrate({ data: { shared: {}, modules: {}, activeModules: [] } });
-    expect(() => computeVariableValue('spine.vibration.intervalA8Max', emptyMr)).toThrow(/반복 grain/);
+    expect(() => computeVariableValue('job.identity.jobNameNormalized', emptyMr)).toThrow(/반복 grain/);
   });
 });
 
@@ -244,12 +230,11 @@ describe('computeRepeatedVariableValue', () => {
   });
 
   // 카탈로그의 반복 grain 키 전부를 순회하며 배열(빈 배열 포함)을 반환하는지 실측한다 —
-  // computeVariableValue 루프 테스트와 대칭. PR0-B3 Part B — diagnosis_side grain 4개
-  // 추가로 2→6개(vibration_interval 2 + diagnosis_side 4). Part C-1 — job grain 2개
-  // 추가로 6→8개. Part C-2 — task grain 2개 + diagnosis_side grain 1개 추가로 8→11개.
+  // computeVariableValue 루프 테스트와 대칭. grain 단순화 개정 이후 반복 grain은 job/
+  // disease 2개뿐이다(case는 비반복 — 위 루프에서 제외. person grain은 이후 삭제됨).
   it('카탈로그 반복 grain 키 전부에서 배열을 반환한다(모듈 비활성/진단·직력 없음이면 빈 배열)', () => {
     const emptyMr = migrate({ data: { shared: {}, modules: {}, activeModules: [] } });
-    const repeatedVariables = getFullVariableCatalog().filter((v) => v.grain !== 'case' && v.grain !== 'person');
+    const repeatedVariables = getFullVariableCatalog().filter((v) => v.grain !== 'case');
     expect(repeatedVariables.length).toBeGreaterThan(0); // 회귀 방지 — 이 루프가 조용히 텅 비지 않게(PR0-B4부터 정확한 개수는 매핑표 fixture가 대신 고정)
 
     for (const variable of repeatedVariables) {

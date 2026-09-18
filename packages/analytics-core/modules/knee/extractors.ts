@@ -7,7 +7,7 @@ import { parseWorkPeriodOverride } from '../../workPeriod';
 import { resolveKneeCalculationJobs, computeKneeCalc, type KneeCalculationJob, type KneeJobExtras } from './derived';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
 import { isPlainObject } from '../../migration/deterministicMigrate';
-import { enumerateDiagnosisSideEntities, enumerateJobEntities } from '../../grainEntities';
+import { enumerateDiseaseEntities, enumerateJobEntities } from '../../grainEntities';
 import { resolveDiagnosisModule, supportsKlGrade } from '../../diagnosisMapping';
 import { KNEE_KLG_ORDER } from './metadata';
 
@@ -117,7 +117,7 @@ export function extractKneeDiagnosisSideKlGrade(
   migrationResult: MigrationResult<AnalysisPatient>,
 ): RepeatedObservation<string>[] {
   const activeModules = migrationResult.payload.data.activeModules ?? [];
-  return enumerateDiagnosisSideEntities(migrationResult).map((entity) => {
+  return enumerateDiseaseEntities(migrationResult).map((entity) => {
     const { diagnosis, side } = entity.source;
     const moduleId = resolveDiagnosisModule(diagnosis, activeModules)?.moduleId;
     if (moduleId !== 'knee' || !supportsKlGrade(diagnosis)) {
@@ -163,7 +163,7 @@ export function extractKneeDiagnosisSideConfirmedStatus(
   migrationResult: MigrationResult<AnalysisPatient>,
 ): RepeatedObservation<boolean>[] {
   const activeModules = migrationResult.payload.data.activeModules ?? [];
-  return enumerateDiagnosisSideEntities(migrationResult).map((entity) => {
+  return enumerateDiseaseEntities(migrationResult).map((entity) => {
     const { diagnosis, side } = entity.source;
     const moduleId = resolveDiagnosisModule(diagnosis, activeModules)?.moduleId;
     if (moduleId !== 'knee') {
@@ -199,7 +199,7 @@ export function extractKneeDiagnosisSideAppliedConfirmedMismatch(
   migrationResult: MigrationResult<AnalysisPatient>,
 ): RepeatedObservation<boolean>[] {
   const activeModules = migrationResult.payload.data.activeModules ?? [];
-  return enumerateDiagnosisSideEntities(migrationResult).map((entity) => {
+  return enumerateDiseaseEntities(migrationResult).map((entity) => {
     const { diagnosis } = entity.source;
     const moduleId = resolveDiagnosisModule(diagnosis, activeModules)?.moduleId;
     if (moduleId !== 'knee') {

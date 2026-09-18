@@ -7,8 +7,13 @@ import type { ExtractedValue, MigrationResult } from '../../types';
 import { parseStrictIsoDate } from '../../dates';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
 
+// null/undefined/공백 문자열만 "미입력"이다 — String(x)로 뭉뚱그리면 []나 [null]이
+// 빈 문자열로 변환돼(String([])===''), 손상된 배열이 정상 미입력으로 둔갑한다(리뷰 지적).
+// 배열·객체 등은 여기서 걸러내지 않고 각 필드의 typeof 검사로 넘겨 invalid로 잡는다.
 function isBlank(x: unknown): boolean {
-  return x === null || x === undefined || String(x).trim() === '';
+  if (x === null || x === undefined) return true;
+  if (typeof x === 'string') return x.trim() === '';
+  return false;
 }
 
 function getShared(migrationResult: MigrationResult<AnalysisPatient>): Record<string, unknown> {
@@ -100,4 +105,32 @@ export function extractPatientIdentityHighBloodPressure(
 
 export function extractPatientIdentityDiabetes(migrationResult: MigrationResult<AnalysisPatient>): ExtractedValue<boolean> {
   return extractPatientYesNoField(migrationResult, 'diabetes');
+}
+
+// BMI — grain 단순화 개정 신규 추가. common.ts의 calculateBMI와 공식은 같지만(W/(H/100)²),
+// 그 함수의 "결측 시 0 반환" UI 폴백은 쓰지 않는다 — height/weight가 이미 쓰는
+// extractPatientNumericField(공백=not_entered, 손상값=invalid, 0 이하=invalid)를
+// 그대로 재사용해 두 입력의 결측/손상 판정을 각각 받은 뒤 조합한다(계산 로직 재구현 금지 —
+// 검증 규칙만 정확히 두 배 적용).
+export function extractPatientIdentityBmi(migrationResult: MigrationResult<AnalysisPatient>): ExtractedValue<number> {
+  const height = extractPatientNumericField(migrationResult, 'height');
+  const weight = extractPatientNumericField(migrationResult, 'weight');
+
+  // 손상값(공백이 아니라 진짜 잘못된 값)이 하나라도 있으면 그 정보를 보존한다 — 공백만
+  // 있는 것처럼 조용히 넘기지 않는다.
+  const anyInvalid = height.qualityFlags.includes('invalid') || weight.qualityFlags.includes('invalid');
+  if (anyInvalid) {
+    return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  }
+  // 하나라도 공백(정상 미입력)이면 결측 — 나머지 하나가 정상이어도 계산 불가.
+  if (height.missing !== null || weight.missing !== null) {
+    return { value: null, missing: 'not_entered', qualityFlags: [] };
+  }
+
+  const heightM = (height.value as number) / 100;
+  const bmi = (weight.value as number) / (heightM * heightM);
+  if (!Number.isFinite(bmi) || bmi <= 0) {
+    return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  }
+  return { value: bmi, missing: null, qualityFlags: [] };
 }

@@ -6,7 +6,7 @@ import { isPlainObject } from '../../migration/deterministicMigrate';
 import { computeShoulderCalc, type ShoulderJobExtras } from './derived';
 import { getEffectiveWorkPeriod } from '../../workPeriod';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
-import { enumerateDiagnosisSideEntities, enumerateJobEntities } from '../../grainEntities';
+import { enumerateDiseaseEntities, enumerateJobEntities } from '../../grainEntities';
 import { resolveDiagnosisModule, supportsEllmanClass } from '../../diagnosisMapping';
 import { SHOULDER_ELLMAN_ORDER } from './metadata';
 
@@ -111,7 +111,7 @@ export function extractShoulderDiagnosisSideEllmanClass(
   migrationResult: MigrationResult<AnalysisPatient>,
 ): RepeatedObservation<string>[] {
   const activeModules = migrationResult.payload.data.activeModules ?? [];
-  return enumerateDiagnosisSideEntities(migrationResult).map((entity) => {
+  return enumerateDiseaseEntities(migrationResult).map((entity) => {
     const { diagnosis, side } = entity.source;
     const moduleId = resolveDiagnosisModule(diagnosis, activeModules)?.moduleId;
     if (moduleId !== 'shoulder' || !supportsEllmanClass(diagnosis)) {

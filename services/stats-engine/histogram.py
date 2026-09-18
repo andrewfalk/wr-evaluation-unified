@@ -18,6 +18,13 @@ Q1/Q3는 descriptive.py::compute_continuous()가 이미 계산한 값을 그대�
 이 모듈은 person을 모른다(프로젝트 전역 원칙) — bin 경계와 관측 건수(count)만
 계산하고, person 단위 소수셀 판정은 Node가 이 경계로 DatasetRow[]를 재순회해
 별도로 수행한다(계획서 §3).
+
+person_count(선택) — bin 개수(k) 계산에만 쓰는 힌트. job/disease grain 브로드캐스트
+변수는 같은 사람의 값이 여러 행에 그대로 복제되므로 len(values)(행 수)로 k를
+정하면 실제 서로 다른 인원보다 bin이 잘게 쪼개져, Node의 person 단위 소수셀
+판정(위 문단)에 거의 항상 걸리는 결과를 낳는다(관측 사실). 실제 bin 채우기
+(np.histogram)는 여전히 전체 values를 그대로 쓴다 — person_count는 오직 k
+공식의 n 자리에만 대입한다.
 """
 from __future__ import annotations
 
@@ -30,7 +37,9 @@ MAX_BINS = 50
 MIN_BINS = 1
 
 
-def compute_histogram(values: list[float], q1: float, q3: float) -> dict[str, Any]:
+def compute_histogram(
+    values: list[float], q1: float, q3: float, person_count: int | None = None
+) -> dict[str, Any]:
     n = len(values)
     if n == 0:
         return {"bins": []}
@@ -41,15 +50,19 @@ def compute_histogram(values: list[float], q1: float, q3: float) -> dict[str, An
     if lo == hi:
         return {"bins": [{"lower": lo, "upper": hi, "count": n}]}
 
+    # bin 개수(k) 공식의 n만 person_count로 바꿔치기한다 — 실제 bin 채우기는 위 x(전체
+    # values) 그대로 쓴다. person_count가 없거나 0 이하면(구버전 호출부·discrete 등)
+    # 기존과 동일하게 행 수(n)를 쓴다.
+    k_n = person_count if person_count is not None and person_count > 0 else n
     iqr = q3 - q1
     if iqr == 0.0:
-        k = math.ceil(math.log2(n) + 1)
+        k = math.ceil(math.log2(k_n) + 1)
     else:
-        h = 2 * iqr * (n ** (-1 / 3))
+        h = 2 * iqr * (k_n ** (-1 / 3))
         if h > 0 and math.isfinite(h):
             k = math.ceil((hi - lo) / h)
         else:
-            k = math.ceil(math.log2(n) + 1)
+            k = math.ceil(math.log2(k_n) + 1)
     k = max(MIN_BINS, min(MAX_BINS, k))
 
     counts, edges = np.histogram(x, bins=k, range=(lo, hi))

@@ -24,7 +24,7 @@ const planned = (key: string, slice: string): FieldMappingEntry => ({ key, scope
 const done = (key: string, slice: string): FieldMappingEntry => ({ key, scope: 'planned', slice, done: true });
 
 export const PR0_B4_FIELD_MAPPING: readonly FieldMappingEntry[] = [
-  // ── §0. 기존 카탈로그 21개(전부 완료) ──────────────────────────────────────────
+  // ── §0. 기존 카탈로그 17개(전부 완료, grain 단순화 개정으로 vibration_interval 2개 제외) ──
   existing('knee.relatedness.max'),
   existing('knee.diagnosisSide.klGrade'),
   existing('knee.diagnosisSide.confirmedStatus'),
@@ -36,12 +36,8 @@ export const PR0_B4_FIELD_MAPPING: readonly FieldMappingEntry[] = [
   existing('cervical.case.maxJobCumulativeKgHours'),
   existing('spine.mddm.lifetimeDoseMNh'),
   existing('spine.vibration.dvMax'),
-  existing('spine.vibration.intervalA8Max'),
-  existing('spine.vibration.intervalExposureHours'),
   existing('spine.diagnosis.verticalDistribution'),
   existing('spine.diagnosis.concomitantSpondylosis'),
-  existing('spine.task.weightKg'),
-  existing('spine.task.frequencyPerDay'),
   existing('job.identity.jobNameNormalized'),
   existing('job.identity.tenureYears'),
   existing('job.rollup.longestTenureJobNameNormalized'),
@@ -51,18 +47,7 @@ export const PR0_B4_FIELD_MAPPING: readonly FieldMappingEntry[] = [
   done('spine.case.mddmStatus', '1'),
   done('spine.case.vibrationExposureStatus', '1'),
   done('spine.case.formulaVersion', '1'),
-  done('spine.case.evalMethod', '1'),
-  done('spine.case.careerYears', '1'),
-  done('spine.case.careerMonths', '1'),
   done('spine.case.workDaysPerYear', '1'),
-  done('spine.task.posture', '1'),
-  done('spine.task.timeValue', '1'),
-  done('spine.task.timeUnit', '1'),
-  done('spine.task.correctionFactor', '1'),
-  done('spine.vibration.intervalAwMin', '1'),
-  done('spine.vibration.intervalAwMax', '1'),
-  done('spine.vibration.intervalTimeValue', '1'),
-  done('spine.vibration.intervalTimeUnit', '1'),
 
   // ── §1(shared). job 잔여 (Slice 2) ──────────────────────────────────────────
   done('job.raw.startDate', '2'),
@@ -88,6 +73,8 @@ export const PR0_B4_FIELD_MAPPING: readonly FieldMappingEntry[] = [
   done('knee.job.jumpDown', '4'),
 
   // ── §1(shared). patient pseudo-module (Slice 5) ─────────────────────────────
+  // grain 단순화 개정 — gender/heightCm/weightKg/birthDate/highBloodPressure/diabetes는
+  // case→person으로 재배치(키 자체는 불변). bmi 신규 추가.
   done('patient.identity.gender', '5'),
   done('patient.identity.heightCm', '5'),
   done('patient.identity.weightKg', '5'),
@@ -96,6 +83,7 @@ export const PR0_B4_FIELD_MAPPING: readonly FieldMappingEntry[] = [
   done('patient.identity.evaluationDate', '5'),
   done('patient.identity.highBloodPressure', '5'),
   done('patient.identity.diabetes', '5'),
+  done('patient.identity.bmi', 'grain-simplification'),
 
   // ── §1(shared)+diagnosis 잔여 (Slice 6) ──────────────────────────────────────
   done('diagnosis.identity.code', '6'),
@@ -109,18 +97,7 @@ export const PR0_B4_FIELD_MAPPING: readonly FieldMappingEntry[] = [
   done('diagnosis.assessment.lowReason.belowThreshold', '6'),
   done('diagnosis.assessment.lowReason.other', '6'),
 
-  // ── §5. cervical_task grain 신설 (Slice 7) ──────────────────────────────────
-  done('cervical.task.name', '7'),
-  done('cervical.task.exposureType.shoulderHeavyLoad', '7'),
-  done('cervical.task.exposureType.awkwardStaticNeckLoad', '7'),
-  done('cervical.task.loadWeightKg', '7'),
-  done('cervical.task.carryHoursPerShift', '7'),
-  done('cervical.task.forcedNeckPosture', '7'),
-  done('cervical.task.neckNonneutralHoursPerDay', '7'),
-  done('cervical.task.combinedFlexionRotationPosture', '7'),
-  done('cervical.task.precisionWork', '7'),
-
-  // ── §6/§7. elbow/wrist temporal (Slice 8a) ──────────────────────────────────
+  // ── §6/§7. elbow/wrist temporal (Slice 8a, case grain — 살아남음) ───────────
   done('elbow.temporal.recentTaskChange', '8a'),
   done('elbow.temporal.taskChangeDate', '8a'),
   done('elbow.temporal.symptomOnsetInterval', '8a'),
@@ -130,98 +107,7 @@ export const PR0_B4_FIELD_MAPPING: readonly FieldMappingEntry[] = [
   done('wrist.temporal.symptomOnsetInterval', '8a'),
   done('wrist.temporal.improvesWithRest', '8a'),
 
-  // ── §6. elbow job_diagnosis 공통 필드 (Slice 8b) ────────────────────────────
-  done('elbow.jobDiagnosis.selectedBkType', '8b'),
-  done('elbow.jobDiagnosis.mainTaskName', '8b'),
-  done('elbow.jobDiagnosis.directAnatomicLink', '8b'),
-  done('elbow.jobDiagnosis.exposureType.repetition', '8b'),
-  done('elbow.jobDiagnosis.exposureType.force', '8b'),
-  done('elbow.jobDiagnosis.exposureType.awkwardPosture', '8b'),
-  done('elbow.jobDiagnosis.repetitionLevel', '8b'),
-  done('elbow.jobDiagnosis.forceLevel', '8b'),
-  done('elbow.jobDiagnosis.awkwardPostureLevel', '8b'),
-  done('elbow.jobDiagnosis.workPattern', '8b'),
-  done('elbow.jobDiagnosis.restDistribution', '8b'),
-  done('elbow.jobDiagnosis.dailyExposureHours', '8b'),
-  done('elbow.jobDiagnosis.shiftSharePercent', '8b'),
-  done('elbow.jobDiagnosis.daysPerWeek', '8b'),
-
-  // ── §7. wrist job_diagnosis 공통 필드 (Slice 8b) ────────────────────────────
-  done('wrist.jobDiagnosis.selectedBkType', '8b'),
-  done('wrist.jobDiagnosis.mainTaskName', '8b'),
-  done('wrist.jobDiagnosis.directAnatomicLink', '8b'),
-  done('wrist.jobDiagnosis.exposureType.repetition', '8b'),
-  done('wrist.jobDiagnosis.exposureType.force', '8b'),
-  done('wrist.jobDiagnosis.exposureType.awkwardPosture', '8b'),
-  done('wrist.jobDiagnosis.repetitionLevel', '8b'),
-  done('wrist.jobDiagnosis.forceLevel', '8b'),
-  done('wrist.jobDiagnosis.awkwardPostureLevel', '8b'),
-  done('wrist.jobDiagnosis.workPattern', '8b'),
-  done('wrist.jobDiagnosis.restDistribution', '8b'),
-  done('wrist.jobDiagnosis.dailyExposureHours', '8b'),
-  done('wrist.jobDiagnosis.shiftSharePercent', '8b'),
-  done('wrist.jobDiagnosis.daysPerWeek', '8b'),
-
-  // ── §6. elbow BK유형별 세부 (Slice 8c) ───────────────────────────────────────
-  done('elbow.jobDiagnosis.staticHoldingLevel', '8c'),
-  done('elbow.jobDiagnosis.directPressureLevel', '8c'),
-  done('elbow.jobDiagnosis.vibrationExposure', '8c'),
-  done('elbow.jobDiagnosis.bk2101CycleSeconds', '8c'),
-  done('elbow.jobDiagnosis.bk2101RepetitionPerHour', '8c'),
-  done('elbow.jobDiagnosis.bk2101Monotony', '8c'),
-  done('elbow.jobDiagnosis.bk2101ForcedDorsalExtension', '8c'),
-  done('elbow.jobDiagnosis.bk2101Prosupination', '8c'),
-  done('elbow.jobDiagnosis.bk2105ElbowLeaning', '8c'),
-  done('elbow.jobDiagnosis.bk2105PressureSource.hardSurface', '8c'),
-  done('elbow.jobDiagnosis.bk2105PressureSource.toolEdge', '8c'),
-  done('elbow.jobDiagnosis.bk2105PressureSource.groundContact', '8c'),
-  done('elbow.jobDiagnosis.bk2105PressureSource.carryingContact', '8c'),
-  done('elbow.jobDiagnosis.bk2105PressureSource.other', '8c'),
-  done('elbow.jobDiagnosis.bk2106PressureSource.hardSurface', '8c'),
-  done('elbow.jobDiagnosis.bk2106PressureSource.toolEdge', '8c'),
-  done('elbow.jobDiagnosis.bk2106PressureSource.groundContact', '8c'),
-  done('elbow.jobDiagnosis.bk2106PressureSource.carryingContact', '8c'),
-  done('elbow.jobDiagnosis.bk2106PressureSource.other', '8c'),
-  done('elbow.jobDiagnosis.bk2103VibrationToolType.grinder', '8c'),
-  done('elbow.jobDiagnosis.bk2103VibrationToolType.jackhammer', '8c'),
-  done('elbow.jobDiagnosis.bk2103VibrationToolType.demolitionHammer', '8c'),
-  done('elbow.jobDiagnosis.bk2103VibrationToolType.chippingHammer', '8c'),
-  done('elbow.jobDiagnosis.bk2103VibrationToolType.tampingMachine', '8c'),
-  done('elbow.jobDiagnosis.bk2103VibrationToolType.rotaryHammer', '8c'),
-  done('elbow.jobDiagnosis.bk2103VibrationToolType.compactor', '8c'),
-  done('elbow.jobDiagnosis.bk2103VibrationToolType.reciprocatingSaw', '8c'),
-  done('elbow.jobDiagnosis.bk2103VibrationToolType.rivetHammer', '8c'),
-  done('elbow.jobDiagnosis.bk2103VibrationToolType.rustHammer', '8c'),
-  done('elbow.jobDiagnosis.bk2103VibrationToolType.powderActuatedTool', '8c'),
-  done('elbow.jobDiagnosis.bk2103VibrationToolType.forgingHammer', '8c'),
-  done('elbow.jobDiagnosis.bk2103VibrationToolType.other', '8c'),
-  done('elbow.jobDiagnosis.bk2103DailyVibrationHours', '8c'),
-  done('elbow.jobDiagnosis.bk2103ToolPressing', '8c'),
-  done('elbow.jobDiagnosis.bk2103FrequentHighForceGrip', '8c'),
-
-  // ── §7. wrist BK유형별 세부 (Slice 8c) ───────────────────────────────────────
-  done('wrist.jobDiagnosis.staticHoldingLevel', '8c'),
-  done('wrist.jobDiagnosis.directPressureLevel', '8c'),
-  done('wrist.jobDiagnosis.vibrationExposure', '8c'),
-  done('wrist.jobDiagnosis.bk2101CycleSeconds', '8c'),
-  done('wrist.jobDiagnosis.bk2101RepetitionPerHour', '8c'),
-  done('wrist.jobDiagnosis.bk2101Monotony', '8c'),
-  done('wrist.jobDiagnosis.bk2101ForcedDorsalExtension', '8c'),
-  done('wrist.jobDiagnosis.bk2101Prosupination', '8c'),
-  done('wrist.jobDiagnosis.bk2106PressureSource.hardSurface', '8c'),
-  done('wrist.jobDiagnosis.bk2106PressureSource.toolEdge', '8c'),
-  done('wrist.jobDiagnosis.bk2106PressureSource.palmContact', '8c'),
-  done('wrist.jobDiagnosis.bk2106PressureSource.carryingContact', '8c'),
-  done('wrist.jobDiagnosis.bk2106PressureSource.other', '8c'),
-  done('wrist.jobDiagnosis.bk2103VibrationToolType.grinder', '8c'),
-  done('wrist.jobDiagnosis.bk2103VibrationToolType.impactWrench', '8c'),
-  done('wrist.jobDiagnosis.bk2103VibrationToolType.hammerDrill', '8c'),
-  done('wrist.jobDiagnosis.bk2103VibrationToolType.jackhammer', '8c'),
-  done('wrist.jobDiagnosis.bk2103VibrationToolType.polisher', '8c'),
-  done('wrist.jobDiagnosis.bk2103VibrationToolType.sander', '8c'),
-  done('wrist.jobDiagnosis.bk2103VibrationToolType.other', '8c'),
-  done('wrist.jobDiagnosis.bk2103DailyVibrationHours', '8c'),
-  done('wrist.jobDiagnosis.bk2103ToolPressing', '8c'),
-  done('wrist.jobDiagnosis.bk2103FrequentHighForceGrip', '8c'),
-  done('wrist.jobDiagnosis.bk2113RepetitiveWristMotion', '8c'),
+  // grain 단순화 개정(PR0-B4) — cervical_task grain 신설(Slice 7), elbow/wrist
+  // job_diagnosis 공통 필드·BK유형별 세부(Slice 8b/8c) 108개는 job_diagnosis/task/
+  // cervical_task/vibration_interval grain 자체와 함께 소스코드까지 완전 삭제됐다.
 ];

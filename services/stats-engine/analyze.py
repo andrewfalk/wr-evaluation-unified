@@ -52,7 +52,9 @@ def run_descriptive(request: dict[str, Any]) -> dict[str, Any]:
             # PR3-B — q1/q3/median이 계산 가능할 때만(n>=1) histogram/boxplot을
             # 만든다. n=0이면 둘 다 None(계획서 §2/§3 — Q1/Q3 재사용 원칙).
             if stat["q1"] is not None and stat["q3"] is not None and stat["median"] is not None:
-                stat["histogram"] = compute_histogram(values, stat["q1"], stat["q3"])
+                stat["histogram"] = compute_histogram(
+                    values, stat["q1"], stat["q3"], variable.get("personCount")
+                )
                 stat["boxplot"] = compute_boxplot(values, stat["q1"], stat["median"], stat["q3"])
             else:
                 stat["histogram"] = None

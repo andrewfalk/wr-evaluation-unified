@@ -49,7 +49,7 @@ export const SHOULDER_METADATA: AnalyticsVariableMetadata[] = [
     label: 'Ellman Class',
     group: '어깨 · 진단별 판정',
     moduleId: 'shoulder',
-    grain: 'diagnosis_side',
+    grain: 'disease',
     type: 'ordinal',
     provenance: 'clinician_judgment',
     dependsOn: [
