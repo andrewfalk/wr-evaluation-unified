@@ -9,9 +9,17 @@ import { computeElbowCalc, type ElbowDiagnosis, type ElbowDiagnosisEntry, type E
 import { normalizeElbowModuleData } from './legacyNormalize';
 import { ELBOW_BURDEN_GRADE_ORDER } from './metadata';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
+import { parseStrictIsoDate } from '../../dates';
 
 function isBlank(x: unknown): boolean {
   return x === null || x === undefined || String(x).trim() === '';
+}
+
+// null·undefined·공백 문자열만 빈 값으로 본다(9차 검토에서 확립 — isBlank는 String(x)
+// 강제변환 때문에 []·[null] 같은 배열도 빈 문자열로 오인해 typeof 검사보다 먼저 걸리면
+// 손상값이 invalid 없이 조용히 not_entered로 빠진다).
+function isBlankScalar(x: unknown): boolean {
+  return x === null || x === undefined || (typeof x === 'string' && x.trim() === '');
 }
 
 // §1-1a 공통 0단계 숫자 파싱 규칙이 적용되는 원본 필드 4종(toNumber()로 읽는 값,
@@ -84,4 +92,73 @@ export function extractElbowBurdenGradeMax(
   }, result.diagnosisSummaries[0].burdenGrade);
 
   return { value: worstGrade, missing: null, qualityFlags: Array.from(qualityFlagSet) };
+}
+
+// ── PR0-B4 Slice 8a — temporal 4개(case grain). normalizeElbowModuleData가 이미 계산해둔
+// temporalSequence ?? temporalRelation 병합 결과(moduleData.temporalSequence)를 그대로
+// 읽는다(재구현 금지 — 계획 §6 "temporalSequence/temporalRelation 각각 변수화 금지").
+function getElbowTemporalSequence(migrationResult: MigrationResult<AnalysisPatient>) {
+  const { payload } = migrationResult;
+  const activeModules = payload.data.activeModules ?? [];
+  const elbowModule = (payload.data.modules as Record<string, unknown> | undefined)?.elbow;
+  if (!activeModules.includes('elbow') || !isPlainObject(elbowModule)) return null;
+
+  const shared = (payload.data.shared as Record<string, unknown>) ?? {};
+  const rawJobs = Array.isArray(shared.jobs) ? shared.jobs : [];
+  const jobs = rawJobs.filter(isPlainObject) as unknown as ElbowJobLike[];
+  const rawDiagnoses = Array.isArray(shared.diagnoses) ? shared.diagnoses : [];
+  const diagnoses = rawDiagnoses.filter(isPlainObject) as unknown as ElbowDiagnosis[];
+
+  return normalizeElbowModuleData(elbowModule as ElbowModuleShape, jobs, diagnoses, activeModules).moduleData.temporalSequence;
+}
+
+const RECENT_TASK_CHANGE_VALUES = ['none', 'increased_load', 'process_change', 'new_task'];
+
+export function extractElbowTemporalRecentTaskChange(
+  migrationResult: MigrationResult<AnalysisPatient>,
+): ExtractedValue<string> {
+  const temporal = getElbowTemporalSequence(migrationResult);
+  if (!temporal) return { value: null, missing: 'structural_missing', qualityFlags: [] };
+  const raw = temporal.recent_task_change;
+  if (isBlankScalar(raw)) return { value: null, missing: 'not_entered', qualityFlags: [] };
+  if (typeof raw !== 'string' || !RECENT_TASK_CHANGE_VALUES.includes(raw)) {
+    return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  }
+  return { value: raw, missing: null, qualityFlags: [] };
+}
+
+export function extractElbowTemporalTaskChangeDate(
+  migrationResult: MigrationResult<AnalysisPatient>,
+): ExtractedValue<string> {
+  const temporal = getElbowTemporalSequence(migrationResult);
+  if (!temporal) return { value: null, missing: 'structural_missing', qualityFlags: [] };
+  const raw = temporal.task_change_date;
+  if (isBlankScalar(raw)) return { value: null, missing: 'not_entered', qualityFlags: [] };
+  if (typeof raw !== 'string' || !parseStrictIsoDate(raw)) {
+    return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  }
+  return { value: raw, missing: null, qualityFlags: [] };
+}
+
+export function extractElbowTemporalSymptomOnsetInterval(
+  migrationResult: MigrationResult<AnalysisPatient>,
+): ExtractedValue<string> {
+  const temporal = getElbowTemporalSequence(migrationResult);
+  if (!temporal) return { value: null, missing: 'structural_missing', qualityFlags: [] };
+  const raw = temporal.symptom_onset_interval;
+  if (isBlankScalar(raw)) return { value: null, missing: 'not_entered', qualityFlags: [] };
+  if (typeof raw !== 'string') return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  return { value: raw, missing: null, qualityFlags: [] };
+}
+
+export function extractElbowTemporalImprovesWithRest(
+  migrationResult: MigrationResult<AnalysisPatient>,
+): ExtractedValue<boolean> {
+  const temporal = getElbowTemporalSequence(migrationResult);
+  if (!temporal) return { value: null, missing: 'structural_missing', qualityFlags: [] };
+  const raw = temporal.improves_with_rest;
+  if (isBlankScalar(raw)) return { value: null, missing: 'not_entered', qualityFlags: [] };
+  if (raw === 'yes') return { value: true, missing: null, qualityFlags: [] };
+  if (raw === 'no') return { value: false, missing: null, qualityFlags: [] };
+  return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
 }

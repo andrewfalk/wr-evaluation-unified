@@ -49,6 +49,9 @@ export interface WristDiagnosisEntry {
   bk2103_daily_vibration_hours?: string | number;
   bk2103_tool_pressing?: string;
   bk2103_frequent_high_force_grip?: string;
+  // normalizeDiagnosisEntry가 다중선택 필드 보정 중 발견한 손상(비배열·null 등) 필드명
+  // 목록 — analytics 전용 마커, UI/저장 데이터 모델에는 없는 값이다(§Slice 8c 리뷰 지적).
+  _corruptedArrayFields?: string[];
   [key: string]: unknown;
 }
 
@@ -231,10 +234,19 @@ function normalizeDiagnosisEntry(
   // 원본 코드가 이 두 필드를 열거값으로 필터링하지 않으므로(계산 로직 재구현 금지) 배열
   // 여부만 보정하고 값 자체는 손대지 않는다.
   const ARRAY_ONLY_FIELDS: Array<keyof WristDiagnosisEntry> = ['bk2103_vibration_tool_type', 'bk2106_pressure_source'];
+  // §다중선택 배열 계약 리뷰 지적(Slice 8c, elbow와 동일) — 위 보정이 손상값(문자열·null
+  // 등)을 조용히 []로 바꿔버려서 extractor가 계약대로 invalid를 매기지 못한다. 보정
+  // 직전에 "진짜 undefined가 아닌데 배열도 아니었다"는 사실만 별도 필드에 남긴다(계산값
+  // 자체는 그대로 [] — UI/기존 계산 소비자에는 영향 없음, extractor만 이 마커를 읽는다).
+  const corruptedArrayFields: string[] = [];
   for (const field of ARRAY_ONLY_FIELDS) {
     if (!Array.isArray(baseEntry[field])) {
+      if (baseEntry[field] !== undefined) corruptedArrayFields.push(field as string);
       baseEntry[field] = [];
     }
+  }
+  if (corruptedArrayFields.length > 0) {
+    baseEntry._corruptedArrayFields = corruptedArrayFields;
   }
 
   const inferredBkType = inferWristBkTypeFromDiagnosis(diagnosis);
@@ -257,7 +269,11 @@ function normalizeDiagnosisEntry(
   return baseEntry;
 }
 
-const BK_GROUP_META_FIELDS = new Set(['diagnosisId', 'selectedBkType', 'bkSelectionMode', 'bkAutoSyncedFrom']);
+// _corruptedArrayFields도 포함 — analytics 전용 마커라 (1) scoreDiagnosisEntry가 "실제
+// 입력 데이터"로 세면 손상값만 있고 다른 입력은 없는 entry가 도너 자격을 갖게 되고,
+// (2) donor-copy가 이 마커를 그대로 복사하면 도너의 손상 이력이 실제로는 정상 []을
+// 물려받은 sibling entry에도 잘못 옮겨붙는다(elbow와 동일, §Slice 8c 리뷰 지적).
+const BK_GROUP_META_FIELDS = new Set(['diagnosisId', 'selectedBkType', 'bkSelectionMode', 'bkAutoSyncedFrom', '_corruptedArrayFields']);
 
 function scoreDiagnosisEntry(entry: WristDiagnosisEntry | null | undefined): number {
   if (!entry) return 0;
@@ -320,10 +336,27 @@ export function normalizeWristModuleData(
         return best;
       }, null);
       if (!donor) return;
+      // §리뷰 지적(자동복사 경로, elbow와 동일) — _corruptedArrayFields를 donor 점수·복사
+      // 대상에서 빼는 것만으로는 부족하다: 도너의 손상된 필드값([]로 보정된 값)을 그대로
+      // 복사만 하고 손상 표식을 안 옮기면, 물려받은 진단이 "정상 빈 배열"처럼 보인다.
+      // 복사되는 필드 각각에 대해 도너가 손상 상태면 수신자도 손상으로 표시하고, 도너가
+      // 정상이면 수신자의 (있었을 수도 있는) 이전 손상 표시를 지운다.
+      const donorCorrupted = new Set(Array.isArray(donor.entry._corruptedArrayFields) ? donor.entry._corruptedArrayFields : []);
+      const nextCorrupted = new Set(Array.isArray(entry._corruptedArrayFields) ? entry._corruptedArrayFields : []);
       Object.entries(donor.entry).forEach(([key, value]) => {
         if (BK_GROUP_META_FIELDS.has(key)) return;
         entry[key] = Array.isArray(value) ? [...value] : value;
+        if (donorCorrupted.has(key)) {
+          nextCorrupted.add(key);
+        } else {
+          nextCorrupted.delete(key);
+        }
       });
+      if (nextCorrupted.size > 0) {
+        entry._corruptedArrayFields = Array.from(nextCorrupted);
+      } else {
+        delete entry._corruptedArrayFields;
+      }
       entry.bkAutoSyncedFrom = donor.entry.diagnosisId;
     });
 

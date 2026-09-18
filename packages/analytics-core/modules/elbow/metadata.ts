@@ -132,3 +132,89 @@ export const ELBOW_METADATA: AnalyticsVariableMetadata[] = [
     supportedFormulaPolicies: ['recompute_current'],
   },
 ];
+
+// ── PR0-B4 Slice 8a/8b — 신설. temporal 4개는 병합 결과(normalizeElbowModuleData가 이미
+// temporalSequence ?? temporalRelation을 계산해둔 moduleData.temporalSequence) 기준
+// case grain 변수로만 등록한다(계획 §6 확정 — temporalSequence/temporalRelation 각각
+// 변수화 금지). job_diagnosis 공통 필드 14개는 BK유형과 무관하게 항상 존재하는 필드만
+// 대상이다(BK 분기 필드는 Slice 8c).
+const TEMPORAL_BASE_DEPENDS_ON = [
+  'activeModules',
+  'modules.elbow.temporalSequence.recent_task_change',
+  'modules.elbow.temporalSequence.task_change_date',
+  'modules.elbow.temporalSequence.symptom_onset_interval',
+  'modules.elbow.temporalSequence.improves_with_rest',
+  'modules.elbow.temporalRelation.recent_task_change',
+  'modules.elbow.temporalRelation.task_change_date',
+  'modules.elbow.temporalRelation.symptom_onset_interval',
+  'modules.elbow.temporalRelation.improves_with_rest',
+];
+
+ELBOW_METADATA.push(
+  {
+    key: 'elbow.temporal.recentTaskChange',
+    label: '팔꿈치 최근 작업변화',
+    group: '팔꿈치 · 원본입력',
+    moduleId: 'elbow',
+    grain: 'case',
+    type: 'categorical',
+    provenance: 'raw',
+    dependsOn: TEMPORAL_BASE_DEPENDS_ON,
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'elbow_temporal_raw',
+    supportedFormulaPolicies: [],
+  },
+  {
+    key: 'elbow.temporal.taskChangeDate',
+    label: '팔꿈치 작업변화 시점',
+    group: '팔꿈치 · 원본입력',
+    moduleId: 'elbow',
+    grain: 'case',
+    type: 'date',
+    provenance: 'raw',
+    dependsOn: TEMPORAL_BASE_DEPENDS_ON,
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'elbow_temporal_raw',
+    supportedFormulaPolicies: [],
+    // 날짜 정책(계획 확정) — 기술통계 엔진이 date 타입을 지원하지 않아 filter_only.
+    analysisRole: 'filter_only',
+  },
+  {
+    key: 'elbow.temporal.symptomOnsetInterval',
+    label: '팔꿈치 작업변화 후 증상발생까지 기간',
+    group: '팔꿈치 · 원본입력',
+    moduleId: 'elbow',
+    grain: 'case',
+    type: 'high_cardinality',
+    provenance: 'raw',
+    dependsOn: TEMPORAL_BASE_DEPENDS_ON,
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'elbow_temporal_raw',
+    supportedFormulaPolicies: [],
+  },
+  {
+    key: 'elbow.temporal.improvesWithRest',
+    label: '팔꿈치 휴가/업무중단 시 호전 여부',
+    group: '팔꿈치 · 원본입력',
+    moduleId: 'elbow',
+    grain: 'case',
+    type: 'boolean',
+    provenance: 'raw',
+    dependsOn: TEMPORAL_BASE_DEPENDS_ON,
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'elbow_temporal_raw',
+    supportedFormulaPolicies: [],
+  },
+);

@@ -32,6 +32,7 @@ function baseCase(overrides: {
 }
 
 const CORE_TASK = {
+  id: 'task-1',
   sharedJobId: 'job-1',
   name: '박스 운반',
   exposure_types: ['shoulder_heavy_load'],

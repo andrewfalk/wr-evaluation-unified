@@ -150,6 +150,93 @@ describe('RecipePanel — 필터 칩 표시(3차 리뷰)', () => {
   });
 });
 
+// 사용자 보고 — spine.mddm.lifetimeDoseMNh(공식 정책이 2개 이상 혼재하는 변수)를 고르면
+// "공식 정책" 드롭다운에서 선택하기 전까지 "분석 실행" 버튼이 비활성화되는데, 왜 안 눌리는지
+// 알려주는 문구가 전혀 없었다 — 원인을 알아낸 뒤 버튼 위에 안내 문구를 추가했다.
+function catalogFixtureWithFormulaChoice() {
+  return {
+    variables: [
+      ...catalogFixture().variables,
+      {
+        key: 'spine.mddm.lifetimeDoseMNh', label: 'MDDM 평생 누적 압박력 선량', group: 'g', moduleId: 'spine',
+        grain: 'case', type: 'continuous', unit: 'MN·h', provenance: 'derived', dependsOn: [],
+        availableAt: 'assessment', shownToAssessor: true, allowedAnalysisPurposes: ['association'],
+        sensitivity: 'non_sensitive', formulaFamily: 'spine_mddm',
+        supportedFormulaPolicies: ['recompute_recorded_version', 'recompute_current'], formulaVersionKey: 'x',
+      },
+    ],
+    unsupportedGrains: [],
+  };
+}
+
+describe('RecipePanel — 공식 정책 미선택 안내', () => {
+  it('정책이 혼재하는 변수를 고르고 아직 선택 안 했으면 실행 버튼 위에 이유를 알려주는 문구가 뜬다', () => {
+    render(<RecipePanel {...baseProps({
+      catalog: catalogFixtureWithFormulaChoice(),
+      selectedKeys: ['spine.mddm.lifetimeDoseMNh'],
+      canExecute: true,
+    })} />);
+    expect(screen.getByText('위 "공식 정책"에서 선택을 완료해야 분석을 실행할 수 있습니다.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '분석 실행' }).disabled).toBe(true);
+  });
+
+  it('정책을 선택하면 안내 문구가 사라지고 실행 버튼이 활성화된다', () => {
+    render(<RecipePanel {...baseProps({
+      catalog: catalogFixtureWithFormulaChoice(),
+      selectedKeys: ['spine.mddm.lifetimeDoseMNh'],
+      formulaPolicies: { spine_mddm: 'recompute_current' },
+      canExecute: true,
+    })} />);
+    expect(screen.queryByText('위 "공식 정책"에서 선택을 완료해야 분석을 실행할 수 있습니다.')).toBeNull();
+    expect(screen.getByRole('button', { name: '분석 실행' }).disabled).toBe(false);
+  });
+});
+
+describe('RecipePanel — 이변량 방법 카드 툴팁', () => {
+  function readyBivariatePreviewState(availableMethods) {
+    return {
+      key: 'k', status: 'ready',
+      result: {
+        counts: { personCount: 20, caseCount: 20, observationCount: 20, suppressed: false, minimumCohort: 10, reasonCode: null },
+        estimability: {
+          completeCaseN: 20, missingRatesByVariable: {}, distinctAssignedDoctorClusters: 3,
+          candidateParameterCount: null, eventNonEvent: [], estimabilityPolicyVersion: 'v1',
+        },
+        availableMethods,
+      },
+      error: null,
+    };
+  }
+
+  it('실행 가능한 검정 카드는 그 검정의 의미·해석을 설명하는 title(hover 툴팁)을 갖는다', () => {
+    render(<RecipePanel {...baseProps({
+      analysisMode: 'bivariate',
+      requestedMethod: null,
+      onRequestedMethodChange: vi.fn(),
+      isPreviewCurrent: true,
+      previewState: readyBivariatePreviewState([
+        { id: 'welch_t', label: 'Welch t 검정', status: 'available', reasonCode: null },
+      ]),
+    })} />);
+    const button = screen.getByRole('button', { name: /Welch t 검정/ });
+    expect(button.title).toMatch(/두 그룹의 평균을 비교/);
+  });
+
+  it('불가 상태 카드는 의미 설명 대신 기존처럼 불가 사유를 title로 유지한다(회귀 방지)', () => {
+    render(<RecipePanel {...baseProps({
+      analysisMode: 'bivariate',
+      requestedMethod: null,
+      onRequestedMethodChange: vi.fn(),
+      isPreviewCurrent: true,
+      previewState: readyBivariatePreviewState([
+        { id: 'welch_t', label: 'Welch t 검정', status: 'unsupported', reasonCode: 'REPEATED_MEASURES_NOT_ALIGNED' },
+      ]),
+    })} />);
+    const button = screen.getByRole('button', { name: /Welch t 검정/ });
+    expect(button.title).toMatch(/반복측정/);
+  });
+});
+
 describe('RecipePanel — Preview estimability 표시', () => {
   it('completeCaseN과 변수별 결측률을 표시한다', () => {
     render(<RecipePanel {...baseProps({

@@ -67,6 +67,11 @@ _VARIABLES_REQUEST_SCHEMA: dict[str, Any] = {
                             ]
                         },
                     },
+                    # histogram bin 개수(Freedman-Diaconis/Sturges) 계산 전용 힌트 — Node가
+                    # values(행 수, 브로드캐스트면 중복 포함)와 별도로 실제 서로 다른 인원 수를
+                    # 계산해 넘긴다(continuous에서만, server/src/statsEngine.ts 참고). person
+                    # 신원 자체는 여전히 모른다 — 개수 하나만 받는다.
+                    "personCount": {"type": "integer", "minimum": 0},
                 },
             },
         },

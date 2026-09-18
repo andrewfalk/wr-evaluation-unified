@@ -9,9 +9,16 @@ import { computeWristCalc, type WristDiagnosis, type WristDiagnosisEntry, type W
 import { normalizeWristModuleData } from './legacyNormalize';
 import { WRIST_BURDEN_GRADE_ORDER } from './metadata';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
+import { parseStrictIsoDate } from '../../dates';
 
 function isBlank(x: unknown): boolean {
   return x === null || x === undefined || String(x).trim() === '';
+}
+
+// null·undefined·공백 문자열만 빈 값으로 본다(elbow와 동일 원칙 — isBlank의 String(x)
+// 강제변환 우회 방지).
+function isBlankScalar(x: unknown): boolean {
+  return x === null || x === undefined || (typeof x === 'string' && x.trim() === '');
 }
 
 // §1-1a 공통 0단계 숫자 파싱 규칙이 적용되는 원본 필드 4종(toNumber()로 읽는 값,
@@ -84,4 +91,72 @@ export function extractWristBurdenGradeMax(
   }, result.diagnosisSummaries[0].burdenGrade);
 
   return { value: worstGrade, missing: null, qualityFlags: Array.from(qualityFlagSet) };
+}
+
+// ── PR0-B4 Slice 8a — temporal 4개(case grain). elbow와 동일 원칙(정규화된 병합 결과를
+// 그대로 읽는다, 재구현 금지).
+function getWristTemporalSequence(migrationResult: MigrationResult<AnalysisPatient>) {
+  const { payload } = migrationResult;
+  const activeModules = payload.data.activeModules ?? [];
+  const wristModule = (payload.data.modules as Record<string, unknown> | undefined)?.wrist;
+  if (!activeModules.includes('wrist') || !isPlainObject(wristModule)) return null;
+
+  const shared = (payload.data.shared as Record<string, unknown>) ?? {};
+  const rawJobs = Array.isArray(shared.jobs) ? shared.jobs : [];
+  const jobs = rawJobs.filter(isPlainObject) as unknown as WristJobLike[];
+  const rawDiagnoses = Array.isArray(shared.diagnoses) ? shared.diagnoses : [];
+  const diagnoses = rawDiagnoses.filter(isPlainObject) as unknown as WristDiagnosis[];
+
+  return normalizeWristModuleData(wristModule as WristModuleShape, jobs, diagnoses, activeModules).moduleData.temporalSequence;
+}
+
+const RECENT_TASK_CHANGE_VALUES = ['none', 'increased_load', 'process_change', 'new_task'];
+
+export function extractWristTemporalRecentTaskChange(
+  migrationResult: MigrationResult<AnalysisPatient>,
+): ExtractedValue<string> {
+  const temporal = getWristTemporalSequence(migrationResult);
+  if (!temporal) return { value: null, missing: 'structural_missing', qualityFlags: [] };
+  const raw = temporal.recent_task_change;
+  if (isBlankScalar(raw)) return { value: null, missing: 'not_entered', qualityFlags: [] };
+  if (typeof raw !== 'string' || !RECENT_TASK_CHANGE_VALUES.includes(raw)) {
+    return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  }
+  return { value: raw, missing: null, qualityFlags: [] };
+}
+
+export function extractWristTemporalTaskChangeDate(
+  migrationResult: MigrationResult<AnalysisPatient>,
+): ExtractedValue<string> {
+  const temporal = getWristTemporalSequence(migrationResult);
+  if (!temporal) return { value: null, missing: 'structural_missing', qualityFlags: [] };
+  const raw = temporal.task_change_date;
+  if (isBlankScalar(raw)) return { value: null, missing: 'not_entered', qualityFlags: [] };
+  if (typeof raw !== 'string' || !parseStrictIsoDate(raw)) {
+    return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  }
+  return { value: raw, missing: null, qualityFlags: [] };
+}
+
+export function extractWristTemporalSymptomOnsetInterval(
+  migrationResult: MigrationResult<AnalysisPatient>,
+): ExtractedValue<string> {
+  const temporal = getWristTemporalSequence(migrationResult);
+  if (!temporal) return { value: null, missing: 'structural_missing', qualityFlags: [] };
+  const raw = temporal.symptom_onset_interval;
+  if (isBlankScalar(raw)) return { value: null, missing: 'not_entered', qualityFlags: [] };
+  if (typeof raw !== 'string') return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  return { value: raw, missing: null, qualityFlags: [] };
+}
+
+export function extractWristTemporalImprovesWithRest(
+  migrationResult: MigrationResult<AnalysisPatient>,
+): ExtractedValue<boolean> {
+  const temporal = getWristTemporalSequence(migrationResult);
+  if (!temporal) return { value: null, missing: 'structural_missing', qualityFlags: [] };
+  const raw = temporal.improves_with_rest;
+  if (isBlankScalar(raw)) return { value: null, missing: 'not_entered', qualityFlags: [] };
+  if (raw === 'yes') return { value: true, missing: null, qualityFlags: [] };
+  if (raw === 'no') return { value: false, missing: null, qualityFlags: [] };
+  return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
 }

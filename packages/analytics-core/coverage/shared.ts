@@ -15,18 +15,20 @@ export const SHARED_INVENTORY: CoverageInventory = {
 
   'shared.patientNo': { included: false, reason: FREE_TEXT },
   'shared.name': { included: false, reason: FREE_TEXT },
-  'shared.gender': { included: true }, // spine.mddm/vibration dependsOn
-  'shared.height': { included: false, reason: DEFERRED },
-  'shared.weight': { included: false, reason: DEFERRED },
-  'shared.birthDate': { included: true }, // knee.relatedness.max dependsOn
-  'shared.injuryDate': { included: true }, // knee.relatedness.max dependsOn
+  'shared.gender': { included: true }, // spine.mddm/vibration dependsOn + PR0-B4 Slice 5 patient.identity.gender 독립 등록
+  // PR0-B4 Slice 5 — patient.identity.heightCm/weightKg/evaluationDate/highBloodPressure/
+  // diabetes로 독립 등록 완료(더 이상 DEFERRED 아님).
+  'shared.height': { included: true },
+  'shared.weight': { included: true },
+  'shared.birthDate': { included: true }, // knee.relatedness.max dependsOn + patient.identity.birthDate
+  'shared.injuryDate': { included: true }, // knee.relatedness.max dependsOn + patient.identity.injuryDate
   'shared.hospitalName': { included: false, reason: FREE_TEXT },
   'shared.department': { included: false, reason: FREE_TEXT },
   'shared.doctorName': { included: false, reason: FREE_TEXT },
-  'shared.evaluationDate': { included: false, reason: DEFERRED },
+  'shared.evaluationDate': { included: true },
   'shared.medicalRecord': { included: false, reason: FREE_TEXT },
-  'shared.highBloodPressure': { included: false, reason: DEFERRED },
-  'shared.diabetes': { included: false, reason: DEFERRED },
+  'shared.highBloodPressure': { included: true },
+  'shared.diabetes': { included: true },
   'shared.visitHistory': { included: false, reason: FREE_TEXT },
   'shared.consultReplyOrtho': { included: false, reason: FREE_TEXT },
   'shared.consultReplyNeuro': { included: false, reason: FREE_TEXT },
@@ -66,10 +68,11 @@ export const SHARED_INVENTORY: CoverageInventory = {
   // reasonRight/Left(낮음 사유)는 이번 Part B 범위에 없는 별개 변수 후보라 그대로 DEFERRED.
   'shared.diagnoses[].confirmedRight': { included: true },
   'shared.diagnoses[].confirmedLeft': { included: true },
-  'shared.diagnoses[].assessmentRight': { included: false, reason: DEFERRED + ' — isXAssessmentComplete가 읽지만 대표 변수 dependsOn에는 없음' },
-  'shared.diagnoses[].assessmentLeft': { included: false, reason: DEFERRED + ' — isXAssessmentComplete가 읽지만 대표 변수 dependsOn에는 없음' },
-  'shared.diagnoses[].reasonRight': { included: false, reason: DEFERRED },
-  'shared.diagnoses[].reasonLeft': { included: false, reason: DEFERRED },
+  // PR0-B4 Slice 6 — diagnosis.assessment.status/lowReason.*로 독립 등록 완료(더 이상 DEFERRED 아님).
+  'shared.diagnoses[].assessmentRight': { included: true },
+  'shared.diagnoses[].assessmentLeft': { included: true },
+  'shared.diagnoses[].reasonRight': { included: true },
+  'shared.diagnoses[].reasonLeft': { included: true },
   'shared.diagnoses[].reasonRightOther': { included: false, reason: FREE_TEXT },
   'shared.diagnoses[].reasonLeftOther': { included: false, reason: FREE_TEXT },
 

@@ -4,9 +4,10 @@
 import type { ExtractedValue, MissingReason, MigrationResult, QualityFlag, RepeatedObservation } from '../../types';
 import { parseStrictIsoDate, compareDate, calculateAgeStrict } from '../../dates';
 import { parseWorkPeriodOverride } from '../../workPeriod';
-import { resolveKneeCalculationJobs, computeKneeCalc, type KneeCalculationJob } from './derived';
+import { resolveKneeCalculationJobs, computeKneeCalc, type KneeCalculationJob, type KneeJobExtras } from './derived';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
-import { enumerateDiagnosisSideEntities } from '../../grainEntities';
+import { isPlainObject } from '../../migration/deterministicMigrate';
+import { enumerateDiseaseEntities, enumerateJobEntities } from '../../grainEntities';
 import { resolveDiagnosisModule, supportsKlGrade } from '../../diagnosisMapping';
 import { KNEE_KLG_ORDER } from './metadata';
 
@@ -116,7 +117,7 @@ export function extractKneeDiagnosisSideKlGrade(
   migrationResult: MigrationResult<AnalysisPatient>,
 ): RepeatedObservation<string>[] {
   const activeModules = migrationResult.payload.data.activeModules ?? [];
-  return enumerateDiagnosisSideEntities(migrationResult).map((entity) => {
+  return enumerateDiseaseEntities(migrationResult).map((entity) => {
     const { diagnosis, side } = entity.source;
     const moduleId = resolveDiagnosisModule(diagnosis, activeModules)?.moduleId;
     if (moduleId !== 'knee' || !supportsKlGrade(diagnosis)) {
@@ -162,7 +163,7 @@ export function extractKneeDiagnosisSideConfirmedStatus(
   migrationResult: MigrationResult<AnalysisPatient>,
 ): RepeatedObservation<boolean>[] {
   const activeModules = migrationResult.payload.data.activeModules ?? [];
-  return enumerateDiagnosisSideEntities(migrationResult).map((entity) => {
+  return enumerateDiseaseEntities(migrationResult).map((entity) => {
     const { diagnosis, side } = entity.source;
     const moduleId = resolveDiagnosisModule(diagnosis, activeModules)?.moduleId;
     if (moduleId !== 'knee') {
@@ -198,7 +199,7 @@ export function extractKneeDiagnosisSideAppliedConfirmedMismatch(
   migrationResult: MigrationResult<AnalysisPatient>,
 ): RepeatedObservation<boolean>[] {
   const activeModules = migrationResult.payload.data.activeModules ?? [];
-  return enumerateDiagnosisSideEntities(migrationResult).map((entity) => {
+  return enumerateDiseaseEntities(migrationResult).map((entity) => {
     const { diagnosis } = entity.source;
     const moduleId = resolveDiagnosisModule(diagnosis, activeModules)?.moduleId;
     if (moduleId !== 'knee') {
@@ -215,4 +216,114 @@ export function extractKneeDiagnosisSideAppliedConfirmedMismatch(
     const mismatch = confirmedCode !== requestedCode || confirmedName !== requestedName;
     return { entityKey: entity.entityKey, value: mismatch, missing: null, qualityFlags: entity.qualityFlags };
   });
+}
+
+// ── PR0-B4 Slice 4 — coverage 잔여 필드(매핑표 §2). jobExtras 원시값 8종을 job grain에
+// 독립 노출한다. shoulder Slice 3와 동일 패턴 — enumerateJobEntities(shared.jobs[] 기준)
+// 로 행 모집단을 고정하고, sharedJobId로 modules.knee.jobExtras[]를 찾아 투영한다.
+// **레거시 modules.knee.jobs[] 배열은 의도적으로 안 본다**(계획 결정 — 그 배열 자체가
+// 카탈로그 대상에서 제외·폐기 예정이라, resolveKneeCalculationJobs의 legacy 병합을
+// 재사용하면 legacy 배열의 별도 id 체계가 shared.jobs[] 기준 entityKey와 어긋난다).
+function findKneeJobExtra(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  jobId: unknown,
+): KneeJobExtras | undefined {
+  const kneeModule = (migrationResult.payload.data.modules as Record<string, unknown> | undefined)?.knee;
+  const rawJobExtras = Array.isArray((kneeModule as { jobExtras?: unknown })?.jobExtras)
+    ? ((kneeModule as { jobExtras?: unknown[] }).jobExtras as unknown[])
+    : [];
+  const jobExtras = rawJobExtras.filter(isPlainObject) as unknown as KneeJobExtras[];
+  return jobExtras.find((e) => e.sharedJobId === jobId);
+}
+
+function isKneeModuleActive(migrationResult: MigrationResult<AnalysisPatient>): boolean {
+  const activeModules = migrationResult.payload.data.activeModules ?? [];
+  const kneeModule = (migrationResult.payload.data.modules as Record<string, unknown> | undefined)?.knee;
+  return activeModules.includes('knee') && isPlainObject(kneeModule);
+}
+
+// weight/squatting — parseNonNegativeNumber(이 파일 상단, 기존 knee 계산과 동일 규칙:
+// Number() 강제변환 + 0 이상만 허용, UI min="0"과 일치)를 그대로 재사용한다.
+function extractKneeJobNumericField(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  field: 'weight' | 'squatting',
+): RepeatedObservation<number>[] {
+  const entities = enumerateJobEntities(migrationResult);
+  if (entities.length === 0) return [];
+  if (!isKneeModuleActive(migrationResult)) {
+    return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'structural_missing', qualityFlags: entity.qualityFlags }));
+  }
+  return entities.map((entity) => {
+    const extra = findKneeJobExtra(migrationResult, entity.source.id);
+    const raw = extra?.[field];
+    // isBlank(전역, 이 파일 다른 곳에서도 쓰임)는 String(x)로 감싸 [] · [null]도 빈
+    // 문자열로 만들어버려 typeof 검사보다 먼저 걸리면 손상 배열이 invalid 없이 조용히
+    // not_entered로 빠진다(9차 검토 P2) — null·undefined·공백 문자열만 여기서 빈 값으로
+    // 본다.
+    if (raw === null || raw === undefined || (typeof raw === 'string' && raw.trim() === '')) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
+    }
+    // typeof 먼저(강제변환 우회 방지) — parseNonNegativeNumber는 내부적으로 String(x)를
+    // 거치므로 배열도 우연히 숫자로 통과시킨다(예: [123] → "123" → 123, 8차 검토 P2). 기존
+    // classifyKneeJob(§4.2, 생산 계산 분기)은 그대로 두고 이 extractor 레벨에서만 막는다.
+    if (typeof raw !== 'number' && typeof raw !== 'string') {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: [...entity.qualityFlags, 'invalid'] };
+    }
+    const n = parseNonNegativeNumber(raw);
+    if (n === null) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: [...entity.qualityFlags, 'invalid'] };
+    }
+    return { entityKey: entity.entityKey, value: n, missing: null, qualityFlags: entity.qualityFlags };
+  });
+}
+
+export function extractKneeJobWeight(mr: MigrationResult<AnalysisPatient>) {
+  return extractKneeJobNumericField(mr, 'weight');
+}
+export function extractKneeJobSquatting(mr: MigrationResult<AnalysisPatient>) {
+  return extractKneeJobNumericField(mr, 'squatting');
+}
+
+// stairs/kneeTwist/startStop/tightSpace/kneeContact/jumpDown — 체크박스(JobTab.jsx,
+// `checked={extras[key] || false}`)라 원본은 boolean 아니면 undefined뿐이다. undefined는
+// not_entered, boolean이 아닌 값(손상 데이터)만 invalid로 구분한다.
+function extractKneeJobBooleanField(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  field: 'stairs' | 'kneeTwist' | 'startStop' | 'tightSpace' | 'kneeContact' | 'jumpDown',
+): RepeatedObservation<boolean>[] {
+  const entities = enumerateJobEntities(migrationResult);
+  if (entities.length === 0) return [];
+  if (!isKneeModuleActive(migrationResult)) {
+    return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'structural_missing', qualityFlags: entity.qualityFlags }));
+  }
+  return entities.map((entity) => {
+    const extra = findKneeJobExtra(migrationResult, entity.source.id);
+    const raw = extra?.[field];
+    if (raw === undefined || raw === null) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
+    }
+    if (typeof raw !== 'boolean') {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: [...entity.qualityFlags, 'invalid'] };
+    }
+    return { entityKey: entity.entityKey, value: raw, missing: null, qualityFlags: entity.qualityFlags };
+  });
+}
+
+export function extractKneeJobStairs(mr: MigrationResult<AnalysisPatient>) {
+  return extractKneeJobBooleanField(mr, 'stairs');
+}
+export function extractKneeJobKneeTwist(mr: MigrationResult<AnalysisPatient>) {
+  return extractKneeJobBooleanField(mr, 'kneeTwist');
+}
+export function extractKneeJobStartStop(mr: MigrationResult<AnalysisPatient>) {
+  return extractKneeJobBooleanField(mr, 'startStop');
+}
+export function extractKneeJobTightSpace(mr: MigrationResult<AnalysisPatient>) {
+  return extractKneeJobBooleanField(mr, 'tightSpace');
+}
+export function extractKneeJobKneeContact(mr: MigrationResult<AnalysisPatient>) {
+  return extractKneeJobBooleanField(mr, 'kneeContact');
+}
+export function extractKneeJobJumpDown(mr: MigrationResult<AnalysisPatient>) {
+  return extractKneeJobBooleanField(mr, 'jumpDown');
 }

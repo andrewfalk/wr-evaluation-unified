@@ -18,7 +18,10 @@ import { INTEGRATED_CATALOG_VERSION } from './statsCatalogVersion';
 // 추가돼 규칙이 확장됐다(계획서 §버전 상수).
 // PR3-B — 히스토그램/그리드 person 단위 전체연결억제 + 박스플롯 이상치 전용
 // partition 게이트가 추가돼 규칙이 다시 확장됐다(계획서 §1/§3).
-export const SUPPRESSION_RULE_VERSION = 'v4-chart-outlier-partition-gate';
+// B안 — 히스토그램이 all-or-nothing 즉시 포기 대신 적응형 해상도 축소(재분할)를
+// 거치도록 규칙 자체가 바뀌어 다시 범프한다(server/src/statsChartDisclosure.ts의
+// resolveDisclosableHistogram 참고).
+export const SUPPRESSION_RULE_VERSION = 'v5-histogram-adaptive-resolution';
 // PR1엔 aggregate 하나뿐 — PR5가 limited_row/phi를 도입할 때 실제 분기가 생긴다.
 const DISCLOSURE_POLICY_VERSION = 'v0-aggregate-only';
 // PR3-A — availableMethods(A-1/A-2) 계산 로직이 신설됐다. statsMethodCatalog.ts가
@@ -27,7 +30,11 @@ export const METHOD_POLICY_VERSION = 'v1-bivariate';
 // PR3-A — AnalyzeResult.bivariate 필드가 추가돼 결과 shape이 확장됐다.
 // PR3-B — histogram/boxplot/scatter/regressionLine/correlationMatrix 필드가
 // 추가돼 결과 shape이 다시 확장됐다.
-const RESULT_SCHEMA_VERSION = 'v3-charts-correlation-matrix';
+// B안 — AnalyzeHistogramSchema.merged + AnalyzeContinuousRevealedSchema.
+// histogramReasonCode 필드가 추가돼 결과 shape이 다시 확장됐다. 테스트(같은
+// 모듈 안의 상수라 STATS_ENGINE_VERSION류의 vi.doMock 패턴이 안 통함, PR0-B4
+// 관련 세션의 리뷰 지적)를 위해 export한다.
+export const RESULT_SCHEMA_VERSION = 'v4-histogram-merge-fields';
 
 export interface ComputeExecutionDigestInput {
   organizationId: string;

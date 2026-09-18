@@ -89,3 +89,60 @@ def test_deterministic_same_input_twice(seed):
     r1 = compute_histogram(values, q1, q3)
     r2 = compute_histogram(values, q1, q3)
     assert r1 == r2
+
+
+# person_count 힌트 — job/disease grain 브로드캐스트 회귀 방지(A안). 실제 값(x)은 그대로
+# 다 쓰되, bin 개수(k) 공식의 n만 person_count로 바꿔치기한다는 계약을 고정한다.
+def test_person_count_none_matches_omitted_argument():
+    rng = np.random.default_rng(11)
+    values = list(rng.normal(size=200))
+    q1, q3 = _q1_q3(values)
+    assert compute_histogram(values, q1, q3) == compute_histogram(values, q1, q3, None)
+
+
+def test_person_count_zero_or_negative_falls_back_to_row_count():
+    rng = np.random.default_rng(12)
+    values = list(rng.normal(size=200))
+    q1, q3 = _q1_q3(values)
+    baseline = compute_histogram(values, q1, q3)
+    assert compute_histogram(values, q1, q3, 0) == baseline
+    assert compute_histogram(values, q1, q3, -5) == baseline
+
+
+def test_person_count_changes_bin_count_deterministically():
+    # 200명(person_count)이 각 3행씩 브로드캐스트돼 600행(values)이 됐다고 가정 —
+    # 무작위 시드에 기대지 않고 등간격 고정값 + FD 공식을 그대로 재현해 기대 k를
+    # 직접 계산한다. 이전 버전은 "<="만 확인해 person_count를 통째로 무시해도
+    # 우연히 통과할 수 있었다(1차 리뷰 지적) — 이번엔 두 k가 서로 다르다는 것과,
+    # 각각이 정확히 그 공식값과 일치한다는 것까지 강하게 고정한다.
+    base = [i / 199 * 100 for i in range(200)]  # 0~100 등간격 200개
+    values = [v for v in base for _ in range(3)]  # 각 값 3행씩 복제 → n=600
+    q1, q3 = _q1_q3(values)
+    iqr = q3 - q1
+    lo, hi = min(values), max(values)
+    assert iqr > 0  # FD 분기(§2 분기 3/4 중 4번)를 타는지 자가검증
+
+    def expected_k(n: int) -> int:
+        h = 2 * iqr * (n ** (-1 / 3))
+        return max(1, min(50, math.ceil((hi - lo) / h)))
+
+    expected_row_k = expected_k(len(values))
+    expected_person_k = expected_k(200)
+    assert expected_row_k != expected_person_k  # 데이터 선택이 실제로 판별력이 있는지 자가검증
+
+    by_row_count = compute_histogram(values, q1, q3)
+    by_person_count = compute_histogram(values, q1, q3, 200)
+    assert len(by_row_count["bins"]) == expected_row_k
+    assert len(by_person_count["bins"]) == expected_person_k
+    # bin을 무엇으로 세든 실제 채워지는 값(x)은 그대로 전부 다 쓴다 — count 합은 항상 n(행 수).
+    assert sum(b["count"] for b in by_person_count["bins"]) == len(values)
+    assert sum(b["count"] for b in by_row_count["bins"]) == len(values)
+
+
+def test_person_count_used_for_iqr_zero_branch_too():
+    # IQR==0(Sturges 분기)도 k_n 대입 대상이다 — FD 분기만 고치고 이쪽을 빠뜨리는 회귀 방지.
+    values = [0.0] * 599 + [1.0]  # n=600, person_count=200이라고 가정
+    q1, q3 = _q1_q3(values)
+    assert q1 == 0.0 and q3 == 0.0
+    result = compute_histogram(values, q1, q3, 200)
+    assert len(result["bins"]) == math.ceil(math.log2(200) + 1)

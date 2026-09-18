@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { isGrainCompatible } from '@analytics-core/common';
 
 const MODULE_LABELS = {
   knee: '무릎', spine: '척추', shoulder: '어깨',
@@ -9,6 +10,8 @@ const MODULE_LABELS = {
   diagnosis: '신청상병(공통)',
   // Part C — 담당의·등록일(SnapshotRow 컬럼, statsSnapshotColumnVariables.ts)의 moduleId.
   meta: '사례 메타(공통)',
+  // grain 단순화(PR0-B4 개정) — patient 모듈 변수(성별·키·몸무게 등)는 case grain 소속.
+  patient: '인적사항(공통)',
 };
 
 function moduleLabel(id) {
@@ -35,8 +38,11 @@ export function CatalogPanel({ catalog, grain, selectedKeys, onToggleVariable, c
   const variables = catalog?.variables ?? [];
   // PR0-B3 Part C — 필터 전용 변수(예: 등록일)는 분석 변수 후보에서 뺀다. 필터로는 여전히
   // 선택 가능하다(RecipePanel.jsx의 FilterEditor는 grain만 거르고 analysisRole은 안 봄).
+  // grain 단순화(PR0-B4 개정) — 정확히 같은 grain뿐 아니라, case의 브로드캐스트 안전
+  // 변수도 다른 grain(job/disease)의 후보로 보여준다. 서버(statsRecipeValidation.ts)
+  // 와 같은 판정 함수를 공유한다(analytics-core/common.ts, 복제 구현 금지).
   const grainVariables = useMemo(
-    () => variables.filter((v) => v.grain === grain && v.analysisRole !== 'filter_only'),
+    () => variables.filter((v) => isGrainCompatible(v, grain) && v.analysisRole !== 'filter_only'),
     [variables, grain],
   );
   const modules = useMemo(

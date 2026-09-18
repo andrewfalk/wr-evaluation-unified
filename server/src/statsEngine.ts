@@ -16,6 +16,11 @@ export interface StatsEngineVariable {
   key: string;
   kind: StatsEngineVariableKind;
   values: Array<number | string | boolean>;
+  // PR3-B 후속 — histogram bin 개수(Freedman-Diaconis/Sturges) 계산 기준을 행 수(values.length,
+  // job/disease grain 브로드캐스트면 같은 case가 여러 행으로 중복된다)가 아니라 실제 서로 다른
+  // 인원 수로 맞추기 위한 힌트. continuous에서만 채운다 — Python은 person 신원을 몰라도(전역
+  // 원칙 유지) 이 스칼라 하나는 받아 bin 해상도 계산에만 쓴다(histogram.py 참고).
+  personCount?: number;
 }
 
 export interface StatsEngineRequest {

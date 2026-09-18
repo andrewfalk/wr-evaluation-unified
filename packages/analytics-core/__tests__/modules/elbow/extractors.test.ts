@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { extractElbowBurdenGradeMax } from '../../../modules/elbow/extractors';
+import {
+  extractElbowBurdenGradeMax,
+  extractElbowTemporalRecentTaskChange,
+  extractElbowTemporalTaskChangeDate,
+  extractElbowTemporalSymptomOnsetInterval,
+  extractElbowTemporalImprovesWithRest,
+} from '../../../modules/elbow/extractors';
 import { deterministicMigrate } from '../../../migration/deterministicMigrate';
 
 const FALLBACK = '2024-01-01T00:00:00.000Z';
@@ -342,5 +348,60 @@ describe('extractElbowBurdenGradeMax — 우선순위 사슬(§1-1a)', () => {
     );
     expect(withNo.value).toBe('부담 작업 아님');
     expect(withBlank).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+  });
+});
+
+// PR0-B4 Slice 8a — temporal 4개(case grain, 병합 결과 기준).
+describe('extractElbowTemporal* — case grain(temporalSequence/temporalRelation 병합 결과)', () => {
+  it('모듈 비활성이면 structural_missing', () => {
+    const result = extractElbowTemporalRecentTaskChange(migrate(baseCase({ activeModules: [] })));
+    expect(result).toEqual({ value: null, missing: 'structural_missing', qualityFlags: [] });
+  });
+
+  it('temporalSequence가 비어있으면 not_entered', () => {
+    const result = extractElbowTemporalRecentTaskChange(migrate(baseCase({ temporalSequence: {} })));
+    expect(result).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+  });
+
+  it('recentTaskChange — 정상 도메인 값은 그대로 통과, 도메인 밖 값은 invalid', () => {
+    const ok = extractElbowTemporalRecentTaskChange(migrate(baseCase({ temporalSequence: { recent_task_change: 'new_task' } })));
+    expect(ok).toEqual({ value: 'new_task', missing: null, qualityFlags: [] });
+    const bad = extractElbowTemporalRecentTaskChange(migrate(baseCase({ temporalSequence: { recent_task_change: 'unknown_value' } })));
+    expect(bad).toEqual({ value: null, missing: 'not_entered', qualityFlags: ['invalid'] });
+  });
+
+  it('taskChangeDate — 정상 ISO 날짜 통과, 형식 불일치는 invalid', () => {
+    const ok = extractElbowTemporalTaskChangeDate(migrate(baseCase({ temporalSequence: { task_change_date: '2024-03-01' } })));
+    expect(ok).toEqual({ value: '2024-03-01', missing: null, qualityFlags: [] });
+    const bad = extractElbowTemporalTaskChangeDate(migrate(baseCase({ temporalSequence: { task_change_date: '2024/03/01' } })));
+    expect(bad).toEqual({ value: null, missing: 'not_entered', qualityFlags: ['invalid'] });
+  });
+
+  it('symptomOnsetInterval — 자유 문자열은 그대로 통과', () => {
+    const result = extractElbowTemporalSymptomOnsetInterval(migrate(baseCase({ temporalSequence: { symptom_onset_interval: '2주' } })));
+    expect(result).toEqual({ value: '2주', missing: null, qualityFlags: [] });
+  });
+
+  it('improvesWithRest — yes/no만 boolean으로 변환, 그 외는 invalid', () => {
+    expect(extractElbowTemporalImprovesWithRest(migrate(baseCase({ temporalSequence: { improves_with_rest: 'yes' } })))).toEqual({
+      value: true, missing: null, qualityFlags: [],
+    });
+    expect(extractElbowTemporalImprovesWithRest(migrate(baseCase({ temporalSequence: { improves_with_rest: 'no' } })))).toEqual({
+      value: false, missing: null, qualityFlags: [],
+    });
+    expect(extractElbowTemporalImprovesWithRest(migrate(baseCase({ temporalSequence: { improves_with_rest: 'maybe' } })))).toEqual({
+      value: null, missing: 'not_entered', qualityFlags: ['invalid'],
+    });
+  });
+
+  it('temporalRelation(legacy alias)만 있어도 동일하게 읽힌다', () => {
+    const payload = {
+      data: {
+        shared: { jobs: [{ id: 'job-1', jobName: '조립공' }], diagnoses: [] },
+        modules: { elbow: { temporalRelation: { recent_task_change: 'process_change' } } },
+        activeModules: ['elbow'],
+      },
+    };
+    expect(extractElbowTemporalRecentTaskChange(migrate(payload))).toEqual({ value: 'process_change', missing: null, qualityFlags: [] });
   });
 });

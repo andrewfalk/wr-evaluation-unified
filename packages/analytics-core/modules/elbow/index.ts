@@ -6,7 +6,13 @@ export * from './metadata';
 
 import { registerAnalyticsModule } from '../../analyticsRegistry';
 import { ELBOW_METADATA } from './metadata';
-import { extractElbowBurdenGradeMax } from './extractors';
+import {
+  extractElbowBurdenGradeMax,
+  extractElbowTemporalRecentTaskChange,
+  extractElbowTemporalTaskChangeDate,
+  extractElbowTemporalSymptomOnsetInterval,
+  extractElbowTemporalImprovesWithRest,
+} from './extractors';
 import { isElbowAssessmentComplete } from './derived';
 
 registerAnalyticsModule({
@@ -14,6 +20,10 @@ registerAnalyticsModule({
   metadata: ELBOW_METADATA,
   extractors: {
     'elbow.assessment.burdenGradeMax': extractElbowBurdenGradeMax,
+    'elbow.temporal.recentTaskChange': extractElbowTemporalRecentTaskChange,
+    'elbow.temporal.taskChangeDate': extractElbowTemporalTaskChangeDate,
+    'elbow.temporal.symptomOnsetInterval': extractElbowTemporalSymptomOnsetInterval,
+    'elbow.temporal.improvesWithRest': extractElbowTemporalImprovesWithRest,
   },
   isComplete: isElbowAssessmentComplete,
 });

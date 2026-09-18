@@ -6,7 +6,8 @@
 // /metadata.ts에 export돼 있어 그걸 그대로 재사용한다.
 import { ELBOW_BURDEN_GRADE_ORDER } from '@wr/analytics-core/modules/elbow/index';
 import { WRIST_BURDEN_GRADE_ORDER } from '@wr/analytics-core/modules/wrist/index';
-// PR0-B3 Part B — diagnosis_side grain 2종(K-L Grade/Ellman Class)도 같은 재사용 패턴.
+// PR0-B3 Part B — disease grain(구 diagnosis_side) 2종(K-L Grade/Ellman Class)도 같은
+// 재사용 패턴.
 import { KNEE_KLG_ORDER } from '@wr/analytics-core/modules/knee/index';
 import { SHOULDER_ELLMAN_ORDER } from '@wr/analytics-core/modules/shoulder/index';
 // PR0-B3 Part C 리뷰 보완 — categorical 변수 중 "고정된 값 집합"을 가진 것(부위군 6종)의
@@ -14,6 +15,10 @@ import { SHOULDER_ELLMAN_ORDER } from '@wr/analytics-core/modules/shoulder/index
 // 않는다 — statsBivariateRoles.ts의 resolveLevelOrder가 관측값에서 동적으로 순서를 만든다.
 import { DIAGNOSIS_MODULE_GROUP_ORDER } from '@wr/analytics-core/modules/diagnosis/index';
 
+// grain 단순화(PR0-B4 개정) — job_diagnosis grain 자체가 삭제되면서 그 grain 전용이던
+// ordinal 변수(repetitionLevel/forceLevel/restDistribution/staticHoldingLevel/
+// directPressureLevel 등)도 카탈로그에서 함께 삭제됐다. 남은 ordinal은 burdenGradeMax
+// (case)·K-L Grade/Ellman Class(disease)뿐이다.
 export function getOrdinalOrder(variableKey: string): readonly string[] | null {
   if (variableKey === 'elbow.assessment.burdenGradeMax') return ELBOW_BURDEN_GRADE_ORDER;
   if (variableKey === 'wrist.assessment.burdenGradeMax') return WRIST_BURDEN_GRADE_ORDER;

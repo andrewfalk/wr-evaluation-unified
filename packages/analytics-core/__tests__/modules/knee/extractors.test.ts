@@ -7,6 +7,8 @@ import {
   extractKneeDiagnosisSideKlGrade,
   extractKneeDiagnosisSideConfirmedStatus,
   extractKneeDiagnosisSideAppliedConfirmedMismatch,
+  extractKneeJobWeight,
+  extractKneeJobStairs,
 } from '../../../modules/knee/extractors';
 import { deterministicMigrate } from '../../../migration/deterministicMigrate';
 import type { KneeCalculationJob } from '../../../modules/knee/derived';
@@ -391,6 +393,66 @@ describe('extractKneeDiagnosisSideAppliedConfirmedMismatch — diagnosis_side gr
     expect(result).toEqual([
       { entityKey: ['dx-1', 'right'], value: true, missing: null, qualityFlags: [] },
       { entityKey: ['dx-1', 'left'], value: true, missing: null, qualityFlags: [] },
+    ]);
+  });
+});
+
+// PR0-B4 Slice 4 — coverage 잔여 필드(매핑표 §2). enumerateJobEntities(shared.jobs[] 기준)
+// + modules.knee.jobExtras[] 투영 — 위 relatedness.max 테스트의 baseCase(레거시
+// modules.knee.jobs[] 기반)와 데이터 소스가 다르므로 별도 헬퍼를 쓴다.
+function jobExtrasCase(overrides: { jobs?: unknown[]; jobExtras?: unknown[]; activeModules?: string[] }) {
+  const { jobs = [{ id: 'job-1', jobName: '용접공' }], jobExtras = [], activeModules = ['knee'] } = overrides;
+  return { data: { shared: { jobs }, modules: { knee: { jobExtras } }, activeModules } };
+}
+
+describe('extractKneeJobWeight/Stairs — job grain(jobExtras 원시값 투영)', () => {
+  it('knee 모듈이 비활성이면 structural_missing', () => {
+    const result = extractKneeJobWeight(migrate(jobExtrasCase({ activeModules: [] })));
+    expect(result).toEqual([{ entityKey: ['job-1'], value: null, missing: 'structural_missing', qualityFlags: [] }]);
+  });
+
+  it('jobExtras 매칭 레코드가 없으면 not_entered', () => {
+    const result = extractKneeJobWeight(migrate(jobExtrasCase({})));
+    expect(result).toEqual([{ entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: [] }]);
+  });
+
+  it('weight — 정상 입력 통과, 레거시 modules.knee.jobs[]는 안 본다(제외 결정)', () => {
+    const result = extractKneeJobWeight(migrate(jobExtrasCase({ jobExtras: [{ sharedJobId: 'job-1', weight: 30 }] })));
+    expect(result).toEqual([{ entityKey: ['job-1'], value: 30, missing: null, qualityFlags: [] }]);
+  });
+
+  // 8차 검토 P2 재현 — parseNonNegativeNumber는 내부적으로 String(x)를 거쳐 배열도
+  // 우연히 숫자로 통과시킨다(String([30]) === '30'). typeof 사전 검증이 이를 막는지 확인.
+  it('배열로 감싼 유효 숫자여도 강제변환으로 통과시키지 않는다 — not_entered + invalid', () => {
+    const result = extractKneeJobWeight(migrate(jobExtrasCase({ jobExtras: [{ sharedJobId: 'job-1', weight: [30] }] })));
+    expect(result).toEqual([{ entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] }]);
+  });
+
+  // 9차 검토 P2 재현 — isBlank(전역 exported)는 String(x)로 감싸 String([])===''·
+  // String([null])===''가 돼 typeof 검사보다 먼저 "빈 값"으로 오인했다. 빈 값 판정을
+  // null·undefined·공백 문자열로 한정했는지 직접 확인한다(무플래그 not_entered가 아니라
+  // invalid가 붙어야 손상값 구분이 산다).
+  it('빈 배열·[null] 등 String() 강제변환으로 빈 문자열이 되는 배열은 빈 값이 아니라 손상값으로 처리한다 — invalid', () => {
+    expect(extractKneeJobWeight(migrate(jobExtrasCase({ jobExtras: [{ sharedJobId: 'job-1', weight: [] }] })))).toEqual([
+      { entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
+    ]);
+    expect(extractKneeJobWeight(migrate(jobExtrasCase({ jobExtras: [{ sharedJobId: 'job-1', weight: [null] }] })))).toEqual([
+      { entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
+    ]);
+  });
+
+  it('stairs — 체크박스라 undefined는 not_entered, boolean은 그대로, 손상 타입만 invalid', () => {
+    expect(extractKneeJobStairs(migrate(jobExtrasCase({ jobExtras: [{ sharedJobId: 'job-1' }] })))).toEqual([
+      { entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: [] },
+    ]);
+    expect(extractKneeJobStairs(migrate(jobExtrasCase({ jobExtras: [{ sharedJobId: 'job-1', stairs: true }] })))).toEqual([
+      { entityKey: ['job-1'], value: true, missing: null, qualityFlags: [] },
+    ]);
+    expect(extractKneeJobStairs(migrate(jobExtrasCase({ jobExtras: [{ sharedJobId: 'job-1', stairs: false }] })))).toEqual([
+      { entityKey: ['job-1'], value: false, missing: null, qualityFlags: [] },
+    ]);
+    expect(extractKneeJobStairs(migrate(jobExtrasCase({ jobExtras: [{ sharedJobId: 'job-1', stairs: 'yes' }] })))).toEqual([
+      { entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] },
     ]);
   });
 });

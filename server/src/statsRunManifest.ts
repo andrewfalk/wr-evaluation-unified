@@ -11,7 +11,13 @@ import { INTEGRATED_CATALOG_VERSION } from './statsCatalogVersion';
 // PR3-A — Python subprocess 엔진이 이변량 8종을 지원하게 됐다(services/stats-engine
 // /bivariate.py, protocolVersion 2).
 // PR3-B — protocolVersion 3(히스토그램·박스플롯·상관행렬 추가, 계획서 §2/§3/§4).
-export const STATS_ENGINE_VERSION = 'v3-python-charts-correlation-matrix';
+// PR3-B 후속(A안) — histogram.py의 bin 개수(Freedman-Diaconis/Sturges) 계산 기준을
+// 행 수에서 personCount(요청에 새로 추가된 선택 필드)로 바꿨다. 통신 규격 자체(요청/
+// 응답 shape)는 안 바뀌었으므로 protocolVersion은 그대로 3이지만, 같은 recipe/데이터로
+// 이전에 캐시된 histogram 결과(옛 bin 개수 기준)를 새 계산 결과와 구분해야 하므로 이
+// 엔진 구현 버전은 반드시 올린다(캐시 무효화 목적 — statsExecutionDigest.ts가 이 값을
+// digest 입력에 직접 포함한다).
+export const STATS_ENGINE_VERSION = 'v4-histogram-person-count-bins';
 
 export interface BuildRunManifestInput {
   recipeDigest: string;

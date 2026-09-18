@@ -6,7 +6,13 @@ export * from './metadata';
 
 import { registerAnalyticsModule } from '../../analyticsRegistry';
 import { WRIST_METADATA } from './metadata';
-import { extractWristBurdenGradeMax } from './extractors';
+import {
+  extractWristBurdenGradeMax,
+  extractWristTemporalRecentTaskChange,
+  extractWristTemporalTaskChangeDate,
+  extractWristTemporalSymptomOnsetInterval,
+  extractWristTemporalImprovesWithRest,
+} from './extractors';
 import { isWristAssessmentComplete } from './derived';
 
 registerAnalyticsModule({
@@ -14,6 +20,10 @@ registerAnalyticsModule({
   metadata: WRIST_METADATA,
   extractors: {
     'wrist.assessment.burdenGradeMax': extractWristBurdenGradeMax,
+    'wrist.temporal.recentTaskChange': extractWristTemporalRecentTaskChange,
+    'wrist.temporal.taskChangeDate': extractWristTemporalTaskChangeDate,
+    'wrist.temporal.symptomOnsetInterval': extractWristTemporalSymptomOnsetInterval,
+    'wrist.temporal.improvesWithRest': extractWristTemporalImprovesWithRest,
   },
   isComplete: isWristAssessmentComplete,
 });

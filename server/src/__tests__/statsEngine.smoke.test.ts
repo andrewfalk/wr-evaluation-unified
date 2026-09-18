@@ -20,6 +20,7 @@
 import { describe, expect, it, beforeAll } from 'vitest';
 import { execFileSync } from 'child_process';
 import path from 'path';
+import { resolveDisclosableHistogram, type PersonKeyed } from '../statsChartDisclosure';
 
 const PYTHON = process.env.STATS_ENGINE_PYTHON_FOR_TEST || 'python';
 const SCRIPTS_DIR = path.resolve(__dirname, '../../../services/stats-engine');
@@ -123,6 +124,63 @@ describe.skipIf(!AVAILABLE)('statsEngine <-> analyze.py 실제 프로세스 (smo
     const parsed = JSON.parse(stdout);
     expect(parsed.continuous[0].histogram.bins.length).toBeGreaterThan(0);
     expect(parsed.continuous[0].boxplot.outlierCount).toBe(1);
+  });
+
+  // PR3-B 후속(A안) — personCount 힌트가 실제 stdin JSON 경로로 전달돼야 의미가 있다
+  // (TS 인터페이스만 바꾸고 실제 요청 조립에서 빠지면 무효). disease/job grain
+  // 브로드캐스트(200명이 3행씩 복제)를 고정값(선형 등간격)으로 재현해, personCount를
+  // 포함한 요청이 생략한 요청보다 실제로 더 적은 bin 개수를 반환하는지 실측한다
+  // (1차 리뷰 권장 — 단위테스트만으로는 실제 전달 경로 누락을 못 잡는다).
+  it('personCount를 포함한 실제 요청은 생략한 요청보다 histogram bin이 더 적게 나온다(200명×3행 브로드캐스트 재현)', () => {
+    const base = Array.from({ length: 200 }, (_, i) => (i / 199) * 100);
+    const values = base.flatMap((v) => [v, v, v]);
+    const withoutPersonCount = { protocolVersion: 3, variables: [{ key: 'v1', kind: 'continuous', values }] };
+    const withPersonCount = { protocolVersion: 3, variables: [{ key: 'v1', kind: 'continuous', values, personCount: 200 }] };
+
+    const r1 = runReal(JSON.stringify(withoutPersonCount));
+    const r2 = runReal(JSON.stringify(withPersonCount));
+    expect(r1.stderr).toBe('');
+    expect(r2.stderr).toBe('');
+    const bins1 = JSON.parse(r1.stdout).continuous[0].histogram.bins;
+    const bins2 = JSON.parse(r2.stdout).continuous[0].histogram.bins;
+
+    expect(bins2.length).toBeLessThan(bins1.length);
+    const sum = (bins: Array<{ count: number }>) => bins.reduce((s, b) => s + b.count, 0);
+    expect(sum(bins1)).toBe(values.length);
+    expect(sum(bins2)).toBe(values.length);
+  });
+
+  // B안(A안 후속) — resolveDisclosableHistogram(순수 Node 로직, 서브프로세스 왕복
+  // 없음)이 실제 numpy가 만든(단순 반올림된 값이 아닌 진짜 float) bin 경계를
+  // 받아도 이진탐색 배정·재분할이 올바르게 동작하는지 확인한다. 원본 bin 중
+  // 가장 값이 작은 구간에 속하는 값들만 인위적으로 소수(2명)에게 몰아(job/disease
+  // grain 브로드캐스트 흉내) 그 bin만 소수셀로 만들고 나머지는 1:1 서로 다른
+  // 사람으로 둔다 — 원본은 그 bin 때문에 실패해야 하고, 재분할하면 인원 많은
+  // 이웃 구간과 합쳐져 통과해야 한다(정확한 bin 개수는 FD 공식이 정하므로
+  // 하드코딩하지 않는다).
+  it('실제 Python이 만든 float bin 경계로도 재분할(resolveDisclosableHistogram)이 올바르게 동작한다', () => {
+    const values = Array.from({ length: 300 }, (_v, i) => i); // 0..299, 균일 분포
+    const request = { protocolVersion: 3, variables: [{ key: 'v1', kind: 'continuous', values, personCount: 300 }] };
+    const { code, stdout, stderr } = runReal(JSON.stringify(request));
+    expect(stderr).toBe('');
+    expect(code).toBe(0);
+    const rawBins = JSON.parse(stdout).continuous[0].histogram.bins as Array<{ lower: number; upper: number; count: number }>;
+    expect(rawBins.length).toBeGreaterThan(3);
+
+    type Row = PersonKeyed & { value: number };
+    let sparseToggle = 0;
+    const firstBinUpper = rawBins[0].upper;
+    const rows: Row[] = values.map((v, i) => ({
+      personClusterKey: v < firstBinUpper ? `sparse-${sparseToggle++ % 2}` : `rich-${i}`,
+      value: v,
+    }));
+    const valueOf = (r: Row) => r.value;
+
+    const resolved = resolveDisclosableHistogram(rows, rawBins, valueOf);
+    expect(resolved).not.toBeNull();
+    expect(resolved!.merged).toBe(true);
+    expect(resolved!.bins.length).toBeLessThan(rawBins.length);
+    expect(resolved!.bins.reduce((s, b) => s + b.count, 0)).toBe(300);
   });
 
   it('상관행렬 요청이 실제 Python 프로세스를 왕복해 모든 쌍을 반환한다', () => {

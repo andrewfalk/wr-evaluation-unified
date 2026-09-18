@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { describeStatsApiError } from './describeStatsError';
 import { describeMethodReasonCode } from './describeMethodReasonCode';
+import { isGrainCompatible } from '@analytics-core/common';
 
 // PR3-A — StatsMethodIdSchema(shared/contracts/stats.ts)와 동일 순서·목록. 실행
 // 가능 8종 + 예약된 unsupported 2종(대응검정, 계획서 §"실행 가능한 방법은 8종").
@@ -19,6 +20,22 @@ const METHOD_LABELS = {
 const METHOD_ORDER = Object.keys(METHOD_LABELS);
 
 const STATUS_LABELS = { available: '실행 가능', conditional: '주의', unsupported: '불가' };
+
+// 통계 배경이 없는 사용자를 위한 방법 카드 툴팁(hover 시 title로 노출) — 이 검정이 뭘
+// 비교하는지·결과를 어떻게 읽는지를 2문장 이내로. "p-값이 작을수록…" 같은 공통 해석은
+// 여기 반복하지 않고 방법 목록 위에 한 번만 둔다(MethodPicker의 METHOD_LIST_PVALUE_NOTE).
+// unsupported 상태는 이미 describeMethodReasonCode()가 title을 채우므로 여기 없음.
+const METHOD_TOOLTIPS = {
+  welch_t: '두 그룹의 평균을 비교합니다(예: 남/여의 부담점수 평균 차이). 두 그룹의 분산이 달라도 쓸 수 있어 일반 t검정보다 안전합니다.',
+  mann_whitney: '두 그룹의 값 순위(분포)를 비교합니다 — 평균 대신 중앙값 차이를 볼 때, 또는 값이 한쪽으로 치우치거나 이상치가 많을 때 Welch t검정보다 안정적입니다.',
+  anova: '세 그룹 이상의 평균을 한 번에 비교합니다(예: 직업군 3개의 부담점수). 유의하면 "적어도 한 그룹은 다르다"는 뜻이며, 어느 그룹끼리 다른지는 별도 확인이 필요합니다.',
+  kruskal_wallis: '세 그룹 이상을 비교하되 평균이 아니라 순위(분포)로 비교합니다 — 분산분석 조건이 안 맞을 때 대신 씁니다.',
+  chi_square: '두 범주형 변수 사이에 연관이 있는지 봅니다(예: 성별과 상병 유무).',
+  fisher_exact: '카이제곱검정과 같은 목적(범주형 변수 간 연관)이지만, 표본이 작거나 어느 칸의 인원이 매우 적을 때 더 정확합니다.',
+  pearson_correlation: '두 연속형 변수가 함께 커지거나 작아지는 직선적 관계를 −1~+1 사이 값으로 나타냅니다. 0에 가까우면 관계가 약하고, ±1에 가까울수록 강합니다.',
+  spearman_correlation: 'Pearson과 같은 목적이지만 직선 관계가 아니라 "한쪽이 커지면 다른 쪽도 대체로 커지는/작아지는" 순위 관계를 봅니다. 이상치에 덜 민감합니다.',
+};
+const METHOD_LIST_PVALUE_NOTE = 'p-값이 작을수록(보통 0.05 미만) 우연이라 보기 어려운 차이·연관으로 해석합니다.';
 
 // server/src/statsRecipeValidation.ts의 TYPE_ALLOWED_OPERATORS와 동일 — 서버가 최종 판정하므로
 // 여기서 어긋나도 안전하지만(400으로 드러남), UI가 애초에 무효한 조합을 안 보여주기 위해 미러링.
@@ -40,15 +57,16 @@ const PURPOSE_LABELS = {
   association: '연관성', prediction: '예측', formula_audit: '공식 감사',
 };
 
-// PR0-B3 Part A — grain 선택 UI. §2 grain표(마스터 계획서)의 한국어 표기.
+// grain 선택 UI. §2 grain표(마스터 계획서)의 한국어 표기 — grain 단순화(PR0-B4 개정) 후속으로
+// person을 다시 삭제해 case(사례)/job(직업)/disease(상병) 3개만 남는다. 라벨은 전부
+// "한글(영문)" 패턴으로 통일한다(job이 "직업"으로만 표기돼 있던 게 이전 리뷰에서
+// 지적된 불일치). disease는 이름만 바뀐 게 아니라 행 단위 자체가 "상병 건수"가 아니라
+// "상병×측"이다(양측 상병=2행, enumerateDiseaseEntities/grainEntities.ts 참고) — 그
+// 설명은 라벨이 아니라 아래 disease 전용 안내 문구(관측 행 기준 note)에서 다룬다.
 const GRAIN_LABELS = {
-  person: '사람(person)',
   case: '사례(case)',
-  diagnosis_side: '진단측',
-  job: '직업력',
-  job_diagnosis: '직업력×진단',
-  task: '작업',
-  vibration_interval: '진동구간',
+  job: '직업(job)',
+  disease: '상병(disease)',
 };
 
 function needsValue(operator) {
@@ -246,10 +264,12 @@ export function RecipePanel({
     [catalog],
   );
 
-  // PR0-B3 Part A — 필터 후보 = 현재 grain 전체(analysisRole 계약은 Part C). 분석 변수
-  // 선택은 CatalogPanel이 이미 grain으로 거르므로 여기서는 필터 후보만 별도로 좁힌다.
+  // 필터 후보 = 현재 grain과 호환되는 전체(analysisRole 계약은 별개 — filter_only도
+  // 여기선 그대로 둔다). 분석 변수 선택은 CatalogPanel이 이미 grain 호환성으로 거르므로
+  // 여기서는 필터 후보만 별도로 좁힌다. grain 단순화(PR0-B4 개정) — 서버와 동일한
+  // isGrainCompatible로 case 브로드캐스트 안전 변수도 포함시킨다.
   const grainCatalogByKey = useMemo(
-    () => new Map(Array.from(catalogByKey.entries()).filter(([, v]) => v.grain === grain)),
+    () => new Map(Array.from(catalogByKey.entries()).filter(([, v]) => isGrainCompatible(v, grain))),
     [catalogByKey, grain],
   );
 
@@ -306,6 +326,18 @@ export function RecipePanel({
         {unsupportedGrains?.length > 0 && (
           <p className="swb-suppressed-note">
             나머지 {unsupportedGrains.length}종은 아직 지원하지 않습니다: {unsupportedGrains.map((u) => GRAIN_LABELS[u.grain] || u.grain).join(', ')}
+          </p>
+        )}
+        {/* grain 단순화 개정(PR0-B4) — job/disease 기술통계는 case 단위가 아니라 관측 행
+            단위다. 브로드캐스트된 인적사항(성별 등)도 그 행 수만큼 반복 집계되므로 사람이
+            job을 여러 개 가지면 고유 인원 분포처럼 보이지 않는다 — 계획서 "행 단위 가중
+            한계" 절, 오해 방지를 위해 grain 선택 즉시 명시한다. */}
+        {(grain === 'job' || grain === 'disease') && (
+          <p className="swb-suppressed-note">
+            {GRAIN_LABELS[grain]} 기술통계는 <strong>관측 행 기준</strong>입니다 — 브로드캐스트된 인적사항(성별 등)도 그 행 수만큼 반영됩니다(고유 인원 분포가 아닙니다).{' '}
+            {grain === 'job'
+              ? '예: 한 사람이 직업을 3개 가지면 그 사람의 값이 3행에 그대로 반복됩니다.'
+              : '예: 양측 상병 하나는 좌·우 2행으로 나뉘고, 그 사람의 값이 2행에 그대로 반복됩니다.'}
           </p>
         )}
 
@@ -435,6 +467,9 @@ export function RecipePanel({
         <div className="swb-section-label">분석 범위 미리보기</div>
         <PreviewSummary previewState={previewState} isPreviewCurrent={isPreviewCurrent} catalogByKey={catalogByKey} />
 
+        {missingFormulaPolicy && (
+          <p className="swb-status-warn">위 "공식 정책"에서 선택을 완료해야 분석을 실행할 수 있습니다.</p>
+        )}
         <button
           type="button"
           className="swb-btn swb-btn--primary"
@@ -469,6 +504,7 @@ function MethodPicker({ previewState, isPreviewCurrent, requestedMethod, onReque
       )}
       {ready && orderedMethods.length > 0 && (
         <div className="swb-method-list">
+          <p className="swb-suppressed-note" style={{ margin: '0 0 4px' }}>{METHOD_LIST_PVALUE_NOTE}</p>
           {orderedMethods.map((m) => {
             const selected = requestedMethod === m.id;
             const clickable = m.status !== 'unsupported';
@@ -482,7 +518,7 @@ function MethodPicker({ previewState, isPreviewCurrent, requestedMethod, onReque
                   className="swb-method-card-main"
                   disabled={!clickable}
                   onClick={() => clickable && onRequestedMethodChange(m.id)}
-                  title={m.status === 'unsupported' ? describeMethodReasonCode(m.reasonCode) : undefined}
+                  title={m.status === 'unsupported' ? describeMethodReasonCode(m.reasonCode) : METHOD_TOOLTIPS[m.id]}
                 >
                   <span>{METHOD_LABELS[m.id] || m.label}</span>
                   <span

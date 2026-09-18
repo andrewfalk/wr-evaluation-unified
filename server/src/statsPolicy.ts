@@ -5,6 +5,12 @@
 // 이 값 미만(0 < n < MINIMUM_COHORT)이면 그 신호를 억제한다.
 export const MINIMUM_COHORT = 10;
 
+// B안(히스토그램 적응형 해상도 축소) — 재분할 폴백 후보의 최소 bin 개수. 이 개수
+// 미만이면 "히스토그램"이라 부르기엔 정보가 너무 없다고 보고 안내 메시지로 대체한다.
+// 원본(재분할 전) bin이 애초에 이보다 적어도(1~2개, 상수값 등) 그건 재분할 대상이
+// 아니라 원본 그대로 공개한다 — 이 하한은 "폴백 후보"에만 적용되는 하한이다.
+export const MIN_DISCLOSABLE_BINS = 3;
+
 // §F — 이번 PR의 estimability는 §9.2가 요구하는 최소 카운트 집합뿐이다(전체 estimability
 // gate, 즉 maxParameters/residual df/design matrix rank 등은 회귀 스펙이 없는 이 PR에는
 // 대상이 없다). 정책이 바뀌면(계산 규칙 변경) 이 값을 올린다.
@@ -23,7 +29,9 @@ export const CORRELATION_MATRIX_POLICY_VERSION = 'v1-pairwise-gates-bh-fdr';
 // 버전(계획서 §1/§3). 히스토그램/그리드는 person 단위 전체연결억제, 박스플롯
 // 이상치는 이상치·비이상치 양쪽 partition의 person 고유 인원 게이트가 독립
 // 적용된다 — 이 판정 로직이 바뀌면 이 값을 올린다.
-export const CHART_DISCLOSURE_POLICY_VERSION = 'v1-outlier-partition-gate';
+// B안 — 히스토그램이 all-or-nothing 억제 대신 적응형 해상도 축소(재분할)를 거치도록
+// 판정 로직 자체가 바뀌어 범프한다(server/src/statsChartDisclosure.ts 참고).
+export const CHART_DISCLOSURE_POLICY_VERSION = 'v2-histogram-adaptive-resolution';
 
 // §D-1 — family 내부 값-다양성 제한. 이 창(windowMinutes) 안에서 같은 queryFamilyDigest의
 // 요청 수가 maxQueriesPerFamily를 넘거나, 어느 필터 키든 서로 다른 값의 수가

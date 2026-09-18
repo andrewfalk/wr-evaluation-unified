@@ -2,12 +2,11 @@
 // spine 전용 우선순위(모듈 비활성 → 평가상태 unknown/none → 데이터 부족 → 정상 계산)를
 // 구현한다.
 
-import type { ExtractedValue, MissingReason, MigrationResult, QualityFlag, RepeatedObservation } from '../../types';
+import type { ExtractedValue, MissingReason, MigrationResult, QualityFlag } from '../../types';
 import { isPlainObject } from '../../migration/deterministicMigrate';
-import { formulaDB, convertTimeToSeconds } from './constants';
+import { formulaDB } from './constants';
 import { computeMddmCalc, resolveMddmStatus, type SpineTask, type MddmFormulaPolicy } from './mddm';
-import { computeVibrationCalc, resolveVibrationStatus, intervalA8, isIntervalValid, type SpineVibrationInterval } from './vibration';
-import { enumerateVibrationIntervalEntities, enumerateTaskEntities } from '../../grainEntities';
+import { computeVibrationCalc, resolveVibrationStatus, type SpineVibrationInterval } from './vibration';
 import type { SpineDiagnosis, SpineJobLike, SpineModuleShape } from './types';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
 
@@ -217,170 +216,11 @@ export function extractSpineVibrationDvMax(
   return { value: result.dv.max, missing: null, qualityFlags: Array.from(qualityFlagSet) };
 }
 
-// PR0-B3 Part A 리뷰 지적(2026-09-12) — isIntervalValid가 읽는 awMin/timeUnit뿐 아니라,
-// intervalA8/convertTimeToSeconds가 실제로 소비하는 방식(Number(aw), value*60/*3600 또는
-// 그대로 통과)과 정확히 같은 검증을 계산 *전에* 해야 한다. 두 함수 다 안 좋은 입력을
-// 조용히 0으로 바꾸거나(Number(NaN)||0) 미인식 단위를 초로 취급하므로, 사전 검증 없이는
-// "미입력"과 "잘못된 입력"과 "정상 0"이 전부 같은 값으로 뭉개진다.
-//
-// "미입력"(blank)과 "잘못 입력"(present but unparseable)은 같은 취급이 아니다 — scanTaskQuality
-// (이 파일 위쪽, task 필드 검증)가 이미 확립한 관례대로 blank는 그냥 not_entered이고
-// invalid 플래그는 "값이 있는데 못 쓴다"는 경우에만 붙인다.
-//
-// PR0-B3 Part A 2차 리뷰 지적(P2) — Number()/String() 강제변환으로 "검증만" 하면 boolean·
-// 배열·객체도 통과한다(예: String(['hr'])==='hr'). 그런데 계산 함수(intervalA8/
-// convertTimeToSeconds)에는 원본 값이 그대로 전달되므로 검증과 계산이 서로 다른 값을 보는
-// 불일치가 생긴다. 그래서 이 두 필드는 원본이 number|string일 때만 허용하고(boolean/배열/
-// 객체는 즉시 invalid_type), 검증을 통과한 값은 parseStrictNumber/parseStrictTimeUnit이
-// 반환하는 정규화된 값을 계산에도 동일하게 넘긴다(원본 interval.xxx를 다시 읽지 않음).
 function parseStrictNumber(x: unknown): number | null {
   if (typeof x !== 'number' && typeof x !== 'string') return null;
   if (typeof x === 'string' && x.trim() === '') return null;
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
-}
-function parseStrictTimeUnit(x: unknown): string | null {
-  if (typeof x !== 'string') return null;
-  return VALID_TIME_UNITS.has(x) ? x : null;
-}
-
-type FieldCheck = 'ok' | 'blank' | 'invalid_type';
-// requirePositive — vibration.ts의 isIntervalValid가 이미 명시한 도메인 규칙("awMax>0 &&
-// time>0", vibration.ts:29)과 동일한 기준이다. 3차 리뷰 지적(P1) — 음수(및 0)는 "그럴듯하지만
-// 의심스러운 값"이 아니라 그 구간이 물리적으로 존재할 수 없는 값이므로, invalid 플래그만
-// 붙이고 계산을 강행하면 안 되고 결측(not_entered)으로 돌려야 한다. 0 역시 도메인 규칙이
-// 이미 배제한 값이므로(exclusive), 음수와 구분해 별도로 허용하지 않기로 명시적으로 결정한다.
-function checkNumericField(x: unknown, opts: { requirePositive?: boolean } = {}): FieldCheck {
-  if (x === null || x === undefined || (typeof x === 'string' && x.trim() === '')) return 'blank';
-  const n = parseStrictNumber(x);
-  if (n === null) return 'invalid_type';
-  if (opts.requirePositive && !(n > 0)) return 'invalid_type';
-  return 'ok';
-}
-function checkTimeUnitField(x: unknown): FieldCheck {
-  if (x === null || x === undefined || (typeof x === 'string' && x.trim() === '')) return 'blank';
-  return parseStrictTimeUnit(x) !== null ? 'ok' : 'invalid_type';
-}
-// 여러 필드 검사 결과를 종합 — 하나라도 invalid_type이면 플래그를 붙이고, 하나라도
-// ok가 아니면(blank 포함) 계산을 진행하지 않고 not_entered로 반환해야 한다는 뜻만 알려준다.
-function summarizeFieldChecks(checks: FieldCheck[]): { computable: boolean; invalid: boolean } {
-  return { computable: checks.every((c) => c === 'ok'), invalid: checks.some((c) => c === 'invalid_type') };
-}
-
-// 순서 1: 모듈 비활성/plain object 아님 → 엔터티 자체가 없음(enumerateVibrationIntervalEntities
-// 가 이미 처리). 순서 2: vibrationExposureStatus 3상태 — 사례 단위 extractor
-// (extractSpineVibrationDvMax)와 동일한 판정을 반복 grain에도 그대로 적용한다. 실제
-// VibrationEvaluation.jsx(evaluation status 변경 UI)는 상태를 바꿔도 기존 구간 데이터를
-// 보존하므로, 이 판정 없이는 "노출없음/미평가"로 전환된 사례의 과거 입력이 계속 정상
-// 관측값으로 집계된다(§리뷰 지적 — 엔터티 행은 유지하되 missing만 상태에 맞게 바꾼다).
-export function extractSpineVibrationIntervalA8Max(
-  migrationResult: MigrationResult<AnalysisPatient>,
-): RepeatedObservation<number>[] {
-  const entities = enumerateVibrationIntervalEntities(migrationResult);
-  if (entities.length === 0) return [];
-
-  const spineModule = (migrationResult.payload.data.modules as Record<string, unknown> | undefined)?.spine as SpineModuleShape;
-  const status = resolveVibrationStatus(spineModule);
-  if (status === 'unknown') {
-    return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'not_assessed', qualityFlags: entity.qualityFlags }));
-  }
-  if (status === 'none') {
-    return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'not_applicable', qualityFlags: entity.qualityFlags }));
-  }
-
-  return entities.map((entity) => {
-    const interval = entity.source;
-    const flagSet = new Set<QualityFlag>(entity.qualityFlags);
-
-    // 계산이 실제로 소비하는 세 필드(awMax·timeValue·timeUnit) 모두를 계산 전에
-    // 검증한다 — 하나라도 blank거나 파싱 불가능하면 "0으로 계산됨"이 아니라
-    // not_entered로 취급한다(extractSpineMddmLifetimeDoseMNh의 최종 NaN 가드와
-    // 동일한 조합). blank는 invalid 플래그를 붙이지 않고, 파싱 불가만 붙인다.
-    // awMax·timeValue는 도메인 규칙상 0 이하가 존재할 수 없다(vibration.ts:29) — requirePositive로
-    // 음수·0을 계산 전에 결측 처리한다(3차 리뷰 P1, invalid 플래그만으로는 통계 입력에서
-    // 제외되지 않는다).
-    const fieldChecks = summarizeFieldChecks([
-      checkNumericField(interval.awMax, { requirePositive: true }),
-      checkNumericField(interval.timeValue, { requirePositive: true }),
-      checkTimeUnitField(interval.timeUnit),
-    ]);
-    if (fieldChecks.invalid) flagSet.add('invalid');
-    if (!fieldChecks.computable) {
-      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: Array.from(flagSet) };
-    }
-
-    // 남은 isIntervalValid 실패 경로(awMin<0 또는 awMax<awMin)는 "계산 불가"가 아니라
-    // "그럴듯하지만 의심스러운 값"이므로(원본 task 검증과 동일 원칙), 값은 그대로 계산하고
-    // invalid 플래그만 붙인다. awMax/timeValue 음수·0은 위에서 이미 결측으로 걸러졌다.
-    if (!isIntervalValid(interval)) flagSet.add('invalid');
-
-    // 검증을 통과한 정규화 값을 계산에도 그대로 넘긴다 — 원본 interval.xxx를 다시 읽으면
-    // 검증·계산이 다른 값을 볼 수 있다(3차 리뷰 P2).
-    const awMax = parseStrictNumber(interval.awMax)!;
-    const timeValue = parseStrictNumber(interval.timeValue)!;
-    const timeUnit = parseStrictTimeUnit(interval.timeUnit)!;
-    const a8 = intervalA8(awMax, timeValue, timeUnit);
-    // 위 사전 검증을 통과했으면 항상 유한값이어야 한다 — 그래도 최종 안전장치는 유지한다
-    // (계획서 §1-1a 7라운드 패턴, 다른 spine extractor와 동일).
-    if (!Number.isFinite(a8)) {
-      flagSet.add('invalid');
-      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: Array.from(flagSet) };
-    }
-    return { entityKey: entity.entityKey, value: a8, missing: null, qualityFlags: Array.from(flagSet) };
-  });
-}
-
-// PR0-B3 Part A — 변수 추가/제거 시 엔터티 모집단이 절대 바뀌지 않는다는 계약을 실제로
-// 검증하려면 같은 grain에 변수가 최소 2개는 있어야 한다(계획 pr0-b3-shimmying-magpie.md
-// "확인 필요" 항목 — 이 목적으로 신설). 구간별 일일 노출시간(시간 단위) — awMax와
-// 무관하게 timeValue/timeUnit만 소비하므로 A8Max와 서로 다른 결측 조건 조합을 만든다.
-export function extractSpineVibrationIntervalExposureHours(
-  migrationResult: MigrationResult<AnalysisPatient>,
-): RepeatedObservation<number>[] {
-  const entities = enumerateVibrationIntervalEntities(migrationResult);
-  if (entities.length === 0) return [];
-
-  const spineModule = (migrationResult.payload.data.modules as Record<string, unknown> | undefined)?.spine as SpineModuleShape;
-  const status = resolveVibrationStatus(spineModule);
-  if (status === 'unknown') {
-    return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'not_assessed', qualityFlags: entity.qualityFlags }));
-  }
-  if (status === 'none') {
-    return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'not_applicable', qualityFlags: entity.qualityFlags }));
-  }
-
-  return entities.map((entity) => {
-    const interval = entity.source;
-    const flagSet = new Set<QualityFlag>(entity.qualityFlags);
-
-    // timeValue는 도메인 규칙상 0 이하가 존재할 수 없다(vibration.ts:29) — 이 변수는
-    // awMax와 무관하게 값이 나오지만, 음수·0 시간은 이 변수에서도 결측이어야 한다(3차
-    // 리뷰 P1 — A8Max뿐 아니라 신규 노출시간 변수도 같은 결함이 재현됨).
-    const fieldChecks = summarizeFieldChecks([
-      checkNumericField(interval.timeValue, { requirePositive: true }),
-      checkTimeUnitField(interval.timeUnit),
-    ]);
-    if (fieldChecks.invalid) flagSet.add('invalid');
-    if (!fieldChecks.computable) {
-      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: Array.from(flagSet) };
-    }
-
-    // isIntervalValid는 awMin/awMax도 읽는다(§5.2 원칙 — 이 변수의 qualityFlags 판정에
-    // 영향을 주므로 dependsOn에도 포함돼 있다) — value 자체는 awMax와 무관하므로 실패해도
-    // 플래그만 붙이고 결측 처리하지 않는다(요청사항: "가속도가 잘못됐더라도 시간 자체가
-    // 유효하면 유지 가능").
-    if (!isIntervalValid(interval)) flagSet.add('invalid');
-
-    // 검증을 통과한 정규화 값을 계산에도 그대로 넘긴다(3차 리뷰 P2, 검증·계산 값 불일치 방지).
-    const timeValue = parseStrictNumber(interval.timeValue)!;
-    const timeUnit = parseStrictTimeUnit(interval.timeUnit)!;
-    const hours = convertTimeToSeconds(timeValue, timeUnit) / 3600;
-    if (!Number.isFinite(hours)) {
-      flagSet.add('invalid');
-      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: Array.from(flagSet) };
-    }
-    return { entityKey: entity.entityKey, value: hours, missing: null, qualityFlags: Array.from(flagSet) };
-  });
 }
 
 // PR0-B3 Part B — verticalDistribution/concomitantSpondylosis는 case grain 값인데 저장
@@ -492,81 +332,63 @@ export function extractSpineDiagnosisConcomitantSpondylosis(
   return extractSpineDiagnosisCommonAssessmentField(migrationResult, 'concomitantSpondylosis');
 }
 
-// PR0-B3 Part C-2 — task grain(§2 키: (case, jobId, taskId)). §0 "코드 사실"이 지적한
-// task seed 기본값(weight=15, frequency=80, timeValue=5, createTask())을 이번에 처음
-// 실제로 소비한다 — §5.2 원칙대로 seed 기본값 자체는 결측이 아니라 possibly_seeded_default
-// 품질 플래그다(사용자가 실제로 그 값을 입력했을 수도 있으므로 결측 처리하면 오히려
-// 편향이 생긴다, 계획 §5.2). 이 코드베이스에서 이 플래그를 실제로 붙이는 첫 사례다.
-const SEEDED_DEFAULT_WEIGHT_KG = 15;
-const SEEDED_DEFAULT_FREQUENCY_PER_DAY = 80;
 
-// mddmStatus 3상태 게이트는 extractSpineMddmLifetimeDoseMNh와 동일 판정을 반복 grain에도
-// 그대로 적용한다(vibration_interval의 extractSpineVibrationIntervalA8Max와 같은 원칙 —
-// 상태가 '노출없음/미평가'로 바뀌어도 과거 입력된 task 데이터는 그대로 두고 missing만
-// 상태에 맞게 바꾼다).
-export function extractSpineTaskWeightKg(
-  migrationResult: MigrationResult<AnalysisPatient>,
-): RepeatedObservation<number>[] {
-  const entities = enumerateTaskEntities(migrationResult);
-  if (entities.length === 0) return [];
+// ── PR0-B4 Slice 1 — coverage 잔여 필드(매핑표 §4). 전부 raw 필드 그대로 노출한다(파생
+// 계산 없음) — 기존 lifetimeDoseMNh/dvMax의 dependsOn에는 이미 있었지만 독립 변수로는
+// 없던 필드들. 공통 원칙: 모듈 비활성 → structural_missing, blank → not_entered, 타입
+// 불일치·미지원 값 → not_entered + invalid(K-L Grade/Ellman과 동일하게 "값이 있는데
+// 못 쓴다"는 못 쓴 값 자체를 보존하지 않고 결측+플래그로 처리 — 잘못된 값이 정상 범주와
+// 섞여 빈도표를 오염시키지 않게 한다).
 
-  const spineModule = (migrationResult.payload.data.modules as Record<string, unknown> | undefined)?.spine as SpineModuleShape;
-  const status = resolveMddmStatus(spineModule);
-  if (status === 'unknown') {
-    return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'not_assessed', qualityFlags: entity.qualityFlags }));
-  }
-  if (status === 'none') {
-    return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'not_applicable', qualityFlags: entity.qualityFlags }));
-  }
-
-  return entities.map((entity) => {
-    const task = entity.source;
-    const flagSet = new Set<QualityFlag>(entity.qualityFlags);
-
-    // 실제 계산(calculateCompressiveForce)과 같은 검증 원칙 — 원본이 number|string일 때만
-    // 허용하고, 0 이하는 도메인상 존재할 수 없어(중량물이 0kg 이하일 수 없음) 결측 처리한다.
-    const check = checkNumericField(task.weight, { requirePositive: true });
-    if (check === 'invalid_type') flagSet.add('invalid');
-    if (check !== 'ok') {
-      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: Array.from(flagSet) };
-    }
-
-    const weight = parseStrictNumber(task.weight)!;
-    if (weight === SEEDED_DEFAULT_WEIGHT_KG) flagSet.add('possibly_seeded_default');
-    return { entityKey: entity.entityKey, value: weight, missing: null, qualityFlags: Array.from(flagSet) };
-  });
+function getActiveSpineModule(migrationResult: MigrationResult<AnalysisPatient>): SpineModuleShape | null {
+  const { payload } = migrationResult;
+  const activeModules = payload.data.activeModules ?? [];
+  const spineModule = (payload.data.modules as Record<string, unknown> | undefined)?.spine;
+  if (!activeModules.includes('spine') || !isPlainObject(spineModule)) return null;
+  return spineModule as SpineModuleShape;
 }
 
-// weightKg와 결측 조건이 독립적이다(무게 없이 빈도만 입력된 task, 또는 그 반대가 가능) —
-// PR0-B3 Part A "변수 추가/제거해도 모집단 불변" 계약을 이 grain에서도 실측하려면 최소
-// 2개가 필요하다(vibration_interval/job과 동일한 이유).
-export function extractSpineTaskFrequencyPerDay(
+function extractSpineCaseStringField(
   migrationResult: MigrationResult<AnalysisPatient>,
-): RepeatedObservation<number>[] {
-  const entities = enumerateTaskEntities(migrationResult);
-  if (entities.length === 0) return [];
+  field: 'mddmStatus' | 'vibrationExposureStatus' | 'formulaVersion' | 'evalMethod',
+): ExtractedValue<string> {
+  const spineModule = getActiveSpineModule(migrationResult);
+  if (!spineModule) return { value: null, missing: 'structural_missing', qualityFlags: [] };
 
-  const spineModule = (migrationResult.payload.data.modules as Record<string, unknown> | undefined)?.spine as SpineModuleShape;
-  const status = resolveMddmStatus(spineModule);
-  if (status === 'unknown') {
-    return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'not_assessed', qualityFlags: entity.qualityFlags }));
-  }
-  if (status === 'none') {
-    return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'not_applicable', qualityFlags: entity.qualityFlags }));
-  }
+  const raw = spineModule[field];
+  if (isBlank(raw)) return { value: null, missing: 'not_entered', qualityFlags: [] };
+  if (typeof raw !== 'string') return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  return { value: raw, missing: null, qualityFlags: [] };
+}
 
-  return entities.map((entity) => {
-    const task = entity.source;
-    const flagSet = new Set<QualityFlag>(entity.qualityFlags);
+export function extractSpineCaseMddmStatus(migrationResult: MigrationResult<AnalysisPatient>): ExtractedValue<string> {
+  return extractSpineCaseStringField(migrationResult, 'mddmStatus');
+}
 
-    const check = checkNumericField(task.frequency, { requirePositive: true });
-    if (check === 'invalid_type') flagSet.add('invalid');
-    if (check !== 'ok') {
-      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: Array.from(flagSet) };
-    }
+export function extractSpineCaseVibrationExposureStatus(migrationResult: MigrationResult<AnalysisPatient>): ExtractedValue<string> {
+  return extractSpineCaseStringField(migrationResult, 'vibrationExposureStatus');
+}
 
-    const frequency = parseStrictNumber(task.frequency)!;
-    if (frequency === SEEDED_DEFAULT_FREQUENCY_PER_DAY) flagSet.add('possibly_seeded_default');
-    return { entityKey: entity.entityKey, value: frequency, missing: null, qualityFlags: Array.from(flagSet) };
-  });
+export function extractSpineCaseFormulaVersion(migrationResult: MigrationResult<AnalysisPatient>): ExtractedValue<string> {
+  return extractSpineCaseStringField(migrationResult, 'formulaVersion');
+}
+
+// careerYears/careerMonths/workDaysPerYear(case 자체) — scanTaskQuality와 동일하게 양수
+// 강제 없이 유한성만 검증한다(구형식 legacy 호환 필드, 기존 계산도 finite 여부만 본다).
+function extractSpineCaseNumericField(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  field: 'careerYears' | 'careerMonths' | 'workDaysPerYear',
+): ExtractedValue<number> {
+  const spineModule = getActiveSpineModule(migrationResult);
+  if (!spineModule) return { value: null, missing: 'structural_missing', qualityFlags: [] };
+
+  const raw = spineModule[field];
+  if (isBlank(raw)) return { value: null, missing: 'not_entered', qualityFlags: [] };
+  const n = parseStrictNumber(raw);
+  if (n === null) return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  return { value: n, missing: null, qualityFlags: [] };
+}
+
+export function extractSpineCaseWorkDaysPerYear(migrationResult: MigrationResult<AnalysisPatient>): ExtractedValue<number> {
+  return extractSpineCaseNumericField(migrationResult, 'workDaysPerYear');
 }

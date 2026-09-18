@@ -13,6 +13,7 @@ import type { AnalyticsVariableMetadata } from '../../types';
 // getWristBurdenGrade(derived.ts)가 실제로 반환하는 4개 값의 심각도 순서 — 오름차순.
 export const WRIST_BURDEN_GRADE_ORDER = ['부담 작업 아님', '경도', '중등도', '고도'] as const;
 
+
 export const WRIST_METADATA: AnalyticsVariableMetadata[] = [
   {
     key: 'wrist.assessment.burdenGradeMax',
@@ -125,3 +126,87 @@ export const WRIST_METADATA: AnalyticsVariableMetadata[] = [
     supportedFormulaPolicies: ['recompute_current'],
   },
 ];
+
+// ── PR0-B4 Slice 8a/8b — 신설. elbow와 완전히 동일한 설계(temporal 4개는 병합 결과 기준
+// case grain, job_diagnosis 공통 필드 14개는 BK유형과 무관하게 항상 존재하는 필드만).
+// 옵션 값은 wrist ExposureForm.jsx/data.js로 직접 확인 완료(매핑표 §7) — elbow와 값은
+// 동일하고 라벨만 일부 다르다(예: force 'mild' 라벨이 "경도" vs elbow "경미").
+const TEMPORAL_BASE_DEPENDS_ON = [
+  'activeModules',
+  'modules.wrist.temporalSequence.recent_task_change',
+  'modules.wrist.temporalSequence.task_change_date',
+  'modules.wrist.temporalSequence.symptom_onset_interval',
+  'modules.wrist.temporalSequence.improves_with_rest',
+  'modules.wrist.temporalRelation.recent_task_change',
+  'modules.wrist.temporalRelation.task_change_date',
+  'modules.wrist.temporalRelation.symptom_onset_interval',
+  'modules.wrist.temporalRelation.improves_with_rest',
+];
+
+WRIST_METADATA.push(
+  {
+    key: 'wrist.temporal.recentTaskChange',
+    label: '손목/손 최근 작업변화',
+    group: '손목/손가락 · 원본입력',
+    moduleId: 'wrist',
+    grain: 'case',
+    type: 'categorical',
+    provenance: 'raw',
+    dependsOn: TEMPORAL_BASE_DEPENDS_ON,
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'wrist_temporal_raw',
+    supportedFormulaPolicies: [],
+  },
+  {
+    key: 'wrist.temporal.taskChangeDate',
+    label: '손목/손 작업변화 시점',
+    group: '손목/손가락 · 원본입력',
+    moduleId: 'wrist',
+    grain: 'case',
+    type: 'date',
+    provenance: 'raw',
+    dependsOn: TEMPORAL_BASE_DEPENDS_ON,
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'wrist_temporal_raw',
+    supportedFormulaPolicies: [],
+    analysisRole: 'filter_only',
+  },
+  {
+    key: 'wrist.temporal.symptomOnsetInterval',
+    label: '손목/손 작업변화 후 증상발생까지 기간',
+    group: '손목/손가락 · 원본입력',
+    moduleId: 'wrist',
+    grain: 'case',
+    type: 'high_cardinality',
+    provenance: 'raw',
+    dependsOn: TEMPORAL_BASE_DEPENDS_ON,
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'wrist_temporal_raw',
+    supportedFormulaPolicies: [],
+  },
+  {
+    key: 'wrist.temporal.improvesWithRest',
+    label: '손목/손 휴가/업무중단 시 호전 여부',
+    group: '손목/손가락 · 원본입력',
+    moduleId: 'wrist',
+    grain: 'case',
+    type: 'boolean',
+    provenance: 'raw',
+    dependsOn: TEMPORAL_BASE_DEPENDS_ON,
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'wrist_temporal_raw',
+    supportedFormulaPolicies: [],
+  },
+);

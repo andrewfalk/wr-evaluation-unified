@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-// PR0-B3 Part A — grain 선택 UI. 계획 pr0-b3-shimmying-magpie.md "Grain 선택 UI" 절의
-// 요구사항 3가지를 실측한다: (1) grain 변경 시 buildConditionKey에 grain이 포함돼
-// preview가 재실행되는지, (2) grain 변경 시 선택된 변수·필터가 초기화되는지, (3) 이전
-// grain에서 필터를 편집하던 중 전환해도 FilterEditor가 재마운트되어 새 grain의 필터를
-// 정상 추가할 수 있는지(key={grain}).
+// grain 단순화 + 공통변수 브로드캐스트(PR0-B4 개정, person grain 삭제 후속) — grain 선택
+// UI가 최종 3개 grain(case/job/disease)을 노출하고, case의 브로드캐스트 안전 변수가
+// job/disease grain의 후보로도 뜨는지(반대로 브로드캐스트 제외 변수는 안 뜨는지)를
+// 실측한다. person grain은 case와 실질적으로 구분되지 않아 다시 삭제됐다 — 라벨도
+// "한글(영문)" 패턴으로 통일했다(job이 "직업"으로만 표기되던 불일치 정정). PR0-B3
+// Part A의 기존 요구사항(조건 키 반영·선택 초기화·FilterEditor 재마운트)은 grain
+// 이름만 바뀌었을 뿐 그대로 유지한다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -27,6 +29,16 @@ function catalogFixture() {
   return {
     catalogVersion: 'cv1',
     variables: [
+      // case grain, 브로드캐스트 안전(non_sensitive/categorical) → job/disease 후보에도 뜬다.
+      {
+        key: 'patient.identity.gender', label: '성별', group: '인적사항 · 공통', moduleId: 'patient',
+        grain: 'case', type: 'categorical', unit: null, provenance: 'raw', dependsOn: [],
+        availableAt: 'assessment', shownToAssessor: true,
+        allowedAnalysisPurposes: ['association'],
+        sensitivity: 'non_sensitive', formulaFamily: 'patient_identity',
+        supportedFormulaPolicies: [], formulaVersionKey: null,
+      },
+      // case grain — 브로드캐스트 안전 → job/disease 후보에도 뜬다.
       {
         key: 'knee.relatedness.max', label: '신체부담기여도(최대)', group: '무릎 · 파생지표', moduleId: 'knee',
         grain: 'case', type: 'continuous', unit: '%', provenance: 'derived', dependsOn: [],
@@ -35,17 +47,18 @@ function catalogFixture() {
         sensitivity: 'non_sensitive', formulaFamily: 'knee_relatedness',
         supportedFormulaPolicies: ['recompute_recorded_version'], formulaVersionKey: null,
       },
+      // case grain, quasi_identifier — 브로드캐스트 제외(자기 grain=case에서만 후보).
       {
-        key: 'spine.vibration.intervalA8Max', label: '전신진동 구간별 A(8) 등가 가속도(상한)', group: '요추(허리) · 파생지표', moduleId: 'spine',
-        grain: 'vibration_interval', type: 'continuous', unit: 'm/s²', provenance: 'derived', dependsOn: [],
+        key: 'job.rollup.longestTenureJobNameNormalized', label: '대표 직종명(근속 최장)', group: '직업력 · 공통', moduleId: 'job',
+        grain: 'case', type: 'high_cardinality', unit: null, provenance: 'derived', dependsOn: [],
         availableAt: 'assessment', shownToAssessor: true,
-        allowedAnalysisPurposes: ['association', 'formula_audit'],
-        sensitivity: 'non_sensitive', formulaFamily: 'spine_wbv',
-        supportedFormulaPolicies: ['recompute_current'], formulaVersionKey: null,
+        allowedAnalysisPurposes: ['association'],
+        sensitivity: 'quasi_identifier', formulaFamily: 'job_rollup_longest_tenure',
+        supportedFormulaPolicies: [], formulaVersionKey: null,
       },
       {
         key: 'knee.diagnosisSide.klGrade', label: 'K-L Grade', group: '무릎 · 진단별 판정', moduleId: 'knee',
-        grain: 'diagnosis_side', type: 'ordinal', unit: null, provenance: 'clinician_judgment', dependsOn: [],
+        grain: 'disease', type: 'ordinal', unit: null, provenance: 'clinician_judgment', dependsOn: [],
         availableAt: 'assessment', shownToAssessor: true,
         allowedAnalysisPurposes: ['association', 'formula_audit'],
         sensitivity: 'non_sensitive', formulaFamily: 'knee_kl_grade_side',
@@ -59,16 +72,7 @@ function catalogFixture() {
         sensitivity: 'quasi_identifier', formulaFamily: 'job_identity',
         supportedFormulaPolicies: [], formulaVersionKey: null,
       },
-      {
-        key: 'spine.task.weightKg', label: 'MDDM 작업 중량물(kg)', group: '요추(허리) · 파생지표', moduleId: 'spine',
-        grain: 'task', type: 'continuous', unit: 'kg', provenance: 'raw', dependsOn: [],
-        availableAt: 'assessment', shownToAssessor: true,
-        allowedAnalysisPurposes: ['association', 'formula_audit'],
-        sensitivity: 'non_sensitive', formulaFamily: 'spine_mddm_task',
-        supportedFormulaPolicies: [], formulaVersionKey: null, analysisRole: 'analyzable',
-      },
-      // PR0-B3 Part C-2 — 필터 전용 변수 계약 실측용. case grain인데 analysisRole이
-      // filter_only라 분석 변수 체크박스에는 안 뜨고, 필터 선택 후보에는 떠야 한다.
+      // 필터 전용 변수 계약(analysisRole) — case grain 등록일.
       {
         key: 'case.meta.registeredAt', label: '등록일', group: '사례 메타 · 공통', moduleId: 'meta',
         grain: 'case', type: 'date', unit: null, provenance: 'raw', dependsOn: [],
@@ -78,11 +82,8 @@ function catalogFixture() {
         supportedFormulaPolicies: [], formulaVersionKey: null, analysisRole: 'filter_only',
       },
     ],
-    supportedGrains: ['case', 'vibration_interval', 'diagnosis_side', 'job', 'task'],
-    unsupportedGrains: [
-      { grain: 'person', reasonCode: 'GRAIN_NOT_YET_SUPPORTED' },
-      { grain: 'job_diagnosis', reasonCode: 'GRAIN_NOT_YET_SUPPORTED' },
-    ],
+    supportedGrains: ['case', 'job', 'disease'],
+    unsupportedGrains: [],
     minimumCohort: 10,
   };
 }
@@ -110,30 +111,15 @@ async function waitForDebounce() {
   await act(async () => { await new Promise((r) => setTimeout(r, 600)); });
 }
 
-function analyzeResponse() {
-  return {
-    runManifest: runManifest('22222222-2222-2222-2222-222222222222'),
-    result: {
-      continuous: [{
-        variableKey: 'spine.vibration.intervalA8Max', kind: 'continuous', suppressed: false,
-        n: 20, missingCount: 0, missingPatterns: [],
-        mean: 0.85, sd: 0.2, median: 0.8, q1: 0.7, q3: 1.0, iqr: 0.3, skewness: 0.1, kurtosis: -0.2, min: 0.3, max: 1.5,
-        nullReasons: {},
-      }],
-      discrete: [],
-    },
-  };
-}
-
-function discreteAnalyzeResponse() {
+function discreteAnalyzeResponse(variableKey, level) {
   return {
     runManifest: runManifest('33333333-3333-3333-3333-333333333333'),
     result: {
       continuous: [],
       discrete: [{
-        variableKey: 'knee.diagnosisSide.klGrade', kind: 'discrete', suppressed: false,
+        variableKey, kind: 'discrete', suppressed: false,
         n: 20, missingCount: 0, missingPatterns: [],
-        levels: [{ level: '2', count: 20, proportion: 1 }], mode: '2',
+        levels: [{ level, count: 20, proportion: 1 }], mode: level,
       }],
     },
   };
@@ -145,34 +131,64 @@ beforeEach(() => {
   window.innerWidth = 1920;
 });
 
-describe('StatisticsWorkbench — grain 선택(PR0-B3 Part A)', () => {
-  it('supportedGrains의 두 grain이 모두 선택지로 보이고, case가 기본 선택이다', async () => {
+describe('StatisticsWorkbench — grain 선택(person grain 삭제 후속)', () => {
+  it('supportedGrains의 3개 grain(사례/직업/상병)이 모두 선택지로 보이고, 사례(case)가 기본 선택이다', async () => {
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
     const caseBtn = await screen.findByRole('button', { name: '사례(case)' });
-    const vibBtn = screen.getByRole('button', { name: '진동구간' });
     expect(caseBtn.className).toMatch(/active/);
-    expect(vibBtn.className).not.toMatch(/active/);
-    // CatalogPanel이 case grain 변수만 보여준다.
-    expect(screen.getByRole('checkbox', { name: /신체부담기여도/ })).toBeTruthy();
-    expect(screen.queryByRole('checkbox', { name: /전신진동 구간별/ })).toBeNull();
+    expect(screen.getByRole('button', { name: '직업(job)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '상병(disease)' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /person/ })).toBeNull();
   });
 
-  it('grain을 진동구간으로 바꾸면 카탈로그 후보가 바뀌고, 선택된 변수가 초기화된다', async () => {
+  it('case grain에서는 case 변수(브로드캐스트 제외 변수 포함)가 후보로 보인다', async () => {
+    fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
+    render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
+    await screen.findByRole('checkbox', { name: /신체부담기여도/ });
+    expect(screen.getByRole('checkbox', { name: /대표 직종명/ })).toBeTruthy();
+  });
+
+  it('직업(job) grain으로 바꾸면 브로드캐스트 안전 변수(성별·신체부담기여도)는 후보로 뜨지만, 브로드캐스트 제외 변수(대표 직종명, quasi_identifier)는 안 뜬다', async () => {
     const user = userEvent.setup();
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
 
     await user.click(await screen.findByRole('checkbox', { name: /신체부담기여도/ }));
-    expect(screen.getByRole('checkbox', { name: /신체부담기여도/ }).checked).toBe(true);
+    await user.click(screen.getByRole('button', { name: '직업(job)' }));
 
-    await user.click(screen.getByRole('button', { name: '진동구간' }));
+    // grain 전환 시 선택 상태가 초기화된다.
+    expect(screen.getByRole('checkbox', { name: /직종명\(정규화\)/ }).checked).toBe(false);
+    // 브로드캐스트 안전 case 변수는 job grain 후보에도 뜬다.
+    expect(screen.getByRole('checkbox', { name: /성별/ })).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: /신체부담기여도/ })).toBeTruthy();
+    // quasi_identifier 브로드캐스트 제외 변수는 자기 grain(case)이 아니면 후보에서 빠진다.
+    expect(screen.queryByRole('checkbox', { name: /대표 직종명/ })).toBeNull();
+  });
 
-    // case grain 변수 후보는 더 이상 안 보인다 — grain 전환 시 후보 자체를 제한.
-    expect(screen.queryByRole('checkbox', { name: /신체부담기여도/ })).toBeNull();
-    // vibration_interval 변수가 후보로 보이고, 선택 상태는 초기화돼 있다(체크 안 됨).
-    const vibCheckbox = screen.getByRole('checkbox', { name: /전신진동 구간별/ });
-    expect(vibCheckbox.checked).toBe(false);
+  // 리뷰 지적 — job/disease는 관측 행 기준 집계라 브로드캐스트된 인적사항도 그 행 수만큼
+  // 반영된다는 사실이 화면에 없으면 "고유 인원 분포"로 오해할 수 있다.
+  it('job/disease grain에서는 관측 행 기준 집계라는 안내가 뜨고, case에서는 뜨지 않는다', async () => {
+    const user = userEvent.setup();
+    fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
+    render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
+
+    expect(screen.queryByText(/관측 행 기준/)).toBeNull();
+
+    await user.click(await screen.findByRole('button', { name: '직업(job)' }));
+    // job의 예시는 "직업 개수"를 들어야 한다 — disease와 같은 문장을 재사용하면 안 된다.
+    expect(await screen.findByText(/관측 행 기준/)).toBeTruthy();
+    expect(screen.getByText(/직업을 3개 가지면/)).toBeTruthy();
+    expect(screen.queryByText(/좌·우/)).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: '상병(disease)' }));
+    // disease의 행 수는 직업 수와 무관하다 — "좌·우 2행" 예시로 분기돼야 한다(리뷰 지적).
+    expect(await screen.findByText(/관측 행 기준/)).toBeTruthy();
+    expect(screen.getByText(/좌·우 2행/)).toBeTruthy();
+    expect(screen.queryByText(/직업을 3개 가지면/)).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: '사례(case)' }));
+    expect(screen.queryByText(/관측 행 기준/)).toBeNull();
   });
 
   it('grain 변경이 조건 키에 반영돼 새 grain으로 preview가 재요청된다', async () => {
@@ -180,167 +196,83 @@ describe('StatisticsWorkbench — grain 선택(PR0-B3 Part A)', () => {
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
 
-    await user.click(await screen.findByRole('button', { name: '진동구간' }));
+    await user.click(await screen.findByRole('button', { name: '직업(job)' }));
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
-    await user.click(screen.getByRole('checkbox', { name: /전신진동 구간별/ }));
+    await user.click(screen.getByRole('checkbox', { name: /직종명\(정규화\)/ }));
     await waitForDebounce();
 
     expect(previewStatsAnalysis).toHaveBeenCalledWith(
-      expect.objectContaining({ grain: 'vibration_interval', variableKeys: ['spine.vibration.intervalA8Max'] }),
+      expect.objectContaining({ grain: 'job', variableKeys: ['job.identity.jobNameNormalized'] }),
       SESSION,
       expect.anything(),
     );
   });
 
-  it('case grain에서 필터를 추가한 뒤 진동구간으로 전환해도 새 grain의 필터를 정상적으로 추가할 수 있다(FilterEditor 재마운트)', async () => {
+  it('브로드캐스트 안전 변수(성별)를 job grain에서 선택하면 recipe의 variableKeys에 grain 그대로 포함된다', async () => {
     const user = userEvent.setup();
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
 
-    // case grain에서 필터 편집 select가 이미 렌더돼 있는지 확인(내부 useState가 채워진 상태).
-    const caseFilterKeySelect = await screen.findByDisplayValue('신체부담기여도(최대)');
-    expect(caseFilterKeySelect).toBeTruthy();
-
-    await user.click(screen.getByRole('button', { name: '진동구간' }));
-
-    // 전환 후 필터 편집기의 변수 select에는 vibration_interval 변수만 후보로 있어야 하고
-    // (case 변수 잔존 없음), 정상적으로 필터를 추가할 수 있어야 한다(재마운트 확인).
-    const vibFilterKeySelect = screen.getByDisplayValue('전신진동 구간별 A(8) 등가 가속도(상한)');
-    expect(vibFilterKeySelect).toBeTruthy();
-    expect(screen.queryByText('신체부담기여도(최대)', { selector: 'option' })).toBeNull();
-
-    await user.type(screen.getByPlaceholderText('값'), '1.2');
-    await user.click(screen.getByRole('button', { name: '필터 추가' }));
-
-    // 필터 추가가 실제로 반영됐는지(칩으로 표시) 확인 — 무동작(조용한 실패)이 아니었다는 증거.
-    expect(await screen.findByText(/전신진동 구간별.*1\.2/)).toBeTruthy();
-  });
-
-  it('진동구간 grain에서 변수 선택 → preview → 분석 실행까지 전체 경로가 동작하고 결과가 표시된다', async () => {
-    const user = userEvent.setup();
-    fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
-    render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
-
-    await user.click(await screen.findByRole('button', { name: '진동구간' }));
+    await user.click(await screen.findByRole('button', { name: '직업(job)' }));
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
-    await user.click(screen.getByRole('checkbox', { name: /전신진동 구간별/ }));
+    await user.click(screen.getByRole('checkbox', { name: /성별/ }));
     await waitForDebounce();
-    await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
 
-    runStatsAnalysis.mockResolvedValueOnce(analyzeResponse());
-    await user.click(screen.getByRole('button', { name: /분석 실행/ }));
-
-    await waitFor(() => expect(screen.getByText(/0\.85/)).toBeTruthy());
-    expect(runStatsAnalysis).toHaveBeenCalledWith(
-      expect.objectContaining({ grain: 'vibration_interval', variableKeys: ['spine.vibration.intervalA8Max'] }),
+    expect(previewStatsAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({ grain: 'job', variableKeys: ['patient.identity.gender'] }),
       SESSION,
+      expect.anything(),
     );
   });
 
-  // PR0-B3 Part B — diagnosis_side grain도 vibration_interval(Part A)과 동일하게 전체
-  // 경로가 동작하는지 실측한다. supportedGrains 응답에 따라 후보 자체가 늘어난다는 점만
-  // 다르다(그 외 grain-agnostic 배선은 위 vibration_interval 테스트가 이미 증명).
-  it('진단측(diagnosis_side) grain에서 변수 선택 → preview → 분석 실행까지 전체 경로가 동작하고 결과가 표시된다', async () => {
+  it('case grain에서 필터를 추가한 뒤 직업(job)으로 전환해도 새 grain의 필터를 정상적으로 추가할 수 있다(FilterEditor 재마운트)', async () => {
     const user = userEvent.setup();
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
 
-    const diagBtn = await screen.findByRole('button', { name: '진단측' });
-    expect(diagBtn.className).not.toMatch(/active/);
-    await user.click(diagBtn);
+    const caseFilterKeySelect = await screen.findByDisplayValue('성별');
+    expect(caseFilterKeySelect).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '직업(job)' }));
+
+    const jobFilterKeySelect = screen.getByDisplayValue('성별');
+    expect(jobFilterKeySelect).toBeTruthy();
+    // job grain 고유 변수(직종명)도 여전히 필터 후보에 남아 있는지 확인한 뒤 그걸로 필터를 추가한다.
+    await user.selectOptions(jobFilterKeySelect, '직종명(정규화)');
+
+    await user.type(screen.getByPlaceholderText('값'), '용접공');
+    await user.click(screen.getByRole('button', { name: '필터 추가' }));
+
+    expect(await screen.findByText(/직종명.*용접공/)).toBeTruthy();
+  });
+
+  it('상병(disease) grain에서 변수 선택 → preview → 분석 실행까지 전체 경로가 동작하고 결과가 표시된다', async () => {
+    const user = userEvent.setup();
+    fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
+    render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
+
+    await user.click(await screen.findByRole('button', { name: '상병(disease)' }));
 
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
     await user.click(screen.getByRole('checkbox', { name: /K-L Grade/ }));
     await waitForDebounce();
     expect(previewStatsAnalysis).toHaveBeenCalledWith(
-      expect.objectContaining({ grain: 'diagnosis_side', variableKeys: ['knee.diagnosisSide.klGrade'] }),
+      expect.objectContaining({ grain: 'disease', variableKeys: ['knee.diagnosisSide.klGrade'] }),
       SESSION,
       expect.anything(),
     );
     await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
 
-    runStatsAnalysis.mockResolvedValueOnce(discreteAnalyzeResponse());
+    runStatsAnalysis.mockResolvedValueOnce(discreteAnalyzeResponse('knee.diagnosisSide.klGrade', '2'));
     await user.click(screen.getByRole('button', { name: /분석 실행/ }));
 
     await waitFor(() => expect(screen.getByText(/최빈값=2/)).toBeTruthy());
     expect(runStatsAnalysis).toHaveBeenCalledWith(
-      expect.objectContaining({ grain: 'diagnosis_side', variableKeys: ['knee.diagnosisSide.klGrade'] }),
+      expect.objectContaining({ grain: 'disease', variableKeys: ['knee.diagnosisSide.klGrade'] }),
       SESSION,
     );
   });
 
-  // PR0-B3 Part C — job grain도 동일하게 전체 경로가 동작하는지 실측한다.
-  it('직업력(job) grain에서 변수 선택 → preview → 분석 실행까지 전체 경로가 동작하고 결과가 표시된다', async () => {
-    const user = userEvent.setup();
-    fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
-    render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
-
-    const jobBtn = await screen.findByRole('button', { name: '직업력' });
-    expect(jobBtn.className).not.toMatch(/active/);
-    await user.click(jobBtn);
-
-    previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
-    await user.click(screen.getByRole('checkbox', { name: /직종명/ }));
-    await waitForDebounce();
-    expect(previewStatsAnalysis).toHaveBeenCalledWith(
-      expect.objectContaining({ grain: 'job', variableKeys: ['job.identity.jobNameNormalized'] }),
-      SESSION,
-      expect.anything(),
-    );
-    await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
-
-    runStatsAnalysis.mockResolvedValueOnce({
-      runManifest: runManifest('44444444-4444-4444-4444-444444444444'),
-      result: {
-        continuous: [],
-        discrete: [{
-          variableKey: 'job.identity.jobNameNormalized', kind: 'discrete', suppressed: false,
-          n: 20, missingCount: 0, missingPatterns: [],
-          levels: [{ level: '용접공', count: 20, proportion: 1 }], mode: '용접공',
-        }],
-      },
-    });
-    await user.click(screen.getByRole('button', { name: /분석 실행/ }));
-
-    await waitFor(() => expect(screen.getByText(/최빈값=용접공/)).toBeTruthy());
-    expect(runStatsAnalysis).toHaveBeenCalledWith(
-      expect.objectContaining({ grain: 'job', variableKeys: ['job.identity.jobNameNormalized'] }),
-      SESSION,
-    );
-  });
-
-  // PR0-B3 Part C-2 — task grain도 동일하게 전체 경로가 동작하는지 실측한다.
-  it('작업(task) grain에서 변수 선택 → preview → 분석 실행까지 전체 경로가 동작하고 결과가 표시된다', async () => {
-    const user = userEvent.setup();
-    fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
-    render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
-
-    const taskBtn = await screen.findByRole('button', { name: '작업' });
-    expect(taskBtn.className).not.toMatch(/active/);
-    await user.click(taskBtn);
-
-    previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
-    await user.click(screen.getByRole('checkbox', { name: /MDDM 작업 중량물/ }));
-    await waitForDebounce();
-    expect(previewStatsAnalysis).toHaveBeenCalledWith(
-      expect.objectContaining({ grain: 'task', variableKeys: ['spine.task.weightKg'] }),
-      SESSION,
-      expect.anything(),
-    );
-    await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
-
-    runStatsAnalysis.mockResolvedValueOnce(analyzeResponse());
-    await user.click(screen.getByRole('button', { name: /분석 실행/ }));
-
-    await waitFor(() => expect(screen.getByText(/0\.85/)).toBeTruthy());
-    expect(runStatsAnalysis).toHaveBeenCalledWith(
-      expect.objectContaining({ grain: 'task', variableKeys: ['spine.task.weightKg'] }),
-      SESSION,
-    );
-  });
-
-  // PR0-B3 Part C — 필터 전용 변수 계약(analysisRole). 등록일은 case grain 소속이므로
-  // 기본 화면(case)에서 확인한다.
   it('필터 전용 변수(등록일)는 분석 변수 체크박스에 없지만 필터 후보에는 있다', async () => {
     const user = userEvent.setup();
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
@@ -349,7 +281,7 @@ describe('StatisticsWorkbench — grain 선택(PR0-B3 Part A)', () => {
     await screen.findByRole('checkbox', { name: /신체부담기여도/ });
     expect(screen.queryByRole('checkbox', { name: /등록일/ })).toBeNull();
 
-    await user.selectOptions(await screen.findByDisplayValue('신체부담기여도(최대)'), '등록일');
+    await user.selectOptions(await screen.findByDisplayValue('성별'), '등록일');
     expect(await screen.findByDisplayValue('등록일')).toBeTruthy();
   });
 });

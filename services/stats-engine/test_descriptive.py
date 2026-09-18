@@ -209,6 +209,27 @@ def test_schema_violation_raises_invalid_input():
     assert exc_info.value.code == "INVALID_INPUT"
 
 
+def test_variable_person_count_optional_field_is_accepted():
+    # A안 — histogram bin 개수 힌트(personCount)를 스키마에 추가한 뒤에도 기존처럼
+    # 필드 없이 보내는 요청은 그대로 통과해야 하고(하위호환), 있으면 통과해야 한다.
+    request = {
+        "protocolVersion": 3,
+        "variables": [{"key": "x", "kind": "continuous", "values": [1.0, 2.0], "personCount": 2}],
+    }
+    parsed = parse_and_validate_request(json.dumps(request))
+    assert parsed["variables"][0]["personCount"] == 2
+
+
+def test_variable_person_count_wrong_type_raises_invalid_input():
+    request = {
+        "protocolVersion": 3,
+        "variables": [{"key": "x", "kind": "continuous", "values": [1.0], "personCount": "2"}],
+    }
+    with pytest.raises(ProtocolError) as exc_info:
+        parse_and_validate_request(json.dumps(request))
+    assert exc_info.value.code == "INVALID_INPUT"
+
+
 # ---------------------------------------------------------------------------
 # analyze.py — stdin/stdout/stderr 프로세스 계약(subprocess로 실측)
 # ---------------------------------------------------------------------------

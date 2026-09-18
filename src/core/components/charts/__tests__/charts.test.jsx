@@ -33,6 +33,43 @@ describe('Histogram', () => {
     await user.click(screen.getByRole('button', { name: '데이터 보기' }));
     expect(document.querySelector('table')).toBeTruthy();
   });
+
+  // B안(A안 후속) — histogram이 null인 두 가지 이유(애초에 자료 없음 vs 재분할
+  // 후보를 전부 시도해도 공개 가능한 해상도가 없음)를 서로 다른 문구로 구분한다.
+  it('histogramReasonCode가 INSUFFICIENT_DISCLOSABLE_RESOLUTION이면 전용 문구를 보여준다', () => {
+    render(<Histogram histogram={null} histogramReasonCode="INSUFFICIENT_DISCLOSABLE_RESOLUTION" />);
+    expect(screen.getByText('분포를 표시하기에는 공개 가능한 구간이 부족합니다.')).toBeTruthy();
+    expect(screen.queryByText(/표본 크기 등/)).toBeFalsy();
+  });
+
+  it('histogramReasonCode가 없으면(구버전 결과 등) 기존 기본 문구를 그대로 유지한다(회귀 방지)', () => {
+    render(<Histogram histogram={null} />);
+    expect(screen.getByText(/공개 정책에 따라 표시되지 않음\(표본 크기 등\)/)).toBeTruthy();
+  });
+
+  it('merged가 true면 구간 수를 줄여 표시했다는 안내가 뜬다', () => {
+    render(<Histogram histogram={{ bins: [{ lower: 0, upper: 10, count: 5 }], merged: true }} />);
+    expect(screen.getByText('공개 기준에 맞춰 구간 수를 줄여 표시했습니다.')).toBeTruthy();
+  });
+
+  it('merged 필드가 아예 없어도(구버전 캐시 결과) 안내 없이 크래시 없이 렌더된다', () => {
+    render(<Histogram histogram={{ bins: [{ lower: 0, upper: 10, count: 5 }] }} />);
+    expect(screen.queryByText(/구간 수를 줄여/)).toBeFalsy();
+    expect(document.querySelector('svg')).toBeTruthy();
+  });
+
+  it('"데이터 보기" 표의 행 수는 항상 histogram.bins.length와 일치한다(그래프·표 해상도 불일치 방지)', async () => {
+    const user = userEvent.setup();
+    const bins = [
+      { lower: 0, upper: 10, count: 5 },
+      { lower: 10, upper: 20, count: 8 },
+      { lower: 20, upper: 30, count: 12 },
+    ];
+    render(<Histogram histogram={{ bins, merged: true }} />);
+    expect(document.querySelectorAll('rect').length).toBe(bins.length);
+    await user.click(screen.getByRole('button', { name: '데이터 보기' }));
+    expect(document.querySelectorAll('tbody tr').length).toBe(bins.length);
+  });
 });
 
 describe('BoxPlot', () => {

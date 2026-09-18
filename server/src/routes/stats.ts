@@ -29,21 +29,16 @@ import { handlePostExport } from '../statsExportHandler';
 
 const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
+// grain 단순화(PR0-B4 개정, person grain 삭제 후속) — case/job/disease 3개만 지원한다
+// (statsRecipeValidation.ts의 SUPPORTED_GRAINS와 반드시 같은 목록을 유지할 것).
 const CASE_GRAIN = 'case' as const;
-// PR0-B3 Part A는 vibration_interval을, Part B는 diagnosis_side를, Part C는 job을
-// 추가했다. job_diagnosis는 계획상 이번 확장에서 전부 제외, task는 Part C의 다음
-// 슬라이스에서 추가한다(statsRecipeValidation.ts의 SUPPORTED_GRAINS와 반드시 같은 목록을 유지할 것).
-const VIBRATION_INTERVAL_GRAIN = 'vibration_interval' as const;
-const DIAGNOSIS_SIDE_GRAIN = 'diagnosis_side' as const;
 const JOB_GRAIN = 'job' as const;
-const TASK_GRAIN = 'task' as const;
-const ALL_GRAINS = ['person', 'case', 'diagnosis_side', 'job', 'job_diagnosis', 'task', 'vibration_interval'] as const;
+const DISEASE_GRAIN = 'disease' as const;
+const ALL_GRAINS = ['case', 'job', 'disease'] as const;
 const SUPPORTED_GRAINS_SET = new Set<(typeof ALL_GRAINS)[number]>([
   CASE_GRAIN,
-  VIBRATION_INTERVAL_GRAIN,
-  DIAGNOSIS_SIDE_GRAIN,
   JOB_GRAIN,
-  TASK_GRAIN,
+  DISEASE_GRAIN,
 ]);
 
 function toCatalogVariableDto(v: AnalyticsVariableMetadata): CatalogVariable {

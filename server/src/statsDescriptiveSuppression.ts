@@ -14,7 +14,7 @@ import type {
 import type { DatasetRow } from './statsDatasetBuilder';
 import { normalizeForCompare } from './statsDatasetBuilder';
 import { isSmallCell } from './statsSmallCell';
-import { isHistogramDisclosable, isOutlierCountDisclosable } from './statsChartDisclosure';
+import { resolveDisclosableHistogram, isOutlierCountDisclosable } from './statsChartDisclosure';
 import type { StatsEngineRawResult, StatsEngineRequest, StatsEngineVariableKind } from './statsEngine';
 
 // PR0-B3 Part C — high_cardinality(job.identity.jobNameNormalized 등) 추가. Python
@@ -80,12 +80,18 @@ export function buildStatsEngineRequest(
   const variables = variableKeys.map((key) => {
     const kind = mapCatalogTypeToKind(catalogByKey.get(key)?.type, key);
     const values: Array<number | string | boolean> = [];
+    const personKeys = new Set<string>();
     for (const row of rows) {
       const extracted = row.values[key];
       if (!extracted || extracted.missing !== null || extracted.value === null) continue;
       values.push(normalizeForCompare(extracted.value) as number | string | boolean);
+      personKeys.add(row.personClusterKey);
     }
-    return { key, kind, values };
+    // job/disease grain 브로드캐스트 변수는 같은 사람의 값이 여러 행(entityKey)에 그대로
+    // 복제된다 — values.length(행 수)를 그대로 histogram bin 개수 계산에 쓰면 실제 인원보다
+    // bin이 잘게 쪼개져 소수 셀 억제(person 단위)에 과도하게 자주 걸린다. continuous에서만
+    // 의미가 있으므로(histogram은 continuous 전용, PR3-B) discrete에는 채우지 않는다.
+    return kind === 'continuous' ? { key, kind, values, personCount: personKeys.size } : { key, kind, values };
   });
   return { variables };
 }
@@ -119,17 +125,22 @@ export function computeDescriptiveSuppression(
       const rawStat = rawContinuousByKey.get(key);
       if (!rawStat) throw new Error(`missing continuous engine result for '${key}'`);
 
-      // PR3-B §3 — 히스토그램은 Python이 만든 bin 경계로 Node가 presentRows를
-      // 재순회해 person 단위 전체연결억제를 판정한다(row-count가 아니라 person
-      // count 기준). 소수셀이면 히스토그램 전체를 생략(null).
+      // B안(A안 후속) — 히스토그램은 Python이 만든 bin 경계로 Node가 presentRows를
+      // 재순회해 person 단위로 판정하되, 원본이 실패하면 정해진 후보 해상도로
+      // 재분할해 공개 가능한 가장 세밀한 것을 채택한다(resolveDisclosableHistogram,
+      // all-or-nothing 즉시 포기가 아님). 후보를 전부 시도해도 실패하면(rawStat.
+      // histogram 자체가 없던 경우와 구분하기 위해) histogramReasonCode를 채운다.
       const valueOf = (row: DatasetRow): number | null => {
         const extracted = row.values[key];
         if (!extracted || extracted.missing !== null) return null;
         return typeof extracted.value === 'number' ? extracted.value : null;
       };
-      const histogram = rawStat.histogram && isHistogramDisclosable(presentRows, rawStat.histogram.bins, valueOf)
-        ? { bins: rawStat.histogram.bins }
+      const resolvedHistogram = rawStat.histogram
+        ? resolveDisclosableHistogram(presentRows, rawStat.histogram.bins, valueOf)
         : null;
+      const histogram = resolvedHistogram ? { bins: resolvedHistogram.bins, merged: resolvedHistogram.merged } : null;
+      const histogramReasonCode: 'INSUFFICIENT_DISCLOSABLE_RESOLUTION' | null =
+        !resolvedHistogram && rawStat.histogram ? 'INSUFFICIENT_DISCLOSABLE_RESOLUTION' : null;
 
       // PR3-B §1 — 박스플롯의 q1/median/q3/lowerWhisker/upperWhisker는 histogram과
       // 같은 부모 게이트(linkedSuppressed)만 통과하면 그대로 노출(범위값 자체는
@@ -168,6 +179,7 @@ export function computeDescriptiveSuppression(
         max: rawStat.max,
         nullReasons: rawStat.nullReasons,
         histogram,
+        histogramReasonCode,
         boxplot,
       });
       continue;

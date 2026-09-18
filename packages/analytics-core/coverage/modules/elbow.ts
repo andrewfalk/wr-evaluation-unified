@@ -9,6 +9,10 @@ const FREE_TEXT = '자유 서술 텍스트 — 계산에 관여하지 않음';
 // FIELD_LABELS(derived.ts)에 라벨은 있지만 실제 flag 계산 로직(computeDiagnosisFlags)
 // 어디에서도 값을 읽지 않는 것을 grep으로 확인(2026-09-06) — burdenGrade에 영향 없음.
 const LABEL_ONLY_UNUSED = '입력 폼과 라벨 맵(FIELD_LABELS)에는 있지만 실제 계산 로직에서 값을 읽지 않음 — PR0-B3에서 재검토 필요';
+// grain 단순화 개정(PR0-B4) — job_diagnosis grain 자체가 소스코드까지 완전 삭제되면서
+// 이 필드를 읽던 유일한 소비처(inferredLinkFlags)도 함께 사라졌다. burdenGradeMax(case
+// grain, 살아남음) dependsOn에는 원래도 없었다.
+const GRAIN_DELETED = 'job_diagnosis grain 삭제(PR0-B4 grain 단순화)로 이 필드를 읽던 유일한 소비처가 사라짐';
 
 // jobEvaluations[].diagnosisEntries[]와 diagnosisEvaluations[](레거시 flat 저장) 둘 다
 // createElbowDiagnosisEntry()로 만들어지는 동일 shape라 필드 목록이 같다 — linkedJobId만
@@ -76,7 +80,7 @@ export const ELBOW_INVENTORY: CoverageInventory = {
 
   'modules.elbow.jobEvaluations[].sharedJobId': { included: true },
   'modules.elbow.jobEvaluations[]._pendingPreset': { included: false, reason: TECHNICAL + ' — 프리셋 적용 대기 중인 임시 상태, 저장 직전 제거됨(data.js normalizeElbowModuleData)' },
-  'modules.elbow.jobEvaluations[].diagnosisEntries[].bkAutoSyncedFrom': { included: false, reason: TECHNICAL + ' — BK유형 자동복사 출처 진단ID(provenance), 계산에 관여하지 않음' },
+  'modules.elbow.jobEvaluations[].diagnosisEntries[].bkAutoSyncedFrom': { included: false, reason: GRAIN_DELETED },
   ...diagnosisEntryInventory('modules.elbow.jobEvaluations[].diagnosisEntries[]'),
 
   // 레거시(구형식, job별이 아니라 진단별 flat 저장) — linkedJobId만 이 구조 전용.

@@ -9,12 +9,12 @@ import { SPINE_METADATA } from './metadata';
 import {
   extractSpineMddmLifetimeDoseMNh,
   extractSpineVibrationDvMax,
-  extractSpineVibrationIntervalA8Max,
-  extractSpineVibrationIntervalExposureHours,
   extractSpineDiagnosisVerticalDistribution,
   extractSpineDiagnosisConcomitantSpondylosis,
-  extractSpineTaskWeightKg,
-  extractSpineTaskFrequencyPerDay,
+  extractSpineCaseMddmStatus,
+  extractSpineCaseVibrationExposureStatus,
+  extractSpineCaseFormulaVersion,
+  extractSpineCaseWorkDaysPerYear,
 } from './extractors';
 import { isSpineAssessmentComplete } from './derived';
 
@@ -24,12 +24,12 @@ registerAnalyticsModule({
   extractors: {
     'spine.mddm.lifetimeDoseMNh': extractSpineMddmLifetimeDoseMNh,
     'spine.vibration.dvMax': extractSpineVibrationDvMax,
-    'spine.vibration.intervalA8Max': extractSpineVibrationIntervalA8Max,
-    'spine.vibration.intervalExposureHours': extractSpineVibrationIntervalExposureHours,
     'spine.diagnosis.verticalDistribution': extractSpineDiagnosisVerticalDistribution,
     'spine.diagnosis.concomitantSpondylosis': extractSpineDiagnosisConcomitantSpondylosis,
-    'spine.task.weightKg': extractSpineTaskWeightKg,
-    'spine.task.frequencyPerDay': extractSpineTaskFrequencyPerDay,
+    'spine.case.mddmStatus': extractSpineCaseMddmStatus,
+    'spine.case.vibrationExposureStatus': extractSpineCaseVibrationExposureStatus,
+    'spine.case.formulaVersion': extractSpineCaseFormulaVersion,
+    'spine.case.workDaysPerYear': extractSpineCaseWorkDaysPerYear,
   },
   isComplete: isSpineAssessmentComplete,
 });

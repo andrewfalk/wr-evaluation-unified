@@ -73,3 +73,34 @@ export function escapeHtml(str: unknown): unknown {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 }
+
+// 그레인 단순화(3개: case/job/disease) + 공통변수 브로드캐스트 — 계획 "공통변수
+// 브로드캐스트 설계" 절. 판정에 필요한 필드(grain/sensitivity/type) 세 개만 구조적으로
+// 받는다 — types.ts의 AnalyticsVariableMetadata를 그대로 import해도 되지만, common.ts는
+// 의도적으로 다른 모듈에 의존하지 않는 leaf 유틸이라 구조적 타입으로 최소화한다.
+// 클라이언트(CatalogPanel.jsx/RecipePanel.jsx, `@analytics-core/common` → dist)와 서버
+// (statsRecipeValidation.ts, `@wr/analytics-core`) 양쪽이 이 함수 하나를 그대로 import해서
+// 쓴다 — 복제 구현 금지(리뷰 지적 — 클라이언트/서버 별도 구현은 드리프트 위험).
+export interface GrainCompatibilityVariable {
+  grain: string;
+  sensitivity: string;
+  type: string;
+}
+
+/** case 변수는 다른 grain(job/disease)에도 안전하게 값을 복제(브로드캐스트)할 수 있다 —
+ * 단, 유사식별자·고카디널리티 변수는 세부 grain에 뿌리면 다른 변수와 조합했을 때
+ * 재식별 위험이 커지므로 제외한다. */
+export function isBroadcastSafe(variable: GrainCompatibilityVariable): boolean {
+  return variable.sensitivity !== 'quasi_identifier' && variable.type !== 'high_cardinality';
+}
+
+/** 이 변수를 `grain` 분석/필터 후보로 쓸 수 있는가 — 자기 grain과 정확히 같거나,
+ * case 브로드캐스트 안전 변수를 job/disease grain에서 보는 경우다. job/disease → case
+ * 역방향 롤업은 이번 범위 밖(항상 false). 목적지 grain 자체가 유효한 3개(case/job/disease)
+ * 중 하나가 아니면 동일성 검사까지 가기 전에 즉시 거부한다(순서 중요 — 이 검사를 동일성
+ * 검사 뒤에 두면 무효한 값끼리 우연히 같을 때 잘못 통과한다, 리뷰 지적). */
+export function isGrainCompatible(variable: GrainCompatibilityVariable, grain: string): boolean {
+  if (grain !== 'case' && grain !== 'job' && grain !== 'disease') return false;
+  if (variable.grain === grain) return true;
+  return variable.grain === 'case' && isBroadcastSafe(variable);
+}

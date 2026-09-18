@@ -6,8 +6,9 @@
 // 넘겨준다).
 import { deterministicMigrate } from '@wr/analytics-core/migration/deterministicMigrate';
 import { computeVariableValue, computeRepeatedVariableValue } from '@wr/analytics-core/catalog';
-import { enumerateVibrationIntervalEntities, enumerateDiagnosisSideEntities, enumerateJobEntities, enumerateTaskEntities } from '@wr/analytics-core/grainEntities';
+import { enumerateDiseaseEntities, enumerateJobEntities } from '@wr/analytics-core/grainEntities';
 import type { AnalyticsVariableMetadata, ExtractedValue, GrainEntity, MigrationResult, RepeatedObservation } from '@wr/analytics-core';
+import { isGrainCompatible } from '@wr/analytics-core';
 import type { AnalysisPatient } from '@wr/analytics-core/migration/deterministicMigrate';
 import type { StatsAnalysisRecipe, StatsFilter } from '@wr/contracts';
 import type { SnapshotRow } from './statsSnapshot';
@@ -196,16 +197,14 @@ function buildCaseGradeDataset(
   };
 }
 
-// PR0-B3 Part A는 vibration_interval을, Part B는 diagnosis_side를, Part C는 job/task를
-// 등록했다. job_diagnosis는 계획상 이번 확장에서 전부 제외한다. 여기 없는 grain으로 이
-// 함수가 호출되면(= statsRecipeValidation.ts의 SUPPORTED_GRAINS와 어긋난 상태) 구현
-// 버그이므로 조용히 넘기지 않고 던진다.
+// grain 단순화(PR0-B4 개정) — case/job/disease 3개만 남는다. case는
+// buildCaseGradeDataset(비반복)이 담당하고, 여기는 반복 grain(job/disease)만 등록한다.
+// 여기 없는 grain으로 이 함수가 호출되면(= statsRecipeValidation.ts의 SUPPORTED_GRAINS와
+// 어긋난 상태) 구현 버그이므로 조용히 넘기지 않고 던진다.
 type Enumerator = (mr: MigrationResult<AnalysisPatient>) => GrainEntity<unknown>[];
 const GRAIN_ENTITY_ENUMERATORS: Partial<Record<StatsAnalysisRecipe['grain'], Enumerator>> = {
-  vibration_interval: enumerateVibrationIntervalEntities as Enumerator,
-  diagnosis_side: enumerateDiagnosisSideEntities as Enumerator,
+  disease: enumerateDiseaseEntities as Enumerator,
   job: enumerateJobEntities as Enumerator,
-  task: enumerateTaskEntities as Enumerator,
 };
 
 /**
@@ -285,6 +284,30 @@ function buildRepeatedGrainDataset(
 
     for (const key of neededKeys) {
       const variable = catalogByKey.get(key);
+
+      // 공통변수 브로드캐스트(계획 "공통변수 브로드캐스트 설계" 절) — key의 grain이 이
+      // recipe의 grain과 다르면(= case 브로드캐스트 안전 변수) case-grain 경로와
+      // 동일한 순서(extractSnapshotColumnValue 우선 → computeVariableValue 폴백)로 값을
+      // 케이스당 1회만 계산해 이 case의 모든 entityKey 버킷에 그대로 복제한다.
+      // assignedDoctorUserId/registeredAt은 extractSnapshotColumnValue 경로로만 값이
+      // 나오므로 이 순서를 지키지 않으면(=computeVariableValue만 호출) 검증은 통과했는데
+      // 데이터셋 생성에서 예외가 난다(리뷰 지적).
+      if (variable && variable.grain !== recipe.grain) {
+        const policy = recipe.formulaPolicies[variable.formulaFamily];
+        const extracted =
+          extractSnapshotColumnValue(key, row) ??
+          computeVariableValue(key, migrationResult, policy ? { formulaPolicy: policy } : undefined);
+        if (!extracted) {
+          throw new Error(
+            `buildRepeatedGrainDataset: 브로드캐스트 대상 "${key}"는 카탈로그에 등록돼 있는데 값을 만들지 못했다(case=${row.id})`,
+          );
+        }
+        for (const bucket of byEntityKey.values()) {
+          bucket.values[key] = extracted;
+        }
+        continue;
+      }
+
       const policy = variable ? recipe.formulaPolicies[variable.formulaFamily] : undefined;
       const observations = computeRepeatedVariableValue(key, migrationResult, policy ? { formulaPolicy: policy } : undefined);
       if (!observations) {

@@ -5,9 +5,6 @@
 import { isPlainObject } from './migration/deterministicMigrate';
 import type { AnalysisPatient } from './migration/deterministicMigrate';
 import type { GrainEntity, MigrationResult, QualityFlag } from './types';
-import type { SpineJobLike, SpineModuleShape } from './modules/spine/types';
-import type { SpineVibrationInterval } from './modules/spine/vibration';
-import type { SpineTask } from './modules/spine/mddm';
 import type { DiagnosisLike } from './diagnosisMapping';
 import type { JobLike } from './workPeriod';
 
@@ -55,88 +52,6 @@ function assertUniqueEntityKeys<TSource>(entities: GrainEntity<TSource>[], grain
   }
 }
 
-/**
- * vibration_interval grain(§2 키: (case, jobId, intervalId)) 엔터티 열거. spine 모듈이
- * 비활성이거나 데이터가 없으면 빈 배열(그 case는 이 grain에서 관측 행 0개) — case grain
- * extractor의 structural_missing/not_assessed 판정과 달리, 반복 grain은 "행이 없다"로
- * 표현한다(§11 "grain 행 수는 fixture별 exact count로 검증" 요구와 일치).
- */
-export function enumerateVibrationIntervalEntities(
-  mr: MigrationResult<AnalysisPatient>,
-): GrainEntity<SpineVibrationInterval>[] {
-  const { payload } = mr;
-  const activeModules = payload.data.activeModules ?? [];
-  const spineModule = (payload.data.modules as Record<string, unknown> | undefined)?.spine;
-  if (!activeModules.includes('spine') || !isPlainObject(spineModule)) return [];
-
-  const shared = (payload.data.shared as Record<string, unknown>) ?? {};
-  const rawJobs = Array.isArray(shared.jobs) ? shared.jobs : [];
-  const jobs = rawJobs.filter(isPlainObject) as unknown as SpineJobLike[];
-  const jobIds = new Set(jobs.map((j) => j.id).filter((id): id is string => typeof id === 'string' && id !== ''));
-  const firstJobId = jobs.length > 0 && typeof jobs[0].id === 'string' ? jobs[0].id : '';
-
-  const rawIntervals = Array.isArray((spineModule as { vibrationIntervals?: unknown }).vibrationIntervals)
-    ? (spineModule as { vibrationIntervals?: unknown[] }).vibrationIntervals!
-    : [];
-  const intervals = rawIntervals.filter(isPlainObject) as unknown as SpineVibrationInterval[];
-
-  const out: GrainEntity<SpineVibrationInterval>[] = [];
-  const seenIds = new Set<string>();
-  intervals.forEach((interval, index) => {
-    const { id, flags } = resolveUniqueLocalId(interval.id, index, seenIds);
-
-    // groupIntervalsByJob(vibration.ts)과 동일한 job 귀속 규칙 — sharedJobId가 있으면
-    // 그 job, 없으면 첫 직력에 귀속(원본 계산 동작 그대로). 참조가 존재하지 않는 jobId를
-    // 가리키면 orphan_reference로 표시하되 엔터티 자체는 그대로 만든다(값 판정은
-    // extractor가 함, 엔터티 존재 여부는 원본 저장 데이터 그대로 반영).
-    const rawSharedJobId = typeof interval.sharedJobId === 'string' ? interval.sharedJobId : '';
-    const resolvedJobId = rawSharedJobId || firstJobId;
-    if (rawSharedJobId && !jobIds.has(rawSharedJobId)) flags.push('orphan_reference');
-
-    out.push({ entityKey: [resolvedJobId, id], source: interval, qualityFlags: flags });
-  });
-
-  assertUniqueEntityKeys(out, 'vibration_interval');
-  return out;
-}
-
-/**
- * task grain(§2 키: (case, jobId, taskId)) 엔터티 열거. vibration_interval과 정확히 같은
- * job 귀속 규칙(sharedJobId 우선, 없으면 첫 직력)과 orphan_reference 판정을 공유한다 — 두
- * grain 모두 spine 모듈의 하위 반복 컬렉션이라 같은 계약을 따른다.
- */
-export function enumerateTaskEntities(mr: MigrationResult<AnalysisPatient>): GrainEntity<SpineTask>[] {
-  const { payload } = mr;
-  const activeModules = payload.data.activeModules ?? [];
-  const spineModule = (payload.data.modules as Record<string, unknown> | undefined)?.spine;
-  if (!activeModules.includes('spine') || !isPlainObject(spineModule)) return [];
-
-  const shared = (payload.data.shared as Record<string, unknown>) ?? {};
-  const rawJobs = Array.isArray(shared.jobs) ? shared.jobs : [];
-  const jobs = rawJobs.filter(isPlainObject) as unknown as SpineJobLike[];
-  const jobIds = new Set(jobs.map((j) => j.id).filter((id): id is string => typeof id === 'string' && id !== ''));
-  const firstJobId = jobs.length > 0 && typeof jobs[0].id === 'string' ? jobs[0].id : '';
-
-  const rawTasks = Array.isArray((spineModule as { tasks?: unknown }).tasks)
-    ? (spineModule as { tasks?: unknown[] }).tasks!
-    : [];
-  const tasks = rawTasks.filter(isPlainObject) as unknown as SpineTask[];
-
-  const out: GrainEntity<SpineTask>[] = [];
-  const seenIds = new Set<string>();
-  tasks.forEach((task, index) => {
-    const { id, flags } = resolveUniqueLocalId(task.id, index, seenIds);
-
-    const rawSharedJobId = typeof task.sharedJobId === 'string' ? task.sharedJobId : '';
-    const resolvedJobId = rawSharedJobId || firstJobId;
-    if (rawSharedJobId && !jobIds.has(rawSharedJobId)) flags.push('orphan_reference');
-
-    out.push({ entityKey: [resolvedJobId, id], source: task, qualityFlags: flags });
-  });
-
-  assertUniqueEntityKeys(out, 'task');
-  return out;
-}
 
 // diagnosis_side grain(§2 키: (case, diagnosisId, side)) 엔터티의 원본 참조 — extractor가
 // side를 다시 판정하지 않고 이 shape을 그대로 쓴다(§핵심 아키텍처 "엔터티가 원본 참조를
@@ -156,7 +71,7 @@ export interface DiagnosisSideSource {
  * 이 규칙은 실제 운영 데이터로 아직 검증하지 않았다 — Part B 착수 시 계획서가 요구한
  * "실제 데이터에서 side 공백 진단 실태 조회"는 이 세션에 DB 접근이 없어 수행하지 못했다.
  */
-export function enumerateDiagnosisSideEntities(
+export function enumerateDiseaseEntities(
   mr: MigrationResult<AnalysisPatient>,
 ): GrainEntity<DiagnosisSideSource>[] {
   const shared = (mr.payload.data.shared as Record<string, unknown>) ?? {};
@@ -179,7 +94,7 @@ export function enumerateDiagnosisSideEntities(
     }
   });
 
-  assertUniqueEntityKeys(out, 'diagnosis_side');
+  assertUniqueEntityKeys(out, 'disease');
   return out;
 }
 

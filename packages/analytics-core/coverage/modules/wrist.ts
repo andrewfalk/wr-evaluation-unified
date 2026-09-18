@@ -5,6 +5,9 @@ import type { CoverageInventory } from '../types';
 
 const TECHNICAL = '기술 ID/UI 상태 — 계산값이 아니라 참조·라우팅·워크플로용';
 const FREE_TEXT = '자유 서술 텍스트 — 계산에 관여하지 않음';
+// grain 단순화 개정(PR0-B4) — job_diagnosis grain 자체가 소스코드까지 완전 삭제되면서
+// 이 필드를 읽던 유일한 소비처(inferredLinkFlags)도 함께 사라졌다.
+const GRAIN_DELETED = 'job_diagnosis grain 삭제(PR0-B4 grain 단순화)로 이 필드를 읽던 유일한 소비처가 사라짐';
 
 // wrist는 elbow와 달리 createWristDiagnosisEntry()가 만드는 필드 전부가 dependsOn에도
 // 그대로 있다(§리뷰 확인, 2026-09-06) — elbow의 5개 미사용 필드(bk2105_repeated_friction_
@@ -64,7 +67,7 @@ export const WRIST_INVENTORY: CoverageInventory = {
 
   'modules.wrist.jobEvaluations[].sharedJobId': { included: true },
   'modules.wrist.jobEvaluations[]._pendingPreset': { included: false, reason: TECHNICAL + ' — 프리셋 적용 대기 중인 임시 상태, 저장 직전 제거됨' },
-  'modules.wrist.jobEvaluations[].diagnosisEntries[].bkAutoSyncedFrom': { included: false, reason: TECHNICAL + ' — BK유형 자동복사 출처 진단ID(provenance), 계산에 관여하지 않음' },
+  'modules.wrist.jobEvaluations[].diagnosisEntries[].bkAutoSyncedFrom': { included: false, reason: GRAIN_DELETED },
   ...diagnosisEntryInventory('modules.wrist.jobEvaluations[].diagnosisEntries[]'),
 
   // 레거시(구형식, job별이 아니라 진단별 flat 저장) — linkedJobId만 이 구조 전용.

@@ -20,7 +20,7 @@ function validCatalogResponse() {
     catalogVersion: 'cv1',
     variables: [],
     supportedGrains: ['case'],
-    unsupportedGrains: [{ grain: 'person', reasonCode: 'GRAIN_NOT_YET_SUPPORTED' }],
+    unsupportedGrains: [],
     minimumCohort: 10,
   };
 }

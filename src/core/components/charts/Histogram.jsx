@@ -9,11 +9,20 @@ import { ChartTooltip, chooseTooltipPlacement } from './ChartTooltip';
 const HEIGHT = 220;
 const MARGIN = { top: 12, right: 16, bottom: 12, left: 44 };
 
-// PR3-B 계획서 §2 — histogram이 null이면(person 단위 전체연결억제) 억제 문구만
-// 보여준다. 경계 포함규칙은 서버(numpy.histogram)와 동일 — 마지막 bin만 양끝 포함.
-export function Histogram({ histogram }) {
-  if (!histogram) return <SuppressionNotice />;
-  const { bins } = histogram;
+// B안(A안 후속) — histogram이 null이어도 이유가 두 가지로 나뉜다: n=0 등 애초에
+// 히스토그램이 없던 경우(기존 기본 문구)와, 적응형 해상도 축소가 후보를 전부
+// 시도해도 공개 가능한 해상도를 못 찾은 경우(histogramReasonCode==='INSUFFICIENT_
+// DISCLOSABLE_RESOLUTION', 전용 문구). histogram이 있고 merged===true면 원본보다
+// 구간 수를 줄여 재분할했다는 안내를 차트 아래에 덧붙인다(정확한 원본 개수는
+// 일부러 밝히지 않음 — server/src/statsChartDisclosure.ts 주석 참고). 경계
+// 포함규칙은 서버(numpy.histogram)와 동일 — 마지막 bin만 양끝 포함.
+export function Histogram({ histogram, histogramReasonCode }) {
+  if (!histogram) {
+    return histogramReasonCode === 'INSUFFICIENT_DISCLOSABLE_RESOLUTION'
+      ? <SuppressionNotice>분포를 표시하기에는 공개 가능한 구간이 부족합니다.</SuppressionNotice>
+      : <SuppressionNotice />;
+  }
+  const { bins, merged } = histogram;
   if (bins.length === 0) return <p className="swb-suppressed-note">자료 없음</p>;
 
   const innerWidth = CHART_VIEW_WIDTH - MARGIN.left - MARGIN.right;
@@ -75,5 +84,10 @@ export function Histogram({ histogram }) {
     </>
   );
 
-  return <DataTableView chart={chart} table={table} tableCaption="히스토그램 데이터" />;
+  return (
+    <>
+      <DataTableView chart={chart} table={table} tableCaption="히스토그램 데이터" />
+      {merged && <p className="swb-suppressed-note">공개 기준에 맞춰 구간 수를 줄여 표시했습니다.</p>}
+    </>
+  );
 }

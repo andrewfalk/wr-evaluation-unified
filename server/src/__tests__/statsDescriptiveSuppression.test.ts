@@ -178,6 +178,91 @@ describe('computeDescriptiveSuppression — PR3-B 히스토그램/박스플롯 �
     if (c.suppressed) return;
     expect(c.histogram).toBeNull();
     expect(c.boxplot).toBeNull();
+    // B안 — rawStat.histogram이 애초에 없던 경우(위 시나리오)와 재분할까지 실패한
+    // 경우를 구분해야 하므로, 전자는 histogramReasonCode도 채워지지 않아야 한다.
+    expect(c.histogramReasonCode).toBeNull();
+  });
+
+  it('B안 — 재분할 후보를 전부 시도해도 실패하면 histogram은 null, histogramReasonCode가 채워진다', () => {
+    const key = 'spine.mddm.lifetimeDoseMNh';
+    // 9명이 lo(0)에 고립, 91명이 반대쪽 끝(250)에 몰려 있어 몇 개로 재분할하든
+    // (하한 3개까지) lo쪽 구간엔 그 9명만 남는다(statsChartDisclosure.test.ts의
+    // 동일 시나리오를 실제 배선 경로로 재확인).
+    const entries = [
+      ...Array.from({ length: 9 }, () => ({ value: 0 })),
+      ...Array.from({ length: 91 }, () => ({ value: 250 })),
+    ];
+    const catalogByKey = new Map([[key, meta(key, 'continuous')]]);
+    const raw: StatsEngineRawResult = {
+      continuous: [{
+        variableKey: key, n: 100, mean: 227.5, sd: 75, median: 250, q1: 250, q3: 250, iqr: 0,
+        skewness: null, kurtosis: null, min: 0, max: 250, nullReasons: {},
+        histogram: {
+          bins: [
+            { lower: 0, upper: 75, count: 9 },
+            { lower: 75, upper: 150, count: 0 },
+            { lower: 150, upper: 225, count: 0 },
+            { lower: 225, upper: 300, count: 91 },
+          ],
+        },
+        boxplot: null,
+      }],
+      discrete: [],
+    };
+    const result = computeDescriptiveSuppression(rows(key, entries), [key], catalogByKey, raw);
+    const c = result.continuous[0];
+    expect(c.suppressed).toBe(false);
+    if (c.suppressed) return;
+    expect(c.histogram).toBeNull();
+    expect(c.histogramReasonCode).toBe('INSUFFICIENT_DISCLOSABLE_RESOLUTION');
+  });
+
+  it('B안 — 원본은 실패해도 재분할 후보에서 통과하면 histogram.merged=true로 노출되고 histogramReasonCode는 null이다', () => {
+    const key = 'spine.mddm.lifetimeDoseMNh';
+    // statsChartDisclosure.test.ts의 검증된 시나리오를 실제 배선 경로로 재확인한다 —
+    // 원본 8개 bin 중 앞 2개가 각 5명씩(소수셀)이라 원본은 실패하지만, 재분할
+    // 후보(자연스러운 절반 축소 4개)에서 두 쌍씩 묶여(10/20/20/20) 전부 통과한다.
+    const entries = [
+      ...Array.from({ length: 5 }, () => ({ value: 5 })), // [0,10)
+      ...Array.from({ length: 5 }, () => ({ value: 15 })), // [10,20)
+      ...Array.from({ length: 10 }, () => ({ value: 25 })), // [20,30)
+      ...Array.from({ length: 10 }, () => ({ value: 35 })), // [30,40)
+      ...Array.from({ length: 10 }, () => ({ value: 45 })), // [40,50)
+      ...Array.from({ length: 10 }, () => ({ value: 55 })), // [50,60)
+      ...Array.from({ length: 10 }, () => ({ value: 65 })), // [60,70)
+      ...Array.from({ length: 10 }, () => ({ value: 75 })), // [70,80]
+    ];
+    const catalogByKey = new Map([[key, meta(key, 'continuous')]]);
+    const raw: StatsEngineRawResult = {
+      continuous: [{
+        variableKey: key, n: 70, mean: 40, sd: 25, median: 40, q1: 20, q3: 60, iqr: 40,
+        skewness: 0, kurtosis: 0, min: 5, max: 75, nullReasons: {},
+        histogram: {
+          bins: [
+            { lower: 0, upper: 10, count: 5 }, { lower: 10, upper: 20, count: 5 },
+            { lower: 20, upper: 30, count: 10 }, { lower: 30, upper: 40, count: 10 },
+            { lower: 40, upper: 50, count: 10 }, { lower: 50, upper: 60, count: 10 },
+            { lower: 60, upper: 70, count: 10 }, { lower: 70, upper: 80, count: 10 },
+          ],
+        },
+        boxplot: null,
+      }],
+      discrete: [],
+    };
+    const result = computeDescriptiveSuppression(rows(key, entries), [key], catalogByKey, raw);
+    const c = result.continuous[0];
+    expect(c.suppressed).toBe(false);
+    if (c.suppressed) return;
+    expect(c.histogram).toEqual({
+      merged: true,
+      bins: [
+        { lower: 0, upper: 20, count: 10 },
+        { lower: 20, upper: 40, count: 20 },
+        { lower: 40, upper: 60, count: 20 },
+        { lower: 60, upper: 80, count: 20 },
+      ],
+    });
+    expect(c.histogramReasonCode).toBeNull();
   });
 });
 
@@ -250,5 +335,36 @@ describe('buildStatsEngineRequest', () => {
     const request = buildStatsEngineRequest(data, [key], catalogByKey);
     expect(request.variables[0].kind).toBe('continuous');
     expect(request.variables[0].values).toEqual([1.5, 2.5]);
+  });
+
+  // A안 — histogram bin 개수를 행 수가 아니라 실제 인원 수 기준으로 계산하기 위한
+  // personCount 힌트. discrete는 histogram이 없으므로 채우지 않는다(불필요한 필드 방지).
+  it('continuous 변수는 결측 아닌 행의 고유 personClusterKey 수를 personCount로 함께 보낸다', () => {
+    const key = 'spine.vibration.dvMax';
+    const data = rows(key, [{ value: 1.5 }, { value: 2.5 }, { value: null, missing: 'not_entered' }]);
+    const catalogByKey = new Map([[key, meta(key, 'continuous')]]);
+    const request = buildStatsEngineRequest(data, [key], catalogByKey);
+    expect(request.variables[0].personCount).toBe(2);
+  });
+
+  it('브로드캐스트로 같은 사람이 여러 행을 차지해도 personCount는 중복 없이 세어진다', () => {
+    const key = 'knee.relatedness.max';
+    const data: DatasetRow[] = [
+      { caseId: 'case-1', personClusterKey: 'person-1', values: { [key]: extracted(70) } },
+      { caseId: 'case-1', personClusterKey: 'person-1', values: { [key]: extracted(70) } },
+      { caseId: 'case-2', personClusterKey: 'person-2', values: { [key]: extracted(55) } },
+    ];
+    const catalogByKey = new Map([[key, meta(key, 'continuous')]]);
+    const request = buildStatsEngineRequest(data, [key], catalogByKey);
+    expect(request.variables[0].values).toHaveLength(3);
+    expect(request.variables[0].personCount).toBe(2);
+  });
+
+  it('discrete 변수에는 personCount를 채우지 않는다(histogram이 없으므로 불필요)', () => {
+    const key = 'elbow.assessment.burdenGradeMax';
+    const data = rows(key, [{ value: '고도' }]);
+    const catalogByKey = new Map([[key, meta(key, 'ordinal')]]);
+    const request = buildStatsEngineRequest(data, [key], catalogByKey);
+    expect(request.variables[0].personCount).toBeUndefined();
   });
 });

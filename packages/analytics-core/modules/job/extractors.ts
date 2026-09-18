@@ -17,7 +17,9 @@ function isBlank(x: unknown): boolean {
 // §5.5 ① 계획 규칙 그대로 — NFC → 앞뒤 공백 제거 → 내부 연속 공백 1칸 → 전각/반각 통일 →
 // 영문 소문자화. 원본 jobName은 절대 덮어쓰지 않는다(이 함수는 파생값만 만든다) —
 // isBlank(raw)를 이미 통과한 non-blank 문자열만 받는다는 게 호출부의 전제.
-function normalizeJobName(raw: string): string {
+// PR0-B4 Slice 8b — elbow/wrist의 main_task_name(job_diagnosis grain, quasi_identifier)이
+// "job.identity.jobNameNormalized 선례 재사용"으로 이 함수를 그대로 가져다 쓴다(재구현 금지).
+export function normalizeJobName(raw: string): string {
   const nfc = raw.normalize('NFC');
   const trimmed = nfc.trim();
   const collapsed = trimmed.replace(/\s+/g, ' ');
@@ -169,4 +171,70 @@ export function extractJobRollupLongestTenureJobNameNormalized(
     return { value: null, missing: 'not_entered', qualityFlags: winner.entity.qualityFlags };
   }
   return { value: normalizeJobName(rawName), missing: null, qualityFlags: winner.entity.qualityFlags };
+}
+
+// ── PR0-B4 Slice 2 — coverage 잔여 필드(매핑표 §1 shared.jobs[]). tenureYears/rollup의
+// dependsOn에만 있던 raw 필드를 독립 노출한다.
+
+// job.raw.startDate/endDate — 카탈로그 최초의 date 타입 analytics-core 변수(서버 전용
+// SNAPSHOT_COLUMN_VARIABLES의 case.meta.registeredAt은 이미 있었다). 값 형식은 그
+// 선례와 동일하게 YYYY-MM-DD 문자열을 그대로 쓴다(statsDatasetBuilder.ts의 필터 비교가
+// 이 형식을 그대로 문자열 비교하므로, parseStrictIsoDate로 검증만 하고 재포맷하지
+// 않는다 — 원본이 이미 그 형식이어야 통과한다).
+function extractJobRawDateField(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  field: 'startDate' | 'endDate',
+): RepeatedObservation<string>[] {
+  return enumerateJobEntities(migrationResult).map((entity) => {
+    const raw = entity.source[field];
+    if (isBlank(raw)) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
+    }
+    if (typeof raw !== 'string' || !parseStrictIsoDate(raw)) {
+      return {
+        entityKey: entity.entityKey,
+        value: null,
+        missing: 'not_entered',
+        qualityFlags: [...entity.qualityFlags, 'invalid'],
+      };
+    }
+    return { entityKey: entity.entityKey, value: raw, missing: null, qualityFlags: entity.qualityFlags };
+  });
+}
+
+export function extractJobRawStartDate(migrationResult: MigrationResult<AnalysisPatient>): RepeatedObservation<string>[] {
+  return extractJobRawDateField(migrationResult, 'startDate');
+}
+
+export function extractJobRawEndDate(migrationResult: MigrationResult<AnalysisPatient>): RepeatedObservation<string>[] {
+  return extractJobRawDateField(migrationResult, 'endDate');
+}
+
+export function extractJobRawWorkDaysPerYear(
+  migrationResult: MigrationResult<AnalysisPatient>,
+): RepeatedObservation<number>[] {
+  return enumerateJobEntities(migrationResult).map((entity) => {
+    const raw = entity.source.workDaysPerYear;
+    if (isBlank(raw)) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
+    }
+    if (typeof raw !== 'number' && typeof raw !== 'string') {
+      return {
+        entityKey: entity.entityKey,
+        value: null,
+        missing: 'not_entered',
+        qualityFlags: [...entity.qualityFlags, 'invalid'],
+      };
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n)) {
+      return {
+        entityKey: entity.entityKey,
+        value: null,
+        missing: 'not_entered',
+        qualityFlags: [...entity.qualityFlags, 'invalid'],
+      };
+    }
+    return { entityKey: entity.entityKey, value: n, missing: null, qualityFlags: entity.qualityFlags };
+  });
 }

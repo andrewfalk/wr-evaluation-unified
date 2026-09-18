@@ -7,6 +7,9 @@ import {
   extractJobIdentityJobNameNormalized,
   extractJobIdentityTenureYears,
   extractJobRollupLongestTenureJobNameNormalized,
+  extractJobRawStartDate,
+  extractJobRawEndDate,
+  extractJobRawWorkDaysPerYear,
 } from './extractors';
 
 registerAnalyticsModule({
@@ -16,6 +19,9 @@ registerAnalyticsModule({
     'job.identity.jobNameNormalized': extractJobIdentityJobNameNormalized,
     'job.identity.tenureYears': extractJobIdentityTenureYears,
     'job.rollup.longestTenureJobNameNormalized': extractJobRollupLongestTenureJobNameNormalized,
+    'job.raw.startDate': extractJobRawStartDate,
+    'job.raw.endDate': extractJobRawEndDate,
+    'job.raw.workDaysPerYear': extractJobRawWorkDaysPerYear,
   },
   // 'job'은 실제 UI 모듈이 아니라 shared.jobs[] 자체를 가리키는 pseudo-moduleId다 — 어떤
   // patient의 activeModules에도 'job'이 들어가지 않으므로 completion.ts의
