@@ -191,33 +191,6 @@ export function extractKneeDiagnosisSideConfirmedStatus(
   });
 }
 
-// "신청≠확정 여부" — 신청상병(code/name)과 확정상병(confirmedCode/confirmedName)이 다른가.
-// side와 무관하게 진단 하나에 대해 정해지는 값이므로, side==='both'로 엔터티가 2개(우/좌)
-// 생겨도 같은 진단이면 두 행에 동일한 값이 반복된다(진단 레벨 사실을 diagnosis_side grain에
-// 투영 — job 레벨 값을 job_diagnosis grain에 투영하는 것과 같은 패턴).
-export function extractKneeDiagnosisSideAppliedConfirmedMismatch(
-  migrationResult: MigrationResult<AnalysisPatient>,
-): RepeatedObservation<boolean>[] {
-  const activeModules = migrationResult.payload.data.activeModules ?? [];
-  return enumerateDiseaseEntities(migrationResult).map((entity) => {
-    const { diagnosis } = entity.source;
-    const moduleId = resolveDiagnosisModule(diagnosis, activeModules)?.moduleId;
-    if (moduleId !== 'knee') {
-      return { entityKey: entity.entityKey, value: null, missing: 'not_applicable', qualityFlags: entity.qualityFlags };
-    }
-    const confirmedCode = String(diagnosis.confirmedCode ?? '').trim();
-    const confirmedName = String(diagnosis.confirmedName ?? '').trim();
-    if (confirmedCode === '' && confirmedName === '') {
-      // 아직 확정상병 자체가 입력되지 않았다 — 비교할 대상이 없다.
-      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
-    }
-    const requestedCode = String(diagnosis.code ?? '').trim();
-    const requestedName = String(diagnosis.name ?? '').trim();
-    const mismatch = confirmedCode !== requestedCode || confirmedName !== requestedName;
-    return { entityKey: entity.entityKey, value: mismatch, missing: null, qualityFlags: entity.qualityFlags };
-  });
-}
-
 // ── PR0-B4 Slice 4 — coverage 잔여 필드(매핑표 §2). jobExtras 원시값 8종을 job grain에
 // 독립 노출한다. shoulder Slice 3와 동일 패턴 — enumerateJobEntities(shared.jobs[] 기준)
 // 로 행 모집단을 고정하고, sharedJobId로 modules.knee.jobExtras[]를 찾아 투영한다.

@@ -3,6 +3,7 @@ import {
   extractJobIdentityJobNameNormalized,
   extractJobIdentityTenureYears,
   extractJobRollupLongestTenureJobNameNormalized,
+  extractJobRollupLongestTenureYears,
   extractJobRawStartDate,
   extractJobRawEndDate,
   extractJobRawWorkDaysPerYear,
@@ -220,6 +221,65 @@ describe('extractJobRollupLongestTenureJobNameNormalized — case grain(§2.1 �
     const first = extractJobRollupLongestTenureJobNameNormalized(migrate(payload));
     const second = extractJobRollupLongestTenureJobNameNormalized(migrate(payload));
     expect(first).toEqual(second);
+  });
+});
+
+// Case-grain 롤업 변수 3종 추가 — longestTenureYears는 longestTenureJobNameNormalized와
+// resolveRepresentativeJob을 공유하므로, 같은 픽스처에서 두 변수가 "같은 job"을 골랐는지
+// 교차검증하는 테스트를 반드시 포함한다(대표 job이 갈리면 안 됨).
+describe('extractJobRollupLongestTenureYears — case grain(§2.1 roll-up, 대표 job 선택 공유)', () => {
+  it('직력이 없으면 not_entered', () => {
+    const result = extractJobRollupLongestTenureYears(jobsMigration([]));
+    expect(result).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+  });
+
+  it('근속기간이 가장 긴 job의 연수를 반환하고, 대표 직종명도 같은 job에서 나온다', () => {
+    const longer = { id: 'job-1', jobName: '용접공', startDate: '2010-01-01', endDate: '2020-01-01' }; // 10년
+    const shorter = { id: 'job-2', jobName: '조립공', startDate: '2020-01-01', endDate: '2021-01-01' }; // 1년
+    const mr = jobsMigration([shorter, longer]);
+    const yearsResult = extractJobRollupLongestTenureYears(mr);
+    expect(yearsResult.missing).toBeNull();
+    expect(yearsResult.value).toBeCloseTo(10, 1);
+    const nameResult = extractJobRollupLongestTenureJobNameNormalized(mr);
+    expect(nameResult).toEqual({ value: '용접공', missing: null, qualityFlags: [] });
+  });
+
+  it('동률 tie-break에서도 두 변수가 같은 job(entityKey)을 고른다', () => {
+    const a = { id: 'job-a', jobName: '용접공', workPeriodOverride: '5년', startDate: '2010-01-01' };
+    const b = { id: 'job-b', jobName: '조립공', workPeriodOverride: '5년', startDate: '2016-01-01' };
+    const mr = jobsMigration([b, a]);
+    const yearsResult = extractJobRollupLongestTenureYears(mr);
+    const nameResult = extractJobRollupLongestTenureJobNameNormalized(mr);
+    expect(nameResult.value).toBe('용접공'); // job-a가 시작일이 이르다
+    expect(yearsResult.value).toBeCloseTo(5, 1);
+  });
+
+  it('동률 근속기간에서 startDate 미입력(workPeriodOverride 전용) job이 실제 startDate가 있는 job보다 우선되지 않는다 — years/name 두 변수 모두 같은 winner', () => {
+    const noStartDate = { id: 'job-a', jobName: '시작일없음', workPeriodOverride: '5년' };
+    const withStartDate = { id: 'job-b', jobName: '시작일있음', workPeriodOverride: '5년', startDate: '2010-01-01' };
+    const mr = jobsMigration([noStartDate, withStartDate]);
+    expect(extractJobRollupLongestTenureJobNameNormalized(mr).value).toBe('시작일있음');
+    expect(extractJobRollupLongestTenureYears(mr).value).toBeCloseTo(5, 1);
+  });
+
+  it('무효한 근속기간을 가진 job은 후보에서 제외된다', () => {
+    const invalid = { id: 'job-1', jobName: '이상직력', workPeriodOverride: '오년' };
+    const valid = { id: 'job-2', jobName: '정상직력', startDate: '2018-01-01', endDate: '2020-01-01' }; // 2년
+    const result = extractJobRollupLongestTenureYears(jobsMigration([invalid, valid]));
+    expect(result.missing).toBeNull();
+    expect(result.value).toBeCloseTo(2, 1);
+  });
+
+  // 리뷰 제안 케이스 — 대표 job의 직종명은 결측이어도 근속기간 자체는 정상 반환해야
+  // 한다(이름 결측이 기간 결측을 의미하지 않는다).
+  it('대표 job의 직종명이 결측이어도(공백) 근속기간은 정상 반환한다', () => {
+    const job = { id: 'job-1', jobName: '', startDate: '2015-01-01', endDate: '2020-01-01' }; // 5년
+    const mr = jobsMigration([job]);
+    const nameResult = extractJobRollupLongestTenureJobNameNormalized(mr);
+    expect(nameResult).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+    const yearsResult = extractJobRollupLongestTenureYears(mr);
+    expect(yearsResult.missing).toBeNull();
+    expect(yearsResult.value).toBeCloseTo(5, 1);
   });
 });
 

@@ -53,9 +53,6 @@ export const SHARED_INVENTORY: CoverageInventory = {
   'shared.diagnoses[].side': { included: true },
 
   // --- knee/shoulder 전용 진단 확장(createKneeDiagnosis/createShoulderDiagnosis) ---
-  // PR0-B3 Part B — knee.diagnosisSide.appliedConfirmedMismatch("신청≠확정 여부") dependsOn.
-  'shared.diagnoses[].confirmedCode': { included: true },
-  'shared.diagnoses[].confirmedName': { included: true },
   // knee.diagnosisSide.klGrade dependsOn.
   'shared.diagnoses[].klgRight': { included: true },
   'shared.diagnoses[].klgLeft': { included: true },

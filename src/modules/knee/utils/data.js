@@ -5,8 +5,6 @@ export const createKneeDiagnosis = () => ({
   code: '',
   name: '',
   side: '',
-  confirmedCode: '',
-  confirmedName: '',
   klgRight: '',
   klgLeft: '',
   confirmedRight: '',

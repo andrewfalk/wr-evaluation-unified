@@ -24,11 +24,12 @@ const planned = (key: string, slice: string): FieldMappingEntry => ({ key, scope
 const done = (key: string, slice: string): FieldMappingEntry => ({ key, scope: 'planned', slice, done: true });
 
 export const PR0_B4_FIELD_MAPPING: readonly FieldMappingEntry[] = [
-  // ── §0. 기존 카탈로그 17개(전부 완료, grain 단순화 개정으로 vibration_interval 2개 제외) ──
+  // ── §0. 기존 카탈로그 16개(전부 완료, grain 단순화 개정으로 vibration_interval 2개 제외,
+  // knee.diagnosisSide.appliedConfirmedMismatch는 입력 UI 없는 dead 필드였던 confirmedCode/
+  // confirmedName 원본까지 함께 삭제되며 제외) ──
   existing('knee.relatedness.max'),
   existing('knee.diagnosisSide.klGrade'),
   existing('knee.diagnosisSide.confirmedStatus'),
-  existing('knee.diagnosisSide.appliedConfirmedMismatch'),
   existing('shoulder.exposure.anyExceeded'),
   existing('shoulder.diagnosisSide.ellmanClass'),
   existing('elbow.assessment.burdenGradeMax'),
@@ -110,4 +111,15 @@ export const PR0_B4_FIELD_MAPPING: readonly FieldMappingEntry[] = [
   // grain 단순화 개정(PR0-B4) — cervical_task grain 신설(Slice 7), elbow/wrist
   // job_diagnosis 공통 필드·BK유형별 세부(Slice 8b/8c) 108개는 job_diagnosis/task/
   // cervical_task/vibration_interval grain 자체와 함께 소스코드까지 완전 삭제됐다.
+
+  // ── Case-grain 롤업 변수 3종 추가 (Slice 9) — 전부 이미 카탈로그에 있던 원본 필드만
+  // 참조하는 신규 case-grain 파생 변수. coverage/shared.ts에 새 raw 필드 추가는 없다.
+  done('diagnosis.rollup.anyHighRelatedness', '9'),
+  done('diagnosis.rollup.hasKnee', '9'),
+  done('diagnosis.rollup.hasWrist', '9'),
+  done('diagnosis.rollup.hasElbow', '9'),
+  done('diagnosis.rollup.hasShoulder', '9'),
+  done('diagnosis.rollup.hasSpine', '9'),
+  done('diagnosis.rollup.hasCervical', '9'),
+  done('job.rollup.longestTenureYears', '9'),
 ];

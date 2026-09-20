@@ -71,6 +71,27 @@ export const JOB_METADATA: AnalyticsVariableMetadata[] = [
     formulaFamily: 'job_rollup_longest_tenure',
     supportedFormulaPolicies: [],
   },
+  {
+    // Case-grain 롤업 변수 3종 추가 절 — "근속기간(년)"을 max로 case에 올린다. 대표
+    // 직종명(longestTenureJobNameNormalized)과 같은 job에서 뽑히도록 resolveRepresentativeJob
+    // helper를 공유한다(독립 max 재계산 아님). 근속기간 숫자 자체는 직종명 문자열과
+    // 달리 식별성이 없으므로 quasi_identifier가 아니라 non_sensitive다.
+    key: 'job.rollup.longestTenureYears',
+    label: '대표 직력 근속기간(년)',
+    group: '직업력 · 공통',
+    moduleId: 'job',
+    grain: 'case',
+    type: 'continuous',
+    unit: '년',
+    provenance: 'derived',
+    dependsOn: ['shared.jobs[].id', 'shared.jobs[].jobName', 'shared.jobs[].startDate', 'shared.jobs[].endDate', 'shared.jobs[].workPeriodOverride'],
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association', 'formula_audit'],
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'job_rollup_longest_tenure_years',
+    supportedFormulaPolicies: [],
+  },
 
   // PR0-B4 Slice 2 — coverage 잔여 필드(매핑표 §1 shared.jobs[]). tenureYears/rollup의
   // dependsOn에는 이미 있었지만 독립 변수로는 없던 raw 필드. startDate/endDate는 날짜

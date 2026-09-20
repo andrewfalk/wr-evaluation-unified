@@ -45,6 +45,24 @@ function recipe(overrides: Partial<StatsAnalysisRecipe> = {}): StatsAnalysisReci
 const JOB_A = { id: 'job-1', jobName: '용접공', startDate: '2015-01-01', endDate: '2020-01-01' };
 const JOB_B = { id: 'job-2', jobName: '조립공', startDate: '2020-01-01', endDate: '2021-01-01' };
 
+// jobSnapshotRow는 diagnoses를 지원하지 않는다 — 아래 case-grain 롤업 브로드캐스트
+// 계산 시점 테스트는 jobs와 diagnoses를 동시에 필요로 해서 별도 헬퍼로 구성한다.
+function caseSnapshotRow(
+  id: string,
+  personId: string,
+  data: { jobs?: Array<Record<string, unknown>>; diagnoses?: Array<Record<string, unknown>> },
+): SnapshotRow {
+  return {
+    id,
+    patientPersonId: personId,
+    assignedDoctorUserId: null,
+    createdAt: new Date('2024-01-01T00:00:00.000Z'),
+    payload: {
+      data: { shared: { jobs: data.jobs ?? [], diagnoses: data.diagnoses ?? [] }, modules: {}, activeModules: [] },
+    },
+  };
+}
+
 describe('buildRepeatedGrainDataset — 공통변수 브로드캐스트(case → job)', () => {
   it('job이 2개인 case에서 브로드캐스트 값(성별)이 정확히 2행에 복제된다', () => {
     const rows = [jobSnapshotRow('case-1', 'person-1', [JOB_A, JOB_B], { gender: 'female' })];
@@ -198,5 +216,53 @@ describe('buildRepeatedGrainDataset — 공통변수 브로드캐스트(case →
     expect(dataset.observationCount).toBe(20);
     expect(dataset.personCount).toBe(1);
     expect(dataset.personCount).toBeLessThan(MINIMUM_COHORT);
+  });
+
+  // Case-grain 롤업 변수 3종 추가 — 계획서 "브로드캐스트 계산 시점" 절: 브로드캐스트
+  // 값은 필터 이전에 케이스 전체로 1회 계산돼 복제되므로, 그 후 필터로 일부 행이
+  // 사라져도 이미 복제된 값 자체는 바뀌지 않는다.
+  it('무릎 low·어깨 high 케이스에서 disease grain 필터로 무릎 행만 남겨도 anyHighRelatedness 브로드캐스트 값은 여전히 true', () => {
+    const dxKnee = { id: 'dx-knee', code: 'M17.1', name: '무릎관절증', side: 'right', assessmentRight: 'low' };
+    const dxShoulder = { id: 'dx-shoulder', code: 'M75.1', name: '회전근개파열', side: 'right', assessmentRight: 'high' };
+    const rows = [caseSnapshotRow('case-1', 'person-1', { diagnoses: [dxKnee, dxShoulder] })];
+    const result = buildDataset(
+      rows,
+      recipe({
+        grain: 'disease',
+        variableKeys: ['diagnosis.identity.moduleGroup', 'diagnosis.rollup.anyHighRelatedness'],
+        filters: [{ key: 'diagnosis.identity.moduleGroup', operator: 'eq', value: 'knee' }],
+      }),
+      RECIPE_DIGEST,
+      CATALOG_BY_KEY,
+    );
+    expect(result.observationCount).toBe(1);
+    expect(result.rows[0].values['diagnosis.identity.moduleGroup']).toEqual({ value: 'knee', missing: null, qualityFlags: [] });
+    // 어깨(high) 상병이 필터로 화면에 안 보여도, 브로드캐스트 값은 케이스 전체 기준으로
+    // 이미 계산된 것이라 true 그대로다.
+    expect(result.rows[0].values['diagnosis.rollup.anyHighRelatedness']).toEqual({ value: true, missing: null, qualityFlags: [] });
+  });
+
+  it('job 필터로 대표 직력에 해당하는 job 행이 결과에서 사라져도, 남은 job 행에 복제된 longestTenureYears 값은 필터 전 계산값 그대로다', () => {
+    const longJob = { id: 'job-long', jobName: '용접공', startDate: '2010-01-01', endDate: '2020-01-01' }; // 10년(대표)
+    const shortJob = { id: 'job-short', jobName: '조립공', startDate: '2020-01-01', endDate: '2021-01-01' }; // 1년
+    const rows = [caseSnapshotRow('case-1', 'person-1', { jobs: [longJob, shortJob] })];
+    const result = buildDataset(
+      rows,
+      recipe({
+        grain: 'job',
+        variableKeys: ['job.identity.jobNameNormalized', 'job.rollup.longestTenureYears'],
+        filters: [{ key: 'job.identity.tenureYears', operator: 'lt', value: 5 }],
+      }),
+      RECIPE_DIGEST,
+      CATALOG_BY_KEY,
+    );
+    expect(result.observationCount).toBe(1);
+    expect(result.rows[0].values['job.identity.jobNameNormalized']).toEqual({ value: '조립공', missing: null, qualityFlags: [] });
+    // 대표 직력(용접공, 10년)에 해당하는 job 행 자체는 필터로 사라졌지만, 브로드캐스트된
+    // longestTenureYears는 필터 전 케이스 전체 기준(10년, 날짜차 계산이라 365.25일
+    // 기준 근사치)이지 남은 job(조립공, 1년) 기준이 아니다.
+    const longestTenureYearsResult = result.rows[0].values['job.rollup.longestTenureYears'];
+    expect(longestTenureYearsResult.missing).toBeNull();
+    expect(longestTenureYearsResult.value).toBeCloseTo(10, 1);
   });
 });

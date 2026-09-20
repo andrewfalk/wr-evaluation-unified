@@ -15,6 +15,13 @@ import {
   extractDiagnosisAssessmentLowReasonLowBurden,
   extractDiagnosisAssessmentLowReasonBelowThreshold,
   extractDiagnosisAssessmentLowReasonOther,
+  extractDiagnosisRollupAnyHighRelatedness,
+  extractDiagnosisRollupHasKnee,
+  extractDiagnosisRollupHasWrist,
+  extractDiagnosisRollupHasElbow,
+  extractDiagnosisRollupHasShoulder,
+  extractDiagnosisRollupHasSpine,
+  extractDiagnosisRollupHasCervical,
 } from './extractors';
 
 registerAnalyticsModule({
@@ -32,6 +39,13 @@ registerAnalyticsModule({
     'diagnosis.assessment.lowReason.lowBurden': extractDiagnosisAssessmentLowReasonLowBurden,
     'diagnosis.assessment.lowReason.belowThreshold': extractDiagnosisAssessmentLowReasonBelowThreshold,
     'diagnosis.assessment.lowReason.other': extractDiagnosisAssessmentLowReasonOther,
+    'diagnosis.rollup.anyHighRelatedness': extractDiagnosisRollupAnyHighRelatedness,
+    'diagnosis.rollup.hasKnee': extractDiagnosisRollupHasKnee,
+    'diagnosis.rollup.hasWrist': extractDiagnosisRollupHasWrist,
+    'diagnosis.rollup.hasElbow': extractDiagnosisRollupHasElbow,
+    'diagnosis.rollup.hasShoulder': extractDiagnosisRollupHasShoulder,
+    'diagnosis.rollup.hasSpine': extractDiagnosisRollupHasSpine,
+    'diagnosis.rollup.hasCervical': extractDiagnosisRollupHasCervical,
   },
   // 'diagnosis'는 job과 마찬가지로 실제 UI 모듈이 아니라 shared.diagnoses[] 자체를
   // 가리키는 pseudo-moduleId다 — 어떤 patient의 activeModules에도 'diagnosis'가 들어가지

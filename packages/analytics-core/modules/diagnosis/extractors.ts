@@ -1,10 +1,13 @@
 // Raw extractor — diagnosis grain 1호 슬라이스(§5.5 ④ "신청상병 부위군").
 
-import type { MissingReason, MigrationResult, QualityFlag, RepeatedObservation } from '../../types';
+import type { ExtractedValue, MissingReason, MigrationResult, QualityFlag, RepeatedObservation } from '../../types';
 import { enumerateDiseaseEntities, type DiagnosisSideSource } from '../../grainEntities';
 import { resolveDiagnosisModule, isValidDiagnosisModuleId } from '../../diagnosisMapping';
 import type { GrainEntity } from '../../types';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
+import type { DIAGNOSIS_MODULE_GROUP_ORDER } from './metadata';
+
+type DiagnosisModuleGroupId = (typeof DIAGNOSIS_MODULE_GROUP_ORDER)[number];
 
 function isBlank(x: unknown): boolean {
   return x === null || x === undefined || String(x).trim() === '';
@@ -41,6 +44,74 @@ export function extractDiagnosisIdentityModuleGroup(
       qualityFlags: [...entity.qualityFlags, 'legacy_unknown'],
     };
   });
+}
+
+interface DiagnosisModulePresence {
+  resolved: Set<DiagnosisModuleGroupId>;
+  hasUnresolved: boolean;
+  qualityFlags: QualityFlag[];
+}
+
+// case grain "부위 포함 여부" 6종의 공통 계산 — extractDiagnosisIdentityModuleGroup과
+// 같은 resolveDiagnosisModule(diag, []) 판정을 재사용하되, "목록 포함 여부"로 의미를
+// 좁힌다: 어떤 부위로도 분류 안 되는(미분류) 진단이 하나라도 남아 있으면 그 진단이
+// 사실 부위 X일 수도 있으므로 X=false를 확정할 수 없다(그래서 hasUnresolved를 따로
+// 추적한다). 이 helper는 변수 키(6개 wrapper)마다 각각 새로 호출된다 — 서버가 변수
+// 키 단위로 extractor를 호출하는 구조라(statsDatasetBuilder.ts) 결과를 캐싱해 1회로
+// 줄이지는 않는다. qualityFlags는 __none__ 진단을 포함해 스캔한 모든 엔터티에서
+// 무조건 먼저 수집한 뒤 분류를 시도한다.
+function computeDiagnosisModulePresence(migrationResult: MigrationResult<AnalysisPatient>): DiagnosisModulePresence {
+  const resolved = new Set<DiagnosisModuleGroupId>();
+  const qualityFlags = new Set<QualityFlag>();
+  let hasUnresolved = false;
+
+  for (const entity of enumerateDiseaseEntities(migrationResult)) {
+    for (const flag of entity.qualityFlags) qualityFlags.add(flag);
+    const { diagnosis } = entity.source;
+    if (diagnosis.moduleId === '__none__') continue;
+    const hint = resolveDiagnosisModule(diagnosis, []);
+    if (hint && isValidDiagnosisModuleId(hint.moduleId)) {
+      resolved.add(hint.moduleId as DiagnosisModuleGroupId);
+    } else {
+      hasUnresolved = true;
+      qualityFlags.add('legacy_unknown');
+    }
+  }
+
+  return { resolved, hasUnresolved, qualityFlags: [...qualityFlags] };
+}
+
+function extractDiagnosisRollupHasModule(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  targetModuleId: DiagnosisModuleGroupId,
+): ExtractedValue<boolean> {
+  const { resolved, hasUnresolved, qualityFlags } = computeDiagnosisModulePresence(migrationResult);
+  if (resolved.has(targetModuleId)) {
+    return { value: true, missing: null, qualityFlags };
+  }
+  if (hasUnresolved) {
+    return { value: null, missing: 'not_entered', qualityFlags };
+  }
+  return { value: false, missing: null, qualityFlags };
+}
+
+export function extractDiagnosisRollupHasKnee(mr: MigrationResult<AnalysisPatient>): ExtractedValue<boolean> {
+  return extractDiagnosisRollupHasModule(mr, 'knee');
+}
+export function extractDiagnosisRollupHasWrist(mr: MigrationResult<AnalysisPatient>): ExtractedValue<boolean> {
+  return extractDiagnosisRollupHasModule(mr, 'wrist');
+}
+export function extractDiagnosisRollupHasElbow(mr: MigrationResult<AnalysisPatient>): ExtractedValue<boolean> {
+  return extractDiagnosisRollupHasModule(mr, 'elbow');
+}
+export function extractDiagnosisRollupHasShoulder(mr: MigrationResult<AnalysisPatient>): ExtractedValue<boolean> {
+  return extractDiagnosisRollupHasModule(mr, 'shoulder');
+}
+export function extractDiagnosisRollupHasSpine(mr: MigrationResult<AnalysisPatient>): ExtractedValue<boolean> {
+  return extractDiagnosisRollupHasModule(mr, 'spine');
+}
+export function extractDiagnosisRollupHasCervical(mr: MigrationResult<AnalysisPatient>): ExtractedValue<boolean> {
+  return extractDiagnosisRollupHasModule(mr, 'cervical');
 }
 
 // ── PR0-B4 Slice 6 — coverage 잔여 필드(매핑표 §1 shared.diagnoses[]).
@@ -101,26 +172,73 @@ function resolveAssessmentSide(
   return null;
 }
 
+type AssessmentStatusResult = 'high' | 'low' | 'blank' | 'invalid';
+
 // assessmentRight/Left — "업무관련성"(AssessmentTab.jsx SideAssessment), 값 도메인은
-// ''/'high'/'low'뿐이다.
+// ''/'high'/'low'뿐이다. extractDiagnosisAssessmentStatus(disease grain)와
+// extractDiagnosisRollupAnyHighRelatedness(case grain, 아래)가 이 판정을 공유한다 —
+// 두 곳에 따로 구현하면 "이 엔터티의 업무관련성이 확정됐는가"에 서로 다른 답이 생긴다.
+function resolveDiagnosisAssessmentStatus(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  entity: GrainEntity<DiagnosisSideSource>,
+): AssessmentStatusResult {
+  const effectiveSide = resolveAssessmentSide(migrationResult, entity);
+  if (effectiveSide === null) return 'blank';
+  const { diagnosis } = entity.source;
+  const raw = effectiveSide === 'right' ? diagnosis.assessmentRight : diagnosis.assessmentLeft;
+  if (isBlank(raw)) return 'blank';
+  if (raw === 'high' || raw === 'low') return raw;
+  return 'invalid';
+}
+
 export function extractDiagnosisAssessmentStatus(
   migrationResult: MigrationResult<AnalysisPatient>,
 ): RepeatedObservation<string>[] {
   return enumerateDiseaseEntities(migrationResult).map((entity) => {
-    const effectiveSide = resolveAssessmentSide(migrationResult, entity);
-    if (effectiveSide === null) {
+    const result = resolveDiagnosisAssessmentStatus(migrationResult, entity);
+    if (result === 'blank') {
       return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
     }
-    const { diagnosis } = entity.source;
-    const raw = effectiveSide === 'right' ? diagnosis.assessmentRight : diagnosis.assessmentLeft;
-    if (isBlank(raw)) {
-      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
+    if (result === 'invalid') {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: [...entity.qualityFlags, 'invalid'] };
     }
-    if (raw === 'high' || raw === 'low') {
-      return { entityKey: entity.entityKey, value: raw, missing: null, qualityFlags: entity.qualityFlags };
-    }
-    return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: [...entity.qualityFlags, 'invalid'] };
+    return { entityKey: entity.entityKey, value: result, missing: null, qualityFlags: entity.qualityFlags };
   });
+}
+
+// case grain 롤업("업무관련성 높음 상병 포함 여부") — "any"이지 mode가 아니다: 신청 상병
+// 중 하나라도 업무관련성 높음(high) 판정이면 true. 다만 false는 "모든 상병의 판정을
+// 확인했는데 전부 low"일 때만 확정한다 — 미판정/오류 상병이 하나라도 섞여 있으면(그리고
+// high가 없으면) 그 상병이 나중에 high일 수도 있으므로 false가 아니라 not_entered다.
+// 판정(value/missing)은 오직 resolveDiagnosisAssessmentStatus의 결과 배열로만 정하고,
+// qualityFlags는 스캔한 모든 엔터티에서 별도로 합친다 — 엔터티 ID 중복 같은 판정과
+// 무관한 이유로 붙는 invalid 플래그가 판정 자체를 흔들면 안 된다.
+export function extractDiagnosisRollupAnyHighRelatedness(
+  migrationResult: MigrationResult<AnalysisPatient>,
+): ExtractedValue<boolean> {
+  const entities = enumerateDiseaseEntities(migrationResult);
+  if (entities.length === 0) {
+    return { value: null, missing: 'not_applicable', qualityFlags: [] };
+  }
+
+  const qualityFlags = new Set<QualityFlag>();
+  let sawHigh = false;
+  let sawUnresolved = false;
+  for (const entity of entities) {
+    for (const flag of entity.qualityFlags) qualityFlags.add(flag);
+    const status = resolveDiagnosisAssessmentStatus(migrationResult, entity);
+    if (status === 'high') sawHigh = true;
+    else if (status === 'blank' || status === 'invalid') sawUnresolved = true;
+    if (status === 'invalid') qualityFlags.add('invalid');
+  }
+
+  if (sawHigh) {
+    return { value: true, missing: null, qualityFlags: [...qualityFlags] };
+  }
+  if (sawUnresolved) {
+    return { value: null, missing: 'not_entered', qualityFlags: [...qualityFlags] };
+  }
+  return { value: false, missing: null, qualityFlags: [...qualityFlags] };
 }
 
 type LowReasonState =

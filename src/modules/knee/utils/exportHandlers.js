@@ -61,20 +61,9 @@ const generateEMRData = (patientData, c) => {
   const { age, bmi, relatedness: rel, cumulativeBurden: cum, jobBurdens: jb } = c || computeKneeCalc(patientData);
   const diagnoses = shared.diagnoses || [];
 
-  const b5 = diagnoses
-    .filter(d => d.confirmedCode || d.confirmedName)
-    .map(d => {
-      let line = `${d.confirmedCode || ''} ${d.confirmedName || ''}`.trim();
-      if (d.side === 'right' || d.side === 'both') {
-        line += `\n  - 우측: 상병 상태(${getStatusText(d.confirmedRight)}) / 업무관련성(${d.assessmentRight === 'high' ? '높음' : d.assessmentRight === 'low' ? '낮음' : '-'})`;
-        if (d.assessmentRight === 'low') line += `\n    업무관련성 평가 낮음 사유:\n    - ${getReasonText(d.reasonRight, d.reasonRightOther).split('\n').join('\n    - ')}`;
-      }
-      if (d.side === 'left' || d.side === 'both') {
-        line += `\n  - 좌측: 상병 상태(${getStatusText(d.confirmedLeft)}) / 업무관련성(${d.assessmentLeft === 'high' ? '높음' : d.assessmentLeft === 'low' ? '낮음' : '-'})`;
-        if (d.assessmentLeft === 'low') line += `\n    업무관련성 평가 낮음 사유:\n    - ${getReasonText(d.reasonLeft, d.reasonLeftOther).split('\n').join('\n    - ')}`;
-      }
-      return line;
-    }).join('\n\n');
+  // "3.최종 확인 상병명"은 담당의가 소견서 출력 후 수기로 채우는 항목이라 자동 계산하지
+  // 않는다("1.신청상병명"과 동일하게 빈칸으로 둔다).
+  const b5 = '';
 
   const jobLines = jb.filter(j => j.jobName).map(j => {
     const checked = Object.entries(AUX_LABELS).filter(([k]) => j[k]).map(([, v]) => v);

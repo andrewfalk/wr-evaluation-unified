@@ -33,7 +33,6 @@ describe('getFullVariableCatalog', () => {
     for (const key of [
       'knee.diagnosisSide.klGrade',
       'knee.diagnosisSide.confirmedStatus',
-      'knee.diagnosisSide.appliedConfirmedMismatch',
       'shoulder.diagnosisSide.ellmanClass',
     ]) {
       const variable = catalog.find((v) => v.key === key);
@@ -170,6 +169,19 @@ describe('computeVariableValue', () => {
       'spine.diagnosis.verticalDistribution',
       'spine.diagnosis.concomitantSpondylosis',
       'job.rollup.longestTenureJobNameNormalized',
+      // Case-grain 롤업 변수 3종 추가 — 8개 전부 shared.diagnoses[]/shared.jobs[]에만
+      // 의존하고 activeModules 게이트가 없다(모듈 활성 여부가 아니라 "그 목록에 무엇이
+      // 있는가"를 판정하는 변수라서). anyHighRelatedness/has-X 6종은 진단 0건이면
+      // not_applicable/false, longestTenureYears는 job 0건이면 not_entered — 셋 다
+      // structural_missing이 아니다.
+      'diagnosis.rollup.anyHighRelatedness',
+      'diagnosis.rollup.hasKnee',
+      'diagnosis.rollup.hasWrist',
+      'diagnosis.rollup.hasElbow',
+      'diagnosis.rollup.hasShoulder',
+      'diagnosis.rollup.hasSpine',
+      'diagnosis.rollup.hasCervical',
+      'job.rollup.longestTenureYears',
     ]);
     const caseVariables = getFullVariableCatalog().filter(
       (v) => v.grain === 'case' && v.moduleId !== 'patient' && !NON_STRUCTURAL_CASE_KEYS.has(v.key),
@@ -210,6 +222,114 @@ describe('computeVariableValue', () => {
     const emptyMr = migrate({ data: { shared: {}, modules: {}, activeModules: [] } });
     const result = computeVariableValue('job.rollup.longestTenureJobNameNormalized', emptyMr);
     expect(result).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+  });
+
+  // ── Case-grain 롤업 변수 3종 추가 — 전용 결측 규칙 고정 테스트 ────────────────────
+
+  it('diagnosis.rollup.anyHighRelatedness — 신청상병이 0건이면 not_applicable', () => {
+    const emptyMr = migrate({ data: { shared: {}, modules: {}, activeModules: [] } });
+    const result = computeVariableValue('diagnosis.rollup.anyHighRelatedness', emptyMr);
+    expect(result).toEqual({ value: null, missing: 'not_applicable', qualityFlags: [] });
+  });
+
+  it('diagnosis.rollup.anyHighRelatedness — 신청상병은 있으나 전부 미판정이면 not_entered', () => {
+    const mr = migrate({
+      data: {
+        shared: { diagnoses: [{ id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'right', assessmentRight: '' }] },
+        modules: {},
+        activeModules: [],
+      },
+    });
+    const result = computeVariableValue('diagnosis.rollup.anyHighRelatedness', mr);
+    expect(result).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+  });
+
+  it('diagnosis.rollup.anyHighRelatedness — low 확정 하나 + 미판정 하나(high 없음)는 false가 아니라 not_entered다', () => {
+    const mr = migrate({
+      data: {
+        shared: {
+          diagnoses: [
+            { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'right', assessmentRight: 'low' },
+            { id: 'dx-2', code: 'M17.2', name: '무릎관절증(양측)', side: 'right', assessmentRight: '' },
+          ],
+        },
+        modules: {},
+        activeModules: [],
+      },
+    });
+    const result = computeVariableValue('diagnosis.rollup.anyHighRelatedness', mr);
+    expect(result).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+  });
+
+  it('diagnosis.rollup.anyHighRelatedness — 전부 low로 확정되면(미판정 없음) false', () => {
+    const mr = migrate({
+      data: {
+        shared: {
+          diagnoses: [
+            { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'right', assessmentRight: 'low' },
+            { id: 'dx-2', code: 'M17.2', name: '무릎관절증(양측)', side: 'right', assessmentRight: 'low' },
+          ],
+        },
+        modules: {},
+        activeModules: [],
+      },
+    });
+    const result = computeVariableValue('diagnosis.rollup.anyHighRelatedness', mr);
+    expect(result).toEqual({ value: false, missing: null, qualityFlags: [] });
+  });
+
+  const HAS_MODULE_KEYS = [
+    'diagnosis.rollup.hasKnee',
+    'diagnosis.rollup.hasWrist',
+    'diagnosis.rollup.hasElbow',
+    'diagnosis.rollup.hasShoulder',
+    'diagnosis.rollup.hasSpine',
+    'diagnosis.rollup.hasCervical',
+  ] as const;
+
+  it('diagnosis.rollup.hasX 6종 — 신청상병이 0건이면 전부 false(missing 아님)', () => {
+    const emptyMr = migrate({ data: { shared: {}, modules: {}, activeModules: [] } });
+    for (const key of HAS_MODULE_KEYS) {
+      const result = computeVariableValue(key, emptyMr);
+      expect(result, `key=${key}`).toEqual({ value: false, missing: null, qualityFlags: [] });
+    }
+  });
+
+  it('diagnosis.rollup.hasX 6종 — 6개 부위 어디로도 분류 안 되는 진단만 있으면 전부 not_entered(+legacy_unknown)', () => {
+    const mr = migrate({
+      data: {
+        shared: { diagnoses: [{ id: 'dx-1', code: 'Z99', name: '알수없는상병', side: 'right' }] },
+        modules: {},
+        activeModules: [],
+      },
+    });
+    for (const key of HAS_MODULE_KEYS) {
+      const result = computeVariableValue(key, mr);
+      expect(result!.value, `key=${key}`).toBeNull();
+      expect(result!.missing, `key=${key}`).toBe('not_entered');
+      expect(result!.qualityFlags, `key=${key}`).toContain('legacy_unknown');
+    }
+  });
+
+  it('job.rollup.longestTenureYears — 직력이 없으면 not_entered', () => {
+    const emptyMr = migrate({ data: { shared: {}, modules: {}, activeModules: [] } });
+    const result = computeVariableValue('job.rollup.longestTenureYears', emptyMr);
+    expect(result).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+  });
+
+  it('job.rollup.longestTenureYears — 대표 직력의 직종명은 결측이어도 근속기간 자체는 정상 반환한다', () => {
+    const mr = migrate({
+      data: {
+        shared: { jobs: [{ id: 'job-1', jobName: '', startDate: '2015-01-01', endDate: '2020-01-01' }] },
+        modules: {},
+        activeModules: [],
+      },
+    });
+    const nameResult = computeVariableValue('job.rollup.longestTenureJobNameNormalized', mr);
+    expect(nameResult).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+    const yearsResult = computeVariableValue('job.rollup.longestTenureYears', mr);
+    expect(yearsResult!.missing).toBeNull();
+    expect(yearsResult!.value).toBeCloseTo(5, 1);
   });
 
   it('반복 grain 키를 스칼라 API로 호출하면 명확히 throw한다', () => {
