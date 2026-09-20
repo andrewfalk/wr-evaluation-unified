@@ -107,31 +107,6 @@ export const KNEE_METADATA: AnalyticsVariableMetadata[] = [
     formulaFamily: 'knee_confirmed_status_side',
     supportedFormulaPolicies: [],
   },
-  {
-    key: 'knee.diagnosisSide.appliedConfirmedMismatch',
-    label: '신청≠확정 여부',
-    group: '무릎 · 진단별 판정',
-    moduleId: 'knee',
-    grain: 'disease',
-    type: 'boolean',
-    provenance: 'derived',
-    dependsOn: [
-      'activeModules',
-      'shared.diagnoses[].id',
-      'shared.diagnoses[].code',
-      'shared.diagnoses[].name',
-      'shared.diagnoses[].moduleId',
-      'shared.diagnoses[].confirmedCode',
-      'shared.diagnoses[].confirmedName',
-    ],
-    availableAt: 'assessment',
-    shownToAssessor: true,
-    allowedAnalysisPurposes: ['association', 'formula_audit'],
-    sensitivity: 'non_sensitive',
-    formulaFamily: 'knee_applied_confirmed_mismatch_side',
-    supportedFormulaPolicies: [],
-  },
-
   // PR0-B4 Slice 4 — coverage 잔여 필드(매핑표 §2). jobExtras 원시값 8종(weight/squatting +
   // DEFERRED 6종)을 job grain에 독립 노출한다. 레거시 modules.knee.jobs[] 배열은 대상 아님.
   {

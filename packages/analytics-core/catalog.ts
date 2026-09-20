@@ -237,4 +237,21 @@ export function computeRepeatedVariableValue(
 // highBloodPressure/diabetes/bmi)는 삭제하지 않고 case로 되돌렸다(변수 자체는 유효,
 // grain 소속만 원상복구) — 카탈로그 65개(case 31/job 19/disease 15)는 그대로, 통합
 // 카탈로그 67개도 그대로. 브로드캐스트는 이제 case→job/disease 단방향뿐이다.
-export const CATALOG_VERSION = 'v21-person-grain-removed';
+//
+// knee.diagnosisSide.appliedConfirmedMismatch 삭제(PR0-B4 후속) — 이 변수가 참조하던
+// shared.diagnoses[].confirmedCode/confirmedName("확정상병" 코드·명칭)는 입력 UI가
+// 앱 어디에도 없어 실제 레코드에서는 항상 빈 문자열이었다. EMR 엑셀 출력의 "3.최종
+// 확인 상병명" 칸도 같은 필드로 채워지지만 그 항목은 수기로 채우는 것으로 확인돼,
+// 죽은 분석 변수뿐 아니라 원본 필드·출력 로직까지 함께 제거한다(src/modules/knee·
+// shoulder의 data.js/exportHandlers.js). 카탈로그 64개(case 31/job 19/disease 14) +
+// 서버 전용 meta 2개(통합 카탈로그 66개).
+//
+// case-grain 롤업 변수 3종 추가(Grain 공유 지도 §1.5 초안 검토 후 전용 설계) —
+// diagnosis.assessment.status를 mode 대신 any로 diagnosis.rollup.anyHighRelatedness
+// (boolean)로, diagnosis.identity.moduleGroup을 단일 categorical mode 대신 부위 6개
+// 각각의 독립 boolean(diagnosis.rollup.hasKnee/hasWrist/hasElbow/hasShoulder/hasSpine/
+// hasCervical)으로, job.identity.tenureYears를 max 대신 대표 job(근속 최장) 선택 로직
+// 공유(resolveRepresentativeJob)로 job.rollup.longestTenureYears(continuous)로 등록.
+// 8개 전부 이미 카탈로그에 있던 원본 필드만 참조(coverage/shared.ts 변경 없음). 카탈로그
+// 72개(case 39/job 19/disease 14) + 서버 전용 meta 2개(통합 카탈로그 74개).
+export const CATALOG_VERSION = 'v23-case-rollup-any-has-tenure-years';

@@ -137,30 +137,30 @@ describe('buildDataset(grain=disease) — 필터', () => {
 // Tier-3 전용이다 — mocked HTTP 인프라는 이 목적으로 없음, 이 파일 위쪽 §9 주석 참고),
 // groupPairsByLevel()을 직접 호출해 실제 분할표 셀 값까지는 이 세션에서 검증한다.
 describe('buildDataset(grain=disease) — 이변량 경로 실측(계획 §11 "검증" 1·2번)', () => {
-  it('K-L Grade(ordinal) × 신청≠확정 여부(boolean) — personCount===rowCount면 실제 분할표가 KNEE_KLG_ORDER 순서로 정확히 만들어지고 chi_square/fisher_exact가 available이다', () => {
+  it('K-L Grade(ordinal) × 상병 상태(확인/미확인)(boolean) — personCount===rowCount면 실제 분할표가 KNEE_KLG_ORDER 순서로 정확히 만들어지고 chi_square/fisher_exact가 available이다', () => {
     const rows = [
-      // klGrade='2' & mismatch=false(신청=확정) 10명, klGrade='3' & mismatch=true(신청≠확정) 10명.
+      // klGrade='2' & confirmedStatus=false(미확인) 10명, klGrade='3' & confirmedStatus=true(확인) 10명.
       ...Array.from({ length: 10 }, (_, i) =>
         diagnosisSnapshotRow(`case-a-${i}`, `person-a-${i}`, [
-          { id: `dx-a-${i}`, code: 'M17.1', name: '무릎관절증', side: 'right', klgRight: '2', confirmedCode: 'M17.1', confirmedName: '무릎관절증' },
+          { id: `dx-a-${i}`, code: 'M17.1', name: '무릎관절증', side: 'right', klgRight: '2', confirmedRight: 'unconfirmed' },
         ]),
       ),
       ...Array.from({ length: 10 }, (_, i) =>
         diagnosisSnapshotRow(`case-b-${i}`, `person-b-${i}`, [
-          { id: `dx-b-${i}`, code: 'M17.1', name: '무릎관절증', side: 'right', klgRight: '3', confirmedCode: 'M17.9', confirmedName: '다른상병' },
+          { id: `dx-b-${i}`, code: 'M17.1', name: '무릎관절증', side: 'right', klgRight: '3', confirmedRight: 'confirmed' },
         ]),
       ),
     ];
     const result = buildDataset(
       rows,
-      recipe({ variableKeys: ['knee.diagnosisSide.klGrade', 'knee.diagnosisSide.appliedConfirmedMismatch'] }),
+      recipe({ variableKeys: ['knee.diagnosisSide.klGrade', 'knee.diagnosisSide.confirmedStatus'] }),
       RECIPE_DIGEST,
       CATALOG_BY_KEY,
     );
     expect(result.observationCount).toBe(20);
     expect(result.personCount).toBe(20); // side='right'뿐이라 explode 없음 — case당 행 1개, 각기 다른 person.
 
-    const paired = buildPairedDataset(result.rows, 'knee.diagnosisSide.klGrade', 'knee.diagnosisSide.appliedConfirmedMismatch');
+    const paired = buildPairedDataset(result.rows, 'knee.diagnosisSide.klGrade', 'knee.diagnosisSide.confirmedStatus');
     expect(paired.includedPersonCount).toBe(20);
     expect(paired.includedCaseCount).toBe(20); // personCount===rowCount — §6.1 반복측정 게이트를 통과해야 한다.
 
@@ -175,13 +175,13 @@ describe('buildDataset(grain=disease) — 이변량 경로 실측(계획 §11 "�
     expect([...yGroups.keys()]).toEqual([false, true]);
     expect(xGroups.get('2')).toHaveLength(10);
     expect(xGroups.get('3')).toHaveLength(10);
-    // 분할표 셀 — klGrade='2'는 전부 mismatch=false, '3'은 전부 mismatch=true(교차 0건).
+    // 분할표 셀 — klGrade='2'는 전부 confirmedStatus=false, '3'은 전부 true(교차 0건).
     expect(xGroups.get('2')!.every((p) => p.y === false)).toBe(true);
     expect(xGroups.get('3')!.every((p) => p.y === true)).toBe(true);
 
     const methods = computeAvailableMethods(
       'knee.diagnosisSide.klGrade',
-      'knee.diagnosisSide.appliedConfirmedMismatch',
+      'knee.diagnosisSide.confirmedStatus',
       CATALOG_BY_KEY,
       paired,
       'v1',
@@ -202,26 +202,26 @@ describe('buildDataset(grain=disease) — 이변량 경로 실측(계획 §11 "�
       diagnosisSnapshotRow('case-1', 'person-1', [
         {
           id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'both',
-          klgRight: '2', klgLeft: '3', confirmedCode: 'M17.9', confirmedName: '다른상병',
+          klgRight: '2', klgLeft: '3', confirmedRight: 'confirmed', confirmedLeft: 'unconfirmed',
         },
       ]),
     ];
     const result = buildDataset(
       rows,
-      recipe({ variableKeys: ['knee.diagnosisSide.klGrade', 'knee.diagnosisSide.appliedConfirmedMismatch'] }),
+      recipe({ variableKeys: ['knee.diagnosisSide.klGrade', 'knee.diagnosisSide.confirmedStatus'] }),
       RECIPE_DIGEST,
       CATALOG_BY_KEY,
     );
     expect(result.observationCount).toBe(2); // side=both explode — 우/좌 2행.
     expect(result.personCount).toBe(1); // 같은 case, 같은 사람.
 
-    const paired = buildPairedDataset(result.rows, 'knee.diagnosisSide.klGrade', 'knee.diagnosisSide.appliedConfirmedMismatch');
+    const paired = buildPairedDataset(result.rows, 'knee.diagnosisSide.klGrade', 'knee.diagnosisSide.confirmedStatus');
     expect(paired.includedPersonCount).toBe(1);
     expect(paired.includedCaseCount).toBe(2); // = rowCount. personCount(1) < rowCount(2).
 
     const methods = computeAvailableMethods(
       'knee.diagnosisSide.klGrade',
-      'knee.diagnosisSide.appliedConfirmedMismatch',
+      'knee.diagnosisSide.confirmedStatus',
       CATALOG_BY_KEY,
       paired,
       'v1',

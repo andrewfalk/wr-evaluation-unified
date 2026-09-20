@@ -124,21 +124,18 @@ interface TenureCandidate {
 
 // §2.1 계획 — job grain 값을 case로 올릴 때의 기본 대표 규칙("대표 직력 기본값 = 근속
 // 최장, 결정 완료"). 근속기간이 결측/무효인 job은 후보에서 제외하고, 전부 그러면
-// not_entered(계획 원문은 "missing: not_mapped"라고 썼지만 실제 MissingReason 타입에는
-// 그 값이 없다 — not_entered로 대체). 동률 tie-break은 계획 그대로: 시작일 이른 순 →
-// jobId 사전순.
-export function extractJobRollupLongestTenureJobNameNormalized(
-  migrationResult: MigrationResult<AnalysisPatient>,
-): ExtractedValue<string> {
+// null(대표 job 없음). 동률 tie-break: 시작일 이른 순 → jobId 사전순.
+// job.rollup.longestTenureJobNameNormalized(대표 직종명)와 job.rollup.longestTenureYears
+// (대표 근속기간, 아래)가 이 선택을 공유한다 — 둘을 따로 계산하면 "대표 직력이 누구인가"에
+// 대해 서로 다른 답이 나올 수 있다(예: tie-break 로직이 갈라지는 버그).
+function resolveRepresentativeJob(migrationResult: MigrationResult<AnalysisPatient>): TenureCandidate | null {
   const entities = enumerateJobEntities(migrationResult);
   const candidates: TenureCandidate[] = [];
   for (const entity of entities) {
     const result = computeJobTenureYears(entity.source);
     if (result.kind === 'ok') candidates.push({ entity, years: result.years });
   }
-  if (candidates.length === 0) {
-    return { value: null, missing: 'not_entered', qualityFlags: [] };
-  }
+  if (candidates.length === 0) return null;
 
   // 4차 리뷰 P2 — 근속이 workPeriodOverride로 계산된 후보는 startDate가 아예 없을 수
   // 있다(값 계산에 안 쓰였으므로). 문자열 비교(String(undefined??'')==='')로 시작일을
@@ -164,13 +161,37 @@ export function extractJobRollupLongestTenureJobNameNormalized(
     return aId < bId ? -1 : aId > bId ? 1 : 0;
   });
 
-  const winner = candidates[0];
+  return candidates[0];
+}
+
+export function extractJobRollupLongestTenureJobNameNormalized(
+  migrationResult: MigrationResult<AnalysisPatient>,
+): ExtractedValue<string> {
+  const winner = resolveRepresentativeJob(migrationResult);
+  if (winner === null) {
+    return { value: null, missing: 'not_entered', qualityFlags: [] };
+  }
   const rawName = winner.entity.source.jobName;
   if (isBlank(rawName) || typeof rawName !== 'string') {
     // 근속 최장 job은 정해졌지만 그 job의 직종명이 없거나 손상됐다 — 보고할 이름이 없다.
     return { value: null, missing: 'not_entered', qualityFlags: winner.entity.qualityFlags };
   }
   return { value: normalizeJobName(rawName), missing: null, qualityFlags: winner.entity.qualityFlags };
+}
+
+// case grain 롤업 — "근속기간(년)"을 max로 case에 올린다(계획서 "Case-grain 롤업 변수
+// 3종 추가" 절). 독립적으로 max를 재계산하지 않고 resolveRepresentativeJob이 고른 바로
+// 그 job의 연수를 반환한다 — 대표 직종명과 대표 근속기간이 항상 같은 job에서 나오도록
+// 보장한다. winner가 있으면 그 job의 tenure는 항상 TenureResult.kind==='ok'였던
+// 것이므로(후보 선정 조건) 여기서 blank/invalid 분기가 따로 필요 없다.
+export function extractJobRollupLongestTenureYears(
+  migrationResult: MigrationResult<AnalysisPatient>,
+): ExtractedValue<number> {
+  const winner = resolveRepresentativeJob(migrationResult);
+  if (winner === null) {
+    return { value: null, missing: 'not_entered', qualityFlags: [] };
+  }
+  return { value: winner.years, missing: null, qualityFlags: winner.entity.qualityFlags };
 }
 
 // ── PR0-B4 Slice 2 — coverage 잔여 필드(매핑표 §1 shared.jobs[]). tenureYears/rollup의

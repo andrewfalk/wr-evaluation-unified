@@ -17,6 +17,15 @@
 
 **6차 개정(person grain 재삭제, PR0-B4 후속)** — 위 5차 개정에서 활성화한 `person` grain은 case와 행 구성·계산 결과가 완전히 같아 실익이 없다고 판단해 다시 삭제했다. §1의 `gender`/`heightCm`/`weightKg`/`birthDate`/`highBloodPressure`/`diabetes`/`bmi` 7개는 삭제하지 않고 `case`로 환원했다(변수 자체는 유효, grain 소속만 원상복구). 최종 grain 3개: `case`/`job`/`disease`. 공통변수 브로드캐스트는 case→job/disease 단방향으로 유지된다. 상세는 같은 계획 파일 참고.
 
+**7차 개정(`knee.diagnosisSide.appliedConfirmedMismatch` 삭제, 2026-09-20)** — 아래 §0 표의 이 행이 참조하는 원본 필드 `shared.diagnoses[].confirmedCode`/`confirmedName`("확정상병" 코드·명칭)는 이 값을 입력할 UI가 앱에 없어 실제 레코드에서는 항상 빈 문자열이었다는 사실이 드러났다. EMR 엑셀 출력("근골격계질환 업무관련성특별진찰소견서")의 "3.최종 확인 상병명" 칸도 같은 필드를 읽지만, 그 항목은 수기로 채우는 것으로 확인돼 죽은 코드였다. 카탈로그 변수·extractor·metadata뿐 아니라 원본 필드 자체(`src/modules/knee/shoulder`의 `data.js` 기본값, `exportHandlers.js`의 "3.최종 확인 상병명" 계산 로직)까지 소스코드에서 완전히 삭제했다 — 아래 §0 표의 해당 행은 5차 개정과 같은 방식으로 삭제 전 상태 그대로 보존한다(재작성하지 않음). 최종 카탈로그 64개(case 31/job 19/disease 14) + 서버 전용 meta 2개(통합 카탈로그 66개).
+
+**8차 개정(case-grain 롤업 변수 3종 추가, Slice 9, 2026-09-20)** — job/disease 전용 변수 34개 중 3개를 대상으로 전용 롤업 설계를 case grain에 신규 등록했다. 전부 이미 카탈로그에 있던 원본 필드만 참조하는 파생 변수라 원본 필드 추가는 없다.
+- `diagnosis.assessment.status`("업무관련성")를 mode가 아니라 any로 `diagnosis.rollup.anyHighRelatedness`(boolean, "업무관련성 높음 상병 포함 여부")로 등록. 신청상병 중 하나라도 확정 판정 없이(미판정 섞이면) false를 내지 않도록 결측 규칙을 엄격히 나눴다(하나라도 high→true, 전부 확정 low→false, low+미판정 혼재→not_entered, 진단 0건→not_applicable).
+- `diagnosis.identity.moduleGroup`("신청상병 부위군")을 단일 categorical mode 대신 부위 6개(무릎/손목·손가락/팔꿈치/어깨/요추/경추) 각각의 독립 boolean(`diagnosis.rollup.hasKnee`/`hasWrist`/`hasElbow`/`hasShoulder`/`hasSpine`/`hasCervical`)으로 분해 등록. "분류 실패(미분류 진단)"와 "해당 부위 없음"을 구분해, 미분류 진단이 남아 있으면 false 대신 not_entered를 낸다.
+- `job.identity.tenureYears`("근속기간")를 max로 `job.rollup.longestTenureYears`(continuous, "대표 직력 근속기간(년)")로 등록. 기존 `job.rollup.longestTenureJobNameNormalized`(대표 직종명)와 대표 job 선택 로직(`resolveRepresentativeJob`)을 공유해, 두 변수가 항상 같은 job에서 나오도록 보장한다.
+
+최종 카탈로그 72개(case 39/job 19/disease 14) + 서버 전용 meta 2개(통합 카탈로그 74개).
+
 범위 결정 값: **기존유지**(이미 독립 카탈로그 변수 있음) / **신규등록**(이번 PR 대상) / **제외**(대상 아님) / **보류**(착수 시 재확인).
 
 ## 0. 기존 카탈로그 21개 — 전부 기존유지, 완료=예 (신규 등록 대상 아님)

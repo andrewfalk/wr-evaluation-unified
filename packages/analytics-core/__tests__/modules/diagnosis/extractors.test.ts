@@ -7,6 +7,13 @@ import {
   extractDiagnosisAssessmentLowReasonUnrelated,
   extractDiagnosisAssessmentLowReasonOther,
   extractDiagnosisAssessmentLowReasonLowBurden,
+  extractDiagnosisRollupAnyHighRelatedness,
+  extractDiagnosisRollupHasKnee,
+  extractDiagnosisRollupHasShoulder,
+  extractDiagnosisRollupHasWrist,
+  extractDiagnosisRollupHasElbow,
+  extractDiagnosisRollupHasSpine,
+  extractDiagnosisRollupHasCervical,
 } from '../../../modules/diagnosis/extractors';
 import { deterministicMigrate } from '../../../migration/deterministicMigrate';
 
@@ -200,6 +207,136 @@ describe('extractDiagnosisAssessmentStatus — diagnosis_side grain("업무관�
     const dx = { id: 'dx-1', code: 'J00', name: '감기' };
     const result = extractDiagnosisIdentityModuleGroup(migrate(diagnosesCaseWithActiveModules([dx], ['spine'])));
     expect(result).toEqual([{ entityKey: ['dx-1', 'unspecified'], value: null, missing: 'not_entered', qualityFlags: ['legacy_unknown'] }]);
+  });
+});
+
+describe('extractDiagnosisRollupAnyHighRelatedness — case grain("업무관련성" any 롤업)', () => {
+  it('상병 중 하나라도 high면 true(다른 상병이 low여도 무관)', () => {
+    const dxHigh = { id: 'dx-1', code: 'M75.1', name: '회전근개파열', side: 'right', assessmentRight: 'high' };
+    const dxLow = { id: 'dx-2', code: 'M17.1', name: '무릎관절증', side: 'right', assessmentRight: 'low' };
+    const result = extractDiagnosisRollupAnyHighRelatedness(migrate(diagnosesCase([dxHigh, dxLow])));
+    expect(result).toEqual({ value: true, missing: null, qualityFlags: [] });
+  });
+
+  it('전부 low로 확정되면 false', () => {
+    const dx1 = { id: 'dx-1', code: 'M75.1', name: '회전근개파열', side: 'right', assessmentRight: 'low' };
+    const dx2 = { id: 'dx-2', code: 'M17.1', name: '무릎관절증', side: 'right', assessmentRight: 'low' };
+    const result = extractDiagnosisRollupAnyHighRelatedness(migrate(diagnosesCase([dx1, dx2])));
+    expect(result).toEqual({ value: false, missing: null, qualityFlags: [] });
+  });
+
+  it('low와 미판정이 혼재하면(high 없음) false가 아니라 not_entered다', () => {
+    const dxLow = { id: 'dx-1', code: 'M75.1', name: '회전근개파열', side: 'right', assessmentRight: 'low' };
+    const dxBlank = { id: 'dx-2', code: 'M17.1', name: '무릎관절증', side: 'right', assessmentRight: '' };
+    const result = extractDiagnosisRollupAnyHighRelatedness(migrate(diagnosesCase([dxLow, dxBlank])));
+    expect(result).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+  });
+
+  it('신청상병이 0건이면 not_applicable', () => {
+    const result = extractDiagnosisRollupAnyHighRelatedness(migrate(diagnosesCase([])));
+    expect(result).toEqual({ value: null, missing: 'not_applicable', qualityFlags: [] });
+  });
+
+  it('side="both" 진단은 좌우가 다른 판정이어도 하나라도 high면 true', () => {
+    const dx = { id: 'dx-1', code: 'M51.2', name: '요추간판탈출증', side: 'both', assessmentRight: 'low', assessmentLeft: 'low' };
+    const dxKnee = { id: 'dx-2', code: 'M17.1', name: '무릎관절증', side: 'both', assessmentRight: 'low', assessmentLeft: 'high' };
+    const result = extractDiagnosisRollupAnyHighRelatedness(migrate(diagnosesCase([dx, dxKnee])));
+    expect(result).toEqual({ value: true, missing: null, qualityFlags: [] });
+  });
+
+  it('축성 진단의 high 판정도 정상 반영한다(resolveAssessmentSide 재사용 확인)', () => {
+    const dx = { id: 'dx-1', code: 'M51.2', name: '요추간판탈출증', assessmentRight: 'high' };
+    const result = extractDiagnosisRollupAnyHighRelatedness(migrate(diagnosesCase([dx])));
+    expect(result).toEqual({ value: true, missing: null, qualityFlags: [] });
+  });
+
+  it('high가 있어도 다른 상병의 판정값이 손상돼 있으면 invalid 플래그를 함께 실어 보낸다', () => {
+    const dxHigh = { id: 'dx-1', code: 'M75.1', name: '회전근개파열', side: 'right', assessmentRight: 'high' };
+    const dxInvalid = { id: 'dx-2', code: 'M17.1', name: '무릎관절증', side: 'right', assessmentRight: 'medium' };
+    const result = extractDiagnosisRollupAnyHighRelatedness(migrate(diagnosesCase([dxHigh, dxInvalid])));
+    expect(result.value).toBe(true);
+    expect(result.missing).toBeNull();
+    expect(result.qualityFlags).toContain('invalid');
+  });
+
+  // 리뷰 지적 — 판정 오류(assessment 값 자체 손상)와 엔터티/ID 오류를 섞어 판정하면 안
+  // 된다. 둘 다 qualityFlags에는 'invalid'가 남지만 value/missing은 서로 달라야 한다.
+  // (수정 — 최초 버전은 dx-1/dx-2로 서로 다른 정상 ID를 써서 실제로는 ID 오류를 전혀
+  // 만들지 않았다. grainEntities.ts의 resolveUniqueLocalId는 같은 id가 중복되면 두
+  // 번째 엔터티에 'invalid' 플래그를 붙이고 id를 'dx-1#1'로 보정한다 — 그 경로를 실제로
+  // 타도록 두 진단에 동일한 id를 준다.)
+  it('대조: 판정은 전부 low로 확정됐지만 중복 ID로 엔터티 자체에 invalid 플래그가 붙어도 값은 false다', () => {
+    const dx1 = { id: 'dx-1', code: 'M75.1', name: '회전근개파열', side: 'right', assessmentRight: 'low' };
+    const dx2 = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', side: 'right', assessmentRight: 'low' }; // id 중복(의도적)
+    const result = extractDiagnosisRollupAnyHighRelatedness(migrate(diagnosesCase([dx1, dx2])));
+    expect(result).toEqual({ value: false, missing: null, qualityFlags: ['invalid'] });
+  });
+
+  it('대조: low 하나 + 판정값 자체가 손상된 진단 하나는 not_entered(값은 다르지만 qualityFlags엔 둘 다 invalid가 남을 수 있음)', () => {
+    const dxLow = { id: 'dx-1', code: 'M75.1', name: '회전근개파열', side: 'right', assessmentRight: 'low' };
+    const dxCorrupted = { id: 'dx-2', code: 'M17.1', name: '무릎관절증', side: 'right', assessmentRight: 'medium' };
+    const result = extractDiagnosisRollupAnyHighRelatedness(migrate(diagnosesCase([dxLow, dxCorrupted])));
+    expect(result.value).toBeNull();
+    expect(result.missing).toBe('not_entered');
+    expect(result.qualityFlags).toContain('invalid');
+  });
+});
+
+describe('diagnosis.rollup.hasX 6종 — case grain(부위별 "목록 포함 여부")', () => {
+  it('무릎+어깨 진단이 섞이면 각 부위는 true, 나머지 4개는 false로 정확히 분리된다', () => {
+    const dxKnee = { id: 'dx-1', code: 'M17.1', name: '무릎관절증' };
+    const dxShoulder = { id: 'dx-2', code: 'M75.1', name: '회전근개파열' };
+    const mr = migrate(diagnosesCase([dxKnee, dxShoulder]));
+    expect(extractDiagnosisRollupHasKnee(mr)).toEqual({ value: true, missing: null, qualityFlags: [] });
+    expect(extractDiagnosisRollupHasShoulder(mr)).toEqual({ value: true, missing: null, qualityFlags: [] });
+    expect(extractDiagnosisRollupHasWrist(mr)).toEqual({ value: false, missing: null, qualityFlags: [] });
+    expect(extractDiagnosisRollupHasElbow(mr)).toEqual({ value: false, missing: null, qualityFlags: [] });
+    expect(extractDiagnosisRollupHasSpine(mr)).toEqual({ value: false, missing: null, qualityFlags: [] });
+    expect(extractDiagnosisRollupHasCervical(mr)).toEqual({ value: false, missing: null, qualityFlags: [] });
+  });
+
+  it('moduleId가 "__none__"인 진단은 어느 부위에도 기여하지 않는다', () => {
+    const dx = { id: 'dx-1', code: 'M17.1', name: '무릎관절증', moduleId: '__none__' };
+    const result = extractDiagnosisRollupHasKnee(migrate(diagnosesCase([dx])));
+    expect(result).toEqual({ value: false, missing: null, qualityFlags: [] });
+  });
+
+  it('진단이 0건이면 false(missing 아님)', () => {
+    const result = extractDiagnosisRollupHasKnee(migrate(diagnosesCase([])));
+    expect(result).toEqual({ value: false, missing: null, qualityFlags: [] });
+  });
+
+  // 리뷰 반영 핵심 케이스 — 미분류 진단은 "부위 없음(false)"과 구분해야 한다.
+  it('6개 부위 어디로도 분류 안 되는 진단만 있으면 false가 아니라 not_entered(+legacy_unknown)다', () => {
+    const dx = { id: 'dx-1', code: 'J00', name: '감기' };
+    const result = extractDiagnosisRollupHasKnee(migrate(diagnosesCase([dx])));
+    expect(result.value).toBeNull();
+    expect(result.missing).toBe('not_entered');
+    expect(result.qualityFlags).toContain('legacy_unknown');
+  });
+
+  // 미분류 진단이 있어도, 다른 진단이 확실히 그 부위로 분류되면 true 확정 자체는
+  // 막히지 않는다 — 다만 발견한 품질 문제(legacy_unknown)는 그대로 실어 보낸다.
+  it('미분류 진단이 섞여 있어도 다른 진단이 확실히 무릎이면 hasKnee=true이고 legacy_unknown 플래그도 함께 남는다', () => {
+    const dxKnee = { id: 'dx-1', code: 'M17.1', name: '무릎관절증' };
+    const dxUnknown = { id: 'dx-2', code: 'J00', name: '감기' };
+    const result = extractDiagnosisRollupHasKnee(migrate(diagnosesCase([dxKnee, dxUnknown])));
+    expect(result.value).toBe(true);
+    expect(result.missing).toBeNull();
+    expect(result.qualityFlags).toContain('legacy_unknown');
+  });
+
+  it('양측(side="both") 진단이 같은 부위로 분류돼도 true는 한 번만 확정된다(중복 계산 문제 없음)', () => {
+    const dx = { id: 'dx-1', code: 'M51.2', name: '요추간판탈출증', side: 'both' };
+    const result = extractDiagnosisRollupHasSpine(migrate(diagnosesCase([dx])));
+    expect(result).toEqual({ value: true, missing: null, qualityFlags: [] });
+  });
+
+  it('서로 다른 방식(명시적 moduleId, 코드/명 패턴)으로 같은 부위에 매치된 진단 2개도 true 하나로 수렴한다', () => {
+    const dxExplicit = { id: 'dx-1', code: 'X', name: 'X', moduleId: 'cervical' };
+    const dxPattern = { id: 'dx-2', code: 'M50.1', name: '경추간판탈출증' };
+    const result = extractDiagnosisRollupHasCervical(migrate(diagnosesCase([dxExplicit, dxPattern])));
+    expect(result).toEqual({ value: true, missing: null, qualityFlags: [] });
   });
 });
 

@@ -294,7 +294,6 @@ knownPaths.add('modules.knee.jobs[]');
 flattenFields(
   {
     ...createDiagnosis(),
-    confirmedCode: '', confirmedName: '',
     klgRight: '', klgLeft: '', ellmanRight: '', ellmanLeft: '',
     confirmedRight: '', confirmedLeft: '', assessmentRight: '', assessmentLeft: '',
     reasonRight: [], reasonLeft: [], reasonRightOther: '', reasonLeftOther: '',
