@@ -131,6 +131,9 @@ export const StatsMethodIdSchema = z.enum([
   'chi_square', 'fisher_exact',
   'pearson_correlation', 'spearman_correlation',
   'paired_t', 'wilcoxon_signed_rank',
+  // PR4-A1 — 연관성 회귀 2종(계획서 §6.9.2). outcome 타입(continuous/boolean)이
+  // 자동 결정하지만 requestedMethod로 명시도 가능(§6.5 인코딩 고정 원칙).
+  'ols_linear', 'binary_logistic',
 ]);
 
 export const StatsAnalysisRecipeSchema = z.object({
@@ -152,8 +155,20 @@ export const StatsAnalysisRecipeSchema = z.object({
   // PR3-B — 'correlation_matrix' 추가(계획서 §4). variableKeys는 3개 이상 선택하는
   // 다중 변수 모드다("전부 continuous여야 한다"는 카탈로그 조회가 필요해 zod가 아니라
   // statsRecipeValidation.ts가 검사 — §7 "구조검증/의미검증 분리").
-  analysisMode:    z.enum(['descriptive', 'bivariate', 'correlation_matrix']).default('descriptive'),
+  // PR4-A1 — 'regression' 추가. requestedMethod는 다른 모드와 마찬가지로 여기서는
+  // 계속 optional이다(리뷰 #1) — 방법 미선택 상태의 최초 preview도 정상 응답해야
+  // availableMethods를 볼 수 있다. 필수 여부는 statsRecipeValidation.ts의
+  // context==='analyze'에서만 강제한다.
+  analysisMode:    z.enum(['descriptive', 'bivariate', 'correlation_matrix', 'regression']).default('descriptive'),
   requestedMethod: StatsMethodIdSchema.optional(),
+  // PR4-A1 — 회귀 전용 서브객체. variableKeys는 그대로 재사용하고(진실원 하나만
+  // 유지), predictors는 variableKeys에서 outcomeKey를 뺀 나머지(원래 순서 유지 —
+  // forest plot 행 순서가 된다)로 파생한다. referenceLevels 값 검증(카탈로그 필요)은
+  // statsRecipeValidation.ts가 담당한다.
+  regression: z.object({
+    outcomeKey: z.string().min(1),
+    referenceLevels: z.record(z.string(), z.string()).default({}),
+  }).strict().optional(),
   // encoding/options/rollups(마스터 계획서 §1)는 PR0-C 범위 밖 — .strict()로 보내면 400.
 }).strict().superRefine((recipe, ctx) => {
   // 카탈로그 조회가 필요 없는 순수 구조검사만 여기서 한다(컨텍스트 무관 — preview·
@@ -192,6 +207,41 @@ export const StatsAnalysisRecipeSchema = z.object({
         path: ['variableKeys'],
       });
     }
+    return;
+  }
+  if (recipe.analysisMode === 'regression') {
+    // PR4-A1 — 카탈로그가 필요 없는 구조검사만(리뷰 #1 — requestedMethod 필수여부는
+    // 여기서 검사하지 않는다). outcome 타입 정합성·predictor 타입 적격성·
+    // referenceLevels 값 검증은 statsRecipeValidation.ts(context 인자, 카탈로그 필요).
+    if (!recipe.regression) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'REGRESSION_REQUIRES_REGRESSION_OBJECT',
+        path: ['regression'],
+      });
+      return;
+    }
+    if (recipe.variableKeys.length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'REGRESSION_REQUIRES_AT_LEAST_TWO_VARIABLES',
+        path: ['variableKeys'],
+      });
+    }
+    if (new Set(recipe.variableKeys).size !== recipe.variableKeys.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'DUPLICATE_VARIABLE_SELECTED',
+        path: ['variableKeys'],
+      });
+    }
+    if (!recipe.variableKeys.includes(recipe.regression.outcomeKey)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'REGRESSION_OUTCOME_MUST_BE_IN_VARIABLE_KEYS',
+        path: ['regression', 'outcomeKey'],
+      });
+    }
   }
 });
 
@@ -220,7 +270,8 @@ export const RunManifestSchema = z.object({
   // outlierValues·scatter 원시 points)가 응답시점에 merge된 뒤의 바이트와는 다를 수
   // 있다(계획서 §6/§9). 그 권한별 응답의 digest는 필요 시 감사로그의
   // deliveredResultDigest로만 남긴다(manifest에는 안 남김).
-  analysisMode:               z.enum(['descriptive', 'bivariate', 'correlation_matrix']).optional(),
+  // PR4-A1 — 'regression' 추가. 나머지 원칙은 그대로(구버전 재파싱 호환용 optional).
+  analysisMode:               z.enum(['descriptive', 'bivariate', 'correlation_matrix', 'regression']).optional(),
 });
 
 export const PreviewCountsSchema = z.object({
@@ -244,8 +295,10 @@ export const PreviewEstimabilitySchema = z.object({
   // 값 자체가 nullable — 소수 셀 억제 대상이면 그 키만 null(record/키 구조는 유지).
   missingRatesByVariable:         z.record(z.string(), z.number().nullable()),
   distinctAssignedDoctorClusters: z.number().int().nullable(),
-  // outcome/predictor 구분이 레시피에 없어 정의 불가 — 이번 PR엔 항상 null.
-  candidateParameterCount:        z.null(),
+  // PR4-A1 — outcome/predictor 구분이 회귀 레시피로 생겼으므로 실제 파라미터 수를
+  // 계산할 수 있다(더미 확장 후 절편 제외). regression 모드가 아니거나 공개통제
+  // (③)를 통과하지 못했으면 여전히 null — "미생성"이지 "생략"이 아니다(리뷰 #14).
+  candidateParameterCount:        z.number().int().nullable(),
   eventNonEvent:                  z.array(EventNonEventEntrySchema),
   estimabilityPolicyVersion:      z.string(),
 });
@@ -589,6 +642,190 @@ export const AnalyzeCorrelationMatrixResultSchema = z.object({
   adjustedPWithheld: z.boolean(),
 });
 
+// ============================================================================
+// PR4-A1: 연관성 회귀(OLS·이분 로지스틱) 결과 계약. 계획서(pr4-a-lexical-reddy.md)
+// §1 "결과 스키마 — 상태 4종" 참고. 억제(suppressed)는 기존 3곳과 같은
+// discriminated union 패턴이되, 안쪽에 estimation(ok/inference_withheld/
+// non_estimable) 3단을 둔다 — §6.7(완전분리는 non_estimable로 종료)과
+// §6.4(클러스터 부족 시 계수·SE만 표시하고 p·CI 차단)를 계약으로 고정한다.
+// ============================================================================
+
+export const RegressionNonEstimableReasonSchema = z.enum([
+  'INSUFFICIENT_COMPLETE_ROWS',
+  'TOO_MANY_LEVELS',
+  'TOO_MANY_PARAMETERS',
+  'INSUFFICIENT_EVENTS_PER_PARAMETER',
+  'CONSTANT_OUTCOME',
+  'ZERO_VARIANCE_PREDICTOR',
+  'RANK_DEFICIENT',
+  'SEPARATION_DETECTED',
+  'SEPARATION_CHECK_FAILED',
+  'NOT_CONVERGED',
+]);
+
+export const RegressionInferenceWithheldReasonSchema = z.enum([
+  'TOO_FEW_CLUSTERS',
+  'CLUSTER_IMBALANCE',
+  'COVARIANCE_NOT_COMPUTABLE',
+  'DEGENERATE_COVARIANCE',
+]);
+
+// se===null은 오직 covariance 계산 자체가 불능(COVARIANCE_NOT_COMPUTABLE/
+// DEGENERATE_COVARIANCE)일 때만 허용된다(아래 superRefine이 강제) — 그 외에는
+// se가 유한하고 0보다 커야 한다(리뷰 #16/#19, se===0 완전적합을 허용하지 않는다).
+export const RegressionTermSchema = z.object({
+  name: z.string(),
+  label: z.string(),
+  variableKey: z.string().nullable(),
+  level: z.string().nullable(),
+  estimate: z.number(),
+  se: z.number().nullable(),
+  statistic: z.number().nullable(),
+  pValue: z.number().nullable(),
+  ciLower: z.number().nullable(),
+  ciUpper: z.number().nullable(),
+  // 로지스틱 전용(OR). estimate가 overflow 경계를 넘으면 null(계획 §3 "수치 안정성").
+  exponentiated: z.object({
+    estimate: z.number(),
+    ciLower: z.number().nullable(),
+    ciUpper: z.number().nullable(),
+  }).nullable(),
+}).strict();
+
+// OLS는 r2/adjR2만, 로지스틱은 logLik/aic/pseudoR2만 채운다 — 모형 전체 검정
+// (F·LR·Wald)은 A1에서 아예 내지 않는다(robust covariance와 정합하지 않고,
+// 별도 추론이라 같은 차단 정책을 또 배선해야 한다 — 계획 §2 "⑥ 추론 공개 정책").
+export const RegressionFitSchema = z.object({
+  r2: z.number().nullable(),
+  adjR2: z.number().nullable(),
+  logLik: z.number().nullable(),
+  aic: z.number().nullable(),
+  pseudoR2: z.number().nullable(),
+}).strict();
+
+const RegressionSuppressedSchema = z.object({
+  suppressed: z.literal(true),
+  // 공개통제 사유는 단 하나로 수렴한다(리뷰 §2 "③ 공개통제") — 레벨별/사유별
+  // 세분화된 코드는 그 자체로 소수셀 정보가 된다.
+  reasonCode: z.literal('MIN_COHORT_NOT_MET'),
+}).strict();
+
+const RegressionResultBodySchema = z.object({
+  suppressed: z.literal(false),
+  estimation: z.enum(['ok', 'inference_withheld', 'non_estimable']),
+  method: z.enum(['ols_linear', 'binary_logistic']),
+  outcomeKey: z.string(),
+  eventLevel: z.string().nullable(),
+  // 실제 적용된 기준 레벨(리뷰 #12) — recipe 지정값이 완전사례에 없어 폴백됐어도
+  // 여기엔 항상 실제 사용값이 기록된다.
+  referenceLevelsUsed: z.record(z.string(), z.string()),
+  covariance: z.enum(['hc3', 'person_cluster_cr1']),
+  // 리뷰 #5 — 분포와 자유도를 별도 필드로 분리(로지스틱+HC3는 normal, df=null).
+  inferenceDistribution: z.enum(['t', 'normal']).nullable(),
+  inferenceDf: z.number().nullable(),
+  residualDf: z.number().int(),
+  n: z.number().int(),
+  personCount: z.number().int(),
+  clusterCount: z.number().int().nullable(),
+  maxClusterShare: z.number().nullable(),
+  terms: z.array(RegressionTermSchema),
+  fit: RegressionFitSchema.nullable(),
+  nonEstimableReason: RegressionNonEstimableReasonSchema.nullable(),
+  inferenceWithheldReason: RegressionInferenceWithheldReasonSchema.nullable(),
+  // 사유별 분해는 내지 않는다(리뷰 #13) — 소수셀을 "기타"로 합쳐도 총계에서
+  // 역산된다. 총 제외 건수만 공개.
+  excludedRowCount: z.number().int().nonnegative(),
+  qualityFlags: z.array(z.string()),
+  // 리뷰 #7 — 행 단위 vs 개인 단위 해석 주의를 고정 문구로 싣는다.
+  analysisUnitNote: z.string(),
+}).strict();
+
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+function isFinitePositive(v: unknown): v is number {
+  return isFiniteNumber(v) && v > 0;
+}
+
+// 상태 불변식(계획 §1 "상태 불변식" 표) — discriminatedUnion **바깥**에 붙인다.
+// Zod 3에서 union 선택지 객체에 직접 .superRefine()을 붙이면 반환형이 ZodEffects가
+// 되어 판별자를 읽지 못하고 스키마 생성 단계에서 터진다(리뷰 #15, 실행 재현됨).
+function validateRegressionStateInvariants(
+  result: z.infer<typeof RegressionSuppressedSchema> | z.infer<typeof RegressionResultBodySchema>,
+  ctx: z.RefinementCtx,
+): void {
+  if (result.suppressed) return;
+
+  if (result.estimation === 'non_estimable') {
+    if (result.terms.length !== 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NON_ESTIMABLE_REQUIRES_EMPTY_TERMS', path: ['terms'] });
+    }
+    if (result.fit !== null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NON_ESTIMABLE_REQUIRES_NULL_FIT', path: ['fit'] });
+    }
+    if (result.nonEstimableReason === null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NON_ESTIMABLE_REQUIRES_REASON', path: ['nonEstimableReason'] });
+    }
+    if (result.inferenceWithheldReason !== null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NON_ESTIMABLE_MUST_NOT_SET_INFERENCE_WITHHELD_REASON', path: ['inferenceWithheldReason'] });
+    }
+    return;
+  }
+
+  // ok | inference_withheld 공통 — 계수가 비어있으면 안 되고 fit은 항상 있다.
+  if (result.terms.length === 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'ESTIMATED_RESULT_REQUIRES_NONEMPTY_TERMS', path: ['terms'] });
+  }
+  if (result.fit === null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'ESTIMATED_RESULT_REQUIRES_FIT', path: ['fit'] });
+  }
+  if (result.nonEstimableReason !== null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'ESTIMATED_RESULT_MUST_NOT_SET_NON_ESTIMABLE_REASON', path: ['nonEstimableReason'] });
+  }
+
+  // se가 전부 null이어야 하는 경우는 covariance 계산 자체가 불능일 때뿐(리뷰 #17
+  // 우선순위 — 클러스터 사유가 이 상태를 덮어쓰면 안 된다).
+  const seMustBeNull = result.estimation === 'inference_withheld'
+    && (result.inferenceWithheldReason === 'COVARIANCE_NOT_COMPUTABLE'
+      || result.inferenceWithheldReason === 'DEGENERATE_COVARIANCE');
+
+  result.terms.forEach((term, i) => {
+    if (seMustBeNull) {
+      if (term.se !== null) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SE_MUST_BE_NULL_WHEN_COVARIANCE_NOT_COMPUTABLE', path: ['terms', i, 'se'] });
+      }
+    } else if (!isFinitePositive(term.se)) {
+      // 리뷰 #16/#19 — se===0(완전적합)을 정상으로 통과시키지 않는다.
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SE_MUST_BE_FINITE_AND_POSITIVE', path: ['terms', i, 'se'] });
+    }
+
+    if (result.estimation === 'ok') {
+      if (!isFiniteNumber(term.pValue)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OK_REQUIRES_FINITE_PVALUE', path: ['terms', i, 'pValue'] });
+      }
+      if (!isFiniteNumber(term.statistic)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OK_REQUIRES_FINITE_STATISTIC', path: ['terms', i, 'statistic'] });
+      }
+      if (!isFiniteNumber(term.ciLower) || !isFiniteNumber(term.ciUpper)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OK_REQUIRES_FINITE_CI', path: ['terms', i, 'ciLower'] });
+      }
+    } else if (term.pValue !== null || term.ciLower !== null || term.ciUpper !== null || term.statistic !== null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'INFERENCE_WITHHELD_REQUIRES_NULL_INFERENCE_FIELDS', path: ['terms', i] });
+    }
+  });
+
+  if (result.estimation === 'inference_withheld' && result.inferenceWithheldReason === null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'INFERENCE_WITHHELD_REQUIRES_REASON', path: ['inferenceWithheldReason'] });
+  }
+  if (result.estimation === 'ok' && result.inferenceWithheldReason !== null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OK_MUST_NOT_SET_INFERENCE_WITHHELD_REASON', path: ['inferenceWithheldReason'] });
+  }
+}
+
+export const AnalyzeRegressionResultSchema = z
+  .discriminatedUnion('suppressed', [RegressionSuppressedSchema, RegressionResultBodySchema])
+  .superRefine(validateRegressionStateInvariants);
+
 export const AnalyzeResultSchema = z.object({
   continuous: z.array(AnalyzeContinuousResultSchema),
   discrete:   z.array(AnalyzeDiscreteResultSchema),
@@ -600,6 +837,10 @@ export const AnalyzeResultSchema = z.object({
   // PR3-B — analysisMode==='correlation_matrix'인 신규 실행 결과는 위와 동일한
   // 원칙으로 항상 존재. optional인 이유도 동일(구버전 재파싱 호환뿐).
   correlationMatrix: AnalyzeCorrelationMatrixResultSchema.optional(),
+  // PR4-A1 — analysisMode==='regression'인 신규 실행 결과도 동일 원칙(항상 존재,
+  // optional은 구버전 재파싱 호환뿐). 리뷰 #14 — 이 필드를 빠뜨리면 클라이언트의
+  // parseOrThrow가 zod strip으로 회귀 결과를 통째로 버린다.
+  regression: AnalyzeRegressionResultSchema.optional(),
 });
 
 export const AnalyzeRequestSchema = StatsAnalysisRecipeSchema;
@@ -625,6 +866,11 @@ export type AnalyzeHistogram              = z.infer<typeof AnalyzeHistogramSchem
 export type AnalyzeBoxplot                = z.infer<typeof AnalyzeBoxplotSchema>;
 export type AnalyzeCorrelationMatrixCell  = z.infer<typeof AnalyzeCorrelationMatrixCellSchema>;
 export type AnalyzeCorrelationMatrixResult = z.infer<typeof AnalyzeCorrelationMatrixResultSchema>;
+export type RegressionNonEstimableReason  = z.infer<typeof RegressionNonEstimableReasonSchema>;
+export type RegressionInferenceWithheldReason = z.infer<typeof RegressionInferenceWithheldReasonSchema>;
+export type RegressionTerm                = z.infer<typeof RegressionTermSchema>;
+export type RegressionFit                 = z.infer<typeof RegressionFitSchema>;
+export type AnalyzeRegressionResult       = z.infer<typeof AnalyzeRegressionResultSchema>;
 export type AnalyzeResult                 = z.infer<typeof AnalyzeResultSchema>;
 export type AnalyzeRequest                = z.infer<typeof AnalyzeRequestSchema>;
 export type AnalyzeResponse               = z.infer<typeof AnalyzeResponseSchema>;
