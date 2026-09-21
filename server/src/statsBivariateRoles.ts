@@ -16,7 +16,9 @@ export function isGroupingType(type: AnalyticsVariableMetadata['type'] | undefin
 // 관측값에서 결정적 순서를 만든다 — localeCompare는 로케일/ICU 버전에 따라 결과가
 // 달라질 수 있어(로컬-Docker 간 digest 불일치 위험) 대신 코드유닛 기준 `<`/`>`을 쓴다
 // (§3 "durableEntityKey" tie-break 등 이 코드베이스가 이미 쓰는 결정성 원칙과 동일).
-function sortDeterministic(values: readonly string[]): string[] {
+// PR4-A1 — statsRegressionDesign.ts가 선언 순서 없는 동적 categorical predictor의
+// 기준 레벨·더미 순서를 같은 규칙으로 정해야 해서 export한다(계획서 §2 ④).
+export function sortDeterministic(values: readonly string[]): string[] {
   return [...values].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
