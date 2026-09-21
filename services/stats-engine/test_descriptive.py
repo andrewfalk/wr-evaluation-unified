@@ -186,7 +186,7 @@ def test_max_total_values_rejects_when_per_variable_ok_but_sum_exceeds():
     # 변수의 합이 MAX_TOTAL_VALUES를 넘는 입력 — 변수 수를 늘려 합만 상한을 넘긴다.
     num_vars = MAX_TOTAL_VALUES // MAX_VALUES_PER_VARIABLE + 2
     request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "variables": [
             {"key": f"v{i}", "kind": "continuous", "values": [1.0] * MAX_VALUES_PER_VARIABLE}
             for i in range(num_vars)
@@ -205,7 +205,7 @@ def test_invalid_json_raises_invalid_input():
 
 def test_schema_violation_raises_invalid_input():
     with pytest.raises(ProtocolError) as exc_info:
-        parse_and_validate_request(json.dumps({"protocolVersion": 3, "variables": [{"key": "x"}]}))
+        parse_and_validate_request(json.dumps({"protocolVersion": 4, "variables": [{"key": "x"}]}))
     assert exc_info.value.code == "INVALID_INPUT"
 
 
@@ -213,7 +213,7 @@ def test_variable_person_count_optional_field_is_accepted():
     # A안 — histogram bin 개수 힌트(personCount)를 스키마에 추가한 뒤에도 기존처럼
     # 필드 없이 보내는 요청은 그대로 통과해야 하고(하위호환), 있으면 통과해야 한다.
     request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "variables": [{"key": "x", "kind": "continuous", "values": [1.0, 2.0], "personCount": 2}],
     }
     parsed = parse_and_validate_request(json.dumps(request))
@@ -222,7 +222,7 @@ def test_variable_person_count_optional_field_is_accepted():
 
 def test_variable_person_count_wrong_type_raises_invalid_input():
     request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "variables": [{"key": "x", "kind": "continuous", "values": [1.0], "personCount": "2"}],
     }
     with pytest.raises(ProtocolError) as exc_info:
@@ -243,7 +243,7 @@ def _run_analyze(stdin_text: str) -> subprocess.CompletedProcess:
 
 def test_analyze_process_success_stdout_only():
     request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "variables": [{"key": "v", "kind": "continuous", "values": [1.0, 2.0, 3.0]}],
     }
     proc = _run_analyze(json.dumps(request))
@@ -257,7 +257,7 @@ def test_analyze_process_continuous_includes_histogram_and_boxplot():
     # PR3-B — descriptive 경로가 histogram/boxplot을 실제로 배선했는지(analyze.py
     # 내부 조립 지점, 계획서 §2/§3).
     request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "variables": [
             {"key": "v", "kind": "continuous", "values": [1.0, 2.0, 3.0, 4.0, 5.0, 100.0]},
         ],
@@ -273,7 +273,7 @@ def test_analyze_process_continuous_includes_histogram_and_boxplot():
 
 def test_analyze_process_continuous_n0_histogram_and_boxplot_are_none():
     request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "variables": [{"key": "empty", "kind": "continuous", "values": []}],
     }
     proc = _run_analyze(json.dumps(request))

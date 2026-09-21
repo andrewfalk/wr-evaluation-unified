@@ -15,7 +15,7 @@ from protocol import MAX_VALUES_PER_VARIABLE, ProtocolError, parse_and_validate_
 
 def _welch_t_request(n1=5, n2=5):
     return {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "bivariate": {
             "method": "welch_t",
             "groups": [
@@ -33,7 +33,7 @@ def test_valid_groups_request_parses():
 
 def test_valid_table_request_parses():
     request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "bivariate": {
             "method": "chi_square",
             "table": [[10, 5], [3, 12]],
@@ -46,7 +46,7 @@ def test_valid_table_request_parses():
 
 def test_valid_correlation_request_parses():
     request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "bivariate": {
             "method": "pearson_correlation",
             "x": [1.0, 2.0, 3.0],
@@ -64,11 +64,12 @@ def test_wrong_protocol_version_rejected():
     assert exc_info.value.code == "INVALID_INPUT"
 
 
-def test_stale_protocol_version_2_rejected():
-    # PR3-B가 2→3으로 상향했다 — 방금 퇴역한 버전 번호도 명시적으로 거부되는지
-    # 확인(임의의 잘못된 버전과 별개로, "바로 이전 버전"을 특정해 회귀를 잡는다).
+def test_stale_protocol_version_3_rejected():
+    # PR4-A1이 3→4로 상향했다(회귀 요청 shape 추가) — 방금 퇴역한 버전 번호도
+    # 명시적으로 거부되는지 확인(임의의 잘못된 버전과 별개로, "바로 이전 버전"을
+    # 특정해 회귀를 잡는다).
     request = _welch_t_request()
-    request["protocolVersion"] = 2
+    request["protocolVersion"] = 3
     with pytest.raises(ProtocolError) as exc_info:
         parse_and_validate_request(json.dumps(request))
     assert exc_info.value.code == "INVALID_INPUT"
@@ -91,7 +92,7 @@ def test_welch_t_requires_exactly_two_groups():
 
 def test_anova_allows_more_than_two_groups():
     request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "bivariate": {
             "method": "anova",
             "groups": [
@@ -114,7 +115,7 @@ def test_duplicate_group_labels_rejected():
 
 def test_groups_total_values_exceeds_limit_rejected():
     request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "bivariate": {
             "method": "welch_t",
             "groups": [
@@ -130,7 +131,7 @@ def test_groups_total_values_exceeds_limit_rejected():
 
 def test_table_not_rectangular_rejected():
     request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "bivariate": {
             "method": "chi_square",
             "table": [[10, 5, 1], [3, 12]],
@@ -145,7 +146,7 @@ def test_table_not_rectangular_rejected():
 
 def test_fisher_exact_requires_2x2():
     request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "bivariate": {
             "method": "fisher_exact",
             "table": [[10, 5, 1], [3, 12, 2]],
@@ -160,7 +161,7 @@ def test_fisher_exact_requires_2x2():
 
 def test_correlation_requires_equal_length_x_y():
     request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "bivariate": {
             "method": "pearson_correlation",
             "x": [1.0, 2.0, 3.0],
@@ -175,7 +176,7 @@ def test_correlation_requires_equal_length_x_y():
 def test_wrong_shape_for_method_rejected():
     # chi_square인데 groups를 보냄 — 방법별 허용 shape 불일치.
     request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "bivariate": {
             "method": "chi_square",
             "groups": [
@@ -204,7 +205,7 @@ def test_analyze_process_bivariate_success():
     assert proc.returncode == 0
     assert proc.stderr == ""
     payload = json.loads(proc.stdout)
-    assert payload["protocolVersion"] == 3
+    assert payload["protocolVersion"] == 4
     assert payload["bivariate"]["method"] == "welch_t"
     assert payload["bivariate"]["n"] == 10
     assert payload["bivariate"]["pValue"] is not None
@@ -212,7 +213,7 @@ def test_analyze_process_bivariate_success():
 
 def test_analyze_process_bivariate_invalid_shape_emits_marker_and_exit1():
     bad_request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "bivariate": {"method": "welch_t", "groups": [{"label": "only-one", "values": [1.0, 2.0]}]},
     }
     proc = _run_analyze(json.dumps(bad_request))

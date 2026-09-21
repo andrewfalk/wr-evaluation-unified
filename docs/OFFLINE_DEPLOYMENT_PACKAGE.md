@@ -1354,6 +1354,17 @@ PR1부터 `wr-app-server` 이미지에 기술통계 계산용 Python subprocess 
 추정치보다 실제로는 큽니다(manylinux wheel이 자체 BLAS 라이브러리를 함께 포함하기 때문). 영상
 추론(`/opt/pose-venv`, +약 570MB)과는 완전히 별도 venv입니다.
 
+**PR4-A1(연관성 회귀) 추가분** — `statsmodels`(+전이 의존 `pandas`·`patsy`)가
+requirements.txt에 추가되며 venv가 **추가로 +약 136MB** 커집니다(실측: 로컬
+`python:3.11-slim` 기준 numpy+scipy+jsonschema만 252MB → statsmodels 추가 후
+388MB, `docker run --rm python:3.11-slim bash -c "python -m venv /v && ... && du
+-sh /v"`로 측정). 실제 프로덕션 베이스 이미지(bookworm 계열)는 절대값이 다를 수
+있으나 증분은 비슷할 것으로 본다 — 실제 프로덕션 Dockerfile 빌드 후 `du -sh
+/opt/stats-venv`로 재확인 필요(이 문서 갱신 시점엔 미실행, §16-2 검증과 함께
+수행할 것). covariance(HC3/person-cluster CR1) 계산은 statsmodels가 아니라
+`regression.py`가 직접 하므로 statsmodels는 로지스틱 계수 추정(MLE)과 적합도
+지표(logLik/AIC/pseudoR2)에만 쓰인다.
+
 ### 16-2. 에어갭 동작 검증
 
 에어갭 배포 전, 빌드한 이미지에서 `--network none`으로 실제 Python subprocess가 도는지 확인합니다:
