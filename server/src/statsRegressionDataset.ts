@@ -91,10 +91,18 @@ export interface RegressionLevelSummary {
   personCount: number;
 }
 
-/** predictor별(categorical/ordinal만) 레벨-person 요약 — 공개통제(③)의
- * isGroupBreakdownDisclosable 재사용 대상. boolean/continuous predictor는
- * 여기 대상이 아니다(boolean은 0/1 직접 인코딩, continuous는 레벨 개념 없음 —
- * 둘 다 §2 ④의 ZERO_VARIANCE_PREDICTOR 검사로 별도 커버). */
+/** predictor별(categorical/ordinal/boolean) 레벨-person 요약 — 공개통제(③)의
+ * isGroupBreakdownDisclosable 재사용 대상. continuous predictor만 대상이
+ * 아니다(레벨 개념 자체가 없음 — §2 ④의 ZERO_VARIANCE_PREDICTOR가 상수 여부만
+ * 커버).
+ *
+ * 리뷰로 발견한 결함 — 이전 판은 boolean을 "ZERO_VARIANCE_PREDICTOR 검사로
+ * 커버된다"고 잘못 판단해 여기서 건너뛰었다. 그 검사는 두 레벨이 *존재하는지*만
+ * 보지 *각 레벨에 충분한 인원이 있는지*는 보지 않는다 — 40명 중 true 5명/
+ * false 35명처럼 분산은 있지만 한쪽이 소수셀인 boolean predictor가 그대로
+ * 새는 실제 반례가 있었다(categorical로 같은 자료를 넣으면 정상 억제되는데
+ * boolean만 새는 비대칭). boolean 레벨은 'true'/'false' 문자열로 표기해
+ * categorical/ordinal과 동일한 person-단위 게이트를 받는다. */
 export function computeRegressionLevelSummaries(
   completeRows: DatasetRow[],
   predictorKeys: string[],
@@ -103,7 +111,7 @@ export function computeRegressionLevelSummaries(
   const summaries: RegressionLevelSummary[] = [];
   for (const key of predictorKeys) {
     const variable = catalogByKey.get(key);
-    if (!variable || (variable.type !== 'categorical' && variable.type !== 'ordinal')) continue;
+    if (!variable || (variable.type !== 'categorical' && variable.type !== 'ordinal' && variable.type !== 'boolean')) continue;
     const personsByLevel = new Map<string, Set<string>>();
     for (const row of completeRows) {
       const raw = row.values[key]?.value;

@@ -82,6 +82,27 @@ function resolveReferenceLevel(
 
 const RANK_RCOND = 1e-10;
 
+/** 열별로 자기 L2 노름으로 정규화한다 — 정규화 없이 원본 스케일로 Gram 행렬을
+ * 만들면 rank 판정이 predictor의 물리적 단위에 의존하게 된다(리뷰로 재현:
+ * 독립인 두 열(±1)은 rank 2로 정상 판정되지만, 한 열만 ×100000으로 재스케일
+ * 하면 threshold(=RANK_RCOND×maxDiag)가 큰 열의 분산에 끌려가 작은 열의 정상
+ * 피벗까지 문턱 아래로 묻혀 RANK_DEFICIENT로 오판했다). 정규화 후 대각선은
+ * 전부 1이 되고 비대각선은 코사인 유사도([-1,1])라 — 이는 상관행렬의 rank를
+ * 보는 것과 동치이며, 열의 단위와 무관하게 고정 threshold 하나로 판정할 수
+ * 있다. 완전 0벡터 열은 이미 ④ 앞단(ZERO_VARIANCE_PREDICTOR)에서 걸러지므로
+ * norm===0 방어는 재현 불가능한 경로에 대한 안전망일 뿐이다. */
+function normalizeColumns(x: number[][]): number[][] {
+  const n = x.length;
+  const p = n > 0 ? x[0].length : 0;
+  const norms = new Array(p).fill(0);
+  for (let j = 0; j < p; j += 1) {
+    let sumSq = 0;
+    for (let i = 0; i < n; i += 1) sumSq += x[i][j] * x[i][j];
+    norms[j] = Math.sqrt(sumSq) || 1;
+  }
+  return x.map((row) => row.map((v, j) => v / norms[j]));
+}
+
 function computeGramMatrix(x: number[][]): number[][] {
   const n = x.length;
   const p = n > 0 ? x[0].length : 0;
@@ -101,7 +122,7 @@ function computeGramMatrix(x: number[][]): number[][] {
  * — 대각합의 최댓값에 RANK_RCOND를 곱한 값보다 작은 피벗은 0(의존 열)으로
  * 취급한다. */
 export function matrixRank(x: number[][]): number {
-  const gram = computeGramMatrix(x);
+  const gram = computeGramMatrix(normalizeColumns(x));
   const p = gram.length;
   if (p === 0) return 0;
   const m = gram.map((row) => [...row]);
@@ -158,6 +179,14 @@ function isFiniteNumber(v: unknown): v is number {
 export function buildRegressionDesignMatrix(input: BuildRegressionDesignInput): RegressionDesignResult {
   const { completeRows, outcomeKey, predictorKeys, catalogByKey, method, referenceLevels, eventSummary } = input;
   const qualityFlags: string[] = [];
+
+  // 리뷰로 발견한 결함 — REGRESSION_POLICY.minCompleteRows(30)가 정책 상수로는
+  // 선언돼 있었지만 실행 경로 어디에서도 비교되지 않았다. 아래 parameterCount/
+  // residualDf 검사만으로는 걸러지지 않는다(예: 절편+predictor 1개, n=12면
+  // residualDf=10으로 minResidualDf 문턱을 통과) — 별도로 명시 검사해야 한다.
+  if (completeRows.length < REGRESSION_POLICY.minCompleteRows) {
+    return { ok: false, reason: 'INSUFFICIENT_COMPLETE_ROWS' };
+  }
 
   // --- outcome 벡터 ---
   const y: number[] = [];

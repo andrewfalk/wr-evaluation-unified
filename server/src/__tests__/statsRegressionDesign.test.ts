@@ -71,7 +71,8 @@ describe('buildRegressionDesignMatrix — OLS 기본', () => {
       ['y', makeVariable('y', 'continuous')],
       ['x1', makeVariable('x1', 'continuous')],
     ]);
-    const rows: DatasetRow[] = Array.from({ length: 10 }, (_, i) =>
+    // minCompleteRows(30) 문턱을 먼저 넘겨야 CONSTANT_OUTCOME 판정까지 도달한다.
+    const rows: DatasetRow[] = Array.from({ length: 30 }, (_, i) =>
       makeRow(`c${i}`, `p${i}`, { y: pv(5.0), x1: pv(i) }));
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys: ['x1'], catalogByKey: catalog,
@@ -85,7 +86,7 @@ describe('buildRegressionDesignMatrix — OLS 기본', () => {
       ['y', makeVariable('y', 'continuous')],
       ['x1', makeVariable('x1', 'continuous')],
     ]);
-    const rows: DatasetRow[] = Array.from({ length: 10 }, (_, i) =>
+    const rows: DatasetRow[] = Array.from({ length: 30 }, (_, i) =>
       makeRow(`c${i}`, `p${i}`, { y: pv(i), x1: pv(7.0) }));
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys: ['x1'], catalogByKey: catalog,
@@ -99,13 +100,55 @@ describe('buildRegressionDesignMatrix — OLS 기본', () => {
       ['y', makeVariable('y', 'continuous')],
       ['flag', makeVariable('flag', 'boolean')],
     ]);
-    const rows: DatasetRow[] = Array.from({ length: 10 }, (_, i) =>
+    const rows: DatasetRow[] = Array.from({ length: 30 }, (_, i) =>
       makeRow(`c${i}`, `p${i}`, { y: pv(i), flag: pv(true) }));
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys: ['flag'], catalogByKey: catalog,
       method: 'ols_linear', referenceLevels: {}, eventSummary: null,
     });
     expect(result).toEqual({ ok: false, reason: 'ZERO_VARIANCE_PREDICTOR' });
+  });
+});
+
+describe('buildRegressionDesignMatrix — 리뷰 #4(minCompleteRows 미적용) 수정 확인', () => {
+  function buildRows(n: number): DatasetRow[] {
+    return Array.from({ length: n }, (_, i) => makeRow(`c${i}`, `p${i}`, { y: pv(i * 1.0), x1: pv(i * 0.7) }));
+  }
+  const catalog = new Map([
+    ['y', makeVariable('y', 'continuous')],
+    ['x1', makeVariable('x1', 'continuous')],
+  ]);
+
+  it.each([12, 20, 29])('완전사례 %d건(30 미만)은 INSUFFICIENT_COMPLETE_ROWS로 거부된다', (n) => {
+    const result = buildRegressionDesignMatrix({
+      completeRows: buildRows(n), outcomeKey: 'y', predictorKeys: ['x1'], catalogByKey: catalog,
+      method: 'ols_linear', referenceLevels: {}, eventSummary: null,
+    });
+    expect(result).toEqual({ ok: false, reason: 'INSUFFICIENT_COMPLETE_ROWS' });
+  });
+
+  it('완전사례 30건(경계값)은 통과한다', () => {
+    const result = buildRegressionDesignMatrix({
+      completeRows: buildRows(30), outcomeKey: 'y', predictorKeys: ['x1'], catalogByKey: catalog,
+      method: 'ols_linear', referenceLevels: {}, eventSummary: null,
+    });
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe('matrixRank — 리뷰 #3(스케일 의존 rank 오판) 수정 확인', () => {
+  it('독립인 두 열은 한쪽 열의 스케일을 ×100000으로 바꿔도 rank 2를 유지한다', () => {
+    const x = [[1, 0], [1, 1], [1, 2], [1, 3]];
+    const scaled = x.map(([a, b]) => [a, b * 100000]);
+    expect(matrixRank(x)).toBe(2);
+    expect(matrixRank(scaled)).toBe(2);
+  });
+
+  it('진짜 선형종속은 스케일을 바꿔도 여전히 rank가 줄어든다', () => {
+    const x = [[1, 5], [1, 5], [1, 5], [1, 5]];
+    const scaled = x.map(([a, b]) => [a, b * 100000]);
+    expect(matrixRank(x)).toBe(1);
+    expect(matrixRank(scaled)).toBe(1);
   });
 });
 

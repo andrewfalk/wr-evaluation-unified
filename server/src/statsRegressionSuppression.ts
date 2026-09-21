@@ -113,7 +113,7 @@ export async function computeRegressionAnalyzeResult(ctx: AnalysisContext): Prom
   const raw = await runRegressionStatsEngine({
     family,
     y: design.design.y,
-    x: design.design.x,
+    X: design.design.x,
     columnNames: design.design.columns.map((c) => c.name),
     covariance: spec,
   });

@@ -70,7 +70,7 @@ describe('computeRegressionCompleteCase — 리뷰 #3 대칭 판정', () => {
 });
 
 describe('computeRegressionLevelSummaries', () => {
-  it('categorical/ordinal predictor만 레벨-person 요약을 낸다(continuous/boolean 제외)', () => {
+  it('categorical/ordinal predictor만 레벨-person 요약을 낸다(continuous 제외, boolean은 포함)', () => {
     const catalog = new Map([
       ['group', makeVariable('group', 'categorical')],
       ['age', makeVariable('age', 'continuous')],
@@ -82,12 +82,31 @@ describe('computeRegressionLevelSummaries', () => {
       makeRow('c3', 'p3', { group: presentValue('A'), age: presentValue(25), flag: presentValue(true) }),
     ];
     const summaries = computeRegressionLevelSummaries(rows, ['group', 'age', 'flag'], catalog);
-    expect(summaries).toHaveLength(2); // group=A, group=B만
-    const a = summaries.find((s) => s.level === 'A')!;
-    const b = summaries.find((s) => s.level === 'B')!;
+    // age(continuous)는 레벨 개념이 없어 제외되지만, flag(boolean)는 이제 포함된다.
+    expect(summaries).toHaveLength(4); // group=A/B + flag=true/false
+    const a = summaries.find((s) => s.variableKey === 'group' && s.level === 'A')!;
+    const b = summaries.find((s) => s.variableKey === 'group' && s.level === 'B')!;
     expect(a.personCount).toBe(2);
     expect(b.personCount).toBe(1);
-    expect(summaries.every((s) => s.variableKey === 'group')).toBe(true);
+    expect(summaries.some((s) => s.variableKey === 'age')).toBe(false);
+    const flagTrue = summaries.find((s) => s.variableKey === 'flag' && s.level === 'true')!;
+    const flagFalse = summaries.find((s) => s.variableKey === 'flag' && s.level === 'false')!;
+    expect(flagTrue.personCount).toBe(2);
+    expect(flagFalse.personCount).toBe(1);
+  });
+
+  it('리뷰 재현 — boolean predictor의 소수셀(40명 중 true 5/false 35)도 레벨-person 요약에 그대로 드러난다', () => {
+    const catalog = new Map([['flag', makeVariable('flag', 'boolean')]]);
+    const rows: DatasetRow[] = [];
+    for (let i = 0; i < 5; i += 1) rows.push(makeRow(`ct${i}`, `pt${i}`, { flag: presentValue(true) }));
+    for (let i = 0; i < 35; i += 1) rows.push(makeRow(`cf${i}`, `pf${i}`, { flag: presentValue(false) }));
+    const summaries = computeRegressionLevelSummaries(rows, ['flag'], catalog);
+    const flagTrue = summaries.find((s) => s.level === 'true')!;
+    const flagFalse = summaries.find((s) => s.level === 'false')!;
+    // 이 personCount가 공개통제(isGroupBreakdownDisclosable, 0 또는 >=10)로 넘어가면
+    // true=5는 소수셀로 억제 대상이 된다 — boolean이 categorical과 동일하게 새지 않아야 한다.
+    expect(flagTrue.personCount).toBe(5);
+    expect(flagFalse.personCount).toBe(35);
   });
 });
 

@@ -74,10 +74,15 @@ export type RegressionCovarianceSpec =
   | { type: 'hc3' }
   | { type: 'cluster'; groups: string[] };
 
+// PR4-A1 리뷰 — X는 대문자여야 한다. protocol.py의 jsonschema가 "X"(대문자)를
+// required로 요구하고 analyze.py도 request["regression"]["X"]로 읽는다(계획서
+// §3 "요청/응답"). 소문자 x로 보내면 Python이 구조검증 단계에서 즉시
+// INVALID_INPUT으로 거부해 회귀 분석 자체가 항상 실패한다 — 필드명은 반드시
+// Python 계약과 대소문자까지 일치해야 한다.
 export interface RegressionEngineRequest {
   family: 'gaussian' | 'binomial';
   y: number[];
-  x: number[][];
+  X: number[][];
   columnNames: string[];
   covariance: RegressionCovarianceSpec;
 }
