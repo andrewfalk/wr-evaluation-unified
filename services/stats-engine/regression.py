@@ -39,9 +39,16 @@ import math
 from typing import Any
 
 import numpy as np
-import statsmodels.api as sm
 from scipy import stats as scipy_stats
 from scipy.optimize import linprog
+
+# statsmodels는 로지스틱(binomial) 경로에서만 쓴다 — 모듈 최상위에서 import하면
+# analyze.py가 모든 요청(descriptive/bivariate/correlation_matrix 포함)에서
+# 무조건 regression 모듈을 import할 때(디스패처 구조) statsmodels가 없는
+# 인터프리터에서는 회귀와 무관한 요청까지 전부 깨진다. 함수 내부 지연 import로
+# 그 결합을 끊는다(운영 venv는 requirements.txt로 항상 설치돼 있어 실제 동작에는
+# 영향 없음 — 로컬에서 numpy/scipy만 있는 인터프리터로 다른 경로를 테스트할 때만
+# 의미 있는 분리).
 
 CI_CONFIDENCE_LEVEL = 0.95
 _Z_CRIT = float(scipy_stats.norm.ppf(1 - (1 - CI_CONFIDENCE_LEVEL) / 2))
@@ -202,6 +209,8 @@ def compute_regression(
             return _non_estimable("SEPARATION_CHECK_FAILED")
         if separation == "separated":
             return _non_estimable("SEPARATION_DETECTED")
+
+        import statsmodels.api as sm  # noqa: PLC0415 — 지연 import(위 모듈 docstring 근접 설명 참고)
 
         try:
             model = sm.Logit(y, x)
