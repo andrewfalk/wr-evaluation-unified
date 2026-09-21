@@ -11,6 +11,7 @@ import { HorizontalBarChart } from '../HorizontalBarChart';
 import { StackedBarChart100 } from '../StackedBarChart100';
 import { ScatterPlot } from '../ScatterPlot';
 import { CorrelationHeatmap } from '../CorrelationHeatmap';
+import { ForestPlot } from '../ForestPlot';
 import { ChartTooltip, chooseTooltipPlacement } from '../ChartTooltip';
 
 afterEach(cleanup);
@@ -188,6 +189,85 @@ describe('CorrelationHeatmap', () => {
     await user.click(screen.getByRole('button', { name: '데이터 보기' }));
     expect(screen.getByText('0.500')).toBeTruthy();
     expect(screen.getAllByText('(비공개)').length).toBeGreaterThan(0);
+  });
+});
+
+// PR4-A1 §5 — forest plot. 절편 제외, CI 유무에 따른 렌더 분기, OR 로그축에서
+// 비유한/음수 OR이 축을 깨지 않는지.
+describe('ForestPlot', () => {
+  const baseTerms = [
+    { name: 'intercept', label: '절편', variableKey: null, level: null, estimate: 1.0, se: 0.2, statistic: 5, pValue: 0.001, ciLower: 0.6, ciUpper: 1.4, exponentiated: null },
+    { name: 'x1', label: 'x1 변수', variableKey: 'x1', level: null, estimate: 1.5, se: 0.3, statistic: 5, pValue: 0.001, ciLower: 0.9, ciUpper: 2.1, exponentiated: null },
+    { name: 'x2', label: 'x2 변수', variableKey: 'x2', level: null, estimate: -0.8, se: 0.4, statistic: -2, pValue: 0.04, ciLower: -1.6, ciUpper: 0.0, exponentiated: null },
+  ];
+
+  it('terms가 없으면 억제 문구를 보여준다', () => {
+    render(<ForestPlot terms={[]} />);
+    expect(screen.getByText(/공개 정책에 따라 표시되지 않음/)).toBeTruthy();
+  });
+
+  it('절편은 그래프 행에서 제외된다(표에도 없음 — 호출자가 계수표에서 별도로 보여줌)', () => {
+    render(<ForestPlot terms={baseTerms} />);
+    // predictor 2개(x1, x2)만 축 라벨로 그려진다.
+    expect(screen.getByText('x1 변수')).toBeTruthy();
+    expect(screen.getByText('x2 변수')).toBeTruthy();
+    expect(screen.queryByText('절편')).toBeFalsy();
+  });
+
+  it('"데이터 보기"를 누르면 표로 전환되고 행 수가 predictor 수(절편 제외)와 일치한다', async () => {
+    const user = userEvent.setup();
+    render(<ForestPlot terms={baseTerms} />);
+    expect(document.querySelector('table')).toBeNull();
+    await user.click(screen.getByRole('button', { name: '데이터 보기' }));
+    const table = document.querySelector('table');
+    expect(table).toBeTruthy();
+    expect(table.querySelectorAll('tbody tr').length).toBe(2); // x1, x2(절편 제외)
+  });
+
+  it('CI가 null(추론 보류)이면 점추정만 찍고 비공개 문구를 표에 낸다', async () => {
+    const user = userEvent.setup();
+    const withheldTerms = baseTerms.map((t) => (
+      t.variableKey === null ? t : { ...t, statistic: null, pValue: null, ciLower: null, ciUpper: null }
+    ));
+    render(<ForestPlot terms={withheldTerms} />);
+    // 점(circle)은 여전히 그려진다.
+    expect(document.querySelectorAll('circle').length).toBe(2);
+    await user.click(screen.getByRole('button', { name: '데이터 보기' }));
+    expect(screen.getAllByText('(비공개)').length).toBe(2);
+  });
+
+  it('exponentiated=true면 OR을 로그축에 그리고, 비유한/0 이하 OR은 축·표에서 "—"로 처리한다', async () => {
+    const user = userEvent.setup();
+    const logisticTerms = [
+      { name: 'intercept', label: '절편', variableKey: null, level: null, estimate: 0.1, se: 0.1, statistic: 1, pValue: 0.3, ciLower: -0.1, ciUpper: 0.3, exponentiated: { estimate: 1.1, ciLower: 0.9, ciUpper: 1.3 } },
+      { name: 'x1', label: 'x1 변수', variableKey: 'x1', level: null, estimate: 0.7, se: 0.2, statistic: 3.5, pValue: 0.001, ciLower: 0.3, ciUpper: 1.1, exponentiated: { estimate: 2.0, ciLower: 1.35, ciUpper: 3.0 } },
+      // exponentiated가 null(overflow guard로 계산 안 됨) — 축 계산에서 빠지고 "축 범위 초과"로 표시.
+      { name: 'x2', label: 'x2 변수', variableKey: 'x2', level: null, estimate: 750, se: 10, statistic: 75, pValue: 0.0001, ciLower: 730, ciUpper: 770, exponentiated: null },
+    ];
+    render(<ForestPlot terms={logisticTerms} exponentiated />);
+    expect(screen.getByText('축 범위 초과')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '데이터 보기' }));
+    const table = document.querySelector('table');
+    expect(table.querySelectorAll('tbody tr').length).toBe(2);
+    expect(screen.getByText('2')).toBeTruthy(); // x1의 OR(formatNumber가 trailing zero를 없앤다)
+    expect(screen.getByText('—')).toBeTruthy(); // x2는 overflow라 OR 없음
+  });
+
+  it('predictor는 있지만 점추정이 비유한이면 그 행에 "축 범위 초과"를 보여준다(전체 억제가 아님)', () => {
+    const allMissing = [
+      { name: 'x1', label: 'x1', variableKey: 'x1', level: null, estimate: NaN, se: null, statistic: null, pValue: null, ciLower: null, ciUpper: null, exponentiated: null },
+    ];
+    render(<ForestPlot terms={allMissing} />);
+    expect(screen.getByText('축 범위 초과')).toBeTruthy();
+    expect(screen.getByText('x1')).toBeTruthy(); // 행 라벨 자체는 유지
+  });
+
+  it('predictor 자체가 하나도 없으면(절편만) 억제 문구를 보여준다', () => {
+    const interceptOnly = [
+      { name: 'intercept', label: '절편', variableKey: null, level: null, estimate: 1.0, se: 0.2, statistic: 5, pValue: 0.001, ciLower: 0.6, ciUpper: 1.4, exponentiated: null },
+    ];
+    render(<ForestPlot terms={interceptOnly} />);
+    expect(screen.getByText(/공개 정책에 따라 표시되지 않음/)).toBeTruthy();
   });
 });
 

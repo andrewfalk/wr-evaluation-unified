@@ -318,3 +318,161 @@ describe('ResultPanel — PR3-B 상관행렬 결과 카드', () => {
     expect(screen.queryByRole('button', { name: /집계 결과 내보내기/ })).toBeNull();
   });
 });
+
+// PR4-A1 §5 — 회귀 결과 카드. estimation 4상태(suppressed 포함)가 각각 다르게
+// 그려지는지, isDescriptiveRun/isRegressionRun 판정이 요약·분포 탭을 깨지 않는지
+// (계획서 §5 "실제 버그 위험 지점"), 추론 보류 시 계수는 보이고 p·CI 자리만
+// 비는지(se는 남는다는 계약 불변식을 화면에서도 확인).
+describe('ResultPanel — PR4-A1 회귀 결과 카드', () => {
+  function regressionRecipe(overrides = {}) {
+    return { analysisMode: 'regression', variableKeys: ['val', 'grp'], regression: { outcomeKey: 'val' }, requestedMethod: 'ols_linear', ...overrides };
+  }
+  async function openRegressionTab(user) {
+    await user.click(screen.getByRole('button', { name: '회귀' }));
+  }
+
+  it('estimation:"ok"이면 계수표에 계수·SE·p값·CI가 전부 표시된다', async () => {
+    const user = userEvent.setup();
+    const committedResult = {
+      runManifest: baseRunManifest(),
+      result: {
+        regression: {
+          suppressed: false, estimation: 'ok', method: 'ols_linear', outcomeKey: 'val', eventLevel: null,
+          referenceLevelsUsed: {}, covariance: 'hc3', inferenceDistribution: 't', inferenceDf: 38,
+          residualDf: 38, n: 40, personCount: 40, clusterCount: null, maxClusterShare: null,
+          terms: [
+            { name: 'intercept', label: '절편', variableKey: null, level: null, estimate: 1.0, se: 0.2, statistic: 5, pValue: 0.0001, ciLower: 0.6, ciUpper: 1.4, exponentiated: null },
+            { name: 'grp', label: '작업군', variableKey: 'grp', level: null, estimate: 1.5, se: 0.3, statistic: 5, pValue: 0.001, ciLower: 0.9, ciUpper: 2.1, exponentiated: null },
+          ],
+          fit: { r2: 0.4, adjR2: 0.38, logLik: null, aic: null, pseudoR2: null },
+          nonEstimableReason: null, inferenceWithheldReason: null, excludedRowCount: 0, qualityFlags: [],
+          analysisUnitNote: '행 단위 해석 주의',
+        },
+      },
+    };
+    render(
+      <ResultPanel
+        catalog={catalogFixture()} committedRecipe={regressionRecipe()} committedResult={committedResult}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported
+      />,
+    );
+    await openRegressionTab(user);
+
+    expect(screen.getByText('선형회귀(OLS)')).toBeTruthy();
+    expect(screen.getByText('0.0010')).toBeTruthy(); // p값
+    expect(screen.getByText('행 단위 해석 주의')).toBeTruthy();
+  });
+
+  it('estimation:"inference_withheld"이면 계수·SE는 보이고 p·CI 자리는 비공개로 표시된다', async () => {
+    const user = userEvent.setup();
+    const committedResult = {
+      runManifest: baseRunManifest(),
+      result: {
+        regression: {
+          suppressed: false, estimation: 'inference_withheld', method: 'ols_linear', outcomeKey: 'val', eventLevel: null,
+          referenceLevelsUsed: {}, covariance: 'person_cluster_cr1', inferenceDistribution: null, inferenceDf: null,
+          residualDf: 78, n: 80, personCount: 15, clusterCount: 15, maxClusterShare: 0.1,
+          terms: [
+            { name: 'intercept', label: '절편', variableKey: null, level: null, estimate: 1.0, se: 0.2, statistic: null, pValue: null, ciLower: null, ciUpper: null, exponentiated: null },
+            { name: 'grp', label: '작업군', variableKey: 'grp', level: null, estimate: 1.5, se: 0.35, statistic: null, pValue: null, ciLower: null, ciUpper: null, exponentiated: null },
+          ],
+          fit: { r2: 0.3, adjR2: 0.25, logLik: null, aic: null, pseudoR2: null },
+          nonEstimableReason: null, inferenceWithheldReason: 'TOO_FEW_CLUSTERS', excludedRowCount: 2, qualityFlags: [],
+          analysisUnitNote: '행 단위 해석 주의',
+        },
+      },
+    };
+    render(
+      <ResultPanel
+        catalog={catalogFixture()} committedRecipe={regressionRecipe()} committedResult={committedResult}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported
+      />,
+    );
+    await openRegressionTab(user);
+
+    expect(screen.getByText(/표본 구조상.*p값·신뢰구간을 표시하지 않습니다/)).toBeTruthy();
+    // 계수(0.35)는 보이지만 p·CI 열은 "(비공개)"/"—"로 채워진다.
+    expect(screen.getByText('0.350')).toBeTruthy(); // se
+    expect(screen.getAllByText('(비공개)').length).toBeGreaterThan(0);
+  });
+
+  it('estimation:"non_estimable"이면 계수표 없이 사유 문구만 보여준다', async () => {
+    const user = userEvent.setup();
+    const committedResult = {
+      runManifest: baseRunManifest(),
+      result: {
+        regression: {
+          suppressed: false, estimation: 'non_estimable', method: 'binary_logistic', outcomeKey: 'grp', eventLevel: null,
+          referenceLevelsUsed: {}, covariance: 'hc3', inferenceDistribution: null, inferenceDf: null,
+          residualDf: 0, n: 0, personCount: 0, clusterCount: null, maxClusterShare: null,
+          terms: [], fit: null, nonEstimableReason: 'SEPARATION_DETECTED', inferenceWithheldReason: null,
+          excludedRowCount: 0, qualityFlags: [], analysisUnitNote: '',
+        },
+      },
+    };
+    render(
+      <ResultPanel
+        catalog={catalogFixture()} committedRecipe={regressionRecipe({ analysisMode: 'regression', variableKeys: ['grp', 'val'], regression: { outcomeKey: 'grp' } })} committedResult={committedResult}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported
+      />,
+    );
+    await openRegressionTab(user);
+
+    expect(screen.getByText('결과변수가 설명변수로 완전히 구분돼 계산할 수 없습니다.')).toBeTruthy();
+    expect(document.querySelector('table')).toBeNull();
+  });
+
+  it('suppressed:true이면 공개통제 억제 문구를 보여준다', async () => {
+    const user = userEvent.setup();
+    const committedResult = {
+      runManifest: baseRunManifest(),
+      result: { regression: { suppressed: true, reasonCode: 'MIN_COHORT_NOT_MET' } },
+    };
+    render(
+      <ResultPanel
+        catalog={catalogFixture()} committedRecipe={regressionRecipe()} committedResult={committedResult}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported
+      />,
+    );
+    await openRegressionTab(user);
+    expect(screen.getByText(/공개 정책에 따라 결과가 표시되지 않음/)).toBeTruthy();
+  });
+
+  it('회귀 실행 결과에서는 요약/분포 탭이 continuous/discrete를 읽지 않고 안내 문구만 보여준다(isDescriptiveRun 오판 방지)', () => {
+    const committedResult = {
+      runManifest: baseRunManifest(),
+      result: { regression: { suppressed: true, reasonCode: 'MIN_COHORT_NOT_MET' } },
+    };
+    render(
+      <ResultPanel
+        catalog={catalogFixture()} committedRecipe={regressionRecipe()} committedResult={committedResult}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported
+      />,
+    );
+    // 기본 탭은 "요약" — descriptive 전용 라벨("연속형"/"이산형")이 아니라 회귀 안내가 떠야 한다.
+    expect(screen.getByText('회귀 분석 결과는 "회귀" 탭에서 확인하세요.')).toBeTruthy();
+    expect(screen.queryByText('연속형')).toBeNull();
+    expect(screen.queryByText('이산형')).toBeNull();
+  });
+
+  it('회귀 결과는 CSV 내보내기 버튼 대신 안내 문구를 보여준다', () => {
+    const committedResult = {
+      runManifest: baseRunManifest(),
+      result: { regression: { suppressed: true, reasonCode: 'MIN_COHORT_NOT_MET' } },
+    };
+    render(
+      <ResultPanel
+        catalog={catalogFixture()} committedRecipe={regressionRecipe()} committedResult={committedResult}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported
+      />,
+    );
+    expect(screen.getByText(/회귀 결과는 아직 CSV 내보내기를 지원하지 않습니다/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /집계 결과 내보내기/ })).toBeNull();
+  });
+});

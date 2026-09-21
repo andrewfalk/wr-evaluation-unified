@@ -16,6 +16,11 @@ const METHOD_LABELS = {
   spearman_correlation: 'Spearman 상관',
   paired_t: '대응 t 검정',
   wilcoxon_signed_rank: 'Wilcoxon 부호순위검정',
+  // PR4-A1 — StatsMethodIdSchema와 동일 순서·목록에 맞춘다. METHOD_ORDER에 없는
+  // id는 MethodPicker의 filter(Boolean)에서 조용히 사라진다 — 여기 추가하는 것
+  // 자체가 카드 노출의 전제조건이다.
+  ols_linear: '선형회귀(OLS)',
+  binary_logistic: '이분 로지스틱 회귀',
 };
 const METHOD_ORDER = Object.keys(METHOD_LABELS);
 
@@ -34,6 +39,8 @@ const METHOD_TOOLTIPS = {
   fisher_exact: '카이제곱검정과 같은 목적(범주형 변수 간 연관)이지만, 표본이 작거나 어느 칸의 인원이 매우 적을 때 더 정확합니다.',
   pearson_correlation: '두 연속형 변수가 함께 커지거나 작아지는 직선적 관계를 −1~+1 사이 값으로 나타냅니다. 0에 가까우면 관계가 약하고, ±1에 가까울수록 강합니다.',
   spearman_correlation: 'Pearson과 같은 목적이지만 직선 관계가 아니라 "한쪽이 커지면 다른 쪽도 대체로 커지는/작아지는" 순위 관계를 봅니다. 이상치에 덜 민감합니다.',
+  ols_linear: '결과변수(연속형)를 여러 설명변수로 동시에 설명합니다 — 다른 변수를 보정한 뒤에도 특정 변수의 효과가 남는지 봅니다.',
+  binary_logistic: '결과변수(있음/없음 같은 이분형)가 나타날 가능성을 여러 설명변수로 동시에 설명합니다. 계수는 오즈비(OR)로도 함께 표시됩니다.',
 };
 const METHOD_LIST_PVALUE_NOTE = 'p-값이 작을수록(보통 0.05 미만) 우연이라 보기 어려운 차이·연관으로 해석합니다.';
 
@@ -252,6 +259,7 @@ export function RecipePanel({
   selectedKeys, onRemoveVariable,
   analysisMode, onAnalysisModeChange, modeChangeBlockedNotice,
   requestedMethod, onRequestedMethodChange,
+  outcomeKey, onOutcomeKeyChange,
   analysisPurpose, onAnalysisPurposeChange,
   formulaPolicies, onFormulaPolicyChange,
   filterDraft, onFilterDraftChange, appliedFilters, onApplyFilters,
@@ -362,6 +370,12 @@ export function RecipePanel({
             className={`swb-seg-opt${analysisMode === 'correlation_matrix' ? ' swb-seg-opt--active' : ''}`}
             onClick={() => onAnalysisModeChange('correlation_matrix')}
           >상관행렬</button>
+          {/* PR4-A1 — 연관성 회귀(계획서 §5). 결과변수 1개 + 설명변수 1개 이상. */}
+          <button
+            type="button"
+            className={`swb-seg-opt${analysisMode === 'regression' ? ' swb-seg-opt--active' : ''}`}
+            onClick={() => onAnalysisModeChange('regression')}
+          >회귀</button>
         </div>
         {modeChangeBlockedNotice && analysisMode !== 'bivariate' && (
           <p className="swb-status-warn">이변량 모드는 변수를 2개까지만 지원합니다 — 먼저 2개로 줄여주세요.</p>
@@ -384,7 +398,7 @@ export function RecipePanel({
           <p className="swb-suppressed-note">목적을 골라도 지금 제공하는 분석은 기술통계뿐입니다.</p>
         )}
 
-        {(analysisMode === 'bivariate' || analysisMode === 'correlation_matrix') && (
+        {(analysisMode === 'bivariate' || analysisMode === 'correlation_matrix' || analysisMode === 'regression') && (
           <MethodPicker
             previewState={previewState}
             isPreviewCurrent={isPreviewCurrent}
@@ -393,29 +407,73 @@ export function RecipePanel({
             onApplyRemedy={(patch) => { if (patch?.requestedMethod) onRequestedMethodChange(patch.requestedMethod); }}
             notReadyMessage={analysisMode === 'correlation_matrix'
               ? '연속형 변수를 3개 이상 선택하면 사용 가능한 방법이 표시됩니다.'
-              : '변수를 2개 선택하면 사용 가능한 방법이 표시됩니다.'}
+              : analysisMode === 'regression'
+                ? '결과변수 1개와 설명변수 1개 이상을 선택하면 사용 가능한 방법이 표시됩니다.'
+                : '변수를 2개 선택하면 사용 가능한 방법이 표시됩니다.'}
           />
         )}
 
-        <div className="swb-section-label">
-          선택 변수 ({selectedKeys.length}
-          {analysisMode === 'bivariate' ? '/2' : analysisMode === 'correlation_matrix' ? ', 3개 이상' : ''})
-        </div>
-        <div>
-          {selectedKeys.length === 0 && (
-            <p className="swb-suppressed-note">
-              좌측 카탈로그에서 변수를 선택하세요.
-              {analysisMode === 'correlation_matrix' && ' (연속형 변수만 3개 이상)'}
-            </p>
-          )}
-          {selectedKeys.map((k, i) => (
-            <span key={k} className="swb-recipe-chip">
-              {analysisMode === 'bivariate' && <strong style={{ marginRight: 4 }}>{i === 0 ? 'x' : 'y'}</strong>}
-              {catalogByKey.get(k)?.label || k}
-              <button type="button" onClick={() => onRemoveVariable(k)} aria-label={`${k} 제거`}>×</button>
-            </span>
-          ))}
-        </div>
+        {/* PR4-A1 §5 — 회귀는 기존 "선택 변수" 칩 목록과 다른 UI를 쓴다: 결과변수
+            (outcome)는 <select>로 역할을 지정하고, 나머지가 설명변수(predictor)로
+            파생된다. CatalogPanel의 체크박스 선택은 그대로 재사용 — 여기서는
+            "이미 고른 변수들 중 무엇이 outcome인지"만 정한다(새로 고르지 않음). */}
+        {analysisMode === 'regression' ? (
+          <>
+            <div className="swb-section-label">결과변수(outcome, 1개)</div>
+            {selectedKeys.length === 0 && (
+              <p className="swb-suppressed-note">좌측 카탈로그에서 변수를 2개 이상 선택하세요.</p>
+            )}
+            {selectedKeys.length > 0 && (
+              <select
+                className="swb-search"
+                aria-label="결과변수"
+                value={outcomeKey || ''}
+                onChange={(e) => onOutcomeKeyChange(e.target.value || null)}
+              >
+                <option value="">선택 필요</option>
+                {selectedKeys.map((k) => (
+                  <option key={k} value={k}>{catalogByKey.get(k)?.label || k}</option>
+                ))}
+              </select>
+            )}
+            <div className="swb-section-label">
+              설명변수(predictor, {Math.max(selectedKeys.length - (outcomeKey ? 1 : 0), 0)}개)
+            </div>
+            <div>
+              {selectedKeys.filter((k) => k !== outcomeKey).length === 0 && (
+                <p className="swb-suppressed-note">결과변수 외에 설명변수를 1개 이상 선택하세요.</p>
+              )}
+              {selectedKeys.filter((k) => k !== outcomeKey).map((k) => (
+                <span key={k} className="swb-recipe-chip">
+                  {catalogByKey.get(k)?.label || k}
+                  <button type="button" onClick={() => onRemoveVariable(k)} aria-label={`${k} 제거`}>×</button>
+                </span>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="swb-section-label">
+              선택 변수 ({selectedKeys.length}
+              {analysisMode === 'bivariate' ? '/2' : analysisMode === 'correlation_matrix' ? ', 3개 이상' : ''})
+            </div>
+            <div>
+              {selectedKeys.length === 0 && (
+                <p className="swb-suppressed-note">
+                  좌측 카탈로그에서 변수를 선택하세요.
+                  {analysisMode === 'correlation_matrix' && ' (연속형 변수만 3개 이상)'}
+                </p>
+              )}
+              {selectedKeys.map((k, i) => (
+                <span key={k} className="swb-recipe-chip">
+                  {analysisMode === 'bivariate' && <strong style={{ marginRight: 4 }}>{i === 0 ? 'x' : 'y'}</strong>}
+                  {catalogByKey.get(k)?.label || k}
+                  <button type="button" onClick={() => onRemoveVariable(k)} aria-label={`${k} 제거`}>×</button>
+                </span>
+              ))}
+            </div>
+          </>
+        )}
 
         {formulaFamiliesNeedingChoice.length > 0 && (
           <>
