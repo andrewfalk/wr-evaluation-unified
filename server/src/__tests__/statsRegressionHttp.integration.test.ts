@@ -7,11 +7,25 @@
 // 우선순위는 statsRegressionSuppression.test.ts가 mock으로 이미 검증했다. 여기서는
 // "preview→analyze가 실제 DB·실제 Python 경계를 넘어 끝까지 도는지"만 본다.
 import crypto from 'crypto';
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { Pool } from 'pg';
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
+
+// 통계 워크벤치는 인트라넷 배포에서만 열린다(statsWorkbenchRuntimeState.ts) — 이 게이트가
+// 꺼져 있으면 requireCapability가 유효한 토큰이 있어도 "기능 자체가 없는 것처럼" 403이
+// 아니라 404를 반환한다(의도된 동작, §7.6). 이 게이트는 DEPLOYMENT_MODE=intranet +
+// STATS_WORKBENCH_ENABLED=true를 요구하고, intranet 모드는 다시 CORS_ORIGINS 등을
+// 요구하는 연쇄가 있다 — 이 테스트는 실 Postgres·실 Python 경계만 검증하면 충분하고
+// 배포모드 게이트 자체를 검증하는 게 목적이 아니므로, 그 연쇄를 통째로 우회한다.
+// (재현된 사고: 이 mock 없이 TEST_DATABASE_URL만 주고 돌리면 preview/analyze가 전부
+// "이유를 알 수 없는 404"로 실패해, 이 테스트가 실제로 한 번도 CI/로컬에서 끝까지
+// 실행된 적이 없었다 — 원인 불명 상태로 계속 skip돼 온 근본 원인이었다.)
+vi.mock('../statsWorkbenchRuntimeState', () => ({
+  getStatsWorkbenchAvailability: () => ({ available: true, reason: null, checkedAt: null }),
+  setStatsWorkbenchHealthy: () => {},
+}));
 
 import { createStatsRouter } from '../routes/stats';
 import { generateAccessToken } from '../auth/tokens';
@@ -183,6 +197,27 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
 
   it('이분 로지스틱 — boolean outcome(shoulder.exposure.anyExceeded) ~ continuous predictor(knee.relatedness.max)', async () => {
     await seedPatients();
+    // seedPatients()만으로는 shoulder=false가 항상 low/lowMid, shoulder=true가 항상
+    // highMid/high 구간이라 knee burden(연속 predictor)로 outcome(shoulder)이 완전히
+    // 갈린다 — 완전분리(로지스틱 MLE 미존재)가 정상적으로 SEPARATION_DETECTED를 낸다.
+    // 이 자체는 §3 LP 분리판정이 올바르게 동작한다는 뜻이지만, 이 테스트의 목적은
+    // "정상 추정 배선이 실제 Python까지 도는지"이므로 두 그룹의 knee burden 구간에
+    // 실제 겹침을 만들어 분리를 깬다(전체 방향성은 유지 — shoulder=true 쪽이 여전히
+    // 평균적으로 더 크다).
+    await insertGroup('shoulder-false-overlap', 4, () => ({
+      data: {
+        shared: { birthDate: '1980-01-01', injuryDate: '2020-01-01', jobs: [SHOULDER_JOB] },
+        modules: { shoulder: shoulderModule(false), knee: kneeModule('highMid') },
+        activeModules: ['shoulder', 'knee'],
+      },
+    }));
+    await insertGroup('shoulder-true-overlap', 4, () => ({
+      data: {
+        shared: { birthDate: '1980-01-01', injuryDate: '2020-01-01', jobs: [SHOULDER_JOB] },
+        modules: { shoulder: shoulderModule(true), knee: kneeModule('lowMid') },
+        activeModules: ['shoulder', 'knee'],
+      },
+    }));
     const variableKeys = [PREDICTOR_KEY, OUTCOME_KEY]; // outcome이 boolean이 되도록 뒤집음
 
     const analyze = await authed(request(app()).post('/api/stats/analyze')).send({
