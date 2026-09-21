@@ -106,7 +106,9 @@ describe('computeExecutionDigest — B안 버전 상수 3개(같은 모듈 상�
       // (1) export된 값을 다시 읽어와 자기 자신과 비교하지 않는다 — 정답을 하드코딩.
       expect(capturedInput.chartDisclosurePolicyVersion).toBe('v2-histogram-adaptive-resolution');
       expect(capturedInput.suppressionRuleVersion).toBe('v5-histogram-adaptive-resolution');
-      expect(capturedInput.resultSchemaVersion).toBe('v4-histogram-merge-fields');
+      // PR4-A1 — AnalyzeResult.regression 필드가 추가돼 v4-histogram-merge-fields →
+      // v5-regression으로 범프됐다.
+      expect(capturedInput.resultSchemaVersion).toBe('v5-regression');
 
       // (2) 각 필드를 범프 전 값으로 되돌리면 실제로 다른 digest가 나오는지(=이
       // 필드들이 죽은 값이 아니라 실제로 해시에 반영되는지) 확인한다. 스파이는
@@ -114,7 +116,40 @@ describe('computeExecutionDigest — B안 버전 상수 3개(같은 모듈 상�
       const OLD_VALUES: Record<string, string> = {
         chartDisclosurePolicyVersion: 'v1-outlier-partition-gate',
         suppressionRuleVersion: 'v4-chart-outlier-partition-gate',
-        resultSchemaVersion: 'v3-charts-correlation-matrix',
+        resultSchemaVersion: 'v4-histogram-merge-fields',
+      };
+      for (const key of Object.keys(OLD_VALUES)) {
+        const staleInput = { ...capturedInput, [key]: OLD_VALUES[key] };
+        const staleDigest = canonicalSerializer.canonicalDigest(staleInput);
+        expect(staleDigest).not.toBe(currentDigest);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+// PR4-A1 — 회귀 설계행렬 게이트(REGRESSION_POLICY)가 신설되며 methodPolicyVersion·
+// estimabilityPolicyVersion이 범프됐고, 새 필드 regressionPolicyVersion이 해시
+// 입력에 추가됐다. 위 블록과 같은 이유로 "캡처값==export값" 자기비교가 아니라
+// 리터럴을 하드코딩하고, 옛 값으로 되돌리면 실제로 digest가 달라지는지까지 검증한다.
+describe('computeExecutionDigest — PR4-A1 회귀 정책 버전 3개 캐시 무효화', () => {
+  it('methodPolicyVersion/estimabilityPolicyVersion/regressionPolicyVersion이 새 값으로 올라갔고, 각각 실제로 digest에 영향을 준다', () => {
+    const spy = vi.spyOn(canonicalSerializer, 'canonicalDigest');
+    try {
+      const currentDigest = computeExecutionDigest(base);
+      const capturedInput = spy.mock.calls[0][0] as Record<string, unknown>;
+
+      expect(capturedInput.methodPolicyVersion).toBe('v2-regression');
+      expect(capturedInput.estimabilityPolicyVersion).toBe('v1-regression-design');
+      expect(capturedInput.regressionPolicyVersion).toBe('v1-association');
+
+      const OLD_VALUES: Record<string, string> = {
+        methodPolicyVersion: 'v1-bivariate',
+        estimabilityPolicyVersion: 'v0-preview-counts',
+        // PR4-A1 이전엔 이 필드 자체가 해시 입력에 없었다 — undefined였던 것과
+        // 다른 문자열을 명시적으로 담는 것만으로도 digest가 달라져야 한다.
+        regressionPolicyVersion: 'v0-not-present',
       };
       for (const key of Object.keys(OLD_VALUES)) {
         const staleInput = { ...capturedInput, [key]: OLD_VALUES[key] };

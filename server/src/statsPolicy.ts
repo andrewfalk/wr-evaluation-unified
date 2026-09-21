@@ -11,10 +11,11 @@ export const MINIMUM_COHORT = 10;
 // 아니라 원본 그대로 공개한다 — 이 하한은 "폴백 후보"에만 적용되는 하한이다.
 export const MIN_DISCLOSABLE_BINS = 3;
 
-// §F — 이번 PR의 estimability는 §9.2가 요구하는 최소 카운트 집합뿐이다(전체 estimability
-// gate, 즉 maxParameters/residual df/design matrix rank 등은 회귀 스펙이 없는 이 PR에는
-// 대상이 없다). 정책이 바뀌면(계산 규칙 변경) 이 값을 올린다.
-export const ESTIMABILITY_POLICY_VERSION = 'v0-preview-counts';
+// §F — PR0-C의 estimability는 §9.2가 요구하는 최소 카운트 집합뿐이었다(maxParameters/
+// residual df/design matrix rank 등은 회귀 스펙이 없어 대상 밖이었다). PR4-A1이 회귀
+// 설계행렬 게이트(REGRESSION_POLICY)를 추가하며 candidateParameterCount가 실제 값을
+// 갖게 됐으므로 정책 버전을 올린다.
+export const ESTIMABILITY_POLICY_VERSION = 'v1-regression-design';
 
 // PR3-A — §6.1 반복측정 게이트(personCount<rowCount면 추론 차단) 정책 버전. §6.1
 // 게이트 규칙이 바뀌면(예: 다른 grain 지원 추가) 이 값을 올린다 — estimability와는
@@ -49,3 +50,20 @@ export const GLOBAL_QUERY_BUDGET = {
   windowMinutes: 15,
   maxQueriesPerUser: 100,
 } as const;
+
+// PR4-A1 — 연관성 회귀(OLS·이분 로지스틱) 설계행렬 게이트 정책(계획서
+// pr4-a-lexical-reddy.md §2 "④ 설계행렬 + 추정가능성"). 실행 전 non_estimable 판정과
+// 클러스터 추론 보류 판정 둘 다 이 값을 쓴다. minEventsPerParameter는 제품 정책값이지
+// 정확도를 보장하는 통계 법칙이 아니다(리뷰 #7). maxClusterShare는 클러스터 수만으로
+// 못 잡는 쏠림(한 사람이 행의 대부분을 차지하는 상황)을 함께 검사한다(확정 결정 5).
+export const REGRESSION_POLICY = {
+  version: 'v1-association',
+  minCompleteRows: 30,
+  minClusters: 30,
+  maxClusterShare: 0.20,
+  minEventsPerParameter: 10,
+  maxParameters: 20,
+  maxLevels: 10,
+  minResidualDf: 10,
+} as const;
+export const REGRESSION_POLICY_VERSION = REGRESSION_POLICY.version;

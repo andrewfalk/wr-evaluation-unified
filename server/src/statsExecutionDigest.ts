@@ -8,6 +8,7 @@ import {
   CORRELATION_MATRIX_POLICY_VERSION,
   ESTIMABILITY_POLICY_VERSION,
   INFERENCE_GATE_POLICY_VERSION,
+  REGRESSION_POLICY_VERSION,
 } from './statsPolicy';
 import { STATS_ENGINE_VERSION } from './statsRunManifest';
 import { INTEGRATED_CATALOG_VERSION } from './statsCatalogVersion';
@@ -26,7 +27,8 @@ export const SUPPRESSION_RULE_VERSION = 'v5-histogram-adaptive-resolution';
 const DISCLOSURE_POLICY_VERSION = 'v0-aggregate-only';
 // PR3-A — availableMethods(A-1/A-2) 계산 로직이 신설됐다. statsMethodCatalog.ts가
 // 이 값을 AvailableMethod.methodPolicyVersion에 그대로 stamp한다(export 필요).
-export const METHOD_POLICY_VERSION = 'v1-bivariate';
+// PR4-A1 — 회귀 2종의 availableMethods 계산이 추가돼 범프.
+export const METHOD_POLICY_VERSION = 'v2-regression';
 // PR3-A — AnalyzeResult.bivariate 필드가 추가돼 결과 shape이 확장됐다.
 // PR3-B — histogram/boxplot/scatter/regressionLine/correlationMatrix 필드가
 // 추가돼 결과 shape이 다시 확장됐다.
@@ -34,7 +36,8 @@ export const METHOD_POLICY_VERSION = 'v1-bivariate';
 // histogramReasonCode 필드가 추가돼 결과 shape이 다시 확장됐다. 테스트(같은
 // 모듈 안의 상수라 STATS_ENGINE_VERSION류의 vi.doMock 패턴이 안 통함, PR0-B4
 // 관련 세션의 리뷰 지적)를 위해 export한다.
-export const RESULT_SCHEMA_VERSION = 'v4-histogram-merge-fields';
+// PR4-A1 — AnalyzeResult.regression 필드가 추가돼 결과 shape이 다시 확장됐다.
+export const RESULT_SCHEMA_VERSION = 'v5-regression';
 
 export interface ComputeExecutionDigestInput {
   organizationId: string;
@@ -69,5 +72,8 @@ export function computeExecutionDigest(input: ComputeExecutionDigestInput): stri
     // 안 된다).
     correlationMatrixPolicyVersion: CORRELATION_MATRIX_POLICY_VERSION,
     chartDisclosurePolicyVersion: CHART_DISCLOSURE_POLICY_VERSION,
+    // PR4-A1 — 회귀 설계행렬 게이트 정책 버전. 같은 이유로 해시 입력에 직접
+    // 추가한다(manifest stamp만으로는 캐시가 무효화되지 않는다).
+    regressionPolicyVersion: REGRESSION_POLICY_VERSION,
   });
 }

@@ -26,7 +26,24 @@ const METHOD_LABELS: Record<StatsMethodId, string> = {
   spearman_correlation: 'Spearman 상관',
   paired_t: '대응 t 검정',
   wilcoxon_signed_rank: 'Wilcoxon 부호순위검정',
+  // PR4-A1 — StatsMethodIdSchema에 추가된 만큼 Record<StatsMethodId,...>인 이
+  // 맵에도 반드시 있어야 한다(TS가 강제). 단, 아래 BIVARIATE_METHOD_IDS 순회에는
+  // 넣지 않는다 — Object.keys(METHOD_LABELS) 전수 순회를 계속 쓰면 이변량
+  // availableMethods 목록에 회귀 방법이 섞여 나온다(리뷰로 잡힌 함정).
+  ols_linear: '선형회귀(OLS)',
+  binary_logistic: '이분 로지스틱 회귀',
 };
+
+// PR3-A~B가 만들던 이변량 목록은 `Object.keys(METHOD_LABELS)` 전수 순회에
+// 기대고 있었다 — PR4-A1이 METHOD_LABELS에 회귀 2종을 추가하면서 그 전수 순회가
+// 깨진다(회귀 방법이 이변량 결과에 섞여 나옴). 이변량 전용 목록을 명시 배열로
+// 분리한다(상관행렬이 CORRELATION_MATRIX_METHOD_IDS로 이미 쓰던 패턴과 동일).
+const BIVARIATE_METHOD_IDS: StatsMethodId[] = [
+  'welch_t', 'mann_whitney', 'anova', 'kruskal_wallis',
+  'chi_square', 'fisher_exact',
+  'pearson_correlation', 'spearman_correlation',
+  'paired_t', 'wilcoxon_signed_rank',
+];
 
 const GROUP_COMPARISON_METHODS: StatsMethodId[] = ['welch_t', 'mann_whitney', 'anova', 'kruskal_wallis'];
 const CONTINGENCY_METHODS: StatsMethodId[] = ['chi_square', 'fisher_exact'];
@@ -224,7 +241,7 @@ export function computeAvailableMethods(
 
   // 쌍 전체가 완전사례 0건이면(A-1, "0"이라 안전) 전부 동일 사유로 통일.
   if (paired.includedPersonCount === 0) {
-    return (Object.keys(METHOD_LABELS) as StatsMethodId[]).map((id) => ({
+    return BIVARIATE_METHOD_IDS.map((id) => ({
       id,
       label: METHOD_LABELS[id],
       purpose: 'association',
@@ -245,7 +262,7 @@ export function computeAvailableMethods(
   const typeX = catalogByKey.get(keyX)?.type;
   const typeY = catalogByKey.get(keyY)?.type;
 
-  return (Object.keys(METHOD_LABELS) as StatsMethodId[]).map((id) => {
+  return BIVARIATE_METHOD_IDS.map((id) => {
     let result: MethodResult;
     if (PAIRED_METHODS.includes(id)) {
       result = resultUnsupported('PAIRED_TEST_REQUIRES_EXPLICIT_PAIRING');
@@ -265,6 +282,61 @@ export function computeAvailableMethods(
       observed,
       methodPolicyVersion,
       ...result,
+    };
+  });
+}
+
+// PR4-A1 — 회귀 전용 방법 카탈로그(계획서 §2 ④). 상관행렬(computeCorrelationMatrixAvailableMethods)
+// 패턴을 따르되, method마다 요구 outcome 타입이 다르므로(ols_linear=continuous,
+// binary_logistic=boolean) 방법별로 개별 판정한다. 여기서 계산하는 것은 A-1 수준의
+// 구조적 사실(전체 0건·outcome 미지정·outcome 타입 불일치)뿐이다 — 완전사례·레벨·
+// EPV·rank 등 데이터 의존 세부 판정(non_estimable 사유)은 절대 여기서 계산·노출하지
+// 않는다(③ 공개통제를 통과하기 전에는 그 사유 자체가 소수셀 정보가 된다, 계획서
+// §2 "③이 ④보다 먼저인 이유"). 그 세부 판정은 statsRegressionDesign.ts(4단계)가
+// 실행 시점(analyze)에만 계산한다.
+const REGRESSION_METHOD_IDS: StatsMethodId[] = ['ols_linear', 'binary_logistic'];
+const REGRESSION_METHOD_OUTCOME_TYPE: Record<'ols_linear' | 'binary_logistic', AnalyticsVariableMetadata['type']> = {
+  ols_linear: 'continuous',
+  binary_logistic: 'boolean',
+};
+
+export function computeRegressionAvailableMethods(
+  datasetPersonCount: number,
+  outcomeKey: string | null,
+  catalogByKey: Map<string, AnalyticsVariableMetadata>,
+  methodPolicyVersion: string,
+): AvailableMethod[] {
+  const observed = { personCount: datasetPersonCount, rowCount: datasetPersonCount };
+  const outcomeType = outcomeKey ? catalogByKey.get(outcomeKey)?.type : undefined;
+
+  return REGRESSION_METHOD_IDS.map((id) => {
+    let status: MethodResult['status'];
+    let reasonCode: StatsMethodReasonCode | null;
+    if (datasetPersonCount === 0) {
+      status = 'unsupported';
+      reasonCode = 'INSUFFICIENT_DATA';
+    } else if (!outcomeKey || outcomeType === undefined) {
+      // outcome 미지정 — 이변량의 "타입 불일치"와 같은 A-1 구조적 사실로 취급한다.
+      status = 'unsupported';
+      reasonCode = 'METHOD_TYPE_MISMATCH';
+    } else if (outcomeType !== REGRESSION_METHOD_OUTCOME_TYPE[id as 'ols_linear' | 'binary_logistic']) {
+      status = 'unsupported';
+      reasonCode = 'METHOD_TYPE_MISMATCH';
+    } else {
+      status = 'available';
+      reasonCode = null;
+    }
+    return {
+      id,
+      label: METHOD_LABELS[id],
+      purpose: 'association',
+      status,
+      reasonCode,
+      observed,
+      required: null,
+      remedy: null,
+      remedyRecipePatch: null,
+      methodPolicyVersion,
     };
   });
 }
