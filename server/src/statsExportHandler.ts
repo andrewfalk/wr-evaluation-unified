@@ -209,6 +209,13 @@ export async function handlePostExport(pool: Pool, req: Request, res: Response):
     res.status(400).json({ code: 'CORRELATION_MATRIX_EXPORT_NOT_SUPPORTED', error: '상관행렬 분석 결과는 아직 CSV 내보내기를 지원하지 않습니다.' });
     return;
   }
+  // PR4-A1 — 회귀 결과 CSV export도 미지원(A2/PR5 범위). 이 가드가 없으면
+  // buildCsv가 빈 continuous/discrete로 빈 CSV를 200으로 내보낸다(계획서 §4).
+  if (manifestParsed.data.analysisMode === 'regression') {
+    await auditDenied('REGRESSION_EXPORT_NOT_SUPPORTED');
+    res.status(400).json({ code: 'REGRESSION_EXPORT_NOT_SUPPORTED', error: '회귀 분석 결과는 아직 CSV 내보내기를 지원하지 않습니다.' });
+    return;
+  }
 
   const csv = buildCsv(manifestParsed.data, resultParsed.data);
 

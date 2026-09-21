@@ -61,6 +61,10 @@ function makeCtx(rows: DatasetRow[], variableKeys: string[], method: 'pearson_co
     methodCatalogVersion: 'v1-bivariate',
     correlationMatrixPairs: buildCorrelationMatrixPairedDatasets(rows, variableKeys),
     correlationMatrixVariables: buildCorrelationMatrixVariables(rows, variableKeys),
+    regressionDisclosed: false,
+    regressionDesign: null,
+    regressionExcludedRowCount: null,
+    regressionMethod: null,
   };
 }
 

@@ -29,6 +29,7 @@ import {
 import { buildRunManifest, buildFailedStatsRunManifest, toStatsRunManifestSucceeded } from './statsRunManifest';
 import { computeBivariateAnalyzeResult } from './statsBivariateSuppression';
 import { computeCorrelationMatrixAnalyzeResult } from './statsCorrelationMatrixSuppression';
+import { computeRegressionAnalyzeResult } from './statsRegressionSuppression';
 import { allCorrelationMatrixPairs } from './statsCorrelationMatrixDataset';
 import { attachLimitedRowFields } from './statsLimitedRowMerge';
 import { hasCapability } from './middleware/requireCapability';
@@ -146,6 +147,14 @@ function buildSuppressedAnalyzeResult(ctx: AnalysisContext): AnalyzeResult {
       correlationMatrix: { method, variableKeys: ctx.recipe.variableKeys, cells, adjustedPWithheld: true },
     };
   }
+  if (ctx.recipe.analysisMode === 'regression') {
+    // PR4-A1 §1 — 회귀 억제는 단일 사유(MIN_COHORT_NOT_MET)로 수렴하는
+    // suppressed:true 스텁뿐이다(다른 필드 일절 없음 — 계약 strict).
+    return {
+      continuous: [], discrete: [],
+      regression: { suppressed: true, reasonCode: 'MIN_COHORT_NOT_MET' },
+    };
+  }
   return {
     continuous: ctx.recipe.variableKeys
       .filter((k) => ctx.catalogByKey.get(k)?.type === 'continuous')
@@ -235,6 +244,9 @@ async function computeAndPersist(
     } else if (ctx.recipe.analysisMode === 'correlation_matrix') {
       const correlationMatrix = await computeCorrelationMatrixAnalyzeResult(ctx);
       result = { continuous: [], discrete: [], correlationMatrix };
+    } else if (ctx.recipe.analysisMode === 'regression') {
+      const regression = await computeRegressionAnalyzeResult(ctx);
+      result = { continuous: [], discrete: [], regression };
     } else {
       const request = buildStatsEngineRequest(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey);
       const raw = await runStatsEngine(request);
@@ -451,7 +463,10 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
     // 이변량이 아니면 pairDisclosed는 항상 false지만 requestSuppressed로만 판정하므로
     // 영향 없다.
     const bivariatePairSuppressed = ctx.recipe.analysisMode === 'bivariate' && !ctx.pairDisclosed;
-    if (ctx.requestSuppressed || bivariatePairSuppressed) {
+    // PR4-A1 §2 "③이 ④보다 먼저인 이유" — 회귀도 같은 OR 결합 원칙. ③(공개통제)을
+    // 통과하지 못하면 ④(설계행렬)·⑤(엔진 호출)로 절대 진행하지 않는다.
+    const regressionSuppressed = ctx.recipe.analysisMode === 'regression' && !ctx.regressionDisclosed;
+    if (ctx.requestSuppressed || bivariatePairSuppressed || regressionSuppressed) {
       const suppressedResult = buildSuppressedAnalyzeResult(ctx);
       const resultDigest = canonicalDigest({ result: suppressedResult });
       const manifest = toStatsRunManifestSucceeded(
@@ -484,7 +499,7 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
           outcome: 'denied' as AuditOutcome,
           extra: auditExtra(ctx, executionDigest, {
             analysisRunId: manifest.analysisRunId,
-            reasonCode: ctx.reasonCode ?? (bivariatePairSuppressed ? 'MIN_COHORT_NOT_MET' : null),
+            reasonCode: ctx.reasonCode ?? (bivariatePairSuppressed || regressionSuppressed ? 'MIN_COHORT_NOT_MET' : null),
           }),
         });
       });
@@ -494,12 +509,13 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
       return;
     }
 
-    // PR3-A/B — 파이프라인 3단계: A-사유로 unsupported이거나 아예 목록에 없는
-    // method면 400(§"방법 가용성 판정" — B-사유는 여기서 절대 걸리지 않는다, 이미
-    // 위에서 pairDisclosed 검사로 다 걸러졌거나 그룹/셀 단위 소수셀이라 여기
-    // 도달하지 않음). 상관행렬은 셀별 세부판정이 없어 이 체크가 "선택한 method
-    // 자체가 목록에 있는가"만 본다(계획서 §4/§7).
-    if (ctx.recipe.analysisMode === 'bivariate' || ctx.recipe.analysisMode === 'correlation_matrix') {
+    // PR3-A/B/PR4-A1 — 파이프라인 3단계: A-사유로 unsupported이거나 아예 목록에
+    // 없는 method면 400(§"방법 가용성 판정" — B-사유는 여기서 절대 걸리지 않는다,
+    // 이미 위에서 pairDisclosed/regressionDisclosed 검사로 다 걸러졌거나 그룹/셀
+    // 단위 소수셀이라 여기 도달하지 않음). 상관행렬·회귀는 셀/설계행렬별 세부판정이
+    // 없어(또는 이미 끝나 있어) 이 체크가 "선택한 method 자체가 목록에 있는가"만
+    // 본다(계획서 §4/§7, PR4-A1 §2).
+    if (ctx.recipe.analysisMode === 'bivariate' || ctx.recipe.analysisMode === 'correlation_matrix' || ctx.recipe.analysisMode === 'regression') {
       const selected = ctx.availableMethods.find((m) => m.id === ctx.recipe.requestedMethod);
       const executable = selected != null && (selected.status === 'available' || selected.status === 'conditional');
       if (!executable) {

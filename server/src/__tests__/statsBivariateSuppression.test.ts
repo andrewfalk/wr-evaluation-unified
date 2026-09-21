@@ -54,6 +54,10 @@ function makeCtx(pairs: PairedRow[], exclusions: AnalysisContext['paired'] exten
     methodCatalogVersion: 'v1-bivariate',
     correlationMatrixPairs: null,
     correlationMatrixVariables: null,
+    regressionDisclosed: false,
+    regressionDesign: null,
+    regressionExcludedRowCount: null,
+    regressionMethod: null,
   };
 }
 

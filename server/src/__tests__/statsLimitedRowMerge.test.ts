@@ -36,6 +36,7 @@ function baseCtx(overrides: Partial<AnalysisContext> = {}): AnalysisContext {
     requestSuppressed: false, reasonCode: null,
     paired: null, pairDisclosed: false, availableMethods: [], methodCatalogVersion: null,
     correlationMatrixPairs: null, correlationMatrixVariables: null,
+    regressionDisclosed: false, regressionDesign: null, regressionExcludedRowCount: null, regressionMethod: null,
     ...overrides,
   };
 }

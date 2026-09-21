@@ -134,7 +134,15 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
       completeCaseN: est.completeCaseN,
       missingRatesByVariable: est.missingRatesByVariable,
       distinctAssignedDoctorClusters: ctx.dataset.distinctAssignedDoctorClusters,
-      candidateParameterCount: est.candidateParameterCount,
+      // PR4-A1 §2 "④ 설계행렬" — outcome/predictor 구분이 회귀 레시피에만 있으므로
+      // 실제 파라미터 수(더미 확장 후, 절편 포함)도 회귀 모드일 때만 계산할 수
+      // 있다. ③ 공개통제를 통과하지 못했거나(ctx.regressionDesign이 null) ④
+      // 설계행렬 자체가 non_estimable(design.ok===false)이면 여전히 null —
+      // "미생성"이지 "생략"이 아니다(리뷰 #14).
+      candidateParameterCount:
+        ctx.recipe.analysisMode === 'regression' && ctx.regressionDesign?.ok === true
+          ? ctx.regressionDesign.design.columns.length
+          : est.candidateParameterCount,
       eventNonEvent: est.eventNonEvent,
       estimabilityPolicyVersion: ESTIMABILITY_POLICY_VERSION,
     };

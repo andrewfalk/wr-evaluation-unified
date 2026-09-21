@@ -387,32 +387,38 @@ export function validateRecipe(
     const outcomeVar = catalogByKey.get(outcomeKey);
     const predictorKeys = recipe.variableKeys.filter((k) => k !== outcomeKey);
 
-    if (context === 'analyze' && !recipe.requestedMethod) {
-      errors.push({
-        code: 'REGRESSION_REQUIRES_METHOD',
-        path: 'requestedMethod',
-        message: '회귀 모드에서는 requestedMethod를 지정해야 한다',
-      });
-    } else if (recipe.requestedMethod && !REGRESSION_METHODS.has(recipe.requestedMethod)) {
-      errors.push({
-        code: 'REGRESSION_METHOD_NOT_SUPPORTED',
-        path: 'requestedMethod',
-        message: `회귀는 ols_linear/binary_logistic만 지원한다(요청: ${recipe.requestedMethod})`,
-      });
-    } else if (recipe.requestedMethod && outcomeVar) {
-      // outcome 타입 ↔ method 정합성. categorical 2레벨 outcome은 A1 범위 밖(A2).
-      const outcomeTypeOk =
-        (recipe.requestedMethod === 'ols_linear' && outcomeVar.type === 'continuous') ||
-        (recipe.requestedMethod === 'binary_logistic' && outcomeVar.type === 'boolean');
-      if (!outcomeTypeOk) {
+    // method 존재 여부·유효성·outcome 타입 정합성은 전부 context==='analyze'
+    // 일 때만 검사한다(bivariate/correlation_matrix와 동일한 관례 — preview는
+    // requestedMethod가 아직 없거나 이후 바뀔 스테일 값이어도 항상 관대해야
+    // 한다. 불일치는 availableMethods의 METHOD_TYPE_MISMATCH로 이미 드러난다).
+    if (context === 'analyze') {
+      if (!recipe.requestedMethod) {
         errors.push({
-          code: 'METHOD_TYPE_MISMATCH',
-          path: 'regression.outcomeKey',
-          message: `${recipe.requestedMethod}는 outcome 타입(${outcomeVar.type})에 쓸 수 없다 — ols_linear는 continuous, binary_logistic은 boolean만 v1에서 지원한다`,
+          code: 'REGRESSION_REQUIRES_METHOD',
+          path: 'requestedMethod',
+          message: '회귀 모드에서는 requestedMethod를 지정해야 한다',
         });
+      } else if (!REGRESSION_METHODS.has(recipe.requestedMethod)) {
+        errors.push({
+          code: 'REGRESSION_METHOD_NOT_SUPPORTED',
+          path: 'requestedMethod',
+          message: `회귀는 ols_linear/binary_logistic만 지원한다(요청: ${recipe.requestedMethod})`,
+        });
+      } else if (outcomeVar) {
+        // outcome 타입 ↔ method 정합성. categorical 2레벨 outcome은 A1 범위 밖(A2).
+        const outcomeTypeOk =
+          (recipe.requestedMethod === 'ols_linear' && outcomeVar.type === 'continuous') ||
+          (recipe.requestedMethod === 'binary_logistic' && outcomeVar.type === 'boolean');
+        if (!outcomeTypeOk) {
+          errors.push({
+            code: 'METHOD_TYPE_MISMATCH',
+            path: 'regression.outcomeKey',
+            message: `${recipe.requestedMethod}는 outcome 타입(${outcomeVar.type})에 쓸 수 없다 — ols_linear는 continuous, binary_logistic은 boolean만 v1에서 지원한다`,
+          });
+        }
       }
+      // outcomeVar가 undefined면 UNKNOWN_VARIABLE로 이미 보고됨 — 중복 보고 방지.
     }
-    // outcomeVar가 undefined면 UNKNOWN_VARIABLE로 이미 보고됨 — 중복 보고 방지.
 
     for (const key of predictorKeys) {
       const variable = catalogByKey.get(key);
