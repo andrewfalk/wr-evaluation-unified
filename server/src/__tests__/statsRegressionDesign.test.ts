@@ -25,7 +25,7 @@ function pv<T>(value: T): ExtractedValue<T> {
   return { value, missing: null, qualityFlags: [] };
 }
 
-describe('matrixRank — Gram 행렬 기반 rank 계산', () => {
+describe('matrixRank — one-sided Jacobi SVD 기반 rank 계산', () => {
   it('독립 열 2개는 rank 2', () => {
     const x = [[1, 0], [1, 1], [1, 2], [1, 3]];
     expect(matrixRank(x)).toBe(2);
@@ -42,6 +42,39 @@ describe('matrixRank — Gram 행렬 기반 rank 계산', () => {
       [1, 3, 4],
     ];
     expect(matrixRank(x)).toBe(2);
+  });
+
+  it('리뷰 재현 — 거의 공선이지만 실제로는 독립인 열(조건수 약 1e6)을 RANK_DEFICIENT로 오판하지 않는다', () => {
+    // x3 = x1 + 0.5*x2 + 1e-6*x1^3 — x1^3은 40개 표본점에서 x1·x2와 선형독립
+    // (차수가 다른 다항식은 서로 다른 값에서 선형독립)이므로 eps>0인 한 4열
+    // 전부 진짜 독립이다. 다만 eps가 작아 조건수가 약 1e6까지 커진다.
+    // Gram 행렬(X'X)을 형성해 판정하면 조건수가 제곱(~1e12)되면서 부동소수점
+    // 상쇄로 작은 특이값 정보가 소실돼 RANK_DEFICIENT로 오판했다(실측 재현:
+    // numpy.linalg.svd는 rank 4, 기존 Gram 경로는 rank 3). one-sided Jacobi는
+    // X에 직접 회전을 적용해 이 정밀도 손실이 없다.
+    const n = 40;
+    const rows: number[][] = [];
+    for (let i = 0; i < n; i += 1) {
+      const x1 = i;
+      const x2 = i * i;
+      const eps = 1e-6;
+      const x3 = x1 + 0.5 * x2 + eps * (i * i * i);
+      rows.push([1, x1, x2, x3]);
+    }
+    expect(matrixRank(rows)).toBe(4);
+  });
+
+  it('위 거의-공선 자료에 정확한 중복열을 추가하면 여전히 rank가 줄어든다(과다판정 방지 확인)', () => {
+    const n = 40;
+    const rows: number[][] = [];
+    for (let i = 0; i < n; i += 1) {
+      const x1 = i;
+      const x2 = i * i;
+      const eps = 1e-6;
+      const x3 = x1 + 0.5 * x2 + eps * (i * i * i);
+      rows.push([1, x1, x2, x3, x1]); // 마지막 열 = x1 복제
+    }
+    expect(matrixRank(rows)).toBe(4);
   });
 });
 

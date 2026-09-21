@@ -6,10 +6,21 @@
 // Python 안으로 숨어 Node가 소수셀 판정을 못 한다. 결정성·억제·감사가 전부
 // Node에 남도록 이 파일이 설계행렬(y, X, 열 이름)까지 완성한다.
 //
-// rank 판정은 SVD가 아니라 Gram 행렬(X'X, P×P — P는 항상 maxParameters=20
-// 이하로 작다)에 부분피벗 가우스 소거를 적용한다. rank(X) = rank(X'X)(실수
-// 행렬의 표준 성질)이므로 수학적으로 동일하고, Node에 선형대수 라이브러리
-// 의존성을 추가하지 않고 P×P(≤20×20) 크기만 다루므로 계산 비용도 무시할 만하다.
+// rank 판정은 계획서(§2 ④)대로 SVD 기반이다 — 단 외부 선형대수 라이브러리
+// 없이, X(N×P)에 직접 one-sided Jacobi SVD(Hestenes)를 적용해 특이값을 구한다.
+// 리뷰로 발견한 결함 — 이전 판은 rank(X)=rank(X'X)라는 수학적 항등식만 믿고
+// Gram 행렬(X'X)을 명시적으로 만들어 그 고유값에 문턱을 걸었다. X'X를
+// 형성하는 순간 조건수가 제곱되고(cond(X'X)=cond(X)²), 작은 특이값의 정보가
+// 부동소수점 상쇄로 소실된다 — 실측 재현: 40행·독립 3열(조건수 약 1e6)에서
+// numpy SVD는 rank 4(정상)인데 Gram+고유값 경로는 소실된 정밀도 때문에
+// 노이즈 바닥이 1e-8~1e-9까지 올라가 RANK_DEFICIENT로 오판하거나(고유값에
+// 직접 문턱 적용) 반대로 진짜 중복열을 못 잡는(고유값 sqrt 후 문턱 적용)
+// 비일관성을 보였다. one-sided Jacobi SVD는 회전을 X의 열에 직접 적용해
+// 반복적으로 재계산하므로(Gram 행렬을 한 번에 형성·분해하지 않음) 작은
+// 특이값도 거의 기계정밀도까지 정확하다(Demmel–Veselic) — 실측 대조로
+// numpy.linalg.svd와 특이값이 소수점 다섯 자리까지 일치함을 확인했다.
+// N이 커도 P(≤maxParameters=20)에 대해서만 열-쌍 회전을 반복하므로 비용은
+// O(sweeps·P²·N)로 무시할 만하다.
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
 import type { RegressionNonEstimableReason } from '@wr/contracts';
 import type { DatasetRow } from './statsDatasetBuilder';
@@ -77,83 +88,74 @@ function resolveReferenceLevel(
 }
 
 // ---------------------------------------------------------------------------
-// rank 계산 — Gram 행렬 + 부분피벗 가우스 소거
+// rank 계산 — one-sided Jacobi SVD(X에 직접 적용, Gram 행렬을 형성하지 않음)
 // ---------------------------------------------------------------------------
 
 const RANK_RCOND = 1e-10;
 
-/** 열별로 자기 L2 노름으로 정규화한다 — 정규화 없이 원본 스케일로 Gram 행렬을
- * 만들면 rank 판정이 predictor의 물리적 단위에 의존하게 된다(리뷰로 재현:
- * 독립인 두 열(±1)은 rank 2로 정상 판정되지만, 한 열만 ×100000으로 재스케일
- * 하면 threshold(=RANK_RCOND×maxDiag)가 큰 열의 분산에 끌려가 작은 열의 정상
- * 피벗까지 문턱 아래로 묻혀 RANK_DEFICIENT로 오판했다). 정규화 후 대각선은
- * 전부 1이 되고 비대각선은 코사인 유사도([-1,1])라 — 이는 상관행렬의 rank를
- * 보는 것과 동치이며, 열의 단위와 무관하게 고정 threshold 하나로 판정할 수
- * 있다. 완전 0벡터 열은 이미 ④ 앞단(ZERO_VARIANCE_PREDICTOR)에서 걸러지므로
- * norm===0 방어는 재현 불가능한 경로에 대한 안전망일 뿐이다. */
-function normalizeColumns(x: number[][]): number[][] {
+/** one-sided Jacobi(Hestenes) SVD — X(N×P)의 두 열이 직교가 아니면 그 두 열
+ * 평면에서 회전시켜 직교화하고, 전체 열 쌍이 수렴할 때까지 반복한다. 수렴 후
+ * 각 열의 L2 노름이 특이값이다. Gram 행렬(X'X)을 한 번에 형성·분해하지 않고
+ * 매 스윕마다 *현재* 열에서 내적(alpha·beta·gamma)을 다시 계산하므로, 이미
+ * 직교화가 진행된 뒤에는 그 내적 자체가 아주 작은 값으로 정확히 계산된다 —
+ * Gram 행렬을 한 번만 만들어 고유분해하는 방식은 작은 특이값의 정보가 X'X를
+ * 형성하는 시점의 부동소수점 상쇄로 이미 소실돼 있어 이 정확도에 도달할 수
+ * 없다(Demmel–Veselic, "Jacobi's method is more accurate than QR"). */
+function singularValuesOneSidedJacobi(x: number[][]): number[] {
   const n = x.length;
   const p = n > 0 ? x[0].length : 0;
-  const norms = new Array(p).fill(0);
-  for (let j = 0; j < p; j += 1) {
-    let sumSq = 0;
-    for (let i = 0; i < n; i += 1) sumSq += x[i][j] * x[i][j];
-    norms[j] = Math.sqrt(sumSq) || 1;
-  }
-  return x.map((row) => row.map((v, j) => v / norms[j]));
-}
-
-function computeGramMatrix(x: number[][]): number[][] {
-  const n = x.length;
-  const p = n > 0 ? x[0].length : 0;
-  const gram: number[][] = Array.from({ length: p }, () => new Array(p).fill(0));
-  for (let i = 0; i < p; i += 1) {
-    for (let j = i; j < p; j += 1) {
-      let sum = 0;
-      for (let k = 0; k < n; k += 1) sum += x[k][i] * x[k][j];
-      gram[i][j] = sum;
-      gram[j][i] = sum;
-    }
-  }
-  return gram;
-}
-
-/** rank(X) = rank(X'X). Gram 행렬에 부분피벗 가우스 소거를 적용해 rank를 센다
- * — 대각합의 최댓값에 RANK_RCOND를 곱한 값보다 작은 피벗은 0(의존 열)으로
- * 취급한다. */
-export function matrixRank(x: number[][]): number {
-  const gram = computeGramMatrix(normalizeColumns(x));
-  const p = gram.length;
-  if (p === 0) return 0;
-  const m = gram.map((row) => [...row]);
-  const maxDiag = Math.max(...gram.map((row, i) => Math.abs(row[i])), 0);
-  const threshold = RANK_RCOND * (maxDiag || 1);
-
-  let rank = 0;
-  for (let col = 0; col < p; col += 1) {
-    let pivotRow = rank;
-    let pivotVal = rank < p ? Math.abs(m[rank][col]) : 0;
-    for (let r = rank + 1; r < p; r += 1) {
-      const v = Math.abs(m[r][col]);
-      if (v > pivotVal) {
-        pivotVal = v;
-        pivotRow = r;
+  if (p === 0) return [];
+  const cols: Float64Array[] = Array.from({ length: p }, (_, j) => Float64Array.from(x.map((row) => row[j])));
+  const maxSweeps = 60;
+  const convTol = 1e-15;
+  for (let sweep = 0; sweep < maxSweeps; sweep += 1) {
+    let maxOffRatio = 0;
+    for (let pp = 0; pp < p - 1; pp += 1) {
+      for (let qq = pp + 1; qq < p; qq += 1) {
+        const cp = cols[pp];
+        const cq = cols[qq];
+        let alpha = 0;
+        let beta = 0;
+        let gamma = 0;
+        for (let i = 0; i < n; i += 1) {
+          alpha += cp[i] * cp[i];
+          beta += cq[i] * cq[i];
+          gamma += cp[i] * cq[i];
+        }
+        const denom = Math.sqrt(alpha * beta);
+        if (denom === 0) continue; // 완전 0벡터 열은 ④ 앞단(ZERO_VARIANCE_PREDICTOR)에서 이미 걸러짐
+        const ratio = Math.abs(gamma) / denom;
+        if (ratio > maxOffRatio) maxOffRatio = ratio;
+        if (ratio < convTol) continue;
+        const zeta = (beta - alpha) / (2 * gamma);
+        const t = zeta === 0 ? 1 : Math.sign(zeta) / (Math.abs(zeta) + Math.sqrt(1 + zeta * zeta));
+        const c = 1 / Math.sqrt(1 + t * t);
+        const s = c * t;
+        for (let i = 0; i < n; i += 1) {
+          const vp = cp[i];
+          const vq = cq[i];
+          cp[i] = c * vp - s * vq;
+          cq[i] = s * vp + c * vq;
+        }
       }
     }
-    if (pivotVal <= threshold) continue; // 이 열은 이전 열들의 선형결합(의존 열)
-    if (pivotRow !== rank) {
-      const tmp = m[rank];
-      m[rank] = m[pivotRow];
-      m[pivotRow] = tmp;
-    }
-    for (let r = rank + 1; r < p; r += 1) {
-      const factor = m[r][col] / m[rank][col];
-      for (let c = col; c < p; c += 1) m[r][c] -= factor * m[rank][c];
-    }
-    rank += 1;
-    if (rank === p) break;
+    if (maxOffRatio < convTol) break;
   }
-  return rank;
+  return cols.map((c) => {
+    let sumSq = 0;
+    for (let i = 0; i < n; i += 1) sumSq += c[i] * c[i];
+    return Math.sqrt(sumSq);
+  });
+}
+
+/** 특이값 중 최댓값의 RANK_RCOND배보다 큰 것만 rank에 센다 — numpy
+ * `linalg.matrix_rank(X, tol=rcond*s.max())`와 동일한 판정 기준. */
+export function matrixRank(x: number[][]): number {
+  const singularValues = singularValuesOneSidedJacobi(x);
+  if (singularValues.length === 0) return 0;
+  const maxSingular = Math.max(...singularValues, 0);
+  const threshold = RANK_RCOND * (maxSingular || 1);
+  return singularValues.filter((s) => s > threshold).length;
 }
 
 // ---------------------------------------------------------------------------

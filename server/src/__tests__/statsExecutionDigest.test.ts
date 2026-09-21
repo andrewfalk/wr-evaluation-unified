@@ -142,7 +142,7 @@ describe('computeExecutionDigest — PR4-A1 회귀 정책 버전 3개 캐시 무
 
       expect(capturedInput.methodPolicyVersion).toBe('v2-regression');
       expect(capturedInput.estimabilityPolicyVersion).toBe('v1-regression-design');
-      expect(capturedInput.regressionPolicyVersion).toBe('v1-association');
+      expect(capturedInput.regressionPolicyVersion).toBe('v2-association-svd-rank');
 
       const OLD_VALUES: Record<string, string> = {
         methodPolicyVersion: 'v1-bivariate',
@@ -150,9 +150,15 @@ describe('computeExecutionDigest — PR4-A1 회귀 정책 버전 3개 캐시 무
         // PR4-A1 이전엔 이 필드 자체가 해시 입력에 없었다 — undefined였던 것과
         // 다른 문자열을 명시적으로 담는 것만으로도 digest가 달라져야 한다.
         regressionPolicyVersion: 'v0-not-present',
+        // rank 판정을 Gram 행렬 기반에서 one-sided Jacobi SVD로 교체했을 때
+        // 실제로 범프했던 값(v1-association → v2-association-svd-rank) —
+        // "옛 리터럴로 되돌리면 digest가 달라지는지"를 이 구체적인 값으로도
+        // 고정해 다음 정책 수정 때 범프 누락을 잡는다.
+        regressionPolicyVersionRankFixPrevious: 'v1-association',
       };
       for (const key of Object.keys(OLD_VALUES)) {
-        const staleInput = { ...capturedInput, [key]: OLD_VALUES[key] };
+        const staleKey = key === 'regressionPolicyVersionRankFixPrevious' ? 'regressionPolicyVersion' : key;
+        const staleInput = { ...capturedInput, [staleKey]: OLD_VALUES[key] };
         const staleDigest = canonicalSerializer.canonicalDigest(staleInput);
         expect(staleDigest).not.toBe(currentDigest);
       }
