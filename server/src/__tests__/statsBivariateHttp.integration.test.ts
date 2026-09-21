@@ -272,9 +272,14 @@ describe.skipIf(!TEST_DB_URL)('이변량 분석 — 실데이터 HTTP 통합(POS
     expect(Number.isFinite(bivariate.statistic)).toBe(true);
     expect(bivariate.pValue).toBeGreaterThanOrEqual(0);
     expect(bivariate.pValue).toBeLessThanOrEqual(1);
+    // PR3-B가 groupBreakdown에 그룹별 boxplot(§9)을 추가하면서 이 기대값이
+    // 갱신되지 않았었다(PR4-A1 리뷰의 HTTP 통합 테스트 404 수정으로 처음
+    // 끝까지 돌려보고서야 드러남 — 이전엔 groupBreakdown 필드 존재 자체를
+    // 확인한 적이 없었다). knee 값은 kneeModule의 고정 bin에서 결정적으로
+    // 계산되므로 boxplot 수치도 고정값이다.
     expect(bivariate.groupBreakdown).toEqual([
-      { label: false, n: 12 },
-      { label: true, n: 12 },
+      { label: false, n: 12, boxplot: { q1: 50, median: 62.5, q3: 75, lowerWhisker: 50, upperWhisker: 75, outlierCount: 0 } },
+      { label: true, n: 12, boxplot: { q1: 83.3, median: 86.1, q3: 88.9, lowerWhisker: 83.3, upperWhisker: 88.9, outlierCount: 0 } },
     ]);
     // true 그룹(무릎 weight/squatting이 훨씬 큼)이 relatedness가 더 높아야 하므로
     // "뒤(true)-앞(false)" 평균차는 양수여야 한다 — 방향규칙(§방향규칙) 실측 확인.
@@ -311,9 +316,11 @@ describe.skipIf(!TEST_DB_URL)('이변량 분석 — 실데이터 HTTP 통합(POS
     expect(bivariate.n).toBe(22);
     // 카탈로그 고정 순서(ELBOW_BURDEN_GRADE_ORDER)를 따라 "부담 작업 아님"이 앞,
     // "고도"가 뒤여야 한다(관측 안 된 중간 레벨은 응답에 아예 등장하지 않음).
+    // boxplot 필드는 PR3-B가 groupBreakdown에 추가했다(위 welch_t 케이스와 동일한
+    // 사전 결함 — knee 값은 kneeModule 고정 bin에서 결정적으로 계산되는 고정값).
     expect(bivariate.groupBreakdown).toEqual([
-      { label: '부담 작업 아님', n: 11 },
-      { label: '고도', n: 11 },
+      { label: '부담 작업 아님', n: 11, boxplot: { q1: 50, median: 50, q3: 75, lowerWhisker: 50, upperWhisker: 75, outlierCount: 0 } },
+      { label: '고도', n: 11, boxplot: { q1: 83.3, median: 83.3, q3: 88.9, lowerWhisker: 83.3, upperWhisker: 88.9, outlierCount: 0 } },
     ]);
   }, 30000);
 
