@@ -386,7 +386,10 @@ async function finalizeAnalyzeResponse(
   outcome: { runManifest: RunManifest; result: AnalyzeResult },
 ): Promise<{ status: number; body: unknown }> {
   const hasLimitedRowAccess = await hasCapability(pool, 'stats.export_limited_rows', ctx.userId, ctx.orgId);
-  const { result: finalResult, attached } = attachLimitedRowFields(ctx, outcome.result, hasLimitedRowAccess);
+  // PR4-A2 — attachLimitedRowFields가 회귀 진단(limited_row)을 위해 별도 경량
+  // 엔진 호출을 할 수 있어 비동기로 바뀌었다(캐시 hit/miss와 무관한 (X,y,β)만의
+  // 순수 함수 — 계획서 §4 "limited_row 진단값").
+  const { result: finalResult, attached } = await attachLimitedRowFields(ctx, outcome.result, hasLimitedRowAccess);
 
   if (attached) {
     // "실제로 받은 최종 바이트"를 증명하는 게 아니라, 이번 조회에 한해 실제로

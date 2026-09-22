@@ -147,7 +147,7 @@ describe('evaluateCorrelationMatrixInputLimits — §8 세 상한을 순회 전�
     const variables = keys.map((key) => ({ key, values: rows.map((r) => (r.values[key] as { value: number }).value) }));
     const variablesOnlyBytes = Buffer.byteLength(JSON.stringify({ variables }), 'utf8');
     const realEnvelopeBytes = Buffer.byteLength(
-      JSON.stringify({ protocolVersion: 4, correlationMatrix: { method: 'spearman_correlation', variables } }),
+      JSON.stringify({ protocolVersion: 5, correlationMatrix: { method: 'spearman_correlation', variables } }),
       'utf8',
     );
     // 이 테스트 자체가 "경계값" 전제가 실제로 성립하는지부터 확인(전제가 깨지면

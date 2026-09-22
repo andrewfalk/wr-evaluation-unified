@@ -124,7 +124,7 @@ export function evaluateCorrelationMatrixInputLimits(
   const variables = buildCorrelationMatrixVariables(rows, keys);
   const envelopeMethod = method ?? WORST_CASE_METHOD_FOR_BYTE_ESTIMATE;
   const byteLength = Buffer.byteLength(
-    JSON.stringify({ protocolVersion: 4, correlationMatrix: { method: envelopeMethod, variables } }),
+    JSON.stringify({ protocolVersion: 5, correlationMatrix: { method: envelopeMethod, variables } }),
     'utf8',
   );
   if (byteLength > config.stats.maxInputBytes) {

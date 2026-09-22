@@ -7,3 +7,5 @@
 export const MAX_VALUES_PER_VARIABLE = 50000;
 export const MAX_TOTAL_VALUES = 350000;
 export const MAX_STRING_LENGTH = 200;
+// PR4-A2 — spline 부분효과 그리드 상한(계획서 §2 "예측 그리드(약 40점)").
+export const MAX_SPLINE_CONTRAST_POINTS = 60;

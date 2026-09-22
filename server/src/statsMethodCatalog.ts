@@ -295,9 +295,12 @@ export function computeAvailableMethods(
 // §2 "③이 ④보다 먼저인 이유"). 그 세부 판정은 statsRegressionDesign.ts(4단계)가
 // 실행 시점(analyze)에만 계산한다.
 const REGRESSION_METHOD_IDS: StatsMethodId[] = ['ols_linear', 'binary_logistic'];
-const REGRESSION_METHOD_OUTCOME_TYPE: Record<'ols_linear' | 'binary_logistic', AnalyticsVariableMetadata['type']> = {
-  ols_linear: 'continuous',
-  binary_logistic: 'boolean',
+// PR4-A2 — binary_logistic은 boolean뿐 아니라 categorical(2레벨) outcome도
+// 허용한다(선언 타입만 — 완전사례 관측 레벨이 정확히 2개인지는 카탈로그로
+// 알 수 없어 statsRegressionDesign.ts(④, 데이터 필요)에서 최종 판정한다).
+const REGRESSION_METHOD_OUTCOME_TYPES: Record<'ols_linear' | 'binary_logistic', ReadonlyArray<AnalyticsVariableMetadata['type']>> = {
+  ols_linear: ['continuous'],
+  binary_logistic: ['boolean', 'categorical'],
 };
 
 export function computeRegressionAvailableMethods(
@@ -319,7 +322,7 @@ export function computeRegressionAvailableMethods(
       // outcome 미지정 — 이변량의 "타입 불일치"와 같은 A-1 구조적 사실로 취급한다.
       status = 'unsupported';
       reasonCode = 'METHOD_TYPE_MISMATCH';
-    } else if (outcomeType !== REGRESSION_METHOD_OUTCOME_TYPE[id as 'ols_linear' | 'binary_logistic']) {
+    } else if (!REGRESSION_METHOD_OUTCOME_TYPES[id as 'ols_linear' | 'binary_logistic'].includes(outcomeType)) {
       status = 'unsupported';
       reasonCode = 'METHOD_TYPE_MISMATCH';
     } else {

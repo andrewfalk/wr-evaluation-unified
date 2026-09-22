@@ -22,6 +22,7 @@ const FIXED_MESSAGES = {
   // PR3-A — 이변량 관련 HTTP 에러(계획서 §"에러 코드").
   METHOD_NOT_AVAILABLE: '선택한 분석 방법을 현재 데이터로 실행할 수 없습니다.',
   BIVARIATE_EXPORT_NOT_SUPPORTED: '이변량 분석 결과는 아직 CSV 내보내기를 지원하지 않습니다.',
+  CORRELATION_MATRIX_EXPORT_NOT_SUPPORTED: '상관행렬 분석 결과는 아직 CSV 내보내기를 지원하지 않습니다.',
 };
 
 // PR3-A — zod superRefine 커스텀 이슈(StatsAnalysisRecipeSchema)는 code가 항상
@@ -34,6 +35,21 @@ const RECIPE_ERROR_MESSAGE_LABELS = {
   BIVARIATE_REQUIRES_METHOD: '이변량 분석은 방법을 선택해야 합니다.',
   METHOD_TYPE_MISMATCH: '선택한 방법이 변수 타입 조합과 맞지 않습니다.',
   PAIRED_TEST_REQUIRES_EXPLICIT_PAIRING: '현재 카탈로그에는 좌우 대응(짝) 변수가 없어 지원하지 않습니다.',
+  // PR4-A2 — interaction/spline/eventLevel 구조검사·의미검증 사유(계획서 §1).
+  INTERACTION_REQUIRES_TWO_DISTINCT_VARIABLES: 'interaction 쌍은 서로 다른 두 변수여야 합니다.',
+  DUPLICATE_INTERACTION_TERM: '같은 interaction 쌍을 중복해서 추가할 수 없습니다.',
+  INTERACTION_VARIABLE_MUST_BE_A_PREDICTOR: 'interaction에 사용한 변수가 설명변수 목록에 없습니다.',
+  SPLINE_VARIABLE_MUST_BE_A_PREDICTOR: 'spline에 사용한 변수가 설명변수 목록에 없습니다.',
+  DUPLICATE_SPLINE_KEY: '같은 변수를 spline 대상으로 중복 지정할 수 없습니다.',
+  SPLINE_INTERACTION_NOT_SUPPORTED: 'spline을 적용한 변수는 interaction에 함께 쓸 수 없습니다.',
+  SPLINE_PREDICTOR_MUST_BE_CONTINUOUS: '연속형 변수만 spline을 적용할 수 있습니다.',
+  EVENT_LEVEL_REQUIRES_CATEGORICAL_OUTCOME: '사건 레벨은 범주형 결과변수에서만 지정할 수 있습니다.',
+  REGRESSION_REQUIRES_AT_LEAST_TWO_VARIABLES: '회귀 분석은 결과변수와 설명변수를 합쳐 2개 이상 선택해야 합니다.',
+  REGRESSION_OUTCOME_MUST_BE_IN_VARIABLE_KEYS: '결과변수는 선택한 변수 목록에 포함돼야 합니다.',
+  REGRESSION_REQUIRES_REGRESSION_OBJECT: '회귀 분석은 결과변수를 지정해야 합니다.',
+  REGRESSION_REFERENCE_LEVEL_UNKNOWN_PREDICTOR: '기준 레벨을 지정한 변수가 설명변수 목록에 없습니다.',
+  REGRESSION_REFERENCE_LEVEL_NOT_DECLARED: '지정한 기준 레벨이 해당 변수의 선언된 값이 아닙니다.',
+  REGRESSION_PREDICTOR_TYPE_UNSUPPORTED: '이 변수 타입은 회귀 설명변수로 쓸 수 없습니다.',
 };
 
 function describeRecipeError(entry) {

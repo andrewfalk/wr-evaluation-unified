@@ -21,7 +21,14 @@ import '../charts/charts.css';
 // 순서가 forest plot 행 순서다. outcomeKey도 조건 키에 넣는다 — 안 넣으면
 // outcome만 바꿨을 때 preview가 재실행되지 않는다(§17-19행의 grain 버그와
 // 동일한 함정, 계획서 §5 "필수 포함").
-function buildConditionKey(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey) {
+// PR4-A2 — standardizePredictors/interactionTerms/splineKeys/eventLevel도 조건
+// 키에 포함한다. 빠뜨리면 이 옵션만 바꿨을 때 preview가 재실행되지 않는다(A1이
+// outcomeKey/grain에서 겪은 것과 동일한 함정 — 계획서 §5 "buildConditionKey에
+// 반드시 포함").
+function buildConditionKey(
+  grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters,
+  outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel,
+) {
   return JSON.stringify({
     grain,
     analysisMode,
@@ -31,10 +38,17 @@ function buildConditionKey(grain, analysisMode, variableKeys, requestedMethod, a
     formulaPolicies,
     appliedFilters,
     outcomeKey: analysisMode === 'regression' ? (outcomeKey ?? null) : null,
+    standardizePredictors: analysisMode === 'regression' ? standardizePredictors : false,
+    interactionTerms: analysisMode === 'regression' ? interactionTerms : [],
+    splineKeys: analysisMode === 'regression' ? splineKeys : [],
+    eventLevel: analysisMode === 'regression' ? (eventLevel || null) : null,
   });
 }
 
-function buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey) {
+function buildRecipe(
+  grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters,
+  outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel,
+) {
   return {
     grain,
     variableKeys,
@@ -48,7 +62,17 @@ function buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysi
     // 만들지 않는다 — 서버 zod가 regression 모드에서 이 객체를 필수로 요구하므로
     // (없으면 REGRESSION_REQUIRES_REGRESSION_OBJECT), isRecipeComplete가 outcomeKey
     // 존재를 먼저 확인해 이 상태로는 애초에 실행/커밋을 안 하게 만든다.
-    ...(analysisMode === 'regression' && outcomeKey ? { regression: { outcomeKey } } : {}),
+    // PR4-A2 — 고급 옵션(표준화/interaction/spline/eventLevel)도 같은 regression
+    // 서브객체에 싣는다(.strict() 스키마라 빈 배열/false도 명시적으로 보낸다).
+    ...(analysisMode === 'regression' && outcomeKey ? {
+      regression: {
+        outcomeKey,
+        standardizePredictors,
+        interactionTerms,
+        splineKeys,
+        ...(eventLevel ? { eventLevel } : {}),
+      },
+    } : {}),
   };
 }
 
@@ -168,6 +192,15 @@ export function StatisticsWorkbench({
   // PR4-A1 §5 — 회귀 outcome 선택 상태. predictor는 selectedKeys(=variableKeys)에서
   // outcomeKey를 뺀 나머지로 파생한다(별도 배열을 두면 두 벌 진실원이 생긴다).
   const [outcomeKey, setOutcomeKey] = useState(null);
+  // PR4-A2 — 회귀 고급 옵션. interactionTerms는 [predictorA, predictorB] 쌍의
+  // 배열, splineKeys는 continuous predictor 키 배열. eventLevel은 categorical
+  // outcome에서만 의미 있다(observed 레벨을 클라이언트가 알 방법이 없어 —
+  // CatalogVariableSchema에 선언 레벨 필드 자체가 없다 — A1의 referenceLevels와
+  // 같은 원칙으로 자유 입력을 받고, 비워두면 서버가 결정적으로 자동 선택한다).
+  const [standardizePredictors, setStandardizePredictors] = useState(false);
+  const [interactionTerms, setInteractionTerms] = useState([]);
+  const [splineKeys, setSplineKeys] = useState([]);
+  const [eventLevel, setEventLevel] = useState('');
 
   // PR0-B3 Part A — grain을 바꾸면 이전 grain에서 고른 변수·필터·method가 새 grain에는
   // 안 맞을 수 있어 전부 초기화한다(후보 목록을 grain으로 거르는 것과는 별개 — 후보를
@@ -180,6 +213,10 @@ export function StatisticsWorkbench({
     setAppliedFilters([]);
     setRequestedMethod(null);
     setOutcomeKey(null);
+    setStandardizePredictors(false);
+    setInteractionTerms([]);
+    setSplineKeys([]);
+    setEventLevel('');
   }
 
   function toggleVariable(key) {
@@ -196,6 +233,13 @@ export function StatisticsWorkbench({
     // PR4-A1 — 지금 outcome으로 지정된 변수를 해제하면 outcome도 함께 비운다(더 이상
     // 선택 목록에 없는 변수를 outcome으로 남겨두면 predictor 파생 로직이 깨진다).
     setOutcomeKey((prev) => (prev === key ? null : prev));
+    // PR4-A2 — 해제된 변수가 interactionTerms/splineKeys에 남아 있으면 서버가
+    // "predictor 집합에 없다"로 400을 낸다 — 선택 해제 시 함께 정리한다.
+    setInteractionTerms((prev) => prev.filter(([a, b]) => a !== key && b !== key));
+    setSplineKeys((prev) => prev.filter((k) => k !== key));
+    // 해제된 변수가 categorical outcome이었다면 eventLevel도 그 변수의 레벨 값이므로
+    // 함께 비운다(handleOutcomeKeyChange와 동일 원칙 — 리뷰 지적).
+    setEventLevel((prev) => (key === outcomeKey ? '' : prev));
   }
 
   function handleAnalysisModeChange(nextMode) {
@@ -211,11 +255,34 @@ export function StatisticsWorkbench({
     // 없다. 모드를 나가거나 새로 들어올 때 outcome만 초기화해 이전 모드의 스테일
     // 상태가 새 모드로 새지 않게 한다.
     setOutcomeKey(null);
+    // PR4-A2 — 고급 옵션도 모드 전환 시 함께 초기화한다(스테일 상태 방지, 위와 동일 원칙).
+    setStandardizePredictors(false);
+    setInteractionTerms([]);
+    setSplineKeys([]);
+    setEventLevel('');
     setAnalysisMode(nextMode);
   }
 
+  // PR4-A2 — outcome을 바꾸면 새 outcome이 이전에 predictor로서 interactionTerms/
+  // splineKeys에 들어가 있었을 수 있다(둘 다 predictor 키만 유효 — 서버가
+  // INTERACTION_VARIABLE_MUST_BE_A_PREDICTOR/SPLINE_VARIABLE_MUST_BE_A_PREDICTOR로
+  // 거부한다). 새 outcome 키를 참조하는 항목만 정리한다.
+  // eventLevel은 이전 outcome(categorical)의 레벨 값이므로 outcome이 바뀌면(같은
+  // categorical 변수로 바뀌어도 레벨 집합이 다를 수 있음) 무조건 초기화한다 —
+  // 안 그러면 continuous/boolean outcome으로 바뀐 뒤에도 값이 남아 서버가
+  // EVENT_LEVEL_REQUIRES_CATEGORICAL_OUTCOME으로 거부한다(리뷰 지적).
+  function handleOutcomeKeyChange(nextOutcomeKey) {
+    setOutcomeKey(nextOutcomeKey);
+    setInteractionTerms((prev) => prev.filter(([a, b]) => a !== nextOutcomeKey && b !== nextOutcomeKey));
+    setSplineKeys((prev) => prev.filter((k) => k !== nextOutcomeKey));
+    setEventLevel('');
+  }
+
   // ---- preview: 조건-key(무엇을 위한 결과인가) + 요청세대(그 요청 인스턴스가 최신인가) ----
-  const currentConditionKey = buildConditionKey(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey);
+  const currentConditionKey = buildConditionKey(
+    grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters,
+    outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel,
+  );
   const [previewState, setPreviewState] = useState({ key: null, status: 'idle', result: null, error: null });
   const previewGenRef = useRef(0);
 
@@ -233,7 +300,7 @@ export function StatisticsWorkbench({
         // PR3-A — preview는 requestedMethod를 참고만 하고 유효성을 검사하지 않는다
         // (서버가 관대함, 계획서 §파이프라인 "preview는 관대하다") — method 미선택
         // 상태에서도 이 호출은 정상적으로 나가야 availableMethods를 받아올 수 있다.
-        const recipe = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey);
+        const recipe = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel);
         const res = await previewStatsAnalysis(recipe, session, { signal: controller.signal });
         if (gen !== previewGenRef.current) return;
         setPreviewState((prev) => (prev.key === key ? { key, status: 'ready', result: res, error: null } : prev));
@@ -290,7 +357,7 @@ export function StatisticsWorkbench({
   async function handleRunAnalyze() {
     if (!canExecute || analyzeInFlightRef.current) return;
     analyzeInFlightRef.current = true;
-    const recipeAtSubmit = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey);
+    const recipeAtSubmit = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel);
     setIsAnalyzing(true);
     setAnalyzeError(null);
     try {
@@ -307,7 +374,7 @@ export function StatisticsWorkbench({
   }
 
   const recipeChanged = committedRecipe
-    ? JSON.stringify(buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey)) !== JSON.stringify(committedRecipe)
+    ? JSON.stringify(buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel)) !== JSON.stringify(committedRecipe)
     : false;
 
   // ---- export ----
@@ -316,7 +383,9 @@ export function StatisticsWorkbench({
   // 아니라 저장된 실행의 analysisMode 기준(committedRecipe)으로 판정한다. 탭을
   // 바꿔도 내보내기 가능 여부는 바뀌면 안 된다. 서버도 manifest.analysisMode 기준으로
   // 같은 판정을 하므로(statsExportHandler.ts) 여기서도 동일 기준으로 미리 막는다.
-  const exportUnsupported = committedRecipe?.analysisMode === 'bivariate' || committedRecipe?.analysisMode === 'correlation_matrix' || committedRecipe?.analysisMode === 'regression';
+  // PR4-A2 — 회귀는 CSV export 지원(집계 섹션만, pointDiagnostics는 서버가
+  // 애초에 CSV에 넣지 않는다). bivariate/correlation_matrix는 여전히 PR5 범위.
+  const exportUnsupported = committedRecipe?.analysisMode === 'bivariate' || committedRecipe?.analysisMode === 'correlation_matrix';
   async function handleExport() {
     if (!committedResult || actionsLocked || exportUnsupported) return; // 버튼 disabled와 별개로 핸들러 자체도 잠금을 지킨다
     setExportState({ status: 'exporting', error: null });
@@ -391,7 +460,15 @@ export function StatisticsWorkbench({
             requestedMethod={requestedMethod}
             onRequestedMethodChange={setRequestedMethod}
             outcomeKey={outcomeKey}
-            onOutcomeKeyChange={setOutcomeKey}
+            onOutcomeKeyChange={handleOutcomeKeyChange}
+            standardizePredictors={standardizePredictors}
+            onStandardizePredictorsChange={setStandardizePredictors}
+            interactionTerms={interactionTerms}
+            onInteractionTermsChange={setInteractionTerms}
+            splineKeys={splineKeys}
+            onSplineKeysChange={setSplineKeys}
+            eventLevel={eventLevel}
+            onEventLevelChange={setEventLevel}
             analysisPurpose={analysisPurpose}
             onAnalysisPurposeChange={setAnalysisPurpose}
             formulaPolicies={formulaPolicies}

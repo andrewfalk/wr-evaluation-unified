@@ -9,6 +9,7 @@ describe('evaluateRegressionDisclosure', () => {
       excludedPersonCount: 0,
       levelSummaries: [{ variableKey: 'group', level: 'A', personCount: 50 }, { variableKey: 'group', level: 'B', personCount: 50 }],
       eventSummary: null,
+      interactionLevelSummaries: [],
     });
     expect(r).toEqual({ disclose: true, reasonCode: null });
   });
@@ -19,6 +20,7 @@ describe('evaluateRegressionDisclosure', () => {
       excludedPersonCount: 1,
       levelSummaries: [],
       eventSummary: null,
+      interactionLevelSummaries: [],
     });
     expect(r).toEqual({ disclose: false, reasonCode: 'MIN_COHORT_NOT_MET' });
   });
@@ -29,6 +31,7 @@ describe('evaluateRegressionDisclosure', () => {
       excludedPersonCount: 0,
       levelSummaries: [],
       eventSummary: null,
+      interactionLevelSummaries: [],
     });
     expect(r.disclose).toBe(true);
   });
@@ -39,6 +42,7 @@ describe('evaluateRegressionDisclosure', () => {
       excludedPersonCount: 0,
       levelSummaries: [{ variableKey: 'group', level: 'A', personCount: 95 }, { variableKey: 'group', level: 'B', personCount: 5 }],
       eventSummary: null,
+      interactionLevelSummaries: [],
     });
     expect(r).toEqual({ disclose: false, reasonCode: 'MIN_COHORT_NOT_MET' });
   });
@@ -49,6 +53,7 @@ describe('evaluateRegressionDisclosure', () => {
       excludedPersonCount: 0,
       levelSummaries: [],
       eventSummary: { eventPersonCount: 95, nonEventPersonCount: 5 },
+      interactionLevelSummaries: [],
     });
     expect(r).toEqual({ disclose: false, reasonCode: 'MIN_COHORT_NOT_MET' });
   });
@@ -59,7 +64,22 @@ describe('evaluateRegressionDisclosure', () => {
       excludedPersonCount: 0,
       levelSummaries: [],
       eventSummary: { eventPersonCount: 50, nonEventPersonCount: 50 },
+      interactionLevelSummaries: [],
     });
     expect(r.disclose).toBe(true);
+  });
+
+  it('interaction 교차표 셀이 소수셀이면 억제(PR4-A2)', () => {
+    const r = evaluateRegressionDisclosure({
+      includedPersonCount: 100,
+      excludedPersonCount: 0,
+      levelSummaries: [],
+      eventSummary: null,
+      interactionLevelSummaries: [
+        { variableKeyA: 'a', levelA: 'x', variableKeyB: 'b', levelB: 'y', personCount: 95 },
+        { variableKeyA: 'a', levelA: 'x', variableKeyB: 'b', levelB: 'z', personCount: 5 },
+      ],
+    });
+    expect(r).toEqual({ disclose: false, reasonCode: 'MIN_COHORT_NOT_MET' });
   });
 });

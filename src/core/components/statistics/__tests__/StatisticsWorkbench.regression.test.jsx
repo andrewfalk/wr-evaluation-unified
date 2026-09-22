@@ -49,6 +49,18 @@ function catalogFixture() {
   };
 }
 
+// PR4-A2(리뷰 후 추가) — eventLevel 초기화 회귀 테스트용, categorical outcome 후보가
+// 필요하다(위 catalogFixture는 continuous/boolean뿐).
+function catalogFixtureWithCategorical() {
+  return {
+    ...catalogFixture(),
+    variables: [
+      ...catalogFixture().variables,
+      variable('spine.diagnosis.category', '척추 진단 분류', 'categorical', 'spine_diagnosis'),
+    ],
+  };
+}
+
 function runManifest(id) {
   return {
     analysisRunId: id, snapshotAsOf: '2024-01-01T00:00:00.000Z',
@@ -132,7 +144,7 @@ describe('StatisticsWorkbench — PR4-A1 회귀 모드', () => {
       expect.objectContaining({
         analysisMode: 'regression',
         variableKeys: expect.arrayContaining(['knee.relatedness.max', 'shoulder.exposure.anyExceeded']),
-        regression: { outcomeKey: 'knee.relatedness.max' },
+        regression: { outcomeKey: 'knee.relatedness.max', standardizePredictors: false, interactionTerms: [], splineKeys: [] },
       }),
       SESSION,
       expect.anything(),
@@ -160,7 +172,9 @@ describe('StatisticsWorkbench — PR4-A1 회귀 모드', () => {
     await waitForDebounce();
 
     expect(previewStatsAnalysis).toHaveBeenCalledTimes(2);
-    expect(previewStatsAnalysis.mock.calls[1][0].regression).toEqual({ outcomeKey: 'shoulder.exposure.anyExceeded' });
+    expect(previewStatsAnalysis.mock.calls[1][0].regression).toEqual({
+      outcomeKey: 'shoulder.exposure.anyExceeded', standardizePredictors: false, interactionTerms: [], splineKeys: [],
+    });
   });
 
   it('method를 선택하지 않으면 실행 버튼이 비활성 상태다', async () => {
@@ -199,5 +213,42 @@ describe('StatisticsWorkbench — PR4-A1 회귀 모드', () => {
     await waitForDebounce();
 
     await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
+  });
+
+  // PR4-A2(리뷰 지적) — categorical outcome에서 사건 레벨을 입력한 다음
+  // continuous/boolean outcome으로 바꿔도 eventLevel이 초기화되지 않아, 입력창은
+  // 사라졌지만 요청에는 값이 계속 남아 서버가 EVENT_LEVEL_REQUIRES_CATEGORICAL_
+  // OUTCOME으로 거부하는 버그(handleOutcomeKeyChange, StatisticsWorkbench.jsx).
+  it('categorical outcome에서 사건 레벨을 입력한 뒤 outcome을 continuous로 바꾸면 eventLevel이 초기화된다', async () => {
+    const user = userEvent.setup();
+    fetchStatsCatalog.mockResolvedValueOnce(catalogFixtureWithCategorical());
+    render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
+    await switchToRegression(user);
+
+    await user.click(await screen.findByRole('checkbox', { name: /척추 진단 분류/ }));
+    await user.click(screen.getByRole('checkbox', { name: /신체부담기여도/ }));
+
+    previewStatsAnalysis.mockResolvedValueOnce(regressionPreview([availableMethod('binary_logistic')]));
+    const outcomeSelect = await screen.findByRole('combobox', { name: '결과변수' });
+    await user.selectOptions(outcomeSelect, '척추 진단 분류');
+    await waitForDebounce();
+
+    // 고급 옵션은 <details>로 접혀 있다 — summary를 클릭해 펼친 뒤 사건 레벨을 입력.
+    await user.click(screen.getByText('고급 옵션(표준화·interaction·spline)'));
+    const eventLevelInput = await screen.findByRole('textbox', { name: '사건 레벨' });
+    previewStatsAnalysis.mockResolvedValueOnce(regressionPreview([availableMethod('binary_logistic')]));
+    await user.type(eventLevelInput, 'yes');
+    await waitForDebounce();
+    expect(previewStatsAnalysis.mock.calls.at(-1)[0].regression.eventLevel).toBe('yes');
+
+    // outcome을 continuous로 바꾼다 — eventLevel 입력창은 사라지지만, 버그가
+    // 있으면 state는 'yes'로 남아 다음 preview 요청에 계속 실린다.
+    previewStatsAnalysis.mockResolvedValueOnce(regressionPreview([availableMethod('ols_linear')]));
+    await user.selectOptions(outcomeSelect, '신체부담기여도(최대)');
+    await waitForDebounce();
+
+    expect(screen.queryByRole('textbox', { name: '사건 레벨' })).toBeNull();
+    const lastRegressionArg = previewStatsAnalysis.mock.calls.at(-1)[0].regression;
+    expect(lastRegressionArg).not.toHaveProperty('eventLevel');
   });
 });

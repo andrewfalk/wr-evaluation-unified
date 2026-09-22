@@ -16,7 +16,7 @@ from protocol import MAX_VALUES_PER_VARIABLE, ProtocolError, parse_and_validate_
 
 def _correlation_matrix_request(k=3, n=10, method="pearson_correlation"):
     return {
-        "protocolVersion": 4,
+        "protocolVersion": 5,
         "correlationMatrix": {
             "method": method,
             "variables": [
@@ -122,14 +122,14 @@ def test_analyze_process_correlation_matrix_success():
     assert proc.returncode == 0
     assert proc.stderr == ""
     payload = json.loads(proc.stdout)
-    assert payload["protocolVersion"] == 4
+    assert payload["protocolVersion"] == 5
     assert payload["correlationMatrix"]["method"] == "pearson_correlation"
     assert len(payload["correlationMatrix"]["cells"]) == 6  # C(4,2)
 
 
 def test_analyze_process_correlation_matrix_invalid_shape_emits_marker_and_exit1():
     bad_request = {
-        "protocolVersion": 4,
+        "protocolVersion": 5,
         "correlationMatrix": {"method": "pearson_correlation", "variables": []},
     }
     proc = _run_analyze(json.dumps(bad_request))

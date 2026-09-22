@@ -57,12 +57,14 @@ describe('computeRegressionAvailableMethods', () => {
     expect(logistic.status).toBe('available');
   });
 
-  it('outcome이 categorical(2레벨 outcome은 A1 범위 밖)이면 두 방법 다 unsupported', () => {
+  it('outcome이 categorical이면 binary_logistic만 available(PR4-A2 — 정확히 2레벨인지는 ④에서 데이터로 최종 판정)', () => {
     const catalog = new Map([['group', makeVariable('group', 'categorical')]]);
     const methods = computeRegressionAvailableMethods(40, 'group', catalog, METHOD_POLICY_VERSION);
-    for (const m of methods) {
-      expect(m.status).toBe('unsupported');
-    }
+    const ols = methods.find((m) => m.id === 'ols_linear')!;
+    const logistic = methods.find((m) => m.id === 'binary_logistic')!;
+    expect(ols.status).toBe('unsupported');
+    expect(ols.reasonCode).toBe('METHOD_TYPE_MISMATCH');
+    expect(logistic.status).toBe('available');
   });
 
   it('non_estimable 세부 사유(TOO_MANY_LEVELS 등)를 이 단계에서 노출하지 않는다', () => {

@@ -4,15 +4,31 @@
 // 경로에서 끝내둔 상태(ctx.regressionDesign)로 이 함수에 들어온다 — ③을
 // 통과하지 못한 요청은 이 함수 자체가 호출되지 않는다(statsAnalyzeHandler.ts가
 // 먼저 차단, §2 "③이 ④보다 먼저인 이유").
-import type { AnalyzeRegressionResult, RegressionTerm } from '@wr/contracts';
+//
+// PR4-A2 — VIF/condition number·spline 부분효과 조립을 여기서 담당한다. spline
+// 대비행렬은 Node가 만들어 보낸다(계획서 §3 "spline 부분효과" — Python은
+// spline을 전혀 모른다). 행 단위 진단(limited_row)은 여기서 만들지 않는다 —
+// statsLimitedRowMerge.ts가 hasAccess일 때만 별도 경량 엔진 호출로 채운다
+// (계획서 §4 "limited_row 진단값" — 캐시 hit/miss와 무관한 (X,y,β)만의 순수
+// 함수로 분리).
+import type {
+  AnalyzeRegressionResult, RegressionDiagnostics, RegressionSplinePartialEffect, RegressionTerm,
+} from '@wr/contracts';
 import type { AnalysisContext } from './statsAnalysisContext';
-import { runRegressionStatsEngine, type RegressionCovarianceSpec } from './statsEngine';
+import {
+  runRegressionStatsEngine,
+  type RegressionCovarianceSpec,
+  type StatsEngineRegressionDiagnostics,
+} from './statsEngine';
 import { REGRESSION_POLICY } from './statsPolicy';
 import type { RegressionDesignMatrix } from './statsRegressionDesign';
+import { naturalSplineBasis, type SplineKnots } from './statsSplineBasis';
 
 const ANALYSIS_UNIT_NOTE =
   '이 계수는 행(사례·직업·상병) 단위 연관성이며, 행을 여러 개 가진 사람이 더 큰 가중치를 ' +
   '갖습니다. 클러스터 보정은 표준오차만 조정하고 이 가중치를 바꾸지 않습니다.';
+
+const SPLINE_GRID_SIZE = 40;
 
 function distinctCount(values: readonly string[]): number {
   return new Set(values).size;
@@ -67,6 +83,105 @@ function mapTerms(
       exponentiated: nullifyInference && t.exponentiated
         ? { estimate: t.exponentiated.estimate, ciLower: null, ciUpper: null }
         : t.exponentiated,
+      // PR4-A2 — spline 기저 항은 클라이언트가 forest plot에서 묶어 빼고
+      // 부분효과 곡선으로 대체 표시한다. interaction 항은 어느 두 predictor의
+      // 곱인지 알려준다.
+      termType: col?.termType ?? 'main',
+      interactionOf: col?.interactionOf ?? null,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// PR4-A2 — spline 예측 그리드 + 대비행렬. 훈련 시 정한 knot을 그대로 재사용한다
+// (그리드에서 분위수를 다시 계산하면 다른 기저가 된다, §2 "spline 기저").
+// ---------------------------------------------------------------------------
+
+function buildSplineGrid(knots: SplineKnots): number[] {
+  const [lo, hi] = knots.boundary;
+  if (!(hi > lo)) return [lo];
+  const grid: number[] = [];
+  for (let i = 0; i < SPLINE_GRID_SIZE; i += 1) {
+    grid.push(lo + ((hi - lo) * i) / (SPLINE_GRID_SIZE - 1));
+  }
+  return grid;
+}
+
+/** 대비 벡터 = basis(x) - basis(x₀)(그리드 최솟값), spline 기저 열에만 값을
+ * 싣고 나머지 열은 0이다 — spline predictor는 interaction에 참여할 수 없으므로
+ * (계약 단계에서 이미 차단) 이 블록만으로 충분하다(계획서 §3 "대비 정의"). */
+function buildSplineContrastMatrix(
+  variableKey: string,
+  knots: SplineKnots,
+  columns: RegressionDesignMatrix['columns'],
+  gridValues: number[],
+): number[][] {
+  const p = columns.length;
+  const basisColumnIndices = columns
+    .map((c, i) => ({ c, i }))
+    .filter(({ c }) => c.variableKey === variableKey && c.termType === 'spline_basis')
+    .map(({ i }) => i);
+  const baseline = naturalSplineBasis(gridValues[0], knots);
+  return gridValues.map((x) => {
+    const row = new Array(p).fill(0);
+    const basis = naturalSplineBasis(x, knots);
+    basisColumnIndices.forEach((colIndex, basisPos) => {
+      row[colIndex] = basis[basisPos] - baseline[basisPos];
+    });
+    return row;
+  });
+}
+
+function buildPublicDiagnostics(
+  raw: StatsEngineRegressionDiagnostics | null,
+  columns: RegressionDesignMatrix['columns'],
+  rowCount: number,
+): RegressionDiagnostics | null {
+  if (raw === null) return null;
+  const nonInterceptColumns = columns.slice(1); // Python의 vif는 절편 제외, 같은 순서
+  const vif = nonInterceptColumns.map((col, i) => ({
+    variableKey: col.variableKey,
+    termName: col.name,
+    vif: raw.vif[i] ?? null,
+  }));
+  return {
+    conditionNumber: raw.conditionNumber,
+    vif,
+    pointDiagnosticsSupported: raw.pointDiagnosticsSupported,
+    pointDiagnosticsUnsupportedReason: raw.pointDiagnosticsUnsupportedReason,
+    // PR4-A2 — 모형이 애초에 미지원이면 여기서 바로 unavailable_model로 확정한다
+    // (엔진을 부를 이유가 없다). 지원하면 statsLimitedRowMerge.ts가 hasAccess를
+    // 보고 최종 상태(unavailable_no_access/unavailable_computation_failed/
+    // available)를 결정할 때까지 not_requested로 둔다.
+    pointDiagnosticsStatus: raw.pointDiagnosticsSupported ? 'not_requested' : 'unavailable_model',
+    displayedPointCount: null,
+    totalPointCount: rowCount,
+  };
+}
+
+function buildPublicSplinePartialEffects(
+  rawEffects: ReadonlyArray<{
+    variableKey: string;
+    points: ReadonlyArray<{
+      deltaFromBaseline: number | null; ciLower: number | null; ciUpper: number | null;
+      exponentiated: { estimate: number; ciLower: number | null; ciUpper: number | null } | null;
+    }>;
+  }> | null,
+  splineGridByKey: ReadonlyMap<string, number[]>,
+): RegressionSplinePartialEffect[] | null {
+  if (rawEffects === null) return null;
+  return rawEffects.map((effect) => {
+    const gridValues = splineGridByKey.get(effect.variableKey) ?? [];
+    return {
+      variableKey: effect.variableKey,
+      scale: 'linear_predictor' as const,
+      points: effect.points.map((point, i) => ({
+        x: gridValues[i],
+        deltaFromBaseline: point.deltaFromBaseline,
+        ciLower: point.ciLower,
+        ciUpper: point.ciUpper,
+        exponentiated: point.exponentiated,
+      })),
     };
   });
 }
@@ -105,20 +220,41 @@ export async function computeRegressionAnalyzeResult(ctx: AnalysisContext): Prom
       excludedRowCount,
       qualityFlags: [],
       analysisUnitNote: ANALYSIS_UNIT_NOTE,
+      diagnostics: null,
+      standardizedPredictorKeys: [],
+      standardization: null,
+      splinePartialEffects: null,
     };
   }
 
   const { spec, personCount, rowCount } = resolveCovarianceSpec(design.design);
   const family = design.design.method === 'ols_linear' ? 'gaussian' : 'binomial';
+
+  // PR4-A2 — spline predictor별 예측 그리드+대비행렬을 만들어 함께 보낸다.
+  // gridByKey는 응답을 받은 뒤 x값을 zip하기 위해 로컬로 보관한다(Python은
+  // 대비 벡터만 알고 원본 x값은 모른다).
+  const splineGridByKey = new Map<string, number[]>();
+  const splineContrasts: { variableKey: string; contrastMatrix: number[][] }[] = [];
+  for (const [variableKey, knots] of Object.entries(design.design.splineKnots)) {
+    const gridValues = buildSplineGrid(knots);
+    splineGridByKey.set(variableKey, gridValues);
+    splineContrasts.push({
+      variableKey,
+      contrastMatrix: buildSplineContrastMatrix(variableKey, knots, design.design.columns, gridValues),
+    });
+  }
+
   const raw = await runRegressionStatsEngine({
     family,
     y: design.design.y,
     X: design.design.x,
     columnNames: design.design.columns.map((c) => c.name),
     covariance: spec,
+    splineContrasts,
   });
 
   const residualDf = rowCount - design.design.columns.length;
+  const standardization = Object.keys(design.design.standardization).length > 0 ? design.design.standardization : null;
 
   if (raw.estimation === 'non_estimable') {
     return {
@@ -143,6 +279,10 @@ export async function computeRegressionAnalyzeResult(ctx: AnalysisContext): Prom
       excludedRowCount,
       qualityFlags: design.design.qualityFlags,
       analysisUnitNote: ANALYSIS_UNIT_NOTE,
+      diagnostics: null,
+      standardizedPredictorKeys: design.design.standardizedPredictorKeys,
+      standardization,
+      splinePartialEffects: null,
     };
   }
 
@@ -171,6 +311,22 @@ export async function computeRegressionAnalyzeResult(ctx: AnalysisContext): Prom
 
   const terms = mapTerms(raw.terms, design.design.columns, nullifyInference);
 
+  // PR4-A2 — spline CI는 계수표와 같은 원칙: Python 자체 사유든 Node 클러스터
+  // 게이트(nullifyInference)든 inference_withheld면 전부 null. Python이
+  // inference_withheld를 직접 리턴한 경우는 이미 cov=None으로 CI가 null이므로,
+  // 여기서 추가로 널화해야 하는 건 Node가 사후에 내린 클러스터 게이트뿐이다.
+  const splinePartialEffectsRaw = nullifyInference && raw.splinePartialEffects
+    ? raw.splinePartialEffects.map((effect) => ({
+        variableKey: effect.variableKey,
+        points: effect.points.map((point) => ({
+          deltaFromBaseline: point.deltaFromBaseline,
+          ciLower: null,
+          ciUpper: null,
+          exponentiated: point.exponentiated ? { estimate: point.exponentiated.estimate, ciLower: null, ciUpper: null } : null,
+        })),
+      }))
+    : raw.splinePartialEffects;
+
   return {
     suppressed: false,
     estimation,
@@ -193,5 +349,9 @@ export async function computeRegressionAnalyzeResult(ctx: AnalysisContext): Prom
     excludedRowCount,
     qualityFlags: [...design.design.qualityFlags, ...raw.qualityFlags],
     analysisUnitNote: ANALYSIS_UNIT_NOTE,
+    diagnostics: buildPublicDiagnostics(raw.diagnostics, design.design.columns, rowCount),
+    standardizedPredictorKeys: design.design.standardizedPredictorKeys,
+    standardization,
+    splinePartialEffects: buildPublicSplinePartialEffects(splinePartialEffectsRaw, splineGridByKey),
   };
 }

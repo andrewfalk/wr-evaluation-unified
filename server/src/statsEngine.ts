@@ -85,6 +85,21 @@ export interface RegressionEngineRequest {
   X: number[][];
   columnNames: string[];
   covariance: RegressionCovarianceSpec;
+  // PR4-A2 — spline predictor별 대비행렬(§3 "spline 부분효과"). Python은
+  // spline을 모르고 대비 벡터만 평가한다.
+  splineContrasts: { variableKey: string; contrastMatrix: number[][] }[];
+}
+
+// PR4-A2 — limited_row 진단(§4 "limited_row 진단값"). 재적합 없이 이미 주어진
+// β로 h/잔차/Cook's D만 계산하는 경량 요청 — 캐시 hit/miss와 완전히 독립적인
+// (X,y,β)만의 순수 함수라 covariance 정보가 필요 없다.
+export interface RegressionDiagnosticsEngineRequest {
+  family: 'gaussian' | 'binomial';
+  y: number[];
+  X: number[][];
+  columnNames: string[];
+  beta: number[];
+  sampledRowIndices: number[];
 }
 
 const StatsEngineNullReasonSchema = z.enum(['insufficient_data', 'undefined_zero_variance', 'non_finite_result']);
@@ -154,7 +169,7 @@ const StatsEngineDiscreteResultSchema = z.object({
 });
 
 const StatsEngineRawResultSchema = z.object({
-  protocolVersion: z.literal(4),
+  protocolVersion: z.literal(5),
   continuous: z.array(StatsEngineContinuousResultSchema),
   discrete: z.array(StatsEngineDiscreteResultSchema),
 }).strict();
@@ -178,7 +193,7 @@ const StatsEngineEffectSizeSchema = z.object({
 });
 
 const StatsEngineBivariateRawResultSchema = z.object({
-  protocolVersion: z.literal(4),
+  protocolVersion: z.literal(5),
   bivariate: z.object({
     method: z.enum([
       'welch_t', 'mann_whitney', 'anova', 'kruskal_wallis',
@@ -271,7 +286,7 @@ function assertWithinLimits(request: StatsEngineRequest): void {
   if (total > MAX_TOTAL_VALUES) {
     throw new StatsEngineInputTooLargeError(`total values (${total}) exceeds MAX_TOTAL_VALUES(${MAX_TOTAL_VALUES})`);
   }
-  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 4, variables: request.variables }), 'utf8');
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 5, variables: request.variables }), 'utf8');
   if (byteLength > config.stats.maxInputBytes) {
     throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
   }
@@ -282,7 +297,7 @@ function assertWithinLimits(request: StatsEngineRequest): void {
 // table은 "sum(모든 셀)"에 같은 상한을 적용(작은 JSON으로 큰 관측수를 표현할 수
 // 있어 상한 자체가 필요, 정합성 검사와는 별개).
 function assertBivariateWithinLimits(request: BivariateEngineRequest): void {
-  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 4, bivariate: request }), 'utf8');
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 5, bivariate: request }), 'utf8');
   if (byteLength > config.stats.maxInputBytes) {
     throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
   }
@@ -332,7 +347,7 @@ function assertCorrelationMatrixWithinLimits(request: CorrelationMatrixEngineReq
   if (total > MAX_TOTAL_VALUES) {
     throw new StatsEngineInputTooLargeError(`total values (${total}) exceeds MAX_TOTAL_VALUES(${MAX_TOTAL_VALUES})`);
   }
-  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 4, correlationMatrix: request }), 'utf8');
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 5, correlationMatrix: request }), 'utf8');
   if (byteLength > config.stats.maxInputBytes) {
     throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
   }
@@ -374,7 +389,7 @@ const StatsEngineCorrelationMatrixCellSchema = z.object({
   adjustedP: z.number().finite().nullable(),
 });
 const StatsEngineCorrelationMatrixRawResultSchema = z.object({
-  protocolVersion: z.literal(4),
+  protocolVersion: z.literal(5),
   correlationMatrix: z.object({
     method: z.enum(['pearson_correlation', 'spearman_correlation']),
     cells: z.array(StatsEngineCorrelationMatrixCellSchema),
@@ -465,6 +480,35 @@ const StatsEngineRegressionFitSchema = z.object({
   pseudoR2: z.number().finite().nullable(),
 }).strict();
 
+// PR4-A2 — VIF/condition number(집계, X만 있으면 계산). pointDiagnosticsSupported
+// 는 추론 상태(estimation/inferenceIssue)와 완전히 독립적으로 (X,y,β)만으로
+// 직접 판정된다(계획서 §3 "_evaluate_diagnostic_support" — 반례로 확정된 원칙).
+// vif는 절편을 제외한 열별(length = columnNames.length - 1) 순서 배열이다.
+const StatsEngineRegressionDiagnosticsSchema = z.object({
+  conditionNumber: z.number().finite().nullable(),
+  vif: z.array(z.number().finite().nullable()),
+  pointDiagnosticsSupported: z.boolean(),
+  pointDiagnosticsUnsupportedReason: z.enum([
+    'QR_DECOMPOSITION_FAILED', 'NEAR_SINGULAR_LEVERAGE', 'INVALID_DIAGNOSTIC_SCALE',
+  ]).nullable(),
+}).strict();
+
+const StatsEngineRegressionSplinePointSchema = z.object({
+  deltaFromBaseline: z.number().finite().nullable(),
+  ciLower: z.number().finite().nullable(),
+  ciUpper: z.number().finite().nullable(),
+  exponentiated: z.object({
+    estimate: z.number().finite(),
+    ciLower: z.number().finite().nullable(),
+    ciUpper: z.number().finite().nullable(),
+  }).strict().nullable(),
+}).strict();
+
+const StatsEngineRegressionSplinePartialEffectSchema = z.object({
+  variableKey: z.string(),
+  points: z.array(StatsEngineRegressionSplinePointSchema),
+}).strict();
+
 const StatsEngineRegressionResultSchema = z.object({
   estimation: z.enum(['ok', 'inference_withheld', 'non_estimable']),
   nonEstimableReason: z.enum(['SEPARATION_DETECTED', 'SEPARATION_CHECK_FAILED', 'NOT_CONVERGED']).nullable(),
@@ -476,16 +520,48 @@ const StatsEngineRegressionResultSchema = z.object({
   fit: StatsEngineRegressionFitSchema.nullable(),
   converged: z.boolean(),
   qualityFlags: z.array(z.string()),
+  diagnostics: StatsEngineRegressionDiagnosticsSchema.nullable(),
+  splinePartialEffects: z.array(StatsEngineRegressionSplinePartialEffectSchema).nullable(),
 }).strict();
 
 const StatsEngineRegressionRawResultSchema = z.object({
-  protocolVersion: z.literal(4),
+  protocolVersion: z.literal(5),
   regression: StatsEngineRegressionResultSchema,
 }).strict();
 
 export type StatsEngineRegressionTerm = z.infer<typeof StatsEngineRegressionTermSchema>;
 export type StatsEngineRegressionFit = z.infer<typeof StatsEngineRegressionFitSchema>;
+export type StatsEngineRegressionDiagnostics = z.infer<typeof StatsEngineRegressionDiagnosticsSchema>;
+export type StatsEngineRegressionSplinePartialEffect = z.infer<typeof StatsEngineRegressionSplinePartialEffectSchema>;
 export type StatsEngineRegressionRawResult = z.infer<typeof StatsEngineRegressionRawResultSchema>['regression'];
+
+// PR4-A2 — limited_row 진단 raw 응답. pointDiagnostics 배열은 Node가 보낸
+// sampledRowIndices와 정확히 같은 개수·순서로 온다(아래 validate가 대조).
+const StatsEngineRegressionDiagnosticsPointSchema = z.object({
+  rowIndex: z.number().int(),
+  fittedValue: z.number().finite(),
+  residual: z.number().finite(),
+  leverage: z.number().finite(),
+  standardizedResidual: z.number().finite(),
+  cooksDistance: z.number().finite(),
+  theoreticalQuantile: z.number().finite(),
+}).strict();
+
+const StatsEngineRegressionDiagnosticsResultSchema = z.object({
+  pointDiagnosticsSupported: z.boolean(),
+  pointDiagnosticsUnsupportedReason: z.enum([
+    'QR_DECOMPOSITION_FAILED', 'NEAR_SINGULAR_LEVERAGE', 'INVALID_DIAGNOSTIC_SCALE',
+  ]).nullable(),
+  points: z.array(StatsEngineRegressionDiagnosticsPointSchema),
+}).strict();
+
+const StatsEngineRegressionDiagnosticsRawResultSchema = z.object({
+  protocolVersion: z.literal(5),
+  regressionDiagnostics: StatsEngineRegressionDiagnosticsResultSchema,
+}).strict();
+
+export type StatsEngineRegressionDiagnosticsRawResult =
+  z.infer<typeof StatsEngineRegressionDiagnosticsRawResultSchema>['regressionDiagnostics'];
 
 // §8 — 값 개수(N×P)는 상관행렬과 동일한 MAX_TOTAL_VALUES를 재사용한다. 바이트
 // 길이는 실제 전송될 envelope({protocolVersion, regression})과 바이트 단위로
@@ -501,7 +577,7 @@ function assertRegressionWithinLimits(request: RegressionEngineRequest): void {
   if (total > MAX_TOTAL_VALUES) {
     throw new StatsEngineInputTooLargeError(`regression 전체 값 개수(N×P=${total})가 상한(${MAX_TOTAL_VALUES})을 초과`);
   }
-  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 4, regression: request }), 'utf8');
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 5, regression: request }), 'utf8');
   if (byteLength > config.stats.maxInputBytes) {
     throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
   }
@@ -525,6 +601,13 @@ function validateRegressionSemantics(
     if (r.nonEstimableReason === null) {
       throw new StatsEngineResultInvalidError('non_estimable 응답인데 nonEstimableReason이 없다');
     }
+    // PR4-A2 — β가 없으므로 진단·spline도 없어야 한다(shared/contracts 상태 불변식과 대응).
+    if (r.diagnostics !== null) {
+      throw new StatsEngineResultInvalidError('non_estimable 응답인데 diagnostics가 null이 아니다');
+    }
+    if (r.splinePartialEffects !== null) {
+      throw new StatsEngineResultInvalidError('non_estimable 응답인데 splinePartialEffects가 null이 아니다');
+    }
     return;
   }
 
@@ -540,6 +623,46 @@ function validateRegressionSemantics(
   });
   if (r.fit === null) {
     throw new StatsEngineResultInvalidError(`estimation="${r.estimation}" 응답인데 fit이 null이다`);
+  }
+
+  // PR4-A2 — β는 존재하므로(ok/inference_withheld 공통) diagnostics 객체
+  // 자체는 항상 있어야 한다(개별 집계값은 계산 실패 시 null 허용 — 스키마가
+  // 이미 nullable로 표현). vif 배열 길이는 절편 제외 열 수와 같아야 한다.
+  if (r.diagnostics === null) {
+    throw new StatsEngineResultInvalidError(`estimation="${r.estimation}" 응답인데 diagnostics가 null이다`);
+  }
+  const expectedVifCount = request.columnNames.length - 1;
+  if (r.diagnostics.vif.length !== expectedVifCount) {
+    throw new StatsEngineResultInvalidError(
+      `diagnostics.vif 길이 불일치: 기대 ${expectedVifCount}개(절편 제외), 응답 ${r.diagnostics.vif.length}개`,
+    );
+  }
+  if (r.splinePartialEffects === null) {
+    throw new StatsEngineResultInvalidError(`estimation="${r.estimation}" 응답인데 splinePartialEffects가 null이다`);
+  }
+  if (r.splinePartialEffects.length !== request.splineContrasts.length) {
+    throw new StatsEngineResultInvalidError(
+      `splinePartialEffects 개수 불일치: 요청 ${request.splineContrasts.length}개, 응답 ${r.splinePartialEffects.length}개`,
+    );
+  }
+  request.splineContrasts.forEach((contrast, i) => {
+    const points = r.splinePartialEffects![i]?.points;
+    if (!points || points.length !== contrast.contrastMatrix.length) {
+      throw new StatsEngineResultInvalidError(
+        `splinePartialEffects[${i}].points 개수가 요청 contrastMatrix 행 수와 다르다`,
+      );
+    }
+  });
+  // inference_withheld면 spline CI를 전부 null로 강제한다(계수표의 nullifyInference와
+  // 같은 원칙 — Python 자체가 withheld를 리턴할 때 cov=None으로 이미 이렇게 낸다).
+  if (r.estimation === 'inference_withheld') {
+    for (const effect of r.splinePartialEffects) {
+      for (const point of effect.points) {
+        if (point.ciLower !== null || point.ciUpper !== null) {
+          throw new StatsEngineResultInvalidError('inference_withheld인데 splinePartialEffects의 CI가 null이 아니다');
+        }
+      }
+    }
   }
 
   const seShouldBeNull = r.inferenceIssue === 'COVARIANCE_NOT_COMPUTABLE' || r.inferenceIssue === 'DEGENERATE_COVARIANCE';
@@ -559,6 +682,50 @@ function validateRegressionSemantics(
       throw new StatsEngineResultInvalidError(`inference_withheld인데 term "${term.name}"의 추론 필드가 null이 아니다`);
     }
   }
+}
+
+// PR4-A2 — limited_row 진단 요청 상한(§4 "입력 검증" — 재적합이 아니므로 최초
+// 적합과 같은 N×P 상한을 그대로 재사용한다).
+function assertRegressionDiagnosticsWithinLimits(request: RegressionDiagnosticsEngineRequest): void {
+  const n = request.y.length;
+  const p = request.columnNames.length;
+  if (n > MAX_VALUES_PER_VARIABLE) {
+    throw new StatsEngineInputTooLargeError(`regressionDiagnostics 행 수(${n})가 상한(${MAX_VALUES_PER_VARIABLE})을 초과`);
+  }
+  const total = n * p;
+  if (total > MAX_TOTAL_VALUES) {
+    throw new StatsEngineInputTooLargeError(`regressionDiagnostics 전체 값 개수(N×P=${total})가 상한(${MAX_TOTAL_VALUES})을 초과`);
+  }
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 5, regressionDiagnostics: request }), 'utf8');
+  if (byteLength > config.stats.maxInputBytes) {
+    throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
+  }
+}
+
+/** raw 진단 응답 검증 — points가 요청 sampledRowIndices와 정확히 같은 개수·
+ * 순서인지, rowIndex가 요청한 인덱스와 일치하는지(엔진이 다른 행을 잘못
+ * 돌려주는 결함을 조기에 잡는다). */
+function validateRegressionDiagnosticsSemantics(
+  request: RegressionDiagnosticsEngineRequest,
+  raw: z.infer<typeof StatsEngineRegressionDiagnosticsRawResultSchema>,
+): void {
+  const rd = raw.regressionDiagnostics;
+  if (!rd.pointDiagnosticsSupported) {
+    if (rd.points.length !== 0) {
+      throw new StatsEngineResultInvalidError('pointDiagnosticsSupported=false인데 points가 비어있지 않다');
+    }
+    return;
+  }
+  if (rd.points.length !== request.sampledRowIndices.length) {
+    throw new StatsEngineResultInvalidError(
+      `points 수 불일치: 요청 ${request.sampledRowIndices.length}개, 응답 ${rd.points.length}개`,
+    );
+  }
+  request.sampledRowIndices.forEach((idx, i) => {
+    if (rd.points[i].rowIndex !== idx) {
+      throw new StatsEngineResultInvalidError(`points[${i}].rowIndex 불일치: 요청 ${idx}, 응답 ${rd.points[i].rowIndex}`);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -857,7 +1024,7 @@ async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
 export async function runStatsEngine(request: StatsEngineRequest): Promise<StatsEngineRawResult> {
   return runEngineProcess<StatsEngineRawResult>({
     assertLimits: () => assertWithinLimits(request),
-    buildStdinPayload: () => ({ protocolVersion: 4, variables: request.variables }),
+    buildStdinPayload: () => ({ protocolVersion: 5, variables: request.variables }),
     parseSuccess: (parsed) => {
       const shapeResult = StatsEngineRawResultSchema.safeParse(parsed);
       if (!shapeResult.success) {
@@ -872,7 +1039,7 @@ export async function runStatsEngine(request: StatsEngineRequest): Promise<Stats
 export async function runBivariateStatsEngine(request: BivariateEngineRequest): Promise<StatsEngineBivariateRawResult> {
   return runEngineProcess<StatsEngineBivariateRawResult>({
     assertLimits: () => assertBivariateWithinLimits(request),
-    buildStdinPayload: () => ({ protocolVersion: 4, bivariate: request }),
+    buildStdinPayload: () => ({ protocolVersion: 5, bivariate: request }),
     parseSuccess: (parsed) => {
       const shapeResult = StatsEngineBivariateRawResultSchema.safeParse(parsed);
       if (!shapeResult.success) {
@@ -889,7 +1056,7 @@ export async function runCorrelationMatrixStatsEngine(
 ): Promise<StatsEngineCorrelationMatrixRawResult> {
   return runEngineProcess<StatsEngineCorrelationMatrixRawResult>({
     assertLimits: () => assertCorrelationMatrixWithinLimits(request),
-    buildStdinPayload: () => ({ protocolVersion: 4, correlationMatrix: request }),
+    buildStdinPayload: () => ({ protocolVersion: 5, correlationMatrix: request }),
     parseSuccess: (parsed) => {
       const shapeResult = StatsEngineCorrelationMatrixRawResultSchema.safeParse(parsed);
       if (!shapeResult.success) {
@@ -904,7 +1071,7 @@ export async function runCorrelationMatrixStatsEngine(
 export async function runRegressionStatsEngine(request: RegressionEngineRequest): Promise<StatsEngineRegressionRawResult> {
   return runEngineProcess<StatsEngineRegressionRawResult>({
     assertLimits: () => assertRegressionWithinLimits(request),
-    buildStdinPayload: () => ({ protocolVersion: 4, regression: request }),
+    buildStdinPayload: () => ({ protocolVersion: 5, regression: request }),
     parseSuccess: (parsed) => {
       const shapeResult = StatsEngineRegressionRawResultSchema.safeParse(parsed);
       if (!shapeResult.success) {
@@ -912,6 +1079,26 @@ export async function runRegressionStatsEngine(request: RegressionEngineRequest)
       }
       validateRegressionSemantics(request, shapeResult.data);
       return shapeResult.data.regression;
+    },
+  });
+}
+
+// PR4-A2 — limited_row 진단 전용 경량 엔진 호출(재적합 없음). 캐시 hit/miss와
+// 완전히 독립적인 (X,y,β)만의 순수 함수라 statsLimitedRowMerge.ts가 매 요청마다
+// hasAccess일 때만 호출한다(계획서 §4 "limited_row 진단값").
+export async function runRegressionDiagnosticsEngine(
+  request: RegressionDiagnosticsEngineRequest,
+): Promise<StatsEngineRegressionDiagnosticsRawResult> {
+  return runEngineProcess<StatsEngineRegressionDiagnosticsRawResult>({
+    assertLimits: () => assertRegressionDiagnosticsWithinLimits(request),
+    buildStdinPayload: () => ({ protocolVersion: 5, regressionDiagnostics: request }),
+    parseSuccess: (parsed) => {
+      const shapeResult = StatsEngineRegressionDiagnosticsRawResultSchema.safeParse(parsed);
+      if (!shapeResult.success) {
+        throw new StatsEngineResultInvalidError(`결과 schema 재검증 실패: ${shapeResult.error.message}`);
+      }
+      validateRegressionDiagnosticsSemantics(request, shapeResult.data);
+      return shapeResult.data.regressionDiagnostics;
     },
   });
 }

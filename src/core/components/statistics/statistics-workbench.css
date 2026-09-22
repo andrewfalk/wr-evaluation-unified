@@ -230,6 +230,27 @@
 .swb-seg-opt--active { background: var(--swb-accent); color: #fff; }
 .swb-seg-opt:disabled { cursor: not-allowed; opacity: 0.45; }
 
+/* PR4-A2 — 회귀 고급 옵션(<details>) + 체크박스 행. */
+.swb-advanced-options {
+  border: 1px solid var(--swb-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 10px 0;
+}
+.swb-advanced-options > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--swb-ink-muted);
+}
+.swb-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin: 6px 0;
+}
+
 .swb-recipe-chip {
   display: inline-flex;
   align-items: center;

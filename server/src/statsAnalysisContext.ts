@@ -30,7 +30,9 @@ import {
   computeRegressionCompleteCase,
   computeRegressionLevelSummaries,
   computeRegressionEventSummary,
+  computeRegressionInteractionLevelSummaries,
   evaluateRegressionInputLimits,
+  type RegressionInteractionLevelSummary,
 } from './statsRegressionDataset';
 import { evaluateRegressionDisclosure } from './statsRegressionDisclosureGate';
 import { buildRegressionDesignMatrix, type RegressionDesignResult } from './statsRegressionDesign';
@@ -169,10 +171,18 @@ export async function buildAnalysisContext(
     // PR4-A1 §2 실행 순서 ①~④. zod+statsRecipeValidation.ts가 이미
     // variableKeys.length>=2 · outcomeKey∈variableKeys를 보장했으므로
     // predictorKeys는 항상 1개 이상이다.
-    const { outcomeKey, referenceLevels } = recipe.regression;
+    const {
+      outcomeKey, referenceLevels, eventLevel, standardizePredictors, interactionTerms, splineKeys,
+    } = recipe.regression;
     const predictorKeys = recipe.variableKeys.filter((k) => k !== outcomeKey);
     const outcomeVar = catalogByKey.get(outcomeKey);
-    regressionMethod = outcomeVar?.type === 'continuous' ? 'ols_linear' : outcomeVar?.type === 'boolean' ? 'binary_logistic' : null;
+    // PR4-A2 — categorical outcome도 잠정 binary_logistic으로 시도한다. "관측
+    // 레벨이 정확히 2개인지"는 ③ 통과 후 ④(설계행렬)에서만 최종 판정한다(§2
+    // "categorical 2레벨 outcome" — 순서가 핵심).
+    regressionMethod =
+      outcomeVar?.type === 'continuous' ? 'ols_linear'
+      : (outcomeVar?.type === 'boolean' || outcomeVar?.type === 'categorical') ? 'binary_logistic'
+      : null;
 
     // ① 입력상한 선검사 — 더미 확장 전 원본 변수 개수(outcome+predictor)로
     // 보수적으로 측정한다(statsRegressionDataset.ts 주석 — 더미 확장은 열만
@@ -185,8 +195,23 @@ export async function buildAnalysisContext(
     // ② 완전사례 + 레벨·event 요약(person 단위, 전부 ③ 공개통제 입력용).
     const completeCase = computeRegressionCompleteCase(dataset.rows, outcomeKey, predictorKeys);
     regressionExcludedRowCount = completeCase.excludedRowCount;
-    const levelSummaries = computeRegressionLevelSummaries(completeCase.completeRows, predictorKeys, catalogByKey);
+    const predictorLevelSummaries = computeRegressionLevelSummaries(completeCase.completeRows, predictorKeys, catalogByKey);
+    // PR4-A2 — outcome이 categorical이면 레벨별 person 요약을 predictor와 별도로
+    // 더해 넣는다(computeRegressionLevelSummaries는 predictor/outcome을 구분하지
+    // 않는 범용 함수). "레벨이 몇 개인지"는 ③ 통과 전엔 전혀 드러나지 않는다.
+    // boolean outcome은 기존 eventSummary 경로로 충분해 이중 게이트를 만들지 않는다.
+    const outcomeLevelSummaries = outcomeVar?.type === 'categorical'
+      ? computeRegressionLevelSummaries(completeCase.completeRows, [outcomeKey], catalogByKey)
+      : [];
+    const levelSummaries = [...predictorLevelSummaries, ...outcomeLevelSummaries];
     const eventSummary = computeRegressionEventSummary(completeCase.completeRows, outcomeKey, outcomeVar?.type);
+
+    // PR4-A2 — interaction 쌍이 둘 다 categorical/ordinal/boolean이면 교차표
+    // 소수셀 검사(연속형이 섞인 쌍은 computeRegressionInteractionLevelSummaries가
+    // 빈 배열을 반환 — 그 값 분산은 기존 ZERO_VARIANCE_PREDICTOR가 이미 커버).
+    const interactionLevelSummaries: RegressionInteractionLevelSummary[] = interactionTerms.flatMap(
+      (pair) => computeRegressionInteractionLevelSummaries(completeCase.completeRows, pair, catalogByKey),
+    );
 
     // ③ 공개통제 — request-level 억제(differencing/전체 MIN_COHORT)와 OR로
     // 합친다(bivariate와 동일 원칙). 실패하면 ④를 절대 실행하지 않는다 —
@@ -196,6 +221,7 @@ export async function buildAnalysisContext(
       excludedPersonCount: completeCase.excludedPersonCount,
       levelSummaries,
       eventSummary,
+      interactionLevelSummaries,
     });
     regressionDisclosed = !requestSuppressed && disclosure.disclose;
 
@@ -211,6 +237,10 @@ export async function buildAnalysisContext(
           method: regressionMethod,
           referenceLevels,
           eventSummary,
+          eventLevel,
+          standardizePredictors,
+          interactionTerms,
+          splineKeys,
         });
       }
       // availableMethods는 ③을 통과했을 때만 계산한다(리뷰 원칙 — 통과 전엔

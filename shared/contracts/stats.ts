@@ -165,9 +165,18 @@ export const StatsAnalysisRecipeSchema = z.object({
   // 유지), predictors는 variableKeys에서 outcomeKey를 뺀 나머지(원래 순서 유지 —
   // forest plot 행 순서가 된다)로 파생한다. referenceLevels 값 검증(카탈로그 필요)은
   // statsRecipeValidation.ts가 담당한다.
+  // PR4-A2 — eventLevel(categorical 2레벨 outcome 전용) · standardizePredictors ·
+  // interactionTerms · splineKeys 추가. 이 넷의 타입/교차 제약 중 카탈로그가 필요
+  // 없는 것(중복·자기자신 쌍·predictor 집합 소속)은 아래 superRefine에서, 카탈로그가
+  // 필요한 것(spline은 continuous만·eventLevel은 categorical outcome에만)은
+  // statsRecipeValidation.ts가 담당한다(계획서 §1 "이것만으로는 부족하다").
   regression: z.object({
     outcomeKey: z.string().min(1),
     referenceLevels: z.record(z.string(), z.string()).default({}),
+    eventLevel: z.string().optional(),
+    standardizePredictors: z.boolean().default(false),
+    interactionTerms: z.array(z.tuple([z.string(), z.string()])).default([]),
+    splineKeys: z.array(z.string()).default([]),
   }).strict().optional(),
   // encoding/options/rollups(마스터 계획서 §1)는 PR0-C 범위 밖 — .strict()로 보내면 400.
 }).strict().superRefine((recipe, ctx) => {
@@ -242,6 +251,75 @@ export const StatsAnalysisRecipeSchema = z.object({
         path: ['regression', 'outcomeKey'],
       });
     }
+
+    // PR4-A2 §1 — interaction/spline 구조검사(카탈로그 불필요). predictor 집합은
+    // variableKeys - outcomeKey(카탈로그 조회 없이도 알 수 있다).
+    const predictorKeySet = new Set(
+      recipe.variableKeys.filter((k) => k !== recipe.regression!.outcomeKey),
+    );
+    const seenInteractionPairs = new Set<string>();
+    recipe.regression.interactionTerms.forEach(([a, b], index) => {
+      if (a === b) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'INTERACTION_REQUIRES_TWO_DISTINCT_VARIABLES',
+          path: ['regression', 'interactionTerms', index],
+        });
+        return;
+      }
+      // [A,B]와 [B,A]를 같은 쌍으로 정규화해서 비교한다.
+      const normalized = [a, b].sort().join('\u0000');
+      if (seenInteractionPairs.has(normalized)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'DUPLICATE_INTERACTION_TERM',
+          path: ['regression', 'interactionTerms', index],
+        });
+        return;
+      }
+      seenInteractionPairs.add(normalized);
+      for (const key of [a, b]) {
+        if (!predictorKeySet.has(key)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'INTERACTION_VARIABLE_MUST_BE_A_PREDICTOR',
+            path: ['regression', 'interactionTerms', index],
+          });
+        }
+      }
+    });
+
+    const splineKeySet = new Set<string>();
+    recipe.regression.splineKeys.forEach((key, index) => {
+      if (splineKeySet.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'DUPLICATE_SPLINE_KEY',
+          path: ['regression', 'splineKeys', index],
+        });
+        return;
+      }
+      splineKeySet.add(key);
+      if (!predictorKeySet.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'SPLINE_VARIABLE_MUST_BE_A_PREDICTOR',
+          path: ['regression', 'splineKeys', index],
+        });
+      }
+    });
+
+    // spline predictor는 interaction에 전면 금지(v1) — 대비(contrast) 정의가
+    // spline 블록에만 0이 아닌 값을 갖는다는 전제가 깨진다(계획서 §1/§3).
+    recipe.regression.interactionTerms.forEach(([a, b], index) => {
+      if (splineKeySet.has(a) || splineKeySet.has(b)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'SPLINE_INTERACTION_NOT_SUPPORTED',
+          path: ['regression', 'interactionTerms', index],
+        });
+      }
+    });
   }
 });
 
@@ -661,6 +739,12 @@ export const RegressionNonEstimableReasonSchema = z.enum([
   'SEPARATION_DETECTED',
   'SEPARATION_CHECK_FAILED',
   'NOT_CONVERGED',
+  // PR4-A2 — categorical outcome 관측 레벨이 정확히 2개가 아님(공개통제 ③ 통과
+  // 후에만 판정 — §2 ④ "categorical 2레벨 outcome").
+  'CATEGORICAL_OUTCOME_NOT_BINARY',
+  // PR4-A2 — spline predictor 고유값 수 < df+1(=5), 또는 내부 knot이 서로/경계
+  // knot과 겹침(편중 분포). 적응형 축소 없이 거부(§2 "표준화·spline 기저").
+  'SPLINE_INSUFFICIENT_UNIQUE_VALUES',
 ]);
 
 export const RegressionInferenceWithheldReasonSchema = z.enum([
@@ -690,6 +774,11 @@ export const RegressionTermSchema = z.object({
     ciLower: z.number().nullable(),
     ciUpper: z.number().nullable(),
   }).nullable(),
+  // PR4-A2 — spline 기저 항은 forest plot에서 묶어 빼고 부분효과 곡선으로 대체
+  // 표시해야 한다(없으면 β_ns1..β_ns4가 해석 불가능한 채로 나열된다). interaction
+  // 항은 interactionOf로 어느 두 predictor의 곱인지 알려준다.
+  termType: z.enum(['main', 'interaction', 'spline_basis']).default('main'),
+  interactionOf: z.tuple([z.string(), z.string()]).nullable().default(null),
 }).strict();
 
 // OLS는 r2/adjR2만, 로지스틱은 logLik/aic/pseudoR2만 채운다 — 모형 전체 검정
@@ -701,6 +790,68 @@ export const RegressionFitSchema = z.object({
   logLik: z.number().nullable(),
   aic: z.number().nullable(),
   pseudoR2: z.number().nullable(),
+}).strict();
+
+// PR4-A2 — 행 단위 진단(잔차·leverage·Cook's D). disclosureClass=limited_row라
+// (계획서 §6.8.1) statsLimitedRowMerge.ts가 붙이기 전엔 배열 자체가 없다
+// (scatter.points와 동일 원칙). pointDiagnosticsStatus==='available'일 때만 이
+// 배열이 존재하고, 존재하면 아래 넷은 전부 non-null이다(모형 단위 판정을 이미
+// 서버가 통과시켰으므로 — 행별 부분 결측은 v1에서 만들지 않는다).
+export const RegressionPointDiagnosticSchema = z.object({
+  rowIndex: z.number().int(),
+  fittedValue: z.number().finite(),
+  residual: z.number().finite(),
+  leverage: z.number().finite(),
+  standardizedResidual: z.number().finite(),
+  cooksDistance: z.number().finite(),
+  theoreticalQuantile: z.number().finite(),
+}).strict();
+
+// PR4-A2 — VIF/condition number(집계, 모든 사용자) + 행 단위 진단 게이트(limited_row).
+// pointDiagnosticsSupported는 (X,y,β)만으로 직접 판정한다 — estimation/
+// inferenceWithheldReason 문자열은 절대 참고하지 않는다(반례로 확인된 원칙, 계획서
+// §3 "_evaluate_diagnostic_support"). pointDiagnosticsStatus는 권한·엔진호출까지
+// 반영한 5단계 최종 표시 상태다.
+export const RegressionDiagnosticsSchema = z.object({
+  conditionNumber: z.number().finite().nullable(),
+  vif: z.array(z.object({
+    // interaction 항은 두 predictor에 걸쳐 있어 단일 variableKey가 없다
+    // (RegressionTermSchema.interactionOf 참고) — null 허용.
+    variableKey: z.string().nullable(),
+    termName: z.string(),
+    vif: z.number().finite().nullable(),
+  })).nullable(),
+  pointDiagnosticsSupported: z.boolean(),
+  pointDiagnosticsUnsupportedReason: z.enum([
+    'QR_DECOMPOSITION_FAILED', 'NEAR_SINGULAR_LEVERAGE', 'INVALID_DIAGNOSTIC_SCALE',
+  ]).nullable(),
+  pointDiagnosticsStatus: z.enum([
+    'not_requested', 'unavailable_no_access', 'unavailable_model',
+    'unavailable_computation_failed', 'available',
+  ]),
+  displayedPointCount: z.number().int().nullable(),
+  totalPointCount: z.number().int().nullable(),
+  pointDiagnostics: z.array(RegressionPointDiagnosticSchema).optional(),
+}).strict();
+
+// PR4-A2 — spline 부분효과: 기준점(그리드 최솟값) 대비 선형예측자 차이(§1 "delta"
+// 방식, 계획서 §3 "spline 부분효과"). scale은 항상 linear_predictor — 로지스틱도
+// 확률이 아니라 log-odds 대비값 + exponentiated(OR)만 제공한다(다른 predictor 값에
+// 의존하는 절대 예측 확률은 "부분효과"라는 틀과 맞지 않는다).
+export const RegressionSplinePartialEffectSchema = z.object({
+  variableKey: z.string(),
+  scale: z.enum(['linear_predictor']),
+  points: z.array(z.object({
+    x: z.number().finite(),
+    deltaFromBaseline: z.number().finite().nullable(),
+    ciLower: z.number().finite().nullable(),
+    ciUpper: z.number().finite().nullable(),
+    exponentiated: z.object({
+      estimate: z.number().finite(),
+      ciLower: z.number().finite().nullable(),
+      ciUpper: z.number().finite().nullable(),
+    }).nullable(),
+  })),
 }).strict();
 
 const RegressionSuppressedSchema = z.object({
@@ -738,6 +889,12 @@ const RegressionResultBodySchema = z.object({
   qualityFlags: z.array(z.string()),
   // 리뷰 #7 — 행 단위 vs 개인 단위 해석 주의를 고정 문구로 싣는다.
   analysisUnitNote: z.string(),
+  // PR4-A2 — estimation==='ok'|'inference_withheld'면 non-null(개별 집계값은
+  // 계산 실패 시 null 허용), 'non_estimable'이면 null(아래 상태 불변식이 강제).
+  diagnostics: RegressionDiagnosticsSchema.nullable(),
+  standardizedPredictorKeys: z.array(z.string()),
+  standardization: z.record(z.string(), z.object({ mean: z.number(), sd: z.number() })).nullable(),
+  splinePartialEffects: z.array(RegressionSplinePartialEffectSchema).nullable(),
 }).strict();
 
 function isFiniteNumber(v: unknown): v is number {
@@ -769,7 +926,47 @@ function validateRegressionStateInvariants(
     if (result.inferenceWithheldReason !== null) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NON_ESTIMABLE_MUST_NOT_SET_INFERENCE_WITHHELD_REASON', path: ['inferenceWithheldReason'] });
     }
+    // PR4-A2 — 계수 자체가 없으므로 진단·spline도 없다.
+    if (result.diagnostics !== null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NON_ESTIMABLE_REQUIRES_NULL_DIAGNOSTICS', path: ['diagnostics'] });
+    }
+    if (result.splinePartialEffects !== null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NON_ESTIMABLE_REQUIRES_NULL_SPLINE_PARTIAL_EFFECTS', path: ['splinePartialEffects'] });
+    }
     return;
+  }
+
+  // PR4-A2 — ok/inference_withheld는 β가 항상 존재하므로 diagnostics 객체 자체는
+  // 항상 있다(개별 집계값의 계산 실패는 그 값만 null — 열별/항별 격리, 여기서는
+  // 객체 존재만 강제한다). pointDiagnosticsSupported는 (X,y,β)로 직접 판정되며
+  // estimation과 무관하다 — 그래서 이 자리에서 값 자체를 검사하지 않는다.
+  if (result.diagnostics === null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'ESTIMATED_RESULT_REQUIRES_DIAGNOSTICS', path: ['diagnostics'] });
+  }
+
+  // PR4-A2 — inference_withheld(사유 불문)면 spline의 원 스케일 CI와 OR CI를 전부
+  // null로 만든다(계수표의 nullifyInference와 동일 원칙 — estimate/exponentiated.
+  // estimate는 유지, ciLower/ciUpper만 null). ok에서는 점별 실패 격리만 허용되고
+  // 블록 전체를 강제로 null화하지 않는다.
+  if (result.estimation === 'inference_withheld' && result.splinePartialEffects !== null) {
+    result.splinePartialEffects.forEach((effect, effectIndex) => {
+      effect.points.forEach((point, pointIndex) => {
+        if (point.ciLower !== null || point.ciUpper !== null) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'INFERENCE_WITHHELD_REQUIRES_NULL_SPLINE_CI',
+            path: ['splinePartialEffects', effectIndex, 'points', pointIndex],
+          });
+        }
+        if (point.exponentiated && (point.exponentiated.ciLower !== null || point.exponentiated.ciUpper !== null)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'INFERENCE_WITHHELD_REQUIRES_NULL_SPLINE_EXPONENTIATED_CI',
+            path: ['splinePartialEffects', effectIndex, 'points', pointIndex, 'exponentiated'],
+          });
+        }
+      });
+    });
   }
 
   // ok | inference_withheld 공통 — 계수가 비어있으면 안 되고 fit은 항상 있다.
@@ -870,6 +1067,9 @@ export type RegressionNonEstimableReason  = z.infer<typeof RegressionNonEstimabl
 export type RegressionInferenceWithheldReason = z.infer<typeof RegressionInferenceWithheldReasonSchema>;
 export type RegressionTerm                = z.infer<typeof RegressionTermSchema>;
 export type RegressionFit                 = z.infer<typeof RegressionFitSchema>;
+export type RegressionPointDiagnostic     = z.infer<typeof RegressionPointDiagnosticSchema>;
+export type RegressionDiagnostics         = z.infer<typeof RegressionDiagnosticsSchema>;
+export type RegressionSplinePartialEffect = z.infer<typeof RegressionSplinePartialEffectSchema>;
 export type AnalyzeRegressionResult       = z.infer<typeof AnalyzeRegressionResultSchema>;
 export type AnalyzeResult                 = z.infer<typeof AnalyzeResultSchema>;
 export type AnalyzeRequest                = z.infer<typeof AnalyzeRequestSchema>;

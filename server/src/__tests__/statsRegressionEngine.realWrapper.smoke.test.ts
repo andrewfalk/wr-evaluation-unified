@@ -68,6 +68,7 @@ describe.skipIf(!AVAILABLE)('runRegressionStatsEngine — 실제 Python + 실제
       X,
       columnNames: ['intercept', 'x1'],
       covariance: { type: 'hc3' },
+      splineContrasts: [],
     });
     expect(result.estimation).toBe('ok');
     expect(result.terms).toHaveLength(2);
@@ -76,6 +77,10 @@ describe.skipIf(!AVAILABLE)('runRegressionStatsEngine — 실제 Python + 실제
       expect(term.se).not.toBeNull();
       expect(Number.isFinite(term.se as number)).toBe(true);
     }
+    // PR4-A2 — 실제 Python 왕복으로 diagnostics도 채워지는지 확인.
+    expect(result.diagnostics).not.toBeNull();
+    expect(result.diagnostics?.pointDiagnosticsSupported).toBe(true);
+    expect(result.diagnostics?.vif).toHaveLength(1);
   }, 30000);
 
   it('binomial(로지스틱) HC3 요청도 실제 프로세스를 왕복해 정상 추정 결과를 받는다', async () => {
@@ -95,6 +100,7 @@ describe.skipIf(!AVAILABLE)('runRegressionStatsEngine — 실제 Python + 실제
       X,
       columnNames: ['intercept', 'x1'],
       covariance: { type: 'hc3' },
+      splineContrasts: [],
     });
     expect(['ok', 'inference_withheld']).toContain(result.estimation);
     expect(result.terms).toHaveLength(2);
@@ -132,6 +138,7 @@ describe.skipIf(!AVAILABLE)('runRegressionStatsEngine — 실제 Python + 실제
     const design = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys: ['x1', 'x2', 'x3'], catalogByKey: catalog,
       method: 'ols_linear', referenceLevels: {}, eventSummary: null,
+      eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(design.ok).toBe(true);
     if (!design.ok) return;
@@ -145,6 +152,7 @@ describe.skipIf(!AVAILABLE)('runRegressionStatsEngine — 실제 Python + 실제
       X: design.design.x,
       columnNames: design.design.columns.map((c) => c.name),
       covariance: { type: 'hc3' },
+      splineContrasts: [],
     });
     expect(result.estimation).toBe('ok');
     expect(result.terms).toHaveLength(4);

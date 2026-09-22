@@ -5,13 +5,23 @@
 // 하나도 나가면 안 된다.
 import { isSmallCell } from './statsSmallCell';
 import { isGroupBreakdownDisclosable } from './statsBivariateDisclosureGate';
-import type { RegressionEventSummary, RegressionLevelSummary } from './statsRegressionDataset';
+import type {
+  RegressionEventSummary,
+  RegressionInteractionLevelSummary,
+  RegressionLevelSummary,
+} from './statsRegressionDataset';
 
 export interface RegressionDisclosureInput {
   includedPersonCount: number;
   excludedPersonCount: number;
+  // PR4-A2 — predictor 레벨 요약 + (categorical outcome이면) outcome 레벨 요약이
+  // 이미 합쳐져서 들어온다(호출부 statsAnalysisContext.ts 책임 — "레벨이 몇
+  // 개인지"가 이 게이트 통과 전에 드러나지 않게 하기 위함).
   levelSummaries: ReadonlyArray<RegressionLevelSummary>;
   eventSummary: RegressionEventSummary | null;
+  // PR4-A2 — interactionTerms 중 두 predictor가 둘 다 categorical/ordinal/boolean인
+  // 쌍의 교차표 요약(연속형이 섞인 쌍은 빈 배열로 옴 — 호출부가 이미 필터링).
+  interactionLevelSummaries: ReadonlyArray<RegressionInteractionLevelSummary>;
 }
 
 export interface RegressionDisclosureResult {
@@ -28,6 +38,7 @@ export function evaluateRegressionDisclosure(input: RegressionDisclosureInput): 
     isSmallCell(input.includedPersonCount) ||
     isSmallCell(input.excludedPersonCount) ||
     !isGroupBreakdownDisclosable(input.levelSummaries) ||
+    !isGroupBreakdownDisclosable(input.interactionLevelSummaries) ||
     (input.eventSummary !== null &&
       (isSmallCell(input.eventSummary.eventPersonCount) || isSmallCell(input.eventSummary.nonEventPersonCount)));
 

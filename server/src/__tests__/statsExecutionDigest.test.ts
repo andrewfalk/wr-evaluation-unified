@@ -107,8 +107,9 @@ describe('computeExecutionDigest — B안 버전 상수 3개(같은 모듈 상�
       expect(capturedInput.chartDisclosurePolicyVersion).toBe('v2-histogram-adaptive-resolution');
       expect(capturedInput.suppressionRuleVersion).toBe('v5-histogram-adaptive-resolution');
       // PR4-A1 — AnalyzeResult.regression 필드가 추가돼 v4-histogram-merge-fields →
-      // v5-regression으로 범프됐다.
-      expect(capturedInput.resultSchemaVersion).toBe('v5-regression');
+      // v5-regression으로 범프됐다. PR4-A2 — diagnostics/spline 필드 추가로
+      // v6-regression-diagnostics-spline으로 다시 범프됐다.
+      expect(capturedInput.resultSchemaVersion).toBe('v6-regression-diagnostics-spline');
 
       // (2) 각 필드를 범프 전 값으로 되돌리면 실제로 다른 digest가 나오는지(=이
       // 필드들이 죽은 값이 아니라 실제로 해시에 반영되는지) 확인한다. 스파이는
@@ -116,7 +117,7 @@ describe('computeExecutionDigest — B안 버전 상수 3개(같은 모듈 상�
       const OLD_VALUES: Record<string, string> = {
         chartDisclosurePolicyVersion: 'v1-outlier-partition-gate',
         suppressionRuleVersion: 'v4-chart-outlier-partition-gate',
-        resultSchemaVersion: 'v4-histogram-merge-fields',
+        resultSchemaVersion: 'v5-regression',
       };
       for (const key of Object.keys(OLD_VALUES)) {
         const staleInput = { ...capturedInput, [key]: OLD_VALUES[key] };
@@ -140,9 +141,9 @@ describe('computeExecutionDigest — PR4-A1 회귀 정책 버전 3개 캐시 무
       const currentDigest = computeExecutionDigest(base);
       const capturedInput = spy.mock.calls[0][0] as Record<string, unknown>;
 
-      expect(capturedInput.methodPolicyVersion).toBe('v2-regression');
+      expect(capturedInput.methodPolicyVersion).toBe('v3-regression-categorical-outcome');
       expect(capturedInput.estimabilityPolicyVersion).toBe('v1-regression-design');
-      expect(capturedInput.regressionPolicyVersion).toBe('v2-association-svd-rank');
+      expect(capturedInput.regressionPolicyVersion).toBe('v2-diagnostics-spline');
 
       const OLD_VALUES: Record<string, string> = {
         methodPolicyVersion: 'v1-bivariate',
@@ -155,9 +156,20 @@ describe('computeExecutionDigest — PR4-A1 회귀 정책 버전 3개 캐시 무
         // "옛 리터럴로 되돌리면 digest가 달라지는지"를 이 구체적인 값으로도
         // 고정해 다음 정책 수정 때 범프 누락을 잡는다.
         regressionPolicyVersionRankFixPrevious: 'v1-association',
+        // PR4-A2 — 진단·spline·interaction·표준화·categorical outcome 추가로
+        // v2-association-svd-rank → v2-diagnostics-spline으로 다시 범프됐다.
+        regressionPolicyVersionDiagnosticsPrevious: 'v2-association-svd-rank',
+        // PR4-A2 — binary_logistic이 categorical outcome도 허용하도록 바뀌어
+        // v2-regression → v3-regression-categorical-outcome으로 다시 범프됐다.
+        methodPolicyVersionPrevious: 'v2-regression',
+      };
+      const FIELD_ALIASES: Record<string, string> = {
+        regressionPolicyVersionRankFixPrevious: 'regressionPolicyVersion',
+        regressionPolicyVersionDiagnosticsPrevious: 'regressionPolicyVersion',
+        methodPolicyVersionPrevious: 'methodPolicyVersion',
       };
       for (const key of Object.keys(OLD_VALUES)) {
-        const staleKey = key === 'regressionPolicyVersionRankFixPrevious' ? 'regressionPolicyVersion' : key;
+        const staleKey = FIELD_ALIASES[key] ?? key;
         const staleInput = { ...capturedInput, [staleKey]: OLD_VALUES[key] };
         const staleDigest = canonicalSerializer.canonicalDigest(staleInput);
         expect(staleDigest).not.toBe(currentDigest);

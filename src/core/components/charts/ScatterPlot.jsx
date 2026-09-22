@@ -13,7 +13,12 @@ const MARGIN = { top: 12, right: 16, bottom: 24, left: 48 };
 // 없으면 grid(2D 집계, aggregate)로 대체 렌더링한다. 회귀선·r·p값은 항상 전체
 // 유효 pairwise-complete 집합 기준 — 표시가 샘플/그리드로 축소돼도 통계량은
 // 축소되지 않는다는 것을 "표시 중 n / 전체 n"으로 명시한다.
-export function ScatterPlot({ scatter, regressionLine }) {
+// PR4-A2 — pointRadius/pointRadiusAccessor(선택) — 회귀 진단(leverage vs
+// 표준화잔차) 패널이 Cook's D를 점 반지름으로 인코딩하기 위해 추가한다(색이
+// 아니라 크기 — §6.8.3 상태색 재사용 금지 원칙과 무관, 유의성을 색으로 표시하지
+// 않는 것과 같은 이유로 크기를 쓴다). 기본값은 기존 고정 반지름(3)을 그대로
+// 유지해 기존 6종 차트 호출부는 무수정이다.
+export function ScatterPlot({ scatter, regressionLine, pointRadius = 3, pointRadiusAccessor }) {
   if (!scatter || (!scatter.points && !scatter.grid)) {
     return <SuppressionNotice />;
   }
@@ -45,7 +50,11 @@ export function ScatterPlot({ scatter, regressionLine }) {
     // 이미 접근 가능한 HTML 표로 제공)가 실질적인 키보드/스크린리더 대안이고,
     // 그리드(아래 분기, 항상 훨씬 적은 셀 수)에만 개별 포커스형 툴팁을 붙인다.
     content = scatter.points.map((p, i) => (
-      <circle key={i} cx={xScale(p[0])} cy={yScale(p[1])} r={3} fill={ACCENT} fillOpacity={0.55} />
+      <circle
+        key={i} cx={xScale(p[0])} cy={yScale(p[1])}
+        r={pointRadiusAccessor ? pointRadiusAccessor(p, i) : pointRadius}
+        fill={ACCENT} fillOpacity={0.55}
+      />
     ));
     tableRows = scatter.points.map((p, i) => <tr key={i}><td>{formatNumber(p[0])}</td><td>{formatNumber(p[1])}</td></tr>);
   } else {

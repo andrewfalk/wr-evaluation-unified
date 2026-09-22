@@ -7,6 +7,8 @@ import { StackedBarChart100 } from '../charts/StackedBarChart100';
 import { ScatterPlot } from '../charts/ScatterPlot';
 import { CorrelationHeatmap } from '../charts/CorrelationHeatmap';
 import { ForestPlot } from '../charts/ForestPlot';
+import { RegressionDiagnosticsPanel } from '../charts/RegressionDiagnosticsPanel';
+import { SplinePartialEffectChart } from '../charts/SplinePartialEffectChart';
 
 const NULL_REASON_LABELS = {
   insufficient_data: '자료 부족',
@@ -47,6 +49,9 @@ const REGRESSION_NON_ESTIMABLE_LABELS = {
   SEPARATION_DETECTED: '결과변수가 설명변수로 완전히 구분돼 계산할 수 없습니다.',
   SEPARATION_CHECK_FAILED: '분리 여부를 판정하지 못해 실행을 중단했습니다.',
   NOT_CONVERGED: '계산이 수렴하지 않았습니다.',
+  // PR4-A2
+  CATEGORICAL_OUTCOME_NOT_BINARY: '결과변수의 관측된 범주가 정확히 2개가 아닙니다.',
+  SPLINE_INSUFFICIENT_UNIQUE_VALUES: '스플라인을 적용할 변수의 고유값이 부족하거나 분포가 편중돼 있습니다.',
 };
 const GROUP_COMPARISON_METHODS = new Set(['welch_t', 'mann_whitney', 'anova', 'kruskal_wallis', 'paired_t', 'wilcoxon_signed_rank']);
 // [코드리뷰 2026-09-12 2차] η²(anova)·ε²(kruskal_wallis)는 부호 있는 "차이" 개념이
@@ -456,7 +461,39 @@ function num(v, digits = 4) {
   return v === null || v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(digits);
 }
 
-function RegressionCoefficientTable({ terms, exponentiated }) {
+// PR4-A2 — 표준화된 predictor의 주효과 계수는 "원 단위 1 증가당"이 아니라 "1 SD
+// 증가당" 계수라 단위가 다르다. 실행 시 저장된 standardizedPredictorKeys를
+// 기준으로 표시한다(체크박스는 실행 후에도 바뀔 수 있어 그것으로는 판단할 수
+// 없다 — 리뷰 지적). interaction 항에는 적용하지 않는다 — 아래 참고.
+function isStandardizedMainTerm(t, standardizedKeys) {
+  return Boolean(t.variableKey) && standardizedKeys.length > 0 && standardizedKeys.includes(t.variableKey);
+}
+
+// PR4-A2(리뷰 후 수정) — interaction 계수(β₁₂)는 "1 SD당 효과"로 해석할 수 없다
+// (β₁z₁+β₂z₂+β₁₂z₁z₂에서 z₁의 한계효과는 β₁+β₁₂z₂이지 β₁₂ 단독이 아니다). 참여
+// 변수 중 하나라도 표준화됐다고 전체에 동일한 suffix를 붙이면 잘못된 해석을
+// 유도한다(리뷰 지적) — 대신 각 변수가 어떤 척도로 곱해졌는지(z-score/원 단위)를
+// 개별 병기한다.
+function interactionScaleNote(interactionOf, standardizedKeys, catalogByKey) {
+  if (!interactionOf || standardizedKeys.length === 0) return null;
+  const describe = (key) => `${variableLabel(catalogByKey, key)}(${standardizedKeys.includes(key) ? 'z-score' : '원 단위'})`;
+  return `${describe(interactionOf[0])} × ${describe(interactionOf[1])}`;
+}
+
+function regressionTermRowLabel(t, standardizedKeys = [], catalogByKey = new Map()) {
+  const base = t.termType === 'interaction' ? t.label : (t.level ? `${t.label}: ${t.level}` : t.label); // 이미 "A × B" 형태(statsRegressionSuppression.ts)
+  if (t.termType === 'interaction') {
+    const note = interactionScaleNote(t.interactionOf, standardizedKeys, catalogByKey);
+    return note ? `${base} — ${note}` : base;
+  }
+  return isStandardizedMainTerm(t, standardizedKeys) ? `${base} (표준화, 1 SD당)` : base;
+}
+
+function RegressionCoefficientTable({ terms, exponentiated, standardizedPredictorKeys = [], catalogByKey = new Map() }) {
+  // PR4-A2 — spline 기저 항(β_ns1..β_ns4)은 개별로는 해석 불가능하므로 계수표에서
+  // 뺀다(SplinePartialEffectChart로 대체 표시 — ForestPlot과 동일 원칙).
+  const rows = terms.filter((t) => t.termType !== 'spline_basis');
+  const splineVariables = [...new Set(terms.filter((t) => t.termType === 'spline_basis').map((t) => t.variableKey))];
   return (
     <div className="swb-table-scroll">
       <table className="swb-table" aria-label="회귀 계수표">
@@ -468,9 +505,9 @@ function RegressionCoefficientTable({ terms, exponentiated }) {
           </tr>
         </thead>
         <tbody>
-          {terms.map((t) => (
+          {rows.map((t) => (
             <tr key={t.name}>
-              <td>{t.level ? `${t.label}: ${t.level}` : t.label}</td>
+              <td>{regressionTermRowLabel(t, standardizedPredictorKeys, catalogByKey)}</td>
               <td>{num(t.estimate, 3)}</td>
               <td>{num(t.se, 3)}</td>
               {exponentiated && <td>{t.exponentiated ? num(t.exponentiated.estimate, 2) : '—'}</td>}
@@ -481,6 +518,11 @@ function RegressionCoefficientTable({ terms, exponentiated }) {
           ))}
         </tbody>
       </table>
+      {splineVariables.length > 0 && (
+        <p className="swb-suppressed-note">
+          스플라인 변수({splineVariables.join(', ')})의 개별 계수는 해석할 수 없어 생략했습니다 — 아래 부분효과 그래프를 참고하세요.
+        </p>
+      )}
     </div>
   );
 }
@@ -530,8 +572,37 @@ function RegressionResultCard({ regression, catalogByKey }) {
         </p>
       )}
 
-      <ForestPlot terms={regression.terms} exponentiated={isLogistic} />
-      <RegressionCoefficientTable terms={regression.terms} exponentiated={isLogistic} />
+      <ForestPlot
+        terms={regression.terms} exponentiated={isLogistic}
+        standardizedPredictorKeys={regression.standardizedPredictorKeys}
+        variableLabelOf={(k) => variableLabel(catalogByKey, k)}
+      />
+      <RegressionCoefficientTable
+        terms={regression.terms} exponentiated={isLogistic}
+        standardizedPredictorKeys={regression.standardizedPredictorKeys} catalogByKey={catalogByKey}
+      />
+      {regression.standardizedPredictorKeys && regression.standardizedPredictorKeys.length > 0 && (
+        <p className="swb-suppressed-note">
+          표준화 적용: {regression.standardizedPredictorKeys.map((k) => variableLabel(catalogByKey, k)).join(', ')}
+          {' '}— 표준화된 변수의 <strong>주효과</strong> 계수는 해당 변수 1 표준편차 증가당
+          효과입니다. interaction 항의 계수는 단일 변수의 1 SD당 효과가 아니므로(참여 변수
+          중 하나의 값에 따라 달라짐) 위 계수표의 척도 표시(z-score/원 단위)를 함께 참고하세요.
+        </p>
+      )}
+
+      {regression.splinePartialEffects && regression.splinePartialEffects.length > 0 && (
+        <>
+          <strong>스플라인 부분효과</strong>
+          {regression.splinePartialEffects.map((effect) => (
+            <SplinePartialEffectChart
+              key={effect.variableKey}
+              effect={effect}
+              label={variableLabel(catalogByKey, effect.variableKey)}
+              exponentiated={isLogistic}
+            />
+          ))}
+        </>
+      )}
 
       {regression.fit && (
         <p className="swb-suppressed-note">
@@ -546,6 +617,12 @@ function RegressionResultCard({ regression, catalogByKey }) {
       )}
       <p className="swb-suppressed-note">완전사례 제외 {regression.excludedRowCount}건</p>
       <p className="swb-suppressed-note">{regression.analysisUnitNote}</p>
+
+      <RegressionDiagnosticsPanel
+        diagnostics={regression.diagnostics}
+        method={regression.method}
+        isPersonCluster={regression.covariance === 'person_cluster_cr1'}
+      />
     </div>
   );
 }
@@ -670,7 +747,9 @@ export function ResultPanel({
           )
         )}
 
-        {committedResult && isDescriptiveRun && (
+        {/* PR4-A2 — 회귀도 집계 CSV export 지원(exportUnsupported prop이 bivariate/
+            correlation_matrix만 막는다 — StatisticsWorkbench.jsx 기준과 동일). */}
+        {committedResult && (isDescriptiveRun || isRegressionRun) && (
           <button
             type="button"
             className="swb-btn"
@@ -682,9 +761,9 @@ export function ResultPanel({
             {exportState.status === 'exporting' ? '내보내는 중…' : '집계 결과 내보내기 (CSV)'}
           </button>
         )}
-        {committedResult && !isDescriptiveRun && (
+        {committedResult && !isDescriptiveRun && !isRegressionRun && (
           <p className="swb-suppressed-note" style={{ marginTop: 12 }}>
-            {isBivariateRun ? '이변량' : isRegressionRun ? '회귀' : '상관행렬'} 결과는 아직 CSV 내보내기를 지원하지 않습니다.
+            {isBivariateRun ? '이변량' : '상관행렬'} 결과는 아직 CSV 내보내기를 지원하지 않습니다.
           </p>
         )}
         {exportState.status === 'error' && (

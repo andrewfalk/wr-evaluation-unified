@@ -62,7 +62,7 @@ function validCorrelationMatrixStdout(variables: CorrelationMatrixEngineRequest[
     }
   }
   return JSON.stringify({
-    protocolVersion: 4,
+    protocolVersion: 5,
     correlationMatrix: { method: 'pearson_correlation', cells },
   });
 }
@@ -120,7 +120,7 @@ describe('runCorrelationMatrixStatsEngine — §8 입력 상한 (3종 분리 테
     const variables = makeVariables(k, rows, (i) => i + 0.123456789);
     const request: CorrelationMatrixEngineRequest = { method: 'pearson_correlation', variables };
 
-    const payloadBytes = Buffer.byteLength(JSON.stringify({ protocolVersion: 4, correlationMatrix: request }), 'utf8');
+    const payloadBytes = Buffer.byteLength(JSON.stringify({ protocolVersion: 5, correlationMatrix: request }), 'utf8');
     expect(k * rows).toBeLessThan(MAX_TOTAL_VALUES);
     expect(payloadBytes).toBeLessThan(config.stats.maxInputBytes);
 
