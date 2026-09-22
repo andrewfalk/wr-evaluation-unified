@@ -18,7 +18,7 @@ import { buildDataset, type DatasetResult } from './statsDatasetBuilder';
 import { computeQueryFamilyDigest, checkAndRecordDifferencing, type DifferencingCheckResult } from './statsDifferencingGuard';
 import { buildPairedDataset, type PairedDatasetResult } from './statsBivariateDataset';
 import { evaluateBivariateDisclosure } from './statsBivariateDisclosureGate';
-import { computeAvailableMethods, computeCorrelationMatrixAvailableMethods } from './statsMethodCatalog';
+import { computeAvailableMethods, computeCorrelationMatrixAvailableMethods, computeRegressionAvailableMethods } from './statsMethodCatalog';
 import {
   buildCorrelationMatrixPairedDatasets,
   evaluateCorrelationMatrixInputLimits,
@@ -26,6 +26,14 @@ import {
   type CorrelationMatrixVariable,
 } from './statsCorrelationMatrixDataset';
 import { METHOD_POLICY_VERSION } from './statsExecutionDigest';
+import {
+  computeRegressionCompleteCase,
+  computeRegressionLevelSummaries,
+  computeRegressionEventSummary,
+  evaluateRegressionInputLimits,
+} from './statsRegressionDataset';
+import { evaluateRegressionDisclosure } from './statsRegressionDisclosureGate';
+import { buildRegressionDesignMatrix, type RegressionDesignResult } from './statsRegressionDesign';
 
 export interface AnalysisContext {
   orgId: string;
@@ -52,6 +60,17 @@ export interface AnalysisContext {
   // 통과할 때 이미 만들어둔 변수별 값 배열. statsCorrelationMatrixSuppression.ts가
   // Python 요청 조립 시 그대로 재사용해 같은 O(k×rows) 추출을 두 번 하지 않는다.
   correlationMatrixVariables: CorrelationMatrixVariable[] | null;
+  // PR4-A1 — analysisMode==='regression'일 때만 채워진다(그 외 null/false).
+  // regressionDesign은 ③(공개통제)을 통과했을 때만 계산된다(계획서 §2 "③이
+  // ④보다 먼저인 이유" — 통과 못 한 요청엔 설계행렬 관련 값이 하나도 나가면
+  // 안 된다). ok:false면 Node 자체 판정으로 non_estimable(Python 미호출).
+  regressionDisclosed: boolean;
+  regressionDesign: RegressionDesignResult | null;
+  regressionExcludedRowCount: number | null;
+  // outcome 타입만으로 결정되는 method(§2 ④ — outcome이 continuous면 ols_linear,
+  // boolean이면 binary_logistic, 그 외엔 null). requestedMethod와 무관하게
+  // 항상 이 값으로 설계행렬을 만든다 — v1은 outcome 타입이 method를 확정한다.
+  regressionMethod: 'ols_linear' | 'binary_logistic' | null;
 }
 
 export type BuildAnalysisContextResult =
@@ -103,6 +122,10 @@ export async function buildAnalysisContext(
   let methodCatalogVersion: string | null = null;
   let correlationMatrixPairs: Map<string, CorrelationMatrixPairSummary> | null = null;
   let correlationMatrixVariables: CorrelationMatrixVariable[] | null = null;
+  let regressionDisclosed = false;
+  let regressionDesign: RegressionDesignResult | null = null;
+  let regressionExcludedRowCount: number | null = null;
+  let regressionMethod: 'ols_linear' | 'binary_logistic' | null = null;
 
   if (recipe.analysisMode === 'bivariate') {
     const [keyX, keyY] = recipe.variableKeys;
@@ -142,6 +165,61 @@ export async function buildAnalysisContext(
       availableMethods = computeCorrelationMatrixAvailableMethods(dataset.personCount, recipe.variableKeys, catalogByKey, METHOD_POLICY_VERSION);
       methodCatalogVersion = METHOD_POLICY_VERSION;
     }
+  } else if (recipe.analysisMode === 'regression' && recipe.regression) {
+    // PR4-A1 §2 실행 순서 ①~④. zod+statsRecipeValidation.ts가 이미
+    // variableKeys.length>=2 · outcomeKey∈variableKeys를 보장했으므로
+    // predictorKeys는 항상 1개 이상이다.
+    const { outcomeKey, referenceLevels } = recipe.regression;
+    const predictorKeys = recipe.variableKeys.filter((k) => k !== outcomeKey);
+    const outcomeVar = catalogByKey.get(outcomeKey);
+    regressionMethod = outcomeVar?.type === 'continuous' ? 'ols_linear' : outcomeVar?.type === 'boolean' ? 'binary_logistic' : null;
+
+    // ① 입력상한 선검사 — 더미 확장 전 원본 변수 개수(outcome+predictor)로
+    // 보수적으로 측정한다(statsRegressionDataset.ts 주석 — 더미 확장은 열만
+    // 늘리므로 실제 초과는 ④ TOO_MANY_PARAMETERS가 별도로 잡는다).
+    const inputLimitCheck = evaluateRegressionInputLimits(dataset.rows.length, recipe.variableKeys.length);
+    if (!inputLimitCheck.ok) {
+      return { ok: false, status: 400, body: { code: 'INPUT_TOO_LARGE', message: '선택한 변수·행 조합이 회귀 처리 상한을 초과합니다.', reason: inputLimitCheck.violation } };
+    }
+
+    // ② 완전사례 + 레벨·event 요약(person 단위, 전부 ③ 공개통제 입력용).
+    const completeCase = computeRegressionCompleteCase(dataset.rows, outcomeKey, predictorKeys);
+    regressionExcludedRowCount = completeCase.excludedRowCount;
+    const levelSummaries = computeRegressionLevelSummaries(completeCase.completeRows, predictorKeys, catalogByKey);
+    const eventSummary = computeRegressionEventSummary(completeCase.completeRows, outcomeKey, outcomeVar?.type);
+
+    // ③ 공개통제 — request-level 억제(differencing/전체 MIN_COHORT)와 OR로
+    // 합친다(bivariate와 동일 원칙). 실패하면 ④를 절대 실행하지 않는다 —
+    // 레벨 수·파라미터 수·rank 등은 전부 데이터 특성을 드러낸다.
+    const disclosure = evaluateRegressionDisclosure({
+      includedPersonCount: completeCase.includedPersonCount,
+      excludedPersonCount: completeCase.excludedPersonCount,
+      levelSummaries,
+      eventSummary,
+    });
+    regressionDisclosed = !requestSuppressed && disclosure.disclose;
+
+    if (regressionDisclosed) {
+      if (regressionMethod) {
+        // ④ 설계행렬 + 추정가능성(Node 판정). 실패해도 non_estimable로
+        // 응답할 정보이지 억제가 아니므로 여기서 계속 진행한다.
+        regressionDesign = buildRegressionDesignMatrix({
+          completeRows: completeCase.completeRows,
+          outcomeKey,
+          predictorKeys,
+          catalogByKey,
+          method: regressionMethod,
+          referenceLevels,
+          eventSummary,
+        });
+      }
+      // availableMethods는 ③을 통과했을 때만 계산한다(리뷰 원칙 — 통과 전엔
+      // 사유 코드조차 노출하지 않는다). A-1 수준 판정(0건·outcome 타입
+      // 불일치)만 담당 — 완전사례/레벨/EPV 등 데이터 의존 세부 사유는 여기
+      // 없다(그건 ④의 nonEstimableReason으로만 노출).
+      availableMethods = computeRegressionAvailableMethods(completeCase.includedPersonCount, outcomeKey, catalogByKey, METHOD_POLICY_VERSION);
+      methodCatalogVersion = METHOD_POLICY_VERSION;
+    }
   }
 
   return {
@@ -151,6 +229,7 @@ export async function buildAnalysisContext(
       differencing, snapshot, dataset, requestSuppressed, reasonCode,
       paired, pairDisclosed, availableMethods, methodCatalogVersion, correlationMatrixPairs,
       correlationMatrixVariables,
+      regressionDisclosed, regressionDesign, regressionExcludedRowCount, regressionMethod,
     },
   };
 }

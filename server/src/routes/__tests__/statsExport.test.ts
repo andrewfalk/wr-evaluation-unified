@@ -288,6 +288,21 @@ describe('POST /export — analysisMode별 CSV export 차단', () => {
     expect(writeAuditLogStrict).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: 'denied' }));
   });
 
+  it('regression 결과는 400 REGRESSION_EXPORT_NOT_SUPPORTED + denied 감사(PR4-A1 — 없으면 빈 CSV가 200으로 나간다)', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    wireRunRow(pool, {
+      manifest: baseManifest({ analysisMode: 'regression' }),
+      result: { continuous: [], discrete: [], regression: { suppressed: true, reasonCode: 'MIN_COHORT_NOT_MET' } },
+      status: 'succeeded', requested_disclosure_profile: 'aggregate',
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+    });
+    const res = await postExport(pool);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('REGRESSION_EXPORT_NOT_SUPPORTED');
+    expect(writeAuditLogStrict).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: 'denied' }));
+  });
+
   it('analysisMode가 없는 구버전 저장 결과는 descriptive로 취급해 export를 허용한다(하위호환)', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);

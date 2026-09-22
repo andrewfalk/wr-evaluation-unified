@@ -100,9 +100,15 @@ ENV VIDEO_ANALYSIS_PYTHON=/opt/pose-venv/bin/python \
     ORT_DISABLE_TELEMETRY=1
 
 # PR1 — stats-engine Python venv(격리, pose venv와 완전히 별도). numpy+scipy+jsonschema만
-# 필요(pandas/statsmodels는 PR1 범위 밖) — opencv 의존(libgl1/libglib2.0-0)도 procps도
-# 불필요(계획서 §2.3 — analyze.py는 shell:true 없이 직접 spawn되고 BLAS 스레드 제한으로
-# 프로세스를 추가로 fork하지 않는 단일 프로세스 트리 전제, tree-kill 미도입).
+# 필요했다(pandas/statsmodels는 PR1 범위 밖) — opencv 의존(libgl1/libglib2.0-0)도
+# procps도 불필요(계획서 §2.3 — analyze.py는 shell:true 없이 직접 spawn되고 BLAS
+# 스레드 제한으로 프로세스를 추가로 fork하지 않는 단일 프로세스 트리 전제, tree-kill
+# 미도입).
+# PR4-A1 — 연관성 회귀(OLS·이분 로지스틱) 도입으로 statsmodels(+전이 의존 pandas·
+# patsy)가 requirements.txt에 추가됐다. 이미지 +약 136MB 실측(로컬 python:3.11-slim
+# 기준, `docs/OFFLINE_DEPLOYMENT_PACKAGE.md` §16-1 갱신 참고) — opencv/procps는
+# 여전히 불필요(covariance는 statsmodels가 아니라 regression.py가 직접 계산해
+# HC3/CR1 공식만 쓴다, statsmodels는 Logit MLE·적합도 지표 전용).
 COPY services/stats-engine/requirements.txt /app/stats-engine/requirements.txt
 RUN python3 -m venv /opt/stats-venv \
     && /opt/stats-venv/bin/pip install --no-cache-dir --upgrade pip \

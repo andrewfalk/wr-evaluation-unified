@@ -214,7 +214,11 @@
   margin: 12px 0 6px;
 }
 
-.swb-seg { display: inline-flex; border: 1px solid var(--swb-border); border-radius: 8px; overflow: hidden; }
+/* PR4-A1 — 분석 모드 세그먼트가 4개(기술통계/이변량/상관행렬/회귀)로 늘어나
+   380px 레시피 패널 폭에서 줄바꿈이 필요할 수 있다. flex-wrap을 허용하되
+   overflow:hidden은 유지 — 한 줄에 다 들어가면 기존 그레인/분석목적 세그먼트의
+   모양은 그대로다. */
+.swb-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--swb-border); border-radius: 8px; overflow: hidden; }
 .swb-seg-opt {
   border: none;
   background: var(--swb-panel);

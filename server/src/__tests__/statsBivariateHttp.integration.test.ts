@@ -19,11 +19,25 @@
 // 재사용한다(계산 로직 자체의 정확성은 그 테스트들과 Python 단위테스트가 이미 검증 —
 // 여기서는 파이프라인 배선만 본다).
 import crypto from 'crypto';
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { Pool } from 'pg';
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
+
+// 통계 워크벤치는 인트라넷 배포에서만 열린다(statsWorkbenchRuntimeState.ts) — 이 게이트가
+// 꺼져 있으면 requireCapability가 유효한 토큰이 있어도 "기능 자체가 없는 것처럼" 403이
+// 아니라 404를 반환한다(의도된 동작, §7.6). 이 게이트는 DEPLOYMENT_MODE=intranet +
+// STATS_WORKBENCH_ENABLED=true를 요구하고, intranet 모드는 다시 CORS_ORIGINS 등을
+// 요구하는 연쇄가 있다 — 이 테스트는 실 Postgres·실 Python 경계만 검증하면 충분하고
+// 배포모드 게이트 자체를 검증하는 게 목적이 아니므로, 그 연쇄를 통째로 우회한다.
+// (재현된 사고: 이 mock 없이 TEST_DATABASE_URL만 주고 돌리면 preview/analyze가 전부
+// "이유를 알 수 없는 404"로 실패해, 이 테스트가 실제로 한 번도 CI/로컬에서 끝까지
+// 실행된 적이 없었다 — 원인 불명 상태로 계속 skip돼 온 근본 원인이었다.)
+vi.mock('../statsWorkbenchRuntimeState', () => ({
+  getStatsWorkbenchAvailability: () => ({ available: true, reason: null, checkedAt: null }),
+  setStatsWorkbenchHealthy: () => {},
+}));
 
 import { createStatsRouter } from '../routes/stats';
 import { generateAccessToken } from '../auth/tokens';
@@ -258,9 +272,14 @@ describe.skipIf(!TEST_DB_URL)('이변량 분석 — 실데이터 HTTP 통합(POS
     expect(Number.isFinite(bivariate.statistic)).toBe(true);
     expect(bivariate.pValue).toBeGreaterThanOrEqual(0);
     expect(bivariate.pValue).toBeLessThanOrEqual(1);
+    // PR3-B가 groupBreakdown에 그룹별 boxplot(§9)을 추가하면서 이 기대값이
+    // 갱신되지 않았었다(PR4-A1 리뷰의 HTTP 통합 테스트 404 수정으로 처음
+    // 끝까지 돌려보고서야 드러남 — 이전엔 groupBreakdown 필드 존재 자체를
+    // 확인한 적이 없었다). knee 값은 kneeModule의 고정 bin에서 결정적으로
+    // 계산되므로 boxplot 수치도 고정값이다.
     expect(bivariate.groupBreakdown).toEqual([
-      { label: false, n: 12 },
-      { label: true, n: 12 },
+      { label: false, n: 12, boxplot: { q1: 50, median: 62.5, q3: 75, lowerWhisker: 50, upperWhisker: 75, outlierCount: 0 } },
+      { label: true, n: 12, boxplot: { q1: 83.3, median: 86.1, q3: 88.9, lowerWhisker: 83.3, upperWhisker: 88.9, outlierCount: 0 } },
     ]);
     // true 그룹(무릎 weight/squatting이 훨씬 큼)이 relatedness가 더 높아야 하므로
     // "뒤(true)-앞(false)" 평균차는 양수여야 한다 — 방향규칙(§방향규칙) 실측 확인.
@@ -297,9 +316,11 @@ describe.skipIf(!TEST_DB_URL)('이변량 분석 — 실데이터 HTTP 통합(POS
     expect(bivariate.n).toBe(22);
     // 카탈로그 고정 순서(ELBOW_BURDEN_GRADE_ORDER)를 따라 "부담 작업 아님"이 앞,
     // "고도"가 뒤여야 한다(관측 안 된 중간 레벨은 응답에 아예 등장하지 않음).
+    // boxplot 필드는 PR3-B가 groupBreakdown에 추가했다(위 welch_t 케이스와 동일한
+    // 사전 결함 — knee 값은 kneeModule 고정 bin에서 결정적으로 계산되는 고정값).
     expect(bivariate.groupBreakdown).toEqual([
-      { label: '부담 작업 아님', n: 11 },
-      { label: '고도', n: 11 },
+      { label: '부담 작업 아님', n: 11, boxplot: { q1: 50, median: 50, q3: 75, lowerWhisker: 50, upperWhisker: 75, outlierCount: 0 } },
+      { label: '고도', n: 11, boxplot: { q1: 83.3, median: 83.3, q3: 88.9, lowerWhisker: 83.3, upperWhisker: 88.9, outlierCount: 0 } },
     ]);
   }, 30000);
 

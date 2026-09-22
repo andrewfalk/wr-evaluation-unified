@@ -85,13 +85,13 @@ export type CorrelationMatrixInputLimitCheck =
 // 코드리뷰 수정 3차(2026-09-11) — "method/protocolVersion 래퍼는 수 바이트뿐이라
 // 무시해도 영향 없다"는 1~2차 수정의 판단은 틀렸다. 리뷰가 정확한 경계값으로
 // 실측: {variables}만 직렬화하면 2,097,152B(정확히 상한)인데, 실제 Python
-// payload({protocolVersion:3, correlationMatrix:{method, variables}})는
+// payload({protocolVersion:4, correlationMatrix:{method, variables}})는
 // 2,097,225B — 73바이트 차이로 선검사는 통과하고 최종 wrapper 검사(Python spawn
 // 직전)에서만 거부되는 경계 구간이 실재했다. "몇 바이트라 무시 가능"이라는 판단은
 // 평균적인 경우 얘기지 상한 검사처럼 정확히 경계에서 동작해야 하는 로직에는
 // 적용할 수 없다는 게 핵심 교훈 — 지금은 실제 전송될 envelope과 바이트 단위로
 // 동일한 문자열을 만들어 측정한다(assertCorrelationMatrixWithinLimits의
-// `{ protocolVersion: 3, correlationMatrix: request }` 그대로 재현).
+// `{ protocolVersion: 4, correlationMatrix: request }` 그대로 재현).
 const SUPPORTED_CORRELATION_METHODS = ['pearson_correlation', 'spearman_correlation'] as const;
 // preview 시점엔 requestedMethod가 아직 선택 안 됐을 수 있다(§"preview는
 // 관대하다") — 그럴 땐 두 method 중 문자열이 더 긴 쪽(spearman_correlation)을
@@ -124,7 +124,7 @@ export function evaluateCorrelationMatrixInputLimits(
   const variables = buildCorrelationMatrixVariables(rows, keys);
   const envelopeMethod = method ?? WORST_CASE_METHOD_FOR_BYTE_ESTIMATE;
   const byteLength = Buffer.byteLength(
-    JSON.stringify({ protocolVersion: 3, correlationMatrix: { method: envelopeMethod, variables } }),
+    JSON.stringify({ protocolVersion: 4, correlationMatrix: { method: envelopeMethod, variables } }),
     'utf8',
   );
   if (byteLength > config.stats.maxInputBytes) {

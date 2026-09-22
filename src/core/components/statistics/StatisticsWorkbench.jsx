@@ -17,19 +17,24 @@ import '../charts/charts.css';
 // PR0-B3 Part A — grain을 조건 키에 추가한다. 안 하면 grain을 바꿔도(예: case →
 // vibration_interval) 다른 필드가 전부 동일할 경우 조건 키가 안 바뀌어 preview가
 // 재실행되지 않는다(계획 pr0-b3-shimmying-magpie.md "Grain 선택 UI" 절).
-function buildConditionKey(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters) {
+// PR4-A1 — 회귀도 이변량과 같은 이유로 정렬하지 않는다(계획서 §5): predictor
+// 순서가 forest plot 행 순서다. outcomeKey도 조건 키에 넣는다 — 안 넣으면
+// outcome만 바꿨을 때 preview가 재실행되지 않는다(§17-19행의 grain 버그와
+// 동일한 함정, 계획서 §5 "필수 포함").
+function buildConditionKey(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey) {
   return JSON.stringify({
     grain,
     analysisMode,
-    variableKeys: analysisMode === 'bivariate' ? variableKeys : [...variableKeys].sort(),
+    variableKeys: analysisMode === 'bivariate' || analysisMode === 'regression' ? variableKeys : [...variableKeys].sort(),
     requestedMethod: requestedMethod ?? null,
     analysisPurpose,
     formulaPolicies,
     appliedFilters,
+    outcomeKey: analysisMode === 'regression' ? (outcomeKey ?? null) : null,
   });
 }
 
-function buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters) {
+function buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey) {
   return {
     grain,
     variableKeys,
@@ -38,7 +43,12 @@ function buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysi
     formulaPolicies,
     analysisMode,
     // PR3-B — 상관행렬도 requestedMethod(pearson/spearman)가 필요하다(계획서 §4/§7).
-    ...((analysisMode === 'bivariate' || analysisMode === 'correlation_matrix') && requestedMethod ? { requestedMethod } : {}),
+    ...((analysisMode === 'bivariate' || analysisMode === 'correlation_matrix' || analysisMode === 'regression') && requestedMethod ? { requestedMethod } : {}),
+    // PR4-A1 — outcomeKey가 아직 없으면(최초 선택 전) regression 필드 자체를
+    // 만들지 않는다 — 서버 zod가 regression 모드에서 이 객체를 필수로 요구하므로
+    // (없으면 REGRESSION_REQUIRES_REGRESSION_OBJECT), isRecipeComplete가 outcomeKey
+    // 존재를 먼저 확인해 이 상태로는 애초에 실행/커밋을 안 하게 만든다.
+    ...(analysisMode === 'regression' && outcomeKey ? { regression: { outcomeKey } } : {}),
   };
 }
 
@@ -47,13 +57,18 @@ function buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysi
 // 자체가 안 나가 availableMethods를 받아올 수 없다(1차 초안의 순환의존 버그가
 // 클라이언트에서 재발했던 지점, 계획서 §"이슈1"). method 실행 가능 여부는 오직
 // canExecute(실행 버튼)에서만 본다.
-function isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters) {
+function isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters, outcomeKey) {
   if (analysisMode === 'bivariate') {
     if (variableKeys.length !== 2 || variableKeys[0] === variableKeys[1]) return false;
   } else if (analysisMode === 'correlation_matrix') {
     // PR3-B §4 — 3개 이상 + 중복 없음(zod superRefine과 동일 조건, 클라이언트도
     // 미리 막아야 preview가 400 없이 매끄럽게 나간다).
     if (variableKeys.length < 3 || new Set(variableKeys).size !== variableKeys.length) return false;
+  } else if (analysisMode === 'regression') {
+    // PR4-A1 §5 — outcome 1개 + predictor 1개 이상(zod superRefine과 동일 조건).
+    // requestedMethod는 여기서 보지 않는다 — 방법 선택 여부는 canExecute에서만
+    // 본다(이변량과 같은 원칙, §5 "requiresMethodCheck").
+    if (!outcomeKey || !variableKeys.includes(outcomeKey) || variableKeys.length < 2) return false;
   } else if (variableKeys.length === 0) {
     return false;
   }
@@ -150,6 +165,9 @@ export function StatisticsWorkbench({
   const [analysisMode, setAnalysisMode] = useState('descriptive');
   const [requestedMethod, setRequestedMethod] = useState(null);
   const [modeChangeBlockedNotice, setModeChangeBlockedNotice] = useState(false);
+  // PR4-A1 §5 — 회귀 outcome 선택 상태. predictor는 selectedKeys(=variableKeys)에서
+  // outcomeKey를 뺀 나머지로 파생한다(별도 배열을 두면 두 벌 진실원이 생긴다).
+  const [outcomeKey, setOutcomeKey] = useState(null);
 
   // PR0-B3 Part A — grain을 바꾸면 이전 grain에서 고른 변수·필터·method가 새 grain에는
   // 안 맞을 수 있어 전부 초기화한다(후보 목록을 grain으로 거르는 것과는 별개 — 후보를
@@ -161,6 +179,7 @@ export function StatisticsWorkbench({
     setFilterDraft([]);
     setAppliedFilters([]);
     setRequestedMethod(null);
+    setOutcomeKey(null);
   }
 
   function toggleVariable(key) {
@@ -174,6 +193,9 @@ export function StatisticsWorkbench({
     // (계획서 §클라이언트배선 "변수 변경 시 requestedMethod 초기화" — 조용히 유지하면
     // 사용자가 뭘 실행했는지 오해할 수 있음).
     setRequestedMethod(null);
+    // PR4-A1 — 지금 outcome으로 지정된 변수를 해제하면 outcome도 함께 비운다(더 이상
+    // 선택 목록에 없는 변수를 outcome으로 남겨두면 predictor 파생 로직이 깨진다).
+    setOutcomeKey((prev) => (prev === key ? null : prev));
   }
 
   function handleAnalysisModeChange(nextMode) {
@@ -185,18 +207,22 @@ export function StatisticsWorkbench({
     }
     setModeChangeBlockedNotice(false);
     setRequestedMethod(null);
+    // PR4-A1 §5 — 회귀는 넉넉한 상한(20)이라 이변량처럼 전환 자체를 막을 필요는
+    // 없다. 모드를 나가거나 새로 들어올 때 outcome만 초기화해 이전 모드의 스테일
+    // 상태가 새 모드로 새지 않게 한다.
+    setOutcomeKey(null);
     setAnalysisMode(nextMode);
   }
 
   // ---- preview: 조건-key(무엇을 위한 결과인가) + 요청세대(그 요청 인스턴스가 최신인가) ----
-  const currentConditionKey = buildConditionKey(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters);
+  const currentConditionKey = buildConditionKey(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey);
   const [previewState, setPreviewState] = useState({ key: null, status: 'idle', result: null, error: null });
   const previewGenRef = useRef(0);
 
   useEffect(() => {
     const key = currentConditionKey;
     const gen = ++previewGenRef.current;
-    if (!isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters)) {
+    if (!isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters, outcomeKey)) {
       setPreviewState({ key, status: 'idle', result: null, error: null });
       return undefined;
     }
@@ -207,7 +233,7 @@ export function StatisticsWorkbench({
         // PR3-A — preview는 requestedMethod를 참고만 하고 유효성을 검사하지 않는다
         // (서버가 관대함, 계획서 §파이프라인 "preview는 관대하다") — method 미선택
         // 상태에서도 이 호출은 정상적으로 나가야 availableMethods를 받아올 수 있다.
-        const recipe = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters);
+        const recipe = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey);
         const res = await previewStatsAnalysis(recipe, session, { signal: controller.signal });
         if (gen !== previewGenRef.current) return;
         setPreviewState((prev) => (prev.key === key ? { key, status: 'ready', result: res, error: null } : prev));
@@ -248,7 +274,7 @@ export function StatisticsWorkbench({
   // PR3-B — 상관행렬도 이변량과 동일하게 requestedMethod가 available/conditional
   // 이어야 실행 가능하다(서버 handlePostAnalyze의 METHOD_NOT_AVAILABLE 판정과
   // 동일 기준 — statsAnalyzeHandler.ts).
-  const requiresMethodCheck = analysisMode === 'bivariate' || analysisMode === 'correlation_matrix';
+  const requiresMethodCheck = analysisMode === 'bivariate' || analysisMode === 'correlation_matrix' || analysisMode === 'regression';
   const methodExecutable =
     !requiresMethodCheck ||
     (selectedMethod != null && (selectedMethod.status === 'available' || selectedMethod.status === 'conditional'));
@@ -264,7 +290,7 @@ export function StatisticsWorkbench({
   async function handleRunAnalyze() {
     if (!canExecute || analyzeInFlightRef.current) return;
     analyzeInFlightRef.current = true;
-    const recipeAtSubmit = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters);
+    const recipeAtSubmit = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey);
     setIsAnalyzing(true);
     setAnalyzeError(null);
     try {
@@ -281,7 +307,7 @@ export function StatisticsWorkbench({
   }
 
   const recipeChanged = committedRecipe
-    ? JSON.stringify(buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters)) !== JSON.stringify(committedRecipe)
+    ? JSON.stringify(buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey)) !== JSON.stringify(committedRecipe)
     : false;
 
   // ---- export ----
@@ -290,7 +316,7 @@ export function StatisticsWorkbench({
   // 아니라 저장된 실행의 analysisMode 기준(committedRecipe)으로 판정한다. 탭을
   // 바꿔도 내보내기 가능 여부는 바뀌면 안 된다. 서버도 manifest.analysisMode 기준으로
   // 같은 판정을 하므로(statsExportHandler.ts) 여기서도 동일 기준으로 미리 막는다.
-  const exportUnsupported = committedRecipe?.analysisMode === 'bivariate' || committedRecipe?.analysisMode === 'correlation_matrix';
+  const exportUnsupported = committedRecipe?.analysisMode === 'bivariate' || committedRecipe?.analysisMode === 'correlation_matrix' || committedRecipe?.analysisMode === 'regression';
   async function handleExport() {
     if (!committedResult || actionsLocked || exportUnsupported) return; // 버튼 disabled와 별개로 핸들러 자체도 잠금을 지킨다
     setExportState({ status: 'exporting', error: null });
@@ -364,6 +390,8 @@ export function StatisticsWorkbench({
             modeChangeBlockedNotice={modeChangeBlockedNotice}
             requestedMethod={requestedMethod}
             onRequestedMethodChange={setRequestedMethod}
+            outcomeKey={outcomeKey}
+            onOutcomeKeyChange={setOutcomeKey}
             analysisPurpose={analysisPurpose}
             onAnalysisPurposeChange={setAnalysisPurpose}
             formulaPolicies={formulaPolicies}

@@ -71,7 +71,7 @@ describe.skipIf(!AVAILABLE)('statsEngine <-> analyze.py 실제 프로세스 (smo
 
   it('실제 stdin JSON을 받아 실제 stdout JSON을 반환한다(mock 없음)', () => {
     const request = {
-      protocolVersion: 3,
+      protocolVersion: 4,
       variables: [
         { key: 'v1', kind: 'continuous', values: [10, 20, 30, 40, 50] },
         { key: 'v2', kind: 'discrete', values: ['a', 'b', 'a'] },
@@ -88,7 +88,7 @@ describe.skipIf(!AVAILABLE)('statsEngine <-> analyze.py 실제 프로세스 (smo
 
   it('한글 ordinal 값이 UTF-8로 손상 없이 왕복한다(§9-item3 요구)', () => {
     const request = {
-      protocolVersion: 3,
+      protocolVersion: 4,
       variables: [{ key: 'grade', kind: 'discrete', values: ['중등도', '경도', '고도', '중등도'] }],
     };
     const { code, stdout } = runReal(JSON.stringify(request));
@@ -115,7 +115,7 @@ describe.skipIf(!AVAILABLE)('statsEngine <-> analyze.py 실제 프로세스 (smo
   // 프로세스와 왕복하는지(mock 없음).
   it('연속형 결과에 histogram/boxplot이 실제로 배선된다', () => {
     const request = {
-      protocolVersion: 3,
+      protocolVersion: 4,
       variables: [{ key: 'v1', kind: 'continuous', values: [1, 2, 3, 4, 5, 100] }],
     };
     const { code, stdout, stderr } = runReal(JSON.stringify(request));
@@ -134,8 +134,8 @@ describe.skipIf(!AVAILABLE)('statsEngine <-> analyze.py 실제 프로세스 (smo
   it('personCount를 포함한 실제 요청은 생략한 요청보다 histogram bin이 더 적게 나온다(200명×3행 브로드캐스트 재현)', () => {
     const base = Array.from({ length: 200 }, (_, i) => (i / 199) * 100);
     const values = base.flatMap((v) => [v, v, v]);
-    const withoutPersonCount = { protocolVersion: 3, variables: [{ key: 'v1', kind: 'continuous', values }] };
-    const withPersonCount = { protocolVersion: 3, variables: [{ key: 'v1', kind: 'continuous', values, personCount: 200 }] };
+    const withoutPersonCount = { protocolVersion: 4, variables: [{ key: 'v1', kind: 'continuous', values }] };
+    const withPersonCount = { protocolVersion: 4, variables: [{ key: 'v1', kind: 'continuous', values, personCount: 200 }] };
 
     const r1 = runReal(JSON.stringify(withoutPersonCount));
     const r2 = runReal(JSON.stringify(withPersonCount));
@@ -160,7 +160,7 @@ describe.skipIf(!AVAILABLE)('statsEngine <-> analyze.py 실제 프로세스 (smo
   // 하드코딩하지 않는다).
   it('실제 Python이 만든 float bin 경계로도 재분할(resolveDisclosableHistogram)이 올바르게 동작한다', () => {
     const values = Array.from({ length: 300 }, (_v, i) => i); // 0..299, 균일 분포
-    const request = { protocolVersion: 3, variables: [{ key: 'v1', kind: 'continuous', values, personCount: 300 }] };
+    const request = { protocolVersion: 4, variables: [{ key: 'v1', kind: 'continuous', values, personCount: 300 }] };
     const { code, stdout, stderr } = runReal(JSON.stringify(request));
     expect(stderr).toBe('');
     expect(code).toBe(0);
@@ -185,7 +185,7 @@ describe.skipIf(!AVAILABLE)('statsEngine <-> analyze.py 실제 프로세스 (smo
 
   it('상관행렬 요청이 실제 Python 프로세스를 왕복해 모든 쌍을 반환한다', () => {
     const request = {
-      protocolVersion: 3,
+      protocolVersion: 4,
       correlationMatrix: {
         method: 'pearson_correlation',
         variables: [
@@ -217,7 +217,7 @@ describe.skipIf(!AVAILABLE)('statsEngine <-> analyze.py 실제 프로세스 (smo
   function runCorrelationMatrixPerf(label: string, variables: Array<{ key: string; values: number[] }>) {
     const k = variables.length;
     const rows = variables[0].values.length;
-    const request = { protocolVersion: 3, correlationMatrix: { method: 'spearman_correlation', variables } };
+    const request = { protocolVersion: 4, correlationMatrix: { method: 'spearman_correlation', variables } };
     const stdin = JSON.stringify(request);
     const byteLength = Buffer.byteLength(stdin, 'utf8');
     expect(k * rows).toBeLessThanOrEqual(350_000); // MAX_TOTAL_VALUES

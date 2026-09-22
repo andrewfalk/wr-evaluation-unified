@@ -6,6 +6,7 @@ import { HorizontalBarChart } from '../charts/HorizontalBarChart';
 import { StackedBarChart100 } from '../charts/StackedBarChart100';
 import { ScatterPlot } from '../charts/ScatterPlot';
 import { CorrelationHeatmap } from '../charts/CorrelationHeatmap';
+import { ForestPlot } from '../charts/ForestPlot';
 
 const NULL_REASON_LABELS = {
   insufficient_data: '자료 부족',
@@ -24,6 +25,28 @@ const METHOD_LABELS = {
   chi_square: '카이제곱 검정', fisher_exact: 'Fisher 정확검정',
   pearson_correlation: 'Pearson 상관', spearman_correlation: 'Spearman 상관',
   paired_t: '대응 t 검정', wilcoxon_signed_rank: 'Wilcoxon 부호순위검정',
+  // PR4-A1 — RecipePanel.jsx의 METHOD_LABELS와 중복(위 주석 참고, 의도적).
+  ols_linear: '선형회귀(OLS)', binary_logistic: '이분 로지스틱 회귀',
+};
+// PR4-A1 — inferenceWithheldReason별 안내 문구. 원인이 다른데 같은 문구로 뭉치면
+// 사용자가 데이터 구조 문제로 오해한다(계획서 §5 "사유별로 다르게 쓴다").
+const REGRESSION_WITHHELD_LABELS = {
+  TOO_FEW_CLUSTERS: '표본 구조상(한 사람이 여러 행) p값·신뢰구간을 표시하지 않습니다.',
+  CLUSTER_IMBALANCE: '표본 구조상(한 사람이 여러 행) p값·신뢰구간을 표시하지 않습니다.',
+  COVARIANCE_NOT_COMPUTABLE: '표준오차를 계산할 수 없어 p값·신뢰구간을 표시하지 않습니다.',
+  DEGENERATE_COVARIANCE: '표준오차를 계산할 수 없어 p값·신뢰구간을 표시하지 않습니다.',
+};
+const REGRESSION_NON_ESTIMABLE_LABELS = {
+  INSUFFICIENT_COMPLETE_ROWS: '완전사례 수가 부족해 실행할 수 없습니다.',
+  TOO_MANY_LEVELS: '범주형 설명변수의 수준이 너무 많습니다.',
+  TOO_MANY_PARAMETERS: '설명변수(범주 포함)가 너무 많아 자유도가 부족합니다.',
+  INSUFFICIENT_EVENTS_PER_PARAMETER: '사건 수 대비 설명변수가 너무 많습니다.',
+  CONSTANT_OUTCOME: '결과변수 값이 전부 동일해 실행할 수 없습니다.',
+  ZERO_VARIANCE_PREDICTOR: '값이 전부 동일한 설명변수가 있습니다.',
+  RANK_DEFICIENT: '설명변수 사이에 완전한 상관(공선성)이 있습니다.',
+  SEPARATION_DETECTED: '결과변수가 설명변수로 완전히 구분돼 계산할 수 없습니다.',
+  SEPARATION_CHECK_FAILED: '분리 여부를 판정하지 못해 실행을 중단했습니다.',
+  NOT_CONVERGED: '계산이 수렴하지 않았습니다.',
 };
 const GROUP_COMPARISON_METHODS = new Set(['welch_t', 'mann_whitney', 'anova', 'kruskal_wallis', 'paired_t', 'wilcoxon_signed_rank']);
 // [코드리뷰 2026-09-12 2차] η²(anova)·ε²(kruskal_wallis)는 부호 있는 "차이" 개념이
@@ -426,11 +449,112 @@ function CorrelationMatrixResultCard({ correlationMatrix, catalogByKey }) {
   );
 }
 
+// PR4-A1 §5 — 연관성 회귀 결과 카드. estimation 4상태(suppressed 포함)를 각각
+// 다르게 그린다: non_estimable은 사유 문구만, inference_withheld는 계수표에서
+// p·CI 열을 빈 칸으로 두고 상단에 배지(BivariateFooter의 qualityFlags 패턴 재사용).
+function num(v, digits = 4) {
+  return v === null || v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(digits);
+}
+
+function RegressionCoefficientTable({ terms, exponentiated }) {
+  return (
+    <div className="swb-table-scroll">
+      <table className="swb-table" aria-label="회귀 계수표">
+        <thead>
+          <tr>
+            <th>변수</th><th>계수</th><th>SE</th>
+            {exponentiated && <th>OR</th>}
+            <th>통계량</th><th>p값</th><th>95% CI</th>
+          </tr>
+        </thead>
+        <tbody>
+          {terms.map((t) => (
+            <tr key={t.name}>
+              <td>{t.level ? `${t.label}: ${t.level}` : t.label}</td>
+              <td>{num(t.estimate, 3)}</td>
+              <td>{num(t.se, 3)}</td>
+              {exponentiated && <td>{t.exponentiated ? num(t.exponentiated.estimate, 2) : '—'}</td>}
+              <td>{num(t.statistic, 3)}</td>
+              <td>{t.pValue === null || t.pValue === undefined ? '—' : t.pValue.toFixed(4)}</td>
+              <td>{t.ciLower !== null && t.ciUpper !== null && t.ciLower !== undefined ? `[${num(t.ciLower, 3)}, ${num(t.ciUpper, 3)}]` : '(비공개)'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RegressionResultCard({ regression, catalogByKey }) {
+  if (regression.suppressed) {
+    return (
+      <div className="swb-card">
+        <strong>{METHOD_LABELS[regression.method] || regression.method || '회귀'}</strong>
+        <p className="swb-suppressed-note">공개 정책에 따라 결과가 표시되지 않음(표본 크기 등).</p>
+      </div>
+    );
+  }
+
+  const methodLabel = METHOD_LABELS[regression.method] || regression.method;
+  const outcomeLabel = variableLabel(catalogByKey, regression.outcomeKey);
+
+  if (regression.estimation === 'non_estimable') {
+    return (
+      <div className="swb-card">
+        <strong>{methodLabel}</strong>
+        <p className="swb-card-subtitle">결과변수: {outcomeLabel}</p>
+        <p className="swb-suppressed-note">
+          {REGRESSION_NON_ESTIMABLE_LABELS[regression.nonEstimableReason] || '현재 데이터로 계산할 수 없습니다.'}
+        </p>
+      </div>
+    );
+  }
+
+  const isWithheld = regression.estimation === 'inference_withheld';
+  const isLogistic = regression.method === 'binary_logistic';
+
+  return (
+    <div className="swb-card">
+      <strong>{methodLabel}</strong>
+      <p className="swb-card-subtitle">
+        결과변수: {outcomeLabel}{isLogistic && regression.eventLevel ? ` (사건=${regression.eventLevel})` : ''} ·
+        {' '}n={regression.n} · 표본 {regression.personCount}명
+        {regression.covariance === 'person_cluster_cr1' && regression.clusterCount != null
+          ? ` · 클러스터 ${regression.clusterCount}개(최대 비중 ${(regression.maxClusterShare * 100).toFixed(0)}%)`
+          : ''}
+      </p>
+
+      {isWithheld && (
+        <p className="swb-status-warn">
+          {REGRESSION_WITHHELD_LABELS[regression.inferenceWithheldReason] || '일부 결과를 표시하지 않습니다.'}
+        </p>
+      )}
+
+      <ForestPlot terms={regression.terms} exponentiated={isLogistic} />
+      <RegressionCoefficientTable terms={regression.terms} exponentiated={isLogistic} />
+
+      {regression.fit && (
+        <p className="swb-suppressed-note">
+          {regression.method === 'ols_linear'
+            ? `R² = ${num(regression.fit.r2, 3)}, 조정 R² = ${num(regression.fit.adjR2, 3)}`
+            : `로그우도 = ${num(regression.fit.logLik, 2)}, AIC = ${num(regression.fit.aic, 2)}, McFadden 의사R² = ${num(regression.fit.pseudoR2, 3)}`}
+        </p>
+      )}
+
+      {regression.qualityFlags.length > 0 && (
+        <p className="swb-status-warn">{regression.qualityFlags.join(', ')}</p>
+      )}
+      <p className="swb-suppressed-note">완전사례 제외 {regression.excludedRowCount}건</p>
+      <p className="swb-suppressed-note">{regression.analysisUnitNote}</p>
+    </div>
+  );
+}
+
 const TABS = [
   { id: 'summary', label: '요약', enabled: true },
   { id: 'distribution', label: '분포', enabled: true },
   { id: 'association', label: '연관성', enabled: true },
-  { id: 'regression', label: '회귀', enabled: false },
+  { id: 'regression', label: '회귀', enabled: true }, // PR4-A1
 ];
 
 // PR2 §6/§8 — 결과 패널. committed(마지막 실행 성공 시점의 recipe/result)만 참조하고,
@@ -446,7 +570,11 @@ export function ResultPanel({
   // PR3-B — 상관행렬도 descriptive의 continuous/discrete 표를 안 쓰므로 이변량과
   // 같은 분기 처리가 필요하다(요약 탭 메시지, export 잠금 등).
   const isCorrelationMatrixRun = committedRecipe?.analysisMode === 'correlation_matrix';
-  const isDescriptiveRun = !isBivariateRun && !isCorrelationMatrixRun;
+  // PR4-A1 — 회귀도 동일 원칙. isDescriptiveRun에서 빠뜨리면 회귀 실행이
+  // descriptive로 오인돼 요약/분포 탭이 빈 continuous/discrete를 읽다 깨진다
+  // (계획서 §5 — 실제 버그 위험 지점으로 명시됐던 곳).
+  const isRegressionRun = committedRecipe?.analysisMode === 'regression';
+  const isDescriptiveRun = !isBivariateRun && !isCorrelationMatrixRun && !isRegressionRun;
 
   return (
     <section className="swb-result" aria-label="결과">
@@ -485,6 +613,8 @@ export function ResultPanel({
                 <DiscreteCard key={row.variableKey} catalogByKey={catalogByKey} row={row} />
               ))}
             </>
+          ) : isRegressionRun ? (
+            <p className="swb-suppressed-note">회귀 분석 결과는 "회귀" 탭에서 확인하세요.</p>
           ) : (
             <p className="swb-suppressed-note">
               {isBivariateRun ? '이변량' : '상관행렬'} 분석 결과는 "연관성" 탭에서 확인하세요.
@@ -529,6 +659,17 @@ export function ResultPanel({
           )
         )}
 
+        {committedResult && activeTab === 'regression' && (
+          isRegressionRun && committedResult.result.regression ? (
+            <RegressionResultCard
+              regression={committedResult.result.regression}
+              catalogByKey={catalogByKey}
+            />
+          ) : (
+            <p className="swb-suppressed-note">회귀 모드로 분석을 실행하면 여기에 결과가 표시됩니다.</p>
+          )
+        )}
+
         {committedResult && isDescriptiveRun && (
           <button
             type="button"
@@ -543,7 +684,7 @@ export function ResultPanel({
         )}
         {committedResult && !isDescriptiveRun && (
           <p className="swb-suppressed-note" style={{ marginTop: 12 }}>
-            {isBivariateRun ? '이변량' : '상관행렬'} 결과는 아직 CSV 내보내기를 지원하지 않습니다.
+            {isBivariateRun ? '이변량' : isRegressionRun ? '회귀' : '상관행렬'} 결과는 아직 CSV 내보내기를 지원하지 않습니다.
           </p>
         )}
         {exportState.status === 'error' && (

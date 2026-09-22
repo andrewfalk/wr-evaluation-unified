@@ -15,12 +15,14 @@ from typing import Any
 
 import bivariate
 import correlation_matrix as correlation_matrix_module
+import regression as regression_module
 from boxplot import compute_boxplot
 from descriptive import compute_continuous, compute_discrete
 from histogram import compute_histogram
 from protocol import ProtocolError, parse_and_validate_request
 
-PROTOCOL_VERSION = 3
+# PR4-A1 — regression shape 추가로 3→4. 계획서 §3 "요청/응답".
+PROTOCOL_VERSION = 4
 
 _BIVARIATE_DISPATCH = {
     "welch_t": lambda b: bivariate.welch_t(b["groups"]),
@@ -80,9 +82,17 @@ def run_correlation_matrix(request: dict[str, Any]) -> dict[str, Any]:
     return {"protocolVersion": PROTOCOL_VERSION, "correlationMatrix": result}
 
 
+def run_regression(request: dict[str, Any]) -> dict[str, Any]:
+    r = request["regression"]
+    result = regression_module.compute_regression(r["family"], r["y"], r["X"], r["columnNames"], r["covariance"])
+    return {"protocolVersion": PROTOCOL_VERSION, "regression": result}
+
+
 def run_analysis(request: dict[str, Any]) -> dict[str, Any]:
     if "correlationMatrix" in request:
         return run_correlation_matrix(request)
+    if "regression" in request:
+        return run_regression(request)
     if "bivariate" in request:
         return run_bivariate(request)
     return run_descriptive(request)

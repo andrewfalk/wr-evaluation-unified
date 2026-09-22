@@ -17,6 +17,13 @@ PR3-B — protocolVersion을 3으로 상향하고 상관행렬 요청 shape(`cor
 검증(변수 키 중복·길이 일치 등)은 `_validate_correlation_matrix_semantics`로
 분리한다 — jsonschema의 `uniqueItems`는 객체 전체 비교라 "같은 key, 다른 values"
 를 못 잡으므로 `key`만 뽑아 별도로 중복 검사한다.
+
+PR4-A1 — protocolVersion을 4로 상향하고 회귀 요청 shape(`regression`)을 네
+번째 상호배타 shape으로 추가했다(계획서 pr4-a-lexical-reddy.md §3). Node가
+설계행렬(y·X·columnNames, 더미 인코딩 완료)을 만들어 보내고 Python은 순수
+수치 계산만 한다 — 계수·소수셀 판정에 필요한 person 신원은 이 요청 shape에
+없다(원칙 유지). `X`는 row-major 2차원 배열(N행×P열)이고, 각 행의 길이가
+`columnNames`와 일치해야 한다(구조 검증 밖 — `_validate_regression_semantics`).
 """
 from __future__ import annotations
 
@@ -46,7 +53,7 @@ _VARIABLES_REQUEST_SCHEMA: dict[str, Any] = {
     "required": ["protocolVersion", "variables"],
     "additionalProperties": False,
     "properties": {
-        "protocolVersion": {"const": 3},
+        "protocolVersion": {"const": 4},
         "variables": {
             "type": "array",
             "items": {
@@ -83,7 +90,7 @@ _BIVARIATE_REQUEST_SCHEMA: dict[str, Any] = {
     "required": ["protocolVersion", "bivariate"],
     "additionalProperties": False,
     "properties": {
-        "protocolVersion": {"const": 3},
+        "protocolVersion": {"const": 4},
         "bivariate": {
             "type": "object",
             "required": ["method"],
@@ -123,7 +130,7 @@ _CORRELATION_MATRIX_REQUEST_SCHEMA: dict[str, Any] = {
     "required": ["protocolVersion", "correlationMatrix"],
     "additionalProperties": False,
     "properties": {
-        "protocolVersion": {"const": 3},
+        "protocolVersion": {"const": 4},
         "correlationMatrix": {
             "type": "object",
             "required": ["method", "variables"],
@@ -154,8 +161,57 @@ _CORRELATION_MATRIX_REQUEST_SCHEMA: dict[str, Any] = {
     },
 }
 
+_REGRESSION_FAMILIES = ("gaussian", "binomial")
+_REGRESSION_COVARIANCE_TYPES = ("hc3", "cluster")
+
+# PR4-A1 — 회귀 요청 shape. y/X는 완전사례(결측 없음)로 이미 걸러진 숫자 배열 —
+# Node가 더미 인코딩·기준 레벨 해석까지 전부 끝낸 뒤 보낸다. covariance.groups는
+# cluster일 때만 필수(person 클러스터 키를 Node가 익명 라벨로 바꿔 보낸다 —
+# 이 파일은 person 신원을 모른다는 원칙 그대로, 그냥 그룹 등가류 라벨일 뿐).
+_REGRESSION_REQUEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["protocolVersion", "regression"],
+    "additionalProperties": False,
+    "properties": {
+        "protocolVersion": {"const": 4},
+        "regression": {
+            "type": "object",
+            "required": ["family", "y", "X", "columnNames", "covariance"],
+            "additionalProperties": False,
+            "properties": {
+                "family": {"enum": list(_REGRESSION_FAMILIES)},
+                "y": {
+                    "type": "array",
+                    "maxItems": MAX_VALUES_PER_VARIABLE,
+                    "items": {"type": "number"},
+                },
+                "X": {
+                    "type": "array",
+                    "maxItems": MAX_VALUES_PER_VARIABLE,
+                    "items": {"type": "array", "items": {"type": "number"}},
+                },
+                "columnNames": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                "covariance": {
+                    "type": "object",
+                    "required": ["type"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "type": {"enum": list(_REGRESSION_COVARIANCE_TYPES)},
+                        "groups": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+        },
+    },
+}
+
 REQUEST_SCHEMA: dict[str, Any] = {
-    "oneOf": [_VARIABLES_REQUEST_SCHEMA, _BIVARIATE_REQUEST_SCHEMA, _CORRELATION_MATRIX_REQUEST_SCHEMA],
+    "oneOf": [
+        _VARIABLES_REQUEST_SCHEMA,
+        _BIVARIATE_REQUEST_SCHEMA,
+        _CORRELATION_MATRIX_REQUEST_SCHEMA,
+        _REGRESSION_REQUEST_SCHEMA,
+    ],
 }
 
 
@@ -194,8 +250,58 @@ def parse_and_validate_request(raw: str) -> dict[str, Any]:
         _validate_correlation_matrix_semantics(data["correlationMatrix"])
         return data
 
+    if "regression" in data:
+        _validate_regression_semantics(data["regression"])
+        return data
+
     _validate_bivariate_semantics(data["bivariate"])
     return data
+
+
+def _validate_regression_semantics(regression: dict[str, Any]) -> None:
+    """oneOf 스키마가 표현 못 하는 교차필드 검증(계획서 §3 "요청/응답"). y 길이·
+    X 각 행 길이·columnNames 길이가 전부 일치해야 하고, cluster covariance는
+    groups 길이도 같은 N이어야 한다. 값 개수 상한은 기존 MAX_TOTAL_VALUES를
+    재사용한다(더미 확장 후 실제 셀 수 = N×P)."""
+    y = regression["y"]
+    x = regression["X"]
+    column_names = regression["columnNames"]
+    covariance = regression["covariance"]
+    n = len(y)
+
+    if len(x) != n:
+        raise ProtocolError("INVALID_INPUT", "regression.X 행 수가 y 길이와 다르다")
+    p = len(column_names)
+    if any(len(row) != p for row in x):
+        raise ProtocolError("INVALID_INPUT", "regression.X의 각 행 길이가 columnNames 길이와 달라야 한다")
+    if p == 0:
+        raise ProtocolError("INVALID_INPUT", "regression.columnNames가 비어있다")
+
+    total_values = n * p
+    if total_values > MAX_TOTAL_VALUES:
+        raise ProtocolError(
+            "LIMIT_EXCEEDED",
+            f"regression 전체 값 개수(N×P={total_values})가 상한({MAX_TOTAL_VALUES})을 초과",
+        )
+    if n > MAX_VALUES_PER_VARIABLE:
+        raise ProtocolError(
+            "LIMIT_EXCEEDED",
+            f"regression 행 수({n})가 상한({MAX_VALUES_PER_VARIABLE})을 초과",
+        )
+
+    if not all(_is_finite_number(v) for v in y):
+        raise ProtocolError("INVALID_INPUT", "regression.y 값에 유한하지 않은 수가 있다")
+    for row in x:
+        if not all(_is_finite_number(v) for v in row):
+            raise ProtocolError("INVALID_INPUT", "regression.X 값에 유한하지 않은 수가 있다")
+
+    if covariance["type"] == "cluster":
+        groups = covariance.get("groups")
+        if groups is None or len(groups) != n:
+            raise ProtocolError("INVALID_INPUT", "regression.covariance.groups 길이가 y 길이와 같아야 한다(cluster 타입 필수)")
+
+    if regression["family"] == "binomial" and not all(v in (0.0, 1.0) for v in y):
+        raise ProtocolError("INVALID_INPUT", "regression.family가 binomial이면 y는 0/1만 허용한다")
 
 
 def _validate_correlation_matrix_semantics(correlation_matrix: dict[str, Any]) -> None:

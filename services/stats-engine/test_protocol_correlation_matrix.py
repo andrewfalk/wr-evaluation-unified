@@ -16,7 +16,7 @@ from protocol import MAX_VALUES_PER_VARIABLE, ProtocolError, parse_and_validate_
 
 def _correlation_matrix_request(k=3, n=10, method="pearson_correlation"):
     return {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "correlationMatrix": {
             "method": method,
             "variables": [
@@ -97,9 +97,10 @@ def test_variables_bivariate_correlation_matrix_mutually_exclusive():
         parse_and_validate_request(json.dumps(request))
 
 
-def test_stale_protocol_version_2_rejected():
+def test_stale_protocol_version_3_rejected():
+    # PR4-A1이 3→4로 상향했다(회귀 요청 shape 추가).
     request = _correlation_matrix_request()
-    request["protocolVersion"] = 2
+    request["protocolVersion"] = 3
     with pytest.raises(ProtocolError) as exc_info:
         parse_and_validate_request(json.dumps(request))
     assert exc_info.value.code == "INVALID_INPUT"
@@ -121,14 +122,14 @@ def test_analyze_process_correlation_matrix_success():
     assert proc.returncode == 0
     assert proc.stderr == ""
     payload = json.loads(proc.stdout)
-    assert payload["protocolVersion"] == 3
+    assert payload["protocolVersion"] == 4
     assert payload["correlationMatrix"]["method"] == "pearson_correlation"
     assert len(payload["correlationMatrix"]["cells"]) == 6  # C(4,2)
 
 
 def test_analyze_process_correlation_matrix_invalid_shape_emits_marker_and_exit1():
     bad_request = {
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "correlationMatrix": {"method": "pearson_correlation", "variables": []},
     }
     proc = _run_analyze(json.dumps(bad_request))

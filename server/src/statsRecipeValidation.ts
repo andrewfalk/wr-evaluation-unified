@@ -6,6 +6,7 @@ import { getIntegratedCatalog } from './statsCatalog';
 import { isGrainCompatible } from '@wr/analytics-core';
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
 import type { StatsAnalysisRecipe, StatsFilter, StatsFilterOperator } from '@wr/contracts';
+import { getOrdinalOrder, getCategoricalOrder } from './statsOrdinalOrder';
 
 // grain 단순화(PR0-B4 개정) — case/job/disease 3개만 지원한다. job_diagnosis/task/
 // cervical_task/vibration_interval은 소스코드까지 완전히 삭제됐고, person은 case와
@@ -80,6 +81,12 @@ const GROUP_COMPARISON_METHODS = new Set(['welch_t', 'mann_whitney', 'anova', 'k
 const CONTINGENCY_METHODS = new Set(['chi_square', 'fisher_exact']);
 const CORRELATION_METHODS = new Set(['pearson_correlation', 'spearman_correlation']);
 const PAIRED_METHODS = new Set(['paired_t', 'wilcoxon_signed_rank']);
+// PR4-A1 — 회귀 2종. outcome 타입이 method를 자동 결정하지만 requestedMethod로도
+// 명시 가능(§6.5). date·high_cardinality는 predictor로 쓸 수 없다(계획 §2 ④ 표) —
+// categorical/ordinal/boolean/continuous만 허용.
+const REGRESSION_METHODS = new Set(['ols_linear', 'binary_logistic']);
+const REGRESSION_PREDICTOR_ALLOWED_TYPES: ReadonlySet<AnalyticsVariableMetadata['type']> =
+  new Set(['continuous', 'categorical', 'ordinal', 'boolean']);
 
 function isContinuousType(type: AnalyticsVariableMetadata['type']): boolean {
   return type === 'continuous';
@@ -365,6 +372,85 @@ export function validateRecipe(
           code: 'METHOD_TYPE_MISMATCH',
           path: key,
           message: `상관행렬은 연속형 변수만 지원한다(${key}는 type=${variable.type})`,
+        });
+      }
+    }
+  }
+
+  // PR4-A1 — 회귀 타입정합성·predictor 적격성·기준 레벨 사전검증. zod superRefine
+  // (shared/contracts/stats.ts)은 구조검사만(≥2개 변수·중복 금지·outcome이 variableKeys
+  // 안에 있는지) 했다 — 여기서 카탈로그가 필요한 의미검증을 한다. context==='analyze'
+  // 일 때만 requestedMethod 필수(리뷰 #1 — preview는 관대해야 최초 방법 미선택 상태의
+  // /preview도 통과한다).
+  if (recipe.analysisMode === 'regression' && recipe.regression) {
+    const { outcomeKey, referenceLevels } = recipe.regression;
+    const outcomeVar = catalogByKey.get(outcomeKey);
+    const predictorKeys = recipe.variableKeys.filter((k) => k !== outcomeKey);
+
+    // method 존재 여부·유효성·outcome 타입 정합성은 전부 context==='analyze'
+    // 일 때만 검사한다(bivariate/correlation_matrix와 동일한 관례 — preview는
+    // requestedMethod가 아직 없거나 이후 바뀔 스테일 값이어도 항상 관대해야
+    // 한다. 불일치는 availableMethods의 METHOD_TYPE_MISMATCH로 이미 드러난다).
+    if (context === 'analyze') {
+      if (!recipe.requestedMethod) {
+        errors.push({
+          code: 'REGRESSION_REQUIRES_METHOD',
+          path: 'requestedMethod',
+          message: '회귀 모드에서는 requestedMethod를 지정해야 한다',
+        });
+      } else if (!REGRESSION_METHODS.has(recipe.requestedMethod)) {
+        errors.push({
+          code: 'REGRESSION_METHOD_NOT_SUPPORTED',
+          path: 'requestedMethod',
+          message: `회귀는 ols_linear/binary_logistic만 지원한다(요청: ${recipe.requestedMethod})`,
+        });
+      } else if (outcomeVar) {
+        // outcome 타입 ↔ method 정합성. categorical 2레벨 outcome은 A1 범위 밖(A2).
+        const outcomeTypeOk =
+          (recipe.requestedMethod === 'ols_linear' && outcomeVar.type === 'continuous') ||
+          (recipe.requestedMethod === 'binary_logistic' && outcomeVar.type === 'boolean');
+        if (!outcomeTypeOk) {
+          errors.push({
+            code: 'METHOD_TYPE_MISMATCH',
+            path: 'regression.outcomeKey',
+            message: `${recipe.requestedMethod}는 outcome 타입(${outcomeVar.type})에 쓸 수 없다 — ols_linear는 continuous, binary_logistic은 boolean만 v1에서 지원한다`,
+          });
+        }
+      }
+      // outcomeVar가 undefined면 UNKNOWN_VARIABLE로 이미 보고됨 — 중복 보고 방지.
+    }
+
+    for (const key of predictorKeys) {
+      const variable = catalogByKey.get(key);
+      if (variable && !REGRESSION_PREDICTOR_ALLOWED_TYPES.has(variable.type)) {
+        errors.push({
+          code: 'REGRESSION_PREDICTOR_TYPE_UNSUPPORTED',
+          path: key,
+          message: `${key}는 type=${variable.type}이라 회귀 predictor로 쓸 수 없다(date·high_cardinality 미지원)`,
+        });
+      }
+    }
+
+    // 기준 레벨 값 검증(계획 §2 ④ "기준 레벨 검증") — 카탈로그에 순서가 선언된
+    // 변수만 여기서 검증한다. 선언이 없는 동적 categorical은 완전사례 관측 레벨
+    // 기준으로만 판정 가능해 statsRegressionDesign.ts(4단계, 데이터 필요)로 미룬다.
+    for (const [refKey, refValue] of Object.entries(referenceLevels ?? {})) {
+      if (!predictorKeys.includes(refKey)) {
+        errors.push({
+          code: 'REGRESSION_REFERENCE_LEVEL_UNKNOWN_PREDICTOR',
+          path: `regression.referenceLevels.${refKey}`,
+          message: `${refKey}는 predictor 집합에 없다`,
+        });
+        continue;
+      }
+      const variable = catalogByKey.get(refKey);
+      if (!variable) continue; // UNKNOWN_VARIABLE로 이미 보고됨
+      const declared = getOrdinalOrder(refKey) ?? getCategoricalOrder(refKey);
+      if (declared && !declared.includes(refValue)) {
+        errors.push({
+          code: 'REGRESSION_REFERENCE_LEVEL_NOT_DECLARED',
+          path: `regression.referenceLevels.${refKey}`,
+          message: `${refKey}의 선언된 레벨(${declared.join(', ')})에 "${refValue}"가 없다`,
         });
       }
     }

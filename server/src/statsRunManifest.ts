@@ -17,7 +17,9 @@ import { INTEGRATED_CATALOG_VERSION } from './statsCatalogVersion';
 // 이전에 캐시된 histogram 결과(옛 bin 개수 기준)를 새 계산 결과와 구분해야 하므로 이
 // 엔진 구현 버전은 반드시 올린다(캐시 무효화 목적 — statsExecutionDigest.ts가 이 값을
 // digest 입력에 직접 포함한다).
-export const STATS_ENGINE_VERSION = 'v4-histogram-person-count-bins';
+// PR4-A1 — regression 요청 shape 추가로 stats-engine 프로토콜이 protocolVersion 3→4로
+// 올라간다(services/stats-engine/protocol.py, analyze.py) — 엔진 버전도 함께 범프.
+export const STATS_ENGINE_VERSION = 'v5-regression';
 
 export interface BuildRunManifestInput {
   recipeDigest: string;
@@ -27,7 +29,8 @@ export interface BuildRunManifestInput {
   formulaPolicies: Record<string, string>;
   // PR3-A — 신규, RunManifestSchema에선 optional이지만(구버전 저장결과 재파싱 호환)
   // 여기 buildRunManifest()는 항상 채운다 — 새로 만드는 manifest는 전부 신버전이므로.
-  analysisMode: 'descriptive' | 'bivariate' | 'correlation_matrix';
+  // PR4-A1 — 'regression' 추가.
+  analysisMode: 'descriptive' | 'bivariate' | 'correlation_matrix' | 'regression';
 }
 
 export function buildRunManifest(input: BuildRunManifestInput): RunManifest {
@@ -64,7 +67,7 @@ export interface BuildFailedStatsRunManifestInput {
   sourceDigest: string;
   snapshotAsOf: string;
   formulaPolicies: Record<string, string>;
-  analysisMode: 'descriptive' | 'bivariate' | 'correlation_matrix';
+  analysisMode: 'descriptive' | 'bivariate' | 'correlation_matrix' | 'regression';
 }
 
 // 실패 행의 manifest는 resultDigest 필드 자체가 없다(null이 아니라 생략) — 계산 결과가
