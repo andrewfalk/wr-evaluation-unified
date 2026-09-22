@@ -19,7 +19,9 @@ import { INTEGRATED_CATALOG_VERSION } from './statsCatalogVersion';
 // digest 입력에 직접 포함한다).
 // PR4-A1 — regression 요청 shape 추가로 stats-engine 프로토콜이 protocolVersion 3→4로
 // 올라간다(services/stats-engine/protocol.py, analyze.py) — 엔진 버전도 함께 범프.
-export const STATS_ENGINE_VERSION = 'v5-regression';
+// PR4-A2 — splineContrasts/regressionDiagnostics shape 추가로 protocolVersion이
+// 4→5로 다시 올라간다 — 엔진 버전도 함께 범프.
+export const STATS_ENGINE_VERSION = 'v6-regression-diagnostics-spline';
 
 export interface BuildRunManifestInput {
   recipeDigest: string;

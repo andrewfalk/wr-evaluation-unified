@@ -460,7 +460,7 @@ describe('ResultPanel — PR4-A1 회귀 결과 카드', () => {
     expect(screen.queryByText('이산형')).toBeNull();
   });
 
-  it('회귀 결과는 CSV 내보내기 버튼 대신 안내 문구를 보여준다', () => {
+  it('PR4-A2 — 회귀 결과도 집계 CSV 내보내기 버튼을 보여준다(exportUnsupported=false)', () => {
     const committedResult = {
       runManifest: baseRunManifest(),
       result: { regression: { suppressed: true, reasonCode: 'MIN_COHORT_NOT_MET' } },
@@ -469,10 +469,10 @@ describe('ResultPanel — PR4-A1 회귀 결과 카드', () => {
       <ResultPanel
         catalog={catalogFixture()} committedRecipe={regressionRecipe()} committedResult={committedResult}
         recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
-        actionsLocked={false} exportUnsupported
+        actionsLocked={false} exportUnsupported={false}
       />,
     );
-    expect(screen.getByText(/회귀 결과는 아직 CSV 내보내기를 지원하지 않습니다/)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /집계 결과 내보내기/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /집계 결과 내보내기/ })).toBeTruthy();
+    expect(screen.queryByText(/회귀 결과는 아직 CSV 내보내기를 지원하지 않습니다/)).toBeNull();
   });
 });

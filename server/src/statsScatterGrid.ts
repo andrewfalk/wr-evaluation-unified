@@ -194,3 +194,40 @@ export function sampleScatterPoints<T extends { caseId: string }>(
   const sample = shuffled.slice(0, MAX_SCATTER_POINTS);
   return { displayedCount: sample.length, totalCount, points: sample.map((r) => [xOf(r), yOf(r)]) };
 }
+
+// PR4-A2 — 회귀 진단(limited_row) 표시 상한. 4패널이 산점도류라 같은 규모가
+// 적절하다고 보고 스캐터와 같은 상수를 재사용한다.
+export const MAX_REGRESSION_DIAGNOSTICS_POINTS = MAX_SCATTER_POINTS;
+
+export interface RegressionDiagnosticsSampleResult {
+  displayedCount: number;
+  totalCount: number;
+  rowIndices: number[];
+}
+
+/**
+ * 회귀 진단(잔차·leverage·Cook's D) 표시용 행 인덱스를 결정적으로 뽑는다 —
+ * sampleScatterPoints와 같은 원칙(caseId로 먼저 정렬해 입력 순서 독립성을
+ * 확보한 뒤 seed 기반 Fisher-Yates 셔플). 계산은 항상 전체 N행 기준(Python이
+ * Q-Q 순위·h·잔차를 전체로 계산) — 이 함수는 **출력에 포함할 행**만 정한다
+ * (계획서 §4 "표시 상한").
+ */
+export function sampleRegressionDiagnosticsRowIndices(
+  caseIds: readonly string[],
+  seed: string,
+): RegressionDiagnosticsSampleResult {
+  const totalCount = caseIds.length;
+  const indexed = caseIds.map((caseId, rowIndex) => ({ caseId, rowIndex }));
+  const sorted = [...indexed].sort((a, b) => a.caseId.localeCompare(b.caseId));
+  if (totalCount <= MAX_REGRESSION_DIAGNOSTICS_POINTS) {
+    return { displayedCount: totalCount, totalCount, rowIndices: sorted.map((r) => r.rowIndex) };
+  }
+  const rand = mulberry32(hashSeed(seed));
+  const shuffled = [...sorted];
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rand() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  const sample = shuffled.slice(0, MAX_REGRESSION_DIAGNOSTICS_POINTS);
+  return { displayedCount: sample.length, totalCount, rowIndices: sample.map((r) => r.rowIndex) };
+}

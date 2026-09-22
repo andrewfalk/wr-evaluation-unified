@@ -36,6 +36,19 @@ const okPayload = {
   excludedRowCount: 0,
   qualityFlags: [],
   analysisUnitNote: 'note',
+  // PR4-A2 — ok/inference_withheld는 diagnostics 객체가 항상 있어야 한다(불변식).
+  diagnostics: {
+    conditionNumber: 1.5,
+    vif: [{ variableKey: 'x1', termName: 'x1', vif: 1.0 }],
+    pointDiagnosticsSupported: true,
+    pointDiagnosticsUnsupportedReason: null,
+    pointDiagnosticsStatus: 'not_requested' as const,
+    displayedPointCount: null,
+    totalPointCount: 40,
+  },
+  standardizedPredictorKeys: [] as string[],
+  standardization: null,
+  splinePartialEffects: [] as unknown[],
 };
 
 describe('AnalyzeRegressionResultSchema — 스키마 생성 smoke (리뷰 #15)', () => {
@@ -237,6 +250,11 @@ describe('AnalyzeRegressionResultSchema — estimation:"non_estimable"', () => {
     excludedRowCount: 0,
     qualityFlags: [],
     analysisUnitNote: 'note',
+    // PR4-A2 — non_estimable은 β 자체가 없으므로 진단·spline도 전부 null(불변식).
+    diagnostics: null,
+    standardizedPredictorKeys: [] as string[],
+    standardization: null,
+    splinePartialEffects: null,
   };
 
   it('terms:[] + fit:null + 사유 코드를 허용한다', () => {

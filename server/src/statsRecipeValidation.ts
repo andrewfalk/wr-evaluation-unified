@@ -405,15 +405,18 @@ export function validateRecipe(
           message: `회귀는 ols_linear/binary_logistic만 지원한다(요청: ${recipe.requestedMethod})`,
         });
       } else if (outcomeVar) {
-        // outcome 타입 ↔ method 정합성. categorical 2레벨 outcome은 A1 범위 밖(A2).
+        // outcome 타입 ↔ method 정합성. PR4-A2 — categorical outcome도 binary_logistic에
+        // 허용한다(선언 타입만 본다 — 완전사례 관측 레벨이 정확히 2개인지는 카탈로그로
+        // 알 수 없어 statsRegressionDesign.ts(④, 데이터 필요)에서 최종 판정한다).
         const outcomeTypeOk =
           (recipe.requestedMethod === 'ols_linear' && outcomeVar.type === 'continuous') ||
-          (recipe.requestedMethod === 'binary_logistic' && outcomeVar.type === 'boolean');
+          (recipe.requestedMethod === 'binary_logistic' &&
+            (outcomeVar.type === 'boolean' || outcomeVar.type === 'categorical'));
         if (!outcomeTypeOk) {
           errors.push({
             code: 'METHOD_TYPE_MISMATCH',
             path: 'regression.outcomeKey',
-            message: `${recipe.requestedMethod}는 outcome 타입(${outcomeVar.type})에 쓸 수 없다 — ols_linear는 continuous, binary_logistic은 boolean만 v1에서 지원한다`,
+            message: `${recipe.requestedMethod}는 outcome 타입(${outcomeVar.type})에 쓸 수 없다 — ols_linear는 continuous, binary_logistic은 boolean·categorical(2레벨)만 v1에서 지원한다`,
           });
         }
       }
@@ -453,6 +456,28 @@ export function validateRecipe(
           message: `${refKey}의 선언된 레벨(${declared.join(', ')})에 "${refValue}"가 없다`,
         });
       }
+    }
+
+    // PR4-A2 — spline은 continuous만, eventLevel은 categorical outcome만. 일반
+    // predictor 적격성 검사(REGRESSION_PREDICTOR_ALLOWED_TYPES, 위)는 continuous/
+    // categorical/ordinal/boolean을 전부 허용하므로 이 제약을 대신하지 못한다.
+    // UI가 선택을 막아도 API를 직접 호출하면 우회되므로 여기서 다시 강제한다.
+    for (const key of recipe.regression.splineKeys) {
+      const variable = catalogByKey.get(key);
+      if (variable && variable.type !== 'continuous') {
+        errors.push({
+          code: 'SPLINE_PREDICTOR_MUST_BE_CONTINUOUS',
+          path: `regression.splineKeys.${key}`,
+          message: `${key}는 type=${variable.type}이라 spline 대상이 될 수 없다(continuous만 지원)`,
+        });
+      }
+    }
+    if (recipe.regression.eventLevel !== undefined && outcomeVar && outcomeVar.type !== 'categorical') {
+      errors.push({
+        code: 'EVENT_LEVEL_REQUIRES_CATEGORICAL_OUTCOME',
+        path: 'regression.eventLevel',
+        message: `eventLevel은 categorical outcome에만 지정할 수 있다(outcome 타입: ${outcomeVar.type})`,
+      });
     }
   }
 

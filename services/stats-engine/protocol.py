@@ -24,6 +24,13 @@ PR4-A1 — protocolVersion을 4로 상향하고 회귀 요청 shape(`regression`
 수치 계산만 한다 — 계수·소수셀 판정에 필요한 person 신원은 이 요청 shape에
 없다(원칙 유지). `X`는 row-major 2차원 배열(N행×P열)이고, 각 행의 길이가
 `columnNames`와 일치해야 한다(구조 검증 밖 — `_validate_regression_semantics`).
+
+PR4-A2 — protocolVersion을 5로 상향한다. `regression` shape에 선택적
+`splineContrasts`를 추가한다(Node가 spline 기저로 만든 대비행렬 — 계획서
+§3 "spline 부분효과", Python은 spline을 모르고 대비 벡터만 평가한다).
+다섯 번째 상호배타 shape `regressionDiagnostics`도 추가한다 — 재적합 없이
+이미 주어진 β로 leverage/잔차/Cook's D만 계산하는 경량 경로(계획서 §4
+"limited_row 진단값" — 캐시 hit/miss와 무관하게 독립적으로 호출된다).
 """
 from __future__ import annotations
 
@@ -36,6 +43,10 @@ import jsonschema
 MAX_VALUES_PER_VARIABLE = 50000
 MAX_TOTAL_VALUES = 350000
 MAX_STRING_LENGTH = 200
+# PR4-A2 — spline 부분효과 그리드 상한(§2 "예측 그리드(약 40점)"). server/src/
+# statsEngineLimits.ts의 같은 이름 상수와 값이 반드시 일치해야 한다(위 세
+# 상수와 같은 원칙 — statsEngineLimits.consistency.test.ts가 대조한다).
+MAX_SPLINE_CONTRAST_POINTS = 60
 
 BIVARIATE_METHODS = (
     "welch_t", "mann_whitney", "anova", "kruskal_wallis",
@@ -53,7 +64,7 @@ _VARIABLES_REQUEST_SCHEMA: dict[str, Any] = {
     "required": ["protocolVersion", "variables"],
     "additionalProperties": False,
     "properties": {
-        "protocolVersion": {"const": 4},
+        "protocolVersion": {"const": 5},
         "variables": {
             "type": "array",
             "items": {
@@ -90,7 +101,7 @@ _BIVARIATE_REQUEST_SCHEMA: dict[str, Any] = {
     "required": ["protocolVersion", "bivariate"],
     "additionalProperties": False,
     "properties": {
-        "protocolVersion": {"const": 4},
+        "protocolVersion": {"const": 5},
         "bivariate": {
             "type": "object",
             "required": ["method"],
@@ -130,7 +141,7 @@ _CORRELATION_MATRIX_REQUEST_SCHEMA: dict[str, Any] = {
     "required": ["protocolVersion", "correlationMatrix"],
     "additionalProperties": False,
     "properties": {
-        "protocolVersion": {"const": 4},
+        "protocolVersion": {"const": 5},
         "correlationMatrix": {
             "type": "object",
             "required": ["method", "variables"],
@@ -173,7 +184,7 @@ _REGRESSION_REQUEST_SCHEMA: dict[str, Any] = {
     "required": ["protocolVersion", "regression"],
     "additionalProperties": False,
     "properties": {
-        "protocolVersion": {"const": 4},
+        "protocolVersion": {"const": 5},
         "regression": {
             "type": "object",
             "required": ["family", "y", "X", "columnNames", "covariance"],
@@ -200,6 +211,63 @@ _REGRESSION_REQUEST_SCHEMA: dict[str, Any] = {
                         "groups": {"type": "array", "items": {"type": "string"}},
                     },
                 },
+                # PR4-A2 — spline predictor별 대비행렬(§3 "spline 부분효과"). 생략
+                # 가능(빈 배열과 동치) — v1은 spline 없는 회귀가 훨씬 많다.
+                "splineContrasts": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["variableKey", "contrastMatrix"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "variableKey": {"type": "string", "minLength": 1},
+                            "contrastMatrix": {
+                                "type": "array",
+                                "maxItems": MAX_SPLINE_CONTRAST_POINTS,
+                                "items": {"type": "array", "items": {"type": "number"}},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+}
+
+# PR4-A2 — 경량 진단 전용 요청(재적합 없음). X·y·columnNames는 회귀 shape과
+# 같은 규칙이지만 covariance는 필요 없다(공분산은 이미 최초 적합에서 나온
+# 값을 쓰지 않고, 이 경로 자체가 diagnostics만 계산한다 — h/잔차/Cook's D는
+# β만 있으면 된다). sampledRowIndices는 Node가 미리 정한 표본 — 계산은 X
+# 전체로 하되 출력은 이 행만 직렬화한다(계획서 §4 "출력은 sampledRowIndices
+# 행만 직렬화").
+_REGRESSION_DIAGNOSTICS_REQUEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["protocolVersion", "regressionDiagnostics"],
+    "additionalProperties": False,
+    "properties": {
+        "protocolVersion": {"const": 5},
+        "regressionDiagnostics": {
+            "type": "object",
+            "required": ["family", "y", "X", "columnNames", "beta", "sampledRowIndices"],
+            "additionalProperties": False,
+            "properties": {
+                "family": {"enum": list(_REGRESSION_FAMILIES)},
+                "y": {
+                    "type": "array",
+                    "maxItems": MAX_VALUES_PER_VARIABLE,
+                    "items": {"type": "number"},
+                },
+                "X": {
+                    "type": "array",
+                    "maxItems": MAX_VALUES_PER_VARIABLE,
+                    "items": {"type": "array", "items": {"type": "number"}},
+                },
+                "columnNames": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                "beta": {"type": "array", "items": {"type": "number"}},
+                "sampledRowIndices": {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 0},
+                },
             },
         },
     },
@@ -211,6 +279,7 @@ REQUEST_SCHEMA: dict[str, Any] = {
         _BIVARIATE_REQUEST_SCHEMA,
         _CORRELATION_MATRIX_REQUEST_SCHEMA,
         _REGRESSION_REQUEST_SCHEMA,
+        _REGRESSION_DIAGNOSTICS_REQUEST_SCHEMA,
     ],
 }
 
@@ -252,6 +321,10 @@ def parse_and_validate_request(raw: str) -> dict[str, Any]:
 
     if "regression" in data:
         _validate_regression_semantics(data["regression"])
+        return data
+
+    if "regressionDiagnostics" in data:
+        _validate_regression_diagnostics_semantics(data["regressionDiagnostics"])
         return data
 
     _validate_bivariate_semantics(data["bivariate"])
@@ -302,6 +375,72 @@ def _validate_regression_semantics(regression: dict[str, Any]) -> None:
 
     if regression["family"] == "binomial" and not all(v in (0.0, 1.0) for v in y):
         raise ProtocolError("INVALID_INPUT", "regression.family가 binomial이면 y는 0/1만 허용한다")
+
+    # PR4-A2 — 대비행렬 각 행 길이는 P(columnNames)와 같아야 하고 전부 유한해야
+    # 한다. 그리드 수 상한은 스키마 maxItems로 이미 걸렸다(방어적으로 재확인).
+    for contrast in regression.get("splineContrasts", []):
+        matrix = contrast["contrastMatrix"]
+        if len(matrix) > MAX_SPLINE_CONTRAST_POINTS:
+            raise ProtocolError("LIMIT_EXCEEDED", f"splineContrasts 그리드 수가 상한({MAX_SPLINE_CONTRAST_POINTS})을 초과")
+        for row in matrix:
+            if len(row) != p:
+                raise ProtocolError("INVALID_INPUT", "splineContrasts.contrastMatrix의 각 행 길이가 columnNames 길이와 달라야 한다")
+            if not all(_is_finite_number(v) for v in row):
+                raise ProtocolError("INVALID_INPUT", "splineContrasts.contrastMatrix 값에 유한하지 않은 수가 있다")
+
+
+def _validate_regression_diagnostics_semantics(regression_diagnostics: dict[str, Any]) -> None:
+    """oneOf 스키마가 표현 못 하는 교차필드 검증(계획서 §4 "limited_row 진단값" —
+    입력 검증 목록). X의 모든 행(첫 행만이 아니라 전체)을 순회해 길이를 확인하고,
+    beta 길이도 columnNames와 일치해야 한다 — 재적합이 아니라 이미 주어진 β를
+    그대로 쓰므로, 불일치는 구조 자체가 어긋났다는 뜻이다."""
+    y = regression_diagnostics["y"]
+    x = regression_diagnostics["X"]
+    column_names = regression_diagnostics["columnNames"]
+    beta = regression_diagnostics["beta"]
+    sampled_row_indices = regression_diagnostics["sampledRowIndices"]
+    n = len(y)
+    p = len(column_names)
+
+    if len(x) != n:
+        raise ProtocolError("INVALID_INPUT", "regressionDiagnostics.X 행 수가 y 길이와 다르다")
+    if any(len(row) != p for row in x):
+        raise ProtocolError("INVALID_INPUT", "regressionDiagnostics.X의 각 행 길이가 columnNames 길이와 달라야 한다")
+    if p == 0:
+        raise ProtocolError("INVALID_INPUT", "regressionDiagnostics.columnNames가 비어있다")
+    if len(beta) != p:
+        raise ProtocolError("INVALID_INPUT", "regressionDiagnostics.beta 길이가 columnNames 길이와 달라야 한다")
+
+    total_values = n * p
+    if total_values > MAX_TOTAL_VALUES:
+        raise ProtocolError(
+            "LIMIT_EXCEEDED",
+            f"regressionDiagnostics 전체 값 개수(N×P={total_values})가 상한({MAX_TOTAL_VALUES})을 초과",
+        )
+    if n > MAX_VALUES_PER_VARIABLE:
+        raise ProtocolError(
+            "LIMIT_EXCEEDED",
+            f"regressionDiagnostics 행 수({n})가 상한({MAX_VALUES_PER_VARIABLE})을 초과",
+        )
+
+    if not all(_is_finite_number(v) for v in y):
+        raise ProtocolError("INVALID_INPUT", "regressionDiagnostics.y 값에 유한하지 않은 수가 있다")
+    for row in x:
+        if not all(_is_finite_number(v) for v in row):
+            raise ProtocolError("INVALID_INPUT", "regressionDiagnostics.X 값에 유한하지 않은 수가 있다")
+    if not all(_is_finite_number(v) for v in beta):
+        raise ProtocolError("INVALID_INPUT", "regressionDiagnostics.beta 값에 유한하지 않은 수가 있다")
+
+    if regression_diagnostics["family"] == "binomial" and not all(v in (0.0, 1.0) for v in y):
+        raise ProtocolError("INVALID_INPUT", "regressionDiagnostics.family가 binomial이면 y는 0/1만 허용한다")
+
+    # PR4-A2 — 정수·중복 없음·[0, N) 범위 내(계획서 §4 "입력 검증"). 실제 표시
+    # 상한 정책(§4 "표시 상한")은 Node가 sampledRowIndices를 만들 때 이미
+    # 강제한다 — 여기서는 구조적 안전망(범위·중복)만 본다.
+    if len(set(sampled_row_indices)) != len(sampled_row_indices):
+        raise ProtocolError("INVALID_INPUT", "regressionDiagnostics.sampledRowIndices에 중복이 있다")
+    if any(idx < 0 or idx >= n for idx in sampled_row_indices):
+        raise ProtocolError("INVALID_INPUT", "regressionDiagnostics.sampledRowIndices가 [0, N) 범위를 벗어난다")
 
 
 def _validate_correlation_matrix_semantics(correlation_matrix: dict[str, Any]) -> None:

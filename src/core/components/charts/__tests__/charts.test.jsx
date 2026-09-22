@@ -12,6 +12,7 @@ import { StackedBarChart100 } from '../StackedBarChart100';
 import { ScatterPlot } from '../ScatterPlot';
 import { CorrelationHeatmap } from '../CorrelationHeatmap';
 import { ForestPlot } from '../ForestPlot';
+import { SplinePartialEffectChart } from '../SplinePartialEffectChart';
 import { ChartTooltip, chooseTooltipPlacement } from '../ChartTooltip';
 
 afterEach(cleanup);
@@ -268,6 +269,107 @@ describe('ForestPlot', () => {
     ];
     render(<ForestPlot terms={interceptOnly} />);
     expect(screen.getByText(/공개 정책에 따라 표시되지 않음/)).toBeTruthy();
+  });
+
+  // PR4-A2(리뷰 지적) — 표준화된 predictor는 "1 SD당" 효과라 원 단위 계수와
+  // 단위가 다른데, 화면에 구분 표시가 없어 결과만 보고는 판단할 수 없었다.
+  it('standardizedPredictorKeys에 포함된 variableKey는 라벨에 "(표준화, 1 SD당)"이 붙는다', async () => {
+    const user = userEvent.setup();
+    render(<ForestPlot terms={baseTerms} standardizedPredictorKeys={['x1']} />);
+    expect(screen.getByText('x1 변수 (표준화, 1 SD당)')).toBeTruthy();
+    expect(screen.getByText('x2 변수')).toBeTruthy(); // x2는 표준화 안 됨 — 접미사 없음
+    await user.click(screen.getByRole('button', { name: '데이터 보기' }));
+    expect(screen.getByText('x1 변수 (표준화, 1 SD당)')).toBeTruthy();
+  });
+
+  // PR4-A2(2차 리뷰 지적) — β₁z₁+β₂z₂+β₁₂z₁z₂에서 z₁의 한계효과는 β₁+β₁₂z₂이지
+  // β₁₂ 단독이 아니다. 참여 변수 중 하나라도 표준화됐다고 interaction 전체에
+  // "(표준화, 1 SD당)"을 붙이면 해석이 틀린다 — 각 변수의 척도(z-score/원 단위)를
+  // 개별 표시해야 한다.
+  it('interaction 항은 참여 변수 각각의 척도(z-score/원 단위)를 개별 표시한다(단일 suffix 금지)', () => {
+    const interactionTerm = {
+      name: 'x1:x2', label: 'x1 변수 × x2 변수', variableKey: null, level: null, termType: 'interaction',
+      interactionOf: ['x1', 'x2'], estimate: 0.3, se: 0.1, statistic: 3, pValue: 0.01, ciLower: 0.1, ciUpper: 0.5, exponentiated: null,
+    };
+    render(
+      <ForestPlot
+        terms={[...baseTerms, interactionTerm]}
+        standardizedPredictorKeys={['x2']}
+        variableLabelOf={(k) => ({ x1: 'x1 변수', x2: 'x2 변수' }[k] || k)}
+      />,
+    );
+    // x1은 원 단위, x2는 표준화 — 전체 접미사가 아니라 변수별로 따로 표시된다.
+    expect(screen.getByText('x1 변수 × x2 변수 — x1 변수(원 단위) × x2 변수(z-score)')).toBeTruthy();
+    expect(screen.queryByText('x1 변수 × x2 변수 (표준화, 1 SD당)')).toBeNull();
+  });
+
+  it('표준화가 전혀 쓰이지 않았으면 interaction 라벨에 척도 표시를 붙이지 않는다', () => {
+    const interactionTerm = {
+      name: 'x1:x2', label: 'x1 변수 × x2 변수', variableKey: null, level: null, termType: 'interaction',
+      interactionOf: ['x1', 'x2'], estimate: 0.3, se: 0.1, statistic: 3, pValue: 0.01, ciLower: 0.1, ciUpper: 0.5, exponentiated: null,
+    };
+    render(<ForestPlot terms={[...baseTerms, interactionTerm]} standardizedPredictorKeys={[]} />);
+    expect(screen.getByText('x1 변수 × x2 변수')).toBeTruthy();
+  });
+});
+
+describe('SplinePartialEffectChart', () => {
+  function point(x, delta, ci) {
+    return {
+      x, deltaFromBaseline: delta,
+      ciLower: ci ? ci[0] : null, ciUpper: ci ? ci[1] : null,
+      exponentiated: null,
+    };
+  }
+
+  it('points가 없으면 억제 문구를 보여준다', () => {
+    render(<SplinePartialEffectChart effect={{ variableKey: 'x1', scale: 'linear_predictor', points: [] }} label="x1" />);
+    expect(screen.getByText(/공개 정책에 따라 표시되지 않음/)).toBeTruthy();
+  });
+
+  // PR4-A2(리뷰 지적) — bandPathFor()가 CI 없는 점을 걸러낸 뒤 나머지를 하나의
+  // polygon으로 이었다. 5점 중 가운데(index 2) CI만 null이면, delta 자체는
+  // 정상(끊기지 않는 선)이라 실제로는 band가 양옆 두 구간으로 나뉘어야 하는데
+  // 버그가 있으면 band path가 1개(전체를 잇는)로 렌더된다.
+  it('가운데 점만 CI가 null이면 신뢰구간 band가 2개 구간으로 분리되어 그려진다(1개로 이어붙지 않는다)', () => {
+    const points = [
+      point(0, 0.0, [-0.2, 0.2]),
+      point(1, 0.5, [0.2, 0.8]),
+      point(2, 1.0, null), // 이 점만 CI 계산 실패 — delta는 정상(선은 안 끊김)
+      point(3, 1.5, [1.1, 1.9]),
+      point(4, 2.0, [1.6, 2.4]),
+    ];
+    render(<SplinePartialEffectChart effect={{ variableKey: 'x1', scale: 'linear_predictor', points }} label="x1" />);
+
+    // line(중심선)은 끊기지 않은 하나의 path(fill="none")여야 한다.
+    const linePaths = document.querySelectorAll('path[fill="none"]');
+    expect(linePaths.length).toBe(1);
+
+    // band(신뢰구간 영역)는 fill=ACCENT로 채워진 path — 가운데 점에서 끊겨 2개여야 한다.
+    const bandPaths = document.querySelectorAll('path[fill="#1d4ed8"]');
+    expect(bandPaths.length).toBe(2);
+  });
+
+  it('delta 자체가 비유한(계산 실패)인 점에서는 선도 함께 끊긴다', () => {
+    const points = [
+      point(0, 0.0, [-0.2, 0.2]),
+      point(1, null, null), // delta 자체 실패 — 선도 끊겨야 함
+      point(2, 1.0, [0.6, 1.4]),
+    ];
+    render(<SplinePartialEffectChart effect={{ variableKey: 'x1', scale: 'linear_predictor', points }} label="x1" />);
+    const linePaths = document.querySelectorAll('path[fill="none"]');
+    expect(linePaths.length).toBe(2); // 끊긴 두 구간이 각각 별도 path
+  });
+
+  it('모든 점에 CI가 있으면 band가 1개의 연속된 path로 그려진다(과도한 분할 방지)', () => {
+    const points = [
+      point(0, 0.0, [-0.2, 0.2]),
+      point(1, 0.5, [0.2, 0.8]),
+      point(2, 1.0, [0.6, 1.4]),
+    ];
+    render(<SplinePartialEffectChart effect={{ variableKey: 'x1', scale: 'linear_predictor', points }} label="x1" />);
+    const bandPaths = document.querySelectorAll('path[fill="#1d4ed8"]');
+    expect(bandPaths.length).toBe(1);
   });
 });
 

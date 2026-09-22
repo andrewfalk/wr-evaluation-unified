@@ -89,6 +89,150 @@ def _exponentiated_term(estimate: float, ci_lower: float | None, ci_upper: float
     }
 
 
+# ---------------------------------------------------------------------------
+# PR4-A2 — 진단(VIF·condition number·leverage 계열 지원 판정). 추론 상태
+# (estimation/inferenceWithheldReason) 문자열과 완전히 분리된 직접 수치 검사다
+# — 계획서 §3 "_evaluate_diagnostic_support", 3차 리뷰 반례로 확정된 원칙.
+# se==0(DEGENERATE_COVARIANCE)이어도 h·MSE가 둘 다 건강한 경우가 있다(공분산
+# 샌드위치 공식 자체의 대수적 퇴화, h·MSE와 무관한 원인) — 그래서 추론 상태가
+# 아니라 h·MSE(OLS)/mu·w·denom(로지스틱)을 매번 다시 직접 검사한다.
+# ---------------------------------------------------------------------------
+
+def _evaluate_diagnostic_support(
+    x: np.ndarray, y: np.ndarray, beta: np.ndarray, family: str, h: np.ndarray | None,
+) -> tuple[bool, str | None]:
+    if h is None:
+        return False, "QR_DECOMPOSITION_FAILED"
+    if not np.all(np.isfinite(h)) or not np.all((1 - h) > LEVERAGE_TOL):
+        return False, "NEAR_SINGULAR_LEVERAGE"
+
+    if family == "gaussian":
+        n, p = x.shape
+        yhat = x @ beta
+        resid = y - yhat
+        ss_res = float(np.sum(resid ** 2))
+        ss_tot = float(np.sum((y - y.mean()) ** 2))
+        mse = ss_res / (n - p) if (n - p) > 0 else float("nan")
+        if not (
+            math.isfinite(mse) and mse > 0 and ss_tot > 0
+            and math.sqrt(ss_res) / math.sqrt(ss_tot) > RESIDUAL_REL_TOL
+        ):
+            return False, "INVALID_DIAGNOSTIC_SCALE"
+    else:
+        # 4차 리뷰로 정정 — "비분리·수렴이면 w_i가 0에 안 붙는다"는 틀렸다. 분리가
+        # 없어도 개별 관측치의 선형예측자가 크면(예: η≈40) mu→1.0, w=mu(1-mu)→0.0
+        # 이 실측으로 확인된다(분리와 무관한 행별 현상이라 h 검사로도 안 걸린다).
+        linear_predictor = x @ beta
+        mu = 1.0 / (1.0 + np.exp(-linear_predictor))
+        w = mu * (1 - mu)
+        denom = w * (1 - h)
+        if not (np.all(np.isfinite(w)) and np.all(np.isfinite(denom)) and np.all(denom > 0)):
+            return False, "INVALID_DIAGNOSTIC_SCALE"
+    return True, None
+
+
+def _compute_vif(x: np.ndarray) -> list[float | None]:
+    """절편(0번 열) 제외 각 열 j를 나머지 열(절편 포함)로 회귀한 R²_j로
+    VIF_j=1/(1-R²_j). rank는 이미 Node가 확인했지만, 개별 열의 준-공선성으로
+    R²_j→1이 되는 경우는 여전히 가능하다 — 열마다 독립적으로 계산·실패를
+    격리한다(계획서 §3 "VIF / condition number", 5차 리뷰 — Infinity를 그대로
+    반환하면 raw 스키마의 `.finite()`를 뚫어 응답 전체가 깨진다)."""
+    n, p = x.shape
+    vifs: list[float | None] = []
+    for j in range(1, p):
+        try:
+            other_cols = [k for k in range(p) if k != j]
+            x_other = x[:, other_cols]
+            y_j = x[:, j]
+            q, r = np.linalg.qr(x_other, mode="reduced")
+            coef = np.linalg.solve(r, q.T @ y_j)
+            fitted = x_other @ coef
+            ss_res = float(np.sum((y_j - fitted) ** 2))
+            ss_tot = float(np.sum((y_j - y_j.mean()) ** 2))
+            if ss_tot <= 0 or (1 - ss_res / ss_tot) >= (1 - 1e-8):
+                vifs.append(None)  # vif_unstable(R²_j가 1에 너무 가까움)
+                continue
+            r_sq = 1 - ss_res / ss_tot
+            vif = 1.0 / (1.0 - r_sq)
+            vifs.append(float(vif) if math.isfinite(vif) else None)
+        except Exception:  # noqa: BLE001 — 이 열의 실패가 다른 열까지 막지 않는다
+            vifs.append(None)
+    return vifs
+
+
+def _diagnostics_block(
+    x: np.ndarray, y: np.ndarray, beta: np.ndarray, family: str, h: np.ndarray | None,
+) -> dict[str, Any]:
+    supported, reason = _evaluate_diagnostic_support(x, y, beta, family, h)
+    try:
+        cond_x = float(np.linalg.cond(x))
+        if not math.isfinite(cond_x):
+            cond_x = None
+    except Exception:  # noqa: BLE001
+        cond_x = None
+    return {
+        "conditionNumber": cond_x,
+        "vif": _compute_vif(x),
+        "pointDiagnosticsSupported": supported,
+        "pointDiagnosticsUnsupportedReason": reason,
+    }
+
+
+def _evaluate_spline_contrasts(
+    spline_contrasts: list[dict[str, Any]],
+    beta: np.ndarray,
+    cov: np.ndarray | None,
+    distribution: str | None,
+    df: float | None,
+    family: str,
+) -> list[dict[str, Any]]:
+    """Node가 만든 대비행렬(contrast matrix, spline 열만 비영)로 delta/CI를
+    계산한다 — Python은 spline을 모른다(계획서 §3 "spline 부분효과"). CI는
+    이미 계산된 추론 분포·df·crit을 그대로 재사용한다(1.96 고정 금지). cov가
+    None이면(공분산 자체가 없음) delta만 채우고 CI는 전부 None — 그리드 한
+    점의 계산이 비유한이어도 그 점만 null 처리하고 나머지는 보존한다(개별
+    실패 격리 원칙, VIF와 동일)."""
+    results = []
+    for item in spline_contrasts:
+        contrast_matrix = np.asarray(item["contrastMatrix"], dtype=float)
+        points = []
+        for row in contrast_matrix:
+            delta: float | None
+            try:
+                raw_delta = float(row @ beta)
+                delta = raw_delta if math.isfinite(raw_delta) else None
+            except Exception:  # noqa: BLE001
+                delta = None
+            if delta is None:
+                points.append({"deltaFromBaseline": None, "ciLower": None, "ciUpper": None, "exponentiated": None})
+                continue
+
+            ci_lower = ci_upper = None
+            if cov is not None and distribution is not None:
+                try:
+                    var = float(row @ cov @ row)
+                    if var >= 0 and math.isfinite(var):
+                        se = math.sqrt(var)
+                        if distribution == "t" and df is not None:
+                            crit = float(scipy_stats.t.ppf(1 - (1 - CI_CONFIDENCE_LEVEL) / 2, df))
+                        else:
+                            crit = _Z_CRIT
+                        candidate_lower = delta - crit * se
+                        candidate_upper = delta + crit * se
+                        if math.isfinite(candidate_lower) and math.isfinite(candidate_upper):
+                            ci_lower, ci_upper = candidate_lower, candidate_upper
+                except Exception:  # noqa: BLE001 — 이 점의 CI 실패가 delta·다른 점을 막지 않는다
+                    pass
+
+            exponentiated = _exponentiated_term(delta, ci_lower, ci_upper) if family == "binomial" else None
+            points.append({
+                "deltaFromBaseline": delta, "ciLower": ci_lower, "ciUpper": ci_upper,
+                "exponentiated": exponentiated,
+            })
+        results.append({"variableKey": item["variableKey"], "points": points})
+    return results
+
+
 def _bread_and_hat(x: np.ndarray, w: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """bread=(X'WX)^-1과 hat h_ii를 Z=W^½X의 QR로 계산한다. X=QR이면
     X(X'X)^-1X'=QQ'(항등식)이므로 h_ii=row(Q)·row(Q), bread=Rinv@Rinv.T —
@@ -157,6 +301,10 @@ def _non_estimable(reason: str) -> dict[str, Any]:
         "fit": None,
         "converged": False,
         "qualityFlags": [],
+        # PR4-A2 — 계수(β) 자체가 없으므로 진단·spline도 없다(shared/contracts의
+        # 상태 불변식과 대응 — non_estimable → diagnostics/splinePartialEffects null).
+        "diagnostics": None,
+        "splinePartialEffects": None,
     }
 
 
@@ -173,9 +321,13 @@ def _withheld_terms(beta: np.ndarray, column_names: list[str], family: str) -> l
 
 
 def _withheld(
-    beta: np.ndarray, column_names: list[str], family: str, fit: dict[str, Any] | None,
-    inference_issue: str, quality_flags: list[str], cluster_count: int | None = None,
+    beta: np.ndarray, x: np.ndarray, y: np.ndarray, column_names: list[str], family: str,
+    fit: dict[str, Any] | None, inference_issue: str, quality_flags: list[str],
+    spline_contrasts: list[dict[str, Any]], cluster_count: int | None = None, h: np.ndarray | None = None,
 ) -> dict[str, Any]:
+    # PR4-A2 — β는 유효하므로 VIF·condition number·leverage 지원 여부는 직접
+    # 재판정한다(추론 상태와 무관 — 계획서 §3). spline 대비값은 delta만 채우고
+    # CI는 항상 None(공분산 자체가 없거나 퇴화한 상태이므로 — cov=None 고정).
     return {
         "estimation": "inference_withheld",
         "nonEstimableReason": None,
@@ -187,6 +339,8 @@ def _withheld(
         "fit": fit,
         "converged": True,
         "qualityFlags": quality_flags,
+        "diagnostics": _diagnostics_block(x, y, beta, family, h),
+        "splinePartialEffects": _evaluate_spline_contrasts(spline_contrasts, beta, None, None, None, family),
     }
 
 
@@ -196,10 +350,12 @@ def compute_regression(
     x_raw: list[list[float]],
     column_names: list[str],
     covariance_spec: dict[str, Any],
+    spline_contrasts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     y = np.asarray(y_raw, dtype=float)
     x = np.asarray(x_raw, dtype=float)
     n, p = x.shape
+    spline_contrasts = spline_contrasts or []
 
     quality_flags: list[str] = []
 
@@ -249,12 +405,12 @@ def compute_regression(
     try:
         bread, h = _bread_and_hat(x, w)
     except np.linalg.LinAlgError:
-        return _withheld(beta, column_names, family, fit, "COVARIANCE_NOT_COMPUTABLE", quality_flags)
+        return _withheld(beta, x, y, column_names, family, fit, "COVARIANCE_NOT_COMPUTABLE", quality_flags, spline_contrasts, h=None)
 
     # 리뷰 #11 — leverage가 1에 근접하면 HC3 분모가 불안정하다. bread 분해가
     # 성공해도 이 검사를 별도로 한다(작은 표본에서 흔한 함정).
     if np.any((1 - h) < LEVERAGE_TOL):
-        return _withheld(beta, column_names, family, fit, "COVARIANCE_NOT_COMPUTABLE", quality_flags)
+        return _withheld(beta, x, y, column_names, family, fit, "COVARIANCE_NOT_COMPUTABLE", quality_flags, spline_contrasts, h=h)
 
     cluster_count: int | None = None
     if covariance_spec["type"] == "hc3":
@@ -264,10 +420,10 @@ def compute_regression(
 
     diag_cov = np.diag(cov)
     if np.any(diag_cov < 0) or not np.all(np.isfinite(diag_cov)):
-        return _withheld(beta, column_names, family, fit, "COVARIANCE_NOT_COMPUTABLE", quality_flags, cluster_count)
+        return _withheld(beta, x, y, column_names, family, fit, "COVARIANCE_NOT_COMPUTABLE", quality_flags, spline_contrasts, cluster_count, h)
     se = np.sqrt(diag_cov)
     if not np.all(np.isfinite(se)):
-        return _withheld(beta, column_names, family, fit, "COVARIANCE_NOT_COMPUTABLE", quality_flags, cluster_count)
+        return _withheld(beta, x, y, column_names, family, fit, "COVARIANCE_NOT_COMPUTABLE", quality_flags, spline_contrasts, cluster_count, h)
 
     # 리뷰 #16/#19/#21 — se===0(완전적합) 또는 OLS 상대잔차 완전적합이면
     # DEGENERATE_COVARIANCE로 추론 보류(COVARIANCE_NOT_COMPUTABLE과 구분 — 원인이
@@ -279,7 +435,7 @@ def compute_regression(
         if y_norm > 0 and (resid_norm / y_norm) <= RESIDUAL_REL_TOL:
             degenerate = True
     if degenerate:
-        return _withheld(beta, column_names, family, fit, "DEGENERATE_COVARIANCE", quality_flags, cluster_count)
+        return _withheld(beta, x, y, column_names, family, fit, "DEGENERATE_COVARIANCE", quality_flags, spline_contrasts, cluster_count, h)
 
     # 계획 §3 "추론 분포와 자유도" 표 — 분포·df는 family와 covariance 타입
     # *조합*으로 정해진다(OLS는 covariance 타입과 무관하게 항상 t이지만 df가
@@ -313,7 +469,7 @@ def compute_regression(
         np.all(np.isfinite(statistic)) and np.all(np.isfinite(p_value))
         and np.all(np.isfinite(ci_lower)) and np.all(np.isfinite(ci_upper))
     ):
-        return _withheld(beta, column_names, family, fit, "DEGENERATE_COVARIANCE", quality_flags, cluster_count)
+        return _withheld(beta, x, y, column_names, family, fit, "DEGENERATE_COVARIANCE", quality_flags, spline_contrasts, cluster_count, h)
 
     cond = float(np.linalg.cond(x.T @ x)) if p > 0 else 0.0
     if not math.isfinite(cond) or cond > ILL_CONDITIONED_THRESHOLD:
@@ -347,4 +503,81 @@ def compute_regression(
         "fit": fit,
         "converged": True,
         "qualityFlags": quality_flags,
+        "diagnostics": _diagnostics_block(x, y, beta, family, h),
+        "splinePartialEffects": _evaluate_spline_contrasts(spline_contrasts, beta, cov, distribution, df, family),
+    }
+
+
+def compute_regression_diagnostics(
+    family: str,
+    y_raw: list[float],
+    x_raw: list[list[float]],
+    beta_raw: list[float],
+    sampled_row_indices: list[int],
+) -> dict[str, Any]:
+    """PR4-A2 — limited_row 행 단위 진단(경량 경로, 재적합 없음). 캐시 hit/miss
+    와 완전히 독립적인 (X,y,β)만의 순수 함수다(계획서 §4 "limited_row 진단값").
+    가용성 판정은 `_evaluate_diagnostic_support`(최초 적합 경로와 동일 함수) —
+    이 경로엔 estimation/inferenceWithheldReason 개념 자체가 없으므로 h/β로
+    직접 재확인하는 것이 유일한 방법이다. Q-Q `theoreticalQuantile`은 **전체
+    N행의 순위**로 먼저 계산한 뒤 표본만 직렬화한다(샘플링 후 재계산하면
+    분위수 라벨이 틀어진다)."""
+    y = np.asarray(y_raw, dtype=float)
+    x = np.asarray(x_raw, dtype=float)
+    beta = np.asarray(beta_raw, dtype=float)
+    n, p = x.shape
+
+    if family == "gaussian":
+        w = np.ones(n)
+    else:
+        linear_predictor = x @ beta
+        mu = 1.0 / (1.0 + np.exp(-linear_predictor))
+        w = mu * (1 - mu)
+
+    h: np.ndarray | None
+    try:
+        _, h = _bread_and_hat(x, w)
+    except np.linalg.LinAlgError:
+        h = None
+
+    supported, reason = _evaluate_diagnostic_support(x, y, beta, family, h)
+    if not supported:
+        return {
+            "pointDiagnosticsSupported": False,
+            "pointDiagnosticsUnsupportedReason": reason,
+            "points": [],
+        }
+
+    if family == "gaussian":
+        yhat = x @ beta
+        resid = y - yhat
+        mse = float(np.sum(resid ** 2)) / (n - p)
+        standardized = resid / (np.sqrt(mse) * np.sqrt(1 - h))
+    else:
+        yhat = 1.0 / (1.0 + np.exp(-(x @ beta)))
+        resid = y - yhat
+        standardized = resid / np.sqrt(w * (1 - h))
+    cooks_d = (standardized ** 2 / p) * (h / (1 - h))
+
+    order = np.argsort(standardized)
+    ranks = np.empty(n, dtype=float)
+    ranks[order] = np.arange(1, n + 1)
+    theoretical_quantile_all = scipy_stats.norm.ppf((ranks - 0.5) / n)
+
+    points = []
+    for idx in sampled_row_indices:
+        points.append({
+            "rowIndex": int(idx),
+            "fittedValue": float(yhat[idx]),
+            "residual": float(resid[idx]),
+            "leverage": float(h[idx]),
+            "standardizedResidual": float(standardized[idx]),
+            "cooksDistance": float(cooks_d[idx]),
+            "theoreticalQuantile": float(theoretical_quantile_all[idx]),
+        })
+
+    return {
+        "pointDiagnosticsSupported": True,
+        "pointDiagnosticsUnsupportedReason": None,
+        "points": points,
     }

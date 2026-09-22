@@ -288,7 +288,7 @@ describe('POST /export — analysisMode별 CSV export 차단', () => {
     expect(writeAuditLogStrict).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: 'denied' }));
   });
 
-  it('regression 결과는 400 REGRESSION_EXPORT_NOT_SUPPORTED + denied 감사(PR4-A1 — 없으면 빈 CSV가 200으로 나간다)', async () => {
+  it('PR4-A2 — 억제된 regression 결과도 200 CSV(집계 사유만, denied 아닌 success 감사)', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
     wireRunRow(pool, {
@@ -298,9 +298,60 @@ describe('POST /export — analysisMode별 CSV export 차단', () => {
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
     const res = await postExport(pool);
-    expect(res.status).toBe(400);
-    expect(res.body.code).toBe('REGRESSION_EXPORT_NOT_SUPPORTED');
-    expect(writeAuditLogStrict).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: 'denied' }));
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('MIN_COHORT_NOT_MET');
+    expect(writeAuditLogStrict).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: 'success' }));
+  });
+
+  it('PR4-A2 — 정상 regression 결과는 계수·적합도·VIF·spline CSV를 담되 pointDiagnostics는 넣지 않는다', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    wireRunRow(pool, {
+      manifest: baseManifest({ analysisMode: 'regression' }),
+      result: {
+        continuous: [], discrete: [],
+        regression: {
+          suppressed: false, estimation: 'ok', method: 'ols_linear', outcomeKey: 'y',
+          eventLevel: null, referenceLevelsUsed: {}, covariance: 'hc3',
+          inferenceDistribution: 't', inferenceDf: 38, residualDf: 38, n: 40, personCount: 40,
+          clusterCount: null, maxClusterShare: null,
+          terms: [
+            {
+              name: 'intercept', label: '절편', variableKey: null, level: null, estimate: 2.0, se: 0.15,
+              statistic: 13.3, pValue: 0.0, ciLower: 1.7, ciUpper: 2.3, exponentiated: null,
+              termType: 'main', interactionOf: null,
+            },
+          ],
+          fit: { r2: 0.5, adjR2: 0.48, logLik: null, aic: null, pseudoR2: null },
+          nonEstimableReason: null, inferenceWithheldReason: null, excludedRowCount: 0, qualityFlags: [],
+          analysisUnitNote: 'note',
+          diagnostics: {
+            conditionNumber: 1.5,
+            vif: [{ variableKey: 'x1', termName: 'x1', vif: 1.2 }],
+            pointDiagnosticsSupported: true, pointDiagnosticsUnsupportedReason: null,
+            pointDiagnosticsStatus: 'available',
+            displayedPointCount: 5, totalPointCount: 40,
+            // limited_row — CSV에 새면 안 되는 값을 일부러 눈에 띄게 넣어 회귀테스트로 삼는다.
+            pointDiagnostics: [{ rowIndex: 0, fittedValue: 1, residual: 0.1, leverage: 0.05, standardizedResidual: 0.2, cooksDistance: 0.01, theoreticalQuantile: 0.1 }],
+          },
+          standardizedPredictorKeys: [], standardization: null,
+          splinePartialEffects: [{ variableKey: 'x2', scale: 'linear_predictor', points: [{ x: 1, deltaFromBaseline: 0.5, ciLower: 0.1, ciUpper: 0.9, exponentiated: null }] }],
+        },
+      },
+      status: 'succeeded', requested_disclosure_profile: 'aggregate',
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+    });
+    const res = await postExport(pool);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('coefficients');
+    expect(res.text).toContain('intercept');
+    expect(res.text).toContain('diagnostics');
+    expect(res.text).toContain('splinePartialEffects');
+    // limited_row 유출 방지 — 가장 중요한 회귀 테스트(계획서 §검증).
+    expect(res.text).not.toContain('pointDiagnostics');
+    expect(res.text).not.toContain('rowIndex');
+    expect(res.text).not.toContain('cooksDistance');
+    expect(writeAuditLogStrict).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: 'success' }));
   });
 
   it('analysisMode가 없는 구버전 저장 결과는 descriptive로 취급해 export를 허용한다(하위호환)', async () => {

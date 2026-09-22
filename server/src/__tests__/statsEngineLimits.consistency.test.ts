@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { MAX_STRING_LENGTH, MAX_TOTAL_VALUES, MAX_VALUES_PER_VARIABLE } from '../statsEngineLimits';
+import { MAX_STRING_LENGTH, MAX_TOTAL_VALUES, MAX_VALUES_PER_VARIABLE, MAX_SPLINE_CONTRAST_POINTS } from '../statsEngineLimits';
 
 function extractPythonConstant(source: string, name: string): number {
   const match = source.match(new RegExp(`^${name}\\s*=\\s*(\\d+)`, 'm'));
@@ -26,5 +26,9 @@ describe('statsEngineLimits <-> protocol.py consistency', () => {
 
   it('MAX_STRING_LENGTH matches', () => {
     expect(extractPythonConstant(source, 'MAX_STRING_LENGTH')).toBe(MAX_STRING_LENGTH);
+  });
+
+  it('MAX_SPLINE_CONTRAST_POINTS matches', () => {
+    expect(extractPythonConstant(source, 'MAX_SPLINE_CONTRAST_POINTS')).toBe(MAX_SPLINE_CONTRAST_POINTS);
   });
 });

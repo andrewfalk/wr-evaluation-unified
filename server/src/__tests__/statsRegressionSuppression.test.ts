@@ -16,19 +16,31 @@ import { computeRegressionAnalyzeResult } from '../statsRegressionSuppression';
 import type { AnalysisContext } from '../statsAnalysisContext';
 import type { RegressionDesignMatrix, RegressionDesignResult } from '../statsRegressionDesign';
 
+// PR4-A2 — 2열(절편+x1) 설계 기준 최소 diagnostics/splinePartialEffects. 이
+// 파일의 목적은 클러스터 게이트 우선순위 로직이지 diagnostics 렌더링이 아니므로
+// 형태만 유효하게 맞춘다(diagnostics===undefined면 buildPublicDiagnostics가
+// 런타임에서 raw.vif에 접근하다 죽는다 — null과 undefined는 다르다).
+const DIAGNOSTICS_OK = {
+  conditionNumber: 1.0, vif: [1.0], pointDiagnosticsSupported: true, pointDiagnosticsUnsupportedReason: null,
+};
+
 function makeDesign(overrides: Partial<RegressionDesignMatrix> = {}): RegressionDesignMatrix {
   return {
     y: [1, 2, 3, 4],
     x: [[1, 0], [1, 1], [1, 0], [1, 1]],
     columns: [
-      { name: 'intercept', label: '절편', variableKey: null, level: null },
-      { name: 'x1', label: 'x1 변수', variableKey: 'x1', level: null },
+      { name: 'intercept', label: '절편', variableKey: null, level: null, termType: 'main', interactionOf: null },
+      { name: 'x1', label: 'x1 변수', variableKey: 'x1', level: null, termType: 'main', interactionOf: null },
     ],
     personClusterKeys: ['p1', 'p2', 'p3', 'p4'],
+    caseIds: ['c1', 'c2', 'c3', 'c4'],
     referenceLevelsUsed: {},
     method: 'ols_linear',
     eventLevel: null,
     qualityFlags: [],
+    standardizedPredictorKeys: [],
+    standardization: {},
+    splineKnots: {},
     ...overrides,
   };
 }
@@ -39,7 +51,10 @@ function makeCtx(design: RegressionDesignResult | null, excludedRowCount = 0): A
     recipe: {
       grain: 'case', variableKeys: ['x1', 'y'], filters: [], analysisPurpose: 'association',
       formulaPolicies: {}, analysisMode: 'regression', requestedMethod: 'ols_linear',
-      regression: { outcomeKey: 'y', referenceLevels: {} },
+      regression: {
+        outcomeKey: 'y', referenceLevels: {}, eventLevel: undefined,
+        standardizePredictors: false, interactionTerms: [], splineKeys: [],
+      },
     },
     catalogByKey: new Map(),
     recipeDigest: 'rd', queryFamilyDigest: 'qfd',
@@ -73,7 +88,10 @@ describe('computeRegressionAnalyzeResult — non_estimable(Node ④ 판정, Pyth
     const ctx = makeCtx({ ok: false, reason: 'RANK_DEFICIENT' });
     const result = await computeRegressionAnalyzeResult(ctx);
     expect(runRegressionStatsEngine).not.toHaveBeenCalled();
-    expect(result).toMatchObject({ suppressed: false, estimation: 'non_estimable', nonEstimableReason: 'RANK_DEFICIENT', terms: [], fit: null });
+    expect(result).toMatchObject({
+      suppressed: false, estimation: 'non_estimable', nonEstimableReason: 'RANK_DEFICIENT', terms: [], fit: null,
+      diagnostics: null, splinePartialEffects: null,
+    });
   });
 });
 
@@ -85,6 +103,7 @@ describe('computeRegressionAnalyzeResult — HC3 경로(personCount===rowCount)'
       terms: [rawTerm({ name: 'intercept', estimate: 1.0 }), rawTerm({ name: 'x1' })],
       fit: { r2: 0.9, adjR2: 0.85, logLik: null, aic: null, pseudoR2: null },
       converged: true, qualityFlags: [],
+      diagnostics: DIAGNOSTICS_OK, splinePartialEffects: [],
     });
     const design = makeDesign(); // personClusterKeys 4개 전부 다름 → personCount===rowCount
     const ctx = makeCtx({ ok: true, design });
@@ -93,6 +112,7 @@ describe('computeRegressionAnalyzeResult — HC3 경로(personCount===rowCount)'
     expect(runRegressionStatsEngine).toHaveBeenCalledTimes(1);
     const call = runRegressionStatsEngine.mock.calls[0][0];
     expect(call.covariance).toEqual({ type: 'hc3' });
+    expect(call.splineContrasts).toEqual([]);
 
     expect(result).toMatchObject({ suppressed: false, estimation: 'ok', covariance: 'hc3', personCount: 4, n: 4, clusterCount: null, maxClusterShare: null });
     if (result.suppressed === false && result.estimation === 'ok') {
@@ -100,6 +120,7 @@ describe('computeRegressionAnalyzeResult — HC3 경로(personCount===rowCount)'
       expect(result.terms[1].label).toBe('x1 변수');
       expect(result.terms[1].variableKey).toBe('x1');
       expect(result.terms[1].pValue).toBe(0.001);
+      expect(result.diagnostics).toMatchObject({ pointDiagnosticsSupported: true, pointDiagnosticsStatus: 'not_requested' });
     }
   });
 });
@@ -122,6 +143,7 @@ describe('computeRegressionAnalyzeResult — 클러스터 경로', () => {
       terms: [rawTerm({ name: 'intercept' }), rawTerm({ name: 'x1' })],
       fit: { r2: 0.5, adjR2: 0.4, logLik: null, aic: null, pseudoR2: null },
       converged: true, qualityFlags: [],
+      diagnostics: DIAGNOSTICS_OK, splinePartialEffects: [],
     });
     const ctx = makeCtx({ ok: true, design: clusterDesign(keys) });
     const result = await computeRegressionAnalyzeResult(ctx);
@@ -143,6 +165,8 @@ describe('computeRegressionAnalyzeResult — 클러스터 경로', () => {
       terms: [rawTerm({ name: 'intercept' }), rawTerm({ name: 'x1', se: 0.4 })],
       fit: { r2: 0.5, adjR2: 0.4, logLik: null, aic: null, pseudoR2: null },
       converged: true, qualityFlags: [],
+      diagnostics: DIAGNOSTICS_OK,
+      splinePartialEffects: [{ variableKey: 'x1', points: [{ deltaFromBaseline: 1.0, ciLower: 0.5, ciUpper: 1.5, exponentiated: null }] }],
     });
     const ctx = makeCtx({ ok: true, design: clusterDesign(keys) });
     const result = await computeRegressionAnalyzeResult(ctx);
@@ -154,6 +178,12 @@ describe('computeRegressionAnalyzeResult — 클러스터 경로', () => {
       expect(result.terms[1].statistic).toBeNull();
       expect(result.terms[1].ciLower).toBeNull();
       expect(result.terms[1].ciUpper).toBeNull();
+      // PR4-A2 — Node 클러스터 게이트가 spline CI도 null로 만든다(계수표와 동일 원칙).
+      expect(result.splinePartialEffects![0].points[0].ciLower).toBeNull();
+      expect(result.splinePartialEffects![0].points[0].ciUpper).toBeNull();
+      expect(result.splinePartialEffects![0].points[0].deltaFromBaseline).toBe(1.0); // delta는 유지
+      // pointDiagnosticsSupported는 Node 클러스터 게이트와 무관하게 유지된다.
+      expect(result.diagnostics).toMatchObject({ pointDiagnosticsSupported: true });
     }
   });
 
@@ -168,6 +198,7 @@ describe('computeRegressionAnalyzeResult — 클러스터 경로', () => {
       terms: [rawTerm({ name: 'intercept' }), rawTerm({ name: 'x1', se: 0.2 })],
       fit: { r2: 0.5, adjR2: 0.4, logLik: null, aic: null, pseudoR2: null },
       converged: true, qualityFlags: [],
+      diagnostics: DIAGNOSTICS_OK, splinePartialEffects: [],
     });
     const ctx = makeCtx({ ok: true, design: clusterDesign(keys) });
     const result = await computeRegressionAnalyzeResult(ctx);
@@ -186,6 +217,8 @@ describe('computeRegressionAnalyzeResult — 클러스터 경로', () => {
       ],
       fit: { r2: 0.5, adjR2: 0.4, logLik: null, aic: null, pseudoR2: null },
       converged: true, qualityFlags: [],
+      diagnostics: { conditionNumber: null, vif: [null], pointDiagnosticsSupported: false, pointDiagnosticsUnsupportedReason: 'NEAR_SINGULAR_LEVERAGE' },
+      splinePartialEffects: [],
     });
     const ctx = makeCtx({ ok: true, design: clusterDesign(keys) });
     const result = await computeRegressionAnalyzeResult(ctx);
@@ -195,6 +228,9 @@ describe('computeRegressionAnalyzeResult — 클러스터 경로', () => {
     expect(result).toMatchObject({ estimation: 'inference_withheld', inferenceWithheldReason: 'COVARIANCE_NOT_COMPUTABLE' });
     if (result.suppressed === false && result.estimation === 'inference_withheld') {
       expect(result.terms.every((t) => t.se === null)).toBe(true);
+      // PR4-A2 — 이 경우는 Python 자체가 h 계산에 실패한 사례를 가정(diagnostics
+      // 예시) — pointDiagnosticsSupported는 이 값을 그대로 반영한다.
+      expect(result.diagnostics).toMatchObject({ pointDiagnosticsSupported: false, pointDiagnosticsUnsupportedReason: 'NEAR_SINGULAR_LEVERAGE' });
     }
   });
 });
@@ -205,9 +241,13 @@ describe('computeRegressionAnalyzeResult — Python이 non_estimable을 반환�
       estimation: 'non_estimable', nonEstimableReason: 'SEPARATION_DETECTED', inferenceIssue: null,
       inferenceDistribution: null, inferenceDf: null, clusterCount: null,
       terms: [], fit: null, converged: false, qualityFlags: [],
+      diagnostics: null, splinePartialEffects: null,
     });
     const ctx = makeCtx({ ok: true, design: makeDesign() });
     const result = await computeRegressionAnalyzeResult(ctx);
-    expect(result).toMatchObject({ estimation: 'non_estimable', nonEstimableReason: 'SEPARATION_DETECTED', terms: [], fit: null });
+    expect(result).toMatchObject({
+      estimation: 'non_estimable', nonEstimableReason: 'SEPARATION_DETECTED', terms: [], fit: null,
+      diagnostics: null, splinePartialEffects: null,
+    });
   });
 });

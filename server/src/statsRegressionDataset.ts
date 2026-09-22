@@ -126,6 +126,46 @@ export function computeRegressionLevelSummaries(
   return summaries;
 }
 
+export interface RegressionInteractionLevelSummary {
+  variableKeyA: string;
+  levelA: string;
+  variableKeyB: string;
+  levelB: string;
+  personCount: number;
+}
+
+/** PR4-A2 §2 "interaction 교차표 소수셀 검사" — 두 predictor가 둘 다 categorical/
+ * ordinal/boolean일 때만 의미 있다(연속형은 이산 교차표 개념이 없다 — 그 값
+ * 분산은 기존 ZERO_VARIANCE_PREDICTOR 검사가 이미 커버한다). 관측된 (레벨A,
+ * 레벨B) 조합마다 person 수를 센다 — `isGroupBreakdownDisclosable`가 그대로
+ * 재사용 가능하도록 `personCount` 필드를 갖는다. */
+export function computeRegressionInteractionLevelSummaries(
+  completeRows: DatasetRow[],
+  pair: readonly [string, string],
+  catalogByKey: Map<string, AnalyticsVariableMetadata>,
+): RegressionInteractionLevelSummary[] {
+  const [keyA, keyB] = pair;
+  const varA = catalogByKey.get(keyA);
+  const varB = catalogByKey.get(keyB);
+  const discreteTypes = new Set(['categorical', 'ordinal', 'boolean']);
+  if (!varA || !varB || !discreteTypes.has(varA.type) || !discreteTypes.has(varB.type)) {
+    return [];
+  }
+  const personsByCombo = new Map<string, { levelA: string; levelB: string; persons: Set<string> }>();
+  for (const row of completeRows) {
+    const levelA = String(row.values[keyA]?.value);
+    const levelB = String(row.values[keyB]?.value);
+    const comboKey = `${levelA}\u0000${levelB}`;
+    if (!personsByCombo.has(comboKey)) {
+      personsByCombo.set(comboKey, { levelA, levelB, persons: new Set() });
+    }
+    personsByCombo.get(comboKey)!.persons.add(row.personClusterKey);
+  }
+  return Array.from(personsByCombo.values()).map(({ levelA, levelB, persons }) => ({
+    variableKeyA: keyA, levelA, variableKeyB: keyB, levelB, personCount: persons.size,
+  }));
+}
+
 export interface RegressionEventSummary {
   eventPersonCount: number;
   nonEventPersonCount: number;

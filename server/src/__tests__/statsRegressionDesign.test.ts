@@ -88,7 +88,7 @@ describe('buildRegressionDesignMatrix — OLS 기본', () => {
       makeRow(`c${i}`, `p${i}`, { y: pv(i * 1.1), x1: pv(i * 0.5) }));
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys: ['x1'], catalogByKey: catalog,
-      method: 'ols_linear', referenceLevels: {}, eventSummary: null,
+      method: 'ols_linear', referenceLevels: {}, eventSummary: null, eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -109,7 +109,7 @@ describe('buildRegressionDesignMatrix — OLS 기본', () => {
       makeRow(`c${i}`, `p${i}`, { y: pv(5.0), x1: pv(i) }));
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys: ['x1'], catalogByKey: catalog,
-      method: 'ols_linear', referenceLevels: {}, eventSummary: null,
+      method: 'ols_linear', referenceLevels: {}, eventSummary: null, eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result).toEqual({ ok: false, reason: 'CONSTANT_OUTCOME' });
   });
@@ -123,7 +123,7 @@ describe('buildRegressionDesignMatrix — OLS 기본', () => {
       makeRow(`c${i}`, `p${i}`, { y: pv(i), x1: pv(7.0) }));
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys: ['x1'], catalogByKey: catalog,
-      method: 'ols_linear', referenceLevels: {}, eventSummary: null,
+      method: 'ols_linear', referenceLevels: {}, eventSummary: null, eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result).toEqual({ ok: false, reason: 'ZERO_VARIANCE_PREDICTOR' });
   });
@@ -137,7 +137,7 @@ describe('buildRegressionDesignMatrix — OLS 기본', () => {
       makeRow(`c${i}`, `p${i}`, { y: pv(i), flag: pv(true) }));
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys: ['flag'], catalogByKey: catalog,
-      method: 'ols_linear', referenceLevels: {}, eventSummary: null,
+      method: 'ols_linear', referenceLevels: {}, eventSummary: null, eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result).toEqual({ ok: false, reason: 'ZERO_VARIANCE_PREDICTOR' });
   });
@@ -155,7 +155,7 @@ describe('buildRegressionDesignMatrix — 리뷰 #4(minCompleteRows 미적용) �
   it.each([12, 20, 29])('완전사례 %d건(30 미만)은 INSUFFICIENT_COMPLETE_ROWS로 거부된다', (n) => {
     const result = buildRegressionDesignMatrix({
       completeRows: buildRows(n), outcomeKey: 'y', predictorKeys: ['x1'], catalogByKey: catalog,
-      method: 'ols_linear', referenceLevels: {}, eventSummary: null,
+      method: 'ols_linear', referenceLevels: {}, eventSummary: null, eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result).toEqual({ ok: false, reason: 'INSUFFICIENT_COMPLETE_ROWS' });
   });
@@ -163,7 +163,7 @@ describe('buildRegressionDesignMatrix — 리뷰 #4(minCompleteRows 미적용) �
   it('완전사례 30건(경계값)은 통과한다', () => {
     const result = buildRegressionDesignMatrix({
       completeRows: buildRows(30), outcomeKey: 'y', predictorKeys: ['x1'], catalogByKey: catalog,
-      method: 'ols_linear', referenceLevels: {}, eventSummary: null,
+      method: 'ols_linear', referenceLevels: {}, eventSummary: null, eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result.ok).toBe(true);
   });
@@ -196,7 +196,7 @@ describe('buildRegressionDesignMatrix — 리뷰 #20 단일 레벨 범주형(더
       makeRow(`c${i}`, `p${i}`, { y: pv(i * 1.0), group: pv('A') }));
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys: ['group'], catalogByKey: catalog,
-      method: 'ols_linear', referenceLevels: {}, eventSummary: null,
+      method: 'ols_linear', referenceLevels: {}, eventSummary: null, eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result).toEqual({ ok: false, reason: 'ZERO_VARIANCE_PREDICTOR' });
   });
@@ -210,7 +210,7 @@ describe('buildRegressionDesignMatrix — 리뷰 #20 단일 레벨 범주형(더
       makeRow(`c${i}`, `p${i}`, { y: pv(i * 1.0), group: pv(`L${i % 11}`) }));
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys: ['group'], catalogByKey: catalog,
-      method: 'ols_linear', referenceLevels: {}, eventSummary: null,
+      method: 'ols_linear', referenceLevels: {}, eventSummary: null, eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result).toEqual({ ok: false, reason: 'TOO_MANY_LEVELS' });
   });
@@ -232,7 +232,7 @@ describe('buildRegressionDesignMatrix — 리뷰 #12/#18 기준 레벨 해석', 
       makeRow(`c${i}`, `p${i}`, { y: pv(i * 1.0), 'knee.diagnosisSide.klGrade': pv(i % 2 === 0 ? '2' : '3') }));
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys: ['knee.diagnosisSide.klGrade'], catalogByKey: catalog,
-      method: 'ols_linear', referenceLevels: {}, eventSummary: null,
+      method: 'ols_linear', referenceLevels: {}, eventSummary: null, eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -254,7 +254,7 @@ describe('buildRegressionDesignMatrix — 리뷰 #12/#18 기준 레벨 해석', 
       makeRow(`c${i}`, `p${i}`, { y: pv(i * 1.0), assignedDoctor: pv(levels[i % 3]) }));
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys: ['assignedDoctor'], catalogByKey: catalog,
-      method: 'ols_linear', referenceLevels: {}, eventSummary: null,
+      method: 'ols_linear', referenceLevels: {}, eventSummary: null, eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -274,7 +274,7 @@ describe('buildRegressionDesignMatrix — 리뷰 #12/#18 기준 레벨 해석', 
       makeRow(`c${i}`, `p${i}`, { y: pv(i * 1.0), assignedDoctor: pv(i % 2 === 0 ? 'doctorB' : 'doctorA') }));
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys: ['assignedDoctor'], catalogByKey: catalog,
-      method: 'ols_linear', referenceLevels: { assignedDoctor: 'doctorB' }, eventSummary: null,
+      method: 'ols_linear', referenceLevels: { assignedDoctor: 'doctorB' }, eventSummary: null, eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -292,7 +292,7 @@ describe('buildRegressionDesignMatrix — 리뷰 #12/#18 기준 레벨 해석', 
       makeRow(`c${i}`, `p${i}`, { y: pv(i * 1.0), assignedDoctor: pv(i % 2 === 0 ? 'doctorB' : 'doctorA') }));
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys: ['assignedDoctor'], catalogByKey: catalog,
-      method: 'ols_linear', referenceLevels: { assignedDoctor: 'doctorZ_never_observed' }, eventSummary: null,
+      method: 'ols_linear', referenceLevels: { assignedDoctor: 'doctorZ_never_observed' }, eventSummary: null, eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -319,6 +319,7 @@ describe('buildRegressionDesignMatrix — 로지스틱 EPV·파라미터 게이�
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'outcome', predictorKeys: ['x1'], catalogByKey: catalog,
       method: 'binary_logistic', referenceLevels: {}, eventSummary: { eventPersonCount: 5, nonEventPersonCount: 50 },
+      eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result).toEqual({ ok: false, reason: 'INSUFFICIENT_EVENTS_PER_PARAMETER' });
   });
@@ -331,6 +332,7 @@ describe('buildRegressionDesignMatrix — 로지스틱 EPV·파라미터 게이�
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'outcome', predictorKeys: ['x1'], catalogByKey: catalog,
       method: 'binary_logistic', referenceLevels: {}, eventSummary: { eventPersonCount: 30, nonEventPersonCount: 30 },
+      eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -353,7 +355,7 @@ describe('buildRegressionDesignMatrix — 로지스틱 EPV·파라미터 게이�
     });
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys, catalogByKey: catalog,
-      method: 'ols_linear', referenceLevels: {}, eventSummary: null,
+      method: 'ols_linear', referenceLevels: {}, eventSummary: null, eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result).toEqual({ ok: false, reason: 'TOO_MANY_PARAMETERS' });
   });
@@ -371,7 +373,7 @@ describe('buildRegressionDesignMatrix — rank deficiency', () => {
       makeRow(`c${i}`, `p${i}`, { y: pv(i * 1.0), x1: pv(i), x2: pv(i * 2) }));
     const result = buildRegressionDesignMatrix({
       completeRows: rows, outcomeKey: 'y', predictorKeys: ['x1', 'x2'], catalogByKey: catalog,
-      method: 'ols_linear', referenceLevels: {}, eventSummary: null,
+      method: 'ols_linear', referenceLevels: {}, eventSummary: null, eventLevel: undefined, standardizePredictors: false, interactionTerms: [], splineKeys: [],
     });
     expect(result).toEqual({ ok: false, reason: 'RANK_DEFICIENT' });
   });

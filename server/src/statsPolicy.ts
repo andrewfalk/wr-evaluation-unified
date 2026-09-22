@@ -63,8 +63,12 @@ export const GLOBAL_QUERY_BUDGET = {
 // 바뀌고 이 문자열을 올리지 않으면 수정 전에 RANK_DEFICIENT로 캐시된 결과가
 // 같은 입력에 계속 재사용된다(statsAnalyzeHandler.ts의 캐시 조회가 적중 시
 // 재계산을 하지 않는다) — 코드가 바뀔 때마다 이 버전도 함께 올릴 것.
+//
+// PR4-A2 — 진단(VIF·condition number·leverage 계열)·spline·interaction·표준화·
+// categorical outcome을 추가하며 설계행렬 조립 로직 자체가 바뀌었으므로 버전을
+// 올린다(캐시 무효화 — 위 문단과 같은 이유).
 export const REGRESSION_POLICY = {
-  version: 'v2-association-svd-rank',
+  version: 'v2-diagnostics-spline',
   minCompleteRows: 30,
   minClusters: 30,
   maxClusterShare: 0.20,

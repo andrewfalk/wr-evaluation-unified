@@ -28,12 +28,17 @@ import { getOrdinalOrder, getCategoricalOrder } from './statsOrdinalOrder';
 import { sortDeterministic } from './statsBivariateRoles';
 import { REGRESSION_POLICY } from './statsPolicy';
 import type { RegressionEventSummary } from './statsRegressionDataset';
+import { resolveSplineKnots, naturalSplineBasis, type SplineKnots } from './statsSplineBasis';
 
 export interface RegressionDesignColumn {
   name: string;
   label: string;
   variableKey: string | null; // null은 절편
   level: string | null;
+  // PR4-A2 — spline 기저 항은 forest plot에서 묶어 빼고 부분효과 곡선으로 대체
+  // 표시해야 한다. interaction 항은 어느 두 predictor의 곱인지 알아야 한다.
+  termType: 'main' | 'interaction' | 'spline_basis';
+  interactionOf: [string, string] | null;
 }
 
 export interface RegressionDesignMatrix {
@@ -41,10 +46,19 @@ export interface RegressionDesignMatrix {
   x: number[][]; // N × P(절편 포함, 항상 첫 열)
   columns: RegressionDesignColumn[];
   personClusterKeys: string[];
+  // PR4-A2 — limited_row 진단(§4)의 결정적 표시 샘플링에 쓰인다(sampleScatterPoints와
+  // 같은 원칙 — caseId로 먼저 정렬 후 seed 셔플). y/x/personClusterKeys와 같은 행 순서.
+  caseIds: string[];
   referenceLevelsUsed: Record<string, string>;
   method: 'ols_linear' | 'binary_logistic';
   eventLevel: string | null;
   qualityFlags: string[];
+  // PR4-A2 — 표준화 실제 적용 열/평균·SD(재현·해석용, outcome은 표준화하지 않음).
+  standardizedPredictorKeys: string[];
+  standardization: Record<string, { mean: number; sd: number }>;
+  // PR4-A2 — spline predictor별 knot(경계 2 + 내부 3). 예측 그리드가 같은 knot을
+  // 재사용해야 하므로(§2 "표준화·spline 기저") 여기 보존한다.
+  splineKnots: Record<string, SplineKnots>;
 }
 
 export type RegressionDesignResult =
@@ -169,17 +183,32 @@ export interface BuildRegressionDesignInput {
   catalogByKey: Map<string, AnalyticsVariableMetadata>;
   method: 'ols_linear' | 'binary_logistic';
   referenceLevels: Readonly<Record<string, string>>;
-  // §2 ④ EPV — ②에서 이미 계산해둔 값을 재사용(같은 complete-case 기준으로
-  // 두 번 계산하지 않는다).
+  // §2 ④ EPV — boolean outcome 전용. categorical outcome은 eventLevel 확정 후
+  // 이 함수가 로컬로 직접 집계한다(계획서 §2 "categorical 2레벨 outcome").
   eventSummary: RegressionEventSummary | null;
+  eventLevel: string | undefined;                             // PR4-A2 — categorical, recipe 지정값
+  standardizePredictors: boolean;                              // PR4-A2
+  interactionTerms: readonly (readonly [string, string])[];    // PR4-A2
+  splineKeys: readonly string[];                                // PR4-A2
 }
 
 function isFiniteNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
+interface ColumnGroupEntry {
+  name: string;
+  label: string;
+  level: string | null;
+  termType: 'main' | 'spline_basis';
+  values: number[];
+}
+
 export function buildRegressionDesignMatrix(input: BuildRegressionDesignInput): RegressionDesignResult {
-  const { completeRows, outcomeKey, predictorKeys, catalogByKey, method, referenceLevels, eventSummary } = input;
+  const {
+    completeRows, outcomeKey, predictorKeys, catalogByKey, method, referenceLevels, eventSummary,
+    eventLevel: requestedEventLevel, standardizePredictors, interactionTerms, splineKeys,
+  } = input;
   const qualityFlags: string[] = [];
 
   // 리뷰로 발견한 결함 — REGRESSION_POLICY.minCompleteRows(30)가 정책 상수로는
@@ -190,15 +219,43 @@ export function buildRegressionDesignMatrix(input: BuildRegressionDesignInput): 
     return { ok: false, reason: 'INSUFFICIENT_COMPLETE_ROWS' };
   }
 
+  const outcomeVar = catalogByKey.get(outcomeKey);
+
   // --- outcome 벡터 ---
   const y: number[] = [];
-  for (const row of completeRows) {
-    const raw = row.values[outcomeKey]?.value;
-    if (method === 'ols_linear') {
+  let resolvedEventLevel: string | null = null;
+  let localEventSummary: RegressionEventSummary | null = null;
+
+  if (method === 'ols_linear') {
+    for (const row of completeRows) {
+      const raw = row.values[outcomeKey]?.value;
       if (!isFiniteNumber(raw)) return { ok: false, reason: 'CONSTANT_OUTCOME' };
       y.push(raw);
-    } else {
-      y.push(raw === true ? 1 : 0);
+    }
+  } else if (outcomeVar?.type === 'categorical') {
+    // PR4-A2 §2 "categorical 2레벨 outcome" — ③ 공개통제(모든 관측 레벨 ≥10명)를
+    // 이미 통과했으므로 여기서 "정확히 2개"를 판정해도 개별 레벨 인원수는 안 샌다.
+    const stringValues = completeRows.map((r) => String(r.values[outcomeKey]?.value));
+    const observedLevels = Array.from(new Set(stringValues));
+    if (observedLevels.length !== 2) {
+      return { ok: false, reason: 'CATEGORICAL_OUTCOME_NOT_BINARY' };
+    }
+    const { level, usedFallback } = resolveReferenceLevel(outcomeKey, observedLevels, requestedEventLevel);
+    if (usedFallback) qualityFlags.push('event_level_fallback');
+    resolvedEventLevel = level;
+    const eventPersons = new Set<string>();
+    const nonEventPersons = new Set<string>();
+    completeRows.forEach((row, i) => {
+      const isEvent = stringValues[i] === resolvedEventLevel;
+      y.push(isEvent ? 1 : 0);
+      (isEvent ? eventPersons : nonEventPersons).add(row.personClusterKey);
+    });
+    localEventSummary = { eventPersonCount: eventPersons.size, nonEventPersonCount: nonEventPersons.size };
+  } else {
+    // boolean outcome(기존 경로)
+    resolvedEventLevel = 'true';
+    for (const row of completeRows) {
+      y.push(row.values[outcomeKey]?.value === true ? 1 : 0);
     }
   }
   if (new Set(y).size < 2) {
@@ -206,11 +263,10 @@ export function buildRegressionDesignMatrix(input: BuildRegressionDesignInput): 
   }
 
   // --- predictor 열 조립(리뷰 #20 — 더미 생성 전에 원 predictor 단위로 단일
-  // 레벨을 먼저 검사한다) ---
-  const columns: RegressionDesignColumn[] = [
-    { name: 'intercept', label: '절편', variableKey: null, level: null },
-  ];
-  const predictorColumns: number[][] = []; // 열 단위(전치) — 나중에 행 단위로 합친다
+  // 레벨을 먼저 검사한다). key -> 그 predictor가 만든 열들("그룹")로 관리해야
+  // 표준화·spline 치환·interaction 외적이 predictor 단위로 자연스럽게 맞물린다. ---
+  const predictorGroups = new Map<string, ColumnGroupEntry[]>();
+  const rawContinuousValues = new Map<string, number[]>(); // spline knot은 항상 원단위 값으로 계산
   const referenceLevelsUsed: Record<string, string> = {};
 
   for (const key of predictorKeys) {
@@ -224,16 +280,15 @@ export function buildRegressionDesignMatrix(input: BuildRegressionDesignInput): 
       });
       if (values.some((v) => Number.isNaN(v))) return { ok: false, reason: 'ZERO_VARIANCE_PREDICTOR' };
       if (new Set(values).size < 2) return { ok: false, reason: 'ZERO_VARIANCE_PREDICTOR' };
-      predictorColumns.push(values);
-      columns.push({ name: key, label: variable.label, variableKey: key, level: null });
+      rawContinuousValues.set(key, values);
+      predictorGroups.set(key, [{ name: key, label: variable.label, level: null, termType: 'main', values: [...values] }]);
       continue;
     }
 
     if (variable.type === 'boolean') {
       const values = completeRows.map((r) => (r.values[key]?.value === true ? 1 : 0));
       if (new Set(values).size < 2) return { ok: false, reason: 'ZERO_VARIANCE_PREDICTOR' };
-      predictorColumns.push(values);
-      columns.push({ name: key, label: variable.label, variableKey: key, level: null });
+      predictorGroups.set(key, [{ name: key, label: variable.label, level: null, termType: 'main', values }]);
       continue;
     }
 
@@ -256,10 +311,98 @@ export function buildRegressionDesignMatrix(input: BuildRegressionDesignInput): 
       ? declared.filter((l) => observedLevels.includes(l) && l !== referenceLevel)
       : sortDeterministic(observedLevels).filter((l) => l !== referenceLevel);
 
-    for (const level of dummyLevelOrder) {
-      const values = stringValues.map((v) => (v === level ? 1 : 0));
-      predictorColumns.push(values);
-      columns.push({ name: `${key}=${level}`, label: `${variable.label}: ${level}`, variableKey: key, level });
+    predictorGroups.set(key, dummyLevelOrder.map((level) => ({
+      name: `${key}=${level}`,
+      label: `${variable.label}: ${level}`,
+      level,
+      termType: 'main',
+      values: stringValues.map((v) => (v === level ? 1 : 0)),
+    })));
+  }
+
+  // --- 표준화(PR4-A2) — continuous 유래 열에 z-score. spline 대상은 제외한다
+  // (spline은 항상 원단위 knot 기준으로 계산 — 표준화 후 splining하면 knot을
+  // un-standardize해서 원단위로 보고해야 하는 불필요한 왕복이 생긴다. 표준화된
+  // 값의 spline 기저는 단일 계수 해석이 없어 "표준화 계수"라는 개념 자체가
+  // 적용되지 않는다). outcome은 표준화하지 않는다. ---
+  const standardizedPredictorKeys: string[] = [];
+  const standardization: Record<string, { mean: number; sd: number }> = {};
+  if (standardizePredictors) {
+    for (const key of predictorKeys) {
+      const variable = catalogByKey.get(key);
+      if (!variable || variable.type !== 'continuous' || splineKeys.includes(key)) continue;
+      const group = predictorGroups.get(key);
+      if (!group) continue;
+      const values = group[0].values;
+      const mean = values.reduce((a, b) => a + b, 0) / values.length;
+      const sd = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length);
+      group[0].values = values.map((v) => (v - mean) / sd);
+      standardizedPredictorKeys.push(key);
+      standardization[key] = { mean, sd };
+    }
+  }
+
+  // --- spline 기저 치환(PR4-A2) — §2 "표준화·spline 기저" 5-knot 정책(경계 2 +
+  // 내부 3, df=4). 고유값 부족·knot 중복은 resolveSplineKnots가 null로 알린다. ---
+  const splineKnots: Record<string, SplineKnots> = {};
+  for (const key of splineKeys) {
+    const rawValues = rawContinuousValues.get(key);
+    if (!rawValues) continue; // 구조/의미검증이 이미 continuous만 허용 — 방어적 분기
+    const knots = resolveSplineKnots(rawValues);
+    if (!knots) return { ok: false, reason: 'SPLINE_INSUFFICIENT_UNIQUE_VALUES' };
+    splineKnots[key] = knots;
+    const variable = catalogByKey.get(key)!;
+    const basisSuffixes = ['ns1', 'ns2', 'ns3', 'ns4'] as const;
+    predictorGroups.set(key, basisSuffixes.map((suffix, basisIndex) => ({
+      name: `${key}#${suffix}`,
+      label: `${variable.label}(spline ${suffix})`,
+      level: null,
+      termType: 'spline_basis',
+      values: rawValues.map((v) => naturalSplineBasis(v, knots)[basisIndex]),
+    })));
+  }
+
+  // --- 절편 + predictor 열(원래 순서, forest plot 행 순서)을 조립 ---
+  const columns: RegressionDesignColumn[] = [
+    { name: 'intercept', label: '절편', variableKey: null, level: null, termType: 'main', interactionOf: null },
+  ];
+  const predictorColumns: number[][] = []; // 열 단위(전치) — 나중에 행 단위로 합친다
+
+  for (const key of predictorKeys) {
+    const group = predictorGroups.get(key);
+    if (!group) continue;
+    for (const entry of group) {
+      predictorColumns.push(entry.values);
+      columns.push({
+        name: entry.name, label: entry.label, variableKey: key, level: entry.level,
+        termType: entry.termType, interactionOf: null,
+      });
+    }
+  }
+
+  // --- interaction 열(PR4-A2) — splineKeys와 배타적(계약 단계에서 이미 거부됨)
+  // 이므로 continuous/boolean/categorical(k-1열) 열 그룹의 외적만 고려한다.
+  // 표준화 이후 실행되므로 표준화된 값으로 곱해진다. ---
+  for (const [keyA, keyB] of interactionTerms) {
+    const groupA = predictorGroups.get(keyA);
+    const groupB = predictorGroups.get(keyB);
+    if (!groupA || !groupB) continue; // 방어적 — 구조검사가 이미 predictor 소속을 확인
+    const varA = catalogByKey.get(keyA)!;
+    const varB = catalogByKey.get(keyB)!;
+    for (const entryA of groupA) {
+      for (const entryB of groupB) {
+        const labelA = entryA.level ? `${varA.label}:${entryA.level}` : varA.label;
+        const labelB = entryB.level ? `${varB.label}:${entryB.level}` : varB.label;
+        predictorColumns.push(entryA.values.map((v, i) => v * entryB.values[i]));
+        columns.push({
+          name: `${entryA.name}×${entryB.name}`,
+          label: `${labelA} × ${labelB}`,
+          variableKey: null, // 두 predictor에 걸침 — interactionOf 참고
+          level: null,
+          termType: 'interaction',
+          interactionOf: [keyA, keyB],
+        });
+      }
     }
   }
 
@@ -281,13 +424,16 @@ export function buildRegressionDesignMatrix(input: BuildRegressionDesignInput): 
   }
 
   if (method === 'binary_logistic') {
-    if (!eventSummary || parameterCountNoIntercept === 0) {
+    // PR4-A2 — categorical outcome은 eventLevel 확정 후 로컬로 집계한 값을 쓴다
+    // (boolean은 기존 ②단계 eventSummary를 그대로 재사용 — 두 번 계산하지 않는다).
+    const effectiveEventSummary = outcomeVar?.type === 'categorical' ? localEventSummary : eventSummary;
+    if (!effectiveEventSummary || parameterCountNoIntercept === 0) {
       return { ok: false, reason: 'INSUFFICIENT_EVENTS_PER_PARAMETER' };
     }
     // 분자 = 사건을 가진 고유 person 수와 non-event person 수 중 작은 쪽(행
     // 수가 아니다 — 반복행을 독립 사건처럼 세면 게이트가 무의미해진다).
     // 분모 = 절편을 제외한 파라미터 수.
-    const epv = Math.min(eventSummary.eventPersonCount, eventSummary.nonEventPersonCount) / parameterCountNoIntercept;
+    const epv = Math.min(effectiveEventSummary.eventPersonCount, effectiveEventSummary.nonEventPersonCount) / parameterCountNoIntercept;
     if (epv < REGRESSION_POLICY.minEventsPerParameter) {
       return { ok: false, reason: 'INSUFFICIENT_EVENTS_PER_PARAMETER' };
     }
@@ -305,10 +451,14 @@ export function buildRegressionDesignMatrix(input: BuildRegressionDesignInput): 
       x,
       columns,
       personClusterKeys: completeRows.map((r) => r.personClusterKey),
+      caseIds: completeRows.map((r) => r.caseId),
       referenceLevelsUsed,
       method,
-      eventLevel: method === 'binary_logistic' ? 'true' : null,
+      eventLevel: resolvedEventLevel,
       qualityFlags,
+      standardizedPredictorKeys,
+      standardization,
+      splineKnots,
     },
   };
 }

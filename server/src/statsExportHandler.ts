@@ -19,6 +19,7 @@ import {
   type AnalyzeDiscreteResult,
   type AnalyzeMissingPatternEntry,
 } from '@wr/contracts';
+
 import { writeAuditLogStrict, type AuditOutcome } from './middleware/audit';
 
 interface StatsRunRow {
@@ -55,19 +56,25 @@ function missingPatternsCell(value: AnalyzeMissingPatternEntry[] | null): string
   return escapeCsvString(value.map((p) => `${p.reasonCode}:${p.count}`).join('; '));
 }
 
+// §1.2 provenance 요구 — run 식별자·버전이 CSV에 남아야 나중에 대조 가능하다.
+// buildCsv/buildRegressionCsv 둘 다 쓴다(PR4-A2에서 공용 추출).
+function buildMetaHeaderLines(manifest: RunManifest): string[] {
+  return [
+    `# analysisRunId,${manifest.analysisRunId}`,
+    `# snapshotAsOf,${manifest.snapshotAsOf}`,
+    `# catalogVersion,${manifest.catalogVersion}`,
+    `# extractorVersion,${manifest.extractorVersion}`,
+    `# migrationVersion,${manifest.migrationVersion}`,
+    `# engineVersion,${manifest.engineVersion}`,
+    `# serializerVersion,${manifest.serializerVersion}`,
+    `# estimabilityPolicyVersion,${manifest.estimabilityPolicyVersion}`,
+    `# note,원본 DB 변경 후 exact rerun은 보장되지 않음 — provenance/무결성 검증용(계획서 §1.2)`,
+    '',
+  ];
+}
+
 function buildCsv(manifest: RunManifest, result: AnalyzeResult): string {
-  const lines: string[] = [];
-  // 메타 헤더 — §1.2 provenance 요구. run 식별자·버전이 CSV에 남아야 나중에 대조 가능하다.
-  lines.push(`# analysisRunId,${manifest.analysisRunId}`);
-  lines.push(`# snapshotAsOf,${manifest.snapshotAsOf}`);
-  lines.push(`# catalogVersion,${manifest.catalogVersion}`);
-  lines.push(`# extractorVersion,${manifest.extractorVersion}`);
-  lines.push(`# migrationVersion,${manifest.migrationVersion}`);
-  lines.push(`# engineVersion,${manifest.engineVersion}`);
-  lines.push(`# serializerVersion,${manifest.serializerVersion}`);
-  lines.push(`# estimabilityPolicyVersion,${manifest.estimabilityPolicyVersion}`);
-  lines.push(`# note,원본 DB 변경 후 exact rerun은 보장되지 않음 — provenance/무결성 검증용(계획서 §1.2)`);
-  lines.push('');
+  const lines: string[] = buildMetaHeaderLines(manifest);
 
   lines.push(['section', 'variableKey', 'suppressed', 'n', 'missingCount', 'missingPatterns',
     'mean', 'sd', 'median', 'q1', 'q3', 'iqr', 'skewness', 'kurtosis', 'min', 'max',
@@ -108,6 +115,111 @@ function buildCsv(manifest: RunManifest, result: AnalyzeResult): string {
         '', '', '', '', '', '', '', '', '', '',
         csvString(level.level), String(level.count), String(level.proportion), csvString(row.mode),
       ].join(','));
+    }
+  }
+
+  // 엑셀 한글 호환 — UTF-8 BOM.
+  return '﻿' + lines.join('\r\n') + '\r\n';
+}
+
+// PR4-A2 — 회귀 결과 CSV export(계획서 §4 "그 외 배선" — regression 차단 제거).
+// 계수·적합도·VIF·condition number·spline 곡선점만 담는다 — **pointDiagnostics는
+// 절대 넣지 않는다**(limited_row 등급이라 이 aggregate-only(stats.export_results)
+// 엔드포인트 범위 밖 — 행단위 export는 PR5가 아직 없다).
+function buildRegressionCsv(manifest: RunManifest, result: AnalyzeResult): string {
+  const lines: string[] = buildMetaHeaderLines(manifest);
+  const regression = result.regression;
+
+  if (!regression || regression.suppressed) {
+    lines.push('# section,suppressed');
+    lines.push(['reasonCode'].join(','));
+    lines.push([csvString(regression?.suppressed ? regression.reasonCode : null)].join(','));
+    return '﻿' + lines.join('\r\n') + '\r\n';
+  }
+
+  lines.push(`# estimation,${regression.estimation}`);
+  if (regression.nonEstimableReason) lines.push(`# nonEstimableReason,${regression.nonEstimableReason}`);
+  if (regression.inferenceWithheldReason) lines.push(`# inferenceWithheldReason,${regression.inferenceWithheldReason}`);
+  lines.push('');
+
+  // PR4-A2(리뷰 후 추가) — eventLevel·기준 범주·표준화 여부는 계수/OR의 해석을
+  // 바꾸는 정보인데도 CSV엔 계수만 있어 다운로드한 파일만으로는 해석이 불가능했다
+  // (리뷰 지적). 모형 메타데이터 섹션을 추가한다.
+  lines.push('# section,model');
+  lines.push(['outcomeKey', 'eventLevel', 'method', 'covariance'].join(','));
+  lines.push([
+    csvString(regression.outcomeKey), csvString(regression.eventLevel), csvString(regression.method),
+    csvString(regression.covariance),
+  ].join(','));
+  lines.push('');
+
+  lines.push('# section,referenceLevelsUsed');
+  lines.push(['variableKey', 'referenceLevel'].join(','));
+  for (const [key, level] of Object.entries(regression.referenceLevelsUsed)) {
+    lines.push([csvString(key), csvString(level)].join(','));
+  }
+  lines.push('');
+
+  lines.push('# section,standardization');
+  lines.push(['variableKey', 'mean', 'sd'].join(','));
+  for (const key of regression.standardizedPredictorKeys) {
+    const stats = regression.standardization?.[key] ?? null;
+    lines.push([csvString(key), csvNumber(stats?.mean ?? null), csvNumber(stats?.sd ?? null)].join(','));
+  }
+  lines.push('');
+
+  lines.push('# section,coefficients');
+  lines.push([
+    'name', 'label', 'variableKey', 'level', 'termType', 'estimate', 'se', 'statistic',
+    'pValue', 'ciLower', 'ciUpper', 'orEstimate', 'orCiLower', 'orCiUpper',
+  ].join(','));
+  for (const term of regression.terms) {
+    lines.push([
+      csvString(term.name), csvString(term.label), csvString(term.variableKey), csvString(term.level),
+      csvString(term.termType), csvNumber(term.estimate), csvNumber(term.se), csvNumber(term.statistic),
+      csvNumber(term.pValue), csvNumber(term.ciLower), csvNumber(term.ciUpper),
+      csvNumber(term.exponentiated?.estimate ?? null), csvNumber(term.exponentiated?.ciLower ?? null),
+      csvNumber(term.exponentiated?.ciUpper ?? null),
+    ].join(','));
+  }
+  lines.push('');
+
+  lines.push('# section,fit');
+  lines.push(['method', 'n', 'personCount', 'residualDf', 'r2', 'adjR2', 'logLik', 'aic', 'pseudoR2'].join(','));
+  lines.push([
+    csvString(regression.method), csvNumber(regression.n), csvNumber(regression.personCount),
+    csvNumber(regression.residualDf), csvNumber(regression.fit?.r2 ?? null), csvNumber(regression.fit?.adjR2 ?? null),
+    csvNumber(regression.fit?.logLik ?? null), csvNumber(regression.fit?.aic ?? null),
+    csvNumber(regression.fit?.pseudoR2 ?? null),
+  ].join(','));
+  lines.push('');
+
+  if (regression.diagnostics) {
+    lines.push('# section,diagnostics');
+    lines.push(['conditionNumber'].join(','));
+    lines.push([csvNumber(regression.diagnostics.conditionNumber)].join(','));
+    lines.push('');
+    lines.push(['variableKey', 'termName', 'vif'].join(','));
+    for (const v of regression.diagnostics.vif ?? []) {
+      lines.push([csvString(v.variableKey), csvString(v.termName), csvNumber(v.vif)].join(','));
+    }
+    lines.push('');
+  }
+
+  if (regression.splinePartialEffects) {
+    lines.push('# section,splinePartialEffects');
+    lines.push([
+      'variableKey', 'x', 'deltaFromBaseline', 'ciLower', 'ciUpper', 'orEstimate', 'orCiLower', 'orCiUpper',
+    ].join(','));
+    for (const effect of regression.splinePartialEffects) {
+      for (const point of effect.points) {
+        lines.push([
+          csvString(effect.variableKey), csvNumber(point.x), csvNumber(point.deltaFromBaseline),
+          csvNumber(point.ciLower), csvNumber(point.ciUpper),
+          csvNumber(point.exponentiated?.estimate ?? null), csvNumber(point.exponentiated?.ciLower ?? null),
+          csvNumber(point.exponentiated?.ciUpper ?? null),
+        ].join(','));
+      }
     }
   }
 
@@ -209,15 +321,11 @@ export async function handlePostExport(pool: Pool, req: Request, res: Response):
     res.status(400).json({ code: 'CORRELATION_MATRIX_EXPORT_NOT_SUPPORTED', error: '상관행렬 분석 결과는 아직 CSV 내보내기를 지원하지 않습니다.' });
     return;
   }
-  // PR4-A1 — 회귀 결과 CSV export도 미지원(A2/PR5 범위). 이 가드가 없으면
-  // buildCsv가 빈 continuous/discrete로 빈 CSV를 200으로 내보낸다(계획서 §4).
-  if (manifestParsed.data.analysisMode === 'regression') {
-    await auditDenied('REGRESSION_EXPORT_NOT_SUPPORTED');
-    res.status(400).json({ code: 'REGRESSION_EXPORT_NOT_SUPPORTED', error: '회귀 분석 결과는 아직 CSV 내보내기를 지원하지 않습니다.' });
-    return;
-  }
-
-  const csv = buildCsv(manifestParsed.data, resultParsed.data);
+  // PR4-A2 — 회귀 결과는 전용 CSV 빌더로 분기한다(pointDiagnostics는 절대 넣지
+  // 않음 — buildRegressionCsv 주석 참고).
+  const csv = manifestParsed.data.analysisMode === 'regression'
+    ? buildRegressionCsv(manifestParsed.data, resultParsed.data)
+    : buildCsv(manifestParsed.data, resultParsed.data);
 
   // §7.4 원칙을 aggregate 등급에도 적용 — 감사 INSERT가 실패하면 CSV는 한 바이트도 안 나간다.
   await writeAuditLogStrict(pool, {

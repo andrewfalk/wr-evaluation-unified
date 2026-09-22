@@ -28,7 +28,9 @@ const DISCLOSURE_POLICY_VERSION = 'v0-aggregate-only';
 // PR3-A — availableMethods(A-1/A-2) 계산 로직이 신설됐다. statsMethodCatalog.ts가
 // 이 값을 AvailableMethod.methodPolicyVersion에 그대로 stamp한다(export 필요).
 // PR4-A1 — 회귀 2종의 availableMethods 계산이 추가돼 범프.
-export const METHOD_POLICY_VERSION = 'v2-regression';
+// PR4-A2 — binary_logistic이 categorical(2레벨) outcome도 허용하도록 타입
+// 정합성 판정이 바뀌어 다시 범프.
+export const METHOD_POLICY_VERSION = 'v3-regression-categorical-outcome';
 // PR3-A — AnalyzeResult.bivariate 필드가 추가돼 결과 shape이 확장됐다.
 // PR3-B — histogram/boxplot/scatter/regressionLine/correlationMatrix 필드가
 // 추가돼 결과 shape이 다시 확장됐다.
@@ -37,7 +39,9 @@ export const METHOD_POLICY_VERSION = 'v2-regression';
 // 모듈 안의 상수라 STATS_ENGINE_VERSION류의 vi.doMock 패턴이 안 통함, PR0-B4
 // 관련 세션의 리뷰 지적)를 위해 export한다.
 // PR4-A1 — AnalyzeResult.regression 필드가 추가돼 결과 shape이 다시 확장됐다.
-export const RESULT_SCHEMA_VERSION = 'v5-regression';
+// PR4-A2 — regression.diagnostics/standardizedPredictorKeys/standardization/
+// splinePartialEffects 필드가 추가돼 결과 shape이 다시 확장됐다.
+export const RESULT_SCHEMA_VERSION = 'v6-regression-diagnostics-spline';
 
 export interface ComputeExecutionDigestInput {
   organizationId: string;
