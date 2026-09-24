@@ -265,8 +265,14 @@ export class StatsEngineDegradedError extends Error {
 export class StatsEngineInputTooLargeError extends Error {
   constructor(message: string) { super(message); this.name = 'StatsEngineInputTooLargeError'; }
 }
+// PR4-B1 §0/§C — 비동기 job 취소. AbortSignal이 spawn 전/후 어느 시점에 abort되든
+// 이 에러로 수렴한다. finishRun이 cancel_requested_at을 outcome.kind와 무관하게
+// 재확인하므로, 이 에러의 정확한 발생 시점은 결과에 영향을 주지 않는다.
+export class StatsEngineCancelledError extends Error {
+  constructor() { super('stats engine process was cancelled'); this.name = 'StatsEngineCancelledError'; }
+}
 
-function assertWithinLimits(request: StatsEngineRequest): void {
+export function assertWithinLimits(request: StatsEngineRequest): void {
   let total = 0;
   for (const v of request.variables) {
     if (v.values.length > MAX_VALUES_PER_VARIABLE) {
@@ -296,7 +302,7 @@ function assertWithinLimits(request: StatsEngineRequest): void {
 // "그룹 전체 합"(그룹당이 아님 — 이변량은 그룹들 합쳐서 변수 하나 취급),
 // table은 "sum(모든 셀)"에 같은 상한을 적용(작은 JSON으로 큰 관측수를 표현할 수
 // 있어 상한 자체가 필요, 정합성 검사와는 별개).
-function assertBivariateWithinLimits(request: BivariateEngineRequest): void {
+export function assertBivariateWithinLimits(request: BivariateEngineRequest): void {
   const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 5, bivariate: request }), 'utf8');
   if (byteLength > config.stats.maxInputBytes) {
     throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
@@ -567,7 +573,7 @@ export type StatsEngineRegressionDiagnosticsRawResult =
 // 길이는 실제 전송될 envelope({protocolVersion, regression})과 바이트 단위로
 // 동일한 문자열로 측정한다(§8 "몇 바이트라 무시 가능하다는 판단은 안 된다"
 // 교훈 — statsCorrelationMatrixDataset.ts 3차 수정과 동일 원칙).
-function assertRegressionWithinLimits(request: RegressionEngineRequest): void {
+export function assertRegressionWithinLimits(request: RegressionEngineRequest): void {
   const n = request.y.length;
   const p = request.columnNames.length;
   if (n > MAX_VALUES_PER_VARIABLE) {
@@ -740,6 +746,20 @@ export function __resetStatsEngineForTests(): void {
   engineDegraded = false;
 }
 
+// PR4-B1 — 큐 워커가 claim 전에 확인하는 non-mutating peek. 힌트일 뿐 보장이
+// 아니다(peek 이후 실제 runEngineProcess 호출 사이에 다른 요청이 슬롯을 채갈
+// 수 있음) — 워커는 그 경합을 StatsEngineBusyError를 잡아 재큐잉하는 것으로
+// 처리한다(statsRunsQueue.ts의 requeueOrFinish).
+export function isEngineSlotAvailable(): boolean {
+  return !engineDegraded && inFlightCount < config.stats.maxConcurrency;
+}
+
+// admission이 quota 검사 단계(캐시hit/합류 확인 이후)에서 부르는 별도 게이트.
+// degraded는 슬롯이 아니라 엔진 자체의 신뢰 상태이므로 슬롯 peek과 분리해 둔다.
+export function isEngineDegraded(): boolean {
+  return engineDegraded;
+}
+
 /** §2.2 — zod shape 통과 후 추가 의미 검증. 위반 시 StatsEngineResultInvalidError. */
 function validateSemantics(request: StatsEngineRequest, raw: z.infer<typeof StatsEngineRawResultSchema>): void {
   const requestedByKind = new Map<string, StatsEngineVariableKind>();
@@ -797,7 +817,7 @@ function validateSemantics(request: StatsEngineRequest, raw: z.infer<typeof Stat
 }
 
 interface RecordedOutcome {
-  kind: 'spawn_error' | 'stdin_error' | 'timeout' | 'output_too_large';
+  kind: 'spawn_error' | 'stdin_error' | 'timeout' | 'output_too_large' | 'cancelled';
   detail?: string;
 }
 
@@ -811,10 +831,23 @@ interface EngineRunConfig<T> {
   /** zod shape + 의미검증까지 끝내고 최종 반환값을 만든다. 실패 시 throw
    * (StatsEngineResultInvalidError 권장 — 그대로 reject된다). */
   parseSuccess: (parsed: unknown) => T;
+  /** PR4-B1 — 생략 시 기존 config.stats.timeoutMs(30초, sync 호출부 전부).
+   * 큐 워커가 행별 engine_timeout_ms를 넘길 때만 오버라이드한다. 실행
+   * 타이머·안전 타이머 둘 다 이 값을 쓴다(한쪽만 바꾸면 행별 timeout이
+   * 반쪽만 적용됨). */
+  timeoutMs?: number;
+  /** PR4-B1 — abort되면 이미 spawn됐으면 requestTermination('SIGTERM'), 아직
+   * spawn 전이면 spawn 자체를 건너뛰고 즉시 StatsEngineCancelledError로 reject. */
+  signal?: AbortSignal;
+  /** PR4-B1 — spawn 직후 실제 PID를 알려준다(취소 registry가 소유권을 기록). */
+  onSpawn?: (pid: number | undefined) => void;
 }
 
 async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
   cfg.assertLimits();
+  if (cfg.signal?.aborted) {
+    throw new StatsEngineCancelledError();
+  }
   if (engineDegraded) {
     throw new StatsEngineDegradedError();
   }
@@ -822,6 +855,7 @@ async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
     throw new StatsEngineBusyError();
   }
   inFlightCount += 1;
+  const resolvedTimeoutMs = cfg.timeoutMs ?? config.stats.timeoutMs;
 
   let slotReleased = false;
   const releaseSlot = () => {
@@ -853,6 +887,7 @@ async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
       reject(new StatsEngineProcessError('PROCESS_ERROR', err instanceof Error ? err.message : 'spawn 실패'));
       return;
     }
+    cfg.onSpawn?.(child.pid);
 
     let recordedOutcome: RecordedOutcome | null = null;
     let requestSettled = false;
@@ -866,6 +901,7 @@ async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
     let stdoutBytes = 0;
     let stderrChunks: Buffer[] = [];
     let stderrBytes = 0;
+    let onAbort: (() => void) | null = null;
 
     const clearAllTimers = () => {
       if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
@@ -878,6 +914,7 @@ async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
       child.stdin?.removeAllListeners();
       child.stdout?.removeAllListeners();
       child.stderr?.removeAllListeners();
+      if (onAbort) cfg.signal?.removeEventListener('abort', onAbort);
     };
 
     // §2.1 — 모든 종료 시도의 단일 진입점. terminationRequested를 kill() 호출 '전에'
@@ -889,6 +926,16 @@ async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
       graceTimer = setTimeout(() => {
         try { child.kill('SIGKILL'); } catch { /* 무시 */ }
       }, config.stats.killGraceMs);
+    }
+
+    // PR4-B1 — spawn 이후에 abort되면 여기서 종료를 요청한다(spawn 이전 abort는
+    // 함수 시작부의 cfg.signal?.aborted 체크가 이미 걸러 spawn 자체를 안 한다).
+    if (cfg.signal) {
+      onAbort = () => {
+        recordedOutcome ??= { kind: 'cancelled' };
+        requestTermination('SIGTERM');
+      };
+      cfg.signal.addEventListener('abort', onAbort);
     }
 
     // 정상 확정(오직 'close'에서만 호출) — recordedOutcome/exitCode로 분기.
@@ -905,6 +952,9 @@ async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
             return;
           case 'output_too_large':
             reject(new StatsEngineOutputTooLargeError());
+            return;
+          case 'cancelled':
+            reject(new StatsEngineCancelledError());
             return;
           case 'spawn_error':
           case 'stdin_error':
@@ -984,7 +1034,7 @@ async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
     timeoutTimer = setTimeout(() => {
       recordedOutcome ??= { kind: 'timeout' };
       requestTermination('SIGTERM');
-    }, config.stats.timeoutMs);
+    }, resolvedTimeoutMs);
 
     // §2.1 최종 안전 타이머 — 'close'가 끝내 안 오면 요청을 실패로 1회 확정하되 슬롯은
     // 반환하지 않는다(프로세스가 실제로 끝났는지 모르므로) — 대신 엔진 전체를 격리한다.
@@ -996,7 +1046,7 @@ async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
       // 슬롯은 의도적으로 반환하지 않는다 — releaseSlot() 호출 없음.
       reject(new StatsEngineProcessError('PROCESS_ERROR', '프로세스 종료를 확인하지 못함(안전 타이머 발동)'));
       // 리스너는 해제하지 않는다 — 늦게 오는 'close'를 계속 듣고 아래에서 정리한다.
-    }, config.stats.timeoutMs + config.stats.killGraceMs + 5000);
+    }, resolvedTimeoutMs + config.stats.killGraceMs + 5000);
 
     child.once('close', (code) => {
       processClosed = true;
@@ -1021,7 +1071,15 @@ async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
   });
 }
 
-export async function runStatsEngine(request: StatsEngineRequest): Promise<StatsEngineRawResult> {
+// PR4-B1 — statsRunsQueue.ts의 attempt()가 행별 timeoutMs·취소 signal·onSpawn을
+// 전달할 때 쓴다. sync 호출부(기존 전부)는 opts를 생략 — 동작 무변경.
+export interface EngineRunOpts {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  onSpawn?: (pid: number | undefined) => void;
+}
+
+export async function runStatsEngine(request: StatsEngineRequest, opts?: EngineRunOpts): Promise<StatsEngineRawResult> {
   return runEngineProcess<StatsEngineRawResult>({
     assertLimits: () => assertWithinLimits(request),
     buildStdinPayload: () => ({ protocolVersion: 5, variables: request.variables }),
@@ -1033,10 +1091,14 @@ export async function runStatsEngine(request: StatsEngineRequest): Promise<Stats
       validateSemantics(request, shapeResult.data);
       return { continuous: shapeResult.data.continuous, discrete: shapeResult.data.discrete };
     },
+    ...opts,
   });
 }
 
-export async function runBivariateStatsEngine(request: BivariateEngineRequest): Promise<StatsEngineBivariateRawResult> {
+export async function runBivariateStatsEngine(
+  request: BivariateEngineRequest,
+  opts?: EngineRunOpts,
+): Promise<StatsEngineBivariateRawResult> {
   return runEngineProcess<StatsEngineBivariateRawResult>({
     assertLimits: () => assertBivariateWithinLimits(request),
     buildStdinPayload: () => ({ protocolVersion: 5, bivariate: request }),
@@ -1048,11 +1110,13 @@ export async function runBivariateStatsEngine(request: BivariateEngineRequest): 
       validateBivariateSemantics(request, shapeResult.data);
       return shapeResult.data.bivariate;
     },
+    ...opts,
   });
 }
 
 export async function runCorrelationMatrixStatsEngine(
   request: CorrelationMatrixEngineRequest,
+  opts?: EngineRunOpts,
 ): Promise<StatsEngineCorrelationMatrixRawResult> {
   return runEngineProcess<StatsEngineCorrelationMatrixRawResult>({
     assertLimits: () => assertCorrelationMatrixWithinLimits(request),
@@ -1065,10 +1129,14 @@ export async function runCorrelationMatrixStatsEngine(
       validateCorrelationMatrixSemantics(request, shapeResult.data);
       return shapeResult.data.correlationMatrix;
     },
+    ...opts,
   });
 }
 
-export async function runRegressionStatsEngine(request: RegressionEngineRequest): Promise<StatsEngineRegressionRawResult> {
+export async function runRegressionStatsEngine(
+  request: RegressionEngineRequest,
+  opts?: EngineRunOpts,
+): Promise<StatsEngineRegressionRawResult> {
   return runEngineProcess<StatsEngineRegressionRawResult>({
     assertLimits: () => assertRegressionWithinLimits(request),
     buildStdinPayload: () => ({ protocolVersion: 5, regression: request }),
@@ -1080,6 +1148,7 @@ export async function runRegressionStatsEngine(request: RegressionEngineRequest)
       validateRegressionSemantics(request, shapeResult.data);
       return shapeResult.data.regression;
     },
+    ...opts,
   });
 }
 

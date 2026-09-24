@@ -28,6 +28,7 @@ import { corsMiddleware } from './middleware/corsMiddleware';
 import { runWorkspaceRetention } from './jobs/workspaceRetention';
 import { runVideoClipCleanup } from './jobs/videoClipCleanup';
 import { runStatsRunCleanup } from './jobs/statsRunCleanup';
+import { createStatsRunsQueueWorker } from './statsRunsQueue';
 
 export const app = express();
 app.set('trust proxy', config.trustProxy);
@@ -145,6 +146,12 @@ if (require.main === module) {
           };
           doStatsRunCleanup();
           setInterval(doStatsRunCleanup, 60 * 60 * 1000).unref();
+
+          // PR4-B1 — admission→attempt→finish 비동기 job 파이프라인. sweepLoop/claimLoop
+          // 독립 등록(계획서 §C — 긴 작업 실행 중에도 다른 queued 작업의 취소·대기초과가
+          // 지연되지 않아야 함).
+          createStatsRunsQueueWorker(pool);
+          console.log('[wr-server] stats-runs-queue worker enabled');
         }
       });
     })

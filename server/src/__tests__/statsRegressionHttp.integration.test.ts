@@ -28,6 +28,7 @@ vi.mock('../statsWorkbenchRuntimeState', () => ({
 }));
 
 import { createStatsRouter } from '../routes/stats';
+import { createStatsRunsQueueWorker } from '../statsRunsQueue';
 import { generateAccessToken } from '../auth/tokens';
 import { hashToken, generateToken } from '../auth/tokenHash';
 // PR4-A2(3차 리뷰 지적) — 표준화 테스트가 "평균·SD가 유한값"만 보면 변환 자체가
@@ -82,9 +83,14 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
   let orgId: string;
   let userId: string;
   let accessToken: string;
+  let worker: { stop: () => void };
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: TEST_DB_URL });
+    // PR4-B1 — POST /analyze는 이제 admission이 항상 queued 행을 만들고, 실제로
+    // claim→attempt→finishRun까지 이 백그라운드 워커가 돌아야 syncBudgetMs 안에
+    // 200으로 끝난다(워커 없이는 매 요청이 202로만 떨어진다).
+    worker = createStatsRunsQueueWorker(pool);
     const org = await pool.query<{ id: string }>(
       `INSERT INTO organizations (name) VALUES ($1) RETURNING id`,
       ['__test_regressionHttp_org__'],
@@ -111,6 +117,7 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
   });
 
   afterAll(async () => {
+    worker.stop();
     await pool.query(`DELETE FROM stats_runs WHERE organization_id = $1`, [orgId]);
     await pool.query(`DELETE FROM user_capability_grants WHERE organization_id = $1`, [orgId]);
     await pool.query(`DELETE FROM sessions WHERE user_id = $1`, [userId]);
@@ -120,6 +127,9 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
   });
 
   afterEach(async () => {
+    // PR4-B1 — 각 it()이 admission으로 만든 queued/succeeded 행을 다음 케이스로
+    // 넘기면 다음 요청의 in-flight/시간당 quota(§A)를 오염시킨다(허위 429).
+    await pool.query(`DELETE FROM stats_runs WHERE organization_id = $1`, [orgId]);
     await pool.query(`DELETE FROM patient_records WHERE organization_id = $1`, [orgId]);
     await pool.query(`DELETE FROM patient_persons WHERE organization_id = $1`, [orgId]);
   });
@@ -134,6 +144,34 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
 
   function authed(req: request.Test): request.Test {
     return req.set('Authorization', `Bearer ${accessToken}`).set('X-CSRF-Token', CSRF_TOKEN);
+  }
+
+  // PR4-B1 코드리뷰(2026-09-24) — POST /analyze는 admission이 항상 관여하므로,
+  // §C-1(limited_row 진단 재계산)이 같은 전역 엔진 세마포어를 잠깐 점유하는 동안
+  // claimTick이 정확히 슬롯을 기다리면(§statsRunsQueue.ts의 isEngineSlotAvailable
+  // 게이트) 이 파일처럼 실제 Python을 여러 번 왕복하는 무거운 fixture는 무부하가
+  // 아닌 실행 환경(다른 테스트 파일과 함께 도는 CI 등)에서 syncBudgetMs(기본 4초)를
+  // 넘겨 202로 떨어질 수 있다 — 계획서 §B-1이 이미 "무부하 조건 한정"이라고 명시한
+  // 그대로다. 이 헬퍼는 200/202 둘 다 받아들이고, 202면 실제 GET /runs/:id 폴링으로
+  // 종결까지 기다린 뒤 200 응답과 동일한 shape({status, body:{runManifest,result}})으로
+  // 맞춰 돌려준다 — 기존 `analyze.status`/`analyze.body...` 단언을 그대로 재사용할 수
+  // 있다(리뷰가 지적한 "202→GET 완료 흐름 coverage 부족"도 이 경로로 함께 메운다).
+  async function postAnalyzeAndAwait(body: Record<string, unknown>): Promise<{ status: number; body: any }> {
+    const res = await authed(request(app()).post('/api/stats/analyze')).send(body);
+    if (res.status !== 202) return res;
+    const analysisRunId = res.body.analysisRunId;
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      const getRes = await authed(request(app()).get(`/api/stats/runs/${analysisRunId}`));
+      if (getRes.body.status === 'succeeded') {
+        return { status: 200, body: { runManifest: getRes.body.runManifest, result: getRes.body.result } };
+      }
+      if (getRes.body.status === 'failed' || getRes.body.status === 'cancelled') {
+        return { status: getRes.status, body: getRes.body };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    throw new Error(`postAnalyzeAndAwait: 202 폴링이 30초 안에 끝나지 않음(analysisRunId=${analysisRunId})`);
   }
 
   async function insertPatient(payload: unknown, personName: string): Promise<void> {
@@ -191,7 +229,7 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
     expect(olsEntry).toMatchObject({ status: 'available', reasonCode: null });
     expect(preview.body.estimability.candidateParameterCount).toBe(2); // 절편 + boolean predictor 1열
 
-    const analyze = await authed(request(app()).post('/api/stats/analyze')).send({
+    const analyze = await postAnalyzeAndAwait({
       ...RECIPE_BASE, variableKeys: VARIABLE_KEYS, formulaPolicies: FORMULA_POLICIES,
       analysisMode: 'regression', regression: { outcomeKey: OUTCOME_KEY }, requestedMethod: 'ols_linear',
     });
@@ -243,7 +281,7 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
     }));
     const variableKeys = [PREDICTOR_KEY, OUTCOME_KEY]; // outcome이 boolean이 되도록 뒤집음
 
-    const analyze = await authed(request(app()).post('/api/stats/analyze')).send({
+    const analyze = await postAnalyzeAndAwait({
       ...RECIPE_BASE, variableKeys, formulaPolicies: FORMULA_POLICIES,
       analysisMode: 'regression', regression: { outcomeKey: PREDICTOR_KEY }, requestedMethod: 'binary_logistic',
     });
@@ -270,7 +308,7 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
   // 없는지(disclosure-safety 회귀 방지)까지 확인한다.
   it('POST /export는 회귀 결과를 CSV로 반환하고, 모형 메타데이터를 포함하며, pointDiagnostics는 담지 않는다(실 저장 결과 기준)', async () => {
     await seedPatients();
-    const analyze = await authed(request(app()).post('/api/stats/analyze')).send({
+    const analyze = await postAnalyzeAndAwait({
       ...RECIPE_BASE, variableKeys: VARIABLE_KEYS, formulaPolicies: FORMULA_POLICIES,
       analysisMode: 'regression', regression: { outcomeKey: OUTCOME_KEY }, requestedMethod: 'ols_linear',
     });
@@ -344,7 +382,7 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
       analysisMode: 'regression' as const, requestedMethod: 'binary_logistic' as const,
     };
 
-    const standardized = await authed(request(app()).post('/api/stats/analyze')).send({
+    const standardized = await postAnalyzeAndAwait({
       ...baseBody, regression: { outcomeKey: PREDICTOR_KEY, standardizePredictors: true },
     });
     expect(standardized.status).toBe(200);
@@ -361,7 +399,7 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
     expect(Number.isFinite(stdTerm.estimate)).toBe(true);
 
     // 비표준화 실행 — 원 단위 계수 β_raw를 얻는다(같은 recipe, standardizePredictors만 false).
-    const raw = await authed(request(app()).post('/api/stats/analyze')).send({
+    const raw = await postAnalyzeAndAwait({
       ...baseBody, regression: { outcomeKey: PREDICTOR_KEY, standardizePredictors: false },
     });
     expect(raw.status).toBe(200);
@@ -402,7 +440,7 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
       analysisMode: 'regression', regression: { outcomeKey: OUTCOME_KEY }, requestedMethod: 'ols_linear',
     };
 
-    const first = await authed(request(app()).post('/api/stats/analyze')).send(body);
+    const first = await postAnalyzeAndAwait(body);
     expect(first.status).toBe(200);
     expect(first.body.result.regression.diagnostics.pointDiagnosticsStatus).toBe('unavailable_no_access');
     // 권한 없음 — pointDiagnostics 키 자체가 없어야 한다(값이 빈 배열인 것과는 다름).
@@ -416,7 +454,7 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
     try {
       // 같은 recipe(=같은 execution_digest) — stats_runs 캐시 hit 경로를 그대로 타면서도
       // 권한 축만 새로 반영돼야 한다(limited_row 재계산은 캐시와 무관, 계획서 §4).
-      const second = await authed(request(app()).post('/api/stats/analyze')).send(body);
+      const second = await postAnalyzeAndAwait(body);
       expect(second.status).toBe(200);
       // 같은 analysisRunId — stats_runs 캐시 hit(재계산 아님)을 실제로 증명한다.
       expect(second.body.runManifest.analysisRunId).toBe(first.body.runManifest.analysisRunId);
@@ -445,7 +483,7 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
           WHERE id = $1`,
         [grant.rows[0].id, userId, orgId],
       );
-      const third = await authed(request(app()).post('/api/stats/analyze')).send(body);
+      const third = await postAnalyzeAndAwait(body);
       expect(third.status).toBe(200);
       expect(third.body.runManifest.analysisRunId).toBe(first.body.runManifest.analysisRunId); // 여전히 캐시 hit
       expect(third.body.result.regression.diagnostics.pointDiagnosticsStatus).toBe('unavailable_no_access');
@@ -493,7 +531,7 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
       [userId, orgId],
     );
     try {
-      const analyze = await authed(request(app()).post('/api/stats/analyze')).send({
+      const analyze = await postAnalyzeAndAwait({
         ...RECIPE_BASE, variableKeys: VARIABLE_KEYS, formulaPolicies: FORMULA_POLICIES,
         analysisMode: 'regression', regression: { outcomeKey: OUTCOME_KEY }, requestedMethod: 'ols_linear',
       });
@@ -589,7 +627,7 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
       [HEIGHT_KEY]: 'recompute_current', [OUTCOME_KEY]: 'recompute_current',
     };
 
-    const analyze = await authed(request(app()).post('/api/stats/analyze')).send({
+    const analyze = await postAnalyzeAndAwait({
       ...RECIPE_BASE, variableKeys, formulaPolicies,
       analysisMode: 'regression',
       regression: {

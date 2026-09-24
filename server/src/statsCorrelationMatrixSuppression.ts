@@ -22,11 +22,15 @@ import type { AnalysisContext } from './statsAnalysisContext';
 import { allCorrelationMatrixPairs, pairMapKey } from './statsCorrelationMatrixDataset';
 import { evaluateBivariateDisclosure } from './statsBivariateDisclosureGate';
 import { evaluateInferenceGate } from './statsInferenceGate';
-import { runCorrelationMatrixStatsEngine, type CorrelationMatrixEngineRequest } from './statsEngine';
+import { runCorrelationMatrixStatsEngine, type CorrelationMatrixEngineRequest, type EngineRunOpts } from './statsEngine';
 
 /** computeAndPersist의 캐시-미스 분기 전용 진입점(계획서 §"파이프라인"과 동일한
- * 원칙 — 캐시 hit면 이 함수는 아예 호출되지 않는다). */
-export async function computeCorrelationMatrixAnalyzeResult(ctx: AnalysisContext): Promise<AnalyzeCorrelationMatrixResult> {
+ * 원칙 — 캐시 hit면 이 함수는 아예 호출되지 않는다). PR4-B1 — opts는 큐 워커
+ * 전용(§statsBivariateSuppression.ts와 동일 원칙). */
+export async function computeCorrelationMatrixAnalyzeResult(
+  ctx: AnalysisContext,
+  opts?: EngineRunOpts,
+): Promise<AnalyzeCorrelationMatrixResult> {
   const method = ctx.recipe.requestedMethod as 'pearson_correlation' | 'spearman_correlation';
   const variableKeys = ctx.recipe.variableKeys;
   const pairsMap = ctx.correlationMatrixPairs!;
@@ -36,7 +40,7 @@ export async function computeCorrelationMatrixAnalyzeResult(ctx: AnalysisContext
   // 이미 만들어둔 것을 재사용한다(여기서 ctx.dataset.rows로부터 다시 추출하면
   // 같은 O(k×rows) 작업을 두 번 하게 됨).
   const request: CorrelationMatrixEngineRequest = { method, variables: ctx.correlationMatrixVariables! };
-  const raw = await runCorrelationMatrixStatsEngine(request);
+  const raw = await runCorrelationMatrixStatsEngine(request, opts);
   const rawCellByPair = new Map(raw.cells.map((c) => [pairMapKey(c.xKey, c.yKey), c] as const));
 
   const cells: AnalyzeCorrelationMatrixCell[] = allCorrelationMatrixPairs(variableKeys).map(({ xKey, yKey }) => {

@@ -40,6 +40,7 @@ vi.mock('../statsWorkbenchRuntimeState', () => ({
 }));
 
 import { createStatsRouter } from '../routes/stats';
+import { createStatsRunsQueueWorker } from '../statsRunsQueue';
 import { generateAccessToken } from '../auth/tokens';
 import { hashToken, generateToken } from '../auth/tokenHash';
 
@@ -147,9 +148,14 @@ describe.skipIf(!TEST_DB_URL)('이변량 분석 — 실데이터 HTTP 통합(POS
   let orgId: string;
   let userId: string;
   let accessToken: string;
+  let worker: { stop: () => void };
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: TEST_DB_URL });
+    // PR4-B1 — POST /analyze는 이제 admission이 항상 queued 행을 만들고, 실제로
+    // claim→attempt→finishRun까지 이 백그라운드 워커가 돌아야 syncBudgetMs 안에
+    // 200으로 끝난다(워커 없이는 매 요청이 202로만 떨어진다).
+    worker = createStatsRunsQueueWorker(pool);
     const org = await pool.query<{ id: string }>(
       `INSERT INTO organizations (name) VALUES ($1) RETURNING id`,
       ['__test_bivariateHttp_org__'],
@@ -180,6 +186,7 @@ describe.skipIf(!TEST_DB_URL)('이변량 분석 — 실데이터 HTTP 통합(POS
   });
 
   afterAll(async () => {
+    worker.stop();
     await pool.query(`DELETE FROM stats_runs WHERE organization_id = $1`, [orgId]);
     await pool.query(`DELETE FROM sessions WHERE user_id = $1`, [userId]);
     await pool.query(`DELETE FROM users WHERE id = $1`, [userId]);
@@ -190,7 +197,10 @@ describe.skipIf(!TEST_DB_URL)('이변량 분석 — 실데이터 HTTP 통합(POS
   // 각 it()이 자기만의 환자 집합을 쓴다고 가정하고 personCount를 정확한 값으로
   // 단언한다 — 이전 케이스의 환자가 남아 있으면 이후 케이스의 personCount가 누적
   // 오염된다(실제로 4번째 케이스에서 111명으로 잡혔던 원인).
+  // PR4-B1 — stats_runs도 함께 정리한다: 지우지 않으면 이전 케이스의 admission
+  // 행이 다음 요청의 in-flight/시간당 quota(§A)를 오염시켜 허위 429가 난다.
   afterEach(async () => {
+    await pool.query(`DELETE FROM stats_runs WHERE organization_id = $1`, [orgId]);
     await pool.query(`DELETE FROM patient_records WHERE organization_id = $1`, [orgId]);
     await pool.query(`DELETE FROM patient_persons WHERE organization_id = $1`, [orgId]);
   });
@@ -362,6 +372,61 @@ describe.skipIf(!TEST_DB_URL)('이변량 분석 — 실데이터 HTTP 통합(POS
     expect(r.value).toBeLessThanOrEqual(1);
     expect(Number.isFinite(bivariate.pValue)).toBe(true);
   }, 30000);
+
+  // PR4-B1 — routes/__tests__/stats.test.ts의 "scatter 원시 points 응답시점 merge(§9)"
+  // mock 테스트 2건이 admission 도입으로 깨져(pool.query 순서 재현 불가) 여기로 옮겨왔다.
+  // 위 pearson_correlation 테스트와 같은 continuous×continuous 픽스처(n=16, ≤2000이라
+  // 표본추출 없이 전량 scatter.points 후보)를 재사용해 hasAccess true/false 양쪽에서
+  // finalizeAnalyzeResponse가 실제로 scatter.points를 붙이는지/안 붙이는지만 본다.
+  describe('scatter 원시 points 응답시점 merge(§9, stats.export_limited_rows)', () => {
+    const KNEE_BIN_ORDER = ['low', 'lowMid', 'highMid', 'high'] as const;
+    async function seedKneeSpineCohort(): Promise<void> {
+      const jobs = [{ id: 'job-1', jobName: '조립공', startDate: '2010-01-01', endDate: '2020-01-01', workDaysPerYear: 250 }];
+      await insertGroup('knee-spine-scatter', 16, (i) => ({
+        data: {
+          shared: { birthDate: '1980-01-01', injuryDate: '2020-01-01', gender: 'male', jobs, diagnoses: [] },
+          modules: { knee: kneeModule(KNEE_BIN_ORDER[Math.min(3, Math.floor(i / 4))]), spine: spineModule(35 + i * 3) },
+          activeModules: ['knee', 'spine'],
+        },
+      }));
+    }
+    async function grantLimitedRows(): Promise<void> {
+      await pool.query(
+        `INSERT INTO user_capability_grants (user_id, organization_id, capability, granted_by, granted_by_org, reason)
+         VALUES ($1,$2,'stats.export_limited_rows',$1,$2,'test grant')`,
+        [userId, orgId],
+      );
+    }
+    afterEach(async () => {
+      await pool.query(`DELETE FROM user_capability_grants WHERE user_id=$1 AND organization_id=$2 AND capability='stats.export_limited_rows'`, [userId, orgId]);
+    });
+
+    it('생성자(캐시 미스) 경로 — 권한이 있으면 bivariate.scatter.points가 실제로 붙는다(완전사례 16건 전부)', async () => {
+      await seedKneeSpineCohort();
+      await grantLimitedRows();
+      const analyze = await authed(request(app()).post('/api/stats/analyze')).send({
+        ...RECIPE_BASE, variableKeys: ['knee.relatedness.max', 'spine.mddm.lifetimeDoseMNh'],
+        formulaPolicies: { spine_mddm: 'recompute_current' }, analysisMode: 'bivariate', requestedMethod: 'pearson_correlation',
+      });
+      expect(analyze.status).toBe(200);
+      const bivariate = analyze.body.result.bivariate;
+      expect(bivariate.suppressed).toBe(false);
+      expect(bivariate.scatter.points).toBeDefined();
+      expect(Array.isArray(bivariate.scatter.points)).toBe(true);
+      expect(bivariate.scatter.points).toHaveLength(16);
+      expect(bivariate.scatter.displayedCount).toBe(16);
+    }, 30000);
+
+    it('권한이 없으면 bivariate.scatter.points가 붙지 않는다', async () => {
+      await seedKneeSpineCohort();
+      const analyze = await authed(request(app()).post('/api/stats/analyze')).send({
+        ...RECIPE_BASE, variableKeys: ['knee.relatedness.max', 'spine.mddm.lifetimeDoseMNh'],
+        formulaPolicies: { spine_mddm: 'recompute_current' }, analysisMode: 'bivariate', requestedMethod: 'pearson_correlation',
+      });
+      expect(analyze.status).toBe(200);
+      expect(analyze.body.result.bivariate.scatter.points).toBeUndefined();
+    }, 30000);
+  });
 
   it('ordinal(elbow) × ordinal(wrist) 2×2 — chi_square, 분할표 각 셀 ≥10이면 실제 cell 수치까지 공개', async () => {
     const sharedJobsAndDx = {

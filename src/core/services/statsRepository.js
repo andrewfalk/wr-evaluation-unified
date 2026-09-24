@@ -6,8 +6,16 @@ import {
   CatalogResponseSchema,
   PreviewResponseSchema,
   AnalyzeResponseSchema,
+  AnalyzeAcceptedResponseSchema,
+  RunStatusResponseSchema,
 } from '@contracts/stats';
+import { z } from 'zod';
 import { requestJson, requestBlobPost } from './httpClient';
+
+// PR4-B1 — POST /analyze는 syncBudgetMs 안에 못 끝나면 202(AnalyzeAcceptedResponseSchema)를
+// 돌려준다 — 200/202 둘 다 requestJson 기준 "성공"(response.ok, 200~299)이라 throw되지
+// 않는다. 어느 쪽인지는 body shape로 구분한다.
+const AnalyzeOrAcceptedResponseSchema = z.union([AnalyzeResponseSchema, AnalyzeAcceptedResponseSchema]);
 
 function parseOrThrow(schema, data, label) {
   const parsed = schema.safeParse(data);
@@ -47,7 +55,29 @@ export async function runStatsAnalysis(recipe, session, { signal } = {}) {
     body: recipe,
     signal,
   });
-  return parseOrThrow(AnalyzeResponseSchema, data, 'POST /analyze');
+  return parseOrThrow(AnalyzeOrAcceptedResponseSchema, data, 'POST /analyze');
+}
+
+// PR4-B1 — §B 폴링. analysisRunId로 진행 상태/결과를 조회한다(DB id PK가 아님 —
+// 기존 exportStatsAggregate의 analysisRunId 관례와 동일).
+export async function getStatsRun(analysisRunId, session, { signal } = {}) {
+  const data = await requestJson(`/api/stats/runs/${encodeURIComponent(analysisRunId)}`, {
+    session,
+    baseUrl: session?.apiBaseUrl,
+    signal,
+  });
+  return parseOrThrow(RunStatusResponseSchema, data, 'GET /runs/:analysisRunId');
+}
+
+// PR4-B1 §E — 취소 의도 확정. 성공/멱등 성공만 이 함수가 정상 반환하고, 404/409는
+// requestJson이 던지는 기존 관례를 그대로 따른다(호출부가 err.status로 분기).
+export async function cancelStatsRun(analysisRunId, session, { signal } = {}) {
+  return requestJson(`/api/stats/runs/${encodeURIComponent(analysisRunId)}/cancel`, {
+    method: 'POST',
+    session,
+    baseUrl: session?.apiBaseUrl,
+    signal,
+  });
 }
 
 // CSV Blob 반환 — 성공 응답은 JSON이 아니므로 requestBlobPost를 쓴다(§9). 서버가 이미

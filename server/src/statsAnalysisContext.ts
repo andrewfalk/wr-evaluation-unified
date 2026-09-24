@@ -105,6 +105,10 @@ export async function buildAnalysisContext(
 
   // differencing 게이트 이후 계산은 결과와 무관하게 항상 실행한다(감사·digest 계산이
   // 억제 여부와 무관하게 항상 일어나야 한다는 기존 /preview 원칙을 그대로 유지).
+  // 부작용(rate limit 카운터 기록)이 있는 호출이라 PR4-B1의 deriveAnalysisContext
+  // (워커/GET 재구성 경로)에서는 절대 다시 부르지 않는다 — admission이 이미 통과시킨
+  // 행은 이 판정이 항상 false였다는 뜻이므로 재실행할 이유도, 재실행해서 카운터를
+  // 또 소비할 이유도 없다.
   const differencing = checkAndRecordDifferencing(orgId, userId, recipe, queryFamilyDigest);
 
   const snapshot = await readSnapshot(pool, orgId);
@@ -117,6 +121,84 @@ export async function buildAnalysisContext(
       ? 'DIFFERENCING_RATE_LIMIT'
       : null;
   const requestSuppressed = reasonCode !== null;
+
+  return buildAnalysisContextTail({
+    orgId, userId, recipe, catalogByKey, recipeDigest, queryFamilyDigest,
+    differencing, snapshot, dataset, requestSuppressed, reasonCode,
+  });
+}
+
+// PR4-B1 — enqueue 시점에 frozen_dataset(JSONB)으로 저장해두는 최소 입력. recipe는
+// 이미 검증된 것, dataset은 buildDataset()의 출력 그대로. 이 이상으로 키우지 않는다
+// (§저장 데이터 최소화 — buildAnalysisContext 꼬리가 실제로 소비하는 형태까지만).
+export interface FrozenAnalysisInput {
+  recipe: StatsAnalysisRecipe;
+  dataset: DatasetResult;
+  recipeDigest: string;
+  sourceDigest: string;
+  snapshotAsOf: string;
+}
+
+// PR4-B1 — 워커(attempt())와 GET /runs/:analysisRunId 둘 다 이 함수로 frozen_dataset을
+// 재구성한다. viewerUserId/viewerOrgId는 frozen_dataset에 박힌 원 요청자와 별개로
+// "지금 이 결과를 보는 사람"을 뜻한다 — capability 체크·감사 actor가 조회자 기준이어야
+// 하기 때문(§H 뷰어 컨텍스트 분리). 워커 자신의 실행(attempt())은 아직 아무도
+// "조회"하지 않으므로 viewer=원 요청자를 그대로 넘긴다.
+//
+// differencing 재실행 없음(위 buildAnalysisContext 주석 참고) — requestSuppressed는
+// 항상 false로 고정한다. admission이 §0에서 이미 억제 요청을 걸러낸 뒤에만 행을
+// 만들므로, 이 함수에 도달하는 recipe는 구조적으로 억제 대상이 아니었던 것이다.
+export function deriveAnalysisContext(
+  frozen: FrozenAnalysisInput,
+  viewer: { viewerUserId: string; viewerOrgId: string },
+): BuildAnalysisContextResult {
+  const validation = validateRecipe(frozen.recipe, 'analyze');
+  if (!validation.valid) {
+    // admission 시점엔 통과했던 recipe가 재검증에 실패 — 카탈로그가 그 사이 바뀐
+    // 경우뿐이어야 한다(claim 시점 실행 버전 재검증이 이미 이런 드리프트를 별도로
+    // 잡지만, 방어적으로 한 번 더 막는다).
+    return { ok: false, status: 400, body: { code: 'INVALID_RECIPE', errors: validation.errors } };
+  }
+  const { catalogByKey } = validation;
+
+  return buildAnalysisContextTail({
+    orgId: viewer.viewerOrgId,
+    userId: viewer.viewerUserId,
+    recipe: frozen.recipe,
+    catalogByKey,
+    recipeDigest: frozen.recipeDigest,
+    queryFamilyDigest: '',
+    differencing: { forceSuppress: false, remaining: 0 },
+    snapshot: { rows: [], sourceDigest: frozen.sourceDigest, snapshotAsOf: frozen.snapshotAsOf },
+    dataset: frozen.dataset,
+    requestSuppressed: false,
+    reasonCode: null,
+  });
+}
+
+interface BuildAnalysisContextTailInput {
+  orgId: string;
+  userId: string;
+  recipe: StatsAnalysisRecipe;
+  catalogByKey: Map<string, AnalyticsVariableMetadata>;
+  recipeDigest: string;
+  queryFamilyDigest: string;
+  differencing: DifferencingCheckResult;
+  snapshot: Snapshot;
+  dataset: DatasetResult;
+  requestSuppressed: boolean;
+  reasonCode: 'MIN_COHORT_NOT_MET' | 'DIFFERENCING_RATE_LIMIT' | null;
+}
+
+// buildAnalysisContext(HTTP, snapshot을 막 읽은 직후)와 deriveAnalysisContext(워커/GET,
+// frozen_dataset에서 재구성)가 공유하는 순수 꼬리 — analysisMode별 paired/correlationMatrix/
+// regressionDesign 계산은 (recipe, catalogByKey, dataset)만의 순수 함수라 두 경로에서
+// 완전히 동일하게 재사용된다.
+function buildAnalysisContextTail(input: BuildAnalysisContextTailInput): BuildAnalysisContextResult {
+  const {
+    orgId, userId, recipe, catalogByKey, recipeDigest, queryFamilyDigest,
+    differencing, snapshot, dataset, requestSuppressed, reasonCode,
+  } = input;
 
   let paired: PairedDatasetResult | null = null;
   let pairDisclosed = false;

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchStatsCatalog, previewStatsAnalysis, runStatsAnalysis, exportStatsAggregate } from '../../services/statsRepository';
+import { useStatsRunPolling } from '../../hooks/useStatsRunPolling';
 import { CatalogPanel } from './CatalogPanel';
 import { RecipePanel } from './RecipePanel';
 import { ResultPanel } from './ResultPanel';
@@ -326,6 +327,28 @@ export function StatisticsWorkbench({
   const [committedRecipe, setCommittedRecipe] = useState(null);
   const [committedResult, setCommittedResult] = useState(null);
   const analyzeInFlightRef = useRef(false);
+  // 코드리뷰(2026-09-24) — 202로 전환된 요청의 recipe를 committedRecipe에 즉시
+  // 반영하면, 이전 결과(committedResult)는 그대로인 채 화면에 새 recipe 라벨만
+  // 붙는 불일치가 생긴다(그 요청이 실패/취소되면 계속 남는다). 진행 중인 recipe는
+  // 여기 별도로 보관해두고, 폴링이 성공했을 때만 committedRecipe/committedResult를
+  // 함께 교체한다 — 리렌더를 유발할 필요가 없으므로 상태가 아니라 ref로 둔다.
+  const pendingRecipeRef = useRef(null);
+  // 코드리뷰(2026-09-24) — POST가 202를 반환하기 전에 화면이 언마운트되면,
+  // useStatsRunPolling의 unmount cleanup(stop())은 이미 실행된 뒤라 그 이후
+  // 도착하는 runPolling.start() 호출을 정리할 방법이 없다(새 generation으로
+  // 폴링이 다시 시작돼 언마운트 후에도 계속 서버를 두드림). 언마운트 이후에는
+  // start()를 아예 호출하지 않도록 컴포넌트 생존 여부를 별도로 추적한다.
+  // 코드리뷰 2차(2026-09-24) — cleanup에서만 false로 바꾸면 StrictMode 개발모드의
+  // "setup→cleanup→재setup" 이중 호출(실제 컴포넌트는 계속 마운트된 채로 effect만
+  // 한 번 더 도는 것 — main.jsx가 StrictMode를 실제로 쓴다) 이후 mountedRef가
+  // false로 눌러앉아, 화면이 멀쩡히 열려 있는데도 이후 모든 POST 응답 처리(200
+  // 결과 반영·202 폴링 시작·에러 처리)가 조용히 무시된다. setup에서도 true로
+  // 복구해야 재setup이 상태를 되돌린다.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   // 2차 리뷰가 잡은 결함 — featureUnavailableDetected가 실행/내보내기 잠금 조건에 빠져 있어,
   // 배너가 떠 있는 동안에도 캐시된 statsAvailable=true·이전 preview=ready로 버튼이 활성화될
@@ -354,6 +377,11 @@ export function StatisticsWorkbench({
     !isAnalyzing &&
     !actionsLocked;
 
+  // PR4-B1 §프론트엔드 — POST /analyze가 syncBudgetMs 안에 못 끝나면 202(analysisRunId만,
+  // runManifest/result 없음)를 돌려준다. 이 경우 폴링을 시작하고, 완료되면 아래 useEffect가
+  // 기존 200 처리 경로(setCommittedResult)로 합류시킨다.
+  const runPolling = useStatsRunPolling(session);
+
   async function handleRunAnalyze() {
     if (!canExecute || analyzeInFlightRef.current) return;
     analyzeInFlightRef.current = true;
@@ -362,16 +390,53 @@ export function StatisticsWorkbench({
     setAnalyzeError(null);
     try {
       const res = await runStatsAnalysis(recipeAtSubmit, session);
-      setCommittedRecipe(recipeAtSubmit);
-      setCommittedResult(res);
+      // 언마운트 후 도착한 응답은 처리하지 않는다 — 특히 202 분기의 runPolling.start()는
+      // useStatsRunPolling의 unmount cleanup이 이미 실행된 뒤라 정리할 방법이 없는
+      // 새 폴링 루프를 만들어버린다(코드리뷰 2026-09-24).
+      if (!mountedRef.current) return;
+      if (res.runManifest) {
+        // 200 — syncBudgetMs 안에 끝남. 기존 경로 그대로.
+        setCommittedRecipe(recipeAtSubmit);
+        setCommittedResult(res);
+        analyzeInFlightRef.current = false;
+        setIsAnalyzing(false);
+        return;
+      }
+      // 202 — 아직 큐/실행 중. 폴링 시작(analyzeInFlightRef/isAnalyzing은 폴링이
+      // 끝날 때까지 유지 — 아래 useEffect가 종결 시 정리한다). committedRecipe는
+      // 아직 교체하지 않는다 — 폴링이 성공했을 때 committedResult와 함께 교체해야
+      // "새 recipe 라벨 + 이전 result"라는 불일치가 생기지 않는다(코드리뷰 2026-09-24).
+      pendingRecipeRef.current = recipeAtSubmit;
+      runPolling.start(res.analysisRunId);
     } catch (err) {
+      if (!mountedRef.current) return;
       if (isFeatureUnavailableError(err)) setFeatureUnavailableDetected(true);
       setAnalyzeError(err);
-    } finally {
       analyzeInFlightRef.current = false;
       setIsAnalyzing(false);
     }
   }
+
+  // 폴링 종결 처리 — succeeded는 기존 200 처리 경로(committedResult)로 합류하되,
+  // committedRecipe도 이 시점에 pendingRecipeRef와 함께 교체한다(단독으로 미리
+  // 바꾸면 "새 recipe 라벨 + 이전 result" 불일치가 생긴다). failed/cancelled는
+  // analyzeError로 — 이 경우 committedRecipe/committedResult는 그대로 둔다(마지막
+  // 성공한 실행을 계속 표시). queued/running/idle은 아무 것도 안 함.
+  useEffect(() => {
+    if (runPolling.status === 'succeeded') {
+      setCommittedRecipe(pendingRecipeRef.current);
+      setCommittedResult({ runManifest: runPolling.data.runManifest, result: runPolling.data.result });
+      analyzeInFlightRef.current = false;
+      setIsAnalyzing(false);
+    } else if (runPolling.status === 'failed' || runPolling.status === 'cancelled' || runPolling.status === 'error') {
+      setAnalyzeError(runPolling.error ?? new Error(
+        runPolling.status === 'cancelled' ? '분석이 취소되었습니다.' : `분석 실행 실패(${runPolling.data?.errorCode ?? runPolling.status})`,
+      ));
+      analyzeInFlightRef.current = false;
+      setIsAnalyzing(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runPolling.status]);
 
   const recipeChanged = committedRecipe
     ? JSON.stringify(buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel)) !== JSON.stringify(committedRecipe)
@@ -502,6 +567,13 @@ export function StatisticsWorkbench({
             collapsed={rightCollapsed}
             onToggleCollapse={() => { userOverrodeRight.current = true; setRightCollapsed((v) => !v); }}
           />
+        </div>
+      )}
+
+      {(runPolling.status === 'polling') && (
+        <div className="swb-banner">
+          분석 실행 중… (queued/running 상태를 확인하는 중입니다)
+          <button type="button" onClick={runPolling.cancel} style={{ marginLeft: '0.75rem' }}>취소</button>
         </div>
       )}
 
