@@ -11,7 +11,7 @@
 // 통과했다는 뜻이고, 전체가 1:1이면 어떤 부분집합(그룹/셀)도 1:1이기 때문이다.
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
 import type { AnalyzeBivariateResult, StatsMethodId } from '@wr/contracts';
-import type { BivariateEngineRequest } from './statsEngine';
+import type { BivariateEngineRequest, EngineRunOpts } from './statsEngine';
 import { runBivariateStatsEngine } from './statsEngine';
 import { isSmallCell } from './statsSmallCell';
 import { isOutlierCountDisclosable } from './statsChartDisclosure';
@@ -115,8 +115,12 @@ function computeExclusionsForResponse(
 }
 
 /** computeAndPersist의 캐시-미스 분기 전용 진입점(계획서 §"파이프라인" — 캐시 hit면
- * 이 함수는 아예 호출되지 않는다). */
-export async function computeBivariateAnalyzeResult(ctx: AnalysisContext): Promise<AnalyzeBivariateResult> {
+ * 이 함수는 아예 호출되지 않는다). PR4-B1 — opts는 큐 워커가 행별 timeoutMs·취소
+ * signal·onSpawn을 전달할 때만 쓴다(sync 호출부는 생략, 동작 무변경). */
+export async function computeBivariateAnalyzeResult(
+  ctx: AnalysisContext,
+  opts?: EngineRunOpts,
+): Promise<AnalyzeBivariateResult> {
   const method = ctx.recipe.requestedMethod!; // validateRecipe(analyze)가 이미 보장
   const paired = ctx.paired as PairedDatasetResult;
   const [keyX, keyY] = ctx.recipe.variableKeys;
@@ -129,7 +133,7 @@ export async function computeBivariateAnalyzeResult(ctx: AnalysisContext): Promi
     return { method, suppressed: true };
   }
 
-  const raw = await runBivariateStatsEngine(request);
+  const raw = await runBivariateStatsEngine(request, opts);
 
   // Python이 계산 도중 발견한 값상수(또는 다른 계산불능 사유)도 동일하게 불투명
   // 처리한다 — statistic===null이면 nullReasons를 응답에 노출하지 않고 침묵 억제.

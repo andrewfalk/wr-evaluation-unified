@@ -300,6 +300,44 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
         maxInputBytes: positiveInt(env, 'STATS_ENGINE_MAX_INPUT_BYTES', 2 * 1024 * 1024),
         // 성공한 stats_runs 결과의 TTL(시간) — idempotency 캐시 유효기간.
         resultTtlHours: positiveInt(env, 'STATS_RUNS_RESULT_TTL_HOURS', 24 * 7),
+
+        // PR4-B1 — 비동기 job 인프라(admission→attempt→finish). video 워커의
+        // jobDeadlineMs/sweepGraceMs/queueWaitMs 관례를 그대로 재사용한다.
+        async: Object.freeze({
+          // HTTP 핸들러가 admission 이후 동기 응답을 시도하는 예산(ms) — 이 안에
+          // 안 끝나면 202로 전환한다. 무부하 상태에서만 유효한 "즉시 응답" 상한.
+          syncBudgetMs: positiveInt(env, 'STATS_ASYNC_SYNC_BUDGET_MS', 4000),
+          // §B 폴링 루프의 재조회 간격(ms).
+          pollTickMs: positiveInt(env, 'STATS_ASYNC_POLL_TICK_MS', 120),
+          // sweepLoop 주기(ms) — claimLoop가 attempt()로 몇 분씩 블록돼도 이
+          // 루프는 독립적으로 돈다(orphan·queued 취소·대기초과 확정용).
+          sweepIntervalMs: positiveInt(env, 'STATS_ASYNC_SWEEP_INTERVAL_MS', 2000),
+          // claimLoop 주기(ms).
+          claimIntervalMs: positiveInt(env, 'STATS_ASYNC_CLAIM_INTERVAL_MS', 500),
+          // heartbeat 갱신 주기(ms) — staleThresholdMs(행별 engine_timeout_ms 기반)
+          // 보다 충분히 작아야 한다(최소 1/3 이하 권장).
+          heartbeatIntervalMs: positiveInt(env, 'STATS_ASYNC_HEARTBEAT_INTERVAL_MS', 5000),
+          // 안전 여유(ms) — staleThresholdMs = engine_timeout_ms + killGraceMs + safetyMs.
+          staleSafetyMs: positiveInt(env, 'STATS_ASYNC_STALE_SAFETY_MS', 5000),
+          // claim 자체를 못 받고 queued로 대기하는 시간의 상한(ms, 실행 타임아웃과 별개
+          // 예산) — video 워커의 VIDEO_ANALYSIS_QUEUE_WAIT_MS 관례 재사용.
+          queueWaitMs: positiveInt(env, 'STATS_ASYNC_QUEUE_WAIT_MS', 600000),
+          // B2가 더 긴 timeout을 쓸 수 있는 상한 — 행별 engine_timeout_ms는 이 값을
+          // 넘지 않는다.
+          maxJobTimeoutMs: positiveInt(env, 'STATS_ASYNC_MAX_JOB_TIMEOUT_MS', 10 * 60 * 1000),
+          // heartbeat 쓰기 연속 실패 허용 횟수 — 넘으면 heartbeat를 멈추고 계산은
+          // 계속 진행(§접근 — DB 일시단절을 계산 중단 이유로 쓰지 않는다).
+          maxConsecutiveHeartbeatFailures: positiveInt(env, 'STATS_ASYNC_MAX_HEARTBEAT_FAILURES', 5),
+          // BUSY 재큐잉 상한 — 넘으면 PROCESS_ERROR로 확정 실패.
+          maxRequeueCount: positiveInt(env, 'STATS_ASYNC_MAX_REQUEUE_COUNT', 20),
+          // finishRun/requeueOrFinish의 저장(DB 쓰기+감사) 자체가 실패했을 때의 재시도 한도.
+          maxFinishPersistRetries: positiveInt(env, 'STATS_ASYNC_MAX_FINISH_PERSIST_RETRIES', 3),
+          // admission quota — 동시실행(queued+running 카운트)·시간당(상태 무관 생성 카운트).
+          maxConcurrentPerUser: positiveInt(env, 'STATS_ASYNC_MAX_CONCURRENT_PER_USER', 2),
+          maxConcurrentPerOrg: positiveInt(env, 'STATS_ASYNC_MAX_CONCURRENT_PER_ORG', 4),
+          maxHourlyPerUser: positiveInt(env, 'STATS_ASYNC_MAX_HOURLY_PER_USER', 60),
+          maxHourlyPerOrg: positiveInt(env, 'STATS_ASYNC_MAX_HOURLY_PER_ORG', 200),
+        }),
       };
     })()),
   });

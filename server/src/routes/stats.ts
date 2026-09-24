@@ -23,9 +23,12 @@ import { canonicalDigest } from '../canonicalSerializer';
 import { MINIMUM_COHORT, ESTIMABILITY_POLICY_VERSION, DIFFERENCING_POLICY } from '../statsPolicy';
 import { computeEstimability } from '../statsEstimability';
 import { buildRunManifest } from '../statsRunManifest';
-import { buildAnalysisContext } from '../statsAnalysisContext';
-import { handlePostAnalyze } from '../statsAnalyzeHandler';
+import { buildAnalysisContext, deriveAnalysisContext } from '../statsAnalysisContext';
+import { handlePostAnalyze, finalizeAnalyzeResponse, toPublicRunManifest } from '../statsAnalyzeHandler';
 import { handlePostExport } from '../statsExportHandler';
+import { requestCancel, hasVersionDrifted } from '../statsRunsQueue';
+import { STATS_RUN_COLUMNS, type StatsRunRow } from '../statsRunRow';
+import type { AnalyzeResult, StatsRunManifestSucceeded } from '@wr/contracts';
 
 const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
@@ -220,6 +223,120 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
   res.status(200).json(response);
 }
 
+// ---------------------------------------------------------------------------
+// PR4-B1 — GET /runs/:analysisRunId, POST /runs/:analysisRunId/cancel.
+// analysisRunId로 주소를 지정한다(DB id PK가 아님 — 기존 POST /export가 이미
+// analysisRunId로 조회하는 관례와 동일).
+// ---------------------------------------------------------------------------
+async function fetchRunRowForViewer(
+  pool: Pool,
+  analysisRunId: string,
+  organizationId: string,
+): Promise<StatsRunRow | null> {
+  const { rows } = await pool.query<StatsRunRow>(
+    `SELECT ${STATS_RUN_COLUMNS} FROM stats_runs
+      WHERE analysis_run_id=$1 AND organization_id=$2 AND expires_at > now()`,
+    [analysisRunId, organizationId],
+  );
+  return rows[0] ?? null;
+}
+
+async function handleGetRun(pool: Pool, req: Request, res: Response): Promise<void> {
+  const session = req.sessionInfo!;
+  const analysisRunId = req.params.analysisRunId;
+  // 조회 쿼리 자체가 expires_at>now()를 포함 — cleanup 전 만료 행은 존재 자체를
+  // 밝히지 않고(cross-org와 동일 취급) RUN_EXPIRED가 아니라 RUN_NOT_FOUND로 응답한다.
+  const row = await fetchRunRowForViewer(pool, analysisRunId, session.organizationId!);
+  if (!row) {
+    res.status(404).json({ code: 'RUN_NOT_FOUND', error: 'Run not found.' });
+    return;
+  }
+  // 소유권 체크(같은 조직+본인 또는 관리자) — 행의 requested_by와 별개로 먼저 수행.
+  if (row.requested_by !== session.userId && session.role !== 'admin') {
+    res.status(403).json({ code: 'FORBIDDEN', error: 'You do not have access to this run.' });
+    return;
+  }
+
+  if (row.status === 'queued' || row.status === 'running') {
+    res.status(200).json({
+      analysisRunId: row.analysis_run_id,
+      status: row.status,
+      createdAt: row.created_at.toISOString(),
+      startedAt: row.started_at ? row.started_at.toISOString() : null,
+    });
+    return;
+  }
+  if (row.status === 'cancelled') {
+    res.status(200).json({
+      analysisRunId: row.analysis_run_id,
+      status: 'cancelled',
+      cancelledAt: (row.finished_at ?? row.created_at).toISOString(),
+    });
+    return;
+  }
+  if (row.status === 'failed') {
+    res.status(200).json({ analysisRunId: row.analysis_run_id, status: 'failed', errorCode: row.error_code });
+    return;
+  }
+
+  // succeeded — viewer(조회자) 컨텍스트로 limited_row 재구성. 버전드리프트 시
+  // attached:false로 저하(이미 저장된 aggregate result 자체는 그대로 서빙).
+  const manifest = row.manifest as StatsRunManifestSucceeded;
+  const publicManifest = toPublicRunManifest(manifest);
+  const result = row.result as AnalyzeResult;
+
+  if (!row.frozen_dataset || hasVersionDrifted(row)) {
+    res.status(200).json({ analysisRunId: row.analysis_run_id, status: 'succeeded', runManifest: publicManifest, result });
+    return;
+  }
+  const ctxResult = deriveAnalysisContext(row.frozen_dataset, {
+    viewerUserId: session.userId,
+    viewerOrgId: session.organizationId!,
+  });
+  if (!ctxResult.ok) {
+    res.status(200).json({ analysisRunId: row.analysis_run_id, status: 'succeeded', runManifest: publicManifest, result });
+    return;
+  }
+  const finalized = await finalizeAnalyzeResponse(pool, ctxResult.ctx, row.execution_digest, {
+    runManifest: publicManifest,
+    result,
+  });
+  if (finalized.status !== 200) {
+    res.status(finalized.status).json(finalized.body);
+    return;
+  }
+  const body = finalized.body as { runManifest: typeof publicManifest; result: AnalyzeResult };
+  res.status(200).json({ analysisRunId: row.analysis_run_id, status: 'succeeded', ...body });
+}
+
+async function handlePostCancelRun(pool: Pool, req: Request, res: Response): Promise<void> {
+  const session = req.sessionInfo!;
+  const analysisRunId = req.params.analysisRunId;
+
+  // 취소 권한 — 요청자 본인 또는 관리자(§8.1). requestCancel 자체는 조직 범위만
+  // 강제하므로, 행위자 신원 체크는 여기서 먼저 한다.
+  const row = await fetchRunRowForViewer(pool, analysisRunId, session.organizationId!);
+  if (!row) {
+    res.status(404).json({ code: 'RUN_NOT_FOUND', error: 'Run not found.' });
+    return;
+  }
+  if (row.requested_by !== session.userId && session.role !== 'admin') {
+    res.status(403).json({ code: 'FORBIDDEN', error: 'You do not have access to this run.' });
+    return;
+  }
+
+  const result = await requestCancel(pool, analysisRunId, session.organizationId!, session.userId);
+  if (result.outcome === 'not_found') {
+    res.status(404).json({ code: 'RUN_NOT_FOUND', error: 'Run not found.' });
+    return;
+  }
+  if (result.outcome === 'already_terminal') {
+    res.status(409).json({ code: 'ALREADY_TERMINAL', error: 'This run has already finished.' });
+    return;
+  }
+  res.status(200).json({ analysisRunId, status: 'cancel_requested' });
+}
+
 export function createStatsRouter(pool: Pool) {
   const router = Router();
   const auth = createAuthMiddleware(pool);
@@ -236,6 +353,14 @@ export function createStatsRouter(pool: Pool) {
   // 정의돼 있다(§4.1) — 별도 user_capability_grants 부여가 새로 필요해지지 않는다.
   router.post('/analyze', auth, requireCapability(pool, 'stats.regression'), analyzeRateLimit(), csrfMiddleware, (req, res) =>
     handlePostAnalyze(pool, req, res).catch(() => res.status(500).json(internalError())),
+  );
+
+  // PR4-B1 — 폴링·취소. 기존 POST /analyze와 같은 capability로 게이트(§5 기존 관례).
+  router.get('/runs/:analysisRunId', auth, requireCapability(pool, 'stats.regression'), (req, res) =>
+    handleGetRun(pool, req, res).catch(() => res.status(500).json(internalError())),
+  );
+  router.post('/runs/:analysisRunId/cancel', auth, requireCapability(pool, 'stats.regression'), csrfMiddleware, (req, res) =>
+    handlePostCancelRun(pool, req, res).catch(() => res.status(500).json(internalError())),
   );
 
   // PR2 §7 — 집계 결과 내보내기. recipe를 다시 안 받고 analysisRunId로 저장된 결과를 그대로

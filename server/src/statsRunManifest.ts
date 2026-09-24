@@ -3,7 +3,13 @@
 // 남긴다.
 import { randomUUID } from 'crypto';
 import { DETERMINISTIC_MIGRATION_VERSION } from '@wr/analytics-core/migration/deterministicMigrate';
-import type { RunManifest, StatsRunManifestFailed, StatsRunManifestSucceeded } from '@wr/contracts';
+import type {
+  RunManifest,
+  StatsRunManifestCancelled,
+  StatsRunManifestFailed,
+  StatsRunManifestPending,
+  StatsRunManifestSucceeded,
+} from '@wr/contracts';
 import { SERIALIZER_VERSION } from './canonicalSerializer';
 import { ESTIMABILITY_POLICY_VERSION, INFERENCE_GATE_POLICY_VERSION } from './statsPolicy';
 import { INTEGRATED_CATALOG_VERSION } from './statsCatalogVersion';
@@ -33,11 +39,15 @@ export interface BuildRunManifestInput {
   // 여기 buildRunManifest()는 항상 채운다 — 새로 만드는 manifest는 전부 신버전이므로.
   // PR4-A1 — 'regression' 추가.
   analysisMode: 'descriptive' | 'bivariate' | 'correlation_matrix' | 'regression';
+  // PR4-B1 — admission이 queued 행 INSERT 시점에 발급한 analysisRunId를 finishRun이
+  // succeeded로 종결할 때도 그대로 유지하기 위한 오버라이드. 생략 시 기존처럼 새로 발급
+  // (sync 억제/캐시-무관 경로 전부 무수정 호환).
+  analysisRunId?: string;
 }
 
 export function buildRunManifest(input: BuildRunManifestInput): RunManifest {
   return {
-    analysisRunId: randomUUID(),
+    analysisRunId: input.analysisRunId ?? randomUUID(),
     snapshotAsOf: input.snapshotAsOf,
     recipeDigest: input.recipeDigest,
     sourceDigest: input.sourceDigest,
@@ -70,13 +80,15 @@ export interface BuildFailedStatsRunManifestInput {
   snapshotAsOf: string;
   formulaPolicies: Record<string, string>;
   analysisMode: 'descriptive' | 'bivariate' | 'correlation_matrix' | 'regression';
+  // PR4-B1 — buildRunManifest와 동일한 오버라이드 원칙.
+  analysisRunId?: string;
 }
 
 // 실패 행의 manifest는 resultDigest 필드 자체가 없다(null이 아니라 생략) — 계산 결과가
 // 없으므로 정의 불가능한 필드를 억지로 채우지 않는다.
 export function buildFailedStatsRunManifest(input: BuildFailedStatsRunManifestInput): StatsRunManifestFailed {
   return {
-    analysisRunId: randomUUID(),
+    analysisRunId: input.analysisRunId ?? randomUUID(),
     snapshotAsOf: input.snapshotAsOf,
     recipeDigest: input.recipeDigest,
     sourceDigest: input.sourceDigest,
@@ -90,5 +102,51 @@ export function buildFailedStatsRunManifest(input: BuildFailedStatsRunManifestIn
     inferenceGatePolicyVersion: INFERENCE_GATE_POLICY_VERSION,
     analysisMode: input.analysisMode,
     outcome: 'failed',
+  };
+}
+
+// PR4-B1 — admission이 queued 행을 INSERT하는 순간 채우는 manifest(manifest 컬럼은
+// NOT NULL). buildFailedStatsRunManifest와 shape이 같고 outcome만 다르다 — 별도
+// input 타입을 두지 않고 재사용한다.
+export type BuildPendingStatsRunManifestInput = BuildFailedStatsRunManifestInput;
+
+export function buildPendingStatsRunManifest(input: BuildPendingStatsRunManifestInput): StatsRunManifestPending {
+  return {
+    analysisRunId: input.analysisRunId ?? randomUUID(),
+    snapshotAsOf: input.snapshotAsOf,
+    recipeDigest: input.recipeDigest,
+    sourceDigest: input.sourceDigest,
+    catalogVersion: INTEGRATED_CATALOG_VERSION,
+    extractorVersion: INTEGRATED_CATALOG_VERSION,
+    migrationVersion: DETERMINISTIC_MIGRATION_VERSION,
+    formulaPolicies: input.formulaPolicies,
+    estimabilityPolicyVersion: ESTIMABILITY_POLICY_VERSION,
+    engineVersion: STATS_ENGINE_VERSION,
+    serializerVersion: SERIALIZER_VERSION,
+    inferenceGatePolicyVersion: INFERENCE_GATE_POLICY_VERSION,
+    analysisMode: input.analysisMode,
+    outcome: 'pending',
+  };
+}
+
+// PR4-B1 — finishRun이 취소로 종결할 때 쓰는 manifest. pending/failed와 shape 동일.
+export type BuildCancelledStatsRunManifestInput = BuildFailedStatsRunManifestInput;
+
+export function buildCancelledStatsRunManifest(input: BuildCancelledStatsRunManifestInput): StatsRunManifestCancelled {
+  return {
+    analysisRunId: input.analysisRunId ?? randomUUID(),
+    snapshotAsOf: input.snapshotAsOf,
+    recipeDigest: input.recipeDigest,
+    sourceDigest: input.sourceDigest,
+    catalogVersion: INTEGRATED_CATALOG_VERSION,
+    extractorVersion: INTEGRATED_CATALOG_VERSION,
+    migrationVersion: DETERMINISTIC_MIGRATION_VERSION,
+    formulaPolicies: input.formulaPolicies,
+    estimabilityPolicyVersion: ESTIMABILITY_POLICY_VERSION,
+    engineVersion: STATS_ENGINE_VERSION,
+    serializerVersion: SERIALIZER_VERSION,
+    inferenceGatePolicyVersion: INFERENCE_GATE_POLICY_VERSION,
+    analysisMode: input.analysisMode,
+    outcome: 'cancelled',
   };
 }

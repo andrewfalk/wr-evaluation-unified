@@ -12,7 +12,8 @@ vi.mock('../statsEngine', async (importOriginal) => {
 
 beforeEach(() => { vi.clearAllMocks(); });
 
-import { computeRegressionAnalyzeResult } from '../statsRegressionSuppression';
+import { computeRegressionAnalyzeResult, buildRegressionEngineRequest } from '../statsRegressionSuppression';
+import { assertRegressionWithinLimits, StatsEngineInputTooLargeError } from '../statsEngine';
 import type { AnalysisContext } from '../statsAnalysisContext';
 import type { RegressionDesignMatrix, RegressionDesignResult } from '../statsRegressionDesign';
 
@@ -249,5 +250,83 @@ describe('computeRegressionAnalyzeResult — Python이 non_estimable을 반환�
       estimation: 'non_estimable', nonEstimableReason: 'SEPARATION_DETECTED', terms: [], fit: null,
       diagnostics: null, splinePartialEffects: null,
     });
+  });
+});
+
+// 코드리뷰(2026-09-24) — statsAnalyzeHandler.ts의 입력상한 사전검사가 covariance:hc3·
+// splineContrasts:[]로 근사한 요청을 검사해, 실제 실행이 보낼 cluster covariance
+// groups·spline 대비행렬을 포함한 진짜 요청보다 작게(과소평가) 측정했다. 그 결과
+// 35,000행×4열처럼 cluster groups만 추가해도 실제 바이트 상한(2MiB)을 넘는 요청이
+// 사전검사를 통과해 admission·quota를 소비한 뒤 워커에서야 PROCESS_ERROR로
+// 실패했다 — 의도한 400 INPUT_TOO_LARGE가 아니었다. buildRegressionEngineRequest를
+// 사전검사와 실행 양쪽이 공유하도록 고친 뒤, 이 함수 자체가 실제 covariance/
+// splineContrasts를 채우는지와 그 결과가 진짜 바이트 상한을 정확히 잡아내는지를
+// 직접 증명한다.
+describe('buildRegressionEngineRequest — 사전검사·실행이 정확히 같은 요청을 쓴다', () => {
+  it('personCount===rowCount면 covariance:hc3를 쓴다', () => {
+    const design = makeDesign(); // personClusterKeys 4개 전부 다름
+    const { request, personCount, rowCount } = buildRegressionEngineRequest(design);
+    expect(request.covariance).toEqual({ type: 'hc3' });
+    expect(personCount).toBe(4);
+    expect(rowCount).toBe(4);
+  });
+
+  it('personCount<rowCount면 실제 personClusterKeys를 담은 covariance:cluster를 쓴다', () => {
+    const design = makeDesign({ personClusterKeys: ['p1', 'p1', 'p2', 'p2'] });
+    const { request, personCount } = buildRegressionEngineRequest(design);
+    expect(request.covariance).toEqual({ type: 'cluster', groups: ['p1', 'p1', 'p2', 'p2'] });
+    expect(personCount).toBe(2);
+  });
+
+  it('spline knots가 있으면 빈 배열이 아닌 실제 대비행렬을 채운다', () => {
+    const design = makeDesign({
+      columns: [
+        { name: 'intercept', label: '절편', variableKey: null, level: null, termType: 'main', interactionOf: null },
+        { name: 'x1_spline_1', label: 'x1 spline', variableKey: 'x1', level: null, termType: 'spline_basis', interactionOf: null },
+      ],
+      splineKnots: { x1: { boundary: [0, 10], internal: [2, 5, 8] } },
+    });
+    const { request, splineGridByKey } = buildRegressionEngineRequest(design);
+    expect(request.splineContrasts).toHaveLength(1);
+    expect(request.splineContrasts[0].variableKey).toBe('x1');
+    expect(request.splineContrasts[0].contrastMatrix.length).toBeGreaterThan(0);
+    expect(request.splineContrasts[0].contrastMatrix[0]).toHaveLength(2); // columns.length
+    expect(splineGridByKey.get('x1')?.length).toBeGreaterThan(0);
+  });
+
+  it('35,000행 cluster covariance 입력 — 실제 요청은 바이트 상한을 넘어 거부되지만, 이전의 hc3+빈 splineContrasts 근사는 같은 입력을 통과시켰다', () => {
+    const n = 35000;
+    // 문자열 길이는 임의가 아니다 — cluster groups 필드 하나만 추가했을 때 실측
+    // 바이트 상한(2,097,152)을 확실히 넘기고, 그 필드가 없는 근사는 확실히 안
+    // 넘기도록(약 1.1MB vs 약 2.3MB) 여유를 두고 맞췄다(node로 직접 측정).
+    const personClusterKeys = Array.from({ length: n }, (_, i) => `person-cluster-group-longer-${i % (n / 2)}`); // n/2명 → cluster 경로
+    const design = makeDesign({
+      // 실측치(리뷰 지적)와 같은 자릿수 규모를 내려고 소수 4자리로 고정한다 — 정수
+      // 몇 자리로는 바이트 상한을 못 넘기고, 완전 정밀도 난수는 반대로 cluster
+      // groups 없이도 넘겨버려 "cluster groups만 추가하면 넘는다"는 재현이 안 된다.
+      y: Array.from({ length: n }, () => Number(Math.random().toFixed(4))),
+      x: Array.from({ length: n }, () => [
+        1, Number(Math.random().toFixed(4)), Number(Math.random().toFixed(4)), Number(Math.random().toFixed(4)),
+      ]),
+      columns: [
+        { name: 'intercept', label: '절편', variableKey: null, level: null, termType: 'main', interactionOf: null },
+        { name: 'x1', label: 'x1', variableKey: 'x1', level: null, termType: 'main', interactionOf: null },
+        { name: 'x2', label: 'x2', variableKey: 'x2', level: null, termType: 'main', interactionOf: null },
+        { name: 'x3', label: 'x3', variableKey: 'x3', level: null, termType: 'main', interactionOf: null },
+      ],
+      personClusterKeys,
+    });
+
+    const { request } = buildRegressionEngineRequest(design);
+    expect(request.covariance.type).toBe('cluster');
+
+    // 실제 요청(진짜 cluster groups 포함) — 바이트 상한을 넘어 거부돼야 한다.
+    expect(() => assertRegressionWithinLimits(request)).toThrow(StatsEngineInputTooLargeError);
+
+    // 이전 사전검사가 쓰던 근사(covariance를 hc3로, splineContrasts를 빈 배열로
+    // 고정)는 정확히 같은 y/X/columnNames를 갖고도 이 초과를 놓쳤다는 것을 직접
+    // 재현한다 — 이게 바로 코드리뷰가 지적한 과소평가다.
+    const oldApproximation = { ...request, covariance: { type: 'hc3' as const }, splineContrasts: [] };
+    expect(() => assertRegressionWithinLimits(oldApproximation)).not.toThrow();
   });
 });

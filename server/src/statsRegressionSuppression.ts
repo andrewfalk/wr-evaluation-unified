@@ -17,7 +17,9 @@ import type {
 import type { AnalysisContext } from './statsAnalysisContext';
 import {
   runRegressionStatsEngine,
+  type EngineRunOpts,
   type RegressionCovarianceSpec,
+  type RegressionEngineRequest,
   type StatsEngineRegressionDiagnostics,
 } from './statsEngine';
 import { REGRESSION_POLICY } from './statsPolicy';
@@ -159,6 +161,45 @@ function buildPublicDiagnostics(
   };
 }
 
+// PR4-B1 코드리뷰(2026-09-24) — statsAnalyzeHandler.ts의 입력상한 사전검사가
+// covariance:hc3·splineContrasts:[]로 고정된 근사 요청을 썼는데, 실측(35,000행×4열
+// 입력)으로 cluster covariance groups만 추가해도 1,271,596→2,146,611바이트로
+// 2MiB 상한(maxInputBytes)을 넘었다 — 사전검사를 통과한 요청이 admission·quota를
+// 소비한 뒤 워커에서 뒤늦게 PROCESS_ERROR로 실패해, 의도한 400 INPUT_TOO_LARGE와
+// 다른 결과를 냈다. 실제 엔진 요청을 만드는 이 함수를 사전검사(assertInputWithinLimitsForMode)와
+// 실행(computeRegressionAnalyzeResult) 양쪽에서 그대로 재사용해 두 지점이 구조적으로
+// 어긋날 수 없게 한다(descriptive/bivariate가 이미 따르는 원칙과 동일).
+export function buildRegressionEngineRequest(design: RegressionDesignMatrix): {
+  request: RegressionEngineRequest;
+  splineGridByKey: Map<string, number[]>;
+  personCount: number;
+  rowCount: number;
+} {
+  const { spec, personCount, rowCount } = resolveCovarianceSpec(design);
+  const family = design.method === 'ols_linear' ? 'gaussian' : 'binomial';
+
+  // spline predictor별 예측 그리드+대비행렬(§3 "spline 부분효과"). gridByKey는
+  // 실행 경로가 응답을 받은 뒤 x값을 zip하기 위해 보관한다 — 사전검사는 request만 쓴다.
+  const splineGridByKey = new Map<string, number[]>();
+  const splineContrasts: { variableKey: string; contrastMatrix: number[][] }[] = [];
+  for (const [variableKey, knots] of Object.entries(design.splineKnots)) {
+    const gridValues = buildSplineGrid(knots);
+    splineGridByKey.set(variableKey, gridValues);
+    splineContrasts.push({
+      variableKey,
+      contrastMatrix: buildSplineContrastMatrix(variableKey, knots, design.columns, gridValues),
+    });
+  }
+
+  return {
+    request: {
+      family, y: design.y, X: design.x, columnNames: design.columns.map((c) => c.name),
+      covariance: spec, splineContrasts,
+    },
+    splineGridByKey, personCount, rowCount,
+  };
+}
+
 function buildPublicSplinePartialEffects(
   rawEffects: ReadonlyArray<{
     variableKey: string;
@@ -190,7 +231,10 @@ function buildPublicSplinePartialEffects(
  * 원칙 — 캐시 hit면 이 함수는 호출되지 않는다). ctx.regressionDesign이 null이면
  * 안 된다 — statsAnalyzeHandler.ts가 호출 전에 ③ 공개·④ 설계행렬 존재를
  * 이미 보장한다. */
-export async function computeRegressionAnalyzeResult(ctx: AnalysisContext): Promise<AnalyzeRegressionResult> {
+export async function computeRegressionAnalyzeResult(
+  ctx: AnalysisContext,
+  opts?: EngineRunOpts,
+): Promise<AnalyzeRegressionResult> {
   const design = ctx.regressionDesign;
   if (!design) {
     throw new Error('computeRegressionAnalyzeResult: ctx.regressionDesign이 없다 — 호출 순서 위반');
@@ -227,31 +271,10 @@ export async function computeRegressionAnalyzeResult(ctx: AnalysisContext): Prom
     };
   }
 
-  const { spec, personCount, rowCount } = resolveCovarianceSpec(design.design);
-  const family = design.design.method === 'ols_linear' ? 'gaussian' : 'binomial';
+  const { request, splineGridByKey, personCount, rowCount } = buildRegressionEngineRequest(design.design);
+  const spec = request.covariance;
 
-  // PR4-A2 — spline predictor별 예측 그리드+대비행렬을 만들어 함께 보낸다.
-  // gridByKey는 응답을 받은 뒤 x값을 zip하기 위해 로컬로 보관한다(Python은
-  // 대비 벡터만 알고 원본 x값은 모른다).
-  const splineGridByKey = new Map<string, number[]>();
-  const splineContrasts: { variableKey: string; contrastMatrix: number[][] }[] = [];
-  for (const [variableKey, knots] of Object.entries(design.design.splineKnots)) {
-    const gridValues = buildSplineGrid(knots);
-    splineGridByKey.set(variableKey, gridValues);
-    splineContrasts.push({
-      variableKey,
-      contrastMatrix: buildSplineContrastMatrix(variableKey, knots, design.design.columns, gridValues),
-    });
-  }
-
-  const raw = await runRegressionStatsEngine({
-    family,
-    y: design.design.y,
-    X: design.design.x,
-    columnNames: design.design.columns.map((c) => c.name),
-    covariance: spec,
-    splineContrasts,
-  });
+  const raw = await runRegressionStatsEngine(request, opts);
 
   const residualDf = rowCount - design.design.columns.length;
   const standardization = Object.keys(design.design.standardization).length > 0 ? design.design.standardization : null;

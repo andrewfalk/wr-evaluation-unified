@@ -449,13 +449,29 @@ export const StatsRunManifestSucceededSchema = RunManifestSchema.extend({
 export const StatsRunManifestFailedSchema = RunManifestSchema.omit({ resultDigest: true }).extend({
   outcome: z.literal('failed'),
 });
+// PR4-B1 — pending(admission이 queued 행을 INSERT할 때 채우는 manifest — manifest
+// 컬럼은 NOT NULL이라 뭔가는 있어야 함)과 cancelled(finishRun이 취소로 종결할 때)도
+// failed와 같은 shape(resultDigest 없음)을 공유한다 — 셋 다 "계산 결과가 확정되지
+// 않았거나 폐기됐다"는 점에서 동일. 4개 outcome 전부 admission이 발급한
+// analysisRunId를 그대로 유지한다(buildXxxStatsRunManifest의 analysisRunId? 오버라이드
+// 인자 — statsRunManifest.ts).
+export const StatsRunManifestPendingSchema = RunManifestSchema.omit({ resultDigest: true }).extend({
+  outcome: z.literal('pending'),
+});
+export const StatsRunManifestCancelledSchema = RunManifestSchema.omit({ resultDigest: true }).extend({
+  outcome: z.literal('cancelled'),
+});
 export const StatsRunManifestSchema = z.discriminatedUnion('outcome', [
   StatsRunManifestSucceededSchema,
   StatsRunManifestFailedSchema,
+  StatsRunManifestPendingSchema,
+  StatsRunManifestCancelledSchema,
 ]);
 
 export type StatsRunManifestSucceeded = z.infer<typeof StatsRunManifestSucceededSchema>;
 export type StatsRunManifestFailed    = z.infer<typeof StatsRunManifestFailedSchema>;
+export type StatsRunManifestPending   = z.infer<typeof StatsRunManifestPendingSchema>;
+export type StatsRunManifestCancelled = z.infer<typeof StatsRunManifestCancelledSchema>;
 export type StatsRunManifest          = z.infer<typeof StatsRunManifestSchema>;
 
 // Python 엔진이 null로 만드는 이유 — 억제(§4.2)와는 다른 축(계산 불능 vs 정책적 은닉).
@@ -1047,6 +1063,54 @@ export const AnalyzeResponseSchema = z.object({
   result:      AnalyzeResultSchema,
 });
 
+// ============================================================================
+// PR4-B1: 비동기 job 인프라. 계획서(pr4-b-virtual-pnueli.md) 11차 통합본 §계약 참고.
+// ============================================================================
+
+export const StatsRunErrorCodeSchema = z.enum([
+  'TIMEOUT', 'PROCESS_ERROR', 'INVALID_OUTPUT', 'OUTPUT_TOO_LARGE', 'RESULT_SCHEMA_INVALID',
+  // PR4-B1 신규 — claim 시점 13개 버전 상수 재계산 불일치 / queued 대기예산 초과.
+  'EXECUTION_VERSION_DRIFTED', 'QUEUE_WAIT_EXCEEDED',
+]);
+
+// POST /analyze가 syncBudgetMs 안에 못 끝내면 202로 돌려주는 접수 응답. 합류(join)
+// 시에는 이미 'running'일 수 있으므로 "queued만 허용"이 아니라 실제 현재 상태를
+// 그대로 반영한다.
+export const AnalyzeAcceptedResponseSchema = z.object({
+  analysisRunId: z.string().uuid(),
+  status: z.enum(['queued', 'running']),
+});
+
+// GET /api/stats/runs/:analysisRunId 응답.
+export const RunStatusPendingSchema = z.object({
+  analysisRunId: z.string().uuid(),
+  status: z.enum(['queued', 'running']),
+  createdAt: z.string(),
+  startedAt: z.string().nullable(),
+});
+export const RunStatusSucceededSchema = z.object({
+  analysisRunId: z.string().uuid(),
+  status: z.literal('succeeded'),
+  runManifest: RunManifestSchema,
+  result: AnalyzeResultSchema,
+});
+export const RunStatusFailedSchema = z.object({
+  analysisRunId: z.string().uuid(),
+  status: z.literal('failed'),
+  errorCode: StatsRunErrorCodeSchema,
+});
+export const RunStatusCancelledSchema = z.object({
+  analysisRunId: z.string().uuid(),
+  status: z.literal('cancelled'),
+  cancelledAt: z.string(),
+});
+export const RunStatusResponseSchema = z.union([
+  RunStatusPendingSchema,
+  RunStatusSucceededSchema,
+  RunStatusFailedSchema,
+  RunStatusCancelledSchema,
+]);
+
 export type StatsNullReason               = z.infer<typeof StatsNullReasonSchema>;
 export type AnalyzeMissingPatternEntry    = z.infer<typeof AnalyzeMissingPatternEntrySchema>;
 export type AnalyzeContinuousResult       = z.infer<typeof AnalyzeContinuousResultSchema>;
@@ -1074,6 +1138,9 @@ export type AnalyzeRegressionResult       = z.infer<typeof AnalyzeRegressionResu
 export type AnalyzeResult                 = z.infer<typeof AnalyzeResultSchema>;
 export type AnalyzeRequest                = z.infer<typeof AnalyzeRequestSchema>;
 export type AnalyzeResponse               = z.infer<typeof AnalyzeResponseSchema>;
+export type StatsRunErrorCode             = z.infer<typeof StatsRunErrorCodeSchema>;
+export type AnalyzeAcceptedResponse       = z.infer<typeof AnalyzeAcceptedResponseSchema>;
+export type RunStatusResponse             = z.infer<typeof RunStatusResponseSchema>;
 
 // ============================================================================
 // PR2: 집계 결과 내보내기 계약. `stats_runs`에 이미 억제 적용 후 저장된 manifest/result를

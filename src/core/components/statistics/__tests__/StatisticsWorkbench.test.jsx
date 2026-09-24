@@ -5,6 +5,7 @@
 // 내부 폴링이 fake timer와 얽히면 불안정해지는 문제를 피하기 위함 — useServerConfig 테스트에서
 // 이미 한 번 겪은 함정과 동일한 종류).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { StrictMode } from 'react';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -12,11 +13,15 @@ const fetchStatsCatalog = vi.fn();
 const previewStatsAnalysis = vi.fn();
 const runStatsAnalysis = vi.fn();
 const exportStatsAggregate = vi.fn();
+const getStatsRun = vi.fn();
+const cancelStatsRun = vi.fn();
 vi.mock('../../../services/statsRepository', () => ({
   fetchStatsCatalog: (...a) => fetchStatsCatalog(...a),
   previewStatsAnalysis: (...a) => previewStatsAnalysis(...a),
   runStatsAnalysis: (...a) => runStatsAnalysis(...a),
   exportStatsAggregate: (...a) => exportStatsAggregate(...a),
+  getStatsRun: (...a) => getStatsRun(...a),
+  cancelStatsRun: (...a) => cancelStatsRun(...a),
 }));
 
 import { StatisticsWorkbench } from '../StatisticsWorkbench.jsx';
@@ -183,6 +188,150 @@ describe('StatisticsWorkbench — analyze 실행 + committed snapshot', () => {
     });
     await user.click(screen.getByRole('button', { name: /분석 실행/ }));
     await waitFor(() => expect(screen.getByText('공개 정책에 따라 표시되지 않음')).toBeTruthy());
+  });
+});
+
+// 코드리뷰(2026-09-24) — 202→GET 폴링 흐름에 대한 coverage가 없다는 지적을 반영.
+// 두 결함을 구체적으로 재현하는 회귀 테스트: (1) 202로 전환된 요청의 recipe가
+// committedRecipe에만 먼저 반영되고 committedResult는 이전 값으로 남는 불일치,
+// (2) POST가 202로 끝나기 전에 화면이 닫히면 언마운트 후에도 폴링이 새로 시작되는
+// 누수.
+describe('StatisticsWorkbench — 202 폴링(PR4-B1)', () => {
+  it('202 응답 후 폴링 중에는 committedRecipe가 앞서 바뀌지 않아, "조건이 변경됨" 배너가 정확하게 유지된다', async () => {
+    const user = userEvent.setup();
+    fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
+    render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
+    await selectFirstVariable(user);
+
+    previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await waitForDebounce();
+    await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
+
+    // 1차 실행(recipe A, 변수 1개) — 200(동기 완료), 결과 A(mean 12.3)가 committed된다.
+    runStatsAnalysis.mockResolvedValueOnce(analyzeResponse());
+    await user.click(screen.getByRole('button', { name: /분석 실행/ }));
+    await waitFor(() => expect(screen.getByText(/12\.3/)).toBeTruthy());
+    expect(screen.queryByText(/조건이 변경됨/)).toBeNull();
+
+    // draft를 recipe B(변수 2개)로 바꾼다 — "조건이 변경됨" 배너가 정상적으로 뜬다.
+    await user.click(screen.getByRole('checkbox', { name: /노출 한도 초과/ }));
+    previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await waitForDebounce();
+    await waitFor(() => expect(screen.getByText(/조건이 변경됨/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
+
+    // 2차 실행(recipe B) — 이번엔 202(큐잉)로 전환된다.
+    runStatsAnalysis.mockResolvedValueOnce({ analysisRunId: 'pending-run-1', status: 'queued' });
+    getStatsRun.mockResolvedValueOnce({ status: 'running', analysisRunId: 'pending-run-1' });
+    getStatsRun.mockResolvedValueOnce({
+      status: 'succeeded',
+      analysisRunId: 'pending-run-1',
+      runManifest: runManifest('pending-run-1'),
+      result: { continuous: [{ ...analyzeResponse().result.continuous[0], mean: 99.9 }], discrete: [] },
+    });
+
+    await user.click(screen.getByRole('button', { name: /분석 실행/ }));
+    await waitFor(() => expect(screen.getByText(/분석 실행 중/)).toBeTruthy());
+    // 핵심 회귀 검증 — draft(B)는 바뀌지 않았는데 committedRecipe가 아직 A인 채로
+    // 폴링 중이라면, "조건이 변경됨" 배너는 계속 떠 있어야 한다(화면에 보이는 12.3은
+    // B가 아니라 A의 결과라는 정확한 신호). 이 시점에 committedRecipe만 B로 앞서
+    // 바뀌면(버그) draft===committedRecipe가 되어 배너가 부정확하게 사라진다 —
+    // 실제로는 여전히 A의 결과(12.3)를 보여주고 있는데도.
+    expect(screen.getByText(/조건이 변경됨/)).toBeTruthy();
+    expect(screen.getByText(/12\.3/)).toBeTruthy();
+    expect(screen.queryByText(/99\.9/)).toBeNull();
+
+    // 폴링이 성공하면 recipe·result가 함께 B로 교체되고, 배너는 정확히 사라진다.
+    await waitFor(() => expect(screen.getByText(/99\.9/)).toBeTruthy(), { timeout: 5000 });
+    expect(screen.queryByText(/분석 실행 중/)).toBeNull();
+    expect(screen.queryByText(/조건이 변경됨/)).toBeNull();
+    expect(screen.queryByText(/12\.3/)).toBeNull();
+  }, 15000);
+
+  it('POST가 202로 완료되기 전에 화면이 닫히면, 언마운트 후 응답이 와도 폴링을 시작하지 않는다', async () => {
+    const user = userEvent.setup();
+    fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
+    const { unmount } = render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
+    await selectFirstVariable(user);
+
+    previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await waitForDebounce();
+    await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
+
+    let resolveAnalyze;
+    runStatsAnalysis.mockReturnValueOnce(new Promise((resolve) => { resolveAnalyze = resolve; }));
+    await user.click(screen.getByRole('button', { name: /분석 실행/ }));
+
+    unmount();
+    // 언마운트 이후에야 202가 도착한다 — 이 시점에 runPolling.start()가 호출되면
+    // useStatsRunPolling의 unmount cleanup은 이미 끝난 뒤라 정리할 방법이 없는
+    // 새 폴링 루프가 생긴다(수정 전 결함).
+    await act(async () => {
+      resolveAnalyze({ analysisRunId: 'orphan-run', status: 'queued' });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // start()가 호출됐다면 즉시(또는 아주 짧게) getStatsRun 폴링이 시작된다 —
+    // 충분히 기다려도 전혀 호출되지 않아야 한다.
+    await new Promise((r) => setTimeout(r, 200));
+    expect(getStatsRun).not.toHaveBeenCalled();
+  });
+});
+
+// 코드리뷰 2차(2026-09-24) — mountedRef를 cleanup에서만 false로 바꾸면, React
+// StrictMode 개발모드의 "setup→cleanup→재setup" 이중 effect 호출(컴포넌트는 계속
+// 마운트된 채로 effect만 한 번 더 도는 것) 이후 mountedRef가 false로 눌러앉는다 —
+// main.jsx가 실제로 StrictMode를 쓰므로 실제 앱에서 200/202/에러 응답이 전부
+// 무시되고 실행 버튼이 계속 잠긴 채로 남는다. 위 "202 폴링" describe의 테스트들은
+// StrictMode 없이 렌더링해 이 결함을 못 잡았다 — 여기서는 StrictMode로 감싼 채
+// 200·202 양쪽 경로가 여전히 정상 동작하는지 확인한다.
+describe('StatisticsWorkbench — StrictMode 방어(코드리뷰 2차, 2026-09-24)', () => {
+  it('StrictMode에서도 200 응답이 결과에 반영된다', async () => {
+    const user = userEvent.setup();
+    // StrictMode 개발모드는 초기 마운트의 effect를 setup→cleanup→재setup으로 두 번
+    // 돈다 — 카탈로그 로드 effect도 두 번 실행되므로 Once가 아니라 항상 같은 값을
+    // 주는 mockResolvedValue를 쓴다(안 그러면 두 번째 호출이 undefined를 받아 죽는다).
+    fetchStatsCatalog.mockResolvedValue(catalogFixture());
+    render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />, { wrapper: StrictMode });
+    await selectFirstVariable(user);
+
+    previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await waitForDebounce();
+    await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
+
+    runStatsAnalysis.mockResolvedValueOnce(analyzeResponse());
+    await user.click(screen.getByRole('button', { name: /분석 실행/ }));
+    await waitFor(() => expect(screen.getByText(/12\.3/)).toBeTruthy());
+    // mountedRef가 StrictMode 이중 effect 이후 false로 눌러앉았다면 이 버튼은
+    // isAnalyzing이 계속 true로 남아 영원히 잠긴 채였을 것이다.
+    expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false);
+  });
+
+  it('StrictMode에서도 202 응답이 폴링을 시작해 결과에 반영된다', async () => {
+    const user = userEvent.setup();
+    fetchStatsCatalog.mockResolvedValue(catalogFixture());
+    render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />, { wrapper: StrictMode });
+    await selectFirstVariable(user);
+
+    previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await waitForDebounce();
+    await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
+
+    runStatsAnalysis.mockResolvedValueOnce({ analysisRunId: 'strictmode-run-1', status: 'queued' });
+    getStatsRun.mockResolvedValueOnce({ status: 'running', analysisRunId: 'strictmode-run-1' });
+    getStatsRun.mockResolvedValueOnce({
+      status: 'succeeded',
+      analysisRunId: 'strictmode-run-1',
+      runManifest: runManifest('strictmode-run-1'),
+      result: analyzeResponse().result,
+    });
+
+    await user.click(screen.getByRole('button', { name: /분석 실행/ }));
+    // mountedRef가 이미 false였다면 runPolling.start()가 아예 호출되지 않아
+    // getStatsRun도 절대 불리지 않고 "분석 실행 중" 배너도 뜨지 않는다.
+    await waitFor(() => expect(screen.getByText(/분석 실행 중/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/12\.3/)).toBeTruthy(), { timeout: 5000 });
+    expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false);
   });
 });
 
