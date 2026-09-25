@@ -227,6 +227,108 @@ function buildRegressionCsv(manifest: RunManifest, result: AnalyzeResult): strin
   return '﻿' + lines.join('\r\n') + '\r\n';
 }
 
+// PR4-B2 — 예측 결과 CSV export(계획서 §5단계 "집계 성능 CSV — 계수는 제외").
+// coefficients는 이 aggregate-only 엔드포인트에 의도적으로 담지 않는다 — 계획서가
+// 명시적으로 "계수는 제외"라고 못박았다(연구용 내부검증 지표만 내보내는 것이
+// 목적이지, 모형을 재구성할 수 있는 값까지 내보내는 것이 목적이 아님).
+function buildPredictionCsv(manifest: RunManifest, result: AnalyzeResult): string {
+  const lines: string[] = buildMetaHeaderLines(manifest);
+  const prediction = result.prediction;
+
+  if (!prediction || prediction.suppressed) {
+    lines.push('# section,suppressed');
+    lines.push(['reasonCode'].join(','));
+    lines.push([csvString(prediction?.suppressed ? prediction.reasonCode : null)].join(','));
+    return '﻿' + lines.join('\r\n') + '\r\n';
+  }
+
+  lines.push(`# estimation,${prediction.estimation}`);
+  if (prediction.nonEstimableReason) lines.push(`# nonEstimableReason,${prediction.nonEstimableReason}`);
+  lines.push('');
+
+  lines.push('# section,model');
+  lines.push(['outcomeKey', 'eventLevel', 'method', 'n', 'personCount', 'eventPersonCount',
+    'nonEventPersonCount', 'prevalence', 'excludedRowCount', 'parameterCount', 'columnCount',
+    'droppedColumnFoldCount'].join(','));
+  lines.push([
+    csvString(prediction.outcomeKey), csvString(prediction.eventLevel), csvString(prediction.method),
+    csvNumber(prediction.n), csvNumber(prediction.personCount), csvNumber(prediction.eventPersonCount),
+    csvNumber(prediction.nonEventPersonCount), csvNumber(prediction.prevalence), csvNumber(prediction.excludedRowCount),
+    csvNumber(prediction.parameterCount), csvNumber(prediction.columnCount), csvNumber(prediction.droppedColumnFoldCount),
+  ].join(','));
+  lines.push('');
+
+  lines.push('# section,validation');
+  lines.push(['scheme', 'outerFolds', 'repeats', 'innerFolds', 'outerFoldBasis', 'samplerVersion'].join(','));
+  lines.push([
+    csvString(prediction.validation.scheme), csvNumber(prediction.validation.outerFolds),
+    csvNumber(prediction.validation.repeats), csvNumber(prediction.validation.innerFolds),
+    csvString(prediction.validation.outerFoldBasis), csvString(prediction.validation.samplerVersion),
+  ].join(','));
+  lines.push('');
+
+  lines.push('# section,lambda');
+  lines.push(['selected', 'gridMin', 'gridMax', 'gridSize'].join(','));
+  lines.push([
+    csvNumber(prediction.lambda.selected), csvNumber(prediction.lambda.gridMin),
+    csvNumber(prediction.lambda.gridMax), csvNumber(prediction.lambda.gridSize),
+  ].join(','));
+  lines.push('');
+
+  lines.push('# section,metrics');
+  lines.push([
+    'metric', 'apparent', 'representativeRepeat',
+    'cvStatus', 'cvWithheldReason', 'cvValidRepeats', 'cvTotalRepeats', 'cvMean', 'cvMin', 'cvMax',
+    'bootstrapStatus', 'bootstrapWithheldReason', 'bootstrapValidReplicates', 'bootstrapTotalReplicates',
+    'bootstrapOptimism', 'bootstrapCorrected', 'bootstrapCorrectedOutOfRange',
+  ].join(','));
+  for (const m of prediction.metrics) {
+    lines.push([
+      csvString(m.metric), csvNumber(m.apparent), csvNumber(m.representativeRepeat),
+      csvString(m.cv.status), csvString(m.cv.withheldReason), csvNumber(m.cv.validRepeats), csvNumber(m.cv.totalRepeats),
+      csvNumber(m.cv.mean), csvNumber(m.cv.min), csvNumber(m.cv.max),
+      csvString(m.bootstrap.status), csvString(m.bootstrap.withheldReason),
+      csvNumber(m.bootstrap.validReplicates), csvNumber(m.bootstrap.totalReplicates),
+      csvNumber(m.bootstrap.optimism), csvNumber(m.bootstrap.corrected),
+      String(m.bootstrap.correctedOutOfRange),
+    ].join(','));
+  }
+  lines.push('');
+
+  lines.push('# section,aucCi');
+  lines.push(['target', 'lower', 'upper', 'method', 'replicates'].join(','));
+  if (prediction.aucCi) {
+    lines.push([
+      csvString(prediction.aucCi.target), csvNumber(prediction.aucCi.lower), csvNumber(prediction.aucCi.upper),
+      csvString(prediction.aucCi.method), csvNumber(prediction.aucCi.replicates),
+    ].join(','));
+  }
+  lines.push('');
+
+  lines.push('# section,curves');
+  lines.push(`# curvesSuppressedReason,${prediction.curves?.suppressedReason ?? ''}`);
+  lines.push(['upperThreshold', 'rows', 'positiveRows', 'meanPredicted', 'observedRate'].join(','));
+  for (const bin of prediction.curves?.bins ?? []) {
+    lines.push([
+      csvNumber(bin.upperThreshold), csvNumber(bin.rows), csvNumber(bin.positiveRows),
+      csvNumber(bin.meanPredicted), csvNumber(bin.observedRate),
+    ].join(','));
+  }
+  lines.push('');
+
+  lines.push('# section,caveats');
+  lines.push(['caveat'].join(','));
+  for (const c of prediction.caveats) lines.push([csvString(c)].join(','));
+  lines.push('');
+
+  lines.push('# section,notPerformed');
+  lines.push(['item'].join(','));
+  for (const item of prediction.notPerformed) lines.push([csvString(item)].join(','));
+
+  // 엑셀 한글 호환 — UTF-8 BOM.
+  return '﻿' + lines.join('\r\n') + '\r\n';
+}
+
 export async function handlePostExport(pool: Pool, req: Request, res: Response): Promise<void> {
   const parsed = ExportAggregateRequestSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -322,10 +424,13 @@ export async function handlePostExport(pool: Pool, req: Request, res: Response):
     return;
   }
   // PR4-A2 — 회귀 결과는 전용 CSV 빌더로 분기한다(pointDiagnostics는 절대 넣지
-  // 않음 — buildRegressionCsv 주석 참고).
+  // 않음 — buildRegressionCsv 주석 참고). PR4-B2 — 예측도 전용 빌더(계수 제외 —
+  // buildPredictionCsv 주석 참고).
   const csv = manifestParsed.data.analysisMode === 'regression'
     ? buildRegressionCsv(manifestParsed.data, resultParsed.data)
-    : buildCsv(manifestParsed.data, resultParsed.data);
+    : manifestParsed.data.analysisMode === 'prediction'
+      ? buildPredictionCsv(manifestParsed.data, resultParsed.data)
+      : buildCsv(manifestParsed.data, resultParsed.data);
 
   // §7.4 원칙을 aggregate 등급에도 적용 — 감사 INSERT가 실패하면 CSV는 한 바이트도 안 나간다.
   await writeAuditLogStrict(pool, {

@@ -18,11 +18,13 @@ import { computeExecutionDigest } from './statsExecutionDigest';
 import { buildStatsEngineRequest } from './statsDescriptiveSuppression';
 import {
   assertBivariateWithinLimits,
+  assertPredictionWithinLimits,
   assertRegressionWithinLimits,
   assertWithinLimits,
   StatsEngineInputTooLargeError,
 } from './statsEngine';
 import { buildBivariateEngineRequest } from './statsBivariateSuppression';
+import { buildPredictionEngineRequestForState } from './statsPredictionSuppression';
 import { buildRegressionEngineRequest } from './statsRegressionSuppression';
 import { buildRunManifest, toStatsRunManifestSucceeded } from './statsRunManifest';
 import { allCorrelationMatrixPairs } from './statsCorrelationMatrixDataset';
@@ -97,6 +99,14 @@ function buildSuppressedAnalyzeResult(ctx: AnalysisContext): AnalyzeResult {
       regression: { suppressed: true, reasonCode: 'MIN_COHORT_NOT_MET' },
     };
   }
+  if (ctx.recipe.analysisMode === 'prediction') {
+    // PR4-B2 — 예측 억제도 회귀와 동일 원칙: 단일 사유로 수렴하는 suppressed:true
+    // 스텁뿐이다(계획서 §2단계 공개통제, 다른 필드 일절 없음 — 계약 strict).
+    return {
+      continuous: [], discrete: [],
+      prediction: { suppressed: true, reasonCode: 'MIN_COHORT_NOT_MET' },
+    };
+  }
   return {
     continuous: ctx.recipe.variableKeys
       .filter((k) => ctx.catalogByKey.get(k)?.type === 'continuous')
@@ -152,6 +162,14 @@ function assertInputWithinLimitsForMode(ctx: AnalysisContext): void {
     if (!ctx.regressionDisclosed || !ctx.regressionDesign?.ok) return;
     const { request } = buildRegressionEngineRequest(ctx.regressionDesign.design);
     assertRegressionWithinLimits(request);
+    return;
+  }
+  if (ctx.recipe.analysisMode === 'prediction') {
+    if (!ctx.predictionDisclosed || !ctx.predictionState || ctx.predictionState.nonEstimableCheck.reason !== null) return;
+    const design = ctx.predictionState.nonEstimableCheck.design;
+    if (!design) return;
+    const { request } = buildPredictionEngineRequestForState(ctx.predictionState, design);
+    assertPredictionWithinLimits(request);
   }
 }
 
@@ -263,7 +281,8 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
     // 보다 반드시 먼저여야 한다.
     const bivariatePairSuppressed = ctx.recipe.analysisMode === 'bivariate' && !ctx.pairDisclosed;
     const regressionSuppressed = ctx.recipe.analysisMode === 'regression' && !ctx.regressionDisclosed;
-    if (ctx.requestSuppressed || bivariatePairSuppressed || regressionSuppressed) {
+    const predictionSuppressed = ctx.recipe.analysisMode === 'prediction' && !ctx.predictionDisclosed;
+    if (ctx.requestSuppressed || bivariatePairSuppressed || regressionSuppressed || predictionSuppressed) {
       const suppressedResult = buildSuppressedAnalyzeResult(ctx);
       const resultDigest = canonicalDigest({ result: suppressedResult });
       const manifest = toStatsRunManifestSucceeded(
@@ -296,7 +315,7 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
           outcome: 'denied' as AuditOutcome,
           extra: auditExtra(ctx, executionDigest, {
             analysisRunId: manifest.analysisRunId,
-            reasonCode: ctx.reasonCode ?? (bivariatePairSuppressed || regressionSuppressed ? 'MIN_COHORT_NOT_MET' : null),
+            reasonCode: ctx.reasonCode ?? (bivariatePairSuppressed || regressionSuppressed || predictionSuppressed ? 'MIN_COHORT_NOT_MET' : null),
           }),
         });
       });
@@ -306,7 +325,10 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
       return;
     }
 
-    if (ctx.recipe.analysisMode === 'bivariate' || ctx.recipe.analysisMode === 'correlation_matrix' || ctx.recipe.analysisMode === 'regression') {
+    if (
+      ctx.recipe.analysisMode === 'bivariate' || ctx.recipe.analysisMode === 'correlation_matrix'
+      || ctx.recipe.analysisMode === 'regression' || ctx.recipe.analysisMode === 'prediction'
+    ) {
       const selected = ctx.availableMethods.find((m) => m.id === ctx.recipe.requestedMethod);
       const executable = selected != null && (selected.status === 'available' || selected.status === 'conditional');
       if (!executable) {

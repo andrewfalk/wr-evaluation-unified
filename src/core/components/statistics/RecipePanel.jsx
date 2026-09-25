@@ -21,6 +21,8 @@ const METHOD_LABELS = {
   // 자체가 카드 노출의 전제조건이다.
   ols_linear: '선형회귀(OLS)',
   binary_logistic: '이분 로지스틱 회귀',
+  // PR4-B2 — StatsMethodIdSchema와 동일 순서·목록.
+  l2_logistic: 'L2 정칙화 로지스틱 회귀(ridge)',
 };
 const METHOD_ORDER = Object.keys(METHOD_LABELS);
 
@@ -41,6 +43,9 @@ const METHOD_TOOLTIPS = {
   spearman_correlation: 'Pearson과 같은 목적이지만 직선 관계가 아니라 "한쪽이 커지면 다른 쪽도 대체로 커지는/작아지는" 순위 관계를 봅니다. 이상치에 덜 민감합니다.',
   ols_linear: '결과변수(연속형)를 여러 설명변수로 동시에 설명합니다 — 다른 변수를 보정한 뒤에도 특정 변수의 효과가 남는지 봅니다.',
   binary_logistic: '결과변수(있음/없음 같은 이분형)가 나타날 가능성을 여러 설명변수로 동시에 설명합니다. 계수는 오즈비(OR)로도 함께 표시됩니다.',
+  // PR4-B2 — 예측 전용 방법 설명. "연관성"과 달리 예측력 자체(교차검증 성능)를
+  // 목적으로 한다는 점을 첫 문장에서 명확히 한다.
+  l2_logistic: '결과변수가 나타날 확률을 예측하는 모형의 교차검증 성능(AUC 등)을 봅니다 — 개별 변수의 유의성이 아니라 모형 전체의 예측력이 목적입니다. 연구용 내부검증이며 실제 판정에 쓰지 않습니다.',
 };
 const METHOD_LIST_PVALUE_NOTE = 'p-값이 작을수록(보통 0.05 미만) 우연이라 보기 어려운 차이·연관으로 해석합니다.';
 
@@ -75,6 +80,9 @@ const GRAIN_LABELS = {
   job: '직업(job)',
   disease: '상병(disease)',
 };
+
+// server/src/statsSnapshotColumnVariables.ts의 REGISTERED_AT_KEY와 동일 리터럴.
+const PREDICTION_REGISTERED_AT_KEY = 'case.meta.registeredAt';
 
 function needsValue(operator) {
   return operator !== 'is_missing' && operator !== 'not_missing';
@@ -404,6 +412,18 @@ export function RecipePanel({
     [catalogByKey, grain],
   );
 
+  // PR4-B2 — 예측 필터는 predictor 역할이거나 등록일(REGISTERED_AT_KEY)만 허용된다
+  // (server/src/statsRecipeValidation.ts PREDICTION_FILTER_LEAKAGE — outcome이나
+  // outcome과 얽힌 변수를 필터로 쓰면 결과를 미리 알고 거른 셈이 되는 정보누출을
+  // 막는다, 계획서 §0단계 "필터"). 그 외 필터는 여기서 아예 후보에서 뺀다 —
+  // "필터를 비활성화할 때 사유를 표시한다"(계획서 §6단계).
+  const filterCatalogByKey = useMemo(() => {
+    if (analysisMode !== 'prediction') return grainCatalogByKey;
+    return new Map(Array.from(grainCatalogByKey.entries()).filter(
+      ([k, v]) => v.predictionRole === 'predictor' || k === PREDICTION_REGISTERED_AT_KEY,
+    ));
+  }, [analysisMode, grainCatalogByKey]);
+
   const neededKeys = useMemo(
     () => Array.from(new Set([...selectedKeys, ...filterDraft.map((f) => f.key)])),
     [selectedKeys, filterDraft],
@@ -422,6 +442,26 @@ export function RecipePanel({
   }, [neededKeys, catalogByKey]);
 
   const predictionSupported = (catalog?.variables ?? []).some((v) => v.allowedAnalysisPurposes.includes('prediction'));
+  // PR4-B2 — 계획서 §6단계 "outcome과 predictor를 역할별로 필터링한다". CatalogPanel은
+  // predictionRole과 무관하게 체크를 허용하므로(회귀와 동일한 원칙 — 역할 제약이 없는
+  // 모드도 있다), 여기서 selectedKeys를 역할로 다시 나눈다. StatisticsWorkbench.jsx의
+  // predictionEffectiveVariableKeys/isRecipeComplete와 같은 필터 로직이다 — 실제로
+  // recipe에 담기는 집합과 화면에 보이는 집합이 어긋나면 안 된다.
+  const predictionOutcomeCandidates = useMemo(
+    () => selectedKeys.filter((k) => catalogByKey.get(k)?.predictionRole === 'outcome'),
+    [selectedKeys, catalogByKey],
+  );
+  const predictionPredictorKeys = useMemo(
+    () => selectedKeys.filter((k) => k !== outcomeKey && catalogByKey.get(k)?.predictionRole === 'predictor'),
+    [selectedKeys, outcomeKey, catalogByKey],
+  );
+  const predictionIgnoredKeys = useMemo(
+    () => selectedKeys.filter((k) => k !== outcomeKey && catalogByKey.get(k)?.predictionRole !== 'predictor'),
+    [selectedKeys, outcomeKey, catalogByKey],
+  );
+  // DTO 필드(routes/stats.ts toCatalogVariableDto) — 자유입력이 아니라 이 목록에서만
+  // 고른다(계획서 §6단계 "eventLevel select는 DTO의 predictionEventLevels에서 만든다").
+  const predictionEventLevels = outcomeKey ? (catalogByKey.get(outcomeKey)?.predictionEventLevels ?? []) : [];
   const filtersDirty = JSON.stringify(filterDraft) !== JSON.stringify(appliedFilters);
   const missingFormulaPolicy = formulaFamiliesNeedingChoice.some((v) => !formulaPolicies[v.formulaFamily]);
 
@@ -499,29 +539,45 @@ export function RecipePanel({
             className={`swb-seg-opt${analysisMode === 'regression' ? ' swb-seg-opt--active' : ''}`}
             onClick={() => onAnalysisModeChange('regression')}
           >회귀</button>
+          {/* PR4-B2 — 예측(계획서 §6단계). outcome/predictor는 predictionRole로
+              정해진 역할제 선택이라 회귀와 다른 UI를 쓴다(아래). */}
+          <button
+            type="button"
+            className={`swb-seg-opt${analysisMode === 'prediction' ? ' swb-seg-opt--active' : ''}`}
+            disabled={!predictionSupported}
+            onClick={() => onAnalysisModeChange('prediction')}
+            title={!predictionSupported ? '현재 지원 변수 없음' : undefined}
+          >예측</button>
         </div>
         {modeChangeBlockedNotice && analysisMode !== 'bivariate' && (
           <p className="swb-status-warn">이변량 모드는 변수를 2개까지만 지원합니다 — 먼저 2개로 줄여주세요.</p>
         )}
 
         <div className="swb-section-label">분석 목적</div>
-        <div className="swb-seg">
-          {['association', 'formula_audit', 'prediction'].map((p) => (
-            <button
-              key={p}
-              type="button"
-              className={`swb-seg-opt${analysisPurpose === p ? ' swb-seg-opt--active' : ''}`}
-              disabled={p === 'prediction' && !predictionSupported}
-              onClick={() => onAnalysisPurposeChange(p)}
-              title={p === 'prediction' && !predictionSupported ? '현재 지원 변수 없음' : undefined}
-            >{PURPOSE_LABELS[p]}</button>
-          ))}
-        </div>
+        {/* PR4-B2 — analysisMode==='prediction' ⇔ analysisPurpose==='prediction'
+            (서버 PURPOSE_MODE_MISMATCH). 예측 모드에서는 부모가 목적을 이미
+            'prediction'으로 강제·고정했으므로(handleAnalysisModeChange) 여기서
+            다시 고를 필요가 없다 — 목적 선택지에서 'prediction'을 아예 제거하고
+            고정 문구로 대신한다(계획서 §6단계 "purpose prediction 옵션을 제거").*/}
+        {analysisMode === 'prediction' ? (
+          <p className="swb-suppressed-note">예측 모드에서는 분석 목적이 "예측"으로 자동 고정됩니다.</p>
+        ) : (
+          <div className="swb-seg">
+            {['association', 'formula_audit'].map((p) => (
+              <button
+                key={p}
+                type="button"
+                className={`swb-seg-opt${analysisPurpose === p ? ' swb-seg-opt--active' : ''}`}
+                onClick={() => onAnalysisPurposeChange(p)}
+              >{PURPOSE_LABELS[p]}</button>
+            ))}
+          </div>
+        )}
         {analysisMode === 'descriptive' && (
           <p className="swb-suppressed-note">목적을 골라도 지금 제공하는 분석은 기술통계뿐입니다.</p>
         )}
 
-        {(analysisMode === 'bivariate' || analysisMode === 'correlation_matrix' || analysisMode === 'regression') && (
+        {(analysisMode === 'bivariate' || analysisMode === 'correlation_matrix' || analysisMode === 'regression' || analysisMode === 'prediction') && (
           <MethodPicker
             previewState={previewState}
             isPreviewCurrent={isPreviewCurrent}
@@ -530,7 +586,7 @@ export function RecipePanel({
             onApplyRemedy={(patch) => { if (patch?.requestedMethod) onRequestedMethodChange(patch.requestedMethod); }}
             notReadyMessage={analysisMode === 'correlation_matrix'
               ? '연속형 변수를 3개 이상 선택하면 사용 가능한 방법이 표시됩니다.'
-              : analysisMode === 'regression'
+              : analysisMode === 'regression' || analysisMode === 'prediction'
                 ? '결과변수 1개와 설명변수 1개 이상을 선택하면 사용 가능한 방법이 표시됩니다.'
                 : '변수를 2개 선택하면 사용 가능한 방법이 표시됩니다.'}
           />
@@ -588,6 +644,60 @@ export function RecipePanel({
               onEventLevelChange={onEventLevelChange}
             />
           </>
+        ) : analysisMode === 'prediction' ? (
+          <>
+            <div className="swb-section-label">결과변수(outcome, 1개)</div>
+            {predictionOutcomeCandidates.length === 0 && (
+              <p className="swb-suppressed-note">좌측 카탈로그에서 예측 결과변수로 쓸 수 있는 변수를 선택하세요.</p>
+            )}
+            {predictionOutcomeCandidates.length > 0 && (
+              <select
+                className="swb-search"
+                aria-label="결과변수"
+                value={outcomeKey || ''}
+                onChange={(e) => onOutcomeKeyChange(e.target.value || null)}
+              >
+                <option value="">선택 필요</option>
+                {predictionOutcomeCandidates.map((k) => (
+                  <option key={k} value={k}>{catalogByKey.get(k)?.label || k}</option>
+                ))}
+              </select>
+            )}
+
+            {outcomeKey && (
+              <div className="swb-section-label">
+                사건 레벨(eventLevel)
+                <select
+                  className="swb-search"
+                  aria-label="사건 레벨"
+                  value={eventLevel}
+                  onChange={(e) => onEventLevelChange(e.target.value)}
+                >
+                  <option value="">선택 필요</option>
+                  {predictionEventLevels.map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
+                </select>
+              </div>
+            )}
+
+            <div className="swb-section-label">설명변수(predictor, {predictionPredictorKeys.length}개)</div>
+            <div>
+              {predictionPredictorKeys.length === 0 && (
+                <p className="swb-suppressed-note">결과변수 외에 예측 설명변수를 1개 이상 선택하세요.</p>
+              )}
+              {predictionPredictorKeys.map((k) => (
+                <span key={k} className="swb-recipe-chip">
+                  {catalogByKey.get(k)?.label || k}
+                  <button type="button" onClick={() => onRemoveVariable(k)} aria-label={`${k} 제거`}>×</button>
+                </span>
+              ))}
+            </div>
+            {predictionIgnoredKeys.length > 0 && (
+              <p className="swb-suppressed-note">
+                선택했지만 예측에는 쓸 수 없는 변수 {predictionIgnoredKeys.length}개는 제외됩니다:{' '}
+                {predictionIgnoredKeys.map((k) => catalogByKey.get(k)?.label || k).join(', ')}
+              </p>
+            )}
+          </>
         ) : (
           <>
             <div className="swb-section-label">
@@ -632,6 +742,11 @@ export function RecipePanel({
         )}
 
         <div className="swb-section-label">필터 ({appliedFilters.length}개 적용됨)</div>
+        {analysisMode === 'prediction' && (
+          <p className="swb-suppressed-note">
+            예측 모드에서는 결과와 무관한 필터만 쓸 수 있습니다 — 설명변수이거나 등록일 하나만 허용됩니다(결과를 미리 알고 거르는 정보누출 방지).
+          </p>
+        )}
         {filterDraft.map((f, i) => (
           <span key={`${f.key}-${i}`} className="swb-recipe-chip">
             {catalogByKey.get(f.key)?.label || f.key} {OPERATOR_LABELS[f.operator] || f.operator} {formatFilterValue(f.operator, f.value)}
@@ -648,8 +763,8 @@ export function RecipePanel({
           // 이전 grain의 key가 남아 variable이 undefined가 되고 필터 추가가 조용히
           // 무동작이 될 수 있음) — grain이 바뀌면 컴포넌트를 통째로 재마운트한다.
           <FilterEditor
-            key={grain}
-            catalogByKey={grainCatalogByKey}
+            key={`${grain}-${analysisMode === 'prediction' ? 'prediction' : 'other'}`}
+            catalogByKey={filterCatalogByKey}
             onAdd={(f) => onFilterDraftChange([...filterDraft, f])}
           />
         )}

@@ -254,4 +254,40 @@ export function computeRepeatedVariableValue(
 // 공유(resolveRepresentativeJob)로 job.rollup.longestTenureYears(continuous)로 등록.
 // 8개 전부 이미 카탈로그에 있던 원본 필드만 참조(coverage/shared.ts 변경 없음). 카탈로그
 // 72개(case 39/job 19/disease 14) + 서버 전용 meta 2개(통합 카탈로그 74개).
-export const CATALOG_VERSION = 'v23-case-rollup-any-has-tenure-years';
+//
+// PR4-B2 — 예측(prediction) 분석 착수. 신규 patient.identity.ageAtEvaluation(case, derived)
+// 1개 추가 + 기존 26개(outcome 2 + predictor 24, §0단계 허용표)에 predictionRole·
+// allowedAnalysisPurposes:'prediction' 배선. 카탈로그 73개(case 40/job 19/disease 14) +
+// 서버 전용 meta 2개(통합 카탈로그 75개).
+export const CATALOG_VERSION = 'v24-prediction-role-and-age';
+
+// PR4-B2 — outcome 명세(계획서 §2단계). 서버 검증(statsRecipeValidation.ts)과 클라이언트
+// 선택지(RecipePanel.jsx, 카탈로그 DTO의 predictionOutcomeLevels/predictionEventLevels)가
+// 공유하는 단일 진실원이다. getCategoricalOrder에는 등록하지 않는다(association의
+// 기준레벨·이변량 축 순서에 영향 주지 않는다 — association 동작 불변 원칙).
+export interface PredictionOutcomeSpec {
+  levels: readonly string[];
+  eventLevels: readonly string[];
+}
+
+export const PREDICTION_OUTCOME_SPECS: Readonly<Record<string, PredictionOutcomeSpec>> = {
+  'diagnosis.rollup.anyHighRelatedness': { levels: ['true', 'false'], eventLevels: ['true'] },
+  // 레벨은 diagnosis/extractors.ts의 AssessmentStatusResult('high'|'low'|'blank'|'invalid'
+  // 중 관측 가능한 값 집합)에서 파생한다 — 값 집합이 어긋나면 테스트가 실패하도록 둔다.
+  'diagnosis.assessment.status': { levels: ['high', 'low'], eventLevels: ['high', 'low'] },
+};
+
+// PR4-B2 — 계획서 §0단계 "derived predictor는 PREDICTION_REVIEWED_DERIVED_PREDICTORS에
+// 명시한다". getIntegratedCatalog() 기동 검사 4가 predictionRole==='predictor'·
+// provenance==='derived'인 카탈로그 변수가 전부 이 목록에 있는지 확인한다(§2단계 검사 4).
+export const PREDICTION_REVIEWED_DERIVED_PREDICTORS: ReadonlySet<string> = new Set([
+  'patient.identity.bmi',
+  'patient.identity.ageAtEvaluation',
+  'job.rollup.longestTenureYears',
+  'diagnosis.rollup.hasKnee',
+  'diagnosis.rollup.hasWrist',
+  'diagnosis.rollup.hasElbow',
+  'diagnosis.rollup.hasShoulder',
+  'diagnosis.rollup.hasSpine',
+  'diagnosis.rollup.hasCervical',
+]);

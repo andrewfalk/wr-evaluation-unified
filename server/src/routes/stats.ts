@@ -7,6 +7,7 @@ import type { Pool } from 'pg';
 import { INTEGRATED_CATALOG_VERSION } from '../statsCatalogVersion';
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
 import { getIntegratedCatalog } from '../statsCatalog';
+import { PREDICTION_OUTCOME_SPECS } from '@wr/analytics-core/catalog';
 import {
   type CatalogResponse,
   type CatalogVariable,
@@ -20,12 +21,14 @@ import { requireCapability } from '../middleware/requireCapability';
 import { analyzeRateLimit } from '../middleware/rateLimit';
 import { writeAuditLogStrict } from '../middleware/audit';
 import { canonicalDigest } from '../canonicalSerializer';
-import { MINIMUM_COHORT, ESTIMABILITY_POLICY_VERSION, DIFFERENCING_POLICY } from '../statsPolicy';
+import { MINIMUM_COHORT, ESTIMABILITY_POLICY_VERSION, DIFFERENCING_POLICY, PREDICTION_POLICY } from '../statsPolicy';
 import { computeEstimability } from '../statsEstimability';
 import { buildRunManifest } from '../statsRunManifest';
-import { buildAnalysisContext, deriveAnalysisContext } from '../statsAnalysisContext';
+import { buildAnalysisContext, deriveAnalysisContext, type AnalysisContext } from '../statsAnalysisContext';
 import { handlePostAnalyze, finalizeAnalyzeResponse, toPublicRunManifest } from '../statsAnalyzeHandler';
 import { handlePostExport } from '../statsExportHandler';
+import { buildPredictionEngineRequestForState } from '../statsPredictionSuppression';
+import { assertPredictionWithinLimits, StatsEngineInputTooLargeError } from '../statsEngine';
 import { requestCancel, hasVersionDrifted } from '../statsRunsQueue';
 import { STATS_RUN_COLUMNS, type StatsRunRow } from '../statsRunRow';
 import type { AnalyzeResult, StatsRunManifestSucceeded } from '@wr/contracts';
@@ -45,6 +48,9 @@ const SUPPORTED_GRAINS_SET = new Set<(typeof ALL_GRAINS)[number]>([
 ]);
 
 function toCatalogVariableDto(v: AnalyticsVariableMetadata): CatalogVariable {
+  // PR4-B2 — outcome 명세는 PREDICTION_OUTCOME_SPECS(단일 진실원)에서만 파생한다.
+  // predictionRole!=='outcome'이면 항상 null(predictor·역할없음 둘 다).
+  const outcomeSpec = v.predictionRole === 'outcome' ? PREDICTION_OUTCOME_SPECS[v.key] : undefined;
   return {
     key: v.key,
     label: v.label,
@@ -63,6 +69,9 @@ function toCatalogVariableDto(v: AnalyticsVariableMetadata): CatalogVariable {
     supportedFormulaPolicies: v.supportedFormulaPolicies,
     formulaVersionKey: v.formulaVersionKey ?? null,
     analysisRole: v.analysisRole ?? 'analyzable',
+    predictionRole: v.predictionRole ?? null,
+    predictionOutcomeLevels: outcomeSpec ? [...outcomeSpec.levels] : null,
+    predictionEventLevels: outcomeSpec ? [...outcomeSpec.eventLevels] : null,
   };
 }
 
@@ -109,6 +118,32 @@ function buildSuppressedPreviewPayload(
   return { counts, estimability };
 }
 
+// PR4-B2 — preview도 analyze와 같은 3-4단계 우선순위(③공개통제 → ④비추정
+// 판정 → 바이트/작업량 상한)를 따른다. 이 셋 중 하나라도 통과하지 못하면
+// candidateParameterCount를 노출하지 않는다(회귀의 design.ok===true 게이트와
+// 동일 원칙 — "미생성"과 "생략"을 구분하는 신중함, 실제로 실행 불가능한
+// 요청에 파라미터 수를 보여주면 오도한다).
+// 코드리뷰(2026-09-25) — candidateParameterCount는 EPV 판정에 쓰이는 K-1
+// 관례의 parameterCount여야 한다(design.columnCount는 one-hot 전체 열 수로
+// 별개 개념 — statsPredictionDesign.ts의 columnCount≠parameterCount 구분과
+// 동일). 범주형 K수준에서 둘이 달라지므로 여기서 columnCount를 반환하면
+// preview가 실제 EPV 판단 기준과 다른 숫자를 보여준다.
+function predictionCandidateParameterCount(ctx: AnalysisContext): number | null {
+  if (ctx.recipe.analysisMode !== 'prediction' || !ctx.predictionState) return null;
+  const { predictionState } = ctx;
+  const design = predictionState.nonEstimableCheck.design;
+  if (!design) return null;
+  if (predictionState.s2Rows.length > PREDICTION_POLICY.maxWorkUnits) return null;
+  try {
+    const { request } = buildPredictionEngineRequestForState(predictionState, design);
+    assertPredictionWithinLimits(request);
+  } catch (err) {
+    if (err instanceof StatsEngineInputTooLargeError) return null;
+    throw err;
+  }
+  return design.parameterCount;
+}
+
 async function handlePostPreview(pool: Pool, req: Request, res: Response): Promise<void> {
   const built = await buildAnalysisContext(pool, req, 'preview');
   if (!built.ok) {
@@ -120,8 +155,16 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
   let counts: PreviewCounts;
   let estimability: PreviewEstimability;
 
-  if (ctx.requestSuppressed) {
-    ({ counts, estimability } = buildSuppressedPreviewPayload(ctx.recipe.variableKeys, ctx.catalogByKey, ctx.reasonCode!));
+  // 코드리뷰(2026-09-25) — ctx.requestSuppressed만 보면 예측 전용 ②공개통제
+  // (predictionDisclosed)가 실패해도 preview가 일반 집계(counts.suppressed:false)로
+  // 진행한다 — statsAnalyzeHandler.ts의 predictionSuppressed 판정과 어긋난다.
+  // 계획서 "preview도 같은 공개통제 우선순위를 따른다"를 충족하려면 여기서도
+  // 동일하게 억제해야 한다.
+  const predictionSuppressed = ctx.recipe.analysisMode === 'prediction' && !ctx.predictionDisclosed;
+  if (ctx.requestSuppressed || predictionSuppressed) {
+    ({ counts, estimability } = buildSuppressedPreviewPayload(
+      ctx.recipe.variableKeys, ctx.catalogByKey, ctx.reasonCode ?? 'MIN_COHORT_NOT_MET',
+    ));
   } else {
     // §C 1단계 게이트를 통과했을 때만 §C 2단계(person 단위 소수 셀 억제)를 계산한다.
     const est = computeEstimability(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey);
@@ -145,7 +188,9 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
       candidateParameterCount:
         ctx.recipe.analysisMode === 'regression' && ctx.regressionDesign?.ok === true
           ? ctx.regressionDesign.design.columns.length
-          : est.candidateParameterCount,
+          : ctx.recipe.analysisMode === 'prediction'
+            ? predictionCandidateParameterCount(ctx)
+            : est.candidateParameterCount,
       eventNonEvent: est.eventNonEvent,
       estimabilityPolicyVersion: ESTIMABILITY_POLICY_VERSION,
     };

@@ -19,7 +19,7 @@ def _ols_request(n=20):
     # DEGENERATE_COVARIANCE로 추론이 보류돼 "정상 성공" E2E 픽스처로 못 쓴다).
     y = [2.0 + 0.5 * v + ((i % 5) - 2) * 0.13 for i, v in enumerate(x1)]
     return {
-        "protocolVersion": 5,
+        "protocolVersion": 6,
         "regression": {
             "family": "gaussian",
             "y": y,
@@ -156,7 +156,7 @@ def test_row_count_exceeds_max_values_per_variable_rejected():
     # LIMIT_EXCEEDED가 아님 — 그건 여러 변수를 합친 총합 검사 전용).
     n = MAX_VALUES_PER_VARIABLE + 1
     request = {
-        "protocolVersion": 5,
+        "protocolVersion": 6,
         "regression": {
             "family": "gaussian",
             "y": [1.0] * n,
@@ -175,7 +175,7 @@ def test_total_values_exceeds_limit_rejected():
     n = MAX_VALUES_PER_VARIABLE
     p = MAX_TOTAL_VALUES // n + 2
     request = {
-        "protocolVersion": 5,
+        "protocolVersion": 6,
         "regression": {
             "family": "gaussian",
             "y": [1.0] * n,
@@ -205,14 +205,14 @@ def test_analyze_process_regression_success():
     assert proc.returncode == 0
     assert proc.stderr == ""
     payload = json.loads(proc.stdout)
-    assert payload["protocolVersion"] == 5
+    assert payload["protocolVersion"] == 6
     assert payload["regression"]["estimation"] == "ok"
     assert len(payload["regression"]["terms"]) == 2
 
 
 def test_analyze_process_regression_invalid_shape_emits_marker_and_exit1():
     bad_request = {
-        "protocolVersion": 5,
+        "protocolVersion": 6,
         "regression": {"family": "gaussian", "y": [1.0, 2.0], "X": [[1.0]], "columnNames": ["intercept"], "covariance": {"type": "hc3"}},
     }
     proc = _run_analyze(json.dumps(bad_request))
@@ -228,7 +228,7 @@ def test_analyze_process_regression_non_estimable_still_exits_0():
     x1 = [-100.0, -1.0, 1.0, 2.0, 3.0] * 10
     y = [0.0, 0.0, 1.0, 1.0, 1.0] * 10
     request = {
-        "protocolVersion": 5,
+        "protocolVersion": 6,
         "regression": {
             "family": "binomial", "y": y, "X": [[1.0, v] for v in x1],
             "columnNames": ["intercept", "x1"], "covariance": {"type": "hc3"},

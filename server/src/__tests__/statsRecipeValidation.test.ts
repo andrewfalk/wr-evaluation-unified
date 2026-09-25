@@ -188,6 +188,126 @@ describe('validateRecipe — 분석 목적(§실측: 7개 변수 전부 predicti
   });
 });
 
+// PR4-B2 — 예측(prediction) 역할·grain·eventLevel·필터 매트릭스. 위 §실측 테스트(7개
+// 공식점수 변수 전부 prediction 불허)는 그대로 유지한다 — 여전히 참인 사실이다(공식점수는
+// predictionRole 자체가 없다). 여기서는 실제로 predictionRole이 배선된 변수들로 새
+// 검증 분기(statsRecipeValidation.ts의 'prediction' 브랜치)를 확인한다.
+function predictionRecipe(overrides: Partial<StatsAnalysisRecipe> = {}): StatsAnalysisRecipe {
+  return baseRecipe({
+    grain: 'case',
+    variableKeys: ['diagnosis.rollup.anyHighRelatedness', 'patient.identity.gender'],
+    analysisPurpose: 'prediction',
+    analysisMode: 'prediction',
+    prediction: { outcomeKey: 'diagnosis.rollup.anyHighRelatedness', eventLevel: 'true' },
+    ...overrides,
+  });
+}
+
+describe('validateRecipe — 예측(prediction) 역할·grain·eventLevel·필터', () => {
+  it('case grain(boolean outcome + 공통 predictor)을 허용한다', () => {
+    const result = validateRecipe(predictionRecipe(), 'analyze');
+    expect(result.valid, !result.valid ? JSON.stringify(result.errors) : '').toBe(true);
+  });
+
+  it('disease grain(categorical outcome + disease 전용 predictor)을 허용한다', () => {
+    const result = validateRecipe(predictionRecipe({
+      grain: 'disease',
+      variableKeys: ['diagnosis.assessment.status', 'knee.diagnosisSide.klGrade'],
+      prediction: { outcomeKey: 'diagnosis.assessment.status', eventLevel: 'high' },
+    }), 'analyze');
+    expect(result.valid, !result.valid ? JSON.stringify(result.errors) : '').toBe(true);
+  });
+
+  it('job grain은 PREDICTION_GRAIN_NOT_SUPPORTED로 거부한다', () => {
+    const result = validateRecipe(predictionRecipe({
+      grain: 'job',
+      variableKeys: ['diagnosis.rollup.anyHighRelatedness', 'job.identity.tenureYears'],
+    }), 'analyze');
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'PREDICTION_GRAIN_NOT_SUPPORTED')).toBe(true);
+  });
+
+  it('outcomeKey가 predictor 역할 변수면 PREDICTION_OUTCOME_INVALID_ROLE로 거부한다', () => {
+    const result = validateRecipe(predictionRecipe({
+      variableKeys: ['patient.identity.gender', 'patient.identity.bmi'],
+      prediction: { outcomeKey: 'patient.identity.gender', eventLevel: 'true' },
+    }), 'analyze');
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'PREDICTION_OUTCOME_INVALID_ROLE')).toBe(true);
+  });
+
+  it('predictor 자리에 outcome 역할 변수를 섞으면 PREDICTION_PREDICTOR_INVALID_ROLE로 거부한다', () => {
+    const result = validateRecipe(predictionRecipe({
+      variableKeys: ['diagnosis.rollup.anyHighRelatedness', 'diagnosis.assessment.status'],
+    }), 'analyze');
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'PREDICTION_PREDICTOR_INVALID_ROLE')).toBe(true);
+  });
+
+  it('eventLevel이 명세 밖이면 PREDICTION_EVENT_LEVEL_NOT_ALLOWED로 거부한다(boolean outcome은 "true"만 허용)', () => {
+    const result = validateRecipe(predictionRecipe({
+      prediction: { outcomeKey: 'diagnosis.rollup.anyHighRelatedness', eventLevel: 'false' },
+    }), 'analyze');
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'PREDICTION_EVENT_LEVEL_NOT_ALLOWED')).toBe(true);
+  });
+
+  it('disease 전용 predictor(K-L Grade)를 case grain에서 쓰면 VARIABLE_GRAIN_MISMATCH로 거부한다', () => {
+    const result = validateRecipe(predictionRecipe({
+      variableKeys: ['diagnosis.rollup.anyHighRelatedness', 'knee.diagnosisSide.klGrade'],
+    }), 'analyze');
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'VARIABLE_GRAIN_MISMATCH')).toBe(true);
+  });
+
+  it('필터가 predictor 역할 변수면 허용한다', () => {
+    const result = validateRecipe(predictionRecipe({
+      filters: [{ key: 'patient.identity.gender', operator: 'eq', value: 'male' }],
+    }), 'analyze');
+    expect(result.valid, !result.valid ? JSON.stringify(result.errors) : '').toBe(true);
+  });
+
+  it('필터가 등록일(case.meta.registeredAt)이면 허용한다', () => {
+    const result = validateRecipe(predictionRecipe({
+      filters: [{ key: 'case.meta.registeredAt', operator: 'not_missing' }],
+    }), 'analyze');
+    expect(result.valid, !result.valid ? JSON.stringify(result.errors) : '').toBe(true);
+  });
+
+  it('필터가 predictor도 등록일도 아니면(공식점수) PREDICTION_FILTER_LEAKAGE로 거부한다', () => {
+    const result = validateRecipe(predictionRecipe({
+      filters: [{ key: 'knee.relatedness.max', operator: 'not_missing' }],
+    }), 'analyze');
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'PREDICTION_FILTER_LEAKAGE')).toBe(true);
+  });
+
+  it('필터가 outcome 변수 자체여도 PREDICTION_FILTER_LEAKAGE로 거부한다', () => {
+    const result = validateRecipe(predictionRecipe({
+      filters: [{ key: 'diagnosis.rollup.anyHighRelatedness', operator: 'eq', value: true }],
+    }), 'analyze');
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'PREDICTION_FILTER_LEAKAGE')).toBe(true);
+  });
+
+  it('필터가 다른 filter_only 변수(생년월일)여도 PREDICTION_FILTER_LEAKAGE로 거부한다', () => {
+    const result = validateRecipe(predictionRecipe({
+      filters: [{ key: 'patient.identity.birthDate', operator: 'not_missing' }],
+    }), 'analyze');
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'PREDICTION_FILTER_LEAKAGE')).toBe(true);
+  });
+
+  it('requestedMethod가 l2_logistic이 아니면 PREDICTION_METHOD_NOT_SUPPORTED로 거부한다', () => {
+    const result = validateRecipe(predictionRecipe({ requestedMethod: 'ols_linear' }), 'analyze');
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'PREDICTION_METHOD_NOT_SUPPORTED')).toBe(true);
+  });
+  // PURPOSE_MODE_MISMATCH는 zod superRefine(shared/contracts/stats.ts) 책임이다 — 이
+  // 함수는 이미 파싱된(=구조적으로 일관된) StatsAnalysisRecipe를 받으므로 여기서
+  // 재현할 수 없다. shared/contracts/__tests__/statsPrediction.test.ts에서 검증한다.
+});
+
 describe('validateRecipe — formulaPolicy', () => {
   it('spine.mddm.lifetimeDoseMNh는 formulaPolicies.spine_mddm 없이는 거부된다(정책 혼재)', () => {
     const result = validateRecipe(baseRecipe({ variableKeys: ['spine.mddm.lifetimeDoseMNh'] }), 'analyze');

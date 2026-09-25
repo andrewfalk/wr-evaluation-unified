@@ -27,7 +27,9 @@ import { INTEGRATED_CATALOG_VERSION } from './statsCatalogVersion';
 // 올라간다(services/stats-engine/protocol.py, analyze.py) — 엔진 버전도 함께 범프.
 // PR4-A2 — splineContrasts/regressionDiagnostics shape 추가로 protocolVersion이
 // 4→5로 다시 올라간다 — 엔진 버전도 함께 범프.
-export const STATS_ENGINE_VERSION = 'v6-regression-diagnostics-spline';
+// PR4-B2 — prediction shape 추가로 protocolVersion이 5→6으로 다시 올라간다 —
+// 엔진 버전도 함께 범프.
+export const STATS_ENGINE_VERSION = 'v7-prediction';
 
 export interface BuildRunManifestInput {
   recipeDigest: string;
@@ -37,8 +39,8 @@ export interface BuildRunManifestInput {
   formulaPolicies: Record<string, string>;
   // PR3-A — 신규, RunManifestSchema에선 optional이지만(구버전 저장결과 재파싱 호환)
   // 여기 buildRunManifest()는 항상 채운다 — 새로 만드는 manifest는 전부 신버전이므로.
-  // PR4-A1 — 'regression' 추가.
-  analysisMode: 'descriptive' | 'bivariate' | 'correlation_matrix' | 'regression';
+  // PR4-A1 — 'regression' 추가. PR4-B2 — 'prediction' 추가.
+  analysisMode: 'descriptive' | 'bivariate' | 'correlation_matrix' | 'regression' | 'prediction';
   // PR4-B1 — admission이 queued 행 INSERT 시점에 발급한 analysisRunId를 finishRun이
   // succeeded로 종결할 때도 그대로 유지하기 위한 오버라이드. 생략 시 기존처럼 새로 발급
   // (sync 억제/캐시-무관 경로 전부 무수정 호환).
@@ -79,7 +81,9 @@ export interface BuildFailedStatsRunManifestInput {
   sourceDigest: string;
   snapshotAsOf: string;
   formulaPolicies: Record<string, string>;
-  analysisMode: 'descriptive' | 'bivariate' | 'correlation_matrix' | 'regression';
+  // PR4-B2 — 'prediction' 추가(buildRunManifest와 동일 원칙 — pending/failed/cancelled
+  // 3곳이 이 타입 하나를 공유한다).
+  analysisMode: 'descriptive' | 'bivariate' | 'correlation_matrix' | 'regression' | 'prediction';
   // PR4-B1 — buildRunManifest와 동일한 오버라이드 원칙.
   analysisRunId?: string;
 }

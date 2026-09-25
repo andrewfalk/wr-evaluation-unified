@@ -53,6 +53,7 @@ function baseCtx(overrides: Partial<AnalysisContext> = {}): AnalysisContext {
     paired: null, pairDisclosed: false, availableMethods: [], methodCatalogVersion: null,
     correlationMatrixPairs: null, correlationMatrixVariables: null,
     regressionDisclosed: false, regressionDesign: null, regressionExcludedRowCount: null, regressionMethod: null,
+    predictionDisclosed: false, predictionState: null,
     ...overrides,
   };
 }

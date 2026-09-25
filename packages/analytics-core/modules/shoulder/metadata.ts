@@ -64,7 +64,9 @@ export const SHOULDER_METADATA: AnalyticsVariableMetadata[] = [
     ],
     availableAt: 'assessment',
     shownToAssessor: true,
-    allowedAnalysisPurposes: ['association', 'formula_audit'],
+    // PR4-B2 — disease 예측 전용 predictor(계획서 §0단계 허용표).
+    allowedAnalysisPurposes: ['association', 'formula_audit', 'prediction'],
+    predictionRole: 'predictor',
     sensitivity: 'non_sensitive',
     formulaFamily: 'shoulder_ellman_class_side',
     supportedFormulaPolicies: [],

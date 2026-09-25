@@ -12,6 +12,10 @@ const STATUS_MESSAGES = {
   unavailable_no_access: '행 단위 진단(잔차·leverage·Cook\'s D)을 보려면 권한이 필요합니다.',
   unavailable_model: '이 모형은 leverage 계열 진단을 계산할 수 없습니다.',
   unavailable_computation_failed: '일시적으로 진단 계산에 실패했습니다 — 계수·적합도 결과는 정상입니다.',
+  // PR4-B2 — 엔진 동시성 상한은 1이라, 예측(수 분 단위 실행)이 실행 중이면 이
+  // 경량 진단 호출이 그 슬롯과 겹칠 수 있다(statsLimitedRowMerge.ts). 계산
+  // 실패와 구분해 "잠시 후 새로고침하면 될 수 있다"는 신호를 준다.
+  unavailable_engine_busy: '다른 분석이 실행 중이라 지금은 진단을 계산할 수 없습니다 — 잠시 후 새로고침해 보세요.',
 };
 
 const UNSUPPORTED_REASON_LABELS = {

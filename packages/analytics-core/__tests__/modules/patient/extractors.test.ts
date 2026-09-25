@@ -9,6 +9,7 @@ import {
   extractPatientIdentityHighBloodPressure,
   extractPatientIdentityDiabetes,
   extractPatientIdentityBmi,
+  extractPatientIdentityAgeAtEvaluation,
 } from '../../../modules/patient/extractors';
 import { deterministicMigrate } from '../../../migration/deterministicMigrate';
 
@@ -232,5 +233,58 @@ describe('extractPatientIdentityHighBloodPressure/Diabetes — case grain(원본
       missing: 'not_entered',
       qualityFlags: ['invalid'],
     });
+  });
+});
+
+describe('extractPatientIdentityAgeAtEvaluation — case grain(PR4-B2 예측 predictor 신설)', () => {
+  it('정상 생년월일·평가일자면 만 나이를 계산한다', () => {
+    expect(extractPatientIdentityAgeAtEvaluation(patientCase({
+      birthDate: '1990-01-01', evaluationDate: '2024-01-01',
+    }))).toEqual({ value: 34, missing: null, qualityFlags: [] });
+  });
+
+  it('생일이 지나지 않았으면 한 살 적게 계산한다', () => {
+    expect(extractPatientIdentityAgeAtEvaluation(patientCase({
+      birthDate: '1990-06-15', evaluationDate: '2024-01-01',
+    }))).toEqual({ value: 33, missing: null, qualityFlags: [] });
+  });
+
+  it('birthDate가 미입력이면 not_entered(무플래그)', () => {
+    expect(extractPatientIdentityAgeAtEvaluation(patientCase({ evaluationDate: '2024-01-01' })))
+      .toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+  });
+
+  it('evaluationDate가 미입력이면 not_entered(무플래그)', () => {
+    expect(extractPatientIdentityAgeAtEvaluation(patientCase({ birthDate: '1990-01-01' })))
+      .toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+  });
+
+  it('둘 다 미입력이면 not_entered(무플래그)', () => {
+    expect(extractPatientIdentityAgeAtEvaluation(patientCase({})))
+      .toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+  });
+
+  it('형식이 strict ISO가 아니면 invalid', () => {
+    expect(extractPatientIdentityAgeAtEvaluation(patientCase({
+      birthDate: '1990/01/01', evaluationDate: '2024-01-01',
+    }))).toEqual({ value: null, missing: 'not_entered', qualityFlags: ['invalid'] });
+  });
+
+  it('존재하지 않는 캘린더 날짜(예: 2021-02-31)는 invalid', () => {
+    expect(extractPatientIdentityAgeAtEvaluation(patientCase({
+      birthDate: '2021-02-31', evaluationDate: '2024-01-01',
+    }))).toEqual({ value: null, missing: 'not_entered', qualityFlags: ['invalid'] });
+  });
+
+  it('평가일이 생년월일보다 이르면(음수 나이) invalid — calculateAgeStrict가 null 반환', () => {
+    expect(extractPatientIdentityAgeAtEvaluation(patientCase({
+      birthDate: '2024-01-01', evaluationDate: '1990-01-01',
+    }))).toEqual({ value: null, missing: 'not_entered', qualityFlags: ['invalid'] });
+  });
+
+  it('문자열이 아닌 값(배열 등)은 강제변환 없이 invalid', () => {
+    expect(extractPatientIdentityAgeAtEvaluation(patientCase({
+      birthDate: ['1990-01-01'], evaluationDate: '2024-01-01',
+    }))).toEqual({ value: null, missing: 'not_entered', qualityFlags: ['invalid'] });
   });
 });

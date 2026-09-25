@@ -192,6 +192,46 @@ export interface BuildRegressionDesignInput {
   splineKeys: readonly string[];                                // PR4-A2
 }
 
+// PR4-B2 — predictor 사전검사(단일레벨→ZERO_VARIANCE_PREDICTOR, 레벨 과다→
+// TOO_MANY_LEVELS) 추출. 원래 buildRegressionDesignMatrix에 인라인돼 있던 로직을
+// maxLevels를 인자로 받도록(REGRESSION_POLICY.maxLevels 하드코딩 해제) 그대로
+// 옮겼다 — 계획서 §3단계 "association 코드는 동작을 바꾸지 않는 추출로만 공유한다".
+// 아래 buildRegressionDesignMatrix 호출부는 REGRESSION_POLICY.maxLevels를 그대로
+// 넘기므로 회귀 동작은 완전히 불변이다(기존 회귀 테스트가 무수정으로 통과해야 한다).
+export type PredictorVarianceCheckResult =
+  | { ok: true }
+  | { ok: false; reason: 'ZERO_VARIANCE_PREDICTOR' | 'TOO_MANY_LEVELS' };
+
+export function checkPredictorVariance(
+  key: string,
+  variable: AnalyticsVariableMetadata,
+  completeRows: DatasetRow[],
+  maxLevels: number,
+): PredictorVarianceCheckResult {
+  if (variable.type === 'continuous') {
+    const values = completeRows.map((r) => {
+      const raw = r.values[key]?.value;
+      return isFiniteNumber(raw) ? raw : NaN;
+    });
+    if (values.some((v) => Number.isNaN(v))) return { ok: false, reason: 'ZERO_VARIANCE_PREDICTOR' };
+    if (new Set(values).size < 2) return { ok: false, reason: 'ZERO_VARIANCE_PREDICTOR' };
+    return { ok: true };
+  }
+
+  if (variable.type === 'boolean') {
+    const values = completeRows.map((r) => (r.values[key]?.value === true ? 1 : 0));
+    if (new Set(values).size < 2) return { ok: false, reason: 'ZERO_VARIANCE_PREDICTOR' };
+    return { ok: true };
+  }
+
+  // categorical | ordinal
+  const stringValues = completeRows.map((r) => String(r.values[key]?.value));
+  const observedLevels = new Set(stringValues);
+  if (observedLevels.size < 2) return { ok: false, reason: 'ZERO_VARIANCE_PREDICTOR' };
+  if (observedLevels.size > maxLevels) return { ok: false, reason: 'TOO_MANY_LEVELS' };
+  return { ok: true };
+}
+
 function isFiniteNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
@@ -273,13 +313,14 @@ export function buildRegressionDesignMatrix(input: BuildRegressionDesignInput): 
     const variable = catalogByKey.get(key);
     if (!variable) continue; // UNKNOWN_VARIABLE로 이미 statsRecipeValidation.ts가 거부
 
+    // PR4-B2 — 단일레벨/레벨과다 검사는 checkPredictorVariance로 추출했다(동작
+    // 불변, 위 함수 주석 참고). continuous/boolean은 통과 시 여기서 그대로 이어서
+    // 열을 만든다.
+    const varianceCheck = checkPredictorVariance(key, variable, completeRows, REGRESSION_POLICY.maxLevels);
+    if (!varianceCheck.ok) return { ok: false, reason: varianceCheck.reason };
+
     if (variable.type === 'continuous') {
-      const values = completeRows.map((r) => {
-        const raw = r.values[key]?.value;
-        return isFiniteNumber(raw) ? raw : NaN;
-      });
-      if (values.some((v) => Number.isNaN(v))) return { ok: false, reason: 'ZERO_VARIANCE_PREDICTOR' };
-      if (new Set(values).size < 2) return { ok: false, reason: 'ZERO_VARIANCE_PREDICTOR' };
+      const values = completeRows.map((r) => r.values[key]!.value as number);
       rawContinuousValues.set(key, values);
       predictorGroups.set(key, [{ name: key, label: variable.label, level: null, termType: 'main', values: [...values] }]);
       continue;
@@ -287,7 +328,6 @@ export function buildRegressionDesignMatrix(input: BuildRegressionDesignInput): 
 
     if (variable.type === 'boolean') {
       const values = completeRows.map((r) => (r.values[key]?.value === true ? 1 : 0));
-      if (new Set(values).size < 2) return { ok: false, reason: 'ZERO_VARIANCE_PREDICTOR' };
       predictorGroups.set(key, [{ name: key, label: variable.label, level: null, termType: 'main', values }]);
       continue;
     }
@@ -295,12 +335,6 @@ export function buildRegressionDesignMatrix(input: BuildRegressionDesignInput): 
     // categorical | ordinal
     const stringValues = completeRows.map((r) => String(r.values[key]?.value));
     const observedLevels = Array.from(new Set(stringValues));
-
-    // 리뷰 #20 — 더미(k-1열)를 만들기 전에 원 predictor 단위로 레벨 수를 검사한다.
-    // 레벨이 하나뿐이면 더미 열이 0개라 아래 열 분산·rank 검사에 걸릴 대상 자체가
-    // 없어, 사용자가 고른 변수가 조용히 모형에서 사라진다.
-    if (observedLevels.length < 2) return { ok: false, reason: 'ZERO_VARIANCE_PREDICTOR' };
-    if (observedLevels.length > REGRESSION_POLICY.maxLevels) return { ok: false, reason: 'TOO_MANY_LEVELS' };
 
     const { level: referenceLevel, usedFallback } = resolveReferenceLevel(key, observedLevels, referenceLevels[key]);
     if (usedFallback) qualityFlags.push('reference_level_fallback');

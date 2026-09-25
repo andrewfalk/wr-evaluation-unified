@@ -107,7 +107,11 @@ export const SPINE_METADATA: AnalyticsVariableMetadata[] = [
     ],
     availableAt: 'assessment',
     shownToAssessor: true,
-    allowedAnalysisPurposes: ['association', 'formula_audit'],
+    // PR4-B2 — case/disease 예측 양쪽에서 쓰는 predictor(계획서 결정 #3 — 기존
+    // case→disease broadcast 규칙을 그대로 적용). disease grain으로 broadcast된
+    // 값은 그 질환 행 고유 소견이 아니라 사례 공통 소견이다(화면 표시 시 유의).
+    allowedAnalysisPurposes: ['association', 'formula_audit', 'prediction'],
+    predictionRole: 'predictor',
     sensitivity: 'non_sensitive',
     formulaFamily: 'spine_vertical_distribution_common',
     supportedFormulaPolicies: [],
@@ -130,7 +134,9 @@ export const SPINE_METADATA: AnalyticsVariableMetadata[] = [
     ],
     availableAt: 'assessment',
     shownToAssessor: true,
-    allowedAnalysisPurposes: ['association', 'formula_audit'],
+    // PR4-B2 — verticalDistribution과 동일 원칙(case/disease 양쪽, broadcast 표시 유의).
+    allowedAnalysisPurposes: ['association', 'formula_audit', 'prediction'],
+    predictionRole: 'predictor',
     sensitivity: 'non_sensitive',
     formulaFamily: 'spine_concomitant_spondylosis_common',
     supportedFormulaPolicies: [],
@@ -201,7 +207,9 @@ export const SPINE_METADATA: AnalyticsVariableMetadata[] = [
     dependsOn: ['activeModules', 'modules.spine.workDaysPerYear'],
     availableAt: 'assessment',
     shownToAssessor: true,
-    allowedAnalysisPurposes: ['association'],
+    // PR4-B2 — 공통 predictor(계획서 §0단계 허용표 — 원자료-노출).
+    allowedAnalysisPurposes: ['association', 'prediction'],
+    predictionRole: 'predictor',
     sensitivity: 'non_sensitive',
     formulaFamily: 'spine_career_legacy',
     supportedFormulaPolicies: [],

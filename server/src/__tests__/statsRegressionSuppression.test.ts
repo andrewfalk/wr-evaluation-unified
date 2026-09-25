@@ -69,6 +69,8 @@ function makeCtx(design: RegressionDesignResult | null, excludedRowCount = 0): A
     regressionDesign: design,
     regressionExcludedRowCount: excludedRowCount,
     regressionMethod: 'ols_linear',
+    predictionDisclosed: false,
+    predictionState: null,
   };
 }
 

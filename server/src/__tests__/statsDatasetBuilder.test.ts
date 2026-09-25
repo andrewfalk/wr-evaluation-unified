@@ -228,3 +228,54 @@ describe('buildDataset — personClusterKey', () => {
     expect(a.rows[0].personClusterKey).not.toBe(b.rows[0].personClusterKey);
   });
 });
+
+// PR4-B2 — cohortPersonKey는 opts.cohortDigest를 넘겼을 때만 채워지는 서버 전용
+// 필드다(계획서 §3-1단계). 기존 association/regression 호출(opts 생략)은 undefined로
+// 남아야 한다 — 이 계약이 §5단계 "DatasetRow가 어떤 HTTP 응답에도 직렬화되지 않는다"
+// 테스트의 전제다.
+describe('buildDataset — cohortPersonKey(opts.cohortDigest)', () => {
+  it('opts를 생략하면 cohortPersonKey는 undefined다(기존 호출 무변경)', () => {
+    const rows = [makeSnapshotRow('case-1', 'person-1')];
+    const result = buildDataset(rows, recipe(), RECIPE_DIGEST, CATALOG_BY_KEY);
+    expect(result.rows[0].cohortPersonKey).toBeUndefined();
+  });
+
+  it('opts.cohortDigest를 넘기면 cohortPersonKey가 채워진다', () => {
+    const rows = [makeSnapshotRow('case-1', 'person-1')];
+    const result = buildDataset(rows, recipe(), RECIPE_DIGEST, CATALOG_BY_KEY, { cohortDigest: 'cohort-digest-1' });
+    expect(result.rows[0].cohortPersonKey).toMatch(/^[0-9a-f]{22}$/);
+  });
+
+  it('cohortPersonKey는 recipeDigest가 아니라 cohortDigest로 결정된다(personClusterKey와 독립)', () => {
+    const rows = [makeSnapshotRow('case-1', 'person-1')];
+    const a = buildDataset(rows, recipe(), 'recipe-digest-a', CATALOG_BY_KEY, { cohortDigest: 'cohort-digest-1' });
+    const b = buildDataset(rows, recipe(), 'recipe-digest-b', CATALOG_BY_KEY, { cohortDigest: 'cohort-digest-1' });
+    // recipeDigest가 달라 personClusterKey는 다르지만
+    expect(a.rows[0].personClusterKey).not.toBe(b.rows[0].personClusterKey);
+    // cohortDigest가 같으므로 cohortPersonKey는 같다.
+    expect(a.rows[0].cohortPersonKey).toBe(b.rows[0].cohortPersonKey);
+  });
+
+  it('같은 person의 여러 case 행은 같은 cohortPersonKey를 공유한다', () => {
+    const rows = [makeSnapshotRow('case-1', 'person-1'), makeSnapshotRow('case-2', 'person-1')];
+    const result = buildDataset(rows, recipe(), RECIPE_DIGEST, CATALOG_BY_KEY, { cohortDigest: 'cohort-digest-1' });
+    expect(result.rows[0].cohortPersonKey).toBe(result.rows[1].cohortPersonKey);
+  });
+
+  it('disease grain(반복 grain 경로)에서도 cohortPersonKey가 채워진다', () => {
+    const rows = [makeSnapshotRow('case-1', 'person-1', {
+      shared: { diagnoses: [{ id: 'd1', code: 'M17.0', name: '무릎관절증', moduleId: 'knee', side: 'right' }] },
+    })];
+    const result = buildDataset(
+      rows,
+      recipe({ grain: 'disease', variableKeys: ['diagnosis.identity.moduleGroup'] }),
+      RECIPE_DIGEST,
+      INTEGRATED_CATALOG_BY_KEY,
+      { cohortDigest: 'cohort-digest-1' },
+    );
+    expect(result.rows.length).toBeGreaterThan(0);
+    for (const row of result.rows) {
+      expect(row.cohortPersonKey).toMatch(/^[0-9a-f]{22}$/);
+    }
+  });
+});

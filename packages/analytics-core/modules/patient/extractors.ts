@@ -4,7 +4,7 @@
 // 기존 extractor의 "모듈 비활성 → structural_missing" 1단계가 적용되지 않는다.
 
 import type { ExtractedValue, MigrationResult } from '../../types';
-import { parseStrictIsoDate } from '../../dates';
+import { parseStrictIsoDate, calculateAgeStrict } from '../../dates';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
 
 // null/undefined/공백 문자열만 "미입력"이다 — String(x)로 뭉뚱그리면 []나 [null]이
@@ -133,4 +133,28 @@ export function extractPatientIdentityBmi(migrationResult: MigrationResult<Analy
     return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
   }
   return { value: bmi, missing: null, qualityFlags: [] };
+}
+
+// PR4-B2 — 예측 predictor 신설(계획서 §2단계 "patient.identity.ageAtEvaluation").
+// calculateAgeStrict(dates.ts:51)로 계산한다 — 타임존에 의존하는 Date 산술을 쓰지
+// 않는다. 둘 중 하나라도 공백이면 not_entered, 형식이 틀리거나(strict ISO 아님)
+// 평가일이 생년월일보다 이르면(음수 나이) invalid — calculateAgeStrict가 두 경우
+// 모두 null을 반환하므로 blank 여부로만 두 상태를 가른다.
+export function extractPatientIdentityAgeAtEvaluation(
+  migrationResult: MigrationResult<AnalysisPatient>,
+): ExtractedValue<number> {
+  const shared = getShared(migrationResult);
+  const birth = shared['birthDate'];
+  const evaluation = shared['evaluationDate'];
+  if (isBlank(birth) || isBlank(evaluation)) {
+    return { value: null, missing: 'not_entered', qualityFlags: [] };
+  }
+  if (typeof birth !== 'string' || typeof evaluation !== 'string') {
+    return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  }
+  const age = calculateAgeStrict(birth, evaluation);
+  if (age === null) {
+    return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  }
+  return { value: age, missing: null, qualityFlags: [] };
 }

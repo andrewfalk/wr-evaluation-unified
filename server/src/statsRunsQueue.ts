@@ -24,6 +24,7 @@ import { buildStatsEngineRequest, computeDescriptiveSuppression } from './statsD
 import { computeBivariateAnalyzeResult } from './statsBivariateSuppression';
 import { computeCorrelationMatrixAnalyzeResult } from './statsCorrelationMatrixSuppression';
 import { computeRegressionAnalyzeResult } from './statsRegressionSuppression';
+import { computePredictionAnalyzeResult } from './statsPredictionSuppression';
 import { errorCodeForFailure } from './statsEngineErrorMapping';
 import { writeAuditLogStrict, type AuditOutcome } from './middleware/audit';
 import { withWriteTransaction } from './db/withWriteTransaction';
@@ -52,12 +53,13 @@ export function __getActiveRunsSizeForTests(): number {
 
 // ---------------------------------------------------------------------------
 // §0 보존정책 — descriptive/bivariate/regression은 limited_row 재구성이 필요하므로
-// 성공 후에도 expires_at까지 보존. correlation_matrix만 그 메커니즘이 없으므로
-// 성공 확정 직후 즉시 NULL화. 모든 실패/취소/orphan/버전드리프트 종결은
-// analysisMode 무관하게 즉시 NULL화.
+// 성공 후에도 expires_at까지 보존. correlation_matrix·prediction은 그 메커니즘이
+// 없으므로(예측은 집계 성능 CSV만 export — 계획서 §7단계) 성공 확정 직후 즉시
+// NULL화. 모든 실패/취소/orphan/버전드리프트 종결은 analysisMode 무관하게 즉시
+// NULL화.
 // ---------------------------------------------------------------------------
 function frozenDatasetAfterSuccess(analysisMode: string, frozen: FrozenAnalysisInput | null): FrozenAnalysisInput | null {
-  if (analysisMode === 'correlation_matrix') return null;
+  if (analysisMode === 'correlation_matrix' || analysisMode === 'prediction') return null;
   return frozen;
 }
 
@@ -112,7 +114,7 @@ async function writeTerminalOutcome(
       engineVersion: row.manifest.engineVersion,
       serializerVersion: row.manifest.serializerVersion,
       inferenceGatePolicyVersion: row.manifest.inferenceGatePolicyVersion,
-      analysisMode: analysisMode as 'descriptive' | 'bivariate' | 'correlation_matrix' | 'regression',
+      analysisMode: analysisMode as 'descriptive' | 'bivariate' | 'correlation_matrix' | 'regression' | 'prediction',
     });
     await client.query(
       `UPDATE stats_runs SET status='succeeded', cacheable=$2, result=$3, manifest=$4,
@@ -134,7 +136,7 @@ async function writeTerminalOutcome(
   if (outcome.kind === 'failed') {
     const manifest = buildFailedStatsRunManifest({
       recipeDigest: row.recipe_digest, sourceDigest: row.source_digest, snapshotAsOf: row.manifest.snapshotAsOf,
-      formulaPolicies, analysisMode: analysisMode as 'descriptive' | 'bivariate' | 'correlation_matrix' | 'regression',
+      formulaPolicies, analysisMode: analysisMode as 'descriptive' | 'bivariate' | 'correlation_matrix' | 'regression' | 'prediction',
       analysisRunId: row.analysis_run_id,
     });
     await client.query(
@@ -154,7 +156,7 @@ async function writeTerminalOutcome(
   // cancelled
   const manifest = buildCancelledStatsRunManifest({
     recipeDigest: row.recipe_digest, sourceDigest: row.source_digest, snapshotAsOf: row.manifest.snapshotAsOf,
-    formulaPolicies, analysisMode: analysisMode as 'descriptive' | 'bivariate' | 'correlation_matrix' | 'regression',
+    formulaPolicies, analysisMode: analysisMode as 'descriptive' | 'bivariate' | 'correlation_matrix' | 'regression' | 'prediction',
     analysisRunId: row.analysis_run_id,
   });
   await client.query(
@@ -360,6 +362,10 @@ async function runEngineFor(ctx: AnalysisContext, opts: EngineRunOpts): Promise<
   if (ctx.recipe.analysisMode === 'regression') {
     const regression = await computeRegressionAnalyzeResult(ctx, opts);
     return { continuous: [], discrete: [], regression };
+  }
+  if (ctx.recipe.analysisMode === 'prediction') {
+    const prediction = await computePredictionAnalyzeResult(ctx, opts);
+    return { continuous: [], discrete: [], prediction };
   }
   const request = buildStatsEngineRequest(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey);
   const raw = await runStatsEngine(request, opts);

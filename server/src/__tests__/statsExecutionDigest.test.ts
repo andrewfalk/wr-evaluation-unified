@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { computeExecutionDigest } from '../statsExecutionDigest';
 import * as canonicalSerializer from '../canonicalSerializer';
+import { PREDICTION_POLICY } from '../statsPolicy';
 
 const base = {
   organizationId: 'org-1',
@@ -100,16 +101,20 @@ describe('computeExecutionDigest — B안 버전 상수 3개(같은 모듈 상�
     const spy = vi.spyOn(canonicalSerializer, 'canonicalDigest');
     try {
       const currentDigest = computeExecutionDigest(base);
-      expect(spy).toHaveBeenCalledTimes(1);
-      const capturedInput = spy.mock.calls[0][0] as Record<string, unknown>;
+      // PR4-B2 — predictionPolicyDigest:canonicalDigest(PREDICTION_POLICY)가 해시
+      // 입력 객체 리터럴 안에서 먼저 평가되므로(자바스크립트 프로퍼티 값 평가
+      // 순서), 실제 전체 입력을 넘기는 바깥쪽 호출은 두 번째(마지막) 호출이다.
+      expect(spy).toHaveBeenCalledTimes(2);
+      const capturedInput = spy.mock.calls[1][0] as Record<string, unknown>;
 
       // (1) export된 값을 다시 읽어와 자기 자신과 비교하지 않는다 — 정답을 하드코딩.
       expect(capturedInput.chartDisclosurePolicyVersion).toBe('v2-histogram-adaptive-resolution');
       expect(capturedInput.suppressionRuleVersion).toBe('v5-histogram-adaptive-resolution');
       // PR4-A1 — AnalyzeResult.regression 필드가 추가돼 v4-histogram-merge-fields →
       // v5-regression으로 범프됐다. PR4-A2 — diagnostics/spline 필드 추가로
-      // v6-regression-diagnostics-spline으로 다시 범프됐다.
-      expect(capturedInput.resultSchemaVersion).toBe('v6-regression-diagnostics-spline');
+      // v6-regression-diagnostics-spline으로 범프됐다. PR4-B2 — AnalyzeResult.
+      // prediction 필드가 추가돼 v7-prediction으로 다시 범프됐다.
+      expect(capturedInput.resultSchemaVersion).toBe('v7-prediction');
 
       // (2) 각 필드를 범프 전 값으로 되돌리면 실제로 다른 digest가 나오는지(=이
       // 필드들이 죽은 값이 아니라 실제로 해시에 반영되는지) 확인한다. 스파이는
@@ -139,9 +144,13 @@ describe('computeExecutionDigest — PR4-A1 회귀 정책 버전 3개 캐시 무
     const spy = vi.spyOn(canonicalSerializer, 'canonicalDigest');
     try {
       const currentDigest = computeExecutionDigest(base);
-      const capturedInput = spy.mock.calls[0][0] as Record<string, unknown>;
+      // PR4-B2 — predictionPolicyDigest 계산이 먼저 canonicalDigest를 한 번 더
+      // 호출하므로 바깥쪽 진짜 입력은 마지막 호출이다(위 B안 블록과 동일 이유).
+      const capturedInput = spy.mock.calls[spy.mock.calls.length - 1][0] as Record<string, unknown>;
 
-      expect(capturedInput.methodPolicyVersion).toBe('v3-regression-categorical-outcome');
+      // PR4-B2 — methodPolicyVersion은 prediction 추가로 v3-regression-categorical-outcome
+      // → v4-prediction-l2-logistic으로 다시 범프됐다.
+      expect(capturedInput.methodPolicyVersion).toBe('v4-prediction-l2-logistic');
       expect(capturedInput.estimabilityPolicyVersion).toBe('v1-regression-design');
       expect(capturedInput.regressionPolicyVersion).toBe('v2-diagnostics-spline');
 
@@ -162,11 +171,16 @@ describe('computeExecutionDigest — PR4-A1 회귀 정책 버전 3개 캐시 무
         // PR4-A2 — binary_logistic이 categorical outcome도 허용하도록 바뀌어
         // v2-regression → v3-regression-categorical-outcome으로 다시 범프됐다.
         methodPolicyVersionPrevious: 'v2-regression',
+        // PR4-B2 — computePredictionAvailableMethods(l2_logistic) 추가로
+        // v3-regression-categorical-outcome → v4-prediction-l2-logistic으로
+        // 다시 범프됐다.
+        methodPolicyVersionPredictionPrevious: 'v3-regression-categorical-outcome',
       };
       const FIELD_ALIASES: Record<string, string> = {
         regressionPolicyVersionRankFixPrevious: 'regressionPolicyVersion',
         regressionPolicyVersionDiagnosticsPrevious: 'regressionPolicyVersion',
         methodPolicyVersionPrevious: 'methodPolicyVersion',
+        methodPolicyVersionPredictionPrevious: 'methodPolicyVersion',
       };
       for (const key of Object.keys(OLD_VALUES)) {
         const staleKey = FIELD_ALIASES[key] ?? key;
@@ -174,6 +188,31 @@ describe('computeExecutionDigest — PR4-A1 회귀 정책 버전 3개 캐시 무
         const staleDigest = canonicalSerializer.canonicalDigest(staleInput);
         expect(staleDigest).not.toBe(currentDigest);
       }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+// PR4-B2 — PREDICTION_POLICY는 다른 정책처럼 손으로 관리하는 버전 문자열 하나가
+// 아니라 canonicalDigest(PREDICTION_POLICY) 전체를 해시 입력에 담는다(위 §설계
+// 의도 주석 참고) — λ 격자·fold 수처럼 결과에 직접 영향을 주는 상수가 버전
+// 문자열을 안 바꾸고도 조용히 바뀌면 캐시가 무효화되지 않기 때문이다. 이 값이
+// 실제로 해시에 반영되는지(죽은 필드가 아닌지) 직접 확인한다.
+describe('computeExecutionDigest — PREDICTION_POLICY 전체 해시 캐시 무효화', () => {
+  it('predictionPolicyDigest가 PREDICTION_POLICY 내용을 반영하고, 값이 바뀌면 digest도 바뀐다', () => {
+    const spy = vi.spyOn(canonicalSerializer, 'canonicalDigest');
+    try {
+      const currentDigest = computeExecutionDigest(base);
+      expect(spy).toHaveBeenCalledTimes(2);
+      // 첫 호출이 predictionPolicyDigest 계산 자체(canonicalDigest(PREDICTION_POLICY)).
+      expect(spy.mock.calls[0][0]).toEqual(PREDICTION_POLICY);
+      const capturedInput = spy.mock.calls[1][0] as Record<string, unknown>;
+      expect(typeof capturedInput.predictionPolicyDigest).toBe('string');
+
+      const staleInput = { ...capturedInput, predictionPolicyDigest: canonicalSerializer.canonicalDigest({ ...PREDICTION_POLICY, maxRows: 999 }) };
+      const staleDigest = canonicalSerializer.canonicalDigest(staleInput);
+      expect(staleDigest).not.toBe(currentDigest);
     } finally {
       spy.mockRestore();
     }

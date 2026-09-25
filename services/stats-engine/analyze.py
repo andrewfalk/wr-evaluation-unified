@@ -15,6 +15,7 @@ from typing import Any
 
 import bivariate
 import correlation_matrix as correlation_matrix_module
+import prediction as prediction_module
 import regression as regression_module
 from boxplot import compute_boxplot
 from descriptive import compute_continuous, compute_discrete
@@ -23,7 +24,8 @@ from protocol import ProtocolError, parse_and_validate_request
 
 # PR4-A2 — splineContrasts/regressionDiagnostics shape 추가로 4→5. 계획서
 # §3 "spline 부분효과"/§4 "limited_row 진단값".
-PROTOCOL_VERSION = 5
+# PR4-B2 — prediction shape 추가로 5→6(계획서 §4단계).
+PROTOCOL_VERSION = 6
 
 _BIVARIATE_DISPATCH = {
     "welch_t": lambda b: bivariate.welch_t(b["groups"]),
@@ -99,6 +101,11 @@ def run_regression_diagnostics(request: dict[str, Any]) -> dict[str, Any]:
     return {"protocolVersion": PROTOCOL_VERSION, "regressionDiagnostics": result}
 
 
+def run_prediction(request: dict[str, Any]) -> dict[str, Any]:
+    result = prediction_module.compute_prediction(request["prediction"])
+    return {"protocolVersion": PROTOCOL_VERSION, "prediction": result}
+
+
 def run_analysis(request: dict[str, Any]) -> dict[str, Any]:
     if "correlationMatrix" in request:
         return run_correlation_matrix(request)
@@ -106,6 +113,8 @@ def run_analysis(request: dict[str, Any]) -> dict[str, Any]:
         return run_regression(request)
     if "regressionDiagnostics" in request:
         return run_regression_diagnostics(request)
+    if "prediction" in request:
+        return run_prediction(request)
     if "bivariate" in request:
         return run_bivariate(request)
     return run_descriptive(request)

@@ -155,7 +155,9 @@ WRIST_METADATA.push(
     dependsOn: TEMPORAL_BASE_DEPENDS_ON,
     availableAt: 'assessment',
     shownToAssessor: true,
-    allowedAnalysisPurposes: ['association'],
+    // PR4-B2 — 공통 predictor(계획서 §0단계 허용표 — 원자료-노출).
+    allowedAnalysisPurposes: ['association', 'prediction'],
+    predictionRole: 'predictor',
     sensitivity: 'non_sensitive',
     formulaFamily: 'wrist_temporal_raw',
     supportedFormulaPolicies: [],
@@ -204,7 +206,9 @@ WRIST_METADATA.push(
     dependsOn: TEMPORAL_BASE_DEPENDS_ON,
     availableAt: 'assessment',
     shownToAssessor: true,
-    allowedAnalysisPurposes: ['association'],
+    // PR4-B2 — 공통 predictor. 증상 경과 정보이지 정량 노출이 아니다.
+    allowedAnalysisPurposes: ['association', 'prediction'],
+    predictionRole: 'predictor',
     sensitivity: 'non_sensitive',
     formulaFamily: 'wrist_temporal_raw',
     supportedFormulaPolicies: [],

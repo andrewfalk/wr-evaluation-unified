@@ -78,4 +78,9 @@ export interface AnalyticsVariableMetadata {
   // 두 곳을 일치시킨다). 등록일처럼 분석 변수로는 부적절하지만(date 타입 — 기술통계 예외
   // 경로에 걸림) 필터로는 유용한 변수에 쓴다.
   analysisRole?: 'analyzable' | 'filter_only';
+  // PR4-B2 — 예측(prediction) 분석 전용 역할표(계획서 §2단계). 미지정이면 예측
+  // outcome/predictor 어느 쪽도 아니다(analysisPurpose에 'prediction'을 허용해도
+  // getIntegratedCatalog() 기동 검사가 role 누락을 막는다 — dependsOn은 변수 key가
+  // 아니라 raw 필드 경로라서 이 역할표 없이는 누출 검사가 발동하지 않는다).
+  predictionRole?: 'outcome' | 'predictor';
 }

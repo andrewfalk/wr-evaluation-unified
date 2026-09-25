@@ -32,6 +32,9 @@ const METHOD_LABELS: Record<StatsMethodId, string> = {
   // availableMethods 목록에 회귀 방법이 섞여 나온다(리뷰로 잡힌 함정).
   ols_linear: '선형회귀(OLS)',
   binary_logistic: '이분 로지스틱 회귀',
+  // PR4-B2 — 예측 전용 방법. BIVARIATE_METHOD_IDS/REGRESSION_METHOD_IDS 순회에도
+  // 넣지 않는다(같은 함정 — prediction availableMethods는 별도 계산 경로를 쓴다).
+  l2_logistic: 'L2 정칙화 로지스틱(예측)',
 };
 
 // PR3-A~B가 만들던 이변량 목록은 `Object.keys(METHOD_LABELS)` 전수 순회에
@@ -342,4 +345,49 @@ export function computeRegressionAvailableMethods(
       methodPolicyVersion,
     };
   });
+}
+
+// PR4-B2 — 예측은 방법이 l2_logistic 1종뿐이라 회귀처럼 outcome 타입별 후보
+// 목록을 순회하지 않는다(계획서 §5단계). A-1 수준 구조적 사실(S2 인원 0건·
+// outcome 역할 불일치)만 판정한다 — EPV·fold class 등 데이터 의존 세부 사유는
+// ③ 공개통제 이후에만 statsPredictionCohort.ts가 계산한다(같은 원칙).
+export function computePredictionAvailableMethods(
+  s2PersonCount: number,
+  outcomeKey: string | null,
+  catalogByKey: Map<string, AnalyticsVariableMetadata>,
+  methodPolicyVersion: string,
+): AvailableMethod[] {
+  const observed = { personCount: s2PersonCount, rowCount: s2PersonCount };
+  const outcomeVar = outcomeKey ? catalogByKey.get(outcomeKey) : undefined;
+
+  // 코드리뷰(2026-09-25) — s2PersonCount===0을 여기서 INSUFFICIENT_DATA/
+  // unsupported로 판정하면 statsAnalyzeHandler.ts의 실행가능 게이트가 그 자리에서
+  // 400 METHOD_NOT_AVAILABLE로 끝내버려, computePredictionAnalyzeResult가 도달하는
+  // OUTCOME_NOT_OBSERVED/INSUFFICIENT_PERSONS 같은 계획에 명시된 non_estimable
+  // 사유(§3-4단계 1~10번)가 영영 응답에 나타나지 못한다(공개통제는 통과했는데도).
+  // 이 함수는 방법 자체의 구조적 적합성(outcome 역할)만 판정하고, 데이터량에 따른
+  // 추정 가능 여부는 오직 statsPredictionCohort.ts의 비추정 판정 파이프라인에만
+  // 맡긴다 — "방법 적합성 검사"와 "데이터에 따른 추정 불가 처리"를 분리한다.
+  let status: MethodResult['status'];
+  let reasonCode: StatsMethodReasonCode | null;
+  if (!outcomeKey || !outcomeVar || outcomeVar.predictionRole !== 'outcome') {
+    status = 'unsupported';
+    reasonCode = 'METHOD_TYPE_MISMATCH';
+  } else {
+    status = 'available';
+    reasonCode = null;
+  }
+
+  return [{
+    id: 'l2_logistic',
+    label: METHOD_LABELS.l2_logistic,
+    purpose: 'prediction',
+    status,
+    reasonCode,
+    observed,
+    required: null,
+    remedy: null,
+    remedyRecipePatch: null,
+    methodPolicyVersion,
+  }];
 }

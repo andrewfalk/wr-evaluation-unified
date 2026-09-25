@@ -9,6 +9,7 @@ import { CorrelationHeatmap } from '../charts/CorrelationHeatmap';
 import { ForestPlot } from '../charts/ForestPlot';
 import { RegressionDiagnosticsPanel } from '../charts/RegressionDiagnosticsPanel';
 import { SplinePartialEffectChart } from '../charts/SplinePartialEffectChart';
+import { CurveChart } from '../charts/CurveChart';
 
 const NULL_REASON_LABELS = {
   insufficient_data: '자료 부족',
@@ -29,6 +30,40 @@ const METHOD_LABELS = {
   paired_t: '대응 t 검정', wilcoxon_signed_rank: 'Wilcoxon 부호순위검정',
   // PR4-A1 — RecipePanel.jsx의 METHOD_LABELS와 중복(위 주석 참고, 의도적).
   ols_linear: '선형회귀(OLS)', binary_logistic: '이분 로지스틱 회귀',
+  // PR4-B2
+  l2_logistic: 'L2 정칙화 로지스틱 회귀(ridge)',
+};
+// PR4-B2 — computePredictionNonEstimableReason(1~10) + 엔진(NOT_CONVERGED, 11번).
+// 사유별로 다르게 쓴다(회귀와 동일 원칙 — "데이터 구조 문제"로 뭉치지 않는다).
+const PREDICTION_NON_ESTIMABLE_LABELS = {
+  OUTCOME_NOT_OBSERVED: '결과변수가 관측된 사례가 없습니다.',
+  EVENT_LEVEL_NOT_OBSERVED: '선택한 사건 레벨이 관측된 사례가 없습니다.',
+  NON_EVENT_LEVEL_NOT_OBSERVED: '비사건 레벨이 관측된 사례가 없습니다.',
+  INSUFFICIENT_PERSONS: '표본(사람) 수가 부족합니다.',
+  INSUFFICIENT_EVENT_PERSONS: '사건/비사건 인원 수가 부족합니다.',
+  ZERO_VARIANCE_PREDICTOR: '값이 전부 동일한 설명변수가 있습니다.',
+  TOO_MANY_LEVELS: '범주형 설명변수의 수준이 너무 많습니다.',
+  TOO_MANY_COLUMNS: '설명변수(범주 포함)가 너무 많습니다.',
+  TOO_MANY_PARAMETERS: '설명변수(범주 포함)가 너무 많아 자유도가 부족합니다.',
+  INSUFFICIENT_EVENTS_PER_PARAMETER: '사건 수 대비 설명변수가 너무 많습니다(EPV 기준 미달).',
+  FOLD_CLASS_MISSING: '교차검증 분할 중 한쪽 사건이 비는 분할이 있습니다.',
+  NOT_CONVERGED: '계산이 수렴하지 않았습니다.',
+};
+// PR4-B2 — PredictionCaveatSchema(shared/contracts/stats.ts)와 동일 목록.
+const PREDICTION_CAVEAT_LABELS = {
+  RESEARCH_INTERNAL_VALIDATION: '연구용 내부검증 결과입니다.',
+  NOT_FOR_DEPLOYMENT: '실제 판정·배포에 쓰지 않습니다.',
+  TEMPORAL_VALIDATION_NOT_PERFORMED: '시간분할(temporal holdout) 검증은 하지 않았습니다 — 후속 필수 과제입니다.',
+  SUBGROUP_PERFORMANCE_NOT_PERFORMED: '하위집단별 성능 분석은 하지 않았습니다 — 후속 필수 과제입니다.',
+  EXTERNAL_VALIDATION_NOT_PERFORMED: '외부(다른 기관·시점) 검증은 하지 않았습니다 — 별도 연구가 필요합니다.',
+  SAME_ASSESSOR_FINDINGS: '선택한 설명변수 중 임상 판단값이 있어, 결과변수 판정과 같은 평가자가 매긴 값입니다.',
+  LATEST_PAYLOAD_LEAKAGE_POSSIBLE: '설명변수는 현재 시점 기준 값입니다 — 판정 당시 시점의 값과 다를 수 있습니다.',
+  RAW_EXPOSURE_FORMULA_INPUT: '일부 설명변수는 작업부담 공식의 원시 입력값입니다.',
+  USER_MODEL_SELECTION_NOT_CORRECTED: '변수·모형 선택 과정의 다중비교 보정은 하지 않았습니다.',
+};
+const PREDICTION_METRIC_LABELS = {
+  roc_auc: 'AUC(ROC)', average_precision: '평균정밀도(AP)', brier: 'Brier score',
+  calibration_intercept: '보정 절편', calibration_slope: '보정 기울기',
 };
 // PR4-A1 — inferenceWithheldReason별 안내 문구. 원인이 다른데 같은 문구로 뭉치면
 // 사용자가 데이터 구조 문제로 오해한다(계획서 §5 "사유별로 다르게 쓴다").
@@ -627,11 +662,149 @@ function RegressionResultCard({ regression, catalogByKey }) {
   );
 }
 
+const PREDICTION_CV_WITHHELD_LABELS = { LOW_VALID_REPEATS: '유효 반복 수 부족' };
+const PREDICTION_BOOTSTRAP_WITHHELD_LABELS = {
+  APPARENT_UNAVAILABLE: 'apparent 값 없음', LOW_VALID_REPLICATES: '유효 복제 수 부족',
+};
+
+function predictionCvCell(cv) {
+  if (cv.status === 'withheld') {
+    return `보류: 유효 ${cv.validRepeats}/${cv.totalRepeats}${cv.withheldReason ? ` (${PREDICTION_CV_WITHHELD_LABELS[cv.withheldReason] || cv.withheldReason})` : ''}`;
+  }
+  return `${num(cv.mean, 3)} [${num(cv.min, 3)}–${num(cv.max, 3)}] (유효 ${cv.validRepeats}/${cv.totalRepeats})`;
+}
+
+function predictionBootstrapCell(bootstrap) {
+  if (bootstrap.status === 'withheld') {
+    return `보류: 유효 ${bootstrap.validReplicates}/${bootstrap.totalReplicates}${bootstrap.withheldReason ? ` (${PREDICTION_BOOTSTRAP_WITHHELD_LABELS[bootstrap.withheldReason] || bootstrap.withheldReason})` : ''}`;
+  }
+  const warn = bootstrap.correctedOutOfRange ? ' ⚠ 범위 밖' : '';
+  return `${num(bootstrap.corrected, 3)} (유효 ${bootstrap.validReplicates}/${bootstrap.totalReplicates})${warn}`;
+}
+
+// PR4-B2 §6단계 "ResultPanel.jsx — PredictionResultCard": 1)억제·추정불가 2)지표표
+// 3)곡선/calibration 4)계수 5)주의문 순서. "층화 기준과 결과 카운트는 다를 수
+// 있음" 도움말은 personCount(S2, 완전사례 기준 최종 분석자료)와 cohortDigest가
+// 만드는 층화 기준(기준 코호트, 예측변수와 무관) 사이의 잠재적 차이를 설명한다.
+function PredictionResultCard({ prediction, catalogByKey }) {
+  if (prediction.suppressed) {
+    return (
+      <div className="swb-card">
+        <strong>{METHOD_LABELS.l2_logistic}</strong>
+        <p className="swb-suppressed-note">공개 정책에 따라 결과가 표시되지 않음(표본 크기 등).</p>
+      </div>
+    );
+  }
+
+  const outcomeLabel = variableLabel(catalogByKey, prediction.outcomeKey);
+
+  if (prediction.estimation === 'non_estimable') {
+    return (
+      <div className="swb-card">
+        <strong>{METHOD_LABELS.l2_logistic}</strong>
+        <p className="swb-card-subtitle">결과변수: {outcomeLabel} (사건={prediction.eventLevel})</p>
+        <p className="swb-suppressed-note">
+          {PREDICTION_NON_ESTIMABLE_LABELS[prediction.nonEstimableReason] || '현재 데이터로 계산할 수 없습니다.'}
+        </p>
+      </div>
+    );
+  }
+
+  const rocAucMetric = prediction.metrics.find((m) => m.metric === 'roc_auc');
+
+  return (
+    <div className="swb-card">
+      <strong>{METHOD_LABELS.l2_logistic}</strong>
+      <p className="swb-card-subtitle">
+        결과변수: {outcomeLabel} (사건={prediction.eventLevel}) ·
+        {' '}n={prediction.n} · 표본 {prediction.personCount}명(사건 {prediction.eventPersonCount} / 비사건 {prediction.nonEventPersonCount})
+      </p>
+      <p className="swb-suppressed-note">
+        층화 기준(기준 코호트)과 위 표본 수(최종 분석자료, 완전사례)는 서로 다를 수 있습니다 — 기준 코호트는 예측변수 선택과 무관하게 결과변수·필터만으로 정해집니다.
+      </p>
+
+      <div className="swb-table-scroll">
+        <table className="swb-table" aria-label="예측 성능 지표표">
+          <thead>
+            <tr><th>지표</th><th>apparent</th><th>CV 평균[최소–최대] (유효 n/R)</th><th>bootstrap 보정 (유효 n/B)</th><th>반복 1</th></tr>
+          </thead>
+          <tbody>
+            {prediction.metrics.map((m) => (
+              <tr key={m.metric}>
+                <td>{PREDICTION_METRIC_LABELS[m.metric] || m.metric}</td>
+                <td>{num(m.apparent, 3)}</td>
+                <td>
+                  {predictionCvCell(m.cv)}
+                  {m.metric === 'roc_auc' && prediction.aucCi && (
+                    <> · 95% CI {fmtCi([prediction.aucCi.lower, prediction.aucCi.upper])}</>
+                  )}
+                </td>
+                <td>{predictionBootstrapCell(m.bootstrap)}</td>
+                <td>{num(m.representativeRepeat, 3)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!prediction.aucCi && rocAucMetric?.cv.status === 'ok' && (
+        <p className="swb-suppressed-note">AUC의 95% 신뢰구간은 계산되지 않았습니다.</p>
+      )}
+
+      <div className="swb-section-label">ROC 곡선</div>
+      <CurveChart curves={prediction.curves} kind="roc" />
+      <div className="swb-section-label">PR 곡선</div>
+      <CurveChart curves={prediction.curves} kind="pr" />
+      <div className="swb-section-label">Calibration 곡선</div>
+      <CurveChart curves={prediction.curves} kind="calibration" />
+      {prediction.curves?.bins && (
+        <p className="swb-suppressed-note">
+          곡선과 &apos;반복 1&apos; 지표는 같은 OOF 예측에서 계산했습니다. 곡선은 공개통제로 구간화되어, 면적은 반복 1 AUC와도 다를 수 있습니다. 표의 주 지표는 반복 평균이고 95% CI는 반복 평균 AUC에 대한 것입니다.
+        </p>
+      )}
+
+      <div className="swb-section-label">계수(표준화, λ={num(prediction.lambda.selected, 4)})</div>
+      <div className="swb-table-scroll">
+        <table className="swb-table" aria-label="예측 계수표">
+          <thead><tr><th>변수</th><th>수준</th><th>표준화 계수</th></tr></thead>
+          <tbody>
+            <tr><td>(절편)</td><td>—</td><td>{num(prediction.coefficients?.intercept, 4)}</td></tr>
+            {(prediction.coefficients?.terms || []).map((t) => (
+              <tr key={t.term}>
+                <td>{variableLabel(catalogByKey, t.variableKey)}</td>
+                <td>{t.level ?? '—'}</td>
+                <td>{num(t.standardizedBeta, 4)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="swb-suppressed-note">
+        ridge(L2 정칙화) 표준화 계수는 개별 변수의 유의성 검정 목적이 아니라 예측 모형 내 상대적 기여도 참고용입니다 — p값·신뢰구간을 제공하지 않습니다.
+      </p>
+
+      {prediction.droppedColumnFoldCount > 0 && (
+        <p className="swb-status-warn">
+          일부 교차검증 분할에서 값이 상수인 설명변수 열 {prediction.droppedColumnFoldCount}개가 제외됐습니다.
+        </p>
+      )}
+      <p className="swb-suppressed-note">완전사례 제외 {prediction.excludedRowCount}건</p>
+
+      <div className="swb-section-label">주의사항</div>
+      <ul>
+        {prediction.caveats.map((c) => (
+          <li key={c} className="swb-suppressed-note">{PREDICTION_CAVEAT_LABELS[c] || c}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 const TABS = [
   { id: 'summary', label: '요약', enabled: true },
   { id: 'distribution', label: '분포', enabled: true },
   { id: 'association', label: '연관성', enabled: true },
   { id: 'regression', label: '회귀', enabled: true }, // PR4-A1
+  { id: 'prediction', label: '예측', enabled: true }, // PR4-B2
 ];
 
 // PR2 §6/§8 — 결과 패널. committed(마지막 실행 성공 시점의 recipe/result)만 참조하고,
@@ -651,7 +824,10 @@ export function ResultPanel({
   // descriptive로 오인돼 요약/분포 탭이 빈 continuous/discrete를 읽다 깨진다
   // (계획서 §5 — 실제 버그 위험 지점으로 명시됐던 곳).
   const isRegressionRun = committedRecipe?.analysisMode === 'regression';
-  const isDescriptiveRun = !isBivariateRun && !isCorrelationMatrixRun && !isRegressionRun;
+  // PR4-B2 — 동일 원칙(위 PR4-A1 주석 참고). 빠뜨리면 예측 실행이 descriptive로
+  // 오인돼 요약/분포 탭이 빈 continuous/discrete를 읽다 깨진다.
+  const isPredictionRun = committedRecipe?.analysisMode === 'prediction';
+  const isDescriptiveRun = !isBivariateRun && !isCorrelationMatrixRun && !isRegressionRun && !isPredictionRun;
 
   return (
     <section className="swb-result" aria-label="결과">
@@ -692,6 +868,8 @@ export function ResultPanel({
             </>
           ) : isRegressionRun ? (
             <p className="swb-suppressed-note">회귀 분석 결과는 "회귀" 탭에서 확인하세요.</p>
+          ) : isPredictionRun ? (
+            <p className="swb-suppressed-note">예측 분석 결과는 "예측" 탭에서 확인하세요.</p>
           ) : (
             <p className="swb-suppressed-note">
               {isBivariateRun ? '이변량' : '상관행렬'} 분석 결과는 "연관성" 탭에서 확인하세요.
@@ -747,9 +925,22 @@ export function ResultPanel({
           )
         )}
 
+        {committedResult && activeTab === 'prediction' && (
+          isPredictionRun && committedResult.result.prediction ? (
+            <PredictionResultCard
+              prediction={committedResult.result.prediction}
+              catalogByKey={catalogByKey}
+            />
+          ) : (
+            <p className="swb-suppressed-note">예측 모드로 분석을 실행하면 여기에 결과가 표시됩니다.</p>
+          )
+        )}
+
         {/* PR4-A2 — 회귀도 집계 CSV export 지원(exportUnsupported prop이 bivariate/
-            correlation_matrix만 막는다 — StatisticsWorkbench.jsx 기준과 동일). */}
-        {committedResult && (isDescriptiveRun || isRegressionRun) && (
+            correlation_matrix만 막는다 — StatisticsWorkbench.jsx 기준과 동일).
+            PR4-B2 — 예측도 집계 CSV export 지원(계수는 서버가 애초에 CSV에 넣지
+            않는다 — statsExportHandler.ts buildPredictionCsv 주석 참고). */}
+        {committedResult && (isDescriptiveRun || isRegressionRun || isPredictionRun) && (
           <button
             type="button"
             className="swb-btn"
@@ -761,7 +952,7 @@ export function ResultPanel({
             {exportState.status === 'exporting' ? '내보내는 중…' : '집계 결과 내보내기 (CSV)'}
           </button>
         )}
-        {committedResult && !isDescriptiveRun && !isRegressionRun && (
+        {committedResult && !isDescriptiveRun && !isRegressionRun && !isPredictionRun && (
           <p className="swb-suppressed-note" style={{ marginTop: 12 }}>
             {isBivariateRun ? '이변량' : '상관행렬'} 결과는 아직 CSV 내보내기를 지원하지 않습니다.
           </p>

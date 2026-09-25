@@ -13,6 +13,7 @@ import { ScatterPlot } from '../ScatterPlot';
 import { CorrelationHeatmap } from '../CorrelationHeatmap';
 import { ForestPlot } from '../ForestPlot';
 import { SplinePartialEffectChart } from '../SplinePartialEffectChart';
+import { CurveChart } from '../CurveChart';
 import { ChartTooltip, chooseTooltipPlacement } from '../ChartTooltip';
 
 afterEach(cleanup);
@@ -370,6 +371,69 @@ describe('SplinePartialEffectChart', () => {
     render(<SplinePartialEffectChart effect={{ variableKey: 'x1', scale: 'linear_predictor', points }} label="x1" />);
     const bandPaths = document.querySelectorAll('path[fill="#1d4ed8"]');
     expect(bandPaths.length).toBe(1);
+  });
+});
+
+// PR4-B2 — 예측 곡선(ROC·PR·calibration). 셋 다 curves.bins(공개통제 통과한
+// 공개 가능 구간만)에서 파생한다.
+describe('CurveChart', () => {
+  function bin(upperThreshold, rows, positiveRows) {
+    return { upperThreshold, rows, positiveRows, meanPredicted: upperThreshold, observedRate: positiveRows / rows };
+  }
+
+  it('curves가 null이면 억제 문구를 보여준다', () => {
+    render(<CurveChart curves={null} kind="roc" />);
+    expect(screen.getByText(/공개 정책에 따라 표시되지 않음/)).toBeTruthy();
+  });
+
+  it('bins가 null(구간 부족으로 억제)이면 사유 문구를 보여준다', () => {
+    render(<CurveChart curves={{ bins: null, suppressedReason: 'MIN_DISCLOSABLE_BINS_NOT_MET' }} kind="roc" />);
+    expect(screen.getByText(/공개 가능한 구간 수가 부족해/)).toBeTruthy();
+  });
+
+  it('ROC — 양성/음성이 섞인 구간에서 곡선을 그린다', () => {
+    const bins = [bin(0.3, 20, 5), bin(0.6, 20, 10), bin(0.9, 20, 15)];
+    render(<CurveChart curves={{ bins }} kind="roc" />);
+    expect(document.querySelector('svg')).toBeTruthy();
+    const linePath = document.querySelector('path[fill="none"]');
+    expect(linePath).toBeTruthy();
+    // (0,0) 시작점 관례 — path가 원점에서 시작해야 한다.
+    expect(linePath.getAttribute('d')).toMatch(/^M/);
+  });
+
+  // 코드리뷰 2차(2026-09-25) — 완전분리(고신뢰 구간에 양성이 전부 몰림) 반례.
+  // 최상위 구간(양성 20행)만으로 recall이 즉시 1이 되면, (recall=0,precision=1)
+  // 시작점을 빠뜨렸을 때 recall<1 구간 전체가 안 그려지는 버그가 재현됐었다.
+  it('PR — 완전분리 구간에서도 (recall=0, precision=1) 시작점을 포함한다', async () => {
+    const user = userEvent.setup();
+    // 높은 예측확률 구간: 양성 20행. 중간·낮은 구간: 각각 음성 20행(정확히
+    // 리뷰가 재현한 시나리오 그대로).
+    const bins = [bin(0.3, 20, 0), bin(0.6, 20, 0), bin(0.9, 20, 20)];
+    render(<CurveChart curves={{ bins }} kind="pr" />);
+
+    await user.click(screen.getByRole('button', { name: '데이터 보기' }));
+    const rows = document.querySelectorAll('table tbody tr');
+    // bins 3개 + prevalence 기준선 행 1개 + 시작점 1개 = 5행.
+    expect(rows.length).toBe(5);
+    const firstRowCells = rows[0].querySelectorAll('td');
+    expect(firstRowCells[0].textContent).toBe('0'); // recall
+    expect(firstRowCells[1].textContent).toBe('1'); // precision
+  });
+
+  it('PR — 사건 행이 전혀 없으면 억제 문구를 보여준다', () => {
+    const bins = [bin(0.3, 20, 0), bin(0.6, 20, 0)];
+    render(<CurveChart curves={{ bins }} kind="pr" />);
+    expect(screen.getByText(/사건 행이 없음/)).toBeTruthy();
+  });
+
+  it('Calibration — 점 크기가 행 수에 따라 달라진다(반지름 인코딩)', () => {
+    const bins = [bin(0.3, 5, 1), bin(0.6, 50, 25)];
+    render(<CurveChart curves={{ bins }} kind="calibration" />);
+    const circles = document.querySelectorAll('circle');
+    expect(circles.length).toBe(2);
+    const r0 = Number(circles[0].getAttribute('r'));
+    const r1 = Number(circles[1].getAttribute('r'));
+    expect(r1).toBeGreaterThan(r0);
   });
 });
 
