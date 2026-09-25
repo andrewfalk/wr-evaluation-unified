@@ -9,6 +9,12 @@ import path from 'path';
 import { z } from 'zod';
 import config from './config';
 import { MAX_STRING_LENGTH, MAX_TOTAL_VALUES, MAX_VALUES_PER_VARIABLE } from './statsEngineLimits';
+import { PREDICTION_POLICY, computePredictionLambdaGrid } from './statsPolicy';
+
+// PR4-B2 — services/stats-engine 프로토콜 버전 단일 상수(계획서 §5단계). z.literal·
+// stdin envelope·byte 사전검사 envelope 15곳(5+5+5) 전부 이 상수를 참조한다 —
+// 리터럴 숫자를 흩어두면 다음 프로토콜 변경 때 한 곳을 빠뜨리기 쉽다(1차 리뷰 #3).
+export const ENGINE_PROTOCOL_VERSION = 6;
 
 export type StatsEngineVariableKind = 'continuous' | 'discrete';
 
@@ -102,6 +108,30 @@ export interface RegressionDiagnosticsEngineRequest {
   sampledRowIndices: number[];
 }
 
+// PR4-B2 — 예측 요청(계획서 §4단계 "요청"). y/X는 S2(완전사례) full one-hot
+// 설계행렬(절편 미포함) — statsPredictionDesign.ts가 만든다. groups는
+// cohortPersonKey를 그대로 보낸다(personClusterKey가 아니다 — §3-1단계).
+// outerFolds는 Node가 확정한 R×N 배정을 그대로 보낸다(Python은 fold를
+// 스스로 정하지 않는다 — 재현성·감사가 전부 Node에 남도록).
+export interface PredictionEngineRequest {
+  y: number[];
+  X: number[][];
+  columnNames: string[];
+  groups: string[];
+  outerFoldCount: number;
+  outerFolds: number[][];
+  config: {
+    innerFolds: number;
+    lambdaGrid: number[];
+    bootstrapReplicates: number;
+    bootstrapMinValidRate: number;
+    cvMinValidRepeats: number;
+    aucCiReplicates: number;
+    samplerSeed: string;
+    representativeRepeat: number;
+  };
+}
+
 const StatsEngineNullReasonSchema = z.enum(['insufficient_data', 'undefined_zero_variance', 'non_finite_result']);
 // PR3-A — bivariate.py의 nullReasons는 기존 3종 + 이변량 전용 2종(계획서 §Python엔진).
 const StatsEngineBivariateNullReasonSchema = z.enum([
@@ -169,7 +199,7 @@ const StatsEngineDiscreteResultSchema = z.object({
 });
 
 const StatsEngineRawResultSchema = z.object({
-  protocolVersion: z.literal(5),
+  protocolVersion: z.literal(ENGINE_PROTOCOL_VERSION),
   continuous: z.array(StatsEngineContinuousResultSchema),
   discrete: z.array(StatsEngineDiscreteResultSchema),
 }).strict();
@@ -193,7 +223,7 @@ const StatsEngineEffectSizeSchema = z.object({
 });
 
 const StatsEngineBivariateRawResultSchema = z.object({
-  protocolVersion: z.literal(5),
+  protocolVersion: z.literal(ENGINE_PROTOCOL_VERSION),
   bivariate: z.object({
     method: z.enum([
       'welch_t', 'mann_whitney', 'anova', 'kruskal_wallis',
@@ -292,7 +322,7 @@ export function assertWithinLimits(request: StatsEngineRequest): void {
   if (total > MAX_TOTAL_VALUES) {
     throw new StatsEngineInputTooLargeError(`total values (${total}) exceeds MAX_TOTAL_VALUES(${MAX_TOTAL_VALUES})`);
   }
-  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 5, variables: request.variables }), 'utf8');
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: ENGINE_PROTOCOL_VERSION, variables: request.variables }), 'utf8');
   if (byteLength > config.stats.maxInputBytes) {
     throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
   }
@@ -303,7 +333,7 @@ export function assertWithinLimits(request: StatsEngineRequest): void {
 // table은 "sum(모든 셀)"에 같은 상한을 적용(작은 JSON으로 큰 관측수를 표현할 수
 // 있어 상한 자체가 필요, 정합성 검사와는 별개).
 export function assertBivariateWithinLimits(request: BivariateEngineRequest): void {
-  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 5, bivariate: request }), 'utf8');
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: ENGINE_PROTOCOL_VERSION, bivariate: request }), 'utf8');
   if (byteLength > config.stats.maxInputBytes) {
     throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
   }
@@ -353,7 +383,7 @@ function assertCorrelationMatrixWithinLimits(request: CorrelationMatrixEngineReq
   if (total > MAX_TOTAL_VALUES) {
     throw new StatsEngineInputTooLargeError(`total values (${total}) exceeds MAX_TOTAL_VALUES(${MAX_TOTAL_VALUES})`);
   }
-  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 5, correlationMatrix: request }), 'utf8');
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: ENGINE_PROTOCOL_VERSION, correlationMatrix: request }), 'utf8');
   if (byteLength > config.stats.maxInputBytes) {
     throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
   }
@@ -395,7 +425,7 @@ const StatsEngineCorrelationMatrixCellSchema = z.object({
   adjustedP: z.number().finite().nullable(),
 });
 const StatsEngineCorrelationMatrixRawResultSchema = z.object({
-  protocolVersion: z.literal(5),
+  protocolVersion: z.literal(ENGINE_PROTOCOL_VERSION),
   correlationMatrix: z.object({
     method: z.enum(['pearson_correlation', 'spearman_correlation']),
     cells: z.array(StatsEngineCorrelationMatrixCellSchema),
@@ -531,7 +561,7 @@ const StatsEngineRegressionResultSchema = z.object({
 }).strict();
 
 const StatsEngineRegressionRawResultSchema = z.object({
-  protocolVersion: z.literal(5),
+  protocolVersion: z.literal(ENGINE_PROTOCOL_VERSION),
   regression: StatsEngineRegressionResultSchema,
 }).strict();
 
@@ -562,7 +592,7 @@ const StatsEngineRegressionDiagnosticsResultSchema = z.object({
 }).strict();
 
 const StatsEngineRegressionDiagnosticsRawResultSchema = z.object({
-  protocolVersion: z.literal(5),
+  protocolVersion: z.literal(ENGINE_PROTOCOL_VERSION),
   regressionDiagnostics: StatsEngineRegressionDiagnosticsResultSchema,
 }).strict();
 
@@ -583,7 +613,7 @@ export function assertRegressionWithinLimits(request: RegressionEngineRequest): 
   if (total > MAX_TOTAL_VALUES) {
     throw new StatsEngineInputTooLargeError(`regression 전체 값 개수(N×P=${total})가 상한(${MAX_TOTAL_VALUES})을 초과`);
   }
-  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 5, regression: request }), 'utf8');
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: ENGINE_PROTOCOL_VERSION, regression: request }), 'utf8');
   if (byteLength > config.stats.maxInputBytes) {
     throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
   }
@@ -702,7 +732,7 @@ function assertRegressionDiagnosticsWithinLimits(request: RegressionDiagnosticsE
   if (total > MAX_TOTAL_VALUES) {
     throw new StatsEngineInputTooLargeError(`regressionDiagnostics 전체 값 개수(N×P=${total})가 상한(${MAX_TOTAL_VALUES})을 초과`);
   }
-  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: 5, regressionDiagnostics: request }), 'utf8');
+  const byteLength = Buffer.byteLength(JSON.stringify({ protocolVersion: ENGINE_PROTOCOL_VERSION, regressionDiagnostics: request }), 'utf8');
   if (byteLength > config.stats.maxInputBytes) {
     throw new StatsEngineInputTooLargeError(`serialized input (${byteLength} bytes) exceeds maxInputBytes(${config.stats.maxInputBytes})`);
   }
@@ -732,6 +762,231 @@ function validateRegressionDiagnosticsSemantics(
       throw new StatsEngineResultInvalidError(`points[${i}].rowIndex 불일치: 요청 ${idx}, 응답 ${rd.points[i].rowIndex}`);
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// PR4-B2 — 예측(prediction) 엔진 요청/응답(계획서 §4/§5단계).
+// ---------------------------------------------------------------------------
+const _PREDICTION_METRIC_NAMES = ['roc_auc', 'average_precision', 'brier', 'calibration_intercept', 'calibration_slope'] as const;
+
+const StatsEnginePredictionCvSchema = z.object({
+  status: z.enum(['ok', 'withheld']),
+  validRepeats: z.number().int().nonnegative(),
+  totalRepeats: z.number().int().nonnegative(),
+  mean: z.number().finite().nullable(),
+  min: z.number().finite().nullable(),
+  max: z.number().finite().nullable(),
+}).strict();
+
+const StatsEnginePredictionBootstrapSchema = z.object({
+  status: z.enum(['ok', 'withheld']),
+  validReplicates: z.number().int().nonnegative(),
+  totalReplicates: z.number().int().nonnegative(),
+  optimism: z.number().finite().nullable(),
+  corrected: z.number().finite().nullable(),
+}).strict();
+
+const StatsEnginePredictionMetricSchema = z.object({
+  apparent: z.number().finite().nullable(),
+  representativeRepeat: z.number().finite().nullable(),
+  cv: StatsEnginePredictionCvSchema,
+  bootstrap: StatsEnginePredictionBootstrapSchema,
+}).strict();
+
+const StatsEnginePredictionAucCiSchema = z.object({
+  target: z.literal('roc_auc_cv_mean'),
+  lower: z.number().finite(),
+  upper: z.number().finite(),
+  method: z.literal('person_bootstrap_oof_conditional'),
+  replicates: z.number().int().nonnegative(),
+}).strict();
+
+const StatsEnginePredictionOofPointSchema = z.object({
+  row: z.number().int().nonnegative(),
+  p: z.number().finite(),
+}).strict();
+
+// nonEstimableReason은 엔진 내부 사유만 나온다 — Node 쪽 비추정 사유 1~10
+// (statsPredictionCohort.ts computePredictionNonEstimableReason)은 애초에 이
+// 엔진을 호출하기 전에 걸러지므로, 여기 도달했다면 오직 NOT_CONVERGED뿐이다
+// (3-4단계 순서표 11번, 계획서 §4단계 "실패 범위").
+const StatsEnginePredictionResultSchema = z.object({
+  estimation: z.enum(['ok', 'non_estimable']),
+  nonEstimableReason: z.literal('NOT_CONVERGED').nullable(),
+  lambdaSelected: z.number().finite().nullable(),
+  metrics: z.record(z.enum(_PREDICTION_METRIC_NAMES), StatsEnginePredictionMetricSchema),
+  aucCi: StatsEnginePredictionAucCiSchema.nullable(),
+  oofRepresentative: z.array(StatsEnginePredictionOofPointSchema).nullable(),
+  intercept: z.number().finite().nullable(),
+  coefficients: z.array(z.number().finite()).nullable(),
+  droppedColumnFoldCount: z.number().int().nonnegative().nullable(),
+  flags: z.array(z.string()),
+}).strict();
+
+const StatsEnginePredictionRawResultSchema = z.object({
+  protocolVersion: z.literal(ENGINE_PROTOCOL_VERSION),
+  prediction: StatsEnginePredictionResultSchema,
+}).strict();
+
+export type StatsEnginePredictionMetric = z.infer<typeof StatsEnginePredictionMetricSchema>;
+export type StatsEnginePredictionAucCi = z.infer<typeof StatsEnginePredictionAucCiSchema>;
+export type StatsEnginePredictionRawResult = z.infer<typeof StatsEnginePredictionRawResultSchema>['prediction'];
+
+// §4단계 응답 계약 "행 단위 예측은 Node까지만 간다" — 4MiB(계획서 "2MiB 상한
+// 충돌 → 4MiB와 실제 바이트 사전검사"). config.stats.maxInputBytes(기본
+// 2MiB)를 그대로 쓰지 않는다 — outerFolds가 R×N 정수 배열이라(repeats=5,
+// maxRows=5000이면 25,000개) 일반 분석 요청보다 payload가 커진다.
+const PREDICTION_MAX_INPUT_BYTES = 4 * 1024 * 1024;
+
+export function assertPredictionWithinLimits(request: PredictionEngineRequest): void {
+  const n = request.y.length;
+  const p = request.columnNames.length;
+  if (n > MAX_VALUES_PER_VARIABLE) {
+    throw new StatsEngineInputTooLargeError(`prediction 행 수(${n})가 상한(${MAX_VALUES_PER_VARIABLE})을 초과`);
+  }
+  const total = n * p;
+  if (total > MAX_TOTAL_VALUES) {
+    throw new StatsEngineInputTooLargeError(`prediction 전체 값 개수(N×P=${total})가 상한(${MAX_TOTAL_VALUES})을 초과`);
+  }
+  const byteLength = Buffer.byteLength(
+    JSON.stringify({ protocolVersion: ENGINE_PROTOCOL_VERSION, prediction: request }), 'utf8',
+  );
+  if (byteLength > PREDICTION_MAX_INPUT_BYTES) {
+    throw new StatsEngineInputTooLargeError(`serialized prediction input (${byteLength} bytes) exceeds PREDICTION_MAX_INPUT_BYTES(${PREDICTION_MAX_INPUT_BYTES})`);
+  }
+}
+
+export interface BuildPredictionEngineRequestInput {
+  y: number[];
+  x: number[][];
+  columnNames: string[];
+  // S2 rows 순서와 정확히 같은 cohortPersonKey 배열(§3-1단계 — Python엔 이
+  // 키만 간다, 원 person ID는 절대 넘기지 않는다).
+  groups: string[];
+  // repeat(1-based) → cohortPersonKey → fold. assignPredictionOuterFolds의
+  // 출력을 그대로 받는다.
+  outerFoldAssignment: ReadonlyMap<number, ReadonlyMap<string, number>>;
+  outerFoldCount: number;
+}
+
+/** 사전검사(preview의 candidateParameterCount 등)와 실제 실행(analyze)이
+ * 공유하는 순수 빌더 — PREDICTION_POLICY를 여기서 한 번만 읽어 request shape로
+ * 굳힌다(계획서 §5단계 "사전검사와 실행이 공유"). */
+export function buildPredictionEngineRequest(input: BuildPredictionEngineRequestInput): PredictionEngineRequest {
+  const repeats = input.outerFoldAssignment.size;
+  const outerFolds: number[][] = [];
+  for (let repeat = 1; repeat <= repeats; repeat++) {
+    const foldOfPerson = input.outerFoldAssignment.get(repeat);
+    if (!foldOfPerson) {
+      throw new Error(`buildPredictionEngineRequest: outerFoldAssignment에 repeat ${repeat}가 없다(1..${repeats} 연속이어야 함)`);
+    }
+    outerFolds.push(input.groups.map((g) => {
+      const fold = foldOfPerson.get(g);
+      if (fold === undefined) {
+        throw new Error(`buildPredictionEngineRequest: person "${g}"의 repeat ${repeat} fold 배정이 없다`);
+      }
+      return fold;
+    }));
+  }
+
+  return {
+    y: input.y,
+    X: input.x,
+    columnNames: input.columnNames,
+    groups: input.groups,
+    outerFoldCount: input.outerFoldCount,
+    outerFolds,
+    config: {
+      innerFolds: PREDICTION_POLICY.innerFolds,
+      lambdaGrid: computePredictionLambdaGrid(),
+      bootstrapReplicates: PREDICTION_POLICY.bootstrapReplicates,
+      bootstrapMinValidRate: PREDICTION_POLICY.bootstrapMinValidRate,
+      cvMinValidRepeats: PREDICTION_POLICY.cvMinValidRepeats,
+      aucCiReplicates: PREDICTION_POLICY.aucCiReplicates,
+      samplerSeed: PREDICTION_POLICY.samplerSeed,
+      representativeRepeat: PREDICTION_POLICY.representativeRepeat,
+    },
+  };
+}
+
+/** raw 엔진 응답 검증 — non_estimable/ok 상태별 null 필드 짝, oofRepresentative
+ * 길이(N과 동일), coefficients 길이(columnCount와 동일), metrics가 5개 지표를
+ * 전부 갖는지(§4단계 응답 계약, shared/contracts의 상태 불변식과 대응). */
+function validatePredictionSemantics(
+  request: PredictionEngineRequest,
+  raw: z.infer<typeof StatsEnginePredictionRawResultSchema>,
+): void {
+  const p = raw.prediction;
+  const n = request.y.length;
+  const columnCount = request.columnNames.length;
+
+  const metricKeys = Object.keys(p.metrics);
+  if (metricKeys.length !== _PREDICTION_METRIC_NAMES.length || !_PREDICTION_METRIC_NAMES.every((name) => name in p.metrics)) {
+    throw new StatsEngineResultInvalidError(`metrics가 5개 지표(${_PREDICTION_METRIC_NAMES.join(', ')})를 전부 갖지 않는다: ${metricKeys.join(', ')}`);
+  }
+
+  if (p.estimation === 'non_estimable') {
+    if (p.nonEstimableReason === null) {
+      throw new StatsEngineResultInvalidError('non_estimable 응답인데 nonEstimableReason이 없다');
+    }
+    if (p.lambdaSelected !== null) {
+      throw new StatsEngineResultInvalidError('non_estimable 응답인데 lambdaSelected가 null이 아니다');
+    }
+    if (p.oofRepresentative !== null) {
+      throw new StatsEngineResultInvalidError('non_estimable 응답인데 oofRepresentative가 null이 아니다');
+    }
+    if (p.coefficients !== null) {
+      throw new StatsEngineResultInvalidError('non_estimable 응답인데 coefficients가 null이 아니다');
+    }
+    if (p.aucCi !== null) {
+      throw new StatsEngineResultInvalidError('non_estimable 응답인데 aucCi가 null이 아니다');
+    }
+    return;
+  }
+
+  if (p.nonEstimableReason !== null) {
+    throw new StatsEngineResultInvalidError('estimation="ok"인데 nonEstimableReason이 null이 아니다');
+  }
+  if (p.lambdaSelected === null) {
+    throw new StatsEngineResultInvalidError('estimation="ok"인데 lambdaSelected가 null이다');
+  }
+  if (p.coefficients === null) {
+    throw new StatsEngineResultInvalidError('estimation="ok"인데 coefficients가 null이다');
+  }
+  if (p.coefficients.length !== columnCount) {
+    throw new StatsEngineResultInvalidError(`coefficients 길이 불일치: 요청 열 ${columnCount}개, 응답 ${p.coefficients.length}개`);
+  }
+  if (p.intercept === null) {
+    throw new StatsEngineResultInvalidError('estimation="ok"인데 intercept가 null이다');
+  }
+  if (p.oofRepresentative === null) {
+    throw new StatsEngineResultInvalidError('estimation="ok"인데 oofRepresentative가 null이다');
+  }
+  if (p.oofRepresentative.length !== n) {
+    throw new StatsEngineResultInvalidError(`oofRepresentative 길이 불일치: 요청 행 ${n}개, 응답 ${p.oofRepresentative.length}개`);
+  }
+  // 코드리뷰(2026-09-25) — 길이만 맞아도 row 인덱스가 중복되거나 범위를
+  // 벗어나면 이후 y[point.row]/groups[point.row] 매핑(statsPredictionSuppression.ts)과
+  // 곡선 공개통제의 전제(row가 0..N-1의 정확한 순열)가 깨진다. 확률값도 [0,1]
+  // 밖이면 calibration/ROC 구간화가 무의미해진다 — 둘 다 zod shape 통과만으로는
+  // 못 잡는 프로토콜 방어 검증이다.
+  const seenOofRows = new Set<number>();
+  for (const point of p.oofRepresentative) {
+    if (point.row < 0 || point.row >= n) {
+      throw new StatsEngineResultInvalidError(`oofRepresentative row 인덱스 범위 초과: ${point.row}(허용 0..${n - 1})`);
+    }
+    if (seenOofRows.has(point.row)) {
+      throw new StatsEngineResultInvalidError(`oofRepresentative row 인덱스 중복: ${point.row}`);
+    }
+    seenOofRows.add(point.row);
+    if (point.p < 0 || point.p > 1) {
+      throw new StatsEngineResultInvalidError(`oofRepresentative 확률값이 [0,1] 범위를 벗어남: row=${point.row}, p=${point.p}`);
+    }
+  }
+  const rocAuc = p.metrics.roc_auc;
+  if (p.aucCi !== null && (!rocAuc || rocAuc.cv.status !== 'ok')) {
+    throw new StatsEngineResultInvalidError('aucCi가 있는데 roc_auc.cv.status가 ok가 아니다');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1082,7 +1337,7 @@ export interface EngineRunOpts {
 export async function runStatsEngine(request: StatsEngineRequest, opts?: EngineRunOpts): Promise<StatsEngineRawResult> {
   return runEngineProcess<StatsEngineRawResult>({
     assertLimits: () => assertWithinLimits(request),
-    buildStdinPayload: () => ({ protocolVersion: 5, variables: request.variables }),
+    buildStdinPayload: () => ({ protocolVersion: ENGINE_PROTOCOL_VERSION, variables: request.variables }),
     parseSuccess: (parsed) => {
       const shapeResult = StatsEngineRawResultSchema.safeParse(parsed);
       if (!shapeResult.success) {
@@ -1101,7 +1356,7 @@ export async function runBivariateStatsEngine(
 ): Promise<StatsEngineBivariateRawResult> {
   return runEngineProcess<StatsEngineBivariateRawResult>({
     assertLimits: () => assertBivariateWithinLimits(request),
-    buildStdinPayload: () => ({ protocolVersion: 5, bivariate: request }),
+    buildStdinPayload: () => ({ protocolVersion: ENGINE_PROTOCOL_VERSION, bivariate: request }),
     parseSuccess: (parsed) => {
       const shapeResult = StatsEngineBivariateRawResultSchema.safeParse(parsed);
       if (!shapeResult.success) {
@@ -1120,7 +1375,7 @@ export async function runCorrelationMatrixStatsEngine(
 ): Promise<StatsEngineCorrelationMatrixRawResult> {
   return runEngineProcess<StatsEngineCorrelationMatrixRawResult>({
     assertLimits: () => assertCorrelationMatrixWithinLimits(request),
-    buildStdinPayload: () => ({ protocolVersion: 5, correlationMatrix: request }),
+    buildStdinPayload: () => ({ protocolVersion: ENGINE_PROTOCOL_VERSION, correlationMatrix: request }),
     parseSuccess: (parsed) => {
       const shapeResult = StatsEngineCorrelationMatrixRawResultSchema.safeParse(parsed);
       if (!shapeResult.success) {
@@ -1139,7 +1394,7 @@ export async function runRegressionStatsEngine(
 ): Promise<StatsEngineRegressionRawResult> {
   return runEngineProcess<StatsEngineRegressionRawResult>({
     assertLimits: () => assertRegressionWithinLimits(request),
-    buildStdinPayload: () => ({ protocolVersion: 5, regression: request }),
+    buildStdinPayload: () => ({ protocolVersion: ENGINE_PROTOCOL_VERSION, regression: request }),
     parseSuccess: (parsed) => {
       const shapeResult = StatsEngineRegressionRawResultSchema.safeParse(parsed);
       if (!shapeResult.success) {
@@ -1160,7 +1415,7 @@ export async function runRegressionDiagnosticsEngine(
 ): Promise<StatsEngineRegressionDiagnosticsRawResult> {
   return runEngineProcess<StatsEngineRegressionDiagnosticsRawResult>({
     assertLimits: () => assertRegressionDiagnosticsWithinLimits(request),
-    buildStdinPayload: () => ({ protocolVersion: 5, regressionDiagnostics: request }),
+    buildStdinPayload: () => ({ protocolVersion: ENGINE_PROTOCOL_VERSION, regressionDiagnostics: request }),
     parseSuccess: (parsed) => {
       const shapeResult = StatsEngineRegressionDiagnosticsRawResultSchema.safeParse(parsed);
       if (!shapeResult.success) {
@@ -1169,5 +1424,27 @@ export async function runRegressionDiagnosticsEngine(
       validateRegressionDiagnosticsSemantics(request, shapeResult.data);
       return shapeResult.data.regressionDiagnostics;
     },
+  });
+}
+
+// PR4-B2 — 예측 엔진 호출. timeoutMs는 호출부(statsRunsQueue.ts)가
+// computePredictionEngineTimeoutMs(S2 행 수)로 계산해 opts로 넘긴다 — 여기서는
+// 다른 run*StatsEngine과 동일하게 opts를 그대로 전달할 뿐 정책값을 모른다.
+export async function runPredictionStatsEngine(
+  request: PredictionEngineRequest,
+  opts?: EngineRunOpts,
+): Promise<StatsEnginePredictionRawResult> {
+  return runEngineProcess<StatsEnginePredictionRawResult>({
+    assertLimits: () => assertPredictionWithinLimits(request),
+    buildStdinPayload: () => ({ protocolVersion: ENGINE_PROTOCOL_VERSION, prediction: request }),
+    parseSuccess: (parsed) => {
+      const shapeResult = StatsEnginePredictionRawResultSchema.safeParse(parsed);
+      if (!shapeResult.success) {
+        throw new StatsEngineResultInvalidError(`결과 schema 재검증 실패: ${shapeResult.error.message}`);
+      }
+      validatePredictionSemantics(request, shapeResult.data);
+      return shapeResult.data.prediction;
+    },
+    ...opts,
   });
 }

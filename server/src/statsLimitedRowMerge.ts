@@ -15,7 +15,7 @@ import type { PairedRow } from './statsBivariateDataset';
 import { computeOutlierValues } from './statsChartDisclosure';
 import { sampleScatterPoints, sampleRegressionDiagnosticsRowIndices } from './statsScatterGrid';
 import { resolveGroupComparisonGroups } from './statsBivariateSuppression';
-import { runRegressionDiagnosticsEngine } from './statsEngine';
+import { runRegressionDiagnosticsEngine, StatsEngineBusyError } from './statsEngine';
 
 function datasetValueOf(rows: DatasetRow[], key: string) {
   return (row: DatasetRow): number | null => {
@@ -121,9 +121,20 @@ async function resolveRegressionPointDiagnostics(
       },
       attached: true,
     };
-  } catch {
-    // 엔진 호출 실패(타임아웃·크래시·비유한값) — 감사와 무관한 순수 계산 실패다.
-    // 계수·적합도·VIF·spline은 이미 확정돼 있으므로 그대로 보존하고 진단만 생략한다.
+  } catch (err) {
+    // PR4-B2 — 엔진 동시성 상한(1)은 prediction의 수 분 단위 실행과 이 경량
+    // 진단 호출이 겹칠 수 있게 됐다. Busy는 "지금 다른 실행이 슬롯을 쓰고
+    // 있을 뿐"이라 계산 실패(unavailable_computation_failed)와 구분한다 — 재시도
+    // 하면 될 수 있다는 신호를 클라이언트에 남긴다.
+    if (err instanceof StatsEngineBusyError) {
+      return {
+        regression: { ...regression, diagnostics: { ...regression.diagnostics, pointDiagnosticsStatus: 'unavailable_engine_busy' } },
+        attached: false,
+      };
+    }
+    // 그 외 엔진 호출 실패(타임아웃·크래시·비유한값) — 감사와 무관한 순수 계산
+    // 실패다. 계수·적합도·VIF·spline은 이미 확정돼 있으므로 그대로 보존하고
+    // 진단만 생략한다.
     return {
       regression: { ...regression, diagnostics: { ...regression.diagnostics, pointDiagnosticsStatus: 'unavailable_computation_failed' } },
       attached: false,

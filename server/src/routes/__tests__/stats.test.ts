@@ -196,6 +196,46 @@ describe('GET /catalog', () => {
     const kneeVar = res.body.variables.find((v: { key: string }) => v.key === 'knee.relatedness.max');
     expect(kneeVar?.analysisRole).toBe('analyzable');
   });
+
+  // PR4-B2 — predictionRole·predictionOutcomeLevels·predictionEventLevels가 카탈로그
+  // DTO에 배선됐는지 확인한다(계획서 §2단계). 클라이언트 eventLevel select는 이 값에서
+  // 만들어진다.
+  it('예측 outcome은 predictionRole:outcome + PREDICTION_OUTCOME_SPECS에서 파생된 레벨을 노출한다', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    const res = await request(makeApp(pool)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
+    expect(res.status).toBe(200);
+    const anyHigh = res.body.variables.find((v: { key: string }) => v.key === 'diagnosis.rollup.anyHighRelatedness');
+    expect(anyHigh?.predictionRole).toBe('outcome');
+    expect(anyHigh?.predictionOutcomeLevels).toEqual(['true', 'false']);
+    expect(anyHigh?.predictionEventLevels).toEqual(['true']);
+
+    const status = res.body.variables.find((v: { key: string }) => v.key === 'diagnosis.assessment.status');
+    expect(status?.predictionRole).toBe('outcome');
+    expect(status?.predictionOutcomeLevels).toEqual(['high', 'low']);
+    expect(status?.predictionEventLevels).toEqual(['high', 'low']);
+  });
+
+  it('예측 predictor는 predictionRole:predictor + null 레벨을 노출한다', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    const res = await request(makeApp(pool)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
+    const bmi = res.body.variables.find((v: { key: string }) => v.key === 'patient.identity.bmi');
+    expect(bmi?.predictionRole).toBe('predictor');
+    expect(bmi?.predictionOutcomeLevels).toBeNull();
+    expect(bmi?.predictionEventLevels).toBeNull();
+
+    const age = res.body.variables.find((v: { key: string }) => v.key === 'patient.identity.ageAtEvaluation');
+    expect(age?.predictionRole).toBe('predictor');
+  });
+
+  it('예측 역할이 없는 변수는 predictionRole:null을 노출한다', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    const res = await request(makeApp(pool)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
+    const doctor = res.body.variables.find((v: { key: string }) => v.key === 'case.staff.assignedDoctorUserId');
+    expect(doctor?.predictionRole).toBeNull();
+  });
 });
 
 describe('POST /preview — 레시피 검증', () => {

@@ -12,7 +12,7 @@ import { isGrainCompatible } from '@wr/analytics-core';
 import type { AnalysisPatient } from '@wr/analytics-core/migration/deterministicMigrate';
 import type { StatsAnalysisRecipe, StatsFilter } from '@wr/contracts';
 import type { SnapshotRow } from './statsSnapshot';
-import { derivePersonClusterKey } from './statsPersonCluster';
+import { derivePersonClusterKey, derivePredictionCohortPersonKey } from './statsPersonCluster';
 import { canonicalDigest } from './canonicalSerializer';
 import { extractSnapshotColumnValue } from './statsSnapshotColumnVariables';
 
@@ -26,7 +26,19 @@ export interface DatasetRow {
   // 직접 만들므로(§0 발견, case grain 전용 시절부터의 관례), 필수 필드로 만들면 그
   // 리터럴들을 전부 고쳐야 한다. 없으면 undefined ≡ null(case grain)로 취급한다.
   entityKey?: string[] | null;
+  // PR4-B2 — 예측 전용, 서버 내부용(계획서 §3-1단계). buildDataset()에 opts.cohortDigest가
+  // 주어졌을 때만 채워진다 — HTTP 응답으로 절대 직렬화되지 않는다(원 person ID를 HMAC한
+  // 값이지만, 그래도 recipe(=변수 선택)와 무관하게 person을 재식별할 수 있는 키라 노출
+  // 범위를 frozen_dataset(서버 DB 컬럼)로 한정한다). distSmoke.test.ts/statsDatasetBuilder
+  // 계약 테스트가 이 필드가 HTTP 경로에 새지 않음을 고정한다.
+  cohortPersonKey?: string;
   values: Record<string, ExtractedValue<unknown>>;
+}
+
+export interface BuildDatasetOptions {
+  // PR4-B2 — analysisMode==='prediction'일 때만 넘긴다. 예측변수와 무관한 digest라
+  // predictor 선택이 바뀌어도 cohortPersonKey는 불변이다(statsPredictionCohort.ts).
+  cohortDigest?: string;
 }
 
 export interface DatasetResult {
@@ -103,11 +115,12 @@ export function buildDataset(
   recipe: StatsAnalysisRecipe,
   recipeDigest: string,
   catalogByKey: Map<string, AnalyticsVariableMetadata>,
+  opts?: BuildDatasetOptions,
 ): DatasetResult {
   if (recipe.grain === 'case') {
-    return buildCaseGradeDataset(snapshotRows, recipe, recipeDigest, catalogByKey);
+    return buildCaseGradeDataset(snapshotRows, recipe, recipeDigest, catalogByKey, opts);
   }
-  return buildRepeatedGrainDataset(snapshotRows, recipe, recipeDigest, catalogByKey);
+  return buildRepeatedGrainDataset(snapshotRows, recipe, recipeDigest, catalogByKey, opts);
 }
 
 function buildCaseGradeDataset(
@@ -115,6 +128,7 @@ function buildCaseGradeDataset(
   recipe: StatsAnalysisRecipe,
   recipeDigest: string,
   catalogByKey: Map<string, AnalyticsVariableMetadata>,
+  opts?: BuildDatasetOptions,
 ): DatasetResult {
   const neededKeys = Array.from(new Set([...recipe.variableKeys, ...recipe.filters.map((f) => f.key)]));
 
@@ -151,6 +165,9 @@ function buildCaseGradeDataset(
       // assignedDoctorUserId는 distinctAssignedDoctorClusters 계산에만 쓰고 출력 행/digest엔
       // 절대 포함하지 않는다(원문 미노출, §B).
       assignedDoctorUserId: row.assignedDoctorUserId,
+      cohortPersonKey: opts?.cohortDigest
+        ? derivePredictionCohortPersonKey(opts.cohortDigest, row.patientPersonId)
+        : undefined,
       values,
     };
   });
@@ -174,6 +191,7 @@ function buildCaseGradeDataset(
     caseId: r.caseId,
     personClusterKey: r.personClusterKey,
     entityKey: null,
+    cohortPersonKey: r.cohortPersonKey,
     values: Object.fromEntries(
       recipe.variableKeys
         .map((key) => [key, r.values[key]] as const)
@@ -250,6 +268,7 @@ function buildRepeatedGrainDataset(
   recipe: StatsAnalysisRecipe,
   recipeDigest: string,
   catalogByKey: Map<string, AnalyticsVariableMetadata>,
+  opts?: BuildDatasetOptions,
 ): DatasetResult {
   const enumerator = GRAIN_ENTITY_ENUMERATORS[recipe.grain];
   if (!enumerator) {
@@ -263,6 +282,7 @@ function buildRepeatedGrainDataset(
     personClusterKey: string;
     assignedDoctorUserId: string | null;
     entityKey: string[];
+    cohortPersonKey?: string;
     values: Record<string, ExtractedValue<unknown>>;
   }
 
@@ -332,12 +352,16 @@ function buildRepeatedGrainDataset(
       }
     }
 
+    const cohortPersonKey = opts?.cohortDigest
+      ? derivePredictionCohortPersonKey(opts.cohortDigest, row.patientPersonId)
+      : undefined;
     for (const bucket of byEntityKey.values()) {
       candidateRows.push({
         caseId: row.id,
         personClusterKey: derivePersonClusterKey(recipeDigest, row.patientPersonId),
         assignedDoctorUserId: row.assignedDoctorUserId,
         entityKey: bucket.entityKey,
+        cohortPersonKey,
         values: bucket.values,
       });
     }
@@ -359,6 +383,7 @@ function buildRepeatedGrainDataset(
     caseId: r.caseId,
     personClusterKey: r.personClusterKey,
     entityKey: r.entityKey,
+    cohortPersonKey: r.cohortPersonKey,
     values: Object.fromEntries(
       recipe.variableKeys
         .map((key) => [key, r.values[key]] as const)

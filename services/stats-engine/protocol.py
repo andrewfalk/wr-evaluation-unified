@@ -31,6 +31,12 @@ PR4-A2 — protocolVersion을 5로 상향한다. `regression` shape에 선택적
 다섯 번째 상호배타 shape `regressionDiagnostics`도 추가한다 — 재적합 없이
 이미 주어진 β로 leverage/잔차/Cook's D만 계산하는 경량 경로(계획서 §4
 "limited_row 진단값" — 캐시 hit/miss와 무관하게 독립적으로 호출된다).
+
+PR4-B2 — protocolVersion을 6으로 상향한다. 여섯 번째 상호배타 shape
+`prediction`을 추가한다(계획서 async-riding-hennessy.md §4단계). Node가
+완전사례 설계행렬(y·X, full one-hot, 절편 미포함)과 person 그룹 라벨
+(cohortPersonKey를 그대로), 외부 fold 배정(R×N)을 만들어 보낸다 — Python은
+정책값(람다 격자·반복 수 등)을 전혀 모르는 순수 함수다(config로 전부 받는다).
 """
 from __future__ import annotations
 
@@ -64,7 +70,7 @@ _VARIABLES_REQUEST_SCHEMA: dict[str, Any] = {
     "required": ["protocolVersion", "variables"],
     "additionalProperties": False,
     "properties": {
-        "protocolVersion": {"const": 5},
+        "protocolVersion": {"const": 6},
         "variables": {
             "type": "array",
             "items": {
@@ -101,7 +107,7 @@ _BIVARIATE_REQUEST_SCHEMA: dict[str, Any] = {
     "required": ["protocolVersion", "bivariate"],
     "additionalProperties": False,
     "properties": {
-        "protocolVersion": {"const": 5},
+        "protocolVersion": {"const": 6},
         "bivariate": {
             "type": "object",
             "required": ["method"],
@@ -141,7 +147,7 @@ _CORRELATION_MATRIX_REQUEST_SCHEMA: dict[str, Any] = {
     "required": ["protocolVersion", "correlationMatrix"],
     "additionalProperties": False,
     "properties": {
-        "protocolVersion": {"const": 5},
+        "protocolVersion": {"const": 6},
         "correlationMatrix": {
             "type": "object",
             "required": ["method", "variables"],
@@ -184,7 +190,7 @@ _REGRESSION_REQUEST_SCHEMA: dict[str, Any] = {
     "required": ["protocolVersion", "regression"],
     "additionalProperties": False,
     "properties": {
-        "protocolVersion": {"const": 5},
+        "protocolVersion": {"const": 6},
         "regression": {
             "type": "object",
             "required": ["family", "y", "X", "columnNames", "covariance"],
@@ -245,7 +251,7 @@ _REGRESSION_DIAGNOSTICS_REQUEST_SCHEMA: dict[str, Any] = {
     "required": ["protocolVersion", "regressionDiagnostics"],
     "additionalProperties": False,
     "properties": {
-        "protocolVersion": {"const": 5},
+        "protocolVersion": {"const": 6},
         "regressionDiagnostics": {
             "type": "object",
             "required": ["family", "y", "X", "columnNames", "beta", "sampledRowIndices"],
@@ -273,6 +279,62 @@ _REGRESSION_DIAGNOSTICS_REQUEST_SCHEMA: dict[str, Any] = {
     },
 }
 
+# PR4-B2 — 예측 요청 shape(계획서 §4단계 "요청"). y/X는 회귀와 같은 완전사례
+# 원칙(결측 없음, full one-hot·절편 미포함)이지만 covariance가 없고 대신
+# groups(cohortPersonKey 그대로)·outerFolds(R×N)·config가 있다. maxItems
+# 상한은 회귀와 동일한 MAX_VALUES_PER_VARIABLE/MAX_TOTAL_VALUES를 재사용한다
+# (계획서가 별도 상한 상수를 요구하지 않음).
+_PREDICTION_REQUEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["protocolVersion", "prediction"],
+    "additionalProperties": False,
+    "properties": {
+        "protocolVersion": {"const": 6},
+        "prediction": {
+            "type": "object",
+            "required": ["y", "X", "columnNames", "groups", "outerFoldCount", "outerFolds", "config"],
+            "additionalProperties": False,
+            "properties": {
+                "y": {
+                    "type": "array",
+                    "maxItems": MAX_VALUES_PER_VARIABLE,
+                    "items": {"type": "number"},
+                },
+                "X": {
+                    "type": "array",
+                    "maxItems": MAX_VALUES_PER_VARIABLE,
+                    "items": {"type": "array", "items": {"type": "number"}},
+                },
+                "columnNames": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                "groups": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                "outerFoldCount": {"type": "integer", "minimum": 1},
+                "outerFolds": {
+                    "type": "array",
+                    "items": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+                },
+                "config": {
+                    "type": "object",
+                    "required": [
+                        "innerFolds", "lambdaGrid", "bootstrapReplicates", "bootstrapMinValidRate",
+                        "cvMinValidRepeats", "aucCiReplicates", "samplerSeed", "representativeRepeat",
+                    ],
+                    "additionalProperties": False,
+                    "properties": {
+                        "innerFolds": {"type": "integer", "minimum": 1},
+                        "lambdaGrid": {"type": "array", "minItems": 1, "items": {"type": "number", "exclusiveMinimum": 0}},
+                        "bootstrapReplicates": {"type": "integer", "minimum": 0},
+                        "bootstrapMinValidRate": {"type": "number", "minimum": 0, "maximum": 1},
+                        "cvMinValidRepeats": {"type": "integer", "minimum": 0},
+                        "aucCiReplicates": {"type": "integer", "minimum": 0},
+                        "samplerSeed": {"type": "string", "minLength": 1},
+                        "representativeRepeat": {"type": "integer", "minimum": 1},
+                    },
+                },
+            },
+        },
+    },
+}
+
 REQUEST_SCHEMA: dict[str, Any] = {
     "oneOf": [
         _VARIABLES_REQUEST_SCHEMA,
@@ -280,6 +342,7 @@ REQUEST_SCHEMA: dict[str, Any] = {
         _CORRELATION_MATRIX_REQUEST_SCHEMA,
         _REGRESSION_REQUEST_SCHEMA,
         _REGRESSION_DIAGNOSTICS_REQUEST_SCHEMA,
+        _PREDICTION_REQUEST_SCHEMA,
     ],
 }
 
@@ -325,6 +388,10 @@ def parse_and_validate_request(raw: str) -> dict[str, Any]:
 
     if "regressionDiagnostics" in data:
         _validate_regression_diagnostics_semantics(data["regressionDiagnostics"])
+        return data
+
+    if "prediction" in data:
+        _validate_prediction_semantics(data["prediction"])
         return data
 
     _validate_bivariate_semantics(data["bivariate"])
@@ -441,6 +508,93 @@ def _validate_regression_diagnostics_semantics(regression_diagnostics: dict[str,
         raise ProtocolError("INVALID_INPUT", "regressionDiagnostics.sampledRowIndices에 중복이 있다")
     if any(idx < 0 or idx >= n for idx in sampled_row_indices):
         raise ProtocolError("INVALID_INPUT", "regressionDiagnostics.sampledRowIndices가 [0, N) 범위를 벗어난다")
+
+
+def _validate_prediction_semantics(prediction: dict[str, Any]) -> None:
+    """oneOf 스키마가 표현 못 하는 교차필드 검증(계획서 §4단계 "의미검증" —
+    3차 리뷰 세부조건: max(fold)+1로는 마지막 fold가 빠진 입력을 구별하지
+    못하므로 outerFoldCount를 명시로 받아 그 값 자체로 검사한다)."""
+    y = prediction["y"]
+    x = prediction["X"]
+    column_names = prediction["columnNames"]
+    groups = prediction["groups"]
+    outer_fold_count = prediction["outerFoldCount"]
+    outer_folds = prediction["outerFolds"]
+    config = prediction["config"]
+    n = len(y)
+    p = len(column_names)
+
+    if len(x) != n:
+        raise ProtocolError("INVALID_INPUT", "prediction.X 행 수가 y 길이와 다르다")
+    if any(len(row) != p for row in x):
+        raise ProtocolError("INVALID_INPUT", "prediction.X의 각 행 길이가 columnNames 길이와 달라야 한다")
+    if p == 0:
+        raise ProtocolError("INVALID_INPUT", "prediction.columnNames가 비어있다")
+    if len(groups) != n:
+        raise ProtocolError("INVALID_INPUT", "prediction.groups 길이가 y 길이와 달라야 한다")
+
+    total_values = n * p
+    if total_values > MAX_TOTAL_VALUES:
+        raise ProtocolError(
+            "LIMIT_EXCEEDED",
+            f"prediction 전체 값 개수(N×P={total_values})가 상한({MAX_TOTAL_VALUES})을 초과",
+        )
+    if n > MAX_VALUES_PER_VARIABLE:
+        raise ProtocolError(
+            "LIMIT_EXCEEDED",
+            f"prediction 행 수({n})가 상한({MAX_VALUES_PER_VARIABLE})을 초과",
+        )
+
+    if not all(_is_finite_number(v) for v in y):
+        raise ProtocolError("INVALID_INPUT", "prediction.y 값에 유한하지 않은 수가 있다")
+    if not all(v in (0.0, 1.0) for v in y):
+        raise ProtocolError("INVALID_INPUT", "prediction.y는 0/1만 허용한다")
+    for row in x:
+        if not all(_is_finite_number(v) for v in row):
+            raise ProtocolError("INVALID_INPUT", "prediction.X 값에 유한하지 않은 수가 있다")
+
+    r = len(outer_folds)
+    if r == 0:
+        raise ProtocolError("INVALID_INPUT", "prediction.outerFolds가 비어있다(반복이 0회)")
+    for repeat_idx, fold_row in enumerate(outer_folds):
+        if len(fold_row) != n:
+            raise ProtocolError("INVALID_INPUT", f"prediction.outerFolds[{repeat_idx}] 길이가 N과 다르다")
+        if any(f < 0 or f >= outer_fold_count for f in fold_row):
+            raise ProtocolError("INVALID_INPUT", f"prediction.outerFolds[{repeat_idx}]에 [0, outerFoldCount) 범위 밖 값이 있다")
+        if set(fold_row) != set(range(outer_fold_count)):
+            raise ProtocolError(
+                "INVALID_INPUT",
+                f"prediction.outerFolds[{repeat_idx}]에 비어있는 fold가 있다(0..{outer_fold_count - 1} 전부 있어야 함)",
+            )
+
+        # 같은 group(person)은 이 반복 안에서 반드시 같은 fold에 들어가야 한다
+        # (grouped CV의 기본 전제 — Node가 이미 보장하지만 방어적으로 재확인).
+        fold_of_group: dict[str, int] = {}
+        for i, g in enumerate(groups):
+            f = fold_row[i]
+            if g in fold_of_group and fold_of_group[g] != f:
+                raise ProtocolError(
+                    "INVALID_INPUT",
+                    f"prediction.outerFolds[{repeat_idx}]에서 group '{g}'이 서로 다른 fold에 걸쳐 있다",
+                )
+            fold_of_group[g] = f
+
+        # 각 test fold(=그 fold로 배정된 행 전체)에 y=0과 y=1이 모두 있어야
+        # 한다(Node가 이미 검사했어도 방어적으로 다시 확인).
+        for k in range(outer_fold_count):
+            fold_y = [y[i] for i in range(n) if fold_row[i] == k]
+            if 1.0 not in fold_y or 0.0 not in fold_y:
+                raise ProtocolError(
+                    "INVALID_INPUT",
+                    f"prediction.outerFolds[{repeat_idx}]의 fold {k}에 y=0 또는 y=1이 없다",
+                )
+
+    representative_repeat = config["representativeRepeat"]
+    if not (1 <= representative_repeat <= r):
+        raise ProtocolError(
+            "INVALID_INPUT",
+            f"prediction.config.representativeRepeat({representative_repeat})가 [1, {r}] 범위를 벗어난다",
+        )
 
 
 def _validate_correlation_matrix_semantics(correlation_matrix: dict[str, Any]) -> None:

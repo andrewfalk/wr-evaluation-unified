@@ -9,6 +9,7 @@ import {
   ESTIMABILITY_POLICY_VERSION,
   INFERENCE_GATE_POLICY_VERSION,
   REGRESSION_POLICY_VERSION,
+  PREDICTION_POLICY,
 } from './statsPolicy';
 import { STATS_ENGINE_VERSION } from './statsRunManifest';
 import { INTEGRATED_CATALOG_VERSION } from './statsCatalogVersion';
@@ -30,7 +31,8 @@ const DISCLOSURE_POLICY_VERSION = 'v0-aggregate-only';
 // PR4-A1 — 회귀 2종의 availableMethods 계산이 추가돼 범프.
 // PR4-A2 — binary_logistic이 categorical(2레벨) outcome도 허용하도록 타입
 // 정합성 판정이 바뀌어 다시 범프.
-export const METHOD_POLICY_VERSION = 'v3-regression-categorical-outcome';
+// PR4-B2 — computePredictionAvailableMethods(l2_logistic)가 추가돼 다시 범프.
+export const METHOD_POLICY_VERSION = 'v4-prediction-l2-logistic';
 // PR3-A — AnalyzeResult.bivariate 필드가 추가돼 결과 shape이 확장됐다.
 // PR3-B — histogram/boxplot/scatter/regressionLine/correlationMatrix 필드가
 // 추가돼 결과 shape이 다시 확장됐다.
@@ -41,7 +43,8 @@ export const METHOD_POLICY_VERSION = 'v3-regression-categorical-outcome';
 // PR4-A1 — AnalyzeResult.regression 필드가 추가돼 결과 shape이 다시 확장됐다.
 // PR4-A2 — regression.diagnostics/standardizedPredictorKeys/standardization/
 // splinePartialEffects 필드가 추가돼 결과 shape이 다시 확장됐다.
-export const RESULT_SCHEMA_VERSION = 'v6-regression-diagnostics-spline';
+// PR4-B2 — AnalyzeResult.prediction 필드가 추가돼 결과 shape이 다시 확장됐다.
+export const RESULT_SCHEMA_VERSION = 'v7-prediction';
 
 export interface ComputeExecutionDigestInput {
   organizationId: string;
@@ -79,5 +82,10 @@ export function computeExecutionDigest(input: ComputeExecutionDigestInput): stri
     // PR4-A1 — 회귀 설계행렬 게이트 정책 버전. 같은 이유로 해시 입력에 직접
     // 추가한다(manifest stamp만으로는 캐시가 무효화되지 않는다).
     regressionPolicyVersion: REGRESSION_POLICY_VERSION,
+    // PR4-B2 — PREDICTION_POLICY 전체(disclosure·samplerVersion 포함)를 해시해
+    // 넣는다. 다른 정책처럼 손으로 관리하는 버전 문자열 하나에 기대지 않는다 —
+    // λ 격자·fold 수·bootstrap 반복수처럼 결과에 직접 영향을 주는 상수가
+    // version 문자열을 안 바꾸고도 조용히 바뀌면 캐시가 무효화되지 않는다.
+    predictionPolicyDigest: canonicalDigest(PREDICTION_POLICY),
   });
 }

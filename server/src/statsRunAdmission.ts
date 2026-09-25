@@ -21,11 +21,15 @@ import { isEngineDegraded } from './statsEngine';
 import { StatsEngineProcessError } from './statsEngine';
 import { withWriteTransaction } from './db/withWriteTransaction';
 import { statsRunExpiresAt } from './statsRunExpiry';
+import { PREDICTION_POLICY, computePredictionEngineTimeoutMs } from './statsPolicy';
 import config from './config';
 
-// B1의 기존 analysisMode 전부 기존 기본값 그대로 — B2가 prediction 분기를 추가할 때
-// 여기를 확장한다(상한은 config.stats.async.maxJobTimeoutMs).
-export function estimateEngineTimeoutMs(_ctx: AnalysisContext): number {
+// PR4-B2 — prediction은 S2 행 수(작업량 실측 기반 선형모델)로 추정한다. 다른
+// analysisMode는 B1 기존 고정값 그대로.
+export function estimateEngineTimeoutMs(ctx: AnalysisContext): number {
+  if (ctx.recipe.analysisMode === 'prediction' && ctx.predictionState) {
+    return Math.min(computePredictionEngineTimeoutMs(ctx.predictionState.s2Rows.length), config.stats.async.maxJobTimeoutMs);
+  }
   return Math.min(config.stats.timeoutMs, config.stats.async.maxJobTimeoutMs);
 }
 
@@ -82,6 +86,23 @@ async function hourlyCount(client: PoolClient, column: 'requested_by' | 'organiz
     [value],
   );
   return Number(rows[0].count);
+}
+
+// PR4-B2 — stats_runs에는 모드 컬럼이 없다(계획서 설계 메모) — frozen_dataset(예약
+// 시점에 이미 채워짐, statsRunAdmission.ts 4)단계) JSONB의 recipe.analysisMode로
+// in-flight 예측 실행 여부를 판별한다. 조직당 동시에 하나의 예측 실행만 허용한다
+// (엔진 시간이 수 분 단위라 다른 analysisMode처럼 여러 개를 동시에 허용하면 그
+// 조직의 quota를 예측 하나가 오래 독점한다).
+async function predictionInFlightExists(client: PoolClient, orgId: string): Promise<boolean> {
+  const { rows } = await client.query<{ exists: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM stats_runs
+        WHERE organization_id=$1 AND status IN ('queued','running')
+          AND frozen_dataset->'recipe'->>'analysisMode' = 'prediction'
+     ) AS exists`,
+    [orgId],
+  );
+  return rows[0].exists;
 }
 
 const ADMIT_RETRY_ATTEMPTS = 3;
@@ -147,6 +168,18 @@ async function admitOnce(
     if (isEngineDegraded()) {
       await auditAdmission(client, ctx, executionDigest, 'denied', { reasonCode: 'ENGINE_DEGRADED' });
       return { kind: 'denied', status: 503, code: 'ENGINE_DEGRADED' };
+    }
+    // PR4-B2 — 작업량 기반 사전거부(계획서 §"admission" — maxWorkUnits는 재시도로
+    // 해소되지 않는 구조적 초과이므로 429가 아니라 400). 같은 요청은 재시도해도
+    // 항상 같은 이유로 거부된다 — 사용자가 변수 선택을 바꿔야 한다.
+    if (ctx.recipe.analysisMode === 'prediction' && ctx.predictionState
+      && ctx.predictionState.s2Rows.length > PREDICTION_POLICY.maxWorkUnits) {
+      await auditAdmission(client, ctx, executionDigest, 'denied', { reasonCode: 'PREDICTION_WORK_BUDGET_EXCEEDED' });
+      return { kind: 'denied', status: 400, code: 'PREDICTION_WORK_BUDGET_EXCEEDED' };
+    }
+    if (ctx.recipe.analysisMode === 'prediction' && (await predictionInFlightExists(client, ctx.orgId))) {
+      await auditAdmission(client, ctx, executionDigest, 'denied', { reasonCode: 'ORG_PREDICTION_CONCURRENCY_LIMIT' });
+      return { kind: 'denied', status: 429, code: 'ORG_PREDICTION_CONCURRENCY_LIMIT' };
     }
     if ((await inFlightCount(client, 'requested_by', ctx.userId)) >= config.stats.async.maxConcurrentPerUser) {
       await auditAdmission(client, ctx, executionDigest, 'denied', { reasonCode: 'USER_CONCURRENCY_LIMIT' });

@@ -77,7 +77,10 @@ export const KNEE_METADATA: AnalyticsVariableMetadata[] = [
     ],
     availableAt: 'assessment',
     shownToAssessor: true,
-    allowedAnalysisPurposes: ['association', 'formula_audit'],
+    // PR4-B2 — disease 예측 전용 predictor(계획서 §0단계 허용표 — K-L Grade는 무릎
+    // 진단 행에만 값이 있어 disease grain 예측에서만 쓴다).
+    allowedAnalysisPurposes: ['association', 'formula_audit', 'prediction'],
+    predictionRole: 'predictor',
     sensitivity: 'non_sensitive',
     formulaFamily: 'knee_kl_grade_side',
     supportedFormulaPolicies: [],
@@ -102,7 +105,9 @@ export const KNEE_METADATA: AnalyticsVariableMetadata[] = [
     ],
     availableAt: 'assessment',
     shownToAssessor: true,
-    allowedAnalysisPurposes: ['association', 'formula_audit'],
+    // PR4-B2 — disease 예측 전용 predictor(계획서 §0단계 허용표).
+    allowedAnalysisPurposes: ['association', 'formula_audit', 'prediction'],
+    predictionRole: 'predictor',
     sensitivity: 'non_sensitive',
     formulaFamily: 'knee_confirmed_status_side',
     supportedFormulaPolicies: [],

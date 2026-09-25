@@ -58,6 +58,8 @@ function makeCtx(pairs: PairedRow[], exclusions: AnalysisContext['paired'] exten
     regressionDesign: null,
     regressionExcludedRowCount: null,
     regressionMethod: null,
+    predictionDisclosed: false,
+    predictionState: null,
   };
 }
 

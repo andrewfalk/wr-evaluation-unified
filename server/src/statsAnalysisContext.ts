@@ -36,6 +36,39 @@ import {
 } from './statsRegressionDataset';
 import { evaluateRegressionDisclosure } from './statsRegressionDisclosureGate';
 import { buildRegressionDesignMatrix, type RegressionDesignResult } from './statsRegressionDesign';
+import { computePredictionAvailableMethods } from './statsMethodCatalog';
+import { PREDICTION_POLICY } from './statsPolicy';
+import {
+  computePredictionCohortDigest,
+  computePredictionDataStages,
+  computeEventNonEventPersonSets,
+  computePredictionLevelSummaries,
+  evaluatePredictionDisclosure,
+  computePredictionNonEstimableReason,
+  assignPredictionOuterFolds,
+  type PredictionStratum,
+  type PredictionNonEstimableCheckResult,
+} from './statsPredictionCohort';
+import type { DatasetRow } from './statsDatasetBuilder';
+
+// PR4-B2 — buildAnalysisContextTail의 prediction 분기가 채우는 상태(계획서 §5단계
+// "buildAnalysisContextTail에 prediction 분기를 추가"). statsPredictionSuppression.ts
+// (엔진 호출+조립)가 이 객체 하나로 필요한 전부를 받는다 — regressionDesign과 같은
+// "한 번 계산해 ctx에 싣는다" 원칙.
+export interface PredictionAnalysisState {
+  outcomeKey: string;
+  eventLevel: string;
+  predictorKeys: string[];
+  s2Rows: DatasetRow[];
+  cohortDigest: string;
+  outerFoldAssignment: Map<number, Map<string, number>>;
+  outerFoldCount: number;
+  nonEstimableCheck: PredictionNonEstimableCheckResult;
+  personCount: number;
+  eventPersonCount: number;
+  nonEventPersonCount: number;
+  excludedRowCount: number;
+}
 
 export interface AnalysisContext {
   orgId: string;
@@ -73,6 +106,11 @@ export interface AnalysisContext {
   // boolean이면 binary_logistic, 그 외엔 null). requestedMethod와 무관하게
   // 항상 이 값으로 설계행렬을 만든다 — v1은 outcome 타입이 method를 확정한다.
   regressionMethod: 'ols_linear' | 'binary_logistic' | null;
+  // PR4-B2 — analysisMode==='prediction'일 때만 채워진다(그 외 null/false).
+  // predictionState는 ②(공개통제)를 통과했을 때만 계산된다(3-4단계 실행 순서 —
+  // 통과 못 한 요청엔 자료단계·fold·비추정 사유 어느 것도 나가면 안 된다).
+  predictionDisclosed: boolean;
+  predictionState: PredictionAnalysisState | null;
 }
 
 export type BuildAnalysisContextResult =
@@ -112,7 +150,12 @@ export async function buildAnalysisContext(
   const differencing = checkAndRecordDifferencing(orgId, userId, recipe, queryFamilyDigest);
 
   const snapshot = await readSnapshot(pool, orgId);
-  const dataset = buildDataset(snapshot.rows, recipe, recipeDigest, catalogByKey);
+  // PR4-B2 — prediction일 때만 cohortDigest를 계산해 넘긴다(예측변수와 무관 —
+  // §3-1단계). recipe.prediction 존재는 zod superRefine이 이미 보장한다.
+  const dataset = buildDataset(
+    snapshot.rows, recipe, recipeDigest, catalogByKey,
+    recipe.analysisMode === 'prediction' ? { cohortDigest: computePredictionCohortDigest(recipe) } : undefined,
+  );
 
   const minCohortExceeded = dataset.personCount < MINIMUM_COHORT;
   const reasonCode: 'MIN_COHORT_NOT_MET' | 'DIFFERENCING_RATE_LIMIT' | null = minCohortExceeded
@@ -210,6 +253,8 @@ function buildAnalysisContextTail(input: BuildAnalysisContextTailInput): BuildAn
   let regressionDesign: RegressionDesignResult | null = null;
   let regressionExcludedRowCount: number | null = null;
   let regressionMethod: 'ols_linear' | 'binary_logistic' | null = null;
+  let predictionDisclosed = false;
+  let predictionState: PredictionAnalysisState | null = null;
 
   if (recipe.analysisMode === 'bivariate') {
     const [keyX, keyY] = recipe.variableKeys;
@@ -332,6 +377,54 @@ function buildAnalysisContextTail(input: BuildAnalysisContextTailInput): BuildAn
       availableMethods = computeRegressionAvailableMethods(completeCase.includedPersonCount, outcomeKey, catalogByKey, METHOD_POLICY_VERSION);
       methodCatalogVersion = METHOD_POLICY_VERSION;
     }
+  } else if (recipe.analysisMode === 'prediction' && recipe.prediction) {
+    // PR4-B2 §3-4단계 실행 순서 ①②만 여기서(request 억제는 이미 requestSuppressed로
+    // 들어와 있다, ②공개통제 게이트). ③(비추정 판정)·④(엔진)는 statsPredictionSuppression.ts
+    // 책임 — ②를 통과하지 못한 요청엔 자료단계·fold·비추정 사유 어느 것도 노출하지
+    // 않는다(정확히 회귀의 "③이 ④보다 먼저인 이유"와 같은 원칙).
+    const { outcomeKey, eventLevel } = recipe.prediction;
+    const predictorKeys = recipe.variableKeys.filter((k) => k !== outcomeKey);
+    const cohortDigest = computePredictionCohortDigest(recipe);
+
+    const stages = computePredictionDataStages(dataset.rows, outcomeKey, predictorKeys);
+    const s1EventNonEvent = computeEventNonEventPersonSets(stages.s1Rows, outcomeKey, eventLevel);
+    const s2EventNonEvent = computeEventNonEventPersonSets(stages.s2Rows, outcomeKey, eventLevel);
+    const s2PersonCount = new Set(stages.s2Rows.map((r) => r.cohortPersonKey!)).size;
+    const s2LevelSummaries = computePredictionLevelSummaries(stages.s2Rows, predictorKeys, catalogByKey);
+
+    const disclosure = evaluatePredictionDisclosure({
+      s1EventNonEvent, s2EventNonEvent, s2PersonCount, s2LevelSummaries,
+      excludedPersonSets: stages.excludedPersonSets,
+    });
+    predictionDisclosed = !requestSuppressed && disclosure.disclose;
+
+    if (predictionDisclosed) {
+      // S1 기준 층화 라벨(사건 = S1에서 y=eventLevel 행이 하나라도 있는 person).
+      const strata = new Map<string, PredictionStratum>();
+      for (const key of s1EventNonEvent.pPlus) strata.set(key, 1);
+      for (const key of s1EventNonEvent.pMinus) if (!strata.has(key)) strata.set(key, 0);
+      const outerFoldAssignment = assignPredictionOuterFolds(
+        strata, PREDICTION_POLICY.repeats, PREDICTION_POLICY.outerFolds, cohortDigest,
+      );
+
+      const nonEstimableCheck = computePredictionNonEstimableReason({
+        s1Rows: stages.s1Rows, s2Rows: stages.s2Rows, outcomeKey, eventLevel, predictorKeys, catalogByKey,
+        s1EventNonEvent, s2EventNonEvent, s2PersonCount,
+        outerFoldAssignment, outerFolds: PREDICTION_POLICY.outerFolds,
+      });
+
+      predictionState = {
+        outcomeKey, eventLevel, predictorKeys, s2Rows: stages.s2Rows, cohortDigest,
+        outerFoldAssignment, outerFoldCount: PREDICTION_POLICY.outerFolds,
+        nonEstimableCheck,
+        personCount: s2PersonCount,
+        eventPersonCount: s2EventNonEvent.pPlus.size,
+        nonEventPersonCount: s2PersonCount - s2EventNonEvent.pPlus.size,
+        excludedRowCount: stages.excludedRowCount,
+      };
+      availableMethods = computePredictionAvailableMethods(s2PersonCount, outcomeKey, catalogByKey, METHOD_POLICY_VERSION);
+      methodCatalogVersion = METHOD_POLICY_VERSION;
+    }
   }
 
   return {
@@ -342,6 +435,7 @@ function buildAnalysisContextTail(input: BuildAnalysisContextTailInput): BuildAn
       paired, pairDisclosed, availableMethods, methodCatalogVersion, correlationMatrixPairs,
       correlationMatrixVariables,
       regressionDisclosed, regressionDesign, regressionExcludedRowCount, regressionMethod,
+      predictionDisclosed, predictionState,
     },
   };
 }

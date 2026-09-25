@@ -87,7 +87,9 @@ export const JOB_METADATA: AnalyticsVariableMetadata[] = [
     dependsOn: ['shared.jobs[].id', 'shared.jobs[].jobName', 'shared.jobs[].startDate', 'shared.jobs[].endDate', 'shared.jobs[].workPeriodOverride'],
     availableAt: 'assessment',
     shownToAssessor: true,
-    allowedAnalysisPurposes: ['association', 'formula_audit'],
+    // PR4-B2 — 공통 predictor(계획서 §0단계 허용표). derived predictor 검토목록 등재.
+    allowedAnalysisPurposes: ['association', 'formula_audit', 'prediction'],
+    predictionRole: 'predictor',
     sensitivity: 'non_sensitive',
     formulaFamily: 'job_rollup_longest_tenure_years',
     supportedFormulaPolicies: [],

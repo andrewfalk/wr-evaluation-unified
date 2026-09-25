@@ -26,6 +26,9 @@ import '../charts/charts.css';
 // 키에 포함한다. 빠뜨리면 이 옵션만 바꿨을 때 preview가 재실행되지 않는다(A1이
 // outcomeKey/grain에서 겪은 것과 동일한 함정 — 계획서 §5 "buildConditionKey에
 // 반드시 포함").
+// PR4-B2 — 예측도 회귀와 같은 이유로 정렬하지 않는다(predictor 순서가 계수표
+// 행 순서다) — outcomeKey·eventLevel도 조건 키에 포함한다(계획서 §6단계
+// "buildConditionKey는 순서를 보존하고 outcome·eventLevel을 포함한다").
 function buildConditionKey(
   grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters,
   outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel,
@@ -33,32 +36,46 @@ function buildConditionKey(
   return JSON.stringify({
     grain,
     analysisMode,
-    variableKeys: analysisMode === 'bivariate' || analysisMode === 'regression' ? variableKeys : [...variableKeys].sort(),
+    variableKeys: analysisMode === 'bivariate' || analysisMode === 'regression' || analysisMode === 'prediction'
+      ? variableKeys : [...variableKeys].sort(),
     requestedMethod: requestedMethod ?? null,
     analysisPurpose,
     formulaPolicies,
     appliedFilters,
-    outcomeKey: analysisMode === 'regression' ? (outcomeKey ?? null) : null,
+    outcomeKey: analysisMode === 'regression' || analysisMode === 'prediction' ? (outcomeKey ?? null) : null,
     standardizePredictors: analysisMode === 'regression' ? standardizePredictors : false,
     interactionTerms: analysisMode === 'regression' ? interactionTerms : [],
     splineKeys: analysisMode === 'regression' ? splineKeys : [],
-    eventLevel: analysisMode === 'regression' ? (eventLevel || null) : null,
+    eventLevel: analysisMode === 'regression' || analysisMode === 'prediction' ? (eventLevel || null) : null,
   });
+}
+
+// PR4-B2 — 예측은 predictionRole로 outcome/predictor가 정해져 있다(회귀처럼 "선택한
+// 나머지 전부가 predictor"가 아니다 — 서버가 PREDICTION_PREDICTOR_INVALID_ROLE로
+// 거부한다). CatalogPanel은 역할과 무관하게 체크를 허용하므로(계획서 §6단계
+// "역할별로 필터링한다"), 실제로 recipe에 담을 집합은 여기서 역할로 다시 걸러
+// 잘못된 역할의 변수가 조용히 400을 유발하지 않게 한다.
+function predictionEffectiveVariableKeys(variableKeys, outcomeKey, catalogByKey) {
+  const predictorKeys = variableKeys.filter((k) => k !== outcomeKey && catalogByKey.get(k)?.predictionRole === 'predictor');
+  if (!outcomeKey || catalogByKey.get(outcomeKey)?.predictionRole !== 'outcome') return predictorKeys;
+  return [outcomeKey, ...predictorKeys];
 }
 
 function buildRecipe(
   grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters,
-  outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel,
+  outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey,
 ) {
   return {
     grain,
-    variableKeys,
+    variableKeys: analysisMode === 'prediction' ? predictionEffectiveVariableKeys(variableKeys, outcomeKey, catalogByKey) : variableKeys,
     filters: appliedFilters,
     analysisPurpose,
     formulaPolicies,
     analysisMode,
     // PR3-B — 상관행렬도 requestedMethod(pearson/spearman)가 필요하다(계획서 §4/§7).
-    ...((analysisMode === 'bivariate' || analysisMode === 'correlation_matrix' || analysisMode === 'regression') && requestedMethod ? { requestedMethod } : {}),
+    // PR4-B2 — 예측은 l2_logistic 하나뿐이라 사용자 선택 UI 없이 모드 전환 시
+    // 자동으로 채운다(handleAnalysisModeChange/handleGrainChange).
+    ...((analysisMode === 'bivariate' || analysisMode === 'correlation_matrix' || analysisMode === 'regression' || analysisMode === 'prediction') && requestedMethod ? { requestedMethod } : {}),
     // PR4-A1 — outcomeKey가 아직 없으면(최초 선택 전) regression 필드 자체를
     // 만들지 않는다 — 서버 zod가 regression 모드에서 이 객체를 필수로 요구하므로
     // (없으면 REGRESSION_REQUIRES_REGRESSION_OBJECT), isRecipeComplete가 outcomeKey
@@ -74,6 +91,12 @@ function buildRecipe(
         ...(eventLevel ? { eventLevel } : {}),
       },
     } : {}),
+    // PR4-B2 — 예측은 회귀와 달리 eventLevel이 필수다(서버 zod가 min(1) — 자동
+    // 선택 폴백이 없다, 계획서 §1단계). isRecipeComplete가 eventLevel 존재를
+    // 먼저 확인해 이 상태로는 실행/커밋을 안 하게 만든다.
+    ...(analysisMode === 'prediction' && outcomeKey && eventLevel ? {
+      prediction: { outcomeKey, eventLevel },
+    } : {}),
   };
 }
 
@@ -82,7 +105,7 @@ function buildRecipe(
 // 자체가 안 나가 availableMethods를 받아올 수 없다(1차 초안의 순환의존 버그가
 // 클라이언트에서 재발했던 지점, 계획서 §"이슈1"). method 실행 가능 여부는 오직
 // canExecute(실행 버튼)에서만 본다.
-function isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters, outcomeKey) {
+function isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters, outcomeKey, eventLevel) {
   if (analysisMode === 'bivariate') {
     if (variableKeys.length !== 2 || variableKeys[0] === variableKeys[1]) return false;
   } else if (analysisMode === 'correlation_matrix') {
@@ -94,6 +117,13 @@ function isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogBy
     // requestedMethod는 여기서 보지 않는다 — 방법 선택 여부는 canExecute에서만
     // 본다(이변량과 같은 원칙, §5 "requiresMethodCheck").
     if (!outcomeKey || !variableKeys.includes(outcomeKey) || variableKeys.length < 2) return false;
+  } else if (analysisMode === 'prediction') {
+    // PR4-B2 — outcome이 실제로 predictionRole:'outcome'이어야 하고, predictor도
+    // 역할이 'predictor'인 것만 센다(회귀와 달리 "나머지 전부"가 아니다). eventLevel은
+    // 서버가 자동 선택하지 않으므로(계획서 §1단계 — min(1) 필수) 여기서도 확인한다.
+    if (!outcomeKey || catalogByKey.get(outcomeKey)?.predictionRole !== 'outcome' || !eventLevel) return false;
+    const validPredictorCount = variableKeys.filter((k) => k !== outcomeKey && catalogByKey.get(k)?.predictionRole === 'predictor').length;
+    if (validPredictorCount < 1) return false;
   } else if (variableKeys.length === 0) {
     return false;
   }
@@ -212,7 +242,10 @@ export function StatisticsWorkbench({
     setVariableKeys([]);
     setFilterDraft([]);
     setAppliedFilters([]);
-    setRequestedMethod(null);
+    // PR4-B2 — 예측은 l2_logistic 하나뿐이라 requestedMethod를 null로 비우면
+    // (다른 모드처럼 사용자가 다시 고를 UI가 없어) canExecute가 영영 막힌다 —
+    // 현재 모드가 prediction이면 그대로 유지한다.
+    setRequestedMethod(analysisMode === 'prediction' ? 'l2_logistic' : null);
     setOutcomeKey(null);
     setStandardizePredictors(false);
     setInteractionTerms([]);
@@ -229,8 +262,9 @@ export function StatisticsWorkbench({
     });
     // 변수 구성이 바뀌면 이전에 고른 method가 새 쌍에 더 이상 안 맞을 수 있어 초기화한다
     // (계획서 §클라이언트배선 "변수 변경 시 requestedMethod 초기화" — 조용히 유지하면
-    // 사용자가 뭘 실행했는지 오해할 수 있음).
-    setRequestedMethod(null);
+    // 사용자가 뭘 실행했는지 오해할 수 있음). PR4-B2 — 예측은 방법이 l2_logistic
+    // 하나뿐이라(선택 UI 없음) 변수 토글로 초기화하면 다시 채워줄 곳이 없다.
+    setRequestedMethod(analysisMode === 'prediction' ? 'l2_logistic' : null);
     // PR4-A1 — 지금 outcome으로 지정된 변수를 해제하면 outcome도 함께 비운다(더 이상
     // 선택 목록에 없는 변수를 outcome으로 남겨두면 predictor 파생 로직이 깨진다).
     setOutcomeKey((prev) => (prev === key ? null : prev));
@@ -251,7 +285,9 @@ export function StatisticsWorkbench({
       return;
     }
     setModeChangeBlockedNotice(false);
-    setRequestedMethod(null);
+    // PR4-B2 — 예측으로 들어갈 때 requestedMethod를 자동으로 채운다(방법이
+    // l2_logistic 하나뿐이라 선택 UI 자체가 없다).
+    setRequestedMethod(nextMode === 'prediction' ? 'l2_logistic' : null);
     // PR4-A1 §5 — 회귀는 넉넉한 상한(20)이라 이변량처럼 전환 자체를 막을 필요는
     // 없다. 모드를 나가거나 새로 들어올 때 outcome만 초기화해 이전 모드의 스테일
     // 상태가 새 모드로 새지 않게 한다.
@@ -261,6 +297,16 @@ export function StatisticsWorkbench({
     setInteractionTerms([]);
     setSplineKeys([]);
     setEventLevel('');
+    // PR4-B2 — 계획서 §6단계 "purpose 강제·복귀": analysisMode==='prediction' ⇔
+    // analysisPurpose==='prediction'(서버 PURPOSE_MODE_MISMATCH, shared/contracts/
+    // stats.ts). 예측으로 들어가면 목적을 강제로 맞추고, 예측에서 나가면 목적을
+    // 기본값으로 되돌린다(그대로 두면 나간 뒤에도 purpose:'prediction'이 남아
+    // 다음 모드에서 곧바로 400을 낸다).
+    if (nextMode === 'prediction') {
+      setAnalysisPurpose('prediction');
+    } else if (analysisPurpose === 'prediction') {
+      setAnalysisPurpose('association');
+    }
     setAnalysisMode(nextMode);
   }
 
@@ -276,7 +322,11 @@ export function StatisticsWorkbench({
     setOutcomeKey(nextOutcomeKey);
     setInteractionTerms((prev) => prev.filter(([a, b]) => a !== nextOutcomeKey && b !== nextOutcomeKey));
     setSplineKeys((prev) => prev.filter((k) => k !== nextOutcomeKey));
-    setEventLevel('');
+    // PR4-B2 — 예측의 boolean outcome은 eventLevel을 자동 'true'로 채운다(계획서
+    // §6단계 "boolean outcome이면 eventLevel 'true'를 자동 설정"). 그 외(회귀,
+    // 또는 예측의 categorical outcome)는 비워 사용자가 select로 다시 고르게 한다.
+    const nextVariable = catalogByKey.get(nextOutcomeKey);
+    setEventLevel(analysisMode === 'prediction' && nextVariable?.type === 'boolean' ? 'true' : '');
   }
 
   // ---- preview: 조건-key(무엇을 위한 결과인가) + 요청세대(그 요청 인스턴스가 최신인가) ----
@@ -290,7 +340,7 @@ export function StatisticsWorkbench({
   useEffect(() => {
     const key = currentConditionKey;
     const gen = ++previewGenRef.current;
-    if (!isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters, outcomeKey)) {
+    if (!isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters, outcomeKey, eventLevel)) {
       setPreviewState({ key, status: 'idle', result: null, error: null });
       return undefined;
     }
@@ -301,7 +351,7 @@ export function StatisticsWorkbench({
         // PR3-A — preview는 requestedMethod를 참고만 하고 유효성을 검사하지 않는다
         // (서버가 관대함, 계획서 §파이프라인 "preview는 관대하다") — method 미선택
         // 상태에서도 이 호출은 정상적으로 나가야 availableMethods를 받아올 수 있다.
-        const recipe = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel);
+        const recipe = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey);
         const res = await previewStatsAnalysis(recipe, session, { signal: controller.signal });
         if (gen !== previewGenRef.current) return;
         setPreviewState((prev) => (prev.key === key ? { key, status: 'ready', result: res, error: null } : prev));
@@ -364,7 +414,7 @@ export function StatisticsWorkbench({
   // PR3-B — 상관행렬도 이변량과 동일하게 requestedMethod가 available/conditional
   // 이어야 실행 가능하다(서버 handlePostAnalyze의 METHOD_NOT_AVAILABLE 판정과
   // 동일 기준 — statsAnalyzeHandler.ts).
-  const requiresMethodCheck = analysisMode === 'bivariate' || analysisMode === 'correlation_matrix' || analysisMode === 'regression';
+  const requiresMethodCheck = analysisMode === 'bivariate' || analysisMode === 'correlation_matrix' || analysisMode === 'regression' || analysisMode === 'prediction';
   const methodExecutable =
     !requiresMethodCheck ||
     (selectedMethod != null && (selectedMethod.status === 'available' || selectedMethod.status === 'conditional'));
@@ -385,7 +435,7 @@ export function StatisticsWorkbench({
   async function handleRunAnalyze() {
     if (!canExecute || analyzeInFlightRef.current) return;
     analyzeInFlightRef.current = true;
-    const recipeAtSubmit = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel);
+    const recipeAtSubmit = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey);
     setIsAnalyzing(true);
     setAnalyzeError(null);
     try {
@@ -439,7 +489,7 @@ export function StatisticsWorkbench({
   }, [runPolling.status]);
 
   const recipeChanged = committedRecipe
-    ? JSON.stringify(buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel)) !== JSON.stringify(committedRecipe)
+    ? JSON.stringify(buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey)) !== JSON.stringify(committedRecipe)
     : false;
 
   // ---- export ----

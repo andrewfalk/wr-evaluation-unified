@@ -65,6 +65,8 @@ function makeCtx(rows: DatasetRow[], variableKeys: string[], method: 'pearson_co
     regressionDesign: null,
     regressionExcludedRowCount: null,
     regressionMethod: null,
+    predictionDisclosed: false,
+    predictionState: null,
   };
 }
 

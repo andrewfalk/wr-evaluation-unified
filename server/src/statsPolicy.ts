@@ -78,3 +78,76 @@ export const REGRESSION_POLICY = {
   minResidualDf: 10,
 } as const;
 export const REGRESSION_POLICY_VERSION = REGRESSION_POLICY.version;
+
+// PR4-B2 — 예측(prediction) 분석 정책(계획서 §3-5단계). 결과에 영향을 주는 상수를
+// 전부 여기 모은다 — statsExecutionDigest.ts가 이 객체 전체를 digest 입력에 넣는다
+// (부분만 넣으면 코드/정책이 바뀌어도 캐시가 무효화되지 않는 함정, REGRESSION_POLICY와
+// 동일한 교훈).
+//
+// 0단계 실측(2026-09-24, 운영 핀 버전 Docker: node:20-bookworm-slim + numpy==1.26.4,
+// BLAS 스레드=1 — statsEngine.ts의 실제 스폰 환경과 동일) — n=700/P=20: 54.4초,
+// n=5000/P=20: 308.1초(둘 다 fit_procedure 226회·λ별 적합 29,606회, 계획서 예고치와
+// 정확히 일치). engineTimeoutMs는 이 두 지점에 안전마진 2배를 적용한 선형모델
+// (computePredictionEngineTimeoutMs)로 요청마다 추정한다 — 비동기 job(PR4-B1)이라
+// "30초"는 동기 응답 제약이 아니라 애초에 참고용 UX 목표였을 뿐이었다(사용자 확인).
+// maxWorkUnits는 별도 추상 수치를 만들지 않고 행 수(maxRows) 자체를 예산으로
+// 재사용한다 — P를 바꿔가며 실측하지 않아 파라미터 수까지 반영하는 2차원 비용모델을
+// 지어낼 근거가 없다.
+export const PREDICTION_POLICY = {
+  version: 'v1-l2-grouped-cv-bootstrap',
+  maxRows: 5000,
+  maxColumns: 30,
+  maxParameters: 20,
+  maxLevels: 10,
+  minPersons: 50,
+  minEventPersons: 25,
+  minNonEventPersons: 25,
+  minEventsPerParameter: 10,
+  outerFolds: 5,
+  repeats: 5,
+  innerFolds: 5,
+  representativeRepeat: 1,
+  lambdaGridMin: 1e-4,
+  lambdaGridMax: 10,
+  lambdaGridSize: 26,
+  bootstrapReplicates: 200,
+  bootstrapMinValidRate: 0.9,
+  cvMinValidRepeats: 3,
+  aucCiReplicates: 1000,
+  samplerSeed: 'pr4-b2-v1',
+  samplerVersion: 'sha256-rr-v1',
+  disclosure: {
+    minimumCohort: MINIMUM_COHORT,
+    minDisclosableBins: MIN_DISCLOSABLE_BINS,
+    curveCandidateBins: 20,
+  },
+  // maxWorkUnits는 maxRows와 같은 값이다(위 설명) — 이름을 분리해 admission
+  // 코드가 "행 수 상한"이 아니라 "작업량 예산"이라는 의도를 드러내게 한다.
+  maxWorkUnits: 5000,
+} as const;
+export const PREDICTION_POLICY_VERSION = PREDICTION_POLICY.version;
+
+// 0단계 실측 2개 지점(n=700→54.4초, n=5000→308.1초)에 안전마진 2배를 적용한 선형
+// 모델 — timeoutSec ≈ 2×(13.1 + 0.059×n) = 26.2 + 0.118×n. n=700→약 109초,
+// n=5000→약 616초(사용자 확인 예시치 "~90초/~600초"와 정합). 안전마진은 Docker/WSL2
+// 가상화 오버헤드·동시 부하 변동을 흡수하기 위함이다 — 실측치를 그대로 쓰면 컨테이너
+// 부하가 조금만 늘어도 정상 실행이 timeout으로 오분류된다.
+export function computePredictionEngineTimeoutMs(rowCount: number): number {
+  const timeoutSec = 26.2 + 0.118 * rowCount;
+  return Math.ceil(timeoutSec) * 1000;
+}
+
+// logspace(gridMin, gridMax, gridSize) — numpy.logspace와 동일 공식(10^linspace).
+// PREDICTION_POLICY.lambdaGridMin/Max/Size에서 파생하는 순수 함수라 여기 둔다
+// (Python 엔진은 이 배열을 그대로 config.lambdaGrid로 받는다 — §4단계 "Python은
+// 정책을 모르는 순수 함수다").
+export function computePredictionLambdaGrid(): number[] {
+  const lambdaGridMin: number = PREDICTION_POLICY.lambdaGridMin;
+  const lambdaGridMax: number = PREDICTION_POLICY.lambdaGridMax;
+  const lambdaGridSize: number = PREDICTION_POLICY.lambdaGridSize;
+  const logMin = Math.log10(lambdaGridMin);
+  const logMax = Math.log10(lambdaGridMax);
+  if (lambdaGridSize === 1) return [10 ** logMin];
+  const step = (logMax - logMin) / (lambdaGridSize - 1);
+  return Array.from({ length: lambdaGridSize }, (_, i) => 10 ** (logMin + step * i));
+}

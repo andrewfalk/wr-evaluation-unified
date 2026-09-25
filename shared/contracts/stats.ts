@@ -88,6 +88,12 @@ export const CatalogVariableSchema = z.object({
   // 빠지지만(CatalogPanel.jsx) 현재 grain 안에서는 여전히 필터로 선택 가능하다(RecipePanel.jsx
   // FilterEditor는 grain만 거르고 analysisRole은 보지 않음 — 등록일이 대표 사례).
   analysisRole:             z.enum(['analyzable', 'filter_only']).default('analyzable'),
+  // PR4-B2 — 예측 역할표(계획서 §2단계). predictionOutcomeLevels/predictionEventLevels는
+  // predictionRole==='outcome'일 때만 non-null(PREDICTION_OUTCOME_SPECS에서 파생) —
+  // 클라이언트 eventLevel select가 자유입력이 아니라 이 값에서 만들어진다.
+  predictionRole:           z.enum(['outcome', 'predictor']).nullable().default(null),
+  predictionOutcomeLevels:  z.array(z.string()).nullable().default(null),
+  predictionEventLevels:    z.array(z.string()).nullable().default(null),
 });
 
 export const CatalogResponseSchema = z.object({
@@ -134,6 +140,9 @@ export const StatsMethodIdSchema = z.enum([
   // PR4-A1 — 연관성 회귀 2종(계획서 §6.9.2). outcome 타입(continuous/boolean)이
   // 자동 결정하지만 requestedMethod로 명시도 가능(§6.5 인코딩 고정 원칙).
   'ols_linear', 'binary_logistic',
+  // PR4-B2 — 예측(prediction) 분석 전용 방법 1종(계획서 §4단계). L2 정칙화 로지스틱만
+  // 지원한다(scikit-learn 미도입, numpy 직접 구현 — 계획 확정 결정 #1).
+  'l2_logistic',
 ]);
 
 export const StatsAnalysisRecipeSchema = z.object({
@@ -159,7 +168,9 @@ export const StatsAnalysisRecipeSchema = z.object({
   // 계속 optional이다(리뷰 #1) — 방법 미선택 상태의 최초 preview도 정상 응답해야
   // availableMethods를 볼 수 있다. 필수 여부는 statsRecipeValidation.ts의
   // context==='analyze'에서만 강제한다.
-  analysisMode:    z.enum(['descriptive', 'bivariate', 'correlation_matrix', 'regression']).default('descriptive'),
+  // PR4-B2 — 'prediction' 추가(계획서 §1단계). 나머지 모드와 원칙 동일(구버전
+  // 재파싱 호환 위해 optional 유지 규칙은 requestedMethod에 그대로 적용).
+  analysisMode:    z.enum(['descriptive', 'bivariate', 'correlation_matrix', 'regression', 'prediction']).default('descriptive'),
   requestedMethod: StatsMethodIdSchema.optional(),
   // PR4-A1 — 회귀 전용 서브객체. variableKeys는 그대로 재사용하고(진실원 하나만
   // 유지), predictors는 variableKeys에서 outcomeKey를 뺀 나머지(원래 순서 유지 —
@@ -178,8 +189,27 @@ export const StatsAnalysisRecipeSchema = z.object({
     interactionTerms: z.array(z.tuple([z.string(), z.string()])).default([]),
     splineKeys: z.array(z.string()).default([]),
   }).strict().optional(),
+  // PR4-B2 — 예측 전용 서브객체(계획서 §1단계). referenceLevels·spline·interaction·
+  // 표준화 옵션은 없다(연구용 내부검증 성능평가만 하므로 회귀 진단 기능을 공유하지
+  // 않는다). eventLevel은 필수다 — boolean outcome은 클라이언트가 'true'로 고정해
+  // 보내고, categorical은 PREDICTION_OUTCOME_SPECS의 허용값 중 하나여야 한다(카탈로그
+  // 조회가 필요해 그 검증은 statsRecipeValidation.ts가 한다).
+  prediction: z.object({
+    outcomeKey: z.string().min(1),
+    eventLevel: z.string().min(1),
+  }).strict().optional(),
   // encoding/options/rollups(마스터 계획서 §1)는 PR0-C 범위 밖 — .strict()로 보내면 400.
 }).strict().superRefine((recipe, ctx) => {
+  // PR4-B2 — analysisMode==='prediction'과 analysisPurpose==='prediction'은 항상
+  // 짝을 이뤄야 한다(계획서 §1단계 "PURPOSE_MODE_MISMATCH"). 카탈로그가 필요 없는
+  // 순수 구조검사라 모드별 분기보다 먼저, 항상 검사한다.
+  if ((recipe.analysisMode === 'prediction') !== (recipe.analysisPurpose === 'prediction')) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'PURPOSE_MODE_MISMATCH',
+      path: ['analysisPurpose'],
+    });
+  }
   // 카탈로그 조회가 필요 없는 순수 구조검사만 여기서 한다(컨텍스트 무관 — preview·
   // analyze 둘 다 항상 참). 타입정합성·paired영구거부·method필수여부(컨텍스트별로
   // 다름)는 카탈로그가 필요해 statsRecipeValidation.ts(context 인자)가 담당한다.
@@ -321,6 +351,40 @@ export const StatsAnalysisRecipeSchema = z.object({
       }
     });
   }
+  if (recipe.analysisMode === 'prediction') {
+    // PR4-B2 — 카탈로그가 필요 없는 구조검사만(계획서 §1단계). outcome이
+    // predictionRole==='outcome'인지·eventLevel이 명세 허용값인지·predictor grain
+    // 적격성은 statsRecipeValidation.ts(context 인자, 카탈로그 필요)가 담당한다.
+    if (!recipe.prediction) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'PREDICTION_REQUIRES_PREDICTION_OBJECT',
+        path: ['prediction'],
+      });
+      return;
+    }
+    if (recipe.variableKeys.length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'PREDICTION_REQUIRES_AT_LEAST_TWO_VARIABLES',
+        path: ['variableKeys'],
+      });
+    }
+    if (new Set(recipe.variableKeys).size !== recipe.variableKeys.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'DUPLICATE_VARIABLE_SELECTED',
+        path: ['variableKeys'],
+      });
+    }
+    if (!recipe.variableKeys.includes(recipe.prediction.outcomeKey)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'PREDICTION_OUTCOME_MUST_BE_IN_VARIABLE_KEYS',
+        path: ['prediction', 'outcomeKey'],
+      });
+    }
+  }
 });
 
 export const RunManifestSchema = z.object({
@@ -349,7 +413,10 @@ export const RunManifestSchema = z.object({
   // 있다(계획서 §6/§9). 그 권한별 응답의 digest는 필요 시 감사로그의
   // deliveredResultDigest로만 남긴다(manifest에는 안 남김).
   // PR4-A1 — 'regression' 추가. 나머지 원칙은 그대로(구버전 재파싱 호환용 optional).
-  analysisMode:               z.enum(['descriptive', 'bivariate', 'correlation_matrix', 'regression']).optional(),
+  // PR4-B2 — 'prediction' 추가. admission의 frozen_dataset->'recipe'->>'analysisMode'
+  // 판별에도 이 값이 쓰인다(계획서 "설계 전제로 확인한 코드 사실" — stats_runs에는
+  // 별도 모드 컬럼이 없다).
+  analysisMode:               z.enum(['descriptive', 'bivariate', 'correlation_matrix', 'regression', 'prediction']).optional(),
 });
 
 export const PreviewCountsSchema = z.object({
@@ -844,6 +911,10 @@ export const RegressionDiagnosticsSchema = z.object({
   pointDiagnosticsStatus: z.enum([
     'not_requested', 'unavailable_no_access', 'unavailable_model',
     'unavailable_computation_failed', 'available',
+    // PR4-B2 — 엔진 동시성은 1이다. limited_row 진단이 큐 밖에서 엔진을 호출할 때
+    // prediction 실행과 겹치면 Busy를 이 값으로 구분한다(statsLimitedRowMerge.ts —
+    // 종전엔 Busy도 unavailable_computation_failed로 삼켰다).
+    'unavailable_engine_busy',
   ]),
   displayedPointCount: z.number().int().nullable(),
   totalPointCount: z.number().int().nullable(),
@@ -1039,6 +1110,329 @@ export const AnalyzeRegressionResultSchema = z
   .discriminatedUnion('suppressed', [RegressionSuppressedSchema, RegressionResultBodySchema])
   .superRefine(validateRegressionStateInvariants);
 
+// ============================================================================
+// PR4-B2: 예측(prediction) 분석 결과 계약. 계획서(async-riding-hennessy.md 4차 통합본)
+// §1단계 참고. L2 정칙화 로지스틱 + person 단위 grouped CV + bootstrap optimism
+// 보정으로 "이 변수 세트가 현행 업무관련성 판정을 처음 보는 환자에게서 얼마나
+// 판별·보정하는가"를 연구용 내부검증으로만 평가한다(모형 저장·점수화·계수 export 없음).
+// ============================================================================
+
+// 3-4단계 순서표(1~11) 그대로 — 이 순서가 고정 우선순위다. 회귀 enum과 공유하지
+// 않는다(회귀 전용 INSUFFICIENT_COMPLETE_ROWS·CONSTANT_OUTCOME·RANK_DEFICIENT·
+// SEPARATION_*·CATEGORICAL_OUTCOME_NOT_BINARY·SPLINE_*는 prediction에 없음 — outcome
+// 명세가 레벨을 2개로 고정해 "3개 이상"에 도달할 수 없고, ridge라 분리·rank결핍
+// 개념이 없다).
+export const PredictionNonEstimableReasonSchema = z.enum([
+  'OUTCOME_NOT_OBSERVED',
+  'EVENT_LEVEL_NOT_OBSERVED',
+  'NON_EVENT_LEVEL_NOT_OBSERVED',
+  'INSUFFICIENT_PERSONS',
+  'INSUFFICIENT_EVENT_PERSONS',
+  'ZERO_VARIANCE_PREDICTOR',
+  'TOO_MANY_LEVELS',
+  'TOO_MANY_COLUMNS',
+  'TOO_MANY_PARAMETERS',
+  'INSUFFICIENT_EVENTS_PER_PARAMETER',
+  'FOLD_CLASS_MISSING',
+  'NOT_CONVERGED',
+]);
+
+const PredictionMetricNameSchema = z.enum([
+  'roc_auc', 'average_precision', 'brier', 'calibration_intercept', 'calibration_slope',
+]);
+
+// cv와 bootstrap은 같은 구조다(계획서 3차 리뷰 #3-6) — 보류돼도 status와 반복/복제
+// 수는 항상 남는다. withheldReason이 null이 아닌 것과 status==='withheld'는 항상
+// 짝을 이룬다(아래 invariants에서 강제).
+const PredictionCvBlockSchema = z.object({
+  status: z.enum(['ok', 'withheld']),
+  withheldReason: z.enum(['LOW_VALID_REPEATS']).nullable(),
+  validRepeats: z.number().int().nonnegative(),
+  totalRepeats: z.number().int().nonnegative(),
+  mean: z.number().nullable(),
+  min: z.number().nullable(),
+  max: z.number().nullable(),
+}).strict();
+
+const PredictionBootstrapBlockSchema = z.object({
+  status: z.enum(['ok', 'withheld']),
+  withheldReason: z.enum(['LOW_VALID_REPLICATES', 'APPARENT_UNAVAILABLE']).nullable(),
+  validReplicates: z.number().int().nonnegative(),
+  totalReplicates: z.number().int().nonnegative(),
+  // 보정값은 잘라내지 않는다(계획서 §4단계 "bootstrap optimism") — 범위를 벗어나면
+  // correctedOutOfRange로만 표시한다.
+  optimism: z.number().finite().nullable(),
+  corrected: z.number().finite().nullable(),
+  correctedOutOfRange: z.boolean(),
+}).strict();
+
+export const PredictionMetricSchema = z.object({
+  metric: PredictionMetricNameSchema,
+  apparent: z.number().nullable(),
+  representativeRepeat: z.number().nullable(),
+  cv: PredictionCvBlockSchema,
+  bootstrap: PredictionBootstrapBlockSchema,
+}).strict();
+
+// AUC 95% CI 대상은 항상 roc_auc의 cv.mean(반복 평균 AUC)뿐이다(계획서 결정 #8/
+// 3차 리뷰 #3-5) — 곡선 면적이나 apparent가 아니다.
+export const PredictionAucCiSchema = z.object({
+  target: z.literal('roc_auc_cv_mean'),
+  lower: z.number(),
+  upper: z.number(),
+  method: z.literal('person_bootstrap_oof_conditional'),
+  replicates: z.number().int().nonnegative(),
+}).strict();
+
+// 공개통제 구간(계획서 §5단계 "곡선 공개통제") — person 수는 공개하지 않는다.
+export const PredictionCurveBinSchema = z.object({
+  upperThreshold: z.number(),
+  rows: z.number().int().nonnegative(),
+  positiveRows: z.number().int().nonnegative(),
+  meanPredicted: z.number(),
+  observedRate: z.number(),
+}).strict();
+
+// bins가 null이면 disclosure로 억제된 것(구간이 minDisclosableBins 미만) — 방법
+// 자체의 non_estimable과는 별개다(전체 curves가 null인 것은 estimation!=='ok'일 때뿐).
+export const PredictionCurvesSchema = z.object({
+  bins: z.array(PredictionCurveBinSchema).nullable(),
+  suppressedReason: z.enum(['MIN_DISCLOSABLE_BINS_NOT_MET']).nullable(),
+  representativeRepeat: z.literal(1),
+  // 구간 병합이 구간 내부 예측 순위를 지우므로, 곡선 면적은 반복 1 AUC와도 다를
+  // 수 있다(계획서 3차 리뷰 반례: 원 AUC 0.667 → 구간 ROC 면적 0.500).
+  areaMayDifferFromAuc: z.literal(true),
+}).strict();
+
+export const PredictionCoefficientTermSchema = z.object({
+  term: z.string(),
+  variableKey: z.string(),
+  level: z.string().nullable(),
+  standardizedBeta: z.number(),
+}).strict();
+
+// 추론값(SE·p·CI)은 없다 — 연구용 성능평가일 뿐 모형 배포·해석용 계수가 아니다.
+export const PredictionCoefficientsSchema = z.object({
+  intercept: z.number(),
+  terms: z.array(PredictionCoefficientTermSchema),
+}).strict();
+
+export const PredictionCaveatSchema = z.enum([
+  'RESEARCH_INTERNAL_VALIDATION',
+  'NOT_FOR_DEPLOYMENT',
+  'TEMPORAL_VALIDATION_NOT_PERFORMED',
+  'SUBGROUP_PERFORMANCE_NOT_PERFORMED',
+  'EXTERNAL_VALIDATION_NOT_PERFORMED',
+  'LATEST_PAYLOAD_LEAKAGE_POSSIBLE',
+  'RAW_EXPOSURE_FORMULA_INPUT',
+  'SAME_ASSESSOR_FINDINGS',
+  'USER_MODEL_SELECTION_NOT_CORRECTED',
+]);
+
+const PredictionSuppressedSchema = z.object({
+  suppressed: z.literal(true),
+  // association/regression과 동일 원칙 — 공개통제 사유는 단 하나로 수렴한다.
+  reasonCode: z.literal('MIN_COHORT_NOT_MET'),
+}).strict();
+
+const PredictionResultBodySchema = z.object({
+  suppressed: z.literal(false),
+  estimation: z.enum(['ok', 'non_estimable']),
+  nonEstimableReason: PredictionNonEstimableReasonSchema.nullable(),
+  method: z.literal('l2_logistic'),
+  outcomeKey: z.string(),
+  eventLevel: z.string(),
+  // S2(최종 완전사례) 기준 — 항상 계산된 정수(S2가 비면 실제 0). 사건·비사건
+  // person은 서로소이며 합이 personCount다(계획서 §3-2/3-3 자료 단계).
+  n: z.number().int().nonnegative(),
+  personCount: z.number().int().nonnegative(),
+  eventPersonCount: z.number().int().nonnegative(),
+  nonEventPersonCount: z.number().int().nonnegative(),
+  prevalence: z.number().nullable(),
+  // S0 → S2 전체 제외 행 수(association과 같은 관례). 제외 person 수는 절대 넣지
+  // 않는다(4차 리뷰 #1 — preview의 S0 인원과 결과의 S2 personCount가 함께 공개되면
+  // 부분 제외 person 수가 역산된다).
+  excludedRowCount: z.number().int().nonnegative(),
+  parameterCount: z.number().int().nonnegative().nullable(),
+  columnCount: z.number().int().nonnegative().nullable(),
+  validation: z.object({
+    scheme: z.literal('grouped_cv'),
+    outerFolds: z.number().int().positive(),
+    repeats: z.number().int().positive(),
+    innerFolds: z.number().int().positive(),
+    outerFoldBasis: z.literal('base_cohort'),
+    samplerVersion: z.string(),
+  }).strict(),
+  lambda: z.object({
+    selected: z.number().nullable(),
+    gridMin: z.number(),
+    gridMax: z.number(),
+    gridSize: z.number().int().positive(),
+  }).strict(),
+  qualityFlags: z.array(z.string()),
+  droppedColumnFoldCount: z.number().int().nonnegative().nullable(),
+  metrics: z.array(PredictionMetricSchema),
+  aucCi: PredictionAucCiSchema.nullable(),
+  curves: PredictionCurvesSchema.nullable(),
+  coefficients: PredictionCoefficientsSchema.nullable(),
+  caveats: z.array(PredictionCaveatSchema),
+  // 후속 필수(temporal holdout·subgroup)와 별도 연구(외부검증)를 구분해 명시한다
+  // (계획서 확정 결정 #5 — §9 "공통 필수" 원안 유지).
+  notPerformed: z.array(z.enum(['temporal_holdout', 'subgroup', 'external_validation'])),
+}).strict();
+
+function isFiniteNum(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+// roc_auc/average_precision/brier는 [0,1] 범위 규칙을 공유한다(계획서 §1단계
+// "apparent: ... → AUC·AP·Brier ∈ [0,1]"). calibration_intercept/slope는 유한하기만
+//하면 되고 정의된 범위가 없다 — 그래서 이 둘의 correctedOutOfRange는 항상 false다.
+const BOUNDED_METRICS = new Set(['roc_auc', 'average_precision', 'brier']);
+
+function validatePredictionStateInvariants(
+  result: z.infer<typeof PredictionSuppressedSchema> | z.infer<typeof PredictionResultBodySchema>,
+  ctx: z.RefinementCtx,
+): void {
+  if (result.suppressed) return;
+
+  if (result.personCount === 0 && result.prevalence !== null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'ZERO_PERSON_COUNT_REQUIRES_NULL_PREVALENCE', path: ['prevalence'] });
+  }
+  if (result.personCount > 0 && result.prevalence === null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NONZERO_PERSON_COUNT_REQUIRES_PREVALENCE', path: ['prevalence'] });
+  }
+
+  if (result.estimation === 'non_estimable') {
+    if (result.nonEstimableReason === null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NON_ESTIMABLE_REQUIRES_REASON', path: ['nonEstimableReason'] });
+    }
+    if (result.metrics.length !== 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NON_ESTIMABLE_REQUIRES_EMPTY_METRICS', path: ['metrics'] });
+    }
+    if (result.curves !== null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NON_ESTIMABLE_REQUIRES_NULL_CURVES', path: ['curves'] });
+    }
+    if (result.coefficients !== null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NON_ESTIMABLE_REQUIRES_NULL_COEFFICIENTS', path: ['coefficients'] });
+    }
+    if (result.aucCi !== null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NON_ESTIMABLE_REQUIRES_NULL_AUC_CI', path: ['aucCi'] });
+    }
+    if (result.lambda.selected !== null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NON_ESTIMABLE_REQUIRES_NULL_LAMBDA_SELECTED', path: ['lambda', 'selected'] });
+    }
+    return;
+  }
+
+  // estimation==='ok'
+  if (result.nonEstimableReason !== null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OK_MUST_NOT_SET_NON_ESTIMABLE_REASON', path: ['nonEstimableReason'] });
+  }
+  if (result.parameterCount === null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OK_REQUIRES_PARAMETER_COUNT', path: ['parameterCount'] });
+  }
+  if (result.columnCount === null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OK_REQUIRES_COLUMN_COUNT', path: ['columnCount'] });
+  }
+  if (result.lambda.selected === null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OK_REQUIRES_LAMBDA_SELECTED', path: ['lambda', 'selected'] });
+  }
+  if (result.droppedColumnFoldCount === null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OK_REQUIRES_DROPPED_COLUMN_FOLD_COUNT', path: ['droppedColumnFoldCount'] });
+  }
+  if (result.curves === null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OK_REQUIRES_CURVES', path: ['curves'] });
+  }
+  if (result.coefficients === null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OK_REQUIRES_COEFFICIENTS', path: ['coefficients'] });
+  }
+
+  const rocAuc = result.metrics.find((m) => m.metric === 'roc_auc');
+  if (!rocAuc) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OK_REQUIRES_ROC_AUC_METRIC', path: ['metrics'] });
+  } else {
+    if (!isFiniteNum(rocAuc.apparent) || !isFiniteNum(rocAuc.representativeRepeat)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OK_REQUIRES_FINITE_ROC_AUC_APPARENT_AND_REPRESENTATIVE', path: ['metrics'] });
+    }
+    if (rocAuc.cv.status !== 'ok') {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OK_REQUIRES_ROC_AUC_CV_OK', path: ['metrics'] });
+    }
+  }
+
+  if (result.aucCi !== null) {
+    if (!rocAuc || rocAuc.cv.status !== 'ok') {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'AUC_CI_REQUIRES_ROC_AUC_CV_OK', path: ['aucCi'] });
+    }
+    if (result.aucCi.lower > result.aucCi.upper) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'AUC_CI_LOWER_MUST_NOT_EXCEED_UPPER', path: ['aucCi'] });
+    }
+  }
+
+  result.metrics.forEach((m, i) => {
+    if (BOUNDED_METRICS.has(m.metric)) {
+      if (m.apparent !== null && (m.apparent < 0 || m.apparent > 1)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'BOUNDED_METRIC_APPARENT_OUT_OF_RANGE', path: ['metrics', i, 'apparent'] });
+      }
+      if (m.representativeRepeat !== null && (m.representativeRepeat < 0 || m.representativeRepeat > 1)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'BOUNDED_METRIC_REPRESENTATIVE_OUT_OF_RANGE', path: ['metrics', i, 'representativeRepeat'] });
+      }
+    } else if (m.bootstrap.correctedOutOfRange) {
+      // calibration_intercept/slope는 정의된 범위가 없다 — 항상 false여야 한다.
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'UNBOUNDED_METRIC_MUST_NOT_SET_CORRECTED_OUT_OF_RANGE', path: ['metrics', i, 'bootstrap', 'correctedOutOfRange'] });
+    }
+
+    // cv.status==='withheld' ⇔ mean/min/max가 null(계획서 §1단계 불변식).
+    if (m.cv.status === 'withheld') {
+      if (m.cv.withheldReason === null) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'CV_WITHHELD_REQUIRES_REASON', path: ['metrics', i, 'cv', 'withheldReason'] });
+      }
+      if (m.cv.mean !== null || m.cv.min !== null || m.cv.max !== null) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'CV_WITHHELD_REQUIRES_NULL_SUMMARY', path: ['metrics', i, 'cv'] });
+      }
+    } else {
+      if (m.cv.withheldReason !== null) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'CV_OK_MUST_NOT_SET_WITHHELD_REASON', path: ['metrics', i, 'cv', 'withheldReason'] });
+      }
+      if (!isFiniteNum(m.cv.mean) || !isFiniteNum(m.cv.min) || !isFiniteNum(m.cv.max)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'CV_OK_REQUIRES_FINITE_SUMMARY', path: ['metrics', i, 'cv'] });
+      }
+    }
+    if (m.cv.validRepeats > m.cv.totalRepeats) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'CV_VALID_MUST_NOT_EXCEED_TOTAL', path: ['metrics', i, 'cv'] });
+    }
+
+    // bootstrap.status==='withheld' ⇔ optimism/corrected가 null.
+    if (m.bootstrap.status === 'withheld') {
+      if (m.bootstrap.withheldReason === null) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'BOOTSTRAP_WITHHELD_REQUIRES_REASON', path: ['metrics', i, 'bootstrap', 'withheldReason'] });
+      }
+      if (m.bootstrap.optimism !== null || m.bootstrap.corrected !== null) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'BOOTSTRAP_WITHHELD_REQUIRES_NULL_VALUES', path: ['metrics', i, 'bootstrap'] });
+      }
+    } else {
+      if (m.bootstrap.withheldReason !== null) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'BOOTSTRAP_OK_MUST_NOT_SET_WITHHELD_REASON', path: ['metrics', i, 'bootstrap', 'withheldReason'] });
+      }
+      if (!isFiniteNum(m.bootstrap.optimism) || !isFiniteNum(m.bootstrap.corrected)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'BOOTSTRAP_OK_REQUIRES_FINITE_VALUES', path: ['metrics', i, 'bootstrap'] });
+      } else if (BOUNDED_METRICS.has(m.metric)) {
+        const outOfRange = m.bootstrap.corrected! < 0 || m.bootstrap.corrected! > 1;
+        if (outOfRange !== m.bootstrap.correctedOutOfRange) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'CORRECTED_OUT_OF_RANGE_MUST_MATCH_CORRECTED', path: ['metrics', i, 'bootstrap', 'correctedOutOfRange'] });
+        }
+      }
+    }
+    if (m.bootstrap.validReplicates > m.bootstrap.totalReplicates) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'BOOTSTRAP_VALID_MUST_NOT_EXCEED_TOTAL', path: ['metrics', i, 'bootstrap'] });
+    }
+  });
+}
+
+export const AnalyzePredictionResultSchema = z
+  .discriminatedUnion('suppressed', [PredictionSuppressedSchema, PredictionResultBodySchema])
+  .superRefine(validatePredictionStateInvariants);
+
 export const AnalyzeResultSchema = z.object({
   continuous: z.array(AnalyzeContinuousResultSchema),
   discrete:   z.array(AnalyzeDiscreteResultSchema),
@@ -1054,6 +1448,10 @@ export const AnalyzeResultSchema = z.object({
   // optional은 구버전 재파싱 호환뿐). 리뷰 #14 — 이 필드를 빠뜨리면 클라이언트의
   // parseOrThrow가 zod strip으로 회귀 결과를 통째로 버린다.
   regression: AnalyzeRegressionResultSchema.optional(),
+  // PR4-B2 — analysisMode==='prediction'인 신규 실행 결과도 동일 원칙(항상 존재,
+  // optional은 구버전 재파싱 호환뿐). 이 필드를 빠뜨리면 클라이언트의 parseOrThrow가
+  // zod strip으로 예측 결과를 통째로 버린다(회귀 리뷰 #14와 동일 함정).
+  prediction: AnalyzePredictionResultSchema.optional(),
 });
 
 export const AnalyzeRequestSchema = StatsAnalysisRecipeSchema;
@@ -1135,6 +1533,15 @@ export type RegressionPointDiagnostic     = z.infer<typeof RegressionPointDiagno
 export type RegressionDiagnostics         = z.infer<typeof RegressionDiagnosticsSchema>;
 export type RegressionSplinePartialEffect = z.infer<typeof RegressionSplinePartialEffectSchema>;
 export type AnalyzeRegressionResult       = z.infer<typeof AnalyzeRegressionResultSchema>;
+export type PredictionNonEstimableReason  = z.infer<typeof PredictionNonEstimableReasonSchema>;
+export type PredictionMetric              = z.infer<typeof PredictionMetricSchema>;
+export type PredictionAucCi               = z.infer<typeof PredictionAucCiSchema>;
+export type PredictionCurveBin            = z.infer<typeof PredictionCurveBinSchema>;
+export type PredictionCurves              = z.infer<typeof PredictionCurvesSchema>;
+export type PredictionCoefficientTerm     = z.infer<typeof PredictionCoefficientTermSchema>;
+export type PredictionCoefficients        = z.infer<typeof PredictionCoefficientsSchema>;
+export type PredictionCaveat              = z.infer<typeof PredictionCaveatSchema>;
+export type AnalyzePredictionResult       = z.infer<typeof AnalyzePredictionResultSchema>;
 export type AnalyzeResult                 = z.infer<typeof AnalyzeResultSchema>;
 export type AnalyzeRequest                = z.infer<typeof AnalyzeRequestSchema>;
 export type AnalyzeResponse               = z.infer<typeof AnalyzeResponseSchema>;

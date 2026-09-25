@@ -162,7 +162,10 @@ ELBOW_METADATA.push(
     dependsOn: TEMPORAL_BASE_DEPENDS_ON,
     availableAt: 'assessment',
     shownToAssessor: true,
-    allowedAnalysisPurposes: ['association'],
+    // PR4-B2 — 공통 predictor(계획서 §0단계 허용표 — 원자료-노출). 팔꿈치 모듈 자료가
+    // 없는 사례는 structural_missing(getElbowTemporalSequence)으로 완전사례에서 빠진다.
+    allowedAnalysisPurposes: ['association', 'prediction'],
+    predictionRole: 'predictor',
     sensitivity: 'non_sensitive',
     formulaFamily: 'elbow_temporal_raw',
     supportedFormulaPolicies: [],
@@ -212,7 +215,10 @@ ELBOW_METADATA.push(
     dependsOn: TEMPORAL_BASE_DEPENDS_ON,
     availableAt: 'assessment',
     shownToAssessor: true,
-    allowedAnalysisPurposes: ['association'],
+    // PR4-B2 — 공통 predictor. 증상 경과 정보이지 정량 노출이 아니다(사용자 리뷰
+    // 지적 — 0단계 허용표에서 "원자료-증상경과"로 분류).
+    allowedAnalysisPurposes: ['association', 'prediction'],
+    predictionRole: 'predictor',
     sensitivity: 'non_sensitive',
     formulaFamily: 'elbow_temporal_raw',
     supportedFormulaPolicies: [],
