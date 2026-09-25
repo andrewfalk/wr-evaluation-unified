@@ -16,3 +16,12 @@ jsonschema==4.22.0
 # OLS는 statsmodels의 HC3도 정상 동작하므로 자체 계산값과의 교차검증에만 쓴다.
 # pandas·patsy가 statsmodels의 전이 의존으로 함께 설치된다(직접 사용하지 않음).
 statsmodels==0.14.2
+# statsmodels 0.14.2가 선언한 제약(pandas!=2.1.0,>=1.4)은 상한이 없어 pip가
+# pandas 3.x를 골라도 "유효한" 선택으로 본다 — 그런데 실제로는 pandas 3.0.x에서
+# deprecate_kwarg()의 인자 시그니처가 바뀌어(new_arg_name 필수화) statsmodels
+# 0.14.2의 tsa.stattools import 시점에 TypeError로 즉시 깨진다(운영 핀 버전
+# 재현: 2026-09-24, PR4-B2 작업 중 발견 — 이 PR과는 무관한 기존 결함이라
+# 별도로 수정한다). 명시 고정 없이 두면 향후 재빌드마다 이 시점의 pandas 최신판
+# 여부에 따라 빌드가 조용히 깨질 수 있다 — statsmodels 0.14.2와 같은 시기에
+# 검증된 2.x대 최신판으로 고정한다.
+pandas==2.2.3
