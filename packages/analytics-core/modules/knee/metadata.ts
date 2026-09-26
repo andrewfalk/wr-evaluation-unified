@@ -17,8 +17,12 @@ export const KNEE_KLG_ORDER = ['1', '2', '3', '4'] as const;
 
 export const KNEE_METADATA: AnalyticsVariableMetadata[] = [
   {
+    // 사용자 요청(2026-09-26) — 표시값을 최댓값에서 평균값(=min~max 구간의 중점)으로
+    // 바꿨다(extractors.ts의 extractKneeRelatednessMax 주석 참고). 키는 그대로 "max"다 —
+    // 30여 개 테스트 파일이 이 키를 "유효한 continuous 무릎 변수" 픽스처로 재사용 중이라
+    // 리네임 범위가 이번 변경과 불균형하게 크다.
     key: 'knee.relatedness.max',
-    label: '신체부담기여도(최대)',
+    label: '신체부담기여도(평균)',
     group: '무릎 · 파생지표',
     moduleId: 'knee',
     grain: 'case',

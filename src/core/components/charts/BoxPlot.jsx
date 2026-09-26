@@ -64,6 +64,38 @@ export function BoxPlot({ boxplot }) {
             <circle cx={centerX} cy={yScale(v)} r={4} fill="none" stroke={STATUS_COLORS.danger} strokeWidth={1.5} />
           </ChartTooltip>
         ))}
+        {/* 가독성 개선 — 위 다섯 요소는 지금까지 호버 툴팁으로만 값을 알 수 있었다.
+            다른 차트(ForestPlot·HorizontalBarChart)처럼 값 라벨을 상자 오른쪽에
+            항상 표시한다(호버 툴팁은 그대로 유지 — 키보드 포커스 접근성용). */}
+        {[
+          ['하단', lowerWhisker],
+          ['Q1', q1],
+          ['중앙값', median],
+          ['Q3', q3],
+          ['상단', upperWhisker],
+        ].map(([tag, v]) => (
+          <text
+            key={tag}
+            x={centerX + BOX_HALF_WIDTH + 8}
+            y={yScale(v)}
+            dominantBaseline="middle"
+            className="chart-value-label"
+          >
+            {tag} {formatNumber(v)}
+          </text>
+        ))}
+        {(outlierValues || []).map((v, i) => (
+          <text
+            key={`ol-${i}`}
+            x={centerX + BOX_HALF_WIDTH + 8}
+            y={yScale(v)}
+            dominantBaseline="middle"
+            className="chart-value-label"
+            style={{ fill: STATUS_COLORS.danger }}
+          >
+            이상치 {formatNumber(v)}
+          </text>
+        ))}
       </g>
     </ChartContainer>
   );

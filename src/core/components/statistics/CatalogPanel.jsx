@@ -18,6 +18,14 @@ function moduleLabel(id) {
   return MODULE_LABELS[id] || id;
 }
 
+// 정본(디자인 핸드오프) 순서 — 여러 모듈에 걸쳐 공통으로 쓰이는 변수(직업력·신청상병·
+// 사례 메타·인적사항)를 먼저 보여주고, 모듈 전용 변수를 뒤에 보여준다.
+const COMMON_MODULE_IDS = new Set(['job', 'diagnosis', 'meta', 'patient']);
+
+function groupRank(vars) {
+  return COMMON_MODULE_IDS.has(vars[0]?.moduleId) ? 0 : 1;
+}
+
 // PR2 §5.6.1 — 카탈로그 검색 + 모듈 칩 필터 + 그룹별 변수 목록. 지금은 7개뿐이라 "218개를
 // 그냥 펼치면 못 쓴다"는 문제가 아직 실감 나지 않지만, PR0-B3가 카탈로그를 확장할 걸
 // 전제로 구조(검색·칩 필터·그룹핑)는 처음부터 갖춘다.
@@ -27,6 +35,10 @@ function moduleLabel(id) {
 export function CatalogPanel({ catalog, grain, selectedKeys, onToggleVariable, collapsed, onToggleCollapse }) {
   const [search, setSearch] = useState('');
   const [moduleFilter, setModuleFilter] = useState('all');
+  // 정본처럼 그룹별로 접고 펼 수 있게 — 기본은 전부 펼침(기존 동작 유지), 여기 담긴
+  // 그룹만 접힌 상태로 취급한다. 검색·모듈 필터가 걸려 있을 때는 접힌 그룹도 강제로
+  // 펼쳐 보여준다(안 그러면 검색 결과가 접힌 그룹 안에 숨어버린다).
+  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
 
   // grain이 바뀌면 이전 grain에만 있던 모듈 칩 선택이 새 grain에서 "조건에 맞는 변수가
   // 없습니다"로 조용히 텅 비게 만들 수 있다 — 검색/모듈 필터를 함께 초기화한다.
@@ -45,10 +57,14 @@ export function CatalogPanel({ catalog, grain, selectedKeys, onToggleVariable, c
     () => variables.filter((v) => isGrainCompatible(v, grain) && v.analysisRole !== 'filter_only'),
     [variables, grain],
   );
-  const modules = useMemo(
-    () => Array.from(new Set(grainVariables.map((v) => v.moduleId))).sort(),
-    [grainVariables],
-  );
+  const modules = useMemo(() => {
+    const ids = Array.from(new Set(grainVariables.map((v) => v.moduleId)));
+    return ids.sort((a, b) => {
+      const rankA = COMMON_MODULE_IDS.has(a) ? 0 : 1;
+      const rankB = COMMON_MODULE_IDS.has(b) ? 0 : 1;
+      return rankA !== rankB ? rankA - rankB : a.localeCompare(b);
+    });
+  }, [grainVariables]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -65,8 +81,17 @@ export function CatalogPanel({ catalog, grain, selectedKeys, onToggleVariable, c
       if (!byGroup.has(v.group)) byGroup.set(v.group, []);
       byGroup.get(v.group).push(v);
     }
-    return Array.from(byGroup.entries());
+    return Array.from(byGroup.entries()).sort((a, b) => groupRank(a[1]) - groupRank(b[1]));
   }, [filtered]);
+
+  const toggleGroup = (group) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group); else next.add(group);
+      return next;
+    });
+  };
+  const searchOrFilterActive = search.trim() !== '' || moduleFilter !== 'all';
 
   if (collapsed) {
     return (
@@ -121,26 +146,42 @@ export function CatalogPanel({ catalog, grain, selectedKeys, onToggleVariable, c
           ))}
         </div>
         {groups.length === 0 && <div className="swb-empty">조건에 맞는 변수가 없습니다.</div>}
-        {groups.map(([group, vars]) => (
-          <div key={group}>
-            <div className="swb-section-label">{group}</div>
-            {vars.map((v) => (
-              <label key={v.key} className="swb-var-row">
-                <input
-                  type="checkbox"
-                  checked={selectedKeys.includes(v.key)}
-                  onChange={() => onToggleVariable(v.key)}
-                />
-                <span className="swb-var-label">{v.label}</span>
-                {v.unit && <span className="swb-var-badge">{v.unit}</span>}
-                <span className="swb-var-badge">{v.type}</span>
-                {v.sensitivity !== 'non_sensitive' && (
-                  <span className="swb-var-badge swb-var-badge--sensitive">민감</span>
-                )}
-              </label>
-            ))}
-          </div>
-        ))}
+        {groups.map(([group, vars]) => {
+          const open = searchOrFilterActive || !collapsedGroups.has(group);
+          return (
+            <div key={group} className="swb-group">
+              <button
+                type="button"
+                className="swb-group-head"
+                onClick={() => toggleGroup(group)}
+                aria-expanded={open}
+              >
+                <span className="swb-group-name">{group}</span>
+                <span className="swb-group-count">{vars.length}</span>
+                <span className="swb-group-caret">{open ? '⌄' : '›'}</span>
+              </button>
+              {open && (
+                <div className="swb-group-list">
+                  {vars.map((v) => (
+                    <label key={v.key} className="swb-var-row">
+                      <input
+                        type="checkbox"
+                        checked={selectedKeys.includes(v.key)}
+                        onChange={() => onToggleVariable(v.key)}
+                      />
+                      <span className="swb-var-label">{v.label}</span>
+                      {v.unit && <span className="swb-var-badge">{v.unit}</span>}
+                      <span className="swb-var-badge">{v.type}</span>
+                      {v.sensitivity !== 'non_sensitive' && (
+                        <span className="swb-var-badge swb-var-badge--sensitive">민감</span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </aside>
   );

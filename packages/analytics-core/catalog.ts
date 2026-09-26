@@ -259,7 +259,11 @@ export function computeRepeatedVariableValue(
 // 1개 추가 + 기존 26개(outcome 2 + predictor 24, §0단계 허용표)에 predictionRole·
 // allowedAnalysisPurposes:'prediction' 배선. 카탈로그 73개(case 40/job 19/disease 14) +
 // 서버 전용 meta 2개(통합 카탈로그 75개).
-export const CATALOG_VERSION = 'v24-prediction-role-and-age';
+//
+// 사용자 요청(2026-09-26) — knee.relatedness.max의 계산값을 최댓값에서 평균값(min~max
+// 구간의 중점)으로 변경(extractors.ts 주석 참고). 키·개수는 그대로지만 기존 등록 키의
+// 출력값이 바뀌므로 캐시된 실행 다이제스트 무효화를 위해 버전을 올린다.
+export const CATALOG_VERSION = 'v25-knee-relatedness-average';
 
 // PR4-B2 — outcome 명세(계획서 §2단계). 서버 검증(statsRecipeValidation.ts)과 클라이언트
 // 선택지(RecipePanel.jsx, 카탈로그 DTO의 predictionOutcomeLevels/predictionEventLevels)가
