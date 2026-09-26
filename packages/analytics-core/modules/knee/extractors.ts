@@ -105,8 +105,20 @@ export function extractKneeRelatednessMax(
   }
 
   // 순서 7: 정상 계산 — 필터링 없이 원본 배열 그대로 computeKneeCalc에 넘긴다(UI와 동일 값).
+  // 사용자 요청(2026-09-26) — 카탈로그에는 최댓값 대신 평균값을 노출한다. relatedness.min/max는
+  // "여러 관측치의 최소·최대"가 아니라, 부담수준 등급(경도/중등도하/중등도상/고도)이 점수
+  // *범위*(예: 중등도상 3.0~6.0)로 정의돼 있어 나온 하나의 기여도 "최소추정치~최대추정치"
+  // 구간이다(calculateWorkRelatedness). 평균은 그 구간의 중점 — evaluateCumulativeBurden이
+  // 누적부담 충분성 판정에 이미 쓰는 것과 같은 산식이다. 실제 종합소견/EMR 출력은 이 값과
+  // 무관하게 여전히 min~max 구간을 그대로 보여준다(computeKneeCalc/KneeResultPanel 미변경) —
+  // 통계 카탈로그 표시값만 바뀐다.
+  // 키·함수명은 여전히 "max"이지만 바꾸지 않았다 — 이 카탈로그 키가 스냅샷/레시피 검증/억제
+  // 테스트 등 30여 개 파일에서 "유효한 continuous 무릎 변수" 픽스처로 광범위하게 재사용되고
+  // 있어(값 자체를 검증하는 곳은 없음), 리네임의 변경 범위가 이 계산값 교체와 비교해 불균형하게
+  // 크다고 판단했다. CATALOG_VERSION은 계산값이 바뀌므로 올린다.
   const result = computeKneeCalc({ shared: shared as any, module: kneeModule as any });
-  return { value: Number(result.relatedness.max), missing: null, qualityFlags: [] };
+  const average = (Number(result.relatedness.min) + Number(result.relatedness.max)) / 2;
+  return { value: average, missing: null, qualityFlags: [] };
 }
 
 // PR0-B3 Part B — diagnosis_side grain. K-L Grade는 무릎 진단(M17 등)에 좌/우 각각 저장되는
