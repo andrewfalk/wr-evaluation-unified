@@ -7,7 +7,7 @@ import { SuppressionNotice } from './SuppressionNotice';
 import { ChartTooltip, chooseTooltipPlacement } from './ChartTooltip';
 
 const HEIGHT = 220;
-const MARGIN = { top: 12, right: 16, bottom: 12, left: 44 };
+const MARGIN = { top: 12, right: 16, bottom: 26, left: 44 };
 
 // B안(A안 후속) — histogram이 null이어도 이유가 두 가지로 나뉜다: n=0 등 애초에
 // 히스토그램이 없던 경우(기존 기본 문구)와, 적응형 해상도 축소가 후보를 전부
@@ -35,6 +35,15 @@ export function Histogram({ histogram, histogramReasonCode }) {
   );
   const yScale = createLinearScale([0, maxCount], [innerHeight, 0]);
   const yTicks = computeNiceTicks(0, maxCount, 4);
+  // 가독성 개선 — 다른 차트(ScatterPlot 등)는 x축 숫자 눈금이 있는데 히스토그램만
+  // 없어서, 구간 경계를 마우스오버 툴팁 없이는 전혀 읽을 수 없었다. 단일값(bin이
+  // 하나뿐이고 lower===upper)은 실제 도메인이 [0,1] placeholder라 계산눈금이 의미
+  // 없으므로, 그 실제 값 하나만 중앙에 표시한다.
+  const xTicks = isSingleConstant
+    ? [{ pos: innerWidth / 2, label: formatNumber(bins[0].lower) }]
+    : computeNiceTicks(bins[0].lower, bins[bins.length - 1].upper, 5)
+        .filter((t) => t >= bins[0].lower && t <= bins[bins.length - 1].upper)
+        .map((t) => ({ pos: xScale(t), label: formatNumber(t) }));
 
   const chart = (
     <ChartContainer height={HEIGHT} ariaLabel="히스토그램">
@@ -66,6 +75,11 @@ export function Histogram({ histogram, histogramReasonCode }) {
           );
         })}
         <line x1={0} x2={innerWidth} y1={innerHeight} y2={innerHeight} className="chart-axis-line" />
+        {xTicks.map((t, i) => (
+          <text key={`x-${i}`} x={t.pos} y={innerHeight + 16} textAnchor="middle" className="chart-axis-label">
+            {t.label}
+          </text>
+        ))}
       </g>
     </ChartContainer>
   );
