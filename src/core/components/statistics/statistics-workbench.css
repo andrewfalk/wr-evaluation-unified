@@ -4,30 +4,47 @@
 
 .swb-root {
   --swb-accent: #1d4ed8;
+  --swb-accent-hi: #1e40af;
   --swb-accent-soft: #eff6ff;
+  --swb-navy: #1e3a8a;
   --swb-panel: #ffffff;
+  --swb-surface: #f8fafc;
   --swb-border: #e5e7eb;
-  --swb-ink: #1e293b;
-  --swb-ink-muted: #64748b;
+  --swb-border-soft: #f1f5f9;
+  --swb-ink: #111827;
+  --swb-ink2: #374151;
+  --swb-ink-muted: #6b7280;
+  --swb-faint: #9ca3af;
   --swb-warn: #d97706;
   --swb-warn-soft: #fef3c7;
   --swb-danger: #dc2626;
   --swb-ok: #16a34a;
   --swb-ok-soft: #dcfce7;
+  --swb-mono: "IBM Plex Mono", ui-monospace, monospace;
 
   display: flex;
   flex-direction: column;
   height: 100vh;
   background: #f1f5f9;
   color: var(--swb-ink);
+  font-family: "Noto Sans KR", "Pretendard", system-ui, sans-serif;
+  font-weight: 400;
   font-size: 13px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
 }
 
 [data-theme="dark"] .swb-root {
   --swb-panel: #1e293b;
+  --swb-surface: #0f172a;
   --swb-border: #334155;
-  --swb-ink: #e2e8f0;
+  --swb-border-soft: #1f2937;
+  --swb-ink: #f1f5f9;
+  --swb-ink2: #cbd5e1;
   --swb-ink-muted: #94a3b8;
+  --swb-faint: #64748b;
+  --swb-navy: #93b4f5;
+  --swb-accent-hi: #60a5fa;
   --swb-accent-soft: #1e2a44;
   --swb-ok-soft: #14291d;
   --swb-warn-soft: #2a2213;
@@ -45,9 +62,9 @@
   border-bottom: 1px solid var(--swb-border);
 }
 
-.swb-header h1 { font-size: 15px; margin: 0; font-weight: 700; }
+.swb-header h1 { font-size: 16px; margin: 0; font-weight: 700; color: var(--swb-navy); letter-spacing: -0.01em; }
 
-.swb-header-status { font-size: 11px; color: var(--swb-ink-muted); font-family: monospace; }
+.swb-header-status { font-size: 11px; color: var(--swb-ink-muted); font-family: var(--swb-mono); font-variant-numeric: tabular-nums; }
 
 .swb-banner {
   flex: none;
@@ -86,10 +103,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--swb-border);
   font-weight: 700;
-  font-size: 12px;
+  font-size: 16px;
+  letter-spacing: -0.01em;
 }
 
 .swb-collapse-btn {
@@ -125,10 +143,8 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: #f8fafc;
+  background: var(--swb-surface);
 }
-
-[data-theme="dark"] .swb-result { background: #111827; }
 
 .swb-tabs {
   flex: none;
@@ -142,25 +158,25 @@
 .swb-tab {
   border: none;
   background: transparent;
-  padding: 8px 12px;
-  font-size: 12px;
+  padding: 12px 12px 10px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--swb-ink-muted);
   cursor: pointer;
   border-bottom: 2px solid transparent;
 }
 
-.swb-tab--active { color: var(--swb-accent); border-bottom-color: var(--swb-accent); }
+.swb-tab--active { color: var(--swb-accent-hi); border-bottom-color: var(--swb-accent); }
 .swb-tab:disabled { cursor: not-allowed; opacity: 0.5; }
 
 .swb-result-body { flex: 1; overflow-y: auto; padding: 16px; }
 
 .swb-search {
   width: 100%;
-  padding: 6px 8px;
+  padding: 8px 11px;
   border: 1px solid var(--swb-border);
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
   margin-bottom: 8px;
   background: var(--swb-panel);
   color: var(--swb-ink);
@@ -170,15 +186,16 @@
 
 .swb-chip {
   border: 1px solid var(--swb-border);
-  background: var(--swb-panel);
-  border-radius: 999px;
-  padding: 3px 10px;
-  font-size: 11px;
+  background: var(--swb-surface);
+  border-radius: 7px;
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
-  color: var(--swb-ink-muted);
+  color: var(--swb-ink2);
 }
 
-.swb-chip--active { background: var(--swb-accent-soft); border-color: var(--swb-accent); color: var(--swb-accent); }
+.swb-chip--active { background: var(--swb-accent); border-color: var(--swb-accent); color: #fff; }
 
 .swb-var-row {
   display: flex;
@@ -190,12 +207,13 @@
   font-size: 12px;
 }
 
-.swb-var-row:hover { background: var(--swb-accent-soft); }
+.swb-var-row:hover { background: var(--swb-surface); }
 
 .swb-var-label { flex: 1; }
 .swb-var-badge {
-  font-size: 9px;
-  font-family: monospace;
+  font-size: 10px;
+  font-family: var(--swb-mono);
+  font-variant-numeric: tabular-nums;
   background: #eef2f7;
   color: #475569;
   border-radius: 4px;
@@ -206,13 +224,34 @@
 .swb-var-badge--sensitive { background: var(--swb-warn-soft); color: var(--swb-warn); }
 
 .swb-section-label {
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--swb-ink-muted);
-  margin: 12px 0 6px;
+  color: var(--swb-ink);
+  margin: 14px 0 8px;
 }
+
+/* 변수 카탈로그 그룹 아코디언 — 그룹 헤더를 눌러 접고 펼 수 있다(정본 .grp/.grp-h). */
+.swb-group { border-bottom: 1px solid var(--swb-border-soft); }
+.swb-group-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 9px 2px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--swb-ink);
+}
+.swb-group-head:hover { color: var(--swb-accent-hi); }
+.swb-group-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swb-group-count { font-size: 11.5px; color: var(--swb-ink-muted); font-weight: 500; }
+.swb-group-caret { color: var(--swb-faint); font-size: 10px; width: 10px; text-align: center; }
+.swb-group-list { padding-bottom: 6px; }
 
 /* PR4-A1 — 분석 모드 세그먼트가 4개(기술통계/이변량/상관행렬/회귀)로 늘어나
    380px 레시피 패널 폭에서 줄바꿈이 필요할 수 있다. flex-wrap을 허용하되
@@ -254,13 +293,14 @@
 .swb-recipe-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   border: 1px solid #bcd0fa;
   background: var(--swb-accent-soft);
-  color: var(--swb-accent);
-  border-radius: 999px;
-  padding: 2px 6px 2px 10px;
-  font-size: 11px;
+  color: var(--swb-accent-hi);
+  border-radius: 7px;
+  font-weight: 600;
+  padding: 4px 8px 4px 10px;
+  font-size: 11.5px;
   margin: 2px 4px 2px 0;
 }
 .swb-recipe-chip button {
@@ -269,20 +309,19 @@
 
 .swb-card {
   border: 1px solid var(--swb-border);
-  border-radius: 8px;
-  padding: 10px 12px;
+  border-radius: 9px;
+  padding: 12px 13px;
   margin-bottom: 10px;
   background: var(--swb-panel);
 }
 
-.swb-card--muted { background: #f8fafc; }
-[data-theme="dark"] .swb-card--muted { background: #0f172a; }
+.swb-card--muted { background: var(--swb-surface); }
 
 /* PR3-A — 방법 선택기(MethodPicker). 기존 --swb-* 로컬 토큰 관례를 그대로 따른다. */
 .swb-method-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .swb-method-card {
   border: 1px solid var(--swb-border);
-  border-radius: 8px;
+  border-radius: 9px;
   padding: 6px 8px;
   background: var(--swb-panel);
 }
@@ -312,26 +351,34 @@
 
 .swb-metric {
   border: 1px solid var(--swb-border);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: 9px;
+  padding: 9px 10px;
   background: var(--swb-panel);
 }
-.swb-metric-value { font-size: 18px; font-weight: 700; font-family: monospace; }
-.swb-metric-label { font-size: 10px; color: var(--swb-ink-muted); }
+.swb-metric-value {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--swb-navy);
+  font-family: var(--swb-mono);
+  font-variant-numeric: tabular-nums;
+}
+.swb-metric-label { font-size: 11px; color: var(--swb-ink-muted); }
 
 .swb-btn {
   border: 1px solid var(--swb-border);
   background: var(--swb-panel);
-  border-radius: 6px;
-  padding: 7px 14px;
-  font-size: 12px;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
-  color: var(--swb-ink);
+  color: var(--swb-ink2);
 }
 .swb-btn:disabled { cursor: not-allowed; opacity: 0.5; }
 .swb-btn--primary { background: var(--swb-accent); border-color: var(--swb-accent); color: #fff; }
-.swb-btn--sm { padding: 3px 9px; font-size: 11px; }
+.swb-btn--primary:hover { background: var(--swb-accent-hi); border-color: var(--swb-accent-hi); }
+.swb-btn--sm { padding: 6px 11px; font-size: 12px; }
 
 .swb-status-ok { color: var(--swb-ok); }
 .swb-status-warn { color: var(--swb-warn); }
@@ -342,19 +389,29 @@
   padding: 8px 16px;
   border-top: 1px solid var(--swb-border);
   background: var(--swb-panel);
-  font-size: 10px;
-  font-family: monospace;
+  font-size: 10.5px;
+  font-family: var(--swb-mono);
+  font-variant-numeric: tabular-nums;
   color: var(--swb-ink-muted);
 }
 
-.swb-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.swb-table th, .swb-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--swb-border); }
-.swb-table th { color: var(--swb-ink-muted); font-weight: 600; font-size: 11px; }
+.swb-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.swb-table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--swb-border-soft); }
+.swb-table th {
+  text-align: left;
+  color: var(--swb-ink2);
+  font-weight: 600;
+  font-size: 11.5px;
+  padding: 8px 10px;
+  background: var(--swb-surface);
+  border-top: 1px solid var(--swb-border);
+  border-bottom: 1px solid var(--swb-border);
+}
 
 .swb-suppressed-note { color: var(--swb-ink-muted); font-style: italic; }
 
 /* [코드리뷰 2026-09-12 2차] 이변량 결과 카드의 변수 식별 줄(그룹/결과변수,
    행/열, x/y) — 억제·경고가 아니라 사실 정보라 italic 아닌 별도 톤. */
-.swb-card-subtitle { color: var(--swb-ink-muted); font-size: 12px; margin: 2px 0 8px; }
+.swb-card-subtitle { color: var(--swb-ink2); font-size: 12px; margin: 2px 0 8px; }
 
 .swb-empty { color: var(--swb-ink-muted); font-size: 12px; padding: 24px; text-align: center; }

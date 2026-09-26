@@ -81,6 +81,19 @@ const GRAIN_LABELS = {
   disease: '상병(disease)',
 };
 
+// 사용자 요청 — 표시 순서를 사례·상병·직업으로. 서버가 주는 supportedGrains 원본 순서
+// (Array.from(SUPPORTED_GRAINS_SET), 계약상 'case','job','disease')는 그대로 두고
+// 화면에서만 재배열한다(서버 순서에 의존하는 테스트·계약을 건드리지 않기 위함).
+const GRAIN_DISPLAY_ORDER = ['case', 'disease', 'job'];
+
+function sortGrainsForDisplay(grains) {
+  return [...grains].sort((a, b) => {
+    const ia = GRAIN_DISPLAY_ORDER.indexOf(a);
+    const ib = GRAIN_DISPLAY_ORDER.indexOf(b);
+    return (ia === -1 ? GRAIN_DISPLAY_ORDER.length : ia) - (ib === -1 ? GRAIN_DISPLAY_ORDER.length : ib);
+  });
+}
+
 // server/src/statsSnapshotColumnVariables.ts의 REGISTERED_AT_KEY와 동일 리터럴.
 const PREDICTION_REGISTERED_AT_KEY = 'case.meta.registeredAt';
 
@@ -485,7 +498,7 @@ export function RecipePanel({
       <div className="swb-panel-body">
         <div className="swb-section-label">그레인</div>
         <div className="swb-seg">
-          {supportedGrains.map((g) => (
+          {sortGrainsForDisplay(supportedGrains).map((g) => (
             <button
               key={g}
               type="button"
@@ -574,7 +587,10 @@ export function RecipePanel({
           </div>
         )}
         {analysisMode === 'descriptive' && (
-          <p className="swb-suppressed-note">목적을 골라도 지금 제공하는 분석은 기술통계뿐입니다.</p>
+          <p className="swb-suppressed-note">
+            목적은 기술통계 자체를 바꾸지 않지만, 선택 가능한 변수 범위에 영향을 줍니다 —
+            일부 변수는 "연관성"에서만 허용되고 "공식 감사"에서는 제외됩니다.
+          </p>
         )}
 
         {(analysisMode === 'bivariate' || analysisMode === 'correlation_matrix' || analysisMode === 'regression' || analysisMode === 'prediction') && (
