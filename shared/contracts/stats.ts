@@ -198,6 +198,12 @@ export const StatsAnalysisRecipeSchema = z.object({
     outcomeKey: z.string().min(1),
     eventLevel: z.string().min(1),
   }).strict().optional(),
+  // Table1 스트라티피케이션 — analysisMode==='descriptive'에서만 의미 있는 옵션
+  // 필드(회귀/예측과 달리 필수 아님 — 기존 기술통계 동작이 additive 기본값). 그룹
+  // 변수 하나로 variableKeys 전체를 층화한다(server/src/statsDescriptiveStratify.ts).
+  descriptive: z.object({
+    stratifyByKey: z.string().min(1),
+  }).strict().optional(),
   // encoding/options/rollups(마스터 계획서 §1)는 PR0-C 범위 밖 — .strict()로 보내면 400.
 }).strict().superRefine((recipe, ctx) => {
   // PR4-B2 — analysisMode==='prediction'과 analysisPurpose==='prediction'은 항상
@@ -209,6 +215,26 @@ export const StatsAnalysisRecipeSchema = z.object({
       message: 'PURPOSE_MODE_MISMATCH',
       path: ['analysisPurpose'],
     });
+  }
+  // Table1 — descriptive 서브객체는 다른 모드에 붙으면 안 된다(회귀/예측 서브객체는
+  // 필수라 이 검사가 자연히 성립하지만, descriptive는 선택 필드라 명시적으로 막아야
+  // 한다). 범위를 이 신규 필드로 한정 — 기존 regression/prediction 검증 로직은
+  // 건드리지 않는다(호환성 리스크 회피).
+  if (recipe.descriptive && recipe.analysisMode !== 'descriptive') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'DESCRIPTIVE_OPTIONS_REQUIRE_DESCRIPTIVE_MODE',
+      path: ['descriptive'],
+    });
+  }
+  if (recipe.analysisMode === 'descriptive' && recipe.descriptive) {
+    if (recipe.variableKeys.includes(recipe.descriptive.stratifyByKey)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'STRATIFY_KEY_MUST_NOT_BE_A_ROW_VARIABLE',
+        path: ['descriptive', 'stratifyByKey'],
+      });
+    }
   }
   // 카탈로그 조회가 필요 없는 순수 구조검사만 여기서 한다(컨텍스트 무관 — preview·
   // analyze 둘 다 항상 참). 타입정합성·paired영구거부·method필수여부(컨텍스트별로
@@ -666,6 +692,98 @@ const AnalyzeDiscreteRevealedSchema = z.object({
 export const AnalyzeDiscreteResultSchema = z.discriminatedUnion('suppressed', [
   AnalyzeDiscreteSuppressedSchema,
   AnalyzeDiscreteRevealedSchema,
+]);
+
+// Table1 스트라티피케이션 — 전용 최소 DTO. AnalyzeContinuousResultSchema/
+// AnalyzeDiscreteResultSchema를 재사용하지 않는다: 그 스키마들의 missingPatterns/
+// histogram/boxplot.outlierCount는 변수 전체 suppressed 플래그와 "독립적인" 자체
+// 소수셀 게이트를 갖고 있어서, 그룹별로 그대로 노출하면 total과 공개된 그룹들만의
+// 차감으로 그 하위 필드가 역산되는 반례가 있다(예: 그룹A는 missingPatterns만 숨고
+// 변수 자체는 suppressed:false, 그룹B/전체는 둘 다 공개 → 전체-B로 A의 결측사유
+// 분포가 정확히 복원됨). Table1은 요약표라 이 부가정보 자체가 필요 없으므로, n/
+// missingCount/평균·분산류(연속형)·levels+mode(이산형)만 남기고 나머지는 애초에
+// 응답에 넣지 않는다 — 이 필드들은 변수 전체 suppressed 플래그 하나로만 게이트되는
+// "평평한" 값이라 하위 독립 게이트 문제가 없다.
+//
+// 통계값(mean/sd/median/q1/q3/iqr/min/max)은 nullable이다 — 인원은 충분해도
+// (isSmallCell 통과) 그룹 안에서 그 변수가 전부 결측이면 n=0이고 엔진이 이 값들을
+// null로 반환한다(services/stats-engine/descriptive.py). 이는 "억제"가 아니라
+// "계산 불가"이므로 suppressed:false를 유지한 채 통계 필드만 null이어야 한다.
+const Table1ContinuousCellSuppressedSchema = z.object({
+  variableKey: z.string(),
+  kind: z.literal('continuous'),
+  suppressed: z.literal(true),
+}).strict();
+const Table1ContinuousCellRevealedSchema = z.object({
+  variableKey: z.string(),
+  kind: z.literal('continuous'),
+  suppressed: z.literal(false),
+  n: z.number().int().nonnegative(),
+  missingCount: z.number().int().nonnegative(),
+  mean: z.number().nullable(),
+  sd: z.number().nullable(),
+  median: z.number().nullable(),
+  q1: z.number().nullable(),
+  q3: z.number().nullable(),
+  iqr: z.number().nullable(),
+  min: z.number().nullable(),
+  max: z.number().nullable(),
+}).strict();
+export const Table1ContinuousCellSchema = z.discriminatedUnion('suppressed', [
+  Table1ContinuousCellSuppressedSchema,
+  Table1ContinuousCellRevealedSchema,
+]);
+
+const Table1DiscreteCellSuppressedSchema = z.object({
+  variableKey: z.string(),
+  kind: z.literal('discrete'),
+  suppressed: z.literal(true),
+}).strict();
+const Table1DiscreteCellRevealedSchema = z.object({
+  variableKey: z.string(),
+  kind: z.literal('discrete'),
+  suppressed: z.literal(false),
+  n: z.number().int().nonnegative(),
+  missingCount: z.number().int().nonnegative(),
+  levels: z.array(AnalyzeDiscreteLevelSchema),
+  mode: z.union([z.string(), z.boolean()]).nullable(),
+}).strict();
+export const Table1DiscreteCellSchema = z.discriminatedUnion('suppressed', [
+  Table1DiscreteCellSuppressedSchema,
+  Table1DiscreteCellRevealedSchema,
+]);
+
+// 그룹 메타데이터는 최소화한다 — mergedLevels(병합된 원본 담당의 등 식별자)는
+// 서버 내부 계산에만 존재하고 응답/CSV 어디에도 노출하지 않는다("기타"에 1명만
+// 병합됐으면 그 자체로 신원이 드러나기 때문).
+export const AnalyzeDescriptiveStratifyGroupSchema = z.object({
+  groupId: z.string(),
+  kind: z.enum(['total', 'level', 'other', 'missing']),
+  // kind==='level'만 채운다. 담당의처럼 원본이 UUID면 서버가 해석한 표시명이
+  // 들어간다(원본 UUID는 응답에 넣지 않는다).
+  level: z.union([z.string(), z.boolean()]).nullable(),
+}).strict();
+
+export const AnalyzeDescriptiveStratifiedGroupResultSchema = z.object({
+  groupId: z.string(),
+  continuous: z.array(Table1ContinuousCellSchema),
+  discrete: z.array(Table1DiscreteCellSchema),
+}).strict();
+
+export const AnalyzeDescriptiveStratifiedResultSchema = z.discriminatedUnion('suppressed', [
+  z.object({
+    suppressed: z.literal(true),
+    stratifyByKey: z.string(),
+    reasonCode: z.enum(['MIN_COHORT_NOT_MET', 'DIFFERENCING_RATE_LIMIT']),
+  }).strict(),
+  z.object({
+    suppressed: z.literal(false),
+    stratifyByKey: z.string(),
+    // groups[0]은 항상 kind:'total'. total 다음 순서는 [...levels(정해진 순서),
+    // other?, missing?] — server/src/statsDescriptiveStratify.ts 참고.
+    groups: z.array(AnalyzeDescriptiveStratifyGroupSchema),
+    byGroup: z.array(AnalyzeDescriptiveStratifiedGroupResultSchema),
+  }).strict(),
 ]);
 
 // PR3-A — 이변량 결과. §"방법 가용성 판정" A/B 원칙을 그대로 반영: 억제 시
@@ -1452,6 +1570,12 @@ export const AnalyzeResultSchema = z.object({
   // optional은 구버전 재파싱 호환뿐). 이 필드를 빠뜨리면 클라이언트의 parseOrThrow가
   // zod strip으로 예측 결과를 통째로 버린다(회귀 리뷰 #14와 동일 함정).
   prediction: AnalyzePredictionResultSchema.optional(),
+  // Table1 스트라티피케이션 — recipe.descriptive.stratifyByKey가 있는 신규 실행
+  // 결과는 동일 원칙으로 항상 존재(optional은 구버전 재파싱 호환뿐). 이 필드가
+  // 있으면 최상위 continuous/discrete는 항상 빈 배열이다(진실 공급원 하나만
+  // 유지 — 같은 응답 안에 "비층화 전체"와 "층화 total"이 독립 계산되어 서로 다른
+  // 억제 판정이 나오는 걸 막기 위함, server/src/statsDescriptiveStratifySuppression.ts).
+  descriptiveStratified: AnalyzeDescriptiveStratifiedResultSchema.optional(),
 });
 
 export const AnalyzeRequestSchema = StatsAnalysisRecipeSchema;
@@ -1514,6 +1638,11 @@ export type AnalyzeMissingPatternEntry    = z.infer<typeof AnalyzeMissingPattern
 export type AnalyzeContinuousResult       = z.infer<typeof AnalyzeContinuousResultSchema>;
 export type AnalyzeDiscreteLevel          = z.infer<typeof AnalyzeDiscreteLevelSchema>;
 export type AnalyzeDiscreteResult         = z.infer<typeof AnalyzeDiscreteResultSchema>;
+export type Table1ContinuousCell          = z.infer<typeof Table1ContinuousCellSchema>;
+export type Table1DiscreteCell            = z.infer<typeof Table1DiscreteCellSchema>;
+export type AnalyzeDescriptiveStratifyGroup = z.infer<typeof AnalyzeDescriptiveStratifyGroupSchema>;
+export type AnalyzeDescriptiveStratifiedGroupResult = z.infer<typeof AnalyzeDescriptiveStratifiedGroupResultSchema>;
+export type AnalyzeDescriptiveStratifiedResult = z.infer<typeof AnalyzeDescriptiveStratifiedResultSchema>;
 export type StatsMethodId                 = z.infer<typeof StatsMethodIdSchema>;
 export type StatsMethodReasonCode         = z.infer<typeof StatsMethodReasonCodeSchema>;
 export type AvailableMethod               = z.infer<typeof AvailableMethodSchema>;

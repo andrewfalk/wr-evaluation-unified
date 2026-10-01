@@ -71,6 +71,7 @@ function makeCtx(design: RegressionDesignResult | null, excludedRowCount = 0): A
     regressionMethod: 'ols_linear',
     predictionDisclosed: false,
     predictionState: null,
+    descriptiveStratifyPartition: null,
   };
 }
 

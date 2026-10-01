@@ -32,6 +32,12 @@ export interface DatasetRow {
   // 범위를 frozen_dataset(서버 DB 컬럼)로 한정한다). distSmoke.test.ts/statsDatasetBuilder
   // 계약 테스트가 이 필드가 HTTP 경로에 새지 않음을 고정한다.
   cohortPersonKey?: string;
+  // Table1 스트라티피케이션 — recipe.descriptive.stratifyByKey가 있을 때만 채워진다.
+  // `values`(=variableKeys, 분석 대상) 맵과 별개 필드로 둔다 — 같은 이유로
+  // filter 전용 키 값을 `values`에서 뺀 것과 동일: `values`를 "이 행의 분석
+  // 변수 전체"로 가정하는 다른 코드(예: Object.keys(row.values) 순회)가 그룹
+  // 변수를 분석 변수로 착각하지 않게 하기 위함(server/src/statsDescriptiveStratify.ts).
+  stratifyValue?: ExtractedValue<unknown>;
   values: Record<string, ExtractedValue<unknown>>;
 }
 
@@ -130,7 +136,14 @@ function buildCaseGradeDataset(
   catalogByKey: Map<string, AnalyticsVariableMetadata>,
   opts?: BuildDatasetOptions,
 ): DatasetResult {
-  const neededKeys = Array.from(new Set([...recipe.variableKeys, ...recipe.filters.map((f) => f.key)]));
+  // Table1 — stratifyByKey도 추출 대상에 포함시킨다(§6 검증기 neededKeys와는 별개
+  // 리스트 — 여기는 데이터셋에 실제 값을 채우는 쪽, 검증기는 카탈로그 존재/grain/
+  // 식별자/산식정책을 검사하는 쪽).
+  const neededKeys = Array.from(new Set([
+    ...recipe.variableKeys,
+    ...recipe.filters.map((f) => f.key),
+    ...(recipe.descriptive?.stratifyByKey ? [recipe.descriptive.stratifyByKey] : []),
+  ]));
 
   const familyByKey = new Map<string, string>();
   for (const key of neededKeys) {
@@ -187,11 +200,13 @@ function buildCaseGradeDataset(
   const observationCount = caseCount;
 
   // 응답/digest엔 variableKeys(분석 대상)만 남긴다 — 필터 전용 키의 값은 노출하지 않는다.
+  // stratifyValue는 values 맵과 별개 필드로 붙인다(위 DatasetRow 주석 참고).
   const outputRows: DatasetRow[] = filteredRows.map((r) => ({
     caseId: r.caseId,
     personClusterKey: r.personClusterKey,
     entityKey: null,
     cohortPersonKey: r.cohortPersonKey,
+    stratifyValue: recipe.descriptive?.stratifyByKey ? r.values[recipe.descriptive.stratifyByKey] : undefined,
     values: Object.fromEntries(
       recipe.variableKeys
         .map((key) => [key, r.values[key]] as const)
@@ -202,7 +217,7 @@ function buildCaseGradeDataset(
   const internalResultDigest = canonicalDigest({
     grain: recipe.grain,
     variableKeys: recipe.variableKeys,
-    rows: outputRows.map((r) => ({ caseId: r.caseId, personClusterKey: r.personClusterKey, values: r.values })),
+    rows: outputRows.map((r) => ({ caseId: r.caseId, personClusterKey: r.personClusterKey, values: r.values, stratifyValue: r.stratifyValue ?? null })),
   });
 
   return {
@@ -275,7 +290,14 @@ function buildRepeatedGrainDataset(
     throw new Error(`buildRepeatedGrainDataset: grain "${recipe.grain}"에 대한 entity enumerator가 없다`);
   }
 
-  const neededKeys = Array.from(new Set([...recipe.variableKeys, ...recipe.filters.map((f) => f.key)]));
+  // Table1 — stratifyByKey도 추출 대상에 포함(그 변수가 이 recipe.grain과 다른
+  // grain이면 아래 브로드캐스트 루프(§"공통변수 브로드캐스트")가 자동으로 처리한다 —
+  // 별도 분기 불필요).
+  const neededKeys = Array.from(new Set([
+    ...recipe.variableKeys,
+    ...recipe.filters.map((f) => f.key),
+    ...(recipe.descriptive?.stratifyByKey ? [recipe.descriptive.stratifyByKey] : []),
+  ]));
 
   interface RepeatedCandidateRow {
     caseId: string;
@@ -384,6 +406,7 @@ function buildRepeatedGrainDataset(
     personClusterKey: r.personClusterKey,
     entityKey: r.entityKey,
     cohortPersonKey: r.cohortPersonKey,
+    stratifyValue: recipe.descriptive?.stratifyByKey ? r.values[recipe.descriptive.stratifyByKey] : undefined,
     values: Object.fromEntries(
       recipe.variableKeys
         .map((key) => [key, r.values[key]] as const)
@@ -394,7 +417,7 @@ function buildRepeatedGrainDataset(
   const internalResultDigest = canonicalDigest({
     grain: recipe.grain,
     variableKeys: recipe.variableKeys,
-    rows: outputRows.map((r) => ({ caseId: r.caseId, personClusterKey: r.personClusterKey, entityKey: r.entityKey, values: r.values })),
+    rows: outputRows.map((r) => ({ caseId: r.caseId, personClusterKey: r.personClusterKey, entityKey: r.entityKey, values: r.values, stratifyValue: r.stratifyValue ?? null })),
   });
 
   return {

@@ -16,6 +16,7 @@ import { buildAnalysisContext, type AnalysisContext } from './statsAnalysisConte
 import { canonicalDigest } from './canonicalSerializer';
 import { computeExecutionDigest } from './statsExecutionDigest';
 import { buildStatsEngineRequest } from './statsDescriptiveSuppression';
+import { buildStratifiedStatsEngineRequest } from './statsDescriptiveStratifySuppression';
 import {
   assertBivariateWithinLimits,
   assertPredictionWithinLimits,
@@ -107,6 +108,19 @@ function buildSuppressedAnalyzeResult(ctx: AnalysisContext): AnalyzeResult {
       prediction: { suppressed: true, reasonCode: 'MIN_COHORT_NOT_MET' },
     };
   }
+  if (ctx.recipe.analysisMode === 'descriptive' && ctx.recipe.descriptive) {
+    // Table1 — descriptive는 bivariate/regression/prediction과 달리 모드 전용
+    // disclosure 플래그가 없다(§ 아래 호출부) — 이 스텁은 오직 ctx.requestSuppressed
+    // (=ctx.reasonCode가 채워진 경우)로만 도달하므로 실제 사유를 그대로 반영한다.
+    return {
+      continuous: [], discrete: [],
+      descriptiveStratified: {
+        suppressed: true,
+        stratifyByKey: ctx.recipe.descriptive.stratifyByKey,
+        reasonCode: ctx.reasonCode!,
+      },
+    };
+  }
   return {
     continuous: ctx.recipe.variableKeys
       .filter((k) => ctx.catalogByKey.get(k)?.type === 'continuous')
@@ -147,7 +161,13 @@ function auditExtra(ctx: AnalysisContext, executionDigest: string, extra: Record
 // ---------------------------------------------------------------------------
 function assertInputWithinLimitsForMode(ctx: AnalysisContext): void {
   if (ctx.recipe.analysisMode === 'descriptive') {
-    const request = buildStatsEngineRequest(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey);
+    // Table1 — 실제 워커(statsRunsQueue.ts)와 정확히 같은 함수로 조립한 요청을
+    // 검사해야 한다. 비층화용 buildStatsEngineRequest로 사전검사하면 실제
+    // 페이로드(그룹 중복 전송으로 약 2×)보다 작게 잡혀, 사전검사는 통과하고
+    // 워커에서 뒤늦게 실패하는 회귀(PR4-A1 covariance 사례와 동일 함정)가 생긴다.
+    const request = ctx.descriptiveStratifyPartition
+      ? buildStratifiedStatsEngineRequest(ctx.descriptiveStratifyPartition.groups, ctx.recipe.variableKeys, ctx.catalogByKey)
+      : buildStatsEngineRequest(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey);
     assertWithinLimits(request);
     return;
   }

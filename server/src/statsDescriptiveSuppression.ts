@@ -29,7 +29,8 @@ function mapCatalogTypeToKind(type: AnalyticsVariableMetadata['type'] | undefine
   throw new Error(`variable '${key}' has type '${type ?? 'unknown'}' — PR1 기술통계는 continuous/boolean/ordinal/categorical/high_cardinality만 지원한다`);
 }
 
-function distinctPersons(rows: DatasetRow[]): number {
+// Table1 — statsDescriptiveStratify.ts가 그룹별 인원 판정에 같은 함수를 재사용한다.
+export function distinctPersons(rows: DatasetRow[]): number {
   return new Set(rows.map((r) => r.personClusterKey)).size;
 }
 

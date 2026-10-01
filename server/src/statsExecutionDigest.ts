@@ -23,7 +23,10 @@ import { INTEGRATED_CATALOG_VERSION } from './statsCatalogVersion';
 // B안 — 히스토그램이 all-or-nothing 즉시 포기 대신 적응형 해상도 축소(재분할)를
 // 거치도록 규칙 자체가 바뀌어 다시 범프한다(server/src/statsChartDisclosure.ts의
 // resolveDisclosableHistogram 참고).
-export const SUPPRESSION_RULE_VERSION = 'v5-histogram-adaptive-resolution';
+// Table1 — descriptiveStratified 전용 "total 강제 억제" 규칙(그룹 하나라도
+// suppressed면 total도 통째로 교체)이 추가돼 다시 범프한다
+// (statsDescriptiveStratifySuppression.ts의 forceTotalSuppressionWhereAnyGroupSuppressed).
+export const SUPPRESSION_RULE_VERSION = 'v6-table1-total-forced-suppression';
 // PR1엔 aggregate 하나뿐 — PR5가 limited_row/phi를 도입할 때 실제 분기가 생긴다.
 const DISCLOSURE_POLICY_VERSION = 'v0-aggregate-only';
 // PR3-A — availableMethods(A-1/A-2) 계산 로직이 신설됐다. statsMethodCatalog.ts가
@@ -44,7 +47,10 @@ export const METHOD_POLICY_VERSION = 'v4-prediction-l2-logistic';
 // PR4-A2 — regression.diagnostics/standardizedPredictorKeys/standardization/
 // splinePartialEffects 필드가 추가돼 결과 shape이 다시 확장됐다.
 // PR4-B2 — AnalyzeResult.prediction 필드가 추가돼 결과 shape이 다시 확장됐다.
-export const RESULT_SCHEMA_VERSION = 'v7-prediction';
+// Table1 — AnalyzeResult.descriptiveStratified 필드가 추가돼 결과 shape이 다시
+// 확장됐다(shared/contracts/stats.ts, Table1ContinuousCellSchema/Table1DiscreteCellSchema
+// 전용 최소 DTO).
+export const RESULT_SCHEMA_VERSION = 'v8-table1-stratify';
 
 export interface ComputeExecutionDigestInput {
   organizationId: string;

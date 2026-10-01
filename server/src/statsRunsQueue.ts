@@ -21,6 +21,7 @@ import {
   type EngineRunOpts,
 } from './statsEngine';
 import { buildStatsEngineRequest, computeDescriptiveSuppression } from './statsDescriptiveSuppression';
+import { computeDescriptiveStratifiedAnalyzeResult, resolveStratifyGroupLabels } from './statsDescriptiveStratifySuppression';
 import { computeBivariateAnalyzeResult } from './statsBivariateSuppression';
 import { computeCorrelationMatrixAnalyzeResult } from './statsCorrelationMatrixSuppression';
 import { computeRegressionAnalyzeResult } from './statsRegressionSuppression';
@@ -367,6 +368,12 @@ async function runEngineFor(ctx: AnalysisContext, opts: EngineRunOpts): Promise<
     const prediction = await computePredictionAnalyzeResult(ctx, opts);
     return { continuous: [], discrete: [], prediction };
   }
+  if (ctx.recipe.analysisMode === 'descriptive' && ctx.descriptiveStratifyPartition) {
+    // Table1 — 최상위 continuous/discrete는 항상 빈 배열(진실 공급원 하나만 유지,
+    // shared/contracts/stats.ts의 AnalyzeResultSchema 주석 참고).
+    const descriptiveStratified = await computeDescriptiveStratifiedAnalyzeResult(ctx, opts);
+    return { continuous: [], discrete: [], descriptiveStratified };
+  }
   const request = buildStatsEngineRequest(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey);
   const raw = await runStatsEngine(request, opts);
   return computeDescriptiveSuppression(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey, raw);
@@ -433,6 +440,14 @@ export async function attempt(pool: Pool, row: StatsRunRow): Promise<void> {
                 .catch((err) => console.error('[stats-runs-queue] worker_pid persist failed (best-effort)', err));
             },
           });
+          // Table1 — 담당의 등 UUID 그룹 값을 저장 전에 표시명으로 치환한다(§8).
+          // 여기서 한 번만 하면 화면·CSV가 항상 저장된 결과를 그대로 읽으므로 자동으로
+          // 일치한다. sync(즉시 200)/async(202+폴링) 둘 다 이 attempt() 하나를 거친다.
+          if (result.descriptiveStratified) {
+            result.descriptiveStratified = await resolveStratifyGroupLabels(
+              pool, ctxResult.ctx.orgId, ctxResult.ctx.catalogByKey, result.descriptiveStratified,
+            );
+          }
           outcome = { kind: 'succeeded', result };
         }
       }

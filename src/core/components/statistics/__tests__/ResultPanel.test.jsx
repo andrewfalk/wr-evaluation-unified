@@ -476,3 +476,152 @@ describe('ResultPanel — PR4-A1 회귀 결과 카드', () => {
     expect(screen.queryByText(/회귀 결과는 아직 CSV 내보내기를 지원하지 않습니다/)).toBeNull();
   });
 });
+
+// Table1 스트라티피케이션 — 화면 회귀 버그 2건(외부 리뷰 지적) 고정.
+describe('ResultPanel — Table1 그룹별 비교(descriptiveStratified) 렌더링 버그 수정', () => {
+  function stratifyCatalog() {
+    return { variables: [{ key: 'sex', label: '성별', type: 'categorical' }] };
+  }
+  function stratifyRecipe() {
+    return { analysisMode: 'descriptive', variableKeys: ['sex'], descriptive: { stratifyByKey: 'case.staff.assignedDoctorUserId' } };
+  }
+
+  it('total이 강제 억제돼도, 서로 다른 그룹에만 있는 레벨(M/F)이 모두 표에 나타난다(합집합 버그 수정)', () => {
+    const committedResult = {
+      runManifest: baseRunManifest(),
+      result: {
+        continuous: [], discrete: [],
+        descriptiveStratified: {
+          suppressed: false,
+          stratifyByKey: 'case.staff.assignedDoctorUserId',
+          groups: [
+            { groupId: 'total', kind: 'total', level: null },
+            { groupId: 'g0', kind: 'level', level: '김민준' },
+            { groupId: 'g1', kind: 'level', level: '이서연' },
+          ],
+          byGroup: [
+            // total은 g0/g1 중 하나가 억제된 게 아니라도 이 시나리오에서 강제
+            // 억제됐다고 가정(서버 §4 규칙) — 첫 번째로 순회되는 그룹이 억제
+            // 상태일 때 옛 코드가 그 뒤 그룹들의 레벨을 아예 못 봤다.
+            { groupId: 'total', continuous: [], discrete: [{ variableKey: 'sex', kind: 'discrete', suppressed: true }] },
+            { groupId: 'g0', continuous: [], discrete: [{ variableKey: 'sex', kind: 'discrete', suppressed: false, n: 15, missingCount: 0, levels: [{ level: 'M', count: 15, proportion: 1 }], mode: 'M' }] },
+            { groupId: 'g1', continuous: [], discrete: [{ variableKey: 'sex', kind: 'discrete', suppressed: false, n: 15, missingCount: 0, levels: [{ level: 'F', count: 15, proportion: 1 }], mode: 'F' }] },
+          ],
+        },
+      },
+    };
+    render(
+      <ResultPanel
+        catalog={stratifyCatalog()} committedRecipe={stratifyRecipe()} committedResult={committedResult}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported={false}
+      />,
+    );
+    expect(screen.getByText('성별: M')).toBeTruthy();
+    expect(screen.getByText('성별: F')).toBeTruthy(); // 버그였다면 이 행 자체가 없었다
+  });
+
+  it('그룹 안에서 변수가 전부 결측(n=0)이면, 다른 그룹의 레벨과 만나도 "0 (0.0%)"가 아니라 "—"를 보여준다', () => {
+    const committedResult = {
+      runManifest: baseRunManifest(),
+      result: {
+        continuous: [], discrete: [],
+        descriptiveStratified: {
+          suppressed: false,
+          stratifyByKey: 'case.staff.assignedDoctorUserId',
+          groups: [
+            { groupId: 'total', kind: 'total', level: null },
+            { groupId: 'g0', kind: 'level', level: '김민준' },
+            { groupId: 'g1', kind: 'level', level: '이서연' },
+          ],
+          byGroup: [
+            { groupId: 'total', continuous: [], discrete: [{ variableKey: 'sex', kind: 'discrete', suppressed: false, n: 15, missingCount: 0, levels: [{ level: 'M', count: 15, proportion: 1 }], mode: 'M' }] },
+            // g0은 이 변수가 전부 결측(계산 불가) — levels가 비어있고 n=0.
+            { groupId: 'g0', continuous: [], discrete: [{ variableKey: 'sex', kind: 'discrete', suppressed: false, n: 0, missingCount: 15, levels: [], mode: null }] },
+            { groupId: 'g1', continuous: [], discrete: [{ variableKey: 'sex', kind: 'discrete', suppressed: false, n: 15, missingCount: 0, levels: [{ level: 'M', count: 15, proportion: 1 }], mode: 'M' }] },
+          ],
+        },
+      },
+    };
+    render(
+      <ResultPanel
+        catalog={stratifyCatalog()} committedRecipe={stratifyRecipe()} committedResult={committedResult}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported={false}
+      />,
+    );
+    const row = screen.getByText('성별: M').closest('tr');
+    const cells = Array.from(row.querySelectorAll('td')).map((td) => td.textContent);
+    // 열 순서: 전체, 김민준(g0, 계산 불가), 이서연(g1, M 15명 100%)
+    expect(cells[1]).toBe('—'); // g0 — 계산 불가, "0 (0.0%)"이면 버그
+    expect(cells[2]).toContain('15');
+  });
+
+  it('표시명이 겹치는 그룹(담당의 표시명 조회 실패로 전부 "(알 수 없음)")은 열 제목에 순번이 붙는다', () => {
+    // 3차 리뷰 지적 — groupId/CSV엔 구분값이 있어도 화면 열 제목이 전부 같으면
+    // 사용자가 서로 다른 그룹임을 구분할 수 없다. UUID는 여전히 노출하지 않는다.
+    const committedResult = {
+      runManifest: baseRunManifest(),
+      result: {
+        continuous: [], discrete: [],
+        descriptiveStratified: {
+          suppressed: false,
+          stratifyByKey: 'case.staff.assignedDoctorUserId',
+          groups: [
+            { groupId: 'total', kind: 'total', level: null },
+            { groupId: 'g0', kind: 'level', level: '(알 수 없음)' },
+            { groupId: 'g1', kind: 'level', level: '(알 수 없음)' },
+          ],
+          byGroup: [
+            { groupId: 'total', continuous: [], discrete: [{ variableKey: 'sex', kind: 'discrete', suppressed: false, n: 30, missingCount: 0, levels: [{ level: 'M', count: 30, proportion: 1 }], mode: 'M' }] },
+            { groupId: 'g0', continuous: [], discrete: [{ variableKey: 'sex', kind: 'discrete', suppressed: false, n: 15, missingCount: 0, levels: [{ level: 'M', count: 15, proportion: 1 }], mode: 'M' }] },
+            { groupId: 'g1', continuous: [], discrete: [{ variableKey: 'sex', kind: 'discrete', suppressed: false, n: 15, missingCount: 0, levels: [{ level: 'M', count: 15, proportion: 1 }], mode: 'M' }] },
+          ],
+        },
+      },
+    };
+    render(
+      <ResultPanel
+        catalog={stratifyCatalog()} committedRecipe={stratifyRecipe()} committedResult={committedResult}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported={false}
+      />,
+    );
+    const headers = Array.from(document.querySelectorAll('thead th')).map((th) => th.textContent);
+    expect(headers).toEqual(['변수', '전체', '(알 수 없음) 1', '(알 수 없음) 2']);
+  });
+
+  it('이름이 같은 담당의가 둘 이상인 정상 조회에서도 열 제목에 순번이 붙는다', () => {
+    const committedResult = {
+      runManifest: baseRunManifest(),
+      result: {
+        continuous: [], discrete: [],
+        descriptiveStratified: {
+          suppressed: false,
+          stratifyByKey: 'case.staff.assignedDoctorUserId',
+          groups: [
+            { groupId: 'total', kind: 'total', level: null },
+            { groupId: 'g0', kind: 'level', level: '김민준' },
+            { groupId: 'g1', kind: 'level', level: '김민준' },
+            { groupId: 'g2', kind: 'level', level: '이서연' },
+          ],
+          byGroup: [
+            { groupId: 'total', continuous: [], discrete: [] },
+            { groupId: 'g0', continuous: [], discrete: [] },
+            { groupId: 'g1', continuous: [], discrete: [] },
+            { groupId: 'g2', continuous: [], discrete: [] },
+          ],
+        },
+      },
+    };
+    render(
+      <ResultPanel
+        catalog={stratifyCatalog()} committedRecipe={stratifyRecipe()} committedResult={committedResult}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported={false}
+      />,
+    );
+    const headers = Array.from(document.querySelectorAll('thead th')).map((th) => th.textContent);
+    expect(headers).toEqual(['변수', '전체', '김민준 1', '김민준 2', '이서연']); // 유일한 "이서연"은 순번 없음
+  });
+});

@@ -86,6 +86,7 @@ function makeCtx(state: PredictionAnalysisState | null, catalogByKey: Map<string
     regressionDisclosed: false, regressionDesign: null, regressionExcludedRowCount: null, regressionMethod: null,
     predictionDisclosed: true,
     predictionState: state,
+    descriptiveStratifyPartition: null,
   };
 }
 

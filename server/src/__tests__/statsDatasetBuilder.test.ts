@@ -10,11 +10,16 @@ const CATALOG_BY_KEY = new Map(getFullVariableCatalog().map((v) => [v.key, v]));
 const INTEGRATED_CATALOG_BY_KEY = new Map(getIntegratedCatalog().map((v) => [v.key, v]));
 const RECIPE_DIGEST = 'test-recipe-digest';
 
-function makeSnapshotRow(id: string, personId: string, overrides: Partial<SnapshotRow['payload']> = {}): SnapshotRow {
+function makeSnapshotRow(
+  id: string,
+  personId: string,
+  overrides: Partial<SnapshotRow['payload']> = {},
+  assignedDoctorUserId: string | null = null,
+): SnapshotRow {
   return {
     id,
     patientPersonId: personId,
-    assignedDoctorUserId: null,
+    assignedDoctorUserId,
     createdAt: new Date('2024-01-01T00:00:00.000Z'),
     payload: {
       data: {
@@ -276,6 +281,63 @@ describe('buildDataset — cohortPersonKey(opts.cohortDigest)', () => {
     expect(result.rows.length).toBeGreaterThan(0);
     for (const row of result.rows) {
       expect(row.cohortPersonKey).toMatch(/^[0-9a-f]{22}$/);
+    }
+  });
+});
+
+// Table1 스트라티피케이션 — stratifyValue가 values 맵과 별개로 채워지는지 확인한다
+// (recipe.variableKeys에 stratifyByKey를 넣지 않아도 값이 도달해야 한다 — 1차
+// 리뷰가 잡은 핵심 누락: 검증기만 고치면 데이터셋엔 값이 없어 전원 결측으로 계산됨).
+describe('buildDataset — Table1 stratifyValue 배선', () => {
+  it('case grain — descriptive.stratifyByKey 값이 stratifyValue에 채워지고 values엔 없다', () => {
+    const rows = [
+      makeSnapshotRow('case-1', 'person-1', {}, 'doctor-a'),
+      makeSnapshotRow('case-2', 'person-2', {}, 'doctor-b'),
+      makeSnapshotRow('case-3', 'person-3', {}, null),
+    ];
+    const result = buildDataset(
+      rows,
+      recipe({ descriptive: { stratifyByKey: 'case.staff.assignedDoctorUserId' } }),
+      RECIPE_DIGEST,
+      INTEGRATED_CATALOG_BY_KEY,
+    );
+    expect(result.rows).toHaveLength(3);
+    const byCaseId = new Map(result.rows.map((r) => [r.caseId, r]));
+    expect(byCaseId.get('case-1')!.stratifyValue).toEqual({ value: 'doctor-a', missing: null, qualityFlags: [] });
+    expect(byCaseId.get('case-2')!.stratifyValue).toEqual({ value: 'doctor-b', missing: null, qualityFlags: [] });
+    expect(byCaseId.get('case-3')!.stratifyValue?.missing).not.toBeNull();
+    // stratifyByKey는 variableKeys에 없으므로 values 맵에는 들어가지 않는다.
+    for (const row of result.rows) {
+      expect('case.staff.assignedDoctorUserId' in row.values).toBe(false);
+    }
+  });
+
+  it('recipe.descriptive가 없으면 stratifyValue는 항상 undefined다', () => {
+    const rows = [makeSnapshotRow('case-1', 'person-1', {}, 'doctor-a')];
+    const result = buildDataset(rows, recipe(), RECIPE_DIGEST, INTEGRATED_CATALOG_BY_KEY);
+    expect(result.rows[0].stratifyValue).toBeUndefined();
+  });
+
+  it('disease grain(반복 grain, 브로드캐스트 경로)에서도 stratifyValue가 모든 행에 복제된다', () => {
+    const rows = [makeSnapshotRow('case-1', 'person-1', {
+      shared: { diagnoses: [
+        { id: 'd1', code: 'M17.0', name: '무릎관절증', moduleId: 'knee', side: 'right' },
+        { id: 'd2', code: 'M75.1', name: '어깨충돌증후군', moduleId: 'shoulder', side: 'left' },
+      ] },
+    }, 'doctor-a')];
+    const result = buildDataset(
+      rows,
+      recipe({
+        grain: 'disease',
+        variableKeys: ['diagnosis.identity.moduleGroup'],
+        descriptive: { stratifyByKey: 'case.staff.assignedDoctorUserId' },
+      }),
+      RECIPE_DIGEST,
+      INTEGRATED_CATALOG_BY_KEY,
+    );
+    expect(result.rows.length).toBe(2); // 상병 2건 = 반복 grain 행 2개
+    for (const row of result.rows) {
+      expect(row.stratifyValue).toEqual({ value: 'doctor-a', missing: null, qualityFlags: [] });
     }
   });
 });

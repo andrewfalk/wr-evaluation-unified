@@ -109,20 +109,23 @@ describe('computeExecutionDigest — B안 버전 상수 3개(같은 모듈 상�
 
       // (1) export된 값을 다시 읽어와 자기 자신과 비교하지 않는다 — 정답을 하드코딩.
       expect(capturedInput.chartDisclosurePolicyVersion).toBe('v2-histogram-adaptive-resolution');
-      expect(capturedInput.suppressionRuleVersion).toBe('v5-histogram-adaptive-resolution');
+      // Table1 — descriptiveStratified 전용 "total 강제 억제" 규칙이 추가돼
+      // v5-histogram-adaptive-resolution → v6-table1-total-forced-suppression으로 범프됐다.
+      expect(capturedInput.suppressionRuleVersion).toBe('v6-table1-total-forced-suppression');
       // PR4-A1 — AnalyzeResult.regression 필드가 추가돼 v4-histogram-merge-fields →
       // v5-regression으로 범프됐다. PR4-A2 — diagnostics/spline 필드 추가로
       // v6-regression-diagnostics-spline으로 범프됐다. PR4-B2 — AnalyzeResult.
-      // prediction 필드가 추가돼 v7-prediction으로 다시 범프됐다.
-      expect(capturedInput.resultSchemaVersion).toBe('v7-prediction');
+      // prediction 필드가 추가돼 v7-prediction으로 다시 범프됐다. Table1 —
+      // AnalyzeResult.descriptiveStratified 필드가 추가돼 v8-table1-stratify로 다시 범프됐다.
+      expect(capturedInput.resultSchemaVersion).toBe('v8-table1-stratify');
 
       // (2) 각 필드를 범프 전 값으로 되돌리면 실제로 다른 digest가 나오는지(=이
       // 필드들이 죽은 값이 아니라 실제로 해시에 반영되는지) 확인한다. 스파이는
       // 원래 구현을 그대로 호출(call-through)하므로 이 직접 호출도 진짜 해시다.
       const OLD_VALUES: Record<string, string> = {
         chartDisclosurePolicyVersion: 'v1-outlier-partition-gate',
-        suppressionRuleVersion: 'v4-chart-outlier-partition-gate',
-        resultSchemaVersion: 'v5-regression',
+        suppressionRuleVersion: 'v5-histogram-adaptive-resolution',
+        resultSchemaVersion: 'v7-prediction',
       };
       for (const key of Object.keys(OLD_VALUES)) {
         const staleInput = { ...capturedInput, [key]: OLD_VALUES[key] };
