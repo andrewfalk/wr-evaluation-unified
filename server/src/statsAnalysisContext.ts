@@ -15,6 +15,8 @@ import { MINIMUM_COHORT } from './statsPolicy';
 import { validateRecipe } from './statsRecipeValidation';
 import { readSnapshot, type Snapshot } from './statsSnapshot';
 import { buildDataset, type DatasetResult } from './statsDatasetBuilder';
+import { partitionRowsForStratify, type StratifyPartitionResult } from './statsDescriptiveStratify';
+import { MAX_STRATIFY_GROUPS } from './statsEngineLimits';
 import { computeQueryFamilyDigest, checkAndRecordDifferencing, type DifferencingCheckResult } from './statsDifferencingGuard';
 import { buildPairedDataset, type PairedDatasetResult } from './statsBivariateDataset';
 import { evaluateBivariateDisclosure } from './statsBivariateDisclosureGate';
@@ -111,6 +113,11 @@ export interface AnalysisContext {
   // 통과 못 한 요청엔 자료단계·fold·비추정 사유 어느 것도 나가면 안 된다).
   predictionDisclosed: boolean;
   predictionState: PredictionAnalysisState | null;
+  // Table1 스트라티피케이션 — recipe.descriptive.stratifyByKey가 있을 때만 채워진다
+  // (그 외 null). requestSuppressed와 무관하게 항상 계산한다(다른 모드들의 paired/
+  // correlationMatrixPairs와 동일 원칙 — 이 계산 자체는 O(rows) 단일 패스라 비싸지
+  // 않다). 실제 억제 여부는 statsDescriptiveStratifySuppression.ts가 그룹별로 판정.
+  descriptiveStratifyPartition: StratifyPartitionResult | null;
 }
 
 export type BuildAnalysisContextResult =
@@ -255,6 +262,7 @@ function buildAnalysisContextTail(input: BuildAnalysisContextTailInput): BuildAn
   let regressionMethod: 'ols_linear' | 'binary_logistic' | null = null;
   let predictionDisclosed = false;
   let predictionState: PredictionAnalysisState | null = null;
+  let descriptiveStratifyPartition: StratifyPartitionResult | null = null;
 
   if (recipe.analysisMode === 'bivariate') {
     const [keyX, keyY] = recipe.variableKeys;
@@ -425,6 +433,24 @@ function buildAnalysisContextTail(input: BuildAnalysisContextTailInput): BuildAn
       availableMethods = computePredictionAvailableMethods(s2PersonCount, outcomeKey, catalogByKey, METHOD_POLICY_VERSION);
       methodCatalogVersion = METHOD_POLICY_VERSION;
     }
+  } else if (recipe.analysisMode === 'descriptive' && recipe.descriptive) {
+    // Table1 — 파티션은 O(rows) 단일 패스라 correlation_matrix류의 "비싼 작업 전
+    // 값싼 사전검사"를 따로 둘 필요가 없다(계획서 §3). 상한 검사는 파티션 직후,
+    // 실제 엔진 요청 조립(비쌈) 이전에 둔다.
+    const stratifyKey = recipe.descriptive.stratifyByKey;
+    const stratifyType = catalogByKey.get(stratifyKey)?.type;
+    descriptiveStratifyPartition = partitionRowsForStratify(dataset.rows, stratifyKey, stratifyType);
+    if (descriptiveStratifyPartition.groups.length > MAX_STRATIFY_GROUPS) {
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          code: 'INPUT_TOO_LARGE',
+          message: '그룹 수가 너무 많습니다 — 필터로 범위를 좁히거나 다른 그룹 변수를 선택하세요.',
+          reason: 'TOO_MANY_STRATIFY_GROUPS',
+        },
+      };
+    }
   }
 
   return {
@@ -436,6 +462,7 @@ function buildAnalysisContextTail(input: BuildAnalysisContextTailInput): BuildAn
       correlationMatrixVariables,
       regressionDisclosed, regressionDesign, regressionExcludedRowCount, regressionMethod,
       predictionDisclosed, predictionState,
+      descriptiveStratifyPartition,
     },
   };
 }

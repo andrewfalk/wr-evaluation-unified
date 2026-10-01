@@ -147,6 +147,82 @@ describe('validateRecipe — 필터 전용 변수 계약(analysisRole)', () => {
   });
 });
 
+// Table1 스트라티피케이션 — descriptive.stratifyByKey도 neededKeys에 포함되므로
+// 존재·grain·직접식별자·산식정책 검증이 자동 적용되고, filter_only·목적·타입(그룹
+// 변수 전용) 검사는 별도로 추가했다(statsRecipeValidation.ts §"검증기 neededKeys").
+describe('validateRecipe — Table1 stratifyByKey', () => {
+  it('boolean/ordinal/categorical(담당의)은 그룹 변수로 허용된다', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['knee.relatedness.max'],
+        analysisMode: 'descriptive',
+        descriptive: { stratifyByKey: 'case.staff.assignedDoctorUserId' },
+      }),
+      'analyze',
+    );
+    expect(result.valid, !result.valid ? JSON.stringify(result.errors) : '').toBe(true);
+  });
+
+  it('continuous 변수는 STRATIFY_KEY_TYPE_UNSUPPORTED로 거부된다', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['shoulder.exposure.anyExceeded'],
+        analysisMode: 'descriptive',
+        descriptive: { stratifyByKey: 'knee.relatedness.max' },
+      }),
+      'analyze',
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.code === 'STRATIFY_KEY_TYPE_UNSUPPORTED')).toBe(true);
+    }
+  });
+
+  it('존재하지 않는 stratifyByKey는 UNKNOWN_VARIABLE로 거부된다', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['knee.relatedness.max'],
+        analysisMode: 'descriptive',
+        descriptive: { stratifyByKey: 'not.a.real.key' },
+      }),
+      'analyze',
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'UNKNOWN_VARIABLE')).toBe(true);
+  });
+
+  it('filter_only 변수(등록일)는 stratifyByKey로도 쓸 수 없다', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['knee.relatedness.max'],
+        analysisMode: 'descriptive',
+        descriptive: { stratifyByKey: 'case.meta.registeredAt' },
+      }),
+      'analyze',
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.code === 'FILTER_ONLY_VARIABLE_NOT_ANALYZABLE')).toBe(true);
+    }
+  });
+
+  it('stratifyByKey도 분석 목적 검사 대상이다(담당의는 prediction 불허)', () => {
+    const result = validateRecipe(
+      baseRecipe({
+        variableKeys: ['knee.relatedness.max'],
+        analysisMode: 'descriptive',
+        analysisPurpose: 'prediction',
+        descriptive: { stratifyByKey: 'case.staff.assignedDoctorUserId' },
+      }),
+      'analyze',
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.code === 'PURPOSE_NOT_ALLOWED')).toBe(true);
+    }
+  });
+});
+
 // spine.mddm.lifetimeDoseMNh는 formulaFamily가 정책 2개를 지원해 formulaPolicies 명시가
 // 필수다(다른 6개는 단일 정책이라 생략 가능) — 일반 루프 테스트에서 이 변수만 예외 처리.
 function formulaPoliciesFor(key: string): StatsAnalysisRecipe['formulaPolicies'] {

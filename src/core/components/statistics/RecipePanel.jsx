@@ -404,6 +404,7 @@ export function RecipePanel({
   interactionTerms = [], onInteractionTermsChange = () => {},
   splineKeys = [], onSplineKeysChange = () => {},
   eventLevel = '', onEventLevelChange = () => {},
+  stratifyByKey = null, onStratifyByKeyChange = () => {},
   analysisPurpose, onAnalysisPurposeChange,
   formulaPolicies, onFormulaPolicyChange,
   filterDraft, onFilterDraftChange, appliedFilters, onApplyFilters,
@@ -437,10 +438,27 @@ export function RecipePanel({
     ));
   }, [analysisMode, grainCatalogByKey]);
 
+  // Table1 — 산식 선택 UI(formulaFamiliesNeedingChoice)가 stratifyByKey도 대상에
+  // 포함하도록 neededKeys에 추가한다(그룹 변수에 산식 버전이 여러 개면 선택 가능해야
+  // 한다). analysisMode!=='descriptive'면 stratifyByKey는 recipe에 실리지 않으므로 제외.
   const neededKeys = useMemo(
-    () => Array.from(new Set([...selectedKeys, ...filterDraft.map((f) => f.key)])),
-    [selectedKeys, filterDraft],
+    () => Array.from(new Set([
+      ...selectedKeys,
+      ...filterDraft.map((f) => f.key),
+      ...(analysisMode === 'descriptive' && stratifyByKey ? [stratifyByKey] : []),
+    ])),
+    [selectedKeys, filterDraft, analysisMode, stratifyByKey],
   );
+
+  // Table1 — 그룹 변수 후보: grain 호환 + boolean/ordinal/categorical + 필터 전용
+  // 아님 + 이미 분석 변수로 선택된 키 제외(양방향 충돌 방지 — StatisticsWorkbench의
+  // toggleVariable 조건부 리셋과 짝을 이룬다).
+  const stratifyCandidates = useMemo(() => {
+    const GROUPING_TYPES = new Set(['boolean', 'ordinal', 'categorical']);
+    return Array.from(grainCatalogByKey.values())
+      .filter((v) => GROUPING_TYPES.has(v.type) && v.analysisRole !== 'filter_only' && !selectedKeys.includes(v.key))
+      .sort((a, b) => a.label.localeCompare(b.label, 'ko'));
+  }, [grainCatalogByKey, selectedKeys]);
 
   const formulaFamiliesNeedingChoice = useMemo(() => {
     const seen = new Set();
@@ -591,6 +609,33 @@ export function RecipePanel({
             목적은 기술통계 자체를 바꾸지 않지만, 선택 가능한 변수 범위에 영향을 줍니다 —
             일부 변수는 "연관성"에서만 허용되고 "공식 감사"에서는 제외됩니다.
           </p>
+        )}
+
+        {/* Table1 스트라티피케이션 — 그룹별 비교(선택). 회귀 결과변수 select(아래
+            §"결과변수" 블록)와 같은 패턴이나, 축이 독립적이라(행=variableKeys,
+            열=그룹) selectedKeys를 소비하지 않고 grain 호환 카탈로그 전체에서
+            고른다. */}
+        {analysisMode === 'descriptive' && (
+          <>
+            <div className="swb-section-label">그룹별 비교(선택)</div>
+            <select
+              className="swb-search"
+              aria-label="그룹 변수"
+              value={stratifyByKey || ''}
+              onChange={(e) => onStratifyByKeyChange(e.target.value || null)}
+            >
+              <option value="">사용 안 함</option>
+              {stratifyCandidates.map((v) => (
+                <option key={v.key} value={v.key}>{v.label}</option>
+              ))}
+            </select>
+            {stratifyByKey && (
+              <p className="swb-suppressed-note">
+                인원이 {catalog?.minimumCohort ?? 10}명 미만인 그룹은 자동으로 "기타"로
+                합쳐집니다. 병합 후에도 인원이 부족하면 해당 그룹의 값은 공개되지 않습니다.
+              </p>
+            )}
+          </>
         )}
 
         {(analysisMode === 'bivariate' || analysisMode === 'correlation_matrix' || analysisMode === 'regression' || analysisMode === 'prediction') && (

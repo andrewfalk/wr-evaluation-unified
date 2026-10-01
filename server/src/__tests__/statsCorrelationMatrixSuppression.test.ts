@@ -67,6 +67,7 @@ function makeCtx(rows: DatasetRow[], variableKeys: string[], method: 'pearson_co
     regressionMethod: null,
     predictionDisclosed: false,
     predictionState: null,
+    descriptiveStratifyPartition: null,
   };
 }
 

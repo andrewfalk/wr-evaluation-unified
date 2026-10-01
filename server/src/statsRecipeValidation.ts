@@ -218,7 +218,17 @@ export function validateRecipe(
   const catalogByKey = new Map(catalog.map((v) => [v.key, v]));
 
   const filterKeys = recipe.filters.map((f) => f.key);
-  const neededKeys = Array.from(new Set([...recipe.variableKeys, ...filterKeys]));
+  // Table1 — stratifyByKey도 neededKeys에 포함시킨다. 이 리스트가 아래 §A-2(존재)·
+  // VARIABLE_GRAIN_MISMATCH·§A-3(직접식별자 금지)·§A-8(산식정책)을 전부 담당하므로,
+  // 여기 한 번만 추가하면 그 네 검사가 stratifyByKey에도 자동으로 적용된다
+  // (server/src/statsDatasetBuilder.ts의 neededKeys와는 별개 리스트 — 그쪽은 실제
+  // 값을 채우는 쪽, 여기는 검증하는 쪽).
+  const stratifyByKey = recipe.analysisMode === 'descriptive' ? recipe.descriptive?.stratifyByKey : undefined;
+  const neededKeys = Array.from(new Set([
+    ...recipe.variableKeys,
+    ...filterKeys,
+    ...(stratifyByKey ? [stratifyByKey] : []),
+  ]));
 
   // §A-2 키 존재
   for (const key of neededKeys) {
@@ -254,8 +264,9 @@ export function validateRecipe(
 
   // PR0-B3 Part C — 필터 전용 변수 계약. filter_only 변수(예: 등록일)는 filters[]에서만
   // 쓸 수 있고 variableKeys(분석 대상)에는 올 수 없다 — grain 검사와 별개 축이라 위
-  // VARIABLE_GRAIN_MISMATCH 검사와 독립적으로 검사한다.
-  for (const key of recipe.variableKeys) {
+  // VARIABLE_GRAIN_MISMATCH 검사와 독립적으로 검사한다. Table1의 stratifyByKey도
+  // "분석 대상 변수 자리"의 일종이라 같은 규칙을 적용한다.
+  for (const key of stratifyByKey ? [...recipe.variableKeys, stratifyByKey] : recipe.variableKeys) {
     const variable = catalogByKey.get(key);
     if (variable && variable.analysisRole === 'filter_only') {
       errors.push({
@@ -266,14 +277,28 @@ export function validateRecipe(
     }
   }
 
-  // §A-4 분석 목적 — variableKeys만(필터는 대상이 아님)
-  for (const key of recipe.variableKeys) {
+  // §A-4 분석 목적 — variableKeys + stratifyByKey(필터는 대상이 아님)
+  for (const key of stratifyByKey ? [...recipe.variableKeys, stratifyByKey] : recipe.variableKeys) {
     const variable = catalogByKey.get(key);
     if (variable && !variable.allowedAnalysisPurposes.includes(recipe.analysisPurpose)) {
       errors.push({
         code: 'PURPOSE_NOT_ALLOWED',
         path: key,
         message: `${key}는 analysisPurpose "${recipe.analysisPurpose}"를 허용하지 않는다(허용: ${variable.allowedAnalysisPurposes.join(', ')})`,
+      });
+    }
+  }
+
+  // Table1 — 그룹 변수는 boolean/ordinal/categorical만 허용(continuous/high_cardinality/
+  // date는 그룹 축으로 쓸 수 없다 — 이 파일의 기존 isGroupingType 재사용, statsBivariateRoles.ts의
+  // 동명 함수와 동일 규칙). 존재하지 않는 키는 위 UNKNOWN_VARIABLE로 이미 보고됐으므로 여기선 스킵.
+  if (stratifyByKey) {
+    const variable = catalogByKey.get(stratifyByKey);
+    if (variable && !isGroupingType(variable.type)) {
+      errors.push({
+        code: 'STRATIFY_KEY_TYPE_UNSUPPORTED',
+        path: 'descriptive.stratifyByKey',
+        message: `${stratifyByKey}는 type "${variable.type}"라 그룹 변수로 쓸 수 없다(허용: boolean/ordinal/categorical)`,
       });
     }
   }

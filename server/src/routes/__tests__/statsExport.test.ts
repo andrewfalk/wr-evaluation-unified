@@ -479,3 +479,118 @@ describe('POST /export — 성공 경로 + CSV 포맷', () => {
     expect(res.text).not.toMatch(/[^']=1\+1/); // escape 안 된 원문 "=1+1"이 단독으로 남아있지 않아야 함
   });
 });
+
+// Table1 스트라티피케이션 — manifest.analysisMode가 descriptive/descriptiveStratified
+// 둘 다 'descriptive'라 result.descriptiveStratified 존재 여부로 분기해야 한다
+// (계획서 §9 경고 — 놓치면 빈 CSV 버그).
+describe('POST /export — Table1 스트라티피케이션 CSV', () => {
+  function stratifiedResult(overrides: Record<string, unknown> = {}) {
+    return {
+      continuous: [], discrete: [],
+      descriptiveStratified: {
+        suppressed: false,
+        stratifyByKey: 'case.staff.assignedDoctorUserId',
+        groups: [
+          { groupId: 'total', kind: 'total', level: null },
+          { groupId: 'g0', kind: 'level', level: 'doctor-a' },
+          { groupId: 'other', kind: 'other', level: null },
+        ],
+        byGroup: [
+          {
+            groupId: 'total',
+            continuous: [{
+              variableKey: 'knee.relatedness.max', kind: 'continuous', suppressed: false,
+              n: 30, missingCount: 0, mean: 40, sd: 5, median: 40, q1: 35, q3: 45, iqr: 10, min: 20, max: 60,
+            }],
+            discrete: [{
+              variableKey: 'sex', kind: 'discrete', suppressed: false,
+              n: 30, missingCount: 0, levels: [{ level: 'M', count: 20, proportion: 20 / 30 }, { level: 'F', count: 10, proportion: 10 / 30 }],
+              mode: 'M',
+            }],
+          },
+          {
+            groupId: 'g0',
+            continuous: [{ variableKey: 'knee.relatedness.max', kind: 'continuous', suppressed: false, n: 18, missingCount: 0, mean: 41, sd: 4, median: 41, q1: 38, q3: 44, iqr: 6, min: 30, max: 50 }],
+            discrete: [{ variableKey: 'sex', kind: 'discrete', suppressed: false, n: 18, missingCount: 0, levels: [{ level: 'M', count: 12, proportion: 12 / 18 }, { level: 'F', count: 6, proportion: 6 / 18 }], mode: 'M' }],
+          },
+          {
+            groupId: 'other',
+            continuous: [{ variableKey: 'knee.relatedness.max', kind: 'continuous', suppressed: true }],
+            discrete: [{ variableKey: 'sex', kind: 'discrete', suppressed: true }],
+          },
+        ],
+        ...overrides,
+      },
+    };
+  }
+
+  it('descriptiveStratified가 있으면 일반 buildCsv가 아니라 Table1 전용 long 포맷을 쓴다', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    wireRunRow(pool, {
+      manifest: baseManifest(), // analysisMode='descriptive' — 일반 descriptive와 동일
+      result: stratifiedResult(),
+      status: 'succeeded', requested_disclosure_profile: 'aggregate',
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+    });
+    const res = await postExport(pool);
+    expect(res.status).toBe(200);
+    expect(res.text.charCodeAt(0)).toBe(0xfeff);
+    expect(res.text).toContain('stratifyByKey,case.staff.assignedDoctorUserId');
+    expect(res.text).toContain('groupId,groupKind,groupLevel');
+    expect(res.text).toContain('doctor-a');
+    // 세로형(long) — 그룹마다 별도 행이어야 한다(그룹 3개 × 변수 2개 = 6개 데이터 행 이상).
+    const dataLines = res.text.split('\r\n').filter((l) => l.startsWith('continuous,') || l.startsWith('discrete,'));
+    expect(dataLines.length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('억제된 그룹(기타)은 수치 필드 없이 suppressed=true만 낸다 — total 강제 억제 흔적 확인', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    wireRunRow(pool, {
+      manifest: baseManifest(),
+      result: stratifiedResult(),
+      status: 'succeeded', requested_disclosure_profile: 'aggregate',
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+    });
+    const res = await postExport(pool);
+    const otherRow = res.text.split('\r\n').find((l) => l.startsWith('continuous,knee.relatedness.max,other,'));
+    expect(otherRow).toBeDefined();
+    expect(otherRow!.split(',')[5]).toBe('true'); // suppressed 컬럼
+    expect(otherRow).not.toContain('41'); // 다른 그룹 평균값 등 수치 흔적 없음
+  });
+
+  it('부가정보(missingPatterns/histogram/boxplot/mergedLevels)는 애초에 없으므로 CSV에도 없다', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    wireRunRow(pool, {
+      manifest: baseManifest(),
+      result: stratifiedResult(),
+      status: 'succeeded', requested_disclosure_profile: 'aggregate',
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+    });
+    const res = await postExport(pool);
+    expect(res.text).not.toContain('missingPatterns');
+    expect(res.text).not.toContain('histogram');
+    expect(res.text).not.toContain('boxplot');
+    expect(res.text).not.toContain('mergedLevels');
+  });
+
+  it('전체 요청 자체가 억제되면 stratifyByKey/reasonCode만 있는 최소 CSV를 낸다', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    wireRunRow(pool, {
+      manifest: baseManifest(),
+      result: {
+        continuous: [], discrete: [],
+        descriptiveStratified: { suppressed: true, stratifyByKey: 'case.staff.assignedDoctorUserId', reasonCode: 'MIN_COHORT_NOT_MET' },
+      },
+      status: 'succeeded', requested_disclosure_profile: 'aggregate',
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+    });
+    const res = await postExport(pool);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('MIN_COHORT_NOT_MET');
+    expect(res.text).not.toContain('doctor-a');
+  });
+});

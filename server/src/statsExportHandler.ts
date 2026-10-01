@@ -18,6 +18,8 @@ import {
   type AnalyzeContinuousResult,
   type AnalyzeDiscreteResult,
   type AnalyzeMissingPatternEntry,
+  type AnalyzeDescriptiveStratifiedResult,
+  type Table1ContinuousCell,
 } from '@wr/contracts';
 
 import { writeAuditLogStrict, type AuditOutcome } from './middleware/audit';
@@ -329,6 +331,84 @@ function buildPredictionCsv(manifest: RunManifest, result: AnalyzeResult): strin
   return '﻿' + lines.join('\r\n') + '\r\n';
 }
 
+// Table1 스트라티피케이션 — 의도적으로 long(tidy) 포맷을 쓴다(화면의 wide 그리드와
+// 다름 — 통계 소프트웨어 재분석 용도로는 long이 표준). Table1ContinuousCell/
+// Table1DiscreteCell 최소 DTO 필드만 컬럼화한다 — missingPatterns/histogram/
+// boxplot은 애초에 이 DTO에 없으므로 CSV에도 없다. groupLevel은 서버가 해석한
+// 표시명이 아니라 원본 추출값 그대로다(담당의는 UUID로 보일 수 있음 — §8 "담당의
+// 표시명" 해석은 이번 범위에서 미구현, 화면도 동일하게 원본 UUID를 보여준다).
+function buildDescriptiveStratifiedCsv(
+  manifest: RunManifest,
+  stratified: AnalyzeDescriptiveStratifiedResult,
+): string {
+  const lines: string[] = buildMetaHeaderLines(manifest);
+
+  if (stratified.suppressed) {
+    lines.push(['stratifyByKey', 'suppressed', 'reasonCode'].join(','));
+    lines.push([csvString(stratified.stratifyByKey), 'true', csvString(stratified.reasonCode)].join(','));
+    return '﻿' + lines.join('\r\n') + '\r\n';
+  }
+
+  lines.push(`# stratifyByKey,${csvString(stratified.stratifyByKey)}`);
+  lines.push('');
+  lines.push(['section', 'variableKey', 'groupId', 'groupKind', 'groupLevel', 'suppressed',
+    'n', 'missingCount', 'mean', 'sd', 'median', 'q1', 'q3', 'iqr', 'min', 'max',
+    'level', 'levelCount', 'levelProportion', 'mode'].join(','));
+
+  const groupMetaById = new Map(stratified.groups.map((g) => [g.groupId, g]));
+
+  // 억제 시 10칸(n..max) 전부 빈칸 — continuousRowCells와 discreteRowCells는
+  // 그 뒤에 오는 level/levelCount/levelProportion/mode 4칸은 채우지 않는다(호출부가
+  // 이어붙인다).
+  function continuousStatCols(cell: Table1ContinuousCell): string[] {
+    if (cell.suppressed) return ['true', '', '', '', '', '', '', '', '', ''];
+    return [
+      'false', csvNumber(cell.n), csvNumber(cell.missingCount),
+      csvNumber(cell.mean), csvNumber(cell.sd), csvNumber(cell.median),
+      csvNumber(cell.q1), csvNumber(cell.q3), csvNumber(cell.iqr), csvNumber(cell.min),
+    ];
+  }
+
+  for (const groupResult of stratified.byGroup) {
+    const meta = groupMetaById.get(groupResult.groupId)!;
+    for (const cell of groupResult.continuous) {
+      lines.push([
+        'continuous', csvString(cell.variableKey), csvString(meta.groupId), csvString(meta.kind), csvString(meta.level),
+        ...continuousStatCols(cell),
+        cell.suppressed ? '' : csvNumber(cell.max),
+        '', '', '', '',
+      ].join(','));
+    }
+    for (const cell of groupResult.discrete) {
+      if (cell.suppressed) {
+        lines.push([
+          'discrete', csvString(cell.variableKey), csvString(meta.groupId), csvString(meta.kind), csvString(meta.level),
+          'true', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
+        ].join(','));
+        continue;
+      }
+      if (cell.levels.length === 0) {
+        lines.push([
+          'discrete', csvString(cell.variableKey), csvString(meta.groupId), csvString(meta.kind), csvString(meta.level),
+          'false', csvNumber(cell.n), csvNumber(cell.missingCount), '', '', '', '', '', '', '', '',
+          '', '', '', csvString(cell.mode),
+        ].join(','));
+        continue;
+      }
+      for (const level of cell.levels) {
+        lines.push([
+          'discrete', csvString(cell.variableKey), csvString(meta.groupId), csvString(meta.kind), csvString(meta.level),
+          'false', csvNumber(cell.n), csvNumber(cell.missingCount), '', '', '', '', '', '', '', '',
+          csvString(level.level), String(level.count), String(level.proportion), csvString(cell.mode),
+        ].join(','));
+      }
+    }
+  }
+
+  // 엑셀 한글 호환 — UTF-8 BOM.
+  return '﻿' + lines.join('\r\n') + '\r\n';
+}
+
 export async function handlePostExport(pool: Pool, req: Request, res: Response): Promise<void> {
   const parsed = ExportAggregateRequestSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -425,12 +505,16 @@ export async function handlePostExport(pool: Pool, req: Request, res: Response):
   }
   // PR4-A2 — 회귀 결과는 전용 CSV 빌더로 분기한다(pointDiagnostics는 절대 넣지
   // 않음 — buildRegressionCsv 주석 참고). PR4-B2 — 예측도 전용 빌더(계수 제외 —
-  // buildPredictionCsv 주석 참고).
+  // buildPredictionCsv 주석 참고). Table1 — descriptive와 descriptiveStratified는
+  // manifest.analysisMode가 둘 다 'descriptive'라 모드만으로 구분할 수 없다
+  // (계획서 §9 경고) — resultParsed.data.descriptiveStratified 존재 여부로 분기한다.
   const csv = manifestParsed.data.analysisMode === 'regression'
     ? buildRegressionCsv(manifestParsed.data, resultParsed.data)
     : manifestParsed.data.analysisMode === 'prediction'
       ? buildPredictionCsv(manifestParsed.data, resultParsed.data)
-      : buildCsv(manifestParsed.data, resultParsed.data);
+      : resultParsed.data.descriptiveStratified
+        ? buildDescriptiveStratifiedCsv(manifestParsed.data, resultParsed.data.descriptiveStratified)
+        : buildCsv(manifestParsed.data, resultParsed.data);
 
   // §7.4 원칙을 aggregate 등급에도 적용 — 감사 INSERT가 실패하면 CSV는 한 바이트도 안 나간다.
   await writeAuditLogStrict(pool, {

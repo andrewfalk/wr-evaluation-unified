@@ -29,9 +29,11 @@ import '../charts/charts.css';
 // PR4-B2 — 예측도 회귀와 같은 이유로 정렬하지 않는다(predictor 순서가 계수표
 // 행 순서다) — outcomeKey·eventLevel도 조건 키에 포함한다(계획서 §6단계
 // "buildConditionKey는 순서를 보존하고 outcome·eventLevel을 포함한다").
+// Table1 — stratifyByKey도 조건 키에 포함한다. 빠뜨리면 그룹 변수만 바꿨을 때
+// preview가 재실행되지 않는다(위 outcomeKey/grain이 겪은 것과 동일한 함정).
 function buildConditionKey(
   grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters,
-  outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel,
+  outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, stratifyByKey,
 ) {
   return JSON.stringify({
     grain,
@@ -47,6 +49,7 @@ function buildConditionKey(
     interactionTerms: analysisMode === 'regression' ? interactionTerms : [],
     splineKeys: analysisMode === 'regression' ? splineKeys : [],
     eventLevel: analysisMode === 'regression' || analysisMode === 'prediction' ? (eventLevel || null) : null,
+    stratifyByKey: analysisMode === 'descriptive' ? (stratifyByKey ?? null) : null,
   });
 }
 
@@ -63,7 +66,7 @@ function predictionEffectiveVariableKeys(variableKeys, outcomeKey, catalogByKey)
 
 function buildRecipe(
   grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters,
-  outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey,
+  outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey, stratifyByKey,
 ) {
   return {
     grain,
@@ -97,6 +100,12 @@ function buildRecipe(
     ...(analysisMode === 'prediction' && outcomeKey && eventLevel ? {
       prediction: { outcomeKey, eventLevel },
     } : {}),
+    // Table1 — stratifyByKey가 선택돼 있을 때만 descriptive 서브객체를 만든다(서버
+    // zod가 다른 모드에 이 필드가 붙는 것을 거부하므로 analysisMode==='descriptive'
+    // 로 한정).
+    ...(analysisMode === 'descriptive' && stratifyByKey ? {
+      descriptive: { stratifyByKey },
+    } : {}),
   };
 }
 
@@ -105,7 +114,7 @@ function buildRecipe(
 // 자체가 안 나가 availableMethods를 받아올 수 없다(1차 초안의 순환의존 버그가
 // 클라이언트에서 재발했던 지점, 계획서 §"이슈1"). method 실행 가능 여부는 오직
 // canExecute(실행 버튼)에서만 본다.
-function isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters, outcomeKey, eventLevel) {
+function isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters, outcomeKey, eventLevel, stratifyByKey) {
   if (analysisMode === 'bivariate') {
     if (variableKeys.length !== 2 || variableKeys[0] === variableKeys[1]) return false;
   } else if (analysisMode === 'correlation_matrix') {
@@ -127,7 +136,13 @@ function isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogBy
   } else if (variableKeys.length === 0) {
     return false;
   }
-  const neededKeys = Array.from(new Set([...variableKeys, ...appliedFilters.map((f) => f.key)]));
+  const neededKeys = Array.from(new Set([
+    ...variableKeys,
+    ...appliedFilters.map((f) => f.key),
+    // Table1 — stratifyByKey에 산식 선택이 필요하면(예: 여러 정책을 지원하는
+    // 변수를 그룹 축으로 쓸 때) 이것도 골라야 실행 가능하다고 판정한다.
+    ...(analysisMode === 'descriptive' && stratifyByKey ? [stratifyByKey] : []),
+  ]));
   const seenFamilies = new Set();
   for (const key of neededKeys) {
     const v = catalogByKey.get(key);
@@ -232,6 +247,8 @@ export function StatisticsWorkbench({
   const [interactionTerms, setInteractionTerms] = useState([]);
   const [splineKeys, setSplineKeys] = useState([]);
   const [eventLevel, setEventLevel] = useState('');
+  // Table1 — descriptive 전용 그룹 변수 선택 상태(§3-대). variableKeys와 별개 축.
+  const [stratifyByKey, setStratifyByKey] = useState(null);
 
   // PR0-B3 Part A — grain을 바꾸면 이전 grain에서 고른 변수·필터·method가 새 grain에는
   // 안 맞을 수 있어 전부 초기화한다(후보 목록을 grain으로 거르는 것과는 별개 — 후보를
@@ -251,6 +268,7 @@ export function StatisticsWorkbench({
     setInteractionTerms([]);
     setSplineKeys([]);
     setEventLevel('');
+    setStratifyByKey(null);
   }
 
   function toggleVariable(key) {
@@ -275,6 +293,9 @@ export function StatisticsWorkbench({
     // 해제된 변수가 categorical outcome이었다면 eventLevel도 그 변수의 레벨 값이므로
     // 함께 비운다(handleOutcomeKeyChange와 동일 원칙 — 리뷰 지적).
     setEventLevel((prev) => (key === outcomeKey ? '' : prev));
+    // Table1 — 토글된 키가 현재 stratifyByKey와 같을 때만 해제한다(무조건 초기화하면
+    // 표에 변수 하나만 추가해도 담당의 선택이 사라지는 버그가 된다 — 1차 리뷰 지적).
+    setStratifyByKey((prev) => (prev === key ? null : prev));
   }
 
   function handleAnalysisModeChange(nextMode) {
@@ -297,6 +318,7 @@ export function StatisticsWorkbench({
     setInteractionTerms([]);
     setSplineKeys([]);
     setEventLevel('');
+    setStratifyByKey(null);
     // PR4-B2 — 계획서 §6단계 "purpose 강제·복귀": analysisMode==='prediction' ⇔
     // analysisPurpose==='prediction'(서버 PURPOSE_MODE_MISMATCH, shared/contracts/
     // stats.ts). 예측으로 들어가면 목적을 강제로 맞추고, 예측에서 나가면 목적을
@@ -332,7 +354,7 @@ export function StatisticsWorkbench({
   // ---- preview: 조건-key(무엇을 위한 결과인가) + 요청세대(그 요청 인스턴스가 최신인가) ----
   const currentConditionKey = buildConditionKey(
     grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters,
-    outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel,
+    outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, stratifyByKey,
   );
   const [previewState, setPreviewState] = useState({ key: null, status: 'idle', result: null, error: null });
   const previewGenRef = useRef(0);
@@ -340,7 +362,7 @@ export function StatisticsWorkbench({
   useEffect(() => {
     const key = currentConditionKey;
     const gen = ++previewGenRef.current;
-    if (!isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters, outcomeKey, eventLevel)) {
+    if (!isRecipeComplete(analysisMode, variableKeys, formulaPolicies, catalogByKey, appliedFilters, outcomeKey, eventLevel, stratifyByKey)) {
       setPreviewState({ key, status: 'idle', result: null, error: null });
       return undefined;
     }
@@ -351,7 +373,7 @@ export function StatisticsWorkbench({
         // PR3-A — preview는 requestedMethod를 참고만 하고 유효성을 검사하지 않는다
         // (서버가 관대함, 계획서 §파이프라인 "preview는 관대하다") — method 미선택
         // 상태에서도 이 호출은 정상적으로 나가야 availableMethods를 받아올 수 있다.
-        const recipe = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey);
+        const recipe = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey, stratifyByKey);
         const res = await previewStatsAnalysis(recipe, session, { signal: controller.signal });
         if (gen !== previewGenRef.current) return;
         setPreviewState((prev) => (prev.key === key ? { key, status: 'ready', result: res, error: null } : prev));
@@ -435,7 +457,7 @@ export function StatisticsWorkbench({
   async function handleRunAnalyze() {
     if (!canExecute || analyzeInFlightRef.current) return;
     analyzeInFlightRef.current = true;
-    const recipeAtSubmit = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey);
+    const recipeAtSubmit = buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey, stratifyByKey);
     setIsAnalyzing(true);
     setAnalyzeError(null);
     try {
@@ -489,7 +511,7 @@ export function StatisticsWorkbench({
   }, [runPolling.status]);
 
   const recipeChanged = committedRecipe
-    ? JSON.stringify(buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey)) !== JSON.stringify(committedRecipe)
+    ? JSON.stringify(buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey, stratifyByKey)) !== JSON.stringify(committedRecipe)
     : false;
 
   // ---- export ----
@@ -584,6 +606,8 @@ export function StatisticsWorkbench({
             onSplineKeysChange={setSplineKeys}
             eventLevel={eventLevel}
             onEventLevelChange={setEventLevel}
+            stratifyByKey={stratifyByKey}
+            onStratifyByKeyChange={setStratifyByKey}
             analysisPurpose={analysisPurpose}
             onAnalysisPurposeChange={setAnalysisPurpose}
             formulaPolicies={formulaPolicies}
