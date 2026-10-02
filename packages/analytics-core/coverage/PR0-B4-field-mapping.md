@@ -354,6 +354,21 @@ temporal 4개는 병합 결과(`temporalSequence ?? temporalRelation`) 기준 **
 | `sander` | `wrist.jobDiagnosis.bk2103VibrationToolType.sander` |
 | `other` | `wrist.jobDiagnosis.bk2103VibrationToolType.other` |
 
+## 8. 어깨·경추 case grain 합계 (사용자 요청 2026-10-02, Slice 8)
+
+원본 입력값을 새로 노출하는 것이 아니라 이미 노출된 job grain 원본(어깨 `shoulder.job.*`)과 경추 작업 필드를 **직업 간 단순합**으로 case grain에 롤업한 파생 변수다. 전부 `grain: case`, `provenance: derived`, `prediction` predictor 허용(`PREDICTION_REVIEWED_DERIVED_PREDICTORS` 등록), `formula_audit` 불허. disease grain은 case→disease broadcast(`isGrainCompatible`)로 자동 제공된다.
+
+| 목표 카탈로그 키 | 산식 | 단위 | 완료 |
+|---|---|---|---|
+| `shoulder.case.sumOverheadHours` | Σ_job `jobExtras[].overheadHours` | 시간 | 예 |
+| `shoulder.case.sumRepetitiveMediumHours` | Σ_job `repetitiveMediumHours` | 시간 | 예 |
+| `shoulder.case.sumRepetitiveFastHours` | Σ_job `repetitiveFastHours` | 시간 | 예 |
+| `shoulder.case.sumHeavyLoadHoursPerDay` | Σ_job (`heavyLoadCount` × `heavyLoadSeconds` ÷ 3600) — 직업별 곱을 먼저 계산 | 시간/일 | 예 |
+| `shoulder.case.sumVibrationHours` | Σ_job `vibrationHours` | 시간 | 예 |
+| `cervical.case.totalNonNeutralHoursPerDay` | Σ_job Σ_task `neck_nonneutral_hours_per_day` (현재 직업에 연결되고 `awkward_static_neck_load`가 선택된 작업만) | 시간/일 | 예 |
+
+기존 `cervical.case.maxJobCumulativeKgHours`는 키를 유지한 채 값이 직업 중 최댓값 → **전 직업 합계**로 바뀌었고(`formula_audit` 유지, `prediction` 추가), 손상 입력은 `value+invalid`가 아니라 결측(`not_entered`+`invalid`)으로 반환한다.
+
 ## 요약 (갱신)
 
 - **기존유지(완료)**: §0의 카탈로그 키 전부(5차 개정 이후 19개 — task/vibration_interval 4종 삭제, bmi 1종 추가) — 원본 raw 필드 기준으로는 klgRight/Left·ellmanRight/Left·confirmedRight/Left·confirmedCode/Name(파생 boolean만)·verticalDistribution·concomitantSpondylosis·jobName(job)·knee/shoulder/elbow/wrist/cervical/spine 각 대표 파생변수 자체

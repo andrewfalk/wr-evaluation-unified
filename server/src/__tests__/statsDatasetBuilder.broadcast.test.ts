@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { buildDataset } from '../statsDatasetBuilder';
 import { buildStatsEngineRequest } from '../statsDescriptiveSuppression';
 import { getIntegratedCatalog } from '../statsCatalog';
+import { computePredictionDataStages } from '../statsPredictionCohort';
 import { MINIMUM_COHORT } from '../statsPolicy';
 import type { SnapshotRow } from '../statsSnapshot';
 import type { StatsAnalysisRecipe } from '@wr/contracts';
@@ -264,5 +265,182 @@ describe('buildRepeatedGrainDataset — 공통변수 브로드캐스트(case →
     const longestTenureYearsResult = result.rows[0].values['job.rollup.longestTenureYears'];
     expect(longestTenureYearsResult.missing).toBeNull();
     expect(longestTenureYearsResult.value).toBeCloseTo(10, 1);
+  });
+});
+
+// 어깨·경추 case grain 합계(2026-10-02) — 신규 6개 변수는 isGrainCompatible의 범용 broadcast 규칙으로
+// job/disease grain에서도 선택된다. 별도 per-variable 코드 없이도 value뿐 아니라 missing·
+// qualityFlags까지(특히 손상값 결측 not_entered + invalid) 모든 하위 행에 그대로 복제되는지 고정한다.
+function moduleSnapshotRow(
+  id: string,
+  personId: string,
+  data: {
+    jobs: Array<Record<string, unknown>>;
+    diagnoses?: Array<Record<string, unknown>>;
+    jobExtras?: unknown[];
+    tasks?: unknown[];
+    gender?: string;
+  },
+): SnapshotRow {
+  return {
+    id,
+    patientPersonId: personId,
+    assignedDoctorUserId: null,
+    createdAt: new Date('2024-01-01T00:00:00.000Z'),
+    payload: {
+      data: {
+        shared: { jobs: data.jobs, diagnoses: data.diagnoses ?? [], gender: data.gender },
+        modules: { shoulder: { jobExtras: data.jobExtras ?? [] }, cervical: { tasks: data.tasks ?? [] } },
+        activeModules: ['shoulder', 'cervical'],
+      },
+    },
+  };
+}
+
+const CASE_SUM_KEYS = [
+  'shoulder.case.sumOverheadHours',
+  'shoulder.case.sumRepetitiveMediumHours',
+  'shoulder.case.sumRepetitiveFastHours',
+  'shoulder.case.sumHeavyLoadHoursPerDay',
+  'shoulder.case.sumVibrationHours',
+  'cervical.case.totalNonNeutralHoursPerDay',
+  'cervical.case.maxJobCumulativeKgHours',
+] as const;
+
+const SHOULDER_DX = { id: 'dx-1', code: 'M75.1', name: '회전근개 병변', side: 'both' };
+const AWKWARD_TASK = {
+  id: 'task-a',
+  sharedJobId: 'job-1',
+  name: '모니터 작업',
+  exposure_types: ['awkward_static_neck_load'],
+  neck_nonneutral_hours_per_day: '2',
+  combined_flexion_rotation_posture: 'yes',
+  precision_work: 'no',
+};
+
+describe('어깨·경추 case 합계 변수의 job/disease broadcast', () => {
+  it('disease grain: side=both 진단 2행 모두에 정상 값이 같은 value·missing·qualityFlags로 복제된다', () => {
+    const rows = [
+      moduleSnapshotRow('case-1', 'person-1', {
+        jobs: [JOB_A],
+        diagnoses: [SHOULDER_DX],
+        jobExtras: [{ sharedJobId: 'job-1', overheadHours: '2', heavyLoadCount: '10', heavyLoadSeconds: '360' }],
+        tasks: [AWKWARD_TASK],
+      }),
+    ];
+    const result = buildDataset(
+      rows,
+      recipe({ grain: 'disease', variableKeys: [...CASE_SUM_KEYS] }),
+      RECIPE_DIGEST,
+      CATALOG_BY_KEY,
+    );
+    expect(result.observationCount).toBe(2); // side=both explode — 행 모집단은 진단 기준이며 변수 선택과 무관
+    for (const row of result.rows) {
+      expect(row.values['shoulder.case.sumOverheadHours']).toEqual({ value: 2, missing: null, qualityFlags: [] });
+      expect(row.values['shoulder.case.sumHeavyLoadHoursPerDay']).toEqual({ value: 1, missing: null, qualityFlags: [] });
+      expect(row.values['shoulder.case.sumVibrationHours']).toEqual({ value: null, missing: 'not_entered', qualityFlags: [] });
+      expect(row.values['cervical.case.totalNonNeutralHoursPerDay']).toEqual({ value: 2, missing: null, qualityFlags: [] });
+    }
+  });
+
+  it('disease grain: 손상값 결측(not_entered + invalid)이 value 없이 모든 행에 그대로 복제된다', () => {
+    const rows = [
+      moduleSnapshotRow('case-1', 'person-1', {
+        jobs: [JOB_A],
+        diagnoses: [SHOULDER_DX],
+        jobExtras: [{ sharedJobId: 'job-1', overheadHours: '2h' }],
+        tasks: [{ ...AWKWARD_TASK, exposure_types: ['typo'] }],
+      }),
+    ];
+    const result = buildDataset(
+      rows,
+      recipe({
+        grain: 'disease',
+        variableKeys: ['shoulder.case.sumOverheadHours', 'cervical.case.totalNonNeutralHoursPerDay', 'cervical.case.maxJobCumulativeKgHours'],
+      }),
+      RECIPE_DIGEST,
+      CATALOG_BY_KEY,
+    );
+    expect(result.observationCount).toBe(2);
+    const corrupted = { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+    for (const row of result.rows) {
+      expect(row.values['shoulder.case.sumOverheadHours']).toEqual(corrupted);
+      expect(row.values['cervical.case.totalNonNeutralHoursPerDay']).toEqual(corrupted);
+      expect(row.values['cervical.case.maxJobCumulativeKgHours']).toEqual(corrupted);
+    }
+  });
+
+  it('job grain: job이 2개인 case에서 합계 값이 2행에 복제되고 행 수는 변수 선택과 무관하다', () => {
+    const rows = [
+      moduleSnapshotRow('case-1', 'person-1', {
+        jobs: [JOB_A, JOB_B],
+        jobExtras: [
+          { sharedJobId: 'job-1', overheadHours: '2' },
+          { sharedJobId: 'job-2', overheadHours: '3' },
+        ],
+      }),
+    ];
+    const result = buildDataset(
+      rows,
+      recipe({ variableKeys: ['job.identity.jobNameNormalized', 'shoulder.case.sumOverheadHours'] }),
+      RECIPE_DIGEST,
+      CATALOG_BY_KEY,
+    );
+    expect(result.observationCount).toBe(2);
+    for (const row of result.rows) {
+      expect(row.values['shoulder.case.sumOverheadHours']).toEqual({ value: 5, missing: null, qualityFlags: [] });
+    }
+  });
+
+  it('신규 6개는 브로드캐스트 안전 변수(non_sensitive·continuous)라 job/disease에서 선택 가능하다', () => {
+    for (const key of CASE_SUM_KEYS) {
+      const variable = CATALOG_BY_KEY.get(key)!;
+      expect(variable.grain, key).toBe('case');
+      expect(variable.type, key).toBe('continuous');
+      expect(variable.sensitivity, key).toBe('non_sensitive');
+      expect(variable.predictionRole, key).toBe('predictor');
+    }
+  });
+});
+
+// 예측 코호트는 missing만 보고 qualityFlags는 보지 않는다(statsPredictionCohort.ts S2 필터).
+// 손상값이 value 0 + invalid 플래그로 나갔다면 분석에 포함됐을 것이다 — 결측으로 반환하므로
+// S2에서 제외된다. (outcome은 성별로 대신한다: 이 테스트의 관심사는 predictor 쪽 제외 경로다.)
+describe('어깨·경추 case 합계 변수 — 예측 코호트 S2 제외', () => {
+  it('손상 입력 case는 predictor 결측으로 S2에서 제외되고 정상 case만 남는다', () => {
+    const rows = [
+      moduleSnapshotRow('case-ok', 'person-1', {
+        jobs: [JOB_A],
+        diagnoses: [SHOULDER_DX],
+        gender: 'male',
+        jobExtras: [{ sharedJobId: 'job-1', overheadHours: '2' }],
+        tasks: [AWKWARD_TASK],
+      }),
+      moduleSnapshotRow('case-corrupt-shoulder', 'person-2', {
+        jobs: [JOB_A],
+        diagnoses: [SHOULDER_DX],
+        gender: 'female',
+        jobExtras: [{ sharedJobId: 'job-1', overheadHours: '2h' }],
+        tasks: [AWKWARD_TASK],
+      }),
+      moduleSnapshotRow('case-corrupt-cervical', 'person-3', {
+        jobs: [JOB_A],
+        diagnoses: [SHOULDER_DX],
+        gender: 'male',
+        jobExtras: [{ sharedJobId: 'job-1', overheadHours: '2' }],
+        tasks: [{ ...AWKWARD_TASK, neck_nonneutral_hours_per_day: '-2' }],
+      }),
+    ];
+    const predictorKeys = ['shoulder.case.sumOverheadHours', 'cervical.case.totalNonNeutralHoursPerDay'];
+    const dataset = buildDataset(
+      rows,
+      recipe({ grain: 'case', variableKeys: ['patient.identity.gender', ...predictorKeys] }),
+      RECIPE_DIGEST,
+      CATALOG_BY_KEY,
+      { cohortDigest: 'cohort-digest-1' },
+    );
+    const stages = computePredictionDataStages(dataset.rows, 'patient.identity.gender', predictorKeys);
+    expect(stages.s1Rows.map((r) => r.caseId).sort()).toEqual(['case-corrupt-cervical', 'case-corrupt-shoulder', 'case-ok']);
+    expect(stages.s2Rows.map((r) => r.caseId)).toEqual(['case-ok']);
   });
 });

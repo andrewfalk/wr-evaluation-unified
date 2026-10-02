@@ -13,6 +13,11 @@ import {
   extractShoulderJobHeavyLoadCount,
   extractShoulderJobHeavyLoadSeconds,
   extractShoulderJobVibrationHours,
+  extractShoulderCaseSumOverheadHours,
+  extractShoulderCaseSumRepetitiveMediumHours,
+  extractShoulderCaseSumRepetitiveFastHours,
+  extractShoulderCaseSumHeavyLoadHoursPerDay,
+  extractShoulderCaseSumVibrationHours,
 } from './extractors';
 import { isShoulderAssessmentComplete } from './derived';
 
@@ -28,6 +33,11 @@ registerAnalyticsModule({
     'shoulder.job.heavyLoadCount': extractShoulderJobHeavyLoadCount,
     'shoulder.job.heavyLoadSeconds': extractShoulderJobHeavyLoadSeconds,
     'shoulder.job.vibrationHours': extractShoulderJobVibrationHours,
+    'shoulder.case.sumOverheadHours': extractShoulderCaseSumOverheadHours,
+    'shoulder.case.sumRepetitiveMediumHours': extractShoulderCaseSumRepetitiveMediumHours,
+    'shoulder.case.sumRepetitiveFastHours': extractShoulderCaseSumRepetitiveFastHours,
+    'shoulder.case.sumHeavyLoadHoursPerDay': extractShoulderCaseSumHeavyLoadHoursPerDay,
+    'shoulder.case.sumVibrationHours': extractShoulderCaseSumVibrationHours,
   },
   isComplete: isShoulderAssessmentComplete,
 });
