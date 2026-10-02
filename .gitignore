@@ -22,6 +22,10 @@ Thumbs.db
 target_webpage*
 업무관련성 평가 진료기록분석지.htm
 .code-review-graph/graph.db
+.code-review-graph/graph.db-shm
+.code-review-graph/graph.db-wal
+# 로컬 UI 시안·디자인 handoff 번들(정본 참조용, 레포에 안 올림)
+docs/ui-mockups/
 .claude/
 electron/build-target.json
 *.crt
