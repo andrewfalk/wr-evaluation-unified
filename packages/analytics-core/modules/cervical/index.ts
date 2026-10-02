@@ -6,7 +6,7 @@ export * from './metadata';
 
 import { registerAnalyticsModule } from '../../analyticsRegistry';
 import { CERVICAL_METADATA } from './metadata';
-import { extractCervicalCaseMaxJobCumulativeKgHours } from './extractors';
+import { extractCervicalCaseMaxJobCumulativeKgHours, extractCervicalCaseTotalNonNeutralHoursPerDay } from './extractors';
 import { isCervicalAssessmentComplete } from './derived';
 
 registerAnalyticsModule({
@@ -14,6 +14,7 @@ registerAnalyticsModule({
   metadata: CERVICAL_METADATA,
   extractors: {
     'cervical.case.maxJobCumulativeKgHours': extractCervicalCaseMaxJobCumulativeKgHours,
+    'cervical.case.totalNonNeutralHoursPerDay': extractCervicalCaseTotalNonNeutralHoursPerDay,
   },
   isComplete: isCervicalAssessmentComplete,
 });

@@ -263,7 +263,17 @@ export function computeRepeatedVariableValue(
 // 사용자 요청(2026-09-26) — knee.relatedness.max의 계산값을 최댓값에서 평균값(min~max
 // 구간의 중점)으로 변경(extractors.ts 주석 참고). 키·개수는 그대로지만 기존 등록 키의
 // 출력값이 바뀌므로 캐시된 실행 다이제스트 무효화를 위해 버전을 올린다.
-export const CATALOG_VERSION = 'v25-knee-relatedness-average';
+//
+// 사용자 요청(2026-10-02) — 어깨·경추 case grain 합계 변수. 신규 6개(shoulder.case.sum* 5개 +
+// cervical.case.totalNonNeutralHoursPerDay)를 case grain에 추가하고(카탈로그 79개: case 46/job 19/
+// disease 14 + 서버 전용 meta 2개), 기존 cervical.case.maxJobCumulativeKgHours의 값을 직업 중
+// 최댓값에서 전 직업 합계로 바꾸고 손상 입력을 value+invalid가 아니라 결측(not_entered+invalid)으로
+// 반환하도록 변경했다. 신규 6개 + 기존 경추 1개 = 7개를 prediction predictor로 허용
+// (PREDICTION_REVIEWED_DERIVED_PREDICTORS 등록). disease grain은 case→disease broadcast
+// (isGrainCompatible)로 자동 제공된다. 주의: 레시피에는 카탈로그 버전 필드가 없어 저장된
+// 레시피가 새 의미로 재실행된다(특히 최댓값 기준으로 저장된 필터 임계값). 이 버전은 실행 다이제스트
+// (캐시 키)만 바꾼다.
+export const CATALOG_VERSION = 'v26-case-sum-shoulder-cervical';
 
 // PR4-B2 — outcome 명세(계획서 §2단계). 서버 검증(statsRecipeValidation.ts)과 클라이언트
 // 선택지(RecipePanel.jsx, 카탈로그 DTO의 predictionOutcomeLevels/predictionEventLevels)가
@@ -294,4 +304,13 @@ export const PREDICTION_REVIEWED_DERIVED_PREDICTORS: ReadonlySet<string> = new S
   'diagnosis.rollup.hasShoulder',
   'diagnosis.rollup.hasSpine',
   'diagnosis.rollup.hasCervical',
+  // 어깨·경추 case grain 합계(2026-10-02). 평가자 판정의 근거 입력값이라 "판정 일관성 점검"
+  // 용도로만 허용한다(각 metadata.ts 주석 참고).
+  'shoulder.case.sumOverheadHours',
+  'shoulder.case.sumRepetitiveMediumHours',
+  'shoulder.case.sumRepetitiveFastHours',
+  'shoulder.case.sumHeavyLoadHoursPerDay',
+  'shoulder.case.sumVibrationHours',
+  'cervical.case.maxJobCumulativeKgHours',
+  'cervical.case.totalNonNeutralHoursPerDay',
 ]);

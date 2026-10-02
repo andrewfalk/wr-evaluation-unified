@@ -4,6 +4,11 @@ import {
   extractShoulderDiagnosisSideEllmanClass,
   extractShoulderJobOverheadHours,
   extractShoulderJobVibrationHours,
+  extractShoulderCaseSumOverheadHours,
+  extractShoulderCaseSumRepetitiveMediumHours,
+  extractShoulderCaseSumRepetitiveFastHours,
+  extractShoulderCaseSumHeavyLoadHoursPerDay,
+  extractShoulderCaseSumVibrationHours,
 } from '../../../modules/shoulder/extractors';
 import { deterministicMigrate } from '../../../migration/deterministicMigrate';
 
@@ -328,5 +333,155 @@ describe('extractShoulderJobOverheadHours/VibrationHours — job grain(jobExtras
     expect(
       extractShoulderJobOverheadHours(migrate(baseCase({ jobExtras: [{ sharedJobId: 'job-1', overheadHours: [null] }] }))),
     ).toEqual([{ entityKey: ['job-1'], value: null, missing: 'not_entered', qualityFlags: ['invalid'] }]);
+  });
+});
+
+// ── case grain 합계 5종 — 직업력 단순합(job grain 원본을 직업 간 합산) ─────────────────────────
+describe('extractShoulderCaseSum* — case grain 합계', () => {
+  const TWO_JOBS = [
+    { id: 'job-1', startDate: '2010-01-01', endDate: '2015-01-01' },
+    { id: 'job-2', startDate: '2015-01-01', endDate: '2020-01-01' },
+  ];
+  const NOT_ENTERED_PLAIN = { value: null, missing: 'not_entered', qualityFlags: [] };
+  const NOT_ENTERED_INVALID = { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+
+  // 시간 4종(heavyLoad 제외) — 키·추출기·원본 필드명 대응.
+  const TIME_VARIABLES = [
+    ['sumOverheadHours', extractShoulderCaseSumOverheadHours, 'overheadHours'],
+    ['sumRepetitiveMediumHours', extractShoulderCaseSumRepetitiveMediumHours, 'repetitiveMediumHours'],
+    ['sumRepetitiveFastHours', extractShoulderCaseSumRepetitiveFastHours, 'repetitiveFastHours'],
+    ['sumVibrationHours', extractShoulderCaseSumVibrationHours, 'vibrationHours'],
+  ] as const;
+
+  const ALL_EXTRACTORS = [
+    extractShoulderCaseSumOverheadHours,
+    extractShoulderCaseSumRepetitiveMediumHours,
+    extractShoulderCaseSumRepetitiveFastHours,
+    extractShoulderCaseSumHeavyLoadHoursPerDay,
+    extractShoulderCaseSumVibrationHours,
+  ];
+
+  it.each(ALL_EXTRACTORS.map((fn) => [fn.name, fn] as const))('%s: 모듈 비활성/비객체는 structural_missing, 직업 없음은 not_entered', (_name, fn) => {
+    expect(fn(migrate(baseCase({ activeModules: [] })))).toEqual({ value: null, missing: 'structural_missing', qualityFlags: [] });
+    expect(fn(migrate(baseCase({ includeShoulderModule: false })))).toEqual({
+      value: null,
+      missing: 'structural_missing',
+      qualityFlags: [],
+    });
+    expect(fn(migrate(baseCase({ jobs: [] })))).toEqual(NOT_ENTERED_PLAIN);
+  });
+
+  it.each(TIME_VARIABLES)('%s: 직업 2개를 직접 합산하고, job grain 값의 합과 일치한다', (_key, fn, field) => {
+    const jobExtras = [
+      { sharedJobId: 'job-1', [field]: '2' },
+      { sharedJobId: 'job-2', [field]: 1.5 },
+    ];
+    const result = fn(migrate(baseCase({ jobs: TWO_JOBS, jobExtras })));
+    expect(result).toEqual({ value: 3.5, missing: null, qualityFlags: [] });
+
+    // job grain 원본 추출기 값의 직접 합과 같아야 한다.
+    const jobGrain: Record<string, (mr: ReturnType<typeof migrate>) => Array<{ value: number | null }>> = {
+      overheadHours: extractShoulderJobOverheadHours,
+      vibrationHours: extractShoulderJobVibrationHours,
+    };
+    if (jobGrain[field]) {
+      const perJob = jobGrain[field](migrate(baseCase({ jobs: TWO_JOBS, jobExtras })));
+      expect(perJob.reduce((s, r) => s + (r.value ?? 0), 0)).toBe(result.value);
+    }
+  });
+
+  it.each(TIME_VARIABLES)('%s: 전 직업 blank → 0이 아니라 not_entered', (_key, fn) => {
+    expect(fn(migrate(baseCase({ jobs: TWO_JOBS, jobExtras: [] })))).toEqual(NOT_ENTERED_PLAIN);
+    expect(fn(migrate(baseCase({ jobs: TWO_JOBS, jobExtras: [{ sharedJobId: 'job-1' }, { sharedJobId: 'job-2' }] })))).toEqual(
+      NOT_ENTERED_PLAIN,
+    );
+  });
+
+  it.each(TIME_VARIABLES)('%s: 일부 직업만 blank면 건너뛴 나머지의 합', (_key, fn, field) => {
+    const jobExtras = [{ sharedJobId: 'job-1', [field]: '4' }, { sharedJobId: 'job-2', [field]: '   ' }];
+    expect(fn(migrate(baseCase({ jobs: TWO_JOBS, jobExtras })))).toEqual({ value: 4, missing: null, qualityFlags: [] });
+  });
+
+  it.each(TIME_VARIABLES)('%s: 정상 + invalid 혼합 → 부분합 없이 not_entered + invalid', (_key, fn, field) => {
+    const jobExtras = [{ sharedJobId: 'job-1', [field]: '2' }, { sharedJobId: 'job-2', [field]: '3kg' }];
+    expect(fn(migrate(baseCase({ jobs: TWO_JOBS, jobExtras })))).toEqual(NOT_ENTERED_INVALID);
+  });
+
+  it.each(TIME_VARIABLES)('%s: 전부 invalid → not_entered + invalid', (_key, fn, field) => {
+    const jobExtras = [{ sharedJobId: 'job-1', [field]: 'abc' }, { sharedJobId: 'job-2', [field]: -1 }];
+    expect(fn(migrate(baseCase({ jobs: TWO_JOBS, jobExtras })))).toEqual(NOT_ENTERED_INVALID);
+  });
+
+  it.each(TIME_VARIABLES)('%s: 음수·배열·[null]은 blank가 아니라 invalid(강제변환으로 빈값 오인 금지)', (_key, fn, field) => {
+    for (const bad of [-2, [2], [], [null], {}, true]) {
+      const result = fn(migrate(baseCase({ jobExtras: [{ sharedJobId: 'job-1', [field]: bad }] })));
+      expect(result, `bad=${JSON.stringify(bad)}`).toEqual(NOT_ENTERED_INVALID);
+    }
+  });
+
+  it.each(TIME_VARIABLES)('%s: 합산 overflow(1e308 + 1e308)는 not_entered + invalid', (_key, fn, field) => {
+    const jobExtras = [{ sharedJobId: 'job-1', [field]: '1e308' }, { sharedJobId: 'job-2', [field]: '1e308' }];
+    expect(fn(migrate(baseCase({ jobs: TWO_JOBS, jobExtras })))).toEqual(NOT_ENTERED_INVALID);
+  });
+
+  it('jobs에 plain object가 아닌 원소가 섞여도 예외 없이 무시하고, 다른 직업의 extras는 합산하지 않는다', () => {
+    const jobExtras = [
+      { sharedJobId: 'job-1', overheadHours: 2 },
+      { sharedJobId: 'job-deleted', overheadHours: 100 }, // 현재 직업에 없는 레코드
+      null,
+    ];
+    const result = extractShoulderCaseSumOverheadHours(
+      migrate(baseCase({ jobs: [null, { id: 'job-1', startDate: '2015-01-01', endDate: '2020-01-01' }] as unknown[], jobExtras })),
+    );
+    expect(result).toEqual({ value: 2, missing: null, qualityFlags: [] });
+  });
+
+  describe('sumHeavyLoadHoursPerDay — 직업별 (횟수 × 초/회 ÷ 3600)을 먼저 계산한 뒤 합산', () => {
+    it('직업별 곱의 합이다(교차곱 방지) — 횟수 합 × 초 합과 다르다', () => {
+      const jobExtras = [
+        { sharedJobId: 'job-1', heavyLoadCount: '10', heavyLoadSeconds: '30' }, // 300초
+        { sharedJobId: 'job-2', heavyLoadCount: '20', heavyLoadSeconds: '60' }, // 1200초
+      ];
+      const result = extractShoulderCaseSumHeavyLoadHoursPerDay(migrate(baseCase({ jobs: TWO_JOBS, jobExtras })));
+      expect(result.missing).toBeNull();
+      expect(result.qualityFlags).toEqual([]);
+      expect(result.value).toBeCloseTo((10 * 30 + 20 * 60) / 3600, 10); // 0.41666…
+      const crossProduct = ((10 + 20) * (30 + 60)) / 3600; // 0.75 — 잘못된 방식
+      expect(result.value).not.toBeCloseTo(crossProduct, 3);
+    });
+
+    it('computeShoulderCalc의 직업별 중량물 일일시간과 같은 산식이다', () => {
+      const jobExtras = [{ sharedJobId: 'job-1', heavyLoadCount: 50, heavyLoadSeconds: 12 }];
+      const result = extractShoulderCaseSumHeavyLoadHoursPerDay(migrate(baseCase({ jobExtras })));
+      expect(result.value).toBeCloseTo(600 / 3600, 10);
+    });
+
+    it('한쪽만 blank면 그쪽을 0으로 보아 곱 0(= computeJobExposures의 ||0), 둘 다 blank면 건너뜀', () => {
+      const oneSide = [
+        { sharedJobId: 'job-1', heavyLoadCount: '10' }, // seconds blank → 0
+        { sharedJobId: 'job-2', heavyLoadCount: '20', heavyLoadSeconds: '60' },
+      ];
+      expect(extractShoulderCaseSumHeavyLoadHoursPerDay(migrate(baseCase({ jobs: TWO_JOBS, jobExtras: oneSide })))).toEqual({
+        value: 1200 / 3600,
+        missing: null,
+        qualityFlags: [],
+      });
+      expect(
+        extractShoulderCaseSumHeavyLoadHoursPerDay(migrate(baseCase({ jobs: TWO_JOBS, jobExtras: [{ sharedJobId: 'job-1' }] }))),
+      ).toEqual(NOT_ENTERED_PLAIN);
+    });
+
+    it('한쪽이 invalid면 다른 쪽이 정상이어도 해당 직업은 invalid → 전체 not_entered + invalid', () => {
+      const jobExtras = [
+        { sharedJobId: 'job-1', heavyLoadCount: '10', heavyLoadSeconds: '30' },
+        { sharedJobId: 'job-2', heavyLoadCount: '20', heavyLoadSeconds: '1분' },
+      ];
+      expect(extractShoulderCaseSumHeavyLoadHoursPerDay(migrate(baseCase({ jobs: TWO_JOBS, jobExtras })))).toEqual(NOT_ENTERED_INVALID);
+    });
+
+    it('곱 overflow(1e308 × 1e308)는 not_entered + invalid', () => {
+      const jobExtras = [{ sharedJobId: 'job-1', heavyLoadCount: '1e308', heavyLoadSeconds: '1e308' }];
+      expect(extractShoulderCaseSumHeavyLoadHoursPerDay(migrate(baseCase({ jobExtras })))).toEqual(NOT_ENTERED_INVALID);
+    });
   });
 });

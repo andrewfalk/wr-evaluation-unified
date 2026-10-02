@@ -9,6 +9,7 @@ import type { AnalysisPatient } from '../../migration/deterministicMigrate';
 import { enumerateDiseaseEntities, enumerateJobEntities } from '../../grainEntities';
 import { resolveDiagnosisModule, supportsEllmanClass } from '../../diagnosisMapping';
 import { SHOULDER_ELLMAN_ORDER } from './metadata';
+import { parseStrictNonNegative, type StrictNumeric } from '../../numericInput';
 
 function isBlank(x: unknown): boolean {
   return x === null || x === undefined || String(x).trim() === '';
@@ -170,27 +171,17 @@ function extractShoulderJobExtraField(
 
   return entities.map((entity) => {
     const extra = jobExtras.find((e) => e.sharedJobId === entity.source.id);
-    const raw = extra?.[field];
-    // isBlank(이 파일 다른 곳에서도 쓰임)는 String(x)로 감싸 [] · [null]도 빈 문자열로
-    // 만들어버려 typeof 검사보다 먼저 걸리면 손상 배열이 invalid 없이 조용히 not_entered로
-    // 빠진다(9차 검토 P2) — null·undefined·공백 문자열만 여기서 빈 값으로 본다.
-    if (raw === null || raw === undefined || (typeof raw === 'string' && raw.trim() === '')) {
+    // 파싱 규칙(blank/invalid/value 판정 순서)은 numericInput.ts에 있다 — 이 job grain 추출기와
+    // 아래 case grain 합계 추출기가 같은 규칙을 공유한다(8·9차 검토에서 확립된 규칙 그대로:
+    // null·undefined·공백만 blank, 비number/string·부분 숫자열·음수·비유한값은 invalid).
+    const parsed = parseStrictNonNegative(extra?.[field]);
+    if (parsed.kind === 'blank') {
       return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: entity.qualityFlags };
     }
-    // typeof 먼저(강제변환 우회 방지) — 실제 계산(computeJobExposures)은 parseFloat(x)||0을
-    // 쓰지만, 배열 등은 String() 강제변환으로 우연히 통과시키지 않는다(§리뷰 확립 원칙).
-    if (typeof raw !== 'number' && typeof raw !== 'string') {
+    if (parsed.kind === 'invalid') {
       return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: [...entity.qualityFlags, 'invalid'] };
     }
-    // parseFloat는 "12kg" 같은 숫자-접두 문자열도 12로 통과시키고 음수도 그대로 허용한다
-    // (8차 검토 P2) — Number()로 전체 문자열이 숫자인지 확인하고, 전부 시간·횟수·초 단위라
-    // 물리적으로 음수가 불가능하므로 0 이상만 허용한다(knee.job.weight/squatting의
-    // parseNonNegativeNumber와 동일 규칙).
-    const n = Number(String(raw).trim());
-    if (!Number.isFinite(n) || n < 0) {
-      return { entityKey: entity.entityKey, value: null, missing: 'not_entered', qualityFlags: [...entity.qualityFlags, 'invalid'] };
-    }
-    return { entityKey: entity.entityKey, value: n, missing: null, qualityFlags: entity.qualityFlags };
+    return { entityKey: entity.entityKey, value: parsed.value, missing: null, qualityFlags: entity.qualityFlags };
   });
 }
 
@@ -211,4 +202,102 @@ export function extractShoulderJobHeavyLoadSeconds(mr: MigrationResult<AnalysisP
 }
 export function extractShoulderJobVibrationHours(mr: MigrationResult<AnalysisPatient>) {
   return extractShoulderJobExtraField(mr, 'vibrationHours');
+}
+
+// ── case grain 합계 변수 5종 — 직업력 단순합(일일 입력값의 합계, 근속·근무일수 가중 없음).
+// job grain 원본 6종(위)을 직업 간에 합산한 것이다. 시간 4종은 직접 합, 중량물은
+// "직업별 (횟수 × 초/회 ÷ 3600)을 먼저 계산한 뒤" 합산한다(computeJobExposures와 동일 산식) —
+// 직업별 횟수 합 × 초 합을 곱하면 직업 간 교차곱이 섞여 틀린 값이 나온다.
+//
+// 결측 정책(예측 코호트가 missing만 보고 qualityFlags는 안 보므로 손상값은 value가 아니라
+// 결측으로 표현한다):
+//  · 모듈 비활성/비객체 → structural_missing, shared.jobs 없음 → not_entered
+//  · 전 직업 blank → not_entered (0이 아님)
+//  · 일부 직업만 blank → 그 직업은 "해당 노출 입력 없음"으로 보고 건너뛴 나머지의 합.
+//    jobExtras는 직업별 선택 입력이고 anyExceeded도 빈칸을 같은 방식으로 다룬다.
+//  · invalid가 하나라도 있으면(정상 직업이 섞여 있어도) not_entered + invalid — 부분합 비반환
+//  · 최종 합이 유한값이 아니면(합산·곱 overflow) not_entered + invalid
+type JobExtraParser = (extra: ShoulderJobExtras | undefined) => StrictNumeric;
+
+function extractShoulderCaseSum(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  parseJob: JobExtraParser,
+): ExtractedValue<number> {
+  const { payload } = migrationResult;
+
+  const activeModules = payload.data.activeModules ?? [];
+  const shoulderModule = (payload.data.modules as Record<string, unknown> | undefined)?.shoulder;
+  if (!activeModules.includes('shoulder') || !isPlainObject(shoulderModule)) {
+    const missing: MissingReason = 'structural_missing';
+    return { value: null, missing, qualityFlags: [] };
+  }
+
+  const shared = (payload.data.shared as Record<string, unknown>) ?? {};
+  const rawJobs = Array.isArray(shared.jobs) ? shared.jobs : [];
+  const jobs = rawJobs.filter(isPlainObject);
+  if (jobs.length === 0) {
+    return { value: null, missing: 'not_entered', qualityFlags: [] };
+  }
+
+  const rawJobExtras = Array.isArray((shoulderModule as { jobExtras?: unknown }).jobExtras)
+    ? ((shoulderModule as { jobExtras?: unknown[] }).jobExtras as unknown[])
+    : [];
+  const jobExtras = rawJobExtras.filter(isPlainObject) as unknown as ShoulderJobExtras[];
+
+  let sum = 0;
+  let enteredJobCount = 0;
+  let hasInvalid = false;
+  for (const job of jobs) {
+    const parsed = parseJob(jobExtras.find((e) => e.sharedJobId === job.id));
+    if (parsed.kind === 'blank') continue;
+    if (parsed.kind === 'invalid') {
+      hasInvalid = true;
+      continue;
+    }
+    enteredJobCount += 1;
+    sum += parsed.value;
+  }
+
+  if (hasInvalid) {
+    return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  }
+  if (enteredJobCount === 0) {
+    return { value: null, missing: 'not_entered', qualityFlags: [] };
+  }
+  if (!Number.isFinite(sum)) {
+    return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  }
+  return { value: sum, missing: null, qualityFlags: [] };
+}
+
+function singleFieldParser(field: keyof ShoulderJobExtras): JobExtraParser {
+  return (extra) => parseStrictNonNegative(extra?.[field]);
+}
+
+// 중량물: 횟수·초/회 각각 파싱 — 하나라도 invalid → invalid, 둘 다 blank → blank, 한쪽만
+// blank면 그쪽을 0으로 본다(computeJobExposures의 parseFloat(x)||0과 동일, 곱 0).
+const heavyLoadHoursPerDayParser: JobExtraParser = (extra) => {
+  const count = parseStrictNonNegative(extra?.heavyLoadCount);
+  const seconds = parseStrictNonNegative(extra?.heavyLoadSeconds);
+  if (count.kind === 'invalid' || seconds.kind === 'invalid') return { kind: 'invalid' };
+  if (count.kind === 'blank' && seconds.kind === 'blank') return { kind: 'blank' };
+  const c = count.kind === 'value' ? count.value : 0;
+  const s = seconds.kind === 'value' ? seconds.value : 0;
+  return { kind: 'value', value: (c * s) / 3600 };
+};
+
+export function extractShoulderCaseSumOverheadHours(mr: MigrationResult<AnalysisPatient>) {
+  return extractShoulderCaseSum(mr, singleFieldParser('overheadHours'));
+}
+export function extractShoulderCaseSumRepetitiveMediumHours(mr: MigrationResult<AnalysisPatient>) {
+  return extractShoulderCaseSum(mr, singleFieldParser('repetitiveMediumHours'));
+}
+export function extractShoulderCaseSumRepetitiveFastHours(mr: MigrationResult<AnalysisPatient>) {
+  return extractShoulderCaseSum(mr, singleFieldParser('repetitiveFastHours'));
+}
+export function extractShoulderCaseSumHeavyLoadHoursPerDay(mr: MigrationResult<AnalysisPatient>) {
+  return extractShoulderCaseSum(mr, heavyLoadHoursPerDayParser);
+}
+export function extractShoulderCaseSumVibrationHours(mr: MigrationResult<AnalysisPatient>) {
+  return extractShoulderCaseSum(mr, singleFieldParser('vibrationHours'));
 }

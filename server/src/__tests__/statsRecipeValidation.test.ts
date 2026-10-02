@@ -244,11 +244,39 @@ describe('validateRecipe — 카탈로그 키 존재', () => {
   });
 });
 
-describe('validateRecipe — 분석 목적(§실측: 7개 변수 전부 prediction 불허)', () => {
-  it.each(CATALOG_KEYS)('%s는 analysisPurpose=prediction을 항상 거부한다', (key) => {
+// 2026-10-02 — 경추 누적 총부하량(기존 formula_audit 유지)이 prediction predictor로 허용됐다.
+// 나머지 공식점수 6개는 predictionRole 자체가 없어 여전히 prediction 불허다.
+const PREDICTION_ALLOWED_OFFICIAL_KEYS = ['cervical.case.maxJobCumulativeKgHours'];
+const PREDICTION_DENIED_OFFICIAL_KEYS = CATALOG_KEYS.filter((key) => !PREDICTION_ALLOWED_OFFICIAL_KEYS.includes(key));
+
+// 어깨·경추 case grain 합계 신규 6개 — association·prediction만 허용, formula_audit는 불허.
+const CASE_SUM_KEYS = [
+  'shoulder.case.sumOverheadHours',
+  'shoulder.case.sumRepetitiveMediumHours',
+  'shoulder.case.sumRepetitiveFastHours',
+  'shoulder.case.sumHeavyLoadHoursPerDay',
+  'shoulder.case.sumVibrationHours',
+  'cervical.case.totalNonNeutralHoursPerDay',
+];
+
+describe('validateRecipe — 분석 목적(§실측: 공식점수 7개 중 경추 누적부하량만 prediction 허용)', () => {
+  it.each(PREDICTION_DENIED_OFFICIAL_KEYS)('%s는 analysisPurpose=prediction을 항상 거부한다', (key) => {
     const result = validateRecipe(baseRecipe({ variableKeys: [key], analysisPurpose: 'prediction' }), 'analyze');
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.errors.some((e) => e.code === 'PURPOSE_NOT_ALLOWED')).toBe(true);
+  });
+
+  it('경추 누적 총부하량은 association·formula_audit(기존 유지)·prediction 목적 변수 검사를 모두 통과한다', () => {
+    for (const purpose of ['association', 'formula_audit', 'prediction'] as const) {
+      const result = validateRecipe(
+        baseRecipe({ variableKeys: ['cervical.case.maxJobCumulativeKgHours'], analysisPurpose: purpose }),
+        'analyze',
+      );
+      // prediction은 목적 허용 검사만 확인한다(전체 예측 레시피 구성은 아래 예측 describe).
+      if (!result.valid) {
+        expect(result.errors.some((e) => e.code === 'PURPOSE_NOT_ALLOWED'), `purpose=${purpose}`).toBe(false);
+      }
+    }
   });
 
   it('association/formula_audit는 7개 변수 전부 허용한다', () => {
@@ -262,12 +290,19 @@ describe('validateRecipe — 분석 목적(§실측: 7개 변수 전부 predicti
       }
     }
   });
+
+  it.each(CASE_SUM_KEYS)('%s: association 허용, formula_audit는 PURPOSE_NOT_ALLOWED로 거부', (key) => {
+    expect(validateRecipe(baseRecipe({ variableKeys: [key], analysisPurpose: 'association' }), 'analyze').valid).toBe(true);
+    const audit = validateRecipe(baseRecipe({ variableKeys: [key], analysisPurpose: 'formula_audit' }), 'analyze');
+    expect(audit.valid).toBe(false);
+    if (!audit.valid) expect(audit.errors.some((e) => e.code === 'PURPOSE_NOT_ALLOWED' && e.path === key)).toBe(true);
+  });
 });
 
-// PR4-B2 — 예측(prediction) 역할·grain·eventLevel·필터 매트릭스. 위 §실측 테스트(7개
-// 공식점수 변수 전부 prediction 불허)는 그대로 유지한다 — 여전히 참인 사실이다(공식점수는
-// predictionRole 자체가 없다). 여기서는 실제로 predictionRole이 배선된 변수들로 새
-// 검증 분기(statsRecipeValidation.ts의 'prediction' 브랜치)를 확인한다.
+// PR4-B2 — 예측(prediction) 역할·grain·eventLevel·필터 매트릭스. 위 §실측 테스트에서
+// 공식점수 6개는 predictionRole이 없어 prediction이 불허이고 경추 누적부하량(2026-10-02)만
+// 허용이다. 여기서는 실제로 predictionRole이 배선된 변수들로 새 검증 분기
+// (statsRecipeValidation.ts의 'prediction' 브랜치)를 확인한다.
 function predictionRecipe(overrides: Partial<StatsAnalysisRecipe> = {}): StatsAnalysisRecipe {
   return baseRecipe({
     grain: 'case',
@@ -292,6 +327,31 @@ describe('validateRecipe — 예측(prediction) 역할·grain·eventLevel·필�
       prediction: { outcomeKey: 'diagnosis.assessment.status', eventLevel: 'high' },
     }), 'analyze');
     expect(result.valid, !result.valid ? JSON.stringify(result.errors) : '').toBe(true);
+  });
+
+  it('어깨·경추 case 합계 신규 6개 + 경추 누적부하량 = 7개를 case grain predictor로 허용한다', () => {
+    const result = validateRecipe(predictionRecipe({
+      variableKeys: ['diagnosis.rollup.anyHighRelatedness', ...CASE_SUM_KEYS, 'cervical.case.maxJobCumulativeKgHours'],
+    }), 'analyze');
+    expect(result.valid, !result.valid ? JSON.stringify(result.errors) : '').toBe(true);
+  });
+
+  it('같은 7개를 disease grain에서도 predictor로 허용한다(case→disease broadcast 규칙)', () => {
+    const result = validateRecipe(predictionRecipe({
+      grain: 'disease',
+      variableKeys: ['diagnosis.assessment.status', ...CASE_SUM_KEYS, 'cervical.case.maxJobCumulativeKgHours'],
+      prediction: { outcomeKey: 'diagnosis.assessment.status', eventLevel: 'high' },
+    }), 'analyze');
+    expect(result.valid, !result.valid ? JSON.stringify(result.errors) : '').toBe(true);
+  });
+
+  it('신규 합계 변수를 outcome으로 쓰면 PREDICTION_OUTCOME_INVALID_ROLE로 거부한다(predictor 역할)', () => {
+    const result = validateRecipe(predictionRecipe({
+      variableKeys: ['shoulder.case.sumOverheadHours', 'patient.identity.bmi'],
+      prediction: { outcomeKey: 'shoulder.case.sumOverheadHours', eventLevel: 'true' },
+    }), 'analyze');
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.errors.some((e) => e.code === 'PREDICTION_OUTCOME_INVALID_ROLE')).toBe(true);
   });
 
   it('job grain은 PREDICTION_GRAIN_NOT_SUPPORTED로 거부한다', () => {

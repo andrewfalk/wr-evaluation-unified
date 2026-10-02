@@ -63,6 +63,14 @@ export const PR0_B4_FIELD_MAPPING: readonly FieldMappingEntry[] = [
   done('shoulder.job.heavyLoadSeconds', '3'),
   done('shoulder.job.vibrationHours', '3'),
 
+  // ── 사용자 요청(2026-10-02) — 어깨·경추 case grain 합계 (매핑표 §8) ──────────
+  done('shoulder.case.sumOverheadHours', '8'),
+  done('shoulder.case.sumRepetitiveMediumHours', '8'),
+  done('shoulder.case.sumRepetitiveFastHours', '8'),
+  done('shoulder.case.sumHeavyLoadHoursPerDay', '8'),
+  done('shoulder.case.sumVibrationHours', '8'),
+  done('cervical.case.totalNonNeutralHoursPerDay', '8'),
+
   // ── §2. knee jobExtras + DEFERRED 6개 (Slice 4) ─────────────────────────────
   done('knee.job.squattingMinutesPerDay', '4'),
   done('knee.job.dailyLoadKg', '4'),
