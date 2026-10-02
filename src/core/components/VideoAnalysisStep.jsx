@@ -30,10 +30,11 @@ const VIEWPOINTS = [
   { value: 'frontal', label: '정면(frontal)' },
   { value: 'other', label: '기타' },
 ];
+// desc: 프로필 선택 시 select 옆에 보이는 짧은 설명(출처: shared/contracts/videoAnalysis.ts 프로필 정의 주석).
 const PROFILES = [
-  { value: 'posture-basic', label: '자세시간(5~10fps)' },
-  { value: 'repetition-upper-limb', label: '상지반복(10~15fps)' },
-  { value: 'hand-wrist', label: '손목·손(15~30fps)' },
+  { value: 'posture-basic', label: '자세시간(5~10fps)', desc: '쪼그려앉기·허리 구부리기·오버헤드 자세시간 추정' },
+  { value: 'repetition-upper-limb', label: '상지반복(10~15fps)', desc: '어깨·팔꿈치 반복 빈도와 속도 구간별 시간 추정' },
+  { value: 'hand-wrist', label: '손목·손(15~30fps)', desc: '손목 굴곡·편위와 손목·손가락 반복 추정' },
 ];
 const MOCK_BUNDLE = 'mock-6.0-2';
 
@@ -359,6 +360,74 @@ export function flatCandidateLabel(c) {
   return null;
 }
 
+// 한 contribution(공정)의 환산식 문자열(자세비율 × 활동시간). ratio metric만 표시. 단위별 분기.
+export function contribFormula(ev, perDayValue, unit) {
+  if (!ev || ev.intrinsicMetric !== 'posture_ratio' || ev.activeMinutesPerDay == null) return null;
+  const ratio = fmtNum(ev.intrinsicValue);
+  const pd = typeof perDayValue === 'number' ? Math.round(perDayValue * 10) / 10 : perDayValue;
+  const pdStr = pd == null ? '?' : pd;
+  const am = ev.activeMinutesPerDay;
+  if (unit === 'hours_per_day') return `${pdStr} 시간/일 = 자세비율 ${ratio} × 활동 ${am}분/일 ÷ 60`;
+  if (unit === 'minutes_per_day') return `${pdStr} 분/일 = 자세비율 ${ratio} × 활동 ${am}분/일`;
+  return `${pdStr} ${unit || ''} = 자세비율 ${ratio} × 활동 ${am}분/일`;
+}
+
+// "왜 이 값?" 근거 패널. jobEv 없으면(mock·이전 세션) fallback 안내(영속화 안 하는 설계 표현).
+export function EvidencePanel({ jobEv, unit }) {
+  if (!jobEv) {
+    return (
+      <div className="va-evidence-note">
+        근거 정보는 현재 분석 세션에서만 표시됩니다. 다시 분석하면 확인할 수 있습니다.
+      </div>
+    );
+  }
+  // 한 행(라벨 dt + 값 dd). 값이 비면 행 자체를 그리지 않는다.
+  const row = (label, value) => (
+    <div className="va-evidence-row">
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  );
+  return (
+    <div className="va-evidence">
+      <dl className="va-evidence-dl">
+        {row('집계 방식', <code>{jobEv.aggregationMethod}</code>)}
+        {jobEv.analysisJobIds?.length > 0 && row('분석 job', jobEv.analysisJobIds.join(', '))}
+      </dl>
+      {(jobEv.contributions || []).map((c, i) => {
+        const ev = c.evidence || {};
+        const formula = contribFormula(ev, c.perDayValue, unit);
+        const bd = ev.confidenceBreakdown;
+        const adopted = ev.fusion?.adopted;
+        const bdKeys = bd
+          ? ['keypoint', 'visibility', 'tracking', 'viewpoint', 'usableFrameRatio'].filter((k) => bd[k] != null)
+          : [];
+        return (
+          <div key={i} className="va-evidence-proc">
+            <div className="va-evidence-proc-title">
+              <b>{c.processName || '(공정)'}</b> <span>공정 점유율 {c.sharePercent}%</span>
+            </div>
+            <dl className="va-evidence-dl">
+              {formula && row('환산식', formula)}
+              {adopted && row('채택 시점', `${adopted.viewpoint || '미지정'}${adopted.jobId ? ` (job ${adopted.jobId})` : ''}${ev.fusion?.candidates?.length > 1 ? ` / 후보 ${ev.fusion.candidates.length}개` : ''}`)}
+              {bdKeys.length > 0 && row('신뢰도 성분', (
+                <span className="va-evidence-chips">
+                  {bdKeys.map((k) => <span key={k} className="va-flag-pill tone-neutral">{`${k} ${Math.round(bd[k] * 100)}%`}</span>)}
+                </span>
+              ))}
+              {ev.segments?.length > 0 && row('근거 구간', `${ev.segments.length}개`)}
+            </dl>
+            {ev.warnings?.length > 0 && <div className="va-evidence-warn">경고: {ev.warnings.join(', ')}</div>}
+          </div>
+        );
+      })}
+      <div className="va-evidence-note">
+        ※ 신뢰도·경고는 실험값입니다(자동제안 차단 임계값은 검증 전까지 비활성). 값은 전문의가 확정합니다.
+      </div>
+    </div>
+  );
+}
+
 /**
  * flat "참고 후보" 리스트(6.0-17 그룹핑 + 6.0-18 골격 검수·근거 배선). `renderEvidencePanel`·
  * `renderSkeletonReview`는 VideoAnalysisStep의 state 클로저(expandedOverlay·session 등)라 재구현하지
@@ -392,16 +461,21 @@ export function FlatCandidateList({
     <div className="va-suggest-group">
       <div className="va-suggest-group-title">참고 후보 (자동입력 금지)</div>
       {candidates.length > 0 && (
-        <ul style={{ margin: 0, paddingLeft: 18 }}>
+        <ul className="va-suggest-list">
           {[...grouped.entries()].map(([featureKey, entries]) => {
             const first = entries[0];
             const label = flatCandidateLabel(first);
             return (
-              <li key={featureKey}>
-                {label !== null
-                  ? <>{label} — <span className="muted">{first.reason}</span></>
-                  : <><code>{featureKey}</code>: {String(first.value)} — <span className="muted">{first.reason}</span></>}
-                <ul style={{ listStyle: 'none', paddingLeft: 16, marginTop: 2 }}>
+              <li key={featureKey} className="va-suggest-card">
+                <div className="va-suggest-head">
+                  <span className="va-suggest-value">
+                    {label !== null
+                      ? <>{label} — <span className="va-hint">{first.reason}</span></>
+                      : <><code className="va-suggest-key">{featureKey}</code>: {String(first.value)} — <span className="va-hint">{first.reason}</span></>}
+                  </span>
+                  <span className="va-flag-pill tone-warning" title="관찰값 — 자동입력 안 함">참고만</span>
+                </div>
+                <ul className="va-subrows">
                   {entries.map((c, idx) => {
                     // 6.0-18: 골격 검수·근거 배선. jobEv는 (processId, featureKey) 1:1이라 서브행이 부착점
                     // (그룹 헤더는 여러 공정 jobEv 합성이 필요해 금지 — 계획 §1).
@@ -429,11 +503,10 @@ export function FlatCandidateList({
                         }
                       : jobEv;
                     return (
-                      <li key={processId || idx} className="muted" style={{ fontSize: 12 }}>
+                      <li key={processId || idx} className="va-subrow">
                         {p?.name || '(공정 미상)'}: {formatCandidateSubValue(c, p?.activeMinutesPerDay)}
                         {serverMode && (
-                          <button type="button" className="btn btn-secondary btn-xs" data-readonly-allow
-                            style={{ marginLeft: 6 }}
+                          <button type="button" className="btn btn-secondary btn-sm va-subrow-btn" data-readonly-allow
                             onClick={() => onToggleEvidence(expanded ? null : rowKey)}>
                             {expanded ? '근거 닫기' : '왜 이 값?'}
                           </button>
@@ -457,13 +530,13 @@ export function FlatCandidateList({
           버그로 오인하지 않도록 블록당 한 번만 안내(서버 모드 한정 — mock은 원래 검수 대상 아님). 6.0-18. */}
       {serverMode && candidates.length > 0
         && !hasAnyFlatEvidence(candidates, processEvidenceByProcessId) && (
-        <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
+        <p className="va-hint va-hint-block">
           ※ 골격 검수·근거는 현재 분석 세션에서만 제공됩니다 — 다시 분석하면 표시됩니다.
         </p>
       )}
       {/* 시점 하드 게이트 안내(6.0-10): 손목 굴곡/편위는 같은 2D 값이라 시점별로만 노출 */}
       {suppressedCandidates.length > 0 && (
-        <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
+        <p className="va-hint va-hint-block">
           손목 각도는 측면 클립에서 굴곡만, 정면 클립에서 편위만 표시됩니다 — 해당 시점 클립이 없어 일부 후보는 숨겨졌습니다.
         </p>
       )}
@@ -894,56 +967,8 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
   if (hasAnalysis) pipelineIndex = 3;
   if (analyzing) pipelineIndex = 2; // 재분석 중에는 이전 결과(hasAnalysis)보다 "분석 중"을 우선 표시
 
-  // 한 contribution(공정)의 환산식 문자열(자세비율 × 활동시간). ratio metric만 표시. 단위별 분기.
-  const contribFormula = (ev, perDayValue, unit) => {
-    if (!ev || ev.intrinsicMetric !== 'posture_ratio' || ev.activeMinutesPerDay == null) return null;
-    const ratio = fmtNum(ev.intrinsicValue);
-    const pd = typeof perDayValue === 'number' ? Math.round(perDayValue * 10) / 10 : perDayValue;
-    const pdStr = pd == null ? '?' : pd;
-    const am = ev.activeMinutesPerDay;
-    if (unit === 'hours_per_day') return `${pdStr} 시간/일 = 자세비율 ${ratio} × 활동 ${am}분/일 ÷ 60`;
-    if (unit === 'minutes_per_day') return `${pdStr} 분/일 = 자세비율 ${ratio} × 활동 ${am}분/일`;
-    return `${pdStr} ${unit || ''} = 자세비율 ${ratio} × 활동 ${am}분/일`;
-  };
-
-  // "왜 이 값?" 근거 패널. jobEv 없으면(mock·이전 세션) fallback 안내(영속화 안 하는 설계 표현).
-  const renderEvidencePanel = (jobEv, unit) => {
-    if (!jobEv) {
-      return (
-        <div className="muted" style={{ fontSize: 12 }}>
-          근거 정보는 현재 분석 세션에서만 표시됩니다. 다시 분석하면 확인할 수 있습니다.
-        </div>
-      );
-    }
-    return (
-      <div style={{ fontSize: 12 }}>
-        <div className="muted">집계 방식: <code>{jobEv.aggregationMethod}</code>{jobEv.analysisJobIds?.length > 0 && <> · 분석 job: {jobEv.analysisJobIds.join(', ')}</>}</div>
-        {(jobEv.contributions || []).map((c, i) => {
-          const ev = c.evidence || {};
-          const formula = contribFormula(ev, c.perDayValue, unit);
-          const bd = ev.confidenceBreakdown;
-          const adopted = ev.fusion?.adopted;
-          return (
-            <div key={i} style={{ marginTop: 4 }}>
-              <b>{c.processName || '(공정)'}</b> <span className="muted">공정 점유율 {c.sharePercent}%</span>
-              {formula && <div>· {formula}</div>}
-              {adopted && <div className="muted">· 채택 시점: {adopted.viewpoint || '미지정'}{adopted.jobId ? ` (job ${adopted.jobId})` : ''}{ev.fusion?.candidates?.length > 1 ? ` / 후보 ${ev.fusion.candidates.length}개` : ''}</div>}
-              {bd && (
-                <div className="muted">· 신뢰도 성분: {['keypoint', 'visibility', 'tracking', 'viewpoint', 'usableFrameRatio']
-                  .filter((k) => bd[k] != null)
-                  .map((k) => `${k} ${Math.round(bd[k] * 100)}%`).join(' / ')}</div>
-              )}
-              {ev.segments?.length > 0 && <div className="muted">· 근거 구간 {ev.segments.length}개</div>}
-              {ev.warnings?.length > 0 && <div style={{ color: 'var(--color-warning)' }}>· 경고: {ev.warnings.join(', ')}</div>}
-            </div>
-          );
-        })}
-        <div className="muted" style={{ marginTop: 4, fontStyle: 'italic' }}>
-          ※ 신뢰도·경고는 실험값입니다(자동제안 차단 임계값은 검증 전까지 비활성). 값은 전문의가 확정합니다.
-        </div>
-      </div>
-    );
-  };
+  // "왜 이 값?" 근거 패널 — 렌더는 모듈 레벨 EvidencePanel(테스트 가능하도록 추출).
+  const renderEvidencePanel = (jobEv, unit) => <EvidencePanel jobEv={jobEv} unit={unit} />;
 
   // 골격 검수 sub-block(suggestion·candidate 행 공용). 행(rowKey) 소속 source job별 overlay 토글.
   const renderSkeletonReview = (rowKey, jobEv) => {
@@ -952,13 +977,13 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     const openSj = sourceJobs.find((sj) => expandedOverlay === `${rowKey}::${sj.jobId}`);
     const openOv = openSj ? (overlayByJob[openSj.jobId] || {}) : null;
     return (
-      <div style={{ marginTop: 4 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      <div className="va-skel">
+        <div className="va-skel-actions">
           {sourceJobs.map((sj) => {
             const ov = overlayByJob[sj.jobId] || {};
             const open = expandedOverlay === `${rowKey}::${sj.jobId}`;
             return (
-              <button key={sj.jobId} type="button" className="btn btn-secondary btn-xs"
+              <button key={sj.jobId} type="button" className="btn btn-secondary btn-sm"
                 data-readonly-allow
                 onClick={() => toggleOverlay(`${rowKey}::${sj.jobId}`, sj.jobId)} disabled={ov.closed}
                 title={ov.closed ? '검수 자료 회수됨' : '중립 배경 골격으로 검수'}>
@@ -968,14 +993,14 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
           })}
         </div>
         {openSj && (
-          <div style={{ marginTop: 6 }}>
-            {openOv.loading && <p className="muted" style={{ fontSize: 12 }}>골격 불러오는 중…</p>}
-            {openOv.error && <p className="muted" style={{ fontSize: 12, color: 'var(--color-warning)' }}>{openOv.error}</p>}
+          <div className="va-skel-body">
+            {openOv.loading && <p className="va-skel-msg">골격 불러오는 중…</p>}
+            {openOv.error && <p className="va-skel-msg is-error">{openOv.error}</p>}
             {openOv.data && (
               <>
                 <SkeletonOverlay overlay={openOv.data} activeSegments={segmentsForJob(jobEv, openSj.jobId)} session={session} settings={settings} />
-                <div style={{ marginTop: 4 }}>
-                  <button type="button" className="btn btn-secondary btn-xs"
+                <div className="va-skel-end">
+                  <button type="button" className="btn btn-secondary btn-sm"
                     onClick={() => endReview(openSj.jobId)}>
                     이 분석 검수 종료(자료 회수)
                   </button>
@@ -1013,8 +1038,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
           {!refOnly && !applyDisabled && (
             <input type="text" className="va-note-input" placeholder="수정 사유(선택)"
               value={applyNotes[rowKey] || ''}
-              onChange={(e) => setApplyNotes((m) => ({ ...m, [rowKey]: e.target.value }))}
-              style={{ fontSize: 12, padding: '2px 6px', minWidth: 140, flex: '1 1 140px' }} />
+              onChange={(e) => setApplyNotes((m) => ({ ...m, [rowKey]: e.target.value }))} />
           )}
           <button type="button" className="btn btn-primary btn-sm" disabled={busy || applyBlocked || refOnly || applyDisabled}
             title={applyDisabled ? applyDisabledTitle : undefined}
@@ -1040,7 +1064,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     if (c.featureKey === 'trunkFlexionOver45Duration') {
       const pct = Math.round((Number(c.value) || 0) * 100);
       const mins = candidateMinutesPerDay(c.value, activeMinutesPerDay);
-      label = <>척추 45°↑ 굴곡: 클립의 {pct}%{mins != null ? ` · 약 ${mins} 분/일` : <span className="muted"> (활동시간 입력 시 분/일 표시)</span>}</>;
+      label = <>척추 45°↑ 굴곡: 클립의 {pct}%{mins != null ? ` · 약 ${mins} 분/일` : <span className="va-hint"> (활동시간 입력 시 분/일 표시)</span>}</>;
       // 근거 패널 contribFormula가 ratio를 분/일로 오표시하지 않도록 perDayValue를 computed minutes로 패치
       // (원본 transient state 변형 금지 — shallow clone).
       if (jobEv && mins != null) {
@@ -1090,17 +1114,17 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
       if (raw == null) return null;
       const contrib = mode ? contributionValue(s.featureKey, raw, effectiveShare(mode, p.shiftSharePercent)) : null;
       return (
-        <div key={p.id} className="muted" style={{ fontSize: 12 }}>
+        <div key={p.id} className="va-subrow">
           {p.name}: {contrib != null
-            ? <>{fmtNum(contrib)} {s.unit || ''} <span style={{ opacity: 0.7 }}>(원값 {fmtNum(raw)} {s.unit || ''})</span></>
+            ? <>{fmtNum(contrib)} {s.unit || ''} <span className="va-hint">(원값 {fmtNum(raw)} {s.unit || ''})</span></>
             : <>{fmtNum(raw)} {s.unit || ''}</>}
         </div>
       );
     }).filter(Boolean);
     if (rows.length === 0) return null;
     return (
-      <li key={`${s.featureKey}:breakdown`} className="va-suggest-breakdown" style={{ listStyle: 'none', paddingLeft: 16 }}>
-        {!mode && <div className="muted" style={{ fontSize: 11 }}>이전 분석은 공정 기여값 정보 없음 — 재분석 시 표시</div>}
+      <li key={`${s.featureKey}:breakdown`} className="va-suggest-breakdown">
+        {!mode && <div className="va-hint">이전 분석은 공정 기여값 정보 없음 — 재분석 시 표시</div>}
         {rows}
       </li>
     );
@@ -1167,33 +1191,38 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
               return (
                 <div key={p.id} className="va-process-card">
                   <div className="va-process-fields">
-                    <div className="form-group"><label>공정명</label>
-                      <input value={p.name} onChange={(e) => editProcess(p.id, { name: e.target.value })} placeholder="공정명" /></div>
-                    <div className="form-group"><label>직업</label>
+                    <div className="form-group va-pf-job"><label>직업</label>
                       <select value={p.sharedJobId} onChange={(e) => editProcess(p.id, { sharedJobId: e.target.value })}>
                         {jobs.map((j) => <option key={j.id} value={j.id}>{j.jobName || '(직업 미지정)'}</option>)}
                       </select></div>
-                    <div className="form-group"><label>점유율(%)</label>
-                      <input type="number" min="0" max="100" value={p.shiftSharePercent}
-                        onChange={(e) => editProcess(p.id, { shiftSharePercent: Number(e.target.value) })} /></div>
-                    <div className="form-group"><label title="공정활동분/일(수기). 비우면 모름(적용 불가).">활동시간(분/일)</label>
-                      <input type="number" min="0" max="1440" placeholder="분/일" value={p.activeMinutesPerDay ?? ''}
-                        onChange={(e) => editProcess(p.id, { activeMinutesPerDay: e.target.value === '' ? null : Number(e.target.value) })} /></div>
-                    <div className="form-group"><label>분석 프로필</label>
+                    <div className="form-group va-pf-name"><label>공정명</label>
+                      <input value={p.name} onChange={(e) => editProcess(p.id, { name: e.target.value })} placeholder="공정명" /></div>
+                    {/* 점유율·활동시간은 한 묶음 — 폭이 좁아 한 줄에 안 들어가면 묶음째 다음 줄로 넘어간다. */}
+                    <div className="va-pf-pair">
+                      <div className="form-group va-pf-share"><label>점유율(%)</label>
+                        <input type="number" min="0" max="100" value={p.shiftSharePercent}
+                          onChange={(e) => editProcess(p.id, { shiftSharePercent: Number(e.target.value) })} /></div>
+                      <div className="form-group va-pf-active"><label title="공정활동분/일(수기). 비우면 모름(적용 불가).">활동시간(분/일)</label>
+                        <input type="number" min="0" max="1440" placeholder="분/일" value={p.activeMinutesPerDay ?? ''}
+                          onChange={(e) => editProcess(p.id, { activeMinutesPerDay: e.target.value === '' ? null : Number(e.target.value) })} /></div>
+                    </div>
+                    <div className="form-group va-pf-profile"><label>분석 프로필</label>
                       {/* 손목·손(고프레임)은 wholebody 추론이 무거워(처리 느림·서버 부하) 손목 모듈 활성 시에만 노출.
                           단, 이미 그 프로필로 저장된 공정은 폴백으로 옵션 유지(선택 보존). 6.0-10. */}
                       <select value={p.analysisProfile} onChange={(e) => editProcess(p.id, { analysisProfile: e.target.value })}>
                         {PROFILES.filter((pr) => pr.value !== 'hand-wrist'
                           || activeModules.includes('wrist') || p.analysisProfile === 'hand-wrist')
                           .map((pr) => <option key={pr.value} value={pr.value}>{pr.label}</option>)}
-                      </select>
-                      {p.analysisProfile === 'hand-wrist' && (
-                        <p className="muted" style={{ fontSize: 11, marginTop: 2, color: 'var(--color-warning)' }}>
-                          ⚠ 고부담(처리 느림·서버 부하) — 손목·손 분석이 필요한 공정에만 사용
-                        </p>
-                      )}</div>
-                    <div className="form-group"><label>&nbsp;</label>
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => removeProcess(p.id)}>공정 삭제</button></div>
+                      </select></div>
+                    <div className="va-pf-rest">
+                      <div className="va-pf-desc">
+                        {PROFILES.find((pr) => pr.value === p.analysisProfile)?.desc}
+                        {p.analysisProfile === 'hand-wrist' && (
+                          <div className="va-pf-warn">고부담(처리 느림·서버 부하) — 손목·손 분석이 필요한 공정에만 사용</div>
+                        )}
+                      </div>
+                      <button type="button" className="btn btn-secondary btn-sm va-pf-del" onClick={() => removeProcess(p.id)}>공정 삭제</button>
+                    </div>
                   </div>
                   {/* 6.0-12: 실제 실행된 추론 디바이스 배지(분석 후). auto에서 cuda→cpu 폴백 시 사유 tooltip. */}
                   {(() => {
@@ -1277,7 +1306,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
           </div>
 
           {/* 오른쪽: 제안 검토 */}
-          <div className="va-col">
+          <div className="va-col va-review-col">
             <div className="va-col-title">검토 — 제안{!hasAnalysis && <small>분석 실행 후 표시됩니다</small>}</div>
             {!hasAnalysis && <p className="evaluation-empty-state">공정·클립을 정리하고 <b>분석 실행</b>을 누르면 제안이 여기에 표시됩니다.</p>}
 
@@ -1285,10 +1314,10 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
         {hasAnalysis && (
           <div className="va-suggest-group">
             <div className="va-suggest-group-title">직업 단위 (무릎·어깨)</div>
-            {jobScopeModules.length === 0 && <p className="muted">자동 매핑 지원 직업단위 모듈(무릎·어깨)이 활성화되어 있지 않습니다.</p>}
+            {jobScopeModules.length === 0 && <p className="va-hint">자동 매핑 지원 직업단위 모듈(무릎·어깨)이 활성화되어 있지 않습니다.</p>}
             {(va.jobFeatures || []).map((jf) => (
-              <div key={jf.sharedJobId} style={{ marginBottom: 10 }}>
-                <b>{jobName(jf.sharedJobId)}</b>
+              <div key={jf.sharedJobId} className="va-review-block">
+                <b className="va-review-block-title">{jobName(jf.sharedJobId)}</b>
                 {jobScopeModules.map((moduleId) => {
                   const suggestions = getModuleSuggestions(jf.features, moduleId);
                   if (suggestions.length === 0) return null;
@@ -1338,12 +1367,12 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                 const targetTaskId = resolveTargetTaskId(tasks, taskTargets[targetKey]);
                 const noTarget = !targetTaskId;
                 return (
-                  <ul key={moduleId} style={{ listStyle: 'none', paddingLeft: 12 }}>
+                  <ul key={moduleId} className="va-suggest-list">
                     {/* 대상 작업 선택은 apply가 있는 auto 제안에만 의미 — candidate만 있는 블록엔 경고/선택 생략 */}
                     {suggestions.length > 0 && (
-                      <div className="muted" style={{ fontSize: 12, marginBottom: 2 }}>
+                      <div className="va-target-pick">
                         <b>{mod?.name || moduleId}</b> 대상 작업:{' '}
-                        {tasks.length === 0 ? <span style={{ color: 'var(--color-warning)' }}>없음 — {mod?.name} 탭에서 작업을 추가한 뒤 적용 가능</span>
+                        {tasks.length === 0 ? <span className="va-target-empty">없음 — {mod?.name} 탭에서 작업을 추가한 뒤 적용 가능</span>
                           : tasks.length === 1 ? (tasks[0].name || '작업')
                             : (
                               <select value={targetTaskId || ''} onChange={(e) => setTaskTargets((m) => ({ ...m, [targetKey]: e.target.value }))}>
@@ -1354,7 +1383,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                       </div>
                     )}
                     {suggestions.length === 0 && candidates.length > 0 && (
-                      <div className="muted" style={{ fontSize: 12, marginBottom: 2 }}><b>{mod?.name || moduleId}</b> 관찰값</div>
+                      <div className="va-target-pick"><b>{mod?.name || moduleId}</b> 관찰값</div>
                     )}
                     {suggestions.map((s) => renderSuggestionRow(s, {
                       moduleId,
@@ -1376,8 +1405,8 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
               });
               if (blocks.every((b) => b === null)) return null;
               return (
-                <div key={p.id} style={{ marginBottom: 10 }}>
-                  <b>{p.name}</b> <span className="muted">({jobName(p.sharedJobId)})</span>
+                <div key={p.id} className="va-review-block">
+                  <b className="va-review-block-title">{p.name}</b> <span className="va-hint">({jobName(p.sharedJobId)})</span>
                   {blocks}
                 </div>
               );

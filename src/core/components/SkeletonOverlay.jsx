@@ -174,34 +174,34 @@ function SkeletonOverlayImpl({ overlay, activeSegments = [], session, settings }
         </svg>
       </div>
       {framesOn && (
-        <p style={{ fontSize: 11, margin: '3px 0 0', color: 'var(--color-warning)' }}>
+        <p className="va-skel-ov-note is-warn">
           ● 실 영상 표시 중(검수 편의 한시 예외 — 식별 가능, 외부 공유 금지)
         </p>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+      <div className="va-skel-ov-scrub">
         {/* 스크럽바 위 호박색 마커 = 이 변수 자세가 잡힌 프레임(구간/peak) */}
-        <div style={{ position: 'relative', flex: 1 }}>
+        <div className="va-skel-ov-track">
           <input type="range" min={0} max={frames.length - 1} value={idx}
             onChange={(e) => setFrameIndex(Number(e.target.value))}
-            aria-label="프레임 스크럽" style={{ width: '100%', display: 'block' }} />
+            aria-label="프레임 스크럽" />
           {activeIdxs.length > 0 && (
-            <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: -3, height: 4, pointerEvents: 'none' }}>
+            <div aria-hidden="true" className="va-skel-ov-markers">
               {activeIdxs.map((ai) => (
-                <span key={ai} style={{ position: 'absolute', left: `${(ai / lastIdx) * 100}%`, width: 3, height: 4, background: '#ffa726', borderRadius: 1, transform: 'translateX(-50%)' }} />
+                <span key={ai} className="va-skel-ov-marker" style={{ left: `${(ai / lastIdx) * 100}%` }} />
               ))}
             </div>
           )}
         </div>
-        <span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+        <span className="va-skel-ov-count">
           {idx + 1}/{frames.length} · {Math.round(frame.timestampMs)}ms
         </span>
       </div>
       {activeSegments.length > 0 && (
-        <p style={{ fontSize: 12, margin: '4px 0 0', color: active ? '#e65100' : 'var(--text-muted)' }}>
+        <p className={`va-skel-ov-note${active ? ' is-warn' : ''}`}>
           {active ? '● 이 프레임에서 해당 변수 자세가 잡혔습니다(호박색 골격).' : `○ 해당 변수 자세 프레임 ${activeIdxs.length}개 — 스크럽바 호박색 마커로 이동.`}
         </p>
       )}
-      {!targetPresent && <p className="muted" style={{ fontSize: 12 }}>이 프레임에 대상자(track)가 없습니다.</p>}
+      {!targetPresent && <p className="va-skel-ov-note">이 프레임에 대상자(track)가 없습니다.</p>}
     </div>
   );
 }
