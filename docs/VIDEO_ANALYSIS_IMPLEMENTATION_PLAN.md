@@ -484,6 +484,20 @@
   - [ ] **잔여**: 라이브 확인(인트라넷 fixture 모드) 미실행 — 손목 profile 공정에서 골격 클릭 시 실제
     프레임·마커 렌더, 검수 종료 파급(같은 job 참조 행 전부 회수됨 처리), read-only 모드에서 토글은
     눌리고 검수 종료는 차단되는지 확인 필요. Tier-3 스택(`reference_tier3_verify_stack`) 권장.
+- [x] **6.0-19 영상 분석 UI 가독성 개선** — 로직·데이터·`data-readonly-allow` 변경 없음(표시 전용).
+  - **원인**: 우측 패널이 인라인 `fontSize:12`·`line-height` 미지정·불릿 목록 중심이었고, `.muted`는 CSS 정의 자체가
+    없었음(보조 텍스트가 일반 텍스트와 같은 색). pill 대비(중립 2.34/경고 2.83/긍정 4.07:1)도 AA 미달.
+  - **우측 검토 열**(`.va-review-col`, 열 내부만 스코프): 본문 14px/보조 13px/줄간격 1.55, 버튼·pill 13px 명시,
+    모든 상태 pill 글자색 `--text-primary` + 상태는 배경·테두리로 구분, 카드 통일(참고 후보도 `va-suggest-card`).
+    근거 패널은 공정별 블록 + `dl` 키-값 행(`EvidencePanel`을 모듈 레벨로 추출 → 렌더 테스트 6건 신규).
+    `SkeletonOverlay` 내부 인라인 스타일도 클래스화(안내문 `--text-muted` 2.45:1 → `--text-primary`).
+    `.va-layout`은 조상이라 직접 수정(우측 1.15fr, 단일열 전환 900→1100px).
+  - **공정 입력 카드**: 1줄 직업·공정명·점유율(84px)·활동시간(108px) / 2줄 분석 프로필·프로필별 짧은 설명(`PROFILES[].desc`)·
+    삭제. flex-wrap + margin 간격(1줄 basis 합과 2줄 basis 합을 맞춰 칸 정렬 유지, 좁으면 묶음째 줄바꿈).
+  - **호환 규칙(재발 주의)**: 빌드 target `chrome80` → **flex `gap` 금지(Chrome 84+)**, grid gap은 OK. 인라인 style은 부모
+    CSS로 못 덮으므로 클래스로 이전. 폼 컨트롤은 폰트 비상속이라 font-family/size 명시.
+  - **검증**: `src/core` 1082건·`build:web` 통과. 외부 리뷰(렌더 40조건·대비·모바일 규격) 2건 반영(긴 직업명 줄바꿈,
+    골격 오버레이 대비). **잔여**: 실 화면(1920/1440/1366px) 육안·Chrome 80 실행·서버 fixture 흐름 미확인.
 
 ---
 

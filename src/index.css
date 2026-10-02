@@ -3633,13 +3633,14 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 
 .va-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
   gap: 16px;
   width: 100%;
   align-items: start;
 }
 .va-layout > * { min-width: 0; }
-@media (max-width: 900px) {
+/* 사이드바가 있는 901~1100px에서도 우측(근거·제안) 패널이 좁아지지 않도록 단일열 전환 기준을 상향 */
+@media (max-width: 1100px) {
   .va-layout { grid-template-columns: 1fr; }
 }
 .va-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
@@ -3657,15 +3658,57 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   padding: 14px;
   min-width: 0;
 }
+/* 공정 입력 카드 — 1줄: 공정명·직업·[점유율|활동시간] / 2줄: 분석 프로필·[설명·삭제].
+   flex-wrap + margin 간격(flex gap은 Chrome 84+라 win7/Chrome 80에서 금지). 칸 간격 8px = 항목 margin 4px × 2,
+   컨테이너 -4px로 바깥 여백 상쇄. 폭이 모자라면 점유율·활동시간 묶음, 설명·삭제 묶음이 통째로 다음 줄로 넘어간다.
+   정렬 규칙: 1줄 basis 합(150+150+200)+margin 24 = 2줄 basis 합(150+358)+margin 16 → 남는 폭이 같게 분배되어
+   2줄 프로필 칸 = 공정명 칸, 2줄 설명·삭제 칸 = 직업 칸 + 8 + 점유율·활동시간 칸 이 항상 맞는다. */
 .va-process-fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 8px;
-  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  margin: -4px;
 }
-.va-process-fields .form-group { margin-bottom: 0; min-width: 0; }
+.va-process-fields > * { margin: 4px; min-width: 0; }
+.va-process-fields .form-group { min-width: 0; }
+.va-pf-pair .form-group { margin: 0; }
 .va-process-fields input,
 .va-process-fields select { width: 100%; min-width: 0; }
+.va-pf-name,
+.va-pf-job,
+.va-pf-profile { flex: 1 1 150px; }
+.va-pf-pair { flex: 0 0 200px; display: flex; align-items: flex-end; }
+.va-pf-share { flex: 0 0 84px; }
+.va-pf-pair .va-pf-active { flex: 0 0 108px; margin-left: 8px; }
+.va-pf-active label { white-space: nowrap; }
+.va-pf-rest {
+  flex: 1 1 358px;
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+}
+.va-pf-desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.va-pf-warn {
+  margin-top: 4px;
+  padding: 3px 8px;
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-warning-bg);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.va-pf-del { flex: 0 0 108px; width: 108px; margin-left: 8px; }
+@media (max-width: 480px) {
+  .va-pf-rest { min-height: 44px; }
+}
 .va-process-clips { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .va-clip-row {
   display: flex;
@@ -3770,4 +3813,212 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   left: 0;
   width: 100%;
   height: 100%;
+}
+
+/* ── 우측 "검토 — 제안" 패널 가독성 (va-review-col) ──────────────────────────
+   범위: 우측 열 내부만(.va-col은 좌우 공통이라 직접 수정 금지). .va-layout은 조상이라 위에서 직접 수정.
+   - 글자 14px/보조 13px, line-height 1.55. 버튼·pill은 상속되지 않으므로 13px 명시.
+   - 대비: 상태 pill/경고 callout은 글자색을 --text-primary로 두고 배경 틴트·테두리로만 상태 구분
+     (--color-warning 글자는 라이트 2.8:1, --color-safe는 4.1:1로 AA 4.5:1 미달).
+   - win7/Chrome 80: flex gap(Chrome 84+) 금지 → gap:0 + margin. grid gap·overflow-wrap:anywhere는 OK.
+   - 색은 CSS 변수만(다크테마 자동). :has()·aspect-ratio 미사용. */
+.va-review-col {
+  gap: 0;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+.va-review-col > * + * { margin-top: 14px; }
+.va-review-col .va-col-title { font-size: 1rem; }
+.va-review-col .va-col-title small { font-size: 0.8125rem; color: var(--text-secondary); }
+.va-review-col .va-hint,
+.va-review-col .muted { color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.55; overflow-wrap: anywhere; }
+.va-review-col .va-hint-block { margin: 8px 0 0; }
+.va-review-col code {
+  font-family: inherit;
+  font-size: inherit;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.va-review-col .va-suggest-group-title { font-size: 0.9375rem; margin-bottom: 10px; color: var(--text-primary); }
+.va-review-col .va-review-block + .va-review-block { margin-top: 16px; }
+.va-review-col .va-review-block-title { font-size: 0.9375rem; display: inline-block; margin-bottom: 8px; overflow-wrap: anywhere; }
+
+/* 카드 목록 — 항목·값 → 사유·상태 → 액션 → 펼친 근거 */
+.va-review-col .va-suggest-list { gap: 0; padding: 0; margin: 0; list-style: none; }
+.va-review-col .va-suggest-list > * + * { margin-top: 10px; }
+.va-review-col .va-suggest-card { padding: 14px 16px; }
+.va-review-col .va-suggest-head { gap: 0; align-items: center; margin: -3px -4px; }
+.va-review-col .va-suggest-head > * { margin: 3px 4px; min-width: 0; max-width: 100%; }
+.va-review-col .va-suggest-key { font-size: 0.9375rem; overflow-wrap: anywhere; word-break: break-word; }
+.va-review-col .va-suggest-value { font-size: 0.9375rem; color: var(--text-primary); overflow-wrap: anywhere; }
+.va-review-col .va-suggest-actions { gap: 0; margin: 8px -4px -3px; }
+.va-review-col .va-suggest-actions > * { margin: 3px 4px; }
+.va-review-col .va-suggest-details { margin-top: 12px; padding-left: 12px; }
+
+/* 버튼·pill — 부모 폰트를 상속하지 않으므로 명시 */
+.va-review-col .btn-sm,
+.va-review-col .btn-xs { font-size: 0.8125rem; padding: 6px 10px; max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.va-review-col .va-flag-pill {
+  font-size: 0.8125rem;
+  padding: 3px 10px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.va-review-col .va-flag-pill.tone-positive { background: var(--color-safe-bg); border-color: var(--color-safe); color: var(--text-primary); }
+.va-review-col .va-flag-pill.tone-info { background: var(--accent-light); border-color: var(--accent); color: var(--text-primary); }
+.va-review-col .va-flag-pill.tone-warning { background: var(--color-warning-bg); border-color: var(--color-warning); color: var(--text-primary); }
+.va-review-col .va-flag-pill.tone-neutral { background: var(--hover-bg); border-color: var(--border-color); color: var(--text-primary); }
+
+/* 수정 사유 입력 — 좌측 .form-group input 규격(index.css:495-496)과 동일 */
+.va-review-col .va-note-input {
+  flex: 1 1 140px;
+  min-width: 140px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  transition: all 0.2s;
+}
+.va-review-col .va-note-input:focus,
+.va-review-col .va-target-pick select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* task 대상 선택 줄 — select는 .form-group 밖이라 전역 입력 스타일을 못 받으므로 직접 지정 */
+.va-review-col .va-target-pick { font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 8px; }
+.va-review-col .va-target-pick select {
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  transition: all 0.2s;
+}
+.va-review-col .va-target-empty {
+  display: inline-block;
+  padding: 2px 8px;
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-warning-bg);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* 공정별 값 행(참고 후보·직업 합계 분해) */
+.va-review-col .va-subrows { list-style: none; padding: 0; margin: 8px 0 0; }
+.va-review-col .va-subrows > * + * { margin-top: 6px; }
+.va-review-col .va-subrow { font-size: 0.875rem; color: var(--text-secondary); overflow-wrap: anywhere; }
+.va-review-col .va-subrow .va-subrow-btn { margin-left: 8px; }
+.va-review-col .va-suggest-breakdown { list-style: none; padding: 0 0 0 16px; margin-top: 6px; }
+.va-review-col .va-suggest-breakdown > * + * { margin-top: 4px; }
+
+/* 골격 검수 */
+.va-review-col .va-skel { margin-top: 8px; }
+.va-review-col .va-skel-actions { display: flex; flex-wrap: wrap; gap: 0; margin: -3px -4px; }
+.va-review-col .va-skel-actions > * { margin: 3px 4px; }
+.va-review-col .va-skel-body { margin-top: 8px; }
+.va-review-col .va-skel-end { margin-top: 8px; }
+.va-review-col .va-skel-msg { font-size: 0.8125rem; color: var(--text-secondary); margin: 0; }
+.va-review-col .va-skel-msg.is-error {
+  padding: 6px 10px;
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-warning-bg);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* 골격 오버레이(SkeletonOverlay) 내부 — 13px, 글자색은 --text-primary(비활성 안내가 --text-muted라 라이트 2.45:1이었음),
+   상태(경고·활성 프레임)는 왼쪽 테두리·배경 틴트로 구분. flex gap 대신 margin(Chrome 80). */
+.va-skel-ov-note {
+  margin: 6px 0 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--border-color);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.va-skel-ov-note.is-warn { border-left-color: var(--color-warning); background: var(--color-warning-bg); }
+.va-skel-ov-scrub { display: flex; align-items: center; margin-top: 8px; }
+.va-skel-ov-track { position: relative; flex: 1 1 auto; min-width: 0; }
+.va-skel-ov-track input { width: 100%; display: block; }
+.va-skel-ov-markers { position: absolute; left: 0; right: 0; top: -3px; height: 4px; pointer-events: none; }
+.va-skel-ov-marker {
+  position: absolute;
+  width: 3px;
+  height: 4px;
+  background: #ffa726;
+  border-radius: 1px;
+  transform: translateX(-50%);
+}
+.va-skel-ov-count {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+/* 근거("왜 이 값?") — 공정별 블록 + 키-값 행(dl). 각 행에 grid, 열은 96px minmax(0,1fr) */
+.va-review-col .va-evidence { font-size: 0.875rem; }
+.va-review-col .va-evidence-dl { margin: 0; }
+.va-review-col .va-evidence-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  column-gap: 10px;
+  padding: 4px 0;
+}
+.va-review-col .va-evidence-row dt { color: var(--text-secondary); font-weight: 600; }
+.va-review-col .va-evidence-row dd {
+  margin: 0;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.va-review-col .va-evidence-proc {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+  min-width: 0;
+}
+.va-review-col .va-evidence-proc-title { margin-bottom: 4px; overflow-wrap: anywhere; }
+.va-review-col .va-evidence-proc-title span { color: var(--text-secondary); font-size: 0.8125rem; margin-left: 6px; }
+.va-review-col .va-evidence-chips { display: flex; flex-wrap: wrap; gap: 0; margin: -2px -3px; }
+.va-review-col .va-evidence-chips > * { margin: 2px 3px; }
+.va-review-col .va-evidence-warn {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-warning-bg);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.va-review-col .va-evidence-note {
+  margin-top: 10px;
+  font-size: 0.8125rem;
+  font-style: italic;
+  color: var(--text-secondary);
+}
+/* 좁은 폭: 라벨을 값 위로 */
+@media (max-width: 1200px) {
+  .va-review-col .va-evidence-row { grid-template-columns: minmax(0, 1fr); row-gap: 2px; }
+}
+
+/* 스마트폰 — 좌측 입력창 규격(index.css 480px 블록)과 동일 */
+@media (max-width: 480px) {
+  .va-review-col .va-note-input,
+  .va-review-col .va-target-pick select { padding: 12px; font-size: 16px; min-height: 44px; }
+  .va-review-col .va-suggest-card { padding: 12px; }
 }
