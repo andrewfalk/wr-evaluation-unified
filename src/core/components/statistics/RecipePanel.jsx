@@ -813,11 +813,18 @@ export function RecipePanel({
             {catalogByKey.get(f.key)?.label || f.key} {OPERATOR_LABELS[f.operator] || f.operator} {formatFilterValue(f.operator, f.value)}
             <button
               type="button"
+              className="swb-chip-remove"
               onClick={() => onFilterDraftChange(filterDraft.filter((_, idx) => idx !== i))}
               aria-label="필터 제거"
+              title="이 필터 제거"
             >×</button>
           </span>
         ))}
+        {filterDraft.length > 1 && (
+          <button type="button" className="swb-btn swb-btn--sm" style={{ margin: '2px 0' }} onClick={() => onFilterDraftChange([])}>
+            필터 모두 제거
+          </button>
+        )}
         {filterDraft.length < 10 && (
           // key={grain} — FilterEditor는 key/operator/raw/error를 내부 useState로 갖고
           // 있어 catalogByKey prop만 바뀌는 것으로는 초기화되지 않는다(grain 전환 후

@@ -150,6 +150,42 @@ describe('RecipePanel — 필터 칩 표시(3차 리뷰)', () => {
   });
 });
 
+// 사용자 보고 — 추가한 필터를 뺄 UI가 없어 보인다는 지적. 칩의 ×는 원래 있었지만 글자 옆에 작게 붙어
+// 제거 버튼으로 안 보였다 → 눈에 띄는 원형 버튼 + 툴팁, 2개 이상일 때 "필터 모두 제거" 추가.
+describe('RecipePanel — 필터 제거', () => {
+  const KNEE_FILTER = { key: 'knee.relatedness.max', operator: 'between', value: [5, 10] };
+  const ELBOW_FILTER = { key: 'elbow.assessment.burdenGradeMax', operator: 'in', value: ['경도', '중등도'] };
+
+  it('칩의 × 버튼은 해당 필터만 빼고 나머지 순서를 유지한 목록을 전달하며 툴팁을 가진다', async () => {
+    const user = userEvent.setup();
+    const onFilterDraftChange = vi.fn();
+    render(<RecipePanel {...baseProps({ filterDraft: [KNEE_FILTER, ELBOW_FILTER], onFilterDraftChange })} />);
+    const removeButtons = screen.getAllByRole('button', { name: '필터 제거' });
+    expect(removeButtons).toHaveLength(2);
+    expect(removeButtons[0].getAttribute('title')).toBe('이 필터 제거');
+    await user.click(removeButtons[0]);
+    expect(onFilterDraftChange).toHaveBeenCalledWith([ELBOW_FILTER]);
+  });
+
+  it('"필터 모두 제거"는 필터가 2개 이상일 때 보이고 빈 목록을 전달한다', async () => {
+    const user = userEvent.setup();
+    const onFilterDraftChange = vi.fn();
+    render(<RecipePanel {...baseProps({ filterDraft: [KNEE_FILTER, ELBOW_FILTER], onFilterDraftChange })} />);
+    await user.click(screen.getByRole('button', { name: '필터 모두 제거' }));
+    expect(onFilterDraftChange).toHaveBeenCalledWith([]);
+  });
+
+  it('필터가 1개이면 "필터 모두 제거"는 보이지 않고(× 하나로 충분), 0개이면 제거 버튼이 전혀 없다', () => {
+    const { unmount } = render(<RecipePanel {...baseProps({ filterDraft: [KNEE_FILTER] })} />);
+    expect(screen.getAllByRole('button', { name: '필터 제거' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: '필터 모두 제거' })).toBeNull();
+    unmount();
+    render(<RecipePanel {...baseProps({ filterDraft: [] })} />);
+    expect(screen.queryByRole('button', { name: '필터 제거' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '필터 모두 제거' })).toBeNull();
+  });
+});
+
 // 사용자 보고 — spine.mddm.lifetimeDoseMNh(공식 정책이 2개 이상 혼재하는 변수)를 고르면
 // "공식 정책" 드롭다운에서 선택하기 전까지 "분석 실행" 버튼이 비활성화되는데, 왜 안 눌리는지
 // 알려주는 문구가 전혀 없었다 — 원인을 알아낸 뒤 버튼 위에 안내 문구를 추가했다.

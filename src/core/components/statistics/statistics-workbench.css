@@ -306,6 +306,14 @@
 .swb-recipe-chip button {
   border: none; background: none; cursor: pointer; color: inherit; font-size: 13px; line-height: 1; padding: 0 2px;
 }
+/* 필터 칩 제거 버튼 — 글자와 구분되는 원형 버튼으로 눌러야 한다는 점이 보이게 한다. */
+.swb-recipe-chip .swb-chip-remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; padding: 0; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.08); font-size: 14px; font-weight: 700;
+}
+.swb-recipe-chip .swb-chip-remove:hover,
+.swb-recipe-chip .swb-chip-remove:focus-visible { background: #d93025; color: #fff; }
 
 .swb-card {
   border: 1px solid var(--swb-border);
