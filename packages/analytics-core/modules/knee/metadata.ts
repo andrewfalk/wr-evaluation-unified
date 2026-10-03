@@ -248,4 +248,66 @@ export const KNEE_METADATA: AnalyticsVariableMetadata[] = [
     formulaFamily: 'knee_job_raw',
     supportedFormulaPolicies: [],
   },
+
+  // case grain 합계 2종 — job grain 원본(weight/squatting)을 직업 간에 합산한 것(직업력 단순합:
+  // 직업별 일일 입력값의 합계이며 근속기간·근무일수 가중 없음 — 연간 누적량이 아니다).
+  // 어깨·경추 합계(shoulder.case.sum*)와 같은 정책이다. 단위 주의: 쪼그려앉기는 원본 입력 단위
+  // 그대로 "분/일"(어깨·경추 합계는 "시간"). 중량물(weight)은 이미 "일일 누적 kg" 하나의 필드라
+  // 어깨 중량물처럼 횟수×초 곱셈 없이 단순 합이다.
+  //
+  // 합산 대상 직업은 shared.jobs의 모든 객체다 — 직종·시작일·종료일·기간 override가 전부 빈
+  // "기본(placeholder) 행"도 jobExtras에 연결된 노출값이 있으면 합산한다. job grain은
+  // enumerateJobEntities가 기본 행을 제외하므로 "case 합계 = job grain 값의 합"이 항상 성립하지는
+  // 않는다(어깨 합계와 동일한 선례). 결측 정책은 extractors.ts의 extractKneeCaseSum 주석 참고
+  // (손상값이 하나라도 있으면 부분합 없이 결측).
+  //
+  // 예측 사용 목적: 이 변수들은 평가자 판정(diagnosis.rollup.anyHighRelatedness 등)의 근거 입력값이다.
+  // prediction 허용은 "노출 요인이 평가자 판정을 얼마나 설명·재현하는가(판정 일관성 점검)" 용도이며
+  // 임상 위험 예측이 아니다 — 모델이 판정 규칙을 거의 그대로 학습할 수 있다는 한계를 해석 시
+  // 감안한다. formula_audit는 허용하지 않는다(job raw 변수와 동일).
+  // case→disease broadcast는 isGrainCompatible 범용 규칙으로 자동 적용된다(무릎이 아닌 상병 행에도
+  // 같은 값이 복제된다).
+  caseSumMetadata({
+    key: 'knee.case.sumSquattingMinutesPerDay',
+    label: '쪼그려앉기 시간 합계(직업력 단순합)',
+    unit: '분/일',
+    field: 'squatting',
+  }),
+  caseSumMetadata({
+    key: 'knee.case.sumDailyLoadKg',
+    label: '중량물 취급량 합계(직업력 단순합)',
+    unit: 'kg/일',
+    field: 'weight',
+  }),
 ];
+
+function caseSumMetadata(params: {
+  key: string;
+  label: string;
+  unit: string;
+  field: 'squatting' | 'weight';
+}): AnalyticsVariableMetadata {
+  return {
+    key: params.key,
+    label: params.label,
+    group: '무릎 · 직업력 합계',
+    moduleId: 'knee',
+    grain: 'case',
+    type: 'continuous',
+    unit: params.unit,
+    provenance: 'derived',
+    dependsOn: [
+      'activeModules',
+      'shared.jobs[].id',
+      'modules.knee.jobExtras[].sharedJobId',
+      `modules.knee.jobExtras[].${params.field}`,
+    ],
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association', 'prediction'],
+    predictionRole: 'predictor',
+    sensitivity: 'non_sensitive',
+    formulaFamily: 'knee_case_raw_sum',
+    supportedFormulaPolicies: [],
+  };
+}

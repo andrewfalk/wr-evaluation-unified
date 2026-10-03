@@ -10,6 +10,7 @@ import { isPlainObject } from '../../migration/deterministicMigrate';
 import { enumerateDiseaseEntities, enumerateJobEntities } from '../../grainEntities';
 import { resolveDiagnosisModule, supportsKlGrade } from '../../diagnosisMapping';
 import { KNEE_KLG_ORDER } from './metadata';
+import { parseStrictNonNegative } from '../../numericInput';
 
 export function isBlank(x: unknown): boolean {
   return x === null || x === undefined || String(x).trim() === '';
@@ -292,6 +293,78 @@ function extractKneeJobBooleanField(
     }
     return { entityKey: entity.entityKey, value: raw, missing: null, qualityFlags: entity.qualityFlags };
   });
+}
+
+// ── case grain 합계 2종 — 직업력 단순합(직업별 일일 입력값의 합계, 근속·근무일수 가중 없음).
+// job grain 원본(weight/squatting) 2종을 직업 간에 합산한다. shoulder.case.sum*
+// (extractShoulderCaseSum)과 같은 정책이다.
+//
+// 합산 대상은 shared.jobs의 모든 plain object다 — enumerateJobEntities와 달리 기본(placeholder)
+// 행(직종·시작일·종료일·기간 override 전부 빈칸)도 jobExtras에 연결된 노출값이 있으면 포함한다.
+// 따라서 "case 합계 = job grain 값의 합"이 항상 성립하지는 않는다(어깨 선례 유지).
+// 직업↔extras 연결은 sharedJobId === job.id(ID 기반이라 extras 배열 순서와 무관)이고,
+// shared.jobs에 없는 orphan extras는 합산되지 않는다. 레거시 modules.knee.jobs[]는 이 함수가
+// 직접 읽지 않는다 — 원본에 shared.jobs가 없을 때 deterministicMigrate가 변환한 결과만 반영된다
+// (그 변환은 `weight || ''`라 레거시 숫자 weight 0은 blank로 바뀐다 — 이번 범위에서 수정하지 않음).
+//
+// 결측 정책(예측 코호트가 missing만 보고 qualityFlags는 안 보므로 손상값은 value가 아니라
+// 결측으로 표현한다):
+//  · 모듈 비활성/비객체 → structural_missing, shared.jobs 없음 → not_entered
+//  · 개별 입력: null·undefined·공백 문자열만 blank, 그 외 비-number/string·비유한·음수는 invalid
+//  · 전 직업 blank → not_entered (0이 아님). 입력한 0/'0'은 blank가 아닌 정상 0
+//  · 일부 직업만 blank → 그 직업은 "입력 없음"으로 보고 건너뛴 나머지의 합
+//  · invalid가 하나라도 있으면(정상 직업이 섞여 있어도) not_entered + invalid — 부분합 비반환.
+//    합산 결과 판정에서는 invalid 확인이 "전 직업 blank" 판정보다 먼저다
+//  · 최종 합이 유한값이 아니면(합산 overflow) not_entered + invalid
+function extractKneeCaseSum(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  field: 'weight' | 'squatting',
+): ExtractedValue<number> {
+  const { payload } = migrationResult;
+
+  if (!isKneeModuleActive(migrationResult)) {
+    const missing: MissingReason = 'structural_missing';
+    return { value: null, missing, qualityFlags: [] };
+  }
+
+  const shared = (payload.data.shared as Record<string, unknown>) ?? {};
+  const rawJobs = Array.isArray(shared.jobs) ? shared.jobs : [];
+  const jobs = rawJobs.filter(isPlainObject);
+  if (jobs.length === 0) {
+    return { value: null, missing: 'not_entered', qualityFlags: [] };
+  }
+
+  let sum = 0;
+  let enteredJobCount = 0;
+  let hasInvalid = false;
+  for (const job of jobs) {
+    const parsed = parseStrictNonNegative(findKneeJobExtra(migrationResult, job.id)?.[field]);
+    if (parsed.kind === 'blank') continue;
+    if (parsed.kind === 'invalid') {
+      hasInvalid = true;
+      continue;
+    }
+    enteredJobCount += 1;
+    sum += parsed.value;
+  }
+
+  if (hasInvalid) {
+    return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  }
+  if (enteredJobCount === 0) {
+    return { value: null, missing: 'not_entered', qualityFlags: [] };
+  }
+  if (!Number.isFinite(sum)) {
+    return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  }
+  return { value: sum, missing: null, qualityFlags: [] };
+}
+
+export function extractKneeCaseSumSquattingMinutesPerDay(mr: MigrationResult<AnalysisPatient>) {
+  return extractKneeCaseSum(mr, 'squatting');
+}
+export function extractKneeCaseSumDailyLoadKg(mr: MigrationResult<AnalysisPatient>) {
+  return extractKneeCaseSum(mr, 'weight');
 }
 
 export function extractKneeJobStairs(mr: MigrationResult<AnalysisPatient>) {

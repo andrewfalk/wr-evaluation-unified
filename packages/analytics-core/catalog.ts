@@ -273,7 +273,14 @@ export function computeRepeatedVariableValue(
 // (isGrainCompatible)로 자동 제공된다. 주의: 레시피에는 카탈로그 버전 필드가 없어 저장된
 // 레시피가 새 의미로 재실행된다(특히 최댓값 기준으로 저장된 필터 임계값). 이 버전은 실행 다이제스트
 // (캐시 키)만 바꾼다.
-export const CATALOG_VERSION = 'v26-case-sum-shoulder-cervical';
+//
+// 사용자 요청(2026-10-03) — 무릎 case grain 합계 변수. 신규 2개(knee.case.sumSquattingMinutesPerDay
+// [분/일], knee.case.sumDailyLoadKg [kg/일])를 case grain에 추가하고(analytics-core 카탈로그 81개:
+// case 48/job 19/disease 14, 서버 전용 meta 2개를 더한 통합 카탈로그 83개) prediction predictor로
+// 허용(PREDICTION_REVIEWED_DERIVED_PREDICTORS 등록). 기존 키의 값·의미는 바뀌지 않아 저장된
+// 레시피에는 영향이 없고 실행 다이제스트(캐시 키)만 바뀐다. disease grain은 case→disease broadcast
+// (isGrainCompatible)로 자동 제공된다.
+export const CATALOG_VERSION = 'v27-case-sum-knee';
 
 // PR4-B2 — outcome 명세(계획서 §2단계). 서버 검증(statsRecipeValidation.ts)과 클라이언트
 // 선택지(RecipePanel.jsx, 카탈로그 DTO의 predictionOutcomeLevels/predictionEventLevels)가
@@ -313,4 +320,7 @@ export const PREDICTION_REVIEWED_DERIVED_PREDICTORS: ReadonlySet<string> = new S
   'shoulder.case.sumVibrationHours',
   'cervical.case.maxJobCumulativeKgHours',
   'cervical.case.totalNonNeutralHoursPerDay',
+  // 무릎 case grain 합계(2026-10-03). 어깨·경추 합계와 같은 용도(판정 일관성 점검)로만 허용.
+  'knee.case.sumSquattingMinutesPerDay',
+  'knee.case.sumDailyLoadKg',
 ]);

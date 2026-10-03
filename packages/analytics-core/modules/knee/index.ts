@@ -16,6 +16,8 @@ import {
   extractKneeJobTightSpace,
   extractKneeJobKneeContact,
   extractKneeJobJumpDown,
+  extractKneeCaseSumSquattingMinutesPerDay,
+  extractKneeCaseSumDailyLoadKg,
 } from './extractors';
 import { isKneeAssessmentComplete } from './derived';
 
@@ -34,6 +36,8 @@ registerAnalyticsModule({
     'knee.job.tightSpace': extractKneeJobTightSpace,
     'knee.job.kneeContact': extractKneeJobKneeContact,
     'knee.job.jumpDown': extractKneeJobJumpDown,
+    'knee.case.sumSquattingMinutesPerDay': extractKneeCaseSumSquattingMinutesPerDay,
+    'knee.case.sumDailyLoadKg': extractKneeCaseSumDailyLoadKg,
   },
   isComplete: isKneeAssessmentComplete,
 });

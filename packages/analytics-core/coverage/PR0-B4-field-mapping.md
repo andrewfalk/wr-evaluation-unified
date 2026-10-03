@@ -369,6 +369,19 @@ temporal 4개는 병합 결과(`temporalSequence ?? temporalRelation`) 기준 **
 
 기존 `cervical.case.maxJobCumulativeKgHours`는 키를 유지한 채 값이 직업 중 최댓값 → **전 직업 합계**로 바뀌었고(`formula_audit` 유지, `prediction` 추가), 손상 입력은 `value+invalid`가 아니라 결측(`not_entered`+`invalid`)으로 반환한다.
 
+## 9. 무릎 case grain 합계 (사용자 요청 2026-10-03, Slice 9)
+
+§8과 같은 정책이다. 이미 노출된 job grain 원본(`knee.job.squattingMinutesPerDay`·`knee.job.dailyLoadKg`)을 **직업 간 단순합**으로 case grain에 롤업한 파생 변수 2종. 전부 `grain: case`, `provenance: derived`, `prediction` predictor 허용(`PREDICTION_REVIEWED_DERIVED_PREDICTORS` 등록), `formula_audit` 불허. disease grain은 case→disease broadcast(`isGrainCompatible`)로 자동 제공되며 무릎이 아닌 상병 행에도 같은 값이 복제된다.
+
+| 목표 카탈로그 키 | 산식 | 단위 | 완료 |
+|---|---|---|---|
+| `knee.case.sumSquattingMinutesPerDay` | Σ_job `jobExtras[].squatting` | 분/일 | 예 |
+| `knee.case.sumDailyLoadKg` | Σ_job `jobExtras[].weight` (이미 "일일 누적 kg" 단일 필드라 곱셈 없음) | kg/일 | 예 |
+
+- 단위 주의: 쪼그려앉기는 원본 입력 단위 그대로 **분/일**(어깨·경추 합계는 시간).
+- 합산 대상은 `shared.jobs`의 모든 객체다. 직종명·시작일·종료일·기간 override가 전부 빈 기본 행도 `jobExtras`에 연결된 노출값이 있으면 합산하므로(어깨 선례), job grain(`enumerateJobEntities`는 기본 행 제외)의 값 합과 다를 수 있다.
+- 결측 정책은 §8과 동일: 전 직업 blank → `not_entered`, 일부 blank → 건너뜀, 손상값이 하나라도 있으면 부분합 없이 `not_entered`+`invalid`. 입력한 `0`/`'0'`은 정상 0이다(단, 레거시 `modules.knee.jobs[]` 변환은 `weight || ''`라 숫자 `weight: 0`이 blank가 되는 기존 동작이 있으며 이번 범위에서 수정하지 않았다).
+
 ## 요약 (갱신)
 
 - **기존유지(완료)**: §0의 카탈로그 키 전부(5차 개정 이후 19개 — task/vibration_interval 4종 삭제, bmi 1종 추가) — 원본 raw 필드 기준으로는 klgRight/Left·ellmanRight/Left·confirmedRight/Left·confirmedCode/Name(파생 boolean만)·verticalDistribution·concomitantSpondylosis·jobName(job)·knee/shoulder/elbow/wrist/cervical/spine 각 대표 파생변수 자체

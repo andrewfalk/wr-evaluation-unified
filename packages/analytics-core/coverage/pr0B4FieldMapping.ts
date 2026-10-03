@@ -71,6 +71,10 @@ export const PR0_B4_FIELD_MAPPING: readonly FieldMappingEntry[] = [
   done('shoulder.case.sumVibrationHours', '8'),
   done('cervical.case.totalNonNeutralHoursPerDay', '8'),
 
+  // ── 사용자 요청(2026-10-03) — 무릎 case grain 합계 (매핑표 §9) ────────────────
+  done('knee.case.sumSquattingMinutesPerDay', '9'),
+  done('knee.case.sumDailyLoadKg', '9'),
+
   // ── §2. knee jobExtras + DEFERRED 6개 (Slice 4) ─────────────────────────────
   done('knee.job.squattingMinutesPerDay', '4'),
   done('knee.job.dailyLoadKg', '4'),
