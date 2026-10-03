@@ -249,7 +249,7 @@ describe('validateRecipe — 카탈로그 키 존재', () => {
 const PREDICTION_ALLOWED_OFFICIAL_KEYS = ['cervical.case.maxJobCumulativeKgHours'];
 const PREDICTION_DENIED_OFFICIAL_KEYS = CATALOG_KEYS.filter((key) => !PREDICTION_ALLOWED_OFFICIAL_KEYS.includes(key));
 
-// 어깨·경추 case grain 합계 신규 6개 — association·prediction만 허용, formula_audit는 불허.
+// 어깨·경추·무릎 case grain 합계 신규 8개 — association·prediction만 허용, formula_audit는 불허.
 const CASE_SUM_KEYS = [
   'shoulder.case.sumOverheadHours',
   'shoulder.case.sumRepetitiveMediumHours',
@@ -257,6 +257,8 @@ const CASE_SUM_KEYS = [
   'shoulder.case.sumHeavyLoadHoursPerDay',
   'shoulder.case.sumVibrationHours',
   'cervical.case.totalNonNeutralHoursPerDay',
+  'knee.case.sumSquattingMinutesPerDay',
+  'knee.case.sumDailyLoadKg',
 ];
 
 describe('validateRecipe — 분석 목적(§실측: 공식점수 7개 중 경추 누적부하량만 prediction 허용)', () => {
@@ -329,14 +331,14 @@ describe('validateRecipe — 예측(prediction) 역할·grain·eventLevel·필�
     expect(result.valid, !result.valid ? JSON.stringify(result.errors) : '').toBe(true);
   });
 
-  it('어깨·경추 case 합계 신규 6개 + 경추 누적부하량 = 7개를 case grain predictor로 허용한다', () => {
+  it('어깨·경추·무릎 case 합계 신규 8개 + 경추 누적부하량 = 9개를 case grain predictor로 허용한다', () => {
     const result = validateRecipe(predictionRecipe({
       variableKeys: ['diagnosis.rollup.anyHighRelatedness', ...CASE_SUM_KEYS, 'cervical.case.maxJobCumulativeKgHours'],
     }), 'analyze');
     expect(result.valid, !result.valid ? JSON.stringify(result.errors) : '').toBe(true);
   });
 
-  it('같은 7개를 disease grain에서도 predictor로 허용한다(case→disease broadcast 규칙)', () => {
+  it('같은 9개를 disease grain에서도 predictor로 허용한다(case→disease broadcast 규칙)', () => {
     const result = validateRecipe(predictionRecipe({
       grain: 'disease',
       variableKeys: ['diagnosis.assessment.status', ...CASE_SUM_KEYS, 'cervical.case.maxJobCumulativeKgHours'],
@@ -353,6 +355,18 @@ describe('validateRecipe — 예측(prediction) 역할·grain·eventLevel·필�
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.errors.some((e) => e.code === 'PREDICTION_OUTCOME_INVALID_ROLE')).toBe(true);
   });
+
+  it.each(['knee.case.sumSquattingMinutesPerDay', 'knee.case.sumDailyLoadKg'])(
+    '무릎 합계 변수 %s를 outcome으로 쓰면 PREDICTION_OUTCOME_INVALID_ROLE로 거부한다(predictor 역할)',
+    (kneeKey) => {
+      const result = validateRecipe(predictionRecipe({
+        variableKeys: [kneeKey, 'patient.identity.bmi'],
+        prediction: { outcomeKey: kneeKey, eventLevel: 'true' },
+      }), 'analyze');
+      expect(result.valid).toBe(false);
+      if (!result.valid) expect(result.errors.some((e) => e.code === 'PREDICTION_OUTCOME_INVALID_ROLE')).toBe(true);
+    },
+  );
 
   it('job grain은 PREDICTION_GRAIN_NOT_SUPPORTED로 거부한다', () => {
     const result = validateRecipe(predictionRecipe({

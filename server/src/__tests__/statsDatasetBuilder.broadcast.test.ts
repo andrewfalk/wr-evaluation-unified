@@ -444,3 +444,136 @@ describe('어깨·경추 case 합계 변수 — 예측 코호트 S2 제외', () 
     expect(stages.s2Rows.map((r) => r.caseId)).toEqual(['case-ok']);
   });
 });
+
+// 무릎 case grain 합계(2026-10-03) — 어깨·경추 합계와 같은 범용 broadcast 규칙으로 job/disease grain에서
+// 선택된다. 무릎+어깨 상병을 한 케이스에 함께 넣어, 무릎 상병 행뿐 아니라 무릎이 아닌(어깨) 상병 행에도
+// 정상값과 손상값 결측(not_entered + invalid)이 그대로 복제됨을 고정한다.
+function kneeSnapshotRow(
+  id: string,
+  personId: string,
+  data: {
+    jobs: Array<Record<string, unknown>>;
+    diagnoses?: Array<Record<string, unknown>>;
+    kneeJobExtras?: unknown[];
+    gender?: string;
+  },
+): SnapshotRow {
+  return {
+    id,
+    patientPersonId: personId,
+    assignedDoctorUserId: null,
+    createdAt: new Date('2024-01-01T00:00:00.000Z'),
+    payload: {
+      data: {
+        shared: { jobs: data.jobs, diagnoses: data.diagnoses ?? [], gender: data.gender },
+        modules: { knee: { jobExtras: data.kneeJobExtras ?? [] }, shoulder: { jobExtras: [] } },
+        activeModules: ['knee', 'shoulder'],
+      },
+    },
+  };
+}
+
+const KNEE_CASE_SUM_KEYS = ['knee.case.sumSquattingMinutesPerDay', 'knee.case.sumDailyLoadKg'] as const;
+const KNEE_DX = { id: 'dx-knee', code: 'M17.1', name: '무릎 관절염', side: 'right' };
+
+describe('무릎 case 합계 변수의 job/disease broadcast', () => {
+  it('disease grain: 무릎 상병 행과 무릎이 아닌(어깨) 상병 행 모두에 정상값이 같은 value·missing·qualityFlags로 복제된다', () => {
+    const rows = [
+      kneeSnapshotRow('case-1', 'person-1', {
+        jobs: [JOB_A, JOB_B],
+        diagnoses: [KNEE_DX, SHOULDER_DX],
+        kneeJobExtras: [
+          { sharedJobId: 'job-1', squatting: '30', weight: '2000' },
+          { sharedJobId: 'job-2', squatting: '45', weight: '1500' },
+        ],
+      }),
+    ];
+    const result = buildDataset(rows, recipe({ grain: 'disease', variableKeys: [...KNEE_CASE_SUM_KEYS] }), RECIPE_DIGEST, CATALOG_BY_KEY);
+    // 무릎(right) 1행 + 어깨(both → left/right) 2행 — 행 모집단은 진단 기준이며 변수 선택과 무관
+    expect(result.observationCount).toBe(3);
+    for (const row of result.rows) {
+      expect(row.values['knee.case.sumSquattingMinutesPerDay']).toEqual({ value: 75, missing: null, qualityFlags: [] });
+      expect(row.values['knee.case.sumDailyLoadKg']).toEqual({ value: 3500, missing: null, qualityFlags: [] });
+    }
+  });
+
+  it('disease grain: 손상값 결측(not_entered + invalid)이 무릎 외 상병 행을 포함한 모든 행에 그대로 복제된다', () => {
+    const rows = [
+      kneeSnapshotRow('case-1', 'person-1', {
+        jobs: [JOB_A, JOB_B],
+        diagnoses: [KNEE_DX, SHOULDER_DX],
+        kneeJobExtras: [
+          { sharedJobId: 'job-1', squatting: '30', weight: '45kg' },
+          { sharedJobId: 'job-2', squatting: '45', weight: '1500' },
+        ],
+      }),
+    ];
+    const result = buildDataset(rows, recipe({ grain: 'disease', variableKeys: [...KNEE_CASE_SUM_KEYS] }), RECIPE_DIGEST, CATALOG_BY_KEY);
+    expect(result.observationCount).toBe(3);
+    for (const row of result.rows) {
+      // 쪼그려앉기는 정상, 중량물만 손상 — 변수별로 독립이다
+      expect(row.values['knee.case.sumSquattingMinutesPerDay']).toEqual({ value: 75, missing: null, qualityFlags: [] });
+      expect(row.values['knee.case.sumDailyLoadKg']).toEqual({ value: null, missing: 'not_entered', qualityFlags: ['invalid'] });
+    }
+  });
+
+  it('job grain: job이 2개인 case에서 합계 값이 2행에 복제되고 행 수는 변수 선택과 무관하다', () => {
+    const rows = [
+      kneeSnapshotRow('case-1', 'person-1', {
+        jobs: [JOB_A, JOB_B],
+        kneeJobExtras: [
+          { sharedJobId: 'job-1', squatting: '30' },
+          { sharedJobId: 'job-2', squatting: '45' },
+        ],
+      }),
+    ];
+    const result = buildDataset(
+      rows,
+      recipe({ variableKeys: ['job.identity.jobNameNormalized', 'knee.case.sumSquattingMinutesPerDay'] }),
+      RECIPE_DIGEST,
+      CATALOG_BY_KEY,
+    );
+    expect(result.observationCount).toBe(2);
+    for (const row of result.rows) {
+      expect(row.values['knee.case.sumSquattingMinutesPerDay']).toEqual({ value: 75, missing: null, qualityFlags: [] });
+    }
+  });
+
+  it('2개 변수는 브로드캐스트 안전 변수(non_sensitive·continuous·case)라 job/disease에서 선택 가능하다', () => {
+    for (const key of KNEE_CASE_SUM_KEYS) {
+      const variable = CATALOG_BY_KEY.get(key)!;
+      expect(variable.grain, key).toBe('case');
+      expect(variable.type, key).toBe('continuous');
+      expect(variable.sensitivity, key).toBe('non_sensitive');
+      expect(variable.predictionRole, key).toBe('predictor');
+    }
+  });
+
+  it('예측 코호트 S2: 손상 입력 case는 predictor 결측으로 제외되고 정상 case만 남는다', () => {
+    const rows = [
+      kneeSnapshotRow('case-ok', 'person-1', {
+        jobs: [JOB_A],
+        diagnoses: [KNEE_DX],
+        gender: 'male',
+        kneeJobExtras: [{ sharedJobId: 'job-1', squatting: '30', weight: '2000' }],
+      }),
+      kneeSnapshotRow('case-corrupt', 'person-2', {
+        jobs: [JOB_A],
+        diagnoses: [KNEE_DX],
+        gender: 'female',
+        kneeJobExtras: [{ sharedJobId: 'job-1', squatting: '30', weight: '-1' }],
+      }),
+    ];
+    const predictorKeys = [...KNEE_CASE_SUM_KEYS];
+    const dataset = buildDataset(
+      rows,
+      recipe({ grain: 'case', variableKeys: ['patient.identity.gender', ...predictorKeys] }),
+      RECIPE_DIGEST,
+      CATALOG_BY_KEY,
+      { cohortDigest: 'cohort-digest-1' },
+    );
+    const stages = computePredictionDataStages(dataset.rows, 'patient.identity.gender', predictorKeys);
+    expect(stages.s1Rows.map((r) => r.caseId).sort()).toEqual(['case-corrupt', 'case-ok']);
+    expect(stages.s2Rows.map((r) => r.caseId)).toEqual(['case-ok']);
+  });
+});
