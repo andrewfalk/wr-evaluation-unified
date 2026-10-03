@@ -1,9 +1,34 @@
+import { useLayoutEffect, useRef } from 'react';
 import { getAllModules } from '../moduleRegistry';
 import {
   getDiagnosisModuleHint,
   isValidDiagnosisModuleId,
   resolveDiagnosisModule,
 } from '../utils/diagnosisMapping';
+
+// 진단명은 길어질 수 있어 단일행 input은 잘린다 — 내용에 맞춰 높이가 늘어나는 textarea.
+// 값은 한 줄 텍스트로 취급(Enter 차단, 붙여넣기 개행은 공백으로).
+function DiagnosisNameInput({ value, onChange, placeholder }) {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+
+  return (
+    <textarea
+      ref={ref}
+      className="diagnosis-name-input"
+      rows="1"
+      value={value}
+      placeholder={placeholder}
+      onChange={e => onChange(e.target.value.replace(/\s*[\r\n]+\s*/g, ' '))}
+      onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }}
+    />
+  );
+}
 
 export function DiagnosisForm({ diagnoses, onChange, errors, createDiagnosis, showModuleHints = false, activeModules = [] }) {
   const moduleOptions = getAllModules().filter(mod => isValidDiagnosisModuleId(mod.id));
@@ -57,9 +82,9 @@ export function DiagnosisForm({ diagnoses, onChange, errors, createDiagnosis, sh
             )}
             {diagnoses.length > 1 && <button className="btn btn-danger btn-xs" onClick={() => removeDiagnosis(i)}>삭제</button>}
           </div>
-          <div className="form-row">
+          <div className="form-row diagnosis-code-name-row">
             <div className="form-group"><label>진단코드 *</label><input value={diag.code} onChange={e => handleDiagnosis(i, 'code', e.target.value)} placeholder="M17.0" /></div>
-            <div className="form-group"><label>진단명 *</label><input value={diag.name} onChange={e => handleDiagnosis(i, 'name', e.target.value)} placeholder="진단명 입력" /></div>
+            <div className="form-group"><label>진단명 *</label><DiagnosisNameInput value={diag.name} onChange={v => handleDiagnosis(i, 'name', v)} placeholder="진단명 입력" /></div>
           </div>
           <div className="form-group">
             <label>평가 모듈</label>
