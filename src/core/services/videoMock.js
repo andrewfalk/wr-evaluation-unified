@@ -40,21 +40,27 @@ const MOCK_VALUES = {
 // 실제 임계값은 6.0-B2 검증으로 확정(§8.9).
 const CONFIDENCE_BY_MODE = { auto: 0.82, 'auto-review': 0.7, candidate: 0.5 };
 
+// 이전 버전이 환자 데이터(제안 후보의 reason)에 이미 저장해 둔 개발 용어 문구를 화면에서만 새 문구로
+// 바꿔 보여준다(저장값은 건드리지 않는다). 새 문구는 CANDIDATE_REASONS에서 바로 나온다.
+export function displayCandidateReason(reason) {
+  return typeof reason === 'string' ? reason.replace('임계 6.0-B2 미검증', '정확도 검증 전') : reason;
+}
+
 export const CANDIDATE_REASONS = {
   suspectedKneeTwist: '무릎 비틀림은 2D 영상에서 저신뢰 — 수기 확인 필요',
   vibrationToolUseDurationCandidate: '공구 사용시간 후보만 — 진동 가속도 측정 불가',
   trunkPostureG: 'G1~G11은 하중 위치·작업유형 반영 — 수기 확인 필수',
   trunkFlexionOver45Duration: '척추 45°↑ 굴곡 시간은 관찰값 — 작업 부담 판정은 수기 확인',
   neckCombinedFlexRot: '회전·복합자세는 2D 저신뢰 — 임계 미만 제안 금지',
-  shoulderRepetitionRate: '어깨 상완거상 반복 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
-  elbowRepetitionRate: '팔꿈치 굴곡 반복 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
-  wristRepetitionRate: '손목 굽힘 반복 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
-  wristFlexionPeakAngle: '손목 굴곡 peak 추정(참고용·측면 클립) — 자동입력 금지, 임계 6.0-B2 미검증',
-  wristDeviationPeakAngle: '손목 요/척측 편위 peak 추정(참고용·정면 클립) — 자동입력 금지, 임계 6.0-B2 미검증',
-  repetitiveMediumHoursLeft: '어깨 상완거상 반복(중간속도, 좌측) 시간 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
-  repetitiveMediumHoursRight: '어깨 상완거상 반복(중간속도, 우측) 시간 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
-  repetitiveFastHoursLeft: '어깨 상완거상 반복(빠른속도, 좌측) 시간 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
-  repetitiveFastHoursRight: '어깨 상완거상 반복(빠른속도, 우측) 시간 추정(참고용) — 자동입력 금지, 임계 6.0-B2 미검증',
+  shoulderRepetitionRate: '어깨 상완거상 반복 추정(참고용) — 자동입력 금지, 정확도 검증 전',
+  elbowRepetitionRate: '팔꿈치 굴곡 반복 추정(참고용) — 자동입력 금지, 정확도 검증 전',
+  wristRepetitionRate: '손목 굽힘 반복 추정(참고용) — 자동입력 금지, 정확도 검증 전',
+  wristFlexionPeakAngle: '손목 굴곡 peak 추정(참고용·측면 클립) — 자동입력 금지, 정확도 검증 전',
+  wristDeviationPeakAngle: '손목 요/척측 편위 peak 추정(참고용·정면 클립) — 자동입력 금지, 정확도 검증 전',
+  repetitiveMediumHoursLeft: '어깨 상완거상 반복(중간속도, 좌측) 시간 추정(참고용) — 자동입력 금지, 정확도 검증 전',
+  repetitiveMediumHoursRight: '어깨 상완거상 반복(중간속도, 우측) 시간 추정(참고용) — 자동입력 금지, 정확도 검증 전',
+  repetitiveFastHoursLeft: '어깨 상완거상 반복(빠른속도, 좌측) 시간 추정(참고용) — 자동입력 금지, 정확도 검증 전',
+  repetitiveFastHoursRight: '어깨 상완거상 반복(빠른속도, 우측) 시간 추정(참고용) — 자동입력 금지, 정확도 검증 전',
 };
 
 function buildFeatureValue(featureKey) {

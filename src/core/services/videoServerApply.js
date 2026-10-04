@@ -8,6 +8,12 @@ import { getLockToken } from './lockTokenStore';
 
 const MOCK_BUNDLE = 'mock-6.0-2';
 
+// 오류 문구에 서버 job 상태 코드를 그대로 노출하지 않기 위한 한글 라벨(모르는 상태는 원문 폴백).
+const JOB_STATUS_LABELS = {
+  queued: '대기 중', running: '분석 중', processing: '분석 중', review_pending: '검수 대기',
+  applied: '적용됨', failed: '실패', cancelled: '취소됨', canceled: '취소됨',
+};
+
 // 멱등 해시 — 서버는 text 동등비교만 하므로 결정적 canonical 문자열이면 충분(§8.12).
 // previousValue는 제외(재시도 시 변동 방지) — jobId + targetPath + appliedValue 기준.
 export function computeAppliedInputsHash(jobId, appliedInput) {
@@ -45,7 +51,7 @@ export async function applyVideoFeatureViaServer(patient, opts, env) {
   );
   // 방어: 분석이 검수 대기(review_pending)가 아니면 적용하지 않는다(서버 apply가 409로 거부하기 전 조기 차단).
   if (job.status && job.status !== 'review_pending') {
-    const err = new Error(`분석이 아직 검수 대기 상태가 아닙니다(${job.status}).`);
+    const err = new Error(`분석이 아직 검수 대기 상태가 아닙니다(${JOB_STATUS_LABELS[job.status] || job.status}).`);
     err.code = 'JOB_NOT_READY';
     throw err;
   }
