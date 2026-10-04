@@ -242,6 +242,24 @@ describe('validateRecipe — 카탈로그 키 존재', () => {
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.errors.some((e) => e.code === 'UNKNOWN_VARIABLE')).toBe(true);
   });
+
+  // 제품 결정(2026-10-04) — 평가일 기준 나이는 삭제됐고 자동 치환하지 않는다. 오래 열린 탭의 구 레시피는
+  // UNKNOWN_VARIABLE(path=구 키)로 거부되고 클라이언트가 삭제 안내를 보여준다.
+  it('삭제된 평가일 기준 나이(patient.identity.ageAtEvaluation)는 UNKNOWN_VARIABLE로 거부한다', () => {
+    const result = validateRecipe(baseRecipe({ variableKeys: ['patient.identity.ageAtEvaluation'] }), 'analyze');
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'UNKNOWN_VARIABLE', path: 'patient.identity.ageAtEvaluation' }));
+    }
+  });
+
+  it('재해일자 기준 만 나이(patient.identity.ageAtInjury)는 연관성·예측에서 허용되고 공식 감사에서는 불허다', () => {
+    const key = 'patient.identity.ageAtInjury';
+    expect(validateRecipe(baseRecipe({ variableKeys: [key] }), 'analyze').valid).toBe(true);
+    const audit = validateRecipe(baseRecipe({ variableKeys: [key], analysisPurpose: 'formula_audit' }), 'analyze');
+    expect(audit.valid).toBe(false);
+    if (!audit.valid) expect(audit.errors.some((e) => e.code === 'PURPOSE_NOT_ALLOWED')).toBe(true);
+  });
 });
 
 // 2026-10-02 — 경추 누적 총부하량(기존 formula_audit 유지)이 prediction predictor로 허용됐다.

@@ -135,24 +135,27 @@ export function extractPatientIdentityBmi(migrationResult: MigrationResult<Analy
   return { value: bmi, missing: null, qualityFlags: [] };
 }
 
-// PR4-B2 — 예측 predictor 신설(계획서 §2단계 "patient.identity.ageAtEvaluation").
-// calculateAgeStrict(dates.ts:51)로 계산한다 — 타임존에 의존하는 Date 산술을 쓰지
-// 않는다. 둘 중 하나라도 공백이면 not_entered, 형식이 틀리거나(strict ISO 아님)
-// 평가일이 생년월일보다 이르면(음수 나이) invalid — calculateAgeStrict가 두 경우
-// 모두 null을 반환하므로 blank 여부로만 두 상태를 가른다.
-export function extractPatientIdentityAgeAtEvaluation(
+// 만 나이(재해일자 기준) — 인적사항 화면의 "만 나이"(BasicInfoForm, refDateField='injuryDate')와
+// 무릎·어깨·경추·팔꿈치 derived가 쓰는 기준과 같다. 제품 결정(2026-10-04)으로 평가일 기준
+// 나이(구 ageAtEvaluation)를 대체했다.
+// calculateAgeStrict(dates.ts:51)로 계산한다 — 타임존에 의존하는 Date 산술을 쓰지 않는다.
+// UI의 calculateAge(common.ts)는 비정형 날짜를 lenient `new Date(문자열)`로 폴백하므로, 비정형
+// 입력에서는 두 값이 다를 수 있다(strict ISO 입력에서는 같다). 둘 중 하나라도 공백이면
+// not_entered, 형식이 틀리거나(strict ISO 아님) 재해일자가 생년월일보다 이르면(음수 나이)
+// invalid — calculateAgeStrict가 두 경우 모두 null을 반환하므로 blank 여부로만 두 상태를 가른다.
+export function extractPatientIdentityAgeAtInjury(
   migrationResult: MigrationResult<AnalysisPatient>,
 ): ExtractedValue<number> {
   const shared = getShared(migrationResult);
   const birth = shared['birthDate'];
-  const evaluation = shared['evaluationDate'];
-  if (isBlank(birth) || isBlank(evaluation)) {
+  const injury = shared['injuryDate'];
+  if (isBlank(birth) || isBlank(injury)) {
     return { value: null, missing: 'not_entered', qualityFlags: [] };
   }
-  if (typeof birth !== 'string' || typeof evaluation !== 'string') {
+  if (typeof birth !== 'string' || typeof injury !== 'string') {
     return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
   }
-  const age = calculateAgeStrict(birth, evaluation);
+  const age = calculateAgeStrict(birth, injury);
   if (age === null) {
     return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
   }

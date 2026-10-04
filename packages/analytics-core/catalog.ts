@@ -280,7 +280,14 @@ export function computeRepeatedVariableValue(
 // 허용(PREDICTION_REVIEWED_DERIVED_PREDICTORS 등록). 기존 키의 값·의미는 바뀌지 않아 저장된
 // 레시피에는 영향이 없고 실행 다이제스트(캐시 키)만 바뀐다. disease grain은 case→disease broadcast
 // (isGrainCompatible)로 자동 제공된다.
-export const CATALOG_VERSION = 'v27-case-sum-knee';
+//
+// 제품 결정(2026-10-04) — 평가일 기준 나이 patient.identity.ageAtEvaluation(예측 전용)을 삭제하고
+// 재해일자 기준 만 나이 patient.identity.ageAtInjury(연관성·예측)로 교체한다(1:1 교체라 개수 변동
+// 없음). 앱 전체가 임상 판단에 쓰는 나이(인적사항 "만 나이", 무릎·어깨·경추·팔꿈치 derived)가
+// 재해일자 기준이다. 구 키는 카탈로그에서 사라져 서버가 UNKNOWN_VARIABLE로 거부하고, 클라이언트는
+// 삭제 안내를 보여준다(자동 치환 없음 — 기준일이 달라 값의 의미가 다르다). stats_runs는
+// 만료되는 실행 캐시라 데이터 마이그레이션은 없다.
+export const CATALOG_VERSION = 'v28-age-at-injury';
 
 // PR4-B2 — outcome 명세(계획서 §2단계). 서버 검증(statsRecipeValidation.ts)과 클라이언트
 // 선택지(RecipePanel.jsx, 카탈로그 DTO의 predictionOutcomeLevels/predictionEventLevels)가
@@ -303,7 +310,7 @@ export const PREDICTION_OUTCOME_SPECS: Readonly<Record<string, PredictionOutcome
 // provenance==='derived'인 카탈로그 변수가 전부 이 목록에 있는지 확인한다(§2단계 검사 4).
 export const PREDICTION_REVIEWED_DERIVED_PREDICTORS: ReadonlySet<string> = new Set([
   'patient.identity.bmi',
-  'patient.identity.ageAtEvaluation',
+  'patient.identity.ageAtInjury',
   'job.rollup.longestTenureYears',
   'diagnosis.rollup.hasKnee',
   'diagnosis.rollup.hasWrist',

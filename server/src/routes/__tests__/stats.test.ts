@@ -225,7 +225,7 @@ describe('GET /catalog', () => {
     expect(bmi?.predictionOutcomeLevels).toBeNull();
     expect(bmi?.predictionEventLevels).toBeNull();
 
-    const age = res.body.variables.find((v: { key: string }) => v.key === 'patient.identity.ageAtEvaluation');
+    const age = res.body.variables.find((v: { key: string }) => v.key === 'patient.identity.ageAtInjury');
     expect(age?.predictionRole).toBe('predictor');
   });
 

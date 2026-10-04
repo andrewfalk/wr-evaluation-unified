@@ -135,7 +135,8 @@ export const PR0_B4_FIELD_MAPPING: readonly FieldMappingEntry[] = [
   done('diagnosis.rollup.hasCervical', '9'),
   done('job.rollup.longestTenureYears', '9'),
 
-  // ── PR4-B2 — 예측(prediction) 분석 착수. 신규 case-grain 파생 변수 1개(생년월일·
-  // 평가일자 원본 필드는 이미 카탈로그에 있음 — coverage/shared.ts 변경 없음).
-  done('patient.identity.ageAtEvaluation', 'PR4-B2'),
+  // ── PR4-B2 — 예측(prediction) 분석 착수. 신규 case-grain 파생 변수 1개(생년월일 원본 필드는
+  // 이미 카탈로그에 있음 — coverage/shared.ts 변경 없음). 제품 결정(2026-10-04): 평가일 기준
+  // 나이(ageAtEvaluation)를 재해일자 기준 만 나이(ageAtInjury)로 교체. shared.injuryDate도 이미 included.
+  done('patient.identity.ageAtInjury', 'PR4-B2'),
 ];
