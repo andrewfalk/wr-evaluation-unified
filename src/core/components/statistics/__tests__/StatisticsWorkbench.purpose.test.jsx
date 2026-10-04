@@ -39,6 +39,8 @@ function catalogFixture(extraVariables = []) {
       variable('p.assocOnly', '연관성 전용 변수', ['association']),
       variable('p.audit', '감사 가능 변수', ['association', 'formula_audit']),
       variable('p.pred', '예측 가능 변수', ['association', 'prediction'], { predictionRole: 'predictor' }),
+      variable('g.assoc', '연관성 전용 그룹', ['association'], { type: 'categorical' }),
+      variable('g.audit', '감사 가능 그룹', ['association', 'formula_audit'], { type: 'categorical' }),
       ...extraVariables,
     ],
     supportedGrains: ['case'],
@@ -179,5 +181,47 @@ describe('StatisticsWorkbench — 삭제된 변수 복구', () => {
     const audit = await screen.findByRole('checkbox', { name: /감사 가능 변수/ });
     expect(audit.checked).toBe(true);
     expect(screen.queryByText(/선택에서 제거했습니다/)).toBeNull();
+  });
+
+  it('재조회가 실패해도 복구 버튼이 유지되고, 카탈로그 오류 화면의 "다시 시도"로 복구를 이어갈 수 있다', async () => {
+    const user = userEvent.setup();
+    fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
+    previewStatsAnalysis.mockRejectedValueOnce(unknownVariableError('p.unknown'));
+    render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
+    await user.click(await screen.findByRole('checkbox', { name: /감사 가능 변수/ }));
+    await waitForDebounce();
+
+    // 1차 재조회: 네트워크 오류로 실패
+    fetchStatsCatalog.mockRejectedValueOnce(new Error('network down'));
+    await user.click(await screen.findByRole('button', { name: '카탈로그 새로 불러오기' }));
+    await screen.findByText(/카탈로그를 불러오지 못했습니다/);
+    // 복구 필요 상태는 유지되고(버튼 그대로), 오류 화면에도 재시도 버튼이 있다.
+    expect(screen.getByRole('button', { name: '카탈로그 새로 불러오기' })).toBeTruthy();
+    const retry = screen.getByRole('button', { name: '다시 시도' });
+
+    // 2차: 재시도 성공 → 화면 복구 + 복구 버튼 해제 + 정상 선택 보존
+    fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
+    await user.click(retry);
+    const audit = await screen.findByRole('checkbox', { name: /감사 가능 변수/ });
+    expect(audit.checked).toBe(true);
+    await waitFor(() => expect(screen.queryByRole('button', { name: '카탈로그 새로 불러오기' })).toBeNull());
+    expect(fetchStatsCatalog).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('StatisticsWorkbench — 그룹 변수 후보와 분석 목적', () => {
+  it('공식 감사에서는 연관성 전용 변수를 그룹 변수로 고를 수 없고, 연관성에서는 고를 수 있다', async () => {
+    const user = userEvent.setup();
+    fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
+    render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
+    await screen.findByRole('checkbox', { name: /감사 가능 변수/ });
+
+    const groupSelect = () => within(screen.getByLabelText('분석 레시피')).getByLabelText('그룹 변수');
+    const optionLabels = () => Array.from(groupSelect().querySelectorAll('option')).map((o) => o.textContent);
+    expect(optionLabels()).toContain('연관성 전용 그룹');
+
+    await user.click(within(screen.getByLabelText('분석 레시피')).getByRole('button', { name: '공식 감사' }));
+    expect(optionLabels()).toContain('감사 가능 그룹');
+    expect(optionLabels()).not.toContain('연관성 전용 그룹');
   });
 });

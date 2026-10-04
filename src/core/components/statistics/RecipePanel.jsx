@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { describeStatsApiError } from './describeStatsError';
 import { describeMethodReasonCode } from './describeMethodReasonCode';
-import { isGrainCompatible } from '@analytics-core/common';
+import { isGrainCompatible, isPurposeCompatible } from '@analytics-core/common';
 import { PURPOSE_LABELS } from './purposeLabels';
 import { PREDICTION_REGISTERED_AT_KEY } from './workbenchTransitions';
 
@@ -457,9 +457,11 @@ export function RecipePanel({
   const stratifyCandidates = useMemo(() => {
     const GROUPING_TYPES = new Set(['boolean', 'ordinal', 'categorical']);
     return Array.from(grainCatalogByKey.values())
-      .filter((v) => GROUPING_TYPES.has(v.type) && v.analysisRole !== 'filter_only' && !selectedKeys.includes(v.key))
+      .filter((v) => GROUPING_TYPES.has(v.type) && v.analysisRole !== 'filter_only' && !selectedKeys.includes(v.key)
+        // 서버는 stratifyByKey에도 분석 목적을 검사한다(PURPOSE_NOT_ALLOWED) — 선택 자체를 막는다.
+        && isPurposeCompatible(v, analysisPurpose))
       .sort((a, b) => a.label.localeCompare(b.label, 'ko'));
-  }, [grainCatalogByKey, selectedKeys]);
+  }, [grainCatalogByKey, selectedKeys, analysisPurpose]);
 
   const formulaFamiliesNeedingChoice = useMemo(() => {
     const seen = new Set();

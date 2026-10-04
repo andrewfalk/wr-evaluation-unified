@@ -254,6 +254,9 @@ export function StatisticsWorkbench({
   const [transitionNotice, setTransitionNotice] = useState(null);
   // 카탈로그 재조회 후 사라진 키를 초안에서 정리했다는 안내.
   const [catalogPruneNotice, setCatalogPruneNotice] = useState(null);
+  // 서버가 UNKNOWN_VARIABLE로 거부한 키 — 카탈로그 재조회가 **성공할 때까지** 유지한다(재조회가 실패해도
+  // 복구 버튼이 사라지지 않게 오류 상태에서 파생하지 않고 별도 state로 둔다).
+  const [recoveryKeys, setRecoveryKeys] = useState([]);
 
   const draftSetters = {
     analysisMode: setAnalysisMode, analysisPurpose: setAnalysisPurpose, variableKeys: setVariableKeys,
@@ -277,6 +280,7 @@ export function StatisticsWorkbench({
   // 구 키를 새 키로 자동 치환하지 않는다(값의 의미가 달라졌을 수 있어 사용자가 다시 고른다).
   useEffect(() => {
     if (catalogState.status !== 'ready') return;
+    setRecoveryKeys([]); // 재조회 성공 — 복구 필요 상태 해제(실패·로딩 중에는 유지)
     const pruned = pruneStaleSelections(currentDraft(), catalogByKey);
     if (!pruned) return;
     applyDraftPatch(pruned.patch);
@@ -548,16 +552,26 @@ export function StatisticsWorkbench({
   }, [runPolling.status]);
 
   // 서버가 UNKNOWN_VARIABLE로 거부한 오류(구 번들·오래 열린 탭의 삭제된 변수)에서 키를 뽑아 복구 안내를 띄운다.
-  const staleVariableKeys = Array.from(new Set([
+  const detectedUnknownKeys = Array.from(new Set([
     ...getUnknownVariableKeys(analyzeError),
     ...(isPreviewCurrent && previewState.status === 'error' ? getUnknownVariableKeys(previewState.error) : []),
   ]));
+  const detectedUnknownSignature = detectedUnknownKeys.join('|');
+  useEffect(() => {
+    if (detectedUnknownKeys.length === 0) return;
+    setRecoveryKeys((prev) => Array.from(new Set([...prev, ...detectedUnknownKeys])));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detectedUnknownSignature]);
 
+  // 카탈로그 재조회. 복구 필요 상태(recoveryKeys)는 건드리지 않는다 — 성공했을 때만 해제된다.
+  function retryCatalog() {
+    setCatalogPruneNotice(null);
+    setRecoveryToken((t) => t + 1);
+  }
   function handleReloadCatalog() {
     setAnalyzeError(null);
     setAnalyzeErrorPurpose(null);
-    setCatalogPruneNotice(null);
-    setRecoveryToken((t) => t + 1);
+    retryCatalog();
   }
 
   const recipeChanged = committedRecipe
@@ -620,7 +634,9 @@ export function StatisticsWorkbench({
 
       {catalogState.status === 'loading' && <div className="swb-empty">카탈로그를 불러오는 중…</div>}
       {catalogState.status === 'error' && !featureUnavailableDetected && (
-        <div className="swb-banner" style={{ whiteSpace: 'pre-wrap' }}>카탈로그를 불러오지 못했습니다: {describeStatsApiError(catalogState.error)}</div>
+        <div className="swb-banner" style={{ whiteSpace: 'pre-wrap' }}>카탈로그를 불러오지 못했습니다: {describeStatsApiError(catalogState.error)}{' '}
+          <button type="button" className="swb-btn swb-btn--sm" onClick={retryCatalog}>다시 시도</button>
+        </div>
       )}
 
       {catalogState.status === 'ready' && (
@@ -708,7 +724,7 @@ export function StatisticsWorkbench({
         <div className="swb-banner" style={{ whiteSpace: 'pre-wrap' }}>분석 실행 실패: {describeStatsApiError(analyzeError, { catalogByKey, analysisPurpose: analyzeErrorPurpose })}</div>
       )}
 
-      {staleVariableKeys.length > 0 && (
+      {recoveryKeys.length > 0 && (
         <div className="swb-banner" role="alert">
           <span>
             삭제되었거나 이름이 바뀐 변수가 선택되어 있습니다. 카탈로그를 새로 불러오면 목록에 없는 변수를 선택에서 제거합니다(새 변수로 자동 교체하지 않으므로 다시 선택해 주세요).
