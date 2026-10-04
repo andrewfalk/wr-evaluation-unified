@@ -5,7 +5,7 @@
 // (부호 있는 효과크기)에만 붙어야 한다. (2) 결과 카드만 보고도 그룹/결과변수,
 // 분할표 행/열이 어떤 변수인지 committedRecipe+catalog로 식별할 수 있어야 한다.
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ResultPanel } from '../ResultPanel.jsx';
@@ -364,6 +364,51 @@ describe('ResultPanel — PR4-A1 회귀 결과 카드', () => {
     expect(screen.getByText('행 단위 해석 주의')).toBeTruthy();
   });
 
+  it('범주형 항은 "변수: 수준"을 한 번만 표시하고, VIF 표는 내부 키 대신 라벨을 쓰며, 숫자는 유효숫자로 정리된다', async () => {
+    const user = userEvent.setup();
+    const committedResult = {
+      runManifest: baseRunManifest(),
+      result: {
+        regression: {
+          suppressed: false, estimation: 'ok', method: 'ols_linear', outcomeKey: 'val', eventLevel: null,
+          referenceLevelsUsed: {}, covariance: 'hc3', inferenceDistribution: 't', inferenceDf: 38,
+          residualDf: 38, n: 40, personCount: 40, clusterCount: null, maxClusterShare: null,
+          terms: [
+            { name: 'intercept', label: '절편', variableKey: null, level: null, estimate: 1.0, se: 0.2, statistic: 5, pValue: 0.0001, ciLower: 0.6, ciUpper: 1.4, exponentiated: null },
+            { name: 'grp:male', label: '작업군: male', variableKey: 'grp', level: 'male', estimate: -0.09309751621743677, se: 0.3, statistic: 5, pValue: 1.4422231634147625e-20, ciLower: 0.9, ciUpper: 2.1, exponentiated: null },
+          ],
+          fit: { r2: 0.4, adjR2: 0.38, logLik: null, aic: null, pseudoR2: null },
+          nonEstimableReason: null, inferenceWithheldReason: null, excludedRowCount: 0, qualityFlags: [],
+          analysisUnitNote: '행 단위 해석 주의',
+          diagnostics: {
+            conditionNumber: 12.3, vif: [{ termName: 'val', vif: 1.5 }, { termName: 'grp:male', vif: 2.5 }],
+            pointDiagnosticsStatus: 'unsupported', pointDiagnosticsUnsupportedReason: null,
+            pointDiagnostics: [], displayedPointCount: 0, totalPointCount: 0,
+          },
+        },
+      },
+    };
+    render(
+      <ResultPanel
+        catalog={catalogFixture()} committedRecipe={regressionRecipe()} committedResult={committedResult}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported
+      />,
+    );
+    await openRegressionTab(user);
+
+    expect(screen.getAllByText('작업군: male').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/male: male/)).toBeNull();
+    // 16자리 원값 대신 유효숫자 4자리, p는 <0.0001.
+    expect(screen.getByText('-0.09310')).toBeTruthy();
+    expect(screen.getAllByText('<0.0001').length).toBeGreaterThan(0);
+    expect(document.body.textContent).not.toMatch(/\d\.\d{8,}/);
+    // VIF 표: 항 이름(grp:male) 대신 라벨, 연속형은 카탈로그 라벨.
+    const vif = within(screen.getByRole('table', { name: 'VIF' }));
+    expect(vif.queryByText('grp:male')).toBeNull();
+    expect(vif.getByText('작업군: male')).toBeTruthy();
+  });
+
   it('estimation:"inference_withheld"이면 계수·SE는 보이고 p·CI 자리는 비공개로 표시된다', async () => {
     const user = userEvent.setup();
     const committedResult = {
@@ -394,7 +439,7 @@ describe('ResultPanel — PR4-A1 회귀 결과 카드', () => {
 
     expect(screen.getByText(/표본 구조상.*p값·신뢰구간을 표시하지 않습니다/)).toBeTruthy();
     // 계수(0.35)는 보이지만 p·CI 열은 "(비공개)"/"—"로 채워진다.
-    expect(screen.getByText('0.350')).toBeTruthy(); // se
+    expect(screen.getByText('0.3500')).toBeTruthy(); // se
     expect(screen.getAllByText('(비공개)').length).toBeGreaterThan(0);
   });
 

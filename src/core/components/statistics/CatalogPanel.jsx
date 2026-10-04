@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { isGrainCompatible } from '@analytics-core/common';
+import { isGrainCompatible, isPurposeCompatible } from '@analytics-core/common';
+import { describeAllowedPurposes } from './purposeLabels';
 
 const MODULE_LABELS = {
   knee: '무릎', spine: '척추', shoulder: '어깨',
@@ -32,7 +33,10 @@ function groupRank(vars) {
 // PR0-B3 Part A — grain prop 추가. 분석 변수 후보는 항상 "현재 grain"으로 한 번 더
 // 거른다 — grain을 바꾼 뒤 사용자가 여전히 다른 grain의 변수를 볼 수 있으면 안 된다
 // (계획 pr0-b3-shimmying-magpie.md "Grain 선택 UI" 절 — 후보 제한과 상태 초기화는 별개다).
-export function CatalogPanel({ catalog, grain, selectedKeys, onToggleVariable, collapsed, onToggleCollapse }) {
+// 분석 목적(analysisPurpose)에서 쓸 수 없는 변수는 숨기지 않고 비활성화한다(왜 못 고르는지
+// 툴팁으로 알 수 있게). 서버(statsRecipeValidation.ts PURPOSE_NOT_ALLOWED)와 같은 판정 함수를
+// 공유한다. analysisPurpose가 없으면(구 호출부) 제한하지 않는다.
+export function CatalogPanel({ catalog, grain, analysisPurpose, selectedKeys, onToggleVariable, collapsed, onToggleCollapse }) {
   const [search, setSearch] = useState('');
   const [moduleFilter, setModuleFilter] = useState('all');
   // 정본처럼 그룹별로 접고 펼 수 있게 — 기본은 전부 펼침(기존 동작 유지), 여기 담긴
@@ -162,11 +166,21 @@ export function CatalogPanel({ catalog, grain, selectedKeys, onToggleVariable, c
               </button>
               {open && (
                 <div className="swb-group-list">
-                  {vars.map((v) => (
-                    <label key={v.key} className="swb-var-row">
+                  {vars.map((v) => {
+                    const checked = selectedKeys.includes(v.key);
+                    const purposeOk = !analysisPurpose || isPurposeCompatible(v, analysisPurpose);
+                    // 이미 선택된 변수는 해제할 수 있어야 한다(목적을 바꿔 비호환이 된 경우 정리 경로).
+                    const disabled = !purposeOk && !checked;
+                    return (
+                    <label
+                      key={v.key}
+                      className={`swb-var-row${disabled ? ' swb-var-row--disabled' : ''}`}
+                      title={purposeOk ? undefined : `이 분석 목적에서는 쓸 수 없습니다. 사용 가능한 목적: ${describeAllowedPurposes(v)}`}
+                    >
                       <input
                         type="checkbox"
-                        checked={selectedKeys.includes(v.key)}
+                        checked={checked}
+                        disabled={disabled}
                         onChange={() => onToggleVariable(v.key)}
                       />
                       <span className="swb-var-label">{v.label}</span>
@@ -176,7 +190,8 @@ export function CatalogPanel({ catalog, grain, selectedKeys, onToggleVariable, c
                         <span className="swb-var-badge swb-var-badge--sensitive">민감</span>
                       )}
                     </label>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

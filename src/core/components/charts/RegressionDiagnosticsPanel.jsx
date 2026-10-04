@@ -40,7 +40,7 @@ function cooksRadius(cooksDistance) {
   return Math.min(10, 3 + 7 * Math.sqrt(Math.min(cooksDistance, 1)));
 }
 
-export function RegressionDiagnosticsPanel({ diagnostics, method, isPersonCluster }) {
+export function RegressionDiagnosticsPanel({ diagnostics, method, isPersonCluster, termLabelOf = (name) => name }) {
   if (!diagnostics) return null;
   const { conditionNumber, vif, pointDiagnosticsStatus, pointDiagnosticsUnsupportedReason, pointDiagnostics, displayedPointCount, totalPointCount } = diagnostics;
 
@@ -51,7 +51,7 @@ export function RegressionDiagnosticsPanel({ diagnostics, method, isPersonCluste
         <tbody>
           {vif.map((v, i) => (
             <tr key={`${v.termName}-${i}`}>
-              <td>{v.termName}</td>
+              <td>{termLabelOf(v.termName)}</td>
               <td>{v.vif === null ? '계산 불가' : formatNumber(v.vif, 2)}</td>
             </tr>
           ))}

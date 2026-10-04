@@ -1,7 +1,7 @@
 import { ChartContainer, CHART_VIEW_WIDTH } from './ChartContainer';
 import { createLinearScale, computeNiceTicks } from './scales';
 import { ACCENT } from './palette';
-import { formatNumber } from './numberFormat';
+import { formatNumber, formatStat } from './numberFormat';
 import { DataTableView } from './DataTableView';
 import { SuppressionNotice } from './SuppressionNotice';
 import { ChartTooltip, chooseTooltipPlacement } from './ChartTooltip';
@@ -52,7 +52,7 @@ export function ForestPlot({ terms, exponentiated = false, standardizedPredictor
   if (rows.length === 0) return <SuppressionNotice />;
 
   const rowLabelOf = (t) => {
-    const base = t.level ? `${t.label}: ${t.level}` : t.label;
+    const base = t.label;
     if (t.termType === 'interaction') {
       const note = interactionScaleNote(t.interactionOf, standardizedPredictorKeys, variableLabelOf);
       return note ? `${base} — ${note}` : base;
@@ -122,7 +122,7 @@ export function ForestPlot({ terms, exponentiated = false, standardizedPredictor
               )}
               {point !== null && ci && (
                 <ChartTooltip
-                  label={`${rowLabel}: ${formatNumber(point, digits)} [${formatNumber(ci[0], digits)}, ${formatNumber(ci[1], digits)}]`}
+                  label={`${rowLabel}: ${formatStat(point)} [${formatStat(ci[0])}, ${formatStat(ci[1])}]`}
                   anchorX={xScale(toScale(point))} anchorY={y}
                   placement={chooseTooltipPlacement(y, MARGIN.top)}
                 >
@@ -136,7 +136,7 @@ export function ForestPlot({ terms, exponentiated = false, standardizedPredictor
               )}
               {point !== null && !ci && (
                 <ChartTooltip
-                  label={`${rowLabel}: ${formatNumber(point, digits)} (신뢰구간 비공개)`}
+                  label={`${rowLabel}: ${formatStat(point)} (신뢰구간 비공개)`}
                   anchorX={xScale(toScale(point))} anchorY={y}
                   placement={chooseTooltipPlacement(y, MARGIN.top)}
                 >
@@ -161,8 +161,8 @@ export function ForestPlot({ terms, exponentiated = false, standardizedPredictor
           return (
             <tr key={t.name}>
               <td>{rowLabel}</td>
-              <td>{point === null ? '—' : formatNumber(point, digits)}</td>
-              <td>{ci ? `[${formatNumber(ci[0], digits)}, ${formatNumber(ci[1], digits)}]` : '(비공개)'}</td>
+              <td>{point === null ? '—' : formatStat(point)}</td>
+              <td>{ci ? `[${formatStat(ci[0])}, ${formatStat(ci[1])}]` : '(비공개)'}</td>
             </tr>
           );
         })}

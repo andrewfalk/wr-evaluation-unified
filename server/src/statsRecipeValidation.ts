@@ -3,7 +3,7 @@
 // zod(shared/contracts/stats.ts)는 구조만 검사하고, 여기서는 카탈로그 메타데이터를
 // 참조해야 하는 동적 검사(변수 type별 허용 연산자·값 타입 등)를 한다.
 import { getIntegratedCatalog } from './statsCatalog';
-import { isGrainCompatible } from '@wr/analytics-core';
+import { isGrainCompatible, isPurposeCompatible } from '@wr/analytics-core';
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
 import type { StatsAnalysisRecipe, StatsFilter, StatsFilterOperator } from '@wr/contracts';
 import { getOrdinalOrder, getCategoricalOrder } from './statsOrdinalOrder';
@@ -280,7 +280,7 @@ export function validateRecipe(
   // §A-4 분석 목적 — variableKeys + stratifyByKey(필터는 대상이 아님)
   for (const key of stratifyByKey ? [...recipe.variableKeys, stratifyByKey] : recipe.variableKeys) {
     const variable = catalogByKey.get(key);
-    if (variable && !variable.allowedAnalysisPurposes.includes(recipe.analysisPurpose)) {
+    if (variable && !isPurposeCompatible(variable, recipe.analysisPurpose)) {
       errors.push({
         code: 'PURPOSE_NOT_ALLOWED',
         path: key,

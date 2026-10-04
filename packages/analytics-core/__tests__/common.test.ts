@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateBMI, calculateAge, stableStringify, escapeHtml, isBroadcastSafe, isGrainCompatible } from '../common';
+import { calculateBMI, calculateAge, stableStringify, escapeHtml, isBroadcastSafe, isGrainCompatible, isPurposeCompatible } from '../common';
 
 describe('calculateBMI', () => {
   it('computes BMI to one decimal place', () => {
@@ -114,5 +114,21 @@ describe('isGrainCompatible', () => {
     expect(isGrainCompatible(stalePersonVar, 'person')).toBe(false);
     const madeUpVar = { grain: 'made_up_grain', sensitivity: 'non_sensitive', type: 'categorical' };
     expect(isGrainCompatible(madeUpVar, 'made_up_grain')).toBe(false);
+  });
+});
+
+
+describe('isPurposeCompatible', () => {
+  it('allowedAnalysisPurposes에 포함된 목적만 허용한다', () => {
+    const v = { allowedAnalysisPurposes: ['association', 'prediction'] };
+    expect(isPurposeCompatible(v, 'association')).toBe(true);
+    expect(isPurposeCompatible(v, 'prediction')).toBe(true);
+    expect(isPurposeCompatible(v, 'formula_audit')).toBe(false);
+  });
+  it('예측 전용 변수는 연관성에서 거부한다', () => {
+    expect(isPurposeCompatible({ allowedAnalysisPurposes: ['prediction'] }, 'association')).toBe(false);
+  });
+  it('허용 목적이 비어 있으면 어떤 목적도 거부한다', () => {
+    expect(isPurposeCompatible({ allowedAnalysisPurposes: [] }, 'association')).toBe(false);
   });
 });

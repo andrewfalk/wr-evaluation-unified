@@ -1,3 +1,5 @@
+import { purposeLabel, describeAllowedPurposes } from './purposeLabels';
+
 // PR2 §9 — 서버 에러 코드별 고정 안내 문구. statsRepository.js가 던지는 Error는
 // httpClient.js 관례대로 `.status`/`.data`를 달고 오므로, 그 `.data.code`(와 INVALID_RECIPE의
 // `.data.errors[]`)를 해석해 사용자가 실제로 무엇이 문제인지 알 수 있는 문장으로 바꾼다.
@@ -52,7 +54,34 @@ const RECIPE_ERROR_MESSAGE_LABELS = {
   REGRESSION_PREDICTOR_TYPE_UNSUPPORTED: '이 변수 타입은 회귀 설명변수로 쓸 수 없습니다.',
 };
 
-function describeRecipeError(entry) {
+// 삭제·개명된 변수 — 오래 열린 탭의 구 레시피가 서버에서 UNKNOWN_VARIABLE로 거부될 때
+// 원인을 사용자 문구로 안내한다. 값의 의미가 바뀐 경우(기준일 변경 등)는 자동 치환하지 않고
+// 사용자가 다시 고르게 한다.
+export const REMOVED_VARIABLES = {
+  'patient.identity.ageAtEvaluation':
+    '평가일 기준 나이는 삭제되었습니다. 기준일이 재해일자로 바뀌었으므로 "만 나이(재해일자 기준)"을 다시 선택하세요.',
+};
+
+export const UNKNOWN_VARIABLE_FALLBACK = '카탈로그가 변경되었을 수 있습니다. "카탈로그 새로 불러오기"를 눌러 변수를 다시 선택하세요.';
+
+/** 에러 응답에 UNKNOWN_VARIABLE 항목이 있으면 그 키 목록, 없으면 빈 배열. */
+export function getUnknownVariableKeys(err) {
+  if (err?.data?.code !== 'INVALID_RECIPE' || !Array.isArray(err.data.errors)) return [];
+  return err.data.errors.filter((e) => e?.code === 'UNKNOWN_VARIABLE' && typeof e.path === 'string').map((e) => e.path);
+}
+
+function describeRecipeError(entry, { catalogByKey, analysisPurpose } = {}) {
+  if (entry?.code === 'PURPOSE_NOT_ALLOWED' && typeof entry.path === 'string') {
+    const variable = catalogByKey?.get(entry.path);
+    const name = variable?.label || entry.path;
+    const allowed = describeAllowedPurposes(variable);
+    const where = analysisPurpose ? `'${purposeLabel(analysisPurpose)}' 목적` : '이 목적';
+    return `'${name}'은(는) ${where}에서 쓸 수 없습니다.${allowed ? ` 사용 가능한 목적: ${allowed}` : ''}`;
+  }
+  if (entry?.code === 'UNKNOWN_VARIABLE' && typeof entry.path === 'string') {
+    return REMOVED_VARIABLES[entry.path] || UNKNOWN_VARIABLE_FALLBACK;
+  }
+
   // 커스텀 RecipeValidationError({code,path,message})와 원시 zod issue({path:[], message})
   // 둘 다 올 수 있다(server/src/statsAnalysisContext.ts §9) — path 형태만 다르고 필드명은 같다.
   const path = Array.isArray(entry?.path) ? entry.path.join('.') : entry?.path;
@@ -61,12 +90,12 @@ function describeRecipeError(entry) {
   return path ? `${path}: ${message}` : message;
 }
 
-export function describeStatsApiError(err) {
+export function describeStatsApiError(err, context = {}) {
   if (!err) return '알 수 없는 오류';
   const code = err.data?.code || err.data?.error?.code;
 
   if (code === 'INVALID_RECIPE' && Array.isArray(err.data?.errors) && err.data.errors.length > 0) {
-    return err.data.errors.map(describeRecipeError).join('\n');
+    return err.data.errors.map((e) => describeRecipeError(e, context)).join('\n');
   }
   if (code && FIXED_MESSAGES[code]) return FIXED_MESSAGES[code];
   return err.message || '알 수 없는 오류가 발생했습니다.';

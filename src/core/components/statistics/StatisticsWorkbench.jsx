@@ -6,7 +6,8 @@ import { RecipePanel } from './RecipePanel';
 import { ResultPanel } from './ResultPanel';
 import { InspectorReportPanel } from './InspectorReportPanel';
 import { useViewportWidth } from './useViewportWidth';
-import { describeStatsApiError } from './describeStatsError';
+import { describeStatsApiError, getUnknownVariableKeys, REMOVED_VARIABLES, UNKNOWN_VARIABLE_FALLBACK } from './describeStatsError';
+import { planModePurposeTransition, pruneStaleSelections } from './workbenchTransitions';
 import './statistics-workbench.css';
 import '../charts/charts.css';
 
@@ -249,6 +250,39 @@ export function StatisticsWorkbench({
   const [eventLevel, setEventLevel] = useState('');
   // Table1 — descriptive 전용 그룹 변수 선택 상태(§3-대). variableKeys와 별개 축.
   const [stratifyByKey, setStratifyByKey] = useState(null);
+  // 모드·목적 전환으로 자동 정리된 변수·필터 안내(RecipePanel 상단에 표시, 닫기 가능).
+  const [transitionNotice, setTransitionNotice] = useState(null);
+  // 카탈로그 재조회 후 사라진 키를 초안에서 정리했다는 안내.
+  const [catalogPruneNotice, setCatalogPruneNotice] = useState(null);
+
+  const draftSetters = {
+    analysisMode: setAnalysisMode, analysisPurpose: setAnalysisPurpose, variableKeys: setVariableKeys,
+    outcomeKey: setOutcomeKey, eventLevel: setEventLevel, standardizePredictors: setStandardizePredictors,
+    interactionTerms: setInteractionTerms, splineKeys: setSplineKeys, stratifyByKey: setStratifyByKey,
+    requestedMethod: setRequestedMethod, filterDraft: setFilterDraft, appliedFilters: setAppliedFilters,
+  };
+  function applyDraftPatch(patch) {
+    for (const [k, v] of Object.entries(patch)) draftSetters[k]?.(v);
+  }
+  function currentDraft() {
+    return {
+      analysisMode, analysisPurpose, variableKeys, outcomeKey, eventLevel, standardizePredictors,
+      interactionTerms, splineKeys, stratifyByKey, requestedMethod, filterDraft, appliedFilters,
+    };
+  }
+
+  // 카탈로그 재조회가 성공한 직후에만 새 카탈로그에 없는 키를 초안에서 정리한다. 로딩·실패 중
+  // catalogByKey는 빈 맵이라 그때 정리하면 정상 변수·필터가 전부 지워진다 — status==='ready'
+  // 가드가 그것을 막는다(지연된 이전 요청의 응답은 위 fetch effect의 cancelled 가드가 무시).
+  // 구 키를 새 키로 자동 치환하지 않는다(값의 의미가 달라졌을 수 있어 사용자가 다시 고른다).
+  useEffect(() => {
+    if (catalogState.status !== 'ready') return;
+    const pruned = pruneStaleSelections(currentDraft(), catalogByKey);
+    if (!pruned) return;
+    applyDraftPatch(pruned.patch);
+    setCatalogPruneNotice(pruned.removed.map((k) => REMOVED_VARIABLES[k] ? `${k} — ${REMOVED_VARIABLES[k]}` : k));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalogState]);
 
   // PR0-B3 Part A — grain을 바꾸면 이전 grain에서 고른 변수·필터·method가 새 grain에는
   // 안 맞을 수 있어 전부 초기화한다(후보 목록을 grain으로 거르는 것과는 별개 — 후보를
@@ -306,30 +340,29 @@ export function StatisticsWorkbench({
       return;
     }
     setModeChangeBlockedNotice(false);
-    // PR4-B2 — 예측으로 들어갈 때 requestedMethod를 자동으로 채운다(방법이
-    // l2_logistic 하나뿐이라 선택 UI 자체가 없다).
-    setRequestedMethod(nextMode === 'prediction' ? 'l2_logistic' : null);
-    // PR4-A1 §5 — 회귀는 넉넉한 상한(20)이라 이변량처럼 전환 자체를 막을 필요는
-    // 없다. 모드를 나가거나 새로 들어올 때 outcome만 초기화해 이전 모드의 스테일
-    // 상태가 새 모드로 새지 않게 한다.
-    setOutcomeKey(null);
-    // PR4-A2 — 고급 옵션도 모드 전환 시 함께 초기화한다(스테일 상태 방지, 위와 동일 원칙).
-    setStandardizePredictors(false);
-    setInteractionTerms([]);
-    setSplineKeys([]);
-    setEventLevel('');
-    setStratifyByKey(null);
     // PR4-B2 — 계획서 §6단계 "purpose 강제·복귀": analysisMode==='prediction' ⇔
     // analysisPurpose==='prediction'(서버 PURPOSE_MODE_MISMATCH, shared/contracts/
     // stats.ts). 예측으로 들어가면 목적을 강제로 맞추고, 예측에서 나가면 목적을
     // 기본값으로 되돌린다(그대로 두면 나간 뒤에도 purpose:'prediction'이 남아
     // 다음 모드에서 곧바로 400을 낸다).
-    if (nextMode === 'prediction') {
-      setAnalysisPurpose('prediction');
-    } else if (analysisPurpose === 'prediction') {
-      setAnalysisPurpose('association');
-    }
-    setAnalysisMode(nextMode);
+    const nextPurpose = nextMode === 'prediction'
+      ? 'prediction'
+      : (analysisPurpose === 'prediction' ? 'association' : analysisPurpose);
+    applyTransition(nextMode, nextPurpose);
+  }
+
+  // 분석 목적 메뉴 — 모드 전환과 같은 정리 규칙(workbenchTransitions.js)을 쓴다.
+  function handleAnalysisPurposeChange(nextPurpose) {
+    if (nextPurpose === analysisPurpose) return;
+    applyTransition(analysisMode, nextPurpose);
+  }
+
+  // 모드·목적 전환 공통 경로: 순수 계산(planModePurposeTransition)이 새 모드/목적을 인자로
+  // 받아 requestedMethod·비호환 변수·예측 필터·고급 옵션을 한 번에 정리한다.
+  function applyTransition(nextMode, nextPurpose) {
+    const { patch, notice } = planModePurposeTransition(currentDraft(), nextMode, nextPurpose, catalogByKey);
+    applyDraftPatch(patch);
+    setTransitionNotice(notice);
   }
 
   // PR4-A2 — outcome을 바꾸면 새 outcome이 이전에 predictor로서 interactionTerms/
@@ -381,7 +414,8 @@ export function StatisticsWorkbench({
         if (err?.name === 'AbortError') return;
         if (isFeatureUnavailableError(err)) setFeatureUnavailableDetected(true);
         if (gen !== previewGenRef.current) return;
-        setPreviewState((prev) => (prev.key === key ? { key, status: 'error', result: null, error: err } : prev));
+        // 실패한 요청의 목적을 오류와 같이 보관한다 — 오류 문구는 현재 화면 목적이 아니라 요청 목적 기준이다.
+        setPreviewState((prev) => (prev.key === key ? { key, status: 'error', result: null, error: err, requestPurpose: analysisPurpose } : prev));
       }
     }, 500);
     return () => { clearTimeout(timer); controller.abort(); };
@@ -396,6 +430,8 @@ export function StatisticsWorkbench({
   // ---- analyze: committed snapshot(요청 전송 시점) ----
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState(null);
+  // 실패한 실행 요청의 분석 목적(오류 문구용) — 현재 화면의 목적과 다를 수 있다.
+  const [analyzeErrorPurpose, setAnalyzeErrorPurpose] = useState(null);
   const [committedRecipe, setCommittedRecipe] = useState(null);
   const [committedResult, setCommittedResult] = useState(null);
   const analyzeInFlightRef = useRef(false);
@@ -484,6 +520,7 @@ export function StatisticsWorkbench({
       if (!mountedRef.current) return;
       if (isFeatureUnavailableError(err)) setFeatureUnavailableDetected(true);
       setAnalyzeError(err);
+      setAnalyzeErrorPurpose(recipeAtSubmit.analysisPurpose);
       analyzeInFlightRef.current = false;
       setIsAnalyzing(false);
     }
@@ -509,6 +546,19 @@ export function StatisticsWorkbench({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runPolling.status]);
+
+  // 서버가 UNKNOWN_VARIABLE로 거부한 오류(구 번들·오래 열린 탭의 삭제된 변수)에서 키를 뽑아 복구 안내를 띄운다.
+  const staleVariableKeys = Array.from(new Set([
+    ...getUnknownVariableKeys(analyzeError),
+    ...(isPreviewCurrent && previewState.status === 'error' ? getUnknownVariableKeys(previewState.error) : []),
+  ]));
+
+  function handleReloadCatalog() {
+    setAnalyzeError(null);
+    setAnalyzeErrorPurpose(null);
+    setCatalogPruneNotice(null);
+    setRecoveryToken((t) => t + 1);
+  }
 
   const recipeChanged = committedRecipe
     ? JSON.stringify(buildRecipe(grain, analysisMode, variableKeys, requestedMethod, analysisPurpose, formulaPolicies, appliedFilters, outcomeKey, standardizePredictors, interactionTerms, splineKeys, eventLevel, catalogByKey, stratifyByKey)) !== JSON.stringify(committedRecipe)
@@ -578,6 +628,7 @@ export function StatisticsWorkbench({
           <CatalogPanel
             catalog={catalogState.data}
             grain={grain}
+            analysisPurpose={analysisPurpose}
             selectedKeys={variableKeys}
             onToggleVariable={toggleVariable}
             collapsed={catalogCollapsed}
@@ -609,7 +660,9 @@ export function StatisticsWorkbench({
             stratifyByKey={stratifyByKey}
             onStratifyByKeyChange={setStratifyByKey}
             analysisPurpose={analysisPurpose}
-            onAnalysisPurposeChange={setAnalysisPurpose}
+            onAnalysisPurposeChange={handleAnalysisPurposeChange}
+            transitionNotice={transitionNotice}
+            onDismissTransitionNotice={() => setTransitionNotice(null)}
             formulaPolicies={formulaPolicies}
             onFormulaPolicyChange={(family, policy) => setFormulaPolicies((prev) => ({ ...prev, [family]: policy }))}
             filterDraft={filterDraft}
@@ -647,12 +700,30 @@ export function StatisticsWorkbench({
       {(runPolling.status === 'polling') && (
         <div className="swb-banner">
           분석 실행 중… (queued/running 상태를 확인하는 중입니다)
-          <button type="button" onClick={runPolling.cancel} style={{ marginLeft: '0.75rem' }}>취소</button>
+          <button type="button" className="swb-btn swb-btn--sm" onClick={runPolling.cancel} style={{ marginLeft: '0.75rem' }}>취소</button>
         </div>
       )}
 
       {analyzeError && (
-        <div className="swb-banner" style={{ whiteSpace: 'pre-wrap' }}>분석 실행 실패: {describeStatsApiError(analyzeError)}</div>
+        <div className="swb-banner" style={{ whiteSpace: 'pre-wrap' }}>분석 실행 실패: {describeStatsApiError(analyzeError, { catalogByKey, analysisPurpose: analyzeErrorPurpose })}</div>
+      )}
+
+      {staleVariableKeys.length > 0 && (
+        <div className="swb-banner" role="alert">
+          <span>
+            삭제되었거나 이름이 바뀐 변수가 선택되어 있습니다. 카탈로그를 새로 불러오면 목록에 없는 변수를 선택에서 제거합니다(새 변수로 자동 교체하지 않으므로 다시 선택해 주세요).
+          </span>
+          <button type="button" className="swb-btn swb-btn--sm" onClick={handleReloadCatalog}>카탈로그 새로 불러오기</button>
+        </div>
+      )}
+
+      {catalogPruneNotice && (
+        <div className="swb-banner" role="status">
+          <span style={{ whiteSpace: 'pre-wrap' }}>
+            카탈로그에 없는 변수 {catalogPruneNotice.length}개를 선택에서 제거했습니다:{' '}{catalogPruneNotice.join(' / ')}
+          </span>
+          <button type="button" className="swb-btn swb-btn--sm" onClick={() => setCatalogPruneNotice(null)}>닫기</button>
+        </div>
       )}
     </div>
   );
