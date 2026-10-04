@@ -179,23 +179,26 @@ export const PATIENT_METADATA: AnalyticsVariableMetadata[] = [
     supportedFormulaPolicies: ['recompute_current'],
   },
   {
-    // PR4-B2 — 예측 predictor 신설(계획서 §0단계/§2단계). 사례 단위 소견 롤업은
-    // 하지 않는다는 원칙과 별개로, "평가 시점 나이"는 인구학 변수라 신설한다(결정 #7).
-    key: 'patient.identity.ageAtEvaluation',
-    label: '평가 시점 나이',
+    // 제품 결정(2026-10-04): 평가일 기준 나이(구 patient.identity.ageAtEvaluation)를 삭제하고
+    // 재해일자 기준 만 나이로 교체한다. 앱 전체가 임상 판단에 쓰는 나이(인적사항 "만 나이",
+    // 무릎·어깨·경추·팔꿈치 derived)가 재해일자 기준이고, 평가일(evaluationDate)은 평가 완료
+    // 시점에 따라 자동으로 채워지고 비워지는 값이라 분석 변수의 기준일로 부적절하다.
+    // 구 키는 자동 치환하지 않는다 — 기준일이 달라 값의 의미가 바뀐다.
+    key: 'patient.identity.ageAtInjury',
+    label: '만 나이(재해일자 기준)',
     group: '인적사항 · 파생지표',
     moduleId: 'patient',
     grain: 'case',
     type: 'continuous',
     unit: '세',
     provenance: 'derived',
-    dependsOn: ['shared.birthDate', 'shared.evaluationDate'],
+    dependsOn: ['shared.birthDate', 'shared.injuryDate'],
     availableAt: 'assessment',
     shownToAssessor: true,
-    allowedAnalysisPurposes: ['prediction'],
+    allowedAnalysisPurposes: ['association', 'prediction'],
     predictionRole: 'predictor',
     sensitivity: 'non_sensitive',
-    formulaFamily: 'patient_age_at_evaluation',
+    formulaFamily: 'patient_age_at_injury',
     supportedFormulaPolicies: [],
   },
 ];

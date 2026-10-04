@@ -171,6 +171,31 @@ describe('POST /export — run 조회 실패', () => {
     expect(res.status).toBe(200);
   });
 
+  // 제품 결정(2026-10-04) — 평가일 기준 나이(ageAtEvaluation)가 카탈로그에서 삭제됐다. 삭제 전에 저장된
+  // 실행(analysisRunId)은 만료 전까지 내보내기가 가능해야 하고, 저장된 결과가 그대로(재계산 없이)
+  // 출력돼야 한다. 내보내기는 현재 카탈로그를 조회하지 않고 저장된 variableKey 문자열을 그대로 쓴다.
+  it('삭제된 변수(patient.identity.ageAtEvaluation)로 저장된 실행도 저장된 값 그대로 내보낸다', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    wireRunRow(pool, {
+      manifest: baseManifest({ catalogVersion: 'v27-case-sum-knee' }),
+      result: baseResult({
+        continuous: [{
+          variableKey: 'patient.identity.ageAtEvaluation', kind: 'continuous', suppressed: false,
+          n: 40, missingCount: 2, missingPatterns: [],
+          mean: 41.5, sd: 8.25, median: 41, q1: 35, q3: 48, iqr: 13, skewness: 0.1, kurtosis: -0.5, min: 22, max: 63, nullReasons: {},
+        }],
+      }),
+      status: 'succeeded', requested_disclosure_profile: 'aggregate',
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+    });
+    const res = await postExport(pool);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('patient.identity.ageAtEvaluation');
+    expect(res.text).toContain('41.5');
+    expect(res.text).toContain('v27-case-sum-knee');
+  });
+
   it('만료됐지만 아직 cleanup 전이면(행이 존재) 410 RUN_EXPIRED', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);

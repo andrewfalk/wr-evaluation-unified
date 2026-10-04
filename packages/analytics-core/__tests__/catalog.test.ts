@@ -90,6 +90,29 @@ describe('getFullVariableCatalog', () => {
     expect(typeof CATALOG_VERSION).toBe('string');
     expect(CATALOG_VERSION.length).toBeGreaterThan(0);
   });
+
+  // 제품 결정(2026-10-04) — 평가일 기준 나이를 삭제하고 재해일자 기준 만 나이로 교체했다.
+  it('평가일 기준 나이(patient.identity.ageAtEvaluation)는 카탈로그에 없고, 재해일자 기준 만 나이가 연관성·예측에 허용돼 있다', () => {
+    const catalog = getFullVariableCatalog();
+    expect(catalog.find((v) => v.key === 'patient.identity.ageAtEvaluation')).toBeUndefined();
+    expect(catalog.some((v) => v.label === '평가 시점 나이')).toBe(false);
+
+    const age = catalog.find((v) => v.key === 'patient.identity.ageAtInjury');
+    expect(age).toBeDefined();
+    expect(age?.label).toBe('만 나이(재해일자 기준)');
+    expect(age?.grain).toBe('case');
+    expect(age?.type).toBe('continuous');
+    expect(age?.unit).toBe('세');
+    expect(age?.dependsOn).toEqual(['shared.birthDate', 'shared.injuryDate']);
+    expect(age?.allowedAnalysisPurposes).toEqual(['association', 'prediction']);
+    expect(age?.predictionRole).toBe('predictor');
+  });
+
+  it('카탈로그 개수는 교체 전과 같다(analytics-core 81개: case 48/job 19/disease 14)', () => {
+    const catalog = getFullVariableCatalog();
+    expect(catalog).toHaveLength(81);
+    expect(catalog.filter((v) => v.grain === 'case')).toHaveLength(48);
+  });
 });
 
 describe('computeVariableValue', () => {
