@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { describeStatsApiError } from './describeStatsError';
 import { describeMethodReasonCode } from './describeMethodReasonCode';
-import { isGrainCompatible } from '@analytics-core/common';
+import { isGrainCompatible, isPurposeCompatible } from '@analytics-core/common';
+import { PURPOSE_LABELS } from './purposeLabels';
+import { PREDICTION_REGISTERED_AT_KEY } from './workbenchTransitions';
 
 // PR3-A — StatsMethodIdSchema(shared/contracts/stats.ts)와 동일 순서·목록. 실행
 // 가능 8종 + 예약된 unsupported 2종(대응검정, 계획서 §"실행 가능한 방법은 8종").
@@ -65,10 +67,6 @@ const OPERATOR_LABELS = {
   between: '범위', in: '포함', is_missing: '결측', not_missing: '결측 아님',
 };
 
-const PURPOSE_LABELS = {
-  association: '연관성', prediction: '예측', formula_audit: '공식 감사',
-};
-
 // grain 선택 UI. §2 grain표(마스터 계획서)의 한국어 표기 — grain 단순화(PR0-B4 개정) 후속으로
 // person을 다시 삭제해 case(사례)/job(직업)/disease(상병) 3개만 남는다. 라벨은 전부
 // "한글(영문)" 패턴으로 통일한다(job이 "직업"으로만 표기돼 있던 게 이전 리뷰에서
@@ -95,7 +93,6 @@ function sortGrainsForDisplay(grains) {
 }
 
 // server/src/statsSnapshotColumnVariables.ts의 REGISTERED_AT_KEY와 동일 리터럴.
-const PREDICTION_REGISTERED_AT_KEY = 'case.meta.registeredAt';
 
 function needsValue(operator) {
   return operator !== 'is_missing' && operator !== 'not_missing';
@@ -228,7 +225,10 @@ function FilterValueInput({ variable, operator, raw, onChange }) {
 
 function FilterEditor({ catalogByKey, onAdd }) {
   const keys = Array.from(catalogByKey.keys());
-  const [key, setKey] = useState(keys[0] || '');
+  const [pickedKey, setKey] = useState(keys[0] || '');
+  // 후보 목록이 바뀌어(카탈로그 재조회·모드 전환) 고른 키가 사라지면 첫 후보로 대체한다 —
+  // 그대로 두면 variable이 undefined가 되어 FilterValueInput이 렌더 중 예외를 던진다.
+  const key = catalogByKey.has(pickedKey) ? pickedKey : (keys[0] || '');
   const [operator, setOperator] = useState('eq');
   const [raw, setRaw] = useState('');
   const [error, setError] = useState(null);
@@ -382,7 +382,7 @@ function RegressionAdvancedOptions({
                 <option key={k} value={k}>{catalogByKey.get(k)?.label || k}</option>
               ))}
             </select>
-            <button type="button" onClick={addInteractionPair}>Interaction 추가</button>
+            <button type="button" className="swb-btn swb-btn--sm" onClick={addInteractionPair}>Interaction 추가</button>
           </div>
         )}
       </div>
@@ -406,6 +406,7 @@ export function RecipePanel({
   eventLevel = '', onEventLevelChange = () => {},
   stratifyByKey = null, onStratifyByKeyChange = () => {},
   analysisPurpose, onAnalysisPurposeChange,
+  transitionNotice = null, onDismissTransitionNotice = () => {},
   formulaPolicies, onFormulaPolicyChange,
   filterDraft, onFilterDraftChange, appliedFilters, onApplyFilters,
   previewState, isPreviewCurrent,
@@ -456,9 +457,11 @@ export function RecipePanel({
   const stratifyCandidates = useMemo(() => {
     const GROUPING_TYPES = new Set(['boolean', 'ordinal', 'categorical']);
     return Array.from(grainCatalogByKey.values())
-      .filter((v) => GROUPING_TYPES.has(v.type) && v.analysisRole !== 'filter_only' && !selectedKeys.includes(v.key))
+      .filter((v) => GROUPING_TYPES.has(v.type) && v.analysisRole !== 'filter_only' && !selectedKeys.includes(v.key)
+        // 서버는 stratifyByKey에도 분석 목적을 검사한다(PURPOSE_NOT_ALLOWED) — 선택 자체를 막는다.
+        && isPurposeCompatible(v, analysisPurpose))
       .sort((a, b) => a.label.localeCompare(b.label, 'ko'));
-  }, [grainCatalogByKey, selectedKeys]);
+  }, [grainCatalogByKey, selectedKeys, analysisPurpose]);
 
   const formulaFamiliesNeedingChoice = useMemo(() => {
     const seen = new Set();
@@ -514,6 +517,25 @@ export function RecipePanel({
         <button type="button" className="swb-collapse-btn" onClick={onToggleCollapse} aria-expanded title="레시피 접기">‹</button>
       </div>
       <div className="swb-panel-body">
+        {transitionNotice && (
+          <div className="swb-status-warn" role="status" style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <div style={{ flex: 1 }}>
+              {transitionNotice.removedVariables.length > 0 && (
+                <p>
+                  이 분석 목적에서 쓸 수 없는 변수 {transitionNotice.removedVariables.length}개를 선택에서 해제했습니다:
+                  {' '}{transitionNotice.removedVariables.join(', ')}
+                </p>
+              )}
+              {transitionNotice.removedFilters.length > 0 && (
+                <p>
+                  예측 모드에서 쓸 수 없는 필터 {transitionNotice.removedFilters.length}개를 제거했습니다:
+                  {' '}{transitionNotice.removedFilters.map((f) => `${catalogByKey.get(f.key)?.label || f.key} ${OPERATOR_LABELS[f.operator] || f.operator} ${formatFilterValue(f.operator, f.value)}`.trim()).join(', ')}
+                </p>
+              )}
+            </div>
+            <button type="button" className="swb-btn swb-btn--sm" onClick={onDismissTransitionNotice} aria-label="안내 닫기">닫기</button>
+          </div>
+        )}
         <div className="swb-section-label">그레인</div>
         <div className="swb-seg">
           {sortGrainsForDisplay(supportedGrains).map((g) => (
@@ -938,7 +960,7 @@ function PreviewSummary({ previewState, isPreviewCurrent, catalogByKey }) {
     return <p className="swb-suppressed-note">미리보기 계산 중…</p>;
   }
   if (previewState.status === 'error') {
-    return <p className="swb-status-danger" style={{ whiteSpace: 'pre-wrap' }}>미리보기 실패: {describeStatsApiError(previewState.error)}</p>;
+    return <p className="swb-status-danger" style={{ whiteSpace: 'pre-wrap' }}>미리보기 실패: {describeStatsApiError(previewState.error, { catalogByKey, analysisPurpose: previewState.requestPurpose })}</p>;
   }
   const { counts, estimability } = previewState.result;
   if (counts.suppressed) {

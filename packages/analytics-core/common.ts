@@ -104,3 +104,15 @@ export function isGrainCompatible(variable: GrainCompatibilityVariable, grain: s
   if (variable.grain === grain) return true;
   return variable.grain === 'case' && isBroadcastSafe(variable);
 }
+
+export interface PurposeCompatibilityVariable {
+  allowedAnalysisPurposes: readonly string[];
+}
+
+/** 이 변수를 분석 목적(analysisPurpose)에서 쓸 수 있는가. 서버 검증(statsRecipeValidation.ts
+ * PURPOSE_NOT_ALLOWED)과 클라이언트 후보 제한(CatalogPanel.jsx)이 이 함수 하나를 공유한다 —
+ * 복제 구현 금지(isGrainCompatible과 같은 원칙). 필터 변수에는 적용하지 않는다(서버가 필터는
+ * 목적을 검사하지 않는다). */
+export function isPurposeCompatible(variable: PurposeCompatibilityVariable, purpose: string): boolean {
+  return variable.allowedAnalysisPurposes.includes(purpose);
+}

@@ -208,6 +208,8 @@
 }
 
 .swb-var-row:hover { background: var(--swb-surface); }
+.swb-var-row--disabled { opacity: 0.45; cursor: not-allowed; }
+.swb-var-row--disabled:hover { background: transparent; }
 
 .swb-var-label { flex: 1; }
 .swb-var-badge {

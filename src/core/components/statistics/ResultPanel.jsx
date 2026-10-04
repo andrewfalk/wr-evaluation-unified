@@ -10,6 +10,7 @@ import { ForestPlot } from '../charts/ForestPlot';
 import { RegressionDiagnosticsPanel } from '../charts/RegressionDiagnosticsPanel';
 import { SplinePartialEffectChart } from '../charts/SplinePartialEffectChart';
 import { CurveChart } from '../charts/CurveChart';
+import { formatPValue, formatStat } from '../charts/numberFormat';
 
 const NULL_REASON_LABELS = {
   insufficient_data: '자료 부족',
@@ -95,6 +96,11 @@ const GROUP_COMPARISON_METHODS = new Set(['welch_t', 'mann_whitney', 'anova', 'k
 const DIRECTIONAL_GROUP_METHODS = new Set(['welch_t', 'mann_whitney', 'paired_t', 'wilcoxon_signed_rank']);
 const CONTINGENCY_METHODS = new Set(['chi_square', 'fisher_exact']);
 const GROUPING_TYPES = new Set(['boolean', 'ordinal', 'categorical']);
+const REGRESSION_QUALITY_FLAG_LABELS = {
+  reference_level_fallback: '지정한 기준 범주를 쓸 수 없어 자동으로 선택한 기준 범주를 사용했습니다.',
+  event_level_fallback: '지정한 사건 수준을 쓸 수 없어 자동으로 선택한 수준을 사용했습니다.',
+};
+
 const QUALITY_FLAG_LABELS = {
   low_expected_count: '일부 칸의 기대도수가 작아 근사의 타당성이 낮습니다.',
   haldane_anscombe_applied: '0이 포함된 셀이 있어 Haldane-Anscombe 보정(+0.5)을 적용했습니다.',
@@ -141,7 +147,13 @@ function fmt(n) {
 
 function fmtCi(ci) {
   if (!ci) return '—';
-  return `[${ci[0].toFixed(3)}, ${ci[1].toFixed(3)}]`;
+  return `[${formatStat(ci[0])}, ${formatStat(ci[1])}]`;
+}
+
+// 자유도: 정수(분자 df 등)는 그대로, 소수(Welch df)는 유효숫자 서식.
+function fmtDf(df) {
+  if (df === null || df === undefined) return '—';
+  return Number.isInteger(df) ? String(df) : formatStat(df);
 }
 
 function ContinuousCard({ catalogByKey, row }) {
@@ -163,10 +175,10 @@ function ContinuousCard({ catalogByKey, row }) {
         <tbody>
           <tr><th>n</th><td>{row.n}</td><th>결측</th><td>{row.missingCount} {missingPatternsText(row.missingPatterns)}</td></tr>
           <tr><th>평균</th><td>{num(row.mean, 2)}</td><th>SD</th><td>{num(row.sd, 2)}</td></tr>
-          <tr><th>중앙값</th><td>{fmt(row.median)}</td><th>IQR</th><td>{fmt(row.iqr)}</td></tr>
-          <tr><th>Q1</th><td>{fmt(row.q1)}</td><th>Q3</th><td>{fmt(row.q3)}</td></tr>
-          <tr><th>왜도</th><td>{fmt(row.skewness)}</td><th>첨도</th><td>{fmt(row.kurtosis)}</td></tr>
-          <tr><th>최소</th><td>{fmt(row.min)}</td><th>최대</th><td>{fmt(row.max)}</td></tr>
+          <tr><th>중앙값</th><td>{num(row.median, 2)}</td><th>IQR</th><td>{num(row.iqr, 2)}</td></tr>
+          <tr><th>Q1</th><td>{num(row.q1, 2)}</td><th>Q3</th><td>{num(row.q3, 2)}</td></tr>
+          <tr><th>왜도</th><td>{formatStat(row.skewness)}</td><th>첨도</th><td>{formatStat(row.kurtosis)}</td></tr>
+          <tr><th>최소</th><td>{num(row.min, 2)}</td><th>최대</th><td>{num(row.max, 2)}</td></tr>
         </tbody>
       </table>
       {nullReasonEntries.length > 0 && (
@@ -275,7 +287,7 @@ function BivariateFooter({ bivariate }) {
       {/* 계획서 §"BH-FDR/Holm 범위 정직화" — m=1 recipe라 항상 "단일 검정"으로
           정직하게 표기한다. "다중검정 보정 지원"이라고 단정하지 않는다. */}
       <p className="swb-suppressed-note">
-        단일 검정(보정 없음) — raw p = adjusted p ({fmt(bivariate.pValue)})
+        단일 검정(보정 없음) — raw p = adjusted p ({formatPValue(bivariate.pValue)})
       </p>
     </>
   );
@@ -343,19 +355,19 @@ function GroupComparisonCard({ bivariate, catalogByKey, committedRecipe }) {
       <GroupBreakdownTable groupBreakdown={bivariate.groupBreakdown} method={bivariate.method} />
       <table className="swb-table">
         <tbody>
-          <tr><th>n</th><td>{bivariate.n}</td><th>통계량</th><td>{fmt(bivariate.statistic)}</td></tr>
+          <tr><th>n</th><td>{bivariate.n}</td><th>통계량</th><td>{formatStat(bivariate.statistic)}</td></tr>
           <tr>
             <th>자유도</th>
             <td colSpan={3}>
               {typeof bivariate.df === 'object' && bivariate.df !== null
-                ? `${fmt(bivariate.df.numerator)}, ${fmt(bivariate.df.denominator)}`
-                : fmt(bivariate.df)}
+                ? `${fmtDf(bivariate.df.numerator)}, ${fmtDf(bivariate.df.denominator)}`
+                : fmtDf(bivariate.df)}
             </td>
           </tr>
-          <tr><th>p값</th><td colSpan={3}>{fmt(bivariate.pValue)}</td></tr>
+          <tr><th>p값</th><td colSpan={3}>{formatPValue(bivariate.pValue)}</td></tr>
           {bivariate.effectSizes.map((es) => (
             <tr key={es.name}>
-              <th>{es.name}</th><td>{fmt(es.value)}</td>
+              <th>{es.name}</th><td>{formatStat(es.value)}</td>
               <th>95% CI</th><td>{es.ci ? fmtCi(es.ci) : (es.ciUnavailableReason || '—')}</td>
             </tr>
           ))}
@@ -408,14 +420,14 @@ function ContingencyCard({ bivariate, catalogByKey, committedRecipe }) {
       <StackedBarChart100 table={bivariate.contingencyTable} />
       <table className="swb-table">
         <tbody>
-          <tr><th>n</th><td>{bivariate.n}</td><th>통계량</th><td>{fmt(bivariate.statistic)}</td></tr>
-          <tr><th>자유도</th><td>{fmt(bivariate.df)}</td><th>p값</th><td>{fmt(bivariate.pValue)}</td></tr>
+          <tr><th>n</th><td>{bivariate.n}</td><th>통계량</th><td>{formatStat(bivariate.statistic)}</td></tr>
+          <tr><th>자유도</th><td>{fmtDf(bivariate.df)}</td><th>p값</th><td>{formatPValue(bivariate.pValue)}</td></tr>
           {cramersV && (
-            <tr><th>Cramér&apos;s V</th><td colSpan={3}>{fmt(cramersV.value)}</td></tr>
+            <tr><th>Cramér&apos;s V</th><td colSpan={3}>{formatStat(cramersV.value)}</td></tr>
           )}
           {bivariate.effectSizes.map((es) => (
             <tr key={es.name}>
-              <th>{es.name}</th><td>{fmt(es.value)}</td>
+              <th>{es.name}</th><td>{formatStat(es.value)}</td>
               <th>95% CI</th><td>{es.ci ? fmtCi(es.ci) : (es.ciUnavailableReason || '—')}</td>
             </tr>
           ))}
@@ -439,14 +451,14 @@ function CorrelationCard({ bivariate, catalogByKey, committedRecipe }) {
       <ScatterPlot scatter={bivariate.scatter} regressionLine={bivariate.regressionLine} />
       <table className="swb-table">
         <tbody>
-          <tr><th>n</th><td>{bivariate.n}</td><th>계수</th><td>{es ? fmt(es.value) : '—'}</td></tr>
+          <tr><th>n</th><td>{bivariate.n}</td><th>계수</th><td>{es ? formatStat(es.value) : '—'}</td></tr>
           <tr>
             <th>95% CI</th>
             <td colSpan={3}>
               {es?.ci ? `${fmtCi(es.ci)} (${bivariate.method === 'pearson_correlation' ? 'Fisher z' : 'Fisher z + Bonett-Wright'})` : (es?.ciUnavailableReason || '—')}
             </td>
           </tr>
-          <tr><th>p값</th><td colSpan={3}>{fmt(bivariate.pValue)}</td></tr>
+          <tr><th>p값</th><td colSpan={3}>{formatPValue(bivariate.pValue)}</td></tr>
         </tbody>
       </table>
       <BivariateFooter bivariate={bivariate} />
@@ -516,7 +528,9 @@ function interactionScaleNote(interactionOf, standardizedKeys, catalogByKey) {
 }
 
 function regressionTermRowLabel(t, standardizedKeys = [], catalogByKey = new Map()) {
-  const base = t.termType === 'interaction' ? t.label : (t.level ? `${t.label}: ${t.level}` : t.label); // 이미 "A × B" 형태(statsRegressionSuppression.ts)
+  // 서버 label이 이미 "변수: 수준"(범주형) / "A × B"(interaction) 형태다(statsRegressionDesign.ts,
+  // statsRegressionSuppression.ts) — 수준을 다시 붙이면 "성별: male: male"이 된다.
+  const base = t.label;
   if (t.termType === 'interaction') {
     const note = interactionScaleNote(t.interactionOf, standardizedKeys, catalogByKey);
     return note ? `${base} — ${note}` : base;
@@ -543,19 +557,19 @@ function RegressionCoefficientTable({ terms, exponentiated, standardizedPredicto
           {rows.map((t) => (
             <tr key={t.name}>
               <td>{regressionTermRowLabel(t, standardizedPredictorKeys, catalogByKey)}</td>
-              <td>{num(t.estimate, 3)}</td>
-              <td>{num(t.se, 3)}</td>
-              {exponentiated && <td>{t.exponentiated ? num(t.exponentiated.estimate, 2) : '—'}</td>}
-              <td>{num(t.statistic, 3)}</td>
-              <td>{t.pValue === null || t.pValue === undefined ? '—' : t.pValue.toFixed(4)}</td>
-              <td>{t.ciLower !== null && t.ciUpper !== null && t.ciLower !== undefined ? `[${num(t.ciLower, 3)}, ${num(t.ciUpper, 3)}]` : '(비공개)'}</td>
+              <td>{formatStat(t.estimate)}</td>
+              <td>{formatStat(t.se)}</td>
+              {exponentiated && <td>{t.exponentiated ? formatStat(t.exponentiated.estimate) : '—'}</td>}
+              <td>{formatStat(t.statistic)}</td>
+              <td>{formatPValue(t.pValue)}</td>
+              <td>{t.ciLower !== null && t.ciUpper !== null && t.ciLower !== undefined ? `[${formatStat(t.ciLower)}, ${formatStat(t.ciUpper)}]` : '(비공개)'}</td>
             </tr>
           ))}
         </tbody>
       </table>
       {splineVariables.length > 0 && (
         <p className="swb-suppressed-note">
-          스플라인 변수({splineVariables.join(', ')})의 개별 계수는 해석할 수 없어 생략했습니다 — 아래 부분효과 그래프를 참고하세요.
+          스플라인 변수({splineVariables.map((k) => variableLabel(catalogByKey, k)).join(', ')})의 개별 계수는 해석할 수 없어 생략했습니다 — 아래 부분효과 그래프를 참고하세요.
         </p>
       )}
     </div>
@@ -589,6 +603,9 @@ function RegressionResultCard({ regression, catalogByKey }) {
 
   const isWithheld = regression.estimation === 'inference_withheld';
   const isLogistic = regression.method === 'binary_logistic';
+  // VIF 표의 termName(내부 이름)을 계수표와 같은 사람이 읽는 라벨로 바꾸기 위한 맵 — 서버 응답 변경 없이
+  // regression.terms의 name → label을 쓴다.
+  const termLabelByName = new Map((regression.terms || []).map((t) => [t.name, t.label]));
 
   return (
     <div className="swb-card">
@@ -642,18 +659,19 @@ function RegressionResultCard({ regression, catalogByKey }) {
       {regression.fit && (
         <p className="swb-suppressed-note">
           {regression.method === 'ols_linear'
-            ? `R² = ${num(regression.fit.r2, 3)}, 조정 R² = ${num(regression.fit.adjR2, 3)}`
-            : `로그우도 = ${num(regression.fit.logLik, 2)}, AIC = ${num(regression.fit.aic, 2)}, McFadden 의사R² = ${num(regression.fit.pseudoR2, 3)}`}
+            ? `R² = ${formatStat(regression.fit.r2)}, 조정 R² = ${formatStat(regression.fit.adjR2)}`
+            : `로그우도 = ${num(regression.fit.logLik, 2)}, AIC = ${num(regression.fit.aic, 2)}, McFadden 의사R² = ${formatStat(regression.fit.pseudoR2)}`}
         </p>
       )}
 
       {regression.qualityFlags.length > 0 && (
-        <p className="swb-status-warn">{regression.qualityFlags.join(', ')}</p>
+        <p className="swb-status-warn">{regression.qualityFlags.map((f) => REGRESSION_QUALITY_FLAG_LABELS[f] || f).join(' ')}</p>
       )}
       <p className="swb-suppressed-note">완전사례 제외 {regression.excludedRowCount}건</p>
       <p className="swb-suppressed-note">{regression.analysisUnitNote}</p>
 
       <RegressionDiagnosticsPanel
+        termLabelOf={(name) => termLabelByName.get(name) || catalogByKey.get(name)?.label || name}
         diagnostics={regression.diagnostics}
         method={regression.method}
         isPersonCluster={regression.covariance === 'person_cluster_cr1'}
@@ -671,7 +689,7 @@ function predictionCvCell(cv) {
   if (cv.status === 'withheld') {
     return `보류: 유효 ${cv.validRepeats}/${cv.totalRepeats}${cv.withheldReason ? ` (${PREDICTION_CV_WITHHELD_LABELS[cv.withheldReason] || cv.withheldReason})` : ''}`;
   }
-  return `${num(cv.mean, 3)} [${num(cv.min, 3)}–${num(cv.max, 3)}] (유효 ${cv.validRepeats}/${cv.totalRepeats})`;
+  return `${formatStat(cv.mean)} [${formatStat(cv.min)}–${formatStat(cv.max)}] (유효 ${cv.validRepeats}/${cv.totalRepeats})`;
 }
 
 function predictionBootstrapCell(bootstrap) {
@@ -679,7 +697,7 @@ function predictionBootstrapCell(bootstrap) {
     return `보류: 유효 ${bootstrap.validReplicates}/${bootstrap.totalReplicates}${bootstrap.withheldReason ? ` (${PREDICTION_BOOTSTRAP_WITHHELD_LABELS[bootstrap.withheldReason] || bootstrap.withheldReason})` : ''}`;
   }
   const warn = bootstrap.correctedOutOfRange ? ' ⚠ 범위 밖' : '';
-  return `${num(bootstrap.corrected, 3)} (유효 ${bootstrap.validReplicates}/${bootstrap.totalReplicates})${warn}`;
+  return `${formatStat(bootstrap.corrected)} (유효 ${bootstrap.validReplicates}/${bootstrap.totalReplicates})${warn}`;
 }
 
 // PR4-B2 §6단계 "ResultPanel.jsx — PredictionResultCard": 1)억제·추정불가 2)지표표
@@ -732,7 +750,7 @@ function PredictionResultCard({ prediction, catalogByKey }) {
             {prediction.metrics.map((m) => (
               <tr key={m.metric}>
                 <td>{PREDICTION_METRIC_LABELS[m.metric] || m.metric}</td>
-                <td>{num(m.apparent, 3)}</td>
+                <td>{formatStat(m.apparent)}</td>
                 <td>
                   {predictionCvCell(m.cv)}
                   {m.metric === 'roc_auc' && prediction.aucCi && (
@@ -740,7 +758,7 @@ function PredictionResultCard({ prediction, catalogByKey }) {
                   )}
                 </td>
                 <td>{predictionBootstrapCell(m.bootstrap)}</td>
-                <td>{num(m.representativeRepeat, 3)}</td>
+                <td>{formatStat(m.representativeRepeat)}</td>
               </tr>
             ))}
           </tbody>
@@ -762,17 +780,17 @@ function PredictionResultCard({ prediction, catalogByKey }) {
         </p>
       )}
 
-      <div className="swb-section-label">계수(표준화, λ={num(prediction.lambda.selected, 4)})</div>
+      <div className="swb-section-label">계수(표준화, λ={formatStat(prediction.lambda.selected)})</div>
       <div className="swb-table-scroll">
         <table className="swb-table" aria-label="예측 계수표">
           <thead><tr><th>변수</th><th>수준</th><th>표준화 계수</th></tr></thead>
           <tbody>
-            <tr><td>(절편)</td><td>—</td><td>{num(prediction.coefficients?.intercept, 4)}</td></tr>
+            <tr><td>(절편)</td><td>—</td><td>{formatStat(prediction.coefficients?.intercept)}</td></tr>
             {(prediction.coefficients?.terms || []).map((t) => (
               <tr key={t.term}>
                 <td>{variableLabel(catalogByKey, t.variableKey)}</td>
                 <td>{t.level ?? '—'}</td>
-                <td>{num(t.standardizedBeta, 4)}</td>
+                <td>{formatStat(t.standardizedBeta)}</td>
               </tr>
             ))}
           </tbody>

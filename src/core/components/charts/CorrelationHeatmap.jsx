@@ -1,4 +1,5 @@
 import { divergingColor } from './palette';
+import { formatPValue, formatStat } from './numberFormat';
 import { DataTableView } from './DataTableView';
 import { ChartTooltip, chooseTooltipPlacement } from './ChartTooltip';
 
@@ -78,7 +79,7 @@ export function CorrelationHeatmap({ variableKeys, cells, labelOf }) {
             );
             if (isDiagonal) return <g key={`${i}-${j}`}>{cellBody}</g>;
             const label = cell && !cell.suppressed
-              ? `${labelOf(cell.xKey)} × ${labelOf(cell.yKey)} — r=${cell.r.toFixed(3)}, p=${cell.pValue.toFixed(4)}${cell.adjustedP === null ? '' : `, 보정p=${cell.adjustedP.toFixed(4)}`}`
+              ? `${labelOf(cell.xKey)} × ${labelOf(cell.yKey)} — r=${formatStat(cell.r)}, p=${formatPValue(cell.pValue)}${cell.adjustedP === null ? '' : `, 보정p=${formatPValue(cell.adjustedP)}`}`
               : `${labelOf((cell || {}).xKey ?? variableKeys[Math.min(i, j)])} × ${labelOf((cell || {}).yKey ?? variableKeys[Math.max(i, j)])} — 공개 정책에 따라 표시되지 않음`;
             // MARGIN.top(96)이 항상 여유(26px)보다 훨씬 커서 실제로 뒤집힐 일은
             // 없지만, 다른 차트와 같은 방식으로 통일해 margin이 나중에 바뀌어도
@@ -103,9 +104,9 @@ export function CorrelationHeatmap({ variableKeys, cells, labelOf }) {
           <tr key={pairKey(c.xKey, c.yKey)}>
             <td>{labelOf(c.xKey)}</td>
             <td>{labelOf(c.yKey)}</td>
-            <td>{c.suppressed ? '(비공개)' : c.r.toFixed(3)}</td>
-            <td>{c.suppressed ? '(비공개)' : c.pValue.toFixed(4)}</td>
-            <td>{c.suppressed ? '(비공개)' : (c.adjustedP === null ? '(비공개)' : c.adjustedP.toFixed(4))}</td>
+            <td>{c.suppressed ? '(비공개)' : formatStat(c.r)}</td>
+            <td>{c.suppressed ? '(비공개)' : formatPValue(c.pValue)}</td>
+            <td>{c.suppressed ? '(비공개)' : (c.adjustedP === null ? '(비공개)' : formatPValue(c.adjustedP))}</td>
           </tr>
         ))}
       </tbody>

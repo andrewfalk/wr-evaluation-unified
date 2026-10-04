@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { formatPValue } from '../charts/numberFormat';
 
 function SuppressedVariablesList({ catalogByKey, committedResult }) {
   const rows = [
@@ -107,7 +108,7 @@ export function InspectorReportPanel({ catalog, committedRecipe, committedResult
                 함수는 구현·검증됐지만 이 레시피 구조에선 실제로 m=1로만 호출된다. */}
             {committedResult?.result?.bivariate && !committedResult.result.bivariate.suppressed ? (
               <p className="swb-suppressed-note">
-                단일 검정(보정 없음) — raw p = adjusted p = {committedResult.result.bivariate.pValue ?? '—'}
+                단일 검정(보정 없음) — raw p = adjusted p = {formatPValue(committedResult.result.bivariate.pValue)}
                 (method: {committedResult.result.bivariate.multipleTesting?.method ?? 'none'})
               </p>
             ) : (

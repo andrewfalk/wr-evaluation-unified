@@ -189,7 +189,7 @@ describe('CorrelationHeatmap', () => {
     ];
     render(<CorrelationHeatmap variableKeys={['a', 'b', 'c']} cells={cells} labelOf={(k) => k} />);
     await user.click(screen.getByRole('button', { name: '데이터 보기' }));
-    expect(screen.getByText('0.500')).toBeTruthy();
+    expect(screen.getByText('0.5000')).toBeTruthy();
     expect(screen.getAllByText('(비공개)').length).toBeGreaterThan(0);
   });
 });
@@ -251,7 +251,7 @@ describe('ForestPlot', () => {
     await user.click(screen.getByRole('button', { name: '데이터 보기' }));
     const table = document.querySelector('table');
     expect(table.querySelectorAll('tbody tr').length).toBe(2);
-    expect(screen.getByText('2')).toBeTruthy(); // x1의 OR(formatNumber가 trailing zero를 없앤다)
+    expect(screen.getByText('2.000')).toBeTruthy(); // x1의 OR(formatStat은 유효숫자 4자리로 고정한다)
     expect(screen.getByText('—')).toBeTruthy(); // x2는 overflow라 OR 없음
   });
 
@@ -528,10 +528,10 @@ describe('ChartTooltip — 키보드 포커스로 작동하는 툴팁(§6.8.5)',
     const user = userEvent.setup();
     const cells = [{ suppressed: false, xKey: 'a', yKey: 'b', n: 50, r: 0.5, pValue: 0.01, adjustedP: 0.02 }];
     render(<CorrelationHeatmap variableKeys={['a', 'b']} cells={cells} labelOf={(k) => k} />);
-    expect(screen.queryByText(/r=0.500/)).toBeFalsy();
+    expect(screen.queryByText(/r=0.5000/)).toBeFalsy();
     await user.tab(); // 1: 데이터 보기 버튼
     await user.tab(); // 2: (0,0) 대각선은 포커스 불가라 건너뛰고 첫 비대각 칸
-    expect(screen.getByText(/r=0.500/)).toBeTruthy();
+    expect(screen.getByText(/r=0.5000/)).toBeTruthy();
   });
 
   it('ScatterPlot 그리드 셀이 Tab으로 포커스되면 x/y 구간·건수가 보인다', async () => {
