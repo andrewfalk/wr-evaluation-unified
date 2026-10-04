@@ -1679,6 +1679,13 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .saved-item-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 
 .error-message { background: #ffe0e0; color: #c92a2a; padding: 8px 12px; border-radius: 8px; font-size: 0.8rem; margin-top: 8px; }
+
+/* 신규 환자 등록 마법사: 안내만 하고 이동은 막지 않는 필수값 요약(IntakeWizard) */
+.intake-issues { margin: 0 0 16px; padding: 10px 14px; border: 1px solid #f0ad4e; border-radius: 10px; background: rgba(240, 173, 78, 0.10); font-size: 0.85rem; }
+.intake-issues-title { font-weight: 600; color: var(--text-primary); }
+.intake-issues-note { font-weight: 400; font-size: 0.78rem; color: var(--text-muted); }
+.intake-issues-list { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.intake-issue-link { background: none; border: 0; padding: 2px 0; cursor: pointer; font: inherit; color: #c92a2a; text-align: left; text-decoration: underline; }
 .preset-info { font-size: 0.7rem; color: var(--text-muted); margin-top: 3px; font-style: italic; }
 .preset-meta { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px; padding: 8px; background: var(--card-bg); border-radius: 8px; }
 .form-meta-card {

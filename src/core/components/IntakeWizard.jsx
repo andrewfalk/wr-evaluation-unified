@@ -4,6 +4,7 @@ import { DiagnosisForm } from './DiagnosisForm';
 import { getAllModules } from '../moduleRegistry';
 import { isValidDiagnosisModuleId, suggestModules } from '../utils/diagnosisMapping';
 import { createDiagnosis } from '../utils/data';
+import { validateIntakeStep, listIntakeIssues, INTAKE_STEP_INFO, INTAKE_STEP_DIAGNOSIS } from '../utils/intakeValidation';
 
 const INTAKE_STEPS = [
   { id: 'info', label: '기본정보' },
@@ -25,6 +26,9 @@ export function IntakeWizard({
 }) {
   const [step, setStep] = useState(0);
   const [selectedModules, setSelectedModules] = useState([]);
+  // "다음"을 눌러 지나간 단계 — 그 단계의 미해결 항목을 안내한다(이동은 막지 않는다). 오류는 현재 shared에서
+  // 매번 다시 계산하므로 값을 고치면 안내가 자동으로 사라진다.
+  const [attemptedSteps, setAttemptedSteps] = useState([]);
 
   const intakeDiagnoses = shared.diagnoses || [createDiagnosis()];
   const suggested = suggestModules(intakeDiagnoses);
@@ -39,6 +43,30 @@ export function IntakeWizard({
       setSelectedModules([...suggested]);
     }
     setStep(next);
+  };
+
+  // "다음": 현재 단계를 안내 대상으로 표시하고 이동한다.
+  const goNext = (next) => {
+    setAttemptedSteps((prev) => (prev.includes(step) ? prev : [...prev, step]));
+    goStep(next);
+  };
+
+  const stepErrors = {
+    [INTAKE_STEP_INFO]: attemptedSteps.includes(INTAKE_STEP_INFO) ? validateIntakeStep(INTAKE_STEP_INFO, shared) : null,
+    [INTAKE_STEP_DIAGNOSIS]: attemptedSteps.includes(INTAKE_STEP_DIAGNOSIS) ? validateIntakeStep(INTAKE_STEP_DIAGNOSIS, shared) : null,
+  };
+  const issues = [INTAKE_STEP_INFO, INTAKE_STEP_DIAGNOSIS]
+    .flatMap((s) => listIntakeIssues(s, stepErrors[s], shared));
+
+  // 요약 항목을 누르면 해당 단계로 이동하고(상병 행이면 그 행으로 스크롤) 필드별 안내를 다시 보여준다.
+  const jumpToIssue = (issue) => {
+    setStep(issue.step);
+    if (issue.rowId) {
+      setTimeout(() => {
+        const el = document.getElementById(`diagnosis-card-${issue.rowId}`);
+        if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+      }, 0);
+    }
   };
 
   return (
@@ -64,12 +92,27 @@ export function IntakeWizard({
           ))}
         </div>
 
+        {issues.length > 0 && (
+          <div className="intake-issues" role="status">
+            <div className="intake-issues-title">확인이 필요한 항목 {issues.length}개 <span className="intake-issues-note">(입력하지 않아도 다음 단계로 이동할 수 있습니다)</span></div>
+            <ul className="intake-issues-list">
+              {issues.map((issue) => (
+                <li key={issue.key}>
+                  <button type="button" className="intake-issue-link" onClick={() => jumpToIssue(issue)}>
+                    {issue.label} — {issue.message}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {step === 0 && (
           <>
-            <BasicInfoForm shared={shared} onChange={onSharedChange} errors={errors} presets={presets} presetMeta={presetMeta} presetError={presetError} session={session} />
+            <BasicInfoForm shared={shared} onChange={onSharedChange} errors={{ ...errors, ...stepErrors[INTAKE_STEP_INFO] }} presets={presets} presetMeta={presetMeta} presetError={presetError} session={session} />
             <div className="wizard-actions">
               <span />
-              <button className="btn btn-primary" onClick={() => goStep(1)}>다음: 상병 입력 &rarr;</button>
+              <button className="btn btn-primary" onClick={() => goNext(1)}>다음: 상병 입력 &rarr;</button>
             </div>
           </>
         )}
@@ -79,14 +122,14 @@ export function IntakeWizard({
             <DiagnosisForm
               diagnoses={intakeDiagnoses}
               onChange={newDiag => onSharedChange(prev => ({ ...prev, diagnoses: newDiag }))}
-              errors={errors}
+              errors={{ ...errors, ...stepErrors[INTAKE_STEP_DIAGNOSIS] }}
               createDiagnosis={createDiagnosis}
               showModuleHints
               activeModules={selectedModules}
             />
             <div className="wizard-actions">
               <button className="btn btn-secondary" onClick={() => goStep(0)}>&larr; 이전</button>
-              <button className="btn btn-primary" onClick={() => goStep(2)}>다음: 모듈 선택 &rarr;</button>
+              <button className="btn btn-primary" onClick={() => goNext(2)}>다음: 모듈 선택 &rarr;</button>
             </div>
           </>
         )}
