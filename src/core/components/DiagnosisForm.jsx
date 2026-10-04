@@ -68,7 +68,7 @@ export function DiagnosisForm({ diagnoses, onChange, errors, createDiagnosis, sh
         const isExplicitNone = diag.moduleId === '__none__';
         const isAxial = resolved?.moduleId === 'spine' || resolved?.moduleId === 'cervical';
         return (
-        <div key={diag.id} className="diagnosis-card">
+        <div key={diag.id} id={`diagnosis-card-${diag.id}`} className="diagnosis-card">
           <div className="diagnosis-card-header">
             <div className="card-title-stack">
               <span className="diagnosis-card-title">상병 #{i + 1}</span>
@@ -83,8 +83,16 @@ export function DiagnosisForm({ diagnoses, onChange, errors, createDiagnosis, sh
             {diagnoses.length > 1 && <button className="btn btn-danger btn-xs" onClick={() => removeDiagnosis(i)}>삭제</button>}
           </div>
           <div className="form-row diagnosis-code-name-row">
-            <div className="form-group"><label>진단코드 *</label><input value={diag.code} onChange={e => handleDiagnosis(i, 'code', e.target.value)} placeholder="M17.0" /></div>
-            <div className="form-group"><label>진단명 *</label><DiagnosisNameInput value={diag.name} onChange={v => handleDiagnosis(i, 'name', v)} placeholder="진단명 입력" /></div>
+            <div className="form-group">
+              <label>진단코드 *</label>
+              <input value={diag.code} onChange={e => handleDiagnosis(i, 'code', e.target.value)} placeholder="M17.0" />
+              {errors?.diagnosisRows?.[diag.id]?.code && <div className="error-message">{errors.diagnosisRows[diag.id].code}</div>}
+            </div>
+            <div className="form-group">
+              <label>진단명 *</label>
+              <DiagnosisNameInput value={diag.name} onChange={v => handleDiagnosis(i, 'name', v)} placeholder="진단명 입력" />
+              {errors?.diagnosisRows?.[diag.id]?.name && <div className="error-message">{errors.diagnosisRows[diag.id].name}</div>}
+            </div>
           </div>
           <div className="form-group">
             <label>평가 모듈</label>
