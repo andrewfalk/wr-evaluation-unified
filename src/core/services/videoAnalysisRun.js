@@ -58,7 +58,7 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
       (c) => c.processId === p.id && (c.fixtureClipName || c.serverClipId || detections[c.id]?.serverClipId),
     );
     if (clipMetas.length === 0) {
-      errors.push({ processId: p.id, message: `공정 "${p.name}"에 분석 가능한 클립이 없습니다(영상 업로드 또는 fixture 파일명 필요).` });
+      errors.push({ processId: p.id, message: `공정 "${p.name}"에 분석 가능한 클립이 없습니다. 영상을 업로드하거나 시험용 영상 파일명을 입력하세요.` });
       continue;
     }
     // 6.0-16: 공정 profile 기준으로 어깨 반복 밴드별 시간합 6키를 요청/환산 대상에서 제외(posture-basic·

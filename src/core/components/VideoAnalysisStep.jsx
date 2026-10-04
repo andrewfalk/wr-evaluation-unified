@@ -3,7 +3,7 @@
 // 서버 경로(clip→job→apply, audit·영속화)로, 그 외는 로컬로 처리한다(§8.2/§8.12).
 // 실제 추론은 M2에서 서버 셸에 연결된다.
 import { useMemo, useState, useRef, useEffect } from 'react';
-import { generateMockFeatures } from '../services/videoMock';
+import { generateMockFeatures, displayCandidateReason } from '../services/videoMock';
 import {
   REPETITION_FEATURE_KEYS, REPETITION_PROFILES, HAND_WRIST_FEATURE_KEYS, REPETITION_BAND_FEATURE_KEYS,
 } from '../services/videoFeatureProfiles';
@@ -470,8 +470,8 @@ export function FlatCandidateList({
                 <div className="va-suggest-head">
                   <span className="va-suggest-value">
                     {label !== null
-                      ? <>{label} — <span className="va-hint">{first.reason}</span></>
-                      : <><code className="va-suggest-key">{featureKey}</code>: {String(first.value)} — <span className="va-hint">{first.reason}</span></>}
+                      ? <>{label} — <span className="va-hint">{displayCandidateReason(first.reason)}</span></>
+                      : <><code className="va-suggest-key">{featureKey}</code>: {String(first.value)} — <span className="va-hint">{displayCandidateReason(first.reason)}</span></>}
                   </span>
                   <span className="va-flag-pill tone-warning" title="관찰값 — 자동입력 안 함">참고만</span>
                 </div>
@@ -941,7 +941,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
       );
       onServerApplied?.(serverPatient);
     } catch (e) {
-      setApplyError(e?.message || '서버 적용에 실패했습니다.');
+      setApplyError(e?.message || '적용에 실패했습니다.');
     } finally {
       setBusy(false);
     }
@@ -1043,7 +1043,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
           <button type="button" className="btn btn-primary btn-sm" disabled={busy || applyBlocked || refOnly || applyDisabled}
             title={applyDisabled ? applyDisabledTitle : undefined}
             onClick={() => applySuggestion(moduleId, ctx, s, processIds, analysisProfile, (applyNotes[rowKey] || '').trim() || undefined)}>
-            {serverMode ? '서버 적용' : '적용'}
+            적용
           </button>
         </div>
         {(expanded || skeleton) && (
@@ -1073,7 +1073,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
     } else {
       // generic candidate(trunkPostureG·neckCombinedFlexRot 등): 원값 + (evidence.intrinsicUnit) 표시.
       const unit = jobEv?.contributions?.[0]?.evidence?.intrinsicUnit || '';
-      label = <>{c.reason ? `${c.reason}: ` : ''}{String(fmtNum(c.value))}{unit ? ` ${unit}` : ''}</>;
+      label = <>{c.reason ? `${displayCandidateReason(c.reason)}: ` : ''}{String(fmtNum(c.value))}{unit ? ` ${unit}` : ''}</>;
     }
     const skeleton = renderSkeletonReview(rowKey, jobEv);
     return (
@@ -1135,10 +1135,13 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
       <section className="section pattern-surface form-section">
         <div className="section-header">
           <div className="section-title-row">
-            <h2 className="section-title"><span className="section-icon">🎥</span>작업 영상 인간공학 분석{serverMode && fixtureMode ? ' (fixture)' : serverMode ? '' : ' (mock)'}</h2>
+            <h2 className="section-title"><span className="section-icon">🎥</span>작업 영상 인간공학 분석{serverMode && fixtureMode ? ' (시험)' : serverMode ? '' : ' (예시)'}</h2>
             <p className="section-description">
-              조사 서류 기반으로 공정을 정리하고 mock 분석을 실행합니다. 결과는 항상 <b>제안값</b>이며 전문의가 확정합니다.
-              {serverMode && ' 적용은 서버에 기록됩니다(audit).'}
+              {serverMode
+                ? '조사 서류 기반으로 공정을 정리하고 영상 분석을 실행합니다. '
+                : '조사 서류 기반으로 공정을 정리하고 예시 분석을 실행합니다. 예시 데이터로 생성한 결과이며 실제 영상에서 산출한 값이 아닙니다. '}
+              결과는 항상 <b>제안값</b>이며 전문의가 확정합니다.
+              {serverMode && ' 적용 내역은 서버에 기록됩니다.'}
               {!serverSupported && ' (인트라넷 외 모드: 로컬 적용만)'}
             </p>
             {applyBlocked && (
@@ -1156,7 +1159,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
             border: '1px solid var(--color-warning)', borderRadius: 6,
             background: 'rgba(240, 173, 78, 0.10)',
           }}>
-            ⚠ <b>시범 운영</b> — 영상 분석값은 정확도 검증(6.0-B2) 전입니다. 모든 값은 <b>참고용</b>이며,
+            ⚠ <b>시범 운영</b> — 영상 분석값은 정확도 검증 전입니다. 모든 값은 <b>참고용</b>이며,
             전문의가 직접 확인·확정해야 합니다. 어긋나거나 이상한 제안은 적용 시 <b>수정 사유 메모</b>로 남겨주시면 검증·개선에 활용됩니다.
           </div>
         )}
@@ -1247,7 +1250,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                             {VIEWPOINTS.map((vp) => <option key={vp.value} value={vp.value}>{vp.label}</option>)}
                           </select>
                           {fixtureMode && (
-                            <input type="text" placeholder="fixture 파일명(dev)" value={c.fixtureClipName || ''}
+                            <input type="text" placeholder="시험용 영상 파일명" value={c.fixtureClipName || ''}
                               onChange={(e) => editClip(c.id, { fixtureClipName: e.target.value })} style={{ width: 150 }} />
                           )}
                           {serverMode && !c.fixtureClipName && (
@@ -1287,7 +1290,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               <button type="button" className="btn btn-secondary btn-sm" onClick={addProcess}>+ 공정 추가</button>
               <button type="button" className="btn btn-primary" onClick={runAnalysis} disabled={va.processes.length === 0 || analyzing}>
-                {analyzing ? '분석 중…' : (serverMode ? '분석 실행' : 'mock 분석 실행')}
+                {analyzing ? '분석 중…' : (serverMode ? '영상 분석 실행' : '예시 분석 실행')}
               </button>
             </div>
 
@@ -1434,9 +1437,9 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
         {/* 5) 적용 이력 + 되돌리기 (전체폭) */}
         {(va.appliedInputs || []).length > 0 && (
           <div className="va-history">
-            <div className="va-col-title">적용 이력 (provenance)</div>
+            <div className="va-col-title">적용 이력</div>
             {serverMode && (
-              <p className="muted">서버 적용 항목의 되돌리기는 후속 단계(M3)에서 지원됩니다. 모듈 탭에서 직접 수정하세요.</p>
+              <p className="muted">서버에 적용한 항목의 되돌리기는 아직 지원되지 않습니다. 모듈 탭에서 직접 수정하세요.</p>
             )}
             <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
               {va.appliedInputs.map((e, i) => (

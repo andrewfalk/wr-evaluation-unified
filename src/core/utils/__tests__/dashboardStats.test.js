@@ -5,10 +5,12 @@ import {
   getDoctorOptionsFromRoster,
   UNASSIGNED_GROUP_KEY,
   computeDashboardStats,
-  computeAge,
+  computeAgeAt,
+  MAX_PLAUSIBLE_AGE,
   normalizeGender,
 } from '../dashboardStats.js';
 import { getOwnerGroupKey } from '../patientOwnership.js';
+import { calculateAge } from '@analytics-core/common';
 
 function patient({ assignedTop, assignedMeta, createdBy, doctorName } = {}) {
   const p = { meta: {} };
@@ -246,7 +248,8 @@ function demographicPatient({ gender, birthDate, jobName, diagCode } = {}) {
       shared: {
         gender,
         birthDate,
-        evaluationDate: '2025-01-01',
+        injuryDate: '2025-01-01',
+        evaluationDate: '2030-06-30', // 나이 기준이 아님을 구분하기 위해 일부러 다르게
         jobs: jobName ? [{ jobName }] : [],
         diagnoses: diagCode ? [{ code: diagCode, name: diagCode + ' name' }] : [],
       },
@@ -270,29 +273,56 @@ describe('normalizeGender', () => {
   });
 });
 
-describe('computeAge', () => {
+describe('computeAgeAt', () => {
   it('YYYY-MM-DD 정상 파싱', () => {
-    expect(computeAge('1980-01-01', '2025-01-01')).toBe(45);
+    expect(computeAgeAt('1980-01-01', '2025-01-01')).toBe(45);
   });
-  it('YYYYMMDD 형식도 처리 (formatBirthDate 정규화)', () => {
-    expect(computeAge('19800101', '2025-01-01')).toBe(45);
+  it('YYYYMMDD 구형식 생년월일도 처리 (formatBirthDate 정규화 후 strict 계산)', () => {
+    expect(computeAgeAt('19800101', '2025-01-01')).toBe(45);
   });
-  it('생일 안 지났으면 한 살 적게', () => {
-    expect(computeAge('1980-06-15', '2025-01-01')).toBe(44);
+  it('생일 안 지났으면 한 살 적게, 생일 당일이면 한 살 더', () => {
+    expect(computeAgeAt('1980-06-15', '2025-01-01')).toBe(44);
+    expect(computeAgeAt('1980-06-15', '2025-06-14')).toBe(44);
+    expect(computeAgeAt('1980-06-15', '2025-06-15')).toBe(45);
   });
-  it('invalid birthDate는 null', () => {
-    expect(computeAge('', '2025-01-01')).toBe(null);
-    expect(computeAge('not-a-date', '2025-01-01')).toBe(null);
-    expect(computeAge(null, '2025-01-01')).toBe(null);
+  it('invalid 생년월일은 null', () => {
+    expect(computeAgeAt('', '2025-01-01')).toBe(null);
+    expect(computeAgeAt('not-a-date', '2025-01-01')).toBe(null);
+    expect(computeAgeAt(null, '2025-01-01')).toBe(null);
+    // 달력에 없는 날짜는 다른 날짜로 보정하지 않고 null
+    expect(computeAgeAt('2021-02-31', '2025-01-01')).toBe(null);
   });
-  it('invalid ref는 today로 fallback', () => {
-    const age = computeAge('1990-01-01', 'not-a-date');
-    expect(age).toBeGreaterThan(30);
-    expect(age).toBeLessThan(60);
+  it('기준일이 없거나 잘못되면 오늘로 대체하지 않고 null (나이가 시간에 따라 커지는 오류 방지)', () => {
+    expect(computeAgeAt('1990-01-01', '')).toBe(null);
+    expect(computeAgeAt('1990-01-01', undefined)).toBe(null);
+    expect(computeAgeAt('1990-01-01', 'not-a-date')).toBe(null);
+    expect(computeAgeAt('1990-01-01', '2025-02-31')).toBe(null);
   });
-  it('비현실값은 null', () => {
-    expect(computeAge('1800-01-01', '2025-01-01')).toBe(null);
-    expect(computeAge('2050-01-01', '2025-01-01')).toBe(null);
+  it('기준일이 생년월일보다 이르면(음수 나이) null', () => {
+    expect(computeAgeAt('2050-01-01', '2025-01-01')).toBe(null);
+  });
+  it('MAX_PLAUSIBLE_AGE(120) 초과는 대시보드 집계에서만 제외한다', () => {
+    expect(MAX_PLAUSIBLE_AGE).toBe(120);
+    expect(computeAgeAt('1800-01-01', '2025-01-01')).toBe(null);
+    expect(computeAgeAt('1905-01-01', '2025-01-01')).toBe(120);
+    expect(computeAgeAt('1903-12-31', '2025-01-01')).toBe(null); // 121세
+  });
+  it('인적사항 화면의 만 나이(calculateAge)와 같은 값이다(strict ISO 입력)', () => {
+    const cases = [['1990-01-01', '2024-01-01'], ['1990-06-15', '2024-06-14'], ['2000-02-29', '2023-02-28'], ['2000-02-29', '2024-02-29']];
+    for (const [b, r] of cases) expect(computeAgeAt(b, r)).toBe(calculateAge(b, r));
+  });
+  it('시간대(TZ)와 무관하게 같은 값을 낸다 — 기존 new Date 방식이 틀리던 경계', () => {
+    // 입력이 문자열 컴포넌트로만 계산되므로 process.env.TZ를 바꿔도 결과가 같아야 한다.
+    const prev = process.env.TZ;
+    try {
+      for (const tz of ['Pacific/Kiritimati', 'Pacific/Pago_Pago', 'Asia/Seoul', 'UTC']) {
+        process.env.TZ = tz;
+        expect(computeAgeAt('1990-03-01', '2025-03-01')).toBe(35);
+        expect(computeAgeAt('1990-03-02', '2025-03-01')).toBe(34);
+      }
+    } finally {
+      if (prev === undefined) delete process.env.TZ; else process.env.TZ = prev;
+    }
   });
 });
 
@@ -374,5 +404,73 @@ describe('computeDashboardStats — 성별·연령·직종·상병 by-gender', (
     expect(topDiagnosesByGender.all.find(d => d.key === 'M54.5').count).toBe(2);
     expect(topDiagnosesByGender.male.find(d => d.key === 'M54.5').count).toBe(2);
     expect(topDiagnosesByGender.female.find(d => d.key === 'M17.0').count).toBe(1);
+  });
+});
+
+describe('computeDashboardStats — 나이 기준은 재해일자(injuryDate)', () => {
+  function agePatient(shared) {
+    return { data: { shared: { gender: '남', jobs: [], diagnoses: [], ...shared }, activeModules: [] } };
+  }
+
+  it('평균 연령·연령대 분포는 평가일이 아니라 재해일자로 계산한다 (두 날짜를 다르게 두어 구분)', () => {
+    const patients = [
+      // 재해일자 기준 35세(30대↓), 평가일 기준이면 45세(40대)
+      agePatient({ birthDate: '1980-01-01', injuryDate: '2015-06-01', evaluationDate: '2025-06-01' }),
+    ];
+    const { avgAgeByGender, ageGroupDistribution } = computeDashboardStats(patients);
+    expect(avgAgeByGender.all).toBe(35);
+    expect(ageGroupDistribution.all['30대↓']).toBe(1);
+    expect(ageGroupDistribution.all['40대']).toBe(0);
+  });
+
+  it('재해일자가 비었거나 잘못된 환자는 오늘로 대체하지 않고 평균·분포에서 제외한다 (평가일만 있어도 제외)', () => {
+    const patients = [
+      agePatient({ birthDate: '1980-01-01', injuryDate: '2020-01-01' }),                     // 40
+      agePatient({ birthDate: '1960-01-01' }),                                               // 재해일자 없음
+      agePatient({ birthDate: '1960-01-01', injuryDate: 'not-a-date' }),                     // 잘못된 재해일자
+      agePatient({ birthDate: '1960-01-01', injuryDate: '', evaluationDate: '2025-01-01' }), // 평가일만 있음
+    ];
+    const { avgAgeByGender, ageGroupDistribution } = computeDashboardStats(patients);
+    expect(avgAgeByGender.all).toBe(40);
+    expect(Object.values(ageGroupDistribution.all).reduce((a, b) => a + b, 0)).toBe(1);
+  });
+
+  it('인적사항 만 나이(calculateAge)로 손계산한 평균과 일치한다', () => {
+    const rows = [['1990-03-10', '2021-03-09'], ['1975-12-31', '2020-01-01'], ['1968-07-07', '2019-07-07']];
+    const patients = rows.map(([birthDate, injuryDate]) => agePatient({ birthDate, injuryDate }));
+    const expected = rows.map(([b, r]) => calculateAge(b, r)).reduce((a, b) => a + b, 0) / rows.length;
+    const { avgAgeByGender } = computeDashboardStats(patients);
+    expect(avgAgeByGender.all).toBe(Math.round(expected * 10) / 10);
+  });
+});
+
+describe('getDoctorPatientCounts — 서버 명부 이름 (roster)', () => {
+  const roster = { doctors: [{ userId: 'c8ba12ad-uuid-0001', name: '이전문' }, { userId: 'other-id', name: '' }], unassignedCount: 0 };
+
+  it('roster 이름이 doctorName보다 우선한다', () => {
+    const patients = [patient({ assignedTop: 'c8ba12ad-uuid-0001', doctorName: '자유입력' })];
+    const { top } = getDoctorPatientCounts(patients, { roster });
+    expect(top[0].label).toBe('이전문');
+  });
+
+  it('roster에 이름이 없거나 명부에 없으면 doctorName으로 폴백한다', () => {
+    const patients = [
+      patient({ assignedTop: 'other-id', doctorName: '김의사' }),
+      patient({ assignedTop: 'not-in-roster', doctorName: '박의사' }),
+    ];
+    const { top } = getDoctorPatientCounts(patients, { roster });
+    expect(top.find((e) => e.key === 'other-id').label).toBe('김의사');
+    expect(top.find((e) => e.key === 'not-in-roster').label).toBe('박의사');
+  });
+
+  it('roster도 doctorName도 없으면 기존처럼 ID 앞 8자로 폴백한다 (roster를 생략해도 동작 불변)', () => {
+    const patients = [patient({ assignedTop: 'xyzlongidvalue999' })];
+    expect(getDoctorPatientCounts(patients, { roster }).top[0].label).toBe('xyzlongi…');
+    expect(getDoctorPatientCounts(patients).top[0].label).toBe('xyzlongi…');
+  });
+
+  it('미배정 그룹 라벨은 roster의 영향을 받지 않는다', () => {
+    const { unassigned } = getDoctorPatientCounts([patient({})], { roster });
+    expect(unassigned.label).toBe('미배정/알 수 없음');
   });
 });

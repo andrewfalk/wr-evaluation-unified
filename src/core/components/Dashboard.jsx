@@ -305,9 +305,9 @@ const Dashboard = ({
   // 'all' 전용: 의사별 환자 수 Top 5
   const doctorCounts = useMemo(
     () => scope === 'all' && canUseScope
-      ? getDoctorPatientCounts(scopedPatients)
+      ? getDoctorPatientCounts(scopedPatients, { roster: doctorRoster })
       : null,
-    [scopedPatients, scope, canUseScope]
+    [scopedPatients, scope, canUseScope, doctorRoster]
   );
 
   const PERIOD_META = {
@@ -529,7 +529,7 @@ const Dashboard = ({
 
         {/* 평균 연령 (토글: 전체/남/여) */}
         <GenderToggleCard
-          title="평균 연령"
+          title={<>평균 연령 <span style={{ display: 'block', fontSize: '0.8em', fontWeight: 400, opacity: 0.7, whiteSpace: 'nowrap' }}>(재해일자 기준)</span></>}
           data={stats.avgAgeByGender}
           renderBody={(v) => (
             <div className="stat-value stat-total">
@@ -541,7 +541,7 @@ const Dashboard = ({
 
         {/* 연령대 분포 */}
         <GenderToggleCard
-          title="연령대 분포"
+          title={<>연령대 분포 <span style={{ display: 'block', fontSize: '0.8em', fontWeight: 400, opacity: 0.7, whiteSpace: 'nowrap' }}>(재해일자 기준)</span></>}
           data={stats.ageGroupDistribution}
           renderBody={(buckets) => {
             const b = buckets || { '30대↓': 0, '40대': 0, '50대': 0, '60대': 0, '70대↑': 0 };

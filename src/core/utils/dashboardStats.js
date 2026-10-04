@@ -2,6 +2,7 @@ import { isPatientComplete } from './patientCompletion';
 import { getOwnerGroupKey } from './patientOwnership';
 import { formatBirthDate } from './data';
 import { toLocalDateString } from './common';
+import { calculateAgeStrict } from '@analytics-core';
 
 export const UNASSIGNED_GROUP_KEY = '__unassigned__';
 
@@ -36,8 +37,20 @@ function groupPatientsByOwner(patients) {
 }
 
 // 의사별 환자 수 집계 (Top 5 + 미배정 별도)
-export function getDoctorPatientCounts(patients, { topN = 5 } = {}) {
-  const all = groupPatientsByOwner(patients);
+// roster(서버 명부 — Dashboard가 이미 받는 `{ doctors:[{ userId, name, count }] }`)가 있으면
+// 그 이름을 최우선으로 쓴다. 환자 데이터의 shared.doctorName은 자유 텍스트라 그룹 환자 전원이
+// 비어 있으면 UUID 앞 8자로 폴백되던 문제를 막는다. 명부에 없거나 이름이 비면 기존 폴백 유지.
+export function getDoctorPatientCounts(patients, { topN = 5, roster } = {}) {
+  const rosterNames = new Map();
+  for (const d of Array.isArray(roster?.doctors) ? roster.doctors : []) {
+    const name = d?.name && String(d.name).trim() ? String(d.name).trim() : null;
+    if (d?.userId && name) rosterNames.set(String(d.userId), name);
+  }
+  const all = groupPatientsByOwner(patients).map((e) => (
+    e.key !== UNASSIGNED_GROUP_KEY && rosterNames.has(String(e.key))
+      ? { ...e, label: rosterNames.get(String(e.key)) }
+      : e
+  ));
 
   const unassigned = all.find(e => e.key === UNASSIGNED_GROUP_KEY) || null;
   const assigned = all.filter(e => e.key !== UNASSIGNED_GROUP_KEY)
@@ -234,25 +247,24 @@ export function normalizeGender(raw) {
   return 'unknown';
 }
 
-// 만 나이. birthDate가 invalid면 null. ref가 invalid면 today로 폴백. 비현실값(<0, >120) null.
-// YYYYMMDD 형식도 허용 (formatBirthDate가 YYYY-MM-DD로 정규화).
-export function computeAge(birthDate, ref) {
+// 대시보드 집계에서 비현실적인 나이로 보고 제외하는 상한. core의 calculateAgeStrict에는 상한이 없다
+// (통계 변수는 값을 임의로 잘라내지 않는다) — 기존 대시보드 정책(0~120)을 이 집계 계층에서만 유지한다.
+export const MAX_PLAUSIBLE_AGE = 120;
+
+// 기준일(refDate) 시점의 만 나이. 통계 카탈로그의 patient.identity.ageAtInjury와 같은 core 함수
+// (calculateAgeStrict — 타임존 비의존 strict ISO 계산)를 쓴다. 이전 computeAge는 `new Date(문자열)`을
+// 쓰고 기준일이 없거나 잘못되면 오늘로 대체했는데, 달력에 없는 날짜(2025-02-31)를 다른 날짜로 보정하고
+// 시간대에 따라 같은 입력이 24세/25세로 달라졌으며 오늘 대체는 나이가 시간이 지날수록 커지는 오류가 된다.
+// 따라서 기준일이 비었거나 잘못되면 오늘로 대체하지 않고 null(집계 제외)을 반환한다.
+// 생년월일의 YYYYMMDD 구형식은 대시보드가 지금까지 받아 주었으므로 YYYY-MM-DD로 정규화한 뒤 strict로 계산한다
+// (통계 추출기는 strict ISO만 받는다는 차이 — 의도적 호환 유지). 음수·MAX_PLAUSIBLE_AGE 초과는 null.
+export function computeAgeAt(birthDate, refDate) {
   if (typeof birthDate !== 'string' || !birthDate) return null;
+  if (typeof refDate !== 'string' || !refDate) return null;
   const normalized = formatBirthDate(birthDate);
-  if (normalized === '-' || !/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null;
-  const b = new Date(normalized);
-  if (Number.isNaN(b.getTime())) return null;
-  let r;
-  if (typeof ref === 'string' && ref) {
-    r = new Date(ref);
-    if (Number.isNaN(r.getTime())) r = new Date();
-  } else {
-    r = new Date();
-  }
-  let age = r.getFullYear() - b.getFullYear();
-  const m = r.getMonth() - b.getMonth();
-  if (m < 0 || (m === 0 && r.getDate() < b.getDate())) age -= 1;
-  if (age < 0 || age > 120) return null;
+  if (normalized === '-') return null;
+  const age = calculateAgeStrict(normalized, refDate);
+  if (age == null || age < 0 || age > MAX_PLAUSIBLE_AGE) return null;
   return age;
 }
 
@@ -504,7 +516,8 @@ export const computeDashboardStats = (currentPatients) => {
     const g = normalizeGender(shared.gender);
     genderBreakdown[g] += 1;
 
-    const age = computeAge(shared.birthDate, shared.evaluationDate);
+    // 재해일자 기준(인적사항 "만 나이"·통계 변수와 동일). 재해일자가 없거나 잘못되면 집계에서 제외한다.
+    const age = computeAgeAt(shared.birthDate, shared.injuryDate);
     if (age != null) {
       ageSums.all += age; ageCounts.all += 1;
       const gk = ageGroupKey(age);
