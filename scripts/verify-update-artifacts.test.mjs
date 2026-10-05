@@ -4,19 +4,23 @@ import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import yaml from 'js-yaml';
-import { verifyUpdateArtifacts, pickExeEntry, resolveSafeInstallerName } from './verify-update-artifacts.mjs';
+import { spawnSync } from 'child_process';
+import { fileURLToPath } from 'url';
+import { verifyUpdateArtifacts, pickExeEntry, resolveSafeInstallerName, installerNameHasVersion } from './verify-update-artifacts.mjs';
+
+const VERIFIER_PATH = fileURLToPath(new URL('./verify-update-artifacts.mjs', import.meta.url));
 
 function sha512Base64(buf) {
   return createHash('sha512').update(buf).digest('base64');
 }
 
-function writeArtifacts(dir, { installerName, installerContent, metadataFileName, extraFilesEntries = [], skipBlockmap = false, overrideSha512 }) {
+function writeArtifacts(dir, { installerName, installerContent, metadataFileName, extraFilesEntries = [], skipBlockmap = false, overrideSha512, version = '6.5.0' }) {
   const installerBuf = Buffer.from(installerContent);
   writeFileSync(path.join(dir, installerName), installerBuf);
   if (!skipBlockmap) writeFileSync(path.join(dir, `${installerName}.blockmap`), Buffer.from('blockmap'));
 
   const metadata = {
-    version: '6.5.0',
+    ...(version === null ? {} : { version }),
     files: [
       ...extraFilesEntries,
       { url: encodeURIComponent(installerName), sha512: overrideSha512 ?? sha512Base64(installerBuf), size: installerBuf.length },
@@ -108,6 +112,81 @@ describe('verify-update-artifacts', () => {
     writeFileSync(path.join(dir, 'latest.yml'), yaml.dump(metadata), 'utf-8');
     const result = verifyUpdateArtifacts({ artifactDir: dir, metadataFileName: 'latest.yml' });
     expect(result.installerFile).toBe(installerName);
+  });
+
+  // 릴리즈 버전 일치(expectedVersion) — export-offline-package.ps1이 package.json 버전을 넘겨
+  // "오래된 설치본 + 오래된 latest.yml" 조합이 새 버전 패키지에 포장되는 것을 막는다.
+  describe('expectedVersion', () => {
+    it('전달 + 일치 → 통과', () => {
+      writeArtifacts(dir, { installerName: 'Setup 7.0.0.exe', installerContent: 'installer-bytes', metadataFileName: 'latest.yml', version: '7.0.0' });
+      const result = verifyUpdateArtifacts({ artifactDir: dir, metadataFileName: 'latest.yml', expectedVersion: '7.0.0' });
+      expect(result.version).toBe('7.0.0');
+      expect(result.installerFile).toBe('Setup 7.0.0.exe');
+    });
+
+    it('전달 + 메타데이터 버전 불일치(이전 빌드 잔여물) → 실패, 메시지에 기대·실제 버전 포함', () => {
+      writeArtifacts(dir, { installerName: 'Setup 6.5.4.exe', installerContent: 'installer-bytes', metadataFileName: 'latest.yml', version: '6.5.4' });
+      expect(() => verifyUpdateArtifacts({ artifactDir: dir, metadataFileName: 'latest.yml', expectedVersion: '7.0.0' }))
+        .toThrow(/version mismatch.*latest\.yml says 6\.5\.4.*release version is 7\.0\.0/s);
+    });
+
+    it('전달 + 메타데이터에 version 필드 없음 → 실패', () => {
+      writeArtifacts(dir, { installerName: 'Setup 7.0.0.exe', installerContent: 'installer-bytes', metadataFileName: 'latest.yml', version: null });
+      expect(() => verifyUpdateArtifacts({ artifactDir: dir, metadataFileName: 'latest.yml', expectedVersion: '7.0.0' }))
+        .toThrow(/no version field/);
+    });
+
+    it('전달 + 메타데이터 버전은 맞지만 설치본 파일명 버전이 다름 → 실패', () => {
+      writeArtifacts(dir, { installerName: 'Setup 6.5.4.exe', installerContent: 'installer-bytes', metadataFileName: 'latest.yml', version: '7.0.0' });
+      expect(() => verifyUpdateArtifacts({ artifactDir: dir, metadataFileName: 'latest.yml', expectedVersion: '7.0.0' }))
+        .toThrow(/installer file name does not carry release version 7\.0\.0/);
+    });
+
+    it('미전달 + version 필드 없음 → 기존 동작 유지(version: null로 통과)', () => {
+      writeArtifacts(dir, { installerName: 'Setup 7.0.0.exe', installerContent: 'installer-bytes', metadataFileName: 'latest.yml', version: null });
+      const result = verifyUpdateArtifacts({ artifactDir: dir, metadataFileName: 'latest.yml' });
+      expect(result.version).toBeNull();
+    });
+
+    it('미전달 + 버전이 달라도 통과(하위호환 — 비교는 expectedVersion을 줄 때만)', () => {
+      writeArtifacts(dir, { installerName: 'Setup 6.5.4.exe', installerContent: 'installer-bytes', metadataFileName: 'latest.yml', version: '6.5.4' });
+      expect(verifyUpdateArtifacts({ artifactDir: dir, metadataFileName: 'latest.yml' }).version).toBe('6.5.4');
+    });
+
+    // PowerShell은 이 CLI를 호출하고 종료코드로 중단하므로, 인자 배선(--expected-version)과
+    // 종료코드·stderr 계약을 CLI 경로로 직접 검증한다.
+    it('CLI: --expected-version 불일치 → 종료코드 1 + stderr에 version mismatch', () => {
+      writeArtifacts(dir, { installerName: 'Setup 6.5.4.exe', installerContent: 'installer-bytes', metadataFileName: 'latest.yml', version: '6.5.4' });
+      const r = spawnSync(process.execPath, [VERIFIER_PATH, '--artifact-dir', dir, '--metadata-file', 'latest.yml', '--expected-version', '7.0.0'], { encoding: 'utf-8' });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/version mismatch/);
+      expect(r.stdout).toBe('');
+    });
+
+    it('CLI: --expected-version 일치 → 종료코드 0 + stdout JSON', () => {
+      writeArtifacts(dir, { installerName: 'Setup 7.0.0.exe', installerContent: 'installer-bytes', metadataFileName: 'latest.yml', version: '7.0.0' });
+      const r = spawnSync(process.execPath, [VERIFIER_PATH, '--artifact-dir', dir, '--metadata-file', 'latest.yml', '--expected-version', '7.0.0'], { encoding: 'utf-8' });
+      expect(r.status).toBe(0);
+      expect(JSON.parse(r.stdout)).toMatchObject({ version: '7.0.0', sha512Verified: true });
+    });
+
+    it('CLI: --expected-version 없이 호출하면 기존 동작(버전 비교 없음)', () => {
+      writeArtifacts(dir, { installerName: 'Setup 6.5.4.exe', installerContent: 'installer-bytes', metadataFileName: 'latest.yml', version: '6.5.4' });
+      const r = spawnSync(process.execPath, [VERIFIER_PATH, '--artifact-dir', dir, '--metadata-file', 'latest.yml'], { encoding: 'utf-8' });
+      expect(r.status).toBe(0);
+    });
+  });
+
+  describe('installerNameHasVersion', () => {
+    it('버전으로 끝나는 NSIS 파일명 허용', () => {
+      expect(installerNameHasVersion('직업성 질환 통합 평가 프로그램 Setup 7.0.0.exe', '7.0.0')).toBe(true);
+      expect(installerNameHasVersion('Setup-7.0.0.exe', '7.0.0')).toBe(true);
+    });
+    it('다른 버전·접두 숫자가 붙은 버전은 거부', () => {
+      expect(installerNameHasVersion('Setup 6.5.4.exe', '7.0.0')).toBe(false);
+      expect(installerNameHasVersion('Setup 17.0.0.exe', '7.0.0')).toBe(false);
+      expect(installerNameHasVersion('Setup 7.0.0-beta.exe', '7.0.0')).toBe(false);
+    });
   });
 
   describe('pickExeEntry', () => {
