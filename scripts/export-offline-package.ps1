@@ -7,6 +7,12 @@
     everything needed to install on an intranet server without internet access.
     Secrets (.env files, private keys, DB dumps) are explicitly excluded.
 
+    The Electron installer is NOT built by this script (only the three Docker images are).
+    Build it first with `npm run electron:build:intranet`; the script then verifies the
+    resulting latest.yml/canary.yml + installer against the release version (package.json)
+    BEFORE any image build or package-directory cleanup, and aborts on a mismatch so a
+    stale installer from a previous release can never be packaged under a new version.
+
 .PARAMETER Version
     Package version (semver). If omitted, read from package.json.
 
@@ -198,6 +204,37 @@ Write-Host ""
 Write-Host "  Package : $PackageName" -ForegroundColor White
 Write-Host "  Output  : $PackageDir"  -ForegroundColor White
 
+# ── Update artifact pre-flight (fail-fast) ────────────────────────────────────
+# 설치본·latest.yml(또는 canary.yml)의 SHA-512/blockmap/버전 일치를 이미지 빌드와 패키지 디렉터리
+# 삭제보다 **먼저** 확인한다. 이전 릴리즈의 설치본이 release\에 남아 있으면(해시는 서로 맞음)
+# 새 버전 패키지에 그대로 포장되므로, 버전은 package.json(=$Version)과 반드시 일치해야 한다.
+# 실패해도 이 시점엔 아무 산출물도 만들거나 지우지 않았으므로 기존 패키지가 보존된다.
+# -ElectronInstallerPath를 주면 그 파일이 있는 폴더를 검색 위치로 쓴다.
+$artifactDir  = if ($ElectronInstallerPath) { Split-Path $ElectronInstallerPath -Parent } else { Join-Path $RepoRoot "release" }
+$metadataPath = Join-Path $artifactDir $UpdateMetadataFileName
+
+function Test-UpdateArtifacts {
+    # 비교 로직은 JS 검증기(vitest로 검증됨)에 있고, 여기서는 인자를 넘기고 종료코드로 중단만 한다.
+    $stdout = & node (Join-Path $RepoRoot "scripts\verify-update-artifacts.mjs") --artifact-dir $artifactDir --metadata-file $UpdateMetadataFileName --expected-version $Version
+    if ($LASTEXITCODE -ne 0) {
+        # verify-update-artifacts.mjs가 위에서 console.error로 원인을 이미 출력했다.
+        Write-Error "Update artifact verification failed (release version $Version) — refusing to package a possibly-mismatched installer+metadata pair."
+        exit 1
+    }
+    return ($stdout | ConvertFrom-Json)
+}
+
+Write-Step "Update artifact pre-flight ($UpdateMetadataFileName vs release version $Version)"
+if (Test-Path $metadataPath) {
+    $preflight = Test-UpdateArtifacts
+    Write-Ok "$($preflight.installerFile) — $UpdateMetadataFileName version $($preflight.version) = release version $Version"
+} elseif ($AllowMissingElectronInstaller) {
+    Write-Warn "$UpdateMetadataFileName not found in $artifactDir — will write PLACEHOLDER.txt (-AllowMissingElectronInstaller was passed)"
+} else {
+    Write-Error "$UpdateMetadataFileName not found in $artifactDir. Build with 'npm run electron:build:intranet' first, or pass -AllowMissingElectronInstaller for an intentional server-only export."
+    exit 1
+}
+
 # ── Secret leak guard ─────────────────────────────────────────────────────────
 
 Write-Step "Secret leak guard"
@@ -303,11 +340,14 @@ Write-Step "Copying docs"
 $docsDest = Join-Path $PackageDir "docs"
 New-Item -ItemType Directory -Force $docsDest | Out-Null
 
+# UPDATE_<버전>.md는 해당 릴리즈의 기존 서버 업데이트 안내서(없으면 아래 루프가 경고만 하고 건너뜀).
 $docFiles = @(
     "INTRANET_DEPLOYMENT.md",
     "BACKUP_RESTORE.md",
     "OPERATIONS_RUNBOOK.md",
-    "PRODUCTION_RELEASE_PLAN.md"
+    "PRODUCTION_RELEASE_PLAN.md",
+    "OFFLINE_DEPLOYMENT_PACKAGE.md",
+    "UPDATE_$Version.md"
 )
 foreach ($f in $docFiles) {
     $src = Join-Path $RepoRoot "docs\$f"
@@ -338,19 +378,11 @@ New-Item -ItemType Directory -Force $electronDest | Out-Null
 # stale yml (or vice versa) and ship a mismatched combination into the air-gapped
 # package. -ElectronInstallerPath (if given) only selects the search directory;
 # the actual filenames always come from the verified metadata.
-$artifactDir  = if ($ElectronInstallerPath) { Split-Path $ElectronInstallerPath -Parent } else { Join-Path $RepoRoot "release" }
-$metadataPath = Join-Path $artifactDir $UpdateMetadataFileName
-
+# $artifactDir/$metadataPath는 위 사전 점검에서 계산했다. 복사 직전에 한 번 더(방어적으로) 같은 검증을 돌린다.
 $copiedInstallerName = $null
 if (Test-Path $metadataPath) {
     Write-Host "    verifying $UpdateMetadataFileName against installer + blockmap in $artifactDir ..." -ForegroundColor Gray
-    $verifyStdout = & node (Join-Path $RepoRoot "scripts\verify-update-artifacts.mjs") --artifact-dir $artifactDir --metadata-file $UpdateMetadataFileName
-    if ($LASTEXITCODE -ne 0) {
-        # verify-update-artifacts.mjs already printed the reason via console.error above.
-        Write-Error "Update artifact verification failed — refusing to package a possibly-mismatched installer+metadata pair."
-        exit 1
-    }
-    $verified = $verifyStdout | ConvertFrom-Json
+    $verified = Test-UpdateArtifacts
 
     Copy-Item (Join-Path $artifactDir $verified.installerFile) $electronDest
     Copy-Item (Join-Path $artifactDir $verified.blockmapFile)  $electronDest
@@ -363,6 +395,7 @@ if (Test-Path $metadataPath) {
 
     $UpdateArtifactManifest = [ordered]@{
         channel        = $verified.channel
+        version        = $verified.version
         metadataFile   = $verified.metadataFile
         installerFile  = $verified.installerFile
         blockmapFile   = $verified.blockmapFile
@@ -377,6 +410,7 @@ if (Test-Path $metadataPath) {
 
     $UpdateArtifactManifest = [ordered]@{
         channel        = $UpdateChannel
+        version        = $null
         metadataFile   = $null
         installerFile  = $null
         blockmapFile   = $null
@@ -475,6 +509,7 @@ $manifest = [ordered]@{
     electronInstaller    = [ordered]@{
         included       = [bool]$copiedInstallerName
         channel        = $UpdateArtifactManifest.channel
+        version        = $UpdateArtifactManifest.version
         metadataFile   = $UpdateArtifactManifest.metadataFile
         installerFile  = $UpdateArtifactManifest.installerFile
         blockmapFile   = $UpdateArtifactManifest.blockmapFile

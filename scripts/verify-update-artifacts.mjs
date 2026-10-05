@@ -12,8 +12,13 @@
  * not a warning, since this is the check that stops a mismatched
  * installer+metadata pair from being shipped into an air-gapped package.
  *
+ * 릴리즈 버전 일치(expectedVersion): export-offline-package.ps1이 package.json 버전을 넘기면
+ * metadata.version 과 설치본 파일명의 버전이 그 값과 같은지도 확인한다. SHA-512·blockmap만
+ * 보면 "오래된 설치본 + 오래된 latest.yml" 조합(서로 해시는 맞음)이 새 버전 패키지에 그대로
+ * 포장되기 때문이다. expectedVersion을 넘기지 않으면 기존 동작(버전 비교 없음)을 유지한다.
+ *
  * Usage:
- *   node scripts/verify-update-artifacts.mjs --artifact-dir <dir> --metadata-file <latest.yml|canary.yml>
+ *   node scripts/verify-update-artifacts.mjs --artifact-dir <dir> --metadata-file <latest.yml|canary.yml> [--expected-version <x.y.z>]
  */
 import { createHash } from 'crypto';
 import { readFileSync, existsSync } from 'fs';
@@ -43,15 +48,43 @@ export function resolveSafeInstallerName(rawUrl) {
   return decoded;
 }
 
-export function verifyUpdateArtifacts({ artifactDir, metadataFileName }) {
+// 설치본 파일명(`... Setup 7.0.0.exe`)이 기대 버전으로 끝나는지 — 앞 글자가 숫자/점이면
+// (예: 기대 7.0.0인데 17.0.0) 다른 버전이므로 불일치로 본다.
+export function installerNameHasVersion(installerFile, expectedVersion) {
+  const stem = installerFile.replace(/\.exe$/i, '');
+  if (!stem.endsWith(expectedVersion)) return false;
+  const before = stem.charAt(stem.length - expectedVersion.length - 1);
+  return before === '' || !/[0-9.]/.test(before);
+}
+
+export function verifyUpdateArtifacts({ artifactDir, metadataFileName, expectedVersion }) {
   const metadataPath = path.join(artifactDir, metadataFileName);
   if (!existsSync(metadataPath)) throw new Error(`metadata file not found: ${metadataPath}`);
 
   const metadata = yaml.load(readFileSync(metadataPath, 'utf-8'));
   if (!metadata || typeof metadata !== 'object') throw new Error(`metadata file is not a valid YAML object: ${metadataPath}`);
 
+  // expectedVersion을 준 경우에만 버전을 강제한다(미전달 시 기존 동작 — 누락도 version:null로 통과).
+  if (expectedVersion) {
+    if (metadata.version === undefined || metadata.version === null || String(metadata.version) === '') {
+      throw new Error(`${metadataFileName} has no version field (expected ${expectedVersion})`);
+    }
+    if (String(metadata.version) !== String(expectedVersion)) {
+      throw new Error(
+        `version mismatch: ${metadataFileName} says ${metadata.version}, release version is ${expectedVersion}\n` +
+        `(release/ 안에 이전 빌드 잔여물이 남아 있을 가능성 — npm run electron:build:intranet 으로 설치본을 다시 빌드하세요)`
+      );
+    }
+  }
+
   const entry = pickExeEntry(metadata.files);
   const installerFile = resolveSafeInstallerName(entry.url);
+  if (expectedVersion && !installerNameHasVersion(installerFile, String(expectedVersion))) {
+    throw new Error(
+      `installer file name does not carry release version ${expectedVersion}: ${installerFile}\n` +
+      `(설치본과 ${metadataFileName}의 짝이 새 버전과 맞지 않음)`
+    );
+  }
   const installerPath = path.join(artifactDir, installerFile);
   if (!existsSync(installerPath)) throw new Error(`installer referenced by ${metadataFileName} not found: ${installerPath}`);
 
@@ -85,14 +118,15 @@ function main() {
   const get = (flag) => { const i = args.indexOf(flag); return i !== -1 ? args[i + 1] : undefined; };
   const artifactDir = get('--artifact-dir');
   const metadataFileName = get('--metadata-file');
+  const expectedVersion = get('--expected-version');
 
   if (!artifactDir || !metadataFileName) {
-    console.error('Usage: node scripts/verify-update-artifacts.mjs --artifact-dir <dir> --metadata-file <latest.yml|canary.yml>');
+    console.error('Usage: node scripts/verify-update-artifacts.mjs --artifact-dir <dir> --metadata-file <latest.yml|canary.yml> [--expected-version <x.y.z>]');
     process.exit(1);
   }
 
   try {
-    const result = verifyUpdateArtifacts({ artifactDir, metadataFileName });
+    const result = verifyUpdateArtifacts({ artifactDir, metadataFileName, expectedVersion });
     console.log(JSON.stringify(result));
     process.exit(0);
   } catch (err) {
