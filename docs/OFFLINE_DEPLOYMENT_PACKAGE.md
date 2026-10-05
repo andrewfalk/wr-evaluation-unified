@@ -26,6 +26,7 @@
 13. [트러블슈팅](#13-트러블슈팅)
 14. [영상 분석 활성화 및 WSL2 메모리 (선택, 6.0-9)](#14-영상-분석-활성화-및-wsl2-메모리-선택-609)
 15. [환자 단위 편집 락 활성화 (선택)](#15-환자-단위-편집-락-활성화-선택)
+16. [통계분석 워크벤치 — Python 통계 엔진 (선택, v7.0.0)](#16-통계분석-워크벤치--python-통계-엔진-선택-v700)
 
 ---
 
@@ -62,6 +63,7 @@ wr-evaluation-unified-5.0.1-intranet/    ← 이 디렉터리가 compose 실행 
 │  ── 문서 ───────────────────────────────────────────────────────────────────
 ├── docs/
 │   ├── OFFLINE_DEPLOYMENT_PACKAGE.md    # 이 문서
+│   ├── UPDATE_<버전>.md                 # 기존 서버 업데이트 절차 (예: UPDATE_7.0.0.md — 마이그레이션·WR_VERSION·롤백)
 │   ├── INTRANET_DEPLOYMENT.md           # 인증서/HTTPS 상세
 │   ├── BACKUP_RESTORE.md                # 백업·복구 상세
 │   ├── OPERATIONS_RUNBOOK.md            # 운영 런북
@@ -1079,6 +1081,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 - `docs/BACKUP_RESTORE.md` — 백업·복구 상세
 - `docs/OPERATIONS_RUNBOOK.md` — 운영 중 발생하는 일반적인 문제
 - `docs/PRODUCTION_RELEASE_PLAN.md` — 릴리즈 및 업그레이드 절차
+- `docs/UPDATE_<버전>.md` — 이미 운영 중인 서버를 새 버전으로 올리는 절차(v7.0.0: `UPDATE_7.0.0.md`)
 
 ---
 
@@ -1340,30 +1343,29 @@ DB에 남아있지만 이후 쓰기 요청에서 더 이상 참조되지 않습�
 
 ---
 
-## 16. 통계분석 워크벤치 — Python 통계 엔진 (선택, PR1)
+## 16. 통계분석 워크벤치 — Python 통계 엔진 (선택, v7.0.0)
 
-PR1부터 `wr-app-server` 이미지에 기술통계 계산용 Python subprocess 엔진(`/opt/stats-venv`,
-`services/stats-engine/`)이 함께 baking됩니다. 화면(PR2)이 아직 없어 `STATS_WORKBENCH_ENABLED`가
-꺼져 있으면(기본값) 관련 라우트(`/api/stats/*`)가 전부 404로 잠깁니다 — 영상 분석의
-`VIDEO_ANALYSIS_ENABLED`와 같은 게이팅 원칙입니다.
+v7.0.0부터 `wr-app-server` 이미지에 통계 계산용 Python subprocess 엔진(`/opt/stats-venv`,
+`services/stats-engine/`)과 `@wr/analytics-core` 공유 계산 패키지가 함께 baking되고, 통계분석 워크벤치
+화면·API(`/api/stats/*`)가 포함됩니다. `STATS_WORKBENCH_ENABLED`가 꺼져 있으면(기본값) 관련 라우트가 전부
+404로 잠기고 화면 버튼도 나타나지 않습니다 — 영상 분석의 `VIDEO_ANALYSIS_ENABLED`와 같은 게이팅 원칙입니다.
+이 플래그와 무관하게 이미지 변경·DB 마이그레이션(0028~0033)은 v7.0.0 업데이트에 항상 포함됩니다
+([UPDATE_7.0.0.md](UPDATE_7.0.0.md)). 기능 상세는 [PRD.md](PRD.md) §12.C 참고.
 
 ### 16-1. 이미지 크기
 
-`/opt/stats-venv`(numpy+scipy+jsonschema, `requirements.txt`에 정확한 버전 고정)가 이미지에
-**+약 246MB** 추가됩니다(실측, `du -sh /opt/stats-venv` 기준) — 이전 계획서 초안의 "+80~120MB"
-추정치보다 실제로는 큽니다(manylinux wheel이 자체 BLAS 라이브러리를 함께 포함하기 때문). 영상
-추론(`/opt/pose-venv`, +약 570MB)과는 완전히 별도 venv입니다.
+실측(2026-10-05, 사전 검증용 `wr-app-server:7.0.0-pre` 이미지, 서버 `Dockerfile` 빌드 결과):
 
-**PR4-A1(연관성 회귀) 추가분** — `statsmodels`(+전이 의존 `pandas`·`patsy`)가
-requirements.txt에 추가되며 venv가 **추가로 +약 136MB** 커집니다(실측: 로컬
-`python:3.11-slim` 기준 numpy+scipy+jsonschema만 252MB → statsmodels 추가 후
-388MB, `docker run --rm python:3.11-slim bash -c "python -m venv /v && ... && du
--sh /v"`로 측정). 실제 프로덕션 베이스 이미지(bookworm 계열)는 절대값이 다를 수
-있으나 증분은 비슷할 것으로 본다 — 실제 프로덕션 Dockerfile 빌드 후 `du -sh
-/opt/stats-venv`로 재확인 필요(이 문서 갱신 시점엔 미실행, §16-2 검증과 함께
-수행할 것). covariance(HC3/person-cluster CR1) 계산은 statsmodels가 아니라
-`regression.py`가 직접 하므로 statsmodels는 로지스틱 계수 추정(MLE)과 적합도
-지표(logLik/AIC/pseudoR2)에만 쓰인다.
+| 항목 | 크기 | 비고 |
+|---|---|---|
+| `/opt/stats-venv` | **391MB** | numpy 1.26.4 · scipy 1.13.0 · statsmodels 0.14.2 · pandas 2.2.3 · jsonschema 4.22.0 (`requirements.txt` 고정) |
+| `/opt/pose-venv` | 574MB | 영상 분석 추론(별개 venv, 비교용) |
+| `wr-app-server` 이미지 | **약 2.75GB** | v6.5.4 이미지는 2.22GB — 증가분에는 stats venv 외에 `analytics-core`·엔진 스크립트 등이 포함됨 |
+
+> 위 값은 venv 용량과 이미지 용량을 **구분해** 측정한 것이며 서로 합산·치환하지 않습니다. 이전 판에 있던
+> "+246MB(numpy+scipy)", "+136MB(statsmodels)" 추정치는 서로 다른 환경에서 잰 값이라 대체했습니다.
+> 최종 오프라인 패키지(ZIP) 크기는 릴리즈마다 `release-manifest.json`·릴리즈 검증 보고에 기록하며 이 문서에는 적지 않습니다.
+> 로컬 개발용 `services/stats-engine/.venv`(약 366MB)는 `.dockerignore`로 이미지에서 제외됩니다.
 
 ### 16-2. 에어갭 동작 검증
 
@@ -1398,7 +1400,8 @@ docker run --rm --network none `
 > 실측으로 확인했습니다. 이스케이프 방식은 이런 함정 자체가 없어 더 안전합니다.
 
 정상 JSON 결과(예: `"mean": 20.0`, `discrete[0].levels`에 두 level 각 1건)가 stdout에 그대로
-출력되면 **인터넷 없이 baked venv로 계산이 동작**하는 것입니다. (PR1 구현 중 이 두 명령을 실제로
+출력되면 **인터넷 없이 baked venv로 계산이 동작**하는 것입니다. 단 `--selfcheck`는 의존성 import와 기술통계
+1건만 확인하는 **필요조건**입니다 — 회귀·예측·비동기 큐·마이그레이션은 §16-4의 HTTP 종단 확인으로 검증합니다. (PR1 구현 중 이 두 명령을 실제로
 `wr-app-server-pr1-test` 이미지에 대해 실행해 통과를 확인함 — Git Bash에서 실행할 경우
 절대경로 인자가 MSYS 경로변환으로 깨질 수 있어 `MSYS_NO_PATHCONV=1`을 앞에 붙여야 함,
 PowerShell에서는 해당 없음.)
@@ -1409,6 +1412,42 @@ PowerShell에서는 해당 없음.)
 STATS_WORKBENCH_ENABLED=true
 ```
 
-`.env.production`에 추가하고 재기동. `STATS_ENGINE_TIMEOUT_MS`/`STATS_ENGINE_MAX_CONCURRENCY` 등
-나머지 `STATS_ENGINE_*` 노브는 `.env.production.example`의 주석과 기본값을 참고하세요. PR1은
-`POST /analyze` API까지만 제공하며 화면은 없습니다(PR2에서 추가 예정).
+`.env.production`에 추가하고 재기동(`up -d`)합니다. `STATS_ENGINE_TIMEOUT_MS`·`STATS_ENGINE_MAX_CONCURRENCY` 등
+나머지 `STATS_*` 노브는 `.env.production.example`의 주석과 기본값을 참고하세요(compose가 전달하는 항목:
+`STATS_ENGINE_TIMEOUT_MS`·`STATS_ENGINE_KILL_GRACE_MS`·`STATS_ENGINE_MAX_CONCURRENCY`·
+`STATS_MAX_CONCURRENT_ANALYZE_REQUESTS`·`STATS_RUNS_RESULT_TTL_HOURS`). 비동기 큐 노브(`STATS_ASYNC_*`)와 엔진
+입출력 상한(`STATS_ENGINE_*_MAX_BYTES`)은 compose가 컨테이너에 전달하지 않아 **코드 기본값으로 고정**됩니다 —
+튜닝이 필요하면 `docker-compose.yml`의 app `environment`에 항목을 추가해야 합니다.
+
+활성화되면 `/api/config/public`의 `statsWorkbenchAvailable`이 `true`가 되고 로그인 후 헤더·랜딩 화면에
+**"통계분석"** 버튼(Electron 7.0.0 설치본은 메뉴 "통계분석 워크벤치"도)이 나타납니다. 활성 조건은
+`STATS_WORKBENCH_ENABLED=true` **그리고** `DEPLOYMENT_MODE=intranet` **그리고** 통계 엔진 런타임 정상입니다.
+
+**권한**: 활성화만으로 조직 소속 인증 사용자는 **별도 grant 없이** 열람(`stats.view`)·분석 실행(`stats.regression`)·집계 결과
+CSV 내보내기(`stats.export_results`)를 쓸 수 있습니다(기본 허용 권한). 별도 grant가 필요한 것은 분석 응답에 제한 행데이터
+필드(이상치 원값·산점도 원시 점·회귀 관측치 진단값)를 포함하는 `stats.export_limited_rows`뿐이며, 관리자 콘솔
+"통계 권한" 탭에서 부여·회수합니다. 행 단위·PHI 내보내기(`stats.export_phi` 등)는 후속 기능이라 현재 노출 경로가 없습니다.
+
+### 16-4. 활성화 후 확인
+
+```powershell
+# 1. 엔진 selfcheck (§16-2) — 컨테이너 안에서
+docker exec wr-prod-app-1 /opt/stats-venv/bin/python /app/stats-engine/analyze.py --selfcheck
+
+# 2. 마이그레이션 적용(0033까지)과 큐 워커 기동
+docker exec wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -tAc "select count(*), max(filename) from schema_migrations"
+docker logs wr-prod-app-1 2>&1 | Select-String "stats-runs-queue"
+
+# 3. 노출 여부
+curl.exe -k https://localhost:8443/api/config/public    # "statsWorkbenchAvailable": true
+```
+
+이후 로그인해 "통계분석" 화면에서 기술통계 1건을 실행해 결과가 나오는지 확인합니다. CSV는 기술통계·회귀·예측만
+지원하며 이변량·상관행렬은 "아직 지원하지 않습니다" 응답이 정상입니다. 같은 사용자의 분석 요청은 분당 20회로 제한되고,
+짧은 시간에 같은 코호트를 반복 질의하면 차분 방지 예산(15분 창)에 의해 결과가 억제될 수 있습니다(정상 보호 동작).
+
+### 16-5. 되돌리기
+
+`.env.production`의 `STATS_WORKBENCH_ENABLED`를 `false`(또는 줄 삭제)로 바꾸고 재기동하면 화면·API가 다시 잠깁니다
+(저장된 `stats_runs` 이력과 grant는 DB에 남습니다). 이미지·마이그레이션 자체의 롤백은 [UPDATE_7.0.0.md](UPDATE_7.0.0.md)
+"롤백 절차"를 따릅니다.

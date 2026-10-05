@@ -39,6 +39,8 @@ src/
 api/analyze.js               # Vercel 서버리스 (Gemini/Claude API 프록시)
 electron/                    # main.js + preload-intranet.js/preload-standalone.js + emr-helper/ (IPC: AI 호출 + EMR 연동)
 server/                       # 인트라넷 서버 (Express + PostgreSQL, server/src/routes/ — 아래 "서버" 섹션 참고)
+packages/analytics-core/      # @wr/analytics-core — 6개 모듈 계산·변수 카탈로그를 클라이언트·서버가 공유 (통계 워크벤치 기반)
+services/stats-engine/        # 통계 Python 엔진 (app 이미지 내 /opt/stats-venv로 spawn)
 shared/contracts/             # 클라이언트-서버 공유 zod 스키마 (아래 "공유 계약" 섹션 참고)
 ```
 
@@ -94,7 +96,7 @@ Patient = {
 
 ## 서버 (server/)
 
-인트라넷 배포용 Express + PostgreSQL 서버. `server/src/routes/`에 11개 라우터:
+인트라넷 배포용 Express + PostgreSQL 서버. `server/src/routes/`에 15개 라우터:
 
 - **auth.ts**: 로그인/로그아웃/비밀번호 변경/가입 요청, `/me`, CSRF 토큰 재발급
 - **admin.ts**: 디바이스 관리, 조직 설정, 사용자 비밀번호 초기화/권한 부여 등 관리자 기능
@@ -107,6 +109,10 @@ Patient = {
 - **opsStatus.ts**: 백업 실행 상태 조회, 실행/알림 확인 작업
 - **config.ts**: `/api/config/public` — 배포 모드, AI 활성화 여부, 서버 시간 등 공개 설정
 - **ai.ts**: `/api/ai/analyze` — 내부 LLM 또는 승인된 외부 벤더로 AI 분석 요청 프록시
+- **videoAnalysis.ts**: 작업 영상 업로드·분석·결과 (`VIDEO_ANALYSIS_ENABLED`)
+- **updates.ts**: Electron 셸 자동 업데이트(electron-updater) 정적 배포 경로·정책
+- **stats.ts**: `/api/stats/*` — 통계분석 워크벤치(catalog·preview·analyze·runs·export), `STATS_WORKBENCH_ENABLED` + intranet에서만 열림(아니면 404)
+- **capabilityGrants.ts**: `/api/capabilities/*` — 통계 capability 정의·grant 부여/회수 (기본 허용 3종은 grant 불필요)
 
 서버 스크립트(`server/package.json`): `dev`(tsx watch), `build`(tsc), `start`,
 `migrate`(DB 마이그레이션), `seed:admin`(관리자 계정 시딩, 루트에서는
