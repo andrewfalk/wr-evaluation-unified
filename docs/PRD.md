@@ -1,8 +1,8 @@
 # PRD: 직업성 질환 통합 평가 시스템 (wr-evaluation-unified)
 
-> **Version:** 6.5.4
-> **Last Updated:** 2026-09-01
-> **Status:** 인트라넷 운영 중 · 무릎 관절염 상병(M17 하위코드 전체·슬관절/관절염 표기)에서 K-L Grade 입력창이 숨던 문제 수정 · 손목 영상분석 timeout 오분류(DEADLINE_EXCEEDED) 수정 + dev 서버 포트 충돌 가드 · 영상분석 flat 참고 후보(무릎 비틀림·어깨/팔꿈치 반복·손목 반복/각도)에 골격 검수·"왜 이 값?" 근거 패널 배선 + Left/Right 반복시간 근거 패널 환산식 오류 수정 · 비담당 환자 조회 시 막혀 있던 조회 전용 토글(종합평가 그룹/개별 카드 전환·상병 칩 이동, 척추/경추 작업 목록 선택·직력 탭·MDDM/전신진동 탭, 영상분석 근거 패널 등) 상호작용 수정 · Electron 셸 자동 업데이트(electron-updater) 도입 — 관리자 on/off 스위치 + canary 채널, 평상시 휴면(트랙 2) · 종합소견 직접 편집 오버라이드(자동 생성 문장을 의사가 다듬어 EMR 전송) · 특이 사항 메모 개편(구 복귀 고려사항, EMR 전송 제외) · 락 취득/상실 직후 모듈 편집 가드 stale 클로저 수정 · 인증 부팅 시 무한 루프(자기영속 401 재시도) 수정 · 환자 등록일 표시 KST 타임존 버그 수정 · 등록번호 "유령 충돌" 해소 + 생년월일 정정 경로(정정 API·고아 person 해제·데드락 재시도) · 종합소견 그룹 형식 미리보기를 개별 형식과 통일 · zod record 타입 optional 처리에 맞춘 테스트 정리 · Electron 종료 후 로그인 유지 문제 + 서버 세션(logout/refresh) 동시성 경쟁조건 수정 · 환자 단위 편집 락(TTL lease lock, LOCK_ENFORCEMENT_MODE 롤아웃) 구현 · 경추/팔꿈치/손목 모듈 저장 무한루프 수정(stableStringify) · 경추 모듈 부담 작업 0건 시 완료 배지 오판정 수정 · 종합소견 미리보기 그룹/개별 탭 명칭 정리 + 토글 연동 자동전환 + 낮음 사유 그룹 제목 구분 표시 + 손목/팔꿈치 직업별 요약 가독성 개선 · 종합평가 패턴 그룹화(상병 50건↑ 우/좌 일괄 처리) + EMR byte 절감 + K-L/Ellman 조건부 표시 · 손목/팔꿈치 BK유형 그룹 합류 시 진단별 저장값 자동 동기화 수정 · 환자 목록 의사별 필터 + 비담당 환자 열람성(복사/스크롤) 개선 · EMR 디바이스 등록 rate-limit 자기악순환 방지 · EMR 추출(재해일자별 신청건 매칭·성별 자동입력)/직접입력 개선 · 일괄입력 빈 양식 상시 제공 · M4 영상분석 시범 운영(참고용, 미검증 배너 — 어깨 반복 시간합 계산기 + 공정별 값 표시 추가, 상세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md`)
+> **Version:** 7.0.0
+> **Last Updated:** 2026-10-05
+> **Status:** 인트라넷 운영 중 · **통계분석 워크벤치 도입(인트라넷 전용·기본 비활성 `STATS_WORKBENCH_ENABLED`)** — 기술통계·Table 1 층화·이변량 8종·상관행렬·회귀(OLS/이분 로지스틱, 진단·spline·interaction)·예측(L2 로지스틱) + 차트, 소수 셀 억제·차분 방지 공개통제, 비동기 실행 큐, 통합 카탈로그 83개 변수(case/job/disease grain), 서버가 데이터셋을 조립하는 `@wr/analytics-core` 공유 계산 패키지, Python 통계 엔진(별도 venv) · capability 권한(기본 3종 전원 허용, 제한 행데이터 필드만 grant) + 관리자 콘솔 "통계 권한" 탭 · 환자 완료시각 서버 재검증 추적 · DB 마이그레이션 0028~0033 · 상병 입력 진단명 잘림 수정 · 등록 마법사 필수값 안내 · 평가 시점 나이를 만 나이(재해일자 기준)로 정정 · 영상 분석 UI 가독성 개선 · 무릎 관절염 상병(M17 하위코드 전체·슬관절/관절염 표기)에서 K-L Grade 입력창이 숨던 문제 수정 · 손목 영상분석 timeout 오분류(DEADLINE_EXCEEDED) 수정 + dev 서버 포트 충돌 가드 · 영상분석 flat 참고 후보(무릎 비틀림·어깨/팔꿈치 반복·손목 반복/각도)에 골격 검수·"왜 이 값?" 근거 패널 배선 + Left/Right 반복시간 근거 패널 환산식 오류 수정 · 비담당 환자 조회 시 막혀 있던 조회 전용 토글(종합평가 그룹/개별 카드 전환·상병 칩 이동, 척추/경추 작업 목록 선택·직력 탭·MDDM/전신진동 탭, 영상분석 근거 패널 등) 상호작용 수정 · Electron 셸 자동 업데이트(electron-updater) 도입 — 관리자 on/off 스위치 + canary 채널, 평상시 휴면(트랙 2) · 종합소견 직접 편집 오버라이드(자동 생성 문장을 의사가 다듬어 EMR 전송) · 특이 사항 메모 개편(구 복귀 고려사항, EMR 전송 제외) · 락 취득/상실 직후 모듈 편집 가드 stale 클로저 수정 · 인증 부팅 시 무한 루프(자기영속 401 재시도) 수정 · 환자 등록일 표시 KST 타임존 버그 수정 · 등록번호 "유령 충돌" 해소 + 생년월일 정정 경로(정정 API·고아 person 해제·데드락 재시도) · 종합소견 그룹 형식 미리보기를 개별 형식과 통일 · zod record 타입 optional 처리에 맞춘 테스트 정리 · Electron 종료 후 로그인 유지 문제 + 서버 세션(logout/refresh) 동시성 경쟁조건 수정 · 환자 단위 편집 락(TTL lease lock, LOCK_ENFORCEMENT_MODE 롤아웃) 구현 · 경추/팔꿈치/손목 모듈 저장 무한루프 수정(stableStringify) · 경추 모듈 부담 작업 0건 시 완료 배지 오판정 수정 · 종합소견 미리보기 그룹/개별 탭 명칭 정리 + 토글 연동 자동전환 + 낮음 사유 그룹 제목 구분 표시 + 손목/팔꿈치 직업별 요약 가독성 개선 · 종합평가 패턴 그룹화(상병 50건↑ 우/좌 일괄 처리) + EMR byte 절감 + K-L/Ellman 조건부 표시 · 손목/팔꿈치 BK유형 그룹 합류 시 진단별 저장값 자동 동기화 수정 · 환자 목록 의사별 필터 + 비담당 환자 열람성(복사/스크롤) 개선 · EMR 디바이스 등록 rate-limit 자기악순환 방지 · EMR 추출(재해일자별 신청건 매칭·성별 자동입력)/직접입력 개선 · 일괄입력 빈 양식 상시 제공 · M4 영상분석 시범 운영(참고용, 미검증 배너 — 어깨 반복 시간합 계산기 + 공정별 값 표시 추가, 상세는 `docs/VIDEO_ANALYSIS_IMPLEMENTATION_PLAN.md`)
 
 ---
 
@@ -72,6 +72,9 @@
 | 감사 로그 | Ed25519 (Electron device 키페어) + append-only 파티션 |
 | 백업 | pg_dump + GPG (RSA 4096, passphrase-less 복구 키) |
 | 백업 모니터링 | 별도 컨테이너 — stale 감지, alert 파일 생성 |
+| 통계 엔진 (v7.0.0) | Python 3 subprocess — app 이미지 내 별도 venv `/opt/stats-venv`(numpy 1.26.4 · scipy 1.13.0 · statsmodels 0.14.2 · pandas 2.2.3 · jsonschema 4.22.0), 별도 컨테이너 없음 |
+| 공유 계산 패키지 (v7.0.0) | `@wr/analytics-core`(`packages/analytics-core`, TypeScript) — 클라이언트·서버가 같은 계산·변수 추출 코드를 import |
+| 권한 (v7.0.0) | capability 모델(`capabilities` + `user_capability_grants`) — 기본 허용 ∪ 유효 grant |
 | 테스트 | Vitest (server/) — admin/auth/audit/patients/presets/workspaces/opsBackupStatus |
 | CI | (없음 — 오프라인 빌드 + 수동 리허설 패스 정책) |
 
@@ -204,6 +207,15 @@ migratePatient(patient)
 ```
 
 불러오기(load) 시 자동 실행되므로 사용자는 기존 저장 데이터를 그대로 사용할 수 있다.
+
+### 2.4 공유 계산 패키지 — `@wr/analytics-core` (v7.0.0)
+
+통계분석 워크벤치가 서버에서 데이터셋을 조립하려면 6개 평가 모듈의 공식·변수 추출·완료 판정을 **서버가 클라이언트와 같은 코드로** 실행할 수 있어야 한다. 이를 위해 `packages/analytics-core`(npm 패키지 `@wr/analytics-core`)로 해당 로직을 이관했다.
+
+- **이관 범위**: 모듈별 계산·변수 추출(`modules/<id>/`), 직력 기간·상병 매핑 등 leaf 유틸, 레코드 구형식 → 현재 형식 결정적 마이그레이션(`migration/`, 순수 TS SHA-1/UUIDv5), 완료 판정(`completion.ts`), grain 엔터티(`grainEntities.ts`), 변수 카탈로그(`catalog.ts`).
+- **기존 경로 호환**: `src/core/utils/*`·각 모듈 `utils/calculations.js`는 옛 경로 shim으로 남겨 기존 코드·테스트가 무수정으로 동작한다.
+- **빌드**: `scripts/prebuild-analytics-core.mjs`가 dev/build/test 전에 패키지를 빌드(tsup)하고, Vite·vitest는 별칭 `@analytics-core`로 resolve한다. 서버 Docker 빌드는 web-builder 단계에서 패키지를 빌드해 server 이미지에 `node_modules/@wr/analytics-core`로 vendoring한다.
+- **원칙**: 파생 공식을 서버·클라이언트에서 각각 재구현하지 않는다. 타임존에 따라 결과가 달라질 수 있는 `Date` 파싱 대신 순수 그레고리력 산술로 날짜를 검증한다.
 
 ---
 
@@ -1056,18 +1068,24 @@ public/
 ```
 server/                                  # API 백엔드 — Node 20 + TS + Express
 ├── Dockerfile
-├── migrations/                          # 26개 SQL migration
+├── migrations/                          # 33개 SQL migration (0028~0033: 통계 워크벤치·완료 추적)
 ├── src/
 │   ├── index.ts                         # Express 진입점, 두 개의 pg pool
 │   ├── config.ts                        # env 검증
 │   ├── middleware/                      # auth, audit, cors, rateLimit, security
 │   ├── routes/                          # auth, patients, presets, workspaces, admin,
-│   │                                    # audit, devices, ai, opsStatus
+│   │                                    # audit, devices, ai, opsStatus, videoAnalysis,
+│   │                                    # stats, capabilityGrants (v7.0.0)
+│   ├── stats*.ts                        # 통계 워크벤치 서버 로직 — snapshot·dataset builder·카탈로그·
+│   │                                    # 공개통제·비동기 큐(statsRunsQueue/statsRunAdmission)·엔진 호출·export
 │   ├── jobs/                            # workspaceRetention 등
 │   ├── db/                              # patientPersons, resolveAssignedDoctor
-│   └── cli/                             # seedAdmin, runRetention
+│   └── cli/                             # seedAdmin, runRetention, seedStatsTestPatients, runStatsRunCleanup
 └── package.json
 
+services/stats-engine/                   # 통계 Python 엔진 (v7.0.0) — analyze.py/protocol.py +
+│                                        # descriptive/bivariate/correlation_matrix/regression/prediction.py
+packages/analytics-core/                 # @wr/analytics-core (v7.0.0) — 공유 계산·카탈로그·completion
 services/backup-monitor/                 # 백업 stale 감지 + alert 컨테이너
 ├── Dockerfile
 ├── index.js
@@ -1077,7 +1095,7 @@ backup/Dockerfile                        # backup 사이드카 (postgres + gnupg
 caddy/Caddyfile                          # HTTPS + 내부 CA
 
 shared/contracts/                        # 클라이언트 ↔ 서버 공유 타입 (zod)
-└── auth.ts, patient.ts, preset.ts, index.ts
+└── auth.ts, patient.ts, preset.ts, stats.ts(v7.0.0), index.ts
 
 scripts/                                 # 운영 자동화
 ├── backup.sh, restore.sh, audit-partition.sh
@@ -1086,9 +1104,13 @@ scripts/                                 # 운영 자동화
 ├── import-images.ps1 / .sh              # docker load 일괄
 ├── install-prod.ps1                     # Windows 자동 설치
 ├── set-build-target.mjs                 # standalone/intranet 빌드 토글
+├── prebuild-shared.mjs, prebuild-analytics-core.mjs   # @wr/contracts·@wr/analytics-core 선빌드 (v7.0.0)
+├── verify-chart-compat.mjs              # 통계 차트 구형 Chrome 호환 검사 (v7.0.0)
 └── verify-csp.mjs
 
 src/core/auth/                           # AuthContext, authChannel, session — v5.0.0
+src/core/components/statistics/          # 통계분석 워크벤치 화면 — v7.0.0
+src/core/components/charts/              # 통계 차트 SVG — v7.0.0
 src/core/components/                     # AdminConsoleModal, LoginModal, ChangePasswordModal,
                                          # SignupRequestModal, AccountProfileModal,
                                          # ConflictResolveModal, MigrationReportModal — v5.0.0
@@ -1169,7 +1191,7 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
                        └─────────────────────────┘    └────────────────┘
 ```
 
-### 12.A.2 데이터베이스 스키마 (migrations 0001~0015)
+### 12.A.2 데이터베이스 스키마 (migrations 0001~0033)
 
 | Migration | 내용 |
 |---|---|
@@ -1188,6 +1210,21 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 | 0013 | patient_owner 인덱스 |
 | 0014 | assigned_doctor 컬럼 |
 | 0015 | 기존 payload에서 assigned_doctor backfill |
+| 0016~0021 | 작업 영상 분석(v6.0.0) — clip/job 상태·출처/파일상태·keypoints artifact·대표 프레임·골격 검수 overlay·recipe versioning |
+| 0022 | 영상 분석 추론 디바이스(GPU) 토글 — 조직 단위 auto/cpu/cuda, job별 실행 디바이스 기록 |
+| 0023 | 기존 private 프리셋을 조직 공개로 backfill(프리셋 조직 공유) |
+| 0024 | `patient_locks` — 환자 단위 TTL lease lock |
+| 0025 | 세션 영구 쿠키 여부 컬럼(Electron은 세션 쿠키) |
+| 0026 | `sessions.family_id` — refresh rotation 계보 단위 logout |
+| 0027 | 고아 `patient_persons` 정리("유령 등록번호" 해제) |
+| 0028 | **통계 권한** — `capabilities`(5개 키) + `user_capability_grants`(복합 FK로 조직 무결성) (v7.0.0) |
+| 0029 | 환자 완료시각 추적 컬럼(`server_observed_modules_complete_at` 등) (v7.0.0) |
+| 0030 | 서버 검증 완료시각 `server_verified_modules_complete_at` (v7.0.0) |
+| 0031 | `stats_runs` — 통계 실행 결과 영속화(종결 상태) (v7.0.0) |
+| 0032 | `stats_runs.analysis_run_id` — export 조회 키 (v7.0.0) |
+| 0033 | `stats_runs` 비동기 큐 — queued/running 상태·frozen_dataset·cancel_requested_at·requeue_count (CHECK 제약 재정의 포함) (v7.0.0) |
+
+> 마이그레이션은 서버 기동 시 미적용분이 순차 자동 적용된다(`schema_migrations`). 0028~0033은 v7.0.0 업데이트 때 한 번에 적용되며, 업데이트 전 DB 백업을 권장한다.
 
 ### 12.A.3 API 엔드포인트
 
@@ -1209,6 +1246,8 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 | `/api/admin/signup-requests` | CRUD | (admin) 가입 요청 처리 |
 | `/api/ops/backup-status` | GET | 백업 상태 조회 |
 | `/api/ai` | POST | Gemini/Claude 프록시 (서버 환경변수 키 사용) |
+| `/api/stats/*` | GET/POST | 통계분석 워크벤치 (v7.0.0) — catalog·preview·analyze·runs·export, 상세는 §12.C.9. 기본 비활성(404) |
+| `/api/capabilities/*` | GET/POST | capability 정의·내 grant 조회, (admin) grant 부여·회수 (v7.0.0) |
 
 ### 12.A.4 인증 / 세션
 
@@ -1287,6 +1326,7 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 3. **감사 로그** — `wr_audit_reader` read-only role로 조회, 필터 (action, user, date range)
 4. **백업 상태** — 마지막 백업 시각, 성공/실패, alert 목록 (해결 처리)
 5. **가입 요청** — signup-request 승인/거부
+6. **통계 권한** (v7.0.0) — `/api/capabilities/grants` 기반 grant 부여·회수(사유 필수, 만료 선택)
 
 ### 12.A.10-A 환자 권한 정책 (v5.1.0 추가)
 
@@ -1436,6 +1476,140 @@ v5.0.0 인트라넷 백엔드 도입 후 실제 운영에서 드러난 권한 �
 - LandingScreen: 인트라넷 + 비admin이면 버튼 자체 숨김 (UI 가드)
 - `handleLoadTestData` 본체: 인트라넷 비admin은 early return, admin은 `showConfirm`으로 "목록 교체 + 서버 동기화 가능성" 안내 (이중 방어)
 - 콘솔에서 함수 호출하는 우회 경로까지 차단
+
+---
+
+## 12.C. 통계분석 워크벤치 (v7.0.0 신규)
+
+### 12.C.1 목적과 범위
+
+대시보드(건수·월별 추이 등 운영 집계)와 별개로, 서버에 누적된 평가 데이터를 **연구 목적으로 분석**하는 화면·API. 직업환경의학 전문의가 "노출 변수와 업무관련성 판정/상병 소견의 연관성"을 검토하는 용도이며, 개별 환자의 판정을 예측·대체하는 도구가 아니다(개인별 판정 예측모형은 범위 밖).
+
+| 구분 | 내용 |
+|---|---|
+| 포함 | 기술통계(Table 1 층화 포함), 이변량 검정 8종, 상관행렬, 회귀(OLS·이분 로지스틱), 예측(L2 로지스틱, 내부 검증), SVG 차트, 집계 결과 CSV |
+| 제외(후속) | 행 단위·PHI 내보내기(PR5)와 step-up 재인증(PR5-B), 예측의 temporal holdout·subgroup 성능, 반복측정 쌍 검정 실행, 이변량·상관행렬 CSV, 카탈로그 잔여 필드 대량 롤아웃 |
+| 제외(별도 연구) | 예측모형 외부검증 |
+
+### 12.C.2 활성 조건과 배포 게이트
+
+- 최종 가용성 = `STATS_WORKBENCH_ENABLED=true` **AND** `DEPLOYMENT_MODE=intranet` **AND** 통계 엔진 런타임 정상(`statsWorkbenchRuntimeState.ts`). 헬스 setter는 런타임 상태만 갱신하고 최종 값은 매번 배포모드·플래그와 AND로 재계산하므로 우회할 수 없다.
+- 하나라도 어긋나면 `requireCapability`가 403이 아니라 **404**를 반환한다(기능 존재 자체를 노출하지 않음, `patientAccess.ts`의 cross-org 404 관례와 동일). 클라이언트는 `/api/config/public`의 `statsWorkbenchAvailable`로 버튼·Electron 메뉴 노출을 결정한다.
+- 기본값은 `false`다. 활성화는 `.env.production`에 `STATS_WORKBENCH_ENABLED=true`를 추가하고 재기동하는 것으로 끝나며, 마이그레이션·이미지 변경은 활성화 여부와 무관하게 v7.0.0 업데이트에 포함된다([docs/UPDATE_7.0.0.md](UPDATE_7.0.0.md)).
+
+### 12.C.3 권한 모델 (capability)
+
+`researcher` 같은 역할을 추가하지 않고 **사용자별 권한 부여 테이블**을 둔다 — 개별 의사가 연구를 겸하는 경우를 역할로는 표현할 수 없기 때문(마이그레이션 0028). 판정 = **`capabilities.default_all_roles` ∪ 유효(미만료·미회수) `user_capability_grants`** (`requireCapability.ts`의 `hasCapability`).
+
+| capability | default_all_roles | step-up | admin 역할 필요 | 현재 용도 |
+|---|---|---|---|---|
+| `stats.view` | true | – | – | 카탈로그·preview·화면 열람 |
+| `stats.regression` | true | – | – | 분석 실행·폴링·취소(모든 분석 모드 공통 게이트) |
+| `stats.export_results` | true | – | – | 저장된 집계 결과 CSV |
+| `stats.export_limited_rows` | false | – | – | **응답 시점**에 제한 행데이터 필드 부착: 이상치 원값(`boxplot.outlierValues`), 산점도 원시 점(`scatter.points`), 회귀 관측치 진단값(`pointDiagnostics`) |
+| `stats.export_phi` | false | true | true | 예약 — 행 단위·PHI export는 미구현이라 노출 경로 없음 |
+
+- 기본 허용 3종은 조직 소속 인증 사용자 전원이 **grant 없이** 사용한다. 기본 허용 권한은 grant를 회수해도 차단되지 않는다.
+- grant 부여·회수는 관리자 콘솔 "통계 권한" 탭(`/api/capabilities/grants`)에서 하며 사유 필수·감사 로그 기록. 자기 자신에 대한 부여/회수도 허용되며 감사 로그에 `selfGrant`로 구분된다.
+- 제한 필드를 부착한 응답은 별도 감사 로그(`limitedRowFieldsAttached`, 전달한 결과의 digest)를 남기고, 감사 로그 기록이 실패하면 응답 자체를 500으로 돌려보낸다.
+
+### 12.C.4 아키텍처
+
+1. **서버가 분석행을 만든다.** 클라이언트는 `AnalysisRecipe`(grain·변수 키·필터·분석 목적·모드·방법)만 보낸다. 브라우저가 만든 행은 조직 전체 포함 여부·revision·변조를 서버가 검증할 수 없기 때문이다.
+2. **스냅샷**: `REPEATABLE READ`·`READ ONLY` 트랜잭션으로 조직 격리·soft-delete 배제 스냅샷을 읽고(`snapshotAsOf`), 레코드 구형식을 결정적으로 마이그레이션한 뒤 변수 계산 → 필터(AND) 순으로 데이터셋을 조립한다(`statsDatasetBuilder.ts`).
+3. **공유 계산 패키지 `@wr/analytics-core`** (`packages/analytics-core`): 6개 평가 모듈의 공식·변수 추출·완료 판정을 클라이언트와 서버가 같은 코드로 import한다. 서버 이미지에는 `node_modules/@wr/analytics-core`로 vendoring된다. 레코드 완료 여부는 서버가 직접 재검증한다(`completion.ts` → `patient_records.server_verified_modules_complete_at`).
+4. **canonical digest**: 키 정렬·NFC 정규화·-0/NaN 처리를 고정한 직렬화(`canonicalSerializer.ts`)로 recipe/source/result digest를 만들어 `stats_runs`에 manifest와 함께 저장한다(재현성·캐시 키).
+5. **Python 통계 엔진**: app 이미지 안의 별도 venv(`/opt/stats-venv`)를 `execFile`로 spawn하는 단일 프로세스 트리(별도 컨테이너 없음). stdin/stdout JSON 프로토콜(`protocol.py`, `ENGINE_PROTOCOL_VERSION=6`), 기본 동시 1건·30초 타임아웃·SIGTERM→SIGKILL 유예 2초, 안전 타이머 초과 시 엔진을 degraded로 격리. 회귀 공분산(HC3·person-cluster CR1)·분리 판정(Konis LP)·rank 판정(one-sided Jacobi SVD)은 statsmodels가 아니라 `regression.py`가 직접 계산하고, statsmodels는 로지스틱 MLE·적합도 지표에만 쓴다. 예측은 numpy로 L2 로지스틱을 직접 구현한다(scikit-learn 미도입).
+6. **의존성 고정**: `services/stats-engine/requirements.txt` — numpy 1.26.4 · scipy 1.13.0 · jsonschema 4.22.0 · statsmodels 0.14.2 · pandas 2.2.3 (pandas 상한 미고정 시 statsmodels와 충돌해 핀 고정).
+
+### 12.C.5 데이터 모델 — 카탈로그와 grain
+
+- **카탈로그**: 통합 83개 변수. `CATALOG_VERSION = v28-age-at-injury`(analytics-core 81개) + 서버 확장 `v1-snapshot-columns`(DB 컬럼 변수 2개) → `INTEGRATED_CATALOG_VERSION = v28-age-at-injury+v1-snapshot-columns`. 변수마다 타입(continuous/categorical/ordinal/date/high_cardinality/boolean)·단위·출처(raw/derived/clinician_judgment)·`availableAt`(pre_assessment/assessment/post_decision)·민감도·허용 분석 목적·공식 정책·`analysisRole`(analyzable/filter_only)·`predictionRole`(outcome/predictor)을 메타데이터로 가진다.
+- **grain 3종**: `case`(사례 = 환자 1행) · `job`(직력) · `disease`(상병). grain을 늘리지 않고 3종으로 확정했다(`person` grain은 case와 계산·행 구성이 동일해 삭제). 하위 grain은 한 사람이 여러 행을 가질 수 있어 person 단위 집계가 필수이며, **case 변수는 하위 grain으로 브로드캐스트**된다(브로드캐스트는 필터 이전에 케이스 전체로 1회 계산).
+- **롤업 변수**: 상병 any 판정(`diagnosis.rollup.anyHighRelatedness` — "true는 증거 하나로 확정, false는 전부 확인돼야 확정", 미판정이 섞이면 결측), 부위군 boolean 6종(`hasKnee`~`hasCervical`), `job.rollup.longestTenureYears`(대표 직력 공유), 어깨·경추·무릎 case 합계 변수(분/일·kg/일·시간 등).
+- **공식 정책**: 파생 공식은 저장값을 읽지 않고 재계산한다(`recompute_current` / `recompute_recorded_version` / `stratify_by_version`). 손상된 원본 값은 결측 처리하며 엄격한 숫자 파서를 쓴다.
+- **나이 변수**: 평가 시점 나이를 삭제하고 `patient.identity.ageAtInjury`(재해일자 기준 만 나이)로 교체했다(구 키 자동 치환 없음).
+
+### 12.C.6 분석 모드
+
+| 모드 | 방법·내용 | grain/제약 | CSV |
+|---|---|---|---|
+| 기술통계 | 연속형: n·평균·SD·중앙값·Q1/Q3·IQR·최소/최대·왜도·첨도·히스토그램·박스플롯, 범주형 빈도, 결측 사유 분포(not_entered/not_assessed/not_applicable/structural_missing). **Table 1 층화**(`descriptive.stratifyByKey`): 담당의별/범주형 변수별, 층화 변수는 `variableKeys`에 넣을 수 없음, 소수 인원 그룹은 "기타"로 병합, **그룹 하나라도 억제되면 total도 새 객체로 교체**(그룹·total 차감 방지), 담당의는 UUID가 아니라 표시명으로 치환 | case/job/disease | 지원 |
+| 이변량 | 실행 8종: `welch_t` · `mann_whitney` · `anova` · `kruskal_wallis` · `chi_square` · `fisher_exact` · `pearson_correlation` · `spearman_correlation`. `paired_t`·`wilcoxon_signed_rank`는 방법 카탈로그에 정의돼 있으나 **현재 실행 불가**(`PAIRED_TEST_REQUIRES_EXPLICIT_PAIRING`) | **반복측정 게이트**: `personCount == rowCount`가 아니면 독립표본 방법을 `REPEATED_MEASURES_NOT_ALIGNED`로 불가 처리. 기타 사유: 변수 타입 불일치·표본 부족·그룹 수·2×2 아님·기대도수 부족(chi_square→fisher_exact 전환 제안) | 미지원(`BIVARIATE_EXPORT_NOT_SUPPORTED`) |
+| 상관행렬 | 변수 C(k,2)쌍 Pearson/Spearman 일괄 + Benjamini–Hochberg FDR, 히트맵 | 변수 3개 이상 | 미지원(`CORRELATION_MATRIX_EXPORT_NOT_SUPPORTED`) |
+| 회귀 | `ols_linear`(연속 outcome) · `binary_logistic`(boolean/2레벨 categorical outcome). 표준오차: person 중복이 없으면 HC3, 있으면 person-cluster CR1. 추정 3단 `ok`/`inference_withheld`/`non_estimable`(사유: 완전 행 부족·수준/파라미터 과다·파라미터당 사건 부족·상수 outcome·분산 0 predictor·rank 부족·`SEPARATION_DETECTED`·미수렴 등). 진단 플롯 4종(잔차·Q-Q·leverage·Cook's D)·VIF·condition number, 자연 3차 spline 부분효과, interaction, predictor 표준화 | 설계행렬 게이트(기준 레벨 3단 해석, EPV 분자는 사건 person 수) | 지원(계수·적합도·VIF·spline 곡선점; 관측치 진단값 제외) |
+| 예측 | `l2_logistic` 1종 — Newton + step-halving, person 단위 grouped stratified K-fold CV — 외부 5-fold를 5회 반복, 내부 5-fold로 λ(로그 격자 26개) 선택과 OOF 평가를 분리 — 와 grouped bootstrap optimism 보정(Harrell, 200회). 지표: ROC-AUC(person bootstrap 1000회 95% CI)·PR-AUC·Brier·calibration intercept/slope, ROC·PR·calibration 곡선(세 곡선이 같은 구간 분할을 공유) | **지원 grain: case, disease**(job 제외, `PREDICTION_GRAIN_NOT_SUPPORTED`). outcome은 `predictionRole='outcome'`만(현재 `diagnosis.assessment.status`[disease]·`diagnosis.rollup.anyHighRelatedness`[case]). predictor는 raw 노출·인구학·평가 시점 임상소견만(`predictionRole='predictor'`); **공식 점수·`post_decision` 정보는 서버가 차단**. fold는 predictor와 무관한 기준 코호트(`cohortDigest`)에서 한 번 정해 person별로 상속(같은 사람이 train/test에 걸치지 않음). 최소 50명·사건 25명·비사건 25명·파라미터당 사건 10, 입력 상한 5000행·30열·파라미터 20개 미충족 시 `non_estimable`. **temporal holdout·subgroup 성능은 후속 필수**, 외부검증은 별도 연구 | 지원(집계, 계수 제외) |
+
+회귀의 반복측정 처리와 이변량의 반복측정 게이트는 서로 다른 정책이다 — 회귀는 person-cluster 공분산으로 추정을 허용하고, 독립표본 이변량 검정은 행이 person과 1:1일 때만 허용한다.
+
+### 12.C.7 공개통제·프라이버시
+
+- **소수 셀 억제**: 최소 코호트 10명(person 단위) 미만 셀은 억제하며 부분 억제를 하지 않는다(하나라도 소수 셀이면 해당 결과 전체 생략). boolean은 결측률과 사건/비사건 분할을 연결해 억제한다.
+- **히스토그램**: 억제 실패 시 bin을 원본 bin 합치기가 아니라 lo~hi 균등 재분할(경계 배열 이진탐색)로 줄여가며(적응형 해상도, 하한값은 사다리에 항상 포함) 공개 가능한 해상도를 찾는다.
+- **차분(differencing) 방지**: family(변수 조합)당 15분 창 30회, 사용자 전역 100쿼리 예산, 필터 값 종류 키당 10개 한도. 예산 초과 시 억제된다. 기술통계 + 필터 조합의 교차질의 차감 공격 방어는 범위 밖이며, 값/관계 기반 재설계는 별도 이니셔티브다.
+- **요청 한도**: `POST /analyze` 사용자당 분당 20회(초과 429), 서버 동시 요청 `STATS_MAX_CONCURRENT_ANALYZE_REQUESTS`(기본 4).
+- **제한 필드**: 이상치 원값·산점도 원시 점·관측치 진단값은 캐시된 결과에 저장하지 않고 **응답 시점에** `stats.export_limited_rows`를 확인한 뒤에만 부착한다(캐시 적중 응답도 동일). 권한 회수 즉시 노출이 사라진다.
+- **감사**: 분석 실행·거부·내보내기·제한 필드 부착이 감사 로그에 남는다(결과 저장과 감사 기록은 원자적 트랜잭션).
+
+### 12.C.8 비동기 실행 (마이그레이션 0031~0033)
+
+`POST /analyze`는 먼저 동기로 실행하고(`STATS_ASYNC_SYNC_BUDGET_MS`, 기본 4초) 끝나지 않으면 **202 + `analysisRunId`**로 전환한다. 클라이언트는 `GET /runs/:id`를 폴링한다.
+
+1. **admission**: 캐시 확인 → 진행 중 동일 실행에 합류 → quota/degraded 판정 → 예약(queued 행 생성). 사용자·조직별 동시/시간당 한도.
+2. **claim/sweep**: 독립 루프가 queued 행을 claim하고(엔진 슬롯이 비어 있을 때만) heartbeat로 stale 실행을 회수한다. 재큐잉 상한 초과 시 실패 처리.
+3. **finish**: `SELECT … FOR UPDATE` 재검증 후 종결 상태(succeeded/failed/cancelled)와 감사 기록을 한 트랜잭션으로 확정한다. 취소 요청은 항상 우선한다(`POST /runs/:id/cancel`).
+4. 결과는 `STATS_RUNS_RESULT_TTL_HOURS`(기본 168시간) 후 서버가 주기적으로 정리한다(`jobs/statsRunCleanup.ts`, 기능이 켜져 있을 때만 동작; 수동 실행은 `server/` 디렉터리에서 `npm run cleanup:stats-runs`).
+
+### 12.C.9 API
+
+| 경로 | 메서드 | capability | 역할 |
+|---|---|---|---|
+| `/api/stats/catalog` | GET | `stats.view` | 통합 카탈로그(변수 메타데이터·`catalogVersion`) |
+| `/api/stats/preview` | POST | `stats.view` | 건수·추정가능성·사용 가능 방법(`availableMethods`) — 억제 상태면 빈 목록 |
+| `/api/stats/analyze` | POST | `stats.regression` | 분석 실행(200 즉시 완료 / 202 비동기 전환). 사용자당 분당 20회 |
+| `/api/stats/runs/:analysisRunId` | GET | `stats.regression` | 폴링(`queued`/`running`/`succeeded`/`failed`/`cancelled`) |
+| `/api/stats/runs/:analysisRunId/cancel` | POST | `stats.regression` | 취소 |
+| `/api/stats/export` | POST | `stats.export_results` | 저장된 결과를 `analysisRunId`로 조회해 CSV로 포맷(재계산 없음, UTF-8 BOM) |
+| `/api/capabilities/catalog` | GET | 인증 | capability 정의 목록 |
+| `/api/capabilities/grants/me` | GET | 인증 | 내 grant |
+| `/api/capabilities/grants` | GET/POST | admin | grant 조회·부여(사유 필수, 만료 선택) |
+| `/api/capabilities/grants/:id/revoke` | POST | 인증(본인 또는 admin) | grant 회수(self-revoke 허용) |
+
+### 12.C.10 화면 (`src/core/components/statistics/`)
+
+- **진입**: 헤더·랜딩의 "통계분석" 버튼, Electron 메뉴 "통계분석 워크벤치"(IPC `set-stats-available`로 가용성을 main에 전파, `open-statistics`로 열기). `activeScreen` 단일 진실원으로 대시보드·평가 화면과 전환하며, 미저장 종합소견 편집 draft가 있으면 전환을 차단하고 안내한다.
+- **4열 레이아웃**: 카탈로그(공통 변수 우선 정렬·그룹 접기·분석 목적 비호환 변수 비활성) · 레시피(grain·변수·필터 칩·결과변수/설명변수 역할·분석 모드/방법) · 결과(표·차트·주의문) · Inspector/리포트. 우측 패널은 4열 유지로 확정.
+- **차트**(`src/core/components/charts/`, SVG): 히스토그램·박스플롯·수평 바·100% 누적 바·산점도·상관 히트맵·포레스트 플롯·잔차/진단 패널·spline 부분효과·ROC/PR/calibration 곡선. 키보드 접근 가능한 툴팁, 데이터 표 보기. 구형 Chrome 호환은 `npm run verify:chart-compat`로 검사한다.
+- 서버 응답이 억제·비추정·권한 부족일 때는 이유를 화면에 안내한다(`describeStatsError.js`, `describeMethodReasonCode.js`).
+
+### 12.C.11 운영 환경변수
+
+| 변수 | 기본값 | compose 전달 | 설명 |
+|---|---|---|---|
+| `STATS_WORKBENCH_ENABLED` | false | O | 기능 전체 게이트(false면 `/api/stats/*` 404) |
+| `STATS_ENGINE_TIMEOUT_MS` / `STATS_ENGINE_KILL_GRACE_MS` | 30000 / 2000 | O | 엔진 실행 타임아웃·종료 유예 |
+| `STATS_ENGINE_MAX_CONCURRENCY` | 1 | O | Python worker 동시 실행 상한 |
+| `STATS_MAX_CONCURRENT_ANALYZE_REQUESTS` | 4 | O | 요청 전체(스냅샷 포함) 동시 처리 상한 |
+| `STATS_RUNS_RESULT_TTL_HOURS` | 168 | O | 결과 보존 시간 |
+| `STATS_ASYNC_*`, `STATS_ENGINE_STDOUT/STDERR/MAX_INPUT_BYTES` | 코드 기본값 | **X** | compose가 전달하지 않아 코드 기본값으로 고정(튜닝하려면 compose `environment`에 추가 필요) |
+
+배포 영향: app 이미지 크기 약 2.75GB(v6.5.4는 2.22GB), `/opt/stats-venv` 약 391MB(실측). 통계 엔진은 app 컨테이너의 메모리 6g·CPU 4 상한을 영상 분석과 공유한다.
+
+### 12.C.12 개발 이력 (PR 계열)
+
+| 계열 | PR | 내용 |
+|---|---|---|
+| PR0-A | #104 | capability 권한·완료시각 추적·기능 플래그 (0028·0029) |
+| PR0-B1~B2 | #105~#106 | `@wr/analytics-core` 뼈대 → 6개 모듈 이관·completion.ts·coverage inventory (0030) |
+| PR0-C | #107 | snapshot dataset builder + `GET /catalog` + `POST /preview` |
+| PR1 | #108 | Python 통계 엔진 + `stats_runs` + `POST /analyze` (0031) |
+| PR2 | #110 | 워크벤치 화면(4열) + 집계 export (0032) |
+| PR3-A / PR3-B | #111 / #112 | 이변량 엔진 8종 + 공개통제 / 차트 6종 + 상관행렬 |
+| PR0-B3 / B4 | #113 / #114 | 카탈로그 확장(grain 계약) / 대량 롤아웃·grain 3종 확정·히스토그램 공개통제 |
+| – | #115 | 죽은 판정 변수 정리 + case-grain 롤업 3종 |
+| PR4-A1 / A2 | #116 / #117 | 회귀(OLS·로지스틱) / 진단·spline·interaction·CSV |
+| PR4-B1 / B2 | #118 / #120 | 비동기 job 인프라(0033) / 예측 |
+| 폴리싱 | #121~#122, #125~#127, #129~#130 | UI 정합, Table 1 층화, case 합계 변수(어깨·경추·무릎), 필터 칩 제거, UX 개선 4건, 만 나이 교체(v28) |
 
 ---
 
@@ -1599,6 +1773,10 @@ v5.0.0 인트라넷 백엔드 도입 후 실제 운영에서 드러난 권한 �
 | P0 | ~~프로덕션 릴리즈 리허설~~ | ~~T46 7개 섹션 전체 PASS, 오프라인 패키지 빌드 완료~~ → v5.0.0 완료 |
 | P1 | 고관절 모듈 | hip 모듈 추가 (플러그인 패턴 활용) |
 | P1 | 현장 device smoke | 병원 PC에 인트라넷 인스톨러 배포 + 의료진 device 등록 검증 |
+| P1 | ~~통계분석 워크벤치~~ | ~~기술통계·이변량·상관행렬·회귀·예측 + 공개통제 + 비동기 큐~~ → v7.0.0 완료 (§12.C) |
+| P2 | 통계 행 단위·PHI 내보내기 | `stats.export_limited_rows`/`stats.export_phi` 기반 행 단위 export + step-up 재인증(PR5/PR5-B) |
+| P2 | 통계 예측 확장 | temporal holdout·subgroup 성능 (외부 검증은 별도 연구) |
+| P3 | 통계 카탈로그 잔여 롤아웃 | 남은 필드·롤업 후보 변수화 (현재 통합 83개) |
 | P2 | ~~척추 프리셋 연동~~ | ~~직업 프리셋 선택 시 MDDM 작업/변수 자동 채움~~ → v3.2.1 완료 (전 모듈 presetConfig 지원) |
 | P2 | ~~EMR 데이터 추출~~ | ~~진료기록분석지/다학제회신 자동 추출~~ → v3.3.0 완료 |
 | P2 | ~~다중 사용자 권한 정책~~ | ~~담당의/admin 권한 분리, 비담당 환자 차단~~ → v5.1.0 완료 |
@@ -2072,6 +2250,16 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 | zod | 3.x (DTO 검증) |
 | vitest | 1.x (테스트) |
 
+### 통계 엔진 (v7.0.0, `services/stats-engine/requirements.txt` 고정)
+
+| 패키지 | 버전 |
+|--------|------|
+| numpy | 1.26.4 |
+| scipy | 1.13.0 |
+| statsmodels | 0.14.2 |
+| pandas | 2.2.3 (statsmodels 0.14.2 호환 위해 핀 고정) |
+| jsonschema | 4.22.0 |
+
 ### 인프라
 
 | 컴포넌트 | 버전 |
@@ -2084,6 +2272,20 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 ---
 
 ## 변경 이력
+
+### v7.0.0 (2026-10-05) — 통계분석 워크벤치 도입 + 권한(capability)·환자 완료시각 추적 기반 (#104~#132)
+
+인트라넷 서버에 누적된 평가 데이터를 연구용으로 집계·분석하는 **통계분석 워크벤치**를 도입했다(PR0-A~PR4-B2 + 폴리싱, 29개 PR). 클라이언트는 `AnalysisRecipe`만 보내고 **서버가 조직 격리 스냅샷에서 데이터셋을 조립**하며, 파생 공식은 클라이언트·서버가 같은 코드를 import하는 `@wr/analytics-core`로 일원화했다. **인트라넷 전용·기본 비활성**(`STATS_WORKBENCH_ENABLED=false`면 `/api/stats/*` 전체 404). 서버·DB·배포 구조(마이그레이션 6건, Python 엔진, 공유 패키지) 변경 폭이 커 major로 표기한다.
+
+- **권한·완료 추적 (#104, #106)**: capability 권한 모델(`capabilities` + `user_capability_grants`, 마이그레이션 0028) — `stats.view`·`stats.regression`·`stats.export_results`는 **기본값 전원 허용(grant 불필요)**, `stats.export_limited_rows`(분석 응답의 이상치 원값·산점도 원시 점·회귀 관측치 진단값 노출)는 grant 필요, `stats.export_phi`는 admin+grant+step-up 예약(행 단위·PHI 내보내기는 후속 PR5로 **미구현**). 관리자 콘솔에 "통계 권한" 탭. 환자 완료시각 추적(0029) + 서버가 클라이언트 신고 없이 직접 재검증하는 `server_verified_modules_complete_at`(0030, `completion.ts`) — 환자 저장·워크스페이스 저장·영상분석 적용 경로 전부 배선.
+- **공유 계산 패키지·카탈로그 (#105~#107, #113~#115, #121, #125~#126, #130)**: `packages/analytics-core`로 6개 평가 모듈의 계산·변수 추출 이관(결정적 마이그레이션·`canonicalSerializer`·coverage inventory 275개 필드 분류). 스냅샷 데이터셋 빌더(REPEATABLE READ·READ ONLY) + `GET /api/stats/catalog`·`POST /api/stats/preview`. 카탈로그는 통합 83개 변수(`v28-age-at-injury+v1-snapshot-columns`), grain 3종(case/job/disease), 공통변수 브로드캐스트, 롤업 변수(상병 any 판정·부위군·최장 근속 등), 필터 전용 변수, 어깨·경추·무릎 case 합계 변수.
+- **엔진·화면 (#108, #110)**: Python subprocess 통계 엔진(`services/stats-engine/`, 별도 venv — numpy 1.26.4·scipy 1.13.0·statsmodels 0.14.2·pandas 2.2.3), `stats_runs`(0031·0032), 4열 워크벤치 화면(카탈로그·레시피·결과·Inspector/리포트), 집계 결과 CSV 내보내기.
+- **분석 기능 (#111~#112, #116~#118, #120, #122)**: 기술통계 + **Table 1 층화**(담당의별/범주형 변수별) · 이변량 8종(Welch t·Mann-Whitney·ANOVA·Kruskal-Wallis·카이제곱·Fisher exact·Pearson·Spearman; 반복측정 쌍 검정은 카탈로그만 있고 실행 불가) · 상관행렬(BH-FDR) · 회귀(OLS·이분 로지스틱, HC3/person-cluster CR1, 분리 판정, 진단 플롯 4종·VIF·spline·interaction·표준화) · 예측(L2 로지스틱, grouped CV + bootstrap optimism 보정, ROC-AUC·PR-AUC·Brier·calibration) · SVG 차트 · 비동기 실행 큐(0033, admission→claim→finish, 폴링·취소). CSV는 기술통계·회귀·예측만 지원(이변량·상관행렬은 `*_EXPORT_NOT_SUPPORTED` 400).
+- **공개통제**: 최소 코호트(10명) 미만 소수 셀 억제, 히스토그램 적응형 해상도, 차분 방지(15분 창 family 30회·사용자 전역 100쿼리 예산), 분석 요청 사용자당 분당 20회, 제한 필드는 응답 시점 capability 확인 후 부착.
+- **UX·기타 (#109, #123, #127~#132)**: 웹(로컬) 모드 환자 전환 시 오탐 저장 실패 경고 제거 · 영상 분석 UI 가독성(우측 검토 패널·공정 입력 카드, 6.0-19)과 문구 정리 · 통계 필터 칩 제거 UI · 분석 목적 비호환 변수 비활성·숫자 서식·회귀 라벨 · 평가 시점 나이를 **만 나이(재해일자 기준)** `patient.identity.ageAtInjury`로 교체 · 상병 입력 진단명 잘림 수정 + 코드:이름 폭 1:3 · 등록 마법사 필수값 안내(이동은 허용) · 대시보드 의사명·나이 기준 수정.
+- **Electron**: 메뉴 "통계분석 워크벤치" 추가(IPC `set-stats-available`/`open-statistics`). 서버가 SPA를 서빙하므로 **기존 클라이언트도 서버 업데이트만으로 헤더/랜딩 "통계분석" 버튼으로 접근 가능** — 새 설치본은 네이티브 메뉴 항목에만 필요하다.
+- **배포 영향**: ① 마이그레이션 0028~0033(서버 기동 시 순차 자동 적용 — 업데이트 전 백업 필수) ② 서버 이미지에 stats venv 추가(venv 약 391MB, app 이미지 약 2.75GB 실측 — v6.5.4는 2.22GB) ③ `.env.production`의 `WR_VERSION=7.0.0` 필수, `STATS_WORKBENCH_ENABLED=true`는 통계를 켤 때만 ④ compose가 `STATS_*` env와 `WR_GIT_COMMIT` build arg를 전달(오프라인 패키지는 자동 주입) ⑤ 절차는 [docs/UPDATE_7.0.0.md](docs/UPDATE_7.0.0.md), 오프라인 패키징은 [docs/OFFLINE_DEPLOYMENT_PACKAGE.md](docs/OFFLINE_DEPLOYMENT_PACKAGE.md) §16. 패키징 스크립트는 설치본 버전이 `package.json`과 다르면 중단하고, 안내서(`UPDATE_7.0.0.md`·`OFFLINE_DEPLOYMENT_PACKAGE.md`)를 패키지에 동봉한다.
+- **릴리즈 사전 검증 (격리 컨테이너·임시 DB)**: `wr-app-server:7.0.0-pre` 이미지 빌드 성공(app 약 2.75GB·stats venv 약 391MB), `--network none` selfcheck 통과, v6.5.4 스키마(0027)와 기존 환자 데이터 위에 마이그레이션 0028~0033이 자동 적용되고 기존 행은 `draft`로 보존됨을 확인. 시험 환자 약 1,800명으로 컨테이너 대상 HTTP 종단 검증 — 기술통계·Table 1·이변량(Welch t·Pearson)·상관행렬·회귀(OLS·이분 로지스틱)·예측(L2 로지스틱, 202→폴링→완료)·비동기 취소·CSV(기술통계·Table 1·회귀 성공, 이변량·상관행렬은 `*_EXPORT_NOT_SUPPORTED` 400) 통과. 권한은 기본 3종이 grant 없이 통과하고, `stats.export_limited_rows`는 grant 전·부여 후·회수 후에 제한 필드(`pointDiagnostics`·`scatter.points`·`outlierValues`) 노출이 나타났다 사라짐을 확인. 분당 20회 한도(429)와 차분 방지 예산 억제가 실제로 동작하는 것도 관측. 롤백 호환: 구버전 6.5.4 앱이 0033 스키마 DB에서 마이그레이션 없이 기동하고 로그인·환자 목록이 정상. **미검증**: 실제 병원 데이터, Electron 실기 메뉴, 구형 Chrome(80) 실브라우저 렌더링.
 
 ### v6.5.4 (2026-09-01) — 무릎 관절염 상병 K-L Grade 입력창 숨김 수정 (#102)
 
