@@ -149,6 +149,9 @@ const finiteNullable = () => z.number().finite().nullable();
 // 전부 계산해 반환한다 — 소수셀 판정(person 단위)은 statsChartDisclosure.ts가
 // 이 원시 결과를 받은 뒤 별도로 수행한다. n=0(계산 불가)이면 Python이 둘 다
 // null로 반환하므로 nullable(optional 아님 — 키는 항상 존재).
+// 히스토그램 끝 구간 병합 — Node는 이제 histogram을 쓰지 않는다(원본 bin의 기준
+// 구현은 statsChartDisclosure.ts buildOriginalHistogram). 엔진 프로토콜은 그대로
+// 두기 위해 스키마 검증만 유지하고, Python 쪽 출력 제거는 후속으로 분리한다.
 const StatsEngineHistogramBinSchema = z.object({
   lower: z.number().finite(),
   upper: z.number().finite(),

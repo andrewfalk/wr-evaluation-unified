@@ -1,14 +1,16 @@
 // PR3-B — 차트 데이터(히스토그램·박스플롯 이상치·산점도)의 person 단위 공개통제.
 // 계획서 §1/§3/§9. 이 모듈은 두 가지 독립된 축을 다룬다:
 //
-//   1) aggregate 게이트(compute 시점, 캐시 대상) — 히스토그램은 B안(적응형 해상도
-//      축소, resolveDisclosableHistogram): 원본 bin이 실패하면 정해진 후보
-//      해상도로 lo~hi를 다시 균등분할해 공개 가능한 가장 세밀한 것을 채택한다(A안
-//      후속). 박스플롯 이상치는 여전히 전용 partition 게이트(outlierCount의 존재
-//      여부, all-or-nothing) 그대로.
-//   2) limited_row 응답시점 merge(§9) — outlierCount가 이미 공개 확정된 변수에
-//      한해, 권한이 있을 때만 정확한 원시값을 원본 rows에서 즉석 재계산한다
-//      (Python 재호출 없음, stats_runs.result에 절대 저장하지 않음).
+//   1) aggregate 게이트(compute 시점, 캐시 대상) — 히스토그램은 원본 bin을
+//      buildOriginalHistogram(Node가 유일한 기준 구현)으로 만든 뒤
+//      resolveDisclosableHistogram이 해상도별로 "그대로 → 끝 구간 병합" 순서로
+//      시도해 공개 가능한 가장 세밀한 것을 채택한다(B안 재분할 + 끝 구간 병합).
+//      박스플롯 이상치는 여전히 전용 partition 게이트(outlierCount의 존재 여부,
+//      all-or-nothing) 그대로.
+//   2) limited_row 응답시점 merge(§9) — 권한이 있을 때만 원본 rows에서 즉석
+//      재계산한다(Python 재호출 없음, stats_runs.result에 절대 저장하지 않음).
+//      outlierValues는 outlierCount가 공개 확정된 변수에만, 원본 히스토그램
+//      (rawHistogram)은 변수 자체가 공개된 경우에만 붙는다.
 //
 // Python은 person을 모른다(프로젝트 전역 원칙) — 이 두 게이트 모두 Node가
 // person 신원을 아는 원본 행(DatasetRow 또는 PairedRow, 둘 다 personClusterKey를
@@ -30,27 +32,140 @@ export interface HistogramBinLike {
   lower: number;
   upper: number;
   count: number;
+  /** 끝 구간 병합으로 원래 bin 2개 이상이 합쳐진 bin이면 true(아니면 키 없음). */
+  tailMerged?: boolean;
 }
 
-/** 0단계(원본) 검사 — 옛 `isHistogramDisclosable`과 동일한 규칙을 그대로 재사용한다.
- * 마지막 bin만 양끝 포함(numpy.histogram과 동일한 경계 포함 규칙). count===0인 bin은
- * 검사할 person 집합이 없으므로 건너뛴다. */
-function passesOriginal<T extends PersonKeyed>(
-  presentRows: T[],
-  bins: HistogramBinLike[],
-  valueOf: (row: T) => number | null,
-): boolean {
-  for (let i = 0; i < bins.length; i += 1) {
-    const bin = bins[i];
-    if (bin.count === 0) continue;
-    const isLast = i === bins.length - 1;
-    const inBin = presentRows.filter((row) => {
-      const v = valueOf(row) as number;
-      return isLast ? v >= bin.lower && v <= bin.upper : v >= bin.lower && v < bin.upper;
-    });
-    if (isSmallCell(distinctPersons(inBin))) return false;
+// services/stats-engine/histogram.py와 같은 상한·하한.
+const MAX_ORIGINAL_BINS = 50;
+const MIN_ORIGINAL_BINS = 1;
+
+/**
+ * 원본 bin 개수 — services/stats-engine/histogram.py `compute_histogram`과 같은
+ * 공식(FD, IQR==0이거나 h가 비정상이면 Sturges, 1~50 clamp). n 자리에는 행 수가
+ * 아니라 "해당 변수에 유효값을 낸 고유 인원수"를 쓴다(job/disease grain
+ * 브로드캐스트로 같은 사람의 값이 여러 행에 복제돼도 bin이 잘게 쪼개지지 않게,
+ * A안). 인원수가 0 이하면 행 수로 대체한다(Python과 동일).
+ */
+export function computeOriginalBinCount(
+  lo: number,
+  hi: number,
+  q1: number,
+  q3: number,
+  personCount: number,
+  rowCount: number,
+): number {
+  const kN = personCount > 0 ? personCount : rowCount;
+  const sturges = () => Math.ceil(Math.log2(kN) + 1);
+  const iqr = q3 - q1;
+  let k: number;
+  if (iqr === 0) {
+    k = sturges();
+  } else {
+    const h = 2 * iqr * Math.pow(kN, -1 / 3);
+    k = h > 0 && Number.isFinite(h) ? Math.ceil((hi - lo) / h) : sturges();
   }
-  return true;
+  return Math.max(MIN_ORIGINAL_BINS, Math.min(MAX_ORIGINAL_BINS, k));
+}
+
+/** lo~hi를 k개 구간으로 균등분할한 경계(k+1개). `np.histogram(bins=k, range=(lo,hi))`
+ * 내부의 `np.linspace(lo, hi, k+1)`와 **연산 순서까지** 같게 `i * step + lo`로
+ * 계산하고 마지막 경계만 hi로 대입한다. `lo + (i * (hi - lo)) / k`처럼 순서를
+ * 바꾸면 같은 수식이라도 결과가 1ulp씩 달라진다(실측: [0,1]·k=5에서 numpy의 세
+ * 번째 경계는 0.6000000000000001인데 그 식은 0.6 — 값 0.6이 다른 bin에 배정됨). */
+export function buildUniformEdges(lo: number, hi: number, k: number): number[] {
+  const step = (hi - lo) / k;
+  const edges = new Array<number>(k + 1);
+  for (let i = 0; i < k; i += 1) edges[i] = i * step + lo;
+  edges[k] = hi;
+  return edges;
+}
+
+/** `edges`(길이 k+1, 오름차순) 안에서 값 `v`가 속하는 bin 인덱스(0..k-1)를 이진탐색으로
+ * 찾는다 — `lower <= v < upper`(왼쪽 폐구간), 마지막 bin만 양끝 포함. 산술식으로
+ * 직접 인덱스를 계산하면(`floor((v-lo)/(hi-lo)*k)`) 부동소수점 오차로 경계값 자체가
+ * 엉뚱한 bin에 배정될 수 있어(실측 확인) 반드시 `edges` 배열 자체를 기준으로
+ * 판정한다 — "표시되는 경계"와 "그 경계로 센 인원"이 항상 같은 소스에서 나오게
+ * 만드는 게 핵심이다. numpy.histogram도 최종 배정은 같은 경계 배열 기준이다. */
+function bucketIndex(edges: number[], v: number): number {
+  const k = edges.length - 1;
+  if (v <= edges[0]) return 0;
+  if (v >= edges[k]) return k - 1;
+  let lo = 0;
+  let hi = k;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (edges[mid] <= v) lo = mid; else hi = mid - 1;
+  }
+  return Math.min(lo, k - 1);
+}
+
+interface EdgeCounts {
+  edges: number[];
+  /** bin별 관측 건수(행 수 — 같은 사람의 반복 행도 각각 센다). */
+  counts: number[];
+  /** bin별 고유 인원 집합(공개 게이트용). */
+  personSets: Array<Set<string>>;
+}
+
+function countByEdges<T extends PersonKeyed>(
+  presentRows: T[],
+  edges: number[],
+  valueOf: (row: T) => number | null,
+): EdgeCounts {
+  const k = edges.length - 1;
+  const counts = new Array<number>(k).fill(0);
+  const personSets: Array<Set<string>> = Array.from({ length: k }, () => new Set<string>());
+  for (const row of presentRows) {
+    const idx = bucketIndex(edges, valueOf(row) as number);
+    counts[idx] += 1;
+    personSets[idx].add(row.personClusterKey);
+  }
+  return { edges, counts, personSets };
+}
+
+function toBins(edges: number[], counts: number[]): HistogramBinLike[] {
+  return counts.map((count, i) => ({ lower: edges[i], upper: edges[i + 1], count }));
+}
+
+/**
+ * 원본 히스토그램 — 공개통제 전의 균등분할 bin. 이 함수가 원본 bin의 **유일한
+ * 기준 구현**이다: aggregate 경로(resolveDisclosableHistogram의 입력)와 limited_row
+ * 원본(rawHistogram, 캐시 hit 시에도 Python 결과 없이 재계산해야 함)이 둘 다 이걸
+ * 쓰므로 두 경로의 원본은 구조적으로 항상 같다. Python 엔진도 여전히
+ * `histogram`을 계산해 내보내지만 Node는 더 이상 쓰지 않는다(엔진 프로토콜은
+ * 그대로 두고 제거는 후속으로 분리 — 공식·경계 연산이 numpy와 같다는 것은
+ * histogramParity 픽스처 테스트가 고정한다).
+ *
+ * 입력은 valueOf가 숫자를 돌려주는 행만 쓴다(Python 요청 조립과 같은 필터 —
+ * statsDescriptiveSuppression.ts buildStatsEngineRequest). q1/q3는 엔진이 계산한
+ * 값을 그대로 받는다(numpy 분위수 방식을 Node에서 재구현하지 않음). 유효값이
+ * 없으면 null.
+ */
+export function buildOriginalHistogram<T extends PersonKeyed>(
+  rows: T[],
+  valueOf: (row: T) => number | null,
+  q1: number,
+  q3: number,
+): HistogramBinLike[] | null {
+  const presentRows = rows.filter((r) => valueOf(r) !== null);
+  if (presentRows.length === 0) return null;
+
+  let lo = Infinity;
+  let hi = -Infinity;
+  const persons = new Set<string>();
+  for (const row of presentRows) {
+    const v = valueOf(row) as number;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+    persons.add(row.personClusterKey);
+  }
+
+  if (lo === hi) return [{ lower: lo, upper: hi, count: presentRows.length }];
+
+  const k = computeOriginalBinCount(lo, hi, q1, q3, persons.size, presentRows.length);
+  const { edges, counts } = countByEdges(presentRows, buildUniformEdges(lo, hi, k), valueOf);
+  return toBins(edges, counts);
 }
 
 /** B안 폴백 후보 bin 개수 목록 — 원본 개수를 절반씩(`ceil(k/2)`) 줄여가며
@@ -59,7 +174,7 @@ function passesOriginal<T extends PersonKeyed>(
  * 줄이기만 하면 하한값 자체는 사다리에서 건너뛸 수 있다 — 예: 원본 4개는
  * ceil(4/2)=2로 하한(3) 미만이라 반복이 바로 멈춰버려 3을 한 번도 시도 안 하게
  * 되는데, 정작 3개로는 통과할 수 있는 데이터일 수 있다(실측 확인: 4개일 때 인원
- * [1,9,10,10]으로 실패해도 3개로 재분할하면 [10,10,10]으로 통과). */
+ * [10,1,9,10]으로 실패해도 3개로 재분할하면 [10,10,10]으로 통과). */
 function fallbackCandidates(originalK: number): number[] {
   const candidates: number[] = [];
   let k = originalK;
@@ -76,62 +191,89 @@ function fallbackCandidates(originalK: number): number[] {
   return candidates;
 }
 
-/** lo~hi를 k개 구간으로 균등분할한 경계(k+1개)를 직접 산술로 만든다 — 양끝은 계산이
- * 아니라 대입으로 고정해 부동소수점 드리프트를 막는다(`np.histogram(bins=k,
- * range=(lo,hi))`와 동일한 경계). */
-function buildUniformEdges(lo: number, hi: number, k: number): number[] {
-  const edges = new Array<number>(k + 1);
-  edges[0] = lo;
-  edges[k] = hi;
-  for (let i = 1; i < k; i += 1) edges[i] = lo + (i * (hi - lo)) / k;
-  return edges;
-}
-
-/** `edges`(길이 k+1, 오름차순) 안에서 값 `v`가 속하는 bin 인덱스(0..k-1)를 이진탐색으로
- * 찾는다 — `lower <= v < upper`(왼쪽 폐구간), 마지막 bin만 양끝 포함. 산술식으로
- * 직접 인덱스를 계산하면(`floor((v-lo)/(hi-lo)*k)`) 부동소수점 오차로 경계값 자체가
- * 엉뚱한 bin에 배정될 수 있어(실측 확인) 반드시 `edges` 배열 자체를 기준으로
- * 판정한다 — "표시되는 경계"와 "그 경계로 센 인원"이 항상 같은 소스에서 나오게
- * 만드는 게 핵심이다. */
-function bucketIndex(edges: number[], v: number): number {
-  const k = edges.length - 1;
-  if (v <= edges[0]) return 0;
-  if (v >= edges[k]) return k - 1;
-  let lo = 0;
-  let hi = k;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (edges[mid] <= v) lo = mid; else hi = mid - 1;
-  }
-  return Math.min(lo, k - 1);
-}
-
-function passesGate(counts: number[], personSets: Array<Set<string>>): boolean {
-  for (let i = 0; i < counts.length; i += 1) {
+/** 모든 bin이 0명이거나 ≥MINIMUM_COHORT명이면 통과(count===0인 bin은 검사할 사람이 없음). */
+function passesGate(counts: number[], personSets: Array<Set<string>>, from = 0, to = counts.length): boolean {
+  for (let i = from; i < to; i += 1) {
     if (counts[i] === 0) continue;
     if (isSmallCell(personSets[i].size)) return false;
   }
   return true;
 }
 
+/**
+ * 끝 구간 병합 — 양 끝 bin이 소수셀(1~9명)이면 안쪽 이웃 bin을 하나씩 계속
+ * 흡수해 ≥MINIMUM_COHORT명이 될 때까지 넓힌다. 인원은 bin별 인원수의 합이 아니라
+ * **person 집합의 합집합**으로 다시 센다(같은 사람의 두 행이 서로 다른 bin에
+ * 있었어도 1명). 다음 중 하나면 이 해상도에서는 실패(null):
+ *   - 양쪽 병합이 서로 만나거나 겹침(가운데가 남지 않음)
+ *   - 가운데에 남은 bin 중 소수셀이 있음(가운데 병합은 하지 않는다 — 폭이
+ *     들쭉날쭉해져 분포 모양이 왜곡되므로 범위 밖)
+ *   - 병합 후 bin 수가 MIN_DISCLOSABLE_BINS 미만
+ *   - 양쪽 다 병합할 게 없었음(그대로 실패한 해상도라 병합으로 달라질 게 없다)
+ * 병합된 bin의 바깥 경계는 lo/hi(이미 공개되는 min/max) 그대로라 경계값이 새로
+ * 드러내는 정보는 없다.
+ */
+function tryTailMerge({ edges, counts, personSets }: EdgeCounts): HistogramBinLike[] | null {
+  const k = counts.length;
+
+  let leftEnd = 0;
+  const leftSet = new Set(personSets[0]);
+  while (isSmallCell(leftSet.size)) {
+    leftEnd += 1;
+    if (leftEnd >= k) return null;
+    for (const p of personSets[leftEnd]) leftSet.add(p);
+  }
+
+  let rightStart = k - 1;
+  const rightSet = new Set(personSets[k - 1]);
+  while (isSmallCell(rightSet.size)) {
+    rightStart -= 1;
+    if (rightStart < 0) return null;
+    for (const p of personSets[rightStart]) rightSet.add(p);
+  }
+
+  if (leftEnd === 0 && rightStart === k - 1) return null;
+  if (leftEnd >= rightStart) return null;
+  if (!passesGate(counts, personSets, leftEnd + 1, rightStart)) return null;
+
+  const resultLength = 1 + (rightStart - leftEnd - 1) + 1;
+  if (resultLength < MIN_DISCLOSABLE_BINS) return null;
+
+  const sum = (from: number, to: number) => counts.slice(from, to + 1).reduce((s, c) => s + c, 0);
+  const bins: HistogramBinLike[] = [];
+  bins.push(leftEnd > 0
+    ? { lower: edges[0], upper: edges[leftEnd + 1], count: sum(0, leftEnd), tailMerged: true }
+    : { lower: edges[0], upper: edges[1], count: counts[0] });
+  for (let i = leftEnd + 1; i < rightStart; i += 1) {
+    bins.push({ lower: edges[i], upper: edges[i + 1], count: counts[i] });
+  }
+  bins.push(rightStart < k - 1
+    ? { lower: edges[rightStart], upper: edges[k], count: sum(rightStart, k - 1), tailMerged: true }
+    : { lower: edges[k - 1], upper: edges[k], count: counts[k - 1] });
+  return bins;
+}
+
 export interface ResolvedHistogram {
   bins: HistogramBinLike[];
   /** 원본보다 구간 수를 줄여 재분할했으면 true(내부적으로는 재분할이지 인접 bin을
-   * 그대로 합치는 게 아니다 — API 필드명은 짧게 유지). */
+   * 그대로 합치는 게 아니다 — API 필드명은 짧게 유지). 끝 구간 병합 여부는 bin별
+   * tailMerged로 따로 표시한다. */
   merged: boolean;
 }
 
 /**
- * 히스토그램 person 단위 공개통제(B안 — 적응형 해상도 축소, A안 후속). 원본(Python이
- * 만든) bin이 그대로 공개 가능하면 그걸 쓰고, 아니면 `fallbackCandidates`가 정한
- * 후보 해상도들을 세밀한 순서부터 시도해 **처음 통과하는 것**을 반환한다("정해진
- * 후보 해상도 중 공개 가능한 가장 세밀한 것" — 가능한 모든 bin 개수를 다 시도한다는
- * 뜻은 아니다). 각 후보는 lo~hi를 그 개수만큼 다시 균등분할한 것이지, 원본 bin을
- * 인접한 것끼리 그대로 합치는 게 아니다(원본 bin 경계 내부를 새 경계가 가로지를 수
- * 있음). 후보를 전부 시도해도 통과하는 게 없으면 `null`(호출부가 별도
- * reasonCode로 "해상도 부족"임을 명시한다). 같은 사람의 서로 다른 두 행이 서로
- * 다른 bin에 있다가 재분할로 같은 bin에 들어가도 `Set` 합집합이라 정확히 1명으로만
- * 세어진다(합산 아님).
+ * 히스토그램 person 단위 공개통제(B안 재분할 + 끝 구간 병합). 해상도를 원본 →
+ * `fallbackCandidates`가 정한 후보 순서(세밀한 것부터)로 내려가며, 각 해상도에서
+ * "그대로" → "끝 구간 병합(tryTailMerge)" 순으로 시도해 **처음 통과하는 것**을
+ * 반환한다 — 즉 원본 해상도의 끝 구간 병합이 더 거친 재분할보다 우선한다. 각
+ * 후보 해상도는 lo~hi를 그 개수만큼 다시 균등분할한 것이지, 원본 bin을 인접한
+ * 것끼리 그대로 합치는 게 아니다(원본 bin 경계 내부를 새 경계가 가로지를 수 있음).
+ * 전부 실패하면 `null`(호출부가 별도 reasonCode로 "해상도 부족"임을 명시한다).
+ * 같은 사람의 서로 다른 두 행이 서로 다른 bin에 있다가 재분할·병합으로 같은 bin에
+ * 들어가도 `Set` 합집합이라 정확히 1명으로만 세어진다(합산 아님).
+ *
+ * `bins`는 원본 bin(보통 buildOriginalHistogram의 결과)이다. 판정은 bins의 count
+ * 필드가 아니라 그 경계로 rows를 직접 재순회한 person 집합으로 한다.
  */
 export function resolveDisclosableHistogram<T extends PersonKeyed>(
   rows: T[],
@@ -141,30 +283,23 @@ export function resolveDisclosableHistogram<T extends PersonKeyed>(
   if (bins.length === 0) return null;
   const presentRows = rows.filter((r) => valueOf(r) !== null);
 
-  if (passesOriginal(presentRows, bins, valueOf)) {
+  const originalEdges = [bins[0].lower, ...bins.map((b) => b.upper)];
+  const original = countByEdges(presentRows, originalEdges, valueOf);
+  if (passesGate(original.counts, original.personSets)) {
     return { bins, merged: false };
   }
+  const originalTail = tryTailMerge(original);
+  if (originalTail) return { bins: originalTail, merged: false };
 
   const lo = bins[0].lower;
   const hi = bins[bins.length - 1].upper;
   for (const k of fallbackCandidates(bins.length)) {
-    const edges = buildUniformEdges(lo, hi, k);
-    const counts = new Array(k).fill(0);
-    const personSets: Array<Set<string>> = Array.from({ length: k }, () => new Set<string>());
-    for (const row of presentRows) {
-      const v = valueOf(row) as number;
-      const idx = bucketIndex(edges, v);
-      counts[idx] += 1;
-      personSets[idx].add(row.personClusterKey);
+    const candidate = countByEdges(presentRows, buildUniformEdges(lo, hi, k), valueOf);
+    if (passesGate(candidate.counts, candidate.personSets)) {
+      return { bins: toBins(candidate.edges, candidate.counts), merged: true };
     }
-    if (passesGate(counts, personSets)) {
-      const resolvedBins: HistogramBinLike[] = counts.map((count, i) => ({
-        lower: edges[i],
-        upper: edges[i + 1],
-        count,
-      }));
-      return { bins: resolvedBins, merged: true };
-    }
+    const tail = tryTailMerge(candidate);
+    if (tail) return { bins: tail, merged: true };
   }
   return null;
 }

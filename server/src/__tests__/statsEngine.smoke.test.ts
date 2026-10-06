@@ -20,7 +20,7 @@
 import { describe, expect, it, beforeAll } from 'vitest';
 import { execFileSync } from 'child_process';
 import path from 'path';
-import { resolveDisclosableHistogram, type PersonKeyed } from '../statsChartDisclosure';
+import { buildOriginalHistogram, resolveDisclosableHistogram, type PersonKeyed } from '../statsChartDisclosure';
 
 const PYTHON = process.env.STATS_ENGINE_PYTHON_FOR_TEST || 'python';
 const SCRIPTS_DIR = path.resolve(__dirname, '../../../services/stats-engine');
@@ -158,7 +158,9 @@ describe.skipIf(!AVAILABLE)('statsEngine <-> analyze.py 실제 프로세스 (smo
   // 사람으로 둔다 — 원본은 그 bin 때문에 실패해야 하고, 재분할하면 인원 많은
   // 이웃 구간과 합쳐져 통과해야 한다(정확한 bin 개수는 FD 공식이 정하므로
   // 하드코딩하지 않는다).
-  it('실제 Python이 만든 float bin 경계로도 재분할(resolveDisclosableHistogram)이 올바르게 동작한다', () => {
+  // 끝 구간 병합 이후 — 첫 bin만 소수셀(2명)이고 바로 옆 bin은 인원이 많으므로,
+  // 재분할보다 먼저 원본 해상도의 끝 병합이 통과한다(첫 두 bin이 하나로 합쳐짐).
+  it('실제 Python이 만든 float bin 경계로도 공개 판정(resolveDisclosableHistogram)이 올바르게 동작한다', () => {
     const values = Array.from({ length: 300 }, (_v, i) => i); // 0..299, 균일 분포
     const request = { protocolVersion: 6, variables: [{ key: 'v1', kind: 'continuous', values, personCount: 300 }] };
     const { code, stdout, stderr } = runReal(JSON.stringify(request));
@@ -178,9 +180,35 @@ describe.skipIf(!AVAILABLE)('statsEngine <-> analyze.py 실제 프로세스 (smo
 
     const resolved = resolveDisclosableHistogram(rows, rawBins, valueOf);
     expect(resolved).not.toBeNull();
-    expect(resolved!.merged).toBe(true);
-    expect(resolved!.bins.length).toBeLessThan(rawBins.length);
+    expect(resolved!.merged).toBe(false);
+    expect(resolved!.bins).toHaveLength(rawBins.length - 1);
+    expect(resolved!.bins[0]).toEqual({ lower: rawBins[0].lower, upper: rawBins[1].upper, count: rawBins[0].count + rawBins[1].count, tailMerged: true });
     expect(resolved!.bins.reduce((s, b) => s + b.count, 0)).toBe(300);
+  });
+
+  // 끝 구간 병합 — 원본 bin의 기준 구현이 Node(buildOriginalHistogram)로 옮겨왔다.
+  // 커밋된 픽스처(statsHistogramParity.test.ts)와 별개로, 지금 이 환경의 실제
+  // analyze.py가 내는 histogram과 Node 결과가 경계·건수까지 정확히 같은지 실측한다
+  // (numpy 버전이 바뀌어 동작이 달라지면 여기서 먼저 드러난다).
+  it('실제 analyze.py의 histogram과 Node buildOriginalHistogram이 정확히 같다(경계·건수)', () => {
+    const datasets: Array<{ values: number[]; persons?: number[] }> = [
+      { values: Array.from({ length: 300 }, (_v, i) => i) },
+      { values: Array.from({ length: 11 * 20 }, (_v, i) => (i % 11) / 10) }, // 0.6 같은 경계값
+      { values: [...Array.from({ length: 99 }, () => 0), 1] }, // IQR==0 → Sturges
+      { values: Array.from({ length: 600 }, (_v, i) => (Math.floor(i / 3) / 199) * 100), persons: Array.from({ length: 600 }, (_v, i) => Math.floor(i / 3)) },
+      { values: [10, 10, 10, 60, 60, 110, 160, 210, 310, 410, 37.5, 12.25, 99.99, 1e-3] },
+    ];
+    for (const { values, persons } of datasets) {
+      const personCount = new Set(persons ?? values.map((_v, i) => i)).size;
+      const request = { protocolVersion: 6, variables: [{ key: 'v1', kind: 'continuous', values, personCount }] };
+      const { code, stdout, stderr } = runReal(JSON.stringify(request));
+      expect(stderr).toBe('');
+      expect(code).toBe(0);
+      const out = JSON.parse(stdout).continuous[0];
+      type Row = PersonKeyed & { value: number };
+      const rows: Row[] = values.map((value, i) => ({ personClusterKey: `p-${persons ? persons[i] : i}`, value }));
+      expect(buildOriginalHistogram(rows, (r) => r.value, out.q1, out.q3)).toEqual(out.histogram.bins);
+    }
   });
 
   it('상관행렬 요청이 실제 Python 프로세스를 왕복해 모든 쌍을 반환한다', () => {

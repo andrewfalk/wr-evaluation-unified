@@ -231,7 +231,7 @@ function ContinuousDistributionCard({ catalogByKey, row }) {
     <div className="swb-card">
       <strong>{variableLabel(catalogByKey, row.variableKey)}</strong>
       <div className="swb-section-label">히스토그램</div>
-      <Histogram histogram={row.histogram} histogramReasonCode={row.histogramReasonCode} />
+      <Histogram histogram={row.histogram} rawHistogram={row.rawHistogram} histogramReasonCode={row.histogramReasonCode} />
       <div className="swb-section-label">박스플롯</div>
       <BoxPlot boxplot={row.boxplot} />
     </div>

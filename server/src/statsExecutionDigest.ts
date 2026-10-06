@@ -50,7 +50,9 @@ export const METHOD_POLICY_VERSION = 'v4-prediction-l2-logistic';
 // Table1 — AnalyzeResult.descriptiveStratified 필드가 추가돼 결과 shape이 다시
 // 확장됐다(shared/contracts/stats.ts, Table1ContinuousCellSchema/Table1DiscreteCellSchema
 // 전용 최소 DTO).
-export const RESULT_SCHEMA_VERSION = 'v8-table1-stratify';
+// 끝 구간 병합 — AnalyzeHistogramBinSchema.tailMerged + (limited_row)
+// AnalyzeContinuousRevealedSchema.rawHistogram 필드가 추가돼 다시 범프.
+export const RESULT_SCHEMA_VERSION = 'v9-histogram-tail-merge-raw';
 
 export interface ComputeExecutionDigestInput {
   organizationId: string;

@@ -32,7 +32,10 @@ export const CORRELATION_MATRIX_POLICY_VERSION = 'v1-pairwise-gates-bh-fdr';
 // 적용된다 — 이 판정 로직이 바뀌면 이 값을 올린다.
 // B안 — 히스토그램이 all-or-nothing 억제 대신 적응형 해상도 축소(재분할)를 거치도록
 // 판정 로직 자체가 바뀌어 범프한다(server/src/statsChartDisclosure.ts 참고).
-export const CHART_DISCLOSURE_POLICY_VERSION = 'v2-histogram-adaptive-resolution';
+// 끝 구간 병합 — 해상도마다 "그대로 → 양 끝 소수셀 bin 병합" 순으로 시도하도록
+// 판정 로직이 바뀌고, 원본 bin의 기준 구현이 Python에서 Node(numpy linspace와 같은
+// 경계 연산)로 옮겨와 범프한다.
+export const CHART_DISCLOSURE_POLICY_VERSION = 'v3-histogram-tail-merge';
 
 // §D-1 — family 내부 값-다양성 제한. 이 창(windowMinutes) 안에서 같은 queryFamilyDigest의
 // 요청 수가 maxQueriesPerFamily를 넘거나, 어느 필터 키든 서로 다른 값의 수가

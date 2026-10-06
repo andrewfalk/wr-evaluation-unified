@@ -34,6 +34,21 @@ import { generateAccessToken } from '../auth/tokens';
 import { hashToken, generateToken } from '../auth/tokenHash';
 import { StatsEngineTimeoutError, StatsEngineProcessError } from '../statsEngine';
 
+// 끝 구간 병합 PR — 202(비동기) 경로를 결정적으로 재현하려면 syncBudgetMs를 테스트
+// 안에서 바꿔야 하는데 실제 config는 Object.freeze라 직접 못 바꾼다(Proxy도 frozen
+// 속성의 get 불변식 위반). 동결 안 된 복사본을 만들고 syncBudgetMs만 getter로 둔다.
+const syncBudget = vi.hoisted(() => ({ ms: null as number | null }));
+vi.mock('../config', async (importOriginal) => {
+  const actualModule = await importOriginal<typeof import('../config')>();
+  const actual = actualModule.default;
+  const asyncCfg = { ...actual.stats.async };
+  Object.defineProperty(asyncCfg, 'syncBudgetMs', {
+    get: () => syncBudget.ms ?? actual.stats.async.syncBudgetMs,
+    enumerable: true,
+  });
+  return { ...actualModule, default: { ...actual, stats: { ...actual.stats, async: asyncCfg } } };
+});
+
 // runStatsEngine은 기본적으로 실제 구현을 그대로 통과시킨다(정상 경로는 실제 Python
 // subprocess가 돈다) — Timeout/ProcessError 두 테스트만 .mockRejectedValueOnce로 딱
 // 한 번 가로챈다(그 뒤 호출은 다시 실제 구현으로 돌아간다, vitest의 …Once 관례).
@@ -367,6 +382,157 @@ describe.skipIf(!TEST_DB_URL)('POST /analyze(descriptive) — 실데이터 HTTP 
       expect(revoked.status).toBe(200);
       expect(revoked.body.runManifest.analysisRunId).toBe(before.body.runManifest.analysisRunId);
       expect(revoked.body.result.continuous[0].boxplot?.outlierValues).toBeUndefined();
+    }, 30000);
+
+    // -------------------------------------------------------------------------
+    // 끝 구간 병합 PR — 원본 히스토그램(rawHistogram)도 같은 응답시점 merge 단일
+    // 지점(finalizeAnalyzeResponse)을 거치는지 4개 경로(생성자·캐시 hit·202→GET·
+    // 진행 중 합류자) 전부에서 확인한다. 12명 코호트라 aggregate 히스토그램은 소수셀
+    // 억제·병합 대상이 될 수 있지만, 원본은 bin 게이트 없이 그대로여야 한다.
+    // -------------------------------------------------------------------------
+    const DESCRIPTIVE_BODY = { ...RECIPE_BASE, variableKeys: ['knee.relatedness.max'], analysisMode: 'descriptive' };
+    const rawCountSum = (body: any) =>
+      (body.result.continuous[0].rawHistogram.bins as Array<{ count: number }>).reduce((s, b) => s + b.count, 0);
+
+    async function pollRun(analysisRunId: string): Promise<request.Response> {
+      const deadline = Date.now() + 30000;
+      while (Date.now() < deadline) {
+        const res = await authed(request(app()).get(`/api/stats/runs/${analysisRunId}`));
+        if (res.body.status !== 'queued' && res.body.status !== 'running') return res;
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      throw new Error(`pollRun: ${analysisRunId}가 30초 안에 끝나지 않음`);
+    }
+
+    async function withSyncBudget<T>(ms: number, fn: () => Promise<T>): Promise<T> {
+      syncBudget.ms = ms;
+      try {
+        return await fn();
+      } finally {
+        syncBudget.ms = null;
+      }
+    }
+
+    it('rawHistogram — 생성자 경로: 권한이 있으면 붙고(합=n, merged/tailMerged 없음), 감사에 limitedRowFieldsAttached가 남고, DB 캐시(stats_runs.result)에는 없다', async () => {
+      await seedKneeCohort();
+      await grant();
+      const res = await authed(request(app()).post('/api/stats/analyze')).send(DESCRIPTIVE_BODY);
+      expect(res.status).toBe(200);
+      const c = res.body.result.continuous[0];
+      expect(c.rawHistogram).toBeDefined();
+      expect(rawCountSum(res.body)).toBe(12);
+      expect(c.rawHistogram.merged).toBeUndefined();
+      expect(c.rawHistogram.bins.every((b: Record<string, unknown>) => !('tailMerged' in b))).toBe(true);
+
+      const stored = await pool.query<{ result: unknown }>(
+        `SELECT result FROM stats_runs WHERE analysis_run_id=$1`,
+        [res.body.runManifest.analysisRunId],
+      );
+      expect(JSON.stringify(stored.rows[0].result)).not.toContain('rawHistogram');
+
+      const audits = await pool.query(
+        `SELECT 1 FROM audit_logs WHERE actor_org_id=$1 AND extra->>'analysisRunId'=$2 AND extra->>'limitedRowFieldsAttached'='true'`,
+        [orgId, res.body.runManifest.analysisRunId],
+      );
+      expect(audits.rowCount).toBeGreaterThanOrEqual(1);
+    }, 30000);
+
+    it('rawHistogram — 권한이 없으면 생성자·캐시 hit 어느 쪽에도 없다', async () => {
+      await seedKneeCohort();
+      const first = await authed(request(app()).post('/api/stats/analyze')).send(DESCRIPTIVE_BODY);
+      expect(first.status).toBe(200);
+      expect(first.body.result.continuous[0].rawHistogram).toBeUndefined();
+      const second = await authed(request(app()).post('/api/stats/analyze')).send(DESCRIPTIVE_BODY);
+      expect(second.body.runManifest.analysisRunId).toBe(first.body.runManifest.analysisRunId);
+      expect(second.body.result.continuous[0].rawHistogram).toBeUndefined();
+    }, 30000);
+
+    it('rawHistogram — 감사 실패 시 500이고 응답 바디에 원본이 없다', async () => {
+      await seedKneeCohort();
+      await grant();
+      writeAuditLogStrictSpy
+        .mockImplementationOnce(async (...args: Parameters<WriteAuditLogStrictFn>) => {
+          const actual = await vi.importActual<typeof import('../middleware/audit')>('../middleware/audit');
+          return actual.writeAuditLogStrict(...args);
+        })
+        .mockRejectedValueOnce(new Error('audit db down'));
+      const res = await authed(request(app()).post('/api/stats/analyze')).send(DESCRIPTIVE_BODY);
+      expect(res.status).toBe(500);
+      expect(JSON.stringify(res.body)).not.toContain('rawHistogram');
+    }, 30000);
+
+    it('rawHistogram — 캐시 hit 경로: 권한 부여→회수가 다음 응답부터 그대로 반영된다', async () => {
+      await seedKneeCohort();
+      const before = await authed(request(app()).post('/api/stats/analyze')).send(DESCRIPTIVE_BODY);
+      expect(before.body.result.continuous[0].rawHistogram).toBeUndefined();
+
+      await grant();
+      const granted = await authed(request(app()).post('/api/stats/analyze')).send(DESCRIPTIVE_BODY);
+      expect(granted.body.runManifest.analysisRunId).toBe(before.body.runManifest.analysisRunId);
+      expect(rawCountSum(granted.body)).toBe(12);
+
+      await revoke();
+      const revoked = await authed(request(app()).post('/api/stats/analyze')).send(DESCRIPTIVE_BODY);
+      expect(revoked.body.runManifest.analysisRunId).toBe(before.body.runManifest.analysisRunId);
+      expect(revoked.body.result.continuous[0].rawHistogram).toBeUndefined();
+    }, 30000);
+
+    it('rawHistogram — 비동기 202 → GET /runs/:id 완료 경로도 조회 시점 권한으로 붙는다', async () => {
+      await seedKneeCohort();
+      await grant();
+      const accepted = await withSyncBudget(0, () => authed(request(app()).post('/api/stats/analyze')).send(DESCRIPTIVE_BODY));
+      expect(accepted.status).toBe(202);
+
+      const done = await pollRun(accepted.body.analysisRunId);
+      expect(done.body.status).toBe('succeeded');
+      expect(rawCountSum(done.body)).toBe(12);
+
+      await revoke();
+      const afterRevoke = await authed(request(app()).get(`/api/stats/runs/${accepted.body.analysisRunId}`));
+      expect(afterRevoke.body.status).toBe('succeeded');
+      expect(afterRevoke.body.result.continuous[0].rawHistogram).toBeUndefined();
+    }, 40000);
+
+    it('rawHistogram — 진행 중 run에 합류한 요청도 합류자 응답 시점 권한으로 붙는다', async () => {
+      await seedKneeCohort();
+      // 워커를 멈춰 첫 요청을 queued로 묶어 둔다 → 두 번째 같은 요청이 반드시 joined가 된다.
+      worker.stop();
+      try {
+        const first = await withSyncBudget(0, () => authed(request(app()).post('/api/stats/analyze')).send(DESCRIPTIVE_BODY));
+        expect(first.status).toBe(202);
+
+        await grant();
+        // supertest 요청은 then()이 불릴 때 출발한다 — withSyncBudget 안의 await가 곧바로
+        // 요청을 보내고(admission → queued 행에 joined), 워커가 멈춰 있으니 동기 예산
+        // 동안 폴링하며 기다린다. 합류자가 admission을 마칠 시간을 준 뒤 워커를 다시 띄운다.
+        const joinerPromise = withSyncBudget(20000, () => authed(request(app()).post('/api/stats/analyze')).send(DESCRIPTIVE_BODY));
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        worker = createStatsRunsQueueWorker(pool);
+        const joiner = await joinerPromise;
+        expect(joiner.status).toBe(200);
+        expect(joiner.body.runManifest.analysisRunId).toBe(first.body.analysisRunId);
+        expect(rawCountSum(joiner.body)).toBe(12);
+      } finally {
+        worker.stop();
+        worker = createStatsRunsQueueWorker(pool);
+      }
+    }, 40000);
+
+    it('rawHistogram — 버전이 달라진 과거 실행은 저장된 aggregate만 돌려주고 원본은 붙지 않는다', async () => {
+      await seedKneeCohort();
+      const res = await authed(request(app()).post('/api/stats/analyze')).send(DESCRIPTIVE_BODY);
+      expect(res.status).toBe(200);
+      // 과거 버전 코드로 저장된 실행을 흉내낸다(hasVersionDrifted → true).
+      await pool.query(
+        `UPDATE stats_runs SET execution_digest='stale-digest-from-old-code' WHERE analysis_run_id=$1`,
+        [res.body.runManifest.analysisRunId],
+      );
+      await grant();
+      const old = await authed(request(app()).get(`/api/stats/runs/${res.body.runManifest.analysisRunId}`));
+      expect(old.status).toBe(200);
+      expect(old.body.status).toBe('succeeded');
+      expect(old.body.result.continuous[0].rawHistogram).toBeUndefined();
+      expect(old.body.result.continuous[0].histogram === null || Array.isArray(old.body.result.continuous[0].histogram?.bins)).toBe(true);
     }, 30000);
   });
 });
