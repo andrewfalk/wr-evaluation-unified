@@ -1,5 +1,5 @@
 // PR3-B §9 — 캐시-권한 드리프트 방지. limited_row 등급 필드(boxplot outlierValues·
-// scatter 원시 points)는 stats_runs.result(캐시 저장 대상)에 절대 포함되지 않는다
+// scatter 원시 points·연속형 rawHistogram)는 stats_runs.result(캐시 저장 대상)에 절대 포함되지 않는다
 // — 이 모듈은 /analyze 응답을 실제로 클라이언트에 보내기 직전(신규계산·캐시hit·
 // in-flight조인 3경로 전부 공통) 단 한 곳에서 호출돼, 공유되는 aggregate 객체를
 // mutate하지 않고 새 객체를 조립해 반환한다. 상관행렬 셀(r/pValue/n/adjustedP)은
@@ -12,7 +12,7 @@ import type { AnalyzeResult, AnalyzeRegressionResult } from '@wr/contracts';
 import type { AnalysisContext } from './statsAnalysisContext';
 import type { DatasetRow } from './statsDatasetBuilder';
 import type { PairedRow } from './statsBivariateDataset';
-import { computeOutlierValues } from './statsChartDisclosure';
+import { buildOriginalHistogram, computeOutlierValues } from './statsChartDisclosure';
 import { sampleScatterPoints, sampleRegressionDiagnosticsRowIndices } from './statsScatterGrid';
 import { resolveGroupComparisonGroups } from './statsBivariateSuppression';
 import { runRegressionDiagnosticsEngine, StatsEngineBusyError } from './statsEngine';
@@ -163,14 +163,32 @@ export async function attachLimitedRowFields(
   if (hasAccess) {
     continuous = result.continuous.map((c) => {
       if (c.suppressed) return c;
-      if (!c.boxplot || c.boxplot.outlierCount === undefined) return c;
-      const outlierValues = computeOutlierValues(
-        ctx.dataset.rows,
-        { q1: c.boxplot.q1, q3: c.boxplot.q3 },
-        datasetValueOf(ctx.dataset.rows, c.variableKey),
-      );
-      attached = true;
-      return { ...c, boxplot: { ...c.boxplot, outlierValues } };
+      const valueOf = datasetValueOf(ctx.dataset.rows, c.variableKey);
+      let next = c;
+
+      // 원본 히스토그램 — 공개 조건이 outlierValues와 다르다: 변수 자체 공개(이
+      // 분기)만 요구하고 bin 소수셀·이상치 partition 게이트는 보지 않는다. 그래서
+      // 아래 outlierCount 조건과 독립적으로 판정한다(이상치는 억제돼도 원본
+      // 히스토그램은 붙을 수 있음). 원본은 aggregate 경로와 같은 기준 구현으로
+      // 재계산한다 — 히스토그램을 만들 조건(q1/q3/median 존재)도 aggregate 경로와 같다.
+      if (c.q1 !== null && c.q3 !== null && c.median !== null) {
+        const bins = buildOriginalHistogram(ctx.dataset.rows, valueOf, c.q1, c.q3);
+        if (bins) {
+          next = { ...next, rawHistogram: { bins } };
+          attached = true;
+        }
+      }
+
+      if (c.boxplot && c.boxplot.outlierCount !== undefined) {
+        const outlierValues = computeOutlierValues(
+          ctx.dataset.rows,
+          { q1: c.boxplot.q1, q3: c.boxplot.q3 },
+          valueOf,
+        );
+        next = { ...next, boxplot: { ...c.boxplot, outlierValues } };
+        attached = true;
+      }
+      return next;
     });
 
     if (bivariate && !bivariate.suppressed) {

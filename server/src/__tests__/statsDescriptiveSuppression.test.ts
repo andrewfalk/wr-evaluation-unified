@@ -159,11 +159,13 @@ describe('computeDescriptiveSuppression — PR3-B 히스토그램/박스플롯 �
     const catalogByKey = new Map([[key, meta(key, 'continuous')]]);
     // 전부 결측이면 애초에 linkedSuppressed(presentPersonCount=0은 isSmallCell 통과,
     // missingPersonCount=20은 통과)라 변수 전체가 억제되는 경로를 타므로, 대신
-    // "값이 있지만 histogram/boxplot 자체가 Python에서 null로 온" 경우를 재현한다.
+    // "값이 있지만 엔진이 q1/q3/median을 null로 준"(analyze.py가 histogram/boxplot을
+    // 만들지 않는 조건) 경우를 재현한다. 원본 bin은 이제 Node가 만들므로(끝 구간 병합
+    // PR) 히스토그램 생성 여부도 Python의 histogram이 아니라 이 분위수 조건으로 정해진다.
     const presentEntries = Array.from({ length: 15 }, () => ({ value: 5 }));
     const raw: StatsEngineRawResult = {
       continuous: [{
-        variableKey: key, n: 15, mean: 5, sd: 0, median: 5, q1: 5, q3: 5, iqr: 0,
+        variableKey: key, n: 15, mean: 5, sd: 0, median: null, q1: null, q3: null, iqr: null,
         skewness: null, kurtosis: null, min: 5, max: 5, nullReasons: {},
         histogram: null, boxplot: null,
       }],
@@ -217,34 +219,21 @@ describe('computeDescriptiveSuppression — PR3-B 히스토그램/박스플롯 �
     expect(c.histogramReasonCode).toBe('INSUFFICIENT_DISCLOSABLE_RESOLUTION');
   });
 
-  it('B안 — 원본은 실패해도 재분할 후보에서 통과하면 histogram.merged=true로 노출되고 histogramReasonCode는 null이다', () => {
+  it('끝 구간 병합 — 원본은 오른쪽 끝 소수셀 때문에 실패해도 원본 해상도의 끝 병합으로 노출되고(tailMerged) histogramReasonCode는 null이다', () => {
     const key = 'spine.mddm.lifetimeDoseMNh';
-    // statsChartDisclosure.test.ts의 검증된 시나리오를 실제 배선 경로로 재확인한다 —
-    // 원본 8개 bin 중 앞 2개가 각 5명씩(소수셀)이라 원본은 실패하지만, 재분할
-    // 후보(자연스러운 절반 축소 4개)에서 두 쌍씩 묶여(10/20/20/20) 전부 통과한다.
-    const entries = [
-      ...Array.from({ length: 5 }, () => ({ value: 5 })), // [0,10)
-      ...Array.from({ length: 5 }, () => ({ value: 15 })), // [10,20)
-      ...Array.from({ length: 10 }, () => ({ value: 25 })), // [20,30)
-      ...Array.from({ length: 10 }, () => ({ value: 35 })), // [30,40)
-      ...Array.from({ length: 10 }, () => ({ value: 45 })), // [40,50)
-      ...Array.from({ length: 10 }, () => ({ value: 55 })), // [50,60)
-      ...Array.from({ length: 10 }, () => ({ value: 65 })), // [60,70)
-      ...Array.from({ length: 10 }, () => ({ value: 75 })), // [70,80]
-    ];
+    // 실제 배선 경로 — 원본 bin은 Python 결과(여기선 일부러 null)가 아니라 Node
+    // buildOriginalHistogram이 rows와 엔진 q1/q3로 만든다. lo=35·hi=385, q1=60·q3=165
+    // (IQR 105, 60명) → FD h≈53.6 → ceil(350/53.6)=7개(폭 50) → 원본 인원
+    // [13,18,12,10,4,0,3](335·385는 마지막 두 bin에 각각 2·1명이지만 경계 포함 규칙상
+    // 같은 마지막 bin [335,385]에 3명). 오른쪽 끝 3명 → 0 → 4 → 10명 bin까지 흡수.
+    const at = (value: number, n: number) => Array.from({ length: n }, () => ({ value }));
+    const entries = [...at(35, 13), ...at(85, 18), ...at(135, 12), ...at(185, 10), ...at(235, 4), ...at(335, 2), ...at(385, 1)];
     const catalogByKey = new Map([[key, meta(key, 'continuous')]]);
     const raw: StatsEngineRawResult = {
       continuous: [{
-        variableKey: key, n: 70, mean: 40, sd: 25, median: 40, q1: 20, q3: 60, iqr: 40,
-        skewness: 0, kurtosis: 0, min: 5, max: 75, nullReasons: {},
-        histogram: {
-          bins: [
-            { lower: 0, upper: 10, count: 5 }, { lower: 10, upper: 20, count: 5 },
-            { lower: 20, upper: 30, count: 10 }, { lower: 30, upper: 40, count: 10 },
-            { lower: 40, upper: 50, count: 10 }, { lower: 50, upper: 60, count: 10 },
-            { lower: 60, upper: 70, count: 10 }, { lower: 70, upper: 80, count: 10 },
-          ],
-        },
+        variableKey: key, n: 60, mean: 120, sd: 80, median: 85, q1: 60, q3: 165, iqr: 105,
+        skewness: 1, kurtosis: 1, min: 35, max: 385, nullReasons: {},
+        histogram: null, // Node는 더 이상 Python 히스토그램을 쓰지 않는다
         boxplot: null,
       }],
       discrete: [],
@@ -253,16 +242,15 @@ describe('computeDescriptiveSuppression — PR3-B 히스토그램/박스플롯 �
     const c = result.continuous[0];
     expect(c.suppressed).toBe(false);
     if (c.suppressed) return;
-    expect(c.histogram).toEqual({
-      merged: true,
-      bins: [
-        { lower: 0, upper: 20, count: 10 },
-        { lower: 20, upper: 40, count: 20 },
-        { lower: 40, upper: 60, count: 20 },
-        { lower: 60, upper: 80, count: 20 },
-      ],
-    });
     expect(c.histogramReasonCode).toBeNull();
+    expect(c.histogram?.merged).toBe(false); // 재분할 아님 — 원본 해상도 그대로
+    const bins = c.histogram!.bins;
+    // 오른쪽 끝 3개 bin(4·0·3명)이 그 안쪽 10명 bin까지 흡수해 17명 하나로 합쳐진다.
+    expect(bins.map((b) => b.count)).toEqual([13, 18, 12, 17]);
+    expect(bins.map((b) => b.tailMerged === true)).toEqual([false, false, false, true]);
+    expect(bins[0].lower).toBe(35);
+    expect(bins[bins.length - 1].upper).toBe(385);
+    expect(bins.reduce((s, b) => s + b.count, 0)).toBe(60);
   });
 });
 

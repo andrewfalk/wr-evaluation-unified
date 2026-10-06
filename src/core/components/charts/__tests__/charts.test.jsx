@@ -73,6 +73,79 @@ describe('Histogram', () => {
     await user.click(screen.getByRole('button', { name: '데이터 보기' }));
     expect(document.querySelectorAll('tbody tr').length).toBe(bins.length);
   });
+
+  // 끝 구간 병합 — 병합 bin은 막대 모양(옅은 면+점선)·툴팁·표·안내 문구로 구분한다.
+  const tailMergedBins = [
+    { lower: 10, upper: 60, count: 13 },
+    { lower: 60, upper: 110, count: 18 },
+    { lower: 110, upper: 160, count: 12 },
+    { lower: 160, upper: 410, count: 17, tailMerged: true },
+  ];
+
+  it('tailMerged bin만 병합 스타일 막대로 그리고, 툴팁에 병합 구간·폭을 밝힌다', () => {
+    render(<Histogram histogram={{ bins: tailMergedBins, merged: false }} />);
+    const mergedRects = document.querySelectorAll('rect.chart-bar-merged');
+    expect(mergedRects.length).toBe(1);
+    expect(mergedRects[0].querySelector('title').textContent).toBe('160 ~ 410 (병합 구간, 폭 250): 17건');
+    expect(document.querySelectorAll('rect').length).toBe(tailMergedBins.length);
+  });
+
+  it('tailMerged bin이 있으면 끝 구간 병합 안내가 뜨고, 재분할(merged) 안내는 merged일 때만 뜬다', () => {
+    render(<Histogram histogram={{ bins: tailMergedBins, merged: false }} />);
+    expect(screen.getByText('인원이 적은 양 끝 구간은 인접 구간과 합쳐 표시했습니다(구간 폭이 다름).')).toBeTruthy();
+    expect(screen.queryByText(/구간 수를 줄여/)).toBeFalsy();
+  });
+
+  it('표 보기에서 병합 bin에 "병합 · 폭" 표시가 붙는다', async () => {
+    const user = userEvent.setup();
+    render(<Histogram histogram={{ bins: tailMergedBins }} />);
+    await user.click(screen.getByRole('button', { name: '데이터 보기' }));
+    const rows = document.querySelectorAll('tbody tr');
+    expect(rows.length).toBe(tailMergedBins.length);
+    expect(rows[3].textContent).toContain('병합 · 폭 250');
+    expect(rows[0].textContent).not.toContain('병합');
+  });
+
+  it('세로축 제목은 "구간별 관측 건수"다', () => {
+    render(<Histogram histogram={{ bins: tailMergedBins }} />);
+    expect(screen.getByText('구간별 관측 건수')).toBeTruthy();
+  });
+
+  it('구버전 결과(tailMerged 키 없음)는 병합 표시·안내 없이 그대로 렌더된다', () => {
+    render(<Histogram histogram={{ bins: [{ lower: 0, upper: 10, count: 20 }, { lower: 10, upper: 20, count: 30 }] }} />);
+    expect(document.querySelectorAll('rect.chart-bar-merged').length).toBe(0);
+    expect(screen.queryByText(/양 끝 구간/)).toBeFalsy();
+  });
+
+  // 원본 히스토그램(제한 데이터 권한자 전용) — 있으면 그래프·표·툴팁 모두 원본을 쓴다.
+  const rawBins = [
+    { lower: 10, upper: 60, count: 13 },
+    { lower: 60, upper: 110, count: 18 },
+    { lower: 110, upper: 160, count: 12 },
+    { lower: 160, upper: 210, count: 10 },
+    { lower: 210, upper: 260, count: 4 },
+    { lower: 260, upper: 310, count: 0 },
+    { lower: 310, upper: 360, count: 2 },
+    { lower: 360, upper: 410, count: 1 },
+  ];
+
+  it('rawHistogram이 있으면 aggregate 대신 원본을 그래프·표 모두에 쓰고 권한 안내를 띄운다', async () => {
+    const user = userEvent.setup();
+    render(<Histogram histogram={{ bins: tailMergedBins }} rawHistogram={{ bins: rawBins }} />);
+    expect(document.querySelectorAll('rect').length).toBe(rawBins.length);
+    expect(document.querySelectorAll('rect.chart-bar-merged').length).toBe(0);
+    expect(screen.getByText('제한 데이터 권한으로 소수 인원 구간까지 표시합니다. 화면을 외부에 공유할 때 주의하세요.')).toBeTruthy();
+    // aggregate 쪽 병합 안내는 원본을 보여줄 때 의미가 없으므로 뜨지 않는다.
+    expect(screen.queryByText(/양 끝 구간/)).toBeFalsy();
+    await user.click(screen.getByRole('button', { name: '데이터 보기' }));
+    expect(document.querySelectorAll('tbody tr').length).toBe(rawBins.length);
+  });
+
+  it('aggregate가 억제(null+사유코드)돼도 rawHistogram이 있으면 원본을 보여준다', () => {
+    render(<Histogram histogram={null} histogramReasonCode="INSUFFICIENT_DISCLOSABLE_RESOLUTION" rawHistogram={{ bins: rawBins }} />);
+    expect(screen.queryByText('분포를 표시하기에는 공개 가능한 구간이 부족합니다.')).toBeFalsy();
+    expect(document.querySelectorAll('rect').length).toBe(rawBins.length);
+  });
 });
 
 describe('BoxPlot', () => {

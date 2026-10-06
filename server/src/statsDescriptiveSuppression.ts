@@ -14,7 +14,7 @@ import type {
 import type { DatasetRow } from './statsDatasetBuilder';
 import { normalizeForCompare } from './statsDatasetBuilder';
 import { isSmallCell } from './statsSmallCell';
-import { resolveDisclosableHistogram, isOutlierCountDisclosable } from './statsChartDisclosure';
+import { buildOriginalHistogram, resolveDisclosableHistogram, isOutlierCountDisclosable } from './statsChartDisclosure';
 import type { StatsEngineRawResult, StatsEngineRequest, StatsEngineVariableKind } from './statsEngine';
 
 // PR0-B3 Part C — high_cardinality(job.identity.jobNameNormalized 등) 추가. Python
@@ -126,22 +126,28 @@ export function computeDescriptiveSuppression(
       const rawStat = rawContinuousByKey.get(key);
       if (!rawStat) throw new Error(`missing continuous engine result for '${key}'`);
 
-      // B안(A안 후속) — 히스토그램은 Python이 만든 bin 경계로 Node가 presentRows를
-      // 재순회해 person 단위로 판정하되, 원본이 실패하면 정해진 후보 해상도로
-      // 재분할해 공개 가능한 가장 세밀한 것을 채택한다(resolveDisclosableHistogram,
-      // all-or-nothing 즉시 포기가 아님). 후보를 전부 시도해도 실패하면(rawStat.
-      // histogram 자체가 없던 경우와 구분하기 위해) histogramReasonCode를 채운다.
+      // 원본 bin은 Python 결과(rawStat.histogram)가 아니라 Node의 기준 구현
+      // (buildOriginalHistogram)으로 만든다 — limited_row 원본(rawHistogram)이 캐시
+      // hit에서도 같은 함수로 재계산되므로 두 경로의 원본이 항상 같아야 한다. 그
+      // 원본으로 resolveDisclosableHistogram이 해상도별 "그대로 → 끝 구간 병합"을
+      // 시도해 공개 가능한 가장 세밀한 것을 채택한다. 히스토그램을 만들 조건은
+      // Python(analyze.py)과 같다(q1/q3/median이 계산 가능할 때만). 원본은
+      // 만들었는데 후보를 전부 시도해도 실패하면 histogramReasonCode를 채운다
+      // (애초에 히스토그램이 없던 n=0과 구분).
       const valueOf = (row: DatasetRow): number | null => {
         const extracted = row.values[key];
         if (!extracted || extracted.missing !== null) return null;
         return typeof extracted.value === 'number' ? extracted.value : null;
       };
-      const resolvedHistogram = rawStat.histogram
-        ? resolveDisclosableHistogram(presentRows, rawStat.histogram.bins, valueOf)
+      const originalBins = rawStat.q1 !== null && rawStat.q3 !== null && rawStat.median !== null
+        ? buildOriginalHistogram(presentRows, valueOf, rawStat.q1, rawStat.q3)
+        : null;
+      const resolvedHistogram = originalBins
+        ? resolveDisclosableHistogram(presentRows, originalBins, valueOf)
         : null;
       const histogram = resolvedHistogram ? { bins: resolvedHistogram.bins, merged: resolvedHistogram.merged } : null;
       const histogramReasonCode: 'INSUFFICIENT_DISCLOSABLE_RESOLUTION' | null =
-        !resolvedHistogram && rawStat.histogram ? 'INSUFFICIENT_DISCLOSABLE_RESOLUTION' : null;
+        !resolvedHistogram && originalBins ? 'INSUFFICIENT_DISCLOSABLE_RESOLUTION' : null;
 
       // PR3-B §1 — 박스플롯의 q1/median/q3/lowerWhisker/upperWhisker는 histogram과
       // 같은 부모 게이트(linkedSuppressed)만 통과하면 그대로 노출(범위값 자체는

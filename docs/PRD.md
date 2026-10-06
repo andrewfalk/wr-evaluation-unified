@@ -1506,7 +1506,7 @@ v5.0.0 인트라넷 백엔드 도입 후 실제 운영에서 드러난 권한 �
 | `stats.view` | true | – | – | 카탈로그·preview·화면 열람 |
 | `stats.regression` | true | – | – | 분석 실행·폴링·취소(모든 분석 모드 공통 게이트) |
 | `stats.export_results` | true | – | – | 저장된 집계 결과 CSV |
-| `stats.export_limited_rows` | false | – | – | **응답 시점**에 제한 행데이터 필드 부착: 이상치 원값(`boxplot.outlierValues`), 산점도 원시 점(`scatter.points`), 회귀 관측치 진단값(`pointDiagnostics`) |
+| `stats.export_limited_rows` | false | – | – | **응답 시점**에 제한 행데이터 필드 부착: 이상치 원값(`boxplot.outlierValues`), 산점도 원시 점(`scatter.points`), 회귀 관측치 진단값(`pointDiagnostics`), 원본 히스토그램(`rawHistogram` — bin 소수셀 게이트 없음, 변수 공개 조건만). 관리자 콘솔 표시명 "제한 데이터 열람(원본 값·원본 히스토그램)"(마이그레이션 0034) |
 | `stats.export_phi` | false | true | true | 예약 — 행 단위·PHI export는 미구현이라 노출 경로 없음 |
 
 - 기본 허용 3종은 조직 소속 인증 사용자 전원이 **grant 없이** 사용한다. 기본 허용 권한은 grant를 회수해도 차단되지 않는다.
@@ -1545,7 +1545,7 @@ v5.0.0 인트라넷 백엔드 도입 후 실제 운영에서 드러난 권한 �
 ### 12.C.7 공개통제·프라이버시
 
 - **소수 셀 억제**: 최소 코호트 10명(person 단위) 미만 셀은 억제하며 부분 억제를 하지 않는다(하나라도 소수 셀이면 해당 결과 전체 생략). boolean은 결측률과 사건/비사건 분할을 연결해 억제한다.
-- **히스토그램**: 억제 실패 시 bin을 원본 bin 합치기가 아니라 lo~hi 균등 재분할(경계 배열 이진탐색)로 줄여가며(적응형 해상도, 하한값은 사다리에 항상 포함) 공개 가능한 해상도를 찾는다.
+- **히스토그램**: 원본 bin은 Node `buildOriginalHistogram`이 유일한 기준 구현이다(numpy `histogram`과 같은 공식·linspace 경계 연산 순서, 픽스처로 대조 고정). 해상도마다 "그대로 → 양 끝 소수셀 bin을 안쪽 이웃과 병합(person 합집합, 가운데 소수셀이 남거나 3구간 미만이면 실패)" 순으로 시도하고, 실패하면 lo~hi 균등 재분할(경계 배열 이진탐색)로 줄여가며(적응형 해상도, 하한값은 사다리에 항상 포함) 공개 가능한 가장 세밀한 것을 찾는다. 병합 bin은 `tailMerged`로 표시하고 화면에서 옅은 면·점선으로 구분한다. `stats.export_limited_rows` 권한자는 게이트를 거치지 않은 원본(`rawHistogram`)을 응답 시점에 받는다.
 - **차분(differencing) 방지**: family(변수 조합)당 15분 창 30회, 사용자 전역 100쿼리 예산, 필터 값 종류 키당 10개 한도. 예산 초과 시 억제된다. 기술통계 + 필터 조합의 교차질의 차감 공격 방어는 범위 밖이며, 값/관계 기반 재설계는 별도 이니셔티브다.
 - **요청 한도**: `POST /analyze` 사용자당 분당 20회(초과 429), 서버 동시 요청 `STATS_MAX_CONCURRENT_ANALYZE_REQUESTS`(기본 4).
 - **제한 필드**: 이상치 원값·산점도 원시 점·관측치 진단값은 캐시된 결과에 저장하지 않고 **응답 시점에** `stats.export_limited_rows`를 확인한 뒤에만 부착한다(캐시 적중 응답도 동일). 권한 회수 즉시 노출이 사라진다.

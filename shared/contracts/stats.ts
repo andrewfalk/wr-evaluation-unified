@@ -598,12 +598,17 @@ export const AnalyzeHistogramBinSchema = z.object({
   lower: z.number(),
   upper: z.number(),
   count: z.number().int().nonnegative(),
+  // 끝 구간 병합 — 인원이 1~9명인 양 끝 구간을 안쪽 이웃 구간과 합친 bin이면 true
+  // (원래 균등분할 bin 2개 이상이 하나로 합쳐져 폭이 다름). 합쳐지지 않은 bin은
+  // 키 자체가 없다.
+  tailMerged: z.boolean().optional(),
 });
 export const AnalyzeHistogramSchema = z.object({
   bins: z.array(AnalyzeHistogramBinSchema),
-  // B안 — 원본(Python) bin보다 구간 수를 줄여 재분할했으면 true. 정확한 원본 bin
+  // B안 — 원본 bin보다 구간 수를 줄여 재분할했으면 true. 정확한 원본 bin
   // 개수는 일부러 넣지 않는다 — bin 개수 자체가 person_count 기반 공식과 조합되면
   // 지금 결과 어디에도 없는 presentPersonCount를 역산하는 실마리가 될 수 있다.
+  // 끝 구간 병합 여부는 이 필드가 아니라 bin별 tailMerged로 표시한다.
   merged: z.boolean().optional(),
 });
 
@@ -662,6 +667,13 @@ const AnalyzeContinuousRevealedSchema = z.object({
   // 해상도가 없던 경우에만 이 값이 채워진다(PreviewCountsSchema.reasonCode와
   // 동일한 네이밍 패턴).
   histogramReasonCode: z.enum(['INSUFFICIENT_DISCLOSABLE_RESOLUTION']).nullable().optional(),
+  // 원본 히스토그램(limited_row) — bin 단위 소수셀 게이트·재분할·끝 구간 병합을
+  // 전혀 거치지 않은 원본 균등분할 bin. outlierValues와 같은 방식(stats.
+  // export_limited_rows 권한 + 응답 감사 성공, 응답시점에만 부착, stats_runs.result
+  // 캐시에는 절대 저장 안 함)이지만 공개 조건은 다르다 — 변수 자체 공개(이
+  // suppressed:false 분기)만 요구하고 이상치 partition 게이트는 보지 않는다.
+  // merged/tailMerged는 원본이라 항상 없다.
+  rawHistogram: AnalyzeHistogramSchema.optional(),
   boxplot: AnalyzeBoxplotSchema.nullable().optional(),
 });
 export const AnalyzeContinuousResultSchema = z.discriminatedUnion('suppressed', [

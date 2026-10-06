@@ -1,6 +1,6 @@
 // PR3-B §9 — attachLimitedRowFields(응답시점 merge). 대상 필드는 boxplot
-// outlierValues(descriptive/그룹별)와 scatter 원시 points 2종뿐(상관행렬은 해당
-// 없음). hasAccess=false면 항상 no-op, 원본 객체를 mutate하지 않는지, gate가
+// outlierValues(descriptive/그룹별)·scatter 원시 points·descriptive rawHistogram
+// (끝 구간 병합 PR에서 추가)이다(상관행렬은 해당 없음). hasAccess=false면 항상 no-op, 원본 객체를 mutate하지 않는지, gate가
 // 실패한(outlierCount 없는) 변수는 건드리지 않는지를 검증한다.
 //
 // PR4-A2 — regression 분기(§4 "limited_row 진단값")도 이 파일에서 검증한다.
@@ -26,6 +26,9 @@ vi.mock('../statsEngine', async (importOriginal) => {
 beforeEach(() => { vi.clearAllMocks(); });
 
 import { attachLimitedRowFields } from '../statsLimitedRowMerge';
+import { buildOriginalHistogram } from '../statsChartDisclosure';
+import { computeDescriptiveSuppression } from '../statsDescriptiveSuppression';
+import type { StatsEngineRawResult } from '../statsEngine';
 
 function makeVariable(key: string, type: AnalyticsVariableMetadata['type'] = 'continuous'): AnalyticsVariableMetadata {
   return {
@@ -94,7 +97,9 @@ describe('attachLimitedRowFields — descriptive boxplot outlierValues', () => {
     expect(resultWithGatePassed).toEqual(before);
   });
 
-  it('outlierCount가 없는(gate 실패) 변수는 손대지 않는다', async () => {
+  it('outlierCount가 없는(gate 실패) 변수에는 outlierValues를 붙이지 않는다 — 원본 히스토그램은 별개 조건이라 그대로 붙는다', async () => {
+    // 끝 구간 병합 PR 이전엔 이 경우 attached:false(완전 no-op)였다. 이제 rawHistogram은
+    // 이상치 partition 게이트와 무관하게(변수 공개만으로) 붙으므로 attached는 true다.
     const gateFailedResult: AnalyzeResult = {
       continuous: [{
         ...resultWithGatePassed.continuous[0],
@@ -104,9 +109,11 @@ describe('attachLimitedRowFields — descriptive boxplot outlierValues', () => {
     } as AnalyzeResult;
     const ctx = baseCtx({ dataset: { ...baseCtx().dataset, rows } });
     const outcome = await attachLimitedRowFields(ctx, gateFailedResult, true);
-    expect(outcome.attached).toBe(false);
+    expect(outcome.attached).toBe(true);
     const c = outcome.result.continuous[0];
-    expect(c.suppressed ? undefined : c.boxplot && 'outlierValues' in c.boxplot).toBeFalsy();
+    if (c.suppressed) throw new Error('unexpected suppressed');
+    expect(c.boxplot && 'outlierValues' in c.boxplot).toBe(false);
+    expect(c.rawHistogram?.bins.reduce((s, b) => s + b.count, 0)).toBe(values.length);
   });
 
   // 코드리뷰로 발견(2026-09-11) — {...result, continuous, bivariate} 형태로 반환하면
@@ -132,6 +139,107 @@ describe('attachLimitedRowFields — descriptive boxplot outlierValues', () => {
     const ctx = baseCtx({ dataset: { ...baseCtx().dataset, rows } });
     const outcome = await attachLimitedRowFields(ctx, suppressedResult, true);
     expect(outcome.attached).toBe(false);
+    expect('rawHistogram' in outcome.result.continuous[0]).toBe(false);
+  });
+});
+
+// 끝 구간 병합 — 원본 히스토그램(rawHistogram, limited_row). 권한·감사·캐시 제외
+// 방식은 outlierValues와 같지만 공개 조건은 "변수 자체 공개"뿐이다(bin 소수셀·
+// 재분할·끝 병합·이상치 partition 게이트를 전혀 거치지 않음).
+describe('attachLimitedRowFields — descriptive rawHistogram', () => {
+  // 1~4번 bin에 소수 인원(2·1·1·1명)이 있는 원본 — aggregate였다면 억제·병합 대상.
+  const values = [...Array.from({ length: 40 }, () => 1), 30, 30, 55, 80, 100];
+  const rows = values.map((v, i) => datasetRow(i, 'v', v));
+  const result: AnalyzeResult = {
+    continuous: [{
+      variableKey: 'v', kind: 'continuous', suppressed: false,
+      n: values.length, missingCount: 0, missingPatterns: [],
+      mean: 7, sd: null, median: 1, q1: 1, q3: 1, iqr: 0,
+      skewness: null, kurtosis: null, min: 1, max: 100, nullReasons: {},
+      histogram: null, histogramReasonCode: 'INSUFFICIENT_DISCLOSABLE_RESOLUTION',
+      boxplot: { q1: 1, median: 1, q3: 1, lowerWhisker: 1, upperWhisker: 1 }, // outlierCount 없음
+    }],
+    discrete: [],
+  };
+
+  it('권한이 있으면 소수 인원 bin까지 그대로인 원본을 붙인다(merged/tailMerged 없음)', async () => {
+    const ctx = baseCtx({ dataset: { ...baseCtx().dataset, rows } });
+    const outcome = await attachLimitedRowFields(ctx, result, true);
+    expect(outcome.attached).toBe(true);
+    const c = outcome.result.continuous[0];
+    if (c.suppressed) throw new Error('unexpected suppressed');
+    expect(c.rawHistogram).toEqual({ bins: buildOriginalHistogram(rows, (r) => r.values.v!.value as number, 1, 1) });
+    expect(c.rawHistogram!.bins.some((b) => b.count > 0 && b.count < 10)).toBe(true); // 소수 bin이 실제로 있음(자가검증)
+    expect('merged' in c.rawHistogram!).toBe(false);
+    expect(c.rawHistogram!.bins.every((b) => !('tailMerged' in b))).toBe(true);
+    // aggregate 쪽 필드는 그대로(억제 사유 포함) — 원본은 별도 필드다.
+    expect(c.histogram).toBeNull();
+    expect(c.histogramReasonCode).toBe('INSUFFICIENT_DISCLOSABLE_RESOLUTION');
+  });
+
+  it('이상치 partition 게이트가 실패해 outlierValues는 억제돼도 원본 히스토그램은 붙는다', async () => {
+    const ctx = baseCtx({ dataset: { ...baseCtx().dataset, rows } });
+    const c = (await attachLimitedRowFields(ctx, result, true)).result.continuous[0];
+    if (c.suppressed) throw new Error('unexpected suppressed');
+    expect(c.boxplot && 'outlierValues' in c.boxplot).toBe(false);
+    expect(c.rawHistogram).toBeDefined();
+  });
+
+  it('권한이 없으면 붙이지 않는다(원본 참조 그대로)', async () => {
+    const ctx = baseCtx({ dataset: { ...baseCtx().dataset, rows } });
+    const outcome = await attachLimitedRowFields(ctx, result, false);
+    expect(outcome.attached).toBe(false);
+    expect(outcome.result).toBe(result);
+  });
+
+  it('입력 result 객체를 mutate하지 않는다', async () => {
+    const ctx = baseCtx({ dataset: { ...baseCtx().dataset, rows } });
+    const before = JSON.parse(JSON.stringify(result));
+    await attachLimitedRowFields(ctx, result, true);
+    expect(result).toEqual(before);
+    expect('rawHistogram' in result.continuous[0]).toBe(false);
+  });
+
+  it('q1/q3/median이 없으면(n=0 — 히스토그램 자체가 없는 변수) 붙이지 않는다', async () => {
+    const noQuantiles: AnalyzeResult = {
+      continuous: [{ ...result.continuous[0], q1: null, q3: null, median: null, histogram: null, histogramReasonCode: null, boxplot: null }],
+      discrete: [],
+    } as AnalyzeResult;
+    const ctx = baseCtx({ dataset: { ...baseCtx().dataset, rows } });
+    const outcome = await attachLimitedRowFields(ctx, noQuantiles, true);
+    expect(outcome.attached).toBe(false);
+    expect('rawHistogram' in outcome.result.continuous[0]).toBe(false);
+  });
+
+  it('결측 행은 원본 계산에서 빠진다(건수 합 = 유효값 행 수)', async () => {
+    const withMissing: DatasetRow[] = [
+      ...rows,
+      ...Array.from({ length: 7 }, (_v, i) => ({ caseId: `m${i}`, personClusterKey: `m${i}`, values: { v: { value: null, missing: 'not_entered' as const, qualityFlags: [] } } })),
+    ];
+    const ctx = baseCtx({ dataset: { ...baseCtx().dataset, rows: withMissing } });
+    const c = (await attachLimitedRowFields(ctx, result, true)).result.continuous[0];
+    if (c.suppressed) throw new Error('unexpected suppressed');
+    expect(c.rawHistogram!.bins.reduce((s, b) => s + b.count, 0)).toBe(values.length);
+  });
+
+  it('aggregate 경로와 같은 기준 구현을 쓴다 — 게이트를 그대로 통과하는 데이터면 원본과 aggregate bin이 정확히 같다', async () => {
+    const uniform = Array.from({ length: 100 }, (_v, i) => datasetRow(i, 'v', i));
+    const raw: StatsEngineRawResult = {
+      continuous: [{
+        variableKey: 'v', n: 100, mean: 49.5, sd: 29, median: 49.5, q1: 24.75, q3: 74.25, iqr: 49.5,
+        skewness: 0, kurtosis: 0, min: 0, max: 99, nullReasons: {},
+        histogram: null, // Node는 Python 히스토그램을 쓰지 않는다 — null이어도 결과는 같아야 한다.
+        boxplot: null,
+      }],
+      discrete: [],
+    };
+    const aggregate = computeDescriptiveSuppression(uniform, ['v'], new Map([['v', makeVariable('v')]]), raw);
+    const ctx = baseCtx({ dataset: { ...baseCtx().dataset, rows: uniform } });
+    const c = (await attachLimitedRowFields(ctx, aggregate, true)).result.continuous[0];
+    if (c.suppressed) throw new Error('unexpected suppressed');
+    expect(c.histogram?.merged).toBe(false);
+    expect(c.histogram!.bins.length).toBeGreaterThan(1);
+    expect(c.rawHistogram!.bins).toEqual(c.histogram!.bins);
   });
 });
 
