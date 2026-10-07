@@ -254,6 +254,40 @@ describe('computeDescriptiveSuppression — PR3-B 히스토그램/박스플롯 �
   });
 });
 
+// 비명목 동점 최빈값은 localeCompare가 아니라 코드유닛 순서다 — 서버 로케일·ICU에 따라 결과가
+// 달라지면 클라이언트가 원본 표시 때 다시 고르는 값(discreteLevels.js pickModeFromLevels, 같은
+// 반례로 테스트)과 어긋난다. ko-KR 로케일에서 localeCompare는 "가"<"A"이므로 이 PC에서도 옛 구현은 실패한다.
+describe('computeDescriptiveSuppression — 비순서형 동점 최빈값은 로케일 무관 코드유닛 순서', () => {
+  const key = 'job.identity.jobNameNormalized';
+  const catalogByKey = new Map([[key, meta(key, 'high_cardinality')]]);
+  const tieMode = (a: string, b: string) => {
+    const entries = [
+      ...Array.from({ length: 12 }, () => ({ value: a })),
+      ...Array.from({ length: 12 }, () => ({ value: b })),
+    ];
+    const raw: StatsEngineRawResult = {
+      continuous: [],
+      discrete: [{ variableKey: key, n: 24, levels: [{ level: a, count: 12 }, { level: b, count: 12 }] }],
+    };
+    const d = computeDescriptiveSuppression(rows(key, entries), [key], catalogByKey, raw).discrete[0];
+    if (d.suppressed) throw new Error('unexpected suppressed');
+    return d.mode;
+  };
+
+  it('"A" vs "가" 동점이면 "A"(코드유닛 65 < 44032) — 한국어 로케일의 localeCompare는 "가"를 고른다', () => {
+    expect(tieMode('A', '가')).toBe('A');
+    expect(tieMode('가', 'A')).toBe('A'); // 입력 순서와 무관
+  });
+
+  it('"a" vs "B" 동점이면 "B"(대문자 66 < 소문자 97) — localeCompare는 로케일과 무관하게 "a"를 고른다', () => {
+    expect(tieMode('a', 'B')).toBe('B');
+  });
+
+  it('같은 문자 체계 안에서는 사전순이다(가 < 나)', () => {
+    expect(tieMode('나', '가')).toBe('가');
+  });
+});
+
 describe('computeDescriptiveSuppression — mode·ordinal 순서(억제 안 됐을 때)', () => {
   it('elbow burdenGradeMax 동점이면 더 낮은(경한) 등급을 mode로 채택한다', () => {
     const key = 'elbow.assessment.burdenGradeMax';

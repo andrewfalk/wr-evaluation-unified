@@ -19,7 +19,9 @@ function sumProportion(list) {
 }
 
 // 원본(rawLevels)을 표시할 때의 최빈값 — 서버의 pickMode(statsDescriptiveSuppression.ts)와 같은
-// 규칙(가장 큰 건수, 동점이면 순서형은 더 낮은(경한) 등급, 그 외는 값 문자열 사전순)이다.
+// 규칙(가장 큰 건수, 동점이면 순서형은 더 낮은(경한) 등급, 그 외는 값 문자열의 코드유닛 순서)이다.
+// 문자열 비교에 localeCompare를 쓰지 않는다 — 브라우저 언어(ko/en)와 서버 로케일에 따라 동점
+// 선택이 갈려("A" vs "가") 서버 결과·CSV와 원본 화면이 어긋난다.
 // row.mode는 "기타"로 합쳐진 공개 범주 기준이라 원본과 다를 수 있다(예: 한 사람이 반복 기록해
 // 소수 범주의 건수가 공개 범주보다 큰 경우). 순서형 rawLevels는 서버가 이미 심각도 순으로
 // 정렬해 보내므로 동점이면 첫 항목이 가장 낮은 등급이다.
@@ -28,7 +30,11 @@ export function pickModeFromLevels(levels, isOrdinal) {
   const maxCount = Math.max(...levels.map((l) => l.count));
   const tied = levels.filter((l) => l.count === maxCount);
   if (tied.length === 1 || isOrdinal) return tied[0].level;
-  return [...tied].sort((a, b) => String(a.level).localeCompare(String(b.level)))[0].level;
+  return [...tied].sort((a, b) => {
+    const sa = String(a.level);
+    const sb = String(b.level);
+    return sa < sb ? -1 : sa > sb ? 1 : 0;
+  })[0].level;
 }
 
 /**

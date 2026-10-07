@@ -1,6 +1,6 @@
 // 범주형 "기타" 병합 표시용 가공(buildDiscreteDisplay) — 요약 탭 표와 분포 탭 차트가 같은
 // 선택값을 쓰는지, 상위 N개 자르기·합계 막대·원본 우선·중복 집계 방지를 확인한다.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildDiscreteDisplay, pickModeFromLevels, OTHER_LEVEL_LABEL, TOP_LEVELS_IN_CHART } from '../discreteLevels';
 
 const lv = (level, count, total = 100) => ({ level, count, proportion: count / total });
@@ -92,6 +92,25 @@ describe('buildDiscreteDisplay', () => {
     it('동점이면 명목형은 값 문자열 사전순 첫 값, 순서형은 서버가 정렬해 둔 첫(낮은) 등급이다(서버 pickMode와 같음)', () => {
       expect(pickModeFromLevels([lv('나', 10), lv('가', 10), lv('다', 5)], false)).toBe('가');
       expect(pickModeFromLevels([lv('경도', 10), lv('중등도', 10), lv('고도', 3)], true)).toBe('경도');
+    });
+
+    // 외부 리뷰 P3 — localeCompare는 브라우저 언어에 따라 동점 선택이 갈린다(ko: "가", en: "A").
+    // 서버 pickMode와 같은 코드유닛 순서이고, 서버 테스트(statsDescriptiveSuppression.test.ts)가 같은
+    // 반례로 고정한다. 이 PC는 ko-KR이라 localeCompare 구현은 여기서도 실패한다.
+    it('동점 비교는 로케일과 무관한 코드유닛 순서다 — "A" vs "가"는 "A", "a" vs "B"는 "B"(서버와 동일)', () => {
+      expect(pickModeFromLevels([lv('A', 10), lv('가', 10)], false)).toBe('A');
+      expect(pickModeFromLevels([lv('가', 10), lv('A', 10)], false)).toBe('A');
+      expect(pickModeFromLevels([lv('a', 10), lv('B', 10)], false)).toBe('B');
+    });
+
+    it('동점 비교에 localeCompare를 호출하지 않는다(브라우저 언어 의존 제거)', () => {
+      const spy = vi.spyOn(String.prototype, 'localeCompare');
+      try {
+        pickModeFromLevels([lv('A', 10), lv('가', 10), lv('b', 10)], false);
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     it('boolean 값이어도 그대로 돌려주고, 비어 있으면 null이다', () => {

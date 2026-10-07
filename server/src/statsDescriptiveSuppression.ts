@@ -36,6 +36,11 @@ export function distinctPersons(rows: DatasetRow[]): number {
 
 // §4.2 — mode 동점 처리: ordinal은 심각도 순서에서 더 낮은(경한) 레벨, 그 외는 값의
 // 문자열 표현 오름차순(boolean은 false<true) — 결정성 고정.
+// 비교는 localeCompare가 아니라 코드유닛 기준 `<`/`>`이다 — localeCompare는 서버 로케일·ICU
+// 버전에 따라 결과가 달라지고(예: ko-KR에서는 "가"<"A", en-US에서는 "A"<"가"), 같은 값을
+// 클라이언트(src/core/components/charts/discreteLevels.js pickModeFromLevels)가 원본 표시 때
+// 다시 고를 때 브라우저 언어와도 어긋난다. statsBivariateRoles.ts sortDeterministic과 같은
+// 원칙이며, 두 구현이 같은 규칙인지는 양쪽 테스트가 같은 반례("a" vs "B", "A" vs "가")로 고정한다.
 function pickMode(levels: AnalyzeDiscreteLevel[], variableKey: string): string | boolean | null {
   if (levels.length === 0) return null;
   const maxCount = Math.max(...levels.map((l) => l.count));
@@ -45,7 +50,9 @@ function pickMode(levels: AnalyzeDiscreteLevel[], variableKey: string): string |
   const order = getOrdinalOrder(variableKey);
   const sorted = [...tied].sort((a, b) => {
     if (order) return order.indexOf(String(a.level)) - order.indexOf(String(b.level));
-    return String(a.level).localeCompare(String(b.level));
+    const sa = String(a.level);
+    const sb = String(b.level);
+    return sa < sb ? -1 : sa > sb ? 1 : 0;
   });
   return sorted[0].level;
 }
