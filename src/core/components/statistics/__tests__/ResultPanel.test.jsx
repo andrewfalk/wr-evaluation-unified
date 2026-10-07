@@ -35,6 +35,95 @@ async function openAssociationTab(user) {
   await user.click(screen.getByRole('button', { name: '연관성' }));
 }
 
+// 범주형 소수 범주 "기타" 병합 — 요약·분포 탭이 other/rawLevels를 어떻게 보여주는지.
+describe('ResultPanel — 범주형 "기타" 병합·권한자 원본(rawLevels)', () => {
+  const jobCatalog = {
+    variables: [
+      { key: 'job', label: '대표 직종명', type: 'high_cardinality' },
+      { key: 'grade', label: '부담작업등급', type: 'ordinal' },
+      { key: 'len', label: '근속기간', type: 'continuous' },
+    ],
+  };
+  const lv = (level, count, total = 76) => ({ level, count, proportion: count / total });
+  const publicRow = {
+    variableKey: 'job', kind: 'discrete', suppressed: false, n: 76, missingCount: 0, missingPatterns: [],
+    levels: [lv('용접공', 40), lv('목수', 20)], other: { count: 16, proportion: 16 / 76 }, mode: '용접공',
+  };
+
+  function renderPanel(row, { recipe = { analysisMode: 'descriptive', variableKeys: ['job'] }, catalog = jobCatalog } = {}) {
+    render(
+      <ResultPanel
+        catalog={catalog} committedRecipe={recipe}
+        committedResult={{ runManifest: baseRunManifest(), result: { continuous: [], discrete: [row] } }}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported={false}
+      />,
+    );
+  }
+
+  it('요약 탭: other가 있으면 표에 "기타 (10명 미만 범주 합계)" 줄과 안내 문구가 뜬다', () => {
+    renderPanel(publicRow);
+    expect(screen.getByText('기타 (10명 미만 범주 합계)')).toBeTruthy();
+    expect(screen.getByText("인원이 10명 미만인 범주는 '기타'로 합쳐 표시했습니다.")).toBeTruthy();
+    const rows = [...document.querySelectorAll('tbody tr')];
+    expect(rows.reduce((s, tr) => s + Number(tr.children[1].textContent), 0)).toBe(76);
+  });
+
+  it('분포 탭: 차트에 합계 막대(점선)가 그려지고 "데이터 보기" 표에는 기타 줄이 있다', async () => {
+    const user = userEvent.setup();
+    renderPanel(publicRow);
+    await user.click(screen.getByRole('button', { name: '분포' }));
+    expect(document.querySelectorAll('rect.chart-bar-merged')).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: '데이터 보기' }));
+    expect(screen.getAllByText('기타 (10명 미만 범주 합계)').length).toBeGreaterThan(0);
+  });
+
+  it('rawLevels가 있으면 원본을 표시하고(중복 집계 없이 합 = n) 권한 안내가 뜨며 기타 안내는 없다', () => {
+    const raw = [lv('용접공', 40), lv('목수', 20), lv('간호사', 12), lv('잠수부', 1), lv('조종사', 3)];
+    renderPanel({ ...publicRow, rawLevels: raw });
+    expect(screen.getByText('잠수부')).toBeTruthy();
+    expect(screen.getByText('제한 데이터 권한으로 소수 인원 범주까지 표시합니다. 화면을 외부에 공유할 때 주의하세요.')).toBeTruthy();
+    expect(screen.queryByText(/합쳐 표시했습니다/)).toBeFalsy();
+    expect(screen.queryByText('기타 (10명 미만 범주 합계)')).toBeFalsy();
+    const rows = [...document.querySelectorAll('tbody tr')];
+    expect(rows.reduce((s, tr) => s + Number(tr.children[1].textContent), 0)).toBe(76);
+  });
+
+  it('억제된 변수도 rawLevels가 있으면 원본을 보여준다(공개 정책 문구 대신)', () => {
+    renderPanel({ variableKey: 'job', kind: 'discrete', suppressed: true, rawLevels: [lv('용접공', 40), lv('잠수부', 1)] });
+    expect(screen.queryByText('공개 정책에 따라 표시되지 않음')).toBeFalsy();
+    expect(screen.getByText('잠수부')).toBeTruthy();
+    expect(screen.getByText(/n=41/)).toBeTruthy();
+  });
+
+  it('변수가 2개 이상인 실행에서 범주형이 억제되면 단독 분석 안내가 뜬다', () => {
+    renderPanel(
+      { variableKey: 'job', kind: 'discrete', suppressed: true },
+      { recipe: { analysisMode: 'descriptive', variableKeys: ['job', 'len'] } },
+    );
+    expect(screen.getByText('공개 정책에 따라 표시되지 않음')).toBeTruthy();
+    expect(screen.getByText(/범주형 변수 하나만 분석하면 10명 미만 범주를 '기타'로 합쳐 볼 수 있는 경우가 있습니다/)).toBeTruthy();
+  });
+
+  it('변수가 1개이거나 순서형이면 단독 분석 안내가 없다', () => {
+    renderPanel({ variableKey: 'job', kind: 'discrete', suppressed: true });
+    expect(screen.queryByText(/하나만 분석하면/)).toBeFalsy();
+    cleanup();
+    renderPanel(
+      { variableKey: 'grade', kind: 'discrete', suppressed: true },
+      { recipe: { analysisMode: 'descriptive', variableKeys: ['grade', 'len'] } },
+    );
+    expect(screen.queryByText(/하나만 분석하면/)).toBeFalsy();
+  });
+
+  it('구버전 결과(other·rawLevels 없음)는 기존과 똑같이 렌더된다', () => {
+    const { other, ...legacy } = publicRow;
+    renderPanel({ ...legacy, levels: [lv('용접공', 40, 60), lv('목수', 20, 60)], n: 60 });
+    expect(screen.queryByText(/기타/)).toBeFalsy();
+    expect(document.querySelectorAll('tbody tr')).toHaveLength(2);
+  });
+});
+
 describe('ResultPanel — 이변량 결과 카드 방향성 표시(η²/ε² vs 부호 있는 효과크기)', () => {
   it('welch_t(2그룹, 부호 있는 효과크기)는 역할·방향 설명을 보여준다', async () => {
     const user = userEvent.setup();

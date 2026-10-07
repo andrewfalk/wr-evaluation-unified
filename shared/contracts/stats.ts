@@ -681,15 +681,22 @@ export const AnalyzeContinuousResultSchema = z.discriminatedUnion('suppressed', 
   AnalyzeContinuousRevealedSchema,
 ]);
 
-const AnalyzeDiscreteSuppressedSchema = z.object({
-  variableKey: z.string(),
-  kind: z.literal('discrete'),
-  suppressed: z.literal(true),
-});
 export const AnalyzeDiscreteLevelSchema = z.object({
   level: z.union([z.string(), z.boolean()]),
   count: z.number().int().nonnegative(),
   proportion: z.number(),
+});
+// 원본 범주 빈도(limited_row) — 범주별 소수셀 게이트·"기타" 병합을 전혀 거치지 않은
+// 원본. stats.export_limited_rows 권한 + 응답 감사 성공이 있을 때만 응답시점에
+// 부착되고(stats_runs.result 캐시에는 절대 저장 안 함), 변수 자체 공개 조건(유효값·
+// 결측 고유 인원)만 요구하므로 변수가 suppressed:true여도 붙을 수 있다. 연속형
+// rawHistogram과 같은 방식이다.
+const AnalyzeDiscreteRawLevelsField = z.array(AnalyzeDiscreteLevelSchema).optional();
+const AnalyzeDiscreteSuppressedSchema = z.object({
+  variableKey: z.string(),
+  kind: z.literal('discrete'),
+  suppressed: z.literal(true),
+  rawLevels: AnalyzeDiscreteRawLevelsField,
 });
 const AnalyzeDiscreteRevealedSchema = z.object({
   variableKey: z.string(),
@@ -699,7 +706,16 @@ const AnalyzeDiscreteRevealedSchema = z.object({
   missingCount: z.number().int().nonnegative(),
   missingPatterns: z.array(AnalyzeMissingPatternEntrySchema).nullable(),
   levels: z.array(AnalyzeDiscreteLevelSchema),
+  // 소수 범주(1~9명) "기타" 병합분 — 10명 미만 범주들을 합친 값. levels에 가짜 "기타"
+  // 레벨로 넣지 않는 이유는 실제 범주 값 "기타"와 구분하기 위해서다. 몇 개 범주가
+  // 합쳐졌는지는 일부러 내지 않는다(Table1의 mergedLevels 비공개와 같은 원칙).
+  // 그 범주형 변수 하나만 요청했을 때만 생긴다(statsDescriptiveSuppression.ts).
+  other: z.object({
+    count: z.number().int().nonnegative(),
+    proportion: z.number(),
+  }).optional(),
   mode: z.union([z.string(), z.boolean()]).nullable(),
+  rawLevels: AnalyzeDiscreteRawLevelsField,
 });
 export const AnalyzeDiscreteResultSchema = z.discriminatedUnion('suppressed', [
   AnalyzeDiscreteSuppressedSchema,

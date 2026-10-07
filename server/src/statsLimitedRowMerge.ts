@@ -13,6 +13,7 @@ import type { AnalysisContext } from './statsAnalysisContext';
 import type { DatasetRow } from './statsDatasetBuilder';
 import type { PairedRow } from './statsBivariateDataset';
 import { buildOriginalHistogram, computeOutlierValues } from './statsChartDisclosure';
+import { computeRawDiscreteLevels } from './statsDescriptiveSuppression';
 import { sampleScatterPoints, sampleRegressionDiagnosticsRowIndices } from './statsScatterGrid';
 import { resolveGroupComparisonGroups } from './statsBivariateSuppression';
 import { runRegressionDiagnosticsEngine, StatsEngineBusyError } from './statsEngine';
@@ -157,10 +158,26 @@ export async function attachLimitedRowFields(
   let attached = false;
 
   let continuous = result.continuous;
+  let discrete = result.discrete;
   let bivariate = result.bivariate;
   let regression = result.regression;
 
   if (hasAccess) {
+    // 원본 범주 빈도(rawLevels) — 변수 수준 게이트(유효값·결측 고유 인원이 0명이거나 ≥10명)만
+    // 통과하면 공개 판정에서 억제된 변수(소수 범주가 있는 직종명 등)에도 붙는다. 연속형
+    // rawHistogram과 같은 원칙이며 기존 limited_row 필드(outlierValues)와 독립이다.
+    // 하나도 안 붙으면 원본 배열 참조를 그대로 둔다(아래 "아무것도 안 바뀌었으면 원본 참조
+    // 반환" 보장이 map의 새 배열 때문에 깨지지 않게).
+    let discreteChanged = false;
+    const withRawLevels = result.discrete.map((d) => {
+      const rawLevels = computeRawDiscreteLevels(ctx.dataset.rows, d.variableKey);
+      if (!rawLevels) return d;
+      discreteChanged = true;
+      attached = true;
+      return { ...d, rawLevels };
+    });
+    if (discreteChanged) discrete = withRawLevels;
+
     continuous = result.continuous.map((c) => {
       if (c.suppressed) return c;
       const valueOf = datasetValueOf(ctx.dataset.rows, c.variableKey);
@@ -248,7 +265,7 @@ export async function attachLimitedRowFields(
   // 더 이상 안 지켜진다(regression이 없는 요청은 이 분기 자체가 안 도니 continuous/
   // bivariate/regression 셋 다 원본과 참조가 같다 — 그 경우엔 새 객체를 만들지
   // 않는다).
-  if (continuous === result.continuous && bivariate === result.bivariate && regression === result.regression) {
+  if (continuous === result.continuous && discrete === result.discrete && bivariate === result.bivariate && regression === result.regression) {
     return { result, attached };
   }
 
@@ -262,7 +279,7 @@ export async function attachLimitedRowFields(
   // 가진 요청은 지금까지 전부 500이었을 것(HTTP 레벨에서 이 조합을 테스트한 적이
   // 없어 발견되지 못했던 잠재 결함). 원래 없던 필드는 아예 키 자체를 만들지 않는다.
   // PR4-A2 — regression도 같은 함정이 있어 동일하게 조건부 스프레드한다.
-  const patched: AnalyzeResult = { ...result, continuous };
+  const patched: AnalyzeResult = { ...result, continuous, discrete };
   if (bivariate !== undefined) patched.bivariate = bivariate;
   if (regression !== undefined) patched.regression = regression;
   return { result: patched, attached };

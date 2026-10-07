@@ -52,6 +52,9 @@ function csvString(value: string | boolean | null): string {
   return escapeCsvString(String(value));
 }
 
+// 소수 범주 "기타" 병합 줄의 레벨 칸 — 실제 범주 값과 겹치지 않도록 대괄호로 구분한다.
+const OTHER_LEVEL_CSV_LABEL = '[10명 미만 범주 합계]';
+
 function missingPatternsCell(value: AnalyzeMissingPatternEntry[] | null): string {
   if (value === null) return escapeCsvString('(비공개)'); // §8 — null(억제)과 []([]  0건)을 다른 표기로 구분
   if (value.length === 0) return escapeCsvString('(없음)');
@@ -116,6 +119,16 @@ function buildCsv(manifest: RunManifest, result: AnalyzeResult): string {
         csvNumber(row.n), csvNumber(row.missingCount), missingPatternsCell(row.missingPatterns),
         '', '', '', '', '', '', '', '', '', '',
         csvString(level.level), String(level.count), String(level.proportion), csvString(row.mode),
+      ].join(','));
+    }
+    // 소수 범주 "기타" 병합분 — 대괄호로 감싸 실제 범주 값 "기타"와 겹치지 않게 한다.
+    // rawLevels(권한자 원본)는 저장된 aggregate result에 원래 없으므로 내보내지 않는다.
+    if (row.other) {
+      lines.push([
+        'discrete', csvString(row.variableKey), 'false',
+        csvNumber(row.n), csvNumber(row.missingCount), missingPatternsCell(row.missingPatterns),
+        '', '', '', '', '', '', '', '', '', '',
+        csvString(OTHER_LEVEL_CSV_LABEL), String(row.other.count), String(row.other.proportion), csvString(row.mode),
       ].join(','));
     }
   }

@@ -419,6 +419,8 @@
 }
 
 .swb-suppressed-note { color: var(--swb-ink-muted); font-style: italic; }
+/* 범주형 "기타"(10명 미만 범주 합계) 줄 — 실제 범주와 구분되도록 옅게. */
+.swb-table tr.swb-row-merged td { color: var(--swb-ink-muted); font-style: italic; }
 
 /* [코드리뷰 2026-09-12 2차] 이변량 결과 카드의 변수 식별 줄(그룹/결과변수,
    행/열, x/y) — 억제·경고가 아니라 사실 정보라 italic 아닌 별도 톤. */

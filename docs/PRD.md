@@ -1506,7 +1506,7 @@ v5.0.0 인트라넷 백엔드 도입 후 실제 운영에서 드러난 권한 �
 | `stats.view` | true | – | – | 카탈로그·preview·화면 열람 |
 | `stats.regression` | true | – | – | 분석 실행·폴링·취소(모든 분석 모드 공통 게이트) |
 | `stats.export_results` | true | – | – | 저장된 집계 결과 CSV |
-| `stats.export_limited_rows` | false | – | – | **응답 시점**에 제한 행데이터 필드 부착: 이상치 원값(`boxplot.outlierValues`), 산점도 원시 점(`scatter.points`), 회귀 관측치 진단값(`pointDiagnostics`), 원본 히스토그램(`rawHistogram` — bin 소수셀 게이트 없음, 변수 공개 조건만). 관리자 콘솔 표시명 "제한 데이터 열람(원본 값·원본 히스토그램)"(마이그레이션 0034) |
+| `stats.export_limited_rows` | false | – | – | **응답 시점**에 제한 행데이터 필드 부착: 이상치 원값(`boxplot.outlierValues`), 산점도 원시 점(`scatter.points`), 회귀 관측치 진단값(`pointDiagnostics`), 원본 히스토그램(`rawHistogram` — bin 소수셀 게이트 없음, 변수 공개 조건만), 원본 범주 빈도(`rawLevels` — 범주별 게이트·"기타" 병합 없음, 변수 수준 조건만, 억제된 변수에도 부착). 관리자 콘솔 표시명 "제한 데이터 열람(원본 값·원본 분포)"(마이그레이션 0034→0035) |
 | `stats.export_phi` | false | true | true | 예약 — 행 단위·PHI export는 미구현이라 노출 경로 없음 |
 
 - 기본 허용 3종은 조직 소속 인증 사용자 전원이 **grant 없이** 사용한다. 기본 허용 권한은 grant를 회수해도 차단되지 않는다.
@@ -1534,7 +1534,7 @@ v5.0.0 인트라넷 백엔드 도입 후 실제 운영에서 드러난 권한 �
 
 | 모드 | 방법·내용 | grain/제약 | CSV |
 |---|---|---|---|
-| 기술통계 | 연속형: n·평균·SD·중앙값·Q1/Q3·IQR·최소/최대·왜도·첨도·히스토그램·박스플롯, 범주형 빈도, 결측 사유 분포(not_entered/not_assessed/not_applicable/structural_missing). **Table 1 층화**(`descriptive.stratifyByKey`): 담당의별/범주형 변수별, 층화 변수는 `variableKeys`에 넣을 수 없음, 소수 인원 그룹은 "기타"로 병합, **그룹 하나라도 억제되면 total도 새 객체로 교체**(그룹·total 차감 방지), 담당의는 UUID가 아니라 표시명으로 치환 | case/job/disease | 지원 |
+| 기술통계 | 연속형: n·평균·SD·중앙값·Q1/Q3·IQR·최소/최대·왜도·첨도·히스토그램·박스플롯, 범주형 빈도(비순서형 범주형을 단독 요청하면 10명 미만 범주를 "기타" 하나로 합쳐 공개 — 아래 공개통제 참고), 결측 사유 분포(not_entered/not_assessed/not_applicable/structural_missing). **Table 1 층화**(`descriptive.stratifyByKey`): 담당의별/범주형 변수별, 층화 변수는 `variableKeys`에 넣을 수 없음, 소수 인원 그룹은 "기타"로 병합, **그룹 하나라도 억제되면 total도 새 객체로 교체**(그룹·total 차감 방지), 담당의는 UUID가 아니라 표시명으로 치환 | case/job/disease | 지원 |
 | 이변량 | 실행 8종: `welch_t` · `mann_whitney` · `anova` · `kruskal_wallis` · `chi_square` · `fisher_exact` · `pearson_correlation` · `spearman_correlation`. `paired_t`·`wilcoxon_signed_rank`는 방법 카탈로그에 정의돼 있으나 **현재 실행 불가**(`PAIRED_TEST_REQUIRES_EXPLICIT_PAIRING`) | **반복측정 게이트**: `personCount == rowCount`가 아니면 독립표본 방법을 `REPEATED_MEASURES_NOT_ALIGNED`로 불가 처리. 기타 사유: 변수 타입 불일치·표본 부족·그룹 수·2×2 아님·기대도수 부족(chi_square→fisher_exact 전환 제안) | 미지원(`BIVARIATE_EXPORT_NOT_SUPPORTED`) |
 | 상관행렬 | 변수 C(k,2)쌍 Pearson/Spearman 일괄 + Benjamini–Hochberg FDR, 히트맵 | 변수 3개 이상 | 미지원(`CORRELATION_MATRIX_EXPORT_NOT_SUPPORTED`) |
 | 회귀 | `ols_linear`(연속 outcome) · `binary_logistic`(boolean/2레벨 categorical outcome). 표준오차: person 중복이 없으면 HC3, 있으면 person-cluster CR1. 추정 3단 `ok`/`inference_withheld`/`non_estimable`(사유: 완전 행 부족·수준/파라미터 과다·파라미터당 사건 부족·상수 outcome·분산 0 predictor·rank 부족·`SEPARATION_DETECTED`·미수렴 등). 진단 플롯 4종(잔차·Q-Q·leverage·Cook's D)·VIF·condition number, 자연 3차 spline 부분효과, interaction, predictor 표준화 | 설계행렬 게이트(기준 레벨 3단 해석, EPV 분자는 사건 person 수) | 지원(계수·적합도·VIF·spline 곡선점; 관측치 진단값 제외) |
@@ -1546,6 +1546,13 @@ v5.0.0 인트라넷 백엔드 도입 후 실제 운영에서 드러난 권한 �
 
 - **소수 셀 억제**: 최소 코호트 10명(person 단위) 미만 셀은 억제하며 부분 억제를 하지 않는다(하나라도 소수 셀이면 해당 결과 전체 생략). boolean은 결측률과 사건/비사건 분할을 연결해 억제한다.
 - **히스토그램**: 원본 bin은 Node `buildOriginalHistogram`이 유일한 기준 구현이다(numpy `histogram`과 같은 공식·linspace 경계 연산 순서, 픽스처로 대조 고정). 해상도마다 "그대로 → 양 끝 소수셀 bin을 안쪽 이웃과 병합(person 합집합, 가운데 소수셀이 남거나 3구간 미만이면 실패)" 순으로 시도하고, 실패하면 lo~hi 균등 재분할(경계 배열 이진탐색)로 줄여가며(적응형 해상도, 하한값은 사다리에 항상 포함) 공개 가능한 가장 세밀한 것을 찾는다. 병합 bin은 `tailMerged`로 표시하고 화면에서 옅은 면·점선으로 구분한다. `stats.export_limited_rows` 권한자는 게이트를 거치지 않은 원본(`rawHistogram`)을 응답 시점에 받는다.
+- **범주형 소수 범주 "기타" 병합**: 범주 중 1~9명이 있으면 지금까지는 변수 전체를 억제했다(부분 억제 금지 — n·결측이 공개되어 빼기로 역산되므로). 다음을 모두 만족할 때만 소수 범주를 "기타" 하나(`other`)로 합쳐 공개한다.
+  - 일반 기술통계 경로(`mergeSmallLevels` 옵션 — Table1 층화·이변량은 제외)
+  - ordinal이 아님(등급 순서 보존)
+  - **요청 변수가 그 범주형 하나뿐** — 다른 변수가 값이나 결측 분할로 "기타" 안을 쪼개 보여 주면 한 응답만으로 역산된다(상병 코드+부위군, `mddmStatus`+`lifetimeDoseMNh` 반례). 변수 사이 종속은 모듈마다 달라 변수 개수로 구조적으로 막는다.
+  - 결측 인원이 1~9명이 아님
+  
+  "기타"의 인원은 person 합집합으로 세고, 1~9명이면 남은 범주 중 고유 인원이 가장 적은 것부터 끌어와 10명 이상으로 채운다. 이름 붙은 범주가 2개 미만이 되면 억제한다(boolean 96/4 등). 최빈값은 "기타"를 제외한다. 권한자는 원본 범주 빈도(`rawLevels`)를 응답 시점에 받는다(변수 수준 게이트만 — 억제된 변수에도 부착, 캐시 미저장, 감사 기록). **알려진 잔여 위험**: 같은 변수를 필터를 바꿔 여러 번 조회해 빼는 차분은 조회 횟수 제한(15분 family 30회·사용자 100회)으로만 완화된다 — 이 병합은 새 공격 수단을 만들지 않지만 공개되는 변수가 늘어 적용 범위를 넓힌다(사용자가 환자 기록을 열람할 수 있는 의사로 한정된다는 전제로 수용, 근본 방어는 별도 설계 과제).
 - **차분(differencing) 방지**: family(변수 조합)당 15분 창 30회, 사용자 전역 100쿼리 예산, 필터 값 종류 키당 10개 한도. 예산 초과 시 억제된다. 기술통계 + 필터 조합의 교차질의 차감 공격 방어는 범위 밖이며, 값/관계 기반 재설계는 별도 이니셔티브다.
 - **요청 한도**: `POST /analyze` 사용자당 분당 20회(초과 429), 서버 동시 요청 `STATS_MAX_CONCURRENT_ANALYZE_REQUESTS`(기본 4).
 - **제한 필드**: 이상치 원값·산점도 원시 점·관측치 진단값은 캐시된 결과에 저장하지 않고 **응답 시점에** `stats.export_limited_rows`를 확인한 뒤에만 부착한다(캐시 적중 응답도 동일). 권한 회수 즉시 노출이 사라진다.

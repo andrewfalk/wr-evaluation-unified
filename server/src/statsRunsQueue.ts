@@ -376,7 +376,9 @@ async function runEngineFor(ctx: AnalysisContext, opts: EngineRunOpts): Promise<
   }
   const request = buildStatsEngineRequest(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey);
   const raw = await runStatsEngine(request, opts);
-  return computeDescriptiveSuppression(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey, raw);
+  // 소수 범주 "기타" 병합은 이 일반 기술통계 경로에서만 켠다 — Table1 층화(위 분기)는
+  // 그룹·전체 차감 역산을 따로 검토해야 해서 옵션 없이(all-or-nothing) 유지한다.
+  return computeDescriptiveSuppression(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey, raw, { mergeSmallLevels: true });
 }
 
 // ---------------------------------------------------------------------------

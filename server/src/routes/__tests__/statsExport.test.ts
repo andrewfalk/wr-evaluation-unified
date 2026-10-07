@@ -503,6 +503,57 @@ describe('POST /export — 성공 경로 + CSV 포맷', () => {
     expect(res.text).toContain("'=1+1");
     expect(res.text).not.toMatch(/[^']=1\+1/); // escape 안 된 원문 "=1+1"이 단독으로 남아있지 않아야 함
   });
+
+  // 범주형 소수 범주 "기타" 병합 — other가 있으면 범주 줄 다음에 대괄호 라벨 한 줄이 붙는다.
+  // rawLevels(권한자 원본)는 저장된 aggregate result에 원래 없지만, 혹시 섞여 들어와도
+  // CSV로 새면 안 된다.
+  it('other가 있으면 "[10명 미만 범주 합계]" 줄이 추가되고, rawLevels는 CSV에 나오지 않는다', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    wireRunRow(pool, {
+      manifest: baseManifest(),
+      result: baseResult({
+        discrete: [{
+          variableKey: 'job', kind: 'discrete', suppressed: false,
+          n: 76, missingCount: 0, missingPatterns: [],
+          levels: [{ level: '용접공', count: 40, proportion: 40 / 76 }, { level: '간호사', count: 20, proportion: 20 / 76 }],
+          other: { count: 16, proportion: 16 / 76 },
+          mode: '용접공',
+          rawLevels: [{ level: '잠수부', count: 1, proportion: 1 / 76 }],
+        }],
+      }),
+      status: 'succeeded', requested_disclosure_profile: 'aggregate',
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+    });
+    const res = await postExport(pool);
+    expect(res.status).toBe(200);
+    const dataLines = res.text.split('\r\n').filter((l) => l.startsWith('discrete,'));
+    expect(dataLines).toHaveLength(3); // 범주 2줄 + 기타 1줄
+    expect(dataLines[2]).toContain('[10명 미만 범주 합계]');
+    expect(dataLines[2]).toContain(',16,');
+    expect(res.text).not.toContain('잠수부');
+  });
+
+  it('other가 없으면 기존과 같은 줄 수다(기타 줄 없음)', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    wireRunRow(pool, {
+      manifest: baseManifest(),
+      result: baseResult({
+        discrete: [{
+          variableKey: 'sex', kind: 'discrete', suppressed: false,
+          n: 30, missingCount: 0, missingPatterns: [],
+          levels: [{ level: 'M', count: 20, proportion: 20 / 30 }, { level: 'F', count: 10, proportion: 10 / 30 }],
+          mode: 'M',
+        }],
+      }),
+      status: 'succeeded', requested_disclosure_profile: 'aggregate',
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+    });
+    const res = await postExport(pool);
+    expect(res.text.split('\r\n').filter((l) => l.startsWith('discrete,'))).toHaveLength(2);
+    expect(res.text).not.toContain('10명 미만');
+  });
 });
 
 // Table1 스트라티피케이션 — manifest.analysisMode가 descriptive/descriptiveStratified
