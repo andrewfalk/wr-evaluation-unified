@@ -1,7 +1,8 @@
 import { ChartContainer, CHART_VIEW_WIDTH } from './ChartContainer';
 import { createLinearScale, computeNiceTicks } from './scales';
 import { ACCENT } from './palette';
-import { formatInt, formatNumber } from './numberFormat';
+import { formatInt, formatNumber, makeEdgeFormatter } from './numberFormat';
+import { chooseEdgeLabels } from './edgeLabels';
 import { DataTableView } from './DataTableView';
 import { SuppressionNotice } from './SuppressionNotice';
 import { ChartTooltip, chooseTooltipPlacement } from './ChartTooltip';
@@ -12,9 +13,12 @@ const MARGIN = { top: 12, right: 16, bottom: 26, left: 56 };
 
 const TAIL_MERGED_NOTE = '인원이 적은 양 끝 구간은 인접 구간과 합쳐 표시했습니다(구간 폭이 다름).';
 const RAW_HISTOGRAM_NOTE = '제한 데이터 권한으로 소수 인원 구간까지 표시합니다. 화면을 외부에 공유할 때 주의하세요.';
+const RAW_BOUNDARY_NOTE = '구간 경계는 보기 좋은 값으로 맞춘 것이라 공개용 히스토그램과 다를 수 있습니다.';
 
-function binLabel(b) {
-  const range = `${formatNumber(b.lower)} ~ ${formatNumber(b.upper)}`;
+// fmt는 경계 값을 문자열로 바꾸는 함수다. 원본(rawHistogram)은 경계 폭에 맞춘 단일 포매터를 축·툴팁·표가
+// 함께 쓰고(makeEdgeFormatter), 공개용은 기존 formatNumber다.
+function binLabel(b, fmt) {
+  const range = `${fmt(b.lower)} ~ ${fmt(b.upper)}`;
   const merged = b.tailMerged ? ` (병합 구간, 폭 ${formatNumber(b.upper - b.lower)})` : '';
   return `${range}${merged}: ${b.count}건`;
 }
@@ -57,11 +61,26 @@ export function Histogram({ histogram, rawHistogram, histogramReasonCode }) {
   // 없어서, 구간 경계를 마우스오버 툴팁 없이는 전혀 읽을 수 없었다. 단일값(bin이
   // 하나뿐이고 lower===upper)은 실제 도메인이 [0,1] placeholder라 계산눈금이 의미
   // 없으므로, 그 실제 값 하나만 중앙에 표시한다.
-  const xTicks = isSingleConstant
-    ? [{ pos: innerWidth / 2, label: formatNumber(bins[0].lower) }]
-    : computeNiceTicks(bins[0].lower, bins[bins.length - 1].upper, 5)
-        .filter((t) => t >= bins[0].lower && t <= bins[bins.length - 1].upper)
-        .map((t) => ({ pos: xScale(t), label: formatNumber(t) }));
+  //
+  // 원본(rawHistogram)은 눈금을 따로 계산하지 않고 막대 경계에 둔다(서버가 경계를 보기 좋은 값에
+  // 정렬해 막대와 눈금이 일치). 라벨은 개수가 아니라 각 라벨의 좌우 범위로 솎고(chooseEdgeLabels),
+  // 위치는 막대를 그리는 것과 같은 xScale(edge)를 쓴다.
+  const edges = isRaw ? [...bins.map((b) => b.lower), bins[bins.length - 1].upper] : null;
+  const fmt = isRaw ? makeEdgeFormatter(edges) : formatNumber;
+  let xTicks;
+  if (isSingleConstant) {
+    xTicks = [{ pos: innerWidth / 2, label: fmt(bins[0].lower), anchor: 'middle' }];
+  } else if (isRaw) {
+    const positions = edges.map((e) => xScale(e));
+    const labels = edges.map((e) => fmt(e));
+    xTicks = chooseEdgeLabels({
+      positions, labels, innerWidth, marginLeft: MARGIN.left, marginRight: MARGIN.right,
+    }).map(({ index, anchor }) => ({ pos: positions[index], label: labels[index], anchor }));
+  } else {
+    xTicks = computeNiceTicks(bins[0].lower, bins[bins.length - 1].upper, 5)
+      .filter((t) => t >= bins[0].lower && t <= bins[bins.length - 1].upper)
+      .map((t) => ({ pos: xScale(t), label: formatNumber(t), anchor: 'middle' }));
+  }
 
   const chart = (
     <ChartContainer height={HEIGHT} ariaLabel="히스토그램">
@@ -86,7 +105,7 @@ export function Histogram({ histogram, rawHistogram, histogramReasonCode }) {
           const x1 = isSingleConstant ? innerWidth : xScale(b.upper);
           const barWidth = Math.max(x1 - x0 - 1, 1);
           const barHeight = Math.max(innerHeight - yScale(b.count), 0);
-          const label = binLabel(b);
+          const label = binLabel(b, fmt);
           // 코드리뷰 수정 — 최고 막대(yScale(count)===0)는 차트 맨 위와 맞닿아
           // 있어 말풍선을 위쪽에 그리면 SVG viewBox 밖으로 잘린다(실측 확인:
           // MARGIN.top=12+0<26). 그럴 땐 아래로 뒤집는다.
@@ -107,7 +126,7 @@ export function Histogram({ histogram, rawHistogram, histogramReasonCode }) {
         })}
         <line x1={0} x2={innerWidth} y1={innerHeight} y2={innerHeight} className="chart-axis-line" />
         {xTicks.map((t, i) => (
-          <text key={`x-${i}`} x={t.pos} y={innerHeight + 16} textAnchor="middle" className="chart-axis-label">
+          <text key={`x-${i}`} x={t.pos} y={innerHeight + 16} textAnchor={t.anchor} className="chart-axis-label">
             {t.label}
           </text>
         ))}
@@ -122,7 +141,7 @@ export function Histogram({ histogram, rawHistogram, histogramReasonCode }) {
         {bins.map((b, i) => (
           <tr key={i}>
             <td>
-              {formatNumber(b.lower)} ~ {formatNumber(b.upper)}{i === bins.length - 1 ? '(포함)' : ' 미만'}
+              {fmt(b.lower)} ~ {fmt(b.upper)}{i === bins.length - 1 ? '(포함)' : ' 미만'}
               {b.tailMerged && <span className="swb-hist-merged-tag">병합 · 폭 {formatNumber(b.upper - b.lower)}</span>}
             </td>
             <td>{b.count}</td>
@@ -136,6 +155,7 @@ export function Histogram({ histogram, rawHistogram, histogramReasonCode }) {
     <>
       <DataTableView chart={chart} table={table} tableCaption="히스토그램 데이터" />
       {isRaw && <p className="swb-suppressed-note">{RAW_HISTOGRAM_NOTE}</p>}
+      {isRaw && <p className="swb-suppressed-note">{RAW_BOUNDARY_NOTE}</p>}
       {!isRaw && merged && <p className="swb-suppressed-note">공개 기준에 맞춰 구간 수를 줄여 표시했습니다.</p>}
       {!isRaw && anyTailMerged && <p className="swb-suppressed-note">{TAIL_MERGED_NOTE}</p>}
     </>

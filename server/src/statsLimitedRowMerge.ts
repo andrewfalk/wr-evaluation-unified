@@ -12,7 +12,7 @@ import type { AnalyzeResult, AnalyzeRegressionResult } from '@wr/contracts';
 import type { AnalysisContext } from './statsAnalysisContext';
 import type { DatasetRow } from './statsDatasetBuilder';
 import type { PairedRow } from './statsBivariateDataset';
-import { buildOriginalHistogram, computeOutlierValues } from './statsChartDisclosure';
+import { buildNiceHistogram, computeOutlierValues } from './statsChartDisclosure';
 import { computeRawDiscreteLevels } from './statsDescriptiveSuppression';
 import { sampleScatterPoints, sampleRegressionDiagnosticsRowIndices } from './statsScatterGrid';
 import { resolveGroupComparisonGroups } from './statsBivariateSuppression';
@@ -186,12 +186,15 @@ export async function attachLimitedRowFields(
       // 원본 히스토그램 — 공개 조건이 outlierValues와 다르다: 변수 자체 공개(이
       // 분기)만 요구하고 bin 소수셀·이상치 partition 게이트는 보지 않는다. 그래서
       // 아래 outlierCount 조건과 독립적으로 판정한다(이상치는 억제돼도 원본
-      // 히스토그램은 붙을 수 있음). 원본은 aggregate 경로와 같은 기준 구현으로
-      // 재계산한다 — 히스토그램을 만들 조건(q1/q3/median 존재)도 aggregate 경로와 같다.
+      // 히스토그램은 붙을 수 있음). 원본은 캐시 hit에서도 Python 결과 없이 원본 행으로
+      // 응답 시점에 재계산한다. 구간 경계는 공개용 히스토그램(buildOriginalHistogram,
+      // numpy 대조)과 달리 보기 좋은 정수·소수 단위에 정렬한다(buildNiceHistogram) —
+      // 공개용과 경계가 다를 수 있다. 히스토그램을 만들 조건(q1/q3/median 존재)은
+      // aggregate 경로와 같다.
       if (c.q1 !== null && c.q3 !== null && c.median !== null) {
-        const bins = buildOriginalHistogram(ctx.dataset.rows, valueOf, c.q1, c.q3);
-        if (bins) {
-          next = { ...next, rawHistogram: { bins } };
+        const nice = buildNiceHistogram(ctx.dataset.rows, valueOf, c.q1, c.q3);
+        if (nice) {
+          next = { ...next, rawHistogram: { bins: nice.bins } };
           attached = true;
         }
       }

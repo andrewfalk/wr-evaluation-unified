@@ -26,7 +26,7 @@ vi.mock('../statsEngine', async (importOriginal) => {
 beforeEach(() => { vi.clearAllMocks(); });
 
 import { attachLimitedRowFields } from '../statsLimitedRowMerge';
-import { buildOriginalHistogram } from '../statsChartDisclosure';
+import { buildNiceHistogram } from '../statsChartDisclosure';
 import { computeDescriptiveSuppression } from '../statsDescriptiveSuppression';
 import type { StatsEngineRawResult } from '../statsEngine';
 
@@ -168,7 +168,9 @@ describe('attachLimitedRowFields — descriptive rawHistogram', () => {
     expect(outcome.attached).toBe(true);
     const c = outcome.result.continuous[0];
     if (c.suppressed) throw new Error('unexpected suppressed');
-    expect(c.rawHistogram).toEqual({ bins: buildOriginalHistogram(rows, (r) => r.values.v!.value as number, 1, 1) });
+    // 권한자 원본은 보기 좋은 경계(buildNiceHistogram)다 — 공개용(buildOriginalHistogram)과 경계가 다르다.
+    const nice = buildNiceHistogram(rows, (r) => r.values.v!.value as number, 1, 1)!;
+    expect(c.rawHistogram).toEqual({ bins: nice.bins });
     expect(c.rawHistogram!.bins.some((b) => b.count > 0 && b.count < 10)).toBe(true); // 소수 bin이 실제로 있음(자가검증)
     expect('merged' in c.rawHistogram!).toBe(false);
     expect(c.rawHistogram!.bins.every((b) => !('tailMerged' in b))).toBe(true);
@@ -222,7 +224,7 @@ describe('attachLimitedRowFields — descriptive rawHistogram', () => {
     expect(c.rawHistogram!.bins.reduce((s, b) => s + b.count, 0)).toBe(values.length);
   });
 
-  it('aggregate 경로와 같은 기준 구현을 쓴다 — 게이트를 그대로 통과하는 데이터면 원본과 aggregate bin이 정확히 같다', async () => {
+  it('원본은 공개용 histogram과 다른 보기 좋은 경계를 쓴다 — 건수 합은 같고, 원본 경계는 폭의 배수이며 공개용 경계(균등분할)와는 다르다', async () => {
     const uniform = Array.from({ length: 100 }, (_v, i) => datasetRow(i, 'v', i));
     const raw: StatsEngineRawResult = {
       continuous: [{
@@ -239,7 +241,14 @@ describe('attachLimitedRowFields — descriptive rawHistogram', () => {
     if (c.suppressed) throw new Error('unexpected suppressed');
     expect(c.histogram?.merged).toBe(false);
     expect(c.histogram!.bins.length).toBeGreaterThan(1);
-    expect(c.rawHistogram!.bins).toEqual(c.histogram!.bins);
+    const sum = (bins: Array<{ count: number }>) => bins.reduce((s, b) => s + b.count, 0);
+    expect(sum(c.rawHistogram!.bins)).toBe(sum(c.histogram!.bins)); // 같은 유효값 100건
+    // 공개용 경계는 최솟값(0)에서 시작하는 균등분할이라 19.8·39.6처럼 어중간하지만, 원본 경계는 20의 배수다.
+    expect(c.histogram!.bins[1].lower).not.toBe(c.rawHistogram!.bins[1].lower);
+    const rawEdges = c.rawHistogram!.bins.map((b) => b.lower);
+    expect(rawEdges.every((e) => e % 20 === 0)).toBe(true);
+    // 정수 데이터 0~99는 반개구간이라 마지막 구간 [80, 100)이 99까지 모두 센다(100번째 구간 없음).
+    expect(c.rawHistogram!.bins.map((b) => b.count)).toEqual([20, 20, 20, 20, 20]);
   });
 });
 

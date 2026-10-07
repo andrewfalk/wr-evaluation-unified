@@ -129,13 +129,14 @@ function toBins(edges: number[], counts: number[]): HistogramBinLike[] {
 }
 
 /**
- * 원본 히스토그램 — 공개통제 전의 균등분할 bin. 이 함수가 원본 bin의 **유일한
- * 기준 구현**이다: aggregate 경로(resolveDisclosableHistogram의 입력)와 limited_row
- * 원본(rawHistogram, 캐시 hit 시에도 Python 결과 없이 재계산해야 함)이 둘 다 이걸
- * 쓰므로 두 경로의 원본은 구조적으로 항상 같다. Python 엔진도 여전히
- * `histogram`을 계산해 내보내지만 Node는 더 이상 쓰지 않는다(엔진 프로토콜은
- * 그대로 두고 제거는 후속으로 분리 — 공식·경계 연산이 numpy와 같다는 것은
- * histogramParity 픽스처 테스트가 고정한다).
+ * 원본 히스토그램 — 공개통제 전의 균등분할 bin. 이 함수는 **공개 판정(집계) 경로의
+ * 기준 구현**이다: resolveDisclosableHistogram의 입력(= 캐시되는 공개용 histogram의
+ * 원본)을 만든다. numpy `histogram`과 경계·건수까지 정확히 같은 결과를 내는 것이
+ * 목적이라(histogramParity 픽스처 테스트가 고정) 경계는 최솟값에서 시작하는 균등분할이다.
+ * 권한자 원본(rawHistogram, limited_row)은 이 함수를 쓰지 않는다 — 보기 좋은 정수·소수
+ * 경계로 정렬한 `buildNiceHistogram`을 쓰므로 같은 변수라도 공개용과 경계가 다를 수 있다.
+ * Python 엔진도 여전히 `histogram`을 계산해 내보내지만 Node는 더 이상 쓰지 않는다
+ * (엔진 프로토콜은 그대로 두고 제거는 후속으로 분리).
  *
  * 입력은 valueOf가 숫자를 돌려주는 행만 쓴다(Python 요청 조립과 같은 필터 —
  * statsDescriptiveSuppression.ts buildStatsEngineRequest). q1/q3는 엔진이 계산한
@@ -166,6 +167,207 @@ export function buildOriginalHistogram<T extends PersonKeyed>(
   const k = computeOriginalBinCount(lo, hi, q1, q3, persons.size, presentRows.length);
   const { edges, counts } = countByEdges(presentRows, buildUniformEdges(lo, hi, k), valueOf);
   return toBins(edges, counts);
+}
+
+// ---------------------------------------------------------------------------
+// 권한자 원본 히스토그램 — 보기 좋은 경계(buildNiceHistogram)
+// ---------------------------------------------------------------------------
+
+/** 값의 범위가 이 이상이면 구간 폭은 최소 1(정수)이다. 그보다 작은 범위의 비정수 데이터는
+ * 소수 폭(0.1·0.2·0.5…)을 허용한다(0~3년처럼 정수로만 끊으면 구간이 2~3개뿐이라). */
+const INTEGER_WIDTH_MIN_RANGE = 10;
+/** 폭의 자릿수(decimals) 상한 — 이보다 작은 폭은 정렬을 포기하고 폴백한다. */
+const MAX_WIDTH_DECIMALS = 12;
+/** 경계 인덱스 보정 루프의 최대 횟수. 넘으면 정렬 실패로 보고 폴백한다. */
+const MAX_EDGE_CORRECTIONS = 4;
+
+interface NiceWidth {
+  /** 1, 2, 5 중 하나. */
+  mantissa: 1 | 2 | 5;
+  exponent: number;
+}
+
+/** `m × 10^e`를 정확한 십진 리터럴에 가장 가까운 double로 만든다. 음수 지수는 곱셈이 아니라
+ * 나눗셈으로 계산한다(10^k, k ≤ 22는 double로 정확하고 나눗셈은 정확히 반올림되므로
+ * 0.1·0.5·1e-13 같은 값이 리터럴과 같다). */
+function niceWidthValue({ mantissa, exponent }: NiceWidth): number {
+  return exponent >= 0 ? mantissa * Math.pow(10, exponent) : mantissa / Math.pow(10, -exponent);
+}
+
+function nextNiceWidth({ mantissa, exponent }: NiceWidth): NiceWidth {
+  if (mantissa === 1) return { mantissa: 2, exponent };
+  if (mantissa === 2) return { mantissa: 5, exponent };
+  return { mantissa: 1, exponent: exponent + 1 };
+}
+
+function prevNiceWidth({ mantissa, exponent }: NiceWidth): NiceWidth {
+  if (mantissa === 5) return { mantissa: 2, exponent };
+  if (mantissa === 2) return { mantissa: 1, exponent };
+  return { mantissa: 5, exponent: exponent - 1 };
+}
+
+function niceWidthFor(x: number): NiceWidth {
+  const exponent = Math.floor(Math.log10(x));
+  const fraction = x / Math.pow(10, exponent);
+  // 클라이언트 src/core/components/charts/scales.js niceNumber(value, round=true)와 같은 임계값.
+  if (fraction < 1.5) return { mantissa: 1, exponent };
+  if (fraction < 3) return { mantissa: 2, exponent };
+  if (fraction < 7) return { mantissa: 5, exponent };
+  return { mantissa: 1, exponent: exponent + 1 };
+}
+
+/** `x`에 가장 가까운 보기 좋은 폭(1·2·5 × 10^e) — 임계값은 클라이언트 `niceNumber(round)`와 같다
+ * (가수 < 1.5 → 1, < 3 → 2, < 7 → 5, 그 외 다음 자릿수의 1). 테스트가 클라이언트와 같은 값을
+ * 내는지 표본으로 고정한다. x가 양의 유한수가 아니면 1. */
+export function roundToNiceWidth(x: number): number {
+  if (!(x > 0) || !Number.isFinite(x)) return 1;
+  return niceWidthValue(niceWidthFor(x));
+}
+
+/** 경계 배열이 히스토그램으로 유효한지 — 유한수, **엄격 증가**(폭 0 구간 없음), 첫 경계 ≤ lo,
+ * 마지막 경계가 `lastClosed`이면 ≥ hi(마지막 구간 닫힘), 아니면 > hi(정수 정렬의 반개구간),
+ * 구간 수 1~50. 이 검증을 통과한 경계라면 `bucketIndex`의 끝 구간 강제 배정(클램프)이
+ * 건수를 숨겨 구간 정의를 위반하는 일이 없다. */
+export function isValidEdges(edges: number[], lo: number, hi: number, lastClosed: boolean): boolean {
+  const k = edges.length - 1;
+  if (k < MIN_ORIGINAL_BINS || k > MAX_ORIGINAL_BINS) return false;
+  for (let i = 0; i <= k; i += 1) {
+    if (!Number.isFinite(edges[i])) return false;
+    if (i > 0 && !(edges[i] > edges[i - 1])) return false;
+  }
+  if (edges[0] > lo) return false;
+  return lastClosed ? edges[k] >= hi : edges[k] > hi;
+}
+
+interface AlignedEdges {
+  edges: number[];
+  lastClosed: boolean;
+}
+
+/** 폭 `width`로 [lo, hi]를 덮는 정렬 경계를 만든다. 실패(null)하면 호출부가 폴백한다.
+ * 경계는 `Number((i * w).toFixed(decimals))` — 고정 12자리가 아니라 **폭의 자릿수**로 반올림해
+ * 폭이 작아도 0으로 뭉개지지 않고, 폭의 정확한 배수가 된다. 허용오차 반올림 대신 **실제
+ * 경계 값으로** 시작·끝 인덱스를 보정해 `lo`/`hi`가 항상 범위 안에 들어오게 한다. */
+function buildAlignedEdges(lo: number, hi: number, width: NiceWidth, integerData: boolean): AlignedEdges | null {
+  const w = niceWidthValue(width);
+  const decimals = Math.max(0, -width.exponent);
+  if (decimals > MAX_WIDTH_DECIMALS || !Number.isFinite(w) || !(w > 0)) return null;
+
+  const edge = (i: number): number => {
+    const v = Number((i * w).toFixed(decimals));
+    return v === 0 ? 0 : v; // -0 정규화
+  };
+  // 정수 데이터의 정렬 성공 경로만 마지막 구간을 닫지 않는다([k, k+1) — 최댓값도 자기 막대를 가짐).
+  const lastClosed = !integerData;
+  const coversHi = (i: number): boolean => (lastClosed ? edge(i) >= hi : edge(i) > hi);
+
+  // 경계 인덱스(a, b)가 안전한 정수(≤ 2^53)가 아니면 `i * w`가 정확한 배수가 아니다(예: 1e6 근처에
+  // 폭 1e-10 → 인덱스 1e16). 그때는 "폭의 배수"라는 정렬의 전제가 성립하지 않으므로 폴백한다.
+  let a = Math.floor(lo / w);
+  if (!Number.isSafeInteger(a)) return null;
+  let guard = 0;
+  while (edge(a) > lo) { a -= 1; guard += 1; if (guard > MAX_EDGE_CORRECTIONS) return null; }
+  guard = 0;
+  while (edge(a + 1) <= lo) { a += 1; guard += 1; if (guard > MAX_EDGE_CORRECTIONS) return null; }
+
+  let b = Math.ceil(hi / w);
+  guard = 0;
+  while (!coversHi(b)) { b += 1; guard += 1; if (guard > MAX_EDGE_CORRECTIONS) return null; }
+  guard = 0;
+  while (b - 1 > a && coversHi(b - 1)) { b -= 1; guard += 1; if (guard > MAX_EDGE_CORRECTIONS) return null; }
+  if (!(b > a) || !Number.isSafeInteger(a) || !Number.isSafeInteger(b)) return null;
+
+  const edges: number[] = [];
+  for (let i = a; i <= b; i += 1) edges.push(edge(i));
+  return { edges, lastClosed };
+}
+
+export interface NiceHistogramResult {
+  bins: HistogramBinLike[];
+  /** 정렬 경계(폭의 배수)를 만들었으면 true. 상수 데이터·폴백은 false. */
+  aligned: boolean;
+  /** 실제로 적용된 마지막 구간 규칙 — true면 마지막 구간이 양끝 포함, false면 반개구간(정수 정렬). */
+  lastClosed: boolean;
+}
+
+/**
+ * 권한자 원본 히스토그램(rawHistogram, limited_row) — 구간 경계를 **보기 좋은 값**(폭 1·2·5×10^e의
+ * 배수)에 맞춘다. 게이트를 거치지 않는 원본이라 경계를 자유롭게 정할 수 있고, 경계가 [최솟값,
+ * 최댓값] 밖으로 조금 나가도 새로 드러나는 정보가 없다(최솟값·최댓값은 이미 공개). 공개용 히스토그램
+ * (buildOriginalHistogram + resolveDisclosableHistogram)은 소수 인원 판정과 numpy 대조가 경계에
+ * 걸려 있어 이 함수를 쓰지 않는다 — 같은 변수라도 두 경계는 다를 수 있다.
+ *
+ * - 폭: rawWidth = (hi − lo) / k0(공개용과 같은 목표 구간 수)를 가장 가까운 보기 좋은 폭으로
+ *   반올림. 값이 전부 정수이거나 범위가 10 이상이면 폭 ≥ 1, 그보다 작은 비정수 범위는 소수 폭.
+ *   구간 수가 50을 넘으면 폭을 올리고 2 미만이면 내린다.
+ * - 정수 데이터는 반개구간 [k, k+1)로 최댓값도 자기 구간을 갖는다(정수 1~9가 20건씩이면 모든
+ *   막대가 20). 그 밖에는 기존 규칙(마지막 구간만 양끝 포함).
+ * - **폴백 사슬:** 정렬이 불가능하거나 검증(isValidEdges)에 실패하면 균등분할 경계로 대체하고
+ *   (마지막 구간 닫힘), 그것도 유효하지 않으면(예: 1e6 ± 2^-33처럼 부동소수점 간격에 가까운
+ *   범위에서 서로 다른 경계가 부족) 구간 수를 절반씩 줄여 다시 만들어 센다. k=1이면 [lo, hi]라
+ *   항상 유효하므로 어떤 입력에서도 폭 0 구간 없이 건수 합이 정의대로 맞는 결과를 낸다.
+ * - 모든 값이 같으면 [lo, hi] 한 구간(엄격 증가 검증의 유일한 예외).
+ *
+ * q1/q3는 엔진이 계산한 값을 그대로 받는다. 유효값이 없으면 null.
+ */
+export function buildNiceHistogram<T extends PersonKeyed>(
+  rows: T[],
+  valueOf: (row: T) => number | null,
+  q1: number,
+  q3: number,
+): NiceHistogramResult | null {
+  const presentRows = rows.filter((r) => valueOf(r) !== null);
+  if (presentRows.length === 0) return null;
+
+  let lo = Infinity;
+  let hi = -Infinity;
+  let allIntegers = true;
+  const persons = new Set<string>();
+  for (const row of presentRows) {
+    const v = valueOf(row) as number;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+    if (allIntegers && !Number.isInteger(v)) allIntegers = false;
+    persons.add(row.personClusterKey);
+  }
+
+  if (lo === hi) {
+    return { bins: [{ lower: lo, upper: hi, count: presentRows.length }], aligned: false, lastClosed: true };
+  }
+
+  const k0 = computeOriginalBinCount(lo, hi, q1, q3, persons.size, presentRows.length);
+  const range = hi - lo;
+  const integerWidthOnly = allIntegers || range >= INTEGER_WIDTH_MIN_RANGE;
+
+  // 1) 정렬 경계 — 폭을 구간 수 1(또는 2)~50 안으로 맞추며 시도한다.
+  let width = niceWidthFor(range / k0);
+  if (integerWidthOnly && niceWidthValue(width) < 1) width = { mantissa: 1, exponent: 0 };
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const aligned = buildAlignedEdges(lo, hi, width, allIntegers);
+    if (!aligned) break;
+    const k = aligned.edges.length - 1;
+    if (k > MAX_ORIGINAL_BINS) { width = nextNiceWidth(width); continue; }
+    const lowered = prevNiceWidth(width);
+    if (k < 2 && (!integerWidthOnly || niceWidthValue(lowered) >= 1)) { width = lowered; continue; }
+    if (isValidEdges(aligned.edges, lo, hi, aligned.lastClosed)) {
+      const { edges, counts } = countByEdges(presentRows, aligned.edges, valueOf);
+      return { bins: toBins(edges, counts), aligned: true, lastClosed: aligned.lastClosed };
+    }
+    break;
+  }
+
+  // 2) 폴백 — 균등분할(마지막 구간 닫힘)을 검증하고, 유효하지 않으면 구간 수를 절반씩 줄인다.
+  let k = k0;
+  for (let attempt = 0; attempt < 64; attempt += 1) {
+    const edges = k <= 1 ? [lo, hi] : buildUniformEdges(lo, hi, k);
+    if (isValidEdges(edges, lo, hi, true)) {
+      const counted = countByEdges(presentRows, edges, valueOf);
+      return { bins: toBins(counted.edges, counted.counts), aligned: false, lastClosed: true };
+    }
+    k = Math.ceil(k / 2);
+  }
+  // 도달 불가(k=1이면 [lo, hi]가 항상 유효) — 방어적으로 단일 구간.
+  return { bins: [{ lower: lo, upper: hi, count: presentRows.length }], aligned: false, lastClosed: true };
 }
 
 /** B안 폴백 후보 bin 개수 목록 — 원본 개수를 절반씩(`ceil(k/2)`) 줄여가며

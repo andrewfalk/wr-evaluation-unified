@@ -21,7 +21,9 @@ export function createBandScale(domainValues, range, paddingRatio = 0.25) {
 }
 
 // "nice number" 알고리즘(표준) — 격자선이 0.1/0.2/0.5/1/2/5/10 배수에 오도록.
-function niceNumber(value, round) {
+// 서버 권한자 원본 히스토그램의 폭 선택(statsChartDisclosure.ts roundToNiceWidth)이 같은 임계값을
+// 쓰는지 고정하려고 export한다(양쪽 테스트가 같은 표를 검증).
+export function niceNumber(value, round) {
   if (value === 0) return 0;
   const exponent = Math.floor(Math.log10(value));
   const fraction = value / Math.pow(10, exponent);
