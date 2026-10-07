@@ -135,9 +135,9 @@ export function computeDescriptiveSuppression(
       if (!rawStat) throw new Error(`missing continuous engine result for '${key}'`);
 
       // 원본 bin은 Python 결과(rawStat.histogram)가 아니라 Node의 기준 구현
-      // (buildOriginalHistogram)으로 만든다 — limited_row 원본(rawHistogram)이 캐시
-      // hit에서도 같은 함수로 재계산되므로 두 경로의 원본이 항상 같아야 한다. 그
-      // 원본으로 resolveDisclosableHistogram이 해상도별 "그대로 → 끝 구간 병합"을
+      // (buildOriginalHistogram, numpy와 경계까지 같음)으로 만든다. 이 경로는 공개 판정용이고,
+      // 권한자 원본(rawHistogram)은 별도의 buildNiceHistogram(보기 좋은 경계)이라 같은 변수라도
+      // 공개용과 경계가 다를 수 있다. 위 원본으로 resolveDisclosableHistogram이 해상도별 "그대로 → 끝 구간 병합"을
       // 시도해 공개 가능한 가장 세밀한 것을 채택한다. 히스토그램을 만들 조건은
       // Python(analyze.py)과 같다(q1/q3/median이 계산 가능할 때만). 원본은
       // 만들었는데 후보를 전부 시도해도 실패하면 histogramReasonCode를 채운다

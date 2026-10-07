@@ -146,6 +146,94 @@ describe('Histogram', () => {
     expect(screen.queryByText('분포를 표시하기에는 공개 가능한 구간이 부족합니다.')).toBeFalsy();
     expect(document.querySelectorAll('rect').length).toBe(rawBins.length);
   });
+
+  // 권한자 원본의 "보기 좋은 경계" — 가로축 눈금이 막대 경계에 놓이고, 축·툴팁·표가 같은 서식을 쓴다.
+  // 가로축 라벨은 y=198(= 220 − 12 − 26 + 16)에 그려져 세로축 라벨과 구분된다.
+  const xLabels = () => [...document.querySelectorAll('text.chart-axis-label')].filter((t) => t.getAttribute('y') === '198');
+  const binsFromEdges = (edges, count = 10) => edges.slice(0, -1).map((lower, i) => ({ lower, upper: edges[i + 1], count }));
+
+  it('원본: 가로축 눈금이 막대 경계에 일치한다(구간 6개 → 경계 7개 라벨)', () => {
+    const edges = [0, 5, 10, 15, 20, 25, 30];
+    render(<Histogram histogram={null} rawHistogram={{ bins: binsFromEdges(edges) }} />);
+    expect(xLabels().map((t) => t.textContent)).toEqual(['0', '5', '10', '15', '20', '25', '30']);
+    // 막대 경계 좌표와 라벨 x 좌표가 같다.
+    const rects = [...document.querySelectorAll('rect')];
+    const barLefts = rects.map((r) => Number(r.getAttribute('x')));
+    const labelXs = xLabels().map((t) => Number(t.getAttribute('x')));
+    barLefts.forEach((x, i) => expect(labelXs[i]).toBeCloseTo(x, 6));
+  });
+
+  it('원본: 경계 간격이 균등하지 않아도 라벨 x 좌표는 막대 경계 좌표(xScale(edge))와 같다(균등 간격 가정 금지)', () => {
+    // 폴백 경계는 부동소수점 반올림 때문에 간격이 같지 않을 수 있다. 인덱스 기준(i × 폭)이면 두 번째 라벨이
+    // 122px에 놓이지만 실제 막대 경계는 48.8px이다.
+    const edges = [0, 10, 20, 30, 100];
+    render(<Histogram histogram={null} rawHistogram={{ bins: binsFromEdges(edges) }} />);
+    const barLefts = [...document.querySelectorAll('rect')].map((r) => Number(r.getAttribute('x')));
+    const labels = xLabels();
+    const labelByText = new Map(labels.map((t) => [t.textContent, Number(t.getAttribute('x'))]));
+    expect(labelByText.get('10')).toBeCloseTo(barLefts[1], 6);
+    expect(labelByText.get('10')).toBeCloseTo(48.8, 1);
+    expect(labelByText.get('20')).toBeCloseTo(barLefts[2], 6);
+    expect(labelByText.get('100')).toBeCloseTo(488, 6);
+  });
+
+  it('원본: 폭 0.001 경계(0.201~0.209)도 서로 다른 라벨·툴팁·표로 표시된다(formatNumber의 소수 3자리 제한과 무관)', async () => {
+    const user = userEvent.setup();
+    const edges = [0.201, 0.202, 0.203, 0.204, 0.205, 0.206, 0.207, 0.208, 0.209];
+    render(<Histogram histogram={null} rawHistogram={{ bins: binsFromEdges(edges) }} />);
+    const titles = [...document.querySelectorAll('rect title')].map((t) => t.textContent);
+    expect(new Set(titles).size).toBe(8);
+    expect(titles[0]).toBe('0.201 ~ 0.202: 10건');
+    await user.click(screen.getByRole('button', { name: '데이터 보기' }));
+    const cells = [...document.querySelectorAll('tbody tr td:first-child')].map((td) => td.textContent);
+    expect(new Set(cells).size).toBe(8);
+    expect(cells[7]).toContain('0.208 ~ 0.209');
+  });
+
+  it('원본: 서버 폴백 경계(0 ~ 5e-13)는 근삿값 없이 정확한 값으로 표시되고 서로 다른 라벨이다', async () => {
+    const user = userEvent.setup();
+    const edges = [0, 1.6666666666666667e-13, 3.3333333333333334e-13, 5e-13];
+    render(<Histogram histogram={null} rawHistogram={{ bins: binsFromEdges(edges, 4) }} />);
+    const titles = [...document.querySelectorAll('rect title')].map((t) => t.textContent);
+    expect(titles[1]).toBe('1.6666666666666667e-13 ~ 3.3333333333333334e-13: 4건');
+    expect(new Set(xLabels().map((t) => t.textContent)).size).toBe(xLabels().length);
+    await user.click(screen.getByRole('button', { name: '데이터 보기' }));
+    expect(document.querySelector('tbody').textContent).toContain('3.3333333333333334e-13');
+  });
+
+  it('원본: 긴 라벨이 많은 30구간에서는 솎아 표시하되 첫·마지막 경계를 포함하고 마지막 라벨은 end 정렬로 잘림을 막는다', () => {
+    const edges = Array.from({ length: 31 }, (_v, i) => 1234 + i * 0.5);
+    render(<Histogram histogram={null} rawHistogram={{ bins: binsFromEdges(edges, 5) }} />);
+    const labels = xLabels();
+    expect(labels.length).toBeLessThan(31);
+    expect(labels[0].textContent).toBe('1,234.0');
+    expect(labels[labels.length - 1].textContent).toBe('1,249.0');
+    expect(labels[labels.length - 1].getAttribute('text-anchor')).toBe('end');
+  });
+
+  it('원본이면 경계 안내 문구가 별도 문단으로 뜨고, 공개용에는 없다', () => {
+    const edges = [0, 5, 10];
+    const { unmount } = render(<Histogram histogram={null} rawHistogram={{ bins: binsFromEdges(edges) }} />);
+    expect(screen.getByText('구간 경계는 보기 좋은 값으로 맞춘 것이라 공개용 히스토그램과 다를 수 있습니다.')).toBeTruthy();
+    expect(screen.getByText('제한 데이터 권한으로 소수 인원 구간까지 표시합니다. 화면을 외부에 공유할 때 주의하세요.')).toBeTruthy();
+    unmount();
+    render(<Histogram histogram={{ bins: binsFromEdges(edges) }} />);
+    expect(screen.queryByText(/보기 좋은 값으로 맞춘/)).toBeFalsy();
+  });
+
+  it('공개용 히스토그램의 가로축 눈금은 기존 방식(computeNiceTicks, middle 정렬)이다 — 원본 변경이 공개용에 영향 없음', () => {
+    render(<Histogram histogram={{ bins: binsFromEdges([2.3, 7.9, 13.4, 19.0, 24.6]) }} />);
+    const labels = xLabels();
+    expect(labels.length).toBeGreaterThan(0);
+    labels.forEach((t) => expect(t.getAttribute('text-anchor')).toBe('middle'));
+    // 눈금은 막대 경계(2.3, 7.9 …)가 아니라 보기 좋은 값(5, 10 …)이다.
+    expect(labels.map((t) => t.textContent)).not.toContain('7.9');
+  });
+
+  it('원본 단일 상수 구간도 크래시 없이 렌더된다', () => {
+    render(<Histogram histogram={null} rawHistogram={{ bins: [{ lower: 7, upper: 7, count: 20 }] }} />);
+    expect(xLabels().map((t) => t.textContent)).toEqual(['7']);
+  });
 });
 
 describe('BoxPlot', () => {

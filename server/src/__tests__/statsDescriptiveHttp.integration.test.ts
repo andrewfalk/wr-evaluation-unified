@@ -423,6 +423,13 @@ describe.skipIf(!TEST_DB_URL)('POST /analyze(descriptive) — 실데이터 HTTP 
       expect(rawCountSum(res.body)).toBe(12);
       expect(c.rawHistogram.merged).toBeUndefined();
       expect(c.rawHistogram.bins.every((b: Record<string, unknown>) => !('tailMerged' in b))).toBe(true);
+      // 권한자 원본은 보기 좋은 경계다 — 모든 경계가 폭(1·2·5 × 10^e)의 배수다(공개용 균등분할과 다름).
+      const rawBins = c.rawHistogram.bins as Array<{ lower: number; upper: number }>;
+      const rawEdges = [...rawBins.map((b) => b.lower), rawBins[rawBins.length - 1].upper];
+      const width = rawEdges[1] - rawEdges[0];
+      const mantissa = width / Math.pow(10, Math.floor(Math.log10(width)));
+      expect([1, 2, 5].some((m) => Math.abs(mantissa - m) < 1e-9)).toBe(true);
+      for (const e of rawEdges) expect(Math.abs(e / width - Math.round(e / width))).toBeLessThan(1e-9);
 
       const stored = await pool.query<{ result: unknown }>(
         `SELECT result FROM stats_runs WHERE analysis_run_id=$1`,

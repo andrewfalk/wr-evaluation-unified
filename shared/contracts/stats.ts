@@ -668,11 +668,14 @@ const AnalyzeContinuousRevealedSchema = z.object({
   // 동일한 네이밍 패턴).
   histogramReasonCode: z.enum(['INSUFFICIENT_DISCLOSABLE_RESOLUTION']).nullable().optional(),
   // 원본 히스토그램(limited_row) — bin 단위 소수셀 게이트·재분할·끝 구간 병합을
-  // 전혀 거치지 않은 원본 균등분할 bin. outlierValues와 같은 방식(stats.
+  // 전혀 거치지 않은 원본 bin. outlierValues와 같은 방식(stats.
   // export_limited_rows 권한 + 응답 감사 성공, 응답시점에만 부착, stats_runs.result
   // 캐시에는 절대 저장 안 함)이지만 공개 조건은 다르다 — 변수 자체 공개(이
   // suppressed:false 분기)만 요구하고 이상치 partition 게이트는 보지 않는다.
-  // merged/tailMerged는 원본이라 항상 없다.
+  // merged/tailMerged는 원본이라 항상 없다. 구간 경계는 보기 좋은 정수·소수 단위(폭의
+  // 배수)에 정렬되어(server buildNiceHistogram) 공개용 histogram의 경계와 다를 수 있다 —
+  // 같은 변수라도 두 히스토그램의 막대 모양이 다를 수 있다. 정렬이 불가능한 입력은 균등분할
+  // 경계로 폴백한다(스키마는 같다).
   rawHistogram: AnalyzeHistogramSchema.optional(),
   boxplot: AnalyzeBoxplotSchema.nullable().optional(),
 });
