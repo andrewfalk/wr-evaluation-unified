@@ -507,7 +507,7 @@ describe('POST /export — 성공 경로 + CSV 포맷', () => {
   // 범주형 소수 범주 "기타" 병합 — other가 있으면 범주 줄 다음에 대괄호 라벨 한 줄이 붙는다.
   // rawLevels(권한자 원본)는 저장된 aggregate result에 원래 없지만, 혹시 섞여 들어와도
   // CSV로 새면 안 된다.
-  it('other가 있으면 "[10명 미만 범주 합계]" 줄이 추가되고, rawLevels는 CSV에 나오지 않는다', async () => {
+  it('other가 있으면 "[공개 기준에 따라 병합한 범주 합계]" 줄이 추가되고, rawLevels는 CSV에 나오지 않는다', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
     wireRunRow(pool, {
@@ -529,7 +529,7 @@ describe('POST /export — 성공 경로 + CSV 포맷', () => {
     expect(res.status).toBe(200);
     const dataLines = res.text.split('\r\n').filter((l) => l.startsWith('discrete,'));
     expect(dataLines).toHaveLength(3); // 범주 2줄 + 기타 1줄
-    expect(dataLines[2]).toContain('[10명 미만 범주 합계]');
+    expect(dataLines[2]).toContain('[공개 기준에 따라 병합한 범주 합계]');
     expect(dataLines[2]).toContain(',16,');
     expect(res.text).not.toContain('잠수부');
   });

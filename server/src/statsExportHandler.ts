@@ -53,7 +53,7 @@ function csvString(value: string | boolean | null): string {
 }
 
 // 소수 범주 "기타" 병합 줄의 레벨 칸 — 실제 범주 값과 겹치지 않도록 대괄호로 구분한다.
-const OTHER_LEVEL_CSV_LABEL = '[10명 미만 범주 합계]';
+const OTHER_LEVEL_CSV_LABEL = '[공개 기준에 따라 병합한 범주 합계]';
 
 function missingPatternsCell(value: AnalyzeMissingPatternEntry[] | null): string {
   if (value === null) return escapeCsvString('(비공개)'); // §8 — null(억제)과 []([]  0건)을 다른 표기로 구분

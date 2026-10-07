@@ -1,7 +1,7 @@
 // 범주형 "기타" 병합 표시용 가공(buildDiscreteDisplay) — 요약 탭 표와 분포 탭 차트가 같은
 // 선택값을 쓰는지, 상위 N개 자르기·합계 막대·원본 우선·중복 집계 방지를 확인한다.
 import { describe, expect, it } from 'vitest';
-import { buildDiscreteDisplay, OTHER_LEVEL_LABEL, TOP_LEVELS_IN_CHART } from '../discreteLevels';
+import { buildDiscreteDisplay, pickModeFromLevels, OTHER_LEVEL_LABEL, TOP_LEVELS_IN_CHART } from '../discreteLevels';
 
 const lv = (level, count, total = 100) => ({ level, count, proportion: count / total });
 
@@ -14,14 +14,14 @@ describe('buildDiscreteDisplay', () => {
     expect(d.chartRows.map((r) => r.label)).toEqual(['A', 'B']); // 건수 내림차순
   });
 
-  it('other가 있으면 표 마지막에 "기타 (10명 미만 범주 합계)" 줄이 붙고, 차트에는 합계 막대 하나가 붙는다', () => {
+  it('other가 있으면 표 마지막에 "기타 (공개 기준에 따라 병합한 범주 합계)" 줄이 붙고, 차트에는 합계 막대 하나가 붙는다', () => {
     const d = buildDiscreteDisplay({
       levels: [lv('A', 40, 76), lv('B', 20, 76)], other: { count: 16, proportion: 16 / 76 }, isOrdinal: false,
     });
     expect(d.hasOther).toBe(true);
     expect(d.tableRows.map((r) => r.label)).toEqual(['A', 'B', OTHER_LEVEL_LABEL]);
     expect(d.tableRows[2]).toMatchObject({ count: 16, merged: true });
-    expect(d.chartRows.map((r) => r.label)).toEqual(['A', 'B', '기타(10명 미만 범주 합계)']);
+    expect(d.chartRows.map((r) => r.label)).toEqual(['A', 'B', '기타(병합한 범주 합계)']);
     expect(d.chartRows[2]).toMatchObject({ count: 16, merged: true });
     // 표 건수 합 = n
     expect(d.tableRows.reduce((s, r) => s + r.count, 0)).toBe(76);
@@ -77,6 +77,32 @@ describe('buildDiscreteDisplay', () => {
     const keys = d.chartRows.map((r) => r.key);
     expect(new Set(keys).size).toBe(keys.length);
     expect(d.chartRows.filter((r) => r.merged)).toHaveLength(1);
+  });
+
+  // 외부 리뷰 지적 — 원본 표시 시 최빈값이 공개 범주 기준 row.mode로 남으면 표와 어긋난다.
+  describe('pickModeFromLevels / rawMode — 원본 기준 최빈값', () => {
+    it('가장 큰 건수의 범주를 고른다(반복 기록으로 소수 범주가 가장 큰 경우 포함)', () => {
+      // D는 고유 5명이지만 반복 기록으로 100건, A는 40건 — 공개 범주만 보면 A가 최빈값이지만 원본은 D.
+      const raw = [lv('A', 40, 160), lv('B', 12, 160), lv('D', 100, 160), lv('E', 8, 160)];
+      expect(pickModeFromLevels(raw, false)).toBe('D');
+      const d = buildDiscreteDisplay({ levels: [lv('A', 40, 160), lv('B', 12, 160)], other: { count: 108, proportion: 108 / 160 }, rawLevels: raw, isOrdinal: false });
+      expect(d.rawMode).toBe('D');
+    });
+
+    it('동점이면 명목형은 값 문자열 사전순 첫 값, 순서형은 서버가 정렬해 둔 첫(낮은) 등급이다(서버 pickMode와 같음)', () => {
+      expect(pickModeFromLevels([lv('나', 10), lv('가', 10), lv('다', 5)], false)).toBe('가');
+      expect(pickModeFromLevels([lv('경도', 10), lv('중등도', 10), lv('고도', 3)], true)).toBe('경도');
+    });
+
+    it('boolean 값이어도 그대로 돌려주고, 비어 있으면 null이다', () => {
+      expect(pickModeFromLevels([lv(true, 30), lv(false, 20)], false)).toBe(true);
+      expect(pickModeFromLevels([], false)).toBeNull();
+      expect(pickModeFromLevels(undefined, false)).toBeNull();
+    });
+
+    it('공개 결과(rawLevels 없음)에서는 rawMode가 없다 — 호출부는 서버의 row.mode를 쓴다', () => {
+      expect(buildDiscreteDisplay({ levels: [lv('A', 60), lv('B', 40)], isOrdinal: false }).rawMode).toBeUndefined();
+    });
   });
 
   it('boolean 값도 문자열로 표시한다', () => {

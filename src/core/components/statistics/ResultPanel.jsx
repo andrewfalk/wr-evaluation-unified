@@ -195,9 +195,11 @@ function ContinuousCard({ catalogByKey, row }) {
 // 함께면 값·결측으로 "기타" 안을 쪼개 역산할 수 있어서). 그래서 변수가 2개 이상인 실행에서
 // 억제된 범주형에는 "단독으로 분석하면 보일 수 있다"는 안내를 띄운다. 서버 정보는 쓰지 않고
 // 레시피 변수 개수와 카탈로그 타입만 본다(순서형은 단독이어도 합치지 않으므로 제외).
-const OTHER_MERGE_NOTE = "인원이 10명 미만인 범주는 '기타'로 합쳐 표시했습니다.";
+// "기타"에는 10명 미만 범주뿐 아니라, 합친 값을 10명 이상으로 맞추려고 함께 합친 범주도 들어갈
+// 수 있다(서버 planSmallLevelMerge) — 문구가 그 사실을 숨기지 않게 한다.
+const OTHER_MERGE_NOTE = "인원이 10명 미만인 범주와, 합친 값을 10명 이상으로 맞추려고 함께 합친 범주는 '기타'로 묶어 표시했습니다.";
 const RAW_LEVELS_NOTE = '제한 데이터 권한으로 소수 인원 범주까지 표시합니다. 화면을 외부에 공유할 때 주의하세요.';
-const SINGLE_VARIABLE_HINT = "범주형 변수 하나만 분석하면 10명 미만 범주를 '기타'로 합쳐 볼 수 있는 경우가 있습니다.";
+const SINGLE_VARIABLE_HINT = "범주형 변수 하나만 분석하면 소수 범주를 '기타'로 합쳐 볼 수 있는 경우가 있습니다.";
 
 function suppressedHint(catalogByKey, row, variableCount) {
   const isOrdinal = catalogByKey.get(row.variableKey)?.type === 'ordinal';
@@ -218,12 +220,15 @@ function DiscreteCard({ catalogByKey, row, variableCount }) {
     );
   }
   const rawTotal = display.isRaw ? row.rawLevels.reduce((s, l) => s + l.count, 0) : null;
+  // 원본을 표시하는 동안에는 최빈값도 원본 기준이다 — row.mode는 "기타"로 합쳐진 공개 범주 기준이라
+  // 반복 기록으로 소수 범주의 건수가 더 큰 경우 표와 어긋난다(외부 리뷰 지적).
+  const modeValue = display.isRaw ? display.rawMode : row.mode;
   return (
     <div className="swb-card">
       <strong>{variableLabel(catalogByKey, row.variableKey)}</strong>
       {row.suppressed
-        ? <p>n={rawTotal} <span className="swb-suppressed-note">(공개 정책상 일반 사용자에게는 표시되지 않는 변수)</span></p>
-        : <p>n={row.n}, 결측={row.missingCount} {missingPatternsText(row.missingPatterns)}, 최빈값={fmt(row.mode)}</p>}
+        ? <p>n={rawTotal}, 최빈값={fmt(modeValue)} <span className="swb-suppressed-note">(공개 정책상 일반 사용자에게는 표시되지 않는 변수)</span></p>
+        : <p>n={row.n}, 결측={row.missingCount} {missingPatternsText(row.missingPatterns)}, 최빈값={fmt(modeValue)}</p>}
       <table className="swb-table">
         <thead><tr><th>수준</th><th>빈도</th><th>비율</th></tr></thead>
         <tbody>

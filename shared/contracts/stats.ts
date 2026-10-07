@@ -706,7 +706,8 @@ const AnalyzeDiscreteRevealedSchema = z.object({
   missingCount: z.number().int().nonnegative(),
   missingPatterns: z.array(AnalyzeMissingPatternEntrySchema).nullable(),
   levels: z.array(AnalyzeDiscreteLevelSchema),
-  // 소수 범주(1~9명) "기타" 병합분 — 10명 미만 범주들을 합친 값. levels에 가짜 "기타"
+  // 소수 범주(1~9명) "기타" 병합분 — 10명 미만 범주들과, 그 합을 10명 이상으로 맞추려고
+  // 함께 합친 공개 범주의 합이다(planSmallLevelMerge). levels에 가짜 "기타"
   // 레벨로 넣지 않는 이유는 실제 범주 값 "기타"와 구분하기 위해서다. 몇 개 범주가
   // 합쳐졌는지는 일부러 내지 않는다(Table1의 mergedLevels 비공개와 같은 원칙).
   // 그 범주형 변수 하나만 요청했을 때만 생긴다(statsDescriptiveSuppression.ts).

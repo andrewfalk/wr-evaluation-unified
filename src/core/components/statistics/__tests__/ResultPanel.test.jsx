@@ -61,10 +61,10 @@ describe('ResultPanel — 범주형 "기타" 병합·권한자 원본(rawLevels)
     );
   }
 
-  it('요약 탭: other가 있으면 표에 "기타 (10명 미만 범주 합계)" 줄과 안내 문구가 뜬다', () => {
+  it('요약 탭: other가 있으면 표에 "기타 (공개 기준에 따라 병합한 범주 합계)" 줄과 안내 문구가 뜬다', () => {
     renderPanel(publicRow);
-    expect(screen.getByText('기타 (10명 미만 범주 합계)')).toBeTruthy();
-    expect(screen.getByText("인원이 10명 미만인 범주는 '기타'로 합쳐 표시했습니다.")).toBeTruthy();
+    expect(screen.getByText('기타 (공개 기준에 따라 병합한 범주 합계)')).toBeTruthy();
+    expect(screen.getByText("인원이 10명 미만인 범주와, 합친 값을 10명 이상으로 맞추려고 함께 합친 범주는 '기타'로 묶어 표시했습니다.")).toBeTruthy();
     const rows = [...document.querySelectorAll('tbody tr')];
     expect(rows.reduce((s, tr) => s + Number(tr.children[1].textContent), 0)).toBe(76);
   });
@@ -75,7 +75,7 @@ describe('ResultPanel — 범주형 "기타" 병합·권한자 원본(rawLevels)
     await user.click(screen.getByRole('button', { name: '분포' }));
     expect(document.querySelectorAll('rect.chart-bar-merged')).toHaveLength(1);
     await user.click(screen.getByRole('button', { name: '데이터 보기' }));
-    expect(screen.getAllByText('기타 (10명 미만 범주 합계)').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('기타 (공개 기준에 따라 병합한 범주 합계)').length).toBeGreaterThan(0);
   });
 
   it('rawLevels가 있으면 원본을 표시하고(중복 집계 없이 합 = n) 권한 안내가 뜨며 기타 안내는 없다', () => {
@@ -84,9 +84,32 @@ describe('ResultPanel — 범주형 "기타" 병합·권한자 원본(rawLevels)
     expect(screen.getByText('잠수부')).toBeTruthy();
     expect(screen.getByText('제한 데이터 권한으로 소수 인원 범주까지 표시합니다. 화면을 외부에 공유할 때 주의하세요.')).toBeTruthy();
     expect(screen.queryByText(/합쳐 표시했습니다/)).toBeFalsy();
-    expect(screen.queryByText('기타 (10명 미만 범주 합계)')).toBeFalsy();
+    expect(screen.queryByText('기타 (공개 기준에 따라 병합한 범주 합계)')).toBeFalsy();
     const rows = [...document.querySelectorAll('tbody tr')];
     expect(rows.reduce((s, tr) => s + Number(tr.children[1].textContent), 0)).toBe(76);
+  });
+
+  it('원본 표시 시 최빈값도 원본 기준이다 — 반복 기록으로 소수 범주가 가장 큰 경우 공개 row.mode(A)가 아니라 D', () => {
+    // D는 고유 5명이지만 100건, A는 40건. 공개 결과는 D를 "기타"에 합쳤으므로 row.mode는 A다.
+    const raw = [lv('A', 40, 160), lv('B', 12, 160), lv('D', 100, 160), lv('E', 8, 160)];
+    renderPanel({
+      ...publicRow, n: 160, levels: [lv('A', 40, 160), lv('B', 12, 160)], other: { count: 108, proportion: 108 / 160 },
+      mode: 'A', rawLevels: raw,
+    });
+    expect(screen.getByText(/최빈값=D/)).toBeTruthy();
+    expect(screen.queryByText(/최빈값=A/)).toBeFalsy();
+  });
+
+  it('원본이 아니면 최빈값은 서버가 준 공개 row.mode 그대로다', () => {
+    renderPanel(publicRow);
+    expect(screen.getByText(/최빈값=용접공/)).toBeTruthy();
+  });
+
+  it('"기타" 안내가 10명 미만 범주만이 아니라 함께 합친 범주도 포함될 수 있음을 밝힌다(리뷰 지적: 1+3명에 12명을 끌어와 16명)', () => {
+    renderPanel(publicRow);
+    const note = screen.getByText(/함께 합친 범주는 '기타'로 묶어 표시했습니다/);
+    expect(note.textContent).toContain('10명 미만인 범주와');
+    expect(screen.queryByText(/10명 미만 범주 합계/)).toBeFalsy();
   });
 
   it('억제된 변수도 rawLevels가 있으면 원본을 보여준다(공개 정책 문구 대신)', () => {
@@ -102,7 +125,7 @@ describe('ResultPanel — 범주형 "기타" 병합·권한자 원본(rawLevels)
       { recipe: { analysisMode: 'descriptive', variableKeys: ['job', 'len'] } },
     );
     expect(screen.getByText('공개 정책에 따라 표시되지 않음')).toBeTruthy();
-    expect(screen.getByText(/범주형 변수 하나만 분석하면 10명 미만 범주를 '기타'로 합쳐 볼 수 있는 경우가 있습니다/)).toBeTruthy();
+    expect(screen.getByText(/범주형 변수 하나만 분석하면 소수 범주를 '기타'로 합쳐 볼 수 있는 경우가 있습니다/)).toBeTruthy();
   });
 
   it('변수가 1개이거나 순서형이면 단독 분석 안내가 없다', () => {
