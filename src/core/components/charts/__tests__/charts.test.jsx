@@ -169,6 +169,36 @@ describe('BoxPlot', () => {
   });
 });
 
+describe('HorizontalBarChart — 합계 막대·표 분리(범주형 "기타" 병합)', () => {
+  const levels = [
+    { level: 'a', count: 40, proportion: 0.4 },
+    { label: '그 외 5개 범주 + 기타', count: 60, proportion: 0.6, merged: true },
+  ];
+
+  it('merged 막대만 점선 스타일이고 label이 level보다 우선한다', () => {
+    render(<HorizontalBarChart levels={levels} />);
+    expect(document.querySelectorAll('rect.chart-bar-merged')).toHaveLength(1);
+    expect(screen.getByText('그 외 5개 범주 + 기타')).toBeTruthy();
+    expect(document.querySelectorAll('rect')).toHaveLength(2);
+  });
+
+  it('tableLevels를 주면 "데이터 보기" 표는 차트용으로 자르기 전의 전체 목록을 보여준다', async () => {
+    const user = userEvent.setup();
+    const tableLevels = [
+      { label: 'a', count: 40, proportion: 0.4 }, { label: 'b', count: 30, proportion: 0.3 },
+      { label: 'c', count: 20, proportion: 0.2 }, { label: 'd', count: 10, proportion: 0.1 },
+    ];
+    render(<HorizontalBarChart levels={levels} tableLevels={tableLevels} />);
+    await user.click(screen.getByRole('button', { name: '데이터 보기' }));
+    expect(document.querySelectorAll('tbody tr')).toHaveLength(4);
+  });
+
+  it('level 값이 같은 항목이 여러 개여도(key 충돌 없이) 렌더된다', () => {
+    render(<HorizontalBarChart levels={[{ level: '기타', count: 5, proportion: 0.5 }, { label: '기타', count: 5, proportion: 0.5, merged: true }]} />);
+    expect(document.querySelectorAll('rect')).toHaveLength(2);
+  });
+});
+
 describe('HorizontalBarChart', () => {
   it('levels가 비어있으면 "자료 없음"을 보여준다', () => {
     render(<HorizontalBarChart levels={[]} />);

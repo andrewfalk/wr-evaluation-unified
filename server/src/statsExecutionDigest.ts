@@ -26,7 +26,9 @@ import { INTEGRATED_CATALOG_VERSION } from './statsCatalogVersion';
 // Table1 — descriptiveStratified 전용 "total 강제 억제" 규칙(그룹 하나라도
 // suppressed면 total도 통째로 교체)이 추가돼 다시 범프한다
 // (statsDescriptiveStratifySuppression.ts의 forceTotalSuppressionWhereAnyGroupSuppressed).
-export const SUPPRESSION_RULE_VERSION = 'v6-table1-total-forced-suppression';
+// 범주형 소수 범주 "기타" 병합 — 변수 하나만 요청한 비순서형 범주형은 1~9명 범주를 "기타"로
+// 합쳐 공개한다(statsDescriptiveSuppression.ts planSmallLevelMerge)로 다시 범프한다.
+export const SUPPRESSION_RULE_VERSION = 'v7-discrete-other-merge';
 // PR1엔 aggregate 하나뿐 — PR5가 limited_row/phi를 도입할 때 실제 분기가 생긴다.
 const DISCLOSURE_POLICY_VERSION = 'v0-aggregate-only';
 // PR3-A — availableMethods(A-1/A-2) 계산 로직이 신설됐다. statsMethodCatalog.ts가
@@ -52,7 +54,9 @@ export const METHOD_POLICY_VERSION = 'v4-prediction-l2-logistic';
 // 전용 최소 DTO).
 // 끝 구간 병합 — AnalyzeHistogramBinSchema.tailMerged + (limited_row)
 // AnalyzeContinuousRevealedSchema.rawHistogram 필드가 추가돼 다시 범프.
-export const RESULT_SCHEMA_VERSION = 'v9-histogram-tail-merge-raw';
+// 범주형 "기타" 병합 — AnalyzeDiscreteRevealedSchema.other + (limited_row) rawLevels
+// 필드가 추가돼 다시 범프.
+export const RESULT_SCHEMA_VERSION = 'v10-discrete-other-raw-levels';
 
 export interface ComputeExecutionDigestInput {
   organizationId: string;

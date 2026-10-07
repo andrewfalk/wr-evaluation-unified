@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AnalyticsVariableMetadata, ExtractedValue } from '@wr/analytics-core';
 import type { DatasetRow } from '../statsDatasetBuilder';
-import { computeDescriptiveSuppression, buildStatsEngineRequest } from '../statsDescriptiveSuppression';
+import { computeDescriptiveSuppression, computeRawDiscreteLevels, buildStatsEngineRequest } from '../statsDescriptiveSuppression';
 import type { StatsEngineRawResult } from '../statsEngine';
 
 function meta(key: string, type: AnalyticsVariableMetadata['type']): AnalyticsVariableMetadata {
@@ -254,6 +254,40 @@ describe('computeDescriptiveSuppression — PR3-B 히스토그램/박스플롯 �
   });
 });
 
+// 비명목 동점 최빈값은 localeCompare가 아니라 코드유닛 순서다 — 서버 로케일·ICU에 따라 결과가
+// 달라지면 클라이언트가 원본 표시 때 다시 고르는 값(discreteLevels.js pickModeFromLevels, 같은
+// 반례로 테스트)과 어긋난다. ko-KR 로케일에서 localeCompare는 "가"<"A"이므로 이 PC에서도 옛 구현은 실패한다.
+describe('computeDescriptiveSuppression — 비순서형 동점 최빈값은 로케일 무관 코드유닛 순서', () => {
+  const key = 'job.identity.jobNameNormalized';
+  const catalogByKey = new Map([[key, meta(key, 'high_cardinality')]]);
+  const tieMode = (a: string, b: string) => {
+    const entries = [
+      ...Array.from({ length: 12 }, () => ({ value: a })),
+      ...Array.from({ length: 12 }, () => ({ value: b })),
+    ];
+    const raw: StatsEngineRawResult = {
+      continuous: [],
+      discrete: [{ variableKey: key, n: 24, levels: [{ level: a, count: 12 }, { level: b, count: 12 }] }],
+    };
+    const d = computeDescriptiveSuppression(rows(key, entries), [key], catalogByKey, raw).discrete[0];
+    if (d.suppressed) throw new Error('unexpected suppressed');
+    return d.mode;
+  };
+
+  it('"A" vs "가" 동점이면 "A"(코드유닛 65 < 44032) — 한국어 로케일의 localeCompare는 "가"를 고른다', () => {
+    expect(tieMode('A', '가')).toBe('A');
+    expect(tieMode('가', 'A')).toBe('A'); // 입력 순서와 무관
+  });
+
+  it('"a" vs "B" 동점이면 "B"(대문자 66 < 소문자 97) — localeCompare는 로케일과 무관하게 "a"를 고른다', () => {
+    expect(tieMode('a', 'B')).toBe('B');
+  });
+
+  it('같은 문자 체계 안에서는 사전순이다(가 < 나)', () => {
+    expect(tieMode('나', '가')).toBe('가');
+  });
+});
+
 describe('computeDescriptiveSuppression — mode·ordinal 순서(억제 안 됐을 때)', () => {
   it('elbow burdenGradeMax 동점이면 더 낮은(경한) 등급을 mode로 채택한다', () => {
     const key = 'elbow.assessment.burdenGradeMax';
@@ -302,6 +336,259 @@ describe('computeDescriptiveSuppression — mode·ordinal 순서(억제 안 됐�
       // levels[]는 Python의 입력순서(고도,경도,중등도)가 아니라 이 순서로 재정렬돼야 한다.
       expect(d.levels.map((l) => l.level)).toEqual(['경도', '중등도', '고도']);
     }
+  });
+});
+
+// 범주형 소수 범주 "기타" 병합 — 옵션({mergeSmallLevels:true})을 켜고, 그 범주형 변수 하나만
+// 요청했으며, ordinal이 아닐 때만 1~9명 범주를 합쳐 공개한다. 하나라도 어기면 기존 all-or-nothing.
+describe('computeDescriptiveSuppression — 소수 범주 "기타" 병합', () => {
+  const key = 'job.identity.jobNameNormalized';
+  const catalogByKey = new Map([[key, meta(key, 'high_cardinality')]]);
+  const mergeOpts = { mergeSmallLevels: true };
+
+  const ids = (prefix: string, n: number) => Array.from({ length: n }, (_v, i) => `${prefix}${i}`);
+
+  // groups[i].persons의 각 원소가 한 행 — 같은 사람 ID를 반복하면 한 사람의 여러 행이다.
+  function fixture(groups: Array<{ value: string | boolean; persons: string[] }>, variableKey = key) {
+    const dataRows: DatasetRow[] = [];
+    let i = 0;
+    for (const g of groups) {
+      for (const p of g.persons) {
+        dataRows.push({ caseId: `case-${i++}`, personClusterKey: p, values: { [variableKey]: extracted(g.value) } });
+      }
+    }
+    const raw: StatsEngineRawResult = {
+      continuous: [],
+      discrete: [{
+        variableKey, n: dataRows.length,
+        levels: groups.map((g) => ({ level: g.value, count: g.persons.length })),
+      }],
+    };
+    return { dataRows, raw };
+  }
+
+  function run(groups: Array<{ value: string | boolean; persons: string[] }>, options: { mergeSmallLevels?: boolean } | undefined = mergeOpts) {
+    const { dataRows, raw } = fixture(groups);
+    return computeDescriptiveSuppression(dataRows, [key], catalogByKey, raw, options).discrete[0];
+  }
+
+  it('소수 범주(1명·3명)가 "기타"로 모이고, 합쳐도 4명(<10)이라 가장 작은 공개 범주(12명)를 끌어와 10명 이상으로 채운다', () => {
+    const d = run([
+      { value: 'A', persons: ids('a', 40) }, { value: 'B', persons: ids('b', 20) },
+      { value: 'C', persons: ids('c', 12) }, { value: 'D', persons: ids('d', 1) }, { value: 'E', persons: ids('e', 3) },
+    ]);
+    expect(d.suppressed).toBe(false);
+    if (d.suppressed) return;
+    expect(d.levels.map((l) => l.level)).toEqual(['A', 'B']);
+    expect(d.other).toEqual({ count: 12 + 1 + 3, proportion: 16 / 76 });
+    expect(d.n).toBe(76);
+    // 공개되는 모든 셀(범주·기타)의 건수 합이 n과 정확히 같다 — 숨겨진 값이 없다.
+    expect(d.levels.reduce((s, l) => s + l.count, 0) + d.other!.count).toBe(d.n);
+  });
+
+  it('소수 범주만으로 이미 10명 이상(5+6=11명)이면 더 끌어오지 않는다', () => {
+    const d = run([
+      { value: 'A', persons: ids('a', 40) }, { value: 'B', persons: ids('b', 20) },
+      { value: 'D', persons: ids('d', 6) }, { value: 'E', persons: ids('e', 5) },
+    ]);
+    expect(d.suppressed).toBe(false);
+    if (d.suppressed) return;
+    expect(d.levels.map((l) => l.level)).toEqual(['A', 'B']);
+    expect(d.other!.count).toBe(11);
+  });
+
+  it('"기타"의 인원은 합산이 아니라 person 합집합이다 — 같은 6명이 두 소수 범주에 걸치면 12가 아니라 6명이라 더 끌어온다', () => {
+    const same = ids('x', 6);
+    const d = run([
+      { value: 'A', persons: ids('a', 40) }, { value: 'B', persons: ids('b', 20) }, { value: 'C', persons: ids('c', 12) },
+      { value: 'D', persons: same }, { value: 'E', persons: same },
+    ]);
+    expect(d.suppressed).toBe(false);
+    if (d.suppressed) return;
+    // 합산(6+6=12≥10)으로 잘못 판정하면 C가 남지만, 합집합(6명)이면 C(12명)를 끌어와 "기타"=18명.
+    expect(d.levels.map((l) => l.level)).toEqual(['A', 'B']);
+    expect(d.other!.count).toBe(6 + 6 + 12);
+  });
+
+  it('끌어올 범주가 동률이면 건수, 그다음 범주 키 문자열 순서로 결정적으로 고른다', () => {
+    const d = run([
+      { value: 'A', persons: ids('a', 40) }, { value: 'B', persons: ids('b', 12) },
+      { value: 'C', persons: ids('c', 12) }, { value: 'D', persons: ids('d', 3) },
+    ]);
+    expect(d.suppressed).toBe(false);
+    if (d.suppressed) return;
+    expect(d.levels.map((l) => l.level)).toEqual(['A', 'C']); // 'string:B'가 먼저 끌려간다
+    expect(d.other!.count).toBe(12 + 3);
+  });
+
+  it('남은 이름 붙은 범주가 2개 미만이면 변수 전체를 억제한다(boolean 96/4, 범주 A 50 + 소수)', () => {
+    expect(run([{ value: true, persons: ids('t', 96) }, { value: false, persons: ids('f', 4) }]).suppressed).toBe(true);
+    expect(run([{ value: 'A', persons: ids('a', 50) }, { value: 'D', persons: ids('d', 3) }]).suppressed).toBe(true);
+    // A 50 + B 20 + 소수 3: 3명 "기타"를 채우려 B를 끌어오면 이름 붙은 범주가 A 하나뿐.
+    expect(run([
+      { value: 'A', persons: ids('a', 50) }, { value: 'B', persons: ids('b', 20) }, { value: 'D', persons: ids('d', 3) },
+    ]).suppressed).toBe(true);
+  });
+
+  it('소수 범주가 없으면 지금과 똑같이 공개되고 other 키가 아예 없다', () => {
+    const d = run([{ value: 'A', persons: ids('a', 30) }, { value: 'B', persons: ids('b', 25) }]);
+    expect(d.suppressed).toBe(false);
+    if (d.suppressed) return;
+    expect('other' in d).toBe(false);
+    expect(d.levels.map((l) => l.count)).toEqual([30, 25]);
+  });
+
+  it('옵션이 없으면(Table1 층화 경로) 소수 범주가 있을 때 기존처럼 전체 억제된다', () => {
+    const groups = [{ value: 'A', persons: ids('a', 40) }, { value: 'B', persons: ids('b', 20) }, { value: 'D', persons: ids('d', 3) }];
+    expect(run(groups, undefined).suppressed).toBe(true);
+    expect(run(groups, { mergeSmallLevels: false }).suppressed).toBe(true);
+  });
+
+  it('최빈값은 "기타"를 제외한 실제 범주에서만 고른다(기타 40건이 어느 범주보다 커도)', () => {
+    // D·E는 각 5명이지만 한 사람이 4행씩이라 행 수는 20 — "기타"=40건 > A=12건.
+    const heavy = (prefix: string) => ids(prefix, 5).flatMap((p) => [p, p, p, p]);
+    const d = run([
+      { value: 'A', persons: ids('a', 12) }, { value: 'B', persons: ids('b', 11) },
+      { value: 'D', persons: heavy('d') }, { value: 'E', persons: heavy('e') },
+    ]);
+    expect(d.suppressed).toBe(false);
+    if (d.suppressed) return;
+    expect(d.other!.count).toBe(40);
+    expect(d.mode).toBe('A');
+  });
+
+  it('ordinal 변수는 옵션을 켜도 소수 등급이 있으면 기존처럼 전체 억제한다(등급 순서가 깨지므로)', () => {
+    const ordKey = 'elbow.assessment.burdenGradeMax';
+    // 같은 데이터를 categorical로 보면 병합이 성립한다(이름 붙은 범주 2개 이상 남음) —
+    // ordinal 가드가 있어야만 억제되는지 확인하려는 대조군이다.
+    const { dataRows, raw } = fixture([
+      { value: '경도', persons: ids('a', 30) }, { value: '중등도', persons: ids('b', 25) },
+      { value: '부담 작업 아님', persons: ids('c', 20) }, { value: '고도', persons: ids('d', 3) },
+    ], ordKey);
+    const asCategorical = computeDescriptiveSuppression(dataRows, [ordKey], new Map([[ordKey, meta(ordKey, 'categorical')]]), raw, mergeOpts).discrete[0];
+    expect(asCategorical.suppressed).toBe(false);
+    const asOrdinal = computeDescriptiveSuppression(dataRows, [ordKey], new Map([[ordKey, meta(ordKey, 'ordinal')]]), raw, mergeOpts).discrete[0];
+    expect(asOrdinal.suppressed).toBe(true);
+  });
+
+  it('결측 인원이 1~9명이면 병합 옵션을 켜도 전체 억제한다', () => {
+    const { dataRows, raw } = fixture([{ value: 'A', persons: ids('a', 30) }, { value: 'B', persons: ids('b', 25) }]);
+    const missingRows: DatasetRow[] = ids('m', 5).map((p, i) => ({
+      caseId: `m-${i}`, personClusterKey: p, values: { [key]: extracted(null, 'not_entered') },
+    }));
+    const d = computeDescriptiveSuppression([...dataRows, ...missingRows], [key], catalogByKey, raw, mergeOpts).discrete[0];
+    expect(d.suppressed).toBe(true);
+  });
+
+  // 같은 응답의 다른 변수가 값이나 결측 분할로 "기타" 안을 쪼개 보여 주면 한 응답만으로 소수
+  // 범주가 역산된다(Codex 리뷰 2·3회차 반례). 변수 사이 종속은 모듈마다 달라 변수 개수로 막는다.
+  describe('변수가 2개 이상이면 병합하지 않는다(단일 응답 역산 반례)', () => {
+    const groups = [
+      { value: 'A', persons: ids('a', 20) }, { value: 'B', persons: ids('b', 20) },
+      { value: 'D', persons: ids('d', 1) }, { value: 'E', persons: ids('e', 9) },
+    ];
+
+    it('상병 코드 + 부위군 반례: 범주형 두 변수를 함께 요청하면 코드 변수는 억제되고 단독이면 병합된다', () => {
+      const codeKey = 'disease.identity.diagnosisCode';
+      const groupKey = 'disease.identity.bodyRegionGroup';
+      const { dataRows, raw } = fixture(groups, codeKey);
+      // 부위군(무릎=21, 어깨=29)은 소수 셀이 없어 그 자체로는 공개 가능한 변수다.
+      for (const [i, r] of dataRows.entries()) r.values[groupKey] = extracted(i < 21 ? '무릎' : '어깨');
+      raw.discrete.push({ variableKey: groupKey, n: dataRows.length, levels: [{ level: '무릎', count: 21 }, { level: '어깨', count: dataRows.length - 21 }] });
+      const catalog = new Map([[codeKey, meta(codeKey, 'categorical')], [groupKey, meta(groupKey, 'categorical')]]);
+
+      const together = computeDescriptiveSuppression(dataRows, [codeKey, groupKey], catalog, raw, mergeOpts);
+      expect(together.discrete.find((d) => d.variableKey === codeKey)!.suppressed).toBe(true);
+
+      const alone = computeDescriptiveSuppression(dataRows, [codeKey], catalog, raw, mergeOpts);
+      expect(alone.discrete[0].suppressed).toBe(false);
+    });
+
+    it('mddmStatus + lifetimeDoseMNh 반례: 결측으로 "기타"를 쪼갤 수 있는 연속형과 함께 요청해도 억제된다', () => {
+      const statusKey = 'spine.case.mddmStatus';
+      const doseKey = 'spine.mddm.lifetimeDoseMNh';
+      const { dataRows, raw } = fixture(groups, statusKey);
+      for (const [i, r] of dataRows.entries()) {
+        // D(1명)가 결측 사유가 되는 분할 — 결측 21 = D 1 + 나머지 20.
+        r.values[doseKey] = i < 21 ? extracted(null, 'not_entered') : extracted(10 + i);
+      }
+      raw.continuous.push({
+        variableKey: doseKey, n: dataRows.length - 21, mean: 50, sd: 10, median: null, q1: null, q3: null, iqr: null,
+        skewness: null, kurtosis: null, min: 10, max: 90, nullReasons: {}, histogram: null, boxplot: null,
+      });
+      const catalog = new Map([[statusKey, meta(statusKey, 'categorical')], [doseKey, meta(doseKey, 'continuous')]]);
+      const together = computeDescriptiveSuppression(dataRows, [statusKey, doseKey], catalog, raw, mergeOpts);
+      expect(together.discrete[0].suppressed).toBe(true);
+    });
+
+    it('범주형 + 아무 연속형이나 조합해도 병합하지 않고, 같은 범주형을 단독으로 요청하면 병합한다', () => {
+      const { dataRows, raw } = fixture(groups);
+      const contKey = 'knee.relatedness.max';
+      for (const r of dataRows) r.values[contKey] = extracted(5);
+      raw.continuous.push({
+        variableKey: contKey, n: dataRows.length, mean: 5, sd: 0, median: null, q1: null, q3: null, iqr: null,
+        skewness: null, kurtosis: null, min: 5, max: 5, nullReasons: {}, histogram: null, boxplot: null,
+      });
+      const catalog = new Map([[key, meta(key, 'high_cardinality')], [contKey, meta(contKey, 'continuous')]]);
+      expect(computeDescriptiveSuppression(dataRows, [key, contKey], catalog, raw, mergeOpts).discrete[0].suppressed).toBe(true);
+      const alone = computeDescriptiveSuppression(dataRows, [key], catalog, raw, mergeOpts).discrete[0];
+      expect(alone.suppressed).toBe(false);
+    });
+  });
+});
+
+describe('computeRawDiscreteLevels — 권한자 원본 범주 빈도', () => {
+  const key = 'job.identity.jobNameNormalized';
+  const dRow = (i: number, person: string, value: unknown, missing: ExtractedValue<unknown>['missing'] = null): DatasetRow => ({
+    caseId: `c${i}`, personClusterKey: person, values: { [key]: extracted(missing ? null : value, missing) },
+  });
+
+  it('범주별 소수셀 게이트 없이 1명 범주까지 원본 그대로 센다(첫 등장 순서, 합=유효 행 수)', () => {
+    const entries = [
+      ...Array.from({ length: 30 }, (_v, i) => dRow(i, `a${i}`, '용접공')),
+      dRow(100, 'z1', '잠수부'),
+      ...Array.from({ length: 12 }, (_v, i) => dRow(200 + i, `b${i}`, '간호사')),
+    ];
+    const levels = computeRawDiscreteLevels(entries, key)!;
+    expect(levels.map((l) => [l.level, l.count])).toEqual([['용접공', 30], ['잠수부', 1], ['간호사', 12]]);
+    expect(levels.reduce((s, l) => s + l.proportion, 0)).toBeCloseTo(1, 10);
+  });
+
+  it('유효값 인원이 1~9명이면 null(변수 수준 게이트)', () => {
+    const entries = Array.from({ length: 5 }, (_v, i) => dRow(i, `a${i}`, '용접공'));
+    expect(computeRawDiscreteLevels(entries, key)).toBeNull();
+  });
+
+  it('결측 인원이 1~9명이면 null', () => {
+    const entries = [
+      ...Array.from({ length: 30 }, (_v, i) => dRow(i, `a${i}`, '용접공')),
+      ...Array.from({ length: 4 }, (_v, i) => dRow(50 + i, `m${i}`, null, 'not_entered')),
+    ];
+    expect(computeRawDiscreteLevels(entries, key)).toBeNull();
+  });
+
+  it('유효값이 하나도 없으면 null', () => {
+    expect(computeRawDiscreteLevels([], key)).toBeNull();
+  });
+
+  it('공개 경로의 범주 건수와 정확히 같다(소수 범주가 없는 변수)', () => {
+    const entries = [
+      ...Array.from({ length: 30 }, (_v, i) => dRow(i, `a${i}`, 'A')),
+      ...Array.from({ length: 25 }, (_v, i) => dRow(100 + i, `b${i}`, 'B')),
+    ];
+    const raw: StatsEngineRawResult = { continuous: [], discrete: [{ variableKey: key, n: 55, levels: [{ level: 'A', count: 30 }, { level: 'B', count: 25 }] }] };
+    const pub = computeDescriptiveSuppression(entries, [key], new Map([[key, meta(key, 'categorical')]]), raw).discrete[0];
+    if (pub.suppressed) throw new Error('unexpected suppressed');
+    expect(computeRawDiscreteLevels(entries, key)).toEqual(pub.levels);
+  });
+
+  it('ordinal 변수는 심각도 순서로 정렬한다', () => {
+    const ordKey = 'elbow.assessment.burdenGradeMax';
+    const entries: DatasetRow[] = [
+      ...Array.from({ length: 12 }, (_v, i) => ({ caseId: `h${i}`, personClusterKey: `h${i}`, values: { [ordKey]: extracted('고도') } })),
+      ...Array.from({ length: 12 }, (_v, i) => ({ caseId: `l${i}`, personClusterKey: `l${i}`, values: { [ordKey]: extracted('경도') } })),
+    ];
+    expect(computeRawDiscreteLevels(entries, ordKey)!.map((l) => l.level)).toEqual(['경도', '고도']);
   });
 });
 

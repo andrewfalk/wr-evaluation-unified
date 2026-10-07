@@ -11,9 +11,16 @@ const MARGIN = { top: 8, right: 72, bottom: 8, left: 128 };
 // 안 붙인다 — 이 차트는 값(개수·비율)을 처음부터 막대 옆에 항상 보이는 텍스트로
 // 그린다(hover/focus로만 드러나는 숨은 정보가 없음). ChartTooltip은 "hover 전에는
 // 안 보이던 정보"를 키보드로도 꺼낼 수 있게 하려는 것이라 여긴 대상이 없다.
-export function HorizontalBarChart({ levels }) {
+//
+// 범주형 "기타" 병합 — levels 항목은 { level, count, proportion } 외에 { label, merged }를
+// 가질 수 있다. label이 있으면 level 대신 그 이름을 쓰고, merged인 막대는 히스토그램의
+// 끝 구간 병합과 같은 옅은 면+점선(.chart-bar-merged)으로 구분한다("상위 N개 밖 범주 + 기타"
+// 같은 합계 막대). tableLevels를 주면 "데이터 보기" 표는 차트용으로 자르기 전의 전체 목록을
+// 그대로 보여 준다(차트는 상위 N개, 표는 전부).
+export function HorizontalBarChart({ levels, tableLevels }) {
   if (!levels || levels.length === 0) return <p className="swb-suppressed-note">자료 없음</p>;
 
+  const nameOf = (l) => (l.label !== undefined ? l.label : String(l.level));
   const height = MARGIN.top + MARGIN.bottom + levels.length * (BAR_HEIGHT + BAR_GAP) - BAR_GAP;
   const innerWidth = CHART_VIEW_WIDTH - MARGIN.left - MARGIN.right;
   const maxCount = Math.max(...levels.map((l) => l.count), 1);
@@ -26,11 +33,13 @@ export function HorizontalBarChart({ levels }) {
           const y = i * (BAR_HEIGHT + BAR_GAP);
           const barWidth = Math.max(xScale(l.count), 1);
           return (
-            <g key={String(l.level)}>
+            <g key={`${i}-${nameOf(l)}`}>
               <text x={-8} y={y + BAR_HEIGHT / 2} textAnchor="end" dominantBaseline="middle" className="chart-axis-label">
-                {String(l.level)}
+                {nameOf(l)}
               </text>
-              <rect x={0} y={y} width={barWidth} height={BAR_HEIGHT} fill={ACCENT} />
+              {l.merged
+                ? <rect x={0} y={y} width={barWidth} height={BAR_HEIGHT} className="chart-bar-merged" />
+                : <rect x={0} y={y} width={barWidth} height={BAR_HEIGHT} fill={ACCENT} />}
               <text x={barWidth + 6} y={y + BAR_HEIGHT / 2} dominantBaseline="middle" className="chart-value-label">
                 {l.count} ({(l.proportion * 100).toFixed(1)}%)
               </text>
@@ -41,12 +50,13 @@ export function HorizontalBarChart({ levels }) {
     </ChartContainer>
   );
 
+  const rowsForTable = tableLevels ?? levels;
   const table = (
     <>
       <thead><tr><th>수준</th><th>빈도</th><th>비율</th></tr></thead>
       <tbody>
-        {levels.map((l, i) => (
-          <tr key={i}><td>{String(l.level)}</td><td>{l.count}</td><td>{(l.proportion * 100).toFixed(1)}%</td></tr>
+        {rowsForTable.map((l, i) => (
+          <tr key={i}><td>{nameOf(l)}</td><td>{l.count}</td><td>{(l.proportion * 100).toFixed(1)}%</td></tr>
         ))}
       </tbody>
     </>

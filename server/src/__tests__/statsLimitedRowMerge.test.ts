@@ -243,6 +243,97 @@ describe('attachLimitedRowFields — descriptive rawHistogram', () => {
   });
 });
 
+// 범주형 소수 범주 "기타" 병합 PR — 원본 범주 빈도(rawLevels, limited_row). 공개 조건은 변수
+// 수준 게이트(유효값·결측 고유 인원이 0명이거나 ≥10명)뿐이라 범주별 소수셀 때문에 aggregate가
+// 억제된 변수에도 붙는다.
+describe('attachLimitedRowFields — descriptive rawLevels', () => {
+  const dKey = 'job.identity.jobNameNormalized';
+  const catRow = (i: number, person: string, value: string): DatasetRow => ({
+    caseId: `c${i}`, personClusterKey: person, values: { [dKey]: { value, missing: null, qualityFlags: [] } },
+  });
+  // 용접공 30명·간호사 25명·잠수부 1명(소수 범주) — aggregate는 이 변수를 억제했다.
+  const rows = [
+    ...Array.from({ length: 30 }, (_v, i) => catRow(i, `a${i}`, '용접공')),
+    ...Array.from({ length: 25 }, (_v, i) => catRow(100 + i, `b${i}`, '간호사')),
+    catRow(200, 'z0', '잠수부'),
+  ];
+  const suppressedResult: AnalyzeResult = {
+    continuous: [], discrete: [{ variableKey: dKey, kind: 'discrete', suppressed: true }],
+  };
+
+  it('권한이 있으면 aggregate에서 억제된 변수에도 1명 범주까지 원본이 붙는다', async () => {
+    const ctx = baseCtx({ dataset: { ...baseCtx().dataset, rows } });
+    const outcome = await attachLimitedRowFields(ctx, suppressedResult, true);
+    expect(outcome.attached).toBe(true);
+    const d = outcome.result.discrete[0];
+    expect(d.suppressed).toBe(true);
+    expect(d.rawLevels!.map((l) => [l.level, l.count])).toEqual([['용접공', 30], ['간호사', 25], ['잠수부', 1]]);
+    expect(d.rawLevels!.reduce((s, l) => s + l.count, 0)).toBe(rows.length);
+  });
+
+  it('공개된 변수(other 있음)에도 붙고, 공개 levels·other는 그대로 둔다(원본은 별도 필드)', async () => {
+    const publicResult: AnalyzeResult = {
+      continuous: [], discrete: [{
+        variableKey: dKey, kind: 'discrete', suppressed: false, n: 56, missingCount: 0, missingPatterns: [],
+        levels: [{ level: '용접공', count: 30, proportion: 30 / 56 }, { level: '간호사', count: 25, proportion: 25 / 56 }],
+        other: { count: 1, proportion: 1 / 56 }, mode: '용접공',
+      }],
+    };
+    const ctx = baseCtx({ dataset: { ...baseCtx().dataset, rows } });
+    const d = (await attachLimitedRowFields(ctx, publicResult, true)).result.discrete[0];
+    if (d.suppressed) throw new Error('unexpected suppressed');
+    expect(d.levels).toEqual(publicResult.discrete[0].suppressed ? [] : (publicResult.discrete[0] as { levels: unknown[] }).levels);
+    expect(d.other).toEqual({ count: 1, proportion: 1 / 56 });
+    expect(d.rawLevels).toHaveLength(3);
+  });
+
+  it('권한이 없으면 붙지 않고 입력 result를 그대로 돌려준다', async () => {
+    const ctx = baseCtx({ dataset: { ...baseCtx().dataset, rows } });
+    const outcome = await attachLimitedRowFields(ctx, suppressedResult, false);
+    expect(outcome.attached).toBe(false);
+    expect(outcome.result).toBe(suppressedResult);
+  });
+
+  it('변수 수준 게이트 실패(유효값 인원 1~9명, 결측 인원 1~9명)면 붙지 않는다', async () => {
+    const few = Array.from({ length: 6 }, (_v, i) => catRow(i, `a${i}`, '용접공'));
+    const fewCtx = baseCtx({ dataset: { ...baseCtx().dataset, rows: few } });
+    expect((await attachLimitedRowFields(fewCtx, suppressedResult, true)).attached).toBe(false);
+
+    const missing: DatasetRow[] = [
+      ...rows,
+      ...Array.from({ length: 4 }, (_v, i) => ({ caseId: `m${i}`, personClusterKey: `m${i}`, values: { [dKey]: { value: null, missing: 'not_entered' as const, qualityFlags: [] } } })),
+    ];
+    const missingCtx = baseCtx({ dataset: { ...baseCtx().dataset, rows: missing } });
+    const outcome = await attachLimitedRowFields(missingCtx, suppressedResult, true);
+    expect(outcome.attached).toBe(false);
+    expect('rawLevels' in outcome.result.discrete[0]).toBe(false);
+  });
+
+  it('입력 result 객체를 mutate하지 않는다', async () => {
+    const ctx = baseCtx({ dataset: { ...baseCtx().dataset, rows } });
+    const before = JSON.parse(JSON.stringify(suppressedResult));
+    await attachLimitedRowFields(ctx, suppressedResult, true);
+    expect(suppressedResult).toEqual(before);
+    expect('rawLevels' in suppressedResult.discrete[0]).toBe(false);
+  });
+
+  it('discrete 결과가 없는 result(연속형만, Table1 층화 등)는 건드리지 않는다', async () => {
+    const ctx = baseCtx({ dataset: { ...baseCtx().dataset, rows } });
+    const noDiscrete: AnalyzeResult = { continuous: [], discrete: [] };
+    const outcome = await attachLimitedRowFields(ctx, noDiscrete, true);
+    expect(outcome.attached).toBe(false);
+    // 결과 객체 전체 참조는 continuous가 항상 map으로 새 배열을 만들어 달라지지만(기존 동작),
+    // discrete 배열은 하나도 안 붙었으면 원본 참조를 유지한다.
+    expect(outcome.result.discrete).toBe(noDiscrete.discrete);
+  });
+
+  it('canonicalDigest가 던지지 않는다(undefined 값 키를 새로 만들지 않음)', async () => {
+    const ctx = baseCtx({ dataset: { ...baseCtx().dataset, rows } });
+    const outcome = await attachLimitedRowFields(ctx, suppressedResult, true);
+    expect(() => canonicalDigest({ result: outcome.result })).not.toThrow();
+  });
+});
+
 describe('attachLimitedRowFields — 상관행렬은 해당 없음(no-op)', () => {
   it('result.correlationMatrix가 있어도 손대지 않는다(limited_row 필드 자체가 없음)', async () => {
     const result: AnalyzeResult = {

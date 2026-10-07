@@ -112,14 +112,16 @@ describe('computeExecutionDigest — B안 버전 상수 3개(같은 모듈 상�
       expect(capturedInput.chartDisclosurePolicyVersion).toBe('v3-histogram-tail-merge');
       // Table1 — descriptiveStratified 전용 "total 강제 억제" 규칙이 추가돼
       // v5-histogram-adaptive-resolution → v6-table1-total-forced-suppression으로 범프됐다.
-      expect(capturedInput.suppressionRuleVersion).toBe('v6-table1-total-forced-suppression');
+      // 범주형 소수 범주 "기타" 병합으로 v7-discrete-other-merge로 다시 범프됐다.
+      expect(capturedInput.suppressionRuleVersion).toBe('v7-discrete-other-merge');
       // PR4-A1 — AnalyzeResult.regression 필드가 추가돼 v4-histogram-merge-fields →
       // v5-regression으로 범프됐다. PR4-A2 — diagnostics/spline 필드 추가로
       // v6-regression-diagnostics-spline으로 범프됐다. PR4-B2 — AnalyzeResult.
       // prediction 필드가 추가돼 v7-prediction으로 다시 범프됐다. Table1 —
       // AnalyzeResult.descriptiveStratified 필드가 추가돼 v8-table1-stratify로 다시 범프됐다.
       // 끝 구간 병합 — bin.tailMerged + rawHistogram 추가로 v9-histogram-tail-merge-raw.
-      expect(capturedInput.resultSchemaVersion).toBe('v9-histogram-tail-merge-raw');
+      // 범주형 "기타" 병합 — other + rawLevels 추가로 v10-discrete-other-raw-levels.
+      expect(capturedInput.resultSchemaVersion).toBe('v10-discrete-other-raw-levels');
 
       // (2) 각 필드를 범프 전 값으로 되돌리면 실제로 다른 digest가 나오는지(=이
       // 필드들이 죽은 값이 아니라 실제로 해시에 반영되는지) 확인한다. 스파이는

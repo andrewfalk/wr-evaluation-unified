@@ -302,7 +302,7 @@ MDDM (Mainz-Dortmund Dose Model) 독일 직업성 요추 질환 평가 모델 �
 | `stats.view` | 조직 소속 인증 사용자 전원 | 카탈로그·레시피·결과 화면 열람 (`GET /catalog`, `POST /preview`) |
 | `stats.regression` | 전원 | 분석 실행·폴링·취소 (`POST /analyze`, `GET /runs/:id`, `POST /runs/:id/cancel`) — 기술통계·이변량·상관행렬·회귀·예측 공통 |
 | `stats.export_results` | 전원 | 저장된 집계 결과 CSV 내보내기 (`POST /export`) |
-| `stats.export_limited_rows` | **grant 필요** | 관리자 콘솔 표시명 "제한 데이터 열람(원본 값·원본 히스토그램)". 분석 응답에 제한 행데이터 필드(이상치 원값·산점도 원시 점·회귀 관측치 진단값·원본 히스토그램)를 포함. **행 단위 CSV 내보내기는 아직 없음** |
+| `stats.export_limited_rows` | **grant 필요** | 관리자 콘솔 표시명 "제한 데이터 열람(원본 값·원본 분포)"(마이그레이션 0034→0035). 분석 응답에 제한 행데이터 필드(이상치 원값·산점도 원시 점·회귀 관측치 진단값·원본 히스토그램·원본 범주 빈도)를 포함. **행 단위 CSV 내보내기는 아직 없음** |
 | `stats.export_phi` | admin 역할 + grant + step-up + 사유 | 예약됨 — 행 단위·PHI 내보내기는 후속(PR5)이라 현재 노출 경로 없음 |
 
 grant는 관리자 콘솔 **"통계 권한"** 탭(`/api/capabilities/*`)에서 부여·회수하며 모두 감사 로그에 남는다.
@@ -311,7 +311,7 @@ grant는 관리자 콘솔 **"통계 권한"** 탭(`/api/capabilities/*`)에서 �
 
 | 모드 | 내용 | CSV |
 |---|---|---|
-| 기술통계 | 연속형(n·평균·SD·중앙값·사분위·왜도·첨도·히스토그램·박스플롯)·범주형 빈도·결측 사유 분포. **Table 1 층화**(담당의별/범주형 변수별, 소수 인원 "기타" 병합, 한 그룹이라도 억제되면 total도 억제) | 지원 |
+| 기술통계 | 연속형(n·평균·SD·중앙값·사분위·왜도·첨도·히스토그램·박스플롯)·범주형 빈도(그 변수 하나만 분석하면 소수 범주를 "기타"로 합쳐 공개)·결측 사유 분포. **Table 1 층화**(담당의별/범주형 변수별, 소수 인원 "기타" 병합, 한 그룹이라도 억제되면 total도 억제) | 지원 |
 | 이변량 | 실행 가능 8종: Welch t · Mann-Whitney · ANOVA · Kruskal-Wallis · 카이제곱 · Fisher exact · Pearson · Spearman. 반복측정 쌍 검정(paired t · Wilcoxon)은 카탈로그에만 있고 현재 실행 불가 | 미지원 |
 | 상관행렬 | 변수 C(k,2)쌍 상관 일괄 계산 + BH-FDR 보정, 히트맵 | 미지원 |
 | 회귀 | OLS · 이분 로지스틱(HC3 / person-cluster CR1 표준오차, 완전·준완전 분리 판정), 진단 플롯 4종·VIF·condition number, 자연 3차 spline · interaction · 표준화 | 지원 |
@@ -323,7 +323,7 @@ grant는 관리자 콘솔 **"통계 권한"** 탭(`/api/capabilities/*`)에서 �
 
 - **카탈로그**: 통합 83개 변수(`CATALOG_VERSION = v28-age-at-injury`, 서버 통합 `v28-age-at-injury+v1-snapshot-columns`) — 6개 평가 모듈 변수, 공통 인적사항·상병/직업 롤업, DB 컬럼(담당의·등록일, 필터 전용).
 - **grain 3종**: `case`(사례, 환자 1행) · `job`(직력) · `disease`(상병). case 변수는 하위 grain으로 브로드캐스트되고, 한 사람이 여러 행이면 person 단위로 센다.
-- **공개통제**: 최소 코호트(10명) 미만 소수 셀 억제(부분 억제 금지), 히스토그램 적응형 해상도 + 양 끝 소수 구간 병합(권한자는 원본 히스토그램), 차분(differencing) 방지(15분 창 family당 30회·사용자 전역 100쿼리 예산), 분석 요청 사용자당 분당 20회 한도. 제한 필드는 **응답 시점에** capability를 확인한 뒤에만 부착한다.
+- **공개통제**: 최소 코호트(10명) 미만 소수 셀 억제(부분 억제 금지), 히스토그램 적응형 해상도 + 양 끝 소수 구간 병합(권한자는 원본 히스토그램), 범주형 소수 범주 "기타" 병합(비순서형·변수 1개 요청일 때만 — 다른 변수의 값·결측으로 "기타"를 쪼개 역산하는 것을 막기 위해, 권한자는 원본 범주 빈도), 차분(differencing) 방지(15분 창 family당 30회·사용자 전역 100쿼리 예산), 분석 요청 사용자당 분당 20회 한도. 제한 필드는 **응답 시점에** capability를 확인한 뒤에만 부착한다.
 - **재현성**: 모든 실행은 `stats_runs`에 recipe/source/result digest·catalog/engine 버전과 함께 저장되며, 결과 보존 기간은 `STATS_RUNS_RESULT_TTL_HOURS`(기본 168시간)다.
 
 ### 운영 환경변수 (docker-compose가 전달하는 항목, 기본값)

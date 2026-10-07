@@ -534,5 +534,136 @@ describe.skipIf(!TEST_DB_URL)('POST /analyze(descriptive) — 실데이터 HTTP 
       expect(old.body.result.continuous[0].rawHistogram).toBeUndefined();
       expect(old.body.result.continuous[0].histogram === null || Array.isArray(old.body.result.continuous[0].histogram?.bins)).toBe(true);
     }, 30000);
+
+    // -------------------------------------------------------------------------
+    // 범주형 소수 범주 "기타" 병합 PR — 사용자가 실제로 본 변수(대표 직종명)로 같은 4경로를
+    // 확인한다. 용접공·목수·간호사 12명씩 + 잠수부 3명(소수 범주): 기존엔 변수 전체 억제였다.
+    // 단독 요청이면 잠수부(3)에 가장 작은 공개 범주 하나(동률이면 범주 키 순서상 첫 번째인
+    // 간호사)를 끌어와 "기타"=15명, 이름 붙은 범주는 용접공·목수 2개다.
+    // -------------------------------------------------------------------------
+    const JOB_KEY = 'job.rollup.longestTenureJobNameNormalized';
+    const JOB_BODY = { ...RECIPE_BASE, variableKeys: [JOB_KEY], analysisMode: 'descriptive' };
+
+    async function seedJobNames(): Promise<void> {
+      const spec: Array<[string, number]> = [['용접공', 12], ['목수', 12], ['간호사', 12], ['잠수부', 3]];
+      for (const [name, count] of spec) {
+        for (let i = 0; i < count; i += 1) {
+          await insertPatient(
+            { data: { shared: { jobs: [{ id: `job-${name}-${i}`, jobName: name, startDate: '2015-01-01', endDate: '2020-01-01' }] }, modules: {}, activeModules: [] } },
+            `job-${name}-${i}-${crypto.randomUUID()}`,
+          );
+        }
+      }
+    }
+    const levelCountSum = (levels: Array<{ count: number }>) => levels.reduce((s, l) => s + l.count, 0);
+
+    it('rawLevels — 권한이 없으면 소수 범주가 "기타"로 합쳐져 공개되고 원본 필드는 없다(캐시 hit도 동일)', async () => {
+      await seedJobNames();
+      const first = await authed(request(app()).post('/api/stats/analyze')).send(JOB_BODY);
+      expect(first.status).toBe(200);
+      const d = first.body.result.discrete[0];
+      expect(d.suppressed).toBe(false);
+      expect(d.n).toBe(39);
+      expect(d.levels.map((l: { level: string }) => l.level).sort()).toEqual(['목수', '용접공']);
+      expect(d.other).toEqual({ count: 15, proportion: 15 / 39 });
+      expect(levelCountSum(d.levels) + d.other.count).toBe(39);
+      expect(d.rawLevels).toBeUndefined();
+      expect(JSON.stringify(d)).not.toContain('잠수부'); // 소수 범주 이름이 응답에 없다
+
+      const second = await authed(request(app()).post('/api/stats/analyze')).send(JOB_BODY);
+      expect(second.body.runManifest.analysisRunId).toBe(first.body.runManifest.analysisRunId);
+      expect(second.body.result.discrete[0].rawLevels).toBeUndefined();
+    }, 30000);
+
+    it('rawLevels — 생성자 경로: 권한이 있으면 1~9명 범주까지 원본이 붙고, 공개 levels·other는 그대로이며, DB 캐시에는 없고, 감사가 남는다', async () => {
+      await seedJobNames();
+      await grant();
+      const res = await authed(request(app()).post('/api/stats/analyze')).send(JOB_BODY);
+      expect(res.status).toBe(200);
+      const d = res.body.result.discrete[0];
+      expect(d.rawLevels.map((l: { level: string; count: number }) => [l.level, l.count]).sort())
+        .toEqual([['간호사', 12], ['목수', 12], ['용접공', 12], ['잠수부', 3]]);
+      expect(levelCountSum(d.rawLevels)).toBe(39);
+      expect(d.other.count).toBe(15);
+      expect(d.levels).toHaveLength(2);
+
+      const stored = await pool.query<{ result: unknown }>(`SELECT result FROM stats_runs WHERE analysis_run_id=$1`, [res.body.runManifest.analysisRunId]);
+      expect(JSON.stringify(stored.rows[0].result)).not.toContain('rawLevels');
+      expect(JSON.stringify(stored.rows[0].result)).not.toContain('잠수부');
+
+      const audits = await pool.query(
+        `SELECT 1 FROM audit_logs WHERE actor_org_id=$1 AND extra->>'analysisRunId'=$2 AND extra->>'limitedRowFieldsAttached'='true'`,
+        [orgId, res.body.runManifest.analysisRunId],
+      );
+      expect(audits.rowCount).toBeGreaterThanOrEqual(1);
+    }, 30000);
+
+    it('rawLevels — 감사 실패 시 500이고 응답에 원본이 없다', async () => {
+      await seedJobNames();
+      await grant();
+      writeAuditLogStrictSpy
+        .mockImplementationOnce(async (...args: Parameters<WriteAuditLogStrictFn>) => {
+          const actual = await vi.importActual<typeof import('../middleware/audit')>('../middleware/audit');
+          return actual.writeAuditLogStrict(...args);
+        })
+        .mockRejectedValueOnce(new Error('audit db down'));
+      const res = await authed(request(app()).post('/api/stats/analyze')).send(JOB_BODY);
+      expect(res.status).toBe(500);
+      expect(JSON.stringify(res.body)).not.toContain('rawLevels');
+      expect(JSON.stringify(res.body)).not.toContain('잠수부');
+    }, 30000);
+
+    it('rawLevels — 캐시 hit와 202→GET 경로: 권한 부여→회수가 다음 응답부터 그대로 반영된다', async () => {
+      await seedJobNames();
+      const accepted = await withSyncBudget(0, () => authed(request(app()).post('/api/stats/analyze')).send(JOB_BODY));
+      expect(accepted.status).toBe(202);
+      const done = await pollRun(accepted.body.analysisRunId);
+      expect(done.body.status).toBe('succeeded');
+      expect(done.body.result.discrete[0].rawLevels).toBeUndefined();
+      expect(done.body.result.discrete[0].other.count).toBe(15);
+
+      await grant();
+      const viaGet = await authed(request(app()).get(`/api/stats/runs/${accepted.body.analysisRunId}`));
+      expect(levelCountSum(viaGet.body.result.discrete[0].rawLevels)).toBe(39);
+      const viaCache = await authed(request(app()).post('/api/stats/analyze')).send(JOB_BODY);
+      expect(viaCache.body.runManifest.analysisRunId).toBe(accepted.body.analysisRunId);
+      expect(levelCountSum(viaCache.body.result.discrete[0].rawLevels)).toBe(39);
+
+      await revoke();
+      const revoked = await authed(request(app()).get(`/api/stats/runs/${accepted.body.analysisRunId}`));
+      expect(revoked.body.result.discrete[0].rawLevels).toBeUndefined();
+    }, 40000);
+
+    it('rawLevels — 진행 중 run에 합류한 요청도 합류자 응답 시점 권한으로 원본이 붙는다', async () => {
+      await seedJobNames();
+      worker.stop();
+      try {
+        const first = await withSyncBudget(0, () => authed(request(app()).post('/api/stats/analyze')).send(JOB_BODY));
+        expect(first.status).toBe(202);
+        await grant();
+        const joinerPromise = withSyncBudget(20000, () => authed(request(app()).post('/api/stats/analyze')).send(JOB_BODY));
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        worker = createStatsRunsQueueWorker(pool);
+        const joiner = await joinerPromise;
+        expect(joiner.status).toBe(200);
+        expect(joiner.body.runManifest.analysisRunId).toBe(first.body.analysisRunId);
+        expect(levelCountSum(joiner.body.result.discrete[0].rawLevels)).toBe(39);
+      } finally {
+        worker.stop();
+        worker = createStatsRunsQueueWorker(pool);
+      }
+    }, 40000);
+
+    it('"기타" 병합은 변수 하나만 요청했을 때만 — 다른 변수와 함께 요청하면 같은 변수가 억제된다(단일 응답 역산 방어)', async () => {
+      await seedJobNames();
+      const res = await authed(request(app()).post('/api/stats/analyze')).send({
+        ...RECIPE_BASE, variableKeys: [JOB_KEY, 'job.rollup.longestTenureYears'], analysisMode: 'descriptive',
+      });
+      expect(res.status).toBe(200);
+      const jobVar = res.body.result.discrete.find((d: { variableKey: string }) => d.variableKey === JOB_KEY);
+      expect(jobVar.suppressed).toBe(true);
+      expect(jobVar.other).toBeUndefined();
+      expect(JSON.stringify(res.body.result)).not.toContain('잠수부');
+    }, 30000);
   });
 });
