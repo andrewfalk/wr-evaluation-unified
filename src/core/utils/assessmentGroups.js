@@ -73,6 +73,36 @@ export function buildAssessmentUnits(diagnoses, activeModules = []) {
   return units;
 }
 
+// EMR "확인 상병" 칸 / 엑셀 "3.최종 확인 상병명"용 — 종합소견에서 상병 상태를 '확인'(confirmed)으로
+// 입력한 평가단위가 하나라도 있는 상병만 한 줄씩 돌려준다(낮음 사유의 '상병 미확인'은 보지 않는다).
+// 방향 "(우)"/"(좌)"는 양측(side==='both') 상병에서 한쪽만 확인된 경우에만 붙인다 — 축성(척추/경추),
+// 단측 상병, 양쪽 모두 확인은 신청 상병 출력과 같이 방향 없이 "코드 이름"만 쓴다. side=''인
+// 비축성 상병은 평가단위가 없어 자동 제외된다. groupOutput이면 b8과 번호가 대응하도록 원본
+// 배열 index 기준 "#N. " 접두를 유지한다(확인 상병만 남기면 번호가 건너뛸 수 있다).
+export function buildConfirmedDiagnosisLines(diagnoses, activeModules = [], { groupOutput = false } = {}) {
+  const list = diagnoses || [];
+  const unitsByDiag = new Map();
+  buildAssessmentUnits(list, activeModules).forEach(unit => {
+    if (!unitsByDiag.has(unit.diagIndex)) unitsByDiag.set(unit.diagIndex, []);
+    unitsByDiag.get(unit.diagIndex).push(unit);
+  });
+
+  const lines = [];
+  list.forEach((diag, index) => {
+    if (!(diag.code || diag.name)) return;
+    const units = unitsByDiag.get(index) || [];
+    const confirmedUnits = units.filter(unit => diag[unit.confirmedKey] === 'confirmed');
+    if (confirmedUnits.length === 0) return;
+
+    let label = `${diag.code || ''} ${diag.name || ''}`.trim();
+    if (diag.side === 'both' && units.length === 2 && confirmedUnits.length === 1) {
+      label += confirmedUnits[0].side === 'right' ? ' (우)' : ' (좌)';
+    }
+    lines.push(groupOutput ? `#${index + 1}. ${label}` : label);
+  });
+  return lines;
+}
+
 // 비축성 진단 중 방향(우/좌/양측)을 아직 선택하지 않은 것 — unitsForDiagnosis가 평가단위를
 // 0개 생성하므로 buildAssessmentGroups의 groups/incomplete 어디에도 잡히지 않는다. 그룹
 // 화면과 그룹 형식 출력(formatGroupedAssessment) 양쪽에서 똑같이 찾아내 쓸 수 있도록 단일

@@ -14,7 +14,7 @@ import { calculateAge, calculateBMI } from './common';
 import { selectModuleNote } from './moduleNotes';
 import { getEffectiveWorkPeriodText } from './workPeriod';
 import { EMR_TEXT_LIMIT_BYTES, cp949ByteLength, truncateCp949Bytes } from './emrText';
-import { buildAssessmentBlocks, formatGroupedAssessment } from './assessmentGroups';
+import { buildAssessmentBlocks, buildConfirmedDiagnosisLines, formatGroupedAssessment } from './assessmentGroups';
 
 function buildSpineExposureText(calc) {
   return buildSpineSectionText(calc);
@@ -397,16 +397,9 @@ export function generateUnifiedEMR(patient, groupOutputOverride) {
   const age = calculateAge(shared.birthDate, shared.injuryDate);
   const bmi = calculateBMI(shared.height, shared.weight);
 
-  // 그룹 옵션이 켜졌을 때만 원본 배열 index 기준 번호를 붙인다 — 꺼짐(기존 환자 기본값)이면
-  // 현재 출력과 완전히 동일하게 유지된다.
-  const b5 = diagnoses
-    .map((diag, index) => ({ diag, index }))
-    .filter(({ diag }) => diag.code || diag.name)
-    .map(({ diag, index }) => {
-      const label = `${diag.code || ''} ${diag.name || ''}`.trim();
-      return groupOutput ? `#${index + 1}. ${label}` : label;
-    })
-    .join('\n');
+  // 확인 상병: 신청 상병 전체가 아니라 종합소견에서 상태를 '확인'으로 입력한 상병만 보낸다.
+  // 그룹 옵션이 켜졌을 때만 원본 배열 index 기준 번호를 붙인다.
+  const b5 = buildConfirmedDiagnosisLines(diagnoses, activeModules, { groupOutput }).join('\n');
 
   const b6 = buildExposureSection(shared, modules, activeModules);
   const b7 = buildPersonalFactorText(shared, age, bmi);
@@ -463,6 +456,8 @@ function buildEmrFieldData(patient, unified, b8Text) {
   const shared = patient.data.shared || {};
 
   const truncatedFields = [];
+  const tAppv = truncateCp949Bytes(b5 || '', EMR_TEXT_LIMIT_BYTES);
+  if (tAppv.truncated) truncatedFields.push('txtAppv_Sick_Cont');
   const tMrec = truncateCp949Bytes(shared.medicalRecord || '', EMR_TEXT_LIMIT_BYTES);
   if (tMrec.truncated) truncatedFields.push('txtMrec_Med_Pov_Cont');
   const t6 = truncateCp949Bytes(b6, EMR_TEXT_LIMIT_BYTES);
@@ -473,7 +468,7 @@ function buildEmrFieldData(patient, unified, b8Text) {
   if (t8.truncated) truncatedFields.push('txtSyth1Cont');
 
   return {
-    txtAppvSickCont: b5 || '',
+    txtAppvSickCont: tAppv.text,
     txtMrecMedPovCont: tMrec.text,
     txtJobCusCont: t6.text,
     txtPerCusCont: t7.text,
@@ -493,7 +488,15 @@ export function prepareEmrInjection(patient) {
   const unified = generateUnifiedEMR(patient);
   const effective = resolveAssessment(patient, unified.b8);
   const fieldData = buildEmrFieldData(patient, unified, effective.text);
-  return { fieldData, effective, bytes: cp949ByteLength(effective.text) };
+  // confirmedDx: 전송 전 경고용 — 절단 전 원본 b5 기준(이미 절단된 fieldData.txtAppvSickCont로는
+  // 한도 초과를 알 수 없다).
+  const confirmedDxBytes = cp949ByteLength(unified.b5 || '');
+  return {
+    fieldData,
+    effective,
+    bytes: cp949ByteLength(effective.text),
+    confirmedDx: { isEmpty: !unified.b5, bytes: confirmedDxBytes, overLimit: confirmedDxBytes > EMR_TEXT_LIMIT_BYTES },
+  };
 }
 
 export function generateEMRFieldData(patient) { // 기존 시그니처 유지 — exportService.js 등 소비자 불변

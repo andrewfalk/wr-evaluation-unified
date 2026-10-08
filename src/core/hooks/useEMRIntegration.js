@@ -17,7 +17,7 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
       const { prepareEmrInjection } = await import('../utils/emrReport');
       const { EMR_TEXT_LIMIT_BYTES } = await import('../utils/emrText');
 
-      const { fieldData, effective, bytes } = prepareEmrInjection(activePatient);
+      const { fieldData, effective, bytes, confirmedDx } = prepareEmrInjection(activePatient);
 
       if (effective.hasInvalidOverride) {
         await showAlert('저장된 종합소견 편집 데이터가 손상되어 전송할 수 없습니다.\n종합평가 화면에서 "깨진 편집 데이터 삭제" 후 다시 시도하세요.');
@@ -33,17 +33,42 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
         );
         if (!proceedStale) return;
       }
+      // 전송 전 경고(종합소견 한도 초과 · 확인 상병 0건/한도 초과)는 사유를 모아 확인창 한 번으로
+      // 묻는다. 확인 상병 판정은 절단 전 원본 b5 기준(confirmedDx) — 이미 절단된
+      // fieldData.txtAppvSickCont 길이로는 초과를 알 수 없다. EMR 헬퍼는 빈 값이면 칸을 건드리지
+      // 않으므로(SetField early-return), 0건이면 EMR에 이미 들어 있던 값이 그대로 남는다.
+      const warnings = [];
+      let willTruncate = false;
       if (bytes > EMR_TEXT_LIMIT_BYTES) {
         const over = bytes - EMR_TEXT_LIMIT_BYTES;
         const reduceHint = effective.isOverride
-          ? '직접 편집한 내용을 줄이면 byte를 줄일 수 있습니다.\n\n'
-          : '종합평가 스텝에서 "패턴 그룹 사용"을 켜면 byte를 줄일 수 있습니다.\n\n';
-        const proceed = await showConfirm(
+          ? '직접 편집한 내용을 줄이면 byte를 줄일 수 있습니다.'
+          : '종합평가 스텝에서 "패턴 그룹 사용"을 켜면 byte를 줄일 수 있습니다.';
+        willTruncate = true;
+        warnings.push(
           `⚠ 6.종합소견이 EMR 한도를 초과합니다.\n`
-          + `${bytes.toLocaleString()} / ${EMR_TEXT_LIMIT_BYTES.toLocaleString()} byte (${over.toLocaleString()} byte 초과)\n\n`
+          + `${bytes.toLocaleString()} / ${EMR_TEXT_LIMIT_BYTES.toLocaleString()} byte (${over.toLocaleString()} byte 초과)\n`
           + `그대로 전송하면 끝부분이 "...(이하 생략)"으로 잘립니다.\n`
           + reduceHint
-          + `잘린 상태로 계속 전송하시겠습니까?`
+        );
+      }
+      if (confirmedDx?.isEmpty) {
+        warnings.push(
+          '⚠ 종합소견에서 "확인"으로 입력된 상병이 없습니다.\n'
+          + '"확인 상병" 칸은 전송되지 않으며, EMR에 이미 입력된 값이 있으면 그대로 남습니다.\n'
+          + '필요하면 EMR에서 직접 지워 주세요.'
+        );
+      } else if (confirmedDx?.overLimit) {
+        willTruncate = true;
+        warnings.push(
+          `⚠ 확인 상병이 EMR 한도를 초과합니다.\n`
+          + `${confirmedDx.bytes.toLocaleString()} / ${EMR_TEXT_LIMIT_BYTES.toLocaleString()} byte\n`
+          + `그대로 전송하면 끝부분이 "...(이하 생략)"으로 잘립니다.`
+        );
+      }
+      if (warnings.length > 0) {
+        const proceed = await showConfirm(
+          warnings.join('\n\n') + '\n\n' + (willTruncate ? '잘린 상태로 계속 전송하시겠습니까?' : '계속 전송하시겠습니까?')
         );
         if (!proceed) return;
       }

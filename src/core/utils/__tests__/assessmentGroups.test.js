@@ -9,6 +9,7 @@ import {
   buildAssessmentBlocks,
   formatGroupedAssessment,
   findUnassignedSideDiagnoses,
+  buildConfirmedDiagnosisLines,
 } from '../assessmentGroups.js';
 
 function makeDiag(overrides = {}) {
@@ -399,5 +400,71 @@ describe('formatGroupedAssessment: 그룹 형식 문구', () => {
     const text = formatGroupedAssessment(diagnoses, []);
     expect(text).toContain('#1. M51.2 요추간판 전위\n#2. M50.1 경추간판장애');
     expect(text).not.toContain('(평가)');
+  });
+});
+
+describe('buildConfirmedDiagnosisLines — 확인 상병만 (EMR/엑셀 확인 상병 칸)', () => {
+  const knee = (o = {}) => makeDiag({ id: 'k', code: 'M23.2', name: '반월상 연골 파열', moduleId: 'knee', ...o });
+  const lines = (diags, opts) => buildConfirmedDiagnosisLines(diags, ['knee', 'spine', 'cervical'], opts);
+
+  it('상태가 "확인"인 상병만 포함하고 미확인·미입력은 제외한다', () => {
+    const diags = [
+      knee({ id: 'a', code: 'M17.0', name: '무릎 관절증', side: 'right', confirmedRight: 'confirmed' }),
+      knee({ id: 'b', code: 'M23.2', name: '반월상 연골 파열', side: 'right', confirmedRight: 'unconfirmed' }),
+      knee({ id: 'c', code: 'M22.4', name: '슬개골 연골연화증', side: 'right', confirmedRight: '' }),
+    ];
+    expect(lines(diags)).toEqual(['M17.0 무릎 관절증']);
+  });
+
+  it('낮음 사유의 "상병 미확인"은 확인 판정에 쓰지 않는다 (상태 필드만 본다)', () => {
+    const diags = [knee({ side: 'right', confirmedRight: 'confirmed', assessmentRight: 'low', reasonRight: ['unconfirmed'] })];
+    expect(lines(diags)).toEqual(['M23.2 반월상 연골 파열']);
+  });
+
+  it('단측 상병은 확인돼도 방향을 붙이지 않는다 (우측 단독·좌측 단독)', () => {
+    expect(lines([knee({ side: 'right', confirmedRight: 'confirmed' })])).toEqual(['M23.2 반월상 연골 파열']);
+    expect(lines([knee({ side: 'left', confirmedLeft: 'confirmed' })])).toEqual(['M23.2 반월상 연골 파열']);
+  });
+
+  it('양측 상병은 한쪽만 확인되면 확인된 쪽 방향을 붙인다', () => {
+    expect(lines([knee({ side: 'both', confirmedRight: 'confirmed', confirmedLeft: 'unconfirmed' })]))
+      .toEqual(['M23.2 반월상 연골 파열 (우)']);
+    expect(lines([knee({ side: 'both', confirmedRight: '', confirmedLeft: 'confirmed' })]))
+      .toEqual(['M23.2 반월상 연골 파열 (좌)']);
+  });
+
+  it('양측 상병이 양쪽 모두 확인이면 방향 없이 한 줄이다', () => {
+    expect(lines([knee({ side: 'both', confirmedRight: 'confirmed', confirmedLeft: 'confirmed' })]))
+      .toEqual(['M23.2 반월상 연골 파열']);
+  });
+
+  it('축성(척추·경추) 상병은 confirmedRight 단일 슬롯으로 판정하고 방향을 붙이지 않는다', () => {
+    const diags = [
+      makeDiag({ id: 's', code: 'M51.2', name: '요추간판 전위', moduleId: 'spine', side: 'both', confirmedRight: 'confirmed' }),
+      makeDiag({ id: 'c', code: 'M50.1', name: '경추간판장애', moduleId: 'cervical', side: '', confirmedRight: 'unconfirmed' }),
+    ];
+    expect(lines(diags)).toEqual(['M51.2 요추간판 전위']);
+  });
+
+  it('방향 미선택(side="") 비축성 상병은 평가단위가 없어 제외된다', () => {
+    expect(lines([knee({ side: '', confirmedRight: 'confirmed' })])).toEqual([]);
+  });
+
+  it('코드·이름이 모두 비어 있는 행은 제외한다', () => {
+    expect(lines([knee({ code: '', name: '', side: 'right', confirmedRight: 'confirmed' })])).toEqual([]);
+  });
+
+  it('groupOutput이면 원본 배열 index 기준 번호를 유지한다 (확인 상병만 남아 번호가 건너뛴다)', () => {
+    const diags = [
+      knee({ id: 'a', code: 'M17.0', name: '무릎 관절증', side: 'right', confirmedRight: 'unconfirmed' }),
+      knee({ id: 'b', code: 'M23.2', name: '반월상 연골 파열', side: 'right', confirmedRight: 'confirmed' }),
+    ];
+    expect(lines(diags, { groupOutput: true })).toEqual(['#2. M23.2 반월상 연골 파열']);
+  });
+
+  it('확인 상병이 하나도 없으면 빈 배열이다', () => {
+    expect(lines([knee({ side: 'right', confirmedRight: 'unconfirmed' })])).toEqual([]);
+    expect(lines([])).toEqual([]);
+    expect(lines(undefined)).toEqual([]);
   });
 });
