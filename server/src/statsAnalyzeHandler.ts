@@ -11,8 +11,10 @@
 import type { Request, Response } from 'express';
 import type { Pool } from 'pg';
 import { withWriteTransaction } from './db/withWriteTransaction';
-import type { AnalyzeResponse, AnalyzeResult, RunManifest, StatsRunManifestSucceeded } from '@wr/contracts';
-import { buildAnalysisContext, type AnalysisContext } from './statsAnalysisContext';
+import type {
+  AnalyzeResponse, AnalyzeResult, LimitedDisclosureStatus, RunManifest, StatsRunManifestSucceeded,
+} from '@wr/contracts';
+import { buildAnalysisContext, buildFrozenAnalysisInput, type AnalysisContext } from './statsAnalysisContext';
 import { canonicalDigest } from './canonicalSerializer';
 import { computeExecutionDigest } from './statsExecutionDigest';
 import { buildStatsEngineRequest } from './statsDescriptiveSuppression';
@@ -30,8 +32,10 @@ import { buildRegressionEngineRequest } from './statsRegressionSuppression';
 import { buildRunManifest, toStatsRunManifestSucceeded } from './statsRunManifest';
 import { allCorrelationMatrixPairs } from './statsCorrelationMatrixDataset';
 import { attachLimitedRowFields } from './statsLimitedRowMerge';
+import { resolveUnrestrictedDescriptive } from './statsDescriptiveUnrestricted';
+import { createResponseAbort } from './statsResponseAbort';
 import { hasCapability } from './middleware/requireCapability';
-import { writeAuditLogStrict, type AuditOutcome } from './middleware/audit';
+import { writeAuditLog, writeAuditLogStrict, type AuditOutcome } from './middleware/audit';
 import { statsRunExpiresAt as expiresAt } from './statsRunExpiry';
 import { admitAnalysisRun, estimateEngineTimeoutMs } from './statsRunAdmission';
 import type { StatsRunRow } from './statsRunRow';
@@ -193,22 +197,76 @@ function assertInputWithinLimitsForMode(ctx: AnalysisContext): void {
   }
 }
 
+// finalizeAnalyzeResponse의 결과. aborted는 클라이언트 연결이 끊겨 해제 계산·공개를 중단했다는
+// 뜻이다 — 모든 호출부(POST·GET)는 이때 응답을 쓰지 않고 즉시 return해야 한다(연결이 이미 끊김).
+export type FinalizeAnalyzeOutcome = { status: number; body: unknown } | { aborted: true };
+
+export function isAbortedFinalize(outcome: FinalizeAnalyzeOutcome): outcome is { aborted: true } {
+  return 'aborted' in outcome;
+}
+
 // PR3-B §9 — 캐시-권한 드리프트 방지. 신규계산·캐시hit·합류자 관측 3경로 전부
 // 이 단일 지점을 거쳐야 한다. limited_row 필드(boxplot outlierValues·scatter 원시
 // points)가 실제로 붙을 때만 신규 감사 단계를 추가하고, 그 감사가 실패하면
 // 500을 반환한다 — aggregate로 강등하지 않는다(§7.4 "제한데이터 export는 감사
 // 실패 시 다운로드도 실패"와 가장 단순하게 정합). GET /runs/:analysisRunId도
 // 이 함수를 그대로 재사용한다(export).
+//
+// 기술통계(descriptive)에서 조회자가 제한데이터 권한을 가지면 소수 셀(1~9명) 제한도 풀어
+// 억제 없는 결과로 바꿔 보낸다(statsDescriptiveUnrestricted.ts). 두 사건은 별개로 추적한다:
+//   attached = 원시 필드(rawHistogram·rawLevels·outlierValues 등)가 붙었는가
+//   lifted   = 소수 셀 제한 해제가 성공했는가(limitedDisclosure === 'applied')
+// 감사 강도는 lifted || attached로 정하고(strict, 실패 시 500), 해제 상태는 실제 계산
+// 결과를 그대로 기록한다. 해제를 시도했지만 폴백했고 원시 필드도 안 붙은 경우만 best-effort 감사다.
+// 응답의 runManifest.resultDigest는 저장된 집계 결과의 것이고, 권한자가 실제로 받은 본문의
+// digest는 감사 extra.deliveredResultDigest에만 있다 — 둘이 다른 것이 정상이다.
 export async function finalizeAnalyzeResponse(
   pool: Pool,
   ctx: AnalysisContext,
   executionDigest: string,
   outcome: { runManifest: RunManifest; result: AnalyzeResult },
-): Promise<{ status: number; body: unknown }> {
-  const hasLimitedRowAccess = await hasCapability(pool, 'stats.export_limited_rows', ctx.userId, ctx.orgId);
-  const { result: finalResult, attached } = await attachLimitedRowFields(ctx, outcome.result, hasLimitedRowAccess);
+  signal?: AbortSignal,
+): Promise<FinalizeAnalyzeOutcome> {
+  let hasLimitedRowAccess = await hasCapability(pool, 'stats.export_limited_rows', ctx.userId, ctx.orgId);
+  let baseResult = outcome.result;
+  let limitedStatus: LimitedDisclosureStatus | null = null;
+  let limitedSource: 'computed' | 'memo' | null = null;
 
-  if (attached) {
+  if (hasLimitedRowAccess && ctx.recipe.analysisMode === 'descriptive') {
+    const attempt = await resolveUnrestrictedDescriptive(pool, ctx, outcome.result, executionDigest, signal);
+    if (attempt.kind === 'aborted') return { aborted: true };
+    if (attempt.kind === 'unavailable') {
+      limitedStatus = attempt.status;
+    } else {
+      if (attempt.source === 'computed') {
+        // 계산에 최대 엔진 timeout만큼 걸렸다 — 그 사이 권한이 회수·만료됐을 수 있으므로
+        // 공개·감사 직전에 다시 확인한다(memo hit은 조금 전에 확인했으므로 생략).
+        hasLimitedRowAccess = await hasCapability(pool, 'stats.export_limited_rows', ctx.userId, ctx.orgId);
+        if (signal?.aborted) return { aborted: true };
+      }
+      if (hasLimitedRowAccess) {
+        baseResult = attempt.result;
+        limitedStatus = 'applied';
+        limitedSource = attempt.source;
+      }
+      // 회수됐으면 해제본을 버리고 저장된 집계 결과를 쓴다. 원시 필드 부착에도 최신 권한값
+      // (false)을 쓰므로 rawLevels·rawHistogram·outlierValues도 붙지 않는다.
+    }
+  }
+
+  const { result: withRawFields, attached } = await attachLimitedRowFields(
+    ctx, baseResult, hasLimitedRowAccess, { skipRawLevels: limitedStatus === 'applied' },
+  );
+  if (signal?.aborted) return { aborted: true };
+
+  const lifted = limitedStatus === 'applied';
+  // 원래 없던 키를 undefined로 만들지 않는다(canonicalDigest가 undefined 값에서 throw).
+  const finalResult: AnalyzeResult = limitedStatus === null
+    ? withRawFields
+    : { ...withRawFields, limitedDisclosure: limitedStatus };
+  const analysisRunId = outcome.runManifest.analysisRunId;
+
+  if (lifted || attached) {
     const deliveredResultDigest = canonicalDigest({ result: finalResult });
     try {
       await writeAuditLogStrict(pool, {
@@ -219,13 +277,37 @@ export async function finalizeAnalyzeResponse(
         targetId: ctx.recipeDigest,
         outcome: 'success' as AuditOutcome,
         extra: auditExtra(ctx, executionDigest, {
-          analysisRunId: outcome.runManifest.analysisRunId,
-          limitedRowFieldsAttached: true,
+          analysisRunId,
+          limitedRowFieldsAttached: attached,
+          ...(limitedStatus !== null ? { smallCellLimitStatus: limitedStatus } : {}),
+          ...(limitedSource !== null ? { limitedDisclosureSource: limitedSource } : {}),
           deliveredResultDigest,
         }),
       });
     } catch {
       return { status: 500, body: internalError() };
+    }
+    if (signal?.aborted) return { aborted: true };
+  } else if (limitedStatus !== null) {
+    // 해제를 시도했지만 폴백했고 원시 필드도 붙지 않았다 — 공개된 것이 없으므로 best-effort.
+    // writeAuditLog는 내부에서 오류를 삼키지만, 이 감사 하나 때문에 집계 응답이 실패하지 않도록
+    // 호출부에서도 한 번 더 막는다(strict 경로와 달리 실패해도 응답을 유지한다).
+    try {
+      await writeAuditLog(pool, {
+        actorUserId: ctx.userId,
+        actorOrgId: ctx.orgId,
+        action: 'stats_analyze',
+        targetType: 'analysis_recipe',
+        targetId: ctx.recipeDigest,
+        outcome: 'success' as AuditOutcome,
+        extra: auditExtra(ctx, executionDigest, {
+          analysisRunId,
+          limitedRowFieldsAttached: false,
+          smallCellLimitStatus: limitedStatus,
+        }),
+      });
+    } catch (err) {
+      console.error('[stats-analyze] best-effort 제한 해제 폴백 감사 실패 — 응답은 그대로 반환', err);
     }
   }
 
@@ -240,13 +322,14 @@ async function respondForTerminalRow(
   ctx: AnalysisContext,
   executionDigest: string,
   row: Pick<StatsRunRow, 'status' | 'manifest' | 'result' | 'error_code'>,
-): Promise<{ status: number; body: unknown }> {
+  signal?: AbortSignal,
+): Promise<FinalizeAnalyzeOutcome> {
   if (row.status === 'succeeded') {
     const manifest = row.manifest as StatsRunManifestSucceeded;
     return finalizeAnalyzeResponse(pool, ctx, executionDigest, {
       runManifest: toPublicRunManifest(manifest),
       result: row.result as AnalyzeResult,
-    });
+    }, signal);
   }
   if (row.status === 'cancelled') {
     return { status: 409, body: { code: 'RUN_CANCELLED', error: 'Analysis was cancelled.' } };
@@ -280,6 +363,8 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
     return;
   }
   activeAnalyzeRequests += 1;
+  // 응답이 끝나기 전에 연결이 끊기면 제한 해제 계산을 중단한다(res close 기반 — statsResponseAbort.ts).
+  const abort = createResponseAbort(res);
 
   try {
     const built = await buildAnalysisContext(pool, req, 'analyze');
@@ -304,6 +389,14 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
     const predictionSuppressed = ctx.recipe.analysisMode === 'prediction' && !ctx.predictionDisclosed;
     if (ctx.requestSuppressed || bivariatePairSuppressed || regressionSuppressed || predictionSuppressed) {
       const suppressedResult = buildSuppressedAnalyzeResult(ctx);
+      // 제한데이터 권한자의 기술통계는 "필터 후 10명 미만"(MIN_COHORT_NOT_MET)도 응답 시점에 해제한다.
+      // differencing 제한(forceSuppress)은 남용 방지 장치라 해제하지 않는다 — 사유 코드는 N<10이면
+      // MIN_COHORT_NOT_MET으로 표시되므로 코드가 아니라 forceSuppress 플래그로 판정한다.
+      const liftCandidate = ctx.recipe.analysisMode === 'descriptive'
+        && ctx.reasonCode === 'MIN_COHORT_NOT_MET'
+        && !ctx.differencing.forceSuppress;
+      const liftHolder = liftCandidate
+        && await hasCapability(pool, 'stats.export_limited_rows', ctx.userId, ctx.orgId);
       const resultDigest = canonicalDigest({ result: suppressedResult });
       const manifest = toStatsRunManifestSucceeded(
         buildRunManifest({
@@ -321,10 +414,14 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
           `INSERT INTO stats_runs (
              organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
              requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at,
-             analysis_run_id
-           ) VALUES ($1,$2,'succeeded',$3,$4,$5,'aggregate',false,$6,$7,$8,now(),$9)`,
+             analysis_run_id, frozen_dataset
+           ) VALUES ($1,$2,'succeeded',$3,$4,$5,'aggregate',false,$6,$7,$8,now(),$9,$10)`,
           [ctx.orgId, ctx.userId, ctx.recipeDigest, ctx.snapshot.sourceDigest, executionDigest,
-            JSON.stringify(manifest), JSON.stringify(suppressedResult), expiresAt(), manifest.analysisRunId],
+            JSON.stringify(manifest), JSON.stringify(suppressedResult), expiresAt(), manifest.analysisRunId,
+            // 저장 최소화: 요청 시점에 제한데이터 권한이 있었고 differencing으로 막히지 않은 기술통계
+            // 실행만 원본을 남긴다(같은 TTL). 그래야 같은 analysisRunId 재조회(GET)에서도 응답 시점 해제가
+            // 가능하다. 그 외 억제 실행은 원본이 없어 이후 권한을 받아도 재실행이 필요하다.
+            liftHolder ? JSON.stringify(buildFrozenAnalysisInput(ctx)) : null],
         );
         await writeAuditLogStrict(client, {
           actorUserId: ctx.userId,
@@ -339,6 +436,15 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
           }),
         });
       });
+
+      if (liftHolder) {
+        const finalized = await finalizeAnalyzeResponse(
+          pool, ctx, executionDigest, { runManifest: toPublicRunManifest(manifest), result: suppressedResult }, abort.signal,
+        );
+        if (isAbortedFinalize(finalized)) return;
+        res.status(finalized.status).json(finalized.body);
+        return;
+      }
 
       const response: AnalyzeResponse = { runManifest: toPublicRunManifest(manifest), result: suppressedResult };
       res.status(200).json(response);
@@ -394,7 +500,8 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
       return;
     }
     if (admission.kind === 'cache_hit') {
-      const finalized = await respondForTerminalRow(pool, ctx, executionDigest, admission.row);
+      const finalized = await respondForTerminalRow(pool, ctx, executionDigest, admission.row, abort.signal);
+      if (isAbortedFinalize(finalized)) return;
       res.status(finalized.status).json(finalized.body);
       return;
     }
@@ -405,7 +512,8 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
     let fresh = admission.row;
     while (true) {
       if (fresh.status === 'succeeded' || fresh.status === 'failed' || fresh.status === 'cancelled') {
-        const finalized = await respondForTerminalRow(pool, ctx, executionDigest, fresh);
+        const finalized = await respondForTerminalRow(pool, ctx, executionDigest, fresh, abort.signal);
+        if (isAbortedFinalize(finalized)) return;
         res.status(finalized.status).json(finalized.body);
         return;
       }
@@ -426,6 +534,7 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
       fresh = { ...fresh, ...polled.rows[0] };
     }
   } finally {
+    abort.dispose();
     activeAnalyzeRequests -= 1;
   }
 }

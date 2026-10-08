@@ -294,3 +294,50 @@ describe('RecipePanel — Preview estimability 표시', () => {
     expect(screen.getByText('10.0%')).toBeTruthy();
   });
 });
+
+// 제한데이터 소수 셀 해제 — 미리보기 표시와 숨겨진 값 안내.
+describe('RecipePanel — 미리보기 소수 인원 보호 표시', () => {
+  function previewWith({ counts = {}, estimability = {}, limitedDisclosure } = {}) {
+    return {
+      key: 'k', status: 'ready', error: null,
+      result: {
+        counts: { personCount: 454, caseCount: 472, observationCount: 1645, suppressed: false, minimumCohort: 10, reasonCode: null, ...counts },
+        estimability: {
+          completeCaseN: 450, missingRatesByVariable: { 'knee.relatedness.max': 0.01 }, distinctAssignedDoctorClusters: 1,
+          candidateParameterCount: null, eventNonEvent: [], estimabilityPolicyVersion: 'v1', ...estimability,
+        },
+        availableMethods: [], methodCatalogVersion: null,
+        ...(limitedDisclosure ? { limitedDisclosure } : {}),
+      },
+    };
+  }
+  const render_ = (previewState) => render(<RecipePanel {...baseProps({ isPreviewCurrent: true, previewState })} />);
+
+  it('limitedDisclosure=applied면 해제된 미리보기라는 안내가 뜬다', () => {
+    render_(previewWith({ limitedDisclosure: 'applied' }));
+    expect(screen.getByRole('status').textContent).toContain('소수 인원(10명 미만) 보호가 해제된 미리보기');
+  });
+
+  it('일반 응답에는 해제 안내가 없다', () => {
+    render_(previewWith());
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('완전사례 수·결측률이 숨겨져 있으면(null) 소수 인원 보호로 숨겨질 수 있다는 중립 안내가 뜬다', () => {
+    render_(previewWith({ estimability: { completeCaseN: null, missingRatesByVariable: { 'knee.relatedness.max': null } } }));
+    expect(screen.getByText(/소수 인원 보호로 숨겨진 값일 수 있습니다/)).toBeTruthy();
+    // 결측률 셀의 "비공개"와 안내 문구 안의 강조 "비공개" 두 곳.
+    expect(screen.getAllByText('비공개')).toHaveLength(2);
+    expect(screen.getByRole('cell', { name: '비공개' })).toBeTruthy();
+  });
+
+  it('boolean event/non-event가 억제돼도 같은 안내가 뜬다', () => {
+    render_(previewWith({ estimability: { eventNonEvent: [{ variableKey: 'shoulder.exposure.anyExceeded', events: null, nonEvents: null, suppressed: true }] } }));
+    expect(screen.getByText(/소수 인원 보호로 숨겨진 값일 수 있습니다/)).toBeTruthy();
+  });
+
+  it('숨겨진 값이 없으면 안내가 없다', () => {
+    render_(previewWith());
+    expect(screen.queryByText(/소수 인원 보호로 숨겨진 값일 수 있습니다/)).toBeNull();
+  });
+});

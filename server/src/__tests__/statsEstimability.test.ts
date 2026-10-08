@@ -115,3 +115,44 @@ describe('computeEstimability — candidateParameterCount', () => {
     expect(result.candidateParameterCount).toBeNull();
   });
 });
+
+// 제한데이터 권한자 미리보기 전용 — unrestricted 옵션은 소수 셀 억제를 끈다. 기본값은 기존과 동일.
+describe('computeEstimability — unrestricted', () => {
+  function singleVariableRows(present: number, missing: number): DatasetRow[] {
+    const rows: DatasetRow[] = [];
+    for (let i = 0; i < present; i++) rows.push(makeRow(`case-p-${i}`, `person-p-${i}`, { v: presentValue('high') }));
+    for (let i = 0; i < missing; i++) rows.push(makeRow(`case-m-${i}`, `person-m-${i}`, { v: missingValue() }));
+    return rows;
+  }
+  const catalog = new Map([['v', makeVariable('v', 'categorical')]]);
+
+  it('결측 2명(소수)이면 기본값은 완전사례 수·결측률을 숨기고 unrestricted는 실제 값을 낸다', () => {
+    const rows = singleVariableRows(448, 2);
+    const aggregate = computeEstimability(rows, ['v'], catalog);
+    expect(aggregate.completeCaseN).toBeNull();
+    expect(aggregate.missingRatesByVariable.v).toBeNull();
+
+    const open = computeEstimability(rows, ['v'], catalog, { unrestricted: true });
+    expect(open.completeCaseN).toBe(448);
+    expect(open.missingRatesByVariable.v).toBeCloseTo(2 / 450, 10);
+  });
+
+  it('boolean 변수의 event/non-event도 소수 셀이어도 공개한다', () => {
+    const boolCatalog = new Map([['flag', makeVariable('flag', 'boolean')]]);
+    const rows: DatasetRow[] = [];
+    for (let i = 0; i < 30; i++) rows.push(makeRow(`e-${i}`, `pe-${i}`, { flag: presentValue(true) }));
+    for (let i = 0; i < 3; i++) rows.push(makeRow(`n-${i}`, `pn-${i}`, { flag: presentValue(false) }));
+
+    const aggregate = computeEstimability(rows, ['flag'], boolCatalog);
+    expect(aggregate.eventNonEvent[0]).toMatchObject({ suppressed: true, events: null, nonEvents: null });
+
+    const open = computeEstimability(rows, ['flag'], boolCatalog, { unrestricted: true });
+    expect(open.eventNonEvent[0]).toEqual({ variableKey: 'flag', events: 30, nonEvents: 3, suppressed: false });
+    expect(open.missingRatesByVariable.flag).toBe(0);
+  });
+
+  it('소수 셀이 없으면 두 모드의 결과가 완전히 같다(해제로 달라진 것이 없음을 비교로 판정할 수 있다)', () => {
+    const rows = singleVariableRows(40, 0);
+    expect(computeEstimability(rows, ['v'], catalog, { unrestricted: true })).toEqual(computeEstimability(rows, ['v'], catalog));
+  });
+});

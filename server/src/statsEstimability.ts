@@ -24,11 +24,21 @@ function distinctPersons(rows: DatasetRow[]): number {
   return new Set(rows.map((r) => r.personClusterKey)).size;
 }
 
+export interface ComputeEstimabilityOptions {
+  /**
+   * true면 소수 셀(1~9명) 억제를 끈다. 제한데이터 권한자 미리보기 전용 — 결과를 권한 없는
+   * 조회자에게 보내거나 저장하면 안 된다(routes/stats.ts handlePostPreview).
+   */
+  unrestricted?: boolean;
+}
+
 export function computeEstimability(
   rows: DatasetRow[],
   variableKeys: string[],
   catalogByKey: Map<string, AnalyticsVariableMetadata>,
+  options: ComputeEstimabilityOptions = {},
 ): EstimabilityResult {
+  const isSmall = (personCount: number): boolean => options.unrestricted !== true && isSmallCell(personCount);
   const caseCount = rows.length;
 
   // §F completeCaseN — variableKeys 전부가 missing===null인 사례(표시값은 사례 수).
@@ -36,7 +46,7 @@ export function computeEstimability(
   const completeRows = rows.filter(isRowComplete);
   const incompleteRows = rows.filter((r) => !isRowComplete(r));
   const completeCaseN =
-    isSmallCell(distinctPersons(completeRows)) || isSmallCell(distinctPersons(incompleteRows))
+    isSmall(distinctPersons(completeRows)) || isSmall(distinctPersons(incompleteRows))
       ? null
       : completeRows.length;
 
@@ -60,7 +70,7 @@ export function computeEstimability(
       const nonEventPersonCount = distinctPersons(nonEventRows);
 
       const suppressed =
-        isSmallCell(missingPersonCount) || isSmallCell(eventPersonCount) || isSmallCell(nonEventPersonCount);
+        isSmall(missingPersonCount) || isSmall(eventPersonCount) || isSmall(nonEventPersonCount);
 
       missingRatesByVariable[key] = suppressed || caseCount === 0 ? null : missingRows.length / caseCount;
       eventNonEvent.push({
@@ -72,7 +82,7 @@ export function computeEstimability(
       continue;
     }
 
-    const suppressed = isSmallCell(missingPersonCount) || isSmallCell(presentPersonCount);
+    const suppressed = isSmall(missingPersonCount) || isSmall(presentPersonCount);
     missingRatesByVariable[key] = suppressed || caseCount === 0 ? null : missingRows.length / caseCount;
   }
 

@@ -49,7 +49,11 @@ export function partitionRowsForStratify(
   rows: DatasetRow[],
   stratifyKey: string,
   stratifyType: AnalyticsVariableMetadata['type'] | undefined,
+  // false면 소수 인원(1~9명) 레벨도 독립 그룹으로 남긴다("기타" 병합 없음). 제한데이터
+  // 권한자 응답 시점 전용(statsDescriptiveUnrestricted.ts) — 기본값(true)이 집계 경로다.
+  opts: { mergeSmallGroups?: boolean } = {},
 ): StratifyPartitionResult {
+  const mergeSmallGroups = opts.mergeSmallGroups !== false;
   const presentRows: DatasetRow[] = [];
   const missingRows: DatasetRow[] = [];
   for (const row of rows) {
@@ -86,7 +90,7 @@ export function partitionRowsForStratify(
     const bucket = byLevel.get(levelKey);
     if (!bucket || bucket.length === 0) continue; // 관측 0건 — 그룹도, 기타 병합도 안 함
     const personCount = distinctPersons(bucket);
-    if (isSmallCell(personCount)) {
+    if (mergeSmallGroups && isSmallCell(personCount)) {
       otherRows.push(...bucket);
       continue;
     }

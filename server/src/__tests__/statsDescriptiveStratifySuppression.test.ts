@@ -428,3 +428,117 @@ describe('resolveStratifyGroupLabels — 담당의 UUID → 표시명', () => {
     expect(resolved.groups[0].groupId).toBe('g0');
   });
 });
+
+// 제한데이터 권한자 응답 전용 — unrestricted 층화: 소수 그룹도 개별로, 억제·total 강제 억제 없음,
+// 엔진은 정확히 1회만 호출한다. 기본 호출(집계 경로)은 기존과 동일해야 한다.
+describe('computeDescriptiveStratifiedAnalyzeResult — unrestricted', () => {
+  const key = 'diagnosis.assessment.status';
+  const staffKey = 'case.staff.assignedDoctorUserId';
+
+  function discreteRows(prefix: string, highs: number, lows: number, missing: number): DatasetRow[] {
+    const out: DatasetRow[] = [];
+    let i = 0;
+    const push = (v: string | null, miss: ExtractedValue<string>['missing']) => {
+      out.push({
+        caseId: `case-${prefix}-${i}`, personClusterKey: `person-${prefix}-${i}`, entityKey: null,
+        values: { [key]: extracted<string>(v, miss) },
+      });
+      i += 1;
+    };
+    for (let n = 0; n < highs; n += 1) push('high', null);
+    for (let n = 0; n < lows; n += 1) push('low', null);
+    for (let n = 0; n < missing; n += 1) push(null, 'not_entered');
+    return out;
+  }
+
+  // 엔진 모의: 요청의 (합성키) 변수별로 범주 빈도를 그대로 센다.
+  function mockDiscreteEngine() {
+    runStatsEngine.mockImplementation(async (request: { variables: Array<{ key: string; values: string[] }> }) => ({
+      continuous: [],
+      discrete: request.variables.map((v) => {
+        const counts = new Map<string, number>();
+        for (const x of v.values) counts.set(x, (counts.get(x) ?? 0) + 1);
+        return { variableKey: v.key, n: v.values.length, levels: [...counts].map(([level, count]) => ({ level, count })) };
+      }),
+    }));
+  }
+
+  function buildCtx() {
+    const catalogByKey = new Map([[key, meta(key, 'categorical')]]);
+    const a = discreteRows('a', 60, 40, 3);   // 결측 3명(소수)
+    const b = discreteRows('b', 50, 30, 0);
+    const c = discreteRows('c', 3, 2, 0);     // 값 있는 인원 5명(소수)
+    const total = [...a, ...b, ...c];
+    const normalGroups: StratifyRowGroup[] = [
+      { groupId: 'total', kind: 'total', level: null, rows: total },
+      { groupId: 'g0', kind: 'level', level: 'doctorA', rows: a },
+      { groupId: 'g1', kind: 'level', level: 'doctorB', rows: b },
+      { groupId: 'other', kind: 'other', level: null, rows: c },
+    ];
+    const openGroups: StratifyRowGroup[] = [
+      { groupId: 'total', kind: 'total', level: null, rows: total },
+      { groupId: 'g0', kind: 'level', level: 'doctorA', rows: a },
+      { groupId: 'g1', kind: 'level', level: 'doctorB', rows: b },
+      { groupId: 'g2', kind: 'level', level: 'doctorC', rows: c },
+    ];
+    const ctx = makeCtx(normalGroups, [key], catalogByKey);
+    ctx.recipe.descriptive = { stratifyByKey: staffKey };
+    return { ctx, openGroups };
+  }
+
+  it('집계 경로(기본값): 결측 3명인 그룹·소수 그룹이 억제되고 total도 강제 억제된다', async () => {
+    mockDiscreteEngine();
+    const { ctx } = buildCtx();
+    const result = await computeDescriptiveStratifiedAnalyzeResult(ctx);
+    expect(result.suppressed).toBe(false);
+    if (result.suppressed) throw new Error('unreachable');
+    const cell = (groupId: string) => result.byGroup.find((g) => g.groupId === groupId)!.discrete[0];
+    expect(cell('g0').suppressed).toBe(true);   // 결측 3명
+    expect(cell('other').suppressed).toBe(true); // 값 있는 인원 5명
+    expect(cell('total').suppressed).toBe(true); // 하나라도 억제되면 total도
+    expect(cell('g1').suppressed).toBe(false);
+  });
+
+  it('unrestricted: 모든 그룹·total이 공개되고 엔진은 1회만 호출된다(새 분할 사용)', async () => {
+    mockDiscreteEngine();
+    const { ctx, openGroups } = buildCtx();
+    const result = await computeDescriptiveStratifiedAnalyzeResult(
+      ctx, undefined, { unrestricted: true, partition: { groups: openGroups } },
+    );
+    expect(runStatsEngine).toHaveBeenCalledTimes(1);
+    expect(result.suppressed).toBe(false);
+    if (result.suppressed) throw new Error('unreachable');
+
+    // 집계용 "기타" 대신 개별 담당의 그룹이 나온다.
+    expect(result.groups.map((g) => [g.groupId, g.kind, g.level])).toEqual([
+      ['total', 'total', null], ['g0', 'level', 'doctorA'], ['g1', 'level', 'doctorB'], ['g2', 'level', 'doctorC'],
+    ]);
+    const cell = (groupId: string) => {
+      const d = result.byGroup.find((g) => g.groupId === groupId)!.discrete[0];
+      if (d.suppressed) throw new Error(`${groupId} must be revealed`);
+      return d;
+    };
+    expect(cell('g0')).toMatchObject({ n: 100, missingCount: 3 });
+    expect(cell('g1')).toMatchObject({ n: 80, missingCount: 0 });
+    expect(cell('g2')).toMatchObject({ n: 5, missingCount: 0 });
+    expect(cell('g2').levels.map((l) => [l.level, l.count])).toEqual([['high', 3], ['low', 2]]);
+    // total은 그룹의 합과 정확히 같다(강제 억제 없음).
+    expect(cell('total')).toMatchObject({ n: 185, missingCount: 3 });
+    // 최상위 continuous/discrete가 비는 계약은 층화 결과 shape(byGroup)로만 노출된다.
+    expect(result.byGroup.every((g) => g.continuous.length === 0)).toBe(true);
+  });
+
+  it('unrestricted 호출 전에 실제 엔진 요청에 입력 상한 검사를 적용한다(상한 초과 시 엔진을 부르지 않고 throw)', async () => {
+    const { ctx, openGroups } = buildCtx();
+    // total 그룹의 변수 하나가 MAX_VALUES_PER_VARIABLE(50,000)을 넘기도록 만든다.
+    const overLimit: DatasetRow[] = Array.from({ length: 50_001 }, (_, i) => ({
+      caseId: `c-${i}`, personClusterKey: `p-${i}`, entityKey: null,
+      values: { [key]: extracted('high') },
+    }));
+    const huge = openGroups.map((g) => (g.groupId === 'total' ? { ...g, rows: overLimit } : g));
+    await expect(
+      computeDescriptiveStratifiedAnalyzeResult(ctx, undefined, { unrestricted: true, partition: { groups: huge } }),
+    ).rejects.toThrow();
+    expect(runStatsEngine).not.toHaveBeenCalled();
+  });
+});

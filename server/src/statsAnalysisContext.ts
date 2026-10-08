@@ -189,6 +189,18 @@ export interface FrozenAnalysisInput {
   snapshotAsOf: string;
 }
 
+// admission(statsRunAdmission.ts)과 조기 억제 실행의 원본 보존(statsAnalyzeHandler.ts)이 같은
+// 형태로 frozen_dataset을 만들도록 한 곳에 둔다. §저장 데이터 최소화 — 이 이상으로 키우지 않는다.
+export function buildFrozenAnalysisInput(ctx: AnalysisContext): FrozenAnalysisInput {
+  return {
+    recipe: ctx.recipe,
+    dataset: ctx.dataset,
+    recipeDigest: ctx.recipeDigest,
+    sourceDigest: ctx.snapshot.sourceDigest,
+    snapshotAsOf: ctx.snapshot.snapshotAsOf,
+  };
+}
+
 // PR4-B1 — 워커(attempt())와 GET /runs/:analysisRunId 둘 다 이 함수로 frozen_dataset을
 // 재구성한다. viewerUserId/viewerOrgId는 frozen_dataset에 박힌 원 요청자와 별개로
 // "지금 이 결과를 보는 사람"을 뜻한다 — capability 체크·감사 actor가 조회자 기준이어야
@@ -198,6 +210,11 @@ export interface FrozenAnalysisInput {
 // differencing 재실행 없음(위 buildAnalysisContext 주석 참고) — requestSuppressed는
 // 항상 false로 고정한다. admission이 §0에서 이미 억제 요청을 걸러낸 뒤에만 행을
 // 만들므로, 이 함수에 도달하는 recipe는 구조적으로 억제 대상이 아니었던 것이다.
+// 예외: 제한데이터 권한자의 기술통계가 "필터 후 10명 미만"(MIN_COHORT_NOT_MET)으로 조기 억제된
+// 실행도 frozen_dataset을 남긴다(statsAnalyzeHandler.ts). 응답 시점 해제(finalizeAnalyzeResponse)의
+// 판정은 요청 단계 억제 여부와 무관하게 "조회자의 현재 권한 + descriptive"만 보므로 이 고정값은
+// 해제 경로에 영향이 없다. differencing으로 막힌 실행(forceSuppress)은 원본을 저장하지 않으므로
+// 이 함수에 도달하지 않는다 — 재조회로 differencing 제한을 우회할 수 없다.
 export function deriveAnalysisContext(
   frozen: FrozenAnalysisInput,
   viewer: { viewerUserId: string; viewerOrgId: string },

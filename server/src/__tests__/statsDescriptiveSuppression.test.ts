@@ -643,3 +643,183 @@ describe('buildStatsEngineRequest', () => {
     expect(request.variables[0].personCount).toBeUndefined();
   });
 });
+
+// 제한데이터 권한자 응답 전용 — unrestricted 옵션은 소수 셀(1~9명) 판정을 전부 끈다.
+// 옵션이 없으면(집계 경로) 기존과 똑같이 억제돼야 한다(기본값 불변).
+describe('computeDescriptiveSuppression — unrestricted(제한데이터 권한자)', () => {
+  const ids = (prefix: string, n: number) => Array.from({ length: n }, (_v, i) => `${prefix}${i}`);
+
+  function discreteFixture(
+    key: string,
+    groups: Array<{ value: string; persons: string[] }>,
+    missingPersons: string[] = [],
+    reason: 'not_entered' | 'not_assessed' = 'not_entered',
+  ) {
+    const dataRows: DatasetRow[] = [];
+    let i = 0;
+    for (const g of groups) {
+      for (const p of g.persons) {
+        dataRows.push({ caseId: `case-${i++}`, personClusterKey: p, values: { [key]: extracted(g.value) } });
+      }
+    }
+    for (const p of missingPersons) {
+      dataRows.push({ caseId: `case-${i++}`, personClusterKey: p, values: { [key]: extracted<string>(null, reason) } });
+    }
+    const present = groups.reduce((s, g) => s + g.persons.length, 0);
+    const raw: StatsEngineRawResult = {
+      continuous: [],
+      discrete: [{ variableKey: key, n: present, levels: groups.map((g) => ({ level: g.value, count: g.persons.length })) }],
+    };
+    return { dataRows, raw };
+  }
+
+  it('업무관련성 high 60/low 40이라도 결측이 3명이면 집계 경로는 억제, unrestricted는 결측 3건과 함께 공개한다', () => {
+    const key = 'diagnosis.assessment.status';
+    const catalogByKey = new Map([[key, meta(key, 'categorical')]]);
+    const { dataRows, raw } = discreteFixture(
+      key, [{ value: 'high', persons: ids('h', 60) }, { value: 'low', persons: ids('l', 40) }], ids('m', 3),
+    );
+
+    expect(computeDescriptiveSuppression(dataRows, [key], catalogByKey, raw).discrete[0].suppressed).toBe(true);
+    expect(computeDescriptiveSuppression(dataRows, [key], catalogByKey, raw, { unrestricted: false }).discrete[0].suppressed).toBe(true);
+
+    const d = computeDescriptiveSuppression(dataRows, [key], catalogByKey, raw, { unrestricted: true }).discrete[0];
+    expect(d.suppressed).toBe(false);
+    if (d.suppressed) return;
+    expect(d.n).toBe(100);
+    expect(d.missingCount).toBe(3);
+    expect(d.levels).toEqual([
+      { level: 'high', count: 60, proportion: 0.6 },
+      { level: 'low', count: 40, proportion: 0.4 },
+    ]);
+    expect(d.mode).toBe('high');
+  });
+
+  it('결측 사유 분포도 소수 사유(1명)가 있어도 생략하지 않는다(집계 경로는 null)', () => {
+    const key = 'diagnosis.assessment.status';
+    const catalogByKey = new Map([[key, meta(key, 'categorical')]]);
+    const { dataRows, raw } = discreteFixture(
+      key, [{ value: 'high', persons: ids('h', 60) }, { value: 'low', persons: ids('l', 40) }],
+      [...ids('a', 12), 'solo'],
+    );
+    // 사유를 둘로 나눈다: not_entered 12명 + not_assessed 1명.
+    dataRows[dataRows.length - 1] = {
+      caseId: 'case-solo', personClusterKey: 'solo', values: { [key]: extracted<string>(null, 'not_assessed') },
+    };
+
+    const aggregate = computeDescriptiveSuppression(dataRows, [key], catalogByKey, raw).discrete[0];
+    // 결측 인원 13명(≥10)이라 변수 자체는 공개되지만 사유 분포는 소수 셀(1명)이 있어 null.
+    expect(aggregate.suppressed).toBe(false);
+    if (!aggregate.suppressed) expect(aggregate.missingPatterns).toBeNull();
+
+    const open = computeDescriptiveSuppression(dataRows, [key], catalogByKey, raw, { unrestricted: true }).discrete[0];
+    expect(open.suppressed).toBe(false);
+    if (open.suppressed) return;
+    expect(open.missingPatterns).toEqual(expect.arrayContaining([
+      { reasonCode: 'not_entered', count: 12 },
+      { reasonCode: 'not_assessed', count: 1 },
+    ]));
+  });
+
+  it('소수 범주(3명)를 "기타"로 병합하거나 억제하지 않고 개별 범주로 그대로 공개한다', () => {
+    const key = 'job.identity.jobNameNormalized';
+    const catalogByKey = new Map([[key, meta(key, 'high_cardinality')]]);
+    const { dataRows, raw } = discreteFixture(
+      key, [{ value: 'A', persons: ids('a', 40) }, { value: 'B', persons: ids('b', 20) }, { value: 'D', persons: ids('d', 3) }],
+    );
+    expect(computeDescriptiveSuppression(dataRows, [key], catalogByKey, raw).discrete[0].suppressed).toBe(true);
+    // 병합 옵션을 켠 일반 기술통계 경로(집계)도 이 조합은 공개 범주가 2개 미만이 되어 억제된다.
+    expect(
+      computeDescriptiveSuppression(dataRows, [key], catalogByKey, raw, { mergeSmallLevels: true }).discrete[0].suppressed,
+    ).toBe(true);
+
+    const d = computeDescriptiveSuppression(
+      dataRows, [key], catalogByKey, raw, { unrestricted: true, mergeSmallLevels: true },
+    ).discrete[0];
+    expect(d.suppressed).toBe(false);
+    if (d.suppressed) return;
+    expect(d.levels.map((l) => [l.level, l.count])).toEqual([['A', 40], ['B', 20], ['D', 3]]);
+    expect('other' in d).toBe(false);
+  });
+
+  it('값이 있는 사람이 3명뿐이어도(나머지는 결측) 공개한다 — 한 사람이 여러 관측이어도 건수는 관측 기준', () => {
+    const key = 'diagnosis.assessment.status';
+    const catalogByKey = new Map([[key, meta(key, 'categorical')]]);
+    const { dataRows, raw } = discreteFixture(
+      key, [{ value: 'high', persons: ['p1', 'p1', 'p2', 'p3'] }], ids('m', 30),
+    );
+    expect(computeDescriptiveSuppression(dataRows, [key], catalogByKey, raw).discrete[0].suppressed).toBe(true);
+    const d = computeDescriptiveSuppression(dataRows, [key], catalogByKey, raw, { unrestricted: true }).discrete[0];
+    expect(d.suppressed).toBe(false);
+    if (d.suppressed) return;
+    expect(d.n).toBe(4);
+    expect(d.missingCount).toBe(30);
+  });
+
+  it('전부 결측이면 n=0으로 공개하고 최빈값은 null이다', () => {
+    const key = 'diagnosis.assessment.status';
+    const catalogByKey = new Map([[key, meta(key, 'categorical')]]);
+    const { dataRows, raw } = discreteFixture(key, [], ids('m', 5));
+    raw.discrete[0] = { variableKey: key, n: 0, levels: [] };
+    const d = computeDescriptiveSuppression(dataRows, [key], catalogByKey, raw, { unrestricted: true }).discrete[0];
+    expect(d.suppressed).toBe(false);
+    if (d.suppressed) return;
+    expect(d.n).toBe(0);
+    expect(d.missingCount).toBe(5);
+    expect(d.levels).toEqual([]);
+    expect(d.mode).toBeNull();
+  });
+
+  it('연속형 valid=97/missing=3은 집계 경로에서 통째 억제되지만 unrestricted는 n·결측·히스토그램·이상치 건수까지 공개한다', () => {
+    const key = 'cervical.case.maxJobCumulativeKgHours';
+    const catalogByKey = new Map([[key, meta(key, 'continuous')]]);
+    const entries = [
+      ...Array.from({ length: 96 }, (_, i) => ({ value: i % 8 })),
+      { value: 40 }, // 이상치 1명
+      ...Array.from({ length: 3 }, () => ({ value: null, missing: 'not_entered' as const })),
+    ];
+    const data = rows(key, entries);
+    const raw: StatsEngineRawResult = {
+      continuous: [{
+        variableKey: key, n: 97, mean: 3.9, sd: 4, median: 3, q1: 1, q3: 6, iqr: 5,
+        skewness: 1, kurtosis: 1, min: 0, max: 40, nullReasons: {},
+        histogram: null,
+        boxplot: { q1: 1, median: 3, q3: 6, lowerWhisker: 0, upperWhisker: 7, lowerFence: -6.5, upperFence: 13.5, outlierCount: 1, outlierValues: [40] },
+      }],
+      discrete: [],
+    };
+    expect(computeDescriptiveSuppression(data, [key], catalogByKey, raw).continuous[0].suppressed).toBe(true);
+
+    const c = computeDescriptiveSuppression(data, [key], catalogByKey, raw, { unrestricted: true }).continuous[0];
+    expect(c.suppressed).toBe(false);
+    if (c.suppressed) return;
+    expect(c.n).toBe(97);
+    expect(c.missingCount).toBe(3);
+    expect(c.missingPatterns).toEqual([{ reasonCode: 'not_entered', count: 3 }]);
+    // 원본 bin을 해상도 축소·끝 구간 병합 없이 그대로 쓴다(전체 건수 합 = n).
+    expect(c.histogram?.merged).toBe(false);
+    expect(c.histogram?.bins.reduce((s, b) => s + b.count, 0)).toBe(97);
+    expect(c.histogramReasonCode).toBeNull();
+    // 이상치가 1명이어도 건수를 공개한다(집계 경로의 이상치 partition 게이트 생략).
+    expect(c.boxplot?.outlierCount).toBe(1);
+  });
+
+  it('1명뿐인 연속형은 SD 등 계산 불가 값을 엔진이 준 null 그대로 둔다(억제가 아니라 계산 불가)', () => {
+    const key = 'cervical.case.maxJobCumulativeKgHours';
+    const catalogByKey = new Map([[key, meta(key, 'continuous')]]);
+    const raw: StatsEngineRawResult = {
+      continuous: [{
+        variableKey: key, n: 1, mean: 5, sd: null, median: 5, q1: 5, q3: 5, iqr: 0,
+        skewness: null, kurtosis: null, min: 5, max: 5, nullReasons: {},
+        histogram: null, boxplot: null,
+      }],
+      discrete: [],
+    };
+    const c = computeDescriptiveSuppression(rows(key, [{ value: 5 }]), [key], catalogByKey, raw, { unrestricted: true }).continuous[0];
+    expect(c.suppressed).toBe(false);
+    if (c.suppressed) return;
+    expect(c.n).toBe(1);
+    expect(c.sd).toBeNull();
+    expect(c.mean).toBe(5);
+  });
+});

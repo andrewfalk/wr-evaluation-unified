@@ -924,7 +924,7 @@ function Table1DiscreteCellText({ cell, level }) {
   return found ? `${found.count} (${(found.proportion * 100).toFixed(1)}%)` : '0 (0.0%)';
 }
 
-function Table1Grid({ stratified, catalogByKey }) {
+function Table1Grid({ stratified, catalogByKey, limitedApplied = false }) {
   if (stratified.suppressed) {
     return <p className="swb-suppressed-note">공개 정책에 따라 표시되지 않음</p>;
   }
@@ -975,16 +975,46 @@ function Table1Grid({ stratified, catalogByKey }) {
         </table>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 8 }}>
-        <span className="swb-suppressed-note"><em>비공개</em> = 공개 정책에 따라 표시되지 않음(소수 인원 보호)</span>
+        {!limitedApplied && (
+          <span className="swb-suppressed-note"><em>비공개</em> = 공개 정책에 따라 표시되지 않음(소수 인원 보호)</span>
+        )}
         <span className="swb-suppressed-note">— = 계산 불가(해당 그룹에서 이 변수의 값이 전부 결측)</span>
       </div>
-      <p className="swb-suppressed-note" style={{ marginTop: 8 }}>
-        집계 단위는 선택한 사례·직업·상병이며, 공개 여부는 고유 인원 기준입니다. 그룹
-        하나라도 비공개 처리되면 전체 값도 함께 비공개로 전환됩니다 — 전체와 공개된
-        그룹만으로 비공개 그룹의 값을 역산하는 것을 막기 위함입니다.
-      </p>
+      {limitedApplied ? (
+        <p className="swb-suppressed-note" style={{ marginTop: 8 }}>
+          집계 단위는 선택한 사례·직업·상병입니다. 제한데이터 권한으로 소수 인원 보호가 해제되어 모든
+          그룹(10명 미만 포함)과 전체 값이 그대로 표시됩니다.
+        </p>
+      ) : (
+        <p className="swb-suppressed-note" style={{ marginTop: 8 }}>
+          집계 단위는 선택한 사례·직업·상병이며, 공개 여부는 고유 인원 기준입니다. 그룹
+          하나라도 비공개 처리되면 전체 값도 함께 비공개로 전환됩니다 — 전체와 공개된
+          그룹만으로 비공개 그룹의 값을 역산하는 것을 막기 위함입니다.
+        </p>
+      )}
     </div>
   );
+}
+
+// 제한데이터 권한자 응답 전용(서버가 응답 시점에만 붙인다 — shared/contracts LimitedDisclosureStatusSchema).
+// applied는 소수 인원(1~9명) 보호가 해제됐다는 경고 배너이고, unavailable_*는 해제를 시도했지만 못 해
+// 일반(집계) 결과를 보여 준다는 안내다. 필드가 없으면 일반 응답이라 아무것도 그리지 않는다.
+const LIMITED_DISCLOSURE_MESSAGES = {
+  applied: '제한데이터 권한: 소수 인원(10명 미만) 보호가 해제된 결과입니다. 화면 캡처·반출·공유에 주의하세요.',
+  unavailable_engine_busy: '제한 해제 계산이 다른 작업과 겹쳐 일반(집계) 결과를 표시합니다. 잠시 후 다시 조회하세요.',
+  unavailable_computation_failed: '제한 해제 계산에 실패해 일반(집계) 결과를 표시합니다. 다시 시도하세요.',
+  unavailable_engine_degraded: '통계 엔진 상태가 불안정해 제한 해제를 할 수 없어 일반(집계) 결과를 표시합니다. 관리자에게 문의하세요.',
+  unavailable_input_too_large: '데이터가 커서 제한 해제를 할 수 없어 일반(집계) 결과를 표시합니다. 필터로 범위를 줄여 보세요.',
+  unavailable_group_limit: '그룹 수가 많아 제한 해제를 할 수 없어 일반(집계) 결과를 표시합니다. 필터로 범위를 줄이거나 다른 그룹 변수를 선택하세요.',
+  unavailable_source_missing: '이 실행은 제한 해제에 필요한 원본이 보존되지 않았습니다(권한을 받기 전에 실행했거나 보존 기간이 지남). 분석을 다시 실행하면 해제됩니다.',
+  unavailable_version_drift: '분석 규칙·엔진 버전이 바뀌어 이 실행은 제한 해제를 할 수 없습니다. 분석을 다시 실행하세요.',
+};
+
+function LimitedDisclosureBanner({ status }) {
+  if (!status) return null;
+  const text = LIMITED_DISCLOSURE_MESSAGES[status]
+    ?? '제한 해제를 적용하지 못해 일반(집계) 결과를 표시합니다. 다시 실행하세요.';
+  return <div className="swb-banner" role="status" style={{ marginBottom: 12 }}>{text}</div>;
 }
 
 const TABS = [
@@ -1043,11 +1073,19 @@ export function ResultPanel({
           <div className="swb-banner" style={{ marginBottom: 12 }}>조건이 변경됨 — 다시 실행 필요</div>
         )}
 
+        {committedResult && isDescriptiveRun && (
+          <LimitedDisclosureBanner status={committedResult.result?.limitedDisclosure} />
+        )}
+
         {!committedResult && <div className="swb-empty">좌측에서 변수를 선택하고 "분석 실행"을 눌러주세요.</div>}
 
         {committedResult && activeTab === 'summary' && (
           descriptiveStratified ? (
-            <Table1Grid stratified={descriptiveStratified} catalogByKey={catalogByKey} />
+            <Table1Grid
+              stratified={descriptiveStratified}
+              catalogByKey={catalogByKey}
+              limitedApplied={committedResult.result?.limitedDisclosure === 'applied'}
+            />
           ) : isDescriptiveRun ? (
             <>
               <div className="swb-section-label">연속형</div>

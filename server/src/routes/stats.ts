@@ -2,6 +2,7 @@
 // 코호트 미달이든 differencing 초과든 같은 마스킹 페이로드로 응답하고, 감사·resultDigest
 // 계산은 예외 없이 거친다. handlePostPreview/handlePostAnalyze는 statsAnalysisContext.ts의
 // buildAnalysisContext()를 공유한다(순수 추출, 계획서 pr1-giggly-treehouse.md §4.1).
+import { isDeepStrictEqual } from 'node:util';
 import { Router, type Request, type Response } from 'express';
 import type { Pool } from 'pg';
 import { INTEGRATED_CATALOG_VERSION } from '../statsCatalogVersion';
@@ -17,7 +18,7 @@ import {
 } from '@wr/contracts';
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
-import { requireCapability } from '../middleware/requireCapability';
+import { hasCapability, requireCapability } from '../middleware/requireCapability';
 import { analyzeRateLimit } from '../middleware/rateLimit';
 import { writeAuditLogStrict } from '../middleware/audit';
 import { canonicalDigest } from '../canonicalSerializer';
@@ -25,7 +26,8 @@ import { MINIMUM_COHORT, ESTIMABILITY_POLICY_VERSION, DIFFERENCING_POLICY, PREDI
 import { computeEstimability } from '../statsEstimability';
 import { buildRunManifest } from '../statsRunManifest';
 import { buildAnalysisContext, deriveAnalysisContext, type AnalysisContext } from '../statsAnalysisContext';
-import { handlePostAnalyze, finalizeAnalyzeResponse, toPublicRunManifest } from '../statsAnalyzeHandler';
+import { handlePostAnalyze, finalizeAnalyzeResponse, isAbortedFinalize, toPublicRunManifest } from '../statsAnalyzeHandler';
+import { createResponseAbort } from '../statsResponseAbort';
 import { handlePostExport } from '../statsExportHandler';
 import { buildPredictionEngineRequestForState } from '../statsPredictionSuppression';
 import { assertPredictionWithinLimits, StatsEngineInputTooLargeError } from '../statsEngine';
@@ -161,13 +163,39 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
   // 계획서 "preview도 같은 공개통제 우선순위를 따른다"를 충족하려면 여기서도
   // 동일하게 억제해야 한다.
   const predictionSuppressed = ctx.recipe.analysisMode === 'prediction' && !ctx.predictionDisclosed;
-  if (ctx.requestSuppressed || predictionSuppressed) {
+
+  // 제한데이터 권한자의 기술통계 미리보기는 소수 셀(1~9명) 제한을 푼다. 범위는 기술통계에만 —
+  // 이변량·회귀·예측은 통계적 타당성 게이트가 섞여 있어 이번에 바꾸지 않는다. differencing 제한
+  // (forceSuppress)은 남용 방지 장치라 풀지 않는다(이때 reasonCode는 N<10이어도 MIN_COHORT로 보일 수
+  // 있어 사유 코드가 아니라 플래그로 판정한다).
+  // 권한 조회(DB 1회)는 풀 것이 실제로 있을 때만 한다 — 요청 수준 억제이거나 억제 없는 추정가능성이
+  // 제한 적용본과 다를 때. 대부분의 미리보기는 조회 없이 끝난다.
+  const liftPossible = ctx.recipe.analysisMode === 'descriptive' && !ctx.differencing.forceSuppress;
+  let holder: boolean | null = null;
+  const isHolder = async (): Promise<boolean> => {
+    holder ??= await hasCapability(pool, 'stats.export_limited_rows', ctx.userId, ctx.orgId);
+    return holder;
+  };
+  // 요청 수준(필터 후 인원 < MINIMUM_COHORT) 게이트를 실제로 우회했는가 — 감사에는 이것만 기록한다.
+  const liftedRequestGate = liftPossible && ctx.requestSuppressed && await isHolder();
+  let liftedCellLevel = false;
+
+  if ((ctx.requestSuppressed && !liftedRequestGate) || predictionSuppressed) {
     ({ counts, estimability } = buildSuppressedPreviewPayload(
       ctx.recipe.variableKeys, ctx.catalogByKey, ctx.reasonCode ?? 'MIN_COHORT_NOT_MET',
     ));
   } else {
     // §C 1단계 게이트를 통과했을 때만 §C 2단계(person 단위 소수 셀 억제)를 계산한다.
-    const est = computeEstimability(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey);
+    const restrictedEst = computeEstimability(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey);
+    let est = restrictedEst;
+    if (liftPossible) {
+      const openEst = computeEstimability(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey, { unrestricted: true });
+      // 셀 수준 해제는 제한 적용본과 실제로 달랐을 때만 적용·기록한다(풀 것이 없었으면 일반 응답과 같다).
+      if (!isDeepStrictEqual(openEst, restrictedEst) && await isHolder()) {
+        est = openEst;
+        liftedCellLevel = true;
+      }
+    }
     counts = {
       personCount: ctx.dataset.personCount,
       caseCount: ctx.dataset.caseCount,
@@ -195,6 +223,9 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
       estimabilityPolicyVersion: ESTIMABILITY_POLICY_VERSION,
     };
   }
+  const smallCellLimitLifted = liftedRequestGate || liftedCellLevel;
+  // 실제로 전달된 응답이 억제 상태인지 — 해제한 경우 원래 억제 사유(originalReasonCode)와 구분한다.
+  const deliveredSuppressed = ctx.requestSuppressed && !liftedRequestGate;
 
   // §E — resultDigest는 억제 적용 "후" 실제 공개 페이로드의 해시. 억제 전 원값을 해시하면
   // 무차별대입으로 역산될 수 있어 절대 쓰지 않는다. PR3-A — availableMethods/
@@ -228,6 +259,8 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
       windowMinutes: DIFFERENCING_POLICY.windowMinutes,
       remaining: ctx.differencing.remaining,
     },
+    // 소수 셀 억제를 실제로 푼 경우에만 표시한다(풀 것이 없었으면 일반 응답과 같다).
+    ...(smallCellLimitLifted ? { limitedDisclosure: 'applied' as const } : {}),
   };
 
   // §D-6 ⑥ — 감사 기록은 억제 여부와 무관하게 항상 남기고, 실패하면 요청 자체를 500으로
@@ -238,7 +271,7 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
     action: 'stats_preview',
     targetType: 'analysis_recipe',
     targetId: ctx.recipeDigest,
-    outcome: ctx.requestSuppressed ? 'denied' : 'success',
+    outcome: deliveredSuppressed ? 'denied' : 'success',
     ip: req.ip ?? null,
     userAgent: req.headers['user-agent'] ?? null,
     extra: {
@@ -254,8 +287,14 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
       filterCount: ctx.recipe.filters.length,
       analysisPurpose: ctx.recipe.analysisPurpose,
       formulaPolicies: ctx.recipe.formulaPolicies,
-      suppressed: ctx.requestSuppressed,
-      reasonCode: ctx.reasonCode,
+      // 실제로 전달된 응답 기준. 제한 해제로 우회한 경우 원래 사유는 originalReasonCode에 남는다.
+      suppressed: deliveredSuppressed,
+      reasonCode: deliveredSuppressed ? ctx.reasonCode : null,
+      originalReasonCode: ctx.reasonCode,
+      deliveredReasonCode: deliveredSuppressed ? ctx.reasonCode : null,
+      smallCellLimitLifted,
+      liftedRequestGate,
+      liftedCellLevel,
       queryFamilyDigest: ctx.queryFamilyDigest,
       catalogVersion: runManifest.catalogVersion,
       extractorVersion: runManifest.extractorVersion,
@@ -330,8 +369,18 @@ async function handleGetRun(pool: Pool, req: Request, res: Response): Promise<vo
   const publicManifest = toPublicRunManifest(manifest);
   const result = row.result as AnalyzeResult;
 
+  // 제한데이터 권한자가 조회한 기술통계 실행인데 응답 시점 해제에 필요한 원본이 없거나(조기 억제 실행 중
+  // 생성 당시 권한이 없었거나 differencing으로 막힌 것, 또는 보존기간 이후) 버전이 어긋났다 — 집계 결과는
+  // 그대로 서빙하되, 조용히 비공개로 보이지 않도록 사유를 알린다(재실행하면 해제된다).
   if (!row.frozen_dataset || hasVersionDrifted(row)) {
-    res.status(200).json({ analysisRunId: row.analysis_run_id, status: 'succeeded', runManifest: publicManifest, result });
+    let body: AnalyzeResult = result;
+    if (
+      (manifest.analysisMode ?? 'descriptive') === 'descriptive'
+      && await hasCapability(pool, 'stats.export_limited_rows', session.userId, session.organizationId!)
+    ) {
+      body = { ...result, limitedDisclosure: row.frozen_dataset ? 'unavailable_version_drift' : 'unavailable_source_missing' };
+    }
+    res.status(200).json({ analysisRunId: row.analysis_run_id, status: 'succeeded', runManifest: publicManifest, result: body });
     return;
   }
   const ctxResult = deriveAnalysisContext(row.frozen_dataset, {
@@ -342,16 +391,23 @@ async function handleGetRun(pool: Pool, req: Request, res: Response): Promise<vo
     res.status(200).json({ analysisRunId: row.analysis_run_id, status: 'succeeded', runManifest: publicManifest, result });
     return;
   }
-  const finalized = await finalizeAnalyzeResponse(pool, ctxResult.ctx, row.execution_digest, {
-    runManifest: publicManifest,
-    result,
-  });
-  if (finalized.status !== 200) {
-    res.status(finalized.status).json(finalized.body);
-    return;
+  // 응답 완료 전에 연결이 끊기면 제한 해제 계산을 중단한다(res close 기반 — statsResponseAbort.ts).
+  const abort = createResponseAbort(res);
+  try {
+    const finalized = await finalizeAnalyzeResponse(pool, ctxResult.ctx, row.execution_digest, {
+      runManifest: publicManifest,
+      result,
+    }, abort.signal);
+    if (isAbortedFinalize(finalized)) return;
+    if (finalized.status !== 200) {
+      res.status(finalized.status).json(finalized.body);
+      return;
+    }
+    const body = finalized.body as { runManifest: typeof publicManifest; result: AnalyzeResult };
+    res.status(200).json({ analysisRunId: row.analysis_run_id, status: 'succeeded', ...body });
+  } finally {
+    abort.dispose();
   }
-  const body = finalized.body as { runManifest: typeof publicManifest; result: AnalyzeResult };
-  res.status(200).json({ analysisRunId: row.analysis_run_id, status: 'succeeded', ...body });
 }
 
 async function handlePostCancelRun(pool: Pool, req: Request, res: Response): Promise<void> {

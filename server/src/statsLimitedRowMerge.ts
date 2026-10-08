@@ -150,10 +150,19 @@ async function resolveRegressionPointDiagnostics(
  * 그 갱신은 이 함수 안에서 이미 attached:false로 처리되므로, 호출자(§9 신규
  * 감사 단계)는 여전히 attached만 보고 판단하면 된다.
  */
+export interface AttachLimitedRowFieldsOptions {
+  /**
+   * true면 이산형 rawLevels를 붙이지 않는다. 소수 셀 제한이 해제된 응답(statsDescriptiveUnrestricted.ts)은
+   * levels가 이미 원본 범주 빈도 전부라 rawLevels가 중복이기 때문이다.
+   */
+  skipRawLevels?: boolean;
+}
+
 export async function attachLimitedRowFields(
   ctx: AnalysisContext,
   result: AnalyzeResult,
   hasAccess: boolean,
+  options: AttachLimitedRowFieldsOptions = {},
 ): Promise<AttachLimitedRowFieldsOutcome> {
   let attached = false;
 
@@ -170,6 +179,7 @@ export async function attachLimitedRowFields(
     // 반환" 보장이 map의 새 배열 때문에 깨지지 않게).
     let discreteChanged = false;
     const withRawLevels = result.discrete.map((d) => {
+      if (options.skipRawLevels) return d;
       const rawLevels = computeRawDiscreteLevels(ctx.dataset.rows, d.variableKey);
       if (!rawLevels) return d;
       discreteChanged = true;

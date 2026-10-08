@@ -969,8 +969,20 @@ function PreviewSummary({ previewState, isPreviewCurrent, catalogByKey }) {
       : `최소 표본(${counts.minimumCohort}명) 미달로 표시할 수 없습니다.`;
     return <p className="swb-status-warn">{reason}</p>;
   }
+  // 제한데이터 권한자가 소수 셀 억제를 실제로 푼 미리보기(서버가 풀 것이 있었을 때만 표시한다).
+  const limitedApplied = previewState.result.limitedDisclosure === 'applied';
+  // 추정가능성의 `—`/`비공개`는 소수 인원(1~9명) 보호로 숨겨진 값이다. 0명인 경우와는 서버 응답으로 구분되지
+  // 않으므로(같은 null) "숨겨질 수 있다"는 중립 문구만 쓴다.
+  const hasHiddenEstimability = estimability.completeCaseN === null
+    || Object.values(estimability.missingRatesByVariable).some((rate) => rate === null)
+    || estimability.eventNonEvent.some((e) => e.suppressed);
   return (
     <>
+      {limitedApplied && (
+        <div className="swb-banner" role="status" style={{ marginBottom: 8 }}>
+          제한데이터 권한: 소수 인원(10명 미만) 보호가 해제된 미리보기입니다.
+        </div>
+      )}
       <div className="swb-metric-grid">
         <div className="swb-metric">
           <div className="swb-metric-value">{counts.personCount}</div>
@@ -1007,6 +1019,11 @@ function PreviewSummary({ previewState, isPreviewCurrent, catalogByKey }) {
           ))}
         </tbody>
       </table>
+      {hasHiddenEstimability && (
+        <p className="swb-suppressed-note">
+          <strong>—</strong>·<strong>비공개</strong>는 소수 인원 보호로 숨겨진 값일 수 있습니다.
+        </p>
+      )}
     </>
   );
 }

@@ -100,6 +100,13 @@ function wireAuthAndCapability(
   mock.mockResolvedValueOnce({ rows: [capability] }); // requireCapability
 }
 
+// 기술통계가 "필터 후 10명 미만"으로 억제될 때 제한데이터 권한자만 응답 시점에 해제되므로 서버가
+// stats.export_limited_rows 권한을 한 번 더 조회한다 — 이 테스트들은 권한 없는 사용자를 가정한다.
+// 호출 순서: auth → requireCapability → (스냅샷은 pool.connect) → 이 조회.
+function wireNoLimitedRowCapability(pool: Pool): void {
+  (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ has_default: false, has_grant: false }] });
+}
+
 const SNAPSHOT_AS_OF = new Date('2024-01-01T00:00:00.000Z');
 
 function patientRow(id: string, personId: string, assignedDoctorUserId: string | null = null) {
@@ -482,6 +489,7 @@ describe('POST /preview·POST /analyze — 공통변수 브로드캐스트 통�
   it('대조군 — 1명이 job 20개를 가지면 observationCount=20이어도 personCount=1이라 /preview 전체가 MIN_COHORT_NOT_MET으로 억제된다', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
+    wireNoLimitedRowCapability(pool);
     wireSnapshot(pool, [genderedJobCaseRow('solo-case', 'solo-person', 'male', 20)]);
     const res = await request(makeApp(pool))
       .post('/api/stats/preview')
@@ -536,6 +544,7 @@ describe('POST /preview — 소수 셀 억제', () => {
   it('personCount<10이면 전체 게이트로 억제되고 필드 구조는 유지된 채 값만 null이다', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
+    wireNoLimitedRowCapability(pool);
     wireSnapshot(pool, manyDistinctPersons(5));
     const res = await request(makeApp(pool))
       .post('/api/stats/preview')
@@ -554,6 +563,7 @@ describe('POST /preview — 소수 셀 억제', () => {
   it('한 사람이 사례 12건을 가지면 personCount=1이라 억제된다', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
+    wireNoLimitedRowCapability(pool);
     const rows = Array.from({ length: 12 }, (_, i) => patientRow(`case-${i}`, 'person-solo'));
     wireSnapshot(pool, rows);
     const res = await request(makeApp(pool))
@@ -610,6 +620,7 @@ describe('POST /preview — 감사 로그', () => {
   it('extra에 필터 값 없이 키/연산자/개수만 남고, analysisRunId·reasonCode를 포함한다', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
+    wireNoLimitedRowCapability(pool);
     wireSnapshot(pool, manyDistinctPersons(12));
     const body = {
       ...BASE_BODY,
@@ -690,6 +701,7 @@ describe('POST /analyze — 요청 단위 억제(코호트 미달)는 caching과
   it('personCount<10이면 result가 전부 suppressed:true이고 감사 outcome은 denied다', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
+    wireNoLimitedRowCapability(pool);
     wireSnapshot(pool, manyDistinctPersons(5));
     // 요청단위 억제도 stats_runs(cacheable=false)에 INSERT한다 — BEGIN+INSERT+COMMIT.
     const writeClient = { query: vi.fn(), release: vi.fn() };
