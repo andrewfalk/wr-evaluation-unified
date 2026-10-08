@@ -300,3 +300,52 @@ describe('prepareEmrInjection — 편집본 CP949 절단 + 생성 1회 통일', 
     expect(bytes).toBe(cp949ByteLength(longText)); // bytes는 절단 전 편집본 기준(byte 경고용)
   });
 });
+
+describe('확인 상병(txtAppvSickCont / 엑셀 3.최종 확인 상병명) — 신청 상병 복사가 아니라 "확인"만', () => {
+  it('종합소견에서 확인으로 입력한 상병만 txtAppvSickCont에 담긴다', () => {
+    const patient = makeAssessmentPatient({
+      diagnoses: [
+        kneeDiag({ id: 'a', code: 'M17.0', name: '무릎 관절증' }),
+        kneeDiag({ id: 'b', code: 'M23.2', name: '반월상 연골 파열', confirmedRight: 'unconfirmed' }),
+      ],
+      activeModules: ['knee'],
+      modules: { knee: {} },
+    });
+    expect(generateEMRFieldData(patient).txtAppvSickCont).toBe('M17.0 무릎 관절증');
+    expect(generateUnifiedEMR(patient).b5).toBe('M17.0 무릎 관절증');
+  });
+
+  it('확인 상병이 0건이면 빈 문자열이고 confirmedDx.isEmpty가 true다', () => {
+    const patient = makeAssessmentPatient({
+      diagnoses: [kneeDiag({ confirmedRight: '' })],
+      activeModules: ['knee'],
+      modules: { knee: {} },
+    });
+    expect(generateEMRFieldData(patient).txtAppvSickCont).toBe('');
+    expect(prepareEmrInjection(patient).confirmedDx).toEqual({ isEmpty: true, bytes: 0, overLimit: false });
+  });
+
+  it('확인 상병이 한도를 넘으면 절단하고 _truncatedFields에 올리되 confirmedDx는 절단 전 바이트로 초과를 알린다', () => {
+    const longName = '가'.repeat(2500); // CP949 2byte × 2500 = 5000 > 한도
+    const patient = makeAssessmentPatient({
+      diagnoses: [kneeDiag({ name: longName })],
+      activeModules: ['knee'],
+      modules: { knee: {} },
+    });
+    const { fieldData, confirmedDx } = prepareEmrInjection(patient);
+    expect(fieldData.txtAppvSickCont).toContain('...(이하 생략)');
+    expect(cp949ByteLength(fieldData.txtAppvSickCont)).toBeLessThanOrEqual(EMR_TEXT_LIMIT_BYTES);
+    expect(fieldData._truncatedFields).toContain('txtAppv_Sick_Cont');
+    expect(confirmedDx.overLimit).toBe(true);
+    expect(confirmedDx.bytes).toBeGreaterThan(EMR_TEXT_LIMIT_BYTES);
+  });
+
+  it('양측 상병에서 한쪽만 확인이면 방향이 붙는다', () => {
+    const patient = makeAssessmentPatient({
+      diagnoses: [kneeDiag({ side: 'both', confirmedRight: 'confirmed', confirmedLeft: 'unconfirmed' })],
+      activeModules: ['knee'],
+      modules: { knee: {} },
+    });
+    expect(generateEMRFieldData(patient).txtAppvSickCont).toBe('M17.0 무릎 관절증 (우)');
+  });
+});

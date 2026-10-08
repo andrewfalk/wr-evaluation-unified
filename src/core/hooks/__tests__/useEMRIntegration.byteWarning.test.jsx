@@ -113,6 +113,117 @@ describe('useEMRIntegration — EMR 종합소견(b8) byte 한도 초과 경고',
   });
 });
 
+describe('useEMRIntegration — 확인 상병 칸 사전 경고', () => {
+  const withConfirmedDx = (confirmedDx) => ({ ...autoResult(), confirmedDx });
+
+  it('확인 상병이 정상이면 추가 확인 없이 전송한다', async () => {
+    mockPrepareEmrInjection.mockReturnValue(withConfirmedDx({ isEmpty: false, bytes: 40, overLimit: false }));
+    const { result } = setup();
+
+    await result.current.handleInjectEMR();
+
+    expect(showConfirm).toHaveBeenCalledTimes(1);
+    expect(window.electron.injectEMR).toHaveBeenCalledTimes(1);
+  });
+
+  it('확인 상병이 0건이면 EMR 기존 값이 남는다는 경고를 띄운다', async () => {
+    mockPrepareEmrInjection.mockReturnValue(withConfirmedDx({ isEmpty: true, bytes: 0, overLimit: false }));
+    const { result } = setup();
+
+    await result.current.handleInjectEMR();
+
+    expect(showConfirm).toHaveBeenCalledTimes(2);
+    expect(showConfirm).toHaveBeenNthCalledWith(2, expect.stringContaining('"확인"으로 입력된 상병이 없습니다'));
+    expect(window.electron.injectEMR).toHaveBeenCalledTimes(1);
+  });
+
+  it('0건 경고에서 거절하면 전송하지 않는다', async () => {
+    mockPrepareEmrInjection.mockReturnValue(withConfirmedDx({ isEmpty: true, bytes: 0, overLimit: false }));
+    showConfirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const { result } = setup();
+
+    await result.current.handleInjectEMR();
+
+    expect(window.electron.injectEMR).not.toHaveBeenCalled();
+  });
+
+  it('원본 확인 상병이 한도를 넘으면(절단 전 바이트 기준) 초과 경고를 띄운다', async () => {
+    mockPrepareEmrInjection.mockReturnValue(withConfirmedDx({ isEmpty: false, bytes: 4300, overLimit: true }));
+    const { result } = setup();
+
+    await result.current.handleInjectEMR();
+
+    expect(showConfirm).toHaveBeenCalledTimes(2);
+    expect(showConfirm).toHaveBeenNthCalledWith(2, expect.stringContaining('확인 상병이 EMR 한도를 초과'));
+    expect(showConfirm).toHaveBeenNthCalledWith(2, expect.stringContaining('4,300'));
+  });
+
+  it('종합소견 초과와 확인 상병 0건이 겹치면 사유를 합쳐 확인창 한 번으로 묻는다', async () => {
+    mockPrepareEmrInjection.mockReturnValue({
+      ...autoResult({ txtSyth1Cont: 'a'.repeat(4200), _truncatedFields: ['txtSyth1Cont'] }, 4200),
+      confirmedDx: { isEmpty: true, bytes: 0, overLimit: false },
+    });
+    const { result } = setup();
+
+    await result.current.handleInjectEMR();
+
+    expect(showConfirm).toHaveBeenCalledTimes(2); // 최초 + 합친 경고 1회
+    const merged = showConfirm.mock.calls[1][0];
+    expect(merged).toContain('byte 초과');
+    expect(merged).toContain('"확인"으로 입력된 상병이 없습니다');
+    expect(merged.match(/전송하시겠습니까\?/g)).toHaveLength(1);
+    expect(window.electron.injectEMR).toHaveBeenCalledTimes(1);
+  });
+
+  it('종합소견과 확인 상병이 모두 한도를 넘으면 두 사유를 한 창에 보여준다', async () => {
+    mockPrepareEmrInjection.mockReturnValue({
+      ...autoResult({ txtSyth1Cont: 'a'.repeat(4200), _truncatedFields: ['txtSyth1Cont', 'txtAppv_Sick_Cont'] }, 4200),
+      confirmedDx: { isEmpty: false, bytes: 4300, overLimit: true },
+    });
+    const { result } = setup();
+
+    await result.current.handleInjectEMR();
+
+    expect(showConfirm).toHaveBeenCalledTimes(2);
+    const merged = showConfirm.mock.calls[1][0];
+    expect(merged).toContain('6.종합소견이 EMR 한도를 초과');
+    expect(merged).toContain('확인 상병이 EMR 한도를 초과');
+    expect(merged).toContain('4,200');
+    expect(merged).toContain('4,300');
+    expect(merged).toContain('잘린 상태로 계속 전송하시겠습니까?');
+  });
+
+  it('합친 경고에서 거절하면 전송하지 않는다', async () => {
+    mockPrepareEmrInjection.mockReturnValue({
+      ...autoResult({ txtSyth1Cont: 'a'.repeat(4200), _truncatedFields: ['txtSyth1Cont', 'txtAppv_Sick_Cont'] }, 4200),
+      confirmedDx: { isEmpty: false, bytes: 4300, overLimit: true },
+    });
+    showConfirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const { result } = setup();
+
+    await result.current.handleInjectEMR();
+
+    expect(showConfirm).toHaveBeenCalledTimes(2);
+    expect(window.electron.injectEMR).not.toHaveBeenCalled();
+  });
+
+  it('낡은 편집본 + 종합소견 초과 + 확인 상병 0건: 낡음 확인은 따로, 나머지 경고는 한 창이다', async () => {
+    mockPrepareEmrInjection.mockReturnValue({
+      ...overrideResult({ isStale: true, text: 'a'.repeat(4200), bytes: 4200 }),
+      confirmedDx: { isEmpty: true, bytes: 0, overLimit: false },
+    });
+    const { result } = setup();
+
+    await result.current.handleInjectEMR();
+
+    expect(showConfirm).toHaveBeenCalledTimes(3); // 최초 + 낡음 + 합친 경고
+    expect(showConfirm).toHaveBeenNthCalledWith(2, expect.stringContaining('변경되었습니다'));
+    const merged = showConfirm.mock.calls[2][0];
+    expect(merged).toContain('byte 초과');
+    expect(merged).toContain('"확인"으로 입력된 상병이 없습니다');
+  });
+});
+
 describe('useEMRIntegration — dirty(미저장 편집 중) 차단', () => {
   it('활성 환자가 dirtyAssessmentPatientId와 일치하면 확인창 없이 전송을 차단한다', async () => {
     const { result } = setup({ dirtyAssessmentPatientId: 'p1' });
