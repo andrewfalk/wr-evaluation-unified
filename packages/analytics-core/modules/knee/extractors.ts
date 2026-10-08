@@ -8,6 +8,7 @@ import { resolveKneeCalculationJobs, computeKneeCalc, type KneeCalculationJob, t
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
 import { isPlainObject } from '../../migration/deterministicMigrate';
 import { enumerateDiseaseEntities, enumerateJobEntities } from '../../grainEntities';
+import { filterAnalysisJobs, hasNoEvaluableJobs, isJobExcludedFromAnalysis } from '../../jobScope';
 import { resolveDiagnosisModule, supportsKlGrade } from '../../diagnosisMapping';
 import { KNEE_KLG_ORDER } from './metadata';
 import { parseStrictNonNegative } from '../../numericInput';
@@ -73,6 +74,13 @@ export function extractKneeRelatednessMax(
   }
 
   const shared = payload.data.shared ?? {};
+
+  // 신체부담평가 미포함: 모든 직력이 제외되면 업무관련성 공식의 평가 대상이 없다. 미입력(not_entered)과
+  // 구분되도록 날짜·직력 입력 검증보다 먼저 not_applicable로 돌려준다.
+  if (hasNoEvaluableJobs((shared as Record<string, unknown>).jobs as unknown[] | undefined)) {
+    return { value: null, missing: 'not_applicable', qualityFlags: [] };
+  }
+
   const birthDate = (shared as Record<string, unknown>).birthDate;
   const injuryDate = (shared as Record<string, unknown>).injuryDate;
   const hadBirthDate = !isBlank(birthDate);
@@ -240,6 +248,10 @@ function extractKneeJobNumericField(
     return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'structural_missing', qualityFlags: entity.qualityFlags }));
   }
   return entities.map((entity) => {
+    // 신체부담평가 미포함 직력: 엔터티(행 모집단)는 유지하고 값만 not_applicable로 둔다.
+    if (isJobExcludedFromAnalysis(entity.source)) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_applicable', qualityFlags: entity.qualityFlags };
+    }
     const extra = findKneeJobExtra(migrationResult, entity.source.id);
     const raw = extra?.[field];
     // isBlank(전역, 이 파일 다른 곳에서도 쓰임)는 String(x)로 감싸 [] · [null]도 빈
@@ -283,6 +295,9 @@ function extractKneeJobBooleanField(
     return entities.map((entity) => ({ entityKey: entity.entityKey, value: null, missing: 'structural_missing', qualityFlags: entity.qualityFlags }));
   }
   return entities.map((entity) => {
+    if (isJobExcludedFromAnalysis(entity.source)) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_applicable', qualityFlags: entity.qualityFlags };
+    }
     const extra = findKneeJobExtra(migrationResult, entity.source.id);
     const raw = extra?.[field];
     if (raw === undefined || raw === null) {
@@ -330,6 +345,10 @@ function extractKneeCaseSum(
   const shared = (payload.data.shared as Record<string, unknown>) ?? {};
   const rawJobs = Array.isArray(shared.jobs) ? shared.jobs : [];
   const jobs = rawJobs.filter(isPlainObject);
+  // 신체부담평가 미포함: 전부 제외면 합산 대상이 없다(미입력과 구분), 일부 제외면 포함 직력만 합산한다.
+  if (hasNoEvaluableJobs(jobs)) {
+    return { value: null, missing: 'not_applicable', qualityFlags: [] };
+  }
   if (jobs.length === 0) {
     return { value: null, missing: 'not_entered', qualityFlags: [] };
   }
@@ -337,7 +356,7 @@ function extractKneeCaseSum(
   let sum = 0;
   let enteredJobCount = 0;
   let hasInvalid = false;
-  for (const job of jobs) {
+  for (const job of filterAnalysisJobs(jobs)) {
     const parsed = parseStrictNonNegative(findKneeJobExtra(migrationResult, job.id)?.[field]);
     if (parsed.kind === 'blank') continue;
     if (parsed.kind === 'invalid') {

@@ -1524,7 +1524,7 @@ v5.0.0 인트라넷 백엔드 도입 후 실제 운영에서 드러난 권한 �
 
 ### 12.C.5 데이터 모델 — 카탈로그와 grain
 
-- **카탈로그**: 통합 83개 변수. `CATALOG_VERSION = v28-age-at-injury`(analytics-core 81개) + 서버 확장 `v1-snapshot-columns`(DB 컬럼 변수 2개) → `INTEGRATED_CATALOG_VERSION = v28-age-at-injury+v1-snapshot-columns`. 변수마다 타입(continuous/categorical/ordinal/date/high_cardinality/boolean)·단위·출처(raw/derived/clinician_judgment)·`availableAt`(pre_assessment/assessment/post_decision)·민감도·허용 분석 목적·공식 정책·`analysisRole`(analyzable/filter_only)·`predictionRole`(outcome/predictor)을 메타데이터로 가진다.
+- **카탈로그**: 통합 83개 변수. `CATALOG_VERSION = v29-exclude-from-analysis`(analytics-core 81개) + 서버 확장 `v1-snapshot-columns`(DB 컬럼 변수 2개) → `INTEGRATED_CATALOG_VERSION = v29-exclude-from-analysis+v1-snapshot-columns`. 변수마다 타입(continuous/categorical/ordinal/date/high_cardinality/boolean)·단위·출처(raw/derived/clinician_judgment)·`availableAt`(pre_assessment/assessment/post_decision)·민감도·허용 분석 목적·공식 정책·`analysisRole`(analyzable/filter_only)·`predictionRole`(outcome/predictor)을 메타데이터로 가진다.
 - **grain 3종**: `case`(사례 = 환자 1행) · `job`(직력) · `disease`(상병). grain을 늘리지 않고 3종으로 확정했다(`person` grain은 case와 계산·행 구성이 동일해 삭제). 하위 grain은 한 사람이 여러 행을 가질 수 있어 person 단위 집계가 필수이며, **case 변수는 하위 grain으로 브로드캐스트**된다(브로드캐스트는 필터 이전에 케이스 전체로 1회 계산).
 - **롤업 변수**: 상병 any 판정(`diagnosis.rollup.anyHighRelatedness` — "true는 증거 하나로 확정, false는 전부 확인돼야 확정", 미판정이 섞이면 결측), 부위군 boolean 6종(`hasKnee`~`hasCervical`), `job.rollup.longestTenureYears`(대표 직력 공유), 어깨·경추·무릎 case 합계 변수(분/일·kg/일·시간 등).
 - **공식 정책**: 파생 공식은 저장값을 읽지 않고 재계산한다(`recompute_current` / `recompute_recorded_version` / `stratify_by_version`). 손상된 원본 값은 결측 처리하며 엄격한 숫자 파서를 쓴다.

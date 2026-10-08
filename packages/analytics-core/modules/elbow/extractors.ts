@@ -5,6 +5,7 @@
 
 import type { ExtractedValue, MissingReason, MigrationResult, QualityFlag } from '../../types';
 import { isPlainObject } from '../../migration/deterministicMigrate';
+import { hasNoEvaluableJobs, isJobIdExcluded } from '../../jobScope';
 import { computeElbowCalc, type ElbowDiagnosis, type ElbowDiagnosisEntry, type ElbowJobLike, type ElbowModuleShape } from './derived';
 import { normalizeElbowModuleData } from './legacyNormalize';
 import { ELBOW_BURDEN_GRADE_ORDER } from './metadata';
@@ -50,6 +51,11 @@ export function extractElbowBurdenGradeMax(
   const rawDiagnoses = Array.isArray(shared.diagnoses) ? shared.diagnoses : [];
   const diagnoses = rawDiagnoses.filter(isPlainObject) as unknown as ElbowDiagnosis[];
 
+  // 신체부담평가 미포함: 모든 직력이 제외되면 평가 대상이 없다 — 미입력(not_entered)과 구분해 not_applicable.
+  if (hasNoEvaluableJobs(jobs)) {
+    return { value: null, missing: 'not_applicable', qualityFlags: [] };
+  }
+
   const synced = normalizeElbowModuleData(elbowModule as ElbowModuleShape, jobs, diagnoses, activeModules);
 
   // 순서 2: 팔꿈치 진단이 없거나 직력 정보 자체가 없음.
@@ -71,6 +77,8 @@ export function extractElbowBurdenGradeMax(
   // 계산기(toNumber, ||0)와 동일하게 그대로 0으로 계산되도록 둔다(계산 로직 재구현 금지).
   const qualityFlagSet = new Set<QualityFlag>();
   for (const jobEvaluation of synced.moduleData.jobEvaluations) {
+    // 미포함 직력의 입력값은 모듈 데이터에 남아 있지만 계산에서 빠지므로 숫자 검증 대상도 아니다.
+    if (isJobIdExcluded(jobs, jobEvaluation.sharedJobId)) continue;
     for (const entry of jobEvaluation.diagnosisEntries || []) {
       for (const field of NUMERIC_ENTRY_FIELDS) {
         const raw = entry[field];

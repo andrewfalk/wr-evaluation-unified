@@ -16,7 +16,8 @@ import { isPlainObject } from '../../migration/deterministicMigrate';
 import { computeCervicalCalc, type CervicalDiagnosis, type CervicalJobLike, type CervicalModuleShape } from './derived';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
 import { parseStrictNonNegative } from '../../numericInput';
-import { getLinkedRawCervicalTasks, validateRawCervicalTaskExposure } from './rawTasks';
+import { getEvaluatedRawCervicalTasks, validateRawCervicalTaskExposure } from './rawTasks';
+import { hasNoEvaluableJobs } from '../../jobScope';
 
 const HEAVY_LOAD_TYPE = 'shoulder_heavy_load';
 const AWKWARD_NECK_TYPE = 'awkward_static_neck_load';
@@ -79,6 +80,11 @@ function readCervicalCaseInputs(
   const rawDiagnoses = Array.isArray(shared.diagnoses) ? shared.diagnoses : [];
   const diagnoses = rawDiagnoses.filter(isPlainObject) as unknown as CervicalDiagnosis[];
 
+  // 신체부담평가 미포함: 모든 직력이 제외되면 평가 대상이 없다 — 직업 정보 없음(not_entered)과 구분해 not_applicable.
+  if (hasNoEvaluableJobs(jobs)) {
+    return { early: { value: null, missing: 'not_applicable', qualityFlags: [] } };
+  }
+
   // 순서 2: shared.jobs 비어있음 → 직업 정보 자체가 없음.
   if (jobs.length === 0) {
     return { early: { value: null, missing: 'not_entered', qualityFlags: [] } };
@@ -103,7 +109,7 @@ export function extractCervicalCaseMaxJobCumulativeKgHours(
 
   // 순서 3a: 정규화 전 원본 exposure_types 검증 — 정규화가 손상값을 []로 바꿔 BK2109 대상 작업이
   // 조용히 사라지는(= 누적 0) 경로를 막는다. 직업 연결은 정규화와 같은 규칙(rawTasks.ts).
-  if (!validateRawCervicalTaskExposure(getLinkedRawCervicalTasks(cervicalModule, jobs))) {
+  if (!validateRawCervicalTaskExposure(getEvaluatedRawCervicalTasks(cervicalModule, jobs))) {
     return notEnteredInvalid();
   }
 
@@ -186,7 +192,7 @@ export function extractCervicalCaseTotalNonNeutralHoursPerDay(
   if ('early' in read) return read.early;
   const { cervicalModule, jobs } = read.inputs;
 
-  const linkedTasks = getLinkedRawCervicalTasks(cervicalModule, jobs);
+  const linkedTasks = getEvaluatedRawCervicalTasks(cervicalModule, jobs);
   if (!validateRawCervicalTaskExposure(linkedTasks)) {
     return notEnteredInvalid();
   }

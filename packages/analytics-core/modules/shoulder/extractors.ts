@@ -7,6 +7,7 @@ import { computeShoulderCalc, type ShoulderJobExtras } from './derived';
 import { getEffectiveWorkPeriod } from '../../workPeriod';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
 import { enumerateDiseaseEntities, enumerateJobEntities } from '../../grainEntities';
+import { filterAnalysisJobs, hasNoEvaluableJobs, isJobExcludedFromAnalysis } from '../../jobScope';
 import { resolveDiagnosisModule, supportsEllmanClass } from '../../diagnosisMapping';
 import { SHOULDER_ELLMAN_ORDER } from './metadata';
 import { parseStrictNonNegative, type StrictNumeric } from '../../numericInput';
@@ -43,6 +44,10 @@ export function extractShoulderExposureAnyExceeded(
   const shared = (payload.data.shared as Record<string, unknown>) ?? {};
   const rawJobs = Array.isArray(shared.jobs) ? shared.jobs : [];
   const jobs = rawJobs.filter(isPlainObject);
+  // 신체부담평가 미포함: 전부 제외면 노출 기준 판정의 대상이 없다 — 미입력(not_entered)과 구분해 not_applicable.
+  if (hasNoEvaluableJobs(jobs)) {
+    return { value: null, missing: 'not_applicable', qualityFlags: [] };
+  }
   if (jobs.length === 0) {
     return { value: null, missing: 'not_entered', qualityFlags: [] };
   }
@@ -56,7 +61,8 @@ export function extractShoulderExposureAnyExceeded(
   const jobExtras = rawJobExtras.filter(isPlainObject) as unknown as ShoulderJobExtras[];
   const qualityFlagSet = new Set<QualityFlag>();
   let hasAnyExposureEntered = false;
-  for (const job of jobs) {
+  // 입력 검증은 포함 직력만 본다(미포함 직력의 잘못된 값이 포함 직력의 통계에 invalid로 남지 않게).
+  for (const job of filterAnalysisJobs(jobs)) {
     const extra = jobExtras.find((e) => e.sharedJobId === job.id) ?? {};
     let jobHasExposureEntered = false;
     for (const field of NUMERIC_EXTRA_FIELDS) {
@@ -170,6 +176,10 @@ function extractShoulderJobExtraField(
   const jobExtras = rawJobExtras.filter(isPlainObject) as unknown as ShoulderJobExtras[];
 
   return entities.map((entity) => {
+    // 신체부담평가 미포함 직력: 엔터티(행 모집단)는 유지하고 값만 not_applicable로 둔다.
+    if (isJobExcludedFromAnalysis(entity.source)) {
+      return { entityKey: entity.entityKey, value: null, missing: 'not_applicable', qualityFlags: entity.qualityFlags };
+    }
     const extra = jobExtras.find((e) => e.sharedJobId === entity.source.id);
     // 파싱 규칙(blank/invalid/value 판정 순서)은 numericInput.ts에 있다 — 이 job grain 추출기와
     // 아래 case grain 합계 추출기가 같은 규칙을 공유한다(8·9차 검토에서 확립된 규칙 그대로:
@@ -235,6 +245,10 @@ function extractShoulderCaseSum(
   const shared = (payload.data.shared as Record<string, unknown>) ?? {};
   const rawJobs = Array.isArray(shared.jobs) ? shared.jobs : [];
   const jobs = rawJobs.filter(isPlainObject);
+  // 신체부담평가 미포함: 전부 제외면 합산 대상이 없다(미입력과 구분), 일부 제외면 포함 직력만 합산한다.
+  if (hasNoEvaluableJobs(jobs)) {
+    return { value: null, missing: 'not_applicable', qualityFlags: [] };
+  }
   if (jobs.length === 0) {
     return { value: null, missing: 'not_entered', qualityFlags: [] };
   }
@@ -247,7 +261,7 @@ function extractShoulderCaseSum(
   let sum = 0;
   let enteredJobCount = 0;
   let hasInvalid = false;
-  for (const job of jobs) {
+  for (const job of filterAnalysisJobs(jobs)) {
     const parsed = parseJob(jobExtras.find((e) => e.sharedJobId === job.id));
     if (parsed.kind === 'blank') continue;
     if (parsed.kind === 'invalid') {
