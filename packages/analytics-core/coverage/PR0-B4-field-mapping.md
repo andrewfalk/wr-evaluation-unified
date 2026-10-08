@@ -96,6 +96,7 @@ analytics-core `getFullVariableCatalog()`가 실제로 반환하는 21개 전부
 | `jobs[].endDate` | `job.raw.endDate` | 신규등록 | 동일 | job | **filter_only** | 2 | 예 |
 | `jobs[].workPeriodOverride` | `job.raw.workPeriodOverride` | 보류 | 자유 서술형 기간 문자열("3년" 등) — Slice 2 최종 결정 | job | 보류 | 2 | 아니오 |
 | `jobs[].workDaysPerYear` | `job.raw.workDaysPerYear` | 신규등록 | spine/shoulder/cervical dependsOn에만 흡수, job 자체 변수로는 미노출 | job | analyzable | 2 | 예 |
+| `jobs[].excludeFromAnalysis` | (변수 아님 — 신체부담 변수의 필터) | 신규등록 | 직력별 "신체부담평가 미포함" 플래그. knee/shoulder/cervical/elbow/wrist/spine의 신체부담 변수(`relatedness`·`anyExceeded`·job grain 투영·case 합계·누적부하/선량 등) 24개 `dependsOn`이 참조한다. 미포함 직력은 job grain 변수에서 엔터티를 유지한 채 `not_applicable`, case 집계에서는 제외, 전부 미포함이면 `not_applicable`. `job.identity.*` 같은 직업력 정보 변수는 영향 없음. 구형 직업 필드가 남은 혼재 환자는 입력 경계(`neutralizeExclusionForLegacy`)에서 `false`로 무력화됨 | — | — | 1 | 예 |
 
 ### `diagnosis.assessment.lowReason` 옵션 (출처 [`knee/utils/data.js:70-78`](../../../src/modules/knee/utils/data.js#L70-L78), shoulder도 동일 정의)
 

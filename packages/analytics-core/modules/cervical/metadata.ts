@@ -30,6 +30,7 @@ export const CERVICAL_METADATA: AnalyticsVariableMetadata[] = [
     dependsOn: [
       'activeModules',
       'shared.jobs[].id',
+      'shared.jobs[].excludeFromAnalysis',
       'shared.jobs[].workDaysPerYear',
       'shared.jobs[].startDate',
       'shared.jobs[].endDate',
@@ -74,6 +75,7 @@ export const CERVICAL_METADATA: AnalyticsVariableMetadata[] = [
     dependsOn: [
       'activeModules',
       'shared.jobs[].id',
+      'shared.jobs[].excludeFromAnalysis',
       'modules.cervical.tasks[].sharedJobId',
       'modules.cervical.tasks[].exposure_types',
       'modules.cervical.tasks[].neck_nonneutral_hours_per_day',

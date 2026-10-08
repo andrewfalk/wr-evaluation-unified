@@ -7,6 +7,7 @@ import { isPlainObject } from '../../migration/deterministicMigrate';
 import { formulaDB } from './constants';
 import { computeMddmCalc, resolveMddmStatus, type SpineTask, type MddmFormulaPolicy } from './mddm';
 import { computeVibrationCalc, resolveVibrationStatus, type SpineVibrationInterval } from './vibration';
+import { hasNoEvaluableJobs } from '../../jobScope';
 import type { SpineDiagnosis, SpineJobLike, SpineModuleShape } from './types';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
 
@@ -69,6 +70,12 @@ export function extractSpineMddmLifetimeDoseMNh(
   const sanitizedShared = { ...shared, jobs, diagnoses };
   const sanitizedModule = { ...(spineModule as Record<string, unknown>), tasks } as SpineModuleShape;
 
+  // 신체부담평가 미포함: 모든 직력이 제외되면 평가 대상이 없다. 노출 상태가 unknown이어도 not_assessed가 아니라
+  // not_applicable이어야 하므로 상태 해석(순서 2)보다 먼저 판정한다.
+  if (hasNoEvaluableJobs(jobs)) {
+    return { value: null, missing: 'not_applicable', qualityFlags: [] };
+  }
+
   // 순서 2: mddmStatus 3상태 해석.
   const mddmStatus = resolveMddmStatus(sanitizedModule);
   if (mddmStatus === 'unknown') {
@@ -113,7 +120,9 @@ export function extractSpineMddmLifetimeDoseMNh(
 
   // 순서 3b(공통 0단계 숫자 파싱): task 4계열 숫자 필드 + posture/timeUnit 범주형 검증.
   const qualityFlagSet = new Set<QualityFlag>();
-  scanTaskQuality(tasks, qualityFlagSet);
+  // 계산기가 실제로 쓴 task 목록(result.tasks — 직력 기반 분기에서는 미포함 직력에 귀속된 task가 빠져 있다)만
+  // 검증한다. 원본 tasks로 검사하면 미포함 직력의 잘못된 값이 포함 직력의 통계에 invalid로 남는다.
+  scanTaskQuality(result.tasks, qualityFlagSet);
 
   // 평생선량 계열(§1-1a 6라운드 보완 세 번째 계열) — job별 근속기간/연간근무일수가 NaN이면
   // (startDate/endDate 파싱 불가) 그 job의 lifetimeDose가 조용히 NaN이 될 수 있다(shoulder/
@@ -169,6 +178,11 @@ export function extractSpineVibrationDvMax(
 
   const sanitizedShared = { ...shared, jobs };
   const sanitizedModule = { ...(spineModule as Record<string, unknown>), vibrationIntervals: intervals } as SpineModuleShape;
+
+  // 신체부담평가 미포함: 전부 제외면 평가 대상 없음 — 상태 해석(not_assessed/not_applicable)보다 먼저 판정한다.
+  if (hasNoEvaluableJobs(jobs)) {
+    return { value: null, missing: 'not_applicable', qualityFlags: [] };
+  }
 
   // 순서 2: vibrationExposureStatus 3상태 해석.
   const status = resolveVibrationStatus(sanitizedModule);

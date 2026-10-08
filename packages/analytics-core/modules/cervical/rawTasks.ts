@@ -11,6 +11,7 @@
 
 import { isPlainObject } from '../../migration/deterministicMigrate';
 import { EXPOSURE_TYPE_OPTIONS, type CervicalJobLike } from './legacyNormalize';
+import { isJobIdExcluded } from '../../jobScope';
 
 export interface LinkedRawCervicalTask {
   task: Record<string, unknown>;
@@ -31,6 +32,19 @@ export function getLinkedRawCervicalTasks(
     .filter(isPlainObject)
     .map((task) => ({ task: task as Record<string, unknown>, jobId: task.sharedJobId || firstJobId }))
     .filter(({ jobId }) => jobIds.has(jobId));
+}
+
+/**
+ * 평가(통계) 대상 직업에 연결된 원본 task — getLinkedRawCervicalTasks로 **전체 직업 기준** 귀속을 확정한 뒤
+ * "신체부담평가 미포함" 직력에 귀속된 task만 사후 제거한다. 포함 직력만 getLinkedRawCervicalTasks에 넘기면
+ * 첫 직력이 미포함일 때 sharedJobId 없는 task가 다음 직력으로 재귀속되어 화면·보고서(전체 jobs로 정규화)와
+ * 값이 달라진다(고아 task 제외 규칙은 getLinkedRawCervicalTasks 그대로).
+ */
+export function getEvaluatedRawCervicalTasks(
+  cervicalModule: Record<string, unknown>,
+  jobs: readonly CervicalJobLike[],
+): LinkedRawCervicalTask[] {
+  return getLinkedRawCervicalTasks(cervicalModule, jobs).filter(({ jobId }) => !isJobIdExcluded(jobs, jobId));
 }
 
 /** 원본 exposure_types가 정상인가 — 미설정(undefined/null)은 빈 배열로 허용, 그 외에는 배열이고

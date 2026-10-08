@@ -32,6 +32,7 @@ export const ELBOW_METADATA: AnalyticsVariableMetadata[] = [
     dependsOn: [
       'activeModules',
       'shared.jobs[].id',
+      'shared.jobs[].excludeFromAnalysis',
       'shared.diagnoses[].id',
       'shared.diagnoses[].code',
       'shared.diagnoses[].name',

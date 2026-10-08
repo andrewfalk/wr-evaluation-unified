@@ -287,7 +287,10 @@ export function computeRepeatedVariableValue(
 // 재해일자 기준이다. 구 키는 카탈로그에서 사라져 서버가 UNKNOWN_VARIABLE로 거부하고, 클라이언트는
 // 삭제 안내를 보여준다(자동 치환 없음 — 기준일이 달라 값의 의미가 다르다). stats_runs는
 // 만료되는 실행 캐시라 데이터 마이그레이션은 없다.
-export const CATALOG_VERSION = 'v28-age-at-injury';
+// v29 — 직력별 "신체부담평가 미포함"(shared.jobs[].excludeFromAnalysis) 반영. 신체부담 변수(무릎·어깨·경추·팔꿈치·
+// 손목·척추의 계산·집계, knee/shoulder job grain 투영)에서 미포함 직력을 제외하고, 전부 미포함이면 not_applicable로
+// 돌려준다. 직업력 정보 변수(job.identity.*)는 미포함 직력도 그대로 집계한다. 값이 바뀌므로 실행 캐시를 분리한다.
+export const CATALOG_VERSION = 'v29-exclude-from-analysis';
 
 // PR4-B2 — outcome 명세(계획서 §2단계). 서버 검증(statsRecipeValidation.ts)과 클라이언트
 // 선택지(RecipePanel.jsx, 카탈로그 DTO의 predictionOutcomeLevels/predictionEventLevels)가

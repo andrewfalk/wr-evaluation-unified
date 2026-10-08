@@ -321,7 +321,7 @@ grant는 관리자 콘솔 **"통계 권한"** 탭(`/api/capabilities/*`)에서 �
 
 ### 데이터와 공개통제
 
-- **카탈로그**: 통합 83개 변수(`CATALOG_VERSION = v28-age-at-injury`, 서버 통합 `v28-age-at-injury+v1-snapshot-columns`) — 6개 평가 모듈 변수, 공통 인적사항·상병/직업 롤업, DB 컬럼(담당의·등록일, 필터 전용).
+- **카탈로그**: 통합 83개 변수(`CATALOG_VERSION = v29-exclude-from-analysis`, 서버 통합 `v29-exclude-from-analysis+v1-snapshot-columns`) — 6개 평가 모듈 변수, 공통 인적사항·상병/직업 롤업, DB 컬럼(담당의·등록일, 필터 전용).
 - **grain 3종**: `case`(사례, 환자 1행) · `job`(직력) · `disease`(상병). case 변수는 하위 grain으로 브로드캐스트되고, 한 사람이 여러 행이면 person 단위로 센다.
 - **공개통제**: 최소 코호트(10명) 미만 소수 셀 억제(부분 억제 금지), 히스토그램 적응형 해상도 + 양 끝 소수 구간 병합(권한자는 보기 좋은 정수·소수 경계의 원본 히스토그램), 범주형 소수 범주 "기타" 병합(비순서형·변수 1개 요청일 때만 — 다른 변수의 값·결측으로 "기타"를 쪼개 역산하는 것을 막기 위해, 권한자는 원본 범주 빈도), 차분(differencing) 방지(15분 창 family당 30회·사용자 전역 100쿼리 예산), 분석 요청 사용자당 분당 20회 한도. 제한 필드는 **응답 시점에** capability를 확인한 뒤에만 부착한다.
 - **재현성**: 모든 실행은 `stats_runs`에 recipe/source/result digest·catalog/engine 버전과 함께 저장되며, 결과 보존 기간은 `STATS_RUNS_RESULT_TTL_HOURS`(기본 168시간)다.
