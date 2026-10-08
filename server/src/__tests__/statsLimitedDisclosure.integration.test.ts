@@ -23,7 +23,7 @@ import { createStatsRouter } from '../routes/stats';
 import { createStatsRunsQueueWorker } from '../statsRunsQueue';
 import { generateAccessToken } from '../auth/tokens';
 import { hashToken, generateToken } from '../auth/tokenHash';
-import { StatsEngineBusyError, StatsEngineCancelledError } from '../statsEngine';
+import { StatsEngineBusyError, StatsEngineCancelledError, StatsEngineTimeoutError } from '../statsEngine';
 import { __resetDifferencingGuardForTests } from '../statsDifferencingGuard';
 import { __resetLimitedDisclosureGuardForTests } from '../statsLimitedDisclosureGuard';
 
@@ -550,6 +550,41 @@ describe.skipIf(!TEST_DB_URL)('제한데이터 권한자 소수 셀 해제 — H
     expect(JSON.stringify(res.body.result)).not.toContain('용접공');
     expect(JSON.stringify(res.body.result)).not.toContain('rawLevels');
     expect(await limitedAudits(id)).toHaveLength(0);
+  }, 40000);
+
+  it('계산이 타임아웃으로 실패해 폴백한 경우에도 그 사이 회수된 권한을 반영한다 — 1명짜리 범주의 rawLevels가 나가지 않는다', async () => {
+    // 잠수부 1명(소수 범주) + 나머지 12명씩 — 권한이 살아 있으면 폴백 응답에도 원시 필드(rawLevels)가 붙는 구성이다.
+    await seedJobs([['용접공', 12], ['목수', 12], ['간호사', 12], ['잠수부', 1]]);
+    const plain = await post(owner, 'analyze', JOB_BODY);
+    const id = plain.body.runManifest.analysisRunId;
+    await grant();
+    runStatsEngineSpy.mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      throw new StatsEngineTimeoutError();
+    });
+    const pending = startPost(owner, 'analyze', JOB_BODY);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await revoke(); // 재계산이 도는 사이 권한 회수 → 곧 타임아웃으로 폴백
+    const res = await pending;
+    expect(res.status).toBe(200);
+    expect(res.body.result.limitedDisclosure).toBeUndefined();
+    expect(res.body.result.discrete[0].rawLevels).toBeUndefined();
+    expect(JSON.stringify(res.body.result)).not.toContain('잠수부');
+    expect(await limitedAudits(id)).toHaveLength(0);
+  }, 40000);
+
+  it('권한이 유지된 채 타임아웃으로 폴백하면 해제 상태 unavailable_computation_failed와 함께 원시 필드가 붙는다(회귀 방지)', async () => {
+    await seedJobs([['용접공', 12], ['목수', 12], ['간호사', 12], ['잠수부', 1]]);
+    const plain = await post(owner, 'analyze', JOB_BODY);
+    const id = plain.body.runManifest.analysisRunId;
+    await grant();
+    runStatsEngineSpy.mockImplementationOnce(async () => { throw new StatsEngineTimeoutError(); });
+    const res = await post(owner, 'analyze', JOB_BODY);
+    expect(res.status).toBe(200);
+    expect(res.body.result.limitedDisclosure).toBe('unavailable_computation_failed');
+    expect(res.body.result.discrete[0].rawLevels).toBeDefined(); // 권한이 있으므로 기존 원시 필드 부착은 유지
+    const audit = (await limitedAudits(id)).at(-1)!;
+    expect(audit).toMatchObject({ smallCellLimitStatus: 'unavailable_computation_failed', limitedRowFieldsAttached: true });
   }, 40000);
 
   // ---------------------------------------------------------------------------

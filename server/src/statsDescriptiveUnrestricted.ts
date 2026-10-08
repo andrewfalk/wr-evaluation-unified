@@ -36,7 +36,6 @@ import {
 import { MAX_STRATIFY_GROUPS } from './statsEngineLimits';
 import {
   getMemoizedUnrestricted,
-  memoizeUnrestricted,
   releaseUserLock,
   tryAcquireUserLock,
 } from './statsLimitedDisclosureGuard';
@@ -103,7 +102,8 @@ export async function resolveUnrestrictedDescriptive(
   try {
     const result = await computeUnrestricted(pool, ctx, aggregate, signal);
     if (signal?.aborted) return { kind: 'aborted' };
-    memoizeUnrestricted(executionDigest, ctx.userId, result);
+    // memo는 여기서 저장하지 않는다 — 계산 뒤 권한 재검사·감사·취소 확인을 통과해 실제로 전달할 때만
+    // 호출부(finalizeAnalyzeResponse)가 저장한다. 그 전에 저장하면 취소·회수된 요청의 해제 결과가 남는다.
     return { kind: 'applied', result, source: 'computed' };
   } catch (err) {
     if (err instanceof StatsEngineCancelledError || signal?.aborted) return { kind: 'aborted' };

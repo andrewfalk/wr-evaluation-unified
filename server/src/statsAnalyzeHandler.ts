@@ -33,6 +33,7 @@ import { buildRunManifest, toStatsRunManifestSucceeded } from './statsRunManifes
 import { allCorrelationMatrixPairs } from './statsCorrelationMatrixDataset';
 import { attachLimitedRowFields } from './statsLimitedRowMerge';
 import { resolveUnrestrictedDescriptive } from './statsDescriptiveUnrestricted';
+import { memoizeUnrestricted } from './statsLimitedDisclosureGuard';
 import { createResponseAbort } from './statsResponseAbort';
 import { hasCapability } from './middleware/requireCapability';
 import { writeAuditLog, writeAuditLogStrict, type AuditOutcome } from './middleware/audit';
@@ -232,25 +233,32 @@ export async function finalizeAnalyzeResponse(
   let limitedStatus: LimitedDisclosureStatus | null = null;
   let limitedSource: 'computed' | 'memo' | null = null;
 
+  // 응답이 실제로 전달된 해제 결과일 때만 memo에 넣는다(아래 최종 확인 뒤, 응답 직전).
+  let memoCandidate: AnalyzeResult | null = null;
+
   if (hasLimitedRowAccess && ctx.recipe.analysisMode === 'descriptive') {
     const attempt = await resolveUnrestrictedDescriptive(pool, ctx, outcome.result, executionDigest, signal);
     if (attempt.kind === 'aborted') return { aborted: true };
-    if (attempt.kind === 'unavailable') {
-      limitedStatus = attempt.status;
-    } else {
-      if (attempt.source === 'computed') {
-        // 계산에 최대 엔진 timeout만큼 걸렸다 — 그 사이 권한이 회수·만료됐을 수 있으므로
-        // 공개·감사 직전에 다시 확인한다(memo hit은 조금 전에 확인했으므로 생략).
-        hasLimitedRowAccess = await hasCapability(pool, 'stats.export_limited_rows', ctx.userId, ctx.orgId);
-        if (signal?.aborted) return { aborted: true };
-      }
-      if (hasLimitedRowAccess) {
+
+    // 계산(또는 폴백 판정)에 최대 엔진 timeout만큼 걸렸을 수 있다 — 성공이든 실패(타임아웃·Busy 등
+    // unavailable)든 그 사이 권한이 회수·만료됐을 수 있으므로 원시 필드 부착·공개·감사 직전에 다시 확인한다.
+    // memo hit만 조금 전에 확인한 값을 그대로 쓴다(기다림이 없었음).
+    if (attempt.kind === 'unavailable' || attempt.source === 'computed') {
+      hasLimitedRowAccess = await hasCapability(pool, 'stats.export_limited_rows', ctx.userId, ctx.orgId);
+      if (signal?.aborted) return { aborted: true };
+    }
+
+    // 회수됐으면 해제본·해제 상태를 모두 버리고 저장된 집계 결과를 쓴다. 아래 원시 필드 부착에도
+    // 이 최신 권한값(false)을 쓰므로 rawLevels·rawHistogram·outlierValues도 붙지 않는다.
+    if (hasLimitedRowAccess) {
+      if (attempt.kind === 'unavailable') {
+        limitedStatus = attempt.status;
+      } else {
         baseResult = attempt.result;
         limitedStatus = 'applied';
         limitedSource = attempt.source;
+        if (attempt.source === 'computed') memoCandidate = attempt.result;
       }
-      // 회수됐으면 해제본을 버리고 저장된 집계 결과를 쓴다. 원시 필드 부착에도 최신 권한값
-      // (false)을 쓰므로 rawLevels·rawHistogram·outlierValues도 붙지 않는다.
     }
   }
 
@@ -310,6 +318,12 @@ export async function finalizeAnalyzeResponse(
       console.error('[stats-analyze] best-effort 제한 해제 폴백 감사 실패 — 응답은 그대로 반환', err);
     }
   }
+
+  // 감사 대기 중(strict·best-effort 어느 쪽이든) 연결이 끊겼으면 응답을 쓰지 않는다 — 호출부가 닫힌
+  // 연결에 응답을 쓰려 하지 않게 하고, 취소된 요청의 해제 결과는 memo에도 남기지 않는다.
+  if (signal?.aborted) return { aborted: true };
+  // memo는 권한 재검사·감사·취소 확인을 모두 통과해 실제로 전달하는 해제 결과만 저장한다.
+  if (memoCandidate !== null && lifted) memoizeUnrestricted(executionDigest, ctx.userId, memoCandidate);
 
   return { status: 200, body: { runManifest: outcome.runManifest, result: finalResult } satisfies AnalyzeResponse };
 }
