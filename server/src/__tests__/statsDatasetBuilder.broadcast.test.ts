@@ -473,12 +473,13 @@ function kneeSnapshotRow(
   };
 }
 
-// 2026-10-08 — 쪼그려앉기는 단순합에서 직력 기간 가중평균·누적으로 교체됐다. 기간은 workPeriodOverride로
+// 2026-10-08·09 — 쪼그려앉기·중량물은 단순합에서 직력 기간 가중평균·누적으로 교체됐다. 기간은 workPeriodOverride로
 // 정확한 연수(2년·8년)를 만들고, 누적은 연간 근무일이 필요해 workDaysPerYear를 함께 둔다.
 const KNEE_CASE_SUM_KEYS = [
   'knee.case.weightedSquattingMinutesPerDay',
   'knee.case.cumulativeSquattingHours',
-  'knee.case.sumDailyLoadKg',
+  'knee.case.weightedDailyLoadKg',
+  'knee.case.cumulativeLoadTon',
 ] as const;
 const KNEE_DX = { id: 'dx-knee', code: 'M17.1', name: '무릎 관절염', side: 'right' };
 const KNEE_JOB_A = { id: 'job-1', jobName: '용접공', workPeriodOverride: '2년', workDaysPerYear: 250 };
@@ -486,6 +487,10 @@ const KNEE_JOB_B = { id: 'job-2', jobName: '조립공', workPeriodOverride: '8�
 // 가중평균 (30×2 + 45×8) / 10 = 42, 누적 30/60×250×2 + 45/60×250×8 = 250 + 1500 = 1750시간
 const WEIGHTED_42 = { value: 42, missing: null, qualityFlags: [] };
 const CUMULATIVE_1750 = { value: 1750, missing: null, qualityFlags: [] };
+// 중량물 (2000×2 + 1500×8) / 10 = 1600 kg/일, 누적 2000/1000×250×2 + 1500/1000×250×8 = 1000 + 3000 = 4000톤
+const LOAD_WEIGHTED_1600 = { value: 1600, missing: null, qualityFlags: [] };
+const LOAD_CUMULATIVE_4000 = { value: 4000, missing: null, qualityFlags: [] };
+const INVALID_ENTRY = { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
 
 describe('무릎 case 쪼그려앉기·중량물 변수의 job/disease broadcast', () => {
   it('disease grain: 무릎 상병 행과 무릎이 아닌(어깨) 상병 행 모두에 정상값이 같은 value·missing·qualityFlags로 복제된다', () => {
@@ -505,7 +510,8 @@ describe('무릎 case 쪼그려앉기·중량물 변수의 job/disease broadcast
     for (const row of result.rows) {
       expect(row.values['knee.case.weightedSquattingMinutesPerDay']).toEqual(WEIGHTED_42);
       expect(row.values['knee.case.cumulativeSquattingHours']).toEqual(CUMULATIVE_1750);
-      expect(row.values['knee.case.sumDailyLoadKg']).toEqual({ value: 3500, missing: null, qualityFlags: [] });
+      expect(row.values['knee.case.weightedDailyLoadKg']).toEqual(LOAD_WEIGHTED_1600);
+      expect(row.values['knee.case.cumulativeLoadTon']).toEqual(LOAD_CUMULATIVE_4000);
     }
   });
 
@@ -550,7 +556,8 @@ describe('무릎 case 쪼그려앉기·중량물 변수의 job/disease broadcast
       // 쪼그려앉기는 정상, 중량물만 손상 — 변수별로 독립이다
       expect(row.values['knee.case.weightedSquattingMinutesPerDay']).toEqual(WEIGHTED_42);
       expect(row.values['knee.case.cumulativeSquattingHours']).toEqual(CUMULATIVE_1750);
-      expect(row.values['knee.case.sumDailyLoadKg']).toEqual({ value: null, missing: 'not_entered', qualityFlags: ['invalid'] });
+      expect(row.values['knee.case.weightedDailyLoadKg']).toEqual(INVALID_ENTRY);
+      expect(row.values['knee.case.cumulativeLoadTon']).toEqual(INVALID_ENTRY);
     }
   });
 
@@ -569,8 +576,9 @@ describe('무릎 case 쪼그려앉기·중량물 변수의 job/disease broadcast
     expect(result.observationCount).toBe(3);
     for (const row of result.rows) {
       expect(row.values['knee.case.weightedSquattingMinutesPerDay']).toEqual({ value: null, missing: 'not_entered', qualityFlags: ['invalid'] });
-      expect(row.values['knee.case.cumulativeSquattingHours']).toEqual({ value: null, missing: 'not_entered', qualityFlags: ['invalid'] });
-      expect(row.values['knee.case.sumDailyLoadKg']).toEqual({ value: 3500, missing: null, qualityFlags: [] });
+      expect(row.values['knee.case.cumulativeSquattingHours']).toEqual(INVALID_ENTRY);
+      expect(row.values['knee.case.weightedDailyLoadKg']).toEqual(LOAD_WEIGHTED_1600);
+      expect(row.values['knee.case.cumulativeLoadTon']).toEqual(LOAD_CUMULATIVE_4000);
     }
   });
 
@@ -597,7 +605,7 @@ describe('무릎 case 쪼그려앉기·중량물 변수의 job/disease broadcast
     }
   });
 
-  it('쪼그려앉기 2개와 중량물은 브로드캐스트 안전 변수(non_sensitive·continuous·case)라 job/disease에서 선택 가능하다', () => {
+  it('쪼그려앉기·중량물 4개는 브로드캐스트 안전 변수(non_sensitive·continuous·case)라 job/disease에서 선택 가능하다', () => {
     for (const key of KNEE_CASE_SUM_KEYS) {
       const variable = CATALOG_BY_KEY.get(key)!;
       expect(variable.grain, key).toBe('case');

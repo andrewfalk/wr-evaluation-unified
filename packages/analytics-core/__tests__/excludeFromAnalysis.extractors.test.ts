@@ -8,9 +8,10 @@ import {
   extractKneeRelatednessMax,
   extractKneeJobWeight,
   extractKneeJobStairs,
-  extractKneeCaseSumDailyLoadKg,
   extractKneeCaseWeightedSquattingMinutesPerDay,
   extractKneeCaseCumulativeSquattingHours,
+  extractKneeCaseWeightedDailyLoadKg,
+  extractKneeCaseCumulativeLoadTon,
 } from '../modules/knee/extractors';
 import {
   extractShoulderExposureAnyExceeded,
@@ -76,37 +77,45 @@ describe('knee extractors', () => {
     expect(obs.map((o) => o.missing)).toEqual(['structural_missing']);
   });
 
-  it('case 합계: 포함 직력만 합산하고 전부 미포함이면 not_applicable', () => {
-    expect(extractKneeCaseSumDailyLoadKg(migrate(payload({ knee }, [job('a'), job('b', true)])))).toMatchObject({ value: 5000, missing: null });
-    expect(extractKneeCaseSumDailyLoadKg(migrate(payload({ knee }, [job('a'), job('b')])))).toMatchObject({ value: 5010 });
-    expect(extractKneeCaseWeightedSquattingMinutesPerDay(migrate(payload({ knee }, [job('a', true), job('b', true)])))).toEqual(NA);
-    expect(extractKneeCaseCumulativeSquattingHours(migrate(payload({ knee }, [job('a', true), job('b', true)])))).toEqual(NA);
+  it('case 집계 4종: 전부 미포함이면 not_applicable', () => {
+    const allExcluded = migrate(payload({ knee }, [job('a', true), job('b', true)]));
+    expect(extractKneeCaseWeightedSquattingMinutesPerDay(allExcluded)).toEqual(NA);
+    expect(extractKneeCaseCumulativeSquattingHours(allExcluded)).toEqual(NA);
+    expect(extractKneeCaseWeightedDailyLoadKg(allExcluded)).toEqual(NA);
+    expect(extractKneeCaseCumulativeLoadTon(allExcluded)).toEqual(NA);
   });
 
-  it('쪼그려앉기 가중평균·누적: 미포함 직력은 분자·분모에서 빠져 처음부터 없는 직력과 같다', () => {
+  it('쪼그려앉기·중량물 가중평균/누적: 미포함 직력은 분자·분모에서 빠져 처음부터 없는 직력과 같다', () => {
     const onlyA = payload({ knee: { jobExtras: [extras[0]] } }, [job('a')]);
     const withExcluded = payload({ knee }, [job('a'), job('b', true)]);
-    const weighted = extractKneeCaseWeightedSquattingMinutesPerDay(migrate(withExcluded));
-    expect(weighted).toEqual(extractKneeCaseWeightedSquattingMinutesPerDay(migrate(onlyA)));
-    expect(weighted.value).toBe(200);
-    const cumulative = extractKneeCaseCumulativeSquattingHours(migrate(withExcluded));
-    expect(cumulative).toEqual(extractKneeCaseCumulativeSquattingHours(migrate(onlyA)));
-    expect(cumulative.value).toBeGreaterThan(0);
-    // 미포함을 풀면 b(5분/일)가 섞여 값이 달라진다.
-    const included = extractKneeCaseWeightedSquattingMinutesPerDay(migrate(payload({ knee }, [job('a'), job('b')])));
-    expect(included.value).not.toBe(200);
+    const both = payload({ knee }, [job('a'), job('b')]);
+    for (const fn of [
+      extractKneeCaseWeightedSquattingMinutesPerDay,
+      extractKneeCaseCumulativeSquattingHours,
+      extractKneeCaseWeightedDailyLoadKg,
+      extractKneeCaseCumulativeLoadTon,
+    ]) {
+      const excluded = fn(migrate(withExcluded));
+      expect(excluded).toEqual(fn(migrate(onlyA)));
+      expect(excluded.missing).toBeNull();
+      // 미포함을 풀면 b가 섞여 값이 달라진다.
+      expect(fn(migrate(both)).value).not.toBeCloseTo(excluded.value as number, 6);
+    }
+    expect(extractKneeCaseWeightedSquattingMinutesPerDay(migrate(withExcluded)).value).toBeCloseTo(200, 8);
+    expect(extractKneeCaseWeightedDailyLoadKg(migrate(withExcluded)).value).toBeCloseTo(5000, 8);
   });
 
-  it('쪼그려앉기 가중평균·누적: 미포함 직력의 손상값은 포함 직력의 값을 invalid로 만들지 않는다', () => {
-    const bad = { jobExtras: [extras[0], { sharedJobId: 'b', squatting: 'abc' }] };
-    expect(extractKneeCaseWeightedSquattingMinutesPerDay(migrate(payload({ knee: bad }, [job('a'), job('b', true)])))).toMatchObject({ value: 200, qualityFlags: [] });
-    expect(extractKneeCaseWeightedSquattingMinutesPerDay(migrate(payload({ knee: bad }, [job('a'), job('b')])))).toMatchObject({ value: null, qualityFlags: ['invalid'] });
-  });
-
-  it('case 합계: 미포함 직력의 손상값은 포함 직력의 합계를 invalid로 만들지 않는다', () => {
-    const bad = { jobExtras: [extras[0], { sharedJobId: 'b', weight: 'abc' }] };
-    expect(extractKneeCaseSumDailyLoadKg(migrate(payload({ knee: bad }, [job('a'), job('b', true)])))).toMatchObject({ value: 5000, qualityFlags: [] });
-    expect(extractKneeCaseSumDailyLoadKg(migrate(payload({ knee: bad }, [job('a'), job('b')])))).toMatchObject({ value: null, qualityFlags: ['invalid'] });
+  it('쪼그려앉기·중량물 가중평균: 미포함 직력의 손상값은 포함 직력의 값을 invalid로 만들지 않는다', () => {
+    const bad = { jobExtras: [extras[0], { sharedJobId: 'b', squatting: 'abc', weight: 'abc' }] };
+    for (const [fn, expected] of [
+      [extractKneeCaseWeightedSquattingMinutesPerDay, 200],
+      [extractKneeCaseWeightedDailyLoadKg, 5000],
+    ] as const) {
+      const excluded = fn(migrate(payload({ knee: bad }, [job('a'), job('b', true)])));
+      expect(excluded.value).toBeCloseTo(expected, 8);
+      expect(excluded.qualityFlags).toEqual([]);
+      expect(fn(migrate(payload({ knee: bad }, [job('a'), job('b')])))).toMatchObject({ value: null, qualityFlags: ['invalid'] });
+    }
   });
 });
 
