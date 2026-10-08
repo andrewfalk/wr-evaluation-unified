@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { getFullVariableCatalog, computeVariableValue, computeRepeatedVariableValue, CATALOG_VERSION } from '../catalog';
+import { isGrainCompatible } from '../common';
 import { deterministicMigrate } from '../migration/deterministicMigrate';
 import { PR0_B4_FIELD_MAPPING } from '../coverage/pr0B4FieldMapping';
 
@@ -108,10 +109,43 @@ describe('getFullVariableCatalog', () => {
     expect(age?.predictionRole).toBe('predictor');
   });
 
-  it('카탈로그 개수는 교체 전과 같다(analytics-core 81개: case 48/job 19/disease 14)', () => {
+  it('카탈로그 개수(analytics-core 82개: case 49/job 19/disease 14) — 쪼그려앉기 단순합 1개 삭제 + 가중평균·누적 2개 추가', () => {
     const catalog = getFullVariableCatalog();
-    expect(catalog).toHaveLength(81);
-    expect(catalog.filter((v) => v.grain === 'case')).toHaveLength(48);
+    expect(catalog).toHaveLength(82);
+    expect(catalog.filter((v) => v.grain === 'case')).toHaveLength(49);
+  });
+
+  it('쪼그려앉기 단순합(knee.case.sumSquattingMinutesPerDay)은 삭제되고 가중평균·누적이 case grain 예측 predictor로 등록돼 있다', () => {
+    const catalog = getFullVariableCatalog();
+    expect(catalog.find((v) => v.key === 'knee.case.sumSquattingMinutesPerDay')).toBeUndefined();
+
+    const weighted = catalog.find((v) => v.key === 'knee.case.weightedSquattingMinutesPerDay');
+    expect(weighted).toMatchObject({ grain: 'case', unit: '분/일', type: 'continuous', predictionRole: 'predictor' });
+    expect(weighted?.allowedAnalysisPurposes).toEqual(['association', 'prediction']);
+    expect(weighted?.dependsOn).toEqual(expect.arrayContaining(['shared.jobs[].workPeriodOverride', 'shared.jobs[].excludeFromAnalysis']));
+    expect(weighted?.dependsOn).not.toContain('shared.jobs[].workDaysPerYear');
+
+    const cumulative = catalog.find((v) => v.key === 'knee.case.cumulativeSquattingHours');
+    expect(cumulative).toMatchObject({ grain: 'case', unit: '시간', type: 'continuous', predictionRole: 'predictor' });
+    expect(cumulative?.dependsOn).toEqual(expect.arrayContaining(['shared.jobs[].workDaysPerYear', 'modules.knee.jobExtras[].squatting']));
+  });
+
+  it('대표 직종명만 disease 복제 예외(broadcastToGrains)를 갖고, job grain 복제와 그 외 변수는 일반 규칙 그대로다', () => {
+    const catalog = getFullVariableCatalog();
+    const withException = catalog.filter((v) => (v.broadcastToGrains?.length ?? 0) > 0).map((v) => v.key);
+    expect(withException).toEqual(['job.rollup.longestTenureJobNameNormalized']);
+
+    const jobName = catalog.find((v) => v.key === 'job.rollup.longestTenureJobNameNormalized');
+    expect(jobName?.broadcastToGrains).toEqual(['disease']);
+    expect(jobName?.allowedAnalysisPurposes).toEqual(['association']);
+    expect(isGrainCompatible(jobName!, 'disease')).toBe(true);
+    expect(isGrainCompatible(jobName!, 'job')).toBe(false);
+    expect(isGrainCompatible(jobName!, 'case')).toBe(true);
+
+    // 같은 quasi_identifier·high_cardinality라도 job grain 자체 변수(직종명 정규화)는 예외 대상이 아니다.
+    const jobIdentity = catalog.find((v) => v.key === 'job.identity.jobNameNormalized');
+    expect(jobIdentity?.broadcastToGrains).toBeUndefined();
+    expect(isGrainCompatible(jobIdentity!, 'disease')).toBe(false);
   });
 });
 

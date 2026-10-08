@@ -71,6 +71,7 @@ function toCatalogVariableDto(v: AnalyticsVariableMetadata): CatalogVariable {
     supportedFormulaPolicies: v.supportedFormulaPolicies,
     formulaVersionKey: v.formulaVersionKey ?? null,
     analysisRole: v.analysisRole ?? 'analyzable',
+    broadcastToGrains: v.broadcastToGrains ? [...v.broadcastToGrains] : [],
     predictionRole: v.predictionRole ?? null,
     predictionOutcomeLevels: outcomeSpec ? [...outcomeSpec.levels] : null,
     predictionEventLevels: outcomeSpec ? [...outcomeSpec.eventLevels] : null,

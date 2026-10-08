@@ -47,14 +47,15 @@ function catalogFixture() {
         sensitivity: 'non_sensitive', formulaFamily: 'knee_relatedness',
         supportedFormulaPolicies: ['recompute_recorded_version'], formulaVersionKey: null,
       },
-      // case grain, quasi_identifier — 브로드캐스트 제외(자기 grain=case에서만 후보).
+      // case grain, quasi_identifier — 일반 브로드캐스트 규칙에서는 제외지만 변수별 예외
+      // (broadcastToGrains: ['disease'], 서버 카탈로그 DTO와 같은 필드)로 disease grain에서만 후보가 된다.
       {
         key: 'job.rollup.longestTenureJobNameNormalized', label: '대표 직종명(근속 최장)', group: '직업력 · 공통', moduleId: 'job',
         grain: 'case', type: 'high_cardinality', unit: null, provenance: 'derived', dependsOn: [],
         availableAt: 'assessment', shownToAssessor: true,
         allowedAnalysisPurposes: ['association'],
         sensitivity: 'quasi_identifier', formulaFamily: 'job_rollup_longest_tenure',
-        supportedFormulaPolicies: [], formulaVersionKey: null,
+        supportedFormulaPolicies: [], formulaVersionKey: null, broadcastToGrains: ['disease'],
       },
       {
         key: 'knee.diagnosisSide.klGrade', label: 'K-L Grade', group: '무릎 · 진단별 판정', moduleId: 'knee',
@@ -164,6 +165,23 @@ describe('StatisticsWorkbench — grain 선택(person grain 삭제 후속)', () 
     expect(screen.getByRole('checkbox', { name: /신체부담기여도/ })).toBeTruthy();
     // quasi_identifier 브로드캐스트 제외 변수는 자기 grain(case)이 아니면 후보에서 빠진다.
     expect(screen.queryByRole('checkbox', { name: /대표 직종명/ })).toBeNull();
+  });
+
+  it('상병(disease) grain에서는 변수별 예외(broadcastToGrains)가 있는 대표 직종명이 후보로 뜨고 선택하면 recipe에 포함된다', async () => {
+    const user = userEvent.setup();
+    fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
+    render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
+
+    await user.click(await screen.findByRole('button', { name: '상병(disease)' }));
+    previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await user.click(screen.getByRole('checkbox', { name: /대표 직종명/ }));
+    await waitForDebounce();
+
+    expect(previewStatsAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({ grain: 'disease', variableKeys: ['job.rollup.longestTenureJobNameNormalized'] }),
+      SESSION,
+      expect.anything(),
+    );
   });
 
   // 리뷰 지적 — job/disease는 관측 행 기준 집계라 브로드캐스트된 인적사항도 그 행 수만큼

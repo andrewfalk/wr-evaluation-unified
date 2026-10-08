@@ -9,7 +9,8 @@ import {
   extractKneeJobWeight,
   extractKneeJobSquatting,
   extractKneeJobStairs,
-  extractKneeCaseSumSquattingMinutesPerDay,
+  extractKneeCaseWeightedSquattingMinutesPerDay,
+  extractKneeCaseCumulativeSquattingHours,
   extractKneeCaseSumDailyLoadKg,
 } from '../../../modules/knee/extractors';
 import { deterministicMigrate } from '../../../migration/deterministicMigrate';
@@ -425,9 +426,9 @@ describe('extractKneeJobWeight/Stairs — job grain(jobExtras 원시값 투영)'
 });
 
 // 사용자 요청(2026-10-03) — 무릎 case grain 합계(직업력 단순합). 어깨 extractShoulderCaseSum* 테스트와
-// 같은 정책을 두 변수(쪼그려앉기 분/일, 중량물 kg/일)에 각각 적용한다.
+// 같은 정책이다. 쪼그려앉기 분/일은 2026-10-08에 단순합에서 기간 가중평균·누적으로 교체돼(파일 끝 describe)
+// 중량물만 남았다. `.each` 형태는 다른 합계가 다시 생길 때를 위해 유지한다.
 describe.each([
-  { name: 'extractKneeCaseSumSquattingMinutesPerDay', fn: extractKneeCaseSumSquattingMinutesPerDay, field: 'squatting', other: 'weight' },
   { name: 'extractKneeCaseSumDailyLoadKg', fn: extractKneeCaseSumDailyLoadKg, field: 'weight', other: 'squatting' },
 ])('$name — case grain 합계', ({ fn, field, other }) => {
   const twoJobs = [
@@ -574,7 +575,7 @@ describe.each([
       jobs: twoJobs,
       jobExtras: [{ sharedJobId: 'job-1', [field]: '30' }, { sharedJobId: 'job-2', [field]: '45' }],
     });
-    const jobGrain = field === 'weight' ? extractKneeJobWeight(migrate(generalCase)) : extractKneeJobSquatting(migrate(generalCase));
+    const jobGrain = extractKneeJobWeight(migrate(generalCase));
     const jobGrainSum = jobGrain.reduce((acc, row) => acc + (row.value ?? 0), 0);
     expect(fn(migrate(generalCase))).toEqual({ value: jobGrainSum, missing: null, qualityFlags: [] });
   });
@@ -628,5 +629,185 @@ describe.each([
     });
     expect(fn(migrate(legacyWith(0)))).toEqual(NOT_ENTERED);
     expect(fn(migrate(legacyWith('0')))).toEqual({ value: 0, missing: null, qualityFlags: [] });
+  });
+});
+
+// 사용자 요청(2026-10-08) — 쪼그려앉기 case 변수: 직력 기간 가중평균(분/일) · 누적(시간).
+// 기간은 workPeriodOverride("N년")로 정확한 연수를 만든다(날짜 기반 연수는 365.25 환산이라 소수).
+describe('쪼그려앉기 case 변수 — 가중평균/누적', () => {
+  const job = (id: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    jobName: id,
+    workPeriodOverride: '2년',
+    workDaysPerYear: 250,
+    ...extra,
+  });
+  const twoJobs = [job('job-1'), job('job-2', { workPeriodOverride: '8년' })];
+  const NOT_ENTERED = { value: null, missing: 'not_entered', qualityFlags: [] };
+  const INVALID = { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
+  const NOT_APPLICABLE = { value: null, missing: 'not_applicable', qualityFlags: [] };
+  const ok = (value: number) => ({ value, missing: null, qualityFlags: [] });
+
+  describe.each([
+    { name: 'extractKneeCaseWeightedSquattingMinutesPerDay', fn: extractKneeCaseWeightedSquattingMinutesPerDay },
+    { name: 'extractKneeCaseCumulativeSquattingHours', fn: extractKneeCaseCumulativeSquattingHours },
+  ])('$name — 공통 결측·대상 직력 규칙', ({ fn }) => {
+    const run = (jobExtras: unknown[], jobs: unknown[] = twoJobs) => fn(migrate(jobExtrasCase({ jobs, jobExtras })));
+
+    it('knee 모듈 비활성이면 structural_missing, shared.jobs가 비면 not_entered', () => {
+      expect(fn(migrate(jobExtrasCase({ jobs: twoJobs, activeModules: [] })))).toEqual({
+        value: null,
+        missing: 'structural_missing',
+        qualityFlags: [],
+      });
+      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], [])).toEqual(NOT_ENTERED);
+    });
+
+    it('전 직업 쪼그려앉기 blank면 not_entered(0 아님)', () => {
+      expect(run([])).toEqual(NOT_ENTERED);
+      expect(run([{ sharedJobId: 'job-1', squatting: '' }, { sharedJobId: 'job-2', squatting: '  ' }])).toEqual(NOT_ENTERED);
+    });
+
+    it.each([
+      ['숫자 접두부 문자열', '45min'],
+      ['음수', -1],
+      ['배열', [60]],
+      ['boolean', true],
+    ])('쪼그려앉기 손상값(%s)이 하나라도 있으면 정상 직력이 섞여 있어도 부분값 없이 not_entered + invalid', (_l, bad) => {
+      expect(run([{ sharedJobId: 'job-1', squatting: '60' }, { sharedJobId: 'job-2', squatting: bad }])).toEqual(INVALID);
+    });
+
+    it('쪼그려앉기를 입력한 직력의 기간이 blank면 가중/누적 불가라 not_entered(flag 없음)', () => {
+      const jobs = [job('job-1', { workPeriodOverride: '' })];
+      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], jobs)).toEqual(NOT_ENTERED);
+    });
+
+    it('기간이 invalid(종료일이 시작일보다 빠름·형식 오류 override)면 not_entered + invalid', () => {
+      const reversed = [job('job-1', { workPeriodOverride: '', startDate: '2020-01-01', endDate: '2010-01-01' })];
+      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], reversed)).toEqual(INVALID);
+      const badOverride = [job('job-1', { workPeriodOverride: '-3년' })];
+      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], badOverride)).toEqual(INVALID);
+    });
+
+    it('쪼그려앉기 blank인 직력은 기간이 invalid여도 건너뛴다(대상이 아님)', () => {
+      const jobs = [job('job-1', { workPeriodOverride: '-3년' }), job('job-2')];
+      const r = run([{ sharedJobId: 'job-2', squatting: '60' }], jobs);
+      expect(r.missing).toBeNull();
+      expect(r.qualityFlags).toEqual([]);
+    });
+
+    it('기간은 날짜(시작·종료일)로도 계산한다', () => {
+      const dated = [job('job-1', { workPeriodOverride: '', startDate: '2010-01-01', endDate: '2020-01-01' })];
+      const r = run([{ sharedJobId: 'job-1', squatting: '60' }], dated);
+      expect(r.missing).toBeNull();
+      expect(r.value).toBeGreaterThan(0);
+    });
+
+    it('신체부담평가 미포함 직력은 분자·분모에서 모두 빠지고, 전부 미포함이면 not_applicable', () => {
+      const excludedFirst = [job('job-1', { excludeFromAnalysis: true }), job('job-2', { workPeriodOverride: '8년' })];
+      const onlyJob2 = [job('job-2', { workPeriodOverride: '8년' })];
+      const extras = [{ sharedJobId: 'job-1', squatting: '600' }, { sharedJobId: 'job-2', squatting: '120' }];
+      expect(run(extras, excludedFirst)).toEqual(run(extras, onlyJob2));
+
+      const allExcluded = twoJobs.map((j) => ({ ...j, excludeFromAnalysis: true }));
+      expect(run(extras, allExcluded)).toEqual(NOT_APPLICABLE);
+    });
+
+    it('미포함 직력의 손상값은 계산에 영향을 주지 않는다', () => {
+      const jobs = [job('job-1', { excludeFromAnalysis: true, workPeriodOverride: '-3년' }), job('job-2')];
+      const r = run([{ sharedJobId: 'job-1', squatting: 'abc' }, { sharedJobId: 'job-2', squatting: '60' }], jobs);
+      expect(r.missing).toBeNull();
+    });
+
+    it('shared.jobs에 없는 orphan extras는 대상이 아니다', () => {
+      expect(run([{ sharedJobId: 'deleted', squatting: '60' }])).toEqual(NOT_ENTERED);
+    });
+
+    it('직종·기간이 전부 빈 기본(placeholder) 행에 쪼그려앉기만 있으면 가중 불가라 not_entered', () => {
+      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], [{ id: 'job-1' }])).toEqual(NOT_ENTERED);
+    });
+
+    it('합산 overflow는 not_entered + invalid', () => {
+      expect(run([{ sharedJobId: 'job-1', squatting: '1e308' }, { sharedJobId: 'job-2', squatting: '1e308' }])).toEqual(INVALID);
+    });
+  });
+
+  describe('extractKneeCaseWeightedSquattingMinutesPerDay — 직력 기간 가중평균', () => {
+    const run = (jobExtras: unknown[], jobs: unknown[] = twoJobs) =>
+      extractKneeCaseWeightedSquattingMinutesPerDay(migrate(jobExtrasCase({ jobs, jobExtras })));
+
+    it('기간으로 가중평균한다 — (60×2 + 120×8) / 10 = 108 (단순합 180이 아님)', () => {
+      expect(run([{ sharedJobId: 'job-1', squatting: '60' }, { sharedJobId: 'job-2', squatting: 120 }])).toEqual(ok(108));
+    });
+
+    it('직력이 하나면 그 직력의 값이다', () => {
+      expect(run([{ sharedJobId: 'job-1', squatting: '45' }])).toEqual(ok(45));
+    });
+
+    it('쪼그려앉기 blank 직력은 분모(기간)에도 넣지 않는다', () => {
+      expect(run([{ sharedJobId: 'job-1', squatting: '' }, { sharedJobId: 'job-2', squatting: '120' }])).toEqual(ok(120));
+    });
+
+    it('입력한 0은 정상 0이며 분모에 포함된다 — (0×2 + 100×8) / 10 = 80', () => {
+      expect(run([{ sharedJobId: 'job-1', squatting: 0 }, { sharedJobId: 'job-2', squatting: '100' }])).toEqual(ok(80));
+      expect(run([{ sharedJobId: 'job-1', squatting: '0' }])).toEqual(ok(0));
+    });
+
+    it('연간 근무일은 가중평균에 쓰이지 않는다(근무일이 비어 있어도 값이 나온다)', () => {
+      const jobs = [job('job-1', { workDaysPerYear: '' })];
+      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], jobs)).toEqual(ok(60));
+    });
+  });
+
+  describe('extractKneeCaseCumulativeSquattingHours — 누적(시간)', () => {
+    const run = (jobExtras: unknown[], jobs: unknown[] = twoJobs) =>
+      extractKneeCaseCumulativeSquattingHours(migrate(jobExtrasCase({ jobs, jobExtras })));
+
+    it('Σ(분/일÷60 × 연간 근무일 × 연수) — 60/60×250×2 + 120/60×250×8 = 4500시간', () => {
+      expect(run([{ sharedJobId: 'job-1', squatting: '60' }, { sharedJobId: 'job-2', squatting: 120 }])).toEqual(ok(4500));
+    });
+
+    it('저장된 근무일을 그대로 쓴다(250 대체 없음) — 60/60×200×2 = 400', () => {
+      const jobs = [job('job-1', { workDaysPerYear: 200 })];
+      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], jobs)).toEqual(ok(400));
+    });
+
+    it('쪼그려앉기 blank 직력은 근무일이 비어 있어도 건너뛴다', () => {
+      const jobs = [job('job-1', { workDaysPerYear: '' }), job('job-2', { workPeriodOverride: '8년' })];
+      expect(run([{ sharedJobId: 'job-2', squatting: '120' }], jobs)).toEqual(ok(4000));
+    });
+
+    it('근무일 0은 정상 0이다', () => {
+      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], [job('job-1', { workDaysPerYear: 0 })])).toEqual(ok(0));
+    });
+
+    it('쪼그려앉기를 입력한 직력의 근무일이 blank면 not_entered(flag 없음)', () => {
+      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], [job('job-1', { workDaysPerYear: '' })])).toEqual(NOT_ENTERED);
+      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], [job('job-1', { workDaysPerYear: undefined })])).toEqual(NOT_ENTERED);
+    });
+
+    it.each([
+      ['음수', -5],
+      ['문자', 'abc'],
+      ['숫자 접두부', '250일'],
+      ['배열', [250]],
+    ])('근무일 손상값(%s)은 not_entered + invalid', (_l, bad) => {
+      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], [job('job-1', { workDaysPerYear: bad })])).toEqual(INVALID);
+    });
+
+    // 알려진 한계 기록(의도된 정책 — 사용자 결정 2026-10-08 "저장된 값 그대로 사용"): 앱은 모든 직력에 근무일
+    // 250을 기본으로 채우고 구형 무릎 마이그레이션도 250을 백필하므로, 직접 입력한 250과 구분되지 않는다.
+    // 이 테스트가 바뀌면 입력 여부 추적을 도입하는 정책 변경이므로 의도를 다시 확인할 것.
+    it('알려진 한계: 구형 modules.knee.jobs[] 마이그레이션이 백필한 근무일 250으로도 누적이 계산된다', () => {
+      const legacy = {
+        data: {
+          shared: {},
+          modules: { knee: { jobs: [{ id: 'legacy-1', jobName: '용접공', workPeriodOverride: '2년', squatting: '60' }] } },
+          activeModules: ['knee'],
+        },
+      };
+      expect(extractKneeCaseCumulativeSquattingHours(migrate(legacy))).toEqual(ok(500));
+      expect(extractKneeCaseWeightedSquattingMinutesPerDay(migrate(legacy))).toEqual(ok(60));
+    });
   });
 });

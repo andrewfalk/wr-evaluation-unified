@@ -5,7 +5,7 @@
 
 import type { ExtractedValue, MigrationResult, RepeatedObservation } from '../../types';
 import { parseStrictIsoDate, compareDate } from '../../dates';
-import { parseWorkPeriodOverride, calculateWorkPeriod } from '../../workPeriod';
+import { computeJobTenureYears } from '../../jobTenure';
 import { enumerateJobEntities, type JobEntitySource } from '../../grainEntities';
 import type { GrainEntity } from '../../types';
 import type { AnalysisPatient } from '../../migration/deterministicMigrate';
@@ -28,53 +28,12 @@ export function normalizeJobName(raw: string): string {
   return halfwidth.toLowerCase();
 }
 
-type TenureResult = { kind: 'blank' } | { kind: 'invalid' } | { kind: 'ok'; years: number };
-
-// 4차 리뷰 P2 — parseWorkPeriodOverride(workPeriod.ts)는 정규식 부분일치라 "-10년"→10,
-// "1.5년"→5, 배열 String() 강제변환("['10년']"→'10년') 같은 오분류를 그대로 통과시킨다.
-// 이 함수는 knee 등 이미 검증된 기존 코드가 그대로 의존하는 공유 함수라(§공유 함수는
-// 광범위한 blast radius 없이 고치지 않는다는 이 세션의 원칙, isReliablySpineDiagnosis와
-// 동일한 판단) 여기서 동작을 바꾸지 않는다 — 대신 이 extractor에서만 호출 전에 전체
-// 형식을 엄격히 검증한다. "N년"·"N개월"·"N년 M개월"(정수, 공백 허용) 형식만 허용하고
-// 그 외(음수·소수·다른 문자 포함·비문자열)는 전부 거부한다.
-const STRICT_WORK_PERIOD_OVERRIDE_RE = /^(?:(\d+)\s*년)?\s*(?:(\d+)\s*개월)?$/;
-function isStrictWorkPeriodOverride(raw: string): boolean {
-  const trimmed = raw.trim();
-  if (trimmed === '') return false;
-  const match = STRICT_WORK_PERIOD_OVERRIDE_RE.exec(trimmed);
-  return !!match && (match[1] !== undefined || match[2] !== undefined);
-}
-
 // 원본이 문자열이 아니면(배열·숫자·boolean 등) parseStrictIsoDate에 String()으로 흘려
 // 넣지 않는다 — String(['2020-01-01'])==='2020-01-01'처럼 우연히 유효한 형식으로
 // 강제변환되는 경로를 원천적으로 막는다(K-L Grade/spine 공통필드에서 이미 확립한 원칙).
 function tryParseStrictDate(raw: unknown) {
   if (typeof raw !== 'string') return null;
   return parseStrictIsoDate(raw);
-}
-
-// job.identity.tenureYears와 job.rollup.longestTenureJobNameNormalized(대표 후보 선정)가
-// 정확히 같은 유효성 규칙을 공유한다 — 두 곳에 서로 다르게 구현하면 "이 job이 유효한
-// 근속기간을 가지는가"에 대해 두 가지 답이 생긴다. knee/extractors.ts의
-// isValidPositivePeriod와 같은 원칙(override 우선, 그 다음 strict 날짜 비교)이지만
-// blank/invalid를 구분해 반환값에 그대로 반영한다(§리뷰 확립 관례 — 미입력과 파싱불가는
-// 다른 결측 사유다).
-function computeJobTenureYears(job: JobEntitySource): TenureResult {
-  const override = job.workPeriodOverride;
-  if (!isBlank(override)) {
-    if (typeof override !== 'string' || !isStrictWorkPeriodOverride(override)) return { kind: 'invalid' };
-    const years = parseWorkPeriodOverride(override);
-    return years > 0 ? { kind: 'ok', years } : { kind: 'invalid' };
-  }
-  const { startDate, endDate } = job;
-  if (isBlank(startDate) && isBlank(endDate)) return { kind: 'blank' };
-  if (isBlank(startDate) || isBlank(endDate)) return { kind: 'invalid' }; // 한쪽만 입력된 불완전 상태
-  if (typeof startDate !== 'string' || typeof endDate !== 'string') return { kind: 'invalid' };
-  const s = parseStrictIsoDate(startDate);
-  const e = parseStrictIsoDate(endDate);
-  if (!s || !e) return { kind: 'invalid' };
-  if (compareDate(e, s) <= 0) return { kind: 'invalid' };
-  return { kind: 'ok', years: calculateWorkPeriod(startDate, endDate) };
 }
 
 export function extractJobIdentityJobNameNormalized(

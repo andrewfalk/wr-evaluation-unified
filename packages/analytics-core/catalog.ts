@@ -290,7 +290,14 @@ export function computeRepeatedVariableValue(
 // v29 — 직력별 "신체부담평가 미포함"(shared.jobs[].excludeFromAnalysis) 반영. 신체부담 변수(무릎·어깨·경추·팔꿈치·
 // 손목·척추의 계산·집계, knee/shoulder job grain 투영)에서 미포함 직력을 제외하고, 전부 미포함이면 not_applicable로
 // 돌려준다. 직업력 정보 변수(job.identity.*)는 미포함 직력도 그대로 집계한다. 값이 바뀌므로 실행 캐시를 분리한다.
-export const CATALOG_VERSION = 'v29-exclude-from-analysis';
+//
+// 사용자 요청(2026-10-08) — 무릎 쪼그려앉기 case 변수 개편(v30). ① knee.case.sumSquattingMinutesPerDay
+// (직업력 단순합)를 삭제하고 직력 기간 가중평균 knee.case.weightedSquattingMinutesPerDay(분/일)로 교체
+// ② 누적 knee.case.cumulativeSquattingHours(시간 = Σ 분/일÷60 × 연간 근무일 × 종사 연수) 신규
+// ③ 대표 직종명(job.rollup.longestTenureJobNameNormalized)에 broadcastToGrains: ['disease'] 예외를 줘
+// disease grain에서 선택 가능(job grain은 계속 차단). 카탈로그 case 48 → 49개. 옛 key는 서버가
+// UNKNOWN_VARIABLE로 거부하고 클라이언트가 안내한다(ageAtEvaluation 선례, 자동 치환 없음 — 의미가 달라짐).
+export const CATALOG_VERSION = 'v30-knee-squatting-weighted-cumulative';
 
 // PR4-B2 — outcome 명세(계획서 §2단계). 서버 검증(statsRecipeValidation.ts)과 클라이언트
 // 선택지(RecipePanel.jsx, 카탈로그 DTO의 predictionOutcomeLevels/predictionEventLevels)가
@@ -330,7 +337,9 @@ export const PREDICTION_REVIEWED_DERIVED_PREDICTORS: ReadonlySet<string> = new S
   'shoulder.case.sumVibrationHours',
   'cervical.case.maxJobCumulativeKgHours',
   'cervical.case.totalNonNeutralHoursPerDay',
-  // 무릎 case grain 합계(2026-10-03). 어깨·경추 합계와 같은 용도(판정 일관성 점검)로만 허용.
-  'knee.case.sumSquattingMinutesPerDay',
+  // 무릎 case grain 집계(2026-10-03 합계, 2026-10-08 쪼그려앉기를 기간 가중평균·누적으로 교체). 어깨·경추
+  // 합계와 같은 용도(판정 일관성 점검)로만 허용.
+  'knee.case.weightedSquattingMinutesPerDay',
+  'knee.case.cumulativeSquattingHours',
   'knee.case.sumDailyLoadKg',
 ]);
