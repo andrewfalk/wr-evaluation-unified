@@ -107,6 +107,15 @@ function Write-Utf8NoBom([string]$path, [string]$content) {
     [System.IO.File]::WriteAllText($path, $content, $enc)
 }
 
+function Copy-Required([string]$src, [string]$destDir) {
+    # -LiteralPath: 한글/특수문자 파일명이 와일드카드로 해석되면 일치 0건이어도 Copy-Item이 오류 없이
+    # 지나간다(설치본이 패키지에서 조용히 빠졌던 원인). 복사 후 존재까지 확인해 빠지면 중단한다.
+    if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { Write-Error "복사할 파일이 없습니다: $src"; exit 1 }
+    Copy-Item -LiteralPath $src -Destination $destDir
+    $dest = Join-Path $destDir (Split-Path $src -Leaf)
+    if (-not (Test-Path -LiteralPath $dest -PathType Leaf)) { Write-Error "복사 후 파일이 없습니다: $dest"; exit 1 }
+}
+
 function Assert-DockerCmd([string]$desc) {
     if (-not $?) { Write-Error "$desc failed (exit code $LASTEXITCODE)"; exit 1 }
 }
@@ -384,9 +393,9 @@ if (Test-Path $metadataPath) {
     Write-Host "    verifying $UpdateMetadataFileName against installer + blockmap in $artifactDir ..." -ForegroundColor Gray
     $verified = Test-UpdateArtifacts
 
-    Copy-Item (Join-Path $artifactDir $verified.installerFile) $electronDest
-    Copy-Item (Join-Path $artifactDir $verified.blockmapFile)  $electronDest
-    Copy-Item $metadataPath $electronDest
+    Copy-Required (Join-Path $artifactDir $verified.installerFile) $electronDest
+    Copy-Required (Join-Path $artifactDir $verified.blockmapFile)  $electronDest
+    Copy-Required $metadataPath $electronDest
     $copiedInstallerName = $verified.installerFile
 
     Write-Ok "electron/$($verified.installerFile)"
@@ -445,9 +454,9 @@ Write-Ok "electron/update-policy.example.json (템플릿 — 실제 배치는 �
 $updatesDest = Join-Path $PackageDir "updates"
 New-Item -ItemType Directory -Force $updatesDest | Out-Null
 if ($copiedInstallerName) {
-    Copy-Item (Join-Path $artifactDir $verified.installerFile) $updatesDest
-    Copy-Item (Join-Path $artifactDir $verified.blockmapFile)  $updatesDest
-    Copy-Item $metadataPath $updatesDest
+    Copy-Required (Join-Path $artifactDir $verified.installerFile) $updatesDest
+    Copy-Required (Join-Path $artifactDir $verified.blockmapFile)  $updatesDest
+    Copy-Required $metadataPath $updatesDest
     Write-Ok "updates/$($verified.installerFile)"
     Write-Ok "updates/$($verified.blockmapFile)"
     Write-Ok "updates/$UpdateMetadataFileName (update-policy.json은 포함하지 않음 — 정책 파일이 없으면 업데이터 휴면)"
