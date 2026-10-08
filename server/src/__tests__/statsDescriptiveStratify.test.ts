@@ -123,3 +123,41 @@ describe('partitionRowsForStratify — 기본 파티셔닝', () => {
     expect(b.rows.some((r) => r.personClusterKey === 'person-1')).toBe(true);
   });
 });
+
+// 제한데이터 권한자 응답 전용 — mergeSmallGroups:false면 소수 인원 레벨도 독립 그룹으로 남는다.
+describe('partitionRowsForStratify — mergeSmallGroups:false', () => {
+  it('3명뿐인 담당의도 "기타"로 병합되지 않고 개별 level 그룹이 된다', () => {
+    const rows = [
+      ...makeRows(15, 'doctorA'),
+      ...makeRows(12, 'doctorB'),
+      ...makeRows(3, 'doctorC'),
+      ...makeRows(1, 'doctorD'),
+    ];
+    const { groups } = partitionRowsForStratify(rows, 'k', 'categorical', { mergeSmallGroups: false });
+
+    expect(groups[0]).toMatchObject({ groupId: 'total', kind: 'total' });
+    expect(groups[0].rows).toHaveLength(31);
+    expect(groups.find((g) => g.kind === 'other')).toBeUndefined();
+    const levels = groups.filter((g) => g.kind === 'level');
+    expect(levels.map((g) => g.level).sort()).toEqual(['doctorA', 'doctorB', 'doctorC', 'doctorD']);
+    expect(levels.find((g) => g.level === 'doctorC')!.rows).toHaveLength(3);
+    expect(levels.find((g) => g.level === 'doctorD')!.rows).toHaveLength(1);
+    // 그룹 rows 합 = total (누락·중복 없음)
+    expect(levels.reduce((s, g) => s + g.rows.length, 0)).toBe(31);
+  });
+
+  it('기본값(옵션 없음)과 { mergeSmallGroups:true }는 기존처럼 기타로 병합한다', () => {
+    const rows = [...makeRows(15, 'doctorA'), ...makeRows(3, 'doctorC')];
+    for (const opts of [undefined, {}, { mergeSmallGroups: true }]) {
+      const { groups } = partitionRowsForStratify(rows, 'k', 'categorical', opts);
+      expect(groups.find((g) => g.kind === 'other')!.rows).toHaveLength(3);
+      expect(groups.filter((g) => g.kind === 'level')).toHaveLength(1);
+    }
+  });
+
+  it('결측 그룹과 관측 0건 레벨 처리는 옵션과 무관하게 같다', () => {
+    const rows = [...makeRows(15, 'doctorA'), ...makeRows(2, null as unknown as string)];
+    const { groups } = partitionRowsForStratify(rows, 'k', 'categorical', { mergeSmallGroups: false });
+    expect(groups.find((g) => g.kind === 'missing')!.rows).toHaveLength(2);
+  });
+});

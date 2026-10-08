@@ -154,3 +154,15 @@ export function computePredictionLambdaGrid(): number[] {
   const step = (logMax - logMin) / (lambdaGridSize - 1);
   return Array.from({ length: lambdaGridSize }, (_, i) => 10 ** (logMin + step * i));
 }
+
+// 제한데이터(stats.export_limited_rows) 권한자의 기술통계 응답에서 소수 셀 제한을 해제하는
+// 응답 시점 재계산(statsDescriptiveUnrestricted.ts)의 자원 예산. 이 경로는 stats_runs의
+// 실행 승인·quota·202 전환 밖에서 돌므로 상한을 여기서 명시한다. 엔진 호출 timeout은
+// config.stats.timeoutMs(동기 호출 기본값)를 그대로 쓰고, 엔진 동시성 상한(1)에 걸리면
+// 기다리지 않고 unavailable_engine_busy로 폴백한다.
+// memo는 같은 (executionDigest, userId)의 해제 결과를 짧게만 프로세스 메모리에 둔다 —
+// GET /runs 새로고침 등 반복 조회가 매번 엔진을 부르지 않게 하는 용도이며 DB에는 저장하지 않는다.
+export const LIMITED_DESCRIPTIVE_RECOMPUTE = {
+  memoTtlMs: 60_000,
+  memoMaxEntries: 16,
+} as const;

@@ -782,3 +782,103 @@ describe('ResultPanel — Table1 그룹별 비교(descriptiveStratified) 렌더�
     expect(headers).toEqual(['변수', '전체', '김민준 1', '김민준 2', '이서연']); // 유일한 "이서연"은 순번 없음
   });
 });
+
+// 제한데이터 권한자 소수 셀 해제 — 서버가 응답 시점에만 붙이는 limitedDisclosure 표시.
+describe('ResultPanel — 제한데이터 소수 셀 해제 표시(limitedDisclosure)', () => {
+  const catalog = { variables: [{ key: 'sex', label: '성별', type: 'categorical' }] };
+  const recipe = { analysisMode: 'descriptive', variableKeys: ['sex'] };
+  const row = {
+    variableKey: 'sex', kind: 'discrete', suppressed: false, n: 4, missingCount: 2, missingPatterns: null,
+    levels: [{ level: 'M', count: 3, proportion: 0.75 }, { level: 'F', count: 1, proportion: 0.25 }], mode: 'M',
+  };
+
+  function renderResult(result, recipeOverride = recipe) {
+    render(
+      <ResultPanel
+        catalog={catalog} committedRecipe={recipeOverride}
+        committedResult={{ runManifest: baseRunManifest(), result }}
+        recipeChanged={false} onExport={() => {}} exportState={{ status: 'idle' }}
+        actionsLocked={false} exportUnsupported={false}
+      />,
+    );
+  }
+
+  it('applied면 소수 인원 보호 해제 경고 배너가 뜨고 1~9명 범주가 그대로 보인다', () => {
+    renderResult({ continuous: [], discrete: [row], limitedDisclosure: 'applied' });
+    expect(screen.getByRole('status').textContent).toContain('소수 인원(10명 미만) 보호가 해제된 결과');
+    expect(screen.getByText(/반출·공유/)).toBeTruthy();
+    expect(screen.getByText(/n=4, 결측=2/)).toBeTruthy();
+  });
+
+  it('필드가 없으면(일반 응답) 배너가 없다', () => {
+    renderResult({ continuous: [], discrete: [row] });
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it.each([
+    ['unavailable_engine_busy', '잠시 후 다시 조회'],
+    ['unavailable_computation_failed', '다시 시도'],
+    ['unavailable_engine_degraded', '관리자에게 문의'],
+    ['unavailable_input_too_large', '필터로 범위를 줄여'],
+    ['unavailable_group_limit', '그룹 수가 많아'],
+    ['unavailable_source_missing', '원본이 보존되지 않았습니다'],
+    ['unavailable_version_drift', '버전이 바뀌어'],
+  ])('%s는 해제하지 못했다는 사유별 안내를 보여준다(해제 경고 배너가 아니다)', (status, expected) => {
+    renderResult({ continuous: [], discrete: [{ variableKey: 'sex', kind: 'discrete', suppressed: true }], limitedDisclosure: status });
+    const banner = screen.getByRole('status');
+    expect(banner.textContent).toContain(expected);
+    expect(banner.textContent).not.toContain('보호가 해제된 결과');
+  });
+
+  it('알 수 없는 상태 값도 일반 결과 표시 안내로 안전하게 처리한다', () => {
+    renderResult({ continuous: [], discrete: [row], limitedDisclosure: 'unavailable_something_new' });
+    expect(screen.getByRole('status').textContent).toContain('일반(집계) 결과를 표시합니다');
+  });
+
+  describe('Table1(담당의 층화)', () => {
+    const stratRecipe = { analysisMode: 'descriptive', variableKeys: ['sex'], descriptive: { stratifyByKey: 'case.staff.assignedDoctorUserId' } };
+    function stratified(limitedDisclosure) {
+      return {
+        continuous: [], discrete: [],
+        ...(limitedDisclosure ? { limitedDisclosure } : {}),
+        descriptiveStratified: {
+          suppressed: false,
+          stratifyByKey: 'case.staff.assignedDoctorUserId',
+          groups: [
+            { groupId: 'total', kind: 'total', level: null },
+            { groupId: 'g0', kind: 'level', level: '김호길' },
+            { groupId: 'g1', kind: 'level', level: '박완' },
+          ],
+          byGroup: [
+            { groupId: 'total', continuous: [], discrete: [{ variableKey: 'sex', kind: 'discrete', suppressed: false, n: 15, missingCount: 3, levels: [{ level: 'M', count: 15, proportion: 1 }], mode: 'M' }] },
+            { groupId: 'g0', continuous: [], discrete: [{ variableKey: 'sex', kind: 'discrete', suppressed: false, n: 12, missingCount: 3, levels: [{ level: 'M', count: 12, proportion: 1 }], mode: 'M' }] },
+            { groupId: 'g1', continuous: [], discrete: [{ variableKey: 'sex', kind: 'discrete', suppressed: false, n: 3, missingCount: 0, levels: [{ level: 'M', count: 3, proportion: 1 }], mode: 'M' }] },
+          ],
+        },
+      };
+    }
+
+    it('해제 응답: 모든 그룹이 표시되고 "그룹 하나라도 비공개면 전체도 비공개" 안내와 비공개 범례가 숨겨진다', () => {
+      renderResult(stratified('applied'), stratRecipe);
+      expect(screen.getByRole('columnheader', { name: '박완' })).toBeTruthy();
+      expect(screen.getByText(/소수 인원 보호가 해제되어 모든 그룹/)).toBeTruthy();
+      expect(screen.queryByText(/전체 값도 함께 비공개로 전환/)).toBeNull();
+      expect(screen.queryByText(/공개 정책에 따라 표시되지 않음\(소수 인원 보호\)/)).toBeNull();
+    });
+
+    it('일반 응답: 기존 역산 방지 안내와 비공개 범례가 그대로 있다(회귀 방지)', () => {
+      renderResult(stratified(null), stratRecipe);
+      expect(screen.getByText(/전체 값도 함께 비공개로 전환/)).toBeTruthy();
+      expect(screen.getByText(/공개 정책에 따라 표시되지 않음\(소수 인원 보호\)/)).toBeTruthy();
+      expect(screen.queryByText(/소수 인원 보호가 해제되어 모든 그룹/)).toBeNull();
+    });
+  });
+
+  it('이변량 실행에는 기술통계 해제 배너가 뜨지 않는다', () => {
+    renderResult(
+      { continuous: [], discrete: [], bivariate: { method: 'welch_t', suppressed: true }, limitedDisclosure: 'applied' },
+      { analysisMode: 'bivariate', variableKeys: ['a', 'b'] },
+    );
+    expect(screen.queryByText(/소수 인원\(10명 미만\) 보호가 해제된 결과/)).toBeNull();
+  });
+});

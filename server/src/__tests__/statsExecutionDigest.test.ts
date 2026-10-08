@@ -121,7 +121,8 @@ describe('computeExecutionDigest — B안 버전 상수 3개(같은 모듈 상�
       // AnalyzeResult.descriptiveStratified 필드가 추가돼 v8-table1-stratify로 다시 범프됐다.
       // 끝 구간 병합 — bin.tailMerged + rawHistogram 추가로 v9-histogram-tail-merge-raw.
       // 범주형 "기타" 병합 — other + rawLevels 추가로 v10-discrete-other-raw-levels.
-      expect(capturedInput.resultSchemaVersion).toBe('v10-discrete-other-raw-levels');
+      // 제한데이터 소수 셀 해제 — limitedDisclosure(응답 시점 전용) 추가로 v11-limited-disclosure.
+      expect(capturedInput.resultSchemaVersion).toBe('v11-limited-disclosure');
 
       // (2) 각 필드를 범프 전 값으로 되돌리면 실제로 다른 digest가 나오는지(=이
       // 필드들이 죽은 값이 아니라 실제로 해시에 반영되는지) 확인한다. 스파이는

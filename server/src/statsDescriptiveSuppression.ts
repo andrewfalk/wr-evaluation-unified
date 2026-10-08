@@ -60,7 +60,11 @@ function pickMode(levels: AnalyzeDiscreteLevel[], variableKey: string): string |
 // §4.2 — 결측사유 분포는 discrete와 같은 연결 억제 규칙을 그 변수의 "결측 하위집합"에
 // 적용한다: reasonCode 중 하나라도 소수 셀이면 분포 전체를 생략한다(missingCount 자체는
 // 이미 n을 통해 암묵적으로 공개되므로 유지 — 부분억제 재도입 방지, 1차 검토 결함 수정).
-function buildMissingPatterns(missingRows: DatasetRow[], key: string): AnalyzeMissingPatternEntry[] | null {
+function buildMissingPatterns(
+  missingRows: DatasetRow[],
+  key: string,
+  unrestricted = false,
+): AnalyzeMissingPatternEntry[] | null {
   const groups = new Map<string, { count: number; personSet: Set<string> }>();
   for (const row of missingRows) {
     const reasonCode = row.values[key]?.missing;
@@ -70,7 +74,7 @@ function buildMissingPatterns(missingRows: DatasetRow[], key: string): AnalyzeMi
     g.count += 1;
     g.personSet.add(row.personClusterKey);
   }
-  const anySmall = [...groups.values()].some((g) => isSmallCell(g.personSet.size));
+  const anySmall = !unrestricted && [...groups.values()].some((g) => isSmallCell(g.personSet.size));
   if (anySmall) return null;
   return [...groups.entries()].map(([reasonCode, g]) => ({
     reasonCode: reasonCode as AnalyzeMissingPatternEntry['reasonCode'],
@@ -114,6 +118,10 @@ export function computeDescriptiveSuppression(
 ): AnalyzeResult {
   const rawContinuousByKey = new Map(raw.continuous.map((c) => [c.variableKey, c] as const));
   const rawDiscreteByKey = new Map(raw.discrete.map((d) => [d.variableKey, d] as const));
+  // 제한데이터 권한자 응답 전용(statsDescriptiveUnrestricted.ts) — 소수 셀 판정을 전부 끈다.
+  // 결과는 stats_runs.result 캐시에 저장하면 안 된다(집계 등급과 섞이면 권한 없는 조회자에게 샌다).
+  const unrestricted = options?.unrestricted === true;
+  const isSmall = (personCount: number): boolean => !unrestricted && isSmallCell(personCount);
 
   const continuous: AnalyzeContinuousResult[] = [];
   const discrete: AnalyzeDiscreteResult[] = [];
@@ -126,7 +134,7 @@ export function computeDescriptiveSuppression(
     const missingPersonCount = distinctPersons(missingRows);
 
     if (kind === 'continuous') {
-      const linkedSuppressed = isSmallCell(presentPersonCount) || isSmallCell(missingPersonCount);
+      const linkedSuppressed = isSmall(presentPersonCount) || isSmall(missingPersonCount);
       if (linkedSuppressed) {
         continuous.push({ variableKey: key, kind: 'continuous', suppressed: true });
         continue;
@@ -150,8 +158,11 @@ export function computeDescriptiveSuppression(
       const originalBins = rawStat.q1 !== null && rawStat.q3 !== null && rawStat.median !== null
         ? buildOriginalHistogram(presentRows, valueOf, rawStat.q1, rawStat.q3)
         : null;
+      // 해제 모드는 해상도 축소·끝 구간 병합 없이 원본 bin을 그대로 쓴다.
       const resolvedHistogram = originalBins
-        ? resolveDisclosableHistogram(presentRows, originalBins, valueOf)
+        ? (unrestricted
+          ? { bins: originalBins, merged: false }
+          : resolveDisclosableHistogram(presentRows, originalBins, valueOf))
         : null;
       const histogram = resolvedHistogram ? { bins: resolvedHistogram.bins, merged: resolvedHistogram.merged } : null;
       const histogramReasonCode: 'INSUFFICIENT_DISCLOSABLE_RESOLUTION' | null =
@@ -170,7 +181,7 @@ export function computeDescriptiveSuppression(
         q3: rawStat.boxplot.q3,
         lowerWhisker: rawStat.boxplot.lowerWhisker,
         upperWhisker: rawStat.boxplot.upperWhisker,
-        ...(isOutlierCountDisclosable(presentRows, rawStat.boxplot, valueOf)
+        ...(unrestricted || isOutlierCountDisclosable(presentRows, rawStat.boxplot, valueOf)
           ? { outlierCount: rawStat.boxplot.outlierCount }
           : {}),
       };
@@ -181,7 +192,7 @@ export function computeDescriptiveSuppression(
         suppressed: false,
         n: rawStat.n,
         missingCount: missingRows.length,
-        missingPatterns: buildMissingPatterns(missingRows, key),
+        missingPatterns: buildMissingPatterns(missingRows, key, unrestricted),
         mean: rawStat.mean,
         sd: rawStat.sd,
         median: rawStat.median,
@@ -211,7 +222,7 @@ export function computeDescriptiveSuppression(
       set.add(row.personClusterKey);
       levelRowCounts.set(levelKey, (levelRowCounts.get(levelKey) ?? 0) + 1);
     }
-    const anySmallLevel = [...levelPersonSets.values()].some((set) => isSmallCell(set.size));
+    const anySmallLevel = [...levelPersonSets.values()].some((set) => isSmall(set.size));
 
     // 소수 범주 "기타" 병합 — 아래 조건을 전부 만족할 때만 한다. 하나라도 어기면 지금처럼
     // 변수 전체 연결 억제다.
@@ -232,7 +243,7 @@ export function computeDescriptiveSuppression(
     if (anySmallLevel && canMerge) {
       mergePlan = planSmallLevelMerge(levelPersonSets, levelRowCounts);
     }
-    if (isSmallCell(missingPersonCount) || (anySmallLevel && !mergePlan)) {
+    if (isSmall(missingPersonCount) || (anySmallLevel && !mergePlan)) {
       discrete.push({ variableKey: key, kind: 'discrete', suppressed: true });
       continue;
     }
@@ -267,7 +278,7 @@ export function computeDescriptiveSuppression(
       suppressed: false,
       n,
       missingCount: missingRows.length,
-      missingPatterns: buildMissingPatterns(missingRows, key),
+      missingPatterns: buildMissingPatterns(missingRows, key, unrestricted),
       levels,
       // mode는 남은 실제 범주만으로 고른다 — "기타"는 범주가 아니다.
       ...(mergePlan ? { other: { count: otherCount, proportion: n > 0 ? otherCount / n : 0 } } : {}),
@@ -281,6 +292,12 @@ export function computeDescriptiveSuppression(
 export interface ComputeDescriptiveSuppressionOptions {
   /** 소수 범주(1~9명)를 "기타"로 합쳐 공개한다. 기본 false(= 하나라도 소수면 변수 전체 억제). */
   mergeSmallLevels?: boolean;
+  /**
+   * 소수 셀(1~9명) 판정을 전부 끈다 — 변수 연결 억제·범주 병합·결측 분포 생략·히스토그램
+   * 해상도 축소·이상치 건수 게이트 모두 해당. stats.export_limited_rows 권한자의 응답 시점
+   * 전용이며 결과를 캐시(stats_runs.result)에 저장하면 안 된다.
+   */
+  unrestricted?: boolean;
 }
 
 // 이산형 범주 키 — Python compute_discrete의 (타입명, 값) 그룹 키와 같은 분할이다.

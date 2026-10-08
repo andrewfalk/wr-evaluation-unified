@@ -13,7 +13,7 @@
 import { randomUUID } from 'crypto';
 import type { Pool, PoolClient } from 'pg';
 import type { AnalysisContext } from './statsAnalysisContext';
-import type { FrozenAnalysisInput } from './statsAnalysisContext';
+import { buildFrozenAnalysisInput, type FrozenAnalysisInput } from './statsAnalysisContext';
 import { STATS_RUN_COLUMNS, type StatsRunRow } from './statsRunRow';
 import { buildPendingStatsRunManifest } from './statsRunManifest';
 import { writeAuditLogStrict, type AuditOutcome } from './middleware/audit';
@@ -211,13 +211,7 @@ async function admitOnce(
     });
     // §저장 데이터 최소화 — buildAnalysisContext 꼬리가 실제로 소비하는 형태 이상으로
     // 키우지 않는다.
-    const frozen: FrozenAnalysisInput = {
-      recipe: ctx.recipe,
-      dataset: ctx.dataset,
-      recipeDigest: ctx.recipeDigest,
-      sourceDigest: ctx.snapshot.sourceDigest,
-      snapshotAsOf: ctx.snapshot.snapshotAsOf,
-    };
+    const frozen: FrozenAnalysisInput = buildFrozenAnalysisInput(ctx);
 
     const insertResult = await client.query<StatsRunRow>(
       `INSERT INTO stats_runs (

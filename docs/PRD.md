@@ -1507,7 +1507,7 @@ v5.0.0 인트라넷 백엔드 도입 후 실제 운영에서 드러난 권한 �
 | `stats.view` | true | – | – | 카탈로그·preview·화면 열람 |
 | `stats.regression` | true | – | – | 분석 실행·폴링·취소(모든 분석 모드 공통 게이트) |
 | `stats.export_results` | true | – | – | 저장된 집계 결과 CSV |
-| `stats.export_limited_rows` | false | – | – | **응답 시점**에 제한 행데이터 필드 부착: 이상치 원값(`boxplot.outlierValues`), 산점도 원시 점(`scatter.points`), 회귀 관측치 진단값(`pointDiagnostics`), 원본 히스토그램(`rawHistogram` — bin 소수셀 게이트 없음, 변수 공개 조건만, 구간 경계는 보기 좋은 정수·소수 단위로 정렬되어 공개용과 다를 수 있음), 원본 범주 빈도(`rawLevels` — 범주별 게이트·"기타" 병합 없음, 변수 수준 조건만, 억제된 변수에도 부착). 관리자 콘솔 표시명 "제한 데이터 열람(원본 값·원본 분포)"(마이그레이션 0034→0035) |
+| `stats.export_limited_rows` | false | – | – | **응답 시점**에 제한 행데이터 필드 부착: 이상치 원값(`boxplot.outlierValues`), 산점도 원시 점(`scatter.points`), 회귀 관측치 진단값(`pointDiagnostics`), 원본 히스토그램(`rawHistogram` — bin 소수셀 게이트 없음, 변수 공개 조건만, 구간 경계는 보기 좋은 정수·소수 단위로 정렬되어 공개용과 다를 수 있음), 원본 범주 빈도(`rawLevels` — 범주별 게이트·"기타" 병합 없음, 변수 수준 조건만, 억제된 변수에도 부착). **기술통계(일반 + 담당의 층화)는 소수 셀(고유 인원 1~9명) 제한 자체를 풀어** 억제 없는 결과를 응답 시점에 재계산해 보낸다(`limitedDisclosure:'applied'`; 소수 담당의도 개별 그룹, total 강제 억제 없음, 결측 건수·결측 사유 분포 공개 — 이때 rawLevels는 `levels`가 이미 원본이라 붙지 않음). 해제 수치는 `stats_runs.result`에 저장하지 않고(캐시-권한 드리프트 방지) 응답 직전 권한 재검사 후 감사(strict)와 함께 전달한다. differencing 제한 요청은 해제하지 않고, 해제에 필요한 원본(`frozen_dataset`)이 없는 실행은 `unavailable_source_missing`(재실행 필요). 관리자 콘솔 표시명 "제한 데이터 열람(원본 값·원본 분포)"(마이그레이션 0034→0035) |
 | `stats.export_phi` | false | true | true | 예약 — 행 단위·PHI export는 미구현이라 노출 경로 없음 |
 
 - 기본 허용 3종은 조직 소속 인증 사용자 전원이 **grant 없이** 사용한다. 기본 허용 권한은 grant를 회수해도 차단되지 않는다.

@@ -526,6 +526,9 @@ export const PreviewResponseSchema = z.object({
     windowMinutes:     z.number(),
     remaining:         z.number().int(),
   }),
+  // 제한데이터 권한자의 기술통계 미리보기에서 소수 셀 억제를 실제로 푼 경우에만 'applied'.
+  // 풀 것이 없었으면(일반 응답과 같음) 필드 자체가 없다.
+  limitedDisclosure: z.literal('applied').optional(),
 });
 
 // ============================================================================
@@ -1583,6 +1586,22 @@ export const AnalyzePredictionResultSchema = z
   .discriminatedUnion('suppressed', [PredictionSuppressedSchema, PredictionResultBodySchema])
   .superRefine(validatePredictionStateInvariants);
 
+// 제한데이터(stats.export_limited_rows) 권한자 응답 전용 — 기술통계의 소수 셀(1~9명) 제한을
+// 해제했는지(applied) 또는 해제하려 했으나 못 한 사유(unavailable_*)다. 응답 시점에만 붙고
+// stats_runs.result(캐시)에는 절대 저장되지 않는다. 필드가 없으면 일반(집계) 응답이다.
+export const LimitedDisclosureStatusSchema = z.enum([
+  'applied',
+  'unavailable_engine_busy',
+  'unavailable_computation_failed',
+  'unavailable_engine_degraded',
+  'unavailable_input_too_large',
+  'unavailable_group_limit',
+  // 해제하려면 입력 행(frozen_dataset)이 남아 있어야 한다 — 생성 당시 권한이 없었거나 differencing으로
+  // 막혔던 조기 억제 실행은 원본을 저장하지 않으므로 재실행이 필요하다.
+  'unavailable_source_missing',
+  'unavailable_version_drift',
+]);
+
 export const AnalyzeResultSchema = z.object({
   continuous: z.array(AnalyzeContinuousResultSchema),
   discrete:   z.array(AnalyzeDiscreteResultSchema),
@@ -1608,6 +1627,8 @@ export const AnalyzeResultSchema = z.object({
   // 유지 — 같은 응답 안에 "비층화 전체"와 "층화 total"이 독립 계산되어 서로 다른
   // 억제 판정이 나오는 걸 막기 위함, server/src/statsDescriptiveStratifySuppression.ts).
   descriptiveStratified: AnalyzeDescriptiveStratifiedResultSchema.optional(),
+  // 응답 시점 전용(위 LimitedDisclosureStatusSchema 주석). 저장된 집계 결과에는 없다.
+  limitedDisclosure: LimitedDisclosureStatusSchema.optional(),
 });
 
 export const AnalyzeRequestSchema = StatsAnalysisRecipeSchema;
@@ -1704,6 +1725,7 @@ export type PredictionCoefficients        = z.infer<typeof PredictionCoefficient
 export type PredictionCaveat              = z.infer<typeof PredictionCaveatSchema>;
 export type AnalyzePredictionResult       = z.infer<typeof AnalyzePredictionResultSchema>;
 export type AnalyzeResult                 = z.infer<typeof AnalyzeResultSchema>;
+export type LimitedDisclosureStatus       = z.infer<typeof LimitedDisclosureStatusSchema>;
 export type AnalyzeRequest                = z.infer<typeof AnalyzeRequestSchema>;
 export type AnalyzeResponse               = z.infer<typeof AnalyzeResponseSchema>;
 export type StatsRunErrorCode             = z.infer<typeof StatsRunErrorCodeSchema>;

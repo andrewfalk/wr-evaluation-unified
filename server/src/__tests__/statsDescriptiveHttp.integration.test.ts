@@ -582,30 +582,43 @@ describe.skipIf(!TEST_DB_URL)('POST /analyze(descriptive) — 실데이터 HTTP 
       expect(second.body.result.discrete[0].rawLevels).toBeUndefined();
     }, 30000);
 
-    it('rawLevels — 생성자 경로: 권한이 있으면 1~9명 범주까지 원본이 붙고, 공개 levels·other는 그대로이며, DB 캐시에는 없고, 감사가 남는다', async () => {
+    it('소수 셀 해제 — 생성자 경로: 권한이 있으면 1~9명 범주까지 levels에 그대로 공개되고(기타·rawLevels 없음), DB 캐시에는 없고, 감사가 남는다', async () => {
       await seedJobNames();
       await grant();
       const res = await authed(request(app()).post('/api/stats/analyze')).send(JOB_BODY);
       expect(res.status).toBe(200);
+      expect(res.body.result.limitedDisclosure).toBe('applied');
       const d = res.body.result.discrete[0];
-      expect(d.rawLevels.map((l: { level: string; count: number }) => [l.level, l.count]).sort())
+      expect(d.suppressed).toBe(false);
+      // 권한자는 "기타" 병합 없이 모든 범주를 개별로 본다 — levels가 이미 원본 전체라 rawLevels는 중복이라 붙지 않는다.
+      expect(d.levels.map((l: { level: string; count: number }) => [l.level, l.count]).sort())
         .toEqual([['간호사', 12], ['목수', 12], ['용접공', 12], ['잠수부', 3]]);
-      expect(levelCountSum(d.rawLevels)).toBe(39);
-      expect(d.other.count).toBe(15);
-      expect(d.levels).toHaveLength(2);
+      expect(levelCountSum(d.levels)).toBe(39);
+      expect(d.n).toBe(39);
+      expect(d.other).toBeUndefined();
+      expect(d.rawLevels).toBeUndefined();
 
+      // 저장된 집계 결과(캐시)에는 해제 수치가 전혀 없다.
       const stored = await pool.query<{ result: unknown }>(`SELECT result FROM stats_runs WHERE analysis_run_id=$1`, [res.body.runManifest.analysisRunId]);
-      expect(JSON.stringify(stored.rows[0].result)).not.toContain('rawLevels');
-      expect(JSON.stringify(stored.rows[0].result)).not.toContain('잠수부');
+      const storedJson = JSON.stringify(stored.rows[0].result);
+      expect(storedJson).not.toContain('rawLevels');
+      expect(storedJson).not.toContain('잠수부');
+      expect(storedJson).not.toContain('limitedDisclosure');
 
+      // 해제 전달 1건당 해제 감사 1건(원시 필드는 붙지 않았으므로 limitedRowFieldsAttached=false).
       const audits = await pool.query(
-        `SELECT 1 FROM audit_logs WHERE actor_org_id=$1 AND extra->>'analysisRunId'=$2 AND extra->>'limitedRowFieldsAttached'='true'`,
+        `SELECT extra FROM audit_logs WHERE actor_org_id=$1 AND extra->>'analysisRunId'=$2 AND extra->>'smallCellLimitStatus'='applied'`,
         [orgId, res.body.runManifest.analysisRunId],
       );
-      expect(audits.rowCount).toBeGreaterThanOrEqual(1);
+      expect(audits.rowCount).toBe(1);
+      expect(audits.rows[0].extra.limitedRowFieldsAttached).toBe(false);
+      expect(audits.rows[0].extra.limitedDisclosureSource).toBe('computed');
+      expect(typeof audits.rows[0].extra.deliveredResultDigest).toBe('string');
+      // 응답 manifest의 resultDigest는 저장된 집계 결과의 것이라 감사의 deliveredResultDigest와 다르다(정상).
+      expect(audits.rows[0].extra.deliveredResultDigest).not.toBe(res.body.runManifest.resultDigest);
     }, 30000);
 
-    it('rawLevels — 감사 실패 시 500이고 응답에 원본이 없다', async () => {
+    it('소수 셀 해제 — 감사 실패 시 500이고 응답에 해제 수치가 없다', async () => {
       await seedJobNames();
       await grant();
       writeAuditLogStrictSpy
@@ -620,28 +633,33 @@ describe.skipIf(!TEST_DB_URL)('POST /analyze(descriptive) — 실데이터 HTTP 
       expect(JSON.stringify(res.body)).not.toContain('잠수부');
     }, 30000);
 
-    it('rawLevels — 캐시 hit와 202→GET 경로: 권한 부여→회수가 다음 응답부터 그대로 반영된다', async () => {
+    it('소수 셀 해제 — 캐시 hit와 202→GET 경로: 권한 부여→회수가 다음 응답부터 그대로 반영된다', async () => {
       await seedJobNames();
       const accepted = await withSyncBudget(0, () => authed(request(app()).post('/api/stats/analyze')).send(JOB_BODY));
       expect(accepted.status).toBe(202);
       const done = await pollRun(accepted.body.analysisRunId);
       expect(done.body.status).toBe('succeeded');
-      expect(done.body.result.discrete[0].rawLevels).toBeUndefined();
+      expect(done.body.result.limitedDisclosure).toBeUndefined();
       expect(done.body.result.discrete[0].other.count).toBe(15);
 
       await grant();
       const viaGet = await authed(request(app()).get(`/api/stats/runs/${accepted.body.analysisRunId}`));
-      expect(levelCountSum(viaGet.body.result.discrete[0].rawLevels)).toBe(39);
+      expect(viaGet.body.result.limitedDisclosure).toBe('applied');
+      expect(levelCountSum(viaGet.body.result.discrete[0].levels)).toBe(39);
+      expect(viaGet.body.result.discrete[0].other).toBeUndefined();
       const viaCache = await authed(request(app()).post('/api/stats/analyze')).send(JOB_BODY);
       expect(viaCache.body.runManifest.analysisRunId).toBe(accepted.body.analysisRunId);
-      expect(levelCountSum(viaCache.body.result.discrete[0].rawLevels)).toBe(39);
+      expect(viaCache.body.result.limitedDisclosure).toBe('applied');
+      expect(levelCountSum(viaCache.body.result.discrete[0].levels)).toBe(39);
 
       await revoke();
       const revoked = await authed(request(app()).get(`/api/stats/runs/${accepted.body.analysisRunId}`));
-      expect(revoked.body.result.discrete[0].rawLevels).toBeUndefined();
+      expect(revoked.body.result.limitedDisclosure).toBeUndefined();
+      expect(revoked.body.result.discrete[0].other.count).toBe(15);
+      expect(JSON.stringify(revoked.body.result)).not.toContain('잠수부');
     }, 40000);
 
-    it('rawLevels — 진행 중 run에 합류한 요청도 합류자 응답 시점 권한으로 원본이 붙는다', async () => {
+    it('소수 셀 해제 — 진행 중 run에 합류한 요청도 합류자 응답 시점 권한으로 해제된다', async () => {
       await seedJobNames();
       worker.stop();
       try {
@@ -654,7 +672,8 @@ describe.skipIf(!TEST_DB_URL)('POST /analyze(descriptive) — 실데이터 HTTP 
         const joiner = await joinerPromise;
         expect(joiner.status).toBe(200);
         expect(joiner.body.runManifest.analysisRunId).toBe(first.body.analysisRunId);
-        expect(levelCountSum(joiner.body.result.discrete[0].rawLevels)).toBe(39);
+        expect(joiner.body.result.limitedDisclosure).toBe('applied');
+        expect(levelCountSum(joiner.body.result.discrete[0].levels)).toBe(39);
       } finally {
         worker.stop();
         worker = createStatsRunsQueueWorker(pool);

@@ -14,9 +14,9 @@ import {
   type Table1DiscreteCell,
 } from '@wr/contracts';
 import type { AnalysisContext } from './statsAnalysisContext';
-import type { StratifyRowGroup } from './statsDescriptiveStratify';
+import type { StratifyPartitionResult, StratifyRowGroup } from './statsDescriptiveStratify';
 import { buildStatsEngineRequest, computeDescriptiveSuppression } from './statsDescriptiveSuppression';
-import { runStatsEngine, type EngineRunOpts, type StatsEngineRawResult, type StatsEngineRequest } from './statsEngine';
+import { assertWithinLimits, runStatsEngine, type EngineRunOpts, type StatsEngineRawResult, type StatsEngineRequest } from './statsEngine';
 
 const GROUP_KEY_SEPARATOR = '\u0000';
 
@@ -195,23 +195,39 @@ function assertResultIntegrity(
   }
 }
 
+export interface StratifiedComputeVariant {
+  /**
+   * true면 소수 셀 억제·total 강제 억제를 전부 끈다. 제한데이터 권한자 응답 시점 전용
+   * (statsDescriptiveUnrestricted.ts)이며 결과를 캐시에 저장하면 안 된다.
+   */
+  unrestricted?: boolean;
+  /** 생략하면 ctx.descriptiveStratifyPartition(소수 그룹이 "기타"로 병합된 집계용 분할). */
+  partition?: StratifyPartitionResult;
+}
+
 export async function computeDescriptiveStratifiedAnalyzeResult(
   ctx: AnalysisContext,
   opts?: EngineRunOpts,
+  variant: StratifiedComputeVariant = {},
 ): Promise<AnalyzeDescriptiveStratifiedResult> {
-  const partition = ctx.descriptiveStratifyPartition;
+  const unrestricted = variant.unrestricted === true;
+  const partition = variant.partition ?? ctx.descriptiveStratifyPartition;
   const stratifyByKey = ctx.recipe.descriptive?.stratifyByKey;
   if (!partition || !stratifyByKey) {
     throw new Error('computeDescriptiveStratifiedAnalyzeResult: ctx.descriptiveStratifyPartition이 없다 — 호출 순서 위반');
   }
 
   const request = buildStratifiedStatsEngineRequest(partition.groups, ctx.recipe.variableKeys, ctx.catalogByKey);
+  // 해제용 분할은 집계 경로 사전검사(assertInputWithinLimitsForMode)가 본 병합 분할과
+  // 다르므로, 실제로 엔진에 보낼 요청 자체를 여기서 검사한다.
+  if (unrestricted) assertWithinLimits(request);
   const raw = await runStatsEngine(request, opts);
   const rawByGroup = splitRawByGroup(raw, partition.groups.map((g) => g.groupId));
 
   const byGroup: AnalyzeDescriptiveStratifiedGroupResult[] = partition.groups.map((group) => {
     const full = computeDescriptiveSuppression(
       group.rows, ctx.recipe.variableKeys, ctx.catalogByKey, rawByGroup.get(group.groupId)!,
+      unrestricted ? { unrestricted: true } : undefined,
     );
     return {
       groupId: group.groupId,
@@ -220,7 +236,7 @@ export async function computeDescriptiveStratifiedAnalyzeResult(
     };
   });
 
-  forceTotalSuppressionWhereAnyGroupSuppressed(byGroup);
+  if (!unrestricted) forceTotalSuppressionWhereAnyGroupSuppressed(byGroup);
   assertResultIntegrity(ctx.recipe.variableKeys, partition.groups, byGroup);
 
   const result: AnalyzeDescriptiveStratifiedResult = {

@@ -56,7 +56,8 @@ export const METHOD_POLICY_VERSION = 'v4-prediction-l2-logistic';
 // AnalyzeContinuousRevealedSchema.rawHistogram 필드가 추가돼 다시 범프.
 // 범주형 "기타" 병합 — AnalyzeDiscreteRevealedSchema.other + (limited_row) rawLevels
 // 필드가 추가돼 다시 범프.
-export const RESULT_SCHEMA_VERSION = 'v10-discrete-other-raw-levels';
+// 제한데이터 소수 셀 해제 — AnalyzeResult.limitedDisclosure(응답 시점 전용 optional)가 추가돼 다시 범프.
+export const RESULT_SCHEMA_VERSION = 'v11-limited-disclosure';
 
 export interface ComputeExecutionDigestInput {
   organizationId: string;
