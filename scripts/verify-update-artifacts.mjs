@@ -127,7 +127,9 @@ function main() {
 
   try {
     const result = verifyUpdateArtifacts({ artifactDir, metadataFileName, expectedVersion });
-    console.log(JSON.stringify(result));
+    // 설치본 파일명에 한글이 있어 콘솔 코드페이지(cp949 등)가 UTF-8과 다르면 PowerShell이 깨진 이름으로
+    // 읽는다(그 이름으로는 파일을 못 찾는다). 비ASCII를 \uXXXX로 이스케이프해 인코딩과 무관하게 한다.
+    console.log(JSON.stringify(result).replace(/[\u0080-￿]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')));
     process.exit(0);
   } catch (err) {
     console.error(`[verify-update-artifacts] FAILED: ${err.message}`);

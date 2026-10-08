@@ -170,6 +170,19 @@ describe('verify-update-artifacts', () => {
       expect(JSON.parse(r.stdout)).toMatchObject({ version: '7.0.0', sha512Verified: true });
     });
 
+    // 7.1.1 패키징에서 콘솔이 cp949라 한글 파일명이 깨져 설치본이 패키지에서 조용히 빠졌다 —
+    // stdout을 ASCII로 고정해 콘솔 인코딩과 무관하게 같은 이름으로 복원되는지 고정한다.
+    it('CLI: 한글 설치본 파일명도 stdout은 ASCII(\\u 이스케이프)이고 JSON.parse하면 원래 이름', () => {
+      const name = '직업성 질환 통합 평가 프로그램 Setup 7.1.1.exe';
+      writeArtifacts(dir, { installerName: name, installerContent: 'installer-bytes', metadataFileName: 'latest.yml', version: '7.1.1' });
+      const r = spawnSync(process.execPath, [VERIFIER_PATH, '--artifact-dir', dir, '--metadata-file', 'latest.yml', '--expected-version', '7.1.1'], { encoding: 'utf-8' });
+      expect(r.status).toBe(0);
+      expect(/^[\x00-\x7f]*$/.test(r.stdout)).toBe(true);
+      const parsed = JSON.parse(r.stdout);
+      expect(parsed.installerFile).toBe(name);
+      expect(parsed.blockmapFile).toBe(`${name}.blockmap`);
+    });
+
     it('CLI: --expected-version 없이 호출하면 기존 동작(버전 비교 없음)', () => {
       writeArtifacts(dir, { installerName: 'Setup 6.5.4.exe', installerContent: 'installer-bytes', metadataFileName: 'latest.yml', version: '6.5.4' });
       const r = spawnSync(process.execPath, [VERIFIER_PATH, '--artifact-dir', dir, '--metadata-file', 'latest.yml'], { encoding: 'utf-8' });
