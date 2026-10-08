@@ -1,4 +1,5 @@
 // 공통 데이터 생성 함수
+import { neutralizeExclusionForLegacy } from '@analytics-core/jobScope';
 
 // 생년월일을 YYYY-MM-DD 형식으로 정규화
 export const formatBirthDate = (birthDate) => {
@@ -32,6 +33,7 @@ export const createSharedJob = () => ({
   endDate: '',
   workPeriodOverride: '',
   workDaysPerYear: 250,
+  excludeFromAnalysis: false, // true면 신체부담평가(모듈 평가·결과·통계 신체부담 변수)에서 제외, 직업력 출력에는 남음
 });
 
 // 작업 영상 인간공학 분석 데이터(§8.11). 환자 JSONB(영구·UI용) — 임시파일 경로 절대 미포함.
@@ -115,7 +117,16 @@ export function migratePatient(patient) {
 
   // migrateJobsToShared는 shared.jobs가 이미 있으면 조기 반환하므로(신형식 환자),
   // 누락 shared 기본값(jobs·videoAnalysis)은 여기서 항상 보강한다.
-  return ensureSharedDefaults(migrated);
+  return neutralizeLegacyExclusion(ensureSharedDefaults(migrated));
+}
+
+// 구형 직업 필드(knee.jobs, spine careerYears 등)가 shared.jobs와 함께 남은 혼재 환자는 직력↔레거시
+// 항목 연결을 확정할 수 없으므로 "신체부담평가 미포함" 플래그를 로드 시점에 무력화한다
+// (analytics-core jobScope.ts — 계산·완료·출력·통계가 같은 값을 읽게 하는 입력 경계 정규화).
+function neutralizeLegacyExclusion(patient) {
+  if (!patient?.data || typeof patient.data !== 'object') return patient;
+  const data = neutralizeExclusionForLegacy(patient.data);
+  return data === patient.data ? patient : { ...patient, data };
 }
 
 // shared 누락 기본값 보강(조기 반환 경로 무관, 신형식 환자에도 적용).

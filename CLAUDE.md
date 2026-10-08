@@ -88,6 +88,9 @@ Patient = {
               hospitalName, department, doctorName, specialNotes, diagnoses[], jobs[],
               medicalRecord, highBloodPressure, diabetes, visitHistory,
               consultReplyOrtho, consultReplyNeuro, consultReplyRehab, consultReplyOther },
+    // shared.jobs[] 원소: { id, jobName, presetId, startDate, endDate, workPeriodOverride, workDaysPerYear,
+    //   excludeFromAnalysis? } — true면 신체부담평가(모듈 평가·결과·통계 신체부담 변수)에서 제외, 직업력 출력에는 남음.
+    //   판정은 항상 `=== true`이며 필드를 직접 읽지 말고 packages/analytics-core/jobScope.ts 헬퍼를 쓴다.
     modules: { knee: {}, shoulder: {}, elbow: {}, spine: {}, cervical: {}, wrist: {} },
     activeModules: ['knee', 'spine', ...]
   }

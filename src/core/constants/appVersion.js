@@ -9,4 +9,5 @@ export const APP_BUILD_VERSION = `${pkg.version}+${gitCommit}`;
 
 // 모듈 isComplete() 판정 로직의 의미가 바뀔 때만 수동으로 올린다. 앱 버전(package.json)과는
 // 독립된 값 — patch 릴리스가 나가도 완료 판정 로직이 그대로면 이 값은 그대로 둔다.
-export const COMPLETION_SCHEMA_VERSION = 1;
+// 2: 직력별 "신체부담평가 미포함"(excludeFromAnalysis) 반영으로 완료 판정 의미 변경(서버 COMPLETION_ENGINE_VERSION v2와 짝).
+export const COMPLETION_SCHEMA_VERSION = 2;

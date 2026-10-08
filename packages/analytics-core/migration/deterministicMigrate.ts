@@ -5,6 +5,7 @@
 
 import { isValidStrictDateTime } from '../dates';
 import { deterministicJobId } from './uuidv5';
+import { neutralizeExclusionForLegacy } from '../jobScope';
 import type { MigrationIssue, MigrationResult } from '../types';
 
 export interface AnalysisJob {
@@ -170,10 +171,11 @@ export function deterministicMigrate(
     issues.push({ code: 'unsupported_legacy_spine_jobs' });
   }
 
+  // 레거시 혼재 환자의 "신체부담평가 미포함" 플래그 무력화(jobScope.ts) — 통계 경로의 입력 경계.
   const payload: AnalysisPatient = {
     ...raw,
     createdAt,
-    data: { shared, modules, activeModules },
+    data: neutralizeExclusionForLegacy({ shared, modules, activeModules }),
   };
 
   return { payload, issues };

@@ -5,6 +5,8 @@ import { calculateCompressiveForce, resolveMddmStatus } from './utils/calculatio
 import { createTask } from './utils/data';
 import { SPINE_FORMULA_V513 } from './utils/formulaVersion';
 import { getEffectiveWorkPeriodText } from '../../core/utils/workPeriod';
+import { NoEvaluableJobsNotice } from '../../core/components/NoEvaluableJobsNotice';
+import { filterAnalysisJobs, hasNoEvaluableJobs } from '@analytics-core/jobScope';
 
 // 사용자가 임상 입력(tasks)을 실제로 건드릴 때마다 spine 모듈을 v5.1.3 공식으로 승격.
 // 단순 자동 정리(sharedJobId 마이그레이션)에서는 호출하지 않는다.
@@ -57,9 +59,12 @@ export function MddmEvaluation({ patient, updateModule, methodTabs, canMutate = 
     return { ...t, force: result ? result.force : 0 };
   }), [mod.tasks]);
 
+  // firstJobId는 "전체" 직력의 첫 직력이다 — sharedJobId 없는 task가 귀속되는 기준이며 계산(computeMddmCalc)과
+  // 같아야 한다. 화면의 직력 탭만 "신체부담평가 미포함" 직력을 뺀 evaluatedJobs를 쓴다.
   const firstJobId = jobs[0]?.id || '';
-  // selectedJobId가 유효하지 않으면 firstJobId로 보정 (렌더용 임시값)
-  const activeJobId = jobs.find(j => j.id === selectedJobId) ? selectedJobId : firstJobId;
+  const evaluatedJobs = filterAnalysisJobs(jobs);
+  // selectedJobId가 유효하지 않으면 첫 포함 직력으로 보정 (렌더용 임시값)
+  const activeJobId = evaluatedJobs.find(j => j.id === selectedJobId) ? selectedJobId : (evaluatedJobs[0]?.id || '');
 
   // 단일 진실원: TaskManager가 보여주는 task 목록 + 모든 핸들러(select/remove/reorder)의 기준
   const visibleTasks = useMemo(() => {
@@ -199,7 +204,9 @@ export function MddmEvaluation({ patient, updateModule, methodTabs, canMutate = 
         <p className="assessment-output-hint" style={{ marginBottom: 12 }}>조회 화면만 전환되며, 저장된 노출 상태는 변경되지 않습니다.</p>
       )}
 
-      {mddmStatus !== 'present' ? (
+      {hasNoEvaluableJobs(jobs) ? (
+        <NoEvaluableJobsNotice />
+      ) : mddmStatus !== 'present' ? (
         <div className="evaluation-empty-state">
           {mddmStatus === 'none'
             ? '요추 압박력 노출 없음으로 처리됩니다.'
@@ -207,9 +214,9 @@ export function MddmEvaluation({ patient, updateModule, methodTabs, canMutate = 
         </div>
       ) : (
         <>
-          {jobs.length > 1 && (
+          {evaluatedJobs.length > 1 && (
             <div className="action-group" style={{ marginBottom: 12 }}>
-              {jobs.map((job, i) => {
+              {evaluatedJobs.map((job, i) => {
                 const isActive = activeJobId === job.id;
                 const jobTaskCount = allTasks.filter(t => (t.sharedJobId || firstJobId) === job.id).length;
                 return (

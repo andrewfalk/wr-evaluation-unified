@@ -3,6 +3,7 @@
 // UI 라벨 매핑 함수(getSideText/getStatusText/getReasonText)는 이동하지 않음 — 옛 파일에 잔류.
 
 import { calculateAge, calculateBMI } from '../../common';
+import { hasNoEvaluableJobs, isJobIdExcluded } from '../../jobScope';
 import type { CompletionContext } from '../../analyticsRegistry';
 import { BK_TYPE_LABELS, ELBOW_BRANCH_FIELDS, EXPOSURE_TYPE_LABELS, PRESSURE_SOURCE_LABELS, VIBRATION_TOOL_LABELS } from './constants';
 import {
@@ -578,6 +579,8 @@ export interface ElbowCalcResult {
   jobSummaries: JobSummary[];
   diagnosisSummaries: DiagnosisSummary[];
   anyFlagged: boolean;
+  /** 직력이 있으나 전부 "신체부담평가 미포함" — 소비처는 평가 결론을 만들지 않는다. */
+  noEvaluableJobs: boolean;
 }
 
 // 전체 계산 — 원본과 동일 로직. `patientData.module`은 원본 syncElbowModuleData 대신
@@ -597,7 +600,11 @@ export function computeElbowCalc(patientData: {
   const age = calculateAge(shared.birthDate as string, shared.injuryDate as string);
   const bmi = calculateBMI(shared.height as string | number, shared.weight as string | number);
 
-  const jobSummaries: JobSummary[] = synced.moduleData.jobEvaluations.map((jobEvaluation) => {
+  // "신체부담평가 미포함" 직력의 jobEvaluations는 normalize(전체 jobs)로 그대로 보존하고, 평가 결과만 뺀다.
+  const evaluatedJobEvaluations = synced.moduleData.jobEvaluations.filter(
+    (jobEvaluation) => !isJobIdExcluded(jobs, jobEvaluation.sharedJobId),
+  );
+  const jobSummaries: JobSummary[] = evaluatedJobEvaluations.map((jobEvaluation) => {
     const job = jobs.find((item) => item.id === jobEvaluation.sharedJobId) || { id: jobEvaluation.sharedJobId, jobName: '' };
     const diagnosisSummaries = synced.elbowDiagnoses.map((diagnosis) => {
       const entry = (jobEvaluation.diagnosisEntries || []).find((item) => item.diagnosisId === diagnosis.id);
@@ -625,6 +632,7 @@ export function computeElbowCalc(patientData: {
     jobSummaries,
     diagnosisSummaries,
     anyFlagged: temporalFlagItems.length > 0 || diagnosisSummaries.some((summary) => summary.flagItems.length > 0),
+    noEvaluableJobs: hasNoEvaluableJobs(jobs),
   };
 }
 
@@ -655,11 +663,14 @@ export function isElbowAssessmentComplete(ctx: CompletionContext): boolean {
   const calc = computeElbowCalc({ shared, module: synced.moduleData, activeModules });
 
   if (synced.elbowDiagnoses.length === 0) return false;
-  if (jobs.length === 0) return false;
-  if (calc.missingCommonFields.length > 0) return false;
 
+  // 순서: 상병 평가 완료 → 직력 0개면 미완료 → 전부 "신체부담평가 미포함"이면 완료 → 공통·직력별 검사.
+  // 전부 미포함이면 공통 노출 항목(missingCommonFields)·직력별 신체부담 입력을 요구하지 않는다.
   const diagnosisComplete = synced.elbowDiagnoses.every((diag) => isDiagnosisAssessmentComplete(diag));
   if (!diagnosisComplete) return false;
+  if (jobs.length === 0) return false;
+  if (hasNoEvaluableJobs(jobs)) return true;
+  if (calc.missingCommonFields.length > 0) return false;
 
   return calc.jobSummaries.every((jobSummary) =>
     jobSummary.diagnosisSummaries.every((summary) => summary.missingFields.length === 0),

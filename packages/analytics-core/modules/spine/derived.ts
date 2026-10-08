@@ -3,6 +3,7 @@
 // (계획서 §1-3 spine 항목의 파일 분리 지침).
 
 import { resolveDiagnosisModule } from '../../diagnosisMapping';
+import { hasNoEvaluableJobs } from '../../jobScope';
 import type { CompletionContext } from '../../analyticsRegistry';
 import { computeMddmCalc, resolveMddmStatus, isMddmComplete, type MddmCalcResult, type MddmFormulaPolicy } from './mddm';
 import { computeVibrationCalc, isVibrationComplete, type VibrationCalcResult } from './vibration';
@@ -60,6 +61,9 @@ function isSpineAssessmentCompleteRaw(patientData: {
   activeModules?: string[];
 }): boolean {
   if (!isSpineDiagnosisComplete(patientData)) return false;
+  // 상병 평가가 끝난 뒤, 직력이 있으나 전부 "신체부담평가 미포함"이면 MDDM/진동 상태(unknown 등)와
+  // 무관하게 평가 대상이 없으므로 완료(결정 4). MDDM/진동 상태 검사보다 먼저 와야 한다.
+  if (hasNoEvaluableJobs(patientData.shared?.jobs)) return true;
   return isMddmComplete(patientData) || isVibrationComplete(patientData);
 }
 

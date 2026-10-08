@@ -100,6 +100,20 @@ describe('SharedJobSchema', () => {
   it('accepts string presetId', () => {
     expect(SharedJobSchema.parse({ ...validJob, presetId: 'preset-abc' }).presetId).toBe('preset-abc');
   });
+
+  it('excludeFromAnalysis is optional (legacy jobs without it still parse as included)', () => {
+    const result = SharedJobSchema.parse(validJob);
+    expect(result.excludeFromAnalysis).toBeUndefined();
+  });
+
+  it('accepts boolean excludeFromAnalysis and keeps it', () => {
+    expect(SharedJobSchema.parse({ ...validJob, excludeFromAnalysis: true }).excludeFromAnalysis).toBe(true);
+    expect(SharedJobSchema.parse({ ...validJob, excludeFromAnalysis: false }).excludeFromAnalysis).toBe(false);
+  });
+
+  it('rejects non-boolean excludeFromAnalysis', () => {
+    expect(() => SharedJobSchema.parse({ ...validJob, excludeFromAnalysis: 'true' })).toThrow();
+  });
 });
 
 describe('SharedDataSchema', () => {

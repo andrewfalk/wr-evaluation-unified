@@ -2,6 +2,8 @@ import { useEffect, useMemo } from 'react';
 import { ExposureForm } from './components/ExposureForm';
 import { WristResultPanel } from './components/WristResultPanel';
 import { syncWristModuleData } from './utils/data';
+import { NoEvaluableJobsNotice } from '../../core/components/NoEvaluableJobsNotice';
+import { hasNoEvaluableJobs, isJobIdExcluded } from '@analytics-core/jobScope';
 
 export function WristEvaluation({ patient, calc, updateModule }) {
   const shared = patient.data.shared || {};
@@ -40,6 +42,9 @@ export function WristEvaluation({ patient, calc, updateModule }) {
 
   const temporalSequence = synced.moduleData.temporalSequence;
   const jobEvaluations = synced.moduleData.jobEvaluations || [];
+  // 화면에는 "신체부담평가 미포함" 직력을 보이지 않는다. sync(syncXxxModuleData)에는 전체 sharedJobs를 넘겨
+  // 미포함 직력의 jobEvaluations 입력값을 보존한다(다시 '포함'으로 바꾸면 그대로 돌아와야 함).
+  const evaluatedJobEvaluations = jobEvaluations.filter(jobEvaluation => !isJobIdExcluded(sharedJobs, jobEvaluation.sharedJobId));
 
   const updateTemporalSequence = (field, value) => {
     updateModule(current => {
@@ -78,6 +83,14 @@ export function WristEvaluation({ patient, calc, updateModule }) {
     });
   };
 
+  if (hasNoEvaluableJobs(sharedJobs)) {
+    return (
+      <div className="panel">
+        <NoEvaluableJobsNotice />
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="panel">
@@ -89,7 +102,7 @@ export function WristEvaluation({ patient, calc, updateModule }) {
             </div>
           </div>
 
-          {jobEvaluations.map((jobEvaluation, index) => {
+          {evaluatedJobEvaluations.map((jobEvaluation, index) => {
             const job = sharedJobs.find(item => item.id === jobEvaluation.sharedJobId);
             if (!job) return null;
 

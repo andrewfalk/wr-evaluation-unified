@@ -224,6 +224,8 @@ Those belong in session state, patient `meta`, patient `sync`, or app settings.
 
 If a module needs per-job details, it must link to the shared job by ID.
 
+A shared job may be flagged `excludeFromAnalysis` (excluded from body-burden evaluation). Modules must treat that as a **display/result filter only**: keep sync/normalisation functions running over the full `shared.jobs` so per-job inputs are never deleted, and filter through the helpers in `packages/analytics-core/jobScope.ts` (`filterAnalysisJobs`, `hasNoEvaluableJobs`, `scopeItemsToIncludedJobs`) instead of reading the field directly. See `docs/DOMAIN_SCHEMA.md` §9.4.
+
 Correct pattern:
 
 ```json

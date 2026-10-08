@@ -12,7 +12,7 @@ import { buildSpineSectionText, buildSpineSectionSummary } from '../../modules/s
 import { AUX_LABELS } from '../../modules/knee/utils/data';
 import { calculateAge, calculateBMI } from './common';
 import { selectModuleNote } from './moduleNotes';
-import { getEffectiveWorkPeriodText } from './workPeriod';
+import { buildJobHistoryLines, NO_EVALUABLE_JOBS_NOTE } from './jobHistory';
 import { EMR_TEXT_LIMIT_BYTES, cp949ByteLength, truncateCp949Bytes } from './emrText';
 import { buildAssessmentBlocks, buildConfirmedDiagnosisLines, formatGroupedAssessment } from './assessmentGroups';
 
@@ -22,6 +22,7 @@ function buildSpineExposureText(calc) {
 
 function buildCervicalExposureText(calc) {
   let text = '\n<경추(목)>\n';
+  if (calc?.noEvaluableJobs) return `${text}${NO_EVALUABLE_JOBS_NOTE}\n`;
 
   (calc?.jobSummaries || []).forEach(jobSummary => {
     text += `- ${jobSummary.jobName || '-'}\n`;
@@ -36,9 +37,7 @@ function buildCervicalExposureText(calc) {
 
 function buildExposureSection(shared, modules, activeModules) {
   let text = '[직업력]\n';
-  (shared.jobs || []).forEach((job, index) => {
-    text += `- 직력${index + 1}: ${job.jobName || '-'} | ${getEffectiveWorkPeriodText(job)}\n`;
-  });
+  text += buildJobHistoryLines(shared.jobs).text;
 
   if (activeModules.length > 0) {
     text += '\n[부위별 신체부담 평가]\n';
@@ -51,50 +50,58 @@ function buildExposureSection(shared, modules, activeModules) {
       : null;
 
     text += '\n<무릎(슬관절)>\n';
-    (calc?.jobBurdens || []).filter(job => job.jobName).forEach(job => {
-      const checked = Object.entries(AUX_LABELS).filter(([key]) => job[key]).map(([, label]) => label);
-      text += `직종: ${job.jobName || '-'}\n`;
-      text += `일 중량물 취급량: ${job.weight || '-'}kg\n`;
-      text += `일 쪼그려 앉기 시간: ${job.squatting || '-'}분\n`;
-      if (checked.length > 0) text += `보조변수: ${checked.join(', ')}\n`;
-      text += `무릎 부담 정도: ${job.burden?.level || '-'}\n\n`;
-    });
-    if (calc?.relatedness) {
-      text += `참고) 신체부담 정도는 다음의 4단계로 구분함.\n`;
-      text += `1) 고도: 퇴행성 변화를 유발 또는 가속하는 것이 확실함(definite)\n`;
-      text += `2) 중등도상: 퇴행성 변화를 유발 또는 가속하기에 충분함(probable)\n`;
-      text += `3) 중등도하: 퇴행성 변화를 유발 또는 가속할 가능성이 있음(possible)\n`;
-      text += `4) 경도: 퇴행성 변화를 유발 또는 가속하기 어려움(no related)\n`;
-      text += `\n[신체부담기여도] ${calc.relatedness.min}% ~ ${calc.relatedness.max}% (평균 ${avgRelatedness}%)\n`;
+    if (calc?.noEvaluableJobs) {
+      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
+    } else {
+      (calc?.jobBurdens || []).filter(job => job.jobName).forEach(job => {
+        const checked = Object.entries(AUX_LABELS).filter(([key]) => job[key]).map(([, label]) => label);
+        text += `직종: ${job.jobName || '-'}\n`;
+        text += `일 중량물 취급량: ${job.weight || '-'}kg\n`;
+        text += `일 쪼그려 앉기 시간: ${job.squatting || '-'}분\n`;
+        if (checked.length > 0) text += `보조변수: ${checked.join(', ')}\n`;
+        text += `무릎 부담 정도: ${job.burden?.level || '-'}\n\n`;
+      });
+      if (calc?.relatedness) {
+        text += `참고) 신체부담 정도는 다음의 4단계로 구분함.\n`;
+        text += `1) 고도: 퇴행성 변화를 유발 또는 가속하는 것이 확실함(definite)\n`;
+        text += `2) 중등도상: 퇴행성 변화를 유발 또는 가속하기에 충분함(probable)\n`;
+        text += `3) 중등도하: 퇴행성 변화를 유발 또는 가속할 가능성이 있음(possible)\n`;
+        text += `4) 경도: 퇴행성 변화를 유발 또는 가속하기 어려움(no related)\n`;
+        text += `\n[신체부담기여도] ${calc.relatedness.min}% ~ ${calc.relatedness.max}% (평균 ${avgRelatedness}%)\n`;
+      }
+      if (calc?.cumulativeBurden) {
+        text += `[누적신체부담] ${calc.cumulativeBurden}\n`;
+      }
+      text += `\n**신체부담정도, 신체부담 기여도, 누적 신체부담에 관한 자세한 사항은\n`;
+      text += `<근골격계 질환의 업무관련성 특별진찰 표준화를 위한 모델 개발\n`;
+      text += `- 무릎 관절염을 대상으로 -, 대한직업환경의학회, 2025>\n`;
+      text += `보고서를 참조하기 바람.\n`;
     }
-    if (calc?.cumulativeBurden) {
-      text += `[누적신체부담] ${calc.cumulativeBurden}\n`;
-    }
-    text += `\n**신체부담정도, 신체부담 기여도, 누적 신체부담에 관한 자세한 사항은\n`;
-    text += `<근골격계 질환의 업무관련성 특별진찰 표준화를 위한 모델 개발\n`;
-    text += `- 무릎 관절염을 대상으로 -, 대한직업환경의학회, 2025>\n`;
-    text += `보고서를 참조하기 바람.\n`;
   }
 
   if (activeModules.includes('shoulder')) {
     const calc = getModule('shoulder')?.computeCalc?.({ shared, module: modules.shoulder || {} });
     text += '\n<어깨(견관절)>\n';
-    text += '독일의 산재보험 번호 BK2117 장기간의 집중적인 기계적 부하로 인한 어깨 회전근개 병변에 사용하는 어깨 부담 평가 지침을 이용하여 평가하였음.\n\n';
-    const shoulderTotals = calc?.totals || [];
-    shoulderTotals.forEach(total => {
-      const pct = total.totalHours > 0 ? ` / ${(total.ratio * 100).toFixed(0)}%` : '';
-      text += `- ${total.label}: ${total.totalHours > 0 ? `${total.totalHours.toFixed(1)}시간` : '-'} (기준 ${total.limit.toLocaleString()}시간${pct}${total.exceeded ? ' [초과]' : ''})\n`;
-    });
-    const exceeded = shoulderTotals.filter(t => t.exceeded);
-    if (exceeded.length > 0) {
-      text += `\n** ${exceeded.map(t => t.label).join(', ')} 기준을 초과하여 누적 신체부담은 충분함.\n`;
+    if (calc?.noEvaluableJobs) {
+      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
     } else {
-      const over75 = shoulderTotals.filter(t => t.ratio >= 0.75);
-      const over50 = shoulderTotals.filter(t => t.ratio >= 0.50);
-      if (over50.length >= 3 || over75.length >= 2) {
-        text += `\n** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.\n`;
+      text += '독일의 산재보험 번호 BK2117 장기간의 집중적인 기계적 부하로 인한 어깨 회전근개 병변에 사용하는 어깨 부담 평가 지침을 이용하여 평가하였음.\n\n';
+      const shoulderTotals = calc?.totals || [];
+      shoulderTotals.forEach(total => {
+        const pct = total.totalHours > 0 ? ` / ${(total.ratio * 100).toFixed(0)}%` : '';
+        text += `- ${total.label}: ${total.totalHours > 0 ? `${total.totalHours.toFixed(1)}시간` : '-'} (기준 ${total.limit.toLocaleString()}시간${pct}${total.exceeded ? ' [초과]' : ''})\n`;
+      });
+      const exceeded = shoulderTotals.filter(t => t.exceeded);
+      if (exceeded.length > 0) {
+        text += `\n** ${exceeded.map(t => t.label).join(', ')} 기준을 초과하여 누적 신체부담은 충분함.\n`;
       } else {
-        text += `\n** 노출 기준치에 미달하여 누적 신체부담 불충분함.\n`;
+        const over75 = shoulderTotals.filter(t => t.ratio >= 0.75);
+        const over50 = shoulderTotals.filter(t => t.ratio >= 0.50);
+        if (over50.length >= 3 || over75.length >= 2) {
+          text += `\n** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.\n`;
+        } else {
+          text += `\n** 노출 기준치에 미달하여 누적 신체부담 불충분함.\n`;
+        }
       }
     }
   }
@@ -102,79 +109,87 @@ function buildExposureSection(shared, modules, activeModules) {
   if (activeModules.includes('wrist')) {
     const calc = getModule('wrist')?.computeCalc?.({ shared, module: modules.wrist || {} });
     text += '\n<손목/손가락>\n';
-    if (calc?.missingCommonFields?.length) {
-      text += `- 공통 시간적 선후관계 누락: ${calc.missingCommonFields.join(', ')}\n`;
-    }
-    if (calc?.temporalFlagItems?.length > 0) {
-      text += `- 공통 시간적 선후관계: ${calc.temporalFlagItems.map(flag => flag.label).join(', ')}\n`;
-    }
-    (calc?.jobSummaries || []).forEach(jobSummary => {
-      text += `- ${jobSummary.jobName || '-'}\n`;
-      const wristGroups = groupWristSummaries(jobSummary.diagnosisSummaries || []);
-      wristGroups.forEach(group => {
-        const merged = mergeWristGroups(group.summaries);
-        const diagList = group.summaries
-          .map(s => {
-            const d = s.diagnosis || {};
-            return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
-          })
-          .join(' / ');
-        const bkLabel = group.bkType ? WRIST_BK_LABELS[group.bkType] || group.bkType : null;
-        const header = bkLabel ? `[${bkLabel}] ${diagList}` : diagList;
-        text += `  - ${header}\n`;
-        if (merged.missingFields?.length > 0) {
-          text += `    입력 누락: ${merged.missingFields.join(', ')}\n`;
-        }
-        const riskFactorText = merged.riskFactorItems?.length > 0
-          ? merged.riskFactorItems.map(flag => flag.label).join(', ')
-          : '확인된 위험 요인 없음';
-        text += `    분석 정리:\n`;
-        text += `      ${(merged.narrative || '-').split('\n').join('\n      ')}\n`;
-        text += `      업무에 포함된 위험 요인: ${riskFactorText}\n`;
-        if (merged.riskFactorSentence) {
-          text += `\n      **종합평가** ${merged.riskFactorSentence}\n`;
-        }
+    if (calc?.noEvaluableJobs) {
+      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
+    } else {
+      if (calc?.missingCommonFields?.length) {
+        text += `- 공통 시간적 선후관계 누락: ${calc.missingCommonFields.join(', ')}\n`;
+      }
+      if (calc?.temporalFlagItems?.length > 0) {
+        text += `- 공통 시간적 선후관계: ${calc.temporalFlagItems.map(flag => flag.label).join(', ')}\n`;
+      }
+      (calc?.jobSummaries || []).forEach(jobSummary => {
+        text += `- ${jobSummary.jobName || '-'}\n`;
+        const wristGroups = groupWristSummaries(jobSummary.diagnosisSummaries || []);
+        wristGroups.forEach(group => {
+          const merged = mergeWristGroups(group.summaries);
+          const diagList = group.summaries
+            .map(s => {
+              const d = s.diagnosis || {};
+              return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
+            })
+            .join(' / ');
+          const bkLabel = group.bkType ? WRIST_BK_LABELS[group.bkType] || group.bkType : null;
+          const header = bkLabel ? `[${bkLabel}] ${diagList}` : diagList;
+          text += `  - ${header}\n`;
+          if (merged.missingFields?.length > 0) {
+            text += `    입력 누락: ${merged.missingFields.join(', ')}\n`;
+          }
+          const riskFactorText = merged.riskFactorItems?.length > 0
+            ? merged.riskFactorItems.map(flag => flag.label).join(', ')
+            : '확인된 위험 요인 없음';
+          text += `    분석 정리:\n`;
+          text += `      ${(merged.narrative || '-').split('\n').join('\n      ')}\n`;
+          text += `      업무에 포함된 위험 요인: ${riskFactorText}\n`;
+          if (merged.riskFactorSentence) {
+            text += `\n      **종합평가** ${merged.riskFactorSentence}\n`;
+          }
+        });
       });
-    });
+    }
   }
 
   if (activeModules.includes('elbow')) {
     const calc = getModule('elbow')?.computeCalc?.({ shared, module: modules.elbow || {} });
     text += '\n<팔꿈치(주관절)>\n';
-    if (calc?.missingCommonFields?.length) {
-      text += `- 공통 시간적 선후관계 누락: ${calc.missingCommonFields.join(', ')}\n`;
-    }
-    if (calc?.temporalFlagItems?.length > 0) {
-      text += `- 공통 시간적 선후관계: ${calc.temporalFlagItems.map(flag => flag.label).join(', ')}\n`;
-    }
-    (calc?.jobSummaries || []).forEach(jobSummary => {
-      text += `- ${jobSummary.jobName || '-'}\n`;
-      const elbowGroups = groupElbowSummaries(jobSummary.diagnosisSummaries || []);
-      elbowGroups.forEach(group => {
-        const merged = mergeElbowGroups(group.summaries);
-        const diagList = group.summaries
-          .map(s => {
-            const d = s.diagnosis || {};
-            return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
-          })
-          .join(' / ');
-        const bkLabel = group.bkType ? ELBOW_BK_LABELS[group.bkType] || group.bkType : null;
-        const header = bkLabel ? `[${bkLabel}] ${diagList}` : diagList;
-        text += `  - ${header}\n`;
-        if (merged.missingFields?.length > 0) {
-          text += `    입력 누락: ${merged.missingFields.join(', ')}\n`;
-        }
-        const riskFactorText = merged.riskFactorItems?.length > 0
-          ? merged.riskFactorItems.map(flag => flag.label).join(', ')
-          : '확인된 위험 요인 없음';
-        text += `    분석 정리:\n`;
-        text += `      ${(merged.narrative || '-').split('\n').join('\n      ')}\n`;
-        text += `      업무에 포함된 위험 요인: ${riskFactorText}\n`;
-        if (merged.riskFactorSentence) {
-          text += `\n      **종합평가** ${merged.riskFactorSentence}\n`;
-        }
+    if (calc?.noEvaluableJobs) {
+      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
+    } else {
+      if (calc?.missingCommonFields?.length) {
+        text += `- 공통 시간적 선후관계 누락: ${calc.missingCommonFields.join(', ')}\n`;
+      }
+      if (calc?.temporalFlagItems?.length > 0) {
+        text += `- 공통 시간적 선후관계: ${calc.temporalFlagItems.map(flag => flag.label).join(', ')}\n`;
+      }
+      (calc?.jobSummaries || []).forEach(jobSummary => {
+        text += `- ${jobSummary.jobName || '-'}\n`;
+        const elbowGroups = groupElbowSummaries(jobSummary.diagnosisSummaries || []);
+        elbowGroups.forEach(group => {
+          const merged = mergeElbowGroups(group.summaries);
+          const diagList = group.summaries
+            .map(s => {
+              const d = s.diagnosis || {};
+              return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
+            })
+            .join(' / ');
+          const bkLabel = group.bkType ? ELBOW_BK_LABELS[group.bkType] || group.bkType : null;
+          const header = bkLabel ? `[${bkLabel}] ${diagList}` : diagList;
+          text += `  - ${header}\n`;
+          if (merged.missingFields?.length > 0) {
+            text += `    입력 누락: ${merged.missingFields.join(', ')}\n`;
+          }
+          const riskFactorText = merged.riskFactorItems?.length > 0
+            ? merged.riskFactorItems.map(flag => flag.label).join(', ')
+            : '확인된 위험 요인 없음';
+          text += `    분석 정리:\n`;
+          text += `      ${(merged.narrative || '-').split('\n').join('\n      ')}\n`;
+          text += `      업무에 포함된 위험 요인: ${riskFactorText}\n`;
+          if (merged.riskFactorSentence) {
+            text += `\n      **종합평가** ${merged.riskFactorSentence}\n`;
+          }
+        });
       });
-    });
+    }
   }
 
   if (activeModules.includes('cervical')) {
@@ -195,9 +210,7 @@ function buildExposureSection(shared, modules, activeModules) {
 // txtJobCusCont(4.직업적 요인, buildExposureSection)에 그대로 남아 있으므로 정보 손실은 없다.
 function buildExposureSummary(shared, modules, activeModules) {
   let text = '[직업력]\n';
-  (shared.jobs || []).forEach((job, index) => {
-    text += `- 직력${index + 1}: ${job.jobName || '-'} | ${getEffectiveWorkPeriodText(job)}\n`;
-  });
+  text += buildJobHistoryLines(shared.jobs).text;
 
   if (activeModules.length > 0) {
     text += '\n[부위별 신체부담 평가]\n';
@@ -210,35 +223,43 @@ function buildExposureSummary(shared, modules, activeModules) {
       : null;
 
     text += '\n<무릎(슬관절)>\n';
-    (calc?.jobBurdens || []).filter(job => job.jobName).forEach(job => {
-      text += `- ${job.jobName || '-'}: 중량물 ${job.weight || '-'}kg / 쪼그려앉기 ${job.squatting || '-'}분 / 부담 정도 ${job.burden?.level || '-'}\n`;
-    });
-    if (calc?.relatedness) {
-      text += `[신체부담기여도] ${calc.relatedness.min}% ~ ${calc.relatedness.max}% (평균 ${avgRelatedness}%)\n`;
-    }
-    if (calc?.cumulativeBurden) {
-      text += `[누적신체부담] ${calc.cumulativeBurden}\n`;
+    if (calc?.noEvaluableJobs) {
+      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
+    } else {
+      (calc?.jobBurdens || []).filter(job => job.jobName).forEach(job => {
+        text += `- ${job.jobName || '-'}: 중량물 ${job.weight || '-'}kg / 쪼그려앉기 ${job.squatting || '-'}분 / 부담 정도 ${job.burden?.level || '-'}\n`;
+      });
+      if (calc?.relatedness) {
+        text += `[신체부담기여도] ${calc.relatedness.min}% ~ ${calc.relatedness.max}% (평균 ${avgRelatedness}%)\n`;
+      }
+      if (calc?.cumulativeBurden) {
+        text += `[누적신체부담] ${calc.cumulativeBurden}\n`;
+      }
     }
   }
 
   if (activeModules.includes('shoulder')) {
     const calc = getModule('shoulder')?.computeCalc?.({ shared, module: modules.shoulder || {} });
     text += '\n<어깨(견관절)>\n';
-    const shoulderTotals = calc?.totals || [];
-    shoulderTotals.filter(total => total.exceeded || total.ratio >= 0.5).forEach(total => {
-      const pct = total.totalHours > 0 ? ` / ${(total.ratio * 100).toFixed(0)}%` : '';
-      text += `- ${total.label}: ${total.totalHours > 0 ? `${total.totalHours.toFixed(1)}시간` : '-'} (기준 ${total.limit.toLocaleString()}시간${pct}${total.exceeded ? ' [초과]' : ''})\n`;
-    });
-    const exceeded = shoulderTotals.filter(t => t.exceeded);
-    if (exceeded.length > 0) {
-      text += `** ${exceeded.map(t => t.label).join(', ')} 기준을 초과하여 누적 신체부담은 충분함.\n`;
+    if (calc?.noEvaluableJobs) {
+      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
     } else {
-      const over75 = shoulderTotals.filter(t => t.ratio >= 0.75);
-      const over50 = shoulderTotals.filter(t => t.ratio >= 0.50);
-      if (over50.length >= 3 || over75.length >= 2) {
-        text += `** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.\n`;
+      const shoulderTotals = calc?.totals || [];
+      shoulderTotals.filter(total => total.exceeded || total.ratio >= 0.5).forEach(total => {
+        const pct = total.totalHours > 0 ? ` / ${(total.ratio * 100).toFixed(0)}%` : '';
+        text += `- ${total.label}: ${total.totalHours > 0 ? `${total.totalHours.toFixed(1)}시간` : '-'} (기준 ${total.limit.toLocaleString()}시간${pct}${total.exceeded ? ' [초과]' : ''})\n`;
+      });
+      const exceeded = shoulderTotals.filter(t => t.exceeded);
+      if (exceeded.length > 0) {
+        text += `** ${exceeded.map(t => t.label).join(', ')} 기준을 초과하여 누적 신체부담은 충분함.\n`;
       } else {
-        text += `** 노출 기준치에 미달하여 누적 신체부담 불충분함.\n`;
+        const over75 = shoulderTotals.filter(t => t.ratio >= 0.75);
+        const over50 = shoulderTotals.filter(t => t.ratio >= 0.50);
+        if (over50.length >= 3 || over75.length >= 2) {
+          text += `** 개별 기준 초과 항목은 없으나, 복합 노출을 고려하여 누적 신체부담은 충분함.\n`;
+        } else {
+          text += `** 노출 기준치에 미달하여 누적 신체부담 불충분함.\n`;
+        }
       }
     }
   }
@@ -246,57 +267,65 @@ function buildExposureSummary(shared, modules, activeModules) {
   if (activeModules.includes('wrist')) {
     const calc = getModule('wrist')?.computeCalc?.({ shared, module: modules.wrist || {} });
     text += '\n<손목/손가락>\n';
-    (calc?.jobSummaries || []).forEach(jobSummary => {
-      const wristGroups = groupWristSummaries(jobSummary.diagnosisSummaries || []);
-      if (wristGroups.length === 0) return;
-      text += `\n[${jobSummary.jobName || '직업 미입력'}]\n`;
-      wristGroups.forEach(group => {
-        const merged = mergeWristGroups(group.summaries);
-        const diagList = group.summaries
-          .map(s => {
-            const d = s.diagnosis || {};
-            return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
-          })
-          .join(' / ');
-        const bkLabel = group.bkType ? WRIST_BK_LABELS[group.bkType] || group.bkType : null;
-        const header = bkLabel ? `[${bkLabel}] ${diagList}` : diagList;
-        text += `  - ${header}\n`;
-        if (merged.missingFields?.length > 0) {
-          text += `    입력 누락: ${merged.missingFields.join(', ')}\n`;
-        }
-        if (merged.riskFactorSentence) {
-          text += `    **종합평가** ${merged.riskFactorSentence}\n`;
-        }
+    if (calc?.noEvaluableJobs) {
+      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
+    } else {
+      (calc?.jobSummaries || []).forEach(jobSummary => {
+        const wristGroups = groupWristSummaries(jobSummary.diagnosisSummaries || []);
+        if (wristGroups.length === 0) return;
+        text += `\n[${jobSummary.jobName || '직업 미입력'}]\n`;
+        wristGroups.forEach(group => {
+          const merged = mergeWristGroups(group.summaries);
+          const diagList = group.summaries
+            .map(s => {
+              const d = s.diagnosis || {};
+              return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
+            })
+            .join(' / ');
+          const bkLabel = group.bkType ? WRIST_BK_LABELS[group.bkType] || group.bkType : null;
+          const header = bkLabel ? `[${bkLabel}] ${diagList}` : diagList;
+          text += `  - ${header}\n`;
+          if (merged.missingFields?.length > 0) {
+            text += `    입력 누락: ${merged.missingFields.join(', ')}\n`;
+          }
+          if (merged.riskFactorSentence) {
+            text += `    **종합평가** ${merged.riskFactorSentence}\n`;
+          }
+        });
       });
-    });
+    }
   }
 
   if (activeModules.includes('elbow')) {
     const calc = getModule('elbow')?.computeCalc?.({ shared, module: modules.elbow || {} });
     text += '\n<팔꿈치(주관절)>\n';
-    (calc?.jobSummaries || []).forEach(jobSummary => {
-      const elbowGroups = groupElbowSummaries(jobSummary.diagnosisSummaries || []);
-      if (elbowGroups.length === 0) return;
-      text += `\n[${jobSummary.jobName || '직업 미입력'}]\n`;
-      elbowGroups.forEach(group => {
-        const merged = mergeElbowGroups(group.summaries);
-        const diagList = group.summaries
-          .map(s => {
-            const d = s.diagnosis || {};
-            return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
-          })
-          .join(' / ');
-        const bkLabel = group.bkType ? ELBOW_BK_LABELS[group.bkType] || group.bkType : null;
-        const header = bkLabel ? `[${bkLabel}] ${diagList}` : diagList;
-        text += `  - ${header}\n`;
-        if (merged.missingFields?.length > 0) {
-          text += `    입력 누락: ${merged.missingFields.join(', ')}\n`;
-        }
-        if (merged.riskFactorSentence) {
-          text += `    **종합평가** ${merged.riskFactorSentence}\n`;
-        }
+    if (calc?.noEvaluableJobs) {
+      text += `${NO_EVALUABLE_JOBS_NOTE}\n`;
+    } else {
+      (calc?.jobSummaries || []).forEach(jobSummary => {
+        const elbowGroups = groupElbowSummaries(jobSummary.diagnosisSummaries || []);
+        if (elbowGroups.length === 0) return;
+        text += `\n[${jobSummary.jobName || '직업 미입력'}]\n`;
+        elbowGroups.forEach(group => {
+          const merged = mergeElbowGroups(group.summaries);
+          const diagList = group.summaries
+            .map(s => {
+              const d = s.diagnosis || {};
+              return `${d.code || ''} ${d.name || ''}${d.side ? ` (${getSideText(d.side)})` : ''}`.trim();
+            })
+            .join(' / ');
+          const bkLabel = group.bkType ? ELBOW_BK_LABELS[group.bkType] || group.bkType : null;
+          const header = bkLabel ? `[${bkLabel}] ${diagList}` : diagList;
+          text += `  - ${header}\n`;
+          if (merged.missingFields?.length > 0) {
+            text += `    입력 누락: ${merged.missingFields.join(', ')}\n`;
+          }
+          if (merged.riskFactorSentence) {
+            text += `    **종합평가** ${merged.riskFactorSentence}\n`;
+          }
+        });
       });
-    });
+    }
   }
 
   if (activeModules.includes('cervical')) {

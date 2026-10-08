@@ -139,3 +139,36 @@ describe('client_reported와 server_verified의 독립성', () => {
     expect(nextVerificationColumns(DRAFT_VERIFICATION_COLUMNS, false)).toEqual(DRAFT_VERIFICATION_COLUMNS);
   });
 });
+
+// 직력별 "신체부담평가 미포함"(excludeFromAnalysis) — 서버는 저장 payload를 migratePatient 없이 그대로 재검증하므로
+// 레거시 혼재 환자의 플래그 무력화(analytics-core jobScope)가 이 입력 경계에서도 적용되어야 한다.
+describe('verifyModulesComplete — 신체부담평가 미포함 직력', () => {
+  const job = (id: string, flag: boolean) => ({ id, jobName: id, startDate: '2010-01-01', endDate: '2015-01-01', excludeFromAnalysis: flag });
+  const spineDx = { id: 'dx-1', code: 'M51', moduleId: 'spine', confirmedRight: 'confirmed', assessmentRight: 'high' };
+  const patient = (flag: boolean, spineModule: Record<string, unknown>) => ({
+    shared: { jobs: [job('a', flag), job('b', flag)], diagnoses: [spineDx] },
+    modules: { spine: spineModule },
+    activeModules: ['spine'],
+  });
+
+  it('레거시 필드가 없고 모든 직력이 미포함이면 척추는 "평가 대상 없음"으로 완료다', () => {
+    expect(verifyModulesComplete(patient(true, {})).allComplete).toBe(true);
+  });
+
+  it('같은 환자에서 미포함 플래그가 없으면 MDDM/진동 미평가로 미완료다 (기존 동작)', () => {
+    expect(verifyModulesComplete(patient(false, {})).allComplete).toBe(false);
+  });
+
+  it('구형 spine 직업 필드가 남은 혼재 환자는 모든 직력이 미포함이어도 완료로 통과하지 않는다 (플래그 무력화)', () => {
+    const mixed = verifyModulesComplete(patient(true, { jobName: '구형 직무' }));
+    const noFlags = verifyModulesComplete(patient(false, { jobName: '구형 직무' }));
+    expect(mixed.allComplete).toBe(false);
+    expect(mixed).toEqual(noFlags);
+  });
+
+  it('입력 객체를 변경하지 않는다', () => {
+    const input = patient(true, { jobName: '구형 직무' });
+    verifyModulesComplete(input);
+    expect((input.shared.jobs[0] as { excludeFromAnalysis: boolean }).excludeFromAnalysis).toBe(true);
+  });
+});

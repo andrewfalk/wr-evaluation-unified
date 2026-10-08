@@ -8,6 +8,7 @@ import {
 } from './calculations';
 import { thresholds } from './thresholds';
 import { SPINE_FORMULA_V513 } from './formulaVersion';
+import { NO_EVALUABLE_JOBS_NOTE } from '../../../core/utils/jobHistory';
 
 const EXCLUDED_NOTE = '(일 임계값 미만으로 누적 노출량이 0으로 계산됩니다)';
 
@@ -59,6 +60,8 @@ export function getSpineInterpretation(comparison, { markdown = true } = {}) {
 // 척추 섹션 단일 소스. reportGenerator와 exportService가 각각 호출.
 // MDDM 섹션(mddmStatus로 게이트) + WBV 섹션(calc.vibration)을 함께 출력한다.
 export function buildSpineSectionText(calc = {}) {
+  // 직력이 있으나 전부 "신체부담평가 미포함"이면 임상 결론 대신 평가 대상 없음 한 줄만 출력한다.
+  if (calc?.noEvaluableJobs) return `\n< 허리(요추) >\n${NO_EVALUABLE_JOBS_NOTE}\n`;
   // 정상 경로는 calc.vibration 서브객체. 구형/직접 WBV calc(top-level evalMethod:'wbv')도 방어.
   const vibration = calc?.vibration || (calc?.evalMethod === 'wbv' ? calc : {});
   return buildMddmSectionText(calc) + buildVibrationSectionText(vibration);
@@ -67,6 +70,7 @@ export function buildSpineSectionText(calc = {}) {
 // buildSpineSectionText의 요약본 — 작업별 분석(반복 행)은 빼고 종합·기준치 대비 결론만
 // 남긴다. EMR 종합소견(b8) byte 절감용. 전문은 buildSpineSectionText가 그대로 담당한다.
 export function buildSpineSectionSummary(calc = {}) {
+  if (calc?.noEvaluableJobs) return `\n< 허리(요추) >\n${NO_EVALUABLE_JOBS_NOTE}\n`;
   const vibration = calc?.vibration || (calc?.evalMethod === 'wbv' ? calc : {});
   return buildMddmSectionSummary(calc) + buildVibrationSectionSummary(vibration);
 }

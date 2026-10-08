@@ -24,6 +24,7 @@ import { TargetPicker } from './TargetPicker';
 import { SkeletonOverlay } from './SkeletonOverlay';
 import { getModule } from '../moduleRegistry';
 import { VIDEO_FEATURE_TARGETS, resolveAnalysisJobIds, buildAppliedRecipe } from '@contracts/index';
+import { filterAnalysisJobs, isJobExcludedFromAnalysis } from '@analytics-core/jobScope';
 
 const VIEWPOINTS = [
   { value: 'sagittal', label: '측면(sagittal)' },
@@ -570,7 +571,8 @@ export function addProcessVA(va, jobs = []) {
     ...va,
     processes: [...va.processes, {
       id: crypto.randomUUID(),
-      sharedJobId: jobs[0]?.id || '',
+      // 새 공정의 기본 직력은 첫 "신체부담평가 포함" 직력(전부 미포함이면 첫 직력)
+      sharedJobId: (filterAnalysisJobs(jobs)[0] || jobs[0])?.id || '',
       name: `공정 ${va.processes.length + 1}`,
       shiftSharePercent: 0,
       activeMinutesPerDay: null, // 공정활동분/일(수기). per-day 환산 입력. null=모름(적용 불가).
@@ -1196,7 +1198,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
                   <div className="va-process-fields">
                     <div className="form-group va-pf-job"><label>직업</label>
                       <select value={p.sharedJobId} onChange={(e) => editProcess(p.id, { sharedJobId: e.target.value })}>
-                        {jobs.map((j) => <option key={j.id} value={j.id}>{j.jobName || '(직업 미지정)'}</option>)}
+                        {jobs.map((j) => <option key={j.id} value={j.id}>{`${j.jobName || '(직업 미지정)'}${isJobExcludedFromAnalysis(j) ? ' (신체부담평가 미포함)' : ''}`}</option>)}
                       </select></div>
                     <div className="form-group va-pf-name"><label>공정명</label>
                       <input value={p.name} onChange={(e) => editProcess(p.id, { name: e.target.value })} placeholder="공정명" /></div>

@@ -4,6 +4,7 @@
 
 import { calculateAge, calculateBMI } from '../../common';
 import { getEffectiveWorkPeriod, type JobLike } from '../../workPeriod';
+import { filterAnalysisJobs, hasNoEvaluableJobs } from '../../jobScope';
 import { resolveDiagnosisModule, type DiagnosisLike } from '../../diagnosisMapping';
 import type { CompletionContext } from '../../analyticsRegistry';
 
@@ -166,6 +167,8 @@ export interface ShoulderCalcResult {
   totals: ShoulderExposureTotal[];
   anyExceeded: boolean;
   anyRepetitiveExceeded: boolean;
+  /** 직력이 있으나 전부 "신체부담평가 미포함" — 소비처는 불충분 등 임상 결론을 만들지 않는다. */
+  noEvaluableJobs: boolean;
 }
 
 // 전체 계산 — 원본과 동일 로직.
@@ -178,7 +181,8 @@ export function computeShoulderCalc(patientData: {
   const age = calculateAge(shared.birthDate as string, shared.injuryDate as string);
   const bmi = calculateBMI(shared.height as string | number, shared.weight as string | number);
 
-  const jobs = mergeJobsWithExtras(shared.jobs, mod.jobExtras);
+  // "신체부담평가 미포함" 직력은 계산에서 뺀다(jobExtras 입력값은 그대로 보존).
+  const jobs = filterAnalysisJobs(mergeJobsWithExtras(shared.jobs, mod.jobExtras));
 
   const jobBurdens = jobs.map((j) => {
     const periodYears = getEffectiveWorkPeriod(j);
@@ -207,5 +211,5 @@ export function computeShoulderCalc(patientData: {
 
   const anyExceeded = totals.some((t) => t.exceeded);
 
-  return { age, bmi, jobBurdens, totals, anyExceeded, anyRepetitiveExceeded };
+  return { age, bmi, jobBurdens, totals, anyExceeded, anyRepetitiveExceeded, noEvaluableJobs: hasNoEvaluableJobs(shared.jobs) };
 }

@@ -88,6 +88,8 @@ export const SHARED_INVENTORY: CoverageInventory = {
   'shared.jobs[].endDate': { included: true },
   'shared.jobs[].workPeriodOverride': { included: true },
   'shared.jobs[].workDaysPerYear': { included: true },
+  // 신체부담평가 미포함 플래그 — 통계 변수 연결(dependsOn)은 PR-C에서 included:true로 전환한다.
+  'shared.jobs[].excludeFromAnalysis': { included: false, reason: '신체부담평가 제외 플래그 — 통계 반영은 후속 PR-C에서 dependsOn으로 연결' },
 
   // --- shared.videoAnalysis(createVideoAnalysisData) — 영상분석 워크스트림(6.0-x) 산출물,
   // 이번 PR의 6개 모듈 계산과 무관 ---

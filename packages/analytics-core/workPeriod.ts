@@ -4,6 +4,8 @@ export interface JobLike {
   startDate?: string;
   endDate?: string;
   workPeriodOverride?: string;
+  /** true면 신체부담평가에서 제외된 직력(jobScope.ts의 헬퍼로만 판정). */
+  excludeFromAnalysis?: boolean;
 }
 
 export function calculateWorkPeriod(s?: string, e?: string): number {

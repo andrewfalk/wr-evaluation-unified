@@ -27,6 +27,7 @@ vi.mock('../../middleware/audit', () => ({
 import { createWorkspacesRouter } from '../workspaces';
 import { generateAccessToken } from '../../auth/tokens';
 import type { Pool } from 'pg';
+import { COMPLETION_ENGINE_VERSION } from '../../completionTracking';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -604,7 +605,7 @@ describe('POST /api/workspaces', () => {
     );
     const params = upsertCall![1] as unknown[];
     expect(params[19]).toBeInstanceOf(Date);
-    expect(params[20]).toBe('v1');
+    expect(params[20]).toBe(COMPLETION_ENGINE_VERSION);
   });
 
   // §리뷰 지적(P2, 2026-09-06): 신규 환자를 두 요청이 동시에 저장하면 SELECT ... FOR UPDATE가

@@ -4,6 +4,7 @@
 // 하는 구조 — src/core/utils/emrReport.js:6 참고) — 이관 대상 아님.
 
 import { calculateAge, calculateBMI } from '../../common';
+import { filterAnalysisJobs, hasNoEvaluableJobs } from '../../jobScope';
 import { getEffectiveWorkPeriod, type JobLike } from '../../workPeriod';
 import type { CompletionContext } from '../../analyticsRegistry';
 import {
@@ -436,6 +437,8 @@ export interface CervicalCalcResult {
   overallBurdenGrade: string;
   overallConclusionText: string;
   overallCumulativeKgHours: number;
+  /** 직력이 있으나 전부 "신체부담평가 미포함" — 소비처는 평가 결론을 만들지 않는다. */
+  noEvaluableJobs: boolean;
 }
 
 // 전체 계산 — 원본과 동일 로직. `patientData.module`은 원본 syncCervicalModuleData 대신
@@ -453,7 +456,9 @@ export function computeCervicalCalc(patientData: {
   const age = calculateAge(shared.birthDate as string, shared.injuryDate as string);
   const bmi = calculateBMI(shared.height as string | number, shared.weight as string | number);
 
-  const jobSummaries = jobs.map((job) =>
+  // task는 normalize(전체 jobs 기준 귀속·고아 제거)를 거친 뒤 직력별로 나누고, "신체부담평가 미포함" 직력의
+  // 요약만 뺀다 — 미포함 직력의 task는 모듈 데이터에 그대로 남는다.
+  const jobSummaries = filterAnalysisJobs(jobs).map((job) =>
     buildJobSummary({
       job,
       diagnoses: cervicalDiagnoses,
@@ -496,6 +501,7 @@ export function computeCervicalCalc(patientData: {
     overallBurdenGrade,
     overallConclusionText,
     overallCumulativeKgHours,
+    noEvaluableJobs: hasNoEvaluableJobs(jobs),
   };
 }
 
@@ -520,6 +526,9 @@ export function isCervicalAssessmentComplete(ctx: CompletionContext): boolean {
 
   const diagnosisComplete = cervicalDiagnoses.every((diag) => isDiagnosisAssessmentComplete(diag));
   if (!diagnosisComplete) return false;
+
+  // 모든 직력이 "신체부담평가 미포함"이면 평가 대상이 없으므로 완료(결정 4).
+  if (hasNoEvaluableJobs(jobs)) return true;
 
   // 작업이 0건인 것은 "경추부담 작업 없음"이라는 유효한 상태이지 미완료가 아니다 —
   // buildJobSummary의 missingFields 판정과 동일한 기준(0건은 입력 누락에서 제외)을 따른다.

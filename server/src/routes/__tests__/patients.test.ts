@@ -40,6 +40,7 @@ function setLockEnforcementMode(mode: 'off' | 'observe' | 'enforce'): void {
   (config as unknown as { lockEnforcementMode: string }).lockEnforcementMode = mode;
 }
 import type { Pool } from 'pg';
+import { COMPLETION_ENGINE_VERSION } from '../../completionTracking';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -897,7 +898,7 @@ describe('POST /api/patients', () => {
       );
       const params = insertCall![1] as unknown[];
       expect(params[19]).toBeInstanceOf(Date);
-      expect(params[20]).toBe('v1');
+      expect(params[20]).toBe(COMPLETION_ENGINE_VERSION);
     });
 
     it('완료 조건을 만족하지 못하면(기본 fixture) server_verified 컬럼은 NULL로 생성된다', async () => {
@@ -1344,7 +1345,7 @@ describe('PATCH /api/patients/:id', () => {
       );
       const params = updateCall![1] as unknown[];
       expect(params[18]).toBeInstanceOf(Date);
-      expect(params[19]).toBe('v1');
+      expect(params[19]).toBe(COMPLETION_ENGINE_VERSION);
     });
 
     it('완료 조건을 만족하지 못하면(기본 fixture, M54.5) server_verified 컬럼은 NULL로 유지된다', async () => {

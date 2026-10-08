@@ -536,6 +536,23 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
 .badge-medium-low { background: #d3f9d8; color: #2b8a3e; }
 .badge-low { background: #e7f5ff; color: #1971c2; }
 
+/* 직력 카드의 "신체부담평가 포함/미포함" 라디오. 구형 Chrome(Win7) 호환: flex gap 대신 margin, :has() 미사용. */
+.form-row.job-name-row { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); align-items: start; }
+.job-scope-group { border: 0; margin: 0; padding: 0; min-width: 0; }
+.job-scope-group legend { font-size: 0.8rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 5px; padding: 0; }
+.job-scope-options { display: flex; flex-wrap: wrap; }
+.job-scope-option { display: inline-flex; align-items: center; padding: 7px 11px; margin: 0 8px 6px 0; border: 1px solid var(--border-color); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); font-size: 0.84rem; cursor: pointer; }
+.job-scope-option input { margin: 0 6px 0 0; accent-color: var(--accent); }
+.job-scope-option.is-selected { border-color: var(--accent); background: var(--accent-light); }
+.job-scope-option.is-excluded-option { border-color: var(--color-warning); background: var(--color-warning-bg); color: var(--color-warning); }
+.job-scope-note { margin: 2px 0 0; font-size: 0.74rem; color: var(--text-muted); }
+.job-excluded-badge { margin-left: 8px; }
+/* 미포함 카드: 투명도 대신 색을 낮춰 라디오는 계속 또렷하게 남긴다(다시 '포함'으로 돌릴 수 있어야 함). */
+.job-card.is-excluded { background: var(--hover-bg); border-style: dashed; border-color: var(--card-border); }
+.job-card.is-excluded .job-card-title { color: var(--text-muted); }
+.job-card.is-excluded .form-group > label { color: var(--text-muted); }
+.job-card.is-excluded .form-group input { color: var(--text-muted); }
+
 .result-card { background: var(--accent); border-radius: 12px; padding: 15px; color: white; margin-bottom: 15px; }
 .result-card h3 { font-size: 0.9rem; margin-bottom: 8px; opacity: 0.9; }
 .result-value { font-size: 1.8rem; font-weight: 700; }
@@ -2321,7 +2338,7 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   .header-actions .btn { padding: 8px 10px; font-size: 0.75rem; min-height: 44px; flex: 0 0 auto; white-space: nowrap; }
   .panel { padding: 12px; border-radius: 10px; }
   .section-title { font-size: 0.9rem; }
-  .form-row, .form-row.diagnosis-code-name-row { grid-template-columns: 1fr; gap: 10px; }
+  .form-row, .form-row.diagnosis-code-name-row, .form-row.job-name-row { grid-template-columns: 1fr; gap: 10px; }
   .form-group label { font-size: 0.85rem; margin-bottom: 6px; }
   .form-group input, .form-group select, .form-group textarea {
     padding: 12px; font-size: 16px; min-height: 44px;
