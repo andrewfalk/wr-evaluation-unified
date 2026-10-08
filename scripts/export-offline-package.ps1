@@ -436,6 +436,25 @@ $policyTemplate = @'
 Write-Utf8NoBom (Join-Path $electronDest "update-policy.example.json") $policyTemplate
 Write-Ok "electron/update-policy.example.json (템플릿 — 실제 배치는 운영자가 롤아웃 시점에 수동으로)"
 
+# updates/ — docker-compose.yml의 app.volumes(./updates:/app/updates:ro)가 가리키는 호스트 경로이자
+# 서버가 /updates/*로 서빙하는 정적 디렉터리다. compose의 상대경로는 **compose 파일이 있는 패키지 폴더**
+# 기준이므로, 새 패키지 폴더에서 기동하면 이전 폴더의 updates/는 보이지 않는다. 운영자가 electron/에서
+# 3종을 손으로 복사하지 않아도 되도록 검증을 마친 3종(설치본·.blockmap·yml)을 여기에도 둔다.
+# update-policy.json은 위와 같은 이유로 넣지 않는다 — 정책 파일이 없으면 업데이터는 휴면이다.
+# (서버 전용 export에서는 빈 디렉터리만 만든다.)
+$updatesDest = Join-Path $PackageDir "updates"
+New-Item -ItemType Directory -Force $updatesDest | Out-Null
+if ($copiedInstallerName) {
+    Copy-Item (Join-Path $artifactDir $verified.installerFile) $updatesDest
+    Copy-Item (Join-Path $artifactDir $verified.blockmapFile)  $updatesDest
+    Copy-Item $metadataPath $updatesDest
+    Write-Ok "updates/$($verified.installerFile)"
+    Write-Ok "updates/$($verified.blockmapFile)"
+    Write-Ok "updates/$UpdateMetadataFileName (update-policy.json은 포함하지 않음 — 정책 파일이 없으면 업데이터 휴면)"
+} else {
+    Write-Warn "updates/ 는 빈 디렉터리로 생성 (설치본 미포함 export)"
+}
+
 # ── Docker image tar ──────────────────────────────────────────────────────────
 
 Write-Step "Saving Docker images"
@@ -514,6 +533,7 @@ $manifest = [ordered]@{
         installerFile  = $UpdateArtifactManifest.installerFile
         blockmapFile   = $UpdateArtifactManifest.blockmapFile
         sha512Verified = $UpdateArtifactManifest.sha512Verified
+        updatesDirPopulated = [bool]$copiedInstallerName
         note           = if (-not $copiedInstallerName) { "인트라넷 Electron 빌드($UpdateChannel 채널) 미완성 — 별도 빌드 후 -ElectronInstallerPath로 재실행 필요" } else { $null }
     }
     checksum             = "SHA256SUMS"

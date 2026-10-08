@@ -136,18 +136,20 @@ docker images | grep wr-
 
 ### 3-1-1. (선택) Electron 자동 업데이트용 `/updates/` 스테이징
 
-트랙 2(electron-updater) 도입 이후 오프라인 패키지의 `electron/` 디렉터리는 설치본(.exe) 외에
-`.blockmap` + `latest.yml`(또는 `canary.yml`) + `update-policy.example.json` 템플릿을 함께 담고
-있다. **이 단계는 최초 설치 자체에는 필요 없다** — 클라이언트 PC 설치는 여전히 5-2-1의 수동
-인스톨러 실행 방식 그대로다. 다만 **지금 서버에 올리는 이 버전을, 이후 이미 설치된 PC들에게
-자동 업데이트로 배포할 계획이라면** 이미지 로드와 함께 아래도 수행한다:
+트랙 2(electron-updater) 도입 이후 오프라인 패키지에는 설치본(.exe) + `.blockmap` +
+`latest.yml`(또는 `canary.yml`) 3종이 **`electron/`(신규 PC 설치용)과 `updates/`(서버 서빙용) 두 곳에**
+들어 있고, `electron/`에는 `update-policy.example.json` 템플릿이 추가로 있다. `docker-compose.yml`이
+`./updates`를 컨테이너 `/app/updates`에 read-only 마운트하므로, **패키지 폴더에서 그대로 기동하면 3종은
+별도 복사 없이 서빙된다.** 이 단계는 최초 설치 자체에는 필요 없다 — 클라이언트 PC 설치는 여전히 5-2-1의
+수동 인스톨러 실행 방식 그대로다(`update-policy.json`이 없으면 업데이터는 휴면).
+
+**기존 서버를 새 패키지 폴더로 교체하는 경우**에는 compose의 `./updates`가 새 폴더를 가리키므로,
+이전 폴더 `updates/`에 `update-policy.json`·`canary.yml` 등을 올려 둔 적이 있다면 새 폴더 `updates/`로
+옮긴다(없으면 생략):
 
 ```powershell
-# 패키지 루트에서, 서버 리포지터리의 updates/ 로 3종 파일 복사
-# (docker-compose.yml이 ./updates 를 컨테이너 /app/updates 에 read-only 마운트)
-Copy-Item ".\electron\*.exe" "<서버 리포 경로>\updates\"
-Copy-Item ".\electron\*.blockmap" "<서버 리포 경로>\updates\"
-Copy-Item ".\electron\latest.yml" "<서버 리포 경로>\updates\"   # 또는 canary.yml
+# 이전 패키지 폴더 → 새 패키지 폴더 (정책 파일이 있을 때만)
+Copy-Item "<이전 폴더>\updates\update-policy.json" "<새 폴더>\updates\"
 ```
 
 **`update-policy.json`(관리자 on/off 스위치)은 여기서 배치하지 않는다** — 템플릿(`update-policy.example.json`)만
