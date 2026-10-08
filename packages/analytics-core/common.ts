@@ -85,6 +85,8 @@ export interface GrainCompatibilityVariable {
   grain: string;
   sensitivity: string;
   type: string;
+  /** isBroadcastSafe에 걸리는 case 변수라도 여기 적힌 grain에는 복제를 허용하는 변수별 예외. */
+  broadcastToGrains?: readonly string[];
 }
 
 /** case 변수는 다른 grain(job/disease)에도 안전하게 값을 복제(브로드캐스트)할 수 있다 —
@@ -95,14 +97,16 @@ export function isBroadcastSafe(variable: GrainCompatibilityVariable): boolean {
 }
 
 /** 이 변수를 `grain` 분석/필터 후보로 쓸 수 있는가 — 자기 grain과 정확히 같거나,
- * case 브로드캐스트 안전 변수를 job/disease grain에서 보는 경우다. job/disease → case
+ * case 브로드캐스트 안전 변수(또는 `broadcastToGrains`로 그 grain이 명시된 변수)를 job/disease
+ * grain에서 보는 경우다. job/disease → case
  * 역방향 롤업은 이번 범위 밖(항상 false). 목적지 grain 자체가 유효한 3개(case/job/disease)
  * 중 하나가 아니면 동일성 검사까지 가기 전에 즉시 거부한다(순서 중요 — 이 검사를 동일성
  * 검사 뒤에 두면 무효한 값끼리 우연히 같을 때 잘못 통과한다, 리뷰 지적). */
 export function isGrainCompatible(variable: GrainCompatibilityVariable, grain: string): boolean {
   if (grain !== 'case' && grain !== 'job' && grain !== 'disease') return false;
   if (variable.grain === grain) return true;
-  return variable.grain === 'case' && isBroadcastSafe(variable);
+  if (variable.grain !== 'case') return false;
+  return isBroadcastSafe(variable) || (variable.broadcastToGrains?.includes(grain) ?? false);
 }
 
 export interface PurposeCompatibilityVariable {

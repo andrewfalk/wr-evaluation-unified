@@ -94,6 +94,34 @@ describe('isGrainCompatible', () => {
     expect(isGrainCompatible(jobNameRollup, 'disease')).toBe(false);
   });
 
+  // 변수별 예외 — 일반 규칙(isBroadcastSafe)은 그대로 두고, 플래그에 적힌 grain에만 복제를 허용한다.
+  it('broadcastToGrains: ["disease"]인 case 변수는 disease에서만 허용되고 job에서는 여전히 거부', () => {
+    const jobNameRollup = { grain: 'case', sensitivity: 'quasi_identifier', type: 'high_cardinality', broadcastToGrains: ['disease'] };
+    expect(isGrainCompatible(jobNameRollup, 'disease')).toBe(true);
+    expect(isGrainCompatible(jobNameRollup, 'job')).toBe(false);
+    expect(isGrainCompatible(jobNameRollup, 'case')).toBe(true);
+  });
+
+  it('broadcastToGrains가 비었거나 없으면 일반 규칙을 따른다(quasi_identifier는 거부, 안전 변수는 허용)', () => {
+    const quasi = { grain: 'case', sensitivity: 'quasi_identifier', type: 'high_cardinality' };
+    expect(isGrainCompatible({ ...quasi, broadcastToGrains: [] }, 'disease')).toBe(false);
+    expect(isGrainCompatible({ ...quasi, broadcastToGrains: undefined }, 'disease')).toBe(false);
+    const safe = { grain: 'case', sensitivity: 'non_sensitive', type: 'categorical', broadcastToGrains: [] };
+    expect(isGrainCompatible(safe, 'job')).toBe(true);
+    expect(isGrainCompatible(safe, 'disease')).toBe(true);
+  });
+
+  it('broadcastToGrains는 case가 아닌 변수의 역방향 롤업을 열어주지 않는다', () => {
+    const diseaseVar = { grain: 'disease', sensitivity: 'quasi_identifier', type: 'high_cardinality', broadcastToGrains: ['disease', 'job'] };
+    expect(isGrainCompatible(diseaseVar, 'case')).toBe(false);
+    expect(isGrainCompatible(diseaseVar, 'job')).toBe(false);
+  });
+
+  it('broadcastToGrains에 유효하지 않은 grain 문자열이 있어도 목적지 grain 검사가 먼저 거부한다', () => {
+    const v = { grain: 'case', sensitivity: 'quasi_identifier', type: 'high_cardinality', broadcastToGrains: ['person'] };
+    expect(isGrainCompatible(v, 'person')).toBe(false);
+  });
+
   it('job↔disease는 서로 거부(둘 다 case가 아니므로 브로드캐스트 대상이 아님)', () => {
     const jobVar = { grain: 'job', sensitivity: 'non_sensitive', type: 'continuous' };
     const diseaseVar = { grain: 'disease', sensitivity: 'non_sensitive', type: 'ordinal' };

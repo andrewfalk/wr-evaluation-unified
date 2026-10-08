@@ -58,6 +58,8 @@ const RECIPE_ERROR_MESSAGE_LABELS = {
 // 원인을 사용자 문구로 안내한다. 값의 의미가 바뀐 경우(기준일 변경 등)는 자동 치환하지 않고
 // 사용자가 다시 고르게 한다.
 export const REMOVED_VARIABLES = {
+  'knee.case.sumSquattingMinutesPerDay':
+    '쪼그려앉기 시간 합계(직업력 단순합)는 삭제되었습니다. 직력 기간으로 가중평균한 "쪼그려앉기 시간(직력 기간 가중평균)" 또는 "쪼그려앉기 누적 시간"을 다시 선택하세요. 값의 의미가 달라 자동으로 바꾸지 않습니다.',
   'patient.identity.ageAtEvaluation':
     '평가일 기준 나이는 삭제되었습니다. 기준일이 재해일자로 바뀌었으므로 "만 나이(재해일자 기준)"을 다시 선택하세요.',
 };

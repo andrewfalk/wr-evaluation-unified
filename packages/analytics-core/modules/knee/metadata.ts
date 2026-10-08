@@ -250,11 +250,44 @@ export const KNEE_METADATA: AnalyticsVariableMetadata[] = [
     supportedFormulaPolicies: [],
   },
 
-  // case grain 합계 2종 — job grain 원본(weight/squatting)을 직업 간에 합산한 것(직업력 단순합:
-  // 직업별 일일 입력값의 합계이며 근속기간·근무일수 가중 없음 — 연간 누적량이 아니다).
-  // 어깨·경추 합계(shoulder.case.sum*)와 같은 정책이다. 단위 주의: 쪼그려앉기는 원본 입력 단위
-  // 그대로 "분/일"(어깨·경추 합계는 "시간"). 중량물(weight)은 이미 "일일 누적 kg" 하나의 필드라
-  // 어깨 중량물처럼 횟수×초 곱셈 없이 단순 합이다.
+  // case grain 쪼그려앉기 2종 — job grain 원본(squatting 분/일)을 직력 기간으로 가중평균/누적한 값.
+  // 직력 개수가 많아도 부풀지 않도록 단순합이 아니라 가중평균을 쓴다(구 knee.case.sumSquatting
+  // MinutesPerDay 단순합은 삭제 — 값의 의미가 달라 key도 교체). 상세 결측·대상 직력 규칙과 근무일
+  // 250 기본값의 알려진 한계는 extractors.ts의 "case grain 쪼그려앉기 2종" 주석 참고.
+  //
+  // 기간은 job.identity.tenureYears와 같은 엄격 규칙(jobTenure.ts)이라 무릎 업무관련성 계산의
+  // getEffectiveWorkPeriod와 판정이 미세하게 다를 수 있다. 합산 대상은 shared.jobs의 모든 객체다 —
+  // 기본(placeholder) 행도 jobExtras에 연결된 노출값이 있으면 포함하므로 job grain 값과 1:1이 아닐 수 있다.
+  //
+  // 예측 사용 목적: 평가자 판정(diagnosis.rollup.anyHighRelatedness 등)의 근거 입력값이다. prediction
+  // 허용은 "노출 요인이 평가자 판정을 얼마나 설명·재현하는가(판정 일관성 점검)" 용도이며 임상 위험
+  // 예측이 아니다 — 모델이 판정 규칙을 거의 그대로 학습할 수 있다는 한계를 해석 시 감안한다.
+  // formula_audit는 허용하지 않는다. case→disease broadcast는 isGrainCompatible 범용 규칙으로 자동 적용된다.
+  kneeSquattingCaseMetadata({
+    key: 'knee.case.weightedSquattingMinutesPerDay',
+    label: '쪼그려앉기 시간(직력 기간 가중평균)',
+    unit: '분/일',
+    formulaFamily: 'knee_case_weighted_squatting',
+    extraDependsOn: ['shared.jobs[].startDate', 'shared.jobs[].endDate', 'shared.jobs[].workPeriodOverride'],
+  }),
+  kneeSquattingCaseMetadata({
+    key: 'knee.case.cumulativeSquattingHours',
+    label: '쪼그려앉기 누적 시간(직력별 시간×연간 근무일×종사 연수 합)',
+    unit: '시간',
+    formulaFamily: 'knee_case_cumulative_squatting',
+    extraDependsOn: [
+      'shared.jobs[].startDate',
+      'shared.jobs[].endDate',
+      'shared.jobs[].workPeriodOverride',
+      'shared.jobs[].workDaysPerYear',
+    ],
+  }),
+
+  // case grain 중량물 합계 — job grain 원본(weight)을 직업 간에 합산한 것(직업력 단순합: 직업별 일일
+  // 입력값의 합계이며 근속기간·근무일수 가중 없음 — 연간 누적량이 아니다). 어깨 합계(shoulder.case.sum*)와
+  // 같은 정책이다. 중량물(weight)은 이미 "일일 누적 kg" 하나의 필드라 어깨 중량물처럼 횟수×초 곱셈 없이
+  // 단순 합이다. 참고: 쪼그려앉기는 위처럼 기간 가중평균이라 두 변수의 합산 정책이 다르다(요청 범위 밖
+  // 이라 중량물은 그대로 둠 — 가중 여부는 후속 판단).
   //
   // 합산 대상 직업은 shared.jobs의 모든 객체다 — 직종·시작일·종료일·기간 override가 전부 빈
   // "기본(placeholder) 행"도 jobExtras에 연결된 노출값이 있으면 합산한다. job grain은
@@ -262,18 +295,8 @@ export const KNEE_METADATA: AnalyticsVariableMetadata[] = [
   // 않는다(어깨 합계와 동일한 선례). 결측 정책은 extractors.ts의 extractKneeCaseSum 주석 참고
   // (손상값이 하나라도 있으면 부분합 없이 결측).
   //
-  // 예측 사용 목적: 이 변수들은 평가자 판정(diagnosis.rollup.anyHighRelatedness 등)의 근거 입력값이다.
-  // prediction 허용은 "노출 요인이 평가자 판정을 얼마나 설명·재현하는가(판정 일관성 점검)" 용도이며
-  // 임상 위험 예측이 아니다 — 모델이 판정 규칙을 거의 그대로 학습할 수 있다는 한계를 해석 시
-  // 감안한다. formula_audit는 허용하지 않는다(job raw 변수와 동일).
-  // case→disease broadcast는 isGrainCompatible 범용 규칙으로 자동 적용된다(무릎이 아닌 상병 행에도
-  // 같은 값이 복제된다).
-  caseSumMetadata({
-    key: 'knee.case.sumSquattingMinutesPerDay',
-    label: '쪼그려앉기 시간 합계(직업력 단순합)',
-    unit: '분/일',
-    field: 'squatting',
-  }),
+  // 예측 사용 목적·한계는 위 쪼그려앉기 2종과 동일하다. case→disease broadcast는 isGrainCompatible 범용
+  // 규칙으로 자동 적용된다(무릎이 아닌 상병 행에도 같은 값이 복제된다).
   caseSumMetadata({
     key: 'knee.case.sumDailyLoadKg',
     label: '중량물 취급량 합계(직업력 단순합)',
@@ -282,11 +305,45 @@ export const KNEE_METADATA: AnalyticsVariableMetadata[] = [
   }),
 ];
 
+function kneeSquattingCaseMetadata(params: {
+  key: string;
+  label: string;
+  unit: string;
+  formulaFamily: string;
+  extraDependsOn: string[];
+}): AnalyticsVariableMetadata {
+  return {
+    key: params.key,
+    label: params.label,
+    group: '무릎 · 직업력 합계',
+    moduleId: 'knee',
+    grain: 'case',
+    type: 'continuous',
+    unit: params.unit,
+    provenance: 'derived',
+    dependsOn: [
+      'activeModules',
+      'shared.jobs[].id',
+      'shared.jobs[].excludeFromAnalysis',
+      'modules.knee.jobExtras[].sharedJobId',
+      'modules.knee.jobExtras[].squatting',
+      ...params.extraDependsOn,
+    ],
+    availableAt: 'assessment',
+    shownToAssessor: true,
+    allowedAnalysisPurposes: ['association', 'prediction'],
+    predictionRole: 'predictor',
+    sensitivity: 'non_sensitive',
+    formulaFamily: params.formulaFamily,
+    supportedFormulaPolicies: [],
+  };
+}
+
 function caseSumMetadata(params: {
   key: string;
   label: string;
   unit: string;
-  field: 'squatting' | 'weight';
+  field: 'weight';
 }): AnalyticsVariableMetadata {
   return {
     key: params.key,

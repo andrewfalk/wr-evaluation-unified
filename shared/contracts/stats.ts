@@ -88,6 +88,10 @@ export const CatalogVariableSchema = z.object({
   // 빠지지만(CatalogPanel.jsx) 현재 grain 안에서는 여전히 필터로 선택 가능하다(RecipePanel.jsx
   // FilterEditor는 grain만 거르고 analysisRole은 보지 않음 — 등록일이 대표 사례).
   analysisRole:             z.enum(['analyzable', 'filter_only']).default('analyzable'),
+  // case grain 변수가 브로드캐스트 일반 규칙(quasi_identifier·high_cardinality 제외)에 걸려도 여기 적힌
+  // 세부 grain에는 복제를 허용하는 변수별 예외. 클라이언트가 isGrainCompatible로 후보를 거를 때 서버
+  // 검증과 같은 판정을 하려면 이 값이 DTO에 실려야 한다.
+  broadcastToGrains:        z.array(z.enum(['job', 'disease'])).default([]),
   // PR4-B2 — 예측 역할표(계획서 §2단계). predictionOutcomeLevels/predictionEventLevels는
   // predictionRole==='outcome'일 때만 non-null(PREDICTION_OUTCOME_SPECS에서 파생) —
   // 클라이언트 eventLevel select가 자유입력이 아니라 이 값에서 만들어진다.

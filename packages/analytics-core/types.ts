@@ -78,6 +78,10 @@ export interface AnalyticsVariableMetadata {
   // 두 곳을 일치시킨다). 등록일처럼 분석 변수로는 부적절하지만(date 타입 — 기술통계 예외
   // 경로에 걸림) 필터로는 유용한 변수에 쓴다.
   analysisRole?: 'analyzable' | 'filter_only';
+  // case grain 변수가 isBroadcastSafe(quasi_identifier·high_cardinality 제외) 일반 규칙에 걸려도 명시한
+  // 세부 grain에는 복제를 허용하는 변수별 예외. 일반 규칙은 그대로 두고 이 플래그가 있는 변수만 풀린다
+  // (isGrainCompatible 참고). 지정하지 않으면 일반 규칙을 따른다.
+  broadcastToGrains?: ReadonlyArray<'job' | 'disease'>;
   // PR4-B2 — 예측(prediction) 분석 전용 역할표(계획서 §2단계). 미지정이면 예측
   // outcome/predictor 어느 쪽도 아니다(analysisPurpose에 'prediction'을 허용해도
   // getIntegratedCatalog() 기동 검사가 role 누락을 막는다 — dependsOn은 변수 key가

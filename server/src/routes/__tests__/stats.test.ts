@@ -236,6 +236,23 @@ describe('GET /catalog', () => {
     expect(age?.predictionRole).toBe('predictor');
   });
 
+  // 클라이언트(CatalogPanel/RecipePanel)는 이 DTO로 isGrainCompatible을 호출하므로 복제 예외 플래그가
+  // 실리지 않으면 서버는 허용하는데 UI에는 변수가 안 보인다.
+  it('대표 직종명만 broadcastToGrains: ["disease"]를 노출하고 나머지는 빈 배열이다', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    const res = await request(makeApp(pool)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
+    expect(res.status).toBe(200);
+    const withException = res.body.variables
+      .filter((v: { broadcastToGrains: string[] }) => v.broadcastToGrains.length > 0)
+      .map((v: { key: string }) => v.key);
+    expect(withException).toEqual(['job.rollup.longestTenureJobNameNormalized']);
+    const jobName = res.body.variables.find((v: { key: string }) => v.key === 'job.rollup.longestTenureJobNameNormalized');
+    expect(jobName.broadcastToGrains).toEqual(['disease']);
+    const bmi = res.body.variables.find((v: { key: string }) => v.key === 'patient.identity.bmi');
+    expect(bmi.broadcastToGrains).toEqual([]);
+  });
+
   it('예측 역할이 없는 변수는 predictionRole:null을 노출한다', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
@@ -313,7 +330,39 @@ describe('POST /preview — disease grain(PR0-B3 Part B, PR0-B4 rename)', () => 
     expect(res.body.counts.observationCount).toBe(13);
   });
 
-  it('grain과 변수의 grain이 다르고 브로드캐스트 대상도 아니면(quasi_identifier 변수를 disease grain에) VARIABLE_GRAIN_MISMATCH 400', async () => {
+  // 사용자 요청(2026-10-08) — 대표 직종명(case grain, quasi_identifier·high_cardinality)은 일반 브로드캐스트
+  // 규칙에서는 제외지만 변수별 예외(broadcastToGrains: ['disease'])로 disease grain에서는 허용된다.
+  // (job grain은 계속 거부 — 아래 job grain 블록의 VARIABLE_GRAIN_MISMATCH 테스트가 고정한다.)
+  it('대표 직종명(quasi_identifier·high_cardinality)은 변수별 예외로 disease grain에서 허용된다', async () => {
+    const pool = makePool();
+    wireAuthAndCapability(pool);
+    const rows = Array.from({ length: 12 }, (_, i) => {
+      const row = diseaseCaseRow(`case-${i}`, `person-${i}`, 'right');
+      row.payload.data.shared = {
+        ...row.payload.data.shared,
+        jobs: [{ id: `case-${i}-job`, jobName: '용접공', startDate: '2015-01-01', endDate: '2020-01-01' }],
+      } as typeof row.payload.data.shared;
+      return row;
+    });
+    wireSnapshot(pool, rows);
+    const res = await request(makeApp(pool))
+      .post('/api/stats/preview')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-CSRF-Token', CSRF_TOKEN)
+      .send({
+        grain: 'disease',
+        variableKeys: ['job.rollup.longestTenureJobNameNormalized'],
+        filters: [],
+        analysisPurpose: 'association',
+        formulaPolicies: {},
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.counts.suppressed).toBe(false);
+    expect(res.body.counts.caseCount).toBe(12);
+    expect(res.body.counts.observationCount).toBe(12);
+  });
+
+  it('쪼그려앉기 단순합은 삭제돼 UNKNOWN_VARIABLE 400으로 거부된다(옛 레시피 안내 대상)', async () => {
     const pool = makePool();
     wireAuthAndCapability(pool);
     const res = await request(makeApp(pool))
@@ -322,13 +371,13 @@ describe('POST /preview — disease grain(PR0-B3 Part B, PR0-B4 rename)', () => 
       .set('X-CSRF-Token', CSRF_TOKEN)
       .send({
         grain: 'disease',
-        variableKeys: ['job.rollup.longestTenureJobNameNormalized'], // case grain, quasi_identifier — 브로드캐스트 제외
+        variableKeys: ['knee.case.sumSquattingMinutesPerDay'],
         filters: [],
         analysisPurpose: 'association',
         formulaPolicies: {},
       });
     expect(res.status).toBe(400);
-    expect(res.body.errors.some((e: { code: string }) => e.code === 'VARIABLE_GRAIN_MISMATCH')).toBe(true);
+    expect(res.body.errors).toContainEqual(expect.objectContaining({ code: 'UNKNOWN_VARIABLE', path: 'knee.case.sumSquattingMinutesPerDay' }));
     expect(pool.connect).not.toHaveBeenCalled();
   });
 

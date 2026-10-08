@@ -253,6 +253,23 @@ describe('validateRecipe — 카탈로그 키 존재', () => {
     }
   });
 
+  // 사용자 요청(2026-10-08) — 쪼그려앉기 단순합은 기간 가중평균으로 교체돼 삭제됐다(의미가 달라 자동 치환 없음).
+  it('삭제된 쪼그려앉기 단순합(knee.case.sumSquattingMinutesPerDay)은 UNKNOWN_VARIABLE로 거부한다', () => {
+    const result = validateRecipe(baseRecipe({ variableKeys: ['knee.case.sumSquattingMinutesPerDay'] }), 'analyze');
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'UNKNOWN_VARIABLE', path: 'knee.case.sumSquattingMinutesPerDay' }));
+    }
+  });
+
+  it('대표 직종명은 disease grain에서 허용되고 job grain에서는 VARIABLE_GRAIN_MISMATCH다(변수별 복제 예외)', () => {
+    const key = 'job.rollup.longestTenureJobNameNormalized';
+    expect(validateRecipe(baseRecipe({ grain: 'disease', variableKeys: [key] }), 'analyze').valid).toBe(true);
+    const onJob = validateRecipe(baseRecipe({ grain: 'job', variableKeys: [key] }), 'analyze');
+    expect(onJob.valid).toBe(false);
+    if (!onJob.valid) expect(onJob.errors.some((e) => e.code === 'VARIABLE_GRAIN_MISMATCH')).toBe(true);
+  });
+
   it('재해일자 기준 만 나이(patient.identity.ageAtInjury)는 연관성·예측에서 허용되고 공식 감사에서는 불허다', () => {
     const key = 'patient.identity.ageAtInjury';
     expect(validateRecipe(baseRecipe({ variableKeys: [key] }), 'analyze').valid).toBe(true);
@@ -267,7 +284,8 @@ describe('validateRecipe — 카탈로그 키 존재', () => {
 const PREDICTION_ALLOWED_OFFICIAL_KEYS = ['cervical.case.maxJobCumulativeKgHours'];
 const PREDICTION_DENIED_OFFICIAL_KEYS = CATALOG_KEYS.filter((key) => !PREDICTION_ALLOWED_OFFICIAL_KEYS.includes(key));
 
-// 어깨·경추·무릎 case grain 합계 신규 8개 — association·prediction만 허용, formula_audit는 불허.
+// 어깨·경추·무릎 case grain 합계/집계 신규 9개 — association·prediction만 허용, formula_audit는 불허.
+// (무릎 쪼그려앉기는 2026-10-08에 단순합이 기간 가중평균·누적 2개로 교체됐다.)
 const CASE_SUM_KEYS = [
   'shoulder.case.sumOverheadHours',
   'shoulder.case.sumRepetitiveMediumHours',
@@ -275,7 +293,8 @@ const CASE_SUM_KEYS = [
   'shoulder.case.sumHeavyLoadHoursPerDay',
   'shoulder.case.sumVibrationHours',
   'cervical.case.totalNonNeutralHoursPerDay',
-  'knee.case.sumSquattingMinutesPerDay',
+  'knee.case.weightedSquattingMinutesPerDay',
+  'knee.case.cumulativeSquattingHours',
   'knee.case.sumDailyLoadKg',
 ];
 
@@ -349,14 +368,14 @@ describe('validateRecipe — 예측(prediction) 역할·grain·eventLevel·필�
     expect(result.valid, !result.valid ? JSON.stringify(result.errors) : '').toBe(true);
   });
 
-  it('어깨·경추·무릎 case 합계 신규 8개 + 경추 누적부하량 = 9개를 case grain predictor로 허용한다', () => {
+  it('어깨·경추·무릎 case 합계/집계 신규 9개 + 경추 누적부하량 = 10개를 case grain predictor로 허용한다', () => {
     const result = validateRecipe(predictionRecipe({
       variableKeys: ['diagnosis.rollup.anyHighRelatedness', ...CASE_SUM_KEYS, 'cervical.case.maxJobCumulativeKgHours'],
     }), 'analyze');
     expect(result.valid, !result.valid ? JSON.stringify(result.errors) : '').toBe(true);
   });
 
-  it('같은 9개를 disease grain에서도 predictor로 허용한다(case→disease broadcast 규칙)', () => {
+  it('같은 10개를 disease grain에서도 predictor로 허용한다(case→disease broadcast 규칙)', () => {
     const result = validateRecipe(predictionRecipe({
       grain: 'disease',
       variableKeys: ['diagnosis.assessment.status', ...CASE_SUM_KEYS, 'cervical.case.maxJobCumulativeKgHours'],
@@ -374,8 +393,8 @@ describe('validateRecipe — 예측(prediction) 역할·grain·eventLevel·필�
     if (!result.valid) expect(result.errors.some((e) => e.code === 'PREDICTION_OUTCOME_INVALID_ROLE')).toBe(true);
   });
 
-  it.each(['knee.case.sumSquattingMinutesPerDay', 'knee.case.sumDailyLoadKg'])(
-    '무릎 합계 변수 %s를 outcome으로 쓰면 PREDICTION_OUTCOME_INVALID_ROLE로 거부한다(predictor 역할)',
+  it.each(['knee.case.weightedSquattingMinutesPerDay', 'knee.case.cumulativeSquattingHours', 'knee.case.sumDailyLoadKg'])(
+    '무릎 case 변수 %s를 outcome으로 쓰면 PREDICTION_OUTCOME_INVALID_ROLE로 거부한다(predictor 역할)',
     (kneeKey) => {
       const result = validateRecipe(predictionRecipe({
         variableKeys: [kneeKey, 'patient.identity.bmi'],

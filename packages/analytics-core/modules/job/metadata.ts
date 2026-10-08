@@ -68,6 +68,12 @@ export const JOB_METADATA: AnalyticsVariableMetadata[] = [
     shownToAssessor: true,
     allowedAnalysisPurposes: ['association'],
     sensitivity: 'quasi_identifier',
+    // 사용자 요청(2026-10-08) — disease grain에서 대표 직종명을 쓸 수 있게 한다. quasi_identifier·
+    // high_cardinality라 일반 규칙(isBroadcastSafe)은 계속 복제를 막으므로 이 변수만 명시 예외로 푼다.
+    // job grain은 요청 범위가 아니라 계속 차단한다. 재식별 방어: 기술통계 억제가 distinctPersons
+    // (personClusterKey) 기준이라 한 환자의 여러 상병 행이 희귀 직종명을 소규모 셀 임계 위로 올리지
+    // 못한다. 허용 목적은 association만(예측 불허).
+    broadcastToGrains: ['disease'],
     formulaFamily: 'job_rollup_longest_tenure',
     supportedFormulaPolicies: [],
   },
