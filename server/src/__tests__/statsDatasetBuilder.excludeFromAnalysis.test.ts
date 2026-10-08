@@ -75,16 +75,30 @@ describe('buildDataset(grain=job) — 미포함 직력', () => {
 });
 
 describe('buildDataset(grain=case) — 미포함 직력', () => {
-  it('knee.case.sumDailyLoadKg는 포함 직력만 합산, 전부 미포함이면 not_applicable', () => {
+  it('knee.case.weightedDailyLoadKg는 포함 직력만 분자·분모에 넣고, 전부 미포함이면 not_applicable', () => {
     const rows = [
       row('c1', [job('a'), job('b', { excludeFromAnalysis: true })], { jobExtras: extras }),
       row('c2', [job('a'), job('b')], { jobExtras: extras }),
       row('c3', [job('a', { excludeFromAnalysis: true }), job('b', { excludeFromAnalysis: true })], { jobExtras: extras }),
     ];
-    const result = buildDataset(rows, recipe({ grain: 'case', variableKeys: ['knee.case.sumDailyLoadKg'] }), DIGEST, CATALOG_BY_KEY);
-    const sum = Object.fromEntries(result.rows.map((r) => [r.caseId, r.values['knee.case.sumDailyLoadKg']]));
-    expect(sum.c1).toMatchObject({ value: 5000, missing: null });
-    expect(sum.c2).toMatchObject({ value: 5010, missing: null });
-    expect(sum.c3).toMatchObject({ value: null, missing: 'not_applicable' });
+    const result = buildDataset(rows, recipe({ grain: 'case', variableKeys: ['knee.case.weightedDailyLoadKg'] }), DIGEST, CATALOG_BY_KEY);
+    const avg = Object.fromEntries(result.rows.map((r) => [r.caseId, r.values['knee.case.weightedDailyLoadKg']]));
+    expect(avg.c1.missing).toBeNull();
+    expect(avg.c1.value).toBeCloseTo(5000, 6); // b(10kg)는 분자·분모에서 제외
+    expect(avg.c2.value).toBeCloseTo(2505, 6); // 두 직력의 기간이 같아 (5000+10)/2
+    expect(avg.c3).toMatchObject({ value: null, missing: 'not_applicable' });
+  });
+
+  it('knee.case.cumulativeLoadTon도 포함 직력만 반영하고, 전부 미포함이면 not_applicable', () => {
+    const rows = [
+      row('c1', [job('a'), job('b', { excludeFromAnalysis: true })], { jobExtras: extras }),
+      row('c2', [job('a'), job('b')], { jobExtras: extras }),
+      row('c3', [job('a', { excludeFromAnalysis: true }), job('b', { excludeFromAnalysis: true })], { jobExtras: extras }),
+    ];
+    const result = buildDataset(rows, recipe({ grain: 'case', variableKeys: ['knee.case.cumulativeLoadTon'] }), DIGEST, CATALOG_BY_KEY);
+    const cum = Object.fromEntries(result.rows.map((r) => [r.caseId, r.values['knee.case.cumulativeLoadTon']]));
+    expect(cum.c1.missing).toBeNull();
+    expect(cum.c2.value as number).toBeGreaterThan(cum.c1.value as number);
+    expect(cum.c3).toMatchObject({ value: null, missing: 'not_applicable' });
   });
 });

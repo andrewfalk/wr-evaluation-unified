@@ -297,7 +297,12 @@ export function computeRepeatedVariableValue(
 // ③ 대표 직종명(job.rollup.longestTenureJobNameNormalized)에 broadcastToGrains: ['disease'] 예외를 줘
 // disease grain에서 선택 가능(job grain은 계속 차단). 카탈로그 case 48 → 49개. 옛 key는 서버가
 // UNKNOWN_VARIABLE로 거부하고 클라이언트가 안내한다(ageAtEvaluation 선례, 자동 치환 없음 — 의미가 달라짐).
-export const CATALOG_VERSION = 'v30-knee-squatting-weighted-cumulative';
+//
+// 사용자 요청(2026-10-09) — 무릎 중량물도 쪼그려앉기와 같은 방식으로 개편(v31). knee.case.sumDailyLoadKg
+// (직업력 단순합, kg/일)를 삭제하고 직력 기간 가중평균 knee.case.weightedDailyLoadKg(kg/일)와 누적
+// knee.case.cumulativeLoadTon(톤 = Σ kg÷1000 × 연간 근무일 × 종사 연수)으로 교체. 카탈로그 case 49 → 50개
+// (analytics-core 83, 통합 85). 옛 key는 UNKNOWN_VARIABLE로 거부하고 클라이언트가 안내한다(자동 치환 없음).
+export const CATALOG_VERSION = 'v31-knee-load-weighted-cumulative';
 
 // PR4-B2 — outcome 명세(계획서 §2단계). 서버 검증(statsRecipeValidation.ts)과 클라이언트
 // 선택지(RecipePanel.jsx, 카탈로그 DTO의 predictionOutcomeLevels/predictionEventLevels)가
@@ -341,5 +346,6 @@ export const PREDICTION_REVIEWED_DERIVED_PREDICTORS: ReadonlySet<string> = new S
   // 합계와 같은 용도(판정 일관성 점검)로만 허용.
   'knee.case.weightedSquattingMinutesPerDay',
   'knee.case.cumulativeSquattingHours',
-  'knee.case.sumDailyLoadKg',
+  'knee.case.weightedDailyLoadKg',
+  'knee.case.cumulativeLoadTon',
 ]);

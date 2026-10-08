@@ -311,104 +311,46 @@ function extractKneeJobBooleanField(
   });
 }
 
-// ── case grain 중량물 합계 — 직업력 단순합(직업별 일일 입력값의 합계, 근속·근무일수 가중 없음).
-// job grain 원본 weight를 직업 간에 합산한다. shoulder.case.sum*(extractShoulderCaseSum)과 같은 정책이다.
-// 쪼그려앉기(squatting)는 단순합이 아니라 아래 "case grain 쪼그려앉기 2종"(기간 가중평균·누적)이다.
+// ── case grain 노출 변수 — 쪼그려앉기(squatting, 분/일)·중량물(weight, 일일 누적 kg)을 같은 방식으로
+// 직력 기간 가중평균 · 누적 2종씩 집계한다(총 4개 변수). 모두 같은 직력 수집
+// (collectKneeExposureJobTerms)을 공유한다 — 대상 직력·결측 판정이 변수마다 갈라지지 않게 하려는 것이다.
 //
-// 합산 대상은 shared.jobs의 모든 plain object다 — enumerateJobEntities와 달리 기본(placeholder)
-// 행(직종·시작일·종료일·기간 override 전부 빈칸)도 jobExtras에 연결된 노출값이 있으면 포함한다.
-// 따라서 "case 합계 = job grain 값의 합"이 항상 성립하지는 않는다(어깨 선례 유지).
-// 직업↔extras 연결은 sharedJobId === job.id(ID 기반이라 extras 배열 순서와 무관)이고,
-// shared.jobs에 없는 orphan extras는 합산되지 않는다. 레거시 modules.knee.jobs[]는 이 함수가
-// 직접 읽지 않는다 — 원본에 shared.jobs가 없을 때 deterministicMigrate가 변환한 결과만 반영된다
-// (그 변환은 `weight || ''`라 레거시 숫자 weight 0은 blank로 바뀐다 — 이번 범위에서 수정하지 않음).
-//
-// 결측 정책(예측 코호트가 missing만 보고 qualityFlags는 안 보므로 손상값은 value가 아니라
-// 결측으로 표현한다):
-//  · 모듈 비활성/비객체 → structural_missing, shared.jobs 없음 → not_entered
-//  · 개별 입력: null·undefined·공백 문자열만 blank, 그 외 비-number/string·비유한·음수는 invalid
-//  · 전 직업 blank → not_entered (0이 아님). 입력한 0/'0'은 blank가 아닌 정상 0
-//  · 일부 직업만 blank → 그 직업은 "입력 없음"으로 보고 건너뛴 나머지의 합
-//  · invalid가 하나라도 있으면(정상 직업이 섞여 있어도) not_entered + invalid — 부분합 비반환.
-//    합산 결과 판정에서는 invalid 확인이 "전 직업 blank" 판정보다 먼저다
-//  · 최종 합이 유한값이 아니면(합산 overflow) not_entered + invalid
-function extractKneeCaseSum(
-  migrationResult: MigrationResult<AnalysisPatient>,
-  field: 'weight',
-): ExtractedValue<number> {
-  const { payload } = migrationResult;
-
-  if (!isKneeModuleActive(migrationResult)) {
-    const missing: MissingReason = 'structural_missing';
-    return { value: null, missing, qualityFlags: [] };
-  }
-
-  const shared = (payload.data.shared as Record<string, unknown>) ?? {};
-  const rawJobs = Array.isArray(shared.jobs) ? shared.jobs : [];
-  const jobs = rawJobs.filter(isPlainObject);
-  // 신체부담평가 미포함: 전부 제외면 합산 대상이 없다(미입력과 구분), 일부 제외면 포함 직력만 합산한다.
-  if (hasNoEvaluableJobs(jobs)) {
-    return { value: null, missing: 'not_applicable', qualityFlags: [] };
-  }
-  if (jobs.length === 0) {
-    return { value: null, missing: 'not_entered', qualityFlags: [] };
-  }
-
-  let sum = 0;
-  let enteredJobCount = 0;
-  let hasInvalid = false;
-  for (const job of filterAnalysisJobs(jobs)) {
-    const parsed = parseStrictNonNegative(findKneeJobExtra(migrationResult, job.id)?.[field]);
-    if (parsed.kind === 'blank') continue;
-    if (parsed.kind === 'invalid') {
-      hasInvalid = true;
-      continue;
-    }
-    enteredJobCount += 1;
-    sum += parsed.value;
-  }
-
-  if (hasInvalid) {
-    return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
-  }
-  if (enteredJobCount === 0) {
-    return { value: null, missing: 'not_entered', qualityFlags: [] };
-  }
-  if (!Number.isFinite(sum)) {
-    return { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
-  }
-  return { value: sum, missing: null, qualityFlags: [] };
-}
-
-// ── case grain 쪼그려앉기 2종 — 직력 기간 가중평균(분/일) · 누적(시간).
-// 두 변수는 같은 직력 수집(collectKneeSquattingJobTerms)을 공유한다 — 대상 직력·쪼그려앉기 결측
-// 판정이 갈라지지 않게 하려는 것이다. 수집 규칙은 extractKneeCaseSum과 같다: shared.jobs의 모든
-// plain object(기본 placeholder 행 포함), "신체부담평가 미포함" 직력은 분자·분모 모두에서 제외,
-// 전부 미포함이면 not_applicable. 쪼그려앉기 blank 직력은 건너뛰고(분모에도 불포함), 입력한 0은
-// 정상값이다. 기간은 job.identity.tenureYears와 같은 엄격 규칙(jobTenure.ts)이다 — 무릎 업무관련성
-// 계산이 쓰는 느슨한 getEffectiveWorkPeriod와는 판정이 미세하게 다를 수 있다.
+// 수집 규칙: shared.jobs의 모든 plain object(기본 placeholder 행 포함 — 직종·기간이 전부 빈 행도
+// jobExtras에 연결된 노출값이 있으면 포함한다), "신체부담평가 미포함" 직력은 분자·분모 모두에서 제외,
+// 전부 미포함이면 not_applicable. 해당 노출값이 blank인 직력은 건너뛰고(분모에도 불포함), 입력한 0은
+// 정상값이다. 직업↔extras 연결은 sharedJobId === job.id(ID 기반)이고 shared.jobs에 없는 orphan extras는
+// 대상이 아니다. 레거시 modules.knee.jobs[]는 직접 읽지 않고 deterministicMigrate가 변환한 결과만
+// 반영된다(그 변환은 `weight || ''`·`squatting || ''`라 레거시 숫자 0은 blank로 바뀐다 — 범위 밖).
+// 기간은 job.identity.tenureYears와 같은 엄격 규칙(jobTenure.ts)이다 — 무릎 업무관련성 계산이 쓰는
+// 느슨한 getEffectiveWorkPeriod와는 판정이 미세하게 다를 수 있다.
 //
 // 결측 정책(예측 코호트가 missing만 보고 qualityFlags는 안 보므로 손상값은 value가 아니라 결측):
-//  · 쪼그려앉기·기간(·누적의 근무일)이 invalid인 직력이 하나라도 있으면 not_entered + invalid, 부분합 없음
-//  · 쪼그려앉기를 입력했는데 기간(·근무일)이 blank → 가중/누적 불가라 not_entered (flag 없음)
+//  · 노출값·기간(·누적의 근무일)이 invalid인 직력이 하나라도 있으면 not_entered + invalid, 부분값 없음
+//  · 노출값을 입력했는데 기간(·근무일)이 blank → 가중/누적 불가라 not_entered (flag 없음)
 //  · 입력한 직력 0개 → not_entered, 결과가 유한값이 아니면 not_entered + invalid
+//  · 모듈 비활성/비객체 → structural_missing, shared.jobs 없음 → not_entered
 //
 // 연간 근무일(shared.jobs[].workDaysPerYear)은 저장된 값을 그대로 쓴다(어깨의 "비면 250" 대체 없음).
 // 알려진 한계: 앱이 모든 직력에 근무일 250을 기본으로 채우고(createSharedJob, BasicInfoForm 입력란은
 // 비우거나 0이어도 250으로 되돌림) 구형 무릎 직력 마이그레이션도 250을 백필하므로, 저장된 250이
 // 직접 입력인지 기본값인지 구분되지 않는다 — 근무일을 확인하지 않은 직력의 누적은 250일/년 가정값으로
 // 계산된다. "빈 근무일 → 결측"은 payload가 직접 비어 있는 경우의 방어선이다. 입력 여부 추적은 후속 범위.
-interface KneeSquattingJobTerm {
-  squatting: number;
+type KneeExposureField = 'squatting' | 'weight';
+
+interface KneeExposureJobTerm {
+  value: number;
   tenure: TenureResult;
   workDays: StrictNumeric;
 }
 
-type KneeSquattingCollection =
+type KneeExposureCollection =
   | { early: ExtractedValue<number> }
-  | { hasInvalidSquatting: boolean; terms: KneeSquattingJobTerm[] };
+  | { hasInvalidValue: boolean; terms: KneeExposureJobTerm[] };
 
-function collectKneeSquattingJobTerms(migrationResult: MigrationResult<AnalysisPatient>): KneeSquattingCollection {
+function collectKneeExposureJobTerms(
+  migrationResult: MigrationResult<AnalysisPatient>,
+  field: KneeExposureField,
+): KneeExposureCollection {
   if (!isKneeModuleActive(migrationResult)) {
     return { early: { value: null, missing: 'structural_missing', qualityFlags: [] } };
   }
@@ -423,36 +365,37 @@ function collectKneeSquattingJobTerms(migrationResult: MigrationResult<AnalysisP
     return { early: { value: null, missing: 'not_entered', qualityFlags: [] } };
   }
 
-  let hasInvalidSquatting = false;
-  const terms: KneeSquattingJobTerm[] = [];
+  let hasInvalidValue = false;
+  const terms: KneeExposureJobTerm[] = [];
   for (const job of filterAnalysisJobs(jobs)) {
-    const parsed = parseStrictNonNegative(findKneeJobExtra(migrationResult, job.id)?.squatting);
+    const parsed = parseStrictNonNegative(findKneeJobExtra(migrationResult, job.id)?.[field]);
     if (parsed.kind === 'blank') continue;
     if (parsed.kind === 'invalid') {
-      hasInvalidSquatting = true;
+      hasInvalidValue = true;
       continue;
     }
     terms.push({
-      squatting: parsed.value,
+      value: parsed.value,
       tenure: computeJobTenureYears(job),
       workDays: parseStrictNonNegative(job.workDaysPerYear),
     });
   }
-  return { hasInvalidSquatting, terms };
+  return { hasInvalidValue, terms };
 }
 
-function squattingNotEntered(invalid: boolean): ExtractedValue<number> {
+function exposureNotEntered(invalid: boolean): ExtractedValue<number> {
   return { value: null, missing: 'not_entered', qualityFlags: invalid ? ['invalid'] : [] };
 }
 
-/** Σ(쪼그려앉기 분/일 × 종사 연수) / Σ 종사 연수 — 직력 기간 가중평균. */
-export function extractKneeCaseWeightedSquattingMinutesPerDay(
+/** Σ(노출값 × 종사 연수) / Σ 종사 연수 — 직력 기간 가중평균. */
+function weightedKneeExposure(
   mr: MigrationResult<AnalysisPatient>,
+  field: KneeExposureField,
 ): ExtractedValue<number> {
-  const collected = collectKneeSquattingJobTerms(mr);
+  const collected = collectKneeExposureJobTerms(mr, field);
   if ('early' in collected) return collected.early;
 
-  let hasInvalid = collected.hasInvalidSquatting;
+  let hasInvalid = collected.hasInvalidValue;
   let hasBlank = false;
   let weightedSum = 0;
   let yearsSum = 0;
@@ -460,42 +403,55 @@ export function extractKneeCaseWeightedSquattingMinutesPerDay(
     if (term.tenure.kind === 'invalid') hasInvalid = true;
     else if (term.tenure.kind === 'blank') hasBlank = true;
     else {
-      weightedSum += term.squatting * term.tenure.years;
+      weightedSum += term.value * term.tenure.years;
       yearsSum += term.tenure.years;
     }
   }
 
-  if (hasInvalid) return squattingNotEntered(true);
-  if (hasBlank || collected.terms.length === 0) return squattingNotEntered(false);
+  if (hasInvalid) return exposureNotEntered(true);
+  if (hasBlank || collected.terms.length === 0) return exposureNotEntered(false);
   const value = weightedSum / yearsSum;
-  if (!Number.isFinite(value)) return squattingNotEntered(true);
+  if (!Number.isFinite(value)) return exposureNotEntered(true);
   return { value, missing: null, qualityFlags: [] };
 }
 
-/** Σ(쪼그려앉기 분/일 ÷ 60 × 연간 근무일 × 종사 연수) — 시간 단위 누적. */
-export function extractKneeCaseCumulativeSquattingHours(
+/** Σ(노출값 ÷ unitDivisor × 연간 근무일 × 종사 연수) — 누적. unitDivisor는 입력 단위 → 표시 단위 환산(분→시간 60, kg→톤 1000). */
+function cumulativeKneeExposure(
   mr: MigrationResult<AnalysisPatient>,
+  field: KneeExposureField,
+  unitDivisor: number,
 ): ExtractedValue<number> {
-  const collected = collectKneeSquattingJobTerms(mr);
+  const collected = collectKneeExposureJobTerms(mr, field);
   if ('early' in collected) return collected.early;
 
-  let hasInvalid = collected.hasInvalidSquatting;
+  let hasInvalid = collected.hasInvalidValue;
   let hasBlank = false;
   let total = 0;
   for (const term of collected.terms) {
     if (term.tenure.kind === 'invalid' || term.workDays.kind === 'invalid') hasInvalid = true;
     else if (term.tenure.kind === 'blank' || term.workDays.kind === 'blank') hasBlank = true;
-    else total += (term.squatting / 60) * term.workDays.value * term.tenure.years;
+    else total += (term.value / unitDivisor) * term.workDays.value * term.tenure.years;
   }
 
-  if (hasInvalid) return squattingNotEntered(true);
-  if (hasBlank || collected.terms.length === 0) return squattingNotEntered(false);
-  if (!Number.isFinite(total)) return squattingNotEntered(true);
+  if (hasInvalid) return exposureNotEntered(true);
+  if (hasBlank || collected.terms.length === 0) return exposureNotEntered(false);
+  if (!Number.isFinite(total)) return exposureNotEntered(true);
   return { value: total, missing: null, qualityFlags: [] };
 }
 
-export function extractKneeCaseSumDailyLoadKg(mr: MigrationResult<AnalysisPatient>) {
-  return extractKneeCaseSum(mr, 'weight');
+export function extractKneeCaseWeightedSquattingMinutesPerDay(mr: MigrationResult<AnalysisPatient>) {
+  return weightedKneeExposure(mr, 'squatting');
+}
+/** 분/일 ÷ 60 × 일/년 × 년 = 시간 */
+export function extractKneeCaseCumulativeSquattingHours(mr: MigrationResult<AnalysisPatient>) {
+  return cumulativeKneeExposure(mr, 'squatting', 60);
+}
+export function extractKneeCaseWeightedDailyLoadKg(mr: MigrationResult<AnalysisPatient>) {
+  return weightedKneeExposure(mr, 'weight');
+}
+/** kg/일 ÷ 1000 × 일/년 × 년 = 톤 */
+export function extractKneeCaseCumulativeLoadTon(mr: MigrationResult<AnalysisPatient>) {
+  return cumulativeKneeExposure(mr, 'weight', 1000);
 }
 
 export function extractKneeJobStairs(mr: MigrationResult<AnalysisPatient>) {

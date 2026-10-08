@@ -109,10 +109,25 @@ describe('getFullVariableCatalog', () => {
     expect(age?.predictionRole).toBe('predictor');
   });
 
-  it('카탈로그 개수(analytics-core 82개: case 49/job 19/disease 14) — 쪼그려앉기 단순합 1개 삭제 + 가중평균·누적 2개 추가', () => {
+  it('카탈로그 개수(analytics-core 83개: case 50/job 19/disease 14) — 무릎 단순합 2개 삭제 + 가중평균·누적 4개 추가', () => {
     const catalog = getFullVariableCatalog();
-    expect(catalog).toHaveLength(82);
-    expect(catalog.filter((v) => v.grain === 'case')).toHaveLength(49);
+    expect(catalog).toHaveLength(83);
+    expect(catalog.filter((v) => v.grain === 'case')).toHaveLength(50);
+  });
+
+  it('중량물 단순합(knee.case.sumDailyLoadKg)은 삭제되고 가중평균(kg/일)·누적(톤)이 case grain 예측 predictor로 등록돼 있다', () => {
+    const catalog = getFullVariableCatalog();
+    expect(catalog.find((v) => v.key === 'knee.case.sumDailyLoadKg')).toBeUndefined();
+
+    const weighted = catalog.find((v) => v.key === 'knee.case.weightedDailyLoadKg');
+    expect(weighted).toMatchObject({ grain: 'case', unit: 'kg/일', type: 'continuous', predictionRole: 'predictor' });
+    expect(weighted?.allowedAnalysisPurposes).toEqual(['association', 'prediction']);
+    expect(weighted?.dependsOn).toEqual(expect.arrayContaining(['modules.knee.jobExtras[].weight', 'shared.jobs[].workPeriodOverride']));
+    expect(weighted?.dependsOn).not.toContain('shared.jobs[].workDaysPerYear');
+
+    const cumulative = catalog.find((v) => v.key === 'knee.case.cumulativeLoadTon');
+    expect(cumulative).toMatchObject({ grain: 'case', unit: '톤', type: 'continuous', predictionRole: 'predictor' });
+    expect(cumulative?.dependsOn).toEqual(expect.arrayContaining(['modules.knee.jobExtras[].weight', 'shared.jobs[].workDaysPerYear']));
   });
 
   it('쪼그려앉기 단순합(knee.case.sumSquattingMinutesPerDay)은 삭제되고 가중평균·누적이 case grain 예측 predictor로 등록돼 있다', () => {

@@ -110,6 +110,15 @@ describe('describeStatsApiError', () => {
       expect(text).toMatch(/자동으로 바꾸지 않습니다/);
     });
 
+    it('삭제된 중량물 단순합은 가중평균·누적 대체 변수 안내를 보여준다(자동 치환 없음)', () => {
+      const removed = apiError(400, { code: 'INVALID_RECIPE', errors: [{ code: 'UNKNOWN_VARIABLE', path: 'knee.case.sumDailyLoadKg', message: 'x' }] });
+      const text = describeStatsApiError(removed);
+      expect(text).toMatch(/중량물/);
+      expect(text).toMatch(/가중평균/);
+      expect(text).toMatch(/누적 취급량/);
+      expect(text).toMatch(/자동으로 바꾸지 않습니다/);
+    });
+
     it('getUnknownVariableKeys는 UNKNOWN_VARIABLE 항목의 키만 뽑는다', () => {
       const err = apiError(400, {
         code: 'INVALID_RECIPE',

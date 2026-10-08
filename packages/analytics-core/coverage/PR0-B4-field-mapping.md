@@ -378,7 +378,8 @@ temporal 4개는 병합 결과(`temporalSequence ?? temporalRelation`) 기준 **
 |---|---|---|---|
 | `knee.case.weightedSquattingMinutesPerDay` | Σ(`jobExtras[].squatting` × 종사 연수) / Σ 종사 연수 (직력 기간 가중평균, 2026-10-08 단순합에서 교체) | 분/일 | 예 |
 | `knee.case.cumulativeSquattingHours` | Σ_job (`jobExtras[].squatting` ÷ 60 × `workDaysPerYear` × 종사 연수) | 시간 | 예 |
-| `knee.case.sumDailyLoadKg` | Σ_job `jobExtras[].weight` (이미 "일일 누적 kg" 단일 필드라 곱셈 없음) | kg/일 | 예 |
+| `knee.case.weightedDailyLoadKg` | Σ(`jobExtras[].weight` × 종사 연수) / Σ 종사 연수 (직력 기간 가중평균, 2026-10-09 단순합에서 교체) | kg/일 | 예 |
+| `knee.case.cumulativeLoadTon` | Σ_job (`jobExtras[].weight` ÷ 1000 × `workDaysPerYear` × 종사 연수) | 톤 | 예 |
 
 - 단위 주의: 쪼그려앉기는 원본 입력 단위 그대로 **분/일**(어깨·경추 합계는 시간).
 - 합산 대상은 `shared.jobs`의 모든 객체다. 직종명·시작일·종료일·기간 override가 전부 빈 기본 행도 `jobExtras`에 연결된 노출값이 있으면 합산하므로(어깨 선례), job grain(`enumerateJobEntities`는 기본 행 제외)의 값 합과 다를 수 있다.

@@ -11,7 +11,8 @@ import {
   extractKneeJobStairs,
   extractKneeCaseWeightedSquattingMinutesPerDay,
   extractKneeCaseCumulativeSquattingHours,
-  extractKneeCaseSumDailyLoadKg,
+  extractKneeCaseWeightedDailyLoadKg,
+  extractKneeCaseCumulativeLoadTon,
 } from '../../../modules/knee/extractors';
 import { deterministicMigrate } from '../../../migration/deterministicMigrate';
 import type { KneeCalculationJob } from '../../../modules/knee/derived';
@@ -425,216 +426,10 @@ describe('extractKneeJobWeight/Stairs — job grain(jobExtras 원시값 투영)'
   });
 });
 
-// 사용자 요청(2026-10-03) — 무릎 case grain 합계(직업력 단순합). 어깨 extractShoulderCaseSum* 테스트와
-// 같은 정책이다. 쪼그려앉기 분/일은 2026-10-08에 단순합에서 기간 가중평균·누적으로 교체돼(파일 끝 describe)
-// 중량물만 남았다. `.each` 형태는 다른 합계가 다시 생길 때를 위해 유지한다.
-describe.each([
-  { name: 'extractKneeCaseSumDailyLoadKg', fn: extractKneeCaseSumDailyLoadKg, field: 'weight', other: 'squatting' },
-])('$name — case grain 합계', ({ fn, field, other }) => {
-  const twoJobs = [
-    { id: 'job-1', jobName: '용접공', startDate: '2015-01-01', endDate: '2020-01-01' },
-    { id: 'job-2', jobName: '배관공', startDate: '2020-01-01', endDate: '2022-01-01' },
-  ];
-  const sumOf = (jobExtras: unknown[], jobs: unknown[] = twoJobs) => fn(migrate(jobExtrasCase({ jobs, jobExtras })));
-  const NOT_ENTERED = { value: null, missing: 'not_entered', qualityFlags: [] };
-  const INVALID = { value: null, missing: 'not_entered', qualityFlags: ['invalid'] };
-
-  it('knee 모듈이 비활성이면 structural_missing', () => {
-    expect(fn(migrate(jobExtrasCase({ jobs: twoJobs, activeModules: [] })))).toEqual({
-      value: null,
-      missing: 'structural_missing',
-      qualityFlags: [],
-    });
-  });
-
-  it('activeModules엔 있는데 data.modules.knee가 plain object가 아니면 structural_missing', () => {
-    const payload = { data: { shared: { jobs: twoJobs }, modules: {}, activeModules: ['knee'] } };
-    expect(fn(migrate(payload))).toEqual({ value: null, missing: 'structural_missing', qualityFlags: [] });
-  });
-
-  it('shared.jobs가 비어 있으면 not_entered', () => {
-    expect(sumOf([{ sharedJobId: 'job-1', [field]: '10' }], [])).toEqual(NOT_ENTERED);
-  });
-
-  it('2개 직업의 값을 합산한다(문자열·number 혼합)', () => {
-    expect(sumOf([{ sharedJobId: 'job-1', [field]: '30' }, { sharedJobId: 'job-2', [field]: 45 }])).toEqual({
-      value: 75,
-      missing: null,
-      qualityFlags: [],
-    });
-  });
-
-  it('다른 필드(other)의 값은 합산에 섞이지 않는다', () => {
-    expect(
-      sumOf([
-        { sharedJobId: 'job-1', [field]: '30', [other]: '999' },
-        { sharedJobId: 'job-2', [field]: '10', [other]: '999' },
-      ]),
-    ).toEqual({ value: 40, missing: null, qualityFlags: [] });
-  });
-
-  it('전 직업 blank(미입력·빈 문자열·공백·extras 없음)이면 0이 아니라 not_entered', () => {
-    expect(sumOf([])).toEqual(NOT_ENTERED);
-    expect(sumOf([{ sharedJobId: 'job-1', [field]: '' }, { sharedJobId: 'job-2', [field]: '   ' }])).toEqual(NOT_ENTERED);
-    expect(sumOf([{ sharedJobId: 'job-1' }, { sharedJobId: 'job-2', [field]: null }])).toEqual(NOT_ENTERED);
-  });
-
-  it('일부 직업만 blank면 그 직업은 건너뛰고 나머지의 합', () => {
-    expect(sumOf([{ sharedJobId: 'job-1', [field]: '' }, { sharedJobId: 'job-2', [field]: '25' }])).toEqual({
-      value: 25,
-      missing: null,
-      qualityFlags: [],
-    });
-  });
-
-  // 입력한 0은 blank가 아니라 정상 0이다(마이그레이션 이후 jobExtras 직접 입력 기준 — 레거시 변환은 아래 별도 테스트).
-  it('0·"0"은 blank가 아닌 정상 0이다 — 전 직업이 0이면 value 0', () => {
-    expect(sumOf([{ sharedJobId: 'job-1', [field]: 0 }, { sharedJobId: 'job-2', [field]: '0' }])).toEqual({
-      value: 0,
-      missing: null,
-      qualityFlags: [],
-    });
-    expect(sumOf([{ sharedJobId: 'job-1', [field]: '0' }, { sharedJobId: 'job-2', [field]: '' }])).toEqual({
-      value: 0,
-      missing: null,
-      qualityFlags: [],
-    });
-  });
-
-  it.each([
-    ['숫자 접두부 문자열', '45kg'],
-    ['문자열', 'abc'],
-    ['음수', -1],
-    ['음수 문자열', '-5'],
-    ['배열로 감싼 유효 숫자', [45]],
-    ['빈 배열', []],
-    ['[null]', [null]],
-    ['객체', {}],
-    ['boolean', true],
-  ])('손상값(%s)이 하나라도 있으면 정상 직업이 섞여 있어도 부분합 없이 not_entered + invalid', (_label, bad) => {
-    expect(sumOf([{ sharedJobId: 'job-1', [field]: '30' }, { sharedJobId: 'job-2', [field]: bad }])).toEqual(INVALID);
-    expect(sumOf([{ sharedJobId: 'job-1', [field]: bad }])).toEqual(INVALID);
-  });
-
-  it('손상값과 blank가 섞여 있어도 invalid가 blank 판정(전 직업 blank → not_entered)보다 먼저다', () => {
-    expect(sumOf([{ sharedJobId: 'job-1', [field]: '' }, { sharedJobId: 'job-2', [field]: 'abc' }])).toEqual(INVALID);
-  });
-
-  it('합산 overflow(비유한 합)는 not_entered + invalid', () => {
-    expect(sumOf([{ sharedJobId: 'job-1', [field]: '1e308' }, { sharedJobId: 'job-2', [field]: '1e308' }])).toEqual(INVALID);
-  });
-
-  it('shared.jobs에 없는 orphan extras는 합산에서 제외한다', () => {
-    expect(sumOf([{ sharedJobId: 'job-1', [field]: '30' }, { sharedJobId: 'deleted-job', [field]: '500' }])).toEqual({
-      value: 30,
-      missing: null,
-      qualityFlags: [],
-    });
-    // orphan에만 값이 있으면 합산 대상이 없으므로 not_entered
-    expect(sumOf([{ sharedJobId: 'deleted-job', [field]: '500' }])).toEqual(NOT_ENTERED);
-  });
-
-  it('orphan extras의 손상값은 합산 대상이 아니므로 invalid로 번지지 않는다', () => {
-    expect(sumOf([{ sharedJobId: 'job-1', [field]: '30' }, { sharedJobId: 'deleted-job', [field]: 'abc' }])).toEqual({
-      value: 30,
-      missing: null,
-      qualityFlags: [],
-    });
-  });
-
-  it('extras 배열 순서를 바꿔도 ID 연결 결과는 같다', () => {
-    const extras = [
-      { sharedJobId: 'job-1', [field]: '30' },
-      { sharedJobId: 'job-2', [field]: '45' },
-    ];
-    expect(sumOf(extras)).toEqual(sumOf([...extras].reverse()));
-  });
-
-  it('plain object가 아닌 jobs·extras 항목은 무시한다', () => {
-    expect(sumOf([null, 'x', { sharedJobId: 'job-1', [field]: '30' }], [null, 7, ...twoJobs])).toEqual({
-      value: 30,
-      missing: null,
-      qualityFlags: [],
-    });
-  });
-
-  // 경계 명시: 직종·시작·종료·override가 전부 빈 기본(placeholder) 행은 job grain에서는 엔터티가 아니지만
-  // (enumerateJobEntities가 제외), 합계는 연결된 노출값이 있으면 포함한다(어깨 합계와 같은 선례).
-  it('기본(placeholder) 직업 행에 연결된 노출값도 합산한다 — 같은 케이스에서 job grain은 0행', () => {
-    const placeholderCase = jobExtrasCase({
-      jobs: [{ id: 'job-1' }],
-      jobExtras: [{ sharedJobId: 'job-1', [field]: '40' }],
-    });
-    expect(fn(migrate(placeholderCase))).toEqual({ value: 40, missing: null, qualityFlags: [] });
-    expect(extractKneeJobWeight(migrate(placeholderCase))).toEqual([]);
-    expect(extractKneeJobSquatting(migrate(placeholderCase))).toEqual([]);
-  });
-
-  it('일반 케이스(기본 행 없음)에서는 job grain 값의 합과 일치한다', () => {
-    const generalCase = jobExtrasCase({
-      jobs: twoJobs,
-      jobExtras: [{ sharedJobId: 'job-1', [field]: '30' }, { sharedJobId: 'job-2', [field]: '45' }],
-    });
-    const jobGrain = extractKneeJobWeight(migrate(generalCase));
-    const jobGrainSum = jobGrain.reduce((acc, row) => acc + (row.value ?? 0), 0);
-    expect(fn(migrate(generalCase))).toEqual({ value: jobGrainSum, missing: null, qualityFlags: [] });
-  });
-
-  // 추출기는 레거시 modules.knee.jobs[]를 직접 읽지 않는다 — 원본에 shared.jobs가 없을 때
-  // deterministicMigrate가 변환한 결과만 반영된다(deterministicMigrate.ts 4단계).
-  it('레거시: 원본에 shared.jobs가 이미 있으면 modules.knee.jobs[]는 무시한다', () => {
-    const payload = {
-      data: {
-        shared: { jobs: [{ id: 'job-1', jobName: '용접공' }] },
-        modules: {
-          knee: {
-            jobExtras: [{ sharedJobId: 'job-1', [field]: '10' }],
-            jobs: [{ id: 'legacy-1', [field]: '999' }],
-          },
-        },
-        activeModules: ['knee'],
-      },
-    };
-    expect(fn(migrate(payload))).toEqual({ value: 10, missing: null, qualityFlags: [] });
-  });
-
-  it('레거시: shared.jobs가 없으면 modules.knee.jobs[]가 shared.jobs+jobExtras로 변환되어 합산된다', () => {
-    const payload = {
-      data: {
-        shared: {},
-        modules: {
-          knee: {
-            jobs: [
-              { id: 'legacy-1', jobName: '용접공', [field]: '10' },
-              { id: 'legacy-2', jobName: '배관공', [field]: '25' },
-            ],
-          },
-        },
-        activeModules: ['knee'],
-      },
-    };
-    expect(fn(migrate(payload))).toEqual({ value: 35, missing: null, qualityFlags: [] });
-  });
-
-  // 현재 동작 기록(변경 아님): deterministicMigrate가 `weight || ''`·`squatting || ''`로 변환하므로
-  // 레거시 숫자 0은 blank가 되고, 문자열 '0'은 유지된다. 마이그레이션 수정은 기존 변수에도 영향을
-  // 주므로 이번 범위가 아니다.
-  it('레거시 경계 기록: 숫자 0은 변환 시 blank가 되고 문자열 "0"은 정상 0으로 남는다', () => {
-    const legacyWith = (value: unknown) => ({
-      data: {
-        shared: {},
-        modules: { knee: { jobs: [{ id: 'legacy-1', jobName: '용접공', [field]: value }] } },
-        activeModules: ['knee'],
-      },
-    });
-    expect(fn(migrate(legacyWith(0)))).toEqual(NOT_ENTERED);
-    expect(fn(migrate(legacyWith('0')))).toEqual({ value: 0, missing: null, qualityFlags: [] });
-  });
-});
-
-// 사용자 요청(2026-10-08) — 쪼그려앉기 case 변수: 직력 기간 가중평균(분/일) · 누적(시간).
+// 사용자 요청(2026-10-08·09) — 쪼그려앉기(분/일)·중량물(kg/일) case 변수: 직력 기간 가중평균 · 누적(시간/톤).
+// 구 단순합(sumSquattingMinutesPerDay·sumDailyLoadKg)은 삭제됐다.
 // 기간은 workPeriodOverride("N년")로 정확한 연수를 만든다(날짜 기반 연수는 365.25 환산이라 소수).
-describe('쪼그려앉기 case 변수 — 가중평균/누적', () => {
+describe('무릎 case 노출 변수 — 가중평균/누적', () => {
   const job = (id: string, extra: Record<string, unknown> = {}) => ({
     id,
     jobName: id,
@@ -649,9 +444,11 @@ describe('쪼그려앉기 case 변수 — 가중평균/누적', () => {
   const ok = (value: number) => ({ value, missing: null, qualityFlags: [] });
 
   describe.each([
-    { name: 'extractKneeCaseWeightedSquattingMinutesPerDay', fn: extractKneeCaseWeightedSquattingMinutesPerDay },
-    { name: 'extractKneeCaseCumulativeSquattingHours', fn: extractKneeCaseCumulativeSquattingHours },
-  ])('$name — 공통 결측·대상 직력 규칙', ({ fn }) => {
+    { name: 'extractKneeCaseWeightedSquattingMinutesPerDay', fn: extractKneeCaseWeightedSquattingMinutesPerDay, field: 'squatting' },
+    { name: 'extractKneeCaseCumulativeSquattingHours', fn: extractKneeCaseCumulativeSquattingHours, field: 'squatting' },
+    { name: 'extractKneeCaseWeightedDailyLoadKg', fn: extractKneeCaseWeightedDailyLoadKg, field: 'weight' },
+    { name: 'extractKneeCaseCumulativeLoadTon', fn: extractKneeCaseCumulativeLoadTon, field: 'weight' },
+  ])('$name — 공통 결측·대상 직력 규칙', ({ fn, field }) => {
     const run = (jobExtras: unknown[], jobs: unknown[] = twoJobs) => fn(migrate(jobExtrasCase({ jobs, jobExtras })));
 
     it('knee 모듈 비활성이면 structural_missing, shared.jobs가 비면 not_entered', () => {
@@ -660,12 +457,12 @@ describe('쪼그려앉기 case 변수 — 가중평균/누적', () => {
         missing: 'structural_missing',
         qualityFlags: [],
       });
-      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], [])).toEqual(NOT_ENTERED);
+      expect(run([{ sharedJobId: 'job-1', [field]: '60' }], [])).toEqual(NOT_ENTERED);
     });
 
-    it('전 직업 쪼그려앉기 blank면 not_entered(0 아님)', () => {
+    it('전 직업 노출값 blank면 not_entered(0 아님)', () => {
       expect(run([])).toEqual(NOT_ENTERED);
-      expect(run([{ sharedJobId: 'job-1', squatting: '' }, { sharedJobId: 'job-2', squatting: '  ' }])).toEqual(NOT_ENTERED);
+      expect(run([{ sharedJobId: 'job-1', [field]: '' }, { sharedJobId: 'job-2', [field]: '  ' }])).toEqual(NOT_ENTERED);
     });
 
     it.each([
@@ -673,32 +470,32 @@ describe('쪼그려앉기 case 변수 — 가중평균/누적', () => {
       ['음수', -1],
       ['배열', [60]],
       ['boolean', true],
-    ])('쪼그려앉기 손상값(%s)이 하나라도 있으면 정상 직력이 섞여 있어도 부분값 없이 not_entered + invalid', (_l, bad) => {
-      expect(run([{ sharedJobId: 'job-1', squatting: '60' }, { sharedJobId: 'job-2', squatting: bad }])).toEqual(INVALID);
+    ])('노출값 손상값(%s)이 하나라도 있으면 정상 직력이 섞여 있어도 부분값 없이 not_entered + invalid', (_l, bad) => {
+      expect(run([{ sharedJobId: 'job-1', [field]: '60' }, { sharedJobId: 'job-2', [field]: bad }])).toEqual(INVALID);
     });
 
-    it('쪼그려앉기를 입력한 직력의 기간이 blank면 가중/누적 불가라 not_entered(flag 없음)', () => {
+    it('노출값를 입력한 직력의 기간이 blank면 가중/누적 불가라 not_entered(flag 없음)', () => {
       const jobs = [job('job-1', { workPeriodOverride: '' })];
-      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], jobs)).toEqual(NOT_ENTERED);
+      expect(run([{ sharedJobId: 'job-1', [field]: '60' }], jobs)).toEqual(NOT_ENTERED);
     });
 
     it('기간이 invalid(종료일이 시작일보다 빠름·형식 오류 override)면 not_entered + invalid', () => {
       const reversed = [job('job-1', { workPeriodOverride: '', startDate: '2020-01-01', endDate: '2010-01-01' })];
-      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], reversed)).toEqual(INVALID);
+      expect(run([{ sharedJobId: 'job-1', [field]: '60' }], reversed)).toEqual(INVALID);
       const badOverride = [job('job-1', { workPeriodOverride: '-3년' })];
-      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], badOverride)).toEqual(INVALID);
+      expect(run([{ sharedJobId: 'job-1', [field]: '60' }], badOverride)).toEqual(INVALID);
     });
 
-    it('쪼그려앉기 blank인 직력은 기간이 invalid여도 건너뛴다(대상이 아님)', () => {
+    it('노출값 blank인 직력은 기간이 invalid여도 건너뛴다(대상이 아님)', () => {
       const jobs = [job('job-1', { workPeriodOverride: '-3년' }), job('job-2')];
-      const r = run([{ sharedJobId: 'job-2', squatting: '60' }], jobs);
+      const r = run([{ sharedJobId: 'job-2', [field]: '60' }], jobs);
       expect(r.missing).toBeNull();
       expect(r.qualityFlags).toEqual([]);
     });
 
     it('기간은 날짜(시작·종료일)로도 계산한다', () => {
       const dated = [job('job-1', { workPeriodOverride: '', startDate: '2010-01-01', endDate: '2020-01-01' })];
-      const r = run([{ sharedJobId: 'job-1', squatting: '60' }], dated);
+      const r = run([{ sharedJobId: 'job-1', [field]: '60' }], dated);
       expect(r.missing).toBeNull();
       expect(r.value).toBeGreaterThan(0);
     });
@@ -706,7 +503,7 @@ describe('쪼그려앉기 case 변수 — 가중평균/누적', () => {
     it('신체부담평가 미포함 직력은 분자·분모에서 모두 빠지고, 전부 미포함이면 not_applicable', () => {
       const excludedFirst = [job('job-1', { excludeFromAnalysis: true }), job('job-2', { workPeriodOverride: '8년' })];
       const onlyJob2 = [job('job-2', { workPeriodOverride: '8년' })];
-      const extras = [{ sharedJobId: 'job-1', squatting: '600' }, { sharedJobId: 'job-2', squatting: '120' }];
+      const extras = [{ sharedJobId: 'job-1', [field]: '600' }, { sharedJobId: 'job-2', [field]: '120' }];
       expect(run(extras, excludedFirst)).toEqual(run(extras, onlyJob2));
 
       const allExcluded = twoJobs.map((j) => ({ ...j, excludeFromAnalysis: true }));
@@ -715,20 +512,77 @@ describe('쪼그려앉기 case 변수 — 가중평균/누적', () => {
 
     it('미포함 직력의 손상값은 계산에 영향을 주지 않는다', () => {
       const jobs = [job('job-1', { excludeFromAnalysis: true, workPeriodOverride: '-3년' }), job('job-2')];
-      const r = run([{ sharedJobId: 'job-1', squatting: 'abc' }, { sharedJobId: 'job-2', squatting: '60' }], jobs);
+      const r = run([{ sharedJobId: 'job-1', [field]: 'abc' }, { sharedJobId: 'job-2', [field]: '60' }], jobs);
       expect(r.missing).toBeNull();
     });
 
     it('shared.jobs에 없는 orphan extras는 대상이 아니다', () => {
-      expect(run([{ sharedJobId: 'deleted', squatting: '60' }])).toEqual(NOT_ENTERED);
+      expect(run([{ sharedJobId: 'deleted', [field]: '60' }])).toEqual(NOT_ENTERED);
     });
 
-    it('직종·기간이 전부 빈 기본(placeholder) 행에 쪼그려앉기만 있으면 가중 불가라 not_entered', () => {
-      expect(run([{ sharedJobId: 'job-1', squatting: '60' }], [{ id: 'job-1' }])).toEqual(NOT_ENTERED);
+    it('직종·기간이 전부 빈 기본(placeholder) 행에 노출값만 있으면 가중 불가라 not_entered', () => {
+      expect(run([{ sharedJobId: 'job-1', [field]: '60' }], [{ id: 'job-1' }])).toEqual(NOT_ENTERED);
     });
 
     it('합산 overflow는 not_entered + invalid', () => {
-      expect(run([{ sharedJobId: 'job-1', squatting: '1e308' }, { sharedJobId: 'job-2', squatting: '1e308' }])).toEqual(INVALID);
+      expect(run([{ sharedJobId: 'job-1', [field]: '1e308' }, { sharedJobId: 'job-2', [field]: '1e308' }])).toEqual(INVALID);
+    });
+
+    it('extras 배열 순서를 바꿔도 ID 연결 결과는 같다', () => {
+      const extras = [{ sharedJobId: 'job-1', [field]: '30' }, { sharedJobId: 'job-2', [field]: '45' }];
+      expect(run(extras)).toEqual(run([...extras].reverse()));
+    });
+
+    it('plain object가 아닌 jobs·extras 항목은 무시한다', () => {
+      const real = run([{ sharedJobId: 'job-1', [field]: '30' }], [job('job-1')]);
+      expect(real.missing).toBeNull();
+      expect(run([null, 'x', { sharedJobId: 'job-1', [field]: '30' }], [null, 7, job('job-1')])).toEqual(real);
+    });
+
+    it('orphan extras의 손상값은 대상이 아니므로 invalid로 번지지 않는다', () => {
+      const r = run([{ sharedJobId: 'job-1', [field]: '30' }, { sharedJobId: 'deleted-job', [field]: 'abc' }], [job('job-1')]);
+      expect(r.missing).toBeNull();
+      expect(r.qualityFlags).toEqual([]);
+    });
+
+    // 추출기는 레거시 modules.knee.jobs[]를 직접 읽지 않는다 — 원본에 shared.jobs가 없을 때
+    // deterministicMigrate가 변환한 결과만 반영된다.
+    it('레거시: 원본에 shared.jobs가 이미 있으면 modules.knee.jobs[]는 무시한다', () => {
+      const payload = {
+        data: {
+          shared: { jobs: [job('job-1')] },
+          modules: { knee: { jobExtras: [{ sharedJobId: 'job-1', [field]: '10' }], jobs: [{ id: 'legacy-1', [field]: '999' }] } },
+          activeModules: ['knee'],
+        },
+      };
+      expect(fn(migrate(payload))).toEqual(run([{ sharedJobId: 'job-1', [field]: '10' }], [job('job-1')]));
+    });
+
+    it('레거시: shared.jobs가 없으면 modules.knee.jobs[]가 변환되어 집계된다', () => {
+      const payload = {
+        data: {
+          shared: {},
+          modules: { knee: { jobs: [{ id: 'legacy-1', jobName: '용접공', workPeriodOverride: '2년', [field]: '10' }] } },
+          activeModules: ['knee'],
+        },
+      };
+      const r = fn(migrate(payload));
+      expect(r.missing).toBeNull();
+      expect(r.value).toBeGreaterThan(0);
+    });
+
+    // 현재 동작 기록(변경 아님): deterministicMigrate가 `weight || ''`·`squatting || ''`로 변환하므로
+    // 레거시 숫자 0은 blank가 되고, 문자열 '0'은 유지된다. 마이그레이션 수정은 범위 밖.
+    it('레거시 경계 기록: 숫자 0은 변환 시 blank가 되고 문자열 "0"은 정상 0으로 남는다', () => {
+      const legacyWith = (value: unknown) => ({
+        data: {
+          shared: {},
+          modules: { knee: { jobs: [{ id: 'legacy-1', jobName: '용접공', workPeriodOverride: '2년', [field]: value }] } },
+          activeModules: ['knee'],
+        },
+      });
+      expect(fn(migrate(legacyWith(0)))).toEqual(NOT_ENTERED);
+      expect(fn(migrate(legacyWith('0')))).toEqual(ok(0));
     });
   });
 
@@ -808,6 +662,42 @@ describe('쪼그려앉기 case 변수 — 가중평균/누적', () => {
       };
       expect(extractKneeCaseCumulativeSquattingHours(migrate(legacy))).toEqual(ok(500));
       expect(extractKneeCaseWeightedSquattingMinutesPerDay(migrate(legacy))).toEqual(ok(60));
+    });
+  });
+  describe('중량물 — 가중평균/누적(톤)', () => {
+    const loadJobs = [job('job-1'), job('job-2', { workPeriodOverride: '8년' })];
+    const runWeighted = (jobExtras: unknown[], jobs: unknown[] = loadJobs) =>
+      extractKneeCaseWeightedDailyLoadKg(migrate(jobExtrasCase({ jobs, jobExtras })));
+    const runCumulative = (jobExtras: unknown[], jobs: unknown[] = loadJobs) =>
+      extractKneeCaseCumulativeLoadTon(migrate(jobExtrasCase({ jobs, jobExtras })));
+    const extras = [{ sharedJobId: 'job-1', weight: '3000' }, { sharedJobId: 'job-2', weight: 2000 }];
+
+    it('가중평균 — (3000×2 + 2000×8) / 10 = 2200 kg/일 (단순합 5000이 아님)', () => {
+      expect(runWeighted(extras)).toEqual(ok(2200));
+    });
+
+    it('누적 — 3000/1000×250×2 + 2000/1000×250×8 = 1500 + 4000 = 5500 톤', () => {
+      expect(runCumulative(extras)).toEqual(ok(5500));
+    });
+
+    it('직력이 하나면 가중평균은 그 값, 누적은 kg/일÷1000×근무일×연수', () => {
+      expect(runWeighted([{ sharedJobId: 'job-1', weight: '3000' }])).toEqual(ok(3000));
+      expect(runCumulative([{ sharedJobId: 'job-1', weight: '3000' }])).toEqual(ok(1500));
+    });
+
+    it('쪼그려앉기 입력은 중량물 집계에 섞이지 않는다', () => {
+      const mixed = [
+        { sharedJobId: 'job-1', weight: '3000', squatting: '999' },
+        { sharedJobId: 'job-2', weight: '2000', squatting: '999' },
+      ];
+      expect(runWeighted(mixed)).toEqual(ok(2200));
+      expect(runCumulative(mixed)).toEqual(ok(5500));
+    });
+
+    it('중량물이 blank인 직력은 근무일·기간이 비어 있어도 건너뛴다', () => {
+      const jobs = [job('job-1', { workDaysPerYear: '', workPeriodOverride: '' }), job('job-2', { workPeriodOverride: '8년' })];
+      expect(runWeighted([{ sharedJobId: 'job-2', weight: '2000' }], jobs)).toEqual(ok(2000));
+      expect(runCumulative([{ sharedJobId: 'job-2', weight: '2000' }], jobs)).toEqual(ok(4000));
     });
   });
 });

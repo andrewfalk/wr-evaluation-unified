@@ -18,7 +18,8 @@ import {
   extractKneeJobJumpDown,
   extractKneeCaseWeightedSquattingMinutesPerDay,
   extractKneeCaseCumulativeSquattingHours,
-  extractKneeCaseSumDailyLoadKg,
+  extractKneeCaseWeightedDailyLoadKg,
+  extractKneeCaseCumulativeLoadTon,
 } from './extractors';
 import { isKneeAssessmentComplete } from './derived';
 
@@ -39,7 +40,8 @@ registerAnalyticsModule({
     'knee.job.jumpDown': extractKneeJobJumpDown,
     'knee.case.weightedSquattingMinutesPerDay': extractKneeCaseWeightedSquattingMinutesPerDay,
     'knee.case.cumulativeSquattingHours': extractKneeCaseCumulativeSquattingHours,
-    'knee.case.sumDailyLoadKg': extractKneeCaseSumDailyLoadKg,
+    'knee.case.weightedDailyLoadKg': extractKneeCaseWeightedDailyLoadKg,
+    'knee.case.cumulativeLoadTon': extractKneeCaseCumulativeLoadTon,
   },
   isComplete: isKneeAssessmentComplete,
 });
