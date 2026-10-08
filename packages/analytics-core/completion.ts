@@ -15,6 +15,7 @@ import './modules/cervical/index';
 import './modules/spine/index';
 
 import { getAnalyticsModule } from './analyticsRegistry';
+import { neutralizeExclusionForLegacy } from './jobScope';
 
 /** isComplete가 실제로 요구하는 최소 payload 형태 — CompletionContext와 달리 module은
  * 6개 모듈 전체의 맵이다(각 모듈 호출 시 그 모듈 항목만 골라 CompletionContext로 좁힌다). */
@@ -37,7 +38,10 @@ function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
 }
 
-export function verifyModuleCompletion(patientData: VerifiablePatientData, moduleId: string): ModuleCompletionResult {
+export function verifyModuleCompletion(rawPatientData: VerifiablePatientData, moduleId: string): ModuleCompletionResult {
+  // 서버는 저장 요청 payload를 migratePatient/deterministicMigrate 없이 그대로 넘기므로, 레거시 혼재
+  // 환자의 "신체부담평가 미포함" 플래그 무력화를 이 입력 경계에서도 적용한다(멱등).
+  const patientData = neutralizeExclusionForLegacy(rawPatientData);
   const registration = getAnalyticsModule(moduleId);
   if (!registration) {
     return { moduleId, complete: false, errored: true };
@@ -78,7 +82,8 @@ export interface VerifyAllModulesResult {
  * patientData.activeModules 전체가 완료 상태인지 판정한다. 빈 activeModules는
  * isPatientComplete()와 동일하게 미완료(allComplete=false)로 취급한다.
  */
-export function verifyAllModulesComplete(patientData: VerifiablePatientData): VerifyAllModulesResult {
+export function verifyAllModulesComplete(rawPatientData: VerifiablePatientData): VerifyAllModulesResult {
+  const patientData = neutralizeExclusionForLegacy(rawPatientData);
   const moduleIds = Array.isArray(patientData.activeModules) ? patientData.activeModules : [];
   if (moduleIds.length === 0) {
     return { allComplete: false, results: [], errorModuleIds: [], failedModuleIds: [] };
@@ -96,4 +101,6 @@ export function verifyAllModulesComplete(patientData: VerifiablePatientData): Ve
 // 바뀌면(버그 수정, 완료 기준 변경 등) 과거에 "검증됨"으로 찍힌 행이 실제로는 새 기준으로
 // 재검증하면 다른 결과가 나올 수 있다. 그 사실을 추적할 수 있도록 판정 시점의 로직 버전을
 // 함께 기록한다 — 로직을 바꿀 때마다 이 값을 올린다.
-export const COMPLETION_ENGINE_VERSION = 'v1';
+// v2: 직력별 "신체부담평가 미포함"(excludeFromAnalysis) 반영 — 전부 미포함이면 모듈 평가 대상 없음으로 완료,
+// 일부 미포함이면 포함 직력만 판정. 레거시 혼재 환자는 입력 경계에서 플래그를 무력화(jobScope.ts).
+export const COMPLETION_ENGINE_VERSION = 'v2';

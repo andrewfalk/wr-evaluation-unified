@@ -3,6 +3,7 @@
 
 import { convertTimeToSeconds, vibrationThresholds, WBV_FORMULA_V1 } from './constants';
 import { getEffectiveWorkPeriod, type JobLike } from '../../workPeriod';
+import { filterAnalysisJobs, hasNoEvaluableJobs, scopeItemsToIncludedJobs } from '../../jobScope';
 import type { SpineJobLike, SpineModuleShape } from './types';
 
 const REFERENCE_HOURS = 8;
@@ -135,6 +136,8 @@ export interface VibrationCalcResult {
   limitZ: number;
   gender: string;
   formulaVersion: string;
+  /** 직력이 있으나 전부 "신체부담평가 미포함" — 소비처는 평가 결론을 만들지 않는다. */
+  noEvaluableJobs: boolean;
 }
 
 // 'present'가 아닐 때(unknown/none) 반환할 safe-default. 모든 consumer가 destructure하는
@@ -163,6 +166,7 @@ function vibrationNoExposureCalc(status: string, gender: string): VibrationCalcR
     limitZ: vibrationThresholds.limitZ,
     gender,
     formulaVersion: WBV_FORMULA_V1,
+    noEvaluableJobs: false,
   };
 }
 
@@ -179,7 +183,11 @@ export function computeVibrationCalc(patientData: {
   const status = resolveVibrationStatus(mod);
   if (status !== 'present') return vibrationNoExposureCalc(status, gender);
 
-  const allIntervals = (mod.vibrationIntervals as SpineVibrationInterval[]) || [];
+  // 맨 앞에서 "신체부담평가 미포함" 직력에 귀속된 구간을 뺀 한 목록을 만들고, 검증·유효 구간·그룹핑·
+  // 최대값·반환 intervals 모두 그 목록만 쓴다(미포함 직력의 잘못된 구간이 메시지·통계 invalid로 남지
+  // 않게). 귀속은 전체 jobs 기준이다(jobScope.ts). 직력이 없으면 원본 구간 그대로.
+  const rawIntervals = (mod.vibrationIntervals as SpineVibrationInterval[]) || [];
+  const allIntervals = jobs.length > 0 ? scopeItemsToIncludedJobs(rawIntervals, jobs, { orphan: 'firstJob' }) : rawIntervals;
 
   const invalidIntervals: Array<{ id?: string | number; name?: string; reason: string }> = [];
   const validIntervals: SpineVibrationInterval[] = [];
@@ -207,7 +215,7 @@ export function computeVibrationCalc(patientData: {
   let amaxMinMax = 0;
   let amaxMaxMax = 0;
 
-  for (const job of jobs) {
+  for (const job of filterAnalysisJobs(jobs)) {
     const jobIntervals = groups.get(job.id || '') || [];
     const periodYears = getEffectiveWorkPeriod(job as JobLike);
     // 원본은 job.workDaysPerYear를 Number()로 강제변환하지 않는다.
@@ -269,6 +277,7 @@ export function computeVibrationCalc(patientData: {
     limitZ: vibrationThresholds.limitZ,
     gender,
     formulaVersion: WBV_FORMULA_V1,
+    noEvaluableJobs: hasNoEvaluableJobs(jobs),
   };
 }
 
@@ -299,11 +308,14 @@ export function isVibrationComplete(patientData: { shared?: { jobs?: SpineJobLik
   if (status === 'unknown') return false;
   if (status === 'none') return true;
 
-  const intervals = (mod.vibrationIntervals as SpineVibrationInterval[]) || [];
+  const rawIntervals = (mod.vibrationIntervals as SpineVibrationInterval[]) || [];
+  const allJobs = shared.jobs || [];
+  // 계산(computeVibrationCalc)과 같은 귀속·제외 규칙으로 판정한다.
+  const intervals = allJobs.length > 0 ? scopeItemsToIncludedJobs(rawIntervals, allJobs, { orphan: 'firstJob' }) : rawIntervals;
   const validCount = intervals.filter(isIntervalValid).length;
   const hasInvalid = intervals.some((iv) => !isIntervalValid(iv));
   if (validCount < 1 || hasInvalid) return false;
 
-  const hasCareer = (shared.jobs || []).some((j) => getEffectiveWorkPeriod(j as JobLike) > 0);
+  const hasCareer = filterAnalysisJobs(allJobs).some((j) => getEffectiveWorkPeriod(j as JobLike) > 0);
   return hasCareer;
 }

@@ -4,7 +4,7 @@ import { AUX_LABELS } from '../../modules/knee/utils/data';
 import { buildSpineSectionText } from '../../modules/spine/utils/sectionText';
 import { buildAssessmentBlocks, formatGroupedAssessment } from './assessmentGroups';
 import { calculateAge, calculateBMI } from './common';
-import { getEffectiveWorkPeriodText } from './workPeriod';
+import { buildJobHistoryLines, resolveJobNumber, NO_EVALUABLE_JOBS_NOTE } from './jobHistory';
 import { selectModuleNote } from './moduleNotes';
 import { groupSummariesByBkType as groupElbowSummaries, mergeBkGroupSummaries as mergeElbowGroups } from '../../modules/elbow/utils/calculations';
 import { BK_TYPE_LABELS as ELBOW_BK_LABELS } from '../../modules/elbow/utils/data';
@@ -14,6 +14,7 @@ import { BK_TYPE_LABELS as WRIST_BK_LABELS } from '../../modules/wrist/utils/dat
 function genKneeBurdenSection(calc) {
   const { relatedness, cumulativeBurden, jobBurdens } = calc;
   let text = `\n  < 무릎(슬관절) >\n`;
+  if (calc.noEvaluableJobs) return `${text}  ${NO_EVALUABLE_JOBS_NOTE}\n`;
   const avgRelatedness = relatedness
     ? ((Number(relatedness.min) + Number(relatedness.max)) / 2).toFixed(1)
     : null;
@@ -65,9 +66,12 @@ function getShoulderInterpretation(totals) {
   return `** 노출 기준치에 미달하여 누적 신체부담 불충분함.`;
 }
 
-function genShoulderBurdenSection(calc) {
+// jobNumbering: 미포함 직력이 있을 때만 전달되는 jobId → 직업력 번호 맵(jobHistory.js). 이 블록은 직종명이 빈
+// 직력을 뺀 뒤 번호를 다시 매기므로, 맵이 있으면 [직업력] 목록과 같은 번호를 쓴다.
+function genShoulderBurdenSection(calc, jobNumbering = null) {
   const { totals, jobBurdens } = calc;
   let text = `\n< 어깨(견관절) >\n`;
+  if (calc.noEvaluableJobs) return `${text}${NO_EVALUABLE_JOBS_NOTE}\n`;
   text += `독일의 산재보험 번호 BK2117 장기간의 집중적인 기계적 부하로 인한 어깨 회전근개 병변에 사용하는 어깨 부담 평가 지침을 이용하여 평가하였음.\n\n`;
 
   (totals || []).forEach(total => {
@@ -82,7 +86,7 @@ function genShoulderBurdenSection(calc) {
   if (jobsWithData.length > 1) {
     text += `\n[직력별 기여]\n`;
     jobsWithData.forEach((job, index) => {
-      text += `- 직력${index + 1}: ${job.jobName} (${job.periodYears > 0 ? `${job.periodYears.toFixed(1)}년` : '-'})\n`;
+      text += `- 직력${resolveJobNumber(jobNumbering, job.id, index + 1)}: ${job.jobName} (${job.periodYears > 0 ? `${job.periodYears.toFixed(1)}년` : '-'})\n`;
       (job.exposures || []).forEach(exposure => {
         if (exposure.dailyHours > 0) {
           text += `  ${exposure.label}: ${exposure.dailyHours}시간/일, 누적 ${exposure.cumulativeHours.toFixed(1)}시간\n`;
@@ -100,6 +104,7 @@ function genSpineBurdenSection(calc) {
 
 function genElbowBurdenSection(calc) {
   let text = `\n< 팔꿈치(주관절) >\n`;
+  if (calc.noEvaluableJobs) return `${text}${NO_EVALUABLE_JOBS_NOTE}\n`;
 
   if (calc.missingCommonFields?.length) {
     text += `- 공통 시간적 선후관계 누락: ${calc.missingCommonFields.join(', ')}\n`;
@@ -144,6 +149,7 @@ function genElbowBurdenSection(calc) {
 
 function genWristBurdenSection(calc) {
   const wristLines = ['\n< 손목/손가락 >'];
+  if (calc.noEvaluableJobs) return `${wristLines[0]}\n${NO_EVALUABLE_JOBS_NOTE}\n`;
 
   if (calc.missingCommonFields?.length) {
     wristLines.push(`- 공통 시간적 선후관계 누락: ${calc.missingCommonFields.join(', ')}`);
@@ -188,6 +194,7 @@ function genWristBurdenSection(calc) {
 
 function genCervicalBurdenSection(calc) {
   let text = `\n< 경추(목) >\n`;
+  if (calc.noEvaluableJobs) return `${text}${NO_EVALUABLE_JOBS_NOTE}\n`;
 
   (calc.jobSummaries || []).forEach((jobSummary, index) => {
     text += `- 직력${index + 1}: ${jobSummary.jobName || '-'}\n`;
@@ -236,10 +243,9 @@ export function generateUnifiedReport(patient) {
 
   text += `\n[특이사항]\n${shared.specialNotes || '-'}\n`;
 
+  const jobHistory = buildJobHistoryLines(jobs);
   text += `\n[직업력]\n`;
-  jobs.forEach((job, index) => {
-    text += `- 직력${index + 1}: ${job.jobName || '-'} | ${getEffectiveWorkPeriodText(job)}\n`;
-  });
+  text += jobHistory.text;
 
   text += `\n[부위별 신체부담 평가]\n`;
   for (const moduleId of activeModules) {
@@ -252,7 +258,7 @@ export function generateUnifiedReport(patient) {
 
     if (moduleId === 'knee') text += genKneeBurdenSection(calc);
     if (moduleId === 'wrist') text += genWristBurdenSection(calc);
-    if (moduleId === 'shoulder') text += genShoulderBurdenSection(calc);
+    if (moduleId === 'shoulder') text += genShoulderBurdenSection(calc, jobHistory.numberingByJobId);
     if (moduleId === 'spine') text += genSpineBurdenSection(calc);
     if (moduleId === 'elbow') text += genElbowBurdenSection(calc);
     if (moduleId === 'cervical') text += genCervicalBurdenSection(calc);

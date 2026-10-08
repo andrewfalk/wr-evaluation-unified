@@ -16,6 +16,9 @@ export const SharedJobSchema = z.object({
   endDate: z.string(),
   workPeriodOverride: z.string(),
   workDaysPerYear: z.number().int().nonnegative().default(250),
+  // true면 신체부담평가(모듈 평가·결과·통계의 신체부담 변수)에서 제외. 직업력 출력에는 남는다.
+  // 구데이터는 undefined(=포함)이므로 optional.
+  excludeFromAnalysis: z.boolean().optional(),
 });
 
 export const SharedDataSchema = z.object({

@@ -4,6 +4,8 @@ import { VibrationIntervalEditor } from './components/VibrationIntervalEditor';
 import { createVibrationInterval } from './utils/data';
 import { resolveVibrationStatus } from './utils/vibrationCalc';
 import { getEffectiveWorkPeriodText } from '../../core/utils/workPeriod';
+import { NoEvaluableJobsNotice } from '../../core/components/NoEvaluableJobsNotice';
+import { filterAnalysisJobs, hasNoEvaluableJobs } from '@analytics-core/jobScope';
 
 const WBV_STATUS_OPTIONS = [
   { value: 'unknown', label: '미평가' },
@@ -44,8 +46,11 @@ export function VibrationEvaluation({ patient, updateModule, methodTabs, canMuta
   }, [jobs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const allIntervals = mod.vibrationIntervals || [];
+  // firstJobId는 "전체" 직력의 첫 직력(sharedJobId 없는 구간의 귀속 기준, 계산과 동일). 화면의 직력 탭만
+  // "신체부담평가 미포함" 직력을 뺀 evaluatedJobs를 쓴다.
   const firstJobId = jobs[0]?.id || '';
-  const activeJobId = jobs.find(j => j.id === selectedJobId) ? selectedJobId : firstJobId;
+  const evaluatedJobs = filterAnalysisJobs(jobs);
+  const activeJobId = evaluatedJobs.find(j => j.id === selectedJobId) ? selectedJobId : (evaluatedJobs[0]?.id || '');
 
   const visibleIntervals = useMemo(() => {
     if (jobs.length === 0) return allIntervals;
@@ -140,7 +145,9 @@ export function VibrationEvaluation({ patient, updateModule, methodTabs, canMuta
         <p className="assessment-output-hint" style={{ marginBottom: 12 }}>조회 화면만 전환되며, 저장된 노출 상태는 변경되지 않습니다.</p>
       )}
 
-      {status !== 'present' ? (
+      {hasNoEvaluableJobs(jobs) ? (
+        <NoEvaluableJobsNotice />
+      ) : status !== 'present' ? (
         <div className="evaluation-empty-state">
           {status === 'none'
             ? '전신진동 노출 없음으로 평가됩니다.'
@@ -148,9 +155,9 @@ export function VibrationEvaluation({ patient, updateModule, methodTabs, canMuta
         </div>
       ) : (
         <>
-          {jobs.length > 1 && (
+          {evaluatedJobs.length > 1 && (
             <div className="action-group" style={{ marginBottom: 12 }}>
-              {jobs.map((job, i) => {
+              {evaluatedJobs.map((job, i) => {
                 const isActive = activeJobId === job.id;
                 const count = allIntervals.filter(iv => (iv.sharedJobId || firstJobId) === job.id).length;
                 return (

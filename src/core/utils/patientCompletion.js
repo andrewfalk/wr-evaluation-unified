@@ -1,16 +1,21 @@
 import { getModule } from '../moduleRegistry';
+import { neutralizeExclusionForLegacy } from '@analytics-core/jobScope';
 import { APP_BUILD_VERSION, COMPLETION_SCHEMA_VERSION } from '../constants/appVersion';
 
 export function isPatientComplete(patient) {
   const moduleIds = patient?.data?.activeModules || [];
   if (moduleIds.length === 0) return false;
 
+  // 서버 verifyAllModulesComplete와 같은 입력 정규화(레거시 혼재 환자의 미포함 플래그 무력화) —
+  // 클라이언트/서버 완료 판정이 갈리지 않게 한다.
+  const data = neutralizeExclusionForLegacy(patient?.data);
+
   return moduleIds.every(moduleId => {
     try {
       const mod = getModule(moduleId);
       return mod?.isComplete?.({
-        shared: patient?.data?.shared,
-        module: patient?.data?.modules?.[moduleId] || {},
+        shared: data?.shared,
+        module: data?.modules?.[moduleId] || {},
         activeModules: moduleIds,
       }) ?? false;
     } catch {

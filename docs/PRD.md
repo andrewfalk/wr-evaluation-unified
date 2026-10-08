@@ -138,7 +138,7 @@ Patient
     │   │   └── { id, code, name, side }
     │   └── jobs[]                      ← 직업력 (공통)
     │       └── { id, jobName, presetId, startDate, endDate,
-    │             workPeriodOverride, workDaysPerYear }
+    │             workPeriodOverride, workDaysPerYear, excludeFromAnalysis? }
     ├── modules
     │   ├── knee                        ← 무릎 전용
     │   │   ├── jobExtras[]             ← 직종별 신체부담 (sharedJobId로 연결)

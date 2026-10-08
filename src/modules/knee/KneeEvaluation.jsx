@@ -2,11 +2,16 @@ import { useEffect } from 'react';
 import { JobTab } from './components/JobTab';
 import { KneeResultPanel } from './components/KneeResultPanel';
 import { createKneeJobExtras } from './utils/data';
+import { NoEvaluableJobsNotice } from '../../core/components/NoEvaluableJobsNotice';
+import { filterAnalysisJobs, hasNoEvaluableJobs } from '@analytics-core/jobScope';
 
 export function KneeEvaluation({ patient, calc, activeTab, updateModule, errors }) {
   const shared = patient.data.shared;
   const mod = patient.data.module;
   const sharedJobs = shared.jobs || [];
+  // 화면에는 "신체부담평가 미포함" 직력을 보이지 않는다. 아래 jobExtras 자동 생성은 전체 직력 기준으로 두어
+  // 미포함 직력의 입력값을 유지한다(다시 '포함'으로 바꾸면 그대로 돌아와야 함).
+  const evaluatedJobs = filterAnalysisJobs(sharedJobs);
 
   // 누락된 직업의 jobExtras 자동 생성
   useEffect(() => {
@@ -27,12 +32,16 @@ export function KneeEvaluation({ patient, calc, activeTab, updateModule, errors 
   return (
     <>
       <div className="panel">
-        <JobTab
-          sharedJobs={sharedJobs}
-          jobExtras={mod.jobExtras || []}
-          onChange={handleJobExtrasChange}
-          errors={errors}
-        />
+        {hasNoEvaluableJobs(sharedJobs) ? (
+          <NoEvaluableJobsNotice />
+        ) : (
+          <JobTab
+            sharedJobs={evaluatedJobs}
+            jobExtras={mod.jobExtras || []}
+            onChange={handleJobExtrasChange}
+            errors={errors}
+          />
+        )}
       </div>
       <KneeResultPanel calc={calc} />
     </>

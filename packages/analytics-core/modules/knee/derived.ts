@@ -3,6 +3,7 @@
 
 import { calculateAge, calculateBMI } from '../../common';
 import { getEffectiveWorkPeriod, getEffectiveWorkPeriodText, type JobLike } from '../../workPeriod';
+import { filterAnalysisJobs, hasNoEvaluableJobs } from '../../jobScope';
 import { resolveDiagnosisModule, type DiagnosisLike } from '../../diagnosisMapping';
 import type { CompletionContext } from '../../analyticsRegistry';
 
@@ -122,12 +123,15 @@ export function mergeJobsWithExtras(
  * 그대로, 아니면 `shared.jobs`+`module.jobExtras`를 병합한 결과. `computeKneeCalc`와
  * extractor(§4.2)가 이 함수 하나를 공유해야, `shared.jobs: []` + 레거시 `modules.knee.jobs`가
  * 함께 있는 케이스에서 서로 다른 배열을 보는 사고가 나지 않는다.
+ *
+ * 병합 결과에서는 "신체부담평가 미포함" 직력을 뺀다(jobScope.ts). 레거시 `module.jobs`는 직력
+ * 연결이 없어 필터 대상이 아니다 — 그 혼재 환자는 입력 경계에서 플래그가 이미 무력화된다.
  */
 export function resolveKneeCalculationJobs(
   shared: SharedShape,
   moduleData: KneeModuleShape,
 ): KneeCalculationJob[] {
-  return moduleData.jobs ? moduleData.jobs : mergeJobsWithExtras(shared.jobs, moduleData.jobExtras);
+  return moduleData.jobs ? moduleData.jobs : filterAnalysisJobs(mergeJobsWithExtras(shared.jobs, moduleData.jobExtras));
 }
 
 export interface KneeDiagnosis extends DiagnosisLike {
@@ -182,6 +186,8 @@ export interface KneeCalcResult {
   relatedness: Relatedness;
   cumulativeBurden: string;
   jobBurdens: KneeJobBurden[];
+  /** 직력이 있으나 전부 "신체부담평가 미포함" — 소비처는 불충분 등 임상 결론을 만들지 않는다. */
+  noEvaluableJobs: boolean;
 }
 
 /** 환자 데이터로부터 전체 계산 결과 산출 — 원본과 동일 로직(입력 shape 그대로). */
@@ -200,5 +206,6 @@ export function computeKneeCalc(patientData: { shared?: SharedShape; module?: Kn
     burden: calculatePhysicalBurden(j.weight, j.squatting),
     period: getEffectiveWorkPeriodText(j),
   }));
-  return { age, bmi, relatedness, cumulativeBurden, jobBurdens };
+  const noEvaluableJobs = !mod.jobs && hasNoEvaluableJobs(shared.jobs);
+  return { age, bmi, relatedness, cumulativeBurden, jobBurdens, noEvaluableJobs };
 }

@@ -5,6 +5,7 @@ export default defineConfig({
     index: 'index.ts',
     common: 'common.ts',
     workPeriod: 'workPeriod.ts',
+    jobScope: 'jobScope.ts',
     diagnosisMapping: 'diagnosisMapping.ts',
     'modules/knee/index': 'modules/knee/index.ts',
     'modules/shoulder/index': 'modules/shoulder/index.ts',

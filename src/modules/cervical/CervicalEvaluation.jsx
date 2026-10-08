@@ -4,6 +4,8 @@ import { TaskManager } from './components/TaskManager';
 import { TaskEditor } from './components/TaskEditor';
 import { CervicalResultPanel } from './components/CervicalResultPanel';
 import { createCervicalTask, isCervicalDiagnosis, syncCervicalModuleData } from './utils/data';
+import { NoEvaluableJobsNotice } from '../../core/components/NoEvaluableJobsNotice';
+import { filterAnalysisJobs, hasNoEvaluableJobs } from '@analytics-core/jobScope';
 
 export function CervicalEvaluation({ patient, calc, updateModule }) {
   const shared = patient.data.shared || {};
@@ -11,11 +13,14 @@ export function CervicalEvaluation({ patient, calc, updateModule }) {
   const diagnoses = shared.diagnoses || [];
   const activeModules = patient.data.activeModules || [];
   const sharedJobs = shared.jobs || [];
+  // 화면에는 "신체부담평가 미포함" 직력을 보이지 않는다. syncCervicalModuleData에는 전체 sharedJobs를 넘겨
+  // 미포함 직력의 task를 보존한다(다시 '포함'으로 바꾸면 그대로 돌아와야 함).
+  const evaluatedJobs = filterAnalysisJobs(sharedJobs);
   const cervicalDiagnoses = useMemo(
     () => (diagnoses || []).filter(diag => isCervicalDiagnosis(diag, activeModules)),
     [diagnoses, activeModules]
   );
-  const [selectedJobId, setSelectedJobId] = useState(sharedJobs[0]?.id || '');
+  const [selectedJobId, setSelectedJobId] = useState(evaluatedJobs[0]?.id || '');
   const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
 
   const synced = useMemo(() => syncCervicalModuleData(mod, sharedJobs), [mod, sharedJobs]);
@@ -27,34 +32,15 @@ export function CervicalEvaluation({ patient, calc, updateModule }) {
   }, [synced, updateModule]);
 
   useEffect(() => {
-    if (!sharedJobs.find(job => job.id === selectedJobId)) {
-      setSelectedJobId(sharedJobs[0]?.id || '');
+    const included = filterAnalysisJobs(sharedJobs);
+    if (!included.find(job => job.id === selectedJobId)) {
+      setSelectedJobId(included[0]?.id || '');
       setSelectedTaskIndex(0);
     }
   }, [sharedJobs, selectedJobId]);
 
-  if (cervicalDiagnoses.length === 0) {
-    return (
-      <div className="panel">
-        <div className="evaluation-empty-state">
-          경추(목)로 분류되는 상병이 없습니다. 진단명 또는 코드에 맞는 경추 상병을 입력하면 이 모듈을 사용할 수 있습니다.
-        </div>
-      </div>
-    );
-  }
-
-  if (sharedJobs.length === 0) {
-    return (
-      <div className="panel">
-        <div className="evaluation-empty-state">
-          기본정보에서 직업력을 먼저 입력해 주세요. 경추 모듈은 직업별 작업 목록 구조를 사용합니다.
-        </div>
-      </div>
-    );
-  }
-
   const allTasks = synced.moduleData.tasks || [];
-  const activeJobId = sharedJobs.find(job => job.id === selectedJobId) ? selectedJobId : (sharedJobs[0]?.id || '');
+  const activeJobId = evaluatedJobs.find(job => job.id === selectedJobId) ? selectedJobId : (evaluatedJobs[0]?.id || '');
   const filteredTasks = allTasks.filter(task => task.sharedJobId === activeJobId);
   const selectedTask = filteredTasks[selectedTaskIndex] || null;
 
@@ -64,7 +50,7 @@ export function CervicalEvaluation({ patient, calc, updateModule }) {
   }, []);
 
   const handleAddTask = useCallback(() => {
-    const jobId = activeJobId || sharedJobs[0]?.id || '';
+    const jobId = activeJobId;
     if (!jobId) return;
 
     updateModule(current => {
@@ -106,6 +92,35 @@ export function CervicalEvaluation({ patient, calc, updateModule }) {
     });
   }, [sharedJobs, updateModule]);
 
+  // 조기 return은 모든 hook 호출 뒤에 둔다 — 환자 전환 시 상병/직력 유무가 바뀌어도 hook 개수가 달라지지 않게.
+  if (cervicalDiagnoses.length === 0) {
+    return (
+      <div className="panel">
+        <div className="evaluation-empty-state">
+          경추(목)로 분류되는 상병이 없습니다. 진단명 또는 코드에 맞는 경추 상병을 입력하면 이 모듈을 사용할 수 있습니다.
+        </div>
+      </div>
+    );
+  }
+
+  if (sharedJobs.length === 0) {
+    return (
+      <div className="panel">
+        <div className="evaluation-empty-state">
+          기본정보에서 직업력을 먼저 입력해 주세요. 경추 모듈은 직업별 작업 목록 구조를 사용합니다.
+        </div>
+      </div>
+    );
+  }
+
+  if (hasNoEvaluableJobs(sharedJobs)) {
+    return (
+      <div className="panel">
+        <NoEvaluableJobsNotice />
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="panel">
@@ -116,9 +131,9 @@ export function CervicalEvaluation({ patient, calc, updateModule }) {
           </div>
         </div>
 
-        {sharedJobs.length > 1 && (
+        {evaluatedJobs.length > 1 && (
           <div className="action-group" style={{ marginBottom: 12 }}>
-            {sharedJobs.map((job, index) => {
+            {evaluatedJobs.map((job, index) => {
               const isActive = activeJobId === job.id;
               const jobTaskCount = allTasks.filter(task => task.sharedJobId === job.id).length;
               return (

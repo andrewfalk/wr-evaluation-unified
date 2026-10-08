@@ -92,6 +92,7 @@ import { generateAccessToken } from '../../auth/tokens';
 import { writeAuditLog } from '../../middleware/audit';
 import { runSampleDetect } from '../../workers/sampleDetect';
 import type { Pool } from 'pg';
+import { COMPLETION_ENGINE_VERSION } from '../../completionTracking';
 
 const CSRF_TOKEN = 'ok';
 const CSRF_HASH = crypto.createHash('sha256').update(CSRF_TOKEN).digest('hex');
@@ -651,7 +652,7 @@ describe('POST /jobs/:jobId/apply', () => {
     const updateCall = cq.mock.calls.find((c) => String(c[0]).includes('UPDATE patient_records'));
     const params = updateCall![1] as unknown[];
     expect(params[9]).toBeInstanceOf(Date);
-    expect(params[10]).toBe('v1');
+    expect(params[10]).toBe(COMPLETION_ENGINE_VERSION);
   });
 
   it('완료 조건을 만족하지 못하면(기본 body, activeModules 없음) server_verified 컬럼은 NULL로 유지된다', async () => {

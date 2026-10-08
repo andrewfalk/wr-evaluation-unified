@@ -285,7 +285,8 @@ Rule:
   "startDate": "2000-03-01",
   "endDate": "2018-12-31",
   "workPeriodOverride": "",
-  "workDaysPerYear": 250
+  "workDaysPerYear": 250,
+  "excludeFromAnalysis": false
 }
 ```
 
@@ -300,12 +301,22 @@ Rule:
 | `endDate` | `string` | No | Job end date |
 | `workPeriodOverride` | `string` | No | Manual override for calculated period |
 | `workDaysPerYear` | `number` | No | Annual work-day count |
+| `excludeFromAnalysis` | `boolean` | No | `true` = excluded from body-burden evaluation. Absent/`undefined` means included (legacy data); consumers must test `=== true` |
 
 ### 9.3 Linking rule
 
 - Shared jobs are the authoritative cross-module occupational history
 - Module-specific job payloads must point to shared jobs by `sharedJobId`
 - Modules should not duplicate `jobName`, `startDate`, and `endDate` unless strictly needed for migration compatibility
+
+### 9.4 Excluding a job from body-burden evaluation
+
+- A job with `excludeFromAnalysis === true` is left out of every module calculation, result, completion check and the body-burden statistics variables. It **stays** in the occupational-history output (comprehensive opinion preview, Excel, EMR `[직업력]`), listed last with the label `신체부담평가에는 미포함`
+- The exclusion is applied only where results are computed (analytics-core `jobScope.ts` helpers). Module data linked to the job (`jobExtras`, `jobEvaluations`, `tasks`, `vibrationIntervals`) is never deleted, so switching the job back to "included" restores the inputs
+- Module sync functions (`sync*ModuleData`) must always receive the full `shared.jobs`; only display lists and calculation results are filtered
+- Items that attach to a job by `sharedJobId` are attributed using the full job list (items without `sharedJobId` belong to `jobs[0]`) and removed afterwards, never re-attributed to the next included job
+- Patients that still carry unmigrated legacy job fields (`modules.knee.jobs`, `modules.spine.jobName/careerYears/careerMonths/workDaysPerYear`) cannot be linked to individual jobs, so their flags are neutralised to `false` at every input boundary (`neutralizeExclusionForLegacy`) and the UI disables the "excluded" option
+- When every job is excluded the module reports "no evaluable jobs" and counts as complete (diagnosis assessment is still required)
 
 ## 10. Module Data
 

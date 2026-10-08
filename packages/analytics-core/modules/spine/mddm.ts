@@ -4,6 +4,7 @@
 
 import { formulaDB, thresholds, SPINE_FORMULA_V513, convertTimeToSeconds } from './constants';
 import { getEffectiveWorkPeriod, type JobLike } from '../../workPeriod';
+import { filterAnalysisJobs, hasNoEvaluableJobs, scopeItemsToIncludedJobs } from '../../jobScope';
 import type { SpineJobLike, SpineModuleShape } from './types';
 
 export interface SpineTask {
@@ -290,7 +291,8 @@ interface SpineCareer {
 
 // shared.jobs에서 직업력 정보 추출 (합산 — 하위호환용)
 function getCareerFromSharedJobs(shared: { jobs?: SpineJobLike[] }): SpineCareer {
-  const jobs = shared.jobs || [];
+  // "신체부담평가 미포함" 직력은 경력 합산·연간 근무일수(첫 직력)에서 뺀다.
+  const jobs = filterAnalysisJobs(shared.jobs || []);
   if (jobs.length === 0) return { careerYears: 0, careerMonths: 0, workDaysPerYear: 250, totalYears: undefined };
 
   let totalYears = 0;
@@ -346,6 +348,8 @@ export interface MddmCalcResult {
   gender: string;
   weightedDailyDose?: { value: number; aboveThreshold: boolean };
   formulaVersion: string | undefined;
+  /** 직력이 있으나 전부 "신체부담평가 미포함"(직력 기반 분기) — 소비처는 평가 결론을 만들지 않는다. */
+  noEvaluableJobs: boolean;
 }
 
 export type MddmFormulaPolicy = 'recompute_recorded_version' | 'recompute_current';
@@ -377,17 +381,23 @@ export function computeMddmCalc(
 
   // 구형식 호환
   const hasLegacyFields = mod.careerYears !== undefined || mod.workDaysPerYear !== undefined;
+  // jobs는 필터 전 전체 직력이다 — 분기 조건과 task 귀속(firstJobId)은 UI(MddmEvaluation)와 같은 전체
+  // 기준으로 정하고, "신체부담평가 미포함" 직력은 그 뒤에 결과·합산에서만 뺀다(jobScope.ts).
   const jobs = shared.jobs || [];
+  const useJobBranch = !hasLegacyFields && jobs.length > 0;
+  // 직력 기반 분기에서만 미포함 직력에 귀속된 task를 뺀 목록으로 합산한다. 레거시 필드 분기나 직력 0개
+  // fallback 분기는 직력에 연결되지 않으므로 원본 task 그대로 쓴다(기존 동작 보존).
+  const calcTasks = useJobBranch ? scopeItemsToIncludedJobs(tasks, jobs, { orphan: 'firstJob' }) : tasks;
 
   const jobResults: MddmJobResult[] = [];
   let totalLifetimeDoseKNh = 0;
   let totalLifetimeDoseMNh = 0;
   let anyExcluded = true;
 
-  if (!hasLegacyFields && jobs.length > 0) {
+  if (useJobBranch) {
     const taskGroups = groupTasksByJob(tasks, jobs);
 
-    for (const job of jobs) {
+    for (const job of filterAnalysisJobs(jobs)) {
       const jobTasks = taskGroups.get(job.id || '') || [];
       const periodYears = getEffectiveWorkPeriod(job as JobLike);
       const periodYearsInt = Math.floor(periodYears);
@@ -444,7 +454,7 @@ export function computeMddmCalc(
     anyExcluded = legacyLifetimeDose.excluded;
   }
 
-  const dailyDose = calculateDailyDose(tasks, formulaVersion);
+  const dailyDose = calculateDailyDose(calcTasks, formulaVersion);
   const career: Pick<SpineCareer, 'careerYears' | 'careerMonths' | 'totalYears'> = hasLegacyFields
     ? { careerYears: mod.careerYears || 0, careerMonths: mod.careerMonths || 0, totalYears: undefined }
     : getCareerFromSharedJobs(shared);
@@ -476,9 +486,9 @@ export function computeMddmCalc(
   const comparison = compareThresholds(lifetimeDose.lifetimeDoseMNh, gender);
   const risk = assessRisk(comparison);
   const workRelatedness = assessWorkRelatedness(lifetimeDose.lifetimeDoseMNh, gender);
-  const maxForce = tasks.length > 0 ? Math.max(...tasks.map((t) => t.force ?? 0)) : 0;
+  const maxForce = calcTasks.length > 0 ? Math.max(...calcTasks.map((t) => t.force ?? 0)) : 0;
 
-  return { tasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender, weightedDailyDose, formulaVersion };
+  return { tasks: calcTasks, jobResults, dailyDose, lifetimeDose, comparison, risk, workRelatedness, maxForce, gender, weightedDailyDose, formulaVersion, noEvaluableJobs: useJobBranch && hasNoEvaluableJobs(jobs) };
 }
 
 // MDDM portion 완료: 'none'(해당없음)이면 OK, 'present'면 작업+유효 근속, 'unknown'이면 false.
@@ -489,12 +499,16 @@ export function isMddmComplete(patientData: { shared?: { jobs?: SpineJobLike[] }
   if (status === 'unknown') return false;
   if (status === 'none') return true;
 
-  const hasTasks = ((mod.tasks as SpineTask[]) || []).length > 0;
+  const allTasks = (mod.tasks as SpineTask[]) || [];
+  const allJobs = shared.jobs || [];
+  // 계산(computeMddmCalc)과 같은 귀속·제외 규칙 — 미포함 직력에만 task가 있으면 계산에서는 빠지므로
+  // 완료 판정에서도 task가 없는 것으로 본다. 직력 0개 fallback은 원본 task 그대로.
+  const hasTasks = (allJobs.length > 0 ? scopeItemsToIncludedJobs(allTasks, allJobs, { orphan: 'firstJob' }) : allTasks).length > 0;
   if (mod.careerYears !== undefined) {
     // 원본 그대로 — 관계 연산자(>)는 양쪽을 ToNumber로 강제변환하므로 Number()를 따로
     // 씌우지 않아도 결과가 같다(shoulder류 `||` 기본값 대입과는 다른 경우).
     return hasTasks && ((mod.careerYears as number) > 0 || (mod.careerMonths as number) > 0);
   }
-  const hasCareer = (shared.jobs || []).some((j) => getEffectiveWorkPeriod(j as JobLike) > 0);
+  const hasCareer = filterAnalysisJobs(allJobs).some((j) => getEffectiveWorkPeriod(j as JobLike) > 0);
   return hasTasks && hasCareer;
 }

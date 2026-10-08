@@ -18,6 +18,7 @@ export function BasicInfoForm({
   onBrowsePreset,
   activeModules,
   session,
+  legacyExclusionBlocked = false,
 }) {
   const handleInput = (field, value) => {
     onChange({ ...shared, [field]: value });
@@ -160,10 +161,13 @@ export function BasicInfoForm({
         )}
         {errors?.jobs && <div className="error-message">{errors.jobs}</div>}
         {jobs.map((job, i) => (
-          <div key={job.id} className="job-card">
+          <div key={job.id} className={`job-card${job.excludeFromAnalysis === true ? ' is-excluded' : ''}`}>
             <div className="job-card-header">
               <div className="card-title-stack">
-                <span className="job-card-title">직력 {i + 1}</span>
+                <span className="job-card-title">
+                  직력 {i + 1}
+                  {job.excludeFromAnalysis === true && <span className="job-badge badge-medium-high job-excluded-badge">신체부담평가 미포함</span>}
+                </span>
                 <span className="job-card-subtitle">해당 직무의 기간과 근무 조건을 입력합니다.</span>
               </div>
               <div className="job-card-actions">
@@ -172,8 +176,8 @@ export function BasicInfoForm({
                 {jobs.length > 1 && <button type="button" className="btn btn-danger btn-xs" onClick={() => removeJob(i)}>삭제</button>}
               </div>
             </div>
-            <div className="form-row">
-              <div className="form-group form-group-wide">
+            <div className="form-row job-name-row">
+              <div className="form-group">
                 <label>직종명</label>
                 {presets ? (
                   <PresetSearch
@@ -187,6 +191,35 @@ export function BasicInfoForm({
                   <input value={job.jobName} onChange={e => handleJob(i, 'jobName', e.target.value)} placeholder="직종명을 입력하세요" />
                 )}
               </div>
+              {/* 신체부담평가 포함/미포함: 미포함 직력은 모듈 평가·결과·통계(신체부담 변수)에서 빠지고
+                  직업력 출력에는 맨 끝에 표기되어 남는다. 입력 필드는 비활성화하지 않는다. */}
+              <fieldset className="job-scope-group">
+                <legend>신체부담평가</legend>
+                <div className="job-scope-options">
+                  <label className={`job-scope-option${job.excludeFromAnalysis === true ? '' : ' is-selected'}`}>
+                    <input
+                      type="radio"
+                      name={`job-scope-${job.id}`}
+                      checked={job.excludeFromAnalysis !== true}
+                      onChange={() => handleJob(i, 'excludeFromAnalysis', false)}
+                    />
+                    포함
+                  </label>
+                  <label className={`job-scope-option${job.excludeFromAnalysis === true ? ' is-selected is-excluded-option' : ''}`}>
+                    <input
+                      type="radio"
+                      name={`job-scope-${job.id}`}
+                      checked={job.excludeFromAnalysis === true}
+                      disabled={legacyExclusionBlocked && job.excludeFromAnalysis !== true}
+                      onChange={() => handleJob(i, 'excludeFromAnalysis', true)}
+                    />
+                    미포함
+                  </label>
+                </div>
+                {legacyExclusionBlocked && job.excludeFromAnalysis !== true && (
+                  <p className="job-scope-note">구형 직력 입력 데이터가 있어 미포함을 설정할 수 없습니다.</p>
+                )}
+              </fieldset>
             </div>
             <div className="form-row">
               <div className="form-group">

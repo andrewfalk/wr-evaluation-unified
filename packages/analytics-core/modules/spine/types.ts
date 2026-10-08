@@ -10,6 +10,7 @@ export interface SpineJobLike {
   startDate?: string;
   endDate?: string;
   workPeriodOverride?: string;
+  excludeFromAnalysis?: boolean;
   [key: string]: unknown;
 }
 

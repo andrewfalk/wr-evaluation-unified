@@ -2,6 +2,7 @@ export * from './types';
 export * from './dates';
 export * from './common';
 export * from './workPeriod';
+export * from './jobScope';
 export * from './diagnosisMapping';
 export * from './analyticsRegistry';
 export * from './migration/deterministicMigrate';

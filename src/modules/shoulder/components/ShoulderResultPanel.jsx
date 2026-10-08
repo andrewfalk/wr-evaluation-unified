@@ -1,3 +1,5 @@
+import { NoEvaluableJobsNotice } from '../../../core/components/NoEvaluableJobsNotice';
+
 function RatioBar({ ratio }) {
   const pct = Math.min(ratio * 100, 100);
   const level = ratio >= 1.0 ? 'danger' : ratio >= 0.7 ? 'warning' : 'safe';
@@ -14,6 +16,7 @@ function RatioBar({ ratio }) {
 }
 
 export function ShoulderResultPanel({ calc }) {
+  if (calc?.noEvaluableJobs) return <div className="panel"><NoEvaluableJobsNotice compact /></div>;
   if (!calc?.totals) return null;
 
   const { totals, jobBurdens, anyRepetitiveExceeded } = calc;

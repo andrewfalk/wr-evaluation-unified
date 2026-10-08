@@ -1,4 +1,7 @@
+import { NoEvaluableJobsNotice } from '../../../core/components/NoEvaluableJobsNotice';
+
 export function KneeResultPanel({ calc }) {
+  if (calc?.noEvaluableJobs) return <div className="panel"><NoEvaluableJobsNotice compact /></div>;
   if (!calc?.relatedness) return null;
 
   const avg = ((+calc.relatedness.min + +calc.relatedness.max) / 2).toFixed(1);

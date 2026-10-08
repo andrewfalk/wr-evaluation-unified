@@ -52,9 +52,14 @@ export function SpineEvaluation({ patient, calc, activeTab, updateModule, errors
         ? <VibrationEvaluation patient={patient} updateModule={updateModule} methodTabs={methodTabs} canMutate={canMutate} />
         : <MddmEvaluation patient={patient} updateModule={updateModule} methodTabs={methodTabs} canMutate={canMutate} />}
 
-      {/* 결과 패널은 탭과 무관하게 둘 다 표시 (각자 status unknown이면 null) */}
-      <SpineResultPanel calc={calc} />
-      <VibrationResultPanel calc={calc?.vibration} />
+      {/* 결과 패널은 탭과 무관하게 둘 다 표시 (각자 status unknown이면 null).
+          모든 직력이 "신체부담평가 미포함"이면 평가 화면에 안내가 나오므로 수치 0의 결과 패널은 숨긴다. */}
+      {!calc?.noEvaluableJobs && (
+        <>
+          <SpineResultPanel calc={calc} />
+          <VibrationResultPanel calc={calc?.vibration} />
+        </>
+      )}
     </>
   );
 }
