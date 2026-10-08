@@ -1,8 +1,8 @@
-# v6.x / v7.0.0 / v7.1.0 → v7.1.1 업데이트 절차
+# v7.0.0 → v7.1.1 업데이트 절차
 
-이미 인트라넷 서버가 운영 중인 환경을 v7.1.1로 올리는 절차. 형식은 [UPDATE_5.1.0.md](UPDATE_5.1.0.md)·[UPDATE_7.0.0.md](UPDATE_7.0.0.md)를 따른다.
+이미 v7.0.0이 운영 중인 인트라넷 서버를 v7.1.1로 올리는 절차. 형식은 [UPDATE_5.1.0.md](UPDATE_5.1.0.md)·[UPDATE_7.0.0.md](UPDATE_7.0.0.md)를 따른다.
 
-> **출발 버전 확인이 먼저다.** v7.0.0·v7.1.0은 패키지만 만들어졌고 운영에 배포되지 않았다면, 현재 운영 버전은 v6.5.4다. 이 경우 v7.0.0의 변경(통계 워크벤치·마이그레이션 0028~0033)이 이번 업데이트에 **함께** 들어간다. 현재 버전은 아래 "0) 현재 운영 환경 정보 파악"으로 확인한다.
+> **v7.1.0은 운영에 배포된 적이 없다.** 운영은 v7.0.0까지만 올라가 있으므로, 이번 업데이트에는 v7.1.0(#135·#136)과 v7.1.1(#137~#141)의 변경이 **한꺼번에** 들어간다. 출발 버전이 v7.0.0이 맞는지는 아래 "0) 현재 운영 환경 정보 파악"으로 먼저 확인한다. v6.x에서 올라오는 경우는 이 문서가 아니라 [UPDATE_7.0.0.md](UPDATE_7.0.0.md)의 마이그레이션 0028~0033 안내를 함께 따라야 한다.
 
 ## 무엇이 바뀌나
 
@@ -11,27 +11,21 @@
   - EMR·엑셀 **"확인 상병"** 칸을 종합소견에서 "확인"으로 입력한 상병만 내보내도록 변경 (#139)
   - 통계 워크벤치: 미포함 직력의 신체부담 변수 제외(카탈로그 v29, #141), 범주형 소수 범주 "기타" 병합·원본 범주 빈도(#137), 권한자 원본 히스토그램 경계 정렬(#138), 히스토그램 끝 구간 병합(7.1.0, #135)
   - 자세한 내용: [README.md](../README.md) 변경 이력 v7.1.1 / v7.1.0 / v7.0.0
-- **DB 스키마**: 서버 기동 시 미적용 마이그레이션이 순차 자동 적용된다(별도 명령 불필요). **업데이트 전 백업 필수.**
-
-  | 출발 버전 | 적용되는 마이그레이션 | 내용 |
-  |---|---|---|
-  | v6.5.4 | 0028~0035 (8건) | 0028 통계 권한 테이블, 0029·0030 환자 완료시각 컬럼, 0031~0033 `stats_runs`·비동기 큐, 0034·0035 권한 표시명 UPDATE |
-  | v7.0.0 | 0034·0035 (2건) | `capabilities`의 `stats.export_limited_rows` 표시명·설명 UPDATE(키·grant 불변) |
-  | v7.1.0 | 0035 (1건) | 위와 같은 표시명을 "제한 데이터 열람(원본 값·원본 분포)"로 확장 |
-
-  - 7.1.1에서 **새로 추가된 마이그레이션은 0035 하나**이며, 직력 미포함 플래그는 환자 `shared` JSON 안의 선택 필드라 **스키마 변경이 없다**(기존 환자 행에 값을 채우거나 바꾸지 않는다).
+- **DB 스키마**: 서버 기동 시 미적용 마이그레이션 **2건(0034·0035)**이 자동 적용된다(별도 명령 불필요). **업데이트 전 백업 필수.**
+  - 0034·0035는 `capabilities`의 `stats.export_limited_rows` 표시명·설명 UPDATE뿐이다(키·grant 불변). 0034는 "제한 데이터 열람(원본 값·원본 히스토그램)", 0035는 이를 "제한 데이터 열람(원본 값·원본 분포)"로 넓힌다.
+  - 직력 미포함 플래그는 환자 `shared` JSON 안의 선택 필드라 **스키마 변경이 없다**(기존 환자 행에 값을 채우거나 바꾸지 않는다).
 - **환경변수**: `.env.production`에서
   - **`WR_VERSION=7.1.1` (필수)** — compose가 `wr-app-server`·`wr-backup-monitor`·`wr-backup` 세 이미지를 모두 `:${WR_VERSION}`으로 찾는다. 안 바꾸면 7.1.1 이미지를 로드해도 컨테이너는 구버전을 계속 쓴다.
-  - **`STATS_WORKBENCH_ENABLED=true` (선택)** — 통계 워크벤치를 켤 때만. 이미 켜 둔 환경은 그대로 둔다. v6.x에서 올라오는 경우 기본값(false)이면 `/api/stats/*` 전체가 404이고 화면 버튼도 나타나지 않는다.
-  - 그 밖의 `STATS_*` 변수는 선택(기본값 권장, [.env.production.example](../.env.production.example) 참고).
-- **이미지 크기**: `wr-app-server`에 Python 통계 venv(`/opt/stats-venv`)가 포함돼 v6.5.4(2.22GB)보다 크다(7.0.0 기준 약 2.75GB). v7.0.0에서 올라오는 경우 크기 변화는 크지 않다. 서버 디스크 여유를 확인한다.
+  - `STATS_WORKBENCH_ENABLED` 등 `STATS_*`는 **7.0.0에서 설정한 값을 그대로 둔다**(변경 없음).
+- **이미지 크기**: 7.0.0과 비슷하다(app 이미지 약 2.75GB). 새 이미지를 로드하는 동안 이전 이미지도 남아 있으므로 서버 디스크 여유를 확인한다.
 - **네트워크·인증서**: 변경 없음 (Caddy·포트 8080/8443 그대로).
+- **`updates/` 폴더**: 패키지에 `updates/`(자동 업데이트 서빙용)가 새로 포함됐다. compose의 `./updates`는 **새 패키지 폴더 기준**이라, 이전(7.0.0) 폴더의 `updates/`는 새 폴더에서 보이지 않는다 → 아래 "업데이트 절차 A" 2번을 따른다.
 - **클라이언트(Electron)**: **재설치 불필요.** 인트라넷 Electron은 서버가 서빙하는 SPA를 로드한다. 7.0.0 이후 Electron 셸·EMR 헬퍼(`EmrHelper.cs`) 코드는 바뀌지 않았다. 신규 PC에는 패키지의 7.1.1 설치본을 쓴다.
   - **EMR 주입으로 달라지는 값(확인 상병, `[직업력]`)은 서버 배포 후 클라이언트를 새로고침/재시작해야 반영**된다.
 
 ## 예상 다운타임
 
-- **서버**: 수십 초 (app 컨테이너 재생성 + 마이그레이션 적용). postgres/caddy는 영향 없음. v6.5.4에서 올라올 때는 `ALTER TABLE`/제약 추가에 짧은 락이 걸릴 수 있으나 인트라넷 규모에서는 순간적이다.
+- **서버**: 수십 초 (app 컨테이너 재생성 + 마이그레이션 적용). postgres/caddy는 영향 없음. 적용되는 마이그레이션은 `UPDATE` 2건뿐이라 락 영향은 사실상 없다.
 - **클라이언트 PC**: 없음(새로고침으로 반영). 작업 중이던 환자 화면은 저장 후 새로고침한다.
 
 ## 사전 준비
@@ -42,7 +36,7 @@ compose 프로젝트 이름(`-p`, 보통 `wr-prod`)과 운영 `.env.production` 
 
 ```powershell
 docker compose ls
-docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"      # 예: wr-app-server:6.5.4
+docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"      # → wr-app-server:7.0.0 이어야 한다 (7.0.0이 아니면 이 문서의 전제가 다르다)
 $installDir = docker inspect wr-prod-app-1 --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
 Get-Content (Join-Path $installDir ".env.production") | Select-String "WR_VERSION|STATS_"
 ```
@@ -64,12 +58,11 @@ docker compose -p wr-prod --profile backup run --rm backup /scripts/backup.sh
 
 ```
 # === WR_VERSION (필수) ===
-# 수정 전:   WR_VERSION=6.5.4   (또는 7.0.0 / 7.1.0)
+# 수정 전:   WR_VERSION=7.0.0
 # 수정 후:   WR_VERSION=7.1.1
-
-# === 통계 워크벤치를 새로 켤 때만 (선택, 이미 켜 둔 환경은 유지) ===
-STATS_WORKBENCH_ENABLED=true
 ```
+
+`STATS_WORKBENCH_ENABLED` 등 `STATS_*`는 7.0.0에서 정한 값을 그대로 둔다.
 
 수정 후 다시 확인:
 
@@ -89,13 +82,21 @@ Get-Content "<env경로>" | Select-String "WR_VERSION|STATS_WORKBENCH_ENABLED"
 # 1. 새 패키지 폴더로 이동
 cd C:\wr\wr-evaluation-unified-7.1.1-intranet
 
-# 2. 새 Docker 이미지 로드
+# 2. (이전 폴더의 updates/ 에 정책·canary 파일을 둔 적이 있을 때만) 새 폴더의 updates/ 로 옮긴다.
+#    compose의 ./updates 는 이 새 폴더 기준이라 이전 폴더 것은 더 이상 마운트되지 않는다.
+#    새 패키지의 updates/ 에는 7.1.1 설치본·.blockmap·latest.yml 이 이미 들어 있고 update-policy.json 은 없다.
+#    자동 업데이트를 켠 적이 없다면(update-policy.json 없음) 생략.
+Test-Path "<이전 폴더>\updates\update-policy.json"
+Copy-Item "<이전 폴더>\updates\update-policy.json" ".\updates\"      # 있을 때만
+# canary 롤아웃을 진행 중이던 경우에만 canary.yml 과 그 설치본도 함께 옮긴다
+
+# 3. 새 Docker 이미지 로드
 .\scripts\import-images.ps1
 
-# 3. 로드된 이미지 확인 (wr-app-server / wr-backup-monitor / wr-backup 모두 7.1.1)
+# 4. 로드된 이미지 확인 (wr-app-server / wr-backup-monitor / wr-backup 모두 7.1.1)
 docker images | Select-String "wr-app-server|wr-backup"
 
-# 4. 컨테이너 재생성 — 세 이미지가 모두 7.1.1 태그로 바뀌므로 app만이 아니라 전체를 올린다
+# 5. 컨테이너 재생성 — 세 이미지가 모두 7.1.1 태그로 바뀌므로 app만이 아니라 전체를 올린다
 docker compose `
   -p wr-prod `
   --env-file <운영 .env.production 절대경로> `
@@ -120,12 +121,16 @@ docker exec wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -tAc "select cou
 
 # 4. 부팅 로그에서 마이그레이션·워커 확인
 docker logs wr-prod-app-1 --tail 60 | Select-String "migrate|stats-runs-queue|error"
-# → [migrate] Applied: 미적용분 (v6.5.4 출발=0028_… ~ 0035_…, v7.0.0=0034·0035, v7.1.0=0035),
+# → [migrate] Applied: 0034_… , 0035_…
 #   (통계 활성화 시) [wr-server] stats-runs-queue worker enabled
 
 # 5. app health / Caddy 경유 헬스
 docker exec wr-prod-app-1 wget -qO- http://localhost:3001/health
 curl.exe -k -o NUL -w "8443: %{http_code}`n" https://localhost:8443/health
+
+# 6. updates/ 마운트 (새 패키지의 updates/ 가 서빙되는지 — 정책 파일이 없으면 업데이터는 휴면이다)
+curl.exe -k https://localhost:8443/updates/latest.yml
+# → version: 7.1.1 이 포함된 YAML (404면 새 폴더의 updates/ 에 파일이 없는 것)
 ```
 
 ### C. 통계 워크벤치 확인 (`STATS_WORKBENCH_ENABLED=true`인 경우)
@@ -171,16 +176,16 @@ curl.exe -k https://localhost:8443/api/config/public
 ### 1) 앱 이미지만 되돌리기 (대부분의 경우 충분)
 
 ```powershell
-# .env.production: WR_VERSION=7.1.1 → 이전 버전 (예: 6.5.4). STATS_WORKBENCH_ENABLED 줄은 지우거나 false
-cd C:\wr\wr-evaluation-unified-<이전 버전>-intranet
-docker images | Select-String "wr-app-server:<이전 버전>"      # 없으면 이전 패키지에서 .\scripts\import-images.ps1
+# .env.production: WR_VERSION=7.1.1 → 7.0.0
+cd C:\wr\wr-evaluation-unified-7.0.0-intranet      # 이전 패키지 폴더 (updates/ 도 그 폴더 기준으로 되돌아간다)
+docker images | Select-String "wr-app-server:7.0.0"      # 없으면 이전 패키지에서 .\scripts\import-images.ps1
 docker compose -p wr-prod --env-file <env경로> -f docker-compose.yml -f docker-compose.prod.yml --profile backup up -d
-docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"
+docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"      # → wr-app-server:7.0.0
 ```
 
-마이그레이션은 **이미 적용된 상태로 DB에 남는다**(down 마이그레이션 없음). 0034·0035는 표시명 UPDATE뿐이고 새 테이블·컬럼은 구버전 앱이 사용하지 않는다. 7.0.0 → 6.5.4 롤백 시 0028~0033 스키마에서 구버전 앱이 동작함은 v7.0.0 릴리즈 사전 검증에서 확인했다.
+마이그레이션 0034·0035는 **이미 적용된 상태로 DB에 남는다**(down 마이그레이션 없음). 표시명 UPDATE뿐이고 새 테이블·컬럼은 없어 7.0.0 앱은 그대로 동작한다(키·grant 불변, 라벨만 다르게 보인다).
 
-**직력 미포함 플래그에 대한 주의**: 구버전(7.1.0 이하) 앱은 `excludeFromAnalysis`를 모르므로 미포함으로 설정된 직력도 **평가 대상으로 취급**한다. 이 플래그가 이미 설정된 환자를 구버전에서 저장했을 때 플래그가 유지되는지는 검증하지 않았다. 롤백이 필요하면 가능한 한 빨리 7.1.1로 다시 올리고, 그 사이 편집한 환자는 플래그를 확인한다.
+**직력 미포함 플래그에 대한 주의**: 7.0.0 앱은 `excludeFromAnalysis`를 모르므로 미포함으로 설정된 직력도 **평가 대상으로 취급**한다. 이 플래그가 이미 설정된 환자를 7.0.0에서 저장했을 때 플래그가 유지되는지는 검증하지 않았다. 또 완료 판정 엔진이 v2로 올라갔으므로, 7.1.1에서 v2로 기록된 완료시각을 7.0.0이 어떻게 다루는지도 검증하지 않았다. 롤백이 필요하면 가능한 한 빨리 7.1.1로 다시 올리고, 그 사이 편집한 환자는 플래그를 확인한다.
 
 ### 2) DB 복원 (스키마/데이터 자체에 문제가 있을 때만)
 
@@ -189,6 +194,9 @@ docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"
 ---
 
 ## 알려진 함정·한계
+
+### 새 패키지로 바꿨는데 자동 업데이트 정책/canary 설정이 사라짐
+**원인**: compose의 `./updates`는 compose 파일이 있는 패키지 폴더 기준이라, 새 폴더에서 기동하면 이전 폴더 `updates/`의 `update-policy.json`·`canary.yml`이 보이지 않는다(정책 파일이 없으면 업데이터는 휴면). **해결**: 이전 폴더 `updates/`에서 새 폴더 `updates/`로 옮긴다(업데이트 절차 A 2번).
 
 ### `up -d` 실행했는데 컨테이너가 이전 버전 그대로
 **원인**: `.env.production`의 `WR_VERSION`이 이전 값으로 남아 있음. **해결**: 사전 준비 3번대로 수정 후 다시 실행.

@@ -71,7 +71,13 @@ wr-evaluation-unified-5.0.1-intranet/    ← 이 디렉터리가 compose 실행 
 │
 │  ── Electron 클라이언트 설치 파일 ─────────────────────────────────────────
 ├── electron/
-│   └── 직업성 질환 통합 평가 프로그램 Setup 5.0.1.exe
+│   ├── 직업성 질환 통합 평가 프로그램 Setup <버전>.exe   # 신규 PC 설치용
+│   ├── ….exe.blockmap, latest.yml (또는 canary.yml)      # 자동 업데이트 3종
+│   └── update-policy.example.json                         # 관리자 스위치 템플릿 (자동 배치 안 됨)
+│
+│  ── Electron 자동 업데이트 서빙 디렉터리 ──────────────────────────────────
+├── updates/                             # compose의 ./updates → 컨테이너 /app/updates (읽기 전용)
+│   └── 설치본 + .blockmap + latest.yml  # electron/의 3종과 동일 파일. update-policy.json은 없음(업데이터 휴면)
 │
 ├── SHA256SUMS                           # 전체 파일 SHA256 해시 (무결성 검증용)
 └── release-manifest.json                # 버전, git commit, 이미지 목록, 빌드 시각
@@ -92,6 +98,7 @@ wr-evaluation-unified-5.0.1-intranet/    ← 이 디렉터리가 compose 실행 
 | `scripts/*.sh`, `scripts/*.ps1` | 운영 자동화 |
 | `docs/*.md` | 설치·운영 지침 |
 | `electron/*.exe` | 클라이언트 앱 설치 파일 |
+| `updates/` (설치본·`.blockmap`·`*.yml`) | Electron 자동 업데이트 서빙용 — `electron/`과 같은 3종, `update-policy.json`은 제외 |
 | `SHA256SUMS`, `release-manifest.json` | 무결성 검증 |
 
 ### 절대 포함 금지

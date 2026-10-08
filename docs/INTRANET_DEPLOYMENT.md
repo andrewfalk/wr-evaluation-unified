@@ -267,7 +267,9 @@ updates/
 └── update-policy.json            # 관리자 on/off 스위치(아래 7-3)
 ```
 
-`scripts/export-offline-package.ps1 -UpdateChannel latest|canary`가 설치본+`.blockmap`+메타데이터 3종을 SHA-512까지 검증한 뒤 패키지의 `electron/`에 담아줍니다(`scripts/verify-update-artifacts.mjs`). 이 3종은 함께 `updates/`에 올립니다. `update-policy.json`은 별도로 관리 — 패키지에는 `electron/update-policy.example.json` **템플릿만** 동봉되고 실제 위치로 자동 배치되지 않습니다(설치 직후부터 업데이터가 켜진 채 나가는 것을 막기 위해서입니다).
+`scripts/export-offline-package.ps1 -UpdateChannel latest|canary`가 설치본+`.blockmap`+메타데이터 3종을 SHA-512까지 검증한 뒤 패키지의 `electron/`(신규 PC 설치용)과 **`updates/`(서버 서빙용)** 두 곳에 담아줍니다(`scripts/verify-update-artifacts.mjs`). 패키지 폴더에서 `docker compose up -d`를 하면 `./updates`가 이 폴더를 가리키므로 3종은 따로 복사하지 않아도 서빙됩니다. `update-policy.json`은 별도로 관리 — 패키지에는 `electron/update-policy.example.json` **템플릿만** 동봉되고 `updates/`에는 넣지 않습니다(설치 직후부터 업데이터가 켜진 채 나가는 것을 막기 위해서입니다. 정책 파일이 없으면 업데이터는 휴면).
+
+> **새 패키지 폴더로 교체할 때의 함정**: compose의 `./updates`는 compose 파일이 있는 **패키지 폴더 기준**입니다. 새 버전 패키지를 새 폴더(`...-<새버전>-intranet`)에 풀고 거기서 기동하면 이전 폴더의 `updates/`는 더 이상 마운트되지 않습니다. 이전 폴더 `updates/`에 운영자가 올려 둔 `update-policy.json`과(canary 롤아웃 중이라면) `canary.yml`·그 설치본은 **새 폴더의 `updates/`로 옮겨야** 합니다. 정책 파일이 없던 환경(휴면)이면 옮길 것이 없습니다. 같은 채널의 이전 버전 `latest.yml`은 새 패키지의 것으로 덮어쓰입니다.
 
 기본적으로 이 3종이 없으면 export 자체가 **실패**합니다(에어갭 패키지에 설치본이 빠지는 것을 막기 위함). Electron 셸을 건드리지 않은 **서버 전용 릴리스**에서만 `-AllowMissingElectronInstaller`로 이 검사를 명시적으로 건너뛸 수 있으며, 이 경우 `release-manifest.json`의 `electronInstaller.included`/`sha512Verified`가 `false`로 기록됩니다. **Electron 셸이 바뀐 롤아웃 패키지에는 이 플래그를 쓰지 마세요.**
 
