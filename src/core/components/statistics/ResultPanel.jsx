@@ -1081,8 +1081,8 @@ export function ResultPanel({
           <div className="swb-banner" style={{ marginBottom: 12 }}>조건이 변경됨 — 다시 실행 필요</div>
         )}
 
-        {/* 서버가 소수 셀 해제를 지원하는 모드에서만 배너를 보인다 — 기술통계·회귀·이변량·상관행렬. 예측은 해제 PR에서 추가한다. */}
-        {committedResult && (isDescriptiveRun || isRegressionRun || isBivariateRun || isCorrelationMatrixRun) && (
+        {/* 서버가 소수 셀 해제를 지원하는 모드에서만 배너를 보인다 — 기술통계·회귀·이변량·상관행렬·예측 — 전 모드. */}
+        {committedResult && (isDescriptiveRun || isRegressionRun || isBivariateRun || isCorrelationMatrixRun || isPredictionRun) && (
           <LimitedDisclosureBanner status={committedResult.result?.limitedDisclosure} />
         )}
 
