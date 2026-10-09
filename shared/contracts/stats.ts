@@ -1590,9 +1590,9 @@ export const AnalyzePredictionResultSchema = z
   .discriminatedUnion('suppressed', [PredictionSuppressedSchema, PredictionResultBodySchema])
   .superRefine(validatePredictionStateInvariants);
 
-// 제한데이터(stats.export_limited_rows) 권한자 응답 전용 — 기술통계의 소수 셀(1~9명) 제한을
-// 해제했는지(applied) 또는 해제하려 했으나 못 한 사유(unavailable_*)다. 응답 시점에만 붙고
-// stats_runs.result(캐시)에는 절대 저장되지 않는다. 필드가 없으면 일반(집계) 응답이다.
+// 제한데이터(stats.export_limited_rows) 권한자 응답 전용 — 소수 셀(1~9명) 제한을 해제했는지(applied)
+// 또는 해제하려 했으나 못 한 사유(unavailable_*)다. 응답 시점에만 붙고 stats_runs.result(캐시)에는
+// 절대 저장되지 않는다. 필드가 없으면 일반(집계) 응답이다.
 export const LimitedDisclosureStatusSchema = z.enum([
   'applied',
   'unavailable_engine_busy',
@@ -1600,6 +1600,8 @@ export const LimitedDisclosureStatusSchema = z.enum([
   'unavailable_engine_degraded',
   'unavailable_input_too_large',
   'unavailable_group_limit',
+  // 소수 셀을 풀고 보니 선택한 분석 방법 자체가 현재 데이터로 실행할 수 없다(반복측정 등 통계적 조건 미충족).
+  'unavailable_method_not_executable',
   // 해제하려면 입력 행(frozen_dataset)이 남아 있어야 한다 — 생성 당시 권한이 없었거나 differencing으로
   // 막혔던 조기 억제 실행은 원본을 저장하지 않으므로 재실행이 필요하다.
   'unavailable_source_missing',

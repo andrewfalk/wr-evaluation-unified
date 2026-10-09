@@ -821,6 +821,7 @@ describe('ResultPanel — 제한데이터 소수 셀 해제 표시(limitedDisclo
     ['unavailable_engine_degraded', '관리자에게 문의'],
     ['unavailable_input_too_large', '필터로 범위를 줄여'],
     ['unavailable_group_limit', '그룹 수가 많아'],
+    ['unavailable_method_not_executable', '실행할 수 없어'],
     ['unavailable_source_missing', '원본이 보존되지 않았습니다'],
     ['unavailable_version_drift', '버전이 바뀌어'],
   ])('%s는 해제하지 못했다는 사유별 안내를 보여준다(해제 경고 배너가 아니다)', (status, expected) => {
@@ -828,6 +829,28 @@ describe('ResultPanel — 제한데이터 소수 셀 해제 표시(limitedDisclo
     const banner = screen.getByRole('status');
     expect(banner.textContent).toContain(expected);
     expect(banner.textContent).not.toContain('보호가 해제된 결과');
+  });
+
+  it('회귀 실행에서도 해제 경고 배너가 뜬다(기술통계 전용이 아니다)', () => {
+    renderResult(
+      {
+        continuous: [], discrete: [],
+        regression: { suppressed: false, estimation: 'non_estimable', nonEstimableReason: 'INSUFFICIENT_COMPLETE_ROWS' },
+        limitedDisclosure: 'applied',
+      },
+      { analysisMode: 'regression', variableKeys: ['sex'], regression: { outcomeKey: 'sex' } },
+    );
+    const banners = screen.getAllByRole('status').map((el) => el.textContent);
+    expect(banners.some((t) => t.includes('소수 인원(10명 미만) 보호가 해제된 결과'))).toBe(true);
+  });
+
+  it('회귀 실행이라도 필드가 없으면(일반 응답) 해제 배너가 없다', () => {
+    renderResult(
+      { continuous: [], discrete: [], regression: { suppressed: true, reasonCode: 'MIN_COHORT_NOT_MET' } },
+      { analysisMode: 'regression', variableKeys: ['sex'], regression: { outcomeKey: 'sex' } },
+    );
+    const banners = screen.queryAllByRole('status').map((el) => el.textContent);
+    expect(banners.some((t) => t.includes('보호가 해제된 결과'))).toBe(false);
   });
 
   it('알 수 없는 상태 값도 일반 결과 표시 안내로 안전하게 처리한다', () => {

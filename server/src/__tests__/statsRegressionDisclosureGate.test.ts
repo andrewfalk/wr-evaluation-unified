@@ -82,4 +82,28 @@ describe('evaluateRegressionDisclosure', () => {
     });
     expect(r).toEqual({ disclose: false, reasonCode: 'MIN_COHORT_NOT_MET' });
   });
+
+  // 제한데이터 권한자 응답 시점 해제 — 소수 셀(1~9명) 판정만 끈다. lifted가 아니면 위 동작이 그대로다.
+  describe('lifted 옵션', () => {
+    const allSmall = {
+      includedPersonCount: 5,
+      excludedPersonCount: 3,
+      levelSummaries: [{ variableKey: 'group', level: 'A', personCount: 2 }],
+      eventSummary: { eventPersonCount: 1, nonEventPersonCount: 4 },
+      interactionLevelSummaries: [
+        { variableKeyA: 'a', levelA: 'x', variableKeyB: 'b', levelB: 'y', personCount: 3 },
+      ],
+    };
+
+    it('모든 소수 셀 조건이 걸려 있어도 lifted면 공개로 통과한다', () => {
+      expect(evaluateRegressionDisclosure(allSmall, { lifted: true })).toEqual({ disclose: true, reasonCode: null });
+    });
+
+    it('lifted를 주지 않거나 false면 같은 입력이 그대로 억제된다(restricted 동작 불변)', () => {
+      const expected = { disclose: false, reasonCode: 'MIN_COHORT_NOT_MET' };
+      expect(evaluateRegressionDisclosure(allSmall)).toEqual(expected);
+      expect(evaluateRegressionDisclosure(allSmall, {})).toEqual(expected);
+      expect(evaluateRegressionDisclosure(allSmall, { lifted: false })).toEqual(expected);
+    });
+  });
 });

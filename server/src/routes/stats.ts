@@ -27,6 +27,7 @@ import { computeEstimability } from '../statsEstimability';
 import { buildRunManifest } from '../statsRunManifest';
 import { buildAnalysisContext, deriveAnalysisContext, type AnalysisContext } from '../statsAnalysisContext';
 import { handlePostAnalyze, finalizeAnalyzeResponse, isAbortedFinalize, toPublicRunManifest } from '../statsAnalyzeHandler';
+import { isLiftApplicable, resolveEffectiveContext } from '../statsLiftedRecompute';
 import { createResponseAbort } from '../statsResponseAbort';
 import { handlePostExport } from '../statsExportHandler';
 import { buildPredictionEngineRequestForState } from '../statsPredictionSuppression';
@@ -155,6 +156,13 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
   }
   const ctx = built.ctx;
 
+  // 제한데이터 권한자는 소수 셀 게이트 때문에 가려진 분석(회귀 등)의 미리보기도 해제 기준으로 본다. 기술통계는 아래
+  // liftPossible 경로가 처리한다. 공개 게이트가 닫히면 availableMethods가 비어 UI의 실행 버튼이 잠기므로
+  // counts·estimability·availableMethods 전부를 같은 유효 컨텍스트(view)에서 만든다.
+  const effective = await resolveEffectiveContext(pool, ctx);
+  const view = effective.ctx;
+  const modeLifted = effective.lifted;
+
   let counts: PreviewCounts;
   let estimability: PreviewEstimability;
 
@@ -163,10 +171,10 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
   // 진행한다 — statsAnalyzeHandler.ts의 predictionSuppressed 판정과 어긋난다.
   // 계획서 "preview도 같은 공개통제 우선순위를 따른다"를 충족하려면 여기서도
   // 동일하게 억제해야 한다.
-  const predictionSuppressed = ctx.recipe.analysisMode === 'prediction' && !ctx.predictionDisclosed;
+  const predictionSuppressed = view.recipe.analysisMode === 'prediction' && !view.predictionDisclosed;
 
-  // 제한데이터 권한자의 기술통계 미리보기는 소수 셀(1~9명) 제한을 푼다. 범위는 기술통계에만 —
-  // 이변량·회귀·예측은 통계적 타당성 게이트가 섞여 있어 이번에 바꾸지 않는다. differencing 제한
+  // 제한데이터 권한자의 기술통계 미리보기는 소수 셀(1~9명) 제한을 푼다. 회귀는 위 유효 컨텍스트(view)가 같은 일을
+  // 한다. 이변량·상관행렬·예측은 아직 해당 없음(후속 PR). differencing 제한
   // (forceSuppress)은 남용 방지 장치라 풀지 않는다(이때 reasonCode는 N<10이어도 MIN_COHORT로 보일 수
   // 있어 사유 코드가 아니라 플래그로 판정한다).
   // 권한 조회(DB 1회)는 풀 것이 실제로 있을 때만 한다 — 요청 수준 억제이거나 억제 없는 추정가능성이
@@ -181,13 +189,16 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
   const liftedRequestGate = liftPossible && ctx.requestSuppressed && await isHolder();
   let liftedCellLevel = false;
 
-  if ((ctx.requestSuppressed && !liftedRequestGate) || predictionSuppressed) {
+  if ((view.requestSuppressed && !liftedRequestGate) || predictionSuppressed) {
     ({ counts, estimability } = buildSuppressedPreviewPayload(
       ctx.recipe.variableKeys, ctx.catalogByKey, ctx.reasonCode ?? 'MIN_COHORT_NOT_MET',
     ));
   } else {
     // §C 1단계 게이트를 통과했을 때만 §C 2단계(person 단위 소수 셀 억제)를 계산한다.
-    const restrictedEst = computeEstimability(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey);
+    // 유효 컨텍스트가 해제 기준이면(회귀) 셀 수준 억제도 함께 끈다.
+    const restrictedEst = computeEstimability(
+      ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey, modeLifted ? { unrestricted: true } : undefined,
+    );
     let est = restrictedEst;
     if (liftPossible) {
       const openEst = computeEstimability(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey, { unrestricted: true });
@@ -215,18 +226,18 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
       // 설계행렬 자체가 non_estimable(design.ok===false)이면 여전히 null —
       // "미생성"이지 "생략"이 아니다(리뷰 #14).
       candidateParameterCount:
-        ctx.recipe.analysisMode === 'regression' && ctx.regressionDesign?.ok === true
-          ? ctx.regressionDesign.design.columns.length
-          : ctx.recipe.analysisMode === 'prediction'
-            ? predictionCandidateParameterCount(ctx)
+        view.recipe.analysisMode === 'regression' && view.regressionDesign?.ok === true
+          ? view.regressionDesign.design.columns.length
+          : view.recipe.analysisMode === 'prediction'
+            ? predictionCandidateParameterCount(view)
             : est.candidateParameterCount,
       eventNonEvent: est.eventNonEvent,
       estimabilityPolicyVersion: ESTIMABILITY_POLICY_VERSION,
     };
   }
-  const smallCellLimitLifted = liftedRequestGate || liftedCellLevel;
+  const smallCellLimitLifted = liftedRequestGate || liftedCellLevel || modeLifted;
   // 실제로 전달된 응답이 억제 상태인지 — 해제한 경우 원래 억제 사유(originalReasonCode)와 구분한다.
-  const deliveredSuppressed = ctx.requestSuppressed && !liftedRequestGate;
+  const deliveredSuppressed = ctx.requestSuppressed && !liftedRequestGate && !modeLifted;
 
   // §E — resultDigest는 억제 적용 "후" 실제 공개 페이로드의 해시. 억제 전 원값을 해시하면
   // 무차별대입으로 역산될 수 있어 절대 쓰지 않는다. PR3-A — availableMethods/
@@ -236,8 +247,8 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
   const resultDigest = canonicalDigest({
     counts,
     estimability,
-    availableMethods: ctx.availableMethods,
-    methodCatalogVersion: ctx.methodCatalogVersion,
+    availableMethods: view.availableMethods,
+    methodCatalogVersion: view.methodCatalogVersion,
   });
 
   const runManifest = buildRunManifest({
@@ -253,8 +264,8 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
     runManifest,
     counts,
     estimability,
-    availableMethods: ctx.availableMethods,
-    methodCatalogVersion: ctx.methodCatalogVersion,
+    availableMethods: view.availableMethods,
+    methodCatalogVersion: view.methodCatalogVersion,
     differencing: {
       queryFamilyDigest: ctx.queryFamilyDigest,
       windowMinutes: DIFFERENCING_POLICY.windowMinutes,
@@ -296,6 +307,8 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
       smallCellLimitLifted,
       liftedRequestGate,
       liftedCellLevel,
+      // 기술통계 외 모드(회귀)가 유효 컨텍스트로 소수 셀 게이트를 풀고 본 미리보기인가.
+      liftedModeGate: modeLifted,
       queryFamilyDigest: ctx.queryFamilyDigest,
       catalogVersion: runManifest.catalogVersion,
       extractorVersion: runManifest.extractorVersion,
@@ -375,8 +388,9 @@ async function handleGetRun(pool: Pool, req: Request, res: Response): Promise<vo
   // 그대로 서빙하되, 조용히 비공개로 보이지 않도록 사유를 알린다(재실행하면 해제된다).
   if (!row.frozen_dataset || hasVersionDrifted(row)) {
     let body: AnalyzeResult = result;
+    const runMode = manifest.analysisMode ?? 'descriptive';
     if (
-      (manifest.analysisMode ?? 'descriptive') === 'descriptive'
+      (runMode === 'descriptive' || isLiftApplicable(runMode, result))
       && await hasCapability(pool, 'stats.export_limited_rows', session.userId, session.organizationId!)
     ) {
       body = { ...result, limitedDisclosure: row.frozen_dataset ? 'unavailable_version_drift' : 'unavailable_source_missing' };

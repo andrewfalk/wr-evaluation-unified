@@ -32,7 +32,8 @@ import { buildRegressionEngineRequest } from './statsRegressionSuppression';
 import { buildRunManifest, toStatsRunManifestSucceeded } from './statsRunManifest';
 import { allCorrelationMatrixPairs } from './statsCorrelationMatrixDataset';
 import { attachLimitedRowFields } from './statsLimitedRowMerge';
-import { resolveUnrestrictedDescriptive } from './statsDescriptiveUnrestricted';
+import { resolveUnrestrictedDescriptive, type UnrestrictedOutcome } from './statsDescriptiveUnrestricted';
+import { isLiftApplicable, liftedContextOrSelf, resolveLiftedRecompute } from './statsLiftedRecompute';
 import { memoizeUnrestricted } from './statsLimitedDisclosureGuard';
 import { createResponseAbort } from './statsResponseAbort';
 import { hasCapability } from './middleware/requireCapability';
@@ -236,8 +237,19 @@ export async function finalizeAnalyzeResponse(
   // 응답이 실제로 전달된 해제 결과일 때만 memo에 넣는다(아래 최종 확인 뒤, 응답 직전).
   let memoCandidate: AnalyzeResult | null = null;
 
-  if (hasLimitedRowAccess && ctx.recipe.analysisMode === 'descriptive') {
-    const attempt = await resolveUnrestrictedDescriptive(pool, ctx, outcome.result, executionDigest, signal);
+  // 기술통계는 항상 시도하고, 그 외 모드는 저장된 집계본에 실제로 풀 것이 있을 때만 시도한다
+  // (isLiftApplicable). differencing(forceSuppress)은 어떤 모드에서도 풀지 않는다.
+  const analysisMode = ctx.recipe.analysisMode;
+  const liftAttempt: (() => Promise<UnrestrictedOutcome>) | null =
+    !hasLimitedRowAccess ? null
+    : analysisMode === 'descriptive'
+      ? () => resolveUnrestrictedDescriptive(pool, ctx, outcome.result, executionDigest, signal)
+      : (!ctx.differencing.forceSuppress && isLiftApplicable(analysisMode, outcome.result))
+        ? () => resolveLiftedRecompute(ctx, outcome.result, executionDigest, signal)
+        : null;
+
+  if (liftAttempt !== null) {
+    const attempt = await liftAttempt();
     if (attempt.kind === 'aborted') return { aborted: true };
 
     // 계산(또는 폴백 판정)에 최대 엔진 timeout만큼 걸렸을 수 있다 — 성공이든 실패(타임아웃·Busy 등
@@ -262,10 +274,33 @@ export async function finalizeAnalyzeResponse(
     }
   }
 
-  const { result: withRawFields, attached } = await attachLimitedRowFields(
-    ctx, baseResult, hasLimitedRowAccess, { skipRawLevels: limitedStatus === 'applied' },
+  // 기술통계 외 모드는 해제본을 만든 것과 같은 해제 컨텍스트로 원시 필드를 붙인다(회귀 진단은 설계행렬이 필요한데
+  // 제한 컨텍스트에는 없다).
+  const attachCtx = limitedStatus === 'applied' && analysisMode !== 'descriptive' ? liftedContextOrSelf(ctx) : ctx;
+  const attachedFields = await attachLimitedRowFields(
+    attachCtx, baseResult, hasLimitedRowAccess, { skipRawLevels: limitedStatus === 'applied' },
   );
+  let withRawFields = attachedFields.result;
+  let attached = attachedFields.attached;
   if (signal?.aborted) return { aborted: true };
+
+  // 회귀의 점별 진단(attachLimitedRowFields)은 별도 엔진 호출이라 최대 timeout만큼 걸린다 — 위 재확인은 그 앞이므로,
+  // 그 대기 중 권한이 회수·만료됐을 수 있다. 마지막 긴 비동기 작업 직후 한 번 더 확인하고, 회수됐으면 해제본·진단값을
+  // 모두 버리고 저장된 집계본으로 되돌린다(memo에도 남기지 않는다). 기술통계의 원시 필드 부착은 동기 계산이라 해당 없음.
+  // 실제로 공개될 것이 있을 때(해제됨 또는 원시 필드 부착)만 확인한다 — 풀 것이 없던 요청에 쿼리를 더하지 않는다.
+  if (hasLimitedRowAccess && analysisMode === 'regression' && (limitedStatus === 'applied' || attached)) {
+    hasLimitedRowAccess = await hasCapability(pool, 'stats.export_limited_rows', ctx.userId, ctx.orgId);
+    if (signal?.aborted) return { aborted: true };
+    if (!hasLimitedRowAccess) {
+      // 권한 없는 조회자의 일반 응답과 같은 모양(pointDiagnosticsStatus=unavailable_no_access)으로 되돌린다.
+      const reverted = await attachLimitedRowFields(ctx, outcome.result, false, { skipRawLevels: false });
+      withRawFields = reverted.result;
+      attached = reverted.attached;
+      limitedStatus = null;
+      limitedSource = null;
+      memoCandidate = null;
+    }
+  }
 
   const lifted = limitedStatus === 'applied';
   // 원래 없던 키를 undefined로 만들지 않는다(canonicalDigest가 undefined 값에서 throw).
@@ -403,12 +438,14 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
     const predictionSuppressed = ctx.recipe.analysisMode === 'prediction' && !ctx.predictionDisclosed;
     if (ctx.requestSuppressed || bivariatePairSuppressed || regressionSuppressed || predictionSuppressed) {
       const suppressedResult = buildSuppressedAnalyzeResult(ctx);
-      // 제한데이터 권한자의 기술통계는 "필터 후 10명 미만"(MIN_COHORT_NOT_MET)도 응답 시점에 해제한다.
+      // 제한데이터 권한자의 기술통계·회귀는 "필터 후 10명 미만"(MIN_COHORT_NOT_MET)·회귀 공개통제도 응답 시점에 해제한다.
       // differencing 제한(forceSuppress)은 남용 방지 장치라 해제하지 않는다 — 사유 코드는 N<10이면
       // MIN_COHORT_NOT_MET으로 표시되므로 코드가 아니라 forceSuppress 플래그로 판정한다.
-      const liftCandidate = ctx.recipe.analysisMode === 'descriptive'
-        && ctx.reasonCode === 'MIN_COHORT_NOT_MET'
-        && !ctx.differencing.forceSuppress;
+      // 회귀의 억제 원인은 요청 수준(N<10)이거나 ③게이트(regressionSuppressed)이고, 둘 다 같은 스텁으로 저장된다.
+      const liftCandidate = !ctx.differencing.forceSuppress && (
+        (ctx.recipe.analysisMode === 'descriptive' && ctx.reasonCode === 'MIN_COHORT_NOT_MET')
+        || (ctx.recipe.analysisMode === 'regression' && (ctx.requestSuppressed || regressionSuppressed))
+      );
       const liftHolder = liftCandidate
         && await hasCapability(pool, 'stats.export_limited_rows', ctx.userId, ctx.orgId);
       const resultDigest = canonicalDigest({ result: suppressedResult });
@@ -432,7 +469,7 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
            ) VALUES ($1,$2,'succeeded',$3,$4,$5,'aggregate',false,$6,$7,$8,now(),$9,$10)`,
           [ctx.orgId, ctx.userId, ctx.recipeDigest, ctx.snapshot.sourceDigest, executionDigest,
             JSON.stringify(manifest), JSON.stringify(suppressedResult), expiresAt(), manifest.analysisRunId,
-            // 저장 최소화: 요청 시점에 제한데이터 권한이 있었고 differencing으로 막히지 않은 기술통계
+            // 저장 최소화: 요청 시점에 제한데이터 권한이 있었고 differencing으로 막히지 않은 기술통계·회귀
             // 실행만 원본을 남긴다(같은 TTL). 그래야 같은 analysisRunId 재조회(GET)에서도 응답 시점 해제가
             // 가능하다. 그 외 억제 실행은 원본이 없어 이후 권한을 받아도 재실행이 필요하다.
             liftHolder ? JSON.stringify(buildFrozenAnalysisInput(ctx)) : null],

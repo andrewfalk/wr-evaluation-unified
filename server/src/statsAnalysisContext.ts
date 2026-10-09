@@ -118,7 +118,14 @@ export interface AnalysisContext {
   // correlationMatrixPairs와 동일 원칙 — 이 계산 자체는 O(rows) 단일 패스라 비싸지
   // 않다). 실제 억제 여부는 statsDescriptiveStratifySuppression.ts가 그룹별로 판정.
   descriptiveStratifyPartition: StratifyPartitionResult | null;
+  // 제한데이터 권한자 응답 시점 해제용 컨텍스트인가. undefined/'restricted'는 기존 공개통제 그대로이고,
+  // 'lifted'는 소수 셀(1~9명) 게이트만 끈 파생 컨텍스트(deriveLiftedContext)다 — 통계적 계산 가능 조건
+  // (표본·사건 수, 분산, EPV 등)과 differencing(forceSuppress)은 그대로 적용된다.
+  // 테스트가 AnalysisContext 전체 리터럴을 직접 만들기 때문에 선택 필드로 둔다.
+  disclosureMode?: DisclosureMode;
 }
+
+export type DisclosureMode = 'restricted' | 'lifted';
 
 export type BuildAnalysisContextResult =
   | { ok: true; ctx: AnalysisContext }
@@ -175,6 +182,7 @@ export async function buildAnalysisContext(
   return buildAnalysisContextTail({
     orgId, userId, recipe, catalogByKey, recipeDigest, queryFamilyDigest,
     differencing, snapshot, dataset, requestSuppressed, reasonCode,
+    disclosureMode: 'restricted',
   });
 }
 
@@ -240,6 +248,31 @@ export function deriveAnalysisContext(
     dataset: frozen.dataset,
     requestSuppressed: false,
     reasonCode: null,
+    disclosureMode: 'restricted',
+  });
+}
+
+// 제한데이터 권한자의 응답 시점 해제 — 이미 만들어진 컨텍스트(ctx)의 dataset을 그대로 쓰되 소수 셀(1~9명)
+// 게이트만 끈 컨텍스트를 새로 만든다. 요청 수준 억제는 differencing(forceSuppress)으로만 판정한다 —
+// 전체 N<10(MIN_COHORT_NOT_MET)은 풀지만 남용 방지 장치인 differencing은 풀지 않는다.
+// POST는 방금 만든 ctx, GET은 deriveAnalysisContext가 frozen_dataset에서 복원한 ctx를 넘기면 된다
+// (둘 다 dataset/recipe/catalog만 쓰는 순수 함수라 결과가 같다). 입력상한 초과 등으로 ok:false가
+// 나오면 호출부가 해제 불가로 처리한다.
+export function deriveLiftedContext(ctx: AnalysisContext): BuildAnalysisContextResult {
+  const forceSuppress = ctx.differencing.forceSuppress;
+  return buildAnalysisContextTail({
+    orgId: ctx.orgId,
+    userId: ctx.userId,
+    recipe: ctx.recipe,
+    catalogByKey: ctx.catalogByKey,
+    recipeDigest: ctx.recipeDigest,
+    queryFamilyDigest: ctx.queryFamilyDigest,
+    differencing: ctx.differencing,
+    snapshot: ctx.snapshot,
+    dataset: ctx.dataset,
+    requestSuppressed: forceSuppress,
+    reasonCode: forceSuppress ? 'DIFFERENCING_RATE_LIMIT' : null,
+    disclosureMode: 'lifted',
   });
 }
 
@@ -255,6 +288,7 @@ interface BuildAnalysisContextTailInput {
   dataset: DatasetResult;
   requestSuppressed: boolean;
   reasonCode: 'MIN_COHORT_NOT_MET' | 'DIFFERENCING_RATE_LIMIT' | null;
+  disclosureMode: DisclosureMode;
 }
 
 // buildAnalysisContext(HTTP, snapshot을 막 읽은 직후)와 deriveAnalysisContext(워커/GET,
@@ -264,8 +298,9 @@ interface BuildAnalysisContextTailInput {
 function buildAnalysisContextTail(input: BuildAnalysisContextTailInput): BuildAnalysisContextResult {
   const {
     orgId, userId, recipe, catalogByKey, recipeDigest, queryFamilyDigest,
-    differencing, snapshot, dataset, requestSuppressed, reasonCode,
+    differencing, snapshot, dataset, requestSuppressed, reasonCode, disclosureMode,
   } = input;
+  const lifted = disclosureMode === 'lifted';
 
   let paired: PairedDatasetResult | null = null;
   let pairDisclosed = false;
@@ -374,7 +409,7 @@ function buildAnalysisContextTail(input: BuildAnalysisContextTailInput): BuildAn
       levelSummaries,
       eventSummary,
       interactionLevelSummaries,
-    });
+    }, { lifted });
     regressionDisclosed = !requestSuppressed && disclosure.disclose;
 
     if (regressionDisclosed) {
@@ -480,6 +515,7 @@ function buildAnalysisContextTail(input: BuildAnalysisContextTailInput): BuildAn
       regressionDisclosed, regressionDesign, regressionExcludedRowCount, regressionMethod,
       predictionDisclosed, predictionState,
       descriptiveStratifyPartition,
+      disclosureMode,
     },
   };
 }

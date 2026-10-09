@@ -51,7 +51,13 @@ export type UnrestrictedOutcome =
   // 클라이언트 연결이 끊겼다 — 호출부는 응답·memo 저장·공개 감사를 하지 않고 즉시 중단한다.
   | { kind: 'aborted' };
 
-class GroupLimitExceeded extends Error {}
+// 계산 도중 "해제본을 만들 수 없다"고 확정된 경우(그룹 수 초과, 방법 실행 불가 등)를 집계본 폴백 상태와 함께 던진다.
+// 결함이 아니라 예상된 폴백이므로 아래 resolveUnrestricted가 unavailable_*로 매핑한다.
+export class UnrestrictedUnavailable extends Error {
+  constructor(readonly status: UnrestrictedUnavailableStatus) {
+    super(status);
+  }
+}
 
 async function computeUnrestricted(
   pool: Pool,
@@ -65,7 +71,7 @@ async function computeUnrestricted(
   if (stratifyByKey) {
     const stratifyType = ctx.catalogByKey.get(stratifyByKey)?.type;
     const partition = partitionRowsForStratify(ctx.dataset.rows, stratifyByKey, stratifyType, { mergeSmallGroups: false });
-    if (partition.groups.length > MAX_STRATIFY_GROUPS) throw new GroupLimitExceeded();
+    if (partition.groups.length > MAX_STRATIFY_GROUPS) throw new UnrestrictedUnavailable('unavailable_group_limit');
     const stratified = await computeDescriptiveStratifiedAnalyzeResult(ctx, opts, { unrestricted: true, partition });
     const labeled = await resolveStratifyGroupLabels(pool, ctx.orgId, ctx.catalogByKey, stratified);
     // 층화 결과는 최상위 continuous/discrete가 항상 빈 배열이다(진실 공급원 하나 — 계약).
@@ -92,15 +98,29 @@ export async function resolveUnrestrictedDescriptive(
   executionDigest: string,
   signal?: AbortSignal,
 ): Promise<UnrestrictedOutcome> {
+  return resolveUnrestricted(ctx.userId, executionDigest, signal, () => computeUnrestricted(pool, ctx, aggregate, signal));
+}
+
+/**
+ * 모드 무관 공통 골격 — abort 확인 → memo 조회 → 사용자당 동시 1건 락 → 계산 → 오류 매핑.
+ * 기술통계 외 모드(statsLiftedRecompute.ts)도 락·memo·폴백 매핑을 복제하지 않고 이 함수를 쓴다.
+ * 호출 전에 호출부가 조회자의 stats.export_limited_rows 권한을 확인해야 한다(memo는 그 "뒤에" 조회).
+ */
+export async function resolveUnrestricted(
+  userId: string,
+  executionDigest: string,
+  signal: AbortSignal | undefined,
+  compute: () => Promise<AnalyzeResult>,
+): Promise<UnrestrictedOutcome> {
   if (signal?.aborted) return { kind: 'aborted' };
 
-  const memoized = getMemoizedUnrestricted(executionDigest, ctx.userId);
+  const memoized = getMemoizedUnrestricted(executionDigest, userId);
   if (memoized) return { kind: 'applied', result: memoized, source: 'memo' };
 
   // 같은 사용자의 동시 해제 계산은 1건만 — 이미 돌고 있으면 기다리지 않고 폴백한다.
-  if (!tryAcquireUserLock(ctx.userId)) return { kind: 'unavailable', status: 'unavailable_engine_busy' };
+  if (!tryAcquireUserLock(userId)) return { kind: 'unavailable', status: 'unavailable_engine_busy' };
   try {
-    const result = await computeUnrestricted(pool, ctx, aggregate, signal);
+    const result = await compute();
     if (signal?.aborted) return { kind: 'aborted' };
     // memo는 여기서 저장하지 않는다 — 계산 뒤 권한 재검사·감사·취소 확인을 통과해 실제로 전달할 때만
     // 호출부(finalizeAnalyzeResponse)가 저장한다. 그 전에 저장하면 취소·회수된 요청의 해제 결과가 남는다.
@@ -117,9 +137,9 @@ export async function resolveUnrestrictedDescriptive(
     }
     if (err instanceof StatsEngineDegradedError) return { kind: 'unavailable', status: 'unavailable_engine_degraded' };
     if (err instanceof StatsEngineInputTooLargeError) return { kind: 'unavailable', status: 'unavailable_input_too_large' };
-    if (err instanceof GroupLimitExceeded) return { kind: 'unavailable', status: 'unavailable_group_limit' };
+    if (err instanceof UnrestrictedUnavailable) return { kind: 'unavailable', status: err.status };
     throw err; // StatsEngineResultInvalidError·무결성 assertion·zod 오류 등은 결함이므로 전파한다.
   } finally {
-    releaseUserLock(ctx.userId);
+    releaseUserLock(userId);
   }
 }

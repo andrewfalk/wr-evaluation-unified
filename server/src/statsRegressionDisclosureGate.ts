@@ -33,7 +33,14 @@ export interface RegressionDisclosureResult {
  * 100명 중 1명만 결측 제외인데 n=99와 제외 건수를 그대로 보이면 preview가
  * 감췄던 결측 정보가 되살아난다. `evaluateBivariateDisclosure`
  * (statsBivariateDisclosureGate.ts)와 동일한 원칙 재사용. */
-export function evaluateRegressionDisclosure(input: RegressionDisclosureInput): RegressionDisclosureResult {
+export function evaluateRegressionDisclosure(
+  input: RegressionDisclosureInput,
+  options: { lifted?: boolean } = {},
+): RegressionDisclosureResult {
+  // 제한데이터 권한자의 응답 시점 해제(statsLiftedRecompute.ts) — 소수 셀(1~9명) 판정만 끈다. 이 게이트는
+  // 소수 셀 검사뿐이라(통계적 계산 가능 조건은 ④ 설계행렬 쪽) lifted면 항상 공개 가능으로 통과한다.
+  if (options.lifted === true) return { disclose: true, reasonCode: null };
+
   const suppressed =
     isSmallCell(input.includedPersonCount) ||
     isSmallCell(input.excludedPersonCount) ||
