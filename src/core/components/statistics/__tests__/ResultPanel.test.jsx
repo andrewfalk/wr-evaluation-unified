@@ -897,11 +897,53 @@ describe('ResultPanel — 제한데이터 소수 셀 해제 표시(limitedDisclo
     });
   });
 
-  it('이변량 실행에는 기술통계 해제 배너가 뜨지 않는다', () => {
+  it('이변량 실행에도 해제 배너가 뜬다', () => {
     renderResult(
       { continuous: [], discrete: [], bivariate: { method: 'welch_t', suppressed: true }, limitedDisclosure: 'applied' },
       { analysisMode: 'bivariate', variableKeys: ['a', 'b'] },
     );
+    expect(screen.getAllByRole('status').some((el) => el.textContent.includes('소수 인원(10명 미만) 보호가 해제된 결과'))).toBe(true);
+  });
+
+  it('아직 해제를 지원하지 않는 모드(상관행렬)에는 해제 배너가 뜨지 않는다', () => {
+    renderResult(
+      { continuous: [], discrete: [], limitedDisclosure: 'applied' },
+      { analysisMode: 'correlation_matrix', variableKeys: ['a', 'b', 'c'] },
+    );
     expect(screen.queryByText(/소수 인원\(10명 미만\) 보호가 해제된 결과/)).toBeNull();
+  });
+
+  describe('이변량 억제 카드 — 해제 후 계산 불가 사유', () => {
+    const biRecipe = { analysisMode: 'bivariate', variableKeys: ['a', 'b'], requestedMethod: 'welch_t' };
+
+    // 이변량 결과 카드는 "연관성" 탭에 그려진다(기본 탭은 요약).
+    it('일반 응답(사유 없음)은 기존 공개 정책 문구를 그대로 보여준다', async () => {
+      const user = userEvent.setup();
+      renderResult(
+        { continuous: [], discrete: [], bivariate: { method: 'welch_t', suppressed: true } },
+        biRecipe,
+      );
+      await openAssociationTab(user);
+      expect(screen.getByText(/공개 정책에 따라 결과가 표시되지 않음/)).toBeTruthy();
+      expect(screen.queryByText(/소수 인원 보호가 해제됐지만/)).toBeNull();
+    });
+
+    it.each([
+      ['REPEATED_MEASURES_NOT_ALIGNED', '반복측정'],
+      ['REQUIRES_EXACTLY_TWO_GROUPS', '정확히 2개'],
+      ['insufficient_group_data', '관측치가 너무 적어'],
+      ['constant_variable', '값이 모두 같아'],
+      ['undefined_zero_variance', '분산이 0'],
+    ])('해제 응답의 unavailableReason=%s는 "해제됐지만 계산 불가" 사유로 보인다', async (unavailableReason, expected) => {
+      const user = userEvent.setup();
+      renderResult(
+        { continuous: [], discrete: [], bivariate: { method: 'welch_t', suppressed: true, unavailableReason }, limitedDisclosure: 'applied' },
+        biRecipe,
+      );
+      await openAssociationTab(user);
+      const note = screen.getByText(/소수 인원 보호가 해제됐지만 결과를 계산할 수 없습니다/);
+      expect(note.textContent).toContain(expected);
+      expect(screen.queryByText(/공개 정책에 따라 결과가 표시되지 않음/)).toBeNull();
+    });
   });
 });

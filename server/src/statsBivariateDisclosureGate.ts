@@ -27,7 +27,17 @@ export interface BivariateDisclosureCounts {
   excludedPersonCount: number;
 }
 
-export function evaluateBivariateDisclosure(paired: BivariateDisclosureCounts): BivariateDisclosureResult {
+// options.lifted: 제한데이터 권한자의 응답 시점 해제 컨텍스트(statsLiftedRecompute.ts) — 소수 셀(1~9명) 판정만
+// 끈다. 아래 세 함수 모두 소수 셀 검사뿐이라 lifted면 항상 공개 가능으로 통과한다(통계적 계산 가능 조건은 별도).
+export interface DisclosureGateOptions {
+  lifted?: boolean;
+}
+
+export function evaluateBivariateDisclosure(
+  paired: BivariateDisclosureCounts,
+  options: DisclosureGateOptions = {},
+): BivariateDisclosureResult {
+  if (options.lifted === true) return { disclose: true, reasonCode: null };
   const suppressed = isSmallCell(paired.includedPersonCount) || isSmallCell(paired.excludedPersonCount);
   return { disclose: !suppressed, reasonCode: suppressed ? 'MIN_COHORT_NOT_MET' : null };
 }
@@ -35,7 +45,11 @@ export function evaluateBivariateDisclosure(paired: BivariateDisclosureCounts): 
 /** 그룹비교(welch_t/mann_whitney/anova/kruskal_wallis) — 관측된 "전부"(그 방법이
  * 최종적으로 쓰는 2개뿐 아니라 그 변수의 관측 레벨 전부)의 personCount가 0 또는
  * ≥MINIMUM_COHORT일 때만 REQUIRES_EXACTLY_TWO_GROUPS 등 구조적 사유를 노출한다. */
-export function isGroupBreakdownDisclosable(groups: ReadonlyArray<{ personCount: number }>): boolean {
+export function isGroupBreakdownDisclosable(
+  groups: ReadonlyArray<{ personCount: number }>,
+  options: DisclosureGateOptions = {},
+): boolean {
+  if (options.lifted === true) return true;
   return groups.every((g) => g.personCount === 0 || g.personCount >= MINIMUM_COHORT);
 }
 
@@ -43,6 +57,10 @@ export function isGroupBreakdownDisclosable(groups: ReadonlyArray<{ personCount:
  * TABLE_NOT_2X2/LOW_EXPECTED_COUNT 등을 노출한다. 주변합이 아니라 개별 셀
  * 기준이다(8차 리뷰 정정 — [[1,19],[19,61]]처럼 주변합은 충분해도 셀 하나가
  * 작으면 false여야 한다). */
-export function isTableDisclosable(table: ReadonlyArray<ReadonlyArray<number>>): boolean {
+export function isTableDisclosable(
+  table: ReadonlyArray<ReadonlyArray<number>>,
+  options: DisclosureGateOptions = {},
+): boolean {
+  if (options.lifted === true) return true;
   return table.every((row) => row.every((cell) => cell === 0 || cell >= MINIMUM_COHORT));
 }

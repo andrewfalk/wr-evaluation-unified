@@ -7,7 +7,8 @@
 // 통계적 계산 가능 조건(완전사례 수, 분산 0, EPV, rank 등)은 lifted 컨텍스트에서도 그대로 판정된다 —
 // 소수 인원 때문에 가려졌던 결과가 풀리면 계산 가능 여부에 따라 추정 결과 또는 non_estimable 사유가 나온다.
 import type { Pool } from 'pg';
-import type { AnalyzeResult } from '@wr/contracts';
+import { isDeepStrictEqual } from 'node:util';
+import type { AnalyzeBivariateResult, AnalyzeResult } from '@wr/contracts';
 import config from './config';
 import { hasCapability } from './middleware/requireCapability';
 import { deriveLiftedContext, type AnalysisContext } from './statsAnalysisContext';
@@ -17,6 +18,9 @@ import {
   type UnrestrictedOutcome,
 } from './statsDescriptiveUnrestricted';
 import { computeRegressionAnalyzeResult } from './statsRegressionSuppression';
+import { computeBivariateAnalyzeResult } from './statsBivariateSuppression';
+import { computeAvailableMethods } from './statsMethodCatalog';
+import { METHOD_POLICY_VERSION } from './statsExecutionDigest';
 
 /**
  * 저장된 집계 결과에서 실제로 "풀 것이 있는" 실행인가. 풀 것이 없는데 재계산하면 엔진을 낭비하고
@@ -26,12 +30,35 @@ import { computeRegressionAnalyzeResult } from './statsRegressionSuppression';
  */
 export function isLiftApplicable(analysisMode: string, aggregate: AnalyzeResult): boolean {
   if (analysisMode === 'regression') return aggregate.regression?.suppressed === true;
+  if (analysisMode === 'bivariate') return isBivariateMasked(aggregate.bivariate);
+  return false;
+}
+
+/**
+ * 저장된 이변량 집계본에 소수 셀 때문에 가려진 부분이 있는가. 전체 억제 스텁(그룹/셀·쌍 게이트·Python 계산 불가)뿐 아니라
+ * 공개된 결과 안의 부분 가림도 포함한다 — 제외 사유 상세(exclusions=null), 그룹별 이상치 수 생략, 산점도 그리드 생략.
+ * 이 중 어느 것도 없으면 해제해도 같은 결과이므로 엔진을 다시 돌리지 않는다.
+ */
+function isBivariateMasked(b: AnalyzeBivariateResult | undefined): boolean {
+  if (!b) return false;
+  if (b.suppressed) return true;
+  if (b.exclusions === null) return true;
+  if (b.groupBreakdown?.some((g) => g.boxplot !== undefined && g.boxplot.outlierCount === undefined)) return true;
+  if (b.scatter !== undefined && b.scatter.grid === undefined) return true;
   return false;
 }
 
 /** restricted 컨텍스트에서 소수 셀(1~9명) 게이트 때문에 "가려진 것"이 있는가. 가려진 게 없으면 해제해도 같은 결과다. */
 function isRestrictedMasked(ctx: AnalysisContext): boolean {
   if (ctx.recipe.analysisMode === 'regression') return ctx.requestSuppressed || !ctx.regressionDisclosed;
+  if (ctx.recipe.analysisMode === 'bivariate') {
+    if (ctx.requestSuppressed || !ctx.pairDisclosed || !ctx.paired) return true;
+    // 쌍 게이트를 통과해도 A-2(브레이크다운 청결도)가 방법별 세부 사유를 가려 'available'로 두었을 수 있다 —
+    // 해제 기준으로 다시 판정한 목록이 다르면 권한자에게는 진짜 사유가 보여야 한다.
+    const [keyX, keyY] = ctx.recipe.variableKeys;
+    const liftedMethods = computeAvailableMethods(keyX, keyY, ctx.catalogByKey, ctx.paired, METHOD_POLICY_VERSION, { lifted: true });
+    return !isDeepStrictEqual(liftedMethods, ctx.availableMethods);
+  }
   return false;
 }
 
@@ -78,6 +105,18 @@ async function computeLifted(
   // 방법이 실제로 실행 가능한지 다시 확인하지 않으면 통계적으로 불가능한 분석을 계산하게 된다.
   const selected = lifted.availableMethods.find((m) => m.id === lifted.recipe.requestedMethod);
   const executable = selected != null && (selected.status === 'available' || selected.status === 'conditional');
+  if (lifted.recipe.analysisMode === 'bivariate') {
+    // 이변량은 실행 불가여도 폴백이 아니라 "사유가 붙은 억제 결과"를 해제본으로 보낸다 — 소수 인원 보호가 풀린 뒤 남은
+    // 이유(반복측정, 그룹 수 등)를 권한자가 알아야 하기 때문이다. 쌍 게이트/설계가 없는 것은 호출 순서 위반.
+    if (!lifted.pairDisclosed || !lifted.paired) throw new UnrestrictedUnavailable('unavailable_method_not_executable');
+    const method = lifted.recipe.requestedMethod!; // validateRecipe(analyze)가 이미 보장
+    if (!executable) {
+      const unavailableReason = selected?.reasonCode ?? undefined;
+      return { ...aggregate, bivariate: { method, suppressed: true, ...(unavailableReason ? { unavailableReason } : {}) } };
+    }
+    const bivariate = await computeBivariateAnalyzeResult(lifted, { timeoutMs: config.stats.timeoutMs, signal });
+    return { ...aggregate, bivariate };
+  }
   if (!executable) throw new UnrestrictedUnavailable('unavailable_method_not_executable');
   // 방법이 실행 가능으로 보여도 설계행렬이 없으면 compute*가 결함 오류를 던져 500이 된다(예: 지원하지 않는 outcome 타입으로
   // regressionMethod가 null). 예상된 폴백으로 처리한다.

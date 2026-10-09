@@ -322,9 +322,9 @@ function buildAnalysisContextTail(input: BuildAnalysisContextTailInput): BuildAn
     // §"통합 공개통제 게이트" — 기존 request-level 억제(differencing/전체 MIN_COHORT)와
     // 새 쌍-level 억제(레이어1)를 OR로 합친다. 이 둘 중 하나라도 억제면 availableMethods
     // 계산 자체를 생략한다(세부 사유가 새는 걸 막기 위해 애초에 안 만듦).
-    pairDisclosed = !requestSuppressed && evaluateBivariateDisclosure(paired).disclose;
+    pairDisclosed = !requestSuppressed && evaluateBivariateDisclosure(paired, { lifted }).disclose;
     if (pairDisclosed) {
-      availableMethods = computeAvailableMethods(keyX, keyY, catalogByKey, paired, METHOD_POLICY_VERSION);
+      availableMethods = computeAvailableMethods(keyX, keyY, catalogByKey, paired, METHOD_POLICY_VERSION, { lifted });
       methodCatalogVersion = METHOD_POLICY_VERSION;
     }
   } else if (recipe.analysisMode === 'correlation_matrix') {

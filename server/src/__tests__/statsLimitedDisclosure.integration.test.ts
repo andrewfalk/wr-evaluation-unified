@@ -382,7 +382,7 @@ describe.skipIf(!TEST_DB_URL)('제한데이터 권한자 소수 셀 해제 — H
   // ---------------------------------------------------------------------------
   // 미리보기
   // ---------------------------------------------------------------------------
-  it('미리보기: 권한자는 N<10도 실제 수와 limitedDisclosure를 받고 감사에는 요청 수준 해제가 기록된다(이변량 미리보기는 그대로 억제)', async () => {
+  it('미리보기: 권한자는 N<10도 실제 수와 limitedDisclosure를 받고 감사에는 요청 수준 해제가 기록된다(이변량 미리보기도 권한자에게만 풀린다)', async () => {
     await seedJobs([['용접공', 5]]);
     const plain = await post(owner, 'preview', JOB_BODY);
     expect(plain.body.counts).toMatchObject({ suppressed: true, personCount: null, reasonCode: 'MIN_COHORT_NOT_MET' });
@@ -405,15 +405,21 @@ describe.skipIf(!TEST_DB_URL)('제한데이터 권한자 소수 셀 해제 — H
       smallCellLimitLifted: true, liftedRequestGate: true,
     });
 
-    // 이변량 미리보기는 권한자여도 변경 없음(통계적 타당성 게이트가 섞여 있어 범위 밖)
-    const bivariate = await post(owner, 'preview', {
+    // 이변량 미리보기도 권한자에게는 풀린다(statsBivariateLimitedDisclosure.integration.test.ts가 상세를 검증).
+    // 비권한 사용자는 같은 요청이 그대로 억제된다 — 풀림이 권한에 묶여 있음을 여기서도 고정한다.
+    const bivariateBody = {
       ...RECIPE_BASE, variableKeys: ['shoulder.exposure.anyExceeded', 'knee.relatedness.max'],
       formulaPolicies: { 'shoulder.exposure.anyExceeded': 'recompute_current', 'knee.relatedness.max': 'recompute_current' },
       analysisMode: 'bivariate',
-    });
+    };
+    const bivariate = await post(owner, 'preview', bivariateBody);
     expect(bivariate.status).toBe(200);
-    expect(bivariate.body.counts.suppressed).toBe(true);
-    expect(bivariate.body.limitedDisclosure).toBeUndefined();
+    expect(bivariate.body.counts).toMatchObject({ suppressed: false, personCount: 5, reasonCode: null });
+    expect(bivariate.body.limitedDisclosure).toBe('applied');
+
+    const bivariateAdmin = await post(adminNoCap, 'preview', bivariateBody);
+    expect(bivariateAdmin.body.counts.suppressed).toBe(true);
+    expect(bivariateAdmin.body.limitedDisclosure).toBeUndefined();
   }, 40000);
 
   it('미리보기: 요청 수준은 통과하고 결측 2명(셀 수준)만 푼 경우 감사는 liftedRequestGate=false, liftedCellLevel=true로 구분된다', async () => {

@@ -16,6 +16,13 @@ const REASON_LABELS = {
   REQUIRES_AT_LEAST_TWO_LEVELS: '각 축에 관측된 수준이 2개 이상이어야 합니다.',
   TABLE_NOT_2X2: '2×2 표에만 쓸 수 있습니다.',
   LOW_EXPECTED_COUNT: '일부 칸의 기대도수가 작아 근사의 타당성이 낮습니다.',
+  // 제한데이터 권한자 해제 응답(bivariate.unavailableReason) 전용 — Python 엔진이 계산 불가로 돌려준 사유(nullReasons).
+  // 소수 인원 보호가 풀린 뒤에도 결과가 없을 때 이유를 알려 "여전히 비공개"로 오해하지 않게 한다.
+  insufficient_group_data: '일부 그룹의 관측치가 너무 적어 계산할 수 없습니다.',
+  constant_variable: '값이 모두 같아 계산할 수 없습니다.',
+  undefined_zero_variance: '분산이 0이라 계산할 수 없습니다.',
+  insufficient_data: '관측치가 부족해 계산할 수 없습니다.',
+  non_finite_result: '계산 결과가 유한한 값이 아니어서 표시할 수 없습니다.',
 };
 
 export function describeMethodReasonCode(reasonCode) {
