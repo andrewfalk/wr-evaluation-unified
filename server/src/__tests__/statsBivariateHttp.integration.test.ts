@@ -43,6 +43,8 @@ import { createStatsRouter } from '../routes/stats';
 import { createStatsRunsQueueWorker } from '../statsRunsQueue';
 import { generateAccessToken } from '../auth/tokens';
 import { hashToken, generateToken } from '../auth/tokenHash';
+// 기대 박스플롯을 하드코딩하지 않고 실제 분석 코드(서버·클라이언트가 공유하는 계산 함수)로 독립 재계산한다.
+import { computeKneeCalc } from '@wr/analytics-core/modules/knee/index';
 
 const TEST_DB_URL = process.env.TEST_DATABASE_URL;
 const CSRF_TOKEN = 'itest-bivariate-csrf';
@@ -81,6 +83,41 @@ function shoulderModule(exceeded: boolean) {
   return { jobExtras: [{ sharedJobId: 'job-1', overheadHours: exceeded ? '3' : '0.1' }] };
 }
 const SHOULDER_JOB = { id: 'job-1', startDate: '2015-01-01', endDate: '2020-01-01', workDaysPerYear: 250 };
+
+// knee.relatedness.max 카탈로그 표시값 = 부담수준 점수 범위(min~max)의 중점(2026-09-26 제품 결정,
+// analytics-core/modules/knee/extractors.ts — 키 이름은 "max" 그대로). bin별 기대값을 실제 formula로 계산한다.
+function kneeRelatednessValue(bin: keyof typeof KNEE_BURDEN_BINS): number {
+  const shared = { birthDate: '1980-01-01', injuryDate: '2020-01-01', jobs: [SHOULDER_JOB] };
+  const { min, max } = computeKneeCalc({ shared: shared as any, module: kneeModule(bin) as any }).relatedness;
+  return (Number(min) + Number(max)) / 2;
+}
+
+// 선형보간 분위수(numpy 기본) + Tukey 울타리 안쪽 최소·최대 = 엔진(boxplot.py)이 내는 값. 엔진 코드가 아니라 정의에서 기대값을 만든다.
+function quantile(sorted: number[], q: number): number {
+  const pos = (sorted.length - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+}
+function expectedBoxplot(values: number[]) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const q1 = quantile(sorted, 0.25);
+  const q3 = quantile(sorted, 0.75);
+  const iqr = q3 - q1;
+  const inside = sorted.filter((v) => v >= q1 - 1.5 * iqr && v <= q3 + 1.5 * iqr);
+  return {
+    q1, median: quantile(sorted, 0.5), q3,
+    lowerWhisker: inside[0], upperWhisker: inside[inside.length - 1],
+    outlierCount: sorted.length - inside.length,
+  };
+}
+function expectBoxplotCloseTo(actual: Record<string, number>, values: number[]) {
+  const expected = expectedBoxplot(values);
+  for (const key of ['q1', 'median', 'q3', 'lowerWhisker', 'upperWhisker'] as const) {
+    expect(actual[key], key).toBeCloseTo(expected[key], 6);
+  }
+  expect(actual.outlierCount).toBe(expected.outlierCount);
+}
 
 // elbow.assessment.burdenGradeMax(ordinal) — extractors.test.ts COMPLETE_ENTRY(고도)/
 // lowRiskEntry(부담 작업 아님). ELBOW_BURDEN_GRADE_ORDER의 양끝 2개 레벨만 실사용 —
@@ -282,15 +319,20 @@ describe.skipIf(!TEST_DB_URL)('이변량 분석 — 실데이터 HTTP 통합(POS
     expect(Number.isFinite(bivariate.statistic)).toBe(true);
     expect(bivariate.pValue).toBeGreaterThanOrEqual(0);
     expect(bivariate.pValue).toBeLessThanOrEqual(1);
-    // PR3-B가 groupBreakdown에 그룹별 boxplot(§9)을 추가하면서 이 기대값이
-    // 갱신되지 않았었다(PR4-A1 리뷰의 HTTP 통합 테스트 404 수정으로 처음
-    // 끝까지 돌려보고서야 드러남 — 이전엔 groupBreakdown 필드 존재 자체를
-    // 확인한 적이 없었다). knee 값은 kneeModule의 고정 bin에서 결정적으로
-    // 계산되므로 boxplot 수치도 고정값이다.
-    expect(bivariate.groupBreakdown).toEqual([
-      { label: false, n: 12, boxplot: { q1: 50, median: 62.5, q3: 75, lowerWhisker: 50, upperWhisker: 75, outlierCount: 0 } },
-      { label: true, n: 12, boxplot: { q1: 83.3, median: 86.1, q3: 88.9, lowerWhisker: 83.3, upperWhisker: 88.9, outlierCount: 0 } },
-    ]);
+    // 그룹별 boxplot(PR3-B §9) — 기대값을 하드코딩하지 않고 실제 formula로 독립 재계산한다.
+    // knee 값은 kneeModule의 고정 bin에서 결정적으로 계산되고, 카탈로그 표시값은 구간 중점이다
+    // (kneeRelatednessValue 주석 참고). 그 정의가 바뀌면 이 기대값도 함께 바뀌어 어긋남이 드러난다.
+    expect(bivariate.groupBreakdown).toHaveLength(2);
+    const [falseGroup, trueGroup] = bivariate.groupBreakdown;
+    expect([falseGroup.label, falseGroup.n, trueGroup.label, trueGroup.n]).toEqual([false, 12, true, 12]);
+    expectBoxplotCloseTo(
+      falseGroup.boxplot,
+      Array.from({ length: 12 }, (_, i) => kneeRelatednessValue(i % 2 === 0 ? 'low' : 'lowMid')),
+    );
+    expectBoxplotCloseTo(
+      trueGroup.boxplot,
+      Array.from({ length: 12 }, (_, i) => kneeRelatednessValue(i % 2 === 0 ? 'highMid' : 'high')),
+    );
     // true 그룹(무릎 weight/squatting이 훨씬 큼)이 relatedness가 더 높아야 하므로
     // "뒤(true)-앞(false)" 평균차는 양수여야 한다 — 방향규칙(§방향규칙) 실측 확인.
     const meanDiff = bivariate.effectSizes.find((es: { name: string }) => es.name === 'mean_difference');
@@ -326,12 +368,18 @@ describe.skipIf(!TEST_DB_URL)('이변량 분석 — 실데이터 HTTP 통합(POS
     expect(bivariate.n).toBe(22);
     // 카탈로그 고정 순서(ELBOW_BURDEN_GRADE_ORDER)를 따라 "부담 작업 아님"이 앞,
     // "고도"가 뒤여야 한다(관측 안 된 중간 레벨은 응답에 아예 등장하지 않음).
-    // boxplot 필드는 PR3-B가 groupBreakdown에 추가했다(위 welch_t 케이스와 동일한
-    // 사전 결함 — knee 값은 kneeModule 고정 bin에서 결정적으로 계산되는 고정값).
-    expect(bivariate.groupBreakdown).toEqual([
-      { label: '부담 작업 아님', n: 11, boxplot: { q1: 50, median: 50, q3: 75, lowerWhisker: 50, upperWhisker: 75, outlierCount: 0 } },
-      { label: '고도', n: 11, boxplot: { q1: 83.3, median: 83.3, q3: 88.9, lowerWhisker: 83.3, upperWhisker: 88.9, outlierCount: 0 } },
-    ]);
+    // 그룹별 boxplot — 위 welch_t 케이스와 같이 실제 formula로 독립 재계산한다.
+    expect(bivariate.groupBreakdown).toHaveLength(2);
+    const [lowGroup, highGroup] = bivariate.groupBreakdown;
+    expect([lowGroup.label, lowGroup.n, highGroup.label, highGroup.n]).toEqual(['부담 작업 아님', 11, '고도', 11]);
+    expectBoxplotCloseTo(
+      lowGroup.boxplot,
+      Array.from({ length: 11 }, (_, i) => kneeRelatednessValue(i % 2 === 0 ? 'low' : 'lowMid')),
+    );
+    expectBoxplotCloseTo(
+      highGroup.boxplot,
+      Array.from({ length: 11 }, (_, i) => kneeRelatednessValue(i % 2 === 0 ? 'highMid' : 'high')),
+    );
   }, 30000);
 
   it('continuous(knee.relatedness.max) × continuous(spine.mddm.lifetimeDoseMNh) — pearson_correlation', async () => {
