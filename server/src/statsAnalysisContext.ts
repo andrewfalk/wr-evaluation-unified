@@ -223,9 +223,13 @@ export function buildFrozenAnalysisInput(ctx: AnalysisContext): FrozenAnalysisIn
 // 판정은 요청 단계 억제 여부와 무관하게 "조회자의 현재 권한 + descriptive"만 보므로 이 고정값은
 // 해제 경로에 영향이 없다. differencing으로 막힌 실행(forceSuppress)은 원본을 저장하지 않으므로
 // 이 함수에 도달하지 않는다 — 재조회로 differencing 제한을 우회할 수 없다.
+// options.disclosureMode='lifted'면 소수 셀 게이트를 끈 컨텍스트(워커가 해제 적격 실행의 해제본을 만들 때).
+// options.restrictedRequestSuppressed=true면 전체 N<10을 restricted 컨텍스트에 그대로 반영한다 — 해제 적격 실행은 admission이
+// 억제 요청을 걸러내지 않고 통과시켰으므로(권한자는 N<10도 풀린다) 일반본 쪽 판정을 워커가 다시 해야 한다.
 export function deriveAnalysisContext(
   frozen: FrozenAnalysisInput,
   viewer: { viewerUserId: string; viewerOrgId: string },
+  options: { disclosureMode?: DisclosureMode; restrictedRequestSuppressed?: boolean } = {},
 ): BuildAnalysisContextResult {
   const validation = validateRecipe(frozen.recipe, 'analyze');
   if (!validation.valid) {
@@ -235,6 +239,7 @@ export function deriveAnalysisContext(
     return { ok: false, status: 400, body: { code: 'INVALID_RECIPE', errors: validation.errors } };
   }
   const { catalogByKey } = validation;
+  const restrictedSuppressed = options.disclosureMode !== 'lifted' && options.restrictedRequestSuppressed === true;
 
   return buildAnalysisContextTail({
     orgId: viewer.viewerOrgId,
@@ -246,9 +251,9 @@ export function deriveAnalysisContext(
     differencing: { forceSuppress: false, remaining: 0 },
     snapshot: { rows: [], sourceDigest: frozen.sourceDigest, snapshotAsOf: frozen.snapshotAsOf },
     dataset: frozen.dataset,
-    requestSuppressed: false,
-    reasonCode: null,
-    disclosureMode: 'restricted',
+    requestSuppressed: restrictedSuppressed,
+    reasonCode: restrictedSuppressed ? 'MIN_COHORT_NOT_MET' : null,
+    disclosureMode: options.disclosureMode ?? 'restricted',
   });
 }
 

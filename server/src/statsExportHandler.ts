@@ -469,8 +469,10 @@ export async function handlePostExport(pool: Pool, req: Request, res: Response):
     return;
   }
 
-  if (row.requested_disclosure_profile !== 'aggregate') {
-    // 방어적 검사 — PR2에서는 항상 aggregate라 이론상 도달 불가. 미래 PR이 이 라우트를
+  // 'lift_eligible'은 요청 시점에 제한데이터 권한자였던 상관행렬·예측 실행이다. 이 라우트는 위 쿼리가 읽은 집계본(result)만
+  // 포맷하고 해제본(limited_result)은 절대 읽지 않으므로 내보내기 내용은 aggregate와 같다 — CSV에는 해제본이 나가지 않는다.
+  if (row.requested_disclosure_profile !== 'aggregate' && row.requested_disclosure_profile !== 'lift_eligible') {
+    // 방어적 검사 — 알 수 없는 프로파일이면 여기서 잡힌다. 미래 PR이 이 라우트를
     // limited_row/phi 등급에 잘못 재사용하면 여기서 잡힌다(§7).
     console.error('[stats-export] unexpected requested_disclosure_profile', {
       analysisRunId, profile: row.requested_disclosure_profile,

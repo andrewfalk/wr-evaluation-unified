@@ -14,9 +14,10 @@ import { withWriteTransaction } from './db/withWriteTransaction';
 import type {
   AnalyzeResponse, AnalyzeResult, LimitedDisclosureStatus, RunManifest, StatsRunManifestSucceeded,
 } from '@wr/contracts';
-import { buildAnalysisContext, buildFrozenAnalysisInput, type AnalysisContext } from './statsAnalysisContext';
+import { buildAnalysisContext, buildFrozenAnalysisInput, deriveLiftedContext, type AnalysisContext } from './statsAnalysisContext';
 import { canonicalDigest } from './canonicalSerializer';
-import { computeExecutionDigest } from './statsExecutionDigest';
+import { computeExecutionDigest, type RequestedDisclosureProfile } from './statsExecutionDigest';
+import { deliverStoredLimited, isStoredLimitedMode } from './statsStoredLimited';
 import { buildStatsEngineRequest } from './statsDescriptiveSuppression';
 import { buildStratifiedStatsEngineRequest } from './statsDescriptiveStratifySuppression';
 import {
@@ -30,7 +31,7 @@ import { buildBivariateEngineRequest } from './statsBivariateSuppression';
 import { buildPredictionEngineRequestForState } from './statsPredictionSuppression';
 import { buildRegressionEngineRequest } from './statsRegressionSuppression';
 import { buildRunManifest, toStatsRunManifestSucceeded } from './statsRunManifest';
-import { allCorrelationMatrixPairs } from './statsCorrelationMatrixDataset';
+import { buildSuppressedAnalyzeResult } from './statsSuppressedResult';
 import { attachLimitedRowFields } from './statsLimitedRowMerge';
 import { resolveUnrestrictedDescriptive, type UnrestrictedOutcome } from './statsDescriptiveUnrestricted';
 import { isLiftApplicable, liftedContextOrSelf, resolveLiftedRecompute } from './statsLiftedRecompute';
@@ -76,65 +77,6 @@ export function __setActiveAnalyzeRequestsForTests(n: number): void {
 export function toPublicRunManifest(manifest: StatsRunManifestSucceeded): RunManifest {
   const { outcome: _outcome, ...rest } = manifest;
   return rest;
-}
-
-// PR3-A — analysisMode==='bivariate'면 continuous/discrete 대신 bivariate 스텁을
-// 만든다(계획서 §"결과 계약 불변조건" — 조기억제 경로에서도 bivariate 필드가 항상
-// 존재해야 함). requestedMethod는 이 시점에 항상 존재한다(validateRecipe(analyze)가
-// analysisMode==='bivariate'일 때 이미 보장 — buildAnalysisContext가 그 전에 실패함).
-function buildSuppressedAnalyzeResult(ctx: AnalysisContext): AnalyzeResult {
-  if (ctx.recipe.analysisMode === 'bivariate') {
-    return { continuous: [], discrete: [], bivariate: { method: ctx.recipe.requestedMethod!, suppressed: true } };
-  }
-  if (ctx.recipe.analysisMode === 'correlation_matrix') {
-    // PR3-B §4 — 요청 전체가 억제돼도 cells는 항상 C(k,2)개(전부 suppressed:true,
-    // 절대 빈 배열이 아님 — "결과 계약 불변조건"을 상관행렬에도 동일하게 적용).
-    const method = ctx.recipe.requestedMethod as 'pearson_correlation' | 'spearman_correlation';
-    const cells = allCorrelationMatrixPairs(ctx.recipe.variableKeys).map(({ xKey, yKey }) => ({
-      suppressed: true as const, xKey, yKey,
-    }));
-    return {
-      continuous: [], discrete: [],
-      correlationMatrix: { method, variableKeys: ctx.recipe.variableKeys, cells, adjustedPWithheld: true },
-    };
-  }
-  if (ctx.recipe.analysisMode === 'regression') {
-    // PR4-A1 §1 — 회귀 억제는 단일 사유(MIN_COHORT_NOT_MET)로 수렴하는
-    // suppressed:true 스텁뿐이다(다른 필드 일절 없음 — 계약 strict).
-    return {
-      continuous: [], discrete: [],
-      regression: { suppressed: true, reasonCode: 'MIN_COHORT_NOT_MET' },
-    };
-  }
-  if (ctx.recipe.analysisMode === 'prediction') {
-    // PR4-B2 — 예측 억제도 회귀와 동일 원칙: 단일 사유로 수렴하는 suppressed:true
-    // 스텁뿐이다(계획서 §2단계 공개통제, 다른 필드 일절 없음 — 계약 strict).
-    return {
-      continuous: [], discrete: [],
-      prediction: { suppressed: true, reasonCode: 'MIN_COHORT_NOT_MET' },
-    };
-  }
-  if (ctx.recipe.analysisMode === 'descriptive' && ctx.recipe.descriptive) {
-    // Table1 — descriptive는 bivariate/regression/prediction과 달리 모드 전용
-    // disclosure 플래그가 없다(§ 아래 호출부) — 이 스텁은 오직 ctx.requestSuppressed
-    // (=ctx.reasonCode가 채워진 경우)로만 도달하므로 실제 사유를 그대로 반영한다.
-    return {
-      continuous: [], discrete: [],
-      descriptiveStratified: {
-        suppressed: true,
-        stratifyByKey: ctx.recipe.descriptive.stratifyByKey,
-        reasonCode: ctx.reasonCode!,
-      },
-    };
-  }
-  return {
-    continuous: ctx.recipe.variableKeys
-      .filter((k) => ctx.catalogByKey.get(k)?.type === 'continuous')
-      .map((k) => ({ variableKey: k, kind: 'continuous' as const, suppressed: true as const })),
-    discrete: ctx.recipe.variableKeys
-      .filter((k) => ctx.catalogByKey.get(k)?.type !== 'continuous')
-      .map((k) => ({ variableKey: k, kind: 'discrete' as const, suppressed: true as const })),
-  };
 }
 
 function auditExtra(ctx: AnalysisContext, executionDigest: string, extra: Record<string, unknown>) {
@@ -375,6 +317,17 @@ async function respondForTerminalRow(
 ): Promise<FinalizeAnalyzeOutcome> {
   if (row.status === 'succeeded') {
     const manifest = row.manifest as StatsRunManifestSucceeded;
+    // 상관행렬·예측은 원본 행이 없어 조회 때 재계산할 수 없다 — 실행 시 저장해 둔 해제본을 조회자의 현재 권한으로 고른다.
+    if (isStoredLimitedMode(manifest.analysisMode)) {
+      return deliverStoredLimited(pool, { userId: ctx.userId, orgId: ctx.orgId }, {
+        analysisRunId: manifest.analysisRunId,
+        executionDigest,
+        recipeDigest: ctx.recipeDigest,
+        analysisMode: manifest.analysisMode as string,
+        runManifest: toPublicRunManifest(manifest),
+        result: row.result as AnalyzeResult,
+      }, signal);
+    }
     return finalizeAnalyzeResponse(pool, ctx, executionDigest, {
       runManifest: toPublicRunManifest(manifest),
       result: row.result as AnalyzeResult,
@@ -421,13 +374,31 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
       res.status(built.status).json(built.body);
       return;
     }
-    const ctx = built.ctx;
+    let ctx = built.ctx;
+
+    // 해제 적격(lift_eligible) — 상관행렬·예측은 성공 직후 원본 행을 지워 조회 때 재계산할 수 없으므로, 요청 시점에 제한데이터
+    // 권한자였으면 워커가 해제본까지 만들어 저장한다. 이때 소수 셀 게이트를 끈 컨텍스트로 이후 판정(조기 억제·방법 실행 가능성·
+    // 입력상한·작업량)을 하고, 같은 프로파일이 execution_digest에 들어가 권한자 실행과 비권한자 실행의 캐시가 섞이지 않는다.
+    // differencing(forceSuppress)은 풀지 않는다 — 그러면 적격이 아니라 기존 억제 경로 그대로다.
+    let disclosureProfile: RequestedDisclosureProfile = 'aggregate';
+    if (
+      isStoredLimitedMode(ctx.recipe.analysisMode)
+      && !ctx.differencing.forceSuppress
+      && await hasCapability(pool, 'stats.export_limited_rows', ctx.userId, ctx.orgId)
+    ) {
+      const lifted = deriveLiftedContext(ctx);
+      if (lifted.ok) {
+        ctx = lifted.ctx;
+        disclosureProfile = 'lift_eligible';
+      }
+    }
 
     const executionDigest = computeExecutionDigest({
       organizationId: ctx.orgId,
       requestedBy: ctx.userId,
       recipeDigest: ctx.recipeDigest,
       sourceDigest: ctx.snapshot.sourceDigest,
+      requestedDisclosureProfile: disclosureProfile,
     });
 
     // 기존 로직 그대로(위치 불변) — 계산이 필요 없는 즉답이라 admission을 거치지
@@ -546,7 +517,7 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
 
     // 여기부터만 admission.
     const engineTimeoutMs = estimateEngineTimeoutMs(ctx);
-    const admission = await admitAnalysisRun(pool, ctx, executionDigest, engineTimeoutMs);
+    const admission = await admitAnalysisRun(pool, ctx, executionDigest, engineTimeoutMs, disclosureProfile);
 
     if (admission.kind === 'denied') {
       res.status(admission.status).json({ code: admission.code, error: 'Request denied.' });
