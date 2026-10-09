@@ -845,6 +845,10 @@ export const AnalyzeBivariateExclusionEntrySchema = z.object({
 const AnalyzeBivariateSuppressedSchema = z.object({
   method: StatsMethodIdSchema,
   suppressed: z.literal(true),
+  // 제한데이터(stats.export_limited_rows) 권한자 해제 응답 전용 — 소수 인원 보호가 풀린 뒤에도 결과가 없는 이유
+  // (선택한 방법이 실행 불가이거나 Python이 계산 불가로 돌려줌). 일반 응답에는 절대 붙지 않는다(소수 인원 때문인지
+  // 값 상수 때문인지 관찰자가 구분할 수 없어야 한다는 기존 불투명 억제 원칙). 응답 시점에만 만들고 저장하지 않는다.
+  unavailableReason: z.union([StatsMethodReasonCodeSchema, StatsNullReasonSchema]).optional(),
 });
 const AnalyzeBivariateRevealedSchema = z.object({
   method: StatsMethodIdSchema,

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { describeStatsApiError } from './describeStatsError';
+import { describeMethodReasonCode } from './describeMethodReasonCode';
 import { Histogram } from '../charts/Histogram';
 import { BoxPlot } from '../charts/BoxPlot';
 import { HorizontalBarChart } from '../charts/HorizontalBarChart';
@@ -296,10 +297,16 @@ function DiscreteDistributionCard({ catalogByKey, row, variableCount }) {
 // 갈라서 렌더링한다 — 응답 shape 자체는 셋 다 동일하다(statistic/df/pValue/
 // effectSizes/extra), 어떤 필드를 어떻게 강조해 보여줄지만 다르다.
 function BivariateSuppressedCard({ bivariate }) {
+  // 제한데이터 권한자 해제 응답에서만 unavailableReason이 온다 — 소수 인원 보호는 풀렸지만 통계적으로 계산할 수 없다는 뜻.
+  const unavailable = describeMethodReasonCode(bivariate.unavailableReason);
   return (
     <div className="swb-card">
       <strong>{METHOD_LABELS[bivariate.method] || bivariate.method}</strong>
-      <p className="swb-suppressed-note">공개 정책에 따라 결과가 표시되지 않음(표본 크기 등).</p>
+      {unavailable ? (
+        <p className="swb-suppressed-note">소수 인원 보호가 해제됐지만 결과를 계산할 수 없습니다 — {unavailable}</p>
+      ) : (
+        <p className="swb-suppressed-note">공개 정책에 따라 결과가 표시되지 않음(표본 크기 등).</p>
+      )}
     </div>
   );
 }
@@ -1074,8 +1081,8 @@ export function ResultPanel({
           <div className="swb-banner" style={{ marginBottom: 12 }}>조건이 변경됨 — 다시 실행 필요</div>
         )}
 
-        {/* 서버가 소수 셀 해제를 지원하는 모드에서만 배너를 보인다 — 기술통계·회귀. 이변량·상관행렬·예측은 각 해제 PR에서 추가한다. */}
-        {committedResult && (isDescriptiveRun || isRegressionRun) && (
+        {/* 서버가 소수 셀 해제를 지원하는 모드에서만 배너를 보인다 — 기술통계·회귀·이변량. 상관행렬·예측은 각 해제 PR에서 추가한다. */}
+        {committedResult && (isDescriptiveRun || isRegressionRun || isBivariateRun) && (
           <LimitedDisclosureBanner status={committedResult.result?.limitedDisclosure} />
         )}
 

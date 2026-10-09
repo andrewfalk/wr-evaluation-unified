@@ -87,6 +87,8 @@ export function computeScatterGrid<T extends PersonKeyed>(
   rows: T[],
   xOf: (row: T) => number,
   yOf: (row: T) => number,
+  // 제한데이터 권한자 해제 컨텍스트 — 소수 셀 전체연결억제를 끈다(그리드 자체는 집계라 그대로 만든다).
+  options: { lifted?: boolean } = {},
 ): ScatterGridResult | null {
   const n = rows.length;
   if (n === 0) return { xEdges: [], yEdges: [], cells: [] };
@@ -122,7 +124,7 @@ export function computeScatterGrid<T extends PersonKeyed>(
 
   for (const bucket of cellRows.values()) {
     const personCount = new Set(bucket.map((r) => r.personClusterKey)).size;
-    if (isSmallCell(personCount)) return null;
+    if (options.lifted !== true && isSmallCell(personCount)) return null;
   }
 
   const cells: ScatterGridCell[] = [...cellRows.entries()].map(([key, bucket]) => {

@@ -10,7 +10,7 @@
 // conditional로 판정했다는 것 자체가 §6.1 게이트(personCount===caseCount)를 이미
 // 통과했다는 뜻이고, 전체가 1:1이면 어떤 부분집합(그룹/셀)도 1:1이기 때문이다.
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
-import type { AnalyzeBivariateResult, StatsMethodId } from '@wr/contracts';
+import type { AnalyzeBivariateResult, StatsMethodId, StatsNullReason } from '@wr/contracts';
 import type { BivariateEngineRequest, EngineRunOpts } from './statsEngine';
 import { runBivariateStatsEngine } from './statsEngine';
 import { isSmallCell } from './statsSmallCell';
@@ -108,10 +108,22 @@ function hasSmallCellInRequest(request: BivariateEngineRequest): boolean {
  * 패턴과 동일한 원칙), 합계(excludedCaseCount)는 별도로 항상 유지된다. */
 function computeExclusionsForResponse(
   paired: PairedDatasetResult,
+  lifted: boolean,
 ): Array<{ reasonCode: 'x_missing' | 'y_missing' | 'both_missing'; count: number }> | null {
-  const anySmall = paired.exclusions.some((e) => isSmallCell(e.personCount));
+  const anySmall = !lifted && paired.exclusions.some((e) => isSmallCell(e.personCount));
   if (anySmall) return null;
   return paired.exclusions.map((e) => ({ reasonCode: e.reasonCode, count: e.count }));
+}
+
+// 계산 불가 사유 우선순위 — 가장 구체적인 것부터. 해제 컨텍스트에서 Python이 null을 돌려준 이유를 권한자에게 알린다.
+const NULL_REASON_PRIORITY: StatsNullReason[] = [
+  'insufficient_group_data', 'constant_variable', 'undefined_zero_variance', 'insufficient_data', 'non_finite_result',
+];
+
+/** Python이 계산 불가로 돌려준 nullReasons에서 대표 사유 하나를 고른다. 사유가 하나도 없으면 undefined(지어내지 않는다). */
+export function pickUnavailableReason(nullReasons: Record<string, StatsNullReason>): StatsNullReason | undefined {
+  const present = new Set(Object.values(nullReasons));
+  return NULL_REASON_PRIORITY.find((r) => present.has(r));
 }
 
 /** computeAndPersist의 캐시-미스 분기 전용 진입점(계획서 §"파이프라인" — 캐시 hit면
@@ -125,11 +137,14 @@ export async function computeBivariateAnalyzeResult(
   const paired = ctx.paired as PairedDatasetResult;
   const [keyX, keyY] = ctx.recipe.variableKeys;
 
+  // 제한데이터 권한자 해제 컨텍스트(statsLiftedRecompute.ts) — 소수 셀(1~9명) 판정만 끈다. 통계적 계산 가능 조건
+  // (반복측정 게이트, 그룹 수, Python의 n<2·분산 0 등)은 그대로라 계산 불가면 사유와 함께 억제 형태로 돌려준다.
+  const lifted = ctx.disclosureMode === 'lifted';
   const request = buildBivariateEngineRequest(method, paired.pairs, ctx.catalogByKey, keyX, keyY);
-  const exclusions = computeExclusionsForResponse(paired);
+  const exclusions = computeExclusionsForResponse(paired, lifted);
   const excludedCaseCount = paired.excludedCaseCount;
 
-  if (hasSmallCellInRequest(request)) {
+  if (!lifted && hasSmallCellInRequest(request)) {
     return { method, suppressed: true };
   }
 
@@ -137,8 +152,10 @@ export async function computeBivariateAnalyzeResult(
 
   // Python이 계산 도중 발견한 값상수(또는 다른 계산불능 사유)도 동일하게 불투명
   // 처리한다 — statistic===null이면 nullReasons를 응답에 노출하지 않고 침묵 억제.
+  // 해제 컨텍스트에서는 소수 인원 사유가 사라져 이 억제가 곧 "통계적 계산 불가"이므로 사유를 붙여 혼동을 막는다.
   if (raw.statistic === null && raw.pValue === null && raw.effectSizes.length === 0) {
-    return { method, suppressed: true };
+    const unavailableReason = lifted ? pickUnavailableReason(raw.nullReasons) : undefined;
+    return { method, suppressed: true, ...(unavailableReason ? { unavailableReason } : {}) };
   }
 
   // [코드리뷰 2026-09-12] 여기 도달했다는 것 자체가 hasSmallCellInRequest()를
@@ -175,7 +192,7 @@ export async function computeBivariateAnalyzeResult(
         q3: rawBoxplot.q3,
         lowerWhisker: rawBoxplot.lowerWhisker,
         upperWhisker: rawBoxplot.upperWhisker,
-        ...(isOutlierCountDisclosable(pairedRowsForGroup, rawBoxplot, valueOf)
+        ...(lifted || isOutlierCountDisclosable(pairedRowsForGroup, rawBoxplot, valueOf)
           ? { outlierCount: rawBoxplot.outlierCount }
           : {}),
       };
@@ -199,7 +216,7 @@ export async function computeBivariateAnalyzeResult(
   } | undefined;
   if (CORRELATION_METHODS.has(method)) {
     regressionLine = raw.regressionLine ?? null;
-    const grid = computeScatterGrid(paired.pairs, (p) => p.x as number, (p) => p.y as number);
+    const grid = computeScatterGrid(paired.pairs, (p) => p.x as number, (p) => p.y as number, { lifted });
     scatter = {
       displayedCount: paired.pairs.length,
       totalCount: paired.pairs.length,

@@ -438,13 +438,15 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
     const predictionSuppressed = ctx.recipe.analysisMode === 'prediction' && !ctx.predictionDisclosed;
     if (ctx.requestSuppressed || bivariatePairSuppressed || regressionSuppressed || predictionSuppressed) {
       const suppressedResult = buildSuppressedAnalyzeResult(ctx);
-      // 제한데이터 권한자의 기술통계·회귀는 "필터 후 10명 미만"(MIN_COHORT_NOT_MET)·회귀 공개통제도 응답 시점에 해제한다.
+      // 제한데이터 권한자의 기술통계·회귀·이변량은 "필터 후 10명 미만"(MIN_COHORT_NOT_MET)·회귀/이변량 쌍 공개통제도 응답 시점에 해제한다.
       // differencing 제한(forceSuppress)은 남용 방지 장치라 해제하지 않는다 — 사유 코드는 N<10이면
       // MIN_COHORT_NOT_MET으로 표시되므로 코드가 아니라 forceSuppress 플래그로 판정한다.
-      // 회귀의 억제 원인은 요청 수준(N<10)이거나 ③게이트(regressionSuppressed)이고, 둘 다 같은 스텁으로 저장된다.
+      // 회귀·이변량의 억제 원인은 요청 수준(N<10)이거나 모드별 게이트(regressionSuppressed/bivariatePairSuppressed)이고,
+      // 둘 다 같은 스텁으로 저장된다.
       const liftCandidate = !ctx.differencing.forceSuppress && (
         (ctx.recipe.analysisMode === 'descriptive' && ctx.reasonCode === 'MIN_COHORT_NOT_MET')
         || (ctx.recipe.analysisMode === 'regression' && (ctx.requestSuppressed || regressionSuppressed))
+        || (ctx.recipe.analysisMode === 'bivariate' && (ctx.requestSuppressed || bivariatePairSuppressed))
       );
       const liftHolder = liftCandidate
         && await hasCapability(pool, 'stats.export_limited_rows', ctx.userId, ctx.orgId);
@@ -469,7 +471,7 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
            ) VALUES ($1,$2,'succeeded',$3,$4,$5,'aggregate',false,$6,$7,$8,now(),$9,$10)`,
           [ctx.orgId, ctx.userId, ctx.recipeDigest, ctx.snapshot.sourceDigest, executionDigest,
             JSON.stringify(manifest), JSON.stringify(suppressedResult), expiresAt(), manifest.analysisRunId,
-            // 저장 최소화: 요청 시점에 제한데이터 권한이 있었고 differencing으로 막히지 않은 기술통계·회귀
+            // 저장 최소화: 요청 시점에 제한데이터 권한이 있었고 differencing으로 막히지 않은 기술통계·회귀·이변량
             // 실행만 원본을 남긴다(같은 TTL). 그래야 같은 analysisRunId 재조회(GET)에서도 응답 시점 해제가
             // 가능하다. 그 외 억제 실행은 원본이 없어 이후 권한을 받아도 재실행이 필요하다.
             liftHolder ? JSON.stringify(buildFrozenAnalysisInput(ctx)) : null],

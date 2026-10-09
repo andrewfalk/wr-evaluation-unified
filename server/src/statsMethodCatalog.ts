@@ -80,6 +80,7 @@ function evaluateGroupComparison(
   typeY: AnalyticsVariableMetadata['type'] | undefined,
   keyX: string,
   keyY: string,
+  lifted: boolean,
 ): MethodResult {
   const roles = resolveGroupComparisonRoles(typeX, typeY, keyX, keyY);
   if (!roles) {
@@ -93,7 +94,7 @@ function evaluateGroupComparison(
   const { groups } = groupPairsByLevel(pairs, roles.groupRoleKey, order);
   const groupsWithCounts = [...groups.values()].map((rows) => ({ personCount: distinctPersons(rows) }));
 
-  if (!isGroupBreakdownDisclosable(groupsWithCounts)) {
+  if (!isGroupBreakdownDisclosable(groupsWithCounts, { lifted })) {
     return resultAvailable(); // A-2 생략 — 실제 판정은 B(실행 시점)로 미룬다.
   }
 
@@ -113,6 +114,7 @@ function evaluateContingency(
   typeY: AnalyticsVariableMetadata['type'] | undefined,
   keyX: string,
   keyY: string,
+  lifted: boolean,
 ): MethodResult {
   if (!isGroupingType(typeX) || !isGroupingType(typeY)) {
     return resultUnsupported('METHOD_TYPE_MISMATCH');
@@ -133,7 +135,7 @@ function evaluateContingency(
     return colLabels.map((colLevel) => distinctPersons(rowsForX.filter((p) => p.y === colLevel)));
   });
 
-  if (!isTableDisclosable(table)) {
+  if (!isTableDisclosable(table, { lifted })) {
     return resultAvailable(); // A-2 생략 — 실제 판정은 B로 미룬다.
   }
 
@@ -239,7 +241,10 @@ export function computeAvailableMethods(
   catalogByKey: Map<string, AnalyticsVariableMetadata>,
   paired: PairedDatasetResult,
   methodPolicyVersion: string,
+  // 제한데이터 권한자 해제 컨텍스트 — A-2(브레이크다운 청결도) 가림을 풀어 진짜 사유(REQUIRES_EXACTLY_TWO_GROUPS 등)를 판정한다.
+  options: { lifted?: boolean } = {},
 ): AvailableMethod[] {
+  const lifted = options.lifted === true;
   const observed = { personCount: paired.includedPersonCount, rowCount: paired.includedCaseCount };
 
   // 쌍 전체가 완전사례 0건이면(A-1, "0"이라 안전) 전부 동일 사유로 통일.
@@ -272,9 +277,9 @@ export function computeAvailableMethods(
     } else if (!inferenceGate.allowed) {
       result = resultUnsupported('REPEATED_MEASURES_NOT_ALIGNED', { rule: 'personCount == rowCount' });
     } else if (GROUP_COMPARISON_METHODS.includes(id)) {
-      result = evaluateGroupComparison(id, paired.pairs, typeX, typeY, keyX, keyY);
+      result = evaluateGroupComparison(id, paired.pairs, typeX, typeY, keyX, keyY, lifted);
     } else if (CONTINGENCY_METHODS.includes(id)) {
-      result = evaluateContingency(id, paired.pairs, typeX, typeY, keyX, keyY);
+      result = evaluateContingency(id, paired.pairs, typeX, typeY, keyX, keyY, lifted);
     } else {
       result = evaluateCorrelation(typeX, typeY);
     }
