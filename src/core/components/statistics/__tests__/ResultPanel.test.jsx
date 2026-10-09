@@ -921,6 +921,62 @@ describe('ResultPanel — 제한데이터 소수 셀 해제 표시(limitedDisclo
     expect(screen.getAllByRole('status').some((el) => el.textContent.includes('소수 인원(10명 미만) 보호가 해제된 결과'))).toBe(true);
   });
 
+  describe('예측 추정 불가 — 해제본의 완전사례 기준 인원', () => {
+    const predictionRecipe = { analysisMode: 'prediction', variableKeys: ['out', 'x'], prediction: { outcomeKey: 'out', eventLevel: 'true' } };
+    const nonEstimable = (over = {}) => ({
+      suppressed: false, estimation: 'non_estimable', nonEstimableReason: 'INSUFFICIENT_EVENT_PERSONS',
+      outcomeKey: 'out', eventLevel: 'true', method: 'l2_logistic',
+      n: 269, personCount: 269, eventPersonCount: 261, nonEventPersonCount: 8, prevalence: 0.97,
+      excludedRowCount: 1232, metrics: [], curves: null, coefficients: null, aucCi: null, caveats: [], notPerformed: [],
+      ...over,
+    });
+    async function renderPrediction(prediction, limitedDisclosure) {
+      const user = userEvent.setup();
+      renderResult({ continuous: [], discrete: [], prediction, ...(limitedDisclosure ? { limitedDisclosure } : {}) }, predictionRecipe);
+      await user.click(screen.getByRole('button', { name: '예측' }));
+    }
+    const cellsOf = (label) => {
+      const table = screen.getByRole('table', { name: '완전사례 기준 인원' });
+      const row = Array.from(table.querySelectorAll('tbody tr')).find((tr) => tr.children[0].textContent === label);
+      return Array.from(row.children).map((td) => td.textContent);
+    };
+
+    it('해제본이면 전체·사건·비사건 인원을 필요 기준과 판정으로 보여 준다(사건 충족, 비사건 부족)', async () => {
+      await renderPrediction(nonEstimable(), 'applied');
+      expect(cellsOf('전체')).toEqual(['전체', '269명', '50명 이상', '충족']);
+      expect(cellsOf('사건')).toEqual(['사건', '261명', '25명 이상', '충족']);
+      expect(cellsOf('비사건')).toEqual(['비사건', '8명', '25명 이상', '부족']);
+      expect(screen.getByText(/미리보기의 사건\/비사건 수는 결과변수만 관측된 인원/)).toBeTruthy();
+      expect(screen.getByText(/완전사례 제외 1232건/)).toBeTruthy();
+    });
+
+    it('기준 경계값은 충족으로 판정한다(25명은 충족, 24명은 부족)', async () => {
+      await renderPrediction(nonEstimable({ nonEventPersonCount: 25, eventPersonCount: 24, personCount: 49 }), 'applied');
+      expect(cellsOf('비사건')[3]).toBe('충족');
+      expect(cellsOf('사건')[3]).toBe('부족');
+      expect(cellsOf('전체')[3]).toBe('부족');
+    });
+
+    it('해제본이 아니면(일반 응답) 이 표를 보여 주지 않는다', async () => {
+      await renderPrediction(nonEstimable());
+      expect(screen.getByText(/사건\/비사건 인원 수가 부족합니다/)).toBeTruthy();
+      expect(screen.queryByRole('table', { name: '완전사례 기준 인원' })).toBeNull();
+    });
+
+    it('정상 추정(ok) 결과 카드에는 이 표가 끼어들지 않는다(기존 부제의 표본 수 표시를 그대로 쓴다)', async () => {
+      await renderPrediction(
+        {
+          ...nonEstimable(), estimation: 'ok', nonEstimableReason: null, parameterCount: 2, columnCount: 2,
+          lambda: { selected: 0.1, gridMin: 1e-4, gridMax: 10, gridSize: 26 }, droppedColumnFoldCount: 0, qualityFlags: [],
+          curves: { bins: null, suppressedReason: 'MIN_DISCLOSABLE_BINS_NOT_MET', representativeRepeat: 1, areaMayDifferFromAuc: true },
+          coefficients: { intercept: 0, terms: [] }, caveats: ['RESEARCH_INTERNAL_VALIDATION'],
+        },
+        'applied',
+      );
+      expect(screen.queryByRole('table', { name: '완전사례 기준 인원' })).toBeNull();
+    });
+  });
+
   it('필드가 없는 예측 일반 응답에는 해제 배너가 없다', () => {
     renderResult(
       { continuous: [], discrete: [], prediction: { suppressed: true, reasonCode: 'MIN_COHORT_NOT_MET' } },
