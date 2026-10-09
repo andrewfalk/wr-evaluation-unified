@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { describeStatsApiError } from './describeStatsError';
 import { describeMethodReasonCode } from './describeMethodReasonCode';
+import { PREDICTION_REQUIREMENTS } from './predictionRequirements';
 import { Histogram } from '../charts/Histogram';
 import { BoxPlot } from '../charts/BoxPlot';
 import { HorizontalBarChart } from '../charts/HorizontalBarChart';
@@ -747,7 +748,42 @@ function predictionBootstrapCell(bootstrap) {
 // 3)곡선/calibration 4)계수 5)주의문 순서. "층화 기준과 결과 카운트는 다를 수
 // 있음" 도움말은 personCount(S2, 완전사례 기준 최종 분석자료)와 cohortDigest가
 // 만드는 층화 기준(기준 코호트, 예측변수와 무관) 사이의 잠재적 차이를 설명한다.
-function PredictionResultCard({ prediction, catalogByKey }) {
+// 제한데이터 권한자 해제본 전용 — 추정 불가일 때 "완전사례 기준" 인원을 필요 기준과 함께 보여 준다. 미리보기의 사건/비사건 수는
+// 결과변수만 관측된 인원이라 예측이 실제로 쓰는 자료(예측변수 값이 모두 있는 사람)와 크게 다를 수 있어, 결측이 많은 변수를 고르면
+// "미리보기엔 138명인데 왜 부족하지?"처럼 혼동하기 쉽다.
+function PredictionCompleteCaseCounts({ prediction }) {
+  const rows = [
+    { label: '전체', count: prediction.personCount, need: PREDICTION_REQUIREMENTS.minPersons },
+    { label: '사건', count: prediction.eventPersonCount, need: PREDICTION_REQUIREMENTS.minEventPersons },
+    { label: '비사건', count: prediction.nonEventPersonCount, need: PREDICTION_REQUIREMENTS.minNonEventPersons },
+  ];
+  return (
+    <>
+      <div className="swb-section-label">완전사례 기준 인원 (예측에 실제로 쓰이는 자료)</div>
+      <div className="swb-table-scroll">
+        <table className="swb-table" aria-label="완전사례 기준 인원">
+          <thead><tr><th>구분</th><th>인원</th><th>필요 기준</th><th>판정</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label}>
+                <td>{r.label}</td>
+                <td>{r.count}명</td>
+                <td>{r.need}명 이상</td>
+                <td>{r.count >= r.need ? '충족' : '부족'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="swb-suppressed-note">
+        미리보기의 사건/비사건 수는 결과변수만 관측된 인원입니다. 예측은 선택한 예측변수 값이 모두 있는 사람만 쓰므로, 결측이 많은
+        변수를 고르면 이 인원이 훨씬 줄어듭니다(완전사례 제외 {prediction.excludedRowCount}건).
+      </p>
+    </>
+  );
+}
+
+function PredictionResultCard({ prediction, catalogByKey, limitedApplied = false }) {
   if (prediction.suppressed) {
     return (
       <div className="swb-card">
@@ -767,6 +803,7 @@ function PredictionResultCard({ prediction, catalogByKey }) {
         <p className="swb-suppressed-note">
           {PREDICTION_NON_ESTIMABLE_LABELS[prediction.nonEstimableReason] || '현재 데이터로 계산할 수 없습니다.'}
         </p>
+        {limitedApplied && <PredictionCompleteCaseCounts prediction={prediction} />}
       </div>
     );
   }
@@ -1179,6 +1216,7 @@ export function ResultPanel({
             <PredictionResultCard
               prediction={committedResult.result.prediction}
               catalogByKey={catalogByKey}
+              limitedApplied={committedResult.result.limitedDisclosure === 'applied'}
             />
           ) : (
             <p className="swb-suppressed-note">예측 모드로 분석을 실행하면 여기에 결과가 표시됩니다.</p>
