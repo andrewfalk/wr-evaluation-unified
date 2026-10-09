@@ -383,6 +383,20 @@ describe('CorrelationHeatmap', () => {
     expect(screen.getByText('0.5000')).toBeTruthy();
     expect(screen.getAllByText('(비공개)').length).toBeGreaterThan(0);
   });
+
+  it('해제본의 억제 셀(reasonCode)은 "(비공개)"가 아니라 "(계산 불가)"로 표시되고, 사유 없는 셀은 기존 그대로다', async () => {
+    const user = userEvent.setup();
+    const cells = [
+      { suppressed: false, xKey: 'a', yKey: 'b', n: 50, r: 0.5, pValue: 0.01, adjustedP: null },
+      { suppressed: true, xKey: 'a', yKey: 'c', reasonCode: 'REPEATED_MEASURES_NOT_ALIGNED' },
+      { suppressed: true, xKey: 'b', yKey: 'c' },
+    ];
+    render(<CorrelationHeatmap variableKeys={['a', 'b', 'c']} cells={cells} labelOf={(k) => k} />);
+    await user.click(screen.getByRole('button', { name: '데이터 보기' }));
+    // 사유가 있는 셀 1개 × 3열 = 계산 불가 3칸, 사유 없는 셀의 비공개 3칸 + 공개 셀의 adjustedP null 1칸 = 4칸
+    expect(screen.getAllByText('(계산 불가)')).toHaveLength(3);
+    expect(screen.getAllByText('(비공개)')).toHaveLength(4);
+  });
 });
 
 // PR4-A1 §5 — forest plot. 절편 제외, CI 유무에 따른 렌더 분기, OR 로그축에서

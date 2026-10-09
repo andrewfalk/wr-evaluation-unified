@@ -28,6 +28,7 @@ import { buildRunManifest } from '../statsRunManifest';
 import { buildAnalysisContext, deriveAnalysisContext, type AnalysisContext } from '../statsAnalysisContext';
 import { handlePostAnalyze, finalizeAnalyzeResponse, isAbortedFinalize, toPublicRunManifest } from '../statsAnalyzeHandler';
 import { isLiftApplicable, resolveEffectiveContext } from '../statsLiftedRecompute';
+import { deliverStoredLimited, isStoredLimitedMode } from '../statsStoredLimited';
 import { createResponseAbort } from '../statsResponseAbort';
 import { handlePostExport } from '../statsExportHandler';
 import { buildPredictionEngineRequestForState } from '../statsPredictionSuppression';
@@ -174,7 +175,7 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
   const predictionSuppressed = view.recipe.analysisMode === 'prediction' && !view.predictionDisclosed;
 
   // 제한데이터 권한자의 기술통계 미리보기는 소수 셀(1~9명) 제한을 푼다. 회귀는 위 유효 컨텍스트(view)가 같은 일을
-  // 한다. 이변량·상관행렬·예측은 아직 해당 없음(후속 PR). differencing 제한
+  // 한다. 예측은 아직 해당 없음(후속 PR). differencing 제한
   // (forceSuppress)은 남용 방지 장치라 풀지 않는다(이때 reasonCode는 N<10이어도 MIN_COHORT로 보일 수
   // 있어 사유 코드가 아니라 플래그로 판정한다).
   // 권한 조회(DB 1회)는 풀 것이 실제로 있을 때만 한다 — 요청 수준 억제이거나 억제 없는 추정가능성이
@@ -382,6 +383,33 @@ async function handleGetRun(pool: Pool, req: Request, res: Response): Promise<vo
   const manifest = row.manifest as StatsRunManifestSucceeded;
   const publicManifest = toPublicRunManifest(manifest);
   const result = row.result as AnalyzeResult;
+
+  // 상관행렬·예측은 성공 직후 원본 행(frozen_dataset)을 지워서 아래 재구성 경로를 못 탄다 — 실행 시 저장해 둔 해제본을
+  // 조회자의 현재 권한으로 고른다(statsStoredLimited.ts). 권한이 없으면 저장된 일반본 그대로다.
+  if (isStoredLimitedMode(manifest.analysisMode)) {
+    const storedAbort = createResponseAbort(res);
+    try {
+      const delivered = await deliverStoredLimited(pool, { userId: session.userId, orgId: session.organizationId! }, {
+        analysisRunId: row.analysis_run_id,
+        executionDigest: row.execution_digest,
+        recipeDigest: row.recipe_digest,
+        analysisMode: manifest.analysisMode as string,
+        runManifest: publicManifest,
+        result,
+        versionDrifted: hasVersionDrifted(row),
+      }, storedAbort.signal);
+      if ('aborted' in delivered) return;
+      if (delivered.status !== 200) {
+        res.status(delivered.status).json(delivered.body);
+        return;
+      }
+      const deliveredBody = delivered.body as { runManifest: typeof publicManifest; result: AnalyzeResult };
+      res.status(200).json({ analysisRunId: row.analysis_run_id, status: 'succeeded', ...deliveredBody });
+    } finally {
+      storedAbort.dispose();
+    }
+    return;
+  }
 
   // 제한데이터 권한자가 조회한 기술통계 실행인데 응답 시점 해제에 필요한 원본이 없거나(조기 억제 실행 중
   // 생성 당시 권한이 없었거나 differencing으로 막힌 것, 또는 보존기간 이후) 버전이 어긋났다 — 집계 결과는

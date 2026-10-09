@@ -22,6 +22,7 @@ import { StatsEngineProcessError } from './statsEngine';
 import { withWriteTransaction } from './db/withWriteTransaction';
 import { statsRunExpiresAt } from './statsRunExpiry';
 import { PREDICTION_POLICY, computePredictionEngineTimeoutMs } from './statsPolicy';
+import type { RequestedDisclosureProfile } from './statsExecutionDigest';
 import config from './config';
 
 // PR4-B2 — prediction은 S2 행 수(작업량 실측 기반 선형모델)로 추정한다. 다른
@@ -112,9 +113,12 @@ export async function admitAnalysisRun(
   ctx: AnalysisContext,
   executionDigest: string,
   engineTimeoutMs: number,
+  // 'lift_eligible'이면 워커가 해제본까지 만들어 limited_result에 저장한다(statsRunsQueue.ts attempt). executionDigest에도
+  // 같은 프로파일이 들어 있어야 한다 — 호출부(handlePostAnalyze)가 둘을 함께 정한다.
+  disclosureProfile: RequestedDisclosureProfile = 'aggregate',
 ): Promise<AdmissionResult> {
   for (let attempt = 0; attempt < ADMIT_RETRY_ATTEMPTS; attempt += 1) {
-    const outcome = await admitOnce(pool, ctx, executionDigest, engineTimeoutMs);
+    const outcome = await admitOnce(pool, ctx, executionDigest, engineTimeoutMs, disclosureProfile);
     if (outcome !== 'retry') return outcome;
   }
   // 이론상 advisory lock으로 도달 불가능 — 같은 org 안에서 이 함수를 부르는 모든
@@ -128,16 +132,20 @@ async function admitOnce(
   ctx: AnalysisContext,
   executionDigest: string,
   engineTimeoutMs: number,
+  disclosureProfile: RequestedDisclosureProfile,
 ): Promise<AdmissionResult | 'retry'> {
   return withWriteTransaction(pool, async (client) => {
     // 항상 이 순서로(사용자 락 → 조직 락) — 데드락 방지.
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`stats_admit_user:${ctx.userId}`]);
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`stats_admit_org:${ctx.orgId}`]);
 
-    // 1) 캐시 확인
+    // 1) 캐시 확인. 해제 적격(lift_eligible) 실행은 해제본이 실제로 있는 행만 적중시킨다 — 워커 시점에 권한이 회수돼
+    //    해제본 없이 끝난 행이 캐시로 남아 같은 digest의 재요청을 계속 막는 고착을 방어한다(writeTerminalOutcome도 그런 행을
+    //    cacheable=false로 종결하지만, 이 조건이 두 번째 안전망이다). limited_result 값은 읽지 않고 NULL 여부만 본다.
     const cacheHit = await client.query<StatsRunRow>(
       `SELECT ${STATS_RUN_COLUMNS} FROM stats_runs
         WHERE organization_id=$1 AND execution_digest=$2 AND status='succeeded' AND cacheable AND expires_at>now()
+          AND (requested_disclosure_profile <> 'lift_eligible' OR limited_result IS NOT NULL)
         LIMIT 1`,
       [ctx.orgId, executionDigest],
     );
@@ -218,13 +226,14 @@ async function admitOnce(
          organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
          requested_disclosure_profile, cacheable, manifest, frozen_dataset, engine_timeout_ms,
          expires_at, analysis_run_id
-       ) VALUES ($1,$2,'queued',$3,$4,$5,'aggregate',true,$6,$7,$8,$9,$10)
+       ) VALUES ($1,$2,'queued',$3,$4,$5,$11,true,$6,$7,$8,$9,$10)
        ON CONFLICT (organization_id, execution_digest) WHERE status IN ('queued','running')
        DO NOTHING
        RETURNING ${STATS_RUN_COLUMNS}`,
       [
         ctx.orgId, ctx.userId, ctx.recipeDigest, ctx.snapshot.sourceDigest, executionDigest,
         JSON.stringify(manifest), JSON.stringify(frozen), engineTimeoutMs, statsRunExpiresAt(), analysisRunId,
+        disclosureProfile,
       ],
     );
     if (insertResult.rows.length > 0) {

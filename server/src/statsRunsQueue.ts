@@ -23,7 +23,10 @@ import {
 import { buildStatsEngineRequest, computeDescriptiveSuppression } from './statsDescriptiveSuppression';
 import { computeDescriptiveStratifiedAnalyzeResult, resolveStratifyGroupLabels } from './statsDescriptiveStratifySuppression';
 import { computeBivariateAnalyzeResult } from './statsBivariateSuppression';
-import { computeCorrelationMatrixAnalyzeResult } from './statsCorrelationMatrixSuppression';
+import { computeCorrelationMatrixAnalyzeResult, computeCorrelationMatrixViews } from './statsCorrelationMatrixSuppression';
+import { hasCapability } from './middleware/requireCapability';
+import { isStoredLimitedMode } from './statsStoredLimited';
+import { MINIMUM_COHORT } from './statsPolicy';
 import { computeRegressionAnalyzeResult } from './statsRegressionSuppression';
 import { computePredictionAnalyzeResult } from './statsPredictionSuppression';
 import { errorCodeForFailure } from './statsEngineErrorMapping';
@@ -69,7 +72,9 @@ function frozenDatasetAfterSuccess(analysisMode: string, frozen: FrozenAnalysisI
 // result/manifest/frozen_dataset을 쓰는 코드가 정확히 한 곳에만 있다.
 // ---------------------------------------------------------------------------
 type TerminalOutcome =
-  | { kind: 'succeeded'; result: AnalyzeResult }
+  // limitedResult: 제한데이터 권한자용 해제본(stats_runs.limited_result). 해제 적격(lift_eligible) 실행을 워커가 권한자로
+  // 확인하고 만든 경우에만 있다 — 없으면 null/undefined.
+  | { kind: 'succeeded'; result: AnalyzeResult; limitedResult?: AnalyzeResult | null }
   | { kind: 'failed'; errorCode: string }
   | { kind: 'cancelled' };
 
@@ -98,7 +103,11 @@ async function writeTerminalOutcome(
         WHERE organization_id=$1 AND execution_digest=$2 AND status='succeeded' AND cacheable AND expires_at>now() AND id != $3`,
       [row.organization_id, row.execution_digest, row.id],
     );
-    const cacheable = stillValid.rows.length === 0;
+    // 해제 적격(lift_eligible)인데 해제본 없이 끝난 행(워커 시점에 권한이 회수됨)은 캐시에 남기지 않는다 — 남기면 권한을 다시
+    // 받은 사용자의 같은 요청이 해제본 없는 이 행에 계속 적중해 재실행으로도 풀리지 않는다(admission의 캐시 조회에도 같은
+    // 방어 조건이 있다). 자기 analysisRunId와 일반 결과는 그대로 유지한다.
+    const eligibleWithoutLimited = row.requested_disclosure_profile === 'lift_eligible' && outcome.limitedResult == null;
+    const cacheable = stillValid.rows.length === 0 && !eligibleWithoutLimited;
 
     const resultDigest = canonicalDigest({ result: outcome.result });
     const manifest = toStatsRunManifestSucceeded({
@@ -119,10 +128,11 @@ async function writeTerminalOutcome(
     });
     await client.query(
       `UPDATE stats_runs SET status='succeeded', cacheable=$2, result=$3, manifest=$4,
-         finished_at=now(), frozen_dataset=$5 WHERE id=$1`,
+         finished_at=now(), frozen_dataset=$5, limited_result=$6 WHERE id=$1`,
       [
         row.id, cacheable, JSON.stringify(outcome.result), JSON.stringify(manifest),
         frozenDatasetAfterSuccess(analysisMode, row.frozen_dataset) ? JSON.stringify(row.frozen_dataset) : null,
+        outcome.limitedResult ? JSON.stringify(outcome.limitedResult) : null,
       ],
     );
     await writeAuditLogStrict(client, {
@@ -142,7 +152,7 @@ async function writeTerminalOutcome(
     });
     await client.query(
       `UPDATE stats_runs SET status='failed', error_code=$2, manifest=$3, result=NULL,
-         finished_at=now(), frozen_dataset=NULL WHERE id=$1`,
+         finished_at=now(), frozen_dataset=NULL, limited_result=NULL WHERE id=$1`,
       [row.id, outcome.errorCode, JSON.stringify(manifest)],
     );
     await writeAuditLogStrict(client, {
@@ -162,7 +172,7 @@ async function writeTerminalOutcome(
   });
   await client.query(
     `UPDATE stats_runs SET status='cancelled', manifest=$2, result=NULL, error_code=NULL,
-       finished_at=now(), frozen_dataset=NULL WHERE id=$1`,
+       finished_at=now(), frozen_dataset=NULL, limited_result=NULL WHERE id=$1`,
     [row.id, JSON.stringify(manifest)],
   );
   await writeAuditLogStrict(client, {
@@ -342,6 +352,8 @@ export function hasVersionDrifted(row: StatsRunRow): boolean {
     requestedBy: row.requested_by ?? '',
     recipeDigest: row.recipe_digest,
     sourceDigest: row.source_digest,
+    // 행이 어떤 프로파일로 접수됐는지가 digest 입력이므로 그대로 넘겨야 드리프트로 오판하지 않는다.
+    requestedDisclosureProfile: row.requested_disclosure_profile === 'lift_eligible' ? 'lift_eligible' : 'aggregate',
   });
   return recomputed !== row.execution_digest;
 }
@@ -379,6 +391,18 @@ async function runEngineFor(ctx: AnalysisContext, opts: EngineRunOpts): Promise<
   // 소수 범주 "기타" 병합은 이 일반 기술통계 경로에서만 켠다 — Table1 층화(위 분기)는
   // 그룹·전체 차감 역산을 따로 검토해야 해서 옵션 없이(all-or-nothing) 유지한다.
   return computeDescriptiveSuppression(ctx.dataset.rows, ctx.recipe.variableKeys, ctx.catalogByKey, raw, { mergeSmallLevels: true });
+}
+
+// 해제 적격 실행 전용 — 엔진을 한 번만 돌려 일반본과 해제본을 함께 만든다. 저장형 해제본을 지원하는 모드만 있다.
+async function runViewsFor(
+  restricted: AnalysisContext,
+  lifted: AnalysisContext,
+  opts: EngineRunOpts,
+): Promise<{ aggregate: AnalyzeResult; limited: AnalyzeResult }> {
+  if (restricted.recipe.analysisMode === 'correlation_matrix') {
+    return computeCorrelationMatrixViews(restricted, lifted, opts);
+  }
+  throw new Error(`runViewsFor: 저장형 해제본을 지원하지 않는 analysisMode=${restricted.recipe.analysisMode}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -425,23 +449,37 @@ export async function attempt(pool: Pool, row: StatsRunRow): Promise<void> {
       if (precheck.rows[0]?.cancel_requested_at) {
         outcome = { kind: 'cancelled' };
       } else {
-        const ctxResult = deriveAnalysisContext(row.frozen_dataset, {
-          viewerUserId: row.requested_by ?? '',
-          viewerOrgId: row.organization_id,
-        });
+        const viewer = { viewerUserId: row.requested_by ?? '', viewerOrgId: row.organization_id };
+        const engineOpts: EngineRunOpts = {
+          signal: controller.signal,
+          timeoutMs: row.engine_timeout_ms,
+          onSpawn: (pid) => {
+            const active = activeRuns.get(row.analysis_run_id);
+            if (active) active.pid = pid ?? null;
+            pool.query(`UPDATE stats_runs SET worker_pid=$2 WHERE id=$1`, [row.id, pid])
+              .catch((err) => console.error('[stats-runs-queue] worker_pid persist failed (best-effort)', err));
+          },
+        };
+        // 해제 적격(lift_eligible) 실행 — admission이 요청 시점에 권한자였던 상관행렬·예측 실행. 일반본은 그대로 만들고,
+        // 워커 시점에도 여전히 권한자일 때만 엔진 한 번으로 해제본까지 만든다(그 사이 회수됐으면 일반본만).
+        const eligible = row.requested_disclosure_profile === 'lift_eligible'
+          && isStoredLimitedMode(row.frozen_dataset.recipe.analysisMode);
+        const ctxResult = deriveAnalysisContext(row.frozen_dataset, viewer, eligible
+          // 적격 실행은 admission이 전체 N<10을 억제하지 않고 통과시켰으므로 일반본 쪽 요청 수준 판정을 워커가 다시 한다.
+          ? { restrictedRequestSuppressed: row.frozen_dataset.dataset.personCount < MINIMUM_COHORT }
+          : {});
         if (!ctxResult.ok) {
           outcome = { kind: 'failed', errorCode: 'PROCESS_ERROR' };
+        } else if (eligible && await hasCapability(pool, 'stats.export_limited_rows', viewer.viewerUserId, viewer.viewerOrgId)) {
+          const liftedResult = deriveAnalysisContext(row.frozen_dataset, viewer, { disclosureMode: 'lifted' });
+          if (!liftedResult.ok) {
+            outcome = { kind: 'failed', errorCode: 'PROCESS_ERROR' };
+          } else {
+            const views = await runViewsFor(ctxResult.ctx, liftedResult.ctx, engineOpts);
+            outcome = { kind: 'succeeded', result: views.aggregate, limitedResult: views.limited };
+          }
         } else {
-          const result = await runEngineFor(ctxResult.ctx, {
-            signal: controller.signal,
-            timeoutMs: row.engine_timeout_ms,
-            onSpawn: (pid) => {
-              const active = activeRuns.get(row.analysis_run_id);
-              if (active) active.pid = pid ?? null;
-              pool.query(`UPDATE stats_runs SET worker_pid=$2 WHERE id=$1`, [row.id, pid])
-                .catch((err) => console.error('[stats-runs-queue] worker_pid persist failed (best-effort)', err));
-            },
-          });
+          const result = await runEngineFor(ctxResult.ctx, engineOpts);
           // Table1 — 담당의 등 UUID 그룹 값을 저장 전에 표시명으로 치환한다(§8).
           // 여기서 한 번만 하면 화면·CSV가 항상 저장된 결과를 그대로 읽으므로 자동으로
           // 일치한다. sync(즉시 200)/async(202+폴링) 둘 다 이 attempt() 하나를 거친다.

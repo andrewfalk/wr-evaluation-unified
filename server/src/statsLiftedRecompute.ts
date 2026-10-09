@@ -51,6 +51,9 @@ function isBivariateMasked(b: AnalyzeBivariateResult | undefined): boolean {
 /** restricted 컨텍스트에서 소수 셀(1~9명) 게이트 때문에 "가려진 것"이 있는가. 가려진 게 없으면 해제해도 같은 결과다. */
 function isRestrictedMasked(ctx: AnalysisContext): boolean {
   if (ctx.recipe.analysisMode === 'regression') return ctx.requestSuppressed || !ctx.regressionDisclosed;
+  // 상관행렬: 미리보기에서 보이는 가림은 전체 N<10으로 availableMethods가 비는 것뿐이다. 쌍별 가림은 분석 응답의 셀에만 나타나며
+  // 실행 시 저장해 둔 해제본(statsStoredLimited.ts)이 처리한다.
+  if (ctx.recipe.analysisMode === 'correlation_matrix') return ctx.requestSuppressed;
   if (ctx.recipe.analysisMode === 'bivariate') {
     if (ctx.requestSuppressed || !ctx.pairDisclosed || !ctx.paired) return true;
     // 쌍 게이트를 통과해도 A-2(브레이크다운 청결도)가 방법별 세부 사유를 가려 'available'로 두었을 수 있다 —

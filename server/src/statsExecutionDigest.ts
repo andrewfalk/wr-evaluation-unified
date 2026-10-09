@@ -59,11 +59,17 @@ export const METHOD_POLICY_VERSION = 'v4-prediction-l2-logistic';
 // 제한데이터 소수 셀 해제 — AnalyzeResult.limitedDisclosure(응답 시점 전용 optional)가 추가돼 다시 범프.
 export const RESULT_SCHEMA_VERSION = 'v11-limited-disclosure';
 
+// 'aggregate'가 기본이다 — 기존 행의 digest는 이 값을 상수로 해시했으므로 그대로 유지된다. 'lift_eligible'은 요청 시점에
+// stats.export_limited_rows 권한자였던 상관행렬·예측 실행으로, 권한자 실행과 비권한자 실행이 캐시·in-flight 합류를
+// 섞지 않게 한다(워커가 해제본까지 만든 행만 권한자에게 해제본을 줄 수 있기 때문).
+export type RequestedDisclosureProfile = 'aggregate' | 'lift_eligible';
+
 export interface ComputeExecutionDigestInput {
   organizationId: string;
   requestedBy: string;
   recipeDigest: string;
   sourceDigest: string;
+  requestedDisclosureProfile?: RequestedDisclosureProfile;
 }
 
 export function computeExecutionDigest(input: ComputeExecutionDigestInput): string {
@@ -79,7 +85,7 @@ export function computeExecutionDigest(input: ComputeExecutionDigestInput): stri
     serializerVersion: SERIALIZER_VERSION,
     formulaImplementationVersion: INTEGRATED_CATALOG_VERSION,
     disclosurePolicyVersion: DISCLOSURE_POLICY_VERSION,
-    requestedDisclosureProfile: 'aggregate' as const,
+    requestedDisclosureProfile: input.requestedDisclosureProfile ?? 'aggregate',
     methodPolicyVersion: METHOD_POLICY_VERSION,
     estimabilityPolicyVersion: ESTIMABILITY_POLICY_VERSION,
     // PR3-A — §6.1 게이트 정책 버전. computeExecutionDigest()의 해시 입력에 직접

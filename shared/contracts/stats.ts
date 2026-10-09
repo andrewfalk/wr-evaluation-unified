@@ -943,6 +943,9 @@ const AnalyzeCorrelationMatrixCellSuppressedSchema = z.object({
   suppressed: z.literal(true),
   xKey: z.string(),
   yKey: z.string(),
+  // 제한데이터(stats.export_limited_rows) 권한자 해제본(stats_runs.limited_result) 전용 — 소수 인원 보호가 풀린 뒤에도 셀이
+  // 비어 있는 통계적 이유. 일반 응답에는 절대 붙지 않는다(소수 인원인지 통계 불가인지 구분되지 않아야 한다는 기존 원칙).
+  reasonCode: z.enum(['REPEATED_MEASURES_NOT_ALIGNED', 'NOT_COMPUTABLE']).optional(),
 });
 const AnalyzeCorrelationMatrixCellRevealedSchema = z.object({
   suppressed: z.literal(false),
