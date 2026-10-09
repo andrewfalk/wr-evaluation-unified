@@ -175,7 +175,7 @@ async function handlePostPreview(pool: Pool, req: Request, res: Response): Promi
   const predictionSuppressed = view.recipe.analysisMode === 'prediction' && !view.predictionDisclosed;
 
   // 제한데이터 권한자의 기술통계 미리보기는 소수 셀(1~9명) 제한을 푼다. 회귀는 위 유효 컨텍스트(view)가 같은 일을
-  // 한다. 예측은 아직 해당 없음(후속 PR). differencing 제한
+  // 한다(예측 포함). differencing 제한
   // (forceSuppress)은 남용 방지 장치라 풀지 않는다(이때 reasonCode는 N<10이어도 MIN_COHORT로 보일 수
   // 있어 사유 코드가 아니라 플래그로 판정한다).
   // 권한 조회(DB 1회)는 풀 것이 실제로 있을 때만 한다 — 요청 수준 억제이거나 억제 없는 추정가능성이

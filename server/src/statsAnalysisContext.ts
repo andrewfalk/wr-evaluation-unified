@@ -460,7 +460,7 @@ function buildAnalysisContextTail(input: BuildAnalysisContextTailInput): BuildAn
     const disclosure = evaluatePredictionDisclosure({
       s1EventNonEvent, s2EventNonEvent, s2PersonCount, s2LevelSummaries,
       excludedPersonSets: stages.excludedPersonSets,
-    });
+    }, { lifted });
     predictionDisclosed = !requestSuppressed && disclosure.disclose;
 
     if (predictionDisclosed) {

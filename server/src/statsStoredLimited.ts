@@ -17,8 +17,9 @@ import { writeAuditLog, writeAuditLogStrict, type AuditOutcome } from './middlew
 
 const CAP = 'stats.export_limited_rows';
 
-// 해제본을 실행 시점에 저장하는 모드. 예측은 PR4에서 추가한다.
-const STORED_LIMITED_MODES: ReadonlySet<string> = new Set(['correlation_matrix']);
+// 해제본을 실행 시점에 저장하는 모드 — 성공 직후 frozen_dataset을 지워 조회 때 재계산할 수 없는 모드. 예측은 계산에 수 분이 걸려
+// 조회 경로에서 재계산할 수도 없다.
+const STORED_LIMITED_MODES: ReadonlySet<string> = new Set(['correlation_matrix', 'prediction']);
 
 export function isStoredLimitedMode(analysisMode: string | undefined): boolean {
   return analysisMode !== undefined && STORED_LIMITED_MODES.has(analysisMode);

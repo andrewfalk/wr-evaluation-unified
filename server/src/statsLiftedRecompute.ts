@@ -54,6 +54,8 @@ function isRestrictedMasked(ctx: AnalysisContext): boolean {
   // 상관행렬: 미리보기에서 보이는 가림은 전체 N<10으로 availableMethods가 비는 것뿐이다. 쌍별 가림은 분석 응답의 셀에만 나타나며
   // 실행 시 저장해 둔 해제본(statsStoredLimited.ts)이 처리한다.
   if (ctx.recipe.analysisMode === 'correlation_matrix') return ctx.requestSuppressed;
+  // 예측: 공개통제 ②(소수 집단·제외 집합·전체 N<10)가 닫히면 미리보기가 억제되고 방법 목록이 비어 실행 버튼이 잠긴다.
+  if (ctx.recipe.analysisMode === 'prediction') return ctx.requestSuppressed || !ctx.predictionDisclosed;
   if (ctx.recipe.analysisMode === 'bivariate') {
     if (ctx.requestSuppressed || !ctx.pairDisclosed || !ctx.paired) return true;
     // 쌍 게이트를 통과해도 A-2(브레이크다운 청결도)가 방법별 세부 사유를 가려 'available'로 두었을 수 있다 —

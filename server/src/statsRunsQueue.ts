@@ -25,10 +25,11 @@ import { computeDescriptiveStratifiedAnalyzeResult, resolveStratifyGroupLabels }
 import { computeBivariateAnalyzeResult } from './statsBivariateSuppression';
 import { computeCorrelationMatrixAnalyzeResult, computeCorrelationMatrixViews } from './statsCorrelationMatrixSuppression';
 import { hasCapability } from './middleware/requireCapability';
+import { buildSuppressedAnalyzeResult } from './statsSuppressedResult';
 import { isStoredLimitedMode } from './statsStoredLimited';
 import { MINIMUM_COHORT } from './statsPolicy';
 import { computeRegressionAnalyzeResult } from './statsRegressionSuppression';
-import { computePredictionAnalyzeResult } from './statsPredictionSuppression';
+import { computePredictionAnalyzeResult, computePredictionViews } from './statsPredictionSuppression';
 import { errorCodeForFailure } from './statsEngineErrorMapping';
 import { writeAuditLogStrict, type AuditOutcome } from './middleware/audit';
 import { withWriteTransaction } from './db/withWriteTransaction';
@@ -402,6 +403,9 @@ async function runViewsFor(
   if (restricted.recipe.analysisMode === 'correlation_matrix') {
     return computeCorrelationMatrixViews(restricted, lifted, opts);
   }
+  if (restricted.recipe.analysisMode === 'prediction') {
+    return computePredictionViews(restricted, lifted, opts);
+  }
   throw new Error(`runViewsFor: 저장형 해제본을 지원하지 않는 analysisMode=${restricted.recipe.analysisMode}`);
 }
 
@@ -478,6 +482,12 @@ export async function attempt(pool: Pool, row: StatsRunRow): Promise<void> {
             const views = await runViewsFor(ctxResult.ctx, liftedResult.ctx, engineOpts);
             outcome = { kind: 'succeeded', result: views.aggregate, limitedResult: views.limited };
           }
+        } else if (eligible && (ctxResult.ctx.requestSuppressed
+          || (ctxResult.ctx.recipe.analysisMode === 'prediction' && !ctxResult.ctx.predictionDisclosed))) {
+          // 해제 적격으로 접수했지만 워커 시점에 권한이 회수된 경우: admission은 권한자라서 공개통제(소수 집단·전체 N<10)를 통과시켰으므로
+          // 일반 컨텍스트는 공개통제가 닫혀 있을 수 있다(예측은 그러면 predictionState가 없어 엔진 단계를 부를 수 없다). 그때는 엔진을 돌리지 않고
+          // 일반 요청이 받았을 억제 스텁으로 종결한다 — 해제본은 없고 cacheable=false(writeTerminalOutcome)다.
+          outcome = { kind: 'succeeded', result: buildSuppressedAnalyzeResult(ctxResult.ctx) };
         } else {
           const result = await runEngineFor(ctxResult.ctx, engineOpts);
           // Table1 — 담당의 등 UUID 그룹 값을 저장 전에 표시명으로 치환한다(§8).

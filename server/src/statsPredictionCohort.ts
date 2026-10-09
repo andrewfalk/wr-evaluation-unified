@@ -232,7 +232,14 @@ export interface PredictionDisclosureResult {
   reasonCode: 'MIN_COHORT_NOT_MET' | null;
 }
 
-export function evaluatePredictionDisclosure(input: PredictionDisclosureInput): PredictionDisclosureResult {
+export function evaluatePredictionDisclosure(
+  input: PredictionDisclosureInput,
+  // 제한데이터(stats.export_limited_rows) 권한자 해제 컨텍스트 — 소수 셀(1~9명) 판정만 끈다. 이 게이트는 소수 셀 검사뿐이라
+  // lifted면 항상 통과하고, 통계적 계산 가능 조건(최소 50명·사건/비사건 각 25·EPV 등)은 ③ computePredictionNonEstimableReason이
+  // 모드와 무관하게 그대로 판정한다 — 사건이 1~9명이면 "억제"가 "사건/비사건 인원 부족" 사유로 바뀐다.
+  options: { lifted?: boolean } = {},
+): PredictionDisclosureResult {
+  if (options.lifted === true) return { disclose: true, reasonCode: null };
   const { s1EventNonEvent, s2EventNonEvent, excludedPersonSets } = input;
   const s1M = new Set([...s1EventNonEvent.pPlus].filter((p) => s1EventNonEvent.pMinus.has(p))).size;
   const s2M = new Set([...s2EventNonEvent.pPlus].filter((p) => s2EventNonEvent.pMinus.has(p))).size;

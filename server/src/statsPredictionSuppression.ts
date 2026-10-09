@@ -3,9 +3,10 @@
 // 공개통제 → 조립"). ②(공개통제)를 통과하지 못한 요청은 이 함수 자체가
 // 호출되지 않는다(statsAnalyzeHandler.ts가 먼저 차단 — 회귀와 동일 원칙).
 import type {
-  AnalyzePredictionResult, PredictionCaveat, PredictionCoefficients, PredictionMetric,
+  AnalyzePredictionResult, AnalyzeResult, PredictionCaveat, PredictionCoefficients, PredictionMetric,
 } from '@wr/contracts';
 import type { AnalysisContext } from './statsAnalysisContext';
+import { buildSuppressedAnalyzeResult } from './statsSuppressedResult';
 import {
   runPredictionStatsEngine,
   buildPredictionEngineRequest,
@@ -183,30 +184,49 @@ export function buildPredictionEngineRequestForState(
   return { request, y, groups };
 }
 
-/** computeAndPersist(statsRunsQueue.ts)의 캐시-미스 분기 전용 진입점(다른 모드
- * 계산 함수와 동일한 원칙). ctx.predictionState가 null이면 안 된다 —
- * statsAnalyzeHandler.ts가 호출 전에 ②공개통제 통과를 이미 보장한다. */
-export async function computePredictionAnalyzeResult(
+type PredictionEngineResponse = Awaited<ReturnType<typeof runPredictionStatsEngine>>;
+
+/**
+ * 엔진 단계의 산출물. 구조적 추정불가(③ 사유 1~10)는 엔진을 부르지 않으므로 'structural'이고, 그 외에는 엔진 응답과 요청 조립에 쓴
+ * 설계·y·그룹을 담는다(곡선 조립이 OOF 행 번호를 y/그룹에 대응시킨다).
+ */
+export type PredictionEngineRun =
+  | { kind: 'structural' }
+  | { kind: 'engine'; raw: PredictionEngineResponse; design: PredictionDesignMatrix; y: number[]; groups: string[] };
+
+/** 엔진 단계 — 공개 정책을 전혀 모른다(엔진도 모른다). ctx.predictionState가 null이면 안 된다. */
+export async function runPredictionEngineStage(
   ctx: AnalysisContext,
   opts?: EngineRunOpts,
-): Promise<AnalyzePredictionResult> {
+): Promise<PredictionEngineRun> {
   const state = ctx.predictionState;
   if (!state) {
-    throw new Error('computePredictionAnalyzeResult: ctx.predictionState가 없다 — 호출 순서 위반');
+    throw new Error('runPredictionEngineStage: ctx.predictionState가 없다 — 호출 순서 위반');
   }
-
   const { nonEstimableCheck } = state;
-  if (nonEstimableCheck.reason !== null) {
-    return buildNonEstimableResult(state, nonEstimableCheck.reason, ctx);
-  }
+  if (nonEstimableCheck.reason !== null) return { kind: 'structural' };
   const design = nonEstimableCheck.design;
   if (!design) {
-    throw new Error('computePredictionAnalyzeResult: nonEstimableCheck.reason이 null인데 design이 없다 — 계약 위반');
+    throw new Error('runPredictionEngineStage: nonEstimableCheck.reason이 null인데 design이 없다 — 계약 위반');
   }
-
   const { request, y, groups } = buildPredictionEngineRequestForState(state, design);
-
   const raw = await runPredictionStatsEngine(request, opts);
+  return { kind: 'engine', raw, design, y, groups };
+}
+
+/**
+ * 조립 단계 — 컨텍스트의 공개 정책(restricted/lifted)을 곡선 공개통제에 적용해 결과를 만든다. 순수 함수 — 엔진을 부르지 않는다.
+ * 같은 run을 restricted·lifted 컨텍스트로 각각 조립할 수 있다(computePredictionViews).
+ */
+export function assemblePredictionResult(ctx: AnalysisContext, run: PredictionEngineRun): AnalyzePredictionResult {
+  const state = ctx.predictionState;
+  if (!state) {
+    throw new Error('assemblePredictionResult: ctx.predictionState가 없다 — 호출 순서 위반');
+  }
+  if (run.kind === 'structural') {
+    return buildNonEstimableResult(state, state.nonEstimableCheck.reason as NonNullable<typeof state.nonEstimableCheck.reason>, ctx);
+  }
+  const { raw, design, y, groups } = run;
 
   if (raw.estimation === 'non_estimable') {
     return {
@@ -247,7 +267,7 @@ export async function computePredictionAnalyzeResult(
     y: y[point.row] as 0 | 1,
     cohortPersonKey: groups[point.row],
   }));
-  const curvesResult = computePredictionCurves(curveRows);
+  const curvesResult = computePredictionCurves(curveRows, { lifted: ctx.disclosureMode === 'lifted' });
   const curves = {
     bins: curvesResult.bins,
     suppressedReason: curvesResult.suppressedReason,
@@ -281,4 +301,42 @@ export async function computePredictionAnalyzeResult(
     caveats: buildCaveats(state, ctx),
     notPerformed: [...NOT_PERFORMED],
   };
+}
+
+/** computeAndPersist(statsRunsQueue.ts)의 캐시-미스 분기 전용 진입점(다른 모드
+ * 계산 함수와 동일한 원칙). ctx.predictionState가 null이면 안 된다 —
+ * statsAnalyzeHandler.ts가 호출 전에 ②공개통제 통과를 이미 보장한다. */
+export async function computePredictionAnalyzeResult(
+  ctx: AnalysisContext,
+  opts?: EngineRunOpts,
+): Promise<AnalyzePredictionResult> {
+  return assemblePredictionResult(ctx, await runPredictionEngineStage(ctx, opts));
+}
+
+/**
+ * 제한데이터 권한자 실행용 — 엔진(수 분)을 한 번만 돌려 일반본(restricted 컨텍스트)과 해제본(lifted 컨텍스트)을 함께 조립한다.
+ * 엔진은 공개 정책을 모르고, 두 컨텍스트는 같은 dataset에서 나온다. restricted 쪽 공개통제 ②가 통과했다면 두 컨텍스트의
+ * predictionState는 내용이 같으므로(공개 판정 여부만 다르다) lifted 상태로 만든 엔진 결과를 그대로 조립에 쓴다.
+ * 일반본: ②가 닫혀 있으면(소수 집단·전체 N<10) 기존 억제 스텁, 아니면 restricted 조립(곡선 구간 병합 포함).
+ */
+export async function computePredictionViews(
+  restrictedCtx: AnalysisContext,
+  liftedCtx: AnalysisContext,
+  opts?: EngineRunOpts,
+): Promise<{ aggregate: AnalyzeResult; limited: AnalyzeResult }> {
+  const run = await runPredictionEngineStage(liftedCtx, opts);
+  let aggregate: AnalyzeResult;
+  if (restrictedCtx.predictionDisclosed && restrictedCtx.predictionState) {
+    // 방어: 일반본은 해제본과 같은 자료·fold에서 나와야 한다. 어긋나면 엔진 결과의 OOF 행 번호가 다른 행을 가리킨다.
+    const a = restrictedCtx.predictionState;
+    const b = liftedCtx.predictionState!;
+    if (a.cohortDigest !== b.cohortDigest || a.s2Rows.length !== b.s2Rows.length || a.personCount !== b.personCount) {
+      throw new Error('computePredictionViews: restricted/lifted predictionState가 어긋났다 — 같은 dataset에서 파생돼야 한다');
+    }
+    aggregate = { continuous: [], discrete: [], prediction: assemblePredictionResult(restrictedCtx, run) };
+  } else {
+    aggregate = buildSuppressedAnalyzeResult(restrictedCtx);
+  }
+  const limited: AnalyzeResult = { continuous: [], discrete: [], prediction: assemblePredictionResult(liftedCtx, run) };
+  return { aggregate, limited };
 }

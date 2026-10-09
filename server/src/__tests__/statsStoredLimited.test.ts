@@ -60,9 +60,10 @@ beforeEach(() => {
 });
 
 describe('isStoredLimitedMode', () => {
-  it('상관행렬만 저장형 해제 모드다(예측은 PR4, 나머지는 조회 시 재계산)', () => {
+  it('상관행렬·예측만 저장형 해제 모드다(나머지는 조회 시 재계산)', () => {
     expect(isStoredLimitedMode('correlation_matrix')).toBe(true);
-    for (const mode of ['descriptive', 'bivariate', 'regression', 'prediction', undefined]) {
+    expect(isStoredLimitedMode('prediction')).toBe(true);
+    for (const mode of ['descriptive', 'bivariate', 'regression', undefined]) {
       expect(isStoredLimitedMode(mode)).toBe(false);
     }
   });

@@ -33,8 +33,10 @@ function personSetsOf(rows: readonly PredictionCurveRow[]): { pPlus: Set<string>
 }
 
 /** 이 구간(병합된 WorkingBin)이 공개 가능한가 — P⁺/P⁻/M 전부 0 또는
- * ≥MINIMUM_COHORT(계획서 §5단계 "구간별로 P⁺_k·P⁻_k·M_k를 센다"). */
-function isBinDisclosable(bin: WorkingBin): boolean {
+ * ≥MINIMUM_COHORT(계획서 §5단계 "구간별로 P⁺_k·P⁻_k·M_k를 센다"). lifted(제한데이터 권한자 해제본)면 소수 인원
+ * 판정을 끄므로 구간 병합이 일어나지 않는다. */
+function isBinDisclosable(bin: WorkingBin, lifted: boolean): boolean {
+  if (lifted) return true;
   const { pPlus, pMinus } = personSetsOf(bin.rows);
   const m = new Set([...pPlus].filter((k) => pMinus.has(k)));
   return !isSmallCell(pPlus.size) && !isSmallCell(pMinus.size) && !isSmallCell(m.size);
@@ -63,12 +65,12 @@ function buildCandidateBins(sortedRows: PredictionCurveRow[], candidateBinCount:
 /** 공개 불가능한 구간을 이웃(다음) 구간과 병합한다 — 전부 공개 가능해질 때까지
  * 반복. 마지막 구간이 여전히 불가능하면 이전 구간과 병합한다(계획서 §5단계 3
  * "0 또는 ≥MINIMUM_COHORT가 될 때까지 이웃 구간과 병합"). */
-function mergeUntilDisclosable(candidateBins: WorkingBin[]): WorkingBin[] {
+function mergeUntilDisclosable(candidateBins: WorkingBin[], lifted: boolean): WorkingBin[] {
   const merged: WorkingBin[] = [];
   let pending: WorkingBin | null = null;
   for (const bin of candidateBins) {
     pending = pending ? { rows: [...pending.rows, ...bin.rows] } : bin;
-    if (isBinDisclosable(pending)) {
+    if (isBinDisclosable(pending, lifted)) {
       merged.push(pending);
       pending = null;
     }
@@ -83,12 +85,18 @@ function mergeUntilDisclosable(candidateBins: WorkingBin[]): WorkingBin[] {
   return merged;
 }
 
-export function computePredictionCurves(representativeRows: PredictionCurveRow[]): PredictionCurvesResult {
+export function computePredictionCurves(
+  representativeRows: PredictionCurveRow[],
+  // 제한데이터 권한자 해제본 — 소수 인원 구간 병합만 끈다. 동점이 많아 구간이 minDisclosableBins 미만이 되는 것은 곡선이
+  // 의미를 가지는 최소 구간 수 조건이라 그대로 적용한다(그 경우 bins:null + 같은 사유 코드).
+  options: { lifted?: boolean } = {},
+): PredictionCurvesResult {
+  const lifted = options.lifted === true;
   const sorted = [...representativeRows].sort((a, b) => a.p - b.p);
   const candidateBins = buildCandidateBins(sorted, PREDICTION_POLICY.disclosure.curveCandidateBins);
-  const merged = mergeUntilDisclosable(candidateBins);
+  const merged = mergeUntilDisclosable(candidateBins, lifted);
 
-  if (merged.length < PREDICTION_POLICY.disclosure.minDisclosableBins || merged.some((b) => !isBinDisclosable(b))) {
+  if (merged.length < PREDICTION_POLICY.disclosure.minDisclosableBins || merged.some((b) => !isBinDisclosable(b, lifted))) {
     return { bins: null, suppressedReason: 'MIN_DISCLOSABLE_BINS_NOT_MET' };
   }
 

@@ -913,9 +913,17 @@ describe('ResultPanel — 제한데이터 소수 셀 해제 표시(limitedDisclo
     expect(screen.getAllByRole('status').some((el) => el.textContent.includes('소수 인원(10명 미만) 보호가 해제된 결과'))).toBe(true);
   });
 
-  it('아직 해제를 지원하지 않는 모드(예측)에는 해제 배너가 뜨지 않는다', () => {
+  it('예측 실행에도 해제 배너가 뜬다', () => {
     renderResult(
       { continuous: [], discrete: [], limitedDisclosure: 'applied' },
+      { analysisMode: 'prediction', variableKeys: ['a', 'b'] },
+    );
+    expect(screen.getAllByRole('status').some((el) => el.textContent.includes('소수 인원(10명 미만) 보호가 해제된 결과'))).toBe(true);
+  });
+
+  it('필드가 없는 예측 일반 응답에는 해제 배너가 없다', () => {
+    renderResult(
+      { continuous: [], discrete: [], prediction: { suppressed: true, reasonCode: 'MIN_COHORT_NOT_MET' } },
       { analysisMode: 'prediction', variableKeys: ['a', 'b'] },
     );
     expect(screen.queryByText(/소수 인원\(10명 미만\) 보호가 해제된 결과/)).toBeNull();
