@@ -368,9 +368,13 @@ describe.skipIf(!TEST_DB_URL)('연관성 회귀 — 실데이터 HTTP 통합(POS
 
     // 실제 분석 코드(패키지가 서버·클라이언트와 공유하는 그 함수)로 기대 평균·SD를
     // 독립 재계산한다 — 매직넘버 하드코딩이 아니라 실 fixture×실 formula.
-    const expectedValues = fixture.map(
-      ({ bin }) => Number(computeKneeCalc({ shared: sharedFixture as any, module: kneeModule(bin) as any }).relatedness.max),
-    );
+    // 카탈로그 키 knee.relatedness.max의 표시값은 "구간 최댓값"이 아니라 부담수준 점수 범위(min~max)의
+    // 중점이다(2026-09-26 제품 결정, packages/analytics-core/modules/knee/extractors.ts — 키 이름은 유지).
+    // 기대값을 이 중점으로 재계산하지 않으면 최댓값 기준이라 서버가 내는 평균·SD와 어긋난다.
+    const expectedValues = fixture.map(({ bin }) => {
+      const { min, max } = computeKneeCalc({ shared: sharedFixture as any, module: kneeModule(bin) as any }).relatedness;
+      return (Number(min) + Number(max)) / 2;
+    });
     const expectedMean = expectedValues.reduce((a, b) => a + b, 0) / expectedValues.length;
     const expectedSd = Math.sqrt(
       expectedValues.reduce((a, b) => a + (b - expectedMean) ** 2, 0) / expectedValues.length,
