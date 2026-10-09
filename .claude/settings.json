@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f .code-review-graph/graph.db ]; then uvx code-review-graph update; else uvx code-review-graph build; fi >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ]
+  }
+}
