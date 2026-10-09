@@ -1006,6 +1006,7 @@ const LIMITED_DISCLOSURE_MESSAGES = {
   unavailable_engine_degraded: '통계 엔진 상태가 불안정해 제한 해제를 할 수 없어 일반(집계) 결과를 표시합니다. 관리자에게 문의하세요.',
   unavailable_input_too_large: '데이터가 커서 제한 해제를 할 수 없어 일반(집계) 결과를 표시합니다. 필터로 범위를 줄여 보세요.',
   unavailable_group_limit: '그룹 수가 많아 제한 해제를 할 수 없어 일반(집계) 결과를 표시합니다. 필터로 범위를 줄이거나 다른 그룹 변수를 선택하세요.',
+  unavailable_method_not_executable: '소수 인원 보호를 풀어 보니 선택한 분석 방법을 현재 데이터로 실행할 수 없어 일반(집계) 결과를 표시합니다. 분석 방법이나 변수를 바꿔 보세요.',
   unavailable_source_missing: '이 실행은 제한 해제에 필요한 원본이 보존되지 않았습니다(권한을 받기 전에 실행했거나 보존 기간이 지남). 분석을 다시 실행하면 해제됩니다.',
   unavailable_version_drift: '분석 규칙·엔진 버전이 바뀌어 이 실행은 제한 해제를 할 수 없습니다. 분석을 다시 실행하세요.',
 };
@@ -1073,7 +1074,8 @@ export function ResultPanel({
           <div className="swb-banner" style={{ marginBottom: 12 }}>조건이 변경됨 — 다시 실행 필요</div>
         )}
 
-        {committedResult && isDescriptiveRun && (
+        {/* 서버가 소수 셀 해제를 지원하는 모드에서만 배너를 보인다 — 기술통계·회귀. 이변량·상관행렬·예측은 각 해제 PR에서 추가한다. */}
+        {committedResult && (isDescriptiveRun || isRegressionRun) && (
           <LimitedDisclosureBanner status={committedResult.result?.limitedDisclosure} />
         )}
 
