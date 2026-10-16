@@ -1,12 +1,36 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildLoadFailureMessage,
+  buildSaveAckMessage,
   getLoadablePatientsFromSnapshot,
 } from '../useWorkspacePersistence.js';
 import {
   isIntranetWorkspaceMode,
   shouldUseWorkspaceAutosave,
 } from '../../utils/workspaceAutosavePolicy.js';
+
+describe('buildSaveAckMessage (HF1)', () => {
+  it('ack가 없거나 전부 저장됐으면 빈 문자열', () => {
+    expect(buildSaveAckMessage(null)).toBe('');
+    expect(buildSaveAckMessage({ saved: [{ id: 'a', revision: 1 }], skipped: [], conflicts: [], lockedByOther: [] })).toBe('');
+  });
+
+  it('삭제된 환자 제외(deleted)는 알리지 않는다', () => {
+    expect(buildSaveAckMessage({ skipped: [{ id: 'a', reason: 'deleted' }] })).toBe('');
+  });
+
+  it('비담당·오류·충돌·타인 편집 중을 각각 인원수와 함께 알린다', () => {
+    const message = buildSaveAckMessage({
+      skipped: [{ id: 'a', reason: 'not_assigned' }, { id: 'b', reason: 'not_assigned' }, { id: 'c', reason: 'error' }],
+      conflicts: [{ id: 'd', serverRevision: 3 }],
+      lockedByOther: [{ id: 'e', holder: { holderName: 'Dr. Lee' } }],
+    });
+    expect(message).toContain('담당의가 아니어서 환자 데이터가 서버에 반영되지 않은 환자 2명');
+    expect(message).toContain('서버 저장 중 오류가 난 환자 1명');
+    expect(message).toContain('서버에 더 새로운 버전이 있어 반영되지 않은 환자 1명');
+    expect(message).toContain('다른 사용자가 편집 중이라 반영되지 않은 환자 1명');
+  });
+});
 
 vi.mock('../../services/workspaceRepository', () => ({
   clearAutoSavedWorkspace: vi.fn(),

@@ -6,6 +6,7 @@ import {
   saveRemoteWorkspace,
 } from '../intranetWorkspaceRepository.js';
 import { requestJson } from '../httpClient.js';
+import { clearAllLockTokens, setLockToken } from '../lockTokenStore.js';
 
 vi.mock('../httpClient.js', () => ({
   requestJson: vi.fn(),
@@ -17,6 +18,10 @@ vi.mock('../../utils/storage.js', () => ({
 
 vi.mock('@contracts/workspace', () => ({
   GetWorkspacesResponseSchema: { parse: value => value },
+  // 실제 스키마처럼 ack 필드 기본값([])을 채워 준다.
+  SaveWorkspaceResponseSchema: {
+    parse: value => ({ saved: [], skipped: [], conflicts: [], lockedByOther: [], ...value }),
+  },
 }));
 
 vi.mock('@contracts/autosave', () => ({
@@ -48,6 +53,7 @@ const PATIENT_WITH_COMPLETION = {
 
 beforeEach(() => {
   requestJson.mockReset();
+  clearAllLockTokens();
 });
 
 describe('saveRemoteWorkspace', () => {
@@ -79,6 +85,35 @@ describe('saveRemoteWorkspace', () => {
     expect(requestJson).toHaveBeenCalledWith('/api/workspaces', expect.objectContaining({
       baseUrl: 'https://intranet.test',
     }));
+  });
+
+  it('HF1: returns { items, ack } with the per-patient server result', async () => {
+    requestJson.mockResolvedValue({
+      items: [],
+      saved: [{ id: PATIENT.id, revision: 4 }],
+      skipped: [{ id: 'p2', reason: 'not_assigned' }],
+    });
+
+    const result = await saveRemoteWorkspace({ name: 'Snapshot', patients: [PATIENT], session: SESSION });
+
+    expect(result.items).toEqual([]);
+    expect(result.ack).toEqual({
+      saved: [{ id: PATIENT.id, revision: 4 }],
+      skipped: [{ id: 'p2', reason: 'not_assigned' }],
+      conflicts: [],
+      lockedByOther: [],
+    });
+  });
+
+  it('HF1: sends per-patient lease tokens as a top-level lockTokens map, never inside the patient snapshot', async () => {
+    requestJson.mockResolvedValue({ items: [] });
+    setLockToken(PATIENT.id, 'lease-abc');
+
+    await saveRemoteWorkspace({ name: 'Snapshot', patients: [PATIENT], session: SESSION });
+
+    const body = requestJson.mock.calls[0][1].body;
+    expect(body.lockTokens).toEqual({ [PATIENT.id]: 'lease-abc' });
+    expect(JSON.stringify(body.patients)).not.toContain('lease-abc');
   });
 
   it('puts when overwriting an existing workspace snapshot', async () => {

@@ -4,6 +4,8 @@ import {
   WorkspaceItemSchema,
   GetWorkspacesResponseSchema,
   SaveWorkspaceRequestSchema,
+  SaveWorkspaceResponseSchema,
+  WorkspaceSaveAckSchema,
 } from '../workspace';
 
 const validScope = {
@@ -118,5 +120,52 @@ describe('SaveWorkspaceRequestSchema', () => {
 
   it('accepts empty patients array', () => {
     expect(SaveWorkspaceRequestSchema.parse({ name: '빈 워크스페이스', patients: [] }).patients).toHaveLength(0);
+  });
+
+  it('carries per-patient lock tokens beside (not inside) the patients snapshot', () => {
+    const result = SaveWorkspaceRequestSchema.parse({
+      name: 'ws', patients: [validPatient], lockTokens: { [validPatient.id]: 'lease-token' },
+    });
+    expect(result.lockTokens).toEqual({ [validPatient.id]: 'lease-token' });
+    expect(SaveWorkspaceRequestSchema.parse({ name: 'ws', patients: [] }).lockTokens).toBeUndefined();
+  });
+});
+
+describe('SaveWorkspaceResponseSchema (HF1 per-patient ack)', () => {
+  it('old-server / mock responses without ack fields still parse, with empty ack lists', () => {
+    const result = SaveWorkspaceResponseSchema.parse({ items: [] });
+    expect(result.saved).toEqual([]);
+    expect(result.skipped).toEqual([]);
+    expect(result.conflicts).toEqual([]);
+    expect(result.lockedByOther).toEqual([]);
+  });
+
+  it('parses saved / skipped / conflicts / lockedByOther', () => {
+    const result = SaveWorkspaceResponseSchema.parse({
+      items: [],
+      saved: [{ id: 'p1', revision: 3, assignedDoctorUserId: 'doc-1' }],
+      skipped: [{ id: 'p2', reason: 'not_assigned' }],
+      conflicts: [{ id: 'p3', serverRevision: 7 }],
+      lockedByOther: [{ id: 'p4', holder: { holderName: 'Dr. Lee', acquiredAt: 'a', expiresAt: 'b' } }],
+    });
+    expect(result.saved[0]).toEqual({ id: 'p1', revision: 3, assignedDoctorUserId: 'doc-1' });
+    expect(result.skipped[0].reason).toBe('not_assigned');
+    expect(result.conflicts[0].serverRevision).toBe(7);
+    expect(result.lockedByOther[0].holder.holderName).toBe('Dr. Lee');
+  });
+
+  it('accepts a missing or null assignedDoctorUserId (old servers / unassigned patients) and lenient lock holders', () => {
+    const result = WorkspaceSaveAckSchema.parse({
+      saved: [{ id: 'p1', revision: 1 }, { id: 'p2', revision: 1, assignedDoctorUserId: null }],
+      lockedByOther: [{ id: 'p3', holder: { holderName: null } }, { id: 'p4', holder: {} }],
+    });
+    expect(result.saved[0].assignedDoctorUserId).toBeUndefined();
+    expect(result.saved[1].assignedDoctorUserId).toBeNull();
+    expect(result.lockedByOther).toHaveLength(2);
+  });
+
+  it('rejects an unknown skip reason and a non-positive saved revision', () => {
+    expect(() => WorkspaceSaveAckSchema.parse({ skipped: [{ id: 'p', reason: 'whatever' }] })).toThrow();
+    expect(() => WorkspaceSaveAckSchema.parse({ saved: [{ id: 'p', revision: 0 }] })).toThrow();
   });
 });

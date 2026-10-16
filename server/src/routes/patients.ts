@@ -230,16 +230,19 @@ function lockHeldResponse(lock: LockRow): { code: string; error: string; holder:
 // patchPatient/deletePatient/assignPatient의 쓰기 게이트. 호출 전 lockPatientAnchor()로
 // 앵커(FOR UPDATE)를 이미 잡아둔 상태여야 한다.
 // off: 항상 통과(구버전 배포 호환). observe: 평가·감사로그만, 절대 막지 않음. enforce: 실제 차단.
-async function evaluateLockGate(
+export async function evaluateLockGate(
   pool: Pool,
   client: QueryRunner,
   req: Request,
   patientId: string,
-  orgId: string
+  orgId: string,
+  // 요청 하나에 환자 N명이 실리는 호출부(워크스페이스 저장)는 X-Lock-Token 헤더 하나로 토큰을 못 보낸다 —
+  // 환자별 토큰을 직접 넘긴다. undefined면 기존처럼 헤더에서 읽고, null은 "토큰 없음"을 명시한다.
+  leaseTokenOverride?: string | null
 ): Promise<{ status: number; body: Record<string, unknown> } | null> {
   if (config.lockEnforcementMode === 'off') return null;
 
-  const leaseToken = getLockTokenHeader(req);
+  const leaseToken = leaseTokenOverride !== undefined ? leaseTokenOverride : getLockTokenHeader(req);
   const result = await checkLockForWrite(client, { patientId, orgId, leaseToken });
   if (result.ok) return null;
 
