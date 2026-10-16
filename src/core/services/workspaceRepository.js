@@ -76,9 +76,9 @@ export async function loadSavedWorkspaces(options = {}) {
 export async function saveWorkspaceSnapshot({ id, name, patients, savedItems, ...options }) {
   if (shouldUseRemoteRepository(options)) {
     try {
-      const items = await saveRemoteWorkspace({ id, name, patients, ...options });
+      const result = await saveRemoteWorkspace({ id, name, patients, ...options });
       markRemoteIntegrationStatus({ ...options, source: 'workspace-save' });
-      return items;
+      return result;
     } catch (error) {
       markFallbackIntegrationStatus(error, { ...options, source: 'workspace-save' });
       if (!shouldFallbackToLocal(error, options)) throw error;
@@ -88,7 +88,8 @@ export async function saveWorkspaceSnapshot({ id, name, patients, savedItems, ..
     markLocalIntegrationStatus({ ...options, source: 'workspace-save' });
   }
 
-  return savePatientsData(name, patients, savedItems);
+  // 로컬 저장은 환자별 서버 결과가 없다(ack: null).
+  return { items: await savePatientsData(name, patients, savedItems), ack: null };
 }
 
 export async function deleteWorkspaceSnapshot({ id, savedItems, ...options }) {

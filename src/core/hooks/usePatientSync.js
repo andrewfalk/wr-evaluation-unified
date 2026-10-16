@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   mergePulledPatients,
   mergePushedPatientAck,
+  applyPushFailures,
   pullPatients,
   pushPendingPatients,
   computeCommittedFlushOutcomes,
@@ -29,43 +30,6 @@ function applySyncedPatients(localPatients, syncedPairs) {
       mergePushedPatientAck(next, serverPatient, pushedPatient),
     localPatients
   );
-}
-
-function buildPushConflict(failure) {
-  const data = failure?.error?.data || {};
-  return {
-    kind: failure.kind === 'lock' ? 'lock' : 'push',
-    code: data.code || null,
-    message: failure?.error?.message || data.error || null,
-    serverRevision: data.currentRevision ?? null,
-    holder: data.holder ?? null,
-  };
-}
-
-// 'lock'(423 — 다른 사람이 활발히 편집 중이라 이번 저장이 거절됨)도 'conflict'와 같은 방식으로
-// syncStatus를 표시한다 — 둘 다 "지금은 저장할 수 없다"는 점에서 동일한 사용자 대응(Resolve/재확인)이
-// 필요하기 때문. 무한 재시도로 조용히 반복 실패하는 것을 막는다.
-function applyPushFailures(localPatients, failures) {
-  const conflictById = new Map(
-    failures
-      .filter(f => (f.kind === 'conflict' || f.kind === 'lock') && f.patient?.id)
-      .map(f => [f.patient.id, buildPushConflict(f)])
-  );
-
-  if (conflictById.size === 0) return localPatients;
-
-  return localPatients.map(patient => {
-    const conflict = conflictById.get(patient.id);
-    if (!conflict) return patient;
-    return {
-      ...patient,
-      sync: {
-        ...(patient.sync || {}),
-        syncStatus: 'conflict',
-        conflict,
-      },
-    };
-  });
 }
 
 // 활성 환자에 한해서만 락 상태를 근거로 push 허용 여부를 판정한다(비활성 dirty 환자는 항상

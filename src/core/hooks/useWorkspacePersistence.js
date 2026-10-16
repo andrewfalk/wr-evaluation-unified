@@ -10,6 +10,7 @@ import {
   saveAutoSavedWorkspace,
   saveWorkspaceSnapshot,
 } from '../services/workspaceRepository';
+import { applyWorkspaceSaveAck } from '../services/patientServerRepository';
 import {
   clonePatientRecordForImport,
   isRedactedPatientRecord,
@@ -34,6 +35,19 @@ export function getLoadablePatientsFromSnapshot(patients = [], context = {}) {
 export function buildLoadFailureMessage({ failedCount = 0, totalCount = 0 } = {}) {
   if (!failedCount) return '';
   return `불러오기한 환자 목록에 삭제된 환자가 포함되어 있어 작업 목록에서 제외했습니다. (실패 ${failedCount}건 / 총 ${totalCount}건)`;
+}
+
+// 워크스페이스 저장 결과(HF1) 중 사용자가 알아야 할 것만 문장으로 만든다. 스냅샷 목록(저장 항목)은 항상
+// 저장되지만, 환자 데이터는 담당의·최신 revision·편집 락 검사를 통과한 환자만 서버 기록에 반영된다.
+export function buildSaveAckMessage(ack) {
+  if (!ack) return '';
+  const skipped = reason => (ack.skipped || []).filter(s => s.reason === reason).length;
+  const lines = [];
+  if (skipped('not_assigned')) lines.push(`담당의가 아니어서 환자 데이터가 서버에 반영되지 않은 환자 ${skipped('not_assigned')}명 (저장 목록에는 포함됨)`);
+  if (skipped('error')) lines.push(`서버 저장 중 오류가 난 환자 ${skipped('error')}명`);
+  if (ack.conflicts?.length) lines.push(`서버에 더 새로운 버전이 있어 반영되지 않은 환자 ${ack.conflicts.length}명 — 충돌을 해결한 뒤 다시 저장하세요`);
+  if (ack.lockedByOther?.length) lines.push(`다른 사용자가 편집 중이라 반영되지 않은 환자 ${ack.lockedByOther.length}명`);
+  return lines.join('\n');
 }
 
 async function showLoadFailureNotice(loadResult) {
@@ -153,12 +167,13 @@ export function useWorkspacePersistence({
       if (!confirmed) return;
     }
     try {
-      const items = await saveWorkspaceSnapshot({ id: existingItem?.id, name: saveName, patients, savedItems, session, settings, serverConfig });
+      const { items, ack } = await saveWorkspaceSnapshot({ id: existingItem?.id, name: saveName, patients, savedItems, session, settings, serverConfig });
       setSavedItems(items);
+      setPatients(prev => applyWorkspaceSaveAck(prev, patients, ack));
       setLastAutoSave(null);
       setShowSaveModal(false);
       setSaveName('');
-      await showAlert('저장됨');
+      await showAlert(['저장됨', buildSaveAckMessage(ack)].filter(Boolean).join('\n'));
     } catch (err) {
       await showAlert(`저장에 실패했습니다. ${err?.message || '서버 오류'}`);
     }
@@ -168,12 +183,13 @@ export function useWorkspacePersistence({
     const confirmed = await showConfirm(`"${item.name}"에 덮어쓰시겠습니까?`);
     if (!confirmed) return;
     try {
-      const items = await saveWorkspaceSnapshot({ id: item.id, name: item.name, patients, savedItems, session, settings, serverConfig });
+      const { items, ack } = await saveWorkspaceSnapshot({ id: item.id, name: item.name, patients, savedItems, session, settings, serverConfig });
       setSavedItems(items);
+      setPatients(prev => applyWorkspaceSaveAck(prev, patients, ack));
       setLastAutoSave(null);
       setShowSaveModal(false);
       setSaveName('');
-      await showAlert('저장됨');
+      await showAlert(['저장됨', buildSaveAckMessage(ack)].filter(Boolean).join('\n'));
     } catch (err) {
       await showAlert(`저장에 실패했습니다. ${err?.message || '서버 오류'}`);
     }

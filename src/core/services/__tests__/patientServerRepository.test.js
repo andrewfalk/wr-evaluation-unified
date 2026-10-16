@@ -8,6 +8,8 @@ import {
   pushPendingPatients,
   mergeServerPatient,
   mergePushedPatientAck,
+  applyPushFailures,
+  applyWorkspaceSaveAck,
   mergePulledPatients,
   acquirePatientLock,
   renewPatientLock,
@@ -19,6 +21,7 @@ import {
   computeCommittedFlushOutcomes,
 } from '../patientServerRepository.js';
 import { setLockToken, clearAllLockTokens } from '../lockTokenStore.js';
+import { canEditPatient } from '../../utils/patientOwnership.js';
 
 vi.mock('../httpClient.js', () => ({
   requestJson: vi.fn(),
@@ -904,6 +907,304 @@ describe('isNetworkError', () => {
 // ---------------------------------------------------------------------------
 // computeCommittedFlushOutcomes
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// applyWorkspaceSaveAck — 워크스페이스 저장 응답(HF1)을 로컬 환자 상태에 반영
+// ---------------------------------------------------------------------------
+describe('applyWorkspaceSaveAck', () => {
+  const ID = '11111111-1111-1111-1111-111111111111';
+
+  function localPatient(syncOverrides = {}, patientOverrides = {}) {
+    return {
+      id: ID,
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      data: { shared: { name: 'Kim' }, modules: {}, activeModules: [] },
+      sync: { serverId: null, revision: 0, syncStatus: 'local-only', lastSyncedAt: null, ...syncOverrides },
+      ...patientOverrides,
+    };
+  }
+
+  it('저장 중 편집이 없으면 synced로 바꾸고 서버가 확정한 revision/serverId를 싣는다', () => {
+    const sent = localPatient();
+    const next = applyWorkspaceSaveAck([sent], [sent], { saved: [{ id: ID, revision: 1 }] });
+    expect(next[0].sync).toMatchObject({ serverId: ID, revision: 1, syncStatus: 'synced' });
+    expect(next[0].sync.lastSyncedAt).toEqual(expect.any(String));
+  });
+
+  it('synced 환자가 저장 중 편집됐으면 데이터를 보존하고 dirty로 남기며 revision만 올린다', () => {
+    const sent = localPatient({ serverId: ID, revision: 2, syncStatus: 'synced' });
+    const edited = { ...sent, updatedAt: '2024-01-01T00:00:05.000Z', data: { ...sent.data, shared: { name: 'Kim 수정' } } };
+    const next = applyWorkspaceSaveAck([edited], [sent], { saved: [{ id: ID, revision: 3 }] });
+    expect(next[0].data.shared.name).toBe('Kim 수정');
+    expect(next[0].sync).toMatchObject({ serverId: ID, revision: 3, syncStatus: 'dirty' });
+  });
+
+  it('local-only 환자가 저장 중 편집돼도 변경분을 잃지 않는다 — serverId/revision만 채우고 dirty(다음 푸시는 PATCH)', () => {
+    const sent = localPatient();
+    const edited = { ...sent, updatedAt: '2024-01-01T00:00:09.000Z', data: { ...sent.data, shared: { name: 'Kim 저장 중 편집' } } };
+    const next = applyWorkspaceSaveAck([edited], [sent], { saved: [{ id: ID, revision: 1 }] });
+    expect(next[0].data.shared.name).toBe('Kim 저장 중 편집');
+    expect(next[0].sync).toMatchObject({ serverId: ID, revision: 1, syncStatus: 'dirty' });
+  });
+
+  it('보낸 스냅샷을 알 수 없으면(편집 여부 판정 불가) 보수적으로 dirty', () => {
+    const next = applyWorkspaceSaveAck([localPatient()], [], { saved: [{ id: ID, revision: 1 }] });
+    expect(next[0].sync.syncStatus).toBe('dirty');
+  });
+
+  it('해결 전 충돌 상태 환자는 saved 응답으로 덮어쓰지 않는다', () => {
+    const conflicted = localPatient({ serverId: ID, revision: 1, syncStatus: 'conflict', conflict: { kind: 'push' } });
+    const next = applyWorkspaceSaveAck([conflicted], [conflicted], { saved: [{ id: ID, revision: 2 }] });
+    expect(next[0]).toBe(conflicted);
+  });
+
+  it('conflicts는 PATCH 409와 같은 모양의 sync.conflict로 표시된다(ConflictResolveModal 재사용)', () => {
+    const local = localPatient({ serverId: ID, revision: 1, syncStatus: 'synced' });
+    const next = applyWorkspaceSaveAck([local], [local], { conflicts: [{ id: ID, serverRevision: 5 }] });
+    expect(next[0].sync.syncStatus).toBe('conflict');
+    expect(next[0].sync.conflict).toMatchObject({ kind: 'push', code: 'CONFLICT', serverRevision: 5 });
+  });
+
+  it('lockedByOther는 kind: lock 충돌로 표시되고 holder를 싣는다', () => {
+    const local = localPatient({ serverId: ID, revision: 1, syncStatus: 'dirty' });
+    const holder = { holderName: 'Dr. Lee', acquiredAt: 'a', expiresAt: 'b' };
+    const next = applyWorkspaceSaveAck([local], [local], { lockedByOther: [{ id: ID, holder }] });
+    expect(next[0].sync.syncStatus).toBe('conflict');
+    expect(next[0].sync.conflict).toMatchObject({ kind: 'lock', code: 'LOCK_HELD', holder });
+  });
+
+  it('skipped 환자와 목록에 없는 id는 상태를 바꾸지 않는다', () => {
+    const local = localPatient({ serverId: ID, revision: 1, syncStatus: 'synced' });
+    const next = applyWorkspaceSaveAck([local], [local], {
+      skipped: [{ id: ID, reason: 'not_assigned' }],
+      saved: [{ id: 'unknown-id', revision: 9 }],
+      conflicts: [{ id: 'unknown-id', serverRevision: 9 }],
+    });
+    expect(next[0]).toBe(local);
+  });
+
+  it('ack가 없으면(로컬 저장·구서버) 환자 배열을 그대로 돌려준다', () => {
+    const patients = [localPatient()];
+    expect(applyWorkspaceSaveAck(patients, patients, null)).toBe(patients);
+    expect(applyWorkspaceSaveAck(patients, patients, undefined)).toBe(patients);
+  });
+
+  describe('담당의 반영 — 저장 직후에도 본인 환자를 편집할 수 있어야 한다', () => {
+    const session = { mode: 'intranet', user: { id: 'doc-1', role: 'doctor' } };
+    const created = () => localPatient({}, { meta: { createdBy: 'doc-1' } });
+
+    it('saved 응답의 담당의를 환자에 싣는다(저장 전 true → 저장 후에도 true)', () => {
+      const sent = created();
+      expect(canEditPatient(sent, session)).toBe(true); // local-only + 본인 생성 임시 허용
+      const next = applyWorkspaceSaveAck([sent], [sent], {
+        saved: [{ id: ID, revision: 1, assignedDoctorUserId: 'doc-1' }],
+      });
+      expect(next[0].assignedDoctorUserId).toBe('doc-1');
+      expect(next[0].sync.syncStatus).toBe('synced');
+      expect(canEditPatient(next[0], session)).toBe(true);
+    });
+
+    it('서버가 담당의 없음(null)으로 확정한 환자는 읽기 전용이 된다 — 서버 PATCH 규칙과 같다', () => {
+      const sent = created();
+      const next = applyWorkspaceSaveAck([sent], [sent], {
+        saved: [{ id: ID, revision: 1, assignedDoctorUserId: null }],
+      });
+      expect(next[0].assignedDoctorUserId).toBeNull();
+      expect(canEditPatient(next[0], session)).toBe(false);
+    });
+
+    it('응답에 담당의 필드가 없으면(구서버) 기존 값을 건드리지 않는다', () => {
+      const sent = { ...created(), assignedDoctorUserId: 'doc-9' };
+      const next = applyWorkspaceSaveAck([sent], [sent], { saved: [{ id: ID, revision: 1 }] });
+      expect(next[0].assignedDoctorUserId).toBe('doc-9');
+    });
+  });
+
+  describe('오래된 응답 무시 — 요청 이후 서버 revision이 움직인 환자', () => {
+    const synced = revision => localPatient({ serverId: ID, revision, syncStatus: 'synced' });
+
+    it('늦게 도착한 saved 응답은 revision을 거꾸로 돌리지 않는다', () => {
+      const sent = synced(2);
+      const advanced = synced(4); // 그 사이 자동 PATCH가 두 번 성공
+      const next = applyWorkspaceSaveAck([advanced], [sent], { saved: [{ id: ID, revision: 3 }] });
+      expect(next[0]).toBe(advanced);
+      expect(next[0].sync.revision).toBe(4);
+    });
+
+    it('이미 앞선 revision이면 늦은 conflicts 응답이 최신 환자를 다시 충돌로 만들지 않는다', () => {
+      const sent = synced(2);
+      const advanced = synced(3); // 자동 PATCH가 revision 3으로 성공
+      const next = applyWorkspaceSaveAck([advanced], [sent], { conflicts: [{ id: ID, serverRevision: 3 }] });
+      expect(next[0]).toBe(advanced);
+      expect(next[0].sync.syncStatus).toBe('synced');
+    });
+
+    it('이미 앞선 revision이면 늦은 lockedByOther 응답도 무시한다', () => {
+      const sent = synced(2);
+      const advanced = synced(3);
+      const next = applyWorkspaceSaveAck([advanced], [sent], {
+        lockedByOther: [{ id: ID, holder: { holderName: 'Dr. Lee' } }],
+      });
+      expect(next[0]).toBe(advanced);
+    });
+
+    it('revision이 그대로면(요청 이후 변화 없음) 충돌 응답은 정상 적용된다', () => {
+      const sent = synced(2);
+      const next = applyWorkspaceSaveAck([sent], [sent], { conflicts: [{ id: ID, serverRevision: 5 }] });
+      expect(next[0].sync.syncStatus).toBe('conflict');
+    });
+  });
+
+  describe('자동 PATCH ↔ 워크스페이스 저장이 겹칠 때 — 응답이 어느 순서로 와도 서버와 같은 상태로 수렴', () => {
+    // 자동 PATCH와 워크스페이스 저장이 같은 환자에 대해 둘 다 revision 1을 기대하고 나간다. 서버에서는 하나만 성공한다.
+    const base = () => localPatient({ serverId: ID, revision: 1, syncStatus: 'dirty' });
+    const edited = p => ({ ...p, updatedAt: '2024-01-01T00:00:05.000Z' });
+    const patchEcho = revision => ({
+      id: ID,
+      assignedDoctorUserId: 'doc-1',
+      data: { shared: { name: 'Kim' }, modules: {}, activeModules: [] },
+      sync: { serverId: ID, revision, syncStatus: 'synced', lastSyncedAt: '2024-01-01T00:00:10.000Z' },
+    });
+    const patchConflict = currentRevision => [{
+      kind: 'conflict', patient: { id: ID }, error: { data: { code: 'CONFLICT', currentRevision } },
+    }];
+
+    it('PATCH가 서버에서 먼저 성공(rev 2)했는데 워크스페이스 충돌 응답이 PATCH 성공 응답보다 먼저 도착해도, 최종은 충돌 없는 rev 2', () => {
+      const sentByPatch = base();
+      let state = applyWorkspaceSaveAck([sentByPatch], [base()], { conflicts: [{ id: ID, serverRevision: 2 }] });
+      expect(state[0].sync.syncStatus).toBe('conflict'); // 잠정 표시
+
+      state = mergePushedPatientAck(state, patchEcho(2), sentByPatch);
+
+      expect(state[0].sync).toMatchObject({ revision: 2, syncStatus: 'synced' });
+      expect(state[0].sync.conflict).toBeUndefined();
+    });
+
+    it('같은 순서에서 그 사이 더 편집했다면 데이터를 보존하고 dirty로 남긴다(충돌만 해소)', () => {
+      const sentByPatch = base();
+      let state = applyWorkspaceSaveAck([edited(sentByPatch)], [base()], { conflicts: [{ id: ID, serverRevision: 2 }] });
+
+      state = mergePushedPatientAck(state, patchEcho(2), sentByPatch);
+
+      expect(state[0].updatedAt).toBe('2024-01-01T00:00:05.000Z'); // 편집 보존
+      expect(state[0].sync).toMatchObject({ revision: 2, syncStatus: 'dirty' });
+      expect(state[0].sync.conflict).toBeUndefined();
+    });
+
+    it('워크스페이스 저장이 서버에서 먼저 성공(rev 2)했는데 PATCH 충돌 응답이 저장 응답보다 먼저 도착해도, 최종은 충돌 없는 rev 2', () => {
+      const sent = base();
+      let state = applyPushFailures([sent], patchConflict(2));
+      expect(state[0].sync.syncStatus).toBe('conflict'); // 잠정 표시
+
+      state = applyWorkspaceSaveAck(state, [sent], { saved: [{ id: ID, revision: 2, assignedDoctorUserId: 'doc-1' }] });
+
+      expect(state[0].sync).toMatchObject({ revision: 2, syncStatus: 'synced' });
+      expect(state[0].sync.conflict).toBeUndefined();
+    });
+
+    it('같은 순서에서 PATCH가 담았던 편집이 더 있었다면 dirty로 남아 다음 저장이 rev 2 위에서 재시도한다', () => {
+      const sent = base();
+      let state = applyPushFailures([edited(sent)], patchConflict(2));
+
+      state = applyWorkspaceSaveAck(state, [sent], { saved: [{ id: ID, revision: 2 }] });
+
+      expect(state[0].sync).toMatchObject({ revision: 2, syncStatus: 'dirty' });
+      expect(state[0].sync.conflict).toBeUndefined();
+    });
+
+    it('워크스페이스 저장 응답이 먼저 반영된 뒤 늦은 PATCH 충돌 응답이 와도 충돌로 표시하지 않는다', () => {
+      const sent = base();
+      let state = applyWorkspaceSaveAck([edited(sent)], [sent], { saved: [{ id: ID, revision: 2 }] });
+      expect(state[0].sync).toMatchObject({ revision: 2, syncStatus: 'dirty' });
+
+      state = applyPushFailures(state, patchConflict(2));
+
+      expect(state[0].sync).toMatchObject({ revision: 2, syncStatus: 'dirty' });
+      expect(state[0].sync.conflict).toBeUndefined();
+    });
+
+    it('보고된 서버 revision이 더 크면(그 뒤에 다른 사람이 썼다) PATCH 성공 응답이 와도 진짜 충돌로 남는다', () => {
+      const sent = base();
+      let state = applyWorkspaceSaveAck([sent], [sent], { conflicts: [{ id: ID, serverRevision: 5 }] });
+
+      state = mergePushedPatientAck(state, patchEcho(3), sent);
+
+      expect(state[0].sync.syncStatus).toBe('conflict');
+      expect(state[0].sync.conflict.serverRevision).toBe(5);
+    });
+
+    it('저장 응답의 revision이 충돌이 보고한 revision보다 작으면 충돌로 남는다', () => {
+      const sent = base();
+      let state = applyPushFailures([sent], patchConflict(5));
+
+      state = applyWorkspaceSaveAck(state, [sent], { saved: [{ id: ID, revision: 3 }] });
+
+      expect(state[0].sync.syncStatus).toBe('conflict');
+      expect(state[0].sync.revision).toBe(1);
+    });
+
+    describe('저장 성공이 저장 충돌이 아닌 충돌을 지우면 안 된다 — 삭제 충돌 등은 사용자가 해결해야 한다', () => {
+      // 같은 revision 숫자(2)를 보고하더라도 종류가 다르면 보존돼야 한다.
+      const NON_SAVE_CONFLICTS = [
+        ['삭제 충돌', { kind: 'delete', code: 'CONFLICT', message: 'Revision mismatch', serverRevision: 2 }],
+        ['원격 삭제', { kind: 'remote-delete', code: 'PATIENT_NOT_FOUND', serverRevision: 2 }],
+        ['pull 충돌', { kind: 'pull', code: null, serverRevision: 2 }],
+        ['락', { kind: 'lock', code: 'LOCK_HELD', serverRevision: 2 }],
+        ['신원 충돌', { kind: 'push', code: 'PATIENT_IDENTITY_CONFLICT', serverRevision: 2 }],
+      ];
+      const conflicted = conflict => localPatient({ serverId: ID, revision: 1, syncStatus: 'conflict', conflict });
+
+      it.each(NON_SAVE_CONFLICTS)('자동 PATCH 성공 응답이 [%s] 상태를 지우지 않는다', (_name, conflict) => {
+        const local = conflicted(conflict);
+        const next = mergePushedPatientAck([local], patchEcho(2), base());
+        expect(next[0]).toBe(local);
+        expect(next[0].sync).toMatchObject({ syncStatus: 'conflict', revision: 1 });
+        expect(next[0].sync.conflict.kind).toBe(conflict.kind);
+      });
+
+      it.each(NON_SAVE_CONFLICTS)('워크스페이스 저장 성공 응답이 [%s] 상태를 지우지 않는다', (_name, conflict) => {
+        const local = conflicted(conflict);
+        const next = applyWorkspaceSaveAck([local], [base()], { saved: [{ id: ID, revision: 2 }] });
+        expect(next[0]).toBe(local);
+        expect(next[0].sync.conflict.kind).toBe(conflict.kind);
+      });
+
+      it('이미 표시된 삭제 충돌을 늦게 온 PATCH 충돌·워크스페이스 충돌 응답이 다른 충돌로 덮어쓰지 않는다', () => {
+        const local = conflicted({ kind: 'delete', code: 'CONFLICT', serverRevision: 2 });
+        const byPatch = applyPushFailures([local], patchConflict(3));
+        expect(byPatch[0]).toBe(local);
+        const byWorkspace = applyWorkspaceSaveAck([local], [base()], { conflicts: [{ id: ID, serverRevision: 3 }] });
+        expect(byWorkspace[0].sync.conflict.kind).toBe('delete');
+      });
+
+      it('저장 충돌(push + CONFLICT)은 여전히 자동 해제된다 — 범위를 좁혀도 기존 수렴 동작은 유지', () => {
+        const local = conflicted({ kind: 'push', code: 'CONFLICT', serverRevision: 2 });
+        const next = mergePushedPatientAck([local], patchEcho(2), base());
+        expect(next[0].sync).toMatchObject({ revision: 2, syncStatus: 'synced' });
+        expect(next[0].sync.conflict).toBeUndefined();
+      });
+    });
+
+    it('서버 revision을 알 수 없는 일반 PATCH 충돌(동시 수정)과 락 거절은 그대로 충돌로 표시된다', () => {
+      const sent = base();
+      const noRevision = applyPushFailures([sent], patchConflict(null));
+      expect(noRevision[0].sync.syncStatus).toBe('conflict');
+
+      const locked = applyPushFailures([sent], [{
+        kind: 'lock', patient: { id: ID }, error: { data: { code: 'LOCK_HELD', holder: { holderName: 'Dr. Lee' } } },
+      }]);
+      expect(locked[0].sync.conflict).toMatchObject({ kind: 'lock' });
+    });
+  });
+
+  it('sync.serverId로도 매칭한다(로컬 id와 서버 id가 다른 환자)', () => {
+    const SERVER_ID = '22222222-2222-2222-2222-222222222222';
+    const sent = localPatient({ serverId: SERVER_ID, revision: 1, syncStatus: 'synced' });
+    const next = applyWorkspaceSaveAck([sent], [sent], { saved: [{ id: SERVER_ID, revision: 2 }] });
+    expect(next[0].id).toBe(ID);
+    expect(next[0].sync.revision).toBe(2);
+  });
+});
 
 describe('computeCommittedFlushOutcomes', () => {
   it('reads the already-committed syncStatus for a synced pair rather than re-comparing', () => {

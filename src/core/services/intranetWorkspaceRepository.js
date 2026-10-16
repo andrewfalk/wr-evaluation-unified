@@ -2,8 +2,10 @@ import { requestJson } from './httpClient';
 import { migratePatientRecords } from './patientRecords';
 import { getDeviceId } from '../utils/storage';
 import { completionReportFields } from '../utils/patientCompletion';
+import { getLockToken } from './lockTokenStore';
 import {
   GetWorkspacesResponseSchema,
+  SaveWorkspaceResponseSchema,
 } from '@contracts/workspace';
 import {
   GetAutosaveResponseSchema,
@@ -63,17 +65,38 @@ function withCompletionReport(patient) {
   return { ...patient, ...completionReportFields(patient) };
 }
 
+// HF1: 환자별 편집 락 lease token을 본문 최상위 lockTokens로 보낸다(키 = 로컬 환자 id). 스냅샷(patients)
+// 안에는 절대 넣지 않는다 — lockTokenStore 주석 참고. 서버는 환자별로 담당의·revision·락을 검사한다.
+function collectLockTokens(patients) {
+  const tokens = {};
+  for (const p of patients) {
+    const token = getLockToken(p.id);
+    if (token) tokens[p.id] = token;
+  }
+  return tokens;
+}
+
+// 반환: { items, ack } — items는 저장된 스냅샷 목록, ack는 환자별 서버 저장 결과(applyWorkspaceSaveAck 입력).
 export async function saveRemoteWorkspace({ id, name, patients, session, settings }) {
   const path = id ? `/api/workspaces/${id}` : '/api/workspaces';
   const method = id ? 'PUT' : 'POST';
+  const lockTokens = collectLockTokens(patients);
   const raw = await requestJson(path, {
     baseUrl: getBaseUrl(session, settings),
     method,
     session,
-    body: { name, patients: patients.map(withCompletionReport) },
+    body: {
+      name,
+      patients: patients.map(withCompletionReport),
+      ...(Object.keys(lockTokens).length > 0 ? { lockTokens } : {}),
+    },
   });
-  const data = parseResponse(GetWorkspacesResponseSchema, raw, `${method} ${path}`);
-  return normalizeSavedItems(data.items, { session });
+  const { items, saved, skipped, conflicts, lockedByOther } =
+    parseResponse(SaveWorkspaceResponseSchema, raw, `${method} ${path}`);
+  return {
+    items: normalizeSavedItems(items, { session }),
+    ack: { saved, skipped, conflicts, lockedByOther },
+  };
 }
 
 export async function deleteRemoteWorkspace({ id, session, settings }) {
