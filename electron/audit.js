@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { enqueue, flush, checkCorrupt, handleCorrupt } = require('./auditQueue');
+const { mustChangePassword } = require('./accessTokenClaims');
 
 // ── Module state ─────────────────────────────────────────────────────────────
 
@@ -129,6 +130,11 @@ async function tryRegister() {
   const token = _getAccessToken();
   if (!token || !_state.publicKeyB64 || !_apiBaseUrl) return false;
 
+  // 임시 비밀번호 상태의 토큰은 서버가 /api/devices/register를 403으로 거절한다. 그 요청이 인증 앞단의 IP 제한
+  // (분당 1회)을 소비하면, 비밀번호를 바꾼 직후의 첫 등록이 429를 받아 20분 재시도 대기에 들어가 EMR이 잠긴다.
+  // 그래서 요청 자체를 보내지 않는다 — 비밀번호 변경 후 새 토큰으로 setAccessToken이 다시 불리면 그때 첫 등록이 나간다.
+  if (mustChangePassword(token)) return false;
+
   const now = Date.now();
   if (now - _lastRegisterAttempt < REGISTER_RETRY_INTERVAL_MS) return false;
   _lastRegisterAttempt = now;
@@ -153,6 +159,11 @@ async function tryRegister() {
     // (or holding) admin approval.
     if (err.status === 429) {
       console.warn('[audit] tryRegister rate-limited, will retry in', REGISTER_RETRY_INTERVAL_MS / 60000, 'min:', err.message);
+      return false;
+    }
+    // 위 사전 검사를 빠져나간 경우(클레임을 못 읽은 토큰 등)에도 장치를 'error'로 내리지 않는다 — 비밀번호 변경이 끝나면 풀린다.
+    if (err.status === 403 && err.code === 'PASSWORD_CHANGE_REQUIRED') {
+      console.warn('[audit] tryRegister deferred until the password is changed');
       return false;
     }
     console.error('[audit] tryRegister failed:', err.message);

@@ -289,7 +289,9 @@ function App() {
   // 초기 + 매 동기화 완료(lastSyncedAt) 후 갱신 → 옵션·카운트 최신 유지.
   const rosterIdentityRef = useRef(null);
   useEffect(() => {
-    if (!canUseDashboardScope || !isAuthenticated || !sessionVerified) {
+    // 임시 비밀번호 상태에서는 서버가 이 조회를 403으로 거절한다(HF2) — 변경 전에는 부르지 않고, 플래그가 풀리면
+    // 아래 deps가 바뀌어 바로 조회한다.
+    if (!canUseDashboardScope || !isAuthenticated || !sessionVerified || session?.user?.mustChangePassword) {
       setDoctorRoster({ doctors: [], unassignedCount: 0 });
       setDoctorRosterStatus('loading');
       rosterIdentityRef.current = null;
@@ -310,7 +312,7 @@ function App() {
       .catch(() => { if (!cancelled) setDoctorRosterStatus('error'); /* 명부는 마지막 성공값 유지, 상태만 error로 표시 */ });
     return () => { cancelled = true; };
     // session/settings 객체는 deps에서 제외(식별자 변동으로 인한 재조회 루프 방지)
-  }, [canUseDashboardScope, isAuthenticated, sessionVerified, session?.user?.id, session?.user?.organizationId, syncState.lastSyncedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [canUseDashboardScope, isAuthenticated, sessionVerified, session?.user?.id, session?.user?.organizationId, session?.user?.mustChangePassword, syncState.lastSyncedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 사이드바(patientScope)·대시보드(dashboardScope) 공통 scope 유효성 가드.
   // 명부 갱신 후 선택된 의사 userId(또는 __unassigned__)가 더 이상 유효하지 않으면
