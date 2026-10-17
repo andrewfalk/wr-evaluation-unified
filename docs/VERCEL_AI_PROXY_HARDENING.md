@@ -47,8 +47,10 @@ Vercel 대시보드 → 프로젝트 → **Settings → Environment Variables**.
 2. 데이터베이스의 **REST API** 탭에서 `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`을 복사한다.
 3. Vercel에 두 변수를 등록한다(Vercel Marketplace의 Upstash 연동을 쓰면 자동 등록된다).
 
-키 접두사는 `wr-ai:`입니다. 무료 플랜의 일일 명령 수 한도(`분당 → 일당 → 전역 예산` 3회 조회/요청)를 넘지 않는지만
-확인하세요. 한도를 넘어 Redis가 응답하지 않으면 요청은 503으로 닫힙니다.
+설정할 값은 URL·토큰 두 개뿐입니다. `wr-ai:`는 사용자가 입력하는 값이 아니라 코드가 만드는 키 이름의 앞부분입니다. 첫 호출 때
+`wr-ai:budget:global:<날짜번호>`, `wr-ai:ip-day:<IP>:<날짜번호>`, `wr-ai:ip-min:<IP>:<분번호>`가 자동으로 생기고, 분당 키는
+약 2분, 예산 키는 약 1일, 일당 키는 약 2일 뒤 만료됩니다. 요청 1번당 Redis 명령을 최대 3번(분당 → 일당 → 전역 예산 순서)
+쓰므로 무료 플랜의 일일 명령 수 한도를 넘지 않는지만 확인하세요. 한도를 넘어 Redis가 응답하지 않으면 요청은 503으로 닫힙니다.
 
 ### Origin 허용 목록
 
@@ -137,7 +139,8 @@ Vercel 대시보드 → 프로젝트 → **Settings → Deployment Protection**�
 - Vercel 대시보드의 **Usage** 탭에서 `api/analyze` 함수 호출 수/에러율을 주기적으로 확인. 급격한 증가는 남용 신호일 수 있음.
 - 함수 로그에서 `[ai] upstream failure` (벤더 오류 `kind`/`status`)와 `[ai] rate limit backend failure` (Redis 장애)를 확인.
 - Gemini/Claude 콘솔의 API 사용량 알림(billing alert)을 설정해 두면, Vercel 설정과 무관하게 비용 급증을 조기에 인지할 수 있음.
-- Upstash 콘솔에서 `wr-ai:budget` 키의 사용량으로 하루 호출 수를 확인할 수 있습니다.
+- Upstash 콘솔 Data Browser에서 `wr-ai:*`로 검색하면 `wr-ai:budget:global:<날짜번호>` 키의 값이 그날 전체 호출 수입니다.
+  (분당 키는 약 2분 뒤 사라지고, 비어 보이면 새로고침·Scan을 누르거나 환경변수 URL이 이 데이터베이스의 것인지 확인하세요.)
 
 ## 배포 전 점검 (체크리스트)
 
