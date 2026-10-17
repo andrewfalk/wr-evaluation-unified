@@ -60,6 +60,8 @@ const NUMBER_LIMIT = 1e9;
 const num = z.number().finite().min(-NUMBER_LIMIT).max(NUMBER_LIMIT);
 const numOrNull = num.nullable();
 const index = z.number().int().min(0).max(1000);
+/** 모듈 결과의 직력 참조 = 최상위 jobs[]의 위치. 계산 결과의 직력이 shared.jobs와 연결되지 않으면(구형식) null — 존재하지 않는 위치를 지어내지 않는다. */
+const jobRef = index.nullable();
 const count = z.number().int().min(0).max(1_000_000);
 const bool = z.boolean();
 const yesNo = z.enum(['yes', 'no']).nullable();
@@ -94,7 +96,13 @@ const DiagnosisUnitSchema = z
     klg: z.enum(KLG_VALUES).nullable(),
     ellman: z.enum(ELLMAN_VALUES).nullable(),
   })
-  .strict();
+  .strict()
+  // 앱은 평가를 '낮음 → 높음'으로 바꿔도 과거 사유를 보관하고, 보고서는 낮음일 때만 사유를 보여 준다. 같은 규칙을 계약에서 강제해
+  // "업무관련성 높음, 낮음 사유: …" 같은 모순된 입력이 어느 클라이언트에서 오더라도 거부한다.
+  .refine((unit) => unit.reasons.length === 0 || unit.assessment === 'low', {
+    message: 'reasons are only valid when assessment is low',
+    path: ['reasons'],
+  });
 
 const DiagnosisSchema = z
   .object({
@@ -106,7 +114,17 @@ const DiagnosisSchema = z
     verticalDistribution: confirmed,
     concomitantSpondylosis: confirmed,
   })
-  .strict();
+  .strict()
+  // 화면은 K-L 등급을 무릎, Ellman을 어깨, 수직분포·동반 척추증을 척추 상병에서만 보여 준다. 진단의 모듈이 바뀌어도 옛 값은 남아 있으므로
+  // 해당 모듈의 상병이 아니면 값이 있을 수 없다.
+  .superRefine((diag, ctx) => {
+    const issue = (message: string, path: Array<string | number>) => ctx.addIssue({ code: z.ZodIssueCode.custom, message, path });
+    if (diag.units.some((u) => u.klg !== null) && diag.moduleId !== 'knee') issue('klg is only valid for knee diagnoses', ['units']);
+    if (diag.units.some((u) => u.ellman !== null) && diag.moduleId !== 'shoulder') issue('ellman is only valid for shoulder diagnoses', ['units']);
+    if ((diag.verticalDistribution !== null || diag.concomitantSpondylosis !== null) && diag.moduleId !== 'spine') {
+      issue('spine common fields are only valid for spine diagnoses', ['verticalDistribution']);
+    }
+  });
 
 const JobSchema = z
   .object({
@@ -126,7 +144,7 @@ const KneeSchema = z
       .array(
         z
           .object({
-            jobIndex: index,
+            jobIndex: jobRef,
             weightKgPerDay: numOrNull,
             squattingMinPerDay: numOrNull,
             aux: keyedObject(KNEE_AUX_KEYS, bool),
@@ -150,7 +168,7 @@ const ShoulderSchema = z
       .array(
         z
           .object({
-            jobIndex: index,
+            jobIndex: jobRef,
             periodYears: numOrNull,
             exposures: keyedObject(
               SHOULDER_EXPOSURE_KEYS,
@@ -186,7 +204,7 @@ function bkModuleSchema<B extends readonly [string, ...string[]], F extends read
         .array(
           z
             .object({
-              jobIndex: index,
+              jobIndex: jobRef,
               groups: z
                 .array(
                   z
@@ -200,7 +218,8 @@ function bkModuleSchema<B extends readonly [string, ...string[]], F extends read
                     })
                     .strict(),
                 )
-                .max(10),
+                // BK 유형을 고르지 않은 상병은 각자 별도 그룹이 되므로 그룹 수의 상한은 상병 수의 상한(20)과 같다.
+                .max(20),
             })
             .strict(),
         )
@@ -218,7 +237,7 @@ const CervicalSchema = z
       .array(
         z
           .object({
-            jobIndex: index,
+            jobIndex: jobRef,
             burdenGrade: z.enum(CERVICAL_BURDEN_GRADES),
             flagKeys: z.array(z.enum(CERVICAL_FLAG_KEYS)).max(CERVICAL_FLAG_KEYS.length),
             riskFactorCount: count,
@@ -278,11 +297,13 @@ const SpineMddmSchema = z
       .array(
         z
           .object({
-            jobIndex: index,
+            jobIndex: jobRef,
             periodYears: numOrNull,
             workDaysPerYear: numOrNull,
             dailyDoseKNh: numOrNull,
             lifetimeDoseMNh: numOrNull,
+            // 직력별로도 '일일 용량 하한 미만이라 평생 누적에서 제외'를 알린다(lifetimeDoseMNh 0이 노출 없음으로 읽히지 않게).
+            lifetimeExcluded: bool,
             tasks: z
               .array(
                 z
@@ -320,7 +341,7 @@ const SpineVibrationSchema = z
       .array(
         z
           .object({
-            jobIndex: index,
+            jobIndex: jobRef,
             periodYears: numOrNull,
             workDaysPerYear: numOrNull,
             intervals: z
@@ -369,7 +390,43 @@ export const AiAnalysisInputSchema = z
       })
       .strict(),
   })
-  .strict();
+  .strict()
+  // 참조 무결성: 모듈의 jobIndex는 jobs[]의, diagnosisRefs는 diagnoses[]의 위치를 가리킨다. 목록이 잘리거나 어긋나 존재하지 않는
+  // 위치를 가리키는 입력은 형식이 맞아도 거부한다(배열 상한 초과는 잘라 내지 않고 거부하는 것과 한 쌍이다).
+  .superRefine((input, ctx) => {
+    const jobCount = input.jobs.length;
+    const diagnosisCount = input.diagnoses.length;
+    const checkJob = (value: number | null, path: Array<string | number>) => {
+      if (value !== null && value >= jobCount) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `jobIndex ${value} is outside jobs (length ${jobCount})`, path });
+      }
+    };
+    const checkJobs = (moduleKey: string, jobs: ReadonlyArray<{ jobIndex: number | null }> | undefined, subPath: Array<string | number> = []) =>
+      jobs?.forEach((job, i) => checkJob(job.jobIndex, ['modules', moduleKey, ...subPath, 'jobs', i, 'jobIndex']));
+
+    const m = input.modules;
+    checkJobs('knee', m.knee?.jobs);
+    checkJobs('shoulder', m.shoulder?.jobs);
+    checkJobs('cervical', m.cervical?.jobs);
+    checkJobs('spine', m.spine?.mddm?.jobs, ['mddm']);
+    checkJobs('spine', m.spine?.vibration?.jobs, ['vibration']);
+    (['elbow', 'wrist'] as const).forEach((moduleKey) => {
+      checkJobs(moduleKey, m[moduleKey]?.jobs);
+      m[moduleKey]?.jobs.forEach((job, ji) =>
+        job.groups.forEach((group, gi) =>
+          group.diagnosisRefs.forEach((ref, ri) => {
+            if (ref >= diagnosisCount) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `diagnosisRef ${ref} is outside diagnoses (length ${diagnosisCount})`,
+                path: ['modules', moduleKey, 'jobs', ji, 'groups', gi, 'diagnosisRefs', ri],
+              });
+            }
+          }),
+        ),
+      );
+    });
+  });
 
 export type AiAnalysisInput = z.infer<typeof AiAnalysisInputSchema>;
 

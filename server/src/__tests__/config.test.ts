@@ -68,6 +68,15 @@ describe('config — AI gate', () => {
     expect(c.ai.provider).toBe('none');
   });
 
+  it('AI_TIMEOUT_MS defaults to 60000 and can be overridden', () => {
+    expect(make().ai.timeoutMs).toBe(60000);
+    expect(make({ AI_TIMEOUT_MS: '15000' }).ai.timeoutMs).toBe(15000);
+  });
+
+  it.each(['0', '-1', '1.5', 'abc'])('AI_TIMEOUT_MS=%s is rejected', (value) => {
+    expect(() => make({ AI_TIMEOUT_MS: value })).toThrow(/AI_TIMEOUT_MS/);
+  });
+
   it('internal provider enables AI without approval flags', () => {
     const c = make({ AI_PROVIDER: 'internal' });
     expect(c.ai.enabled).toBe(true);

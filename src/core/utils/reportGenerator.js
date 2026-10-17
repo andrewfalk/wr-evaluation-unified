@@ -52,7 +52,7 @@ function genKneeBurdenSection(calc) {
   return text;
 }
 
-function getShoulderInterpretation(totals) {
+export function getShoulderInterpretation(totals) {
   const exceeded = (totals || []).filter(t => t.exceeded);
   if (exceeded.length > 0) {
     const names = exceeded.map(t => t.label).join(', ');

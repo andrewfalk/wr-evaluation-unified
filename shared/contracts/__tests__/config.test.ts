@@ -33,6 +33,12 @@ describe('ServerPublicConfigSchema', () => {
     expect(result.localFallbackAllowed).toBe(false);
   });
 
+  it('aiFullReportAllowed defaults to false for old servers and accepts true', () => {
+    const base = { mode: 'intranet', aiEnabled: true, localFallbackAllowed: false, serverTime: '2024-01-10T09:00:00.000Z' };
+    expect(ServerPublicConfigSchema.parse(base).aiFullReportAllowed).toBe(false);
+    expect(ServerPublicConfigSchema.parse({ ...base, aiFullReportAllowed: true }).aiFullReportAllowed).toBe(true);
+  });
+
   it('parses standalone config with AI enabled', () => {
     const result = ServerPublicConfigSchema.parse({
       mode: 'standalone',

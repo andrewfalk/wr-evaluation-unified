@@ -28,6 +28,7 @@ describe('GET /api/config/public', () => {
     expect(res.body).toMatchObject({
       mode:                 'intranet',
       aiEnabled:            false,
+      aiFullReportAllowed:  false,
       localFallbackAllowed: false,
       videoAnalysisEnabled: false,
       videoAnalysisFixtureMode: false,
@@ -88,5 +89,34 @@ describe('GET /api/config/public — statsWorkbenchAvailable is false outside in
     app.use('/api/config', createFreshConfigRouter());
     const res = await request(app).get('/api/config/public');
     expect(res.body.statsWorkbenchAvailable).toBe(false);
+  });
+});
+
+// 보고서 전문(fullReport)은 병원 내부 LLM으로만 보낼 수 있다 — 외부 벤더·AI 비활성에서는 false여야
+// 클라이언트가 전문을 보내지 않는다(서버 스키마도 외부 경로에서 거부한다).
+describe('GET /api/config/public — aiFullReportAllowed', () => {
+  beforeEach(() => { vi.resetModules(); });
+
+  it.each([
+    ['internal', true, true],
+    ['external', true, false],
+    ['internal', false, false],
+    ['none', false, false],
+  ] as const)('provider=%s enabled=%s → %s', async (provider, enabled, expected) => {
+    vi.doMock('../../config', () => ({
+      default: {
+        deploymentMode: 'intranet',
+        ai: { enabled, provider },
+        localFallbackAllowed: false,
+        videoAnalysisEnabled: false,
+        video: { fixtureMode: false, jobDeadlineMs: 600000, queueWaitMs: 600000 },
+        statsWorkbenchEnabled: false,
+      },
+    }));
+    const { createConfigRouter: createFreshConfigRouter } = await import('../config');
+    const app = express();
+    app.use('/api/config', createFreshConfigRouter());
+    const res = await request(app).get('/api/config/public');
+    expect(res.body.aiFullReportAllowed).toBe(expected);
   });
 });

@@ -182,6 +182,8 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
       externalApiKey:         aiExternalApiKey,
       externalVendorApproved: aiExternalVendorApproved,
       deidentifyRequired:     aiDeidentifyRequired,
+      // AI 업스트림(내부 LLM·외부 벤더) 호출 한 건의 제한 시간(ms). 초과하면 504로 끊는다.
+      timeoutMs:              positiveInt(env, 'AI_TIMEOUT_MS', 60000),
     }),
 
     cors: Object.freeze({ origins: corsOrigins }),

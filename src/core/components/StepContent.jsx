@@ -4,6 +4,7 @@ import { AssessmentStep } from './AssessmentStep';
 import { AIAnalysisPanel } from './AIAnalysisPanel';
 import { VideoAnalysisStep } from './VideoAnalysisStep';
 import { createDiagnosis } from '../utils/data';
+import { buildAiInputResult } from '../utils/aiInput';
 import { hasUnmigratedLegacyJobData } from '@analytics-core/jobScope';
 
 const UNIFIED_AI_SYSTEM_PROMPT = `당신은 직업성 근골격계 질환 업무관련성 평가 전문 직업환경의학 전문의입니다.
@@ -128,6 +129,8 @@ export function StepContent({
       return (
         <AIAnalysisPanel
           generatePrompt={() => unifiedPreviewText}
+          buildInput={() => buildAiInputResult(activePatient)}
+          fullReportAllowed={serverConfig?.aiFullReportAllowed === true}
           systemPrompt={`${UNIFIED_AI_SYSTEM_PROMPT}\n6. 팔꿈치: BK 유형별 노출 패턴, 시간적 선후관계, 직업별-진단별 narrative를 함께 검토합니다.`}
           title="AI 업무관련성 종합분석"
           aiAvailable={aiAvailable}

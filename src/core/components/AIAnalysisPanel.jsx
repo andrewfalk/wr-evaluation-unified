@@ -1,17 +1,29 @@
 import { useState } from 'react';
+import { MODEL_OPTIONS, DEFAULT_GEMINI_MODEL } from '@contracts/aiModels';
 import { useAuth } from '../auth/AuthContext';
 import { useAIAnalysis } from '../hooks/useAIAnalysis';
 
-export function AIAnalysisPanel({ generatePrompt, systemPrompt, title = 'AI 분석', aiAvailable = true }) {
+// buildInput: () => ({ input, error }) — 환자 → 비식별 구조화 입력(buildAiInputResult). 인트라넷 서버로는 input만 나가고,
+//   만들지 못하면 input은 null이며 error는 사용자에게 보일 사유다.
+// fullReportAllowed: 서버가 병원 내부 LLM일 때만 true — 이때만 보고서 전문(generatePrompt)을 함께 보낸다.
+// generatePrompt/systemPrompt: 웹(Vercel)·Electron 직접 호출 경로 전용(hf7-3에서 구조화 입력으로 바뀐다).
+export function AIAnalysisPanel({ generatePrompt, systemPrompt, buildInput, fullReportAllowed = false, title = 'AI 분석', aiAvailable = true }) {
   const { session } = useAuth();
   const { analyze, loading, result, error, reset } = useAIAnalysis();
-  const [model, setModel] = useState('gemini-2.5-flash');
+  const [model, setModel] = useState(DEFAULT_GEMINI_MODEL);
   const isIntranet = session?.mode === 'intranet';
 
   const handleAnalyze = async () => {
+    if (isIntranet) {
+      // 입력을 만들지 못하면 input은 null — analyzeAIRequest가 사유를 안내하고 분석은 보내지 않는다(보고서 전문도 만들지 않는다).
+      const { input = null, error: inputError } = (buildInput && buildInput()) || {};
+      const fullReport = input && fullReportAllowed ? generatePrompt() : undefined;
+      await analyze({ input, inputError, fullReport: fullReport || undefined });
+      return;
+    }
     const prompt = generatePrompt();
     if (!prompt) return;
-    await analyze(prompt, systemPrompt, model);
+    await analyze({ prompt, systemPrompt, model });
   };
 
   if (!aiAvailable) {
@@ -41,14 +53,13 @@ export function AIAnalysisPanel({ generatePrompt, systemPrompt, title = 'AI 분�
                 value={model}
                 onChange={e => setModel(e.target.value)}
               >
-                <optgroup label="Google Gemini">
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (빠름/저비용)</option>
-                  <option value="gemini-2.5-pro">Gemini 2.5 Pro (정밀)</option>
-                </optgroup>
-                <optgroup label="Anthropic Claude">
-                  <option value="claude-haiku-4-5-20251001">Haiku 4.5 (빠름/저비용)</option>
-                  <option value="claude-sonnet-4-6-20250514">Sonnet 4.6 (정밀)</option>
-                </optgroup>
+                {MODEL_OPTIONS.map(group => (
+                  <optgroup key={group.group} label={group.group}>
+                    {group.options.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </optgroup>
+                ))}
               </select>
             </div>
           )}

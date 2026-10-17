@@ -41,8 +41,8 @@ describe('MODEL_OPTIONS', () => {
   });
 });
 
-// 이관 기간의 드리프트 방지 — 소비처(api/analyze.js·electron/main.js·AIAnalysisPanel)를 이 계약으로 옮기는 PR(hf7-2/3)에서
-// 이 블록을 지운다(루트 ai-models.config.cjs 삭제 시점).
+// 이관 기간의 드리프트 방지 — 화면(AIAnalysisPanel)은 hf7-2에서 이 계약으로 옮겼다. 나머지 소비처(api/analyze.js·electron/main.js)를
+// 옮기는 PR(hf7-3)에서 ai-models.config.cjs를 지우면서 '기존 파일과 같은 값' 케이스를 제거한다.
 describe('기존 소비처와의 일치(이관 전까지)', () => {
   const legacy = createRequire(import.meta.url)(path.join(ROOT, 'ai-models.config.cjs')) as {
     ALLOWED_MODELS: string[];
@@ -60,10 +60,10 @@ describe('기존 소비처와의 일치(이관 전까지)', () => {
     expect({ ...GEMINI_MAX_OUTPUT_TOKENS }).toEqual(legacy.GEMINI_MAX_OUTPUT_TOKENS);
   });
 
-  it('AIAnalysisPanel의 하드코딩 선택지와 같은 모델·라벨이다', () => {
+  it('AIAnalysisPanel은 모델 선택지를 계약에서 가져오고 모델명을 하드코딩하지 않는다', () => {
     const source = fs.readFileSync(path.join(ROOT, 'src/core/components/AIAnalysisPanel.jsx'), 'utf8');
-    const panel = [...source.matchAll(/<option value="([^"]+)">([^<]+)<\/option>/g)].map((m) => ({ value: m[1], label: m[2] }));
-    const contract = MODEL_OPTIONS.flatMap((group) => group.options.map((o) => ({ value: o.value as string, label: o.label })));
-    expect(panel).toEqual(contract);
+    expect(source).toContain("from '@contracts/aiModels'");
+    expect(source).toContain('MODEL_OPTIONS');
+    expect(source).not.toMatch(/gemini-2\.5|claude-(haiku|sonnet)/);
   });
 });
