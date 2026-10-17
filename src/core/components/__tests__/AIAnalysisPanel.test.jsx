@@ -25,7 +25,7 @@ const run = async () => userEvent.setup().click(screen.getByRole('button', { nam
 function renderPanel(props = {}) {
   const generatePrompt = vi.fn(() => '보고서 전문 텍스트');
   const buildInput = vi.fn(() => ({ input: INPUT, error: null }));
-  render(<AIAnalysisPanel generatePrompt={generatePrompt} systemPrompt="레거시 시스템 프롬프트" buildInput={buildInput} {...props} />);
+  render(<AIAnalysisPanel generatePrompt={generatePrompt} buildInput={buildInput} {...props} />);
   return { generatePrompt, buildInput };
 }
 
@@ -83,7 +83,7 @@ describe('AIAnalysisPanel — 인트라넷', () => {
   });
 });
 
-describe('AIAnalysisPanel — 웹·Electron (hf7-3 전까지 기존 동작)', () => {
+describe('AIAnalysisPanel — 웹·Electron(외부 AI)', () => {
   beforeEach(() => { auth.session = { mode: 'standalone' }; });
 
   it('모델 선택지가 계약(MODEL_OPTIONS)과 같다', () => {
@@ -95,21 +95,29 @@ describe('AIAnalysisPanel — 웹·Electron (hf7-3 전까지 기존 동작)', ()
     expect([...select.querySelectorAll('optgroup')].map((g) => g.label)).toEqual(MODEL_OPTIONS.map((g) => g.group));
   });
 
-  it('프롬프트·시스템 프롬프트·선택한 모델로 호출하고 구조화 입력은 쓰지 않는다', async () => {
-    const { buildInput } = renderPanel();
+  it('구조화 입력과 선택한 모델만 보낸다(프롬프트·시스템 프롬프트는 없다)', async () => {
+    renderPanel();
     await userEvent.setup().selectOptions(screen.getByLabelText('모델 선택'), 'gemini-2.5-pro');
     await run();
 
-    expect(buildInput).not.toHaveBeenCalled();
-    expect(vi.mocked(analyzeAIRequest).mock.calls[0][0]).toMatchObject({
-      prompt: '보고서 전문 텍스트', systemPrompt: '레거시 시스템 프롬프트', model: 'gemini-2.5-pro',
-    });
-    expect(vi.mocked(analyzeAIRequest).mock.calls[0][0].input).toBeUndefined();
+    const args = vi.mocked(analyzeAIRequest).mock.calls[0][0];
+    expect(args).toMatchObject({ input: INPUT, model: 'gemini-2.5-pro' });
+    expect(args.prompt).toBeUndefined();
+    expect(args.systemPrompt).toBeUndefined();
   });
 
-  it('프롬프트가 비어 있으면 호출하지 않는다', async () => {
-    renderPanel({ generatePrompt: () => '' });
+  it('fullReportAllowed가 true여도 외부 AI에는 보고서 전문을 만들지도 보내지도 않는다', async () => {
+    const { generatePrompt } = renderPanel({ fullReportAllowed: true });
     await run();
-    expect(analyzeAIRequest).not.toHaveBeenCalled();
+    expect(generatePrompt).not.toHaveBeenCalled();
+    expect(vi.mocked(analyzeAIRequest).mock.calls[0][0].fullReport).toBeUndefined();
+  });
+
+  it('입력을 만들지 못하면 사유를 넘긴다', async () => {
+    renderPanel({ buildInput: () => ({ input: null, error: '상병이 20개를 넘어 AI 분석에 포함할 수 없습니다. (최대 20개)' }) });
+    await run();
+    const args = vi.mocked(analyzeAIRequest).mock.calls[0][0];
+    expect(args.input).toBeNull();
+    expect(args.inputError).toContain('상병이 20개를 넘어');
   });
 });

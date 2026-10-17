@@ -8,17 +8,14 @@ export function useAIAnalysis() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 
-  // 인트라넷: { input, fullReport? } — 비식별 구조화 입력(+ 내부 LLM일 때만 보고서 전문).
-  // 웹·Electron: { prompt, systemPrompt, model } — hf7-3에서 같은 구조화 입력으로 바뀐다.
-  const analyze = useCallback(async ({ prompt, systemPrompt, input, inputError, fullReport, model } = {}) => {
+  // input: 비식별 구조화 입력(세 경로 공통), inputError: 입력을 못 만든 사유, fullReport: 내부 LLM일 때만, model: 웹·Electron 선택 모델.
+  const analyze = useCallback(async ({ input, inputError, fullReport, model } = {}) => {
     setLoading(true);
     setError(null);
     setResult(null);
 
     try {
       const response = await analyzeAIRequest({
-        prompt,
-        systemPrompt,
         input,
         inputError,
         fullReport,
@@ -38,10 +35,8 @@ export function useAIAnalysis() {
         return null;
       }
 
-      const text = data?.content?.[0]?.text
-        || data?.candidates?.[0]?.content?.parts?.[0]?.text
-        || data?.text
-        || '';
+      // 세 경로(인트라넷 서버 · Vercel · Electron) 모두 { text }만 돌려준다.
+      const text = data?.text || '';
 
       setResult(text);
       return text;

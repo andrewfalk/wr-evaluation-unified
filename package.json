@@ -44,6 +44,8 @@
     "verify:chart-compat": "node scripts/verify-chart-compat.mjs"
   },
   "dependencies": {
+    "@upstash/ratelimit": "^2.2.0",
+    "@upstash/redis": "^1.39.0",
     "electron-updater": "6.1.9",
     "html2pdf.js": "^0.10.1",
     "jszip": "^3.10.1",

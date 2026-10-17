@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import {
@@ -41,29 +40,51 @@ describe('MODEL_OPTIONS', () => {
   });
 });
 
-// 이관 기간의 드리프트 방지 — 화면(AIAnalysisPanel)은 hf7-2에서 이 계약으로 옮겼다. 나머지 소비처(api/analyze.js·electron/main.js)를
-// 옮기는 PR(hf7-3)에서 ai-models.config.cjs를 지우면서 '기존 파일과 같은 값' 케이스를 제거한다.
-describe('기존 소비처와의 일치(이관 전까지)', () => {
-  const legacy = createRequire(import.meta.url)(path.join(ROOT, 'ai-models.config.cjs')) as {
-    ALLOWED_MODELS: string[];
-    DEFAULT_CLAUDE_MODEL: string;
-    DEFAULT_GEMINI_MODEL: string;
-    CLAUDE_MAX_TOKENS: number;
-    GEMINI_MAX_OUTPUT_TOKENS: { pro: number; flash: number };
-  };
+describe('모델 값', () => {
+  it('허용 목록·기본값·토큰 한도가 운영 값 그대로다', () => {
+    expect([...ALLOWED_MODELS]).toEqual(['gemini-2.5-flash', 'gemini-2.5-pro', 'claude-haiku-4-5-20251001', 'claude-sonnet-4-6-20250514']);
+    expect(DEFAULT_GEMINI_MODEL).toBe('gemini-2.5-flash');
+    expect(DEFAULT_CLAUDE_MODEL).toBe('claude-haiku-4-5-20251001');
+    expect(CLAUDE_MAX_TOKENS).toBe(2000);
+    expect({ ...GEMINI_MAX_OUTPUT_TOKENS }).toEqual({ pro: 65536, flash: 8192 });
+  });
+});
 
-  it('ai-models.config.cjs와 같은 값이다', () => {
-    expect([...ALLOWED_MODELS]).toEqual(legacy.ALLOWED_MODELS);
-    expect(DEFAULT_GEMINI_MODEL).toBe(legacy.DEFAULT_GEMINI_MODEL);
-    expect(DEFAULT_CLAUDE_MODEL).toBe(legacy.DEFAULT_CLAUDE_MODEL);
-    expect(CLAUDE_MAX_TOKENS).toBe(legacy.CLAUDE_MAX_TOKENS);
-    expect({ ...GEMINI_MAX_OUTPUT_TOKENS }).toEqual(legacy.GEMINI_MAX_OUTPUT_TOKENS);
+// 모델 정보의 단일 출처는 이 계약이다. 소비처(화면·Vercel 함수·Electron 독립형)가 모델명을 따로 들고 있지 않아야 하고,
+// 옛 공유 파일(ai-models.config.cjs)이 되살아나지 않아야 한다.
+describe('소비처는 이 계약을 쓴다', () => {
+  const read = (file: string) => fs.readFileSync(path.join(ROOT, file), 'utf8');
+  const HARDCODED = /gemini-2.5|claude-(haiku|sonnet)/;
+
+  it('옛 ai-models.config.cjs는 없다', () => {
+    expect(fs.existsSync(path.join(ROOT, 'ai-models.config.cjs'))).toBe(false);
   });
 
   it('AIAnalysisPanel은 모델 선택지를 계약에서 가져오고 모델명을 하드코딩하지 않는다', () => {
-    const source = fs.readFileSync(path.join(ROOT, 'src/core/components/AIAnalysisPanel.jsx'), 'utf8');
+    const source = read('src/core/components/AIAnalysisPanel.jsx');
     expect(source).toContain("from '@contracts/aiModels'");
     expect(source).toContain('MODEL_OPTIONS');
-    expect(source).not.toMatch(/gemini-2\.5|claude-(haiku|sonnet)/);
+    expect(source).not.toMatch(HARDCODED);
+  });
+
+  it('Vercel 함수는 shared/dist의 계약을 불러오고 모델명을 하드코딩하지 않는다', () => {
+    const source = read('api/analyze.js');
+    expect(source).toContain("from '../shared/dist/aiModels.js'");
+    expect(source).toContain("from '../shared/dist/aiPrompt.js'");
+    expect(source).not.toMatch(HARDCODED);
+  });
+
+  it('Electron 독립형은 shared/dist의 CJS 계약을 불러오고 모델명을 하드코딩하지 않는다', () => {
+    const source = read('electron/aiRequest.js');
+    expect(source).toContain("require('../shared/dist/aiModels.cjs')");
+    expect(source).toContain("require('../shared/dist/aiPrompt.cjs')");
+    expect(source).not.toMatch(HARDCODED);
+  });
+
+  it('Electron 패키징에 계약 파일이 포함되고 옛 파일은 없다', () => {
+    const builder = read('electron-builder.base.yml');
+    // electron/aiRequest.js가 require하는 CJS 계약 3개만 넣는다(.d.ts·ESM 번들은 설치본에 필요 없다).
+    for (const file of ['aiModels', 'aiAnalysis', 'aiPrompt']) expect(builder).toContain(`shared/dist/${file}.cjs`);
+    expect(builder).not.toContain('ai-models.config.cjs');
   });
 });

@@ -1,4 +1,5 @@
 {
+  "installCommand": "npm install && node scripts/prebuild-shared.mjs",
   "buildCommand": "npm run build:web",
   "outputDirectory": "dist/web",
   "rewrites": [

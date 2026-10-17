@@ -15,7 +15,15 @@ const {
   shouldSkipUpdateCheck, decideUpdatePhaseTransition,
 } = require('./updateFeed');
 const { autoUpdater } = require('electron-updater');
-const aiModels = require('../ai-models.config.cjs');
+const {
+  AiHttpError,
+  parseAnalyzeEnvelope,
+  buildClaudeCall,
+  buildGeminiCall,
+  extractAiText,
+  describeAiFailure,
+  postJsonViaNet,
+} = require('./aiRequest');
 const { createIpcRegistrar } = require('./ipcGuard');
 const { isAllowedStandaloneNavigation } = require('./navigationGuard');
 const { isPermissionAllowed } = require('./permissionPolicy');
@@ -729,88 +737,24 @@ ipc.handle('show-confirm', async (_event, message) => {
 });
 
 // IPC: AI 분석 (Electron에서 직접 API 호출 — Claude / Gemini 분기)
-ipc.handle('analyze-ai', async (_event, { prompt, systemPrompt, model, apiKey }) => {
-  const isGemini = (model || '').startsWith('gemini');
-
-  if (!apiKey) {
-    return { error: { message: `API 키가 설정되지 않았습니다. 설정에서 ${isGemini ? 'Gemini' : 'Claude'} API 키를 입력하세요.` } };
-  }
+// 렌더러는 { input, model?, apiKey }만 보낸다. 프롬프트·시스템 프롬프트는 aiRequest.js가 @wr/contracts 빌더로 조립하고,
+// 모델명은 허용 목록으로 검증한다. 업스트림 오류 메시지·본문은 렌더러로 돌려주지 않는다(상태 코드로만 안내).
+ipc.handle('analyze-ai', async (_event, envelope) => {
+  const parsed = parseAnalyzeEnvelope(envelope);
+  if (!parsed.ok) return { error: { message: parsed.message } };
 
   try {
-    if (isGemini) {
-      return await callGemini({ prompt, systemPrompt, model, apiKey });
-    } else {
-      return await callClaude({ prompt, systemPrompt, model, apiKey });
-    }
+    const call = parsed.provider === 'gemini' ? buildGeminiCall(parsed) : buildClaudeCall(parsed);
+    const data = await postJsonViaNet(net, call);
+    const text = extractAiText(parsed.provider, data);
+    if (!text) throw new AiHttpError('shape');
+    return { text };
   } catch (error) {
-    return { error: { message: 'AI 서버 연결 오류: ' + error.message } };
+    // 업스트림 메시지는 기록하지 않는다(프롬프트·환자 요약이 섞일 수 있다).
+    console.error('[ai] standalone upstream failure', { provider: parsed.provider, kind: error?.kind, status: error?.status });
+    return { error: { message: describeAiFailure(error) } };
   }
 });
-
-// Electron net 모듈을 사용한 HTTPS 요청 헬퍼
-// net.request는 Chromium 네트워크 스택을 사용하므로 시스템 인증서 저장소를 신뢰함
-// → 회사 프록시(SSL Inspection)의 자체 서명 인증서도 정상 통과
-function netRequest(url, options, body) {
-  return new Promise((resolve, reject) => {
-    const req = net.request({ url, method: 'POST' });
-    for (const [key, value] of Object.entries(options.headers || {})) {
-      req.setHeader(key, value);
-    }
-    req.on('response', (res) => {
-      let chunks = '';
-      res.on('data', (chunk) => { chunks += chunk.toString(); });
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(chunks);
-          if (res.statusCode >= 400) {
-            reject(new Error(parsed.error?.message || `HTTP ${res.statusCode}`));
-          } else {
-            resolve(parsed);
-          }
-        } catch {
-          reject(new Error(`응답 파싱 오류 (HTTP ${res.statusCode})`));
-        }
-      });
-    });
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
-}
-
-function callClaude({ prompt, systemPrompt, model, apiKey }) {
-  const body = JSON.stringify({
-    model: model || aiModels.DEFAULT_CLAUDE_MODEL,
-    max_tokens: aiModels.CLAUDE_MAX_TOKENS,
-    system: systemPrompt || '',
-    messages: [{ role: 'user', content: prompt }]
-  });
-
-  return netRequest('https://api.anthropic.com/v1/messages', {
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01'
-    }
-  }, body);
-}
-
-function callGemini({ prompt, systemPrompt, model, apiKey }) {
-  const geminiModel = model || aiModels.DEFAULT_GEMINI_MODEL;
-  const isPro = geminiModel.includes('pro');
-  const body = JSON.stringify({
-    system_instruction: { parts: [{ text: systemPrompt || '' }] },
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: { maxOutputTokens: isPro ? aiModels.GEMINI_MAX_OUTPUT_TOKENS.pro : aiModels.GEMINI_MAX_OUTPUT_TOKENS.flash }
-  });
-
-  return netRequest(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`, {
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': apiKey,
-    }
-  }, body);
-}
 
 // IPC: 구형 무릎 프로그램(wr-evaluation) 저장 데이터 읽기
 // Chromium localStorage → LevelDB → WAL(.log) 포맷 파싱 + UTF-16LE 값 추출

@@ -6,7 +6,10 @@ files:
   - dist/electron/**/*
   - electron/**/*
   - public/**/*
-  - ai-models.config.cjs
+  # 독립형 AI 호출(electron/aiRequest.js)이 require하는 공유 계약(CJS)만 넣는다. zod는 루트 dependencies라 node_modules로 함께 들어간다.
+  - shared/dist/aiModels.cjs
+  - shared/dist/aiAnalysis.cjs
+  - shared/dist/aiPrompt.cjs
 extraResources:
   - from: electron/emr-helper/bin/Release/EmrHelper.exe
     to: emr-helper/EmrHelper.exe
