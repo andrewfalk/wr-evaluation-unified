@@ -29,7 +29,9 @@ export function buildUploadMiddleware(): RequestHandler | null {
     destination: (_req, _file, cb) => cb(null, tmp),
     filename: (_req, _file, cb) => cb(null, crypto.randomUUID()),
   });
-  return multer({ storage, limits: { fileSize: config.video.maxUploadBytes, files: 1 } }).single('file');
+  // 클라이언트는 'file' 파트 하나만 보낸다(videoAnalysisClient.uploadClip). 텍스트 필드는 받지 않는다(fields: 0).
+  // 총 파트 수는 files:1 + fields:0이 이미 1개로 묶으므로 parts 제한은 중복이라 두지 않는다.
+  return multer({ storage, limits: { fileSize: config.video.maxUploadBytes, files: 1, fields: 0 } }).single('file');
 }
 
 /** 미들웨어를 Promise로 실행(에러를 핸들러 try/catch로 받기 위함). */
