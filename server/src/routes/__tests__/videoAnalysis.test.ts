@@ -11,7 +11,7 @@ import cookieParser from 'cookie-parser';
 const flagState = vi.hoisted(() => ({ enabled: true, fixtureMode: false, targetThumbnail: false, overlayFrames: false, allowUnverifiedRecipe: false }));
 const lockFlagState = vi.hoisted(() => ({ mode: 'off' as 'off' | 'observe' | 'enforce' }));
 // 업로드 테스트용 실제 temp uploadDir(buildUploadMiddleware가 tmp 하위를 mkdir). 경로는 beforeAll에서 채운다.
-const uploadEnv = vi.hoisted(() => ({ dir: '' }));
+const uploadEnv = vi.hoisted(() => ({ dir: '', maxBytes: 50 * 1024 * 1024 }));
 beforeAll(() => { uploadEnv.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'va-upload-')); });
 
 vi.mock('../../config', () => ({
@@ -30,7 +30,7 @@ vi.mock('../../config', () => ({
       scriptsDir: '/tmp/scripts',
       python: '/tmp/python',
       get uploadDir() { return uploadEnv.dir; },
-      maxUploadBytes: 50 * 1024 * 1024,
+      get maxUploadBytes() { return uploadEnv.maxBytes; },
       allowedExtensions: ['mp4', 'mov', 'webm', 'avi'],
       allowedMimeTypes: ['video/mp4', 'video/webm', 'video/x-msvideo'],
       clipTtlHours: 24,
@@ -1088,6 +1088,61 @@ describe('POST /clips/:id/upload (M3-7a)', () => {
       .attach('wrongfield', MP4, { filename: 'clip.mp4', contentType: 'video/mp4' });
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('INVALID_UPLOAD');
+  });
+
+  // multer가 거부한 요청이 tmp에 반쯤 쓴 파일을 남기지 않는지(디스크 누수) — 버전 업그레이드 시 깨지기 쉬운 동작.
+  const tmpFiles = () => {
+    const dir = path.join(uploadEnv.dir, 'tmp');
+    return fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  };
+
+  it('파일 뒤에 텍스트 필드가 오면(fields: 0 → LIMIT_FIELD_COUNT) → 400 INVALID_UPLOAD + tmp 잔여 없음', async () => {
+    const before = tmpFiles().length;
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadRow()] });
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/upload`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .attach('file', MP4, { filename: 'clip.mp4', contentType: 'video/mp4' })
+      .field('note', 'x'); // 클라이언트는 file 외 필드를 보내지 않는다 — 파일이 이미 tmp에 쓰인 뒤에 필드가 도착하는 경우
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_UPLOAD');
+    expect(tmpFiles()).toHaveLength(before);
+  });
+
+  it('종결 경계 없이 끊긴 본문 → 오류 응답 + 반쯤 쓴 tmp 파일 잔여 없음 (multer 1.x는 남겼다)', async () => {
+    const before = tmpFiles().length;
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadRow()] });
+    const truncated = '--XB\r\nContent-Disposition: form-data; name="file"; filename="clip.mp4"\r\nContent-Type: video/mp4\r\n\r\nftyp-partial-data';
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/clips/${CLIP_ID}/upload`)
+      .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+      .set('Content-Type', 'multipart/form-data; boundary=XB')
+      .send(Buffer.from(truncated));
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(tmpFiles()).toHaveLength(before);
+  });
+
+  it('크기 한도 초과 → 413 FILE_TOO_LARGE + tmp 잔여 없음', async () => {
+    const before = tmpFiles().length;
+    const pool = makePool();
+    authOk(pool);
+    q(pool).mockResolvedValueOnce({ rows: [uploadRow()] });
+    uploadEnv.maxBytes = 1024; // buildUploadMiddleware가 makeApp 시점에 읽는다
+    try {
+      const res = await request(makeApp(pool))
+        .post(`/api/video-analysis/clips/${CLIP_ID}/upload`)
+        .set('Authorization', `Bearer ${orgToken()}`).set('x-csrf-token', CSRF_TOKEN)
+        .attach('file', Buffer.concat([MP4, Buffer.alloc(8192)]), { filename: 'clip.mp4', contentType: 'video/mp4' });
+      expect(res.status).toBe(413);
+      expect(res.body.code).toBe('FILE_TOO_LARGE');
+      expect(tmpFiles()).toHaveLength(before);
+    } finally {
+      uploadEnv.maxBytes = 50 * 1024 * 1024;
+    }
   });
 });
 
