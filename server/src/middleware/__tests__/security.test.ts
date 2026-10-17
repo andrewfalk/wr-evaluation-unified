@@ -16,7 +16,7 @@ vi.mock('../../config', () => ({
   },
 }));
 
-import { cspMiddleware } from '../csp';
+import { cspMiddleware, noStoreMiddleware } from '../csp';
 import { corsMiddleware } from '../corsMiddleware';
 import { loginRateLimit, csrfRateLimit } from '../rateLimit';
 
@@ -29,6 +29,48 @@ function makeApp() {
   app.post('/csrf',  csrfRateLimit(),  (_req, res) => res.json({ ok: true }));
   return app;
 }
+
+// ---------------------------------------------------------------------------
+// HF4(L7): /api 응답 Cache-Control: no-store
+// ---------------------------------------------------------------------------
+describe('noStoreMiddleware (/api)', () => {
+  function makeNoStoreApp() {
+    const app = express();
+    app.use('/api', noStoreMiddleware());
+    app.get('/api/patients', (_req, res) => res.json({ ok: true }));
+    app.get('/api/video/frame', (_req, res) => { res.set('Cache-Control', 'no-store, private'); res.send('x'); });
+    app.get('/api/boom', (_req, _res, next) => next(new Error('boom')));
+    app.use((_err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+      res.status(500).json({ code: 'INTERNAL_ERROR' });
+    });
+    app.get('/health', (_req, res) => res.json({ ok: true }));
+    app.get('/assets/app.js', (_req, res) => res.type('js').send('x'));
+    return app;
+  }
+
+  it('/api 응답(성공·오류·미등록 경로)에 no-store를 붙인다', async () => {
+    const app = makeNoStoreApp();
+    expect((await request(app).get('/api/patients')).headers['cache-control']).toBe('no-store');
+    expect((await request(app).get('/api/boom')).headers['cache-control']).toBe('no-store');
+    expect((await request(app).get('/api/does-not-exist')).headers['cache-control']).toBe('no-store');
+  });
+
+  it('라우트가 더 구체적인 Cache-Control을 정하면 그쪽이 이긴다', async () => {
+    const res = await request(makeNoStoreApp()).get('/api/video/frame');
+    expect(res.headers['cache-control']).toBe('no-store, private');
+  });
+
+  it('/api 밖(health·정적 자산)에는 붙이지 않는다', async () => {
+    const app = makeNoStoreApp();
+    expect((await request(app).get('/health')).headers['cache-control']).toBeUndefined();
+    expect((await request(app).get('/assets/app.js')).headers['cache-control']).toBeUndefined();
+  });
+
+  it('Express ETag는 그대로 유지된다(If-Match revision과 무관)', async () => {
+    const res = await request(makeNoStoreApp()).get('/api/patients');
+    expect(res.headers['etag']).toBeDefined();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // CSP

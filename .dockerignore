@@ -57,3 +57,17 @@ services/pose-inference/**/*.webm
 # Dockerfile이 별도로 pip install한다). fixtures/(R 참조값·pytest 전용)는 런타임에
 # 불필요하지만 크기가 무의미해 제외하지 않는다.
 services/stats-engine/.venv/
+
+# HF9: 빌드 컨텍스트에 실리면 안 되는 로컬 비밀·개인 데이터·산출물(모두 .gitignore 대상이며 어떤 Dockerfile도 COPY하지 않는다).
+# 패턴은 컨텍스트 루트 기준이다(루트의 *.htm이 index.html이나 하위 폴더 파일을 막지 않는다).
+*.asc
+wr-backup*
+target_webpage*
+*.htm
+*.xlsm
+.mcp.json
+.vercel/
+.video-uploads/
+.mock-intranet/
+updates/
+test-results/
