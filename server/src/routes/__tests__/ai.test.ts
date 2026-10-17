@@ -156,6 +156,28 @@ describe('POST /api/ai/analyze — 요청 검증', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('존재하지 않는 직력·상병을 가리키는 참조는 형식이 맞아도 400이다(목록이 잘린 입력 방지)', async () => {
+    const dangling = structuredClone(INPUT) as any;
+    dangling.modules.knee = {
+      noEvaluableJobs: false, relatedness: null, cumulativeBurdenSufficient: false,
+      jobs: [{ jobIndex: 30, weightKgPerDay: null, squattingMinPerDay: null, aux: { stairs: false, kneeTwist: false, startStop: false, tightSpace: false, kneeContact: false, jumpDown: false }, burdenLevel: null }],
+    };
+    const res = await post(makeApp(), { input: dangling });
+    expect(res.status).toBe(400);
+    expect(res.body.error.details).toContainEqual({ path: 'input.modules.knee.jobs.0.jobIndex', code: 'custom' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('"높음" 평가에 과거 낮음 사유가 남은 모순된 입력은 400이다', async () => {
+    const contradictory = structuredClone(INPUT) as any;
+    contradictory.diagnoses[0].units[0].assessment = 'high';
+    contradictory.diagnoses[0].units[0].reasons = ['unrelated'];
+    const res = await post(makeApp(), { input: contradictory });
+    expect(res.status).toBe(400);
+    expect(res.body.error.details).toContainEqual({ path: 'input.diagnoses.0.units.0.reasons', code: 'custom' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('400 응답은 요청 값을 메아리치지 않고 경로·코드만 알려 준다', async () => {
     const bad = structuredClone(INPUT) as any;
     bad.diagnoses[0].moduleId = '홍길동-비밀값';

@@ -24,7 +24,7 @@ const run = async () => userEvent.setup().click(screen.getByRole('button', { nam
 
 function renderPanel(props = {}) {
   const generatePrompt = vi.fn(() => '보고서 전문 텍스트');
-  const buildInput = vi.fn(() => INPUT);
+  const buildInput = vi.fn(() => ({ input: INPUT, error: null }));
   render(<AIAnalysisPanel generatePrompt={generatePrompt} systemPrompt="레거시 시스템 프롬프트" buildInput={buildInput} {...props} />);
   return { generatePrompt, buildInput };
 }
@@ -52,12 +52,14 @@ describe('AIAnalysisPanel — 인트라넷', () => {
     expect(vi.mocked(analyzeAIRequest).mock.calls[0][0]).toMatchObject({ input: INPUT, fullReport: '보고서 전문 텍스트' });
   });
 
-  it('입력을 만들지 못하면(null) 보고서 전문도 보내지 않는다 — 전문만 단독으로 나가는 일이 없다', async () => {
-    const { generatePrompt } = renderPanel({ fullReportAllowed: true, buildInput: () => null });
+  it('입력을 만들지 못하면(null) 보고서 전문도 보내지 않고 사유를 넘긴다 — 전문만 단독으로 나가는 일이 없다', async () => {
+    const reason = '직력이 30개를 넘어 AI 분석에 포함할 수 없습니다. (최대 30개)';
+    const { generatePrompt } = renderPanel({ fullReportAllowed: true, buildInput: () => ({ input: null, error: reason }) });
     await run();
     expect(generatePrompt).not.toHaveBeenCalled();
     const args = vi.mocked(analyzeAIRequest).mock.calls[0][0];
     expect(args.input).toBeNull();
+    expect(args.inputError).toBe(reason);
     expect(args.fullReport).toBeUndefined();
   });
 

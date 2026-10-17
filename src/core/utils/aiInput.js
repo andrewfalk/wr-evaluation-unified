@@ -41,8 +41,6 @@ import { groupSummariesByBkType as groupWrist, mergeBkGroupSummaries as mergeWri
 // ---------------------------------------------------------------------------
 
 const NUMBER_LIMIT = 1e9;
-const MAX_JOBS = 30;
-const MAX_TASKS = 30;
 
 const finite = (value) => {
   if (value === null || value === undefined || value === '') return null;
@@ -95,31 +93,38 @@ function buildDiagnoses(shared, activeModules) {
   const out = [];
 
   all.forEach((diag, diagIndex) => {
-    if (!diag || (!diag.code && !diag.name) || out.length >= 20) return; // 보고서와 같이 코드·이름이 모두 빈 행은 뺀다
+    if (!diag || (!diag.code && !diag.name)) return; // 보고서와 같이 코드·이름이 모두 빈 행은 뺀다
     refByDiagnosisId.set(diag.id, out.length);
+    const moduleId = oneOf(AI_MODULE_IDS, resolveDiagnosisModule(diag, activeModules)?.moduleId);
+    // 화면은 이 값들을 해당 모듈의 상병에서만 보여 준다. 모듈이 바뀐 진단에는 옛 값이 남아 있을 수 있어 그대로 보내면 안 된다.
+    const sideValue = (unit, right, left) => (unit.side === 'right' ? right : unit.side === 'left' ? left : null);
     out.push({
       code: normalizeIcdCode(diag.code),
-      moduleId: oneOf(AI_MODULE_IDS, resolveDiagnosisModule(diag, activeModules)?.moduleId),
+      moduleId,
       side: oneOf(['right', 'left', 'both'], diag.side),
       units: units
         .filter((unit) => unit.diagIndex === diagIndex)
-        .map((unit) => ({
-          side: unit.side,
-          confirmed: oneOf(['confirmed', 'unconfirmed'], diag[unit.confirmedKey]),
-          assessment: oneOf(['high', 'low'], diag[unit.assessmentKey]),
-          reasons: listOf(LOW_REASON_KEYS, diag[unit.reasonKey]),
-          klg: unit.side === 'right' ? oneOf(KLG_VALUES, diag.klgRight) : unit.side === 'left' ? oneOf(KLG_VALUES, diag.klgLeft) : null,
-          ellman: unit.side === 'right' ? oneOf(ELLMAN_VALUES, diag.ellmanRight) : unit.side === 'left' ? oneOf(ELLMAN_VALUES, diag.ellmanLeft) : null,
-        })),
-      verticalDistribution: oneOf(['confirmed', 'unconfirmed'], diag.verticalDistribution),
-      concomitantSpondylosis: oneOf(['confirmed', 'unconfirmed'], diag.concomitantSpondylosis),
+        .map((unit) => {
+          const assessment = oneOf(['high', 'low'], diag[unit.assessmentKey]);
+          return {
+            side: unit.side,
+            confirmed: oneOf(['confirmed', 'unconfirmed'], diag[unit.confirmedKey]),
+            assessment,
+            // 앱은 평가를 '낮음 → 높음'으로 바꿔도 과거 사유를 보관하고, 보고서(buildAssessmentBlocks)는 낮음일 때만 보여 준다.
+            reasons: assessment === 'low' ? listOf(LOW_REASON_KEYS, diag[unit.reasonKey]) : [],
+            klg: moduleId === 'knee' ? oneOf(KLG_VALUES, sideValue(unit, diag.klgRight, diag.klgLeft)) : null,
+            ellman: moduleId === 'shoulder' ? oneOf(ELLMAN_VALUES, sideValue(unit, diag.ellmanRight, diag.ellmanLeft)) : null,
+          };
+        }),
+      verticalDistribution: moduleId === 'spine' ? oneOf(['confirmed', 'unconfirmed'], diag.verticalDistribution) : null,
+      concomitantSpondylosis: moduleId === 'spine' ? oneOf(['confirmed', 'unconfirmed'], diag.concomitantSpondylosis) : null,
     });
   });
   return { diagnoses: out, refByDiagnosisId };
 }
 
 function buildJobs(jobs) {
-  return jobs.slice(0, MAX_JOBS).map((job) => {
+  return jobs.map((job) => {
     const workDays = intOrNull(job?.workDaysPerYear);
     return {
       durationYears: finite(getEffectiveWorkPeriod(job || {})),
@@ -139,8 +144,8 @@ function buildKnee(calc, jobIndexOf) {
       ? { minPct: min, maxPct: max, avgPct: min !== null && max !== null ? Math.round(((min + max) / 2) * 10) / 10 : null }
       : null,
     cumulativeBurdenSufficient: calc.cumulativeBurden === '충분함',
-    jobs: (calc.jobBurdens || []).slice(0, MAX_JOBS).map((job, i) => ({
-      jobIndex: jobIndexOf(job.id, i),
+    jobs: (calc.jobBurdens || []).map((job) => ({
+      jobIndex: jobIndexOf(job.id),
       weightKgPerDay: finite(job.weight),
       squattingMinPerDay: finite(job.squatting),
       aux: Object.fromEntries(KNEE_AUX_KEYS.map((key) => [key, job[key] === true])),
@@ -172,8 +177,8 @@ function buildShoulder(calc, jobIndexOf) {
         )
       : null,
     interpretation: complete && calc.noEvaluableJobs !== true ? classifyShoulderInterpretation(totals) : null,
-    jobs: (calc.jobBurdens || []).slice(0, MAX_JOBS).map((job, i) => ({
-      jobIndex: jobIndexOf(job.id, i),
+    jobs: (calc.jobBurdens || []).map((job) => ({
+      jobIndex: jobIndexOf(job.id),
       periodYears: finite(job.periodYears),
       exposures: Object.fromEntries(
         SHOULDER_EXPOSURE_KEYS.map((key) => {
@@ -197,10 +202,9 @@ function buildBk(calc, { bkTypes, flagKeys, groupFn, mergeFn, gradeFn }, jobInde
       flags: listOf(TEMPORAL_FLAG_KEYS, (calc.temporalFlagItems || []).map((item) => item.key)),
       hasMissingCommonFields: (calc.missingCommonFields || []).length > 0,
     },
-    jobs: (calc.jobSummaries || []).slice(0, MAX_JOBS).map((jobSummary, i) => ({
-      jobIndex: jobIndexOf(jobSummary.sharedJobId, i),
+    jobs: (calc.jobSummaries || []).map((jobSummary) => ({
+      jobIndex: jobIndexOf(jobSummary.sharedJobId),
       groups: groupFn(jobSummary.diagnosisSummaries || [])
-        .slice(0, 10)
         .map((group) => {
           const merged = mergeFn(group.summaries);
           const riskFactorKeys = listOf(flagKeys, (merged.riskFactorItems || []).map((item) => item.key));
@@ -210,8 +214,7 @@ function buildBk(calc, { bkTypes, flagKeys, groupFn, mergeFn, gradeFn }, jobInde
             bkType: oneOf(bkTypes, group.bkType),
             diagnosisRefs: group.summaries
               .map((s) => diagnosisRefOf(s.diagnosis?.id ?? s.diagnosisId))
-              .filter((ref) => ref !== undefined)
-              .slice(0, 20),
+              .filter((ref) => ref !== undefined),
             riskFactorKeys,
             riskFactorCount: count,
             burdenGrade: BK_GRADE_KEYS[gradeFn(count, flags)] ?? 'none',
@@ -227,8 +230,8 @@ function buildCervical(calc, jobIndexOf) {
     noEvaluableJobs: calc.noEvaluableJobs === true,
     overallBurdenGrade: oneOf(CERVICAL_BURDEN_GRADES, calc.overallBurdenGrade),
     overallCumulativeKgHours: finite(calc.overallCumulativeKgHours),
-    jobs: (calc.jobSummaries || []).slice(0, MAX_JOBS).map((js, i) => ({
-      jobIndex: jobIndexOf(js.sharedJobId, i),
+    jobs: (calc.jobSummaries || []).map((js) => ({
+      jobIndex: jobIndexOf(js.sharedJobId),
       burdenGrade: oneOf(CERVICAL_BURDEN_GRADES, js.burdenGrade) ?? 'low',
       flagKeys: listOf(CERVICAL_FLAG_KEYS, (js.flagItems || []).map((item) => item.key)),
       riskFactorCount: Math.max(0, intOrNull(js.riskFactorCount) ?? 0),
@@ -239,7 +242,7 @@ function buildCervical(calc, jobIndexOf) {
       taskCount: Math.max(0, intOrNull(js.totalTaskCount) ?? 0),
       completedTaskCount: Math.max(0, intOrNull(js.completedTaskCount) ?? 0),
       hasBk2109CoreTask: js.hasBk2109CoreTask === true,
-      tasks: (js.taskSummaries || []).slice(0, MAX_TASKS).map((task) => ({
+      tasks: (js.taskSummaries || []).map((task) => ({
         exposureTypes: listOf(CERVICAL_EXPOSURE_TYPES, task.exposure_types),
         loadWeightKg: finite(task.load_weight_kg),
         carryHoursPerShift: finite(task.carry_hours_per_shift),
@@ -278,14 +281,14 @@ function buildSpineMddm(calc, jobIndexOf) {
       personalContributionPct: finite(calc.workRelatedness?.personalContribution),
     },
     severity: BURDEN_LEVEL_KEYS[classifySpineSeverity(dailyKNh, calc.maxForce || 0, calc.gender)] ?? 'low',
-    jobs: (calc.jobResults || []).slice(0, MAX_JOBS).map((jr, i) => ({
-      jobIndex: jobIndexOf(jr.jobId, i),
+    jobs: (calc.jobResults || []).map((jr) => ({
+      jobIndex: jobIndexOf(jr.jobId),
       periodYears: finite(jr.periodYears),
       workDaysPerYear: finite(jr.workDaysPerYear),
       dailyDoseKNh: finite(jr.dailyDose?.dailyDoseKNh),
       lifetimeDoseMNh: finite(jr.lifetimeDose?.lifetimeDoseMNh),
       lifetimeExcluded: jr.lifetimeDose?.excluded === true,
-      tasks: (jr.tasks || []).slice(0, MAX_TASKS).map((task) => ({
+      tasks: (jr.tasks || []).map((task) => ({
         posture: oneOf(SPINE_POSTURES, task.posture),
         weightKg: finite(task.weight),
         frequencyPerDay: finite(task.frequency),
@@ -312,11 +315,11 @@ function buildSpineVibration(v, jobIndexOf) {
     lifetime: range(v.comparison?.lifetime),
     hasInvalidIntervals: v.validation?.hasInvalidIntervals === true,
     jobs: present
-      ? (v.jobResults || []).slice(0, MAX_JOBS).map((jr, i) => ({
-          jobIndex: jobIndexOf(jr.jobId, i),
+      ? (v.jobResults || []).map((jr) => ({
+          jobIndex: jobIndexOf(jr.jobId),
           periodYears: finite(jr.periodYears),
           workDaysPerYear: finite(jr.workDaysPerYear),
-          intervals: (jr.intervals || []).slice(0, MAX_TASKS).map((iv) => ({
+          intervals: (jr.intervals || []).map((iv) => ({
             awMin: finite(iv.awMin),
             awMax: finite(iv.awMax),
             timeValue: finite(iv.timeValue),
@@ -343,8 +346,8 @@ function buildModules(patientData, shared, diagnosisRefOf) {
   const activeModules = patientData.activeModules || [];
   const jobs = Array.isArray(shared.jobs) ? shared.jobs : [];
   const indexById = new Map(jobs.map((job, index) => [job?.id, index]));
-  // 계산 결과의 직력은 id로 shared.jobs 위치에 연결한다. id가 없는 구형식(module.jobs)은 결과 안의 순서를 쓴다.
-  const jobIndexOf = (id, fallback) => (indexById.has(id) ? indexById.get(id) : fallback);
+  // 계산 결과의 직력은 id로 shared.jobs 위치에 연결한다. 연결되지 않는 구형식(module.jobs)은 null — 존재하지 않을 수 있는 위치를 지어내지 않는다.
+  const jobIndexOf = (id) => (indexById.has(id) ? indexById.get(id) : null);
 
   const bkConfigs = {
     elbow: { bkTypes: ELBOW_BK_TYPES, flagKeys: ELBOW_FLAG_KEYS, groupFn: groupElbow, mergeFn: mergeElbow, gradeFn: getElbowBurdenGrade },
@@ -381,13 +384,31 @@ export function buildRawAiInput(patient) {
   };
 }
 
+const DEFAULT_INPUT_ERROR = 'AI 분석 입력을 만들 수 없습니다. 입력값을 확인해 주세요.';
+const LIMIT_LABELS = { jobs: '직력', diagnoses: '상병' };
+
+// 항목 수 한도를 넘으면 잘라 내지 않고 거부한다(잘라 내면 모듈 결과가 목록에 없는 직력·상병을 가리킨다). 무엇이 넘었는지 알려 준다.
+function describeInputIssues(issues) {
+  const tooBig = issues.find((issue) => issue.code === 'too_big' && issue.type === 'array');
+  if (!tooBig) return DEFAULT_INPUT_ERROR;
+  const label = LIMIT_LABELS[tooBig.path.join('.')];
+  return label
+    ? `${label}이 ${tooBig.maximum}개를 넘어 AI 분석에 포함할 수 없습니다. (최대 ${tooBig.maximum}개)`
+    : 'AI 분석에 보낼 수 있는 항목 수 한도를 넘는 입력이 있어 분석할 수 없습니다.';
+}
+
 /**
- * 환자 → 검증을 통과한 AI 입력. 스키마를 통과하지 못하면 null — 호출부는 분석을 막아야 한다.
+ * 환자 → { input, error }. 스키마를 통과한 입력이면 input, 아니면 input: null과 사용자에게 보일 사유(error).
  * 콘솔에는 오류 경로와 코드만 남긴다(값은 환자 정보일 수 있어 기록하지 않는다).
  */
-export function buildAiInput(patient) {
+export function buildAiInputResult(patient) {
   const parsed = AiAnalysisInputSchema.safeParse(buildRawAiInput(patient));
-  if (parsed.success) return parsed.data;
+  if (parsed.success) return { input: parsed.data, error: null };
   console.error('[ai] 분석 입력을 만들 수 없습니다', parsed.error.issues.slice(0, 10).map((issue) => `${issue.path.join('.')}: ${issue.code}`));
-  return null;
+  return { input: null, error: describeInputIssues(parsed.error.issues) };
+}
+
+/** 환자 → 검증을 통과한 AI 입력. 통과하지 못하면 null — 호출부는 분석을 막아야 한다. */
+export function buildAiInput(patient) {
+  return buildAiInputResult(patient).input;
 }

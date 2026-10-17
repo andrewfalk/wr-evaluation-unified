@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // html2pdf.js의 UMD 빌드는 브라우저 전역 `self`를 참조해 node 환경에서 모듈 index 로드가 실패한다 — PDF 로직은 필요 없어 모킹.
 vi.mock('html2pdf.js', () => ({ default: () => ({}) }));
@@ -14,8 +14,8 @@ import { buildPrompt } from '@contracts/aiPrompt';
 import { getModule } from '../../moduleRegistry';
 import { createTestPatients } from '../../fixtures/createTestPatients';
 import { createPatient } from '../data';
-import { getShoulderInterpretation } from '../reportGenerator';
-import { buildAiInput, buildRawAiInput, classifyShoulderInterpretation } from '../aiInput';
+import { getShoulderInterpretation, generateUnifiedReport } from '../reportGenerator';
+import { buildAiInput, buildAiInputResult, buildRawAiInput, classifyShoulderInterpretation } from '../aiInput';
 import {
   createElbowModuleData, createElbowJobEvaluation, createElbowDiagnosisEntry,
 } from '../../../modules/elbow/utils/data';
@@ -155,6 +155,117 @@ describe('buildAiInput — 직력·상병 매핑', () => {
     patient.data.shared.birthDate = '1970-05-05';
     patient.data.shared.injuryDate = 'abc';
     expect(buildAiInput(patient).demographics.ageYears).toBeNull();
+  });
+});
+
+describe('buildAiInput — 한도 초과는 잘라 내지 않고 거부한다', () => {
+  let errorSpy;
+  beforeEach(() => { errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined); });
+  afterEach(() => errorSpy.mockRestore());
+
+  const kneePatient = (jobCount, { excludeFirst = 0 } = {}) => {
+    const patient = clone(withModules('knee'));
+    const job = patient.data.shared.jobs[0];
+    patient.data.shared.jobs = Array.from({ length: jobCount }, (_, i) => ({ ...job, id: `j${i}`, excludeFromAnalysis: i < excludeFirst }));
+    return patient;
+  };
+
+  it('직력 31개에서 앞의 30개가 평가 제외여도, 존재하지 않는 직력 위치(jobIndex 30)를 가리키는 입력을 만들지 않는다', () => {
+    // 이전 구현은 목록을 30개로 잘라 모듈 결과가 목록에 없는 jobIndex 30을 가리켰다(스키마도 통과했다).
+    const patient = kneePatient(31, { excludeFirst: 30 });
+    const result = buildAiInputResult(patient);
+    expect(result.input).toBeNull();
+    expect(result.error).toContain('직력이 30개를 넘어');
+    expect(buildAiInput(patient)).toBeNull();
+  });
+
+  it('직력 31개(모두 포함)도 거부하고, 정확히 30개는 허용하며 모든 jobIndex가 목록 안에 있다', () => {
+    expect(buildAiInputResult(kneePatient(31)).input).toBeNull();
+    const ok = buildAiInput(kneePatient(30));
+    expect(ok.jobs).toHaveLength(30);
+    expect(ok.modules.knee.jobs.map((j) => j.jobIndex)).toEqual(Array.from({ length: 30 }, (_, i) => i));
+  });
+
+  it('상병 21개는 조용히 20개로 줄이지 않고 거부한다', () => {
+    const patient = clone(withModules('knee'));
+    const base = patient.data.shared.diagnoses[0];
+    patient.data.shared.diagnoses = Array.from({ length: 21 }, (_, i) => ({ ...base, id: `d${i}`, code: 'M17.1', name: `상병${i}` }));
+    const result = buildAiInputResult(patient);
+    expect(result.input).toBeNull();
+    expect(result.error).toContain('상병이 20개를 넘어');
+  });
+
+  it('검증 실패 시 사유가 없는 일반 오류는 기본 안내를 돌려주고, 콘솔에는 경로와 코드만 남긴다', () => {
+    const patient = kneePatient(31);
+    buildAiInputResult(patient);
+    const logged = JSON.stringify(errorSpy.mock.calls);
+    expect(logged).toContain('jobs: too_big');
+    expect(logged).not.toContain('j0');
+  });
+});
+
+describe('buildAiInput — 모듈이 바뀌거나 평가가 바뀐 상병에 남은 옛 값', () => {
+  const diagnosisPatient = (over) => {
+    const patient = clone(withModules('knee'));
+    const base = patient.data.shared.diagnoses[0];
+    patient.data.shared.diagnoses = [{
+      ...base, id: 'dx', code: 'M17.1', name: '무릎관절증', side: 'right', moduleId: '',
+      confirmedRight: 'confirmed', assessmentRight: 'high', reasonRight: [], reasonRightOther: '',
+      klgRight: '', klgLeft: '', ellmanRight: '', ellmanLeft: '', verticalDistribution: '', concomitantSpondylosis: '', ...over,
+    }];
+    return patient;
+  };
+
+  it('평가를 낮음→높음으로 바꿔도 남아 있는 과거 낮음 사유를 보내지 않는다(보고서와 같다)', () => {
+    const patient = diagnosisPatient({ assessmentRight: 'high', reasonRight: ['unrelated', 'lowBurden'] });
+    const input = buildAiInput(patient);
+    expect(input.diagnoses[0].units[0]).toMatchObject({ assessment: 'high', reasons: [] });
+    const text = buildPrompt(input);
+    expect(text).toContain('업무관련성 높음');
+    expect(text).not.toContain('낮음 사유');
+  });
+
+  it('평가가 낮음이면 사유를 그대로 보낸다', () => {
+    const patient = diagnosisPatient({ assessmentRight: 'low', reasonRight: ['unrelated', 'lowBurden', 'not_a_reason'] });
+    const unit = buildAiInput(patient).diagnoses[0].units[0];
+    expect(unit).toMatchObject({ assessment: 'low', reasons: ['unrelated', 'lowBurden'] });
+  });
+
+  it('평가가 아직 비어 있으면(null) 사유도 보내지 않는다', () => {
+    const patient = diagnosisPatient({ assessmentRight: '', reasonRight: ['ageMild'] });
+    expect(buildAiInput(patient).diagnoses[0].units[0]).toMatchObject({ assessment: null, reasons: [] });
+  });
+
+  it('보고서 문구와 일치: 높음이면 보고서도 낮음 사유를 출력하지 않는다', () => {
+    const patient = diagnosisPatient({ assessmentRight: 'high', reasonRight: ['unrelated'] });
+    const report = generateUnifiedReport(patient);
+    expect(report).not.toContain('낮음 사유');
+    expect(buildPrompt(buildAiInput(patient))).not.toContain('낮음 사유');
+  });
+
+  it.each([
+    ['knee', { klgRight: '3' }, (u, d) => [u.klg, d.verticalDistribution], ['3', null]],
+    ['shoulder', { ellmanRight: 'Grade 2' }, (u) => [u.ellman], ['Grade 2']],
+    ['spine', { verticalDistribution: 'confirmed', concomitantSpondylosis: 'unconfirmed' }, (u, d) => [d.verticalDistribution, d.concomitantSpondylosis], ['confirmed', 'unconfirmed']],
+  ])('%s 상병이면 해당 모듈 전용 값(K-L·Ellman·척추 공통 항목)을 보낸다', (moduleId, over, pick, expected) => {
+    const patient = diagnosisPatient({ moduleId, ...over });
+    patient.data.activeModules = [moduleId];
+    const diagnosis = buildAiInput(patient).diagnoses[0];
+    expect(pick(diagnosis.units[0], diagnosis)).toEqual(expected);
+  });
+
+  it('진단의 모듈이 바뀌어 옛 값이 남아 있으면 보내지 않는다(예: 무릎 K-L 등급이 남은 어깨 상병)', () => {
+    const stale = { klgRight: '3', klgLeft: '2', ellmanRight: 'Grade 2', verticalDistribution: 'confirmed', concomitantSpondylosis: 'confirmed' };
+    for (const moduleId of ['knee', 'shoulder', 'spine', 'wrist']) {
+      const patient = diagnosisPatient({ moduleId, ...stale });
+      patient.data.activeModules = [moduleId];
+      const d = buildAiInput(patient).diagnoses[0];
+      const u = d.units[0] || {};
+      expect(u.klg ?? null, `${moduleId} klg`).toBe(moduleId === 'knee' ? '3' : null);
+      expect(u.ellman ?? null, `${moduleId} ellman`).toBe(moduleId === 'shoulder' ? 'Grade 2' : null);
+      expect(d.verticalDistribution, `${moduleId} vertical`).toBe(moduleId === 'spine' ? 'confirmed' : null);
+      expect(d.concomitantSpondylosis, `${moduleId} concomitant`).toBe(moduleId === 'spine' ? 'confirmed' : null);
+    }
   });
 });
 

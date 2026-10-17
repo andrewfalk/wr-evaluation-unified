@@ -210,7 +210,8 @@ function yesNoText(value: 'yes' | 'no' | null): string {
   return value === 'yes' ? '예' : value === 'no' ? '아니오' : '-';
 }
 
-const jobLabel = (jobIndex: number): string => `직력${jobIndex + 1}`;
+// null = 계산 결과의 직력이 직력 목록과 연결되지 않은 구형식 데이터. 번호를 지어내지 않고 그대로 밝힌다.
+const jobLabel = (jobIndex: number | null): string => (jobIndex === null ? '직력(직력 목록과 연결되지 않음)' : `직력${jobIndex + 1}`);
 const labels = <K extends string>(keys: readonly K[], dict: Record<K, string>): string => keys.map((k) => dict[k]).join(', ');
 
 // ── 섹션 ─────────────────────────────────────────────────────────────────

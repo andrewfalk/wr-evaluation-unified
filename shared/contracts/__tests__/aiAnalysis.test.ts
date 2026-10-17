@@ -262,6 +262,90 @@ describe('AiAnalysisInputSchema — 값 검증', () => {
   });
 });
 
+describe('AiAnalysisInputSchema — 참조 무결성과 모순 거부', () => {
+  const issues = (value: unknown) => {
+    const result = AiAnalysisInputSchema.safeParse(value);
+    return result.success ? [] : result.error.issues;
+  };
+  const pathsOf = (value: unknown) => issues(value).map((issue) => issue.path.join('.'));
+
+  // fullInput의 jobs는 2개(0, 1), diagnoses는 6개(0~5)다.
+  const JOB_REF_PATHS: Array<[string, Path]> = [
+    ['무릎', ['modules', 'knee', 'jobs', 0]],
+    ['어깨', ['modules', 'shoulder', 'jobs', 0]],
+    ['팔꿈치', ['modules', 'elbow', 'jobs', 0]],
+    ['손목', ['modules', 'wrist', 'jobs', 0]],
+    ['척추 MDDM', ['modules', 'spine', 'mddm', 'jobs', 0]],
+    ['척추 전신진동', ['modules', 'spine', 'vibration', 'jobs', 0]],
+    ['경추', ['modules', 'cervical', 'jobs', 0]],
+  ];
+
+  it.each(JOB_REF_PATHS)('%s: jobIndex가 직력 목록 밖이면 거부하고 경로를 알려 준다', (_name, path) => {
+    const bad = withValue(path, 'jobIndex', 2); // jobs는 0, 1뿐
+    expect(pathsOf(bad)).toContain([...path, 'jobIndex'].join('.'));
+    expect(AiAnalysisInputSchema.safeParse(withValue(path, 'jobIndex', 1)).success).toBe(true); // 마지막 위치는 허용
+    expect(AiAnalysisInputSchema.safeParse(withValue(path, 'jobIndex', null)).success).toBe(true); // 연결 안 된 직력
+  });
+
+  it('직력 목록이 비어 있으면 어떤 jobIndex도 거부하고, null만 허용한다', () => {
+    const input = fullInput();
+    input.jobs = [];
+    expect(AiAnalysisInputSchema.safeParse(input).success).toBe(false);
+    for (const [, path] of JOB_REF_PATHS) {
+      let list: any = input;
+      for (const key of path.slice(0, -1)) list = list[key]; // 직력 배열(jobs)
+      for (const job of list) job.jobIndex = null; // 첫 항목만이 아니라 모든 항목
+    }
+    expect(AiAnalysisInputSchema.safeParse(input).success).toBe(true);
+  });
+
+  it.each(['elbow', 'wrist'])('%s: diagnosisRefs가 상병 목록 밖이면 거부한다', (moduleId) => {
+    const path: Path = ['modules', moduleId, 'jobs', 0, 'groups', 0];
+    expect(pathsOf(withValue(path, 'diagnosisRefs', [6]))).toContain(`modules.${moduleId}.jobs.0.groups.0.diagnosisRefs.0`); // diagnoses는 0~5
+    expect(AiAnalysisInputSchema.safeParse(withValue(path, 'diagnosisRefs', [5])).success).toBe(true);
+  });
+
+  it('BK 그룹은 상병 수 상한(20)만큼 허용한다(BK 유형을 고르지 않은 상병은 각자 별도 그룹이다)', () => {
+    const group = fullInput().modules.elbow!.jobs[0].groups[0];
+    const withGroups = (n: number) => mutate(['modules', 'elbow', 'jobs', 0], (node) => { node.groups = Array(n).fill({ ...group, diagnosisRefs: [] }); });
+    expect(AiAnalysisInputSchema.safeParse(withGroups(20)).success).toBe(true);
+    expect(AiAnalysisInputSchema.safeParse(withGroups(21)).success).toBe(false);
+  });
+
+  it('낮음 사유는 평가가 낮음일 때만 허용한다(높음·미평가에 과거 사유가 남아 있는 모순을 거부)', () => {
+    const unitPath: Path = ['diagnoses', 0, 'units', 0];
+    const reasons = ['unrelated', 'lowBurden'];
+    const make = (assessment: 'high' | 'low' | null) => mutate(unitPath, (u) => { u.assessment = assessment; u.reasons = reasons; });
+    expect(pathsOf(make('high'))).toContain('diagnoses.0.units.0.reasons');
+    expect(pathsOf(make(null))).toContain('diagnoses.0.units.0.reasons');
+    expect(AiAnalysisInputSchema.safeParse(make('low')).success).toBe(true);
+  });
+
+  it('K-L 등급은 무릎, Ellman은 어깨, 수직분포·동반 척추증은 척추 상병에서만 허용한다', () => {
+    // fullInput: 0=무릎(K-L 3), 1=척추(공통 항목), 2=어깨(Ellman Grade 2), 3=팔꿈치
+    expect(AiAnalysisInputSchema.safeParse(withValue(['diagnoses', 3, 'units', 0], 'klg', '3')).success).toBe(false);
+    expect(AiAnalysisInputSchema.safeParse(withValue(['diagnoses', 3, 'units', 0], 'ellman', 'Full')).success).toBe(false);
+    expect(AiAnalysisInputSchema.safeParse(withValue(['diagnoses', 0], 'verticalDistribution', 'confirmed')).success).toBe(false);
+    expect(AiAnalysisInputSchema.safeParse(withValue(['diagnoses', 2], 'concomitantSpondylosis', 'confirmed')).success).toBe(false);
+    expect(AiAnalysisInputSchema.safeParse(withValue(['diagnoses', 0, 'units', 1], 'ellman', 'Full')).success).toBe(false); // 무릎 상병에 Ellman
+    expect(AiAnalysisInputSchema.safeParse(fullInput()).success).toBe(true); // 기준 입력은 모두 맞는 모듈에 있다
+  });
+
+  it('상병의 모듈을 알 수 없으면(null) 모듈 전용 값은 어느 것도 허용하지 않는다', () => {
+    const base = withValue(['diagnoses', 0], 'moduleId', null) as AiAnalysisInput; // 0번은 K-L 3을 가진 무릎 상병
+    expect(AiAnalysisInputSchema.safeParse(base).success).toBe(false);
+  });
+
+  it('연결되지 않은 직력(jobIndex null)은 번호를 지어내지 않고 그대로 밝힌다', () => {
+    const input = fullInput();
+    input.modules.knee!.jobs[0].jobIndex = null;
+    const text = buildPrompt(input);
+    expect(text).toContain('- 직력(직력 목록과 연결되지 않음): 일 중량물 취급량 2500kg');
+    expect(text).not.toContain('직력NaN');
+    expect(text).not.toContain('직력0');
+  });
+});
+
 describe('요청 스키마', () => {
   it('내부 경로는 fullReport(보고서 전문)를 받는다', () => {
     const body = { input: fullInput(), fullReport: '보고서 전문', model: 'gemini-2.5-flash' };

@@ -6,7 +6,8 @@ const registry = vi.hoisted(() => ({}));
 vi.mock('../../moduleRegistry', () => ({ getModule: (id) => registry[id] }));
 
 import { createPatient } from '../data';
-import { buildAiInput, buildRawAiInput } from '../aiInput';
+import { buildPrompt } from '@contracts/aiPrompt';
+import { buildAiInput, buildAiInputResult, buildRawAiInput } from '../aiInput';
 import { getElbowBurdenGrade, mergeBkGroupSummaries as mergeElbow } from '../../../modules/elbow/utils/calculations';
 import { getWristBurdenGrade, mergeBkGroupSummaries as mergeWrist } from '../../../modules/wrist/utils/calculations';
 
@@ -154,14 +155,29 @@ describe('팔꿈치·손목 매핑 — 합쳐진 그룹의 부담 등급', () =>
 });
 
 describe('무릎·경추 매핑', () => {
-  it('무릎: 직력 id가 shared.jobs에 없으면(구형식) 결과 안의 순서를 jobIndex로 쓰고, 30개로 자른다', () => {
-    const jobBurdens = Array.from({ length: 40 }, (_, i) => ({ id: i === 0 ? 'job-2' : `legacy-${i}`, weight: '1000', squatting: '30', burden: { level: '경도' } }));
+  it('무릎: 직력 id가 shared.jobs에 없으면(구형식) jobIndex는 null이다 — 존재하지 않을 수 있는 위치를 지어내지 않는다', () => {
+    const jobBurdens = [
+      { id: 'job-2', weight: '1000', squatting: '30', burden: { level: '경도' } },
+      { id: 'legacy-1', weight: '2000', squatting: '60', burden: { level: '중등도하' } },
+      { weight: '500', squatting: '10', burden: { level: '경도' } }, // id 자체가 없는 구형식
+    ];
     const patient = patientWith(['knee'], { knee: { noEvaluableJobs: false, relatedness: { min: '10.0', max: '20.0' }, cumulativeBurden: '불충분함', jobBurdens } });
-    const { jobs, relatedness } = buildAiInput(patient).modules.knee;
-    expect(jobs).toHaveLength(30);
-    expect(jobs[0].jobIndex).toBe(2); // id가 맞는 직력은 shared.jobs 위치
-    expect(jobs[1].jobIndex).toBe(1); // 맞지 않으면 결과 안의 순서
+    const input = buildAiInput(patient);
+    const { jobs, relatedness } = input.modules.knee;
+    expect(jobs.map((j) => j.jobIndex)).toEqual([2, null, null]); // id가 맞는 직력만 shared.jobs 위치
     expect(relatedness).toEqual({ minPct: 10, maxPct: 20, avgPct: 15 });
+    // 연결되지 않은 직력도 프롬프트에서 번호를 만들어 내지 않고 그대로 밝힌다.
+    expect(buildPrompt(input)).toContain('- 직력(직력 목록과 연결되지 않음): 일 중량물 취급량 2000kg');
+  });
+
+  it('항목 수 한도(직력 30)를 넘으면 잘라 내지 않고 거부한다 — 사유를 돌려준다', () => {
+    const jobBurdens = Array.from({ length: 31 }, (_, i) => ({ id: `legacy-${i}`, weight: '1000', squatting: '30', burden: { level: '경도' } }));
+    const patient = patientWith(['knee'], { knee: { noEvaluableJobs: false, relatedness: null, cumulativeBurden: '', jobBurdens } });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const result = buildAiInputResult(patient);
+    errorSpy.mockRestore();
+    expect(result.input).toBeNull();
+    expect(result.error).toContain('한도');
   });
 
   it('무릎: 알 수 없는 부담 등급·보조변수 값은 null/false다', () => {

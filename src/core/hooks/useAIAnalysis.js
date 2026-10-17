@@ -10,7 +10,7 @@ export function useAIAnalysis() {
 
   // 인트라넷: { input, fullReport? } — 비식별 구조화 입력(+ 내부 LLM일 때만 보고서 전문).
   // 웹·Electron: { prompt, systemPrompt, model } — hf7-3에서 같은 구조화 입력으로 바뀐다.
-  const analyze = useCallback(async ({ prompt, systemPrompt, input, fullReport, model } = {}) => {
+  const analyze = useCallback(async ({ prompt, systemPrompt, input, inputError, fullReport, model } = {}) => {
     setLoading(true);
     setError(null);
     setResult(null);
@@ -20,6 +20,7 @@ export function useAIAnalysis() {
         prompt,
         systemPrompt,
         input,
+        inputError,
         fullReport,
         model,
         session,

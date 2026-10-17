@@ -3,7 +3,8 @@ import { MODEL_OPTIONS, DEFAULT_GEMINI_MODEL } from '@contracts/aiModels';
 import { useAuth } from '../auth/AuthContext';
 import { useAIAnalysis } from '../hooks/useAIAnalysis';
 
-// buildInput: 환자 → 비식별 구조화 입력(buildAiInput). 인트라넷 서버로는 이 값만 나간다.
+// buildInput: () => ({ input, error }) — 환자 → 비식별 구조화 입력(buildAiInputResult). 인트라넷 서버로는 input만 나가고,
+//   만들지 못하면 input은 null이며 error는 사용자에게 보일 사유다.
 // fullReportAllowed: 서버가 병원 내부 LLM일 때만 true — 이때만 보고서 전문(generatePrompt)을 함께 보낸다.
 // generatePrompt/systemPrompt: 웹(Vercel)·Electron 직접 호출 경로 전용(hf7-3에서 구조화 입력으로 바뀐다).
 export function AIAnalysisPanel({ generatePrompt, systemPrompt, buildInput, fullReportAllowed = false, title = 'AI 분석', aiAvailable = true }) {
@@ -14,10 +15,10 @@ export function AIAnalysisPanel({ generatePrompt, systemPrompt, buildInput, full
 
   const handleAnalyze = async () => {
     if (isIntranet) {
-      // 입력을 만들지 못하면 null — analyzeAIRequest가 오류 안내를 돌려준다(분석을 보내지 않는다).
-      const input = buildInput ? buildInput() : null;
+      // 입력을 만들지 못하면 input은 null — analyzeAIRequest가 사유를 안내하고 분석은 보내지 않는다(보고서 전문도 만들지 않는다).
+      const { input = null, error: inputError } = (buildInput && buildInput()) || {};
       const fullReport = input && fullReportAllowed ? generatePrompt() : undefined;
-      await analyze({ input, fullReport: fullReport || undefined });
+      await analyze({ input, inputError, fullReport: fullReport || undefined });
       return;
     }
     const prompt = generatePrompt();
