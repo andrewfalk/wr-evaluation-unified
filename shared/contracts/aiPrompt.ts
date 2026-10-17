@@ -12,6 +12,7 @@ import type {
   BK_BURDEN_GRADES,
   CERVICAL_BURDEN_GRADES,
   CERVICAL_EXPOSURE_TYPES,
+  SPINE_POSTURES,
 } from './aiAnalysis';
 
 // ---------------------------------------------------------------------------
@@ -153,6 +154,21 @@ const CERVICAL_GRADE_LABELS: Record<Union<typeof CERVICAL_BURDEN_GRADES>, string
   low: '경추 부담 노출을 뚜렷하게 지지하기 어려움',
 };
 
+/** 척추 MDDM 자세 분류 G1~G11 (packages/analytics-core/modules/spine/constants.ts formulaDB[*].name과 같은 문구). */
+export const SPINE_POSTURE_LABELS: Record<Union<typeof SPINE_POSTURES>, string> = {
+  G1: '똑바로 → 똑바로',
+  G2: '약간 굴곡 → 똑바로',
+  G3: '심한 굴곡 → 똑바로',
+  G4: '약간 굴곡 → 약간 굴곡',
+  G5: '심한 굴곡 → 약간 굴곡',
+  G6: '심한 굴곡 → 심한 굴곡',
+  G7: '몸 앞·양옆 운반',
+  G8: '한쪽·한 손 운반',
+  G9: '어깨·등에 멤',
+  G10: '몸 앞·양옆·어깨·등 들고있기',
+  G11: '한쪽·한 손 들고있기',
+};
+
 const CERVICAL_EXPOSURE_LABELS: Record<Union<typeof CERVICAL_EXPOSURE_TYPES>, string> = {
   shoulder_heavy_load: '어깨에 무거운 하중 올려 운반',
   awkward_static_neck_load: '비중립·정적 목 부하',
@@ -166,7 +182,14 @@ const SHOULDER_INTERPRETATION_LABELS = {
 
 const SPINE_RELATEDNESS_LABELS = { high: '높음', medium: '불충분(다른 요건 고려)', low: '낮음' } as const;
 const SPINE_STATUS_LABELS = { unknown: '미평가', none: '노출 없음', present: '평가함' } as const;
-const RANGE_STATUS_LABELS = { safe: '기준 이내', warning: '기준 근접', danger: '기준 도달/초과' } as const;
+// 같은 safe/warning/danger라도 비교마다 뜻이 다르다(aiAnalysis.ts 주석 참고). 하나의 사전으로 합치면 "기준 초과"를 "근접"으로 잘못 전달한다.
+const MDDM_STATUS_LABELS = { safe: '기준 이내', danger: '기준 초과' } as const;
+const COURT_STATUS_LABELS = { safe: '기준 이내', warning: '기준 초과(기준의 120% 이내)', danger: '기준의 120% 초과' } as const;
+const VIBRATION_RANGE_LABELS = {
+  safe: '기준 미만',
+  warning: '노출 범위가 기준에 걸침(최소값은 기준 미만, 최대값은 기준 이상)',
+  danger: '노출 범위 전체가 기준 이상',
+} as const;
 const TIME_UNIT_LABELS = { sec: '초', min: '분', hr: '시간' } as const;
 const SIDE_LABELS = { right: '우측', left: '좌측', both: '양측', axial: '축성(척추/경추)' } as const;
 
@@ -357,8 +380,8 @@ function spineText(m: NonNullable<Modules['spine']>, gender: AiAnalysisInput['de
     );
     if (mddm.excluded) lines.push('- 일일 용량이 하한 기준에 못 미쳐 평생 누적 용량 계산에서 제외됨');
     lines.push(
-      `- MDDM 기준 ${fmt(mddm.comparison.mddm.limit, ' MN·h')} 대비 ${fmt(mddm.comparison.mddm.percent, '%')} (${RANGE_STATUS_LABELS[mddm.comparison.mddm.status]})`,
-      `- 독일 법원(BSG) 기준 ${fmt(mddm.comparison.court.limit, ' MN·h')} 대비 ${fmt(mddm.comparison.court.percent, '%')} (${RANGE_STATUS_LABELS[mddm.comparison.court.status]})`,
+      `- MDDM 기준 ${fmt(mddm.comparison.mddm.limit, ' MN·h')} 대비 ${fmt(mddm.comparison.mddm.percent, '%')} — ${MDDM_STATUS_LABELS[mddm.comparison.mddm.status]}`,
+      `- 독일 법원(BSG) 기준 ${fmt(mddm.comparison.court.limit, ' MN·h')} 대비 ${fmt(mddm.comparison.court.percent, '%')} — ${COURT_STATUS_LABELS[mddm.comparison.court.status]}`,
       `- 업무관련성 ${SPINE_RELATEDNESS_LABELS[mddm.workRelatedness.level]} (업무 기여 ${fmt(mddm.workRelatedness.workContributionPct, '%')}, 개인 요인 ${fmt(mddm.workRelatedness.personalContributionPct, '%')}), 신체부담 정도 ${BURDEN_LABELS[mddm.severity]}`,
     );
     mddm.jobs.forEach((job) => {
@@ -368,7 +391,7 @@ function spineText(m: NonNullable<Modules['spine']>, gender: AiAnalysisInput['de
       job.tasks.forEach((task) => {
         const unit = task.timeUnit ? TIME_UNIT_LABELS[task.timeUnit] : '';
         lines.push(
-          `  · 자세 ${task.posture ?? '-'}, 중량 ${fmt(task.weightKg, 'kg')}, 빈도 ${fmt(task.frequencyPerDay, '회')}/일, 시간 ${fmt(task.timeValue, unit)}, ` +
+          `  · 자세 ${task.posture ? `${task.posture}(${SPINE_POSTURE_LABELS[task.posture]})` : '-'}, 중량 ${fmt(task.weightKg, 'kg')}, 빈도 ${fmt(task.frequencyPerDay, '회')}/일, 시간 ${fmt(task.timeValue, unit)}, ` +
             `보정계수 ${fmt(task.correctionFactor)}, 추정 힘 ${fmt(task.forceN, 'N')}${task.included ? '' : ' (일일 용량 계산 제외)'}`,
         );
       });
@@ -380,8 +403,8 @@ function spineText(m: NonNullable<Modules['spine']>, gender: AiAnalysisInput['de
     lines.push(`② 전신진동(BK2110) 평가: ${SPINE_STATUS_LABELS[vib.exposureStatus]}`);
     if (vib.exposureStatus === 'present') {
       lines.push(`- 일일 Amax(8) ${fmt(vib.amax8Min)}~${fmt(vib.amax8Max)} m/s², 평생 누적 DV ${fmt(vib.dvMin)}~${fmt(vib.dvMax)} (m/s²)²`);
-      if (vib.daily) lines.push(`- 일일 기준 대비 ${fmt(vib.daily.percentMin, '%')}~${fmt(vib.daily.percentMax, '%')} (${RANGE_STATUS_LABELS[vib.daily.status]})`);
-      if (vib.lifetime) lines.push(`- 평생 기준 대비 ${fmt(vib.lifetime.percentMin, '%')}~${fmt(vib.lifetime.percentMax, '%')} (${RANGE_STATUS_LABELS[vib.lifetime.status]})`);
+      if (vib.daily) lines.push(`- 일일 기준 대비 ${fmt(vib.daily.percentMin, '%')}~${fmt(vib.daily.percentMax, '%')} — ${VIBRATION_RANGE_LABELS[vib.daily.status]}`);
+      if (vib.lifetime) lines.push(`- 평생 기준 대비 ${fmt(vib.lifetime.percentMin, '%')}~${fmt(vib.lifetime.percentMax, '%')} — ${VIBRATION_RANGE_LABELS[vib.lifetime.status]}`);
       if (vib.hasInvalidIntervals) lines.push('- 일부 진동 구간 입력이 올바르지 않음');
       vib.jobs.forEach((job) => {
         lines.push(`- ${jobLabel(job.jobIndex)} (${fmt(job.periodYears, '년')}, 연 ${fmt(job.workDaysPerYear, '일')})`);

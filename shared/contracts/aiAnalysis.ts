@@ -64,7 +64,6 @@ const count = z.number().int().min(0).max(1_000_000);
 const bool = z.boolean();
 const yesNo = z.enum(['yes', 'no']).nullable();
 const confirmed = z.enum(['confirmed', 'unconfirmed']).nullable();
-const rangeStatus = z.enum(['safe', 'warning', 'danger']);
 const burdenLevel = z.enum(AI_BURDEN_LEVELS);
 
 /** 키마다 같은 스키마를 갖는 strict 객체(예: 어깨 5개 노출 항목). */
@@ -164,6 +163,9 @@ const ShoulderSchema = z
   })
   .strict();
 
+/** z.enum은 변경 가능한 튜플을 요구한다 — 단언은 값의 리터럴 유니온(T[number])을 유지해 공개 타입이 string으로 넓어지지 않게 한다. */
+const literalEnum = <T extends readonly [string, ...string[]]>(values: T) => z.enum(values as unknown as [T[number], ...T[number][]]);
+
 /** 팔꿈치·손목은 같은 구조(BK 유형 목록과 위험요인 키 목록만 다르다). */
 function bkModuleSchema<B extends readonly [string, ...string[]], F extends readonly [string, ...string[]]>(
   bkTypes: B,
@@ -189,9 +191,9 @@ function bkModuleSchema<B extends readonly [string, ...string[]], F extends read
                 .array(
                   z
                     .object({
-                      bkType: z.enum(bkTypes as unknown as [string, ...string[]]).nullable(),
+                      bkType: literalEnum(bkTypes).nullable(),
                       diagnosisRefs: z.array(index).max(20),
-                      riskFactorKeys: z.array(z.enum(flagKeys as unknown as [string, ...string[]])).max(flagKeys.length),
+                      riskFactorKeys: z.array(literalEnum(flagKeys)).max(flagKeys.length),
                       riskFactorCount: count,
                       burdenGrade: z.enum(BK_BURDEN_GRADES),
                       hasMissingFields: bool,
@@ -249,8 +251,15 @@ const CervicalSchema = z
   })
   .strict();
 
-const DoseComparisonSchema = z.object({ limit: num, percent: num, status: rangeStatus }).strict();
-const VibrationRangeSchema = z.object({ percentMin: num, percentMax: num, status: rangeStatus }).strict();
+// 상태 값의 의미는 비교마다 다르다(spine/mddm.ts compareThresholds, vibration.ts rangeStatus). 라벨을 섞지 않도록 스키마도 나눈다.
+//  - MDDM 기준: 한도 이하 safe / 초과 danger (warning 없음)
+//  - 법원(BSG) 기준: 한도 이하 safe / 한도 초과~120% warning / 120% 초과 danger  ← warning은 "근접"이 아니라 이미 초과다
+//  - 전신진동 범위: 최대값이 기준 미만 safe / 범위가 기준에 걸침(최소<기준≤최대) warning / 최소값이 기준 이상 danger
+const MddmComparisonSchema = z.object({ limit: num, percent: num, status: z.enum(['safe', 'danger']) }).strict();
+const CourtComparisonSchema = z.object({ limit: num, percent: num, status: z.enum(['safe', 'warning', 'danger']) }).strict();
+const VibrationRangeSchema = z
+  .object({ percentMin: num, percentMax: num, status: z.enum(['safe', 'warning', 'danger']) })
+  .strict();
 
 const SpineMddmSchema = z
   .object({
@@ -260,7 +269,7 @@ const SpineMddmSchema = z
     totalYears: numOrNull,
     excluded: bool,
     weightedDailyDoseKNh: numOrNull,
-    comparison: z.object({ mddm: DoseComparisonSchema, court: DoseComparisonSchema }).strict(),
+    comparison: z.object({ mddm: MddmComparisonSchema, court: CourtComparisonSchema }).strict(),
     workRelatedness: z
       .object({ level: z.enum(['high', 'medium', 'low']), workContributionPct: numOrNull, personalContributionPct: numOrNull })
       .strict(),

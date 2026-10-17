@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 import {
   AiAnalysisInputSchema,
   AiAnalysisRequestSchema,
@@ -9,6 +9,7 @@ import {
   KNEE_AUX_KEYS,
   SHOULDER_EXPOSURE_KEYS,
   LOW_REASON_KEYS,
+  SPINE_POSTURES,
   type AiAnalysisInput,
 } from '../aiAnalysis';
 import {
@@ -21,6 +22,7 @@ import {
   KNEE_AUX_LABELS,
   SHOULDER_LABELS,
   LOW_REASON_LABELS,
+  SPINE_POSTURE_LABELS,
 } from '../aiPrompt';
 
 // 모든 모듈을 채운 유효 입력. 테스트마다 structuredClone으로 복사해 쓴다.
@@ -103,7 +105,8 @@ function fullInput(): AiAnalysisInput {
           formulaVersion: 'v5.1.3', dailyDoseKNh: 6.2, lifetimeDoseMNh: 14.7, totalYears: 12.5, excluded: false, weightedDailyDoseKNh: null,
           comparison: {
             mddm: { limit: 25, percent: 58.8, status: 'safe' },
-            court: { limit: 12.5, percent: 117.6, status: 'danger' },
+            // 실제 compareThresholds: 한도 초과 ~ 120%는 'warning'(근접이 아니라 이미 초과), 120% 초과는 'danger'
+            court: { limit: 12.5, percent: 117.6, status: 'warning' },
           },
           workRelatedness: { level: 'high', workContributionPct: 100, personalContributionPct: 0 },
           severity: 'upperModerate',
@@ -293,6 +296,7 @@ describe('라벨 사전', () => {
     ['무릎 보조변수', KNEE_AUX_KEYS, KNEE_AUX_LABELS],
     ['어깨 노출', SHOULDER_EXPOSURE_KEYS, SHOULDER_LABELS],
     ['낮음 사유', LOW_REASON_KEYS, LOW_REASON_LABELS],
+    ['척추 자세', SPINE_POSTURES, SPINE_POSTURE_LABELS],
   ] as Array<[string, readonly string[], Record<string, string>]>)('%s: 키 목록과 라벨 사전의 키가 정확히 같고 라벨이 비어 있지 않다', (_name, keys, dict) => {
     expect(Object.keys(dict).sort()).toEqual([...keys].sort());
     for (const key of keys) expect(dict[key].trim().length, key).toBeGreaterThan(0);
@@ -349,9 +353,11 @@ describe('buildPrompt', () => {
 
   it('척추: MDDM 비교·업무관련성·자세별 작업, 전신진동', () => {
     expect(prompt).toContain('① MDDM(누적 부하) 평가: 평가함');
-    expect(prompt).toContain('독일 법원(BSG) 기준 12.5 MN·h 대비 117.6% (기준 도달/초과)');
+    expect(prompt).toContain('MDDM 기준 25 MN·h 대비 58.8% — 기준 이내');
+    expect(prompt).toContain('독일 법원(BSG) 기준 12.5 MN·h 대비 117.6% — 기준 초과(기준의 120% 이내)');
     expect(prompt).toContain('업무관련성 높음 (업무 기여 100%, 개인 요인 0%), 신체부담 정도 중등도상');
-    expect(prompt).toContain('· 자세 G3, 중량 25kg, 빈도 100회/일, 시간 5초, 보정계수 1.2, 추정 힘 3200N');
+    expect(prompt).toContain('· 자세 G3(심한 굴곡 → 똑바로), 중량 25kg, 빈도 100회/일, 시간 5초, 보정계수 1.2, 추정 힘 3200N');
+    expect(prompt).toContain('일일 기준 대비 63%~111% — 노출 범위가 기준에 걸침(최소값은 기준 미만, 최대값은 기준 이상)');
     expect(prompt).toContain('② 전신진동(BK2110) 평가: 평가함');
     expect(prompt).toContain('일일 Amax(8) 0.4~0.7 m/s², 평생 누적 DV 900~1500 (m/s²)²');
   });
@@ -412,6 +418,73 @@ describe('buildPrompt', () => {
     expect(text).toContain('① MDDM(누적 부하) 평가: 노출 없음');
     expect(text).toContain('② 전신진동(BK2110) 평가: 노출 없음');
     expect(text).not.toContain('일일 Amax(8)');
+  });
+});
+
+describe('척추 상태 라벨 — 같은 safe/warning/danger라도 비교마다 뜻이 다르다', () => {
+  const withCourt = (percent: number, status: 'safe' | 'warning' | 'danger') => {
+    const input = fullInput();
+    input.modules.spine!.mddm!.comparison.court = { limit: 12.5, percent, status };
+    return buildPrompt(input);
+  };
+
+  it.each([
+    [90, 'safe', '기준 이내'],
+    [112, 'warning', '기준 초과(기준의 120% 이내)'],
+    [125, 'danger', '기준의 120% 초과'],
+  ] as const)('법원(BSG) 기준 %s%% (%s) → "%s"', (percent, status, label) => {
+    expect(withCourt(percent, status)).toContain(`독일 법원(BSG) 기준 12.5 MN·h 대비 ${percent}% — ${label}`);
+  });
+
+  it('한도를 넘은 법원 기준 값이 "근접"으로 표시되지 않는다(실제 compareThresholds의 warning은 한도 초과 구간)', () => {
+    expect(withCourt(112, 'warning')).not.toContain('근접');
+    expect(buildPrompt(fullInput())).not.toContain('근접');
+  });
+
+  it('MDDM 비교는 safe/danger뿐이다 — warning을 받지 않고, 법원 비교는 받는다', () => {
+    const comparison = ['modules', 'spine', 'mddm', 'comparison'];
+    expect(AiAnalysisInputSchema.safeParse(mutate([...comparison, 'mddm'], (n) => { n.status = 'warning'; })).success).toBe(false);
+    expect(AiAnalysisInputSchema.safeParse(mutate([...comparison, 'mddm'], (n) => { n.status = 'danger'; })).success).toBe(true);
+    expect(AiAnalysisInputSchema.safeParse(mutate([...comparison, 'court'], (n) => { n.status = 'warning'; })).success).toBe(true);
+  });
+
+  it.each([
+    ['safe', '기준 미만'],
+    ['warning', '노출 범위가 기준에 걸침(최소값은 기준 미만, 최대값은 기준 이상)'],
+    ['danger', '노출 범위 전체가 기준 이상'],
+  ] as const)('전신진동 범위 %s → "%s"', (status, label) => {
+    const input = fullInput();
+    input.modules.spine!.vibration!.daily = { percentMin: 63, percentMax: 111, status };
+    expect(buildPrompt(input)).toContain(`일일 기준 대비 63%~111% — ${label}`);
+  });
+});
+
+describe('공개 타입은 열거형 리터럴을 보존한다 (컴파일 타임 — shared의 tsc가 검증)', () => {
+  it('팔꿈치·손목의 BK 유형과 위험요인 키가 string으로 넓어지지 않는다', () => {
+    const input = fullInput();
+    const elbow = input.modules.elbow!.jobs[0].groups[0];
+    const wrist = input.modules.wrist!.jobs[0].groups[0];
+
+    // @ts-expect-error 팔꿈치에 손목 전용 BK 유형
+    elbow.bkType = 'BK2113';
+    // @ts-expect-error 손목에 팔꿈치 전용 BK 유형
+    wrist.bkType = 'BK2105';
+    // @ts-expect-error 위험요인 키에 임의 문자열
+    elbow.riskFactorKeys = ['아무 문자열'];
+    // @ts-expect-error 경추 전용 키를 손목 위험요인에
+    wrist.riskFactorKeys = ['heavy_load_present'];
+
+    elbow.bkType = 'BK2105'; // 유효한 값은 컴파일된다
+    wrist.bkType = 'BK2113';
+  });
+
+  it('필드 타입이 정확히 키 목록의 리터럴 유니온이다', () => {
+    // 대입 후 좁히기와 무관하게 타입을 직접 조회한다.
+    type Group<K extends 'elbow' | 'wrist'> = NonNullable<AiAnalysisInput['modules'][K]>['jobs'][number]['groups'][number];
+    expectTypeOf<Group<'elbow'>['bkType']>().toEqualTypeOf<'BK2101' | 'BK2103' | 'BK2105' | 'BK2106' | null>();
+    expectTypeOf<Group<'wrist'>['bkType']>().toEqualTypeOf<'BK2113' | 'BK2101' | 'BK2103' | 'BK2106' | null>();
+    expectTypeOf<Group<'elbow'>['riskFactorKeys'][number]>().toEqualTypeOf<(typeof ELBOW_FLAG_KEYS)[number]>();
+    expectTypeOf<Group<'wrist'>['riskFactorKeys'][number]>().toEqualTypeOf<(typeof WRIST_FLAG_KEYS)[number]>();
   });
 });
 
