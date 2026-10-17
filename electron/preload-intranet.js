@@ -4,6 +4,15 @@
 // File-storage (fs*) APIs are absent — data lives on the intranet server.
 const { contextBridge, ipcRenderer } = require('electron');
 
+// 메인이 보내는 이벤트를 페이지 콜백에 전달할 때 IpcRendererEvent를 빼고 payload만 넘긴다(HF3). 이벤트 객체의
+// sender가 ipcRenderer라, contextBridge로 페이지에 그대로 건네면 페이지가 raw ipcRenderer를 얻는다.
+// 반환하는 해제 함수는 같은 리스너를 정확히 제거한다. (샌드박스 preload는 로컬 모듈을 require할 수 없어 인라인.)
+function subscribe(channel, callback) {
+  const listener = (_event, ...args) => callback(...args);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
+
 // ---------------------------------------------------------------------------
 // Preload-level origin gate (defence-in-depth, main process gate is primary).
 // Origin mismatch → expose empty object. No IPC surface at all.
@@ -24,26 +33,14 @@ if (!originAllowed) {
     platform: process.platform,
 
     // Menu events
-    onMenuNew: (callback) => {
-      ipcRenderer.on('menu-new', callback);
-      return () => ipcRenderer.removeListener('menu-new', callback);
-    },
-    onGotoModule: (callback) => {
-      ipcRenderer.on('goto-module', callback);
-      return () => ipcRenderer.removeListener('goto-module', callback);
-    },
-    onQuitRequested: (callback) => {
-      ipcRenderer.on('app-quit-requested', callback);
-      return () => ipcRenderer.removeListener('app-quit-requested', callback);
-    },
+    onMenuNew: (callback) => subscribe('menu-new', callback),
+    onGotoModule: (callback) => subscribe('goto-module', callback),
+    onQuitRequested: (callback) => subscribe('app-quit-requested', callback),
     notifyQuitLogoutDone: () => ipcRenderer.send('quit-logout-done'),
 
     // PR2 §3 — 통계분석 워크벤치 메뉴 클릭 + 가용성 전파(renderer는 서버 설정을 알고,
     // main은 그걸 모르므로 바뀔 때마다 알려줘야 메뉴를 켜고 끌 수 있다).
-    onOpenStatistics: (callback) => {
-      ipcRenderer.on('open-statistics', callback);
-      return () => ipcRenderer.removeListener('open-statistics', callback);
-    },
+    onOpenStatistics: (callback) => subscribe('open-statistics', callback),
     setStatsAvailable: (available) => ipcRenderer.send('set-stats-available', !!available),
 
     // 미저장 종합소견 편집 draft 여부 — main의 창 닫기/새로고침 가드가 참조한다.
