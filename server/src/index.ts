@@ -23,7 +23,7 @@ import { createCapabilityGrantsRouter } from './routes/capabilityGrants';
 import { createOpsStatusRouter } from './routes/opsStatus';
 import { createUpdatesRouter } from './routes/updates';
 import { createStatsRouter } from './routes/stats';
-import { cspMiddleware } from './middleware/csp';
+import { cspMiddleware, noStoreMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
 import { runWorkspaceRetention } from './jobs/workspaceRetention';
 import { runVideoClipCleanup } from './jobs/videoClipCleanup';
@@ -37,6 +37,7 @@ app.use(cspMiddleware());
 app.use(corsMiddleware());
 app.use(express.json({ limit: config.jsonBodyLimit }));
 app.use(cookieParser());
+app.use('/api', noStoreMiddleware());
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'wr-app-server', time: new Date().toISOString() });

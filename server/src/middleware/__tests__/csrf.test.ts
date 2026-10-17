@@ -50,13 +50,16 @@ describe('csrfMiddleware', () => {
     expect(next).toHaveBeenCalledTimes(2);
   });
 
-  it('passes through POST /api/auth/csrf without session (exempt path)', () => {
-    const req  = makeReq({ path: '/api/auth/csrf', headers: {}, sessionInfo: undefined });
-    const next = vi.fn() as unknown as NextFunction;
-    const { res } = makeRes();
-    csrfMiddleware(req, res, next);
-    expect(next).toHaveBeenCalledOnce();
-    expect(res.status).not.toHaveBeenCalled();
+  // HF9: 예외 경로는 없다 — 경로 이름이 /api/auth/csrf여도 세션 없는 변경 요청은 401이다.
+  it('does not exempt any path: a session-less POST is 401 even for the old "/api/auth/csrf" path', () => {
+    for (const path of ['/api/auth/csrf', '/csrf']) {
+      const req  = makeReq({ path, headers: {}, sessionInfo: undefined });
+      const next = vi.fn() as unknown as NextFunction;
+      const { res, status } = makeRes();
+      csrfMiddleware(req, res, next);
+      expect(next).not.toHaveBeenCalled();
+      expect(status).toHaveBeenCalledWith(401);
+    }
   });
 
   it('returns 401 when session is missing on mutating request', () => {
