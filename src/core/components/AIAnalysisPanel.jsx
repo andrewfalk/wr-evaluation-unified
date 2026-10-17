@@ -3,27 +3,26 @@ import { MODEL_OPTIONS, DEFAULT_GEMINI_MODEL } from '@contracts/aiModels';
 import { useAuth } from '../auth/AuthContext';
 import { useAIAnalysis } from '../hooks/useAIAnalysis';
 
-// buildInput: () => ({ input, error }) — 환자 → 비식별 구조화 입력(buildAiInputResult). 인트라넷 서버로는 input만 나가고,
-//   만들지 못하면 input은 null이며 error는 사용자에게 보일 사유다.
-// fullReportAllowed: 서버가 병원 내부 LLM일 때만 true — 이때만 보고서 전문(generatePrompt)을 함께 보낸다.
-// generatePrompt/systemPrompt: 웹(Vercel)·Electron 직접 호출 경로 전용(hf7-3에서 구조화 입력으로 바뀐다).
-export function AIAnalysisPanel({ generatePrompt, systemPrompt, buildInput, fullReportAllowed = false, title = 'AI 분석', aiAvailable = true }) {
+// buildInput: () => ({ input, error }) — 환자 → 비식별 구조화 입력(buildAiInputResult). 세 경로(인트라넷 · 웹 · Electron) 모두
+//   이 input만 AI로 나가고, 만들지 못하면 input은 null이며 error는 사용자에게 보일 사유다.
+// generatePrompt/fullReportAllowed: 보고서 전문은 서버가 병원 내부 LLM일 때(인트라넷, fullReportAllowed)만 함께 보낸다.
+//   외부 AI(웹·Electron)에는 보고서 전문을 보내지 않는다.
+export function AIAnalysisPanel({ generatePrompt, buildInput, fullReportAllowed = false, title = 'AI 분석', aiAvailable = true }) {
   const { session } = useAuth();
   const { analyze, loading, result, error, reset } = useAIAnalysis();
   const [model, setModel] = useState(DEFAULT_GEMINI_MODEL);
   const isIntranet = session?.mode === 'intranet';
 
   const handleAnalyze = async () => {
-    if (isIntranet) {
-      // 입력을 만들지 못하면 input은 null — analyzeAIRequest가 사유를 안내하고 분석은 보내지 않는다(보고서 전문도 만들지 않는다).
-      const { input = null, error: inputError } = (buildInput && buildInput()) || {};
-      const fullReport = input && fullReportAllowed ? generatePrompt() : undefined;
-      await analyze({ input, inputError, fullReport: fullReport || undefined });
-      return;
-    }
-    const prompt = generatePrompt();
-    if (!prompt) return;
-    await analyze({ prompt, systemPrompt, model });
+    // 입력을 만들지 못하면 input은 null — analyzeAIRequest가 사유를 안내하고 분석은 보내지 않는다(보고서 전문도 만들지 않는다).
+    const { input = null, error: inputError } = (buildInput && buildInput()) || {};
+    const fullReport = isIntranet && input && fullReportAllowed ? generatePrompt() : undefined;
+    await analyze({
+      input,
+      inputError,
+      fullReport: fullReport || undefined,
+      model: isIntranet ? undefined : model, // 인트라넷은 서버가 승인된 모델을 쓴다
+    });
   };
 
   if (!aiAvailable) {

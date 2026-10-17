@@ -7,15 +7,6 @@ import { createDiagnosis } from '../utils/data';
 import { buildAiInputResult } from '../utils/aiInput';
 import { hasUnmigratedLegacyJobData } from '@analytics-core/jobScope';
 
-const UNIFIED_AI_SYSTEM_PROMPT = `당신은 직업성 근골격계 질환 업무관련성 평가 전문 직업환경의학 전문의입니다.
-무릎(슬관절) 및 척추(요추) 평가 모두에 전문성을 갖추고 있습니다.
-다음 지침에 따라 분석하세요:
-1. 무릎: 신체부담정도 4단계(고도/중등도상/중등도하/경도)와 신체부담기여도 공식을 정확히 적용
-2. 척추: ① MDDM 공식(F = b + m·L)과 G1~G11 자세 분류, 독일 법원(BSG) 기준(남 12.5 MN·h, 여 8.5 MN·h) 적용 ② 전신진동(BK2110): 일일 Amax(8)≥0.63 m/s², 평생 누적용량 DV,RI=1400 (m/s²)² 기준 적용
-3. 한국 산재보상보험법 기준을 참조하여 업무관련성을 판단
-4. 분석 결과는 한국어로 작성하고, 전문 용어는 명확히 설명
-5. 구체적이고 실행 가능한 의견을 제시`;
-
 export function StepContent({
   currentStep,
   activePatient,
@@ -131,7 +122,6 @@ export function StepContent({
           generatePrompt={() => unifiedPreviewText}
           buildInput={() => buildAiInputResult(activePatient)}
           fullReportAllowed={serverConfig?.aiFullReportAllowed === true}
-          systemPrompt={`${UNIFIED_AI_SYSTEM_PROMPT}\n6. 팔꿈치: BK 유형별 노출 패턴, 시간적 선후관계, 직업별-진단별 narrative를 함께 검토합니다.`}
           title="AI 업무관련성 종합분석"
           aiAvailable={aiAvailable}
         />
