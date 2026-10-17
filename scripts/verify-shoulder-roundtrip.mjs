@@ -7,6 +7,9 @@ import { suggestModules } from '../src/core/utils/diagnosisMapping.js';
 import { exportBatchFormatSingle } from '../src/core/utils/exportService.js';
 import { createShoulderJobExtras, createShoulderModuleData } from '../src/modules/shoulder/utils/data.js';
 
+// xlsx 0.20.x ESM은 Node에서 readFile/writeFile을 쓰려면 fs를 직접 연결해야 한다.
+XLSX.set_fs(fs);
+
 function registerTestModules() {
   registerModule({
     id: 'knee',

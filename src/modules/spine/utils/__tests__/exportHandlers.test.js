@@ -1,17 +1,20 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import * as XLSX from 'xlsx';
 import { spineExportHandlers, generateSpineReport } from '../exportHandlers';
 import { createSpineModuleData, createTask, createVibrationInterval } from '../data';
 
 // XLSX.writeFile은 브라우저 다운로드/Node fs 저장을 시도한다. 시트 내용만 검증하면
 // 되므로 워크북 인자를 가로채고 실제 저장은 막는다.
+// xlsx 0.20.x의 ESM 네임스페이스는 재정의할 수 없어 vi.spyOn(XLSX, 'writeFile')이
+// "Cannot redefine property"로 실패한다 → 모듈 단위로 writeFile만 목으로 바꾼다.
+const writeFile = vi.hoisted(() => vi.fn());
+vi.mock('xlsx', async (importOriginal) => ({ ...(await importOriginal()), writeFile }));
+
 let captured = null;
 beforeEach(() => {
   captured = null;
-  vi.spyOn(XLSX, 'writeFile').mockImplementation(wb => { captured = wb; });
-});
-afterEach(() => {
-  vi.restoreAllMocks();
+  writeFile.mockReset();
+  writeFile.mockImplementation(wb => { captured = wb; });
 });
 
 function makePatientData({ mddmStatus, vibrationExposureStatus, tasks, vibrationIntervals, returnConsiderations } = {}) {
