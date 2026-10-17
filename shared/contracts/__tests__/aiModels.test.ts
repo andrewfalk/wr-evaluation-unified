@@ -67,10 +67,12 @@ describe('소비처는 이 계약을 쓴다', () => {
     expect(source).not.toMatch(HARDCODED);
   });
 
-  it('Vercel 함수는 shared/dist의 계약을 불러오고 모델명을 하드코딩하지 않는다', () => {
+  it('Vercel 함수는 shared/dist의 CJS 계약(.cjs)을 불러오고 모델명을 하드코딩하지 않는다', () => {
     const source = read('api/analyze.js');
-    expect(source).toContain("from '../shared/dist/aiModels.js'");
-    expect(source).toContain("from '../shared/dist/aiPrompt.js'");
+    expect(source).toContain("from '../shared/dist/aiModels.cjs'");
+    expect(source).toContain("from '../shared/dist/aiPrompt.cjs'");
+    // ESM 빌드(.js)를 가져오면 Vercel의 CJS 변환 뒤 require(esm)이 되어 Node 20.18·22.11 등에서 함수 로드가 실패한다.
+    expect(source).not.toMatch(/from '\.\.\/shared\/dist\/[A-Za-z]+\.js'/);
     expect(source).not.toMatch(HARDCODED);
   });
 

@@ -12,14 +12,18 @@
 import { timingSafeEqual } from 'node:crypto';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
+// 계약은 반드시 CJS 빌드(.cjs)로 가져온다. 루트 package.json에 "type"이 없어 Vercel이 이 파일을 CommonJS로
+// 변환하는데, 그러면 import가 require()가 되고 shared/package.json이 "type":"module"이라 ESM인 dist/*.js를
+// require()하게 된다. require(esm)을 지원하지 않는 Node(20.19·22.12 미만)에서는 ERR_REQUIRE_ESM으로 함수 로드가
+// 실패한다(FUNCTION_INVOCATION_FAILED). 회귀 테스트: scripts/__tests__/vercelAnalyzeCjsLoad.test.mjs.
 import {
     isAllowedModel,
     DEFAULT_CLAUDE_MODEL,
     CLAUDE_MAX_TOKENS,
     GEMINI_MAX_OUTPUT_TOKENS,
-} from '../shared/dist/aiModels.js';
-import { AiAnalysisExternalRequestSchema } from '../shared/dist/aiAnalysis.js';
-import { buildPrompt, UNIFIED_AI_SYSTEM_PROMPT } from '../shared/dist/aiPrompt.js';
+} from '../shared/dist/aiModels.cjs';
+import { AiAnalysisExternalRequestSchema } from '../shared/dist/aiAnalysis.cjs';
+import { buildPrompt, UNIFIED_AI_SYSTEM_PROMPT } from '../shared/dist/aiPrompt.cjs';
 
 const UPSTREAM_TIMEOUT_MS = 60_000;
 const MAX_UPSTREAM_RESPONSE_BYTES = 1024 * 1024;

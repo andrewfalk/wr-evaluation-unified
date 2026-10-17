@@ -77,6 +77,21 @@ Vercel 대시보드 → 프로젝트 → **Settings → Environment Variables**.
 | 502 | `AI_UPSTREAM_ERROR` | 벤더 오류(상세는 Vercel 함수 로그의 `kind`/`status`에서만 확인) |
 | 504 | `AI_TIMEOUT` | 벤더 응답 60초 초과 |
 
+### Vercel 자체 500 (`FUNCTION_INVOCATION_FAILED`)
+
+본문이 JSON이 아니라 `A server error has occurred … FUNCTION_INVOCATION_FAILED`이면 위 표의 응답이 아니라
+**함수가 로드되지 못한 것**입니다(우리 코드가 응답을 만들기 전). 대시보드 → Deployments → 해당 배포 → Logs에서
+오류 메시지를 확인하세요. 2026-10 PR #167 미리보기에서 한 번 발생했습니다.
+
+- 원인: `api/analyze.js`가 `shared/dist/*.js`(ESM)를 import했다. 루트 `package.json`에 `"type":"module"`이 없어 Vercel이 함수를
+  CommonJS로 변환하고("Node.js functions are compiled from ESM to CommonJS"), import가 `require()`가 되는데
+  `shared/package.json`이 `"type":"module"`이라 ESM인 파일을 `require()`하게 된다. `require(esm)`을 지원하지 않는
+  Node(20.19·22.12 미만)에서는 `ERR_REQUIRE_ESM`으로 로드가 실패한다. 로컬 Node 24에서는 되어서 테스트를 통과한다.
+- **지켜야 할 것**: `api/analyze.js`는 계약을 `shared/dist/*.cjs`(CommonJS 빌드)에서만 가져온다. `.js`로 바꾸지 말 것.
+  새 모듈을 import할 때도 그 파일이 CommonJS로 `require()` 가능한지 확인한다.
+- 재발 방지 테스트: `scripts/__tests__/vercelAnalyzeCjsLoad.test.mjs` — `require(esm)`을 끈 Node에서 함수를 CJS로 변환해
+  로드하고 핸들러를 한 번 호출한다.
+
 ## 한계 (이 설정이 막지 못하는 것)
 
 ### 왜 `X-WR-Client` 토큰을 인증 수단으로 쓰지 않는가 — 2026-10 결정 변경
