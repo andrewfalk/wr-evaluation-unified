@@ -386,7 +386,8 @@ function spineText(m: NonNullable<Modules['spine']>, gender: AiAnalysisInput['de
     );
     mddm.jobs.forEach((job) => {
       lines.push(
-        `- ${jobLabel(job.jobIndex)} (${fmt(job.periodYears, '년')}, 연 ${fmt(job.workDaysPerYear, '일')}): 일일 ${fmt(job.dailyDoseKNh, ' kN·h')}, 평생 ${fmt(job.lifetimeDoseMNh, ' MN·h')}`,
+        `- ${jobLabel(job.jobIndex)} (${fmt(job.periodYears, '년')}, 연 ${fmt(job.workDaysPerYear, '일')}): 일일 ${fmt(job.dailyDoseKNh, ' kN·h')}, 평생 ${fmt(job.lifetimeDoseMNh, ' MN·h')}` +
+          `${job.lifetimeExcluded ? ' (일일 용량이 하한 기준에 못 미쳐 평생 누적에서 제외)' : ''}`,
       );
       job.tasks.forEach((task) => {
         const unit = task.timeUnit ? TIME_UNIT_LABELS[task.timeUnit] : '';

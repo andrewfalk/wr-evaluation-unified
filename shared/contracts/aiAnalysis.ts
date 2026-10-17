@@ -283,6 +283,8 @@ const SpineMddmSchema = z
             workDaysPerYear: numOrNull,
             dailyDoseKNh: numOrNull,
             lifetimeDoseMNh: numOrNull,
+            // 직력별로도 '일일 용량 하한 미만이라 평생 누적에서 제외'를 알린다(lifetimeDoseMNh 0이 노출 없음으로 읽히지 않게).
+            lifetimeExcluded: bool,
             tasks: z
               .array(
                 z

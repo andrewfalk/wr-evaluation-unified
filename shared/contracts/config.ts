@@ -6,6 +6,8 @@ export const DeploymentModeSchema = z.enum(['intranet', 'standalone']);
 export const ServerPublicConfigSchema = z.object({
   mode: DeploymentModeSchema,
   aiEnabled: z.boolean(),
+  // 현행 보고서 전문(fullReport)을 서버 AI로 보내도 되는지(병원 내부 LLM일 때만 true). 구버전 서버 응답 호환 위해 기본 false.
+  aiFullReportAllowed: z.boolean().default(false),
   localFallbackAllowed: z.boolean(),
   // 작업 영상 인간공학 분석(v6.0.0). 구버전 서버 응답 호환 위해 기본 false.
   videoAnalysisEnabled: z.boolean().default(false),

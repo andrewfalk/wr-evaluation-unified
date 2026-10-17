@@ -111,7 +111,7 @@ function fullInput(): AiAnalysisInput {
           workRelatedness: { level: 'high', workContributionPct: 100, personalContributionPct: 0 },
           severity: 'upperModerate',
           jobs: [{
-            jobIndex: 0, periodYears: 12.5, workDaysPerYear: 250, dailyDoseKNh: 6.2, lifetimeDoseMNh: 14.7,
+            jobIndex: 0, periodYears: 12.5, workDaysPerYear: 250, dailyDoseKNh: 6.2, lifetimeDoseMNh: 14.7, lifetimeExcluded: false,
             tasks: [{ posture: 'G3', weightKg: 25, frequencyPerDay: 100, timeValue: 5, timeUnit: 'sec', correctionFactor: 1.2, forceN: 3200, included: true }],
           }],
         },
@@ -407,6 +407,14 @@ describe('buildPrompt', () => {
     const text = buildPrompt(input);
     expect(text).toContain('성별이 입력되지 않아 성별별 기준값이 정확하지 않을 수 있음');
     expect(text).toContain('일일 용량이 하한 기준에 못 미쳐 평생 누적 용량 계산에서 제외됨');
+  });
+
+  it('척추: 평생 누적에서 제외된 직력은 0 MN·h가 "노출 없음"으로 읽히지 않게 표시한다', () => {
+    const input = fullInput();
+    input.modules.spine!.mddm!.jobs[0].lifetimeExcluded = true;
+    input.modules.spine!.mddm!.jobs[0].lifetimeDoseMNh = 0;
+    expect(buildPrompt(input)).toContain('직력1 (12.5년, 연 250일): 일일 6.2 kN·h, 평생 0 MN·h (일일 용량이 하한 기준에 못 미쳐 평생 누적에서 제외)');
+    expect(buildPrompt(fullInput())).not.toContain('평생 누적에서 제외)');
   });
 
   it('척추: MDDM 미평가·진동 노출 없음이면 세부 값은 나오지 않는다', () => {
