@@ -1,5 +1,9 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import * as XLSX from 'xlsx';
+
+// xlsx 0.20.x ESM은 Node에서 readFile/writeFile을 쓰려면 fs를 직접 연결해야 한다.
+XLSX.set_fs(fs);
 
 const headers = [
   '이름', '등록번호', '생년월일', '재해일자', '키', '체중', '성별',
