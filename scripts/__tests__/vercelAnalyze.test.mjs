@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const rl = vi.hoisted(() => ({
   results: {}, // prefix → { success, reset } 또는 throw
   calls: [], // 호출 순서: [prefix, key]
-  windows: [], // 생성된 제한 설정
+  constructed: [], // Ratelimit 생성자 옵션
   redisOptions: [],
 }));
 
@@ -13,11 +13,12 @@ vi.mock('@upstash/redis', () => ({
 }));
 vi.mock('@upstash/ratelimit', () => {
   class Ratelimit {
-    constructor({ limiter, prefix }) { this.limiter = limiter; this.prefix = prefix; }
+    constructor(options) { this.limiter = options.limiter; this.prefix = options.prefix; rl.constructed.push(options); }
     async limit(key) {
       rl.calls.push([this.prefix, key]);
-      const outcome = rl.results[this.prefix] ?? { success: true, reset: Date.now() + 60_000 };
-      if (outcome.throws) throw new Error('redis unreachable: SECRET-REDIS-HOST');
+      // 시나리오가 지정한 결과를 그대로 돌려준다(undefined·null 포함). 지정이 없으면 정상 통과.
+      const outcome = this.prefix in rl.results ? rl.results[this.prefix] : { success: true, reset: Date.now() + 60_000 };
+      if (outcome && outcome.throws) throw new Error('redis unreachable: SECRET-REDIS-HOST');
       return outcome;
     }
     static slidingWindow(max, window) { return { kind: 'sliding', max, window }; }
@@ -78,7 +79,7 @@ beforeEach(() => {
     APP_ORIGIN: ORIGIN, WEB_AI_CLIENT_TOKEN: TOKEN, UPSTASH_REDIS_REST_URL: 'https://redis.example', UPSTASH_REDIS_REST_TOKEN: 'redis-token',
     GEMINI_API_KEY: 'gemini-key', CLAUDE_API_KEY: 'claude-key',
   });
-  rl.results = {}; rl.calls = []; rl.redisOptions = [];
+  rl.results = {}; rl.calls = []; rl.redisOptions = []; rl.constructed = [];
   fetchMock = vi.fn();
   vi.stubGlobal('fetch', fetchMock);
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -191,6 +192,57 @@ describe('속도 제한 (Upstash)', () => {
     expect(JSON.stringify(res.body)).not.toContain('SECRET');
     expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('SECRET');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // Upstash는 Redis가 시간 안에 응답하지 않으면 예외 대신 { success: true, reason: 'timeout' }을 돌려준다.
+  // success만 보면 한도를 확인하지 못한 채 AI를 호출한다(fail-open) — 시간 초과는 장애로 취급해 닫아야 한다.
+  it.each(['wr-ai:ip-min', 'wr-ai:ip-day', 'wr-ai:budget'])('%s 확인이 시간 초과({ success: true, reason: "timeout" })면 통과시키지 않고 503이다', async (prefix) => {
+    rl.results[prefix] = { success: true, limit: 0, remaining: 0, reset: 0, reason: 'timeout' };
+    const res = await call();
+    expect(res.statusCode).toBe(503);
+    expect(res.body.error.code).toBe('RATE_LIMIT_UNAVAILABLE');
+    expect(fetchMock).not.toHaveBeenCalled();
+    // 시간 초과가 난 단계에서 바로 멈춘다(뒤 단계를 더 기다리지 않는다).
+    expect(rl.calls.at(-1)[0]).toBe(prefix);
+  });
+
+  it('success가 false여도 시간 초과면 한도 초과(429)가 아니라 장애(503)로 본다', async () => {
+    rl.results['wr-ai:ip-min'] = { success: false, reset: Date.now() + 1000, reason: 'timeout' };
+    expect((await call()).statusCode).toBe(503);
+  });
+
+  it.each([
+    ['빈 객체', {}],
+    ['success가 불리언이 아님', { success: 'yes', reset: 0 }],
+    ['undefined', undefined],
+    ['null', null],
+  ])('예상 밖의 응답 형태(%s)도 통과시키지 않고 503이다', async (_name, outcome) => {
+    rl.results['wr-ai:ip-day'] = outcome;
+    const res = await call();
+    expect(res.statusCode).toBe(503);
+    expect(res.body.error.code).toBe('RATE_LIMIT_UNAVAILABLE');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('라이브러리의 로컬 차단 캐시(success:false, reason:"cacheBlock")는 정상적인 한도 초과(429)다', async () => {
+    rl.results['wr-ai:ip-min'] = { success: false, reason: 'cacheBlock', reset: Date.now() + 30_000 };
+    const res = await call();
+    expect(res.statusCode).toBe(429);
+    expect(res.body.error.code).toBe('RATE_LIMITED');
+  });
+
+  it('모든 제한 확인에 2초 제한 시간을 건다(라이브러리 기본 5초 × 3 = 15초를 기다리지 않는다)', async () => {
+    fetchMock.mockResolvedValue(geminiOk());
+    await call();
+    expect(rl.constructed.map((o) => o.prefix)).toEqual(['wr-ai:ip-min', 'wr-ai:ip-day', 'wr-ai:budget']);
+    expect(rl.constructed.every((o) => o.timeout === 2000)).toBe(true);
+  });
+
+  it('시간 초과 장애는 사유(timeout)만 로그에 남기고 응답에는 싣지 않는다', async () => {
+    rl.results['wr-ai:ip-min'] = { success: true, reason: 'timeout', reset: 0 };
+    const res = await call();
+    expect(JSON.stringify(errorSpy.mock.calls)).toContain('timeout');
+    expect(JSON.stringify(res.body)).not.toContain('timeout');
   });
 
   it('한도를 넘으면 429와 Retry-After를 돌려주고 업스트림을 부르지 않는다', async () => {

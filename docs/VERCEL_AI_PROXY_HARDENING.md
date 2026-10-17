@@ -72,7 +72,7 @@ Vercel 대시보드 → 프로젝트 → **Settings → Environment Variables**.
 | 429 | `RATE_LIMITED` | IP/전역 한도 초과(`Retry-After` 초) |
 | 429 | `AI_UPSTREAM_RATE_LIMITED` | 벤더 쪽 한도 초과 |
 | 503 | `AI_PROXY_NOT_CONFIGURED` | `WEB_AI_CLIENT_TOKEN` 미설정 |
-| 503 | `RATE_LIMIT_UNAVAILABLE` | Upstash 미설정 또는 Redis 장애 |
+| 503 | `RATE_LIMIT_UNAVAILABLE` | Upstash 미설정, Redis 장애, 또는 Redis가 **2초 안에 응답하지 않음**(시간 초과도 열어 두지 않고 닫는다) |
 | 503 | `AI_NOT_CONFIGURED` | 해당 업체 API 키 미설정 |
 | 502 | `AI_UPSTREAM_ERROR` | 벤더 오류(상세는 Vercel 함수 로그의 `kind`/`status`에서만 확인) |
 | 504 | `AI_TIMEOUT` | 벤더 응답 60초 초과 |

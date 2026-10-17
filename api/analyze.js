@@ -67,6 +67,18 @@ function send(res, status, error, extraHeaders = {}) {
 // 속도 제한 (Upstash Redis). 분당 IP 10 · 일당 IP 100 · 전역 일일 예산(WEB_AI_DAILY_BUDGET).
 // Redis에 닿지 못해도 열어 두지 않는다(호출 비용 남용을 막는 것이 목적이므로 fail-closed).
 // ---------------------------------------------------------------------------
+
+// 한 번의 제한 확인을 기다리는 최대 시간. Redis가 응답하지 않으면 첫 확인에서 바로 503으로 닫는다.
+// (라이브러리 기본값 5초 × 세 번 = 15초를 기다린 뒤 통과하던 것을 2초로 줄인다.)
+const LIMITER_TIMEOUT_MS = 2000;
+
+class RateLimitUnavailableError extends Error {
+    constructor(reason) {
+        super(`rate limit unavailable: ${reason}`);
+        this.reason = reason;
+    }
+}
+
 async function checkRateLimit(env, ip) {
     const url = env.UPSTASH_REDIS_REST_URL;
     const token = env.UPSTASH_REDIS_REST_TOKEN;
@@ -74,15 +86,23 @@ async function checkRateLimit(env, ip) {
 
     const redis = new Redis({ url, token });
     const budget = Number.parseInt(env.WEB_AI_DAILY_BUDGET, 10) || DEFAULT_DAILY_BUDGET;
+    const make = (limiter, prefix) => new Ratelimit({ redis, limiter, prefix, timeout: LIMITER_TIMEOUT_MS });
     const checks = [
-        [new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(10, '1 m'), prefix: 'wr-ai:ip-min' }), ip],
-        [new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(100, '1 d'), prefix: 'wr-ai:ip-day' }), ip],
-        [new Ratelimit({ redis, limiter: Ratelimit.fixedWindow(budget, '1 d'), prefix: 'wr-ai:budget' }), 'global'],
+        [make(Ratelimit.slidingWindow(10, '1 m'), 'wr-ai:ip-min'), ip],
+        [make(Ratelimit.slidingWindow(100, '1 d'), 'wr-ai:ip-day'), ip],
+        [make(Ratelimit.fixedWindow(budget, '1 d'), 'wr-ai:budget'), 'global'],
     ];
     // 순서대로 확인해 앞 단계에서 거절된 요청이 전역 예산을 소모하지 않게 한다.
     for (const [limiter, key] of checks) {
         const result = await limiter.limit(key);
-        if (!result.success) return { configured: true, allowed: false, retryAfterSec: Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)) };
+        // Upstash는 Redis가 시간 안에 응답하지 않으면 예외를 던지지 않고 { success: true, reason: 'timeout' }을 돌려준다.
+        // success만 보면 한도를 확인하지 못한 채 통과(fail-open)하므로, 시간 초과와 예상 밖의 응답 형태는 장애로 취급한다.
+        if (!result || result.reason === 'timeout' || typeof result.success !== 'boolean') {
+            throw new RateLimitUnavailableError(result?.reason ?? 'malformed');
+        }
+        if (!result.success) {
+            return { configured: true, allowed: false, retryAfterSec: Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)) };
+        }
     }
     return { configured: true, allowed: true };
 }
@@ -132,7 +152,7 @@ export default async function handler(req, res) {
     try {
         limit = await checkRateLimit(env, clientIp(req));
     } catch (err) {
-        console.error('[ai] rate limit backend failure', err instanceof Error ? err.name : typeof err);
+        console.error('[ai] rate limit backend failure', err instanceof RateLimitUnavailableError ? err.reason : err instanceof Error ? err.name : typeof err);
         return send(res, 503, { code: 'RATE_LIMIT_UNAVAILABLE', message: 'AI 분석을 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도해주세요.' });
     }
     if (!limit.configured) {
