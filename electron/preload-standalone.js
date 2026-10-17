@@ -1,23 +1,23 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// 메인이 보내는 이벤트를 페이지 콜백에 전달할 때 IpcRendererEvent를 빼고 payload만 넘긴다(HF3). 이벤트 객체의
+// sender가 ipcRenderer라, contextBridge로 페이지에 그대로 건네면 페이지가 raw ipcRenderer를 얻는다.
+// 반환하는 해제 함수는 같은 리스너를 정확히 제거한다. (샌드박스 preload는 로컬 모듈을 require할 수 없어 인라인.)
+function subscribe(channel, callback) {
+  const listener = (_event, ...args) => callback(...args);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
+
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
 
   // 메뉴 이벤트
-  onMenuNew: (callback) => {
-    ipcRenderer.on('menu-new', callback);
-    return () => ipcRenderer.removeListener('menu-new', callback);
-  },
-  onGotoModule: (callback) => {
-    ipcRenderer.on('goto-module', callback);
-    return () => ipcRenderer.removeListener('goto-module', callback);
-  },
+  onMenuNew: (callback) => subscribe('menu-new', callback),
+  onGotoModule: (callback) => subscribe('goto-module', callback),
   // PR2 §3 — 통계분석 워크벤치(인트라넷 전용 기능이라 standalone에서는 항상 false지만,
   // 채널 자체는 노출해 App.jsx가 빌드 종류를 분기하지 않게 한다).
-  onOpenStatistics: (callback) => {
-    ipcRenderer.on('open-statistics', callback);
-    return () => ipcRenderer.removeListener('open-statistics', callback);
-  },
+  onOpenStatistics: (callback) => subscribe('open-statistics', callback),
   setStatsAvailable: (available) => ipcRenderer.send('set-stats-available', !!available),
 
   // native alert/confirm

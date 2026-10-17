@@ -16,6 +16,9 @@ const {
 } = require('./updateFeed');
 const { autoUpdater } = require('electron-updater');
 const aiModels = require('../ai-models.config.cjs');
+const { createIpcRegistrar } = require('./ipcGuard');
+const { isAllowedStandaloneNavigation } = require('./navigationGuard');
+const { isPermissionAllowed } = require('./permissionPolicy');
 
 // ---------------------------------------------------------------------------
 // Build target: 'intranet' or 'standalone' (default)
@@ -34,11 +37,23 @@ const IS_INTRANET_BUILD = detectBuildTarget() === 'intranet';
 const INTRANET_URL      = (process.env.WR_INTRANET_URL || (IS_INTRANET_BUILD ? DEFAULT_INTRANET_URL : '')).trim().replace(/\/$/, '');
 
 // ---------------------------------------------------------------------------
+// IPC 등록 관문(HF3): 최상위 IPC 채널은 전부 ipc.handle / ipc.on 으로 등록한다 — 허용되지 않은 sender 거부 +
+// 독립형 전용 채널(fs-*·analyze-ai·load-legacy-data)은 인트라넷 빌드에서 등록하지 않는다(ipcGuard.js).
+// isAllowedSender는 함수 선언이라 호이스팅되고, mainWindow는 이벤트가 올 때 읽는다.
+// ---------------------------------------------------------------------------
+const ipc = createIpcRegistrar({
+  ipcMain,
+  isIntranetBuild: IS_INTRANET_BUILD,
+  isAllowedSender,
+  getMainWindow: () => mainWindow,
+});
+
+// ---------------------------------------------------------------------------
 // In-memory access token — set by the renderer via 'set-access-token' IPC.
 // Used by the audit module for device registration and audit signing.
 // ---------------------------------------------------------------------------
 let _accessToken = null;
-ipcMain.on('set-access-token', (event, token) => {
+ipc.on('set-access-token', (event, token) => {
   // emr-* 핸들러와 동일한 origin 게이트 — 허용 외 origin의 토큰 주입 차단
   if (!isAllowedSender(event.senderFrame?.url ?? event.sender.getURL())) return;
   _accessToken = token || null;
@@ -53,7 +68,7 @@ ipcMain.on('set-access-token', (event, token) => {
 // 창 닫기/새로고침 가드(win.on('close'), requestSafeReload)가 이 값을 참조한다.
 // ---------------------------------------------------------------------------
 let _hasUnsavedDraft = false;
-ipcMain.on('set-has-unsaved-draft', (event, hasUnsavedDraft) => {
+ipc.on('set-has-unsaved-draft', (event, hasUnsavedDraft) => {
   if (!isAllowedSender(event.senderFrame?.url ?? event.sender.getURL())) return;
   _hasUnsavedDraft = !!hasUnsavedDraft;
 });
@@ -64,7 +79,7 @@ ipcMain.on('set-has-unsaved-draft', (event, hasUnsavedDraft) => {
 // 위 주석 참고). 기본은 숨김 — 가용성이 확인되기 전까지 메뉴에 노출하지 않는다.
 // ---------------------------------------------------------------------------
 let _statsAvailable = false;
-ipcMain.on('set-stats-available', (event, available) => {
+ipc.on('set-stats-available', (event, available) => {
   if (!isAllowedSender(event.senderFrame?.url ?? event.sender.getURL())) return;
   const next = !!available;
   if (next === _statsAvailable) return;
@@ -518,6 +533,23 @@ function createWindow() {
     mainWindow.loadURL(INTRANET_URL);
   } else {
     const isDev = process.env.NODE_ENV === 'development';
+
+    // HF9: 독립형도 인트라넷 빌드처럼 이동·리다이렉트·새 창을 자기 앱으로 제한한다(loadURL/loadFile 전에 등록).
+    // 렌더러에는 window.open·target="_blank" 외부 링크가 없으므로 새 창은 전부 거부한다.
+    const appDir = path.join(__dirname, '../dist/electron');
+    const guardNavigation = (label) => (event, url) => {
+      if (!isAllowedStandaloneNavigation(url, { isDev, appDir })) {
+        event.preventDefault();
+        console.warn(`[standalone] blocked ${label}`, url);
+      }
+    };
+    mainWindow.webContents.on('will-navigate', guardNavigation('navigation to'));
+    mainWindow.webContents.on('will-redirect', guardNavigation('redirect to'));
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+      console.warn('[standalone] blocked window open for', url);
+      return { action: 'deny' };
+    });
+
     if (isDev) {
       mainWindow.loadURL('http://localhost:3000');
       mainWindow.webContents.openDevTools();
@@ -642,6 +674,13 @@ app.whenReady().then(async () => {
     }
   }
 
+  // HF9: 세션 권한은 기본이 "전부 허용"이다 — 앱이 쓰는 것(permissionPolicy.js)만 허용하고 나머지는 거부.
+  // 창을 만들기 전에 걸어야 첫 페이지의 권한 요청부터 적용된다.
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(isPermissionAllowed(permission));
+  });
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => isPermissionAllowed(permission));
+
   await clearLegacyPersistentRefreshCookie();
   createWindow();
 
@@ -665,12 +704,12 @@ app.whenReady().then(async () => {
 });
 
 // IPC: 앱 버전 (preload에서 동기 호출)
-ipcMain.on('get-app-version', (event) => {
+ipc.on('get-app-version', (event) => {
   event.returnValue = app.getVersion();
 });
 
 // IPC: native alert/confirm
-ipcMain.handle('show-alert', async (_event, message) => {
+ipc.handle('show-alert', async (_event, message) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     await dialog.showMessageBox(mainWindow, {
       type: 'info', title: '알림', message: String(message), buttons: ['확인']
@@ -678,7 +717,7 @@ ipcMain.handle('show-alert', async (_event, message) => {
   }
 });
 
-ipcMain.handle('show-confirm', async (_event, message) => {
+ipc.handle('show-confirm', async (_event, message) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     const { response } = await dialog.showMessageBox(mainWindow, {
       type: 'question', title: '확인', message: String(message),
@@ -690,7 +729,7 @@ ipcMain.handle('show-confirm', async (_event, message) => {
 });
 
 // IPC: AI 분석 (Electron에서 직접 API 호출 — Claude / Gemini 분기)
-ipcMain.handle('analyze-ai', async (_event, { prompt, systemPrompt, model, apiKey }) => {
+ipc.handle('analyze-ai', async (_event, { prompt, systemPrompt, model, apiKey }) => {
   const isGemini = (model || '').startsWith('gemini');
 
   if (!apiKey) {
@@ -775,7 +814,7 @@ function callGemini({ prompt, systemPrompt, model, apiKey }) {
 
 // IPC: 구형 무릎 프로그램(wr-evaluation) 저장 데이터 읽기
 // Chromium localStorage → LevelDB → WAL(.log) 포맷 파싱 + UTF-16LE 값 추출
-ipcMain.handle('load-legacy-data', async () => {
+ipc.handle('load-legacy-data', async () => {
   const debug = [];
   try {
     const legacyPath = path.join(app.getPath('appData'), 'wr-evaluation', 'Local Storage', 'leveldb');
@@ -978,7 +1017,7 @@ function sanitizeId(id) {
 }
 
 // 환자 개별 파일
-ipcMain.handle('fs-load-all-patients', async () => {
+ipc.handle('fs-load-all-patients', async () => {
   ensureDirs();
   const index = loadIndex();
   const patients = [];
@@ -989,12 +1028,12 @@ ipcMain.handle('fs-load-all-patients', async () => {
   return patients;
 });
 
-ipcMain.handle('fs-load-patient', async (_e, id) => {
+ipc.handle('fs-load-patient', async (_e, id) => {
   ensureDirs();
   return readJsonFile(path.join(patientsDir, `${sanitizeId(id)}.json`));
 });
 
-ipcMain.handle('fs-save-patient', async (_e, patient) => {
+ipc.handle('fs-save-patient', async (_e, patient) => {
   ensureDirs();
   sanitizeId(patient.id);
   writeJsonFile(path.join(patientsDir, `${patient.id}.json`), patient);
@@ -1012,7 +1051,7 @@ ipcMain.handle('fs-save-patient', async (_e, patient) => {
   saveIndex(index);
 });
 
-ipcMain.handle('fs-delete-patient', async (_e, id) => {
+ipc.handle('fs-delete-patient', async (_e, id) => {
   ensureDirs();
   const filePath = path.join(patientsDir, `${sanitizeId(id)}.json`);
   if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -1020,7 +1059,7 @@ ipcMain.handle('fs-delete-patient', async (_e, id) => {
   saveIndex(index);
 });
 
-ipcMain.handle('fs-save-all-patients', async (_e, patients) => {
+ipc.handle('fs-save-all-patients', async (_e, patients) => {
   ensureDirs();
   patients.forEach(p => sanitizeId(p.id));
   const index = [];
@@ -1037,7 +1076,7 @@ ipcMain.handle('fs-save-all-patients', async (_e, patients) => {
 });
 
 // 저장 항목 (savedItems)
-ipcMain.handle('fs-load-items', async () => {
+ipc.handle('fs-load-items', async () => {
   ensureDirs();
   const files = fs.readdirSync(savedDir).filter(f => f.endsWith('.json'));
   const items = [];
@@ -1048,58 +1087,58 @@ ipcMain.handle('fs-load-items', async () => {
   return items.sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || ''));
 });
 
-ipcMain.handle('fs-save-item', async (_e, item) => {
+ipc.handle('fs-save-item', async (_e, item) => {
   ensureDirs();
   sanitizeId(item.id);
   writeJsonFile(path.join(savedDir, `${item.id}.json`), item);
 });
 
-ipcMain.handle('fs-delete-item', async (_e, id) => {
+ipc.handle('fs-delete-item', async (_e, id) => {
   ensureDirs();
   const filePath = path.join(savedDir, `${sanitizeId(id)}.json`);
   if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 });
 
 // 자동저장
-ipcMain.handle('fs-save-autosave', async (_e, data) => {
+ipc.handle('fs-save-autosave', async (_e, data) => {
   ensureDirs();
   writeJsonFile(path.join(dataDir, 'autosave.json'), data);
 });
 
-ipcMain.handle('fs-load-autosave', async () => {
+ipc.handle('fs-load-autosave', async () => {
   ensureDirs();
   return readJsonFile(path.join(dataDir, 'autosave.json'));
 });
 
-ipcMain.handle('fs-clear-autosave', async () => {
+ipc.handle('fs-clear-autosave', async () => {
   const filePath = path.join(dataDir, 'autosave.json');
   if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 });
 
 // 설정
-ipcMain.handle('fs-save-settings', async (_e, settings) => {
+ipc.handle('fs-save-settings', async (_e, settings) => {
   ensureDirs();
   writeJsonFile(path.join(dataDir, 'settings.json'), settings);
 });
 
-ipcMain.handle('fs-load-settings', async () => {
+ipc.handle('fs-load-settings', async () => {
   ensureDirs();
   return readJsonFile(path.join(dataDir, 'settings.json'));
 });
 
 // 커스텀 프리셋
-ipcMain.handle('fs-load-custom-presets', async () => {
+ipc.handle('fs-load-custom-presets', async () => {
   ensureDirs();
   return readJsonFile(customPresetsPath, []);
 });
 
-ipcMain.handle('fs-save-custom-presets', async (_e, presets) => {
+ipc.handle('fs-save-custom-presets', async (_e, presets) => {
   ensureDirs();
   writeJsonFile(customPresetsPath, Array.isArray(presets) ? presets : []);
 });
 
 // 마이그레이션: localStorage 데이터를 파일로 이전
-ipcMain.handle('fs-migrate', async (_e, { savedItems, autoSave, settings }) => {
+ipc.handle('fs-migrate', async (_e, { savedItems, autoSave, settings }) => {
   ensureDirs();
   const indexPath = path.join(dataDir, 'index.json');
   if (fs.existsSync(indexPath)) return { migrated: false }; // 이미 마이그레이션됨
@@ -1147,7 +1186,7 @@ ipcMain.handle('fs-migrate', async (_e, { savedItems, autoSave, settings }) => {
 // fs-* 핸들러와 별도. 4단계 게이트(빌드 타깃 / origin / 토큰 / 사용자 확인) 통과 시에만
 // 디스크 읽기. patients/는 index.json 기준만 — fs-save-all-patients가 stale 파일을
 // 정리하지 않아 ghost 부활 위험이 있음. saved/, autosave.json은 사용자 명시 데이터.
-ipcMain.handle('migration-load-local-data', async (event) => {
+ipc.handle('migration-load-local-data', async (event) => {
   const empty = { savedItems: [], indexedPatients: [], autoSave: null, customPresets: [] };
 
   const gate = evaluateMigrationGate({
@@ -1325,7 +1364,7 @@ async function execEmrInject(fieldData) {
 }
 
 // IPC: EMR 직접입력 (C# EmrHelper.exe → IE DOM 주입)
-ipcMain.handle('emr-inject', async (event, fieldData) => {
+ipc.handle('emr-inject', async (event, fieldData) => {
   const denied = emrGate(event, 'emr_inject');
   if (denied) return denied;
 
@@ -1349,7 +1388,7 @@ ipcMain.handle('emr-inject', async (event, fieldData) => {
 });
 
 // IPC: 진료기록 데이터 추출 (단건 — App.jsx가 환자별 루프 수행)
-ipcMain.handle('emr-extract-record', async (event, patientNo, injuryDate) => {
+ipc.handle('emr-extract-record', async (event, patientNo, injuryDate) => {
   const denied = emrGate(event, 'emr_extract_record');
   if (denied) return { success: false, error: denied.message };
 
@@ -1372,7 +1411,7 @@ ipcMain.handle('emr-extract-record', async (event, patientNo, injuryDate) => {
 });
 
 // IPC: 다학제회신 추출 (현재 열린 진료메인 페이지 대상)
-ipcMain.handle('emr-extract-consultation', async (event) => {
+ipc.handle('emr-extract-consultation', async (event) => {
   const denied = emrGate(event, 'emr_extract_consultation');
   if (denied) return { success: false, error: denied.message };
 
