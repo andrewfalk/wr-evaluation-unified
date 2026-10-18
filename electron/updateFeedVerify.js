@@ -80,7 +80,36 @@ async function checkFeedBeforeDownload({ feedBaseUrl, channel, info, publicKeys,
   return verifyFeedForUpdate({ ymlBytes, sigBase64: sigBytes.toString('utf8'), publicKeys, info });
 }
 
+// 거부 사유를 로그·메뉴에 남길 오류 메시지로 만든다. info-mismatch는 어떤 필드가 달랐는지 함께 적는다.
+function describeRejection(verdict) {
+  const detail = verdict.differingKeys?.length ? `(${verdict.differingKeys.join(',')})` : '';
+  return `UPDATE_FEED_REJECTED:${verdict.reason}${detail}`;
+}
+
+// update-available → 다운로드 허용 판정을 한 함수로 묶는다. autoUpdater.autoDownload=false이므로 이 게이트가
+// download()를 부르는 유일한 경로여야 한다(main.js 연결부는 테스트되지 않으므로 이 로직을 여기에 둔다).
+// 거부뿐 아니라 검증 중 예외도 다운로드로 이어지지 않는다 — 어떤 실패든 onRejected로만 알린다. 허용 시 true를 돌려준다.
+// onVerified: 검증을 통과한 순간 download() 직전에 한 번 부른다. "검증 성공"에 맞춰 해야 하는 일(예: 연속 실패 횟수 초기화)용 —
+// update-available 이벤트는 검증을 통과했다는 뜻이 아니므로 그 시점에 하면 거부가 연속돼도 횟수가 쌓이지 않는다.
+function createDownloadGate({ feedBaseUrl, channel, publicKeys, fetchBuffer, download, onRejected, onVerified = () => {} }) {
+  return async function downloadGate(info) {
+    let verdict;
+    try {
+      verdict = await checkFeedBeforeDownload({ feedBaseUrl, channel, info, publicKeys, fetchBuffer });
+    } catch (err) {
+      verdict = { ok: false, reason: `verification-error:${err?.message ?? err}` };
+    }
+    if (!verdict.ok) {
+      onRejected(new Error(describeRejection(verdict)));
+      return false;
+    }
+    onVerified();
+    download();
+    return true;
+  };
+}
+
 module.exports = {
   SIGNATURE_BYTES, FEED_MAX_BYTES, SIG_MAX_BYTES,
-  feedFileNames, verifyFeedSignature, verifyFeedForUpdate, checkFeedBeforeDownload,
+  feedFileNames, verifyFeedSignature, verifyFeedForUpdate, checkFeedBeforeDownload, describeRejection, createDownloadGate,
 };
