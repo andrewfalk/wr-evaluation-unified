@@ -380,7 +380,7 @@ shared/contracts/{aiAnalysis,aiPrompt,aiModels}.ts  # AI 입력 계약(.strict) 
 
 1. (완료) 결정 D1–D8과 정정 사항(서버 vitest=dist, AI 분기=analysisClient.js)을 메모리에 저장함.
 2. **Phase H 코드·릴리스 문서 main 머지 완료**(2026-10-18, PR #159~#172, HEAD `77e6686`, 버전 7.1.4). 세부 결과는 Phase H 섹션 "구현 결과", 계획은 메모리 `project_phase_h_hotfix_plan`.
-3. **7.1.4 배포(사용자 몫)**: `npm run electron:build:intranet`(EMR 헬퍼 때문에 dotnet 필요) → `export-offline-package.ps1 -UpdateSigningKey "<비밀 키>"`(암호가 걸린 키면 같은 창에 `WR_UPDATE_SIGNING_PASSPHRASE` 설정) → `docs/UPDATE_7.1.4.md` 릴리스 게이트(설치본 수동 점검 + 서명 업데이트 실기기 시험) 통과 → 운영 배포. 서명 비밀 키와 암호는 오프라인 백업.
+3. **7.1.4 배포(사용자 몫)**: `npm run electron:build:intranet`(EMR 헬퍼 빌드 `build:emr-helper`에 Windows 기본 포함 .NET Framework 4의 `C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe`가 필요 — 별도 dotnet SDK 불필요) → `export-offline-package.ps1 -UpdateSigningKey "<비밀 키>"`(암호가 걸린 키면 같은 창에 `WR_UPDATE_SIGNING_PASSPHRASE` 설정) → `docs/UPDATE_7.1.4.md` 릴리스 게이트(설치본 수동 점검 + 서명 업데이트 실기기 시험) 통과 → 운영 배포. 서명 비밀 키와 암호는 오프라인 백업.
 4. Phase 0은 H 배포와 병행 가능하되, 충돌 최소화를 위해 CI(P0-1)·ESLint(P0-4)·줄끝(P0-8)부터.
 5. 각 Phase 완료 시 이 문서의 해당 표에 "완료(PR#, 날짜)"를 기록하고 메모리 `project_refactoring_roadmap`을 갱신한다.
 
