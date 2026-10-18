@@ -137,10 +137,10 @@ docker images | grep wr-
 ### 3-1-1. (선택) Electron 자동 업데이트용 `/updates/` 스테이징
 
 트랙 2(electron-updater) 도입 이후 오프라인 패키지에는 설치본(.exe) + `.blockmap` +
-`latest.yml`(또는 `canary.yml`) 3종이 **`electron/`(신규 PC 설치용)과 `updates/`(서버 서빙용) 두 곳에**
+`latest.yml`(또는 `canary.yml`) + 그 서명 `.sig`(7.1.4~, INTRANET_DEPLOYMENT.md 7-6) 4종이 **`electron/`(신규 PC 설치용)과 `updates/`(서버 서빙용) 두 곳에**
 들어 있고, `electron/`에는 `update-policy.example.json` 템플릿이 추가로 있다. `docker-compose.yml`이
-`./updates`를 컨테이너 `/app/updates`에 read-only 마운트하므로, **패키지 폴더에서 그대로 기동하면 3종은
-별도 복사 없이 서빙된다.** 이 단계는 최초 설치 자체에는 필요 없다 — 클라이언트 PC 설치는 여전히 5-2-1의
+`./updates`를 컨테이너 `/app/updates`에 read-only 마운트하므로, **패키지 폴더에서 그대로 기동하면 4종은
+별도 복사 없이 서빙된다.** 서명 없는 피드는 7.1.4 이후 셸이 모두 거부하므로 패키지는 서명 키(`export-offline-package.ps1 -UpdateSigningKey`)로 만들어야 하고, `updates/`에 yml만 따로 복사하지 말고 폴더를 통째로 복사한다. 이 단계는 최초 설치 자체에는 필요 없다 — 클라이언트 PC 설치는 여전히 5-2-1의
 수동 인스톨러 실행 방식 그대로다(`update-policy.json`이 없으면 업데이터는 휴면).
 
 **기존 서버를 새 패키지 폴더로 교체하는 경우**에는 compose의 `./updates`가 새 폴더를 가리키므로,
@@ -492,7 +492,7 @@ Electron 앱 → 로그인 → POST /api/devices/register (publicKey, buildTarge
 1. 인스톨러 실행 (electron-builder `productName` 기준 파일명):
    - 기본: `직업성 질환 통합 평가 프로그램 Setup {VERSION}.exe`
    - 오프라인 패키지의 `electron/` 디렉터리에서 `.exe` 파일을 찾아 실행
-   - (트랙 2 이후) 같은 디렉터리에 `.blockmap`/`latest.yml`(또는 `canary.yml`)/
+   - (트랙 2 이후) 같은 디렉터리에 `.blockmap`/`latest.yml`(또는 `canary.yml`)/`.yml.sig`/
      `update-policy.example.json`이 함께 있으나, **첫 설치에는 `.exe`만 사용**한다 —
      나머지는 3-1-1의 서버 측 자동 업데이트 스테이징용이다.
 2. 서버 URL `https://wr.hospital.local` 입력 후 저장
@@ -1059,4 +1059,5 @@ $env:WR_VERSION = ""  # 원복
 - [ ] GPG 공개키 등록 및 백업 1회 성공
 - [ ] 클라이언트 PC CA 인증서 설치 확인 (INTRANET_DEPLOYMENT.md 3절)
 - [ ] (Electron 셸이 바뀐 릴리스인 경우) `/updates/` 스테이징 + `update-policy.json` 롤아웃 절차 확인 (3-1-1, INTRANET_DEPLOYMENT.md 7절)
+- [ ] (Electron 셸이 바뀐 릴리스인 경우) 패키지가 서명 키로 만들어졌고 `release-manifest.json`의 `electronInstaller.updateFeedSigned`가 `true`이며, 서버 `updates/`의 yml·`.sig` 쌍이 검증됨: `node scripts/sign-update-feed.mjs --verify --dir <updates 폴더> --channel latest` (INTRANET_DEPLOYMENT.md 7-6). 서명 키·암호가 서버·`.env.production`에 없음
 - [ ] T46 Go/No-Go 결과표 PASS (docs/T46_GO_NO_GO.md)

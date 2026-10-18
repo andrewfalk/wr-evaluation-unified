@@ -17,14 +17,19 @@
  * 보면 "오래된 설치본 + 오래된 latest.yml" 조합(서로 해시는 맞음)이 새 버전 패키지에 그대로
  * 포장되기 때문이다. expectedVersion을 넘기지 않으면 기존 동작(버전 비교 없음)을 유지한다.
  *
+ * 피드 서명(requireSignature, HF8): <channel>.yml.sig가 셸에 내장된 공개 키(electron/updateSigningPublicKey.js)로 검증되는지
+ * 확인한다. 서명이 없거나 yml이 서명 뒤 바뀌었거나 신뢰하지 않는 키로 서명됐으면 실패한다 — 그런 패키지를 풀면 7.1.4 이후
+ * 셸이 모든 업데이트를 거부(fail-closed)하므로, 만들기 전에 막는다. 켜지 않으면 기존 동작(서명 검증 없음)을 유지한다.
+ *
  * Usage:
- *   node scripts/verify-update-artifacts.mjs --artifact-dir <dir> --metadata-file <latest.yml|canary.yml> [--expected-version <x.y.z>]
+ *   node scripts/verify-update-artifacts.mjs --artifact-dir <dir> --metadata-file <latest.yml|canary.yml> [--expected-version <x.y.z>] [--require-signature]
  */
 import { createHash } from 'crypto';
 import { readFileSync, existsSync } from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import yaml from 'js-yaml';
+import { verifyFeedFile } from './sign-update-feed.mjs';
 
 export function pickExeEntry(files) {
   if (!Array.isArray(files)) throw new Error('metadata files[] is missing or not an array');
@@ -57,7 +62,8 @@ export function installerNameHasVersion(installerFile, expectedVersion) {
   return before === '' || !/[0-9.]/.test(before);
 }
 
-export function verifyUpdateArtifacts({ artifactDir, metadataFileName, expectedVersion }) {
+// trustedPublicKeys는 requireSignature일 때만 쓰며 생략하면 셸에 내장된 공개 키 목록이다(테스트에서만 주입).
+export function verifyUpdateArtifacts({ artifactDir, metadataFileName, expectedVersion, requireSignature = false, trustedPublicKeys }) {
   const metadataPath = path.join(artifactDir, metadataFileName);
   if (!existsSync(metadataPath)) throw new Error(`metadata file not found: ${metadataPath}`);
 
@@ -100,7 +106,7 @@ export function verifyUpdateArtifacts({ artifactDir, metadataFileName, expectedV
   const blockmapPath = path.join(artifactDir, blockmapFile);
   if (!existsSync(blockmapPath)) throw new Error(`blockmap not found next to installer: ${blockmapPath}`);
 
-  return {
+  const result = {
     channel: metadataFileName.replace(/\.ya?ml$/i, ''),
     version: metadata.version ?? null,
     metadataFile: metadataFileName,
@@ -108,6 +114,12 @@ export function verifyUpdateArtifacts({ artifactDir, metadataFileName, expectedV
     blockmapFile,
     sha512Verified: true,
   };
+  if (requireSignature) {
+    // 실패하면 throw — 서명 파일 없음·yml 변조·신뢰하지 않는 키·내장 공개 키 없음이 모두 여기서 막힌다.
+    verifyFeedFile({ dir: artifactDir, channel: result.channel, trustedPublicKeys });
+    result.signatureVerified = true; // 서명을 요구하지 않은 호출의 결과에는 이 필드가 없다(기존 호출자 호환)
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,14 +131,15 @@ function main() {
   const artifactDir = get('--artifact-dir');
   const metadataFileName = get('--metadata-file');
   const expectedVersion = get('--expected-version');
+  const requireSignature = args.includes('--require-signature');
 
   if (!artifactDir || !metadataFileName) {
-    console.error('Usage: node scripts/verify-update-artifacts.mjs --artifact-dir <dir> --metadata-file <latest.yml|canary.yml> [--expected-version <x.y.z>]');
+    console.error('Usage: node scripts/verify-update-artifacts.mjs --artifact-dir <dir> --metadata-file <latest.yml|canary.yml> [--expected-version <x.y.z>] [--require-signature]');
     process.exit(1);
   }
 
   try {
-    const result = verifyUpdateArtifacts({ artifactDir, metadataFileName, expectedVersion });
+    const result = verifyUpdateArtifacts({ artifactDir, metadataFileName, expectedVersion, requireSignature });
     // 설치본 파일명에 한글이 있어 콘솔 코드페이지(cp949 등)가 UTF-8과 다르면 PowerShell이 깨진 이름으로
     // 읽는다(그 이름으로는 파일을 못 찾는다). 비ASCII를 \uXXXX로 이스케이프해 인코딩과 무관하게 한다.
     console.log(JSON.stringify(result).replace(/[\u0080-￿]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')));
