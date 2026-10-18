@@ -9,6 +9,11 @@
  * 사용법:
  *   node scripts/sign-update-feed.mjs --generate-keypair <저장소 밖 폴더>
  *   node scripts/sign-update-feed.mjs --sign --key <비밀키.pem> --dir <yml이 있는 폴더> --channel <latest|canary>
+ *   node scripts/sign-update-feed.mjs --verify --dir <yml과 .sig가 있는 폴더> --channel <latest|canary> [--public-key <공개키.pem>]
+ *
+ * --verify는 이미 만들어진(또는 서버 폴더로 복사된) 피드를 **비밀 키 없이** 다시 확인한다. 기본은 셸에 내장된 공개 키 목록
+ * (electron/updateSigningPublicKey.js)으로 검증하므로 "셸이 이 피드를 받아들이는가"를 그대로 보여 준다.
+ * --public-key를 주면 그 공개 키 파일 하나로만 검증한다. 통과하면 종료 코드 0, 아니면 1.
  *
  * 비밀 키는 릴리스 PC에만 둔다. --generate-keypair는 저장소 안에는 만들지 않고(실수로 커밋 방지), 기존 파일을
  * 덮어쓰지 않으며, 비밀 키 내용을 출력하지 않는다. 키를 암호로 보호하려면 환경변수 WR_UPDATE_SIGNING_PASSPHRASE를 설정한다
@@ -87,12 +92,46 @@ export function signFeedFile({ dir, channel, keyPath, passphrase, trustedPublicK
   return { ymlPath, sigPath };
 }
 
+const REJECTION_HINT = {
+  'no-public-key': '공개 키 목록이 비어 있습니다(electron/updateSigningPublicKey.js) — 이 상태의 셸은 모든 업데이트를 거부합니다',
+  'bad-signature-format': '서명 파일 형식이 올바르지 않습니다(base64 한 줄이어야 함)',
+  'signature-mismatch': 'yml이 서명한 뒤 바뀌었거나, 신뢰하는 키가 아닌 다른 키로 서명됐습니다',
+};
+
+// 이미 만들어진 피드를 비밀 키 없이 검증한다(서명 직후 자가 검증과 별개로, 복사·이송 뒤 손상·바꿔치기를 확인하는 용도).
+export function verifyFeedFile({ dir, channel, trustedPublicKeys = UPDATE_SIGNING_PUBLIC_KEYS }) {
+  if (!CHANNELS.includes(channel)) throw new Error(`channel은 ${CHANNELS.join(' | ')} 중 하나여야 합니다: ${channel}`);
+  const names = feedFileNames(channel);
+  const ymlPath = path.join(dir, names.yml);
+  const sigPath = path.join(dir, names.sig);
+  if (!existsSync(ymlPath)) throw new Error(`검증할 파일이 없습니다: ${ymlPath}`);
+  if (!existsSync(sigPath)) throw new Error(`서명 파일이 없습니다(미서명 피드 — 셸은 이 피드를 거부합니다): ${sigPath}`);
+
+  const result = verifyFeedSignature({ ymlBytes: readFileSync(ymlPath), sigBase64: readFileSync(sigPath, 'utf8'), publicKeys: trustedPublicKeys });
+  if (!result.ok) throw new Error(`서명 검증 실패(${result.reason}): ${REJECTION_HINT[result.reason] ?? '알 수 없는 사유'}\n  ${sigPath}`);
+  return { ymlPath, sigPath };
+}
+
 function main() {
   const args = process.argv.slice(2);
   const get = (flag) => { const i = args.indexOf(flag); return i !== -1 ? args[i + 1] : undefined; };
   const passphrase = process.env.WR_UPDATE_SIGNING_PASSPHRASE || undefined;
 
   try {
+    const modes = ['--generate-keypair', '--sign', '--verify'].filter((flag) => args.includes(flag));
+    if (modes.length > 1) throw new Error(`한 번에 하나의 동작만 지정할 수 있습니다: ${modes.join(' ')}`);
+
+    if (args.includes('--verify')) {
+      const dir = get('--dir');
+      const channel = get('--channel');
+      if (!dir || !channel) throw new Error('사용법: --verify --dir <폴더> --channel <latest|canary> [--public-key <공개키.pem>]');
+      const publicKeyPath = get('--public-key');
+      if (publicKeyPath && !existsSync(publicKeyPath)) throw new Error(`공개 키 파일이 없습니다: ${publicKeyPath}`);
+      const trustedPublicKeys = publicKeyPath ? [readFileSync(publicKeyPath, 'utf8')] : UPDATE_SIGNING_PUBLIC_KEYS;
+      const result = verifyFeedFile({ dir, channel, trustedPublicKeys });
+      console.log(`서명 검증 성공: ${result.sigPath}`);
+      return;
+    }
     if (args.includes('--generate-keypair')) {
       const dir = get('--generate-keypair');
       if (!dir) throw new Error('사용법: --generate-keypair <저장소 밖 폴더>');
@@ -112,7 +151,7 @@ function main() {
       console.log(`서명 완료: ${result.sigPath}`);
       return;
     }
-    throw new Error('사용법: --generate-keypair <폴더> | --sign --key <pem> --dir <폴더> --channel <latest|canary>');
+    throw new Error('사용법: --generate-keypair <폴더> | --sign --key <pem> --dir <폴더> --channel <latest|canary> | --verify --dir <폴더> --channel <latest|canary> [--public-key <pem>]');
   } catch (err) {
     console.error(`[sign-update-feed] FAILED: ${err.message}`);
     process.exit(1);
