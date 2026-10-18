@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import crypto from 'crypto';
 import yaml from 'js-yaml';
-import { verifyFeedSignature, verifyFeedForUpdate, checkFeedBeforeDownload, feedFileNames, SIGNATURE_BYTES } from '../updateFeedVerify.js';
+import {
+  verifyFeedSignature, verifyFeedForUpdate, checkFeedBeforeDownload, feedFileNames, SIGNATURE_BYTES,
+  createDownloadGate, describeRejection,
+} from '../updateFeedVerify.js';
 
 const newKeyPair = () => crypto.generateKeyPairSync('ed25519', {
   publicKeyEncoding: { type: 'spki', format: 'pem' },
@@ -204,6 +207,101 @@ describe('checkFeedBeforeDownload', () => {
   it('공개 키가 없으면 서명이 맞아도 거부한다(fail-closed)', async () => {
     const { fetchBuffer } = makeFetch({ [`${BASE}/latest.yml`]: bytes, [`${BASE}/latest.yml.sig`]: sigBytes });
     expect(await run({ fetchBuffer, publicKeys: [] })).toEqual({ ok: false, reason: 'no-public-key' });
+  });
+});
+
+describe('createDownloadGate — 검증을 통과해야만 다운로드한다', () => {
+  const bytes = ymlBytes();
+  const sigBytes = Buffer.from(`${sign(bytes, trusted.privateKey)}\n`, 'utf8');
+  const BASE = 'https://wr.hospital.local:8443/updates';
+  const goodFiles = { [`${BASE}/latest.yml`]: bytes, [`${BASE}/latest.yml.sig`]: sigBytes };
+
+  function makeGate({ files = goodFiles, publicKeys = [trusted.publicKey], fetchBuffer, channel = 'latest' } = {}) {
+    const calls = { download: 0, rejected: [] };
+    const gate = createDownloadGate({
+      feedBaseUrl: BASE, channel, publicKeys,
+      fetchBuffer: fetchBuffer ?? (async (url) => files[url] ?? null),
+      download: () => { calls.download += 1; },
+      onRejected: (err) => calls.rejected.push(err),
+    });
+    return { gate, calls };
+  }
+
+  it('서명과 info가 모두 맞으면 download를 한 번 부르고 true를 돌려준다', async () => {
+    const { gate, calls } = makeGate();
+    expect(await gate(infoOf(bytes))).toBe(true);
+    expect(calls.download).toBe(1);
+    expect(calls.rejected).toHaveLength(0);
+  });
+
+  it.each([
+    ['서명 파일이 없음(미서명 피드)', { [`${BASE}/latest.yml`]: bytes }, 'signature-file-missing'],
+    ['yml을 받지 못함', { [`${BASE}/latest.yml.sig`]: sigBytes }, 'feed-unavailable'],
+    ['서버의 yml이 서명 뒤에 바뀜(바꿔치기)', { ...goodFiles, [`${BASE}/latest.yml`]: ymlBytes(feedObject({ sha512: 'ZmFrZQ==' })) }, 'signature-mismatch'],
+    ['서명이 다른 키로 만들어짐', { ...goodFiles, [`${BASE}/latest.yml.sig`]: Buffer.from(sign(bytes, attacker.privateKey)) }, 'signature-mismatch'],
+  ])('%s → download를 부르지 않고 사유와 함께 거부를 알린다', async (_name, files, reason) => {
+    const { gate, calls } = makeGate({ files });
+    expect(await gate(infoOf(bytes))).toBe(false);
+    expect(calls.download).toBe(0);
+    expect(calls.rejected).toHaveLength(1);
+    expect(calls.rejected[0]).toBeInstanceOf(Error);
+    expect(calls.rejected[0].message).toBe(`UPDATE_FEED_REJECTED:${reason}`);
+  });
+
+  it('공개 키가 없으면(셸에 키가 비어 있음) 서명이 맞아도 다운로드하지 않는다', async () => {
+    const { gate, calls } = makeGate({ publicKeys: [] });
+    expect(await gate(infoOf(bytes))).toBe(false);
+    expect(calls.download).toBe(0);
+    expect(calls.rejected[0].message).toBe('UPDATE_FEED_REJECTED:no-public-key');
+  });
+
+  it('서명은 맞지만 electron-updater가 받은 info가 다르면 거부하고 어느 필드가 다른지 알린다', async () => {
+    const { gate, calls } = makeGate();
+    expect(await gate({ ...infoOf(bytes), version: '9.9.9' })).toBe(false);
+    expect(calls.download).toBe(0);
+    expect(calls.rejected[0].message).toBe('UPDATE_FEED_REJECTED:info-mismatch(version)');
+  });
+
+  it('검증 중 예외(네트워크 계층이 던짐)도 다운로드로 이어지지 않고 거부로 알린다', async () => {
+    const { gate, calls } = makeGate({ fetchBuffer: async () => { throw new Error('socket hang up'); } });
+    expect(await gate(infoOf(bytes))).toBe(false);
+    expect(calls.download).toBe(0);
+    expect(calls.rejected).toHaveLength(1);
+    expect(calls.rejected[0].message).toBe('UPDATE_FEED_REJECTED:verification-error:socket hang up');
+  });
+
+  it('동기로 던지는 fetchBuffer도 같다(net.request가 동기 throw할 수 있음)', async () => {
+    const { gate, calls } = makeGate({ fetchBuffer: () => { throw new Error('sync throw'); } });
+    expect(await gate(infoOf(bytes))).toBe(false);
+    expect(calls.download).toBe(0);
+    expect(calls.rejected[0].message).toContain('verification-error:sync throw');
+  });
+
+  it('매 호출이 독립적이다 — 거부 뒤에도 다음 정상 호출은 다운로드한다', async () => {
+    let healthy = false;
+    const { gate, calls } = makeGate({ fetchBuffer: async (url) => (healthy ? goodFiles[url] ?? null : null) });
+    expect(await gate(infoOf(bytes))).toBe(false);
+    healthy = true;
+    expect(await gate(infoOf(bytes))).toBe(true);
+    expect(calls.download).toBe(1);
+    expect(calls.rejected).toHaveLength(1);
+  });
+
+  it('canary 채널은 canary 피드로 검증하고, latest 서명만 있으면 거부한다', async () => {
+    const { gate, calls } = makeGate({ channel: 'canary' }); // goodFiles에는 latest만 있음
+    expect(await gate(infoOf(bytes))).toBe(false);
+    expect(calls.rejected[0].message).toBe('UPDATE_FEED_REJECTED:feed-unavailable');
+    const canaryFiles = { [`${BASE}/canary.yml`]: bytes, [`${BASE}/canary.yml.sig`]: sigBytes };
+    const ok = makeGate({ channel: 'canary', files: canaryFiles });
+    expect(await ok.gate(infoOf(bytes))).toBe(true);
+  });
+});
+
+describe('describeRejection', () => {
+  it('사유를 접두사와 함께 적고, info 불일치는 다른 필드 이름을 덧붙인다', () => {
+    expect(describeRejection({ ok: false, reason: 'signature-mismatch' })).toBe('UPDATE_FEED_REJECTED:signature-mismatch');
+    expect(describeRejection({ ok: false, reason: 'info-mismatch', differingKeys: ['version', 'files'] })).toBe('UPDATE_FEED_REJECTED:info-mismatch(version,files)');
+    expect(describeRejection({ ok: false, reason: 'info-mismatch', differingKeys: [] })).toBe('UPDATE_FEED_REJECTED:info-mismatch');
   });
 });
 

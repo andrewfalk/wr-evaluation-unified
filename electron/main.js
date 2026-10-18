@@ -15,6 +15,8 @@ const {
   shouldSkipUpdateCheck, decideUpdatePhaseTransition,
 } = require('./updateFeed');
 const { autoUpdater } = require('electron-updater');
+const { createDownloadGate } = require('./updateFeedVerify');
+const { UPDATE_SIGNING_PUBLIC_KEYS } = require('./updateSigningPublicKey');
 const {
   AiHttpError,
   parseAnalyzeEnvelope,
@@ -188,7 +190,9 @@ function setInstallUpdateEnabled(enabled) {
 // request error·response error의 중복 resolve와 타이머 정리를 한 곳에서 처리한다.
 const POLICY_MAX_BYTES = 64 * 1024;
 
-function fetchUpdatePolicy() {   // 실패 시 null(throw하지 않음) — 정책을 못 읽으면 비활성으로 간주
+// 정책 파일과 피드 서명 검증(HF8: <channel>.yml·.sig)이 같이 쓴다. 실패(타임아웃·네트워크 오류·200이 아님·크기 초과)는
+// null — throw하지 않는다.
+function httpGetBuffer(url, maxBytes) {
   return new Promise((resolve) => {
     let settled = false;
     let timer = null;
@@ -198,7 +202,7 @@ function fetchUpdatePolicy() {   // 실패 시 null(throw하지 않음) — 정�
       clearTimeout(timer);
       resolve(value);
     };
-    const req = net.request({ url: `${INTRANET_URL}/updates/update-policy.json?t=${Date.now()}`, method: 'GET' });
+    const req = net.request({ url, method: 'GET' });
     timer = setTimeout(() => { try { req.abort(); } catch {} finish(null); }, 10000);
     req.on('response', (res) => {
       if (res.statusCode !== 200) { res.resume(); finish(null); return; }
@@ -207,15 +211,21 @@ function fetchUpdatePolicy() {   // 실패 시 null(throw하지 않음) — 정�
       res.on('data', (c) => {
         const buf = Buffer.isBuffer(c) ? c : Buffer.from(c);
         received += buf.length; // 문자열 length가 아니라 실제 바이트 수
-        if (received > POLICY_MAX_BYTES) { try { req.abort(); } catch {} finish(null); return; }
+        if (received > maxBytes) { try { req.abort(); } catch {} finish(null); return; }
         chunks.push(buf);
       });
-      res.on('end', () => { try { finish(JSON.parse(Buffer.concat(chunks).toString('utf-8'))); } catch { finish(null); } });
+      res.on('end', () => finish(Buffer.concat(chunks)));
       res.on('error', () => finish(null));
     });
     req.on('error', () => finish(null));
     req.end();
   });
+}
+
+async function fetchUpdatePolicy() {   // 실패 시 null(throw하지 않음) — 정책을 못 읽으면 비활성으로 간주
+  const body = await httpGetBuffer(`${INTRANET_URL}/updates/update-policy.json?t=${Date.now()}`, POLICY_MAX_BYTES);
+  if (!body) return null;
+  try { return JSON.parse(body.toString('utf-8')); } catch { return null; }
 }
 
 // updateFeed.js의 decideUpdatePhaseTransition이 돌려준 timerAction을 실제로 실행한다 —
@@ -231,11 +241,12 @@ function applyUpdatePhaseTransition(event) {
 
 // 실패 집계는 'error' 이벤트 하나에서만 한다 — checkForUpdates()의 Promise도 별도로
 // reject하지만 그쪽은 unhandled rejection 방지용 빈 catch만 둔다(이중 집계 방지, E-1).
-function handleUpdaterFailure(err) {
+// label: 단계 라벨(PHASE_LABEL) 대신 보일 문구 — 서명 검증 거부처럼 phase만으론 구분이 안 되는 실패용(HF8).
+function handleUpdaterFailure(err, label) {
   const failedPhase = updatePhase;
   consecutiveFailures += 1;
   logUpdateEvent(`[updater] ${failedPhase} failed (${consecutiveFailures}): ${err?.message || err}`);
-  setUpdateMenuStatusLabel(`${PHASE_LABEL[failedPhase] || '업데이트 처리 실패'} (${consecutiveFailures}회)`);
+  setUpdateMenuStatusLabel(`${label || PHASE_LABEL[failedPhase] || '업데이트 처리 실패'} (${consecutiveFailures}회)`);
   if (failedPhase === 'installing') { applyUpdatePhaseTransition('installFail'); return; }
   updatePhase = 'idle';
   scheduleNextCheck(consecutiveFailures === 1 ? 15 * 60 * 1000 : 60 * 60 * 1000); // 15분 → 1시간
@@ -273,8 +284,20 @@ async function initAutoUpdater() {
   if (!feed) return;
 
   autoUpdater.autoInstallOnAppQuit = false; // 이 커스텀 흐름(D-3)이 유일한 설치 경로
-  autoUpdater.autoDownload = true;
+  // HF8: 자동 다운로드를 끈다. update-available 직후 곧바로 내려받으면 피드(<channel>.yml)가 진짜인지 확인할 틈이 없다.
+  // 아래 downloadGate가 서명·info 검증을 통과시킨 뒤에만 downloadUpdate()를 부른다 — 이 파일에서 downloadUpdate()를
+  // 부르는 곳은 거기 하나뿐이어야 한다(electron/__tests__/updaterWiring.test.js가 지킨다).
+  autoUpdater.autoDownload = false;
   autoUpdater.setFeedURL(feed);
+  const downloadGate = createDownloadGate({
+    feedBaseUrl: feed.url,
+    channel: WR_UPDATE_CHANNEL,
+    publicKeys: UPDATE_SIGNING_PUBLIC_KEYS,
+    // electron-updater가 yml 요청에 붙이는 ?noCache= 와 같은 취지의 캐시 버스터.
+    fetchBuffer: (url, maxBytes) => httpGetBuffer(`${url}?t=${Date.now()}`, maxBytes),
+    download: () => { autoUpdater.downloadUpdate().catch(() => {}); }, // 다운로드 실패 집계는 'error' 이벤트 한 곳(원칙 유지)
+    onRejected: (err) => handleUpdaterFailure(err, '업데이트 서명 검증 실패'),
+  });
 
   // TODO(update-CA-trust): 내부 CA HTTPS 신뢰 확인 실패 시(docs/INTRANET_DEPLOYMENT.md CA절
   // 참고) 여기서 전용 session에 setCertificateVerifyProc을 끼워넣는다. 실측 전 미리 구현 안 함.
@@ -287,6 +310,7 @@ async function initAutoUpdater() {
     applyUpdatePhaseTransition('available');
     clearUpdaterFailureStatus();
     logUpdateEvent(`[updater] update-available: ${info?.version ?? 'unknown'}`);
+    downloadGate(info).catch((err) => handleUpdaterFailure(err)); // 서명 검증 통과 시에만 다운로드가 시작된다(HF8)
   });
   autoUpdater.on('update-not-available', () => {
     applyUpdatePhaseTransition('notAvailable'); // 정상 주기 재예약은 여기서만(전이 테이블의 scheduleStable)
