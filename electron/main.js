@@ -297,6 +297,8 @@ async function initAutoUpdater() {
     fetchBuffer: (url, maxBytes) => httpGetBuffer(`${url}?t=${Date.now()}`, maxBytes),
     download: () => { autoUpdater.downloadUpdate().catch(() => {}); }, // 다운로드 실패 집계는 'error' 이벤트 한 곳(원칙 유지)
     onRejected: (err) => handleUpdaterFailure(err, '업데이트 서명 검증 실패'),
+    // 연속 실패 횟수는 검증을 통과한 뒤에만 지운다(update-available 시점이 아니라). 그래야 서명 거부가 이어질 때 15분 → 1시간이 작동한다.
+    onVerified: clearUpdaterFailureStatus,
   });
 
   // TODO(update-CA-trust): 내부 CA HTTPS 신뢰 확인 실패 시(docs/INTRANET_DEPLOYMENT.md CA절
@@ -308,7 +310,7 @@ async function initAutoUpdater() {
   });
   autoUpdater.on('update-available', (info) => {
     applyUpdatePhaseTransition('available');
-    clearUpdaterFailureStatus();
+    // 실패 횟수를 여기서 지우지 않는다 — update-available은 "서명 검증을 통과했다"는 뜻이 아니다(위 downloadGate의 onVerified에서 지운다).
     logUpdateEvent(`[updater] update-available: ${info?.version ?? 'unknown'}`);
     downloadGate(info).catch((err) => handleUpdaterFailure(err)); // 서명 검증 통과 시에만 다운로드가 시작된다(HF8)
   });

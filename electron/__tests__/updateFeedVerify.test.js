@@ -217,11 +217,12 @@ describe('createDownloadGate — 검증을 통과해야만 다운로드한다', 
   const goodFiles = { [`${BASE}/latest.yml`]: bytes, [`${BASE}/latest.yml.sig`]: sigBytes };
 
   function makeGate({ files = goodFiles, publicKeys = [trusted.publicKey], fetchBuffer, channel = 'latest' } = {}) {
-    const calls = { download: 0, rejected: [] };
+    const calls = { download: 0, verified: 0, order: [], rejected: [] };
     const gate = createDownloadGate({
       feedBaseUrl: BASE, channel, publicKeys,
       fetchBuffer: fetchBuffer ?? (async (url) => files[url] ?? null),
-      download: () => { calls.download += 1; },
+      download: () => { calls.download += 1; calls.order.push('download'); },
+      onVerified: () => { calls.verified += 1; calls.order.push('verified'); },
       onRejected: (err) => calls.rejected.push(err),
     });
     return { gate, calls };
@@ -234,6 +235,23 @@ describe('createDownloadGate — 검증을 통과해야만 다운로드한다', 
     expect(calls.rejected).toHaveLength(0);
   });
 
+  it('검증을 통과하면 onVerified를 한 번, download 직전에 부른다 — 연속 실패 횟수 초기화 같은 "검증 성공" 후속 작업용', async () => {
+    const { gate, calls } = makeGate();
+    await gate(infoOf(bytes));
+    expect(calls.verified).toBe(1);
+    expect(calls.order).toEqual(['verified', 'download']);
+  });
+
+  it('onVerified는 선택 인자다 — 넘기지 않아도 다운로드한다', async () => {
+    let downloads = 0;
+    const gate = createDownloadGate({
+      feedBaseUrl: BASE, channel: 'latest', publicKeys: [trusted.publicKey],
+      fetchBuffer: async (url) => goodFiles[url] ?? null, download: () => { downloads += 1; }, onRejected: () => {},
+    });
+    expect(await gate(infoOf(bytes))).toBe(true);
+    expect(downloads).toBe(1);
+  });
+
   it.each([
     ['서명 파일이 없음(미서명 피드)', { [`${BASE}/latest.yml`]: bytes }, 'signature-file-missing'],
     ['yml을 받지 못함', { [`${BASE}/latest.yml.sig`]: sigBytes }, 'feed-unavailable'],
@@ -243,6 +261,7 @@ describe('createDownloadGate — 검증을 통과해야만 다운로드한다', 
     const { gate, calls } = makeGate({ files });
     expect(await gate(infoOf(bytes))).toBe(false);
     expect(calls.download).toBe(0);
+    expect(calls.verified).toBe(0); // 거부는 "검증 성공"이 아니므로 연속 실패 횟수가 초기화되면 안 된다
     expect(calls.rejected).toHaveLength(1);
     expect(calls.rejected[0]).toBeInstanceOf(Error);
     expect(calls.rejected[0].message).toBe(`UPDATE_FEED_REJECTED:${reason}`);
@@ -252,6 +271,7 @@ describe('createDownloadGate — 검증을 통과해야만 다운로드한다', 
     const { gate, calls } = makeGate({ publicKeys: [] });
     expect(await gate(infoOf(bytes))).toBe(false);
     expect(calls.download).toBe(0);
+    expect(calls.verified).toBe(0);
     expect(calls.rejected[0].message).toBe('UPDATE_FEED_REJECTED:no-public-key');
   });
 
@@ -259,6 +279,7 @@ describe('createDownloadGate — 검증을 통과해야만 다운로드한다', 
     const { gate, calls } = makeGate();
     expect(await gate({ ...infoOf(bytes), version: '9.9.9' })).toBe(false);
     expect(calls.download).toBe(0);
+    expect(calls.verified).toBe(0);
     expect(calls.rejected[0].message).toBe('UPDATE_FEED_REJECTED:info-mismatch(version)');
   });
 
@@ -266,6 +287,7 @@ describe('createDownloadGate — 검증을 통과해야만 다운로드한다', 
     const { gate, calls } = makeGate({ fetchBuffer: async () => { throw new Error('socket hang up'); } });
     expect(await gate(infoOf(bytes))).toBe(false);
     expect(calls.download).toBe(0);
+    expect(calls.verified).toBe(0);
     expect(calls.rejected).toHaveLength(1);
     expect(calls.rejected[0].message).toBe('UPDATE_FEED_REJECTED:verification-error:socket hang up');
   });
