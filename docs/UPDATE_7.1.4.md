@@ -2,7 +2,7 @@
 
 이미 v7.1.3이 운영 중인 인트라넷 서버를 v7.1.4로 올리는 절차. 형식은 [UPDATE_5.1.0.md](UPDATE_5.1.0.md)·[UPDATE_7.0.0.md](UPDATE_7.0.0.md)·[UPDATE_7.1.1.md](UPDATE_7.1.1.md)·[UPDATE_7.1.3.md](UPDATE_7.1.3.md)를 따른다.
 
-> **이번 릴리스는 보안 핫픽스다(기능 추가 없음, DB 마이그레이션 없음).** 7.1.3과 다른 점 두 가지: ① **Electron 설치본(셸)을 교체해야 한다** — 7.1.3은 "재설치 불필요"였지만 이번에는 `main.js`·preload가 바뀌었다 ② **"배포 전 점검(릴리스 게이트)"을 통과하기 전에는 배포하지 않는다** — Electron 설치본에서만 확인되는 항목이 있다.
+> **이번 릴리스는 보안 핫픽스다(기능 추가 없음, DB 마이그레이션 없음).** 7.1.3과 다른 점 세 가지: ① **Electron 설치본(셸)을 교체해야 한다** — 7.1.3은 "재설치 불필요"였지만 이번에는 `main.js`·preload가 바뀌었다 ② **업데이트 피드 서명(HF8)이 이 릴리스에 포함된다** — 패키지는 서명 키로 만들어야 하고, 7.1.4 셸부터는 서명이 없는 피드를 모두 거부한다(셸 교체를 PC마다 두 번 하지 않도록 7.1.5로 미루지 않고 합쳤다) ③ **"배포 전 점검(릴리스 게이트)"을 통과하기 전에는 배포하지 않는다** — Electron 설치본에서만 확인되는 항목이 있다.
 > 운영이 v7.1.3이 맞는지는 아래 "0) 현재 운영 환경 정보 파악"으로 먼저 확인한다. v7.1.1 이하에서 올라오는 경우는 이 문서가 아니라 [UPDATE_7.1.3.md](UPDATE_7.1.3.md)(그리고 그 이전 문서)를 먼저 따른다.
 
 ## 무엇이 바뀌나
@@ -13,6 +13,7 @@
   - **`/api` 응답 `Cache-Control: no-store`(HF4, #161)**, 죽은 CSRF 예외 경로 제거, `.dockerignore` 보강.
   - **영상 업로드 multer 2.4.0(HF5, #163)**: `files: 1`·`fields: 0` 제한. 정상 업로드 동작은 같다.
   - **AI 경로 비식별 구조화 입력(HF7-1~2, #165·#166)**: `/api/ai/analyze`가 `{ input, fullReport? }`만 받고 프롬프트는 서버가 조립한다. **운영은 `AI_PROVIDER=none`이라 이 경로는 휴면이다**(내부 LLM 도입 전까지 변화 없음).
+  - **`/updates/`에 서명 파일(`.sig`)이 함께 서빙된다(HF8, #169~#172)**: 서버는 서명을 만들지도 검증하지도 않고 파일을 그대로 내려줄 뿐이다. 서버에 서명 키·암호·새 환경변수는 필요 없다.
   - 자세한 내용: [README.md](../README.md) 변경 이력 v7.1.4
 - **DB 스키마**: **변경 없음.** 마이그레이션 0037까지(37행)가 그대로다. 7.1.3 때와 달리 서버 기동 시 새로 적용되는 마이그레이션이 없다. 그래도 **업데이트 전 백업은 유지한다.**
 - **환경변수**: `.env.production`에서
@@ -21,11 +22,13 @@
   - `STATS_*`는 **기존 값을 그대로 둔다**. 그 밖의 새 환경변수는 없다.
 - **이미지 크기**: 7.1.3과 비슷할 것으로 예상한다(app 이미지 약 2.75GB 안팎). 패키지 생성 후 실제 크기를 확인한다. 새 이미지를 로드하는 동안 이전 이미지도 남아 있으므로 서버 디스크 여유를 확인한다.
 - **네트워크·인증서**: 서버 쪽 변경 없음 (Caddy·포트 8080/8443 그대로). 단 **패키지·이미지를 만드는 PC는 `cdn.sheetjs.com`에 접근할 수 있어야 한다**(xlsx 0.20.3을 이 주소의 타르볼로 받는다). 운영 서버는 이미지를 로드할 뿐이라 접근이 필요 없다.
-- **`updates/` 폴더**: compose의 `./updates`는 **새 패키지 폴더 기준**이다. 이전(7.1.3) 폴더의 `update-policy.json`·`canary.yml`은 새 폴더에서 보이지 않으므로 아래 "업데이트 절차 A" 2번을 따른다.
+- **서명 키(릴리스 PC 전용)**: 패키지를 만드는 PC에서 `export-offline-package.ps1 -UpdateSigningKey "<비밀키.pem>"`로 만든다(암호로 보호된 키면 같은 창에서 `WR_UPDATE_SIGNING_PASSPHRASE` 설정). 키가 없으면 패키징이 실패하고, 서명 없이 만든 패키지의 셸은 업데이트를 모두 거부한다. 절차·키 관리(분실·교체)는 [INTRANET_DEPLOYMENT.md](INTRANET_DEPLOYMENT.md) 7-6. **키·암호는 서버·`.env.production`·저장소·클라우드 동기화 폴더에 두지 않는다.**
+- **`updates/` 폴더**: compose의 `./updates`는 **새 패키지 폴더 기준**이다. 이전(7.1.3) 폴더의 `update-policy.json`·`canary.yml`은 새 폴더에서 보이지 않으므로 아래 "업데이트 절차 A" 2번을 따른다. 새 패키지의 `updates/`에는 설치본·`.blockmap`·`latest.yml` 외에 **`latest.yml.sig`가 있다 — 폴더를 통째로 복사하고, yml만 따로 복사하지 않는다**(`.sig`가 없으면 7.1.4 셸이 모든 업데이트를 거부한다).
 - **클라이언트(Electron)**: **설치본 교체가 필요하다.** 서버만 올려도 SPA 화면은 바뀌지만, 다음은 셸 안에 있어 설치본을 바꿔야 적용된다.
   - IPC 송신자 검증·독립형 전용 채널 비등록·preload 이벤트 객체 차단·권한/내비게이션 가드(HF3·HF9, #162)
   - 임시 비밀번호 상태에서 EMR 디바이스 등록 요청을 보내지 않고 변경 직후 등록(HF2)
   - (독립형) 모델명 허용 목록·60초 제한·응답 오류 비노출(HF7-3, #167)
+  - **업데이트 피드 서명 검증(HF8, #169·#170·#171)**: 자동 업데이트가 받는 `<channel>.yml`의 Ed25519 서명을 셸에 내장된 공개 키로 확인한 뒤에만 설치본을 내려받는다(`autoDownload=false` + 서명 게이트). 서명이 없거나 틀리면 다운로드하지 않고 메뉴에 "업데이트 서명 검증 실패 (n회)"가 표시되며 15분 → 1시간 간격으로 다시 확인한다.
   - EMR 헬퍼(`EmrHelper.cs`)는 바뀌지 않았다. 신규 PC에는 패키지의 7.1.4 설치본을 쓴다.
 - **웹(Vercel)**: 서버 업데이트와 별개로 `main` 머지 시 자동 배포된다. #167 머지(2026-10-17)로 새 함수가 이미 반영됐다. 아래 "웹(Vercel) 확인" 참고.
 
@@ -50,6 +53,14 @@
 - [ ] 파일 열기/저장(`fs-*`), Excel·PDF 내보내기, 메뉴 이벤트가 정상 (HF3·HF9 — `blob:` 내비게이션 허용 확인)
 - [ ] AI 분석을 **실제 키로 1회** 실행해 결과가 나온다 (HF7-3)
 
+**업데이트 피드 서명 (HF8)** — 7.1.4 설치본 **두 개**(예: 7.1.4와 시험용 다음 버전)와 로컬 서버의 `updates/`로 확인한다.
+
+- [ ] 패키지가 서명 키로 만들어졌다: `release-manifest.json`의 `electronInstaller.updateFeedSigned`가 `true`이고 `electron/`·`updates/`에 `latest.yml.sig`가 있다
+- [ ] `node scripts/sign-update-feed.mjs --verify --dir <updates 폴더> --channel latest`가 "서명 검증 성공"
+- [ ] **정상 업데이트**: 7.1.4 셸이 서명된 더 높은 버전의 피드를 받아 설치본을 내려받고 설치 확인 창까지 진행한다(`update-policy.json`을 켠 상태)
+- [ ] **거부**: `latest.yml`을 한 글자 바꾸거나, `latest.yml.sig`를 지우거나, 다른 키로 서명하면 → 다운로드하지 않고 메뉴에 "업데이트 서명 검증 실패 (n회)", 앱 사용자 데이터 폴더의 `updater.log`에 `UPDATE_FEED_REJECTED:…`, 재시도 간격이 15분 → 1시간으로 늘어난다
+- [ ] 서명 키·암호가 서버·`.env.production`·저장소에 없다
+
 **서버·웹**
 
 - [ ] 서버 업데이트 후 워크스페이스 저장(본인 환자 / 비담당 환자 포함 / 저장 직후 같은 환자 편집) — 아래 "검증 시나리오"
@@ -72,7 +83,7 @@ Get-Content (Join-Path $installDir ".env.production") | Select-String "WR_VERSIO
 ### 1) 패키지 이송·무결성 검증
 
 - `release\wr-evaluation-unified-7.1.4-intranet.zip`을 서버로 복사하고 압축을 푼다(이미지 로드 시 app 이미지 약 2.75GB 이상의 디스크 여유 필요).
-- 무결성 검증은 [UPDATE_5.1.0.md](UPDATE_5.1.0.md) "2) 무결성 검증"(SHA256SUMS)과 동일. `release-manifest.json`의 `version`이 7.1.4인지, 이미지 3종이 모두 7.1.4 태그인지, `electron/`의 `latest.yml` 버전이 7.1.4인지 확인한다.
+- 무결성 검증은 [UPDATE_5.1.0.md](UPDATE_5.1.0.md) "2) 무결성 검증"(SHA256SUMS)과 동일. `release-manifest.json`의 `version`이 7.1.4인지, 이미지 3종이 모두 7.1.4 태그인지, `electron/`의 `latest.yml` 버전이 7.1.4인지 확인한다. 또한 `electronInstaller.updateFeedSigned`가 `true`이고 `electron/`·`updates/`에 `latest.yml.sig`가 있는지 확인한다 — `false`이거나 `.sig`가 없으면 이 패키지의 셸은 업데이트를 모두 거부하므로 서명 키로 다시 만든다.
 
 ### 2) (필수) 업데이트 직전 DB 백업
 
@@ -154,6 +165,8 @@ curl.exe -k -o NUL -w "8443: %{http_code}`n" https://localhost:8443/health
 # 6. updates/ 마운트
 curl.exe -k https://localhost:8443/updates/latest.yml
 # → version: 7.1.4 이 포함된 YAML (404면 새 폴더의 updates/ 에 파일이 없는 것)
+curl.exe -k https://localhost:8443/updates/latest.yml.sig
+# → base64 한 줄(88자). 404면 새 폴더의 updates/ 에 .sig가 없는 것 — 이 상태에서는 7.1.4 셸이 모든 업데이트를 거부한다
 ```
 
 통계 워크벤치(`STATS_WORKBENCH_ENABLED=true`)는 이번에 코드·카탈로그·결과 스키마가 바뀌지 않았다. 기존 분석 결과 캐시도 그대로 재사용된다. 필요하면 [UPDATE_7.1.3.md](UPDATE_7.1.3.md) "C. 통계 워크벤치 확인"을 그대로 쓴다.
@@ -163,7 +176,7 @@ curl.exe -k https://localhost:8443/updates/latest.yml
 - **신규 PC**: 패키지의 7.1.4 설치본(`직업성 질환 통합 평가 프로그램 Setup 7.1.4.exe`)을 설치한다.
 - **기존 PC**: 7.1.4 설치본으로 교체한다(수동 설치 또는 Electron 자동 업데이트 — `update-policy.json`·canary 채널, [INTRANET_DEPLOYMENT.md](INTRANET_DEPLOYMENT.md) "자동 업데이트"). 서버 화면은 새로고침만으로 바뀌지만 셸 보안 가드는 교체해야 적용된다.
 - **권장 순서**: 서버 업데이트 → **모든 PC의 셸 교체가 끝날 때까지 임시 비밀번호 발급·관리자 비밀번호 초기화를 미룬다**(아래 "알려진 함정·한계"의 조합 한계). 7.1.4 셸과 7.1.3 서버의 조합은 코드상 호환되도록 했지만 실제 조합 시험은 하지 않았다.
-- **업데이트 피드는 아직 서명되지 않는다**(HF8, 7.1.5 예정). 자동 업데이트로 배포하는 동안의 보안 예외 승인은 [INTRANET_DEPLOYMENT.md](INTRANET_DEPLOYMENT.md) 7-6을 따른다. 고위험 PC는 설치본을 수동으로 설치하는 편이 안전하다.
+- **서명 검증은 7.1.4 이상 셸에서만 동작한다.** 7.1.3 이하 PC는 검증기가 없어 서명 없는 피드로 7.1.4를 받는다 — **이 한 번의 전환은 서명 보호 밖**이다. 자동 업데이트로 배포하는 동안의 보안 예외 승인은 [INTRANET_DEPLOYMENT.md](INTRANET_DEPLOYMENT.md) 7-6을 따르고, 고위험 PC는 설치본을 수동으로 설치하는 편이 안전하다. 7.1.4 이후의 업데이트부터는 서명이 검증된다.
 
 ---
 
@@ -180,6 +193,10 @@ curl.exe -k https://localhost:8443/updates/latest.yml
 | 로그인 후 개발자 도구 Network에서 `/api/patients` 응답 헤더 | `Cache-Control: no-store` |
 | 영상 업로드 1회 | 정상 |
 | Excel 일괄 가져오기·내보내기 1회 | 정상(xlsx 교체 확인) |
+| (7.1.4 셸) 서명된 더 높은 버전 피드가 `updates/`에 있고 정책을 켬 | 설치본을 내려받고 설치 확인 창이 뜬다 |
+| (7.1.4 셸) `updates/`에 yml만 있고 `.sig`가 없음 | 다운로드하지 않고 "업데이트 서명 검증 실패 (n회)". `updater.log`에 `UPDATE_FEED_REJECTED:signature-file-missing` |
+| (7.1.4 셸) 서명한 뒤 yml이 바뀜 | 거부. `UPDATE_FEED_REJECTED:signature-mismatch`. 연속 거부 시 재시도 15분 → 1시간 |
+| (7.1.4 셸) 서명은 통과했는데 다운로드가 연속 실패 | "업데이트 다운로드 실패 (n회)"로 횟수가 쌓여 재시도 15분 → 1시간(다운로드 중에는 "업데이트 다운로드 중 (이전 실패 N회)") |
 | (AI 활성화 환경만) 직력 31개 이상·상병 21개 이상·직력별 작업/구간 31개 이상 환자에서 AI 분석 | 거부되고 사유 메시지가 나온다 (이전에는 일부가 누락된 채 분석) |
 | 운영(`AI_PROVIDER=none`)의 AI 분석 | 403 — 7.1.3과 같다(내부 LLM 도입 전까지 휴면) |
 
@@ -207,6 +224,7 @@ docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"      # → wr-app-
 
 - 스키마 변경이 없어 DB는 그대로 둔다. 7.1.4가 저장한 워크스페이스 스냅샷에는 확정 revision·담당의 정보가 함께 기록되어 있으며, 7.1.3 앱은 이 필드를 이미 알고 있다. **다만 7.1.3 앱을 7.1.4가 쓴 DB에서 실제로 돌려 확인하지는 않았다.**
 - 완전한 롤백은 **Electron 셸도 7.1.3 설치본으로 되돌려야** 한다. 서버만 되돌리면 7.1.4 셸 + 7.1.3 서버 조합이 된다.
+- 7.1.3 패키지의 `updates/`에는 `.sig`가 없다. **7.1.4 셸은 서명 없는 피드를 받지 않으므로**, 롤백한 상태에서 자동 업데이트를 쓰려면 서명된 새 패키지(7.1.4 이상)의 `updates/`를 올려야 한다. 업데이트가 꺼져 있으면(`update-policy.json` 없음) 무관하다.
 
 ### 2) DB 복원 (스키마/데이터 자체에 문제가 있을 때만)
 
@@ -239,8 +257,17 @@ docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"      # → wr-app-
 ### 웹에서 AI 분석이 "설정되지 않았습니다"(503)
 **원인**: 같은 문구가 세 가지 원인에서 나온다 — `WEB_AI_CLIENT_TOKEN`·Upstash 접속 정보·고른 업체의 API 키 중 하나가 해당 배포에 없다. 환경변수는 **새 배포부터** 적용되므로 등록 후 재배포해야 한다. **해결**: 브라우저 개발자 도구 Network의 응답 `error.code`로 어느 것인지 확인한다([VERCEL_AI_PROXY_HARDENING.md](VERCEL_AI_PROXY_HARDENING.md) 응답 코드 표).
 
-### 업데이트 피드가 서명되지 않음
-HF8(업데이트 피드 Ed25519 서명)은 7.1.5에서 처리한다. 그때까지는 sha512 무결성 검증만 켜져 있다(전송 손상은 잡지만 피드 자체의 위조는 막지 못한다).
+### `updates/`에 yml만 복사했더니 모든 PC가 업데이트를 거부함
+**원인**: 7.1.4 셸은 `<channel>.yml.sig`가 없으면 피드를 믿지 않는다. **해결**: yml만 따로 복사하지 말고 패키지의 `updates/`를 통째로 복사한다. 서버에서 확인: `curl.exe -k https://localhost:8443/updates/latest.yml.sig`가 404면 없는 것이다.
+
+### 메뉴에 "업데이트 서명 검증 실패 (n회)"가 뜸
+**원인**: 업데이트가 켜진 PC가 받은 피드의 서명을 확인하지 못했다. 사유는 앱 사용자 데이터 폴더의 `updater.log`에 `UPDATE_FEED_REJECTED:<사유>`로 남는다 — `signature-file-missing`(`.sig` 없음), `signature-mismatch`(서명한 뒤 yml이 바뀌었거나 셸이 신뢰하지 않는 키로 서명), `info-mismatch(<필드>)`(PC가 받은 정보와 서명된 yml이 다름), `no-public-key`(셸에 공개 키가 없음), `feed-unavailable`·`verification-error`(yml을 받지 못함·네트워크 오류), `bad-signature-format`(`.sig` 형식 깨짐). **해결**: 서버 `updates/`의 yml과 `.sig`가 같은 릴리스의 쌍인지, 서명 키가 셸에 내장된 키와 짝인지 확인한다(`node scripts/sign-update-feed.mjs --verify --dir <updates 폴더> --channel latest`). yml과 `.sig`를 올리는 몇 초 사이에 확인한 PC는 일시적으로 어긋나 거부되고 15분 뒤 다시 확인한다(정상).
+
+### 서명 키를 분실했거나 유출이 의심됨
+**분실**: 새 키 쌍을 만들어 공개 키를 내장한 새 설치본을 **모든 PC에 수동으로 재배포**해야 한다(기존 셸은 새 서명을 신뢰할 수 없다). **유출 의심**: 새 공개 키를 목록에 추가한 셸을 먼저 배포하고, 모든 PC가 그 셸이 된 뒤 새 키로 서명한 다음 옛 키를 뺀다. 절차는 [INTRANET_DEPLOYMENT.md](INTRANET_DEPLOYMENT.md) 7-6 "키 관리". 비밀 키 파일과 암호는 따로 오프라인 백업해 두어야 한다.
+
+### 설치본 자체의 코드서명(Authenticode)은 여전히 없음
+피드 서명은 "누가 설치본을 올렸는가"를 막지만 설치본 발행자 검증 단계 자체는 없다. `/updates/` 쓰기 권한 최소화·접근 감사·보안 예외 승인은 [INTRANET_DEPLOYMENT.md](INTRANET_DEPLOYMENT.md) 7-6을 따른다.
 
 ### 내부 LLM
 GPU 미확보로 병원 내부 LLM은 아직 없고, 운영은 `AI_PROVIDER=none`이다. 도입 시점에 `docker-compose.yml`의 `AI_INTERNAL_ENDPOINT`·`AI_INTERNAL_MODEL` 전달, 컨테이너에서 LLM 호스트로 가는 네트워크, `AI_TIMEOUT_MS` 상향, 내부 호출의 인증 부재(망 분리·접근 통제 확인), `aiFullReportAllowed`가 켜져 보고서 전문이 내부 LLM으로 전송됨을 확인해야 한다.
@@ -250,5 +277,6 @@ GPU 미확보로 병원 내부 LLM은 아직 없고, 운영은 `AI_PROVIDER=none
 ## 참고
 
 - 변경 이력: [README.md](../README.md) 변경 이력 v7.1.4, [PRD.md](PRD.md) v7.1.4
+- 업데이트 피드 서명(절차·키 관리·운영 주의): [INTRANET_DEPLOYMENT.md](INTRANET_DEPLOYMENT.md) 7-6
 - 웹 AI 프록시 운영 설정: [VERCEL_AI_PROXY_HARDENING.md](VERCEL_AI_PROXY_HARDENING.md), 이전 단계 절차: [UPDATE_7.1.3.md](UPDATE_7.1.3.md)·[UPDATE_7.1.1.md](UPDATE_7.1.1.md)·[UPDATE_7.0.0.md](UPDATE_7.0.0.md)
 - 신규 설치 가이드: [OFFLINE_DEPLOYMENT_PACKAGE.md](OFFLINE_DEPLOYMENT_PACKAGE.md), 백업/복구: [BACKUP_RESTORE.md](BACKUP_RESTORE.md)
