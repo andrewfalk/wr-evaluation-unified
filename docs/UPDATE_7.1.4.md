@@ -56,7 +56,7 @@
 **업데이트 피드 서명 (HF8)** — 7.1.4 설치본 **두 개**(예: 7.1.4와 시험용 다음 버전)와 로컬 서버의 `updates/`로 확인한다.
 
 - [ ] 패키지가 서명 키로 만들어졌다: `release-manifest.json`의 `electronInstaller.updateFeedSigned`가 `true`이고 `electron/`·`updates/`에 `latest.yml.sig`가 있다
-- [ ] `node scripts/sign-update-feed.mjs --verify --dir <updates 폴더> --channel latest`가 "서명 검증 성공"
+- [ ] `node scripts/sign-update-feed.mjs --verify --dir <패키지의 updates 폴더> --channel latest`가 "서명 검증 성공" — **소스가 있는 릴리스 PC에서** 실행한다(오프라인 패키지와 서버에는 이 도구가 없다)
 - [ ] **정상 업데이트**: 7.1.4 셸이 서명된 더 높은 버전의 피드를 받아 설치본을 내려받고 설치 확인 창까지 진행한다(`update-policy.json`을 켠 상태)
 - [ ] **거부**: `latest.yml`을 한 글자 바꾸거나, `latest.yml.sig`를 지우거나, 다른 키로 서명하면 → 다운로드하지 않고 메뉴에 "업데이트 서명 검증 실패 (n회)", 앱 사용자 데이터 폴더의 `updater.log`에 `UPDATE_FEED_REJECTED:…`, 재시도 간격이 15분 → 1시간으로 늘어난다
 - [ ] 서명 키·암호가 서버·`.env.production`·저장소에 없다
@@ -123,7 +123,12 @@ cd C:\wr\wr-evaluation-unified-7.1.4-intranet
 #    자동 업데이트를 켠 적이 없다면(update-policy.json 없음) 생략.
 Test-Path "<이전 폴더>\updates\update-policy.json"
 Copy-Item "<이전 폴더>\updates\update-policy.json" ".\updates\"      # 있을 때만
-# canary 롤아웃을 진행 중이던 경우에만 canary.yml 과 그 설치본도 함께 옮긴다
+# canary 롤아웃을 진행 중이던 경우에만 canary 피드 4종(설치본·.blockmap·canary.yml·canary.yml.sig)을 한 벌로 옮긴다.
+# .sig 없이 canary.yml만 옮기면 7.1.4 이상 canary PC가 업데이트를 거부한다.
+Copy-Item "<이전 폴더>\updates\canary.yml*" ".\updates\"                      # canary.yml + canary.yml.sig
+Copy-Item "<이전 폴더>\updates\<canary 설치본 파일명>*" ".\updates\"            # 설치본(.exe) + .blockmap
+# 단 7.1.4 이전(서명 도입 전)에 만든 canary는 .sig가 없어 7.1.4 이상 canary PC가 받지 않는다 — 옮기지 말고
+# 7.1.4 패키지 기준으로 -UpdateChannel canary -UpdateSigningKey ...로 다시 만든다(7.1.3 이하 PC는 서명을 보지 않으므로 받는다).
 
 # 3. 새 Docker 이미지 로드
 .\scripts\import-images.ps1
@@ -238,7 +243,7 @@ docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"      # → wr-app-
 **원인**: `.env.production`의 `WR_VERSION`이 이전 값으로 남아 있음. **해결**: 사전 준비 3번대로 수정 후 다시 실행.
 
 ### 새 패키지로 바꿨는데 자동 업데이트 정책/canary 설정이 사라짐
-**원인**: compose의 `./updates`는 compose 파일이 있는 패키지 폴더 기준이다. **해결**: 이전 폴더 `updates/`에서 새 폴더 `updates/`로 옮긴다(업데이트 절차 A 2번).
+**원인**: compose의 `./updates`는 compose 파일이 있는 패키지 폴더 기준이다. **해결**: 이전 폴더 `updates/`에서 새 폴더 `updates/`로 옮긴다(업데이트 절차 A 2번). canary는 설치본·`.blockmap`·`canary.yml`·**`canary.yml.sig`** 4종을 함께 옮겨야 하며, 7.1.4 이전에 만든 canary는 `.sig`가 없으므로 옮기지 말고 7.1.4 기준으로 다시 만든다.
 
 ### 7.1.4 서버 + 7.1.3 이하 셸에서 임시 비밀번호 로그인 직후 EMR 장치 등록이 늦어짐
 **조건**: 그 PC의 장치 상태가 아직 `active`가 아닐 때(신규 PC·승인 대기·오류)만 해당한다. 이미 `active`인 PC는 영향이 없다.
@@ -261,7 +266,7 @@ docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"      # → wr-app-
 **원인**: 7.1.4 셸은 `<channel>.yml.sig`가 없으면 피드를 믿지 않는다. **해결**: yml만 따로 복사하지 말고 패키지의 `updates/`를 통째로 복사한다. 서버에서 확인: `curl.exe -k https://localhost:8443/updates/latest.yml.sig`가 404면 없는 것이다.
 
 ### 메뉴에 "업데이트 서명 검증 실패 (n회)"가 뜸
-**원인**: 업데이트가 켜진 PC가 받은 피드의 서명을 확인하지 못했다. 사유는 앱 사용자 데이터 폴더의 `updater.log`에 `UPDATE_FEED_REJECTED:<사유>`로 남는다 — `signature-file-missing`(`.sig` 없음), `signature-mismatch`(서명한 뒤 yml이 바뀌었거나 셸이 신뢰하지 않는 키로 서명), `info-mismatch(<필드>)`(PC가 받은 정보와 서명된 yml이 다름), `no-public-key`(셸에 공개 키가 없음), `feed-unavailable`·`verification-error`(yml을 받지 못함·네트워크 오류), `bad-signature-format`(`.sig` 형식 깨짐). **해결**: 서버 `updates/`의 yml과 `.sig`가 같은 릴리스의 쌍인지, 서명 키가 셸에 내장된 키와 짝인지 확인한다(`node scripts/sign-update-feed.mjs --verify --dir <updates 폴더> --channel latest`). yml과 `.sig`를 올리는 몇 초 사이에 확인한 PC는 일시적으로 어긋나 거부되고 15분 뒤 다시 확인한다(정상).
+**원인**: 업데이트가 켜진 PC가 받은 피드의 서명을 확인하지 못했다. 사유는 앱 사용자 데이터 폴더의 `updater.log`에 `UPDATE_FEED_REJECTED:<사유>`로 남는다 — `signature-file-missing`(`.sig` 없음), `signature-mismatch`(서명한 뒤 yml이 바뀌었거나 셸이 신뢰하지 않는 키로 서명), `info-mismatch(<필드>)`(PC가 받은 정보와 서명된 yml이 다름), `no-public-key`(셸에 공개 키가 없음), `feed-unavailable`·`verification-error`(yml을 받지 못함·네트워크 오류), `bad-signature-format`(`.sig` 형식 깨짐). **해결**: 서버 `updates/`의 yml과 `.sig`가 같은 릴리스의 쌍인지, 서명 키가 셸에 내장된 키와 짝인지 확인한다(`node scripts/sign-update-feed.mjs --verify --dir <updates 폴더> --channel latest` — **소스가 있는 릴리스 PC에서** 실행한다. 서버에는 이 도구가 없으므로 서버의 `updates/`를 릴리스 PC로 복사해 와서 확인하고, 서버에서는 `curl.exe -k https://localhost:8443/updates/latest.yml.sig`로 `.sig`가 서빙되는지와 패키지의 `SHA256SUMS`만 확인할 수 있다). yml과 `.sig`를 올리는 몇 초 사이에 확인한 PC는 일시적으로 어긋나 거부되고 15분 뒤 다시 확인한다(정상).
 
 ### 서명 키를 분실했거나 유출이 의심됨
 **분실**: 새 키 쌍을 만들어 공개 키를 내장한 새 설치본을 **모든 PC에 수동으로 재배포**해야 한다(기존 셸은 새 서명을 신뢰할 수 없다). **유출 의심**: 새 공개 키를 목록에 추가한 셸을 먼저 배포하고, 모든 PC가 그 셸이 된 뒤 새 키로 서명한 다음 옛 키를 뺀다. 절차는 [INTRANET_DEPLOYMENT.md](INTRANET_DEPLOYMENT.md) 7-6 "키 관리". 비밀 키 파일과 암호는 따로 오프라인 백업해 두어야 한다.
