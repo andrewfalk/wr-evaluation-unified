@@ -6,7 +6,7 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
-import { generateSigningKeyPair, signFeed, signFeedFile, verifyFeedFile } from './sign-update-feed.mjs';
+import { generateSigningKeyPair, signFeed, signFeedFile, verifyFeedFile, optionValue, runVerify } from './sign-update-feed.mjs';
 
 const require = createRequire(import.meta.url);
 const { verifyFeedSignature } = require('../electron/updateFeedVerify.js');
@@ -213,6 +213,67 @@ describe('sign-update-feed', () => {
     });
   });
 
+  describe('옵션 값 처리 — 값이 비면 조용히 기본 동작으로 바뀌지 않는다', () => {
+    const MISSING_VALUE_CASES = [
+      ['없이 끝남', ['--public-key']],
+      ['빈 문자열', ['--public-key', '']],
+      ['다음이 다른 옵션', ['--public-key', '--channel', 'latest']],
+    ];
+
+    describe('optionValue', () => {
+      it('옵션이 없으면 undefined, 있으면 그 값을 돌려준다', () => {
+        expect(optionValue(['--dir', 'x'], '--channel')).toBeUndefined();
+        expect(optionValue(['--dir', 'x', '--channel', 'latest'], '--channel')).toBe('latest');
+      });
+
+      it.each(MISSING_VALUE_CASES)('옵션은 있는데 값이 %s이면 거부한다', (_name, args) => {
+        expect(() => optionValue(args, '--public-key')).toThrow('--public-key 옵션에 값이 없습니다');
+      });
+    });
+
+    describe('runVerify — 내장 공개 키로 통과할 피드로 시험한다(내장 키가 등록된 운영 구성과 같은 조건)', () => {
+      function feedTrustedByEmbeddedKey() {
+        const keys = generateSigningKeyPair({ dir: path.join(root, 'rv-keys'), repoRoot: repo });
+        const dir = path.join(root, 'updates');
+        require('fs').mkdirSync(dir, { recursive: true });
+        writeFileSync(path.join(dir, 'latest.yml'), YML);
+        signFeedFile({ dir, channel: 'latest', keyPath: keys.privatePath, trustedPublicKeys: [keys.publicKeyPem] });
+        return { dir, embedded: [keys.publicKeyPem], publicPath: keys.publicPath };
+      }
+      const base = (dir) => ['--verify', '--dir', dir, '--channel', 'latest'];
+
+      it('--public-key 옵션이 없을 때만 내장 공개 키로 검증한다', () => {
+        const { dir, embedded } = feedTrustedByEmbeddedKey();
+        expect(runVerify(base(dir), embedded).sigPath).toContain('latest.yml.sig');
+      });
+
+      it.each(MISSING_VALUE_CASES)('--public-key 값이 %s이면 내장 키로 대체하지 않고 거부한다(내장 키로는 통과할 피드여도)', (_name, publicKeyArgs) => {
+        const { dir, embedded } = feedTrustedByEmbeddedKey();
+        // 같은 피드가 옵션 없이는 통과한다는 것을 먼저 확인해, 거부가 피드 문제가 아니라 옵션 처리 때문임을 보인다.
+        expect(() => runVerify(base(dir), embedded)).not.toThrow();
+        const args = publicKeyArgs.includes('--channel') ? ['--verify', '--dir', dir, ...publicKeyArgs] : [...base(dir), ...publicKeyArgs];
+        expect(() => runVerify(args, embedded)).toThrow('옵션에 값이 없습니다');
+      });
+
+      it('--public-key를 주면 내장 키가 아니라 그 키로만 검증한다 — 내장 키로는 통과하는 피드도 다른 키면 실패한다', () => {
+        const { dir, embedded } = feedTrustedByEmbeddedKey();
+        const other = generateSigningKeyPair({ dir: path.join(root, 'rv-other'), repoRoot: repo });
+        expect(() => runVerify([...base(dir), '--public-key', other.publicPath], embedded)).toThrow('signature-mismatch');
+      });
+
+      it('--public-key로 맞는 키를 주면 내장 키 목록이 비어 있어도 통과한다', () => {
+        const { dir, publicPath } = feedTrustedByEmbeddedKey();
+        expect(runVerify([...base(dir), '--public-key', publicPath], []).sigPath).toContain('latest.yml.sig');
+      });
+
+      it('--dir·--channel의 값이 없어도 거부한다(다음 옵션을 값으로 읽지 않는다)', () => {
+        const { embedded } = feedTrustedByEmbeddedKey();
+        expect(() => runVerify(['--verify', '--dir', '--channel', 'latest'], embedded)).toThrow('--dir 옵션에 값이 없습니다');
+        expect(() => runVerify(['--verify', '--dir', root, '--channel'], embedded)).toThrow('--channel 옵션에 값이 없습니다');
+      });
+    });
+  });
+
   describe('CLI', () => {
     const run = (args, env = {}) => spawnSync(process.execPath, [SIGNER_PATH, ...args], { encoding: 'utf8', env: { ...process.env, WR_UPDATE_SIGNING_PASSPHRASE: '', ...env } });
 
@@ -294,6 +355,18 @@ describe('sign-update-feed', () => {
         const result = verify(dir, undefined);
         expect(result.status).toBe(1);
         expect(result.stderr).toContain('서명 검증 실패');
+      });
+
+      it.each([
+        ['값 없이 끝남', (dir) => ['--verify', '--dir', dir, '--channel', 'latest', '--public-key']],
+        ['빈 문자열', (dir) => ['--verify', '--dir', dir, '--channel', 'latest', '--public-key', '']],
+        ['다음이 다른 옵션', (dir) => ['--verify', '--dir', dir, '--public-key', '--channel', 'latest']],
+      ])('--public-key 값이 %s이면 종료 코드 1로 거부한다', (_name, makeArgs) => {
+        const { dir } = signedDir();
+        const result = run(makeArgs(dir));
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain('--public-key 옵션에 값이 없습니다');
+        expect(result.stdout).not.toContain('서명 검증 성공');
       });
 
       it('없는 공개 키 파일, 동시에 지정한 동작, 부족한 인자는 사용법과 함께 실패한다', () => {

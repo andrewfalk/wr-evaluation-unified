@@ -112,9 +112,30 @@ export function verifyFeedFile({ dir, channel, trustedPublicKeys = UPDATE_SIGNIN
   return { ymlPath, sigPath };
 }
 
+// 옵션 값 읽기. 옵션이 없으면 undefined. 옵션은 있는데 값이 없거나 비어 있거나 다음 옵션이면 오류로 거부한다 —
+// 자동화의 변수가 비었을 때 조용히 기본 동작(예: --public-key 대신 내장 공개 키로 검증)으로 바뀌지 않게 한다.
+export function optionValue(args, flag) {
+  const i = args.indexOf(flag);
+  if (i === -1) return undefined;
+  const value = args[i + 1];
+  if (!value || value.startsWith('--')) throw new Error(`${flag} 옵션에 값이 없습니다`);
+  return value;
+}
+
+// --verify 명령. 옵션 --public-key가 **없을 때만** 내장 공개 키 목록을 쓰고, 있으면 그 파일 하나로만 검증한다.
+export function runVerify(args, embeddedKeys = UPDATE_SIGNING_PUBLIC_KEYS) {
+  const dir = optionValue(args, '--dir');
+  const channel = optionValue(args, '--channel');
+  if (!dir || !channel) throw new Error('사용법: --verify --dir <폴더> --channel <latest|canary> [--public-key <공개키.pem>]');
+  const publicKeyPath = optionValue(args, '--public-key');
+  if (publicKeyPath !== undefined && !existsSync(publicKeyPath)) throw new Error(`공개 키 파일이 없습니다: ${publicKeyPath}`);
+  const trustedPublicKeys = publicKeyPath !== undefined ? [readFileSync(publicKeyPath, 'utf8')] : embeddedKeys;
+  return verifyFeedFile({ dir, channel, trustedPublicKeys });
+}
+
 function main() {
   const args = process.argv.slice(2);
-  const get = (flag) => { const i = args.indexOf(flag); return i !== -1 ? args[i + 1] : undefined; };
+  const get = (flag) => optionValue(args, flag);
   const passphrase = process.env.WR_UPDATE_SIGNING_PASSPHRASE || undefined;
 
   try {
@@ -122,14 +143,7 @@ function main() {
     if (modes.length > 1) throw new Error(`한 번에 하나의 동작만 지정할 수 있습니다: ${modes.join(' ')}`);
 
     if (args.includes('--verify')) {
-      const dir = get('--dir');
-      const channel = get('--channel');
-      if (!dir || !channel) throw new Error('사용법: --verify --dir <폴더> --channel <latest|canary> [--public-key <공개키.pem>]');
-      const publicKeyPath = get('--public-key');
-      if (publicKeyPath && !existsSync(publicKeyPath)) throw new Error(`공개 키 파일이 없습니다: ${publicKeyPath}`);
-      const trustedPublicKeys = publicKeyPath ? [readFileSync(publicKeyPath, 'utf8')] : UPDATE_SIGNING_PUBLIC_KEYS;
-      const result = verifyFeedFile({ dir, channel, trustedPublicKeys });
-      console.log(`서명 검증 성공: ${result.sigPath}`);
+      console.log(`서명 검증 성공: ${runVerify(args).sigPath}`);
       return;
     }
     if (args.includes('--generate-keypair')) {
