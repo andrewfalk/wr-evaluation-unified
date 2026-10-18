@@ -271,7 +271,7 @@ updates/
 
 `scripts/export-offline-package.ps1 -UpdateChannel latest|canary`가 설치본+`.blockmap`+메타데이터 3종을 SHA-512까지 검증하고, 메타데이터에 **서명(`.sig`)을 만든 뒤**(`-UpdateSigningKey` 필요 — 7-6) 패키지의 `electron/`(신규 PC 설치용)과 **`updates/`(서버 서빙용)** 두 곳에 담아줍니다(`scripts/verify-update-artifacts.mjs`, `scripts/sign-update-feed.mjs`). 패키지 폴더에서 `docker compose up -d`를 하면 `./updates`가 이 폴더를 가리키므로 설치본·`.blockmap`·yml·`.sig`는 따로 복사하지 않아도 서빙됩니다(**yml만 따로 복사하지 마세요 — `.sig`가 없으면 모든 PC가 업데이트를 거부합니다**). `update-policy.json`은 별도로 관리 — 패키지에는 `electron/update-policy.example.json` **템플릿만** 동봉되고 `updates/`에는 넣지 않습니다(설치 직후부터 업데이터가 켜진 채 나가는 것을 막기 위해서입니다. 정책 파일이 없으면 업데이터는 휴면).
 
-> **새 패키지 폴더로 교체할 때의 함정**: compose의 `./updates`는 compose 파일이 있는 **패키지 폴더 기준**입니다. 새 버전 패키지를 새 폴더(`...-<새버전>-intranet`)에 풀고 거기서 기동하면 이전 폴더의 `updates/`는 더 이상 마운트되지 않습니다. 이전 폴더 `updates/`에 운영자가 올려 둔 `update-policy.json`과(canary 롤아웃 중이라면) `canary.yml`·그 설치본은 **새 폴더의 `updates/`로 옮겨야** 합니다. 정책 파일이 없던 환경(휴면)이면 옮길 것이 없습니다. 같은 채널의 이전 버전 `latest.yml`은 새 패키지의 것으로 덮어쓰입니다.
+> **새 패키지 폴더로 교체할 때의 함정**: compose의 `./updates`는 compose 파일이 있는 **패키지 폴더 기준**입니다. 새 버전 패키지를 새 폴더(`...-<새버전>-intranet`)에 풀고 거기서 기동하면 이전 폴더의 `updates/`는 더 이상 마운트되지 않습니다. 이전 폴더 `updates/`에 운영자가 올려 둔 `update-policy.json`과(canary 롤아웃 중이라면) canary 피드 **4종 — 설치본·`.blockmap`·`canary.yml`·`canary.yml.sig`** 를 **새 폴더의 `updates/`로 함께 옮겨야** 합니다. 새 패키지를 `-UpdateChannel latest`로 만들었다면 `canary.yml.sig`가 들어 있지 않으므로, `.sig` 없이 `canary.yml`만 옮기면 7.1.4 이상 canary PC가 업데이트를 거부합니다. 단 **7.1.4 이전(서명 도입 전)에 만든 canary 피드에는 `.sig`가 없어** 옮겨도 7.1.4 이상 canary PC는 받지 않습니다(7.1.3 이하 PC는 서명을 보지 않으므로 받습니다). 그런 canary는 옮기지 말고 7.1.4 패키지 기준으로 `-UpdateChannel canary -UpdateSigningKey ...`로 다시 만드세요. 정책 파일이 없던 환경(휴면)이면 옮길 것이 없습니다. 같은 채널의 이전 버전 `latest.yml`은 새 패키지의 것으로 덮어쓰입니다.
 
 기본적으로 이 3종이 없으면 export 자체가 **실패**합니다(에어갭 패키지에 설치본이 빠지는 것을 막기 위함). Electron 셸을 건드리지 않은 **서버 전용 릴리스**에서만 `-AllowMissingElectronInstaller`로 이 검사를 명시적으로 건너뛸 수 있으며, 이 경우 `release-manifest.json`의 `electronInstaller.included`/`sha512Verified`가 `false`로 기록됩니다. **Electron 셸이 바뀐 롤아웃 패키지에는 이 플래그를 쓰지 마세요.** 서명 키(`-UpdateSigningKey`)가 없어도 export가 실패합니다 — 서명 없이 만들려면 `-AllowUnsignedUpdateFeed`를 명시해야 하며, 그 패키지의 셸은 모든 업데이트를 거부합니다(`release-manifest.json`의 `electronInstaller.updateFeedSigned`가 `false`로 기록됩니다).
 
@@ -329,10 +329,14 @@ electron-updater는 **더 낮은 버전을 설치하지 않습니다.** 장애 �
    .\scripts\export-offline-package.ps1 -UpdateSigningKey "<비밀키.pem 경로>"
    ```
    스크립트는 ① `release\<channel>.yml`에 서명 → ② 사전 검증(`.sig`가 셸에 내장된 공개 키로 검증되는지) → ③ `electron/`·`updates/`에 **yml + .sig 쌍** 복사 → ④ 복사본 재검증 순서로 진행하며, **어느 단계든 실패하면 패키지를 만들지 않습니다.** 키를 주지 않으면 실패합니다(서명 없이 만들려면 `-AllowUnsignedUpdateFeed` — 그 패키지의 셸은 모든 업데이트를 거부합니다). `release-manifest.json`의 `electronInstaller.updateFeedSigned`로 서명 여부를 확인할 수 있습니다. `-UpdateChannel canary`로 만들 때도 같은 키가 필요합니다(`canary.yml.sig`).
-3. **배포된 폴더 재검증(비밀 키 불필요)** — 서버 `updates/` 또는 풀어 놓은 패키지 폴더를 셸이 보는 것과 같은 기준으로 다시 확인합니다.
+3. **재검증(비밀 키 불필요)** — 셸이 보는 것과 같은 기준으로 `updates/`의 yml·`.sig`를 다시 확인합니다. **소스(저장소 체크아웃 + `npm ci`)와 Node가 있는 릴리스 PC에서 실행합니다.** 오프라인 패키지에는 이 도구와 의존 모듈(`js-yaml`)·공개 키 파일이 들어 있지 않고, 운영 서버는 Docker 전용이라 Node도 없어 **서버에서는 실행할 수 없습니다.**
    ```powershell
-   node scripts/sign-update-feed.mjs --verify --dir "<updates 폴더>" --channel latest
+   # 릴리스 PC에서: 방금 만든 패키지 폴더(또는 zip을 풀어 둔 폴더)의 updates를 검증
+   node scripts/sign-update-feed.mjs --verify --dir "release\wr-evaluation-unified-<버전>-intranet\updates" --channel latest
    ```
+   패키징 스크립트가 복사 직후 같은 검증을 이미 수행하므로, 이 명령은 패키지를 옮기거나 풀어 둔 뒤 **다시 확인하고 싶을 때** 씁니다. 이미 서버에서 서빙 중인 `updates/`를 확인하려면 그 폴더를 릴리스 PC로 복사해 와서 같은 명령을 실행하세요.
+
+   **서버에서 할 수 있는 확인**은 ① 패키지의 `SHA256SUMS`로 전송 중 손상 확인(yml·`.sig` 포함) ② `curl.exe -k https://<서버>/updates/latest.yml.sig`가 base64 한 줄(88자)을 돌려주는지입니다. 서명 자체의 최종 확인은 PC에서의 실제 업데이트 시험(정상 업데이트 + yml 변조·`.sig` 삭제 시 거부)입니다.
 
 #### 키 관리
 
