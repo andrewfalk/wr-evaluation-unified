@@ -30,6 +30,8 @@ docs/ui-mockups/
 electron/build-target.json
 *.crt
 *.key
+# 업데이트 피드 서명용 비밀 키(HF8) — 릴리스 PC 밖으로 나가면 안 된다. 생성 도구가 저장소 안에는 만들지 않지만 이중 방어.
+*update-signing-private*
 # GPG backup keys — never commit; store offline
 wr-backup-private.asc
 wr-backup-public.asc

@@ -64,6 +64,27 @@ describe('GET /updates/*', () => {
     expect(res.headers['content-disposition']).toBeUndefined();
   });
 
+  it('.yml.sig(HF8 피드 서명)는 octet-stream·no-cache로 바이트 그대로 제공한다', async () => {
+    const sig = 'c2lnbmF0dXJlLWJhc2U2NA==\n';
+    writeFileSync(path.join(dir, 'latest.yml.sig'), sig, 'utf-8');
+    const res = await request(makeApp(dir)).get('/updates/latest.yml.sig').buffer(true).parse((r, cb) => {
+      const chunks: Buffer[] = [];
+      r.on('data', (c: Buffer) => chunks.push(c));
+      r.on('end', () => cb(null, Buffer.concat(chunks)));
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toBe('application/octet-stream');
+    expect(res.headers['cache-control']).toBe('no-cache');
+    expect(res.body.toString('utf-8')).toBe(sig);
+  });
+
+  it('존재하지 않는 서명 파일은 JSON 404다(셸은 서명 없는 피드를 거부한다)', async () => {
+    writeFileSync(path.join(dir, 'latest.yml'), 'version: 6.5.0\n', 'utf-8');
+    const res = await request(makeApp(dir)).get('/updates/latest.yml.sig');
+    expect(res.status).toBe(404);
+    expect(res.headers['content-type']).toMatch(/application\/json/);
+  });
+
   it('존재하지 않는 파일은 JSON 404를 반환하고 SPA HTML로 흐르지 않는다', async () => {
     const res = await request(makeApp(dir)).get('/updates/nonexistent.yml');
     expect(res.status).toBe(404);

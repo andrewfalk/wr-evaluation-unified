@@ -26,7 +26,7 @@ export function createUpdatesRouter(updatesDir: string = DEFAULT_UPDATES_DIR): R
     setHeaders(res, filePath) {
       // update-policy.json은 관리자가 값을 바꾼 즉시(재시작 없이) 반영돼야 하므로 무조건 no-cache.
       res.setHeader('Cache-Control', 'no-cache');
-      if (filePath.endsWith('.exe') || filePath.endsWith('.blockmap')) {
+      if (filePath.endsWith('.exe') || filePath.endsWith('.blockmap') || filePath.endsWith('.sig')) {
         res.setHeader('Content-Type', 'application/octet-stream');
         // Content-Disposition은 의도적으로 설정하지 않는다 — productName에 한글이 포함돼
         // Node의 헤더 값 검증이 Latin1 밖 문자를 거부해 ERR_INVALID_CHAR가 발생한다.
