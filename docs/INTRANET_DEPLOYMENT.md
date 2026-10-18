@@ -263,19 +263,21 @@ updates/
 ├── 직업성 질환 통합 평가 프로그램 Setup 6.5.0.exe
 ├── 직업성 질환 통합 평가 프로그램 Setup 6.5.0.exe.blockmap
 ├── latest.yml                    # 정식 채널 메타데이터
+├── latest.yml.sig                # 위 yml의 Ed25519 서명(7-6) — yml과 한 쌍. 없으면 셸이 업데이트를 거부
 ├── canary.yml                    # canary 채널 메타데이터(canary 롤아웃 중에만 존재)
+├── canary.yml.sig                # canary.yml의 서명(canary 롤아웃 중에만 존재)
 └── update-policy.json            # 관리자 on/off 스위치(아래 7-3)
 ```
 
-`scripts/export-offline-package.ps1 -UpdateChannel latest|canary`가 설치본+`.blockmap`+메타데이터 3종을 SHA-512까지 검증한 뒤 패키지의 `electron/`(신규 PC 설치용)과 **`updates/`(서버 서빙용)** 두 곳에 담아줍니다(`scripts/verify-update-artifacts.mjs`). 패키지 폴더에서 `docker compose up -d`를 하면 `./updates`가 이 폴더를 가리키므로 3종은 따로 복사하지 않아도 서빙됩니다. `update-policy.json`은 별도로 관리 — 패키지에는 `electron/update-policy.example.json` **템플릿만** 동봉되고 `updates/`에는 넣지 않습니다(설치 직후부터 업데이터가 켜진 채 나가는 것을 막기 위해서입니다. 정책 파일이 없으면 업데이터는 휴면).
+`scripts/export-offline-package.ps1 -UpdateChannel latest|canary`가 설치본+`.blockmap`+메타데이터 3종을 SHA-512까지 검증하고, 메타데이터에 **서명(`.sig`)을 만든 뒤**(`-UpdateSigningKey` 필요 — 7-6) 패키지의 `electron/`(신규 PC 설치용)과 **`updates/`(서버 서빙용)** 두 곳에 담아줍니다(`scripts/verify-update-artifacts.mjs`, `scripts/sign-update-feed.mjs`). 패키지 폴더에서 `docker compose up -d`를 하면 `./updates`가 이 폴더를 가리키므로 설치본·`.blockmap`·yml·`.sig`는 따로 복사하지 않아도 서빙됩니다(**yml만 따로 복사하지 마세요 — `.sig`가 없으면 모든 PC가 업데이트를 거부합니다**). `update-policy.json`은 별도로 관리 — 패키지에는 `electron/update-policy.example.json` **템플릿만** 동봉되고 `updates/`에는 넣지 않습니다(설치 직후부터 업데이터가 켜진 채 나가는 것을 막기 위해서입니다. 정책 파일이 없으면 업데이터는 휴면).
 
-> **새 패키지 폴더로 교체할 때의 함정**: compose의 `./updates`는 compose 파일이 있는 **패키지 폴더 기준**입니다. 새 버전 패키지를 새 폴더(`...-<새버전>-intranet`)에 풀고 거기서 기동하면 이전 폴더의 `updates/`는 더 이상 마운트되지 않습니다. 이전 폴더 `updates/`에 운영자가 올려 둔 `update-policy.json`과(canary 롤아웃 중이라면) `canary.yml`·그 설치본은 **새 폴더의 `updates/`로 옮겨야** 합니다. 정책 파일이 없던 환경(휴면)이면 옮길 것이 없습니다. 같은 채널의 이전 버전 `latest.yml`은 새 패키지의 것으로 덮어쓰입니다.
+> **새 패키지 폴더로 교체할 때의 함정**: compose의 `./updates`는 compose 파일이 있는 **패키지 폴더 기준**입니다. 새 버전 패키지를 새 폴더(`...-<새버전>-intranet`)에 풀고 거기서 기동하면 이전 폴더의 `updates/`는 더 이상 마운트되지 않습니다. 이전 폴더 `updates/`에 운영자가 올려 둔 `update-policy.json`과(canary 롤아웃 중이라면) canary 피드 **4종 — 설치본·`.blockmap`·`canary.yml`·`canary.yml.sig`** 를 **새 폴더의 `updates/`로 함께 옮겨야** 합니다. 새 패키지를 `-UpdateChannel latest`로 만들었다면 `canary.yml.sig`가 들어 있지 않으므로, `.sig` 없이 `canary.yml`만 옮기면 7.1.4 이상 canary PC가 업데이트를 거부합니다. 단 **7.1.4 이전(서명 도입 전)에 만든 canary 피드에는 `.sig`가 없어** 옮겨도 7.1.4 이상 canary PC는 받지 않습니다(7.1.3 이하 PC는 서명을 보지 않으므로 받습니다). 그런 canary는 옮기지 말고 7.1.4 패키지 기준으로 `-UpdateChannel canary -UpdateSigningKey ...`로 다시 만드세요. 정책 파일이 없던 환경(휴면)이면 옮길 것이 없습니다. 같은 채널의 이전 버전 `latest.yml`은 새 패키지의 것으로 덮어쓰입니다.
 
-기본적으로 이 3종이 없으면 export 자체가 **실패**합니다(에어갭 패키지에 설치본이 빠지는 것을 막기 위함). Electron 셸을 건드리지 않은 **서버 전용 릴리스**에서만 `-AllowMissingElectronInstaller`로 이 검사를 명시적으로 건너뛸 수 있으며, 이 경우 `release-manifest.json`의 `electronInstaller.included`/`sha512Verified`가 `false`로 기록됩니다. **Electron 셸이 바뀐 롤아웃 패키지에는 이 플래그를 쓰지 마세요.**
+기본적으로 이 3종이 없으면 export 자체가 **실패**합니다(에어갭 패키지에 설치본이 빠지는 것을 막기 위함). Electron 셸을 건드리지 않은 **서버 전용 릴리스**에서만 `-AllowMissingElectronInstaller`로 이 검사를 명시적으로 건너뛸 수 있으며, 이 경우 `release-manifest.json`의 `electronInstaller.included`/`sha512Verified`가 `false`로 기록됩니다. **Electron 셸이 바뀐 롤아웃 패키지에는 이 플래그를 쓰지 마세요.** 서명 키(`-UpdateSigningKey`)가 없어도 export가 실패합니다 — 서명 없이 만들려면 `-AllowUnsignedUpdateFeed`를 명시해야 하며, 그 패키지의 셸은 모든 업데이트를 거부합니다(`release-manifest.json`의 `electronInstaller.updateFeedSigned`가 `false`로 기록됩니다).
 
 ### 7-2. 업로드 순서(필수)
 
-**설치본 + `.blockmap` 먼저 → 메타데이터(`latest.yml`/`canary.yml`) 마지막.** 가능하면 메타데이터 파일을 임시 파일명으로 올린 뒤 원자적 rename으로 교체하세요(반쯤 올라간 상태에서 클라이언트가 읽는 것을 방지). 순서를 반대로 하면, 클라이언트가 메타데이터는 새 버전을 가리키는데 설치본이 아직 없는 상태를 순간적으로 볼 수 있습니다.
+**설치본 + `.blockmap` 먼저 → 서명(`.sig`)과 메타데이터(`latest.yml`/`canary.yml`)는 마지막에 연달아.** 가능하면 두 파일을 임시 파일명으로 올린 뒤 원자적 rename으로 **연달아** 교체하세요(반쯤 올라간 상태에서 클라이언트가 읽는 것을 방지). yml과 서명은 한 쌍이라 둘이 어긋난 몇 초 사이에 확인한 PC는 일시적으로 업데이트를 거부하고 15분 뒤 다시 확인합니다(정상 동작). 순서를 반대로 하면, 클라이언트가 메타데이터는 새 버전을 가리키는데 설치본이 아직 없는 상태를 순간적으로 볼 수 있습니다.
 
 ### 7-3. 관리자 on/off 스위치 — `update-policy.json`
 
@@ -292,7 +294,7 @@ updates/
 
 0. **평상시**: `update-policy.json` 없음 또는 `{"enabled": false}` — 전 PC 휴면, 로그·경고 없음.
 1. canary 릴리스는 **prerelease 태그**로 빌드(예: `npm version 6.5.0-canary.0` 후 `electron:build:intranet`) — electron-builder가 `latest.yml`이 아니라 `canary.yml`을 생성합니다.
-2. `export-offline-package.ps1 -UpdateChannel canary`로 canary 설치본+blockmap+`canary.yml`을 `updates/`에 추가(**기존 `latest.yml`은 그대로 둠** — 같은 디렉터리에 두 채널이 공존).
+2. `export-offline-package.ps1 -UpdateChannel canary`로 canary 설치본+blockmap+`canary.yml`(+ 서명 `canary.yml.sig` — 같은 서명 키가 필요)을 `updates/`에 추가(**기존 `latest.yml`·`latest.yml.sig`는 그대로 둠** — 같은 디렉터리에 두 채널이 공존).
 3. canary로 지정한 PC에서 `WR_UPDATE_CHANNEL=canary` 환경변수를 설정하고 앱을 재시작합니다(예: 시스템 환경변수 또는 서비스/바로가기의 실행 환경에 설정).
 4. `update-policy.json`을 `{"enabled": true, "channels": ["canary"]}`로 올립니다(가장 마지막에). 반영을 즉시 확인하려면 canary PC를 한 번 더 재시작하세요.
 5. canary PC에서 업데이트 수신·설치·정상 동작을 확인합니다.
@@ -304,19 +306,58 @@ updates/
 
 electron-updater는 **더 낮은 버전을 설치하지 않습니다.** 장애 버전을 되돌려야 한다면 더 높은 hotfix 버전을 다시 게시하는 방식으로 대응하세요. 이전 설치본은 수동 복구용으로 별도 보관합니다.
 
-### 7-6. 코드서명 — 현재 미서명, 정확한 보안 함의
+### 7-6. 업데이트 피드 서명(HF8) — 그리고 코드서명은 여전히 미서명
 
-**현재 설치본은 미서명입니다**(`electron-builder.intranet.yml`에 `certificateFile` 없음 — 후속 과제로 연기). sha512 무결성 검증(electron-updater 기본 동작, 서명과 무관)은 항상 켜져 있어 전송 손상은 잡아냅니다.
+#### 무엇을 막나
 
-**"UAC 경고 문구가 뜨는 정도의 차이"로 축소해서 이해하면 안 됩니다.** 정확히는:
-- sha512는 `latest.yml`/`canary.yml` **자체가 신뢰됨을 전제**로 설치본과의 정합성만 검증합니다.
-- **설치본 발행자 검증 단계 자체가 생략됩니다**(비활성화되는 게 아니라 애초에 그 단계가 없습니다).
-- `/updates/` 쓰기 권한을 가진 공격자가 설치본과 메타데이터 파일을 **함께** 교체하면 이 방어를 우회할 수 있습니다.
+7.1.4 셸부터 자동 업데이트는 **`<channel>.yml`에 붙은 Ed25519 서명(`<channel>.yml.sig`)을 확인한 뒤에만** 설치본을 내려받습니다(`autoDownload=false` + 서명 게이트). 서명 키는 릴리스 PC에만 있으므로, `/updates/` 쓰기 권한을 가진 사람이 **설치본과 yml을 함께 바꿔치기해도**(sha512는 통과하더라도) 서명이 없거나 다른 키로 만든 서명이면 셸이 설치본을 받지 않습니다.
 
-**따라서 canary 롤아웃을 처음 실사용하기 전에 반드시 다음을 완료하세요(코드 구현과 별개의 승인 절차입니다):**
+- 서명이 없거나, 틀렸거나, 서명한 뒤 yml이 바뀌었거나, electron-updater가 받은 정보와 다르면 다운로드하지 않고 메뉴에 **"업데이트 서명 검증 실패 (n회)"** 를 표시합니다. 15분 → 이후 1시간 간격으로 다시 확인합니다.
+- 셸에 내장된 공개 키가 비어 있으면(fail-closed) 모든 업데이트를 거부합니다.
+- 서명 확인을 통과해도 다운로드가 실패하면 "업데이트 다운로드 실패 (n회)"로 같은 방식으로 집계합니다.
+
+#### 서명 절차(릴리스 PC)
+
+1. **키 쌍 생성(최초 1회)** — 저장소 밖, 클라우드 동기화(OneDrive 등)가 안 되는 폴더에 만듭니다. 비밀 키 파일을 암호로 보호하려면 같은 PowerShell 창에서 환경변수 `WR_UPDATE_SIGNING_PASSPHRASE`를 먼저 설정합니다.
+   ```powershell
+   node scripts/sign-update-feed.mjs --generate-keypair "<저장소·동기화 폴더 밖>"
+   ```
+   출력된 **공개 키만** `electron/updateSigningPublicKey.js`에 등록하고(코드 리뷰에서 지문 확인), 설치본은 **공개 키를 등록한 뒤에** 빌드합니다(키가 내장된 셸만 서명을 검증할 수 있습니다). 생성 도구는 저장소 안에는 키를 만들지 않고 비밀 키 내용을 출력하지 않습니다.
+2. **패키징** — `release\`에 설치본을 빌드한 뒤(`npm run electron:build:intranet`):
+   ```powershell
+   # 키가 암호로 보호돼 있으면 같은 창에서 먼저 $env:WR_UPDATE_SIGNING_PASSPHRASE 설정
+   .\scripts\export-offline-package.ps1 -UpdateSigningKey "<비밀키.pem 경로>"
+   ```
+   스크립트는 ① `release\<channel>.yml`에 서명 → ② 사전 검증(`.sig`가 셸에 내장된 공개 키로 검증되는지) → ③ `electron/`·`updates/`에 **yml + .sig 쌍** 복사 → ④ 복사본 재검증 순서로 진행하며, **어느 단계든 실패하면 패키지를 만들지 않습니다.** 키를 주지 않으면 실패합니다(서명 없이 만들려면 `-AllowUnsignedUpdateFeed` — 그 패키지의 셸은 모든 업데이트를 거부합니다). `release-manifest.json`의 `electronInstaller.updateFeedSigned`로 서명 여부를 확인할 수 있습니다. `-UpdateChannel canary`로 만들 때도 같은 키가 필요합니다(`canary.yml.sig`).
+3. **재검증(비밀 키 불필요)** — 셸이 보는 것과 같은 기준으로 `updates/`의 yml·`.sig`를 다시 확인합니다. **소스(저장소 체크아웃 + `npm ci`)와 Node가 있는 릴리스 PC에서 실행합니다.** 오프라인 패키지에는 이 도구와 의존 모듈(`js-yaml`)·공개 키 파일이 들어 있지 않고, 운영 서버는 Docker 전용이라 Node도 없어 **서버에서는 실행할 수 없습니다.**
+   ```powershell
+   # 릴리스 PC에서: 방금 만든 패키지 폴더(또는 zip을 풀어 둔 폴더)의 updates를 검증
+   node scripts/sign-update-feed.mjs --verify --dir "release\wr-evaluation-unified-<버전>-intranet\updates" --channel latest
+   ```
+   패키징 스크립트가 복사 직후 같은 검증을 이미 수행하므로, 이 명령은 패키지를 옮기거나 풀어 둔 뒤 **다시 확인하고 싶을 때** 씁니다. 이미 서버에서 서빙 중인 `updates/`를 확인하려면 그 폴더를 릴리스 PC로 복사해 와서 같은 명령을 실행하세요.
+
+   **서버에서 할 수 있는 확인**은 ① 패키지의 `SHA256SUMS`로 전송 중 손상 확인(yml·`.sig` 포함) ② `curl.exe -k https://<서버>/updates/latest.yml.sig`가 base64 한 줄(88자)을 돌려주는지입니다. 서명 자체의 최종 확인은 PC에서의 실제 업데이트 시험(정상 업데이트 + yml 변조·`.sig` 삭제 시 거부)입니다.
+
+#### 키 관리
+
+- 비밀 키와 암호는 **릴리스 PC에만** 둡니다. 서버, `.env.production`, `docker-compose.yml`, 저장소, 채팅, 클라우드 동기화 폴더(OneDrive 등)에 두지 않습니다. **서버는 서명을 만들지도 검증하지도 않고 파일을 그대로 내려줄 뿐이라 키·암호가 필요 없습니다.** 비밀 키 파일과 암호는 **따로** 오프라인 매체(USB·금고)에 백업합니다.
+- **분실하면** 새 키 쌍을 만들고 그 공개 키를 내장한 새 설치본을 **모든 PC에 수동으로 재배포**해야 합니다(기존 셸은 새 서명을 신뢰할 수 없고, 서명 없이는 자동 업데이트로 고칠 수도 없습니다).
+- **교체(유출 의심 포함)**: 새 공개 키를 목록에 **추가**한 셸을 먼저 배포합니다(셸은 목록의 어느 키로든 검증) → 모든 PC가 그 셸이 된 뒤 새 키로 서명 → 그 뒤 옛 키를 목록에서 뺍니다. 유출이 의심되면 옛 키가 신뢰되는 기간이 곧 위험 기간이므로 전체 PC 교체를 서두릅니다.
+
+#### 운영 시 주의
+
+- **`yml`과 `.sig`는 한 쌍입니다.** `updates/`에 yml만 복사하면 `.sig`가 없어 **모든 PC가 업데이트를 거부**합니다. 패키지의 `updates/`를 통째로 복사하세요.
+- 업로드 순서(7-2): 설치본·`.blockmap` 먼저 → `.sig`와 yml은 **연달아**. 그 사이 몇 초에 확인한 PC는 yml과 서명이 어긋나 일시적으로 거부되고 15분 뒤 다시 확인합니다(정상 동작).
+- **서명 검증은 7.1.4 이상 셸에서만 동작합니다.** 7.1.3 이하는 검증기가 없어 서명 없는 피드로 7.1.4를 받습니다 — 이 한 번의 전환은 서명 보호 밖이므로 고위험 PC는 설치본을 수동으로 설치하는 편이 안전합니다.
+- 서명은 **피드(yml)가 진짜인지**를 보증합니다. 릴리스 PC와 비밀 키까지 장악한 공격자는 막지 못합니다.
+
+#### 코드서명(Authenticode)은 여전히 미서명
+
+**설치본 자체는 여전히 코드서명이 없습니다**(`electron-builder.intranet.yml`에 `certificateFile` 없음 — 후속 과제). 피드 서명 덕분에 "누가 설치본을 올렸는가"는 막히지만, **설치본 발행자 검증 단계 자체가 없다**는 점은 그대로입니다(Windows가 보여 주는 발행자 표시도 없음). 그래서 다음 승인 절차는 여전히 유효합니다.
+
 1. `/updates/` 디렉터리(호스트 `./updates/`)의 **쓰기 권한을 최소 인원으로 제한**.
 2. 해당 디렉터리에 대한 **접근 감사**(누가 언제 파일을 올렸는지 기록/확인 가능하게).
-3. 미서명 상태에 대한 **명시적 보안 예외 승인**을 병원 보안 담당/책임자로부터 받아 문서로 남길 것.
+3. 설치본 코드서명이 없는 상태에 대한 **명시적 보안 예외 승인**을 병원 보안 담당/책임자로부터 받아 문서로 남길 것.
 
 코드서명 인증서 도입(자체 PKI 구축 포함 가능 — 3절의 Caddy CA와는 완전히 별개의 인증서/절차 필요)은 후속 과제로, 도입 시 `electron-builder.intranet.yml`에 `certificateFile`/`certificatePassword`를 추가합니다.
 

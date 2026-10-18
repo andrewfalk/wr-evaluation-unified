@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createHash } from 'crypto';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import yaml from 'js-yaml';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { verifyUpdateArtifacts, pickExeEntry, resolveSafeInstallerName, installerNameHasVersion } from './verify-update-artifacts.mjs';
+import { generateSigningKeyPair, signFeedFile } from './sign-update-feed.mjs';
 
 const VERIFIER_PATH = fileURLToPath(new URL('./verify-update-artifacts.mjs', import.meta.url));
 
@@ -217,6 +218,100 @@ describe('verify-update-artifacts', () => {
     });
     it('디코딩 후 경로 구분자가 있으면 거부', () => {
       expect(() => resolveSafeInstallerName(encodeURIComponent('sub/dir/evil.exe'))).toThrow(/outside the artifact directory/);
+    });
+  });
+
+  // HF8 — 서명 없는 피드가 든 패키지를 풀면 7.1.4 이후 셸이 모든 업데이트를 거부한다. 만들기 전에 막는다.
+  describe('피드 서명 검증(requireSignature)', () => {
+    let keysDir;
+    let keys;
+    beforeEach(() => {
+      keysDir = mkdtempSync(path.join(tmpdir(), 'wr-update-keys-'));
+      keys = generateSigningKeyPair({ dir: path.join(keysDir, 'k') });
+    });
+    afterEach(() => { rmSync(keysDir, { recursive: true, force: true }); });
+
+    const trusted = () => [keys.publicKeyPem];
+    function signedArtifacts(channel = 'latest') {
+      writeArtifacts(dir, { installerName: 'Setup-7.1.4.exe', installerContent: 'installer-bytes', metadataFileName: `${channel}.yml`, version: '7.1.4' });
+      signFeedFile({ dir, channel, keyPath: keys.privatePath, trustedPublicKeys: trusted() });
+    }
+    const verify = (extra = {}) => verifyUpdateArtifacts({
+      artifactDir: dir, metadataFileName: 'latest.yml', expectedVersion: '7.1.4', requireSignature: true, trustedPublicKeys: trusted(), ...extra,
+    });
+
+    it('서명된 피드는 통과하고 결과에 signatureVerified: true가 붙는다', () => {
+      signedArtifacts();
+      expect(verify()).toEqual({
+        channel: 'latest', version: '7.1.4', metadataFile: 'latest.yml', installerFile: 'Setup-7.1.4.exe',
+        blockmapFile: 'Setup-7.1.4.exe.blockmap', sha512Verified: true, signatureVerified: true,
+      });
+    });
+
+    it('canary 채널도 같은 방식으로 검증한다', () => {
+      signedArtifacts('canary');
+      expect(verify({ metadataFileName: 'canary.yml' })).toMatchObject({ channel: 'canary', signatureVerified: true });
+    });
+
+    it('서명 파일(.sig)이 없으면 실패한다 — 미서명 피드', () => {
+      writeArtifacts(dir, { installerName: 'Setup-7.1.4.exe', installerContent: 'installer-bytes', metadataFileName: 'latest.yml', version: '7.1.4' });
+      expect(() => verify()).toThrow('서명 파일이 없습니다');
+    });
+
+    it('서명한 뒤 yml이 바뀌면(설치본 해시는 그대로여도) 실패한다', () => {
+      signedArtifacts();
+      writeFileSync(path.join(dir, 'latest.yml'), `${readFileSync(path.join(dir, 'latest.yml'), 'utf-8')}releaseNotes: edited\n`, 'utf-8');
+      expect(() => verify()).toThrow('서명 검증 실패(signature-mismatch)');
+    });
+
+    it('신뢰하지 않는 키로 서명했으면 실패한다', () => {
+      signedArtifacts();
+      const other = generateSigningKeyPair({ dir: path.join(keysDir, 'other') });
+      expect(() => verify({ trustedPublicKeys: [other.publicKeyPem] })).toThrow('서명 검증 실패(signature-mismatch)');
+    });
+
+    it('신뢰하는 공개 키 목록이 비어 있으면 서명이 맞아도 실패한다(fail-closed)', () => {
+      signedArtifacts();
+      expect(() => verify({ trustedPublicKeys: [] })).toThrow('no-public-key');
+    });
+
+    it('SHA-512 불일치는 서명 검증과 무관하게 먼저 실패한다', () => {
+      signedArtifacts();
+      writeFileSync(path.join(dir, 'Setup-7.1.4.exe'), 'tampered-installer');
+      expect(() => verify()).toThrow(/SHA-512 mismatch/);
+    });
+
+    it('서명을 요구하지 않으면 기존 동작이다 — .sig가 없거나 깨져 있어도 통과하고 결과에 signatureVerified가 없다', () => {
+      writeArtifacts(dir, { installerName: 'Setup-7.1.4.exe', installerContent: 'installer-bytes', metadataFileName: 'latest.yml', version: '7.1.4' });
+      writeFileSync(path.join(dir, 'latest.yml.sig'), 'garbage');
+      const result = verifyUpdateArtifacts({ artifactDir: dir, metadataFileName: 'latest.yml', expectedVersion: '7.1.4' });
+      expect(result.sha512Verified).toBe(true);
+      expect(result).not.toHaveProperty('signatureVerified');
+    });
+
+    describe('CLI --require-signature (내장 공개 키로 검증)', () => {
+      const cli = (...extra) => spawnSync(process.execPath, [VERIFIER_PATH, '--artifact-dir', dir, '--metadata-file', 'latest.yml', '--expected-version', '7.1.4', ...extra], { encoding: 'utf-8' });
+
+      it('내장 키가 아닌 키로 서명한 피드는 종료 코드 1이다', () => {
+        signedArtifacts(); // 임시 키로 서명 — 셸에 내장된 실제 공개 키가 아니다
+        const r = cli('--require-signature');
+        expect(r.status).toBe(1);
+        expect(r.stderr).toContain('서명 검증 실패');
+      });
+
+      it('서명 파일이 없으면 종료 코드 1이다', () => {
+        writeArtifacts(dir, { installerName: 'Setup-7.1.4.exe', installerContent: 'installer-bytes', metadataFileName: 'latest.yml', version: '7.1.4' });
+        const r = cli('--require-signature');
+        expect(r.status).toBe(1);
+        expect(r.stderr).toContain('서명 파일이 없습니다');
+      });
+
+      it('같은 피드도 --require-signature 없이는 종료 코드 0이고 stdout JSON에 signatureVerified가 없다', () => {
+        signedArtifacts();
+        const r = cli();
+        expect(r.status).toBe(0);
+        expect(JSON.parse(r.stdout)).not.toHaveProperty('signatureVerified');
+      });
     });
   });
 });

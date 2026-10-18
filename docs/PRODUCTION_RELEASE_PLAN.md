@@ -137,20 +137,28 @@ docker images | grep wr-
 ### 3-1-1. (선택) Electron 자동 업데이트용 `/updates/` 스테이징
 
 트랙 2(electron-updater) 도입 이후 오프라인 패키지에는 설치본(.exe) + `.blockmap` +
-`latest.yml`(또는 `canary.yml`) 3종이 **`electron/`(신규 PC 설치용)과 `updates/`(서버 서빙용) 두 곳에**
+`latest.yml`(또는 `canary.yml`) + 그 서명 `.sig`(7.1.4~, INTRANET_DEPLOYMENT.md 7-6) 4종이 **`electron/`(신규 PC 설치용)과 `updates/`(서버 서빙용) 두 곳에**
 들어 있고, `electron/`에는 `update-policy.example.json` 템플릿이 추가로 있다. `docker-compose.yml`이
-`./updates`를 컨테이너 `/app/updates`에 read-only 마운트하므로, **패키지 폴더에서 그대로 기동하면 3종은
-별도 복사 없이 서빙된다.** 이 단계는 최초 설치 자체에는 필요 없다 — 클라이언트 PC 설치는 여전히 5-2-1의
+`./updates`를 컨테이너 `/app/updates`에 read-only 마운트하므로, **패키지 폴더에서 그대로 기동하면 4종은
+별도 복사 없이 서빙된다.** 서명 없는 피드는 7.1.4 이후 셸이 모두 거부하므로 패키지는 서명 키(`export-offline-package.ps1 -UpdateSigningKey`)로 만들어야 하고, `updates/`에 yml만 따로 복사하지 말고 폴더를 통째로 복사한다. 이 단계는 최초 설치 자체에는 필요 없다 — 클라이언트 PC 설치는 여전히 5-2-1의
 수동 인스톨러 실행 방식 그대로다(`update-policy.json`이 없으면 업데이터는 휴면).
 
 **기존 서버를 새 패키지 폴더로 교체하는 경우**에는 compose의 `./updates`가 새 폴더를 가리키므로,
-이전 폴더 `updates/`에 `update-policy.json`·`canary.yml` 등을 올려 둔 적이 있다면 새 폴더 `updates/`로
-옮긴다(없으면 생략):
+이전 폴더 `updates/`에 `update-policy.json`·canary 피드 등을 올려 둔 적이 있다면 새 폴더 `updates/`로
+옮긴다(없으면 생략). **canary는 설치본·`.blockmap`·`canary.yml`·`canary.yml.sig` 4종을 함께** 옮긴다 —
+`.sig` 없이 `canary.yml`만 옮기면 7.1.4 이상 canary PC가 업데이트를 거부한다:
 
 ```powershell
-# 이전 패키지 폴더 → 새 패키지 폴더 (정책 파일이 있을 때만)
-Copy-Item "<이전 폴더>\updates\update-policy.json" "<새 폴더>\updates\"
+# 이전 패키지 폴더 → 새 패키지 폴더 (있는 것만)
+Copy-Item "<이전 폴더>\updates\update-policy.json" "<새 폴더>\updates\"                # 정책 파일이 있을 때만
+# canary 롤아웃 중일 때만 — canary 피드 4종을 한 벌로
+Copy-Item "<이전 폴더>\updates\canary.yml*" "<새 폴더>\updates\"                      # canary.yml + canary.yml.sig
+Copy-Item "<이전 폴더>\updates\<canary 설치본 파일명>*" "<새 폴더>\updates\"            # 설치본(.exe) + .blockmap
 ```
+
+7.1.4 **이전**(서명 도입 전)에 만든 canary 피드에는 `.sig`가 없어 옮겨도 7.1.4 이상 canary PC는 받지 않는다(7.1.3 이하 PC는
+서명을 보지 않으므로 받는다). 그런 canary는 옮기지 말고 7.1.4 패키지 기준으로 `-UpdateChannel canary -UpdateSigningKey ...`로
+다시 만든다.
 
 **`update-policy.json`(관리자 on/off 스위치)은 여기서 배치하지 않는다** — 템플릿(`update-policy.example.json`)만
 동봉되어 있으며, 기본은 비활성 상태를 유지해야 한다. 실제 롤아웃(canary → 전체 → 휴면 복귀) 절차는
@@ -492,7 +500,7 @@ Electron 앱 → 로그인 → POST /api/devices/register (publicKey, buildTarge
 1. 인스톨러 실행 (electron-builder `productName` 기준 파일명):
    - 기본: `직업성 질환 통합 평가 프로그램 Setup {VERSION}.exe`
    - 오프라인 패키지의 `electron/` 디렉터리에서 `.exe` 파일을 찾아 실행
-   - (트랙 2 이후) 같은 디렉터리에 `.blockmap`/`latest.yml`(또는 `canary.yml`)/
+   - (트랙 2 이후) 같은 디렉터리에 `.blockmap`/`latest.yml`(또는 `canary.yml`)/`.yml.sig`/
      `update-policy.example.json`이 함께 있으나, **첫 설치에는 `.exe`만 사용**한다 —
      나머지는 3-1-1의 서버 측 자동 업데이트 스테이징용이다.
 2. 서버 URL `https://wr.hospital.local` 입력 후 저장
@@ -1059,4 +1067,5 @@ $env:WR_VERSION = ""  # 원복
 - [ ] GPG 공개키 등록 및 백업 1회 성공
 - [ ] 클라이언트 PC CA 인증서 설치 확인 (INTRANET_DEPLOYMENT.md 3절)
 - [ ] (Electron 셸이 바뀐 릴리스인 경우) `/updates/` 스테이징 + `update-policy.json` 롤아웃 절차 확인 (3-1-1, INTRANET_DEPLOYMENT.md 7절)
+- [ ] (Electron 셸이 바뀐 릴리스인 경우) 패키지가 서명 키로 만들어졌다: `release-manifest.json`의 `electronInstaller.updateFeedSigned`가 `true`이고 `updates/`에 yml·`.sig` 쌍이 있다. 서명 검증 명령(`node scripts/sign-update-feed.mjs --verify ...`)은 **소스가 있는 릴리스 PC에서** 실행한다 — 오프라인 패키지와 서버에는 이 도구가 없다(INTRANET_DEPLOYMENT.md 7-6). 서버에서는 `SHA256SUMS` 검증과 `curl.exe -k https://<서버>/updates/latest.yml.sig`(base64 한 줄)로 확인한다. 서명 키·암호가 서버·`.env.production`에 없음
 - [ ] T46 Go/No-Go 결과표 PASS (docs/T46_GO_NO_GO.md)

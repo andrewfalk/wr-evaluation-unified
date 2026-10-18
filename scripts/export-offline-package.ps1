@@ -49,6 +49,25 @@
     intentionally server-only exports (e.g. a hotfix that doesn't touch the
     Electron shell) — in that case a PLACEHOLDER.txt is written instead.
 
+.PARAMETER UpdateSigningKey
+    Path to the Ed25519 PRIVATE key used to sign -UpdateChannel's metadata file
+    (scripts/sign-update-feed.mjs). REQUIRED whenever an Electron installer is
+    packaged (unless -AllowUnsignedUpdateFeed): the shell (7.1.4+) only downloads an
+    update after verifying <channel>.yml.sig against the public key built into it, so a
+    package whose updates/ holds an unsigned feed would make every shell reject updates.
+    The script signs release\<channel>.yml BEFORE the pre-flight (nothing is packaged if
+    signing or verification fails), copies the yml + .sig pair, and re-verifies the copied
+    files. If the key file is passphrase-protected, set $env:WR_UPDATE_SIGNING_PASSPHRASE
+    in the same PowerShell window first (never put it in .env.production or on the server).
+    Keep the key OUTSIDE this repository and outside cloud-synced folders.
+
+.PARAMETER AllowUnsignedUpdateFeed
+    Opt-out escape hatch: package the installer WITHOUT signing the update feed. Shells
+    (7.1.4+) will refuse every update from such a package (fail-closed); only use it for
+    a package that is installed fresh and never meant to update through the feed.
+    Recorded as updateFeedSigned=false in release-manifest.json. Cannot be combined with
+    -UpdateSigningKey.
+
 .PARAMETER NoZip
     Create the package directory but skip the .zip archive.
 
@@ -61,6 +80,9 @@
 
     # Canary channel package
     .\scripts\export-offline-package.ps1 -UpdateChannel canary
+
+    # Standard release with a signed update feed (key outside the repo; set the passphrase env var first if the key is encrypted)
+    .\scripts\export-offline-package.ps1 -UpdateSigningKey "D:\wr-keys\update-signing-private.pem"
 
     # Server-only export — no Electron shell change this release
     .\scripts\export-offline-package.ps1 -AllowMissingElectronInstaller
@@ -80,7 +102,9 @@ param(
     [switch]$ExcludeBaseImages     = $false,
     [switch]$NoZip                 = $false,
     [switch]$AllowDirty            = $false,
-    [switch]$AllowMissingElectronInstaller = $false
+    [switch]$AllowMissingElectronInstaller = $false,
+    [string]$UpdateSigningKey      = "",
+    [switch]$AllowUnsignedUpdateFeed = $false
 )
 
 Set-StrictMode -Version Latest
@@ -91,6 +115,14 @@ if ($UpdateChannel -ne "latest" -and $UpdateChannel -ne "canary") {
     exit 1
 }
 $UpdateMetadataFileName = "$UpdateChannel.yml"
+
+# 업데이트 피드 서명(HF8). 기본은 서명 필수 — 서명 없는 피드가 든 패키지는 7.1.4 이후 셸이 모든 업데이트를 거부(fail-closed)한다.
+# 서명 없이 만드는 것은 -AllowUnsignedUpdateFeed로 명시한 경우뿐이다(키와 함께 줄 수 없다).
+if ($AllowUnsignedUpdateFeed -and $UpdateSigningKey) {
+    Write-Error "-AllowUnsignedUpdateFeed 와 -UpdateSigningKey 는 함께 쓸 수 없습니다. 서명하려면 -AllowUnsignedUpdateFeed 를 빼세요."
+    exit 1
+}
+$SignUpdateFeed = -not $AllowUnsignedUpdateFeed
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -221,20 +253,67 @@ Write-Host "  Output  : $PackageDir"  -ForegroundColor White
 # -ElectronInstallerPath를 주면 그 파일이 있는 폴더를 검색 위치로 쓴다.
 $artifactDir  = if ($ElectronInstallerPath) { Split-Path $ElectronInstallerPath -Parent } else { Join-Path $RepoRoot "release" }
 $metadataPath = Join-Path $artifactDir $UpdateMetadataFileName
+$signaturePath = Join-Path $artifactDir "$UpdateMetadataFileName.sig"
 
 function Test-UpdateArtifacts {
     # 비교 로직은 JS 검증기(vitest로 검증됨)에 있고, 여기서는 인자를 넘기고 종료코드로 중단만 한다.
-    $stdout = & node (Join-Path $RepoRoot "scripts\verify-update-artifacts.mjs") --artifact-dir $artifactDir --metadata-file $UpdateMetadataFileName --expected-version $Version
+    # 서명이 필요한 패키징이면 --require-signature로 .sig도 셸에 내장된 공개 키로 검증한다(서명 없는 피드는 여기서 막힌다).
+    $verifyArgs = @('--artifact-dir', $artifactDir, '--metadata-file', $UpdateMetadataFileName, '--expected-version', $Version)
+    if ($SignUpdateFeed) { $verifyArgs += '--require-signature' }
+    $stdout = & node (Join-Path $RepoRoot "scripts\verify-update-artifacts.mjs") @verifyArgs
     if ($LASTEXITCODE -ne 0) {
         # verify-update-artifacts.mjs가 위에서 console.error로 원인을 이미 출력했다.
-        Write-Error "Update artifact verification failed (release version $Version) — refusing to package a possibly-mismatched installer+metadata pair."
+        Write-Error "Update artifact verification failed (release version $Version) — refusing to package a possibly-mismatched or unsigned installer+metadata pair."
         exit 1
     }
     return ($stdout | ConvertFrom-Json)
 }
 
+# 서명은 JS 도구(vitest로 검증됨)에 맡기고 종료코드로 중단만 한다. 비밀 키 암호는 환경변수 WR_UPDATE_SIGNING_PASSPHRASE로
+# 도구가 직접 읽으므로 이 스크립트는 암호를 받지도 출력하지도 않는다.
+function Invoke-UpdateFeedSigning {
+    & node (Join-Path $RepoRoot "scripts\sign-update-feed.mjs") --sign --key $UpdateSigningKey --dir $artifactDir --channel $UpdateChannel
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Update feed signing failed — refusing to package an unsigned feed."
+        exit 1
+    }
+}
+
+# 비밀 키 없이 이미 만들어진(복사된) 피드를 셸에 내장된 공개 키로 다시 확인한다.
+function Test-UpdateFeedSignature([string]$dir) {
+    & node (Join-Path $RepoRoot "scripts\sign-update-feed.mjs") --verify --dir $dir --channel $UpdateChannel
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Update feed signature verification failed in $dir — refusing to ship a feed that shells would reject."
+        exit 1
+    }
+}
+
 Write-Step "Update artifact pre-flight ($UpdateMetadataFileName vs release version $Version)"
 if (Test-Path $metadataPath) {
+    if ($SignUpdateFeed) {
+        # 사전 점검보다 **먼저** 서명한다. release\에 이전 빌드의 .sig가 남아 있어도 현재 yml에 대해 새로 만들어 덮어쓰므로
+        # 낡은 서명이 포장되지 않는다. 키 누락·서명 실패·검증 실패는 아무 산출물도 만들거나 지우기 전에 중단한다.
+        if (-not $UpdateSigningKey) {
+            Write-Error "업데이트 피드 서명 키가 필요합니다: -UpdateSigningKey <비밀키.pem> (서명 없이 만들려면 -AllowUnsignedUpdateFeed — 그 패키지의 셸은 업데이트를 모두 거부합니다)."
+            exit 1
+        }
+        if (-not (Test-Path -LiteralPath $UpdateSigningKey -PathType Leaf)) {
+            Write-Error "서명 키 파일이 없습니다: $UpdateSigningKey"
+            exit 1
+        }
+        $signingKeyFull = [System.IO.Path]::GetFullPath($UpdateSigningKey)
+        if ($signingKeyFull.StartsWith([System.IO.Path]::GetFullPath($RepoRoot), [System.StringComparison]::OrdinalIgnoreCase)) {
+            Write-Warn "서명 키가 저장소 폴더 안에 있습니다 — 커밋되지 않게 주의하고 저장소 밖으로 옮기세요."
+        }
+        if ($signingKeyFull -match 'OneDrive|Dropbox|Google ?Drive|iCloud') {
+            Write-Warn "서명 키가 클라우드로 동기화되는 폴더에 있는 것으로 보입니다($signingKeyFull) — 비밀 키는 동기화되지 않는 저장소 밖 폴더에 두세요."
+        }
+        Write-Host "    signing $UpdateMetadataFileName ..." -ForegroundColor Gray
+        Invoke-UpdateFeedSigning
+        Write-Ok "$UpdateMetadataFileName.sig 생성 (서명 직후 셸에 내장된 공개 키로 자가 검증됨)"
+    } else {
+        Write-Warn "서명 없이 패키징합니다(-AllowUnsignedUpdateFeed) — 이 패키지의 셸(7.1.4+)은 업데이트 피드를 신뢰하지 않아 자동 업데이트를 모두 거부합니다."
+    }
     $preflight = Test-UpdateArtifacts
     Write-Ok "$($preflight.installerFile) — $UpdateMetadataFileName version $($preflight.version) = release version $Version"
 } elseif ($AllowMissingElectronInstaller) {
@@ -402,6 +481,14 @@ if (Test-Path $metadataPath) {
     Write-Ok "electron/$($verified.blockmapFile)"
     Write-Ok "electron/$UpdateMetadataFileName (SHA-512 verified against installer)"
 
+    if ($SignUpdateFeed) {
+        # yml과 .sig는 **한 쌍**이다 — yml만 복사하면 셸이 서명 파일이 없다는 이유로 업데이트를 거부한다.
+        if (-not $verified.signatureVerified) { Write-Error "사전 점검이 서명을 확인하지 못했습니다(signatureVerified 없음)."; exit 1 }
+        Copy-Required $signaturePath $electronDest
+        Test-UpdateFeedSignature $electronDest
+        Write-Ok "electron/$UpdateMetadataFileName.sig (복사본을 셸에 내장된 공개 키로 재검증)"
+    }
+
     $UpdateArtifactManifest = [ordered]@{
         channel        = $verified.channel
         version        = $verified.version
@@ -409,6 +496,8 @@ if (Test-Path $metadataPath) {
         installerFile  = $verified.installerFile
         blockmapFile   = $verified.blockmapFile
         sha512Verified = $verified.sha512Verified
+        updateFeedSigned = [bool]$SignUpdateFeed
+        signatureFile  = if ($SignUpdateFeed) { "$UpdateMetadataFileName.sig" } else { $null }
     }
 } elseif ($AllowMissingElectronInstaller) {
     $placeholder  = "Electron intranet installer ($UpdateChannel channel) not yet available.`r`n"
@@ -424,6 +513,8 @@ if (Test-Path $metadataPath) {
         installerFile  = $null
         blockmapFile   = $null
         sha512Verified = $false
+        updateFeedSigned = $false
+        signatureFile  = $null
     }
 } else {
     # 기본 동작은 실패다 — electron-updater 도입 이후 에어갭 패키지는 설치본을 반드시
@@ -460,6 +551,12 @@ if ($copiedInstallerName) {
     Write-Ok "updates/$($verified.installerFile)"
     Write-Ok "updates/$($verified.blockmapFile)"
     Write-Ok "updates/$UpdateMetadataFileName (update-policy.json은 포함하지 않음 — 정책 파일이 없으면 업데이터 휴면)"
+    if ($SignUpdateFeed) {
+        # 서버가 실제로 서빙하는 디렉터리다 — 여기서도 yml·.sig 쌍을 복사하고 복사본을 다시 검증한다.
+        Copy-Required $signaturePath $updatesDest
+        Test-UpdateFeedSignature $updatesDest
+        Write-Ok "updates/$UpdateMetadataFileName.sig (복사본을 셸에 내장된 공개 키로 재검증)"
+    }
 } else {
     Write-Warn "updates/ 는 빈 디렉터리로 생성 (설치본 미포함 export)"
 }
@@ -542,6 +639,8 @@ $manifest = [ordered]@{
         installerFile  = $UpdateArtifactManifest.installerFile
         blockmapFile   = $UpdateArtifactManifest.blockmapFile
         sha512Verified = $UpdateArtifactManifest.sha512Verified
+        updateFeedSigned = $UpdateArtifactManifest.updateFeedSigned
+        signatureFile  = $UpdateArtifactManifest.signatureFile
         updatesDirPopulated = [bool]$copiedInstallerName
         note           = if (-not $copiedInstallerName) { "인트라넷 Electron 빌드($UpdateChannel 채널) 미완성 — 별도 빌드 후 -ElectronInstallerPath로 재실행 필요" } else { $null }
     }
