@@ -64,6 +64,12 @@ describe('verify-stack.ps1 — 다른 스택을 건드리지 않는다', () => {
     }
     expect(SCRIPT.toLowerCase()).not.toContain('changeme');
   });
+
+  it('환경 파일 템플릿은 통계 워크벤치를 켜고(꺼 두면 설치본에 버튼이 안 뜬다) 영상 분석은 운영 기본값(꺼짐)으로 둔다', () => {
+    expect(SCRIPT).toMatch(/^STATS_WORKBENCH_ENABLED=true$/m);
+    expect(SCRIPT).toMatch(/^#VIDEO_ANALYSIS_ENABLED=true$/m);
+    expect(SCRIPT).not.toMatch(/^VIDEO_ANALYSIS_ENABLED=true$/m);
+  });
 });
 
 describe('verify-stack.ps1 — 볼륨', () => {

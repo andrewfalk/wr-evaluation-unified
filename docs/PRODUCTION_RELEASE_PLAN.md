@@ -127,7 +127,7 @@ pwsh -File scripts/verify-stack.ps1 purge -Force      # 볼륨까지 삭제 (공
 
 - 필요: PowerShell 7, Docker, hosts의 `127.0.0.1 wr.hospital.local`, 패키지 폴더 `release\wr-evaluation-unified-<버전>-intranet`(`-PackageDir`로 지정 가능).
 - **패키지 그대로**: 패키지의 `docker-compose.yml` + `docker-compose.prod.yml`과 패키지에 담긴 이미지를 쓴다. `up`은 로컬 이미지 ID가 `release-manifest.json`과 같은지 먼저 확인한다(다르면 `-LoadImages`로 패키지의 tar를 불러온다). 패키지의 `updates\`가 `/updates/`로 서빙되므로 서명된 `latest.yml.sig` 업데이트 시험에 쓴다.
-- **환경 파일**: `release\.verify-stack\wr-verify.env`에 시험 전용 무작위 값으로 만든다. 실제 `.env.production`은 읽지 않는다. 영상 분석·통계 워크벤치는 이 파일의 주석을 풀고 `up`을 다시 실행하면 켜진다.
+- **환경 파일**: `release\.verify-stack\wr-verify.env`에 시험 전용 무작위 값으로 만든다. 실제 `.env.production`은 읽지 않는다. 통계 워크벤치는 기본으로 켜 둔다(서버가 꺼 두면 설치본에 통계분석 버튼이 뜨지 않는다). 영상 분석은 운영 기본값(꺼짐)을 따르며, 이 파일의 주석을 풀고 `up`을 다시 실행하면 켜진다.
 - **TLS**: 기존 Caddy CA 볼륨(`wr-evaluation-unified_caddy_data`)을 재사용한다. 그 루트가 Windows에 신뢰 등록돼 있으면 별도 설치가 필요 없다(`up`·`status`가 지문으로 알려 준다). 새 CA를 쓰려면 `-FreshCa`이며 루트 인증서를 직접 신뢰 등록해야 한다. 오래 멈춰 있던 볼륨의 서버 인증서(수명 6일)는 만료돼 있으므로 `up`이 Caddy를 한 번 재시작해 새로 발급받는다.
 - 이 스택은 리허설용이다. 백업 서비스(GPG)는 띄우지 않으며, 아래 4절(초기화)·5절(검증)의 운영 절차를 대체하지 않는다.
 

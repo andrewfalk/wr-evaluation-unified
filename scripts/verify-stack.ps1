@@ -13,7 +13,7 @@
     - compose 프로젝트 이름은 wr-verify 로 고정이다(파라미터로 열지 않는다). 운영(wr-prod)·개발(wr-evaluation-unified)
       프로젝트의 컨테이너·볼륨은 건드리지 않는다. DB·업로드·백업 볼륨도 wr-verify_* 로 따로 생긴다.
     - 실제 .env.production 은 읽지 않는다. 시험 전용 환경 파일(release\.verify-stack\wr-verify.env)을 처음 한 번
-      무작위 비밀값으로 만든다. 영상 분석·통계 워크벤치 등은 그 파일을 고친 뒤 up 을 다시 실행하면 켜진다.
+      무작위 비밀값으로 만든다. 통계 워크벤치는 기본으로 켜 두고, 영상 분석 등은 그 파일을 고친 뒤 up 을 다시 실행하면 켜진다.
     - TLS: Caddy 내부 CA 는 기존 볼륨(wr-evaluation-unified_caddy_data)을 재사용한다. 그 CA 루트가 이미 Windows 에
       신뢰 등록돼 있으면 별도 설치 없이 설치본이 접속된다(up 이 지문을 비교해 알려 준다). 새 CA 를 쓰려면 -FreshCa.
     - 서비스는 패키지의 기본 서비스 전부(postgres·backup-monitor·partition·app·caddy)다. backup 프로필(GPG 필요)은 띄우지
@@ -126,9 +126,10 @@ ACCESS_TOKEN_SECRET=$(New-HexSecret)
 REFRESH_TOKEN_SECRET=$(New-HexSecret)
 # docker-compose.prod.yml 이 비어 있으면 거부하는 필수 값 — 이 스택은 backup 서비스를 띄우지 않으므로 자리만 채운다.
 BACKUP_GPG_RECIPIENT=verify-stack-unused@invalid.example
-# 시험 항목에 따라 필요하면 주석을 풀고 up 을 다시 실행한다.
+# 통계분석 워크벤치는 기본으로 켠다 — 서버가 꺼 두면(compose 기본값 false) 설치본에 통계분석 버튼이 뜨지 않는다.
+STATS_WORKBENCH_ENABLED=true
+# 영상 분석은 운영 기본값(꺼짐)을 따른다. 시험이 필요하면 주석을 풀고 up 을 다시 실행한다.
 #VIDEO_ANALYSIS_ENABLED=true
-#STATS_WORKBENCH_ENABLED=true
 "@
         Write-Utf8NoBom $EnvFile ($text -replace "`r`n", "`n")
         Write-Ok "시험 전용 환경 파일 생성: $EnvFile"
