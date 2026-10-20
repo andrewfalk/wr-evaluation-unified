@@ -52,7 +52,8 @@ wr-evaluation-unified-5.0.1-intranet/    ← 이 디렉터리가 compose 실행 
 │   ├── partition-crontab                # 파티션 cron 스케줄
 │   ├── import-images.ps1                # Windows: Docker 이미지 로드
 │   ├── import-images.sh                 # Linux: Docker 이미지 로드
-│   └── install-prod.ps1                 # Windows: 설치 자동화 스크립트
+│   ├── install-prod.ps1                 # Windows: 설치 자동화 스크립트
+│   └── backup-caddy-ca.ps1              # Windows: Caddy 내부 CA 키 백업 (PRODUCTION_RELEASE_PLAN.md 7-1)
 │
 │  ── Docker 이미지 ──────────────────────────────────────────────────────────
 ├── images/
@@ -571,6 +572,8 @@ docker exec wr-prod-caddy-1 cat /data/caddy/pki/authorities/local/root.crt > cad
 ```
 
 생성된 `caddy-root.crt` 파일을 USB 등으로 모든 클라이언트 PC에 배포합니다.
+
+> **CA 키 백업**: 이 CA의 비밀 키가 든 `caddy_data` 볼륨은 일일 백업 대상이 아닙니다. 최초 배포 직후 `.\scripts\backup-caddy-ca.ps1`로 반드시 백업하세요(PRODUCTION_RELEASE_PLAN.md 7-1). 잃으면 새 CA가 생겨 모든 클라이언트 PC에 루트 인증서를 다시 설치해야 합니다.
 
 ### 8-2. 클라이언트 PC에 CA 인증서 설치
 

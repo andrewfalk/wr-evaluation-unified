@@ -80,6 +80,8 @@ docker compose exec caddy cat /data/caddy/pki/authorities/local/root.crt > wr-in
 
 `wr-internal-ca.crt` 파일을 클라이언트 PC에 배포합니다 (공유 폴더, USB, 내부 웹 서버 등).
 
+> **CA 키 백업**: 이 CA의 비밀 키가 든 `caddy_data` 볼륨은 일일 백업 대상이 아니다. 최초 배포 직후 `scripts\backup-caddy-ca.ps1`로 반드시 백업한다(PRODUCTION_RELEASE_PLAN.md 7-1). 잃으면 새 CA가 생겨 모든 클라이언트 PC에 루트 인증서를 다시 설치해야 한다.
+
 ### 3-2. Windows — 신뢰 저장소 설치
 
 **방법 A: GUI**
