@@ -1059,7 +1059,7 @@ $env:WR_VERSION = ""  # 원복
 | Volume | 용도 | 보존 정책 |
 |---|---|---|
 | `wr-prod_postgres_data` | 주 DB 데이터 | 영구 보존, 삭제 금지 |
-| `wr-prod_caddy_data` | Caddy cert/CA | 재생성 가능 (인증서 재발급 필요) |
+| `wr-prod_caddy_data` | Caddy 내부 CA 키·인증서 | **영구 보존, 삭제 금지** — 잃으면 새 CA가 생겨 모든 클라이언트 PC에 루트 인증서를 다시 설치해야 한다. 일일 DB 백업 대상이 아니므로 7-1의 CA 키 백업이 필요 |
 | `wr-prod_caddy_config` | Caddy 런타임 설정 | 재생성 가능 |
 | `wr-prod_backup_data` | GPG 암호화 백업 파일 | 영구 보존 |
 | `wr-prod_backup_alerts` | 백업 알림 파일 | 재생성 가능 |
@@ -1068,6 +1068,50 @@ $env:WR_VERSION = ""  # 원복
 **규칙:**
 - dev/staging volume (`wr-evaluation-unified_*`)과 절대 혼용하지 않는다.
 - `wr-prod_postgres_data`와 `wr-prod_backup_data`는 정기 외장 미디어 또는 안전한 위치에 별도 보존 고려.
+- `wr-prod_caddy_data`는 일일 백업 대상이 **아니다**. 최초 배포 직후·연 1회·서버 이전이나 볼륨 작업 직전에 `scripts\backup-caddy-ca.ps1`로 CA 키를 백업한다(7-1).
+
+### 7-1. Caddy 내부 CA 키 백업·복구
+
+**왜 필요한가**: 모든 클라이언트 PC가 Caddy 내부 CA의 루트 인증서를 신뢰 등록해 두었다(INTRANET_DEPLOYMENT.md 3절). `wr-prod_caddy_data` 볼륨을 잃으면 Caddy가 **새 CA**를 만들고, 그 루트 인증서를 병원 PC 전부에 다시 설치해야 한다. 이 볼륨은 일일 DB 백업(backup 서비스)의 대상이 아니다. 이 CA의 비밀 키(`root.key`, `intermediate.key`)를 가진 사람은 병원 PC가 신뢰하는 가짜 서버 인증서를 만들 수 있으므로, 백업 파일은 반드시 암호화하고 개인 키와 따로 보관한다.
+
+**언제**: 최초 배포 직후 1회 · 이후 연 1회(루트는 약 10년 수명이지만 중간 인증서는 365일 수명이라 갱신될 수 있다) · 서버 이전, Docker 재설치, 볼륨 작업 직전.
+
+**백업** (서버, 패키지 루트에서 실행. Windows PowerShell 5.1과 PowerShell 7 모두 된다):
+
+```powershell
+.\scripts\backup-caddy-ca.ps1
+# 다른 compose 프로젝트(리허설 설치 등)라면:  -Project wr-prod-test -EnvFile .\.env.rehearsal
+```
+
+- `.env.production`에서 `BACKUP_GPG_RECIPIENT`와 `WR_VERSION`만 읽는다. 기존 DB 백업과 같은 **GPG 공개 키**로 암호화하며, 그 키가 `wr-prod_backup_gnupg` 볼륨에 등록돼 있어야 한다(BACKUP_RESTORE.md 3-2). 서버에는 복호화에 필요한 개인 키가 없다.
+- 결과물: `caddy-ca-wr-prod-<시각>.tar.gpg`(암호화된 CA 키·인증서 4개)와 `.info.txt`(루트 인증서 지문 등 공개 정보만). 암호화되지 않은 파일은 디스크에 쓰지 않는다(tar는 컨테이너 메모리에만 만들어진다). `caddy_data` 볼륨은 읽기 전용으로 마운트하며 키 내용은 화면에 출력하지 않는다.
+- 두 파일을 **오프라인 매체(USB·금고)**로 옮기고 서버의 작업 사본은 지운다. 복호화에 필요한 **개인 GPG 키는 이 파일과 다른 매체**에 보관한다(BACKUP_RESTORE.md 3-1).
+- 백업 직후 `.info.txt`의 `Root SHA-1` 지문이 클라이언트 PC에 설치된 인증서의 지문(`Get-ChildItem Cert:\CurrentUser\Root` 또는 `LocalMachine\Root`의 `WR Evaluation Internal CA` 항목)과 같은지 한 번 확인한다.
+
+**복구** (CA 볼륨을 잃었거나 새 서버로 옮길 때):
+
+1. **개인 GPG 키가 있는 PC**에서 복호화한다. 결과는 `local\` 폴더(키 4개 — 평문이므로 취급 주의)다.
+   ```powershell
+   gpg --decrypt .\caddy-ca-wr-prod-<시각>.tar.gpg | tar -xf -
+   ```
+2. `local\` 폴더를 서버로 옮기고 Caddy를 멈춘다.
+   ```powershell
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod stop caddy
+   ```
+3. 볼륨에 덮어쓴다. `<폴더>`는 `local\`이 들어 있는 폴더의 전체 경로다.
+   ```powershell
+   docker run --rm --entrypoint sh -v wr-prod_caddy_data:/data -v "<폴더>:/in:ro" wr-backup:<WR_VERSION> -c 'mkdir -p /data/caddy/pki/authorities/local && cp -a /in/local/. /data/caddy/pki/authorities/local/ && chown -R 0:0 /data/caddy/pki/authorities/local && chmod 700 /data/caddy/pki/authorities/local && chmod 600 /data/caddy/pki/authorities/local/*'
+   ```
+4. Caddy를 시작하고(`... -p wr-prod up -d caddy`) 루트 지문이 `.info.txt`와 같은지 확인한다.
+   ```powershell
+   docker exec wr-prod-caddy-1 cat /data/caddy/pki/authorities/local/root.crt > check-root.crt
+   (Get-PfxCertificate -FilePath .\check-root.crt).Thumbprint
+   ```
+5. 지문이 같으면 클라이언트 PC에서 할 일은 없다(같은 루트를 계속 신뢰한다). 평문 `local\` 폴더와 `check-root.crt`를 지운다.
+
+복구 절차는 **운영 밖에서 한 번 리허설**해 두는 것이 좋다. 시험용 키로 백업을 만들어 복호화하고 새 볼륨에 복원했을 때 4개 파일이 원본과 바이트 단위로 같았다(스크립트 도입 시 확인).
+
+참고: 서버를 6일 넘게 멈췄다가 켜면 Caddy의 서버 인증서(수명 6일)가 만료돼 있다. 이때 Caddy는 만료된 파일을 지우고 갱신하다 실패하며 스스로 복구되지 않는다(검증 스택에서 확인). 접속 오류(`NotTimeValid`)가 보이면 `... -p wr-prod restart caddy`를 한 번 실행한다. CA 키 복구와는 별개의 증상이다.
 
 ---
 
@@ -1083,6 +1127,7 @@ $env:WR_VERSION = ""  # 원복
 - [ ] AUDIT_DB_PASSWORD ALTER ROLE 실행 완료
 - [ ] 사용자 정의 프리셋은 계정별 `private` 저장으로 동작함
 - [ ] GPG 공개키 등록 및 백업 1회 성공
+- [ ] Caddy 내부 CA 키 백업 완료(7-1): `caddy-ca-*.tar.gpg`가 오프라인 매체에 있고, 개인 GPG 키와 다른 곳에 보관됨
 - [ ] 클라이언트 PC CA 인증서 설치 확인 (INTRANET_DEPLOYMENT.md 3절)
 - [ ] (Electron 셸이 바뀐 릴리스인 경우) `/updates/` 스테이징 + `update-policy.json` 롤아웃 절차 확인 (3-1-1, INTRANET_DEPLOYMENT.md 7절)
 - [ ] (Electron 셸이 바뀐 릴리스인 경우) 패키지가 서명 키로 만들어졌다: `release-manifest.json`의 `electronInstaller.updateFeedSigned`가 `true`이고 `updates/`에 yml·`.sig` 쌍이 있다. 서명 검증 명령(`node scripts/sign-update-feed.mjs --verify ...`)은 **소스가 있는 릴리스 PC에서** 실행한다 — 오프라인 패키지와 서버에는 이 도구가 없다(INTRANET_DEPLOYMENT.md 7-6). 서버에서는 `SHA256SUMS` 검증과 `curl.exe -k https://<서버>/updates/latest.yml.sig`(base64 한 줄)로 확인한다. 서명 키·암호가 서버·`.env.production`에 없음

@@ -52,6 +52,7 @@
 - 평문 dump는 `/tmp`에 임시 생성 후 암호화 즉시 삭제
 - `backup_data` 볼륨은 암호화된 파일만 보관
 - `backup_gnupg` 볼륨은 공개 키 keyring 보관 (개인 키 없음)
+- **범위**: 이 백업은 PostgreSQL 덤프만 대상이다. Caddy 내부 CA 키(`caddy_data` 볼륨)는 포함되지 않는다. 같은 공개 키를 써서 `scripts\backup-caddy-ca.ps1`로 따로 백업한다(PRODUCTION_RELEASE_PLAN.md 7-1).
 
 ---
 
