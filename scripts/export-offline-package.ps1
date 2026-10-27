@@ -410,7 +410,7 @@ $opsScripts = @(
     "audit-partition.sh", "backup-crontab", "partition-crontab"
 )
 # Installer helper scripts (for use during offline installation)
-$helperScripts = @("import-images.ps1", "import-images.sh", "install-prod.ps1", "backup-caddy-ca.ps1")
+$helperScripts = @("import-images.ps1", "import-images.sh", "install-prod.ps1", "backup-caddy-ca.ps1", "check-app-publish.ps1")
 
 foreach ($f in ($opsScripts + $helperScripts)) {
     $src = Join-Path $RepoRoot "scripts\$f"

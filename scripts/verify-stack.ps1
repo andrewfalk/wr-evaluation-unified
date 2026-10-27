@@ -69,6 +69,8 @@ $ProjectName   = 'wr-verify'
 $Domain        = 'wr.hospital.local'
 $HttpsPort     = 8443
 $HttpPort      = 8080
+$AppPort       = 13001   # 앱 루프백 게시(127.0.0.1:<번호>) — 이 PC의 Tier-3 개발 서버가 3001 을 쓰므로 비켜 둔다
+$ShellOverrideKeys = @('WR_APP_PORT', 'WR_CADDY_HTTPS_BIND', 'WR_CADDY_HTTP_BIND')
 $CaVolumeName  = 'wr-evaluation-unified_caddy_data'   # 예전 스택이 만든 Caddy 데이터(내부 CA) 볼륨 — 재사용(external)
 $BaseUrl       = "https://${Domain}:${HttpsPort}"
 
@@ -130,6 +132,8 @@ BACKUP_GPG_RECIPIENT=verify-stack-unused@invalid.example
 STATS_WORKBENCH_ENABLED=true
 # 영상 분석은 운영 기본값(꺼짐)을 따른다. 시험이 필요하면 주석을 풀고 up 을 다시 실행한다.
 #VIDEO_ANALYSIS_ENABLED=true
+# 앱 루프백 게시 포트(127.0.0.1:<번호>). 운영 기본 3001 은 이 PC의 개발 서버와 겹친다(옛 패키지는 이 값을 무시).
+WR_APP_PORT=$AppPort
 "@
         Write-Utf8NoBom $EnvFile ($text -replace "`r`n", "`n")
         Write-Ok "시험 전용 환경 파일 생성: $EnvFile"
@@ -144,6 +148,19 @@ STATS_WORKBENCH_ENABLED=true
     } else {
         Write-Utf8NoBom $EnvFile ($cur.TrimEnd() + "`nWR_VERSION=$Version`n")
     }
+    # 이 키가 생기기 전에 만든 환경 파일은 보충한다 — 없으면 새 패키지가 기본 3001 에 게시해 개발 서버와 충돌한다.
+    $cur = Get-Content $EnvFile -Raw
+    if ($cur -notmatch '(?m)^WR_APP_PORT=') {
+        Write-Utf8NoBom $EnvFile ($cur.TrimEnd() + "`nWR_APP_PORT=$AppPort`n")
+        Write-Ok "환경 파일에 WR_APP_PORT=$AppPort 보충 (개발 서버 3001 과 충돌 방지)"
+    }
+}
+
+# 시험 환경 파일의 앱 게시 포트(키가 없거나 비면 compose 기본값 3001).
+function Get-AppPort {
+    $v = Get-EnvValue 'WR_APP_PORT'
+    if ($v) { return [int]$v }
+    return 3001
 }
 
 function Get-EnvValue([string]$Key) {
@@ -219,15 +236,37 @@ function Get-OwnContainers {
     return @(docker ps --filter "label=com.docker.compose.project=$ProjectName" --format '{{.Names}}' 2>$null)
 }
 
-function Assert-PortsFree {
-    $mine = @(Get-OwnContainers)
-    foreach ($port in $HttpsPort, $HttpPort) {
-        $names = @(docker ps --filter "publish=$port" --format '{{.Names}}' 2>$null) | Where-Object { $_ }
-        $others = @($names | Where-Object { $mine -notcontains $_ })
-        if ($others.Count -gt 0) {
-            Stop-WithError ":$port 를 다른 컨테이너가 쓰고 있습니다: $($others -join ', ')`n   이 스크립트는 wr-verify 프로젝트 외의 컨테이너를 건드리지 않습니다. 직접 정리한 뒤 다시 실행하세요."
+# 호스트 포트를 실제로 쥔 컨테이너 목록(이름·compose 프로젝트·서비스·HostIp·HostPort).
+# docker ps 의 publish 필터는 쓰지 않는다 — 호스트/컨테이너 포트 중 어느 쪽에 걸리는지 문서가 일관되지 않다
+# (이 PC Docker 29.7.2 실측은 호스트 포트, Docker 문서 예시는 컨테이너 포트로 읽힘). 실제 매핑을 읽으면 버전과 무관하다.
+function Get-PortOwners {
+    $ids = @(docker ps -q 2>$null | Where-Object { $_ })
+    if ($ids.Count -eq 0) { return @() }
+    $owners = foreach ($c in (docker inspect @ids 2>$null | Out-String | ConvertFrom-Json)) {
+        $labels = $c.Config.Labels
+        $project = if ($labels -and $labels.PSObject.Properties['com.docker.compose.project']) { $labels.'com.docker.compose.project' } else { '' }
+        $service = if ($labels -and $labels.PSObject.Properties['com.docker.compose.service']) { $labels.'com.docker.compose.service' } else { '' }
+        if (-not $c.NetworkSettings.Ports) { continue }
+        foreach ($prop in $c.NetworkSettings.Ports.PSObject.Properties) {
+            foreach ($b in @($prop.Value)) {
+                if ($null -eq $b) { continue }
+                [pscustomobject]@{ Name = $c.Name.TrimStart('/'); Project = $project; Service = $service; HostIp = $b.HostIp; HostPort = [int]$b.HostPort }
+            }
         }
-        if ($mine.Count -eq 0) {
+    }
+    return @($owners)
+}
+
+function Assert-PortsFree {
+    $owners = @(Get-PortOwners)
+    foreach ($port in $HttpsPort, $HttpPort, (Get-AppPort)) {
+        $here = @($owners | Where-Object { $_.HostPort -eq $port })
+        $others = @($here | Where-Object { $_.Project -ne $ProjectName })
+        if ($others.Count -gt 0) {
+            Stop-WithError ":$port 를 다른 컨테이너가 쓰고 있습니다: $(($others | ForEach-Object Name | Sort-Object -Unique) -join ', ')`n   이 스크립트는 wr-verify 프로젝트 외의 컨테이너를 건드리지 않습니다. 직접 정리한 뒤 다시 실행하세요."
+        }
+        # 이 프로젝트 컨테이너가 쥔 포트는 통과(재실행). 아무 컨테이너도 안 쥐었는데 리스너가 있으면 다른 프로세스다.
+        if ($here.Count -eq 0) {
             $listen = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($listen) {
                 $p = Get-Process -Id $listen.OwningProcess -ErrorAction SilentlyContinue
@@ -235,6 +274,29 @@ function Assert-PortsFree {
             }
         }
     }
+}
+
+# 셸 환경변수는 --env-file 보다 우선한다 — 남아 있으면 시험 구성이 환경 파일과 달라진다.
+function Assert-NoShellOverride {
+    $set = @($ShellOverrideKeys | Where-Object { Test-Path "env:$_" })
+    if ($set.Count -gt 0) {
+        Stop-WithError "이 셸에 $($set -join ', ') 가 설정돼 있어 환경 파일 값을 덮어씁니다. Remove-Item env:<이름> 로 지우거나 새 창에서 실행하세요."
+    }
+}
+
+# 해석된 compose 설정에서 app 게시가 127.0.0.1 에만, 환경 파일의 포트로 있는지(게시가 없는 옛 패키지는 통과). 게시 개수를 돌려준다.
+function Assert-AppLoopbackOnly {
+    $json = (Invoke-Compose @('config', '--format', 'json')) -join "`n"
+    if ($LASTEXITCODE -ne 0) { Stop-WithError 'docker compose config --format json 실패' }
+    $app = ($json | ConvertFrom-Json).services.app
+    $ports = @(if ($app.PSObject.Properties['ports']) { $app.ports | Where-Object { $null -ne $_ } })
+    $want = Get-AppPort
+    foreach ($p in $ports) {
+        $hostIp = if ($p.PSObject.Properties['host_ip']) { $p.host_ip } else { '' }
+        if ($hostIp -ne '127.0.0.1') { Stop-WithError "app 이 127.0.0.1 이 아닌 주소('$hostIp')에 게시됩니다(published=$($p.published)). 패키지의 docker-compose.prod.yml 을 확인하세요." }
+        if ("$($p.published)" -ne "$want") { Stop-WithError "app 게시 포트($($p.published))가 환경 파일의 WR_APP_PORT($want)와 다릅니다." }
+    }
+    return $ports.Count
 }
 
 function Test-HostResolves {
@@ -337,6 +399,7 @@ function Invoke-Up {
     Write-Step '1/7 사전 점검'
     Assert-Docker
     Write-Ok 'Docker / Compose'
+    Assert-NoShellOverride
     $pkg = Resolve-PackageDir
     $manifest = Get-Content (Join-Path $pkg 'release-manifest.json') -Raw | ConvertFrom-Json
     Write-Ok "패키지: $pkg (버전 $($manifest.version), 커밋 $($manifest.gitCommit.Substring(0, 7)))"
@@ -357,10 +420,12 @@ function Invoke-Up {
     Invoke-Compose @('config', '--quiet')
     if ($LASTEXITCODE -ne 0) { Stop-WithError 'docker compose config 검증 실패(위 메시지 확인)' }
     Write-Ok 'compose 설정 유효 (운영 오버레이 + 시험 override)'
+    $appPublished = Assert-AppLoopbackOnly
+    if ($appPublished -gt 0) { Write-Ok "app 게시: 127.0.0.1:$(Get-AppPort) 만 (LAN 에서는 닿지 않음)" } else { Write-Ok 'app 게시 없음 (루프백 게시 이전 패키지)' }
 
     Write-Step '4/7 포트 · 호스트 · CA'
     Assert-PortsFree
-    Write-Ok ":$HttpsPort / :$HttpPort 사용 가능"
+    Write-Ok ":$HttpsPort / :$HttpPort / :$(Get-AppPort) 사용 가능"
     Test-HostResolves
     Show-CaTrust
 

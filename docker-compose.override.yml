@@ -5,6 +5,10 @@ services:
   app:
     environment:
       CORS_ORIGINS: "https://wr.hospital.local:8443,http://localhost:3000,http://localhost:3001"
+    # 개발용 앱 포트 게시(이전에는 docker-compose.yml에 있었다). 운영 명령은 -f로 파일을 지정해
+    # 이 파일을 읽지 않으며, 오프라인 패키지에도 들어가지 않는다.
+    ports:
+      - "${DEV_PORT:-3001}:3001"
   # 6.0-7 스모크: 네이티브 서버(npm run dev)가 host에서 DB에 붙도록 postgres 포트 노출(dev 전용).
   postgres:
     ports:

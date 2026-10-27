@@ -101,8 +101,10 @@ services:
       # update-policy.json). 리터럴 경로(BACKUPS_DIR와 동일 이유 — Windows에서
       # ${VAR:-/...} 보간 기본값이 C:\...로 변환되는 함정을 피한다).
       UPDATES_DIR:          /app/updates
-    ports:
-      - "${DEV_PORT:-3001}:3001"
+    # 앱 포트 게시는 이 파일에 두지 않는다 — 개발은 docker-compose.override.yml(자동 로드),
+    # 운영은 docker-compose.prod.yml(127.0.0.1 고정). 여기에 두면 운영 오버레이가 지울 방법이
+    # `!override`(Compose 2.24.4+)뿐인데, 운영 서버의 Compose v2.22.0은 이 태그를 오류 없이 무시해
+    # 전 주소 게시가 남는다(실측).
     volumes:
       - backup_data:/backups:ro
       - backup_alerts:/backups/_alerts
@@ -142,9 +144,11 @@ services:
     # 호스트는 8080/8443으로 노출하고 컨테이너 내부는 표준 80/443을 그대로 사용한다.
     # 8080은 HTTP→HTTPS redirect 용도, 8443이 실제 HTTPS 진입점.
     # Electron 클라이언트(electron/main.js)의 DEFAULT_INTRANET_URL도 :8443으로 통일.
+    # 게시 주소는 변수로 바꿀 수 있다(기본값 = 위 동작). Caddy를 Windows 호스트 서비스로 옮기면
+    # 127.0.0.1:18443 / 127.0.0.1:18080처럼 루프백으로 비켜 두어 8443/8080과 겹치지 않게 한다.
     ports:
-      - "8080:80"
-      - "8443:443"
+      - "${WR_CADDY_HTTP_BIND:-8080}:80"
+      - "${WR_CADDY_HTTPS_BIND:-8443}:443"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
