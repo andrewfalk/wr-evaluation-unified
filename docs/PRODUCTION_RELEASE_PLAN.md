@@ -22,8 +22,8 @@
 | 항목 | 요건 |
 |---|---|
 | 서버 OS | Linux Ubuntu 22.04 LTS 또는 Windows Server 2019+ |
-| Docker Engine | 24.0 이상 |
-| Docker Compose | v2.17 이상 (`!reset` tag 지원 필요) |
+| Docker Engine | 24.0 이상. **Linux 호스트는 28.0.0 이상** — 앱을 `127.0.0.1`에만 게시하는데, 28.0.0 이전 엔진은 같은 L2 네트워크의 다른 호스트가 localhost 게시 포트에 접근할 수 있다([moby#45610](https://github.com/moby/moby/issues/45610)). Windows Docker Desktop은 게시 포트를 Windows 루프백 리스너가 받으므로 이 제약과 무관하다. `scripts/check-app-publish.ps1`이 기동 전에 확인한다 |
+| Docker Compose | v2.17 이상 (`!reset` tag 지원 필요). `!override`는 쓰지 않는다(v2.24.4 미만은 오류 없이 무시) |
 | DNS | `wr.hospital.local` → 서버 IP (클라이언트 전 PC에 적용) |
 | 방화벽 | 서버 포트 80, 443 인바운드 허용 |
 | GPG | 공개키 준비 완료 (백업 암호화용) |

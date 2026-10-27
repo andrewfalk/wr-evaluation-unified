@@ -116,7 +116,7 @@ describe('check-app-publish.ps1 — 읽기 전용 사전 점검', () => {
     const { bodies } = splitNativeBlocks(CHECK_CODE);
     for (const b of bodies) {
       const cmd = b.replace(/\s+/g, ' ');
-      expect(cmd, b).toMatch(/^docker (ps -q|inspect \$ids|compose -f docker-compose\.yml -f docker-compose\.prod\.yml --env-file \$EnvFile -p \$ProjectName config --format json)\b/);
+      expect(cmd, b).toMatch(/^docker (ps -q|inspect \$ids|info --format '\{\{\.OperatingSystem\}\}'|version --format '\{\{\.Server\.Version\}\}'|compose -f docker-compose\.yml -f docker-compose\.prod\.yml --env-file \$EnvFile -p \$ProjectName config --format json)( |$)/);
     }
     const statements = CHECK_CODE.split('\n').map((l) => l.trim());
     for (const s of statements) expect(s).not.toMatch(/^(?:&\s*)?(Stop-Process|Remove-Item|Set-Content|Add-Content|Out-File|New-Item)\b/);
@@ -132,6 +132,19 @@ describe('check-app-publish.ps1 — 읽기 전용 사전 점검', () => {
     expect(CHECK).toMatch(/if \(\$appPorts\.Count -eq 0\)\s*\{\s*Stop-Check/);
     expect(CHECK).toMatch(/if \(\$hostIp -ne '127\.0\.0\.1'\)\s*\{\s*Stop-Check/);
     expect(CHECK).toMatch(/if \(\[string\]\$p\.published -ne \[string\]\$expected\)\s*\{\s*Stop-Check/);
+  });
+
+  it('Docker Desktop 이 아닌 엔진은 28.0.0 미만이면 중단한다(moby#45610: localhost 게시가 L2 에서 닿음)', () => {
+    expect(CHECK).toMatch(/^\$MinLinuxEngineMajor = 28\b/m);
+    const at = CHECK.indexOf("if ($dockerOs -match 'Docker Desktop')");
+    expect(at).toBeGreaterThan(0);
+    const block = CHECK.slice(at, CHECK.indexOf('# 2.', at));
+    expect(block).toMatch(/\} else \{[\s\S]*?if \(\$major -lt \$MinLinuxEngineMajor\) \{\s*Stop-Check/);
+    // 엔진을 못 읽으면 통과시키지 않는다
+    expect(CHECK).toMatch(/if \(\$LASTEXITCODE -ne 0 -or -not \$dockerOs\) \{ Stop-Check/);
+    expect(CHECK).toMatch(/if \(\$LASTEXITCODE -ne 0 -or -not \$engine\) \{ Stop-Check/);
+    // 게시 판정·포트 점검보다 먼저 본다
+    expect(at).toBeLessThan(CHECK.indexOf('config --format json'));
   });
 
   it('WR_APP_PORT 는 번호만 허용한다(주소를 넣으면 중단)', () => {

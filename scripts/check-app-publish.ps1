@@ -21,6 +21,9 @@
          the host or the container port is not documented consistently (Docker 29 matched the
          host port in a test; the Docker docs example reads as the container port), and the
          production server runs an older Docker Engine.
+      4. The Docker engine enforces loopback-only publishing: Docker Desktop, or Docker Engine
+         28.0.0+ elsewhere (older Linux engines let same-network hosts reach 127.0.0.1 publishes,
+         moby/moby#45610).
 
     It never stops, removes or restarts anything. Exit code 0 = OK, 1 = fix the reported issue.
 
@@ -43,6 +46,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $DefaultAppPort = 3001
+$MinLinuxEngineMajor = 28   # moby/moby#45610: localhost publishes reachable from the L2 network before 28.0.0
 $ShellOverrideKeys = @('WR_APP_PORT', 'WR_CADDY_HTTPS_BIND', 'WR_CADDY_HTTP_BIND')
 
 function Write-Ok([string]$msg)   { Write-Host "   OK   $msg" -ForegroundColor Green }
@@ -111,6 +115,27 @@ if ($overrides.Count -gt 0) {
         ". Remove them (e.g. Remove-Item env:WR_APP_PORT) or open a new PowerShell window.")
 }
 Write-Ok "No shell overrides ($($ShellOverrideKeys -join ', '))"
+
+# 1b. Docker engine: a 127.0.0.1 publish only limits access to this host if the engine enforces it.
+# Docker Engine before 28.0.0 on Linux lets other hosts on the same L2 network reach ports
+# published to localhost (moby/moby#45610). Docker Desktop forwards published ports through a
+# listener on the Windows host's own loopback, so it is not affected in the same way.
+$dockerOs = (Invoke-Native { docker info --format '{{.OperatingSystem}}' 2>$null } | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $dockerOs) { Stop-Check "docker info failed. Is Docker running?" }
+$engine = (Invoke-Native { docker version --format '{{.Server.Version}}' 2>$null } | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $engine) { Stop-Check "docker version failed. Is Docker running?" }
+if ($dockerOs -match 'Docker Desktop') {
+    Write-Ok "Docker Desktop (engine $engine): published ports are forwarded by a Windows loopback listener"
+} else {
+    $major = 0
+    if ($engine -match '^(\d+)\.') { $major = [int]$Matches[1] }
+    if ($major -lt $MinLinuxEngineMajor) {
+        Stop-Check ("Docker Engine $engine on '$dockerOs' is older than $MinLinuxEngineMajor.0.0. Before 28.0.0, other hosts on " +
+            "the same network can reach ports published to 127.0.0.1 (moby/moby#45610), so the app would be reachable " +
+            "without Caddy. Upgrade Docker Engine to $MinLinuxEngineMajor.0.0 or later.")
+    }
+    Write-Ok "Docker Engine $engine ($dockerOs) enforces loopback-only publishing"
+}
 
 # 2. The port the env file asks for
 if (-not (Test-Path $EnvFile)) { Stop-Check "$EnvFile not found." }
