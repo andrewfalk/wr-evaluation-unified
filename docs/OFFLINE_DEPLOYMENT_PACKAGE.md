@@ -37,7 +37,7 @@ wr-evaluation-unified-5.0.1-intranet/    ← 이 디렉터리가 compose 실행 
 │
 │  ── compose 파일 ──────────────────────────────────────────────────────────
 ├── docker-compose.yml                   # 기본 compose 정의
-├── docker-compose.prod.yml              # 프로덕션 오버레이 (포트 미노출, HTTPS)
+├── docker-compose.prod.yml              # 프로덕션 오버레이 (앱은 127.0.0.1 루프백에만 게시, HTTPS)
 ├── .env.production.example              # 환경변수 템플릿 (비밀값 없음)
 │
 │  ── compose가 참조하는 설정 파일 ───────────────────────────────────────────
@@ -53,7 +53,8 @@ wr-evaluation-unified-5.0.1-intranet/    ← 이 디렉터리가 compose 실행 
 │   ├── import-images.ps1                # Windows: Docker 이미지 로드
 │   ├── import-images.sh                 # Linux: Docker 이미지 로드
 │   ├── install-prod.ps1                 # Windows: 설치 자동화 스크립트
-│   └── backup-caddy-ca.ps1              # Windows: Caddy 내부 CA 키 백업 (PRODUCTION_RELEASE_PLAN.md 7-1)
+│   ├── backup-caddy-ca.ps1              # Windows: Caddy 내부 CA 키 백업 (PRODUCTION_RELEASE_PLAN.md 7-1)
+│   └── check-app-publish.ps1            # Windows: 앱 루프백 게시 사전 점검 (설치·업데이트 전, 읽기 전용)
 │
 │  ── Docker 이미지 ──────────────────────────────────────────────────────────
 ├── images/

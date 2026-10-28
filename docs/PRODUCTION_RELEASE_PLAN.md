@@ -22,8 +22,8 @@
 | 항목 | 요건 |
 |---|---|
 | 서버 OS | Linux Ubuntu 22.04 LTS 또는 Windows Server 2019+ |
-| Docker Engine | 24.0 이상 |
-| Docker Compose | v2.17 이상 (`!reset` tag 지원 필요) |
+| Docker Engine | 24.0 이상. **Linux 호스트는 28.0.0 이상** — 앱을 `127.0.0.1`에만 게시하는데, 28.0.0 이전 엔진은 같은 L2 네트워크의 다른 호스트가 localhost 게시 포트에 접근할 수 있다([moby#45610](https://github.com/moby/moby/issues/45610)). Windows Docker Desktop은 게시 포트를 Windows 루프백 리스너가 받으므로 이 제약과 무관하다. `scripts/check-app-publish.ps1`이 기동 전에 확인한다 |
+| Docker Compose | v2.17 이상 (`!reset` tag 지원 필요). `!override`는 쓰지 않는다(v2.24.4 미만은 오류 없이 무시) |
 | DNS | `wr.hospital.local` → 서버 IP (클라이언트 전 PC에 적용) |
 | 방화벽 | 서버 포트 80, 443 인바운드 허용 |
 | GPG | 공개키 준비 완료 (백업 암호화용) |
@@ -251,7 +251,7 @@ docker compose -p wr-prod exec postgres \
 ```
 
 ```bash
-# 5. app 포트 노출 확인 (빈 출력이어야 함)
+# 5. app 포트 노출 확인 (루프백에만 게시돼 있어야 함)
 # port 명령은 compose 설정을 읽으므로 전체 플래그 필요
 docker compose \
   -f docker-compose.yml \
@@ -259,8 +259,15 @@ docker compose \
   --env-file .env.production \
   -p wr-prod \
   port app 3001
-# 기대: 빈 출력 (host:3001 바인딩 없음 — docker-compose.prod.yml의 ports: !reset [] 적용 확인)
+# 기대: 127.0.0.1:3001 (WR_APP_PORT를 바꿨으면 그 번호) — 0.0.0.0 이나 [::] 가 보이면 실패
+# 앱은 서버 PC 안에서만 닿는 루프백에 게시된다(docker-compose.prod.yml이 호스트 주소를 127.0.0.1로 고정).
+# 다른 PC(또는 서버의 LAN 주소)에서는 접속이 거부돼야 한다:
+#   Test-NetConnection <서버 LAN 주소> -Port 3001   → TcpTestSucceeded : False
 ```
+
+> **이전 기준과 다르다.** 루프백 게시 도입 전 패키지는 `ports: !reset []`로 앱을 전혀 게시하지 않아 위 명령이
+> "빈 출력"이었다. 지금은 `127.0.0.1:<포트>`가 정상이며, 판정 기준은 "LAN에서 닿지 않음"이다. 기동 전 점검은
+> `.\scripts\check-app-publish.ps1`(설치 스크립트가 자동 실행)이 한다.
 
 기대 테이블 목록:
 ```
@@ -286,7 +293,7 @@ docker compose \
 | app healthy | `STATUS: healthy` | `docker compose -p wr-prod ps` |
 | caddy healthy | `STATUS: healthy` | `docker compose -p wr-prod ps` |
 | migration 성공 | ERROR/FATAL 없음 + 위 테이블 목록 | `logs app + \dt` |
-| app 포트 미노출 | host 3001 바인딩 없음 → 빈 출력 | `docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod port app 3001` |
+| app 포트 미노출 | `127.0.0.1:3001`(또는 `WR_APP_PORT` 번호)에만 게시, LAN 주소로는 접속 거부 | `docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod port app 3001` + 다른 PC에서 `Test-NetConnection <서버 주소> -Port 3001` → False |
 
 ---
 
@@ -1121,7 +1128,7 @@ $env:WR_VERSION = ""  # 원복
 
 - [ ] `.env.production`에 `changeme_` 문자열 없음: `grep -i changeme .env.production`
 - [ ] ACCESS_TOKEN_SECRET, REFRESH_TOKEN_SECRET이 32바이트 이상 랜덤값
-- [ ] app 포트가 외부에 직접 노출되지 않음 (`docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod port app 3001` → 빈 출력)
+- [ ] app 포트가 외부에 직접 노출되지 않음 (`docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod port app 3001` → `127.0.0.1:3001`만, 다른 PC에서 `Test-NetConnection <서버 주소> -Port 3001` → False)
 - [ ] Caddy 인증서 정상 발급: `https://wr.hospital.local` 접속 시 인증서 오류 없음
 - [ ] admin 계정 초기 비밀번호 변경 완료
 - [ ] AUDIT_DB_PASSWORD ALTER ROLE 실행 완료

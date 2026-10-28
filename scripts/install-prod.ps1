@@ -194,6 +194,15 @@ if ($LASTEXITCODE -ne 0) {
 Write-Ok "Compose config is valid"
 $Passed++
 
+# App loopback publish (127.0.0.1:<WR_APP_PORT>): no shell overrides, resolved host IP is
+# 127.0.0.1 only, and the port is free or already held by this project's app. Read-only.
+& (Join-Path $PSScriptRoot "check-app-publish.ps1") -EnvFile $EnvFile -ProjectName $ProjectName
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "App port pre-check failed. Fix the issue above and retry."
+    exit 1
+}
+$Passed++
+
 # ── Step 5: Volume isolation check ───────────────────────────────────────────
 
 Write-Step 5 "Volume isolation check"

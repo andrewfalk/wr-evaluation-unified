@@ -138,12 +138,49 @@ describe('verify-stack.ps1 — 기동 순서·검증', () => {
     expect(all).toBeGreaterThan(first);
   });
 
-  it('다른 컨테이너가 8443/8080 을 쓰고 있으면 건드리지 않고 중단한다', () => {
+  it('다른 컨테이너가 8443/8080/앱 포트를 쓰고 있으면 건드리지 않고 중단한다', () => {
     const fn = fnBody('Assert-PortsFree');
-    expect(fn).toMatch(/publish=\$port/);
-    expect(fn).toMatch(/\$mine -notcontains \$_/);
+    expect(fn).toMatch(/foreach \(\$port in \$HttpsPort, \$HttpPort, \(Get-AppPort\)\)/);
+    expect(fn).toMatch(/\$_\.Project -ne \$ProjectName/);
     expect(fn).toMatch(/if\s*\(\$others\.Count -gt 0\)\s*\{\s*Stop-WithError/);
     expect(fn).not.toMatch(/Stop-Process|docker (stop|rm|kill)/);
+  });
+
+  it('포트 점유자는 실제 HostPort 매핑으로 찾는다 — 의미가 버전마다 다를 수 있는 publish 필터를 쓰지 않는다', () => {
+    expect(SCRIPT).not.toMatch(/--filter\s+"?publish=/);
+    const fn = fnBody('Get-PortOwners');
+    expect(fn).toMatch(/docker inspect @ids/);
+    expect(fn).toMatch(/NetworkSettings\.Ports/);
+    expect(fn).toMatch(/HostPort = \[int\]\$b\.HostPort/);
+    expect(fn).toMatch(/com\.docker\.compose\.project/);
+  });
+
+  it('앱 루프백 포트는 13001 이고(개발 서버 3001 회피) 새 환경 파일·기존 환경 파일 모두에 들어간다', () => {
+    expect(SCRIPT).toMatch(/^\$AppPort\s*=\s*13001\b/m);
+    const fn = fnBody('Initialize-EnvFile');
+    expect(fn).toMatch(/^WR_APP_PORT=\$AppPort$/m);
+    expect(fn).toMatch(/if \(\$cur -notmatch '\(\?m\)\^WR_APP_PORT='\)\s*\{[\s\S]*?WR_APP_PORT=\$AppPort/);
+  });
+
+  it('기동 전에 셸 덮어쓰기 변수를 거부하고, 해석된 설정의 app 게시가 127.0.0.1·환경 파일 포트인지 확인한다', () => {
+    const guard = fnBody('Assert-NoShellOverride');
+    expect(guard).toMatch(/Test-Path "env:\$_"/);
+    expect(SCRIPT).toMatch(/\$ShellOverrideKeys = @\('WR_APP_PORT', 'WR_CADDY_HTTPS_BIND', 'WR_CADDY_HTTP_BIND'\)/);
+    const check = fnBody('Assert-AppLoopbackOnly');
+    expect(check).toMatch(/Invoke-Compose @\('config', '--format', 'json'\)/);
+    expect(check).toMatch(/if \(\$hostIp -ne '127\.0\.0\.1'\)\s*\{\s*Stop-WithError/);
+    expect(check).toMatch(/-ne "\$want"\)\s*\{\s*Stop-WithError/);
+    const body = up();
+    const shell = body.indexOf('Assert-NoShellOverride');
+    const config = body.indexOf("'config', '--quiet'");
+    const loop = body.indexOf('Assert-AppLoopbackOnly');
+    const ports = body.indexOf('Assert-PortsFree');
+    const start = body.indexOf("'up', '-d', 'backup-monitor'");
+    expect(shell).toBeGreaterThanOrEqual(0);
+    expect(shell).toBeLessThan(config);
+    expect(config).toBeLessThan(loop);
+    expect(loop).toBeLessThan(ports);
+    expect(ports).toBeLessThan(start);
   });
 
   it('만료된 CA 볼륨 인증서(NotTimeValid)는 Caddy 를 단 한 번만 재시작해 해결한다', () => {

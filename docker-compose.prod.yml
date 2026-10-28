@@ -37,8 +37,14 @@ services:
   # Key changes from base compose:
   #   - image: pre-built image from offline package (no local build context)
   #   - build: !reset null → prevents accidental rebuild from source
-  #   - ports: !reset []  → app port NOT exposed externally.
-  #                          Caddy (80/443) is the only external entry point.
+  #   - ports: 127.0.0.1:${WR_APP_PORT:-3001} only → loopback-only publish so a
+  #     reverse proxy on the Windows host itself can reach the app. Other PCs
+  #     cannot connect; Caddy (8443/8080) stays the only external entry point.
+  #     The host IP is fixed here on purpose: only the port NUMBER is a variable,
+  #     so no env-file or shell value can turn this into an all-interface publish
+  #     (a value like "0.0.0.0:3001" makes compose fail with an address error).
+  #     The base file has no app ports, so nothing is merged. Do NOT use the
+  #     !override tag here — Compose v2.22 (production) ignores it silently.
   #   - All secrets required (no changeme_ defaults)
   #   - restart: always for production uptime
   # ---------------------------------------------------------------------------
@@ -52,7 +58,8 @@ services:
       REFRESH_TOKEN_SECRET: "${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET must be set}"
       CORS_ORIGINS:         "${CORS_ORIGINS:?CORS_ORIGINS must be set (e.g. https://wr.hospital.local:8443)}"
       TRUST_PROXY:          "1"
-    ports: !reset []
+    ports:
+      - "127.0.0.1:${WR_APP_PORT:-3001}:3001"
     restart: always
 
   # ---------------------------------------------------------------------------

@@ -372,7 +372,7 @@ grant는 관리자 콘솔 **"통계 권한"** 탭(`/api/capabilities/*`)에서 �
 ```
 wr-evaluation-unified/
 ├── docker-compose.yml                  # 기본 compose (dev + intranet 공통)
-├── docker-compose.prod.yml             # 프로덕션 오버레이 (포트 미노출, healthcheck)
+├── docker-compose.prod.yml             # 프로덕션 오버레이 (앱은 127.0.0.1 루프백에만 게시, healthcheck)
 ├── .env.production.example             # 프로덕션 env 템플릿
 │
 ├── server/                             # 인트라넷 API 백엔드
