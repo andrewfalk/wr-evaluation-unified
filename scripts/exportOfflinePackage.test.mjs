@@ -91,3 +91,34 @@ describe('export-offline-package.ps1 — 업데이트 피드 서명(HF8)', () =>
     expect(SCRIPT).toMatch(/OneDrive\|Dropbox/);
   });
 });
+
+describe('export-offline-package.ps1 — 서버 전용 export(-AllowMissingElectronInstaller)', () => {
+  // 셸 변경이 없는 릴리스(예: 7.1.5)를 만드는데 release\에 이전 빌드(7.1.4)의 latest.yml이 남아 있으면, 전에는 "yml 있음"
+  // 경로로 들어가 버전 대조에서 실패해 서버 전용 패키지를 만들 수 없었다. 판정 로직은 실제 7.1.4 yml·따옴표 표기·version 줄 없음·
+  // 파일 없음으로 pwsh에서 실행해 확인했다(7.1.5+스위치 → 제외, 7.1.5+스위치 없음 → 포함(사전 점검이 실패시킴), 7.1.4 → 포함).
+  it('설치본 포함 여부를 한 번만 정하고, 사전 점검과 복사가 같은 값을 쓴다', () => {
+    expect(SCRIPT).toMatch(/^\$PackageInstaller = Test-Path \$metadataPath$/m);
+    expect(SCRIPT).not.toMatch(/^if \(Test-Path \$metadataPath\)/m);
+    const decided = indexOfOrFail('$PackageInstaller = Test-Path $metadataPath');
+    const preflight = indexOfOrFail('Write-Step "Update artifact pre-flight');
+    const copy = indexOfOrFail('Write-Step "Electron installer');
+    expect(decided).toBeLessThan(preflight);
+    expect(SCRIPT.slice(preflight, preflight + 200)).toMatch(/\nif \(\$PackageInstaller\) \{/);
+    expect(SCRIPT.slice(copy, copy + 2500)).toMatch(/\nif \(\$PackageInstaller\) \{/);
+  });
+
+  it('스위치가 있을 때만, yml 버전이 이 릴리스와 다르면(또는 읽을 수 없으면) 설치본 없이 만든다', () => {
+    const at = indexOfOrFail('if ($PackageInstaller -and $AllowMissingElectronInstaller) {');
+    const block = SCRIPT.slice(at, SCRIPT.indexOf('\n}\n', at));
+    expect(block).toMatch(/\$leftoverVersion = Get-UpdateMetadataVersion \$metadataPath/);
+    expect(block).toMatch(/if \(\$leftoverVersion -ne \$Version\) \{[\s\S]*?Write-Warn[\s\S]*?\$PackageInstaller = \$false/);
+    expect(SCRIPT).toContain(String.raw`if ($line -match '^version:\s*[''"]?([^''"\s]+)') { return $Matches[1] }`);
+  });
+
+  it('제외된 경우 서명 키를 요구하지 않는다 — 서명은 설치본을 넣을 때의 분기 안에만 있다', () => {
+    const preflight = indexOfOrFail('Write-Step "Update artifact pre-flight');
+    const sign = indexOfOrFail('Invoke-UpdateFeedSigning\n', preflight);
+    const elseMissing = indexOfOrFail('} elseif ($AllowMissingElectronInstaller) {', preflight);
+    expect(sign).toBeLessThan(elseMissing);
+  });
+});

@@ -288,8 +288,29 @@ function Test-UpdateFeedSignature([string]$dir) {
     }
 }
 
+# 설치본을 패키지에 넣을지 여기서 한 번만 정한다 — 아래 사전 점검(서명 포함)과 "Electron installer" 복사가 같은 값을 쓴다.
+# -AllowMissingElectronInstaller(서버 전용 export)인데 release\에 이전 빌드의 yml이 남아 있고 그 버전이 이 릴리스와
+# 다르면 그 설치본은 이 릴리스의 것이 아니다 → 서명·검증·복사하지 않고 설치본 없이 만든다(예: 셸 변경이 없는 7.1.5를
+# 만드는데 release\에 7.1.4 latest.yml이 남아 있는 경우 — 전에는 버전 대조에서 실패해 서버 전용 export를 만들 수 없었다).
+# 스위치가 없으면 지금처럼 사전 점검이 버전 불일치로 실패시킨다(뒤섞인 설치본을 조용히 빼지 않는다).
+function Get-UpdateMetadataVersion([string]$path) {
+    foreach ($line in (Get-Content -LiteralPath $path -TotalCount 20)) {
+        if ($line -match '^version:\s*[''"]?([^''"\s]+)') { return $Matches[1] }
+    }
+    return $null
+}
+$PackageInstaller = Test-Path $metadataPath
+if ($PackageInstaller -and $AllowMissingElectronInstaller) {
+    $leftoverVersion = Get-UpdateMetadataVersion $metadataPath
+    if ($leftoverVersion -ne $Version) {
+        $shown = if ($leftoverVersion) { $leftoverVersion } else { '(version not found)' }
+        Write-Warn "$UpdateMetadataFileName in $artifactDir is $shown, not $Version — leftover from another build; packaging WITHOUT an installer (-AllowMissingElectronInstaller)"
+        $PackageInstaller = $false
+    }
+}
+
 Write-Step "Update artifact pre-flight ($UpdateMetadataFileName vs release version $Version)"
-if (Test-Path $metadataPath) {
+if ($PackageInstaller) {
     if ($SignUpdateFeed) {
         # 사전 점검보다 **먼저** 서명한다. release\에 이전 빌드의 .sig가 남아 있어도 현재 yml에 대해 새로 만들어 덮어쓰므로
         # 낡은 서명이 포장되지 않는다. 키 누락·서명 실패·검증 실패는 아무 산출물도 만들거나 지우기 전에 중단한다.
@@ -317,7 +338,7 @@ if (Test-Path $metadataPath) {
     $preflight = Test-UpdateArtifacts
     Write-Ok "$($preflight.installerFile) — $UpdateMetadataFileName version $($preflight.version) = release version $Version"
 } elseif ($AllowMissingElectronInstaller) {
-    Write-Warn "$UpdateMetadataFileName not found in $artifactDir — will write PLACEHOLDER.txt (-AllowMissingElectronInstaller was passed)"
+    Write-Warn "no $Version $UpdateMetadataFileName in $artifactDir — will write PLACEHOLDER.txt (-AllowMissingElectronInstaller was passed)"
 } else {
     Write-Error "$UpdateMetadataFileName not found in $artifactDir. Build with 'npm run electron:build:intranet' first, or pass -AllowMissingElectronInstaller for an intentional server-only export."
     exit 1
@@ -468,7 +489,7 @@ New-Item -ItemType Directory -Force $electronDest | Out-Null
 # the actual filenames always come from the verified metadata.
 # $artifactDir/$metadataPath는 위 사전 점검에서 계산했다. 복사 직전에 한 번 더(방어적으로) 같은 검증을 돌린다.
 $copiedInstallerName = $null
-if (Test-Path $metadataPath) {
+if ($PackageInstaller) {
     Write-Host "    verifying $UpdateMetadataFileName against installer + blockmap in $artifactDir ..." -ForegroundColor Gray
     $verified = Test-UpdateArtifacts
 
@@ -504,7 +525,7 @@ if (Test-Path $metadataPath) {
     $placeholder += "Build with: npm run electron:build:intranet`r`n"
     $placeholder += "Then re-run: export-offline-package.ps1 -UpdateChannel $UpdateChannel -ElectronInstallerPath <path-to-installer.exe>"
     Write-Utf8NoBom (Join-Path $electronDest "PLACEHOLDER.txt") $placeholder
-    Write-Warn "$UpdateMetadataFileName not found in $artifactDir — PLACEHOLDER.txt added (-AllowMissingElectronInstaller was passed)"
+    Write-Warn "no $Version $UpdateMetadataFileName in $artifactDir — PLACEHOLDER.txt added (-AllowMissingElectronInstaller was passed)"
 
     $UpdateArtifactManifest = [ordered]@{
         channel        = $UpdateChannel
