@@ -71,6 +71,13 @@
 .PARAMETER NoZip
     Create the package directory but skip the .zip archive.
 
+.PARAMETER ExcludeCaddyHost
+    Opt-out escape hatch: by default the script FAILS unless caddy\windows-amd64\caddy.exe
+    exists and matches the SHA-512 pinned in caddy\caddy-windows-amd64.sha512 (run
+    scripts\fetch-caddy.ps1 first). The verified caddy.exe + LICENSE go into caddy-host\
+    for the Windows host Caddy service (release B). Pass this switch only for a package
+    that intentionally ships without the host Caddy; recorded as caddyHost.included=false.
+
 .EXAMPLE
     # Standard: includes ALL images (app + base), suitable for air-gapped install
     .\scripts\export-offline-package.ps1
@@ -104,7 +111,8 @@ param(
     [switch]$AllowDirty            = $false,
     [switch]$AllowMissingElectronInstaller = $false,
     [string]$UpdateSigningKey      = "",
-    [switch]$AllowUnsignedUpdateFeed = $false
+    [switch]$AllowUnsignedUpdateFeed = $false,
+    [switch]$ExcludeCaddyHost      = $false
 )
 
 Set-StrictMode -Version Latest
@@ -236,6 +244,30 @@ if (Test-Path $poseManifestPath) {
         Write-Warn "pose 가중치 미반입(weightsComplete=false) — scripts/fetch-pose-weights.ps1 먼저 실행 권장."
         Write-Warn "이대로 app 이미지를 빌드하면 영상 추론 recipe가 unverified가 되어 운영 apply가 막힌다(fail-closed)."
     }
+}
+
+# ── 호스트용 Caddy(릴리스 B) — 저장소의 고정 SHA-512와 실제 caddy.exe 대조 ──────────────
+# 패키지 폴더를 지우기 전에 확인한다(실패해도 기존 패키지가 보존된다). 고정 값 파싱 규칙은 fetch-caddy.ps1과 같은 헬퍼를 쓴다.
+. (Join-Path $PSScriptRoot "caddy-pin.ps1")
+$caddyHostSrcDir = Join-Path $RepoRoot "caddy\windows-amd64"
+$caddyPin = $null
+if ($ExcludeCaddyHost) {
+    Write-Warn "호스트용 Caddy 제외(-ExcludeCaddyHost) — 이 패키지로는 호스트 Caddy 서비스를 설치할 수 없습니다."
+} else {
+    Write-Step "호스트용 Caddy 검증 (caddy\windows-amd64\caddy.exe vs 고정 SHA-512)"
+    try { $caddyPin = Read-CaddyPin (Join-Path $RepoRoot "caddy") } catch { Write-Error $_.Exception.Message; exit 1 }
+    foreach ($f in @("caddy.exe", "LICENSE")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $caddyHostSrcDir $f) -PathType Leaf)) {
+            Write-Error "caddy\windows-amd64\$f 가 없습니다. scripts\fetch-caddy.ps1 을 먼저 실행하세요(호스트 Caddy 없이 만들려면 -ExcludeCaddyHost)."
+            exit 1
+        }
+    }
+    $caddyExeSha = Get-Sha512 (Join-Path $caddyHostSrcDir "caddy.exe")
+    if ($caddyExeSha -ne $caddyPin.ExeSha512) {
+        Write-Error "caddy.exe SHA-512가 고정 값과 다릅니다 — scripts\fetch-caddy.ps1 로 다시 받으세요.`n  고정: $($caddyPin.ExeSha512)`n  실제: $caddyExeSha"
+        exit 1
+    }
+    Write-Ok "caddy.exe $($caddyPin.Version) SHA-512 = 고정 값"
 }
 
 $PackageName = "wr-evaluation-unified-$Version-intranet"
@@ -418,6 +450,20 @@ $caddySrc = Join-Path $RepoRoot "caddy\Caddyfile"
 if (-not (Test-Path $caddySrc)) { Write-Error "caddy/Caddyfile not found"; exit 1 }
 Copy-Item $caddySrc $caddyDest
 Write-Ok "caddy/Caddyfile"
+
+# caddy-host/ — Windows 호스트 Caddy 서비스용 바이너리(릴리스 B). 사전 점검을 통과한 파일을 복사하고 복사본을 다시 대조한다.
+if ($caddyPin) {
+    $caddyHostDest = Join-Path $PackageDir "caddy-host"
+    New-Item -ItemType Directory -Force $caddyHostDest | Out-Null
+    Copy-Required (Join-Path $caddyHostSrcDir "caddy.exe") $caddyHostDest
+    Copy-Required (Join-Path $caddyHostSrcDir "LICENSE")   $caddyHostDest
+    if ((Get-Sha512 (Join-Path $caddyHostDest "caddy.exe")) -ne $caddyPin.ExeSha512) {
+        Write-Error "복사한 caddy-host/caddy.exe 가 고정 SHA-512와 다릅니다."
+        exit 1
+    }
+    Write-Ok "caddy-host/caddy.exe ($($caddyPin.Version), SHA-512 재대조)"
+    Write-Ok "caddy-host/LICENSE"
+}
 
 # ── Scripts ───────────────────────────────────────────────────────────────────
 
@@ -664,6 +710,15 @@ $manifest = [ordered]@{
         signatureFile  = $UpdateArtifactManifest.signatureFile
         updatesDirPopulated = [bool]$copiedInstallerName
         note           = if (-not $copiedInstallerName) { "인트라넷 Electron 빌드($UpdateChannel 채널) 미완성 — 별도 빌드 후 -ElectronInstallerPath로 재실행 필요" } else { $null }
+    }
+    # 호스트 Caddy(릴리스 B). exeSha512 = 보안 솔루션 허용 목록에 쓰는 값, zipSha512 = 공식 checksums.txt와 같은 값.
+    caddyHost            = [ordered]@{
+        included  = [bool]$caddyPin
+        version   = if ($caddyPin) { $caddyPin.Version } else { $null }
+        file      = if ($caddyPin) { "caddy-host/caddy.exe" } else { $null }
+        exeSha512 = if ($caddyPin) { $caddyPin.ExeSha512 } else { $null }
+        zipSha512 = if ($caddyPin) { $caddyPin.ZipSha512 } else { $null }
+        zipName   = if ($caddyPin) { $caddyPin.ZipName } else { $null }
     }
     checksum             = "SHA256SUMS"
 }

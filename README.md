@@ -78,6 +78,8 @@ npm run electron:build:intranet                   # 인트라넷용 NSIS 인스�
 # 3) 오프라인 배포 패키지 생성 (서버 이미지 + 클라이언트 인스톨러 + 설치 스크립트)
 #    스크립트는 Electron 설치본을 빌드하지 않는다 — 2)를 먼저 실행해 release\latest.yml을 새로 만들어 둘 것
 #    (버전은 package.json에서 자동 인식하며, 설치본 버전이 다르면 중단한다)
+#    호스트용 caddy.exe(caddy/에 고정한 SHA-512로 검증)를 먼저 받아 둘 것 — 없으면 export가 중단한다
+.\scripts\fetch-caddy.ps1
 .\scripts\export-offline-package.ps1
 ```
 
@@ -450,6 +452,7 @@ wr-evaluation-unified/
 │   ├── verify-chart-compat.mjs         # 통계 차트 구형 Chrome(80) 호환 검사
 │   ├── mock-intranet-server.mjs        # 개발용 mock 서버
 │   ├── fetch-pose-weights.ps1          # pose inference 모델 준비
+│   ├── fetch-caddy.ps1, caddy-pin.ps1  # 호스트용 caddy.exe 다운로드·고정 SHA-512 검증 (패키징 전)
 │   └── videoValidateReport.mjs         # 영상 분석 검증 보고서
 │
 ├── shared/                             # contracts (server ↔ client 공유 타입, v5.0.0 신규)
