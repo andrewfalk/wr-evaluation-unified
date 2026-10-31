@@ -44,6 +44,11 @@ wr-evaluation-unified-5.0.1-intranet/    ← 이 디렉터리가 compose 실행 
 ├── caddy/
 │   └── Caddyfile                        # HTTPS 리버스 프록시 설정
 │
+│  ── Windows 호스트 Caddy 서비스용 (Docker Caddy 대신 쓸 때 — 설치 절차는 해당 릴리스 문서) ──
+├── caddy-host/
+│   ├── caddy.exe                        # Caddy 공식 Windows 바이너리 (서명 없음, SHA-512는 release-manifest.json의 caddyHost.exeSha512)
+│   └── LICENSE                          # Caddy 라이선스 (Apache-2.0)
+│
 ├── scripts/
 │   ├── backup.sh                        # 백업 실행 스크립트
 │   ├── restore.sh                       # DB 복구 스크립트
@@ -96,6 +101,7 @@ wr-evaluation-unified-5.0.1-intranet/    ← 이 디렉터리가 compose 실행 
 | `images/wr-images.tar` | air-gapped 환경에서 docker pull 불가 |
 | `docker-compose.yml`, `docker-compose.prod.yml` | 서비스 정의 |
 | `caddy/Caddyfile` | HTTPS 설정 |
+| `caddy-host/caddy.exe`, `LICENSE` | Caddy를 Windows 호스트 서비스로 실행할 때 쓰는 바이너리(접속자 실제 IP 보존). 빌드 PC가 저장소의 고정 SHA-512로 검증해 넣는다(`scripts/fetch-caddy.ps1`) |
 | `.env.production.example` | 운영자가 채울 비밀값 템플릿 |
 | `scripts/*.sh`, `scripts/*.ps1` | 운영 자동화 |
 | `docs/*.md` | 설치·운영 지침 |
@@ -840,6 +846,7 @@ cat release-manifest.json
 | `buildTime` | ISO 8601 빌드 시각 (UTC) |
 | `images[].imageId` | `sha256:...` 전체 image ID |
 | `electronInstaller.included` | Electron 설치 파일 포함 여부 |
+| `caddyHost` | 호스트 Caddy 바이너리: `included`, `version`, `file`(`caddy-host/caddy.exe`), `exeSha512`(보안 솔루션 허용 목록에 쓰는 값), `zipSha512`·`zipName`(Caddy 공식 `checksums.txt`와 같은 값). `-ExcludeCaddyHost`로 만든 패키지는 `included: false` |
 
 ---
 
