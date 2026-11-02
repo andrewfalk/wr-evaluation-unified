@@ -83,7 +83,7 @@ describe('scripts/fetch-caddy.ps1 — 고정 해시로 검증한 뒤에만 배�
     const exeCheck = indexIn(FETCH, 'if ($exeSha -ne $pin.ExeSha512)');
     const run = indexIn(FETCH, '& $exe version');
     const versionCheck = indexIn(FETCH, 'if ($reportedVersion -ne "v$($pin.Version)")');
-    const move = indexIn(FETCH, 'Move-Item -LiteralPath $staging -Destination $OutDir');
+    const move = indexIn(FETCH, 'Move-Item -LiteralPath $exePart');
     const order = [zipCheck, sumsCheck, expand, exeCheck, run, versionCheck, move];
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     // 각 검사는 실패 시 중단한다.
@@ -99,11 +99,21 @@ describe('scripts/fetch-caddy.ps1 — 고정 해시로 검증한 뒤에만 배�
     expect(FETCH).toMatch(/if \(-not \$official\) \{ Stop-WithError/);
   });
 
-  it('출력 폴더는 옆의 .new에 채우고 복사본을 다시 대조한 뒤 교체한다 — 실패해도 반쯤 찬 폴더가 남지 않는다', () => {
-    const recheck = indexIn(FETCH, 'if ((Get-Sha512 (Join-Path $staging "caddy.exe")) -ne $pin.ExeSha512)');
-    const removeOld = indexIn(FETCH, 'Remove-Item -LiteralPath $OutDir -Recurse -Force');
-    expect(recheck).toBeLessThan(removeOld);
-    expect(FETCH).toMatch(/finally \{[\s\S]*?Remove-Item -LiteralPath \$tmp[\s\S]*?\$staging/);
+  it('출력 폴더는 지우지 않는다 — caddy.exe·LICENSE만 .part 복사본을 대조한 뒤 이름을 바꿔 덮어쓴다', () => {
+    // Codex 1회차: 예전에는 "<OutDir>.new"를 채운 뒤 OutDir를 재귀 삭제했는데, -OutDir가 '\'로 끝나면 staging이
+    // OutDir 안에 생겨 같이 지워졌다(재현). 잘못된 -OutDir를 주면 그 폴더 전체가 지워질 위험도 있었다.
+    expect(FETCH).not.toMatch(/Remove-Item[^\n]*\$OutDir/);
+    expect(FETCH).not.toMatch(/\$staging/);
+    const recheck = indexIn(FETCH, 'if ((Get-Sha512 $exePart) -ne $pin.ExeSha512)');
+    expect(recheck).toBeLessThan(indexIn(FETCH, 'Move-Item -LiteralPath $exePart -Destination (Join-Path $OutDir "caddy.exe") -Force'));
+    expect(recheck).toBeLessThan(indexIn(FETCH, 'Move-Item -LiteralPath $licensePart -Destination (Join-Path $OutDir "LICENSE") -Force'));
+    expect(FETCH).toMatch(/finally \{[\s\S]*?Remove-Item -LiteralPath \$tmp[\s\S]*?foreach \(\$p in \$parts\)/);
+  });
+
+  it('상대 -OutDir는 PowerShell 현재 위치 기준으로 해석한다(GetFullPath는 5.1에서 프로세스 작업 폴더 기준)', () => {
+    // Codex 1회차: 5.1에서 [Environment]::CurrentDirectory와 Set-Location 위치가 다르면 다른 폴더에 썼다(재현).
+    expect(FETCH).toContain('$OutDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutDir)');
+    expect(FETCH).not.toMatch(/GetFullPath\(\$OutDir\)/);
   });
 });
 

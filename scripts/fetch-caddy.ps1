@@ -16,8 +16,9 @@
          (needs cosign); the pinned hash is the trust anchor and is reviewed in the PR.
       4. Extracts the zip, stops unless caddy.exe matches the pinned SHA-512 and
          `caddy.exe version` reports the pinned version.
-      5. Replaces -OutDir with caddy.exe + LICENSE. Nothing is written to -OutDir unless
-         every check above passed.
+      5. Writes caddy.exe + LICENSE into -OutDir (created if missing). Nothing is written
+         unless every check above passed. Only those two files are replaced, each through a
+         verified .part copy; other files in -OutDir are never touched or deleted.
 
     scripts/export-offline-package.ps1 checks caddy.exe against the pin again before it
     packages it into caddy-host/.
@@ -29,7 +30,8 @@
     Use this local zip instead of downloading. Step 3 (checksums.txt cross-check) is skipped.
 
 .PARAMETER OutDir
-    Destination folder. Default: <repo>\caddy\windows-amd64 (git-ignored).
+    Destination folder. Default: <repo>\caddy\windows-amd64 (git-ignored). A relative path is
+    resolved against the current PowerShell location.
 
 .EXAMPLE
     .\scripts\fetch-caddy.ps1
@@ -56,14 +58,16 @@ function Stop-WithError([string]$m) {
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 if (-not $OutDir) { $OutDir = Join-Path $RepoRoot "caddy\windows-amd64" }
-$OutDir = [System.IO.Path]::GetFullPath($OutDir)
+# Not [IO.Path]::GetFullPath: in Windows PowerShell 5.1 that resolves relative paths against the
+# process working directory, which Set-Location does not change, so '.\out' could land elsewhere.
+$OutDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutDir)
 
 try { $pin = Read-CaddyPin (Join-Path $RepoRoot "caddy") } catch { Stop-WithError $_.Exception.Message }
 Write-Step "Caddy $($pin.Version) for Windows amd64 (pinned in caddy/)"
 
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("wr-caddy-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force $tmp | Out-Null
-$staging = $null
+$parts = @()
 try {
     $releaseBase = "https://github.com/caddyserver/caddy/releases/download/v$($pin.Version)"
     if ($ZipPath) {
@@ -125,17 +129,24 @@ try {
     }
     Write-Ok "caddy.exe version = $reportedVersion"
 
-    # Stage next to the destination, then swap, so a failed copy never leaves a half-filled OutDir.
-    $staging = "$OutDir.new"
-    if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
-    New-Item -ItemType Directory -Force $staging | Out-Null
-    Copy-Item -LiteralPath $exe, $license -Destination $staging
-    if ((Get-Sha512 (Join-Path $staging "caddy.exe")) -ne $pin.ExeSha512) { Stop-WithError "copied caddy.exe does not match the pin" }
-    if (Test-Path -LiteralPath $OutDir) { Remove-Item -LiteralPath $OutDir -Recurse -Force }
-    Move-Item -LiteralPath $staging -Destination $OutDir
+    # Replace only our two files, each through a .part copy in the destination folder that is
+    # verified before it is renamed over the old file. The folder itself is never deleted, so a
+    # wrong -OutDir (or one ending in a separator) cannot wipe unrelated files.
+    if (Test-Path -LiteralPath $OutDir -PathType Leaf) { Stop-WithError "-OutDir is a file, not a folder: $OutDir" }
+    New-Item -ItemType Directory -Force $OutDir | Out-Null
+    $exePart     = Join-Path $OutDir "caddy.exe.part"
+    $licensePart = Join-Path $OutDir "LICENSE.part"
+    $parts = @($exePart, $licensePart)
+    Copy-Item -LiteralPath $exe -Destination $exePart -Force
+    Copy-Item -LiteralPath $license -Destination $licensePart -Force
+    if ((Get-Sha512 $exePart) -ne $pin.ExeSha512) { Stop-WithError "copied caddy.exe does not match the pin" }
+    Move-Item -LiteralPath $exePart -Destination (Join-Path $OutDir "caddy.exe") -Force
+    Move-Item -LiteralPath $licensePart -Destination (Join-Path $OutDir "LICENSE") -Force
     Write-Ok "$OutDir (caddy.exe, LICENSE)"
 }
 finally {
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
-    if ($staging -and (Test-Path -LiteralPath $staging)) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
+    foreach ($p in $parts) {
+        if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
+    }
 }
