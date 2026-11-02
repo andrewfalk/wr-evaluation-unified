@@ -34,7 +34,7 @@ docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"
 # 예: wr-app-server:5.0.1 ← 업데이트 후 5.1.0이 되어야 함
 
 Write-Host "`n=== 3. 현재 운영 .env.production 경로 ===" -ForegroundColor Cyan
-$installDir = docker inspect wr-prod-app-1 --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
+$installDir = (docker inspect wr-prod-app-1 --format '{{json .Config.Labels}}' | ConvertFrom-Json).'com.docker.compose.project.working_dir'   # 따옴표 없는 형식: Windows PowerShell 5.1은 --format 안의 큰따옴표를 지워 버린다
 Write-Host "Install dir: $installDir"
 Get-ChildItem -Path $installDir -Filter ".env*" -ErrorAction SilentlyContinue
 # 예: C:\wr\wr-evaluation-unified-5.0.1-intranet\.env.production
@@ -79,7 +79,9 @@ Write-Host "Verified $($lines.Count) files"
 업데이트 전 한 번 더 백업하면 만일의 롤백이 깔끔합니다. 운영 중인 백업 서비스 활용:
 
 ```powershell
-docker compose -p wr-prod --profile backup run --rm backup /scripts/backup.sh
+# 실행 중인 백업 컨테이너 안에서 바로 실행한다(compose 파일·env 파일이 필요 없다).
+docker ps --filter "name=wr-prod-backup-1" --format "{{.Names}} {{.Status}}"   # → wr-prod-backup-1 Up ... 이어야 한다
+docker exec wr-prod-backup-1 sh /scripts/backup.sh
 ```
 
 `_status\last-success.txt`에 새 백업 시각이 찍히는지 확인.
@@ -195,7 +197,7 @@ docker exec wr-prod-app-1 wget -qO- http://localhost:3001/health
 # → {"ok":true,...}
 
 # 4. Caddy 경유 HTTPS 헬스체크 (호스트에서)
-curl.exe -k -o NUL -w "8443: %{http_code}`n" https://localhost:8443/health
+curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 -o NUL -w "8443: %{http_code}`n" https://wr.hospital.local:8443/health
 # → 8443: 200 이면 정상 (인증서 경고는 -k로 무시)
 
 # 5. 부팅 로그 확인

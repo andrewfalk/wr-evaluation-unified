@@ -289,7 +289,7 @@ docker compose \
 | 항목 | 기준 | 증적 명령 |
 |---|---|---|
 | volume 격리 | `wr-prod_postgres_data` 존재 | `docker volume ls \| grep wr-prod` |
-| dev volume 미마운트 | postgres 컨테이너가 `wr-prod_postgres_data`만 마운트 | `docker inspect wr-prod-postgres-1 --format '{{range .Mounts}}{{.Name}}{{"\n"}}{{end}}'` |
+| dev volume 미마운트 | postgres 컨테이너가 `wr-prod_postgres_data`만 마운트 | `docker inspect wr-prod-postgres-1 --format '{{range .Mounts}}{{println .Name}}{{end}}'` |
 | app healthy | `STATUS: healthy` | `docker compose -p wr-prod ps` |
 | caddy healthy | `STATUS: healthy` | `docker compose -p wr-prod ps` |
 | migration 성공 | ERROR/FATAL 없음 + 위 테이블 목록 | `logs app + \dt` |
@@ -496,7 +496,7 @@ docker volume ls | grep wr-prod
 # 2. PASS 기준 — 컨테이너가 dev volume을 마운트하지 않는 것
 #    (같은 PC에서 리허설하면 dev volume 자체는 남아 있을 수 있음 — 그것은 실패가 아님)
 docker inspect wr-prod-postgres-1 \
-  --format '{{range .Mounts}}{{.Name}}{{"\n"}}{{end}}'
+  --format '{{range .Mounts}}{{println .Name}}{{end}}'
 # 기대: wr-prod_postgres_data
 # 실패: wr-evaluation-unified_postgres_data 또는 다른 프로젝트 이름
 
