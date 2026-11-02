@@ -45,6 +45,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# A path copied from a rendered document can pick up a line break where the line wrapped
+# ("Illegal characters in path"). Leading/trailing whitespace is never part of a real path.
+$EnvFile = $EnvFile.Trim()
+
 $DefaultAppPort = 3001
 $MinLinuxEngineMajor = 28   # moby/moby#45610: localhost publishes reachable from the L2 network before 28.0.0
 $ShellOverrideKeys = @('WR_APP_PORT', 'WR_CADDY_HTTPS_BIND', 'WR_CADDY_HTTP_BIND')
@@ -138,7 +142,11 @@ if ($dockerOs -match 'Docker Desktop') {
 }
 
 # 2. The port the env file asks for
-if (-not (Test-Path $EnvFile)) { Stop-Check "$EnvFile not found." }
+$envFound = $false
+try { $envFound = Test-Path -LiteralPath $EnvFile } catch {
+    Stop-Check "The -EnvFile path is not valid: '$EnvFile'. Type it on one line, or set it in a variable first: `$envFile = 'C:\path\.env.production'"
+}
+if (-not $envFound) { Stop-Check "$EnvFile not found." }
 $expected = $DefaultAppPort
 $line = Get-Content $EnvFile | Where-Object { $_ -match '^\s*WR_APP_PORT\s*=' } | Select-Object -Last 1
 if ($line) {

@@ -167,6 +167,29 @@ Run end  : ...  (exit 0)
 
 `C:\wr\backup-exports\`에 `.tar.gz` 3종 세트가 보이는지도 확인.
 
+### 3-5. 패키지 업데이트와 무관하게 유지하기 (권장)
+
+등록된 작업은 **등록할 때의 폴더**(`-PackageRoot`, 기본은 현재 폴더)로 이동해 그 안의 `scripts\export-backup-snapshot.ps1`을 실행한다(wrapper `.cmd`도 그 폴더의 `scripts\`에 생긴다). 그래서 패키지 폴더에서 등록하면, 업데이트 뒤 이전 패키지 폴더를 지우는 순간 반출이 멈추고 새 폴더에서 다시 등록해야 한다.
+
+두 스크립트를 **패키지와 무관한 고정 폴더**에 두고 그 폴더로 한 번 등록하면 이후 업데이트에서 다시 설정할 필요가 없다(두 스크립트는 7.1.5 다음 패키지부터 오프라인 패키지의 `scripts\`에 들어 있다).
+
+```powershell
+# 한 번만: 고정 폴더에 두 스크립트를 복사 (경로는 ASCII만)
+New-Item -ItemType Directory -Force C:\wr\backup-tools\scripts | Out-Null
+Copy-Item .\scripts\export-backup-snapshot.ps1, .\scripts\register-backup-export-task.ps1 C:\wr\backup-tools\scripts\
+
+# 같은 작업 이름으로 다시 등록하면 기존 작업을 덮어쓴다(schtasks /F)
+cd C:\wr\backup-tools
+.\scripts\register-backup-export-task.ps1 -Frequency weekly
+.\scripts\register-backup-export-task.ps1 -Frequency monthly
+.\scripts\register-backup-export-task.ps1 -Frequency quarterly
+
+# 등록 직후 3-4대로 schtasks /Run 으로 시험
+```
+
+- 반출 스크립트는 `.env.production`을 **묶음에 쓸 Docker 이미지 태그(`wr-backup:<WR_VERSION>`)를 고를 때만** 읽는다. 고정 폴더에는 env 파일이 없으므로 로컬에 있는 `wr-backup:*` 이미지 중 하나로 대신하고 실행 로그에 경고가 두 줄 남는다. 이 이미지는 묶음(tar)을 만드는 도구로만 쓰여 어느 버전 태그든 결과는 같다. 단 서버에서 `wr-backup` 이미지를 모두 지우면 실패한다(운영 중인 백업 컨테이너가 쓰는 이미지가 남아 있으므로 평소에는 해당 없음).
+- 백업 원본은 Docker 볼륨 `wr-prod_backup_data`에 있고 패키지 폴더와 무관하다. 반출 결과(`C:\wr\backup-exports`)도 패키지 폴더 밖이다.
+
 ---
 
 ## 4. 등록된 작업 확인

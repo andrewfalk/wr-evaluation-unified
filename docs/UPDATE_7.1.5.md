@@ -36,7 +36,7 @@
 ```powershell
 docker compose ls
 docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"      # → wr-app-server:7.1.4 이어야 한다 (7.1.3이면 UPDATE_7.1.4.md 먼저)
-$installDir = docker inspect wr-prod-app-1 --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
+$installDir = (docker inspect wr-prod-app-1 --format '{{json .Config.Labels}}' | ConvertFrom-Json).'com.docker.compose.project.working_dir'   # 따옴표 없는 형식: Windows PowerShell 5.1은 --format 안의 큰따옴표를 지워 버린다
 Get-Content (Join-Path $installDir ".env.production") | Select-String "WR_VERSION|WR_APP_PORT|DEV_PORT"
 docker info --format '{{.OperatingSystem}}'                         # → Docker Desktop (아래 점검이 이 값을 본다)
 docker compose version
@@ -50,7 +50,9 @@ docker compose version
 ### 2) (필수) 업데이트 직전 DB 백업
 
 ```powershell
-docker compose -p wr-prod --profile backup run --rm backup /scripts/backup.sh
+# 실행 중인 백업 컨테이너 안에서 바로 실행한다(compose 파일·env 파일이 필요 없다).
+docker ps --filter "name=wr-prod-backup-1" --format "{{.Names}} {{.Status}}"   # → wr-prod-backup-1 Up ... 이어야 한다
+docker exec wr-prod-backup-1 sh /scripts/backup.sh
 ```
 
 ### 3) (필수) .env.production 수정 + 앱 포트 점검
@@ -65,9 +67,12 @@ docker compose -p wr-prod --profile backup run --rm backup /scripts/backup.sh
 
 ```powershell
 cd C:\wr\wr-evaluation-unified-7.1.5-intranet
-.\scripts\check-app-publish.ps1 -EnvFile "<운영 .env.production 절대경로>" -ProjectName wr-prod
+$envFile = '<운영 .env.production 절대경로>'      # 이후 "업데이트 절차 A-5"의 --env-file 에도 이 변수를 쓴다
+.\scripts\check-app-publish.ps1 -EnvFile $envFile -ProjectName wr-prod
 # → 마지막 줄 "App port pre-check passed." 이면 진행한다
 ```
+
+> 경로는 **변수로 먼저 받아 두고** 쓴다. 이 문서 미리보기에서 긴 줄을 복사하면 화면 폭에서 접힌 자리에 줄바꿈이 끼어들어 경로가 깨질 수 있다("경로에 잘못된 문자가 있습니다").
 
 | 점검 결과 | 뜻·조치 |
 |---|---|
@@ -106,12 +111,12 @@ docker images | Select-String "wr-app-server|wr-backup"
 # 5. 컨테이너 재생성
 docker compose `
   -p wr-prod `
-  --env-file <운영 .env.production 절대경로> `
+  --env-file $envFile `
   -f docker-compose.yml -f docker-compose.prod.yml `
   --profile backup up -d
 ```
 
-정상이면 `Recreate wr-prod-app-1`(및 backup-monitor/backup)이 출력된다. Caddy는 설정이 같아 재생성되지 않을 수 있다(정상).
+정상이면 `Recreate wr-prod-app-1`(및 backup-monitor/backup)이 출력된다. Caddy는 설정이 같아 재생성되지 않을 수 있다(정상). postgres는 이미지(`postgres:16-alpine`)가 서버에 있던 것과 같으면 그대로 두고, 다르면 새로 만든다(같은 16 버전 안의 교체라 데이터는 볼륨에 그대로 있다). `docker compose ls`나 컨테이너 표시에 오래된 패키지 폴더(예: 5.0.1)가 보이는 것은 그 컨테이너를 그때 만든 뒤 바뀐 적이 없다는 뜻일 뿐이다 — postgres는 패키지 폴더의 파일을 쓰지 않는다.
 
 ### B. 서버 헬스 체크
 
@@ -136,12 +141,26 @@ curl.exe -k https://localhost:8443/updates/latest.yml        # → version: 7.1.
 curl.exe -k https://localhost:8443/updates/latest.yml.sig    # → base64 한 줄
 ```
 
-**다른 PC에서** 앱 포트가 막혀 있는지 확인한다(서버 주소는 실제 IP로):
+**다른 PC에서** 앱 포트가 막혀 있는지 확인한다(서버 주소는 실제 IP로). 정상 결과는 **3001 연결 안 됨, 8443 연결됨**이다.
+
+Windows 8.1/10 이상(PowerShell 4.0+):
 
 ```powershell
 Test-NetConnection <서버 IP> -Port 3001     # → TcpTestSucceeded : False  (True면 즉시 롤백)
 Test-NetConnection <서버 IP> -Port 8443     # → TcpTestSucceeded : True
 ```
+
+Windows 7(PowerShell 2.0 — `Test-NetConnection`이 없다):
+
+```powershell
+$ip = '<서버 IP>'
+$c = New-Object System.Net.Sockets.TcpClient
+try { $c.Connect($ip, 3001); '3001: 연결됨 - 문제! 즉시 롤백' } catch { '3001: 연결 안 됨 - 정상' } finally { $c.Close() }
+$c = New-Object System.Net.Sockets.TcpClient
+try { $c.Connect($ip, 8443); '8443: 연결됨 - 정상' } catch { '8443: 연결 안 됨 - 확인 필요' } finally { $c.Close() }
+```
+
+> **브라우저로 확인하지 않는다.** 병원 PC는 강제 프록시(PAC)가 걸려 있어 일반 크롬은 3001이 열려 있든 막혀 있든 프록시 오류 화면을 보여 줄 수 있다. 위 PowerShell 방법은 프록시와 무관하게 직접 연결해 본다. 꼭 브라우저로 보려면 프록시를 끈 크롬(`--no-proxy-server --user-data-dir=C:\temp\chrome-test`, [OFFLINE_DEPLOYMENT_PACKAGE.md](OFFLINE_DEPLOYMENT_PACKAGE.md) "ERR_PROXY_CONNECTION_FAILED")으로 `http://<서버 IP>:3001/health`를 열어 "연결할 수 없음"이 나오는지 본다.
 
 ### C. Caddy 내부 CA 키 백업 (아직 하지 않았다면)
 
@@ -214,6 +233,15 @@ docker ps --filter "name=wr-prod-app-1" --format "{{.Image}} {{.Ports}}"      # 
 
 ### 감사 로그 IP가 여전히 모두 같다
 **원인**: 정상이다. 이번 릴리스는 준비 단계이고, 실제 IP 기록은 다음 단계(Windows 호스트 Caddy)에서 바뀐다.
+
+### 백업 반출 작업(작업 스케줄러)이 이전 패키지 폴더를 가리킴
+**원인**: `register-backup-export-task.ps1`은 **등록할 때의 폴더**로 이동해 그 안의 `scripts\export-backup-snapshot.ps1`을 실행하는 작업을 만든다. 이전 패키지 폴더에서 등록했다면 그 폴더를 지우는 순간 반출이 멈춘다. **해결**: 이전 폴더를 남겨 두거나, 한 번만 **패키지와 무관한 고정 폴더**(예: `C:\wr\backup-tools`)로 옮겨 다시 등록하면 이후 패키지가 바뀌어도 다시 설정할 필요가 없다 — [BACKUP_EXPORT_OPS.md](BACKUP_EXPORT_OPS.md) "패키지 업데이트와 무관하게 유지하기". 두 스크립트는 7.1.5 다음 패키지부터 `scripts\`에 들어 있다(7.1.5 패키지에는 없으므로 이전 폴더의 것을 쓴다).
+
+### `docker compose ls`에 오래된 패키지 폴더가 함께 보임
+**원인**: 그 폴더에서 만든 컨테이너가 그 뒤로 바뀐 적이 없어서다(대개 postgres). postgres는 패키지 폴더의 파일을 쓰지 않으므로 그대로 둬도 된다. 컨테이너별 폴더 확인(5.1에서도 동작):
+```powershell
+docker ps -a --filter label=com.docker.compose.project=wr-prod --format '{{.Names}}|{{.Labels}}' | ForEach-Object { $n, $l = $_ -split '\|', 2; $wd = ($l -split ',' | Where-Object { $_ -like 'com.docker.compose.project.working_dir=*' }) -replace '^[^=]*=', ''; "$n  $wd" }
+```
 
 ---
 

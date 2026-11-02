@@ -174,4 +174,27 @@ describe('check-app-publish.ps1 — 읽기 전용 사전 점검', () => {
     const helper = EXPORT.match(/\$helperScripts\s*=\s*@\(([^)]*)\)/)?.[1] ?? '';
     expect(helper).toContain('"check-app-publish.ps1"');
   });
+
+  it('-EnvFile 앞뒤의 공백·줄바꿈을 잘라 내고, 잘못된 경로는 예외 대신 안내로 멈춘다(문서 복사 시 줄바꿈이 끼는 사례)', () => {
+    const trim = CHECK_CODE.indexOf('$EnvFile = $EnvFile.Trim()');
+    expect(trim).toBeGreaterThan(0);
+    expect(trim).toBeLessThan(CHECK_CODE.indexOf('Write-Host "-- App port pre-check'));
+    expect(CHECK_CODE).toMatch(/try \{ \$envFound = Test-Path -LiteralPath \$EnvFile \} catch \{\s*Stop-Check/);
+    expect(CHECK_CODE).not.toMatch(/if \(-not \(Test-Path \$EnvFile\)\)/);
+  });
+});
+
+describe('백업 반출 스크립트 — 오프라인 패키지 포함', () => {
+  it('export-backup-snapshot.ps1·register-backup-export-task.ps1 이 패키지 scripts\\ 로 복사된다', () => {
+    const helper = EXPORT.match(/\$helperScripts\s*=\s*@\(([^)]*)\)/)?.[1] ?? '';
+    expect(helper).toContain('"export-backup-snapshot.ps1"');
+    expect(helper).toContain('"register-backup-export-task.ps1"');
+  });
+
+  it('두 스크립트는 서버의 Windows PowerShell 5.1 에서 깨지지 않도록 ASCII 만 쓴다', () => {
+    for (const f of ['scripts/export-backup-snapshot.ps1', 'scripts/register-backup-export-task.ps1']) {
+      const bad = [...read(f)].filter((c) => c.charCodeAt(0) > 0x7f);
+      expect(bad, f).toEqual([]);
+    }
+  });
 });

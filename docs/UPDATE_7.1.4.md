@@ -76,7 +76,7 @@ compose 프로젝트 이름(`-p`, 보통 `wr-prod`)과 운영 `.env.production` 
 ```powershell
 docker compose ls
 docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"      # → wr-app-server:7.1.3 이어야 한다 (그 외면 이 문서의 전제가 다르다)
-$installDir = docker inspect wr-prod-app-1 --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
+$installDir = (docker inspect wr-prod-app-1 --format '{{json .Config.Labels}}' | ConvertFrom-Json).'com.docker.compose.project.working_dir'   # 따옴표 없는 형식: Windows PowerShell 5.1은 --format 안의 큰따옴표를 지워 버린다
 Get-Content (Join-Path $installDir ".env.production") | Select-String "WR_VERSION|STATS_|AI_"
 ```
 
@@ -88,7 +88,9 @@ Get-Content (Join-Path $installDir ".env.production") | Select-String "WR_VERSIO
 ### 2) (필수) 업데이트 직전 DB 백업
 
 ```powershell
-docker compose -p wr-prod --profile backup run --rm backup /scripts/backup.sh
+# 실행 중인 백업 컨테이너 안에서 바로 실행한다(compose 파일·env 파일이 필요 없다).
+docker ps --filter "name=wr-prod-backup-1" --format "{{.Names}} {{.Status}}"   # → wr-prod-backup-1 Up ... 이어야 한다
+docker exec wr-prod-backup-1 sh /scripts/backup.sh
 ```
 
 `_status\last-success.txt`에 새 백업 시각이 찍히는지 확인한다. 마이그레이션이 없어 DB 복원이 필요해질 가능성은 낮지만 관례대로 유지한다(아래 "롤백 절차").
