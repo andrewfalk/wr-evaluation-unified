@@ -115,7 +115,7 @@ docker logs wr-prod-app-1 --tail 60 | Select-String "migrate|stats-runs-queue|er
 
 # 5. app health / Caddy 경유 헬스
 docker exec wr-prod-app-1 wget -qO- http://localhost:3001/health
-curl.exe -k -o NUL -w "8443: %{http_code}`n" https://localhost:8443/health
+curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 -o NUL -w "8443: %{http_code}`n" https://wr.hospital.local:8443/health
 ```
 
 ### C. 통계분석 워크벤치 활성화 확인 (`STATS_WORKBENCH_ENABLED=true`로 켠 경우)
@@ -126,7 +126,7 @@ docker exec wr-prod-app-1 /opt/stats-venv/bin/python /app/stats-engine/analyze.p
 # → stats-engine selfcheck OK
 
 # 서버 설정 노출 여부 (비로그인 공개 설정)
-curl.exe -k https://localhost:8443/api/config/public
+curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local:8443/api/config/public
 # → "statsWorkbenchAvailable": true
 ```
 

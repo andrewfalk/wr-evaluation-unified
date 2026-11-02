@@ -128,10 +128,10 @@ docker logs wr-prod-app-1 --tail 60 | Select-String "migrate|stats-runs-queue|er
 
 # 5. app health / Caddy 경유 헬스
 docker exec wr-prod-app-1 wget -qO- http://localhost:3001/health
-curl.exe -k -o NUL -w "8443: %{http_code}`n" https://localhost:8443/health
+curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 -o NUL -w "8443: %{http_code}`n" https://wr.hospital.local:8443/health
 
 # 6. updates/ 마운트 (새 패키지의 updates/ 가 서빙되는지 — 정책 파일이 없으면 업데이터는 휴면이다)
-curl.exe -k https://localhost:8443/updates/latest.yml
+curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local:8443/updates/latest.yml
 # → version: 7.1.1 이 포함된 YAML (404면 새 폴더의 updates/ 에 파일이 없는 것)
 ```
 
@@ -141,7 +141,7 @@ curl.exe -k https://localhost:8443/updates/latest.yml
 docker exec wr-prod-app-1 /opt/stats-venv/bin/python /app/stats-engine/analyze.py --selfcheck
 # → stats-engine selfcheck OK
 
-curl.exe -k https://localhost:8443/api/config/public
+curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local:8443/api/config/public
 # → "statsWorkbenchAvailable": true
 ```
 

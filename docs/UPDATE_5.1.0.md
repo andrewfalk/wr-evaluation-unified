@@ -197,7 +197,7 @@ docker exec wr-prod-app-1 wget -qO- http://localhost:3001/health
 # → {"ok":true,...}
 
 # 4. Caddy 경유 HTTPS 헬스체크 (호스트에서)
-curl.exe -k -o NUL -w "8443: %{http_code}`n" https://localhost:8443/health
+curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 -o NUL -w "8443: %{http_code}`n" https://wr.hospital.local:8443/health
 # → 8443: 200 이면 정상 (인증서 경고는 -k로 무시)
 
 # 5. 부팅 로그 확인

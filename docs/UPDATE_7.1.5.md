@@ -134,11 +134,11 @@ docker exec wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -tAc "select cou
 # 4. app health / 루프백 게시 / Caddy 경유
 docker exec wr-prod-app-1 wget -qO- http://localhost:3001/health
 curl.exe -s -o NUL -w "loopback 3001: %{http_code}`n" http://127.0.0.1:3001/health
-curl.exe -k -o NUL -w "8443: %{http_code}`n" https://localhost:8443/health
+curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 -o NUL -w "8443: %{http_code}`n" https://wr.hospital.local:8443/health
 
 # 5. updates/ (2번에서 옮긴 7.1.4 피드)
-curl.exe -k https://localhost:8443/updates/latest.yml        # → version: 7.1.4
-curl.exe -k https://localhost:8443/updates/latest.yml.sig    # → base64 한 줄
+curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local:8443/updates/latest.yml        # → version: 7.1.4
+curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local:8443/updates/latest.yml.sig    # → base64 한 줄
 ```
 
 **다른 PC에서** 앱 포트가 막혀 있는지 확인한다(서버 주소는 실제 IP로). 정상 결과는 **3001 연결 안 됨, 8443 연결됨**이다.
@@ -236,6 +236,9 @@ docker ps --filter "name=wr-prod-app-1" --format "{{.Image}} {{.Ports}}"      # 
 
 ### 백업 반출 작업(작업 스케줄러)이 이전 패키지 폴더를 가리킴
 **원인**: `register-backup-export-task.ps1`은 **등록할 때의 폴더**로 이동해 그 안의 `scripts\export-backup-snapshot.ps1`을 실행하는 작업을 만든다. 이전 패키지 폴더에서 등록했다면 그 폴더를 지우는 순간 반출이 멈춘다. **해결**: 이전 폴더를 남겨 두거나, 한 번만 **패키지와 무관한 고정 폴더**(예: `C:\wr\backup-tools`)로 옮겨 다시 등록하면 이후 패키지가 바뀌어도 다시 설정할 필요가 없다 — [BACKUP_EXPORT_OPS.md](BACKUP_EXPORT_OPS.md) "패키지 업데이트와 무관하게 유지하기". 두 스크립트는 7.1.5 다음 패키지부터 `scripts\`에 들어 있다(7.1.5 패키지에는 없으므로 이전 폴더의 것을 쓴다).
+
+### 서버에서 `curl.exe -k https://localhost:8443/...` 가 `SEC_E_ILLEGAL_MESSAGE`(또는 `SEC_E_INTERNAL_ERROR`)로 실패
+**원인**: 서비스 문제가 아니다. Caddy는 `WR_DOMAIN`(`wr.hospital.local`) 이름으로만 인증서를 내주므로(`caddy/Caddyfile`), `localhost` 이름으로 접속하면 TLS 단계에서 연결을 끊는다(`-k`로도 통과하지 못한다). **해결**: 이름은 도메인으로, 주소는 서버 자신으로 묶어 접속한다 — `curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local:8443/health`. `WR_DOMAIN`을 다른 이름으로 썼다면 두 곳의 `wr.hospital.local`을 그 값으로 바꾼다. (이전 안내서들의 같은 명령도 이렇게 고쳤다.)
 
 ### `docker compose ls`에 오래된 패키지 폴더가 함께 보임
 **원인**: 그 폴더에서 만든 컨테이너가 그 뒤로 바뀐 적이 없어서다(대개 postgres). postgres는 패키지 폴더의 파일을 쓰지 않으므로 그대로 둬도 된다. 컨테이너별 폴더 확인(5.1에서도 동작):

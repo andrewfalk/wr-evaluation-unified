@@ -167,12 +167,12 @@ docker logs wr-prod-app-1 --tail 60 | Select-String "migrate|error"
 
 # 5. app health / Caddy 경유 헬스
 docker exec wr-prod-app-1 wget -qO- http://localhost:3001/health
-curl.exe -k -o NUL -w "8443: %{http_code}`n" https://localhost:8443/health
+curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 -o NUL -w "8443: %{http_code}`n" https://wr.hospital.local:8443/health
 
 # 6. updates/ 마운트
-curl.exe -k https://localhost:8443/updates/latest.yml
+curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local:8443/updates/latest.yml
 # → version: 7.1.4 이 포함된 YAML (404면 새 폴더의 updates/ 에 파일이 없는 것)
-curl.exe -k https://localhost:8443/updates/latest.yml.sig
+curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local:8443/updates/latest.yml.sig
 # → base64 한 줄(88자). 404면 새 폴더의 updates/ 에 .sig가 없는 것 — 이 상태에서는 7.1.4 셸이 모든 업데이트를 거부한다
 ```
 
@@ -265,10 +265,10 @@ docker ps --filter "name=wr-prod-app-1" --format "{{.Image}}"      # → wr-app-
 **원인**: 같은 문구가 세 가지 원인에서 나온다 — `WEB_AI_CLIENT_TOKEN`·Upstash 접속 정보·고른 업체의 API 키 중 하나가 해당 배포에 없다. 환경변수는 **새 배포부터** 적용되므로 등록 후 재배포해야 한다. **해결**: 브라우저 개발자 도구 Network의 응답 `error.code`로 어느 것인지 확인한다([VERCEL_AI_PROXY_HARDENING.md](VERCEL_AI_PROXY_HARDENING.md) 응답 코드 표).
 
 ### `updates/`에 yml만 복사했더니 모든 PC가 업데이트를 거부함
-**원인**: 7.1.4 셸은 `<channel>.yml.sig`가 없으면 피드를 믿지 않는다. **해결**: yml만 따로 복사하지 말고 패키지의 `updates/`를 통째로 복사한다. 서버에서 확인: `curl.exe -k https://localhost:8443/updates/latest.yml.sig`가 404면 없는 것이다.
+**원인**: 7.1.4 셸은 `<channel>.yml.sig`가 없으면 피드를 믿지 않는다. **해결**: yml만 따로 복사하지 말고 패키지의 `updates/`를 통째로 복사한다. 서버에서 확인: `curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local:8443/updates/latest.yml.sig`가 404면 없는 것이다.
 
 ### 메뉴에 "업데이트 서명 검증 실패 (n회)"가 뜸
-**원인**: 업데이트가 켜진 PC가 받은 피드의 서명을 확인하지 못했다. 사유는 앱 사용자 데이터 폴더의 `updater.log`에 `UPDATE_FEED_REJECTED:<사유>`로 남는다 — `signature-file-missing`(`.sig` 없음), `signature-mismatch`(서명한 뒤 yml이 바뀌었거나 셸이 신뢰하지 않는 키로 서명), `info-mismatch(<필드>)`(PC가 받은 정보와 서명된 yml이 다름), `no-public-key`(셸에 공개 키가 없음), `feed-unavailable`·`verification-error`(yml을 받지 못함·네트워크 오류), `bad-signature-format`(`.sig` 형식 깨짐). **해결**: 서버 `updates/`의 yml과 `.sig`가 같은 릴리스의 쌍인지, 서명 키가 셸에 내장된 키와 짝인지 확인한다(`node scripts/sign-update-feed.mjs --verify --dir <updates 폴더> --channel latest` — **소스가 있는 릴리스 PC에서** 실행한다. 서버에는 이 도구가 없으므로 서버의 `updates/`를 릴리스 PC로 복사해 와서 확인하고, 서버에서는 `curl.exe -k https://localhost:8443/updates/latest.yml.sig`로 `.sig`가 서빙되는지와 패키지의 `SHA256SUMS`만 확인할 수 있다). yml과 `.sig`를 올리는 몇 초 사이에 확인한 PC는 일시적으로 어긋나 거부되고 15분 뒤 다시 확인한다(정상).
+**원인**: 업데이트가 켜진 PC가 받은 피드의 서명을 확인하지 못했다. 사유는 앱 사용자 데이터 폴더의 `updater.log`에 `UPDATE_FEED_REJECTED:<사유>`로 남는다 — `signature-file-missing`(`.sig` 없음), `signature-mismatch`(서명한 뒤 yml이 바뀌었거나 셸이 신뢰하지 않는 키로 서명), `info-mismatch(<필드>)`(PC가 받은 정보와 서명된 yml이 다름), `no-public-key`(셸에 공개 키가 없음), `feed-unavailable`·`verification-error`(yml을 받지 못함·네트워크 오류), `bad-signature-format`(`.sig` 형식 깨짐). **해결**: 서버 `updates/`의 yml과 `.sig`가 같은 릴리스의 쌍인지, 서명 키가 셸에 내장된 키와 짝인지 확인한다(`node scripts/sign-update-feed.mjs --verify --dir <updates 폴더> --channel latest` — **소스가 있는 릴리스 PC에서** 실행한다. 서버에는 이 도구가 없으므로 서버의 `updates/`를 릴리스 PC로 복사해 와서 확인하고, 서버에서는 `curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local:8443/updates/latest.yml.sig`로 `.sig`가 서빙되는지와 패키지의 `SHA256SUMS`만 확인할 수 있다). yml과 `.sig`를 올리는 몇 초 사이에 확인한 PC는 일시적으로 어긋나 거부되고 15분 뒤 다시 확인한다(정상).
 
 ### 서명 키를 분실했거나 유출이 의심됨
 **분실**: 새 키 쌍을 만들어 공개 키를 내장한 새 설치본을 **모든 PC에 수동으로 재배포**해야 한다(기존 셸은 새 서명을 신뢰할 수 없다). **유출 의심**: 새 공개 키를 목록에 추가한 셸을 먼저 배포하고, 모든 PC가 그 셸이 된 뒤 새 키로 서명한 다음 옛 키를 뺀다. 절차는 [INTRANET_DEPLOYMENT.md](INTRANET_DEPLOYMENT.md) 7-6 "키 관리". 비밀 키 파일과 암호는 따로 오프라인 백업해 두어야 한다.
