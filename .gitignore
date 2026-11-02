@@ -7,6 +7,8 @@ playwright-report/
 # 트랙 2 — electron-updater 배포 디렉터리(운영자가 설치본/yml/정책 파일을 두는 곳,
 # docker-compose.yml의 app.volumes가 마운트). 대용량 바이너리라 git에 안 올림.
 updates/
+# 릴리스 B — scripts/fetch-caddy.ps1이 고정 해시로 검증해 내려받는 호스트용 caddy.exe(약 50MB). 해시만 커밋한다.
+caddy/windows-amd64/
 .env
 .env.local
 .env.production

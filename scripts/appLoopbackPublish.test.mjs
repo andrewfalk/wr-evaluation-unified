@@ -77,7 +77,10 @@ describe('compose 파일 — 앱 게시', () => {
   });
 
   it('오프라인 패키지에는 base·prod 만 들어가고 override 는 들어가지 않는다', () => {
-    const copied = EXPORT.match(/foreach \(\$f in @\(([^)]*)\)\)\s*\{/)?.[1] ?? '';
+    // compose 복사 단계의 foreach만 본다(그 앞의 호스트 Caddy 사전 점검에도 foreach가 있다).
+    const step = EXPORT.indexOf('Write-Step "Copying compose + env template"');
+    expect(step).toBeGreaterThan(-1);
+    const copied = EXPORT.slice(step).match(/foreach \(\$f in @\(([^)]*)\)\)\s*\{/)?.[1] ?? '';
     expect(copied).toContain('"docker-compose.yml"');
     expect(copied).toContain('"docker-compose.prod.yml"');
     expect(copied).not.toContain('override');
