@@ -1,0 +1,85 @@
+# wr-evaluation-unified - Caddy running as a Windows service on the host (release B).
+#
+# This is a TEMPLATE. scripts/install-caddy-host.ps1 fills in the double-underscore placeholders and writes
+# C:\ProgramData\wr-caddy\bin\Caddyfile.host (the service does not inherit user environment variables).
+# Do not edit the generated file by hand - re-run the install script instead.
+#
+# Differences from caddy/Caddyfile (the Docker Caddy):
+#   - Caddy sees the real client IP here and forwards it to the app in X-Forwarded-For.
+#   - The app is reached through its loopback-only publish 127.0.0.1:<WR_APP_PORT>.
+#   - The internal CA is the same one, copied from the Docker volume (clients keep their root).
+#   - admin off: no admin API on localhost:2019 (any local process could otherwise load a config
+#     that serves the CA key). Config changes = regenerate + restart the service.
+#   - HTTP/3 is off (no UDP listener), so only the two TCP ports below are opened.
+#   - Every logger that can record a request strips the query string (patient search sends the
+#     name/patient number in ?q=). Errors such as a 502 while the app restarts are written by the
+#     default logger with the full request, so the default logger is filtered too.
+{
+	admin off
+	auto_https disable_redirects
+	# Never touch the OS trust store from the service (clients already trust this CA's root).
+	skip_install_trust
+	storage file_system __DATA_DIR__
+
+	servers {
+		protocols h1 h2
+	}
+
+	log {
+		output file __LOG_DIR__/caddy.log {
+			roll_size 100MiB
+			roll_keep 10
+			roll_keep_for 2160h
+		}
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp [?].*$ ""
+				request>headers>Referer regexp [?].*$ ""
+			}
+		}
+	}
+
+	pki {
+		ca local {
+			name "WR Evaluation Internal CA"
+			intermediate_lifetime 365d
+		}
+	}
+}
+
+https://__DOMAIN__:__HTTPS_PORT__ {
+	tls {
+		issuer internal {
+			ca local
+			lifetime 6d
+		}
+	}
+
+	reverse_proxy 127.0.0.1:__APP_PORT__
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output file __LOG_DIR__/access.log {
+			roll_size 100MiB
+			roll_keep 10
+			roll_keep_for 2160h
+		}
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp [?].*$ ""
+				request>headers>Referer regexp [?].*$ ""
+			}
+		}
+	}
+}
+
+# HTTP -> HTTPS. Keeps the HTTPS port in the target (the Docker Caddyfile redirects to :443).
+http://__DOMAIN__:__HTTP_PORT__ {
+	redir https://{host}:__HTTPS_PORT__{uri} permanent
+}

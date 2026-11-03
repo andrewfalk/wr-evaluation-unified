@@ -47,7 +47,9 @@ wr-evaluation-unified-5.0.1-intranet/    ← 이 디렉터리가 compose 실행 
 │  ── Windows 호스트 Caddy 서비스용 (Docker Caddy 대신 쓸 때 — 설치 절차는 해당 릴리스 문서) ──
 ├── caddy-host/
 │   ├── caddy.exe                        # Caddy 공식 Windows 바이너리 (서명 없음, SHA-512는 release-manifest.json의 caddyHost.exeSha512)
-│   └── LICENSE                          # Caddy 라이선스 (Apache-2.0)
+│   ├── LICENSE                          # Caddy 라이선스 (Apache-2.0)
+│   ├── install-caddy-host.ps1           # 서비스 설치·상태·제거 (현재는 시범 포트 설치만, 관리자 PowerShell)
+│   └── Caddyfile.host.template          # 설치 스크립트가 도메인·포트·경로를 채워 서비스 설정을 만든다
 │
 ├── scripts/
 │   ├── backup.sh                        # 백업 실행 스크립트
