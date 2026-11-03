@@ -116,7 +116,9 @@ $SidAdmins       = 'S-1-5-32-544'
 $SidSystem       = 'S-1-5-18'
 $SidLocalService = 'S-1-5-19'
 $SidUsers        = 'S-1-5-32-545'
-$BroadSids       = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-5-4')   # Everyone, Authenticated Users, Users, Interactive
+# Allow-lists for the ACL checks: only these may write the install root/bin/state, or read data/logs.
+$Writers         = @($SidAdmins, $SidSystem)
+$DataReaders     = @($SidAdmins, $SidSystem, $SidLocalService)
 
 if ($Root -match '[\s"]') { throw "Install root must not contain spaces or quotes: $Root" }
 
@@ -364,16 +366,25 @@ function Invoke-Icacls([string[]]$IcaclsArgs) {
     if ($LASTEXITCODE -ne 0) { throw ("icacls " + ($IcaclsArgs -join ' ') + " failed: " + ($out | Out-String).Trim()) }
 }
 
-# Any ACE that gives a broad group (Everyone, Users, ...) the listed rights on $Path.
-function Get-BroadAccess([string]$Path, [System.Security.AccessControl.FileSystemRights]$Rights) {
+# Any allow ACE (explicit or inherited) that gives the listed rights on $Path to a SID outside $AllowedSids.
+# Allow-list, not a list of broad groups: a single user's SID can also be planted (ProgramData lets users
+# create folders, and the creator owns them).
+function Get-ForeignAccess([string]$Path, [System.Security.AccessControl.FileSystemRights]$Rights, [string[]]$AllowedSids) {
     $hits = @()
-    foreach ($ace in (Get-Acl -LiteralPath $Path).Access) {
+    foreach ($ace in (Get-Acl -LiteralPath $Path).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
         if ($ace.AccessControlType -ne 'Allow') { continue }
-        try { $sid = $ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { continue }
-        if ($BroadSids -notcontains $sid) { continue }
-        if (($ace.FileSystemRights -band $Rights) -ne 0) { $hits += "$($ace.IdentityReference) ($($ace.FileSystemRights))" }
+        if ($AllowedSids -contains $ace.IdentityReference.Value) { continue }
+        if (($ace.FileSystemRights -band $Rights) -ne 0) { $hits += "$($ace.IdentityReference.Value) ($($ace.FileSystemRights))" }
     }
     return $hits
+}
+
+# icacls /grant:r replaces only the SIDs it names; remove every other explicit allow entry on $Path.
+function Remove-ForeignAllowAce([string]$Path, [string[]]$KeepSids) {
+    foreach ($rule in (Get-Acl -LiteralPath $Path).GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])) {
+        $sid = $rule.IdentityReference.Value
+        if ($rule.AccessControlType -eq 'Allow' -and $KeepSids -notcontains $sid) { Invoke-Icacls @($Path, '/remove:g', "*$sid") }
+    }
 }
 
 $WriteRights = [System.Security.AccessControl.FileSystemRights]'WriteData, AppendData, WriteExtendedAttributes, WriteAttributes, Delete, DeleteSubdirectoriesAndFiles, ChangePermissions, TakeOwnership'
@@ -483,6 +494,8 @@ function Invoke-Install {
             foreach ($d in @($Root, $BinDir, $DataDir, $LogDir, $StateDir)) { New-Item -ItemType Directory -Force $d | Out-Null }
             Invoke-Icacls @($Root, '/setowner', "*$SidAdmins", '/T', '/C', '/Q')
             Invoke-Icacls @($Root, '/inheritance:r', '/grant:r', "*${SidAdmins}:(OI)(CI)F", "*${SidSystem}:(OI)(CI)F", "*${SidLocalService}:(OI)(CI)RX", "*${SidUsers}:(OI)(CI)RX")
+            # The folder may have been created beforehand by a user who gave themselves rights on it.
+            Remove-ForeignAllowAce $Root @($SidAdmins, $SidSystem, $SidLocalService, $SidUsers)
             foreach ($d in @($BinDir, $StateDir)) { Invoke-Icacls @($d, '/reset', '/T', '/C', '/Q') }
             # Restrict the folder itself FIRST, then let its contents inherit from it. Resetting the folder first
             # would make it inherit Users:RX from the root for a moment - with a CA key already in data on a
@@ -490,22 +503,16 @@ function Invoke-Install {
             foreach ($d in @($DataDir, $LogDir)) {
                 Invoke-Icacls @($d, '/inheritance:r', '/grant:r', "*${SidAdmins}:(OI)(CI)F", "*${SidSystem}:(OI)(CI)F", "*${SidLocalService}:(OI)(CI)M")
                 # /grant:r only replaces those three; drop any other explicit allow entry (the old /reset did that too).
-                $explicit = (Get-Acl -LiteralPath $d).GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])
-                foreach ($rule in $explicit) {
-                    $sid = $rule.IdentityReference.Value
-                    if ($rule.AccessControlType -eq 'Allow' -and @($SidAdmins, $SidSystem, $SidLocalService) -notcontains $sid) {
-                        Invoke-Icacls @($d, '/remove:g', "*$sid")
-                    }
-                }
+                Remove-ForeignAllowAce $d @($SidAdmins, $SidSystem, $SidLocalService)
                 foreach ($child in @(Get-ChildItem -LiteralPath $d -Force)) { Invoke-Icacls @($child.FullName, '/reset', '/T', '/C', '/Q') }
             }
             foreach ($d in @($DataDir, $LogDir)) {
-                $broad = @(Get-BroadAccess $d $ReadRights)
-                if ($broad.Count -gt 0) { throw "ACL check failed, users can read ${d}: $($broad -join ', ')" }
+                $foreign = @(Get-ForeignAccess $d $ReadRights $DataReaders)
+                if ($foreign.Count -gt 0) { throw "ACL check failed, others can read ${d}: $($foreign -join ', ')" }
             }
             foreach ($d in @($Root, $BinDir, $StateDir)) {
-                $broad = @(Get-BroadAccess $d $WriteRights)
-                if ($broad.Count -gt 0) { throw "ACL check failed, users can write ${d}: $($broad -join ', ')" }
+                $foreign = @(Get-ForeignAccess $d $WriteRights $Writers)
+                if ($foreign.Count -gt 0) { throw "ACL check failed, others can write ${d}: $($foreign -join ', ')" }
             }
             Write-Ok 'ACLs set and verified'
         }
@@ -541,8 +548,8 @@ function Invoke-Install {
         }
         if ((Test-Path -LiteralPath $CaDir) -and $ScriptCmdlet.ShouldProcess($RootCrtPublic, 'Copy the public root certificate (for -Status)')) {
             foreach ($f in $CaFiles) {
-                $broad = @(Get-BroadAccess (Join-Path $CaDir $f) $ReadRights)
-                if ($broad.Count -gt 0) { throw "ACL check failed, users can read $f in ${CaDir}: $($broad -join ', ')" }
+                $foreign = @(Get-ForeignAccess (Join-Path $CaDir $f) $ReadRights $DataReaders)
+                if ($foreign.Count -gt 0) { throw "ACL check failed, others can read $f in ${CaDir}: $($foreign -join ', ')" }
             }
             Write-Ok 'CA files are not readable by users'
             Copy-Item -LiteralPath (Join-Path $CaDir 'root.crt') -Destination $RootCrtPublic -Force   # public certificate only
@@ -563,6 +570,11 @@ function Invoke-Install {
         if ($ScriptCmdlet.ShouldProcess($ConfigDest, "Write Caddyfile.host (https :$HttpsPort, http :$HttpPort, upstream 127.0.0.1:$appPort) and validate")) {
             Write-TextFile $ConfigDest $config
             $created.Config = $true
+            # caddy.exe is about to run elevated: nobody else may be able to swap it or its config.
+            foreach ($f in @($ExeDest, $ConfigDest)) {
+                $foreign = @(Get-ForeignAccess $f $WriteRights $Writers)
+                if ($foreign.Count -gt 0) { throw "ACL check failed, others can write ${f}: $($foreign -join ', ')" }
+            }
             # Validate only after the CA is in place, so validation loads it instead of creating a new one.
             $out = Invoke-Native { & $ExeDest validate --config $ConfigDest --adapter caddyfile 2>&1 }
             if ($LASTEXITCODE -ne 0) { throw ("caddy validate failed:`n" + ($out | Out-String)) }
@@ -688,15 +700,15 @@ function Invoke-Status {
         try { $exeOk = ((Get-Sha512File $ExeDest) -eq [string]$state.caddyExeSha512) } catch { $exeOk = $false }
         if ($exeOk) { Write-Ok 'caddy.exe matches the installed SHA-512' } else { Write-Fail 'caddy.exe does not match the SHA-512 recorded at install.'; $problems++ }
     } else { Write-Fail "$ExeDest not found."; $problems++ }
-    foreach ($d in @($Root, $BinDir, $StateDir)) {
+    foreach ($d in @($Root, $BinDir, $StateDir, $ExeDest, $ConfigDest)) {
         if (-not (Test-Path -LiteralPath $d)) { continue }
-        $broad = @(Get-BroadAccess $d $WriteRights)
-        if ($broad.Count -gt 0) { Write-Fail "Users can write ${d}: $($broad -join ', ')"; $problems++ } else { Write-Ok "No user write access: $d" }
+        $foreign = @(Get-ForeignAccess $d $WriteRights $Writers)
+        if ($foreign.Count -gt 0) { Write-Fail "Others can write ${d}: $($foreign -join ', ')"; $problems++ } else { Write-Ok "Only Administrators and SYSTEM can write: $d" }
     }
     foreach ($d in @($DataDir, $LogDir)) {
         try {
-            $broad = @(Get-BroadAccess $d $ReadRights)
-            if ($broad.Count -gt 0) { Write-Fail "Users can read ${d}: $($broad -join ', ')"; $problems++ } else { Write-Ok "No user read access: $d" }
+            $foreign = @(Get-ForeignAccess $d $ReadRights $DataReaders)
+            if ($foreign.Count -gt 0) { Write-Fail "Others can read ${d}: $($foreign -join ', ')"; $problems++ } else { Write-Ok "Only Administrators, SYSTEM and the service can read: $d" }
         } catch {
             Write-Ok "No access for this account: $d (expected when not elevated)"
         }

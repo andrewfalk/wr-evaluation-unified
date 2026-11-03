@@ -143,7 +143,7 @@ describe('install-caddy-host.ps1 -Install — CA 가드와 순서', () => {
   it('ACL을 CA 복사보다 먼저 설정·검증하고, data·logs는 사용자 접근 없음(상속 끊음)', () => {
     const b = body();
     const acl = indexIn(b, "Invoke-Icacls @($Root, '/inheritance:r'");
-    const verify = indexIn(b, 'ACL check failed, users can read');
+    const verify = indexIn(b, 'ACL check failed, others can read');
     const copy = indexIn(b, 'docker cp');
     expect(acl).toBeLessThan(copy);
     expect(verify).toBeLessThan(copy);
@@ -162,7 +162,36 @@ describe('install-caddy-host.ps1 -Install — CA 가드와 순서', () => {
     expect(restrict).toBeLessThan(childReset);
     expect(loop).not.toMatch(/Invoke-Icacls @\(\$d, '\/reset'/);
     // /grant:r는 세 계정만 바꾸므로, 그 밖의 직접 허용 ACE는 지운다(예전 /reset이 하던 일).
-    expect(loop.slice(restrict, childReset)).toContain("Invoke-Icacls @($d, '/remove:g', \"*$sid\")");
+    expect(loop.slice(restrict, childReset)).toContain('Remove-ForeignAllowAce $d @($SidAdmins, $SidSystem, $SidLocalService)');
+  });
+
+  it('미리 만들어진 설치 루트의 개별 사용자 ACE도 지우고, 검사는 허용 SID 목록 밖을 모두 위반으로 본다', () => {
+    // Codex PR 리뷰 2회차: ProgramData는 일반 사용자가 폴더를 만들 수 있고 만든 사람이 소유자가 된다.
+    // 광범위 그룹 4개만 보던 검사는 그 사용자 SID의 (OI)(CI)F를 놓쳐 bin의 caddy.exe 교체가 가능했다.
+    const b = body();
+    const rootGrant = indexIn(b, "Invoke-Icacls @($Root, '/inheritance:r'");
+    const rootClean = indexIn(b, 'Remove-ForeignAllowAce $Root @($SidAdmins, $SidSystem, $SidLocalService, $SidUsers)');
+    const binReset = indexIn(b, "foreach ($d in @($BinDir, $StateDir)) { Invoke-Icacls @($d, '/reset'");
+    expect(rootGrant).toBeLessThan(rootClean);
+    expect(rootClean).toBeLessThan(binReset);
+    const paramFn = (name) => {
+      const start = indexIn(SCRIPT, `function ${name}(`);
+      return SCRIPT.slice(start, indexIn(SCRIPT, '\n}\n', start));
+    };
+    const remover = paramFn('Remove-ForeignAllowAce');
+    expect(remover).toContain('GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])');
+    expect(remover).toContain("Invoke-Icacls @($Path, '/remove:g', \"*$sid\")");
+    // 허용 목록: 쓰기는 Administrators·SYSTEM만, data·logs 읽기는 여기에 서비스 계정만.
+    expect(SCRIPT).toContain('$Writers         = @($SidAdmins, $SidSystem)');
+    expect(SCRIPT).toContain('$DataReaders     = @($SidAdmins, $SidSystem, $SidLocalService)');
+    expect(CODE).not.toMatch(/Get-BroadAccess|BroadSids/);
+    const checker = paramFn('Get-ForeignAccess');
+    expect(checker).toContain('GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])');
+    expect(checker).toContain('if ($AllowedSids -contains $ace.IdentityReference.Value) { continue }');
+    // 관리자 권한으로 caddy.exe를 실행(validate)하기 직전에 실행 파일·설정 파일 자체도 검사한다.
+    const fileCheck = indexIn(b, 'foreach ($f in @($ExeDest, $ConfigDest)) {\n                $foreign = @(Get-ForeignAccess $f $WriteRights $Writers)');
+    expect(fileCheck).toBeLessThan(indexIn(b, '& $ExeDest validate'));
+    expect(fnBody('Invoke-Status')).toContain('foreach ($d in @($Root, $BinDir, $StateDir, $ExeDest, $ConfigDest)) {');
   });
 
   it('복사본 지문을 대조한 뒤에만 local로 이름을 바꾸고, 다르면 복사본을 지운다. 기존 local은 덮어쓰지 않는다', () => {
