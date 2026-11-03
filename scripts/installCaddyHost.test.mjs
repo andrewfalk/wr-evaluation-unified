@@ -11,6 +11,19 @@ import { fileURLToPath } from 'url';
 //  - 관리자 리허설(사용자가 관리자 PowerShell로 실행, 2026-11-03): 7·5.1 각각 설치→상태→제거, 강제 종료 뒤 자동 재시작,
 //    재설치 거부, 기존 CA 복사본 일치 경로, 감사 로그 IP가 출발지별(루프백·LAN)로 남고 Docker 경로는 172.x 그대로,
 //    서비스 로그 쿼리 표식 0건. 비관리자로 data 읽기·bin 쓰기 거부, 2019 연결 거부, 8443 무영향 확인
+// PR-3b — 8443 전환(-Cutover)·되돌리기(-Rollback)·앱 포트 반영(-Reconfigure). 이 PC에서 확인한 것:
+//  - 실측: 셸 변수가 Compose v2.22.0(운영과 같은 공식 바이너리)·v5.4 모두 --env-file보다 우선, `config --format json`의
+//    volumes.<키>.name = 실제 볼륨 이름, `up -d --no-deps caddy`는 app·postgres 컨테이너 ID 불변, Docker Desktop은 8443을
+//    약 1초에 놓음, PowerShell 7에서 SetEnvironmentVariable(k, $null)은 빈 변수를 남김([NullString]::Value로 지움),
+//    env 임시 파일은 생성 순간부터 원본 ACL·독점(다른 프로세스 열기 = 공유 위반), 교체 뒤 ACL·백업 ACL = 원본
+//  - 헬퍼 단위 시험(5.1·7, 스크립트 AST에서 함수만 꺼내 실행): env 편집(BOM·CRLF·LF·혼합 줄바꿈·주석·따옴표·중복 키 거부·
+//    교체 실패 시 임시 파일 정리·되돌리면 원래 바이트), 셸 변수 감지, 대상 구성 검사(다른 CA 볼륨·셸 도메인·앱 포트 거부),
+//    실행 중인 caddy 컨테이너 라벨 대조
+//  - 관리자 리허설(사용자 실행, 2026-11-03, 검증 스택): 시범 설치 → 전환(5.1) → 8443 접속 IP가 127.0.0.1·LAN 주소로 기록
+//    (Docker 18443 경로는 172.20.0.1, LAN에서 18443 접속 불가) → 전체 `up -d` 뒤에도 host 모드 유지 → 앱 포트 13002 변경 시
+//    Status 실패 → -Reconfigure(5.1·7) → 거부 시험(host에서 Uninstall, 손으로 바꾼 env에서 Rollback, 셸 WR_CADDY_HTTPS_BIND·
+//    WR_DOMAIN, override 파일 누락) → 롤백 뒤 다른 env 키 보존·DISABLED·8443 = Docker(172.x) → 서비스 기동 실패를 주입하자
+//    Docker로 자동 복귀(env 복원·방화벽 제거·8443 200) → 재전환 → 재롤백 → docker 모드에서 제거
 // 이 테스트는 그때 확인한 안전 불변식이 의도 없이 바뀌는 것을 막는다.
 const here = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel) => readFileSync(path.join(here, rel), 'utf8').replace(/\r\n/g, '\n');
@@ -29,6 +42,12 @@ const fnBody = (name) => {
   const start = indexIn(SCRIPT, `function ${name} {`);
   const end = SCRIPT.indexOf('\n}\n', start);
   return SCRIPT.slice(start, end);
+};
+// 인자 목록이 있는 함수(`function Name([string]$x) {`)도 찾는다.
+const fnAny = (name) => {
+  const m = new RegExp(`function ${name}[ (]`).exec(SCRIPT);
+  if (!m) throw new Error(`찾지 못했습니다: function ${name}`);
+  return SCRIPT.slice(m.index, SCRIPT.indexOf('\n}\n', m.index));
 };
 
 describe('caddy/Caddyfile.host.template', () => {
@@ -85,15 +104,21 @@ describe('scripts/install-caddy-host.ps1 — 기본 성질', () => {
     expect(CODE).not.toMatch(/\$PSCmdlet\.ShouldProcess/);
   });
 
-  it('이 버전은 시범 포트만 — 8443/8080은 거부하고 .env·compose·컨테이너는 바꾸지 않는다', () => {
+  it('-Install은 시범 포트만(8443/8080 거부). 컨테이너 변경은 caddy 재생성 하나뿐이고 env 파일은 Write-EnvKeys로만 쓴다', () => {
     expect(SCRIPT).toContain('$ReservedPorts  = @(8443, 8080)');
     expect(SCRIPT).toMatch(/if \(\$ReservedPorts -contains \$p\) \{ throw/);
     expect(SCRIPT).toMatch(/\[int\]\$HttpsPort\s*=\s*9443/);
     expect(SCRIPT).toMatch(/\[int\]\$HttpPort\s*=\s*9080/);
-    expect(CODE).not.toMatch(/docker compose[^\n]*\b(up|down|stop|restart|rm)\b/);
+    // 사용자 결정(2026-11-03): 재생성은 caddy만 — 앱·DB는 건드리지 않는다. compose 하위 명령은 config와 이것뿐.
+    expect(CODE.match(/'up'/g)).toHaveLength(1);
+    expect(CODE).toContain("@(Get-ComposeArgs) + @('up', '-d', '--no-deps', 'caddy')");
+    expect(CODE).not.toMatch(/'(down|stop|restart|rm|kill|pull|build|create)'/);
     expect(CODE).not.toMatch(/docker (stop|restart|kill|volume rm|rm -f)/);
-    expect(CODE).not.toMatch(/(Set|Add)-Content[^\n]*\$EnvFile/);
-    expect(CODE).not.toMatch(/WriteAllText\(\$EnvFile/);
+    expect(fnBody('Invoke-Install')).not.toMatch(/Write-EnvKeys|Get-ComposeArgs|Invoke-ComposeUpCaddy/);
+    // env 파일 쓰기 경로는 Write-EnvKeys의 File.Replace 하나.
+    expect(CODE).not.toMatch(/(Set|Add|Out)-Content[^\n]*\$EnvFile|WriteAllText\(\$EnvFile|WriteAllBytes/);
+    expect(CODE.match(/\[System\.IO\.File\]::Replace\(/g)).toHaveLength(1);
+    expect(fnAny('Write-EnvKeys')).toContain('[System.IO.File]::Replace($tmp, $Path, $backup)');
   });
 
   it('설치 폴더에는 공백이 없다(서비스 명령줄에 따옴표 중첩이 필요 없고, 따옴표 없는 경로 문제도 없다)', () => {
@@ -113,8 +138,8 @@ describe('scripts/install-caddy-host.ps1 — 기본 성질', () => {
     expect(SCRIPT).toContain("[System.Security.Cryptography.HashAlgorithm]::Create($Algorithm)");
   });
 
-  it('설치·제거는 관리자 권한을 요구한다(-WhatIf 제외)', () => {
-    for (const fn of ['Invoke-Install', 'Invoke-Uninstall']) {
+  it('설치·제거·전환·롤백·재구성은 관리자 권한을 요구한다(-WhatIf 제외)', () => {
+    for (const fn of ['Invoke-Install', 'Invoke-Uninstall', 'Invoke-Cutover', 'Invoke-Rollback', 'Invoke-Reconfigure']) {
       expect(fnBody(fn)).toMatch(/if \(-not \$whatIf -and -not \(Test-Admin\)\) \{ throw/);
     }
   });
@@ -331,12 +356,15 @@ describe('install-caddy-host.ps1 -Install — CA 가드와 순서', () => {
 });
 
 describe('install-caddy-host.ps1 -Uninstall / -Status', () => {
-  it('Uninstall은 시범 모드에서만, 우리 서비스일 때만 지우고, CA(data)·logs는 절대 지우지 않는다', () => {
+  it('Uninstall은 pilot·docker 모드에서만(host는 거부 — 8443이 빈다), 우리 서비스일 때만 지우고, CA(data)·logs는 절대 지우지 않는다', () => {
     const b = fnBody('Invoke-Uninstall');
-    expect(b).toMatch(/if \(\$state -and \[string\]\$state\.mode -ne 'pilot'\) \{\s*throw/);
+    expect(b).toMatch(/if \(\$state -and @\('pilot', 'docker'\) -notcontains \[string\]\$state\.mode\) \{\s*throw "[^"]*-Rollback first/);
     expect(b).toMatch(/if \(\$svc -and \$svc\.PathName -notlike "\$ExeDest \*"\) \{\s*throw/);
-    expect(b).toContain('foreach ($f in @($ExeDest, $ConfigDest, $StateFile, $SnapshotFile, $RootCrtPublic)) {');
+    expect(b).toContain('foreach ($f in @($ExeDest, $ConfigDest, $ConfigNext, $ConfigPrev, $StateFile, $SnapshotFile, $HostModeFile, $RootCrtPublic)) {');
     expect(b).not.toMatch(/Remove-Item[^\n]*(\$DataDir|\$CaDir|\$LogDir|\$Root\b|-Recurse)/);
+    // 중단된 전환(기록 'applied')이 남아 있으면 모드와 상관없이 변경 전에 거부(Codex PR 리뷰 1회차).
+    expect(b).toMatch(/if \(\$journal -and \[string\]\$journal\.status -eq 'applied'\) \{\s*throw/);
+    expect(indexIn(b, '$journal = Get-HostModeJson')).toBeLessThan(indexIn(b, 'Write-Step'));
   });
 
   it('Status는 읽기 전용이다(ShouldProcess·변경 명령 없음)', () => {
@@ -355,6 +383,9 @@ describe('install-caddy-host.ps1 -Uninstall / -Status', () => {
     // Codex PR 리뷰 1회차: 비루프백 게시를 감지해도 경고만 내고 Status: OK였다.
     const b = fnBody('Invoke-Status');
     expect(b).toMatch(/try \{ \$owners = @\(Get-PortOwners\) \} catch \{ Write-Warn/);
+    // 게시 규칙 검사는 모든 모드에서(docker 모드도), 업스트림 비교만 docker 모드에서 생략(PR 리뷰 2회차).
+    expect(b).toMatch(/if \(\$null -ne \$owners\) \{\s*try \{/);
+    expect(b).toContain("if ($mode -eq 'docker') { Write-Ok \"App published on 127.0.0.1:$appPort only");
     expect(b).toMatch(/\$appPort = Get-AppPublishedPort -Owners \$owners[\s\S]*?\} catch \{ Write-Fail \$_\.Exception\.Message; \$problems\+\+ \}/);
   });
 
@@ -369,6 +400,179 @@ describe('install-caddy-host.ps1 -Uninstall / -Status', () => {
     expect(b).toContain("$_.Project -eq $ProjectName -and $_.Service -eq 'app'");
     expect(b).toMatch(/\$_\.HostIp -ne '127\.0\.0\.1'/);
     expect(CODE).not.toMatch(/--filter publish=/);
+  });
+});
+
+describe('install-caddy-host.ps1 -Cutover / -Rollback / -Reconfigure (PR-3b)', () => {
+  const cut = () => fnBody('Invoke-Cutover');
+  const rb = () => fnBody('Invoke-Rollback');
+  const before = (text, a, b) => expect(indexIn(text, a)).toBeLessThan(indexIn(text, b));
+
+  it('모드 전이: Cutover는 pilot·docker에서, Rollback은 host에서만, Reconfigure는 pilot·host에서', () => {
+    expect(cut()).toContain("$inst = Get-TrustedInstall @('pilot', 'docker')");
+    expect(rb()).toContain("$inst = Get-TrustedInstall @('host', 'pilot', 'docker')");
+    // pilot/docker에서의 Rollback은 중단된 전환(기록 'applied')을 마무리할 때만(Codex PR 리뷰 1회차).
+    expect(rb()).toMatch(/if \(-not \$hm -or \[string\]\$hm\.status -ne 'applied'\) \{\s*if \(\$interrupted\) \{ throw/);
+    expect(fnBody('Invoke-Reconfigure')).toContain("$inst = Get-TrustedInstall @('pilot', 'host')");
+    // 중단된 전환(pilot + 기록 'applied')에서는 시범 포트로 되돌리지 않고 거부(PR 리뷰 2회차).
+    expect(fnBody('Invoke-Reconfigure')).toMatch(/if \(\[string\]\$state\.mode -ne 'host' -and \$journal -and \[string\]\$journal\.status -eq 'applied'\) \{\s*throw/);
+    const g = fnAny('Get-TrustedInstall');
+    expect(g).toMatch(/if \(\$Modes -notcontains \$mode\) \{ throw/);
+    // 우리 서비스·잠긴 설치 폴더·설치 때 기록한 caddy.exe 해시와 CA 지문이어야 손댄다.
+    for (const s of ['$svc.PathName -notlike "$ExeDest *"', 'Get-ExistingRootProblem -MustExist', 'Get-ReparsePoints $d', '[string]$state.caddyExeSha512', '[string]$state.rootSha256']) {
+      expect(g).toContain(s);
+    }
+  });
+
+  it('미리 보기에 쓰는 compose 기본값이 docker-compose.yml의 기본값과 같다(5.1에서 빈 값은 변수 삭제 — Codex 계획 리뷰 1회차)', () => {
+    const compose = read('../docker-compose.yml');
+    const https = /\$\{WR_CADDY_HTTPS_BIND:-(\d+)\}:443/.exec(compose)[1];
+    const http = /\$\{WR_CADDY_HTTP_BIND:-(\d+)\}:80/.exec(compose)[1];
+    expect(SCRIPT).toContain(`$ComposeDefaultBinds = @{ WR_CADDY_HTTPS_BIND = '${https}'; WR_CADDY_HTTP_BIND = '${http}' }`);
+    expect(SCRIPT).toContain("$HostBinds           = @{ WR_CADDY_HTTPS_BIND = '127.0.0.1:18443'; WR_CADDY_HTTP_BIND = '127.0.0.1:18080' }");
+    const g = fnAny('Get-ComposeConfig');
+    expect(g).toMatch(/IsNullOrEmpty\(\[string\]\$Overrides\[\$k\]\)\) \{ throw/);
+    // 셸 변수는 finally에서 지운다. PowerShell 7은 $null을 ''로 넘겨 빈 변수가 남으므로 [NullString]::Value.
+    // Set-Item/Remove-Item Env:는 -WhatIf를 따르므로 쓰지 않는다.
+    expect(g).toMatch(/\} finally \{\s*foreach \(\$k in @\(\$Overrides\.Keys\)\) \{ \[Environment\]::SetEnvironmentVariable\(\$k, \[NullString\]::Value, 'Process'\) \}/);
+    expect(CODE).not.toMatch(/(Set|Remove)-Item\s+(-LiteralPath\s+|-Path\s+)?["']?Env:(?!<)|SetEnvironmentVariable\([^\n]*\$null/);
+    expect(g).toContain("@('config', '--format', 'json')");
+  });
+
+  it('셸 변수 검사는 env 키 + compose가 참조하는 변수 전체(WR_DOMAIN 등)이고, 동작 맨 앞에서 한다(Codex 계획 리뷰 2회차)', () => {
+    const names = fnAny('Get-ComposeVariableNames');
+    expect(names).toContain("'\\$\\{([A-Za-z_][A-Za-z0-9_]*)'");
+    expect(names).toContain('[System.IO.File]::ReadAllLines($EnvFile)');
+    expect(names).toContain('[System.StringComparer]::OrdinalIgnoreCase');
+    for (const b of [cut(), rb()]) before(b, 'Assert-NoShellOverride', 'Get-ComposeConfig');
+    expect(fnBody('Invoke-Status')).toContain('$shellVars = @(Get-ShellOverrides)');
+  });
+
+  it('대상 구성 검사: 앱은 127.0.0.1, caddy 게시, CA 볼륨 이름 = 설치 때 볼륨, caddy WR_DOMAIN = env·설치 도메인', () => {
+    const a = fnAny('Assert-TargetConfig');
+    expect(a).toContain("-ne '127.0.0.1') { throw");
+    expect(a).toContain("if ($volName -ne [string]$State.caVolume) {");
+    expect(a).toContain("(Get-JsonProp (Get-JsonProp $Config 'volumes') ([string](Get-JsonProp $dataMount[0] 'source'))) 'name'");
+    expect(a).toContain('if ($d -ne $Domain -or $d -ne [string]$State.domain) { throw');
+  });
+
+  it('Cutover 순서: 검사·대상 구성·validate → (WhatIf 끝) → 서비스 정지 → host-mode.json → env → caddy 재생성 → 시작, 실패하면 자동 복귀', () => {
+    const b = cut();
+    before(b, 'Assert-ComposeMatchesContainer $container', 'Stop-HostService');
+    before(b, 'Assert-TargetConfig (Get-ComposeConfig $HostBinds) $HostBinds', 'if ($whatIf) {');
+    before(b, 'if ($whatIf) {', 'Write-ValidatedConfig $ConfigNext $config');
+    before(b, 'Write-ValidatedConfig $ConfigNext $config', 'Stop-HostService');
+    // 기록(journal)이 서비스 정지보다 먼저: 창이 닫혀 중단돼도 'applied'가 남아 Uninstall은 거부, Rollback이 마무리(Codex PR 리뷰 1회차).
+    before(b, 'Write-TextFile $HostModeFile', 'Stop-HostService');
+    before(b, 'Stop-HostService', "Write-EnvKeys $EnvFile $changes 'cutover'");
+    before(b, "Write-EnvKeys $EnvFile $changes 'cutover'", '$envEdited = $true');
+    before(b, '$envEdited = $true', 'Invoke-ComposeUpCaddy');
+    before(b, 'Invoke-ComposeUpCaddy', 'Move-Item -LiteralPath $ConfigNext -Destination $ConfigDest');
+    before(b, "Set-ServiceStart 'auto'", 'Start-Service -Name $ServiceName');
+    expect(b).toMatch(/\} catch \{[\s\S]*if \(Restore-DockerMode \$state \$domain \$envEdited\)/);
+    // 이전 전환이 중간에 끊긴 흔적(env에 이미 host 값, host-mode.json applied)이 있으면 덮어쓰지 않는다.
+    expect(b).toMatch(/\$current\[\$k\]\.Value -eq \$HostBinds\[\$k\]\) \{\s*throw/);
+    expect(b).toMatch(/\[string\]\$hm\.status -eq 'applied'\) \{\s*throw/);
+    // 기록: 모드 키는 revert, WR_APP_PORT는 retain(롤백 때 되돌리지 않음).
+    expect(b).toContain("key = $k; action = 'revert'");
+    expect(b).toContain("key = 'WR_APP_PORT'; action = 'retain'");
+  });
+
+  it('자동 복귀: 서비스 정지+disabled → (env를 고쳤으면) 모드 키만 복원 → caddy 재생성 → 8443을 Docker가 같은 CA로 응답', () => {
+    const r = fnAny('Restore-DockerMode');
+    before(r, 'Stop-Service -Name $ServiceName -Force', "Set-ServiceStart 'disabled'");
+    before(r, "Set-ServiceStart 'disabled'", 'if ($EnvEdited) {');
+    before(r, 'Undo-EnvModeKeys', 'Invoke-ComposeUpCaddy');
+    before(r, 'Invoke-ComposeUpCaddy', 'Wait-DockerHttps $Domain ([string]$State.rootSha256)');
+    expect(r).toContain('Could not finish returning to the Docker Caddy. Run -Rollback');
+    // 기록은 Docker 응답·mode=docker 뒤에 닫는다: env를 고치기 전 실패면 'aborted'(안 닫으면 재전환이 영원히 막힘, PR 리뷰 1회차),
+    // 그 전에 실패하면 'applied'로 남아 -Rollback으로 이어서 할 수 있다(PR 리뷰 2회차).
+    expect(r).toContain("if ($EnvEdited) { Close-HostModeJournal 'reverted' } else { Close-HostModeJournal 'aborted' }");
+    before(r, "Update-JsonFile $StateFile @{ mode = 'docker'", 'Close-HostModeJournal');
+    before(r, 'Wait-DockerHttps', 'Close-HostModeJournal');
+    expect(fnBody('Undo-EnvModeKeys')).not.toMatch(/Update-JsonFile|Close-HostModeJournal/);
+  });
+
+  it('Rollback: env 값이 전환 때 넣은 값과 같을 때만, 서비스를 멈추기 전에 대상 구성을 검사하고, 서비스는 disabled', () => {
+    const b = rb();
+    expect(b).toContain('$atNew = ($current[$k].Exists -and $current[$k].Value -eq [string]$e.newValue)');
+    // 이전 값 그대로인 키도 허용: 중단된 전환, 또는 env를 복원한 뒤 실패한 롤백의 재실행(PR 리뷰 2회차). 그 밖의 값은 손으로 바꾼 것.
+    expect(b).toContain('$atPrevious = ($current[$k].Exists -eq [bool]$e.existedBefore -and ');
+    before(b, "Update-JsonFile $StateFile @{ mode = 'docker'", "Close-HostModeJournal 'reverted'");
+    expect(b).toMatch(/if \(-not \$atNew -and -not \$atPrevious\) \{\s*throw/);
+    // 중단된 전환에서는 Docker가 아직 8443을 쥐고 있을 수 있다: 제3 프로그램만 거부하고, 기다릴 때도 Docker는 제외.
+    expect(b).toContain('$_.Pid -ne $svcPid -and $_.Process -notmatch $DockerProcessPattern');
+    expect(b).toContain('Wait-Until { Test-NoHostListener } 30');
+    expect(b).toContain('if ($e.existedBefore) { $targetBinds[$k] = [string]$e.previousValue } else { $targetBinds[$k] = $ComposeDefaultBinds[$k] }');
+    before(b, 'Assert-TargetConfig (Get-ComposeConfig $targetBinds) $targetBinds', 'Stop-HostService');
+    before(b, 'if ($whatIf) {', 'Stop-HostService');
+    before(b, 'Stop-HostService', "Set-ServiceStart 'disabled'");
+    before(b, "Set-ServiceStart 'disabled'", 'Undo-EnvModeKeys');
+    before(b, 'Undo-EnvModeKeys', 'Invoke-ComposeUpCaddy');
+    before(b, 'Invoke-ComposeUpCaddy', 'Wait-DockerHttps $domain');
+  });
+
+  it('env 되돌리기는 revert 항목만 키 단위로 — 백업을 통째로 되돌리는 코드가 없다(WR_VERSION·비밀번호가 되돌아감)', () => {
+    const u = fnBody('Undo-EnvModeKeys');
+    expect(u).toContain("if ([string]$e.action -ne 'revert') { continue }");
+    expect(u).toContain('if ($e.existedBefore) { $changes[[string]$e.key] = [string]$e.previousLine } else { $changes[[string]$e.key] = $null }');
+    expect(CODE).not.toMatch(/(Copy|Move)-Item[^\n]*before-/);
+    expect(CODE.match(/Write-EnvKeys \$EnvFile/g)).toHaveLength(2); // Cutover(모드 키)·Undo-EnvModeKeys(revert 항목)
+  });
+
+  it('Write-EnvKeys: 임시 파일은 env의 ACL로 독점 생성하고, 같은 핸들로 ACL 확인·기록한다(Codex 계획 리뷰 2~4회차)', () => {
+    const w = fnAny('Write-EnvKeys');
+    expect(w).toContain("[System.Security.AccessControl.FileSystemRights]'Write, ReadPermissions'");
+    expect(w).toContain('[System.IO.FileSystemAclExtensions]::Create((New-Object System.IO.FileInfo $tmp), [System.IO.FileMode]::CreateNew, $rights,');
+    expect(w).toContain('New-Object System.IO.FileStream ($tmp, [System.IO.FileMode]::CreateNew, $rights, [System.IO.FileShare]::None');
+    expect(w.match(/\[System\.IO\.FileShare\]::None/g)).toHaveLength(2);
+    expect(w).toContain("$sec.SetSecurityDescriptorSddlForm($origAcl.GetSecurityDescriptorSddlForm('Access'), 'Access')");
+    before(w, '$tmpAcl = $fs.GetAccessControl()', '$fs.Write($body');
+    before(w, '$tmpAcl = [System.IO.FileSystemAclExtensions]::GetAccessControl($fs)', '$fs.Write($body');
+    before(w, 'Get-ForeignAccess $tmp $ReadRights $readers -Acl $tmpAcl', '$fs.Write($body');
+    expect(w).not.toMatch(/Set-Acl|SetAccessControl/);
+    expect(w).toMatch(/\} finally \{\s*if \(\$fs\) \{ \$fs\.Dispose\(\) \}\s*if \(Test-Path -LiteralPath \$tmp\) \{ Remove-Item -LiteralPath \$tmp/);
+    // 같은 키가 여러 줄이면 편집하지 않는다.
+    expect(w).toMatch(/if \(\$handled\.ContainsKey\(\$key\)\) \{ throw/);
+    // 줄마다 원래 줄바꿈을 그대로 쓴다(관리자 리허설: LF 파일에 CRLF 줄 하나가 붙자 파일 전체가 CRLF로 바뀌었다).
+    expect(w).toContain('if ($null -eq $key) { [void]$sb.Append($l).Append($doc.Endings[$i]); continue }');
+    expect(w).toContain('[void]$sb.Append([string]$Changes[$key]).Append($doc.Endings[$i])');
+    expect(fnAny('Read-EnvDocument')).toContain('$endings.Add($m.Groups[2].Value)');
+  });
+
+  it('변경 동작은 머신 범위 Mutex로 한 번에 하나만 — 다른 창의 -Cutover가 -Uninstall의 검사와 삭제 사이에 끼지 못한다(PR 리뷰 3회차)', () => {
+    const lock = indexIn(SCRIPT, "$RunLock = New-Object System.Threading.Mutex ($false, 'Global\\wr-evaluation-caddy-host')");
+    expect(lock).toBeLessThan(indexIn(SCRIPT, "        'Uninstall'   { Invoke-Uninstall }"));
+    expect(SCRIPT).toContain("if ($PSCmdlet.ParameterSetName -ne 'Status' -and -not $WhatIfPreference -and (Test-Admin)) {");
+    expect(SCRIPT).toMatch(/if \(-not \$RunLockOwned\) \{\s*\$RunLock\.Dispose\(\)[\s\S]{0,300}?exit 1/);
+    // 운영자 콘솔에서 실행하면 exit는 스크립트만 끝내고 프로세스는 남는다 — finally에서 해제(PR 리뷰 4회차, 5.1·7 재현).
+    expect(SCRIPT).toMatch(/\} finally \{\s*if \(\$RunLockOwned\) \{ \$RunLock\.ReleaseMutex\(\) \}\s*if \(\$RunLock\) \{ \$RunLock\.Dispose\(\) \}\s*\}\s*$/);
+    expect(indexIn(SCRIPT, "$RunLockOwned = $false")).toBeLessThan(indexIn(SCRIPT, "            'Cutover'     { Invoke-Cutover }"));
+    // 5.1·7 모두 AbandonedMutexException을 MethodInvocationException으로 감싼다(실측) — 타입 지정 catch로는 못 잡는다.
+    expect(SCRIPT).toContain('$_.Exception.InnerException -is [System.Threading.AbandonedMutexException]');
+    expect(CODE).not.toMatch(/catch \[System\.Threading\.AbandonedMutexException\]/);
+  });
+
+  it('실행 중인 caddy 컨테이너와 같은 폴더·compose 파일·env 파일로만 재생성한다', () => {
+    const a = fnAny('Assert-ComposeMatchesContainer');
+    // compose는 뒤 파일이 앞 파일을 덮어쓰므로 순서까지 같아야 한다(정렬 금지, Codex PR 리뷰 1회차).
+    expect(a).not.toMatch(/Sort-Object/);
+    for (const l of ['com.docker.compose.project.working_dir', 'com.docker.compose.project.config_files', 'com.docker.compose.project.environment_file']) expect(a).toContain(l);
+    expect(a).toMatch(/if \(\(& \$norm \$wd\) -ne \(& \$norm \$ComposeDir\)\) \{\s*throw/);
+    expect(a).toMatch(/if \(\(\$have -join '\|'\) -ne \(\$want -join '\|'\)\) \{\s*throw/);
+    expect(a).toMatch(/if \(\$envLabel -and \(& \$norm \$envLabel\) -ne \(& \$norm \$EnvFile\)\) \{\s*throw/);
+    expect(cut()).toMatch(/if \(-not \$container\) \{ throw/);
+  });
+
+  it('Status: docker 모드에서 시작 유형이 Disabled가 아니면 문제(재부팅 때 8443 경합), host 모드는 env 모드 키·Docker Caddy 루프백 확인', () => {
+    const s = fnBody('Invoke-Status');
+    expect(s).toMatch(/if \(\$svc\.StartMode -ne 'Disabled'\) \{ Write-Fail [^\n]*\$problems\+\+ \}/);
+    expect(s).toMatch(/if \(\$svc\.StartMode -ne 'Auto'\) \{ Write-Fail [^\n]*\$problems\+\+ \}/);
+    expect(s).toContain("@($dock | Where-Object { $_.HostIp -ne '127.0.0.1' }).Count -eq 0");
+    expect(s).toContain('$bad = @($ModeKeys | Where-Object { -not $envKeys[$_].Exists -or $envKeys[$_].Value -ne $HostBinds[$_] })');
+    expect(s).toContain('$bad = @($ModeKeys | Where-Object { $envKeys[$_].Exists -and $envKeys[$_].Value -eq $HostBinds[$_] })');
+    // PowerShell 변수는 대소문자를 구분하지 않는다: 지역 변수가 $ModeKeys를 가리면 안 된다.
+    expect(CODE).not.toMatch(/\$modeKeys\b/); // 대소문자 구분 검색: 소문자로 쓴 지역 변수만 잡는다
   });
 });
 
