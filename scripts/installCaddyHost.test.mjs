@@ -214,9 +214,14 @@ describe('install-caddy-host.ps1 -Install — CA 가드와 순서', () => {
     expect(b.slice(preCheck, preCheck + 200)).toMatch(/if \(\$rootProblem\) \{\s*throw/);
     expect(preCheck).toBeLessThan(indexIn(b, "ShouldProcess($Root, 'Create folders"));
     const acl = b.slice(indexIn(b, "ShouldProcess($Root, 'Create folders"), indexIn(b, "Write-Ok 'ACLs set and verified'"));
-    expect(acl).toContain('if ($rootIsNew) { New-Item -ItemType Directory $Root | Out-Null }');   // -Force 없음
+    // Codex PR 리뷰 4회차: 생성 단계가 Test-Path로 다시 보면, 사전 검사 뒤 생긴 junction을 "기존 루트"로
+    // 받아들여 icacls가 먼저 돈다. 사전 검사 때 본 존재 여부를 그대로 쓰고, 없었으면 -Force 없이 만든다.
+    expect(b.slice(preCheck - 120, preCheck)).toContain('$rootExisted = Test-Path -LiteralPath $Root');
+    expect(acl).toMatch(/if \(-not \$rootExisted\) \{\s*New-Item -ItemType Directory \$Root -ErrorAction Stop \| Out-Null\s*\} else \{\s*\$rootProblem = Get-ExistingRootProblem\s*if \(\$rootProblem\) \{ throw/);
+    expect(acl).not.toMatch(/New-Item[^\n]*-Force[^\n]*\$Root\b(?!\\)/);
     const lockOwner = indexIn(acl, "Invoke-Icacls @($Root, '/setowner', \"*$SidAdmins\", '/C', '/Q')");
-    const empty = indexIn(acl, 'if ($rootIsNew -and @(Get-ChildItem -LiteralPath $Root -Force).Count -gt 0) {');
+    expect(acl.slice(0, lockOwner)).not.toMatch(/Test-Path -LiteralPath \$Root/);
+    const empty = indexIn(acl, 'if (-not $rootExisted -and @(Get-ChildItem -LiteralPath $Root -Force).Count -gt 0) {');
     const scan = indexIn(acl, '$links = @(Get-ReparsePoints $Root)');
     const firstRecursive = acl.search(/'\/T'/);
     expect(lockOwner).toBeLessThan(empty);

@@ -475,11 +475,14 @@ function Invoke-Install {
     $oldRules = @(Get-NetFirewallRule -Group $FirewallGroup -ErrorAction SilentlyContinue)
     if ($oldRules.Count -gt 0) { throw "Firewall rules of group '$FirewallGroup' already exist. Run -Uninstall first." }
     Write-Ok "No existing '$ServiceName' service or firewall rules"
+    # Remember what the pre-check saw: the create step must not look again (a path appearing in between
+    # must make it fail, not be adopted).
+    $rootExisted = Test-Path -LiteralPath $Root
     $rootProblem = Get-ExistingRootProblem
     if ($rootProblem) {
         throw "Existing install folder not trusted: $rootProblem. Nothing was changed. Inspect it, delete it as an Administrator (keep a copy of data\ if it holds the CA) and run again."
     }
-    if (Test-Path -LiteralPath $Root) { Write-Ok "Existing $Root is locked down (owner and write access)" }
+    if ($rootExisted) { Write-Ok "Existing $Root is locked down (owner and write access)" }
 
     Invoke-Native { docker info 2>$null } | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Docker is not running.' }
@@ -529,15 +532,20 @@ function Invoke-Install {
     try {
         Write-Step "Folders and ACLs ($Root)"
         if ($ScriptCmdlet.ShouldProcess($Root, 'Create folders and set ACLs (users: read bin/state only; no access to data/logs)')) {
-            # 1. Lock the root itself (not recursively) before anything touches its contents. No -Force: if a
-            #    user created the path after the pre-check, New-Item fails instead of adopting it.
-            $rootIsNew = -not (Test-Path -LiteralPath $Root)
-            if ($rootIsNew) { New-Item -ItemType Directory $Root | Out-Null }
+            # 1. Lock the root itself (not recursively) before anything touches its contents.
+            #    Absent at the pre-check: create it WITHOUT -Force, so anything that appeared at the path since
+            #    (e.g. a junction) makes this fail before any icacls runs. Present: it was locked down, re-check.
+            if (-not $rootExisted) {
+                New-Item -ItemType Directory $Root -ErrorAction Stop | Out-Null
+            } else {
+                $rootProblem = Get-ExistingRootProblem
+                if ($rootProblem) { throw "Install folder changed since the pre-check: $rootProblem. Nothing was changed in it." }
+            }
             Invoke-Icacls @($Root, '/setowner', "*$SidAdmins", '/C', '/Q')
             Invoke-Icacls @($Root, '/inheritance:r', '/grant:r', "*${SidAdmins}:(OI)(CI)F", "*${SidSystem}:(OI)(CI)F", "*${SidLocalService}:(OI)(CI)RX", "*${SidUsers}:(OI)(CI)RX")
             Remove-ForeignAllowAce $Root @($SidAdmins, $SidSystem, $SidLocalService, $SidUsers)
             # 2. Until the lock, a new root inherited "users may add folders" from ProgramData: it must still be empty.
-            if ($rootIsNew -and @(Get-ChildItem -LiteralPath $Root -Force).Count -gt 0) {
+            if (-not $rootExisted -and @(Get-ChildItem -LiteralPath $Root -Force).Count -gt 0) {
                 throw "Something was created inside $Root while it was being set up. Inspect it, delete it as an Administrator and run again."
             }
             # 3. No junction/symlink anywhere below before the recursive (/T) changes and the elevated writes.
