@@ -400,8 +400,13 @@ function Get-ReparsePoints([string]$Top) {
 # An existing install root is accepted only in the locked state this script leaves it in: a real folder,
 # owned by Administrators/SYSTEM, writable by nobody else. ProgramData lets any user create (and own) a
 # folder there, e.g. a junction to a folder they can swap later. Returns the reason, or $null.
-function Get-ExistingRootProblem {
-    if (-not (Test-Path -LiteralPath $Root)) { return $null }
+# -MustExist: the caller saw the folder before. Its disappearance is then a problem, not "nothing there" -
+# a user-owned folder deleted between two checks could come back as a junction right after.
+function Get-ExistingRootProblem([switch]$MustExist) {
+    if (-not (Test-Path -LiteralPath $Root)) {
+        if ($MustExist) { return "$Root disappeared after it was seen" }
+        return $null
+    }
     $item = Get-Item -LiteralPath $Root -Force
     if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return "$Root is a junction or symbolic link" }
     if (-not $item.PSIsContainer) { return "$Root is not a folder" }
@@ -478,7 +483,7 @@ function Invoke-Install {
     # Remember what the pre-check saw: the create step must not look again (a path appearing in between
     # must make it fail, not be adopted).
     $rootExisted = Test-Path -LiteralPath $Root
-    $rootProblem = Get-ExistingRootProblem
+    $rootProblem = Get-ExistingRootProblem -MustExist:$rootExisted
     if ($rootProblem) {
         throw "Existing install folder not trusted: $rootProblem. Nothing was changed. Inspect it, delete it as an Administrator (keep a copy of data\ if it holds the CA) and run again."
     }
@@ -538,7 +543,7 @@ function Invoke-Install {
             if (-not $rootExisted) {
                 New-Item -ItemType Directory $Root -ErrorAction Stop | Out-Null
             } else {
-                $rootProblem = Get-ExistingRootProblem
+                $rootProblem = Get-ExistingRootProblem -MustExist
                 if ($rootProblem) { throw "Install folder changed since the pre-check: $rootProblem. Nothing was changed in it." }
             }
             Invoke-Icacls @($Root, '/setowner', "*$SidAdmins", '/C', '/Q')

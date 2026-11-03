@@ -217,7 +217,11 @@ describe('install-caddy-host.ps1 -Install — CA 가드와 순서', () => {
     // Codex PR 리뷰 4회차: 생성 단계가 Test-Path로 다시 보면, 사전 검사 뒤 생긴 junction을 "기존 루트"로
     // 받아들여 icacls가 먼저 돈다. 사전 검사 때 본 존재 여부를 그대로 쓰고, 없었으면 -Force 없이 만든다.
     expect(b.slice(preCheck - 120, preCheck)).toContain('$rootExisted = Test-Path -LiteralPath $Root');
-    expect(acl).toMatch(/if \(-not \$rootExisted\) \{\s*New-Item -ItemType Directory \$Root -ErrorAction Stop \| Out-Null\s*\} else \{\s*\$rootProblem = Get-ExistingRootProblem\s*if \(\$rootProblem\) \{ throw/);
+    expect(acl).toMatch(/if \(-not \$rootExisted\) \{\s*New-Item -ItemType Directory \$Root -ErrorAction Stop \| Out-Null\s*\} else \{\s*\$rootProblem = Get-ExistingRootProblem -MustExist\s*if \(\$rootProblem\) \{ throw/);
+    // Codex PR 리뷰 5회차: 한 번 본 루트가 사라진 것은 "없음 = 문제없음"이 아니라 문제다
+    // (사용자 소유 폴더를 지웠다가 재검사 직후 junction으로 되살릴 수 있다).
+    expect(b).toContain('$rootProblem = Get-ExistingRootProblem -MustExist:$rootExisted');
+    expect(trust).toMatch(/if \(-not \(Test-Path -LiteralPath \$Root\)\) \{\s*if \(\$MustExist\) \{ return "[^"]+" \}\s*return \$null\s*\}/);
     expect(acl).not.toMatch(/New-Item[^\n]*-Force[^\n]*\$Root\b(?!\\)/);
     const lockOwner = indexIn(acl, "Invoke-Icacls @($Root, '/setowner', \"*$SidAdmins\", '/C', '/Q')");
     expect(acl.slice(0, lockOwner)).not.toMatch(/Test-Path -LiteralPath \$Root/);
