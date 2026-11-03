@@ -540,6 +540,16 @@ describe('install-caddy-host.ps1 -Cutover / -Rollback / -Reconfigure (PR-3b)', (
     expect(fnAny('Read-EnvDocument')).toContain('$endings.Add($m.Groups[2].Value)');
   });
 
+  it('변경 동작은 머신 범위 Mutex로 한 번에 하나만 — 다른 창의 -Cutover가 -Uninstall의 검사와 삭제 사이에 끼지 못한다(PR 리뷰 3회차)', () => {
+    const lock = indexIn(SCRIPT, "$RunLock = New-Object System.Threading.Mutex ($false, 'Global\\wr-evaluation-caddy-host')");
+    expect(lock).toBeLessThan(indexIn(SCRIPT, "        'Uninstall'   { Invoke-Uninstall }"));
+    expect(SCRIPT).toContain("if ($PSCmdlet.ParameterSetName -ne 'Status' -and -not $WhatIfPreference -and (Test-Admin)) {");
+    expect(SCRIPT).toMatch(/if \(-not \$owned\) \{[\s\S]{0,300}?exit 1/);
+    // 5.1·7 모두 AbandonedMutexException을 MethodInvocationException으로 감싼다(실측) — 타입 지정 catch로는 못 잡는다.
+    expect(SCRIPT).toContain('$_.Exception.InnerException -is [System.Threading.AbandonedMutexException]');
+    expect(CODE).not.toMatch(/catch \[System\.Threading\.AbandonedMutexException\]/);
+  });
+
   it('실행 중인 caddy 컨테이너와 같은 폴더·compose 파일·env 파일로만 재생성한다', () => {
     const a = fnAny('Assert-ComposeMatchesContainer');
     // compose는 뒤 파일이 앞 파일을 덮어쓰므로 순서까지 같아야 한다(정렬 금지, Codex PR 리뷰 1회차).
