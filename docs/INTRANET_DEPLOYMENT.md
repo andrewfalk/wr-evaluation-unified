@@ -202,6 +202,8 @@ docker compose exec caddy sh -c "rm -f /data/caddy/certificates/local/wr.hospita
 docker compose restart caddy
 ```
 
+> **호스트 Caddy 모드**(PRODUCTION_RELEASE_PLAN.md 9절 — 8443을 Windows 서비스 `wr-caddy`가 맡는 경우): 위 `docker compose` 명령 대신 관리자 PowerShell에서 `Restart-Service wr-caddy`로 재시작한다. 인증서 만료일·체인은 패키지 루트에서 `.\caddy-host\install-caddy-host.ps1 -Status -EnvFile <운영 env 경로>`가 보여 준다. 같은 내부 CA를 쓰므로 클라이언트 PC의 루트 인증서는 그대로다.
+
 ---
 
 ## 6. 1년 만료 알림 설정
@@ -397,6 +399,8 @@ electron-updater는 **더 낮은 버전을 설치하지 않습니다.** 장애 �
 ```bash
 docker compose logs caddy --tail=100 -f
 ```
+
+호스트 Caddy 모드(PRODUCTION_RELEASE_PLAN.md 9절)에서는 로그가 `C:\ProgramData\wr-caddy\logs\caddy.log`(서버 로그)와 `access.log`(접속 로그 — 실제 접속자 IP가 남는다)에 있다. 관리자만 읽을 수 있고, URL의 쿼리 문자열은 기록하지 않는다. 관리자 PowerShell에서 `Get-Content C:\ProgramData\wr-caddy\logs\caddy.log -Tail 100`.
 
 ### 인증서 발급 실패 (Caddy 시작 직후)
 
