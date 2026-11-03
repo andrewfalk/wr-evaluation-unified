@@ -362,6 +362,9 @@ describe('install-caddy-host.ps1 -Uninstall / -Status', () => {
     expect(b).toMatch(/if \(\$svc -and \$svc\.PathName -notlike "\$ExeDest \*"\) \{\s*throw/);
     expect(b).toContain('foreach ($f in @($ExeDest, $ConfigDest, $ConfigNext, $ConfigPrev, $StateFile, $SnapshotFile, $HostModeFile, $RootCrtPublic)) {');
     expect(b).not.toMatch(/Remove-Item[^\n]*(\$DataDir|\$CaDir|\$LogDir|\$Root\b|-Recurse)/);
+    // 중단된 전환(기록 'applied')이 남아 있으면 모드와 상관없이 변경 전에 거부(Codex PR 리뷰 1회차).
+    expect(b).toMatch(/if \(\$journal -and \[string\]\$journal\.status -eq 'applied'\) \{\s*throw/);
+    expect(indexIn(b, '$journal = Get-HostModeJson')).toBeLessThan(indexIn(b, 'Write-Step'));
   });
 
   it('Status는 읽기 전용이다(ShouldProcess·변경 명령 없음)', () => {
@@ -404,7 +407,9 @@ describe('install-caddy-host.ps1 -Cutover / -Rollback / -Reconfigure (PR-3b)', (
 
   it('모드 전이: Cutover는 pilot·docker에서, Rollback은 host에서만, Reconfigure는 pilot·host에서', () => {
     expect(cut()).toContain("$inst = Get-TrustedInstall @('pilot', 'docker')");
-    expect(rb()).toContain("$inst = Get-TrustedInstall @('host')");
+    expect(rb()).toContain("$inst = Get-TrustedInstall @('host', 'pilot', 'docker')");
+    // pilot/docker에서의 Rollback은 중단된 전환(기록 'applied')을 마무리할 때만(Codex PR 리뷰 1회차).
+    expect(rb()).toMatch(/if \(-not \$hm -or \[string\]\$hm\.status -ne 'applied'\) \{\s*if \(\$interrupted\) \{ throw/);
     expect(fnBody('Invoke-Reconfigure')).toContain("$inst = Get-TrustedInstall @('pilot', 'host')");
     const g = fnAny('Get-TrustedInstall');
     expect(g).toMatch(/if \(\$Modes -notcontains \$mode\) \{ throw/);
@@ -452,8 +457,9 @@ describe('install-caddy-host.ps1 -Cutover / -Rollback / -Reconfigure (PR-3b)', (
     before(b, 'Assert-TargetConfig (Get-ComposeConfig $HostBinds) $HostBinds', 'if ($whatIf) {');
     before(b, 'if ($whatIf) {', 'Write-ValidatedConfig $ConfigNext $config');
     before(b, 'Write-ValidatedConfig $ConfigNext $config', 'Stop-HostService');
-    before(b, 'Stop-HostService', 'Write-TextFile $HostModeFile');
-    before(b, 'Write-TextFile $HostModeFile', "Write-EnvKeys $EnvFile $changes 'cutover'");
+    // 기록(journal)이 서비스 정지보다 먼저: 창이 닫혀 중단돼도 'applied'가 남아 Uninstall은 거부, Rollback이 마무리(Codex PR 리뷰 1회차).
+    before(b, 'Write-TextFile $HostModeFile', 'Stop-HostService');
+    before(b, 'Stop-HostService', "Write-EnvKeys $EnvFile $changes 'cutover'");
     before(b, "Write-EnvKeys $EnvFile $changes 'cutover'", '$envEdited = $true');
     before(b, '$envEdited = $true', 'Invoke-ComposeUpCaddy');
     before(b, 'Invoke-ComposeUpCaddy', 'Move-Item -LiteralPath $ConfigNext -Destination $ConfigDest');
@@ -473,12 +479,20 @@ describe('install-caddy-host.ps1 -Cutover / -Rollback / -Reconfigure (PR-3b)', (
     before(r, "Set-ServiceStart 'disabled'", 'if ($EnvEdited) {');
     before(r, 'Undo-EnvModeKeys', 'Invoke-ComposeUpCaddy');
     before(r, 'Invoke-ComposeUpCaddy', 'Wait-DockerHttps $Domain ([string]$State.rootSha256)');
-    expect(r).toContain('Write-Fail \'Could not finish returning to the Docker Caddy. Do these by hand, in this order:\'');
+    expect(r).toContain('Could not finish returning to the Docker Caddy. Run -Rollback');
+    // env를 고치기 전에 실패했으면 기록을 'aborted'로 닫는다 — 'applied'가 남으면 재전환이 영원히 막힌다(Codex PR 리뷰 1회차).
+    expect(r).toContain("if (-not $EnvEdited -and (Test-Path -LiteralPath $HostModeFile)) { Update-JsonFile $HostModeFile @{ status = 'aborted'");
   });
 
   it('Rollback: env 값이 전환 때 넣은 값과 같을 때만, 서비스를 멈추기 전에 대상 구성을 검사하고, 서비스는 disabled', () => {
     const b = rb();
-    expect(b).toMatch(/\$current\[\$k\]\.Value -ne \[string\]\$e\.newValue\) \{\s*throw/);
+    expect(b).toContain('$atNew = ($current[$k].Exists -and $current[$k].Value -eq [string]$e.newValue)');
+    // 이전 값 그대로인 키는 중단된 전환일 때만 허용(host 모드에서 이전 값 = 손으로 바꾼 것).
+    expect(b).toContain('$atPrevious = ($interrupted -and ');
+    expect(b).toMatch(/if \(-not \$atNew -and -not \$atPrevious\) \{\s*throw/);
+    // 중단된 전환에서는 Docker가 아직 8443을 쥐고 있을 수 있다: 제3 프로그램만 거부하고, 기다릴 때도 Docker는 제외.
+    expect(b).toContain('$_.Pid -ne $svcPid -and $_.Process -notmatch $DockerProcessPattern');
+    expect(b).toContain('Wait-Until { Test-NoHostListener } 30');
     expect(b).toContain('if ($e.existedBefore) { $targetBinds[$k] = [string]$e.previousValue } else { $targetBinds[$k] = $ComposeDefaultBinds[$k] }');
     before(b, 'Assert-TargetConfig (Get-ComposeConfig $targetBinds) $targetBinds', 'Stop-HostService');
     before(b, 'if ($whatIf) {', 'Stop-HostService');
@@ -518,6 +532,8 @@ describe('install-caddy-host.ps1 -Cutover / -Rollback / -Reconfigure (PR-3b)', (
 
   it('실행 중인 caddy 컨테이너와 같은 폴더·compose 파일·env 파일로만 재생성한다', () => {
     const a = fnAny('Assert-ComposeMatchesContainer');
+    // compose는 뒤 파일이 앞 파일을 덮어쓰므로 순서까지 같아야 한다(정렬 금지, Codex PR 리뷰 1회차).
+    expect(a).not.toMatch(/Sort-Object/);
     for (const l of ['com.docker.compose.project.working_dir', 'com.docker.compose.project.config_files', 'com.docker.compose.project.environment_file']) expect(a).toContain(l);
     expect(a).toMatch(/if \(\(& \$norm \$wd\) -ne \(& \$norm \$ComposeDir\)\) \{\s*throw/);
     expect(a).toMatch(/if \(\(\$have -join '\|'\) -ne \(\$want -join '\|'\)\) \{\s*throw/);

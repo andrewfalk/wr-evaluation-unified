@@ -762,14 +762,15 @@ function Assert-ComposeMatchesContainer($Container) {
         throw "The running caddy container was created from $wd, not $ComposeDir. Run this script from that package or pass -ComposeDir (and the same -ExtraComposeFile). Nothing was changed."
     }
     $files = [string](Get-JsonProp $labels 'com.docker.compose.project.config_files')
-    $have = @(@($files -split ',' | Where-Object { $_ } | ForEach-Object {
+    # Same files in the same ORDER: a later file overrides an earlier one.
+    $have = @($files -split ',' | Where-Object { $_ } | ForEach-Object {
         $f = $_
         if (-not [System.IO.Path]::IsPathRooted($f)) { $f = Join-Path $wd $f }
         & $norm $f
-    }) | Sort-Object)
-    $want = @(@($ComposeFiles | ForEach-Object { & $norm $_ }) | Sort-Object)
+    })
+    $want = @($ComposeFiles | ForEach-Object { & $norm $_ })
     if (($have -join '|') -ne ($want -join '|')) {
-        throw "The running caddy container was created with the compose files [$files]; this run would use [$($ComposeFiles -join ',')]. Pass the same files (-ExtraComposeFile). Nothing was changed."
+        throw "The running caddy container was created with the compose files [$files] (in this order); this run would use [$($ComposeFiles -join ',')]. Pass the same files in the same order (-ExtraComposeFile). Nothing was changed."
     }
     $envLabel = [string](Get-JsonProp $labels 'com.docker.compose.project.environment_file')
     if ($envLabel -and (& $norm $envLabel) -ne (& $norm $EnvFile)) {
@@ -810,6 +811,11 @@ function Wait-Until([scriptblock]$Condition, [int]$Seconds = 60) {
 }
 
 function Test-ProdPortsFree { return (@(Get-TcpListeners $ProdHttpsPort).Count -eq 0 -and @(Get-TcpListeners $ProdHttpPort).Count -eq 0) }
+
+# Nothing but Docker listens on 8443 / 8080 (wr-caddy has let go of them).
+function Test-NoHostListener {
+    return (@(@(Get-TcpListeners $ProdHttpsPort) + @(Get-TcpListeners $ProdHttpPort) | Where-Object { $_.Process -notmatch $DockerProcessPattern }).Count -eq 0)
+}
 
 # The Docker Caddy answers on 8443 again: listeners are Docker's, the chain root is the installed CA.
 function Wait-DockerHttps([string]$Domain, [string]$Fp) {
@@ -945,10 +951,14 @@ function Restore-DockerMode($State, [string]$Domain, [bool]$EnvEdited) {
         Write-Ok "Firewall rules of group '$FirewallGroup' removed"
     } catch { $left += "Remove-NetFirewallRule -Group '$FirewallGroup'   ($($_.Exception.Message))" }
     if ($left.Count -eq 0) {
-        try { Update-JsonFile $StateFile @{ mode = 'docker'; dockerSince = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ssK') } } catch { $left += "Set mode to docker in $StateFile   ($($_.Exception.Message))" }
+        try {
+            # The env file was not changed (the failure came first): close the journal so -Cutover can run again.
+            if (-not $EnvEdited -and (Test-Path -LiteralPath $HostModeFile)) { Update-JsonFile $HostModeFile @{ status = 'aborted'; abortedAt = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ssK') } }
+            Update-JsonFile $StateFile @{ mode = 'docker'; dockerSince = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ssK') }
+        } catch { $left += "Set mode to docker in $StateFile   ($($_.Exception.Message))" }
     }
     if ($left.Count -gt 0) {
-        Write-Fail 'Could not finish returning to the Docker Caddy. Do these by hand, in this order:'
+        Write-Fail "Could not finish returning to the Docker Caddy. Run -Rollback (it finishes an interrupted switch-over recorded in $HostModeFile), or do these by hand, in this order:"
         $i = 1
         foreach ($s in $left) { Write-Host "   $i. $s" -ForegroundColor Yellow; $i++ }
         return $false
@@ -1280,15 +1290,15 @@ function Invoke-Cutover {
     Write-Ok 'No shell variables override the env file'
     $domain = Get-EnvValue 'WR_DOMAIN'
     if ($domain -ne [string]$state.domain) { throw "WR_DOMAIN in $EnvFile is '$domain', but the service was installed for '$($state.domain)'. Nothing was changed." }
+    $hm = Get-HostModeJson
+    if ($hm -and [string]$hm.status -eq 'applied') {
+        throw "An earlier switch-over was interrupted ($HostModeFile is 'applied' while the mode is '$($state.mode)'). Run -Rollback first; it puts the Docker Caddy back. Nothing was changed."
+    }
     $current = Get-ModeKeyState (Read-EnvDocument $EnvFile)
     foreach ($k in $ModeKeys) {
         if ($current[$k].Exists -and $current[$k].Value -eq $HostBinds[$k]) {
-            throw "$EnvFile already has $k=$($HostBinds[$k]) (host mode) while the recorded mode is '$($state.mode)': an earlier switch-over was interrupted. Restore only that line from the newest $EnvFile.before-cutover-* file, then run again. Nothing was changed."
+            throw "$EnvFile already has $k=$($HostBinds[$k]) (host mode) while the recorded mode is '$($state.mode)' and no switch-over is recorded. Restore only that line from the newest $EnvFile.before-cutover-* file, then run again. Nothing was changed."
         }
-    }
-    $hm = Get-HostModeJson
-    if ($hm -and [string]$hm.status -eq 'applied') {
-        throw "$HostModeFile says a switch-over was applied, but the mode is '$($state.mode)'. Check the env file against it by hand. Nothing was changed."
     }
     # What a later rollback returns to: the current lines, or the compose default where a key is absent.
     $restoreBinds = @{}
@@ -1345,8 +1355,6 @@ function Invoke-Cutover {
     Write-Step 'Switch-over'
     $envEdited = $false
     try {
-        Stop-HostService
-        Write-Ok "Service '$ServiceName' stopped (trial ports closed)"
         $entries = @()
         foreach ($k in $ModeKeys) {
             $entries += [ordered]@{ key = $k; action = 'revert'; existedBefore = [bool]$current[$k].Exists; previousLine = $current[$k].Line; previousValue = $current[$k].Value; newValue = $HostBinds[$k] }
@@ -1362,9 +1370,12 @@ function Invoke-Cutover {
             project      = $ProjectName
             entries      = $entries
         }
-        # Recorded BEFORE the env file changes, so a rollback always knows what to restore.
+        # The journal is written BEFORE anything changes. While it says 'applied' and the mode is not yet host, the
+        # switch-over counts as interrupted (e.g. the window was closed): -Uninstall refuses, -Rollback finishes it.
         Write-TextFile $HostModeFile ($hostMode | ConvertTo-Json -Depth 5)
-        $changes = New-Object System.Collections.Specialized.OrderedDictionary
+        Stop-HostService
+        Write-Ok "Service '$ServiceName' stopped (trial ports closed)"
+        $changes =New-Object System.Collections.Specialized.OrderedDictionary
         foreach ($k in $ModeKeys) { $changes[$k] = "$k=$($HostBinds[$k])" }
         $backup = Write-EnvKeys $EnvFile $changes 'cutover'
         $envEdited = $true
@@ -1409,11 +1420,18 @@ function Invoke-Rollback {
     if (-not $whatIf -and -not (Test-Admin)) { throw 'Run this from an elevated (Administrator) PowerShell. -WhatIf works without it.' }
 
     Write-Step 'Pre-checks'
-    $inst = Get-TrustedInstall @('host')
+    # Mode host, or an interrupted switch-over: the journal says 'applied' but the mode was never set to host
+    # (the window was closed mid-way, or the automatic return could not finish).
+    $inst = Get-TrustedInstall @('host', 'pilot', 'docker')
     $state = $inst.State
     $svc = $inst.Service
     $hm = Get-HostModeJson
-    if (-not $hm -or [string]$hm.status -ne 'applied') { throw "$HostModeFile is missing or not 'applied'; the env lines to restore are unknown. Nothing was changed." }
+    $interrupted = ([string]$state.mode -ne 'host')
+    if (-not $hm -or [string]$hm.status -ne 'applied') {
+        if ($interrupted) { throw "Mode is '$($state.mode)' and no switch-over is recorded in $HostModeFile; there is nothing to roll back. Nothing was changed." }
+        throw "$HostModeFile is missing or not 'applied'; the env lines to restore are unknown. Nothing was changed."
+    }
+    if ($interrupted) { Write-Warn "Finishing an interrupted switch-over (mode '$($state.mode)', $HostModeFile 'applied')." }
     if (-not $EnvFileGiven -and (Get-JsonProp $hm 'envFile')) { $script:EnvFile = [string]$hm.envFile }
     if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) { throw "Env file not found: $EnvFile" }
     Assert-ComposeFiles
@@ -1425,7 +1443,10 @@ function Invoke-Rollback {
     $targetBinds = @{}
     foreach ($e in @($hm.entries | Where-Object { [string]$_.action -eq 'revert' })) {
         $k = [string]$e.key
-        if (-not $current[$k].Exists -or $current[$k].Value -ne [string]$e.newValue) {
+        $atNew = ($current[$k].Exists -and $current[$k].Value -eq [string]$e.newValue)
+        # An interrupted switch-over may have stopped before the env file was changed: the key is still as before.
+        $atPrevious = ($interrupted -and $current[$k].Exists -eq [bool]$e.existedBefore -and (-not $current[$k].Exists -or $current[$k].Value -eq [string]$e.previousValue))
+        if (-not $atNew -and -not $atPrevious) {
             throw "$k in $EnvFile is '$($current[$k].Value)', not '$($e.newValue)' as the switch-over set it. It was changed by hand; fix it (see $HostModeFile) and run again. Nothing was changed."
         }
         if ($e.existedBefore) { $targetBinds[$k] = [string]$e.previousValue } else { $targetBinds[$k] = $ComposeDefaultBinds[$k] }
@@ -1446,11 +1467,12 @@ function Invoke-Rollback {
     }
     $svcPid = 0
     if ($svc.State -eq 'Running') { $svcPid = [int]$svc.ProcessId }
+    # Docker may still (or again) hold them after an interrupted switch-over; anything else is a third program.
     foreach ($p in @($ProdHttpsPort, $ProdHttpPort)) {
-        $others = @(Get-TcpListeners $p | Where-Object { $_.Pid -ne $svcPid })
-        if ($others.Count -gt 0) { throw "Port $p is held by $(($others | ForEach-Object { "$($_.Process) (pid $($_.Pid))" }) -join ', '), not by wr-caddy. Nothing was changed." }
+        $others = @(Get-TcpListeners $p | Where-Object { $_.Pid -ne $svcPid -and $_.Process -notmatch $DockerProcessPattern })
+        if ($others.Count -gt 0) { throw "Port $p is held by $(($others | ForEach-Object { "$($_.Process) (pid $($_.Pid))" }) -join ', '), not by wr-caddy or Docker. Nothing was changed." }
     }
-    Write-Ok '8443 / 8080 are held by wr-caddy only (or free)'
+    Write-Ok '8443 / 8080 are held by wr-caddy or Docker only (or free)'
     $appPort = Get-AppPublishedPort
 
     Write-Step 'Compose configuration after the rollback (checked before the service stops)'
@@ -1470,7 +1492,7 @@ function Invoke-Rollback {
         Set-ServiceStart 'disabled'
         $done.ServiceStopped = $true
         Write-Ok "Service '$ServiceName' stopped and disabled"
-        if (-not (Wait-Until { Test-ProdPortsFree } 30)) { throw '8443 / 8080 are still in use after stopping wr-caddy.' }
+        if (-not (Wait-Until { Test-NoHostListener } 30)) { throw 'Something other than Docker still listens on 8443 / 8080 after stopping wr-caddy.' }
         $backup = Undo-EnvModeKeys
         $done.EnvRestored = $true
         Write-Ok "Env file: WR_CADDY_HTTPS_BIND / WR_CADDY_HTTP_BIND restored (file before this step: $backup)"
@@ -1687,6 +1709,9 @@ function Invoke-Status {
         }
     }
     $hm = Get-HostModeJson
+    if ($mode -ne 'host' -and $hm -and [string]$hm.status -eq 'applied') {
+        Write-Fail "A switch-over recorded in $HostModeFile did not finish (mode '$mode'). Run -Rollback to put the Docker Caddy back."; $problems++
+    }
     $envPath = $EnvFile
     if (-not $EnvFileGiven -and $hm -and (Get-JsonProp $hm 'envFile')) { $envPath = [string]$hm.envFile }
     $envKeys = $null
@@ -1721,6 +1746,12 @@ function Invoke-Uninstall {
     $state = Get-StateJson
     if ($state -and @('pilot', 'docker') -notcontains [string]$state.mode) {
         throw "Mode is '$($state.mode)'. Run -Rollback first; uninstalling now would leave 8443 without a server. Nothing was changed."
+    }
+    # An interrupted switch-over leaves the mode at pilot/docker while wr-caddy may already serve 8443 and the env
+    # file may already hold the host-mode lines: removing the service and the journal would strand both.
+    $journal = Get-HostModeJson
+    if ($journal -and [string]$journal.status -eq 'applied') {
+        throw "A switch-over is recorded in $HostModeFile but did not finish. Run -Rollback first. Nothing was changed."
     }
     $svc = Get-ServiceInfo
     if ($svc -and $svc.PathName -notlike "$ExeDest *") {
