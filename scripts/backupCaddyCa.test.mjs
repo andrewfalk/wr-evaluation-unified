@@ -24,9 +24,9 @@ describe('backup-caddy-ca.ps1 — 비밀 키가 평문으로 남지 않는다', 
     expect(SCRIPT).toContain('-cf /dev/shm/ca.tar');
     expect(SCRIPT).not.toMatch(/-cf\s+\/out/);
     expect(SCRIPT).toContain('--output /out/$OUT_FILE --encrypt /dev/shm/ca.tar');
-    // /out 은 쓰기 가능 마운트가 아카이브 생성 단계 한 곳뿐이다(나머지 /out 마운트는 :ro).
+    // /out 쓰기 가능 마운트는 아카이브를 만드는 두 경로(볼륨·-SourceDir)에 하나씩뿐이다(나머지 /out 마운트는 :ro).
     const writable = SCRIPT.match(/-v "\$\{outFull\}:\/out"/g) ?? [];
-    expect(writable).toHaveLength(1);
+    expect(writable).toHaveLength(2);
   });
 
   it('gpg 는 공개 키 비대칭 암호화(--recipient --encrypt)이고 암호 입력이 필요 없다', () => {
@@ -58,6 +58,55 @@ describe('backup-caddy-ca.ps1 — 비밀 키가 평문으로 남지 않는다', 
     // 정보 파일에는 지문·파일 이름 같은 공개 정보만 쓴다.
     const info = SCRIPT.slice(indexOfOrFail('$info = @('), indexOfOrFail('Set-Content -Path $infoPath'));
     expect(info).not.toMatch(/\.key\b(?!,)/);
+  });
+});
+
+describe('backup-caddy-ca.ps1 -SourceDir (호스트 Caddy 서비스의 CA 사본, 릴리스 B PR-4)', () => {
+  // 실측(2026-11-03, 가짜 CA 4개·시험 키링): 5.1·7 모두 아카이브 생성 → 복호화한 파일 4개가 원본과 바이트 일치,
+  // out 폴더에 평문 없음. 거부 4종(비관리자·경로에 junction·64 KiB 초과·SHA-256 불일치)은 종료 코드 1, 아카이브 없음.
+  // 관리자 리허설(사용자 실행): 실제 C:\ProgramData\wr-caddy\data 를 5.1로 백업 → 설치 기록의 루트와 일치, 복호화한 4개가
+  // 호스트 폴더·볼륨 백업과 모두 바이트 일치, 출력 폴더에 평문 없음.
+  const src = () => SCRIPT.slice(indexOfOrFail('} else {\n    # Host folder:'), indexOfOrFail('$archivePath = Join-Path $outFull $outFile'));
+
+  it('관리자 창에서만 동작하고, 경로의 모든 폴더·파일에서 junction/symlink를 거부하며 크기 상한을 둔다', () => {
+    expect(SCRIPT).toMatch(/if \(-not \(Test-Admin\)\) \{ Stop-WithError '-SourceDir needs an elevated/);
+    expect(SCRIPT).toContain("foreach ($d in @($chain + @((Join-Path $SourceDir 'pki'), (Join-Path $SourceDir 'pki\\authorities'), $hostCaDir))) {");
+    // 드라이브 루트부터 -SourceDir 까지 모든 상위 폴더도 검사한다(상위 junction 도 읽기를 돌린다 — PR 리뷰 1회차 권고, 5.1·7 실측).
+    expect(SCRIPT).toMatch(/while \(\$p\) \{\s*\$chain = @\(\$p\) \+ \$chain\s*\$parent = Split-Path -Parent \$p\s*if \(-not \$parent -or \$parent -eq \$p\) \{ break \}/);
+    expect(SCRIPT.match(/-band \[System\.IO\.FileAttributes\]::ReparsePoint\) \{ Stop-WithError/g)).toHaveLength(2);
+    expect(SCRIPT).toMatch(/if \(\$item\.Length -le 0 -or \$item\.Length -gt 65536\) \{ Stop-WithError/);
+    expect(SCRIPT).toContain('$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SourceDir)');
+  });
+
+  it('평문은 호스트 디스크에 쓰지 않는다 — 표준입력(base64)으로 넘기고 컨테이너 /dev/shm 에서만 다시 만든다', () => {
+    const s = src();
+    expect(s).toContain('$payload | docker run -i --rm --entrypoint sh');
+    expect(s).toContain('[Convert]::ToBase64String($hostFiles[$f])');
+    expect(s).toContain('d=/dev/shm/caimport');
+    expect(s).toContain('tar -C $d -cf /dev/shm/ca.tar local');
+    expect(s).toContain('rm -rf $d /dev/shm/ca.tar; exit $rc');
+    expect(s).not.toMatch(/-v "\$\{?(SourceDir|hostCaDir)/);    // 호스트 폴더를 바인드 마운트하지 않는다
+    expect(SCRIPT).not.toMatch(/WriteAllBytes|Set-Content[^\n]*hostFiles|Out-File/);
+    // 쓰고 나면 프로세스 메모리의 키 바이트를 지운다.
+    expect(s).toContain('[Array]::Clear($hostFiles[$f], 0, $hostFiles[$f].Length)');
+  });
+
+  it('컨테이너가 파일 이름을 화이트리스트로 다시 검사하고, SHA-256이 원본과 다르면 암호화 전에 중단한다', () => {
+    const s = src();
+    expect(s).toContain("case $name in root.crt|root.key|intermediate.crt|intermediate.key) ;; *) exit 3 ;; esac;");
+    expect(s).toContain('for p in root.crt:$H_RC root.key:$H_RK intermediate.crt:$H_IC intermediate.key:$H_IK; do');
+    expect(s).toMatch(/if \[ \$ok = 1 \]; then echo IMPORT_OK && tar /);
+    expect(s).toMatch(/if \(@\(\$importOut \| Where-Object \{ "\$_" -eq 'IMPORT_OK' \}\)\.Count -eq 0\) \{\s*Stop-WithError/);
+  });
+
+  it('컨테이너 sh 명령에 큰따옴표가 없다 — Windows PowerShell 5.1은 네이티브 인자 속 큰따옴표를 넘기지 못한다(실측)', () => {
+    const cmd = SCRIPT.slice(indexOfOrFail('$importCmd = '), indexOfOrFail("exit $rc'", indexOfOrFail('$importCmd = ')));
+    expect(cmd).not.toContain('"');
+  });
+
+  it('설치 기록(state\\install.json)의 루트 지문과 다르면 아무것도 쓰지 않고 중단한다', () => {
+    expect(SCRIPT).toMatch(/if \(\$installed -and \$installed -ne \$thumb256\) \{ Stop-WithError/);
+    expect(indexOfOrFail('if ($installed -and $installed -ne $thumb256)')).toBeLessThan(indexOfOrFail("Write-Step 'Create the encrypted archive'"));
   });
 });
 

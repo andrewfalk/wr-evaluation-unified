@@ -15,6 +15,8 @@ const indexOfOrFail = (needle, from = 0) => {
   if (i < 0) throw new Error(`verify-stack.ps1에서 찾지 못했습니다: ${needle}`);
   return i;
 };
+// 도움말 블록(<# ... #>)과 줄 전체 주석을 뺀 코드.
+const CODE_NO_HELP = () => SCRIPT.replace(/<#[\s\S]*?#>/, '').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
 const fnBody = (name) => {
   const start = indexOfOrFail(`function ${name}`);
   const next = SCRIPT.indexOf('\nfunction ', start + 1);
@@ -140,10 +142,13 @@ describe('verify-stack.ps1 — 기동 순서·검증', () => {
 
   it('다른 컨테이너가 8443/8080/앱 포트를 쓰고 있으면 건드리지 않고 중단한다', () => {
     const fn = fnBody('Assert-PortsFree');
-    expect(fn).toMatch(/foreach \(\$port in \$HttpsPort, \$HttpPort, \(Get-AppPort\)\)/);
-    expect(fn).toMatch(/\$_\.Project -ne \$ProjectName/);
-    expect(fn).toMatch(/if\s*\(\$others\.Count -gt 0\)\s*\{\s*Stop-WithError/);
-    expect(fn).not.toMatch(/Stop-Process|docker (stop|rm|kill)/);
+    const each = fnBody('Assert-PortForThisStack');
+    // docker 모드: 8443/8080, 모든 모드: 앱 포트 — 이 프로젝트 컨테이너만 허용.
+    expect(fn).toMatch(/foreach \(\$port in \$HttpsPort, \$HttpPort\) \{ Assert-PortForThisStack \$port \$owners \}/);
+    expect(fn).toContain('Assert-PortForThisStack (Get-AppPort) $owners');
+    expect(each).toMatch(/\$_\.Project -ne \$ProjectName/);
+    expect(each).toMatch(/if\s*\(\$others\.Count -gt 0\)\s*\{\s*Stop-WithError/);
+    for (const f of [fn, each]) expect(f).not.toMatch(/Stop-Process|docker (stop|rm|kill)/);
   });
 
   it('포트 점유자는 실제 HostPort 매핑으로 찾는다 — 의미가 버전마다 다를 수 있는 publish 필터를 쓰지 않는다', () => {
@@ -165,7 +170,7 @@ describe('verify-stack.ps1 — 기동 순서·검증', () => {
   it('기동 전에 셸 덮어쓰기 변수를 거부하고, 해석된 설정의 app 게시가 127.0.0.1·환경 파일 포트인지 확인한다', () => {
     const guard = fnBody('Assert-NoShellOverride');
     expect(guard).toMatch(/Test-Path "env:\$_"/);
-    expect(SCRIPT).toMatch(/\$ShellOverrideKeys = @\('WR_APP_PORT', 'WR_CADDY_HTTPS_BIND', 'WR_CADDY_HTTP_BIND'\)/);
+    expect(SCRIPT).toMatch(/\$ShellOverrideKeys = @\('WR_APP_PORT', 'WR_CADDY_HTTPS_BIND', 'WR_CADDY_HTTP_BIND', 'WR_DOMAIN'\)/);
     const check = fnBody('Assert-AppLoopbackOnly');
     expect(check).toMatch(/Invoke-Compose @\('config', '--format', 'json'\)/);
     expect(check).toMatch(/if \(\$hostIp -ne '127\.0\.0\.1'\)\s*\{\s*Stop-WithError/);
@@ -185,10 +190,14 @@ describe('verify-stack.ps1 — 기동 순서·검증', () => {
 
   it('만료된 CA 볼륨 인증서(NotTimeValid)는 Caddy 를 단 한 번만 재시작해 해결한다', () => {
     const fn = fnBody('Wait-Https');
-    expect(fn).toMatch(/if\s*\(-not \$restarted -and \$p\.Error -match 'NotTimeValid'\)/);
+    expect(fn).toMatch(/if\s*\(-not \$HostMode -and -not \$restarted -and \$p\.Error -match 'NotTimeValid'\)/);
     expect(fn).toMatch(/Invoke-Compose @\('restart', 'caddy'\)/);
     expect(fn).toMatch(/\$restarted = \$true/);
-    expect(up()).toContain('Wait-Https');
+    // host 모드에서는 8443 이 caddy.exe 라 Docker caddy 재시작은 소용없다 — 안내만 하고 돌아온다(재시작 전에 return).
+    const host = fn.indexOf("if ($HostMode -and $p.Error -match 'NotTimeValid')");
+    expect(host).toBeGreaterThanOrEqual(0);
+    expect(host).toBeLessThan(fn.indexOf("Invoke-Compose @('restart', 'caddy')"));
+    expect(up()).toContain('Wait-Https 120 $hc.Host');
   });
 
   it('감사 계정 비밀번호는 시험 환경 파일의 값으로 동기화한다(고정 문자열 아님)', () => {
@@ -204,5 +213,91 @@ describe('verify-stack.ps1 — 기동 순서·검증', () => {
     expect(clear).toBeGreaterThanOrEqual(0);
     expect(clear).toBeLessThan(start);
     expect(restore).toBeGreaterThan(start);
+  });
+});
+
+describe('verify-stack.ps1 — 호스트 Caddy(릴리스 B PR-4)', () => {
+  // 비관리자 실측(2026-11-03, docker 모드 검증 스택): up·status 회귀 없음, accept 는 'host 모드 아님'으로 거부,
+  // 환경 파일에만 host 값을 넣으면 status 는 경고·up 은 compose 기동 전에 중단.
+  // 관리자 리허설(사용자 실행, 2026-11-03): 시범 설치 → 전환 → host 모드 up(8443 = wr-caddy 로 인식, 오인 없음) → accept PASS 3종
+  // (감사 IP 루프백 127.0.0.1·LAN 주소 그대로, Docker 경로는 브리지 게이트웨이 / 루프백 5번째에 429 직후 LAN 401 / 8 KiB 200,
+  // 16 KiB 부터는 앱(Node)이 431) → status·down 경고(스택이 꺼진 동안 8443 은 502)·up → 롤백 → docker 모드 up → 제거.
+  // 헤더 한도 실측: caddy.exe 2.11.7 단독은 17 KiB 통과·20 KiB 431 — 앱의 16 KiB 보다 넉넉해 새로 막히는 요청은 없다.
+  // a 가 b 보다 앞에 있어야 한다 — 둘 다 없으면 실패(indexOf 의 -1 이 '앞'으로 통과하지 않게).
+  const before = (text, a, b) => {
+    const i = text.indexOf(a);
+    const j = text.indexOf(b);
+    if (i < 0) throw new Error(`찾지 못했습니다: ${a}`);
+    if (j < 0) throw new Error(`찾지 못했습니다: ${b}`);
+    expect(i).toBeLessThan(j);
+  };
+  it('host 모드 = 설치 기록(mode host·project wr-verify·기록 applied) + 우리 서비스 실행 중 + 환경 파일 두 키가 모두 맞을 때만', () => {
+    const fn = fnBody('Get-HostCaddyMode');
+    expect(fn).toContain("if ($mine -and $mode -eq 'host') {");
+    expect(fn).toContain("$journalApplied = [bool]($journal -and [string]$journal.status -eq 'applied')");
+    expect(fn).toContain('$envHost = ($envHttps -eq $HostHttpsBind -and $envHttp -eq $HostHttpBind)');
+    expect(fn).toContain('$svcOurs = [bool]($svc -and $svc.PathName -like "$HostCaddyExe *")');
+    expect(fn).toContain('$isHost = ($problems.Count -eq 0)');
+    // 세 출처 가운데 하나라도 어긋나면 문제로 남긴다.
+    expect(fn).toMatch(/if \(-not \$envHost\) \{ \$problems \+= /);
+    expect(fn).toMatch(/if \(-not \$journalApplied\) \{ \$problems \+= /);
+    expect(fn).toMatch(/if \(\$svcPid -eq 0\) \{ \$problems \+= /);
+    expect(fn).toMatch(/if \(\$envAnyHost\) \{ \$problems \+= /);
+    // 정상 host 모드의 'applied' 는 정상(Codex 계획 리뷰 1회차) — 어긋남은 host 가 아닌데 applied 인 경우뿐.
+    expect(fn).toMatch(/if \(\$mine -and \$journalApplied\) \{ \$problems \+= /);
+    expect(SCRIPT).toContain("$HostHttpsBind  = '127.0.0.1:18443'");
+    expect(SCRIPT).toContain("$HostHttpBind   = '127.0.0.1:18080'");
+  });
+
+  it('어긋난 상태면 up·accept 는 compose 기동 전에 멈추고, status·down·purge 는 알려만 준다', () => {
+    const body = fnBody('Invoke-Up');
+    before(body, 'Stop-OnHostCaddyProblems $hc', "'up', '-d', 'backup-monitor'");
+    expect(fnBody('Invoke-Accept')).toContain('Stop-OnHostCaddyProblems $hc');
+    expect(fnBody('Invoke-Status')).not.toContain('Stop-OnHostCaddyProblems');
+    expect(fnBody('Invoke-Down')).toContain('Write-HostModeNotice');
+    expect(fnBody('Invoke-Purge')).toContain('Write-HostModeNotice');
+    // 어긋난 상태(예: env 만 host 값)도 down·purge 에서 경고로 보여 준다(PR 리뷰 2회차 권고).
+    before(fnBody('Write-HostModeNotice'), '$hc.Problems | ForEach-Object { Write-Warn $_ }', 'if ($hc.Host -or');
+    expect(fnBody('Write-HostModeNotice')).not.toMatch(/Stop-WithError|exit/);
+  });
+
+  it('host 모드 포트 점검: 8443/8080 은 wr-caddy 프로세스만(컨테이너 게시 없음), 18443/18080 은 이 프로젝트만', () => {
+    const fn = fnBody('Assert-PortsFree');
+    expect(fn).toMatch(/if \(\$pub\.Count -gt 0\) \{ Stop-WithError "host 모드인데 컨테이너가/);
+    expect(fn).toMatch(/if \(-not \$l -or \$l\.Pid -ne \$Hc\.ServicePid\) \{ Stop-WithError/);
+    expect(fn).toContain("foreach ($bind in $HostHttpsBind, $HostHttpBind) { Assert-PortForThisStack");
+    // docker 모드에서 wr-caddy 가 8443 을 쥐었으면 그렇게 알려 준다(예전엔 '프로세스가 쓰고 있다'로만 보였다).
+    expect(fnBody('Assert-PortForThisStack')).toMatch(/\[int\]\$svc\.ProcessId -eq \$l\.Pid\) \{[\s\S]*?Stop-WithError ":\$Port 를 호스트 Caddy 서비스 wr-caddy/);
+    const pub = fnBody('Assert-CaddyPublish');
+    expect(pub).toContain('@("127.0.0.1|18080|80", "127.0.0.1|18443|443")');
+    before(fnBody('Invoke-Up'), 'Assert-CaddyPublish $hc', "'up', '-d', 'backup-monitor'");
+  });
+
+  it('관리자 작업(설치·전환·롤백·서비스 제어)을 하지 않는다 — 안내만 한다', () => {
+    expect(CODE_NO_HELP()).not.toMatch(/sc\.exe|Start-Service|Stop-Service|Restart-Service -|Set-Service|install-caddy-host\.ps1 -(Install|Cutover|Rollback|Uninstall)\b[^'"]*$/m);
+    expect(SCRIPT).not.toMatch(/&\s*[^\n]*install-caddy-host\.ps1/);
+  });
+
+  it('accept: 두 출발지(루프백·LAN)의 감사 IP, 루프백 버킷이 찬 직후 LAN 은 401, 8 KiB 헤더 통과를 판정한다', () => {
+    const fn = fnBody('Invoke-Accept');
+    expect(fn).toContain("if (-not $hc.Host) { Stop-WithError");
+    expect(fn).toContain("$results['출발지별 IP'] = ($ip['loopback'] -eq '127.0.0.1' -and $ip['lan'] -eq $lan -and $ip['loopback'] -ne $ip['lan'])");
+    const bucket = fnBody('Test-SeparateBuckets');
+    before(bucket, "$c = Send-BadLogin '127.0.0.1' \"$Prefix-rl$i\"", '$lanAfter = Send-BadLogin $Lan');
+    expect(fn).toContain("$results['로그인 제한 버킷 분리'] = ($bucket.Hit -and $bucket.LanAfter -eq '401')");
+    // LAN 도 429 면(같은 창에 LAN 요청이 이미 있었음) 61초 뒤 두 버킷 모두 새 창에서 한 번 더(PR 리뷰 1회차 권고).
+    expect(fn).toMatch(/if \(\$bucket\.Hit -and \$bucket\.LanAfter -eq '429'\) \{[\s\S]*?Start-Sleep -Seconds 61\s*\$bucket = Test-SeparateBuckets/);
+    expect(fn).toContain("$results['8 KiB 헤더 통과'] = ((Send-PaddedHeader 8 $HttpsPort) -eq '200')");
+    expect(fn).toMatch(/if \(\$failed -gt 0\) \{ exit 1 \}/);
+    // 이전 실행의 1분 창이 남았으면 한 번만 61초 기다렸다 다시 보낸다.
+    expect(fn).toMatch(/if \(\$codes\.Values -contains '429'\) \{[\s\S]*?Start-Sleep -Seconds 61/);
+  });
+
+  it('accept: 본문은 파일로(--data-binary @), LAN 주소는 파일에 쓰지 않고, 임시 파일은 finally 에서 지운다', () => {
+    expect(fnBody('Send-BadLogin')).toContain('--data-binary "@$script:AcceptBody"');
+    expect(fnBody('Send-BadLogin')).toContain('--resolve "${Domain}:${Port}:$Source"');
+    const fn = fnBody('Invoke-Accept');
+    expect(fn).not.toMatch(/(Set|Add|Out)-(Content|File)[^\n]*\$lan|WriteAllText[^\n]*\$lan|Write-Utf8NoBom[^\n]*\$lan/);
+    expect(fn).toMatch(/\} finally \{\s*foreach \(\$f in \$script:AcceptBody, \$script:AcceptHeader\) \{ if \(Test-Path \$f\) \{ Remove-Item \$f -Force \} \}/);
   });
 });
