@@ -81,8 +81,12 @@ cd C:\wr\wr-evaluation-unified-7.1.6-intranet
 
 # 2. 7.1.5 폴더의 updates/ 를 통째로 옮긴다(이번 패키지의 updates/ 는 비어 있다).
 #    설치본·.blockmap·latest.yml·latest.yml.sig(+ update-policy.json, canary 파일)가 한 벌로 옮겨져야 한다.
-Copy-Item "$installDir\updates\*" ".\updates\" -Recurse
-Get-ChildItem .\updates
+#    원본 경로는 이 창에서 다시 구한다(새 창을 열었으면 0)의 $installDir 는 없다). 아직 재생성 전이라 7.1.5 폴더가 나온다.
+$installDir = (docker inspect wr-prod-app-1 --format '{{json .Config.Labels}}' | ConvertFrom-Json).'com.docker.compose.project.working_dir'
+$installDir                                                                  # → 7.1.5 패키지 폴더여야 한다(지금 폴더가 나오면 이미 재생성한 것 — 7.1.5 폴더 경로를 직접 넣는다)
+if (-not (Test-Path "$installDir\updates\latest.yml") -or -not (Test-Path "$installDir\updates\latest.yml.sig")) { throw "원본 updates 가 없습니다: $installDir\updates — 여기서 멈추고 경로를 확인한다" }
+Copy-Item "$installDir\updates\*" ".\updates\" -Recurse -ErrorAction Stop
+Get-ChildItem .\updates                                                      # → latest.yml·latest.yml.sig·설치본이 보여야 한다. 아니면 5번(재생성)으로 가지 않는다
 
 # 3. 새 Docker 이미지 로드
 .\scripts\import-images.ps1
