@@ -1109,15 +1109,16 @@ $env:WR_VERSION = ""  # 원복
    ```powershell
    gpg --decrypt .\caddy-ca-wr-prod-<시각>.tar.gpg | tar -xf -
    ```
-2. `local\` 폴더를 서버로 옮기고 Caddy를 멈춘다.
+2. `local\` 폴더를 서버로 옮기고, 패키지 루트에서 Caddy를 멈춘다. `$envFile`은 **현재 운영 env의 절대 경로**다(패키지 밖에 두었을 수 있다 — 9-0 "env 경로 규칙").
    ```powershell
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod stop caddy
+   $envFile = '<운영 .env.production 절대경로>'
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file $envFile -p wr-prod stop caddy
    ```
 3. 볼륨에 덮어쓴다. `<폴더>`는 `local\`이 들어 있는 폴더의 전체 경로다.
    ```powershell
    docker run --rm --entrypoint sh -v wr-prod_caddy_data:/data -v "<폴더>:/in:ro" wr-backup:<WR_VERSION> -c 'mkdir -p /data/caddy/pki/authorities/local && cp -a /in/local/. /data/caddy/pki/authorities/local/ && chown -R 0:0 /data/caddy/pki/authorities/local && chmod 700 /data/caddy/pki/authorities/local && chmod 600 /data/caddy/pki/authorities/local/*'
    ```
-4. Caddy를 시작하고(`... -p wr-prod up -d caddy`) 루트 지문이 `.info.txt`와 같은지 확인한다.
+4. Caddy를 시작하고(`docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file $envFile -p wr-prod up -d caddy`) 루트 지문이 `.info.txt`와 같은지 확인한다. 호스트 Caddy 모드라면 env의 `WR_CADDY_*` 값 때문에 Docker Caddy는 루프백(18443/18080)에 뜬다 — 정상이다.
    ```powershell
    docker exec wr-prod-caddy-1 cat /data/caddy/pki/authorities/local/root.crt > check-root.crt
    (Get-PfxCertificate -FilePath .\check-root.crt).Thumbprint
