@@ -194,6 +194,45 @@ describe('install-caddy-host.ps1 -Install — CA 가드와 순서', () => {
     expect(fnBody('Invoke-Status')).toContain('foreach ($d in @($Root, $BinDir, $StateDir, $ExeDest, $ConfigDest)) {');
   });
 
+  it('미리 만든 junction·남이 소유한 설치 루트는 거부하고, 재귀(/T) 변경 전에 루트를 잠근 뒤 링크가 없는지 본다', () => {
+    // Codex PR 리뷰 3회차: 루트를 사용자 폴더로 향하는 junction으로 미리 만들면 ACL 검사 뒤 대상을 바꿔
+    // 관리자 권한 caddy 실행을 가로챌 수 있고, 관리자 icacls /T가 링크를 따라 다른 폴더를 바꿀 수 있다.
+    const paramFn = (name) => {
+      const start = indexIn(SCRIPT, `function ${name}`);
+      return SCRIPT.slice(start, indexIn(SCRIPT, '\n}\n', start));
+    };
+    const trust = paramFn('Get-ExistingRootProblem');
+    expect(trust).toContain('[System.IO.FileAttributes]::ReparsePoint) { return "$Root is a junction or symbolic link" }');
+    expect(trust).toContain('if ($Writers -notcontains $owner) { return');
+    expect(trust).toContain('@(Get-ForeignAccess $Root $WriteRights $Writers)');
+    const links = paramFn('Get-ReparsePoints');
+    expect(links).not.toMatch(/-Recurse/);   // 5.1의 -Recurse는 junction을 따라 내려간다
+    expect(links).toMatch(/ReparsePoint\) \{ \$hits \+= \$i\.FullName; continue \}/);
+
+    const b = body();
+    const preCheck = indexIn(b, '$rootProblem = Get-ExistingRootProblem');
+    expect(b.slice(preCheck, preCheck + 200)).toMatch(/if \(\$rootProblem\) \{\s*throw/);
+    expect(preCheck).toBeLessThan(indexIn(b, "ShouldProcess($Root, 'Create folders"));
+    const acl = b.slice(indexIn(b, "ShouldProcess($Root, 'Create folders"), indexIn(b, "Write-Ok 'ACLs set and verified'"));
+    expect(acl).toContain('if ($rootIsNew) { New-Item -ItemType Directory $Root | Out-Null }');   // -Force 없음
+    const lockOwner = indexIn(acl, "Invoke-Icacls @($Root, '/setowner', \"*$SidAdmins\", '/C', '/Q')");
+    const empty = indexIn(acl, 'if ($rootIsNew -and @(Get-ChildItem -LiteralPath $Root -Force).Count -gt 0) {');
+    const scan = indexIn(acl, '$links = @(Get-ReparsePoints $Root)');
+    const firstRecursive = acl.search(/'\/T'/);
+    expect(lockOwner).toBeLessThan(empty);
+    expect(empty).toBeLessThan(scan);
+    expect(scan).toBeLessThan(firstRecursive);
+    expect(acl.slice(scan, scan + 200)).toMatch(/if \(\$links\.Count -gt 0\) \{ throw/);
+
+    // 제거·상태 점검도 같은 검사를 한다(제거의 파일 삭제가 링크를 따라가지 않게).
+    const un = fnBody('Invoke-Uninstall');
+    expect(indexIn(un, 'Get-ExistingRootProblem')).toBeLessThan(indexIn(un, 'Remove-Item'));
+    expect(indexIn(un, 'Get-ReparsePoints $d')).toBeLessThan(indexIn(un, 'Remove-Item'));
+    const st = fnBody('Invoke-Status');
+    expect(st).toMatch(/if \(\$rootProblem\) \{ Write-Fail [^\n]*\$problems\+\+ \}/);
+    expect(st).toMatch(/\$links = @\(Get-ReparsePoints \$Root\)[\s\S]*?if \(\$links\.Count -gt 0\) \{ Write-Fail [^\n]*\$problems\+\+/);
+  });
+
   it('복사본 지문을 대조한 뒤에만 local로 이름을 바꾸고, 다르면 복사본을 지운다. 기존 local은 덮어쓰지 않는다', () => {
     const b = body();
     const check = indexIn(b, "if ((Get-PemFileFingerprint (Join-Path $CaIncoming 'root.crt')) -ne $fp) {");

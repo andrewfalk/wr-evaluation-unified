@@ -379,6 +379,39 @@ function Get-ForeignAccess([string]$Path, [System.Security.AccessControl.FileSys
     return $hits
 }
 
+# Junctions / symbolic links at or under $Top. Does not descend into them (5.1 Get-ChildItem -Recurse would).
+# Elevated icacls /T and file writes must never follow a link a user planted into another folder.
+function Get-ReparsePoints([string]$Top) {
+    $hits = @()
+    $topItem = Get-Item -LiteralPath $Top -Force -ErrorAction SilentlyContinue
+    if (-not $topItem) { return $hits }
+    if ($topItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return @($Top) }
+    $queue = New-Object System.Collections.Queue
+    $queue.Enqueue($Top)
+    while ($queue.Count -gt 0) {
+        foreach ($i in @(Get-ChildItem -LiteralPath $queue.Dequeue() -Force -ErrorAction SilentlyContinue)) {
+            if ($i.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { $hits += $i.FullName; continue }
+            if ($i.PSIsContainer) { $queue.Enqueue($i.FullName) }
+        }
+    }
+    return $hits
+}
+
+# An existing install root is accepted only in the locked state this script leaves it in: a real folder,
+# owned by Administrators/SYSTEM, writable by nobody else. ProgramData lets any user create (and own) a
+# folder there, e.g. a junction to a folder they can swap later. Returns the reason, or $null.
+function Get-ExistingRootProblem {
+    if (-not (Test-Path -LiteralPath $Root)) { return $null }
+    $item = Get-Item -LiteralPath $Root -Force
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return "$Root is a junction or symbolic link" }
+    if (-not $item.PSIsContainer) { return "$Root is not a folder" }
+    $owner = (Get-Acl -LiteralPath $Root).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+    if ($Writers -notcontains $owner) { return "$Root is owned by $owner, not by Administrators or SYSTEM" }
+    $foreign = @(Get-ForeignAccess $Root $WriteRights $Writers)
+    if ($foreign.Count -gt 0) { return "others can write ${Root}: $($foreign -join ', ')" }
+    return $null
+}
+
 # icacls /grant:r replaces only the SIDs it names; remove every other explicit allow entry on $Path.
 function Remove-ForeignAllowAce([string]$Path, [string[]]$KeepSids) {
     foreach ($rule in (Get-Acl -LiteralPath $Path).GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])) {
@@ -442,6 +475,11 @@ function Invoke-Install {
     $oldRules = @(Get-NetFirewallRule -Group $FirewallGroup -ErrorAction SilentlyContinue)
     if ($oldRules.Count -gt 0) { throw "Firewall rules of group '$FirewallGroup' already exist. Run -Uninstall first." }
     Write-Ok "No existing '$ServiceName' service or firewall rules"
+    $rootProblem = Get-ExistingRootProblem
+    if ($rootProblem) {
+        throw "Existing install folder not trusted: $rootProblem. Nothing was changed. Inspect it, delete it as an Administrator (keep a copy of data\ if it holds the CA) and run again."
+    }
+    if (Test-Path -LiteralPath $Root) { Write-Ok "Existing $Root is locked down (owner and write access)" }
 
     Invoke-Native { docker info 2>$null } | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Docker is not running.' }
@@ -491,11 +529,22 @@ function Invoke-Install {
     try {
         Write-Step "Folders and ACLs ($Root)"
         if ($ScriptCmdlet.ShouldProcess($Root, 'Create folders and set ACLs (users: read bin/state only; no access to data/logs)')) {
-            foreach ($d in @($Root, $BinDir, $DataDir, $LogDir, $StateDir)) { New-Item -ItemType Directory -Force $d | Out-Null }
-            Invoke-Icacls @($Root, '/setowner', "*$SidAdmins", '/T', '/C', '/Q')
+            # 1. Lock the root itself (not recursively) before anything touches its contents. No -Force: if a
+            #    user created the path after the pre-check, New-Item fails instead of adopting it.
+            $rootIsNew = -not (Test-Path -LiteralPath $Root)
+            if ($rootIsNew) { New-Item -ItemType Directory $Root | Out-Null }
+            Invoke-Icacls @($Root, '/setowner', "*$SidAdmins", '/C', '/Q')
             Invoke-Icacls @($Root, '/inheritance:r', '/grant:r', "*${SidAdmins}:(OI)(CI)F", "*${SidSystem}:(OI)(CI)F", "*${SidLocalService}:(OI)(CI)RX", "*${SidUsers}:(OI)(CI)RX")
-            # The folder may have been created beforehand by a user who gave themselves rights on it.
             Remove-ForeignAllowAce $Root @($SidAdmins, $SidSystem, $SidLocalService, $SidUsers)
+            # 2. Until the lock, a new root inherited "users may add folders" from ProgramData: it must still be empty.
+            if ($rootIsNew -and @(Get-ChildItem -LiteralPath $Root -Force).Count -gt 0) {
+                throw "Something was created inside $Root while it was being set up. Inspect it, delete it as an Administrator and run again."
+            }
+            # 3. No junction/symlink anywhere below before the recursive (/T) changes and the elevated writes.
+            $links = @(Get-ReparsePoints $Root)
+            if ($links.Count -gt 0) { throw "Junctions or symbolic links under ${Root}: $($links -join ', '). Refusing to continue." }
+            foreach ($d in @($BinDir, $DataDir, $LogDir, $StateDir)) { New-Item -ItemType Directory -Force $d | Out-Null }
+            Invoke-Icacls @($Root, '/setowner', "*$SidAdmins", '/T', '/C', '/Q')
             foreach ($d in @($BinDir, $StateDir)) { Invoke-Icacls @($d, '/reset', '/T', '/C', '/Q') }
             # Restrict the folder itself FIRST, then let its contents inherit from it. Resetting the folder first
             # would make it inherit Users:RX from the root for a moment - with a CA key already in data on a
@@ -700,6 +749,10 @@ function Invoke-Status {
         try { $exeOk = ((Get-Sha512File $ExeDest) -eq [string]$state.caddyExeSha512) } catch { $exeOk = $false }
         if ($exeOk) { Write-Ok 'caddy.exe matches the installed SHA-512' } else { Write-Fail 'caddy.exe does not match the SHA-512 recorded at install.'; $problems++ }
     } else { Write-Fail "$ExeDest not found."; $problems++ }
+    $rootProblem = Get-ExistingRootProblem
+    if ($rootProblem) { Write-Fail "Install folder not trusted: $rootProblem"; $problems++ }
+    $links = @(Get-ReparsePoints $Root)   # data/logs are skipped silently when not elevated
+    if ($links.Count -gt 0) { Write-Fail "Junctions or symbolic links under ${Root}: $($links -join ', ')"; $problems++ } else { Write-Ok "No junctions or symbolic links under $Root" }
     foreach ($d in @($Root, $BinDir, $StateDir, $ExeDest, $ConfigDest)) {
         if (-not (Test-Path -LiteralPath $d)) { continue }
         $foreign = @(Get-ForeignAccess $d $WriteRights $Writers)
@@ -781,6 +834,11 @@ function Invoke-Uninstall {
     if ($svc -and $svc.PathName -notlike "$ExeDest *") {
         throw "Service '$ServiceName' does not point to $ExeDest ($($svc.PathName)). It is not ours; nothing was changed."
     }
+    # Deletes below must not follow a planted link out of the install folder.
+    $rootProblem = Get-ExistingRootProblem
+    if ($rootProblem) { throw "Install folder not trusted: $rootProblem. Nothing was changed; inspect it as an Administrator." }
+    $links = @(foreach ($d in @($BinDir, $StateDir)) { Get-ReparsePoints $d })
+    if ($links.Count -gt 0) { throw "Junctions or symbolic links in the install folder: $($links -join ', '). Nothing was changed." }
 
     Write-Step 'Uninstall (pilot)'
     if ($svc -and $ScriptCmdlet.ShouldProcess($ServiceName, 'Stop and delete service')) {
