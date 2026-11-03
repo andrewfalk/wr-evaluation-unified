@@ -256,6 +256,9 @@ describe('verify-stack.ps1 — 호스트 Caddy(릴리스 B PR-4)', () => {
     expect(fnBody('Invoke-Status')).not.toContain('Stop-OnHostCaddyProblems');
     expect(fnBody('Invoke-Down')).toContain('Write-HostModeNotice');
     expect(fnBody('Invoke-Purge')).toContain('Write-HostModeNotice');
+    // 어긋난 상태(예: env 만 host 값)도 down·purge 에서 경고로 보여 준다(PR 리뷰 2회차 권고).
+    before(fnBody('Write-HostModeNotice'), '$hc.Problems | ForEach-Object { Write-Warn $_ }', 'if ($hc.Host -or');
+    expect(fnBody('Write-HostModeNotice')).not.toMatch(/Stop-WithError|exit/);
   });
 
   it('host 모드 포트 점검: 8443/8080 은 wr-caddy 프로세스만(컨테이너 게시 없음), 18443/18080 은 이 프로젝트만', () => {

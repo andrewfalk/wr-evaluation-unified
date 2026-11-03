@@ -605,6 +605,7 @@ function Invoke-Down {
 # host 모드에서 스택을 내리면 wr-caddy 는 계속 8443 을 쥐고 502 를 낸다 — 멈추지 않고 알려만 준다.
 function Write-HostModeNotice {
     $hc = Get-HostCaddyMode
+    $hc.Problems | ForEach-Object { Write-Warn $_ }   # 어긋난 상태도 알린다(내리는 작업은 계속)
     if ($hc.Host -or ($hc.Project -eq $ProjectName -and $hc.Mode -eq 'host')) {
         Write-Warn '이 스택은 호스트 Caddy(host 모드)입니다. wr-caddy 는 계속 8443/8080 을 쥐고, 스택이 꺼진 동안 502 를 냅니다.'
         Write-Host '   Docker Caddy 로 되돌리려면 관리자 창에서: install-caddy-host.ps1 -Rollback -ProjectName wr-verify -EnvFile <이 환경 파일> -ComposeDir <패키지> -ExtraComposeFile <override>'
