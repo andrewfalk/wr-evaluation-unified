@@ -148,9 +148,21 @@ describe('install-caddy-host.ps1 -Install — CA 가드와 순서', () => {
     expect(acl).toBeLessThan(copy);
     expect(verify).toBeLessThan(copy);
     expect(b).toContain("Invoke-Icacls @($d, '/inheritance:r', '/grant:r', \"*${SidAdmins}:(OI)(CI)F\", \"*${SidSystem}:(OI)(CI)F\", \"*${SidLocalService}:(OI)(CI)M\")");
-    expect(b).toMatch(/foreach \(\$d in @\(\$DataDir, \$LogDir\)\) \{\s*Invoke-Icacls @\(\$d, '\/reset'/);
     // 사용자는 SID로 지정한다(Windows 언어에 따라 그룹 이름이 다르다).
     expect(SCRIPT).toContain("$SidUsers        = 'S-1-5-32-545'");
+  });
+
+  it('data·logs는 폴더를 먼저 제한한 뒤 내용물만 상속으로 되돌린다 — 재설치 때 기존 CA 키가 Users 읽기를 상속하는 순간이 없다', () => {
+    // Codex PR 리뷰 1회차: 폴더 자체를 /reset하면 잠깐 루트의 Users:RX를 상속한다.
+    const b = body();
+    const from = indexIn(b, 'foreach ($d in @($DataDir, $LogDir)) {\n                Invoke-Icacls');
+    const loop = b.slice(from, indexIn(b, '\n            }\n', from));
+    const restrict = indexIn(loop, "Invoke-Icacls @($d, '/inheritance:r'");
+    const childReset = indexIn(loop, "foreach ($child in @(Get-ChildItem -LiteralPath $d -Force)) { Invoke-Icacls @($child.FullName, '/reset'");
+    expect(restrict).toBeLessThan(childReset);
+    expect(loop).not.toMatch(/Invoke-Icacls @\(\$d, '\/reset'/);
+    // /grant:r는 세 계정만 바꾸므로, 그 밖의 직접 허용 ACE는 지운다(예전 /reset이 하던 일).
+    expect(loop.slice(restrict, childReset)).toContain("Invoke-Icacls @($d, '/remove:g', \"*$sid\")");
   });
 
   it('복사본 지문을 대조한 뒤에만 local로 이름을 바꾸고, 다르면 복사본을 지운다. 기존 local은 덮어쓰지 않는다', () => {
@@ -216,6 +228,22 @@ describe('install-caddy-host.ps1 -Install — CA 가드와 순서', () => {
     expect(probe).not.toMatch(/X509Certificate2 \(\$script:probeLeaf\)/);
   });
 
+  it('TLS 프로브는 모든 단계에 제한 시간이 있고, 체인 검증 결과와 이름 불일치를 실패로 반영한다', () => {
+    // Codex PR 리뷰 1회차: 응답하지 않는 업스트림에서 설치가 롤백 전에 멈춤 / Build 결과를 버림.
+    const start = indexIn(SCRIPT, 'function Invoke-TlsProbe(');
+    const probe = SCRIPT.slice(start, indexIn(SCRIPT, '\n}\n', start));
+    expect(probe).toContain('$client.ReceiveTimeout = $TimeoutMs');
+    expect(probe).toContain('$client.SendTimeout = $TimeoutMs');
+    expect(probe).toMatch(/BeginConnect\([^\n]*\n\s*if \(-not \$connect\.AsyncWaitHandle\.WaitOne\(\$TimeoutMs\)\) \{ throw/);
+    expect(probe).toContain('$ssl.ReadTimeout = $TimeoutMs');
+    expect(probe).not.toMatch(/\$client\.Connect\(/);
+    expect(probe).toMatch(/\$built = \$chain\.Build\(\$leaf\)/);
+    expect(probe).toMatch(/if \(-not \$built\) \{\n[^\n]*\n\s*throw "certificate chain is not valid/);
+    expect(probe).toMatch(/RemoteCertificateNameMismatch\) \{\s*throw/);
+    // 실패는 throw → catch에서 Ok=$false로 돌아가야 설치·상태가 실패로 판정한다.
+    expect(probe.indexOf('$result.Ok = $true')).toBeGreaterThan(probe.indexOf('if (-not $built)'));
+  });
+
   it('실패하면 이번 실행이 만든 서비스·방화벽·bin 파일만 되돌리고 CA(data)는 남긴다', () => {
     const b = body();
     const undo = b.slice(indexIn(b, '} catch {\n        Write-Fail $_.Exception.Message'));
@@ -244,6 +272,13 @@ describe('install-caddy-host.ps1 -Uninstall / -Status', () => {
   it('Status는 Caddyfile 업스트림이 앱의 실제 게시 포트와 다르면 문제로 보고한다', () => {
     const b = fnBody('Invoke-Status');
     expect(b).toMatch(/if \(\$appPort -eq \[int\]\$state\.upstreamPort\)/);
+  });
+
+  it('Status는 앱 게시 규칙 위반(비루프백·없음·복수)을 문제로, Docker 조회 불가만 경고로 본다', () => {
+    // Codex PR 리뷰 1회차: 비루프백 게시를 감지해도 경고만 내고 Status: OK였다.
+    const b = fnBody('Invoke-Status');
+    expect(b).toMatch(/try \{ \$owners = @\(Get-PortOwners\) \} catch \{ Write-Warn/);
+    expect(b).toMatch(/\$appPort = Get-AppPublishedPort -Owners \$owners[\s\S]*?\} catch \{ Write-Fail \$_\.Exception\.Message; \$problems\+\+ \}/);
   });
 
   it('JSON 배열은 변수에 먼저 받은 뒤 @()로 감싼다 — 5.1 ConvertFrom-Json은 배열을 파이프라인 객체 하나로 낸다', () => {

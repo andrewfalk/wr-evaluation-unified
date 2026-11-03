@@ -241,8 +241,12 @@ function Get-PortOwners {
 }
 
 # The app port Caddy must proxy to = what the running app container actually publishes.
+# Throws when the publish breaks the rules (none, non-loopback, several ports). -Owners lets -Status read
+# Docker separately, so "Docker unreadable" (warning) is not confused with a rule violation (problem).
 function Get-AppPublishedPort {
-    $app = @(Get-PortOwners | Where-Object { $_.Project -eq $ProjectName -and $_.Service -eq 'app' })
+    param([object[]]$Owners = $null)
+    if ($null -eq $Owners) { $Owners = @(Get-PortOwners) }
+    $app = @($Owners | Where-Object { $_.Project -eq $ProjectName -and $_.Service -eq 'app' })
     if ($app.Count -eq 0) {
         throw "No running '$ProjectName' app container publishes a port. Deploy the release that publishes the app on 127.0.0.1:<WR_APP_PORT> first (check-app-publish.ps1)."
     }
@@ -276,24 +280,38 @@ function Get-ServiceInfo {
 }
 
 # TLS probe through the service: SNI = domain, HTTP/1.1 GET, chain checked against the CA root.
-function Invoke-TlsProbe([int]$Port, [string]$Domain, [string]$Path, [string]$RootPemPath) {
+function Invoke-TlsProbe([int]$Port, [string]$Domain, [string]$Path, [string]$RootPemPath, [int]$TimeoutMs = 10000) {
     $result = [ordered]@{ Ok = $false; Status = 0; LeafNotAfter = $null; ChainRoot = $null; Error = $null }
     $script:probeLeafRaw = $null
     $script:probeSentRaw = New-Object System.Collections.ArrayList
+    $script:probePolicyErrors = [System.Net.Security.SslPolicyErrors]::None
     $client = New-Object System.Net.Sockets.TcpClient
+    # Every step is bounded: a stuck upstream (Caddy has no response-header timeout by default) must make the
+    # probe fail, not hang the install before it can roll back.
+    $client.ReceiveTimeout = $TimeoutMs
+    $client.SendTimeout = $TimeoutMs
     try {
-        $client.Connect('127.0.0.1', $Port)
+        $connect = $client.BeginConnect('127.0.0.1', $Port, $null, $null)
+        if (-not $connect.AsyncWaitHandle.WaitOne($TimeoutMs)) { throw "connect to 127.0.0.1:$Port timed out" }
+        $client.EndConnect($connect)
         # Copy the raw bytes inside the callback: .NET Framework (Windows PowerShell 5.1) frees the certificate
         # and chain handles once the callback returns, and X509Chain.Build on them then throws.
+        # The callback accepts everything (the CA is not in the trust store here); the checks are done below.
         $callback = [System.Net.Security.RemoteCertificateValidationCallback] {
             param($s, $cert, $sentChain, $errors)
+            $script:probePolicyErrors = $errors
             $script:probeLeafRaw = $cert.GetRawCertData()
             if ($sentChain) { foreach ($el in $sentChain.ChainElements) { [void]$script:probeSentRaw.Add($el.Certificate.RawData) } }
             return $true
         }
         $ssl = New-Object System.Net.Security.SslStream ($client.GetStream(), $false, $callback)
+        $ssl.ReadTimeout = $TimeoutMs
+        $ssl.WriteTimeout = $TimeoutMs
         # Explicit TLS 1.2: Windows PowerShell 5.1 (.NET Framework) may otherwise offer only TLS 1.0.
         $ssl.AuthenticateAsClient($Domain, $null, [System.Security.Authentication.SslProtocols]::Tls12, $false)
+        if ($script:probePolicyErrors -band [System.Net.Security.SslPolicyErrors]::RemoteCertificateNameMismatch) {
+            throw "the server certificate is not issued for $Domain"
+        }
         $leaf = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 (,$script:probeLeafRaw)
         $result.LeafNotAfter = $leaf.NotAfter
         $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
@@ -307,9 +325,15 @@ function Invoke-TlsProbe([int]$Port, [string]$Domain, [string]$Path, [string]$Ro
             $rootCert = ConvertFrom-Pem ([System.IO.File]::ReadAllText($RootPemPath))
             if ($rootCert) { [void]$chain.ChainPolicy.ExtraStore.Add($rootCert) }
         }
-        [void]$chain.Build($leaf)
+        # AllowUnknownCertificateAuthority waives only "root not trusted"; time validity, signatures and a
+        # complete chain are still required.
+        $built = $chain.Build($leaf)
         if ($chain.ChainElements.Count -gt 0) {
             $result.ChainRoot = Get-CertFingerprint $chain.ChainElements[$chain.ChainElements.Count - 1].Certificate
+        }
+        if (-not $built) {
+            $why = @($chain.ChainStatus | ForEach-Object { [string]$_.Status } | Sort-Object -Unique) -join ', '
+            throw "certificate chain is not valid ($why)"
         }
         $req = [System.Text.Encoding]::ASCII.GetBytes("GET $Path HTTP/1.1`r`nHost: ${Domain}:$Port`r`nConnection: close`r`n`r`n")
         $ssl.Write($req, 0, $req.Length)
@@ -460,9 +484,20 @@ function Invoke-Install {
             Invoke-Icacls @($Root, '/setowner', "*$SidAdmins", '/T', '/C', '/Q')
             Invoke-Icacls @($Root, '/inheritance:r', '/grant:r', "*${SidAdmins}:(OI)(CI)F", "*${SidSystem}:(OI)(CI)F", "*${SidLocalService}:(OI)(CI)RX", "*${SidUsers}:(OI)(CI)RX")
             foreach ($d in @($BinDir, $StateDir)) { Invoke-Icacls @($d, '/reset', '/T', '/C', '/Q') }
+            # Restrict the folder itself FIRST, then let its contents inherit from it. Resetting the folder first
+            # would make it inherit Users:RX from the root for a moment - with a CA key already in data on a
+            # re-install, users could open root.key in that window.
             foreach ($d in @($DataDir, $LogDir)) {
-                Invoke-Icacls @($d, '/reset', '/T', '/C', '/Q')
                 Invoke-Icacls @($d, '/inheritance:r', '/grant:r', "*${SidAdmins}:(OI)(CI)F", "*${SidSystem}:(OI)(CI)F", "*${SidLocalService}:(OI)(CI)M")
+                # /grant:r only replaces those three; drop any other explicit allow entry (the old /reset did that too).
+                $explicit = (Get-Acl -LiteralPath $d).GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])
+                foreach ($rule in $explicit) {
+                    $sid = $rule.IdentityReference.Value
+                    if ($rule.AccessControlType -eq 'Allow' -and @($SidAdmins, $SidSystem, $SidLocalService) -notcontains $sid) {
+                        Invoke-Icacls @($d, '/remove:g', "*$sid")
+                    }
+                }
+                foreach ($child in @(Get-ChildItem -LiteralPath $d -Force)) { Invoke-Icacls @($child.FullName, '/reset', '/T', '/C', '/Q') }
             }
             foreach ($d in @($DataDir, $LogDir)) {
                 $broad = @(Get-BroadAccess $d $ReadRights)
@@ -573,7 +608,7 @@ function Invoke-Install {
                 Start-Sleep -Seconds 1
                 $probe = Invoke-TlsProbe $HttpsPort $domain '/api/config/public' $RootCrtPublic
             } while (-not $probe.Ok -and (Get-Date) -lt $deadline)
-            if (-not $probe.Ok) { throw "No HTTPS answer on 127.0.0.1:$HttpsPort ($($probe.Error)). See $LogDir\caddy.log." }
+            if (-not $probe.Ok) { throw "HTTPS check failed on 127.0.0.1:$HttpsPort ($($probe.Error)). See $LogDir\caddy.log." }
             if ($probe.ChainRoot -ne $fp) { throw "The service presents a chain whose root is $($probe.ChainRoot), not the expected CA." }
             if ($probe.Status -lt 200 -or $probe.Status -ge 500) { throw "HTTPS answered with status $($probe.Status) (the app behind 127.0.0.1:$appPort?)." }
             Write-Ok "HTTPS on :$HttpsPort answers $($probe.Status), chain root = expected CA, certificate valid until $($probe.LeafNotAfter)"
@@ -695,7 +730,7 @@ function Invoke-Status {
     if ($svc.State -eq 'Running') {
         $probe = Invoke-TlsProbe ([int]$state.httpsPort) ([string]$state.domain) '/api/config/public' $RootCrtPublic
         if (-not $probe.Ok) {
-            Write-Fail "No HTTPS answer on 127.0.0.1:$($state.httpsPort): $($probe.Error)"; $problems++
+            Write-Fail "HTTPS check failed on 127.0.0.1:$($state.httpsPort): $($probe.Error)"; $problems++
         } else {
             if ($probe.ChainRoot -eq [string]$state.rootSha256) { Write-Ok 'Certificate chain root = installed CA' } else { Write-Fail "Chain root $($probe.ChainRoot) differs from the installed CA"; $problems++ }
             $left = $probe.LeafNotAfter - (Get-Date)
@@ -705,12 +740,16 @@ function Invoke-Status {
             }
         }
     }
-    try {
-        $appPort = Get-AppPublishedPort
-        if ($appPort -eq [int]$state.upstreamPort) { Write-Ok "Upstream 127.0.0.1:$appPort = the app's actual publish" } else {
-            Write-Fail "Caddy proxies to 127.0.0.1:$($state.upstreamPort) but the app now publishes 127.0.0.1:$appPort. Re-install (pilot) to regenerate the configuration."; $problems++
-        }
-    } catch { Write-Warn "Could not read the app publish from Docker: $($_.Exception.Message)" }
+    $owners = $null
+    try { $owners = @(Get-PortOwners) } catch { Write-Warn "Could not read the app publish from Docker: $($_.Exception.Message)" }
+    if ($null -ne $owners) {
+        try {
+            $appPort = Get-AppPublishedPort -Owners $owners
+            if ($appPort -eq [int]$state.upstreamPort) { Write-Ok "Upstream 127.0.0.1:$appPort = the app's actual publish" } else {
+                Write-Fail "Caddy proxies to 127.0.0.1:$($state.upstreamPort) but the app now publishes 127.0.0.1:$appPort. Re-install (pilot) to regenerate the configuration."; $problems++
+            }
+        } catch { Write-Fail $_.Exception.Message; $problems++ }
+    }
 
     Write-Host ''
     if ($problems -eq 0) { Write-Host '   Status: OK' -ForegroundColor Green; exit 0 }
