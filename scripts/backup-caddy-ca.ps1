@@ -120,8 +120,17 @@ if ($SourceDir) {
     # Relative paths follow the current PowerShell location (GetFullPath would use the process directory in 5.1).
     $SourceDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SourceDir)
     $hostCaDir = Join-Path $SourceDir 'pki\authorities\local'
-    # The elevated reads below must not follow a link planted into another folder.
-    foreach ($d in @($SourceDir, (Join-Path $SourceDir 'pki'), (Join-Path $SourceDir 'pki\authorities'), $hostCaDir)) {
+    # The elevated reads below must not follow a link planted into another folder - anywhere on the path, from the
+    # drive root down to the CA folder (a junction above -SourceDir would redirect the reads just the same).
+    $chain = @()
+    $p = $SourceDir
+    while ($p) {
+        $chain = @($p) + $chain
+        $parent = Split-Path -Parent $p
+        if (-not $parent -or $parent -eq $p) { break }
+        $p = $parent
+    }
+    foreach ($d in @($chain + @((Join-Path $SourceDir 'pki'), (Join-Path $SourceDir 'pki\authorities'), $hostCaDir))) {
         $item = Get-Item -LiteralPath $d -Force -ErrorAction SilentlyContinue
         if (-not $item -or -not $item.PSIsContainer) { Stop-WithError "Folder not found: $d" }
         if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { Stop-WithError "$d is a junction or symbolic link. Refusing to read through it." }

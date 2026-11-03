@@ -70,7 +70,9 @@ describe('backup-caddy-ca.ps1 -SourceDir (호스트 Caddy 서비스의 CA 사본
 
   it('관리자 창에서만 동작하고, 경로의 모든 폴더·파일에서 junction/symlink를 거부하며 크기 상한을 둔다', () => {
     expect(SCRIPT).toMatch(/if \(-not \(Test-Admin\)\) \{ Stop-WithError '-SourceDir needs an elevated/);
-    expect(SCRIPT).toContain("foreach ($d in @($SourceDir, (Join-Path $SourceDir 'pki'), (Join-Path $SourceDir 'pki\\authorities'), $hostCaDir)) {");
+    expect(SCRIPT).toContain("foreach ($d in @($chain + @((Join-Path $SourceDir 'pki'), (Join-Path $SourceDir 'pki\\authorities'), $hostCaDir))) {");
+    // 드라이브 루트부터 -SourceDir 까지 모든 상위 폴더도 검사한다(상위 junction 도 읽기를 돌린다 — PR 리뷰 1회차 권고, 5.1·7 실측).
+    expect(SCRIPT).toMatch(/while \(\$p\) \{\s*\$chain = @\(\$p\) \+ \$chain\s*\$parent = Split-Path -Parent \$p\s*if \(-not \$parent -or \$parent -eq \$p\) \{ break \}/);
     expect(SCRIPT.match(/-band \[System\.IO\.FileAttributes\]::ReparsePoint\) \{ Stop-WithError/g)).toHaveLength(2);
     expect(SCRIPT).toMatch(/if \(\$item\.Length -le 0 -or \$item\.Length -gt 65536\) \{ Stop-WithError/);
     expect(SCRIPT).toContain('$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SourceDir)');

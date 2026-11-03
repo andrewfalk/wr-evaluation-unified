@@ -279,11 +279,11 @@ describe('verify-stack.ps1 — 호스트 Caddy(릴리스 B PR-4)', () => {
     const fn = fnBody('Invoke-Accept');
     expect(fn).toContain("if (-not $hc.Host) { Stop-WithError");
     expect(fn).toContain("$results['출발지별 IP'] = ($ip['loopback'] -eq '127.0.0.1' -and $ip['lan'] -eq $lan -and $ip['loopback'] -ne $ip['lan'])");
-    const flood = fn.indexOf("$c = Send-BadLogin '127.0.0.1' \"$tag-rl$i\"");
-    const lanAfter = fn.indexOf('$lanAfter = Send-BadLogin $lan');
-    expect(flood).toBeGreaterThan(0);
-    expect(flood).toBeLessThan(lanAfter);
-    expect(fn).toContain("$results['로그인 제한 버킷 분리'] = ($hit -and $lanAfter -eq '401')");
+    const bucket = fnBody('Test-SeparateBuckets');
+    before(bucket, "$c = Send-BadLogin '127.0.0.1' \"$Prefix-rl$i\"", '$lanAfter = Send-BadLogin $Lan');
+    expect(fn).toContain("$results['로그인 제한 버킷 분리'] = ($bucket.Hit -and $bucket.LanAfter -eq '401')");
+    // LAN 도 429 면(같은 창에 LAN 요청이 이미 있었음) 61초 뒤 두 버킷 모두 새 창에서 한 번 더(PR 리뷰 1회차 권고).
+    expect(fn).toMatch(/if \(\$bucket\.Hit -and \$bucket\.LanAfter -eq '429'\) \{[\s\S]*?Start-Sleep -Seconds 61\s*\$bucket = Test-SeparateBuckets/);
     expect(fn).toContain("$results['8 KiB 헤더 통과'] = ((Send-PaddedHeader 8 $HttpsPort) -eq '200')");
     expect(fn).toMatch(/if \(\$failed -gt 0\) \{ exit 1 \}/);
     // 이전 실행의 1분 창이 남았으면 한 번만 61초 기다렸다 다시 보낸다.

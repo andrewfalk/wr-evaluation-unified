@@ -676,6 +676,18 @@ function Send-BadLogin([string]$Source, [string]$Agent, [int]$Port = $HttpsPort)
         --data-binary "@$script:AcceptBody" "https://${Domain}:${Port}/api/auth/login" -o NUL -w '%{http_code}')
 }
 
+# 루프백으로 429 가 날 때까지(최대 7회) 보낸 직후 LAN 에서 1회 — 버킷이 출발지별이면 LAN 은 401.
+function Test-SeparateBuckets([string]$Lan, [string]$Prefix) {
+    $hit = $false
+    for ($i = 1; $i -le 7; $i++) {
+        $c = Send-BadLogin '127.0.0.1' "$Prefix-rl$i"
+        if ($c -eq '429') { $hit = $true; Write-Host "   루프백 $i 번째 요청에서 429"; break }
+    }
+    $lanAfter = Send-BadLogin $Lan "$Prefix-rl-lan"
+    Write-Host "   루프백 버킷이 찬 직후 LAN: $lanAfter"
+    return [pscustomobject]@{ Hit = $hit; LanAfter = $lanAfter }
+}
+
 function Send-PaddedHeader([int]$KiB, [int]$Port) {
     [System.IO.File]::WriteAllText($script:AcceptHeader, "X-Accept-Pad: $('a' * ($KiB * 1024))`r`n")
     return (curl.exe -sk --max-time 10 --resolve "${Domain}:${Port}:127.0.0.1" -H "@$script:AcceptHeader" "https://${Domain}:${Port}/api/config/public" -o NUL -w '%{http_code}')
@@ -719,14 +731,14 @@ function Invoke-Accept {
         $results['출발지별 IP'] = ($ip['loopback'] -eq '127.0.0.1' -and $ip['lan'] -eq $lan -and $ip['loopback'] -ne $ip['lan'])
 
         Write-Step '2/3 로그인 제한(분당 5회)이 출발지별 버킷인가'
-        $hit = $false
-        for ($i = 1; $i -le 7; $i++) {
-            $c = Send-BadLogin '127.0.0.1' "$tag-rl$i"
-            if ($c -eq '429') { $hit = $true; Write-Host "   루프백 $i 번째 요청에서 429"; break }
+        $bucket = Test-SeparateBuckets $lan "$tag-a"
+        if ($bucket.Hit -and $bucket.LanAfter -eq '429') {
+            # 같은 1분 창에 LAN 요청이 이미 여러 번 있었다면(앞 단계·이전 실행) LAN 버킷도 찼을 수 있다 — 창이 지난 뒤 한 번 더.
+            Write-Warn 'LAN 도 429 — LAN 버킷이 이전 요청으로 이미 찼을 수 있습니다. 61초 기다린 뒤(두 버킷 모두 새 창) 한 번 다시 합니다.'
+            Start-Sleep -Seconds 61
+            $bucket = Test-SeparateBuckets $lan "$tag-b"
         }
-        $lanAfter = Send-BadLogin $lan "$tag-rl-lan"
-        Write-Host "   루프백 버킷이 찬 직후 LAN: $lanAfter"
-        $results['로그인 제한 버킷 분리'] = ($hit -and $lanAfter -eq '401')
+        $results['로그인 제한 버킷 분리'] = ($bucket.Hit -and $bucket.LanAfter -eq '401')
 
         Write-Step '3/3 헤더 크기 (Caddy 2.11.6 부터 요청 헤더 상한)'
         $results['8 KiB 헤더 통과'] = ((Send-PaddedHeader 8 $HttpsPort) -eq '200')
