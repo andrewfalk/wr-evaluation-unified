@@ -630,9 +630,14 @@ function Undo-EnvModeKeys {
         if ([string]$e.action -ne 'revert') { continue }
         if ($e.existedBefore) { $changes[[string]$e.key] = [string]$e.previousLine } else { $changes[[string]$e.key] = $null }
     }
-    $backup = Write-EnvKeys $EnvFile $changes 'rollback'
-    Update-JsonFile $HostModeFile @{ status = 'reverted'; revertedAt = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ssK') }
-    return $backup
+    # The journal stays 'applied': it is closed only after the Docker Caddy answers and the mode says docker, so a
+    # rollback that fails after this step can simply be run again.
+    return (Write-EnvKeys $EnvFile $changes 'rollback')
+}
+
+# Closes the journal; called last, after the mode was set to docker.
+function Close-HostModeJournal([string]$Status) {
+    if (Test-Path -LiteralPath $HostModeFile) { Update-JsonFile $HostModeFile @{ status = $Status; closedAt = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ssK') } }
 }
 
 # --- docker compose -------------------------------------------------------------
@@ -952,10 +957,10 @@ function Restore-DockerMode($State, [string]$Domain, [bool]$EnvEdited) {
     } catch { $left += "Remove-NetFirewallRule -Group '$FirewallGroup'   ($($_.Exception.Message))" }
     if ($left.Count -eq 0) {
         try {
-            # The env file was not changed (the failure came first): close the journal so -Cutover can run again.
-            if (-not $EnvEdited -and (Test-Path -LiteralPath $HostModeFile)) { Update-JsonFile $HostModeFile @{ status = 'aborted'; abortedAt = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ssK') } }
             Update-JsonFile $StateFile @{ mode = 'docker'; dockerSince = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ssK') }
-        } catch { $left += "Set mode to docker in $StateFile   ($($_.Exception.Message))" }
+            # Only now close the journal, so -Cutover can run again ('aborted' when the env file was never changed).
+            if ($EnvEdited) { Close-HostModeJournal 'reverted' } else { Close-HostModeJournal 'aborted' }
+        } catch { $left += "Set mode to docker in $StateFile and status 'reverted' in $HostModeFile   ($($_.Exception.Message))" }
     }
     if ($left.Count -gt 0) {
         Write-Fail "Could not finish returning to the Docker Caddy. Run -Rollback (it finishes an interrupted switch-over recorded in $HostModeFile), or do these by hand, in this order:"
@@ -1444,8 +1449,9 @@ function Invoke-Rollback {
     foreach ($e in @($hm.entries | Where-Object { [string]$_.action -eq 'revert' })) {
         $k = [string]$e.key
         $atNew = ($current[$k].Exists -and $current[$k].Value -eq [string]$e.newValue)
-        # An interrupted switch-over may have stopped before the env file was changed: the key is still as before.
-        $atPrevious = ($interrupted -and $current[$k].Exists -eq [bool]$e.existedBefore -and (-not $current[$k].Exists -or $current[$k].Value -eq [string]$e.previousValue))
+        # Already as before: an interrupted switch-over that stopped before the env file was changed, or an earlier
+        # rollback that restored the env file and then failed (the journal stays open until the very end).
+        $atPrevious = ($current[$k].Exists -eq [bool]$e.existedBefore -and (-not $current[$k].Exists -or $current[$k].Value -eq [string]$e.previousValue))
         if (-not $atNew -and -not $atPrevious) {
             throw "$k in $EnvFile is '$($current[$k].Value)', not '$($e.newValue)' as the switch-over set it. It was changed by hand; fix it (see $HostModeFile) and run again. Nothing was changed."
         }
@@ -1503,10 +1509,11 @@ function Invoke-Rollback {
         Remove-NetFirewallRule -Group $FirewallGroup -ErrorAction SilentlyContinue
         Write-Ok "Firewall rules of group '$FirewallGroup' removed"
         Update-JsonFile $StateFile @{ mode = 'docker'; dockerSince = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ssK') }
+        Close-HostModeJournal 'reverted'
         Write-Ok 'Mode = docker'
     } catch {
         Write-Fail $_.Exception.Message
-        Write-Host '   Rollback stopped. Where it stands and what is left:' -ForegroundColor Yellow
+        Write-Host '   Rollback stopped (running -Rollback again continues from here). Where it stands and what is left:' -ForegroundColor Yellow
         $up = "docker $((Get-ComposeArgs) -join ' ') up -d --no-deps caddy"
         if (-not $done.ServiceStopped) {
             Write-Host '   - wr-caddy may still serve 8443; nothing else was changed. Check with -Status.' -ForegroundColor Yellow
@@ -1535,6 +1542,12 @@ function Invoke-Reconfigure {
     Write-Step 'Pre-checks'
     $inst = Get-TrustedInstall @('pilot', 'host')
     $state = $inst.State
+    # Mode pilot with an open journal = interrupted switch-over: wr-caddy may be the one serving 8443 while
+    # install.json still lists the trial ports. Regenerating from those would leave 8443 without a server.
+    $journal = Get-HostModeJson
+    if ([string]$state.mode -ne 'host' -and $journal -and [string]$journal.status -eq 'applied') {
+        throw "A switch-over recorded in $HostModeFile did not finish. Run -Rollback first. Nothing was changed."
+    }
     Invoke-Native { docker info 2>$null } | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Docker is not running.' }
     $appPort = Get-AppPublishedPort
@@ -1683,10 +1696,12 @@ function Invoke-Status {
     }
     $owners = $null
     try { $owners = @(Get-PortOwners) } catch { Write-Warn "Could not read the app publish from Docker: $($_.Exception.Message)" }
-    if ($null -ne $owners -and $mode -ne 'docker') {
+    if ($null -ne $owners) {
         try {
+            # The publish rules (loopback only, one port) apply in every mode; only the upstream comparison needs the service.
             $appPort = Get-AppPublishedPort -Owners $owners
-            if ($appPort -eq [int]$state.upstreamPort) { Write-Ok "Upstream 127.0.0.1:$appPort = the app's actual publish" } else {
+            if ($mode -eq 'docker') { Write-Ok "App published on 127.0.0.1:$appPort only (upstream not compared: service disabled)" }
+            elseif ($appPort -eq [int]$state.upstreamPort) { Write-Ok "Upstream 127.0.0.1:$appPort = the app's actual publish" } else {
                 Write-Fail "Caddy proxies to 127.0.0.1:$($state.upstreamPort) but the app now publishes 127.0.0.1:$appPort. Run -Reconfigure to regenerate the configuration."; $problems++
             }
         } catch { Write-Fail $_.Exception.Message; $problems++ }

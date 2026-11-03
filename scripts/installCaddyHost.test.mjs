@@ -383,6 +383,9 @@ describe('install-caddy-host.ps1 -Uninstall / -Status', () => {
     // Codex PR 리뷰 1회차: 비루프백 게시를 감지해도 경고만 내고 Status: OK였다.
     const b = fnBody('Invoke-Status');
     expect(b).toMatch(/try \{ \$owners = @\(Get-PortOwners\) \} catch \{ Write-Warn/);
+    // 게시 규칙 검사는 모든 모드에서(docker 모드도), 업스트림 비교만 docker 모드에서 생략(PR 리뷰 2회차).
+    expect(b).toMatch(/if \(\$null -ne \$owners\) \{\s*try \{/);
+    expect(b).toContain("if ($mode -eq 'docker') { Write-Ok \"App published on 127.0.0.1:$appPort only");
     expect(b).toMatch(/\$appPort = Get-AppPublishedPort -Owners \$owners[\s\S]*?\} catch \{ Write-Fail \$_\.Exception\.Message; \$problems\+\+ \}/);
   });
 
@@ -411,6 +414,8 @@ describe('install-caddy-host.ps1 -Cutover / -Rollback / -Reconfigure (PR-3b)', (
     // pilot/docker에서의 Rollback은 중단된 전환(기록 'applied')을 마무리할 때만(Codex PR 리뷰 1회차).
     expect(rb()).toMatch(/if \(-not \$hm -or \[string\]\$hm\.status -ne 'applied'\) \{\s*if \(\$interrupted\) \{ throw/);
     expect(fnBody('Invoke-Reconfigure')).toContain("$inst = Get-TrustedInstall @('pilot', 'host')");
+    // 중단된 전환(pilot + 기록 'applied')에서는 시범 포트로 되돌리지 않고 거부(PR 리뷰 2회차).
+    expect(fnBody('Invoke-Reconfigure')).toMatch(/if \(\[string\]\$state\.mode -ne 'host' -and \$journal -and \[string\]\$journal\.status -eq 'applied'\) \{\s*throw/);
     const g = fnAny('Get-TrustedInstall');
     expect(g).toMatch(/if \(\$Modes -notcontains \$mode\) \{ throw/);
     // 우리 서비스·잠긴 설치 폴더·설치 때 기록한 caddy.exe 해시와 CA 지문이어야 손댄다.
@@ -480,15 +485,20 @@ describe('install-caddy-host.ps1 -Cutover / -Rollback / -Reconfigure (PR-3b)', (
     before(r, 'Undo-EnvModeKeys', 'Invoke-ComposeUpCaddy');
     before(r, 'Invoke-ComposeUpCaddy', 'Wait-DockerHttps $Domain ([string]$State.rootSha256)');
     expect(r).toContain('Could not finish returning to the Docker Caddy. Run -Rollback');
-    // env를 고치기 전에 실패했으면 기록을 'aborted'로 닫는다 — 'applied'가 남으면 재전환이 영원히 막힌다(Codex PR 리뷰 1회차).
-    expect(r).toContain("if (-not $EnvEdited -and (Test-Path -LiteralPath $HostModeFile)) { Update-JsonFile $HostModeFile @{ status = 'aborted'");
+    // 기록은 Docker 응답·mode=docker 뒤에 닫는다: env를 고치기 전 실패면 'aborted'(안 닫으면 재전환이 영원히 막힘, PR 리뷰 1회차),
+    // 그 전에 실패하면 'applied'로 남아 -Rollback으로 이어서 할 수 있다(PR 리뷰 2회차).
+    expect(r).toContain("if ($EnvEdited) { Close-HostModeJournal 'reverted' } else { Close-HostModeJournal 'aborted' }");
+    before(r, "Update-JsonFile $StateFile @{ mode = 'docker'", 'Close-HostModeJournal');
+    before(r, 'Wait-DockerHttps', 'Close-HostModeJournal');
+    expect(fnBody('Undo-EnvModeKeys')).not.toMatch(/Update-JsonFile|Close-HostModeJournal/);
   });
 
   it('Rollback: env 값이 전환 때 넣은 값과 같을 때만, 서비스를 멈추기 전에 대상 구성을 검사하고, 서비스는 disabled', () => {
     const b = rb();
     expect(b).toContain('$atNew = ($current[$k].Exists -and $current[$k].Value -eq [string]$e.newValue)');
-    // 이전 값 그대로인 키는 중단된 전환일 때만 허용(host 모드에서 이전 값 = 손으로 바꾼 것).
-    expect(b).toContain('$atPrevious = ($interrupted -and ');
+    // 이전 값 그대로인 키도 허용: 중단된 전환, 또는 env를 복원한 뒤 실패한 롤백의 재실행(PR 리뷰 2회차). 그 밖의 값은 손으로 바꾼 것.
+    expect(b).toContain('$atPrevious = ($current[$k].Exists -eq [bool]$e.existedBefore -and ');
+    before(b, "Update-JsonFile $StateFile @{ mode = 'docker'", "Close-HostModeJournal 'reverted'");
     expect(b).toMatch(/if \(-not \$atNew -and -not \$atPrevious\) \{\s*throw/);
     // 중단된 전환에서는 Docker가 아직 8443을 쥐고 있을 수 있다: 제3 프로그램만 거부하고, 기다릴 때도 Docker는 제외.
     expect(b).toContain('$_.Pid -ne $svcPid -and $_.Process -notmatch $DockerProcessPattern');
