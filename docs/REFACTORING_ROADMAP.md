@@ -251,7 +251,7 @@
 | H4 | 업데이트 미서명 + electron-updater CVE | ✅ **HF8(#169~#172, 7.1.4 편입)** — 피드 서명 검증 도입. electron-updater 권고 2건은 미서명 설치본·무토큰 피드 구성에 해당하지 않아 업그레이드하지 않고 수용. 코드서명(Authenticode)은 여전히 없음 |
 | H5 | Electron 22 EOL·no-sandbox | 수용 리스크, Phase 3 문서화·ADR |
 | M1 | 임시비번 강제변경 미적용 | ✅ **HF2(#160)** |
-| M2 | 계정별 brute-force 보호 없음 | S4 뒤 Phase 1 bundle |
+| M2 | 계정별 brute-force 보호 없음 | S4 뒤 Phase 1 bundle. 참고: Windows Docker Desktop 앞에서는 IP 키 limiter 4종이 병원 전체 한 버킷이었다 — 호스트 Caddy 모드(PRODUCTION_RELEASE_PLAN 9절, #181~#183)에서는 출발지별로 나뉜다(`verify-stack accept` 실측). 계정별 보호는 여전히 필요 |
 | M3 | 세션 무기한 갱신 | Phase 1 bundle |
 | M4 | preload raw IPC·무조건 등록 | ✅ **HF3(#162)** → E2 |
 | M5 | API 키 평문 | Phase 2/3 bundle(safeStorage) |
@@ -276,7 +276,7 @@
 | L14 | CSV TAB/CR | Phase 1 bundle |
 | L15 | 웹 CSP/SRI | Phase 2 bundle |
 | L16 | Dependabot 범위·미사용 deps | Phase 0 훅 + S11 |
-| L17 | Caddy 로그 query string | Phase 1 bundle |
+| L17 | Caddy 로그 query string | 호스트 Caddy 템플릿(`caddy/Caddyfile.host.template`, #181)은 반영 — 기본·접속 로거 모두 쿼리 제거. Docker `caddy/Caddyfile`은 Phase 1 bundle |
 | Info | admin 라우터 레벨 가드 · CSRF dead code · `===` 비교 | S4 · ✅ **HF9**(#161) · S4 |
 
 ---

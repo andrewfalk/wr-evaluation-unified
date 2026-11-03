@@ -14,6 +14,7 @@
 6. [롤백 절차](#6-롤백-절차)
 7. [Production Volume 정책](#7-production-volume-정책)
 8. [릴리스 체크리스트](#8-릴리스-체크리스트)
+9. [호스트 Caddy 전환 (접속자 실제 IP 기록)](#9-호스트-caddy-전환-접속자-실제-ip-기록)
 
 ---
 
@@ -25,7 +26,7 @@
 | Docker Engine | 24.0 이상. **Linux 호스트는 28.0.0 이상** — 앱을 `127.0.0.1`에만 게시하는데, 28.0.0 이전 엔진은 같은 L2 네트워크의 다른 호스트가 localhost 게시 포트에 접근할 수 있다([moby#45610](https://github.com/moby/moby/issues/45610)). Windows Docker Desktop은 게시 포트를 Windows 루프백 리스너가 받으므로 이 제약과 무관하다. `scripts/check-app-publish.ps1`이 기동 전에 확인한다 |
 | Docker Compose | v2.17 이상 (`!reset` tag 지원 필요). `!override`는 쓰지 않는다(v2.24.4 미만은 오류 없이 무시) |
 | DNS | `wr.hospital.local` → 서버 IP (클라이언트 전 PC에 적용) |
-| 방화벽 | 서버 포트 80, 443 인바운드 허용 |
+| 방화벽 | 서버 포트 8443(HTTPS)·8080(HTTP → HTTPS 리다이렉트) 인바운드 허용. 호스트 Caddy 모드(9절)에서는 설치 스크립트가 `caddy.exe` 한정 규칙을 따로 만든다 |
 | GPG | 공개키 준비 완료 (백업 암호화용) |
 | 오프라인 패키지 | `scripts/export-offline-package.ps1`으로 생성한 패키지 |
 
@@ -129,6 +130,8 @@ pwsh -File scripts/verify-stack.ps1 purge -Force      # 볼륨까지 삭제 (공
 - **패키지 그대로**: 패키지의 `docker-compose.yml` + `docker-compose.prod.yml`과 패키지에 담긴 이미지를 쓴다. `up`은 로컬 이미지 ID가 `release-manifest.json`과 같은지 먼저 확인한다(다르면 `-LoadImages`로 패키지의 tar를 불러온다). 패키지의 `updates\`가 `/updates/`로 서빙되므로 서명된 `latest.yml.sig` 업데이트 시험에 쓴다.
 - **환경 파일**: `release\.verify-stack\wr-verify.env`에 시험 전용 무작위 값으로 만든다. 실제 `.env.production`은 읽지 않는다. 통계 워크벤치는 기본으로 켜 둔다(서버가 꺼 두면 설치본에 통계분석 버튼이 뜨지 않는다). 영상 분석은 운영 기본값(꺼짐)을 따르며, 이 파일의 주석을 풀고 `up`을 다시 실행하면 켜진다.
 - **TLS**: 기존 Caddy CA 볼륨(`wr-evaluation-unified_caddy_data`)을 재사용한다. 그 루트가 Windows에 신뢰 등록돼 있으면 별도 설치가 필요 없다(`up`·`status`가 지문으로 알려 준다). 새 CA를 쓰려면 `-FreshCa`이며 루트 인증서를 직접 신뢰 등록해야 한다. 오래 멈춰 있던 볼륨의 서버 인증서(수명 6일)는 만료돼 있으므로 `up`이 Caddy를 한 번 재시작해 새로 발급받는다.
+- **호스트 Caddy 모드**: 관리자 창에서 `install-caddy-host.ps1 -Install … -ProjectName wr-verify` → `-Cutover`로 이 스택을 host 모드로 바꾸면(9절과 같은 절차, `-EnvFile release\.verify-stack\wr-verify.env -ComposeDir <패키지> -ExtraComposeFile release\.verify-stack\wr-verify.override.yml`) `up`·`status`가 그 상태를 알아보고 8443 을 쥔 `wr-caddy` 를 정상으로 본다. 설치 기록·서비스·환경 파일이 서로 맞지 않으면 무엇이 다른지 보여 주고 멈춘다. `verify-stack.ps1` 은 설치·전환·롤백을 하지 않는다.
+- **수용 시험** `pwsh -File scripts/verify-stack.ps1 accept`(host 모드에서만): 루프백·이 PC의 LAN 주소 두 출발지에서 잘못된 로그인을 보내 ① 감사 로그 IP가 출발지 그대로·서로 다르게 남는지 ② 로그인 제한(분당 5회)이 출발지별 버킷인지 ③ 8 KiB 헤더가 통과하는지 확인한다. LAN 주소는 화면에만 출력한다.
 - 이 스택은 리허설용이다. 백업 서비스(GPG)는 띄우지 않으며, 아래 4절(초기화)·5절(검증)의 운영 절차를 대체하지 않는다.
 
 ### 3-1. 오프라인 패키지에서 이미지 로드 (인트라넷 환경)
@@ -1066,7 +1069,7 @@ $env:WR_VERSION = ""  # 원복
 | Volume | 용도 | 보존 정책 |
 |---|---|---|
 | `wr-prod_postgres_data` | 주 DB 데이터 | 영구 보존, 삭제 금지 |
-| `wr-prod_caddy_data` | Caddy 내부 CA 키·인증서 | **영구 보존, 삭제 금지** — 잃으면 새 CA가 생겨 모든 클라이언트 PC에 루트 인증서를 다시 설치해야 한다. 일일 DB 백업 대상이 아니므로 7-1의 CA 키 백업이 필요 |
+| `wr-prod_caddy_data` | Caddy 내부 CA 키·인증서 | **영구 보존, 삭제 금지** — 잃으면 새 CA가 생겨 모든 클라이언트 PC에 루트 인증서를 다시 설치해야 한다. 일일 DB 백업 대상이 아니므로 7-1의 CA 키 백업이 필요. 호스트 Caddy 모드(9절)에서도 지우지 않는다 — 설치·재설치가 이 볼륨에서 CA를 복사하고(지문 대조), 롤백한 Docker Caddy도 이 볼륨을 쓴다 |
 | `wr-prod_caddy_config` | Caddy 런타임 설정 | 재생성 가능 |
 | `wr-prod_backup_data` | GPG 암호화 백업 파일 | 영구 보존 |
 | `wr-prod_backup_alerts` | 백업 알림 파일 | 재생성 가능 |
@@ -1076,6 +1079,7 @@ $env:WR_VERSION = ""  # 원복
 - dev/staging volume (`wr-evaluation-unified_*`)과 절대 혼용하지 않는다.
 - `wr-prod_postgres_data`와 `wr-prod_backup_data`는 정기 외장 미디어 또는 안전한 위치에 별도 보존 고려.
 - `wr-prod_caddy_data`는 일일 백업 대상이 **아니다**. 최초 배포 직후·연 1회·서버 이전이나 볼륨 작업 직전에 `scripts\backup-caddy-ca.ps1`로 CA 키를 백업한다(7-1).
+- 호스트 Caddy 모드의 CA 사본 `C:\ProgramData\wr-caddy\data`(관리자·SYSTEM·서비스 계정만 읽기)는 설치 스크립트가 볼륨에서 복사한 것이다. 제거(`-Uninstall`)해도 자동으로 지우지 않는다. 지울 때는 볼륨이 남아 있고 그 루트 지문이 클라이언트와 같은지 먼저 확인한다.
 
 ### 7-1. Caddy 내부 CA 키 백업·복구
 
@@ -1094,6 +1098,10 @@ $env:WR_VERSION = ""  # 원복
 - 결과물: `caddy-ca-wr-prod-<시각>.tar.gpg`(암호화된 CA 키·인증서 4개)와 `.info.txt`(루트 인증서 지문 등 공개 정보만). 암호화되지 않은 파일은 디스크에 쓰지 않는다(tar는 컨테이너 메모리에만 만들어진다). `caddy_data` 볼륨은 읽기 전용으로 마운트하며 키 내용은 화면에 출력하지 않는다.
 - 두 파일을 **오프라인 매체(USB·금고)**로 옮기고 서버의 작업 사본은 지운다. 복호화에 필요한 **개인 GPG 키는 이 파일과 다른 매체**에 보관한다(BACKUP_RESTORE.md 3-1).
 - 백업 직후 `.info.txt`의 `Root SHA-1` 지문이 클라이언트 PC에 설치된 인증서의 지문(`Get-ChildItem Cert:\CurrentUser\Root` 또는 `LocalMachine\Root`의 `WR Evaluation Internal CA` 항목)과 같은지 한 번 확인한다.
+- **호스트 Caddy 모드(9절)에서는** 서비스가 실제로 쓰는 사본(`C:\ProgramData\wr-caddy\data`)도 백업한다. 그 폴더는 관리자만 읽을 수 있으므로 **관리자 창**에서 실행한다. 스크립트가 파일 4개를 읽어 컨테이너 메모리로 넘기고, 원본과 SHA-256이 같을 때만 암호화한다(평문은 디스크에 남지 않는다). 아카이브 형식은 볼륨 백업과 같아 아래 복구 절차를 그대로 쓴다. 설치 기록의 루트와 다르면 아무것도 쓰지 않고 멈춘다.
+  ```powershell
+  .\scripts\backup-caddy-ca.ps1 -SourceDir C:\ProgramData\wr-caddy\data -EnvFile $envFile
+  ```
 
 **복구** (CA 볼륨을 잃었거나 새 서버로 옮길 때):
 
@@ -1118,7 +1126,37 @@ $env:WR_VERSION = ""  # 원복
 
 복구 절차는 **운영 밖에서 한 번 리허설**해 두는 것이 좋다. 시험용 키로 백업을 만들어 복호화하고 새 볼륨에 복원했을 때 4개 파일이 원본과 바이트 단위로 같았다(스크립트 도입 시 확인).
 
-참고: 서버를 6일 넘게 멈췄다가 켜면 Caddy의 서버 인증서(수명 6일)가 만료돼 있다. 이때 Caddy는 만료된 파일을 지우고 갱신하다 실패하며 스스로 복구되지 않는다(검증 스택에서 확인). 접속 오류(`NotTimeValid`)가 보이면 `... -p wr-prod restart caddy`를 한 번 실행한다. CA 키 복구와는 별개의 증상이다.
+**호스트 Caddy 모드(9절)에서의 복구** — 호스트 사본(`C:\ProgramData\wr-caddy\data`)에 직접 복원하지 않는다. 호스트 사본은 언제나 설치 스크립트(`-Install`)가 볼륨에서 지문을 대조해 복사한다. 아래 명령의 `$envFile`은 현재 운영 env의 절대 경로다(9절 "env 경로 규칙").
+
+| 상황 | 절차 |
+|---|---|
+| 볼륨만 잃었고 호스트 사본은 정상 | 위 1~5단계로 백업 아카이브(`-SourceDir` 백업이든 볼륨 백업이든)를 새 볼륨에 복원한다. host 모드는 그대로 운영된다. Docker Caddy로 돌아가려면 그 뒤에 `.\caddy-host\install-caddy-host.ps1 -Rollback -EnvFile $envFile` |
+| 둘 다 정상이고 다시 설치만 필요 | `-Rollback -EnvFile $envFile` → `-Uninstall` → `-Install …`(9-2) → `-Cutover -EnvFile $envFile`(9-3) |
+| **호스트 사본이 없거나 손상됨** | `-Rollback`·`-Uninstall`은 시작할 때 호스트 사본의 루트를 검사하므로 멈추고, `-Install`도 기존 사본을 덮어쓰지 않는다. 아래 수동 절차로 Docker Caddy로 되돌린 뒤 설치 폴더를 지우고 다시 설치한다 |
+
+호스트 사본이 없거나 손상됐을 때(관리자 창, 패키지 루트):
+
+1. 볼륨도 없거나 손상됐으면 먼저 위 1~5단계로 복원하고, 볼륨의 루트 지문이 클라이언트 PC의 지문과 같은지 확인한다.
+2. 서비스를 멈추고 자동 시작을 끈다.
+   ```powershell
+   Stop-Service wr-caddy -Force
+   sc.exe config wr-caddy start= disabled
+   ```
+3. env 파일에서 `WR_CADDY_HTTPS_BIND`·`WR_CADDY_HTTP_BIND` **두 줄만** `C:\ProgramData\wr-caddy\state\host-mode.json`의 기록대로 되돌린다: `existedBefore`가 `true`면 `previousLine`으로 바꾸고, `false`면 그 줄을 지운다. 다른 키(`WR_VERSION`·비밀번호·`WR_APP_PORT` 등)는 건드리지 않는다.
+4. Docker Caddy를 업데이트 때와 같은 파일·env로 다시 만들고 8443 응답을 확인한다.
+   ```powershell
+   docker compose -p wr-prod --env-file $envFile -f docker-compose.yml -f docker-compose.prod.yml up -d --no-deps caddy
+   curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 -o NUL -w "8443: %{http_code}`n" https://wr.hospital.local:8443/health
+   ```
+5. 방화벽 규칙과 서비스를 지운다.
+   ```powershell
+   Remove-NetFirewallRule -Group 'WR Evaluation Caddy'
+   sc.exe delete wr-caddy
+   ```
+6. `C:\ProgramData\wr-caddy`를 지운다(로그가 필요하면 `logs\`를 먼저 다른 곳으로 옮긴다). 원본 CA는 볼륨에 있으므로 잃지 않는다.
+7. 9-2(시범 설치)부터 다시 한다.
+
+참고: 서버를 6일 넘게 멈췄다가 켜면 Caddy의 서버 인증서(수명 6일)가 만료돼 있다. 이때 Caddy는 만료된 파일을 지우고 갱신하다 실패하며 스스로 복구되지 않는다(검증 스택에서 확인). 접속 오류(`NotTimeValid`)가 보이면 `... -p wr-prod restart caddy`를 한 번 실행한다(호스트 Caddy 모드라면 관리자 창에서 `Restart-Service wr-caddy`). CA 키 복구와는 별개의 증상이다.
 
 ---
 
@@ -1139,3 +1177,143 @@ $env:WR_VERSION = ""  # 원복
 - [ ] (Electron 셸이 바뀐 릴리스인 경우) `/updates/` 스테이징 + `update-policy.json` 롤아웃 절차 확인 (3-1-1, INTRANET_DEPLOYMENT.md 7절)
 - [ ] (Electron 셸이 바뀐 릴리스인 경우) 패키지가 서명 키로 만들어졌다: `release-manifest.json`의 `electronInstaller.updateFeedSigned`가 `true`이고 `updates/`에 yml·`.sig` 쌍이 있다. 서명 검증 명령(`node scripts/sign-update-feed.mjs --verify ...`)은 **소스가 있는 릴리스 PC에서** 실행한다 — 오프라인 패키지와 서버에는 이 도구가 없다(INTRANET_DEPLOYMENT.md 7-6). 서버에서는 `SHA256SUMS` 검증과 `curl.exe -k https://<서버>/updates/latest.yml.sig`(base64 한 줄)로 확인한다. 서명 키·암호가 서버·`.env.production`에 없음
 - [ ] T46 Go/No-Go 결과표 PASS (docs/T46_GO_NO_GO.md)
+- [ ] (호스트 Caddy 모드인 경우, 9절) `.\caddy-host\install-caddy-host.ps1 -Status -EnvFile $envFile` → `Status: OK`, 새 로그인의 감사 로그 IP가 실제 PC 주소
+- [ ] (호스트 Caddy 모드에서 롤백한 경우) `sc.exe qc wr-caddy`가 `DISABLED`이고 8443을 Docker가 쓴다
+- [ ] (호스트 Caddy 모드인 경우) CA 키 백업을 `-SourceDir`로도 받아 두었다(7-1)
+
+---
+
+## 9. 호스트 Caddy 전환 (접속자 실제 IP 기록)
+
+### 9-0. 개요
+
+Windows의 Docker Desktop은 게시 포트로 들어온 접속의 출발지 IP를 내부 게이트웨이 주소로 바꾼다. 그래서 Docker 안의 Caddy를 거치면 관리자 콘솔의 감사 로그·세션·장치 IP가 모두 같은 값으로 남고, IP 단위 로그인 제한(분당 5회)도 병원 전체가 한 버킷을 나눠 쓴다. Caddy를 **Windows 서비스(`wr-caddy`, `caddy.exe`)**로 돌리면 실제 접속자 IP를 보고 앱에 `X-Forwarded-For`로 넘긴다. 앱은 서버 PC 안에서만 닿는 `127.0.0.1:<WR_APP_PORT>`로 받는다(7.1.5부터).
+
+| 모드 | 8443/8080을 쓰는 것 | `wr-caddy` 서비스 | env의 `WR_CADDY_HTTPS_BIND` / `WR_CADDY_HTTP_BIND` |
+|---|---|---|---|
+| 없음(설치 전) | Docker Caddy | 없음 | 없음(기본 8443/8080) |
+| `pilot`(시범) | Docker Caddy | 자동 시작, 시범 포트 9443/9080 | 없음 |
+| `host`(전환 후) | `wr-caddy` | 자동 시작, 8443/8080 | `127.0.0.1:18443` / `127.0.0.1:18080` (Docker Caddy는 서버 안 루프백으로 비켜 있다) |
+| `docker`(롤백 후) | Docker Caddy | **사용 안 함(Disabled)**, 정지 | 전환 전 값으로 되돌림 |
+
+- **클라이언트 PC 작업은 없다.** 같은 내부 CA(루트 인증서)를 그대로 쓴다. 설치 스크립트는 Docker 볼륨의 CA를 지문 대조 후 `C:\ProgramData\wr-caddy\data`로 복사한다.
+- 모드는 env 파일에 남는다. 그래서 host 모드에서도 평소 업데이트 명령(2-파일 `up -d`)을 그대로 쓴다.
+- 운영 작업은 세 단계로 나눈다: **1단계** 앱 루프백 게시(7.1.5 배포) → **2단계** 시범 설치(사용자 영향 없음) → **3단계** 8443 전환(점검 창 약 15분).
+- 모든 명령은 **새 패키지 폴더(루트)**에서, **관리자 PowerShell**로 실행한다(`-Status`·`-WhatIf`는 일반 창에서도 된다). Windows PowerShell 5.1과 PowerShell 7 모두 된다.
+
+**env 경로 규칙(이 절 전체)**: 아래 명령의 `$envFile`은 **현재 운영 `.env.production`의 절대 경로**다. 창을 열 때마다 먼저 받아 둔다.
+
+```powershell
+$envFile = '<운영 .env.production 절대경로>'
+```
+
+`-Cutover`·`-Rollback`·`-Status`·`-Reconfigure`에는 항상 `-EnvFile $envFile`을 준다. 빼면 `-Rollback`은 처음 전환할 때 기록한 경로를 쓰는데, 그 뒤 업데이트하면서 env 위치가 바뀌었다면 옛 파일만 고치거나 거부된다. 옛 파일만 고쳐지면 현재 env에는 host 값이 남아 다음 `up -d`에서 8443이 끊긴다.
+
+### 9-1. 사전 준비 (전환 전날까지)
+
+- [ ] 7.1.5(앱 루프백 게시)를 배포하고 관찰을 마쳤다(`docs/UPDATE_7.1.5.md`).
+- [ ] CA 키를 백업했다(7-1). 설치 때 백업 아카이브와 `.info.txt`가 **둘 다 서버에** 있어야 한다(스크립트가 아카이브 해시를 대조한다) — 오프라인 매체에서 잠시 가져오고, 설치가 끝나면 다시 지운다.
+- [ ] 클라이언트 PC 한 대에서 설치된 루트 인증서의 **SHA-256** 지문을 구했다(설치 스크립트의 `-ExpectedRootSha256`). 그 PC의 PowerShell에서:
+  ```powershell
+  $c = Get-ChildItem Cert:\LocalMachine\Root, Cert:\CurrentUser\Root | Where-Object Subject -like '*WR Evaluation Internal CA*' | Select-Object -First 1
+  ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($c.RawData))).Replace('-', '')
+  ```
+  이 값이 백업 `.info.txt`의 `Root SHA-256`과 같아야 한다.
+- [ ] 서버의 보안 프로그램 담당자와 협의했다. `caddy.exe`에는 코드 서명이 없다. 허용 기준으로 `release-manifest.json`의 `caddyHost.exeSha512`(SHA-512)와 설치 경로 `C:\ProgramData\wr-caddy\bin\caddy.exe`를 전달한다. 새 Windows 서비스(`wr-caddy`, NT AUTHORITY\LocalService) 등록과 TCP 8443·8080(시범 때는 9443·9080) 인바운드 허용도 함께 알린다.
+- [ ] 서버 시각이 맞다(서버 인증서 수명이 6일이라 시각이 틀리면 인증서 오류가 난다).
+- [ ] **새 PowerShell 창**을 쓴다. 셸에 `WR_DOMAIN`·`WR_APP_PORT`·`WR_CADDY_*` 같은 변수가 있으면 env 파일보다 우선하므로 스크립트가 거부한다.
+
+### 9-2. 2단계 — 시범 설치 (9443/9080, 사용자 영향 없음)
+
+Docker Caddy는 8443/8080을 그대로 쓰고, `wr-caddy`가 시범 포트에서 같은 앱을 서비스한다.
+
+```powershell
+cd C:\wr\wr-evaluation-unified-<버전>-intranet
+$envFile = '<운영 .env.production 절대경로>'
+$info = '<CA 백업 .info.txt 경로>'
+$fp = '<클라이언트 PC에서 구한 SHA-256 지문>'
+.\caddy-host\install-caddy-host.ps1 -Install -ExpectedRootSha256 $fp -CaBackupInfo $info -EnvFile $envFile -WhatIf   # 점검만
+.\caddy-host\install-caddy-host.ps1 -Install -ExpectedRootSha256 $fp -CaBackupInfo $info -EnvFile $envFile
+.\caddy-host\install-caddy-host.ps1 -Status -EnvFile $envFile                                                         # → Status: OK
+```
+
+- 설치는 폴더 ACL → CA 복사(지문이 클라이언트·백업·볼륨 셋 다 같아야 진행) → `caddy validate` → 서비스·방화벽 → 기동·HTTPS 확인 순서다. 한 단계라도 실패하면 이번 실행이 만든 것을 되돌린다(복사한 CA는 남긴다).
+- **실제 IP 확인**: Windows 10 이상 다른 PC에서 잘못된 로그인을 1회 보낸 뒤, 관리자 콘솔 감사 로그에 **그 PC의 IP**가 남았는지 본다.
+  ```powershell
+  Set-Content -Path .\trial-login.json -Value '{"loginId":"trial-check","password":"x"}' -Encoding ASCII
+  curl.exe -k --resolve wr.hospital.local:9443:<서버 주소> -H "Content-Type: application/json" --data-binary "@trial-login.json" -o NUL -w "%{http_code}`n" https://wr.hospital.local:9443/api/auth/login   # → 401
+  ```
+  브라우저·설치본으로 9443에 접속하지 않는다(앱의 허용 출처가 8443이라 막힐 수 있다). 확인은 `curl.exe` 수준으로 한다.
+- 문제가 있으면 `.\caddy-host\install-caddy-host.ps1 -Uninstall`로 되돌린다. 8443에는 영향이 없다.
+
+### 9-3. 3단계 — 8443 전환 (점검 창 약 15분)
+
+**전환 직전**: 마지막 업데이트(`up -d`)에 쓴 것과 **같은 패키지 폴더·같은 env 파일 경로**에서 실행한다. 스크립트는 실행 중인 caddy 컨테이너의 compose 라벨(폴더·compose 파일·env 파일)과 대조해, 다르면 아무것도 바꾸지 않고 멈춘다.
+
+```powershell
+.\caddy-host\install-caddy-host.ps1 -Cutover -EnvFile $envFile -WhatIf   # 점검만(아무것도 바꾸지 않음)
+.\caddy-host\install-caddy-host.ps1 -Cutover -EnvFile $envFile
+```
+
+`-Cutover`가 하는 일(순서대로):
+
+1. 점검 — 셸 변수, 컨테이너 라벨, 8443/8080을 Docker Caddy만 쓰는지, 18443/18080이 비었는지, 바꾼 뒤의 compose 구성(앱은 `127.0.0.1`, 같은 CA 볼륨, 같은 도메인), 새 설정 `caddy validate`.
+2. 전환 기록(`C:\ProgramData\wr-caddy\state\host-mode.json`)을 먼저 남기고 시범 서비스를 멈춘다.
+3. env의 `WR_CADDY_HTTPS_BIND`/`WR_CADDY_HTTP_BIND` 두 줄만 고친다(다른 키·주석·줄바꿈 그대로, 이전 파일은 `<env>.before-cutover-<시각>`으로 남는다).
+4. **Docker Caddy 컨테이너만** 다시 만든다(`up -d --no-deps caddy` — 앱·DB는 그대로). Docker Caddy가 `127.0.0.1:18443/18080`으로 옮겨 가며 8443/8080이 빈다.
+5. 새 설정을 넣고 방화벽 규칙(8443·8080, `caddy.exe` 한정)을 바꾼 뒤 서비스를 자동 시작으로 켠다.
+6. 8443 HTTPS(같은 CA)·리스너를 확인하고 모드를 `host`로 기록한다.
+
+중간에 실패하면 **스스로 Docker Caddy로 되돌아간다**(서비스 Disabled, env 두 줄 복원, Docker Caddy 재생성, 방화벽 규칙 제거). 되돌림마저 끝내지 못하면 남은 수동 절차를 순서대로 출력한다. 접속이 끊기는 시간은 8443이 비는 순간부터 서비스가 뜰 때까지 수 초다.
+
+**사후 확인**:
+
+- [ ] `.\caddy-host\install-caddy-host.ps1 -Status -EnvFile $envFile` → `Status: OK`
+- [ ] 관리자 콘솔 감사 로그에서 새 로그인의 IP가 **실제 PC 주소**다. 서로 다른 두 PC가 서로 다른 IP로 남는다.
+- [ ] 설치본(Electron)이 인증서 오류 없이 접속한다. EMR 연동·장치 등록이 된다.
+- [ ] `curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local:8443/updates/latest.yml`(와 `.sig`)이 응답한다.
+- [ ] 다른 PC에서 앱 포트(`WR_APP_PORT`, 기본 3001)와 18443에 연결되지 않는다(3-3 표의 "app 포트 미노출"과 같은 방법).
+
+### 9-4. 평소 운영 (host 모드)
+
+- **업데이트**: 평소 절차 그대로(2-파일 `up -d`). env에 남은 `WR_CADDY_*` 값 때문에 Docker Caddy는 루프백에 머문다. 패키지 폴더를 바꾼 업데이트 뒤에는 새 폴더에서 `-Status -EnvFile $envFile`로 확인한다.
+- **앱 포트 변경**(`WR_APP_PORT`): env 수정 → `up -d` → `.\caddy-host\install-caddy-host.ps1 -Reconfigure -EnvFile $envFile`(새 포트로 설정 재생성·검증·재시작). 하지 않으면 `-Status`가 불일치를 보고하고 접속은 502가 된다.
+- **상태 확인**: `-Status -EnvFile $envFile`(일반 창 가능 — CA·로그 폴더 검사는 관리자 창에서만 나온다).
+- **로그**: `C:\ProgramData\wr-caddy\logs\caddy.log`·`access.log`(관리자만 읽기). URL의 쿼리 문자열(환자 검색어 등)은 기록하지 않는다. 100 MB마다 회전, 최대 10개·90일 보관.
+- **재부팅**: 서비스는 로그온과 상관없이 자동으로 시작한다. Docker가 아직 뜨지 않은 동안에는 502이고, Docker·앱이 뜨면 저절로 정상이 된다. 프로세스가 죽으면 Windows가 다시 시작한다.
+- **인증서 만료**(`NotTimeValid`, 서버를 오래 멈춘 뒤): 관리자 창에서 `Restart-Service wr-caddy`.
+- **CA 키 백업**: 연 1회 `-SourceDir`로도 받는다(7-1).
+
+### 9-5. 롤백 (Docker Caddy로 되돌리기, 약 2~3분)
+
+현재 패키지 폴더에서:
+
+```powershell
+.\caddy-host\install-caddy-host.ps1 -Rollback -EnvFile $envFile
+sc.exe qc wr-caddy        # → START_TYPE : 4 DISABLED
+```
+
+- 서비스를 멈추기 **전에** 되돌린 뒤의 구성(같은 CA 볼륨·도메인·앱 루프백)을 검사한다. 그다음 서비스 정지·Disabled → env의 `WR_CADDY_*` 두 줄만 전환 전 값으로(그 사이 바뀐 `WR_VERSION`·비밀번호·`WR_APP_PORT`는 그대로, 백업본을 통째로 되돌리지 않는다) → Docker Caddy만 재생성 → 8443을 같은 CA로 응답하는지 확인 → 방화벽 규칙 제거 순서다.
+- 롤백 뒤 재부팅해도 `wr-caddy`는 시작하지 않는다(Disabled). 다시 전환하려면 `-Cutover -EnvFile $envFile`.
+- 롤백이 중간에 실패했으면 원인을 고친 뒤 **같은 명령을 다시 실행**한다(이어서 진행한다).
+- **중단된 전환**(전환 중 창을 닫음 등): `-Status`가 "A switch-over … did not finish"를 문제로 보고한다. 이 상태에서는 `-Uninstall`·`-Reconfigure`·`-Cutover`가 거부되고, `-Rollback -EnvFile $envFile`이 Docker Caddy로 마무리한다.
+- **앱 롤백 규칙**:
+  - 앱 이미지만 되돌릴 때는 **현재 패키지의 compose**로 `WR_VERSION`만 이전 값으로 바꿔 `up -d`한다. host 모드가 그대로 유지된다.
+  - **이전 패키지 폴더의 compose로 되돌려야 하면 반드시 `-Rollback`을 먼저** 한다. 이전 compose(7.1.4 이하)에는 Caddy 게시 주소 변수가 없어 Docker Caddy가 8443을 다시 잡으려다 `wr-caddy`와 부딪친다.
+- 호스트 CA 사본이 없거나 손상돼 `-Rollback`이 멈추면 7-1 "호스트 Caddy 모드에서의 복구"의 수동 절차를 따른다.
+
+### 9-6. 제거
+
+```powershell
+.\caddy-host\install-caddy-host.ps1 -Rollback -EnvFile $envFile   # host 모드라면 먼저
+.\caddy-host\install-caddy-host.ps1 -Uninstall
+```
+
+`-Uninstall`은 시범·docker 모드에서만 동작한다(host 모드나 중단된 전환에서는 거부 — 8443이 비게 되므로). 서비스·방화벽 규칙·`bin`·`state` 파일을 지우고, **CA 사본(`data`)과 로그는 자동으로 지우지 않는다**(7절).
+
+### 9-7. 알려진 한계
+
+- NAT 장비나 강제 프록시(PAC)를 **거쳐** 들어온 연결은 그 장비의 IP로 남는다. Electron 설치본은 프록시를 쓰지 않고 직접 연결하므로 PC의 실제 IP가 남는다.
+- 서버를 재부팅한 뒤 Docker가 뜨기 전(로그온 전 자동 기동 설정이 없으면 로그온 전까지)에는 502다. 지금도 그 시간에는 접속이 되지 않으므로 증상만 달라진다.
+- 서버 PC에 로그인한 사용자는 앱의 루프백 포트로 `X-Forwarded-For`를 위조할 수 있다(LAN의 다른 PC에서는 그 포트에 닿지 않는다).
+- 리허설 PC에서는 같은 절차를 `verify-stack.ps1`의 검증 스택으로 미리 해 볼 수 있다(3-0-1, `accept`).

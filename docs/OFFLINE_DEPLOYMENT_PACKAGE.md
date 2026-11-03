@@ -44,7 +44,7 @@ wr-evaluation-unified-5.0.1-intranet/    ← 이 디렉터리가 compose 실행 
 ├── caddy/
 │   └── Caddyfile                        # HTTPS 리버스 프록시 설정
 │
-│  ── Windows 호스트 Caddy 서비스용 (Docker Caddy 대신 쓸 때 — 설치 절차는 해당 릴리스 문서) ──
+│  ── Windows 호스트 Caddy 서비스용 (Docker Caddy 대신 쓸 때 — 설치·전환·롤백 절차는 PRODUCTION_RELEASE_PLAN.md 9절) ──
 ├── caddy-host/
 │   ├── caddy.exe                        # Caddy 공식 Windows 바이너리 (서명 없음, SHA-512는 release-manifest.json의 caddyHost.exeSha512)
 │   ├── LICENSE                          # Caddy 라이선스 (Apache-2.0)
