@@ -463,6 +463,10 @@ if ($caddyPin) {
     }
     Write-Ok "caddy-host/caddy.exe ($($caddyPin.Version), SHA-512 재대조)"
     Write-Ok "caddy-host/LICENSE"
+    # 설치 스크립트는 패키지 레이아웃(caddy-host\caddy.exe + 패키지 루트의 release-manifest.json)을 기준으로 동작한다.
+    Copy-Required (Join-Path $RepoRoot "scripts\install-caddy-host.ps1") $caddyHostDest
+    Copy-Required (Join-Path $RepoRoot "caddy\Caddyfile.host.template") $caddyHostDest
+    Write-Ok "caddy-host/install-caddy-host.ps1, Caddyfile.host.template"
 }
 
 # ── Scripts ───────────────────────────────────────────────────────────────────
