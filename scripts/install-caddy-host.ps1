@@ -1807,18 +1807,21 @@ function Invoke-Uninstall {
 
 # ===========================================================================
 # One changing run at a time on this machine: the pre-checks of one run (e.g. -Uninstall waiting at a -Confirm
-# prompt) must not be overtaken by another window's -Cutover. Held until the process exits (Windows releases it
-# then; a run that died leaves it abandoned, which the next run may take). Needs elevation (Global\ namespace),
-# which every changing run requires anyway; -Status and -WhatIf runs do not take it.
+# prompt) must not be overtaken by another window's -Cutover. Released in the finally below: the script is usually
+# run inside an operator's console, where `exit` ends the script but not the process, so ownership would otherwise
+# stay with that console (`exit` inside the functions still runs the finally - checked on 5.1 and 7). A run that
+# died leaves it abandoned, which the next run may take. Needs elevation (Global\ namespace), which every changing
+# run requires anyway; -Status and -WhatIf runs do not take it.
 $RunLock = $null
+$RunLockOwned = $false
 if ($PSCmdlet.ParameterSetName -ne 'Status' -and -not $WhatIfPreference -and (Test-Admin)) {
     $RunLock = New-Object System.Threading.Mutex ($false, 'Global\wr-evaluation-caddy-host')
-    $owned = $false
     # PowerShell wraps the AbandonedMutexException in a MethodInvocationException (a typed catch would miss it).
-    try { $owned = $RunLock.WaitOne(0) } catch {
-        if ($_.Exception -is [System.Threading.AbandonedMutexException] -or $_.Exception.InnerException -is [System.Threading.AbandonedMutexException]) { $owned = $true } else { throw }
+    try { $RunLockOwned = $RunLock.WaitOne(0) } catch {
+        if ($_.Exception -is [System.Threading.AbandonedMutexException] -or $_.Exception.InnerException -is [System.Threading.AbandonedMutexException]) { $RunLockOwned = $true } else { throw }
     }
-    if (-not $owned) {
+    if (-not $RunLockOwned) {
+        $RunLock.Dispose()
         Write-Fail 'Another install-caddy-host.ps1 run that changes things is in progress on this machine. Wait for it to finish, then run again.'
         Write-Host '   Nothing was changed.' -ForegroundColor White
         exit 1
@@ -1826,16 +1829,21 @@ if ($PSCmdlet.ParameterSetName -ne 'Status' -and -not $WhatIfPreference -and (Te
 }
 
 try {
-    switch ($PSCmdlet.ParameterSetName) {
-        'Install'     { Invoke-Install }
-        'Uninstall'   { Invoke-Uninstall }
-        'Cutover'     { Invoke-Cutover }
-        'Rollback'    { Invoke-Rollback }
-        'Reconfigure' { Invoke-Reconfigure }
-        default       { Invoke-Status }
+    try {
+        switch ($PSCmdlet.ParameterSetName) {
+            'Install'     { Invoke-Install }
+            'Uninstall'   { Invoke-Uninstall }
+            'Cutover'     { Invoke-Cutover }
+            'Rollback'    { Invoke-Rollback }
+            'Reconfigure' { Invoke-Reconfigure }
+            default       { Invoke-Status }
+        }
+    } catch {
+        Write-Fail $_.Exception.Message
+        Write-Host '   Nothing was changed by the failing step.' -ForegroundColor White
+        exit 1
     }
-} catch {
-    Write-Fail $_.Exception.Message
-    Write-Host '   Nothing was changed by the failing step.' -ForegroundColor White
-    exit 1
+} finally {
+    if ($RunLockOwned) { $RunLock.ReleaseMutex() }
+    if ($RunLock) { $RunLock.Dispose() }
 }

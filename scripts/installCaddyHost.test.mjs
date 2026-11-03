@@ -544,7 +544,10 @@ describe('install-caddy-host.ps1 -Cutover / -Rollback / -Reconfigure (PR-3b)', (
     const lock = indexIn(SCRIPT, "$RunLock = New-Object System.Threading.Mutex ($false, 'Global\\wr-evaluation-caddy-host')");
     expect(lock).toBeLessThan(indexIn(SCRIPT, "        'Uninstall'   { Invoke-Uninstall }"));
     expect(SCRIPT).toContain("if ($PSCmdlet.ParameterSetName -ne 'Status' -and -not $WhatIfPreference -and (Test-Admin)) {");
-    expect(SCRIPT).toMatch(/if \(-not \$owned\) \{[\s\S]{0,300}?exit 1/);
+    expect(SCRIPT).toMatch(/if \(-not \$RunLockOwned\) \{\s*\$RunLock\.Dispose\(\)[\s\S]{0,300}?exit 1/);
+    // 운영자 콘솔에서 실행하면 exit는 스크립트만 끝내고 프로세스는 남는다 — finally에서 해제(PR 리뷰 4회차, 5.1·7 재현).
+    expect(SCRIPT).toMatch(/\} finally \{\s*if \(\$RunLockOwned\) \{ \$RunLock\.ReleaseMutex\(\) \}\s*if \(\$RunLock\) \{ \$RunLock\.Dispose\(\) \}\s*\}\s*$/);
+    expect(indexIn(SCRIPT, "$RunLockOwned = $false")).toBeLessThan(indexIn(SCRIPT, "            'Cutover'     { Invoke-Cutover }"));
     // 5.1·7 모두 AbandonedMutexException을 MethodInvocationException으로 감싼다(실측) — 타입 지정 catch로는 못 잡는다.
     expect(SCRIPT).toContain('$_.Exception.InnerException -is [System.Threading.AbandonedMutexException]');
     expect(CODE).not.toMatch(/catch \[System\.Threading\.AbandonedMutexException\]/);
