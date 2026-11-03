@@ -18,6 +18,10 @@
       신뢰 등록돼 있으면 별도 설치 없이 설치본이 접속된다(up 이 지문을 비교해 알려 준다). 새 CA 를 쓰려면 -FreshCa.
     - 서비스는 패키지의 기본 서비스 전부(postgres·backup-monitor·partition·app·caddy)다. backup 프로필(GPG 필요)은 띄우지
       않는다. restart 정책은 no — PC 를 재부팅해도 저절로 8443 을 잡지 않는다.
+    - 호스트 Caddy(릴리스 B): 관리자 창에서 install-caddy-host.ps1 -Install → -Cutover(-ProjectName wr-verify)로 이 스택을
+      host 모드로 바꾸면 8443/8080 은 Windows 서비스 wr-caddy(caddy.exe)가, Docker Caddy 는 127.0.0.1:18443/18080 이 쓴다.
+      이 스크립트는 그 상태를 알아보고(설치 기록·서비스·환경 파일의 WR_CADDY_*_BIND) 그대로 점검·기동한다. 설치·전환·롤백은
+      하지 않는다(관리자 작업은 install-caddy-host.ps1 의 몫). 세 가지가 서로 맞지 않으면 무엇이 다른지 보여 주고 멈춘다.
 
 .PARAMETER Action
     up         스택을 켠다(이미지 확인 → 환경 파일 → 포트 점검 → compose up → 헬스 대기 → 감사 계정 비밀번호 동기화).
@@ -25,6 +29,9 @@
     status     컨테이너, 주소별 응답, CA 신뢰 여부를 보여 준다. 스택이 꺼져 있어도 실행된다.
     purge      down + wr-verify_* 볼륨 삭제(DB 초기화). 공유 Caddy CA 볼륨은 external 이라 지워지지 않는다.
     seed-admin 첫 관리자 계정 생성(대화형: 기관·로그인 ID·비밀번호 입력). up 뒤 최초 1회.
+    accept     호스트 Caddy 수용 시험(host 모드에서만). 루프백(127.0.0.1)과 이 PC 의 LAN 주소 두 출발지에서 잘못된 로그인을
+               보내 ① 감사 로그 IP 가 출발지 그대로 서로 다르게 남는지 ② 로그인 제한(분당 5회)이 출발지별 버킷인지
+               ③ 8 KiB 헤더가 통과하는지 확인한다. LAN 주소는 화면에만 출력하고 파일에 쓰지 않는다.
 
 .PARAMETER PackageDir
     패키지 폴더. 생략하면 release\wr-evaluation-unified-<package.json 버전>-intranet.
@@ -47,11 +54,12 @@
     pwsh -File scripts/verify-stack.ps1 status
     pwsh -File scripts/verify-stack.ps1 down
     pwsh -File scripts/verify-stack.ps1 purge -Force
+    pwsh -File scripts/verify-stack.ps1 accept
 #>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('up', 'down', 'status', 'purge', 'seed-admin')]
+    [ValidateSet('up', 'down', 'status', 'purge', 'seed-admin', 'accept')]
     [string]$Action = 'status',
     [string]$PackageDir = '',
     [switch]$LoadImages,
@@ -70,7 +78,14 @@ $Domain        = 'wr.hospital.local'
 $HttpsPort     = 8443
 $HttpPort      = 8080
 $AppPort       = 13001   # 앱 루프백 게시(127.0.0.1:<번호>) — 이 PC의 Tier-3 개발 서버가 3001 을 쓰므로 비켜 둔다
-$ShellOverrideKeys = @('WR_APP_PORT', 'WR_CADDY_HTTPS_BIND', 'WR_CADDY_HTTP_BIND')
+$ShellOverrideKeys = @('WR_APP_PORT', 'WR_CADDY_HTTPS_BIND', 'WR_CADDY_HTTP_BIND', 'WR_DOMAIN')
+# 호스트 Caddy(install-caddy-host.ps1)가 남기는 기록과 host 모드의 Docker Caddy 게시 주소 — 읽기만 한다.
+$HostCaddyRoot  = 'C:\ProgramData\wr-caddy'
+$HostStateFile  = Join-Path $HostCaddyRoot 'state\install.json'
+$HostJournal    = Join-Path $HostCaddyRoot 'state\host-mode.json'
+$HostCaddyExe   = Join-Path $HostCaddyRoot 'bin\caddy.exe'
+$HostHttpsBind  = '127.0.0.1:18443'
+$HostHttpBind   = '127.0.0.1:18080'
 $CaVolumeName  = 'wr-evaluation-unified_caddy_data'   # 예전 스택이 만든 Caddy 데이터(내부 CA) 볼륨 — 재사용(external)
 $BaseUrl       = "https://${Domain}:${HttpsPort}"
 
@@ -257,23 +272,103 @@ function Get-PortOwners {
     return @($owners)
 }
 
-function Assert-PortsFree {
-    $owners = @(Get-PortOwners)
-    foreach ($port in $HttpsPort, $HttpPort, (Get-AppPort)) {
-        $here = @($owners | Where-Object { $_.HostPort -eq $port })
-        $others = @($here | Where-Object { $_.Project -ne $ProjectName })
-        if ($others.Count -gt 0) {
-            Stop-WithError ":$port 를 다른 컨테이너가 쓰고 있습니다: $(($others | ForEach-Object Name | Sort-Object -Unique) -join ', ')`n   이 스크립트는 wr-verify 프로젝트 외의 컨테이너를 건드리지 않습니다. 직접 정리한 뒤 다시 실행하세요."
-        }
-        # 이 프로젝트 컨테이너가 쥔 포트는 통과(재실행). 아무 컨테이너도 안 쥐었는데 리스너가 있으면 다른 프로세스다.
-        if ($here.Count -eq 0) {
-            $listen = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($listen) {
-                $p = Get-Process -Id $listen.OwningProcess -ErrorAction SilentlyContinue
-                Stop-WithError ":$port 를 프로세스가 쓰고 있습니다: $(if ($p) { "$($p.ProcessName) (pid $($p.Id))" } else { "pid $($listen.OwningProcess)" })"
+# 호스트 Caddy 상태(읽기 전용). Host = 이 스택(wr-verify)이 host 모드로 맞게 전환돼 있음. Problems = 세 출처가 어긋난 내용.
+#   ① 설치 기록 state\install.json(mode·project) + 전환 기록 host-mode.json(정상 host 모드에서는 'applied'가 정상 —
+#      install-caddy-host 는 전환이 끝난 뒤에도 기록을 열어 두고 -Status 도 그 값을 요구한다)
+#   ② Windows 서비스 wr-caddy(우리 caddy.exe 인지, 실행 중인지)  ③ 시험 환경 파일의 WR_CADDY_HTTPS_BIND / WR_CADDY_HTTP_BIND
+function Get-HostCaddyMode {
+    $problems = @()
+    $state = $null
+    $journal = $null
+    if (Test-Path $HostStateFile) { try { $state = Get-Content $HostStateFile -Raw | ConvertFrom-Json } catch { $problems += "$HostStateFile 을 읽지 못했습니다." } }
+    if (Test-Path $HostJournal) { try { $journal = Get-Content $HostJournal -Raw | ConvertFrom-Json } catch { $problems += "$HostJournal 을 읽지 못했습니다." } }
+    $svc = Get-CimInstance Win32_Service -Filter "Name='wr-caddy'" -ErrorAction SilentlyContinue
+    $svcOurs = [bool]($svc -and $svc.PathName -like "$HostCaddyExe *")
+    $svcPid = if ($svcOurs -and $svc.State -eq 'Running') { [int]$svc.ProcessId } else { 0 }
+    $mode = if ($state) { [string]$state.mode } else { '' }
+    $project = if ($state) { [string]$state.project } else { '' }
+    $mine = ($project -eq $ProjectName)
+    $journalApplied = [bool]($journal -and [string]$journal.status -eq 'applied')
+    $envHttps = if (Test-Path $EnvFile) { Get-EnvValue 'WR_CADDY_HTTPS_BIND' } else { $null }
+    $envHttp = if (Test-Path $EnvFile) { Get-EnvValue 'WR_CADDY_HTTP_BIND' } else { $null }
+    $envHost = ($envHttps -eq $HostHttpsBind -and $envHttp -eq $HostHttpBind)
+    $envAnyHost = ($envHttps -eq $HostHttpsBind -or $envHttp -eq $HostHttpBind)
+    $isHost = $false
+    if ($mine -and $mode -eq 'host') {
+        if (-not $envHost) { $problems += "설치 기록은 host 모드인데 환경 파일의 WR_CADDY_HTTPS_BIND / WR_CADDY_HTTP_BIND 가 $HostHttpsBind / $HostHttpBind 이 아닙니다." }
+        if (-not $journalApplied) { $problems += "설치 기록은 host 모드인데 $HostJournal 이 'applied' 가 아닙니다." }
+        if ($svcPid -eq 0) { $problems += 'host 모드인데 wr-caddy 서비스(우리 caddy.exe)가 실행 중이 아닙니다.' }
+        $isHost = ($problems.Count -eq 0)
+    } else {
+        if ($envAnyHost) { $problems += "환경 파일에 host 모드 값($HostHttpsBind / $HostHttpBind)이 있는데 설치 기록은 mode='$mode', project='$project' 입니다." }
+        if ($mine -and $journalApplied) { $problems += "전환이 중간에 끝났습니다($HostJournal 'applied', mode='$mode')." }
+    }
+    return [pscustomobject]@{ Host = $isHost; Problems = $problems; Mode = $mode; Project = $project; ServicePid = $svcPid; ServiceInstalled = [bool]$svc }
+}
+
+function Stop-OnHostCaddyProblems($Hc) {
+    if ($Hc.Problems.Count -eq 0) { return }
+    $Hc.Problems | ForEach-Object { Write-Fail $_ }
+    Stop-WithError '호스트 Caddy 상태가 서로 맞지 않습니다. 관리자 창에서 install-caddy-host.ps1 -Status -ProjectName wr-verify -EnvFile <이 환경 파일> 로 확인하고, 필요하면 -Rollback 하세요.'
+}
+
+function Get-Listener([int]$Port) {
+    $l = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $l) { return $null }
+    $p = Get-Process -Id $l.OwningProcess -ErrorAction SilentlyContinue
+    return [pscustomobject]@{ Pid = [int]$l.OwningProcess; Name = $(if ($p) { $p.ProcessName } else { "pid $($l.OwningProcess)" }) }
+}
+
+# 이 프로젝트 컨테이너가 쥔 포트는 통과(재실행). 다른 컨테이너·프로세스가 쥐었으면 멈춘다.
+function Assert-PortForThisStack([int]$Port, [object[]]$Owners) {
+    $here = @($Owners | Where-Object { $_.HostPort -eq $Port })
+    $others = @($here | Where-Object { $_.Project -ne $ProjectName })
+    if ($others.Count -gt 0) {
+        Stop-WithError ":$Port 를 다른 컨테이너가 쓰고 있습니다: $(($others | ForEach-Object Name | Sort-Object -Unique) -join ', ')`n   이 스크립트는 wr-verify 프로젝트 외의 컨테이너를 건드리지 않습니다. 직접 정리한 뒤 다시 실행하세요."
+    }
+    if ($here.Count -eq 0) {
+        $l = Get-Listener $Port
+        if ($l) {
+            $svc = Get-CimInstance Win32_Service -Filter "Name='wr-caddy'" -ErrorAction SilentlyContinue
+            if ($svc -and [int]$svc.ProcessId -eq $l.Pid) {
+                $who = if (Test-Path $HostStateFile) { $s = Get-Content $HostStateFile -Raw | ConvertFrom-Json; "프로젝트 '$($s.project)', mode '$($s.mode)'" } else { '설치 기록 없음' }
+                Stop-WithError ":$Port 를 호스트 Caddy 서비스 wr-caddy($who)가 쓰고 있습니다. 이 스택은 host 모드가 아닙니다 — 관리자 창에서 install-caddy-host.ps1 -Rollback 으로 되돌리거나, 이 스택을 host 모드로 전환하세요."
             }
+            Stop-WithError ":$Port 를 프로세스가 쓰고 있습니다: $($l.Name) (pid $($l.Pid))"
         }
     }
+}
+
+function Assert-PortsFree($Hc) {
+    $owners = @(Get-PortOwners)
+    if ($Hc.Host) {
+        # host 모드: 8443/8080 은 wr-caddy 프로세스 하나만, 어떤 컨테이너도 게시하지 않는다. Docker Caddy 는 루프백 대체 포트에.
+        foreach ($port in $HttpsPort, $HttpPort) {
+            $pub = @($owners | Where-Object { $_.HostPort -eq $port })
+            if ($pub.Count -gt 0) { Stop-WithError "host 모드인데 컨테이너가 :$port 를 게시합니다: $(($pub | ForEach-Object Name | Sort-Object -Unique) -join ', ')" }
+            $l = Get-Listener $port
+            if (-not $l -or $l.Pid -ne $Hc.ServicePid) { Stop-WithError "host 모드인데 :$port 를 wr-caddy 가 아닌 $(if ($l) { "$($l.Name) (pid $($l.Pid))" } else { '아무도' }) 쓰고 있습니다." }
+        }
+        foreach ($bind in $HostHttpsBind, $HostHttpBind) { Assert-PortForThisStack ([int]($bind -split ':')[-1]) $owners }
+    } else {
+        foreach ($port in $HttpsPort, $HttpPort) { Assert-PortForThisStack $port $owners }
+    }
+    Assert-PortForThisStack (Get-AppPort) $owners
+}
+
+# 해석된 compose 설정의 caddy 게시: host 모드면 127.0.0.1:18443/18080, docker 모드면 8443/8080.
+function Assert-CaddyPublish($Hc) {
+    $json = (Invoke-Compose @('config', '--format', 'json')) -join "`n"
+    if ($LASTEXITCODE -ne 0) { Stop-WithError 'docker compose config --format json 실패' }
+    $caddy = ($json | ConvertFrom-Json).services.caddy
+    $ports = @(if ($caddy.PSObject.Properties['ports']) { $caddy.ports })
+    $have = @(@($ports | Where-Object { $null -ne $_ } | ForEach-Object {
+        $ip = if ($_.PSObject.Properties['host_ip']) { $_.host_ip } else { '' }
+        "$ip|$($_.published)|$($_.target)"
+    }) | Sort-Object)
+    $want = if ($Hc.Host) { @("127.0.0.1|18080|80", "127.0.0.1|18443|443") } else { @("|${HttpPort}|80", "|${HttpsPort}|443") }
+    if (($have -join ',') -ne (($want | Sort-Object) -join ',')) { Stop-WithError "caddy 게시가 예상과 다릅니다: $($have -join ', ') (예상: $($want -join ', '))" }
+    return $have
 }
 
 # 셸 환경변수는 --env-file 보다 우선한다 — 남아 있으면 시험 구성이 환경 파일과 달라진다.
@@ -340,13 +435,18 @@ function Invoke-Probe([string]$Path) {
 # HTTPS 가 열릴 때까지 기다린다. 재사용한 CA 볼륨의 leaf 인증서(수명 6일)가 만료돼 있으면 Caddy 는 시작할 때 그 파일을 지우고
 # 갱신을 시도하다가 방금 지운 키 파일을 읽지 못해 재시도만 반복한다(검증에서 확인: 60초→120초→… 스스로 복구되지 않음).
 # 파일이 지워진 뒤 Caddy 를 한 번 다시 시작하면 새로 발급받으므로, NotTimeValid 가 보이면 한 번만 재시작한다.
-function Wait-Https([int]$TimeoutSec = 120) {
+# host 모드에서는 8443 이 호스트 Caddy(caddy.exe)라 Docker caddy 재시작은 소용없다 — 안내만 한다.
+function Wait-Https([int]$TimeoutSec = 120, [bool]$HostMode = $false) {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $restarted = $false
     while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
         $p = Invoke-Probe '/health'
         if ($p.Code -eq 200) { return $true }
-        if (-not $restarted -and $p.Error -match 'NotTimeValid') {
+        if ($HostMode -and $p.Error -match 'NotTimeValid') {
+            Write-Warn '호스트 Caddy(wr-caddy)의 인증서가 유효하지 않습니다. 관리자 창에서 Restart-Service wr-caddy 후 install-caddy-host.ps1 -Status 로 확인하세요.'
+            return $false
+        }
+        if (-not $HostMode -and -not $restarted -and $p.Error -match 'NotTimeValid') {
             Write-Warn '재사용한 Caddy 볼륨의 인증서가 만료돼 있습니다 — Caddy 를 한 번 다시 시작해 새로 발급받습니다.'
             Invoke-Compose @('restart', 'caddy') | Out-Null
             $restarted = $true
@@ -422,10 +522,16 @@ function Invoke-Up {
     Write-Ok 'compose 설정 유효 (운영 오버레이 + 시험 override)'
     $appPublished = Assert-AppLoopbackOnly
     if ($appPublished -gt 0) { Write-Ok "app 게시: 127.0.0.1:$(Get-AppPort) 만 (LAN 에서는 닿지 않음)" } else { Write-Ok 'app 게시 없음 (루프백 게시 이전 패키지)' }
+    $hc = Get-HostCaddyMode
+    Stop-OnHostCaddyProblems $hc
+    $caddyPub = Assert-CaddyPublish $hc
+    if ($hc.Host) { Write-Ok "Caddy 모드: host — 8443/8080 = 호스트 서비스 wr-caddy, Docker Caddy 게시 $(($caddyPub | ForEach-Object { $p = $_ -split '\|'; "$($p[0]):$($p[1])->$($p[2])" }) -join ', ')" }
+    else { Write-Ok "Caddy 모드: docker — Docker Caddy 가 :$HttpsPort / :$HttpPort" }
 
     Write-Step '4/7 포트 · 호스트 · CA'
-    Assert-PortsFree
-    Write-Ok ":$HttpsPort / :$HttpPort / :$(Get-AppPort) 사용 가능"
+    Assert-PortsFree $hc
+    if ($hc.Host) { Write-Ok ":$HttpsPort / :$HttpPort = wr-caddy (pid $($hc.ServicePid)), :18443 / :18080 / :$(Get-AppPort) 사용 가능" }
+    else { Write-Ok ":$HttpsPort / :$HttpPort / :$(Get-AppPort) 사용 가능" }
     Test-HostResolves
     Show-CaTrust
 
@@ -450,7 +556,7 @@ function Invoke-Up {
     if ($LASTEXITCODE -ne 0) { Write-Warn 'ALTER ROLE 실패 — 감사 로그 조회(관리자 콘솔)가 오류일 수 있음' } else { Write-Ok 'wr_audit_reader 비밀번호 동기화' }
 
     Write-Step '7/7 접속 확인'
-    [void](Wait-Https 120)
+    [void](Wait-Https 120 $hc.Host)
     $reachable = Show-Endpoints
     if ($FreshCa) { Export-FreshRoot }
 
@@ -460,6 +566,7 @@ function Invoke-Up {
         Write-Host "  접속:        $BaseUrl   (설치본의 기본 주소 — WR_INTRANET_URL 설정 불필요)"
         Write-Host '  첫 관리자:   pwsh -File scripts/verify-stack.ps1 seed-admin   (최초 1회)'
         Write-Host '  상태/종료:   ... status / down / purge -Force'
+        if ($hc.Host) { Write-Host '  수용 시험:   pwsh -File scripts/verify-stack.ps1 accept   (호스트 Caddy: 실제 IP·로그인 제한 버킷·헤더 크기)' }
     } else {
         Write-Warn '컨테이너는 떴지만 HTTPS 접속 확인에 실패했습니다. 위 메시지를 확인하세요.'
     }
@@ -492,6 +599,16 @@ function Invoke-Down {
     Invoke-Compose @('down', '--remove-orphans')
     if ($LASTEXITCODE -ne 0) { Stop-WithError 'docker compose down 실패' }
     Write-Ok '내렸습니다. DB 등 wr-verify_* 볼륨은 남아 있습니다(초기화는 purge).'
+    Write-HostModeNotice
+}
+
+# host 모드에서 스택을 내리면 wr-caddy 는 계속 8443 을 쥐고 502 를 낸다 — 멈추지 않고 알려만 준다.
+function Write-HostModeNotice {
+    $hc = Get-HostCaddyMode
+    if ($hc.Host -or ($hc.Project -eq $ProjectName -and $hc.Mode -eq 'host')) {
+        Write-Warn '이 스택은 호스트 Caddy(host 모드)입니다. wr-caddy 는 계속 8443/8080 을 쥐고, 스택이 꺼진 동안 502 를 냅니다.'
+        Write-Host '   Docker Caddy 로 되돌리려면 관리자 창에서: install-caddy-host.ps1 -Rollback -ProjectName wr-verify -EnvFile <이 환경 파일> -ComposeDir <패키지> -ExtraComposeFile <override>'
+    }
 }
 
 function Invoke-Purge {
@@ -512,6 +629,7 @@ function Invoke-Purge {
     if ($left.Count -gt 0) { Write-Warn "남은 볼륨: $($left -join ', ')" } else { Write-Ok "wr-verify_* 볼륨 없음" }
     $caKept = @(docker volume ls --format '{{.Name}}' | Where-Object { $_ -eq $CaVolumeName }).Count -gt 0
     if ($caKept) { Write-Ok "공유 Caddy CA 볼륨 보존: $CaVolumeName" } elseif (-not $FreshCa) { Write-Warn "공유 Caddy CA 볼륨이 없습니다: $CaVolumeName" }
+    Write-HostModeNotice
 }
 
 function Invoke-Status {
@@ -522,6 +640,10 @@ function Invoke-Status {
     $vols = @(docker volume ls --format '{{.Name}}' | Where-Object { $_ -like "${ProjectName}_*" })
     Write-Host "   볼륨: $(if ($vols.Count) { $vols -join ', ' } else { '없음' })"
     Write-Host "   환경 파일: $(if (Test-Path $EnvFile) { $EnvFile } else { '없음(아직 up 하지 않음)' })"
+    $hc = Get-HostCaddyMode
+    if ($hc.Host) { Write-Ok "Caddy 모드: host — 8443/8080 = 호스트 서비스 wr-caddy (pid $($hc.ServicePid)), Docker Caddy 는 $HostHttpsBind / $HostHttpBind" }
+    elseif ($hc.Problems.Count -gt 0) { $hc.Problems | ForEach-Object { Write-Warn $_ } }
+    else { Write-Host "   Caddy 모드: docker$(if ($hc.ServiceInstalled) { " (wr-caddy 서비스는 있음: 프로젝트 '$($hc.Project)', mode '$($hc.Mode)')" })" }
     Write-Step 'CA 신뢰'
     Show-CaTrust
     Write-Step "주소 응답 ($BaseUrl)"
@@ -540,10 +662,96 @@ function Invoke-SeedAdmin {
     if ($LASTEXITCODE -ne 0) { Stop-WithError 'seedAdmin 실패(이미 있는 로그인 ID 이거나 스택이 꺼져 있을 수 있음)' }
 }
 
+# ── 수용 시험 (호스트 Caddy) ──────────────────────────────────────────────────
+# 기본 게이트웨이가 있는 어댑터의 IPv4 — 이 주소로 접속하면 출발지도 이 주소가 된다.
+function Get-LanIPv4 {
+    $cfg = Get-NetIPConfiguration -ErrorAction SilentlyContinue | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1
+    if (-not $cfg) { return $null }
+    return [string]($cfg.IPv4Address | Select-Object -First 1).IPAddress
+}
+
+# 잘못된 로그인 1회. 본문은 파일로 넘긴다(인자 속 JSON 따옴표 문제 회피). 출발지 = --resolve 로 정한 주소.
+function Send-BadLogin([string]$Source, [string]$Agent, [int]$Port = $HttpsPort) {
+    return (curl.exe -sk --max-time 10 --resolve "${Domain}:${Port}:$Source" -A $Agent -H 'Content-Type: application/json' `
+        --data-binary "@$script:AcceptBody" "https://${Domain}:${Port}/api/auth/login" -o NUL -w '%{http_code}')
+}
+
+function Send-PaddedHeader([int]$KiB, [int]$Port) {
+    [System.IO.File]::WriteAllText($script:AcceptHeader, "X-Accept-Pad: $('a' * ($KiB * 1024))`r`n")
+    return (curl.exe -sk --max-time 10 --resolve "${Domain}:${Port}:127.0.0.1" -H "@$script:AcceptHeader" "https://${Domain}:${Port}/api/config/public" -o NUL -w '%{http_code}')
+}
+
+function Invoke-Accept {
+    Assert-Docker
+    if (-not (Test-Path $EnvFile)) { Stop-WithError '먼저 up 으로 스택을 켜세요.' }
+    Assert-NoShellOverride
+    $pkg = Resolve-PackageDir
+    Write-OverrideFile
+    $script:ComposeBase = Get-ComposeBase $pkg
+    $hc = Get-HostCaddyMode
+    Stop-OnHostCaddyProblems $hc
+    if (-not $hc.Host) { Stop-WithError '이 스택은 host 모드가 아닙니다. 관리자 창에서 install-caddy-host.ps1 -Install … -ProjectName wr-verify 뒤 -Cutover 로 전환한 다음 실행하세요.' }
+    if (@(Get-OwnContainers).Count -eq 0) { Stop-WithError '스택이 꺼져 있습니다. 먼저 up 하세요.' }
+    $lan = Get-LanIPv4
+    if (-not $lan) { Stop-WithError '기본 게이트웨이가 있는 IPv4 어댑터를 찾지 못했습니다(LAN 출발지가 필요합니다).' }
+    Write-Ok "출발지: 루프백 127.0.0.1, LAN $lan (이 주소는 화면에만 출력하고 파일에 쓰지 않습니다)"
+    $script:AcceptBody = Join-Path $WorkDir 'accept-login.json'
+    $script:AcceptHeader = Join-Path $WorkDir 'accept-header.txt'
+    Write-Utf8NoBom $script:AcceptBody '{"loginId":"verify-accept-no-such-user","password":"wrong-password"}'
+    $tag = 'wr-accept-' + (Get-Date -Format 'yyyyMMddHHmmss')
+    $results = [ordered]@{}
+    try {
+        Write-Step '1/3 감사 로그 IP 가 출발지 그대로, 서로 다르게 남는가'
+        $codes = @{ loopback = (Send-BadLogin '127.0.0.1' "$tag-loopback"); lan = (Send-BadLogin $lan "$tag-lan") }
+        if ($codes.Values -contains '429') {
+            Write-Warn '로그인 제한(분당 5회)의 이전 창이 남아 있습니다 — 61초 기다린 뒤 한 번 다시 보냅니다.'
+            Start-Sleep -Seconds 61
+            $codes = @{ loopback = (Send-BadLogin '127.0.0.1' "$tag-loopback"); lan = (Send-BadLogin $lan "$tag-lan") }
+        }
+        $dockerCode = Send-BadLogin '127.0.0.1' "$tag-docker" 18443
+        Write-Host "   응답: 루프백 $($codes.loopback), LAN $($codes.lan), Docker 경로(18443) $dockerCode"
+        Start-Sleep -Seconds 2
+        $rows = @(Invoke-Compose @('exec', '-T', 'postgres', 'psql', '-U', 'wr_user', '-d', 'wr_evaluation', '-At', '-c',
+            "SELECT user_agent || '|' || coalesce(host(ip),'') FROM audit_logs WHERE user_agent LIKE '$tag-%'"))
+        $ip = @{}
+        foreach ($r in $rows) { $parts = "$r" -split '\|', 2; if ($parts.Count -eq 2) { $ip[$parts[0].Substring($tag.Length + 1)] = $parts[1] } }
+        Write-Host "   기록: 루프백 → $($ip['loopback']), LAN → $($ip['lan']), Docker 경로 → $($ip['docker']) (참고: Docker Desktop 경유라 가려짐)"
+        $results['출발지별 IP'] = ($ip['loopback'] -eq '127.0.0.1' -and $ip['lan'] -eq $lan -and $ip['loopback'] -ne $ip['lan'])
+
+        Write-Step '2/3 로그인 제한(분당 5회)이 출발지별 버킷인가'
+        $hit = $false
+        for ($i = 1; $i -le 7; $i++) {
+            $c = Send-BadLogin '127.0.0.1' "$tag-rl$i"
+            if ($c -eq '429') { $hit = $true; Write-Host "   루프백 $i 번째 요청에서 429"; break }
+        }
+        $lanAfter = Send-BadLogin $lan "$tag-rl-lan"
+        Write-Host "   루프백 버킷이 찬 직후 LAN: $lanAfter"
+        $results['로그인 제한 버킷 분리'] = ($hit -and $lanAfter -eq '401')
+
+        Write-Step '3/3 헤더 크기 (Caddy 2.11.6 부터 요청 헤더 상한)'
+        $results['8 KiB 헤더 통과'] = ((Send-PaddedHeader 8 $HttpsPort) -eq '200')
+        foreach ($k in 12, 16, 20, 32) {
+            Write-Host ("   참고 {0,2} KiB: 호스트 Caddy(8443) {1} / Docker Caddy(18443) {2}" -f $k, (Send-PaddedHeader $k $HttpsPort), (Send-PaddedHeader $k 18443))
+        }
+        Write-Host '   (앱 자체도 Node 기본 상한 16 KiB 에서 431 을 낸다 — 호스트 Caddy 의 상한은 그보다 넉넉하다)'
+    } finally {
+        foreach ($f in $script:AcceptBody, $script:AcceptHeader) { if (Test-Path $f) { Remove-Item $f -Force } }
+    }
+
+    Write-Host ''
+    $failed = 0
+    foreach ($k in $results.Keys) {
+        if ($results[$k]) { Write-Ok "PASS $k" } else { Write-Fail "FAIL $k"; $failed++ }
+    }
+    if ($failed -gt 0) { exit 1 }
+    Write-Host '수용 시험 통과' -ForegroundColor Green
+}
+
 switch ($Action) {
     'up'         { Invoke-Up }
     'down'       { Invoke-Down }
     'status'     { Invoke-Status }
     'purge'      { Invoke-Purge }
     'seed-admin' { Invoke-SeedAdmin }
+    'accept'     { Invoke-Accept }
 }

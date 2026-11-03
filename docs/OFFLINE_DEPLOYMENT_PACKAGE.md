@@ -60,7 +60,7 @@ wr-evaluation-unified-5.0.1-intranet/    ← 이 디렉터리가 compose 실행 
 │   ├── import-images.ps1                # Windows: Docker 이미지 로드
 │   ├── import-images.sh                 # Linux: Docker 이미지 로드
 │   ├── install-prod.ps1                 # Windows: 설치 자동화 스크립트
-│   ├── backup-caddy-ca.ps1              # Windows: Caddy 내부 CA 키 백업 (PRODUCTION_RELEASE_PLAN.md 7-1)
+│   ├── backup-caddy-ca.ps1              # Windows: Caddy 내부 CA 키 백업 (PRODUCTION_RELEASE_PLAN.md 7-1). 호스트 Caddy 서비스의 사본은 -SourceDir (관리자)
 │   ├── check-app-publish.ps1            # Windows: 앱 루프백 게시 사전 점검 (설치·업데이트 전, 읽기 전용)
 │   ├── export-backup-snapshot.ps1       # Windows: 백업 반출 스냅샷 (BACKUP_EXPORT_OPS.md)
 │   └── register-backup-export-task.ps1  # Windows: 반출 작업 스케줄러 등록 (고정 폴더 등록 권장, BACKUP_EXPORT_OPS.md 3-5)
