@@ -1,8 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
-
-// html2pdf.js UMD는 브라우저 전역 `self`를 참조하므로 모듈 index.js(→ exportHandlers) import 시 node 환경에서
-// ReferenceError가 난다. PDF 생성은 이 테스트와 무관하므로 모킹한다(batchImportConfig.test.js와 동일).
-vi.mock('html2pdf.js', () => ({ default: () => ({}) }));
+import { describe, expect, it } from 'vitest';
 
 import '../../../modules/knee';
 import '../../../modules/shoulder';

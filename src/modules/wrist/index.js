@@ -2,7 +2,6 @@ import { registerModule } from '../../core/moduleRegistry';
 import { WristEvaluation } from './WristEvaluation';
 import { createWristModuleData, createWristJobEvaluation, createWristDiagnosisEntry } from './utils/data';
 import { computeWristCalc, isWristAssessmentComplete } from './utils/calculations';
-import { wristExportHandlers } from './utils/exportHandlers';
 import { ensureModule, splitList, parseDate } from '../../core/utils/batchImportHelpers';
 
 const PRESET_COMMON_FIELDS = [
@@ -22,7 +21,6 @@ registerModule({
   createModuleData: createWristModuleData,
   computeCalc: computeWristCalc,
   isComplete: isWristAssessmentComplete,
-  exportHandlers: wristExportHandlers,
   tabs: [
     { id: 'burden', label: '신체부담 평가' },
   ],

@@ -14,7 +14,7 @@ export function noStoreMiddleware(): RequestHandler {
 
 // Content-Security-Policy for the API server.
 //
-// blob: in img-src/worker-src is needed for html2pdf/Excel export and image
+// blob: in img-src/worker-src is needed for Excel/ZIP export and image
 // previews. style-src 'unsafe-inline' is temporary until CSS Variables /
 // inline styles are cleaned up in the React app (Phase 6+ task).
 // frame-ancestors 'none' prevents clickjacking.

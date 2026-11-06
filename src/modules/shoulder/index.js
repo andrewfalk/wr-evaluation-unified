@@ -2,7 +2,6 @@ import { registerModule } from '../../core/moduleRegistry';
 import { ShoulderEvaluation } from './ShoulderEvaluation';
 import { createShoulderModuleData, createShoulderDiagnosis, createShoulderJobExtras } from './utils/data';
 import { computeShoulderCalc, isShoulderAssessmentComplete } from './utils/calculations';
-import { shoulderExportHandlers } from './utils/exportHandlers';
 import { ensureModule } from '../../core/utils/batchImportHelpers';
 import { jobScopeWriteField, stringCoerce } from '../../core/utils/videoMapping';
 
@@ -16,7 +15,6 @@ registerModule({
   createDiagnosis: createShoulderDiagnosis,
   computeCalc: computeShoulderCalc,
   isComplete: isShoulderAssessmentComplete,
-  exportHandlers: shoulderExportHandlers,
   tabs: [
     { id: 'job', label: '신체부담 평가' },
   ],

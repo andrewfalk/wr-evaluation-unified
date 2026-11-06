@@ -28,7 +28,6 @@ Each module is registered through `registerModule()` and may provide:
 - `createDiagnosis()` when module-specific diagnosis fields are needed
 - `computeCalc()`
 - `isComplete()`
-- `exportHandlers`
 - `tabs`
 
 At runtime, the app stores module payloads under:
@@ -383,7 +382,6 @@ registerModule({
   }),
   computeCalc: computeHipCalc,
   isComplete: isHipComplete,
-  exportHandlers: hipExportHandlers,
   tabs: [
     { id: 'tasks', label: 'Task Review' }
   ]

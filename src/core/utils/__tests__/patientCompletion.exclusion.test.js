@@ -1,7 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
-
-// html2pdf.js UMD는 node 환경에서 ReferenceError — 모듈 index.js import용 모킹(batchImportConfig.test.js와 동일).
-vi.mock('html2pdf.js', () => ({ default: () => ({}) }));
+import { describe, expect, it } from 'vitest';
 
 import '../../../modules/spine';
 import '../../../modules/elbow';

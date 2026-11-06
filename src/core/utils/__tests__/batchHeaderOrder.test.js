@@ -1,7 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
-
-// exportService.js는 html2pdf.js(UMD, 브라우저 전역 `self` 참조)를 import하므로 모킹.
-vi.mock('html2pdf.js', () => ({ default: () => ({}) }));
+import { describe, expect, it } from 'vitest';
 
 import { BATCH_HEADERS, generateBatchRows } from '../exportService';
 

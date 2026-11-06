@@ -2,7 +2,6 @@ import { registerModule } from '../../core/moduleRegistry';
 import { KneeEvaluation } from './KneeEvaluation';
 import { createKneeModuleData, createKneeDiagnosis, createKneeJobExtras } from './utils/data';
 import { computeKneeCalc, isKneeAssessmentComplete } from './utils/calculations';
-import { kneeExportHandlers } from './utils/exportHandlers';
 import { parseKlg, parseBool, ensureModule } from '../../core/utils/batchImportHelpers';
 import { jobScopeWriteField, stringCoerce } from '../../core/utils/videoMapping';
 
@@ -16,7 +15,6 @@ registerModule({
   createDiagnosis: createKneeDiagnosis,
   computeCalc: computeKneeCalc,
   isComplete: isKneeAssessmentComplete,
-  exportHandlers: kneeExportHandlers,
   tabs: [
     { id: 'job', label: '신체부담 평가' },
   ],

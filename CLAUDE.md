@@ -62,7 +62,6 @@ registerModule({
   EvaluationComponent: MyComponent,
   computeCalc: computeFn,
   isComplete: checkFn,
-  exportHandlers: { excelSingle: exportFn },
   presetConfig: {                          // 프리셋 시스템 연동 (선택)
     label: '프리셋 표시명',
     fields: [{ key: 'fieldKey', label: '라벨', type: 'number' }],

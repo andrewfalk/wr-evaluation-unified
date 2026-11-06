@@ -13,72 +13,11 @@
     },
     {
       "workspace": "root",
-      "package": "dompurify",
-      "category": "not-applicable",
-      "reason": "Only reached from the per-module exportHandlers.pdf functions, which the app never calls (registered via registerModule but unused — the export menu uses src/core/utils/exportService.js; verified 2026-11-06). If used: pulled in by jsPDF for its html() method, which html2pdf does not call; the app does not use DOMPurify directly.",
-      "advisories": [
-        "GHSA-39q2-94rc-95cp",
-        "GHSA-55q2-fjhq-7xh7",
-        "GHSA-6688-9rhm-gjv2",
-        "GHSA-76mc-f452-cxcm",
-        "GHSA-c2j3-45gr-mqc4",
-        "GHSA-c6gr-qvv4-5v3f",
-        "GHSA-cmwh-pvxp-8882",
-        "GHSA-crv5-9vww-q3g8",
-        "GHSA-gvmj-g25r-r7wr",
-        "GHSA-h7mw-gpvr-xq4m",
-        "GHSA-hpcv-96wg-7vj8",
-        "GHSA-mrv2-3pqr-j5jr",
-        "GHSA-r47g-fvhr-h676",
-        "GHSA-rp9w-3fw7-7cwq",
-        "GHSA-v9jr-rg53-9pgp",
-        "GHSA-vxr8-fq34-vvx9",
-        "GHSA-x4vx-rjvf-j5p4"
-      ]
-    },
-    {
-      "workspace": "root",
       "package": "electron-updater",
       "category": "existing-decision",
       "reason": "Windows code-signing bypass: installers have no Authenticode signature (electron-builder.intranet.yml); updates are protected by the Ed25519-signed feed + sha512 check (HF8). electron-updater is not upgraded (decision D8, Electron 22 compatibility).",
       "advisories": [
         "GHSA-9jxc-qjr9-vjxq"
-      ]
-    },
-    {
-      "workspace": "root",
-      "package": "fflate",
-      "category": "not-applicable",
-      "reason": "Only reached from the per-module exportHandlers.pdf functions, which the app never calls (registered via registerModule but unused — the export menu uses src/core/utils/exportService.js; verified 2026-11-06). If used: the advisory is in unzipSync on malformed ZIP64 input — never called on user data.",
-      "advisories": [
-        "GHSA-px8p-9vwx-vf98"
-      ]
-    },
-    {
-      "workspace": "root",
-      "package": "html2pdf.js",
-      "category": "not-applicable",
-      "reason": "Only reached from the per-module exportHandlers.pdf functions, which the app never calls (registered via registerModule but unused — the export menu uses src/core/utils/exportService.js; verified 2026-11-06). Even if called, all four PDF exporters escape every patient value (shoulder gap fixed in #194, pinned by src/core/utils/__tests__/pdfExportEscaping.test.js). Removing the unused handlers and this dependency is a pending decision; otherwise upgrade to 0.14 (jsPDF 4, major).",
-      "advisories": [
-        "GHSA-w8x4-x68c-m6fc"
-      ]
-    },
-    {
-      "workspace": "root",
-      "package": "jspdf",
-      "category": "not-applicable",
-      "reason": "Only reached from the per-module exportHandlers.pdf functions, which the app never calls (registered via registerModule but unused — the export menu uses src/core/utils/exportService.js; verified 2026-11-06). If used: only through html2pdf to place canvas images — file inclusion is Node-only (we run in the browser); AcroForm, addJS, FreeText, new-window output and BMP/GIF decoding are not used.",
-      "advisories": [
-        "GHSA-67pg-wm7f-q7fj",
-        "GHSA-7x6v-j9x4-qf24",
-        "GHSA-95fx-jjr5-f39c",
-        "GHSA-9vjf-qc39-jprp",
-        "GHSA-cjw8-79x6-5cj4",
-        "GHSA-f8cm-6447-x5h2",
-        "GHSA-p5xg-68wr-hm3m",
-        "GHSA-pqxr-3g65-p328",
-        "GHSA-vm32-vv63-w422",
-        "GHSA-wfv2-pwc8-crg5"
       ]
     },
     {

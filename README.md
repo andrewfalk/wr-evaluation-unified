@@ -21,7 +21,7 @@
 | 데스크톱 | Electron 22 + electron-builder (NSIS) |
 | 웹 배포 | Vercel (서버리스) |
 | AI | Google Gemini API (기본) + Claude API (Vercel 서버리스 / Electron IPC) |
-| 내보내기 | xlsx (엑셀), html2pdf.js (PDF), jszip |
+| 내보내기 | xlsx (엑셀), jszip |
 | 폰트 | Pretendard (CDN), Noto Sans KR (fallback) |
 
 ### 백엔드 / 인프라 (인트라넷 모드, v5.0.0)
@@ -119,7 +119,6 @@ registerModule({
   createModuleData,       // 초기 데이터 팩토리
   computeCalc,            // 계산/점수 산출 함수
   isComplete,             // 완료 판정 함수
-  exportHandlers,         // 내보내기 핸들러
   tabs: [{ id: 'job', label: '신체부담 평가' }],
   presetConfig: {         // 프리셋 시스템 연동 (선택)
     label, fields,
@@ -586,7 +585,7 @@ src/  # (기존 standalone 부분만 발췌)
 │   ├── knee/                        # 무릎 모듈 (한국 산재 기준)
 │   │   ├── KneeEvaluation.jsx       # 메인 컴포넌트
 │   │   ├── components/              # JobTab, KneeResultPanel, AssessmentTab
-│   │   ├── utils/                   # calculations, data, exportHandlers
+│   │   ├── utils/                   # calculations, data
 │   │   └── index.js                 # 모듈 등록
 │   ├── spine/                       # 척추 모듈 (MDDM)
 │   │   ├── SpineEvaluation.jsx      # 메인 컴포넌트
@@ -596,22 +595,22 @@ src/  # (기존 standalone 부분만 발췌)
 │   ├── shoulder/                    # 어깨 모듈 (BK2117)
 │   │   ├── ShoulderEvaluation.jsx   # 메인 컴포넌트
 │   │   ├── components/              # JobTab, ShoulderResultPanel
-│   │   ├── utils/                   # calculations, data, exportHandlers
+│   │   ├── utils/                   # calculations, data
 │   │   └── index.js                 # 모듈 등록
 │   ├── elbow/                       # 팔꿈치 모듈 (BK2101/2103/2105/2106)
 │   │   ├── ElbowEvaluation.jsx      # 메인 컴포넌트
 │   │   ├── components/              # ExposureForm, DiseaseSpecificFields, ElbowResultPanel
-│   │   ├── utils/                   # calculations, data, exportHandlers
+│   │   ├── utils/                   # calculations, data
 │   │   └── index.js                 # 모듈 등록
 │   ├── wrist/                       # 손목 모듈 (BK2113/BK2101/2103/2106)
 │   │   ├── WristEvaluation.jsx      # 메인 컴포넌트
 │   │   ├── components/              # ExposureForm, DiseaseSpecificFields, WristResultPanel
-│   │   ├── utils/                   # calculations, data, exportHandlers
+│   │   ├── utils/                   # calculations, data
 │   │   └── index.js                 # 모듈 등록
 │   └── cervical/                    # 경추 모듈 (BK2109)
 │       ├── CervicalEvaluation.jsx   # 메인 컴포넌트
 │       ├── components/              # TaskManager, TaskEditor, CervicalResultPanel
-│       ├── utils/                   # calculations, data, exportHandlers
+│       ├── utils/                   # calculations, data
 │       └── index.js                 # 모듈 등록
 ```
 

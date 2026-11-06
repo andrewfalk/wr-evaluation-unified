@@ -1,6 +1,6 @@
 // src/modules/spine/utils/{formulaDB,thresholds,formulaVersion,time}.js에서 이동한 순수
 // leaf 상수·함수. src/의 원본 파일들은 UI(자세 이미지 경로 등)와 export 코드
-// (exportHandlers.js, sectionText.js)에서도 직접 import하므로 건드리지 않고 그대로 둔다 —
+// (sectionText.js)에서도 직접 import하므로 건드리지 않고 그대로 둔다 —
 // 이 파일은 계산에 필요한 부분만 analytics-core 전용으로 새로 옮겨 적었다(§1-3 spine 항목).
 // `images` 필드(자세 그림 경로)는 UI 전용이라 옮기지 않는다 — 계산은 b/m/category/
 // applyCorrectionFactor만 읽는다(calculateCompressiveForce, mddm.ts 참고).

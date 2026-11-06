@@ -1,8 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// html2pdf.js의 UMD 빌드는 브라우저 전역 `self`를 참조해 node 환경에서 모듈 index 로드가 실패한다 — PDF 로직은 필요 없어 모킹.
-vi.mock('html2pdf.js', () => ({ default: () => ({}) }));
-
 import '../../../modules/knee';
 import '../../../modules/shoulder';
 import '../../../modules/elbow';

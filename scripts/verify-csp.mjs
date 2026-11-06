@@ -224,7 +224,6 @@ function printBlobNote() {
   section('blob: manual check reminder');
   console.log('  This script cannot automate blob: URL behavior (requires a browser).');
   console.log('  Manually verify:');
-  console.log('    - PDF export (html2pdf) creates a blob: download link');
   console.log('    - Excel export creates a blob: download link');
   console.log('    - Image previews load via blob: URL');
   console.log('    - Web Worker (if any) loads from blob: or same-origin');

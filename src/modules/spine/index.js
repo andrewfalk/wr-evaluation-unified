@@ -3,7 +3,6 @@ import { SpineEvaluation } from './SpineEvaluation';
 import { createSpineModuleData, createTask } from './utils/data';
 import { computeSpineCalc, isSpineAssessmentComplete } from './utils/calculations';
 import { SPINE_FORMULA_V513 } from './utils/formulaVersion';
-import { spineExportHandlers } from './utils/exportHandlers';
 import { ensureModule } from '../../core/utils/batchImportHelpers';
 import { taskScopeWriteField, numberCoerce } from '../../core/utils/videoMapping';
 
@@ -16,7 +15,6 @@ registerModule({
   createModuleData: createSpineModuleData,
   computeCalc: computeSpineCalc,
   isComplete: isSpineAssessmentComplete,
-  exportHandlers: spineExportHandlers,
   tabs: [
     { id: 'tasks', label: '신체부담 평가' },
   ],
