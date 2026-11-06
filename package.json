@@ -38,6 +38,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:analytics-core": "npm --prefix packages/analytics-core run typecheck",
     "lint": "eslint src/ electron/ api/ shared/ packages/",
+    "check": "node scripts/check.mjs",
     "server:seed:admin": "cd server && npm run seed:admin",
     "server:seed:stats-test-patients": "cd server && npm run seed:stats-test-patients --",
     "verify:csp": "node scripts/verify-csp.mjs",
