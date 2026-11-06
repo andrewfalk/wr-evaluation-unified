@@ -9,3 +9,30 @@
 da6e7454bf1b500a06b35e2e85e09fadfad6861a:services/pose-inference/models/manifest.json:generic-api-key:47
 # Made-up patient keys (e.g. "abcdef123456789") in a dashboard statistics unit test.
 5a2402d93b331485885869f882c56b0ddf184785:src/core/utils/__tests__/dashboardStats.test.js:generic-api-key:50
+
+# Wrist module variable identifier bk2113_combined_exposure_present (a catalog field name) in the G1 calc golden
+# (#199) — not a secret. Main squash commit, then the #199 branch commit (origin/test/g1-calc-goldens).
+763080d10c3bd2805a536159dbce0600612d1335:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2374
+763080d10c3bd2805a536159dbce0600612d1335:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2432
+763080d10c3bd2805a536159dbce0600612d1335:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2550
+763080d10c3bd2805a536159dbce0600612d1335:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2594
+763080d10c3bd2805a536159dbce0600612d1335:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2712
+763080d10c3bd2805a536159dbce0600612d1335:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2756
+763080d10c3bd2805a536159dbce0600612d1335:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2890
+763080d10c3bd2805a536159dbce0600612d1335:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2948
+763080d10c3bd2805a536159dbce0600612d1335:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:3058
+763080d10c3bd2805a536159dbce0600612d1335:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:3102
+763080d10c3bd2805a536159dbce0600612d1335:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:3212
+763080d10c3bd2805a536159dbce0600612d1335:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:3256
+f6c643dfc58d8eb1c8600d91e178a2f0bf3db825:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2374
+f6c643dfc58d8eb1c8600d91e178a2f0bf3db825:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2432
+f6c643dfc58d8eb1c8600d91e178a2f0bf3db825:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2550
+f6c643dfc58d8eb1c8600d91e178a2f0bf3db825:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2594
+f6c643dfc58d8eb1c8600d91e178a2f0bf3db825:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2712
+f6c643dfc58d8eb1c8600d91e178a2f0bf3db825:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2756
+f6c643dfc58d8eb1c8600d91e178a2f0bf3db825:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2890
+f6c643dfc58d8eb1c8600d91e178a2f0bf3db825:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:2948
+f6c643dfc58d8eb1c8600d91e178a2f0bf3db825:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:3058
+f6c643dfc58d8eb1c8600d91e178a2f0bf3db825:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:3102
+f6c643dfc58d8eb1c8600d91e178a2f0bf3db825:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:3212
+f6c643dfc58d8eb1c8600d91e178a2f0bf3db825:src/core/utils/__tests__/__goldens__/calc-wrist.json:generic-api-key:3256
