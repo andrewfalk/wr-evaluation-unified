@@ -19,8 +19,20 @@ describe('integration setup — dedicated test database guard', () => {
 
   it('uses the name pg will connect to, not the raw URL path', () => {
     expect(testDatabaseName('postgresql://u@h/wr_test%5Fx')).toBe('wr_test_x');
-    // No database in the URL: pg falls back (PGDATABASE or the user name), which is not a test database.
-    expect(() => assertDedicatedTestDatabase('postgres://someone:p@h:5432')).toThrow(/starts with "wr_test"/);
+  });
+
+  it('with no database in the URL, checks the name pg falls back to (PGDATABASE)', () => {
+    // Pin PGDATABASE so the result does not depend on the shell running the tests (Codex review of #192).
+    const saved = process.env.PGDATABASE;
+    try {
+      process.env.PGDATABASE = 'wr_evaluation';
+      expect(() => assertDedicatedTestDatabase('postgres://someone:p@h:5432')).toThrow(/"wr_evaluation"/);
+      process.env.PGDATABASE = 'wr_test';
+      expect(() => assertDedicatedTestDatabase('postgres://someone:p@h:5432')).not.toThrow();
+    } finally {
+      if (saved === undefined) delete process.env.PGDATABASE;
+      else process.env.PGDATABASE = saved;
+    }
   });
 
   it('rejects malformed URLs', () => {
