@@ -14,6 +14,7 @@
  * Exit codes: 0 = no findings; 1 = findings, Docker unavailable, or the scan could not run.
  */
 import { spawnSync } from 'node:child_process';
+import { statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,6 +25,14 @@ const IMAGE = 'ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60d
 function fail(message, code = 1) {
   console.error(`verify-secrets: ${message}`);
   process.exit(code);
+}
+
+// In a linked worktree (`git worktree add`), .git is a file pointing at the main repository's
+// metadata by a host path the container cannot reach, so gitleaks would fail obscurely
+// (Codex review of #196). Say so plainly instead.
+if (statSync(path.join(root, '.git'), { throwIfNoEntry: false })?.isFile()) {
+  fail('this is a linked git worktree (.git is a file); gitleaks in Docker cannot reach the main repository\'s\n' +
+    '  history from here. Run `npm run verify:secrets` (or check:full) from the main checkout.');
 }
 
 if (spawnSync('docker', ['info'], { stdio: 'ignore' }).status !== 0) {
