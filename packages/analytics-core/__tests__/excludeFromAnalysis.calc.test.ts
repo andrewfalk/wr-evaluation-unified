@@ -4,7 +4,7 @@
 //  · 귀속(sharedJobId 없는 항목 → 첫 직력)은 필터 전 전체 jobs 기준이다.
 //  · 직력 0개 fallback·레거시 분기는 기존 동작 그대로.
 import { describe, it, expect } from 'vitest';
-import { computeKneeCalc } from '../modules/knee/derived';
+import { computeKneeCalc, type KneeCalculationJob } from '../modules/knee/derived';
 import { computeShoulderCalc } from '../modules/shoulder/derived';
 import { computeElbowCalc, isElbowAssessmentComplete } from '../modules/elbow/derived';
 import { computeWristCalc, isWristAssessmentComplete } from '../modules/wrist/derived';
@@ -24,7 +24,7 @@ const X = (job: Record<string, unknown>) => ({ ...job, excludeFromAnalysis: true
 
 // ── knee ────────────────────────────────────────────────────────────────────
 describe('knee — computeKneeCalc', () => {
-  const shared = (jobs: unknown[]) => ({ birthDate: '1970-01-01', injuryDate: '2020-01-01', jobs });
+  const shared = (jobs: KneeCalculationJob[]) => ({ birthDate: '1970-01-01', injuryDate: '2020-01-01', jobs });
   const mod = { jobExtras: [{ sharedJobId: 'job-1', weight: '5000', squatting: '200' }, { sharedJobId: 'job-2', weight: '0', squatting: '0' }] };
 
   it('미포함 직력은 jobBurdens·업무관련성 합산에서 빠진다', () => {
@@ -143,7 +143,7 @@ describe('elbow — 미포함 직력의 입력값이 sync/normalize로 삭제되
     const dx = [{ id: 'dx-1', code: 'M77.0', moduleId: 'elbow', side: 'right' }];
     const out = normalizeElbowModuleData(module as any, jobs as any, dx as any, ['elbow']);
     expect(out.moduleData.jobEvaluations.map((e: any) => e.sharedJobId)).toEqual(['job-1', 'job-2']);
-    const kept = out.moduleData.jobEvaluations[1].diagnosisEntries.find((e: any) => e.diagnosisId === 'dx-1');
+    const kept = out.moduleData.jobEvaluations[1].diagnosisEntries!.find((e: any) => e.diagnosisId === 'dx-1');
     expect((kept as any).daily_exposure_hours).toBe('5');
   });
 });
