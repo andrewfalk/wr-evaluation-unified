@@ -50,7 +50,6 @@ registerModule({
   EvaluationComponent: MyComponent,
   computeCalc: computeFn,
   isComplete: checkFn,
-  exportHandlers: { excelSingle: exportFn },
   batchImportConfig: {                     // BatchImportModal 일괄 import 연동 (선택)
     columns: { fieldKey: ['엑셀헤더후보1', 'header_candidate2'] },  // findCol 후보 목록
     applyRow({ patient, row, diagnosis, job, colMap, getCell, rowIndex }) {

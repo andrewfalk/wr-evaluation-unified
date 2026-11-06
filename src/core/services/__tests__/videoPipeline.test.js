@@ -1,11 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-
-// exportHandlers는 html2pdf(브라우저 전역 self 의존)를 끌어오므로 node 테스트에서 stub —
-// videoMappingConfig 검증과 무관. (vi.mock은 import보다 먼저 hoist된다.)
-vi.mock('../../../modules/knee/utils/exportHandlers', () => ({ kneeExportHandlers: {} }));
-vi.mock('../../../modules/shoulder/utils/exportHandlers', () => ({ shoulderExportHandlers: {} }));
-vi.mock('../../../modules/spine/utils/exportHandlers', () => ({ spineExportHandlers: {} }));
-vi.mock('../../../modules/cervical/utils/exportHandlers', () => ({ cervicalExportHandlers: {} }));
+import { describe, it, expect, beforeEach } from 'vitest';
 
 // 모듈 self-register (videoMappingConfig 포함)
 import '../../../modules/knee';

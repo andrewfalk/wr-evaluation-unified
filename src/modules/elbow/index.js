@@ -2,7 +2,6 @@ import { registerModule } from '../../core/moduleRegistry';
 import { ElbowEvaluation } from './ElbowEvaluation';
 import { createElbowModuleData, createElbowJobEvaluation, createElbowDiagnosisEntry } from './utils/data';
 import { computeElbowCalc, isElbowAssessmentComplete } from './utils/calculations';
-import { elbowExportHandlers } from './utils/exportHandlers';
 import { ensureModule, splitList, parseDate } from '../../core/utils/batchImportHelpers';
 
 // 프리셋에 저장할 공통 노출 필드 (BK 유형과 무관한 직업 물리부담 정보)
@@ -23,7 +22,6 @@ registerModule({
   createModuleData: createElbowModuleData,
   computeCalc: computeElbowCalc,
   isComplete: isElbowAssessmentComplete,
-  exportHandlers: elbowExportHandlers,
   tabs: [
     { id: 'burden', label: '신체부담 평가' },
   ],

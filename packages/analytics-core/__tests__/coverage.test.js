@@ -17,9 +17,7 @@
 //      (job-scope)·cervical/spine(task-scope) 4개 모듈의 featureKeys 전부를 실제 호출
 //   3. 어떤 팩토리도 만들지 않는 레거시 전용 구조(수기 샘플 — legacyNormalize.ts가
 //      실제로 읽는 shape를 그대로 재현)
-import { describe, it, expect, vi } from 'vitest';
-
-vi.mock('html2pdf.js', () => ({ default: () => ({}) }));
+import { describe, it, expect } from 'vitest';
 
 import { FULL_COVERAGE_INVENTORY } from '../coverage/index';
 import { KNEE_METADATA } from '../modules/knee/metadata';

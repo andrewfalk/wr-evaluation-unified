@@ -6,8 +6,6 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { useGoldenEnvironment } from '../../fixtures/goldenEnv';
 import { loadGoldenPatients } from '../../fixtures/goldenPatients';
 
-vi.mock('html2pdf.js', () => ({ default: () => ({}) }));
-
 const MODULE_IDS = ['knee', 'shoulder', 'elbow', 'wrist', 'spine', 'cervical'];
 
 // Stable, readable JSON: keep NaN/±Infinity distinguishable (plain JSON would turn them into null).

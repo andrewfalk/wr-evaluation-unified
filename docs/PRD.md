@@ -56,7 +56,7 @@
 | 데스크톱 | Electron 22 + electron-builder (NSIS) |
 | 웹 배포 | Vercel (서버리스) |
 | AI | Google Gemini API + Claude API (Vercel 서버리스 / Electron IPC / 인트라넷 서버 프록시) |
-| 내보내기 | xlsx (엑셀), html2pdf.js (PDF), jszip |
+| 내보내기 | xlsx (엑셀), jszip |
 | 폰트 | Pretendard (CDN), Noto Sans KR (fallback) |
 | 테스트 | Vitest (renderer + electron), node 환경 기본 + jsdom·@testing-library/react·user-event로 컴포넌트/훅 렌더링 테스트 (v6.1.6+) |
 
@@ -104,7 +104,6 @@ registerModule({
   createDiagnosis,              // (선택) 모듈별 상병 확장 팩토리
   computeCalc,                  // 계산/점수 산출 함수
   isComplete,                   // 완료 판정 함수
-  exportHandlers,               // 내보내기 핸들러 (Excel, PDF 등)
   tabs: [                       // 위자드 스텝 정의
     { id: 'job', label: '신체부담 평가' },
   ]
@@ -869,7 +868,7 @@ ZIP명: `업무관련성평가_{N}명_{날짜}.zip` (동명 파일은 인덱스 
 
 ### 7.3 PDF
 
-무릎 모듈 활성 시 보고서 미리보기 영역을 html2pdf.js로 PDF 변환.
+PDF 내보내기는 제공하지 않는다. 모듈별 `exportHandlers`(엑셀 단일·html2pdf PDF)는 등록만 되고 앱 어디에서도 호출되지 않아 2026-11-06 코드와 `html2pdf.js` 의존성을 함께 제거했다(내보내기 메뉴는 `src/core/utils/exportService.js`만 사용).
 
 ### 7.4 일괄 입력 (Batch Import)
 
@@ -985,8 +984,7 @@ src/
 │   │   │   └── PresetSearch.jsx         # (레거시, core로 이동됨)
 │   │   └── utils/
 │   │       ├── data.js                  # createKneeJobExtras, KLG 옵션 등
-│   │       ├── calculations.js          # computeKneeCalc, 신체부담도
-│   │       └── exportHandlers.js        # 보고서 생성, Excel 내보내기
+│   │       └── calculations.js          # computeKneeCalc, 신체부담도
 │   │
 │   ├── spine/                           # 척추 모듈
 │   │   ├── index.js                     # registerModule()
@@ -998,7 +996,6 @@ src/
 │   │   └── utils/
 │   │       ├── data.js                  # createTask, createSpineModuleData
 │   │       ├── calculations.js          # MDDM 압박력/선량/노출량 계산
-│   │       ├── exportHandlers.js        # 보고서 생성, Excel 내보내기
 │   │       ├── formulaDB.js             # G1~G11 자세별 계수 (b, m)
 │   │       └── thresholds.js            # 성별/기준별 판정 역치
 │   │
@@ -1010,8 +1007,7 @@ src/
 │   │   │   └── ShoulderResultPanel.jsx  # BK2117 누적 기준 비교 결과 패널
 │   │   └── utils/
 │   │       ├── data.js                  # createShoulderJobExtras, Ellman 옵션 등
-│   │       ├── calculations.js          # computeShoulderCalc, BK2117 노출 계산
-│   │       └── exportHandlers.js        # EMR Excel, PDF 내보내기
+│   │       └── calculations.js          # computeShoulderCalc, BK2117 노출 계산
 │   │
 │   └── elbow/                           # 팔꿈치 모듈 (BK2101/2103/2105/2106)
 │       ├── index.js                     # registerModule()
@@ -1022,8 +1018,7 @@ src/
 │       │   └── ElbowResultPanel.jsx     # 공통 선후관계 + 직업/상병 Summary
 │       └── utils/
 │           ├── data.js                  # BK 옵션, jobEvaluations 싱크/마이그레이션
-│           ├── calculations.js          # computeElbowCalc, Gate-and-Flag 엔진
-│           └── exportHandlers.js        # EMR Excel (B5~B9), PDF 내보내기
+│           └── calculations.js          # computeElbowCalc, Gate-and-Flag 엔진
 │   ├── wrist/                           # 손목 모듈 (BK2113/2101/2103/2106)
 │   │   ├── index.js
 │   │   ├── WristEvaluation.jsx
@@ -1033,8 +1028,7 @@ src/
 │   │   │   └── WristResultPanel.jsx
 │   │   └── utils/
 │   │       ├── data.js
-│   │       ├── calculations.js
-│   │       └── exportHandlers.js
+│   │       └── calculations.js
 │   │
 │   └── cervical/                        # 경추 모듈 (BK2109)
 │       ├── index.js                     # registerModule()
@@ -1045,8 +1039,7 @@ src/
 │       │   └── CervicalResultPanel.jsx  # 직업별 flag + narrative + 종합평가
 │       └── utils/
 │           ├── data.js                  # createCervicalTask, syncCervicalModuleData
-│           ├── calculations.js          # computeCervicalCalc, Gate-and-Flag 엔진
-│           └── exportHandlers.js        # EMR Excel, 엑셀 요약
+│           └── calculations.js          # computeCervicalCalc, Gate-and-Flag 엔진
 │
 api/analyze.js                           # Vercel 서버리스 (Gemini/Claude 프록시, standalone 모드)
 electron/
@@ -2243,7 +2236,6 @@ ageFactor = 만나이 − 30   (만 30세 이하이면 기여도 0%)
 | vite | 5.0.0 |
 | electron | 22.x |
 | xlsx | 0.18.5 |
-| html2pdf.js | 0.10.1 |
 
 ### 서버 (인트라넷 모드, v5.0.0)
 

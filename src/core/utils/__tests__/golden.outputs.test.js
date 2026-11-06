@@ -3,13 +3,10 @@
 // generateBatchRows); G3: the narrative outputs (unified report text, EMR fields, AI input);
 // G4: the files the app's export menu produces (core/utils/exportService.js — single workbook,
 // selected/all ZIPs, batch-format workbooks, empty template). REFACTORING_ROADMAP P0-9.
-// The per-module exportHandlers are not covered: the app never calls them.
 // Rules (update only for intended output changes, never in a refactor): src/core/fixtures/goldenEnv.js
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGoldenEnvironment } from '../../fixtures/goldenEnv';
 import { loadGoldenPatients } from '../../fixtures/goldenPatients';
-
-vi.mock('html2pdf.js', () => ({ default: () => ({}) }));
 
 // Capture what the export functions hand to SheetJS / JSZip instead of writing files.
 const captured = vi.hoisted(() => ({ writeFile: [], write: [], zips: [] }));

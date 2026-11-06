@@ -2,7 +2,6 @@ import { registerModule } from '../../core/moduleRegistry';
 import { CervicalEvaluation } from './CervicalEvaluation';
 import { createCervicalModuleData, createCervicalTask, EXPOSURE_TYPE_OPTIONS } from './utils/data';
 import { computeCervicalCalc, isCervicalAssessmentComplete } from './utils/calculations';
-import { cervicalExportHandlers } from './utils/exportHandlers';
 import { ensureModule, parseYesNo, splitList } from '../../core/utils/batchImportHelpers';
 import { taskScopeWriteField, stringCoerce } from '../../core/utils/videoMapping';
 
@@ -27,7 +26,6 @@ registerModule({
   createModuleData: createCervicalModuleData,
   computeCalc: computeCervicalCalc,
   isComplete: isCervicalAssessmentComplete,
-  exportHandlers: cervicalExportHandlers,
   tabs: [
     { id: 'burden', label: '부담 노출 평가' },
   ],

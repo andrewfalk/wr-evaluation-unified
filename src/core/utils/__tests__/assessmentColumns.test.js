@@ -1,9 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
-
-// html2pdf.js의 UMD 빌드는 브라우저 전역 `self`를 참조하므로 node 테스트 환경에서
-// exportService.js import 시 ReferenceError가 발생한다. export row 생성 로직만
-// 검증하므로 PDF 생성 부분은 모킹한다.
-vi.mock('html2pdf.js', () => ({ default: () => ({}) }));
+import { describe, expect, it } from 'vitest';
 
 import { BATCH_HEADERS, generateBatchRows } from '../exportService';
 
