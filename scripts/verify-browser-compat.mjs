@@ -35,41 +35,44 @@ const EXTENSIONS = new Set(['.js', '.jsx', '.css']);
 
 // [where, pattern, first Chrome version that supports it, name]
 // 'css' rules run on .css only (so JSX `&&` cannot look like CSS nesting);
-// 'js' rules run on .js/.jsx only.
+// 'js' rules run on .js/.jsx only. Patterns are matched against the whole file with comments
+// blanked (not line by line), so `\s` also spans line breaks: `arr\n  .toSorted ()` is caught.
+// This is a grep heuristic, not a type-aware parser: dynamic access such as `arr['toSorted']()`
+// or aliasing (`const s = arr.toSorted; s()`) is not detected.
 const FEATURES = [
   // CSS
-  ['css', /color-mix\(/, 111, 'color-mix()'],
-  ['css', /^\s*&/, 112, 'CSS nesting (&)'],
+  ['css', /color-mix\s*\(/, 111, 'color-mix()'],
+  ['css', /(?:^|[{;])\s*&/m, 112, 'CSS nesting (&)'],
   ['css', /text-wrap\s*:/, 114, 'text-wrap'],
   ['css', /@starting-style/, 117, '@starting-style'],
   ['css', /\bsubgrid\b/, 117, 'subgrid'],
   ['css', /@scope\b/, 118, '@scope'],
   ['css', /:user-(?:in)?valid\b/, 119, ':user-valid / :user-invalid'],
   ['css', /\(\s*from\s/, 119, 'relative color syntax (rgb(from …))'],
-  ['css', /light-dark\(/, 123, 'light-dark()'],
+  ['css', /light-dark\s*\(/, 123, 'light-dark()'],
   ['css', /field-sizing/, 123, 'field-sizing'],
-  ['css', /anchor-name|position-anchor|\banchor\(/, 125, 'CSS anchor positioning'],
-  ['css', /\b(?:round|mod|rem)\(/, 125, 'CSS round()/mod()/rem()'],
+  ['css', /anchor-name|position-anchor|\banchor\s*\(/, 125, 'CSS anchor positioning'],
+  ['css', /\b(?:round|mod|rem)\s*\(/, 125, 'CSS round()/mod()/rem()'],
   // JS — instance/static methods and web APIs
-  ['js', /\.(?:toSorted|toReversed|toSpliced)\(/, 110, 'Array.prototype.toSorted/toReversed/toSpliced'],
-  ['js', /\.(?:isWellFormed|toWellFormed)\(/, 111, 'String.prototype.isWellFormed/toWellFormed'],
-  ['js', /\.startViewTransition\(/, 111, 'document.startViewTransition()'],
-  ['js', /navigator\.gpu\b/, 113, 'WebGPU (navigator.gpu)'],
-  ['js', /\.showPopover\(|\.hidePopover\(|\.togglePopover\(|\bpopover=/, 114, 'Popover API'],
-  ['js', /AbortSignal\.any\(/, 116, 'AbortSignal.any()'],
-  ['js', /\b(?:Object|Map)\.groupBy\(/, 117, 'Object.groupBy / Map.groupBy'],
-  ['js', /Promise\.withResolvers\(/, 119, 'Promise.withResolvers()'],
-  ['js', /URL\.canParse\(/, 120, 'URL.canParse()'],
-  ['js', /Array\.fromAsync\(/, 121, 'Array.fromAsync()'],
+  ['js', /\.\s*(?:toSorted|toReversed|toSpliced)\s*\(/, 110, 'Array.prototype.toSorted/toReversed/toSpliced'],
+  ['js', /\.\s*(?:isWellFormed|toWellFormed)\s*\(/, 111, 'String.prototype.isWellFormed/toWellFormed'],
+  ['js', /\.\s*startViewTransition\s*\(/, 111, 'document.startViewTransition()'],
+  ['js', /navigator\s*\.\s*gpu\b/, 113, 'WebGPU (navigator.gpu)'],
+  ['js', /\.\s*(?:showPopover|hidePopover|togglePopover)\s*\(|\bpopover\s*=/, 114, 'Popover API'],
+  ['js', /AbortSignal\s*\.\s*any\s*\(/, 116, 'AbortSignal.any()'],
+  ['js', /\b(?:Object|Map)\s*\.\s*groupBy\s*\(/, 117, 'Object.groupBy / Map.groupBy'],
+  ['js', /Promise\s*\.\s*withResolvers\s*\(/, 119, 'Promise.withResolvers()'],
+  ['js', /URL\s*\.\s*canParse\s*\(/, 120, 'URL.canParse()'],
+  ['js', /Array\s*\.\s*fromAsync\s*\(/, 121, 'Array.fromAsync()'],
   // Any receiver/argument. zod's z.union()/z.intersection() (the only current users of these
   // names in src) are excluded by the lookbehind; another library with the same method names
   // would need a `browser-compat-ignore` marker.
-  ['js', /(?<!\bz)\.(?:union|intersection|difference|symmetricDifference|isSubsetOf|isSupersetOf|isDisjointFrom)\s*\(/, 122, 'Set methods (union/intersection/…)'],
-  ['js', /URL\.parse\(/, 126, 'URL.parse()'],
+  ['js', /(?<!\bz\s*)\.\s*(?:union|intersection|difference|symmetricDifference|isSubsetOf|isSupersetOf|isDisjointFrom)\s*\(/, 122, 'Set methods (union/intersection/…)'],
+  ['js', /URL\s*\.\s*parse\s*\(/, 126, 'URL.parse()'],
   ['js', /\bCloseWatcher\b/, 126, 'CloseWatcher'],
-  ['js', /Promise\.try\(/, 128, 'Promise.try()'],
-  ['js', /scheduler\.yield\(/, 129, 'scheduler.yield()'],
-  ['js', /Intl\.DurationFormat/, 129, 'Intl.DurationFormat'],
+  ['js', /Promise\s*\.\s*try\s*\(/, 128, 'Promise.try()'],
+  ['js', /scheduler\s*\.\s*yield\s*\(/, 129, 'scheduler.yield()'],
+  ['js', /Intl\s*\.\s*DurationFormat/, 129, 'Intl.DurationFormat'],
 ];
 
 function fail(message) {
@@ -158,15 +161,34 @@ export function scanSource(content, ext, floor) {
   const kind = ext === '.css' ? 'css' : 'js';
   const active = FEATURES.filter(([where, , since]) => where === kind && since > floor);
   const raw = content.split('\n');
-  const code = stripComments(content, ext).split('\n');
-  const found = [];
-  code.forEach((line, i) => {
-    if (raw[i].includes('browser-compat-ignore')) return;
-    for (const [, pattern, since, name] of active) {
-      if (pattern.test(line)) found.push({ line: i + 1, name, since, text: raw[i].trim() });
+  const code = stripComments(content, ext); // same length and line breaks as content
+  const lineStarts = [0];
+  for (let i = 0; i < code.length; i += 1) if (code[i] === '\n') lineStarts.push(i + 1);
+  const lineOf = (index) => {
+    let lo = 0;
+    let hi = lineStarts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (lineStarts[mid] <= index) lo = mid; else hi = mid - 1;
     }
-  });
-  return found;
+    return lo + 1;
+  };
+  const found = [];
+  const seen = new Set();
+  for (const [, pattern, since, name] of active) {
+    const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
+    for (const m of code.matchAll(re)) {
+      // Report the line of the last matched character (the '(' or '&'), i.e. where the call is.
+      const line = lineOf(m.index + Math.max(m[0].length - 1, 0));
+      const startLine = lineOf(m.index);
+      if (raw[line - 1].includes('browser-compat-ignore') || raw[startLine - 1].includes('browser-compat-ignore')) continue;
+      const key = `${line}|${name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      found.push({ line, name, since, text: raw[line - 1].trim() });
+    }
+  }
+  return found.sort((a, b) => a.line - b.line);
 }
 
 function collectFiles(dir) {

@@ -20,7 +20,21 @@ describe('verify-browser-compat — JS rules', () => {
     expect(names('seen.isSubsetOf(\n  other);', '.js')).toContain('Set methods (union/intersection/…)');
   });
 
+  it('allows whitespace and line breaks between the name and the call (Codex review round 4)', () => {
+    expect(names('const result = [2, 1].toSorted ();', '.js')).toContain('Array.prototype.toSorted/toReversed/toSpliced');
+    const multi = scanSource('const r = items\n  .toSorted\n  ((a, b) => a - b);\nconst p = Promise\n  .withResolvers();', '.js', FLOOR);
+    expect(multi.map((v) => [v.line, v.name])).toEqual([
+      [3, 'Array.prototype.toSorted/toReversed/toSpliced'],
+      [5, 'Promise.withResolvers()'],
+    ]);
+  });
+
+  it('a comment between the name and the call does not hide it', () => {
+    expect(names('const r = arr.toSorted /* asc */ ();', '.js')).toContain('Array.prototype.toSorted/toReversed/toSpliced');
+  });
+
   it("does not flag zod's z.union()/z.intersection()", () => {
+    expect(names('const S = z\n  .union([A, B]);', '.js')).toEqual([]);
     expect(names('const S = z.union([A, B]); const T = z.intersection(A, B);', '.js')).toEqual([]);
   });
 
@@ -69,6 +83,12 @@ describe('verify-browser-compat — CSS rules', () => {
   it('does not treat `//` in CSS as a comment, but does strip /* */', () => {
     expect(names('.a { background: url(//cdn/x.png); color: color-mix(in srgb, red, blue); }', '.css')).toEqual(['color-mix()']);
     expect(names('/* color-mix() is Chrome 111+ */ .a { color: red; }', '.css')).toEqual([]);
+  });
+
+  it('flags nesting written on the same line as the parent block (Codex review round 4)', () => {
+    expect(names('.card { & .title { color: red; } }', '.css')).toEqual(['CSS nesting (&)']);
+    expect(names('.card { color: blue; & .title { color: red; } }', '.css')).toEqual(['CSS nesting (&)']);
+    expect(names('.a::after { content: "&"; }', '.css')).toEqual([]);
   });
 
   it('a comment marker inside a CSS string does not hide later rules (Codex review round 3)', () => {
