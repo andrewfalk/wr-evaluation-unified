@@ -29,6 +29,22 @@ describe('verify-browser-compat — JS rules', () => {
     expect(names('const u = `http://x`; [1].toReversed();', '.js')).toContain('Array.prototype.toSorted/toReversed/toSpliced');
   });
 
+  it('quotes inside a regex literal do not hide a later string `//` (Codex review round 2)', () => {
+    const src = "const quotes = /['\"]/g;\nconst result = ['a//b', 'c'].toSorted();";
+    expect(scanSource(src, '.js', FLOOR).map((v) => v.line)).toEqual([2]);
+  });
+
+  it('an apostrophe in JSX text does not hide a later string `//`', () => {
+    const src = "const el = <p>Patient's note</p>;\nconst x = ['http://a'].toSorted();";
+    expect(scanSource(src, '.jsx', FLOOR).map((v) => v.line)).toEqual([2]);
+  });
+
+  it('if a file does not parse, nothing is stripped (no hidden code; a comment may raise a false alarm)', () => {
+    const src = 'const = ; // [1].toSorted()';
+    expect(stripComments(src, '.js')).toBe(src);
+    expect(names(src, '.js')).toContain('Array.prototype.toSorted/toReversed/toSpliced');
+  });
+
   it('ignores real comments and lines marked browser-compat-ignore', () => {
     expect(names('// [1].toSorted() would break Chrome 108\n/* Promise.withResolvers() */', '.js')).toEqual([]);
     expect(names('const s = [1].toSorted(); // browser-compat-ignore -- feature-detected', '.js')).toEqual([]);

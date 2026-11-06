@@ -27,6 +27,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as espree from 'espree';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC_DIR = path.join(root, 'src');
@@ -95,41 +96,42 @@ function checkViteTarget(floor) {
   }
 }
 
-// Blank out comments (keeping line breaks so line numbers stay put) while leaving string and
-// template-literal contents alone, so `'a//b'.toSorted()` is still checked. `//` is a comment
-// only in JS. Regex literals are not tokenized; a `//` inside one is rare enough to accept.
-export function stripComments(content, ext) {
-  const isJs = ext !== '.css';
+// Replace [start, end) ranges with spaces, keeping line breaks so line numbers stay put.
+function blankRanges(content, ranges) {
   let out = '';
-  let i = 0;
-  let quote = null; // ', ", or ` while inside a string/template
-  while (i < content.length) {
-    const ch = content[i];
-    const next = content[i + 1];
-    if (quote) {
-      out += ch;
-      if (ch === '\\' && i + 1 < content.length) { out += next; i += 2; continue; }
-      if (ch === quote) quote = null;
-      i += 1;
-      continue;
-    }
-    if (ch === '/' && next === '*') {
-      const end = content.indexOf('*/', i + 2);
-      const stop = end === -1 ? content.length : end + 2;
-      out += content.slice(i, stop).replace(/[^\n]/g, ' ');
-      i = stop;
-      continue;
-    }
-    if (isJs && ch === '/' && next === '/') {
-      const end = content.indexOf('\n', i);
-      i = end === -1 ? content.length : end;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || (isJs && ch === '`')) quote = ch;
-    out += ch;
-    i += 1;
+  let pos = 0;
+  for (const [start, end] of ranges) {
+    out += content.slice(pos, start) + content.slice(start, end).replace(/[^\n]/g, ' ');
+    pos = end;
   }
-  return out;
+  return out + content.slice(pos);
+}
+
+// Blank out comments only — never string, template, regex or JSX text contents — so code after
+// `'a//b'` or `/['"]/` is still checked. JS comment positions come from espree (ESLint's parser,
+// JSX enabled): a hand-written scanner cannot tell regex literals and JSX text from strings
+// (Codex review of #191). If a file does not parse, nothing is stripped: a comment may then
+// cause a false alarm, but real code is never hidden. CSS has only /* */ comments.
+export function stripComments(content, ext) {
+  if (ext === '.css') {
+    const ranges = [];
+    const re = /\/\*[\s\S]*?(?:\*\/|$)/g;
+    for (let m; (m = re.exec(content)); ) ranges.push([m.index, m.index + m[0].length]);
+    return blankRanges(content, ranges);
+  }
+  let comments;
+  try {
+    comments = espree.parse(content, {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      ecmaFeatures: { jsx: true },
+      comment: true,
+      range: true,
+    }).comments;
+  } catch {
+    return content;
+  }
+  return blankRanges(content, comments.map((c) => c.range));
 }
 
 // Violations in one file's source. Exported for scripts/verifyBrowserCompat.test.mjs.
