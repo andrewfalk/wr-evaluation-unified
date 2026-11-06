@@ -133,7 +133,7 @@
 | P0-12 | Python 재현 | (부분 2026-11-06) pytest를 `check:full`에 연결(로컬 venv `services/stats-engine/.venv` 기준, 249건). **남음**: 운영 핀(Python 3.11·numpy 1.26.4 등)과 로컬 venv(numpy 2.x)의 차이 해소 — `services/stats-engine/{requirements-dev.txt,pyproject.toml}`(pytest·ruff), `.python-version`(3.11), pose `requirements.txt` `==` 핀 | – | L/S | pytest 234+47 |
 | P0-13 | **성능 기준선**(트랙 P 선행) | ① 인트라넷 빌드 cold/warm 네트워크 전송량·Lighthouse(DevTools) ② 라우트별 p95(S9 access log 전엔 임시 타이머 미들웨어) ③ `statsEngine` spawn→첫 바이트 vs 계산 시간 로그 ④ React Profiler commit 시간(환자 100·500명 픽스처) → `docs/PERF_BASELINE.md`에 기록. 트랙 P 항목은 이 수치 대비 효과를 적는다 | `src/core/fixtures/createTestPatients.js` | L/S | 수치 4종 기록 |
 
-보안 훅(Phase 0): ~~gitleaks action, `npm audit` 보고 job~~ → D9에 따라 `check:full`에 `npm audit`(루트·서버) 보고와 gitleaks 로컬 실행(설치돼 있을 때만)을 넣는다(**미구현** — 2026-11-06 `check:full` 첫 버전에는 없음). `check:full`에 docker 이미지 빌드는 넣지 않는다(수 분~십수 분, 릴리스 때 `export-offline-package.ps1`이 빌드·검증). Dependabot 디렉터리 확장(`/server`,`/shared`,`/packages/*`, pip)(L16)은 자동 PR이 늘어 D9의 CI 도입 조건 ③에 해당할 수 있으므로, 확장할 때 CI 도입 여부를 다시 판단한다.
+보안 훅(Phase 0): ~~gitleaks action, `npm audit` 보고 job~~ → D9에 따라 `check:full`에서 — ✅ `npm audit` 운영 의존성 감시(`verify:audit`, 검토한 advisory 목록 기반, 2026-11-06, 아래 "의존성 취약점 분류") · gitleaks 로컬 실행은 **미구현**(이 PC에 미설치 — 설치 여부 결정 필요). `check:full`에 docker 이미지 빌드는 넣지 않는다(수 분~십수 분, 릴리스 때 `export-offline-package.ps1`이 빌드·검증). Dependabot 디렉터리 확장(`/server`,`/shared`,`/packages/*`, pip)(L16)은 자동 PR이 늘어 D9의 CI 도입 조건 ③에 해당할 수 있으므로, 확장할 때 CI 도입 여부를 다시 판단한다.
 
 > **"CI" 표기 읽는 법(D9)**: 이 문서의 다른 곳(P0-6·P0-7·P0-9·S10·S11·E6·K5·D5·검증 전략 표 등)에 "CI"·"CI job"·"CI에서 증가 금지"로 적힌 검증은 **`npm run check`(빠른 묶음) 또는 `npm run check:full`(통합 테스트·pytest)에 넣는 로컬 검사**로 읽는다. 래칫(suppressions·`@ts-nocheck` 개수 증가 금지)도 그 명령 안의 스크립트가 막는다.
 
@@ -281,6 +281,22 @@
 | L16 | Dependabot 범위·미사용 deps | Phase 0 훅 + S11 |
 | L17 | Caddy 로그 query string | 호스트 Caddy 템플릿(`caddy/Caddyfile.host.template`, #181)은 반영 — 기본·접속 로거 모두 쿼리 제거. Docker `caddy/Caddyfile`은 Phase 1 bundle |
 | Info | admin 라우터 레벨 가드 · CSRF dead code · `===` 비교 | S4 · ✅ **HF9**(#161) · S4 |
+
+### 의존성 취약점 분류 (2026-11-06)
+
+`npm audit --omit=dev`(운영 의존성)가 루트 7건(critical 2·high 4)·서버 12건(critical 2·high 7)을 보고 → 패키지마다 "우리 앱에서 실제로 해당하는지" 판단. 판단과 advisory ID는 `scripts/audit-allowlist.json`(항목별 근거 포함), `npm run check:full`의 `verify:audit` 단계가 **목록에 없는 high/critical advisory가 새로 생기면 실패**(moderate·low는 경고, 레지스트리 접속 실패도 실패).
+
+| 패키지 | 판단 | 근거 · 조치 |
+|---|---|---|
+| proxy-addr, body-parser, express(qs), multer, express-rate-limit(ip-address), fast-copy, brace-expansion | 조치 완료 | 패치·마이너 업데이트(#193). proxy-addr는 `TRUST_PROXY=1`(홉 수)이라 해당 경로를 쓰지 않지만 실제 IP 판단 부품이라 올림 |
+| drizzle-orm | 조치 완료 | 미사용 → 제거(#193, S11) |
+| html2pdf.js | 해당 없음(조건부) + **실제 결함 1건 수정** | XSS는 넘기는 HTML이 이스케이프됐는지에 달림 → 어깨 PDF가 생년월일·재해일자·키·몸무게를 이스케이프 없이 넣던 저장형 XSS 경로를 수정(#194), 4개 모듈 전부 이스케이프를 테스트로 고정(`src/core/utils/__tests__/pdfExportEscaping.test.js`) |
+| jspdf, dompurify, fflate | 해당 없음 | html2pdf가 캔버스 이미지를 넣는 데만 씀 — 파일 읽기는 Node 전용, AcroForm·addJS·새 창 출력·BMP/GIF·`html()`(DOMPurify)·unzip 미사용 |
+| electron-updater, builder-util-runtime | 기존 결정(D8) | Authenticode 서명 없음 → 피드 Ed25519 서명·sha512 검증(HF8)으로 보호, 피드에 토큰 없음. 업그레이드하지 않음 |
+| tar, @mapbox/node-pre-gyp | 해당 없음 | bcrypt 5 설치(이미지 빌드) 때만 사용, 실행 중 미사용 |
+| zod(루트·서버) | **후속** | 수정은 zod 4(메이저, 공유 계약 전체). 완화: `express.json` 10 MB 제한·대부분 인증 필요. zod 3 해당 여부 미확인 |
+
+**후속(각각 착수 시 계획)**: zod 4 이전 · html2pdf 0.14(jsPDF 4) 업그레이드(4개 PDF 실물 비교, 트랙 P-7 printToPDF와 함께 판단) · bcrypt 6(node-pre-gyp·tar 제거) · **서버 Docker 이미지가 개발 의존성까지 담는 문제**(`server/Dockerfile`의 `npm ci` 결과를 그대로 복사 — eslint·vitest 등이 운영 이미지에 들어감. `npm prune --omit=dev`가 정석이나 운영의 `seed:admin`이 `tsx`를 쓰므로 함께 설계).
 
 ---
 
