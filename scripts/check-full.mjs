@@ -14,6 +14,8 @@
 //   3. Server integration tests (server/vitest.integration.config.ts) against that database.
 //      WR_REQUIRE_INTEGRATION=1 turns a missing database into a failure instead of a skip.
 //   4. Python unit tests (pytest) in services/stats-engine.
+//   5. Production-dependency audit (scripts/verify-audit.mjs): fails on a high/critical npm
+//      advisory that is not in the reviewed list scripts/audit-allowlist.json. Needs the registry.
 //
 // Not included: building the Docker images — slow, and scripts/export-offline-package.ps1
 // already builds and checks them for every release package.
@@ -127,6 +129,7 @@ async function main() {
     ? await runStep('integration tests (server, real PostgreSQL)', 'npm --prefix server run test:integration', { env: integrationEnv })
     : skipped('integration tests (server, real PostgreSQL)'));
   results.push(await runStep('python unit tests (stats-engine)', `"${PYTHON}" -m pytest -q`, { cwd: STATS_DIR }));
+  results.push(await runStep('dependency audit (production, reviewed list)', 'npm run verify:audit'));
   return printSummary('check:full', results);
 }
 
