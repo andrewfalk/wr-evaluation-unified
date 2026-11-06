@@ -1,5 +1,7 @@
-import { pool } from '../db/client';
+import { createPool } from '../db/client';
 import { runWorkspaceRetention } from '../jobs/workspaceRetention';
+
+const pool = createPool();
 
 runWorkspaceRetention(pool)
   .then(({ deleted }) => {
