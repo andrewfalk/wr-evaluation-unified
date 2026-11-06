@@ -1,0 +1,988 @@
+{
+  "pendingPresetOnNewJob": {
+    "sameModuleData": false,
+    "sync": {
+      "changed": true,
+      "moduleData": {
+        "returnConsiderations": "반복적인 손목 굴신과 강한 파지 작업을 제한하고 충분한 미세 휴식을 배정합니다.",
+        "temporalSequence": {
+          "recent_task_change": "process_change",
+          "task_change_date": "2021-06-18",
+          "symptom_onset_interval": "3to12m",
+          "improves_with_rest": "unclear"
+        },
+        "jobEvaluations": [
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000161",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "반복 절단 및 칼집 내기 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture",
+                  "force"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "3.5",
+                "shift_share_percent": "55",
+                "days_per_week": "6",
+                "work_pattern": "continuous",
+                "rest_distribution": "insufficient",
+                "force_level": "moderate",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "frequent",
+                "direct_pressure_level": "mild",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.32",
+                "bk2101_repetition_per_hour": "11250",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "yes",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000160",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "집게형 부품 선별 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "2.2",
+                "shift_share_percent": "32",
+                "days_per_week": "5",
+                "work_pattern": "intermittent",
+                "rest_distribution": "moderate",
+                "force_level": "mild",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "moderate",
+                "direct_pressure_level": "none",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.55",
+                "bk2101_repetition_per_hour": "6545",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "no",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          },
+          {
+            "sharedJobId": "golden-job-new",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "프리셋 작업",
+                "direct_anatomic_link": "",
+                "exposure_types": [],
+                "repetition_level": "",
+                "daily_exposure_hours": "3",
+                "shift_share_percent": "",
+                "days_per_week": "",
+                "work_pattern": "",
+                "rest_distribution": "",
+                "force_level": "high",
+                "awkward_posture_level": "",
+                "static_holding_level": "",
+                "direct_pressure_level": "",
+                "vibration_exposure": "",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "",
+                "bk2101_repetition_per_hour": "",
+                "bk2101_monotony": "",
+                "bk2101_forced_dorsal_extension": "",
+                "bk2101_prosupination": "",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "normalize": {
+      "moduleData": {
+        "returnConsiderations": "반복적인 손목 굴신과 강한 파지 작업을 제한하고 충분한 미세 휴식을 배정합니다.",
+        "temporalSequence": {
+          "recent_task_change": "process_change",
+          "task_change_date": "2021-06-18",
+          "symptom_onset_interval": "3to12m",
+          "improves_with_rest": "unclear"
+        },
+        "jobEvaluations": [
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000161",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "반복 절단 및 칼집 내기 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture",
+                  "force"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "3.5",
+                "shift_share_percent": "55",
+                "days_per_week": "6",
+                "work_pattern": "continuous",
+                "rest_distribution": "insufficient",
+                "force_level": "moderate",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "frequent",
+                "direct_pressure_level": "mild",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.32",
+                "bk2101_repetition_per_hour": "11250",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "yes",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000160",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "집게형 부품 선별 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "2.2",
+                "shift_share_percent": "32",
+                "days_per_week": "5",
+                "work_pattern": "intermittent",
+                "rest_distribution": "moderate",
+                "force_level": "mild",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "moderate",
+                "direct_pressure_level": "none",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.55",
+                "bk2101_repetition_per_hour": "6545",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "no",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          },
+          {
+            "sharedJobId": "golden-job-new",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "",
+                "direct_anatomic_link": "",
+                "exposure_types": [],
+                "repetition_level": "",
+                "daily_exposure_hours": "",
+                "shift_share_percent": "",
+                "days_per_week": "",
+                "work_pattern": "",
+                "rest_distribution": "",
+                "force_level": "",
+                "awkward_posture_level": "",
+                "static_holding_level": "",
+                "direct_pressure_level": "",
+                "vibration_exposure": "",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "",
+                "bk2101_repetition_per_hour": "",
+                "bk2101_monotony": "",
+                "bk2101_forced_dorsal_extension": "",
+                "bk2101_prosupination": "",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "corruptedExposureTypes": {
+    "sameModuleData": true,
+    "sync": {
+      "changed": true,
+      "moduleData": {
+        "returnConsiderations": "반복적인 손목 굴신과 강한 파지 작업을 제한하고 충분한 미세 휴식을 배정합니다.",
+        "temporalSequence": {
+          "recent_task_change": "process_change",
+          "task_change_date": "2021-06-18",
+          "symptom_onset_interval": "3to12m",
+          "improves_with_rest": "unclear"
+        },
+        "jobEvaluations": [
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000161",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "반복 절단 및 칼집 내기 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "3.5",
+                "shift_share_percent": "55",
+                "days_per_week": "6",
+                "work_pattern": "continuous",
+                "rest_distribution": "insufficient",
+                "force_level": "moderate",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "frequent",
+                "direct_pressure_level": "mild",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.32",
+                "bk2101_repetition_per_hour": "11250",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "yes",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000160",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "집게형 부품 선별 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "2.2",
+                "shift_share_percent": "32",
+                "days_per_week": "5",
+                "work_pattern": "intermittent",
+                "rest_distribution": "moderate",
+                "force_level": "mild",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "moderate",
+                "direct_pressure_level": "none",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.55",
+                "bk2101_repetition_per_hour": "6545",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "no",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "normalize": {
+      "moduleData": {
+        "returnConsiderations": "반복적인 손목 굴신과 강한 파지 작업을 제한하고 충분한 미세 휴식을 배정합니다.",
+        "temporalSequence": {
+          "recent_task_change": "process_change",
+          "task_change_date": "2021-06-18",
+          "symptom_onset_interval": "3to12m",
+          "improves_with_rest": "unclear"
+        },
+        "jobEvaluations": [
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000161",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "반복 절단 및 칼집 내기 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "3.5",
+                "shift_share_percent": "55",
+                "days_per_week": "6",
+                "work_pattern": "continuous",
+                "rest_distribution": "insufficient",
+                "force_level": "moderate",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "frequent",
+                "direct_pressure_level": "mild",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.32",
+                "bk2101_repetition_per_hour": "11250",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "yes",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000160",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "집게형 부품 선별 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "2.2",
+                "shift_share_percent": "32",
+                "days_per_week": "5",
+                "work_pattern": "intermittent",
+                "rest_distribution": "moderate",
+                "force_level": "mild",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "moderate",
+                "direct_pressure_level": "none",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.55",
+                "bk2101_repetition_per_hour": "6545",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "no",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "corruptedPressureSource": {
+    "sameModuleData": false,
+    "sync": {
+      "changed": false,
+      "moduleData": {
+        "returnConsiderations": "반복적인 손목 굴신과 강한 파지 작업을 제한하고 충분한 미세 휴식을 배정합니다.",
+        "temporalSequence": {
+          "recent_task_change": "process_change",
+          "task_change_date": "2021-06-18",
+          "symptom_onset_interval": "3to12m",
+          "improves_with_rest": "unclear"
+        },
+        "jobEvaluations": [
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000161",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "반복 절단 및 칼집 내기 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture",
+                  "force"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "3.5",
+                "shift_share_percent": "55",
+                "days_per_week": "6",
+                "work_pattern": "continuous",
+                "rest_distribution": "insufficient",
+                "force_level": "moderate",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "frequent",
+                "direct_pressure_level": "mild",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.32",
+                "bk2101_repetition_per_hour": "11250",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "yes",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": null,
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000160",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "집게형 부품 선별 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "2.2",
+                "shift_share_percent": "32",
+                "days_per_week": "5",
+                "work_pattern": "intermittent",
+                "rest_distribution": "moderate",
+                "force_level": "mild",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "moderate",
+                "direct_pressure_level": "none",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.55",
+                "bk2101_repetition_per_hour": "6545",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "no",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "normalize": {
+      "moduleData": {
+        "returnConsiderations": "반복적인 손목 굴신과 강한 파지 작업을 제한하고 충분한 미세 휴식을 배정합니다.",
+        "temporalSequence": {
+          "recent_task_change": "process_change",
+          "task_change_date": "2021-06-18",
+          "symptom_onset_interval": "3to12m",
+          "improves_with_rest": "unclear"
+        },
+        "jobEvaluations": [
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000161",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "반복 절단 및 칼집 내기 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture",
+                  "force"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "3.5",
+                "shift_share_percent": "55",
+                "days_per_week": "6",
+                "work_pattern": "continuous",
+                "rest_distribution": "insufficient",
+                "force_level": "moderate",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "frequent",
+                "direct_pressure_level": "mild",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.32",
+                "bk2101_repetition_per_hour": "11250",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "yes",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": "",
+                "_corruptedArrayFields": [
+                  "bk2106_pressure_source"
+                ]
+              }
+            ]
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000160",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "집게형 부품 선별 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "2.2",
+                "shift_share_percent": "32",
+                "days_per_week": "5",
+                "work_pattern": "intermittent",
+                "rest_distribution": "moderate",
+                "force_level": "mild",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "moderate",
+                "direct_pressure_level": "none",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.55",
+                "bk2101_repetition_per_hour": "6545",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "no",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "nullJobEvaluation": {
+    "sameModuleData": false,
+    "sync": {
+      "error": "TypeError: Cannot read properties of null (reading 'sharedJobId')"
+    },
+    "normalize": {
+      "moduleData": {
+        "returnConsiderations": "반복적인 손목 굴신과 강한 파지 작업을 제한하고 충분한 미세 휴식을 배정합니다.",
+        "temporalSequence": {
+          "recent_task_change": "process_change",
+          "task_change_date": "2021-06-18",
+          "symptom_onset_interval": "3to12m",
+          "improves_with_rest": "unclear"
+        },
+        "jobEvaluations": [
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000161",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "반복 절단 및 칼집 내기 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture",
+                  "force"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "3.5",
+                "shift_share_percent": "55",
+                "days_per_week": "6",
+                "work_pattern": "continuous",
+                "rest_distribution": "insufficient",
+                "force_level": "moderate",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "frequent",
+                "direct_pressure_level": "mild",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.32",
+                "bk2101_repetition_per_hour": "11250",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "yes",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000160",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "집게형 부품 선별 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "2.2",
+                "shift_share_percent": "32",
+                "days_per_week": "5",
+                "work_pattern": "intermittent",
+                "rest_distribution": "moderate",
+                "force_level": "mild",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "moderate",
+                "direct_pressure_level": "none",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.55",
+                "bk2101_repetition_per_hour": "6545",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "no",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "jobEvaluationsNotArray": {
+    "sameModuleData": false,
+    "sync": {
+      "error": "TypeError: (moduleData.jobEvaluations || []).map is not a function"
+    },
+    "normalize": {
+      "moduleData": {
+        "returnConsiderations": "반복적인 손목 굴신과 강한 파지 작업을 제한하고 충분한 미세 휴식을 배정합니다.",
+        "temporalSequence": {
+          "recent_task_change": "process_change",
+          "task_change_date": "2021-06-18",
+          "symptom_onset_interval": "3to12m",
+          "improves_with_rest": "unclear"
+        },
+        "jobEvaluations": [
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000161",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "",
+                "direct_anatomic_link": "",
+                "exposure_types": [],
+                "repetition_level": "",
+                "daily_exposure_hours": "",
+                "shift_share_percent": "",
+                "days_per_week": "",
+                "work_pattern": "",
+                "rest_distribution": "",
+                "force_level": "",
+                "awkward_posture_level": "",
+                "static_holding_level": "",
+                "direct_pressure_level": "",
+                "vibration_exposure": "",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "",
+                "bk2101_repetition_per_hour": "",
+                "bk2101_monotony": "",
+                "bk2101_forced_dorsal_extension": "",
+                "bk2101_prosupination": "",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000160",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "",
+                "direct_anatomic_link": "",
+                "exposure_types": [],
+                "repetition_level": "",
+                "daily_exposure_hours": "",
+                "shift_share_percent": "",
+                "days_per_week": "",
+                "work_pattern": "",
+                "rest_distribution": "",
+                "force_level": "",
+                "awkward_posture_level": "",
+                "static_holding_level": "",
+                "direct_pressure_level": "",
+                "vibration_exposure": "",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "",
+                "bk2101_repetition_per_hour": "",
+                "bk2101_monotony": "",
+                "bk2101_forced_dorsal_extension": "",
+                "bk2101_prosupination": "",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "orphanJobEvaluation": {
+    "sameModuleData": true,
+    "sync": {
+      "changed": true,
+      "moduleData": {
+        "returnConsiderations": "반복적인 손목 굴신과 강한 파지 작업을 제한하고 충분한 미세 휴식을 배정합니다.",
+        "temporalSequence": {
+          "recent_task_change": "process_change",
+          "task_change_date": "2021-06-18",
+          "symptom_onset_interval": "3to12m",
+          "improves_with_rest": "unclear"
+        },
+        "jobEvaluations": [
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000161",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "반복 절단 및 칼집 내기 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture",
+                  "force"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "3.5",
+                "shift_share_percent": "55",
+                "days_per_week": "6",
+                "work_pattern": "continuous",
+                "rest_distribution": "insufficient",
+                "force_level": "moderate",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "frequent",
+                "direct_pressure_level": "mild",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.32",
+                "bk2101_repetition_per_hour": "11250",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "yes",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000160",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "집게형 부품 선별 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "2.2",
+                "shift_share_percent": "32",
+                "days_per_week": "5",
+                "work_pattern": "intermittent",
+                "rest_distribution": "moderate",
+                "force_level": "mild",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "moderate",
+                "direct_pressure_level": "none",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.55",
+                "bk2101_repetition_per_hour": "6545",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "no",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "normalize": {
+      "moduleData": {
+        "returnConsiderations": "반복적인 손목 굴신과 강한 파지 작업을 제한하고 충분한 미세 휴식을 배정합니다.",
+        "temporalSequence": {
+          "recent_task_change": "process_change",
+          "task_change_date": "2021-06-18",
+          "symptom_onset_interval": "3to12m",
+          "improves_with_rest": "unclear"
+        },
+        "jobEvaluations": [
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000161",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "반복 절단 및 칼집 내기 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture",
+                  "force"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "3.5",
+                "shift_share_percent": "55",
+                "days_per_week": "6",
+                "work_pattern": "continuous",
+                "rest_distribution": "insufficient",
+                "force_level": "moderate",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "frequent",
+                "direct_pressure_level": "mild",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.32",
+                "bk2101_repetition_per_hour": "11250",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "yes",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000160",
+            "diagnosisEntries": [
+              {
+                "diagnosisId": "00000000-0000-4000-8000-000000000159",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "집게형 부품 선별 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "awkward_posture"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "2.2",
+                "shift_share_percent": "32",
+                "days_per_week": "5",
+                "work_pattern": "intermittent",
+                "rest_distribution": "moderate",
+                "force_level": "mild",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "moderate",
+                "direct_pressure_level": "none",
+                "vibration_exposure": "none",
+                "bk2113_repetitive_wrist_motion": "",
+                "bk2101_cycle_seconds": "0.55",
+                "bk2101_repetition_per_hour": "6545",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "no",
+                "bk2101_prosupination": "yes",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

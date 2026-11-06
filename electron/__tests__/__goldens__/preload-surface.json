@@ -1,0 +1,554 @@
+{
+  "commonKeys": [
+    "platform",
+    "onMenuNew",
+    "onGotoModule",
+    "onOpenStatistics",
+    "setStatsAvailable",
+    "showAlert",
+    "showConfirm",
+    "injectEMR",
+    "extractRecord",
+    "extractConsultation",
+    "version"
+  ],
+  "preload-intranet.js": {
+    "extractConsultation": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "emr-extract-consultation",
+          "args": []
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "extractRecord": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "emr-extract-record",
+          "args": [
+            "arg1",
+            "arg2"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "injectEMR": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "emr-inject",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "loadLocalMigrationData": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "migration-load-local-data",
+          "args": []
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "notifyQuitLogoutDone": {
+      "calls": [
+        {
+          "method": "send",
+          "channel": "quit-logout-done",
+          "args": []
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "onGotoModule": {
+      "calls": [
+        {
+          "method": "on",
+          "channel": "goto-module",
+          "args": [
+            "<function>"
+          ]
+        },
+        {
+          "method": "removeListener",
+          "channel": "goto-module",
+          "args": [
+            "<function>"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": true
+    },
+    "onMenuNew": {
+      "calls": [
+        {
+          "method": "on",
+          "channel": "menu-new",
+          "args": [
+            "<function>"
+          ]
+        },
+        {
+          "method": "removeListener",
+          "channel": "menu-new",
+          "args": [
+            "<function>"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": true
+    },
+    "onOpenStatistics": {
+      "calls": [
+        {
+          "method": "on",
+          "channel": "open-statistics",
+          "args": [
+            "<function>"
+          ]
+        },
+        {
+          "method": "removeListener",
+          "channel": "open-statistics",
+          "args": [
+            "<function>"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": true
+    },
+    "onQuitRequested": {
+      "calls": [
+        {
+          "method": "on",
+          "channel": "app-quit-requested",
+          "args": [
+            "<function>"
+          ]
+        },
+        {
+          "method": "removeListener",
+          "channel": "app-quit-requested",
+          "args": [
+            "<function>"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": true
+    },
+    "platform": "win32",
+    "setAccessToken": {
+      "calls": [
+        {
+          "method": "send",
+          "channel": "set-access-token",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "setHasUnsavedDraft": {
+      "calls": [
+        {
+          "method": "send",
+          "channel": "set-has-unsaved-draft",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "setStatsAvailable": {
+      "calls": [
+        {
+          "method": "send",
+          "channel": "set-stats-available",
+          "args": [
+            true
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "showAlert": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "show-alert",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "showConfirm": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "show-confirm",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "version": {
+      "app": "0.0.0-golden",
+      "electron": "E",
+      "node": "N",
+      "chrome": "C"
+    }
+  },
+  "preload-standalone.js": {
+    "analyzeAI": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "analyze-ai",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "extractConsultation": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "emr-extract-consultation",
+          "args": []
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "extractRecord": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "emr-extract-record",
+          "args": [
+            "arg1",
+            "arg2"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsClearAutoSave": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-clear-autosave",
+          "args": []
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsDeleteItem": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-delete-item",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsDeletePatient": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-delete-patient",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsLoadAllPatients": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-load-all-patients",
+          "args": []
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsLoadAutoSave": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-load-autosave",
+          "args": []
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsLoadCustomPresets": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-load-custom-presets",
+          "args": []
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsLoadItems": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-load-items",
+          "args": []
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsLoadPatient": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-load-patient",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsLoadSettings": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-load-settings",
+          "args": []
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsMigrate": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-migrate",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsSaveAllPatients": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-save-all-patients",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsSaveAutoSave": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-save-autosave",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsSaveCustomPresets": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-save-custom-presets",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsSaveItem": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-save-item",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsSavePatient": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-save-patient",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "fsSaveSettings": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "fs-save-settings",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "injectEMR": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "emr-inject",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "loadLegacyData": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "load-legacy-data",
+          "args": []
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "onGotoModule": {
+      "calls": [
+        {
+          "method": "on",
+          "channel": "goto-module",
+          "args": [
+            "<function>"
+          ]
+        },
+        {
+          "method": "removeListener",
+          "channel": "goto-module",
+          "args": [
+            "<function>"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": true
+    },
+    "onMenuNew": {
+      "calls": [
+        {
+          "method": "on",
+          "channel": "menu-new",
+          "args": [
+            "<function>"
+          ]
+        },
+        {
+          "method": "removeListener",
+          "channel": "menu-new",
+          "args": [
+            "<function>"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": true
+    },
+    "onOpenStatistics": {
+      "calls": [
+        {
+          "method": "on",
+          "channel": "open-statistics",
+          "args": [
+            "<function>"
+          ]
+        },
+        {
+          "method": "removeListener",
+          "channel": "open-statistics",
+          "args": [
+            "<function>"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": true
+    },
+    "platform": "win32",
+    "setStatsAvailable": {
+      "calls": [
+        {
+          "method": "send",
+          "channel": "set-stats-available",
+          "args": [
+            true
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "showAlert": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "show-alert",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "showConfirm": {
+      "calls": [
+        {
+          "method": "invoke",
+          "channel": "show-confirm",
+          "args": [
+            "arg1"
+          ]
+        }
+      ],
+      "returnsUnsubscribe": false
+    },
+    "version": {
+      "app": "0.0.0-golden",
+      "electron": "E",
+      "node": "N",
+      "chrome": "C"
+    }
+  }
+}

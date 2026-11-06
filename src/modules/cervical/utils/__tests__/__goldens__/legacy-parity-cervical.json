@@ -1,0 +1,759 @@
+{
+  "orphanTask": {
+    "sameModuleData": false,
+    "sync": {
+      "changed": true,
+      "moduleData": {
+        "returnConsiderations": "40kg 이상 중량물 견착 운반과 장시간 비중립 목 자세 작업을 줄이고 보조 장비 사용을 권고합니다.",
+        "tasks": [
+          {
+            "id": 7001,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "48",
+            "carry_hours_per_shift": "0.7",
+            "forced_neck_posture": "no",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성"
+          },
+          {
+            "id": 7002,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "상방 주시 및 목 고정 작업",
+            "exposure_types": [
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "",
+            "carry_hours_per_shift": "",
+            "forced_neck_posture": "",
+            "neck_nonneutral_hours_per_day": "2.7",
+            "combined_flexion_rotation_posture": "no",
+            "precision_work": "no",
+            "notes": ""
+          },
+          {
+            "id": 7003,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "적재물 정리와 목 회전 확인",
+            "exposure_types": [
+              "shoulder_heavy_load",
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "28",
+            "carry_hours_per_shift": "0.9",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "1.2",
+            "combined_flexion_rotation_posture": "yes",
+            "precision_work": "no",
+            "notes": ""
+          },
+          {
+            "id": 7021,
+            "sharedJobId": "00000000-0000-4000-8000-000000000058",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "36",
+            "carry_hours_per_shift": "1",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성"
+          }
+        ]
+      }
+    },
+    "normalize": {
+      "moduleData": {
+        "returnConsiderations": "40kg 이상 중량물 견착 운반과 장시간 비중립 목 자세 작업을 줄이고 보조 장비 사용을 권고합니다.",
+        "tasks": [
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "48",
+            "carry_hours_per_shift": "0.7",
+            "forced_neck_posture": "no",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성",
+            "id": 7001
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "상방 주시 및 목 고정 작업",
+            "exposure_types": [
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "",
+            "carry_hours_per_shift": "",
+            "forced_neck_posture": "",
+            "neck_nonneutral_hours_per_day": "2.7",
+            "combined_flexion_rotation_posture": "no",
+            "precision_work": "no",
+            "notes": "",
+            "id": 7002
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "적재물 정리와 목 회전 확인",
+            "exposure_types": [
+              "shoulder_heavy_load",
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "28",
+            "carry_hours_per_shift": "0.9",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "1.2",
+            "combined_flexion_rotation_posture": "yes",
+            "precision_work": "no",
+            "notes": "",
+            "id": 7003
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000058",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "36",
+            "carry_hours_per_shift": "1",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성",
+            "id": 7021
+          },
+          {
+            "sharedJobId": "golden-job-gone",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "48",
+            "carry_hours_per_shift": "0.7",
+            "forced_neck_posture": "no",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성",
+            "id": 9001
+          }
+        ]
+      }
+    }
+  },
+  "taskWithoutId": {
+    "sameModuleData": false,
+    "sync": {
+      "changed": true,
+      "moduleData": {
+        "returnConsiderations": "40kg 이상 중량물 견착 운반과 장시간 비중립 목 자세 작업을 줄이고 보조 장비 사용을 권고합니다.",
+        "tasks": [
+          {
+            "id": 1767225600000.5327,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "48",
+            "carry_hours_per_shift": "0.7",
+            "forced_neck_posture": "no",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성"
+          },
+          {
+            "id": 7002,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "상방 주시 및 목 고정 작업",
+            "exposure_types": [
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "",
+            "carry_hours_per_shift": "",
+            "forced_neck_posture": "",
+            "neck_nonneutral_hours_per_day": "2.7",
+            "combined_flexion_rotation_posture": "no",
+            "precision_work": "no",
+            "notes": ""
+          },
+          {
+            "id": 7003,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "적재물 정리와 목 회전 확인",
+            "exposure_types": [
+              "shoulder_heavy_load",
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "28",
+            "carry_hours_per_shift": "0.9",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "1.2",
+            "combined_flexion_rotation_posture": "yes",
+            "precision_work": "no",
+            "notes": ""
+          },
+          {
+            "id": 7021,
+            "sharedJobId": "00000000-0000-4000-8000-000000000058",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "36",
+            "carry_hours_per_shift": "1",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성"
+          }
+        ]
+      }
+    },
+    "normalize": {
+      "moduleData": {
+        "returnConsiderations": "40kg 이상 중량물 견착 운반과 장시간 비중립 목 자세 작업을 줄이고 보조 장비 사용을 권고합니다.",
+        "tasks": [
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "48",
+            "carry_hours_per_shift": "0.7",
+            "forced_neck_posture": "no",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성"
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "상방 주시 및 목 고정 작업",
+            "exposure_types": [
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "",
+            "carry_hours_per_shift": "",
+            "forced_neck_posture": "",
+            "neck_nonneutral_hours_per_day": "2.7",
+            "combined_flexion_rotation_posture": "no",
+            "precision_work": "no",
+            "notes": "",
+            "id": 7002
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "적재물 정리와 목 회전 확인",
+            "exposure_types": [
+              "shoulder_heavy_load",
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "28",
+            "carry_hours_per_shift": "0.9",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "1.2",
+            "combined_flexion_rotation_posture": "yes",
+            "precision_work": "no",
+            "notes": "",
+            "id": 7003
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000058",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "36",
+            "carry_hours_per_shift": "1",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성",
+            "id": 7021
+          }
+        ]
+      }
+    }
+  },
+  "taskWithoutSharedJobId": {
+    "sameModuleData": true,
+    "sync": {
+      "changed": true,
+      "moduleData": {
+        "returnConsiderations": "40kg 이상 중량물 견착 운반과 장시간 비중립 목 자세 작업을 줄이고 보조 장비 사용을 권고합니다.",
+        "tasks": [
+          {
+            "id": 7001,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "48",
+            "carry_hours_per_shift": "0.7",
+            "forced_neck_posture": "no",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성"
+          },
+          {
+            "id": 7002,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "상방 주시 및 목 고정 작업",
+            "exposure_types": [
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "",
+            "carry_hours_per_shift": "",
+            "forced_neck_posture": "",
+            "neck_nonneutral_hours_per_day": "2.7",
+            "combined_flexion_rotation_posture": "no",
+            "precision_work": "no",
+            "notes": ""
+          },
+          {
+            "id": 7003,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "적재물 정리와 목 회전 확인",
+            "exposure_types": [
+              "shoulder_heavy_load",
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "28",
+            "carry_hours_per_shift": "0.9",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "1.2",
+            "combined_flexion_rotation_posture": "yes",
+            "precision_work": "no",
+            "notes": ""
+          },
+          {
+            "id": 7021,
+            "sharedJobId": "00000000-0000-4000-8000-000000000058",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "36",
+            "carry_hours_per_shift": "1",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성"
+          },
+          {
+            "id": 9002,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "48",
+            "carry_hours_per_shift": "0.7",
+            "forced_neck_posture": "no",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성"
+          }
+        ]
+      }
+    },
+    "normalize": {
+      "moduleData": {
+        "returnConsiderations": "40kg 이상 중량물 견착 운반과 장시간 비중립 목 자세 작업을 줄이고 보조 장비 사용을 권고합니다.",
+        "tasks": [
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "48",
+            "carry_hours_per_shift": "0.7",
+            "forced_neck_posture": "no",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성",
+            "id": 7001
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "상방 주시 및 목 고정 작업",
+            "exposure_types": [
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "",
+            "carry_hours_per_shift": "",
+            "forced_neck_posture": "",
+            "neck_nonneutral_hours_per_day": "2.7",
+            "combined_flexion_rotation_posture": "no",
+            "precision_work": "no",
+            "notes": "",
+            "id": 7002
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "적재물 정리와 목 회전 확인",
+            "exposure_types": [
+              "shoulder_heavy_load",
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "28",
+            "carry_hours_per_shift": "0.9",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "1.2",
+            "combined_flexion_rotation_posture": "yes",
+            "precision_work": "no",
+            "notes": "",
+            "id": 7003
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000058",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "36",
+            "carry_hours_per_shift": "1",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성",
+            "id": 7021
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "48",
+            "carry_hours_per_shift": "0.7",
+            "forced_neck_posture": "no",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성",
+            "id": 9002
+          }
+        ]
+      }
+    }
+  },
+  "nullTask": {
+    "sameModuleData": false,
+    "sync": {
+      "changed": true,
+      "moduleData": {
+        "returnConsiderations": "40kg 이상 중량물 견착 운반과 장시간 비중립 목 자세 작업을 줄이고 보조 장비 사용을 권고합니다.",
+        "tasks": [
+          {
+            "id": 1767225600000.0347,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "작업 1",
+            "exposure_types": [],
+            "load_weight_kg": "",
+            "carry_hours_per_shift": "",
+            "forced_neck_posture": "",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": ""
+          },
+          {
+            "id": 7001,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "48",
+            "carry_hours_per_shift": "0.7",
+            "forced_neck_posture": "no",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성"
+          },
+          {
+            "id": 7002,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "상방 주시 및 목 고정 작업",
+            "exposure_types": [
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "",
+            "carry_hours_per_shift": "",
+            "forced_neck_posture": "",
+            "neck_nonneutral_hours_per_day": "2.7",
+            "combined_flexion_rotation_posture": "no",
+            "precision_work": "no",
+            "notes": ""
+          },
+          {
+            "id": 7003,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "적재물 정리와 목 회전 확인",
+            "exposure_types": [
+              "shoulder_heavy_load",
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "28",
+            "carry_hours_per_shift": "0.9",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "1.2",
+            "combined_flexion_rotation_posture": "yes",
+            "precision_work": "no",
+            "notes": ""
+          },
+          {
+            "id": 7021,
+            "sharedJobId": "00000000-0000-4000-8000-000000000058",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "36",
+            "carry_hours_per_shift": "1",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성"
+          }
+        ]
+      }
+    },
+    "normalize": {
+      "moduleData": {
+        "returnConsiderations": "40kg 이상 중량물 견착 운반과 장시간 비중립 목 자세 작업을 줄이고 보조 장비 사용을 권고합니다.",
+        "tasks": [
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "48",
+            "carry_hours_per_shift": "0.7",
+            "forced_neck_posture": "no",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성",
+            "id": 7001
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "상방 주시 및 목 고정 작업",
+            "exposure_types": [
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "",
+            "carry_hours_per_shift": "",
+            "forced_neck_posture": "",
+            "neck_nonneutral_hours_per_day": "2.7",
+            "combined_flexion_rotation_posture": "no",
+            "precision_work": "no",
+            "notes": "",
+            "id": 7002
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "적재물 정리와 목 회전 확인",
+            "exposure_types": [
+              "shoulder_heavy_load",
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "28",
+            "carry_hours_per_shift": "0.9",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "1.2",
+            "combined_flexion_rotation_posture": "yes",
+            "precision_work": "no",
+            "notes": "",
+            "id": 7003
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000058",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "36",
+            "carry_hours_per_shift": "1",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성",
+            "id": 7021
+          }
+        ]
+      }
+    }
+  },
+  "noJobs": {
+    "sameModuleData": true,
+    "sync": {
+      "changed": false,
+      "moduleData": {
+        "returnConsiderations": "40kg 이상 중량물 견착 운반과 장시간 비중립 목 자세 작업을 줄이고 보조 장비 사용을 권고합니다.",
+        "tasks": [
+          {
+            "id": 7001,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "48",
+            "carry_hours_per_shift": "0.7",
+            "forced_neck_posture": "no",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성"
+          },
+          {
+            "id": 7002,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "상방 주시 및 목 고정 작업",
+            "exposure_types": [
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "",
+            "carry_hours_per_shift": "",
+            "forced_neck_posture": "",
+            "neck_nonneutral_hours_per_day": "2.7",
+            "combined_flexion_rotation_posture": "no",
+            "precision_work": "no",
+            "notes": ""
+          },
+          {
+            "id": 7003,
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "적재물 정리와 목 회전 확인",
+            "exposure_types": [
+              "shoulder_heavy_load",
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "28",
+            "carry_hours_per_shift": "0.9",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "1.2",
+            "combined_flexion_rotation_posture": "yes",
+            "precision_work": "no",
+            "notes": ""
+          },
+          {
+            "id": 7021,
+            "sharedJobId": "00000000-0000-4000-8000-000000000058",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "36",
+            "carry_hours_per_shift": "1",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성"
+          }
+        ]
+      }
+    },
+    "normalize": {
+      "moduleData": {
+        "returnConsiderations": "40kg 이상 중량물 견착 운반과 장시간 비중립 목 자세 작업을 줄이고 보조 장비 사용을 권고합니다.",
+        "tasks": [
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "48",
+            "carry_hours_per_shift": "0.7",
+            "forced_neck_posture": "no",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성",
+            "id": 7001
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "상방 주시 및 목 고정 작업",
+            "exposure_types": [
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "",
+            "carry_hours_per_shift": "",
+            "forced_neck_posture": "",
+            "neck_nonneutral_hours_per_day": "2.7",
+            "combined_flexion_rotation_posture": "no",
+            "precision_work": "no",
+            "notes": "",
+            "id": 7002
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000059",
+            "name": "적재물 정리와 목 회전 확인",
+            "exposure_types": [
+              "shoulder_heavy_load",
+              "awkward_static_neck_load"
+            ],
+            "load_weight_kg": "28",
+            "carry_hours_per_shift": "0.9",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "1.2",
+            "combined_flexion_rotation_posture": "yes",
+            "precision_work": "no",
+            "notes": "",
+            "id": 7003
+          },
+          {
+            "sharedJobId": "00000000-0000-4000-8000-000000000058",
+            "name": "중량물 어깨 운반",
+            "exposure_types": [
+              "shoulder_heavy_load"
+            ],
+            "load_weight_kg": "36",
+            "carry_hours_per_shift": "1",
+            "forced_neck_posture": "yes",
+            "neck_nonneutral_hours_per_day": "",
+            "combined_flexion_rotation_posture": "",
+            "precision_work": "",
+            "notes": "테스트 데이터 자동 생성",
+            "id": 7021
+          }
+        ]
+      }
+    }
+  }
+}
