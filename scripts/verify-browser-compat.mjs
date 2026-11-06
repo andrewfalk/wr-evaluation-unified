@@ -107,18 +107,37 @@ function blankRanges(content, ranges) {
   return out + content.slice(pos);
 }
 
+// CSS comment ranges, skipping "…"/'…' strings so `content: "/*"` cannot open a comment that
+// swallows the rest of the file (Codex review of #191, round 3). Per CSS syntax, a backslash
+// escapes the next character and an unescaped newline ends an (invalid) string.
+function cssCommentRanges(content) {
+  const ranges = [];
+  let quote = null;
+  for (let i = 0; i < content.length; i += 1) {
+    const ch = content[i];
+    if (quote) {
+      if (ch === '\\') i += 1;
+      else if (ch === quote || ch === '\n') quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === '/' && content[i + 1] === '*') {
+      const end = content.indexOf('*/', i + 2);
+      const stop = end === -1 ? content.length : end + 2;
+      ranges.push([i, stop]);
+      i = stop - 1;
+    }
+  }
+  return ranges;
+}
+
 // Blank out comments only — never string, template, regex or JSX text contents — so code after
 // `'a//b'` or `/['"]/` is still checked. JS comment positions come from espree (ESLint's parser,
 // JSX enabled): a hand-written scanner cannot tell regex literals and JSX text from strings
 // (Codex review of #191). If a file does not parse, nothing is stripped: a comment may then
 // cause a false alarm, but real code is never hidden. CSS has only /* */ comments.
 export function stripComments(content, ext) {
-  if (ext === '.css') {
-    const ranges = [];
-    const re = /\/\*[\s\S]*?(?:\*\/|$)/g;
-    for (let m; (m = re.exec(content)); ) ranges.push([m.index, m.index + m[0].length]);
-    return blankRanges(content, ranges);
-  }
+  if (ext === '.css') return blankRanges(content, cssCommentRanges(content));
   let comments;
   try {
     comments = espree.parse(content, {

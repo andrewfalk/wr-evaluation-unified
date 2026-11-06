@@ -71,6 +71,16 @@ describe('verify-browser-compat — CSS rules', () => {
     expect(names('/* color-mix() is Chrome 111+ */ .a { color: red; }', '.css')).toEqual([]);
   });
 
+  it('a comment marker inside a CSS string does not hide later rules (Codex review round 3)', () => {
+    const src = '.label::before { content: "/*"; }\n.panel { background: color-mix(in srgb, red, blue); }';
+    expect(scanSource(src, '.css', FLOOR).map((v) => v.line)).toEqual([2]);
+    expect(names(".a::after { content: '\\'/*'; }\n.b { color: color-mix(in srgb, red, blue); }", '.css')).toEqual(['color-mix()']);
+  });
+
+  it('a comment containing a quote does not start a CSS string', () => {
+    expect(names("/* don't use color-mix here */\n.b { color: color-mix(in srgb, red, blue); }", '.css')).toEqual(['color-mix()']);
+  });
+
   it('applies only rules newer than the floor', () => {
     expect(scanSource('.a { color: color-mix(in srgb, red, blue); }', '.css', 111)).toEqual([]);
   });
