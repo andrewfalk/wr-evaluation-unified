@@ -145,8 +145,8 @@ export const shoulderExportHandlers = {
     content.innerHTML = `
       <h1 style="text-align:center; margin-bottom:24px; font-size:16px; border-bottom:2px solid #333; padding-bottom:8px;">업무관련성 특별진찰 소견서</h1>
       <table style="width:100%; border-collapse:collapse; margin-bottom:16px;">
-        <tr><td style="${thStyle} width:100px;">이름/성별</td><td style="${tdStyle}">${escapeHtml(shared.name)} (${shared.gender === 'male' ? '남' : '여'})</td><td style="${thStyle} width:100px;">키/몸무게</td><td style="${tdStyle}">${shared.height || '-'}cm / ${shared.weight || '-'}kg (BMI: ${escapeHtml(bmi)})</td></tr>
-        <tr><td style="${thStyle}">생년월일</td><td style="${tdStyle}">${shared.birthDate || '-'}</td><td style="${thStyle}">재해일자</td><td style="${tdStyle}">${shared.injuryDate || '-'} (만 ${escapeHtml(age)}세)</td></tr>
+        <tr><td style="${thStyle} width:100px;">이름/성별</td><td style="${tdStyle}">${escapeHtml(shared.name)} (${shared.gender === 'male' ? '남' : '여'})</td><td style="${thStyle} width:100px;">키/몸무게</td><td style="${tdStyle}">${escapeHtml(shared.height) || '-'}cm / ${escapeHtml(shared.weight) || '-'}kg (BMI: ${escapeHtml(bmi)})</td></tr>
+        <tr><td style="${thStyle}">생년월일</td><td style="${tdStyle}">${escapeHtml(shared.birthDate) || '-'}</td><td style="${thStyle}">재해일자</td><td style="${tdStyle}">${escapeHtml(shared.injuryDate) || '-'} (만 ${escapeHtml(age)}세)</td></tr>
       </table>
       <h3 style="font-size:13px; margin:16px 0 8px;">BK2117 누적 기준 비교</h3>
       ${totalsHtml}
