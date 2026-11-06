@@ -290,13 +290,13 @@
 |---|---|---|
 | proxy-addr, body-parser, express(qs), multer, express-rate-limit(ip-address), fast-copy, brace-expansion | 조치 완료 | 패치·마이너 업데이트(#193). proxy-addr는 `TRUST_PROXY=1`(홉 수)이라 해당 경로를 쓰지 않지만 실제 IP 판단 부품이라 올림 |
 | drizzle-orm | 조치 완료 | 미사용 → 제거(#193, S11) |
-| html2pdf.js | 해당 없음(조건부) + **실제 결함 1건 수정** | XSS는 넘기는 HTML이 이스케이프됐는지에 달림 → 어깨 PDF가 생년월일·재해일자·키·몸무게를 이스케이프 없이 넣던 저장형 XSS 경로를 수정(#194), 4개 모듈 전부 이스케이프를 테스트로 고정(`src/core/utils/__tests__/pdfExportEscaping.test.js`) |
-| jspdf, dompurify, fflate | 해당 없음 | html2pdf가 캔버스 이미지를 넣는 데만 씀 — 파일 읽기는 Node 전용, AcroForm·addJS·새 창 출력·BMP/GIF·`html()`(DOMPurify)·unzip 미사용 |
+| html2pdf.js | 해당 없음(**도달 불가 코드**) + 잠재 결함 1건 수정 | html2pdf.js를 쓰는 곳은 모듈별 `exportHandlers`의 `pdf` 4개뿐인데, 모듈별 `exportHandlers`(`excelSingle`·`pdf`)는 `registerModule`에 등록만 되고 **앱 어디에서도 호출되지 않는다**(앱의 내보내기 메뉴는 `src/App.jsx` → `exportService.js` 공통 함수만 사용, 2026-11-06 확인). 그 안의 어깨 PDF가 생년월일·재해일자·키·몸무게를 이스케이프 없이 넣던 것은 #194에서 고쳤고 4개 모듈 이스케이프를 테스트로 고정(`src/core/utils/__tests__/pdfExportEscaping.test.js`) — **정정: #194 당시 "실제 저장형 XSS 경로"라고 적었으나 실행되지 않는 코드의 잠재 결함이었다** |
+| jspdf, dompurify, fflate | 해당 없음 | 위 도달 불가 PDF 코드에서만 쓰임. 쓰이더라도 html2pdf가 캔버스 이미지를 넣는 데만 씀 — 파일 읽기는 Node 전용, AcroForm·addJS·새 창 출력·BMP/GIF·`html()`(DOMPurify)·unzip 미사용 |
 | electron-updater, builder-util-runtime | 기존 결정(D8) | Authenticode 서명 없음 → 피드 Ed25519 서명·sha512 검증(HF8)으로 보호, 피드에 토큰 없음. 업그레이드하지 않음 |
 | tar, @mapbox/node-pre-gyp | 해당 없음 | bcrypt 5 설치(이미지 빌드) 때만 사용, 실행 중 미사용 |
 | zod(루트·서버) | **후속** | 수정은 zod 4(메이저, 공유 계약 전체). 완화: `express.json` 10 MB 제한·대부분 인증 필요. zod 3 해당 여부 미확인 |
 
-**후속(각각 착수 시 계획)**: zod 4 이전 · html2pdf 0.14(jsPDF 4) 업그레이드(4개 PDF 실물 비교, 트랙 P-7 printToPDF와 함께 판단) · bcrypt 6(node-pre-gyp·tar 제거) · **서버 Docker 이미지가 개발 의존성까지 담는 문제**(`server/Dockerfile`의 `npm ci` 결과를 그대로 복사 — eslint·vitest 등이 운영 이미지에 들어감. `npm prune --omit=dev`가 정석이나 운영의 `seed:admin`이 `tsx`를 쓰므로 함께 설계).
+**후속(각각 착수 시 계획)**: zod 4 이전 · **미사용 모듈별 `exportHandlers`(`excelSingle`·`pdf`, 6개 모듈)와 `html2pdf.js` 의존성 제거 검토**(앱이 호출하지 않음 — 지우면 html2pdf.js·jsPDF·DOMPurify·fflate advisory가 함께 사라지고 번들도 줄어듦. 등록 계약(`registerModule`의 `exportHandlers` 키)과 기존 테스트 정리 포함, 사용자 결정 필요) — 남긴다면 html2pdf 0.14(jsPDF 4) 업그레이드(트랙 P-7 printToPDF와 함께 판단) · bcrypt 6(node-pre-gyp·tar 제거) · **서버 Docker 이미지가 개발 의존성까지 담는 문제**(`server/Dockerfile`의 `npm ci` 결과를 그대로 복사 — eslint·vitest 등이 운영 이미지에 들어감. `npm prune --omit=dev`가 정석이나 운영의 `seed:admin`이 `tsx`를 쓰므로 함께 설계).
 
 ---
 

@@ -15,7 +15,7 @@
       "workspace": "root",
       "package": "dompurify",
       "category": "not-applicable",
-      "reason": "Pulled in by jsPDF for its html() method, which html2pdf does not call; the app does not use DOMPurify directly. Goes away with the deferred html2pdf/jsPDF upgrade.",
+      "reason": "Only reached from the per-module exportHandlers.pdf functions, which the app never calls (registered via registerModule but unused — the export menu uses src/core/utils/exportService.js; verified 2026-11-06). If used: pulled in by jsPDF for its html() method, which html2pdf does not call; the app does not use DOMPurify directly.",
       "advisories": [
         "GHSA-39q2-94rc-95cp",
         "GHSA-55q2-fjhq-7xh7",
@@ -49,7 +49,7 @@
       "workspace": "root",
       "package": "fflate",
       "category": "not-applicable",
-      "reason": "Pulled in by jsPDF; the advisory is in unzipSync on malformed ZIP64 input — the app never unzips user data with it. Goes away with the deferred jsPDF upgrade.",
+      "reason": "Only reached from the per-module exportHandlers.pdf functions, which the app never calls (registered via registerModule but unused — the export menu uses src/core/utils/exportService.js; verified 2026-11-06). If used: the advisory is in unzipSync on malformed ZIP64 input — never called on user data.",
       "advisories": [
         "GHSA-px8p-9vwx-vf98"
       ]
@@ -58,7 +58,7 @@
       "workspace": "root",
       "package": "html2pdf.js",
       "category": "not-applicable",
-      "reason": "XSS depends on unescaped HTML: all four PDF exporters escape every patient value (shoulder gap fixed in #194, pinned by src/core/utils/__tests__/pdfExportEscaping.test.js). Upgrade to 0.14 (jsPDF 4, major) deferred.",
+      "reason": "Only reached from the per-module exportHandlers.pdf functions, which the app never calls (registered via registerModule but unused — the export menu uses src/core/utils/exportService.js; verified 2026-11-06). Even if called, all four PDF exporters escape every patient value (shoulder gap fixed in #194, pinned by src/core/utils/__tests__/pdfExportEscaping.test.js). Removing the unused handlers and this dependency is a pending decision; otherwise upgrade to 0.14 (jsPDF 4, major).",
       "advisories": [
         "GHSA-w8x4-x68c-m6fc"
       ]
@@ -67,7 +67,7 @@
       "workspace": "root",
       "package": "jspdf",
       "category": "not-applicable",
-      "reason": "Used only through html2pdf to place canvas images: file inclusion is Node-only (we run in the browser); AcroForm, addJS, FreeText, new-window output and BMP/GIF decoding are not used. Fix needs html2pdf 0.14 (major) — deferred.",
+      "reason": "Only reached from the per-module exportHandlers.pdf functions, which the app never calls (registered via registerModule but unused — the export menu uses src/core/utils/exportService.js; verified 2026-11-06). If used: only through html2pdf to place canvas images — file inclusion is Node-only (we run in the browser); AcroForm, addJS, FreeText, new-window output and BMP/GIF decoding are not used.",
       "advisories": [
         "GHSA-67pg-wm7f-q7fj",
         "GHSA-7x6v-j9x4-qf24",

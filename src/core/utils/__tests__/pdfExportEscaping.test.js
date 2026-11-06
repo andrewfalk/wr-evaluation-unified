@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-// The four PDF exporters build HTML strings and assign them to `content.innerHTML`, then hand the
-// element to html2pdf. Patient data reaches that HTML from other users, EMR import and batch
-// import, so every value must be escaped — otherwise a stored value such as
-// `<img src=x onerror=…>` runs in the browser of whoever exports the PDF (found while triaging the
-// html2pdf.js XSS advisory, 2026-11-06: shoulder left birthDate/injuryDate/height/weight raw).
+// The four per-module PDF exporters build HTML strings and assign them to `content.innerHTML`, then
+// hand the element to html2pdf. Patient data comes from other users, EMR import and batch import, so
+// every value must be escaped — otherwise a stored value such as `<img src=x onerror=…>` would run in
+// the browser of whoever exports the PDF. Found while triaging the html2pdf.js advisory (2026-11-06:
+// shoulder left birthDate/injuryDate/height/weight raw). NOTE: these per-module exportHandlers are
+// registered but not called by the app today (the export menu uses core/utils/exportService.js), so
+// this was a latent defect in unreachable code; the test keeps it from returning if they are wired up.
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 let captured = null;
