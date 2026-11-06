@@ -24,13 +24,17 @@ const BLOCKING = new Set(['high', 'critical']);
 
 // Advisories reported by one `npm audit --json` result: [{ package, id, severity, title }].
 export function advisoriesFrom(auditJson) {
-  if (!auditJson || typeof auditJson !== 'object' || auditJson.error || !auditJson.vulnerabilities) {
-    const why = auditJson?.error?.summary || auditJson?.error?.code || 'no "vulnerabilities" in the output';
+  const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+  if (!isPlainObject(auditJson) || auditJson.error || !isPlainObject(auditJson.vulnerabilities)) {
+    const why = auditJson?.error?.summary || auditJson?.error?.code || '"vulnerabilities" is missing or not an object';
     throw new Error(`npm audit did not return a usable report (${why}).`);
   }
   const out = [];
   for (const [pkg, vuln] of Object.entries(auditJson.vulnerabilities)) {
-    for (const via of vuln.via || []) {
+    if (!isPlainObject(vuln) || !Array.isArray(vuln.via)) {
+      throw new Error(`npm audit did not return a usable report (entry "${pkg}" has no "via" list).`);
+    }
+    for (const via of vuln.via) {
       if (typeof via !== 'object' || !via.url) continue; // string = inherited from another package
       out.push({ package: pkg, id: via.url.split('/').pop(), severity: via.severity, title: via.title });
     }

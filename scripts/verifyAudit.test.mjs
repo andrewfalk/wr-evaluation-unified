@@ -53,5 +53,13 @@ describe('verify-audit', () => {
     expect(() => advisoriesFrom({ error: { code: 'ENOTFOUND', summary: 'registry unreachable' } })).toThrow(/registry unreachable/);
     expect(() => advisoriesFrom({})).toThrow(/usable report/);
     expect(() => advisoriesFrom(null)).toThrow(/usable report/);
+    // Malformed shapes must not read as "no vulnerabilities" (Codex review of #195).
+    expect(() => advisoriesFrom({ vulnerabilities: [] })).toThrow(/usable report/);
+    expect(() => advisoriesFrom({ vulnerabilities: { jspdf: {} } })).toThrow(/"jspdf" has no "via"/);
+    expect(() => advisoriesFrom({ vulnerabilities: { jspdf: { via: 'x' } } })).toThrow(/"jspdf" has no "via"/);
+  });
+
+  it('accepts an empty but well-formed report', () => {
+    expect(advisoriesFrom({ vulnerabilities: {} })).toEqual([]);
   });
 });
