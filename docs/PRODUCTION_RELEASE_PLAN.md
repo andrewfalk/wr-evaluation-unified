@@ -1214,12 +1214,14 @@ $envFile = '<운영 .env.production 절대경로>'
 
 - [ ] 7.1.5(앱 루프백 게시)를 배포하고 관찰을 마쳤다(`docs/UPDATE_7.1.5.md`).
 - [ ] CA 키를 백업했다(7-1). 설치 때 백업 아카이브와 `.info.txt`가 **둘 다 서버에** 있어야 한다(스크립트가 아카이브 해시를 대조한다) — 오프라인 매체에서 잠시 가져오고, 설치가 끝나면 다시 지운다.
-- [ ] 클라이언트 PC 한 대에서 설치된 루트 인증서의 **SHA-256** 지문을 구했다(설치 스크립트의 `-ExpectedRootSha256`). 그 PC의 PowerShell에서:
+- [ ] 클라이언트 PC 한 대에서 설치된 루트 인증서의 **SHA-256** 지문을 구했다(설치 스크립트의 `-ExpectedRootSha256`). 그 PC의 PowerShell에서 **한 줄씩** 실행한다(Windows 7 기본 PowerShell 2.0에서도 동작하는 형태다. 여러 줄을 한 번에 붙여 넣으면 줄이 이어져 `$c`가 비고 "ComputeHash 모호한 오버로드" 오류가 난다):
   ```powershell
-  $c = Get-ChildItem Cert:\LocalMachine\Root, Cert:\CurrentUser\Root | Where-Object Subject -like '*WR Evaluation Internal CA*' | Select-Object -First 1
-  ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($c.RawData))).Replace('-', '')
+  $c = Get-ChildItem Cert:\LocalMachine\Root, Cert:\CurrentUser\Root | Where-Object { $_.Subject -like '*WR Evaluation Internal CA*' } | Select-Object -First 1
+  $c.Subject
+  $sha = New-Object System.Security.Cryptography.SHA256Managed
+  [BitConverter]::ToString($sha.ComputeHash([byte[]]$c.RawData)).Replace('-','')
   ```
-  이 값이 백업 `.info.txt`의 `Root SHA-256`과 같아야 한다.
+  `$c.Subject`가 `CN=WR Evaluation Internal CA - … Root`를 보여야 하고, 마지막 줄의 64자리 값이 백업 `.info.txt`의 `Root SHA-256`과 같아야 한다(대소문자 무관). 지문은 공개 정보라 종이·메신저로 옮겨도 된다.
 - [ ] 서버의 보안 프로그램 담당자와 협의했다. `caddy.exe`에는 코드 서명이 없다. 허용 기준으로 `release-manifest.json`의 `caddyHost.exeSha512`(SHA-512)와 설치 경로 `C:\ProgramData\wr-caddy\bin\caddy.exe`를 전달한다. 새 Windows 서비스(`wr-caddy`, NT AUTHORITY\LocalService) 등록과 TCP 8443·8080(시범 때는 9443·9080) 인바운드 허용도 함께 알린다.
 - [ ] 서버 시각이 맞다(서버 인증서 수명이 6일이라 시각이 틀리면 인증서 오류가 난다).
 - [ ] **새 PowerShell 창**을 쓴다. 셸에 `WR_DOMAIN`·`WR_APP_PORT`·`WR_CADDY_*` 같은 변수가 있으면 env 파일보다 우선하므로 스크립트가 거부한다.
@@ -1231,20 +1233,32 @@ Docker Caddy는 8443/8080을 그대로 쓰고, `wr-caddy`가 시범 포트에서
 ```powershell
 cd C:\wr\wr-evaluation-unified-<버전>-intranet
 $envFile = '<운영 .env.production 절대경로>'
-$info = '<CA 백업 .info.txt 경로>'
+$info = (Get-ChildItem .\caddy-ca-backup\*.info.txt).FullName   # 폴더가 아니라 .info.txt 파일 경로. 결과가 정확히 한 줄인지 $info 로 확인
 $fp = '<클라이언트 PC에서 구한 SHA-256 지문>'
 .\caddy-host\install-caddy-host.ps1 -Install -ExpectedRootSha256 $fp -CaBackupInfo $info -EnvFile $envFile -WhatIf   # 점검만
 .\caddy-host\install-caddy-host.ps1 -Install -ExpectedRootSha256 $fp -CaBackupInfo $info -EnvFile $envFile
 .\caddy-host\install-caddy-host.ps1 -Status -EnvFile $envFile                                                         # → Status: OK
 ```
 
+`-WhatIf` 점검과 실제 설치는 **따로** 실행한다(여러 줄을 한 번에 붙여 넣으면 점검 결과를 보기 전에 설치가 이어서 돈다). CA 백업 아카이브(`.tar.gpg`)와 `.info.txt`는 같은 폴더에 있어야 한다 — 이 패키지 폴더에서 7-1 백업을 방금 만들었다면 `caddy-ca-backup\`에 둘 다 있고, 오프라인 매체에서 가져왔다면 두 파일을 넣은 폴더로 `$info`의 경로를 바꾼다.
+
 - 설치는 폴더 ACL → CA 복사(지문이 클라이언트·백업·볼륨 셋 다 같아야 진행) → `caddy validate` → 서비스·방화벽 → 기동·HTTPS 확인 순서다. 한 단계라도 실패하면 이번 실행이 만든 것을 되돌린다(복사한 CA는 남긴다).
-- **실제 IP 확인**: Windows 10 이상 다른 PC에서 잘못된 로그인을 1회 보낸 뒤, 관리자 콘솔 감사 로그에 **그 PC의 IP**가 남았는지 본다.
-  ```powershell
-  Set-Content -Path .\trial-login.json -Value '{"loginId":"trial-check","password":"x"}' -Encoding ASCII
-  curl.exe -k --resolve wr.hospital.local:9443:<서버 주소> -H "Content-Type: application/json" --data-binary "@trial-login.json" -o NUL -w "%{http_code}`n" https://wr.hospital.local:9443/api/auth/login   # → 401
-  ```
-  브라우저·설치본으로 9443에 접속하지 않는다(앱의 허용 출처가 8443이라 막힐 수 있다). 확인은 `curl.exe` 수준으로 한다.
+- **실제 IP 확인**: 다른 PC에서 9443에 한 번 접속한 뒤, **서버의 Caddy 접속 로그**에 그 PC의 IP가 남았는지 본다. 병원 PC에는 강제 프록시(PAC)가 걸려 있어 일반 Chrome은 프록시 오류를 내거나 프록시를 거쳐 **프록시 장비의 IP**를 남길 수 있다 — 실제 사용자 경로인 설치본(Electron)처럼 **직접 연결**로 확인한다.
+  - **Windows 7 클라이언트(기본)** — `curl.exe`가 없으므로 프록시를 끈 Chrome으로 `/health`만 연다(`Win+R`에 붙여 넣기, 32비트 Chrome이면 `C:\Program Files (x86)\…`):
+    ```
+    "C:\Program Files\Google\Chrome\Application\chrome.exe" --no-proxy-server --user-data-dir=C:\temp\chrome-test https://wr.hospital.local:9443/health
+    ```
+    인증서 경고 없이 `{"ok":true,…}`가 보여야 한다. 확인 뒤 `C:\temp\chrome-test`는 지워도 된다. 로그인 화면은 9443에서 쓰지 않는다(앱의 허용 출처가 8443이라 막힐 수 있다).
+  - **Windows 10 이상 클라이언트** — `curl.exe`는 PAC(자동 프록시 구성)를 읽지 않으므로 그대로 쓸 수 있다(창에 `HTTPS_PROXY` 환경 변수가 설정돼 있지 않을 때):
+    ```powershell
+    curl.exe -k --resolve wr.hospital.local:9443:<서버 주소> -o NUL -w "%{http_code}`n" https://wr.hospital.local:9443/health   # → 200
+    ```
+  - **서버(관리자 창)에서 확인**:
+    ```powershell
+    Get-Content C:\ProgramData\wr-caddy\logs\access.log -Tail 3
+    ```
+    방금 시각의 `/health` 줄에서 `"remote_ip"`·`"client_ip"`가 **그 클라이언트 PC의 주소**(PC에서 `ipconfig`로 확인)여야 한다. Docker 게이트웨이 주소(172.x)가 아니어야 한다. 같은 로그에 `127.0.0.1`로 남은 `/api/config/public` 줄은 설치 스크립트가 서버 안에서 스스로 점검한 기록이라 정상이다.
+  - Caddy가 받은 IP를 앱에 넘기는 경로(`X-Forwarded-For` → 감사 로그)는 개발 PC 리허설(`verify-stack.ps1 accept`)에서 확인했고, 운영에서는 9-3 전환 뒤 관리자 콘솔 감사 로그로 확인한다.
 - 문제가 있으면 `.\caddy-host\install-caddy-host.ps1 -Uninstall`로 되돌린다. 8443에는 영향이 없다.
 
 ### 9-3. 3단계 — 8443 전환 (점검 창 약 15분)

@@ -1,6 +1,6 @@
-# 전체 코드베이스 리팩터링 밑그림 v2 (2026-10-15 작성 · 2026-10-18 갱신 — 진단 기준 main 5604f36·v7.1.3, Phase H 완료 시점 main 77e6686·v7.1.4)
+# 전체 코드베이스 리팩터링 밑그림 v2 (2026-10-15 작성 · 2026-10-18 갱신 · 2026-11-06 상태 갱신 — 진단 기준 main 5604f36·v7.1.3, Phase H 완료 시점 main 77e6686·v7.1.4)
 
-> **정본**: 저장소 `docs/REFACTORING_ROADMAP.md` · **상태**: 계획 확정(2026-10-15, Codex 리뷰 5회 반영) · **Phase H(7.1.4 보안 핫픽스) 코드·릴리스 문서 main 머지 완료**(PR #159~#172, 2026-10-18, HEAD `77e6686`, 버전 7.1.4 — 업데이트 피드 서명 HF8 포함, 메모리 `project_phase_h_hotfix_plan`) · **7.1.4는 미배포**(Electron 설치본 빌드 → 서명 키로 패키징 → `docs/UPDATE_7.1.4.md` 릴리스 게이트 → 운영 배포는 사용자 몫) · **트랙 P(성능) 추가(2026-10-16)** · 운영은 v7.1.3 배포 완료·정상 구동(2026-10-16 사용자 확인) · **새 세션 시작점**: 맨 아래 "착수 순서" — 7.1.4 배포 게이트 확인 후 Phase 0 착수, 각 Phase는 착수 시 세부 플랜(플랜 모드 + codex 루프)을 다시 세운다. 근거 라인(file:line)은 부록 B 기준이며 코드가 바뀌면 재확인할 것. Phase H가 바꾼 파일을 가리키는 Phase 0~5·트랙 P·quick win의 줄 번호는 2026-10-18(main `77e6686`) 기준으로 대조해 맞췄고(HF 표 원문과 부록은 2026-10-15 기준 그대로), 그 밖의 줄 번호는 각 Phase 착수 시 재확인한다.
+> **정본**: 저장소 `docs/REFACTORING_ROADMAP.md` · **상태**: 계획 확정(2026-10-15, Codex 리뷰 5회 반영) · **Phase H(7.1.4 보안 핫픽스) 코드·릴리스 문서 main 머지 완료**(PR #159~#172, 2026-10-18, HEAD `77e6686`, 버전 7.1.4 — 업데이트 피드 서명 HF8 포함, 메모리 `project_phase_h_hotfix_plan`) · **7.1.4 운영 배포 완료(2026-10-31)** · 그 뒤 리팩터링과 별개의 운영 작업 "접속자 실제 IP 기록"(PR #174~#185, v7.1.5·v7.1.6, 운영 배포·호스트 Caddy 8443 전환 완료 2026-11-06 — `docs/PRODUCTION_RELEASE_PLAN.md` 9절)을 먼저 끝냈고 **Phase 0은 아직 착수 전** · **CI(P0-1)는 보류**(D9) · **트랙 P(성능) 추가(2026-10-16)** · **새 세션 시작점**: 맨 아래 "착수 순서" — Phase 0(줄끝 P0-8·.jsx 린트 P0-4부터), 각 Phase는 착수 시 세부 플랜(플랜 모드 + codex 루프)을 다시 세운다. 근거 라인(file:line)은 부록 B 기준이며 코드가 바뀌면 재확인할 것. Phase H가 바꾼 파일을 가리키는 Phase 0~5·트랙 P·quick win의 줄 번호는 2026-10-18(main `77e6686`) 기준으로 대조해 맞췄고(HF 표 원문과 부록은 2026-10-15 기준 그대로), 그 밖의 줄 번호는 각 Phase 착수 시 재확인한다.
 
 ## Context
 
@@ -16,13 +16,14 @@
 | # | 결정 | 영향 |
 |---|---|---|
 | D1 | 유지 배포 형태: **Electron 인트라넷(운영) · Electron 독립형 · Vercel 웹**. mock-intranet 개발 서버는 **유지하되 정리** | 플랫폼 5축 유지, 어댑터로 집중 |
-| D2 | **Win7 호환 유지, 하한은 Chrome 109**(Win7 마지막 크롬) | vite target `chrome109`, browserslist 기반 lint. ⚠ 2026-06 현장 크롬에서 `Object.hasOwn`(93+)이 깨진 기록 → **현장 PC 1대 `chrome://version` 확인을 target 상향 머지 게이트로**(P0-5) |
+| D2 | **Win7 호환 유지, 하한은 Chrome 109**(Win7 마지막 크롬) | vite target `chrome109`, browserslist 기반 lint. ⚠ 2026-06 현장 크롬에서 `Object.hasOwn`(93+)이 깨진 기록 → **현장 PC 1대 `chrome://version` 확인을 target 상향 머지 게이트로**(P0-5). ✅ **2026-11-06 현장 Win7 PC 1대 Chrome 109 확인**(호스트 Caddy 접속 로그의 User-Agent) |
 | D3 | 클라이언트 **TS 점진 전환**(allowJs+checkJs → 분할/수정하는 파일부터 .ts/.tsx) | C11 규칙 |
 | D4 | **main에 소형 PR 연속**, 기능 개발 병행 | PR 3종 라벨(move/safe/flagged), freeze window 규칙 |
 | D5 | 보안 hotfix-first 항목은 **7.1.4 보안 패치로 먼저** 릴리스·배포(운영 7.1.3 → 7.1.4; 7.1.3은 2026-10-16 배포 완료·정상 구동) | Phase H |
 | D6 | AI PHI: **외부 벤더(Gemini/Claude)만 비식별, 내부 LLM은 전문 허용** | HF7 |
 | D7 | Vercel 웹 AI: **배포 비밀키 + rate limit + origin 403**로 유지(번들 토큰의 한계 인지) | HF7(b) |
 | D8 | 코드서명 당장 불가 → **대안**: 배포 전용 Ed25519 키로 채널별 피드 yml(`latest.yml`·`canary.yml`) 서명·앱 검증 + updates 폴더 권한 최소화 (electron-updater는 업그레이드하지 않음 — 해당 권고가 미서명 설치본·무토큰 피드에는 적용되지 않고 Electron 22 호환 위험만 추가) | HF8 ✅ (**7.1.4에 편입**, 2026-10-18 — PC 셸 교체를 1회로 줄이려는 사용자 결정) |
+| D9 | **CI(GitHub Actions) 보류** (2026-10-15 결정, 이 문서에는 2026-11-06 반영). 1인 개발이고 병합 전에 로컬에서 전체 검증을 이미 하며, 이 프로젝트에서 실제로 사고가 난 영역(실DB 동시성·구형 브라우저·실화면·배포 환경)은 CI가 잡지 못한다. CI가 잡는 lint·vitest·tsc·빌드는 로컬 검증과 겹쳐 이중 절차가 된다. **도입 조건**: 공동 개발자가 생김 / 로컬 검증 누락으로 main이 깨짐 / Dependabot 등 자동 PR을 정기 처리해야 함 | P0-1을 로컬 단일 명령(`npm run check`)으로 대체. 이 문서에서 "CI"로 적힌 검증은 그 명령으로 읽는다(Phase 0 표 아래 주 참고) |
 
 ## 진단 요약 (근거는 부록 B)
 
@@ -105,7 +106,7 @@
 
 **남은 것 · 수용한 한계(배포 전 확인)**
 
-- **릴리스 게이트 미통과**: Electron 설치본 수동 점검 전부와 서명 업데이트의 실기기 시험(성공 + yml 변조·`.sig` 삭제·다른 키 거부)은 아직 실행하지 않았다. 통과 전에는 7.1.4를 배포하지 않는다(`docs/UPDATE_7.1.4.md`).
+- ✅ **릴리스 게이트 통과**(사용자 확인): Electron 설치본 수동 점검 전부와 서명 업데이트의 실기기 시험(성공 + yml 변조·`.sig` 삭제·다른 키 거부)을 실행·통과한 뒤 7.1.4를 운영 배포했다(2026-10-31, `docs/UPDATE_7.1.4.md`).
 - **7.1.3 → 7.1.4 전환은 서명 보호 밖**: 7.1.3 이하 셸에는 검증기가 없다. 코드서명(Authenticode)도 여전히 없다. 서명 키를 분실하면 모든 PC의 셸을 재배포해야 하고, 교체는 새 공개 키를 셸 목록에 먼저 추가하는 과도기 릴리스를 거친다.
 - **운영 전제**: Vercel Production·Preview에 `WEB_AI_CLIENT_TOKEN`·`VITE_WEB_AI_TOKEN`(같은 값)과 Upstash env가 없으면 웹 AI는 503으로 닫힌다. 미리보기에서는 실제 AI 호출까지 확인했고, 운영 주소에서의 호출은 미확인이다.
 - **구 셸 + 7.1.4 서버 조합**: 디바이스가 active가 아닌 PC에서 임시 비밀번호로 로그인하면 디바이스 등록이 최대 20분 늦어진다(앱 재시작으로 해소). 사용자 결정으로 서버 예외 없이 유지하고 안내서에 명시했다.
@@ -118,11 +119,11 @@
 
 | # | 목표 | 파일/내용 | 재사용 | 위험/크기 | 검증 |
 |---|---|---|---|---|---|
-| P0-1 | GitHub Actions CI 6 job: 루트 vitest / 서버 vitest(postgres:16 service + `TEST_DATABASE_URL` + `migrate`) / pytest(Python 3.11, 운영 핀) / lint(루트+서버) / typecheck / `build:web` + docker build | `.github/workflows/ci.yml` | `server/src/db/migrate.ts`, `docker-compose.yml` | L/M | no-op PR에서 전부 green |
-| P0-2 | 조용한 skip 금지 | `server/src/testing/env.ts` `requireIntegrationEnv()`; `skipIf(!TEST_DATABASE_URL)` 15파일을 "CI면 실패, 로컬은 skip+경고"로 | – | L/S | `CI=1` env 누락 시 실패 |
+| P0-1 | ~~GitHub Actions CI 6 job~~ **보류(D9)** → **로컬 검증 명령 묶기**: 지금 손으로 하는 검증을 그대로 한 명령으로. `npm run check` = lint(루트+서버) · 루트 vitest · 서버 typecheck·vitest(unit) · `build:web`(평소 PR 전) / `npm run check:full` = check + 서버 통합 테스트(`TEST_DATABASE_URL` + `migrate`) · pytest · docker build(해당 영역을 건드린 PR과 릴리스 전). 새 검사를 추가하는 것이 아니라 묶기만 한다 | 루트 `package.json` scripts(필요하면 `scripts/check.mjs`) | 기존 npm scripts | L/S | `npm run check`가 지금 main에서 통과 |
+| P0-2 | 조용한 skip 금지 | `server/src/testing/env.ts` `requireIntegrationEnv()`; `skipIf(!TEST_DATABASE_URL)` 15파일을 "`check:full`(통합 필수 플래그 `WR_REQUIRE_INTEGRATION=1`)이면 실패, 평소 실행은 skip+경고"로 | – | L/S | `WR_REQUIRE_INTEGRATION=1`에서 env 누락 시 실패 |
 | P0-3 | `createApp(deps)` 추출(`move`) — 테스트가 실제 app을 띄울 수 있게 | `server/src/app.ts`(신규), `index.ts`는 부팅만; `db/client.ts:3` 즉시 pool 생성 제거 → `createPool(config)` | `createConfig` | L/M | 서버 1,602케이스, docker |
 | P0-4 | **.jsx 린트** + 베이스라인 | `eslint.config.mjs`: `files: ['**/*.{js,jsx,mjs,cjs}']`, `parserOptions.ecmaFeatures.jsx`; 기존 위반은 ESLint 9.24+ bulk suppressions(`--suppress-all`)로 `eslint-suppressions.json` 베이스라인, CI에서 증가 금지·주간 `--prune-suppressions`. 대상에 `electron/`·`api/`·`shared/`·`packages/` 추가 | 설치본 ESLint ^9.39 | L/S | `npx eslint src/App.jsx`가 "ignored" 아님 |
-| P0-5 | **브라우저 하한 고정** | `package.json` `browserslist: ["chrome 109"]`, `vite.config.js:41` target `chrome109`, `eslint-plugin-compat`, `stylelint` + `stylelint-no-unsupported-browser-features`, `scripts/verify-chart-compat.mjs` 퇴역. **머지 게이트: 현장 Win7 PC 1대 `chrome://version` 확인**(<109면 그 값으로; <93이면 `Object.hasOwn` 금지 유지) | – | L/M | lint 0, `build:web` |
+| P0-5 | **브라우저 하한 고정** | `package.json` `browserslist: ["chrome 109"]`, `vite.config.js:41` target `chrome109`, `eslint-plugin-compat`, `stylelint` + `stylelint-no-unsupported-browser-features`, `scripts/verify-chart-compat.mjs` 퇴역. **머지 게이트: 현장 Win7 PC 1대 `chrome://version` 확인**(<109면 그 값으로; <93이면 `Object.hasOwn` 금지 유지). ✅ 2026-11-06 1대 Chrome 109 확인으로 게이트 충족 — 단 2026-06에 `Object.hasOwn`이 깨진 PC(당시 <93)가 이후 갱신됐는지는 미확인이므로, 착수 시 그 PC가 남아 있는지 한 번 더 묻는다 | – | L/M | lint 0, `build:web` |
 | P0-6 | checkJs 점진 | `tsconfig.client.json`(`allowJs+checkJs+strict`, `target ES2019`, `lib ES2019+DOM`, `jsx react-jsx`, `moduleResolution Bundler`), 실패 파일에 `// @ts-nocheck` 코드모드 + `scripts/ts-ratchet.mjs`(개수 증가 금지), `src/types/global.d.ts`(`window.electron`, `__APP_GIT_COMMIT__`), 루트 `typecheck`를 `tsc -b`(references) | JSDoc 64태그 | L/S | CI typecheck |
 | P0-7 | **`@wr/*` 해석 통일 — npm workspaces + always-dist(+watch)** | 3단계: (a) 지정자 통일(`@contracts`→`@wr/contracts`, `@analytics-core`→`@wr/analytics-core` 코드모드, vite/vitest/tsconfig alias 동시 수정) (b) 서버 `pretest`/`pretypecheck`에 패키지 빌드 추가 (c) 루트 `workspaces: ["shared","packages/*","server"]`, 하위 lock 3개 삭제, zod `^3.25.76` 단일 호이스트, alias 전부 삭제, `scripts/dev.mjs`(tsup --watch ×2 + vite), `vercel.json` installCommand. **서버 모듈 해석은 같은 PR에서 함께 정렬**(Codex 지적: `moduleResolution: Node16`만 바꾸면 TS5110, `module`까지 맞춰도 ESM 타입 선언 때문에 TS1479): `shared/package.json`·`packages/analytics-core/package.json` `exports`를 `{ "import": {"types": "./dist/*.d.ts", "default": "./dist/*.js"}, "require": {"types": "./dist/*.d.cts", "default": "./dist/*.cjs"} }` 형태로(tsup이 이미 `.d.cts` 생성) + 서버 tsconfig `module: Node16` + `moduleResolution: Node16` + paths 삭제 → `npm --prefix server run typecheck`·`build`·vitest 통과를 머지 조건으로; 실패 시 폴백 = `node10` 유지하고 paths만 워크스페이스 심링크 경로로 갱신. **Docker도 같은 PR**(Codex 지적: hoisting으로 루트 `node_modules`에 설치되는데 최종 이미지는 `server/node_modules`만 복사 — `server/Dockerfile:126`): builder 단계에서 루트 `npm ci --include-workspace-root --workspaces` → 빌드 → `npm prune --omit=dev --include-workspace-root --workspaces`; 최종 이미지에 루트 `node_modules`(심링크 `@wr/*` 포함)·`shared/{package.json,dist}`·`packages/analytics-core/{package.json,dist}`·`server/{package.json,dist,node_modules?}`를 경로 구조 그대로 COPY. CI docker job에서 `docker compose up` + `/health` 200 + `/api/config/public` 응답으로 **컨테이너 기동 검증** | `distSmoke.test.ts` | (c) M/L | docker build + 컨테이너 기동 + Vercel preview + asar 검사 |
 | P0-8 | 줄끝·포매터 | PR1 `git add --renormalize .`(README 인덱스 CRLF 해소) + `.editorconfig`; PR2 `.prettierrc` + "수정 파일만 포맷" 규칙, 디렉터리별 전체 포맷은 `.git-blame-ignore-revs` 등록 freeze 커밋 | `.gitattributes` | L/S | `git ls-files --eol | grep i/crlf` = 0 |
@@ -132,7 +133,9 @@
 | P0-12 | Python 재현 | `services/stats-engine/{requirements-dev.txt,pyproject.toml}`(pytest·ruff), `.python-version`(3.11), 루트 `test:py`, pose `requirements.txt` `==` 핀 | – | L/S | pytest 234+47 |
 | P0-13 | **성능 기준선**(트랙 P 선행) | ① 인트라넷 빌드 cold/warm 네트워크 전송량·Lighthouse(DevTools) ② 라우트별 p95(S9 access log 전엔 임시 타이머 미들웨어) ③ `statsEngine` spawn→첫 바이트 vs 계산 시간 로그 ④ React Profiler commit 시간(환자 100·500명 픽스처) → `docs/PERF_BASELINE.md`에 기록. 트랙 P 항목은 이 수치 대비 효과를 적는다 | `src/core/fixtures/createTestPatients.js` | L/S | 수치 4종 기록 |
 
-보안 훅(Phase 0): gitleaks action, `npm audit` 보고 job, Dependabot 디렉터리 확장(`/server`,`/shared`,`/packages/*`, pip)(L16).
+보안 훅(Phase 0): ~~gitleaks action, `npm audit` 보고 job~~ → D9에 따라 `check:full`에 `npm audit`(루트·서버) 보고와 gitleaks 로컬 실행(설치돼 있을 때만)을 넣는다. Dependabot 디렉터리 확장(`/server`,`/shared`,`/packages/*`, pip)(L16)은 자동 PR이 늘어 D9의 CI 도입 조건 ③에 해당할 수 있으므로, 확장할 때 CI 도입 여부를 다시 판단한다.
+
+> **"CI" 표기 읽는 법(D9)**: 이 문서의 다른 곳(P0-6·P0-7·P0-9·S10·S11·E6·K5·D5·검증 전략 표 등)에 "CI"·"CI job"·"CI에서 증가 금지"로 적힌 검증은 **`npm run check`(빠른 묶음) 또는 `npm run check:full`(통합·docker·pytest)에 넣는 로컬 검사**로 읽는다. 래칫(suppressions·`@ts-nocheck` 개수 증가 금지)도 그 명령 안의 스크립트가 막는다.
 
 ---
 
@@ -343,7 +346,7 @@ shared/contracts/{aiAnalysis,aiPrompt,aiModels}.ts  # AI 입력 계약(.strict) 
 - **freeze window**: PR 제목 `[freeze App.jsx 10/21]`, 최대 24h, 대상 C3-①⑦⑧·S5·S7-③④·S6-①·E1·C10-①·D5. 창 후 `scripts/codemod-imports.mjs`(경로 변경 맵)로 기능 브랜치 자체 rebase.
 - **안정 seam**: 공개 팩토리 시그니처(`createPatientsRouter(pool)` 등), `registerModule` 매니페스트 키(추가만), `window.electron` 키(추가만)는 Phase 종료까지 유지; re-export shim은 1릴리스 유지 후 `no-restricted-imports` deprecation으로 제거.
 - 진행 중 기능이 있는 파일은 리팩터링 보류("2주 no-touch" 목록 유지); 리팩터링 브랜치 수명 ≤2일. 주간 리듬: 월·화 `move`/freeze, 수~금 `safe` + 기능.
-- 모든 리팩터링 PR = 전체 CI(통합·docker 포함); `flagged`는 두 Electron 타깃 수동 스모크 추가. 동시성 수정은 실DB로 실패 재현 후 복원(기존 교훈).
+- 모든 리팩터링 PR = `npm run check` 통과(통합 테스트·docker·Python을 건드린 PR은 `npm run check:full`, D9); `flagged`는 두 Electron 타깃 수동 스모크 추가. 동시성 수정은 실DB로 실패 재현 후 복원(기존 교훈).
 
 ---
 
@@ -352,7 +355,7 @@ shared/contracts/{aiAnalysis,aiPrompt,aiModels}.ts  # AI 입력 계약(.strict) 
 | Phase | 자동 | 수동 | DoD |
 |---|---|---|---|
 | H | HF별 단위/라우트 테스트(간호 계정 비담당 덮어쓰기 불가 · 임시비번 403 · preload 콜백에 event 없음 · `/api` no-store · 외부 벤더 미비식별 400 · 웹 토큰 없음 403/초과 429 · 서명 불일치 다운로드 거부) | 7.1.4 설치본 릴리스 게이트(`docs/UPDATE_7.1.4.md`: 설치·EMR·AI·일괄 import roundtrip·서명 업데이트 실기기 시험), Vercel preview | 7.1.4 운영 배포 완료(HF8 포함; 코드 머지는 완료, 배포는 게이트 통과 후) |
-| 0 | CI 6 job green, G1–G10 존재, suppressions 수 추세 ↓, `git ls-files --eol` CRLF 0 | 현장 PC 크롬 버전 확인 | `.jsx` 린트됨·src typecheck 켜짐·`@wr/*` 단일 해석·skip 0 |
+| 0 | `npm run check`·`check:full` 통과(D9), G1–G10 존재, suppressions 수 추세 ↓, `git ls-files --eol` CRLF 0 | 현장 PC 크롬 버전 확인 | `.jsx` 린트됨·src typecheck 켜짐·`@wr/*` 단일 해석·skip 0 |
 | 1 | 서버 unit/integration 프로젝트, G5/G6 불변, `grep res.status(500)` 0, `patient_records` 쓰기 파일 1 | 실DB 동시성(PATCH/락/claim), Tier-3(docker postgres → dev-intranet-server.ps1 → `npm run dev`) | 라우트 ≤400줄·하네스 단일·`stats/` 트리·체크섬 활성·SIGTERM 정상 종료·보안 bundle 종결 |
 | 2 | G1–G4·G8·G9 불변, lint: core→modules 0·`window.electron` 어댑터 외 0·stylelint 0, `typecheck:client` 전 파일 | 두 Electron 타깃 + Vercel preview 스모크, 다크모드 육안, Chrome 109 환경 1회 | `App.jsx` ≤200줄·매니페스트 검증·서술 단일 소스 ADR·twin parity·src TS ≥80% |
 | 3 | Electron 테스트 82+·`ipcRegistration`·asar 검사·버전 일관성 | 설치본 2종 설치·업데이트 경로 | `main.js` ≤150줄·타깃별 IPC·`build-target.json` 없음·asar <40MB |
@@ -380,8 +383,8 @@ shared/contracts/{aiAnalysis,aiPrompt,aiModels}.ts  # AI 입력 계약(.strict) 
 
 1. (완료) 결정 D1–D8과 정정 사항(서버 vitest=dist, AI 분기=analysisClient.js)을 메모리에 저장함.
 2. **Phase H 코드·릴리스 문서 main 머지 완료**(2026-10-18, PR #159~#172, HEAD `77e6686`, 버전 7.1.4). 세부 결과는 Phase H 섹션 "구현 결과", 계획은 메모리 `project_phase_h_hotfix_plan`.
-3. **7.1.4 배포(사용자 몫)**: `npm run electron:build:intranet`(EMR 헬퍼 빌드 `build:emr-helper`에 Windows 기본 포함 .NET Framework 4의 `C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe`가 필요 — 별도 dotnet SDK 불필요) → `export-offline-package.ps1 -UpdateSigningKey "<비밀 키>"`(암호가 걸린 키면 같은 창에 `WR_UPDATE_SIGNING_PASSPHRASE` 설정) → `docs/UPDATE_7.1.4.md` 릴리스 게이트(설치본 수동 점검 + 서명 업데이트 실기기 시험) 통과 → 운영 배포. 서명 비밀 키와 암호는 오프라인 백업.
-4. Phase 0은 H 배포와 병행 가능하되, 충돌 최소화를 위해 CI(P0-1)·ESLint(P0-4)·줄끝(P0-8)부터.
+3. ✅ **7.1.4 운영 배포 완료(2026-10-31)**. 당시 절차(기록용): `npm run electron:build:intranet`(EMR 헬퍼 빌드 `build:emr-helper`에 Windows 기본 포함 .NET Framework 4의 `C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe`가 필요 — 별도 dotnet SDK 불필요) → `export-offline-package.ps1 -UpdateSigningKey "<비밀 키>"`(암호가 걸린 키면 같은 창에 `WR_UPDATE_SIGNING_PASSPHRASE` 설정) → `docs/UPDATE_7.1.4.md` 릴리스 게이트(설치본 수동 점검 + 서명 업데이트 실기기 시험) 통과 → 운영 배포. 서명 비밀 키와 암호는 오프라인 백업.
+4. (2026-11-06) 운영 작업 "접속자 실제 IP 기록"(v7.1.5·v7.1.6, 호스트 Caddy 8443 전환)이 끝나 Phase 0으로 돌아온다. **줄끝(P0-8) → .jsx 린트(P0-4)부터**. CI(P0-1)는 D9에 따라 보류하고, 로컬 `npm run check` 묶기는 P0-4 이후 래칫을 넣을 때 함께 만든다.
 5. 각 Phase 완료 시 이 문서의 해당 표에 "완료(PR#, 날짜)"를 기록하고 메모리 `project_refactoring_roadmap`을 갱신한다.
 
 ---
