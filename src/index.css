@@ -3120,7 +3120,10 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   text-decoration: underline;
 }
 .signup-approval-result {
-  background: color-mix(in srgb, var(--success, #28a745) 8%, var(--bg-secondary, #f5f5f5));
+  /* 8% green tint over the panel color. Was color-mix() (Chrome 111+), which Win7 Chrome 109 and
+     the Electron 22 (Chromium 108) installer ignored — the box lost its background. */
+  background-color: var(--bg-secondary, #f5f5f5);
+  background-image: linear-gradient(rgba(40, 167, 69, 0.08), rgba(40, 167, 69, 0.08));
   border: 1px solid var(--success, #28a745);
   border-radius: 6px;
   padding: 0.75rem 1rem;

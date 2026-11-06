@@ -52,7 +52,7 @@ npm run dev               # 개발 서버 (localhost:3000)
 npm run build:web         # 웹 빌드 → dist/web/
 ```
 
-> `dev` / `build:*` / `test` 계열은 `shared/`(`@wr/contracts`)와 `packages/analytics-core`를 `scripts/prebuild-*.mjs`로 먼저 빌드한다. 차트 호환성(Chrome 80 대응)은 `npm run verify:chart-compat`로 확인한다.
+> `dev` / `build:*` / `test` 계열은 `shared/`(`@wr/contracts`)와 `packages/analytics-core`를 `scripts/prebuild-*.mjs`로 먼저 빌드한다. 브라우저 하한(Chrome 108 — Win7 Chrome 109·설치본 Electron 22) 초과 기능은 `npm run verify:browser-compat`로 확인한다(`npm run check`에 포함).
 
 ### Standalone (단일 PC / 웹)
 
@@ -449,7 +449,7 @@ wr-evaluation-unified/
 │   ├── set-build-target.mjs            # standalone/intranet 빌드 타깃 토글
 │   ├── verify-csp.mjs                  # CSP 헤더 검증
 │   ├── prebuild-shared.mjs, prebuild-analytics-core.mjs  # @wr/contracts·@wr/analytics-core 선빌드
-│   ├── verify-chart-compat.mjs         # 통계 차트 구형 Chrome(80) 호환 검사
+│   ├── verify-browser-compat.mjs       # 브라우저 하한(Chrome 108) 초과 기능 검사 — npm run check 포함
 │   ├── mock-intranet-server.mjs        # 개발용 mock 서버
 │   ├── fetch-pose-weights.ps1          # pose inference 모델 준비
 │   ├── fetch-caddy.ps1, caddy-pin.ps1  # 호스트용 caddy.exe 다운로드·고정 SHA-512 검증 (패키징 전)

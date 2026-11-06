@@ -3,6 +3,9 @@
   "version": "7.1.6",
   "description": "근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미",
   "main": "electron/main.js",
+  "browserslist": [
+    "chrome >= 108"
+  ],
   "scripts": {
     "dev": "vite",
     "predev": "node scripts/prebuild-shared.mjs && node scripts/prebuild-analytics-core.mjs",
@@ -42,7 +45,7 @@
     "server:seed:admin": "cd server && npm run seed:admin",
     "server:seed:stats-test-patients": "cd server && npm run seed:stats-test-patients --",
     "verify:csp": "node scripts/verify-csp.mjs",
-    "verify:chart-compat": "node scripts/verify-chart-compat.mjs"
+    "verify:browser-compat": "node scripts/verify-browser-compat.mjs"
   },
   "dependencies": {
     "@upstash/ratelimit": "^2.2.0",

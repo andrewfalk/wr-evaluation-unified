@@ -35,10 +35,12 @@ export default defineConfig({
     assetsDir: 'assets',
     sourcemap: false,
     minify: 'esbuild',
-    // 인트라넷 클라이언트(윈도7 + 구형 크롬)를 위해 ES2020+ 문법을 트랜스파일.
-    // 주의: target은 문법만 변환하므로 Object.hasOwn 같은 신규 "메서드"는
-    // 소스에서 직접 호환 코드로 작성해야 함(diagnosisMapping.js 참고).
-    target: ['chrome80', 'es2019'],
+    // 브라우저 하한 = Chrome 108 (package.json browserslist와 같은 값, REFACTORING_ROADMAP D2/P0-5).
+    // 현장 Win7 PC는 Chrome 109, 인트라넷 설치본(Electron 22 = Chromium 108)도 이 웹 빌드를
+    // 그대로 로드한다 → 108. 하한을 올리려면 Electron 업그레이드가 먼저다.
+    // target은 문법만 변환한다. 108에 없는 API·메서드는 eslint-plugin-compat(compat/compat)과
+    // scripts/verify-browser-compat.mjs가 `npm run check`에서 막는다.
+    target: ['chrome108'],
     rollupOptions: {
       output: {
         manualChunks: {
