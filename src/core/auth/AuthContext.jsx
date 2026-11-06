@@ -80,7 +80,7 @@ export function AuthProvider({ children }) {
         setSessionState(fallback);
         setSessionVerified(true); // local session needs no server check
       });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps — mount-only, uses ref snapshot
+  }, []); // mount-only, uses ref snapshot
 
   // Normalize and persist outside the state updater so the return value is stable.
   const setSession = useCallback((nextSession) => {
