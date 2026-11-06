@@ -1,0 +1,1182 @@
+[
+  {
+    "step": "POST /api/patients",
+    "status": 201,
+    "body": {
+      "id": "<uuid-3>",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "<uuid-4>",
+              "endDate": "2015-01-03",
+              "jobName": "축산물 가공 작업자",
+              "presetId": null,
+              "startDate": "1997-12-03",
+              "workDaysPerYear": 251,
+              "workPeriodOverride": ""
+            },
+            {
+              "id": "<uuid-5>",
+              "endDate": "2021-04-04",
+              "jobName": "건설 현장 배관공",
+              "presetId": null,
+              "startDate": "2015-01-04",
+              "workDaysPerYear": 248,
+              "workPeriodOverride": ""
+            },
+            {
+              "id": "<uuid-6>",
+              "endDate": "2025-10-05",
+              "jobName": "물류센터 상하차원",
+              "presetId": null,
+              "startDate": "2021-04-05",
+              "workDaysPerYear": 260,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "김철수",
+          "gender": "male",
+          "height": "160",
+          "weight": "60",
+          "diabetes": "",
+          "birthDate": "1960-01-15",
+          "diagnoses": [
+            {
+              "id": "<uuid-7>",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "klgRight": "3",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            },
+            {
+              "id": "<uuid-8>",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "klgLeft": "2",
+              "reasonLeft": [],
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high",
+              "reasonLeftOther": ""
+            }
+          ],
+          "patientNo": "WR240001",
+          "department": "직업환경의학과",
+          "doctorName": "골든 의사",
+          "injuryDate": "2025-10-05",
+          "hospitalName": "근로복지공단 안산병원",
+          "specialNotes": "기타 동반 질환 없음",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "videoAnalysis": {
+            "clips": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            },
+            "processes": [],
+            "jobFeatures": [],
+            "appliedInputs": [],
+            "processFeatures": [],
+            "candidateFeatures": []
+          },
+          "evaluationDate": "2025-10-20",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": ""
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "stairs": false,
+                "weight": "1900",
+                "jumpDown": false,
+                "kneeTwist": true,
+                "squatting": "44",
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": true,
+                "sharedJobId": "<uuid-4>",
+                "evidenceSources": []
+              },
+              {
+                "stairs": true,
+                "weight": "2360",
+                "jumpDown": false,
+                "kneeTwist": true,
+                "squatting": "63",
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": true,
+                "sharedJobId": "<uuid-5>",
+                "evidenceSources": []
+              },
+              {
+                "stairs": true,
+                "weight": "1920",
+                "jumpDown": false,
+                "kneeTwist": false,
+                "squatting": "40",
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "sharedJobId": "<uuid-6>",
+                "evidenceSources": []
+              }
+            ],
+            "returnConsiderations": "무거운 물건 취급을 제한하고 쪼그려 앉는 작업은 피하는 것이 좋습니다."
+          }
+        },
+        "activeModules": [
+          "knee"
+        ]
+      },
+      "phase": "intake",
+      "createdAt": "<time>",
+      "assignedDoctorUserId": "<user>",
+      "updatedAt": "<time>",
+      "completionStatus": "draft",
+      "serverObservedModulesCompleteAt": null,
+      "serverVerifiedModulesCompleteAt": "<time>",
+      "sync": {
+        "serverId": "<uuid-3>",
+        "revision": 1,
+        "syncStatus": "synced",
+        "lastSyncedAt": "<time>"
+      }
+    }
+  },
+  {
+    "step": "GET /api/patients",
+    "status": 200,
+    "body": {
+      "items": [
+        {
+          "id": "<uuid-3>",
+          "data": {
+            "shared": {
+              "jobs": [
+                {
+                  "id": "<uuid-4>",
+                  "endDate": "2015-01-03",
+                  "jobName": "축산물 가공 작업자",
+                  "presetId": null,
+                  "startDate": "1997-12-03",
+                  "workDaysPerYear": 251,
+                  "workPeriodOverride": ""
+                },
+                {
+                  "id": "<uuid-5>",
+                  "endDate": "2021-04-04",
+                  "jobName": "건설 현장 배관공",
+                  "presetId": null,
+                  "startDate": "2015-01-04",
+                  "workDaysPerYear": 248,
+                  "workPeriodOverride": ""
+                },
+                {
+                  "id": "<uuid-6>",
+                  "endDate": "2025-10-05",
+                  "jobName": "물류센터 상하차원",
+                  "presetId": null,
+                  "startDate": "2021-04-05",
+                  "workDaysPerYear": 260,
+                  "workPeriodOverride": ""
+                }
+              ],
+              "name": "김철수",
+              "gender": "male",
+              "height": "160",
+              "weight": "60",
+              "diabetes": "",
+              "birthDate": "1960-01-15",
+              "diagnoses": [
+                {
+                  "id": "<uuid-7>",
+                  "code": "M17.1",
+                  "name": "양측성 무릎관절증",
+                  "side": "right",
+                  "klgRight": "3",
+                  "confirmedRight": "confirmed",
+                  "assessmentRight": "high"
+                },
+                {
+                  "id": "<uuid-8>",
+                  "code": "M17.1",
+                  "name": "양측성 무릎관절증",
+                  "side": "left",
+                  "klgLeft": "2",
+                  "reasonLeft": [],
+                  "confirmedLeft": "confirmed",
+                  "assessmentLeft": "high",
+                  "reasonLeftOther": ""
+                }
+              ],
+              "patientNo": "WR240001",
+              "department": "직업환경의학과",
+              "doctorName": "골든 의사",
+              "injuryDate": "2025-10-05",
+              "hospitalName": "근로복지공단 안산병원",
+              "specialNotes": "기타 동반 질환 없음",
+              "visitHistory": "",
+              "medicalRecord": "",
+              "videoAnalysis": {
+                "clips": [],
+                "settings": {
+                  "retentionMode": "privacy_first"
+                },
+                "processes": [],
+                "jobFeatures": [],
+                "appliedInputs": [],
+                "processFeatures": [],
+                "candidateFeatures": []
+              },
+              "evaluationDate": "2025-10-20",
+              "consultReplyNeuro": "",
+              "consultReplyOrtho": "",
+              "consultReplyOther": "",
+              "consultReplyRehab": "",
+              "highBloodPressure": ""
+            },
+            "modules": {
+              "knee": {
+                "jobExtras": [
+                  {
+                    "stairs": false,
+                    "weight": "1900",
+                    "jumpDown": false,
+                    "kneeTwist": true,
+                    "squatting": "44",
+                    "startStop": true,
+                    "tightSpace": false,
+                    "kneeContact": true,
+                    "sharedJobId": "<uuid-4>",
+                    "evidenceSources": []
+                  },
+                  {
+                    "stairs": true,
+                    "weight": "2360",
+                    "jumpDown": false,
+                    "kneeTwist": true,
+                    "squatting": "63",
+                    "startStop": false,
+                    "tightSpace": false,
+                    "kneeContact": true,
+                    "sharedJobId": "<uuid-5>",
+                    "evidenceSources": []
+                  },
+                  {
+                    "stairs": true,
+                    "weight": "1920",
+                    "jumpDown": false,
+                    "kneeTwist": false,
+                    "squatting": "40",
+                    "startStop": true,
+                    "tightSpace": false,
+                    "kneeContact": false,
+                    "sharedJobId": "<uuid-6>",
+                    "evidenceSources": []
+                  }
+                ],
+                "returnConsiderations": "무거운 물건 취급을 제한하고 쪼그려 앉는 작업은 피하는 것이 좋습니다."
+              }
+            },
+            "activeModules": [
+              "knee"
+            ]
+          },
+          "phase": "intake",
+          "createdAt": "<time>",
+          "assignedDoctorUserId": "<user>",
+          "updatedAt": "<time>",
+          "completionStatus": "draft",
+          "serverObservedModulesCompleteAt": null,
+          "serverVerifiedModulesCompleteAt": "<time>",
+          "sync": {
+            "serverId": "<uuid-3>",
+            "revision": 1,
+            "syncStatus": "synced",
+            "lastSyncedAt": "<time>"
+          }
+        }
+      ],
+      "total": 1,
+      "unassignedCount": 0,
+      "orgPatientCount": 1,
+      "limit": 20,
+      "offset": 0
+    }
+  },
+  {
+    "step": "GET /api/patients/:id",
+    "status": 200,
+    "body": {
+      "id": "<uuid-3>",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "<uuid-4>",
+              "endDate": "2015-01-03",
+              "jobName": "축산물 가공 작업자",
+              "presetId": null,
+              "startDate": "1997-12-03",
+              "workDaysPerYear": 251,
+              "workPeriodOverride": ""
+            },
+            {
+              "id": "<uuid-5>",
+              "endDate": "2021-04-04",
+              "jobName": "건설 현장 배관공",
+              "presetId": null,
+              "startDate": "2015-01-04",
+              "workDaysPerYear": 248,
+              "workPeriodOverride": ""
+            },
+            {
+              "id": "<uuid-6>",
+              "endDate": "2025-10-05",
+              "jobName": "물류센터 상하차원",
+              "presetId": null,
+              "startDate": "2021-04-05",
+              "workDaysPerYear": 260,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "김철수",
+          "gender": "male",
+          "height": "160",
+          "weight": "60",
+          "diabetes": "",
+          "birthDate": "1960-01-15",
+          "diagnoses": [
+            {
+              "id": "<uuid-7>",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "klgRight": "3",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            },
+            {
+              "id": "<uuid-8>",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "klgLeft": "2",
+              "reasonLeft": [],
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high",
+              "reasonLeftOther": ""
+            }
+          ],
+          "patientNo": "WR240001",
+          "department": "직업환경의학과",
+          "doctorName": "골든 의사",
+          "injuryDate": "2025-10-05",
+          "hospitalName": "근로복지공단 안산병원",
+          "specialNotes": "기타 동반 질환 없음",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "videoAnalysis": {
+            "clips": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            },
+            "processes": [],
+            "jobFeatures": [],
+            "appliedInputs": [],
+            "processFeatures": [],
+            "candidateFeatures": []
+          },
+          "evaluationDate": "2025-10-20",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": ""
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "stairs": false,
+                "weight": "1900",
+                "jumpDown": false,
+                "kneeTwist": true,
+                "squatting": "44",
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": true,
+                "sharedJobId": "<uuid-4>",
+                "evidenceSources": []
+              },
+              {
+                "stairs": true,
+                "weight": "2360",
+                "jumpDown": false,
+                "kneeTwist": true,
+                "squatting": "63",
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": true,
+                "sharedJobId": "<uuid-5>",
+                "evidenceSources": []
+              },
+              {
+                "stairs": true,
+                "weight": "1920",
+                "jumpDown": false,
+                "kneeTwist": false,
+                "squatting": "40",
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "sharedJobId": "<uuid-6>",
+                "evidenceSources": []
+              }
+            ],
+            "returnConsiderations": "무거운 물건 취급을 제한하고 쪼그려 앉는 작업은 피하는 것이 좋습니다."
+          }
+        },
+        "activeModules": [
+          "knee"
+        ]
+      },
+      "phase": "intake",
+      "createdAt": "<time>",
+      "assignedDoctorUserId": "<user>",
+      "updatedAt": "<time>",
+      "completionStatus": "draft",
+      "serverObservedModulesCompleteAt": null,
+      "serverVerifiedModulesCompleteAt": "<time>",
+      "sync": {
+        "serverId": "<uuid-3>",
+        "revision": 1,
+        "syncStatus": "synced",
+        "lastSyncedAt": "<time>"
+      }
+    }
+  },
+  {
+    "step": "PATCH /api/patients/:id",
+    "status": 200,
+    "body": {
+      "id": "<uuid-3>",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "<uuid-4>",
+              "endDate": "2015-01-03",
+              "jobName": "축산물 가공 작업자",
+              "presetId": null,
+              "startDate": "1997-12-03",
+              "workDaysPerYear": 251,
+              "workPeriodOverride": ""
+            },
+            {
+              "id": "<uuid-5>",
+              "endDate": "2021-04-04",
+              "jobName": "건설 현장 배관공",
+              "presetId": null,
+              "startDate": "2015-01-04",
+              "workDaysPerYear": 248,
+              "workPeriodOverride": ""
+            },
+            {
+              "id": "<uuid-6>",
+              "endDate": "2025-10-05",
+              "jobName": "물류센터 상하차원",
+              "presetId": null,
+              "startDate": "2021-04-05",
+              "workDaysPerYear": 260,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "김철수(수정)",
+          "gender": "male",
+          "height": "160",
+          "weight": "60",
+          "diabetes": "",
+          "birthDate": "1960-01-15",
+          "diagnoses": [
+            {
+              "id": "<uuid-7>",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "klgRight": "3",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            },
+            {
+              "id": "<uuid-8>",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "klgLeft": "2",
+              "reasonLeft": [],
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high",
+              "reasonLeftOther": ""
+            }
+          ],
+          "patientNo": "WR240001",
+          "department": "직업환경의학과",
+          "doctorName": "골든 의사",
+          "injuryDate": "2025-10-05",
+          "hospitalName": "근로복지공단 안산병원",
+          "specialNotes": "기타 동반 질환 없음",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "videoAnalysis": {
+            "clips": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            },
+            "processes": [],
+            "jobFeatures": [],
+            "appliedInputs": [],
+            "processFeatures": [],
+            "candidateFeatures": []
+          },
+          "evaluationDate": "2025-10-20",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": ""
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "stairs": false,
+                "weight": "1900",
+                "jumpDown": false,
+                "kneeTwist": true,
+                "squatting": "44",
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": true,
+                "sharedJobId": "<uuid-4>",
+                "evidenceSources": []
+              },
+              {
+                "stairs": true,
+                "weight": "2360",
+                "jumpDown": false,
+                "kneeTwist": true,
+                "squatting": "63",
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": true,
+                "sharedJobId": "<uuid-5>",
+                "evidenceSources": []
+              },
+              {
+                "stairs": true,
+                "weight": "1920",
+                "jumpDown": false,
+                "kneeTwist": false,
+                "squatting": "40",
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "sharedJobId": "<uuid-6>",
+                "evidenceSources": []
+              }
+            ],
+            "returnConsiderations": "무거운 물건 취급을 제한하고 쪼그려 앉는 작업은 피하는 것이 좋습니다."
+          }
+        },
+        "activeModules": [
+          "knee"
+        ]
+      },
+      "phase": "intake",
+      "createdAt": "<time>",
+      "assignedDoctorUserId": "<user>",
+      "updatedAt": "<time>",
+      "completionStatus": "draft",
+      "serverObservedModulesCompleteAt": null,
+      "serverVerifiedModulesCompleteAt": "<time>",
+      "sync": {
+        "serverId": "<uuid-3>",
+        "revision": 2,
+        "syncStatus": "synced",
+        "lastSyncedAt": "<time>",
+        "warnings": [
+          {
+            "code": "PATIENT_NAME_MISMATCH",
+            "message": "Same patient number and birth date, but the name differs. Confirm whether this is a legal name change or a data entry issue.",
+            "existingName": "김철수",
+            "incomingName": "김철수(수정)"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "step": "PATCH /api/patients/:id (stale If-Match)",
+    "status": 409,
+    "body": {
+      "code": "CONFLICT",
+      "error": "Revision mismatch. Fetch the latest version before retrying.",
+      "currentRevision": 2
+    }
+  },
+  {
+    "step": "POST /api/patients/:id/lock",
+    "status": 200,
+    "body": {
+      "leaseToken": "<lease-token>",
+      "expiresAt": "<time>",
+      "ttlMs": 100000
+    }
+  },
+  {
+    "step": "GET /api/patients/:id/lock",
+    "status": 200,
+    "body": {
+      "lock": {
+        "holderName": "골든 의사",
+        "acquiredAt": "<time>",
+        "expiresAt": "<time>"
+      }
+    }
+  },
+  {
+    "step": "DELETE /api/patients/:id/lock (no token)",
+    "status": 204,
+    "body": {}
+  },
+  {
+    "step": "GET /api/patients/:id/lock (after release without token)",
+    "status": 200,
+    "body": {
+      "lock": {
+        "holderName": "골든 의사",
+        "acquiredAt": "<time>",
+        "expiresAt": "<time>"
+      }
+    }
+  },
+  {
+    "step": "DELETE /api/patients/:id/lock",
+    "status": 204,
+    "body": {}
+  },
+  {
+    "step": "GET /api/patients/:id/lock (after release)",
+    "status": 200,
+    "body": {
+      "lock": null
+    }
+  },
+  {
+    "step": "POST /api/workspaces",
+    "status": 201,
+    "body": {
+      "items": [
+        {
+          "id": "<uuid-9>",
+          "name": "골든 워크스페이스",
+          "count": 1,
+          "savedAt": "<time>",
+          "patients": [
+            {
+              "id": "<uuid-10>",
+              "data": {
+                "shared": {
+                  "jobs": [
+                    {
+                      "id": "golden-job-elbow-1",
+                      "endDate": "2010-01-01",
+                      "jobName": "용접공",
+                      "presetId": null,
+                      "startDate": "2000-01-01",
+                      "workDaysPerYear": 250,
+                      "workPeriodOverride": ""
+                    }
+                  ],
+                  "name": "골든팔꿈치",
+                  "gender": "male",
+                  "height": "172",
+                  "weight": "74",
+                  "diabetes": "무",
+                  "birthDate": "1970-05-05",
+                  "diagnoses": [
+                    {
+                      "id": "golden-dx-elbow-1",
+                      "code": "M77.1",
+                      "name": "외측상과염",
+                      "side": "both",
+                      "reasonLeft": [
+                        "other"
+                      ],
+                      "reasonRight": [],
+                      "confirmedLeft": "suspected",
+                      "assessmentLeft": "low",
+                      "confirmedRight": "confirmed",
+                      "assessmentRight": "high",
+                      "reasonLeftOther": "노출 부족",
+                      "reasonRightOther": ""
+                    }
+                  ],
+                  "patientNo": "G-0901",
+                  "department": "직업환경의학과",
+                  "doctorName": "골든 의사",
+                  "injuryDate": "2025-06-01",
+                  "hospitalName": "테스트병원",
+                  "specialNotes": "",
+                  "visitHistory": "",
+                  "medicalRecord": "",
+                  "videoAnalysis": {
+                    "clips": [],
+                    "settings": {
+                      "retentionMode": "privacy_first"
+                    },
+                    "processes": [],
+                    "jobFeatures": [],
+                    "appliedInputs": [],
+                    "processFeatures": [],
+                    "candidateFeatures": []
+                  },
+                  "evaluationDate": "2025-07-01",
+                  "consultReplyNeuro": "",
+                  "consultReplyOrtho": "",
+                  "consultReplyOther": "",
+                  "consultReplyRehab": "",
+                  "highBloodPressure": "유"
+                },
+                "modules": {
+                  "elbow": {
+                    "jobEvaluations": [
+                      {
+                        "sharedJobId": "golden-job-elbow-1",
+                        "diagnosisEntries": [
+                          {
+                            "diagnosisId": "golden-dx-elbow-1",
+                            "force_level": "moderate",
+                            "work_pattern": "continuous",
+                            "days_per_week": "5",
+                            "exposure_types": [
+                              "repetition",
+                              "force"
+                            ],
+                            "main_task_name": "용접 작업",
+                            "selectedBkType": "BK2101",
+                            "bk2101_monotony": "yes",
+                            "bkSelectionMode": "auto",
+                            "repetition_level": "frequent",
+                            "rest_distribution": "insufficient",
+                            "vibration_exposure": "",
+                            "shift_share_percent": "60",
+                            "bk2101_cycle_seconds": "0.3",
+                            "bk2101_prosupination": "yes",
+                            "bk2103_tool_pressing": "",
+                            "bk2105_elbow_leaning": "",
+                            "daily_exposure_hours": "4",
+                            "direct_anatomic_link": "yes",
+                            "static_holding_level": "frequent",
+                            "awkward_posture_level": "frequent",
+                            "direct_pressure_level": "",
+                            "bk2105_pressure_source": [],
+                            "bk2106_pressure_source": [],
+                            "bk2103_handheld_or_guided": "",
+                            "bk2101_repetition_per_hour": "9000",
+                            "bk2103_vibration_tool_type": [],
+                            "bk2103_daily_vibration_hours": "",
+                            "bk2106_noncorrectable_posture": "",
+                            "bk2101_forced_dorsal_extension": "yes",
+                            "bk2103_frequent_high_force_grip": "",
+                            "bk2105_repeated_friction_impact": "",
+                            "bk2106_prolonged_joint_position": "",
+                            "bk2106_repeated_mechanical_exposure": ""
+                          }
+                        ]
+                      }
+                    ],
+                    "temporalSequence": {
+                      "task_change_date": "2024-01-10",
+                      "improves_with_rest": "yes",
+                      "recent_task_change": "increased_load",
+                      "symptom_onset_interval": "3to12m"
+                    },
+                    "returnConsiderations": ""
+                  }
+                },
+                "activeModules": [
+                  "elbow"
+                ]
+              },
+              "sync": {
+                "revision": 1,
+                "serverId": "<uuid-10>",
+                "syncStatus": "synced"
+              },
+              "phase": "intake",
+              "createdAt": "<time>",
+              "assignedDoctorUserId": "<user>"
+            }
+          ]
+        }
+      ],
+      "saved": [
+        {
+          "id": "<uuid-10>",
+          "revision": 1,
+          "assignedDoctorUserId": "<user>"
+        }
+      ],
+      "skipped": [],
+      "conflicts": [],
+      "lockedByOther": []
+    }
+  },
+  {
+    "step": "GET /api/workspaces",
+    "status": 200,
+    "body": {
+      "items": [
+        {
+          "id": "<uuid-9>",
+          "name": "골든 워크스페이스",
+          "count": 1,
+          "savedAt": "<time>",
+          "patients": [
+            {
+              "id": "<uuid-10>",
+              "data": {
+                "shared": {
+                  "jobs": [
+                    {
+                      "id": "golden-job-elbow-1",
+                      "endDate": "2010-01-01",
+                      "jobName": "용접공",
+                      "presetId": null,
+                      "startDate": "2000-01-01",
+                      "workDaysPerYear": 250,
+                      "workPeriodOverride": ""
+                    }
+                  ],
+                  "name": "골든팔꿈치",
+                  "gender": "male",
+                  "height": "172",
+                  "weight": "74",
+                  "diabetes": "무",
+                  "birthDate": "1970-05-05",
+                  "diagnoses": [
+                    {
+                      "id": "golden-dx-elbow-1",
+                      "code": "M77.1",
+                      "name": "외측상과염",
+                      "side": "both",
+                      "reasonLeft": [
+                        "other"
+                      ],
+                      "reasonRight": [],
+                      "confirmedLeft": "suspected",
+                      "assessmentLeft": "low",
+                      "confirmedRight": "confirmed",
+                      "assessmentRight": "high",
+                      "reasonLeftOther": "노출 부족",
+                      "reasonRightOther": ""
+                    }
+                  ],
+                  "patientNo": "G-0901",
+                  "department": "직업환경의학과",
+                  "doctorName": "골든 의사",
+                  "injuryDate": "2025-06-01",
+                  "hospitalName": "테스트병원",
+                  "specialNotes": "",
+                  "visitHistory": "",
+                  "medicalRecord": "",
+                  "videoAnalysis": {
+                    "clips": [],
+                    "settings": {
+                      "retentionMode": "privacy_first"
+                    },
+                    "processes": [],
+                    "jobFeatures": [],
+                    "appliedInputs": [],
+                    "processFeatures": [],
+                    "candidateFeatures": []
+                  },
+                  "evaluationDate": "2025-07-01",
+                  "consultReplyNeuro": "",
+                  "consultReplyOrtho": "",
+                  "consultReplyOther": "",
+                  "consultReplyRehab": "",
+                  "highBloodPressure": "유"
+                },
+                "modules": {
+                  "elbow": {
+                    "jobEvaluations": [
+                      {
+                        "sharedJobId": "golden-job-elbow-1",
+                        "diagnosisEntries": [
+                          {
+                            "diagnosisId": "golden-dx-elbow-1",
+                            "force_level": "moderate",
+                            "work_pattern": "continuous",
+                            "days_per_week": "5",
+                            "exposure_types": [
+                              "repetition",
+                              "force"
+                            ],
+                            "main_task_name": "용접 작업",
+                            "selectedBkType": "BK2101",
+                            "bk2101_monotony": "yes",
+                            "bkSelectionMode": "auto",
+                            "repetition_level": "frequent",
+                            "rest_distribution": "insufficient",
+                            "vibration_exposure": "",
+                            "shift_share_percent": "60",
+                            "bk2101_cycle_seconds": "0.3",
+                            "bk2101_prosupination": "yes",
+                            "bk2103_tool_pressing": "",
+                            "bk2105_elbow_leaning": "",
+                            "daily_exposure_hours": "4",
+                            "direct_anatomic_link": "yes",
+                            "static_holding_level": "frequent",
+                            "awkward_posture_level": "frequent",
+                            "direct_pressure_level": "",
+                            "bk2105_pressure_source": [],
+                            "bk2106_pressure_source": [],
+                            "bk2103_handheld_or_guided": "",
+                            "bk2101_repetition_per_hour": "9000",
+                            "bk2103_vibration_tool_type": [],
+                            "bk2103_daily_vibration_hours": "",
+                            "bk2106_noncorrectable_posture": "",
+                            "bk2101_forced_dorsal_extension": "yes",
+                            "bk2103_frequent_high_force_grip": "",
+                            "bk2105_repeated_friction_impact": "",
+                            "bk2106_prolonged_joint_position": "",
+                            "bk2106_repeated_mechanical_exposure": ""
+                          }
+                        ]
+                      }
+                    ],
+                    "temporalSequence": {
+                      "task_change_date": "2024-01-10",
+                      "improves_with_rest": "yes",
+                      "recent_task_change": "increased_load",
+                      "symptom_onset_interval": "3to12m"
+                    },
+                    "returnConsiderations": ""
+                  }
+                },
+                "activeModules": [
+                  "elbow"
+                ]
+              },
+              "sync": {
+                "revision": 1,
+                "serverId": "<uuid-10>",
+                "syncStatus": "synced"
+              },
+              "phase": "intake",
+              "createdAt": "<time>",
+              "assignedDoctorUserId": "<user>"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "step": "GET /api/workspaces/:id",
+    "status": 200,
+    "body": {
+      "id": "<uuid-9>",
+      "name": "골든 워크스페이스",
+      "count": 1,
+      "savedAt": "<time>",
+      "patients": [
+        {
+          "id": "<uuid-10>",
+          "data": {
+            "shared": {
+              "jobs": [
+                {
+                  "id": "golden-job-elbow-1",
+                  "endDate": "2010-01-01",
+                  "jobName": "용접공",
+                  "presetId": null,
+                  "startDate": "2000-01-01",
+                  "workDaysPerYear": 250,
+                  "workPeriodOverride": ""
+                }
+              ],
+              "name": "골든팔꿈치",
+              "gender": "male",
+              "height": "172",
+              "weight": "74",
+              "diabetes": "무",
+              "birthDate": "1970-05-05",
+              "diagnoses": [
+                {
+                  "id": "golden-dx-elbow-1",
+                  "code": "M77.1",
+                  "name": "외측상과염",
+                  "side": "both",
+                  "reasonLeft": [
+                    "other"
+                  ],
+                  "reasonRight": [],
+                  "confirmedLeft": "suspected",
+                  "assessmentLeft": "low",
+                  "confirmedRight": "confirmed",
+                  "assessmentRight": "high",
+                  "reasonLeftOther": "노출 부족",
+                  "reasonRightOther": ""
+                }
+              ],
+              "patientNo": "G-0901",
+              "department": "직업환경의학과",
+              "doctorName": "골든 의사",
+              "injuryDate": "2025-06-01",
+              "hospitalName": "테스트병원",
+              "specialNotes": "",
+              "visitHistory": "",
+              "medicalRecord": "",
+              "videoAnalysis": {
+                "clips": [],
+                "settings": {
+                  "retentionMode": "privacy_first"
+                },
+                "processes": [],
+                "jobFeatures": [],
+                "appliedInputs": [],
+                "processFeatures": [],
+                "candidateFeatures": []
+              },
+              "evaluationDate": "2025-07-01",
+              "consultReplyNeuro": "",
+              "consultReplyOrtho": "",
+              "consultReplyOther": "",
+              "consultReplyRehab": "",
+              "highBloodPressure": "유"
+            },
+            "modules": {
+              "elbow": {
+                "jobEvaluations": [
+                  {
+                    "sharedJobId": "golden-job-elbow-1",
+                    "diagnosisEntries": [
+                      {
+                        "diagnosisId": "golden-dx-elbow-1",
+                        "force_level": "moderate",
+                        "work_pattern": "continuous",
+                        "days_per_week": "5",
+                        "exposure_types": [
+                          "repetition",
+                          "force"
+                        ],
+                        "main_task_name": "용접 작업",
+                        "selectedBkType": "BK2101",
+                        "bk2101_monotony": "yes",
+                        "bkSelectionMode": "auto",
+                        "repetition_level": "frequent",
+                        "rest_distribution": "insufficient",
+                        "vibration_exposure": "",
+                        "shift_share_percent": "60",
+                        "bk2101_cycle_seconds": "0.3",
+                        "bk2101_prosupination": "yes",
+                        "bk2103_tool_pressing": "",
+                        "bk2105_elbow_leaning": "",
+                        "daily_exposure_hours": "4",
+                        "direct_anatomic_link": "yes",
+                        "static_holding_level": "frequent",
+                        "awkward_posture_level": "frequent",
+                        "direct_pressure_level": "",
+                        "bk2105_pressure_source": [],
+                        "bk2106_pressure_source": [],
+                        "bk2103_handheld_or_guided": "",
+                        "bk2101_repetition_per_hour": "9000",
+                        "bk2103_vibration_tool_type": [],
+                        "bk2103_daily_vibration_hours": "",
+                        "bk2106_noncorrectable_posture": "",
+                        "bk2101_forced_dorsal_extension": "yes",
+                        "bk2103_frequent_high_force_grip": "",
+                        "bk2105_repeated_friction_impact": "",
+                        "bk2106_prolonged_joint_position": "",
+                        "bk2106_repeated_mechanical_exposure": ""
+                      }
+                    ]
+                  }
+                ],
+                "temporalSequence": {
+                  "task_change_date": "2024-01-10",
+                  "improves_with_rest": "yes",
+                  "recent_task_change": "increased_load",
+                  "symptom_onset_interval": "3to12m"
+                },
+                "returnConsiderations": ""
+              }
+            },
+            "activeModules": [
+              "elbow"
+            ]
+          },
+          "sync": {
+            "revision": 1,
+            "serverId": "<uuid-10>",
+            "syncStatus": "synced"
+          },
+          "phase": "intake",
+          "createdAt": "<time>",
+          "assignedDoctorUserId": "<user>"
+        }
+      ]
+    }
+  },
+  {
+    "step": "PUT /api/workspaces/:id",
+    "status": 200,
+    "body": {
+      "items": [
+        {
+          "id": "<uuid-9>",
+          "name": "골든 워크스페이스(수정)",
+          "count": 0,
+          "savedAt": "<time>",
+          "patients": []
+        }
+      ],
+      "saved": [],
+      "skipped": [],
+      "conflicts": [],
+      "lockedByOther": []
+    }
+  },
+  {
+    "step": "DELETE /api/workspaces/:id",
+    "status": 200,
+    "body": {
+      "items": []
+    }
+  },
+  {
+    "step": "DELETE /api/patients/:id (no revision)",
+    "status": 400,
+    "body": {
+      "code": "REVISION_REQUIRED",
+      "error": "revision query parameter is required"
+    }
+  },
+  {
+    "step": "DELETE /api/patients/:id",
+    "status": 204,
+    "body": {}
+  }
+]
