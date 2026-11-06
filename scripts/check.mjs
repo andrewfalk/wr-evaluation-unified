@@ -24,6 +24,7 @@ const prerequisite = [
 const steps = [
   ['lint (root)', 'npm run lint'],
   ['lint (server)', 'npm --prefix server run lint'],
+  ['browser floor (Chrome 108)', 'npm run verify:browser-compat'],
   ['typecheck (root)', 'npm run typecheck'],
   ['test (root)', 'npm test'],
   ['typecheck (server)', 'npm --prefix server run typecheck'],

@@ -1106,7 +1106,7 @@ scripts/                                 # 운영 자동화
 ├── install-prod.ps1                     # Windows 자동 설치
 ├── set-build-target.mjs                 # standalone/intranet 빌드 토글
 ├── prebuild-shared.mjs, prebuild-analytics-core.mjs   # @wr/contracts·@wr/analytics-core 선빌드 (v7.0.0)
-├── verify-chart-compat.mjs              # 통계 차트 구형 Chrome 호환 검사 (v7.0.0)
+├── verify-browser-compat.mjs            # 브라우저 하한(Chrome 108) 초과 기능 검사 (P0-5, 이전 verify-chart-compat.mjs)
 └── verify-csp.mjs
 
 src/core/auth/                           # AuthContext, authChannel, session — v5.0.0
@@ -1587,7 +1587,7 @@ v5.0.0 인트라넷 백엔드 도입 후 실제 운영에서 드러난 권한 �
 
 - **진입**: 헤더·랜딩의 "통계분석" 버튼, Electron 메뉴 "통계분석 워크벤치"(IPC `set-stats-available`로 가용성을 main에 전파, `open-statistics`로 열기). `activeScreen` 단일 진실원으로 대시보드·평가 화면과 전환하며, 미저장 종합소견 편집 draft가 있으면 전환을 차단하고 안내한다.
 - **4열 레이아웃**: 카탈로그(공통 변수 우선 정렬·그룹 접기·분석 목적 비호환 변수 비활성) · 레시피(grain·변수·필터 칩·결과변수/설명변수 역할·분석 모드/방법) · 결과(표·차트·주의문) · Inspector/리포트. 우측 패널은 4열 유지로 확정.
-- **차트**(`src/core/components/charts/`, SVG): 히스토그램·박스플롯·수평 바·100% 누적 바·산점도·상관 히트맵·포레스트 플롯·잔차/진단 패널·spline 부분효과·ROC/PR/calibration 곡선. 키보드 접근 가능한 툴팁, 데이터 표 보기. 구형 Chrome 호환은 `npm run verify:chart-compat`로 검사한다.
+- **차트**(`src/core/components/charts/`, SVG): 히스토그램·박스플롯·수평 바·100% 누적 바·산점도·상관 히트맵·포레스트 플롯·잔차/진단 패널·spline 부분효과·ROC/PR/calibration 곡선. 키보드 접근 가능한 툴팁, 데이터 표 보기. 브라우저 하한(Chrome 108) 호환은 `npm run verify:browser-compat`(`npm run check`에 포함)로 검사한다.
 - 서버 응답이 억제·비추정·권한 부족일 때는 이유를 화면에 안내한다(`describeStatsError.js`, `describeMethodReasonCode.js`).
 
 ### 12.C.11 운영 환경변수
