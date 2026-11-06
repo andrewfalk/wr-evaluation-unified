@@ -84,6 +84,14 @@ describe('createApp', () => {
     expect(feed.text).not.toContain('<title>SPA</title>');
   });
 
+  it('accepts a relative webDir (normalised to an absolute path for sendFile)', async () => {
+    const { pool } = untouchablePool();
+    const app = createApp({ pool, auditPool: pool, webDir: path.relative(process.cwd(), webDir) });
+    const page = await request(app).get('/another/route');
+    expect(page.status).toBe(200);
+    expect(page.text).toContain('<title>SPA</title>');
+  });
+
   it('answers an oversized JSON body with the JSON 413 from the error handler', async () => {
     const { pool } = untouchablePool();
     const app = createApp({ pool, auditPool: pool, webDir });

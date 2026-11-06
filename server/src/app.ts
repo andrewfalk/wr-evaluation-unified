@@ -39,7 +39,9 @@ export interface AppDeps {
   webDir?: string;
 }
 
-export function createApp({ pool, auditPool, webDir = path.join(__dirname, 'web') }: AppDeps): Express {
+export function createApp({ pool, auditPool, webDir: webDirOption = path.join(__dirname, 'web') }: AppDeps): Express {
+  // Absolute, so express.static and res.sendFile (which requires an absolute path) agree.
+  const webDir = path.resolve(webDirOption);
   const app = express();
   app.set('trust proxy', config.trustProxy);
   // Security headers first — applied to every response before any route runs.
