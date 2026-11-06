@@ -60,7 +60,10 @@ const FEATURES = [
   ['js', /Promise\.withResolvers\(/, 119, 'Promise.withResolvers()'],
   ['js', /URL\.canParse\(/, 120, 'URL.canParse()'],
   ['js', /Array\.fromAsync\(/, 121, 'Array.fromAsync()'],
-  ['js', /\.(?:union|intersection|difference|symmetricDifference|isSubsetOf|isSupersetOf|isDisjointFrom)\(\s*new Set\b/, 122, 'Set methods (union/intersection/…)'],
+  // Any receiver/argument. zod's z.union()/z.intersection() (the only current users of these
+  // names in src) are excluded by the lookbehind; another library with the same method names
+  // would need a `browser-compat-ignore` marker.
+  ['js', /(?<!\bz)\.(?:union|intersection|difference|symmetricDifference|isSubsetOf|isSupersetOf|isDisjointFrom)\s*\(/, 122, 'Set methods (union/intersection/…)'],
   ['js', /URL\.parse\(/, 126, 'URL.parse()'],
   ['js', /\bCloseWatcher\b/, 126, 'CloseWatcher'],
   ['js', /Promise\.try\(/, 128, 'Promise.try()'],
@@ -92,11 +95,57 @@ function checkViteTarget(floor) {
   }
 }
 
-// Blank out comments but keep line numbers. `//` is only a comment in JS.
-function stripComments(content, ext) {
-  let out = content.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
-  if (ext !== '.css') out = out.replace(/(^|[^:"'`\\])\/\/.*$/gm, '$1');
+// Blank out comments (keeping line breaks so line numbers stay put) while leaving string and
+// template-literal contents alone, so `'a//b'.toSorted()` is still checked. `//` is a comment
+// only in JS. Regex literals are not tokenized; a `//` inside one is rare enough to accept.
+export function stripComments(content, ext) {
+  const isJs = ext !== '.css';
+  let out = '';
+  let i = 0;
+  let quote = null; // ', ", or ` while inside a string/template
+  while (i < content.length) {
+    const ch = content[i];
+    const next = content[i + 1];
+    if (quote) {
+      out += ch;
+      if (ch === '\\' && i + 1 < content.length) { out += next; i += 2; continue; }
+      if (ch === quote) quote = null;
+      i += 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = content.indexOf('*/', i + 2);
+      const stop = end === -1 ? content.length : end + 2;
+      out += content.slice(i, stop).replace(/[^\n]/g, ' ');
+      i = stop;
+      continue;
+    }
+    if (isJs && ch === '/' && next === '/') {
+      const end = content.indexOf('\n', i);
+      i = end === -1 ? content.length : end;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || (isJs && ch === '`')) quote = ch;
+    out += ch;
+    i += 1;
+  }
   return out;
+}
+
+// Violations in one file's source. Exported for scripts/verifyBrowserCompat.test.mjs.
+export function scanSource(content, ext, floor) {
+  const kind = ext === '.css' ? 'css' : 'js';
+  const active = FEATURES.filter(([where, , since]) => where === kind && since > floor);
+  const raw = content.split('\n');
+  const code = stripComments(content, ext).split('\n');
+  const found = [];
+  code.forEach((line, i) => {
+    if (raw[i].includes('browser-compat-ignore')) return;
+    for (const [, pattern, since, name] of active) {
+      if (pattern.test(line)) found.push({ line: i + 1, name, since, text: raw[i].trim() });
+    }
+  });
+  return found;
 }
 
 function collectFiles(dir) {
@@ -121,18 +170,10 @@ function main() {
   const violations = [];
 
   for (const file of files) {
-    const ext = path.extname(file);
-    const kind = ext === '.css' ? 'css' : 'js';
-    const raw = readFileSync(file, 'utf8').split('\n');
-    const code = stripComments(raw.join('\n'), ext).split('\n');
-    code.forEach((line, i) => {
-      if (raw[i].includes('browser-compat-ignore')) return;
-      for (const [where, pattern, since, name] of active) {
-        if (where === kind && pattern.test(line)) {
-          violations.push({ file: path.relative(root, file).replace(/\\/g, '/'), line: i + 1, name, since, text: raw[i].trim() });
-        }
-      }
-    });
+    const rel = path.relative(root, file).replace(/\\/g, '/');
+    for (const v of scanSource(readFileSync(file, 'utf8'), path.extname(file), floor)) {
+      violations.push({ file: rel, ...v });
+    }
   }
 
   if (violations.length > 0) {
@@ -149,4 +190,5 @@ function main() {
   console.log(`verify-browser-compat: floor Chrome ${floor}, ${active.length} rules, ${files.length} files — no violations.`);
 }
 
-main();
+// Run only when executed directly (the test file imports scanSource/stripComments).
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
