@@ -91,6 +91,11 @@ describe('verify-browser-compat — CSS rules', () => {
     expect(names('.a::after { content: "&"; }', '.css')).toEqual([]);
   });
 
+  it('an ignore marker on the previous declaration does not exempt the next nested rule (Codex review round 5)', () => {
+    const src = '.card {\n color: red;\n color: color-mix(in srgb, red, blue); /* browser-compat-ignore -- fallback above */\n &:hover { color: blue; }\n}';
+    expect(scanSource(src, '.css', FLOOR).map((v) => [v.line, v.name])).toEqual([[4, 'CSS nesting (&)']]);
+  });
+
   it('a comment marker inside a CSS string does not hide later rules (Codex review round 3)', () => {
     const src = '.label::before { content: "/*"; }\n.panel { background: color-mix(in srgb, red, blue); }';
     expect(scanSource(src, '.css', FLOOR).map((v) => v.line)).toEqual([2]);

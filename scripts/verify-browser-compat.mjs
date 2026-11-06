@@ -19,7 +19,8 @@
  *
  * Scope: src/**\/*.{js,jsx,css}, tests excluded (they run in jsdom/Node).
  * Comments are ignored. To allow a deliberate, feature-detected use, put
- * `browser-compat-ignore` in a comment on the same line with the reason.
+ * `browser-compat-ignore` in a comment on the reported line (the line with the call's `(` or
+ * the nesting `&`) with the reason.
  *
  * Usage: node scripts/verify-browser-compat.mjs   (also run by `npm run check`)
  * Exit codes: 0 = pass, 1 = violation or misconfiguration.
@@ -179,9 +180,11 @@ export function scanSource(content, ext, floor) {
     const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
     for (const m of code.matchAll(re)) {
       // Report the line of the last matched character (the '(' or '&'), i.e. where the call is.
+      // The ignore marker counts only on that reported line — a match can start on the previous
+      // line (CSS nesting matches from the preceding `;`), and a marker there must not exempt
+      // the next rule (Codex review of #191, round 5).
       const line = lineOf(m.index + Math.max(m[0].length - 1, 0));
-      const startLine = lineOf(m.index);
-      if (raw[line - 1].includes('browser-compat-ignore') || raw[startLine - 1].includes('browser-compat-ignore')) continue;
+      if (raw[line - 1].includes('browser-compat-ignore')) continue;
       const key = `${line}|${name}`;
       if (seen.has(key)) continue;
       seen.add(key);
