@@ -5,7 +5,7 @@
 // (4) 회수·접근 제어, (5) 미리보기도 해제 기준이라 실행 버튼이 열린다.
 //
 //   TEST_DATABASE_URL=postgres://wr_user:<PW>@localhost:5432/wr_test \
-//     npx vitest run --config vitest.config.ts --no-file-parallelism src/__tests__/statsBivariateLimitedDisclosure.integration.test.ts
+//     npx vitest run --config vitest.integration.config.ts src/__tests__/statsBivariateLimitedDisclosure.integration.test.ts
 import crypto from 'crypto';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { Pool } from 'pg';

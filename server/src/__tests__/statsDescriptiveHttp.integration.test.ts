@@ -13,8 +13,8 @@
 // statsRunsQueue.integration.test.ts가 대신 증명한다(routes/__tests__/stats.test.ts의
 // 해당 두 테스트는 삭제하고 이 사실을 주석으로 남긴다).
 //
-//   TEST_DATABASE_URL=postgres://wr_user:<POSTGRES_PASSWORD>@localhost:5432/wr_evaluation \
-//     npx vitest run --config vitest.config.ts src/__tests__/statsDescriptiveHttp.integration.test.ts
+//   TEST_DATABASE_URL=postgres://wr_user:<POSTGRES_PASSWORD>@localhost:5432/wr_test \
+//     npx vitest run --config vitest.integration.config.ts src/__tests__/statsDescriptiveHttp.integration.test.ts
 import crypto from 'crypto';
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { Pool } from 'pg';

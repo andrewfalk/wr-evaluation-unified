@@ -13,6 +13,7 @@
 ```bash
 npm run dev              # 개발 서버 (Vite, localhost:3000)
 npm run check            # 병합 전 로컬 검증 묶음 (lint·typecheck·test 루트+서버, build:web) — CI 대신 (로드맵 D9)
+npm run check:full       # check + 실DB 통합 테스트(일회용 Docker PostgreSQL) + pytest — DB·동시성·통계 엔진·마이그레이션 변경 PR과 릴리스 전
 npm run build:web        # 웹 빌드 → dist/web/
 npm run build:electron   # Electron 빌드 → dist/electron/
 npm run electron:dev     # Electron 개발 실행
