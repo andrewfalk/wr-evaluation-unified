@@ -47,7 +47,8 @@
     "server:seed:stats-test-patients": "cd server && npm run seed:stats-test-patients --",
     "verify:csp": "node scripts/verify-csp.mjs",
     "verify:browser-compat": "node scripts/verify-browser-compat.mjs",
-    "verify:audit": "node scripts/verify-audit.mjs"
+    "verify:audit": "node scripts/verify-audit.mjs",
+    "verify:secrets": "node scripts/verify-secrets.mjs"
   },
   "dependencies": {
     "@upstash/ratelimit": "^2.2.0",

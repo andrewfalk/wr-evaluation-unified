@@ -13,20 +13,35 @@
 //      cannot skip.
 //   3. Server integration tests (server/vitest.integration.config.ts) against that database.
 //      WR_REQUIRE_INTEGRATION=1 turns a missing database into a failure instead of a skip.
-//   4. Python unit tests (pytest) in services/stats-engine.
+//   4. Python unit tests (pytest) in services/stats-engine with the production versions: an image
+//      from services/stats-engine/Dockerfile.test (Debian 12 python3 3.11 + requirements.txt pins,
+//      as in server/Dockerfile), built once and reused until those files change. The local venv
+//      is still used by the Node<->Python smoke and integration tests in steps 2-3.
 //   5. Production-dependency audit (scripts/verify-audit.mjs): fails on a high/critical npm
 //      advisory that is not in the reviewed list scripts/audit-allowlist.json. Needs the registry.
+//   6. Secret scan (scripts/verify-secrets.mjs, gitleaks in Docker) of the current branch history,
+//      including commits not pushed yet.
 //
 // Not included: building the Docker images — slow, and scripts/export-offline-package.ps1
 // already builds and checks them for every release package.
 import { spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { installAbortHandlers, isAborted, printSummary, root, runCheckSteps, runStep, skipped } from './lib/runSteps.mjs';
 
 const STATS_DIR = path.join(root, 'services', 'stats-engine');
 const PYTHON = path.join(STATS_DIR, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+
+// Production-version test image for the stats engine, tagged by the content of the files that
+// define it, so a changed pin rebuilds it and an unchanged one reuses it.
+function statsTestImageTag() {
+  const hash = createHash('sha256');
+  for (const name of ['Dockerfile.test', 'requirements.txt', 'requirements-dev.txt']) {
+    hash.update(name).update('\0').update(readFileSync(path.join(STATS_DIR, name))).update('\0');
+  }
+  return `wr-stats-test:${hash.digest('hex').slice(0, 12)}`;
+}
 const IMAGE = 'postgres:16-alpine';
 const CONTAINER = `wr-check-pg-${process.pid}`;
 const LABEL = 'wr.check-full.pid';
@@ -128,8 +143,23 @@ async function main() {
   results.push(sharedBuilt
     ? await runStep('integration tests (server, real PostgreSQL)', 'npm --prefix server run test:integration', { env: integrationEnv })
     : skipped('integration tests (server, real PostgreSQL)'));
-  results.push(await runStep('python unit tests (stats-engine)', `"${PYTHON}" -m pytest -q`, { cwd: STATS_DIR }));
+  const statsImage = statsTestImageTag();
+  if (spawnSync('docker', ['image', 'inspect', statsImage], { stdio: 'ignore' }).status === 0) {
+    process.stdout.write(`\n=== python test image ${statsImage}: already built, reused\n`);
+  } else {
+    results.push(await runStep('python test image (production versions)', `docker build -t ${statsImage} -f "${path.join(STATS_DIR, 'Dockerfile.test')}" "${STATS_DIR}"`));
+  }
+  const imageReady = spawnSync('docker', ['image', 'inspect', statsImage], { stdio: 'ignore' }).status === 0;
+  const inImage = (cmd) => `docker run --rm -e PYTHONDONTWRITEBYTECODE=1 -v "${STATS_DIR}:/w:ro" -w /w ${statsImage} /opt/stats-venv/bin/python ${cmd}`;
+  if (imageReady) {
+    // First print one line with the versions the tests run on (kept in the log), then pytest.
+    results.push(await runStep('python unit tests (production versions)',
+      `${inImage('-c "import sys,numpy,scipy,statsmodels,pandas;print(sys.version.split()[0],numpy.__version__,scipy.__version__,statsmodels.__version__,pandas.__version__)"')} && ${inImage('-m pytest -q -p no:cacheprovider')}`));
+  } else {
+    results.push(skipped('python unit tests (production versions)'));
+  }
   results.push(await runStep('dependency audit (production, reviewed list)', 'npm run verify:audit'));
+  results.push(await runStep('secret scan (gitleaks, git history)', 'npm run verify:secrets'));
   return printSummary('check:full', results);
 }
 

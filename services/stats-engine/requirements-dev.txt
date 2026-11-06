@@ -1,0 +1,6 @@
+# Test dependencies for the stats engine (REFACTORING_ROADMAP P0-12).
+# Runtime pins come from requirements.txt — the same file the production image installs.
+# Used by Dockerfile.test, which `npm run check:full` builds to run pytest with the exact
+# production versions (Debian 12 python3 3.11 + these pins).
+-r requirements.txt
+pytest==8.3.5
