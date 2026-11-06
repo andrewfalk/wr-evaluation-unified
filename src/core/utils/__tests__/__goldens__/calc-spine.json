@@ -1,0 +1,3117 @@
+{
+  "00000000-0000-4000-8000-000000000009": {
+    "name": "이영미",
+    "activeModules": [
+      "knee",
+      "spine"
+    ],
+    "isComplete": false,
+    "calc": {
+      "tasks": [
+        {
+          "id": 101,
+          "sharedJobId": "00000000-0000-4000-8000-000000000016",
+          "name": "문서 상자 이동",
+          "posture": "G3",
+          "weight": 9,
+          "frequency": 16,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1.1,
+          "force": 2593
+        },
+        {
+          "id": 102,
+          "sharedJobId": "00000000-0000-4000-8000-000000000016",
+          "name": "사무 비품 정리",
+          "posture": "G4",
+          "weight": 8,
+          "frequency": 22,
+          "timeValue": 4,
+          "timeUnit": "sec",
+          "correctionFactor": 1,
+          "force": 1700
+        },
+        {
+          "id": 121,
+          "sharedJobId": "00000000-0000-4000-8000-000000000015",
+          "name": "문서 상자 이동",
+          "posture": "G3",
+          "weight": 10,
+          "frequency": 18,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1,
+          "force": 2600
+        },
+        {
+          "id": 122,
+          "sharedJobId": "00000000-0000-4000-8000-000000000015",
+          "name": "사무 비품 정리",
+          "posture": "G4",
+          "weight": 6,
+          "frequency": 24,
+          "timeValue": 4,
+          "timeUnit": "sec",
+          "correctionFactor": 1.1,
+          "force": 1595
+        }
+      ],
+      "jobResults": [
+        {
+          "jobId": "00000000-0000-4000-8000-000000000016",
+          "jobName": "병원 행정 사무원",
+          "periodYears": 8.501026694045175,
+          "workDaysPerYear": 238,
+          "tasks": [
+            {
+              "id": 101,
+              "sharedJobId": "00000000-0000-4000-8000-000000000016",
+              "name": "문서 상자 이동",
+              "posture": "G3",
+              "weight": 9,
+              "frequency": 16,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.1,
+              "force": 2593
+            },
+            {
+              "id": 102,
+              "sharedJobId": "00000000-0000-4000-8000-000000000016",
+              "name": "사무 비품 정리",
+              "posture": "G4",
+              "weight": 8,
+              "frequency": 22,
+              "timeValue": 4,
+              "timeUnit": "sec",
+              "correctionFactor": 1,
+              "force": 1700
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 149414.42222222223,
+            "dailyDoseNh": 1093.3047963755478,
+            "dailyDoseKNh": 1.0933047963755478,
+            "includedCount": 1,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        },
+        {
+          "jobId": "00000000-0000-4000-8000-000000000015",
+          "jobName": "고객센터 상담원",
+          "periodYears": 4.999315537303217,
+          "workDaysPerYear": 239,
+          "tasks": [
+            {
+              "id": 121,
+              "sharedJobId": "00000000-0000-4000-8000-000000000015",
+              "name": "문서 상자 이동",
+              "posture": "G3",
+              "weight": 10,
+              "frequency": 18,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1,
+              "force": 2600
+            },
+            {
+              "id": 122,
+              "sharedJobId": "00000000-0000-4000-8000-000000000015",
+              "name": "사무 비품 정리",
+              "posture": "G4",
+              "weight": 6,
+              "frequency": 24,
+              "timeValue": 4,
+              "timeUnit": "sec",
+              "correctionFactor": 1.1,
+              "force": 1595
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 169000,
+            "dailyDoseNh": 1162.7553482998906,
+            "dailyDoseKNh": 1.1627553482998905,
+            "includedCount": 1,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        }
+      ],
+      "dailyDose": {
+        "sumF2T_hour": 318414.4222222222,
+        "dailyDoseNh": 1596.0311330853724,
+        "dailyDoseKNh": 1.5960311330853725,
+        "includedCount": 2,
+        "hasHighForceTask": false
+      },
+      "lifetimeDose": {
+        "lifetimeDoseKNh": 0,
+        "lifetimeDoseMNh": 0,
+        "excluded": true,
+        "totalYears": 13.500342231348391
+      },
+      "comparison": {
+        "mddm": {
+          "limit": 17,
+          "percent": 0,
+          "status": "safe"
+        },
+        "court": {
+          "limit": 8.5,
+          "percent": 0,
+          "status": "safe"
+        }
+      },
+      "risk": {
+        "level": "safe",
+        "text": "현재 수준 유지",
+        "description": "독일 법원(BSG) 기준 충족"
+      },
+      "workRelatedness": {
+        "level": "low",
+        "grade": "낮음",
+        "description": "업무관련성 낮음",
+        "detail": "현재 누적 노출량(0.00 MN·h)이 독일 법원(BSG) 기준의 50%(4.3 MN·h) 미만입니다.",
+        "recommendation": "현재 노출 수준으로는 업무상 질병 인정이 어렵습니다.",
+        "workContribution": 0,
+        "personalContribution": 100
+      },
+      "maxForce": 2600,
+      "gender": "female",
+      "weightedDailyDose": {
+        "value": 1.1627553482998905,
+        "aboveThreshold": false
+      },
+      "formulaVersion": "v5.1.3",
+      "noEvaluableJobs": false,
+      "mddmStatus": "present",
+      "vibration": {
+        "evalMethod": "wbv",
+        "noExposure": true,
+        "exposureStatus": "unknown",
+        "intervals": [],
+        "jobResults": [],
+        "amax8": {
+          "min": 0,
+          "max": 0
+        },
+        "dv": {
+          "min": 0,
+          "max": 0
+        },
+        "comparison": {
+          "daily": {
+            "threshold": 0.63,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          },
+          "lifetime": {
+            "threshold": 1400,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          }
+        },
+        "validation": {
+          "hasInvalidIntervals": false,
+          "invalidIntervals": [],
+          "messages": []
+        },
+        "risk": {
+          "level": "safe",
+          "text": "전신진동 미평가",
+          "description": "전신진동 평가 미실시"
+        },
+        "actionValue": 0.5,
+        "limitZ": 0.8,
+        "gender": "female",
+        "formulaVersion": "BK2110-v1",
+        "noEvaluableJobs": false
+      }
+    }
+  },
+  "00000000-0000-4000-8000-000000000017": {
+    "name": "박준호",
+    "activeModules": [
+      "spine"
+    ],
+    "isComplete": false,
+    "calc": {
+      "tasks": [
+        {
+          "id": 201,
+          "sharedJobId": "00000000-0000-4000-8000-000000000022",
+          "name": "설비 부품 교체",
+          "posture": "G6",
+          "weight": 19,
+          "frequency": 30,
+          "timeValue": 7,
+          "timeUnit": "sec",
+          "correctionFactor": 1.3,
+          "force": 3382
+        },
+        {
+          "id": 202,
+          "sharedJobId": "00000000-0000-4000-8000-000000000022",
+          "name": "공구함 이동",
+          "posture": "G4",
+          "weight": 13,
+          "frequency": 36,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1.2,
+          "force": 2270
+        },
+        {
+          "id": 221,
+          "sharedJobId": "00000000-0000-4000-8000-000000000021",
+          "name": "적재함 정리",
+          "posture": "G4",
+          "weight": 11,
+          "frequency": 24,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1.1,
+          "force": 2008
+        }
+      ],
+      "jobResults": [
+        {
+          "jobId": "00000000-0000-4000-8000-000000000022",
+          "jobName": "학교 시설관리원",
+          "periodYears": 11.000684462696784,
+          "workDaysPerYear": 245,
+          "tasks": [
+            {
+              "id": 201,
+              "sharedJobId": "00000000-0000-4000-8000-000000000022",
+              "name": "설비 부품 교체",
+              "posture": "G6",
+              "weight": 19,
+              "frequency": 30,
+              "timeValue": 7,
+              "timeUnit": "sec",
+              "correctionFactor": 1.3,
+              "force": 3382
+            },
+            {
+              "id": 202,
+              "sharedJobId": "00000000-0000-4000-8000-000000000022",
+              "name": "공구함 이동",
+              "posture": "G4",
+              "weight": 13,
+              "frequency": 36,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 2270
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 924857.2333333334,
+            "dailyDoseNh": 2720.084165364496,
+            "dailyDoseKNh": 2.7200841653644963,
+            "includedCount": 2,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        },
+        {
+          "jobId": "00000000-0000-4000-8000-000000000021",
+          "jobName": "통학버스 운전원",
+          "periodYears": 7.167693360711842,
+          "workDaysPerYear": 244,
+          "tasks": [
+            {
+              "id": 221,
+              "sharedJobId": "00000000-0000-4000-8000-000000000021",
+              "name": "적재함 정리",
+              "posture": "G4",
+              "weight": 11,
+              "frequency": 24,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.1,
+              "force": 2008
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 134402.13333333333,
+            "dailyDoseNh": 1036.926741224599,
+            "dailyDoseKNh": 1.036926741224599,
+            "includedCount": 1,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        }
+      ],
+      "dailyDose": {
+        "sumF2T_hour": 1059259.3666666667,
+        "dailyDoseNh": 2911.026439820383,
+        "dailyDoseKNh": 2.911026439820383,
+        "includedCount": 3,
+        "hasHighForceTask": false
+      },
+      "lifetimeDose": {
+        "lifetimeDoseKNh": 0,
+        "lifetimeDoseMNh": 0,
+        "excluded": true,
+        "totalYears": 18.168377823408626
+      },
+      "comparison": {
+        "mddm": {
+          "limit": 25,
+          "percent": 0,
+          "status": "safe"
+        },
+        "court": {
+          "limit": 12.5,
+          "percent": 0,
+          "status": "safe"
+        }
+      },
+      "risk": {
+        "level": "safe",
+        "text": "현재 수준 유지",
+        "description": "독일 법원(BSG) 기준 충족"
+      },
+      "workRelatedness": {
+        "level": "low",
+        "grade": "낮음",
+        "description": "업무관련성 낮음",
+        "detail": "현재 누적 노출량(0.00 MN·h)이 독일 법원(BSG) 기준의 50%(6.3 MN·h) 미만입니다.",
+        "recommendation": "현재 노출 수준으로는 업무상 질병 인정이 어렵습니다.",
+        "workContribution": 0,
+        "personalContribution": 100
+      },
+      "maxForce": 3382,
+      "gender": "male",
+      "weightedDailyDose": {
+        "value": 2.7200841653644963,
+        "aboveThreshold": false
+      },
+      "formulaVersion": "v5.1.3",
+      "noEvaluableJobs": false,
+      "mddmStatus": "present",
+      "vibration": {
+        "evalMethod": "wbv",
+        "noExposure": true,
+        "exposureStatus": "unknown",
+        "intervals": [],
+        "jobResults": [],
+        "amax8": {
+          "min": 0,
+          "max": 0
+        },
+        "dv": {
+          "min": 0,
+          "max": 0
+        },
+        "comparison": {
+          "daily": {
+            "threshold": 0.63,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          },
+          "lifetime": {
+            "threshold": 1400,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          }
+        },
+        "validation": {
+          "hasInvalidIntervals": false,
+          "invalidIntervals": [],
+          "messages": []
+        },
+        "risk": {
+          "level": "safe",
+          "text": "전신진동 미평가",
+          "description": "전신진동 평가 미실시"
+        },
+        "actionValue": 0.5,
+        "limitZ": 0.8,
+        "gender": "male",
+        "formulaVersion": "BK2110-v1",
+        "noEvaluableJobs": false
+      }
+    }
+  },
+  "00000000-0000-4000-8000-000000000030": {
+    "name": "정수민",
+    "activeModules": [
+      "knee",
+      "spine"
+    ],
+    "isComplete": false,
+    "calc": {
+      "tasks": [
+        {
+          "id": 401,
+          "sharedJobId": "00000000-0000-4000-8000-000000000037",
+          "name": "환자 체위 변경",
+          "posture": "G6",
+          "weight": 17,
+          "frequency": 24,
+          "timeValue": 6,
+          "timeUnit": "sec",
+          "correctionFactor": 1.2,
+          "force": 3124
+        },
+        {
+          "id": 402,
+          "sharedJobId": "00000000-0000-4000-8000-000000000037",
+          "name": "침상 이동 보조",
+          "posture": "G7",
+          "weight": 16,
+          "frequency": 22,
+          "timeValue": 7,
+          "timeUnit": "sec",
+          "correctionFactor": 1.4,
+          "force": 2320
+        },
+        {
+          "id": 421,
+          "sharedJobId": "00000000-0000-4000-8000-000000000036",
+          "name": "환자 체위 변경",
+          "posture": "G6",
+          "weight": 18,
+          "frequency": 26,
+          "timeValue": 6,
+          "timeUnit": "sec",
+          "correctionFactor": 1.3,
+          "force": 3304
+        },
+        {
+          "id": 422,
+          "sharedJobId": "00000000-0000-4000-8000-000000000036",
+          "name": "침상 이동 보조",
+          "posture": "G7",
+          "weight": 14,
+          "frequency": 24,
+          "timeValue": 7,
+          "timeUnit": "sec",
+          "correctionFactor": 1.3,
+          "force": 2130
+        }
+      ],
+      "jobResults": [
+        {
+          "jobId": "00000000-0000-4000-8000-000000000037",
+          "jobName": "요양병원 간호조무사",
+          "periodYears": 9.661875427789186,
+          "workDaysPerYear": 244,
+          "tasks": [
+            {
+              "id": 401,
+              "sharedJobId": "00000000-0000-4000-8000-000000000037",
+              "name": "환자 체위 변경",
+              "posture": "G6",
+              "weight": 17,
+              "frequency": 24,
+              "timeValue": 6,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 3124
+            },
+            {
+              "id": 402,
+              "sharedJobId": "00000000-0000-4000-8000-000000000037",
+              "name": "침상 이동 보조",
+              "posture": "G7",
+              "weight": 16,
+              "frequency": 22,
+              "timeValue": 7,
+              "timeUnit": "sec",
+              "correctionFactor": 1.4,
+              "force": 2320
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 620622.151111111,
+            "dailyDoseNh": 2228.222881331418,
+            "dailyDoseKNh": 2.228222881331418,
+            "includedCount": 2,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        },
+        {
+          "jobId": "00000000-0000-4000-8000-000000000036",
+          "jobName": "내시경실 보조인력",
+          "periodYears": 6.338124572210814,
+          "workDaysPerYear": 243,
+          "tasks": [
+            {
+              "id": 421,
+              "sharedJobId": "00000000-0000-4000-8000-000000000036",
+              "name": "환자 체위 변경",
+              "posture": "G6",
+              "weight": 18,
+              "frequency": 26,
+              "timeValue": 6,
+              "timeUnit": "sec",
+              "correctionFactor": 1.3,
+              "force": 3304
+            },
+            {
+              "id": 422,
+              "sharedJobId": "00000000-0000-4000-8000-000000000036",
+              "name": "침상 이동 보조",
+              "posture": "G7",
+              "weight": 14,
+              "frequency": 24,
+              "timeValue": 7,
+              "timeUnit": "sec",
+              "correctionFactor": 1.3,
+              "force": 2130
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 684766.6933333334,
+            "dailyDoseNh": 2340.541293518802,
+            "dailyDoseKNh": 2.340541293518802,
+            "includedCount": 2,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        }
+      ],
+      "dailyDose": {
+        "sumF2T_hour": 1305388.8444444444,
+        "dailyDoseNh": 3231.580225765029,
+        "dailyDoseKNh": 3.231580225765029,
+        "includedCount": 4,
+        "hasHighForceTask": false
+      },
+      "lifetimeDose": {
+        "lifetimeDoseKNh": 0,
+        "lifetimeDoseMNh": 0,
+        "excluded": true,
+        "totalYears": 16
+      },
+      "comparison": {
+        "mddm": {
+          "limit": 25,
+          "percent": 0,
+          "status": "safe"
+        },
+        "court": {
+          "limit": 12.5,
+          "percent": 0,
+          "status": "safe"
+        }
+      },
+      "risk": {
+        "level": "safe",
+        "text": "현재 수준 유지",
+        "description": "독일 법원(BSG) 기준 충족"
+      },
+      "workRelatedness": {
+        "level": "low",
+        "grade": "낮음",
+        "description": "업무관련성 낮음",
+        "detail": "현재 누적 노출량(0.00 MN·h)이 독일 법원(BSG) 기준의 50%(6.3 MN·h) 미만입니다.",
+        "recommendation": "현재 노출 수준으로는 업무상 질병 인정이 어렵습니다.",
+        "workContribution": 0,
+        "personalContribution": 100
+      },
+      "maxForce": 3304,
+      "gender": "male",
+      "weightedDailyDose": {
+        "value": 2.340541293518802,
+        "aboveThreshold": false
+      },
+      "formulaVersion": "v5.1.3",
+      "noEvaluableJobs": false,
+      "mddmStatus": "present",
+      "vibration": {
+        "evalMethod": "wbv",
+        "noExposure": true,
+        "exposureStatus": "unknown",
+        "intervals": [],
+        "jobResults": [],
+        "amax8": {
+          "min": 0,
+          "max": 0
+        },
+        "dv": {
+          "min": 0,
+          "max": 0
+        },
+        "comparison": {
+          "daily": {
+            "threshold": 0.63,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          },
+          "lifetime": {
+            "threshold": 1400,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          }
+        },
+        "validation": {
+          "hasInvalidIntervals": false,
+          "invalidIntervals": [],
+          "messages": []
+        },
+        "risk": {
+          "level": "safe",
+          "text": "전신진동 미평가",
+          "description": "전신진동 평가 미실시"
+        },
+        "actionValue": 0.5,
+        "limitZ": 0.8,
+        "gender": "male",
+        "formulaVersion": "BK2110-v1",
+        "noEvaluableJobs": false
+      }
+    }
+  },
+  "00000000-0000-4000-8000-000000000038": {
+    "name": "한지훈",
+    "activeModules": [
+      "spine"
+    ],
+    "isComplete": false,
+    "calc": {
+      "tasks": [
+        {
+          "id": 501,
+          "sharedJobId": "00000000-0000-4000-8000-000000000042",
+          "name": "부품 상자 이동",
+          "posture": "G4",
+          "weight": 17,
+          "frequency": 34,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1.2,
+          "force": 2630
+        },
+        {
+          "id": 502,
+          "sharedJobId": "00000000-0000-4000-8000-000000000042",
+          "name": "라인 자재 공급",
+          "posture": "G5",
+          "weight": 18,
+          "frequency": 32,
+          "timeValue": 6,
+          "timeUnit": "sec",
+          "correctionFactor": 1.2,
+          "force": 3304
+        }
+      ],
+      "jobResults": [
+        {
+          "jobId": "00000000-0000-4000-8000-000000000042",
+          "jobName": "검품 포장 작업자",
+          "periodYears": 8,
+          "workDaysPerYear": 247,
+          "tasks": [
+            {
+              "id": 501,
+              "sharedJobId": "00000000-0000-4000-8000-000000000042",
+              "name": "부품 상자 이동",
+              "posture": "G4",
+              "weight": 17,
+              "frequency": 34,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 2630
+            },
+            {
+              "id": 502,
+              "sharedJobId": "00000000-0000-4000-8000-000000000042",
+              "name": "라인 자재 공급",
+              "posture": "G5",
+              "weight": 18,
+              "frequency": 32,
+              "timeValue": 6,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 3304
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 908840.2422222223,
+            "dailyDoseNh": 2696.427625169602,
+            "dailyDoseKNh": 2.6964276251696018,
+            "includedCount": 2,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        }
+      ],
+      "dailyDose": {
+        "sumF2T_hour": 908840.2422222223,
+        "dailyDoseNh": 2696.427625169602,
+        "dailyDoseKNh": 2.6964276251696018,
+        "includedCount": 2,
+        "hasHighForceTask": false
+      },
+      "lifetimeDose": {
+        "lifetimeDoseKNh": 0,
+        "lifetimeDoseMNh": 0,
+        "excluded": true,
+        "totalYears": 8
+      },
+      "comparison": {
+        "mddm": {
+          "limit": 17,
+          "percent": 0,
+          "status": "safe"
+        },
+        "court": {
+          "limit": 8.5,
+          "percent": 0,
+          "status": "safe"
+        }
+      },
+      "risk": {
+        "level": "safe",
+        "text": "현재 수준 유지",
+        "description": "독일 법원(BSG) 기준 충족"
+      },
+      "workRelatedness": {
+        "level": "low",
+        "grade": "낮음",
+        "description": "업무관련성 낮음",
+        "detail": "현재 누적 노출량(0.00 MN·h)이 독일 법원(BSG) 기준의 50%(4.3 MN·h) 미만입니다.",
+        "recommendation": "현재 노출 수준으로는 업무상 질병 인정이 어렵습니다.",
+        "workContribution": 0,
+        "personalContribution": 100
+      },
+      "maxForce": 3304,
+      "gender": "female",
+      "formulaVersion": "v5.1.3",
+      "noEvaluableJobs": false,
+      "mddmStatus": "present",
+      "vibration": {
+        "evalMethod": "wbv",
+        "noExposure": true,
+        "exposureStatus": "unknown",
+        "intervals": [],
+        "jobResults": [],
+        "amax8": {
+          "min": 0,
+          "max": 0
+        },
+        "dv": {
+          "min": 0,
+          "max": 0
+        },
+        "comparison": {
+          "daily": {
+            "threshold": 0.63,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          },
+          "lifetime": {
+            "threshold": 1400,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          }
+        },
+        "validation": {
+          "hasInvalidIntervals": false,
+          "invalidIntervals": [],
+          "messages": []
+        },
+        "risk": {
+          "level": "safe",
+          "text": "전신진동 미평가",
+          "description": "전신진동 평가 미실시"
+        },
+        "actionValue": 0.5,
+        "limitZ": 0.8,
+        "gender": "female",
+        "formulaVersion": "BK2110-v1",
+        "noEvaluableJobs": false
+      }
+    }
+  },
+  "00000000-0000-4000-8000-000000000051": {
+    "name": "윤상미",
+    "activeModules": [
+      "knee",
+      "spine",
+      "cervical"
+    ],
+    "isComplete": true,
+    "calc": {
+      "tasks": [
+        {
+          "id": 701,
+          "sharedJobId": "00000000-0000-4000-8000-000000000059",
+          "name": "부품 상자 이동",
+          "posture": "G4",
+          "weight": 16,
+          "frequency": 38,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1.2,
+          "force": 2540
+        },
+        {
+          "id": 702,
+          "sharedJobId": "00000000-0000-4000-8000-000000000059",
+          "name": "라인 자재 공급",
+          "posture": "G5",
+          "weight": 20,
+          "frequency": 28,
+          "timeValue": 6,
+          "timeUnit": "sec",
+          "correctionFactor": 1.2,
+          "force": 3460
+        },
+        {
+          "id": 721,
+          "sharedJobId": "00000000-0000-4000-8000-000000000058",
+          "name": "상자 상하차",
+          "posture": "G5",
+          "weight": 24,
+          "frequency": 38,
+          "timeValue": 6,
+          "timeUnit": "sec",
+          "correctionFactor": 1.2,
+          "force": 3772
+        },
+        {
+          "id": 722,
+          "sharedJobId": "00000000-0000-4000-8000-000000000058",
+          "name": "피킹 카트 적재",
+          "posture": "G6",
+          "weight": 16,
+          "frequency": 46,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1.2,
+          "force": 3052
+        }
+      ],
+      "jobResults": [
+        {
+          "jobId": "00000000-0000-4000-8000-000000000059",
+          "jobName": "축산물 가공 작업자",
+          "periodYears": 19.000684462696782,
+          "workDaysPerYear": 251,
+          "tasks": [
+            {
+              "id": 701,
+              "sharedJobId": "00000000-0000-4000-8000-000000000059",
+              "name": "부품 상자 이동",
+              "posture": "G4",
+              "weight": 16,
+              "frequency": 38,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 2540
+            },
+            {
+              "id": 702,
+              "sharedJobId": "00000000-0000-4000-8000-000000000059",
+              "name": "라인 자재 공급",
+              "posture": "G5",
+              "weight": 20,
+              "frequency": 28,
+              "timeValue": 6,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 3460
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 899175.7777777779,
+            "dailyDoseNh": 2682.0526136193193,
+            "dailyDoseKNh": 2.6820526136193195,
+            "includedCount": 2,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        },
+        {
+          "jobId": "00000000-0000-4000-8000-000000000058",
+          "jobName": "냉동창고 피킹 작업자",
+          "periodYears": 9.248459958932239,
+          "workDaysPerYear": 252,
+          "tasks": [
+            {
+              "id": 721,
+              "sharedJobId": "00000000-0000-4000-8000-000000000058",
+              "name": "상자 상하차",
+              "posture": "G5",
+              "weight": 24,
+              "frequency": 38,
+              "timeValue": 6,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 3772
+            },
+            {
+              "id": 722,
+              "sharedJobId": "00000000-0000-4000-8000-000000000058",
+              "name": "피킹 카트 적재",
+              "posture": "G6",
+              "weight": 16,
+              "frequency": 46,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 3052
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 1496211.7422222223,
+            "dailyDoseNh": 3459.724546517797,
+            "dailyDoseKNh": 3.4597245465177973,
+            "includedCount": 2,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 8064.617917932985,
+            "lifetimeDoseMNh": 8.064617917932985,
+            "excluded": false,
+            "totalYears": 9.25
+          }
+        }
+      ],
+      "dailyDose": {
+        "sumF2T_hour": 2395387.52,
+        "dailyDoseNh": 4377.56783613915,
+        "dailyDoseKNh": 4.37756783613915,
+        "includedCount": 4,
+        "hasHighForceTask": false
+      },
+      "lifetimeDose": {
+        "lifetimeDoseKNh": 8064.617917932985,
+        "lifetimeDoseMNh": 8.064617917932985,
+        "excluded": false,
+        "totalYears": 28.24914442162902
+      },
+      "comparison": {
+        "mddm": {
+          "limit": 17,
+          "percent": 47.43892892901756,
+          "status": "safe"
+        },
+        "court": {
+          "limit": 8.5,
+          "percent": 94.87785785803511,
+          "status": "safe"
+        }
+      },
+      "risk": {
+        "level": "warning",
+        "text": "작업 환경 개선 권고",
+        "description": "독일 법원(BSG) 기준 근접"
+      },
+      "workRelatedness": {
+        "level": "medium",
+        "grade": "불충분",
+        "description": "업무관련성 불충분(다른 요건 고려)",
+        "detail": "독일 법원(BSG) 기준의 50%(4.3 MN·h) 이상이나, 기준(8.5 MN·h)을 초과하지는 않습니다. 누적 노출만으로는 충분치 않으므로, 다른 직업적·임상적 요건을 함께 고려해야 합니다.",
+        "recommendation": "업무 외 요인 및 추가 임상 소견과 함께 종합 판단이 필요합니다.",
+        "workContribution": 95,
+        "personalContribution": 5
+      },
+      "maxForce": 3772,
+      "gender": "female",
+      "weightedDailyDose": {
+        "value": 3.4597245465177973,
+        "aboveThreshold": true
+      },
+      "formulaVersion": "v5.1.3",
+      "noEvaluableJobs": false,
+      "mddmStatus": "present",
+      "vibration": {
+        "evalMethod": "wbv",
+        "noExposure": true,
+        "exposureStatus": "unknown",
+        "intervals": [],
+        "jobResults": [],
+        "amax8": {
+          "min": 0,
+          "max": 0
+        },
+        "dv": {
+          "min": 0,
+          "max": 0
+        },
+        "comparison": {
+          "daily": {
+            "threshold": 0.63,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          },
+          "lifetime": {
+            "threshold": 1400,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          }
+        },
+        "validation": {
+          "hasInvalidIntervals": false,
+          "invalidIntervals": [],
+          "messages": []
+        },
+        "risk": {
+          "level": "safe",
+          "text": "전신진동 미평가",
+          "description": "전신진동 평가 미실시"
+        },
+        "actionValue": 0.5,
+        "limitZ": 0.8,
+        "gender": "female",
+        "formulaVersion": "BK2110-v1",
+        "noEvaluableJobs": false
+      }
+    }
+  },
+  "00000000-0000-4000-8000-000000000060": {
+    "name": "강민석",
+    "activeModules": [
+      "spine"
+    ],
+    "isComplete": false,
+    "calc": {
+      "tasks": [
+        {
+          "id": 801,
+          "sharedJobId": "00000000-0000-4000-8000-000000000065",
+          "name": "장비 카세트 교체",
+          "posture": "G4",
+          "weight": 11,
+          "frequency": 18,
+          "timeValue": 4,
+          "timeUnit": "sec",
+          "correctionFactor": 1,
+          "force": 1925
+        },
+        {
+          "id": 802,
+          "sharedJobId": "00000000-0000-4000-8000-000000000065",
+          "name": "소모품 박스 이동",
+          "posture": "G3",
+          "weight": 7,
+          "frequency": 24,
+          "timeValue": 4,
+          "timeUnit": "sec",
+          "correctionFactor": 1.1,
+          "force": 2439
+        },
+        {
+          "id": 821,
+          "sharedJobId": "00000000-0000-4000-8000-000000000064",
+          "name": "장비 카세트 교체",
+          "posture": "G4",
+          "weight": 9,
+          "frequency": 20,
+          "timeValue": 4,
+          "timeUnit": "sec",
+          "correctionFactor": 1.1,
+          "force": 1843
+        }
+      ],
+      "jobResults": [
+        {
+          "jobId": "00000000-0000-4000-8000-000000000065",
+          "jobName": "공작기계 조작원",
+          "periodYears": 7.838466803559206,
+          "workDaysPerYear": 247,
+          "tasks": [
+            {
+              "id": 801,
+              "sharedJobId": "00000000-0000-4000-8000-000000000065",
+              "name": "장비 카세트 교체",
+              "posture": "G4",
+              "weight": 11,
+              "frequency": 18,
+              "timeValue": 4,
+              "timeUnit": "sec",
+              "correctionFactor": 1,
+              "force": 1925
+            },
+            {
+              "id": 802,
+              "sharedJobId": "00000000-0000-4000-8000-000000000065",
+              "name": "소모품 박스 이동",
+              "posture": "G3",
+              "weight": 7,
+              "frequency": 24,
+              "timeValue": 4,
+              "timeUnit": "sec",
+              "correctionFactor": 1.1,
+              "force": 2439
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 232745.06,
+            "dailyDoseNh": 1364.5367272448184,
+            "dailyDoseKNh": 1.3645367272448183,
+            "includedCount": 2,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        },
+        {
+          "jobId": "00000000-0000-4000-8000-000000000064",
+          "jobName": "품질검사 담당자",
+          "periodYears": 4.914442162902122,
+          "workDaysPerYear": 241,
+          "tasks": [
+            {
+              "id": 821,
+              "sharedJobId": "00000000-0000-4000-8000-000000000064",
+              "name": "장비 카세트 교체",
+              "posture": "G4",
+              "weight": 9,
+              "frequency": 20,
+              "timeValue": 4,
+              "timeUnit": "sec",
+              "correctionFactor": 1.1,
+              "force": 1843
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 0,
+            "dailyDoseNh": 0,
+            "dailyDoseKNh": 0,
+            "includedCount": 0,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        }
+      ],
+      "dailyDose": {
+        "sumF2T_hour": 232745.06,
+        "dailyDoseNh": 1364.5367272448184,
+        "dailyDoseKNh": 1.3645367272448183,
+        "includedCount": 2,
+        "hasHighForceTask": false
+      },
+      "lifetimeDose": {
+        "lifetimeDoseKNh": 0,
+        "lifetimeDoseMNh": 0,
+        "excluded": true,
+        "totalYears": 12.752908966461328
+      },
+      "comparison": {
+        "mddm": {
+          "limit": 25,
+          "percent": 0,
+          "status": "safe"
+        },
+        "court": {
+          "limit": 12.5,
+          "percent": 0,
+          "status": "safe"
+        }
+      },
+      "risk": {
+        "level": "safe",
+        "text": "현재 수준 유지",
+        "description": "독일 법원(BSG) 기준 충족"
+      },
+      "workRelatedness": {
+        "level": "low",
+        "grade": "낮음",
+        "description": "업무관련성 낮음",
+        "detail": "현재 누적 노출량(0.00 MN·h)이 독일 법원(BSG) 기준의 50%(6.3 MN·h) 미만입니다.",
+        "recommendation": "현재 노출 수준으로는 업무상 질병 인정이 어렵습니다.",
+        "workContribution": 0,
+        "personalContribution": 100
+      },
+      "maxForce": 2439,
+      "gender": "male",
+      "weightedDailyDose": {
+        "value": 1.3645367272448183,
+        "aboveThreshold": false
+      },
+      "formulaVersion": "v5.1.3",
+      "noEvaluableJobs": false,
+      "mddmStatus": "present",
+      "vibration": {
+        "evalMethod": "wbv",
+        "noExposure": true,
+        "exposureStatus": "unknown",
+        "intervals": [],
+        "jobResults": [],
+        "amax8": {
+          "min": 0,
+          "max": 0
+        },
+        "dv": {
+          "min": 0,
+          "max": 0
+        },
+        "comparison": {
+          "daily": {
+            "threshold": 0.63,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          },
+          "lifetime": {
+            "threshold": 1400,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          }
+        },
+        "validation": {
+          "hasInvalidIntervals": false,
+          "invalidIntervals": [],
+          "messages": []
+        },
+        "risk": {
+          "level": "safe",
+          "text": "전신진동 미평가",
+          "description": "전신진동 평가 미실시"
+        },
+        "actionValue": 0.5,
+        "limitZ": 0.8,
+        "gender": "male",
+        "formulaVersion": "BK2110-v1",
+        "noEvaluableJobs": false
+      }
+    }
+  },
+  "00000000-0000-4000-8000-000000000079": {
+    "name": "신다은",
+    "activeModules": [
+      "knee",
+      "spine",
+      "cervical"
+    ],
+    "isComplete": false,
+    "calc": {
+      "tasks": [
+        {
+          "id": 1101,
+          "sharedJobId": "00000000-0000-4000-8000-000000000086",
+          "name": "문서 상자 이동",
+          "posture": "G3",
+          "weight": 10,
+          "frequency": 20,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1.1,
+          "force": 2670
+        },
+        {
+          "id": 1102,
+          "sharedJobId": "00000000-0000-4000-8000-000000000086",
+          "name": "사무 비품 정리",
+          "posture": "G4",
+          "weight": 6,
+          "frequency": 18,
+          "timeValue": 4,
+          "timeUnit": "sec",
+          "correctionFactor": 1,
+          "force": 1550
+        }
+      ],
+      "jobResults": [
+        {
+          "jobId": "00000000-0000-4000-8000-000000000086",
+          "jobName": "구매팀 사무직",
+          "periodYears": 5.333333333333333,
+          "workDaysPerYear": 237,
+          "tasks": [
+            {
+              "id": 1101,
+              "sharedJobId": "00000000-0000-4000-8000-000000000086",
+              "name": "문서 상자 이동",
+              "posture": "G3",
+              "weight": 10,
+              "frequency": 20,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.1,
+              "force": 2670
+            },
+            {
+              "id": 1102,
+              "sharedJobId": "00000000-0000-4000-8000-000000000086",
+              "name": "사무 비품 정리",
+              "posture": "G4",
+              "weight": 6,
+              "frequency": 18,
+              "timeValue": 4,
+              "timeUnit": "sec",
+              "correctionFactor": 1,
+              "force": 1550
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 198025,
+            "dailyDoseNh": 1258.6500705120545,
+            "dailyDoseKNh": 1.2586500705120545,
+            "includedCount": 1,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        }
+      ],
+      "dailyDose": {
+        "sumF2T_hour": 198025,
+        "dailyDoseNh": 1258.6500705120545,
+        "dailyDoseKNh": 1.2586500705120545,
+        "includedCount": 1,
+        "hasHighForceTask": false
+      },
+      "lifetimeDose": {
+        "lifetimeDoseKNh": 0,
+        "lifetimeDoseMNh": 0,
+        "excluded": true,
+        "totalYears": 5.333333333333333
+      },
+      "comparison": {
+        "mddm": {
+          "limit": 17,
+          "percent": 0,
+          "status": "safe"
+        },
+        "court": {
+          "limit": 8.5,
+          "percent": 0,
+          "status": "safe"
+        }
+      },
+      "risk": {
+        "level": "safe",
+        "text": "현재 수준 유지",
+        "description": "독일 법원(BSG) 기준 충족"
+      },
+      "workRelatedness": {
+        "level": "low",
+        "grade": "낮음",
+        "description": "업무관련성 낮음",
+        "detail": "현재 누적 노출량(0.00 MN·h)이 독일 법원(BSG) 기준의 50%(4.3 MN·h) 미만입니다.",
+        "recommendation": "현재 노출 수준으로는 업무상 질병 인정이 어렵습니다.",
+        "workContribution": 0,
+        "personalContribution": 100
+      },
+      "maxForce": 2670,
+      "gender": "female",
+      "formulaVersion": "v5.1.3",
+      "noEvaluableJobs": false,
+      "mddmStatus": "present",
+      "vibration": {
+        "evalMethod": "wbv",
+        "noExposure": true,
+        "exposureStatus": "unknown",
+        "intervals": [],
+        "jobResults": [],
+        "amax8": {
+          "min": 0,
+          "max": 0
+        },
+        "dv": {
+          "min": 0,
+          "max": 0
+        },
+        "comparison": {
+          "daily": {
+            "threshold": 0.63,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          },
+          "lifetime": {
+            "threshold": 1400,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          }
+        },
+        "validation": {
+          "hasInvalidIntervals": false,
+          "invalidIntervals": [],
+          "messages": []
+        },
+        "risk": {
+          "level": "safe",
+          "text": "전신진동 미평가",
+          "description": "전신진동 평가 미실시"
+        },
+        "actionValue": 0.5,
+        "limitZ": 0.8,
+        "gender": "female",
+        "formulaVersion": "BK2110-v1",
+        "noEvaluableJobs": false
+      }
+    }
+  },
+  "00000000-0000-4000-8000-000000000087": {
+    "name": "임효진",
+    "activeModules": [
+      "spine"
+    ],
+    "isComplete": false,
+    "calc": {
+      "tasks": [
+        {
+          "id": 1201,
+          "sharedJobId": "00000000-0000-4000-8000-000000000093",
+          "name": "장비 카세트 교체",
+          "posture": "G4",
+          "weight": 9,
+          "frequency": 18,
+          "timeValue": 4,
+          "timeUnit": "sec",
+          "correctionFactor": 1,
+          "force": 1775
+        },
+        {
+          "id": 1221,
+          "sharedJobId": "00000000-0000-4000-8000-000000000092",
+          "name": "부품 상자 이동",
+          "posture": "G4",
+          "weight": 16,
+          "frequency": 34,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1.2,
+          "force": 2540
+        },
+        {
+          "id": 1222,
+          "sharedJobId": "00000000-0000-4000-8000-000000000092",
+          "name": "라인 자재 공급",
+          "posture": "G5",
+          "weight": 20,
+          "frequency": 32,
+          "timeValue": 6,
+          "timeUnit": "sec",
+          "correctionFactor": 1.2,
+          "force": 3460
+        },
+        {
+          "id": 1241,
+          "sharedJobId": "00000000-0000-4000-8000-000000000091",
+          "name": "부품 상자 이동",
+          "posture": "G4",
+          "weight": 17,
+          "frequency": 36,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1.1,
+          "force": 2503
+        },
+        {
+          "id": 1242,
+          "sharedJobId": "00000000-0000-4000-8000-000000000091",
+          "name": "라인 자재 공급",
+          "posture": "G5",
+          "weight": 18,
+          "frequency": 34,
+          "timeValue": 6,
+          "timeUnit": "sec",
+          "correctionFactor": 1.3,
+          "force": 3421
+        }
+      ],
+      "jobResults": [
+        {
+          "jobId": "00000000-0000-4000-8000-000000000093",
+          "jobName": "어린이집 보육교사",
+          "periodYears": 6.584531143052704,
+          "workDaysPerYear": 239,
+          "tasks": [
+            {
+              "id": 1201,
+              "sharedJobId": "00000000-0000-4000-8000-000000000093",
+              "name": "장비 카세트 교체",
+              "posture": "G4",
+              "weight": 9,
+              "frequency": 18,
+              "timeValue": 4,
+              "timeUnit": "sec",
+              "correctionFactor": 1,
+              "force": 1775
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 0,
+            "dailyDoseNh": 0,
+            "dailyDoseKNh": 0,
+            "includedCount": 0,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        },
+        {
+          "jobId": "00000000-0000-4000-8000-000000000092",
+          "jobName": "농산물 선별 작업자",
+          "periodYears": 18.496919917864478,
+          "workDaysPerYear": 249,
+          "tasks": [
+            {
+              "id": 1221,
+              "sharedJobId": "00000000-0000-4000-8000-000000000092",
+              "name": "부품 상자 이동",
+              "posture": "G4",
+              "weight": 16,
+              "frequency": 34,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 2540
+            },
+            {
+              "id": 1222,
+              "sharedJobId": "00000000-0000-4000-8000-000000000092",
+              "name": "라인 자재 공급",
+              "posture": "G5",
+              "weight": 20,
+              "frequency": 32,
+              "timeValue": 6,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 3460
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 943144.2222222222,
+            "dailyDoseNh": 2746.844330823605,
+            "dailyDoseKNh": 2.7468443308236052,
+            "includedCount": 2,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        },
+        {
+          "jobId": "00000000-0000-4000-8000-000000000091",
+          "jobName": "스마트팜 재배관리원",
+          "periodYears": 8.503764544832306,
+          "workDaysPerYear": 245,
+          "tasks": [
+            {
+              "id": 1241,
+              "sharedJobId": "00000000-0000-4000-8000-000000000091",
+              "name": "부품 상자 이동",
+              "posture": "G4",
+              "weight": 17,
+              "frequency": 36,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.1,
+              "force": 2503
+            },
+            {
+              "id": 1242,
+              "sharedJobId": "00000000-0000-4000-8000-000000000091",
+              "name": "라인 자재 공급",
+              "posture": "G5",
+              "weight": 18,
+              "frequency": 34,
+              "timeValue": 6,
+              "timeUnit": "sec",
+              "correctionFactor": 1.3,
+              "force": 3421
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 976434.1066666667,
+            "dailyDoseNh": 2794.9012242534322,
+            "dailyDoseKNh": 2.794901224253432,
+            "includedCount": 2,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        }
+      ],
+      "dailyDose": {
+        "sumF2T_hour": 1919578.328888889,
+        "dailyDoseNh": 3918.753198545567,
+        "dailyDoseKNh": 3.9187531985455673,
+        "includedCount": 4,
+        "hasHighForceTask": false
+      },
+      "lifetimeDose": {
+        "lifetimeDoseKNh": 0,
+        "lifetimeDoseMNh": 0,
+        "excluded": true,
+        "totalYears": 33.58521560574949
+      },
+      "comparison": {
+        "mddm": {
+          "limit": 25,
+          "percent": 0,
+          "status": "safe"
+        },
+        "court": {
+          "limit": 12.5,
+          "percent": 0,
+          "status": "safe"
+        }
+      },
+      "risk": {
+        "level": "safe",
+        "text": "현재 수준 유지",
+        "description": "독일 법원(BSG) 기준 충족"
+      },
+      "workRelatedness": {
+        "level": "low",
+        "grade": "낮음",
+        "description": "업무관련성 낮음",
+        "detail": "현재 누적 노출량(0.00 MN·h)이 독일 법원(BSG) 기준의 50%(6.3 MN·h) 미만입니다.",
+        "recommendation": "현재 노출 수준으로는 업무상 질병 인정이 어렵습니다.",
+        "workContribution": 0,
+        "personalContribution": 100
+      },
+      "maxForce": 3460,
+      "gender": "male",
+      "weightedDailyDose": {
+        "value": 2.794901224253432,
+        "aboveThreshold": false
+      },
+      "formulaVersion": "v5.1.3",
+      "noEvaluableJobs": false,
+      "mddmStatus": "present",
+      "vibration": {
+        "evalMethod": "wbv",
+        "noExposure": true,
+        "exposureStatus": "unknown",
+        "intervals": [],
+        "jobResults": [],
+        "amax8": {
+          "min": 0,
+          "max": 0
+        },
+        "dv": {
+          "min": 0,
+          "max": 0
+        },
+        "comparison": {
+          "daily": {
+            "threshold": 0.63,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          },
+          "lifetime": {
+            "threshold": 1400,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          }
+        },
+        "validation": {
+          "hasInvalidIntervals": false,
+          "invalidIntervals": [],
+          "messages": []
+        },
+        "risk": {
+          "level": "safe",
+          "text": "전신진동 미평가",
+          "description": "전신진동 평가 미실시"
+        },
+        "actionValue": 0.5,
+        "limitZ": 0.8,
+        "gender": "male",
+        "formulaVersion": "BK2110-v1",
+        "noEvaluableJobs": false
+      }
+    }
+  },
+  "00000000-0000-4000-8000-000000000101": {
+    "name": "문형준",
+    "activeModules": [
+      "knee",
+      "spine",
+      "cervical"
+    ],
+    "isComplete": false,
+    "calc": {
+      "tasks": [
+        {
+          "id": 1401,
+          "sharedJobId": "00000000-0000-4000-8000-000000000110",
+          "name": "환자 체위 변경",
+          "posture": "G6",
+          "weight": 18,
+          "frequency": 28,
+          "timeValue": 6,
+          "timeUnit": "sec",
+          "correctionFactor": 1.2,
+          "force": 3196
+        },
+        {
+          "id": 1402,
+          "sharedJobId": "00000000-0000-4000-8000-000000000110",
+          "name": "침상 이동 보조",
+          "posture": "G7",
+          "weight": 14,
+          "frequency": 26,
+          "timeValue": 7,
+          "timeUnit": "sec",
+          "correctionFactor": 1.4,
+          "force": 2130
+        },
+        {
+          "id": 1421,
+          "sharedJobId": "00000000-0000-4000-8000-000000000109",
+          "name": "물품 진열",
+          "posture": "G3",
+          "weight": 10,
+          "frequency": 30,
+          "timeValue": 4,
+          "timeUnit": "sec",
+          "correctionFactor": 1.1,
+          "force": 2670
+        },
+        {
+          "id": 1441,
+          "sharedJobId": "00000000-0000-4000-8000-000000000108",
+          "name": "물품 진열",
+          "posture": "G3",
+          "weight": 11,
+          "frequency": 24,
+          "timeValue": 4,
+          "timeUnit": "sec",
+          "correctionFactor": 1,
+          "force": 2670
+        },
+        {
+          "id": 1442,
+          "sharedJobId": "00000000-0000-4000-8000-000000000108",
+          "name": "청소 장비 이동",
+          "posture": "G4",
+          "weight": 11,
+          "frequency": 22,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1.1,
+          "force": 2008
+        }
+      ],
+      "jobResults": [
+        {
+          "jobId": "00000000-0000-4000-8000-000000000110",
+          "jobName": "건설 현장 배관공",
+          "periodYears": 9.084188911704311,
+          "workDaysPerYear": 248,
+          "tasks": [
+            {
+              "id": 1401,
+              "sharedJobId": "00000000-0000-4000-8000-000000000110",
+              "name": "환자 체위 변경",
+              "posture": "G6",
+              "weight": 18,
+              "frequency": 28,
+              "timeValue": 6,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 3196
+            },
+            {
+              "id": 1402,
+              "sharedJobId": "00000000-0000-4000-8000-000000000110",
+              "name": "침상 이동 보조",
+              "posture": "G7",
+              "weight": 14,
+              "frequency": 26,
+              "timeValue": 7,
+              "timeUnit": "sec",
+              "correctionFactor": 1.4,
+              "force": 2130
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 706038.2466666667,
+            "dailyDoseNh": 2376.6164968991807,
+            "dailyDoseKNh": 2.3766164968991808,
+            "includedCount": 2,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        },
+        {
+          "jobId": "00000000-0000-4000-8000-000000000109",
+          "jobName": "호텔 객실 정비원",
+          "periodYears": 16.243668720054757,
+          "workDaysPerYear": 241,
+          "tasks": [
+            {
+              "id": 1421,
+              "sharedJobId": "00000000-0000-4000-8000-000000000109",
+              "name": "물품 진열",
+              "posture": "G3",
+              "weight": 10,
+              "frequency": 30,
+              "timeValue": 4,
+              "timeUnit": "sec",
+              "correctionFactor": 1.1,
+              "force": 2670
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 237630,
+            "dailyDoseNh": 1378.7820712498403,
+            "dailyDoseKNh": 1.3787820712498404,
+            "includedCount": 1,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        },
+        {
+          "jobId": "00000000-0000-4000-8000-000000000108",
+          "jobName": "세탁물 정리 담당",
+          "periodYears": 6.757015742642026,
+          "workDaysPerYear": 244,
+          "tasks": [
+            {
+              "id": 1441,
+              "sharedJobId": "00000000-0000-4000-8000-000000000108",
+              "name": "물품 진열",
+              "posture": "G3",
+              "weight": 11,
+              "frequency": 24,
+              "timeValue": 4,
+              "timeUnit": "sec",
+              "correctionFactor": 1,
+              "force": 2670
+            },
+            {
+              "id": 1442,
+              "sharedJobId": "00000000-0000-4000-8000-000000000108",
+              "name": "청소 장비 이동",
+              "posture": "G4",
+              "weight": 11,
+              "frequency": 22,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.1,
+              "force": 2008
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 313305.9555555555,
+            "dailyDoseNh": 1583.1764413496192,
+            "dailyDoseKNh": 1.5831764413496192,
+            "includedCount": 2,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        }
+      ],
+      "dailyDose": {
+        "sumF2T_hour": 1256974.2022222222,
+        "dailyDoseNh": 3171.0871350024076,
+        "dailyDoseKNh": 3.1710871350024075,
+        "includedCount": 5,
+        "hasHighForceTask": false
+      },
+      "lifetimeDose": {
+        "lifetimeDoseKNh": 0,
+        "lifetimeDoseMNh": 0,
+        "excluded": true,
+        "totalYears": 32.08487337440109
+      },
+      "comparison": {
+        "mddm": {
+          "limit": 25,
+          "percent": 0,
+          "status": "safe"
+        },
+        "court": {
+          "limit": 12.5,
+          "percent": 0,
+          "status": "safe"
+        }
+      },
+      "risk": {
+        "level": "safe",
+        "text": "현재 수준 유지",
+        "description": "독일 법원(BSG) 기준 충족"
+      },
+      "workRelatedness": {
+        "level": "low",
+        "grade": "낮음",
+        "description": "업무관련성 낮음",
+        "detail": "현재 누적 노출량(0.00 MN·h)이 독일 법원(BSG) 기준의 50%(6.3 MN·h) 미만입니다.",
+        "recommendation": "현재 노출 수준으로는 업무상 질병 인정이 어렵습니다.",
+        "workContribution": 0,
+        "personalContribution": 100
+      },
+      "maxForce": 3196,
+      "gender": "male",
+      "weightedDailyDose": {
+        "value": 2.3766164968991808,
+        "aboveThreshold": false
+      },
+      "formulaVersion": "v5.1.3",
+      "noEvaluableJobs": false,
+      "mddmStatus": "present",
+      "vibration": {
+        "evalMethod": "wbv",
+        "noExposure": true,
+        "exposureStatus": "unknown",
+        "intervals": [],
+        "jobResults": [],
+        "amax8": {
+          "min": 0,
+          "max": 0
+        },
+        "dv": {
+          "min": 0,
+          "max": 0
+        },
+        "comparison": {
+          "daily": {
+            "threshold": 0.63,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          },
+          "lifetime": {
+            "threshold": 1400,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          }
+        },
+        "validation": {
+          "hasInvalidIntervals": false,
+          "invalidIntervals": [],
+          "messages": []
+        },
+        "risk": {
+          "level": "safe",
+          "text": "전신진동 미평가",
+          "description": "전신진동 평가 미실시"
+        },
+        "actionValue": 0.5,
+        "limitZ": 0.8,
+        "gender": "male",
+        "formulaVersion": "BK2110-v1",
+        "noEvaluableJobs": false
+      }
+    }
+  },
+  "00000000-0000-4000-8000-000000000111": {
+    "name": "송은지",
+    "activeModules": [
+      "spine",
+      "cervical"
+    ],
+    "isComplete": false,
+    "calc": {
+      "tasks": [
+        {
+          "id": 1501,
+          "sharedJobId": "00000000-0000-4000-8000-000000000117",
+          "name": "설비 부품 교체",
+          "posture": "G6",
+          "weight": 17,
+          "frequency": 32,
+          "timeValue": 7,
+          "timeUnit": "sec",
+          "correctionFactor": 1.4,
+          "force": 3328
+        },
+        {
+          "id": 1521,
+          "sharedJobId": "00000000-0000-4000-8000-000000000116",
+          "name": "설비 부품 교체",
+          "posture": "G6",
+          "weight": 18,
+          "frequency": 26,
+          "timeValue": 7,
+          "timeUnit": "sec",
+          "correctionFactor": 1.3,
+          "force": 3304
+        },
+        {
+          "id": 1522,
+          "sharedJobId": "00000000-0000-4000-8000-000000000116",
+          "name": "공구함 이동",
+          "posture": "G4",
+          "weight": 15,
+          "frequency": 32,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1.2,
+          "force": 2450
+        }
+      ],
+      "jobResults": [
+        {
+          "jobId": "00000000-0000-4000-8000-000000000117",
+          "jobName": "전기 설비 시공기사",
+          "periodYears": 8.752908966461328,
+          "workDaysPerYear": 248,
+          "tasks": [
+            {
+              "id": 1501,
+              "sharedJobId": "00000000-0000-4000-8000-000000000117",
+              "name": "설비 부품 교체",
+              "posture": "G6",
+              "weight": 17,
+              "frequency": 32,
+              "timeValue": 7,
+              "timeUnit": "sec",
+              "correctionFactor": 1.4,
+              "force": 3328
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 689147.4488888888,
+            "dailyDoseNh": 2348.016096859455,
+            "dailyDoseKNh": 2.348016096859455,
+            "includedCount": 1,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        },
+        {
+          "jobId": "00000000-0000-4000-8000-000000000116",
+          "jobName": "건물 시설관리 기사",
+          "periodYears": 4.161533196440794,
+          "workDaysPerYear": 246,
+          "tasks": [
+            {
+              "id": 1521,
+              "sharedJobId": "00000000-0000-4000-8000-000000000116",
+              "name": "설비 부품 교체",
+              "posture": "G6",
+              "weight": 18,
+              "frequency": 26,
+              "timeValue": 7,
+              "timeUnit": "sec",
+              "correctionFactor": 1.3,
+              "force": 3304
+            },
+            {
+              "id": 1522,
+              "sharedJobId": "00000000-0000-4000-8000-000000000116",
+              "name": "공구함 이동",
+              "posture": "G4",
+              "weight": 15,
+              "frequency": 32,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 2450
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 818663.2533333334,
+            "dailyDoseNh": 2559.161195912963,
+            "dailyDoseKNh": 2.559161195912963,
+            "includedCount": 2,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        }
+      ],
+      "dailyDose": {
+        "sumF2T_hour": 1507810.7022222222,
+        "dailyDoseNh": 3473.1089268518167,
+        "dailyDoseKNh": 3.4731089268518165,
+        "includedCount": 3,
+        "hasHighForceTask": false
+      },
+      "lifetimeDose": {
+        "lifetimeDoseKNh": 0,
+        "lifetimeDoseMNh": 0,
+        "excluded": true,
+        "totalYears": 12.914442162902123
+      },
+      "comparison": {
+        "mddm": {
+          "limit": 17,
+          "percent": 0,
+          "status": "safe"
+        },
+        "court": {
+          "limit": 8.5,
+          "percent": 0,
+          "status": "safe"
+        }
+      },
+      "risk": {
+        "level": "safe",
+        "text": "현재 수준 유지",
+        "description": "독일 법원(BSG) 기준 충족"
+      },
+      "workRelatedness": {
+        "level": "low",
+        "grade": "낮음",
+        "description": "업무관련성 낮음",
+        "detail": "현재 누적 노출량(0.00 MN·h)이 독일 법원(BSG) 기준의 50%(4.3 MN·h) 미만입니다.",
+        "recommendation": "현재 노출 수준으로는 업무상 질병 인정이 어렵습니다.",
+        "workContribution": 0,
+        "personalContribution": 100
+      },
+      "maxForce": 3328,
+      "gender": "female",
+      "weightedDailyDose": {
+        "value": 2.559161195912963,
+        "aboveThreshold": false
+      },
+      "formulaVersion": "v5.1.3",
+      "noEvaluableJobs": false,
+      "mddmStatus": "present",
+      "vibration": {
+        "evalMethod": "wbv",
+        "noExposure": true,
+        "exposureStatus": "unknown",
+        "intervals": [],
+        "jobResults": [],
+        "amax8": {
+          "min": 0,
+          "max": 0
+        },
+        "dv": {
+          "min": 0,
+          "max": 0
+        },
+        "comparison": {
+          "daily": {
+            "threshold": 0.63,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          },
+          "lifetime": {
+            "threshold": 1400,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          }
+        },
+        "validation": {
+          "hasInvalidIntervals": false,
+          "invalidIntervals": [],
+          "messages": []
+        },
+        "risk": {
+          "level": "safe",
+          "text": "전신진동 미평가",
+          "description": "전신진동 평가 미실시"
+        },
+        "actionValue": 0.5,
+        "limitZ": 0.8,
+        "gender": "female",
+        "formulaVersion": "BK2110-v1",
+        "noEvaluableJobs": false
+      }
+    }
+  },
+  "00000000-0000-4000-8000-000000000142": {
+    "name": "백승현",
+    "activeModules": [
+      "shoulder",
+      "spine"
+    ],
+    "isComplete": false,
+    "calc": {
+      "tasks": [
+        {
+          "id": 1901,
+          "sharedJobId": "00000000-0000-4000-8000-000000000149",
+          "name": "환자 체위 변경",
+          "posture": "G6",
+          "weight": 17,
+          "frequency": 30,
+          "timeValue": 6,
+          "timeUnit": "sec",
+          "correctionFactor": 1.3,
+          "force": 3226
+        },
+        {
+          "id": 1902,
+          "sharedJobId": "00000000-0000-4000-8000-000000000149",
+          "name": "침상 이동 보조",
+          "posture": "G7",
+          "weight": 16,
+          "frequency": 20,
+          "timeValue": 7,
+          "timeUnit": "sec",
+          "correctionFactor": 1.3,
+          "force": 2320
+        },
+        {
+          "id": 1921,
+          "sharedJobId": "00000000-0000-4000-8000-000000000148",
+          "name": "문서 상자 이동",
+          "posture": "G3",
+          "weight": 10,
+          "frequency": 14,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1,
+          "force": 2600
+        },
+        {
+          "id": 1922,
+          "sharedJobId": "00000000-0000-4000-8000-000000000148",
+          "name": "사무 비품 정리",
+          "posture": "G4",
+          "weight": 6,
+          "frequency": 20,
+          "timeValue": 4,
+          "timeUnit": "sec",
+          "correctionFactor": 1.1,
+          "force": 1595
+        }
+      ],
+      "jobResults": [
+        {
+          "jobId": "00000000-0000-4000-8000-000000000149",
+          "jobName": "어린이집 보육교사",
+          "periodYears": 9.084188911704311,
+          "workDaysPerYear": 239,
+          "tasks": [
+            {
+              "id": 1901,
+              "sharedJobId": "00000000-0000-4000-8000-000000000149",
+              "name": "환자 체위 변경",
+              "posture": "G6",
+              "weight": 17,
+              "frequency": 30,
+              "timeValue": 6,
+              "timeUnit": "sec",
+              "correctionFactor": 1.3,
+              "force": 3226
+            },
+            {
+              "id": 1902,
+              "sharedJobId": "00000000-0000-4000-8000-000000000149",
+              "name": "침상 이동 보조",
+              "posture": "G7",
+              "weight": 16,
+              "frequency": 20,
+              "timeValue": 7,
+              "timeUnit": "sec",
+              "correctionFactor": 1.3,
+              "force": 2320
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 729669.3555555556,
+            "dailyDoseNh": 2416.0618461546974,
+            "dailyDoseKNh": 2.4160618461546974,
+            "includedCount": 2,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        },
+        {
+          "jobId": "00000000-0000-4000-8000-000000000148",
+          "jobName": "학원 행정실 직원",
+          "periodYears": 4.670773442847365,
+          "workDaysPerYear": 238,
+          "tasks": [
+            {
+              "id": 1921,
+              "sharedJobId": "00000000-0000-4000-8000-000000000148",
+              "name": "문서 상자 이동",
+              "posture": "G3",
+              "weight": 10,
+              "frequency": 14,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1,
+              "force": 2600
+            },
+            {
+              "id": 1922,
+              "sharedJobId": "00000000-0000-4000-8000-000000000148",
+              "name": "사무 비품 정리",
+              "posture": "G4",
+              "weight": 6,
+              "frequency": 20,
+              "timeValue": 4,
+              "timeUnit": "sec",
+              "correctionFactor": 1.1,
+              "force": 1595
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 131444.44444444444,
+            "dailyDoseNh": 1025.4538290706,
+            "dailyDoseKNh": 1.0254538290706001,
+            "includedCount": 1,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        }
+      ],
+      "dailyDose": {
+        "sumF2T_hour": 861113.8,
+        "dailyDoseNh": 2624.673389204836,
+        "dailyDoseKNh": 2.624673389204836,
+        "includedCount": 3,
+        "hasHighForceTask": false
+      },
+      "lifetimeDose": {
+        "lifetimeDoseKNh": 0,
+        "lifetimeDoseMNh": 0,
+        "excluded": true,
+        "totalYears": 13.754962354551676
+      },
+      "comparison": {
+        "mddm": {
+          "limit": 17,
+          "percent": 0,
+          "status": "safe"
+        },
+        "court": {
+          "limit": 8.5,
+          "percent": 0,
+          "status": "safe"
+        }
+      },
+      "risk": {
+        "level": "safe",
+        "text": "현재 수준 유지",
+        "description": "독일 법원(BSG) 기준 충족"
+      },
+      "workRelatedness": {
+        "level": "low",
+        "grade": "낮음",
+        "description": "업무관련성 낮음",
+        "detail": "현재 누적 노출량(0.00 MN·h)이 독일 법원(BSG) 기준의 50%(4.3 MN·h) 미만입니다.",
+        "recommendation": "현재 노출 수준으로는 업무상 질병 인정이 어렵습니다.",
+        "workContribution": 0,
+        "personalContribution": 100
+      },
+      "maxForce": 3226,
+      "gender": "female",
+      "weightedDailyDose": {
+        "value": 2.4160618461546974,
+        "aboveThreshold": false
+      },
+      "formulaVersion": "v5.1.3",
+      "noEvaluableJobs": false,
+      "mddmStatus": "present",
+      "vibration": {
+        "evalMethod": "wbv",
+        "noExposure": true,
+        "exposureStatus": "unknown",
+        "intervals": [],
+        "jobResults": [],
+        "amax8": {
+          "min": 0,
+          "max": 0
+        },
+        "dv": {
+          "min": 0,
+          "max": 0
+        },
+        "comparison": {
+          "daily": {
+            "threshold": 0.63,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          },
+          "lifetime": {
+            "threshold": 1400,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          }
+        },
+        "validation": {
+          "hasInvalidIntervals": false,
+          "invalidIntervals": [],
+          "messages": []
+        },
+        "risk": {
+          "level": "safe",
+          "text": "전신진동 미평가",
+          "description": "전신진동 평가 미실시"
+        },
+        "actionValue": 0.5,
+        "limitZ": 0.8,
+        "gender": "female",
+        "formulaVersion": "BK2110-v1",
+        "noEvaluableJobs": false
+      }
+    }
+  },
+  "00000000-0000-4000-8000-000000000170": {
+    "name": "진서영",
+    "activeModules": [
+      "wrist",
+      "spine",
+      "cervical"
+    ],
+    "isComplete": true,
+    "calc": {
+      "tasks": [
+        {
+          "id": 2301,
+          "sharedJobId": "00000000-0000-4000-8000-000000000178",
+          "name": "부품 상자 이동",
+          "posture": "G4",
+          "weight": 17,
+          "frequency": 38,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1.2,
+          "force": 2630
+        },
+        {
+          "id": 2302,
+          "sharedJobId": "00000000-0000-4000-8000-000000000178",
+          "name": "라인 자재 공급",
+          "posture": "G5",
+          "weight": 18,
+          "frequency": 28,
+          "timeValue": 6,
+          "timeUnit": "sec",
+          "correctionFactor": 1.2,
+          "force": 3304
+        },
+        {
+          "id": 2321,
+          "sharedJobId": "00000000-0000-4000-8000-000000000177",
+          "name": "설비 부품 교체",
+          "posture": "G6",
+          "weight": 17,
+          "frequency": 26,
+          "timeValue": 7,
+          "timeUnit": "sec",
+          "correctionFactor": 1.3,
+          "force": 3226
+        },
+        {
+          "id": 2341,
+          "sharedJobId": "00000000-0000-4000-8000-000000000176",
+          "name": "적재함 정리",
+          "posture": "G4",
+          "weight": 12,
+          "frequency": 20,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1.1,
+          "force": 2090
+        },
+        {
+          "id": 2342,
+          "sharedJobId": "00000000-0000-4000-8000-000000000176",
+          "name": "운행 전 차량 점검",
+          "posture": "G3",
+          "weight": 10,
+          "frequency": 20,
+          "timeValue": 4,
+          "timeUnit": "sec",
+          "correctionFactor": 1,
+          "force": 2600
+        }
+      ],
+      "jobResults": [
+        {
+          "jobId": "00000000-0000-4000-8000-000000000178",
+          "jobName": "토목 현장 측량보조",
+          "periodYears": 18.99794661190965,
+          "workDaysPerYear": 243,
+          "tasks": [
+            {
+              "id": 2301,
+              "sharedJobId": "00000000-0000-4000-8000-000000000178",
+              "name": "부품 상자 이동",
+              "posture": "G4",
+              "weight": 17,
+              "frequency": 38,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 2630
+            },
+            {
+              "id": 2302,
+              "sharedJobId": "00000000-0000-4000-8000-000000000178",
+              "name": "라인 자재 공급",
+              "posture": "G5",
+              "weight": 18,
+              "frequency": 28,
+              "timeValue": 6,
+              "timeUnit": "sec",
+              "correctionFactor": 1.2,
+              "force": 3304
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 874491.3577777778,
+            "dailyDoseNh": 2644.9822045190062,
+            "dailyDoseKNh": 2.6449822045190063,
+            "includedCount": 2,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        },
+        {
+          "jobId": "00000000-0000-4000-8000-000000000177",
+          "jobName": "학교 시설관리원",
+          "periodYears": 11.000684462696784,
+          "workDaysPerYear": 245,
+          "tasks": [
+            {
+              "id": 2321,
+              "sharedJobId": "00000000-0000-4000-8000-000000000177",
+              "name": "설비 부품 교체",
+              "posture": "G6",
+              "weight": 17,
+              "frequency": 26,
+              "timeValue": 7,
+              "timeUnit": "sec",
+              "correctionFactor": 1.3,
+              "force": 3226
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 526135.5088888889,
+            "dailyDoseNh": 2051.605242514044,
+            "dailyDoseKNh": 2.0516052425140443,
+            "includedCount": 1,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        },
+        {
+          "jobId": "00000000-0000-4000-8000-000000000176",
+          "jobName": "통학버스 운전원",
+          "periodYears": 7.170431211498974,
+          "workDaysPerYear": 244,
+          "tasks": [
+            {
+              "id": 2341,
+              "sharedJobId": "00000000-0000-4000-8000-000000000176",
+              "name": "적재함 정리",
+              "posture": "G4",
+              "weight": 12,
+              "frequency": 20,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.1,
+              "force": 2090
+            },
+            {
+              "id": 2342,
+              "sharedJobId": "00000000-0000-4000-8000-000000000176",
+              "name": "운행 전 차량 점검",
+              "posture": "G3",
+              "weight": 10,
+              "frequency": 20,
+              "timeValue": 4,
+              "timeUnit": "sec",
+              "correctionFactor": 1,
+              "force": 2600
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 271558.3333333333,
+            "dailyDoseNh": 1473.928989696134,
+            "dailyDoseKNh": 1.473928989696134,
+            "includedCount": 2,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        }
+      ],
+      "dailyDose": {
+        "sumF2T_hour": 1672185.2,
+        "dailyDoseNh": 3657.5239712133125,
+        "dailyDoseKNh": 3.6575239712133123,
+        "includedCount": 5,
+        "hasHighForceTask": false
+      },
+      "lifetimeDose": {
+        "lifetimeDoseKNh": 0,
+        "lifetimeDoseMNh": 0,
+        "excluded": true,
+        "totalYears": 37.16906228610541
+      },
+      "comparison": {
+        "mddm": {
+          "limit": 17,
+          "percent": 0,
+          "status": "safe"
+        },
+        "court": {
+          "limit": 8.5,
+          "percent": 0,
+          "status": "safe"
+        }
+      },
+      "risk": {
+        "level": "safe",
+        "text": "현재 수준 유지",
+        "description": "독일 법원(BSG) 기준 충족"
+      },
+      "workRelatedness": {
+        "level": "low",
+        "grade": "낮음",
+        "description": "업무관련성 낮음",
+        "detail": "현재 누적 노출량(0.00 MN·h)이 독일 법원(BSG) 기준의 50%(4.3 MN·h) 미만입니다.",
+        "recommendation": "현재 노출 수준으로는 업무상 질병 인정이 어렵습니다.",
+        "workContribution": 0,
+        "personalContribution": 100
+      },
+      "maxForce": 3304,
+      "gender": "female",
+      "weightedDailyDose": {
+        "value": 2.6449822045190063,
+        "aboveThreshold": false
+      },
+      "formulaVersion": "v5.1.3",
+      "noEvaluableJobs": false,
+      "mddmStatus": "present",
+      "vibration": {
+        "evalMethod": "wbv",
+        "noExposure": true,
+        "exposureStatus": "unknown",
+        "intervals": [],
+        "jobResults": [],
+        "amax8": {
+          "min": 0,
+          "max": 0
+        },
+        "dv": {
+          "min": 0,
+          "max": 0
+        },
+        "comparison": {
+          "daily": {
+            "threshold": 0.63,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          },
+          "lifetime": {
+            "threshold": 1400,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          }
+        },
+        "validation": {
+          "hasInvalidIntervals": false,
+          "invalidIntervals": [],
+          "messages": []
+        },
+        "risk": {
+          "level": "safe",
+          "text": "전신진동 미평가",
+          "description": "전신진동 평가 미실시"
+        },
+        "actionValue": 0.5,
+        "limitZ": 0.8,
+        "gender": "female",
+        "formulaVersion": "BK2110-v1",
+        "noEvaluableJobs": false
+      }
+    }
+  },
+  "golden-patient-excluded-job": {
+    "name": "골든직력미포함",
+    "activeModules": [
+      "knee",
+      "spine"
+    ],
+    "isComplete": false,
+    "calc": {
+      "tasks": [
+        {
+          "id": 101,
+          "sharedJobId": "00000000-0000-4000-8000-000000000016",
+          "name": "문서 상자 이동",
+          "posture": "G3",
+          "weight": 9,
+          "frequency": 16,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1.1,
+          "force": 2593
+        },
+        {
+          "id": 102,
+          "sharedJobId": "00000000-0000-4000-8000-000000000016",
+          "name": "사무 비품 정리",
+          "posture": "G4",
+          "weight": 8,
+          "frequency": 22,
+          "timeValue": 4,
+          "timeUnit": "sec",
+          "correctionFactor": 1,
+          "force": 1700
+        },
+        {
+          "id": 121,
+          "sharedJobId": "00000000-0000-4000-8000-000000000015",
+          "name": "문서 상자 이동",
+          "posture": "G3",
+          "weight": 10,
+          "frequency": 18,
+          "timeValue": 5,
+          "timeUnit": "sec",
+          "correctionFactor": 1,
+          "force": 2600
+        },
+        {
+          "id": 122,
+          "sharedJobId": "00000000-0000-4000-8000-000000000015",
+          "name": "사무 비품 정리",
+          "posture": "G4",
+          "weight": 6,
+          "frequency": 24,
+          "timeValue": 4,
+          "timeUnit": "sec",
+          "correctionFactor": 1.1,
+          "force": 1595
+        }
+      ],
+      "jobResults": [
+        {
+          "jobId": "00000000-0000-4000-8000-000000000016",
+          "jobName": "병원 행정 사무원",
+          "periodYears": 8.501026694045175,
+          "workDaysPerYear": 238,
+          "tasks": [
+            {
+              "id": 101,
+              "sharedJobId": "00000000-0000-4000-8000-000000000016",
+              "name": "문서 상자 이동",
+              "posture": "G3",
+              "weight": 9,
+              "frequency": 16,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1.1,
+              "force": 2593
+            },
+            {
+              "id": 102,
+              "sharedJobId": "00000000-0000-4000-8000-000000000016",
+              "name": "사무 비품 정리",
+              "posture": "G4",
+              "weight": 8,
+              "frequency": 22,
+              "timeValue": 4,
+              "timeUnit": "sec",
+              "correctionFactor": 1,
+              "force": 1700
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 149414.42222222223,
+            "dailyDoseNh": 1093.3047963755478,
+            "dailyDoseKNh": 1.0933047963755478,
+            "includedCount": 1,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        },
+        {
+          "jobId": "00000000-0000-4000-8000-000000000015",
+          "jobName": "고객센터 상담원",
+          "periodYears": 4.999315537303217,
+          "workDaysPerYear": 239,
+          "tasks": [
+            {
+              "id": 121,
+              "sharedJobId": "00000000-0000-4000-8000-000000000015",
+              "name": "문서 상자 이동",
+              "posture": "G3",
+              "weight": 10,
+              "frequency": 18,
+              "timeValue": 5,
+              "timeUnit": "sec",
+              "correctionFactor": 1,
+              "force": 2600
+            },
+            {
+              "id": 122,
+              "sharedJobId": "00000000-0000-4000-8000-000000000015",
+              "name": "사무 비품 정리",
+              "posture": "G4",
+              "weight": 6,
+              "frequency": 24,
+              "timeValue": 4,
+              "timeUnit": "sec",
+              "correctionFactor": 1.1,
+              "force": 1595
+            }
+          ],
+          "dailyDose": {
+            "sumF2T_hour": 169000,
+            "dailyDoseNh": 1162.7553482998906,
+            "dailyDoseKNh": 1.1627553482998905,
+            "includedCount": 1,
+            "hasHighForceTask": false
+          },
+          "lifetimeDose": {
+            "lifetimeDoseKNh": 0,
+            "lifetimeDoseMNh": 0,
+            "excluded": true
+          }
+        }
+      ],
+      "dailyDose": {
+        "sumF2T_hour": 318414.4222222222,
+        "dailyDoseNh": 1596.0311330853724,
+        "dailyDoseKNh": 1.5960311330853725,
+        "includedCount": 2,
+        "hasHighForceTask": false
+      },
+      "lifetimeDose": {
+        "lifetimeDoseKNh": 0,
+        "lifetimeDoseMNh": 0,
+        "excluded": true,
+        "totalYears": 13.500342231348391
+      },
+      "comparison": {
+        "mddm": {
+          "limit": 17,
+          "percent": 0,
+          "status": "safe"
+        },
+        "court": {
+          "limit": 8.5,
+          "percent": 0,
+          "status": "safe"
+        }
+      },
+      "risk": {
+        "level": "safe",
+        "text": "현재 수준 유지",
+        "description": "독일 법원(BSG) 기준 충족"
+      },
+      "workRelatedness": {
+        "level": "low",
+        "grade": "낮음",
+        "description": "업무관련성 낮음",
+        "detail": "현재 누적 노출량(0.00 MN·h)이 독일 법원(BSG) 기준의 50%(4.3 MN·h) 미만입니다.",
+        "recommendation": "현재 노출 수준으로는 업무상 질병 인정이 어렵습니다.",
+        "workContribution": 0,
+        "personalContribution": 100
+      },
+      "maxForce": 2600,
+      "gender": "female",
+      "weightedDailyDose": {
+        "value": 1.1627553482998905,
+        "aboveThreshold": false
+      },
+      "formulaVersion": "v5.1.3",
+      "noEvaluableJobs": false,
+      "mddmStatus": "present",
+      "vibration": {
+        "evalMethod": "wbv",
+        "noExposure": true,
+        "exposureStatus": "unknown",
+        "intervals": [],
+        "jobResults": [],
+        "amax8": {
+          "min": 0,
+          "max": 0
+        },
+        "dv": {
+          "min": 0,
+          "max": 0
+        },
+        "comparison": {
+          "daily": {
+            "threshold": 0.63,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          },
+          "lifetime": {
+            "threshold": 1400,
+            "percent": {
+              "min": 0,
+              "max": 0
+            },
+            "status": "safe"
+          }
+        },
+        "validation": {
+          "hasInvalidIntervals": false,
+          "invalidIntervals": [],
+          "messages": []
+        },
+        "risk": {
+          "level": "safe",
+          "text": "전신진동 미평가",
+          "description": "전신진동 평가 미실시"
+        },
+        "actionValue": 0.5,
+        "limitZ": 0.8,
+        "gender": "female",
+        "formulaVersion": "BK2110-v1",
+        "noEvaluableJobs": false
+      }
+    }
+  }
+}

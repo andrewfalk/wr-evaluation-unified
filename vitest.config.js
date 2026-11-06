@@ -5,6 +5,12 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Fixed time zone for every test (golden/characterization tests depend on local dates — e.g. job
+// periods). Set here, in the main process before workers start: assigning process.env.TZ inside a
+// test worker does not take effect (REFACTORING_ROADMAP P0-9). Asia/Seoul = the clinic's zone and
+// this development PC's, so existing tests behave as before. src/core/fixtures/goldenEnv.js checks it.
+process.env.TZ = 'Asia/Seoul';
+
 // Root vitest config covers client (src/) and shared contract (shared/) tests only.
 // Server tests live in server/ and are run separately via:
 //   npm --prefix server test

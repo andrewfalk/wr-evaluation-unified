@@ -1,0 +1,931 @@
+{
+  "00000000-0000-4000-8000-000000000001": {
+    "name": "김철수",
+    "activeModules": [
+      "knee"
+    ],
+    "isComplete": true,
+    "calc": {
+      "age": 65,
+      "bmi": "23.4",
+      "relatedness": {
+        "min": "15.1",
+        "max": "53.5"
+      },
+      "cumulativeBurden": "불충분함",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000008",
+          "jobName": "축산물 가공 작업자",
+          "presetId": null,
+          "startDate": "1997-12-03",
+          "endDate": "2015-01-03",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 251,
+          "weight": "1900",
+          "squatting": "44",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": true,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": true,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "1997-12-03 ~ 2015-01-03 (17년 1개월)"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000007",
+          "jobName": "건설 현장 배관공",
+          "presetId": null,
+          "startDate": "2015-01-04",
+          "endDate": "2021-04-04",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 248,
+          "weight": "2360",
+          "squatting": "63",
+          "evidenceSources": [],
+          "stairs": true,
+          "kneeTwist": true,
+          "startStop": false,
+          "tightSpace": false,
+          "kneeContact": true,
+          "jumpDown": false,
+          "burden": {
+            "level": "중등도하",
+            "minScore": 2,
+            "maxScore": 4
+          },
+          "period": "2015-01-04 ~ 2021-04-04 (6년 3개월)"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000006",
+          "jobName": "물류센터 상하차원",
+          "presetId": null,
+          "startDate": "2021-04-05",
+          "endDate": "2025-10-05",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 260,
+          "weight": "1920",
+          "squatting": "40",
+          "evidenceSources": [],
+          "stairs": true,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2021-04-05 ~ 2025-10-05 (4년 6개월)"
+        }
+      ],
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000009": {
+    "name": "이영미",
+    "activeModules": [
+      "knee",
+      "spine"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 64,
+      "bmi": "23.4",
+      "relatedness": {
+        "min": "0.0",
+        "max": "28.4"
+      },
+      "cumulativeBurden": "불충분함",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000016",
+          "jobName": "병원 행정 사무원",
+          "presetId": null,
+          "startDate": "2012-04-07",
+          "endDate": "2020-10-07",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 238,
+          "weight": "760",
+          "squatting": "13",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2012-04-07 ~ 2020-10-07 (8년 6개월)"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000015",
+          "jobName": "고객센터 상담원",
+          "presetId": null,
+          "startDate": "2020-10-08",
+          "endDate": "2025-10-08",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 239,
+          "weight": "620",
+          "squatting": "12",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": false,
+          "startStop": false,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2020-10-08 ~ 2025-10-08 (5년 0개월)"
+        }
+      ],
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000023": {
+    "name": "최선영",
+    "activeModules": [
+      "knee"
+    ],
+    "isComplete": true,
+    "calc": {
+      "age": 62,
+      "bmi": "23.5",
+      "relatedness": {
+        "min": "47.0",
+        "max": "69.9"
+      },
+      "cumulativeBurden": "충분함",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000029",
+          "jobName": "조선소 용접공",
+          "presetId": null,
+          "startDate": "2008-01-02",
+          "endDate": "2022-03-02",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 252,
+          "weight": "3200",
+          "squatting": "104",
+          "evidenceSources": [],
+          "stairs": true,
+          "kneeTwist": true,
+          "startStop": true,
+          "tightSpace": true,
+          "kneeContact": false,
+          "jumpDown": true,
+          "burden": {
+            "level": "중등도상",
+            "minScore": 3,
+            "maxScore": 6
+          },
+          "period": "2008-01-02 ~ 2022-03-02 (14년 2개월)"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000028",
+          "jobName": "설비 유지보수 기사",
+          "presetId": null,
+          "startDate": "2022-03-03",
+          "endDate": "2025-11-03",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 248,
+          "weight": "1160",
+          "squatting": "18",
+          "evidenceSources": [],
+          "stairs": true,
+          "kneeTwist": false,
+          "startStop": false,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2022-03-03 ~ 2025-11-03 (3년 8개월)"
+        }
+      ],
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000030": {
+    "name": "정수민",
+    "activeModules": [
+      "knee",
+      "spine"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 61,
+      "bmi": "23.6",
+      "relatedness": {
+        "min": "0.0",
+        "max": "34.0"
+      },
+      "cumulativeBurden": "불충분함",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000037",
+          "jobName": "요양병원 간호조무사",
+          "presetId": null,
+          "startDate": "2009-11-09",
+          "endDate": "2019-07-09",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 244,
+          "weight": "1460",
+          "squatting": "36",
+          "evidenceSources": [],
+          "stairs": true,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2009-11-09 ~ 2019-07-09 (9년 8개월)"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000036",
+          "jobName": "내시경실 보조인력",
+          "presetId": null,
+          "startDate": "2019-07-10",
+          "endDate": "2025-11-10",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 243,
+          "weight": "1020",
+          "squatting": "25",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2019-07-10 ~ 2025-11-10 (6년 4개월)"
+        }
+      ],
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000043": {
+    "name": "조현우",
+    "activeModules": [
+      "knee"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 59,
+      "bmi": "23.7",
+      "relatedness": {
+        "min": "0.0",
+        "max": "51.7"
+      },
+      "cumulativeBurden": "불충분함",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000050",
+          "jobName": "제빵 생산라인 작업자",
+          "presetId": null,
+          "startDate": "1994-10-26",
+          "endDate": "2007-12-26",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 246,
+          "weight": "700",
+          "squatting": "16",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "1994-10-26 ~ 2007-12-26 (13년 2개월)"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000049",
+          "jobName": "대형마트 진열 담당",
+          "presetId": null,
+          "startDate": "2007-12-27",
+          "endDate": "2020-04-27",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 250,
+          "weight": "760",
+          "squatting": "21",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2007-12-27 ~ 2020-04-27 (12년 4개월)"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000048",
+          "jobName": "택배 배송 기사",
+          "presetId": null,
+          "startDate": "2020-04-28",
+          "endDate": "2025-11-28",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 255,
+          "weight": "1920",
+          "squatting": "34",
+          "evidenceSources": [],
+          "stairs": true,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2020-04-28 ~ 2025-11-28 (5년 7개월)"
+        }
+      ],
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000051": {
+    "name": "윤상미",
+    "activeModules": [
+      "knee",
+      "spine",
+      "cervical"
+    ],
+    "isComplete": true,
+    "calc": {
+      "age": 58,
+      "bmi": "23.7",
+      "relatedness": {
+        "min": "0.0",
+        "max": "50.2"
+      },
+      "cumulativeBurden": "불충분함",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000059",
+          "jobName": "축산물 가공 작업자",
+          "presetId": null,
+          "startDate": "1997-09-01",
+          "endDate": "2016-09-01",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 251,
+          "weight": "1960",
+          "squatting": "53",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": true,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": true,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "1997-09-01 ~ 2016-09-01 (19년 0개월)"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000058",
+          "jobName": "냉동창고 피킹 작업자",
+          "presetId": null,
+          "startDate": "2016-09-02",
+          "endDate": "2025-12-02",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 252,
+          "weight": "1920",
+          "squatting": "34",
+          "evidenceSources": [],
+          "stairs": true,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2016-09-02 ~ 2025-12-02 (9년 3개월)"
+        }
+      ],
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000066": {
+    "name": "오진아",
+    "activeModules": [
+      "knee"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 56,
+      "bmi": "23.8",
+      "relatedness": {
+        "min": "44.5",
+        "max": "69.1"
+      },
+      "cumulativeBurden": "충분함",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000072",
+          "jobName": "토목 현장 측량보조",
+          "presetId": null,
+          "startDate": "2009-07-19",
+          "endDate": "2019-12-19",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 243,
+          "weight": "3200",
+          "squatting": "98",
+          "evidenceSources": [],
+          "stairs": true,
+          "kneeTwist": true,
+          "startStop": true,
+          "tightSpace": true,
+          "kneeContact": false,
+          "jumpDown": true,
+          "burden": {
+            "level": "중등도상",
+            "minScore": 3,
+            "maxScore": 6
+          },
+          "period": "2009-07-19 ~ 2019-12-19 (10년 5개월)"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000071",
+          "jobName": "현장 안전관리자",
+          "presetId": null,
+          "startDate": "2019-12-20",
+          "endDate": "2025-12-20",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 240,
+          "weight": "560",
+          "squatting": "12",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": false,
+          "startStop": false,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2019-12-20 ~ 2025-12-20 (6년 0개월)"
+        }
+      ],
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000073": {
+    "name": "박경훈",
+    "activeModules": [
+      "knee"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 55,
+      "bmi": "23.9",
+      "relatedness": {
+        "min": "0.0",
+        "max": "23.5"
+      },
+      "cumulativeBurden": "불충분함",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000078",
+          "jobName": "병동 이송보조원",
+          "presetId": null,
+          "startDate": "2018-05-05",
+          "endDate": "2026-01-05",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 246,
+          "weight": "1460",
+          "squatting": "42",
+          "evidenceSources": [],
+          "stairs": true,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2018-05-05 ~ 2026-01-05 (7년 8개월)"
+        }
+      ],
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000079": {
+    "name": "신다은",
+    "activeModules": [
+      "knee",
+      "spine",
+      "cervical"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 54,
+      "bmi": "23.9",
+      "relatedness": {
+        "min": "0.0",
+        "max": "18.2"
+      },
+      "cumulativeBurden": "불충분함",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000086",
+          "jobName": "구매팀 사무직",
+          "presetId": null,
+          "startDate": "2020-09-14",
+          "endDate": "2026-01-14",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 237,
+          "weight": "820",
+          "squatting": "19",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2020-09-14 ~ 2026-01-14 (5년 4개월)"
+        }
+      ],
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000094": {
+    "name": "유동현",
+    "activeModules": [
+      "knee"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 52,
+      "bmi": "24.0",
+      "relatedness": {
+        "min": "0.0",
+        "max": "30.7"
+      },
+      "cumulativeBurden": "불충분함",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000100",
+          "jobName": "제빵 생산라인 작업자",
+          "presetId": null,
+          "startDate": "2016-05-07",
+          "endDate": "2022-04-07",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 246,
+          "weight": "1960",
+          "squatting": "47",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": true,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": true,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2016-05-07 ~ 2022-04-07 (5년 11개월)"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000099",
+          "jobName": "카페 매장 관리자",
+          "presetId": null,
+          "startDate": "2022-04-08",
+          "endDate": "2026-02-08",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 242,
+          "weight": "820",
+          "squatting": "18",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2022-04-08 ~ 2026-02-08 (3년 10개월)"
+        }
+      ],
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000101": {
+    "name": "문형준",
+    "activeModules": [
+      "knee",
+      "spine",
+      "cervical"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 51,
+      "bmi": "24.0",
+      "relatedness": {
+        "min": "0.0",
+        "max": "60.4"
+      },
+      "cumulativeBurden": "불충분함",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000110",
+          "jobName": "건설 현장 배관공",
+          "presetId": null,
+          "startDate": "1994-01-16",
+          "endDate": "2003-02-16",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 248,
+          "weight": "1520",
+          "squatting": "42",
+          "evidenceSources": [],
+          "stairs": true,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "1994-01-16 ~ 2003-02-16 (9년 1개월)"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000109",
+          "jobName": "호텔 객실 정비원",
+          "presetId": null,
+          "startDate": "2003-02-17",
+          "endDate": "2019-05-17",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 241,
+          "weight": "700",
+          "squatting": "21",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2003-02-17 ~ 2019-05-17 (16년 3개월)"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000108",
+          "jobName": "세탁물 정리 담당",
+          "presetId": null,
+          "startDate": "2019-05-18",
+          "endDate": "2026-02-18",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 244,
+          "weight": "760",
+          "squatting": "12",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2019-05-18 ~ 2026-02-18 (6년 9개월)"
+        }
+      ],
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000132": {
+    "name": "노유진",
+    "activeModules": [
+      "knee",
+      "shoulder"
+    ],
+    "isComplete": true,
+    "calc": {
+      "age": 47,
+      "bmi": "24.2",
+      "relatedness": {
+        "min": "40.4",
+        "max": "75.9"
+      },
+      "cumulativeBurden": "충분함",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000141",
+          "jobName": "요양병원 간호조무사",
+          "presetId": null,
+          "startDate": "1995-05-07",
+          "endDate": "2006-05-07",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 244,
+          "weight": "1700",
+          "squatting": "36",
+          "evidenceSources": [],
+          "stairs": true,
+          "kneeTwist": true,
+          "startStop": false,
+          "tightSpace": true,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "1995-05-07 ~ 2006-05-07 (11년 0개월)"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000140",
+          "jobName": "천장재 시공 기사",
+          "presetId": null,
+          "startDate": "2006-05-08",
+          "endDate": "2017-11-08",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 247,
+          "weight": "2360",
+          "squatting": "69",
+          "evidenceSources": [],
+          "stairs": true,
+          "kneeTwist": true,
+          "startStop": false,
+          "tightSpace": false,
+          "kneeContact": true,
+          "jumpDown": false,
+          "burden": {
+            "level": "중등도하",
+            "minScore": 2,
+            "maxScore": 4
+          },
+          "period": "2006-05-08 ~ 2017-11-08 (11년 6개월)"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000139",
+          "jobName": "가구 조립 설치원",
+          "presetId": null,
+          "startDate": "2017-11-09",
+          "endDate": "2025-12-09",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 249,
+          "weight": "1420",
+          "squatting": "28",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2017-11-09 ~ 2025-12-09 (8년 1개월)"
+        }
+      ],
+      "noEvaluableJobs": false
+    }
+  },
+  "golden-patient-excluded-job": {
+    "name": "골든직력미포함",
+    "activeModules": [
+      "knee",
+      "spine"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 64,
+      "bmi": "23.4",
+      "relatedness": {
+        "min": "0.0",
+        "max": "28.4"
+      },
+      "cumulativeBurden": "불충분함",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000016",
+          "jobName": "병원 행정 사무원",
+          "presetId": null,
+          "startDate": "2012-04-07",
+          "endDate": "2020-10-07",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 238,
+          "weight": "760",
+          "squatting": "13",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": false,
+          "startStop": true,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2012-04-07 ~ 2020-10-07 (8년 6개월)"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000015",
+          "jobName": "고객센터 상담원",
+          "presetId": null,
+          "startDate": "2020-10-08",
+          "endDate": "2025-10-08",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 239,
+          "weight": "620",
+          "squatting": "12",
+          "evidenceSources": [],
+          "stairs": false,
+          "kneeTwist": false,
+          "startStop": false,
+          "tightSpace": false,
+          "kneeContact": false,
+          "jumpDown": false,
+          "burden": {
+            "level": "경도",
+            "minScore": 1,
+            "maxScore": 2
+          },
+          "period": "2020-10-08 ~ 2025-10-08 (5년 0개월)"
+        }
+      ],
+      "noEvaluableJobs": false
+    }
+  }
+}

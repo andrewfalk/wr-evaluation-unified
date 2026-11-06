@@ -322,3 +322,36 @@ export function applyDiagnosisAssessment(diagnosis, row, colMap, getCellFn, modu
 
   return changed;
 }
+
+// Base (non-module) columns of the batch import sheet: field key → accepted header names.
+// Used by BatchImportModal; exported so the batch import golden test uses the same definition.
+export const BASE_COLUMNS = {
+  name: ['이름', 'name'],
+  patientNo: ['등록번호', 'patientno', 'registration'],
+  birthDate: ['생년월일', 'birth'],
+  injuryDate: ['재해일자', 'injury'],
+  height: ['키', 'height'],
+  weight: ['체중', 'weight'],
+  gender: ['성별', 'gender'],
+  hospitalName: ['병원명', 'hospital'],
+  department: ['진료과', 'department'],
+  doctorName: ['담당의', 'doctor'],
+  specialNotes: ['특이사항', 'special'],
+  returnConsiderations: ['특이사항메모', '복귀고려사항', 'return'],
+  diagCode: ['진단코드', 'code'],
+  diagName: ['진단명', 'diag'],
+  side: ['방향', 'side'],
+  diagConfirmedRight: ['상병상태(우)'],
+  diagConfirmedLeft: ['상병상태(좌)'],
+  diagAssessmentRight: ['업무관련성(우)'],
+  diagAssessmentLeft: ['업무관련성(좌)'],
+  diagReasonRight: ['업무관련성낮음사유(우)'],
+  diagReasonLeft: ['업무관련성낮음사유(좌)'],
+  diagVerticalDistribution: ['수직분포원리'],
+  diagConcomitantSpondylosis: ['동반척추증'],
+  jobName: ['직종명', 'job'],
+  jobStart: ['시작일', 'start'],
+  jobEnd: ['종료일', 'end'],
+  jobPeriodY: ['근무기간(년)', 'period(년)', 'period_y'],
+  jobPeriodM: ['근무기간(개월)', 'period(개월)', 'period_m'],
+};

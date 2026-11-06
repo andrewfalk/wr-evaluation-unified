@@ -1,0 +1,2116 @@
+{
+  "00000000-0000-4000-8000-000000000051": {
+    "name": "윤상미",
+    "activeModules": [
+      "knee",
+      "spine",
+      "cervical"
+    ],
+    "isComplete": true,
+    "calc": {
+      "age": 58,
+      "bmi": "23.7",
+      "jobSummaries": [
+        {
+          "sharedJobId": "00000000-0000-4000-8000-000000000059",
+          "jobName": "축산물 가공 작업자",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000057",
+              "code": "M48.02",
+              "name": "경추 척추관 협착",
+              "side": "",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            }
+          ],
+          "diagnosisText": "M48.02 경추 척추관 협착",
+          "taskSummaries": [
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000059",
+              "name": "중량물 어깨 운반",
+              "exposure_types": [
+                "shoulder_heavy_load"
+              ],
+              "load_weight_kg": "48",
+              "carry_hours_per_shift": "0.7",
+              "forced_neck_posture": "no",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": "테스트 데이터 자동 생성",
+              "id": 7001,
+              "displayName": "중량물 어깨 운반",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 0,
+              "representativeHours": 0.7,
+              "signals": {
+                "heavy_load_present": true,
+                "carry_time_supported": true,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 0,
+                "representativeHours": 0.7
+              }
+            },
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000059",
+              "name": "상방 주시 및 목 고정 작업",
+              "exposure_types": [
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "",
+              "carry_hours_per_shift": "",
+              "forced_neck_posture": "",
+              "neck_nonneutral_hours_per_day": "2.7",
+              "combined_flexion_rotation_posture": "no",
+              "precision_work": "no",
+              "notes": "",
+              "id": 7002,
+              "displayName": "상방 주시 및 목 고정 작업",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 2.7,
+              "representativeHours": 2.7,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": false,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 2.7,
+                "representativeHours": 2.7
+              }
+            },
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000059",
+              "name": "적재물 정리와 목 회전 확인",
+              "exposure_types": [
+                "shoulder_heavy_load",
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "28",
+              "carry_hours_per_shift": "0.9",
+              "forced_neck_posture": "yes",
+              "neck_nonneutral_hours_per_day": "1.2",
+              "combined_flexion_rotation_posture": "yes",
+              "precision_work": "no",
+              "notes": "",
+              "id": 7003,
+              "displayName": "적재물 정리와 목 회전 확인",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 1.2,
+              "representativeHours": 2.1,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": true,
+                "forced_neck_posture_present": true,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 1.2,
+                "representativeHours": 2.1
+              }
+            }
+          ],
+          "totalTaskCount": 3,
+          "completedTaskCount": 3,
+          "missingFields": [],
+          "flags": {
+            "heavy_load_present": true,
+            "carry_time_supported": true,
+            "forced_neck_posture_present": true,
+            "daily_share_high": true,
+            "awkward_static_neck_supported": true,
+            "mechanical_cervical_load_dominant": true,
+            "cumulativeKgHours": 0,
+            "representativeHours": 5.5,
+            "totalAwkwardHours": 3.9000000000000004
+          },
+          "flagItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "daily_share_high",
+              "label": "일일 노출량 높음",
+              "description": "작업별 운반시간과 비중립 정적 자세 시간을 합산한 대표 노출 시간이 하루 3.5시간 이상입니다.",
+              "tone": "positive"
+            },
+            {
+              "key": "awkward_static_neck_supported",
+              "label": "비중립·정적 목 부하",
+              "description": "비중립 정적 목 자세 노출이 작업 합산 기준으로 의미 있게 확인됩니다.",
+              "tone": "positive"
+            },
+            {
+              "key": "mechanical_cervical_load_dominant",
+              "label": "기계적 경추 부담 우세",
+              "description": "기계적 경추 부담 노출이 우세하게 확인됩니다.",
+              "tone": "positive"
+            }
+          ],
+          "riskFactorItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorCount": 3,
+          "burdenGrade": "present",
+          "narrative": "작업 1: 중량물 어깨 운반 (어깨에 무거운 하중 올려서 운반)\n - 하중 : 48kg\n - 한 작업 교대(shift)당 노출 시간 : 0.7시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 아니오\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n메모: 테스트 데이터 자동 생성\n작업 2: 상방 주시 및 목 고정 작업 (비중립·정적 목 부하)\n - 수행 시간 : 2.7시간\n - 굴곡/신전과 회전/측굴이 동시에 발생 : 아니오\n - 고도의 정밀(precision) 작업 : 아니오\n작업 3: 적재물 정리와 목 회전 확인 (어깨에 무거운 하중 올려서 운반 / 비중립·정적 목 부하)\n - 하중 : 28kg\n - 한 작업 교대(shift)당 노출 시간 : 0.9시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 예\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n - 수행 시간 : 1.2시간\n - 굴곡/신전과 회전/측굴이 동시에 발생 : 예\n - 고도의 정밀(precision) 작업 : 아니오\n직업 합산\n - BK2109 누적 총부하량 합계 : 0 kg·h (참고치 44,000 kg·h, 참고치 대비 0.0%)\n - 일일 대표 노출시간 합계 : 5.5시간\n - 비중립 정적 자세 시간 합계 : 3.9시간",
+          "conclusionText": "장시간 비중립·정적 목 부하 작업이 확인되어 경추 부담 노출은 있으나, 독일 BK2109(어깨에 무거운 하중 올려 운반) 정량 요건 지지는 제한적입니다.",
+          "cumulativeKgHours": 0,
+          "representativeHours": 5.5,
+          "totalAwkwardHours": 3.9000000000000004,
+          "workDaysPerYear": 251,
+          "yearsExposed": 19.000684462696782,
+          "hasBk2109CoreTask": false
+        },
+        {
+          "sharedJobId": "00000000-0000-4000-8000-000000000058",
+          "jobName": "냉동창고 피킹 작업자",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000057",
+              "code": "M48.02",
+              "name": "경추 척추관 협착",
+              "side": "",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            }
+          ],
+          "diagnosisText": "M48.02 경추 척추관 협착",
+          "taskSummaries": [
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000058",
+              "name": "중량물 어깨 운반",
+              "exposure_types": [
+                "shoulder_heavy_load"
+              ],
+              "load_weight_kg": "36",
+              "carry_hours_per_shift": "1",
+              "forced_neck_posture": "yes",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": "테스트 데이터 자동 생성",
+              "id": 7021,
+              "displayName": "중량물 어깨 운반",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 0,
+              "representativeHours": 1,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": true,
+                "forced_neck_posture_present": true,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 0,
+                "representativeHours": 1
+              }
+            }
+          ],
+          "totalTaskCount": 1,
+          "completedTaskCount": 1,
+          "missingFields": [],
+          "flags": {
+            "carry_time_supported": true,
+            "forced_neck_posture_present": true,
+            "cumulativeKgHours": 0,
+            "representativeHours": 1,
+            "totalAwkwardHours": 0
+          },
+          "flagItems": [
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorItems": [
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorCount": 2,
+          "burdenGrade": "low",
+          "narrative": "작업 1: 중량물 어깨 운반 (어깨에 무거운 하중 올려서 운반)\n - 하중 : 36kg\n - 한 작업 교대(shift)당 노출 시간 : 1시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 예\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n메모: 테스트 데이터 자동 생성\n직업 합산\n - BK2109 누적 총부하량 합계 : 0 kg·h (참고치 44,000 kg·h, 참고치 대비 0.0%)\n - 일일 대표 노출시간 합계 : 1시간\n - 비중립 정적 자세 시간 합계 : 0시간",
+          "conclusionText": "현재 입력된 작업 기반 노출정보만으로는 경추 부담 노출을 뚜렷하게 지지하기 어렵습니다.",
+          "cumulativeKgHours": 0,
+          "representativeHours": 1,
+          "totalAwkwardHours": 0,
+          "workDaysPerYear": 252,
+          "yearsExposed": 9.248459958932239,
+          "hasBk2109CoreTask": false
+        }
+      ],
+      "anyFlagged": true,
+      "overallBurdenGrade": "present",
+      "overallConclusionText": "장시간 비중립·정적 목 부하 작업이 확인되어 경추 부담 노출은 있으나, 독일 BK2109(어깨에 무거운 하중 올려 운반) 정량 요건 지지는 제한적입니다.",
+      "overallCumulativeKgHours": 0,
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000079": {
+    "name": "신다은",
+    "activeModules": [
+      "knee",
+      "spine",
+      "cervical"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 54,
+      "bmi": "23.9",
+      "jobSummaries": [
+        {
+          "sharedJobId": "00000000-0000-4000-8000-000000000086",
+          "jobName": "구매팀 사무직",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000085",
+              "code": "M48.02",
+              "name": "경추 척추관 협착",
+              "side": ""
+            }
+          ],
+          "diagnosisText": "M48.02 경추 척추관 협착",
+          "taskSummaries": [
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000086",
+              "name": "중량물 어깨 운반",
+              "exposure_types": [
+                "shoulder_heavy_load"
+              ],
+              "load_weight_kg": "48",
+              "carry_hours_per_shift": "1",
+              "forced_neck_posture": "no",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": "테스트 데이터 자동 생성",
+              "id": 11001,
+              "displayName": "중량물 어깨 운반",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 0,
+              "representativeHours": 1,
+              "signals": {
+                "heavy_load_present": true,
+                "carry_time_supported": true,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 0,
+                "representativeHours": 1
+              }
+            }
+          ],
+          "totalTaskCount": 1,
+          "completedTaskCount": 1,
+          "missingFields": [],
+          "flags": {
+            "heavy_load_present": true,
+            "carry_time_supported": true,
+            "cumulativeKgHours": 0,
+            "representativeHours": 1,
+            "totalAwkwardHours": 0
+          },
+          "flagItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorCount": 2,
+          "burdenGrade": "low",
+          "narrative": "작업 1: 중량물 어깨 운반 (어깨에 무거운 하중 올려서 운반)\n - 하중 : 48kg\n - 한 작업 교대(shift)당 노출 시간 : 1시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 아니오\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n메모: 테스트 데이터 자동 생성\n직업 합산\n - BK2109 누적 총부하량 합계 : 0 kg·h (참고치 44,000 kg·h, 참고치 대비 0.0%)\n - 일일 대표 노출시간 합계 : 1시간\n - 비중립 정적 자세 시간 합계 : 0시간",
+          "conclusionText": "현재 입력된 작업 기반 노출정보만으로는 경추 부담 노출을 뚜렷하게 지지하기 어렵습니다.",
+          "cumulativeKgHours": 0,
+          "representativeHours": 1,
+          "totalAwkwardHours": 0,
+          "workDaysPerYear": 237,
+          "yearsExposed": 5.333333333333333,
+          "hasBk2109CoreTask": false
+        }
+      ],
+      "anyFlagged": true,
+      "overallBurdenGrade": "low",
+      "overallConclusionText": "현재 입력된 작업 기반 노출정보만으로는 경추 부담 노출을 뚜렷하게 지지하기 어렵습니다.",
+      "overallCumulativeKgHours": 0,
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000101": {
+    "name": "문형준",
+    "activeModules": [
+      "knee",
+      "spine",
+      "cervical"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 51,
+      "bmi": "24.0",
+      "jobSummaries": [
+        {
+          "sharedJobId": "00000000-0000-4000-8000-000000000110",
+          "jobName": "건설 현장 배관공",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000107",
+              "code": "M50.1",
+              "name": "경추간판장애",
+              "side": ""
+            }
+          ],
+          "diagnosisText": "M50.1 경추간판장애",
+          "taskSummaries": [
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000110",
+              "name": "중량물 어깨 운반",
+              "exposure_types": [
+                "shoulder_heavy_load"
+              ],
+              "load_weight_kg": "44",
+              "carry_hours_per_shift": "1",
+              "forced_neck_posture": "yes",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": "테스트 데이터 자동 생성",
+              "id": 14001,
+              "displayName": "중량물 어깨 운반",
+              "missingFields": [],
+              "cumulativeKgHours": 99126.66940451745,
+              "awkwardHours": 0,
+              "representativeHours": 1,
+              "signals": {
+                "heavy_load_present": true,
+                "carry_time_supported": true,
+                "forced_neck_posture_present": true,
+                "bk2109CoreTask": true,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 99126.66940451745,
+                "awkwardHours": 0,
+                "representativeHours": 1
+              }
+            }
+          ],
+          "totalTaskCount": 1,
+          "completedTaskCount": 1,
+          "missingFields": [],
+          "flags": {
+            "heavy_load_present": true,
+            "carry_time_supported": true,
+            "forced_neck_posture_present": true,
+            "cumulative_load_supported": true,
+            "bk2109_pattern_supported": true,
+            "mechanical_cervical_load_dominant": true,
+            "cumulativeKgHours": 99126.66940451745,
+            "representativeHours": 1,
+            "totalAwkwardHours": 0
+          },
+          "flagItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "cumulative_load_supported",
+              "label": "누적 총부하 기준 충족",
+              "description": "작업별 누적 총부하량 합계가 44,000 kg·h 이상입니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "bk2109_pattern_supported",
+              "label": "BK2109형 패턴 지지",
+              "description": "동일 직업 내 작업 합산 기준으로 독일 BK2109 정량 패턴이 지지됩니다.",
+              "tone": "positive"
+            },
+            {
+              "key": "mechanical_cervical_load_dominant",
+              "label": "기계적 경추 부담 우세",
+              "description": "기계적 경추 부담 노출이 우세하게 확인됩니다.",
+              "tone": "positive"
+            }
+          ],
+          "riskFactorItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "cumulative_load_supported",
+              "label": "누적 총부하 기준 충족",
+              "description": "작업별 누적 총부하량 합계가 44,000 kg·h 이상입니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorCount": 4,
+          "burdenGrade": "high_bk2109",
+          "narrative": "작업 1: 중량물 어깨 운반 (어깨에 무거운 하중 올려서 운반)\n - 하중 : 44kg\n - 한 작업 교대(shift)당 노출 시간 : 1시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 예\n - 작업별 누적 총부하량 : 99,127 kg·h\n메모: 테스트 데이터 자동 생성\n직업 합산\n - BK2109 누적 총부하량 합계 : 99,127 kg·h (참고치 44,000 kg·h, 참고치 대비 225.3%)\n - 일일 대표 노출시간 합계 : 1시간\n - 비중립 정적 자세 시간 합계 : 0시간",
+          "conclusionText": "어깨에 무거운 하중 운반 작업의 정량 조건과 작업 합산 누적 총부하 기준이 확인되어 독일 BK2109(어깨에 무거운 하중 올려 운반)형 경추 부담 노출이 강하게 지지됩니다.",
+          "cumulativeKgHours": 99126.66940451745,
+          "representativeHours": 1,
+          "totalAwkwardHours": 0,
+          "workDaysPerYear": 248,
+          "yearsExposed": 9.084188911704311,
+          "hasBk2109CoreTask": true
+        },
+        {
+          "sharedJobId": "00000000-0000-4000-8000-000000000109",
+          "jobName": "호텔 객실 정비원",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000107",
+              "code": "M50.1",
+              "name": "경추간판장애",
+              "side": ""
+            }
+          ],
+          "diagnosisText": "M50.1 경추간판장애",
+          "taskSummaries": [
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000109",
+              "name": "중량물 어깨 운반",
+              "exposure_types": [
+                "shoulder_heavy_load"
+              ],
+              "load_weight_kg": "48",
+              "carry_hours_per_shift": "0.4",
+              "forced_neck_posture": "no",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": "테스트 데이터 자동 생성",
+              "id": 14021,
+              "displayName": "중량물 어깨 운반",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 0,
+              "representativeHours": 0.4,
+              "signals": {
+                "heavy_load_present": true,
+                "carry_time_supported": false,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 0,
+                "representativeHours": 0.4
+              }
+            },
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000109",
+              "name": "상방 주시 및 목 고정 작업",
+              "exposure_types": [
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "",
+              "carry_hours_per_shift": "",
+              "forced_neck_posture": "",
+              "neck_nonneutral_hours_per_day": "2.7",
+              "combined_flexion_rotation_posture": "yes",
+              "precision_work": "no",
+              "notes": "",
+              "id": 14022,
+              "displayName": "상방 주시 및 목 고정 작업",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 2.7,
+              "representativeHours": 2.7,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": false,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": true,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 2.7,
+                "representativeHours": 2.7
+              }
+            }
+          ],
+          "totalTaskCount": 2,
+          "completedTaskCount": 2,
+          "missingFields": [],
+          "flags": {
+            "heavy_load_present": true,
+            "daily_share_moderate": true,
+            "awkward_static_neck_supported": true,
+            "mechanical_cervical_load_dominant": true,
+            "cumulativeKgHours": 0,
+            "representativeHours": 3.1,
+            "totalAwkwardHours": 2.7
+          },
+          "flagItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "daily_share_moderate",
+              "label": "일일 노출량 중간",
+              "description": "작업별 운반시간과 비중립 정적 자세 시간을 합산한 대표 노출 시간이 하루 2.5시간 이상 3.5시간 미만입니다.",
+              "tone": "info"
+            },
+            {
+              "key": "awkward_static_neck_supported",
+              "label": "비중립·정적 목 부하",
+              "description": "비중립 정적 목 자세 노출이 작업 합산 기준으로 의미 있게 확인됩니다.",
+              "tone": "positive"
+            },
+            {
+              "key": "mechanical_cervical_load_dominant",
+              "label": "기계적 경추 부담 우세",
+              "description": "기계적 경추 부담 노출이 우세하게 확인됩니다.",
+              "tone": "positive"
+            }
+          ],
+          "riskFactorItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorCount": 1,
+          "burdenGrade": "present",
+          "narrative": "작업 1: 중량물 어깨 운반 (어깨에 무거운 하중 올려서 운반)\n - 하중 : 48kg\n - 한 작업 교대(shift)당 노출 시간 : 0.4시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 아니오\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n메모: 테스트 데이터 자동 생성\n작업 2: 상방 주시 및 목 고정 작업 (비중립·정적 목 부하)\n - 수행 시간 : 2.7시간\n - 굴곡/신전과 회전/측굴이 동시에 발생 : 예\n - 고도의 정밀(precision) 작업 : 아니오\n직업 합산\n - BK2109 누적 총부하량 합계 : 0 kg·h (참고치 44,000 kg·h, 참고치 대비 0.0%)\n - 일일 대표 노출시간 합계 : 3.1시간\n - 비중립 정적 자세 시간 합계 : 2.7시간",
+          "conclusionText": "장시간 비중립·정적 목 부하 작업이 확인되어 경추 부담 노출은 있으나, 독일 BK2109(어깨에 무거운 하중 올려 운반) 정량 요건 지지는 제한적입니다.",
+          "cumulativeKgHours": 0,
+          "representativeHours": 3.1,
+          "totalAwkwardHours": 2.7,
+          "workDaysPerYear": 241,
+          "yearsExposed": 16.243668720054757,
+          "hasBk2109CoreTask": false
+        },
+        {
+          "sharedJobId": "00000000-0000-4000-8000-000000000108",
+          "jobName": "세탁물 정리 담당",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000107",
+              "code": "M50.1",
+              "name": "경추간판장애",
+              "side": ""
+            }
+          ],
+          "diagnosisText": "M50.1 경추간판장애",
+          "taskSummaries": [
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000108",
+              "name": "중량물 어깨 운반",
+              "exposure_types": [
+                "shoulder_heavy_load"
+              ],
+              "load_weight_kg": "36",
+              "carry_hours_per_shift": "0.7",
+              "forced_neck_posture": "yes",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": "테스트 데이터 자동 생성",
+              "id": 14041,
+              "displayName": "중량물 어깨 운반",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 0,
+              "representativeHours": 0.7,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": true,
+                "forced_neck_posture_present": true,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 0,
+                "representativeHours": 0.7
+              }
+            },
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000108",
+              "name": "상방 주시 및 목 고정 작업",
+              "exposure_types": [
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "",
+              "carry_hours_per_shift": "",
+              "forced_neck_posture": "",
+              "neck_nonneutral_hours_per_day": "1.2",
+              "combined_flexion_rotation_posture": "no",
+              "precision_work": "yes",
+              "notes": "",
+              "id": 14042,
+              "displayName": "상방 주시 및 목 고정 작업",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 1.2,
+              "representativeHours": 1.2,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": false,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 1.2,
+                "representativeHours": 1.2
+              }
+            },
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000108",
+              "name": "적재물 정리와 목 회전 확인",
+              "exposure_types": [
+                "shoulder_heavy_load",
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "23",
+              "carry_hours_per_shift": "0.3",
+              "forced_neck_posture": "no",
+              "neck_nonneutral_hours_per_day": "1.2",
+              "combined_flexion_rotation_posture": "yes",
+              "precision_work": "no",
+              "notes": "",
+              "id": 14043,
+              "displayName": "적재물 정리와 목 회전 확인",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 1.2,
+              "representativeHours": 1.5,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": false,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 1.2,
+                "representativeHours": 1.5
+              }
+            }
+          ],
+          "totalTaskCount": 3,
+          "completedTaskCount": 3,
+          "missingFields": [],
+          "flags": {
+            "carry_time_supported": true,
+            "forced_neck_posture_present": true,
+            "daily_share_moderate": true,
+            "awkward_static_neck_supported": true,
+            "mechanical_cervical_load_dominant": true,
+            "cumulativeKgHours": 0,
+            "representativeHours": 3.4,
+            "totalAwkwardHours": 2.4
+          },
+          "flagItems": [
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "daily_share_moderate",
+              "label": "일일 노출량 중간",
+              "description": "작업별 운반시간과 비중립 정적 자세 시간을 합산한 대표 노출 시간이 하루 2.5시간 이상 3.5시간 미만입니다.",
+              "tone": "info"
+            },
+            {
+              "key": "awkward_static_neck_supported",
+              "label": "비중립·정적 목 부하",
+              "description": "비중립 정적 목 자세 노출이 작업 합산 기준으로 의미 있게 확인됩니다.",
+              "tone": "positive"
+            },
+            {
+              "key": "mechanical_cervical_load_dominant",
+              "label": "기계적 경추 부담 우세",
+              "description": "기계적 경추 부담 노출이 우세하게 확인됩니다.",
+              "tone": "positive"
+            }
+          ],
+          "riskFactorItems": [
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorCount": 2,
+          "burdenGrade": "present",
+          "narrative": "작업 1: 중량물 어깨 운반 (어깨에 무거운 하중 올려서 운반)\n - 하중 : 36kg\n - 한 작업 교대(shift)당 노출 시간 : 0.7시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 예\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n메모: 테스트 데이터 자동 생성\n작업 2: 상방 주시 및 목 고정 작업 (비중립·정적 목 부하)\n - 수행 시간 : 1.2시간\n - 굴곡/신전과 회전/측굴이 동시에 발생 : 아니오\n - 고도의 정밀(precision) 작업 : 예\n작업 3: 적재물 정리와 목 회전 확인 (어깨에 무거운 하중 올려서 운반 / 비중립·정적 목 부하)\n - 하중 : 23kg\n - 한 작업 교대(shift)당 노출 시간 : 0.3시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 아니오\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n - 수행 시간 : 1.2시간\n - 굴곡/신전과 회전/측굴이 동시에 발생 : 예\n - 고도의 정밀(precision) 작업 : 아니오\n직업 합산\n - BK2109 누적 총부하량 합계 : 0 kg·h (참고치 44,000 kg·h, 참고치 대비 0.0%)\n - 일일 대표 노출시간 합계 : 3.4시간\n - 비중립 정적 자세 시간 합계 : 2.4시간",
+          "conclusionText": "장시간 비중립·정적 목 부하 작업이 확인되어 경추 부담 노출은 있으나, 독일 BK2109(어깨에 무거운 하중 올려 운반) 정량 요건 지지는 제한적입니다.",
+          "cumulativeKgHours": 0,
+          "representativeHours": 3.4,
+          "totalAwkwardHours": 2.4,
+          "workDaysPerYear": 244,
+          "yearsExposed": 6.757015742642026,
+          "hasBk2109CoreTask": false
+        }
+      ],
+      "anyFlagged": true,
+      "overallBurdenGrade": "high_bk2109",
+      "overallConclusionText": "어깨에 무거운 하중 운반 작업의 정량 조건과 작업 합산 누적 총부하 기준이 확인되어 독일 BK2109(어깨에 무거운 하중 올려 운반)형 경추 부담 노출이 강하게 지지됩니다.",
+      "overallCumulativeKgHours": 99126.66940451745,
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000111": {
+    "name": "송은지",
+    "activeModules": [
+      "spine",
+      "cervical"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 50,
+      "bmi": "24.0",
+      "jobSummaries": [
+        {
+          "sharedJobId": "00000000-0000-4000-8000-000000000117",
+          "jobName": "전기 설비 시공기사",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000115",
+              "code": "M48.02",
+              "name": "경추 척추관 협착",
+              "side": ""
+            }
+          ],
+          "diagnosisText": "M48.02 경추 척추관 협착",
+          "taskSummaries": [
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000117",
+              "name": "중량물 어깨 운반",
+              "exposure_types": [
+                "shoulder_heavy_load"
+              ],
+              "load_weight_kg": "48",
+              "carry_hours_per_shift": "0.4",
+              "forced_neck_posture": "no",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": "테스트 데이터 자동 생성",
+              "id": 15001,
+              "displayName": "중량물 어깨 운반",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 0,
+              "representativeHours": 0.4,
+              "signals": {
+                "heavy_load_present": true,
+                "carry_time_supported": false,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 0,
+                "representativeHours": 0.4
+              }
+            },
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000117",
+              "name": "상방 주시 및 목 고정 작업",
+              "exposure_types": [
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "",
+              "carry_hours_per_shift": "",
+              "forced_neck_posture": "",
+              "neck_nonneutral_hours_per_day": "2.7",
+              "combined_flexion_rotation_posture": "yes",
+              "precision_work": "no",
+              "notes": "",
+              "id": 15002,
+              "displayName": "상방 주시 및 목 고정 작업",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 2.7,
+              "representativeHours": 2.7,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": false,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": true,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 2.7,
+                "representativeHours": 2.7
+              }
+            }
+          ],
+          "totalTaskCount": 2,
+          "completedTaskCount": 2,
+          "missingFields": [],
+          "flags": {
+            "heavy_load_present": true,
+            "daily_share_moderate": true,
+            "awkward_static_neck_supported": true,
+            "mechanical_cervical_load_dominant": true,
+            "cumulativeKgHours": 0,
+            "representativeHours": 3.1,
+            "totalAwkwardHours": 2.7
+          },
+          "flagItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "daily_share_moderate",
+              "label": "일일 노출량 중간",
+              "description": "작업별 운반시간과 비중립 정적 자세 시간을 합산한 대표 노출 시간이 하루 2.5시간 이상 3.5시간 미만입니다.",
+              "tone": "info"
+            },
+            {
+              "key": "awkward_static_neck_supported",
+              "label": "비중립·정적 목 부하",
+              "description": "비중립 정적 목 자세 노출이 작업 합산 기준으로 의미 있게 확인됩니다.",
+              "tone": "positive"
+            },
+            {
+              "key": "mechanical_cervical_load_dominant",
+              "label": "기계적 경추 부담 우세",
+              "description": "기계적 경추 부담 노출이 우세하게 확인됩니다.",
+              "tone": "positive"
+            }
+          ],
+          "riskFactorItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorCount": 1,
+          "burdenGrade": "present",
+          "narrative": "작업 1: 중량물 어깨 운반 (어깨에 무거운 하중 올려서 운반)\n - 하중 : 48kg\n - 한 작업 교대(shift)당 노출 시간 : 0.4시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 아니오\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n메모: 테스트 데이터 자동 생성\n작업 2: 상방 주시 및 목 고정 작업 (비중립·정적 목 부하)\n - 수행 시간 : 2.7시간\n - 굴곡/신전과 회전/측굴이 동시에 발생 : 예\n - 고도의 정밀(precision) 작업 : 아니오\n직업 합산\n - BK2109 누적 총부하량 합계 : 0 kg·h (참고치 44,000 kg·h, 참고치 대비 0.0%)\n - 일일 대표 노출시간 합계 : 3.1시간\n - 비중립 정적 자세 시간 합계 : 2.7시간",
+          "conclusionText": "장시간 비중립·정적 목 부하 작업이 확인되어 경추 부담 노출은 있으나, 독일 BK2109(어깨에 무거운 하중 올려 운반) 정량 요건 지지는 제한적입니다.",
+          "cumulativeKgHours": 0,
+          "representativeHours": 3.1,
+          "totalAwkwardHours": 2.7,
+          "workDaysPerYear": 248,
+          "yearsExposed": 8.752908966461328,
+          "hasBk2109CoreTask": false
+        },
+        {
+          "sharedJobId": "00000000-0000-4000-8000-000000000116",
+          "jobName": "건물 시설관리 기사",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000115",
+              "code": "M48.02",
+              "name": "경추 척추관 협착",
+              "side": ""
+            }
+          ],
+          "diagnosisText": "M48.02 경추 척추관 협착",
+          "taskSummaries": [
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000116",
+              "name": "중량물 어깨 운반",
+              "exposure_types": [
+                "shoulder_heavy_load"
+              ],
+              "load_weight_kg": "36",
+              "carry_hours_per_shift": "0.7",
+              "forced_neck_posture": "yes",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": "테스트 데이터 자동 생성",
+              "id": 15021,
+              "displayName": "중량물 어깨 운반",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 0,
+              "representativeHours": 0.7,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": true,
+                "forced_neck_posture_present": true,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 0,
+                "representativeHours": 0.7
+              }
+            },
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000116",
+              "name": "상방 주시 및 목 고정 작업",
+              "exposure_types": [
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "",
+              "carry_hours_per_shift": "",
+              "forced_neck_posture": "",
+              "neck_nonneutral_hours_per_day": "1.2",
+              "combined_flexion_rotation_posture": "no",
+              "precision_work": "yes",
+              "notes": "",
+              "id": 15022,
+              "displayName": "상방 주시 및 목 고정 작업",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 1.2,
+              "representativeHours": 1.2,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": false,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 1.2,
+                "representativeHours": 1.2
+              }
+            },
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000116",
+              "name": "적재물 정리와 목 회전 확인",
+              "exposure_types": [
+                "shoulder_heavy_load",
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "23",
+              "carry_hours_per_shift": "0.3",
+              "forced_neck_posture": "no",
+              "neck_nonneutral_hours_per_day": "1.2",
+              "combined_flexion_rotation_posture": "yes",
+              "precision_work": "no",
+              "notes": "",
+              "id": 15023,
+              "displayName": "적재물 정리와 목 회전 확인",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 1.2,
+              "representativeHours": 1.5,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": false,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 1.2,
+                "representativeHours": 1.5
+              }
+            }
+          ],
+          "totalTaskCount": 3,
+          "completedTaskCount": 3,
+          "missingFields": [],
+          "flags": {
+            "carry_time_supported": true,
+            "forced_neck_posture_present": true,
+            "daily_share_moderate": true,
+            "awkward_static_neck_supported": true,
+            "mechanical_cervical_load_dominant": true,
+            "cumulativeKgHours": 0,
+            "representativeHours": 3.4,
+            "totalAwkwardHours": 2.4
+          },
+          "flagItems": [
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "daily_share_moderate",
+              "label": "일일 노출량 중간",
+              "description": "작업별 운반시간과 비중립 정적 자세 시간을 합산한 대표 노출 시간이 하루 2.5시간 이상 3.5시간 미만입니다.",
+              "tone": "info"
+            },
+            {
+              "key": "awkward_static_neck_supported",
+              "label": "비중립·정적 목 부하",
+              "description": "비중립 정적 목 자세 노출이 작업 합산 기준으로 의미 있게 확인됩니다.",
+              "tone": "positive"
+            },
+            {
+              "key": "mechanical_cervical_load_dominant",
+              "label": "기계적 경추 부담 우세",
+              "description": "기계적 경추 부담 노출이 우세하게 확인됩니다.",
+              "tone": "positive"
+            }
+          ],
+          "riskFactorItems": [
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorCount": 2,
+          "burdenGrade": "present",
+          "narrative": "작업 1: 중량물 어깨 운반 (어깨에 무거운 하중 올려서 운반)\n - 하중 : 36kg\n - 한 작업 교대(shift)당 노출 시간 : 0.7시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 예\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n메모: 테스트 데이터 자동 생성\n작업 2: 상방 주시 및 목 고정 작업 (비중립·정적 목 부하)\n - 수행 시간 : 1.2시간\n - 굴곡/신전과 회전/측굴이 동시에 발생 : 아니오\n - 고도의 정밀(precision) 작업 : 예\n작업 3: 적재물 정리와 목 회전 확인 (어깨에 무거운 하중 올려서 운반 / 비중립·정적 목 부하)\n - 하중 : 23kg\n - 한 작업 교대(shift)당 노출 시간 : 0.3시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 아니오\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n - 수행 시간 : 1.2시간\n - 굴곡/신전과 회전/측굴이 동시에 발생 : 예\n - 고도의 정밀(precision) 작업 : 아니오\n직업 합산\n - BK2109 누적 총부하량 합계 : 0 kg·h (참고치 44,000 kg·h, 참고치 대비 0.0%)\n - 일일 대표 노출시간 합계 : 3.4시간\n - 비중립 정적 자세 시간 합계 : 2.4시간",
+          "conclusionText": "장시간 비중립·정적 목 부하 작업이 확인되어 경추 부담 노출은 있으나, 독일 BK2109(어깨에 무거운 하중 올려 운반) 정량 요건 지지는 제한적입니다.",
+          "cumulativeKgHours": 0,
+          "representativeHours": 3.4,
+          "totalAwkwardHours": 2.4,
+          "workDaysPerYear": 246,
+          "yearsExposed": 4.161533196440794,
+          "hasBk2109CoreTask": false
+        }
+      ],
+      "anyFlagged": true,
+      "overallBurdenGrade": "present",
+      "overallConclusionText": "장시간 비중립·정적 목 부하 작업이 확인되어 경추 부담 노출은 있으나, 독일 BK2109(어깨에 무거운 하중 올려 운반) 정량 요건 지지는 제한적입니다.",
+      "overallCumulativeKgHours": 0,
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000170": {
+    "name": "진서영",
+    "activeModules": [
+      "wrist",
+      "spine",
+      "cervical"
+    ],
+    "isComplete": true,
+    "calc": {
+      "age": 42,
+      "bmi": "24.3",
+      "jobSummaries": [
+        {
+          "sharedJobId": "00000000-0000-4000-8000-000000000178",
+          "jobName": "토목 현장 측량보조",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000174",
+              "code": "M48.02",
+              "name": "경추 척추관 협착",
+              "side": "",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            }
+          ],
+          "diagnosisText": "M48.02 경추 척추관 협착",
+          "taskSummaries": [
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000178",
+              "name": "중량물 어깨 운반",
+              "exposure_types": [
+                "shoulder_heavy_load"
+              ],
+              "load_weight_kg": "48",
+              "carry_hours_per_shift": "1",
+              "forced_neck_posture": "no",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": "테스트 데이터 자동 생성",
+              "id": 23001,
+              "displayName": "중량물 어깨 운반",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 0,
+              "representativeHours": 1,
+              "signals": {
+                "heavy_load_present": true,
+                "carry_time_supported": true,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 0,
+                "representativeHours": 1
+              }
+            }
+          ],
+          "totalTaskCount": 1,
+          "completedTaskCount": 1,
+          "missingFields": [],
+          "flags": {
+            "heavy_load_present": true,
+            "carry_time_supported": true,
+            "cumulativeKgHours": 0,
+            "representativeHours": 1,
+            "totalAwkwardHours": 0
+          },
+          "flagItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorCount": 2,
+          "burdenGrade": "low",
+          "narrative": "작업 1: 중량물 어깨 운반 (어깨에 무거운 하중 올려서 운반)\n - 하중 : 48kg\n - 한 작업 교대(shift)당 노출 시간 : 1시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 아니오\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n메모: 테스트 데이터 자동 생성\n직업 합산\n - BK2109 누적 총부하량 합계 : 0 kg·h (참고치 44,000 kg·h, 참고치 대비 0.0%)\n - 일일 대표 노출시간 합계 : 1시간\n - 비중립 정적 자세 시간 합계 : 0시간",
+          "conclusionText": "현재 입력된 작업 기반 노출정보만으로는 경추 부담 노출을 뚜렷하게 지지하기 어렵습니다.",
+          "cumulativeKgHours": 0,
+          "representativeHours": 1,
+          "totalAwkwardHours": 0,
+          "workDaysPerYear": 243,
+          "yearsExposed": 18.99794661190965,
+          "hasBk2109CoreTask": false
+        },
+        {
+          "sharedJobId": "00000000-0000-4000-8000-000000000177",
+          "jobName": "학교 시설관리원",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000174",
+              "code": "M48.02",
+              "name": "경추 척추관 협착",
+              "side": "",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            }
+          ],
+          "diagnosisText": "M48.02 경추 척추관 협착",
+          "taskSummaries": [
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000177",
+              "name": "중량물 어깨 운반",
+              "exposure_types": [
+                "shoulder_heavy_load"
+              ],
+              "load_weight_kg": "36",
+              "carry_hours_per_shift": "0.4",
+              "forced_neck_posture": "yes",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": "테스트 데이터 자동 생성",
+              "id": 23021,
+              "displayName": "중량물 어깨 운반",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 0,
+              "representativeHours": 0.4,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": false,
+                "forced_neck_posture_present": true,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 0,
+                "representativeHours": 0.4
+              }
+            },
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000177",
+              "name": "상방 주시 및 목 고정 작업",
+              "exposure_types": [
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "",
+              "carry_hours_per_shift": "",
+              "forced_neck_posture": "",
+              "neck_nonneutral_hours_per_day": "1.2",
+              "combined_flexion_rotation_posture": "yes",
+              "precision_work": "yes",
+              "notes": "",
+              "id": 23022,
+              "displayName": "상방 주시 및 목 고정 작업",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 1.2,
+              "representativeHours": 1.2,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": false,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 1.2,
+                "representativeHours": 1.2
+              }
+            }
+          ],
+          "totalTaskCount": 2,
+          "completedTaskCount": 2,
+          "missingFields": [],
+          "flags": {
+            "forced_neck_posture_present": true,
+            "cumulativeKgHours": 0,
+            "representativeHours": 1.6,
+            "totalAwkwardHours": 1.2
+          },
+          "flagItems": [
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorItems": [
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorCount": 1,
+          "burdenGrade": "low",
+          "narrative": "작업 1: 중량물 어깨 운반 (어깨에 무거운 하중 올려서 운반)\n - 하중 : 36kg\n - 한 작업 교대(shift)당 노출 시간 : 0.4시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 예\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n메모: 테스트 데이터 자동 생성\n작업 2: 상방 주시 및 목 고정 작업 (비중립·정적 목 부하)\n - 수행 시간 : 1.2시간\n - 굴곡/신전과 회전/측굴이 동시에 발생 : 예\n - 고도의 정밀(precision) 작업 : 예\n직업 합산\n - BK2109 누적 총부하량 합계 : 0 kg·h (참고치 44,000 kg·h, 참고치 대비 0.0%)\n - 일일 대표 노출시간 합계 : 1.6시간\n - 비중립 정적 자세 시간 합계 : 1.2시간",
+          "conclusionText": "현재 입력된 작업 기반 노출정보만으로는 경추 부담 노출을 뚜렷하게 지지하기 어렵습니다.",
+          "cumulativeKgHours": 0,
+          "representativeHours": 1.6,
+          "totalAwkwardHours": 1.2,
+          "workDaysPerYear": 245,
+          "yearsExposed": 11.000684462696784,
+          "hasBk2109CoreTask": false
+        },
+        {
+          "sharedJobId": "00000000-0000-4000-8000-000000000176",
+          "jobName": "통학버스 운전원",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000174",
+              "code": "M48.02",
+              "name": "경추 척추관 협착",
+              "side": "",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            }
+          ],
+          "diagnosisText": "M48.02 경추 척추관 협착",
+          "taskSummaries": [
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000176",
+              "name": "중량물 어깨 운반",
+              "exposure_types": [
+                "shoulder_heavy_load"
+              ],
+              "load_weight_kg": "40",
+              "carry_hours_per_shift": "0.7",
+              "forced_neck_posture": "no",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": "테스트 데이터 자동 생성",
+              "id": 23041,
+              "displayName": "중량물 어깨 운반",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 0,
+              "representativeHours": 0.7,
+              "signals": {
+                "heavy_load_present": true,
+                "carry_time_supported": true,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 0,
+                "representativeHours": 0.7
+              }
+            },
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000176",
+              "name": "상방 주시 및 목 고정 작업",
+              "exposure_types": [
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "",
+              "carry_hours_per_shift": "",
+              "forced_neck_posture": "",
+              "neck_nonneutral_hours_per_day": "1.7",
+              "combined_flexion_rotation_posture": "no",
+              "precision_work": "no",
+              "notes": "",
+              "id": 23042,
+              "displayName": "상방 주시 및 목 고정 작업",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 1.7,
+              "representativeHours": 1.7,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": false,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 1.7,
+                "representativeHours": 1.7
+              }
+            },
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000176",
+              "name": "적재물 정리와 목 회전 확인",
+              "exposure_types": [
+                "shoulder_heavy_load",
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "18",
+              "carry_hours_per_shift": "0.5",
+              "forced_neck_posture": "yes",
+              "neck_nonneutral_hours_per_day": "1.2",
+              "combined_flexion_rotation_posture": "yes",
+              "precision_work": "no",
+              "notes": "",
+              "id": 23043,
+              "displayName": "적재물 정리와 목 회전 확인",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 1.2,
+              "representativeHours": 1.7,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": true,
+                "forced_neck_posture_present": true,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 1.2,
+                "representativeHours": 1.7
+              }
+            }
+          ],
+          "totalTaskCount": 3,
+          "completedTaskCount": 3,
+          "missingFields": [],
+          "flags": {
+            "heavy_load_present": true,
+            "carry_time_supported": true,
+            "forced_neck_posture_present": true,
+            "daily_share_high": true,
+            "awkward_static_neck_supported": true,
+            "mechanical_cervical_load_dominant": true,
+            "cumulativeKgHours": 0,
+            "representativeHours": 4.1,
+            "totalAwkwardHours": 2.9
+          },
+          "flagItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "daily_share_high",
+              "label": "일일 노출량 높음",
+              "description": "작업별 운반시간과 비중립 정적 자세 시간을 합산한 대표 노출 시간이 하루 3.5시간 이상입니다.",
+              "tone": "positive"
+            },
+            {
+              "key": "awkward_static_neck_supported",
+              "label": "비중립·정적 목 부하",
+              "description": "비중립 정적 목 자세 노출이 작업 합산 기준으로 의미 있게 확인됩니다.",
+              "tone": "positive"
+            },
+            {
+              "key": "mechanical_cervical_load_dominant",
+              "label": "기계적 경추 부담 우세",
+              "description": "기계적 경추 부담 노출이 우세하게 확인됩니다.",
+              "tone": "positive"
+            }
+          ],
+          "riskFactorItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorCount": 3,
+          "burdenGrade": "present",
+          "narrative": "작업 1: 중량물 어깨 운반 (어깨에 무거운 하중 올려서 운반)\n - 하중 : 40kg\n - 한 작업 교대(shift)당 노출 시간 : 0.7시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 아니오\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n메모: 테스트 데이터 자동 생성\n작업 2: 상방 주시 및 목 고정 작업 (비중립·정적 목 부하)\n - 수행 시간 : 1.7시간\n - 굴곡/신전과 회전/측굴이 동시에 발생 : 아니오\n - 고도의 정밀(precision) 작업 : 아니오\n작업 3: 적재물 정리와 목 회전 확인 (어깨에 무거운 하중 올려서 운반 / 비중립·정적 목 부하)\n - 하중 : 18kg\n - 한 작업 교대(shift)당 노출 시간 : 0.5시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 예\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n - 수행 시간 : 1.2시간\n - 굴곡/신전과 회전/측굴이 동시에 발생 : 예\n - 고도의 정밀(precision) 작업 : 아니오\n직업 합산\n - BK2109 누적 총부하량 합계 : 0 kg·h (참고치 44,000 kg·h, 참고치 대비 0.0%)\n - 일일 대표 노출시간 합계 : 4.1시간\n - 비중립 정적 자세 시간 합계 : 2.9시간",
+          "conclusionText": "장시간 비중립·정적 목 부하 작업이 확인되어 경추 부담 노출은 있으나, 독일 BK2109(어깨에 무거운 하중 올려 운반) 정량 요건 지지는 제한적입니다.",
+          "cumulativeKgHours": 0,
+          "representativeHours": 4.1,
+          "totalAwkwardHours": 2.9,
+          "workDaysPerYear": 244,
+          "yearsExposed": 7.170431211498974,
+          "hasBk2109CoreTask": false
+        }
+      ],
+      "anyFlagged": true,
+      "overallBurdenGrade": "present",
+      "overallConclusionText": "장시간 비중립·정적 목 부하 작업이 확인되어 경추 부담 노출은 있으나, 독일 BK2109(어깨에 무거운 하중 올려 운반) 정량 요건 지지는 제한적입니다.",
+      "overallCumulativeKgHours": 0,
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000186": {
+    "name": "테스트환자26",
+    "activeModules": [
+      "cervical"
+    ],
+    "isComplete": true,
+    "calc": {
+      "age": 41,
+      "bmi": "24.3",
+      "jobSummaries": [
+        {
+          "sharedJobId": "00000000-0000-4000-8000-000000000190",
+          "jobName": "내시경실 보조인력",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000189",
+              "code": "M48.02",
+              "name": "경추 척추관 협착",
+              "side": "",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "low",
+              "reasonRight": [
+                "lowBurden"
+              ],
+              "reasonRightOther": ""
+            }
+          ],
+          "diagnosisText": "M48.02 경추 척추관 협착",
+          "taskSummaries": [
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000190",
+              "name": "중량물 어깨 운반",
+              "exposure_types": [
+                "shoulder_heavy_load"
+              ],
+              "load_weight_kg": "40",
+              "carry_hours_per_shift": "0.7",
+              "forced_neck_posture": "no",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": "테스트 데이터 자동 생성",
+              "id": 25001,
+              "displayName": "중량물 어깨 운반",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 0,
+              "representativeHours": 0.7,
+              "signals": {
+                "heavy_load_present": true,
+                "carry_time_supported": true,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 0,
+                "representativeHours": 0.7
+              }
+            },
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000190",
+              "name": "상방 주시 및 목 고정 작업",
+              "exposure_types": [
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "",
+              "carry_hours_per_shift": "",
+              "forced_neck_posture": "",
+              "neck_nonneutral_hours_per_day": "1.7",
+              "combined_flexion_rotation_posture": "no",
+              "precision_work": "no",
+              "notes": "",
+              "id": 25002,
+              "displayName": "상방 주시 및 목 고정 작업",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 1.7,
+              "representativeHours": 1.7,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": false,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 1.7,
+                "representativeHours": 1.7
+              }
+            },
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000190",
+              "name": "적재물 정리와 목 회전 확인",
+              "exposure_types": [
+                "shoulder_heavy_load",
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "18",
+              "carry_hours_per_shift": "0.5",
+              "forced_neck_posture": "yes",
+              "neck_nonneutral_hours_per_day": "1.2",
+              "combined_flexion_rotation_posture": "yes",
+              "precision_work": "no",
+              "notes": "",
+              "id": 25003,
+              "displayName": "적재물 정리와 목 회전 확인",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 1.2,
+              "representativeHours": 1.7,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": true,
+                "forced_neck_posture_present": true,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 1.2,
+                "representativeHours": 1.7
+              }
+            }
+          ],
+          "totalTaskCount": 3,
+          "completedTaskCount": 3,
+          "missingFields": [],
+          "flags": {
+            "heavy_load_present": true,
+            "carry_time_supported": true,
+            "forced_neck_posture_present": true,
+            "daily_share_high": true,
+            "awkward_static_neck_supported": true,
+            "mechanical_cervical_load_dominant": true,
+            "cumulativeKgHours": 0,
+            "representativeHours": 4.1,
+            "totalAwkwardHours": 2.9
+          },
+          "flagItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "daily_share_high",
+              "label": "일일 노출량 높음",
+              "description": "작업별 운반시간과 비중립 정적 자세 시간을 합산한 대표 노출 시간이 하루 3.5시간 이상입니다.",
+              "tone": "positive"
+            },
+            {
+              "key": "awkward_static_neck_supported",
+              "label": "비중립·정적 목 부하",
+              "description": "비중립 정적 목 자세 노출이 작업 합산 기준으로 의미 있게 확인됩니다.",
+              "tone": "positive"
+            },
+            {
+              "key": "mechanical_cervical_load_dominant",
+              "label": "기계적 경추 부담 우세",
+              "description": "기계적 경추 부담 노출이 우세하게 확인됩니다.",
+              "tone": "positive"
+            }
+          ],
+          "riskFactorItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorCount": 3,
+          "burdenGrade": "present",
+          "narrative": "작업 1: 중량물 어깨 운반 (어깨에 무거운 하중 올려서 운반)\n - 하중 : 40kg\n - 한 작업 교대(shift)당 노출 시간 : 0.7시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 아니오\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n메모: 테스트 데이터 자동 생성\n작업 2: 상방 주시 및 목 고정 작업 (비중립·정적 목 부하)\n - 수행 시간 : 1.7시간\n - 굴곡/신전과 회전/측굴이 동시에 발생 : 아니오\n - 고도의 정밀(precision) 작업 : 아니오\n작업 3: 적재물 정리와 목 회전 확인 (어깨에 무거운 하중 올려서 운반 / 비중립·정적 목 부하)\n - 하중 : 18kg\n - 한 작업 교대(shift)당 노출 시간 : 0.5시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 예\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n - 수행 시간 : 1.2시간\n - 굴곡/신전과 회전/측굴이 동시에 발생 : 예\n - 고도의 정밀(precision) 작업 : 아니오\n직업 합산\n - BK2109 누적 총부하량 합계 : 0 kg·h (참고치 44,000 kg·h, 참고치 대비 0.0%)\n - 일일 대표 노출시간 합계 : 4.1시간\n - 비중립 정적 자세 시간 합계 : 2.9시간",
+          "conclusionText": "장시간 비중립·정적 목 부하 작업이 확인되어 경추 부담 노출은 있으나, 독일 BK2109(어깨에 무거운 하중 올려 운반) 정량 요건 지지는 제한적입니다.",
+          "cumulativeKgHours": 0,
+          "representativeHours": 4.1,
+          "totalAwkwardHours": 2.9,
+          "workDaysPerYear": 243,
+          "yearsExposed": 6.33264887063655,
+          "hasBk2109CoreTask": false
+        }
+      ],
+      "anyFlagged": true,
+      "overallBurdenGrade": "present",
+      "overallConclusionText": "장시간 비중립·정적 목 부하 작업이 확인되어 경추 부담 노출은 있으나, 독일 BK2109(어깨에 무거운 하중 올려 운반) 정량 요건 지지는 제한적입니다.",
+      "overallCumulativeKgHours": 0,
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000191": {
+    "name": "테스트환자27",
+    "activeModules": [
+      "shoulder",
+      "cervical"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 40,
+      "bmi": "24.4",
+      "jobSummaries": [
+        {
+          "sharedJobId": "00000000-0000-4000-8000-000000000198",
+          "jobName": "의류 봉제 작업자",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000194",
+              "code": "M50.1",
+              "name": "경추간판장애",
+              "side": ""
+            }
+          ],
+          "diagnosisText": "M50.1 경추간판장애",
+          "taskSummaries": [
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000198",
+              "name": "중량물 어깨 운반",
+              "exposure_types": [
+                "shoulder_heavy_load"
+              ],
+              "load_weight_kg": "44",
+              "carry_hours_per_shift": "1",
+              "forced_neck_posture": "yes",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": "테스트 데이터 자동 생성",
+              "id": 26001,
+              "displayName": "중량물 어깨 운반",
+              "missingFields": [],
+              "cumulativeKgHours": 184919.2607802875,
+              "awkwardHours": 0,
+              "representativeHours": 1,
+              "signals": {
+                "heavy_load_present": true,
+                "carry_time_supported": true,
+                "forced_neck_posture_present": true,
+                "bk2109CoreTask": true,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 184919.2607802875,
+                "awkwardHours": 0,
+                "representativeHours": 1
+              }
+            }
+          ],
+          "totalTaskCount": 1,
+          "completedTaskCount": 1,
+          "missingFields": [],
+          "flags": {
+            "heavy_load_present": true,
+            "carry_time_supported": true,
+            "forced_neck_posture_present": true,
+            "cumulative_load_supported": true,
+            "bk2109_pattern_supported": true,
+            "mechanical_cervical_load_dominant": true,
+            "cumulativeKgHours": 184919.2607802875,
+            "representativeHours": 1,
+            "totalAwkwardHours": 0
+          },
+          "flagItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "cumulative_load_supported",
+              "label": "누적 총부하 기준 충족",
+              "description": "작업별 누적 총부하량 합계가 44,000 kg·h 이상입니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "bk2109_pattern_supported",
+              "label": "BK2109형 패턴 지지",
+              "description": "동일 직업 내 작업 합산 기준으로 독일 BK2109 정량 패턴이 지지됩니다.",
+              "tone": "positive"
+            },
+            {
+              "key": "mechanical_cervical_load_dominant",
+              "label": "기계적 경추 부담 우세",
+              "description": "기계적 경추 부담 노출이 우세하게 확인됩니다.",
+              "tone": "positive"
+            }
+          ],
+          "riskFactorItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "carry_time_supported",
+              "label": "운반시간 기준 충족",
+              "description": "한 작업 교대당 운반 시간이 0.5시간 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "forced_neck_posture_present",
+              "label": "운반 시 부자연스러운 목 자세 강제",
+              "description": "하중 운반 중 목의 부자연스러운 자세가 강제되는 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "cumulative_load_supported",
+              "label": "누적 총부하 기준 충족",
+              "description": "작업별 누적 총부하량 합계가 44,000 kg·h 이상입니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorCount": 4,
+          "burdenGrade": "high_bk2109",
+          "narrative": "작업 1: 중량물 어깨 운반 (어깨에 무거운 하중 올려서 운반)\n - 하중 : 44kg\n - 한 작업 교대(shift)당 노출 시간 : 1시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 예\n - 작업별 누적 총부하량 : 184,919 kg·h\n메모: 테스트 데이터 자동 생성\n직업 합산\n - BK2109 누적 총부하량 합계 : 184,919 kg·h (참고치 44,000 kg·h, 참고치 대비 420.3%)\n - 일일 대표 노출시간 합계 : 1시간\n - 비중립 정적 자세 시간 합계 : 0시간",
+          "conclusionText": "어깨에 무거운 하중 운반 작업의 정량 조건과 작업 합산 누적 총부하 기준이 확인되어 독일 BK2109(어깨에 무거운 하중 올려 운반)형 경추 부담 노출이 강하게 지지됩니다.",
+          "cumulativeKgHours": 184919.2607802875,
+          "representativeHours": 1,
+          "totalAwkwardHours": 0,
+          "workDaysPerYear": 246,
+          "yearsExposed": 17.084188911704313,
+          "hasBk2109CoreTask": true
+        },
+        {
+          "sharedJobId": "00000000-0000-4000-8000-000000000197",
+          "jobName": "검품 포장 작업자",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000194",
+              "code": "M50.1",
+              "name": "경추간판장애",
+              "side": ""
+            }
+          ],
+          "diagnosisText": "M50.1 경추간판장애",
+          "taskSummaries": [
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000197",
+              "name": "중량물 어깨 운반",
+              "exposure_types": [
+                "shoulder_heavy_load"
+              ],
+              "load_weight_kg": "48",
+              "carry_hours_per_shift": "0.4",
+              "forced_neck_posture": "no",
+              "neck_nonneutral_hours_per_day": "",
+              "combined_flexion_rotation_posture": "",
+              "precision_work": "",
+              "notes": "테스트 데이터 자동 생성",
+              "id": 26021,
+              "displayName": "중량물 어깨 운반",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 0,
+              "representativeHours": 0.4,
+              "signals": {
+                "heavy_load_present": true,
+                "carry_time_supported": false,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": false,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 0,
+                "representativeHours": 0.4
+              }
+            },
+            {
+              "sharedJobId": "00000000-0000-4000-8000-000000000197",
+              "name": "상방 주시 및 목 고정 작업",
+              "exposure_types": [
+                "awkward_static_neck_load"
+              ],
+              "load_weight_kg": "",
+              "carry_hours_per_shift": "",
+              "forced_neck_posture": "",
+              "neck_nonneutral_hours_per_day": "2.7",
+              "combined_flexion_rotation_posture": "yes",
+              "precision_work": "no",
+              "notes": "",
+              "id": 26022,
+              "displayName": "상방 주시 및 목 고정 작업",
+              "missingFields": [],
+              "cumulativeKgHours": 0,
+              "awkwardHours": 2.7,
+              "representativeHours": 2.7,
+              "signals": {
+                "heavy_load_present": false,
+                "carry_time_supported": false,
+                "forced_neck_posture_present": false,
+                "bk2109CoreTask": false,
+                "awkward_supportive_task": true,
+                "cumulativeKgHours": 0,
+                "awkwardHours": 2.7,
+                "representativeHours": 2.7
+              }
+            }
+          ],
+          "totalTaskCount": 2,
+          "completedTaskCount": 2,
+          "missingFields": [],
+          "flags": {
+            "heavy_load_present": true,
+            "daily_share_moderate": true,
+            "awkward_static_neck_supported": true,
+            "mechanical_cervical_load_dominant": true,
+            "cumulativeKgHours": 0,
+            "representativeHours": 3.1,
+            "totalAwkwardHours": 2.7
+          },
+          "flagItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            },
+            {
+              "key": "daily_share_moderate",
+              "label": "일일 노출량 중간",
+              "description": "작업별 운반시간과 비중립 정적 자세 시간을 합산한 대표 노출 시간이 하루 2.5시간 이상 3.5시간 미만입니다.",
+              "tone": "info"
+            },
+            {
+              "key": "awkward_static_neck_supported",
+              "label": "비중립·정적 목 부하",
+              "description": "비중립 정적 목 자세 노출이 작업 합산 기준으로 의미 있게 확인됩니다.",
+              "tone": "positive"
+            },
+            {
+              "key": "mechanical_cervical_load_dominant",
+              "label": "기계적 경추 부담 우세",
+              "description": "기계적 경추 부담 노출이 우세하게 확인됩니다.",
+              "tone": "positive"
+            }
+          ],
+          "riskFactorItems": [
+            {
+              "key": "heavy_load_present",
+              "label": "무거운 하중 기준 충족",
+              "description": "어깨에 올려 운반하는 하중이 40kg 이상인 작업이 있습니다.",
+              "tone": "warning"
+            }
+          ],
+          "riskFactorCount": 1,
+          "burdenGrade": "present",
+          "narrative": "작업 1: 중량물 어깨 운반 (어깨에 무거운 하중 올려서 운반)\n - 하중 : 48kg\n - 한 작업 교대(shift)당 노출 시간 : 0.4시간\n - 운반 시 목의 부자연스러운 자세가 강제 : 아니오\n - 작업별 누적 총부하량 : BK2109 핵심 3요건 미충족으로 미산정\n메모: 테스트 데이터 자동 생성\n작업 2: 상방 주시 및 목 고정 작업 (비중립·정적 목 부하)\n - 수행 시간 : 2.7시간\n - 굴곡/신전과 회전/측굴이 동시에 발생 : 예\n - 고도의 정밀(precision) 작업 : 아니오\n직업 합산\n - BK2109 누적 총부하량 합계 : 0 kg·h (참고치 44,000 kg·h, 참고치 대비 0.0%)\n - 일일 대표 노출시간 합계 : 3.1시간\n - 비중립 정적 자세 시간 합계 : 2.7시간",
+          "conclusionText": "장시간 비중립·정적 목 부하 작업이 확인되어 경추 부담 노출은 있으나, 독일 BK2109(어깨에 무거운 하중 올려 운반) 정량 요건 지지는 제한적입니다.",
+          "cumulativeKgHours": 0,
+          "representativeHours": 3.1,
+          "totalAwkwardHours": 2.7,
+          "workDaysPerYear": 247,
+          "yearsExposed": 8,
+          "hasBk2109CoreTask": false
+        }
+      ],
+      "anyFlagged": true,
+      "overallBurdenGrade": "high_bk2109",
+      "overallConclusionText": "어깨에 무거운 하중 운반 작업의 정량 조건과 작업 합산 누적 총부하 기준이 확인되어 독일 BK2109(어깨에 무거운 하중 올려 운반)형 경추 부담 노출이 강하게 지지됩니다.",
+      "overallCumulativeKgHours": 184919.2607802875,
+      "noEvaluableJobs": false
+    }
+  }
+}
