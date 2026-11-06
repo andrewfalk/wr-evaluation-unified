@@ -77,7 +77,9 @@ describe.skipIf(!AVAILABLE)('runStatsEngine — 실제 Python + 실제 운영 wr
     expect(result.continuous[0].mean).toBe(30);
     expect(result.discrete[0].variableKey).toBe('grade');
     expect(result.discrete[0].n).toBe(4);
-  });
+    // 실제 Python 기동은 전체 스위트 부하에서 vitest 기본 5초를 넘길 수 있다(단독 ~3.6초) —
+    // 엔진 timeoutMs(30000)와 같게, 옆의 regression/prediction realWrapper 스모크와 같은 형식.
+  }, 30000);
 
   it('연속으로 두 번 호출해도(세마포어 순차 반환) 둘 다 정상 완료된다', async () => {
     const { runStatsEngine, __resetStatsEngineForTests } = await import('../statsEngine');
@@ -87,5 +89,5 @@ describe.skipIf(!AVAILABLE)('runStatsEngine — 실제 Python + 실제 운영 wr
     const r2 = await runStatsEngine({ variables: [{ key: 'b', kind: 'continuous', values: [4, 5, 6] }] });
     expect(r1.continuous[0].mean).toBe(2);
     expect(r2.continuous[0].mean).toBe(5);
-  });
+  }, 30000);
 });
