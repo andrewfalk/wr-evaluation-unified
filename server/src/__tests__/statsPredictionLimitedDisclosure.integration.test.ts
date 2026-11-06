@@ -7,7 +7,7 @@
 // (3) 해제본은 limited_result에만 있고 result(캐시)·비권한 admin에는 없다, (4) 회수·재조회·CSV.
 //
 //   TEST_DATABASE_URL=postgres://wr_user:<PW>@localhost:5432/wr_test \
-//     npx vitest run --config vitest.config.ts --no-file-parallelism src/__tests__/statsPredictionLimitedDisclosure.integration.test.ts
+//     npx vitest run --config vitest.integration.config.ts src/__tests__/statsPredictionLimitedDisclosure.integration.test.ts
 import crypto from 'crypto';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { Pool } from 'pg';

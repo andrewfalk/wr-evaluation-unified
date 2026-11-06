@@ -5,8 +5,8 @@
 // integration.test.ts와 동일한 패턴(TEST_DATABASE_URL 없으면 전체 skip, 실제
 // Postgres+실제 Python+실제 워커)으로 다시 증명한다.
 //
-//   TEST_DATABASE_URL=postgres://wr_user:<POSTGRES_PASSWORD>@localhost:5432/wr_evaluation \
-//     npx vitest run --config vitest.config.ts src/__tests__/statsCorrelationMatrixHttp.integration.test.ts
+//   TEST_DATABASE_URL=postgres://wr_user:<POSTGRES_PASSWORD>@localhost:5432/wr_test \
+//     npx vitest run --config vitest.integration.config.ts src/__tests__/statsCorrelationMatrixHttp.integration.test.ts
 import crypto from 'crypto';
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { Pool } from 'pg';

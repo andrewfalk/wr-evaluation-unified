@@ -5,7 +5,7 @@
 // 실행 조건: TEST_DATABASE_URL이 격리된 테스트 DB(마이그레이션 적용됨)를 가리켜야 한다.
 // 개발 서버가 같은 DB를 보면 워커가 간섭하므로 wr_evaluation이 아닌 별도 DB를 쓸 것.
 //   TEST_DATABASE_URL=postgres://wr_user:<POSTGRES_PASSWORD>@localhost:5432/wr_test_hf1 \
-//     npx vitest run --config vitest.config.ts src/routes/__tests__/workspaces.integration.test.ts
+//     npx vitest run --config vitest.integration.config.ts src/routes/__tests__/workspaces.integration.test.ts
 import crypto from 'crypto';
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { Pool } from 'pg';

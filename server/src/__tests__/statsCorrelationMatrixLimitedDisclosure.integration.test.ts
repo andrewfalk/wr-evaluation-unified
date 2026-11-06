@@ -6,7 +6,7 @@
 // (2) 권한자 실행과 비권한자 실행은 캐시가 섞이지 않는다, (3) 회수·재조회·재실행, (4) 해제본 없는 적격 캐시 고착 방지.
 //
 //   TEST_DATABASE_URL=postgres://wr_user:<PW>@localhost:5432/wr_test \
-//     npx vitest run --config vitest.config.ts --no-file-parallelism src/__tests__/statsCorrelationMatrixLimitedDisclosure.integration.test.ts
+//     npx vitest run --config vitest.integration.config.ts src/__tests__/statsCorrelationMatrixLimitedDisclosure.integration.test.ts
 import crypto from 'crypto';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { Pool } from 'pg';

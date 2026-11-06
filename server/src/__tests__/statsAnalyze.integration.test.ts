@@ -3,8 +3,8 @@
 // 컬럼 지정 ON DELETE SET NULL을 증명할 수 없다 — statsSnapshot.integration.test.ts와
 // 동일 패턴(TEST_DATABASE_URL 없으면 전체 skip, 자체 fixture 생성/정리).
 //
-//   TEST_DATABASE_URL=postgres://wr_user:<POSTGRES_PASSWORD>@localhost:5432/wr_evaluation \
-//     npx vitest run --config vitest.config.ts src/__tests__/statsAnalyze.integration.test.ts
+//   TEST_DATABASE_URL=postgres://wr_user:<POSTGRES_PASSWORD>@localhost:5432/wr_test \
+//     npx vitest run --config vitest.integration.config.ts src/__tests__/statsAnalyze.integration.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Pool } from 'pg';
 

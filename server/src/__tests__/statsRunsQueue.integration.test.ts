@@ -3,8 +3,8 @@
 // 부분 유니크 인덱스)으로만 증명 가능하다. statsAnalyze.integration.test.ts/
 // statsSnapshot.integration.test.ts와 동일한 패턴(TEST_DATABASE_URL 없으면 전체 skip).
 //
-//   TEST_DATABASE_URL=postgres://wr_user:<POSTGRES_PASSWORD>@localhost:5432/wr_evaluation \
-//     npx vitest run --config vitest.config.ts src/__tests__/statsRunsQueue.integration.test.ts
+//   TEST_DATABASE_URL=postgres://wr_user:<POSTGRES_PASSWORD>@localhost:5432/wr_test \
+//     npx vitest run --config vitest.integration.config.ts src/__tests__/statsRunsQueue.integration.test.ts
 //
 // 여기서는 admitAnalysisRun(실제 AnalysisContext 필요)까지 가지 않고, stats_runs 행을
 // 직접 원하는 상태(created_at/heartbeat_at/cancel_requested_at/execution_digest 등)로

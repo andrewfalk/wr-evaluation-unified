@@ -5,7 +5,7 @@
 // (3) 해제본은 stats_runs.result(캐시)에 저장되지 않고 응답 시점 권한으로만 나온다, (4) 회수·접근 제어.
 //
 //   TEST_DATABASE_URL=postgres://wr_user:<PW>@localhost:5432/wr_test \
-//     npx vitest run --config vitest.config.ts src/__tests__/statsRegressionLimitedDisclosure.integration.test.ts
+//     npx vitest run --config vitest.integration.config.ts src/__tests__/statsRegressionLimitedDisclosure.integration.test.ts
 import crypto from 'crypto';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { Pool } from 'pg';

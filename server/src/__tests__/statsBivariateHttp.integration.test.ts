@@ -11,8 +11,8 @@
 // 서브프로세스(services/stats-engine/.venv, config.ts의 STATS_ENGINE_PYTHON 기본
 // 경로 해석을 그대로 사용 — mock 없음)까지 전부 실행한다.
 //
-//   TEST_DATABASE_URL=postgres://wr_user:<POSTGRES_PASSWORD>@localhost:5432/wr_evaluation \
-//     npx vitest run --config vitest.config.ts src/__tests__/statsBivariateHttp.integration.test.ts
+//   TEST_DATABASE_URL=postgres://wr_user:<POSTGRES_PASSWORD>@localhost:5432/wr_test \
+//     npx vitest run --config vitest.integration.config.ts src/__tests__/statsBivariateHttp.integration.test.ts
 //
 // 실데이터 소스: packages/analytics-core/__tests__/modules/{knee,shoulder,elbow,wrist,spine}
 // /extractors.test.ts가 이미 검증해 둔 "정상 계산에 도달하는" 최소 payload를 그대로

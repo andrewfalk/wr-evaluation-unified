@@ -4,8 +4,8 @@
 //
 // 실행 조건: TEST_DATABASE_URL 환경변수가 실제로 접근 가능한 Postgres를 가리켜야 한다.
 // 없으면 이 파일 전체를 건너뛴다(CI/로컬에 DB가 없어도 나머지 테스트에 영향 없음).
-//   TEST_DATABASE_URL=postgres://wr_user:<POSTGRES_PASSWORD>@localhost:5432/wr_evaluation \
-//     npx vitest run --config vitest.config.ts src/db/__tests__/capabilityGrants.integration.test.ts
+//   TEST_DATABASE_URL=postgres://wr_user:<POSTGRES_PASSWORD>@localhost:5432/wr_test \
+//     npx vitest run --config vitest.integration.config.ts src/db/__tests__/capabilityGrants.integration.test.ts
 //
 // 이 테스트는 자신만의 organizations/users fixture 행을 만들고 afterAll에서 전부
 // 삭제한다(user_capability_grants는 users.id에 ON DELETE CASCADE라 함께 정리된다).

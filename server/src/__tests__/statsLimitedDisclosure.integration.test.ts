@@ -4,7 +4,7 @@
 // 접근 제어·감사·권한 회수·연결 중단·엔진 폴백이 핵심 검증 대상이다.
 //
 //   TEST_DATABASE_URL=postgres://wr_user:<PW>@localhost:5432/wr_test STATS_ENGINE_PYTHON=<venv>/bin/python \
-//     npx vitest run --config vitest.config.ts src/__tests__/statsLimitedDisclosure.integration.test.ts
+//     npx vitest run --config vitest.integration.config.ts src/__tests__/statsLimitedDisclosure.integration.test.ts
 import crypto from 'crypto';
 import http from 'http';
 import type { AddressInfo } from 'net';
