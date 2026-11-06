@@ -1,5 +1,7 @@
-import { pool } from '../db/client';
+import { createPool } from '../db/client';
 import { runStatsRunCleanup } from '../jobs/statsRunCleanup';
+
+const pool = createPool();
 
 runStatsRunCleanup(pool)
   .then(({ deleted }) => {
