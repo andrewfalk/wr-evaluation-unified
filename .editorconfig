@@ -1,0 +1,14 @@
+# Editor defaults that match .gitattributes (`* text=auto eol=lf`).
+# Indentation is intentionally not set: existing files differ by area and a
+# formatter is deferred (REFACTORING_ROADMAP P0-8, 2026-11-06).
+root = true
+
+[*]
+end_of_line = lf
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Two trailing spaces are a hard line break in Markdown.
+[*.md]
+trim_trailing_whitespace = false
