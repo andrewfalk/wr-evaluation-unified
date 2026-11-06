@@ -18,13 +18,14 @@ vi.mock('xlsx', async (importOriginal) => {
   return {
     ...actual,
     writeFile: (wb, fileName) => { captured.writeFile.push({ wb, fileName }); },
-    write: (wb, opts) => { captured.write.push({ wb, opts }); return new Uint8Array(); },
+    // Tag each buffer so the ZIP entry it lands in can be tied back to its workbook.
+    write: (wb, opts) => { captured.write.push({ wb, opts }); return { goldenWorkbookIndex: captured.write.length - 1 }; },
   };
 });
 vi.mock('jszip', () => ({
   default: class FakeZip {
     constructor() { this.entries = []; captured.zips.push(this); }
-    file(name) { this.entries.push(name); return this; }
+    file(name, data) { this.entries.push({ name, workbookIndex: data?.goldenWorkbookIndex ?? null }); return this; }
     async generateAsync() { return new Blob([]); }
   },
 }));
@@ -118,8 +119,15 @@ describe('G4 — export menu files (exportService)', () => {
     const selectedIds = new Set([patients[0].id, patients[1].id, patients[2].id]);
     await exportService.exportSelected(patients, selectedIds);
     await exportService.exportBatch(patients);
-    result.zips = captured.zips.map((zip, i) => ({ download: downloads[i], entries: zip.entries }));
-    result.zipWorkbooks = captured.write.map(({ wb, opts }) => ({ opts, workbook: workbookData(wb) }));
+    // Each ZIP entry with the workbook that was actually written into it (Codex review of #200).
+    result.zips = captured.zips.map((zip, i) => ({
+      download: downloads[i],
+      entries: zip.entries.map(({ name, workbookIndex }) => ({
+        name,
+        writeOptions: captured.write[workbookIndex]?.opts ?? null,
+        workbook: workbookIndex === null ? null : workbookData(captured.write[workbookIndex].wb),
+      })),
+    }));
 
     exportService.exportBatchFormatSingle(patients[0]);
     exportService.exportBatchFormatSelected(patients, selectedIds);
