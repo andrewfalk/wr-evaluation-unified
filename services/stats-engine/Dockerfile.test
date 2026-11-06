@@ -1,0 +1,19 @@
+# Test image for the stats engine: the same Python as production (REFACTORING_ROADMAP P0-12).
+#
+# server/Dockerfile's production stage is node:20-bookworm-slim (Debian 12) with apt's python3
+# (3.11) and a venv at /opt/stats-venv installed from requirements.txt. This image repeats those
+# steps on plain Debian 12 and adds pytest, so `npm run check:full` runs the unit tests (including
+# the R reference comparisons) against the production versions, not the developer's local venv.
+#
+# The source is not copied in: check:full mounts services/stats-engine read-only at run time.
+# Built by scripts/check-full.mjs and tagged with a hash of this file and the requirements files.
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-venv python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt requirements-dev.txt /tmp/stats-engine/
+RUN python3 -m venv /opt/stats-venv \
+    && /opt/stats-venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/stats-venv/bin/pip install --no-cache-dir -r /tmp/stats-engine/requirements-dev.txt

@@ -1,4 +1,6 @@
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
+# Build context for Dockerfile.test only (the production image builds from the repository root).
+# Keep the local .venv (hundreds of MB) and everything else out of the context.
+*
+!requirements.txt
+!requirements-dev.txt
+!Dockerfile.test

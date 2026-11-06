@@ -1,0 +1,11 @@
+# gitleaks findings reviewed and confirmed NOT to be secrets (scripts/verify-secrets.mjs).
+# Format: <commit>:<file>:<rule>:<line> — one fingerprint per finding, as printed by gitleaks.
+# Add an entry only after checking the value; a real secret must be rotated, not ignored.
+# Reviewed 2026-11-06 (full history scan, 488 commits).
+
+# Pose model keypoint-convention name ("wholebody…") in test data; the field name contains "key".
+90c80a9cda093661c2296503f321936c11a21d8c:services/pose-inference/test_feature_calc.py:generic-api-key:421
+# Same keypoint-convention name in the bundled model manifest.
+da6e7454bf1b500a06b35e2e85e09fadfad6861a:services/pose-inference/models/manifest.json:generic-api-key:47
+# Made-up patient keys (e.g. "abcdef123456789") in a dashboard statistics unit test.
+5a2402d93b331485885869f882c56b0ddf184785:src/core/utils/__tests__/dashboardStats.test.js:generic-api-key:50
