@@ -21,7 +21,7 @@ import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { printSummary, root, runCheckSteps, runStep, skipped } from './lib/runSteps.mjs';
+import { installAbortHandlers, isAborted, printSummary, root, runCheckSteps, runStep, skipped } from './lib/runSteps.mjs';
 
 const STATS_DIR = path.join(root, 'services', 'stats-engine');
 const PYTHON = path.join(STATS_DIR, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
@@ -35,34 +35,17 @@ function removeContainer() {
   containerStarted = false;
   spawnSync('docker', ['rm', '-f', CONTAINER], { stdio: 'ignore' });
 }
-// spawnSync blocks the event loop, so Ctrl+C reaches this handler after the running step ends.
+// Cleanup runs in main()'s finally; this 'exit' hook covers a second Ctrl+C (immediate exit).
 process.on('exit', removeContainer);
-for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
+installAbortHandlers();
 
-function sleep(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+class CheckFullError extends Error {}
 function fail(message) {
-  process.stderr.write(`\ncheck:full: ${message}\n`);
-  process.exit(1);
+  throw new CheckFullError(message);
 }
 
-// --- 0. preconditions --------------------------------------------------------------------------
-if (spawnSync('docker', ['info'], { stdio: 'ignore' }).status !== 0) {
-  fail('Docker is not running. Start Docker Desktop and run `npm run check:full` again.');
-}
-if (!existsSync(PYTHON)) {
-  fail(`stats-engine venv not found: ${PYTHON}\n  Create it: python -m venv services/stats-engine/.venv, then install services/stats-engine/requirements.txt and pytest.`);
-}
-if (spawnSync(PYTHON, ['-c', 'import numpy, scipy, jsonschema, pytest'], { stdio: 'ignore' }).status !== 0) {
-  fail(`${PYTHON} lacks numpy/scipy/jsonschema/pytest.\n  Install services/stats-engine/requirements.txt and pytest into that venv.`);
-}
-
-// --- 1. throwaway PostgreSQL -------------------------------------------------------------------
-// A run that was killed outright (closed window, killed process) cannot clean up, and `--rm`
-// only removes a container once it stops. Remove containers left by earlier runs whose
-// process is gone; a concurrent run's container (process still alive) is left alone.
 function processAlive(pid) {
   try {
     process.kill(pid, 0);
@@ -71,61 +54,90 @@ function processAlive(pid) {
     return err.code === 'EPERM';
   }
 }
-const leftovers = spawnSync('docker', ['ps', '-a', '--filter', `label=${LABEL}`, '--format', `{{.ID}} {{.Label "${LABEL}"}}`], { encoding: 'utf8' }).stdout ?? '';
-for (const line of leftovers.split('\n').filter(Boolean)) {
-  const [id, pid] = line.trim().split(/\s+/);
-  if (!processAlive(Number(pid))) {
-    process.stdout.write(`removing a container left by an earlier check:full run (pid ${pid})\n`);
-    spawnSync('docker', ['rm', '-f', id], { stdio: 'ignore' });
+
+async function main() {
+  // --- 0. preconditions ------------------------------------------------------------------------
+  if (spawnSync('docker', ['info'], { stdio: 'ignore' }).status !== 0) {
+    fail('Docker is not running. Start Docker Desktop and run `npm run check:full` again.');
   }
+  if (!existsSync(PYTHON)) {
+    fail(`stats-engine venv not found: ${PYTHON}\n  Create it: python -m venv services/stats-engine/.venv, then install services/stats-engine/requirements.txt and pytest.`);
+  }
+  if (spawnSync(PYTHON, ['-c', 'import numpy, scipy, jsonschema, pytest'], { stdio: 'ignore' }).status !== 0) {
+    fail(`${PYTHON} lacks numpy/scipy/jsonschema/pytest.\n  Install services/stats-engine/requirements.txt and pytest into that venv.`);
+  }
+
+  // --- 1. throwaway PostgreSQL -----------------------------------------------------------------
+  // A run that was killed outright (closed window, killed process) cannot clean up, and `--rm`
+  // only removes a container once it stops. Remove containers left by earlier runs whose
+  // process is gone; a concurrent run's container (process still alive) is left alone.
+  const leftovers = spawnSync('docker', ['ps', '-a', '--filter', `label=${LABEL}`, '--format', `{{.ID}} {{.Label "${LABEL}"}}`], { encoding: 'utf8' }).stdout ?? '';
+  for (const line of leftovers.split('\n').filter(Boolean)) {
+    const [id, pid] = line.trim().split(/\s+/);
+    if (!processAlive(Number(pid))) {
+      process.stdout.write(`removing a container left by an earlier check:full run (pid ${pid})\n`);
+      spawnSync('docker', ['rm', '-f', id], { stdio: 'ignore' });
+    }
+  }
+
+  const password = randomBytes(24).toString('hex');
+  process.stdout.write(`\n=== throwaway PostgreSQL: ${IMAGE} as ${CONTAINER}\n`);
+  const started = spawnSync('docker', [
+    'run', '-d', '--rm', '--name', CONTAINER, '--label', `${LABEL}=${process.pid}`,
+    '-e', 'POSTGRES_USER=wr_user',
+    '-e', 'POSTGRES_PASSWORD', // value comes from this process's env, not the command line
+    '-e', 'POSTGRES_DB=wr_test',
+    '--tmpfs', '/var/lib/postgresql/data',
+    '-p', '127.0.0.1::5432',
+    IMAGE,
+  ], { env: { ...process.env, POSTGRES_PASSWORD: password }, encoding: 'utf8' });
+  if (started.status !== 0) fail(`could not start ${IMAGE}:\n${started.stderr}`);
+  containerStarted = true;
+
+  const portOut = spawnSync('docker', ['port', CONTAINER, '5432/tcp'], { encoding: 'utf8' }).stdout ?? '';
+  const port = /127\.0\.0\.1:(\d+)/.exec(portOut)?.[1];
+  if (!port) fail(`could not read the published port of ${CONTAINER} (${portOut.trim()})`);
+
+  // TCP readiness inside the container: during first-run init the image's temporary server does
+  // not listen on TCP, so this only succeeds once the real server is up. Async wait, so Ctrl+C
+  // is handled here too.
+  let ready = false;
+  for (let i = 0; i < 60 && !ready && !isAborted(); i += 1) {
+    ready = spawnSync('docker', ['exec', CONTAINER, 'pg_isready', '-h', '127.0.0.1', '-U', 'wr_user', '-d', 'wr_test'], { stdio: 'ignore' }).status === 0;
+    if (!ready) await sleep(1000);
+  }
+  if (!ready && !isAborted()) fail(`${CONTAINER} did not become ready within 60 s.`);
+  if (ready) process.stdout.write(`ready on 127.0.0.1:${port}\n`);
+
+  // --- 2-4. checks (each step is skipped once a signal has been received) ----------------------
+  const pythonEnv = {
+    STATS_ENGINE_PYTHON_FOR_TEST: PYTHON, // read by the Python smoke tests (default would be PATH `python`)
+    STATS_ENGINE_PYTHON: PYTHON,          // the engine the integration tests spawn
+    STATS_ENGINE_REQUIRE_PYTHON: '1',     // smoke tests fail instead of skipping without Python
+  };
+  const results = await runCheckSteps({ env: pythonEnv });
+  const sharedBuilt = results[0].ok;
+
+  const integrationEnv = {
+    ...pythonEnv,
+    TEST_DATABASE_URL: `postgres://wr_user:${password}@127.0.0.1:${port}/wr_test`,
+    WR_REQUIRE_INTEGRATION: '1',
+  };
+  results.push(sharedBuilt
+    ? await runStep('integration tests (server, real PostgreSQL)', 'npm --prefix server run test:integration', { env: integrationEnv })
+    : skipped('integration tests (server, real PostgreSQL)'));
+  results.push(await runStep('python unit tests (stats-engine)', `"${PYTHON}" -m pytest -q`, { cwd: STATS_DIR }));
+  return printSummary('check:full', results);
 }
 
-const password = randomBytes(24).toString('hex');
-process.stdout.write(`\n=== throwaway PostgreSQL: ${IMAGE} as ${CONTAINER}\n`);
-const started = spawnSync('docker', [
-  'run', '-d', '--rm', '--name', CONTAINER, '--label', `${LABEL}=${process.pid}`,
-  '-e', 'POSTGRES_USER=wr_user',
-  '-e', 'POSTGRES_PASSWORD', // value comes from this process's env, not the command line
-  '-e', 'POSTGRES_DB=wr_test',
-  '--tmpfs', '/var/lib/postgresql/data',
-  '-p', '127.0.0.1::5432',
-  IMAGE,
-], { env: { ...process.env, POSTGRES_PASSWORD: password }, encoding: 'utf8' });
-if (started.status !== 0) fail(`could not start ${IMAGE}:\n${started.stderr}`);
-containerStarted = true;
-
-const portOut = spawnSync('docker', ['port', CONTAINER, '5432/tcp'], { encoding: 'utf8' }).stdout ?? '';
-const port = /127\.0\.0\.1:(\d+)/.exec(portOut)?.[1];
-if (!port) fail(`could not read the published port of ${CONTAINER} (${portOut.trim()})`);
-
-// TCP readiness inside the container: during first-run init the image's temporary server does
-// not listen on TCP, so this only succeeds once the real server is up.
-let ready = false;
-for (let i = 0; i < 60 && !ready; i += 1) {
-  ready = spawnSync('docker', ['exec', CONTAINER, 'pg_isready', '-h', '127.0.0.1', '-U', 'wr_user', '-d', 'wr_test'], { stdio: 'ignore' }).status === 0;
-  if (!ready) sleep(1000);
+let exitCode = 1;
+try {
+  exitCode = await main();
+} catch (err) {
+  if (!(err instanceof CheckFullError)) throw err;
+  process.stderr.write(`\ncheck:full: ${err.message}\n`);
+  exitCode = isAborted() ? 130 : 1;
+} finally {
+  removeContainer();
 }
-if (!ready) fail(`${CONTAINER} did not become ready within 60 s.`);
-process.stdout.write(`ready on 127.0.0.1:${port}\n`);
-
-// --- 2-4. checks -------------------------------------------------------------------------------
-const pythonEnv = {
-  STATS_ENGINE_PYTHON_FOR_TEST: PYTHON, // read by the Python smoke tests (default would be PATH `python`)
-  STATS_ENGINE_PYTHON: PYTHON,          // the engine the integration tests spawn
-  STATS_ENGINE_REQUIRE_PYTHON: '1',     // smoke tests fail instead of skipping without Python
-};
-const results = runCheckSteps({ env: pythonEnv });
-const sharedBuilt = results[0].ok;
-
-const integrationEnv = {
-  ...pythonEnv,
-  TEST_DATABASE_URL: `postgres://wr_user:${password}@127.0.0.1:${port}/wr_test`,
-  WR_REQUIRE_INTEGRATION: '1',
-};
-results.push(sharedBuilt
-  ? runStep('integration tests (server, real PostgreSQL)', 'npm --prefix server run test:integration', { env: integrationEnv })
-  : skipped('integration tests (server, real PostgreSQL)'));
-results.push(runStep('python unit tests (stats-engine)', `"${PYTHON}" -m pytest -q`, { cwd: STATS_DIR }));
-
-removeContainer();
-process.exit(printSummary('check:full', results));
+process.exit(exitCode);

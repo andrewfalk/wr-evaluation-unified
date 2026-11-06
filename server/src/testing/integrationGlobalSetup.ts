@@ -10,17 +10,23 @@
 //    development or production database (`wr_evaluation`), the run could change its schema or
 //    process someone else's work, so it is refused before connecting.
 // 3. Apply migrations (idempotent), so every run starts from the current schema.
-import { Pool } from 'pg';
+import { Client, Pool } from 'pg';
 import { runMigrations } from '../db/migrate';
 
+// The database pg will actually connect to. Read from pg's own parser (a Client that is never
+// connected) rather than the URL path: in `socket:/dir?db=name` the path is the socket
+// directory and `db` is the database (Codex review of #192), and PGDATABASE fills a missing name.
 export function testDatabaseName(url: string): string {
-  let parsed: URL;
+  let protocol: string;
   try {
-    parsed = new URL(url);
+    protocol = new URL(url).protocol;
   } catch {
     throw new Error('TEST_DATABASE_URL is not a valid URL.');
   }
-  return decodeURIComponent(parsed.pathname.replace(/^\//, ''));
+  if (protocol !== 'postgres:' && protocol !== 'postgresql:') {
+    throw new Error(`TEST_DATABASE_URL must be a postgres:// or postgresql:// URL (got "${protocol}").`);
+  }
+  return new Client({ connectionString: url }).database ?? '';
 }
 
 export function assertDedicatedTestDatabase(url: string): void {

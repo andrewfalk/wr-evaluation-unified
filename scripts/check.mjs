@@ -8,6 +8,7 @@
 //
 // Real-Postgres integration tests and the Python unit tests run in `npm run check:full`
 // (scripts/check-full.mjs), which starts a throwaway database. Steps: scripts/lib/runSteps.mjs.
-import { printSummary, runCheckSteps } from './lib/runSteps.mjs';
+import { installAbortHandlers, printSummary, runCheckSteps } from './lib/runSteps.mjs';
 
-process.exit(printSummary('check', runCheckSteps()));
+installAbortHandlers();
+process.exit(printSummary('check', await runCheckSteps()));
