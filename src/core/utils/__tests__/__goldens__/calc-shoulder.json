@@ -1,0 +1,1273 @@
+{
+  "00000000-0000-4000-8000-000000000118": {
+    "name": "서지연",
+    "activeModules": [
+      "shoulder"
+    ],
+    "isComplete": true,
+    "calc": {
+      "age": 49,
+      "bmi": "24.1",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000124",
+          "jobName": "자동차 도장 작업자",
+          "presetId": null,
+          "startDate": "1998-10-23",
+          "endDate": "2018-10-23",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 245,
+          "overheadHours": "1.2",
+          "repetitiveMediumHours": "2.0",
+          "repetitiveFastHours": "0.9",
+          "heavyLoadCount": "20",
+          "heavyLoadSeconds": "11",
+          "vibrationHours": "0.8",
+          "evidenceSources": [],
+          "periodYears": 20,
+          "exposures": [
+            {
+              "key": "overhead",
+              "label": "오버헤드/어깨높이 이상 작업",
+              "dailyHours": 1.2,
+              "cumulativeHours": 5880,
+              "limit": 3600,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveMedium",
+              "label": "반복동작 중간속도 (4~14회/분)",
+              "dailyHours": 2,
+              "cumulativeHours": 9800,
+              "limit": 38000,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveFast",
+              "label": "반복동작 고도 (≥15회/분)",
+              "dailyHours": 0.9,
+              "cumulativeHours": 4410,
+              "limit": 9400,
+              "unit": "시간"
+            },
+            {
+              "key": "heavyLoad",
+              "label": "중량물(≥20kg) 취급 시간",
+              "dailyHours": 0.06111111111111111,
+              "cumulativeHours": 299.44444444444446,
+              "limit": 200,
+              "unit": "시간"
+            },
+            {
+              "key": "vibration",
+              "label": "손-팔 진동 (≥3 m/s²)",
+              "dailyHours": 0.8,
+              "cumulativeHours": 3920,
+              "limit": 5300,
+              "unit": "시간"
+            }
+          ]
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000123",
+          "jobName": "자동차 정비 보조원",
+          "presetId": null,
+          "startDate": "2018-10-24",
+          "endDate": "2025-10-24",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 248,
+          "overheadHours": "1.0",
+          "repetitiveMediumHours": "1.2",
+          "repetitiveFastHours": "0.4",
+          "heavyLoadCount": "14",
+          "heavyLoadSeconds": "9",
+          "vibrationHours": "0.9",
+          "evidenceSources": [],
+          "periodYears": 7.000684462696783,
+          "exposures": [
+            {
+              "key": "overhead",
+              "label": "오버헤드/어깨높이 이상 작업",
+              "dailyHours": 1,
+              "cumulativeHours": 1736.169746748802,
+              "limit": 3600,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveMedium",
+              "label": "반복동작 중간속도 (4~14회/분)",
+              "dailyHours": 1.2,
+              "cumulativeHours": 2083.4036960985622,
+              "limit": 38000,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveFast",
+              "label": "반복동작 고도 (≥15회/분)",
+              "dailyHours": 0.4,
+              "cumulativeHours": 694.4678986995209,
+              "limit": 9400,
+              "unit": "시간"
+            },
+            {
+              "key": "heavyLoad",
+              "label": "중량물(≥20kg) 취급 시간",
+              "dailyHours": 0.035,
+              "cumulativeHours": 60.765941136208085,
+              "limit": 200,
+              "unit": "시간"
+            },
+            {
+              "key": "vibration",
+              "label": "손-팔 진동 (≥3 m/s²)",
+              "dailyHours": 0.9,
+              "cumulativeHours": 1562.5527720739221,
+              "limit": 5300,
+              "unit": "시간"
+            }
+          ]
+        }
+      ],
+      "totals": [
+        {
+          "key": "overhead",
+          "label": "오버헤드/어깨높이 이상 작업",
+          "totalHours": 7616.169746748802,
+          "limit": 3600,
+          "unit": "시간",
+          "ratio": 2.115602707430223,
+          "exceeded": true
+        },
+        {
+          "key": "repetitiveMedium",
+          "label": "반복동작 중간속도 (4~14회/분)",
+          "totalHours": 11883.403696098561,
+          "limit": 38000,
+          "unit": "시간",
+          "ratio": 0.3127211498973306,
+          "exceeded": false
+        },
+        {
+          "key": "repetitiveFast",
+          "label": "반복동작 고도 (≥15회/분)",
+          "totalHours": 5104.46789869952,
+          "limit": 9400,
+          "unit": "시간",
+          "ratio": 0.5430284998616511,
+          "exceeded": false
+        },
+        {
+          "key": "heavyLoad",
+          "label": "중량물(≥20kg) 취급 시간",
+          "totalHours": 360.21038558065254,
+          "limit": 200,
+          "unit": "시간",
+          "ratio": 1.8010519279032626,
+          "exceeded": true
+        },
+        {
+          "key": "vibration",
+          "label": "손-팔 진동 (≥3 m/s²)",
+          "totalHours": 5482.552772073922,
+          "limit": 5300,
+          "unit": "시간",
+          "ratio": 1.0344439192592305,
+          "exceeded": true
+        }
+      ],
+      "anyExceeded": true,
+      "anyRepetitiveExceeded": false,
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000125": {
+    "name": "장민호",
+    "activeModules": [
+      "shoulder"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 48,
+      "bmi": "24.1",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000131",
+          "jobName": "반도체 장비 오퍼레이터",
+          "presetId": null,
+          "startDate": "2013-10-15",
+          "endDate": "2020-05-15",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 242,
+          "overheadHours": "0.9",
+          "repetitiveMediumHours": "1.2",
+          "repetitiveFastHours": "0.5",
+          "heavyLoadCount": "10",
+          "heavyLoadSeconds": "7",
+          "vibrationHours": "0.3",
+          "evidenceSources": [],
+          "periodYears": 6.581793292265571,
+          "exposures": [
+            {
+              "key": "overhead",
+              "label": "오버헤드/어깨높이 이상 작업",
+              "dailyHours": 0.9,
+              "cumulativeHours": 1433.5145790554413,
+              "limit": 3600,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveMedium",
+              "label": "반복동작 중간속도 (4~14회/분)",
+              "dailyHours": 1.2,
+              "cumulativeHours": 1911.3527720739216,
+              "limit": 38000,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveFast",
+              "label": "반복동작 고도 (≥15회/분)",
+              "dailyHours": 0.5,
+              "cumulativeHours": 796.3969883641341,
+              "limit": 9400,
+              "unit": "시간"
+            },
+            {
+              "key": "heavyLoad",
+              "label": "중량물(≥20kg) 취급 시간",
+              "dailyHours": 0.019444444444444445,
+              "cumulativeHours": 30.97099399193855,
+              "limit": 200,
+              "unit": "시간"
+            },
+            {
+              "key": "vibration",
+              "label": "손-팔 진동 (≥3 m/s²)",
+              "dailyHours": 0.3,
+              "cumulativeHours": 477.8381930184804,
+              "limit": 5300,
+              "unit": "시간"
+            }
+          ]
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000130",
+          "jobName": "총무팀 운영 담당",
+          "presetId": null,
+          "startDate": "2020-05-16",
+          "endDate": "2025-11-16",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 236,
+          "overheadHours": "0.2",
+          "repetitiveMediumHours": "1.1",
+          "repetitiveFastHours": "0.1",
+          "heavyLoadCount": "2",
+          "heavyLoadSeconds": "6",
+          "vibrationHours": "0.0",
+          "evidenceSources": [],
+          "periodYears": 5.503080082135524,
+          "exposures": [
+            {
+              "key": "overhead",
+              "label": "오버헤드/어깨높이 이상 작업",
+              "dailyHours": 0.2,
+              "cumulativeHours": 259.74537987679673,
+              "limit": 3600,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveMedium",
+              "label": "반복동작 중간속도 (4~14회/분)",
+              "dailyHours": 1.1,
+              "cumulativeHours": 1428.5995893223821,
+              "limit": 38000,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveFast",
+              "label": "반복동작 고도 (≥15회/분)",
+              "dailyHours": 0.1,
+              "cumulativeHours": 129.87268993839837,
+              "limit": 9400,
+              "unit": "시간"
+            },
+            {
+              "key": "heavyLoad",
+              "label": "중량물(≥20kg) 취급 시간",
+              "dailyHours": 0.0033333333333333335,
+              "cumulativeHours": 4.329089664613279,
+              "limit": 200,
+              "unit": "시간"
+            },
+            {
+              "key": "vibration",
+              "label": "손-팔 진동 (≥3 m/s²)",
+              "dailyHours": 0,
+              "cumulativeHours": 0,
+              "limit": 5300,
+              "unit": "시간"
+            }
+          ]
+        }
+      ],
+      "totals": [
+        {
+          "key": "overhead",
+          "label": "오버헤드/어깨높이 이상 작업",
+          "totalHours": 1693.259958932238,
+          "limit": 3600,
+          "unit": "시간",
+          "ratio": 0.4703499885922884,
+          "exceeded": false
+        },
+        {
+          "key": "repetitiveMedium",
+          "label": "반복동작 중간속도 (4~14회/분)",
+          "totalHours": 3339.952361396304,
+          "limit": 38000,
+          "unit": "시간",
+          "ratio": 0.08789348319463958,
+          "exceeded": false
+        },
+        {
+          "key": "repetitiveFast",
+          "label": "반복동작 고도 (≥15회/분)",
+          "totalHours": 926.2696783025325,
+          "limit": 9400,
+          "unit": "시간",
+          "ratio": 0.09853932747899281,
+          "exceeded": false
+        },
+        {
+          "key": "heavyLoad",
+          "label": "중량물(≥20kg) 취급 시간",
+          "totalHours": 35.30008365655183,
+          "limit": 200,
+          "unit": "시간",
+          "ratio": 0.17650041828275914,
+          "exceeded": false
+        },
+        {
+          "key": "vibration",
+          "label": "손-팔 진동 (≥3 m/s²)",
+          "totalHours": 477.8381930184804,
+          "limit": 5300,
+          "unit": "시간",
+          "ratio": 0.09015814962612838,
+          "exceeded": false
+        }
+      ],
+      "anyExceeded": false,
+      "anyRepetitiveExceeded": false,
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000132": {
+    "name": "노유진",
+    "activeModules": [
+      "knee",
+      "shoulder"
+    ],
+    "isComplete": true,
+    "calc": {
+      "age": 47,
+      "bmi": "24.2",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000141",
+          "jobName": "요양병원 간호조무사",
+          "presetId": null,
+          "startDate": "1995-05-07",
+          "endDate": "2006-05-07",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 244,
+          "overheadHours": "1.3",
+          "repetitiveMediumHours": "1.9",
+          "repetitiveFastHours": "0.6",
+          "heavyLoadCount": "12",
+          "heavyLoadSeconds": "12",
+          "vibrationHours": "1.2",
+          "evidenceSources": [],
+          "periodYears": 11.000684462696784,
+          "exposures": [
+            {
+              "key": "overhead",
+              "label": "오버헤드/어깨높이 이상 작업",
+              "dailyHours": 1.3,
+              "cumulativeHours": 3489.41711156742,
+              "limit": 3600,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveMedium",
+              "label": "반복동작 중간속도 (4~14회/분)",
+              "dailyHours": 1.9,
+              "cumulativeHours": 5099.917316906229,
+              "limit": 38000,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveFast",
+              "label": "반복동작 고도 (≥15회/분)",
+              "dailyHours": 0.6,
+              "cumulativeHours": 1610.500205338809,
+              "limit": 9400,
+              "unit": "시간"
+            },
+            {
+              "key": "heavyLoad",
+              "label": "중량물(≥20kg) 취급 시간",
+              "dailyHours": 0.04,
+              "cumulativeHours": 107.36668035592061,
+              "limit": 200,
+              "unit": "시간"
+            },
+            {
+              "key": "vibration",
+              "label": "손-팔 진동 (≥3 m/s²)",
+              "dailyHours": 1.2,
+              "cumulativeHours": 3221.000410677618,
+              "limit": 5300,
+              "unit": "시간"
+            }
+          ]
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000140",
+          "jobName": "천장재 시공 기사",
+          "presetId": null,
+          "startDate": "2006-05-08",
+          "endDate": "2017-11-08",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 247,
+          "overheadHours": "1.6",
+          "repetitiveMediumHours": "1.1",
+          "repetitiveFastHours": "0.6",
+          "heavyLoadCount": "20",
+          "heavyLoadSeconds": "12",
+          "vibrationHours": "0.7",
+          "evidenceSources": [],
+          "periodYears": 11.50444900752909,
+          "exposures": [
+            {
+              "key": "overhead",
+              "label": "오버헤드/어깨높이 이상 작업",
+              "dailyHours": 1.6,
+              "cumulativeHours": 4546.558247775497,
+              "limit": 3600,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveMedium",
+              "label": "반복동작 중간속도 (4~14회/분)",
+              "dailyHours": 1.1,
+              "cumulativeHours": 3125.758795345654,
+              "limit": 38000,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveFast",
+              "label": "반복동작 고도 (≥15회/분)",
+              "dailyHours": 0.6,
+              "cumulativeHours": 1704.959342915811,
+              "limit": 9400,
+              "unit": "시간"
+            },
+            {
+              "key": "heavyLoad",
+              "label": "중량물(≥20kg) 취급 시간",
+              "dailyHours": 0.06666666666666667,
+              "cumulativeHours": 189.43992699064566,
+              "limit": 200,
+              "unit": "시간"
+            },
+            {
+              "key": "vibration",
+              "label": "손-팔 진동 (≥3 m/s²)",
+              "dailyHours": 0.7,
+              "cumulativeHours": 1989.1192334017794,
+              "limit": 5300,
+              "unit": "시간"
+            }
+          ]
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000139",
+          "jobName": "가구 조립 설치원",
+          "presetId": null,
+          "startDate": "2017-11-09",
+          "endDate": "2025-12-09",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 249,
+          "overheadHours": "0.8",
+          "repetitiveMediumHours": "1.6",
+          "repetitiveFastHours": "0.6",
+          "heavyLoadCount": "14",
+          "heavyLoadSeconds": "10",
+          "vibrationHours": "0.5",
+          "evidenceSources": [],
+          "periodYears": 8.082135523613964,
+          "exposures": [
+            {
+              "key": "overhead",
+              "label": "오버헤드/어깨높이 이상 작업",
+              "dailyHours": 0.8,
+              "cumulativeHours": 1609.9613963039017,
+              "limit": 3600,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveMedium",
+              "label": "반복동작 중간속도 (4~14회/분)",
+              "dailyHours": 1.6,
+              "cumulativeHours": 3219.9227926078033,
+              "limit": 38000,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveFast",
+              "label": "반복동작 고도 (≥15회/분)",
+              "dailyHours": 0.6,
+              "cumulativeHours": 1207.4710472279262,
+              "limit": 9400,
+              "unit": "시간"
+            },
+            {
+              "key": "heavyLoad",
+              "label": "중량물(≥20kg) 취급 시간",
+              "dailyHours": 0.03888888888888889,
+              "cumulativeHours": 78.26201232032855,
+              "limit": 200,
+              "unit": "시간"
+            },
+            {
+              "key": "vibration",
+              "label": "손-팔 진동 (≥3 m/s²)",
+              "dailyHours": 0.5,
+              "cumulativeHours": 1006.2258726899385,
+              "limit": 5300,
+              "unit": "시간"
+            }
+          ]
+        }
+      ],
+      "totals": [
+        {
+          "key": "overhead",
+          "label": "오버헤드/어깨높이 이상 작업",
+          "totalHours": 9645.936755646819,
+          "limit": 3600,
+          "unit": "시간",
+          "ratio": 2.6794268765685607,
+          "exceeded": true
+        },
+        {
+          "key": "repetitiveMedium",
+          "label": "반복동작 중간속도 (4~14회/분)",
+          "totalHours": 11445.598904859688,
+          "limit": 38000,
+          "unit": "시간",
+          "ratio": 0.3011999711805181,
+          "exceeded": false
+        },
+        {
+          "key": "repetitiveFast",
+          "label": "반복동작 고도 (≥15회/분)",
+          "totalHours": 4522.930595482547,
+          "limit": 9400,
+          "unit": "시간",
+          "ratio": 0.48116282930665394,
+          "exceeded": false
+        },
+        {
+          "key": "heavyLoad",
+          "label": "중량물(≥20kg) 취급 시간",
+          "totalHours": 375.0686196668948,
+          "limit": 200,
+          "unit": "시간",
+          "ratio": 1.8753430983344739,
+          "exceeded": true
+        },
+        {
+          "key": "vibration",
+          "label": "손-팔 진동 (≥3 m/s²)",
+          "totalHours": 6216.3455167693355,
+          "limit": 5300,
+          "unit": "시간",
+          "ratio": 1.1728953805225162,
+          "exceeded": true
+        }
+      ],
+      "anyExceeded": true,
+      "anyRepetitiveExceeded": false,
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000142": {
+    "name": "백승현",
+    "activeModules": [
+      "shoulder",
+      "spine"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 46,
+      "bmi": "24.2",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000149",
+          "jobName": "어린이집 보육교사",
+          "presetId": null,
+          "startDate": "2012-05-05",
+          "endDate": "2021-06-05",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 239,
+          "overheadHours": "1.1",
+          "repetitiveMediumHours": "2.3",
+          "repetitiveFastHours": "0.5",
+          "heavyLoadCount": "12",
+          "heavyLoadSeconds": "10",
+          "vibrationHours": "0.2",
+          "evidenceSources": [],
+          "periodYears": 9.084188911704311,
+          "exposures": [
+            {
+              "key": "overhead",
+              "label": "오버헤드/어깨높이 이상 작업",
+              "dailyHours": 1.1,
+              "cumulativeHours": 2388.233264887064,
+              "limit": 3600,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveMedium",
+              "label": "반복동작 중간속도 (4~14회/분)",
+              "dailyHours": 2.3,
+              "cumulativeHours": 4993.578644763859,
+              "limit": 38000,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveFast",
+              "label": "반복동작 고도 (≥15회/분)",
+              "dailyHours": 0.5,
+              "cumulativeHours": 1085.5605749486651,
+              "limit": 9400,
+              "unit": "시간"
+            },
+            {
+              "key": "heavyLoad",
+              "label": "중량물(≥20kg) 취급 시간",
+              "dailyHours": 0.03333333333333333,
+              "cumulativeHours": 72.37070499657769,
+              "limit": 200,
+              "unit": "시간"
+            },
+            {
+              "key": "vibration",
+              "label": "손-팔 진동 (≥3 m/s²)",
+              "dailyHours": 0.2,
+              "cumulativeHours": 434.22422997946614,
+              "limit": 5300,
+              "unit": "시간"
+            }
+          ]
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000148",
+          "jobName": "학원 행정실 직원",
+          "presetId": null,
+          "startDate": "2021-06-06",
+          "endDate": "2026-02-06",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 238,
+          "overheadHours": "0.2",
+          "repetitiveMediumHours": "0.9",
+          "repetitiveFastHours": "0.1",
+          "heavyLoadCount": "6",
+          "heavyLoadSeconds": "5",
+          "vibrationHours": "0.0",
+          "evidenceSources": [],
+          "periodYears": 4.670773442847365,
+          "exposures": [
+            {
+              "key": "overhead",
+              "label": "오버헤드/어깨높이 이상 작업",
+              "dailyHours": 0.2,
+              "cumulativeHours": 222.32881587953457,
+              "limit": 3600,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveMedium",
+              "label": "반복동작 중간속도 (4~14회/분)",
+              "dailyHours": 0.9,
+              "cumulativeHours": 1000.4796714579056,
+              "limit": 38000,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveFast",
+              "label": "반복동작 고도 (≥15회/분)",
+              "dailyHours": 0.1,
+              "cumulativeHours": 111.16440793976729,
+              "limit": 9400,
+              "unit": "시간"
+            },
+            {
+              "key": "heavyLoad",
+              "label": "중량물(≥20kg) 취급 시간",
+              "dailyHours": 0.008333333333333333,
+              "cumulativeHours": 9.263700661647274,
+              "limit": 200,
+              "unit": "시간"
+            },
+            {
+              "key": "vibration",
+              "label": "손-팔 진동 (≥3 m/s²)",
+              "dailyHours": 0,
+              "cumulativeHours": 0,
+              "limit": 5300,
+              "unit": "시간"
+            }
+          ]
+        }
+      ],
+      "totals": [
+        {
+          "key": "overhead",
+          "label": "오버헤드/어깨높이 이상 작업",
+          "totalHours": 2610.5620807665982,
+          "limit": 3600,
+          "unit": "시간",
+          "ratio": 0.7251561335462773,
+          "exceeded": false
+        },
+        {
+          "key": "repetitiveMedium",
+          "label": "반복동작 중간속도 (4~14회/분)",
+          "totalHours": 5994.0583162217645,
+          "limit": 38000,
+          "unit": "시간",
+          "ratio": 0.15773837674267802,
+          "exceeded": false
+        },
+        {
+          "key": "repetitiveFast",
+          "label": "반복동작 고도 (≥15회/분)",
+          "totalHours": 1196.7249828884324,
+          "limit": 9400,
+          "unit": "시간",
+          "ratio": 0.12731116839238643,
+          "exceeded": false
+        },
+        {
+          "key": "heavyLoad",
+          "label": "중량물(≥20kg) 취급 시간",
+          "totalHours": 81.63440565822496,
+          "limit": 200,
+          "unit": "시간",
+          "ratio": 0.4081720282911248,
+          "exceeded": false
+        },
+        {
+          "key": "vibration",
+          "label": "손-팔 진동 (≥3 m/s²)",
+          "totalHours": 434.22422997946614,
+          "limit": 5300,
+          "unit": "시간",
+          "ratio": 0.08192909999612569,
+          "exceeded": false
+        }
+      ],
+      "anyExceeded": false,
+      "anyRepetitiveExceeded": false,
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000150": {
+    "name": "하은서",
+    "activeModules": [
+      "shoulder"
+    ],
+    "isComplete": true,
+    "calc": {
+      "age": 45,
+      "bmi": "24.2",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000155",
+          "jobName": "도수치료실 코디네이터",
+          "presetId": null,
+          "startDate": "2019-04-12",
+          "endDate": "2026-03-12",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 240,
+          "overheadHours": "0.9",
+          "repetitiveMediumHours": "2.5",
+          "repetitiveFastHours": "0.4",
+          "heavyLoadCount": "14",
+          "heavyLoadSeconds": "11",
+          "vibrationHours": "0.1",
+          "evidenceSources": [],
+          "periodYears": 6.915811088295688,
+          "exposures": [
+            {
+              "key": "overhead",
+              "label": "오버헤드/어깨높이 이상 작업",
+              "dailyHours": 0.9,
+              "cumulativeHours": 1493.8151950718686,
+              "limit": 3600,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveMedium",
+              "label": "반복동작 중간속도 (4~14회/분)",
+              "dailyHours": 2.5,
+              "cumulativeHours": 4149.486652977413,
+              "limit": 38000,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveFast",
+              "label": "반복동작 고도 (≥15회/분)",
+              "dailyHours": 0.4,
+              "cumulativeHours": 663.9178644763861,
+              "limit": 9400,
+              "unit": "시간"
+            },
+            {
+              "key": "heavyLoad",
+              "label": "중량물(≥20kg) 취급 시간",
+              "dailyHours": 0.042777777777777776,
+              "cumulativeHours": 71.00232717316905,
+              "limit": 200,
+              "unit": "시간"
+            },
+            {
+              "key": "vibration",
+              "label": "손-팔 진동 (≥3 m/s²)",
+              "dailyHours": 0.1,
+              "cumulativeHours": 165.97946611909651,
+              "limit": 5300,
+              "unit": "시간"
+            }
+          ]
+        }
+      ],
+      "totals": [
+        {
+          "key": "overhead",
+          "label": "오버헤드/어깨높이 이상 작업",
+          "totalHours": 1493.8151950718686,
+          "limit": 3600,
+          "unit": "시간",
+          "ratio": 0.41494866529774127,
+          "exceeded": false
+        },
+        {
+          "key": "repetitiveMedium",
+          "label": "반복동작 중간속도 (4~14회/분)",
+          "totalHours": 4149.486652977413,
+          "limit": 38000,
+          "unit": "시간",
+          "ratio": 0.10919701718361612,
+          "exceeded": false
+        },
+        {
+          "key": "repetitiveFast",
+          "label": "반복동작 고도 (≥15회/분)",
+          "totalHours": 663.9178644763861,
+          "limit": 9400,
+          "unit": "시간",
+          "ratio": 0.07062956005067937,
+          "exceeded": false
+        },
+        {
+          "key": "heavyLoad",
+          "label": "중량물(≥20kg) 취급 시간",
+          "totalHours": 71.00232717316905,
+          "limit": 200,
+          "unit": "시간",
+          "ratio": 0.3550116358658453,
+          "exceeded": false
+        },
+        {
+          "key": "vibration",
+          "label": "손-팔 진동 (≥3 m/s²)",
+          "totalHours": 165.97946611909651,
+          "limit": 5300,
+          "unit": "시간",
+          "ratio": 0.03131688039982953,
+          "exceeded": false
+        }
+      ],
+      "anyExceeded": false,
+      "anyRepetitiveExceeded": false,
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000162": {
+    "name": "구태훈",
+    "activeModules": [
+      "wrist",
+      "shoulder"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 43,
+      "bmi": "24.3",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000169",
+          "jobName": "병원 행정 사무원",
+          "presetId": null,
+          "startDate": "2012-07-21",
+          "endDate": "2021-01-21",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 238,
+          "overheadHours": "0.4",
+          "repetitiveMediumHours": "1.1",
+          "repetitiveFastHours": "0.2",
+          "heavyLoadCount": "3",
+          "heavyLoadSeconds": "5",
+          "vibrationHours": "0.0",
+          "evidenceSources": [],
+          "periodYears": 8.503764544832306,
+          "exposures": [
+            {
+              "key": "overhead",
+              "label": "오버헤드/어깨높이 이상 작업",
+              "dailyHours": 0.4,
+              "cumulativeHours": 809.5583846680355,
+              "limit": 3600,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveMedium",
+              "label": "반복동작 중간속도 (4~14회/분)",
+              "dailyHours": 1.1,
+              "cumulativeHours": 2226.2855578370977,
+              "limit": 38000,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveFast",
+              "label": "반복동작 고도 (≥15회/분)",
+              "dailyHours": 0.2,
+              "cumulativeHours": 404.77919233401775,
+              "limit": 9400,
+              "unit": "시간"
+            },
+            {
+              "key": "heavyLoad",
+              "label": "중량물(≥20kg) 취급 시간",
+              "dailyHours": 0.004166666666666667,
+              "cumulativeHours": 8.432899840292038,
+              "limit": 200,
+              "unit": "시간"
+            },
+            {
+              "key": "vibration",
+              "label": "손-팔 진동 (≥3 m/s²)",
+              "dailyHours": 0,
+              "cumulativeHours": 0,
+              "limit": 5300,
+              "unit": "시간"
+            }
+          ]
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000168",
+          "jobName": "고객센터 상담원",
+          "presetId": null,
+          "startDate": "2021-01-22",
+          "endDate": "2026-01-22",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 239,
+          "overheadHours": "0.4",
+          "repetitiveMediumHours": "0.9",
+          "repetitiveFastHours": "0.2",
+          "heavyLoadCount": "4",
+          "heavyLoadSeconds": "5",
+          "vibrationHours": "0.1",
+          "evidenceSources": [],
+          "periodYears": 4.999315537303217,
+          "exposures": [
+            {
+              "key": "overhead",
+              "label": "오버헤드/어깨높이 이상 작업",
+              "dailyHours": 0.4,
+              "cumulativeHours": 477.9345653661876,
+              "limit": 3600,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveMedium",
+              "label": "반복동작 중간속도 (4~14회/분)",
+              "dailyHours": 0.9,
+              "cumulativeHours": 1075.352772073922,
+              "limit": 38000,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveFast",
+              "label": "반복동작 고도 (≥15회/분)",
+              "dailyHours": 0.2,
+              "cumulativeHours": 238.9672826830938,
+              "limit": 9400,
+              "unit": "시간"
+            },
+            {
+              "key": "heavyLoad",
+              "label": "중량물(≥20kg) 취급 시간",
+              "dailyHours": 0.005555555555555556,
+              "cumulativeHours": 6.6379800745303825,
+              "limit": 200,
+              "unit": "시간"
+            },
+            {
+              "key": "vibration",
+              "label": "손-팔 진동 (≥3 m/s²)",
+              "dailyHours": 0.1,
+              "cumulativeHours": 119.4836413415469,
+              "limit": 5300,
+              "unit": "시간"
+            }
+          ]
+        }
+      ],
+      "totals": [
+        {
+          "key": "overhead",
+          "label": "오버헤드/어깨높이 이상 작업",
+          "totalHours": 1287.4929500342232,
+          "limit": 3600,
+          "unit": "시간",
+          "ratio": 0.357636930565062,
+          "exceeded": false
+        },
+        {
+          "key": "repetitiveMedium",
+          "label": "반복동작 중간속도 (4~14회/분)",
+          "totalHours": 3301.63832991102,
+          "limit": 38000,
+          "unit": "시간",
+          "ratio": 0.08688521920818473,
+          "exceeded": false
+        },
+        {
+          "key": "repetitiveFast",
+          "label": "반복동작 고도 (≥15회/분)",
+          "totalHours": 643.7464750171116,
+          "limit": 9400,
+          "unit": "시간",
+          "ratio": 0.06848366755501187,
+          "exceeded": false
+        },
+        {
+          "key": "heavyLoad",
+          "label": "중량물(≥20kg) 취급 시간",
+          "totalHours": 15.07087991482242,
+          "limit": 200,
+          "unit": "시간",
+          "ratio": 0.07535439957411211,
+          "exceeded": false
+        },
+        {
+          "key": "vibration",
+          "label": "손-팔 진동 (≥3 m/s²)",
+          "totalHours": 119.4836413415469,
+          "limit": 5300,
+          "unit": "시간",
+          "ratio": 0.022544083271989982,
+          "exceeded": false
+        }
+      ],
+      "anyExceeded": false,
+      "anyRepetitiveExceeded": false,
+      "noEvaluableJobs": false
+    }
+  },
+  "00000000-0000-4000-8000-000000000191": {
+    "name": "테스트환자27",
+    "activeModules": [
+      "shoulder",
+      "cervical"
+    ],
+    "isComplete": false,
+    "calc": {
+      "age": 40,
+      "bmi": "24.4",
+      "jobBurdens": [
+        {
+          "id": "00000000-0000-4000-8000-000000000198",
+          "jobName": "의류 봉제 작업자",
+          "presetId": null,
+          "startDate": "2001-03-11",
+          "endDate": "2018-04-11",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 246,
+          "overheadHours": "1.2",
+          "repetitiveMediumHours": "2.2",
+          "repetitiveFastHours": "0.9",
+          "heavyLoadCount": "16",
+          "heavyLoadSeconds": "12",
+          "vibrationHours": "0.8",
+          "evidenceSources": [],
+          "periodYears": 17.084188911704313,
+          "exposures": [
+            {
+              "key": "overhead",
+              "label": "오버헤드/어깨높이 이상 작업",
+              "dailyHours": 1.2,
+              "cumulativeHours": 5043.252566735113,
+              "limit": 3600,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveMedium",
+              "label": "반복동작 중간속도 (4~14회/분)",
+              "dailyHours": 2.2,
+              "cumulativeHours": 9245.963039014376,
+              "limit": 38000,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveFast",
+              "label": "반복동작 고도 (≥15회/분)",
+              "dailyHours": 0.9,
+              "cumulativeHours": 3782.439425051335,
+              "limit": 9400,
+              "unit": "시간"
+            },
+            {
+              "key": "heavyLoad",
+              "label": "중량물(≥20kg) 취급 시간",
+              "dailyHours": 0.05333333333333334,
+              "cumulativeHours": 224.1445585215606,
+              "limit": 200,
+              "unit": "시간"
+            },
+            {
+              "key": "vibration",
+              "label": "손-팔 진동 (≥3 m/s²)",
+              "dailyHours": 0.8,
+              "cumulativeHours": 3362.168377823409,
+              "limit": 5300,
+              "unit": "시간"
+            }
+          ]
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000197",
+          "jobName": "검품 포장 작업자",
+          "presetId": null,
+          "startDate": "2018-04-12",
+          "endDate": "2026-04-12",
+          "workPeriodOverride": "",
+          "workDaysPerYear": 247,
+          "overheadHours": "1.0",
+          "repetitiveMediumHours": "1.8",
+          "repetitiveFastHours": "0.7",
+          "heavyLoadCount": "12",
+          "heavyLoadSeconds": "11",
+          "vibrationHours": "0.6",
+          "evidenceSources": [],
+          "periodYears": 8,
+          "exposures": [
+            {
+              "key": "overhead",
+              "label": "오버헤드/어깨높이 이상 작업",
+              "dailyHours": 1,
+              "cumulativeHours": 1976,
+              "limit": 3600,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveMedium",
+              "label": "반복동작 중간속도 (4~14회/분)",
+              "dailyHours": 1.8,
+              "cumulativeHours": 3556.8,
+              "limit": 38000,
+              "unit": "시간"
+            },
+            {
+              "key": "repetitiveFast",
+              "label": "반복동작 고도 (≥15회/분)",
+              "dailyHours": 0.7,
+              "cumulativeHours": 1383.1999999999998,
+              "limit": 9400,
+              "unit": "시간"
+            },
+            {
+              "key": "heavyLoad",
+              "label": "중량물(≥20kg) 취급 시간",
+              "dailyHours": 0.03666666666666667,
+              "cumulativeHours": 72.45333333333333,
+              "limit": 200,
+              "unit": "시간"
+            },
+            {
+              "key": "vibration",
+              "label": "손-팔 진동 (≥3 m/s²)",
+              "dailyHours": 0.6,
+              "cumulativeHours": 1185.6,
+              "limit": 5300,
+              "unit": "시간"
+            }
+          ]
+        }
+      ],
+      "totals": [
+        {
+          "key": "overhead",
+          "label": "오버헤드/어깨높이 이상 작업",
+          "totalHours": 7019.252566735113,
+          "limit": 3600,
+          "unit": "시간",
+          "ratio": 1.9497923796486425,
+          "exceeded": true
+        },
+        {
+          "key": "repetitiveMedium",
+          "label": "반복동작 중간속도 (4~14회/분)",
+          "totalHours": 12802.763039014375,
+          "limit": 38000,
+          "unit": "시간",
+          "ratio": 0.33691481681616775,
+          "exceeded": false
+        },
+        {
+          "key": "repetitiveFast",
+          "label": "반복동작 고도 (≥15회/분)",
+          "totalHours": 5165.639425051335,
+          "limit": 9400,
+          "unit": "시간",
+          "ratio": 0.5495361090480143,
+          "exceeded": false
+        },
+        {
+          "key": "heavyLoad",
+          "label": "중량물(≥20kg) 취급 시간",
+          "totalHours": 296.59789185489393,
+          "limit": 200,
+          "unit": "시간",
+          "ratio": 1.4829894592744697,
+          "exceeded": true
+        },
+        {
+          "key": "vibration",
+          "label": "손-팔 진동 (≥3 m/s²)",
+          "totalHours": 4547.7683778234095,
+          "limit": 5300,
+          "unit": "시간",
+          "ratio": 0.8580695052496999,
+          "exceeded": false
+        }
+      ],
+      "anyExceeded": true,
+      "anyRepetitiveExceeded": false,
+      "noEvaluableJobs": false
+    }
+  }
+}

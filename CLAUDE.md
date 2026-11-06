@@ -139,6 +139,8 @@ SharedJob/SharedData), `workspace.ts`(WorkspaceScope/WorkspaceItem), `autosave.t
 
 ## 주의사항
 
+- **골든(특성화) 테스트** (`**/__goldens__/*.json`, `src/core/fixtures/goldenEnv.js`): 계산·출력 결과를 그대로 얼려 둔 것. 리팩터링 PR에서 실패하면 동작이 바뀐 것이니 코드를 고친다 — **골든을 갱신하지 않는다**. 의도한 출력 변경(기능 PR)만 `npx vitest run -u <테스트 파일>`로 갱신하고 PR에 diff와 이유를 적는다. 입력 `src/core/fixtures/goldenPatients.json`은 재생성하지 않는다(새 사례는 추가).
+
 - localStorage 키 접두사: `wrEvalUnified`
 - 자세 이미지: `public/images/` (G1-G11)
 - 직업 프리셋: `public/job-presets.json`

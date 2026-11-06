@@ -1,0 +1,418 @@
+{
+  "00000000-0000-4000-8000-000000000199": {
+    "name": "골든팔꿈치",
+    "activeModules": [
+      "elbow"
+    ],
+    "isComplete": true,
+    "calc": {
+      "age": 55,
+      "bmi": "25.0",
+      "temporalSequence": {
+        "recent_task_change": "increased_load",
+        "task_change_date": "2024-01-10",
+        "symptom_onset_interval": "3to12m",
+        "improves_with_rest": "yes"
+      },
+      "temporalFlags": {
+        "temporal_fit_high": true
+      },
+      "temporalFlagItems": [
+        {
+          "key": "temporal_fit_high",
+          "label": "시간적 선후관계 지지",
+          "description": "작업 변화와 증상 악화/호전의 시간 흐름이 비교적 잘 맞습니다.",
+          "tone": "info",
+          "icon": "🕰️"
+        }
+      ],
+      "missingCommonFields": [],
+      "jobSummaries": [
+        {
+          "sharedJobId": "golden-job-elbow-1",
+          "jobName": "용접공",
+          "diagnosisSummaries": [
+            {
+              "sharedJobId": "golden-job-elbow-1",
+              "jobName": "용접공",
+              "diagnosisId": "golden-dx-elbow-1",
+              "diagnosis": {
+                "id": "golden-dx-elbow-1",
+                "code": "M77.1",
+                "name": "외측상과염",
+                "side": "both",
+                "confirmedRight": "confirmed",
+                "assessmentRight": "high",
+                "reasonRight": [],
+                "reasonRightOther": "",
+                "confirmedLeft": "suspected",
+                "assessmentLeft": "low",
+                "reasonLeft": [
+                  "other"
+                ],
+                "reasonLeftOther": "노출 부족"
+              },
+              "entry": {
+                "diagnosisId": "golden-dx-elbow-1",
+                "selectedBkType": "BK2101",
+                "bkSelectionMode": "auto",
+                "main_task_name": "용접 작업",
+                "direct_anatomic_link": "yes",
+                "exposure_types": [
+                  "repetition",
+                  "force"
+                ],
+                "repetition_level": "frequent",
+                "daily_exposure_hours": "4",
+                "shift_share_percent": "60",
+                "days_per_week": "5",
+                "work_pattern": "continuous",
+                "rest_distribution": "insufficient",
+                "force_level": "moderate",
+                "awkward_posture_level": "frequent",
+                "static_holding_level": "frequent",
+                "direct_pressure_level": "",
+                "vibration_exposure": "",
+                "bk2101_cycle_seconds": "0.3",
+                "bk2101_repetition_per_hour": "9000",
+                "bk2101_monotony": "yes",
+                "bk2101_forced_dorsal_extension": "yes",
+                "bk2101_prosupination": "yes",
+                "bk2105_elbow_leaning": "",
+                "bk2105_repeated_friction_impact": "",
+                "bk2105_pressure_source": [],
+                "bk2106_repeated_mechanical_exposure": "",
+                "bk2106_noncorrectable_posture": "",
+                "bk2106_prolonged_joint_position": "",
+                "bk2106_pressure_source": [],
+                "bk2103_vibration_tool_type": [],
+                "bk2103_daily_vibration_hours": "",
+                "bk2103_handheld_or_guided": "",
+                "bk2103_tool_pressing": "",
+                "bk2103_frequent_high_force_grip": ""
+              },
+              "branchLabel": "BK2101 상과병변/부착부 건병증",
+              "flags": {
+                "temporal_fit_high": true,
+                "core_exposure_present": true,
+                "daily_share_high": true,
+                "rest_unfavorable": true,
+                "mechanical_load_dominant": true,
+                "bk2101_high_freq_example": true,
+                "bk2101_pattern_supported": true
+              },
+              "positiveFlags": [
+                "core_exposure_present",
+                "daily_share_high",
+                "rest_unfavorable",
+                "mechanical_load_dominant",
+                "bk2101_high_freq_example",
+                "bk2101_pattern_supported",
+                "temporal_fit_high"
+              ],
+              "flagItems": [
+                {
+                  "key": "core_exposure_present",
+                  "label": "핵심 노출 확인",
+                  "description": "병변과 직접 연결되는 핵심 노출이 확인됩니다.",
+                  "tone": "positive",
+                  "icon": "🎯"
+                },
+                {
+                  "key": "daily_share_high",
+                  "label": "일일 노출량 높음",
+                  "description": "하루 노출 비중이 높은 편입니다.",
+                  "tone": "positive",
+                  "icon": "⏱️"
+                },
+                {
+                  "key": "rest_unfavorable",
+                  "label": "휴식 분포 불리",
+                  "description": "휴식이 충분하지 않아 회복 여건이 좋지 않습니다.",
+                  "tone": "warning",
+                  "icon": "🛌"
+                },
+                {
+                  "key": "mechanical_load_dominant",
+                  "label": "기계적 부담 우세",
+                  "description": "힘 사용 또는 비중립 자세 부담이 두드러집니다.",
+                  "tone": "positive",
+                  "icon": "💪"
+                },
+                {
+                  "key": "bk2101_high_freq_example",
+                  "label": "BK2101 고빈도 반복 예시",
+                  "description": "BK2101에서 고빈도 반복 작업 사례가 확인됩니다.",
+                  "tone": "info",
+                  "icon": "🔂"
+                },
+                {
+                  "key": "bk2101_pattern_supported",
+                  "label": "상과병변 패턴 지지",
+                  "description": "반복과 힘 사용 양상이 BK2101과 잘 맞습니다.",
+                  "tone": "positive",
+                  "icon": "🔁"
+                },
+                {
+                  "key": "temporal_fit_high",
+                  "label": "시간적 선후관계 지지",
+                  "description": "작업 변화와 증상 악화/호전의 시간 흐름이 비교적 잘 맞습니다.",
+                  "tone": "info",
+                  "icon": "🕰️"
+                }
+              ],
+              "riskFactorItems": [
+                {
+                  "key": "core_exposure_present",
+                  "label": "핵심 노출 확인",
+                  "description": "병변과 직접 연결되는 핵심 노출이 확인됩니다.",
+                  "tone": "positive",
+                  "icon": "🎯"
+                },
+                {
+                  "key": "daily_share_high",
+                  "label": "일일 노출량 높음",
+                  "description": "하루 노출 비중이 높은 편입니다.",
+                  "tone": "positive",
+                  "icon": "⏱️"
+                },
+                {
+                  "key": "rest_unfavorable",
+                  "label": "휴식 분포 불리",
+                  "description": "휴식이 충분하지 않아 회복 여건이 좋지 않습니다.",
+                  "tone": "warning",
+                  "icon": "🛌"
+                },
+                {
+                  "key": "mechanical_load_dominant",
+                  "label": "기계적 부담 우세",
+                  "description": "힘 사용 또는 비중립 자세 부담이 두드러집니다.",
+                  "tone": "positive",
+                  "icon": "💪"
+                },
+                {
+                  "key": "bk2101_high_freq_example",
+                  "label": "BK2101 고빈도 반복 예시",
+                  "description": "BK2101에서 고빈도 반복 작업 사례가 확인됩니다.",
+                  "tone": "info",
+                  "icon": "🔂"
+                },
+                {
+                  "key": "bk2101_pattern_supported",
+                  "label": "상과병변 패턴 지지",
+                  "description": "반복과 힘 사용 양상이 BK2101과 잘 맞습니다.",
+                  "tone": "positive",
+                  "icon": "🔁"
+                },
+                {
+                  "key": "temporal_fit_high",
+                  "label": "시간적 선후관계 지지",
+                  "description": "작업 변화와 증상 악화/호전의 시간 흐름이 비교적 잘 맞습니다.",
+                  "tone": "info",
+                  "icon": "🕰️"
+                }
+              ],
+              "riskFactorCount": 7,
+              "burdenGrade": "고도",
+              "riskFactorSentence": "핵심 노출 확인, 일일 노출량 높음, 질환별 패턴 지지 조건을 모두 만족하여 팔꿈치 부위 부담이 고도인 작업입니다.",
+              "missingFields": [],
+              "narrative": "문제 작업: 용접 작업\n작업량: 1일 4시간, 하루 작업 비중 60%, 주당 5일\n핵심 노출: 반복 동작(빈번), 힘 사용(중등도)\n질환별 세부 사항: 주기 0.3초, 시간당 12000회, 단조 반복 있음, 강제 배측굴곡 있음, 회내·회외 있음"
+            }
+          ],
+          "completedCount": 1,
+          "flagCount": 7
+        }
+      ],
+      "diagnosisSummaries": [
+        {
+          "sharedJobId": "golden-job-elbow-1",
+          "jobName": "용접공",
+          "diagnosisId": "golden-dx-elbow-1",
+          "diagnosis": {
+            "id": "golden-dx-elbow-1",
+            "code": "M77.1",
+            "name": "외측상과염",
+            "side": "both",
+            "confirmedRight": "confirmed",
+            "assessmentRight": "high",
+            "reasonRight": [],
+            "reasonRightOther": "",
+            "confirmedLeft": "suspected",
+            "assessmentLeft": "low",
+            "reasonLeft": [
+              "other"
+            ],
+            "reasonLeftOther": "노출 부족"
+          },
+          "entry": {
+            "diagnosisId": "golden-dx-elbow-1",
+            "selectedBkType": "BK2101",
+            "bkSelectionMode": "auto",
+            "main_task_name": "용접 작업",
+            "direct_anatomic_link": "yes",
+            "exposure_types": [
+              "repetition",
+              "force"
+            ],
+            "repetition_level": "frequent",
+            "daily_exposure_hours": "4",
+            "shift_share_percent": "60",
+            "days_per_week": "5",
+            "work_pattern": "continuous",
+            "rest_distribution": "insufficient",
+            "force_level": "moderate",
+            "awkward_posture_level": "frequent",
+            "static_holding_level": "frequent",
+            "direct_pressure_level": "",
+            "vibration_exposure": "",
+            "bk2101_cycle_seconds": "0.3",
+            "bk2101_repetition_per_hour": "9000",
+            "bk2101_monotony": "yes",
+            "bk2101_forced_dorsal_extension": "yes",
+            "bk2101_prosupination": "yes",
+            "bk2105_elbow_leaning": "",
+            "bk2105_repeated_friction_impact": "",
+            "bk2105_pressure_source": [],
+            "bk2106_repeated_mechanical_exposure": "",
+            "bk2106_noncorrectable_posture": "",
+            "bk2106_prolonged_joint_position": "",
+            "bk2106_pressure_source": [],
+            "bk2103_vibration_tool_type": [],
+            "bk2103_daily_vibration_hours": "",
+            "bk2103_handheld_or_guided": "",
+            "bk2103_tool_pressing": "",
+            "bk2103_frequent_high_force_grip": ""
+          },
+          "branchLabel": "BK2101 상과병변/부착부 건병증",
+          "flags": {
+            "temporal_fit_high": true,
+            "core_exposure_present": true,
+            "daily_share_high": true,
+            "rest_unfavorable": true,
+            "mechanical_load_dominant": true,
+            "bk2101_high_freq_example": true,
+            "bk2101_pattern_supported": true
+          },
+          "positiveFlags": [
+            "core_exposure_present",
+            "daily_share_high",
+            "rest_unfavorable",
+            "mechanical_load_dominant",
+            "bk2101_high_freq_example",
+            "bk2101_pattern_supported",
+            "temporal_fit_high"
+          ],
+          "flagItems": [
+            {
+              "key": "core_exposure_present",
+              "label": "핵심 노출 확인",
+              "description": "병변과 직접 연결되는 핵심 노출이 확인됩니다.",
+              "tone": "positive",
+              "icon": "🎯"
+            },
+            {
+              "key": "daily_share_high",
+              "label": "일일 노출량 높음",
+              "description": "하루 노출 비중이 높은 편입니다.",
+              "tone": "positive",
+              "icon": "⏱️"
+            },
+            {
+              "key": "rest_unfavorable",
+              "label": "휴식 분포 불리",
+              "description": "휴식이 충분하지 않아 회복 여건이 좋지 않습니다.",
+              "tone": "warning",
+              "icon": "🛌"
+            },
+            {
+              "key": "mechanical_load_dominant",
+              "label": "기계적 부담 우세",
+              "description": "힘 사용 또는 비중립 자세 부담이 두드러집니다.",
+              "tone": "positive",
+              "icon": "💪"
+            },
+            {
+              "key": "bk2101_high_freq_example",
+              "label": "BK2101 고빈도 반복 예시",
+              "description": "BK2101에서 고빈도 반복 작업 사례가 확인됩니다.",
+              "tone": "info",
+              "icon": "🔂"
+            },
+            {
+              "key": "bk2101_pattern_supported",
+              "label": "상과병변 패턴 지지",
+              "description": "반복과 힘 사용 양상이 BK2101과 잘 맞습니다.",
+              "tone": "positive",
+              "icon": "🔁"
+            },
+            {
+              "key": "temporal_fit_high",
+              "label": "시간적 선후관계 지지",
+              "description": "작업 변화와 증상 악화/호전의 시간 흐름이 비교적 잘 맞습니다.",
+              "tone": "info",
+              "icon": "🕰️"
+            }
+          ],
+          "riskFactorItems": [
+            {
+              "key": "core_exposure_present",
+              "label": "핵심 노출 확인",
+              "description": "병변과 직접 연결되는 핵심 노출이 확인됩니다.",
+              "tone": "positive",
+              "icon": "🎯"
+            },
+            {
+              "key": "daily_share_high",
+              "label": "일일 노출량 높음",
+              "description": "하루 노출 비중이 높은 편입니다.",
+              "tone": "positive",
+              "icon": "⏱️"
+            },
+            {
+              "key": "rest_unfavorable",
+              "label": "휴식 분포 불리",
+              "description": "휴식이 충분하지 않아 회복 여건이 좋지 않습니다.",
+              "tone": "warning",
+              "icon": "🛌"
+            },
+            {
+              "key": "mechanical_load_dominant",
+              "label": "기계적 부담 우세",
+              "description": "힘 사용 또는 비중립 자세 부담이 두드러집니다.",
+              "tone": "positive",
+              "icon": "💪"
+            },
+            {
+              "key": "bk2101_high_freq_example",
+              "label": "BK2101 고빈도 반복 예시",
+              "description": "BK2101에서 고빈도 반복 작업 사례가 확인됩니다.",
+              "tone": "info",
+              "icon": "🔂"
+            },
+            {
+              "key": "bk2101_pattern_supported",
+              "label": "상과병변 패턴 지지",
+              "description": "반복과 힘 사용 양상이 BK2101과 잘 맞습니다.",
+              "tone": "positive",
+              "icon": "🔁"
+            },
+            {
+              "key": "temporal_fit_high",
+              "label": "시간적 선후관계 지지",
+              "description": "작업 변화와 증상 악화/호전의 시간 흐름이 비교적 잘 맞습니다.",
+              "tone": "info",
+              "icon": "🕰️"
+            }
+          ],
+          "riskFactorCount": 7,
+          "burdenGrade": "고도",
+          "riskFactorSentence": "핵심 노출 확인, 일일 노출량 높음, 질환별 패턴 지지 조건을 모두 만족하여 팔꿈치 부위 부담이 고도인 작업입니다.",
+          "missingFields": [],
+          "narrative": "문제 작업: 용접 작업\n작업량: 1일 4시간, 하루 작업 비중 60%, 주당 5일\n핵심 노출: 반복 동작(빈번), 힘 사용(중등도)\n질환별 세부 사항: 주기 0.3초, 시간당 12000회, 단조 반복 있음, 강제 배측굴곡 있음, 회내·회외 있음"
+        }
+      ],
+      "anyFlagged": true,
+      "noEvaluableJobs": false
+    }
+  }
+}
