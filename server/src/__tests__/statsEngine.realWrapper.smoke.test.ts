@@ -62,7 +62,7 @@ vi.mock('../config', () => ({
 
 describe.skipIf(!AVAILABLE)('runStatsEngine — 실제 Python + 실제 운영 wrapper(mock 없음)', () => {
   it('세마포어·close 기반 생명주기·zod 재검증·§2.2 의미검증을 전부 거쳐 실제 프로세스로부터 정상 결과를 받는다', async () => {
-    const { runStatsEngine, __resetStatsEngineForTests } = await import('../statsEngine');
+    const { runStatsEngine, __resetStatsEngineForTests } = await import('../statsEngine.js');
     __resetStatsEngineForTests();
 
     const result = await runStatsEngine({
@@ -82,7 +82,7 @@ describe.skipIf(!AVAILABLE)('runStatsEngine — 실제 Python + 실제 운영 wr
   }, 30000);
 
   it('연속으로 두 번 호출해도(세마포어 순차 반환) 둘 다 정상 완료된다', async () => {
-    const { runStatsEngine, __resetStatsEngineForTests } = await import('../statsEngine');
+    const { runStatsEngine, __resetStatsEngineForTests } = await import('../statsEngine.js');
     __resetStatsEngineForTests();
 
     const r1 = await runStatsEngine({ variables: [{ key: 'a', kind: 'continuous', values: [1, 2, 3] }] });

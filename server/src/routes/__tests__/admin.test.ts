@@ -438,7 +438,7 @@ describe('GET /api/admin/audit', () => {
   });
 
   it('records admin_audit_view in audit log after successful query', async () => {
-    const { writeAuditLog } = await import('../../middleware/audit');
+    const { writeAuditLog } = await import('../../middleware/audit.js');
     const pool      = makePool();
     const auditPool = makePool();
 
@@ -583,7 +583,7 @@ describe('POST /api/admin/users', () => {
   });
 
   it('records admin_user_create audit log on success', async () => {
-    const { writeAuditLog } = await import('../../middleware/audit');
+    const { writeAuditLog } = await import('../../middleware/audit.js');
     const pool = makePool();
     wireQueries(pool, [USER_ROW]);
     await request(makeApp(pool))
@@ -655,7 +655,7 @@ describe('POST /api/admin/users/:id/reset-password', () => {
   });
 
   it('records admin_user_reset_password audit log', async () => {
-    const { writeAuditLog } = await import('../../middleware/audit');
+    const { writeAuditLog } = await import('../../middleware/audit.js');
     const pool = makePool();
     wireTxClient(pool, { rows: [USER_HASH_ROW] }, { rows: [] }, { rows: [] });
     await request(makeApp(pool))
@@ -713,7 +713,7 @@ describe('POST /api/admin/users/:id/disable', () => {
   });
 
   it('disables user and writes audit log', async () => {
-    const { writeAuditLog } = await import('../../middleware/audit');
+    const { writeAuditLog } = await import('../../middleware/audit.js');
     const pool = makePool();
     wireQueries(pool, [{ id: 'user-2' }]); // UPDATE RETURNING
     const res = await request(makeApp(pool))
@@ -745,7 +745,7 @@ describe('POST /api/admin/users/:id/enable', () => {
   });
 
   it('enables user and writes audit log', async () => {
-    const { writeAuditLog } = await import('../../middleware/audit');
+    const { writeAuditLog } = await import('../../middleware/audit.js');
     const pool = makePool();
     wireQueries(pool, [{ id: 'user-2' }]);
     const res = await request(makeApp(pool))
@@ -901,7 +901,7 @@ describe('POST /api/admin/signup-requests/:id/approve', () => {
   });
 
   it('writes admin_signup_approve audit log on success', async () => {
-    const { writeAuditLog } = await import('../../middleware/audit');
+    const { writeAuditLog } = await import('../../middleware/audit.js');
     const pool = makePool();
     wireTxClient(
       pool,
@@ -964,7 +964,7 @@ describe('POST /api/admin/signup-requests/:id/reject', () => {
   });
 
   it('returns 200 and writes admin_signup_reject audit log', async () => {
-    const { writeAuditLog } = await import('../../middleware/audit');
+    const { writeAuditLog } = await import('../../middleware/audit.js');
     const pool = makePool();
     wireQueries(pool, [{ id: 'req-1' }]); // UPDATE WHERE status='pending' RETURNING
     const res = await request(makeApp(pool))
@@ -1014,7 +1014,7 @@ describe('DELETE /api/admin/workspaces/:id/purge', () => {
   });
 
   it('returns 204 and writes audit log on successful purge', async () => {
-    const { writeAuditLog } = await import('../../middleware/audit');
+    const { writeAuditLog } = await import('../../middleware/audit.js');
     const pool = makePool();
     const mock = pool.query as ReturnType<typeof vi.fn>;
     mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
@@ -1115,7 +1115,7 @@ describe('POST /api/admin/presets/visibility', () => {
   });
 
   it('dedupes ids and returns requested/updated counts', async () => {
-    const { writeAuditLog } = await import('../../middleware/audit');
+    const { writeAuditLog } = await import('../../middleware/audit.js');
     const pool = makePool();
     // UPDATE … RETURNING id → 2 rows updated.
     wireQueries(pool, [{ id: PRESET_ID_1 }, { id: PRESET_ID_2 }]);

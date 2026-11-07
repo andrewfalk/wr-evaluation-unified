@@ -3,11 +3,11 @@
 // 블록을 복사해 두고 있다 — 새 테스트는 공통 모양 + 필요한 키만 덮어쓴다:
 //
 //   vi.mock('../../config', async () => ({
-//     default: (await import('../../testing/configMock')).testConfig({ lockEnforcementMode: 'enforce' }),
+//     default: (await import('../../testing/configMock.js')).testConfig({ lockEnforcementMode: 'enforce' }),
 //   }));
 //
 // vi.mock 팩토리는 파일 맨 위로 끌어올려지므로 바깥 import를 쓸 수 없다 — 위처럼 팩토리 안에서
-// 동적 import 한다. 이 파일은 `../config`를 **타입으로만** import하므로(런타임 import 없음) mock 대상
+// 동적 import 한다(서버 tsconfig가 Node16이라 상대 경로에 .js 확장자 필요). 이 파일은 `../config`를 **타입으로만** import하므로(런타임 import 없음) mock 대상
 // 모듈을 먼저 불러오는 순환이 생기지 않는다.
 //
 // 결과는 실제 config의 일부만 채운 객체다. 테스트 대상 코드가 여기 없는 키를 읽으면 undefined —

@@ -647,7 +647,7 @@ describe('POST /preview — 소수 셀 억제', () => {
   it('personCount≥10인데 differencing 예산만 초과하면 reasonCode=DIFFERENCING_RATE_LIMIT(전체 게이트와 별개)', async () => {
     const recipe = StatsAnalysisRecipeSchema.parse(BASE_BODY);
     const family = computeQueryFamilyDigest(recipe);
-    const { checkAndRecordDifferencing } = await import('../../statsDifferencingGuard');
+    const { checkAndRecordDifferencing } = await import('../../statsDifferencingGuard.js');
     for (let i = 0; i < 35; i++) checkAndRecordDifferencing(ORG_ID, USER_ID, recipe, family);
 
     const pool = makePool();
@@ -797,7 +797,7 @@ describe('POST /analyze — 정상 경로(4차 검토 §1 회귀 방지: 응답�
   // UPDATE도 롤백된다" 테스트가 실제 Postgres로 이를 증명한다.
 
   it('9차 검토 §1 핵심 — 가드A(REQUEST_CAPACITY_EXCEEDED) 감사 실패는 429가 아니라 500으로 승격된다', async () => {
-    const { __setActiveAnalyzeRequestsForTests } = await import('../../statsAnalyzeHandler');
+    const { __setActiveAnalyzeRequestsForTests } = await import('../../statsAnalyzeHandler.js');
     __setActiveAnalyzeRequestsForTests(4); // config.stats.maxConcurrentAnalyzeRequests(4)에 도달
     try {
       const pool = makePool();

@@ -365,7 +365,7 @@ describe('POST /api/audit/emr', () => {
   });
 
   it('writes audit log on successful request', async () => {
-    const { writeAuditLogStrict } = await import('../../middleware/audit');
+    const { writeAuditLogStrict } = await import('../../middleware/audit.js');
     const { privateKey, publicKey } = makeKeyPair();
     const pool     = makePool();
     const ts       = new Date().toISOString();
@@ -504,7 +504,7 @@ describe('POST /api/audit/emr', () => {
   // ── Queue-replay paths (no Authorization header) ─────────────────────────
 
   it('accepts queue replay without Authorization and records session_missing flag', async () => {
-    const { writeAuditLogStrict } = await import('../../middleware/audit');
+    const { writeAuditLogStrict } = await import('../../middleware/audit.js');
     const { privateKey, publicKey } = makeKeyPair();
     const pool     = makePool();
     const ts       = new Date().toISOString();
@@ -644,7 +644,7 @@ describe('POST /api/audit/emr', () => {
     // If the DB INSERT throws after signature verification, the nonce must NOT be
     // committed to seenNonces. The device must be able to retry with the same
     // nonce+signature and succeed on the next attempt.
-    const { writeAuditLogStrict } = await import('../../middleware/audit');
+    const { writeAuditLogStrict } = await import('../../middleware/audit.js');
     const { privateKey, publicKey } = makeKeyPair();
     const pool     = makePool();
     const app      = makeApp(pool);
