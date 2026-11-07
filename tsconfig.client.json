@@ -1,0 +1,10 @@
+{
+  "//": "새 클라이언트 TS 코드(src/**/*.ts·tsx)용 strict 검사. JS는 import만 하고 검사하지 않는다(checkJs:false) — JS 검사는 tsconfig.client.js.json.",
+  "extends": "./tsconfig.client.base.json",
+  "compilerOptions": {
+    "strict": true,
+    "checkJs": false
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/types/**/*.d.ts"],
+  "exclude": ["node_modules", "dist"]
+}

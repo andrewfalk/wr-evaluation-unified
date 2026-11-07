@@ -22,6 +22,6 @@
       "@analytics-core/*": ["./packages/analytics-core/dist/*.d.ts"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "shared/**/*.ts", "packages/**/*.ts", "scripts/**/*.mjs", "types/**/*.d.ts"],
+  "include": ["shared/**/*.ts", "packages/**/*.ts", "scripts/**/*.mjs", "types/**/*.d.ts"],
   "exclude": ["node_modules", "dist", "release", "shared/dist", "server/dist", "packages/analytics-core/dist"]
 }

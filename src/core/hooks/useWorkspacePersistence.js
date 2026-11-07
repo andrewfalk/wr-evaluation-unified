@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect, useRef } from 'react';
 import { showAlert, showConfirm } from '../utils/platform';
 import {

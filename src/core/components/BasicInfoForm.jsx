@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useRef, useCallback } from 'react';
 import { calculateBMI, calculateAge } from '../utils/common';
 import { formatWorkPeriod } from '../utils/workPeriod';

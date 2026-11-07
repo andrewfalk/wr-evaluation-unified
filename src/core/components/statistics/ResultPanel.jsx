@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState } from 'react';
 import { describeStatsApiError } from './describeStatsError';
 import { describeMethodReasonCode } from './describeMethodReasonCode';

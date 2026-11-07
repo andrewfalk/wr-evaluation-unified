@@ -1,3 +1,4 @@
+// @ts-nocheck
 import {
   BK_TYPE_LABELS,
   BK_TYPE_OPTIONS,

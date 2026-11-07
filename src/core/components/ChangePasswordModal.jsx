@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { requestJson } from '../services/httpClient';

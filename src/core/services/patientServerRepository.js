@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { requestJson } from './httpClient';
 import { isRedactedPatientRecord } from './patientRecords';
 import { requireSyncedServerId } from './videoAnalysisClient';

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // 직업력([직업력]) 출력 공통 함수. 종합소견 미리보기·EMR(txtJobCusCont/txtSyth1Cont)·엑셀·통합 텍스트
 // 리포트가 같은 포맷을 쓰도록 한 곳에서 만든다.
 //

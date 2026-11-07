@@ -1,0 +1,11 @@
+{
+  "//": "기존 클라이언트 JS(src/**/*.js·jsx) 완화 검사(strict·noImplicitAny 끔) — 없는 속성·잘못된 인자 같은 실제 오류만 잡는다. 아직 통과 못 하는 파일은 맨 위 // @ts-nocheck(scripts/ts-nocheck-baseline.json, 늘리면 scripts/ts-ratchet.mjs가 실패).",
+  "extends": "./tsconfig.client.base.json",
+  "compilerOptions": {
+    "strict": false,
+    "noImplicitAny": false,
+    "checkJs": true
+  },
+  "include": ["src/**/*.js", "src/**/*.jsx", "src/types/**/*.d.ts"],
+  "exclude": ["node_modules", "dist", "src/**/__tests__/**", "src/**/*.test.js", "src/**/*.test.jsx", "src/core/fixtures/**"]
+}

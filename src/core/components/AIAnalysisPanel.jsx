@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState } from 'react';
 import { MODEL_OPTIONS, DEFAULT_GEMINI_MODEL } from '@contracts/aiModels';
 import { useAuth } from '../auth/AuthContext';

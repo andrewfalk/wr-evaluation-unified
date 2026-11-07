@@ -1,3 +1,4 @@
+// @ts-nocheck
 // 영상 분석 서버 적용 오케스트레이터 (6.0-4 UI). 인트라넷+synced 환자에서 제안 1건을
 // 서버 경로로 적용한다: clip 생성 → job 생성(review_pending) → 환자 data 계산 → apply(영속화).
 // 별도 모듈인 이유: videoAnalysisClient ↔ patientServerRepository 순환 import 회피.

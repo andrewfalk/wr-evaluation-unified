@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useEffect, useRef } from 'react';
 import { configureHttpClient } from '../services/httpClient';
 import { getCsrfToken } from '../utils/csrfCookie';
