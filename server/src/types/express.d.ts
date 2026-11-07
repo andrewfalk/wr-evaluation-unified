@@ -6,6 +6,8 @@ declare global {
     interface Request {
       /** Set by requestIdMiddleware (http/requestId.ts) for every request. */
       requestId?: string;
+      /** Set by requireOrg() (http/authz.ts): the session's organization, never null after it. */
+      orgId?: string;
       sessionInfo?: {
         sessionId:          string;
         userId:             string;

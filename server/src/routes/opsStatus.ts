@@ -2,8 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Pool } from 'pg';
-import { createAuthMiddleware } from '../middleware/auth';
-import { adminOnly } from '../middleware/adminOnly';
+import { requireAdmin, requireAuth } from '../http/authz';
 import { csrfMiddleware } from '../middleware/csrf';
 import { asyncHandler } from '../http/asyncHandler';
 import config from '../config';
@@ -166,24 +165,23 @@ async function resolveAlert(req: Request, res: Response): Promise<void> {
 // ---------------------------------------------------------------------------
 export function createOpsStatusRouter(pool: Pool) {
   const router = Router();
-  const auth  = createAuthMiddleware(pool);
-  const admin = adminOnly();
+  // Admin only, for the whole router (fail-closed, S4 / P1-15).
+  router.use(requireAuth(pool), requireAdmin());
 
   router.get(
     '/backup-status',
-    auth, admin,
     asyncHandler((req, res) => getBackupStatus(req, res)),
   );
 
   router.post(
     '/backup-alerts/:runId/ack',
-    auth, admin, csrfMiddleware,
+    csrfMiddleware,
     asyncHandler((req, res) => ackAlert(req, res)),
   );
 
   router.post(
     '/backup-alerts/:runId/resolve',
-    auth, admin, csrfMiddleware,
+    csrfMiddleware,
     asyncHandler((req, res) => resolveAlert(req, res)),
   );
 

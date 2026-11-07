@@ -1,4 +1,4 @@
-import { Router, type Request, type Response, type RequestHandler } from 'express';
+import { Router, type Request, type Response } from 'express';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import config from '../config';
@@ -18,6 +18,7 @@ import crypto from 'crypto';
 import { checkLockForWrite } from '../db/patientLocks';
 import type { QueryRunner } from '../db/patientPersons';
 import { asyncHandler } from '../http/asyncHandler';
+import { requireFeature } from '../http/authz';
 import {
   CompletionReportFields,
   requireCompletionVersions,
@@ -1051,20 +1052,13 @@ export function createVideoAnalysisRouter(pool: Pool): Router {
   const router = Router();
   const auth = createAuthMiddleware(pool);
 
-  // 피처플래그 fail-closed: 비활성 시 전 라우트 404(존재 누설 방지, PATIENT_NOT_FOUND 관례 일치).
-  const flagGuard: RequestHandler = (_req, res, next) => {
-    if (!config.videoAnalysisEnabled) {
-      res.status(404).json({ code: 'NOT_FOUND', error: 'Not found' });
-      return;
-    }
-    next();
-  };
 
   // Rejections go to the central error handler (http/errorHandler.ts, S1) — answered and logged there.
   const wrap = (fn: (p: Pool, req: Request, res: Response) => Promise<void>) =>
     asyncHandler((req: Request, res: Response) => fn(pool, req, res));
 
-  router.use(flagGuard);
+  // 피처플래그 fail-closed: 비활성 시 전 라우트 404(존재 누설 방지, PATIENT_NOT_FOUND 관례 일치).
+  router.use(requireFeature(() => config.videoAnalysisEnabled));
 
   router.post('/clips', auth, csrfMiddleware, wrap(createClip));
   // 실 영상 업로드(M3-7a). uploadDir 미설정 시 라우트 비활성(UPLOAD_DISABLED).

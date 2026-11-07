@@ -7,9 +7,8 @@ import { promisify } from 'util';
 import path from 'path';
 import type { Pool, PoolClient } from 'pg';
 import { OrgInferenceSettingsSchema } from '@wr/contracts';
-import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
-import { adminOnly } from '../middleware/adminOnly';
+import { requireAdmin, requireAuth } from '../http/authz';
 import { writeAuditLog } from '../middleware/audit';
 import { checkPasswordPolicy, appendPasswordHistory } from '../auth/passwordPolicy';
 import config from '../config';
@@ -988,110 +987,102 @@ async function setPresetsVisibility(pool: Pool, req: Request, res: Response): Pr
 
 export function createAdminRouter(pool: Pool, auditPool: Pool): Router {
   const router = Router();
-  const auth   = createAuthMiddleware(pool);
-  const admin  = adminOnly();
-
-  // All admin routes require auth + admin role.
-  // Mutating routes also require CSRF.
+  // Every admin route requires auth + admin role — once, for the whole router (fail-closed: a route
+  // added later cannot forget it, S4 / P1-15). Mutating routes also require CSRF.
+  router.use(requireAuth(pool), requireAdmin());
   router.get(
     '/devices',
-    auth, admin,
     asyncHandler((req, res) => listDevices(pool, req, res))
   );
 
   router.post(
     '/devices/:id/approve',
-    auth, admin, csrfMiddleware,
+    csrfMiddleware,
     asyncHandler((req, res) => approveDevice(pool, req, res))
   );
 
   router.post(
     '/devices/:id/revoke',
-    auth, admin, csrfMiddleware,
+    csrfMiddleware,
     asyncHandler((req, res) => revokeDevice(pool, req, res))
   );
 
   router.get(
     '/audit',
-    auth, admin,
     asyncHandler((req, res) => listAuditLogs(pool, auditPool, req, res))
   );
 
   router.delete(
     '/workspaces/:id/purge',
-    auth, admin, csrfMiddleware,
+    csrfMiddleware,
     asyncHandler((req, res) => purgeWorkspace(pool, req, res))
   );
 
   router.get(
     '/users',
-    auth, admin,
     asyncHandler((req, res) => listUsers(pool, req, res))
   );
 
   router.post(
     '/users',
-    auth, admin, csrfMiddleware,
+    csrfMiddleware,
     asyncHandler((req, res) => createUser(pool, req, res))
   );
 
   router.post(
     '/users/:id/reset-password',
-    auth, admin, csrfMiddleware,
+    csrfMiddleware,
     asyncHandler((req, res) => resetUserPassword(pool, req, res))
   );
 
   router.post(
     '/users/:id/disable',
-    auth, admin, csrfMiddleware,
+    csrfMiddleware,
     asyncHandler((req, res) => disableUser(pool, req, res))
   );
 
   router.post(
     '/users/:id/enable',
-    auth, admin, csrfMiddleware,
+    csrfMiddleware,
     asyncHandler((req, res) => enableUser(pool, req, res))
   );
 
   router.get(
     '/org-settings',
-    auth, admin,
     asyncHandler((req, res) => getOrgSettings(pool, req, res))
   );
 
   router.patch(
     '/org-settings',
-    auth, admin, csrfMiddleware,
+    csrfMiddleware,
     asyncHandler((req, res) => updateOrgSettings(pool, req, res))
   );
 
   router.get(
     '/presets',
-    auth, admin,
     asyncHandler((req, res) => listAllPresets(pool, req, res))
   );
 
   router.post(
     '/presets/visibility',
-    auth, admin, csrfMiddleware,
+    csrfMiddleware,
     asyncHandler((req, res) => setPresetsVisibility(pool, req, res))
   );
 
   router.get(
     '/signup-requests',
-    auth, admin,
     asyncHandler((req, res) => listSignupRequests(pool, req, res))
   );
 
   router.post(
     '/signup-requests/:id/approve',
-    auth, admin, csrfMiddleware,
+    csrfMiddleware,
     asyncHandler((req, res) => approveSignupRequest(pool, req, res))
   );
 
   router.post(
     '/signup-requests/:id/reject',
-    auth, admin, csrfMiddleware,
+    csrfMiddleware,
     asyncHandler((req, res) => rejectSignupRequest(pool, req, res))
   );
 
