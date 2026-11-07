@@ -29,6 +29,8 @@ import config from '../../config';
 import { writeAuditLog } from '../../middleware/audit';
 import { hashToken } from '../../auth/sessionStore';
 import { createWorkspacesRouter } from '../workspaces';
+import { createErrorHandler } from '../../http/errorHandler';
+import { createLogger } from '../../logger';
 import { generateAccessToken } from '../../auth/tokens';
 import type { Pool } from 'pg';
 import { COMPLETION_ENGINE_VERSION } from '../../completionTracking';
@@ -68,6 +70,7 @@ function makeApp(pool: Pool) {
   app.use(express.json());
   app.use(cookieParser());
   app.use('/api/workspaces', createWorkspacesRouter(pool));
+  app.use(createErrorHandler(createLogger({ level: 'silent' }))); // as in createApp (S1)
   return app;
 }
 
@@ -196,6 +199,18 @@ describe('GET /api/workspaces', () => {
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(1);
     expect(res.body.items[0]).toMatchObject({ id: WS_ID, name: 'Visit 2024', count: 1 });
+  });
+
+  it('answers a DB failure with the 500 envelope (central error handler, S1)', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ rows: [{ exists: 1 }] }) // auth middleware
+      .mockRejectedValueOnce(new Error('connection terminated'));
+    const res = await request(makeApp(pool))
+      .get('/api/workspaces')
+      .set('Authorization', `Bearer ${orgToken()}`);
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
   });
 
   it('returns 200 with empty list when user has no workspaces', async () => {
