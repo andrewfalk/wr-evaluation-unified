@@ -48,6 +48,11 @@
 .PARAMETER Force
     purge 의 확인 질문을 건너뛴다.
 
+.PARAMETER StatsEngineTiming
+    (성능 측정 전용, up 에서만) 시험 override 의 app 환경에 STATS_ENGINE_TIMING=1 을 넣어 통계 엔진 구간 시간
+    로그(docs/PERF_BASELINE.md)를 켠다. 운영 compose 는 이 변수를 넘기지 않는다. 기동 뒤 컨테이너 안 값이 1 인지 확인한다.
+    스위치 없이 up 을 다시 하면 꺼진다.
+
 .EXAMPLE
     pwsh -File scripts/verify-stack.ps1 up -LaunchShell
     pwsh -File scripts/verify-stack.ps1 seed-admin
@@ -55,6 +60,7 @@
     pwsh -File scripts/verify-stack.ps1 down
     pwsh -File scripts/verify-stack.ps1 purge -Force
     pwsh -File scripts/verify-stack.ps1 accept
+    pwsh -File scripts/verify-stack.ps1 up -PackageDir release\wr-evaluation-unified-7.1.6-perf-intranet -StatsEngineTiming
 #>
 [CmdletBinding()]
 param(
@@ -65,7 +71,8 @@ param(
     [switch]$LoadImages,
     [switch]$FreshCa,
     [switch]$LaunchShell,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$StatsEngineTiming
 )
 
 $ErrorActionPreference = 'Stop'
@@ -184,15 +191,19 @@ function Get-EnvValue([string]$Key) {
     return ($line -split '=', 2)[1].Trim()
 }
 
-# 시험용 override: 재시작 정책 off + (기본) 기존 Caddy CA 볼륨 재사용.
+# 시험용 override: 재시작 정책 off + (기본) 기존 Caddy CA 볼륨 재사용 + (-StatsEngineTiming, up 만) 통계 엔진 계측.
 function Write-OverrideFile {
+    $appLine = '  app:            { restart: "no" }'
+    if ($StatsEngineTiming -and $Action -eq 'up') {
+        $appLine = '  app:            { restart: "no", environment: { STATS_ENGINE_TIMING: "1" } }'
+    }
     $lines = @(
         '# verify-stack.ps1 이 만든 파일 — 직접 고치지 않는다(매 up 마다 다시 쓴다).',
         'services:',
         '  postgres:       { restart: "no" }',
         '  backup-monitor: { restart: "no" }',
         '  partition:      { restart: "no" }',
-        '  app:            { restart: "no" }',
+        $appLine,
         '  caddy:          { restart: "no" }'
     )
     if (-not $FreshCa) {
@@ -549,6 +560,12 @@ function Invoke-Up {
         Stop-WithError 'app 이 healthy 가 되지 않았습니다.'
     }
     Write-Ok 'app healthy'
+    if ($StatsEngineTiming) {
+        # override 가 실제로 컨테이너까지 전달됐는지 — compose 는 명시한 환경변수만 넘기므로 눈으로 확인한다.
+        $timing = (Invoke-Compose @('exec', '-T', 'app', 'printenv', 'STATS_ENGINE_TIMING') 2>$null | Out-String).Trim()
+        if ($timing -ne '1') { Stop-WithError "app 컨테이너의 STATS_ENGINE_TIMING 이 1 이 아닙니다(값: '$timing')" }
+        Write-Ok 'app 컨테이너 STATS_ENGINE_TIMING=1 (통계 엔진 구간 시간 로그 켜짐 — docker compose logs app 에서 [stats-engine] timing)'
+    }
 
     Write-Step '6/7 감사 계정 비밀번호 동기화 (INTRANET_DEPLOYMENT.md 2절 4번)'
     $auditPw = Get-EnvValue 'AUDIT_DB_PASSWORD'

@@ -1079,6 +1079,68 @@ interface RecordedOutcome {
   detail?: string;
 }
 
+// P0-13 성능 기준선 — STATS_ENGINE_TIMING=1일 때만(기본 꺼짐, 운영 compose는 이 값을 넘기지 않음)
+// analyze.py가 정상 종료 직전 stderr에 쓰는 `STATS_ENGINE_TIMING {...}` 표식을 읽어 Node 쪽
+// spawn→close 시간과 합친 한 줄을 로그로 남긴다. 꺼져 있으면 아무것도 읽거나 쓰지 않는다.
+// stderr는 원래도 stderrMaxBytes 상한 안에서 모으므로(아래 runEngineProcess) 표식 한 줄은 동작에 영향 없음.
+export const STATS_ENGINE_TIMING_ENV = 'STATS_ENGINE_TIMING';
+
+export function isEngineTimingEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[STATS_ENGINE_TIMING_ENV] === '1';
+}
+
+export interface EngineTimingLog {
+  mode: string | null;
+  /** spawn 직전(Node 벽시계) → Python 프로세스 첫 줄(Python 벽시계). 같은 호스트 시계라 비교 가능. */
+  interpreterStartMs: number | null;
+  importMs: number | null;
+  stdinMs: number | null;
+  parseMs: number | null;
+  computeMs: number | null;
+  serializeMs: number | null;
+  /** Python 첫 줄 → 결과 직렬화 완료(단조 시계). */
+  processMs: number | null;
+  /** spawn 직전 → 'close'(Node 벽시계). */
+  totalMs: number;
+  /** 표식을 못 찾거나 해석하지 못하면 false(나머지 Python 구간은 null). */
+  markerFound: boolean;
+}
+
+function finiteOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+export function buildEngineTimingLog(stderrText: string, spawnWallMs: number, closeWallMs: number): EngineTimingLog {
+  const totalMs = closeWallMs - spawnWallMs;
+  const empty: EngineTimingLog = {
+    mode: null, interpreterStartMs: null, importMs: null, stdinMs: null, parseMs: null,
+    computeMs: null, serializeMs: null, processMs: null, totalMs, markerFound: false,
+  };
+  const match = stderrText.match(/^STATS_ENGINE_TIMING (\{.*\})\s*$/m);
+  if (!match) return empty;
+  let marker: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(match[1]!);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return empty;
+    marker = parsed as Record<string, unknown>;
+  } catch {
+    return empty;
+  }
+  const startWall = finiteOrNull(marker.processStartWallMs);
+  return {
+    mode: typeof marker.mode === 'string' ? marker.mode : null,
+    interpreterStartMs: startWall === null ? null : Math.round((startWall - spawnWallMs) * 1000) / 1000,
+    importMs: finiteOrNull(marker.importMs),
+    stdinMs: finiteOrNull(marker.stdinMs),
+    parseMs: finiteOrNull(marker.parseMs),
+    computeMs: finiteOrNull(marker.computeMs),
+    serializeMs: finiteOrNull(marker.serializeMs),
+    processMs: finiteOrNull(marker.processMs),
+    totalMs,
+    markerFound: true,
+  };
+}
+
 // PR3-A — descriptive/bivariate 두 경로가 spawn·타이머·세마포어·listener 생명주기를
 // 전부 동일하게 공유한다(6차례 검토를 거친 로직, 변경 없음). 달라지는 3가지(입력상한
 // 검사·stdin payload·stdout 성공 파싱)만 파라미터로 뺀다 — 로직을 복제하면 한쪽만
@@ -1137,6 +1199,8 @@ async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
     // 플랫폼별 ENOENT가 비동기 'error' 대신 동기 예외로 오는 경우). 이 시점엔 아직 아무
     // 리스너도 등록 전이라 'close'가 절대 오지 않으므로, 여기서 못 잡으면 슬롯이 영구
     // 누수되고 이후 모든 요청이 StatsEngineBusyError로 막힌다(실제 재현됨).
+    const timingEnabled = isEngineTimingEnabled();
+    const spawnWallMs = timingEnabled ? Date.now() : 0;
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(config.stats.python, [scriptPath], { env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1222,6 +1286,10 @@ async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
       }
 
       if (exitCode === 0) {
+        if (timingEnabled) {
+          const timing = buildEngineTimingLog(Buffer.concat(stderrChunks).toString('utf8'), spawnWallMs, Date.now());
+          console.info(`[stats-engine] timing ${JSON.stringify(timing)}`);
+        }
         let parsed: unknown;
         try {
           parsed = JSON.parse(Buffer.concat(stdoutChunks).toString('utf8'));
