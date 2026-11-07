@@ -35,18 +35,38 @@ function copyKeys(err: Error, out: Record<string, unknown>): Record<string, unkn
 }
 
 // Some error messages (and so the first part of their stack) repeat the input that failed:
-// a ZodError's message is the JSON of its issues (`received: …`), and a SyntaxError from
-// JSON.parse — including body-parser's `entity.parse.failed` — quotes the request body
-// (`"{"password":…" is not valid JSON`). For those keep a fixed message and the call frames only.
+// - a ZodError's message is the JSON of its issues (`received: …`);
+// - a SyntaxError from JSON.parse — including body-parser's `entity.parse.failed` — quotes the
+//   request body (`"{"password":…" is not valid JSON`);
+// - a PostgreSQL error message quotes the offending value (22P02
+//   `invalid input syntax for type uuid: "…"`).
+// For those keep a fixed message and only the call frames that come AFTER the original message
+// in the stack: the quoted input can itself contain lines that look like "    at …", so frames
+// are never searched for inside the message. If the message cannot be located, drop the stack.
+function framesAfterMessage(err: Error): string[] {
+  const stack = err.stack ?? '';
+  const at = err.message ? stack.indexOf(err.message) : -1;
+  if (at < 0) return [];
+  return stack.slice(at + err.message.length).split('\n').filter((line) => /^\s+at /.test(line));
+}
+
 function withFixedMessage(err: Error, message: string): Record<string, unknown> {
-  const frames = (err.stack ?? '').split('\n').filter((line) => /^\s+at /.test(line));
+  const frames = framesAfterMessage(err);
   return copyKeys(err, { type: err.name, message, stack: [`${err.name}: ${message}`, ...frames].join('\n') });
+}
+
+// pg's DatabaseError (pg-protocol) — matched by shape, not class: pg-protocol is not a direct
+// dependency. Every server error carries a severity and a five-character SQLSTATE code.
+function isPostgresError(err: Error): err is Error & { code: string } {
+  const record = err as unknown as Record<string, unknown>;
+  return typeof record.severity === 'string' && typeof record.code === 'string' && /^[0-9A-Z]{5}$/.test(record.code);
 }
 
 export function serializeError(err: unknown): Record<string, unknown> {
   if (err instanceof ZodError) return withFixedMessage(err, `${err.issues.length} validation issue(s)`);
   if (err instanceof SyntaxError) return withFixedMessage(err, 'invalid JSON');
   if (!(err instanceof Error)) return { type: typeof err };
+  if (isPostgresError(err)) return withFixedMessage(err, `PostgreSQL error ${err.code}`);
   return copyKeys(err, { type: err.name, message: err.message, stack: err.stack });
 }
 

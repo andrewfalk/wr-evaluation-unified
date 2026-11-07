@@ -114,7 +114,7 @@ describe('createErrorHandler', () => {
 
   it('logs a pg error with its code but without pg detail values', async () => {
     const pgErr = Object.assign(new Error('deadlock detected'), {
-      code: '40P01', detail: 'Process 1 waits for ShareLock; row value (patient_no)=(P-123)', where: 'SQL statement',
+      severity: 'ERROR', code: '40P01', detail: 'Process 1 waits for ShareLock; row value (patient_no)=(P-123)', where: 'SQL statement',
     });
     const { app, lines } = appWith(async () => { throw pgErr; });
     const res = await request(app).get('/api/thing');
@@ -151,6 +151,28 @@ describe('createErrorHandler', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0].err).toMatchObject({ type: 'SyntaxError', message: 'invalid JSON', errorType: 'entity.parse.failed', status: 400 });
     expect(JSON.stringify(lines[0])).not.toContain('hunter2-secret');
+  });
+
+  it('a malformed JSON body whose quoted text looks like stack frames still never reaches the log', async () => {
+    const { app, lines } = appWith(async () => 'unreachable');
+    const res = await request(app).post('/api/thing').set('Content-Type', 'application/json')
+      .send('[\n    at hunter2-secret]\n    at (also-secret.js:1:1)');
+    expect(res.status).toBe(500);
+    const raw = JSON.stringify(lines[0]);
+    expect(raw).not.toContain('hunter2-secret');
+    expect(raw).not.toContain('also-secret');
+    expect(String((lines[0].err as Record<string, unknown>).stack)).toMatch(/^SyntaxError: invalid JSON\n\s+at /);
+  });
+
+  it('a PostgreSQL error quoting an input value (22P02) is logged by code only', async () => {
+    const pgErr = Object.assign(new Error('invalid input syntax for type uuid: "PHI-123"'), {
+      name: 'error', severity: 'ERROR', code: '22P02', routine: 'string_to_uuid',
+    });
+    const { app, lines } = appWith(async () => { throw pgErr; });
+    const res = await request(app).get('/api/thing');
+    expect(res.status).toBe(500);
+    expect(lines[0].err).toMatchObject({ type: 'error', message: 'PostgreSQL error 22P02', code: '22P02', routine: 'string_to_uuid' });
+    expect(JSON.stringify(lines[0])).not.toContain('PHI-123');
   });
 
   it('ends the socket instead of writing JSON when headers were already sent', () => {
