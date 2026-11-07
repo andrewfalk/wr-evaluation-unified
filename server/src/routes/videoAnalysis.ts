@@ -15,7 +15,7 @@ import { validateAppliedRecipes } from '../workers/recipeValidation';
 import type { RequestHandler as ExpressRequestHandler } from 'express';
 import fs from 'fs';
 import crypto from 'crypto';
-import { checkLockForWrite } from '../db/patientLocks';
+import { checkLockForWrite, isAssignedOrAdmin } from '../db/patientLocks';
 import type { QueryRunner } from '../db/patientPersons';
 import { asyncHandler } from '../http/asyncHandler';
 import { orgIdOf, requireFeature, requireOrg, sessionOf, type SessionInfo } from '../http/authz';
@@ -83,11 +83,9 @@ const ApplyBody = z.object({
   ...CompletionReportFields,
 }).superRefine(requireCompletionVersions);
 
-// 담당의/admin 확인(공통). orgId null(superadmin context)은 라우트의 requireOrg()가 먼저 403으로 거부한다.
-function canAccess(session: SessionInfo, assignedDoctorUserId: string | null): boolean {
-  return session.role === 'admin' || assignedDoctorUserId === session.userId;
-}
-
+// 담당의/admin 판정은 db/patientLocks.ts isAssignedOrAdmin 하나(S4 / P1-17). orgId null(superadmin
+// context)은 라우트의 requireOrg()가 먼저 403으로 거부한다.
+//
 // patientId(서버 patient_records.id) 기반 접근 확인. 미존재/타org → 404(존재 누설 방지).
 async function loadAccessiblePatient(
   pool: Pool, session: SessionInfo, orgId: string, patientId: string, res: Response
@@ -101,7 +99,7 @@ async function loadAccessiblePatient(
     res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
     return null;
   }
-  if (!canAccess(session, rows[0].assigned_doctor_user_id)) {
+  if (!isAssignedOrAdmin(session, rows[0].assigned_doctor_user_id)) {
     res.status(403).json({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
     return null;
   }
@@ -134,7 +132,7 @@ async function loadAccessibleClip(
     res.status(404).json({ code: 'CLIP_NOT_FOUND', error: 'Clip not found' });
     return null;
   }
-  if (!canAccess(session, rows[0].assigned_doctor_user_id)) {
+  if (!isAssignedOrAdmin(session, rows[0].assigned_doctor_user_id)) {
     res.status(403).json({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
     return null;
   }
@@ -161,7 +159,7 @@ async function loadAccessibleJob(
     res.status(404).json({ code: 'JOB_NOT_FOUND', error: 'Job not found' });
     return null;
   }
-  if (!canAccess(session, rows[0].assigned_doctor_user_id)) {
+  if (!isAssignedOrAdmin(session, rows[0].assigned_doctor_user_id)) {
     res.status(403).json({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
     return null;
   }
@@ -800,7 +798,7 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
       return;
     }
     const job = jobs[0];
-    if (!canAccess(session, job.assigned_doctor_user_id)) {
+    if (!isAssignedOrAdmin(session, job.assigned_doctor_user_id)) {
       await client.query('ROLLBACK');
       res.status(403).json({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
       return;
@@ -873,7 +871,7 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
     // ①의 canAccess는 job+patient를 JOIN한 스냅샷(FOR UPDATE OF j — patient_records는 안 잠금)
     // 기준이었다 — 그 확인과 지금 사이에 담당의가 재배정됐을 수 있으므로, patient_records를
     // 실제로 FOR UPDATE로 잠근 이 시점에 다시 확인한다(TOCTOU 최종 방어선).
-    if (!canAccess(session, pats[0].assigned_doctor_user_id)) {
+    if (!isAssignedOrAdmin(session, pats[0].assigned_doctor_user_id)) {
       await client.query('ROLLBACK');
       res.status(403).json({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
       return;

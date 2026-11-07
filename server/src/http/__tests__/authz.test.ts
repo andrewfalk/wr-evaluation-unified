@@ -8,10 +8,12 @@ vi.mock('../../config', async () => ({
 }));
 
 import { makeRouterApp } from '../../testing/app';
-import { createFakePool, authSessionHandler } from '../../testing/fakePool';
+import { createFakePool, authSessionHandler, type QueryHandler } from '../../testing/fakePool';
 import { makeAccessToken, authHeaders } from '../../testing/tokens';
 import { AppError } from '../errors';
-import { orgIdOf, requireAdmin, requireAuth, requireCsrf, requireFeature, requireOrg, sessionOf } from '../authz';
+import { orgIdOf, requireAdmin, requireAuth, requireCsrf, requireFeature, requireOrg, requirePatientAccess, sessionOf } from '../authz';
+import { isAssignedOrAdmin, assertAssignedOrAdmin, PatientLockForbiddenError } from '../../db/patientLocks';
+import { assignedDoctorOrAdmin } from '../../middleware/patientAccess';
 import { createAuthMiddleware } from '../../middleware/auth';
 import { adminOnly } from '../../middleware/adminOnly';
 import { csrfMiddleware } from '../../middleware/csrf';
@@ -133,5 +135,83 @@ describe('requireFeature', () => {
     misused({} as Request, res as never, next);
     expect(next).not.toHaveBeenCalled(); // even if it slips through, a non-true value keeps it closed
     expect(res.status).toHaveBeenCalledWith(404);
+  });
+});
+
+describe('isAssignedOrAdmin — the one patient write rule (P1-17)', () => {
+  it('admin, or the assigned doctor', () => {
+    expect(isAssignedOrAdmin({ role: 'admin', userId: 'u1' }, null)).toBe(true);
+    expect(isAssignedOrAdmin({ role: 'admin', userId: 'u1' }, 'someone-else')).toBe(true);
+    expect(isAssignedOrAdmin({ role: 'doctor', userId: 'u1' }, 'u1')).toBe(true);
+    expect(isAssignedOrAdmin({ role: 'doctor', userId: 'u1' }, 'u2')).toBe(false);
+    expect(isAssignedOrAdmin({ role: 'doctor', userId: 'u1' }, null)).toBe(false);
+  });
+
+  it('assertAssignedOrAdmin throws PatientLockForbiddenError exactly when the rule says no', () => {
+    expect(() => assertAssignedOrAdmin({ id: 'p', assignedDoctorUserId: 'u1' }, { role: 'doctor', userId: 'u1' })).not.toThrow();
+    expect(() => assertAssignedOrAdmin({ id: 'p', assignedDoctorUserId: 'u2' }, { role: 'doctor', userId: 'u1' }))
+      .toThrow(PatientLockForbiddenError);
+  });
+});
+
+describe("requirePatientAccess(pool, 'write')", () => {
+  const PATIENT = '11111111-1111-4111-8111-111111111111';
+  function patientApp(lookup: QueryHandler['reply'] | null) {
+    const handlers: QueryHandler[] = [authSessionHandler()];
+    if (lookup) handlers.push({ name: 'patient.assigned', match: /SELECT assigned_doctor_user_id FROM patient_records/, reply: lookup });
+    const fake = createFakePool({ handlers });
+    const app = makeRouterApp((a) => {
+      a.patch('/p/:id', requireAuth(fake.pool), requirePatientAccess(fake.pool, 'write'), (_req, res) => { res.json({ ok: true }); });
+    });
+    return { app, fake };
+  }
+
+  it('the assigned doctor passes; the lookup is scoped to the session organization and live rows', async () => {
+    const { app, fake } = patientApp({ rows: [{ assigned_doctor_user_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }] });
+    const res = await request(app).patch(`/p/${PATIENT}`).set(authHeaders(makeAccessToken({ role: 'doctor' })));
+    expect(res.status).toBe(200);
+    const [lookup] = fake.callsTo('patient.assigned');
+    expect(lookup!.params).toEqual([PATIENT, 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb']);
+    expect(lookup!.sql).toMatch(/deleted_at IS NULL/);
+    fake.assertNoUnmatched();
+  });
+
+  it('403 for another doctor, 404 PATIENT_NOT_FOUND for a missing / other-organization patient', async () => {
+    const other = patientApp({ rows: [{ assigned_doctor_user_id: 'someone-else' }] });
+    const forbidden = await request(other.app).patch(`/p/${PATIENT}`).set(authHeaders(makeAccessToken({ role: 'doctor' })));
+    expect(forbidden.status).toBe(403);
+    expect(forbidden.body).toEqual({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
+
+    const missing = patientApp({ rows: [] });
+    const notFound = await request(missing.app).patch(`/p/${PATIENT}`).set(authHeaders(makeAccessToken({ role: 'doctor' })));
+    expect(notFound.status).toBe(404);
+    expect(notFound.body).toEqual({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
+  });
+
+  it('admin passes without a lookup; no organization is 403', async () => {
+    const admin = patientApp(null);
+    expect((await request(admin.app).patch(`/p/${PATIENT}`).set(authHeaders(makeAccessToken({ role: 'admin' })))).status).toBe(200);
+    expect(admin.fake.callsTo('patient.assigned')).toHaveLength(0);
+    admin.fake.assertNoUnmatched();
+
+    const noOrg = patientApp(null);
+    const res = await request(noOrg.app).patch(`/p/${PATIENT}`).set(authHeaders(makeAccessToken({ role: 'admin', orgId: null })));
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ code: 'FORBIDDEN', error: 'Organization context required' });
+  });
+
+  it('a DB failure goes to the central error handler (500)', async () => {
+    const { app } = patientApp(new Error('db down'));
+    const res = await request(app).patch(`/p/${PATIENT}`).set(authHeaders(makeAccessToken({ role: 'doctor' })));
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
+  });
+
+  it('middleware/patientAccess assignedDoctorOrAdmin is the same guard', async () => {
+    const fake = createFakePool({ handlers: [authSessionHandler(), { name: 'patient.assigned', match: /SELECT assigned_doctor_user_id/, reply: { rows: [] } }] });
+    const app = makeRouterApp((a) => {
+      a.patch('/p/:id', requireAuth(fake.pool), assignedDoctorOrAdmin(fake.pool), (_req, res) => { res.json({ ok: true }); });
+    });
+    expect((await request(app).patch(`/p/${PATIENT}`).set(authHeaders(makeAccessToken({ role: 'doctor' })))).status).toBe(404);
   });
 });

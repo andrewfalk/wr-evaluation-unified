@@ -14,7 +14,9 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { createAuthMiddleware } from '../middleware/auth';
 import { adminOnly } from '../middleware/adminOnly';
+import type { Pool } from 'pg';
 import { csrfMiddleware } from '../middleware/csrf';
+import { isAssignedOrAdmin } from '../db/patientLocks';
 import { AppError } from './errors';
 
 export type SessionInfo = NonNullable<Request['sessionInfo']>;
@@ -67,6 +69,64 @@ export function orgIdOf(req: Request): string {
     throw new AppError(403, 'FORBIDDEN', 'Organization context required');
   }
   return req.orgId;
+}
+
+/**
+ * Patient write access for routes with the patient id in `:id` (PATCH/DELETE /api/patients/:id, the
+ * lease lock, identity correction). The former middleware/patientAccess.ts assignedDoctorOrAdmin,
+ * unchanged: 403 without an organization; admin passes without a lookup; otherwise the patient must
+ * exist in the session's organization (else 404 `PATIENT_NOT_FOUND` — another organization's patient
+ * is not revealed) and the session must be its assigned doctor (else 403). The decision is
+ * isAssignedOrAdmin (db/patientLocks.ts), the same function the transactions re-check with after
+ * locking the row (assertAssignedOrAdmin) — this middleware is the fast rejection, not the final
+ * guard. Use after requireAuth.
+ *
+ * Only 'write' exists: the read paths query the patient in their handlers already, and the video
+ * routes take the patient id from the validated body, so a 'read' middleware would only add a
+ * second query (S4 / P1-17).
+ */
+export function requirePatientAccess(pool: Pool, _mode: 'write'): RequestHandler {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const session = sessionOf(req);
+    const orgId = session.organizationId;
+    const { id } = req.params;
+
+    if (orgId === null) {
+      res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
+      return;
+    }
+
+    // admin needs no lookup (same short-circuit as before); the transaction re-check still runs.
+    if (session.role === 'admin') {
+      next();
+      return;
+    }
+
+    try {
+      const { rows } = await pool.query<{ assigned_doctor_user_id: string | null }>(
+        `SELECT assigned_doctor_user_id FROM patient_records
+         WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
+        [id, orgId]
+      );
+
+      if (rows.length === 0) {
+        res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
+        return;
+      }
+
+      if (!isAssignedOrAdmin(session, rows[0].assigned_doctor_user_id)) {
+        res.status(403).json({
+          code: 'FORBIDDEN',
+          error: 'Only the assigned doctor can modify this patient',
+        });
+        return;
+      }
+
+      next();
+    } catch (err) {
+      next(err);
+    }
+  };
 }
 
 /**

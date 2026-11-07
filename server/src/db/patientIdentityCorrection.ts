@@ -1,5 +1,5 @@
 import type { QueryRunner } from './patientPersons';
-import { checkLockForWrite } from './patientLocks';
+import { checkLockForWrite, isAssignedOrAdmin } from './patientLocks';
 
 // ---------------------------------------------------------------------------
 // 생년월일 정정 — 범용 resolver와 의도적으로 분리된 경로.
@@ -125,7 +125,7 @@ export async function correctPatientIdentity(
   }
 
   // 트랜잭션 안에서 담당의를 다시 확인한다(미들웨어 검사 이후 재배정 TOCTOU 방지).
-  if (session.role !== 'admin' && targetRow.assigned_doctor_user_id !== session.userId) {
+  if (!isAssignedOrAdmin(session, targetRow.assigned_doctor_user_id)) {
     throw new IdentityForbiddenError(false);
   }
 
