@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { ChartContainer, CHART_VIEW_WIDTH } from './ChartContainer';
 import { createLinearScale, computeNiceTicks } from './scales';
 import { ACCENT } from './palette';

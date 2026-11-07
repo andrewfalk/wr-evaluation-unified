@@ -1,3 +1,4 @@
+// @ts-nocheck
 // 영상 분석 서버 API 클라이언트 (6.0-4). analysisClient.js의 형제 — 플랫폼 분기.
 // 영상 분석은 사실상 인트라넷 기능: 인트라넷에서만 서버 호출, 그 외(electron standalone/web)는
 // 미지원 stub(§8.2). 실제 업로드(multipart)는 M3에서 추가된다.

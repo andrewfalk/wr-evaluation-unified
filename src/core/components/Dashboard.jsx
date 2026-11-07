@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useMemo, useState } from 'react';
 import { computeDashboardStats, getDoctorPatientCounts, getDoctorOptionsFromRoster, UNASSIGNED_GROUP_KEY } from '../utils/dashboardStats';
 import { getAllModules } from '../moduleRegistry';

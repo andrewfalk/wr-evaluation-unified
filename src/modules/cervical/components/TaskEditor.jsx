@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { EXPOSURE_TYPE_OPTIONS } from '../utils/data';
 
 function NumberField({ label, value, onChange, min = 0, step = 0.5 }) {

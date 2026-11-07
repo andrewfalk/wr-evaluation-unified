@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Returns whether AI analysis is available in the current session context.
 // - Local / Electron (non-intranet): always available (Vercel endpoint or Electron IPC).
 // - Intranet: only when the server's /api/config/public reports aiEnabled=true.

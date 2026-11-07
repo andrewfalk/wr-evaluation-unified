@@ -1,3 +1,4 @@
+// @ts-nocheck
 export function isIntranetWorkspaceMode({ session, settings } = {}) {
   return session?.mode === 'intranet' || settings?.integrationMode === 'intranet';
 }

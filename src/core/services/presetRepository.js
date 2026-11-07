@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { z } from 'zod';
 import { ServerPresetSchema } from '@contracts/preset';
 import { requestJson } from './httpClient';

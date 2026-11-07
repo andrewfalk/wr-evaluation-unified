@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { requestJson } from './httpClient';
 
 const listeners = new Set();

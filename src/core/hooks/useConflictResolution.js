@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useCallback } from 'react';
 import { resolvePatientConflictInList } from '../services/patientConflictResolution';
 import { correctPatientIdentity, deletePatientOnServer } from '../services/patientServerRepository';

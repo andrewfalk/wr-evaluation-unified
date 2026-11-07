@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useLayoutEffect, useRef } from 'react';
 import { getAllModules } from '../moduleRegistry';
 import {

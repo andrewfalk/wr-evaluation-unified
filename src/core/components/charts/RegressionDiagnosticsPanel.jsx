@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { ScatterPlot } from './ScatterPlot';
 import { SuppressionNotice } from './SuppressionNotice';
 import { formatNumber } from './numberFormat';

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // 서버 분석 실행 오케스트레이터 (6.0-6b, PR D1/D2b). "분석 실행" 단계 — 공정별로 실제 추론 job을
 // 돌려(fixture) intrinsic clipFeatures를 받고, 수기 activeMinutesPerDay로 per-day 환산해
 // processFeatures를 구성한다. "제안 적용"(videoServerApply)과 분리되어 적용마다 추론이 재실행되지 않는다.

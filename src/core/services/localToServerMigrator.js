@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { loadAutoSave, loadSavedItems } from '../utils/storage';
 import { isRedactedPatientRecord } from './patientRecords';
 import { pushPatient } from './patientServerRepository';

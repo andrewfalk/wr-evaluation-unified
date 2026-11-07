@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useCallback } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { analyzeAIRequest } from '../services/analysisClient';

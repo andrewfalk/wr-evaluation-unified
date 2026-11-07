@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { purposeLabel, describeAllowedPurposes } from './purposeLabels';
 
 // PR2 §9 — 서버 에러 코드별 고정 안내 문구. statsRepository.js가 던지는 Error는

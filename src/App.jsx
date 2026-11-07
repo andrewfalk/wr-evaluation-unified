@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { getModule, getAllModules } from './core/moduleRegistry';
 import { LandingScreen } from './core/components/LandingScreen';

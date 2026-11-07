@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Cross-tab auth coordination.
 //
 // Primary:  navigator.locks  — true mutual exclusion, no race window.

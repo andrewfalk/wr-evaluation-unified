@@ -23,6 +23,7 @@ export const CHECK_STEPS = [
   ['lint (server)', 'npm --prefix server run lint'],
   ['browser floor (Chrome 108)', 'npm run verify:browser-compat'],
   ['typecheck (root)', 'npm run typecheck'],
+  ['ts ratchet (@ts-nocheck baseline)', 'npm run verify:ts-ratchet'],
   ['test (root)', 'npm test'],
   ['typecheck (server)', 'npm --prefix server run typecheck'],
   ['test (server)', 'npm --prefix server test'],

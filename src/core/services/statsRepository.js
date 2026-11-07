@@ -1,3 +1,4 @@
+// @ts-nocheck
 // PR2 §9 — 통계분석 워크벤치 화면이 쓰는 서버 API 클라이언트. httpClient.js의 requestJson/
 // requestBlobPost(인증·CSRF·401 재시도 이미 구현됨)을 그대로 재사용하고, 응답은 서버와
 // 동일한 @wr/contracts zod 스키마로 실제 safeParse한다 — 타입 import만으로는 런타임

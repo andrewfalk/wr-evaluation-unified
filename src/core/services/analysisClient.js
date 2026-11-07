@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { buildSessionHeaders } from '../auth/session';
 import { requestJson } from './httpClient';
 

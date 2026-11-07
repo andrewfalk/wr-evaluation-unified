@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState } from 'react';
 import { BasicInfoForm } from './BasicInfoForm';
 import { DiagnosisForm } from './DiagnosisForm';

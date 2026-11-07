@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Fragment } from 'react';
 import { thresholds } from '../utils/thresholds';
 import { convertTimeToSeconds, classifySpineSeverity } from '../utils/calculations';
