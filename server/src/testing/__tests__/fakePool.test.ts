@@ -206,6 +206,23 @@ describe('sequenceHandler (S3 / P1-11 compatibility shim)', () => {
     fake.assertAllReleased();
   });
 
+  it('once used up, transaction control is rejected too (not the default empty reply)', async () => {
+    const fake = createFakePool({ handlers: [sequenceHandler([{ rows: [] }], { via: 'client' })] });
+    const client = await fake.pool.connect();
+    await client.query('BEGIN');
+    await expect(client.query('COMMIT')).rejects.toThrow(/no handler matched client query: COMMIT .*already used up their times: sequence/);
+    client.release();
+    expect(fake.unmatched.map(c => c.sql)).toEqual(['COMMIT']);
+    expect(() => fake.assertNoUnmatched()).toThrow(/1 unmatched query/);
+    // An ordinary handler with times keeps the default for transaction control.
+    const plain = createFakePool({ handlers: [{ name: 'once', match: () => true, times: 1, reply: { rows: [] } }] });
+    const c2 = await plain.pool.connect();
+    await c2.query('BEGIN');
+    await expect(c2.query('COMMIT')).resolves.toMatchObject({ rows: [] });
+    c2.release();
+    plain.assertNoUnmatched();
+  });
+
   it('separate pool and client queues with via', async () => {
     const fake = createFakePool({
       handlers: [

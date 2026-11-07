@@ -51,6 +51,11 @@ export interface QueryHandler {
   times?: number;
   /** 'pool'이면 pool.query만, 'client'면 connect()한 client의 query만. 생략하면 둘 다. */
   via?: 'pool' | 'client';
+  /**
+   * times를 다 쓴 뒤 이 handler와 맞는 쿼리는 트랜잭션 제어문(BEGIN/COMMIT/…)이라도 기본 빈 응답으로
+   * 넘기지 않고 미매치로 거부한다. sequenceHandler가 켠다(큐가 BEGIN/COMMIT까지 책임지므로).
+   */
+  rejectWhenExhausted?: boolean;
 }
 
 export interface RecordedQuery {
@@ -216,12 +221,13 @@ export function createFakePool(options: CreateFakePoolOptions = {}): FakePool {
     calls.push(call);
 
     if (!handler) {
-      if (isTxControl) {
+      const exhausted = handlers.filter(h => h.times !== undefined && (used.get(h) ?? 0) >= h.times && matches(h, sql, params, via));
+      if (isTxControl && !exhausted.some(h => h.rejectWhenExhausted)) {
         if (txClientId !== undefined) recordTxControl(txClientId, sql, true);
         return toResult({ rows: [], rowCount: null });
       }
+      call.handler = null;
       unmatched.push(call);
-      const exhausted = handlers.filter(h => h.times !== undefined && (used.get(h) ?? 0) >= h.times && matches(h, sql, params, via));
       const hint = exhausted.length > 0
         ? ` (matching handler(s) already used up their times: ${exhausted.map(h => h.name).join(', ')})`
         : '';
@@ -333,6 +339,7 @@ export function sequenceHandler(
     match: options.match ?? (() => true),
     ...(options.via ? { via: options.via } : {}),
     times: responses.length,
+    rejectWhenExhausted: true,
     reply: () => responses[next++]!,
   };
 }
