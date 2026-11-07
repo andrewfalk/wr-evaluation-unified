@@ -24,6 +24,7 @@ import { csrfMiddleware } from '../middleware/csrf';
 import { loginRateLimit, csrfRateLimit, signupRateLimit } from '../middleware/rateLimit';
 import { auditLogin, auditLogout, auditRefreshFail, auditRefreshSuccess, writeAuditLog } from '../middleware/audit';
 import { checkPasswordPolicy, isPasswordReused, appendPasswordHistory } from '../auth/passwordPolicy';
+import { asyncHandler } from '../http/asyncHandler';
 
 const REFRESH_COOKIE = 'wr_refresh';
 
@@ -615,33 +616,32 @@ async function createSignupRequest(pool: Pool, req: Request, res: Response): Pro
 // ---------------------------------------------------------------------------
 // Router factory
 // ---------------------------------------------------------------------------
-const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
 export function createAuthRouter(pool: Pool): Router {
   const router = Router();
   const auth   = createAuthMiddleware(pool);
 
   // Unauthenticated
-  router.post('/login',   loginRateLimit(), (req, res) => login(pool, req, res).catch(() => res.status(500).json(internalError())));
-  router.post('/refresh', (req, res) => refresh(pool, req, res).catch(() => res.status(500).json(internalError())));
+  router.post('/login',   loginRateLimit(), asyncHandler((req, res) => login(pool, req, res)));
+  router.post('/refresh', asyncHandler((req, res) => refresh(pool, req, res)));
 
   // /csrf is exempt from csrfMiddleware (wr_csrf cookie is missing when called).
   // Protected by: HttpOnly wr_refresh cookie (SameSite=Strict), Origin check
   // (CORS middleware), and rate limit below.
-  router.post('/csrf', csrfRateLimit(), (req, res) => csrfReissue(pool, req, res).catch(() => res.status(500).json(internalError())));
+  router.post('/csrf', csrfRateLimit(), asyncHandler((req, res) => csrfReissue(pool, req, res)));
 
   // Requires valid access token + live DB session check
-  router.get('/me', auth, (req, res) => me(pool, req, res).catch(() => res.status(500).json(internalError())));
+  router.get('/me', auth, asyncHandler((req, res) => me(pool, req, res)));
 
   // logout: cookie + manual CSRF check inside logout() itself (see comment there) —
   // deliberately NOT behind `auth`/`csrfMiddleware`, which require a live access token.
-  router.post('/logout', (req, res) => logout(pool, req, res).catch(() => res.status(500).json(internalError())));
+  router.post('/logout', asyncHandler((req, res) => logout(pool, req, res)));
 
   // change-password: auth + CSRF (mutating POST)
-  router.post('/change-password', auth, csrfMiddleware, (req, res) => changePassword(pool, req, res).catch(() => res.status(500).json(internalError())));
+  router.post('/change-password', auth, csrfMiddleware, asyncHandler((req, res) => changePassword(pool, req, res)));
 
   // Public: no auth, no CSRF — protected only by rate limit.
-  router.post('/signup-requests', signupRateLimit(), (req, res) => createSignupRequest(pool, req, res).catch(() => res.status(500).json(internalError())));
+  router.post('/signup-requests', signupRateLimit(), asyncHandler((req, res) => createSignupRequest(pool, req, res)));
 
   return router;
 }
