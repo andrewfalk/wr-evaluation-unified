@@ -44,13 +44,15 @@
 
 | 방문 | 요청 수 | 전송 KiB | 304 | 캐시에서 | DOMContentLoaded ms | load ms |
 | --- | --- | --- | --- | --- | --- | --- |
-| cold(새 브라우저 컨텍스트, 첫 방문) | 10 | **1904** | 0 | 0 | 106 | 107 (96~2818) |
-| warm(같은 컨텍스트 재방문) | 10 | 0.9 | **4** | 0 | 28 | 28 (24~33) |
+| cold(새 브라우저 컨텍스트, 첫 방문) | 10 | **1904** | 0 | 0 | 103 | 103 (95~149) |
+| warm(같은 컨텍스트 재방문) | 10 | 0.9 | **6** | 0 | 24 | 24 (23~27) |
+
+304는 실제 네트워크 상태(CDP `responseReceivedExtraInfo.statusCode`)로 센다 — 재검증된 응답은 `responseReceived`에 캐시와 병합한 200으로 나오기 때문이다.
 
 관찰:
 - **압축이 전혀 없다**: cold 전송량(1904 KiB)이 초기 로드 원본 합(1896 KiB)과 같다 — Express·Caddy 어느 쪽도 gzip/brotli를 하지 않는다. gzip이면 약 534 KiB, brotli면 약 392 KiB(1-a).
-- **해시 파일도 매번 재검증한다**: 정적 자산 응답이 `Cache-Control: public, max-age=0`이라 재방문 때 `index.html`과 해시가 붙은 JS·CSS 4개가 모두 조건부 요청(304)으로 다시 확인된다. 내용이 바뀌지 않는 `assets/*-<hash>.*`는 장기 캐시(immutable)로 왕복 자체를 없앨 수 있다.
-- cold 첫 회(2818 ms)는 Chromium 첫 기동·TLS 첫 연결이 섞인 값이라 중앙값에서 제외된다.
+- **해시 파일도 매번 재검증한다**: 정적 자산 응답이 `Cache-Control: public, max-age=0`이라 재방문 때 `index.html`·해시가 붙은 JS·CSS 4개·`job-presets.json`이 모두 조건부 요청(304)으로 다시 확인된다(나머지 4건은 `no-store`인 `/api` 호출). 내용이 바뀌지 않는 `assets/*-<hash>.*`는 장기 캐시(immutable)로 왕복 자체를 없앨 수 있다.
+- cold 첫 회가 수 초로 튀는 경우는 Chromium 첫 기동·TLS 첫 연결이 섞인 값이다(중앙값에는 영향 없음).
 - Lighthouse 점수는 도구 세션에서 GUI DevTools를 쓸 수 없어 이 수치로 대신한다.
 
 ## 2. API 응답 시간 (`node scripts/perf/api-latency.mjs --iterations 30`)

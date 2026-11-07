@@ -58,7 +58,7 @@ export function summarizeSamples(samplesByStep) {
       errors: list.length - ok.length,
       p50: round(percentile(ok, 50)),
       p95: round(percentile(ok, 95)),
-      max: ok.length ? round(Math.max(...ok)) : null,
+      max: ok.length ? round(ok.reduce((m, v) => (v > m ? v : m), -Infinity)) : null,
     };
   });
 }

@@ -24,9 +24,11 @@ export function parseAccessLine(line, prefix = '/api/') {
 export function aggregate(records, minCount = 1) {
   const byKey = new Map();
   for (const r of records) {
-    if (!byKey.has(r.key)) byKey.set(r.key, { ms: [], errors: 0 });
+    if (!byKey.has(r.key)) byKey.set(r.key, { ms: [], errors: 0, max: -Infinity });
     const g = byKey.get(r.key);
     g.ms.push(r.ms);
+    // Math.max(...배열)은 표본이 많으면(운영 로그 수십만 건) 호출 인자 한도를 넘어 RangeError — 누적한다.
+    if (r.ms > g.max) g.max = r.ms;
     if (r.status >= 500) g.errors += 1;
   }
   return [...byKey.entries()]
@@ -36,7 +38,7 @@ export function aggregate(records, minCount = 1) {
       count: g.ms.length,
       p50: round(percentile(g.ms, 50)),
       p95: round(percentile(g.ms, 95)),
-      max: round(Math.max(...g.ms)),
+      max: round(g.max),
       errors5xx: g.errors,
     }))
     .sort((a, b) => b.count - a.count);

@@ -76,6 +76,13 @@ describe('access-log-latency', () => {
     records.push({ key: 'GET /api/rare', ms: 1, status: 200 });
     expect(aggregate(records, 2)).toEqual([{ route: 'GET /api/x', count: 4, p50: 25, p95: 38.5, max: 40, errors5xx: 1 }]);
   });
+
+  it('handles a route with hundreds of thousands of samples (no spread into Math.max)', () => {
+    const many = Array.from({ length: 300_000 }, (_, i) => ({ key: 'GET /api/big', ms: i % 1000, status: 200 }));
+    const [row] = aggregate(many, 1);
+    expect(row.count).toBe(300_000);
+    expect(row.max).toBe(999);
+  });
 });
 
 describe('page-load summarizeNetwork', () => {
@@ -91,6 +98,18 @@ describe('page-load summarizeNetwork', () => {
       { method: 'Network.responseReceived', params: { requestId: '4', response: { url: 'data:image/png;base64,x', status: 200 } } },
     ];
     expect(summarizeNetwork(events)).toEqual({ requests: 3, transferBytes: 1200, notModified: 1, servedFromCache: 1 });
+  });
+
+  it('counts a revalidated response as 304 from responseReceivedExtraInfo even when responseReceived says 200', () => {
+    const events = [
+      { method: 'Network.responseReceivedExtraInfo', params: { requestId: 'doc', statusCode: 304 } },
+      { method: 'Network.responseReceived', params: { requestId: 'doc', response: { url: 'https://h/', status: 200 } } },
+      { method: 'Network.loadingFinished', params: { requestId: 'doc', encodedDataLength: 31 } },
+      { method: 'Network.responseReceived', params: { requestId: 'api', response: { url: 'https://h/api/x', status: 200 } } },
+      { method: 'Network.responseReceivedExtraInfo', params: { requestId: 'api', statusCode: 200 } },
+      { method: 'Network.loadingFinished', params: { requestId: 'api', encodedDataLength: 400 } },
+    ];
+    expect(summarizeNetwork(events)).toMatchObject({ requests: 2, notModified: 1, transferBytes: 431 });
   });
 });
 

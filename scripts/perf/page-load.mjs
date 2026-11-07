@@ -17,13 +17,20 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { markdownTable, median, parseArgs, round } from './lib/perfLib.mjs';
 
-/** CDP 이벤트 기록 → 집계. 요청 ID별 마지막 응답만 센다(리다이렉트 체인은 각각 별도 ID 아님 — Chromium이 같은 ID로 재사용). */
+/**
+ * CDP 이벤트 기록 → 집계. 요청 ID별 마지막 응답만 센다.
+ * 캐시된 항목을 재검증하면 Chromium은 responseReceived에 캐시와 병합한 상태(200)를 주고, 실제 네트워크
+ * 상태(304)는 responseReceivedExtraInfo.statusCode로 따로 준다 — 304는 그 값을 우선해 센다.
+ */
 export function summarizeNetwork(events) {
   const responses = new Map();
   const finished = new Map();
   const fromCache = new Set();
+  const wireStatus = new Map();
   for (const e of events) {
-    if (e.method === 'Network.responseReceived') {
+    if (e.method === 'Network.responseReceivedExtraInfo') {
+      if (Number.isInteger(e.params.statusCode)) wireStatus.set(e.params.requestId, e.params.statusCode);
+    } else if (e.method === 'Network.responseReceived') {
       const r = e.params.response;
       responses.set(e.params.requestId, { url: r.url, status: r.status, fromDiskCache: !!r.fromDiskCache, fromServiceWorker: !!r.fromServiceWorker });
     } else if (e.method === 'Network.loadingFinished') {
@@ -38,7 +45,7 @@ export function summarizeNetwork(events) {
   for (const [id, r] of responses) {
     if (r.url.startsWith('data:')) continue;
     bytes += finished.get(id) ?? 0;
-    if (r.status === 304) notModified += 1;
+    if ((wireStatus.get(id) ?? r.status) === 304) notModified += 1;
     if (r.fromDiskCache || fromCache.has(id)) cached += 1;
   }
   const requests = [...responses.values()].filter(r => !r.url.startsWith('data:')).length;
@@ -48,7 +55,7 @@ export function summarizeNetwork(events) {
 async function visit(page, cdp, url) {
   const events = [];
   const handler = method => params => events.push({ method, params });
-  const methods = ['Network.responseReceived', 'Network.loadingFinished', 'Network.requestServedFromCache'];
+  const methods = ['Network.responseReceived', 'Network.responseReceivedExtraInfo', 'Network.loadingFinished', 'Network.requestServedFromCache'];
   const listeners = methods.map(m => [m, handler(m)]);
   for (const [m, h] of listeners) cdp.on(m, h);
   try {
