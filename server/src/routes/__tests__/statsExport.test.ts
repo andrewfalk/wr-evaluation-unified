@@ -2,29 +2,18 @@
 // analysisRunId로 조회해 그대로 CSV로 포맷한다(재계산 없음). 계획서(pr2-dreamy-frog.md) §7의
 // 상태코드 전체를 검증한다: 0행→404 RUN_NOT_FOUND, status!='succeeded'→409 RUN_NOT_SUCCEEDED,
 // 만료→410 RUN_EXPIRED, UUID 형식 오류→400, 저장 데이터 스키마 위반→500, 성공→200 CSV.
-import crypto from 'crypto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import express from 'express';
-import cookieParser from 'cookie-parser';
-import type { Pool } from 'pg';
 
-vi.mock('../../config', () => ({
-  default: {
-    env: 'test',
-    cors: { origins: [] },
-    auth: {
-      accessTokenTtl: 900,
-      accessTokenSecret: 'test-access-secret',
-      refreshTokenSecret: 'test-refresh-secret',
-    },
+vi.mock('../../config', async () => ({
+  default: (await import('../../testing/configMock.js')).testConfig({
     stats: {
       python: 'python', scriptsDir: '/fake/scripts', timeoutMs: 30000, killGraceMs: 2000,
       maxConcurrency: 1, maxConcurrentAnalyzeRequests: 4,
       stdoutMaxBytes: 10 * 1024 * 1024, stderrMaxBytes: 64 * 1024,
       maxInputBytes: 2 * 1024 * 1024, resultTtlHours: 168,
     },
-  },
+  }),
 }));
 
 vi.mock('../../statsWorkbenchRuntimeState', () => ({
@@ -38,40 +27,34 @@ vi.mock('../../middleware/audit', () => ({
 }));
 
 import { createStatsRouter } from '../stats';
-import { createErrorHandler } from '../../http/errorHandler';
-import { createLogger } from '../../logger';
-import { generateAccessToken } from '../../auth/tokens';
+import { createFakePool, authSessionHandler, sequenceHandler, type FakePool } from '../../testing/fakePool';
+import { makeRouterApp } from '../../testing/app';
+import { makeAccessToken, authHeaders, TEST_ORG_ID } from '../../testing/tokens';
 
-const USER_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-const ORG_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
-const CSRF_TOKEN = 'ok';
-const CSRF_HASH = crypto.createHash('sha256').update(CSRF_TOKEN).digest('hex');
+const ORG_ID = TEST_ORG_ID;
 const RUN_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
 
-function makePool(): Pool {
-  return { connect: vi.fn(), query: vi.fn() } as unknown as Pool;
-}
-
+// sub=TEST_USER_ID, orgId=TEST_ORG_ID, role doctor, name Dr. Kim, CSRF 'ok' (testing/tokens 기본값).
 function orgToken(): string {
-  return generateAccessToken({
-    sub: USER_ID, sessionId: 'sess-1', orgId: ORG_ID,
-    role: 'doctor', name: 'Dr. Kim', mustChangePassword: false, csrfHash: CSRF_HASH,
-  }).token;
+  return makeAccessToken({ sessionId: 'sess-1' });
 }
 
-function makeApp(pool: Pool) {
-  const app = express();
-  app.use(express.json());
-  app.use(cookieParser());
-  app.use('/api/stats', createStatsRouter(pool));
-  app.use(createErrorHandler(createLogger({ level: 'silent' }))); // as in createApp (S1)
-  return app;
+function exportApp(fake: FakePool) {
+  return makeRouterApp(a => a.use('/api/stats', createStatsRouter(fake.pool)));
 }
 
-function wireAuthAndCapability(pool: Pool): void {
-  const mock = pool.query as ReturnType<typeof vi.fn>;
-  mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth session check
-  mock.mockResolvedValueOnce({ rows: [{ has_default: true, has_grant: false }] }); // requireCapability
+// auth 세션 확인(authSessionHandler) → requireCapability → (run 조회) 순서의 pool.query 응답.
+// run 인자를 생략하면 run 조회 응답을 준비하지 않는다(요청 검증에서 끝나는 테스트), null이면 0행.
+function makeExportFake(run?: Record<string, unknown> | null): FakePool {
+  return createFakePool({
+    handlers: [
+      authSessionHandler(),
+      sequenceHandler([
+        { rows: [{ has_default: true, has_grant: false }] }, // requireCapability
+        ...(run === undefined ? [] : [{ rows: run ? [run] : [] }]), // stats_runs SELECT
+      ], { via: 'pool' }),
+    ],
+  });
 }
 
 function baseManifest(overrides: Record<string, unknown> = {}) {
@@ -96,15 +79,10 @@ function baseResult(overrides: Partial<{ continuous: unknown[]; discrete: unknow
   return { continuous: [], discrete: [], ...overrides };
 }
 
-function wireRunRow(pool: Pool, row: Record<string, unknown> | null): void {
-  (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: row ? [row] : [] });
-}
-
-function postExport(pool: Pool, body: Record<string, unknown> = { analysisRunId: RUN_ID }) {
-  return request(makeApp(pool))
+function postExport(fake: FakePool, body: Record<string, unknown> = { analysisRunId: RUN_ID }) {
+  return request(exportApp(fake))
     .post('/api/stats/export')
-    .set('Authorization', `Bearer ${orgToken()}`)
-    .set('X-CSRF-Token', CSRF_TOKEN)
+    .set(authHeaders(orgToken()))
     .send(body);
 }
 
@@ -115,21 +93,20 @@ beforeEach(() => {
 
 describe('POST /export — 요청 검증', () => {
   it('analysisRunId가 UUID 형식이 아니면 400이고 DB에 접근하지 않는다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const res = await postExport(pool, { analysisRunId: 'not-a-uuid' });
+    const fake = makeExportFake();
+    const res = await postExport(fake, { analysisRunId: 'not-a-uuid' });
+    fake.assertNoUnmatched();
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('INVALID_REQUEST');
-    expect(pool.query).toHaveBeenCalledTimes(2); // auth + capability만, SELECT 없음
+    expect(fake.calls).toHaveLength(2); // auth + capability만, SELECT 없음
   });
 });
 
 describe('POST /export — run 조회 실패', () => {
   it('0행이면 404 RUN_NOT_FOUND + denied 감사', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, null);
-    const res = await postExport(pool);
+    const fake = makeExportFake(null);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(404);
     expect(res.body.code).toBe('RUN_NOT_FOUND');
     expect(writeAuditLogStrict).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
@@ -139,38 +116,35 @@ describe('POST /export — run 조회 실패', () => {
   });
 
   it('조회 SQL이 organization_id로도 거른다 (조직 스코프 회귀 방지)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, null);
-    await postExport(pool);
-    const selectCall = (pool.query as ReturnType<typeof vi.fn>).mock.calls[2];
-    expect(selectCall[0]).toMatch(/organization_id/);
-    expect(selectCall[1]).toEqual([ORG_ID, RUN_ID]);
+    const fake = makeExportFake(null);
+    await postExport(fake);
+    fake.assertNoUnmatched();
+    const selectCall = fake.calls[2]!;
+    expect(selectCall.sql).toMatch(/organization_id/);
+    expect(selectCall.params).toEqual([ORG_ID, RUN_ID]);
   });
 
   it("status='failed' run은 409 RUN_NOT_SUCCEEDED — 실패 run은 export 대상이 아니다", async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(), result: null, status: 'failed',
       requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('RUN_NOT_SUCCEEDED');
     expect(writeAuditLogStrict).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: 'denied' }));
   });
 
   it('요청단위 억제(succeeded + cacheable=false) run도 succeeded면 export 성공한다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(), result: baseResult(), status: 'succeeded',
       requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(200);
   });
 
@@ -178,9 +152,7 @@ describe('POST /export — run 조회 실패', () => {
   // 실행(analysisRunId)은 만료 전까지 내보내기가 가능해야 하고, 저장된 결과가 그대로(재계산 없이)
   // 출력돼야 한다. 내보내기는 현재 카탈로그를 조회하지 않고 저장된 variableKey 문자열을 그대로 쓴다.
   it('삭제된 변수(patient.identity.ageAtEvaluation)로 저장된 실행도 저장된 값 그대로 내보낸다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest({ catalogVersion: 'v27-case-sum-knee' }),
       result: baseResult({
         continuous: [{
@@ -192,7 +164,8 @@ describe('POST /export — run 조회 실패', () => {
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(200);
     expect(res.text).toContain('patient.identity.ageAtEvaluation');
     expect(res.text).toContain('41.5');
@@ -200,14 +173,13 @@ describe('POST /export — run 조회 실패', () => {
   });
 
   it('만료됐지만 아직 cleanup 전이면(행이 존재) 410 RUN_EXPIRED', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(), result: baseResult(), status: 'succeeded',
       requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() - 1000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(410);
     expect(res.body.code).toBe('RUN_EXPIRED');
     expect(writeAuditLogStrict).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
@@ -216,94 +188,89 @@ describe('POST /export — run 조회 실패', () => {
   });
 
   it('cleanup이 이미 지운 만료 행은 그냥 0행 — 404로 수렴한다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, null); // cleanup 후엔 조회 결과가 그냥 없다
-    const res = await postExport(pool);
+    const fake = makeExportFake(null); // cleanup 후엔 조회 결과가 그냥 없다
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(404);
   });
 
   it('저장된 manifest/result가 스키마를 위반하면 500이고 CSV가 전송되지 않는다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: { broken: true }, result: baseResult(), status: 'succeeded',
       requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
     expect(writeAuditLogStrict).not.toHaveBeenCalled();
   });
 
   it('requested_disclosure_profile이 aggregate가 아니면 500(방어적 검사)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(), result: baseResult(), status: 'succeeded',
       requested_disclosure_profile: 'limited_row',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
   });
 
   it('감사 INSERT가 실패하면 CSV가 전송되지 않고 500을 반환한다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(), result: baseResult(), status: 'succeeded',
       requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
     writeAuditLogStrict.mockRejectedValueOnce(new Error('audit insert failed'));
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(500);
     expect(res.text).not.toContain('analysisRunId');
+    // 500은 감사 INSERT 실패에서 나와야 한다(미매치 쿼리 거부가 아니라).
+    expect(writeAuditLogStrict).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('POST /export — 조직 공유 캐시 정책 (§7 [필수 수정 2])', () => {
   it('요청자가 누구였는지와 무관하게 같은 조직이면 export가 성공한다 (requested_by 소유권 검사 없음)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool); // 이 요청은 USER_ID로 인증됨
+    // 이 요청은 TEST_USER_ID로 인증됨
     // 이 run을 실제로 만든 사람이 다른 사용자(예: 의사 A)였다는 걸 SQL이 조회하지도, 비교하지도
     // 않는다는 것을 보여준다 — SELECT 자체가 requested_by를 안 select하고 WHERE에도 안 씀
     // (§7 [필수 수정 2]: 조직 공유 캐시이므로 캐시 히트로 같은 결과를 받은 B도 export해야 한다).
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(), result: baseResult(), status: 'succeeded',
       requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(200);
-    const selectCall = (pool.query as ReturnType<typeof vi.fn>).mock.calls[2];
-    expect(selectCall[0]).not.toMatch(/requested_by/);
+    const selectCall = fake.calls[2]!;
+    expect(selectCall.sql).not.toMatch(/requested_by/);
   });
 });
 
 describe('POST /export — analysisMode별 CSV export 차단', () => {
   it('bivariate 결과는 400 BIVARIATE_EXPORT_NOT_SUPPORTED + denied 감사(기존 동작 회귀 방지)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest({ analysisMode: 'bivariate' }),
       result: { continuous: [], discrete: [], bivariate: { method: 'welch_t', suppressed: true } },
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('BIVARIATE_EXPORT_NOT_SUPPORTED');
     expect(writeAuditLogStrict).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: 'denied' }));
   });
 
   it('correlation_matrix 결과는 400 CORRELATION_MATRIX_EXPORT_NOT_SUPPORTED + denied 감사(PR3-B)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest({ analysisMode: 'correlation_matrix' }),
       result: {
         continuous: [], discrete: [],
@@ -312,31 +279,29 @@ describe('POST /export — analysisMode별 CSV export 차단', () => {
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('CORRELATION_MATRIX_EXPORT_NOT_SUPPORTED');
     expect(writeAuditLogStrict).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: 'denied' }));
   });
 
   it('PR4-A2 — 억제된 regression 결과도 200 CSV(집계 사유만, denied 아닌 success 감사)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest({ analysisMode: 'regression' }),
       result: { continuous: [], discrete: [], regression: { suppressed: true, reasonCode: 'MIN_COHORT_NOT_MET' } },
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(200);
     expect(res.text).toContain('MIN_COHORT_NOT_MET');
     expect(writeAuditLogStrict).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: 'success' }));
   });
 
   it('PR4-A2 — 정상 regression 결과는 계수·적합도·VIF·spline CSV를 담되 pointDiagnostics는 넣지 않는다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest({ analysisMode: 'regression' }),
       result: {
         continuous: [], discrete: [],
@@ -371,7 +336,8 @@ describe('POST /export — analysisMode별 CSV export 차단', () => {
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(200);
     expect(res.text).toContain('coefficients');
     expect(res.text).toContain('intercept');
@@ -385,29 +351,27 @@ describe('POST /export — analysisMode별 CSV export 차단', () => {
   });
 
   it('analysisMode가 없는 구버전 저장 결과는 descriptive로 취급해 export를 허용한다(하위호환)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(), // analysisMode 필드 자체가 없음
       result: baseResult(),
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(200);
   });
 });
 
 describe('POST /export — 성공 경로 + CSV 포맷', () => {
   it('성공하면 200 + CSV(BOM, analysisRunId 메타헤더) + success 감사', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(), result: baseResult(), status: 'succeeded',
       requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toMatch(/text\/csv/);
     expect(res.headers['content-disposition']).toContain(RUN_ID);
@@ -420,23 +384,20 @@ describe('POST /export — 성공 경로 + CSV 포맷', () => {
   });
 
   it('억제된 변수는 다른 필드 없이 suppressed=true 행만 낸다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(),
       result: baseResult({ continuous: [{ variableKey: 'knee.relatedness.max', kind: 'continuous', suppressed: true }] }),
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(200);
     expect(res.text).toContain('continuous,knee.relatedness.max,true,,,,,,,,,,,,,,,,,');
   });
 
   it('음수 통계값은 문자열 이스케이프 없이 그대로 숫자로 나온다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(),
       result: baseResult({
         continuous: [{
@@ -450,7 +411,8 @@ describe('POST /export — 성공 경로 + CSV 포맷', () => {
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(200);
     // -5.2가 '-5.2로 이스케이프되지 않고 그대로 숫자 셀로 남는지.
     expect(res.text).toContain(',-5.2,');
@@ -458,9 +420,7 @@ describe('POST /export — 성공 경로 + CSV 포맷', () => {
   });
 
   it('missingPatterns null(억제)과 []([]0건)을 다른 표기로 구분한다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(),
       result: baseResult({
         continuous: [
@@ -481,16 +441,15 @@ describe('POST /export — 성공 경로 + CSV 포맷', () => {
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(200);
     expect(res.text).toContain('(비공개)');
     expect(res.text).toContain('(없음)');
   });
 
   it('=로 시작하는 범주형 level 라벨은 CSV formula injection 방어로 이스케이프된다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(),
       result: baseResult({
         discrete: [{
@@ -503,7 +462,8 @@ describe('POST /export — 성공 경로 + CSV 포맷', () => {
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(200);
     expect(res.text).toContain("'=1+1");
     expect(res.text).not.toMatch(/[^']=1\+1/); // escape 안 된 원문 "=1+1"이 단독으로 남아있지 않아야 함
@@ -513,9 +473,7 @@ describe('POST /export — 성공 경로 + CSV 포맷', () => {
   // rawLevels(권한자 원본)는 저장된 aggregate result에 원래 없지만, 혹시 섞여 들어와도
   // CSV로 새면 안 된다.
   it('other가 있으면 "[공개 기준에 따라 병합한 범주 합계]" 줄이 추가되고, rawLevels는 CSV에 나오지 않는다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(),
       result: baseResult({
         discrete: [{
@@ -530,7 +488,8 @@ describe('POST /export — 성공 경로 + CSV 포맷', () => {
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(200);
     const dataLines = res.text.split('\r\n').filter((l) => l.startsWith('discrete,'));
     expect(dataLines).toHaveLength(3); // 범주 2줄 + 기타 1줄
@@ -540,9 +499,7 @@ describe('POST /export — 성공 경로 + CSV 포맷', () => {
   });
 
   it('other가 없으면 기존과 같은 줄 수다(기타 줄 없음)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(),
       result: baseResult({
         discrete: [{
@@ -555,7 +512,8 @@ describe('POST /export — 성공 경로 + CSV 포맷', () => {
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.text.split('\r\n').filter((l) => l.startsWith('discrete,'))).toHaveLength(2);
     expect(res.text).not.toContain('10명 미만');
   });
@@ -606,15 +564,14 @@ describe('POST /export — Table1 스트라티피케이션 CSV', () => {
   }
 
   it('descriptiveStratified가 있으면 일반 buildCsv가 아니라 Table1 전용 long 포맷을 쓴다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(), // analysisMode='descriptive' — 일반 descriptive와 동일
       result: stratifiedResult(),
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(200);
     expect(res.text.charCodeAt(0)).toBe(0xfeff);
     expect(res.text).toContain('stratifyByKey,case.staff.assignedDoctorUserId');
@@ -626,15 +583,14 @@ describe('POST /export — Table1 스트라티피케이션 CSV', () => {
   });
 
   it('억제된 그룹(기타)은 수치 필드 없이 suppressed=true만 낸다 — total 강제 억제 흔적 확인', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(),
       result: stratifiedResult(),
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     const otherRow = res.text.split('\r\n').find((l) => l.startsWith('continuous,knee.relatedness.max,other,'));
     expect(otherRow).toBeDefined();
     expect(otherRow!.split(',')[5]).toBe('true'); // suppressed 컬럼
@@ -642,15 +598,14 @@ describe('POST /export — Table1 스트라티피케이션 CSV', () => {
   });
 
   it('부가정보(missingPatterns/histogram/boxplot/mergedLevels)는 애초에 없으므로 CSV에도 없다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(),
       result: stratifiedResult(),
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.text).not.toContain('missingPatterns');
     expect(res.text).not.toContain('histogram');
     expect(res.text).not.toContain('boxplot');
@@ -658,9 +613,7 @@ describe('POST /export — Table1 스트라티피케이션 CSV', () => {
   });
 
   it('전체 요청 자체가 억제되면 stratifyByKey/reasonCode만 있는 최소 CSV를 낸다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireRunRow(pool, {
+    const fake = makeExportFake({
       manifest: baseManifest(),
       result: {
         continuous: [], discrete: [],
@@ -669,7 +622,8 @@ describe('POST /export — Table1 스트라티피케이션 CSV', () => {
       status: 'succeeded', requested_disclosure_profile: 'aggregate',
       expires_at: new Date(Date.now() + 86400000).toISOString(),
     });
-    const res = await postExport(pool);
+    const res = await postExport(fake);
+    fake.assertNoUnmatched();
     expect(res.status).toBe(200);
     expect(res.text).toContain('MIN_COHORT_NOT_MET');
     expect(res.text).not.toContain('doctor-a');

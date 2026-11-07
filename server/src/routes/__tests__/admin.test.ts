@@ -1,88 +1,71 @@
-import crypto from 'crypto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import express from 'express';
-import cookieParser from 'cookie-parser';
-import type { PoolClient } from 'pg';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
-vi.mock('../../config', () => ({
-  default: {
-    env:  'test',
-    cors: { origins: [] },
-    auth: {
-      accessTokenTtl:     900,
-      accessTokenSecret:  'test-access-secret',
-      refreshTokenSecret: 'test-refresh-secret',
-    },
-  },
+vi.mock('../../config', async () => ({
+  default: (await import('../../testing/configMock.js')).testConfig(),
 }));
 
 vi.mock('../../middleware/audit', () => ({ writeAuditLog: vi.fn() }));
 
 import { createAdminRouter } from '../admin';
-import { createErrorHandler } from '../../http/errorHandler';
-import { createLogger } from '../../logger';
-import { generateAccessToken } from '../../auth/tokens';
-import type { Pool } from 'pg';
+import {
+  createFakePool, authSessionHandler, sequenceHandler, pgError,
+  type FakePool, type FakeQueryReply, type RecordedQuery,
+} from '../../testing/fakePool';
+import { makeRouterApp } from '../../testing/app';
+import { makeAccessToken, authHeaders } from '../../testing/tokens';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function makePool(): Pool {
-  return {
-    connect: vi.fn(),
-    query:   vi.fn(),
-  } as unknown as Pool;
-}
-
-// CSRF header value used in all mutating test requests.
-const CSRF_TOKEN = 'ok';
-const CSRF_HASH  = crypto.createHash('sha256').update(CSRF_TOKEN).digest('hex');
-
+// CSRF 원문은 testing/tokens 기본값('ok') — authHeaders()가 같은 값을 x-csrf-token으로 싣는다.
 function token(role: 'admin' | 'doctor' = 'admin'): string {
-  return generateAccessToken({
-    sub: 'admin-1', sessionId: 'sess-1', orgId: 'org-1',
-    role, name: 'Admin User', mustChangePassword: false, csrfHash: CSRF_HASH,
-  }).token;
+  return makeAccessToken({ userId: 'admin-1', sessionId: 'sess-1', orgId: 'org-1', role, name: 'Admin User' });
 }
 
-function makeApp(pool: Pool, auditPool?: Pool) {
-  const app = express();
-  app.use(express.json());
-  app.use(cookieParser());
-  app.use('/api/admin', createAdminRouter(pool, auditPool ?? pool));
-  app.use(createErrorHandler(createLogger({ level: 'silent' }))); // as in createApp (S1)
-  return app;
+function adminApp(fake: FakePool, auditFake?: FakePool) {
+  return makeRouterApp(a => a.use('/api/admin', createAdminRouter(fake.pool, (auditFake ?? fake).pool)));
 }
 
-// Wire auth middleware session check then successive query results.
-function wireQueries(pool: Pool, ...results: unknown[][]): void {
-  const mock = pool.query as ReturnType<typeof vi.fn>;
-  mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth middleware
-  for (const rows of results) {
-    mock.mockResolvedValueOnce({ rows });
-  }
+// auth middleware session check(authSessionHandler), then successive pool.query replies in call order.
+function fakePoolReplies(...replies: (FakeQueryReply | Error)[]): FakePool {
+  return createFakePool({
+    handlers: [authSessionHandler(), sequenceHandler(replies, { via: 'pool' })],
+  });
 }
 
-// Wire auth middleware on pool.query, and a transaction client on pool.connect.
-// client sequence: BEGIN (implied), ...results, COMMIT/ROLLBACK (implied).
-function wireTxClient(pool: Pool, ...results: { rows: unknown[] }[]): ReturnType<typeof vi.fn> {
-  (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-  const clientMock = {
-    query:   vi.fn(),
-    release: vi.fn(),
-  } as unknown as PoolClient;
-  const q = clientMock.query as ReturnType<typeof vi.fn>;
-  q.mockResolvedValueOnce(undefined); // BEGIN
-  for (const r of results) {
-    q.mockResolvedValueOnce(r);
-  }
-  q.mockResolvedValue(undefined); // COMMIT / ROLLBACK (catches all remaining calls)
-  (pool.connect as ReturnType<typeof vi.fn>).mockResolvedValueOnce(clientMock);
-  return q;
+// auth middleware session check, then successive pool.query results (rows) in call order.
+function fakeQueries(...results: unknown[][]): FakePool {
+  return fakePoolReplies(...results.map(rows => ({ rows })));
+}
+
+const TX_CONTROL = /^\s*(BEGIN|COMMIT|ROLLBACK)\b/i;
+
+// auth middleware on pool.query, and a transaction client on pool.connect.
+// client sequence: BEGIN (implied), ...results, COMMIT/ROLLBACK (implied) — 트랜잭션 제어문은 fakePool
+// 기본 응답(빈 결과)으로 넘어가고 fake.calls·fake.transactions에 기록된다.
+function fakeTx(...results: (FakeQueryReply | Error)[]): FakePool {
+  return createFakePool({
+    handlers: [
+      authSessionHandler(),
+      sequenceHandler(results, { name: 'tx', via: 'client', match: sql => !TX_CONTROL.test(sql) }),
+    ],
+  });
+}
+
+// 트랜잭션 client가 보낸 쿼리(기존 테스트의 clientMock.query.mock.calls에 해당 — BEGIN/COMMIT 포함).
+function clientCalls(fake: FakePool): RecordedQuery[] {
+  return fake.calls.filter(c => c.via === 'client');
+}
+
+// auditPool(감사 로그 조회 전용) — 인증 미들웨어는 pool 쪽이라 세션 확인 handler가 없다.
+function fakeAuditPool(...results: unknown[][]): FakePool {
+  return createFakePool({
+    handlers: [sequenceHandler(results.map(rows => ({ rows })), { name: 'audit' })],
+  });
 }
 
 const DEVICE_ROW = {
@@ -103,31 +86,32 @@ describe('GET /api/admin/devices', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when not authenticated', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [] });
-    const res = await request(makeApp(pool)).get('/api/admin/devices');
+    const fake = fakeQueries(); // no Bearer — the auth middleware rejects before any query
+    const res = await request(adminApp(fake)).get('/api/admin/devices');
     expect(res.status).toBe(401);
+    fake.assertNoUnmatched();
+    expect(fake.calls).toHaveLength(0);
   });
 
   it('returns 403 when user is not admin', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries(); // auth only
+    const res = await request(adminApp(fake))
       .get('/api/admin/devices')
       .set('Authorization', `Bearer ${token('doctor')}`);
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('FORBIDDEN');
   });
 
   it('returns device list with suspicious flag', async () => {
-    const pool = makePool();
-    wireQueries(pool, [DEVICE_ROW]);
+    const fake = fakeQueries([DEVICE_ROW]);
 
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .get('/api/admin/devices')
       .set('Authorization', `Bearer ${token('admin')}`);
 
     expect(res.status).toBe(200);
+    fake.assertNoUnmatched();
     expect(res.body.devices).toHaveLength(1);
     expect(res.body.devices[0].status).toBe('pending');
     // Electron UA → not suspicious
@@ -135,17 +119,17 @@ describe('GET /api/admin/devices', () => {
   });
 
   it('flags non-Electron UA as suspicious', async () => {
-    const pool = makePool();
-    wireQueries(pool, [{
+    const fake = fakeQueries([{
       ...DEVICE_ROW,
       register_ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120',
     }]);
 
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .get('/api/admin/devices')
       .set('Authorization', `Bearer ${token('admin')}`);
 
     expect(res.body.devices[0].suspicious).toBe(true);
+    fake.assertNoUnmatched();
   });
 });
 
@@ -156,53 +140,49 @@ describe('POST /api/admin/devices/:id/approve', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 403 for non-admin', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries(); // auth only
+    const res = await request(adminApp(fake))
       .post('/api/admin/devices/dev-1/approve')
-      .set('Authorization', `Bearer ${token('doctor')}`)
-      .set('x-csrf-token', 'ok');
+      .set(authHeaders(token('doctor')));
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
   });
 
   it('returns 404 when device does not exist', async () => {
-    const pool = makePool();
-    wireQueries(pool,
+    const fake = fakeQueries(
       [],               // UPDATE returns nothing (no pending row with this id)
       []                // SELECT status returns nothing
     );
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/devices/missing-id/approve')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', 'ok');
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(404);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('DEVICE_NOT_FOUND');
   });
 
   it('returns 409 when device is not pending', async () => {
-    const pool = makePool();
-    wireQueries(pool,
+    const fake = fakeQueries(
       [],                                   // UPDATE: no pending row
       [{ status: 'active' }]                // SELECT: device exists but not pending
     );
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/devices/dev-1/approve')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', 'ok');
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(409);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('DEVICE_NOT_PENDING');
   });
 
   it('approves pending device and returns active status', async () => {
-    const pool = makePool();
-    wireQueries(pool, [{ id: 'dev-1', status: 'active' }]);
+    const fake = fakeQueries([{ id: 'dev-1', status: 'active' }]);
 
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/devices/dev-1/approve')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', 'ok');
+      .set(authHeaders(token('admin')));
 
     expect(res.status).toBe(200);
+    fake.assertNoUnmatched();
     expect(res.body.deviceId).toBe('dev-1');
     expect(res.body.status).toBe('active');
   });
@@ -215,39 +195,36 @@ describe('POST /api/admin/devices/:id/revoke', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 404 when device does not exist', async () => {
-    const pool = makePool();
-    wireQueries(pool, [], []);
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries([], []);
+    const res = await request(adminApp(fake))
       .post('/api/admin/devices/gone/revoke')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', 'ok');
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(404);
+    fake.assertNoUnmatched();
   });
 
   it('returns 409 when device is already revoked', async () => {
-    const pool = makePool();
-    wireQueries(pool,
+    const fake = fakeQueries(
       [],                               // UPDATE: nothing (already revoked)
       [{ status: 'revoked' }]           // SELECT confirms it exists
     );
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/devices/dev-1/revoke')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', 'ok');
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(409);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('DEVICE_ALREADY_REVOKED');
   });
 
   it('revokes active device and returns revoked status', async () => {
-    const pool = makePool();
-    wireQueries(pool, [{ id: 'dev-1', status: 'revoked' }]);
+    const fake = fakeQueries([{ id: 'dev-1', status: 'revoked' }]);
 
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/devices/dev-1/revoke')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', 'ok');
+      .set(authHeaders(token('admin')));
 
     expect(res.status).toBe(200);
+    fake.assertNoUnmatched();
     expect(res.body.status).toBe('revoked');
   });
 });
@@ -274,56 +251,49 @@ describe('PATCH /api/admin/org-settings', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   function tokenNoOrg(): string {
-    return generateAccessToken({
-      sub: 'admin-1', sessionId: 'sess-1', orgId: null as unknown as string,
-      role: 'admin', name: 'Admin User', mustChangePassword: false, csrfHash: CSRF_HASH,
-    }).token;
+    return makeAccessToken({ userId: 'admin-1', sessionId: 'sess-1', orgId: null, role: 'admin', name: 'Admin User' });
   }
 
   it('returns 403 for non-admin', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries(); // auth only
+    const res = await request(adminApp(fake))
       .patch('/api/admin/org-settings')
-      .set('Authorization', `Bearer ${token('doctor')}`)
-      .set('x-csrf-token', 'ok')
+      .set(authHeaders(token('doctor')))
       .send({ inferenceDevice: 'cpu' });
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
   });
 
   it('returns 403 ORG_REQUIRED when admin has no organization', async () => {
-    const pool = makePool();
-    wireQueries(pool); // auth only
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries(); // auth only
+    const res = await request(adminApp(fake))
       .patch('/api/admin/org-settings')
-      .set('Authorization', `Bearer ${tokenNoOrg()}`)
-      .set('x-csrf-token', 'ok')
+      .set(authHeaders(tokenNoOrg()))
       .send({ inferenceDevice: 'cpu' });
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('ORG_REQUIRED');
   });
 
   it('returns 400 for invalid device value', async () => {
-    const pool = makePool();
-    wireQueries(pool); // auth only — validation fails before any DB write
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries(); // auth only — validation fails before any DB write
+    const res = await request(adminApp(fake))
       .patch('/api/admin/org-settings')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', 'ok')
+      .set(authHeaders(token('admin')))
       .send({ inferenceDevice: 'tpu' });
     expect(res.status).toBe(400);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('INVALID_BODY');
   });
 
   it('updates inference device and returns it', async () => {
-    const pool = makePool();
-    wireQueries(pool, [{ inference_device: 'cuda' }]); // auth, then UPDATE RETURNING
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries([{ inference_device: 'cuda' }]); // auth, then UPDATE RETURNING
+    const res = await request(adminApp(fake))
       .patch('/api/admin/org-settings')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', 'ok')
+      .set(authHeaders(token('admin')))
       .send({ inferenceDevice: 'cuda' });
     expect(res.status).toBe(200);
+    fake.assertNoUnmatched();
     expect(res.body.inferenceDevice).toBe('cuda');
   });
 });
@@ -332,39 +302,35 @@ describe('GET /api/admin/audit', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when unauthenticated', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [] });
-    const res = await request(makeApp(pool)).get('/api/admin/audit');
+    const fake = fakeQueries(); // no Bearer — the auth middleware rejects before any query
+    const res = await request(adminApp(fake)).get('/api/admin/audit');
     expect(res.status).toBe(401);
+    fake.assertNoUnmatched();
+    expect(fake.calls).toHaveLength(0);
   });
 
   it('returns 403 for non-admin role', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries(); // auth only
+    const res = await request(adminApp(fake))
       .get('/api/admin/audit')
       .set('Authorization', `Bearer ${token('doctor')}`);
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
   });
 
   it('returns paginated audit logs from auditPool', async () => {
-    const pool      = makePool();
-    const auditPool = makePool();
-
     // pool: auth middleware session check
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+    const fake = fakeQueries();
 
     // auditPool: COUNT query + SELECT query (Promise.all)
-    const auditMock = auditPool.query as ReturnType<typeof vi.fn>;
-    auditMock
-      .mockResolvedValueOnce({ rows: [{ total: '1' }] })
-      .mockResolvedValueOnce({ rows: [AUDIT_ROW] });
+    const auditFake = fakeAuditPool([{ total: '1' }], [AUDIT_ROW]);
 
-    const res = await request(makeApp(pool, auditPool))
+    const res = await request(adminApp(fake, auditFake))
       .get('/api/admin/audit')
       .set('Authorization', `Bearer ${token('admin')}`);
 
     expect(res.status).toBe(200);
+    fake.assertNoUnmatched();
     expect(res.body.items).toHaveLength(1);
     expect(res.body.items[0].action).toBe('patient_view');
     expect(res.body.total).toBe(1);
@@ -373,109 +339,95 @@ describe('GET /api/admin/audit', () => {
   });
 
   it('applies action/targetType filters', async () => {
-    const pool      = makePool();
-    const auditPool = makePool();
+    const fake      = fakeQueries();
+    const auditFake = fakeAuditPool([{ total: '0' }], []);
 
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    const auditMock = auditPool.query as ReturnType<typeof vi.fn>;
-    auditMock
-      .mockResolvedValueOnce({ rows: [{ total: '0' }] })
-      .mockResolvedValueOnce({ rows: [] });
-
-    const res = await request(makeApp(pool, auditPool))
+    const res = await request(adminApp(fake, auditFake))
       .get('/api/admin/audit?action=login&targetType=session')
       .set('Authorization', `Bearer ${token('admin')}`);
 
     expect(res.status).toBe(200);
+    fake.assertNoUnmatched();
     expect(res.body.items).toHaveLength(0);
 
     // Both COUNT and SELECT queries must have received filter params
-    const calls = auditMock.mock.calls;
-    expect(calls[0][1]).toContain('login');
-    expect(calls[0][1]).toContain('session');
+    const calls = auditFake.calls;
+    expect(calls[0]!.params).toContain('login');
+    expect(calls[0]!.params).toContain('session');
   });
 
   it('returns 400 for limit exceeding 200', async () => {
-    const pool      = makePool();
-    const auditPool = makePool();
+    const fake      = fakeQueries();
+    const auditFake = fakeAuditPool();
 
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-
-    const res = await request(makeApp(pool, auditPool))
+    const res = await request(adminApp(fake, auditFake))
       .get('/api/admin/audit?limit=9999')
       .set('Authorization', `Bearer ${token('admin')}`);
 
     expect(res.status).toBe(400);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('INVALID_PARAMS');
-    expect((auditPool.query as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+    expect(auditFake.calls).toHaveLength(0);
   });
 
   it('returns 400 for invalid actorUserId (not a UUID)', async () => {
-    const pool      = makePool();
-    const auditPool = makePool();
+    const fake      = fakeQueries();
+    const auditFake = fakeAuditPool();
 
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-
-    const res = await request(makeApp(pool, auditPool))
+    const res = await request(adminApp(fake, auditFake))
       .get('/api/admin/audit?actorUserId=not-a-uuid')
       .set('Authorization', `Bearer ${token('admin')}`);
 
     expect(res.status).toBe(400);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('INVALID_PARAMS');
     // auditPool should not have been queried
-    expect((auditPool.query as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+    expect(auditFake.calls).toHaveLength(0);
   });
 
   it('returns 400 for invalid from date', async () => {
-    const pool      = makePool();
-    const auditPool = makePool();
+    const fake      = fakeQueries();
+    const auditFake = fakeAuditPool();
 
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-
-    const res = await request(makeApp(pool, auditPool))
+    const res = await request(adminApp(fake, auditFake))
       .get('/api/admin/audit?from=not-a-date')
       .set('Authorization', `Bearer ${token('admin')}`);
 
     expect(res.status).toBe(400);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('INVALID_PARAMS');
   });
 
   it('records admin_audit_view in audit log after successful query', async () => {
     const { writeAuditLog } = await import('../../middleware/audit.js');
-    const pool      = makePool();
-    const auditPool = makePool();
+    const fake      = fakeQueries();
+    const auditFake = fakeAuditPool([{ total: '0' }], []);
 
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    (auditPool.query as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ rows: [{ total: '0' }] })
-      .mockResolvedValueOnce({ rows: [] });
-
-    await request(makeApp(pool, auditPool))
+    await request(adminApp(fake, auditFake))
       .get('/api/admin/audit')
       .set('Authorization', `Bearer ${token('admin')}`);
 
     expect(writeAuditLog).toHaveBeenCalledWith(
-      pool,
+      fake.pool,
       expect.objectContaining({ action: 'admin_audit_view', outcome: 'success' })
     );
+    fake.assertNoUnmatched();
+    auditFake.assertNoUnmatched();
   });
 
   it('uses auditPool not pool for queries', async () => {
-    const pool      = makePool();
-    const auditPool = makePool();
+    const fake      = fakeQueries();
+    const auditFake = fakeAuditPool([{ total: '0' }], []);
 
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    (auditPool.query as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ rows: [{ total: '0' }] })
-      .mockResolvedValueOnce({ rows: [] });
-
-    await request(makeApp(pool, auditPool))
+    await request(adminApp(fake, auditFake))
       .get('/api/admin/audit')
       .set('Authorization', `Bearer ${token('admin')}`);
 
     // auditPool called twice (COUNT + SELECT), pool only once (auth)
-    expect((pool.query as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
-    expect((auditPool.query as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.callsTo('auth.session')).toHaveLength(1);
+    expect(auditFake.calls).toHaveLength(2);
+    auditFake.assertNoUnmatched();
   });
 });
 
@@ -492,36 +444,35 @@ describe('GET /api/admin/users', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 403 for non-admin', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries(); // auth only
+    const res = await request(adminApp(fake))
       .get('/api/admin/users')
       .set('Authorization', `Bearer ${token('doctor')}`);
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
   });
 
   it('returns user list with disabled flag', async () => {
-    const pool = makePool();
-    wireQueries(pool, [USER_ROW, { ...USER_ROW, id: 'user-3', disabled_at: new Date() }]);
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries([USER_ROW, { ...USER_ROW, id: 'user-3', disabled_at: new Date() }]);
+    const res = await request(adminApp(fake))
       .get('/api/admin/users')
       .set('Authorization', `Bearer ${token('admin')}`);
     expect(res.status).toBe(200);
+    fake.assertNoUnmatched();
     expect(res.body.users).toHaveLength(2);
     expect(res.body.users[0].disabled).toBe(false);
     expect(res.body.users[1].disabled).toBe(true);
   });
 
   it('answers a DB failure with the 500 envelope (central error handler, S1)', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ rows: [{ exists: 1 }] }) // auth middleware
-      .mockRejectedValueOnce(new Error('connection terminated'));
-    const res = await request(makeApp(pool))
+    const fake = fakePoolReplies(new Error('connection terminated')); // auth middleware: authSessionHandler
+    const res = await request(adminApp(fake))
       .get('/api/admin/users')
       .set('Authorization', `Bearer ${token('admin')}`);
     expect(res.status).toBe(500);
+    fake.assertNoUnmatched();
     expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
+    expect(fake.callsTo('sequence')).toHaveLength(1); // 500은 준비한 DB 오류에서 나왔다
   });
 });
 
@@ -535,80 +486,74 @@ describe('POST /api/admin/users', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 403 for non-admin', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries(); // auth only
+    const res = await request(adminApp(fake))
       .post('/api/admin/users')
-      .set('Authorization', `Bearer ${token('doctor')}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(token('doctor')))
       .send({ loginId: 'new1', name: 'New', role: 'doctor', password: VALID_PASSWORD });
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
   });
 
   it('returns 400 when password does not meet policy (too short)', async () => {
-    const pool = makePool();
-    wireQueries(pool); // only auth
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries(); // only auth
+    const res = await request(adminApp(fake))
       .post('/api/admin/users')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(token('admin')))
       .send({ loginId: 'new1', name: 'New', role: 'doctor', password: 'short' });
     expect(res.status).toBe(400);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('PASSWORD_POLICY');
   });
 
   it('returns 400 when password has no special character', async () => {
-    const pool = makePool();
-    wireQueries(pool);
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries();
+    const res = await request(adminApp(fake))
       .post('/api/admin/users')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(token('admin')))
       .send({ loginId: 'new1', name: 'New', role: 'doctor', password: 'NoSpecial1234' });
     expect(res.status).toBe(400);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('PASSWORD_POLICY');
   });
 
   it('creates user and returns 201', async () => {
-    const pool = makePool();
     const insertedRow = { ...USER_ROW, id: 'new-id', login_id: 'new1', name: 'New' };
-    wireQueries(pool, [insertedRow]);
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries([insertedRow]);
+    const res = await request(adminApp(fake))
       .post('/api/admin/users')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(token('admin')))
       .send({ loginId: 'new1', name: 'New', role: 'doctor', password: VALID_PASSWORD });
     expect(res.status).toBe(201);
+    fake.assertNoUnmatched();
     expect(res.body.user.loginId).toBe('new1');
     expect(res.body.user.disabled).toBe(false);
   });
 
   it('returns 409 when loginId already exists (pg 23505)', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    const pgError = Object.assign(new Error('unique violation'), { code: '23505' });
-    (pool.query as ReturnType<typeof vi.fn>).mockRejectedValueOnce(pgError);
-    const res = await request(makeApp(pool))
+    // auth: authSessionHandler, then INSERT INTO users → unique violation
+    const fake = fakePoolReplies(pgError('23505', 'unique violation'));
+    const res = await request(adminApp(fake))
       .post('/api/admin/users')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(token('admin')))
       .send({ loginId: 'dup', name: 'Dup', role: 'doctor', password: VALID_PASSWORD });
     expect(res.status).toBe(409);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('LOGIN_ID_TAKEN');
+    expect(fake.callsTo('sequence')).toHaveLength(1); // 준비한 INSERT 23505까지 도달
   });
 
   it('records admin_user_create audit log on success', async () => {
     const { writeAuditLog } = await import('../../middleware/audit.js');
-    const pool = makePool();
-    wireQueries(pool, [USER_ROW]);
-    await request(makeApp(pool))
+    const fake = fakeQueries([USER_ROW]);
+    await request(adminApp(fake))
       .post('/api/admin/users')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(token('admin')))
       .send({ loginId: 'new1', name: 'New', role: 'doctor', password: VALID_PASSWORD });
-    expect(writeAuditLog).toHaveBeenCalledWith(pool, expect.objectContaining({
+    expect(writeAuditLog).toHaveBeenCalledWith(fake.pool, expect.objectContaining({
       action: 'admin_user_create', outcome: 'success',
     }));
+    fake.assertNoUnmatched();
   });
 });
 
@@ -619,68 +564,63 @@ describe('POST /api/admin/users/:id/reset-password', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 400 when password does not meet policy', async () => {
-    const pool = makePool();
-    wireQueries(pool);
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries();
+    const res = await request(adminApp(fake))
       .post('/api/admin/users/user-2/reset-password')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(token('admin')))
       .send({ password: 'weak' });
     expect(res.status).toBe(400);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('PASSWORD_POLICY');
   });
 
   it('returns 404 when user not found in org', async () => {
-    const pool = makePool();
     // Transaction: BEGIN → SELECT users (empty) → ROLLBACK
-    wireTxClient(pool, { rows: [] });
-    const res = await request(makeApp(pool))
+    const fake = fakeTx({ rows: [] });
+    const res = await request(adminApp(fake))
       .post('/api/admin/users/missing/reset-password')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(token('admin')))
       .send({ password: VALID_PASSWORD });
     expect(res.status).toBe(404);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('USER_NOT_FOUND');
   });
 
   const USER_HASH_ROW = { password_hash: 'old-hash', password_history: [] };
 
   it('resets password, preserves history, invalidates sessions, returns 200', async () => {
-    const pool = makePool();
-    const clientQuery = wireTxClient(
-      pool,
+    const fake = fakeTx(
       { rows: [USER_HASH_ROW] }, // SELECT password_hash + history
       { rows: [] },               // UPDATE users SET password_hash + history
       { rows: [] },               // UPDATE sessions invalidated_at
     );
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/users/user-2/reset-password')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(token('admin')))
       .send({ password: VALID_PASSWORD });
     expect(res.status).toBe(200);
+    fake.assertNoUnmatched();
     expect(res.body.userId).toBe('user-2');
     // Verify sessions invalidation was called
-    const calls = (clientQuery as ReturnType<typeof vi.fn>).mock.calls;
-    const sessionCall = calls.find(c => typeof c[0] === 'string' && (c[0] as string).includes('invalidated_at'));
+    const calls = clientCalls(fake);
+    const sessionCall = calls.find(c => c.sql.includes('invalidated_at'));
     expect(sessionCall).toBeDefined();
     // Verify password_history was included in UPDATE
-    const updateCall = calls.find(c => typeof c[0] === 'string' && (c[0] as string).includes('password_history'));
+    const updateCall = calls.find(c => c.sql.includes('password_history'));
     expect(updateCall).toBeDefined();
   });
 
   it('records admin_user_reset_password audit log', async () => {
     const { writeAuditLog } = await import('../../middleware/audit.js');
-    const pool = makePool();
-    wireTxClient(pool, { rows: [USER_HASH_ROW] }, { rows: [] }, { rows: [] });
-    await request(makeApp(pool))
+    const fake = fakeTx({ rows: [USER_HASH_ROW] }, { rows: [] }, { rows: [] });
+    await request(adminApp(fake))
       .post('/api/admin/users/user-2/reset-password')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(token('admin')))
       .send({ password: VALID_PASSWORD });
-    expect(writeAuditLog).toHaveBeenCalledWith(pool, expect.objectContaining({
+    expect(writeAuditLog).toHaveBeenCalledWith(fake.pool, expect.objectContaining({
       action: 'admin_user_reset_password', outcome: 'success',
     }));
+    fake.assertNoUnmatched();
   });
 });
 
@@ -691,52 +631,48 @@ describe('POST /api/admin/users/:id/disable', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 400 when trying to disable own account', async () => {
-    const pool = makePool();
-    wireQueries(pool); // auth only
+    const fake = fakeQueries(); // auth only
     // Token sub is 'admin-1', so request to disable 'admin-1' is self-disable
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/users/admin-1/disable')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(400);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('CANNOT_DISABLE_SELF');
   });
 
   it('returns 404 when user not found', async () => {
-    const pool = makePool();
-    wireQueries(pool, [], []); // UPDATE → empty, SELECT → empty
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries([], []); // UPDATE → empty, SELECT → empty
+    const res = await request(adminApp(fake))
       .post('/api/admin/users/missing/disable')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(404);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('USER_NOT_FOUND');
   });
 
   it('returns 409 when user already disabled', async () => {
-    const pool = makePool();
-    wireQueries(pool,
+    const fake = fakeQueries(
       [],                      // UPDATE: user already has disabled_at set
       [{ id: 'user-2' }]      // SELECT: user exists
     );
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/users/user-2/disable')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(409);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('USER_ALREADY_DISABLED');
   });
 
   it('disables user and writes audit log', async () => {
     const { writeAuditLog } = await import('../../middleware/audit.js');
-    const pool = makePool();
-    wireQueries(pool, [{ id: 'user-2' }]); // UPDATE RETURNING
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries([{ id: 'user-2' }]); // UPDATE RETURNING
+    const res = await request(adminApp(fake))
       .post('/api/admin/users/user-2/disable')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(200);
-    expect(writeAuditLog).toHaveBeenCalledWith(pool, expect.objectContaining({
+    fake.assertNoUnmatched();
+    expect(writeAuditLog).toHaveBeenCalledWith(fake.pool, expect.objectContaining({
       action: 'admin_user_disable', targetId: 'user-2', outcome: 'success',
     }));
   });
@@ -746,29 +682,27 @@ describe('POST /api/admin/users/:id/enable', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 409 when user already enabled (disabled_at IS NULL)', async () => {
-    const pool = makePool();
-    wireQueries(pool,
+    const fake = fakeQueries(
       [],                      // UPDATE: no rows (already enabled)
       [{ id: 'user-2' }]      // SELECT: user exists
     );
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/users/user-2/enable')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(409);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('USER_ALREADY_ENABLED');
   });
 
   it('enables user and writes audit log', async () => {
     const { writeAuditLog } = await import('../../middleware/audit.js');
-    const pool = makePool();
-    wireQueries(pool, [{ id: 'user-2' }]);
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries([{ id: 'user-2' }]);
+    const res = await request(adminApp(fake))
       .post('/api/admin/users/user-2/enable')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(200);
-    expect(writeAuditLog).toHaveBeenCalledWith(pool, expect.objectContaining({
+    fake.assertNoUnmatched();
+    expect(writeAuditLog).toHaveBeenCalledWith(fake.pool, expect.objectContaining({
       action: 'admin_user_enable', targetId: 'user-2', outcome: 'success',
     }));
   });
@@ -796,21 +730,21 @@ describe('GET /api/admin/signup-requests', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 403 for non-admin', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries(); // auth only
+    const res = await request(adminApp(fake))
       .get('/api/admin/signup-requests')
       .set('Authorization', `Bearer ${token('doctor')}`);
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
   });
 
   it('returns list of pending requests by default', async () => {
-    const pool = makePool();
-    wireQueries(pool, [REQ_ROW]);
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries([REQ_ROW]);
+    const res = await request(adminApp(fake))
       .get('/api/admin/signup-requests')
       .set('Authorization', `Bearer ${token('admin')}`);
     expect(res.status).toBe(200);
+    fake.assertNoUnmatched();
     expect(res.body.requests).toHaveLength(1);
     expect(res.body.requests[0].loginId).toBe('newdoc');
     expect(res.body.requests[0].requestedRole).toBe('doctor');
@@ -818,12 +752,12 @@ describe('GET /api/admin/signup-requests', () => {
   });
 
   it('applies status filter for approved requests', async () => {
-    const pool = makePool();
-    wireQueries(pool, [{ ...REQ_ROW, status: 'approved', reviewer_name: 'Admin User' }]);
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries([{ ...REQ_ROW, status: 'approved', reviewer_name: 'Admin User' }]);
+    const res = await request(adminApp(fake))
       .get('/api/admin/signup-requests?status=approved')
       .set('Authorization', `Bearer ${token('admin')}`);
     expect(res.status).toBe(200);
+    fake.assertNoUnmatched();
     expect(res.body.requests[0].status).toBe('approved');
     expect(res.body.requests[0].reviewerName).toBe('Admin User');
   });
@@ -836,71 +770,65 @@ describe('POST /api/admin/signup-requests/:id/approve', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 403 for non-admin', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries(); // auth only
+    const res = await request(adminApp(fake))
       .post('/api/admin/signup-requests/req-1/approve')
-      .set('Authorization', `Bearer ${token('doctor')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('doctor')));
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
   });
 
   it('returns 404 when request does not exist', async () => {
-    const pool = makePool();
-    wireTxClient(pool, { rows: [] }); // SELECT FOR UPDATE → not found
-    const res = await request(makeApp(pool))
+    const fake = fakeTx({ rows: [] }); // SELECT FOR UPDATE → not found
+    const res = await request(adminApp(fake))
       .post('/api/admin/signup-requests/missing/approve')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(404);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('REQUEST_NOT_FOUND');
   });
 
   it('returns 409 when request has already been reviewed', async () => {
-    const pool = makePool();
-    wireTxClient(pool, { rows: [{ ...REQ_ROW, status: 'approved' }] }); // SELECT FOR UPDATE → already reviewed
-    const res = await request(makeApp(pool))
+    const fake = fakeTx({ rows: [{ ...REQ_ROW, status: 'approved' }] }); // SELECT FOR UPDATE → already reviewed
+    const res = await request(adminApp(fake))
       .post('/api/admin/signup-requests/req-1/approve')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(409);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('ALREADY_REVIEWED');
   });
 
   it('returns 409 when login_id is already taken (INSERT 23505)', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    const clientMock = { query: vi.fn(), release: vi.fn() } as unknown as PoolClient;
-    const q = clientMock.query as ReturnType<typeof vi.fn>;
-    q.mockResolvedValueOnce(undefined);              // BEGIN
-    q.mockResolvedValueOnce({ rows: [REQ_ROW] });   // SELECT FOR UPDATE → pending
-    const pgError = Object.assign(new Error('duplicate key'), { code: '23505' });
-    q.mockRejectedValueOnce(pgError);               // INSERT INTO users → unique violation
-    q.mockResolvedValue(undefined);                 // ROLLBACK (catchall)
-    (pool.connect as ReturnType<typeof vi.fn>).mockResolvedValueOnce(clientMock);
+    // auth: authSessionHandler. client: BEGIN (implied) → SELECT FOR UPDATE → INSERT (reject) → ROLLBACK (implied)
+    const fake = fakeTx(
+      { rows: [REQ_ROW] },                   // SELECT FOR UPDATE → pending
+      pgError('23505', 'duplicate key'),     // INSERT INTO users → unique violation
+    );
 
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/signup-requests/req-1/approve')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(409);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('LOGIN_ID_TAKEN');
+    // 409는 준비한 INSERT 23505에서 나와야 한다 — INSERT까지 도달했고 트랜잭션은 롤백.
+    expect(fake.callsTo('tx')).toHaveLength(2);
+    expect(fake.transactions).toEqual([{ clientId: 1, statements: ['BEGIN', 'ROLLBACK'], outcome: 'rollback' }]);
+    fake.assertAllReleased();
   });
 
   it('returns 200 with userId and tempPassword, creates user with must_change_password', async () => {
-    const pool = makePool();
-    const q    = wireTxClient(
-      pool,
+    const fake = fakeTx(
       { rows: [REQ_ROW] },              // SELECT FOR UPDATE → pending
       { rows: [{ id: 'new-user-1' }] }, // INSERT INTO users RETURNING id
+      { rows: [] },                     // UPDATE user_signup_requests SET status='approved' (기존 catchall이 답하던 쿼리)
     );
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/signup-requests/req-1/approve')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
 
     expect(res.status).toBe(200);
+    fake.assertNoUnmatched();
     expect(res.body.userId).toBe('new-user-1');
     expect(res.body.loginId).toBe('newdoc');
     // tempPassword must satisfy password policy (10+ chars, letter + digit + special)
@@ -910,30 +838,29 @@ describe('POST /api/admin/signup-requests/:id/approve', () => {
     expect(/\d/.test(pw)).toBe(true);
     expect(/[^a-zA-Z0-9]/.test(pw)).toBe(true);
     // INSERT SQL must contain must_change_password = TRUE (literal, not a param)
-    const insertCall = q.mock.calls[2]; // calls: [0]=BEGIN, [1]=SELECT, [2]=INSERT
-    expect(insertCall[0]).toMatch(/must_change_password/i);
-    expect(insertCall[0]).toMatch(/TRUE/i);
+    const insertCall = clientCalls(fake)[2]!; // calls: [0]=BEGIN, [1]=SELECT, [2]=INSERT
+    expect(insertCall.sql).toMatch(/must_change_password/i);
+    expect(insertCall.sql).toMatch(/TRUE/i);
   });
 
   it('writes admin_signup_approve audit log on success', async () => {
     const { writeAuditLog } = await import('../../middleware/audit.js');
-    const pool = makePool();
-    wireTxClient(
-      pool,
+    const fake = fakeTx(
       { rows: [REQ_ROW] },
       { rows: [{ id: 'new-user-2' }] },
+      { rows: [] }, // UPDATE user_signup_requests SET status='approved'
     );
-    await request(makeApp(pool))
+    await request(adminApp(fake))
       .post('/api/admin/signup-requests/req-1/approve')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
 
-    expect(writeAuditLog).toHaveBeenCalledWith(pool, expect.objectContaining({
+    expect(writeAuditLog).toHaveBeenCalledWith(fake.pool, expect.objectContaining({
       action:     'admin_signup_approve',
       targetType: 'user',
       targetId:   'new-user-2',
       outcome:    'success',
     }));
+    fake.assertNoUnmatched();
   });
 });
 
@@ -944,51 +871,47 @@ describe('POST /api/admin/signup-requests/:id/reject', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 403 for non-admin', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries(); // auth only
+    const res = await request(adminApp(fake))
       .post('/api/admin/signup-requests/req-1/reject')
-      .set('Authorization', `Bearer ${token('doctor')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('doctor')));
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
   });
 
   it('returns 404 when request does not exist', async () => {
-    const pool = makePool();
-    wireQueries(pool, [], []); // UPDATE → empty, SELECT → empty
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries([], []); // UPDATE → empty, SELECT → empty
+    const res = await request(adminApp(fake))
       .post('/api/admin/signup-requests/missing/reject')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(404);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('REQUEST_NOT_FOUND');
   });
 
   it('returns 409 when request has already been reviewed', async () => {
-    const pool = makePool();
-    wireQueries(pool,
+    const fake = fakeQueries(
       [],                           // UPDATE: was not pending
       [{ status: 'approved' }]      // SELECT: exists but already reviewed
     );
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/signup-requests/req-1/reject')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(409);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('ALREADY_REVIEWED');
   });
 
   it('returns 200 and writes admin_signup_reject audit log', async () => {
     const { writeAuditLog } = await import('../../middleware/audit.js');
-    const pool = makePool();
-    wireQueries(pool, [{ id: 'req-1' }]); // UPDATE WHERE status='pending' RETURNING
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries([{ id: 'req-1' }]); // UPDATE WHERE status='pending' RETURNING
+    const res = await request(adminApp(fake))
       .post('/api/admin/signup-requests/req-1/reject')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(200);
+    fake.assertNoUnmatched();
     expect(res.body.id).toBe('req-1');
-    expect(writeAuditLog).toHaveBeenCalledWith(pool, expect.objectContaining({
+    expect(writeAuditLog).toHaveBeenCalledWith(fake.pool, expect.objectContaining({
       action:     'admin_signup_reject',
       targetType: 'signup_request',
       targetId:   'req-1',
@@ -1006,42 +929,35 @@ describe('DELETE /api/admin/workspaces/:id/purge', () => {
   const WS_ID = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
 
   it('returns 403 for non-admin', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries(); // auth only
+    const res = await request(adminApp(fake))
       .delete(`/api/admin/workspaces/${WS_ID}/purge`)
-      .set('Authorization', `Bearer ${token('doctor')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('doctor')));
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
   });
 
   it('returns 404 when workspace not found', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    mock.mockResolvedValueOnce({ rows: [] });               // DELETE RETURNING (no rows)
-    const res = await request(makeApp(pool))
+    const fake = fakeQueries([]); // auth: authSessionHandler, then DELETE RETURNING (no rows)
+    const res = await request(adminApp(fake))
       .delete(`/api/admin/workspaces/${WS_ID}/purge`)
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
     expect(res.status).toBe(404);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('WORKSPACE_NOT_FOUND');
   });
 
   it('returns 204 and writes audit log on successful purge', async () => {
     const { writeAuditLog } = await import('../../middleware/audit.js');
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    mock.mockResolvedValueOnce({ rows: [{ id: WS_ID }] }); // DELETE RETURNING
+    const fake = fakeQueries([{ id: WS_ID }]); // auth: authSessionHandler, then DELETE RETURNING
 
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .delete(`/api/admin/workspaces/${WS_ID}/purge`)
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(token('admin')));
 
     expect(res.status).toBe(204);
-    expect(writeAuditLog).toHaveBeenCalledWith(pool, expect.objectContaining({
+    fake.assertNoUnmatched();
+    expect(writeAuditLog).toHaveBeenCalledWith(fake.pool, expect.objectContaining({
       action:     'admin_workspace_purge',
       targetType: 'workspace',
       targetId:   WS_ID,
@@ -1075,14 +991,14 @@ function adminPresetRow(overrides = {}) {
 
 describe('GET /api/admin/presets', () => {
   it('returns org presets with owner name and organizationId for admin', async () => {
-    const pool = makePool();
-    wireQueries(pool, [adminPresetRow()]);
+    const fake = fakeQueries([adminPresetRow()]);
 
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .get('/api/admin/presets')
       .set('Authorization', `Bearer ${token('admin')}`);
 
     expect(res.status).toBe(200);
+    fake.assertNoUnmatched();
     expect(res.body.presets).toHaveLength(1);
     expect(res.body.presets[0].ownerName).toBe('홍길동');
     expect(res.body.presets[0].organizationId).toBe('org-1');
@@ -1091,61 +1007,59 @@ describe('GET /api/admin/presets', () => {
   });
 
   it('returns 403 for non-admin', async () => {
-    const pool = makePool();
-    wireQueries(pool);
+    const fake = fakeQueries();
 
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .get('/api/admin/presets')
       .set('Authorization', `Bearer ${token('doctor')}`);
 
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
   });
 });
 
 describe('POST /api/admin/presets/visibility', () => {
   it('returns 403 without CSRF token', async () => {
-    const pool = makePool();
-    wireQueries(pool);
+    const fake = fakeQueries();
 
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/presets/visibility')
       .set('Authorization', `Bearer ${token('admin')}`)
       .send({ ids: [PRESET_ID_1], visibility: 'organization' });
 
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
   });
 
   it('returns 400 for empty ids', async () => {
-    const pool = makePool();
-    wireQueries(pool);
+    const fake = fakeQueries();
 
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/presets/visibility')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(token('admin')))
       .send({ ids: [], visibility: 'organization' });
 
     expect(res.status).toBe(400);
+    fake.assertNoUnmatched();
     expect(res.body.code).toBe('INVALID_BODY');
   });
 
   it('dedupes ids and returns requested/updated counts', async () => {
     const { writeAuditLog } = await import('../../middleware/audit.js');
-    const pool = makePool();
     // UPDATE … RETURNING id → 2 rows updated.
-    wireQueries(pool, [{ id: PRESET_ID_1 }, { id: PRESET_ID_2 }]);
+    const fake = fakeQueries([{ id: PRESET_ID_1 }, { id: PRESET_ID_2 }]);
 
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/presets/visibility')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(token('admin')))
       // PRESET_ID_2 repeated → deduped to 2 distinct requested.
       .send({ ids: [PRESET_ID_1, PRESET_ID_2, PRESET_ID_2], visibility: 'organization' });
 
     expect(res.status).toBe(200);
+    fake.assertNoUnmatched();
     expect(res.body.requested).toBe(2);
     expect(res.body.updated).toBe(2);
-    expect(writeAuditLog).toHaveBeenCalledWith(pool, expect.objectContaining({
+    expect(writeAuditLog).toHaveBeenCalledWith(fake.pool, expect.objectContaining({
       action:     'admin_presets_set_visibility',
       targetType: 'custom_preset',
       targetId:   null,
@@ -1160,17 +1074,16 @@ describe('POST /api/admin/presets/visibility', () => {
   });
 
   it('reports updated < requested when some rows are already at target', async () => {
-    const pool = makePool();
     // 3 requested, but UPDATE (visibility <> $2 + org scope) returns only 1.
-    wireQueries(pool, [{ id: PRESET_ID_1 }]);
+    const fake = fakeQueries([{ id: PRESET_ID_1 }]);
 
-    const res = await request(makeApp(pool))
+    const res = await request(adminApp(fake))
       .post('/api/admin/presets/visibility')
-      .set('Authorization', `Bearer ${token('admin')}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(token('admin')))
       .send({ ids: [PRESET_ID_1, PRESET_ID_2, PRESET_ID_3], visibility: 'private' });
 
     expect(res.status).toBe(200);
+    fake.assertNoUnmatched();
     expect(res.body.requested).toBe(3);
     expect(res.body.updated).toBe(1);
   });

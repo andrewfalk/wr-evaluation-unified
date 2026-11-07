@@ -1,22 +1,11 @@
-import crypto from 'crypto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import express from 'express';
-import cookieParser from 'cookie-parser';
-import type { Pool } from 'pg';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
-vi.mock('../../config', () => ({
-  default: {
-    env: 'test',
-    cors: { origins: [] },
-    auth: {
-      accessTokenTtl: 900,
-      accessTokenSecret: 'test-access-secret',
-      refreshTokenSecret: 'test-refresh-secret',
-    },
+vi.mock('../../config', async () => ({
+  default: (await import('../../testing/configMock.js')).testConfig({
     stats: {
       python: 'python',
       scriptsDir: '/fake/scripts',
@@ -29,7 +18,7 @@ vi.mock('../../config', () => ({
       maxInputBytes: 2 * 1024 * 1024,
       resultTtlHours: 168,
     },
-  },
+  }),
 }));
 
 const availabilityState = { available: true };
@@ -58,9 +47,12 @@ vi.mock('../../statsEngine', async (importOriginal) => {
 });
 
 import { createStatsRouter } from '../stats';
-import { createErrorHandler } from '../../http/errorHandler';
-import { createLogger } from '../../logger';
-import { generateAccessToken } from '../../auth/tokens';
+import {
+  createFakePool, authSessionHandler, sequenceHandler,
+  type FakePool, type FakeQueryReply,
+} from '../../testing/fakePool';
+import { makeRouterApp } from '../../testing/app';
+import { makeAccessToken, authHeaders, TEST_USER_ID, TEST_ORG_ID } from '../../testing/tokens';
 import { __resetDifferencingGuardForTests, computeQueryFamilyDigest } from '../../statsDifferencingGuard';
 import { __resetInFlightForTests } from '../../statsAnalyzeInFlight';
 import { StatsAnalysisRecipeSchema } from '@wr/contracts';
@@ -69,45 +61,58 @@ import { getFullVariableCatalog } from '@wr/analytics-core/catalog';
 // ---------------------------------------------------------------------------
 // Constants / helpers
 // ---------------------------------------------------------------------------
-const USER_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-const ORG_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
-const CSRF_TOKEN = 'ok';
-const CSRF_HASH = crypto.createHash('sha256').update(CSRF_TOKEN).digest('hex');
+const USER_ID = TEST_USER_ID;
+const ORG_ID = TEST_ORG_ID;
 
-function makePool(): Pool {
-  return { connect: vi.fn(), query: vi.fn() } as unknown as Pool;
-}
-
+// sub=TEST_USER_ID, orgId=TEST_ORG_ID, role doctor, name Dr. Kim, CSRF 'ok' (testing/tokens 기본값).
 function orgToken(): string {
-  return generateAccessToken({
-    sub: USER_ID, sessionId: 'sess-1', orgId: ORG_ID,
-    role: 'doctor', name: 'Dr. Kim', mustChangePassword: false, csrfHash: CSRF_HASH,
-  }).token;
+  return makeAccessToken({ sessionId: 'sess-1' });
 }
 
-function makeApp(pool: Pool) {
-  const app = express();
-  app.use(express.json());
-  app.use(cookieParser());
-  app.use('/api/stats', createStatsRouter(pool));
-  app.use(createErrorHandler(createLogger({ level: 'silent' }))); // as in createApp (S1)
-  return app;
+// 순서형 응답 큐(기존 pool.query / pool.connect() client mock 큐와 같은 순서). wire* 헬퍼가 쌓고,
+// statsApp()이 그 시점의 큐로 가짜 Pool을 만든다 — 인증 미들웨어의 세션 확인은 큐가 아니라
+// authSessionHandler()가 답한다. 큐를 다 쓴 뒤의 쿼리는 미매치로 거부되어 fx.fake.unmatched에 남는다.
+interface StatsFixture {
+  poolReplies: FakeQueryReply[];
+  /** pool.connect()로 얻은 client들의 query 응답 — client가 순서대로 쓰이므로 한 큐로 이어 붙인다(BEGIN/COMMIT 포함). */
+  clientReplies: FakeQueryReply[];
+  fake?: FakePool;
+}
+
+function makeFixture(): StatsFixture {
+  return { poolReplies: [], clientReplies: [] };
+}
+
+function statsApp(fx: StatsFixture) {
+  fx.fake = createFakePool({
+    handlers: [
+      authSessionHandler(),
+      sequenceHandler(fx.poolReplies, { name: 'pool', via: 'pool' }),
+      sequenceHandler(fx.clientReplies, { name: 'client', via: 'client' }),
+    ],
+  });
+  const pool = fx.fake.pool;
+  return makeRouterApp(a => a.use('/api/stats', createStatsRouter(pool)));
+}
+
+function fakeOf(fx: StatsFixture): FakePool {
+  if (!fx.fake) throw new Error('statsApp(fx) was not called');
+  return fx.fake;
 }
 
 function wireAuthAndCapability(
-  pool: Pool,
+  fx: StatsFixture,
   capability: { has_default: boolean; has_grant: boolean } = { has_default: true, has_grant: false },
 ): void {
-  const mock = pool.query as ReturnType<typeof vi.fn>;
-  mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth session check
-  mock.mockResolvedValueOnce({ rows: [capability] }); // requireCapability
+  // auth session check는 authSessionHandler()가 답한다.
+  fx.poolReplies.push({ rows: [capability] }); // requireCapability
 }
 
 // 기술통계가 "필터 후 10명 미만"으로 억제될 때 제한데이터 권한자만 응답 시점에 해제되므로 서버가
 // stats.export_limited_rows 권한을 한 번 더 조회한다 — 이 테스트들은 권한 없는 사용자를 가정한다.
 // 호출 순서: auth → requireCapability → (스냅샷은 pool.connect) → 이 조회.
-function wireNoLimitedRowCapability(pool: Pool): void {
-  (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ has_default: false, has_grant: false }] });
+function wireNoLimitedRowCapability(fx: StatsFixture): void {
+  fx.poolReplies.push({ rows: [{ has_default: false, has_grant: false }] });
 }
 
 const SNAPSHOT_AS_OF = new Date('2024-01-01T00:00:00.000Z');
@@ -128,14 +133,13 @@ function manyDistinctPersons(n: number) {
 
 // Routes/stats.ts의 readSnapshot()이 pool.connect()로 얻은 client에 BEGIN → clock_timestamp
 // → SELECT patient_records → COMMIT 4개를 순서대로 호출한다.
-function wireSnapshot(pool: Pool, patientRecordRows: unknown[]): void {
-  const clientMock = { query: vi.fn(), release: vi.fn() };
-  (pool.connect as ReturnType<typeof vi.fn>).mockResolvedValueOnce(clientMock);
-  const cq = clientMock.query as ReturnType<typeof vi.fn>;
-  cq.mockResolvedValueOnce({ rows: [] }); // BEGIN
-  cq.mockResolvedValueOnce({ rows: [{ snapshot_as_of: SNAPSHOT_AS_OF }] }); // clock_timestamp
-  cq.mockResolvedValueOnce({ rows: patientRecordRows }); // SELECT patient_records
-  cq.mockResolvedValueOnce({ rows: [] }); // COMMIT
+function wireSnapshot(fx: StatsFixture, patientRecordRows: unknown[]): void {
+  fx.clientReplies.push(
+    { rows: [] }, // BEGIN
+    { rows: [{ snapshot_as_of: SNAPSHOT_AS_OF }] }, // clock_timestamp
+    { rows: patientRecordRows }, // SELECT patient_records
+    { rows: [] }, // COMMIT
+  );
 }
 
 const BASE_BODY = {
@@ -157,22 +161,24 @@ beforeEach(() => {
 describe('requireCapability 게이트(기존 미들웨어 재사용 확인)', () => {
   it('워크벤치 런타임 unavailable이면 404', async () => {
     availabilityState.available = false;
-    const pool = makePool();
+    const fx = makeFixture();
     // auth 미들웨어는 requireCapability보다 먼저 실행되고 availability와 무관하게 항상
-    // 세션 검증 쿼리를 날린다 — 404는 그 다음 단계(requireCapability)에서 나온다.
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
+    // 세션 검증 쿼리를 날린다(authSessionHandler) — 404는 그 다음 단계(requireCapability)에서 나온다.
+    const res = await request(statsApp(fx)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(404);
+    fakeOf(fx).assertNoUnmatched();
     // requireCapability는 availability 확인 후 즉시 반환 — capability 조회 쿼리(2번째 호출)는
     // 발생하지 않는다.
-    expect(pool.query).toHaveBeenCalledTimes(1);
+    expect(fakeOf(fx).calls.filter(c => c.via === 'pool')).toHaveLength(1);
+    expect(fakeOf(fx).callsTo('auth.session')).toHaveLength(1);
   });
 
   it('stats.view capability가 없으면 403 + 감사(stats_access_denied — requireCapability 자체 동작)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool, { has_default: false, has_grant: false });
-    const res = await request(makeApp(pool)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
+    const fx = makeFixture();
+    wireAuthAndCapability(fx, { has_default: false, has_grant: false });
+    const res = await request(statsApp(fx)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(403);
+    fakeOf(fx).assertNoUnmatched();
   });
 });
 
@@ -182,10 +188,11 @@ describe('GET /catalog', () => {
   // import해서 대조한다(매 슬라이스 하드코딩 갱신 방지 — analytics-core 쪽 정확한
   // 개수는 coverage/pr0B4FieldMapping.ts fixture가 이미 고정한다).
   it('200 + 정확한 변수 개수, case+job+disease 전부 지원, 감사 로그를 남기지 않는다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const res = await request(makeApp(pool)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    const res = await request(statsApp(fx)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.variables).toHaveLength(getFullVariableCatalog().length + 2);
     expect(res.body.supportedGrains).toEqual(['case', 'job', 'disease']);
     expect(res.body.unsupportedGrains).toHaveLength(0);
@@ -193,10 +200,11 @@ describe('GET /catalog', () => {
   });
 
   it('담당의는 analysisRole:analyzable, 등록일은 analysisRole:filter_only로 노출된다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const res = await request(makeApp(pool)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    const res = await request(statsApp(fx)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     const doctor = res.body.variables.find((v: { key: string }) => v.key === 'case.staff.assignedDoctorUserId');
     const registeredAt = res.body.variables.find((v: { key: string }) => v.key === 'case.meta.registeredAt');
     expect(doctor?.analysisRole).toBe('analyzable');
@@ -211,10 +219,11 @@ describe('GET /catalog', () => {
   // DTO에 배선됐는지 확인한다(계획서 §2단계). 클라이언트 eventLevel select는 이 값에서
   // 만들어진다.
   it('예측 outcome은 predictionRole:outcome + PREDICTION_OUTCOME_SPECS에서 파생된 레벨을 노출한다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const res = await request(makeApp(pool)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    const res = await request(statsApp(fx)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     const anyHigh = res.body.variables.find((v: { key: string }) => v.key === 'diagnosis.rollup.anyHighRelatedness');
     expect(anyHigh?.predictionRole).toBe('outcome');
     expect(anyHigh?.predictionOutcomeLevels).toEqual(['true', 'false']);
@@ -227,11 +236,12 @@ describe('GET /catalog', () => {
   });
 
   it('예측 predictor는 predictionRole:predictor + null 레벨을 노출한다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const res = await request(makeApp(pool)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    const res = await request(statsApp(fx)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
     const bmi = res.body.variables.find((v: { key: string }) => v.key === 'patient.identity.bmi');
     expect(bmi?.predictionRole).toBe('predictor');
+    fakeOf(fx).assertNoUnmatched();
     expect(bmi?.predictionOutcomeLevels).toBeNull();
     expect(bmi?.predictionEventLevels).toBeNull();
 
@@ -242,10 +252,11 @@ describe('GET /catalog', () => {
   // 클라이언트(CatalogPanel/RecipePanel)는 이 DTO로 isGrainCompatible을 호출하므로 복제 예외 플래그가
   // 실리지 않으면 서버는 허용하는데 UI에는 변수가 안 보인다.
   it('대표 직종명만 broadcastToGrains: ["disease"]를 노출하고 나머지는 빈 배열이다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const res = await request(makeApp(pool)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    const res = await request(statsApp(fx)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     const withException = res.body.variables
       .filter((v: { broadcastToGrains: string[] }) => v.broadcastToGrains.length > 0)
       .map((v: { key: string }) => v.key);
@@ -257,11 +268,12 @@ describe('GET /catalog', () => {
   });
 
   it('예측 역할이 없는 변수는 predictionRole:null을 노출한다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const res = await request(makeApp(pool)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    const res = await request(statsApp(fx)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
     const doctor = res.body.variables.find((v: { key: string }) => v.key === 'case.staff.assignedDoctorUserId');
     expect(doctor?.predictionRole).toBeNull();
+    fakeOf(fx).assertNoUnmatched();
   });
 });
 
@@ -271,16 +283,16 @@ describe('POST /preview — 레시피 검증', () => {
   // parse 단계에서 먼저 거부된다(statsAnalysisContext.ts:72, code: 'INVALID_RECIPE').
   // 단순 삭제 대신 이 실제 거부 경로를 HTTP 레벨로 확인한다(리뷰 권장 지적).
   it('grain=person은 이제 유효한 스키마 값이 아니라 400 INVALID_RECIPE로 거부되고 DB에 접근하지 않는다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const res = await request(makeApp(pool))
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({ ...BASE_BODY, grain: 'person' });
     expect(res.status).toBe(400);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.code).toBe('INVALID_RECIPE');
-    expect(pool.connect).not.toHaveBeenCalled();
+    expect(fakeOf(fx).connected).toBe(0);
   });
 });
 
@@ -306,19 +318,18 @@ describe('POST /preview — disease grain(PR0-B3 Part B, PR0-B4 rename)', () => 
   }
 
   it('grain=disease를 GRAIN_NOT_YET_SUPPORTED 없이 처리하고, side===both인 case는 행 2개를 낸다(§2.2, 상병×측 단위)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
     // 11개 case는 side=right(행 1개), 1개 case는 side=both(행 2개) — caseCount=12,
     // observationCount=13, personCount=12(각 case가 다른 person).
     const rows = [
       ...Array.from({ length: 11 }, (_, i) => diseaseCaseRow(`case-${i}`, `person-${i}`, 'right')),
       diseaseCaseRow('case-11', 'person-11', 'both'),
     ];
-    wireSnapshot(pool, rows);
-    const res = await request(makeApp(pool))
+    wireSnapshot(fx, rows);
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({
         grain: 'disease',
         variableKeys: ['knee.diagnosisSide.klGrade'],
@@ -327,6 +338,7 @@ describe('POST /preview — disease grain(PR0-B3 Part B, PR0-B4 rename)', () => 
         formulaPolicies: {},
       });
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.counts.suppressed).toBe(false);
     expect(res.body.counts.personCount).toBe(12);
     expect(res.body.counts.caseCount).toBe(12);
@@ -337,8 +349,8 @@ describe('POST /preview — disease grain(PR0-B3 Part B, PR0-B4 rename)', () => 
   // 규칙에서는 제외지만 변수별 예외(broadcastToGrains: ['disease'])로 disease grain에서는 허용된다.
   // (job grain은 계속 거부 — 아래 job grain 블록의 VARIABLE_GRAIN_MISMATCH 테스트가 고정한다.)
   it('대표 직종명(quasi_identifier·high_cardinality)은 변수별 예외로 disease grain에서 허용된다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
     const rows = Array.from({ length: 12 }, (_, i) => {
       const row = diseaseCaseRow(`case-${i}`, `person-${i}`, 'right');
       row.payload.data.shared = {
@@ -347,11 +359,10 @@ describe('POST /preview — disease grain(PR0-B3 Part B, PR0-B4 rename)', () => 
       } as typeof row.payload.data.shared;
       return row;
     });
-    wireSnapshot(pool, rows);
-    const res = await request(makeApp(pool))
+    wireSnapshot(fx, rows);
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({
         grain: 'disease',
         variableKeys: ['job.rollup.longestTenureJobNameNormalized'],
@@ -360,18 +371,18 @@ describe('POST /preview — disease grain(PR0-B3 Part B, PR0-B4 rename)', () => 
         formulaPolicies: {},
       });
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.counts.suppressed).toBe(false);
     expect(res.body.counts.caseCount).toBe(12);
     expect(res.body.counts.observationCount).toBe(12);
   });
 
   it('쪼그려앉기 단순합은 삭제돼 UNKNOWN_VARIABLE 400으로 거부된다(옛 레시피 안내 대상)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const res = await request(makeApp(pool))
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({
         grain: 'disease',
         variableKeys: ['knee.case.sumSquattingMinutesPerDay'],
@@ -380,8 +391,9 @@ describe('POST /preview — disease grain(PR0-B3 Part B, PR0-B4 rename)', () => 
         formulaPolicies: {},
       });
     expect(res.status).toBe(400);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.errors).toContainEqual(expect.objectContaining({ code: 'UNKNOWN_VARIABLE', path: 'knee.case.sumSquattingMinutesPerDay' }));
-    expect(pool.connect).not.toHaveBeenCalled();
+    expect(fakeOf(fx).connected).toBe(0);
   });
 
   // PR4-B1 — admission 도입으로 이 테스트의 pool.query mock 시퀀스가 더 이상 실제
@@ -416,17 +428,16 @@ describe('POST /preview — job grain(PR0-B3 Part C)', () => {
   }
 
   it('grain=job을 GRAIN_NOT_YET_SUPPORTED 없이 처리하고, 직력 2개인 case는 행 2개를 낸다(§2.2)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
     const rows = [
       ...Array.from({ length: 11 }, (_, i) => jobCaseRow(`case-${i}`, `person-${i}`, 1)),
       jobCaseRow('case-11', 'person-11', 2),
     ];
-    wireSnapshot(pool, rows);
-    const res = await request(makeApp(pool))
+    wireSnapshot(fx, rows);
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({
         grain: 'job',
         variableKeys: ['job.identity.jobNameNormalized'],
@@ -435,6 +446,7 @@ describe('POST /preview — job grain(PR0-B3 Part C)', () => {
         formulaPolicies: {},
       });
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.counts.suppressed).toBe(false);
     expect(res.body.counts.personCount).toBe(12);
     expect(res.body.counts.caseCount).toBe(12);
@@ -442,12 +454,11 @@ describe('POST /preview — job grain(PR0-B3 Part C)', () => {
   });
 
   it('grain과 변수의 grain이 다르고 브로드캐스트 대상도 아니면(quasi_identifier 변수를 job grain에) VARIABLE_GRAIN_MISMATCH 400', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const res = await request(makeApp(pool))
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({
         grain: 'job',
         variableKeys: ['job.rollup.longestTenureJobNameNormalized'], // case grain, quasi_identifier — 브로드캐스트 제외
@@ -456,18 +467,18 @@ describe('POST /preview — job grain(PR0-B3 Part C)', () => {
         formulaPolicies: {},
       });
     expect(res.status).toBe(400);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.errors.some((e: { code: string }) => e.code === 'VARIABLE_GRAIN_MISMATCH')).toBe(true);
-    expect(pool.connect).not.toHaveBeenCalled();
+    expect(fakeOf(fx).connected).toBe(0);
   });
 
   it('브로드캐스트 안전 case 변수(knee.relatedness.max)는 job grain에서도 허용된다(공통변수 브로드캐스트)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireSnapshot(pool, Array.from({ length: 12 }, (_, i) => jobCaseRow(`case-${i}`, `person-${i}`, 1)));
-    const res = await request(makeApp(pool))
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    wireSnapshot(fx, Array.from({ length: 12 }, (_, i) => jobCaseRow(`case-${i}`, `person-${i}`, 1)));
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({
         grain: 'job',
         variableKeys: ['knee.relatedness.max'],
@@ -476,6 +487,7 @@ describe('POST /preview — job grain(PR0-B3 Part C)', () => {
         formulaPolicies: {},
       });
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.counts.suppressed).toBe(false);
   });
 
@@ -511,17 +523,16 @@ describe('POST /preview·POST /analyze — 공통변수 브로드캐스트 통�
   }
 
   it('남성 10명(job 3개씩)·여성 10명(job 1개씩) — /preview counts가 personCount=20/caseCount=20/observationCount=40, 억제 없음', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
     const rows = [
       ...Array.from({ length: 10 }, (_, i) => genderedJobCaseRow(`male-case-${i}`, `male-person-${i}`, 'male', 3)),
       ...Array.from({ length: 10 }, (_, i) => genderedJobCaseRow(`female-case-${i}`, `female-person-${i}`, 'female', 1)),
     ];
-    wireSnapshot(pool, rows);
-    const res = await request(makeApp(pool))
+    wireSnapshot(fx, rows);
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({
         grain: 'job',
         variableKeys: ['patient.identity.gender'],
@@ -530,6 +541,7 @@ describe('POST /preview·POST /analyze — 공통변수 브로드캐스트 통�
         formulaPolicies: {},
       });
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.counts).toMatchObject({ suppressed: false, personCount: 20, caseCount: 20, observationCount: 40 });
   });
 
@@ -539,14 +551,13 @@ describe('POST /preview·POST /analyze — 공통변수 브로드캐스트 통�
   // statsDescriptiveHttp.integration.test.ts로 옮겨 다시 증명한다.
 
   it('대조군 — 1명이 job 20개를 가지면 observationCount=20이어도 personCount=1이라 /preview 전체가 MIN_COHORT_NOT_MET으로 억제된다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireNoLimitedRowCapability(pool);
-    wireSnapshot(pool, [genderedJobCaseRow('solo-case', 'solo-person', 'male', 20)]);
-    const res = await request(makeApp(pool))
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    wireNoLimitedRowCapability(fx);
+    wireSnapshot(fx, [genderedJobCaseRow('solo-case', 'solo-person', 'male', 20)]);
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({
         grain: 'job',
         variableKeys: ['patient.identity.gender'],
@@ -555,23 +566,23 @@ describe('POST /preview·POST /analyze — 공통변수 브로드캐스트 통�
         formulaPolicies: {},
       });
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.counts.suppressed).toBe(true);
     expect(res.body.counts.reasonCode).toBe('MIN_COHORT_NOT_MET');
     expect(res.body.counts.personCount).toBeNull();
   });
 
   it('브로드캐스트로 personCount≠observationCount가 되면(job 3개인 사람들 섞임) 이변량 추론 검정이 REPEATED_MEASURES_NOT_ALIGNED로 차단된다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
     const rows = [
       ...Array.from({ length: 10 }, (_, i) => genderedJobCaseRow(`male-case-${i}`, `male-person-${i}`, 'male', 3)),
       ...Array.from({ length: 10 }, (_, i) => genderedJobCaseRow(`female-case-${i}`, `female-person-${i}`, 'female', 1)),
     ];
-    wireSnapshot(pool, rows);
-    const res = await request(makeApp(pool))
+    wireSnapshot(fx, rows);
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({
         grain: 'job',
         variableKeys: ['patient.identity.gender', 'job.identity.tenureYears'],
@@ -581,6 +592,7 @@ describe('POST /preview·POST /analyze — 공통변수 브로드캐스트 통�
         analysisMode: 'bivariate',
       });
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.counts.personCount).toBe(20);
     expect(res.body.counts.observationCount).toBe(40);
     expect(res.body.availableMethods.length).toBeGreaterThan(0);
@@ -594,16 +606,16 @@ describe('POST /preview·POST /analyze — 공통변수 브로드캐스트 통�
 
 describe('POST /preview — 소수 셀 억제', () => {
   it('personCount<10이면 전체 게이트로 억제되고 필드 구조는 유지된 채 값만 null이다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireNoLimitedRowCapability(pool);
-    wireSnapshot(pool, manyDistinctPersons(5));
-    const res = await request(makeApp(pool))
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    wireNoLimitedRowCapability(fx);
+    wireSnapshot(fx, manyDistinctPersons(5));
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send(BASE_BODY);
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.counts).toEqual({
       personCount: null, caseCount: null, observationCount: null,
       suppressed: true, minimumCohort: 10, reasonCode: 'MIN_COHORT_NOT_MET',
@@ -613,31 +625,31 @@ describe('POST /preview — 소수 셀 억제', () => {
   });
 
   it('한 사람이 사례 12건을 가지면 personCount=1이라 억제된다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireNoLimitedRowCapability(pool);
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    wireNoLimitedRowCapability(fx);
     const rows = Array.from({ length: 12 }, (_, i) => patientRow(`case-${i}`, 'person-solo'));
-    wireSnapshot(pool, rows);
-    const res = await request(makeApp(pool))
+    wireSnapshot(fx, rows);
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send(BASE_BODY);
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.counts.suppressed).toBe(true);
     expect(res.body.counts.reasonCode).toBe('MIN_COHORT_NOT_MET');
   });
 
   it('personCount≥10이면 억제되지 않고 실제 값을 반환한다(knee 비활성 → missingRate=1)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireSnapshot(pool, manyDistinctPersons(12));
-    const res = await request(makeApp(pool))
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    wireSnapshot(fx, manyDistinctPersons(12));
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send(BASE_BODY);
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.counts.suppressed).toBe(false);
     expect(res.body.counts.personCount).toBe(12);
     expect(res.body.counts.caseCount).toBe(12);
@@ -653,15 +665,15 @@ describe('POST /preview — 소수 셀 억제', () => {
     const { checkAndRecordDifferencing } = await import('../../statsDifferencingGuard.js');
     for (let i = 0; i < 35; i++) checkAndRecordDifferencing(ORG_ID, USER_ID, recipe, family);
 
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireSnapshot(pool, manyDistinctPersons(12));
-    const res = await request(makeApp(pool))
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    wireSnapshot(fx, manyDistinctPersons(12));
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send(BASE_BODY);
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.counts.suppressed).toBe(true);
     expect(res.body.counts.reasonCode).toBe('DIFFERENCING_RATE_LIMIT');
     expect(res.body.counts.personCount).toBeNull();
@@ -670,21 +682,21 @@ describe('POST /preview — 소수 셀 억제', () => {
 
 describe('POST /preview — 감사 로그', () => {
   it('extra에 필터 값 없이 키/연산자/개수만 남고, analysisRunId·reasonCode를 포함한다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireNoLimitedRowCapability(pool);
-    wireSnapshot(pool, manyDistinctPersons(12));
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    wireNoLimitedRowCapability(fx);
+    wireSnapshot(fx, manyDistinctPersons(12));
     const body = {
       ...BASE_BODY,
       filters: [{ key: 'knee.relatedness.max', operator: 'gt', value: 42 }],
     };
-    await request(makeApp(pool))
+    await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send(body);
 
     expect(writeAuditLogStrict).toHaveBeenCalledTimes(1);
+    fakeOf(fx).assertNoUnmatched();
     const [, entry] = writeAuditLogStrict.mock.calls[0];
     expect(entry.action).toBe('stats_preview');
     expect(entry.extra).toMatchObject({
@@ -702,15 +714,17 @@ describe('POST /preview — 감사 로그', () => {
 
   it('감사 기록이 실패하면 /preview 요청 전체가 500으로 실패한다', async () => {
     writeAuditLogStrict.mockRejectedValueOnce(new Error('audit insert failed'));
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireSnapshot(pool, manyDistinctPersons(12));
-    const res = await request(makeApp(pool))
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    wireSnapshot(fx, manyDistinctPersons(12));
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send(BASE_BODY);
     expect(res.status).toBe(500);
+    fakeOf(fx).assertNoUnmatched();
+    // 500은 감사 기록 실패에서 나와야 한다(미매치 쿼리 거부가 아니라).
+    expect(writeAuditLogStrict).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -726,48 +740,48 @@ describe('POST /preview — 감사 로그', () => {
 // ---------------------------------------------------------------------------
 describe('POST /analyze — capability·rate limit', () => {
   it('stats.regression capability가 없으면 403(별도 grant 없이 default_all_roles=true라 보통은 통과)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool, { has_default: false, has_grant: false });
-    const res = await request(makeApp(pool))
+    const fx = makeFixture();
+    wireAuthAndCapability(fx, { has_default: false, has_grant: false });
+    const res = await request(statsApp(fx))
       .post('/api/stats/analyze')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send(BASE_BODY);
     expect(res.status).toBe(403);
+    fakeOf(fx).assertNoUnmatched();
     expect(runStatsEngine).not.toHaveBeenCalled();
   });
 
   it('CSRF 토큰 없이 보내면 403이고 DB에 접근하지 않는다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const res = await request(makeApp(pool))
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    const res = await request(statsApp(fx))
       .post('/api/stats/analyze')
       .set('Authorization', `Bearer ${orgToken()}`)
       .send(BASE_BODY);
     expect(res.status).toBe(403);
-    expect(pool.connect).not.toHaveBeenCalled();
+    fakeOf(fx).assertNoUnmatched();
+    expect(fakeOf(fx).connected).toBe(0);
   });
 });
 
 describe('POST /analyze — 요청 단위 억제(코호트 미달)는 caching과 무관하게 매번 새로 처리된다', () => {
   it('personCount<10이면 result가 전부 suppressed:true이고 감사 outcome은 denied다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireNoLimitedRowCapability(pool);
-    wireSnapshot(pool, manyDistinctPersons(5));
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    wireNoLimitedRowCapability(fx);
+    wireSnapshot(fx, manyDistinctPersons(5));
     // 요청단위 억제도 stats_runs(cacheable=false)에 INSERT한다 — BEGIN+INSERT+COMMIT.
-    const writeClient = { query: vi.fn(), release: vi.fn() };
-    (pool.connect as ReturnType<typeof vi.fn>).mockResolvedValueOnce(writeClient);
-    const wq = writeClient.query as ReturnType<typeof vi.fn>;
-    wq.mockResolvedValueOnce({ rows: [] }); // BEGIN
-    wq.mockResolvedValueOnce({ rows: [] }); // INSERT stats_runs(cacheable=false)
-    wq.mockResolvedValueOnce({ rows: [] }); // COMMIT
-    const res = await request(makeApp(pool))
+    fx.clientReplies.push(
+      { rows: [] }, // BEGIN
+      { rows: [] }, // INSERT stats_runs(cacheable=false)
+      { rows: [] }, // COMMIT
+    );
+    const res = await request(statsApp(fx))
       .post('/api/stats/analyze')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send(BASE_BODY);
     expect(res.status).toBe(200);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.result.continuous[0]).toEqual({
       variableKey: 'knee.relatedness.max', kind: 'continuous', suppressed: true,
     });
@@ -803,21 +817,21 @@ describe('POST /analyze — 정상 경로(4차 검토 §1 회귀 방지: 응답�
     const { __setActiveAnalyzeRequestsForTests } = await import('../../statsAnalyzeHandler.js');
     __setActiveAnalyzeRequestsForTests(4); // config.stats.maxConcurrentAnalyzeRequests(4)에 도달
     try {
-      const pool = makePool();
+      const fx = makeFixture();
       // 가드A는 auth→requireCapability→rateLimit→csrf를 전부 통과한 뒤 핸들러 최상단에서
       // 걸린다 — auth/capability는 여전히 정상 통과해야 한다.
-      wireAuthAndCapability(pool);
+      wireAuthAndCapability(fx);
       writeAuditLogStrict.mockRejectedValueOnce(new Error('audit db down'));
 
-      const res = await request(makeApp(pool))
+      const res = await request(statsApp(fx))
         .post('/api/stats/analyze')
-        .set('Authorization', `Bearer ${orgToken()}`)
-        .set('X-CSRF-Token', CSRF_TOKEN)
+        .set(authHeaders(orgToken()))
         .send(BASE_BODY);
 
       // 감사가 실패했으니 429(REQUEST_CAPACITY_EXCEEDED)가 아니라 500이어야 한다 — 이전
       // 판은 .catch(() => {})로 감사 실패를 삼키고 그대로 429를 내보냈다(기록 없이).
       expect(res.status).toBe(500);
+      fakeOf(fx).assertNoUnmatched();
       expect(res.body.code).not.toBe('REQUEST_CAPACITY_EXCEEDED');
       expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
       // 시도된 감사 호출 자체는 있어야 한다(REQUEST_CAPACITY_EXCEEDED 사유로) — 그 호출이
@@ -873,29 +887,29 @@ describe('POST /analyze — correlation_matrix HTTP 라우트 wiring(PR3-B)', ()
   // METHOD_NOT_AVAILABLE·변수개수 부족·입력상한 3개는 admission 이전에 거부되는
   // 400 경로라 영향이 없어 그대로 남겨둔다).
   it('선택한 method가 availableMethods에 없으면(예: welch_t 오용) 400 METHOD_NOT_AVAILABLE', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireSnapshot(pool, manyDistinctPersons(12));
-    const res = await request(makeApp(pool))
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    wireSnapshot(fx, manyDistinctPersons(12));
+    const res = await request(statsApp(fx))
       .post('/api/stats/analyze')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({ ...CORRELATION_MATRIX_BODY, requestedMethod: 'welch_t' });
     // welch_t는 상관행렬 모드에서 statsRecipeValidation.ts가 이미 400으로 거부한다
     // (CORRELATION_MATRIX_METHOD_NOT_SUPPORTED) — availableMethods 조회 이전 단계.
     expect(res.status).toBe(400);
+    fakeOf(fx).assertNoUnmatched();
     expect(runCorrelationMatrixStatsEngine).not.toHaveBeenCalled();
   });
 
   it('변수가 2개뿐이면 400(zod superRefine — CORRELATION_MATRIX_REQUIRES_AT_LEAST_THREE_VARIABLES)', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    const res = await request(makeApp(pool))
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    const res = await request(statsApp(fx))
       .post('/api/stats/analyze')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({ ...CORRELATION_MATRIX_BODY, variableKeys: ['knee.relatedness.max', 'spine.mddm.lifetimeDoseMNh'] });
     expect(res.status).toBe(400);
+    fakeOf(fx).assertNoUnmatched();
     expect(runCorrelationMatrixStatsEngine).not.toHaveBeenCalled();
   });
 
@@ -913,15 +927,15 @@ describe('POST /analyze — correlation_matrix HTTP 라우트 wiring(PR3-B)', ()
   // 픽스처로는 못 만듦)은 `statsCorrelationMatrixDataset.test.ts`가 유닛
   // 레벨에서 세 상한 전부를 정밀하게 검증한다.
   it('§8 — 변수당 값 개수 상한 초과 시 /preview에서도 pair 순회 전에 400 INPUT_TOO_LARGE(VALUES_PER_VARIABLE_EXCEEDED)로 거부된다', async () => {
-    const pool = makePool();
-    wireAuthAndCapability(pool);
-    wireSnapshot(pool, manyDistinctPersons(120_000));
-    const res = await request(makeApp(pool))
+    const fx = makeFixture();
+    wireAuthAndCapability(fx);
+    wireSnapshot(fx, manyDistinctPersons(120_000));
+    const res = await request(statsApp(fx))
       .post('/api/stats/preview')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('X-CSRF-Token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send(CORRELATION_MATRIX_BODY);
     expect(res.status).toBe(400);
+    fakeOf(fx).assertNoUnmatched();
     expect(res.body.code).toBe('INPUT_TOO_LARGE');
     expect(res.body.reason).toBe('VALUES_PER_VARIABLE_EXCEEDED');
     expect(runCorrelationMatrixStatsEngine).not.toHaveBeenCalled();
