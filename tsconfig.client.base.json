@@ -13,12 +13,6 @@
     "isolatedModules": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["vite/client"],
-    "paths": {
-      "@wr/contracts": ["./shared/dist/index.d.ts"],
-      "@wr/contracts/*": ["./shared/dist/*.d.ts"],
-      "@wr/analytics-core": ["./packages/analytics-core/dist/index.d.ts"],
-      "@wr/analytics-core/*": ["./packages/analytics-core/dist/*.d.ts"]
-    }
+    "types": ["vite/client"]
   }
 }

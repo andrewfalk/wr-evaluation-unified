@@ -11,7 +11,7 @@
 ## 빌드 & 실행
 
 ```bash
-npm run dev              # 개발 서버 (Vite, localhost:3000)
+npm run dev              # 개발 서버 (Vite, localhost:3000) + @wr/contracts·@wr/analytics-core tsup --watch (클라이언트는 별칭 없이 dist로 해석)
 npm run check            # 병합 전 로컬 검증 묶음 (lint·typecheck·test 루트+서버, build:web) — CI 대신 (로드맵 D9)
 npm run typecheck        # 루트(shared·packages) + 클라이언트 TS(strict, tsconfig.client.json) + 클라이언트 JS(완화 checkJs, tsconfig.client.js.json) — 새 @ts-nocheck는 scripts/ts-ratchet.mjs가 막음
 npm run check:full       # check + 실DB 통합 테스트(일회용 Docker PostgreSQL) + 운영 버전 pytest(Python 3.11 컨테이너) + 운영 의존성 audit(검토 목록 scripts/audit-allowlist.json) + gitleaks — DB·동시성·통계 엔진·마이그레이션 변경 PR과 릴리스 전

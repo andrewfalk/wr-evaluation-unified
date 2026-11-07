@@ -1,9 +1,5 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Fixed time zone for every test (golden/characterization tests depend on local dates — e.g. job
 // periods). Set here, in the main process before workers start: assigning process.env.TZ inside a
@@ -16,22 +12,14 @@ process.env.TZ = 'Asia/Seoul';
 //   npm --prefix server test
 // (Server has its own vitest.config.ts with the required DATABASE_URL env stub.)
 //
-// '@wr/contracts' resolves to the contract SOURCE (shared/contracts) in tests so they
-// run without the prebuilt shared/dist bundle. The app build (vite.config.js) aliases
-// '@wr/contracts' to shared/dist instead — separate concerns, identical exports.
+// '@wr/contracts'·'@wr/analytics-core'는 별칭 없이 npm workspaces 심링크(node_modules/@wr/*) →
+// 패키지 exports(import 조건) → dist로 해석된다 — 앱 빌드·서버·Electron과 같은 산출물을 테스트한다
+// (REFACTORING_ROADMAP P0-7 W4 always-dist). 그래서 `npm test`의 pretest가 두 패키지를 먼저 빌드한다.
+// 패키지 소스는 packages/**·shared/** 아래 자체 테스트가 상대 경로로 검사한다.
 export default defineConfig({
   // 앱 소스(.jsx)와 동일한 JSX 자동 런타임 변환이 필요 — 렌더링 테스트(.test.jsx)가
   // `import React`(classic 런타임) 없이도 App.jsx 등과 동일하게 동작하도록.
   plugins: [react()],
-  resolve: {
-    alias: {
-      '@wr/contracts': path.resolve(__dirname, 'shared/contracts'),
-      // '@wr/contracts'와 동일한 이유(주석 위 참고) — 소스를 직접 가리켜 prebuild 없이 테스트가
-      // 돈다. 앱 빌드(vite.config.js)는 '@wr/analytics-core'를 packages/analytics-core/dist로
-      // 별도 alias한다 — 관심사 분리, export는 동일.
-      '@wr/analytics-core': path.resolve(__dirname, 'packages/analytics-core'),
-    },
-  },
   test: {
     environment: 'node',
     include: [

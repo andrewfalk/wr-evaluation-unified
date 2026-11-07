@@ -14,13 +14,7 @@
     "isolatedModules": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["vitest/globals", "node"],
-    "paths": {
-      "@wr/contracts": ["./shared/dist/index.d.ts"],
-      "@wr/contracts/*": ["./shared/dist/*.d.ts"],
-      "@wr/analytics-core": ["./packages/analytics-core/dist/index.d.ts"],
-      "@wr/analytics-core/*": ["./packages/analytics-core/dist/*.d.ts"]
-    }
+    "types": ["vitest/globals", "node"]
   },
   "include": ["shared/**/*.ts", "packages/**/*.ts", "scripts/**/*.mjs", "types/**/*.d.ts"],
   "exclude": ["node_modules", "dist", "release", "shared/dist", "server/dist", "packages/analytics-core/dist"]
