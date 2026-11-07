@@ -11,9 +11,12 @@ import config from './config';
 
 export type { Logger };
 
+// Top-level and one level down (pino's `*` matches exactly one level).
 const REDACT_PATHS = [
   'req.headers.authorization',
   'req.headers.cookie',
+  'password',
+  'refreshToken',
   '*.password',
   '*.refreshToken',
 ];

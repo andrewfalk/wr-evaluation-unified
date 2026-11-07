@@ -25,6 +25,8 @@ vi.mock('../../middleware/audit', () => ({
 }));
 
 import { createAuditRouter } from '../audit';
+import { createErrorHandler } from '../../http/errorHandler';
+import { createLogger } from '../../logger';
 import { generateAccessToken } from '../../auth/tokens';
 import type { Pool } from 'pg';
 
@@ -86,6 +88,7 @@ function makeApp(pool: Pool) {
   app.use(express.json());
   app.use(cookieParser());
   app.use('/api/audit', createAuditRouter(pool));
+  app.use(createErrorHandler(createLogger({ level: 'silent' }))); // as in createApp (S1)
   return app;
 }
 
@@ -670,6 +673,7 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-device-nonce', devNonce)
       .send(VALID_BODY);
     expect(res1.status).toBe(500);
+    expect(res1.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
     // Second attempt: same nonce+sig, DB now succeeds → must not get 401
     wireDevice(pool, {

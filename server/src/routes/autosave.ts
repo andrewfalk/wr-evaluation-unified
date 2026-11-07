@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { auditMiddleware } from '../middleware/audit';
+import { asyncHandler } from '../http/asyncHandler';
 
 // ---------------------------------------------------------------------------
 // Validation helpers
@@ -110,7 +111,6 @@ async function deleteAutosave(pool: Pool, req: Request, res: Response): Promise<
 // ---------------------------------------------------------------------------
 // Router factory
 // ---------------------------------------------------------------------------
-const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
 export function createAutosaveRouter(pool: Pool): Router {
   const router = Router();
@@ -121,19 +121,19 @@ export function createAutosaveRouter(pool: Pool): Router {
   router.get(
     '/',
     auth, audit('autosave_load'),
-    (req, res) => getAutosave(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => getAutosave(pool, req, res))
   );
 
   router.put(
     '/',
     auth, csrfMiddleware, audit('autosave_save'),
-    (req, res) => putAutosave(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => putAutosave(pool, req, res))
   );
 
   router.delete(
     '/',
     auth, csrfMiddleware, audit('autosave_delete'),
-    (req, res) => deleteAutosave(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => deleteAutosave(pool, req, res))
   );
 
   return router;

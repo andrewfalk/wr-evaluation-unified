@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import { z } from 'zod';
 import { createAuthMiddleware } from '../middleware/auth';
 import { writeAuditLog, writeAuditLogStrict } from '../middleware/audit';
+import { asyncHandler } from '../http/asyncHandler';
 
 // ---------------------------------------------------------------------------
 // POST /api/audit/emr
@@ -284,9 +285,7 @@ export function createAuditRouter(pool: Pool): Router {
   router.post(
     '/emr',
     makeOptionalAuth(pool),
-    (req, res) => handleEmrAudit(pool, req, res).catch(() =>
-      res.status(500).json({ code: 'INTERNAL_ERROR', error: 'Internal server error' })
-    )
+    asyncHandler((req, res) => handleEmrAudit(pool, req, res))
   );
 
   return router;

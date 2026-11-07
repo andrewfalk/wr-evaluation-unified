@@ -5,6 +5,7 @@ import type { Pool } from 'pg';
 import { createAuthMiddleware } from '../middleware/auth';
 import { adminOnly } from '../middleware/adminOnly';
 import { csrfMiddleware } from '../middleware/csrf';
+import { asyncHandler } from '../http/asyncHandler';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -169,19 +170,19 @@ export function createOpsStatusRouter(pool: Pool) {
   router.get(
     '/backup-status',
     auth, admin,
-    (req, res) => getBackupStatus(req, res).catch(() => res.status(500).json({ error: 'Internal server error' })),
+    asyncHandler((req, res) => getBackupStatus(req, res)),
   );
 
   router.post(
     '/backup-alerts/:runId/ack',
     auth, admin, csrfMiddleware,
-    (req, res) => ackAlert(req, res).catch(() => res.status(500).json({ error: 'Internal server error' })),
+    asyncHandler((req, res) => ackAlert(req, res)),
   );
 
   router.post(
     '/backup-alerts/:runId/resolve',
     auth, admin, csrfMiddleware,
-    (req, res) => resolveAlert(req, res).catch(() => res.status(500).json({ error: 'Internal server error' })),
+    asyncHandler((req, res) => resolveAlert(req, res)),
   );
 
   return router;

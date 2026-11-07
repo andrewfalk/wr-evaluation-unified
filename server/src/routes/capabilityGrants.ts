@@ -8,12 +8,12 @@ import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { adminOnly } from '../middleware/adminOnly';
 import { writeAuditLogStrict } from '../middleware/audit';
+import { asyncHandler } from '../http/asyncHandler';
 
 // PR0-A: 통계 워크벤치 권한 부여/회수. `/api/admin`에 두지 않고 별도 마운트(`/api/capabilities`)
 // 한다 — admin.ts는 "모든 라우트가 균일하게 auth+admin"을 전제하는데, 여기엔 self-revoke·
 // 본인조회처럼 비균일 인가가 섞여 있어 그 전제를 깨지 않기 위해 분리한다.
 
-const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
 interface CapabilityCatalogRow {
   key:                 string;
@@ -313,25 +313,25 @@ export function createCapabilityGrantsRouter(pool: Pool): Router {
   router.get(
     '/catalog',
     auth,
-    (req, res) => listCatalog(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => listCatalog(pool, req, res))
   );
 
   router.get(
     '/grants/me',
     auth,
-    (req, res) => listMyGrants(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => listMyGrants(pool, req, res))
   );
 
   router.get(
     '/grants',
     auth, admin,
-    (req, res) => listGrants(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => listGrants(pool, req, res))
   );
 
   router.post(
     '/grants',
     auth, admin, csrfMiddleware,
-    (req, res) => createGrant(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => createGrant(pool, req, res))
   );
 
   // adminOnly 없음(의도적) — self-revoke는 비-admin도 허용해야 하므로 핸들러 내부에서
@@ -339,7 +339,7 @@ export function createCapabilityGrantsRouter(pool: Pool): Router {
   router.post(
     '/grants/:id/revoke',
     auth, csrfMiddleware,
-    (req, res) => revokeGrant(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => revokeGrant(pool, req, res))
   );
 
   return router;

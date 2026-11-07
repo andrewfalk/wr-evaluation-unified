@@ -5,6 +5,7 @@ import { CreatePresetBodySchema as CreateBody, UpdatePresetBodySchema as UpdateB
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { writeAuditLog } from '../middleware/audit';
+import { asyncHandler } from '../http/asyncHandler';
 
 // ---------------------------------------------------------------------------
 // Row → client shape
@@ -31,7 +32,6 @@ function toClient(row: PresetRow) {
   };
 }
 
-const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
 // ---------------------------------------------------------------------------
 // Handlers
@@ -316,10 +316,10 @@ export function createPresetsRouter(pool: Pool) {
   const router = Router();
   const auth   = createAuthMiddleware(pool);
 
-  router.get('/',    auth,              (req, res) => listPresets(pool, req, res).catch(() => res.status(500).json(internalError())));
-  router.post('/',   auth, csrfMiddleware, (req, res) => createPreset(pool, req, res).catch(() => res.status(500).json(internalError())));
-  router.patch('/:id', auth, csrfMiddleware, (req, res) => updatePreset(pool, req, res).catch(() => res.status(500).json(internalError())));
-  router.delete('/:id', auth, csrfMiddleware, (req, res) => deletePreset(pool, req, res).catch(() => res.status(500).json(internalError())));
+  router.get('/',    auth,              asyncHandler((req, res) => listPresets(pool, req, res)));
+  router.post('/',   auth, csrfMiddleware, asyncHandler((req, res) => createPreset(pool, req, res)));
+  router.patch('/:id', auth, csrfMiddleware, asyncHandler((req, res) => updatePreset(pool, req, res)));
+  router.delete('/:id', auth, csrfMiddleware, asyncHandler((req, res) => deletePreset(pool, req, res)));
 
   return router;
 }
