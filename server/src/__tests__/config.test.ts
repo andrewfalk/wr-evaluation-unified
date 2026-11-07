@@ -275,3 +275,19 @@ describe('config — CORS origins', () => {
     })).not.toThrow();
   });
 });
+
+describe('config — LOG_LEVEL (P1-01)', () => {
+  it('defaults to info outside tests and silent under NODE_ENV=test', () => {
+    expect(make({ NODE_ENV: 'development' }).log.level).toBe('info');
+    expect(make({ NODE_ENV: 'production', CORS_ORIGINS: 'https://wr.hospital.local:8443' }).log.level).toBe('info');
+    expect(make({ NODE_ENV: 'test' }).log.level).toBe('silent');
+  });
+
+  it('accepts an explicit pino level', () => {
+    expect(make({ LOG_LEVEL: 'debug' }).log.level).toBe('debug');
+  });
+
+  it('throws on an unknown level', () => {
+    expect(() => make({ LOG_LEVEL: 'verbose' })).toThrow(/LOG_LEVEL/);
+  });
+});

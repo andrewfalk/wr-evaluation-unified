@@ -7,9 +7,10 @@
 //
 // The registration ORDER below is part of the behaviour and was moved unchanged from index.ts:
 // security headers first; /updates before the SPA catch-all; the error handler last.
+// P1-01 added the request id (right after trust proxy) and the /api JSON 404 (after the routers).
 import path from 'path';
 import fs from 'fs';
-import express, { type Express, type Request, type Response, type NextFunction } from 'express';
+import express, { type Express } from 'express';
 import cookieParser from 'cookie-parser';
 import type { Pool } from 'pg';
 import config from './config';
@@ -30,6 +31,10 @@ import { createUpdatesRouter } from './routes/updates';
 import { createStatsRouter } from './routes/stats';
 import { cspMiddleware, noStoreMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
+import { requestIdMiddleware } from './http/requestId';
+import { apiNotFound } from './http/notFound';
+import { createErrorHandler } from './http/errorHandler';
+import defaultLogger, { type Logger } from './logger';
 
 export interface AppDeps {
   pool: Pool;
@@ -37,13 +42,22 @@ export interface AppDeps {
   auditPool: Pool;
   /** Built web SPA directory; defaults to <dist>/web next to the compiled server. */
   webDir?: string;
+  /** Logger for the error handler; defaults to the process logger (logger.ts). */
+  logger?: Logger;
 }
 
-export function createApp({ pool, auditPool, webDir: webDirOption = path.join(__dirname, 'web') }: AppDeps): Express {
+export function createApp({
+  pool,
+  auditPool,
+  webDir: webDirOption = path.join(__dirname, 'web'),
+  logger = defaultLogger,
+}: AppDeps): Express {
   // Absolute, so express.static and res.sendFile (which requires an absolute path) agree.
   const webDir = path.resolve(webDirOption);
   const app = express();
   app.set('trust proxy', config.trustProxy);
+  // Request id before anything that can answer or fail, so every response and error log has one.
+  app.use(requestIdMiddleware());
   // Security headers first — applied to every response before any route runs.
   app.use(cspMiddleware());
   app.use(corsMiddleware());
@@ -69,6 +83,8 @@ export function createApp({ pool, auditPool, webDir: webDirOption = path.join(__
   app.use('/api/capabilities', createCapabilityGrantsRouter(pool));
   app.use('/api/video-analysis', createVideoAnalysisRouter(pool));
   app.use('/api/stats', createStatsRouter(pool));
+  // Unknown /api paths: JSON 404 (P1-01). After every API router, before /updates and the SPA.
+  app.use('/api', apiNotFound());
 
   // 트랙 2 — electron-updater 정적 배포 경로(설치본/latest.yml/canary.yml/blockmap/정책 파일).
   // /api/* 는 아니지만 반드시 아래 SPA catch-all보다 먼저 등록해야 한다 — 순서가 바뀌면
@@ -88,21 +104,10 @@ export function createApp({ pool, auditPool, webDir: webDirOption = path.join(__
     });
   }
 
-  // Global JSON error handler — keeps API responses consistent when middleware
-  // calls next(err) (e.g. DB failures in auth middleware).
-  // Must be registered after all routes and have exactly 4 parameters.
-  app.use((err: Error & { type?: string; limit?: number }, _req: Request, res: Response, _next: NextFunction) => {
-    if (err.type === 'entity.too.large') {
-      console.warn('[wr-server] request body too large', { limit: err.limit });
-      res.status(413).json({
-        code: 'PAYLOAD_TOO_LARGE',
-        error: 'Request body is too large',
-      });
-      return;
-    }
-    console.error('[wr-server] unhandled error', err);
-    res.status(500).json({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
-  });
+  // Central JSON error handler (http/errorHandler.ts) — maps whatever a route or middleware
+  // forwarded with next(err) (asyncHandler, auth middleware DB failures, body-parser 413).
+  // Must be registered after all routes.
+  app.use(createErrorHandler(logger));
 
   return app;
 }

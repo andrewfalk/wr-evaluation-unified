@@ -4,6 +4,8 @@
 declare global {
   namespace Express {
     interface Request {
+      /** Set by requestIdMiddleware (http/requestId.ts) for every request. */
+      requestId?: string;
       sessionInfo?: {
         sessionId:          string;
         userId:             string;

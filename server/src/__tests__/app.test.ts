@@ -98,6 +98,40 @@ describe('createApp', () => {
     const big = JSON.stringify({ blob: 'x'.repeat(11 * 1024 * 1024) }); // default JSON_BODY_LIMIT is 10mb
     const res = await request(app).post('/api/auth/login').set('Content-Type', 'application/json').send(big);
     expect(res.status).toBe(413);
-    expect(res.body).toEqual({ code: 'PAYLOAD_TOO_LARGE', error: 'Request body is too large' });
+    // P1-01: the central error handler adds the request id to every error envelope.
+    expect(res.body).toEqual({ code: 'PAYLOAD_TOO_LARGE', error: 'Request body is too large', requestId: res.headers['x-request-id'] });
+  });
+
+  it('keeps answering malformed JSON with the 500 envelope (unchanged by P1-01)', async () => {
+    const { pool } = untouchablePool();
+    const app = createApp({ pool, auditPool: pool, webDir });
+    const res = await request(app).post('/api/auth/login').set('Content-Type', 'application/json').send('{"loginId":');
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error', requestId: res.headers['x-request-id'] });
+  });
+
+  // P1-01 — unknown /api paths answer JSON (was Express's HTML "Cannot GET"), with or without the SPA.
+  it.each([
+    ['with the SPA', true],
+    ['API-only (no web directory)', false],
+  ])('answers an unknown /api path with a JSON 404 (%s)', async (_name, withSpa) => {
+    const { pool, used } = untouchablePool();
+    const app = createApp({ pool, auditPool: pool, webDir: withSpa ? webDir : path.join(webDir, 'missing') });
+    for (const [method, url] of [['get', '/api/does-not-exist'], ['post', '/api/admin-typo/x'], ['get', '/api']] as const) {
+      const res = await request(app)[method](url);
+      expect(res.status, `${method} ${url}`).toBe(404);
+      expect(res.headers['content-type']).toMatch(/application\/json/);
+      expect(res.body).toEqual({ code: 'NOT_FOUND', error: 'Not found', requestId: res.headers['x-request-id'] });
+    }
+    expect(used).not.toHaveBeenCalled();
+  });
+
+  it('keeps /health unchanged apart from the X-Request-Id header', async () => {
+    const { pool } = untouchablePool();
+    const app = createApp({ pool, auditPool: pool, webDir });
+    const res = await request(app).get('/health').set('X-Request-Id', 'probe-1');
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body).sort()).toEqual(['ok', 'service', 'time']);
+    expect(res.headers['x-request-id']).toBe('probe-1');
   });
 });
