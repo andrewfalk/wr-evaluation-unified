@@ -3,24 +3,15 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import express from 'express';
-import cookieParser from 'cookie-parser';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
-vi.mock('../../config', () => ({
-  default: {
-    env:  'test',
-    cors: { origins: [] },
-    auth: {
-      accessTokenTtl:     900,
-      accessTokenSecret:  'test-access-secret',
-      refreshTokenSecret: 'test-refresh-secret',
-    },
-    ai:                  { enabled: false },
+vi.mock('../../config', async () => ({
+  default: (await import('../../testing/configMock.js')).testConfig({
+    ai:                   { enabled: false },
     localFallbackAllowed: false,
-  },
+  }),
 }));
 vi.mock('../../middleware/audit', () => ({ writeAuditLog: vi.fn() }));
 
@@ -42,61 +33,57 @@ vi.mock('../../auth/passwordPolicy', () => ({
 import bcrypt from 'bcrypt';
 import { checkPasswordPolicy, isPasswordReused } from '../../auth/passwordPolicy';
 import { createAuthRouter } from '../auth';
-import { generateAccessToken, verifyAccessToken } from '../../auth/tokens';
-import type { Pool, PoolClient } from 'pg';
+import { verifyAccessToken } from '../../auth/tokens';
+import {
+  createFakePool, authSessionHandler, sequenceHandler,
+  type FakePool, type FakeQueryReply,
+} from '../../testing/fakePool';
+import { makeRouterApp } from '../../testing/app';
+import { makeAccessToken, authHeaders } from '../../testing/tokens';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function makePool(): Pool {
-  const release = vi.fn();
-  const client = { query: vi.fn() as unknown as PoolClient['query'], release } as unknown as PoolClient;
-  return {
-    connect: vi.fn().mockResolvedValue(client),
-    query:   vi.fn(),
-  } as unknown as Pool;
+function changePasswordApp(fake: FakePool) {
+  return makeRouterApp(a => a.use('/api/auth', createAuthRouter(fake.pool)));
 }
 
-function makeApp(pool: Pool) {
-  const app = express();
-  app.use(express.json());
-  app.use(cookieParser());
-  app.use('/api/auth', createAuthRouter(pool));
-  return app;
-}
-
-// SHA-256 of 'csrf-tok' (matches validateCsrf internals when it reads from real csrf module)
-// For simplicity: the auth middleware uses pool.query to check session liveness;
-// we short-circuit by returning { exists: 1 }. CSRF passes because validateCsrf
-// is exported from the real module and we wire the token accordingly.
-import crypto from 'crypto';
+// The auth middleware checks session liveness with pool.query (authSessionHandler);
+// CSRF passes because the token carries the hash of CSRF_TOKEN and authHeaders() sends it.
 const CSRF_TOKEN = 'csrf-tok';
-const CSRF_HASH  = crypto.createHash('sha256').update(CSRF_TOKEN).digest('hex');
 
 function authedToken(): string {
-  const { token } = generateAccessToken({
-    sub:                'user-1',
+  return makeAccessToken({
+    userId:             'user-1',
     sessionId:          'sess-1',
     orgId:              'org-1',
     role:               'doctor',
     name:               'Dr. Kim',
     mustChangePassword: false,
-    csrfHash:           CSRF_HASH,
+    csrfToken:          CSRF_TOKEN,
   });
-  return token;
 }
 
-// Wire: auth middleware session check (pool.query), then client.query for the handler
-function wireSuccess(pool: Pool) {
-  // pool.query: auth middleware session check
-  (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-  // client.query: SELECT password_hash/history
-  const client = { query: vi.fn(), release: vi.fn() };
-  (pool.connect as ReturnType<typeof vi.fn>).mockResolvedValue(client);
-  client.query
-    .mockResolvedValueOnce({ rows: [{ password_hash: '$oldhash$', password_history: [] }] }) // SELECT
-    .mockResolvedValueOnce({ rows: [] }) // BEGIN
-    .mockResolvedValueOnce({
+const TX_CONTROL = /^\s*(BEGIN|COMMIT|ROLLBACK)\b/i;
+
+// auth middleware session check (pool.query), then client.query for the handler in call order.
+// BEGIN/COMMIT은 fakePool 기본 응답(빈 결과)으로 넘어가고 fake.calls·fake.transactions에 기록된다.
+function makeFake(...clientReplies: FakeQueryReply[]): FakePool {
+  return createFakePool({
+    handlers: [
+      authSessionHandler(),
+      sequenceHandler(clientReplies, { name: 'client', via: 'client', match: sql => !TX_CONTROL.test(sql) }),
+    ],
+  });
+}
+
+const PASSWORD_ROW: FakeQueryReply = { rows: [{ password_hash: '$oldhash$', password_history: [] }] };
+
+// Wire: SELECT password_hash/history → (BEGIN) → UPDATE users RETURNING → UPDATE sessions → (COMMIT)
+function wireSuccess(): FakePool {
+  return makeFake(
+    PASSWORD_ROW, // SELECT
+    {
       rows: [{
         id:                   'user-1',
         name:                 'Dr. Kim',
@@ -104,10 +91,9 @@ function wireSuccess(pool: Pool) {
         organization_id:      'org-1',
         must_change_password: false,
       }],
-    }) // UPDATE users RETURNING
-    .mockResolvedValueOnce({ rows: [] }) // UPDATE sessions
-    .mockResolvedValueOnce({ rows: [] }); // COMMIT
-  return client;
+    }, // UPDATE users RETURNING
+    { rows: [] }, // UPDATE sessions
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -117,96 +103,81 @@ describe('POST /api/auth/change-password', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when not authenticated', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [] });
+    const fake = makeFake();
 
-    const res = await request(makeApp(pool))
+    const res = await request(changePasswordApp(fake))
       .post('/api/auth/change-password')
       .send({ currentPassword: 'old1234!A', newPassword: 'new1234!A' });
 
     expect(res.status).toBe(401);
+    expect(fake.calls).toHaveLength(0); // Bearer 없음 — DB까지 가지 않음
   });
 
   it('returns 400 when body is missing fields', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
+    const fake = makeFake();
 
-    const res = await request(makeApp(pool))
+    const res = await request(changePasswordApp(fake))
       .post('/api/auth/change-password')
-      .set('Authorization', `Bearer ${authedToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(authedToken(), CSRF_TOKEN))
       .send({});
 
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('INVALID_BODY');
+    fake.assertNoUnmatched();
   });
 
   it('returns 400 when new password fails policy', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
+    const fake = makeFake();
     vi.mocked(checkPasswordPolicy).mockReturnValueOnce({ ok: false, error: 'Too short' });
 
-    const res = await request(makeApp(pool))
+    const res = await request(changePasswordApp(fake))
       .post('/api/auth/change-password')
-      .set('Authorization', `Bearer ${authedToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(authedToken(), CSRF_TOKEN))
       .send({ currentPassword: 'old1234!A', newPassword: 'short' });
 
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('PASSWORD_POLICY_VIOLATION');
+    fake.assertNoUnmatched();
   });
 
   it('returns 401 when current password is wrong', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const client = { query: vi.fn(), release: vi.fn() };
-    (pool.connect as ReturnType<typeof vi.fn>).mockResolvedValue(client);
-    client.query.mockResolvedValueOnce({
-      rows: [{ password_hash: '$oldhash$', password_history: [] }],
-    });
+    const fake = makeFake(PASSWORD_ROW);
     vi.mocked(bcrypt.compare).mockResolvedValueOnce(false as never); // wrong password
 
-    const res = await request(makeApp(pool))
+    const res = await request(changePasswordApp(fake))
       .post('/api/auth/change-password')
-      .set('Authorization', `Bearer ${authedToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(authedToken(), CSRF_TOKEN))
       .send({ currentPassword: 'wrongpass', newPassword: 'new1234!A' });
 
     expect(res.status).toBe(401);
     expect(res.body.code).toBe('WRONG_CURRENT_PASSWORD');
+    fake.assertNoUnmatched();
+    fake.assertAllReleased();
   });
 
   it('returns 400 when new password was recently used', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const client = { query: vi.fn(), release: vi.fn() };
-    (pool.connect as ReturnType<typeof vi.fn>).mockResolvedValue(client);
-    client.query.mockResolvedValueOnce({
-      rows: [{ password_hash: '$oldhash$', password_history: [] }],
-    });
+    const fake = makeFake(PASSWORD_ROW);
     vi.mocked(bcrypt.compare).mockResolvedValueOnce(true as never); // current password ok
     vi.mocked(isPasswordReused).mockResolvedValueOnce(true);        // but reused
 
-    const res = await request(makeApp(pool))
+    const res = await request(changePasswordApp(fake))
       .post('/api/auth/change-password')
-      .set('Authorization', `Bearer ${authedToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(authedToken(), CSRF_TOKEN))
       .send({ currentPassword: 'old1234!A', newPassword: 'old1234!A' });
 
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('PASSWORD_RECENTLY_USED');
+    fake.assertNoUnmatched();
+    fake.assertAllReleased();
   });
 
   it('returns 200 and revokes other sessions on success', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const client = wireSuccess(pool);
+    const fake = wireSuccess();
     vi.mocked(bcrypt.compare).mockResolvedValueOnce(true as never);
 
-    const res = await request(makeApp(pool))
+    const res = await request(changePasswordApp(fake))
       .post('/api/auth/change-password')
-      .set('Authorization', `Bearer ${authedToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(authedToken(), CSRF_TOKEN))
       .send({ currentPassword: 'old1234!A', newPassword: 'New1234!A' });
 
     expect(res.status).toBe(200);
@@ -228,13 +199,14 @@ describe('POST /api/auth/change-password', () => {
     expect(decoded?.mustChangePassword).toBe(false);
 
     // Verify COMMIT was called
-    const calls = client.query.mock.calls.map((c: unknown[]) => c[0]);
+    const calls = fake.calls.filter(c => c.via === 'client').map(c => c.sql);
     expect(calls).toContain('COMMIT');
+    expect(fake.transactions).toEqual([{ clientId: 1, statements: ['BEGIN', 'COMMIT'], outcome: 'commit' }]);
 
     // Verify UPDATE sessions was called to revoke other sessions
-    const revokeCall = calls.find(
-      (q: unknown) => typeof q === 'string' && q.includes('UPDATE sessions')
-    );
+    const revokeCall = calls.find(q => q.includes('UPDATE sessions'));
     expect(revokeCall).toBeDefined();
+    fake.assertNoUnmatched();
+    fake.assertAllReleased();
   });
 });
