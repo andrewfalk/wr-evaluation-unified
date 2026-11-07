@@ -13,6 +13,7 @@ import {
   nextCompletionColumns, DRAFT_COMPLETION_COLUMNS, type CompletionColumns,
   verifyModulesComplete, logCompletionMismatchIfAny, nextVerificationColumns, DRAFT_VERIFICATION_COLUMNS, type VerificationColumns,
 } from '../completionTracking';
+import { asyncHandler } from '../http/asyncHandler';
 
 // ---------------------------------------------------------------------------
 // POST /api/workspaces body schema
@@ -833,7 +834,6 @@ async function deleteWorkspace(pool: Pool, req: Request, res: Response): Promise
 // ---------------------------------------------------------------------------
 // Router factory
 // ---------------------------------------------------------------------------
-const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
 export function createWorkspacesRouter(pool: Pool): Router {
   const router = Router();
@@ -844,34 +844,34 @@ export function createWorkspacesRouter(pool: Pool): Router {
   router.get(
     '/',
     auth, audit('workspace_list'),
-    (req, res) => listWorkspaces(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => listWorkspaces(pool, req, res))
   );
 
   router.get(
     '/:id',
     auth, audit('workspace_load'),
-    (req, res) => getWorkspace(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => getWorkspace(pool, req, res))
   );
 
   router.post(
     '/',
     auth, csrfMiddleware, audit('workspace_save'),
-    (req, res) => saveWorkspace(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => saveWorkspace(pool, req, res))
   );
 
   router.put(
     '/:id',
     auth, csrfMiddleware, audit('workspace_overwrite'),
-    (req, res) => saveWorkspace(pool, req, res, {
+    asyncHandler((req, res) => saveWorkspace(pool, req, res, {
       workspaceId: req.params.id,
       statusCode: 200,
-    }).catch(() => res.status(500).json(internalError()))
+    }))
   );
 
   router.delete(
     '/:id',
     auth, csrfMiddleware, audit('workspace_delete'),
-    (req, res) => deleteWorkspace(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => deleteWorkspace(pool, req, res))
   );
 
   return router;
