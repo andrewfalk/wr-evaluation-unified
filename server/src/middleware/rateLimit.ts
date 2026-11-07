@@ -75,3 +75,61 @@ export function analyzeRateLimit(): RequestHandler {
     message:         { code: 'RATE_LIMITED', error: 'Too many analysis requests, please try again later' },
   });
 }
+
+// SEC-A L3 — POST /api/auth/refresh: 60 per minute per IP. Each call rotates the refresh token and
+// issues an access token; a normal client refreshes a few times per hour.
+export function refreshRateLimit(): RequestHandler {
+  return rateLimit({
+    windowMs:        60 * 1000,
+    limit:           60,
+    standardHeaders: 'draft-7',
+    legacyHeaders:   false,
+    message:         { code: 'RATE_LIMITED', error: 'Too many token refresh requests, please try again later' },
+  });
+}
+
+// SEC-A L3 — POST /api/audit/emr, outer guard: 120 per minute per IP. The route accepts requests
+// without a session (queued replays), and the device id is a request header — so before the
+// signature is verified the only safe key is the address. This bounds the device lookups an
+// unverified sender can cause. The per-device limit runs after verification (createKeyedLimiter).
+export function emrAuditIpRateLimit(): RequestHandler {
+  return rateLimit({
+    windowMs:        60 * 1000,
+    limit:           120,
+    standardHeaders: 'draft-7',
+    legacyHeaders:   false,
+    message:         { code: 'RATE_LIMITED', error: 'Too many audit requests, please try again later' },
+  });
+}
+
+export interface KeyedLimiter {
+  /** Counts one event for `key`; `allowed` is false once the window's limit is used up. */
+  hit(key: string): { allowed: boolean; retryAfterSec: number };
+}
+
+/**
+ * Fixed-window counter keyed by an arbitrary string, for limits that can only be keyed after the
+ * handler has verified something (express-rate-limit keys before the handler runs). In memory, per
+ * process — like the other limiters here. Keys whose window has ended are dropped when the map grows
+ * past `maxKeys`, so a stream of distinct keys cannot grow it without bound.
+ */
+export function createKeyedLimiter(options: { windowMs: number; max: number; maxKeys?: number; now?: () => number }): KeyedLimiter {
+  const { windowMs, max, maxKeys = 10_000, now = Date.now } = options;
+  const windows = new Map<string, { count: number; resetAt: number }>();
+  return {
+    hit(key: string) {
+      const t = now();
+      let w = windows.get(key);
+      if (!w || w.resetAt <= t) {
+        if (!w && windows.size >= maxKeys) {
+          for (const [k, v] of windows) if (v.resetAt <= t) windows.delete(k);
+          if (windows.size >= maxKeys) windows.delete(windows.keys().next().value as string); // oldest entry
+        }
+        w = { count: 0, resetAt: t + windowMs };
+        windows.set(key, w);
+      }
+      w.count += 1;
+      return { allowed: w.count <= max, retryAfterSec: Math.max(1, Math.ceil((w.resetAt - t) / 1000)) };
+    },
+  };
+}

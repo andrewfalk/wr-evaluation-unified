@@ -83,8 +83,8 @@ function makeDeviceNoSessionFake(deviceRow: object | null): FakePool {
   return createFakePool({ handlers: deviceHandlers(deviceRow) });
 }
 
-function auditApp(fake: FakePool) {
-  return makeRouterApp(a => a.use('/api/audit', createAuditRouter(fake.pool)));
+function auditApp(fake: FakePool, options: Parameters<typeof createAuditRouter>[1] = {}) {
+  return makeRouterApp(a => a.use('/api/audit', createAuditRouter(fake.pool, options)));
 }
 
 const VALID_BODY = {
@@ -322,6 +322,56 @@ describe('POST /api/audit/emr', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
+  });
+
+  // SEC-A L3 — per verified device, after the signature check.
+  it('429 RATE_LIMITED once a verified device exceeds its per-minute limit; nothing is written for it', async () => {
+    const { writeAuditLogStrict } = await import('../../middleware/audit.js');
+    const { privateKey, publicKey } = makeKeyPair();
+    const fake = makeDeviceFake({ user_id: 'user-1', organization_id: 'org-1', public_key: exportPublicKey(publicKey), status: 'active' });
+    const app = auditApp(fake, { emrEventsPerDevicePerMinute: 1 });
+    const send = () => {
+      const ts = new Date().toISOString();
+      const devNonce = nonce();
+      return request(app)
+        .post('/api/audit/emr')
+        .set('Authorization', `Bearer ${userToken()}`)
+        .set('x-wr-source', 'electron-main')
+        .set('x-wr-device-id', 'dev-1')
+        .set('x-wr-device-sig', signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY))
+        .set('x-wr-device-ts', ts)
+        .set('x-wr-device-nonce', devNonce)
+        .send(VALID_BODY);
+    };
+    vi.mocked(writeAuditLogStrict).mockClear();
+    expect((await send()).status).toBe(200);
+    const limited = await send();
+    expect(limited.status).toBe(429);
+    expect(limited.body).toEqual({ code: 'RATE_LIMITED', error: 'Too many audit events from this device, please retry later' });
+    expect(Number(limited.headers['retry-after'])).toBeGreaterThanOrEqual(1);
+    expect(writeAuditLogStrict).toHaveBeenCalledTimes(1); // only the first request was recorded
+  });
+
+  it('an unverified (bad signature) request does not use up the device bucket', async () => {
+    const { privateKey, publicKey } = makeKeyPair();
+    const fake = makeDeviceFake({ user_id: 'user-1', organization_id: 'org-1', public_key: exportPublicKey(publicKey), status: 'active' });
+    const app = auditApp(fake, { emrEventsPerDevicePerMinute: 1 });
+    const ts = new Date().toISOString();
+    const bad = await request(app)
+      .post('/api/audit/emr')
+      .set('Authorization', `Bearer ${userToken()}`)
+      .set('x-wr-source', 'electron-main').set('x-wr-device-id', 'dev-1')
+      .set('x-wr-device-sig', Buffer.alloc(64).toString('base64')).set('x-wr-device-ts', ts).set('x-wr-device-nonce', nonce())
+      .send(VALID_BODY);
+    expect(bad.status).toBe(401);
+    const devNonce = nonce();
+    const ok = await request(app)
+      .post('/api/audit/emr')
+      .set('Authorization', `Bearer ${userToken()}`)
+      .set('x-wr-source', 'electron-main').set('x-wr-device-id', 'dev-1')
+      .set('x-wr-device-sig', signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY)).set('x-wr-device-ts', ts).set('x-wr-device-nonce', devNonce)
+      .send(VALID_BODY);
+    expect(ok.status).toBe(200);
   });
 
   it('writes audit log on successful request', async () => {

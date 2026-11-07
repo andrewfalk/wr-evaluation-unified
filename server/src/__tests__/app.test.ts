@@ -22,9 +22,10 @@ vi.mock('pg', async (importOriginal) => {
 
 let Pool: typeof import('pg').Pool;
 let createApp: typeof import('../app').createApp;
+let API_BODY_LIMITS: typeof import('../app').API_BODY_LIMITS;
 beforeAll(async () => {
   ({ Pool } = await import('pg'));
-  ({ createApp } = await import('../app.js'));
+  ({ createApp, API_BODY_LIMITS } = await import('../app.js'));
 });
 
 // A pool that is never connected: any use fails the test.
@@ -95,7 +96,7 @@ describe('createApp', () => {
   it('answers an oversized JSON body with the JSON 413 from the error handler', async () => {
     const { pool } = untouchablePool();
     const app = createApp({ pool, auditPool: pool, webDir });
-    const big = JSON.stringify({ blob: 'x'.repeat(11 * 1024 * 1024) }); // default JSON_BODY_LIMIT is 10mb
+    const big = JSON.stringify({ blob: 'x'.repeat(11 * 1024 * 1024) }); // above every limit (largest: JSON_BODY_LIMIT 10mb)
     const res = await request(app).post('/api/auth/login').set('Content-Type', 'application/json').send(big);
     expect(res.status).toBe(413);
     // P1-01: the central error handler adds the request id to every error envelope.
@@ -133,5 +134,43 @@ describe('createApp', () => {
     expect(res.status).toBe(200);
     expect(Object.keys(res.body).sort()).toEqual(['ok', 'service', 'time']);
     expect(res.headers['x-request-id']).toBe('probe-1');
+  });
+
+  // SEC-A L2 — every API mount has its own JSON parser with its own limit.
+  describe('per-mount JSON body limits', () => {
+    const toBytes = (limit: string): number => {
+      const m = /^(\d+)(kb|mb)$/.exec(limit);
+      if (!m) throw new Error(`unexpected limit ${limit}`);
+      return Number(m[1]) * (m[2] === 'kb' ? 1024 : 1024 * 1024);
+    };
+    const bodyOf = (bytes: number) => {
+      const overhead = JSON.stringify({ blob: '' }).length;
+      return JSON.stringify({ blob: 'x'.repeat(bytes - overhead) });
+    };
+
+    it('the large limit is only on the routes that carry whole patients', () => {
+      expect(API_BODY_LIMITS).toEqual({
+        '/api/auth': '256kb', '/api/config': '256kb', '/api/devices': '256kb', '/api/admin/ops': '256kb',
+        '/api/admin': '256kb', '/api/audit': '256kb', '/api/workspaces': '10mb', '/api/patients': '10mb',
+        '/api/autosave': '10mb', '/api/ai': '2mb', '/api/presets': '256kb', '/api/capabilities': '256kb',
+        '/api/video-analysis': '10mb', '/api/stats': '1mb',
+      });
+    });
+
+    it.each(Object.keys({
+      '/api/auth': 1, '/api/config': 1, '/api/devices': 1, '/api/admin/ops': 1, '/api/admin': 1, '/api/audit': 1,
+      '/api/workspaces': 1, '/api/patients': 1, '/api/autosave': 1, '/api/ai': 1, '/api/presets': 1,
+      '/api/capabilities': 1, '/api/video-analysis': 1, '/api/stats': 1,
+    }))('%s: 413 just over its limit, parsed (not 413) just under it — without touching the pool', async (prefix) => {
+      const { pool, used } = untouchablePool();
+      const app = createApp({ pool, auditPool: pool, webDir });
+      const limit = toBytes(API_BODY_LIMITS[prefix as keyof typeof API_BODY_LIMITS]);
+      const over = await request(app).post(`${prefix}/__limit_probe`).set('Content-Type', 'application/json').send(bodyOf(limit + 1));
+      expect(over.status).toBe(413);
+      expect(over.body).toMatchObject({ code: 'PAYLOAD_TOO_LARGE' });
+      const under = await request(app).post(`${prefix}/__limit_probe`).set('Content-Type', 'application/json').send(bodyOf(limit - 64));
+      expect(under.status).not.toBe(413);
+      expect(used).not.toHaveBeenCalled();
+    });
   });
 });

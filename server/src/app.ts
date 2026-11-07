@@ -10,7 +10,7 @@
 // P1-01 added the request id (right after trust proxy) and the /api JSON 404 (after the routers).
 import path from 'path';
 import fs from 'fs';
-import express, { type Express } from 'express';
+import express, { type Express, type Router } from 'express';
 import cookieParser from 'cookie-parser';
 import type { Pool } from 'pg';
 import config from './config';
@@ -35,6 +35,30 @@ import { requestIdMiddleware } from './http/requestId';
 import { apiNotFound } from './http/notFound';
 import { createErrorHandler } from './http/errorHandler';
 import defaultLogger, { type Logger } from './logger';
+
+// JSON body limit per API mount (SEC-A L2). Before 7.2.0 one app-wide parser accepted 10 MB on every
+// route. Now only the routes that carry whole patients take the large limit (JSON_BODY_LIMIT,
+// default 10mb): patient save, workspace save (a 500-patient workspace measured 1.5–4 MB),
+// autosave, and video-analysis apply (it sends the patient's whole data). Everything else 256 KB;
+// AI 2 MB (input + a report of up to 60,000 characters); stats 1 MB (recipes).
+const SMALL_BODY = '256kb';
+export const API_BODY_LIMITS = {
+  '/api/auth':           SMALL_BODY,
+  '/api/config':         SMALL_BODY,
+  '/api/devices':        SMALL_BODY,
+  '/api/admin/ops':      SMALL_BODY,
+  '/api/admin':          SMALL_BODY,
+  '/api/audit':          SMALL_BODY,
+  '/api/workspaces':     config.jsonBodyLimit,
+  '/api/patients':       config.jsonBodyLimit,
+  '/api/autosave':       config.jsonBodyLimit,
+  '/api/ai':             '2mb',
+  '/api/presets':        SMALL_BODY,
+  '/api/capabilities':   SMALL_BODY,
+  '/api/video-analysis': config.jsonBodyLimit,
+  '/api/stats':          '1mb',
+} as const satisfies Record<string, string>;
+type ApiPrefix = keyof typeof API_BODY_LIMITS;
 
 export interface AppDeps {
   pool: Pool;
@@ -61,7 +85,7 @@ export function createApp({
   // Security headers first — applied to every response before any route runs.
   app.use(cspMiddleware());
   app.use(corsMiddleware());
-  app.use(express.json({ limit: config.jsonBodyLimit }));
+  // No app-wide JSON parser: each API mount below names its own body limit (SEC-A L2).
   app.use(cookieParser());
   app.use('/api', noStoreMiddleware());
 
@@ -69,22 +93,27 @@ export function createApp({
     res.json({ ok: true, service: 'wr-app-server', time: new Date().toISOString() });
   });
 
-  app.use('/api/auth', createAuthRouter(pool));
-  app.use('/api/config', createConfigRouter());
-  app.use('/api/devices', createDevicesRouter(pool));
+  // Every API mount gets its own express.json with the limit from API_BODY_LIMITS (SEC-A L2), so a
+  // router cannot end up without a parser or with the large limit by accident (app.test checks).
+  const mount = (prefix: ApiPrefix, router: Router) => {
+    app.use(prefix, express.json({ limit: API_BODY_LIMITS[prefix] }), router);
+  };
+  mount('/api/auth', createAuthRouter(pool));
+  mount('/api/config', createConfigRouter());
+  mount('/api/devices', createDevicesRouter(pool));
   // ops before admin: the admin router now runs auth + admin for every path under it (router.use),
   // so mounting it first would check the session twice for /api/admin/ops/* (S4 / P1-15).
-  app.use('/api/admin/ops',  createOpsStatusRouter(pool));
-  app.use('/api/admin',      createAdminRouter(pool, auditPool));
-  app.use('/api/audit',      createAuditRouter(pool));
-  app.use('/api/workspaces', createWorkspacesRouter(pool));
-  app.use('/api/patients',  createPatientsRouter(pool));
-  app.use('/api/autosave',  createAutosaveRouter(pool));
-  app.use('/api/ai',        createAIRouter(pool));
-  app.use('/api/presets',   createPresetsRouter(pool));
-  app.use('/api/capabilities', createCapabilityGrantsRouter(pool));
-  app.use('/api/video-analysis', createVideoAnalysisRouter(pool));
-  app.use('/api/stats', createStatsRouter(pool));
+  mount('/api/admin/ops',  createOpsStatusRouter(pool));
+  mount('/api/admin',      createAdminRouter(pool, auditPool));
+  mount('/api/audit',      createAuditRouter(pool));
+  mount('/api/workspaces', createWorkspacesRouter(pool));
+  mount('/api/patients',  createPatientsRouter(pool));
+  mount('/api/autosave',  createAutosaveRouter(pool));
+  mount('/api/ai',        createAIRouter(pool));
+  mount('/api/presets',   createPresetsRouter(pool));
+  mount('/api/capabilities', createCapabilityGrantsRouter(pool));
+  mount('/api/video-analysis', createVideoAnalysisRouter(pool));
+  mount('/api/stats', createStatsRouter(pool));
   // Unknown /api paths: JSON 404 (P1-01). After every API router, before /updates and the SPA.
   app.use('/api', apiNotFound());
 

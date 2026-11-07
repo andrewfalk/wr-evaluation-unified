@@ -5,6 +5,11 @@ import { z } from 'zod';
 import { createAuthMiddleware } from '../middleware/auth';
 import { writeAuditLog, writeAuditLogStrict } from '../middleware/audit';
 import { asyncHandler } from '../http/asyncHandler';
+import { createKeyedLimiter, emrAuditIpRateLimit, type KeyedLimiter } from '../middleware/rateLimit';
+
+// SEC-A L3 — signed EMR audit events accepted per device per minute (a normal device sends a few per
+// EMR action; a queue flush after a long offline period is spread over several minutes).
+export const EMR_AUDIT_EVENTS_PER_DEVICE_PER_MINUTE = 120;
 
 // ---------------------------------------------------------------------------
 // POST /api/audit/emr
@@ -72,7 +77,7 @@ interface DeviceRow {
   status:          string;
 }
 
-async function handleEmrAudit(pool: Pool, req: Request, res: Response): Promise<void> {
+async function handleEmrAudit(pool: Pool, deviceLimiter: KeyedLimiter, req: Request, res: Response): Promise<void> {
   // --- 1. Source guard ---
   if (req.headers[SOURCE_HEADER] !== 'electron-main') {
     res.status(401).json({ code: 'UNAUTHORIZED', error: 'Invalid source' });
@@ -220,6 +225,17 @@ async function handleEmrAudit(pool: Pool, req: Request, res: Response): Promise<
       return;
     }
 
+    // --- 7b. Per-device rate limit (SEC-A L3) — keyed by the device id only now that the signature
+    // proved the sender holds that device's key (keying on the unverified header would let anyone
+    // create unlimited buckets). Before the INSERT, so the nonce is released (finally) and the
+    // device's queue can resend the same entry later.
+    const limit = deviceLimiter.hit(deviceId);
+    if (!limit.allowed) {
+      res.setHeader('Retry-After', String(limit.retryAfterSec));
+      res.status(429).json({ code: 'RATE_LIMITED', error: 'Too many audit events from this device, please retry later' });
+      return;
+    }
+
     // --- 8. Write audit log (strict — throws on failure) ---
     // This endpoint exists solely to record the audit row. If the INSERT fails
     // we must NOT return 200; the caller's retry logic depends on it.
@@ -279,13 +295,25 @@ function makeOptionalAuth(pool: Pool): RequestHandler {
   };
 }
 
-export function createAuditRouter(pool: Pool): Router {
+export interface AuditRouterOptions {
+  /** Per-device limit after signature verification (tests lower it). Default EMR_AUDIT_EVENTS_PER_DEVICE_PER_MINUTE. */
+  emrEventsPerDevicePerMinute?: number;
+}
+
+export function createAuditRouter(pool: Pool, options: AuditRouterOptions = {}): Router {
   const router = Router();
+
+  // SEC-A L3: per-device events per minute after signature verification (one bucket per router).
+  const deviceLimiter = createKeyedLimiter({
+    windowMs: 60 * 1000,
+    max: options.emrEventsPerDevicePerMinute ?? EMR_AUDIT_EVENTS_PER_DEVICE_PER_MINUTE,
+  });
 
   router.post(
     '/emr',
+    emrAuditIpRateLimit(), // before anything that queries the database
     makeOptionalAuth(pool),
-    asyncHandler((req, res) => handleEmrAudit(pool, req, res))
+    asyncHandler((req, res) => handleEmrAudit(pool, deviceLimiter, req, res))
   );
 
   return router;

@@ -21,7 +21,7 @@ import {
 } from '../auth/csrf';
 import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
-import { loginRateLimit, csrfRateLimit, signupRateLimit } from '../middleware/rateLimit';
+import { loginRateLimit, csrfRateLimit, refreshRateLimit, signupRateLimit } from '../middleware/rateLimit';
 import { auditLogin, auditLogout, auditRefreshFail, auditRefreshSuccess, writeAuditLog } from '../middleware/audit';
 import { checkPasswordPolicy, isPasswordReused, appendPasswordHistory } from '../auth/passwordPolicy';
 import { asyncHandler } from '../http/asyncHandler';
@@ -624,7 +624,7 @@ export function createAuthRouter(pool: Pool): Router {
 
   // Unauthenticated
   router.post('/login',   loginRateLimit(), asyncHandler((req, res) => login(pool, req, res)));
-  router.post('/refresh', asyncHandler((req, res) => refresh(pool, req, res)));
+  router.post('/refresh', refreshRateLimit(), asyncHandler((req, res) => refresh(pool, req, res)));
 
   // /csrf is exempt from csrfMiddleware (wr_csrf cookie is missing when called).
   // Protected by: HttpOnly wr_refresh cookie (SameSite=Strict), Origin check

@@ -228,6 +228,16 @@ describe('POST /api/auth/login', () => {
 describe('POST /api/auth/refresh', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
+  it('is rate limited per IP: the 61st refresh within a minute gets 429 (SEC-A L3)', async () => {
+    const app = authApp(makeFake());
+    for (let i = 0; i < 60; i += 1) {
+      expect((await request(app).post('/api/auth/refresh')).status).toBe(401); // NO_REFRESH_TOKEN, counted
+    }
+    const limited = await request(app).post('/api/auth/refresh');
+    expect(limited.status).toBe(429);
+    expect(limited.body).toEqual({ code: 'RATE_LIMITED', error: 'Too many token refresh requests, please try again later' });
+  });
+
   it('returns 401 when refresh cookie is absent', async () => {
     const fake = makeFake();
     const res  = await request(authApp(fake)).post('/api/auth/refresh');
