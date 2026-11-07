@@ -26,6 +26,9 @@ function defaultStatsPython(scriptsDir: string): string {
   return path.join(scriptsDir, '.venv', rel);
 }
 
+export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
+export type LogLevel = (typeof LOG_LEVELS)[number];
+
 function required(env: NodeJS.ProcessEnv, key: string): string {
   const val = env[key];
   if (!val) throw new Error(`Missing required env var: ${key}`);
@@ -134,6 +137,15 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
   }
   const nodeEnv = rawNodeEnv as 'development' | 'production' | 'test';
 
+  // ---------------------------------------------------------------------------
+  // LOG_LEVEL (pino level, REFACTORING_ROADMAP P1-01). Tests default to silent so error-path
+  // tests do not flood the output; tests that check logging inject their own logger.
+  // ---------------------------------------------------------------------------
+  const logLevel = optional(env, 'LOG_LEVEL', nodeEnv === 'test' ? 'silent' : 'info');
+  if (!LOG_LEVELS.includes(logLevel as LogLevel)) {
+    throw new Error(`LOG_LEVEL must be one of ${LOG_LEVELS.join(', ')}, got '${logLevel}'`);
+  }
+
   // CORS_ORIGINS is mandatory in production / intranet deployments.
   // An empty allowlist in production would silently block all credentialed
   // browser requests that include an Origin header (login, CSRF, etc.).
@@ -148,6 +160,7 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
     port:        positiveInt(env, 'PORT', 3001),
     databaseUrl: required(env, 'DATABASE_URL'),
     jsonBodyLimit: optional(env, 'JSON_BODY_LIMIT', '10mb'),
+    log: Object.freeze({ level: logLevel as LogLevel }),
 
     deploymentMode,
     // intranet mode never falls back to local storage on server errors
