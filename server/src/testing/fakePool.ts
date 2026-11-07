@@ -18,7 +18,7 @@
 //   그 오류를 500으로 바꿔 삼키더라도 `fake.unmatched`에 남으므로 `assertNoUnmatched()`로 원인을 본다.
 // - `pool.query`와 `pool.connect()`가 주는 client의 `query`는 같은 handler 목록을 쓴다.
 // - client의 BEGIN/COMMIT/ROLLBACK/SAVEPOINT/RELEASE는 handler가 없으면 기본으로 빈 결과를 주고,
-//   handler가 있든 없든 `fake.transactions`에 기록한다. `pool.query('BEGIN')`은 실제 pg에서 매번 다른
+//   handler가 있든 없든 `fake.transactions`에 기록한다(응답 뒤에 — 실패한 COMMIT은 트랜잭션을 닫지 않음). `pool.query('BEGIN')`은 실제 pg에서 매번 다른
 //   연결로 갈 수 있는 버그이므로 오류로 거부한다.
 // - `client.release()`를 두 번 부르면 실제 pg처럼 오류. 테스트 끝에 `assertAllReleased()`로 누수 검사.
 //
@@ -63,7 +63,7 @@ export interface RecordedQuery {
 
 export interface RecordedTransaction {
   clientId: number;
-  /** BEGIN부터 끝(COMMIT/ROLLBACK)까지의 트랜잭션 제어문, 대문자 첫 단어 기준. */
+  /** BEGIN부터 끝(COMMIT/ROLLBACK)까지의 트랜잭션 제어문, 대문자 첫 단어 기준. 실패한 문은 'COMMIT (failed)'처럼. */
   statements: string[];
   outcome: 'open' | 'commit' | 'rollback';
 }
@@ -148,9 +148,17 @@ export function createFakePool(options: CreateFakePoolOptions = {}): FakePool {
   let released = 0;
   const releasedIds = new Set<number>();
 
-  function recordTxControl(clientId: number, sql: string): void {
-    const word = sql.trim().split(/\s+/)[0]!.toUpperCase();
+  // 트랜잭션 제어문의 첫 단어. 판별(TX_CONTROL)과 같은 정규식으로 뽑아 'BEGIN;'처럼 세미콜론이 붙어도 맞춘다.
+  function txWord(sql: string): string {
+    return TX_CONTROL.exec(sql)![1]!.split(/\s+/)[0]!.toUpperCase();
+  }
+
+  // 제어문이 응답(성공·실패)을 받은 뒤에 상태를 바꾼다 — 실패한 COMMIT은 트랜잭션을 닫지 않고
+  // 'COMMIT (failed)'로 남겨, 그 뒤 정리용 ROLLBACK까지 기록되게 한다. 실패한 BEGIN은 트랜잭션을 열지 않는다.
+  function recordTxControl(clientId: number, sql: string, ok: boolean): void {
+    const word = txWord(sql);
     if (word === 'BEGIN' || word === 'START') {
+      if (!ok) return;
       const tx: RecordedTransaction = { clientId, statements: ['BEGIN'], outcome: 'open' };
       transactions.push(tx);
       openTx.set(clientId, tx);
@@ -160,7 +168,9 @@ export function createFakePool(options: CreateFakePoolOptions = {}): FakePool {
     if (!tx) return;
     // ROLLBACK TO SAVEPOINT는 트랜잭션을 끝내지 않는다.
     const isRollbackTo = word === 'ROLLBACK' && /^\s*ROLLBACK\s+TO\b/i.test(sql);
-    tx.statements.push(isRollbackTo ? 'ROLLBACK TO' : word);
+    const label = isRollbackTo ? 'ROLLBACK TO' : word;
+    tx.statements.push(ok ? label : `${label} (failed)`);
+    if (!ok) return;
     if (word === 'COMMIT' || word === 'END') {
       tx.outcome = 'commit';
       openTx.delete(clientId);
@@ -186,9 +196,7 @@ export function createFakePool(options: CreateFakePoolOptions = {}): FakePool {
     if (via === 'client' && clientId !== undefined && releasedIds.has(clientId)) {
       throw new Error(`fakePool: client #${clientId} was used after release(): ${sqlPreview(sql)}`);
     }
-    if (via === 'client' && clientId !== undefined && isTxControl) {
-      recordTxControl(clientId, sql);
-    }
+    const txClientId = via === 'client' && isTxControl ? clientId : undefined;
 
     const handler = handlers.find(h => {
       if (h.times !== undefined && (used.get(h) ?? 0) >= h.times) return false;
@@ -205,7 +213,10 @@ export function createFakePool(options: CreateFakePoolOptions = {}): FakePool {
     calls.push(call);
 
     if (!handler) {
-      if (isTxControl) return toResult({ rows: [], rowCount: null });
+      if (isTxControl) {
+        if (txClientId !== undefined) recordTxControl(txClientId, sql, true);
+        return toResult({ rows: [], rowCount: null });
+      }
       unmatched.push(call);
       const exhausted = handlers.filter(h => h.times !== undefined && (used.get(h) ?? 0) >= h.times && matches(h, sql, params));
       const hint = exhausted.length > 0
@@ -215,7 +226,14 @@ export function createFakePool(options: CreateFakePoolOptions = {}): FakePool {
     }
 
     used.set(handler, (used.get(handler) ?? 0) + 1);
-    const reply = typeof handler.reply === 'function' ? await handler.reply(sql, params) : handler.reply;
+    let reply: FakeQueryReply | Error;
+    try {
+      reply = typeof handler.reply === 'function' ? await handler.reply(sql, params) : handler.reply;
+    } catch (err) {
+      if (txClientId !== undefined) recordTxControl(txClientId, sql, false);
+      throw err;
+    }
+    if (txClientId !== undefined) recordTxControl(txClientId, sql, !(reply instanceof Error));
     if (reply instanceof Error) throw reply;
     return toResult(reply);
   }

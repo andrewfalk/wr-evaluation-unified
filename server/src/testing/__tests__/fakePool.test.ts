@@ -121,14 +121,44 @@ describe('createFakePool — clients and transactions', () => {
     expect(fake.callsTo('transaction-control')).toHaveLength(6);
   });
 
-  it('a handler can override transaction control (e.g. make COMMIT fail)', async () => {
+  it('a handler can override transaction control; a failed COMMIT keeps the transaction open for the cleanup ROLLBACK', async () => {
     const fake = createFakePool({ handlers: [{ name: 'commit-fails', match: /^COMMIT/, reply: pgError('40001') }] });
     const client = await fake.pool.connect();
     await client.query('BEGIN');
     await expect(client.query('COMMIT')).rejects.toMatchObject({ code: '40001' });
+    expect(fake.transactions[0]!.outcome).toBe('open');
+    await client.query('ROLLBACK');
     client.release();
-    expect(fake.transactions[0]!.outcome).toBe('commit');
+    expect(fake.transactions).toEqual([
+      { clientId: 1, statements: ['BEGIN', 'COMMIT (failed)', 'ROLLBACK'], outcome: 'rollback' },
+    ]);
     expect(fake.callsTo('commit-fails')).toHaveLength(1);
+  });
+
+  it('a failed BEGIN (reply function that throws) opens no transaction', async () => {
+    const fake = createFakePool({
+      handlers: [{ name: 'begin-fails', match: /^BEGIN/, reply: () => { throw pgError('57P01'); } }],
+    });
+    const client = await fake.pool.connect();
+    await expect(client.query('BEGIN')).rejects.toMatchObject({ code: '57P01' });
+    client.release();
+    expect(fake.transactions).toEqual([]);
+  });
+
+  it('records transaction control written with a trailing semicolon', async () => {
+    const fake = createFakePool();
+    const a = await fake.pool.connect();
+    await a.query('BEGIN;');
+    await a.query('COMMIT;');
+    a.release();
+    const b = await fake.pool.connect();
+    await b.query('begin;');
+    await b.query('rollback;');
+    b.release();
+    expect(fake.transactions).toEqual([
+      { clientId: 1, statements: ['BEGIN', 'COMMIT'], outcome: 'commit' },
+      { clientId: 2, statements: ['BEGIN', 'ROLLBACK'], outcome: 'rollback' },
+    ]);
   });
 
   it('rejects transaction control sent through pool.query', async () => {
