@@ -1,6 +1,6 @@
 // scripts/verify-audit.mjs — advisory extraction and allow-list comparison.
 import { describe, expect, it } from 'vitest';
-import { advisoriesFrom, evaluate, reachableLocations, advisoriesFor } from './verify-audit.mjs';
+import { advisoriesFrom, evaluate, reachableLocations, advisoriesFor, versionInRange } from './verify-audit.mjs';
 
 const audit = {
   vulnerabilities: {
@@ -135,5 +135,59 @@ describe('verify-audit workspace attribution (npm workspaces, one lockfile)', ()
   it('tolerates an empty lock', () => {
     expect([...reachableLocations({}, '')]).toEqual(['']);
     expect([...reachableLocations(null, 'server')]).toEqual(['server']);
+  });
+});
+
+describe('verify-audit per-advisory version ranges', () => {
+  it('versionInRange handles npm audit range forms and refuses what it cannot read', () => {
+    expect(versionInRange('6.2.1', '<7.5.7')).toBe(true);
+    expect(versionInRange('7.5.7', '<7.5.7')).toBe(false);
+    expect(versionInRange('2.5.0', '>=2.0.0 <3.0.6')).toBe(true);
+    expect(versionInRange('3.0.6', '>=2.0.0 <3.0.6')).toBe(false);
+    expect(versionInRange('1.0.0', '<=0.9.0 || >=1.0.0 <1.0.2')).toBe(true);
+    expect(versionInRange('1.0.2', '<=0.9.0 || >=1.0.0 <1.0.2')).toBe(false);
+    expect(versionInRange('1.0.0-rc.1', '<1.0.0')).toBe(true);
+    expect(versionInRange('4.1.0', '*')).toBe(true);
+    expect(versionInRange('1.2.3', '=1.2.3')).toBe(true);
+    expect(versionInRange(undefined, '<1.0.0')).toBeNull();
+    expect(versionInRange('1.0.0', '~1.0.0')).toBeNull();
+    expect(versionInRange('1.0.0', '')).toBeNull();
+  });
+
+  it('two versions of one package vulnerable to different advisories are attributed separately', () => {
+    // root uses foo@1.0.0 (only GHSA-A, <2), server uses foo@2.0.0 (only GHSA-B, >=2 <3).
+    const lock = {
+      packages: {
+        '': { dependencies: { foo: '^1' } },
+        server: { dependencies: { foo: '^2' } },
+        'node_modules/foo': { version: '1.0.0' },
+        'server/node_modules/foo': { version: '2.0.0' },
+      },
+    };
+    const report = {
+      vulnerabilities: {
+        foo: {
+          nodes: ['node_modules/foo', 'server/node_modules/foo'],
+          via: [
+            { url: 'https://github.com/advisories/GHSA-A', severity: 'high', title: 'A', range: '<2.0.0' },
+            { url: 'https://github.com/advisories/GHSA-B', severity: 'high', title: 'B', range: '>=2.0.0 <3.0.0' },
+          ],
+        },
+      },
+    };
+    const advisories = advisoriesFrom(report, lock);
+    const rootAdv = advisoriesFor(reachableLocations(lock, ''), advisories);
+    const serverAdv = advisoriesFor(reachableLocations(lock, 'server'), advisories);
+    expect(rootAdv.map((a) => a.id)).toEqual(['GHSA-A']);
+    expect(serverAdv.map((a) => a.id)).toEqual(['GHSA-B']);
+    const allow = { entries: [{ workspace: 'root', package: 'foo', advisories: ['GHSA-A'] }, { workspace: 'server', package: 'foo', advisories: ['GHSA-B'] }] };
+    expect(evaluate('root', rootAdv, allow).failures).toEqual([]);
+    expect(evaluate('server', serverAdv, allow).failures).toEqual([]);
+  });
+
+  it('keeps a location whose version or the advisory range cannot be read (unknown = vulnerable)', () => {
+    const lock = { packages: { 'node_modules/foo': {} } };
+    const report = { vulnerabilities: { foo: { nodes: ['node_modules/foo'], via: [{ url: 'u/GHSA-X', severity: 'high', title: 'X', range: '<2.0.0' }] } } };
+    expect(advisoriesFrom(report, lock)[0].nodes).toEqual(['node_modules/foo']);
   });
 });

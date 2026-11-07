@@ -30,9 +30,50 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WORKSPACES = { root: '', server: 'server' };
 const BLOCKING = new Set(['high', 'critical']);
 
+// Does `version` (x.y.z[-pre]) fall in an advisory `range` as npm audit reports it — comparator sets
+// joined by `||`, each a space-separated AND of `<`, `<=`, `>`, `>=`, `=` (or bare) x.y.z bounds, or `*`?
+// Returns null when either side cannot be parsed, so the caller can treat it as vulnerable.
+export function versionInRange(version, range) {
+  const parse = (v) => {
+    const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(String(v).trim());
+    return m ? { nums: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ?? null } : null;
+  };
+  const cmp = (a, b) => {
+    for (let i = 0; i < 3; i += 1) if (a.nums[i] !== b.nums[i]) return a.nums[i] < b.nums[i] ? -1 : 1;
+    if (a.pre === b.pre) return 0;
+    if (a.pre === null) return 1; // 1.0.0 > 1.0.0-rc
+    if (b.pre === null) return -1;
+    return a.pre < b.pre ? -1 : 1;
+  };
+  const v = parse(version);
+  if (!v || typeof range !== 'string' || range.trim() === '') return null;
+  let anyParsed = false;
+  for (const set of range.split('||')) {
+    const parts = set.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return null;
+    let ok = true;
+    for (const part of parts) {
+      if (part === '*') continue;
+      const m = /^(<=|>=|<|>|=)?(.+)$/.exec(part);
+      const bound = m && parse(m[2]);
+      if (!bound) return null;
+      const c = cmp(v, bound);
+      const op = m[1] || '=';
+      const pass = op === '<' ? c < 0 : op === '<=' ? c <= 0 : op === '>' ? c > 0 : op === '>=' ? c >= 0 : c === 0;
+      if (!pass) ok = false;
+    }
+    anyParsed = true;
+    if (ok) return true;
+  }
+  return anyParsed ? false : null;
+}
+
 // Advisories reported by one `npm audit --json` result: [{ package, id, severity, title, nodes }].
-// `nodes` are the vulnerable install locations (package-lock.json keys).
-export function advisoriesFrom(auditJson) {
+// `nodes` are the install locations (package-lock.json keys) vulnerable to THIS advisory: npm audit's
+// per-package `nodes` is the union over all of that package's advisories, so when a lockfile is given
+// each location is kept only if its installed version is in the advisory's `range` (a location whose
+// version or range cannot be read stays — unknown counts as vulnerable).
+export function advisoriesFrom(auditJson, lock = null) {
   const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
   if (!isPlainObject(auditJson) || auditJson.error || !isPlainObject(auditJson.vulnerabilities)) {
     const why = auditJson?.error?.summary || auditJson?.error?.code || '"vulnerabilities" is missing or not an object';
@@ -45,7 +86,10 @@ export function advisoriesFrom(auditJson) {
     }
     for (const via of vuln.via) {
       if (typeof via !== 'object' || !via.url) continue; // string = inherited from another package
-      out.push({ package: pkg, id: via.url.split('/').pop(), severity: via.severity, title: via.title, nodes: vuln.nodes });
+      const nodes = lock
+        ? vuln.nodes.filter((node) => versionInRange(lock.packages?.[node]?.version, via.range) !== false)
+        : vuln.nodes;
+      out.push({ package: pkg, id: via.url.split('/').pop(), severity: via.severity, title: via.title, nodes });
     }
   }
   return out;
@@ -139,7 +183,7 @@ function main() {
   let failed = false;
   let advisories;
   try {
-    advisories = advisoriesFrom(runAudit());
+    advisories = advisoriesFrom(runAudit(), lock);
   } catch (err) {
     console.error(`verify-audit: ${err.message}`);
     process.exit(1);
