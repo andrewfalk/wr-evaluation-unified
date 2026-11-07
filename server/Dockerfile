@@ -1,10 +1,13 @@
 # =============================================================================
 # wr-evaluation-unified — server image (영상 추론 동봉, 6.0-9)
 #
-# Three-stage build:
-#   web-builder    → Vite SPA (prebuild:web hook builds shared contracts first)
-#   server-builder → TypeScript compile (server + shared contracts)
-#   production     → Node 20 (Debian bookworm) + Python 포즈 추론 런타임 + baked 가중치
+# Four-stage build (npm workspaces, 루트 package-lock.json 하나 — REFACTORING_ROADMAP P0-7 W3):
+#   web-builder      → 루트 + @wr/contracts·@wr/analytics-core 설치, 공유 패키지 dist + Vite SPA
+#   server-builder   → @wr/server 설치(dev 포함), TypeScript 컴파일
+#   server-prod-deps → @wr/server 운영 의존성만(npm ci --omit=dev), 네이티브 모듈(bcrypt) glibc 빌드
+#   production       → Node 20 (Debian bookworm) + Python 포즈 추론 런타임 + baked 가중치.
+#                      저장소와 같은 경로 구조(/app/node_modules·/app/shared·/app/packages·/app/server)라
+#                      워크스페이스 심링크(node_modules/@wr/* → ../../shared 등)가 그대로 유효하다.
 #
 # ABI 정합(6.0-9): server-builder·production을 같은 Debian(bookworm) 계열로 통일한다.
 #   네이티브 모듈(bcrypt 등)을 musl(alpine)에서 빌드해 glibc 런타임으로 복사하면 부팅 시
@@ -33,40 +36,60 @@ WORKDIR /build
 ARG WR_GIT_COMMIT=unknown
 ENV WR_GIT_COMMIT=$WR_GIT_COMMIT
 
-COPY package*.json ./
+# 워크스페이스 매니페스트 먼저(설치 레이어 캐시). 서버 매니페스트도 있어야 lock의 워크스페이스 목록과 맞는다.
+COPY package.json package-lock.json ./
+COPY shared/package.json ./shared/
+COPY packages/analytics-core/package.json ./packages/analytics-core/
+COPY server/package.json ./server/
+RUN npm ci --include-workspace-root --workspace @wr/contracts --workspace @wr/analytics-core
+
 COPY scripts/ ./scripts/
 COPY shared/ ./shared/
 COPY packages/ ./packages/
 COPY vite.config.js index.html ./
 COPY src/ ./src/
 COPY public/ ./public/
-
-RUN npm ci
 RUN VITE_DEFAULT_INTEGRATION_MODE=intranet npm run build:web
 
 # =============================================================================
 # Stage 2: Build server TypeScript (glibc — 런타임과 ABI 정합)
 # =============================================================================
 FROM node:20-bookworm-slim AS server-builder
-WORKDIR /build/server
+WORKDIR /build
 
 # 네이티브 모듈(bcrypt 등) 소스 빌드 폴백 대비(prebuilt 없을 때).
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy built shared contracts so the file: dependency resolves at npm ci
-COPY --from=web-builder /build/shared /build/shared
-# Same for analytics-core — server/package.json now depends on it (file:../packages/analytics-core).
-COPY --from=web-builder /build/packages/analytics-core /build/packages/analytics-core
+COPY package.json package-lock.json ./
+COPY shared/package.json ./shared/
+COPY packages/analytics-core/package.json ./packages/analytics-core/
+COPY server/package.json ./server/
+RUN npm ci --workspace @wr/server
 
-COPY server/package*.json ./
-RUN npm ci
-
-COPY server/ ./
-RUN npm run build
+# 서버 tsc는 @wr/* 를 node_modules 심링크 → 패키지 exports(require 조건) → dist/*.d.cts 로 해석한다.
+COPY --from=web-builder /build/shared/dist ./shared/dist
+COPY --from=web-builder /build/packages/analytics-core/dist ./packages/analytics-core/dist
+COPY server/ ./server/
+# --ignore-scripts: 서버 prebuild(공유 패키지 tsup 재빌드)는 건너뛴다 — 공유 패키지 dist는 위에서 web-builder가
+# 만든 것을 복사했고, 이 단계는 서버 의존성만 설치해 tsup이 없다. build 자체는 tsc -p tsconfig.build.json.
+RUN npm run build --workspace @wr/server --ignore-scripts
 
 # =============================================================================
-# Stage 3: Production runtime — Node(glibc) + Python 포즈 추론 + baked 가중치
+# Stage 3: 서버 운영 의존성만 (dev 의존성·클라이언트 의존성 제외, glibc 네이티브 빌드)
+# =============================================================================
+FROM node:20-bookworm-slim AS server-prod-deps
+WORKDIR /build
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+COPY package.json package-lock.json ./
+COPY shared/package.json ./shared/
+COPY packages/analytics-core/package.json ./packages/analytics-core/
+COPY server/package.json ./server/
+RUN npm ci --omit=dev --workspace @wr/server
+
+# =============================================================================
+# Stage 4: Production runtime — Node(glibc) + Python 포즈 추론 + baked 가중치
 # =============================================================================
 FROM node:20-bookworm-slim AS production
 ENV NODE_ENV=production
@@ -121,26 +144,19 @@ COPY services/stats-engine/ /app/stats-engine/
 ENV STATS_ENGINE_PYTHON=/opt/stats-venv/bin/python \
     STATS_ENGINE_SCRIPTS_DIR=/app/stats-engine
 
-# Server compiled JS + production node_modules (bookworm builder와 ABI 정합)
-COPY --from=server-builder /build/server/dist        ./dist
-COPY --from=server-builder /build/server/node_modules ./node_modules
-COPY server/migrations ./migrations
+# 운영 의존성 트리 전체(/build → /app, bookworm에서 설치해 ABI 정합): 루트 node_modules(끌어올린 패키지 +
+# @wr/* 워크스페이스 상대 심링크), 버전이 달라 server/node_modules에 남은 패키지, 워크스페이스 package.json들.
+# 같은 구조로 복사하므로 심링크가 /app/shared·/app/packages/analytics-core·/app/server를 그대로 가리킨다.
+COPY --from=server-prod-deps /build/ /app/
+# 공유 패키지 빌드 산출물(@wr/contracts·@wr/analytics-core의 exports가 가리키는 dist).
+COPY --from=web-builder /build/shared/dist /app/shared/dist
+COPY --from=web-builder /build/packages/analytics-core/dist /app/packages/analytics-core/dist
+# 서버 컴파일 결과 + 마이그레이션(server/src/db/migrate.ts: dist/db/../../migrations).
+COPY --from=server-builder /build/server/dist /app/server/dist
+COPY server/migrations /app/server/migrations
 
-# npm installs local file dependencies as symlinks. The @wr/contracts symlink
-# points outside /app in the builder image, so vendor the built contract package
-# into the final runtime image as real files.
-RUN rm -rf ./node_modules/@wr/contracts && mkdir -p ./node_modules/@wr/contracts
-COPY --from=server-builder /build/shared/package.json ./node_modules/@wr/contracts/package.json
-COPY --from=server-builder /build/shared/dist ./node_modules/@wr/contracts/dist
-
-# Same vendor treatment for @wr/analytics-core (PR0-B2 — server_verified_modules_complete_at
-# verification calls into packages/analytics-core/completion.ts).
-RUN rm -rf ./node_modules/@wr/analytics-core && mkdir -p ./node_modules/@wr/analytics-core
-COPY --from=server-builder /build/packages/analytics-core/package.json ./node_modules/@wr/analytics-core/package.json
-COPY --from=server-builder /build/packages/analytics-core/dist ./node_modules/@wr/analytics-core/dist
-
-# Web SPA served at / for non-API routes
-COPY --from=web-builder /build/dist/web ./dist/web
+# Web SPA served at / for non-API routes (server/src/app.ts: path.join(__dirname, 'web'))
+COPY --from=web-builder /build/dist/web /app/server/dist/web
 
 # 영상 업로드 공유 디렉터리(named volume `video_uploads` 마운트 대상). 부팅 시 비-root(node)가
 # 하위 tmp/를 만들므로(buildUploadMiddleware) 디렉터리를 미리 생성하고 소유권을 node에 준다.
@@ -157,4 +173,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 # Run as unprivileged user (node user is built into the official image)
 USER node
 
+# 운영 문서·스크립트의 `docker compose exec app node dist/cli/seedAdmin.js` 같은 명령이 그대로 동작하도록
+# 서버 패키지 폴더를 작업 폴더로 둔다(그 밖의 경로는 모두 절대 경로 환경변수 — compose·위 ENV).
+WORKDIR /app/server
 CMD ["node", "dist/index.js"]

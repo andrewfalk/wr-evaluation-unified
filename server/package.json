@@ -6,7 +6,7 @@
     "predev": "cd ../shared && npm run build && cd ../packages/analytics-core && npm run build",
     "dev": "tsx watch src/index.ts",
     "migrate": "tsx src/db/migrate.ts",
-    "prebuild": "cd ../shared && npm run build && cd ../packages/analytics-core && npm run build",
+    "prebuild": "node ../scripts/prebuild-shared.mjs && node ../scripts/prebuild-analytics-core.mjs",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "test": "vitest run --config vitest.config.ts --passWithNoTests",
@@ -20,8 +20,8 @@
     "cleanup:stats-runs": "tsx src/cli/runStatsRunCleanup.ts"
   },
   "dependencies": {
-    "@wr/analytics-core": "file:../packages/analytics-core",
-    "@wr/contracts": "file:../shared",
+    "@wr/analytics-core": "*",
+    "@wr/contracts": "*",
     "bcrypt": "^5.1.1",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.6",
@@ -33,7 +33,7 @@
     "pg": "^8.11.3",
     "pino": "^8.19.0",
     "pino-pretty": "^10.3.1",
-    "zod": "^3.23.0"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
