@@ -11,6 +11,7 @@ describe('hasLeadingNocheck', () => {
     expect(hasLeadingNocheck('// header\n/* block */\n// @ts-nocheck\nconst a = 1;')).toBe(true);
     expect(hasLeadingNocheck('/** @ts-nocheck */\nconst a = 1;')).toBe(true);
     expect(hasLeadingNocheck('const a = 1;\n// @ts-nocheck\n')).toBe(false);
+    expect(hasLeadingNocheck('/// @ts-nocheck\nexport const v = 1;')).toBe(true);
     expect(hasLeadingNocheck('// @ts-nocheckx\n')).toBe(false);
     expect(hasLeadingNocheck('// @ts-check\n')).toBe(false);
     expect(hasLeadingNocheck('/* unterminated')).toBe(false);

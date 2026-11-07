@@ -26,7 +26,8 @@ export function hasLeadingNocheck(text) {
     if (rest.startsWith('//')) {
       const end = rest.indexOf('\n');
       const line = end === -1 ? rest : rest.slice(0, end);
-      if (/^\/\/\s*@ts-nocheck\b/.test(line)) return true;
+      // `/// @ts-nocheck`(세 슬래시)도 TypeScript가 지시문으로 따른다.
+      if (/^\/\/\/?\s*@ts-nocheck\b/.test(line)) return true;
       if (end === -1) return false;
       rest = rest.slice(end + 1);
     } else if (rest.startsWith('/*')) {
