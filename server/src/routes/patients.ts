@@ -55,6 +55,7 @@ import {
   type LockRow,
 } from '../db/patientLocks';
 import { asyncHandler } from '../http/asyncHandler';
+import { lockOf, lockTokenOf, parsePositiveInt, requireLockToken } from '../http/lockToken';
 import { orgIdOf, requireOrg, requirePatientAccess, sessionOf } from '../http/authz';
 
 // ---------------------------------------------------------------------------
@@ -139,13 +140,6 @@ function strOrNull(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null;
 }
 
-// Rejects "1abc", "0", "-1", "". Returns null on invalid input.
-function parsePositiveInt(val: unknown): number | null {
-  const s = String(val ?? '').trim();
-  if (!/^\d+$/.test(s)) return null;
-  const n = Number(s);
-  return n >= 1 ? n : null;
-}
 
 function isUniqueViolation(err: unknown): err is PgErrorLike {
   return (err as PgErrorLike | null)?.code === '23505';
@@ -205,10 +199,6 @@ function personVanishedResponse(): { code: string; error: string; retriable: boo
 // 환자 단위 TTL lease lock — 헬퍼
 // ---------------------------------------------------------------------------
 
-function getLockTokenHeader(req: Request): string | null {
-  const v = req.headers['x-lock-token'];
-  return typeof v === 'string' && v ? v : null;
-}
 
 // holder 응답에는 holderName/acquiredAt/expiresAt만 노출 — leaseToken/clientInstanceId/
 // sessionId/userId는 절대 노출하지 않는다.
@@ -243,7 +233,7 @@ export async function evaluateLockGate(
 ): Promise<{ status: number; body: Record<string, unknown> } | null> {
   if (config.lockEnforcementMode === 'off') return null;
 
-  const leaseToken = leaseTokenOverride !== undefined ? leaseTokenOverride : getLockTokenHeader(req);
+  const leaseToken = leaseTokenOverride !== undefined ? leaseTokenOverride : lockTokenOf(req);
   const result = await checkLockForWrite(client, { patientId, orgId, leaseToken });
   if (result.ok) return null;
 
@@ -783,16 +773,7 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
   const orgId   = orgIdOf(req);
   const { id }  = req.params;
 
-  const ifMatch = req.headers['if-match'];
-  if (!ifMatch) {
-    res.status(400).json({ code: 'IF_MATCH_REQUIRED', error: 'If-Match header with current revision is required' });
-    return;
-  }
-  const expectedRevision = parsePositiveInt(ifMatch);
-  if (expectedRevision === null) {
-    res.status(400).json({ code: 'INVALID_IF_MATCH', error: 'If-Match must be a positive integer revision' });
-    return;
-  }
+  const { ifMatch: expectedRevision } = lockOf(req); // requireLockToken() on the route (S4 / P1-18)
 
   const parse = PatchBody.safeParse(req.body);
   if (!parse.success) {
@@ -1126,16 +1107,7 @@ async function correctPatientIdentityRoute(pool: Pool, req: Request, res: Respon
   const orgId   = orgIdOf(req);
   const { id }  = req.params;
 
-  const ifMatch = req.headers['if-match'];
-  if (!ifMatch) {
-    res.status(400).json({ code: 'IF_MATCH_REQUIRED', error: 'If-Match header with current revision is required' });
-    return;
-  }
-  const expectedRevision = parsePositiveInt(ifMatch);
-  if (expectedRevision === null) {
-    res.status(400).json({ code: 'INVALID_IF_MATCH', error: 'If-Match must be a positive integer revision' });
-    return;
-  }
+  const { ifMatch: expectedRevision } = lockOf(req); // requireLockToken() on the route (S4 / P1-18)
 
   const parse = IdentityCorrectionBody.safeParse(req.body);
   if (!parse.success) {
@@ -1171,7 +1143,7 @@ async function correctPatientIdentityRoute(pool: Pool, req: Request, res: Respon
         session: { userId: session.userId, role: session.role },
         // 권위 있는 락 판정은 correctPatientIdentity가 활성 case를 잠근 뒤 수행한다.
         // 위 evaluateLockGate는 앵커 없이 도는 값싼 조기 차단일 뿐이다.
-        leaseToken: getLockTokenHeader(req),
+        leaseToken: lockTokenOf(req),
       });
 
       // 감사 기록은 변경과 같은 트랜잭션에서 — 기록이 남지 않으면 변경도 남지 않아야 한다.
@@ -1399,7 +1371,7 @@ async function acquireOrRenewPatientLock(pool: Pool, req: Request, res: Response
   const { id }  = req.params;
 
   const force = req.query['force'] === 'true';
-  const presentedToken = getLockTokenHeader(req);
+  const presentedToken = lockTokenOf(req);
 
   const client = await pool.connect();
   try {
@@ -1487,7 +1459,7 @@ async function releasePatientLock(pool: Pool, req: Request, res: Response): Prom
   const orgId   = orgIdOf(req);
   const { id }  = req.params;
 
-  const token = getLockTokenHeader(req);
+  const token = lockTokenOf(req);
   if (!token) {
     res.status(204).end();
     return;
@@ -1563,7 +1535,7 @@ export function createPatientsRouter(pool: Pool): Router {
 
   router.patch(
     '/:id',
-    auth, csrfMiddleware, requirePatientAccess(pool, 'write'), audit('patient_update'), requireOrg(),
+    auth, csrfMiddleware, requirePatientAccess(pool, 'write'), audit('patient_update'), requireOrg(), requireLockToken(),
     asyncHandler((req, res) => withDeadlockRetry(() => patchPatient(pool, req, res)))
   );
 
@@ -1616,6 +1588,7 @@ export function createPatientsRouter(pool: Pool): Router {
     }),
     requirePatientAccess(pool, 'write'),
     requireOrg(),
+    requireLockToken(),
     asyncHandler((req, res) => correctPatientIdentityRoute(pool, req, res))
   );
 

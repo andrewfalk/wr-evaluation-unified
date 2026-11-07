@@ -8,6 +8,8 @@ declare global {
       requestId?: string;
       /** Set by requireOrg() (http/authz.ts): the session's organization, never null after it. */
       orgId?: string;
+      /** Set by requireLockToken() (http/lockToken.ts): If-Match revision + X-Lock-Token. */
+      lock?: { ifMatch: number; token: string | null };
       sessionInfo?: {
         sessionId:          string;
         userId:             string;
