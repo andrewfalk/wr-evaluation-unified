@@ -9,7 +9,7 @@ export {
   computeJobExposures,
   isShoulderAssessmentComplete,
   computeShoulderCalc,
-} from '@analytics-core/modules/shoulder/index';
+} from '@wr/analytics-core/modules/shoulder/index';
 
 // UI 라벨 매핑 함수 — analytics-core로 이동하지 않음(UI 전용, 계산에 관여 안 함).
 export const getSideText = (side) =>

@@ -3,7 +3,7 @@ import { JobTab } from './components/JobTab';
 import { KneeResultPanel } from './components/KneeResultPanel';
 import { createKneeJobExtras } from './utils/data';
 import { NoEvaluableJobsNotice } from '../../core/components/NoEvaluableJobsNotice';
-import { filterAnalysisJobs, hasNoEvaluableJobs } from '@analytics-core/jobScope';
+import { filterAnalysisJobs, hasNoEvaluableJobs } from '@wr/analytics-core/jobScope';
 
 export function KneeEvaluation({ patient, calc, activeTab, updateModule, errors }) {
   const shared = patient.data.shared;

@@ -9,8 +9,8 @@
 //
 // 실행: node scripts/videoValidateReport.mjs --bundle <validation_bundle.json>
 //          --annotations <annotations.json> [--out report.json]
-//   사전: shared/dist 빌드 필요(@contracts alias) → package.json prevideo:validate-report가 prebuild-shared.mjs 실행.
-//   @contracts alias(=shared/dist)는 Vite가 해석하므로 Vite SSR(ssrLoadModule)로 모듈을 로드한다(plain node 불가).
+//   사전: shared/dist 빌드 필요(@wr/contracts alias) → package.json prevideo:validate-report가 prebuild-shared.mjs 실행.
+//   @wr/contracts alias(=shared/dist)는 Vite가 해석하므로 Vite SSR(ssrLoadModule)로 모듈을 로드한다(plain node 불가).
 
 import fs from 'node:fs';
 import { createServer } from 'vite';
@@ -52,7 +52,7 @@ async function main() {
     const perDay = await vite.ssrLoadModule('/src/core/services/videoPerDayConversion.js');
     const validation = await vite.ssrLoadModule('/src/core/services/videoValidation.js');
     const vthresh = await vite.ssrLoadModule('/src/core/services/videoValidationThresholds.js');
-    const contracts = await vite.ssrLoadModule('@contracts/index');
+    const contracts = await vite.ssrLoadModule('@wr/contracts/index');
 
     const { VIDEO_FEATURE_TARGETS, AnnotationSetSchema } = contracts;
 

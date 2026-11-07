@@ -7,12 +7,12 @@ import { getLockToken } from './lockTokenStore';
 import {
   GetWorkspacesResponseSchema,
   SaveWorkspaceResponseSchema,
-} from '@contracts/workspace';
+} from '@wr/contracts/workspace';
 import {
   GetAutosaveResponseSchema,
   PutAutosaveResponseSchema,
   DeleteAutosaveResponseSchema,
-} from '@contracts/autosave';
+} from '@wr/contracts/autosave';
 
 // Wraps schema.parse() so ZodErrors get status=502 + code='CONTRACT_VIOLATION'.
 // Without this, shouldFallbackToLocal() in workspaceRepository treats ZodErrors

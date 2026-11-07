@@ -3,7 +3,7 @@
 // Update the golden only for an intended change, never in a refactor (src/core/fixtures/goldenEnv.js).
 import { legacyParitySuite, moduleArgs } from '../../../../core/fixtures/legacyParity';
 import { syncWristModuleData } from '../data';
-import { normalizeWristModuleData } from '@analytics-core/modules/wrist/legacyNormalize';
+import { normalizeWristModuleData } from '@wr/analytics-core/modules/wrist/legacyNormalize';
 
 const NEW_JOB = { id: 'golden-job-new', jobName: '신규 직종', startDate: '2020-01-01', endDate: '2021-01-01' };
 

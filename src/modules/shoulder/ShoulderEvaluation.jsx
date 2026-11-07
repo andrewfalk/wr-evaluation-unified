@@ -3,7 +3,7 @@ import { JobTab } from './components/JobTab';
 import { ShoulderResultPanel } from './components/ShoulderResultPanel';
 import { createShoulderJobExtras } from './utils/data';
 import { NoEvaluableJobsNotice } from '../../core/components/NoEvaluableJobsNotice';
-import { filterAnalysisJobs, hasNoEvaluableJobs } from '@analytics-core/jobScope';
+import { filterAnalysisJobs, hasNoEvaluableJobs } from '@wr/analytics-core/jobScope';
 
 export function ShoulderEvaluation({ patient, calc, activeTab, updateModule, errors }) {
   const shared = patient.data.shared;

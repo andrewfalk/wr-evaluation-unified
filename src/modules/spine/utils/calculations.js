@@ -20,4 +20,4 @@ export {
   assessWorkRelatedness,
   isSpineAssessmentComplete,
   resolveMddmStatus,
-} from '@analytics-core/modules/spine/index';
+} from '@wr/analytics-core/modules/spine/index';

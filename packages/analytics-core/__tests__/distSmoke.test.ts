@@ -1,4 +1,4 @@
-// 6차 리뷰 권장 사항: vitest의 '@analytics-core' alias(vitest.config.js)는 소스를
+// 6차 리뷰 권장 사항: vitest의 '@wr/analytics-core' alias(vitest.config.js)는 소스를
 // 직접 가리키므로, 여태까지의 유닛 테스트는 registerAnalyticsModule()의 등록 side effect가
 // 실제 배포 산출물(빌드된 dist)에서도 일어나는지는 검증하지 못했다. 이 테스트는 dist/index.js
 // (ESM)와 dist/index.cjs(CJS)를 상대경로로 직접 import/require해 확인한다.

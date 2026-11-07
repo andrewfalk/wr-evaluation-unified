@@ -9,7 +9,7 @@
  *
  * 환자 생성 로직은 src/core/fixtures/createTestPatients.js(브라우저 "테스트 데이터 로드"
  * 버튼)를 그대로 재사용하지 않고 이 파일 안에 독립적으로 다시 구현했다 — 그 픽스처는
- * wrist 모듈 경로에서 core/utils/diagnosisMapping → @analytics-core/diagnosisMapping를
+ * wrist 모듈 경로에서 core/utils/diagnosisMapping → @wr/analytics-core/diagnosisMapping를
  * import하는데, 이 별칭은 vite.config.js의 resolve.alias(→ packages/analytics-core/dist)
  * 로만 존재해 tsx/Node 단독 실행에서는 절대 resolve되지 않는다(직접 확인함). 대신 knee/
  * shoulder/spine/cervical/wrist 모듈 payload의 필드 이름·타입(문자열 vs 숫자 등)은 그

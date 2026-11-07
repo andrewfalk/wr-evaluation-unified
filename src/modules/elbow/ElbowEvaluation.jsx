@@ -3,7 +3,7 @@ import { ExposureForm } from './components/ExposureForm';
 import { ElbowResultPanel } from './components/ElbowResultPanel';
 import { createElbowTemporalSequence, syncElbowModuleData } from './utils/data';
 import { NoEvaluableJobsNotice } from '../../core/components/NoEvaluableJobsNotice';
-import { hasNoEvaluableJobs, isJobIdExcluded } from '@analytics-core/jobScope';
+import { hasNoEvaluableJobs, isJobIdExcluded } from '@wr/analytics-core/jobScope';
 
 export function ElbowEvaluation({ patient, calc, updateModule, errors }) {
   const shared = patient.data.shared || {};

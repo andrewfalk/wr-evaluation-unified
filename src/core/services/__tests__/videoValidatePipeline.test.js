@@ -6,7 +6,7 @@ import { fuseClipFeatureSetsWithEvidence } from '../videoViewpointFusion.js';
 import { convertClipFeaturesToPerDay } from '../videoPerDayConversion.js';
 import { compareFeatureMap, summarizeErrors, withinTolerance } from '../videoValidation.js';
 import { normalizeForComparison } from '../videoValidationThresholds.js';
-import { VIDEO_FEATURE_TARGETS } from '@contracts/index';
+import { VIDEO_FEATURE_TARGETS } from '@wr/contracts/index';
 
 function clipSet(features, clipRef = 'clip.mp4') {
   return { schemaVersion: 1, featureConfigVersion: 'fc-test-1', clipRef, clipDurationMs: 60000, analyzedFrames: 300, features };

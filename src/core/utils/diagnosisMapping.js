@@ -12,4 +12,4 @@ export {
   isValidDiagnosisModuleId,
   resolveDiagnosisModule,
   suggestModules,
-} from '@analytics-core/diagnosisMapping';
+} from '@wr/analytics-core/diagnosisMapping';

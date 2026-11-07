@@ -12,4 +12,4 @@ export {
   FLAG_META,
   computeCervicalCalc,
   isCervicalAssessmentComplete,
-} from '@analytics-core/modules/cervical/index';
+} from '@wr/analytics-core/modules/cervical/index';

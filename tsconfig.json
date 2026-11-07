@@ -16,10 +16,10 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["vitest/globals", "node"],
     "paths": {
-      "@contracts": ["./shared/dist/index.d.ts"],
-      "@contracts/*": ["./shared/dist/*.d.ts"],
-      "@analytics-core": ["./packages/analytics-core/dist/index.d.ts"],
-      "@analytics-core/*": ["./packages/analytics-core/dist/*.d.ts"]
+      "@wr/contracts": ["./shared/dist/index.d.ts"],
+      "@wr/contracts/*": ["./shared/dist/*.d.ts"],
+      "@wr/analytics-core": ["./packages/analytics-core/dist/index.d.ts"],
+      "@wr/analytics-core/*": ["./packages/analytics-core/dist/*.d.ts"]
     }
   },
   "include": ["shared/**/*.ts", "packages/**/*.ts", "scripts/**/*.mjs", "types/**/*.d.ts"],

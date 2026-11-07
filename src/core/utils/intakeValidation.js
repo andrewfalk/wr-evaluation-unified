@@ -1,6 +1,6 @@
 // 신규 환자 등록 마법사의 단계별 필수값 검증. 이동을 막지 않고(안내만) 어떤 항목이 비었는지/잘못됐는지를
 // 계산한다 — 호출부(IntakeWizard)는 현재 shared에서 매번 다시 계산하므로 값을 고치면 안내가 자동으로 사라진다.
-import { validatePastDate, describeDateRejectReason } from '@contracts/patientDates';
+import { validatePastDate, describeDateRejectReason } from '@wr/contracts/patientDates';
 
 export const INTAKE_STEP_INFO = 0;
 export const INTAKE_STEP_DIAGNOSIS = 1;

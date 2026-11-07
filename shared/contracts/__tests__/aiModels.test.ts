@@ -62,7 +62,7 @@ describe('소비처는 이 계약을 쓴다', () => {
 
   it('AIAnalysisPanel은 모델 선택지를 계약에서 가져오고 모델명을 하드코딩하지 않는다', () => {
     const source = read('src/core/components/AIAnalysisPanel.jsx');
-    expect(source).toContain("from '@contracts/aiModels'");
+    expect(source).toContain("from '@wr/contracts/aiModels'");
     expect(source).toContain('MODEL_OPTIONS');
     expect(source).not.toMatch(HARDCODED);
   });

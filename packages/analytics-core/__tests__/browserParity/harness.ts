@@ -1,12 +1,12 @@
 // Browser parity harness(§9). 클라이언트가 실제로 쓰는 것과 같은 두 entry를 import한다 —
 // 계산은 modules/knee/index, 마이그레이션은 migration/deterministicMigrate(독립 tsup entry,
 // §7 — 클라이언트 shim엔 불필요하지만 이 harness가 마이그레이션 parity도 검증하려고 별도로
-// import한다). '@analytics-core' alias는 이 파일 전용 vite.harness.config.ts가
+// import한다). '@wr/analytics-core' alias는 이 파일 전용 vite.harness.config.ts가
 // 빌드된 dist를 가리키게 설정한다(소스가 아니라 실제 산출물을 테스트해야 "번들 parity"가
 // 증명된다).
-import { computeKneeCalc, classifyKneeJob } from '@analytics-core/modules/knee/index';
-import { computeShoulderCalc } from '@analytics-core/modules/shoulder/index';
-import { deterministicMigrate } from '@analytics-core/migration/deterministicMigrate';
+import { computeKneeCalc, classifyKneeJob } from '@wr/analytics-core/modules/knee/index';
+import { computeShoulderCalc } from '@wr/analytics-core/modules/shoulder/index';
+import { deterministicMigrate } from '@wr/analytics-core/migration/deterministicMigrate';
 
 declare global {
   interface Window {

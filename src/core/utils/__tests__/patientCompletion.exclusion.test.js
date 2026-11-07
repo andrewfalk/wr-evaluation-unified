@@ -4,7 +4,7 @@ import '../../../modules/spine';
 import '../../../modules/elbow';
 import { isPatientComplete } from '../patientCompletion.js';
 import { migratePatient } from '../data.js';
-import { verifyAllModulesComplete } from '@analytics-core/completion';
+import { verifyAllModulesComplete } from '@wr/analytics-core/completion';
 
 const job = (id, flag) => ({ id, jobName: id, presetId: null, startDate: '2010-01-01', endDate: '2015-01-01', workPeriodOverride: '', workDaysPerYear: 250, excludeFromAnalysis: flag });
 const spineDx = { id: 'dx-1', code: 'M51', moduleId: 'spine', side: '', confirmedRight: 'confirmed', assessmentRight: 'high' };

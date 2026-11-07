@@ -5,7 +5,7 @@ import { createVibrationInterval } from './utils/data';
 import { resolveVibrationStatus } from './utils/vibrationCalc';
 import { getEffectiveWorkPeriodText } from '../../core/utils/workPeriod';
 import { NoEvaluableJobsNotice } from '../../core/components/NoEvaluableJobsNotice';
-import { filterAnalysisJobs, hasNoEvaluableJobs } from '@analytics-core/jobScope';
+import { filterAnalysisJobs, hasNoEvaluableJobs } from '@wr/analytics-core/jobScope';
 
 const WBV_STATUS_OPTIONS = [
   { value: 'unknown', label: '미평가' },

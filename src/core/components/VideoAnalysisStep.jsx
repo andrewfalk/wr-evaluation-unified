@@ -24,8 +24,8 @@ import { runServerAnalysis } from '../services/videoAnalysisRun';
 import { TargetPicker } from './TargetPicker';
 import { SkeletonOverlay } from './SkeletonOverlay';
 import { getModule } from '../moduleRegistry';
-import { VIDEO_FEATURE_TARGETS, resolveAnalysisJobIds, buildAppliedRecipe } from '@contracts/index';
-import { filterAnalysisJobs, isJobExcludedFromAnalysis } from '@analytics-core/jobScope';
+import { VIDEO_FEATURE_TARGETS, resolveAnalysisJobIds, buildAppliedRecipe } from '@wr/contracts/index';
+import { filterAnalysisJobs, isJobExcludedFromAnalysis } from '@wr/analytics-core/jobScope';
 
 const VIEWPOINTS = [
   { value: 'sagittal', label: '측면(sagittal)' },

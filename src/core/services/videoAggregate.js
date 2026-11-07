@@ -1,7 +1,7 @@
 // 공정 집계 (공정 → 직업), §8.6.2. job-scope 모듈(무릎·어깨)에서 여러 공정의
 // feature를 직업 단위 하나로 합친다. tasks[] 모듈(척추·경추)은 공정≈task 1:1이라
 // 집계 없이 공정별 task로 직접 매핑하므로 이 함수를 쓰지 않는다.
-import { VIDEO_FEATURE_TARGETS } from '@contracts/index';
+import { VIDEO_FEATURE_TARGETS } from '@wr/contracts/index';
 
 // featureKey별 집계 방식.
 //  - weightedSum: 누적형(시간·횟수) = Σ(value × share/100)

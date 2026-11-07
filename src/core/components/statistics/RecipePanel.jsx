@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react';
 import { describeStatsApiError } from './describeStatsError';
 import { describeMethodReasonCode } from './describeMethodReasonCode';
-import { isGrainCompatible, isPurposeCompatible } from '@analytics-core/common';
+import { isGrainCompatible, isPurposeCompatible } from '@wr/analytics-core/common';
 import { PURPOSE_LABELS } from './purposeLabels';
 import { PREDICTION_REGISTERED_AT_KEY } from './workbenchTransitions';
 

@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { z } from 'zod';
-import { ServerPresetSchema } from '@contracts/preset';
+import { ServerPresetSchema } from '@wr/contracts/preset';
 import { requestJson } from './httpClient';
 
 const CUSTOM_PRESETS_KEY = 'wrEvalUnifiedCustomPresets';

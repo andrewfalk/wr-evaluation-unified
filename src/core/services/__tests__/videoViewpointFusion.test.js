@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { fuseClipFeatureSets, fuseClipFeatureSetsWithEvidence, NON_PREFERRED_WARNING, CONFLICT_WARNING } from '../videoViewpointFusion.js';
-import { ClipFeatureSetSchema } from '@contracts/index';
+import { ClipFeatureSetSchema } from '@wr/contracts/index';
 
 const numFeat = (value, confidence, breakdown, warnings = []) => ({
   kind: 'numeric', metric: 'posture_ratio', value, unit: 'ratio', confidence,

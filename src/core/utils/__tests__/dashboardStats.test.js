@@ -10,7 +10,7 @@ import {
   normalizeGender,
 } from '../dashboardStats.js';
 import { getOwnerGroupKey } from '../patientOwnership.js';
-import { calculateAge } from '@analytics-core/common';
+import { calculateAge } from '@wr/analytics-core/common';
 
 function patient({ assignedTop, assignedMeta, createdBy, doctorName } = {}) {
   const p = { meta: {} };

@@ -3,7 +3,7 @@
 // 출처·원제안값·이전값은 data.shared.videoAnalysis.appliedInputs[]에 별도 보존한다.
 // 모듈별 write/coerce는 각 모듈 videoMappingConfig가 제공(jobExtras vs tasks, String vs number).
 import { getModule } from '../moduleRegistry';
-import { VIDEO_FEATURE_TARGETS } from '@contracts/index';
+import { VIDEO_FEATURE_TARGETS } from '@wr/contracts/index';
 
 const cloneVideoAnalysis = (patient) => {
   const va = patient.data.shared.videoAnalysis || {};

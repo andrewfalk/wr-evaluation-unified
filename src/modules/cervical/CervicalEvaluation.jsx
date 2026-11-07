@@ -5,7 +5,7 @@ import { TaskEditor } from './components/TaskEditor';
 import { CervicalResultPanel } from './components/CervicalResultPanel';
 import { createCervicalTask, isCervicalDiagnosis, syncCervicalModuleData } from './utils/data';
 import { NoEvaluableJobsNotice } from '../../core/components/NoEvaluableJobsNotice';
-import { filterAnalysisJobs, hasNoEvaluableJobs } from '@analytics-core/jobScope';
+import { filterAnalysisJobs, hasNoEvaluableJobs } from '@wr/analytics-core/jobScope';
 
 export function CervicalEvaluation({ patient, calc, updateModule }) {
   const shared = patient.data.shared || {};

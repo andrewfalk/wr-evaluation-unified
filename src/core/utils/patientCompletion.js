@@ -1,5 +1,5 @@
 import { getModule } from '../moduleRegistry';
-import { neutralizeExclusionForLegacy } from '@analytics-core/jobScope';
+import { neutralizeExclusionForLegacy } from '@wr/analytics-core/jobScope';
 import { APP_BUILD_VERSION, COMPLETION_SCHEMA_VERSION } from '../constants/appVersion';
 
 export function isPatientComplete(patient) {

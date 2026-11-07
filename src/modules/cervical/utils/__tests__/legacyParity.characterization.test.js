@@ -6,7 +6,7 @@
 // Update the golden only for an intended change, never in a refactor (src/core/fixtures/goldenEnv.js).
 import { legacyParitySuite, moduleArgs } from '../../../../core/fixtures/legacyParity';
 import { syncCervicalModuleData } from '../data';
-import { normalizeCervicalModuleData } from '@analytics-core/modules/cervical/legacyNormalize';
+import { normalizeCervicalModuleData } from '@wr/analytics-core/modules/cervical/legacyNormalize';
 
 function withTasks(patient, change) {
   change(patient.data.modules.cervical.tasks);
