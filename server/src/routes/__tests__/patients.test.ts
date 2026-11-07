@@ -30,6 +30,9 @@ vi.mock('../../middleware/audit', () => ({
 }));
 
 import { createPatientsRouter } from '../patients';
+import { createErrorHandler } from '../../http/errorHandler';
+import { requestIdMiddleware } from '../../http/requestId';
+import { createLogger } from '../../logger';
 import { generateAccessToken } from '../../auth/tokens';
 import { writeAuditLog } from '../../middleware/audit';
 import config from '../../config';
@@ -78,7 +81,9 @@ function makeApp(pool: Pool) {
   const app = express();
   app.use(express.json());
   app.use(cookieParser());
+  app.use(requestIdMiddleware());                                  // as in createApp (S1)
   app.use('/api/patients', createPatientsRouter(pool));
+  app.use(createErrorHandler(createLogger({ level: 'silent' }))); // as in createApp (S1)
   return app;
 }
 
@@ -218,6 +223,20 @@ describe('GET /api/patients', () => {
       .get('/api/patients')
       .set('Authorization', `Bearer ${superToken()}`);
     expect(res.status).toBe(403);
+  });
+
+  it('answers a DB failure with the 500 envelope carrying the request id (central error handler, S1)', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ rows: [{ exists: 1 }] }) // auth middleware
+      .mockRejectedValue(new Error('connection terminated'));
+    const res = await request(makeApp(pool))
+      .get('/api/patients')
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('X-Request-Id', 'req-p1-07');
+    expect(res.status).toBe(500);
+    expect(res.headers['x-request-id']).toBe('req-p1-07');
+    expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error', requestId: 'req-p1-07' });
   });
 
   it('returns 200 with items and total', async () => {
