@@ -1245,7 +1245,7 @@ Vercel 대시보드 또는 `vercel env add`로 설정.
 
 ### 12.A.4 인증 / 세션
 
-- **JWT**: ACCESS_TOKEN_SECRET / REFRESH_TOKEN_SECRET (32 bytes hex 각각)
+- **JWT**: ACCESS_TOKEN_SECRET (HS256 고정, 32바이트 이상 필수 — 7.2.0부터. refresh 토큰은 JWT가 아니라 DB에 해시로 저장하는 무작위 값이라 REFRESH_TOKEN_SECRET은 쓰지 않음)
 - **must_change_password**: admin이 신규 사용자 생성 시 `true` → 첫 로그인 시 강제 변경
 - **비밀번호 정책**: 10자 이상, 영문 + 숫자 + 특수문자 1개 이상
 - **bcrypt**: 12라운드

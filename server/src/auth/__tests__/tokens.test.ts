@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import jwt from 'jsonwebtoken';
+import config from '../../config';
 import { generateAccessToken, verifyAccessToken, type AccessTokenPayload } from '../tokens';
 
 const BASE: AccessTokenPayload = {
@@ -52,5 +54,26 @@ describe('generateAccessToken / verifyAccessToken', () => {
     const { token } = generateAccessToken({ ...BASE, orgId: null });
     const decoded = verifyAccessToken(token);
     expect(decoded!.orgId).toBeNull();
+  });
+});
+
+// SEC-A L5 — the signing algorithm is pinned to HS256 on both sides.
+describe('algorithm pinning (HS256 only)', () => {
+  const secret = config.auth.accessTokenSecret;
+
+  it('signs with HS256', () => {
+    const { token } = generateAccessToken(BASE);
+    expect(jwt.decode(token, { complete: true })?.header.alg).toBe('HS256');
+  });
+
+  it('rejects a token signed with the same secret but another HMAC algorithm', () => {
+    const other = jwt.sign(BASE, secret, { algorithm: 'HS512', expiresIn: 60 });
+    expect(verifyAccessToken(other)).toBeNull();
+  });
+
+  it('rejects an unsigned (alg: none) token', () => {
+    const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
+    const body = Buffer.from(JSON.stringify({ ...BASE, exp: Math.floor(Date.now() / 1000) + 60 })).toString('base64url');
+    expect(verifyAccessToken(`${header}.${body}.`)).toBeNull();
   });
 });

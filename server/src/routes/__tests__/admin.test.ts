@@ -495,6 +495,17 @@ describe('POST /api/admin/users', () => {
     fake.assertNoUnmatched();
   });
 
+  it('returns 400 PASSWORD_POLICY for a new password over 128 characters (SEC-A L6)', async () => {
+    const fake = fakeQueries(); // only auth — rejected before any query
+    const res = await request(adminApp(fake))
+      .post('/api/admin/users')
+      .set(authHeaders(token('admin')))
+      .send({ loginId: 'new1', name: 'New', role: 'doctor', password: VALID_PASSWORD + 'x'.repeat(129 - VALID_PASSWORD.length) });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ code: 'PASSWORD_POLICY', error: '비밀번호는 최대 128자까지 사용할 수 있습니다.' });
+    fake.assertNoUnmatched();
+  });
+
   it('returns 400 when password does not meet policy (too short)', async () => {
     const fake = fakeQueries(); // only auth
     const res = await request(adminApp(fake))

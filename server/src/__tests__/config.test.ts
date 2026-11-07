@@ -5,8 +5,7 @@ import { createConfig } from '../config';
 
 const BASE = {
   DATABASE_URL:         'postgresql://test',
-  ACCESS_TOKEN_SECRET:  'access-secret',
-  REFRESH_TOKEN_SECRET: 'refresh-secret',
+  ACCESS_TOKEN_SECRET:  'access-secret-0123456789abcdef0123',
 } satisfies NodeJS.ProcessEnv;
 
 function make(overrides: NodeJS.ProcessEnv = {}) {
@@ -133,14 +132,31 @@ describe('config — AI gate', () => {
 describe('config — required env vars', () => {
   it('throws when DATABASE_URL is missing', () => {
     expect(() =>
-      createConfig({ ACCESS_TOKEN_SECRET: 'a', REFRESH_TOKEN_SECRET: 'b' })
+      createConfig({ ACCESS_TOKEN_SECRET: 'access-secret-0123456789abcdef0123' })
     ).toThrow('Missing required env var: DATABASE_URL');
   });
 
   it('throws when ACCESS_TOKEN_SECRET is missing', () => {
     expect(() =>
-      createConfig({ DATABASE_URL: 'pg://x', REFRESH_TOKEN_SECRET: 'b' })
+      createConfig({ DATABASE_URL: 'pg://x' })
     ).toThrow('Missing required env var: ACCESS_TOKEN_SECRET');
+  });
+
+  // SEC-A L5 — HS256 key length.
+  it('throws when ACCESS_TOKEN_SECRET is shorter than 32 bytes', () => {
+    expect(() => createConfig({ DATABASE_URL: 'pg://x', ACCESS_TOKEN_SECRET: 'x'.repeat(31) }))
+      .toThrow('ACCESS_TOKEN_SECRET must be at least 32 bytes (generate with: openssl rand -hex 32)');
+    expect(createConfig({ DATABASE_URL: 'pg://x', ACCESS_TOKEN_SECRET: 'x'.repeat(32) }).auth.accessTokenSecret).toHaveLength(32);
+  });
+
+  it('counts bytes, not characters (multi-byte secrets)', () => {
+    expect(() => createConfig({ DATABASE_URL: 'pg://x', ACCESS_TOKEN_SECRET: '가'.repeat(10) })).toThrow(/at least 32 bytes/); // 30 bytes
+    expect(createConfig({ DATABASE_URL: 'pg://x', ACCESS_TOKEN_SECRET: '가'.repeat(11) }).auth.accessTokenSecret).toBe('가'.repeat(11)); // 33 bytes
+  });
+
+  it('no longer needs REFRESH_TOKEN_SECRET, and ignores one left in an existing .env', () => {
+    const c = createConfig({ DATABASE_URL: 'pg://x', ACCESS_TOKEN_SECRET: 'x'.repeat(32), REFRESH_TOKEN_SECRET: 'old' });
+    expect(c.auth).not.toHaveProperty('refreshTokenSecret');
   });
 });
 

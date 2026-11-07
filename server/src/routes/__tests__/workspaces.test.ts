@@ -14,8 +14,7 @@ vi.mock('../../config', () => ({
     cors: { origins: [] },
     auth: {
       accessTokenTtl:     900,
-      accessTokenSecret:  'test-access-secret',
-      refreshTokenSecret: 'test-refresh-secret',
+      accessTokenSecret:  'test-access-secret-0123456789abcd',
     },
   },
 }));

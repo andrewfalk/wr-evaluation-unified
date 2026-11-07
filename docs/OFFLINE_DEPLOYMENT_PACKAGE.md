@@ -280,7 +280,7 @@ notepad .env.production
 | 변수 | 설명 | 생성 방법 |
 |---|---|---|
 | `ACCESS_TOKEN_SECRET` | JWT 서명 키 (32바이트 hex) | 아래 명령 참조 |
-| `REFRESH_TOKEN_SECRET` | Refresh JWT 키 (32바이트 hex) | 아래 명령 참조 |
+| ~~`REFRESH_TOKEN_SECRET`~~ | 7.2.0부터 쓰지 않음(남아 있어도 무시됨) | – |
 | `POSTGRES_PASSWORD` | DB 비밀번호 (32바이트 hex 권장) | 아래 명령 참조 |
 | `AUDIT_DB_PASSWORD` | 감사 로그 읽기 전용 계정 비밀번호 | 직접 설정 |
 | `WR_DOMAIN` | 서버 도메인 (예: `wr.hospital.local`) | 직접 설정 |
@@ -292,9 +292,6 @@ notepad .env.production
 
 ```powershell
 # ACCESS_TOKEN_SECRET
--join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Max 256) })
-
-# REFRESH_TOKEN_SECRET (한 번 더 실행)
 -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Max 256) })
 
 # POSTGRES_PASSWORD
@@ -395,7 +392,7 @@ nano .env.production        # 또는 vi .env.production
 | 변수 | 설명 | 생성 방법 |
 |---|---|---|
 | `ACCESS_TOKEN_SECRET` | JWT 서명 키 | `openssl rand -hex 32` |
-| `REFRESH_TOKEN_SECRET` | Refresh JWT 키 | `openssl rand -hex 32` |
+| ~~`REFRESH_TOKEN_SECRET`~~ | 7.2.0부터 쓰지 않음(남아 있어도 무시됨) | – |
 | `POSTGRES_PASSWORD` | DB 비밀번호 | `openssl rand -hex 32` |
 | `AUDIT_DB_PASSWORD` | 감사 로그 읽기 전용 계정 비밀번호 | 직접 설정 |
 | `WR_DOMAIN` | 서버 도메인 (예: `wr.hospital.local`) | 직접 설정 |
@@ -406,7 +403,6 @@ nano .env.production        # 또는 vi .env.production
 ```bash
 # 랜덤 시크릿 생성 예시
 openssl rand -hex 32   # ACCESS_TOKEN_SECRET용
-openssl rand -hex 32   # REFRESH_TOKEN_SECRET용 (다시 실행)
 openssl rand -hex 32   # POSTGRES_PASSWORD용 (다시 실행)
 ```
 

@@ -17,8 +17,7 @@ export default defineConfig({
     globalSetup: ['./src/testing/integrationGlobalSetup.ts'],
     env: {
       DATABASE_URL:         'postgresql://localhost/wr_test',
-      ACCESS_TOKEN_SECRET:  'test-access-secret',
-      REFRESH_TOKEN_SECRET: 'test-refresh-secret',
+      ACCESS_TOKEN_SECRET:  'test-access-secret-0123456789abcd',
     },
   },
 });

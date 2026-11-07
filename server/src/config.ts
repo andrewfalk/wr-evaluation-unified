@@ -58,7 +58,6 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
 
     auth: Object.freeze({
       accessTokenSecret:  e.ACCESS_TOKEN_SECRET,
-      refreshTokenSecret: e.REFRESH_TOKEN_SECRET,
       // access token TTL in seconds (default 15 min)
       accessTokenTtl:  e.ACCESS_TOKEN_TTL,
       // refresh token TTL in seconds (default 7 days)

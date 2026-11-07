@@ -36,7 +36,7 @@ describe('testConfig', () => {
     expect(testConfig()).toEqual({
       env: 'test',
       cors: { origins: [] },
-      auth: { accessTokenTtl: 900, accessTokenSecret: 'test-access-secret', refreshTokenSecret: 'test-refresh-secret' },
+      auth: { accessTokenTtl: 900, accessTokenSecret: 'test-access-secret-0123456789abcd' },
       lockEnforcementMode: 'off',
     });
   });
@@ -44,7 +44,7 @@ describe('testConfig', () => {
   it('deep-merges overrides without dropping sibling keys', () => {
     const cfg = testConfig({ lockEnforcementMode: 'enforce', auth: { accessTokenTtl: 60 } });
     expect(cfg.lockEnforcementMode).toBe('enforce');
-    expect(cfg.auth).toEqual({ accessTokenTtl: 60, accessTokenSecret: 'test-access-secret', refreshTokenSecret: 'test-refresh-secret' });
+    expect(cfg.auth).toEqual({ accessTokenTtl: 60, accessTokenSecret: 'test-access-secret-0123456789abcd' });
   });
 
   it('replaces arrays wholesale and ignores undefined values', () => {

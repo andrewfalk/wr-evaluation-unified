@@ -386,7 +386,7 @@ const createUserSchema = z.object({
   loginId:  z.string().trim().min(2).max(100),
   name:     z.string().trim().min(1).max(100),
   role:     z.enum(['admin', 'doctor', 'nurse', 'staff']),
-  password: z.string().min(1).max(200),
+  password: z.string().min(1), // length/strength: checkPasswordPolicy (max 128, SEC-A L6)
 });
 
 async function createUser(pool: Pool, req: Request, res: Response): Promise<void> {
@@ -449,7 +449,7 @@ async function createUser(pool: Pool, req: Request, res: Response): Promise<void
 // POST /api/admin/users/:id/reset-password
 // ---------------------------------------------------------------------------
 const resetPasswordSchema = z.object({
-  password: z.string().min(1).max(200),
+  password: z.string().min(1), // length/strength: checkPasswordPolicy (max 128, SEC-A L6)
 });
 
 async function resetUserPassword(pool: Pool, req: Request, res: Response): Promise<void> {

@@ -29,8 +29,7 @@ function baseTestConfig(): Record<string, unknown> {
     cors: { origins: [] },
     auth: {
       accessTokenTtl:     900,
-      accessTokenSecret:  'test-access-secret',
-      refreshTokenSecret: 'test-refresh-secret',
+      accessTokenSecret:  'test-access-secret-0123456789abcd',
     },
     // 'off' — 락 게이트 쿼리를 따로 준비하지 않은 테스트가 통과하도록. 락 게이팅을 검증하는 테스트는 덮어쓴다.
     lockEnforcementMode: 'off',

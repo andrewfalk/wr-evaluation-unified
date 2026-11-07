@@ -1,6 +1,10 @@
 import bcrypt from 'bcrypt';
 
 const MIN_LENGTH        = 10;
+// Upper bound for NEW passwords (create, admin reset, change) — SEC-A L6. Passwords typed to log in
+// or as the current password have no upper bound: existing passwords were never capped, bcrypt
+// truncates at 72 bytes so length adds no hashing cost, and the request body limit bounds the size.
+export const MAX_PASSWORD_LENGTH = 128;
 const MAX_HISTORY       = 5;
 
 // Requires at least one letter, one digit, and one special character.
@@ -16,6 +20,9 @@ export interface PasswordPolicyResult {
 export function checkPasswordPolicy(password: string): PasswordPolicyResult {
   if (password.length < MIN_LENGTH) {
     return { ok: false, error: `비밀번호는 최소 ${MIN_LENGTH}자 이상이어야 합니다.` };
+  }
+  if (password.length > MAX_PASSWORD_LENGTH) {
+    return { ok: false, error: `비밀번호는 최대 ${MAX_PASSWORD_LENGTH}자까지 사용할 수 있습니다.` };
   }
   if (!HAS_LETTER.test(password)) {
     return { ok: false, error: '비밀번호에 문자(영문 또는 한글)가 포함되어야 합니다.' };

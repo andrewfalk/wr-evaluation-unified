@@ -83,6 +83,7 @@ export function ChangePasswordModal({ apiBaseUrl = '', onClose }) {
             <input
               id="cp-new"
               type="password"
+              maxLength={128}
               value={newPassword}
               onChange={e => setNewPassword(e.target.value)}
               autoComplete="new-password"
@@ -98,6 +99,7 @@ export function ChangePasswordModal({ apiBaseUrl = '', onClose }) {
             <input
               id="cp-confirm"
               type="password"
+              maxLength={128}
               value={confirmPassword}
               onChange={e => setConfirmPassword(e.target.value)}
               autoComplete="new-password"

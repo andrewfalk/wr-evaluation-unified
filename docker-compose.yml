@@ -2,7 +2,6 @@
 #
 # Required environment variables (set via .env or shell export):
 #   ACCESS_TOKEN_SECRET   — random 64-char string (openssl rand -hex 32)
-#   REFRESH_TOKEN_SECRET  — random 64-char string (openssl rand -hex 32)
 #   CORS_ORIGINS          — comma-separated allowed origins (e.g. https://wr.hospital.local:8443)
 #   WR_DOMAIN             — intranet hostname Caddy serves (e.g. wr.hospital.local)
 #
@@ -60,7 +59,6 @@ services:
       DEPLOYMENT_MODE:      ${DEPLOYMENT_MODE:-intranet}
       TRUST_PROXY:          ${TRUST_PROXY:-}
       ACCESS_TOKEN_SECRET:  "${ACCESS_TOKEN_SECRET:?ACCESS_TOKEN_SECRET is required}"
-      REFRESH_TOKEN_SECRET: "${REFRESH_TOKEN_SECRET:?REFRESH_TOKEN_SECRET is required}"
       CORS_ORIGINS:         ${CORS_ORIGINS:-https://wr.hospital.local:8443,http://localhost:3001}
       AI_PROVIDER:          ${AI_PROVIDER:-none}
       # AI 업스트림 호출 1건의 제한 시간(ms). 비우면 서버 기본값(60000). 초과 시 504.

@@ -34,7 +34,7 @@
 # 1. 환경 변수 설정
 cp .env.example .env
 # .env 편집: 아래 항목을 반드시 실제 값으로 변경
-#   ACCESS_TOKEN_SECRET, REFRESH_TOKEN_SECRET   (openssl rand -hex 32)
+#   ACCESS_TOKEN_SECRET   (openssl rand -hex 32, 32바이트 이상 필수 — 7.2.0부터 REFRESH_TOKEN_SECRET은 쓰지 않음)
 #   CORS_ORIGINS, WR_DOMAIN
 #   POSTGRES_PASSWORD                           (기본값 변경 필수)
 #   AUDIT_DB_PASSWORD                           (기본값 changeme_audit_reader 반드시 변경)

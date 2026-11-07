@@ -13,8 +13,7 @@ vi.mock('../../config', () => ({
     cors: { origins: [] },
     auth: {
       accessTokenTtl:     900,
-      accessTokenSecret:  'test-access-secret',
-      refreshTokenSecret: 'test-refresh-secret',
+      accessTokenSecret:  'test-access-secret-0123456789abcd',
     },
     // 'off'가 기본값 — 기존 PATCH/DELETE/assignment 테스트들이 락 게이트 쿼리를 추가로
     // 목킹하지 않아도 되도록. 락 게이팅 자체를 검증하는 테스트는 이 값을 'enforce'로 덮어쓴다.
