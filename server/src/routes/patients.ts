@@ -56,6 +56,7 @@ import {
   type LockRow,
 } from '../db/patientLocks';
 import { asyncHandler } from '../http/asyncHandler';
+import { orgIdOf, requireOrg, sessionOf } from '../http/authz';
 
 // ---------------------------------------------------------------------------
 // Schemas — defined locally, mirroring shared/contracts/patient.ts structure
@@ -247,7 +248,7 @@ export async function evaluateLockGate(
   const result = await checkLockForWrite(client, { patientId, orgId, leaseToken });
   if (result.ok) return null;
 
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   if (config.lockEnforcementMode === 'observe') {
     // observe 모드는 console.warn이 아니라 감사 로그로 남긴다 — 운영에서 통계·추적 가능해야
     // "관찰"이 의미가 있다. 절대 요청을 막지 않는다(계속 진행).
@@ -441,13 +442,7 @@ async function resolveListScope(
 // Returns only { userId, name, count } + unassignedCount — no PHI / payloads.
 // ---------------------------------------------------------------------------
 async function getDoctorCounts(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
-  const orgId   = session.organizationId;
-
-  if (orgId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
+  const orgId   = orgIdOf(req);
 
   const { rows } = await pool.query<{ user_id: string | null; name: string | null; count: number }>(
     `SELECT pr.assigned_doctor_user_id AS user_id, u.name AS name, COUNT(*)::int AS count
@@ -481,13 +476,8 @@ async function getDoctorCounts(pool: Pool, req: Request, res: Response): Promise
 //           limit (default 20, max 100), offset (default 0).
 // ---------------------------------------------------------------------------
 async function listPatients(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
-  const orgId   = session.organizationId;
-
-  if (orgId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
+  const session = sessionOf(req);
+  const orgId   = orgIdOf(req);
 
   const q            = typeof req.query['q']            === 'string' ? req.query['q'].trim()            : '';
   const diagCode     = typeof req.query['diagnosesCode'] === 'string' ? req.query['diagnosesCode'].trim() : '';
@@ -585,14 +575,8 @@ async function listPatients(pool: Pool, req: Request, res: Response): Promise<vo
 // GET /api/patients/:id
 // ---------------------------------------------------------------------------
 async function getPatient(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
-  const orgId   = session.organizationId;
+  const orgId   = orgIdOf(req);
   const { id }  = req.params;
-
-  if (orgId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
 
   const { rows } = await pool.query<PatientRow>(
     `SELECT ${SELECT_COLS}
@@ -619,13 +603,8 @@ async function getPatient(pool: Pool, req: Request, res: Response): Promise<void
 // the transaction so they never block a fresh retry.
 // ---------------------------------------------------------------------------
 async function createPatient(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
-  const orgId   = session.organizationId;
-
-  if (orgId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
+  const session = sessionOf(req);
+  const orgId   = orgIdOf(req);
 
   const idempKey = typeof req.headers['idempotency-key'] === 'string'
     ? req.headers['idempotency-key'].trim() : null;
@@ -801,14 +780,9 @@ async function createPatient(pool: Pool, req: Request, res: Response): Promise<v
 // Requires If-Match: <revision> header. Returns 409 on mismatch.
 // ---------------------------------------------------------------------------
 async function patchPatient(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
-  const orgId   = session.organizationId;
+  const session = sessionOf(req);
+  const orgId   = orgIdOf(req);
   const { id }  = req.params;
-
-  if (orgId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
 
   const ifMatch = req.headers['if-match'];
   if (!ifMatch) {
@@ -1012,14 +986,9 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
 // Returns 409 on revision mismatch.
 // ---------------------------------------------------------------------------
 async function deletePatient(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
-  const orgId   = session.organizationId;
+  const session = sessionOf(req);
+  const orgId   = orgIdOf(req);
   const { id }  = req.params;
-
-  if (orgId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
 
   const revParam = req.query['revision'];
   if (!revParam) {
@@ -1154,14 +1123,9 @@ const IdentityCorrectionBody = z.object({
 const IDENTITY_CORRECTION_MAX_ATTEMPTS = 3;
 
 async function correctPatientIdentityRoute(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
-  const orgId   = session.organizationId;
+  const session = sessionOf(req);
+  const orgId   = orgIdOf(req);
   const { id }  = req.params;
-
-  if (orgId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
 
   const ifMatch = req.headers['if-match'];
   if (!ifMatch) {
@@ -1294,13 +1258,8 @@ const AssignmentBody = z.object({
 
 async function assignPatient(pool: Pool, req: Request, res: Response): Promise<void> {
   const { id } = req.params;
-  const session = req.sessionInfo!;
-  const orgId   = session.organizationId;
-
-  if (!orgId) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
+  const session = sessionOf(req);
+  const orgId   = orgIdOf(req);
 
   const parsed = AssignmentBody.safeParse(req.body);
   if (!parsed.success) {
@@ -1436,14 +1395,9 @@ const LockBody = z.object({
 });
 
 async function acquireOrRenewPatientLock(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
-  const orgId   = session.organizationId;
+  const session = sessionOf(req);
+  const orgId   = orgIdOf(req);
   const { id }  = req.params;
-
-  if (orgId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
 
   const force = req.query['force'] === 'true';
   const presentedToken = getLockTokenHeader(req);
@@ -1531,14 +1485,8 @@ async function acquireOrRenewPatientLock(pool: Pool, req: Request, res: Response
 // 전부 204 no-op(호출자 관점에서 "내 락은 이제 없다"는 목표가 이미 달성된 상태).
 // ---------------------------------------------------------------------------
 async function releasePatientLock(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
-  const orgId   = session.organizationId;
+  const orgId   = orgIdOf(req);
   const { id }  = req.params;
-
-  if (orgId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
 
   const token = getLockTokenHeader(req);
   if (!token) {
@@ -1571,14 +1519,8 @@ async function releasePatientLock(pool: Pool, req: Request, res: Response): Prom
 // 응답에는 절대 넣지 않는다(일시적 락 상태가 pull/merge/workspace 스냅샷에 영속화되는 것 방지).
 // ---------------------------------------------------------------------------
 async function peekPatientLock(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
-  const orgId   = session.organizationId;
+  const orgId   = orgIdOf(req);
   const { id }  = req.params;
-
-  if (orgId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
 
   const lock = await peekLock(pool as unknown as QueryRunner, { patientId: id, orgId });
   res.status(200).json({ lock: lock ? lockHolderResponse(lock) : null });
@@ -1596,7 +1538,7 @@ export function createPatientsRouter(pool: Pool): Router {
 
   router.get(
     '/',
-    auth, audit('patient_list'),
+    auth, audit('patient_list'), requireOrg(),
     asyncHandler((req, res) => listPatients(pool, req, res))
   );
 
@@ -1604,37 +1546,37 @@ export function createPatientsRouter(pool: Pool): Router {
   // Org patient distribution is not PHI but is audited at the same level as the list.
   router.get(
     '/doctor-counts',
-    auth, audit('patient_list'),
+    auth, audit('patient_list'), requireOrg(),
     asyncHandler((req, res) => getDoctorCounts(pool, req, res))
   );
 
   router.get(
     '/:id',
-    auth, audit('patient_read'),
+    auth, audit('patient_read'), requireOrg(),
     asyncHandler((req, res) => getPatient(pool, req, res))
   );
 
   router.post(
     '/',
-    auth, csrfMiddleware, audit('patient_create'),
+    auth, csrfMiddleware, audit('patient_create'), requireOrg(),
     asyncHandler((req, res) => createPatient(pool, req, res))
   );
 
   router.patch(
     '/:id',
-    auth, csrfMiddleware, assignedDoctorOrAdmin(pool), audit('patient_update'),
+    auth, csrfMiddleware, assignedDoctorOrAdmin(pool), audit('patient_update'), requireOrg(),
     asyncHandler((req, res) => withDeadlockRetry(() => patchPatient(pool, req, res)))
   );
 
   router.delete(
     '/:id',
-    auth, csrfMiddleware, assignedDoctorOrAdmin(pool), audit('patient_delete'),
+    auth, csrfMiddleware, assignedDoctorOrAdmin(pool), audit('patient_delete'), requireOrg(),
     asyncHandler((req, res) => deletePatient(pool, req, res))
   );
 
   router.post(
     '/:id/assignment',
-    auth, adminOnly(), csrfMiddleware,
+    auth, adminOnly(), csrfMiddleware, requireOrg(),
     asyncHandler((req, res) => assignPatient(pool, req, res))
   );
 
@@ -1645,19 +1587,19 @@ export function createPatientsRouter(pool: Pool): Router {
   // 내부에서 실제 최초 획득/force-takeover일 때만 수동 기록한다.
   router.post(
     '/:id/lock',
-    auth, csrfMiddleware, assignedDoctorOrAdmin(pool),
+    auth, csrfMiddleware, assignedDoctorOrAdmin(pool), requireOrg(),
     asyncHandler((req, res) => acquireOrRenewPatientLock(pool, req, res))
   );
 
   router.delete(
     '/:id/lock',
-    auth, csrfMiddleware, assignedDoctorOrAdmin(pool),
+    auth, csrfMiddleware, assignedDoctorOrAdmin(pool), requireOrg(),
     asyncHandler((req, res) => releasePatientLock(pool, req, res))
   );
 
   router.get(
     '/:id/lock',
-    auth,
+    auth, requireOrg(),
     asyncHandler((req, res) => peekPatientLock(pool, req, res))
   );
 
@@ -1674,6 +1616,7 @@ export function createPatientsRouter(pool: Pool): Router {
       shouldWrite: auditFailuresOnly,
     }),
     assignedDoctorOrAdmin(pool),
+    requireOrg(),
     asyncHandler((req, res) => correctPatientIdentityRoute(pool, req, res))
   );
 

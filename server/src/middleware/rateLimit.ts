@@ -1,5 +1,6 @@
 import { rateLimit } from 'express-rate-limit';
 import type { Request, RequestHandler } from 'express';
+import { sessionOf } from '../http/authz';
 
 // 5 login attempts per minute per IP — brute-force protection.
 export function loginRateLimit(): RequestHandler {
@@ -56,7 +57,7 @@ export function deviceRegisterUserRateLimit(): RequestHandler {
     legacyHeaders:   false,
     // Auth middleware runs before this limiter, so sessionInfo is always set.
     // Avoid using req.ip here to sidestep the IPv6 normalisation warning.
-    keyGenerator:    (req: Request) => req.sessionInfo!.userId,
+    keyGenerator:    (req: Request) => sessionOf(req).userId,
     message:         { code: 'RATE_LIMITED', error: 'Device registration limit reached for this account' },
   });
 }
@@ -70,7 +71,7 @@ export function analyzeRateLimit(): RequestHandler {
     limit:           20,
     standardHeaders: 'draft-7',
     legacyHeaders:   false,
-    keyGenerator:    (req: Request) => req.sessionInfo!.userId,
+    keyGenerator:    (req: Request) => sessionOf(req).userId,
     message:         { code: 'RATE_LIMITED', error: 'Too many analysis requests, please try again later' },
   });
 }

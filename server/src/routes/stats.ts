@@ -37,7 +37,7 @@ import { requestCancel, hasVersionDrifted } from '../statsRunsQueue';
 import { STATS_RUN_COLUMNS, type StatsRunRow } from '../statsRunRow';
 import type { AnalyzeResult, StatsRunManifestSucceeded } from '@wr/contracts';
 import { asyncHandler } from '../http/asyncHandler';
-import { requireFeature } from '../http/authz';
+import { requireFeature, sessionOf } from '../http/authz';
 import { getStatsWorkbenchAvailability } from '../statsWorkbenchRuntimeState';
 
 
@@ -343,7 +343,7 @@ async function fetchRunRowForViewer(
 }
 
 async function handleGetRun(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   const analysisRunId = req.params.analysisRunId;
   // 조회 쿼리 자체가 expires_at>now()를 포함 — cleanup 전 만료 행은 존재 자체를
   // 밝히지 않고(cross-org와 동일 취급) RUN_EXPIRED가 아니라 RUN_NOT_FOUND로 응답한다.
@@ -456,7 +456,7 @@ async function handleGetRun(pool: Pool, req: Request, res: Response): Promise<vo
 }
 
 async function handlePostCancelRun(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   const analysisRunId = req.params.analysisRunId;
 
   // 취소 권한 — 요청자 본인 또는 관리자(§8.1). requestCancel 자체는 조직 범위만

@@ -5,6 +5,7 @@ import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { auditMiddleware } from '../middleware/audit';
 import { asyncHandler } from '../http/asyncHandler';
+import { sessionOf } from '../http/authz';
 
 // ---------------------------------------------------------------------------
 // Validation helpers
@@ -36,7 +37,7 @@ async function getAutosave(pool: Pool, req: Request, res: Response): Promise<voi
     return;
   }
 
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   interface AutosaveRow { saved_at: Date; payload: unknown; }
   const { rows } = await pool.query<AutosaveRow>(
     `SELECT saved_at, payload FROM autosaves WHERE user_id = $1 AND device_id = $2`,
@@ -72,7 +73,8 @@ async function putAutosave(pool: Pool, req: Request, res: Response): Promise<voi
   }
   const { patients } = parse.data;
 
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
+  // Not requireOrg(): autosave is per user/device, and a null organization is stored as is.
   const orgId   = session.organizationId;
 
   const { rows } = await pool.query<{ saved_at: Date }>(
@@ -99,7 +101,7 @@ async function deleteAutosave(pool: Pool, req: Request, res: Response): Promise<
     return;
   }
 
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   await pool.query(
     `DELETE FROM autosaves WHERE user_id = $1 AND device_id = $2`,
     [session.userId, deviceId]

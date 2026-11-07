@@ -9,7 +9,8 @@
 //   }));
 //
 // requireAuth / requireAdmin / requireCsrf re-export the existing middleware unchanged; the rest is
-// new. P1-16 replaces `req.sessionInfo!` and the inline organization checks with sessionOf/requireOrg.
+// new. P1-16 replaced the non-null assertions on req.sessionInfo and the inline organization
+// checks with sessionOf/requireOrg.
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { createAuthMiddleware } from '../middleware/auth';
 import { adminOnly } from '../middleware/adminOnly';
@@ -29,7 +30,8 @@ export const requireCsrf = csrfMiddleware;
 
 /**
  * The authenticated session. Routes behind requireAuth always have one; if a route forgot
- * requireAuth this throws 401 instead of reading `undefined` (the `req.sessionInfo!` it replaces).
+ * requireAuth this throws 401 instead of reading `undefined` (what the non-null assertion on
+ * req.sessionInfo it replaces would have done).
  */
 export function sessionOf(req: Request): SessionInfo {
   if (!req.sessionInfo) throw new AppError(401, 'UNAUTHORIZED', 'Authentication required');
@@ -54,6 +56,17 @@ export function requireOrg(): RequestHandler {
     req.orgId = orgId;
     next();
   };
+}
+
+/**
+ * The organization set by requireOrg(). If a route forgot requireOrg this throws the same 403
+ * requireOrg would have sent (fail-closed) instead of reading `undefined`.
+ */
+export function orgIdOf(req: Request): string {
+  if (typeof req.orgId !== 'string') {
+    throw new AppError(403, 'FORBIDDEN', 'Organization context required');
+  }
+  return req.orgId;
 }
 
 /**

@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import type { Pool } from 'pg';
+import { sessionOf } from '../http/authz';
 import { writeAuditLog } from './audit';
 
 // PR0-A: 통계 워크벤치 capability 판정 = 역할 기본값(default_all_roles) ∪ 유효
@@ -22,7 +23,7 @@ export async function hasCapability(pool: Pool, capability: string, userId: stri
 // stats workbench is available at all is the router's requireFeature() (http/authz.ts, S4 / P1-15).
 export function requireCapability(pool: Pool, capability: string): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const session = req.sessionInfo!;
+    const session = sessionOf(req);
     const orgId = session.organizationId;
 
     if (orgId === null) {

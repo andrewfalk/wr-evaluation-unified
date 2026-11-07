@@ -8,6 +8,7 @@
 // 인자는 validateRecipe에만 영향을 준다('preview'는 관대함, 'analyze'는 엄격).
 import type { Request } from 'express';
 import type { Pool } from 'pg';
+import { sessionOf } from './http/authz';
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
 import { StatsAnalysisRecipeSchema, type AvailableMethod, type StatsAnalysisRecipe } from '@wr/contracts';
 import { canonicalDigest } from './canonicalSerializer';
@@ -136,7 +137,7 @@ export async function buildAnalysisContext(
   req: Request,
   context: 'preview' | 'analyze',
 ): Promise<BuildAnalysisContextResult> {
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   const orgId = session.organizationId!;
   const userId = session.userId;
 

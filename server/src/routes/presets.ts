@@ -6,6 +6,7 @@ import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { writeAuditLog } from '../middleware/audit';
 import { asyncHandler } from '../http/asyncHandler';
+import { orgIdOf, requireOrg, sessionOf } from '../http/authz';
 
 // ---------------------------------------------------------------------------
 // Row → client shape
@@ -38,11 +39,8 @@ function toClient(row: PresetRow) {
 // ---------------------------------------------------------------------------
 
 async function listPresets(pool: Pool, req: Request, res: Response): Promise<void> {
-  const { organizationId, userId } = req.sessionInfo!;
-  if (!organizationId) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
+  const { userId } = sessionOf(req);
+  const organizationId = orgIdOf(req);
 
   const { rows } = await pool.query(
     `SELECT cp.*, u.name AS owner_name
@@ -65,11 +63,8 @@ async function createPreset(pool: Pool, req: Request, res: Response): Promise<vo
     return;
   }
 
-  const { organizationId, userId } = req.sessionInfo!;
-  if (!organizationId) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
+  const { userId } = sessionOf(req);
+  const organizationId = orgIdOf(req);
 
   const { jobName, category, description, visibility, modules } = parsed.data;
 
@@ -140,11 +135,8 @@ async function updatePreset(pool: Pool, req: Request, res: Response): Promise<vo
     return;
   }
 
-  const { organizationId, userId } = req.sessionInfo!;
-  if (!organizationId) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
+  const { userId } = sessionOf(req);
+  const organizationId = orgIdOf(req);
 
   const { id } = req.params;
   const ifMatchRaw = req.headers['if-match'];
@@ -241,11 +233,8 @@ async function updatePreset(pool: Pool, req: Request, res: Response): Promise<vo
 }
 
 async function deletePreset(pool: Pool, req: Request, res: Response): Promise<void> {
-  const { organizationId, userId } = req.sessionInfo!;
-  if (!organizationId) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
+  const { userId } = sessionOf(req);
+  const organizationId = orgIdOf(req);
 
   const { id } = req.params;
 
@@ -316,10 +305,10 @@ export function createPresetsRouter(pool: Pool) {
   const router = Router();
   const auth   = createAuthMiddleware(pool);
 
-  router.get('/',    auth,              asyncHandler((req, res) => listPresets(pool, req, res)));
-  router.post('/',   auth, csrfMiddleware, asyncHandler((req, res) => createPreset(pool, req, res)));
-  router.patch('/:id', auth, csrfMiddleware, asyncHandler((req, res) => updatePreset(pool, req, res)));
-  router.delete('/:id', auth, csrfMiddleware, asyncHandler((req, res) => deletePreset(pool, req, res)));
+  router.get('/',    auth,              requireOrg(), asyncHandler((req, res) => listPresets(pool, req, res)));
+  router.post('/',   auth, csrfMiddleware, requireOrg(), asyncHandler((req, res) => createPreset(pool, req, res)));
+  router.patch('/:id', auth, csrfMiddleware, requireOrg(), asyncHandler((req, res) => updatePreset(pool, req, res)));
+  router.delete('/:id', auth, csrfMiddleware, requireOrg(), asyncHandler((req, res) => deletePreset(pool, req, res)));
 
   return router;
 }

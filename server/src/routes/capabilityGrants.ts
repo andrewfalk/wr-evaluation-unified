@@ -9,6 +9,7 @@ import { csrfMiddleware } from '../middleware/csrf';
 import { adminOnly } from '../middleware/adminOnly';
 import { writeAuditLogStrict } from '../middleware/audit';
 import { asyncHandler } from '../http/asyncHandler';
+import { orgIdOf, requireOrg, sessionOf } from '../http/authz';
 
 // PR0-A: 통계 워크벤치 권한 부여/회수. `/api/admin`에 두지 않고 별도 마운트(`/api/capabilities`)
 // 한다 — admin.ts는 "모든 라우트가 균일하게 auth+admin"을 전제하는데, 여기엔 self-revoke·
@@ -86,8 +87,9 @@ function toGrantResponse(row: GrantRow) {
   };
 }
 
+// Not requireOrg(): a null organization is let through (the query then matches no grants).
 async function listGrants(pool: Pool, req: Request, res: Response): Promise<void> {
-  const orgId = req.sessionInfo!.organizationId;
+  const orgId = sessionOf(req).organizationId;
   const { rows } = await pool.query<GrantRow>(
     `${GRANT_SELECT} WHERE g.organization_id = $1 ORDER BY g.granted_at DESC`,
     [orgId]
@@ -97,8 +99,9 @@ async function listGrants(pool: Pool, req: Request, res: Response): Promise<void
 
 // 호출자 본인의 grant 목록. Self-revoke는 API로는 admin이 아니어도 가능하지만, 관리자
 // 콘솔에 접근할 수 없는 비-admin 사용자는 자기 grant id를 알 방법이 없었다 — 그 격차를 메운다.
+// Not requireOrg(): a null organization is let through (the query then matches no grants).
 async function listMyGrants(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   const { rows } = await pool.query<GrantRow>(
     `${GRANT_SELECT} WHERE g.organization_id = $1 AND g.user_id = $2 ORDER BY g.granted_at DESC`,
     [session.organizationId, session.userId]
@@ -109,12 +112,8 @@ async function listMyGrants(pool: Pool, req: Request, res: Response): Promise<vo
 // §7.2 재부여 트랜잭션: 열린 grant를 FOR UPDATE로 잠그고, 만료됐으면 expired_regrant로
 // 닫은 뒤 새 grant를 INSERT한다. 동시 재부여 경쟁은 user_capability_grants_open_uniq가 막는다.
 async function createGrant(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
-  const orgId   = session.organizationId;
-  if (orgId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
+  const session = sessionOf(req);
+  const orgId   = orgIdOf(req);
 
   const parsed = CreateCapabilityGrantRequestSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -229,13 +228,9 @@ async function createGrant(pool: Pool, req: Request, res: Response): Promise<voi
 }
 
 async function revokeGrant(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
-  const orgId   = session.organizationId;
+  const session = sessionOf(req);
+  const orgId   = orgIdOf(req);
   const { id }  = req.params;
-  if (orgId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
 
   const parsed = RevokeCapabilityGrantRequestSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -330,7 +325,7 @@ export function createCapabilityGrantsRouter(pool: Pool): Router {
 
   router.post(
     '/grants',
-    auth, admin, csrfMiddleware,
+    auth, admin, csrfMiddleware, requireOrg(),
     asyncHandler((req, res) => createGrant(pool, req, res))
   );
 
@@ -338,7 +333,7 @@ export function createCapabilityGrantsRouter(pool: Pool): Router {
   // admin 또는 grant 본인인지 확인한다. 상태 변경 POST이므로 CSRF는 예외 없이 적용.
   router.post(
     '/grants/:id/revoke',
-    auth, csrfMiddleware,
+    auth, csrfMiddleware, requireOrg(),
     asyncHandler((req, res) => revokeGrant(pool, req, res))
   );
 

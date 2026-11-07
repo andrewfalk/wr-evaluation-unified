@@ -14,6 +14,7 @@ import {
   verifyModulesComplete, logCompletionMismatchIfAny, nextVerificationColumns, DRAFT_VERIFICATION_COLUMNS, type VerificationColumns,
 } from '../completionTracking';
 import { asyncHandler } from '../http/asyncHandler';
+import { orgIdOf, requireOrg, sessionOf } from '../http/authz';
 
 // ---------------------------------------------------------------------------
 // POST /api/workspaces body schema
@@ -527,10 +528,11 @@ async function listQuery(pool: Pool, orgId: string, userId: string): Promise<Wor
 // GET /api/workspaces
 // ---------------------------------------------------------------------------
 async function listWorkspaces(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   const orgId   = session.organizationId;
 
-  // Superadmin (null org) has no org-scoped workspace bucket.
+  // Superadmin (null org) has no org-scoped workspace bucket. Not requireOrg(): a null org answers
+  // 200 with an empty list, not 403.
   if (orgId === null) {
     res.status(200).json({ items: [] });
     return;
@@ -546,15 +548,10 @@ async function listWorkspaces(pool: Pool, req: Request, res: Response): Promise<
 // ?view=current: re-fetch live patient records by patient_ids
 // ---------------------------------------------------------------------------
 async function getWorkspace(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session   = req.sessionInfo!;
-  const orgId     = session.organizationId;
+  const session   = sessionOf(req);
+  const orgId     = orgIdOf(req);
   const { id }    = req.params;
   const isCurrent = req.query['view'] === 'current';
-
-  if (orgId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
 
   const { rows } = await pool.query<WorkspaceRow>(
     `SELECT id, name, created_at, patient_ids, snapshot_payload
@@ -665,15 +662,10 @@ async function saveWorkspace(
   res: Response,
   options: { workspaceId?: string; statusCode?: 200 | 201 } = {},
 ): Promise<void> {
-  const session = req.sessionInfo!;
-  const orgId   = session.organizationId;
+  const session = sessionOf(req);
+  const orgId   = orgIdOf(req);
   const workspaceId = options.workspaceId ?? null;
   const statusCode = options.statusCode ?? 201;
-
-  if (orgId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
 
   const parse = SaveBody.safeParse(req.body);
   if (!parse.success) {
@@ -807,14 +799,9 @@ async function saveWorkspace(
 // Returns refreshed list after deletion.
 // ---------------------------------------------------------------------------
 async function deleteWorkspace(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo!;
-  const orgId   = session.organizationId;
+  const session = sessionOf(req);
+  const orgId   = orgIdOf(req);
   const { id }  = req.params;
-
-  if (orgId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
 
   const result = await pool.query(
     `DELETE FROM workspaces
@@ -849,19 +836,19 @@ export function createWorkspacesRouter(pool: Pool): Router {
 
   router.get(
     '/:id',
-    auth, audit('workspace_load'),
+    auth, audit('workspace_load'), requireOrg(),
     asyncHandler((req, res) => getWorkspace(pool, req, res))
   );
 
   router.post(
     '/',
-    auth, csrfMiddleware, audit('workspace_save'),
+    auth, csrfMiddleware, audit('workspace_save'), requireOrg(),
     asyncHandler((req, res) => saveWorkspace(pool, req, res))
   );
 
   router.put(
     '/:id',
-    auth, csrfMiddleware, audit('workspace_overwrite'),
+    auth, csrfMiddleware, audit('workspace_overwrite'), requireOrg(),
     asyncHandler((req, res) => saveWorkspace(pool, req, res, {
       workspaceId: req.params.id,
       statusCode: 200,
@@ -870,7 +857,7 @@ export function createWorkspacesRouter(pool: Pool): Router {
 
   router.delete(
     '/:id',
-    auth, csrfMiddleware, audit('workspace_delete'),
+    auth, csrfMiddleware, audit('workspace_delete'), requireOrg(),
     asyncHandler((req, res) => deleteWorkspace(pool, req, res))
   );
 
