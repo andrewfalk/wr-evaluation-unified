@@ -39,7 +39,8 @@ if (require.main === module) {
         setInterval(doRetention, 24 * 60 * 60 * 1000).unref();
 
         // EMR audit nonces (SEC-A L11): drop rows past the 24-hour retention, at start and hourly.
-        // The sweeper object is kept for the S9 graceful shutdown (stop()).
+        // createAuditNonceSweeper returns { stop() }; S9 (graceful shutdown) will keep it and call stop()
+        // with the other timers — until then the interval is unref()'d like the jobs above.
         createAuditNonceSweeper(pool, {
           onError: (err) => console.error('[wr-server] emr-audit-nonce sweep error', err),
         });
