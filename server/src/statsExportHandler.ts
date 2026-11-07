@@ -35,10 +35,12 @@ interface StatsRunRow {
 
 // CSV formula injection 방어(§7.5) — 문자열 셀만 대상. 숫자 통계값(음수 포함)은 이스케이프
 // 대상이 아니다 — 문자열로 감싸면 엑셀에서 숫자가 아니라 텍스트로 깨진다.
-function escapeCsvString(value: string): string {
-  const needsFormulaEscape = /^[=+\-@]/.test(value);
+// SEC-A L14: a leading TAB or CR is a formula trigger too (spreadsheets strip it and evaluate what
+// follows), and a TAB inside a value is quoted like the other separators.
+export function escapeCsvString(value: string): string {
+  const needsFormulaEscape = /^[=+\-@\t\r]/.test(value);
   const escaped = needsFormulaEscape ? `'${value}` : value;
-  if (/[",\n\r]/.test(escaped)) {
+  if (/[",\n\r\t]/.test(escaped)) {
     return `"${escaped.replace(/"/g, '""')}"`;
   }
   return escaped;

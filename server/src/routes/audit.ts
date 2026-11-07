@@ -35,24 +35,8 @@ const SOURCE_HEADER       = 'x-wr-source';
 // Replay window: ±5 minutes
 const TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000;
 
-// ---------------------------------------------------------------------------
-// In-memory nonce store: prevents replay of the same signed request within
-// the timestamp window. Each entry = nonce → expiry timestamp.
-// A periodic sweep bounds memory. For multi-instance deployments, replace
-// with a shared Redis SETNX + TTL key.
-// ---------------------------------------------------------------------------
-const seenNonces    = new Map<string, number>(); // nonce → expiry ms
-const pendingNonces = new Set<string>();          // in-flight nonces (pre-commit)
-const NONCE_TTL_MS  = TIMESTAMP_TOLERANCE_MS * 2 + 1000;
-
-// Sweep expired entries every minute so memory stays bounded.
-function sweepNonces(): void {
-  const now = Date.now();
-  for (const [nonce, expiresAt] of seenNonces) {
-    if (expiresAt < now) seenNonces.delete(nonce);
-  }
-}
-setInterval(sweepNonces, 60_000).unref();
+// Nonces are recorded in emr_audit_nonces (migration 0038) in the same transaction as the audit row
+// — see step 8 (SEC-A L11). jobs/emrAuditNonces.ts removes old rows.
 
 const EMR_AUDIT_ACTIONS = new Set([
   'emr_inject',
@@ -102,148 +86,147 @@ async function handleEmrAudit(pool: Pool, deviceLimiter: KeyedLimiter, req: Requ
     return;
   }
 
-  // --- 3b. Nonce atomic guard ---
-  // seenNonces:    committed nonces (signature verified, audit written)
-  // pendingNonces: in-flight nonces (claimed before the first await)
-  //
-  // Both sets are checked together so two concurrent requests with the same
-  // nonce cannot both slip through the gap between the has() check and the
-  // first DB await. The nonce is added to pendingNonces synchronously (no
-  // await between the has() check and the add()), which is safe because
-  // Node.js is single-threaded within a synchronous block.
-  //
-  // The nonce is only promoted to seenNonces (permanent) on signature success.
-  // On any failure path it is removed from pendingNonces so the device can
-  // retry the same nonce after a transient error.
-  const nonceKey = `${deviceId}:${deviceNonce}`;
-  if (seenNonces.has(nonceKey) || pendingNonces.has(nonceKey)) {
-    res.status(401).json({ code: 'UNAUTHORIZED', error: 'Duplicate request (nonce reuse)' });
+  // --- 4. Body validation ---
+  const parse = EmrAuditBody.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ code: 'INVALID_BODY', error: parse.error.issues });
     return;
   }
-  pendingNonces.add(nonceKey);
+  const body = parse.data;
 
-  let nonceCommitted = false;
+  // --- 5. Load device + verify status ---
+  const deviceRes = await pool.query<DeviceRow>(
+    `SELECT user_id, organization_id, public_key, status
+     FROM devices WHERE id = $1`,
+    [deviceId]
+  );
+  if (deviceRes.rows.length === 0) {
+    res.status(401).json({ code: 'UNAUTHORIZED', error: 'Device not found' });
+    return;
+  }
+  const device = deviceRes.rows[0];
+
+  if (device.status !== 'active') {
+    res.status(401).json({ code: 'UNAUTHORIZED', error: 'Device not active' });
+    return;
+  }
+
+  // --- 6. Optional session check + actor resolution ---
+  // When replaying from the encrypted local queue (session expired), no Bearer
+  // token is sent. In that case we skip the user/org mismatch check and use
+  // the device's own user_id / organization_id as the audit actor, marked with
+  // session_missing=true in the extra field.
+  const session = req.sessionInfo ?? null;
+  const sessionMissing = session === null;
+
+  if (!sessionMissing) {
+    const userMismatch = session.userId !== device.user_id;
+    // If the session belongs to an org, the device must belong to the same org.
+    // A null device.organization_id is not tolerated for org-scoped sessions:
+    // legitimate devices are always registered with an org in production.
+    // Superadmin (session.organizationId === null) bypasses the org check.
+    const orgMismatch =
+      session.organizationId !== null &&
+      session.organizationId !== device.organization_id;
+
+    if (userMismatch || orgMismatch) {
+      const action = userMismatch ? 'device_user_mismatch' : 'device_org_mismatch';
+      writeAuditLog(pool, {
+        actorUserId: session.userId,
+        actorOrgId:  session.organizationId ?? null,
+        action,
+        targetType:  'device',
+        targetId:    deviceId,
+        outcome:     'denied',
+        ip:          req.ip ?? null,
+        userAgent:   req.headers['user-agent'] ?? null,
+        extra: userMismatch
+          ? { deviceUserId: device.user_id }
+          : { deviceOrgId: device.organization_id },
+      });
+      res.status(401).json({ code: 'UNAUTHORIZED', error: 'Device / session identity mismatch' });
+      return;
+    }
+  }
+
+  // Actor identity: from live session when present, from device registration otherwise.
+  const actorUserId = session?.userId ?? device.user_id;
+  const actorOrgId  = session?.organizationId ?? device.organization_id ?? null;
+
+  // --- 7. Ed25519 signature verification ---
+  // Canonical message = "<deviceId>.<deviceTs>.<deviceNonce>.<JSON-sorted-body>"
+  // Including deviceId and deviceNonce binds the signature to this specific
+  // device+request so an attacker cannot reuse a valid signature by substituting
+  // a fresh nonce (which would otherwise bypass the nonce replay guard).
+  const canonicalBody = JSON.stringify(
+    Object.fromEntries(
+      Object.entries(body).sort(([a], [b]) => a.localeCompare(b))
+    )
+  );
+  const message = `${deviceId}.${deviceTs}.${deviceNonce}.${canonicalBody}`;
+
+  let sigValid = false;
   try {
-    // --- 4. Body validation ---
-    const parse = EmrAuditBody.safeParse(req.body);
-    if (!parse.success) {
-      res.status(400).json({ code: 'INVALID_BODY', error: parse.error.issues });
-      return;
-    }
-    const body = parse.data;
-
-    // --- 5. Load device + verify status ---
-    const deviceRes = await pool.query<DeviceRow>(
-      `SELECT user_id, organization_id, public_key, status
-       FROM devices WHERE id = $1`,
-      [deviceId]
+    const rawKeyBytes = Buffer.from(device.public_key, 'base64');
+    // Ed25519 SPKI DER header (12 bytes): prepend to raw 32-byte key
+    const spkiHeader = Buffer.from('302a300506032b6570032100', 'hex');
+    const spkiDer    = Buffer.concat([spkiHeader, rawKeyBytes]);
+    const pubKey     = crypto.createPublicKey({ key: spkiDer, format: 'der', type: 'spki' });
+    sigValid = crypto.verify(
+      null,
+      Buffer.from(message),
+      pubKey,
+      Buffer.from(deviceSig, 'base64')
     );
-    if (deviceRes.rows.length === 0) {
-      res.status(401).json({ code: 'UNAUTHORIZED', error: 'Device not found' });
-      return;
-    }
-    const device = deviceRes.rows[0];
+  } catch {
+    sigValid = false;
+  }
 
-    if (device.status !== 'active') {
-      res.status(401).json({ code: 'UNAUTHORIZED', error: 'Device not active' });
-      return;
-    }
+  if (!sigValid) {
+    res.status(401).json({ code: 'UNAUTHORIZED', error: 'Invalid device signature' });
+    return;
+  }
 
-    // --- 6. Optional session check + actor resolution ---
-    // When replaying from the encrypted local queue (session expired), no Bearer
-    // token is sent. In that case we skip the user/org mismatch check and use
-    // the device's own user_id / organization_id as the audit actor, marked with
-    // session_missing=true in the extra field.
-    const session = req.sessionInfo ?? null;
-    const sessionMissing = session === null;
+  // --- 8. Nonce + audit row, in one transaction (SEC-A L11) ---
+  // The nonce is claimed only now — after the signature proved the request — and in the same
+  // transaction as the audit row:
+  //  - a nonce already recorded (replay, or a duplicate in flight that committed first) → 0 rows →
+  //    401 as before; concurrent duplicates are serialised by the primary-key row lock.
+  //  - if the audit INSERT fails, ROLLBACK removes the nonce row too, so the device's queue can resend
+  //    the same signed request (this endpoint exists to record the audit row; never 200 without it).
+  // Server-set fields come after the client's `extra`, so a client cannot overwrite them; the device
+  // rate limit is counted inside, after the claim.
+  // session_missing / actor_from_queue say how the server authenticated this request — only the
+  // server sets them (a session-authenticated request must not be recorded as a queue replay).
+  const { session_missing: _clientSessionMissing, actor_from_queue: _clientFromQueue, ...clientExtra } = body.extra ?? {};
 
-    if (!sessionMissing) {
-      const userMismatch = session.userId !== device.user_id;
-      // If the session belongs to an org, the device must belong to the same org.
-      // A null device.organization_id is not tolerated for org-scoped sessions:
-      // legitimate devices are always registered with an org in production.
-      // Superadmin (session.organizationId === null) bypasses the org check.
-      const orgMismatch =
-        session.organizationId !== null &&
-        session.organizationId !== device.organization_id;
-
-      if (userMismatch || orgMismatch) {
-        const action = userMismatch ? 'device_user_mismatch' : 'device_org_mismatch';
-        writeAuditLog(pool, {
-          actorUserId: session.userId,
-          actorOrgId:  session.organizationId ?? null,
-          action,
-          targetType:  'device',
-          targetId:    deviceId,
-          outcome:     'denied',
-          ip:          req.ip ?? null,
-          userAgent:   req.headers['user-agent'] ?? null,
-          extra: userMismatch
-            ? { deviceUserId: device.user_id }
-            : { deviceOrgId: device.organization_id },
-        });
-        res.status(401).json({ code: 'UNAUTHORIZED', error: 'Device / session identity mismatch' });
-        return;
-      }
-    }
-
-    // Actor identity: from live session when present, from device registration otherwise.
-    const actorUserId = session?.userId ?? device.user_id;
-    const actorOrgId  = session?.organizationId ?? device.organization_id ?? null;
-
-    // --- 7. Ed25519 signature verification ---
-    // Canonical message = "<deviceId>.<deviceTs>.<deviceNonce>.<JSON-sorted-body>"
-    // Including deviceId and deviceNonce binds the signature to this specific
-    // device+request so an attacker cannot reuse a valid signature by substituting
-    // a fresh nonce (which would otherwise bypass the nonce replay guard).
-    const canonicalBody = JSON.stringify(
-      Object.fromEntries(
-        Object.entries(body).sort(([a], [b]) => a.localeCompare(b))
-      )
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const claimed = await client.query(
+      `INSERT INTO emr_audit_nonces (device_id, nonce) VALUES ($1, $2)
+       ON CONFLICT (device_id, nonce) DO NOTHING
+       RETURNING 1`,
+      [deviceId, deviceNonce],
     );
-    const message = `${deviceId}.${deviceTs}.${deviceNonce}.${canonicalBody}`;
-
-    let sigValid = false;
-    try {
-      const rawKeyBytes = Buffer.from(device.public_key, 'base64');
-      // Ed25519 SPKI DER header (12 bytes): prepend to raw 32-byte key
-      const spkiHeader = Buffer.from('302a300506032b6570032100', 'hex');
-      const spkiDer    = Buffer.concat([spkiHeader, rawKeyBytes]);
-      const pubKey     = crypto.createPublicKey({ key: spkiDer, format: 'der', type: 'spki' });
-      sigValid = crypto.verify(
-        null,
-        Buffer.from(message),
-        pubKey,
-        Buffer.from(deviceSig, 'base64')
-      );
-    } catch {
-      sigValid = false;
-    }
-
-    if (!sigValid) {
-      res.status(401).json({ code: 'UNAUTHORIZED', error: 'Invalid device signature' });
+    if ((claimed.rowCount ?? 0) === 0) {
+      await client.query('ROLLBACK');
+      res.status(401).json({ code: 'UNAUTHORIZED', error: 'Duplicate request (nonce reuse)' });
       return;
     }
-
-    // --- 7b. Per-device rate limit (SEC-A L3) — keyed by the device id only now that the signature
-    // proved the sender holds that device's key (keying on the unverified header would let anyone
-    // create unlimited buckets). Before the INSERT, so the nonce is released (finally) and the
-    // device's queue can resend the same entry later.
+    // Per-device rate limit (SEC-A L3) — keyed by the device id only now that the signature proved
+    // the sender holds that device's key (keying on the unverified header would let anyone create
+    // unlimited buckets), and counted only for a nonce claimed just now: replays of an already
+    // recorded request (401 above) do not use up the device's budget. Over the limit → ROLLBACK
+    // releases the nonce, so the device's queue can resend the same signed entry later.
     const limit = deviceLimiter.hit(deviceId);
     if (!limit.allowed) {
+      await client.query('ROLLBACK');
       res.setHeader('Retry-After', String(limit.retryAfterSec));
       res.status(429).json({ code: 'RATE_LIMITED', error: 'Too many audit events from this device, please retry later' });
       return;
     }
-
-    // --- 8. Write audit log (strict — throws on failure) ---
-    // This endpoint exists solely to record the audit row. If the INSERT fails
-    // we must NOT return 200; the caller's retry logic depends on it.
-    //
-    // IMPORTANT: nonce is committed to seenNonces ONLY after a successful INSERT.
-    // If writeAuditLogStrict throws, nonceCommitted stays false → finally releases
-    // the nonce from pendingNonces so the device can retry with the same nonce+sig.
-    await writeAuditLogStrict(pool, {
+    await writeAuditLogStrict(client, {
       actorUserId,
       actorOrgId,
       action:    body.action,
@@ -253,29 +236,27 @@ async function handleEmrAudit(pool: Pool, deviceLimiter: KeyedLimiter, req: Requ
       ip:         req.ip ?? null,
       userAgent:  req.headers['user-agent'] ?? null,
       extra:      {
+        ...clientExtra,
         deviceId,
         source:   'electron-main',
         ...(sessionMissing ? { session_missing: true, actor_from_queue: true } : {}),
-        ...(body.extra ?? {}),
       },
     });
-
-    // Audit row persisted — permanently block replay of this nonce.
-    nonceCommitted = true;
-    seenNonces.set(nonceKey, Date.now() + NONCE_TTL_MS);
-
-    // Update device last_seen_at
-    pool.query(
-      `UPDATE devices SET last_seen_at = now() WHERE id = $1`,
-      [deviceId]
-    ).catch(() => undefined);
-
-    res.status(200).json({ ok: true });
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
   } finally {
-    // Release the in-flight claim on failure so the device can retry.
-    // On success nonceCommitted=true and the nonce lives in seenNonces instead.
-    if (!nonceCommitted) pendingNonces.delete(nonceKey);
+    client.release();
   }
+
+  // Update device last_seen_at
+  pool.query(
+    `UPDATE devices SET last_seen_at = now() WHERE id = $1`,
+    [deviceId]
+  ).catch(() => undefined);
+
+  res.status(200).json({ ok: true });
 }
 
 // ---------------------------------------------------------------------------

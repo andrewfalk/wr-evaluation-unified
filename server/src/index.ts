@@ -8,6 +8,7 @@ import { createVideoAnalysisWorker } from './workers/videoAnalysisWorker';
 import { runWorkspaceRetention } from './jobs/workspaceRetention';
 import { runVideoClipCleanup } from './jobs/videoClipCleanup';
 import { runStatsRunCleanup } from './jobs/statsRunCleanup';
+import { createAuditNonceSweeper } from './jobs/emrAuditNonces';
 import { createStatsRunsQueueWorker } from './statsRunsQueue';
 
 // The server process: create the database pools, build the app (src/app.ts — REFACTORING_ROADMAP
@@ -36,6 +37,13 @@ if (require.main === module) {
         };
         doRetention();
         setInterval(doRetention, 24 * 60 * 60 * 1000).unref();
+
+        // EMR audit nonces (SEC-A L11): drop rows past the 24-hour retention, at start and hourly.
+        // createAuditNonceSweeper returns { stop() }; S9 (graceful shutdown) will keep it and call stop()
+        // with the other timers — until then the interval is unref()'d like the jobs above.
+        createAuditNonceSweeper(pool, {
+          onError: (err) => console.error('[wr-server] emr-audit-nonce sweep error', err),
+        });
 
         // 영상 분석 워커: 플래그 on + (fixtureMode 또는 uploadDir 구성됨)일 때 큐 처리.
         //  - fixtureMode: dev fixture clip 추론. uploadDir: 실 업로드 clip 추론(M3-7a).

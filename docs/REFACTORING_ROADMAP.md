@@ -277,10 +277,10 @@
 | L8 | EMR 헬퍼 대상 휴리스틱·%TEMP% PHI | Phase 3 bundle |
 | L9 | permission handler·nav guard·모델명 | ✅ **HF9**(handler/guard, #162) + HF7(d)(모델명, #167) |
 | L10 | Python 자식 env 상속 | Phase 1 bundle |
-| L11 | 감사 nonce 메모리·spread 순서 | Phase 1 bundle |
+| L11 | 감사 nonce 메모리·spread 순서 | Phase 1 bundle — ✅ 2026-11-08(#233: 마이그레이션 0038 emr_audit_nonces, nonce 차지·장치 한도·감사 행을 한 트랜잭션, 서버 필드 우선·세션 플래그는 서버만) |
 | L12 | autosave 잔존·retention dry-run·seed 가드 | Phase 1 bundle |
 | L13 | compose 기본값·reader 비번 | Phase 1 bundle |
-| L14 | CSV TAB/CR | Phase 1 bundle |
+| L14 | CSV TAB/CR | Phase 1 bundle — ✅ 2026-11-08(#233: 앞머리 TAB·CR 접두, TAB 인용) |
 | L15 | 웹 CSP/SRI | Phase 2 bundle |
 | L16 | Dependabot 범위·미사용 deps | Phase 0 훅 + S11 |
 | L17 | Caddy 로그 query string | 호스트 Caddy 템플릿(`caddy/Caddyfile.host.template`, #181)은 반영 — 기본·접속 로거 모두 쿼리 제거. Docker `caddy/Caddyfile`은 Phase 1 bundle |
