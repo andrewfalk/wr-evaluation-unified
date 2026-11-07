@@ -55,6 +55,7 @@ import {
   LOCK_TTL_MS,
   type LockRow,
 } from '../db/patientLocks';
+import { asyncHandler } from '../http/asyncHandler';
 
 // ---------------------------------------------------------------------------
 // Schemas — defined locally, mirroring shared/contracts/patient.ts structure
@@ -1586,7 +1587,6 @@ async function peekPatientLock(pool: Pool, req: Request, res: Response): Promise
 // ---------------------------------------------------------------------------
 // Router factory
 // ---------------------------------------------------------------------------
-const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
 export function createPatientsRouter(pool: Pool): Router {
   const router = Router();
@@ -1597,7 +1597,7 @@ export function createPatientsRouter(pool: Pool): Router {
   router.get(
     '/',
     auth, audit('patient_list'),
-    (req, res) => listPatients(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => listPatients(pool, req, res))
   );
 
   // MUST be registered before '/:id' or Express resolves 'doctor-counts' as a patient id.
@@ -1605,38 +1605,37 @@ export function createPatientsRouter(pool: Pool): Router {
   router.get(
     '/doctor-counts',
     auth, audit('patient_list'),
-    (req, res) => getDoctorCounts(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => getDoctorCounts(pool, req, res))
   );
 
   router.get(
     '/:id',
     auth, audit('patient_read'),
-    (req, res) => getPatient(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => getPatient(pool, req, res))
   );
 
   router.post(
     '/',
     auth, csrfMiddleware, audit('patient_create'),
-    (req, res) => createPatient(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => createPatient(pool, req, res))
   );
 
   router.patch(
     '/:id',
     auth, csrfMiddleware, assignedDoctorOrAdmin(pool), audit('patient_update'),
-    (req, res) => withDeadlockRetry(() => patchPatient(pool, req, res))
-      .catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => withDeadlockRetry(() => patchPatient(pool, req, res)))
   );
 
   router.delete(
     '/:id',
     auth, csrfMiddleware, assignedDoctorOrAdmin(pool), audit('patient_delete'),
-    (req, res) => deletePatient(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => deletePatient(pool, req, res))
   );
 
   router.post(
     '/:id/assignment',
     auth, adminOnly(), csrfMiddleware,
-    (req, res) => assignPatient(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => assignPatient(pool, req, res))
   );
 
   // 환자 단위 TTL lease lock — acquire/renew(POST), force-takeover(POST ?force=true),
@@ -1647,19 +1646,19 @@ export function createPatientsRouter(pool: Pool): Router {
   router.post(
     '/:id/lock',
     auth, csrfMiddleware, assignedDoctorOrAdmin(pool),
-    (req, res) => acquireOrRenewPatientLock(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => acquireOrRenewPatientLock(pool, req, res))
   );
 
   router.delete(
     '/:id/lock',
     auth, csrfMiddleware, assignedDoctorOrAdmin(pool),
-    (req, res) => releasePatientLock(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => releasePatientLock(pool, req, res))
   );
 
   router.get(
     '/:id/lock',
     auth,
-    (req, res) => peekPatientLock(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => peekPatientLock(pool, req, res))
   );
 
   // 감사 미들웨어가 assignedDoctorOrAdmin **앞**에 온다는 점이 중요하다. 다른 라우트처럼
@@ -1675,7 +1674,7 @@ export function createPatientsRouter(pool: Pool): Router {
       shouldWrite: auditFailuresOnly,
     }),
     assignedDoctorOrAdmin(pool),
-    (req, res) => correctPatientIdentityRoute(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => correctPatientIdentityRoute(pool, req, res))
   );
 
   return router;
