@@ -1,6 +1,11 @@
 {
   "name": "wr-evaluation-unified",
   "version": "7.1.6",
+  "workspaces": [
+    "shared",
+    "packages/*",
+    "server"
+  ],
   "description": "근골격계 질환 업무관련성 평가 및 특별진찰 소견서 작성 도우미",
   "main": "electron/main.js",
   "browserslist": [
@@ -70,6 +75,8 @@
     "@types/react": "18.3.31",
     "@types/react-dom": "18.3.7",
     "@vitejs/plugin-react": "^4.2.1",
+    "@wr/analytics-core": "*",
+    "@wr/contracts": "*",
     "electron": "^22.3.27",
     "electron-builder": "^24.9.1",
     "eslint": "^9.39.4",

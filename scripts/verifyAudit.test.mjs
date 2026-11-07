@@ -1,6 +1,6 @@
 // scripts/verify-audit.mjs — advisory extraction and allow-list comparison.
 import { describe, expect, it } from 'vitest';
-import { advisoriesFrom, evaluate } from './verify-audit.mjs';
+import { advisoriesFrom, evaluate, ownersFrom, advisoriesFor } from './verify-audit.mjs';
 
 const audit = {
   vulnerabilities: {
@@ -61,5 +61,46 @@ describe('verify-audit', () => {
 
   it('accepts an empty but well-formed report', () => {
     expect(advisoriesFrom({ vulnerabilities: {} })).toEqual([]);
+  });
+});
+
+describe('verify-audit workspace attribution (npm workspaces, one lockfile)', () => {
+  const ls = {
+    dependencies: {
+      'electron-updater': { version: '6.0.0', dependencies: { 'builder-util-runtime': { version: '9.0.0' } } },
+      zod: { version: '3.25.76' },
+      '@wr/server': {
+        version: '0.1.0',
+        dependencies: {
+          bcrypt: { version: '5.1.1', dependencies: { '@mapbox/node-pre-gyp': { version: '1.0.11', dependencies: { tar: { version: '6.2.1' } } } } },
+          '@wr/contracts': { version: '0.1.0', dependencies: { zod: { version: '3.25.76' } } },
+        },
+      },
+    },
+  };
+
+  it('attributes packages under @wr/server to "server" and everything else to "root"', () => {
+    const owners = ownersFrom(ls);
+    expect([...owners.get('tar')]).toEqual(['server']);
+    expect([...owners.get('builder-util-runtime')]).toEqual(['root']);
+    expect([...owners.get('zod')].sort()).toEqual(['root', 'server']);
+    expect(owners.has('@wr/server')).toBe(false);
+    expect(owners.has('@wr/contracts')).toBe(false);
+  });
+
+  it('filters advisories per workspace', () => {
+    const owners = ownersFrom(ls);
+    const advisories = [
+      { package: 'tar', id: 'A', severity: 'high' },
+      { package: 'zod', id: 'B', severity: 'high' },
+      { package: 'electron-updater', id: 'C', severity: 'high' },
+    ];
+    expect(advisoriesFor('server', advisories, owners).map((a) => a.id)).toEqual(['A', 'B']);
+    expect(advisoriesFor('root', advisories, owners).map((a) => a.id)).toEqual(['B', 'C']);
+  });
+
+  it('tolerates an empty tree', () => {
+    expect(ownersFrom({}).size).toBe(0);
+    expect(ownersFrom(null).size).toBe(0);
   });
 });

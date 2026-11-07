@@ -2,9 +2,12 @@
 /**
  * scripts/verify-audit.mjs — production-dependency vulnerability gate (REFACTORING_ROADMAP, 보안 훅 / D9).
  *
- * Runs `npm audit --omit=dev --json` for the repository root (client + Electron) and server/,
- * and compares every reported advisory with scripts/audit-allowlist.json (advisories that were
- * reviewed and judged not applicable / covered by a decision / deferred, each with a reason).
+ * Runs `npm audit --omit=dev --json` once for the whole npm-workspaces tree (one lockfile, P0-7 W3)
+ * and attributes each advisory to the workspace(s) whose production dependency tree contains the
+ * package — "server" (anything reached through @wr/server) and "root" (client + Electron: everything
+ * else). npm's own `--workspace` filter cannot isolate the root, because every workspace is linked
+ * under the root. Each workspace's advisories are compared with scripts/audit-allowlist.json
+ * (advisories that were reviewed and judged not applicable / covered by a decision / deferred).
  *   - high or critical advisory not in the allow list → FAIL (new, unreviewed risk)
  *   - moderate or low advisory not in the allow list   → warning only
  *   - allow-listed advisory no longer reported          → note (remove it from the list)
@@ -19,7 +22,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const WORKSPACES = [['root', root], ['server', path.join(root, 'server')]];
+const WORKSPACES = ['root', 'server'];
+const SERVER_PACKAGE = '@wr/server';
 const BLOCKING = new Set(['high', 'critical']);
 
 // Advisories reported by one `npm audit --json` result: [{ package, id, severity, title }].
@@ -42,6 +46,32 @@ export function advisoriesFrom(auditJson) {
   return out;
 }
 
+// `npm ls --all --omit=dev --json` tree → Map(package name → Set of owning workspaces).
+// Anything under the @wr/server node belongs to "server"; every other production node to "root".
+// Workspace link nodes themselves (@wr/*) are not packages that npm audit reports, so they are skipped.
+export function ownersFrom(lsJson) {
+  const owners = new Map();
+  const add = (name, ws) => {
+    if (!owners.has(name)) owners.set(name, new Set());
+    owners.get(name).add(ws);
+  };
+  const walk = (deps, ws) => {
+    for (const [name, node] of Object.entries(deps || {})) {
+      if (!node || typeof node !== 'object') continue;
+      const owner = name === SERVER_PACKAGE ? 'server' : ws;
+      if (!name.startsWith('@wr/')) add(name, owner);
+      walk(node.dependencies, owner);
+    }
+  };
+  walk(lsJson?.dependencies, 'root');
+  return owners;
+}
+
+// Advisories whose package appears in the given workspace's production tree.
+export function advisoriesFor(workspace, advisories, owners) {
+  return advisories.filter((a) => owners.get(a.package)?.has(workspace));
+}
+
 // Compare one workspace's advisories with the allow list.
 export function evaluate(workspace, advisories, allowlist) {
   const allowed = new Set();
@@ -58,8 +88,8 @@ export function evaluate(workspace, advisories, allowlist) {
   };
 }
 
-function runAudit(cwd) {
-  const res = spawnSync('npm audit --omit=dev --json', { cwd, shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+function runAudit() {
+  const res = spawnSync('npm audit --omit=dev --json', { cwd: root, shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   // npm audit exits 1 when it finds vulnerabilities, so judge by the JSON, not the exit code.
   try {
     return JSON.parse(res.stdout);
@@ -68,18 +98,35 @@ function runAudit(cwd) {
   }
 }
 
+function runLs() {
+  // npm ls exits non-zero for extraneous/missing packages but still prints the tree.
+  const res = spawnSync('npm ls --all --omit=dev --json', { cwd: root, shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  try {
+    return JSON.parse(res.stdout);
+  } catch {
+    throw new Error(`npm ls produced no JSON (exit ${res.status}). ${String(res.stderr || '').trim().split('\n').slice(-2).join(' ')}`);
+  }
+}
+
 function main() {
   const allowlist = JSON.parse(readFileSync(path.join(root, 'scripts', 'audit-allowlist.json'), 'utf8'));
   let failed = false;
-  for (const [workspace, cwd] of WORKSPACES) {
-    let result;
-    try {
-      result = evaluate(workspace, advisoriesFrom(runAudit(cwd)), allowlist);
-    } catch (err) {
-      console.error(`verify-audit [${workspace}]: ${err.message}`);
-      failed = true;
-      continue;
-    }
+  let advisories;
+  let owners;
+  try {
+    advisories = advisoriesFrom(runAudit());
+    owners = ownersFrom(runLs());
+  } catch (err) {
+    console.error(`verify-audit: ${err.message}`);
+    process.exit(1);
+  }
+  const unattributed = advisories.filter((a) => !owners.has(a.package));
+  for (const a of unattributed) {
+    console.error(`verify-audit: ${a.package} ${a.id} is reported but not found in any production tree — cannot attribute it`);
+    failed = true;
+  }
+  for (const workspace of WORKSPACES) {
+    const result = evaluate(workspace, advisoriesFor(workspace, advisories, owners), allowlist);
     for (const a of result.failures) {
       console.error(`verify-audit [${workspace}]: UNREVIEWED ${a.severity} ${a.package} ${a.id} — ${a.title}`);
     }

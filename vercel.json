@@ -1,5 +1,5 @@
 {
-  "installCommand": "npm install && node scripts/prebuild-shared.mjs",
+  "installCommand": "npm ci --include-workspace-root --workspace @wr/contracts --workspace @wr/analytics-core && node scripts/prebuild-shared.mjs",
   "buildCommand": "npm run build:web",
   "outputDirectory": "dist/web",
   "rewrites": [
