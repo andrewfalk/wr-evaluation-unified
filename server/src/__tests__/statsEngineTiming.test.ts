@@ -17,15 +17,17 @@ vi.mock('../config', () => ({
       stderrMaxBytes: 4096,
       maxInputBytes: 1024 * 1024,
       resultTtlHours: 168,
+      // Mutable on this mock: tests switch timing on/off (config.stats.timingEnabled, P1-10).
+      timingEnabled: false,
     },
   },
 }));
 
 import { spawn } from 'child_process';
+import config from '../config';
 import {
   runStatsEngine,
   buildEngineTimingLog,
-  isEngineTimingEnabled,
   __resetStatsEngineForTests,
   type StatsEngineRequest,
 } from '../statsEngine';
@@ -55,14 +57,7 @@ const MARKER = {
   computeMs: 30, serializeMs: 0.5, processMs: 434,
 };
 
-describe('isEngineTimingEnabled', () => {
-  it('is on only for the exact value "1"', () => {
-    expect(isEngineTimingEnabled({})).toBe(false);
-    expect(isEngineTimingEnabled({ STATS_ENGINE_TIMING: '0' })).toBe(false);
-    expect(isEngineTimingEnabled({ STATS_ENGINE_TIMING: 'true' })).toBe(false);
-    expect(isEngineTimingEnabled({ STATS_ENGINE_TIMING: '1' })).toBe(true);
-  });
-});
+// "only STATS_ENGINE_TIMING=1 turns it on" is the config rule — config.test.ts ('stats.timingEnabled').
 
 describe('buildEngineTimingLog', () => {
   it('combines the Python marker with the Node spawn→close time', () => {
@@ -102,7 +97,7 @@ function spyInfo() {
 describe('runStatsEngine with STATS_ENGINE_TIMING', () => {
   let fake: FakeChildProcess;
   let info: ReturnType<typeof spyInfo>;
-  const saved = process.env.STATS_ENGINE_TIMING;
+  const setTiming = (on: boolean) => { (config.stats as { timingEnabled: boolean }).timingEnabled = on; };
 
   beforeEach(() => {
     __resetStatsEngineForTests();
@@ -113,12 +108,11 @@ describe('runStatsEngine with STATS_ENGINE_TIMING', () => {
 
   afterEach(() => {
     info.mockRestore();
-    if (saved === undefined) delete process.env.STATS_ENGINE_TIMING;
-    else process.env.STATS_ENGINE_TIMING = saved;
+    setTiming(false);
   });
 
   it('off (default): no timing log, same result', async () => {
-    delete process.env.STATS_ENGINE_TIMING;
+    setTiming(false);
     const promise = runStatsEngine(req);
     fake.stdout.emit('data', Buffer.from(validStdoutPayload()));
     fake.stderr.emit('data', Buffer.from(`STATS_ENGINE_TIMING ${JSON.stringify(MARKER)}\n`));
@@ -129,7 +123,7 @@ describe('runStatsEngine with STATS_ENGINE_TIMING', () => {
   });
 
   it('on: one timing log line on success, result unchanged', async () => {
-    process.env.STATS_ENGINE_TIMING = '1';
+    setTiming(true);
     const promise = runStatsEngine(req);
     fake.stdout.emit('data', Buffer.from(validStdoutPayload()));
     fake.stderr.emit('data', Buffer.from(`STATS_ENGINE_TIMING ${JSON.stringify(MARKER)}\n`));
@@ -145,7 +139,7 @@ describe('runStatsEngine with STATS_ENGINE_TIMING', () => {
   });
 
   it('on: a failed run logs no timing line', async () => {
-    process.env.STATS_ENGINE_TIMING = '1';
+    setTiming(true);
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const promise = runStatsEngine(req);
     fake.stderr.emit('data', Buffer.from('STATS_ENGINE_ERROR {"code":"COMPUTE_ERROR","detail":"x"}\n'));

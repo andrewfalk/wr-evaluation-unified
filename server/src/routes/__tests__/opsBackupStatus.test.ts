@@ -11,6 +11,7 @@ import type { Pool } from 'pg';
 vi.mock('../../config', () => ({
   default: {
     env:  'test',
+    backupsDir: '/backups', // config.backupsDir default (P1-10: was process.env.BACKUPS_DIR ?? '/backups')
     cors: { origins: [] },
     auth: {
       accessTokenTtl:     900,

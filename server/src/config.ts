@@ -195,6 +195,8 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
     backupsDir: e.BACKUPS_DIR,
     // electron-updater feed directory served under /updates (routes/updates.ts).
     updatesDir: e.UPDATES_DIR,
+    // Read-only audit pool (wr_audit_reader) — db/auditClient.ts. Raw env value.
+    auditDatabaseUrl: e.AUDIT_DATABASE_URL,
   });
 }
 

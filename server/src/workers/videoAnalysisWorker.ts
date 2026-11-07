@@ -253,7 +253,7 @@ async function persistKeypoints(
 /**
  * 추론 결과에서 재현성 recipe(§8.11)를 조립한다(서버 source of truth). 가중치 sha가 모두 확정
  * (weightsComplete)이어야 status='verified'. mapping/viewpoint 버전은 서버 상수(@wr/contracts)에서,
- * code commit은 env WR_GIT_COMMIT(PR-B Dockerfile ARG→ENV)에서 채운다.
+ * code commit은 config.gitCommit(env WR_GIT_COMMIT, PR-B Dockerfile ARG→ENV)에서 채운다.
  */
 export function buildJobRecipe(result: InferenceResult): AnalysisRecipe {
   return {
@@ -265,7 +265,7 @@ export function buildJobRecipe(result: InferenceResult): AnalysisRecipe {
     featureConfigVersion: result.featureConfigVersion ?? 'unknown',
     mappingConfigVersion: VIDEO_MAPPING_CONFIG_VERSION,
     viewpointConfigVersion: VIDEO_VIEWPOINT_CONFIG_VERSION,
-    codeCommit: process.env.WR_GIT_COMMIT || 'unknown',
+    codeCommit: config.gitCommit,
   };
 }
 

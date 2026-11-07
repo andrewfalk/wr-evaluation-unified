@@ -22,7 +22,7 @@
  */
 import { createPool } from '../db/client';
 
-const pool = createPool();
+const pool = createPool(process.env.DATABASE_URL);
 
 // ---------------------------------------------------------------------------
 // 시드 가능한 PRNG(mulberry32) — 환자 idx로 시드해 재실행 시에도 같은 조합이 나오게 한다.

@@ -156,6 +156,8 @@ export const EnvSchema = z.object({
   // `??`, not `||`: an empty BACKUPS_DIR stays empty, as in routes/opsStatus.ts before S2.
   BACKUPS_DIR: raw.transform((v) => v ?? '/backups'),
   UPDATES_DIR: text('/app/updates'),
+  // Raw value (unset, empty or set) — db/auditClient.ts keeps its own unset/empty handling.
+  AUDIT_DATABASE_URL: raw,
 });
 
 export type ParsedEnv = z.infer<typeof EnvSchema>;
