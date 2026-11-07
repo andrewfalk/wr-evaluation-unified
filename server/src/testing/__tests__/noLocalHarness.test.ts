@@ -29,6 +29,24 @@ function testFiles(dir: string): string[] {
   return out;
 }
 
+/** The text of the call whose '(' is at `open`, up to its matching ')' (string contents skipped). */
+function callText(source: string, open: number): string {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = open; i < source.length; i += 1) {
+    const c = source[i];
+    if (quote) {
+      if (c === '\\') i += 1;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') quote = c;
+    else if (c === '(') depth += 1;
+    else if (c === ')' && (depth -= 1) === 0) return source.slice(open, i + 1);
+  }
+  return source.slice(open);
+}
+
 /** Local doubles found in a test file's source (empty = uses the shared harness). */
 export function localDoubles(source: string): string[] {
   const found: string[] = [];
@@ -36,10 +54,11 @@ export function localDoubles(source: string): string[] {
   if (/\bfunction\s+makeApp\s*\(/.test(source)) found.push('function makeApp');
   // A vi.mock / vi.doMock of the config module whose factory neither builds it with testConfig() nor
   // wraps the real config (importOriginal — integration tests that override one value of it).
-  const configMock = /vi\.(?:mock|doMock)\(\s*['"](?:\.\.?\/)+config(?:\.js)?['"]\s*,/g;
+  const configMock = /vi\.(?:mock|doMock)(\()\s*['"](?:\.\.?\/)+config(?:\.js)?['"]\s*,/g;
   for (const m of source.matchAll(configMock)) {
-    const factory = source.slice(m.index! + m[0].length, m.index! + m[0].length + 300);
-    if (!/testConfig\(|importOriginal/.test(factory)) found.push(`hand-written config mock (${m[0].trim()})`);
+    // Only this vi.mock(...) call's own factory counts — not a later mock of another module.
+    const call = callText(source, m.index! + m[0].indexOf('('));
+    if (!/testConfig\(|importOriginal/.test(call)) found.push(`hand-written config mock (${m[0].replace(/\s+/g, ' ').trim()})`);
   }
   return found;
 }
@@ -75,5 +94,9 @@ describe('no local test harness (S3 / P1-14)', () => {
     expect(localDoubles(
       "vi.mock('../config', async (importOriginal) => { const a = await importOriginal(); return { ...a }; });",
     )).toEqual([]);
+    // A later mock of another module that uses importOriginal does not excuse a hand-written config mock.
+    expect(localDoubles(
+      "vi.mock('../../config', () => ({ default: { s: ')' } }));\nvi.mock('../../auth/csrf', async (importOriginal) => importOriginal());",
+    )).toHaveLength(1);
   });
 });
