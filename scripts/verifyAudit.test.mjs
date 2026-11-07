@@ -1,16 +1,17 @@
 // scripts/verify-audit.mjs — advisory extraction and allow-list comparison.
 import { describe, expect, it } from 'vitest';
-import { advisoriesFrom, evaluate, ownersFrom, advisoriesFor } from './verify-audit.mjs';
+import { advisoriesFrom, evaluate, reachableLocations, advisoriesFor } from './verify-audit.mjs';
 
 const audit = {
   vulnerabilities: {
     jspdf: {
+      nodes: ['node_modules/jspdf'],
       via: [
         { url: 'https://github.com/advisories/GHSA-aaaa', severity: 'critical', title: 'A' },
         { url: 'https://github.com/advisories/GHSA-bbbb', severity: 'moderate', title: 'B' },
       ],
     },
-    'html2pdf.js': { via: ['jspdf', { url: 'https://github.com/advisories/GHSA-cccc', severity: 'high', title: 'C' }] },
+    'html2pdf.js': { nodes: ['node_modules/html2pdf.js'], via: ['jspdf', { url: 'https://github.com/advisories/GHSA-cccc', severity: 'high', title: 'C' }] },
   },
 };
 const allowlist = {
@@ -56,7 +57,9 @@ describe('verify-audit', () => {
     // Malformed shapes must not read as "no vulnerabilities" (Codex review of #195).
     expect(() => advisoriesFrom({ vulnerabilities: [] })).toThrow(/usable report/);
     expect(() => advisoriesFrom({ vulnerabilities: { jspdf: {} } })).toThrow(/"jspdf" has no "via"/);
-    expect(() => advisoriesFrom({ vulnerabilities: { jspdf: { via: 'x' } } })).toThrow(/"jspdf" has no "via"/);
+    expect(() => advisoriesFrom({ vulnerabilities: { jspdf: { via: 'x', nodes: [] } } })).toThrow(/"jspdf" has no "via"/);
+    // Attribution needs the vulnerable install locations.
+    expect(() => advisoriesFrom({ vulnerabilities: { jspdf: { via: [] } } })).toThrow(/"nodes"/);
   });
 
   it('accepts an empty but well-formed report', () => {
@@ -65,42 +68,72 @@ describe('verify-audit', () => {
 });
 
 describe('verify-audit workspace attribution (npm workspaces, one lockfile)', () => {
-  const ls = {
-    dependencies: {
-      'electron-updater': { version: '6.0.0', dependencies: { 'builder-util-runtime': { version: '9.0.0' } } },
-      zod: { version: '3.25.76' },
-      '@wr/server': {
-        version: '0.1.0',
-        dependencies: {
-          bcrypt: { version: '5.1.1', dependencies: { '@mapbox/node-pre-gyp': { version: '1.0.11', dependencies: { tar: { version: '6.2.1' } } } } },
-          '@wr/contracts': { version: '0.1.0', dependencies: { zod: { version: '3.25.76' } } },
-        },
-      },
+  // root depends on electron-updater (→ builder-util-runtime) and zod; server depends on bcrypt
+  // (→ node-pre-gyp → tar), the @wr/contracts workspace (→ zod) and a vulnerable lodash@1 that is
+  // nested under server/ while root uses a safe lodash@2. Root devDependencies are never production.
+  const lock = {
+    packages: {
+      '': { dependencies: { 'electron-updater': '^6', zod: '^3', lodash: '^2' }, devDependencies: { vitest: '^1', '@wr/contracts': '*' } },
+      server: { dependencies: { bcrypt: '^5', '@wr/contracts': '*', lodash: '^1' } },
+      shared: { dependencies: { zod: '^3' }, devDependencies: { tsup: '^8' } },
+      'node_modules/@wr/contracts': { resolved: 'shared', link: true },
+      'node_modules/@wr/server': { resolved: 'server', link: true },
+      'node_modules/electron-updater': { version: '6.0.0', dependencies: { 'builder-util-runtime': '^9' } },
+      'node_modules/builder-util-runtime': { version: '9.0.0' },
+      'node_modules/zod': { version: '3.25.76' },
+      'node_modules/lodash': { version: '2.0.0' },
+      'server/node_modules/lodash': { version: '1.0.0' },
+      'node_modules/bcrypt': { version: '5.1.1', dependencies: { '@mapbox/node-pre-gyp': '^1' } },
+      'node_modules/@mapbox/node-pre-gyp': { version: '1.0.11', dependencies: { tar: '^6' }, optionalDependencies: { missing: '*' } },
+      'node_modules/tar': { version: '6.2.1' },
+      'node_modules/vitest': { version: '1.6.0', dependencies: { tar: '^6' } },
+      'node_modules/tsup': { version: '8.0.0' },
     },
   };
+  const rootReach = reachableLocations(lock, '');
+  const serverReach = reachableLocations(lock, 'server');
+  const adv = (pkg, id, nodes) => ({ package: pkg, id, severity: 'high', title: id, nodes });
 
-  it('attributes packages under @wr/server to "server" and everything else to "root"', () => {
-    const owners = ownersFrom(ls);
-    expect([...owners.get('tar')]).toEqual(['server']);
-    expect([...owners.get('builder-util-runtime')]).toEqual(['root']);
-    expect([...owners.get('zod')].sort()).toEqual(['root', 'server']);
-    expect(owners.has('@wr/server')).toBe(false);
-    expect(owners.has('@wr/contracts')).toBe(false);
+  it('follows production dependencies and workspace links, never devDependencies', () => {
+    expect(serverReach.has('node_modules/tar')).toBe(true);
+    expect(serverReach.has('node_modules/zod')).toBe(true); // via the @wr/contracts link → shared
+    expect(serverReach.has('node_modules/tsup')).toBe(false); // shared devDependency
+    expect(rootReach.has('node_modules/tar')).toBe(false); // only root's devDependency vitest uses tar
+    expect(rootReach.has('node_modules/vitest')).toBe(false);
+    expect(rootReach.has('node_modules/builder-util-runtime')).toBe(true);
   });
 
-  it('filters advisories per workspace', () => {
-    const owners = ownersFrom(ls);
-    const advisories = [
-      { package: 'tar', id: 'A', severity: 'high' },
-      { package: 'zod', id: 'B', severity: 'high' },
-      { package: 'electron-updater', id: 'C', severity: 'high' },
-    ];
-    expect(advisoriesFor('server', advisories, owners).map((a) => a.id)).toEqual(['A', 'B']);
-    expect(advisoriesFor('root', advisories, owners).map((a) => a.id)).toEqual(['B', 'C']);
+  it('a shared non-leaf package counts for every workspace that reaches it (no dedup blind spot)', () => {
+    // zod is reached by root directly and by server through the workspace link; tar by server only.
+    const advisories = [adv('zod', 'Z', ['node_modules/zod']), adv('tar', 'T', ['node_modules/tar'])];
+    expect(advisoriesFor(rootReach, advisories).map((a) => a.id)).toEqual(['Z']);
+    expect(advisoriesFor(serverReach, advisories).map((a) => a.id)).toEqual(['Z', 'T']);
   });
 
-  it('tolerates an empty tree', () => {
-    expect(ownersFrom({}).size).toBe(0);
-    expect(ownersFrom(null).size).toBe(0);
+  it('attributes by install location, so a safe version elsewhere is not blamed', () => {
+    const advisories = [adv('lodash', 'L', ['server/node_modules/lodash'])];
+    expect(serverReach.has('server/node_modules/lodash')).toBe(true);
+    expect(rootReach.has('server/node_modules/lodash')).toBe(false);
+    expect(advisoriesFor(serverReach, advisories).map((a) => a.id)).toEqual(['L']);
+    expect(advisoriesFor(rootReach, advisories)).toEqual([]);
+  });
+
+  it('resolves nested installs before hoisted ones (node resolution order)', () => {
+    const nested = {
+      packages: {
+        '': { dependencies: { a: '*' } },
+        'node_modules/a': { version: '1.0.0', dependencies: { b: '*' } },
+        'node_modules/a/node_modules/b': { version: '2.0.0' },
+        'node_modules/b': { version: '1.0.0' },
+      },
+    };
+    const reach = reachableLocations(nested, '');
+    expect(reach.has('node_modules/a/node_modules/b')).toBe(true);
+    expect(reach.has('node_modules/b')).toBe(false);
+  });
+
+  it('tolerates an empty lock', () => {
+    expect([...reachableLocations({}, '')]).toEqual(['']);
+    expect([...reachableLocations(null, 'server')]).toEqual(['server']);
   });
 });
