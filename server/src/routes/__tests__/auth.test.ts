@@ -64,6 +64,8 @@ vi.mock('../../middleware/csrf', () => ({
 }));
 
 import { createAuthRouter } from '../auth';
+import { createErrorHandler } from '../../http/errorHandler';
+import { createLogger } from '../../logger';
 import type { Pool } from 'pg';
 
 // ---------------------------------------------------------------------------
@@ -78,6 +80,7 @@ function makeApp(pool: Pool) {
   app.use(express.json());
   app.use(cookieParser());
   app.use('/api/auth', createAuthRouter(pool));
+  app.use(createErrorHandler(createLogger({ level: 'silent' }))); // as in createApp (S1)
   return app;
 }
 
@@ -145,6 +148,19 @@ describe('POST /api/auth/signup-requests', () => {
       .send(VALID_REQUEST);
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('ALREADY_REQUESTED');
+  });
+
+  it('answers any other DB failure with the 500 envelope (central error handler, S1)', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ rows: [] }) // users check
+      .mockRejectedValueOnce(Object.assign(new Error('connection reset'), { code: '08006', severity: 'FATAL' }));
+
+    const res = await request(makeApp(pool))
+      .post('/api/auth/signup-requests')
+      .send(VALID_REQUEST);
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
   });
 
   it('returns 201 and writes signup_request_create audit log on success', async () => {
