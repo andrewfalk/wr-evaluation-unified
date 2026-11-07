@@ -88,6 +88,9 @@ vi.mock('../../middleware/audit', () => ({
 }));
 
 import { createVideoAnalysisRouter } from '../videoAnalysis';
+import { createErrorHandler } from '../../http/errorHandler';
+import { requestIdMiddleware } from '../../http/requestId';
+import { createLogger } from '../../logger';
 import { generateAccessToken } from '../../auth/tokens';
 import { writeAuditLog } from '../../middleware/audit';
 import { runSampleDetect } from '../../workers/sampleDetect';
@@ -117,7 +120,9 @@ function makeApp(pool: Pool) {
   const app = express();
   app.use(express.json());
   app.use(cookieParser());
+  app.use(requestIdMiddleware());                                  // as in createApp (S1)
   app.use('/api/video-analysis', createVideoAnalysisRouter(pool));
+  app.use(createErrorHandler(createLogger({ level: 'silent' }))); // as in createApp (S1)
   return app;
 }
 const q = (pool: Pool) => pool.query as ReturnType<typeof vi.fn>;
@@ -743,6 +748,23 @@ describe('POST /jobs/:jobId/apply', () => {
       expect(res.status).toBe(200);
       expect(res.body.idempotent).toBe(true);
     });
+  });
+
+  it('a DB failure inside the apply transaction → ROLLBACK + 500 envelope with the request id (S1)', async () => {
+    const pool = makePool();
+    const cq = clientSetup(pool, { rows: [] });                    // BEGIN
+    cq.mockRejectedValueOnce(new Error('connection terminated'));  // job FOR UPDATE
+    cq.mockResolvedValue({ rows: [] });                            // ROLLBACK
+    const res = await request(makeApp(pool))
+      .post(`/api/video-analysis/jobs/${JOB_ID}/apply`)
+      .set('Authorization', `Bearer ${orgToken()}`)
+      .set('x-csrf-token', CSRF_TOKEN)
+      .set('If-Match', '1')
+      .set('X-Request-Id', 'req-p1-08')
+      .send(body);
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error', requestId: 'req-p1-08' });
+    expect(cq.mock.calls.some((c) => c[0] === 'ROLLBACK')).toBe(true);
   });
 
   it('idempotent: already applied with same hash returns stored patient (no re-apply)', async () => {
