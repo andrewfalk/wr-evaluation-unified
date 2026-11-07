@@ -14,10 +14,11 @@ export default defineConfig({
   workers: 1,
   reporter: 'list',
   webServer: {
-    // npx는 cwd에서 상위 디렉터리로 올라가며 node_modules/.bin을 찾으므로 이 깊은
-    // 경로에서도 루트에 설치된 vite를 정상적으로 찾는다.
-    command: 'npx vite --config vite.harness.config.ts',
-    cwd: 'packages/analytics-core/__tests__/browserParity',
+    // 저장소 루트에서 설정 파일 경로를 준다 — packages/analytics-core는 npm 워크스페이스라 그 하위 폴더에서
+    // npx를 실행하면 npm이 작업 폴더를 워크스페이스 루트(packages/analytics-core)로 바꿔 상대 경로
+    // --config가 어긋난다(P0-7 W3 이후). harness 설정의 root는 자기 폴더(__dirname)라 cwd와 무관하다.
+    command: 'npx vite --config packages/analytics-core/__tests__/browserParity/vite.harness.config.ts',
+    cwd: '.',
     url: 'http://localhost:5183/harness.html',
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,

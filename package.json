@@ -12,7 +12,7 @@
     "chrome >= 108"
   ],
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.mjs",
     "predev": "node scripts/prebuild-shared.mjs && node scripts/prebuild-analytics-core.mjs",
     "premock:intranet": "node scripts/prebuild-shared.mjs",
     "mock:intranet": "node scripts/mock-intranet-server.mjs",
@@ -38,7 +38,7 @@
     "prevideo:validate-report": "node scripts/prebuild-shared.mjs",
     "video:validate-report": "node scripts/videoValidateReport.mjs",
     "video:annotations-from-csv": "node scripts/b2AnnotationsFromCsv.mjs",
-    "pretest": "node scripts/prebuild-analytics-core.mjs",
+    "pretest": "node scripts/prebuild-shared.mjs && node scripts/prebuild-analytics-core.mjs",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "pretest:browser": "node scripts/prebuild-analytics-core.mjs",

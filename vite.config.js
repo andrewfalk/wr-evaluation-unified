@@ -1,6 +1,5 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import path from 'path';
 import { execSync } from 'child_process';
 
 // PR0-A: 완료 보고(completionClientBuildVersion)에 쓰는 빌드 식별자. package.json 버전만으로는
@@ -24,12 +23,8 @@ export default defineConfig({
   define: {
     __APP_GIT_COMMIT__: JSON.stringify(getGitCommit()),
   },
-  resolve: {
-    alias: {
-      '@wr/contracts': path.resolve('./shared/dist'),
-      '@wr/analytics-core': path.resolve('./packages/analytics-core/dist'),
-    },
-  },
+  // '@wr/contracts'·'@wr/analytics-core'는 별칭 없이 npm workspaces 심링크 → 패키지 exports → dist로
+  // 해석된다(P0-7 W4). prebuild:web·predev가 두 패키지를 먼저 빌드하고, `npm run dev`는 watch로 다시 빌드한다.
   build: {
     outDir: 'dist/web',
     assetsDir: 'assets',
