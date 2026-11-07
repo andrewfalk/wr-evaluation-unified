@@ -1,4 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import os from 'os';
+import path from 'path';
+import { describe, it, expect, vi } from 'vitest';
 import { createConfig } from '../config';
 
 const BASE = {
@@ -289,5 +291,56 @@ describe('config — LOG_LEVEL (P1-01)', () => {
 
   it('throws on an unknown level', () => {
     expect(() => make({ LOG_LEVEL: 'verbose' })).toThrow(/LOG_LEVEL/);
+  });
+});
+
+describe('config — default tool paths do not depend on the working directory (P1-09)', () => {
+  const repoRoot = path.resolve(__dirname, '..', '..', '..');
+
+  it('resolves services/ from the repository root wherever the server was started', () => {
+    const spy = vi.spyOn(process, 'cwd').mockReturnValue(path.join(os.tmpdir(), 'somewhere-else'));
+    try {
+      const c = make();
+      expect(c.video.scriptsDir).toBe(path.join(repoRoot, 'services', 'pose-inference'));
+      expect(c.video.fixtureDir).toBe(path.join(repoRoot, 'services', 'pose-inference', 'samples'));
+      expect(c.stats.scriptsDir).toBe(path.join(repoRoot, 'services', 'stats-engine'));
+      expect(c.stats.python.startsWith(path.join(repoRoot, 'services', 'stats-engine', '.venv'))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('still prefers the env paths (production/containers)', () => {
+    const c = make({ VIDEO_ANALYSIS_SCRIPTS_DIR: '/opt/pose', STATS_ENGINE_SCRIPTS_DIR: '/opt/stats', STATS_ENGINE_PYTHON: '/opt/stats-venv/bin/python' });
+    expect(c.video.scriptsDir).toBe('/opt/pose');
+    expect(c.stats.scriptsDir).toBe('/opt/stats');
+    expect(c.stats.python).toBe('/opt/stats-venv/bin/python');
+  });
+});
+
+describe('config — keys added by S2 for former process.env readers (P1-09)', () => {
+  it('gitCommit: WR_GIT_COMMIT or "unknown"', () => {
+    expect(make().gitCommit).toBe('unknown');
+    expect(make({ WR_GIT_COMMIT: '' }).gitCommit).toBe('unknown');
+    expect(make({ WR_GIT_COMMIT: 'abc1234' }).gitCommit).toBe('abc1234');
+  });
+
+  it('backupsDir: BACKUPS_DIR ?? "/backups" (an empty value stays empty, as opsStatus read it)', () => {
+    expect(make().backupsDir).toBe('/backups');
+    expect(make({ BACKUPS_DIR: '' }).backupsDir).toBe('');
+    expect(make({ BACKUPS_DIR: '/mnt/backups' }).backupsDir).toBe('/mnt/backups');
+  });
+
+  it('updatesDir: UPDATES_DIR or "/app/updates"', () => {
+    expect(make().updatesDir).toBe('/app/updates');
+    expect(make({ UPDATES_DIR: '' }).updatesDir).toBe('/app/updates');
+    expect(make({ UPDATES_DIR: '/srv/updates' }).updatesDir).toBe('/srv/updates');
+  });
+
+  it('stats.timingEnabled: only STATS_ENGINE_TIMING=1', () => {
+    expect(make().stats.timingEnabled).toBe(false);
+    expect(make({ STATS_ENGINE_TIMING: 'true' }).stats.timingEnabled).toBe(false);
+    expect(make({ STATS_ENGINE_TIMING: '0' }).stats.timingEnabled).toBe(false);
+    expect(make({ STATS_ENGINE_TIMING: '1' }).stats.timingEnabled).toBe(true);
   });
 });

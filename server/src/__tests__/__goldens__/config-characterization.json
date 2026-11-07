@@ -1,0 +1,1293 @@
+{
+  "defaults (minimal env)": {
+    "config": {
+      "env": "development",
+      "port": 3001,
+      "databaseUrl": "postgresql://test",
+      "jsonBodyLimit": "10mb",
+      "log": {
+        "level": "info"
+      },
+      "deploymentMode": "standalone",
+      "localFallbackAllowed": true,
+      "trustProxy": false,
+      "auth": {
+        "accessTokenSecret": "access-secret",
+        "refreshTokenSecret": "refresh-secret",
+        "accessTokenTtl": 900,
+        "refreshTokenTtl": 604800
+      },
+      "ai": {
+        "provider": "none",
+        "enabled": false,
+        "internalEndpoint": "http://localhost:11434",
+        "internalModel": "llama3",
+        "externalModel": "gpt-4o",
+        "externalEndpoint": "",
+        "externalApiKey": "",
+        "externalVendorApproved": false,
+        "deidentifyRequired": false,
+        "timeoutMs": 60000
+      },
+      "cors": {
+        "origins": []
+      },
+      "videoAnalysisEnabled": false,
+      "statsWorkbenchEnabled": false,
+      "lockEnforcementMode": "off",
+      "video": {
+        "fixtureMode": false,
+        "fixtureDir": "<repo>/services/pose-inference/samples",
+        "scriptsDir": "<repo>/services/pose-inference",
+        "python": "<repo>/services/pose-inference/.venv/<venv-python>",
+        "uploadDir": null,
+        "maxUploadBytes": 2147483648,
+        "allowedExtensions": [
+          "mp4",
+          "mov",
+          "m4v",
+          "webm",
+          "avi",
+          "mkv"
+        ],
+        "allowedMimeTypes": [
+          "video/mp4",
+          "video/quicktime",
+          "video/x-m4v",
+          "video/webm",
+          "video/x-msvideo",
+          "video/x-matroska"
+        ],
+        "retentionPolicy": "privacy_first",
+        "targetThumbnail": false,
+        "overlayFrames": false,
+        "clipTtlHours": 24,
+        "allowUnverifiedRecipe": false,
+        "poseTier": "standard",
+        "detIntervalSec": 0,
+        "jobDeadlineMs": 600000,
+        "sweepGraceMs": 30000,
+        "queueWaitMs": 600000
+      },
+      "stats": {
+        "scriptsDir": "<repo>/services/stats-engine",
+        "python": "<repo>/services/stats-engine/.venv/<venv-python>",
+        "timeoutMs": 30000,
+        "killGraceMs": 2000,
+        "maxConcurrency": 1,
+        "maxConcurrentAnalyzeRequests": 4,
+        "stdoutMaxBytes": 10485760,
+        "stderrMaxBytes": 65536,
+        "maxInputBytes": 2097152,
+        "resultTtlHours": 168,
+        "async": {
+          "syncBudgetMs": 4000,
+          "pollTickMs": 120,
+          "sweepIntervalMs": 2000,
+          "claimIntervalMs": 500,
+          "heartbeatIntervalMs": 5000,
+          "staleSafetyMs": 5000,
+          "queueWaitMs": 600000,
+          "maxJobTimeoutMs": 600000,
+          "maxConsecutiveHeartbeatFailures": 5,
+          "maxRequeueCount": 20,
+          "maxFinishPersistRetries": 3,
+          "maxConcurrentPerUser": 2,
+          "maxConcurrentPerOrg": 4,
+          "maxHourlyPerUser": 60,
+          "maxHourlyPerOrg": 200
+        }
+      }
+    }
+  },
+  "intranet defaults": {
+    "config": {
+      "env": "development",
+      "port": 3001,
+      "databaseUrl": "postgresql://test",
+      "jsonBodyLimit": "10mb",
+      "log": {
+        "level": "info"
+      },
+      "deploymentMode": "intranet",
+      "localFallbackAllowed": false,
+      "trustProxy": 1,
+      "auth": {
+        "accessTokenSecret": "access-secret",
+        "refreshTokenSecret": "refresh-secret",
+        "accessTokenTtl": 900,
+        "refreshTokenTtl": 604800
+      },
+      "ai": {
+        "provider": "none",
+        "enabled": false,
+        "internalEndpoint": "http://localhost:11434",
+        "internalModel": "llama3",
+        "externalModel": "gpt-4o",
+        "externalEndpoint": "",
+        "externalApiKey": "",
+        "externalVendorApproved": false,
+        "deidentifyRequired": false,
+        "timeoutMs": 60000
+      },
+      "cors": {
+        "origins": [
+          "https://wr.hospital.local:8443"
+        ]
+      },
+      "videoAnalysisEnabled": false,
+      "statsWorkbenchEnabled": false,
+      "lockEnforcementMode": "off",
+      "video": {
+        "fixtureMode": false,
+        "fixtureDir": "<repo>/services/pose-inference/samples",
+        "scriptsDir": "<repo>/services/pose-inference",
+        "python": "<repo>/services/pose-inference/.venv/<venv-python>",
+        "uploadDir": null,
+        "maxUploadBytes": 2147483648,
+        "allowedExtensions": [
+          "mp4",
+          "mov",
+          "m4v",
+          "webm",
+          "avi",
+          "mkv"
+        ],
+        "allowedMimeTypes": [
+          "video/mp4",
+          "video/quicktime",
+          "video/x-m4v",
+          "video/webm",
+          "video/x-msvideo",
+          "video/x-matroska"
+        ],
+        "retentionPolicy": "privacy_first",
+        "targetThumbnail": false,
+        "overlayFrames": false,
+        "clipTtlHours": 24,
+        "allowUnverifiedRecipe": false,
+        "poseTier": "standard",
+        "detIntervalSec": 0,
+        "jobDeadlineMs": 600000,
+        "sweepGraceMs": 30000,
+        "queueWaitMs": 600000
+      },
+      "stats": {
+        "scriptsDir": "<repo>/services/stats-engine",
+        "python": "<repo>/services/stats-engine/.venv/<venv-python>",
+        "timeoutMs": 30000,
+        "killGraceMs": 2000,
+        "maxConcurrency": 1,
+        "maxConcurrentAnalyzeRequests": 4,
+        "stdoutMaxBytes": 10485760,
+        "stderrMaxBytes": 65536,
+        "maxInputBytes": 2097152,
+        "resultTtlHours": 168,
+        "async": {
+          "syncBudgetMs": 4000,
+          "pollTickMs": 120,
+          "sweepIntervalMs": 2000,
+          "claimIntervalMs": 500,
+          "heartbeatIntervalMs": 5000,
+          "staleSafetyMs": 5000,
+          "queueWaitMs": 600000,
+          "maxJobTimeoutMs": 600000,
+          "maxConsecutiveHeartbeatFailures": 5,
+          "maxRequeueCount": 20,
+          "maxFinishPersistRetries": 3,
+          "maxConcurrentPerUser": 2,
+          "maxConcurrentPerOrg": 4,
+          "maxHourlyPerUser": 60,
+          "maxHourlyPerOrg": 200
+        }
+      }
+    }
+  },
+  "every variable overridden": {
+    "config": {
+      "env": "production",
+      "port": 4001,
+      "databaseUrl": "postgresql://test",
+      "jsonBodyLimit": "2mb",
+      "log": {
+        "level": "debug"
+      },
+      "deploymentMode": "intranet",
+      "localFallbackAllowed": false,
+      "trustProxy": 2,
+      "auth": {
+        "accessTokenSecret": "access-secret",
+        "refreshTokenSecret": "refresh-secret",
+        "accessTokenTtl": 600,
+        "refreshTokenTtl": 86400
+      },
+      "ai": {
+        "provider": "external",
+        "enabled": true,
+        "internalEndpoint": "http://llm.internal:11434",
+        "internalModel": "mistral",
+        "externalModel": "gpt-x",
+        "externalEndpoint": "https://llm.example/v1",
+        "externalApiKey": "key-1",
+        "externalVendorApproved": true,
+        "deidentifyRequired": true,
+        "timeoutMs": 30000
+      },
+      "cors": {
+        "origins": [
+          "https://a.example",
+          "https://b.example"
+        ]
+      },
+      "videoAnalysisEnabled": true,
+      "statsWorkbenchEnabled": true,
+      "lockEnforcementMode": "enforce",
+      "video": {
+        "fixtureMode": true,
+        "fixtureDir": "/opt/pose/fixtures",
+        "scriptsDir": "/opt/pose",
+        "python": "/opt/pose/venv/bin/python",
+        "uploadDir": "/data/uploads",
+        "maxUploadBytes": 1048576,
+        "allowedExtensions": [
+          "mp4",
+          "mov",
+          "m4v",
+          "webm",
+          "avi",
+          "mkv"
+        ],
+        "allowedMimeTypes": [
+          "video/mp4",
+          "video/quicktime",
+          "video/x-m4v",
+          "video/webm",
+          "video/x-msvideo",
+          "video/x-matroska"
+        ],
+        "retentionPolicy": "review_fidelity",
+        "targetThumbnail": true,
+        "overlayFrames": true,
+        "clipTtlHours": 12,
+        "allowUnverifiedRecipe": true,
+        "poseTier": "auto",
+        "detIntervalSec": 0.5,
+        "jobDeadlineMs": 300000,
+        "sweepGraceMs": 10000,
+        "queueWaitMs": 120000
+      },
+      "stats": {
+        "scriptsDir": "/opt/stats",
+        "python": "/opt/stats-venv/bin/python",
+        "timeoutMs": 20000,
+        "killGraceMs": 1000,
+        "maxConcurrency": 2,
+        "maxConcurrentAnalyzeRequests": 8,
+        "stdoutMaxBytes": 1000,
+        "stderrMaxBytes": 2000,
+        "maxInputBytes": 3000,
+        "resultTtlHours": 48,
+        "async": {
+          "syncBudgetMs": 1000,
+          "pollTickMs": 50,
+          "sweepIntervalMs": 1500,
+          "claimIntervalMs": 250,
+          "heartbeatIntervalMs": 3000,
+          "staleSafetyMs": 4000,
+          "queueWaitMs": 90000,
+          "maxJobTimeoutMs": 120000,
+          "maxConsecutiveHeartbeatFailures": 7,
+          "maxRequeueCount": 9,
+          "maxFinishPersistRetries": 4,
+          "maxConcurrentPerUser": 3,
+          "maxConcurrentPerOrg": 5,
+          "maxHourlyPerUser": 30,
+          "maxHourlyPerOrg": 100
+        }
+      }
+    }
+  },
+  "empty strings fall back to defaults": {
+    "config": {
+      "env": "development",
+      "port": 3001,
+      "databaseUrl": "postgresql://test",
+      "jsonBodyLimit": "10mb",
+      "log": {
+        "level": "info"
+      },
+      "deploymentMode": "standalone",
+      "localFallbackAllowed": true,
+      "trustProxy": false,
+      "auth": {
+        "accessTokenSecret": "access-secret",
+        "refreshTokenSecret": "refresh-secret",
+        "accessTokenTtl": 900,
+        "refreshTokenTtl": 604800
+      },
+      "ai": {
+        "provider": "none",
+        "enabled": false,
+        "internalEndpoint": "http://localhost:11434",
+        "internalModel": "llama3",
+        "externalModel": "gpt-4o",
+        "externalEndpoint": "",
+        "externalApiKey": "",
+        "externalVendorApproved": false,
+        "deidentifyRequired": false,
+        "timeoutMs": 60000
+      },
+      "cors": {
+        "origins": []
+      },
+      "videoAnalysisEnabled": false,
+      "statsWorkbenchEnabled": false,
+      "lockEnforcementMode": "off",
+      "video": {
+        "fixtureMode": false,
+        "fixtureDir": "<repo>/services/pose-inference/samples",
+        "scriptsDir": "<repo>/services/pose-inference",
+        "python": "<repo>/services/pose-inference/.venv/<venv-python>",
+        "uploadDir": null,
+        "maxUploadBytes": 2147483648,
+        "allowedExtensions": [
+          "mp4",
+          "mov",
+          "m4v",
+          "webm",
+          "avi",
+          "mkv"
+        ],
+        "allowedMimeTypes": [
+          "video/mp4",
+          "video/quicktime",
+          "video/x-m4v",
+          "video/webm",
+          "video/x-msvideo",
+          "video/x-matroska"
+        ],
+        "retentionPolicy": "privacy_first",
+        "targetThumbnail": false,
+        "overlayFrames": false,
+        "clipTtlHours": 24,
+        "allowUnverifiedRecipe": false,
+        "poseTier": "standard",
+        "detIntervalSec": 0,
+        "jobDeadlineMs": 600000,
+        "sweepGraceMs": 30000,
+        "queueWaitMs": 600000
+      },
+      "stats": {
+        "scriptsDir": "<repo>/services/stats-engine",
+        "python": "<repo>/services/stats-engine/.venv/<venv-python>",
+        "timeoutMs": 30000,
+        "killGraceMs": 2000,
+        "maxConcurrency": 1,
+        "maxConcurrentAnalyzeRequests": 4,
+        "stdoutMaxBytes": 10485760,
+        "stderrMaxBytes": 65536,
+        "maxInputBytes": 2097152,
+        "resultTtlHours": 168,
+        "async": {
+          "syncBudgetMs": 4000,
+          "pollTickMs": 120,
+          "sweepIntervalMs": 2000,
+          "claimIntervalMs": 500,
+          "heartbeatIntervalMs": 5000,
+          "staleSafetyMs": 5000,
+          "queueWaitMs": 600000,
+          "maxJobTimeoutMs": 600000,
+          "maxConsecutiveHeartbeatFailures": 5,
+          "maxRequeueCount": 20,
+          "maxFinishPersistRetries": 3,
+          "maxConcurrentPerUser": 2,
+          "maxConcurrentPerOrg": 4,
+          "maxHourlyPerUser": 60,
+          "maxHourlyPerOrg": 200
+        }
+      }
+    }
+  },
+  "booleans: only \"true\" and \"1\" are true": {
+    "config": {
+      "env": "development",
+      "port": 3001,
+      "databaseUrl": "postgresql://test",
+      "jsonBodyLimit": "10mb",
+      "log": {
+        "level": "info"
+      },
+      "deploymentMode": "standalone",
+      "localFallbackAllowed": true,
+      "trustProxy": false,
+      "auth": {
+        "accessTokenSecret": "access-secret",
+        "refreshTokenSecret": "refresh-secret",
+        "accessTokenTtl": 900,
+        "refreshTokenTtl": 604800
+      },
+      "ai": {
+        "provider": "none",
+        "enabled": false,
+        "internalEndpoint": "http://localhost:11434",
+        "internalModel": "llama3",
+        "externalModel": "gpt-4o",
+        "externalEndpoint": "",
+        "externalApiKey": "",
+        "externalVendorApproved": false,
+        "deidentifyRequired": false,
+        "timeoutMs": 60000
+      },
+      "cors": {
+        "origins": []
+      },
+      "videoAnalysisEnabled": false,
+      "statsWorkbenchEnabled": false,
+      "lockEnforcementMode": "off",
+      "video": {
+        "fixtureMode": false,
+        "fixtureDir": "<repo>/services/pose-inference/samples",
+        "scriptsDir": "<repo>/services/pose-inference",
+        "python": "<repo>/services/pose-inference/.venv/<venv-python>",
+        "uploadDir": null,
+        "maxUploadBytes": 2147483648,
+        "allowedExtensions": [
+          "mp4",
+          "mov",
+          "m4v",
+          "webm",
+          "avi",
+          "mkv"
+        ],
+        "allowedMimeTypes": [
+          "video/mp4",
+          "video/quicktime",
+          "video/x-m4v",
+          "video/webm",
+          "video/x-msvideo",
+          "video/x-matroska"
+        ],
+        "retentionPolicy": "privacy_first",
+        "targetThumbnail": false,
+        "overlayFrames": false,
+        "clipTtlHours": 24,
+        "allowUnverifiedRecipe": true,
+        "poseTier": "standard",
+        "detIntervalSec": 0,
+        "jobDeadlineMs": 600000,
+        "sweepGraceMs": 30000,
+        "queueWaitMs": 600000
+      },
+      "stats": {
+        "scriptsDir": "<repo>/services/stats-engine",
+        "python": "<repo>/services/stats-engine/.venv/<venv-python>",
+        "timeoutMs": 30000,
+        "killGraceMs": 2000,
+        "maxConcurrency": 1,
+        "maxConcurrentAnalyzeRequests": 4,
+        "stdoutMaxBytes": 10485760,
+        "stderrMaxBytes": 65536,
+        "maxInputBytes": 2097152,
+        "resultTtlHours": 168,
+        "async": {
+          "syncBudgetMs": 4000,
+          "pollTickMs": 120,
+          "sweepIntervalMs": 2000,
+          "claimIntervalMs": 500,
+          "heartbeatIntervalMs": 5000,
+          "staleSafetyMs": 5000,
+          "queueWaitMs": 600000,
+          "maxJobTimeoutMs": 600000,
+          "maxConsecutiveHeartbeatFailures": 5,
+          "maxRequeueCount": 20,
+          "maxFinishPersistRetries": 3,
+          "maxConcurrentPerUser": 2,
+          "maxConcurrentPerOrg": 4,
+          "maxHourlyPerUser": 60,
+          "maxHourlyPerOrg": 200
+        }
+      }
+    }
+  },
+  "TRUST_PROXY true": {
+    "config": {
+      "env": "development",
+      "port": 3001,
+      "databaseUrl": "postgresql://test",
+      "jsonBodyLimit": "10mb",
+      "log": {
+        "level": "info"
+      },
+      "deploymentMode": "standalone",
+      "localFallbackAllowed": true,
+      "trustProxy": true,
+      "auth": {
+        "accessTokenSecret": "access-secret",
+        "refreshTokenSecret": "refresh-secret",
+        "accessTokenTtl": 900,
+        "refreshTokenTtl": 604800
+      },
+      "ai": {
+        "provider": "none",
+        "enabled": false,
+        "internalEndpoint": "http://localhost:11434",
+        "internalModel": "llama3",
+        "externalModel": "gpt-4o",
+        "externalEndpoint": "",
+        "externalApiKey": "",
+        "externalVendorApproved": false,
+        "deidentifyRequired": false,
+        "timeoutMs": 60000
+      },
+      "cors": {
+        "origins": []
+      },
+      "videoAnalysisEnabled": false,
+      "statsWorkbenchEnabled": false,
+      "lockEnforcementMode": "off",
+      "video": {
+        "fixtureMode": false,
+        "fixtureDir": "<repo>/services/pose-inference/samples",
+        "scriptsDir": "<repo>/services/pose-inference",
+        "python": "<repo>/services/pose-inference/.venv/<venv-python>",
+        "uploadDir": null,
+        "maxUploadBytes": 2147483648,
+        "allowedExtensions": [
+          "mp4",
+          "mov",
+          "m4v",
+          "webm",
+          "avi",
+          "mkv"
+        ],
+        "allowedMimeTypes": [
+          "video/mp4",
+          "video/quicktime",
+          "video/x-m4v",
+          "video/webm",
+          "video/x-msvideo",
+          "video/x-matroska"
+        ],
+        "retentionPolicy": "privacy_first",
+        "targetThumbnail": false,
+        "overlayFrames": false,
+        "clipTtlHours": 24,
+        "allowUnverifiedRecipe": false,
+        "poseTier": "standard",
+        "detIntervalSec": 0,
+        "jobDeadlineMs": 600000,
+        "sweepGraceMs": 30000,
+        "queueWaitMs": 600000
+      },
+      "stats": {
+        "scriptsDir": "<repo>/services/stats-engine",
+        "python": "<repo>/services/stats-engine/.venv/<venv-python>",
+        "timeoutMs": 30000,
+        "killGraceMs": 2000,
+        "maxConcurrency": 1,
+        "maxConcurrentAnalyzeRequests": 4,
+        "stdoutMaxBytes": 10485760,
+        "stderrMaxBytes": 65536,
+        "maxInputBytes": 2097152,
+        "resultTtlHours": 168,
+        "async": {
+          "syncBudgetMs": 4000,
+          "pollTickMs": 120,
+          "sweepIntervalMs": 2000,
+          "claimIntervalMs": 500,
+          "heartbeatIntervalMs": 5000,
+          "staleSafetyMs": 5000,
+          "queueWaitMs": 600000,
+          "maxJobTimeoutMs": 600000,
+          "maxConsecutiveHeartbeatFailures": 5,
+          "maxRequeueCount": 20,
+          "maxFinishPersistRetries": 3,
+          "maxConcurrentPerUser": 2,
+          "maxConcurrentPerOrg": 4,
+          "maxHourlyPerUser": 60,
+          "maxHourlyPerOrg": 200
+        }
+      }
+    }
+  },
+  "TRUST_PROXY false in intranet": {
+    "config": {
+      "env": "development",
+      "port": 3001,
+      "databaseUrl": "postgresql://test",
+      "jsonBodyLimit": "10mb",
+      "log": {
+        "level": "info"
+      },
+      "deploymentMode": "intranet",
+      "localFallbackAllowed": false,
+      "trustProxy": false,
+      "auth": {
+        "accessTokenSecret": "access-secret",
+        "refreshTokenSecret": "refresh-secret",
+        "accessTokenTtl": 900,
+        "refreshTokenTtl": 604800
+      },
+      "ai": {
+        "provider": "none",
+        "enabled": false,
+        "internalEndpoint": "http://localhost:11434",
+        "internalModel": "llama3",
+        "externalModel": "gpt-4o",
+        "externalEndpoint": "",
+        "externalApiKey": "",
+        "externalVendorApproved": false,
+        "deidentifyRequired": false,
+        "timeoutMs": 60000
+      },
+      "cors": {
+        "origins": [
+          "https://wr.hospital.local:8443"
+        ]
+      },
+      "videoAnalysisEnabled": false,
+      "statsWorkbenchEnabled": false,
+      "lockEnforcementMode": "off",
+      "video": {
+        "fixtureMode": false,
+        "fixtureDir": "<repo>/services/pose-inference/samples",
+        "scriptsDir": "<repo>/services/pose-inference",
+        "python": "<repo>/services/pose-inference/.venv/<venv-python>",
+        "uploadDir": null,
+        "maxUploadBytes": 2147483648,
+        "allowedExtensions": [
+          "mp4",
+          "mov",
+          "m4v",
+          "webm",
+          "avi",
+          "mkv"
+        ],
+        "allowedMimeTypes": [
+          "video/mp4",
+          "video/quicktime",
+          "video/x-m4v",
+          "video/webm",
+          "video/x-msvideo",
+          "video/x-matroska"
+        ],
+        "retentionPolicy": "privacy_first",
+        "targetThumbnail": false,
+        "overlayFrames": false,
+        "clipTtlHours": 24,
+        "allowUnverifiedRecipe": false,
+        "poseTier": "standard",
+        "detIntervalSec": 0,
+        "jobDeadlineMs": 600000,
+        "sweepGraceMs": 30000,
+        "queueWaitMs": 600000
+      },
+      "stats": {
+        "scriptsDir": "<repo>/services/stats-engine",
+        "python": "<repo>/services/stats-engine/.venv/<venv-python>",
+        "timeoutMs": 30000,
+        "killGraceMs": 2000,
+        "maxConcurrency": 1,
+        "maxConcurrentAnalyzeRequests": 4,
+        "stdoutMaxBytes": 10485760,
+        "stderrMaxBytes": 65536,
+        "maxInputBytes": 2097152,
+        "resultTtlHours": 168,
+        "async": {
+          "syncBudgetMs": 4000,
+          "pollTickMs": 120,
+          "sweepIntervalMs": 2000,
+          "claimIntervalMs": 500,
+          "heartbeatIntervalMs": 5000,
+          "staleSafetyMs": 5000,
+          "queueWaitMs": 600000,
+          "maxJobTimeoutMs": 600000,
+          "maxConsecutiveHeartbeatFailures": 5,
+          "maxRequeueCount": 20,
+          "maxFinishPersistRetries": 3,
+          "maxConcurrentPerUser": 2,
+          "maxConcurrentPerOrg": 4,
+          "maxHourlyPerUser": 60,
+          "maxHourlyPerOrg": 200
+        }
+      }
+    }
+  },
+  "TRUST_PROXY 0": {
+    "config": {
+      "env": "development",
+      "port": 3001,
+      "databaseUrl": "postgresql://test",
+      "jsonBodyLimit": "10mb",
+      "log": {
+        "level": "info"
+      },
+      "deploymentMode": "standalone",
+      "localFallbackAllowed": true,
+      "trustProxy": 0,
+      "auth": {
+        "accessTokenSecret": "access-secret",
+        "refreshTokenSecret": "refresh-secret",
+        "accessTokenTtl": 900,
+        "refreshTokenTtl": 604800
+      },
+      "ai": {
+        "provider": "none",
+        "enabled": false,
+        "internalEndpoint": "http://localhost:11434",
+        "internalModel": "llama3",
+        "externalModel": "gpt-4o",
+        "externalEndpoint": "",
+        "externalApiKey": "",
+        "externalVendorApproved": false,
+        "deidentifyRequired": false,
+        "timeoutMs": 60000
+      },
+      "cors": {
+        "origins": []
+      },
+      "videoAnalysisEnabled": false,
+      "statsWorkbenchEnabled": false,
+      "lockEnforcementMode": "off",
+      "video": {
+        "fixtureMode": false,
+        "fixtureDir": "<repo>/services/pose-inference/samples",
+        "scriptsDir": "<repo>/services/pose-inference",
+        "python": "<repo>/services/pose-inference/.venv/<venv-python>",
+        "uploadDir": null,
+        "maxUploadBytes": 2147483648,
+        "allowedExtensions": [
+          "mp4",
+          "mov",
+          "m4v",
+          "webm",
+          "avi",
+          "mkv"
+        ],
+        "allowedMimeTypes": [
+          "video/mp4",
+          "video/quicktime",
+          "video/x-m4v",
+          "video/webm",
+          "video/x-msvideo",
+          "video/x-matroska"
+        ],
+        "retentionPolicy": "privacy_first",
+        "targetThumbnail": false,
+        "overlayFrames": false,
+        "clipTtlHours": 24,
+        "allowUnverifiedRecipe": false,
+        "poseTier": "standard",
+        "detIntervalSec": 0,
+        "jobDeadlineMs": 600000,
+        "sweepGraceMs": 30000,
+        "queueWaitMs": 600000
+      },
+      "stats": {
+        "scriptsDir": "<repo>/services/stats-engine",
+        "python": "<repo>/services/stats-engine/.venv/<venv-python>",
+        "timeoutMs": 30000,
+        "killGraceMs": 2000,
+        "maxConcurrency": 1,
+        "maxConcurrentAnalyzeRequests": 4,
+        "stdoutMaxBytes": 10485760,
+        "stderrMaxBytes": 65536,
+        "maxInputBytes": 2097152,
+        "resultTtlHours": 168,
+        "async": {
+          "syncBudgetMs": 4000,
+          "pollTickMs": 120,
+          "sweepIntervalMs": 2000,
+          "claimIntervalMs": 500,
+          "heartbeatIntervalMs": 5000,
+          "staleSafetyMs": 5000,
+          "queueWaitMs": 600000,
+          "maxJobTimeoutMs": 600000,
+          "maxConsecutiveHeartbeatFailures": 5,
+          "maxRequeueCount": 20,
+          "maxFinishPersistRetries": 3,
+          "maxConcurrentPerUser": 2,
+          "maxConcurrentPerOrg": 4,
+          "maxHourlyPerUser": 60,
+          "maxHourlyPerOrg": 200
+        }
+      }
+    }
+  },
+  "AI internal": {
+    "config": {
+      "env": "development",
+      "port": 3001,
+      "databaseUrl": "postgresql://test",
+      "jsonBodyLimit": "10mb",
+      "log": {
+        "level": "info"
+      },
+      "deploymentMode": "standalone",
+      "localFallbackAllowed": true,
+      "trustProxy": false,
+      "auth": {
+        "accessTokenSecret": "access-secret",
+        "refreshTokenSecret": "refresh-secret",
+        "accessTokenTtl": 900,
+        "refreshTokenTtl": 604800
+      },
+      "ai": {
+        "provider": "internal",
+        "enabled": true,
+        "internalEndpoint": "http://localhost:11434",
+        "internalModel": "llama3",
+        "externalModel": "gpt-4o",
+        "externalEndpoint": "",
+        "externalApiKey": "",
+        "externalVendorApproved": false,
+        "deidentifyRequired": false,
+        "timeoutMs": 60000
+      },
+      "cors": {
+        "origins": []
+      },
+      "videoAnalysisEnabled": false,
+      "statsWorkbenchEnabled": false,
+      "lockEnforcementMode": "off",
+      "video": {
+        "fixtureMode": false,
+        "fixtureDir": "<repo>/services/pose-inference/samples",
+        "scriptsDir": "<repo>/services/pose-inference",
+        "python": "<repo>/services/pose-inference/.venv/<venv-python>",
+        "uploadDir": null,
+        "maxUploadBytes": 2147483648,
+        "allowedExtensions": [
+          "mp4",
+          "mov",
+          "m4v",
+          "webm",
+          "avi",
+          "mkv"
+        ],
+        "allowedMimeTypes": [
+          "video/mp4",
+          "video/quicktime",
+          "video/x-m4v",
+          "video/webm",
+          "video/x-msvideo",
+          "video/x-matroska"
+        ],
+        "retentionPolicy": "privacy_first",
+        "targetThumbnail": false,
+        "overlayFrames": false,
+        "clipTtlHours": 24,
+        "allowUnverifiedRecipe": false,
+        "poseTier": "standard",
+        "detIntervalSec": 0,
+        "jobDeadlineMs": 600000,
+        "sweepGraceMs": 30000,
+        "queueWaitMs": 600000
+      },
+      "stats": {
+        "scriptsDir": "<repo>/services/stats-engine",
+        "python": "<repo>/services/stats-engine/.venv/<venv-python>",
+        "timeoutMs": 30000,
+        "killGraceMs": 2000,
+        "maxConcurrency": 1,
+        "maxConcurrentAnalyzeRequests": 4,
+        "stdoutMaxBytes": 10485760,
+        "stderrMaxBytes": 65536,
+        "maxInputBytes": 2097152,
+        "resultTtlHours": 168,
+        "async": {
+          "syncBudgetMs": 4000,
+          "pollTickMs": 120,
+          "sweepIntervalMs": 2000,
+          "claimIntervalMs": 500,
+          "heartbeatIntervalMs": 5000,
+          "staleSafetyMs": 5000,
+          "queueWaitMs": 600000,
+          "maxJobTimeoutMs": 600000,
+          "maxConsecutiveHeartbeatFailures": 5,
+          "maxRequeueCount": 20,
+          "maxFinishPersistRetries": 3,
+          "maxConcurrentPerUser": 2,
+          "maxConcurrentPerOrg": 4,
+          "maxHourlyPerUser": 60,
+          "maxHourlyPerOrg": 200
+        }
+      }
+    }
+  },
+  "AI external without approval flags (disabled)": {
+    "config": {
+      "env": "development",
+      "port": 3001,
+      "databaseUrl": "postgresql://test",
+      "jsonBodyLimit": "10mb",
+      "log": {
+        "level": "info"
+      },
+      "deploymentMode": "standalone",
+      "localFallbackAllowed": true,
+      "trustProxy": false,
+      "auth": {
+        "accessTokenSecret": "access-secret",
+        "refreshTokenSecret": "refresh-secret",
+        "accessTokenTtl": 900,
+        "refreshTokenTtl": 604800
+      },
+      "ai": {
+        "provider": "external",
+        "enabled": false,
+        "internalEndpoint": "http://localhost:11434",
+        "internalModel": "llama3",
+        "externalModel": "gpt-4o",
+        "externalEndpoint": "",
+        "externalApiKey": "",
+        "externalVendorApproved": true,
+        "deidentifyRequired": false,
+        "timeoutMs": 60000
+      },
+      "cors": {
+        "origins": []
+      },
+      "videoAnalysisEnabled": false,
+      "statsWorkbenchEnabled": false,
+      "lockEnforcementMode": "off",
+      "video": {
+        "fixtureMode": false,
+        "fixtureDir": "<repo>/services/pose-inference/samples",
+        "scriptsDir": "<repo>/services/pose-inference",
+        "python": "<repo>/services/pose-inference/.venv/<venv-python>",
+        "uploadDir": null,
+        "maxUploadBytes": 2147483648,
+        "allowedExtensions": [
+          "mp4",
+          "mov",
+          "m4v",
+          "webm",
+          "avi",
+          "mkv"
+        ],
+        "allowedMimeTypes": [
+          "video/mp4",
+          "video/quicktime",
+          "video/x-m4v",
+          "video/webm",
+          "video/x-msvideo",
+          "video/x-matroska"
+        ],
+        "retentionPolicy": "privacy_first",
+        "targetThumbnail": false,
+        "overlayFrames": false,
+        "clipTtlHours": 24,
+        "allowUnverifiedRecipe": false,
+        "poseTier": "standard",
+        "detIntervalSec": 0,
+        "jobDeadlineMs": 600000,
+        "sweepGraceMs": 30000,
+        "queueWaitMs": 600000
+      },
+      "stats": {
+        "scriptsDir": "<repo>/services/stats-engine",
+        "python": "<repo>/services/stats-engine/.venv/<venv-python>",
+        "timeoutMs": 30000,
+        "killGraceMs": 2000,
+        "maxConcurrency": 1,
+        "maxConcurrentAnalyzeRequests": 4,
+        "stdoutMaxBytes": 10485760,
+        "stderrMaxBytes": 65536,
+        "maxInputBytes": 2097152,
+        "resultTtlHours": 168,
+        "async": {
+          "syncBudgetMs": 4000,
+          "pollTickMs": 120,
+          "sweepIntervalMs": 2000,
+          "claimIntervalMs": 500,
+          "heartbeatIntervalMs": 5000,
+          "staleSafetyMs": 5000,
+          "queueWaitMs": 600000,
+          "maxJobTimeoutMs": 600000,
+          "maxConsecutiveHeartbeatFailures": 5,
+          "maxRequeueCount": 20,
+          "maxFinishPersistRetries": 3,
+          "maxConcurrentPerUser": 2,
+          "maxConcurrentPerOrg": 4,
+          "maxHourlyPerUser": 60,
+          "maxHourlyPerOrg": 200
+        }
+      }
+    }
+  },
+  "VIDEO_DET_INTERVAL_SEC upper bound": {
+    "config": {
+      "env": "development",
+      "port": 3001,
+      "databaseUrl": "postgresql://test",
+      "jsonBodyLimit": "10mb",
+      "log": {
+        "level": "info"
+      },
+      "deploymentMode": "standalone",
+      "localFallbackAllowed": true,
+      "trustProxy": false,
+      "auth": {
+        "accessTokenSecret": "access-secret",
+        "refreshTokenSecret": "refresh-secret",
+        "accessTokenTtl": 900,
+        "refreshTokenTtl": 604800
+      },
+      "ai": {
+        "provider": "none",
+        "enabled": false,
+        "internalEndpoint": "http://localhost:11434",
+        "internalModel": "llama3",
+        "externalModel": "gpt-4o",
+        "externalEndpoint": "",
+        "externalApiKey": "",
+        "externalVendorApproved": false,
+        "deidentifyRequired": false,
+        "timeoutMs": 60000
+      },
+      "cors": {
+        "origins": []
+      },
+      "videoAnalysisEnabled": false,
+      "statsWorkbenchEnabled": false,
+      "lockEnforcementMode": "off",
+      "video": {
+        "fixtureMode": false,
+        "fixtureDir": "<repo>/services/pose-inference/samples",
+        "scriptsDir": "<repo>/services/pose-inference",
+        "python": "<repo>/services/pose-inference/.venv/<venv-python>",
+        "uploadDir": null,
+        "maxUploadBytes": 2147483648,
+        "allowedExtensions": [
+          "mp4",
+          "mov",
+          "m4v",
+          "webm",
+          "avi",
+          "mkv"
+        ],
+        "allowedMimeTypes": [
+          "video/mp4",
+          "video/quicktime",
+          "video/x-m4v",
+          "video/webm",
+          "video/x-msvideo",
+          "video/x-matroska"
+        ],
+        "retentionPolicy": "privacy_first",
+        "targetThumbnail": false,
+        "overlayFrames": false,
+        "clipTtlHours": 24,
+        "allowUnverifiedRecipe": false,
+        "poseTier": "standard",
+        "detIntervalSec": 1,
+        "jobDeadlineMs": 600000,
+        "sweepGraceMs": 30000,
+        "queueWaitMs": 600000
+      },
+      "stats": {
+        "scriptsDir": "<repo>/services/stats-engine",
+        "python": "<repo>/services/stats-engine/.venv/<venv-python>",
+        "timeoutMs": 30000,
+        "killGraceMs": 2000,
+        "maxConcurrency": 1,
+        "maxConcurrentAnalyzeRequests": 4,
+        "stdoutMaxBytes": 10485760,
+        "stderrMaxBytes": 65536,
+        "maxInputBytes": 2097152,
+        "resultTtlHours": 168,
+        "async": {
+          "syncBudgetMs": 4000,
+          "pollTickMs": 120,
+          "sweepIntervalMs": 2000,
+          "claimIntervalMs": 500,
+          "heartbeatIntervalMs": 5000,
+          "staleSafetyMs": 5000,
+          "queueWaitMs": 600000,
+          "maxJobTimeoutMs": 600000,
+          "maxConsecutiveHeartbeatFailures": 5,
+          "maxRequeueCount": 20,
+          "maxFinishPersistRetries": 3,
+          "maxConcurrentPerUser": 2,
+          "maxConcurrentPerOrg": 4,
+          "maxHourlyPerUser": 60,
+          "maxHourlyPerOrg": 200
+        }
+      }
+    }
+  },
+  "NODE_ENV test": {
+    "config": {
+      "env": "test",
+      "port": 3001,
+      "databaseUrl": "postgresql://test",
+      "jsonBodyLimit": "10mb",
+      "log": {
+        "level": "silent"
+      },
+      "deploymentMode": "standalone",
+      "localFallbackAllowed": true,
+      "trustProxy": false,
+      "auth": {
+        "accessTokenSecret": "access-secret",
+        "refreshTokenSecret": "refresh-secret",
+        "accessTokenTtl": 900,
+        "refreshTokenTtl": 604800
+      },
+      "ai": {
+        "provider": "none",
+        "enabled": false,
+        "internalEndpoint": "http://localhost:11434",
+        "internalModel": "llama3",
+        "externalModel": "gpt-4o",
+        "externalEndpoint": "",
+        "externalApiKey": "",
+        "externalVendorApproved": false,
+        "deidentifyRequired": false,
+        "timeoutMs": 60000
+      },
+      "cors": {
+        "origins": []
+      },
+      "videoAnalysisEnabled": false,
+      "statsWorkbenchEnabled": false,
+      "lockEnforcementMode": "off",
+      "video": {
+        "fixtureMode": false,
+        "fixtureDir": "<repo>/services/pose-inference/samples",
+        "scriptsDir": "<repo>/services/pose-inference",
+        "python": "<repo>/services/pose-inference/.venv/<venv-python>",
+        "uploadDir": null,
+        "maxUploadBytes": 2147483648,
+        "allowedExtensions": [
+          "mp4",
+          "mov",
+          "m4v",
+          "webm",
+          "avi",
+          "mkv"
+        ],
+        "allowedMimeTypes": [
+          "video/mp4",
+          "video/quicktime",
+          "video/x-m4v",
+          "video/webm",
+          "video/x-msvideo",
+          "video/x-matroska"
+        ],
+        "retentionPolicy": "privacy_first",
+        "targetThumbnail": false,
+        "overlayFrames": false,
+        "clipTtlHours": 24,
+        "allowUnverifiedRecipe": false,
+        "poseTier": "standard",
+        "detIntervalSec": 0,
+        "jobDeadlineMs": 600000,
+        "sweepGraceMs": 30000,
+        "queueWaitMs": 600000
+      },
+      "stats": {
+        "scriptsDir": "<repo>/services/stats-engine",
+        "python": "<repo>/services/stats-engine/.venv/<venv-python>",
+        "timeoutMs": 30000,
+        "killGraceMs": 2000,
+        "maxConcurrency": 1,
+        "maxConcurrentAnalyzeRequests": 4,
+        "stdoutMaxBytes": 10485760,
+        "stderrMaxBytes": 65536,
+        "maxInputBytes": 2097152,
+        "resultTtlHours": 168,
+        "async": {
+          "syncBudgetMs": 4000,
+          "pollTickMs": 120,
+          "sweepIntervalMs": 2000,
+          "claimIntervalMs": 500,
+          "heartbeatIntervalMs": 5000,
+          "staleSafetyMs": 5000,
+          "queueWaitMs": 600000,
+          "maxJobTimeoutMs": 600000,
+          "maxConsecutiveHeartbeatFailures": 5,
+          "maxRequeueCount": 20,
+          "maxFinishPersistRetries": 3,
+          "maxConcurrentPerUser": 2,
+          "maxConcurrentPerOrg": 4,
+          "maxHourlyPerUser": 60,
+          "maxHourlyPerOrg": 200
+        }
+      }
+    }
+  },
+  "missing DATABASE_URL": {
+    "error": "Missing required env var: DATABASE_URL"
+  },
+  "empty DATABASE_URL": {
+    "error": "Missing required env var: DATABASE_URL"
+  },
+  "missing ACCESS_TOKEN_SECRET": {
+    "error": "Missing required env var: ACCESS_TOKEN_SECRET"
+  },
+  "missing REFRESH_TOKEN_SECRET": {
+    "error": "Missing required env var: REFRESH_TOKEN_SECRET"
+  },
+  "bad DEPLOYMENT_MODE": {
+    "error": "DEPLOYMENT_MODE must be 'intranet' or 'standalone', got 'cloud'"
+  },
+  "bad AI_PROVIDER": {
+    "error": "AI_PROVIDER must be 'none', 'internal', or 'external', got 'openai'"
+  },
+  "bad NODE_ENV": {
+    "error": "NODE_ENV must be 'development', 'production', or 'test', got 'staging'"
+  },
+  "bad LOG_LEVEL": {
+    "error": "LOG_LEVEL must be one of fatal, error, warn, info, debug, trace, silent, got 'verbose'"
+  },
+  "CORS_ORIGINS missing in production": {
+    "error": "CORS_ORIGINS must be set (e.g. https://wr.hospital.local:8443) in production or intranet mode"
+  },
+  "CORS_ORIGINS only commas in intranet": {
+    "error": "CORS_ORIGINS must be set (e.g. https://wr.hospital.local:8443) in production or intranet mode"
+  },
+  "PORT 0": {
+    "error": "PORT must be a positive integer, got '0'"
+  },
+  "PORT not a number": {
+    "error": "PORT must be a positive integer, got 'abc'"
+  },
+  "PORT fractional": {
+    "error": "PORT must be a positive integer, got '1.5'"
+  },
+  "negative STATS_ASYNC_POLL_TICK_MS": {
+    "error": "STATS_ASYNC_POLL_TICK_MS must be a positive integer, got '-5'"
+  },
+  "bad TRUST_PROXY": {
+    "error": "TRUST_PROXY must be 'true', 'false', or a non-negative integer"
+  },
+  "negative TRUST_PROXY": {
+    "error": "TRUST_PROXY must be 'true', 'false', or a non-negative integer"
+  },
+  "bad LOCK_ENFORCEMENT_MODE": {
+    "error": "LOCK_ENFORCEMENT_MODE must be 'off', 'observe', or 'enforce', got 'strict'"
+  },
+  "bad VIDEO_ANALYSIS_RETENTION": {
+    "error": "VIDEO_ANALYSIS_RETENTION must be 'privacy_first' or 'review_fidelity', got 'forever'"
+  },
+  "VIDEO_POSE_TIER high (dev CLI only)": {
+    "error": "VIDEO_POSE_TIER must be 'standard' or 'auto' ('high' is dev CLI-only), got 'high'"
+  },
+  "VIDEO_DET_INTERVAL_SEC above 1": {
+    "error": "VIDEO_DET_INTERVAL_SEC must be a number in [0, 1.0] (0 disables), got '1.5'"
+  },
+  "VIDEO_DET_INTERVAL_SEC negative": {
+    "error": "VIDEO_DET_INTERVAL_SEC must be a number in [0, 1.0] (0 disables), got '-0.1'"
+  },
+  "VIDEO_DET_INTERVAL_SEC not a number": {
+    "error": "VIDEO_DET_INTERVAL_SEC must be a number in [0, 1.0] (0 disables), got 'soon'"
+  },
+  "AI external approved without endpoint": {
+    "error": "AI_EXTERNAL_ENDPOINT is required when AI_PROVIDER=external and approval flags are set"
+  },
+  "AI external approved without key": {
+    "error": "AI_EXTERNAL_API_KEY is required when AI_PROVIDER=external and approval flags are set"
+  }
+}

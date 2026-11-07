@@ -2,359 +2,199 @@
  * Central config loaded once at startup from process.env.
  * All other modules import the default export.
  * Tests can call createConfig({ ... }) directly without module reloading.
+ *
+ * Parsing and start-up validation live in config/schema.ts (zod, REFACTORING_ROADMAP S2 / P1-09);
+ * this file only shapes the parsed values into the nested, frozen object the server uses.
+ * Behaviour is frozen by __tests__/config.characterization.test.ts.
  */
 import path from 'path';
+import { resolveEnv } from './config/schema';
 
-// 영상 분석 dev 도구 기본 경로: 서버는 server/에서 실행되므로 repo 루트는 cwd 상위로 가정.
-// 운영/컨테이너는 env로 명시(아래 VIDEO_ANALYSIS_* 참고) — 기본값 의존 금지.
+export {
+  LOG_LEVELS,
+  type LogLevel,
+  type DeploymentMode,
+  type AiProvider,
+  type LockEnforcementMode,
+} from './config/schema';
+
+// Repository root, from this file's location — server/src/config.ts and server/dist/config.js are
+// both two levels below it — so the dev-tool defaults below no longer depend on the working
+// directory (before S2 they assumed the server was started from server/). Production and
+// containers set these paths through env (VIDEO_ANALYSIS_*, STATS_ENGINE_*).
+const REPO_ROOT = path.resolve(__dirname, '..', '..');
+
 function poseInferenceRoot(): string {
-  return path.resolve(process.cwd(), '..', 'services', 'pose-inference');
+  return path.join(REPO_ROOT, 'services', 'pose-inference');
 }
-function defaultPython(scriptsDir: string): string {
+
+// PR1: stats-engine dev 도구 기본 경로 — pose venv와 완전히 독립된 경로(계획서 §7.3).
+function statsEngineRoot(): string {
+  return path.join(REPO_ROOT, 'services', 'stats-engine');
+}
+
+function venvPython(scriptsDir: string): string {
   // venv 경로는 OS별로 다르다(Windows=Scripts/python.exe, POSIX=bin/python).
   const rel = process.platform === 'win32' ? path.join('Scripts', 'python.exe') : path.join('bin', 'python');
   return path.join(scriptsDir, '.venv', rel);
 }
 
-// PR1: stats-engine dev 도구 기본 경로. video의 poseInferenceRoot()와 같은 패턴을 복제한다
-// (pose venv와 완전히 독립된 경로로 두기 위해 공용 헬퍼로 묶지 않는다 — 계획서 §7.3).
-function statsEngineRoot(): string {
-  return path.resolve(process.cwd(), '..', 'services', 'stats-engine');
-}
-function defaultStatsPython(scriptsDir: string): string {
-  const rel = process.platform === 'win32' ? path.join('Scripts', 'python.exe') : path.join('bin', 'python');
-  return path.join(scriptsDir, '.venv', rel);
-}
-
-export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
-export type LogLevel = (typeof LOG_LEVELS)[number];
-
-function required(env: NodeJS.ProcessEnv, key: string): string {
-  const val = env[key];
-  if (!val) throw new Error(`Missing required env var: ${key}`);
-  return val;
-}
-
-function optional(env: NodeJS.ProcessEnv, key: string, fallback: string): string {
-  return env[key] || fallback;
-}
-
-function bool(env: NodeJS.ProcessEnv, key: string, fallback = false): boolean {
-  const val = env[key];
-  if (val === undefined) return fallback;
-  return val === 'true' || val === '1';
-}
-
-function positiveInt(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
-  const raw = env[key];
-  if (raw === undefined || raw === '') return fallback;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n <= 0) {
-    throw new Error(`${key} must be a positive integer, got '${raw}'`);
-  }
-  return n;
-}
-
-function trustProxy(env: NodeJS.ProcessEnv, deploymentMode: DeploymentMode): false | true | number {
-  const raw = env['TRUST_PROXY'];
-  if (raw === undefined || raw === '') {
-    return deploymentMode === 'intranet' ? 1 : false;
-  }
-
-  if (raw === 'true') return true;
-  if (raw === 'false') return false;
-
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 0) {
-    throw new Error("TRUST_PROXY must be 'true', 'false', or a non-negative integer");
-  }
-  return n;
-}
-
-export type DeploymentMode = 'intranet' | 'standalone';
-export type AiProvider     = 'none' | 'internal' | 'external';
-export type LockEnforcementMode = 'off' | 'observe' | 'enforce';
-
 export function createConfig(env: NodeJS.ProcessEnv = process.env) {
-  // ---------------------------------------------------------------------------
-  // Deployment mode
-  // ---------------------------------------------------------------------------
-  const rawMode = optional(env, 'DEPLOYMENT_MODE', 'standalone');
-  if (rawMode !== 'intranet' && rawMode !== 'standalone') {
-    throw new Error(
-      `DEPLOYMENT_MODE must be 'intranet' or 'standalone', got '${rawMode}'`
-    );
-  }
-  const deploymentMode = rawMode as DeploymentMode;
-
-  // ---------------------------------------------------------------------------
-  // AI provider gate
-  //
-  // AI_PROVIDER=none       → disabled
-  // AI_PROVIDER=internal   → internal LLM (Ollama/vLLM); no deidentification gate
-  // AI_PROVIDER=external   → external vendor; requires both approval flags
-  // ---------------------------------------------------------------------------
-  const rawAiProvider = optional(env, 'AI_PROVIDER', 'none');
-  if (!['none', 'internal', 'external'].includes(rawAiProvider)) {
-    throw new Error(
-      `AI_PROVIDER must be 'none', 'internal', or 'external', got '${rawAiProvider}'`
-    );
-  }
-  const aiProvider               = rawAiProvider as AiProvider;
-  const aiExternalVendorApproved = bool(env, 'AI_EXTERNAL_VENDOR_APPROVED');
-  const aiDeidentifyRequired     = bool(env, 'AI_DEIDENTIFY_REQUIRED');
-  const aiExternalEndpoint       = optional(env, 'AI_EXTERNAL_ENDPOINT', '');
-  const aiExternalApiKey         = optional(env, 'AI_EXTERNAL_API_KEY', '');
-
-  function resolveAiEnabled(): boolean {
-    if (aiProvider === 'none')     return false;
-    if (aiProvider === 'internal') return true;
-    // external: both approval flags AND endpoint+key must be present
-    if (!aiExternalVendorApproved || !aiDeidentifyRequired) return false;
-    if (!aiExternalEndpoint) {
-      throw new Error('AI_EXTERNAL_ENDPOINT is required when AI_PROVIDER=external and approval flags are set');
-    }
-    if (!aiExternalApiKey) {
-      throw new Error('AI_EXTERNAL_API_KEY is required when AI_PROVIDER=external and approval flags are set');
-    }
-    return true;
-  }
-
-  // ---------------------------------------------------------------------------
-  // CORS origins (comma-separated)
-  // ---------------------------------------------------------------------------
-  const corsOrigins = (env['CORS_ORIGINS'] ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  // ---------------------------------------------------------------------------
-  // NODE_ENV
-  // ---------------------------------------------------------------------------
-  const rawNodeEnv = optional(env, 'NODE_ENV', 'development');
-  if (!['development', 'production', 'test'].includes(rawNodeEnv)) {
-    throw new Error(`NODE_ENV must be 'development', 'production', or 'test', got '${rawNodeEnv}'`);
-  }
-  const nodeEnv = rawNodeEnv as 'development' | 'production' | 'test';
-
-  // ---------------------------------------------------------------------------
-  // LOG_LEVEL (pino level, REFACTORING_ROADMAP P1-01). Tests default to silent so error-path
-  // tests do not flood the output; tests that check logging inject their own logger.
-  // ---------------------------------------------------------------------------
-  const logLevel = optional(env, 'LOG_LEVEL', nodeEnv === 'test' ? 'silent' : 'info');
-  if (!LOG_LEVELS.includes(logLevel as LogLevel)) {
-    throw new Error(`LOG_LEVEL must be one of ${LOG_LEVELS.join(', ')}, got '${logLevel}'`);
-  }
-
-  // CORS_ORIGINS is mandatory in production / intranet deployments.
-  // An empty allowlist in production would silently block all credentialed
-  // browser requests that include an Origin header (login, CSRF, etc.).
-  if (corsOrigins.length === 0 && (nodeEnv === 'production' || deploymentMode === 'intranet')) {
-    throw new Error(
-      'CORS_ORIGINS must be set (e.g. https://wr.hospital.local:8443) in production or intranet mode'
-    );
-  }
+  const e = resolveEnv(env);
+  const videoScriptsDir = e.VIDEO_ANALYSIS_SCRIPTS_DIR ?? poseInferenceRoot();
+  const statsScriptsDir = e.STATS_ENGINE_SCRIPTS_DIR ?? statsEngineRoot();
 
   return Object.freeze({
-    env:         nodeEnv,
-    port:        positiveInt(env, 'PORT', 3001),
-    databaseUrl: required(env, 'DATABASE_URL'),
-    jsonBodyLimit: optional(env, 'JSON_BODY_LIMIT', '10mb'),
-    log: Object.freeze({ level: logLevel as LogLevel }),
+    env:         e.NODE_ENV,
+    port:        e.PORT,
+    databaseUrl: e.DATABASE_URL,
+    jsonBodyLimit: e.JSON_BODY_LIMIT,
+    log: Object.freeze({ level: e.LOG_LEVEL }),
 
-    deploymentMode,
+    deploymentMode: e.DEPLOYMENT_MODE,
     // intranet mode never falls back to local storage on server errors
-    localFallbackAllowed: deploymentMode !== 'intranet',
-    // Caddy terminates TLS and forwards requests to the app container in
-    // intranet mode. Trust exactly one proxy hop by default so req.ip and
-    // rate-limit buckets reflect the real client address.
-    trustProxy: trustProxy(env, deploymentMode),
+    localFallbackAllowed: e.DEPLOYMENT_MODE !== 'intranet',
+    trustProxy: e.TRUST_PROXY,
 
     auth: Object.freeze({
-      accessTokenSecret:  required(env, 'ACCESS_TOKEN_SECRET'),
-      refreshTokenSecret: required(env, 'REFRESH_TOKEN_SECRET'),
+      accessTokenSecret:  e.ACCESS_TOKEN_SECRET,
+      refreshTokenSecret: e.REFRESH_TOKEN_SECRET,
       // access token TTL in seconds (default 15 min)
-      accessTokenTtl:  positiveInt(env, 'ACCESS_TOKEN_TTL',  15 * 60),
+      accessTokenTtl:  e.ACCESS_TOKEN_TTL,
       // refresh token TTL in seconds (default 7 days)
-      refreshTokenTtl: positiveInt(env, 'REFRESH_TOKEN_TTL', 7 * 24 * 60 * 60),
+      refreshTokenTtl: e.REFRESH_TOKEN_TTL,
     }),
 
     ai: Object.freeze({
-      provider:               aiProvider,
-      enabled:                resolveAiEnabled(),
-      internalEndpoint:       optional(env, 'AI_INTERNAL_ENDPOINT', 'http://localhost:11434'),
-      // Model name sent to the internal LLM backend (e.g. 'llama3', 'mistral').
-      // Overrides any model name the client sends — the client has no visibility
-      // into what models are loaded in the hospital's Ollama/vLLM instance.
-      internalModel:          optional(env, 'AI_INTERNAL_MODEL', 'llama3'),
-      // Model name sent to the external vendor endpoint (e.g. 'gpt-4o').
-      // Overrides the client-sent model — the approved vendor contract may
-      // restrict which models are permitted under the hospital agreement.
-      externalModel:          optional(env, 'AI_EXTERNAL_MODEL', 'gpt-4o'),
-      externalEndpoint:       aiExternalEndpoint,
-      externalApiKey:         aiExternalApiKey,
-      externalVendorApproved: aiExternalVendorApproved,
-      deidentifyRequired:     aiDeidentifyRequired,
+      provider:               e.AI_PROVIDER,
+      enabled:                e.aiEnabled,
+      internalEndpoint:       e.AI_INTERNAL_ENDPOINT,
+      // Model name sent to the internal LLM backend (e.g. 'llama3', 'mistral'). Overrides any model
+      // the client sends — the client cannot see which models the hospital's Ollama/vLLM has loaded.
+      internalModel:          e.AI_INTERNAL_MODEL,
+      // Model name sent to the external vendor endpoint (e.g. 'gpt-4o'). Overrides the client-sent
+      // model — the approved vendor contract may restrict which models are permitted.
+      externalModel:          e.AI_EXTERNAL_MODEL,
+      externalEndpoint:       e.AI_EXTERNAL_ENDPOINT,
+      externalApiKey:         e.AI_EXTERNAL_API_KEY,
+      externalVendorApproved: e.AI_EXTERNAL_VENDOR_APPROVED,
+      deidentifyRequired:     e.AI_DEIDENTIFY_REQUIRED,
       // AI 업스트림(내부 LLM·외부 벤더) 호출 한 건의 제한 시간(ms). 초과하면 504로 끊는다.
-      timeoutMs:              positiveInt(env, 'AI_TIMEOUT_MS', 60000),
+      timeoutMs:              e.AI_TIMEOUT_MS,
     }),
 
-    cors: Object.freeze({ origins: corsOrigins }),
+    cors: Object.freeze({ origins: e.CORS_ORIGINS }),
 
     // 작업 영상 인간공학 분석(v6.0.0). 검증(6.0-B2) 통과 전까지 운영 기본 비활성.
-    videoAnalysisEnabled: bool(env, 'VIDEO_ANALYSIS_ENABLED', false),
+    videoAnalysisEnabled: e.VIDEO_ANALYSIS_ENABLED,
 
-    // 통계분석 워크벤치(PR0-A). 화면·엔진이 아직 없어 기본 비활성 — 최종 활성화 여부는
-    // statsWorkbenchRuntimeState.ts가 이 값과 deploymentMode를 함께 본다(§7.6).
-    statsWorkbenchEnabled: bool(env, 'STATS_WORKBENCH_ENABLED', false),
+    // 통계분석 워크벤치(PR0-A). 최종 활성화 여부는 statsWorkbenchRuntimeState.ts가 이 값과
+    // deploymentMode를 함께 본다(§7.6).
+    statsWorkbenchEnabled: e.STATS_WORKBENCH_ENABLED,
 
     // 환자 단위 TTL lease lock 롤아웃 플래그(3단계). off: 락 API는 존재하되 쓰기 엔드포인트가
     // 락을 확인 안 함(기본, 구버전 클라이언트와 100% 호환) → observe: 락 체크는 평가·로그만
-    // 남기고 막지 않음(프론트가 정상적으로 acquire/renew하는지 관찰) → enforce: 실제 게이팅.
-    lockEnforcementMode: (() => {
-      const mode = optional(env, 'LOCK_ENFORCEMENT_MODE', 'off');
-      if (mode !== 'off' && mode !== 'observe' && mode !== 'enforce') {
-        throw new Error(`LOCK_ENFORCEMENT_MODE must be 'off', 'observe', or 'enforce', got '${mode}'`);
-      }
-      return mode as LockEnforcementMode;
-    })(),
+    // 남기고 막지 않음 → enforce: 실제 게이팅.
+    lockEnforcementMode: e.LOCK_ENFORCEMENT_MODE,
 
-    video: Object.freeze((() => {
-      const scriptsDir = optional(env, 'VIDEO_ANALYSIS_SCRIPTS_DIR', poseInferenceRoot());
-      const retention = optional(env, 'VIDEO_ANALYSIS_RETENTION', 'privacy_first');
-      if (retention !== 'privacy_first' && retention !== 'review_fidelity') {
-        throw new Error(`VIDEO_ANALYSIS_RETENTION must be 'privacy_first' or 'review_fidelity', got '${retention}'`);
-      }
-      return {
-        // dev-only fixture 추론 워커 활성(운영 기본 off). enabled와 함께여야 워커가 돈다.
-        fixtureMode: bool(env, 'VIDEO_ANALYSIS_FIXTURE_MODE', false),
-        // fixture 영상 allowlist 디렉터리. 이 안의 파일만 분석 입력으로 허용(path traversal 차단).
-        fixtureDir: optional(env, 'VIDEO_ANALYSIS_FIXTURE_DIR', path.join(scriptsDir, 'samples')),
-        scriptsDir,
-        // Python 실행기. 운영/컨테이너는 env 명시 권장(기본값은 dev venv).
-        python: optional(env, 'VIDEO_ANALYSIS_PYTHON', defaultPython(scriptsDir)),
-        // M3-7a 실 업로드: Node·추론 공유 볼륨. 미설정이면 업로드 라우트 비활성(UPLOAD_DISABLED).
-        uploadDir: env['VIDEO_ANALYSIS_UPLOAD_DIR'] || null,
-        // 업로드 최대 크기(바이트). 기본 2GB.
-        maxUploadBytes: positiveInt(env, 'VIDEO_ANALYSIS_MAX_UPLOAD_BYTES', 2 * 1024 * 1024 * 1024),
-        // 허용 확장자/MIME(매직바이트 sniffing과 함께 검증).
-        allowedExtensions: Object.freeze(['mp4', 'mov', 'm4v', 'webm', 'avi', 'mkv']),
-        allowedMimeTypes: Object.freeze(['video/mp4', 'video/quicktime', 'video/x-m4v', 'video/webm', 'video/x-msvideo', 'video/x-matroska']),
-        // 보존 정책: privacy_first(원본 추론 후 삭제·skeleton만) | review_fidelity(원본 TTL 보존).
-        retentionPolicy: retention as 'privacy_first' | 'review_fidelity',
-        // 대상자 선택 시 대표 프레임 썸네일 노출(privacy 정책 예외, 기본 off). 동의+인트라넷 전제에서만 opt-in.
-        targetThumbnail: bool(env, 'VIDEO_ANALYSIS_TARGET_THUMBNAIL', false),
-        // 골격 검수 overlay에 실 프레임 표시(privacy 정책 예외, 기본 off). on일 때만 추론이 샘플 프레임을
-        // 다운스케일 JPEG로 추출·보관하고 서빙 허용. 검증 초기 한시 예외(동의+인트라넷 전제).
-        overlayFrames: bool(env, 'VIDEO_ANALYSIS_OVERLAY_FRAMES', false),
-        // 미확정 임시 영상 보존 시간(시간). TTL 경과 시 cleanup이 회수.
-        clipTtlHours: positiveInt(env, 'VIDEO_ANALYSIS_CLIP_TTL_HOURS', 24),
-        // recipe 미확정(가중치 sha 없음 → status='unverified')인데도 apply를 허용할지(fail-closed 기본 false).
-        // dev/test/fixture 전용 단일 노브(6.0-9). 운영(에어갭 baked 이미지)에선 절대 켜지 않는다.
-        allowUnverifiedRecipe: bool(env, 'VIDEO_ANALYSIS_ALLOW_UNVERIFIED_RECIPE', false),
-        // pose 모델 티어(6.0-14): standard(기본, rtmpose-s=기존 동작) | auto(l/CUDA 세션 2단 검증 통과 시에만
-        // rtmpose-l, 실패 시 tier만 강등 — CPU-l 경로 없음). 'high'(l+cuda 강제)는 dev CLI 디버그 전용이라
-        // 운영 env로 들어오면 설정 실수 — 조용한 강등 대신 기동 실패로 드러낸다(fail-fast).
-        poseTier: (() => {
-          const tier = optional(env, 'VIDEO_POSE_TIER', 'standard');
-          if (tier !== 'standard' && tier !== 'auto') {
-            throw new Error(`VIDEO_POSE_TIER must be 'standard' or 'auto' ('high' is dev CLI-only), got '${tier}'`);
-          }
-          return tier as 'standard' | 'auto';
-        })(),
-        // det 실행 간격 초(6.0-15 det 빈도 감소). 0(기본)=매 샘플 프레임 det(현행 무변경).
-        // >0이면 워커가 infer_clip --det-interval-sec으로 전달 — 사이 프레임은 pose 역산 박스 재사용.
-        // 상한 1.0: mapTargetTrack이 선택시각 ±500ms 창에서 매칭하므로 det 간격이 1초를 넘으면
-        // target 매핑이 창을 벗어날 수 있다. 범위 밖 값은 조용한 무시 대신 기동 실패(fail-fast, 6.0-14식).
-        detIntervalSec: (() => {
-          const raw = optional(env, 'VIDEO_DET_INTERVAL_SEC', '0');
-          const sec = Number(raw);
-          if (!Number.isFinite(sec) || sec < 0 || sec > 1.0) {
-            throw new Error(`VIDEO_DET_INTERVAL_SEC must be a number in [0, 1.0] (0 disables), got '${raw}'`);
-          }
-          return sec;
-        })(),
-        // 전체 job 처리 deadline(ms, 6.0-12). 추론(infer_clip+feature_calc) subprocess의 합이 이를 넘지 않도록
-        // 엄격 분배하고, sweepStale·클라이언트 폴링 상한이 모두 이 값에서 파생된다(단일 진실원천).
-        // 손목(wholebody)은 CPU에서 1~2분 클립도 오래 걸려 기본 600000(10분). GPU면 더 줄여도 됨(§Range).
-        jobDeadlineMs: positiveInt(env, 'VIDEO_ANALYSIS_JOB_DEADLINE_MS', 600000),
-        // sweepStale이 정체 job을 error로 정리하는 여유(ms). sweep 임계 = jobDeadlineMs + sweepGraceMs라
-        // claim·IO·persist 오버헤드로 정상 job이 조기에 죽지 않게 한다.
-        sweepGraceMs: positiveInt(env, 'VIDEO_ANALYSIS_SWEEP_GRACE_MS', 30000),
-        // 클라이언트가 job을 queued 상태로 기다리는 상한(ms). 직렬 큐(동시 1건)라 앞선 job 때문에 대기할 수
-        // 있어 별도 예산으로 둔다. 서버 queued stale(1시간)보다 짧게(기본 10분) — UI가 과도하게 매달리지 않게.
-        queueWaitMs: positiveInt(env, 'VIDEO_ANALYSIS_QUEUE_WAIT_MS', 600000),
-      };
-    })()),
+    video: Object.freeze({
+      // dev-only fixture 추론 워커 활성(운영 기본 off). enabled와 함께여야 워커가 돈다.
+      fixtureMode: e.VIDEO_ANALYSIS_FIXTURE_MODE,
+      // fixture 영상 allowlist 디렉터리. 이 안의 파일만 분석 입력으로 허용(path traversal 차단).
+      fixtureDir: e.VIDEO_ANALYSIS_FIXTURE_DIR ?? path.join(videoScriptsDir, 'samples'),
+      scriptsDir: videoScriptsDir,
+      // Python 실행기. 운영/컨테이너는 env 명시 권장(기본값은 dev venv).
+      python: e.VIDEO_ANALYSIS_PYTHON ?? venvPython(videoScriptsDir),
+      // M3-7a 실 업로드: Node·추론 공유 볼륨. 미설정이면 업로드 라우트 비활성(UPLOAD_DISABLED).
+      uploadDir: e.VIDEO_ANALYSIS_UPLOAD_DIR,
+      // 업로드 최대 크기(바이트). 기본 2GB.
+      maxUploadBytes: e.VIDEO_ANALYSIS_MAX_UPLOAD_BYTES,
+      // 허용 확장자/MIME(매직바이트 sniffing과 함께 검증).
+      allowedExtensions: Object.freeze(['mp4', 'mov', 'm4v', 'webm', 'avi', 'mkv']),
+      allowedMimeTypes: Object.freeze(['video/mp4', 'video/quicktime', 'video/x-m4v', 'video/webm', 'video/x-msvideo', 'video/x-matroska']),
+      // 보존 정책: privacy_first(원본 추론 후 삭제·skeleton만) | review_fidelity(원본 TTL 보존).
+      retentionPolicy: e.VIDEO_ANALYSIS_RETENTION,
+      // 대상자 선택 시 대표 프레임 썸네일 노출(privacy 정책 예외, 기본 off). 동의+인트라넷 전제에서만 opt-in.
+      targetThumbnail: e.VIDEO_ANALYSIS_TARGET_THUMBNAIL,
+      // 골격 검수 overlay에 실 프레임 표시(privacy 정책 예외, 기본 off).
+      overlayFrames: e.VIDEO_ANALYSIS_OVERLAY_FRAMES,
+      // 미확정 임시 영상 보존 시간(시간). TTL 경과 시 cleanup이 회수.
+      clipTtlHours: e.VIDEO_ANALYSIS_CLIP_TTL_HOURS,
+      // recipe 미확정(status='unverified')인데도 apply를 허용할지(fail-closed 기본 false). dev/test/fixture 전용.
+      allowUnverifiedRecipe: e.VIDEO_ANALYSIS_ALLOW_UNVERIFIED_RECIPE,
+      // pose 모델 티어(6.0-14): standard(기본) | auto. 'high'는 dev CLI 디버그 전용 → 기동 실패(fail-fast).
+      poseTier: e.VIDEO_POSE_TIER,
+      // det 실행 간격 초(6.0-15). 0(기본)=매 샘플 프레임 det. 상한 1.0(mapTargetTrack ±500ms 창).
+      detIntervalSec: e.VIDEO_DET_INTERVAL_SEC,
+      // 전체 job 처리 deadline(ms, 6.0-12) — sweepStale·클라이언트 폴링 상한의 단일 진실원천.
+      jobDeadlineMs: e.VIDEO_ANALYSIS_JOB_DEADLINE_MS,
+      // sweepStale 임계 = jobDeadlineMs + sweepGraceMs(정상 job 조기 종료 방지 여유).
+      sweepGraceMs: e.VIDEO_ANALYSIS_SWEEP_GRACE_MS,
+      // 클라이언트가 job을 queued 상태로 기다리는 상한(ms, 직렬 큐 대기 예산).
+      queueWaitMs: e.VIDEO_ANALYSIS_QUEUE_WAIT_MS,
+    }),
 
-    // PR1 — Python subprocess 기술통계 엔진. maxValuesPerVariable/maxTotalValues/
-    // maxStringLength는 여기 없다 — server/src/statsEngineLimits.ts의 하드코딩 상수를
-    // 그대로 쓴다(env로 바꿀 수 있게 하면 Python jsonschema의 하드코딩 값과 어긋난다,
-    // 계획서 §7.3). 바꾸려면 그 파일과 services/stats-engine/protocol.py를 함께 코드
-    // 변경+재배포해야 한다.
-    stats: Object.freeze((() => {
-      const scriptsDir = optional(env, 'STATS_ENGINE_SCRIPTS_DIR', statsEngineRoot());
-      return {
-        scriptsDir,
-        python: optional(env, 'STATS_ENGINE_PYTHON', defaultStatsPython(scriptsDir)),
-        // Python 프로세스 계산 타임아웃(ms). 프로세스 안전 타이머는 이 값+killGraceMs+5000ms —
-        // 리버스 프록시/Express 요청 타임아웃은 그보다도 커야 하고 추가로 snapshot·전처리·
-        // DB 저장 여유(권장 +5000ms)를 더해야 한다(계획서 §7.4의 정확한 부등식 참고).
-        timeoutMs: positiveInt(env, 'STATS_ENGINE_TIMEOUT_MS', 30000),
-        // SIGTERM 이후 SIGKILL까지 유예(ms).
-        killGraceMs: positiveInt(env, 'STATS_ENGINE_KILL_GRACE_MS', 2000),
-        // Python worker 동시 실행 상한(가드C, runStatsEngine 내부 세마포어).
-        maxConcurrency: positiveInt(env, 'STATS_ENGINE_MAX_CONCURRENCY', 1),
-        // POST /analyze 핸들러 전체(snapshot+buildDataset+Python+DB저장)의 동시 처리 상한
-        // (가드A) — Python 세마포어(가드C)와 독립된, Node 측 전처리 비용 통제용.
-        maxConcurrentAnalyzeRequests: positiveInt(env, 'STATS_MAX_CONCURRENT_ANALYZE_REQUESTS', 4),
-        stdoutMaxBytes: positiveInt(env, 'STATS_ENGINE_STDOUT_MAX_BYTES', 10 * 1024 * 1024),
-        stderrMaxBytes: positiveInt(env, 'STATS_ENGINE_STDERR_MAX_BYTES', 64 * 1024),
-        // stdin으로 보낼 JSON 문자열 바이트 상한 — maxValuesPerVariable/maxTotalValues(값
-        // 개수 상한)와 별개로 문자열 총량도 이중 검사한다(계획서 §7.4).
-        maxInputBytes: positiveInt(env, 'STATS_ENGINE_MAX_INPUT_BYTES', 2 * 1024 * 1024),
-        // 성공한 stats_runs 결과의 TTL(시간) — idempotency 캐시 유효기간.
-        resultTtlHours: positiveInt(env, 'STATS_RUNS_RESULT_TTL_HOURS', 24 * 7),
+    // PR1 — Python subprocess 통계 엔진. maxValuesPerVariable/maxTotalValues/maxStringLength는
+    // 여기 없다 — statsEngineLimits.ts의 하드코딩 상수(Python jsonschema와 일치해야 함, 계획서 §7.3).
+    stats: Object.freeze({
+      scriptsDir: statsScriptsDir,
+      python: e.STATS_ENGINE_PYTHON ?? venvPython(statsScriptsDir),
+      // Python 프로세스 계산 타임아웃(ms). 안전 타이머 = timeoutMs + killGraceMs + 5000ms(§7.4).
+      timeoutMs: e.STATS_ENGINE_TIMEOUT_MS,
+      // SIGTERM 이후 SIGKILL까지 유예(ms).
+      killGraceMs: e.STATS_ENGINE_KILL_GRACE_MS,
+      // Python worker 동시 실행 상한(가드C, runStatsEngine 내부 세마포어).
+      maxConcurrency: e.STATS_ENGINE_MAX_CONCURRENCY,
+      // POST /analyze 핸들러 전체의 동시 처리 상한(가드A) — Node 측 전처리 비용 통제용.
+      maxConcurrentAnalyzeRequests: e.STATS_MAX_CONCURRENT_ANALYZE_REQUESTS,
+      stdoutMaxBytes: e.STATS_ENGINE_STDOUT_MAX_BYTES,
+      stderrMaxBytes: e.STATS_ENGINE_STDERR_MAX_BYTES,
+      // stdin JSON 바이트 상한 — 값 개수 상한과 별개의 이중 검사(§7.4).
+      maxInputBytes: e.STATS_ENGINE_MAX_INPUT_BYTES,
+      // 성공한 stats_runs 결과의 TTL(시간) — idempotency 캐시 유효기간.
+      resultTtlHours: e.STATS_RUNS_RESULT_TTL_HOURS,
+      // P0-13 성능 기준선 — STATS_ENGINE_TIMING=1일 때만(운영 compose는 넘기지 않음).
+      timingEnabled: e.STATS_ENGINE_TIMING,
 
-        // PR4-B1 — 비동기 job 인프라(admission→attempt→finish). video 워커의
-        // jobDeadlineMs/sweepGraceMs/queueWaitMs 관례를 그대로 재사용한다.
-        async: Object.freeze({
-          // HTTP 핸들러가 admission 이후 동기 응답을 시도하는 예산(ms) — 이 안에
-          // 안 끝나면 202로 전환한다. 무부하 상태에서만 유효한 "즉시 응답" 상한.
-          syncBudgetMs: positiveInt(env, 'STATS_ASYNC_SYNC_BUDGET_MS', 4000),
-          // §B 폴링 루프의 재조회 간격(ms).
-          pollTickMs: positiveInt(env, 'STATS_ASYNC_POLL_TICK_MS', 120),
-          // sweepLoop 주기(ms) — claimLoop가 attempt()로 몇 분씩 블록돼도 이
-          // 루프는 독립적으로 돈다(orphan·queued 취소·대기초과 확정용).
-          sweepIntervalMs: positiveInt(env, 'STATS_ASYNC_SWEEP_INTERVAL_MS', 2000),
-          // claimLoop 주기(ms).
-          claimIntervalMs: positiveInt(env, 'STATS_ASYNC_CLAIM_INTERVAL_MS', 500),
-          // heartbeat 갱신 주기(ms) — staleThresholdMs(행별 engine_timeout_ms 기반)
-          // 보다 충분히 작아야 한다(최소 1/3 이하 권장).
-          heartbeatIntervalMs: positiveInt(env, 'STATS_ASYNC_HEARTBEAT_INTERVAL_MS', 5000),
-          // 안전 여유(ms) — staleThresholdMs = engine_timeout_ms + killGraceMs + safetyMs.
-          staleSafetyMs: positiveInt(env, 'STATS_ASYNC_STALE_SAFETY_MS', 5000),
-          // claim 자체를 못 받고 queued로 대기하는 시간의 상한(ms, 실행 타임아웃과 별개
-          // 예산) — video 워커의 VIDEO_ANALYSIS_QUEUE_WAIT_MS 관례 재사용.
-          queueWaitMs: positiveInt(env, 'STATS_ASYNC_QUEUE_WAIT_MS', 600000),
-          // B2가 더 긴 timeout을 쓸 수 있는 상한 — 행별 engine_timeout_ms는 이 값을
-          // 넘지 않는다.
-          maxJobTimeoutMs: positiveInt(env, 'STATS_ASYNC_MAX_JOB_TIMEOUT_MS', 10 * 60 * 1000),
-          // heartbeat 쓰기 연속 실패 허용 횟수 — 넘으면 heartbeat를 멈추고 계산은
-          // 계속 진행(§접근 — DB 일시단절을 계산 중단 이유로 쓰지 않는다).
-          maxConsecutiveHeartbeatFailures: positiveInt(env, 'STATS_ASYNC_MAX_HEARTBEAT_FAILURES', 5),
-          // BUSY 재큐잉 상한 — 넘으면 PROCESS_ERROR로 확정 실패.
-          maxRequeueCount: positiveInt(env, 'STATS_ASYNC_MAX_REQUEUE_COUNT', 20),
-          // finishRun/requeueOrFinish의 저장(DB 쓰기+감사) 자체가 실패했을 때의 재시도 한도.
-          maxFinishPersistRetries: positiveInt(env, 'STATS_ASYNC_MAX_FINISH_PERSIST_RETRIES', 3),
-          // admission quota — 동시실행(queued+running 카운트)·시간당(상태 무관 생성 카운트).
-          maxConcurrentPerUser: positiveInt(env, 'STATS_ASYNC_MAX_CONCURRENT_PER_USER', 2),
-          maxConcurrentPerOrg: positiveInt(env, 'STATS_ASYNC_MAX_CONCURRENT_PER_ORG', 4),
-          maxHourlyPerUser: positiveInt(env, 'STATS_ASYNC_MAX_HOURLY_PER_USER', 60),
-          maxHourlyPerOrg: positiveInt(env, 'STATS_ASYNC_MAX_HOURLY_PER_ORG', 200),
-        }),
-      };
-    })()),
+      // PR4-B1 — 비동기 job 인프라(admission→attempt→finish).
+      async: Object.freeze({
+        // admission 이후 동기 응답을 시도하는 예산(ms) — 넘으면 202.
+        syncBudgetMs: e.STATS_ASYNC_SYNC_BUDGET_MS,
+        // §B 폴링 루프의 재조회 간격(ms).
+        pollTickMs: e.STATS_ASYNC_POLL_TICK_MS,
+        // sweepLoop 주기(ms) — claimLoop와 독립(orphan·queued 취소·대기초과 확정).
+        sweepIntervalMs: e.STATS_ASYNC_SWEEP_INTERVAL_MS,
+        // claimLoop 주기(ms).
+        claimIntervalMs: e.STATS_ASYNC_CLAIM_INTERVAL_MS,
+        // heartbeat 갱신 주기(ms) — staleThresholdMs의 1/3 이하 권장.
+        heartbeatIntervalMs: e.STATS_ASYNC_HEARTBEAT_INTERVAL_MS,
+        // staleThresholdMs = engine_timeout_ms + killGraceMs + safetyMs.
+        staleSafetyMs: e.STATS_ASYNC_STALE_SAFETY_MS,
+        // claim 전 queued 대기 상한(ms, 실행 타임아웃과 별개 예산).
+        queueWaitMs: e.STATS_ASYNC_QUEUE_WAIT_MS,
+        // 행별 engine_timeout_ms 상한.
+        maxJobTimeoutMs: e.STATS_ASYNC_MAX_JOB_TIMEOUT_MS,
+        // heartbeat 쓰기 연속 실패 허용 횟수 — 넘으면 heartbeat만 멈추고 계산은 계속.
+        maxConsecutiveHeartbeatFailures: e.STATS_ASYNC_MAX_HEARTBEAT_FAILURES,
+        // BUSY 재큐잉 상한 — 넘으면 PROCESS_ERROR로 확정 실패.
+        maxRequeueCount: e.STATS_ASYNC_MAX_REQUEUE_COUNT,
+        // finishRun/requeueOrFinish 저장 실패 재시도 한도.
+        maxFinishPersistRetries: e.STATS_ASYNC_MAX_FINISH_PERSIST_RETRIES,
+        // admission quota — 동시실행(queued+running)·시간당(상태 무관 생성).
+        maxConcurrentPerUser: e.STATS_ASYNC_MAX_CONCURRENT_PER_USER,
+        maxConcurrentPerOrg: e.STATS_ASYNC_MAX_CONCURRENT_PER_ORG,
+        maxHourlyPerUser: e.STATS_ASYNC_MAX_HOURLY_PER_USER,
+        maxHourlyPerOrg: e.STATS_ASYNC_MAX_HOURLY_PER_ORG,
+      }),
+    }),
+
+    // Values P1-10 moves off direct process.env reads (behaviour unchanged).
+    // Build provenance recorded in video analysis recipes (workers/videoAnalysisWorker.ts).
+    gitCommit: e.WR_GIT_COMMIT,
+    // Backup monitor output read by GET /api/admin/ops/backup-status (routes/opsStatus.ts).
+    backupsDir: e.BACKUPS_DIR,
+    // electron-updater feed directory served under /updates (routes/updates.ts).
+    updatesDir: e.UPDATES_DIR,
   });
 }
 
