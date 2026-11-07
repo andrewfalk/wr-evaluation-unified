@@ -271,8 +271,8 @@
 | L2 | 본문 10MB 인증 전 파싱 | Phase 1 bundle |
 | L3 | refresh·audit/emr rate limit | Phase 1 bundle |
 | L4 | 가입 ID 노출·org 미연결 | Phase 1 bundle |
-| L5 | JWT alg·비밀키 강도·미사용 secret | Phase 1 bundle |
-| L6 | 비밀번호 최대 길이 | Phase 1 bundle |
+| L5 | JWT alg·비밀키 강도·미사용 secret | Phase 1 bundle — ✅ 2026-11-08(#231: HS256 고정, ACCESS_TOKEN_SECRET 32바이트 미만 기동 실패, REFRESH_TOKEN_SECRET 제거 — 운영 .env 길이 확인을 7.2.0 안내서에) |
+| L6 | 비밀번호 최대 길이 | Phase 1 bundle — ✅ 2026-11-08(#231: 새 비밀번호 128자, 로그인·현재 비밀번호는 상한 없음) |
 | L7 | PHI 응답 no-store | ✅ **HF4(#161)** |
 | L8 | EMR 헬퍼 대상 휴리스틱·%TEMP% PHI | Phase 3 bundle |
 | L9 | permission handler·nav guard·모델명 | ✅ **HF9**(handler/guard, #162) + HF7(d)(모델명, #167) |
