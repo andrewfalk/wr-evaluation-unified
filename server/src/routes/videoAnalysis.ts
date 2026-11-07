@@ -18,7 +18,7 @@ import crypto from 'crypto';
 import { checkLockForWrite } from '../db/patientLocks';
 import type { QueryRunner } from '../db/patientPersons';
 import { asyncHandler } from '../http/asyncHandler';
-import { requireFeature } from '../http/authz';
+import { orgIdOf, requireFeature, requireOrg, sessionOf, type SessionInfo } from '../http/authz';
 import {
   CompletionReportFields,
   requireCompletionVersions,
@@ -83,30 +83,19 @@ const ApplyBody = z.object({
   ...CompletionReportFields,
 }).superRefine(requireCompletionVersions);
 
-interface SessionInfo {
-  userId: string;
-  organizationId: string | null;
-  role: string;
-  name?: string;
-}
-
-// 담당의/admin 확인(공통). orgId null(superadmin context)이거나 미존재면 거부.
+// 담당의/admin 확인(공통). orgId null(superadmin context)은 라우트의 requireOrg()가 먼저 403으로 거부한다.
 function canAccess(session: SessionInfo, assignedDoctorUserId: string | null): boolean {
   return session.role === 'admin' || assignedDoctorUserId === session.userId;
 }
 
 // patientId(서버 patient_records.id) 기반 접근 확인. 미존재/타org → 404(존재 누설 방지).
 async function loadAccessiblePatient(
-  pool: Pool, session: SessionInfo, patientId: string, res: Response
+  pool: Pool, session: SessionInfo, orgId: string, patientId: string, res: Response
 ): Promise<{ id: string } | null> {
-  if (session.organizationId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return null;
-  }
   const { rows } = await pool.query<{ id: string; assigned_doctor_user_id: string | null }>(
     `SELECT id, assigned_doctor_user_id FROM patient_records
      WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
-    [patientId, session.organizationId]
+    [patientId, orgId]
   );
   if (rows.length === 0) {
     res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
@@ -126,12 +115,8 @@ interface ClipCtx {
 }
 // clipId → clip + 소속 환자 권한 확인. job-scoped guard의 clip 버전.
 async function loadAccessibleClip(
-  pool: Pool, session: SessionInfo, clipId: string, res: Response
+  pool: Pool, session: SessionInfo, orgId: string, clipId: string, res: Response
 ): Promise<ClipCtx | null> {
-  if (session.organizationId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return null;
-  }
   const { rows } = await pool.query<{
     id: string; patient_record_id: string; organization_id: string; assigned_doctor_user_id: string | null;
     process_id: string | null; upload_path: string | null; sample_detect_result: unknown; target_person_id: string | null;
@@ -143,7 +128,7 @@ async function loadAccessibleClip(
      FROM video_analysis_clips c
      JOIN patient_records p ON p.id = c.patient_record_id AND p.deleted_at IS NULL
      WHERE c.id = $1 AND c.organization_id = $2`,
-    [clipId, session.organizationId]
+    [clipId, orgId]
   );
   if (rows.length === 0) {
     res.status(404).json({ code: 'CLIP_NOT_FOUND', error: 'Clip not found' });
@@ -163,18 +148,14 @@ async function loadAccessibleClip(
 
 // jobId → job + 소속 환자 권한 확인. (FOR UPDATE 없는 일반 조회용.)
 async function loadAccessibleJob(
-  pool: Pool, session: SessionInfo, jobId: string, res: Response
+  pool: Pool, session: SessionInfo, orgId: string, jobId: string, res: Response
 ): Promise<{ row: VideoJobRow } | null> {
-  if (session.organizationId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return null;
-  }
   const { rows } = await pool.query<VideoJobRow & { assigned_doctor_user_id: string | null }>(
     `SELECT j.*, p.assigned_doctor_user_id
      FROM video_analysis_jobs j
      JOIN patient_records p ON p.id = j.patient_record_id AND p.deleted_at IS NULL
      WHERE j.id = $1 AND j.organization_id = $2`,
-    [jobId, session.organizationId]
+    [jobId, orgId]
   );
   if (rows.length === 0) {
     res.status(404).json({ code: 'JOB_NOT_FOUND', error: 'Job not found' });
@@ -256,7 +237,7 @@ function jobResponse(row: VideoJobRow): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 async function createClip(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo as unknown as SessionInfo;
+  const session = sessionOf(req);
   // purpose 누락은 임시 추론하지 않고 명시 거부(배포 중 혼선 차단).
   if (req.body == null || (req.body as { purpose?: unknown }).purpose === undefined) {
     res.status(400).json({ code: 'MISSING_PURPOSE', error: 'purpose is required (analysis_upload | apply_shell | fixture)' });
@@ -267,7 +248,7 @@ async function createClip(pool: Pool, req: Request, res: Response): Promise<void
     res.status(400).json({ code: 'INVALID_BODY', error: parse.error.issues });
     return;
   }
-  const patient = await loadAccessiblePatient(pool, session, parse.data.patientId, res);
+  const patient = await loadAccessiblePatient(pool, session, orgIdOf(req), parse.data.patientId, res);
   if (!patient) return;
 
   // purpose → source_type / file_state / upload_path 결정.
@@ -305,11 +286,11 @@ async function createClip(pool: Pool, req: Request, res: Response): Promise<void
 
 // 실 영상 업로드(M3-7a). 사전 권한·상태 검사 → multer 스트리밍 → 확장자/MIME/hash 검증 → atomic rename → 짧은 단일 UPDATE.
 async function uploadClip(pool: Pool, uploadMw: ExpressRequestHandler, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo as unknown as SessionInfo;
+  const session = sessionOf(req);
 
   // ① 수신 전 사전 검사: 권한 없는/업로드 대상 아닌/이미 업로드된 clip에 최대 maxUploadBytes를
   //    디스크/대역폭으로 받지 않도록 multer 이전에 차단. (수신 후 경쟁은 ④ 짧은 UPDATE가 재차 막는다.)
-  const pre = await loadAccessibleClip(pool, session, req.params.clipId, res);
+  const pre = await loadAccessibleClip(pool, session, orgIdOf(req), req.params.clipId, res);
   if (!pre) return; // loadAccessibleClip이 이미 응답.
   if (pre.sourceType !== 'upload') {
     res.status(400).json({ code: 'CLIP_NOT_UPLOAD_TARGET', error: 'this clip does not accept uploads' });
@@ -405,8 +386,8 @@ async function unlinkSampleFrameSafe(p: string | null | undefined, clipId: strin
 
 // sample-detect (§8.7). 대표 프레임 person box 후보를 실제 탐지. 실 업로드(M3-7a) + dev fixture 지원.
 async function sampleDetect(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo as unknown as SessionInfo;
-  const clip = await loadAccessibleClip(pool, session, req.params.clipId, res);
+  const session = sessionOf(req);
+  const clip = await loadAccessibleClip(pool, session, orgIdOf(req), req.params.clipId, res);
   if (!clip) return;
 
   // 출처/파일상태 guard로 분석 가능한 clip만 통과 + 신뢰 경계 밖 경로 재검증.
@@ -474,13 +455,13 @@ async function sampleDetect(pool: Pool, req: Request, res: Response): Promise<vo
 }
 
 async function selectTarget(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo as unknown as SessionInfo;
+  const session = sessionOf(req);
   const parse = SelectTargetBody.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ code: 'INVALID_BODY', error: parse.error.issues });
     return;
   }
-  const clip = await loadAccessibleClip(pool, session, req.params.clipId, res);
+  const clip = await loadAccessibleClip(pool, session, orgIdOf(req), req.params.clipId, res);
   if (!clip) return;
 
   // sample-detect 선행 필수.
@@ -510,15 +491,15 @@ async function selectTarget(pool: Pool, req: Request, res: Response): Promise<vo
 
 // 대상자 선택용 대표 프레임 썸네일 스트리밍(정책 예외). sample_frame_path가 있고 전용 검증 통과 시 image/jpeg.
 async function getSampleFrame(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo as unknown as SessionInfo;
+  const session = sessionOf(req);
   // opt-in 불변식: 게이트가 꺼지면 DB에 과거 sample_frame_path가 남아 있어도 노출 금지(404).
   if (!config.video.targetThumbnail) {
-    const clip = await loadAccessibleClip(pool, session, req.params.clipId, res); // 권한 우선 적용(존재 누설 방지)
+    const clip = await loadAccessibleClip(pool, session, orgIdOf(req), req.params.clipId, res); // 권한 우선 적용(존재 누설 방지)
     if (!clip) return;
     res.status(404).json({ code: 'SAMPLE_FRAME_NOT_FOUND', error: 'No sample frame for this clip' });
     return;
   }
-  const clip = await loadAccessibleClip(pool, session, req.params.clipId, res);
+  const clip = await loadAccessibleClip(pool, session, orgIdOf(req), req.params.clipId, res);
   if (!clip) return;
   const framePath = resolveSampleFramePath(clip.sampleFramePath, clip.clipId, config.video.uploadDir);
   if (!framePath) {
@@ -536,14 +517,14 @@ async function getSampleFrame(pool: Pool, req: Request, res: Response): Promise<
 }
 
 async function createJob(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo as unknown as SessionInfo;
+  const session = sessionOf(req);
   const parse = CreateJobBody.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ code: 'INVALID_BODY', error: parse.error.issues });
     return;
   }
   // patient_record_id/organization_id는 클라 body가 아니라 clip 조회로 채운다(denormalize 무결성).
-  const clip = await loadAccessibleClip(pool, session, parse.data.clipId, res);
+  const clip = await loadAccessibleClip(pool, session, orgIdOf(req), parse.data.clipId, res);
   if (!clip) return;
 
   // process_id도 clip 저장값이 source of truth(D2b createClip이 저장). body가 다른 공정을 가리키면
@@ -605,8 +586,8 @@ async function createJob(pool: Pool, req: Request, res: Response): Promise<void>
 }
 
 async function getJob(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo as unknown as SessionInfo;
-  const job = await loadAccessibleJob(pool, session, req.params.jobId, res);
+  const session = sessionOf(req);
+  const job = await loadAccessibleJob(pool, session, orgIdOf(req), req.params.jobId, res);
   if (!job) return;
   res.status(200).json(jobResponse(job.row));
 }
@@ -616,8 +597,8 @@ async function getJob(pool: Pool, req: Request, res: Response): Promise<void> {
 // 경로 재검증 ② sha256 무결성 ③ PoseKeypointsSchema 계약 검증을 모두 통과한 것만 응답(raw stream 금지 —
 // 변조/깨진 구조가 클라로 새지 않게). targetTrackId까지 함께 실어 UI가 payload만으로 그릴 수 있게 한다.
 async function getOverlay(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo as unknown as SessionInfo;
-  const job = await loadAccessibleJob(pool, session, req.params.jobId, res);
+  const session = sessionOf(req);
+  const job = await loadAccessibleJob(pool, session, orgIdOf(req), req.params.jobId, res);
   if (!job) return;
 
   const row = job.row;
@@ -683,8 +664,8 @@ async function getOverlay(pool: Pool, req: Request, res: Response): Promise<void
 // 골격 검수 overlay 실 프레임 스트리밍(privacy 정책 예외). 서빙 조건 = 게이트 on + DB frames_path + resolver 통과 셋 다.
 // getSampleFrame 미러: 게이트 off거나 frames_path NULL(close-review 후 등)이면 orphan 디렉터리가 남아도 무조건 404.
 async function getOverlayFrame(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo as unknown as SessionInfo;
-  const job = await loadAccessibleJob(pool, session, req.params.jobId, res); // 권한 우선(존재 누설 방지)
+  const session = sessionOf(req);
+  const job = await loadAccessibleJob(pool, session, orgIdOf(req), req.params.jobId, res); // 권한 우선(존재 누설 방지)
   if (!job) return;
   if (!config.video.overlayFrames) {
     res.status(404).json({ code: 'OVERLAY_FRAME_NOT_FOUND', error: 'No overlay frame for this job' });
@@ -709,8 +690,8 @@ async function getOverlayFrame(pool: Pool, req: Request, res: Response): Promise
 // 검수 종료(6.0-8): 해당 job의 keypoints artifact를 즉시 회수해 식별 가능성을 줄인다. artifact는
 // job당 1개(<jobId>.keypoints.json)라 job 단위로 좁혀 같은 clip의 다른 job 근거는 보존한다.
 async function closeReview(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo as unknown as SessionInfo;
-  const job = await loadAccessibleJob(pool, session, req.params.jobId, res);
+  const session = sessionOf(req);
+  const job = await loadAccessibleJob(pool, session, orgIdOf(req), req.params.jobId, res);
   if (!job) return;
 
   // 진행 중 job은 차단: worker가 아직 keypoints artifact를 쓸 수 있어 "종료 직후 재생성" 경합 발생.
@@ -776,11 +757,8 @@ function patientApplyResponse(row: PatientRowLite): Record<string, unknown> {
 // ① job+patient FOR UPDATE → ② applied_at+동일 hash면 idempotent 반환
 // → ③ If-Match revision 검사 → ④ payload 갱신·revision+1·job done·audit.
 async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> {
-  const session = req.sessionInfo as unknown as SessionInfo;
-  if (session.organizationId === null) {
-    res.status(403).json({ code: 'FORBIDDEN', error: 'Organization context required' });
-    return;
-  }
+  const session = sessionOf(req);
+  const orgId = orgIdOf(req);
 
   const ifMatch = req.headers['if-match'];
   const expectedRevision = typeof ifMatch === 'string' && /^\d+$/.test(ifMatch) ? Number(ifMatch) : null;
@@ -814,7 +792,7 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
        JOIN patient_records p ON p.id = j.patient_record_id AND p.deleted_at IS NULL
        WHERE j.id = $1 AND j.organization_id = $2
        FOR UPDATE OF j`,
-      [req.params.jobId, session.organizationId]
+      [req.params.jobId, orgId]
     );
     if (jobs.length === 0) {
       await client.query('ROLLBACK');
@@ -837,7 +815,7 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
                 server_verified_modules_complete_at, completion_verification_engine_version
          FROM patient_records
          WHERE id = $1 AND organization_id = $2`,
-        [job.patient_record_id, session.organizationId]
+        [job.patient_record_id, orgId]
       );
       await client.query('COMMIT');
       if (cur.length === 0) { res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' }); return; }
@@ -865,7 +843,7 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
          WHERE id = ANY($1) AND organization_id = $2 AND patient_record_id = $3
            AND result_features IS NOT NULL AND process_id IS NOT NULL
            AND status IN ('review_pending','done') AND id <> $4`,
-        [uniqueSourceIds, session.organizationId, job.patient_record_id, job.id]
+        [uniqueSourceIds, orgId, job.patient_record_id, job.id]
       );
       if (srcRows.length !== uniqueSourceIds.length) {
         await client.query('ROLLBACK');
@@ -884,7 +862,7 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
        FROM patient_records
        WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
        FOR UPDATE`,
-      [job.patient_record_id, session.organizationId]
+      [job.patient_record_id, orgId]
     );
     if (pats.length === 0) {
       await client.query('ROLLBACK');
@@ -906,7 +884,7 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
     // 재시도가 이 게이트 때문에 불필요하게 423을 받는 일은 없다.
     if (config.lockEnforcementMode !== 'off') {
       const lockCheck = await checkLockForWrite(client as unknown as QueryRunner, {
-        patientId: job.patient_record_id, orgId: session.organizationId, leaseToken: getLockTokenHeader(req),
+        patientId: job.patient_record_id, orgId, leaseToken: getLockTokenHeader(req),
       });
       if (!lockCheck.ok) {
         if (config.lockEnforcementMode === 'enforce') {
@@ -919,7 +897,7 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
           return;
         }
         void writeAuditLog(pool, {
-          actorUserId: session.userId, actorOrgId: session.organizationId, action: 'patient_lock_observed_block',
+          actorUserId: session.userId, actorOrgId: orgId, action: 'patient_lock_observed_block',
           targetType: 'patient', targetId: job.patient_record_id, outcome: 'success',
           ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null,
           extra: { holderName: lockCheck.heldBy.holderName, context: 'video_analysis_apply' },
@@ -990,7 +968,7 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
                  completion_client_build_version, completion_client_schema_version,
                  server_verified_modules_complete_at, completion_verification_engine_version`,
       [
-        job.patient_record_id, session.organizationId, JSON.stringify(newPayload), expectedRevision,
+        job.patient_record_id, orgId, JSON.stringify(newPayload), expectedRevision,
         nextCompletion.completion_status,
         nextCompletion.server_observed_modules_complete_at,
         nextCompletion.completion_source,
@@ -1020,14 +998,14 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
         `UPDATE video_analysis_jobs
          SET status = 'done', applied_at = now(), applied_revision = $4
          WHERE id = ANY($1) AND organization_id = $2 AND patient_record_id = $3 AND status = 'review_pending'`,
-        [uniqueSourceIds, session.organizationId, job.patient_record_id, newRevision]
+        [uniqueSourceIds, orgId, job.patient_record_id, newRevision]
       );
     }
 
     await client.query('COMMIT');
 
     void writeAuditLog(pool, {
-      actorUserId: session.userId, actorOrgId: session.organizationId,
+      actorUserId: session.userId, actorOrgId: orgId,
       action: 'video_analysis_apply', targetType: 'patient', targetId: job.patient_record_id,
       outcome: 'success', ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null,
       extra: {
@@ -1060,25 +1038,26 @@ export function createVideoAnalysisRouter(pool: Pool): Router {
   // 피처플래그 fail-closed: 비활성 시 전 라우트 404(존재 누설 방지, PATIENT_NOT_FOUND 관례 일치).
   router.use(requireFeature(() => config.videoAnalysisEnabled));
 
-  router.post('/clips', auth, csrfMiddleware, wrap(createClip));
+  router.post('/clips', auth, csrfMiddleware, requireOrg(), wrap(createClip));
   // 실 영상 업로드(M3-7a). uploadDir 미설정 시 라우트 비활성(UPLOAD_DISABLED).
   const uploadMw = buildUploadMiddleware();
   if (uploadMw) {
-    router.post('/clips/:clipId/upload', auth, csrfMiddleware,
+    router.post('/clips/:clipId/upload', auth, csrfMiddleware, requireOrg(),
       asyncHandler((req: Request, res: Response) => uploadClip(pool, uploadMw, req, res)));
   } else {
+    // No requireOrg(): the disabled-upload stub answers 503 for every session, as before.
     router.post('/clips/:clipId/upload', auth, csrfMiddleware,
       (_req: Request, res: Response) => res.status(503).json({ code: 'UPLOAD_DISABLED', error: 'video upload is not configured on this server' }));
   }
-  router.post('/clips/:clipId/sample-detect', auth, csrfMiddleware, wrap(sampleDetect));
-  router.get('/clips/:clipId/sample-frame', auth, wrap(getSampleFrame));
-  router.post('/clips/:clipId/select-target', auth, csrfMiddleware, wrap(selectTarget));
-  router.post('/jobs', auth, csrfMiddleware, wrap(createJob));
-  router.get('/jobs/:jobId', auth, wrap(getJob));
-  router.get('/jobs/:jobId/overlay', auth, wrap(getOverlay));
-  router.get('/jobs/:jobId/overlay-frame/:frameIndex', auth, wrap(getOverlayFrame));
-  router.post('/jobs/:jobId/apply', auth, csrfMiddleware, wrap(applyJob));
-  router.post('/jobs/:jobId/close-review', auth, csrfMiddleware, wrap(closeReview));
+  router.post('/clips/:clipId/sample-detect', auth, csrfMiddleware, requireOrg(), wrap(sampleDetect));
+  router.get('/clips/:clipId/sample-frame', auth, requireOrg(), wrap(getSampleFrame));
+  router.post('/clips/:clipId/select-target', auth, csrfMiddleware, requireOrg(), wrap(selectTarget));
+  router.post('/jobs', auth, csrfMiddleware, requireOrg(), wrap(createJob));
+  router.get('/jobs/:jobId', auth, requireOrg(), wrap(getJob));
+  router.get('/jobs/:jobId/overlay', auth, requireOrg(), wrap(getOverlay));
+  router.get('/jobs/:jobId/overlay-frame/:frameIndex', auth, requireOrg(), wrap(getOverlayFrame));
+  router.post('/jobs/:jobId/apply', auth, csrfMiddleware, requireOrg(), wrap(applyJob));
+  router.post('/jobs/:jobId/close-review', auth, csrfMiddleware, requireOrg(), wrap(closeReview));
 
   return router;
 }

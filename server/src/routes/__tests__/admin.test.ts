@@ -264,7 +264,7 @@ describe('PATCH /api/admin/org-settings', () => {
     fake.assertNoUnmatched();
   });
 
-  it('returns 403 ORG_REQUIRED when admin has no organization', async () => {
+  it('returns 403 FORBIDDEN (requireOrg) when admin has no organization', async () => {
     const fake = fakeQueries(); // auth only
     const res = await request(adminApp(fake))
       .patch('/api/admin/org-settings')
@@ -272,7 +272,7 @@ describe('PATCH /api/admin/org-settings', () => {
       .send({ inferenceDevice: 'cpu' });
     expect(res.status).toBe(403);
     fake.assertNoUnmatched();
-    expect(res.body.code).toBe('ORG_REQUIRED');
+    expect(res.body.code).toBe('FORBIDDEN');
   });
 
   it('returns 400 for invalid device value', async () => {

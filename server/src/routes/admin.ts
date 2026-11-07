@@ -8,7 +8,7 @@ import path from 'path';
 import type { Pool, PoolClient } from 'pg';
 import { OrgInferenceSettingsSchema } from '@wr/contracts';
 import { csrfMiddleware } from '../middleware/csrf';
-import { requireAdmin, requireAuth } from '../http/authz';
+import { orgIdOf, requireAdmin, requireAuth, requireOrg, sessionOf } from '../http/authz';
 import { writeAuditLog } from '../middleware/audit';
 import { checkPasswordPolicy, appendPasswordHistory } from '../auth/passwordPolicy';
 import config from '../config';
@@ -89,7 +89,7 @@ async function listDevices(pool: Pool, req: Request, res: Response): Promise<voi
 // ---------------------------------------------------------------------------
 async function approveDevice(pool: Pool, req: Request, res: Response): Promise<void> {
   const { id } = req.params;
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   const orgId   = session.organizationId ?? null;
 
   const { rows } = await pool.query<{ id: string; status: string }>(
@@ -139,7 +139,7 @@ async function approveDevice(pool: Pool, req: Request, res: Response): Promise<v
 // ---------------------------------------------------------------------------
 async function revokeDevice(pool: Pool, req: Request, res: Response): Promise<void> {
   const { id } = req.params;
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   const orgId   = session.organizationId ?? null;
 
   const { rows } = await pool.query<{ id: string; status: string }>(
@@ -269,7 +269,7 @@ async function listAuditLogs(pool: Pool, auditPool: Pool, req: Request, res: Res
   const total = parseInt(countRows[0]?.total ?? '0', 10);
 
   // Audit the audit query itself — filter params recorded, no PHI in extra.
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   writeAuditLog(pool, {
     actorUserId: session.userId,
     actorOrgId:  session.organizationId ?? null,
@@ -309,7 +309,7 @@ async function listAuditLogs(pool: Pool, auditPool: Pool, req: Request, res: Res
 // ---------------------------------------------------------------------------
 async function purgeWorkspace(pool: Pool, req: Request, res: Response): Promise<void> {
   const { id } = req.params;
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   const orgId   = session.organizationId ?? null;
 
   const { rows } = await pool.query<{ id: string }>(
@@ -402,7 +402,7 @@ async function createUser(pool: Pool, req: Request, res: Response): Promise<void
     res.status(400).json({ code: 'PASSWORD_POLICY', error: policyCheck.error });
     return;
   }
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   const orgId   = session.organizationId ?? null;
   const hash    = await bcrypt.hash(password, 12);
 
@@ -466,7 +466,7 @@ async function resetUserPassword(pool: Pool, req: Request, res: Response): Promi
     return;
   }
 
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   const orgId   = session.organizationId ?? null;
   const hash    = await bcrypt.hash(parsed.data.password, 12);
 
@@ -535,7 +535,7 @@ async function resetUserPassword(pool: Pool, req: Request, res: Response): Promi
 // ---------------------------------------------------------------------------
 async function disableUser(pool: Pool, req: Request, res: Response): Promise<void> {
   const { id } = req.params;
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   const orgId   = session.organizationId ?? null;
 
   if (id === session.userId) {
@@ -580,7 +580,7 @@ async function disableUser(pool: Pool, req: Request, res: Response): Promise<voi
 
 async function enableUser(pool: Pool, req: Request, res: Response): Promise<void> {
   const { id } = req.params;
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   const orgId   = session.organizationId ?? null;
 
   const { rows } = await pool.query<{ id: string }>(
@@ -697,7 +697,7 @@ async function listSignupRequests(pool: Pool, req: Request, res: Response): Prom
 // ---------------------------------------------------------------------------
 async function approveSignupRequest(pool: Pool, req: Request, res: Response): Promise<void> {
   const { id } = req.params;
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   const orgId   = session.organizationId ?? null;
   const tempPw  = generateTempPassword();
   const hash    = await bcrypt.hash(tempPw, 12);
@@ -775,7 +775,7 @@ async function approveSignupRequest(pool: Pool, req: Request, res: Response): Pr
 // ---------------------------------------------------------------------------
 async function rejectSignupRequest(pool: Pool, req: Request, res: Response): Promise<void> {
   const { id }  = req.params;
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
 
   const { rows } = await pool.query<{ id: string }>(
     `UPDATE user_signup_requests
@@ -831,19 +831,10 @@ async function probeGpu(): Promise<{ cudaAvailable: boolean; providers: string[]
   }
 }
 
-// 시스템 관리자(organizationId 없음)는 대상 조직이 불명확 → 403. 다조직 운용 필요 시 별도 superadmin 경로로 분리.
-function requireOrg(req: Request, res: Response): string | null {
-  const orgId = req.sessionInfo?.organizationId ?? null;
-  if (!orgId) {
-    res.status(403).json({ code: 'ORG_REQUIRED', error: 'Organization-scoped admin required for org settings' });
-    return null;
-  }
-  return orgId;
-}
-
+// 시스템 관리자(organizationId 없음)는 대상 조직이 불명확 → 라우트의 requireOrg()가 403. 다조직 운용 필요 시
+// 별도 superadmin 경로로 분리.
 async function getOrgSettings(pool: Pool, req: Request, res: Response): Promise<void> {
-  const orgId = requireOrg(req, res);
-  if (!orgId) return;
+  const orgId = orgIdOf(req);
   const { rows } = await pool.query<{ inference_device: string }>(
     `SELECT inference_device FROM organizations WHERE id = $1`, [orgId],
   );
@@ -856,8 +847,7 @@ async function getOrgSettings(pool: Pool, req: Request, res: Response): Promise<
 }
 
 async function updateOrgSettings(pool: Pool, req: Request, res: Response): Promise<void> {
-  const orgId = requireOrg(req, res);
-  if (!orgId) return;
+  const orgId = orgIdOf(req);
   const parsed = OrgInferenceSettingsSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ code: 'INVALID_BODY', error: 'inferenceDevice must be one of auto|cpu|cuda' });
@@ -872,7 +862,7 @@ async function updateOrgSettings(pool: Pool, req: Request, res: Response): Promi
     return;
   }
   writeAuditLog(pool, {
-    actorUserId: req.sessionInfo!.userId,
+    actorUserId: sessionOf(req).userId,
     actorOrgId:  orgId,
     action:      'org_settings_update',
     targetType:  'organization',
@@ -948,7 +938,7 @@ async function setPresetsVisibility(pool: Pool, req: Request, res: Response): Pr
     return;
   }
 
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   const orgId   = session.organizationId ?? null;
   // Dedupe so `requested` reflects distinct targets even if the body repeats ids.
   const ids        = [...new Set(parsed.data.ids)];
@@ -990,6 +980,8 @@ export function createAdminRouter(pool: Pool, auditPool: Pool): Router {
   // Every admin route requires auth + admin role — once, for the whole router (fail-closed: a route
   // added later cannot forget it, S4 / P1-15). Mutating routes also require CSRF.
   router.use(requireAuth(pool), requireAdmin());
+  // requireOrg() only on /org-settings: the other admin handlers read `organizationId ?? null` on
+  // purpose — a null organization is the super-administrator, who sees every organization.
   router.get(
     '/devices',
     asyncHandler((req, res) => listDevices(pool, req, res))
@@ -1049,12 +1041,13 @@ export function createAdminRouter(pool: Pool, auditPool: Pool): Router {
 
   router.get(
     '/org-settings',
+    requireOrg(),
     asyncHandler((req, res) => getOrgSettings(pool, req, res))
   );
 
   router.patch(
     '/org-settings',
-    csrfMiddleware,
+    csrfMiddleware, requireOrg(),
     asyncHandler((req, res) => updateOrgSettings(pool, req, res))
   );
 

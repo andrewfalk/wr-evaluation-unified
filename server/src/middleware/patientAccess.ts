@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import type { Pool } from 'pg';
+import { sessionOf } from '../http/authz';
 
 // PATCH/DELETE /api/patients/:id 전용 권한 가드.
 // admin 또는 해당 환자의 assigned_doctor_user_id == session.userId 인 경우에만 통과.
@@ -7,7 +8,7 @@ import type { Pool } from 'pg';
 // Must be used after auth so req.sessionInfo is populated.
 export function assignedDoctorOrAdmin(pool: Pool): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const session = req.sessionInfo!;
+    const session = sessionOf(req);
     const orgId = session.organizationId;
     const { id } = req.params;
 

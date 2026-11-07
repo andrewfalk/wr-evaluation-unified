@@ -25,6 +25,7 @@ import { loginRateLimit, csrfRateLimit, signupRateLimit } from '../middleware/ra
 import { auditLogin, auditLogout, auditRefreshFail, auditRefreshSuccess, writeAuditLog } from '../middleware/audit';
 import { checkPasswordPolicy, isPasswordReused, appendPasswordHistory } from '../auth/passwordPolicy';
 import { asyncHandler } from '../http/asyncHandler';
+import { sessionOf } from '../http/authz';
 
 const REFRESH_COOKIE = 'wr_refresh';
 
@@ -315,7 +316,7 @@ async function logout(pool: Pool, req: Request, res: Response): Promise<void> {
 // Route: GET /api/auth/me
 // ---------------------------------------------------------------------------
 async function me(pool: Pool, req: Request, res: Response): Promise<void> {
-  const { userId, organizationId, role, name, mustChangePassword } = req.sessionInfo!;
+  const { userId, organizationId, role, name, mustChangePassword } = sessionOf(req);
 
   let org: { id: string; name: string } | null = null;
   if (organizationId) {
@@ -435,7 +436,7 @@ async function changePassword(pool: Pool, req: Request, res: Response): Promise<
     return;
   }
   const { currentPassword, newPassword } = parse.data;
-  const { userId, organizationId, sessionId, csrfTokenHash } = req.sessionInfo!;
+  const { userId, organizationId, sessionId, csrfTokenHash } = sessionOf(req);
 
   // Policy check first (fast path before DB round-trip)
   const policy = checkPasswordPolicy(newPassword);
@@ -509,7 +510,7 @@ async function changePassword(pool: Pool, req: Request, res: Response): Promise<
     await client.query(
       `UPDATE sessions SET invalidated_at = now()
        WHERE user_id = $1 AND id != $2 AND invalidated_at IS NULL`,
-      [userId, req.sessionInfo!.sessionId]
+      [userId, sessionOf(req).sessionId]
     );
     await client.query('COMMIT');
   } catch (err) {

@@ -11,7 +11,7 @@ import { makeRouterApp } from '../../testing/app';
 import { createFakePool, authSessionHandler } from '../../testing/fakePool';
 import { makeAccessToken, authHeaders } from '../../testing/tokens';
 import { AppError } from '../errors';
-import { requireAdmin, requireAuth, requireCsrf, requireFeature, requireOrg, sessionOf } from '../authz';
+import { orgIdOf, requireAdmin, requireAuth, requireCsrf, requireFeature, requireOrg, sessionOf } from '../authz';
 import { createAuthMiddleware } from '../../middleware/auth';
 import { adminOnly } from '../../middleware/adminOnly';
 import { csrfMiddleware } from '../../middleware/csrf';
@@ -59,6 +59,18 @@ describe('requireOrg', () => {
     const res = await request(app).get('/x').set(authHeaders(makeAccessToken({ orgId: null })));
     expect(res.status).toBe(403);
     expect(res.body).toEqual({ code: 'FORBIDDEN', error: 'Organization context required' });
+  });
+});
+
+describe('orgIdOf', () => {
+  it('returns req.orgId set by requireOrg', () => {
+    expect(orgIdOf({ orgId: 'org-1' } as unknown as Request)).toBe('org-1');
+  });
+
+  it('throws the requireOrg 403 when requireOrg was not applied (fail-closed)', () => {
+    let caught: unknown;
+    try { orgIdOf({} as Request); } catch (err) { caught = err; }
+    expect(caught).toMatchObject({ status: 403, code: 'FORBIDDEN', message: 'Organization context required' });
   });
 });
 

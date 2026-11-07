@@ -6,6 +6,7 @@ import { createAuthMiddleware } from '../middleware/auth';
 import { deviceRegisterIpRateLimit, deviceRegisterUserRateLimit } from '../middleware/rateLimit';
 import { writeAuditLog } from '../middleware/audit';
 import { asyncHandler } from '../http/asyncHandler';
+import { sessionOf } from '../http/authz';
 
 // Ed25519 public keys are exactly 32 raw bytes.
 // Accept standard base64 (44 chars, optional trailing =) or
@@ -56,7 +57,7 @@ async function registerDevice(pool: Pool, req: Request, res: Response): Promise<
   }
 
   const { publicKey, buildTarget } = parsed.data;
-  const session     = req.sessionInfo!;
+  const session     = sessionOf(req);
   const ua          = req.headers['user-agent'];
   const origin      = req.headers.origin ?? null;
   const ip          = req.ip ?? null;

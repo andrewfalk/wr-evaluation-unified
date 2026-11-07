@@ -9,6 +9,7 @@
 // 유지한다 — 이번 결정은 "누가 실행했는지"만 export 조건에서 빼는 것이다.
 import type { Request, Response } from 'express';
 import type { Pool } from 'pg';
+import { sessionOf } from './http/authz';
 import {
   ExportAggregateRequestSchema,
   RunManifestSchema,
@@ -430,7 +431,7 @@ export async function handlePostExport(pool: Pool, req: Request, res: Response):
   }
   const { analysisRunId } = parsed.data;
 
-  const session = req.sessionInfo!;
+  const session = sessionOf(req);
   const orgId = session.organizationId!;
   const userId = session.userId;
 
