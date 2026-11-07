@@ -147,7 +147,6 @@ CORS_ORIGINS=$BaseUrl
 POSTGRES_PASSWORD=$(New-HexSecret)
 AUDIT_DB_PASSWORD=$(New-HexSecret)
 ACCESS_TOKEN_SECRET=$(New-HexSecret)
-REFRESH_TOKEN_SECRET=$(New-HexSecret)
 # docker-compose.prod.yml 이 비어 있으면 거부하는 필수 값 — 이 스택은 backup 서비스를 띄우지 않으므로 자리만 채운다.
 BACKUP_GPG_RECIPIENT=verify-stack-unused@invalid.example
 # 통계분석 워크벤치는 기본으로 켠다 — 서버가 꺼 두면(compose 기본값 false) 설치본에 통계분석 버튼이 뜨지 않는다.

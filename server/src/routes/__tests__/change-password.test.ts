@@ -155,6 +155,23 @@ describe('POST /api/auth/change-password', () => {
     fake.assertAllReleased();
   });
 
+  it('accepts a long existing current password — no upper bound on passwords typed to authenticate (SEC-A L6)', async () => {
+    const fake = makeFake(PASSWORD_ROW);
+    vi.mocked(bcrypt.compare).mockResolvedValueOnce(false as never);
+
+    const res = await request(changePasswordApp(fake))
+      .post('/api/auth/change-password')
+      .set(authHeaders(authedToken(), CSRF_TOKEN))
+      .send({ currentPassword: 'p'.repeat(300), newPassword: 'new1234!A' });
+
+    // Reached the bcrypt comparison (not rejected as INVALID_BODY).
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('WRONG_CURRENT_PASSWORD');
+    expect(vi.mocked(bcrypt.compare).mock.calls[0]![0]).toBe('p'.repeat(300));
+    fake.assertNoUnmatched();
+    fake.assertAllReleased();
+  });
+
   it('returns 400 when new password was recently used', async () => {
     const fake = makeFake(PASSWORD_ROW);
     vi.mocked(bcrypt.compare).mockResolvedValueOnce(true as never); // current password ok

@@ -49,8 +49,7 @@ function outcome(env: NodeJS.ProcessEnv): unknown {
 
 const BASE = {
   DATABASE_URL: 'postgresql://test',
-  ACCESS_TOKEN_SECRET: 'access-secret',
-  REFRESH_TOKEN_SECRET: 'refresh-secret',
+  ACCESS_TOKEN_SECRET: 'access-secret-0123456789abcdef0123',
 } satisfies NodeJS.ProcessEnv;
 
 const INTRANET = { ...BASE, DEPLOYMENT_MODE: 'intranet', CORS_ORIGINS: 'https://wr.hospital.local:8443' };
@@ -142,10 +141,12 @@ const CASES: Array<[string, NodeJS.ProcessEnv]> = [
   ['VIDEO_DET_INTERVAL_SEC upper bound', { ...BASE, VIDEO_DET_INTERVAL_SEC: '1.0' }],
   ['NODE_ENV test', { ...BASE, NODE_ENV: 'test' }],
   // --- start-up errors ---
-  ['missing DATABASE_URL', { ACCESS_TOKEN_SECRET: 'a', REFRESH_TOKEN_SECRET: 'r' }],
+  ['missing DATABASE_URL', { ACCESS_TOKEN_SECRET: 'access-secret-0123456789abcdef0123' }],
   ['empty DATABASE_URL', { ...BASE, DATABASE_URL: '' }],
-  ['missing ACCESS_TOKEN_SECRET', { DATABASE_URL: 'postgresql://test', REFRESH_TOKEN_SECRET: 'r' }],
-  ['missing REFRESH_TOKEN_SECRET', { DATABASE_URL: 'postgresql://test', ACCESS_TOKEN_SECRET: 'a' }],
+  ['missing ACCESS_TOKEN_SECRET', { DATABASE_URL: 'postgresql://test' }],
+  // SEC-A L5 (intended change, snapshot updated with it): REFRESH_TOKEN_SECRET is no longer required;
+  // a short HS256 key is a start-up error.
+  ['ACCESS_TOKEN_SECRET shorter than 32 bytes', { DATABASE_URL: 'postgresql://test', ACCESS_TOKEN_SECRET: 'a' }],
   ['bad DEPLOYMENT_MODE', { ...BASE, DEPLOYMENT_MODE: 'cloud' }],
   ['bad AI_PROVIDER', { ...BASE, AI_PROVIDER: 'openai' }],
   ['bad NODE_ENV', { ...BASE, NODE_ENV: 'staging' }],

@@ -42,7 +42,6 @@ production 서버에서 직접 생성. 절대 git에 커밋하지 않는다.
 ```bash
 # 각 값을 별도로 생성
 openssl rand -hex 32   # ACCESS_TOKEN_SECRET
-openssl rand -hex 32   # REFRESH_TOKEN_SECRET
 openssl rand -hex 32   # POSTGRES_PASSWORD (32자 이상 권장)
 openssl rand -hex 32   # AUDIT_DB_PASSWORD
 ```
@@ -59,7 +58,7 @@ cp .env.production.example .env.production
 | 변수 | 설명 |
 |---|---|
 | `ACCESS_TOKEN_SECRET` | JWT access token 서명 키 |
-| `REFRESH_TOKEN_SECRET` | JWT refresh token 서명 키 |
+| ~~`REFRESH_TOKEN_SECRET`~~ | 7.2.0부터 쓰지 않음(남아 있어도 무시됨) |
 | `POSTGRES_PASSWORD` | PostgreSQL 비밀번호 |
 | `AUDIT_DB_PASSWORD` | wr_audit_reader 역할 비밀번호 |
 | `BACKUP_GPG_RECIPIENT` | GPG 공개키 fingerprint 또는 이메일 |
@@ -1166,7 +1165,7 @@ $env:WR_VERSION = ""  # 원복
 배포 전 최종 확인:
 
 - [ ] `.env.production`에 `changeme_` 문자열 없음: `grep -i changeme .env.production`
-- [ ] ACCESS_TOKEN_SECRET, REFRESH_TOKEN_SECRET이 32바이트 이상 랜덤값
+- [ ] ACCESS_TOKEN_SECRET이 32바이트 이상 랜덤값(7.2.0부터 미만이면 서버가 기동하지 않음)
 - [ ] app 포트가 외부에 직접 노출되지 않음 (`docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod port app 3001` → `127.0.0.1:3001`만, 다른 PC에서 `Test-NetConnection <서버 주소> -Port 3001` → False)
 - [ ] Caddy 인증서 정상 발급: `https://wr.hospital.local` 접속 시 인증서 오류 없음
 - [ ] admin 계정 초기 비밀번호 변경 완료

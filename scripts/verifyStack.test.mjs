@@ -61,7 +61,7 @@ describe('verify-stack.ps1 — 다른 스택을 건드리지 않는다', () => {
 
   it('비밀값은 무작위로 만들고 고정·changeme 값을 쓰지 않는다', () => {
     expect(SCRIPT).toContain('RandomNumberGenerator');
-    for (const key of ['POSTGRES_PASSWORD', 'AUDIT_DB_PASSWORD', 'ACCESS_TOKEN_SECRET', 'REFRESH_TOKEN_SECRET']) {
+    for (const key of ['POSTGRES_PASSWORD', 'AUDIT_DB_PASSWORD', 'ACCESS_TOKEN_SECRET']) {
       expect(SCRIPT).toMatch(new RegExp(`${key}=\\$\\(New-HexSecret\\)`));
     }
     expect(SCRIPT.toLowerCase()).not.toContain('changeme');

@@ -89,8 +89,14 @@ export const EnvSchema = z.object({
   DATABASE_URL: requiredText(),
   JSON_BODY_LIMIT: text('10mb'),
   TRUST_PROXY: trustProxy,
-  ACCESS_TOKEN_SECRET: requiredText(),
-  REFRESH_TOKEN_SECRET: requiredText(),
+  ACCESS_TOKEN_SECRET: requiredText().transform((v, ctx) => (
+    // HS256 key: at least 32 bytes (SEC-A L5). Generate with `openssl rand -hex 32` (64 characters).
+    Buffer.byteLength(v, 'utf8') >= 32
+      ? v
+      : fail(ctx, 'ACCESS_TOKEN_SECRET must be at least 32 bytes (generate with: openssl rand -hex 32)')
+  )),
+  // REFRESH_TOKEN_SECRET is no longer read (refresh tokens are random values stored hashed, not JWTs);
+  // a value left in an existing .env is ignored (SEC-A L5).
   ACCESS_TOKEN_TTL: positiveInt(15 * 60),
   REFRESH_TOKEN_TTL: positiveInt(7 * 24 * 60 * 60),
 

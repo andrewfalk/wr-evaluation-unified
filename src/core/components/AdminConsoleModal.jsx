@@ -316,7 +316,7 @@ function UsersTab({ session }) {
             <option value="staff">직원</option>
             <option value="admin">관리자</option>
           </select>
-          <input type="password" placeholder="임시 비밀번호 (10자+, 숫자·특수문자 포함)" value={form.password}
+          <input type="password" maxLength={128} placeholder="임시 비밀번호 (10자+, 숫자·특수문자 포함)" value={form.password}
             onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
             onKeyDown={e => e.key === 'Enter' && handleCreate()} />
           <button className="btn btn-primary btn-sm" onClick={handleCreate} disabled={creating}>
@@ -383,6 +383,7 @@ function UsersTab({ session }) {
             <div className="admin-inline-modal-title">비밀번호 초기화</div>
             <input
               type="password"
+              maxLength={128}
               placeholder="새 임시 비밀번호 (10자+, 숫자·특수문자 포함)"
               value={resetPw}
               onChange={e => setResetPw(e.target.value)}
