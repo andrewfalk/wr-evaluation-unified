@@ -6,6 +6,7 @@
 // `detail` / `where` / `parameters`, and `detail` repeats the offending row values
 // (`Key (patient_no)=(…) already exists`), which must not reach the log.
 import pino, { type DestinationStream, type Logger } from 'pino';
+import { ZodError } from 'zod';
 import config from './config';
 
 export type { Logger };
@@ -21,7 +22,19 @@ const REDACT_PATHS = [
 // properties a library attached) is dropped.
 const ERROR_KEYS = ['code', 'constraint', 'table', 'column', 'routine', 'status', 'type'] as const;
 
+// A ZodError's message (and so the first part of its stack) is the JSON of its issues, which
+// repeats rejected input values (`received: …`). Keep only the issue count and the call frames.
+function serializeZodError(err: ZodError): Record<string, unknown> {
+  const frames = (err.stack ?? '').split('\n').filter((line) => /^\s+at /.test(line));
+  return {
+    type: err.name,
+    message: `${err.issues.length} validation issue(s)`,
+    stack: [`${err.name}: ${err.issues.length} validation issue(s)`, ...frames].join('\n'),
+  };
+}
+
 export function serializeError(err: unknown): Record<string, unknown> {
+  if (err instanceof ZodError) return serializeZodError(err);
   if (!(err instanceof Error)) return { type: typeof err };
   const out: Record<string, unknown> = { type: err.name, message: err.message, stack: err.stack };
   const record = err as unknown as Record<string, unknown>;

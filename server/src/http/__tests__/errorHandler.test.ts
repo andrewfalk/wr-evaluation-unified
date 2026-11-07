@@ -139,7 +139,9 @@ describe('createErrorHandler', () => {
     expect(res.status).toBe(500);
     expect(res.body).not.toHaveProperty('issues');
     expect(lines[0]).toMatchObject({ level: 50, issues: [{ path: ['a'], code: 'invalid_enum_value' }] });
-    expect(JSON.stringify(lines[0].issues)).not.toContain('PHI-like-value');
+    expect(lines[0].err).toMatchObject({ type: 'ZodError', message: '1 validation issue(s)' });
+    // The whole line — not just `issues`: ZodError.message/stack repeat the rejected value.
+    expect(JSON.stringify(lines[0])).not.toContain('PHI-like-value');
   });
 
   it('ends the socket instead of writing JSON when headers were already sent', () => {
