@@ -9,25 +9,27 @@ import express from 'express';
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
-vi.mock('../../config', () => ({
-  default: {
+vi.mock('../../config', async () => ({
+  default: (await import('../../testing/configMock.js')).testConfig({
     env:  'production',
     cors: { origins: ['https://wr.hospital.local:8443'] },
-  },
+  }),
 }));
 
 import { cspMiddleware, noStoreMiddleware } from '../csp';
 import { corsMiddleware } from '../corsMiddleware';
 import { loginRateLimit, csrfRateLimit } from '../rateLimit';
+import { makeRouterApp } from '../../testing/app';
+import { testConfig } from '../../testing/configMock';
 
-function makeApp() {
-  const app = express();
-  app.use(cspMiddleware());
-  app.use(corsMiddleware());
-  app.get('/test', (_req, res) => res.json({ ok: true }));
-  app.post('/login', loginRateLimit(), (_req, res) => res.json({ ok: true }));
-  app.post('/csrf',  csrfRateLimit(),  (_req, res) => res.json({ ok: true }));
-  return app;
+function securityApp() {
+  return makeRouterApp(app => {
+    app.use(cspMiddleware());
+    app.use(corsMiddleware());
+    app.get('/test', (_req, res) => res.json({ ok: true }));
+    app.post('/login', loginRateLimit(), (_req, res) => res.json({ ok: true }));
+    app.post('/csrf',  csrfRateLimit(),  (_req, res) => res.json({ ok: true }));
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -77,22 +79,22 @@ describe('noStoreMiddleware (/api)', () => {
 // ---------------------------------------------------------------------------
 describe('CSP headers', () => {
   it('includes Content-Security-Policy header', async () => {
-    const res = await request(makeApp()).get('/test');
+    const res = await request(securityApp()).get('/test');
     expect(res.headers['content-security-policy']).toBeDefined();
   });
 
   it("CSP blocks external connect-src (only 'self' allowed)", async () => {
-    const csp = (await request(makeApp()).get('/test')).headers['content-security-policy'] as string;
+    const csp = (await request(securityApp()).get('/test')).headers['content-security-policy'] as string;
     expect(csp).toContain("connect-src 'self'");
   });
 
   it('CSP allows blob: for worker-src and img-src (export/pdf support)', async () => {
-    const csp = (await request(makeApp()).get('/test')).headers['content-security-policy'] as string;
+    const csp = (await request(securityApp()).get('/test')).headers['content-security-policy'] as string;
     expect(csp).toContain('blob:');
   });
 
   it('CSP sets frame-ancestors none (clickjacking protection)', async () => {
-    const csp = (await request(makeApp()).get('/test')).headers['content-security-policy'] as string;
+    const csp = (await request(securityApp()).get('/test')).headers['content-security-policy'] as string;
     expect(csp).toContain("frame-ancestors 'none'");
   });
 });
@@ -102,14 +104,14 @@ describe('CSP headers', () => {
 // ---------------------------------------------------------------------------
 describe('CORS middleware', () => {
   it('allows requests from the whitelisted intranet origin', async () => {
-    const res = await request(makeApp())
+    const res = await request(securityApp())
       .get('/test')
       .set('Origin', 'https://wr.hospital.local:8443');
     expect(res.headers['access-control-allow-origin']).toBe('https://wr.hospital.local:8443');
   });
 
   it('blocks null origin with 403 CORS_ORIGIN_DENIED', async () => {
-    const res = await request(makeApp())
+    const res = await request(securityApp())
       .get('/test')
       .set('Origin', 'null');
     expect(res.status).toBe(403);
@@ -118,7 +120,7 @@ describe('CORS middleware', () => {
   });
 
   it('blocks unknown external origin with 403', async () => {
-    const res = await request(makeApp())
+    const res = await request(securityApp())
       .get('/test')
       .set('Origin', 'https://evil.example.com');
     expect(res.status).toBe(403);
@@ -126,12 +128,12 @@ describe('CORS middleware', () => {
   });
 
   it('allows requests with no Origin header (same-origin / server-to-server)', async () => {
-    const res = await request(makeApp()).get('/test');
+    const res = await request(securityApp()).get('/test');
     expect(res.status).toBe(200);
   });
 
   it('does NOT allow localhost:5173 in production mode (403)', async () => {
-    const res = await request(makeApp())
+    const res = await request(securityApp())
       .get('/test')
       .set('Origin', 'http://localhost:5173');
     expect(res.status).toBe(403);
@@ -139,14 +141,14 @@ describe('CORS middleware', () => {
   });
 
   it('echoes Access-Control-Allow-Credentials: true for whitelisted origin', async () => {
-    const res = await request(makeApp())
+    const res = await request(securityApp())
       .get('/test')
       .set('Origin', 'https://wr.hospital.local:8443');
     expect(res.headers['access-control-allow-credentials']).toBe('true');
   });
 
   it('OPTIONS preflight allows PUT and custom headers from whitelisted origin', async () => {
-    const res = await request(makeApp())
+    const res = await request(securityApp())
       .options('/test')
       .set('Origin', 'https://wr.hospital.local:8443')
       .set('Access-Control-Request-Method', 'PUT')
@@ -166,7 +168,7 @@ describe('CORS middleware', () => {
 // ---------------------------------------------------------------------------
 describe('Login rate limit', () => {
   it('allows requests up to the limit', async () => {
-    const app = makeApp();
+    const app = securityApp();
     for (let i = 0; i < 5; i++) {
       const res = await request(app).post('/login');
       expect(res.status).toBe(200);
@@ -174,7 +176,7 @@ describe('Login rate limit', () => {
   });
 
   it('returns 429 after exceeding the limit', async () => {
-    const app = makeApp();
+    const app = securityApp();
     for (let i = 0; i < 5; i++) await request(app).post('/login');
     const res = await request(app).post('/login');
     expect(res.status).toBe(429);
@@ -187,7 +189,7 @@ describe('Login rate limit', () => {
 // ---------------------------------------------------------------------------
 describe('CSRF rate limit', () => {
   it('returns 429 after exceeding 10 requests', async () => {
-    const app = makeApp();
+    const app = securityApp();
     for (let i = 0; i < 10; i++) await request(app).post('/csrf');
     const res = await request(app).post('/csrf');
     expect(res.status).toBe(429);
@@ -203,10 +205,10 @@ describe('CORS dev mode (non-production)', () => {
 
   it('allows localhost:5173 when env is not production', async () => {
     vi.doMock('../../config', () => ({
-      default: {
+      default: testConfig({
         env:  'development',
         cors: { origins: ['https://wr.hospital.local:8443'] },
-      },
+      }),
     }));
     const { corsMiddleware: corsDevMiddleware } = await import('../corsMiddleware.js');
     const app = express();

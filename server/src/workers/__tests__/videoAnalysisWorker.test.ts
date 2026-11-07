@@ -2,14 +2,13 @@ import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import type { Pool } from 'pg';
 
 const videoCfg = vi.hoisted(() => ({
-  uploadDir: '', retentionPolicy: 'review_fidelity', overlayFrames: false, detIntervalSec: 0,
+  uploadDir: '', retentionPolicy: 'review_fidelity' as 'review_fidelity' | 'privacy_first', overlayFrames: false, detIntervalSec: 0,
 }));
 beforeAll(() => { videoCfg.uploadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wk-up-')); });
-vi.mock('../../config', () => ({
-  default: {
+vi.mock('../../config', async () => ({
+  default: (await import('../../testing/configMock.js')).testConfig({
     video: {
       fixtureDir: '/fx', scriptsDir: '/s', python: '/p', poseTier: 'standard',
       get uploadDir() { return videoCfg.uploadDir; },
@@ -17,7 +16,7 @@ vi.mock('../../config', () => ({
       get overlayFrames() { return videoCfg.overlayFrames; },
       get detIntervalSec() { return videoCfg.detIntervalSec; },
     },
-  },
+  }),
 }));
 vi.mock('../fixturePath', () => ({
   resolveFixtureClip: vi.fn((name: unknown) => (name === 'good.mp4' ? '/fx/good.mp4' : null)),
@@ -25,15 +24,18 @@ vi.mock('../fixturePath', () => ({
 }));
 
 import { pollOnce, iouXywh, mapTargetTrack, buildInferArgs } from '../videoAnalysisWorker';
+import { createFakePool, type FakePool, type QueryHandler } from '../../testing/fakePool';
 
 const JOB = { id: 'job-1', clip_id: 'clip-1', analysis_profile: 'posture-basic', inference_device: 'auto' };
 
-// queued job 1건을 claim하도록 client/pool mock 구성.
-function makePool(opts: {
+// queued job 1건을 claim하도록 fakePool handler 구성(SQL로 응답 선택).
+// overrides는 기본 handler보다 앞에 놓여 먼저 매치된다(특정 쿼리만 실패시키는 테스트용).
+function workerFake(opts: {
   job?: typeof JOB | null; uploadPath?: string | null;
   sourceType?: string; fileState?: string;
   sampleDetectResult?: unknown; targetPersonId?: string | null;
-} = {}) {
+  overrides?: QueryHandler[];
+} = {}): FakePool {
   const job = opts.job === undefined ? JOB : opts.job;
   const uploadPath = opts.uploadPath === undefined ? '/fx/good.mp4' : opts.uploadPath;
   const sourceType = opts.sourceType ?? 'fixture';
@@ -41,51 +43,51 @@ function makePool(opts: {
   const sampleDetectResult = opts.sampleDetectResult ?? null;
   const targetPersonId = opts.targetPersonId ?? null;
 
-  const client = {
-    query: vi.fn((sql: string) => {
-      if (typeof sql === 'string' && sql.includes('SKIP LOCKED')) {
-        return Promise.resolve({ rows: job ? [job] : [] });
-      }
-      return Promise.resolve({ rows: [] }); // BEGIN/UPDATE processing/COMMIT
-    }),
-    release: vi.fn(),
-  };
-  const query = vi.fn((sql: string) => {
-    if (typeof sql === 'string' && sql.includes('SELECT upload_path')) {
-      return Promise.resolve({ rows: [{ upload_path: uploadPath, source_type: sourceType, file_state: fileState }] });
-    }
-    if (typeof sql === 'string' && sql.includes('SELECT sample_detect_result')) {
-      return Promise.resolve({ rows: [{ sample_detect_result: sampleDetectResult, target_person_id: targetPersonId }] });
-    }
-    return Promise.resolve({ rows: [] }); // sweeps + final update
+  return createFakePool({
+    handlers: [
+      ...(opts.overrides ?? []),
+      // claim 트랜잭션(client): BEGIN/COMMIT/ROLLBACK은 fakePool 기본 응답.
+      { name: 'claim.select', via: 'client', match: (sql) => sql.includes('SKIP LOCKED'), reply: { rows: job ? [job] : [] } },
+      { name: 'claim.markProcessing', via: 'client', match: (sql) => sql.includes("SET status = 'processing'"), reply: { rows: [] } },
+      {
+        name:  'clip.load',
+        via:   'pool',
+        match: (sql) => sql.includes('SELECT upload_path'),
+        reply: { rows: [{ upload_path: uploadPath, source_type: sourceType, file_state: fileState }] },
+      },
+      {
+        name:  'clip.targetSelection',
+        via:   'pool',
+        match: (sql) => sql.includes('SELECT sample_detect_result'),
+        reply: { rows: [{ sample_detect_result: sampleDetectResult, target_person_id: targetPersonId }] },
+      },
+      { name: 'pool.updates', via: 'pool', match: /^\s*UPDATE\b/, reply: { rows: [] } }, // sweeps + final update
+    ],
   });
-  const pool = { connect: vi.fn().mockResolvedValue(client), query } as unknown as Pool;
-  return { pool, client, query };
 }
 
 const SDR = { schemaVersion: 1, frameIndex: 100, timestampMs: 8000, frameWidth: 640, frameHeight: 480, persons: [{ id: 'p1', bbox: [10, 20, 100, 200], score: 1 }] };
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-const clientSql = (client: any): string[] =>
-  client.query.mock.calls.map((c: unknown[]) => String(c[0]));
-const poolUpdate = (query: any, needle: string): unknown[] | undefined =>
-  query.mock.calls.find((c: unknown[]) => String(c[0]).includes(needle));
+const clientSql = (fake: FakePool): string[] =>
+  fake.calls.filter((c) => c.via === 'client').map((c) => c.sql);
+const poolUpdate = (fake: FakePool, needle: string): readonly unknown[] | undefined =>
+  fake.calls.find((c) => c.via === 'pool' && c.sql.includes(needle))?.params;
 
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe('videoAnalysisWorker.pollOnce', () => {
   it('빈 큐 → false (처리 안 함)', async () => {
-    const { pool, query } = makePool({ job: null });
+    const fake = workerFake({ job: null });
     const runInference = vi.fn();
-    expect(await pollOnce(pool, { runInference })).toBe(false);
+    expect(await pollOnce(fake.pool, { runInference })).toBe(false);
     expect(runInference).not.toHaveBeenCalled();
-    expect(poolUpdate(query, 'SELECT upload_path')).toBeUndefined();
+    expect(poolUpdate(fake, 'SELECT upload_path')).toBeUndefined();
   });
 
   it('claim은 단일 트랜잭션 + FOR UPDATE SKIP LOCKED (중복 처리 방지)', async () => {
-    const { pool, client } = makePool();
-    await pollOnce(pool, { runInference: vi.fn().mockResolvedValue({ clipFeatures: {}, preprocessConfigHash: null, inputSha256: null }) });
-    const sqls = clientSql(client);
+    const fake = workerFake();
+    await pollOnce(fake.pool, { runInference: vi.fn().mockResolvedValue({ clipFeatures: {}, preprocessConfigHash: null, inputSha256: null }) });
+    const sqls = clientSql(fake);
     expect(sqls.some((s) => s === 'BEGIN')).toBe(true);
     expect(sqls.some((s) => s.includes('FOR UPDATE OF j SKIP LOCKED'))).toBe(true);
     expect(sqls.some((s) => s.includes("status = 'processing'"))).toBe(true);
@@ -93,76 +95,76 @@ describe('videoAnalysisWorker.pollOnce', () => {
   });
 
   it('성공: 추론 결과를 review_pending + result_features/hash로 저장', async () => {
-    const { pool, query } = makePool();
+    const fake = workerFake();
     const runInference = vi.fn().mockResolvedValue({
       clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: 'pch', inputSha256: 'sha',
     });
-    expect(await pollOnce(pool, { runInference })).toBe(true);
+    expect(await pollOnce(fake.pool, { runInference })).toBe(true);
     expect(runInference).toHaveBeenCalledWith('/fx/good.mp4', 'posture-basic', null, { framesDir: null, device: 'auto' });
-    const upd = poolUpdate(query, "status = 'review_pending'");
+    const upd = poolUpdate(fake, "status = 'review_pending'");
     expect(upd).toBeDefined();
-    expect(upd?.[1]).toContain('pch');
-    expect(upd?.[1]).toContain('sha');
+    expect(upd).toContain('pch');
+    expect(upd).toContain('sha');
   });
 
   it('overlayFrames 게이트 on: runInference에 framesDir 전달 + .jpg 생성 시 frames_path 기록', async () => {
     videoCfg.overlayFrames = true;
-    const { pool, query } = makePool();
+    const fake = workerFake();
     const runInference = vi.fn(async (_c: string, _p: string | null, _t: unknown, opts?: { framesDir?: string | null }) => {
       if (opts?.framesDir) { fs.mkdirSync(opts.framesDir, { recursive: true }); fs.writeFileSync(path.join(opts.framesDir, '0.jpg'), 'x'); }
       return { clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: null, inputSha256: null, keypointsJson: '{}',
         modelVersion: null, detectorSha256: null, poseSha256: null, weightsComplete: false, featureConfigVersion: null };
     });
-    expect(await pollOnce(pool, { runInference })).toBe(true);
+    expect(await pollOnce(fake.pool, { runInference })).toBe(true);
     const expectedDir = path.join(videoCfg.uploadDir, 'artifacts', 'job-1.frames');
     expect(runInference).toHaveBeenCalledWith('/fx/good.mp4', 'posture-basic', null, { framesDir: expectedDir, device: 'auto' });
-    const upd = poolUpdate(query, "status = 'review_pending'");
-    expect(upd?.[1]).toContain(expectedDir); // frames_path 기록(.jpg 존재)
+    const upd = poolUpdate(fake, "status = 'review_pending'");
+    expect(upd).toContain(expectedDir); // frames_path 기록(.jpg 존재)
     videoCfg.overlayFrames = false;
   });
 
   it('overlayFrames 게이트 on이나 프레임 미생성(빈 dir) → frames_path 미기록', async () => {
     videoCfg.overlayFrames = true;
     fs.rmSync(path.join(videoCfg.uploadDir, 'artifacts', 'job-1.frames'), { recursive: true, force: true }); // 이전 테스트 잔여 제거
-    const { pool, query } = makePool();
+    const fake = workerFake();
     const runInference = vi.fn().mockResolvedValue({ clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: null, inputSha256: null, keypointsJson: '{}' });
-    expect(await pollOnce(pool, { runInference })).toBe(true);
+    expect(await pollOnce(fake.pool, { runInference })).toBe(true);
     const expectedDir = path.join(videoCfg.uploadDir, 'artifacts', 'job-1.frames');
-    const upd = poolUpdate(query, "status = 'review_pending'");
-    expect(upd?.[1]).not.toContain(expectedDir); // .jpg 없음 → frames_path=null
+    const upd = poolUpdate(fake, "status = 'review_pending'");
+    expect(upd).not.toContain(expectedDir); // .jpg 없음 → frames_path=null
     videoCfg.overlayFrames = false;
   });
 
   it('추론 실패 → error 상태 + error_code', async () => {
-    const { pool, query } = makePool();
+    const fake = workerFake();
     const runInference = vi.fn().mockRejectedValue(Object.assign(new Error('boom'), { code: 'INFERENCE_ERROR' }));
-    await pollOnce(pool, { runInference });
-    const upd = poolUpdate(query, 'error_code = $2');
+    await pollOnce(fake.pool, { runInference });
+    const upd = poolUpdate(fake, 'error_code = $2');
     expect(upd).toBeDefined();
-    expect(upd?.[1]).toContain('INFERENCE_ERROR');
+    expect(upd).toContain('INFERENCE_ERROR');
   });
 
   it('execFile timeout으로 kill됨 → error DEADLINE_EXCEEDED (INFERENCE_ERROR로 뭉뚱그리지 않음)', async () => {
-    const { pool, query } = makePool();
+    const fake = workerFake();
     const runInference = vi.fn().mockRejectedValue(Object.assign(
       new Error('Command failed: /p /s/infer_clip.py --input x'),
       { killed: true, signal: 'SIGTERM', cmd: '/p /s/infer_clip.py --input x', code: null },
     ));
-    await pollOnce(pool, { runInference });
-    const upd = poolUpdate(query, 'error_code = $2');
+    await pollOnce(fake.pool, { runInference });
+    const upd = poolUpdate(fake, 'error_code = $2');
     expect(upd).toBeDefined();
-    const params = upd?.[1] as unknown[];
+    const params = upd as unknown[];
     expect(params).toContain('DEADLINE_EXCEEDED');
     expect(params[2]).toMatch(/infer_clip/);
   });
 
   it('clip 경로 없음(upload_path null) → error CLIP_UNAVAILABLE (추론 미실행)', async () => {
-    const { pool, query } = makePool({ uploadPath: null });
+    const fake = workerFake({ uploadPath: null });
     const runInference = vi.fn();
-    await pollOnce(pool, { runInference });
+    await pollOnce(fake.pool, { runInference });
     expect(runInference).not.toHaveBeenCalled();
-    const upd = poolUpdate(query, 'error_code = $2');
-    expect(upd?.[1]).toContain('CLIP_UNAVAILABLE');
+    const upd = poolUpdate(fake, 'error_code = $2');
+    expect(upd).toContain('CLIP_UNAVAILABLE');
   });
 });
 
@@ -170,43 +172,41 @@ describe('pollOnce keypoints artifact + 보존 정책 A (M3-7b)', () => {
   beforeEach(() => { videoCfg.retentionPolicy = 'review_fidelity'; });
 
   it('성공 시 keypoints artifact 저장 + keypoints_path/sha256 UPDATE', async () => {
-    const { pool, query } = makePool();
+    const fake = workerFake();
     const runInference = vi.fn().mockResolvedValue({
       clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: 'pch', inputSha256: 'sha',
       keypointsJson: '{"frames":[]}',
     });
-    await pollOnce(pool, { runInference });
+    await pollOnce(fake.pool, { runInference });
     const artPath = path.join(videoCfg.uploadDir, 'artifacts', 'job-1.keypoints.json');
     expect(fs.existsSync(artPath)).toBe(true);
-    const upd = poolUpdate(query, 'keypoints_path = $5');
-    expect(upd?.[1]).toContain(artPath); // keypoints_path
+    const upd = poolUpdate(fake, 'keypoints_path = $5');
+    expect(upd).toContain(artPath); // keypoints_path
   });
 
   it('privacy_first + 업로드 clip → 원본 unlink + file_state=deleted UPDATE', async () => {
     videoCfg.retentionPolicy = 'privacy_first';
     const orig = path.join(videoCfg.uploadDir, 'orig.bin');
     fs.writeFileSync(orig, 'video');
-    const { pool, query } = makePool({ sourceType: 'upload', fileState: 'present', uploadPath: orig });
+    const fake = workerFake({ sourceType: 'upload', fileState: 'present', uploadPath: orig });
     const runInference = vi.fn().mockResolvedValue({
       clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: null, inputSha256: null, keypointsJson: '{}',
     });
-    await pollOnce(pool, { runInference });
+    await pollOnce(fake.pool, { runInference });
     expect(fs.existsSync(orig)).toBe(false); // 원본 삭제
-    const upd = poolUpdate(query, "file_state = 'deleted'");
+    const upd = poolUpdate(fake, "file_state = 'deleted'");
     expect(upd).toBeDefined();
   });
 
   it('job row UPDATE 실패 시 keypoints artifact 즉시 정리(orphan 방지)', async () => {
-    const { pool } = makePool();
-    // review_pending UPDATE(keypoints_path 기록)만 실패시킨다.
-    (pool.query as ReturnType<typeof vi.fn>).mockImplementation((sql: string) => {
-      if (typeof sql === 'string' && sql.includes('SELECT upload_path')) {
-        return Promise.resolve({ rows: [{ upload_path: '/fx/good.mp4', source_type: 'fixture', file_state: 'present' }] });
-      }
-      if (typeof sql === 'string' && sql.includes("status = 'review_pending'")) {
-        return Promise.reject(new Error('db down'));
-      }
-      return Promise.resolve({ rows: [] });
+    // review_pending UPDATE(keypoints_path 기록)만 실패시킨다. 그 밖의 pool 쿼리는 기존 mock처럼 빈 결과
+    // (sample_detect_result 조회 포함).
+    const { pool } = workerFake({
+      uploadPath: '/fx/good.mp4', sourceType: 'fixture', fileState: 'present',
+      overrides: [
+        { name: 'jobs.reviewPending.fail', via: 'pool', match: (sql) => sql.includes("status = 'review_pending'"), reply: new Error('db down') },
+        { name: 'clip.targetSelection.empty', via: 'pool', match: (sql) => sql.includes('SELECT sample_detect_result'), reply: { rows: [] } },
+      ],
     });
     const runInference = vi.fn().mockResolvedValue({
       clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: null, inputSha256: null, keypointsJson: '{"k":1}',
@@ -218,12 +218,12 @@ describe('pollOnce keypoints artifact + 보존 정책 A (M3-7b)', () => {
 
   it('privacy_first라도 fixture 원본은 삭제하지 않는다', async () => {
     videoCfg.retentionPolicy = 'privacy_first';
-    const { pool, query } = makePool({ sourceType: 'fixture', fileState: 'present', uploadPath: '/fx/good.mp4' });
+    const fake = workerFake({ sourceType: 'fixture', fileState: 'present', uploadPath: '/fx/good.mp4' });
     const runInference = vi.fn().mockResolvedValue({
       clipFeatures: { schemaVersion: 1, features: {} }, preprocessConfigHash: null, inputSha256: null, keypointsJson: '{}',
     });
-    await pollOnce(pool, { runInference });
-    expect(poolUpdate(query, "file_state = 'deleted'")).toBeUndefined();
+    await pollOnce(fake.pool, { runInference });
+    expect(poolUpdate(fake, "file_state = 'deleted'")).toBeUndefined();
   });
 });
 
@@ -287,7 +287,7 @@ describe('box→track 매핑 (PR D2b, §8.7)', () => {
   });
 
   it('pollOnce: clip에 선택 있으면 runInference에 targetSelection 전달', async () => {
-    const { pool } = makePool({ sampleDetectResult: SDR, targetPersonId: 'p1' });
+    const { pool } = workerFake({ sampleDetectResult: SDR, targetPersonId: 'p1' });
     const runInference = vi.fn().mockResolvedValue({ clipFeatures: {}, preprocessConfigHash: null, inputSha256: null });
     await pollOnce(pool, { runInference });
     expect(runInference).toHaveBeenCalledWith('/fx/good.mp4', 'posture-basic',
@@ -295,18 +295,18 @@ describe('box→track 매핑 (PR D2b, §8.7)', () => {
   });
 
   it('pollOnce: 선택했는데 후보 id 불일치 → job error TARGET_TRACK_MAP_FAILED', async () => {
-    const { pool, query } = makePool({ sampleDetectResult: SDR, targetPersonId: 'pX' });
-    await pollOnce(pool, { runInference: vi.fn() });
-    const upd = poolUpdate(query, 'error_code = $2');
-    expect(upd?.[1]).toContain('TARGET_TRACK_MAP_FAILED');
+    const fake = workerFake({ sampleDetectResult: SDR, targetPersonId: 'pX' });
+    await pollOnce(fake.pool, { runInference: vi.fn() });
+    const upd = poolUpdate(fake, 'error_code = $2');
+    expect(upd).toContain('TARGET_TRACK_MAP_FAILED');
   });
 
   it('pollOnce: 선택은 있는데 sample_detect_result null → job error INVALID_SAMPLE_DETECT (dominant 폴백 금지)', async () => {
-    const { pool, query } = makePool({ sampleDetectResult: null, targetPersonId: 'p1' });
+    const fake = workerFake({ sampleDetectResult: null, targetPersonId: 'p1' });
     const runInference = vi.fn();
-    await pollOnce(pool, { runInference });
+    await pollOnce(fake.pool, { runInference });
     expect(runInference).not.toHaveBeenCalled();
-    const upd = poolUpdate(query, 'error_code = $2');
-    expect(upd?.[1]).toContain('INVALID_SAMPLE_DETECT');
+    const upd = poolUpdate(fake, 'error_code = $2');
+    expect(upd).toContain('INVALID_SAMPLE_DETECT');
   });
 });

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Request, Response, NextFunction } from 'express';
-import type { Pool } from 'pg';
 
 const availabilityState = { available: true };
 vi.mock('../../statsWorkbenchRuntimeState', () => ({
@@ -11,11 +10,14 @@ const writeAuditLog = vi.fn().mockResolvedValue(undefined);
 vi.mock('../audit', () => ({ writeAuditLog: (...args: unknown[]) => writeAuditLog(...args) }));
 
 import { requireCapability } from '../requireCapability';
+import { createFakePool, type FakePool } from '../../testing/fakePool';
 
 type SessionInfo = { userId: string; organizationId: string | null; role: string };
 
-function makePool(rows: unknown[]): Pool {
-  return { query: vi.fn().mockResolvedValue({ rows }) } as unknown as Pool;
+function capabilityFake(reply: unknown[] | Error): FakePool {
+  return createFakePool({
+    handlers: [{ name: 'capability', match: () => true, reply: reply instanceof Error ? reply : { rows: reply } }],
+  });
 }
 
 function makeReq(session: SessionInfo | undefined): Request {
@@ -40,19 +42,19 @@ describe('requireCapability', () => {
 
   it('returns 404 when the workbench runtime availability is off', async () => {
     availabilityState.available = false;
-    const pool = makePool([]);
-    const middleware = requireCapability(pool, 'stats.view');
+    const fake = capabilityFake([]);
+    const middleware = requireCapability(fake.pool, 'stats.view');
     const req  = makeReq({ userId: 'u1', organizationId: 'org-1', role: 'doctor' });
     const next = vi.fn() as unknown as NextFunction;
     const { res, status } = makeRes();
     await middleware(req, res, next);
     expect(status).toHaveBeenCalledWith(404);
     expect(next).not.toHaveBeenCalled();
-    expect(pool.query).not.toHaveBeenCalled();
+    expect(fake.calls).toHaveLength(0);
   });
 
   it('returns 403 when organizationId is null', async () => {
-    const pool = makePool([]);
+    const { pool } = capabilityFake([]);
     const middleware = requireCapability(pool, 'stats.view');
     const req  = makeReq({ userId: 'u1', organizationId: null, role: 'doctor' });
     const next = vi.fn() as unknown as NextFunction;
@@ -63,7 +65,7 @@ describe('requireCapability', () => {
   });
 
   it('calls next when the capability defaults to all roles', async () => {
-    const pool = makePool([{ has_default: true, has_grant: false }]);
+    const { pool } = capabilityFake([{ has_default: true, has_grant: false }]);
     const middleware = requireCapability(pool, 'stats.view');
     const req  = makeReq({ userId: 'u1', organizationId: 'org-1', role: 'doctor' });
     const next = vi.fn() as unknown as NextFunction;
@@ -73,7 +75,7 @@ describe('requireCapability', () => {
   });
 
   it('calls next when an active grant exists', async () => {
-    const pool = makePool([{ has_default: false, has_grant: true }]);
+    const { pool } = capabilityFake([{ has_default: false, has_grant: true }]);
     const middleware = requireCapability(pool, 'stats.export_limited_rows');
     const req  = makeReq({ userId: 'u1', organizationId: 'org-1', role: 'doctor' });
     const next = vi.fn() as unknown as NextFunction;
@@ -83,7 +85,7 @@ describe('requireCapability', () => {
   });
 
   it('returns 403 and audits denial when neither default nor grant applies', async () => {
-    const pool = makePool([{ has_default: false, has_grant: false }]);
+    const { pool } = capabilityFake([{ has_default: false, has_grant: false }]);
     const middleware = requireCapability(pool, 'stats.export_phi');
     const req  = makeReq({ userId: 'u1', organizationId: 'org-1', role: 'doctor' });
     const next = vi.fn() as unknown as NextFunction;
@@ -98,7 +100,7 @@ describe('requireCapability', () => {
   });
 
   it('calls next(err) when the DB query throws', async () => {
-    const pool = { query: vi.fn().mockRejectedValue(new Error('DB down')) } as unknown as Pool;
+    const { pool } = capabilityFake(new Error('DB down'));
     const middleware = requireCapability(pool, 'stats.view');
     const req  = makeReq({ userId: 'u1', organizationId: 'org-1', role: 'doctor' });
     const next = vi.fn() as unknown as NextFunction;

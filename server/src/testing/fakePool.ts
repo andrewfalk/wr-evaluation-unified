@@ -49,6 +49,13 @@ export interface QueryHandler {
   reply: FakeQueryReply | Error | FakeReplyFn;
   /** 이 handler가 응답할 최대 횟수. 생략하면 무제한. */
   times?: number;
+  /** 'pool'이면 pool.query만, 'client'면 connect()한 client의 query만. 생략하면 둘 다. */
+  via?: 'pool' | 'client';
+  /**
+   * times를 다 쓴 뒤 이 handler와 맞는 쿼리는 트랜잭션 제어문(BEGIN/COMMIT/…)이라도 기본 빈 응답으로
+   * 넘기지 않고 미매치로 거부한다. sequenceHandler가 켠다(큐가 BEGIN/COMMIT까지 책임지므로).
+   */
+  rejectWhenExhausted?: boolean;
 }
 
 export interface RecordedQuery {
@@ -129,7 +136,8 @@ function readQueryArgs(textOrConfig: unknown, values: unknown): { sql: string; p
   throw new Error('fakePool: query() needs a SQL string or a { text, values } config');
 }
 
-function matches(handler: QueryHandler, sql: string, params: readonly unknown[]): boolean {
+function matches(handler: QueryHandler, sql: string, params: readonly unknown[], via: 'pool' | 'client'): boolean {
+  if (handler.via !== undefined && handler.via !== via) return false;
   const sqlOk = handler.match instanceof RegExp
     // lastIndex가 남는 g/y 플래그 정규식도 매번 처음부터 검사되도록.
     ? (handler.match.lastIndex = 0, handler.match.test(sql))
@@ -200,7 +208,7 @@ export function createFakePool(options: CreateFakePoolOptions = {}): FakePool {
 
     const handler = handlers.find(h => {
       if (h.times !== undefined && (used.get(h) ?? 0) >= h.times) return false;
-      return matches(h, sql, params);
+      return matches(h, sql, params, via);
     });
 
     const call: RecordedQuery = {
@@ -213,12 +221,13 @@ export function createFakePool(options: CreateFakePoolOptions = {}): FakePool {
     calls.push(call);
 
     if (!handler) {
-      if (isTxControl) {
+      const exhausted = handlers.filter(h => h.times !== undefined && (used.get(h) ?? 0) >= h.times && matches(h, sql, params, via));
+      if (isTxControl && !exhausted.some(h => h.rejectWhenExhausted)) {
         if (txClientId !== undefined) recordTxControl(txClientId, sql, true);
         return toResult({ rows: [], rowCount: null });
       }
+      call.handler = null;
       unmatched.push(call);
-      const exhausted = handlers.filter(h => h.times !== undefined && (used.get(h) ?? 0) >= h.times && matches(h, sql, params));
       const hint = exhausted.length > 0
         ? ` (matching handler(s) already used up their times: ${exhausted.map(h => h.name).join(', ')})`
         : '';
@@ -300,5 +309,37 @@ export function authSessionHandler(options: AuthSessionHandlerOptions = {}): Que
     name: 'auth.session',
     match: /FROM\s+sessions\s+s\s+JOIN\s+users\s+u\s+ON\s+u\.id\s*=\s*s\.user_id/i,
     reply: options.revoked ? { rows: [] } : { rows: [{ disabled_at: options.disabledAt ?? null }] },
+  };
+}
+
+export interface SequenceHandlerOptions {
+  /** 기록·오류 메시지에 쓰는 이름. 기본 'sequence'. */
+  name?: string;
+  /** 'pool' 또는 'client'만 받을 때(기존 테스트가 pool.query와 client.query mock을 따로 쌓던 경우). */
+  via?: 'pool' | 'client';
+  /** 기본은 모든 SQL(트랜잭션 제어문 포함 — 기존 mockResolvedValueOnce 큐가 BEGIN도 한 칸 썼듯이). */
+  match?: RegExp | ((sql: string) => boolean);
+}
+
+/**
+ * 호환 shim(REFACTORING_ROADMAP S3 / P1-11): 기존 순서형 테스트의 `mockResolvedValueOnce` 큐를 한 줄로
+ * 옮길 수 있게, 맞는 쿼리에 responses를 **호출 순서대로** 하나씩 준다. 다 쓰면 이 handler는 더 응답하지
+ * 않으므로 그 뒤 쿼리는 다른 handler가 없으면 미매치 오류(`fake.unmatched`)가 된다 — 조용히 빈 결과를
+ * 주지 않는다. 새 테스트는 SQL로 고르는 handler를 쓴다(순서 결합을 줄이려는 것이 S3의 목적).
+ *
+ *   createFakePool({ handlers: [sequenceHandler([{ rows: [row] }, { rowCount: 1 }])] })
+ */
+export function sequenceHandler(
+  responses: ReadonlyArray<FakeQueryReply | Error>,
+  options: SequenceHandlerOptions = {},
+): QueryHandler {
+  let next = 0;
+  return {
+    name: options.name ?? 'sequence',
+    match: options.match ?? (() => true),
+    ...(options.via ? { via: options.via } : {}),
+    times: responses.length,
+    rejectWhenExhausted: true,
+    reply: () => responses[next++]!,
   };
 }
