@@ -19,6 +19,7 @@ vi.mock('../../../services/statsRepository', () => ({
 }));
 
 import { StatisticsWorkbench } from '../StatisticsWorkbench.jsx';
+import { installDefaultPreview } from '../../../fixtures/statsPreviewFixture';
 
 const SESSION = { apiBaseUrl: 'https://intranet.local', accessToken: 'tok' };
 
@@ -94,6 +95,7 @@ async function waitForDebounce() {
 afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
+  installDefaultPreview(previewStatsAnalysis);
   window.innerWidth = 1920;
 });
 
@@ -108,13 +110,12 @@ describe('StatisticsWorkbench — PR3-A 이변량 모드', () => {
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
     await switchToBivariate(user);
 
-    await user.click(await screen.findByRole('checkbox', { name: /신체부담기여도/ }));
-    await user.click(screen.getByRole('checkbox', { name: /전신진동/ }));
-
     previewStatsAnalysis.mockResolvedValueOnce(bivariatePreview([
       availableMethod('pearson_correlation'),
       availableMethod('spearman_correlation'),
     ]));
+    await user.click(await screen.findByRole('checkbox', { name: /신체부담기여도/ }));
+    await user.click(screen.getByRole('checkbox', { name: /전신진동/ }));
     await waitForDebounce();
 
     expect(previewStatsAnalysis).toHaveBeenCalledWith(
@@ -135,10 +136,9 @@ describe('StatisticsWorkbench — PR3-A 이변량 모드', () => {
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
     await switchToBivariate(user);
+    previewStatsAnalysis.mockResolvedValueOnce(bivariatePreview([availableMethod('pearson_correlation')]));
     await user.click(await screen.findByRole('checkbox', { name: /신체부담기여도/ }));
     await user.click(screen.getByRole('checkbox', { name: /전신진동/ }));
-
-    previewStatsAnalysis.mockResolvedValueOnce(bivariatePreview([availableMethod('pearson_correlation')]));
     await waitForDebounce();
     await waitFor(() => expect(screen.getByText('Pearson 상관')).toBeTruthy());
 
@@ -150,10 +150,9 @@ describe('StatisticsWorkbench — PR3-A 이변량 모드', () => {
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
     await switchToBivariate(user);
+    previewStatsAnalysis.mockResolvedValueOnce(bivariatePreview([availableMethod('pearson_correlation')]));
     await user.click(await screen.findByRole('checkbox', { name: /신체부담기여도/ }));
     await user.click(screen.getByRole('checkbox', { name: /전신진동/ }));
-
-    previewStatsAnalysis.mockResolvedValueOnce(bivariatePreview([availableMethod('pearson_correlation')]));
     await waitForDebounce();
     await waitFor(() => expect(screen.getByText('Pearson 상관')).toBeTruthy());
 
@@ -170,12 +169,11 @@ describe('StatisticsWorkbench — PR3-A 이변량 모드', () => {
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
     await switchToBivariate(user);
-    await user.click(await screen.findByRole('checkbox', { name: /신체부담기여도/ }));
-    await user.click(screen.getByRole('checkbox', { name: /전신진동/ }));
-
     previewStatsAnalysis.mockResolvedValueOnce(bivariatePreview([
       availableMethod('welch_t', { status: 'unsupported', reasonCode: 'METHOD_TYPE_MISMATCH' }),
     ]));
+    await user.click(await screen.findByRole('checkbox', { name: /신체부담기여도/ }));
+    await user.click(screen.getByRole('checkbox', { name: /전신진동/ }));
     await waitForDebounce();
     await waitFor(() => expect(screen.getByText('Welch t 검정')).toBeTruthy());
 

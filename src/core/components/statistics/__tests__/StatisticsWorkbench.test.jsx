@@ -25,6 +25,7 @@ vi.mock('../../../services/statsRepository', () => ({
 }));
 
 import { StatisticsWorkbench } from '../StatisticsWorkbench.jsx';
+import { installDefaultPreview } from '../../../fixtures/statsPreviewFixture';
 
 const SESSION = { apiBaseUrl: 'https://intranet.local', accessToken: 'tok' };
 
@@ -102,6 +103,7 @@ async function waitForDebounce() {
 afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
+  installDefaultPreview(previewStatsAnalysis);
   // jsdom 기본 innerWidth는 1024px — §10 반응형 규칙("<1280이면 카탈로그 자동 접힘")이
   // 그대로 발동해 카탈로그가 접힌 채로 마운트된다(실제 좁은 창에서는 의도된 동작이지만,
   // 이 테스트들은 카탈로그가 펼쳐진 넓은 화면을 전제로 하므로 뷰포트를 넓게 고정한다).
@@ -122,9 +124,8 @@ describe('StatisticsWorkbench — 카탈로그 로드 + 변수 선택 → previe
     const user = userEvent.setup();
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
-    await selectFirstVariable(user);
-
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await selectFirstVariable(user);
     await waitForDebounce();
     await waitFor(() => expect(screen.getByText('person')).toBeTruthy());
     expect(previewStatsAnalysis).toHaveBeenCalledWith(
@@ -138,11 +139,10 @@ describe('StatisticsWorkbench — 카탈로그 로드 + 변수 선택 → previe
     const user = userEvent.setup();
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
-    await selectFirstVariable(user);
-
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview({
       counts: { personCount: null, caseCount: null, observationCount: null, suppressed: true, minimumCohort: 10, reasonCode: 'MIN_COHORT_NOT_MET' },
     }));
+    await selectFirstVariable(user);
     await waitForDebounce();
     await waitFor(() => expect(screen.getByText(/최소 표본/)).toBeTruthy());
     expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(true);
@@ -154,9 +154,8 @@ describe('StatisticsWorkbench — analyze 실행 + committed snapshot', () => {
     const user = userEvent.setup();
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
-    await selectFirstVariable(user);
-
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await selectFirstVariable(user);
     await waitForDebounce();
     await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
 
@@ -177,8 +176,8 @@ describe('StatisticsWorkbench — analyze 실행 + committed snapshot', () => {
     const user = userEvent.setup();
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
-    await selectFirstVariable(user);
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await selectFirstVariable(user);
     await waitForDebounce();
     await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
 
@@ -201,9 +200,8 @@ describe('StatisticsWorkbench — 202 폴링(PR4-B1)', () => {
     const user = userEvent.setup();
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
-    await selectFirstVariable(user);
-
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await selectFirstVariable(user);
     await waitForDebounce();
     await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
 
@@ -214,8 +212,8 @@ describe('StatisticsWorkbench — 202 폴링(PR4-B1)', () => {
     expect(screen.queryByText(/조건이 변경됨/)).toBeNull();
 
     // draft를 recipe B(변수 2개)로 바꾼다 — "조건이 변경됨" 배너가 정상적으로 뜬다.
-    await user.click(screen.getByRole('checkbox', { name: /노출 한도 초과/ }));
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await user.click(screen.getByRole('checkbox', { name: /노출 한도 초과/ }));
     await waitForDebounce();
     await waitFor(() => expect(screen.getByText(/조건이 변경됨/)).toBeTruthy());
     await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
@@ -252,9 +250,8 @@ describe('StatisticsWorkbench — 202 폴링(PR4-B1)', () => {
     const user = userEvent.setup();
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     const { unmount } = render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
-    await selectFirstVariable(user);
-
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await selectFirstVariable(user);
     await waitForDebounce();
     await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
 
@@ -293,9 +290,8 @@ describe('StatisticsWorkbench — StrictMode 방어(코드리뷰 2차, 2026-09-2
     // 주는 mockResolvedValue를 쓴다(안 그러면 두 번째 호출이 undefined를 받아 죽는다).
     fetchStatsCatalog.mockResolvedValue(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />, { wrapper: StrictMode });
-    await selectFirstVariable(user);
-
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await selectFirstVariable(user);
     await waitForDebounce();
     await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
 
@@ -311,9 +307,8 @@ describe('StatisticsWorkbench — StrictMode 방어(코드리뷰 2차, 2026-09-2
     const user = userEvent.setup();
     fetchStatsCatalog.mockResolvedValue(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />, { wrapper: StrictMode });
-    await selectFirstVariable(user);
-
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await selectFirstVariable(user);
     await waitForDebounce();
     await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
 
@@ -340,8 +335,8 @@ describe('StatisticsWorkbench — 내보내기', () => {
     const user = userEvent.setup();
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
-    await selectFirstVariable(user);
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await selectFirstVariable(user);
     await waitForDebounce();
     await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
 
@@ -418,9 +413,8 @@ describe('StatisticsWorkbench — 기능 비가용 시 실행·내보내기 잠�
     const user = userEvent.setup();
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
-    await selectFirstVariable(user);
-
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await selectFirstVariable(user);
     await waitForDebounce();
     await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
 
@@ -438,9 +432,8 @@ describe('StatisticsWorkbench — 기능 비가용 시 실행·내보내기 잠�
     const user = userEvent.setup();
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
-    await selectFirstVariable(user);
-
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await selectFirstVariable(user);
     await waitForDebounce();
     await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
 
@@ -456,9 +449,8 @@ describe('StatisticsWorkbench — 기능 비가용 시 실행·내보내기 잠�
     const user = userEvent.setup();
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
-    await selectFirstVariable(user);
-
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await selectFirstVariable(user);
     await waitForDebounce();
     await waitFor(() => expect(screen.getByRole('button', { name: /분석 실행/ }).disabled).toBe(false));
 

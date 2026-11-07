@@ -22,6 +22,7 @@ vi.mock('../../../services/statsRepository', () => ({
 }));
 
 import { StatisticsWorkbench } from '../StatisticsWorkbench.jsx';
+import { installDefaultPreview } from '../../../fixtures/statsPreviewFixture';
 
 const SESSION = { apiBaseUrl: 'https://intranet.local', accessToken: 'tok' };
 
@@ -98,6 +99,7 @@ async function waitForDebounce() {
 afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
+  installDefaultPreview(previewStatsAnalysis);
   window.innerWidth = 1920;
 });
 
@@ -129,13 +131,12 @@ describe('StatisticsWorkbench — PR4-A1 회귀 모드', () => {
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
     await switchToRegression(user);
 
-    await user.click(await screen.findByRole('checkbox', { name: /신체부담기여도/ }));
-    await user.click(screen.getByRole('checkbox', { name: /어깨 노출 초과/ }));
-
     previewStatsAnalysis.mockResolvedValueOnce(regressionPreview([
       availableMethod('ols_linear'),
       availableMethod('binary_logistic', { status: 'unsupported', reasonCode: 'METHOD_TYPE_MISMATCH' }),
     ]));
+    await user.click(await screen.findByRole('checkbox', { name: /신체부담기여도/ }));
+    await user.click(screen.getByRole('checkbox', { name: /어깨 노출 초과/ }));
     const outcomeSelect = await screen.findByRole('combobox', { name: '결과변수' });
     await user.selectOptions(outcomeSelect, '신체부담기여도(최대)');
     await waitForDebounce();
@@ -158,10 +159,9 @@ describe('StatisticsWorkbench — PR4-A1 회귀 모드', () => {
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
     await switchToRegression(user);
+    previewStatsAnalysis.mockResolvedValueOnce(regressionPreview([availableMethod('ols_linear')]));
     await user.click(await screen.findByRole('checkbox', { name: /신체부담기여도/ }));
     await user.click(screen.getByRole('checkbox', { name: /어깨 노출 초과/ }));
-
-    previewStatsAnalysis.mockResolvedValueOnce(regressionPreview([availableMethod('ols_linear')]));
     const outcomeSelect = await screen.findByRole('combobox', { name: '결과변수' });
     await user.selectOptions(outcomeSelect, '신체부담기여도(최대)');
     await waitForDebounce();
@@ -182,10 +182,9 @@ describe('StatisticsWorkbench — PR4-A1 회귀 모드', () => {
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
     await switchToRegression(user);
+    previewStatsAnalysis.mockResolvedValueOnce(regressionPreview([availableMethod('ols_linear')]));
     await user.click(await screen.findByRole('checkbox', { name: /신체부담기여도/ }));
     await user.click(screen.getByRole('checkbox', { name: /어깨 노출 초과/ }));
-
-    previewStatsAnalysis.mockResolvedValueOnce(regressionPreview([availableMethod('ols_linear')]));
     const outcomeSelect = await screen.findByRole('combobox', { name: '결과변수' });
     await user.selectOptions(outcomeSelect, '신체부담기여도(최대)');
     await waitForDebounce();
@@ -199,10 +198,9 @@ describe('StatisticsWorkbench — PR4-A1 회귀 모드', () => {
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
     await switchToRegression(user);
+    previewStatsAnalysis.mockResolvedValueOnce(regressionPreview([availableMethod('ols_linear')]));
     await user.click(await screen.findByRole('checkbox', { name: /신체부담기여도/ }));
     await user.click(screen.getByRole('checkbox', { name: /어깨 노출 초과/ }));
-
-    previewStatsAnalysis.mockResolvedValueOnce(regressionPreview([availableMethod('ols_linear')]));
     const outcomeSelect = await screen.findByRole('combobox', { name: '결과변수' });
     await user.selectOptions(outcomeSelect, '신체부담기여도(최대)');
     await waitForDebounce();
@@ -225,10 +223,9 @@ describe('StatisticsWorkbench — PR4-A1 회귀 모드', () => {
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
     await switchToRegression(user);
 
+    previewStatsAnalysis.mockResolvedValueOnce(regressionPreview([availableMethod('binary_logistic')]));
     await user.click(await screen.findByRole('checkbox', { name: /척추 진단 분류/ }));
     await user.click(screen.getByRole('checkbox', { name: /신체부담기여도/ }));
-
-    previewStatsAnalysis.mockResolvedValueOnce(regressionPreview([availableMethod('binary_logistic')]));
     const outcomeSelect = await screen.findByRole('combobox', { name: '결과변수' });
     await user.selectOptions(outcomeSelect, '척추 진단 분류');
     await waitForDebounce();
