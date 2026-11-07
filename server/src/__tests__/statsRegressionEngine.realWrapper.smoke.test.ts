@@ -38,8 +38,8 @@ if (REQUIRE_PYTHON && !AVAILABLE) {
   );
 }
 
-vi.mock('../config', () => ({
-  default: {
+vi.mock('../config', async () => ({
+  default: (await import('../testing/configMock.js')).testConfig({
     stats: {
       python: PYTHON,
       scriptsDir: SCRIPTS_DIR,
@@ -52,7 +52,7 @@ vi.mock('../config', () => ({
       maxInputBytes: 2 * 1024 * 1024,
       resultTtlHours: 168,
     },
-  },
+  }),
 }));
 
 describe.skipIf(!AVAILABLE)('runRegressionStatsEngine — 실제 Python + 실제 운영 wrapper(mock 없음)', () => {

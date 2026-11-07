@@ -11,8 +11,8 @@ import { EventEmitter } from 'events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('child_process', () => ({ spawn: vi.fn() }));
-vi.mock('../config', () => ({
-  default: {
+vi.mock('../config', async () => ({
+  default: (await import('../testing/configMock.js')).testConfig({
     stats: {
       python: 'python',
       scriptsDir: '/fake/scripts',
@@ -25,7 +25,7 @@ vi.mock('../config', () => ({
       maxInputBytes: 2 * 1024 * 1024, // 운영 기본값(2MiB)과 동일 — §8 바이트 계산의 기준.
       resultTtlHours: 168,
     },
-  },
+  }),
 }));
 
 import { spawn } from 'child_process';

@@ -4,8 +4,8 @@ import { EventEmitter } from 'events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('child_process', () => ({ spawn: vi.fn() }));
-vi.mock('../config', () => ({
-  default: {
+vi.mock('../config', async () => ({
+  default: (await import('../testing/configMock.js')).testConfig({
     stats: {
       python: 'python',
       scriptsDir: '/fake/scripts',
@@ -20,7 +20,7 @@ vi.mock('../config', () => ({
       // Mutable on this mock: tests switch timing on/off (config.stats.timingEnabled, P1-10).
       timingEnabled: false,
     },
-  },
+  }),
 }));
 
 import { spawn } from 'child_process';
