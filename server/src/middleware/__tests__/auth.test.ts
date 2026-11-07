@@ -5,6 +5,7 @@ import type { Request, Response, NextFunction } from 'express';
 import type { Pool } from 'pg';
 import { createAuthMiddleware } from '../auth';
 import { generateAccessToken, type AccessTokenPayload } from '../../auth/tokens';
+import { createFakePool, authSessionHandler } from '../../testing/fakePool';
 
 const BASE: AccessTokenPayload = {
   sub:                'user-1',
@@ -16,8 +17,10 @@ const BASE: AccessTokenPayload = {
   csrfHash:           'csrfhash',
 };
 
-function makePool(sessionRows: unknown[]): Pool {
-  return { query: vi.fn().mockResolvedValue({ rows: sessionRows }) } as unknown as Pool;
+// 세션 생존 확인 쿼리(authSessionHandler의 SQL 매치)에 주어진 rows 그대로 답한다.
+function sessionPool(sessionRows: unknown[] | Error): Pool {
+  const reply = sessionRows instanceof Error ? sessionRows : { rows: sessionRows };
+  return createFakePool({ handlers: [{ ...authSessionHandler(), reply }] }).pool;
 }
 
 function makeReq(authorization?: string, baseUrl = '/api/patients', path = '/'): Request {
@@ -32,7 +35,7 @@ function makeRes() {
 
 describe('createAuthMiddleware', () => {
   it('returns 401 when Authorization header is missing', async () => {
-    const middleware = createAuthMiddleware(makePool([]));
+    const middleware = createAuthMiddleware(sessionPool([]));
     const req  = makeReq();
     const next = vi.fn() as unknown as NextFunction;
     const { res, status } = makeRes();
@@ -42,7 +45,7 @@ describe('createAuthMiddleware', () => {
   });
 
   it('returns 401 when token is invalid', async () => {
-    const middleware = createAuthMiddleware(makePool([]));
+    const middleware = createAuthMiddleware(sessionPool([]));
     const req  = makeReq('Bearer bad.token.here');
     const next = vi.fn() as unknown as NextFunction;
     const { res, status } = makeRes();
@@ -53,7 +56,7 @@ describe('createAuthMiddleware', () => {
   it('returns 401 when session is revoked in DB (invalidated_at set)', async () => {
     const { token } = generateAccessToken(BASE);
     // DB returns empty rows → session revoked / expired
-    const middleware = createAuthMiddleware(makePool([]));
+    const middleware = createAuthMiddleware(sessionPool([]));
     const req  = makeReq(`Bearer ${token}`) as Request & { sessionInfo?: unknown };
     const next = vi.fn() as unknown as NextFunction;
     const { res, status, json } = makeRes();
@@ -65,7 +68,7 @@ describe('createAuthMiddleware', () => {
 
   it('returns 401 when the user account is disabled', async () => {
     const { token } = generateAccessToken(BASE);
-    const middleware = createAuthMiddleware(makePool([{ disabled_at: '2026-01-01T00:00:00Z' }]));
+    const middleware = createAuthMiddleware(sessionPool([{ disabled_at: '2026-01-01T00:00:00Z' }]));
     const req  = makeReq(`Bearer ${token}`) as Request & { sessionInfo?: unknown };
     const next = vi.fn() as unknown as NextFunction;
     const { res, status, json } = makeRes();
@@ -77,7 +80,7 @@ describe('createAuthMiddleware', () => {
 
   it('calls next(err) when pool.query throws (DB down)', async () => {
     const { token } = generateAccessToken(BASE);
-    const pool = { query: vi.fn().mockRejectedValue(new Error('DB down')) } as unknown as Pool;
+    const pool = sessionPool(new Error('DB down'));
     const middleware = createAuthMiddleware(pool);
     const req  = makeReq(`Bearer ${token}`) as Request & { sessionInfo?: unknown };
     const next = vi.fn() as unknown as NextFunction;
@@ -95,7 +98,7 @@ describe('createAuthMiddleware', () => {
       const { token } = generateAccessToken(payload);
       const next = vi.fn() as unknown as NextFunction;
       const { res, status, json } = makeRes();
-      await createAuthMiddleware(makePool(rows))(makeReq(`Bearer ${token}`, baseUrl, path), res, next);
+      await createAuthMiddleware(sessionPool(rows))(makeReq(`Bearer ${token}`, baseUrl, path), res, next);
       return { next, status, json };
     }
 
@@ -141,7 +144,7 @@ describe('createAuthMiddleware', () => {
 
     it('라우터에 마운트된 실제 Express에서 req.baseUrl + req.path로 판정된다(상대 경로 가정 검증)', async () => {
       const { token } = generateAccessToken(FORCED);
-      const auth = createAuthMiddleware(makePool([{ exists: 1 }]));
+      const auth = createAuthMiddleware(sessionPool([{ exists: 1 }]));
       const authRouter = Router();
       authRouter.get('/me', auth, (_req, res) => { res.json({ ok: 'me' }); });
       authRouter.post('/change-password', auth, (_req, res) => { res.json({ ok: 'change' }); });
@@ -165,7 +168,7 @@ describe('createAuthMiddleware', () => {
   it('populates req.sessionInfo and calls next when JWT + DB session are valid', async () => {
     const { token } = generateAccessToken(BASE);
     // DB returns a row → session is live
-    const middleware = createAuthMiddleware(makePool([{ exists: 1 }]));
+    const middleware = createAuthMiddleware(sessionPool([{ exists: 1 }]));
     const req  = makeReq(`Bearer ${token}`) as Request & { sessionInfo?: unknown };
     const next = vi.fn() as unknown as NextFunction;
     const { res } = makeRes();

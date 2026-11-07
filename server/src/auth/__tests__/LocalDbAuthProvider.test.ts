@@ -1,11 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
-import type { Pool } from 'pg';
+import { describe, it, expect } from 'vitest';
 import { LocalDbAuthProvider } from '../LocalDbAuthProvider';
+import { createFakePool, type FakePool } from '../../testing/fakePool';
 
-function makePool(rows: unknown[]): Pool {
-  return {
-    query: vi.fn().mockResolvedValue({ rows }),
-  } as unknown as Pool;
+function userLookupFake(rows: unknown[]): FakePool {
+  return createFakePool({ handlers: [{ name: 'users.byLogin', match: () => true, reply: { rows } }] });
 }
 
 // bcrypt.hash at module level: use a pre-computed hash (cost 4) to keep tests fast
@@ -14,14 +12,14 @@ const HASHED_PASS = '$2b$04$yD1h8iMKEXEK.m/wFBndFeIjQdx7fCnmpe6Js7O.6YaMYAR/hWuK
 
 describe('LocalDbAuthProvider.verifyCredentials', () => {
   it('returns null when user is not found', async () => {
-    const pool = makePool([]);
+    const { pool } = userLookupFake([]);
     const provider = new LocalDbAuthProvider(pool);
     const result = await provider.verifyCredentials('unknown', 'pass');
     expect(result).toBeNull();
   });
 
   it('returns null when user is disabled', async () => {
-    const pool = makePool([{
+    const { pool } = userLookupFake([{
       id: 'u1', password_hash: HASHED_PASS, organization_id: 'org1',
       role: 'doctor', name: 'Dr. Kim', must_change_password: false,
       disabled_at: '2025-01-01T00:00:00Z',
@@ -32,7 +30,7 @@ describe('LocalDbAuthProvider.verifyCredentials', () => {
   });
 
   it('returns null when password is wrong', async () => {
-    const pool = makePool([{
+    const { pool } = userLookupFake([{
       id: 'u1', password_hash: HASHED_PASS, organization_id: 'org1',
       role: 'doctor', name: 'Dr. Kim', must_change_password: false,
       disabled_at: null,
@@ -43,7 +41,7 @@ describe('LocalDbAuthProvider.verifyCredentials', () => {
   });
 
   it('returns credentials when login id + password are correct', async () => {
-    const pool = makePool([{
+    const { pool } = userLookupFake([{
       id: 'u1', password_hash: HASHED_PASS, organization_id: 'org1',
       role: 'doctor', name: 'Dr. Kim', must_change_password: false,
       disabled_at: null,
@@ -61,7 +59,7 @@ describe('LocalDbAuthProvider.verifyCredentials', () => {
   });
 
   it('returns mustChangePassword=true when flag is set', async () => {
-    const pool = makePool([{
+    const { pool } = userLookupFake([{
       id: 'u1', password_hash: HASHED_PASS, organization_id: null,
       role: 'admin', name: 'Admin', must_change_password: true,
       disabled_at: null,
@@ -73,11 +71,11 @@ describe('LocalDbAuthProvider.verifyCredentials', () => {
   });
 
   it('queries by login_id (not name or id)', async () => {
-    const pool = makePool([]);
-    const provider = new LocalDbAuthProvider(pool);
+    const fake = userLookupFake([]);
+    const provider = new LocalDbAuthProvider(fake.pool);
     await provider.verifyCredentials('mylogin', 'pass');
 
-    const [_sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0] as [string, unknown[]];
+    const { params } = fake.calls[0]!;
     expect(params[0]).toBe('mylogin');
   });
 });

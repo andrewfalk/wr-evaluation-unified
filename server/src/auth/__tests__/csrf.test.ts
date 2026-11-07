@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { validateCsrf, setCsrfCookie, clearCsrfCookie, reissueCsrfToken, CSRF_COOKIE } from '../csrf';
 import { hashToken } from '../sessionStore';
 import type { Response } from 'express';
-import type { Pool, PoolClient } from 'pg';
+import { createFakePool, type FakePool } from '../../testing/fakePool';
 
 // ---------------------------------------------------------------------------
 // validateCsrf
@@ -74,22 +74,19 @@ describe('clearCsrfCookie', () => {
 // reissueCsrfToken
 // ---------------------------------------------------------------------------
 describe('reissueCsrfToken', () => {
-  function makePool(): Pool {
-    const client: Partial<PoolClient> = {
-      query:   vi.fn().mockResolvedValue({ rows: [] }),
-      release: vi.fn(),
-    };
-    return { connect: vi.fn().mockResolvedValue(client) } as unknown as Pool;
+  // connect()한 client의 모든 쿼리에 빈 결과(성공) 또는 주어진 오류로 답한다.
+  function clientFake(reply: Error | { rows: unknown[] } = { rows: [] }): FakePool {
+    return createFakePool({ handlers: [{ name: 'client.any', via: 'client', match: () => true, reply }] });
   }
 
   it('updates csrf_token_hash in DB and sets cookie', async () => {
-    const pool = makePool();
+    const fake = clientFake();
     const res  = makeMockRes();
 
-    await reissueCsrfToken(pool, 'sess-id', res, true);
+    await reissueCsrfToken(fake.pool, 'sess-id', res, true);
 
-    const client = await (pool.connect as ReturnType<typeof vi.fn>).mock.results[0].value;
-    const [sql, params] = (client.query as ReturnType<typeof vi.fn>).mock.calls[0] as [string, unknown[]];
+    const [firstClientQuery] = fake.calls.filter(c => c.via === 'client' && c.clientId === 1);
+    const { sql, params } = firstClientQuery!;
 
     expect(sql).toContain('UPDATE sessions SET csrf_token_hash');
     expect(params[1]).toBe('sess-id');
@@ -104,8 +101,8 @@ describe('reissueCsrfToken', () => {
   });
 
   it('generates a unique token each call', async () => {
-    const pool1 = makePool();
-    const pool2 = makePool();
+    const { pool: pool1 } = clientFake();
+    const { pool: pool2 } = clientFake();
     const res1  = makeMockRes();
     const res2  = makeMockRes();
 
@@ -118,19 +115,16 @@ describe('reissueCsrfToken', () => {
   });
 
   it('releases the DB connection even on error', async () => {
-    const client: Partial<PoolClient> = {
-      query:   vi.fn().mockRejectedValue(new Error('DB error')),
-      release: vi.fn(),
-    };
-    const pool = { connect: vi.fn().mockResolvedValue(client) } as unknown as Pool;
+    const fake = clientFake(new Error('DB error'));
     const res  = makeMockRes();
 
-    await expect(reissueCsrfToken(pool, 'sess', res, true)).rejects.toThrow('DB error');
-    expect(client.release).toHaveBeenCalledOnce();
+    await expect(reissueCsrfToken(fake.pool, 'sess', res, true)).rejects.toThrow('DB error');
+    expect(fake.released).toBe(1);
+    fake.assertAllReleased();
   });
 
   it('returns the raw token so callers can embed its hash in a new access token', async () => {
-    const pool = makePool();
+    const { pool } = clientFake();
     const res  = makeMockRes();
 
     const rawToken = await reissueCsrfToken(pool, 'sess-id', res, true);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createFakePool, authSessionHandler, pgError, sqlPreview } from '../fakePool';
+import { createFakePool, authSessionHandler, pgError, sequenceHandler, sqlPreview } from '../fakePool';
 
 describe('createFakePool — SQL routing', () => {
   it('routes by SQL text, so the order of queries does not matter', async () => {
@@ -181,6 +181,66 @@ describe('createFakePool — clients and transactions', () => {
 
     b.release();
     expect(() => fake.assertAllReleased()).not.toThrow();
+  });
+});
+
+describe('sequenceHandler (S3 / P1-11 compatibility shim)', () => {
+  it('answers in call order regardless of SQL, then stops — the next query is unmatched, not an empty result', async () => {
+    const fake = createFakePool({ handlers: [sequenceHandler([{ rows: [{ n: 1 }] }, { rowCount: 3 }, pgError('23505')])] });
+    expect((await fake.pool.query('SELECT a')).rows).toEqual([{ n: 1 }]);
+    expect((await fake.pool.query('UPDATE b')).rowCount).toBe(3);
+    await expect(fake.pool.query('INSERT c')).rejects.toMatchObject({ code: '23505' });
+    await expect(fake.pool.query('SELECT d')).rejects.toThrow(/no handler matched pool query: SELECT d \(matching handler\(s\) already used up their times: sequence\)/);
+    expect(fake.unmatched).toHaveLength(1);
+    expect(fake.callsTo('sequence')).toHaveLength(3);
+  });
+
+  it('consumes transaction control too by default, like a mockResolvedValueOnce queue on client.query', async () => {
+    const fake = createFakePool({ handlers: [sequenceHandler([{ rows: [] }, { rows: [{ id: 's1' }] }, { rows: [] }], { via: 'client' })] });
+    const client = await fake.pool.connect();
+    await client.query('BEGIN');
+    expect((await client.query('SELECT id FROM sessions')).rows).toEqual([{ id: 's1' }]);
+    await client.query('COMMIT');
+    client.release();
+    expect(fake.transactions).toEqual([{ clientId: 1, statements: ['BEGIN', 'COMMIT'], outcome: 'commit' }]);
+    fake.assertAllReleased();
+  });
+
+  it('separate pool and client queues with via', async () => {
+    const fake = createFakePool({
+      handlers: [
+        sequenceHandler([{ rows: [{ q: 'pool-1' }] }], { name: 'pool-seq', via: 'pool' }),
+        sequenceHandler([{ rows: [{ q: 'client-1' }] }], { name: 'client-seq', via: 'client' }),
+      ],
+    });
+    const client = await fake.pool.connect();
+    expect((await client.query('SELECT 1')).rows).toEqual([{ q: 'client-1' }]);
+    expect((await fake.pool.query('SELECT 1')).rows).toEqual([{ q: 'pool-1' }]);
+    client.release();
+    expect(fake.calls.map(c => `${c.via}:${c.handler}`)).toEqual(['client:client-seq', 'pool:pool-seq']);
+  });
+
+  it('an optional match narrows which queries the sequence answers', async () => {
+    const fake = createFakePool({
+      handlers: [
+        authSessionHandler(),
+        sequenceHandler([{ rows: [{ a: 1 }] }, { rows: [{ a: 2 }] }], { match: /FROM presets/ }),
+      ],
+    });
+    await fake.pool.query('SELECT s.revoked_at, u.disabled_at FROM sessions s JOIN users u ON u.id = s.user_id');
+    expect((await fake.pool.query('SELECT * FROM presets')).rows).toEqual([{ a: 1 }]);
+    expect((await fake.pool.query('SELECT * FROM presets')).rows).toEqual([{ a: 2 }]);
+    fake.assertNoUnmatched();
+  });
+});
+
+describe('via filter', () => {
+  it("a handler with via: 'pool' does not answer client queries", async () => {
+    const fake = createFakePool({ handlers: [{ name: 'pool-only', match: /SELECT/, via: 'pool', reply: { rows: [] } }] });
+    const client = await fake.pool.connect();
+    await expect(client.query('SELECT 1')).rejects.toThrow(/no handler matched client query/);
+    client.release();
+    await expect(fake.pool.query('SELECT 1')).resolves.toMatchObject({ rows: [] });
   });
 });
 
