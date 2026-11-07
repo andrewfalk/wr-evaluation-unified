@@ -1,6 +1,6 @@
 # 전체 코드베이스 리팩터링 밑그림 v2 (2026-10-15 작성 · 2026-10-18 갱신 · 2026-11-06 상태 갱신 — 진단 기준 main 5604f36·v7.1.3, Phase H 완료 시점 main 77e6686·v7.1.4)
 
-> **정본**: 저장소 `docs/REFACTORING_ROADMAP.md` · **상태**: 계획 확정(2026-10-15, Codex 리뷰 5회 반영) · **Phase H(7.1.4 보안 핫픽스) 코드·릴리스 문서 main 머지 완료**(PR #159~#172, 2026-10-18, HEAD `77e6686`, 버전 7.1.4 — 업데이트 피드 서명 HF8 포함, 메모리 `project_phase_h_hotfix_plan`) · **7.1.4 운영 배포 완료(2026-10-31)** · 그 뒤 리팩터링과 별개의 운영 작업 "접속자 실제 IP 기록"(PR #174~#185, v7.1.5·v7.1.6, 운영 배포·호스트 Caddy 8443 전환 완료 2026-11-06 — `docs/PRODUCTION_RELEASE_PLAN.md` 9절)을 먼저 끝냈고 **Phase 0은 아직 착수 전** · **CI(P0-1)는 보류**(D9) · **트랙 P(성능) 추가(2026-10-16)** · **새 세션 시작점**: 맨 아래 "착수 순서" — Phase 0(줄끝 P0-8·.jsx 린트 P0-4부터), 각 Phase는 착수 시 세부 플랜(플랜 모드 + codex 루프)을 다시 세운다. 근거 라인(file:line)은 부록 B 기준이며 코드가 바뀌면 재확인할 것. Phase H가 바꾼 파일을 가리키는 Phase 0~5·트랙 P·quick win의 줄 번호는 2026-10-18(main `77e6686`) 기준으로 대조해 맞췄고(HF 표 원문과 부록은 2026-10-15 기준 그대로), 그 밖의 줄 번호는 각 Phase 착수 시 재확인한다.
+> **정본**: 저장소 `docs/REFACTORING_ROADMAP.md` · **상태**: 계획 확정(2026-10-15, Codex 리뷰 5회 반영) · **Phase H(7.1.4 보안 핫픽스) 코드·릴리스 문서 main 머지 완료**(PR #159~#172, 2026-10-18, HEAD `77e6686`, 버전 7.1.4 — 업데이트 피드 서명 HF8 포함, 메모리 `project_phase_h_hotfix_plan`) · **7.1.4 운영 배포 완료(2026-10-31)** · 그 뒤 리팩터링과 별개의 운영 작업 "접속자 실제 IP 기록"(PR #174~#185, v7.1.5·v7.1.6, 운영 배포·호스트 Caddy 8443 전환 완료 2026-11-06 — `docs/PRODUCTION_RELEASE_PLAN.md` 9절)을 먼저 끝냈고 **Phase 0(안전망) 완료(2026-11-07, PR #186~#211 — P0-1~P0-13 전부)** · **CI(P0-1)는 보류**(D9, 로컬 `npm run check`·`check:full`로 대체) · **트랙 P(성능) 추가(2026-10-16)** · **새 세션 시작점**: 맨 아래 "착수 순서" 7번 — **Phase 1(서버, S1부터)**, 각 Phase는 착수 시 세부 플랜(플랜 모드 + codex 루프)을 다시 세운다. 근거 라인(file:line)은 부록 B 기준이며 코드가 바뀌면 재확인할 것. Phase H가 바꾼 파일을 가리키는 Phase 0~5·트랙 P·quick win의 줄 번호는 2026-10-18(main `77e6686`) 기준으로 대조해 맞췄고(HF 표 원문과 부록은 2026-10-15 기준 그대로), 그 밖의 줄 번호는 각 Phase 착수 시 재확인한다.
 
 ## Context
 
@@ -56,7 +56,7 @@
 | Phase | 내용 | PR≈ | 기간≈ | 선행 |
 |---|---|---|---|---|
 | **H** | 7.1.4 보안 핫픽스(업데이트 피드 서명 HF8 포함) → 릴리스·배포 — ✅ **코드·릴리스 문서 머지 완료**(실제 14 PR: 코드 13 + docs 1, 2026-10-16~18), 배포 대기 | 10–12 | 1–2주 | – |
-| **0** | 안전망: CI·lint·checkJs·workspaces·줄끝·골든 G1–G10·서버 하네스·Python 핀 | 20–25 | 2–3주 | H 배포 후 착수 권장(병행 가능) |
+| **0** | 안전망: CI·lint·checkJs·workspaces·줄끝·골든 G1–G10·서버 하네스·Python 핀 — ✅ **완료(2026-11-06~07, 실제 26 PR #186~#211)** | 20–25 | 2–3주 | H 배포 후 착수 권장(병행 가능) |
 | **1** | 서버: 에러/인가 조합/라우트 분할/`patient_records` 단일 경로/stats 폴더/큐/종료/체크섬 + 보안 bundle | 35–45 | 4–6주 | 0 |
 | **2** | 클라이언트: 플랫폼 어댑터/요청 계층/App 분해/스토어/매니페스트/경계/서술/쌍둥이/거대 컴포넌트/CSS/TS | 45–60 | 6–8주 | 0, E0 |
 | **3** | Electron·패키징: main 분할/조건부 IPC/preload base/asar/build-target/버전 스크립트 | 12–15 | 2–3주 | 0(E0는 즉시) |
@@ -115,7 +115,9 @@
 
 ---
 
-## Phase 0 — 안전망 (전부 병행 가능; P0-3·P0-10 → G5 순서만 고정)
+## Phase 0 — 안전망 (전부 병행 가능; P0-3·P0-10 → G5 순서만 고정) — ✅ 완료(2026-11-07)
+
+> **완료 요약(2026-11-07, main `36b7e61`)**: P0-1~P0-13 모두 아래 표의 ✅ 기록대로 끝났다(P0-1 CI는 D9에 따라 로컬 `npm run check`·`check:full`로 대체). 이제 병합 전 검증 = `npm run check`(lint·typecheck 루트+클라이언트 TS/JS+서버·ts ratchet·브라우저 하한·test·build:web), DB·동시성·통계·마이그레이션·Docker 변경과 릴리스 전 = `npm run check:full`(+실DB 통합·운영 버전 pytest·audit·gitleaks), push 전 `npm run verify:secrets`. **다음 Phase로 넘어가는 조건·이월**: ① G5 영상 분석 apply 골든 → Phase 1에서 `server/src/routes/videoAnalysis.ts`를 건드리기 전 ② G10 preload `invoke` 반환 계약 → Phase 3 전 ③ PC 부하 시 서버 테스트 2건 1회 실패 기록 → 재발 시 조사 ④ **W3 뒤 첫 릴리스는 오프라인 패키지 리허설 필수**(착수 순서 5번) ⑤ 현장 PC 크롬 버전 확인은 다음 배포 때 access.log로(P0-5).
 
 | # | 목표 | 파일/내용 | 재사용 | 위험/크기 | 검증 |
 |---|---|---|---|---|---|
@@ -373,7 +375,7 @@ shared/contracts/{aiAnalysis,aiPrompt,aiModels}.ts  # AI 입력 계약(.strict) 
 | Phase | 자동 | 수동 | DoD |
 |---|---|---|---|
 | H | HF별 단위/라우트 테스트(간호 계정 비담당 덮어쓰기 불가 · 임시비번 403 · preload 콜백에 event 없음 · `/api` no-store · 외부 벤더 미비식별 400 · 웹 토큰 없음 403/초과 429 · 서명 불일치 다운로드 거부) | 7.1.4 설치본 릴리스 게이트(`docs/UPDATE_7.1.4.md`: 설치·EMR·AI·일괄 import roundtrip·서명 업데이트 실기기 시험), Vercel preview | 7.1.4 운영 배포 완료(HF8 포함; 코드 머지는 완료, 배포는 게이트 통과 후) |
-| 0 | `npm run check`·`check:full` 통과(D9), G1–G10 존재, suppressions 수 추세 ↓, `git ls-files --eol` CRLF 0 | 현장 PC 크롬 버전 확인 | `.jsx` 린트됨·src typecheck 켜짐·`@wr/*` 단일 해석·skip 0 |
+| 0 — ✅ 달성(2026-11-07: check·check:full 통과, G1–G10 존재(G5 영상 apply만 이월), CRLF 0, `.jsx` 린트·src typecheck·`@wr/*` 단일 해석) | `npm run check`·`check:full` 통과(D9), G1–G10 존재, suppressions 수 추세 ↓, `git ls-files --eol` CRLF 0 | 현장 PC 크롬 버전 확인(다음 배포 때) | `.jsx` 린트됨·src typecheck 켜짐·`@wr/*` 단일 해석·skip 0 |
 | 1 | 서버 unit/integration 프로젝트, G5/G6 불변, `grep res.status(500)` 0, `patient_records` 쓰기 파일 1 | 실DB 동시성(PATCH/락/claim), Tier-3(docker postgres → dev-intranet-server.ps1 → `npm run dev`) | 라우트 ≤400줄·하네스 단일·`stats/` 트리·체크섬 활성·SIGTERM 정상 종료·보안 bundle 종결 |
 | 2 | G1–G4·G8·G9 불변, lint: core→modules 0·`window.electron` 어댑터 외 0·stylelint 0, `typecheck:client` 전 파일 | 두 Electron 타깃 + Vercel preview 스모크, 다크모드 육안, Chrome 109 환경 1회 | `App.jsx` ≤200줄·매니페스트 검증·서술 단일 소스 ADR·twin parity·src TS ≥80% |
 | 3 | Electron 테스트 82+·`ipcRegistration`·asar 검사·버전 일관성 | 설치본 2종 설치·업데이트 경로 | `main.js` ≤150줄·타깃별 IPC·`build-target.json` 없음·asar <40MB |
@@ -402,9 +404,13 @@ shared/contracts/{aiAnalysis,aiPrompt,aiModels}.ts  # AI 입력 계약(.strict) 
 1. (완료) 결정 D1–D8과 정정 사항(서버 vitest=dist, AI 분기=analysisClient.js)을 메모리에 저장함.
 2. **Phase H 코드·릴리스 문서 main 머지 완료**(2026-10-18, PR #159~#172, HEAD `77e6686`, 버전 7.1.4). 세부 결과는 Phase H 섹션 "구현 결과", 계획은 메모리 `project_phase_h_hotfix_plan`.
 3. ✅ **7.1.4 운영 배포 완료(2026-10-31)**. 당시 절차(기록용): `npm run electron:build:intranet`(EMR 헬퍼 빌드 `build:emr-helper`에 Windows 기본 포함 .NET Framework 4의 `C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe`가 필요 — 별도 dotnet SDK 불필요) → `export-offline-package.ps1 -UpdateSigningKey "<비밀 키>"`(암호가 걸린 키면 같은 창에 `WR_UPDATE_SIGNING_PASSPHRASE` 설정) → `docs/UPDATE_7.1.4.md` 릴리스 게이트(설치본 수동 점검 + 서명 업데이트 실기기 시험) 통과 → 운영 배포. 서명 비밀 키와 암호는 오프라인 백업.
-4. (2026-11-06) 운영 작업 "접속자 실제 IP 기록"(v7.1.5·v7.1.6, 호스트 Caddy 8443 전환)이 끝나 Phase 0으로 돌아온다. **줄끝(P0-8) → .jsx 린트(P0-4)부터**. CI(P0-1)는 D9에 따라 보류하고, 로컬 `npm run check` 묶기는 P0-4 이후 래칫을 넣을 때 함께 만든다.
+4. ✅ (2026-11-06~07) Phase 0 완료 — 운영 작업 "접속자 실제 IP 기록"(v7.1.5·v7.1.6) 뒤 Phase 0으로 돌아와 PR #186~#211로 끝냄(아래는 당시 순서 기록). **줄끝(P0-8) → .jsx 린트(P0-4)부터**. CI(P0-1)는 D9에 따라 보류하고, 로컬 `npm run check` 묶기는 P0-4 이후 래칫을 넣을 때 함께 만든다.
 5. **P0-7 W3(npm workspaces·Dockerfile 재구성) 머지 뒤 첫 릴리스는 오프라인 패키지 리허설 필수** — `export-offline-package.ps1`로 만든 패키지를 `verify-stack.ps1`로 띄워 로그인·환자 저장·통계 분석·업데이트 피드까지 확인한 뒤 배포한다(이미지 구조가 `/app/server` 기준으로 바뀜).
 6. 각 Phase 완료 시 이 문서의 해당 표에 "완료(PR#, 날짜)"를 기록하고 메모리 `project_refactoring_roadmap`을 갱신한다.
+7. **새 세션 시작점 = Phase 1(서버), S1(asyncHandler + 중앙 에러 매퍼)부터.** 진행 방법:
+   - 플랜 모드로 Phase 1 세부 계획을 세운다 — PR 단위로 쪼개고, 위 Phase 1 표와 부록 B의 줄 번호는 2026-10 기준이므로 현재 main에서 그래프(code-review-graph)·부분 Read로 다시 확인한다. 계획은 `plan-codex-loop`으로 검토(차단 0)한 뒤 사용자 승인.
+   - 승인 후 PR마다: `npm run check`(서버·DB·동시성·통계·마이그레이션·Docker를 건드리면 `npm run check:full`) → `npm run verify:secrets` → push → PR → `pr-codex-loop` → 차단 0이면 squash 머지(Phase 0와 같은 방식, 회차 상한·기각한 차단이 남으면 멈추고 묻는다).
+   - Phase 0에서 이어지는 조건: 골든 G1~G10은 리팩터링 PR에서 바뀌면 안 된다(바뀌면 코드를 고친다) · 새 서버 테스트와 S3 이관은 `server/src/testing/`(fakePool·tokens·configMock·makeRouterApp, 사용 예 `harnessUsage.test.ts`)을 쓴다 · S7이 SQL 순서를 바꾸는 라우트는 재목킹 대신 실DB 통합 테스트로 · `videoAnalysis.ts`를 건드리기 전 G5 영상 apply 골든을 먼저 만든다 · 성능 효과를 주장하는 변경은 `docs/PERF_BASELINE.md`의 같은 도구로 전/후를 잰다 · 새 클라이언트 코드는 TS(strict), 새 `@ts-nocheck` 금지(ratchet).
 
 ---
 
