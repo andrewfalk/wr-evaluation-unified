@@ -32,18 +32,17 @@ const BLOCKING = new Set(['high', 'critical']);
 
 // Does `version` (x.y.z[-pre]) fall in an advisory `range` as npm audit reports it — comparator sets
 // joined by `||`, each a space-separated AND of `<`, `<=`, `>`, `>=`, `=` (or bare) x.y.z bounds, or `*`?
-// Returns null when either side cannot be parsed, so the caller can treat it as vulnerable.
+// Returns null when either side cannot be parsed — including any prerelease version or bound, whose
+// SemVer ordering (identifier-wise, numeric parts as numbers) this small comparator does not implement —
+// so the caller keeps the location (unknown = vulnerable) instead of wrongly dropping it.
 export function versionInRange(version, range) {
   const parse = (v) => {
-    const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(String(v).trim());
-    return m ? { nums: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ?? null } : null;
+    const m = /^v?(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?$/.exec(String(v).trim());
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
   };
   const cmp = (a, b) => {
-    for (let i = 0; i < 3; i += 1) if (a.nums[i] !== b.nums[i]) return a.nums[i] < b.nums[i] ? -1 : 1;
-    if (a.pre === b.pre) return 0;
-    if (a.pre === null) return 1; // 1.0.0 > 1.0.0-rc
-    if (b.pre === null) return -1;
-    return a.pre < b.pre ? -1 : 1;
+    for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+    return 0;
   };
   const v = parse(version);
   if (!v || typeof range !== 'string' || range.trim() === '') return null;

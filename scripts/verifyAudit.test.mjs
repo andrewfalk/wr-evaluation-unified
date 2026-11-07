@@ -146,7 +146,10 @@ describe('verify-audit per-advisory version ranges', () => {
     expect(versionInRange('3.0.6', '>=2.0.0 <3.0.6')).toBe(false);
     expect(versionInRange('1.0.0', '<=0.9.0 || >=1.0.0 <1.0.2')).toBe(true);
     expect(versionInRange('1.0.2', '<=0.9.0 || >=1.0.0 <1.0.2')).toBe(false);
-    expect(versionInRange('1.0.0-rc.1', '<1.0.0')).toBe(true);
+    // Prerelease ordering is not implemented — never decide, so the location is kept (unknown = vulnerable).
+    expect(versionInRange('1.0.0-rc.1', '<1.0.0')).toBeNull();
+    expect(versionInRange('1.0.0-rc.2', '>=1.0.0-rc.1 <1.0.0-rc.10')).toBeNull();
+    expect(versionInRange('1.0.0', '<1.0.1-beta.1')).toBeNull();
     expect(versionInRange('4.1.0', '*')).toBe(true);
     expect(versionInRange('1.2.3', '=1.2.3')).toBe(true);
     expect(versionInRange(undefined, '<1.0.0')).toBeNull();
@@ -183,6 +186,30 @@ describe('verify-audit per-advisory version ranges', () => {
     const allow = { entries: [{ workspace: 'root', package: 'foo', advisories: ['GHSA-A'] }, { workspace: 'server', package: 'foo', advisories: ['GHSA-B'] }] };
     expect(evaluate('root', rootAdv, allow).failures).toEqual([]);
     expect(evaluate('server', serverAdv, allow).failures).toEqual([]);
+  });
+
+  it('a prerelease install inside a prerelease range stays attributed (Codex review of #210)', () => {
+    // root foo@1.0.0-rc.2, server foo@1.0.0-rc.1, advisory >=1.0.0-rc.1 <1.0.0-rc.10 allowed for server only.
+    const lock = {
+      packages: {
+        '': { dependencies: { foo: '*' } },
+        server: { dependencies: { foo: '*' } },
+        'node_modules/foo': { version: '1.0.0-rc.2' },
+        'server/node_modules/foo': { version: '1.0.0-rc.1' },
+      },
+    };
+    const report = {
+      vulnerabilities: {
+        foo: {
+          nodes: ['node_modules/foo', 'server/node_modules/foo'],
+          via: [{ url: 'https://github.com/advisories/GHSA-P', severity: 'high', title: 'P', range: '>=1.0.0-rc.1 <1.0.0-rc.10' }],
+        },
+      },
+    };
+    const advisories = advisoriesFrom(report, lock);
+    const rootAdv = advisoriesFor(reachableLocations(lock, ''), advisories);
+    const allow = { entries: [{ workspace: 'server', package: 'foo', advisories: ['GHSA-P'] }] };
+    expect(evaluate('root', rootAdv, allow).failures.map((a) => a.id)).toEqual(['GHSA-P']);
   });
 
   it('keeps a location whose version or the advisory range cannot be read (unknown = vulnerable)', () => {
