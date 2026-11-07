@@ -65,10 +65,31 @@ function makeSessionOnlyFake(options: { revoked?: boolean } = {}): FakePool {
   return createFakePool({ handlers: [authSessionHandler({ revoked: options.revoked })] });
 }
 
+// emr_audit_nonces as the handler uses it (SEC-A L11): a claimed nonce is kept on COMMIT and dropped
+// on ROLLBACK, and a kept one answers the next claim with 0 rows. One store per fake (per test).
+function nonceHandlers(): QueryHandler[] {
+  const committed = new Set<string>();
+  let pending: string | null = null;
+  return [
+    {
+      name: 'nonce.claim', via: 'client', match: /INSERT INTO emr_audit_nonces/,
+      reply: (_sql, params) => {
+        const key = `${String(params[0])}:${String(params[1])}`;
+        if (committed.has(key)) return { rows: [], rowCount: 0 };
+        pending = key;
+        return { rows: [{ '?column?': 1 }], rowCount: 1 };
+      },
+    },
+    { name: 'tx.commit', via: 'client', match: /^\s*COMMIT\b/, reply: () => { if (pending) committed.add(pending); pending = null; return { rows: [] }; } },
+    { name: 'tx.rollback', via: 'client', match: /^\s*ROLLBACK\b/, reply: () => { pending = null; return { rows: [] }; } },
+  ];
+}
+
 function deviceHandlers(deviceRow: object | null): QueryHandler[] {
   return [
     { name: 'devices.select', match: /FROM devices WHERE id = \$1/, reply: { rows: deviceRow ? [deviceRow] : [] } },
     { name: 'devices.touch', match: /UPDATE devices SET last_seen_at = now\(\)/, reply: { rows: [] } },
+    ...nonceHandlers(),
   ];
 }
 
@@ -397,14 +418,18 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-device-nonce', devNonce)
       .send(VALID_BODY);
 
+    // Written with the transaction's client, inside the same transaction that claimed the nonce (SEC-A L11).
     expect(writeAuditLogStrict).toHaveBeenCalledWith(
-      fake.pool,
+      expect.objectContaining({ query: expect.any(Function), release: expect.any(Function) }),
       expect.objectContaining({
         actorUserId: 'user-1',
         action:      'emr_inject',
         outcome:     'success',
       })
     );
+    expect(fake.transactions).toEqual([{ clientId: 1, statements: ['BEGIN', 'COMMIT'], outcome: 'commit' }]);
+    expect(fake.callsTo('nonce.claim')).toHaveLength(1);
+    fake.assertAllReleased();
   });
 
   it('returns 401 when device.organization_id !== session.organizationId', async () => {
@@ -467,18 +492,12 @@ describe('POST /api/audit/emr', () => {
       public_key:      exportPublicKey(publicKey),
       status:          'active',
     });
-    const fake2      = makeDeviceFake({
-      user_id:         'user-1',
-      organization_id: 'org-1',
-      public_key:      exportPublicKey(publicKey),
-      status:          'active',
-    });
     const app        = auditApp(fake1);
     const ts         = new Date().toISOString();
     const replayNonce = nonce();
     const sig         = signPayload(privateKey, 'dev-1', ts, replayNonce, VALID_BODY);
 
-    await request(app)
+    const res1 = await request(app)
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
       .set('x-wr-source',     'electron-main')
@@ -487,9 +506,11 @@ describe('POST /api/audit/emr', () => {
       .set('x-wr-device-ts',    ts)
       .set('x-wr-device-nonce', replayNonce)
       .send(VALID_BODY);
+    expect(res1.status).toBe(200);
 
-    // Replay with same nonce — must be rejected even though signature is valid
-    const res2 = await request(auditApp(fake2))
+    // Replay with same nonce — must be rejected even though signature is valid. A second app instance on
+    // the same database (as after a server restart): the nonce is in the database now, not in memory.
+    const res2 = await request(auditApp(fake1))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
       .set('x-wr-source',     'electron-main')
@@ -531,7 +552,7 @@ describe('POST /api/audit/emr', () => {
     expect(res.status).toBe(200);
     // Actor falls back to device.user_id / device.organization_id
     expect(writeAuditLogStrict).toHaveBeenCalledWith(
-      fake.pool,
+      expect.objectContaining({ query: expect.any(Function) }), // the nonce transaction's client
       expect.objectContaining({
         actorUserId: 'user-1',
         actorOrgId:  'org-1',
