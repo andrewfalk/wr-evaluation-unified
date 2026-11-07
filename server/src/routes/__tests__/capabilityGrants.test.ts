@@ -230,6 +230,8 @@ describe('POST /api/capabilities/grants', () => {
       .send({ userId: '11111111-1111-4111-8111-111111111111', capability: 'stats.view', reason: 'research' });
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
+    expect(writeAuditLogStrict).toHaveBeenCalledTimes(1); // the 500 comes from the audit failure, not an unanswered query
+    fake.assertNoUnmatched();
     expect(clientCalls(fake).some(c => c.sql === 'COMMIT')).toBe(false);
     expect(clientCalls(fake).some(c => c.sql === 'ROLLBACK')).toBe(true);
   });
@@ -288,6 +290,7 @@ describe('POST /api/capabilities/grants/:id/revoke', () => {
   it('rolls back when the strict audit write fails', async () => {
     const fake = makeTxFake(
       { rows: [{ id: 'grant-1', user_id: 'user-1', capability: 'stats.view', revoked_at: null }] },
+      { rows: [] }, // UPDATE … SET revoked_at — the audit write comes after it
     );
     writeAuditLogStrict.mockRejectedValueOnce(new Error('audit db down'));
     const res = await request(grantsApp(fake))
@@ -296,6 +299,8 @@ describe('POST /api/capabilities/grants/:id/revoke', () => {
       .send({});
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
+    expect(writeAuditLogStrict).toHaveBeenCalledTimes(1); // the 500 comes from the audit failure, not an unanswered query
+    fake.assertNoUnmatched();
     expect(clientCalls(fake).some(c => c.sql === 'COMMIT')).toBe(false);
     expect(clientCalls(fake).some(c => c.sql === 'ROLLBACK')).toBe(true);
   });
