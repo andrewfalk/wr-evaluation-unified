@@ -22,6 +22,7 @@ vi.mock('../../../services/statsRepository', () => ({
 }));
 
 import { StatisticsWorkbench } from '../StatisticsWorkbench.jsx';
+import { installDefaultPreview } from '../../../fixtures/statsPreviewFixture';
 
 const SESSION = { apiBaseUrl: 'https://intranet.local', accessToken: 'tok' };
 
@@ -129,6 +130,7 @@ function discreteAnalyzeResponse(variableKey, level) {
 afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
+  installDefaultPreview(previewStatsAnalysis);
   window.innerWidth = 1920;
 });
 
@@ -172,8 +174,8 @@ describe('StatisticsWorkbench — grain 선택(person grain 삭제 후속)', () 
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
 
-    await user.click(await screen.findByRole('button', { name: '상병(disease)' }));
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await user.click(await screen.findByRole('button', { name: '상병(disease)' }));
     await user.click(screen.getByRole('checkbox', { name: /대표 직종명/ }));
     await waitForDebounce();
 
@@ -214,8 +216,8 @@ describe('StatisticsWorkbench — grain 선택(person grain 삭제 후속)', () 
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
 
-    await user.click(await screen.findByRole('button', { name: '직업(job)' }));
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await user.click(await screen.findByRole('button', { name: '직업(job)' }));
     await user.click(screen.getByRole('checkbox', { name: /직종명\(정규화\)/ }));
     await waitForDebounce();
 
@@ -231,8 +233,8 @@ describe('StatisticsWorkbench — grain 선택(person grain 삭제 후속)', () 
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
 
-    await user.click(await screen.findByRole('button', { name: '직업(job)' }));
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await user.click(await screen.findByRole('button', { name: '직업(job)' }));
     await user.click(screen.getByRole('checkbox', { name: /성별/ }));
     await waitForDebounce();
 
@@ -269,9 +271,8 @@ describe('StatisticsWorkbench — grain 선택(person grain 삭제 후속)', () 
     fetchStatsCatalog.mockResolvedValueOnce(catalogFixture());
     render(<StatisticsWorkbench session={SESSION} statsAvailable onClose={() => {}} />);
 
-    await user.click(await screen.findByRole('button', { name: '상병(disease)' }));
-
     previewStatsAnalysis.mockResolvedValueOnce(readyPreview());
+    await user.click(await screen.findByRole('button', { name: '상병(disease)' }));
     await user.click(screen.getByRole('checkbox', { name: /K-L Grade/ }));
     await waitForDebounce();
     expect(previewStatsAnalysis).toHaveBeenCalledWith(

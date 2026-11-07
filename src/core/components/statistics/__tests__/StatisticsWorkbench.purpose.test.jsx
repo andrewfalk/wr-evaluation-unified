@@ -17,6 +17,7 @@ vi.mock('../../../services/statsRepository', () => ({
 }));
 
 import { StatisticsWorkbench } from '../StatisticsWorkbench.jsx';
+import { installDefaultPreview } from '../../../fixtures/statsPreviewFixture';
 
 const SESSION = { apiBaseUrl: 'https://intranet.local', accessToken: 'tok' };
 
@@ -56,6 +57,7 @@ async function waitForDebounce() {
 afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
+  installDefaultPreview(previewStatsAnalysis);
   window.innerWidth = 1920;
   previewStatsAnalysis.mockReturnValue(new Promise(() => {})); // 미리보기는 기본적으로 보류
 });
