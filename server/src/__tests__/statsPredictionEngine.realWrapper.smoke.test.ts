@@ -32,8 +32,8 @@ if (REQUIRE_PYTHON && !AVAILABLE) {
   );
 }
 
-vi.mock('../config', () => ({
-  default: {
+vi.mock('../config', async () => ({
+  default: (await import('../testing/configMock.js')).testConfig({
     stats: {
       python: PYTHON,
       scriptsDir: SCRIPTS_DIR,
@@ -46,7 +46,7 @@ vi.mock('../config', () => ({
       maxInputBytes: 2 * 1024 * 1024,
       resultTtlHours: 168,
     },
-  },
+  }),
 }));
 
 function makeSyntheticRequest(n: number, p: number, seed: number) {

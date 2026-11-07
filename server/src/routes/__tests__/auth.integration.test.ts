@@ -4,8 +4,6 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import express from 'express';
-import cookieParser from 'cookie-parser';
 
 // ------------------------------------------------------------------
 // Mock heavy deps before importing the router under test
@@ -30,18 +28,12 @@ vi.mock('../../auth/csrf', async (importOriginal) => {
     validateCsrf:     vi.fn(() => true),   // default: CSRF passes
   };
 });
-vi.mock('../../config', () => ({
-  default: {
-    env: 'test',
-    auth: {
-      refreshTokenTtl:    604800,
-      accessTokenTtl:     900,
-      accessTokenSecret:  'test-access-secret',
-      refreshTokenSecret: 'test-refresh-secret',
-    },
-    ai:                  { enabled: false },
+vi.mock('../../config', async () => ({
+  default: (await import('../../testing/configMock.js')).testConfig({
+    auth:                 { refreshTokenTtl: 604800 },
+    ai:                   { enabled: false },
     localFallbackAllowed: false,
-  },
+  }),
 }));
 
 import { LocalDbAuthProvider } from '../../auth/LocalDbAuthProvider';
@@ -54,7 +46,13 @@ import {
 import { validateCsrf } from '../../auth/csrf';
 import { createAuthRouter } from '../auth';
 import { generateAccessToken } from '../../auth/tokens';
-import type { Pool, PoolClient } from 'pg';
+import {
+  createFakePool,
+  authSessionHandler,
+  type FakePool,
+  type QueryHandler,
+} from '../../testing/fakePool';
+import { makeRouterApp } from '../../testing/app';
 
 // ------------------------------------------------------------------
 // Helpers
@@ -68,24 +66,40 @@ const SESSION_ROW = {
   familyId:      'fam-1',
 };
 
-function makePool(overrides: Partial<Pool> = {}): Pool {
-  const release = vi.fn();
-  const client  = { query: vi.fn(), release } as unknown as PoolClient;
+// middleware/audit을 mock 하지 않으므로 auditLogin·auditLogout·auditRefresh*가 pool.query로
+// INSERT INTO audit_logs를 실제로 보낸다(기존 vi.fn() pool.query는 undefined를 돌려 조용히 통과).
+// 모든 가짜 Pool에 이 handler를 깔아 두고, 그 밖의 쿼리는 테스트마다 SQL로 고른 handler만 준다 —
+// 준비하지 않은 쿼리는 미매치로 거부되므로 각 테스트 끝에 assertNoUnmatched()로 확인한다.
+function makeFake(handlers: QueryHandler[] = []): FakePool {
+  return createFakePool({
+    handlers: [
+      { name: 'audit', match: /INSERT INTO audit_logs/, via: 'pool', reply: { rowCount: 1 } },
+      ...handlers,
+    ],
+  });
+}
+
+function authApp(fake: FakePool) {
+  return makeRouterApp(a => a.use('/api/auth', createAuthRouter(fake.pool)));
+}
+
+// login의 마지막 로그인 시각 갱신(트랜잭션 client).
+const lastLoginHandler: QueryHandler = {
+  name: 'users.lastLogin', match: /UPDATE users SET last_login_at = now\(\) WHERE id = \$1/, via: 'client', reply: { rowCount: 1 },
+};
+
+// refresh의 회전 전 사용자 조회(별도 client).
+function userLookupHandler(row: Record<string, unknown>): QueryHandler {
   return {
-    connect: vi.fn().mockResolvedValue(client),
-    query:   vi.fn(),
-    ...overrides,
-  } as unknown as Pool;
+    name:  'users.byId',
+    match: /SELECT id AS user_id, role, name, organization_id, must_change_password, disabled_at\s+FROM users WHERE id = \$1/,
+    via:   'client',
+    reply: { rows: [row] },
+  };
 }
 
-function makeApp(pool: Pool) {
-  const app = express();
-  app.use(express.json());
-  app.use(cookieParser());
-  app.use('/api/auth', createAuthRouter(pool));
-  return app;
-}
-
+// 토큰 클레임(sub 'user-1', csrfHash 'hash:csrf-tok')이 testing/tokens의 기본값(UUID·sha256)과 달라
+// makeAccessToken으로 바꾸지 않고 로컬 도우미를 그대로 둔다.
 function validToken(extra?: object): string {
   const { token } = generateAccessToken({
     sub:                'user-1',
@@ -107,28 +121,35 @@ describe('POST /api/auth/login', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 400 when body is missing required fields', async () => {
-    const pool = makePool();
-    const res  = await request(makeApp(pool)).post('/api/auth/login').send({});
+    const fake = makeFake();
+    const res  = await request(authApp(fake)).post('/api/auth/login').send({});
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('INVALID_BODY');
+    fake.assertNoUnmatched();
+    expect(LocalDbAuthProvider).not.toHaveBeenCalled();
+    expect(fake.connected).toBe(0);
   });
 
   it('returns 401 for invalid credentials', async () => {
-    const pool = makePool();
+    const fake = makeFake();
+    const verifyCredentials = vi.fn().mockResolvedValue(null);
     vi.mocked(LocalDbAuthProvider).mockImplementation(() => ({
-      verifyCredentials: vi.fn().mockResolvedValue(null),
+      verifyCredentials,
     }) as never);
 
-    const res = await request(makeApp(pool))
+    const res = await request(authApp(fake))
       .post('/api/auth/login')
       .send({ loginId: 'bad', password: 'wrong' });
 
     expect(res.status).toBe(401);
     expect(res.body.code).toBe('INVALID_CREDENTIALS');
+    fake.assertNoUnmatched();
+    expect(verifyCredentials).toHaveBeenCalledWith('bad', 'wrong');
+    expect(fake.connected).toBe(0);
   });
 
   it('returns 200 with accessToken and sets refresh cookie on success', async () => {
-    const pool = makePool();
+    const fake = makeFake([lastLoginHandler]);
     vi.mocked(LocalDbAuthProvider).mockImplementation(() => ({
       verifyCredentials: vi.fn().mockResolvedValue({
         userId:             'user-1',
@@ -146,10 +167,7 @@ describe('POST /api/auth/login', () => {
       persistentCookie: true,
     } as never);
 
-    const client = (await pool.connect()) as unknown as { query: ReturnType<typeof vi.fn> };
-    client.query.mockResolvedValue({ rows: [] });
-
-    const res = await request(makeApp(pool))
+    const res = await request(authApp(fake))
       .post('/api/auth/login')
       .send({ loginId: 'doc1', password: 'pass123' });
 
@@ -162,10 +180,14 @@ describe('POST /api/auth/login', () => {
     // rememberMe omitted → defaults to true → persistent cookie with Expires.
     expect(cookieStr).toContain('Expires=');
     expect(vi.mocked(createSession).mock.calls[0][4]).toBe(true);
+    fake.assertNoUnmatched();
+    expect(fake.callsTo('users.lastLogin')).toHaveLength(1);
+    expect(fake.transactions.map(t => t.outcome)).toEqual(['commit']);
+    fake.assertAllReleased();
   });
 
   it('issues a session cookie (no Expires) when rememberMe is false', async () => {
-    const pool = makePool();
+    const fake = makeFake([lastLoginHandler]);
     vi.mocked(LocalDbAuthProvider).mockImplementation(() => ({
       verifyCredentials: vi.fn().mockResolvedValue({
         userId:             'user-1',
@@ -183,10 +205,7 @@ describe('POST /api/auth/login', () => {
       persistentCookie: false,
     } as never);
 
-    const client = (await pool.connect()) as unknown as { query: ReturnType<typeof vi.fn> };
-    client.query.mockResolvedValue({ rows: [] });
-
-    const res = await request(makeApp(pool))
+    const res = await request(authApp(fake))
       .post('/api/auth/login')
       .send({ loginId: 'doc1', password: 'pass123', rememberMe: false });
 
@@ -197,6 +216,9 @@ describe('POST /api/auth/login', () => {
     expect(cookieStr).not.toContain('Expires=');
     // rememberMe=false is forwarded to createSession as the persistentCookie arg.
     expect(vi.mocked(createSession).mock.calls[0][4]).toBe(false);
+    fake.assertNoUnmatched();
+    expect(fake.transactions.map(t => t.outcome)).toEqual(['commit']);
+    fake.assertAllReleased();
   });
 });
 
@@ -207,62 +229,74 @@ describe('POST /api/auth/refresh', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when refresh cookie is absent', async () => {
-    const pool = makePool();
-    const res  = await request(makeApp(pool)).post('/api/auth/refresh');
+    const fake = makeFake();
+    const res  = await request(authApp(fake)).post('/api/auth/refresh');
     expect(res.status).toBe(401);
     expect(res.body.code).toBe('NO_REFRESH_TOKEN');
+    fake.assertNoUnmatched();
+    expect(verifySession).not.toHaveBeenCalled();
   });
 
   it('returns 401 when session is invalid', async () => {
-    const pool = makePool();
+    const fake = makeFake();
     vi.mocked(verifySession).mockResolvedValue(null);
 
-    const res = await request(makeApp(pool))
+    const res = await request(authApp(fake))
       .post('/api/auth/refresh')
       .set('Cookie', 'wr_refresh=bad-token');
 
     expect(res.status).toBe(401);
     expect(res.body.code).toBe('SESSION_INVALID');
+    fake.assertNoUnmatched();
+    expect(verifySession).toHaveBeenCalledWith(expect.anything(), 'bad-token');
+    fake.assertAllReleased();
   });
 
   it('returns 403 when CSRF is invalid', async () => {
-    const pool = makePool();
+    const fake = makeFake();
     vi.mocked(verifySession).mockResolvedValue(SESSION_ROW as never);
     vi.mocked(validateCsrf).mockReturnValue(false);
 
-    const res = await request(makeApp(pool))
+    const res = await request(authApp(fake))
       .post('/api/auth/refresh')
       .set('Cookie', 'wr_refresh=valid-token')
       .set('x-csrf-token', 'bad-csrf');
 
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('CSRF_INVALID');
+    fake.assertNoUnmatched();
+    expect(validateCsrf).toHaveBeenCalledWith('bad-csrf', SESSION_ROW.csrfTokenHash);
+    fake.assertAllReleased();
   });
 
   it('returns 401 when rotation returns null (already rotated)', async () => {
-    const pool = makePool();
+    const fake = makeFake([userLookupHandler({
+      user_id: 'user-1', role: 'doctor', name: 'Dr. Kim',
+      organization_id: 'org-1', must_change_password: false, disabled_at: null,
+    })]);
     vi.mocked(verifySession).mockResolvedValue(SESSION_ROW as never);
     vi.mocked(validateCsrf).mockReturnValue(true);
     vi.mocked(rotateSession).mockResolvedValue(null);
-    const client = (await pool.connect()) as unknown as { query: ReturnType<typeof vi.fn> };
-    client.query.mockResolvedValue({
-      rows: [{
-        user_id: 'user-1', role: 'doctor', name: 'Dr. Kim',
-        organization_id: 'org-1', must_change_password: false, disabled_at: null,
-      }],
-    });
 
-    const res = await request(makeApp(pool))
+    const res = await request(authApp(fake))
       .post('/api/auth/refresh')
       .set('Cookie', 'wr_refresh=valid-token')
       .set('x-csrf-token', 'ok');
 
     expect(res.status).toBe(401);
     expect(res.body.code).toBe('SESSION_ALREADY_ROTATED');
+    fake.assertNoUnmatched();
+    expect(fake.callsTo('users.byId')).toHaveLength(1);
+    expect(rotateSession).toHaveBeenCalledTimes(1);
+    fake.assertAllReleased();
   });
 
   it('returns 200 with new accessToken and current user on valid refresh', async () => {
-    const pool   = makePool();
+    // client query for the user lookup
+    const fake = makeFake([userLookupHandler({
+      user_id: 'user-1', role: 'doctor', name: 'Dr. Kim',
+      organization_id: 'org-1', must_change_password: false, disabled_at: null,
+    })]);
     vi.mocked(verifySession).mockResolvedValue(SESSION_ROW as never);
     vi.mocked(validateCsrf).mockReturnValue(true);
     vi.mocked(rotateSession).mockResolvedValue({
@@ -273,16 +307,7 @@ describe('POST /api/auth/refresh', () => {
       persistentCookie: true,
     } as never);
 
-    // pool.connect().query for user lookup
-    const client = (await pool.connect()) as unknown as { query: ReturnType<typeof vi.fn> };
-    client.query.mockResolvedValue({
-      rows: [{
-        user_id: 'user-1', role: 'doctor', name: 'Dr. Kim',
-        organization_id: 'org-1', must_change_password: false, disabled_at: null,
-      }],
-    });
-
-    const res = await request(makeApp(pool))
+    const res = await request(authApp(fake))
       .post('/api/auth/refresh')
       .set('Cookie', 'wr_refresh=valid-token')
       .set('x-csrf-token', 'ok');
@@ -295,10 +320,15 @@ describe('POST /api/auth/refresh', () => {
       organizationId:     'org-1',
       mustChangePassword: false,
     });
+    fake.assertNoUnmatched();
+    fake.assertAllReleased();
   });
 
   it('keeps a session cookie (no Expires) on refresh when the session policy is non-persistent', async () => {
-    const pool   = makePool();
+    const fake = makeFake([userLookupHandler({
+      user_id: 'user-1', role: 'doctor', name: 'Dr. Kim',
+      organization_id: 'org-1', must_change_password: false, disabled_at: null,
+    })]);
     vi.mocked(verifySession).mockResolvedValue(SESSION_ROW as never);
     vi.mocked(validateCsrf).mockReturnValue(true);
     vi.mocked(rotateSession).mockResolvedValue({
@@ -309,15 +339,7 @@ describe('POST /api/auth/refresh', () => {
       persistentCookie: false,
     } as never);
 
-    const client = (await pool.connect()) as unknown as { query: ReturnType<typeof vi.fn> };
-    client.query.mockResolvedValue({
-      rows: [{
-        user_id: 'user-1', role: 'doctor', name: 'Dr. Kim',
-        organization_id: 'org-1', must_change_password: false, disabled_at: null,
-      }],
-    });
-
-    const res = await request(makeApp(pool))
+    const res = await request(authApp(fake))
       .post('/api/auth/refresh')
       .set('Cookie', 'wr_refresh=valid-token')
       .set('x-csrf-token', 'ok');
@@ -327,23 +349,20 @@ describe('POST /api/auth/refresh', () => {
     const cookieStr = Array.isArray(cookie) ? cookie.join(';') : String(cookie ?? '');
     expect(cookieStr).toContain('wr_refresh');
     expect(cookieStr).not.toContain('Expires=');
+    fake.assertNoUnmatched();
+    fake.assertAllReleased();
   });
 
   it('returns 401 and does not rotate when the user account is disabled', async () => {
-    const pool = makePool();
+    const fake = makeFake([userLookupHandler({
+      user_id: 'user-1', role: 'doctor', name: 'Dr. Kim',
+      organization_id: 'org-1', must_change_password: false,
+      disabled_at: '2026-01-01T00:00:00Z',
+    })]);
     vi.mocked(verifySession).mockResolvedValue(SESSION_ROW as never);
     vi.mocked(validateCsrf).mockReturnValue(true);
 
-    const client = (await pool.connect()) as unknown as { query: ReturnType<typeof vi.fn> };
-    client.query.mockResolvedValue({
-      rows: [{
-        user_id: 'user-1', role: 'doctor', name: 'Dr. Kim',
-        organization_id: 'org-1', must_change_password: false,
-        disabled_at: '2026-01-01T00:00:00Z',
-      }],
-    });
-
-    const res = await request(makeApp(pool))
+    const res = await request(authApp(fake))
       .post('/api/auth/refresh')
       .set('Cookie', 'wr_refresh=valid-token')
       .set('x-csrf-token', 'ok');
@@ -351,6 +370,9 @@ describe('POST /api/auth/refresh', () => {
     expect(res.status).toBe(401);
     expect(res.body.code).toBe('USER_DISABLED');
     expect(rotateSession).not.toHaveBeenCalled();
+    fake.assertNoUnmatched();
+    expect(fake.callsTo('users.byId')).toHaveLength(1);
+    fake.assertAllReleased();
   });
 });
 
@@ -361,39 +383,51 @@ describe('GET /api/auth/me', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when no Authorization header', async () => {
-    const pool = makePool();
-    const res  = await request(makeApp(pool)).get('/api/auth/me');
+    const fake = makeFake();
+    const res  = await request(authApp(fake)).get('/api/auth/me');
     expect(res.status).toBe(401);
+    fake.assertNoUnmatched();
+    expect(fake.calls).toHaveLength(0);
   });
 
   it('returns 401 when DB session is revoked (SESSION_REVOKED)', async () => {
     const token = validToken();
-    // pool.query returns empty → session revoked
-    const pool  = { ...makePool(), query: vi.fn().mockResolvedValue({ rows: [] }) } as unknown as Pool;
+    // session check returns no rows → session revoked
+    const fake  = makeFake([authSessionHandler({ revoked: true })]);
 
-    const res = await request(makeApp(pool))
+    const res = await request(authApp(fake))
       .get('/api/auth/me')
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(401);
     expect(res.body.code).toBe('SESSION_REVOKED');
+    fake.assertNoUnmatched();
+    expect(fake.callsTo('auth.session')).toHaveLength(1);
+    expect(fake.connected).toBe(0);
   });
 
   it('returns 200 with user info when JWT + session are valid', async () => {
     const token = validToken();
-    // pool.query for auth middleware returns a live session row
-    const innerPool = makePool();
-    vi.mocked(innerPool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    // pool.connect().query for org lookup
-    const client = (await innerPool.connect()) as unknown as { query: ReturnType<typeof vi.fn> };
-    client.query.mockResolvedValue({ rows: [{ id: 'org-1', name: 'Seoul Hospital' }] });
+    const fake = makeFake([
+      // auth middleware session check returns a live session row
+      authSessionHandler(),
+      // client query for org lookup
+      {
+        name:  'organizations.byId',
+        match: /SELECT id, name FROM organizations WHERE id = \$1/,
+        via:   'client',
+        reply: { rows: [{ id: 'org-1', name: 'Seoul Hospital' }] },
+      },
+    ]);
 
-    const res = await request(makeApp(innerPool))
+    const res = await request(authApp(fake))
       .get('/api/auth/me')
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
     expect(res.body.user).toMatchObject({ id: 'user-1', role: 'doctor' });
+    fake.assertNoUnmatched();
+    fake.assertAllReleased();
   });
 });
 
@@ -406,42 +440,54 @@ describe('POST /api/auth/logout', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('is idempotent (200) when no refresh cookie is present — nothing to revoke', async () => {
-    const pool = makePool();
-    const res  = await request(makeApp(pool)).post('/api/auth/logout');
+    const fake = makeFake();
+    const res  = await request(authApp(fake)).post('/api/auth/logout');
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(revokeSessionFamily).not.toHaveBeenCalled();
+    fake.assertNoUnmatched();
   });
 
   it('is idempotent (200) when the refresh cookie is invalid/expired — nothing to revoke', async () => {
-    const pool = makePool();
+    const fake = makeFake();
     vi.mocked(revokeSessionFamily).mockResolvedValue({ status: 'not_found' });
 
-    const res = await request(makeApp(pool))
+    const res = await request(authApp(fake))
       .post('/api/auth/logout')
       .set('Cookie', 'wr_refresh=stale-token');
 
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
+    fake.assertNoUnmatched();
+    expect(revokeSessionFamily).toHaveBeenCalledTimes(1);
+    expect(fake.connected).toBe(0);
   });
 
   it('returns 403 when CSRF is invalid — does not revoke', async () => {
     // CSRF is now validated inside revokeSessionFamily itself (same transaction
     // as the revoke), not as a separate route-level pre-check — see auth.ts.
-    const pool = makePool();
+    const fake = makeFake();
     vi.mocked(revokeSessionFamily).mockResolvedValue({ status: 'csrf_invalid' });
 
-    const res = await request(makeApp(pool))
+    const res = await request(authApp(fake))
       .post('/api/auth/logout')
       .set('Cookie', 'wr_refresh=valid-token')
       .set('x-csrf-token', 'bad-csrf');
 
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('CSRF_INVALID');
+    fake.assertNoUnmatched();
+    expect(revokeSessionFamily).toHaveBeenCalledWith(expect.anything(), 'valid-token', 'bad-csrf');
+    expect(fake.calls).toHaveLength(0);
   });
 
   it('returns 200 and revokes the session family when the refresh cookie + CSRF are valid — no access token needed', async () => {
-    const pool = makePool();
+    const fake = makeFake([{
+      name:  'users.orgById',
+      match: /SELECT organization_id FROM users WHERE id = \$1/,
+      via:   'client',
+      reply: { rows: [{ organization_id: 'org-1' }] },
+    }]);
     vi.mocked(revokeSessionFamily).mockResolvedValue({
       status:    'revoked',
       sessionId: SESSION_ROW.sessionId,
@@ -449,10 +495,7 @@ describe('POST /api/auth/logout', () => {
       familyId:  SESSION_ROW.familyId,
     });
 
-    const client = (await pool.connect()) as unknown as { query: ReturnType<typeof vi.fn> };
-    client.query.mockResolvedValue({ rows: [{ organization_id: 'org-1' }] });
-
-    const res = await request(makeApp(pool))
+    const res = await request(authApp(fake))
       .post('/api/auth/logout')
       .set('Cookie', 'wr_refresh=valid-token')
       .set('x-csrf-token', 'ok');
@@ -461,19 +504,23 @@ describe('POST /api/auth/logout', () => {
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(revokeSessionFamily).toHaveBeenCalledWith(expect.anything(), 'valid-token', 'ok');
+    fake.assertNoUnmatched();
+    expect(fake.callsTo('users.orgById')).toHaveLength(1);
+    fake.assertAllReleased();
   });
 
   it('blocks /me after session is revoked in DB', async () => {
     const token = validToken();
-    // First call (auth middleware check) → revoked (empty rows)
-    const innerPool = makePool();
-    vi.mocked(innerPool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [] });
+    // auth middleware session check → revoked (empty rows)
+    const fake = makeFake([authSessionHandler({ revoked: true })]);
 
-    const meRes = await request(makeApp(innerPool))
+    const meRes = await request(authApp(fake))
       .get('/api/auth/me')
       .set('Authorization', `Bearer ${token}`);
 
     expect(meRes.status).toBe(401);
     expect(meRes.body.code).toBe('SESSION_REVOKED');
+    fake.assertNoUnmatched();
+    expect(fake.callsTo('auth.session')).toHaveLength(1);
   });
 });
