@@ -1,22 +1,12 @@
 import crypto from 'crypto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import express from 'express';
-import cookieParser from 'cookie-parser';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
-vi.mock('../../config', () => ({
-  default: {
-    env:  'test',
-    cors: { origins: [] },
-    auth: {
-      accessTokenTtl:     900,
-      accessTokenSecret:  'test-access-secret',
-      refreshTokenSecret: 'test-refresh-secret',
-    },
-  },
+vi.mock('../../config', async () => ({
+  default: (await import('../../testing/configMock.js')).testConfig(),
 }));
 
 vi.mock('../../middleware/audit', () => ({
@@ -25,17 +15,13 @@ vi.mock('../../middleware/audit', () => ({
 }));
 
 import { createAuditRouter } from '../audit';
-import { createErrorHandler } from '../../http/errorHandler';
-import { createLogger } from '../../logger';
-import { generateAccessToken } from '../../auth/tokens';
-import type { Pool } from 'pg';
+import { createFakePool, authSessionHandler, type FakePool, type QueryHandler } from '../../testing/fakePool';
+import { makeRouterApp } from '../../testing/app';
+import { makeAccessToken } from '../../testing/tokens';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function makePool(): Pool {
-  return { connect: vi.fn(), query: vi.fn() } as unknown as Pool;
-}
 
 // Generate a real Ed25519 key pair for signature tests
 function makeKeyPair() {
@@ -65,50 +51,40 @@ function signPayload(
   return crypto.sign(null, Buffer.from(message), privKey).toString('base64');
 }
 
-const CSRF_TOKEN = 'ok';
-const CSRF_HASH  = crypto.createHash('sha256').update(CSRF_TOKEN).digest('hex');
-
 // Each test must use a unique nonce (replay guard rejects duplicates within TTL)
 function nonce(): string { return crypto.randomBytes(16).toString('hex'); }
 
+// CSRF 해시는 testing/tokens 기본값(sha256('ok')) — 기존 로컬 도우미와 같은 클레임.
 function userToken(userId = 'user-1'): string {
-  return generateAccessToken({
-    sub:                userId,
-    sessionId:          'sess-1',
-    orgId:              'org-1',
-    role:               'doctor',
-    name:               'Dr. Kim',
-    mustChangePassword: false,
-    csrfHash:           CSRF_HASH,
-  }).token;
+  return makeAccessToken({ userId, sessionId: 'sess-1', orgId: 'org-1', role: 'doctor', name: 'Dr. Kim' });
 }
 
-function makeApp(pool: Pool) {
-  const app = express();
-  app.use(express.json());
-  app.use(cookieParser());
-  app.use('/api/audit', createAuditRouter(pool));
-  app.use(createErrorHandler(createLogger({ level: 'silent' }))); // as in createApp (S1)
-  return app;
+// 세션 확인 쿼리(인증 미들웨어)에만 답하는 fake — 장치 SELECT까지 가지 않는 요청용.
+// revoked면 세션 없음(빈 결과).
+function makeSessionOnlyFake(options: { revoked?: boolean } = {}): FakePool {
+  return createFakePool({ handlers: [authSessionHandler({ revoked: options.revoked })] });
 }
 
-// Wire: auth session check, then device SELECT result
-function wireDevice(
-  pool:       Pool,
-  deviceRow:  object | null,
-) {
-  const mock = pool.query as ReturnType<typeof vi.fn>;
-  mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });          // auth middleware
-  mock.mockResolvedValueOnce({ rows: deviceRow ? [deviceRow] : [] }); // device SELECT
-  mock.mockResolvedValue({ rows: [] });                           // last_seen_at UPDATE + any extra
+function deviceHandlers(deviceRow: object | null): QueryHandler[] {
+  return [
+    { name: 'devices.select', match: /FROM devices WHERE id = \$1/, reply: { rows: deviceRow ? [deviceRow] : [] } },
+    { name: 'devices.touch', match: /UPDATE devices SET last_seen_at = now\(\)/, reply: { rows: [] } },
+  ];
 }
 
-// Wire for queue-replay requests that have no Authorization header.
-// makeOptionalAuth skips the session check, so no auth query fires.
-function wireDeviceNoSession(pool: Pool, deviceRow: object | null) {
-  const mock = pool.query as ReturnType<typeof vi.fn>;
-  mock.mockResolvedValueOnce({ rows: deviceRow ? [deviceRow] : [] }); // device SELECT (first call)
-  mock.mockResolvedValue({ rows: [] });                              // last_seen_at UPDATE + any extra
+// auth session check, then device SELECT result, then last_seen_at UPDATE
+function makeDeviceFake(deviceRow: object | null): FakePool {
+  return createFakePool({ handlers: [authSessionHandler(), ...deviceHandlers(deviceRow)] });
+}
+
+// For queue-replay requests that have no Authorization header.
+// makeOptionalAuth skips the session check, so no auth query fires (no session handler → it would be unmatched).
+function makeDeviceNoSessionFake(deviceRow: object | null): FakePool {
+  return createFakePool({ handlers: deviceHandlers(deviceRow) });
+}
+
+function auditApp(fake: FakePool) {
+  return makeRouterApp(a => a.use('/api/audit', createAuditRouter(fake.pool)));
 }
 
 const VALID_BODY = {
@@ -123,9 +99,8 @@ describe('POST /api/audit/emr', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when not authenticated', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [] });
-    const res = await request(makeApp(pool))
+    const fake = makeSessionOnlyFake({ revoked: true });
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('x-wr-source', 'electron-main')
       .send(VALID_BODY);
@@ -133,9 +108,8 @@ describe('POST /api/audit/emr', () => {
   });
 
   it('returns 401 when X-WR-Source is missing or wrong', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = makeSessionOnlyFake();
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
       .send(VALID_BODY);
@@ -144,9 +118,8 @@ describe('POST /api/audit/emr', () => {
   });
 
   it('returns 401 when device headers are missing', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = makeSessionOnlyFake();
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
       .set('x-wr-source', 'electron-main')
@@ -157,14 +130,12 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 401 when timestamp is out of range', async () => {
     const { privateKey, publicKey } = makeKeyPair();
-    const pool    = makePool();
+    const fake    = makeSessionOnlyFake();
     const devNonce = nonce();
     const staleTs  = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     const sig      = signPayload(privateKey, 'dev-1', staleTs, devNonce, VALID_BODY);
 
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-
-    const res = await request(makeApp(pool))
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
       .set('x-wr-source',     'electron-main')
@@ -181,15 +152,13 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 400 on invalid body (unknown action)', async () => {
     const { privateKey } = makeKeyPair();
-    const pool     = makePool();
+    const fake     = makeSessionOnlyFake();
     const ts       = new Date().toISOString();
     const devNonce = nonce();
     const body     = { action: 'unknown_action', outcome: 'success' };
     const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, body);
 
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-
-    const res = await request(makeApp(pool))
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
       .set('x-wr-source',     'electron-main')
@@ -205,14 +174,12 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 401 when device does not exist', async () => {
     const { privateKey } = makeKeyPair();
-    const pool     = makePool();
+    const fake     = makeDeviceFake(null);
     const ts       = new Date().toISOString();
     const devNonce = nonce();
     const sig      = signPayload(privateKey, 'dev-missing', ts, devNonce, VALID_BODY);
 
-    wireDevice(pool, null);
-
-    const res = await request(makeApp(pool))
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
       .set('x-wr-source',     'electron-main')
@@ -228,19 +195,17 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 401 when device is pending', async () => {
     const { privateKey, publicKey } = makeKeyPair();
-    const pool     = makePool();
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    wireDevice(pool, {
+    const fake     = makeDeviceFake({
       user_id:         'user-1',
       organization_id: 'org-1',
       public_key:      exportPublicKey(publicKey),
       status:          'pending',
     });
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
 
-    const res = await request(makeApp(pool))
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
       .set('x-wr-source',     'electron-main')
@@ -256,19 +221,17 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 401 when device is revoked', async () => {
     const { privateKey, publicKey } = makeKeyPair();
-    const pool     = makePool();
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    wireDevice(pool, {
+    const fake     = makeDeviceFake({
       user_id:         'user-1',
       organization_id: 'org-1',
       public_key:      exportPublicKey(publicKey),
       status:          'revoked',
     });
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
 
-    const res = await request(makeApp(pool))
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
       .set('x-wr-source',     'electron-main')
@@ -284,19 +247,17 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 401 when session.user !== device.user', async () => {
     const { privateKey, publicKey } = makeKeyPair();
-    const pool     = makePool();
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    wireDevice(pool, {
+    const fake     = makeDeviceFake({
       user_id:         'other-user-99',
       organization_id: 'org-1',
       public_key:      exportPublicKey(publicKey),
       status:          'active',
     });
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
 
-    const res = await request(makeApp(pool))
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken('user-1')}`)
       .set('x-wr-source',     'electron-main')
@@ -313,19 +274,17 @@ describe('POST /api/audit/emr', () => {
   it('returns 401 when Ed25519 signature is invalid', async () => {
     const { publicKey }             = makeKeyPair();
     const { privateKey: wrongPriv } = makeKeyPair();
-    const pool     = makePool();
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(wrongPriv, 'dev-1', ts, devNonce, VALID_BODY);
-
-    wireDevice(pool, {
+    const fake     = makeDeviceFake({
       user_id:         'user-1',
       organization_id: 'org-1',
       public_key:      exportPublicKey(publicKey),
       status:          'active',
     });
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(wrongPriv, 'dev-1', ts, devNonce, VALID_BODY);
 
-    const res = await request(makeApp(pool))
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
       .set('x-wr-source',     'electron-main')
@@ -341,19 +300,17 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 200 when approved device with valid signature', async () => {
     const { privateKey, publicKey } = makeKeyPair();
-    const pool     = makePool();
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    wireDevice(pool, {
+    const fake     = makeDeviceFake({
       user_id:         'user-1',
       organization_id: 'org-1',
       public_key:      exportPublicKey(publicKey),
       status:          'active',
     });
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
 
-    const res = await request(makeApp(pool))
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
       .set('x-wr-source',     'electron-main')
@@ -370,19 +327,17 @@ describe('POST /api/audit/emr', () => {
   it('writes audit log on successful request', async () => {
     const { writeAuditLogStrict } = await import('../../middleware/audit.js');
     const { privateKey, publicKey } = makeKeyPair();
-    const pool     = makePool();
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    wireDevice(pool, {
+    const fake     = makeDeviceFake({
       user_id:         'user-1',
       organization_id: 'org-1',
       public_key:      exportPublicKey(publicKey),
       status:          'active',
     });
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
 
-    await request(makeApp(pool))
+    await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
       .set('x-wr-source',     'electron-main')
@@ -393,7 +348,7 @@ describe('POST /api/audit/emr', () => {
       .send(VALID_BODY);
 
     expect(writeAuditLogStrict).toHaveBeenCalledWith(
-      pool,
+      fake.pool,
       expect.objectContaining({
         actorUserId: 'user-1',
         action:      'emr_inject',
@@ -404,19 +359,17 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 401 when device.organization_id !== session.organizationId', async () => {
     const { privateKey, publicKey } = makeKeyPair();
-    const pool     = makePool();
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    wireDevice(pool, {
+    const fake     = makeDeviceFake({
       user_id:         'user-1',
       organization_id: 'different-org-99',
       public_key:      exportPublicKey(publicKey),
       status:          'active',
     });
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
 
-    const res = await request(makeApp(pool))
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
       .set('x-wr-source',     'electron-main')
@@ -432,19 +385,17 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 401 when device.organization_id is null but session has an org', async () => {
     const { privateKey, publicKey } = makeKeyPair();
-    const pool     = makePool();
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    wireDevice(pool, {
+    const fake     = makeDeviceFake({
       user_id:         'user-1',
       organization_id: null,   // null org — rejected when session has org-1
       public_key:      exportPublicKey(publicKey),
       status:          'active',
     });
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
 
-    const res = await request(makeApp(pool))
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
       .set('x-wr-source',     'electron-main')
@@ -460,19 +411,23 @@ describe('POST /api/audit/emr', () => {
 
   it('returns 401 when same nonce is reused (replay attack)', async () => {
     const { privateKey, publicKey } = makeKeyPair();
-    const pool1      = makePool();
-    const pool2      = makePool();
-    const app        = makeApp(pool1);
-    const ts         = new Date().toISOString();
-    const replayNonce = nonce();
-    const sig         = signPayload(privateKey, 'dev-1', ts, replayNonce, VALID_BODY);
-
-    wireDevice(pool1, {
+    const fake1      = makeDeviceFake({
       user_id:         'user-1',
       organization_id: 'org-1',
       public_key:      exportPublicKey(publicKey),
       status:          'active',
     });
+    const fake2      = makeDeviceFake({
+      user_id:         'user-1',
+      organization_id: 'org-1',
+      public_key:      exportPublicKey(publicKey),
+      status:          'active',
+    });
+    const app        = auditApp(fake1);
+    const ts         = new Date().toISOString();
+    const replayNonce = nonce();
+    const sig         = signPayload(privateKey, 'dev-1', ts, replayNonce, VALID_BODY);
+
     await request(app)
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
@@ -484,13 +439,7 @@ describe('POST /api/audit/emr', () => {
       .send(VALID_BODY);
 
     // Replay with same nonce — must be rejected even though signature is valid
-    wireDevice(pool2, {
-      user_id:         'user-1',
-      organization_id: 'org-1',
-      public_key:      exportPublicKey(publicKey),
-      status:          'active',
-    });
-    const res2 = await request(makeApp(pool2))
+    const res2 = await request(auditApp(fake2))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
       .set('x-wr-source',     'electron-main')
@@ -509,19 +458,17 @@ describe('POST /api/audit/emr', () => {
   it('accepts queue replay without Authorization and records session_missing flag', async () => {
     const { writeAuditLogStrict } = await import('../../middleware/audit.js');
     const { privateKey, publicKey } = makeKeyPair();
-    const pool     = makePool();
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    wireDeviceNoSession(pool, {
+    const fake     = makeDeviceNoSessionFake({
       user_id:         'user-1',
       organization_id: 'org-1',
       public_key:      exportPublicKey(publicKey),
       status:          'active',
     });
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
 
-    const res = await request(makeApp(pool))
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       // No Authorization header — simulates queue replay after session expiry
       .set('x-wr-source',       'electron-main')
@@ -534,7 +481,7 @@ describe('POST /api/audit/emr', () => {
     expect(res.status).toBe(200);
     // Actor falls back to device.user_id / device.organization_id
     expect(writeAuditLogStrict).toHaveBeenCalledWith(
-      pool,
+      fake.pool,
       expect.objectContaining({
         actorUserId: 'user-1',
         actorOrgId:  'org-1',
@@ -545,20 +492,18 @@ describe('POST /api/audit/emr', () => {
 
   it('accepts audit_queue_corrupt action without Authorization', async () => {
     const { privateKey, publicKey } = makeKeyPair();
-    const pool      = makePool();
-    const ts        = new Date().toISOString();
-    const devNonce  = nonce();
-    const corruptBody = { action: 'audit_queue_corrupt', outcome: 'failure' as const };
-    const sig = signPayload(privateKey, 'dev-1', ts, devNonce, corruptBody);
-
-    wireDeviceNoSession(pool, {
+    const fake      = makeDeviceNoSessionFake({
       user_id:         'user-1',
       organization_id: 'org-1',
       public_key:      exportPublicKey(publicKey),
       status:          'active',
     });
+    const ts        = new Date().toISOString();
+    const devNonce  = nonce();
+    const corruptBody = { action: 'audit_queue_corrupt', outcome: 'failure' as const };
+    const sig = signPayload(privateKey, 'dev-1', ts, devNonce, corruptBody);
 
-    const res = await request(makeApp(pool))
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('x-wr-source',       'electron-main')
       .set('x-wr-device-id',    'dev-1')
@@ -573,19 +518,17 @@ describe('POST /api/audit/emr', () => {
   it('rejects invalid signature even without Authorization header', async () => {
     const { publicKey }             = makeKeyPair();
     const { privateKey: wrongPriv } = makeKeyPair();
-    const pool     = makePool();
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(wrongPriv, 'dev-1', ts, devNonce, VALID_BODY);
-
-    wireDeviceNoSession(pool, {
+    const fake     = makeDeviceNoSessionFake({
       user_id:         'user-1',
       organization_id: 'org-1',
       public_key:      exportPublicKey(publicKey),
       status:          'active',
     });
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(wrongPriv, 'dev-1', ts, devNonce, VALID_BODY);
 
-    const res = await request(makeApp(pool))
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('x-wr-source',       'electron-main')
       .set('x-wr-device-id',    'dev-1')
@@ -603,17 +546,16 @@ describe('POST /api/audit/emr', () => {
     // from pendingNonces so the device can retry with the same nonce.
     const { privateKey, publicKey }    = makeKeyPair();
     const { privateKey: wrongPriv }    = makeKeyPair();
-    const pool     = makePool();
-    const app      = makeApp(pool);
+    const fake     = makeDeviceFake({
+      user_id: 'user-1', organization_id: 'org-1',
+      public_key: exportPublicKey(publicKey), status: 'active',
+    });
+    const app      = auditApp(fake);
     const ts       = new Date().toISOString();
     const devNonce = nonce();
 
     // First attempt: wrong key → signature invalid → nonce released
     const badSig = signPayload(wrongPriv, 'dev-1', ts, devNonce, VALID_BODY);
-    wireDevice(pool, {
-      user_id: 'user-1', organization_id: 'org-1',
-      public_key: exportPublicKey(publicKey), status: 'active',
-    });
     const res1 = await request(app)
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
@@ -627,10 +569,6 @@ describe('POST /api/audit/emr', () => {
 
     // Second attempt: correct key, same nonce → must succeed
     const goodSig = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-    wireDevice(pool, {
-      user_id: 'user-1', organization_id: 'org-1',
-      public_key: exportPublicKey(publicKey), status: 'active',
-    });
     const res2 = await request(app)
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
@@ -649,8 +587,11 @@ describe('POST /api/audit/emr', () => {
     // nonce+signature and succeed on the next attempt.
     const { writeAuditLogStrict } = await import('../../middleware/audit.js');
     const { privateKey, publicKey } = makeKeyPair();
-    const pool     = makePool();
-    const app      = makeApp(pool);
+    const fake     = makeDeviceFake({
+      user_id: 'user-1', organization_id: 'org-1',
+      public_key: exportPublicKey(publicKey), status: 'active',
+    });
+    const app      = auditApp(fake);
     const ts       = new Date().toISOString();
     const devNonce = nonce();
     const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
@@ -659,10 +600,6 @@ describe('POST /api/audit/emr', () => {
     (writeAuditLogStrict as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error('DB connection lost')
     );
-    wireDevice(pool, {
-      user_id: 'user-1', organization_id: 'org-1',
-      public_key: exportPublicKey(publicKey), status: 'active',
-    });
     const res1 = await request(app)
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
@@ -676,10 +613,6 @@ describe('POST /api/audit/emr', () => {
     expect(res1.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
     // Second attempt: same nonce+sig, DB now succeeds → must not get 401
-    wireDevice(pool, {
-      user_id: 'user-1', organization_id: 'org-1',
-      public_key: exportPublicKey(publicKey), status: 'active',
-    });
     const res2 = await request(app)
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken()}`)
@@ -697,19 +630,17 @@ describe('POST /api/audit/emr', () => {
     // Mismatch must return UNAUTHORIZED so doSendWithSessionFallback() does NOT retry,
     // preserving the device.user_id ≡ session.user_id identity enforcement.
     const { privateKey, publicKey } = makeKeyPair();
-    const pool     = makePool();
-    const ts       = new Date().toISOString();
-    const devNonce = nonce();
-    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
-
-    wireDevice(pool, {
+    const fake     = makeDeviceFake({
       user_id:         'other-user-99', // device owned by a different user
       organization_id: 'org-1',
       public_key:      exportPublicKey(publicKey),
       status:          'active',
     });
+    const ts       = new Date().toISOString();
+    const devNonce = nonce();
+    const sig      = signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY);
 
-    const res = await request(makeApp(pool))
+    const res = await request(auditApp(fake))
       .post('/api/audit/emr')
       .set('Authorization', `Bearer ${userToken('user-1')}`)
       .set('x-wr-source',     'electron-main')

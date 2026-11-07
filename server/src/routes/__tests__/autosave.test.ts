@@ -1,22 +1,11 @@
-import crypto from 'crypto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import express from 'express';
-import cookieParser from 'cookie-parser';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
-vi.mock('../../config', () => ({
-  default: {
-    env:  'test',
-    cors: { origins: [] },
-    auth: {
-      accessTokenTtl:     900,
-      accessTokenSecret:  'test-access-secret',
-      refreshTokenSecret: 'test-refresh-secret',
-    },
-  },
+vi.mock('../../config', async () => ({
+  default: (await import('../../testing/configMock.js')).testConfig(),
 }));
 
 vi.mock('../../middleware/audit', () => ({
@@ -25,41 +14,30 @@ vi.mock('../../middleware/audit', () => ({
 }));
 
 import { createAutosaveRouter } from '../autosave';
-import { generateAccessToken } from '../../auth/tokens';
-import type { Pool } from 'pg';
+import { createFakePool, authSessionHandler, sequenceHandler, type FakePool } from '../../testing/fakePool';
+import { makeRouterApp } from '../../testing/app';
+import { makeAccessToken, authHeaders, TEST_CSRF_TOKEN } from '../../testing/tokens';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function makePool(): Pool {
-  return { connect: vi.fn(), query: vi.fn() } as unknown as Pool;
-}
-
-const CSRF_TOKEN = 'ok';
-const CSRF_HASH  = crypto.createHash('sha256').update(CSRF_TOKEN).digest('hex');
-
+// sub/orgId는 testing/tokens 기본 UUID(aaaa…/bbbb…), CSRF 원문 'ok' — 기존 로컬 도우미와 같은 클레임.
 function userToken(): string {
-  return generateAccessToken({
-    sub: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-    sessionId: 'sess-1',
-    orgId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
-    role: 'doctor', name: 'Dr. Kim', mustChangePassword: false, csrfHash: CSRF_HASH,
-  }).token;
+  return makeAccessToken({ sessionId: 'sess-1', role: 'doctor', name: 'Dr. Kim' });
 }
 
-function makeApp(pool: Pool) {
-  const app = express();
-  app.use(express.json());
-  app.use(cookieParser());
-  app.use('/api/autosave', createAutosaveRouter(pool));
-  return app;
+function autosaveApp(fake: FakePool) {
+  return makeRouterApp(a => a.use('/api/autosave', createAutosaveRouter(fake.pool)));
 }
 
-// Wire: first call = auth middleware session check; subsequent = route queries.
-function wireQueries(pool: Pool, ...results: { rows: unknown[]; rowCount?: number }[]): void {
-  const mock = pool.query as ReturnType<typeof vi.fn>;
-  mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-  for (const r of results) mock.mockResolvedValueOnce(r);
+// first call = auth middleware session check; subsequent = route queries (호출 순서대로).
+function makeFake(...results: { rows: unknown[]; rowCount?: number }[]): FakePool {
+  return createFakePool({ handlers: [authSessionHandler(), sequenceHandler(results)] });
+}
+
+// 세션 없음(인증 미들웨어가 401) — 원래 테스트는 모든 쿼리에 빈 결과를 줬다.
+function makeNoSessionFake(): FakePool {
+  return createFakePool({ handlers: [authSessionHandler({ revoked: true })] });
 }
 
 const DEVICE_ID = 'device-abc-123';
@@ -73,16 +51,14 @@ describe('GET /api/autosave', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when not authenticated', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [] });
-    const res = await request(makeApp(pool)).get(`/api/autosave?deviceId=${DEVICE_ID}`);
+    const fake = makeNoSessionFake();
+    const res = await request(autosaveApp(fake)).get(`/api/autosave?deviceId=${DEVICE_ID}`);
     expect(res.status).toBe(401);
   });
 
   it('returns 400 when deviceId is missing', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = makeFake();
+    const res = await request(autosaveApp(fake))
       .get('/api/autosave')
       .set('Authorization', `Bearer ${userToken()}`);
     expect(res.status).toBe(400);
@@ -90,9 +66,8 @@ describe('GET /api/autosave', () => {
   });
 
   it('returns 400 when deviceId is empty string', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = makeFake();
+    const res = await request(autosaveApp(fake))
       .get('/api/autosave?deviceId=')
       .set('Authorization', `Bearer ${userToken()}`);
     expect(res.status).toBe(400);
@@ -100,10 +75,9 @@ describe('GET /api/autosave', () => {
   });
 
   it('returns 400 when deviceId exceeds max length', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
+    const fake = makeFake();
     const longId = 'x'.repeat(257);
-    const res = await request(makeApp(pool))
+    const res = await request(autosaveApp(fake))
       .get(`/api/autosave?deviceId=${longId}`)
       .set('Authorization', `Bearer ${userToken()}`);
     expect(res.status).toBe(400);
@@ -111,9 +85,8 @@ describe('GET /api/autosave', () => {
   });
 
   it('returns null when no autosave exists for device', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [] });
-    const res = await request(makeApp(pool))
+    const fake = makeFake({ rows: [] });
+    const res = await request(autosaveApp(fake))
       .get(`/api/autosave?deviceId=${DEVICE_ID}`)
       .set('Authorization', `Bearer ${userToken()}`);
     expect(res.status).toBe(200);
@@ -121,9 +94,8 @@ describe('GET /api/autosave', () => {
   });
 
   it('returns savedAt and patients when autosave exists', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [{ saved_at: SAVED_AT, payload: PATIENTS }] });
-    const res = await request(makeApp(pool))
+    const fake = makeFake({ rows: [{ saved_at: SAVED_AT, payload: PATIENTS }] });
+    const res = await request(autosaveApp(fake))
       .get(`/api/autosave?deviceId=${DEVICE_ID}`)
       .set('Authorization', `Bearer ${userToken()}`);
     expect(res.status).toBe(200);
@@ -132,9 +104,8 @@ describe('GET /api/autosave', () => {
   });
 
   it('returns empty patients array when payload is not an array', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [{ saved_at: SAVED_AT, payload: null }] });
-    const res = await request(makeApp(pool))
+    const fake = makeFake({ rows: [{ saved_at: SAVED_AT, payload: null }] });
+    const res = await request(autosaveApp(fake))
       .get(`/api/autosave?deviceId=${DEVICE_ID}`)
       .set('Authorization', `Bearer ${userToken()}`);
     expect(res.status).toBe(200);
@@ -142,15 +113,14 @@ describe('GET /api/autosave', () => {
   });
 
   it('queries by user_id and device_id', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [] });
-    await request(makeApp(pool))
+    const fake = makeFake({ rows: [] });
+    await request(autosaveApp(fake))
       .get(`/api/autosave?deviceId=${DEVICE_ID}`)
       .set('Authorization', `Bearer ${userToken()}`);
-    const mock   = pool.query as ReturnType<typeof vi.fn>;
-    const select = mock.mock.calls[1]; // call[0] = auth, call[1] = SELECT
-    expect(select[1][0]).toBe('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); // user_id
-    expect(select[1][1]).toBe(DEVICE_ID);                               // device_id
+    const select = fake.calls[1]!; // call[0] = auth, call[1] = SELECT
+    expect(select.handler).toBe('sequence');
+    expect(select.params[0]).toBe('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); // user_id
+    expect(select.params[1]).toBe(DEVICE_ID);                               // device_id
   });
 });
 
@@ -161,46 +131,39 @@ describe('PUT /api/autosave', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when not authenticated', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [] });
-    const res = await request(makeApp(pool))
+    const fake = makeNoSessionFake();
+    const res = await request(autosaveApp(fake))
       .put(`/api/autosave?deviceId=${DEVICE_ID}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set('x-csrf-token', TEST_CSRF_TOKEN)
       .send({ patients: PATIENTS });
     expect(res.status).toBe(401);
   });
 
   it('returns 400 when deviceId is missing', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = makeFake();
+    const res = await request(autosaveApp(fake))
       .put('/api/autosave')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(userToken()))
       .send({ patients: PATIENTS });
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('MISSING_DEVICE_ID');
   });
 
   it('returns 400 for invalid body (patients not array)', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = makeFake();
+    const res = await request(autosaveApp(fake))
       .put(`/api/autosave?deviceId=${DEVICE_ID}`)
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(userToken()))
       .send({ patients: 'not-array' });
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('INVALID_BODY');
   });
 
   it('returns 200 with ok and savedAt on success', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [{ saved_at: SAVED_AT }] });
-    const res = await request(makeApp(pool))
+    const fake = makeFake({ rows: [{ saved_at: SAVED_AT }] });
+    const res = await request(autosaveApp(fake))
       .put(`/api/autosave?deviceId=${DEVICE_ID}`)
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(userToken()))
       .send({ patients: PATIENTS });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
@@ -208,26 +171,22 @@ describe('PUT /api/autosave', () => {
   });
 
   it('stores patients array as payload via upsert', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [{ saved_at: SAVED_AT }] });
-    await request(makeApp(pool))
+    const fake = makeFake({ rows: [{ saved_at: SAVED_AT }] });
+    await request(autosaveApp(fake))
       .put(`/api/autosave?deviceId=${DEVICE_ID}`)
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(userToken()))
       .send({ patients: PATIENTS });
-    const mock   = pool.query as ReturnType<typeof vi.fn>;
-    const upsert = mock.mock.calls[1]; // call[0] = auth, call[1] = UPSERT
-    expect(typeof upsert[0]).toBe('string');
-    expect((upsert[0] as string).toUpperCase()).toContain('ON CONFLICT');
-    expect(upsert[1][0]).toBe('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); // user_id
-    expect(upsert[1][1]).toBe(DEVICE_ID);                               // device_id
-    expect(upsert[1][2]).toBe('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'); // org_id
+    const upsert = fake.calls[1]!; // call[0] = auth, call[1] = UPSERT
+    expect(typeof upsert.sql).toBe('string');
+    expect(upsert.sql.toUpperCase()).toContain('ON CONFLICT');
+    expect(upsert.params[0]).toBe('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); // user_id
+    expect(upsert.params[1]).toBe(DEVICE_ID);                               // device_id
+    expect(upsert.params[2]).toBe('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'); // org_id
   });
 
   it('returns 403 when CSRF token is missing', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = makeFake();
+    const res = await request(autosaveApp(fake))
       .put(`/api/autosave?deviceId=${DEVICE_ID}`)
       .set('Authorization', `Bearer ${userToken()}`)
       // no x-csrf-token header
@@ -243,51 +202,43 @@ describe('DELETE /api/autosave', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when not authenticated', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [] });
-    const res = await request(makeApp(pool))
+    const fake = makeNoSessionFake();
+    const res = await request(autosaveApp(fake))
       .delete(`/api/autosave?deviceId=${DEVICE_ID}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set('x-csrf-token', TEST_CSRF_TOKEN);
     expect(res.status).toBe(401);
   });
 
   it('returns 400 when deviceId is missing', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = makeFake();
+    const res = await request(autosaveApp(fake))
       .delete('/api/autosave')
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(userToken()));
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('MISSING_DEVICE_ID');
   });
 
   it('returns 200 ok:true when row exists and is deleted', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [], rowCount: 1 });
-    const res = await request(makeApp(pool))
+    const fake = makeFake({ rows: [], rowCount: 1 });
+    const res = await request(autosaveApp(fake))
       .delete(`/api/autosave?deviceId=${DEVICE_ID}`)
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(userToken()));
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
   });
 
   it('returns 200 ok:true even when no row existed (idempotent)', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [], rowCount: 0 });
-    const res = await request(makeApp(pool))
+    const fake = makeFake({ rows: [], rowCount: 0 });
+    const res = await request(autosaveApp(fake))
       .delete(`/api/autosave?deviceId=${DEVICE_ID}`)
-      .set('Authorization', `Bearer ${userToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(userToken()));
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
   });
 
   it('returns 403 when CSRF token is missing', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = makeFake();
+    const res = await request(autosaveApp(fake))
       .delete(`/api/autosave?deviceId=${DEVICE_ID}`)
       .set('Authorization', `Bearer ${userToken()}`);
     expect(res.status).toBe(403);
