@@ -20,6 +20,7 @@ vi.mock('../../middleware/audit', () => ({
 vi.mock('../../middleware/rateLimit', () => ({
   loginRateLimit:              () => (_: unknown, __: unknown, next: () => void) => next(),
   csrfRateLimit:               () => (_: unknown, __: unknown, next: () => void) => next(),
+  refreshRateLimit:            () => (_: unknown, __: unknown, next: () => void) => next(),
   signupRateLimit:             () => (_: unknown, __: unknown, next: () => void) => next(),
   deviceRegisterIpRateLimit:   () => (_: unknown, __: unknown, next: () => void) => next(),
   deviceRegisterUserRateLimit: () => (_: unknown, __: unknown, next: () => void) => next(),
