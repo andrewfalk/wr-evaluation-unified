@@ -117,7 +117,7 @@
 
 ## Phase 0 — 안전망 (전부 병행 가능; P0-3·P0-10 → G5 순서만 고정) — ✅ 완료(2026-11-07)
 
-> **완료 요약(2026-11-07, main `36b7e61`)**: P0-1~P0-13 모두 아래 표의 ✅ 기록대로 끝났다(P0-1 CI는 D9에 따라 로컬 `npm run check`·`check:full`로 대체). 이제 병합 전 검증 = `npm run check`(lint·typecheck 루트+클라이언트 TS/JS+서버·ts ratchet·브라우저 하한·test·build:web), DB·동시성·통계·마이그레이션·Docker 변경과 릴리스 전 = `npm run check:full`(+실DB 통합·운영 버전 pytest·audit·gitleaks), push 전 `npm run verify:secrets`. **다음 Phase로 넘어가는 조건·이월**: ① G5 영상 분석 apply 골든 → Phase 1에서 `server/src/routes/videoAnalysis.ts`를 건드리기 전 ② G10 preload `invoke` 반환 계약 → Phase 3 전 ③ PC 부하 시 서버 테스트 2건 1회 실패 기록 → 재발 시 조사 ④ **W3 뒤 첫 릴리스는 오프라인 패키지 리허설 필수**(착수 순서 5번) ⑤ 현장 PC 크롬 버전 확인은 다음 배포 때 access.log로(P0-5).
+> **완료 요약(2026-11-07, main `36b7e61`)**: P0-1~P0-13 모두 아래 표의 ✅ 기록대로 끝났다(P0-1 CI는 D9에 따라 로컬 `npm run check`·`check:full`로 대체). 이제 병합 전 검증 = `npm run check`(lint·typecheck 루트+클라이언트 TS/JS+서버·ts ratchet·브라우저 하한·test·build:web), DB·동시성·통계·마이그레이션·Docker 변경과 릴리스 전 = `npm run check:full`(+실DB 통합·운영 버전 pytest·audit·gitleaks), push 전 `npm run verify:secrets`. **다음 Phase로 넘어가는 조건·이월**: ① G5 영상 분석 apply 골든 → Phase 1에서 `server/src/routes/videoAnalysis.ts`를 건드리기 전 ② G10 preload `invoke` 반환 계약 → Phase 3 전 ②-1 아직 없는 골든: G9 `App.smoke.test.jsx` → Phase 2 착수 전, G7 Electron 헬퍼 스냅샷 → Phase 3 추출 PR마다 ③ PC 부하 시 서버 테스트 2건 1회 실패 기록 → 재발 시 조사 ④ **W3 뒤 첫 릴리스는 오프라인 패키지 리허설 필수**(착수 순서 5번) ⑤ 현장 PC 크롬 버전 확인은 다음 배포 때 access.log로(P0-5).
 
 | # | 목표 | 파일/내용 | 재사용 | 위험/크기 | 검증 |
 |---|---|---|---|---|---|
@@ -375,7 +375,7 @@ shared/contracts/{aiAnalysis,aiPrompt,aiModels}.ts  # AI 입력 계약(.strict) 
 | Phase | 자동 | 수동 | DoD |
 |---|---|---|---|
 | H | HF별 단위/라우트 테스트(간호 계정 비담당 덮어쓰기 불가 · 임시비번 403 · preload 콜백에 event 없음 · `/api` no-store · 외부 벤더 미비식별 400 · 웹 토큰 없음 403/초과 429 · 서명 불일치 다운로드 거부) | 7.1.4 설치본 릴리스 게이트(`docs/UPDATE_7.1.4.md`: 설치·EMR·AI·일괄 import roundtrip·서명 업데이트 실기기 시험), Vercel preview | 7.1.4 운영 배포 완료(HF8 포함; 코드 머지는 완료, 배포는 게이트 통과 후) |
-| 0 — ✅ 달성(2026-11-07: check·check:full 통과, G1–G10 존재(G5 영상 apply만 이월), CRLF 0, `.jsx` 린트·src typecheck·`@wr/*` 단일 해석) | `npm run check`·`check:full` 통과(D9), G1–G10 존재, suppressions 수 추세 ↓, `git ls-files --eol` CRLF 0 | 현장 PC 크롬 버전 확인(다음 배포 때) | `.jsx` 린트됨·src typecheck 켜짐·`@wr/*` 단일 해석·skip 0 |
+| 0 — ✅ 달성(2026-11-07: check·check:full 통과, 골든 G1·G1b·G2·G3·G4·G5(영상 apply 이월)·G6·G8·G10 존재 — G7은 Phase 3 Electron 추출 PR마다, G9 `App.smoke`는 Phase 2 착수 전에 만든다, CRLF 0, `.jsx` 린트·src typecheck·`@wr/*` 단일 해석) | `npm run check`·`check:full` 통과(D9), G1–G10 존재, suppressions 수 추세 ↓, `git ls-files --eol` CRLF 0 | 현장 PC 크롬 버전 확인(다음 배포 때) | `.jsx` 린트됨·src typecheck 켜짐·`@wr/*` 단일 해석·skip 0 |
 | 1 | 서버 unit/integration 프로젝트, G5/G6 불변, `grep res.status(500)` 0, `patient_records` 쓰기 파일 1 | 실DB 동시성(PATCH/락/claim), Tier-3(docker postgres → dev-intranet-server.ps1 → `npm run dev`) | 라우트 ≤400줄·하네스 단일·`stats/` 트리·체크섬 활성·SIGTERM 정상 종료·보안 bundle 종결 |
 | 2 | G1–G4·G8·G9 불변, lint: core→modules 0·`window.electron` 어댑터 외 0·stylelint 0, `typecheck:client` 전 파일 | 두 Electron 타깃 + Vercel preview 스모크, 다크모드 육안, Chrome 109 환경 1회 | `App.jsx` ≤200줄·매니페스트 검증·서술 단일 소스 ADR·twin parity·src TS ≥80% |
 | 3 | Electron 테스트 82+·`ipcRegistration`·asar 검사·버전 일관성 | 설치본 2종 설치·업데이트 경로 | `main.js` ≤150줄·타깃별 IPC·`build-target.json` 없음·asar <40MB |
