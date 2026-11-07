@@ -80,14 +80,23 @@ export async function lockPatientAnchor(
   return { id: rows[0].id, assignedDoctorUserId: rows[0].assigned_doctor_user_id };
 }
 
+// 환자 쓰기 권한 판정식 — 이 함수 하나가 정의다(S4 / P1-17). admin이거나 그 환자의 담당의.
+// 미들웨어(http/authz.ts requirePatientAccess), 트랜잭션 안 재확인(assertAssignedOrAdmin),
+// 영상 분석 접근 확인, 신원 정정이 모두 이것을 부른다.
+export function isAssignedOrAdmin(
+  session: { role: string; userId: string },
+  assignedDoctorUserId: string | null,
+): boolean {
+  return session.role === 'admin' || assignedDoctorUserId === session.userId;
+}
+
 // 앵커로 patient_records를 잠근 "이후"에 담당의를 재확인한다 — 미들웨어 통과 시점과 지금
 // 사이에 재배정이 끼어들었으면 여기서 걸러진다. admin은 항상 통과.
 export function assertAssignedOrAdmin(
   anchor: PatientAnchor,
   session: { role: string; userId: string }
 ): void {
-  if (session.role === 'admin') return;
-  if (anchor.assignedDoctorUserId !== session.userId) throw new PatientLockForbiddenError();
+  if (!isAssignedOrAdmin(session, anchor.assignedDoctorUserId)) throw new PatientLockForbiddenError();
 }
 
 type AcquireAttemptResult =

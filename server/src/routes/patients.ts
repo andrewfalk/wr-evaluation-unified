@@ -5,7 +5,6 @@ import { z } from 'zod';
 import config from '../config';
 import { createAuthMiddleware } from '../middleware/auth';
 import { adminOnly } from '../middleware/adminOnly';
-import { assignedDoctorOrAdmin } from '../middleware/patientAccess';
 import { csrfMiddleware } from '../middleware/csrf';
 import { auditMiddleware, auditFailuresOnly, writeAuditLog, writeAuditLogStrict } from '../middleware/audit';
 import {
@@ -56,7 +55,7 @@ import {
   type LockRow,
 } from '../db/patientLocks';
 import { asyncHandler } from '../http/asyncHandler';
-import { orgIdOf, requireOrg, sessionOf } from '../http/authz';
+import { orgIdOf, requireOrg, requirePatientAccess, sessionOf } from '../http/authz';
 
 // ---------------------------------------------------------------------------
 // Schemas — defined locally, mirroring shared/contracts/patient.ts structure
@@ -1564,13 +1563,13 @@ export function createPatientsRouter(pool: Pool): Router {
 
   router.patch(
     '/:id',
-    auth, csrfMiddleware, assignedDoctorOrAdmin(pool), audit('patient_update'), requireOrg(),
+    auth, csrfMiddleware, requirePatientAccess(pool, 'write'), audit('patient_update'), requireOrg(),
     asyncHandler((req, res) => withDeadlockRetry(() => patchPatient(pool, req, res)))
   );
 
   router.delete(
     '/:id',
-    auth, csrfMiddleware, assignedDoctorOrAdmin(pool), audit('patient_delete'), requireOrg(),
+    auth, csrfMiddleware, requirePatientAccess(pool, 'write'), audit('patient_delete'), requireOrg(),
     asyncHandler((req, res) => deletePatient(pool, req, res))
   );
 
@@ -1587,13 +1586,13 @@ export function createPatientsRouter(pool: Pool): Router {
   // 내부에서 실제 최초 획득/force-takeover일 때만 수동 기록한다.
   router.post(
     '/:id/lock',
-    auth, csrfMiddleware, assignedDoctorOrAdmin(pool), requireOrg(),
+    auth, csrfMiddleware, requirePatientAccess(pool, 'write'), requireOrg(),
     asyncHandler((req, res) => acquireOrRenewPatientLock(pool, req, res))
   );
 
   router.delete(
     '/:id/lock',
-    auth, csrfMiddleware, assignedDoctorOrAdmin(pool), requireOrg(),
+    auth, csrfMiddleware, requirePatientAccess(pool, 'write'), requireOrg(),
     asyncHandler((req, res) => releasePatientLock(pool, req, res))
   );
 
@@ -1615,7 +1614,7 @@ export function createPatientsRouter(pool: Pool): Router {
     auditMiddleware(pool, 'patient_identity_correct_attempt', 'patient', undefined, {
       shouldWrite: auditFailuresOnly,
     }),
-    assignedDoctorOrAdmin(pool),
+    requirePatientAccess(pool, 'write'),
     requireOrg(),
     asyncHandler((req, res) => correctPatientIdentityRoute(pool, req, res))
   );
