@@ -10,17 +10,27 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import time
 from typing import Any
 
-import bivariate
-import correlation_matrix as correlation_matrix_module
-import prediction as prediction_module
-import regression as regression_module
-from boxplot import compute_boxplot
-from descriptive import compute_continuous, compute_discrete
-from histogram import compute_histogram
-from protocol import ProtocolError, parse_and_validate_request
+# P0-13 성능 기준선 — STATS_ENGINE_TIMING=1일 때만 구간 시간을 stderr 한 줄로 쓴다(기본 꺼짐).
+# 시각은 무거운 import(numpy/scipy를 끌어오는 아래 모듈들) **전에** 잡아야 import 비용이 보인다.
+_TIMING_ENABLED = os.environ.get("STATS_ENGINE_TIMING") == "1"
+_PROCESS_START_WALL_MS = time.time() * 1000.0
+_PROCESS_START = time.perf_counter()
+
+import bivariate  # noqa: E402 — 위 시각 기록이 import보다 먼저여야 한다
+import correlation_matrix as correlation_matrix_module  # noqa: E402
+import prediction as prediction_module  # noqa: E402
+import regression as regression_module  # noqa: E402
+from boxplot import compute_boxplot  # noqa: E402
+from descriptive import compute_continuous, compute_discrete  # noqa: E402
+from histogram import compute_histogram  # noqa: E402
+from protocol import ProtocolError, parse_and_validate_request  # noqa: E402
+
+_IMPORTS_DONE = time.perf_counter()
 
 # PR4-A2 — splineContrasts/regressionDiagnostics shape 추가로 4→5. 계획서
 # §3 "spline 부분효과"/§4 "limited_row 진단값".
@@ -106,6 +116,35 @@ def run_prediction(request: dict[str, Any]) -> dict[str, Any]:
     return {"protocolVersion": PROTOCOL_VERSION, "prediction": result}
 
 
+def analysis_mode(request: dict[str, Any]) -> str:
+    """run_analysis가 고르는 분기 이름(계측 로그용). 분기 순서는 run_analysis와 같아야 한다."""
+    for key in ("correlationMatrix", "regression", "regressionDiagnostics", "prediction", "bivariate"):
+        if key in request:
+            return key
+    return "descriptive"
+
+
+def _ms(start: float, end: float) -> float:
+    return round((end - start) * 1000.0, 3)
+
+
+def _emit_timing(marks: dict[str, float], mode: str) -> None:
+    """STATS_ENGINE_TIMING {...} 한 줄. Node(statsEngine.ts)가 정상 종료 때만 읽는다.
+    processStartWallMs는 벽시계(Node spawn 시각과 비교해 인터프리터 기동 시간을 구함),
+    나머지는 단조 시계 구간."""
+    timing = {
+        "mode": mode,
+        "processStartWallMs": round(_PROCESS_START_WALL_MS, 3),
+        "importMs": _ms(_PROCESS_START, _IMPORTS_DONE),
+        "stdinMs": _ms(marks["main"], marks["stdin"]),
+        "parseMs": _ms(marks["stdin"], marks["parsed"]),
+        "computeMs": _ms(marks["parsed"], marks["computed"]),
+        "serializeMs": _ms(marks["computed"], marks["serialized"]),
+        "processMs": _ms(_PROCESS_START, marks["serialized"]),
+    }
+    print(f"STATS_ENGINE_TIMING {json.dumps(timing)}", file=sys.stderr)
+
+
 def run_analysis(request: dict[str, Any]) -> dict[str, Any]:
     if "correlationMatrix" in request:
         return run_correlation_matrix(request)
@@ -124,10 +163,14 @@ def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "--selfcheck":
         return _selfcheck()
 
+    marks: dict[str, float] = {"main": time.perf_counter()}
     try:
         raw = sys.stdin.read()
+        marks["stdin"] = time.perf_counter()
         request = parse_and_validate_request(raw)
+        marks["parsed"] = time.perf_counter()
         response = run_analysis(request)
+        marks["computed"] = time.perf_counter()
     except ProtocolError as exc:
         _emit_error(exc.code, exc.detail)
         return 1
@@ -135,8 +178,12 @@ def main() -> int:
         _emit_error("COMPUTE_ERROR", f"{type(exc).__name__}: {exc}")
         return 1
 
-    sys.stdout.write(json.dumps(response, ensure_ascii=False))
+    body = json.dumps(response, ensure_ascii=False)
+    marks["serialized"] = time.perf_counter()
+    sys.stdout.write(body)
     sys.stdout.flush()
+    if _TIMING_ENABLED:
+        _emit_timing(marks, analysis_mode(request))
     return 0
 
 
