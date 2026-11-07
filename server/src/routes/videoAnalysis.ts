@@ -17,6 +17,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { checkLockForWrite } from '../db/patientLocks';
 import type { QueryRunner } from '../db/patientPersons';
+import { asyncHandler } from '../http/asyncHandler';
 import {
   CompletionReportFields,
   requireCompletionVersions,
@@ -42,7 +43,6 @@ function getLockTokenHeader(req: Request): string | null {
 // 실제 추론(서버측 feature 계산)은 M2(6.0-5/6.0-6)에서 이 셸에 끼워 넣는다.
 // ---------------------------------------------------------------------------
 
-const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
 const CreateClipBody = z.object({
   patientId: z.string().uuid(),
@@ -1060,8 +1060,9 @@ export function createVideoAnalysisRouter(pool: Pool): Router {
     next();
   };
 
+  // Rejections go to the central error handler (http/errorHandler.ts, S1) — answered and logged there.
   const wrap = (fn: (p: Pool, req: Request, res: Response) => Promise<void>) =>
-    (req: Request, res: Response) => fn(pool, req, res).catch(() => res.status(500).json(internalError()));
+    asyncHandler((req: Request, res: Response) => fn(pool, req, res));
 
   router.use(flagGuard);
 
@@ -1070,7 +1071,7 @@ export function createVideoAnalysisRouter(pool: Pool): Router {
   const uploadMw = buildUploadMiddleware();
   if (uploadMw) {
     router.post('/clips/:clipId/upload', auth, csrfMiddleware,
-      (req: Request, res: Response) => uploadClip(pool, uploadMw, req, res).catch(() => res.status(500).json(internalError())));
+      asyncHandler((req: Request, res: Response) => uploadClip(pool, uploadMw, req, res)));
   } else {
     router.post('/clips/:clipId/upload', auth, csrfMiddleware,
       (_req: Request, res: Response) => res.status(503).json({ code: 'UPLOAD_DISABLED', error: 'video upload is not configured on this server' }));
