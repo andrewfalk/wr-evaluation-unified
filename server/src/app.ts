@@ -72,8 +72,10 @@ export function createApp({
   app.use('/api/auth', createAuthRouter(pool));
   app.use('/api/config', createConfigRouter());
   app.use('/api/devices', createDevicesRouter(pool));
-  app.use('/api/admin',      createAdminRouter(pool, auditPool));
+  // ops before admin: the admin router now runs auth + admin for every path under it (router.use),
+  // so mounting it first would check the session twice for /api/admin/ops/* (S4 / P1-15).
   app.use('/api/admin/ops',  createOpsStatusRouter(pool));
+  app.use('/api/admin',      createAdminRouter(pool, auditPool));
   app.use('/api/audit',      createAuditRouter(pool));
   app.use('/api/workspaces', createWorkspacesRouter(pool));
   app.use('/api/patients',  createPatientsRouter(pool));

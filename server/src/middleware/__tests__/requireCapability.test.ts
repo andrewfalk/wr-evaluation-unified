@@ -40,17 +40,17 @@ describe('requireCapability', () => {
     availabilityState.available = true;
   });
 
-  it('returns 404 when the workbench runtime availability is off', async () => {
-    availabilityState.available = false;
-    const fake = capabilityFake([]);
+  it('decides the capability only — runtime availability is decided by the router requireFeature (S4 / P1-15)', async () => {
+    availabilityState.available = false; // ignored here: the stats router answers 404 before this runs
+    const fake = capabilityFake([{ has_default: true, has_grant: false }]);
     const middleware = requireCapability(fake.pool, 'stats.view');
     const req  = makeReq({ userId: 'u1', organizationId: 'org-1', role: 'doctor' });
     const next = vi.fn() as unknown as NextFunction;
     const { res, status } = makeRes();
     await middleware(req, res, next);
-    expect(status).toHaveBeenCalledWith(404);
-    expect(next).not.toHaveBeenCalled();
-    expect(fake.calls).toHaveLength(0);
+    expect(status).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledWith();
+    expect(fake.calls).toHaveLength(1);
   });
 
   it('returns 403 when organizationId is null', async () => {

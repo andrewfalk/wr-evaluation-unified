@@ -37,6 +37,8 @@ import { requestCancel, hasVersionDrifted } from '../statsRunsQueue';
 import { STATS_RUN_COLUMNS, type StatsRunRow } from '../statsRunRow';
 import type { AnalyzeResult, StatsRunManifestSucceeded } from '@wr/contracts';
 import { asyncHandler } from '../http/asyncHandler';
+import { requireFeature } from '../http/authz';
+import { getStatsWorkbenchAvailability } from '../statsWorkbenchRuntimeState';
 
 
 // grain 단순화(PR0-B4 개정, person grain 삭제 후속) — case/job/disease 3개만 지원한다
@@ -484,6 +486,10 @@ async function handlePostCancelRun(pool: Pool, req: Request, res: Response): Pro
 export function createStatsRouter(pool: Pool) {
   const router = Router();
   const auth = createAuthMiddleware(pool);
+  // Runtime availability (intranet + flag + health) first: while the workbench is closed every route
+  // answers 404 so its existence is not revealed — even before authentication (S4 / P1-15). Pass the
+  // boolean, not the availability object (that would always be truthy).
+  router.use(requireFeature(() => getStatsWorkbenchAvailability().available));
 
   router.get('/catalog', auth, requireCapability(pool, 'stats.view'), asyncHandler((req, res) => handleGetCatalog(req, res)),
   );

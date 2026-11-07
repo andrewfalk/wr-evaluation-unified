@@ -1,7 +1,6 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import type { Pool } from 'pg';
 import { writeAuditLog } from './audit';
-import { getStatsWorkbenchAvailability } from '../statsWorkbenchRuntimeState';
 
 // PR0-A: 통계 워크벤치 capability 판정 = 역할 기본값(default_all_roles) ∪ 유효
 // (미만료·미회수) grant. PR3-B(계획서 §9)가 requireCapability 미들웨어 바깥에서도
@@ -19,18 +18,10 @@ export async function hasCapability(pool: Pool, capability: string, userId: stri
   return Boolean(rows[0]?.has_default || rows[0]?.has_grant);
 }
 
-// Must be used after auth so req.sessionInfo is populated.
-//
-// 런타임 가용성이 꺼져 있으면(비-intranet 배포, feature flag off) 403이 아니라 404를
-// 반환한다 — patientAccess.ts의 cross-org 404 관례와 동일하게, 기능 자체의 존재를
-// 노출하지 않는다.
+// Must be used after auth so req.sessionInfo is populated. Capability decision only — whether the
+// stats workbench is available at all is the router's requireFeature() (http/authz.ts, S4 / P1-15).
 export function requireCapability(pool: Pool, capability: string): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    if (!getStatsWorkbenchAvailability().available) {
-      res.status(404).json({ code: 'NOT_FOUND', error: 'Not found' });
-      return;
-    }
-
     const session = req.sessionInfo!;
     const orgId = session.organizationId;
 

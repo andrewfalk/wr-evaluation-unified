@@ -162,15 +162,13 @@ describe('requireCapability 게이트(기존 미들웨어 재사용 확인)', ()
   it('워크벤치 런타임 unavailable이면 404', async () => {
     availabilityState.available = false;
     const fx = makeFixture();
-    // auth 미들웨어는 requireCapability보다 먼저 실행되고 availability와 무관하게 항상
-    // 세션 검증 쿼리를 날린다(authSessionHandler) — 404는 그 다음 단계(requireCapability)에서 나온다.
+    // S4 / P1-15: 가용성은 라우터 맨 앞의 requireFeature가 본다 — 인증보다 먼저 404를 내므로
+    // 세션 검증 쿼리도 capability 조회도 일어나지 않는다(닫힌 기능의 존재를 인증 전에도 숨김).
     const res = await request(statsApp(fx)).get('/api/stats/catalog').set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(404);
     fakeOf(fx).assertNoUnmatched();
-    // requireCapability는 availability 확인 후 즉시 반환 — capability 조회 쿼리(2번째 호출)는
-    // 발생하지 않는다.
-    expect(fakeOf(fx).calls.filter(c => c.via === 'pool')).toHaveLength(1);
-    expect(fakeOf(fx).callsTo('auth.session')).toHaveLength(1);
+    expect(fakeOf(fx).calls.filter(c => c.via === 'pool')).toHaveLength(0);
+    expect(fakeOf(fx).callsTo('auth.session')).toHaveLength(0);
   });
 
   it('stats.view capability가 없으면 403 + 감사(stats_access_denied — requireCapability 자체 동작)', async () => {
