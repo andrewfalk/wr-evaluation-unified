@@ -1,5 +1,5 @@
 // 공통 데이터 생성 함수
-import { neutralizeExclusionForLegacy } from '@analytics-core/jobScope';
+import { neutralizeExclusionForLegacy } from '@wr/analytics-core/jobScope';
 
 // 생년월일을 YYYY-MM-DD 형식으로 정규화
 export const formatBirthDate = (birthDate) => {

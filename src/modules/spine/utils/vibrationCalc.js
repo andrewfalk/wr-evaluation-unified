@@ -12,4 +12,4 @@ export {
   computeVibrationCalc,
   assessVibrationRisk,
   isVibrationComplete,
-} from '@analytics-core/modules/spine/index';
+} from '@wr/analytics-core/modules/spine/index';

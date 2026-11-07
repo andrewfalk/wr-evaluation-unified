@@ -1,4 +1,4 @@
-import { isPurposeCompatible } from '@analytics-core/common';
+import { isPurposeCompatible } from '@wr/analytics-core/common';
 
 // 예측 필터 화이트리스트의 등록일 키 — RecipePanel(필터 후보)과 이 파일(전환 시 정리)이 같이 쓴다.
 export const PREDICTION_REGISTERED_AT_KEY = 'case.meta.registeredAt';

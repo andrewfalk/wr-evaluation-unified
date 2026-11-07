@@ -6,4 +6,4 @@ export {
   WBV_FORMULA_V1,
   WBV_FORMULA_LABEL,
   WBV_FORMULA_TITLE,
-} from '@analytics-core/modules/spine/index';
+} from '@wr/analytics-core/modules/spine/index';

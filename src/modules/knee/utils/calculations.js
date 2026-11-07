@@ -9,7 +9,7 @@ export {
   resolveKneeCalculationJobs,
   computeKneeCalc,
   isKneeAssessmentComplete,
-} from '@analytics-core/modules/knee/index';
+} from '@wr/analytics-core/modules/knee/index';
 
 // UI 라벨 매핑 — analytics-core로 이동하지 않음(통계 분석에 쓰이지 않는 순수 표시용).
 export const getSideText = (side) =>

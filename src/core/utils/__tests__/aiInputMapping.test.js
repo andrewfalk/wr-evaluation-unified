@@ -6,7 +6,7 @@ const registry = vi.hoisted(() => ({}));
 vi.mock('../../moduleRegistry', () => ({ getModule: (id) => registry[id] }));
 
 import { createPatient } from '../data';
-import { buildPrompt } from '@contracts/aiPrompt';
+import { buildPrompt } from '@wr/contracts/aiPrompt';
 import { buildAiInput, buildAiInputResult, buildRawAiInput } from '../aiInput';
 import { getElbowBurdenGrade, mergeBkGroupSummaries as mergeElbow } from '../../../modules/elbow/utils/calculations';
 import { getWristBurdenGrade, mergeBkGroupSummaries as mergeWrist } from '../../../modules/wrist/utils/calculations';

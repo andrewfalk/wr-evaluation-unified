@@ -1,6 +1,6 @@
 // videoMappingConfig 공용 헬퍼 (6.0-2). 모듈별 writeField/coerce 중복 제거.
 // 대상 필드명·단위는 VIDEO_FEATURE_TARGETS(계약)이 단일 진실.
-import { VIDEO_FEATURE_TARGETS } from '@contracts/index';
+import { VIDEO_FEATURE_TARGETS } from '@wr/contracts/index';
 
 // job-scope(무릎·어깨): jobExtras[sharedJobId] 위치에 원자값 기입. {moduleData, previousValue, targetPath}.
 export function jobScopeWriteField(moduleId, createExtras, moduleData, ctx, featureKey, value) {

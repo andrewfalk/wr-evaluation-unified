@@ -2,7 +2,7 @@
 // modules/spine로 이관됐다(계산 단일 소스 원칙, §리뷰 지적). `images`(자세 그림 경로)는
 // 계산에 관여하지 않는 UI 전용 데이터라 analytics-core로 옮기지 않았다 — 여기서 계산값
 // 위에 병합해 기존 소비자(TaskEditor.jsx 등의 `formulaDB[code].images`)를 그대로 지원한다.
-import { formulaDB as CORE_FORMULA_DB, POSTURE_CODES } from '@analytics-core/modules/spine/index';
+import { formulaDB as CORE_FORMULA_DB, POSTURE_CODES } from '@wr/analytics-core/modules/spine/index';
 
 const IMAGES = {
   G1: { from: './images/G1_From.png', to: './images/G1_To.png' },

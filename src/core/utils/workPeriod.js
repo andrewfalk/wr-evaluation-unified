@@ -7,4 +7,4 @@ export {
   getEffectiveWorkPeriod,
   getWorkPeriodYearMonth,
   getEffectiveWorkPeriodText,
-} from '@analytics-core/workPeriod';
+} from '@wr/analytics-core/workPeriod';

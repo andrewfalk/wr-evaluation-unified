@@ -16,20 +16,20 @@ process.env.TZ = 'Asia/Seoul';
 //   npm --prefix server test
 // (Server has its own vitest.config.ts with the required DATABASE_URL env stub.)
 //
-// '@contracts' resolves to the contract SOURCE (shared/contracts) in tests so they
+// '@wr/contracts' resolves to the contract SOURCE (shared/contracts) in tests so they
 // run without the prebuilt shared/dist bundle. The app build (vite.config.js) aliases
-// '@contracts' to shared/dist instead — separate concerns, identical exports.
+// '@wr/contracts' to shared/dist instead — separate concerns, identical exports.
 export default defineConfig({
   // 앱 소스(.jsx)와 동일한 JSX 자동 런타임 변환이 필요 — 렌더링 테스트(.test.jsx)가
   // `import React`(classic 런타임) 없이도 App.jsx 등과 동일하게 동작하도록.
   plugins: [react()],
   resolve: {
     alias: {
-      '@contracts': path.resolve(__dirname, 'shared/contracts'),
-      // '@contracts'와 동일한 이유(주석 위 참고) — 소스를 직접 가리켜 prebuild 없이 테스트가
-      // 돈다. 앱 빌드(vite.config.js)는 '@analytics-core'를 packages/analytics-core/dist로
+      '@wr/contracts': path.resolve(__dirname, 'shared/contracts'),
+      // '@wr/contracts'와 동일한 이유(주석 위 참고) — 소스를 직접 가리켜 prebuild 없이 테스트가
+      // 돈다. 앱 빌드(vite.config.js)는 '@wr/analytics-core'를 packages/analytics-core/dist로
       // 별도 alias한다 — 관심사 분리, export는 동일.
-      '@analytics-core': path.resolve(__dirname, 'packages/analytics-core'),
+      '@wr/analytics-core': path.resolve(__dirname, 'packages/analytics-core'),
     },
   },
   test: {

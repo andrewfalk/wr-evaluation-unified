@@ -16,7 +16,7 @@ vi.mock('../../utils/storage.js', () => ({
   getDeviceId: vi.fn(() => 'device abc/123'),
 }));
 
-vi.mock('@contracts/workspace', () => ({
+vi.mock('@wr/contracts/workspace', () => ({
   GetWorkspacesResponseSchema: { parse: value => value },
   // 실제 스키마처럼 ack 필드 기본값([])을 채워 준다.
   SaveWorkspaceResponseSchema: {
@@ -24,7 +24,7 @@ vi.mock('@contracts/workspace', () => ({
   },
 }));
 
-vi.mock('@contracts/autosave', () => ({
+vi.mock('@wr/contracts/autosave', () => ({
   GetAutosaveResponseSchema: { parse: value => value },
   PutAutosaveResponseSchema: { parse: value => value },
   DeleteAutosaveResponseSchema: { parse: value => value },

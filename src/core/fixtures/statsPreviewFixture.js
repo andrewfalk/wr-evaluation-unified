@@ -11,7 +11,7 @@
 // Rule for the tests: queue a preview answer (mockResolvedValueOnce / mockRejectedValueOnce) BEFORE
 // the action that completes the recipe, not after it — if that action takes longer than the 500ms
 // debounce, the preview fires before a later-queued answer exists and gets this default instead.
-import { PreviewResponseSchema } from '@contracts/stats';
+import { PreviewResponseSchema } from '@wr/contracts/stats';
 
 export function defaultPreviewResponse() {
   return PreviewResponseSchema.parse({

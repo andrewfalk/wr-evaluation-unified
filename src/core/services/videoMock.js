@@ -1,7 +1,7 @@
 // Mock feature 생성기 (§8.16 6.0-2). 실제 RTMPose 추론 없이 매핑/적용/provenance
 // 세로조각을 검증하기 위한 임시 구현 — M2(6.0-5/6.0-6)에서 실제 계산기로 교체된다.
 // 계약(VideoFeatureValue/VIDEO_FEATURE_TARGETS)은 동일하게 유지하므로 교체 시 소비측 무변경.
-import { VIDEO_FEATURE_TARGETS } from '@contracts/index';
+import { VIDEO_FEATURE_TARGETS } from '@wr/contracts/index';
 import {
   REPETITION_FEATURE_KEYS, REPETITION_PROFILES, HAND_WRIST_FEATURE_KEYS, REPETITION_BAND_FEATURE_KEYS,
 } from './videoFeatureProfiles';

@@ -1,5 +1,5 @@
 // PR0-B2 §1-2: 소스가 아니라 실제 빌드 산출물(dist/completion.js)을 직접 import한다.
-// 이 파일의 다른 테스트(completion.test.ts)는 vitest alias(@analytics-core → 소스)로
+// 이 파일의 다른 테스트(completion.test.ts)는 vitest alias(@wr/analytics-core → 소스)로
 // 돌아 tsup 번들링·entry 누락 문제를 못 잡는다(shoulder shim 사건 — vitest 1472개가
 // 전부 통과한 채 dist에서만 export가 죽어 있던 전례). 여기서는 6개 모듈이 실제로
 // dist/completion.js 안에 전부 등록됐는지(errorModuleIds가 비어 있는지)와, 빈 데이터로는

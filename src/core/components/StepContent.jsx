@@ -5,7 +5,7 @@ import { AIAnalysisPanel } from './AIAnalysisPanel';
 import { VideoAnalysisStep } from './VideoAnalysisStep';
 import { createDiagnosis } from '../utils/data';
 import { buildAiInputResult } from '../utils/aiInput';
-import { hasUnmigratedLegacyJobData } from '@analytics-core/jobScope';
+import { hasUnmigratedLegacyJobData } from '@wr/analytics-core/jobScope';
 
 export function StepContent({
   currentStep,

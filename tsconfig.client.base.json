@@ -15,10 +15,10 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["vite/client"],
     "paths": {
-      "@contracts": ["./shared/dist/index.d.ts"],
-      "@contracts/*": ["./shared/dist/*.d.ts"],
-      "@analytics-core": ["./packages/analytics-core/dist/index.d.ts"],
-      "@analytics-core/*": ["./packages/analytics-core/dist/*.d.ts"]
+      "@wr/contracts": ["./shared/dist/index.d.ts"],
+      "@wr/contracts/*": ["./shared/dist/*.d.ts"],
+      "@wr/analytics-core": ["./packages/analytics-core/dist/index.d.ts"],
+      "@wr/analytics-core/*": ["./packages/analytics-core/dist/*.d.ts"]
     }
   }
 }

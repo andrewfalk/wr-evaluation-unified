@@ -8,7 +8,7 @@
 // conflictThreshold만 수치 임계값이라 기본 비활성(검증 전 경고 차단, 실값 6.0-B2).
 
 // 버전 상수 단일 source = shared/contracts/videoRecipe (서버 apply 검증 게이트와 공유, 6.0-9). re-export.
-export { VIDEO_VIEWPOINT_CONFIG_VERSION } from '@contracts/index';
+export { VIDEO_VIEWPOINT_CONFIG_VERSION } from '@wr/contracts/index';
 
 // featureKey → 가장 잘 보이는 평면(§8.6.1: 측면=체간전굴·무릎·목굴곡 / 정면=어깨외전·목회전·비틀림).
 // 미선언 = 시점 선호 없음(융합은 confidence로만, viewpoint 성분 미부여).

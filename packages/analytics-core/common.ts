@@ -78,7 +78,7 @@ export function escapeHtml(str: unknown): unknown {
 // 브로드캐스트 설계" 절. 판정에 필요한 필드(grain/sensitivity/type) 세 개만 구조적으로
 // 받는다 — types.ts의 AnalyticsVariableMetadata를 그대로 import해도 되지만, common.ts는
 // 의도적으로 다른 모듈에 의존하지 않는 leaf 유틸이라 구조적 타입으로 최소화한다.
-// 클라이언트(CatalogPanel.jsx/RecipePanel.jsx, `@analytics-core/common` → dist)와 서버
+// 클라이언트(CatalogPanel.jsx/RecipePanel.jsx, `@wr/analytics-core/common` → dist)와 서버
 // (statsRecipeValidation.ts, `@wr/analytics-core`) 양쪽이 이 함수 하나를 그대로 import해서
 // 쓴다 — 복제 구현 금지(리뷰 지적 — 클라이언트/서버 별도 구현은 드리프트 위험).
 export interface GrainCompatibilityVariable {

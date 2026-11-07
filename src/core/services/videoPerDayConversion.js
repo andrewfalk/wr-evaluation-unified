@@ -5,7 +5,7 @@
 //
 // null vs 0 (중요): activeMinutesPerDay == null(모름)이면 해당 per-day numeric을 만들지 않고 누락 처리
 // (missingActiveTime) — 0으로 표시해 오적용하는 사고를 막는다. 0(0분 공정)은 정상값.
-import { ClipFeatureSetSchema, VIDEO_FEATURE_TARGETS, VIDEO_MAPPING_CONFIG_VERSION, buildRecipeVersion } from '@contracts/index';
+import { ClipFeatureSetSchema, VIDEO_FEATURE_TARGETS, VIDEO_MAPPING_CONFIG_VERSION, buildRecipeVersion } from '@wr/contracts/index';
 import { CANDIDATE_REASONS } from './videoMock';
 import { resolveAutoSuggest, DEFAULT_CONFIDENCE_THRESHOLDS } from './videoConfidenceConfig';
 

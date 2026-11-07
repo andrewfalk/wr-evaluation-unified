@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MODEL_OPTIONS } from '@contracts/aiModels';
+import { MODEL_OPTIONS } from '@wr/contracts/aiModels';
 
 const auth = vi.hoisted(() => ({ session: { mode: 'intranet' } }));
 vi.mock('../../auth/AuthContext', () => ({ useAuth: () => ({ session: auth.session }) }));

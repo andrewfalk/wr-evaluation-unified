@@ -9,7 +9,7 @@ import {
   AnalyzeResponseSchema,
   AnalyzeAcceptedResponseSchema,
   RunStatusResponseSchema,
-} from '@contracts/stats';
+} from '@wr/contracts/stats';
 import { z } from 'zod';
 import { requestJson, requestBlobPost } from './httpClient';
 

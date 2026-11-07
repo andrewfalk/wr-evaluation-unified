@@ -26,8 +26,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@contracts': path.resolve('./shared/dist'),
-      '@analytics-core': path.resolve('./packages/analytics-core/dist'),
+      '@wr/contracts': path.resolve('./shared/dist'),
+      '@wr/analytics-core': path.resolve('./packages/analytics-core/dist'),
     },
   },
   build: {

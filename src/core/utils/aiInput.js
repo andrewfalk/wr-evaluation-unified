@@ -16,8 +16,8 @@ import {
   TEMPORAL_FLAG_KEYS,
   CERVICAL_EXPOSURE_TYPES,
   CERVICAL_BURDEN_GRADES,
-} from '@contracts/aiAnalysis';
-import { isJobExcludedFromAnalysis } from '@analytics-core/jobScope';
+} from '@wr/contracts/aiAnalysis';
+import { isJobExcludedFromAnalysis } from '@wr/analytics-core/jobScope';
 import { getModule } from '../moduleRegistry';
 import { calculateBMI } from './common';
 import { computeAgeAt } from './dashboardStats';

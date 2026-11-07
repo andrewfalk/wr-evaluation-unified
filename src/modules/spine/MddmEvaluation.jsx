@@ -6,7 +6,7 @@ import { createTask } from './utils/data';
 import { SPINE_FORMULA_V513 } from './utils/formulaVersion';
 import { getEffectiveWorkPeriodText } from '../../core/utils/workPeriod';
 import { NoEvaluableJobsNotice } from '../../core/components/NoEvaluableJobsNotice';
-import { filterAnalysisJobs, hasNoEvaluableJobs } from '@analytics-core/jobScope';
+import { filterAnalysisJobs, hasNoEvaluableJobs } from '@wr/analytics-core/jobScope';
 
 // 사용자가 임상 입력(tasks)을 실제로 건드릴 때마다 spine 모듈을 v5.1.3 공식으로 승격.
 // 단순 자동 정리(sharedJobId 마이그레이션)에서는 호출하지 않는다.

@@ -3,7 +3,7 @@ import { isPatientComplete } from './patientCompletion';
 import { getOwnerGroupKey } from './patientOwnership';
 import { formatBirthDate } from './data';
 import { toLocalDateString } from './common';
-import { calculateAgeStrict } from '@analytics-core';
+import { calculateAgeStrict } from '@wr/analytics-core';
 
 export const UNASSIGNED_GROUP_KEY = '__unassigned__';
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { isGrainCompatible, isPurposeCompatible } from '@analytics-core/common';
+import { isGrainCompatible, isPurposeCompatible } from '@wr/analytics-core/common';
 import { describeAllowedPurposes } from './purposeLabels';
 
 const MODULE_LABELS = {

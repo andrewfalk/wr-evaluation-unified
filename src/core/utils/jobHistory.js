@@ -8,7 +8,7 @@
 // 같다. 미포함 직력이 없으면 출력은 종전과 완전히 같다.
 
 import { getEffectiveWorkPeriodText } from './workPeriod';
-import { hasExcludedJobs, isJobExcludedFromAnalysis, orderJobsForHistory } from '@analytics-core/jobScope';
+import { hasExcludedJobs, isJobExcludedFromAnalysis, orderJobsForHistory } from '@wr/analytics-core/jobScope';
 
 export const EXCLUDED_JOB_LABEL = '신체부담평가에는 미포함';
 export const NO_EVALUABLE_JOBS_NOTE = '※ 모든 직력이 신체부담평가에서 제외되어 평가 대상 없음';

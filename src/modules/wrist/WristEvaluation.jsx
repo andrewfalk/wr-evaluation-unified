@@ -3,7 +3,7 @@ import { ExposureForm } from './components/ExposureForm';
 import { WristResultPanel } from './components/WristResultPanel';
 import { syncWristModuleData } from './utils/data';
 import { NoEvaluableJobsNotice } from '../../core/components/NoEvaluableJobsNotice';
-import { hasNoEvaluableJobs, isJobIdExcluded } from '@analytics-core/jobScope';
+import { hasNoEvaluableJobs, isJobIdExcluded } from '@wr/analytics-core/jobScope';
 
 export function WristEvaluation({ patient, calc, updateModule }) {
   const shared = patient.data.shared || {};

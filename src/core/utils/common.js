@@ -2,7 +2,7 @@
 // packages/analytics-core/common.ts로 이동(클라이언트·서버 공유). toLocalDateString은
 // 의도적으로 로컬 타임존에 의존하는 UI 표시 함수라 이동하지 않고 그대로 남는다 —
 // 이 파일은 "부분 shim"이다.
-export { calculateBMI, calculateAge, stableStringify, escapeHtml } from '@analytics-core/common';
+export { calculateBMI, calculateAge, stableStringify, escapeHtml } from '@wr/analytics-core/common';
 
 // UTC(Z) ISO 타임스탬프(createdAt 등)의 앞 10자를 그대로 잘라 쓰면(slice/split) KST(UTC+9)
 // 등 UTC보다 빠른 시간대에서는 자정~오전 사이 생성된 기록이 하루 전날 UTC 날짜로 표시된다.
