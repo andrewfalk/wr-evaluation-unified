@@ -18,31 +18,36 @@ const REDACT_PATHS = [
   '*.refreshToken',
 ];
 
-// Keys copied from an Error. Everything else (pg `detail`, `where`, `parameters`, arbitrary
-// properties a library attached) is dropped.
-const ERROR_KEYS = ['code', 'constraint', 'table', 'column', 'routine', 'status', 'type'] as const;
+// Keys copied from an Error. Everything else (pg `detail`, `where`, `parameters`, body-parser's
+// raw `body`, arbitrary properties a library attached) is dropped. An error's own `type` property
+// (body-parser: `entity.too.large`, `entity.parse.failed`) is kept as `errorType` so it does not
+// overwrite the class name in `type`.
+const ERROR_KEYS = ['code', 'constraint', 'table', 'column', 'routine', 'status'] as const;
 
-// A ZodError's message (and so the first part of its stack) is the JSON of its issues, which
-// repeats rejected input values (`received: …`). Keep only the issue count and the call frames.
-function serializeZodError(err: ZodError): Record<string, unknown> {
-  const frames = (err.stack ?? '').split('\n').filter((line) => /^\s+at /.test(line));
-  return {
-    type: err.name,
-    message: `${err.issues.length} validation issue(s)`,
-    stack: [`${err.name}: ${err.issues.length} validation issue(s)`, ...frames].join('\n'),
-  };
-}
-
-export function serializeError(err: unknown): Record<string, unknown> {
-  if (err instanceof ZodError) return serializeZodError(err);
-  if (!(err instanceof Error)) return { type: typeof err };
-  const out: Record<string, unknown> = { type: err.name, message: err.message, stack: err.stack };
+function copyKeys(err: Error, out: Record<string, unknown>): Record<string, unknown> {
   const record = err as unknown as Record<string, unknown>;
   for (const key of ERROR_KEYS) {
     const value = record[key];
     if (typeof value === 'string' || typeof value === 'number') out[key] = value;
   }
+  if (typeof record.type === 'string') out.errorType = record.type;
   return out;
+}
+
+// Some error messages (and so the first part of their stack) repeat the input that failed:
+// a ZodError's message is the JSON of its issues (`received: …`), and a SyntaxError from
+// JSON.parse — including body-parser's `entity.parse.failed` — quotes the request body
+// (`"{"password":…" is not valid JSON`). For those keep a fixed message and the call frames only.
+function withFixedMessage(err: Error, message: string): Record<string, unknown> {
+  const frames = (err.stack ?? '').split('\n').filter((line) => /^\s+at /.test(line));
+  return copyKeys(err, { type: err.name, message, stack: [`${err.name}: ${message}`, ...frames].join('\n') });
+}
+
+export function serializeError(err: unknown): Record<string, unknown> {
+  if (err instanceof ZodError) return withFixedMessage(err, `${err.issues.length} validation issue(s)`);
+  if (err instanceof SyntaxError) return withFixedMessage(err, 'invalid JSON');
+  if (!(err instanceof Error)) return { type: typeof err };
+  return copyKeys(err, { type: err.name, message: err.message, stack: err.stack });
 }
 
 export interface CreateLoggerOptions {

@@ -144,6 +144,15 @@ describe('createErrorHandler', () => {
     expect(JSON.stringify(lines[0])).not.toContain('PHI-like-value');
   });
 
+  it('a malformed JSON body (body-parser) never reaches the log, though JSON.parse quotes it', async () => {
+    const { app, lines } = appWith(async () => 'unreachable');
+    const res = await request(app).post('/api/thing').set('Content-Type', 'application/json').send('{"password":hunter2-secret}');
+    expect(res.status).toBe(500); // unchanged: entity.parse.failed stays a 500 in S1
+    expect(lines).toHaveLength(1);
+    expect(lines[0].err).toMatchObject({ type: 'SyntaxError', message: 'invalid JSON', errorType: 'entity.parse.failed', status: 400 });
+    expect(JSON.stringify(lines[0])).not.toContain('hunter2-secret');
+  });
+
   it('ends the socket instead of writing JSON when headers were already sent', () => {
     const { logger, lines } = capturingLogger();
     const res = { headersSent: true, destroy: vi.fn(), status: vi.fn(), json: vi.fn() };
@@ -186,5 +195,8 @@ describe('logger', () => {
     expect(out).not.toHaveProperty('detail');
     expect(out).not.toHaveProperty('parameters');
     expect(serializeError('str')).toEqual({ type: 'string' });
+    // body-parser's own `type` does not replace the class name
+    const tooLarge = Object.assign(new Error('request entity too large'), { type: 'entity.too.large', status: 413 });
+    expect(serializeError(tooLarge)).toMatchObject({ type: 'Error', errorType: 'entity.too.large', status: 413 });
   });
 });
