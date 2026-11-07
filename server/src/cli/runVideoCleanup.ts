@@ -1,7 +1,7 @@
 import { createPool } from '../db/client';
 import { runVideoClipCleanup } from '../jobs/videoClipCleanup';
 
-const pool = createPool();
+const pool = createPool(process.env.DATABASE_URL);
 
 runVideoClipCleanup(pool)
   .then(({ clipsExpired, originalsDeleted, artifactsDeleted, sampleFramesDeleted, orphansDeleted }) => {

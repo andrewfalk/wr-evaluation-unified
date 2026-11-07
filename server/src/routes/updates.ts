@@ -1,19 +1,19 @@
 import { Router } from 'express';
 import express from 'express';
+import config from '../config';
 
 // 트랙 2 계획 F/G — electron-updater가 latest.yml/canary.yml/설치본/.blockmap을
 // 내려받는 정적 경로 + 관리자 on/off 스위치(update-policy.json)를 같은 디렉터리에서 서빙한다.
 // 운영자가 docker exec 없이 단순 파일 복사로 배포할 수 있도록 host bind mount로 연결됨
 // (docker-compose.yml의 app.volumes 참고) — 컨테이너 재시작 없이도 새 파일을 즉시 인식해야
 // 하므로 부팅 시 1회 존재 확인 후 캐싱하는 방식은 쓰지 않는다.
-const DEFAULT_UPDATES_DIR = process.env.UPDATES_DIR || '/app/updates';
 
 // PHI 없음(설치본·yml·정책 파일뿐) — 인증 없이 서빙한다. 보안 경계는 (a) 인트라넷 네트워크
 // 경계 자체(로그인 페이지도 동일 경계에 의존), (b) sha512 무결성(electron-updater 기본 동작),
 // (c) 코드서명(후속 과제)이지, 이 라우트의 세션 인증이 아니다.
 // updatesDir 파라미터는 테스트에서 임시 디렉터리를 주입하기 위한 것 — 실제 서버는 인자
-// 없이 호출해 DEFAULT_UPDATES_DIR(process.env.UPDATES_DIR)을 그대로 쓴다.
-export function createUpdatesRouter(updatesDir: string = DEFAULT_UPDATES_DIR): Router {
+// 없이 호출해 config.updatesDir(UPDATES_DIR || '/app/updates')을 그대로 쓴다(P1-10).
+export function createUpdatesRouter(updatesDir: string = config.updatesDir): Router {
   const router = Router();
 
   // fs.existsSync로 등록을 조건화하지 않는다 — express.static은 디렉터리가 없으면

@@ -1083,11 +1083,7 @@ interface RecordedOutcome {
 // analyze.py가 정상 종료 직전 stderr에 쓰는 `STATS_ENGINE_TIMING {...}` 표식을 읽어 Node 쪽
 // spawn→close 시간과 합친 한 줄을 로그로 남긴다. 꺼져 있으면 아무것도 읽거나 쓰지 않는다.
 // stderr는 원래도 stderrMaxBytes 상한 안에서 모으므로(아래 runEngineProcess) 표식 한 줄은 동작에 영향 없음.
-export const STATS_ENGINE_TIMING_ENV = 'STATS_ENGINE_TIMING';
-
-export function isEngineTimingEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env[STATS_ENGINE_TIMING_ENV] === '1';
-}
+// 켜짐 여부는 config.stats.timingEnabled(STATS_ENGINE_TIMING === '1', P1-10에서 process.env 직접 읽기를 옮김).
 
 export interface EngineTimingLog {
   mode: string | null;
@@ -1187,6 +1183,7 @@ async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const scriptPath = path.join(config.stats.scriptsDir, 'analyze.py');
     const env = {
+      // eslint-disable-next-line no-restricted-syntax -- 자식 env 최소화는 L10(SEC-A P1-22)에서 buildChildEnv()로.
       ...process.env,
       OMP_NUM_THREADS: '1',
       OPENBLAS_NUM_THREADS: '1',
@@ -1199,7 +1196,7 @@ async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
     // 플랫폼별 ENOENT가 비동기 'error' 대신 동기 예외로 오는 경우). 이 시점엔 아직 아무
     // 리스너도 등록 전이라 'close'가 절대 오지 않으므로, 여기서 못 잡으면 슬롯이 영구
     // 누수되고 이후 모든 요청이 StatsEngineBusyError로 막힌다(실제 재현됨).
-    const timingEnabled = isEngineTimingEnabled();
+    const timingEnabled = config.stats.timingEnabled;
     const spawnWallMs = timingEnabled ? Date.now() : 0;
     let child: ReturnType<typeof spawn>;
     try {

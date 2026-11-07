@@ -6,13 +6,15 @@ import { createAuthMiddleware } from '../middleware/auth';
 import { adminOnly } from '../middleware/adminOnly';
 import { csrfMiddleware } from '../middleware/csrf';
 import { asyncHandler } from '../http/asyncHandler';
+import config from '../config';
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
-const BACKUPS_DIR = process.env.BACKUPS_DIR ?? '/backups';
-const STATUS_DIR  = path.join(BACKUPS_DIR, '_status');
-const ALERTS_DIR  = path.join(BACKUPS_DIR, '_alerts');
+// config.backupsDir (BACKUPS_DIR ?? '/backups'), read when a request is handled rather than at
+// import (P1-10).
+const statusDir = (): string => path.join(config.backupsDir, '_status');
+const alertsDir = (): string => path.join(config.backupsDir, '_alerts');
 
 // backup.sh encodes runId as YYYYmmdd_HHMMSS — validate strictly to prevent
 // path traversal via the :runId URL param.
@@ -44,13 +46,13 @@ async function writeJsonAtomic(dest: string, obj: unknown): Promise<void> {
 async function readOpenAlerts(): Promise<Record<string, unknown>[]> {
   let files: string[];
   try {
-    files = await fs.readdir(ALERTS_DIR);
+    files = await fs.readdir(alertsDir());
   } catch {
     return [];
   }
   const alertFiles = files.filter(f => f.startsWith('FAILED_') && f.endsWith('.json'));
   const results = await Promise.all(
-    alertFiles.map(f => readJsonFile(path.join(ALERTS_DIR, f)))
+    alertFiles.map(f => readJsonFile(path.join(alertsDir(), f)))
   );
   return results.filter(
     (a): a is Record<string, unknown> =>
@@ -76,8 +78,8 @@ function recomputeSummary(stale: boolean, openAlerts: Record<string, unknown>[])
 // and backup-status.json. 503 when neither file exists.
 async function getBackupStatus(_req: Request, res: Response): Promise<void> {
   const [monitorReport, backupStatus, openAlerts] = await Promise.all([
-    readJsonFile(path.join(STATUS_DIR, 'monitor-report.json')),
-    readJsonFile(path.join(STATUS_DIR, 'backup-status.json')),
+    readJsonFile(path.join(statusDir(), 'monitor-report.json')),
+    readJsonFile(path.join(statusDir(), 'backup-status.json')),
     readOpenAlerts(),
   ]);
 
@@ -108,7 +110,7 @@ async function ackAlert(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const alertPath = path.join(ALERTS_DIR, `FAILED_${runId}.json`);
+  const alertPath = path.join(alertsDir(), `FAILED_${runId}.json`);
   const alert = await readJsonFile(alertPath) as Record<string, unknown> | null;
   if (!alert) {
     res.status(404).json({ error: 'Alert not found.' });
@@ -138,7 +140,7 @@ async function resolveAlert(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const alertPath = path.join(ALERTS_DIR, `FAILED_${runId}.json`);
+  const alertPath = path.join(alertsDir(), `FAILED_${runId}.json`);
   const alert = await readJsonFile(alertPath) as Record<string, unknown> | null;
   if (!alert) {
     res.status(404).json({ error: 'Alert not found.' });

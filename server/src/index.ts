@@ -12,7 +12,7 @@ import { createStatsRunsQueueWorker } from './statsRunsQueue';
 
 // The server process: create the database pools, build the app (src/app.ts — REFACTORING_ROADMAP
 // P0-3), then run migrations, listen and start the background jobs.
-const pool = createPool();
+const pool = createPool(config.databaseUrl);
 const auditPool = createAuditPool();
 export const app = createApp({ pool, auditPool });
 

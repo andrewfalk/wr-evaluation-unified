@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import config from '../config';
 
 // Separate read-only pool for audit log queries (wr_audit_reader role).
 // AUDIT_DATABASE_URL is injected by docker-compose via AUDIT_DB_PASSWORD.
@@ -8,12 +9,14 @@ import { Pool } from 'pg';
 //
 // Created by the process entry point (index.ts) rather than at import time
 // (REFACTORING_ROADMAP P0-3); the checks below are unchanged.
-export function createAuditPool(env: NodeJS.ProcessEnv = process.env): Pool {
-  const isStrictEnv =
-    env.NODE_ENV === 'production' ||
-    env.DEPLOYMENT_MODE === 'intranet';
+export type AuditPoolSettings = Pick<typeof config, 'env' | 'deploymentMode' | 'databaseUrl' | 'auditDatabaseUrl'>;
 
-  if (!env.AUDIT_DATABASE_URL) {
+export function createAuditPool(settings: AuditPoolSettings = config): Pool {
+  const isStrictEnv =
+    settings.env === 'production' ||
+    settings.deploymentMode === 'intranet';
+
+  if (!settings.auditDatabaseUrl) {
     if (isStrictEnv) {
       throw new Error(
         'AUDIT_DATABASE_URL is required in production/intranet mode. ' +
@@ -26,7 +29,7 @@ export function createAuditPool(env: NodeJS.ProcessEnv = process.env): Pool {
     );
   }
 
-  const connectionString = env.AUDIT_DATABASE_URL ?? env.DATABASE_URL;
+  const connectionString = settings.auditDatabaseUrl ?? settings.databaseUrl;
 
   if (!connectionString) {
     throw new Error('DATABASE_URL environment variable is required');

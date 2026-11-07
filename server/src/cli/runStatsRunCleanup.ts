@@ -1,7 +1,7 @@
 import { createPool } from '../db/client';
 import { runStatsRunCleanup } from '../jobs/statsRunCleanup';
 
-const pool = createPool();
+const pool = createPool(process.env.DATABASE_URL);
 
 runStatsRunCleanup(pool)
   .then(({ deleted }) => {
