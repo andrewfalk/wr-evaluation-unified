@@ -373,6 +373,43 @@ describe('POST /api/audit/emr', () => {
     expect(writeAuditLogStrict).toHaveBeenCalledTimes(1); // only the first request was recorded
   });
 
+  it('a replayed (already recorded) nonce does not use up the device budget', async () => {
+    const { privateKey, publicKey } = makeKeyPair();
+    const fake = makeDeviceFake({ user_id: 'user-1', organization_id: 'org-1', public_key: exportPublicKey(publicKey), status: 'active' });
+    const app = auditApp(fake, { emrEventsPerDevicePerMinute: 2 });
+    const ts = new Date().toISOString();
+    const sendWith = (devNonce: string) => request(app)
+      .post('/api/audit/emr')
+      .set('Authorization', `Bearer ${userToken()}`)
+      .set('x-wr-source', 'electron-main').set('x-wr-device-id', 'dev-1')
+      .set('x-wr-device-sig', signPayload(privateKey, 'dev-1', ts, devNonce, VALID_BODY)).set('x-wr-device-ts', ts).set('x-wr-device-nonce', devNonce)
+      .send(VALID_BODY);
+    const a = nonce();
+    expect((await sendWith(a)).status).toBe(200);
+    for (let i = 0; i < 3; i += 1) expect((await sendWith(a)).status).toBe(401); // replays
+    expect((await sendWith(nonce())).status).toBe(200); // the second real event still fits the budget of 2
+  });
+
+  it('a session-authenticated request cannot record itself as a queue replay (session flags are server-set)', async () => {
+    const { writeAuditLogStrict } = await import('../../middleware/audit.js');
+    const { privateKey, publicKey } = makeKeyPair();
+    const fake = makeDeviceFake({ user_id: 'user-1', organization_id: 'org-1', public_key: exportPublicKey(publicKey), status: 'active' });
+    const spoofed = { ...VALID_BODY, extra: { session_missing: true, actor_from_queue: true, kept: 'yes' } };
+    const ts = new Date().toISOString();
+    const devNonce = nonce();
+    const res = await request(auditApp(fake))
+      .post('/api/audit/emr')
+      .set('Authorization', `Bearer ${userToken()}`)
+      .set('x-wr-source', 'electron-main').set('x-wr-device-id', 'dev-1')
+      .set('x-wr-device-sig', signPayload(privateKey, 'dev-1', ts, devNonce, spoofed)).set('x-wr-device-ts', ts).set('x-wr-device-nonce', devNonce)
+      .send(spoofed);
+    expect(res.status).toBe(200);
+    const entry = vi.mocked(writeAuditLogStrict).mock.calls.at(-1)![1] as { extra: Record<string, unknown> };
+    expect(entry.extra).toMatchObject({ kept: 'yes', deviceId: 'dev-1', source: 'electron-main' });
+    expect(entry.extra).not.toHaveProperty('session_missing');
+    expect(entry.extra).not.toHaveProperty('actor_from_queue');
+  });
+
   it('an unverified (bad signature) request does not use up the device bucket', async () => {
     const { privateKey, publicKey } = makeKeyPair();
     const fake = makeDeviceFake({ user_id: 'user-1', organization_id: 'org-1', public_key: exportPublicKey(publicKey), status: 'active' });

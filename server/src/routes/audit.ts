@@ -187,17 +187,6 @@ async function handleEmrAudit(pool: Pool, deviceLimiter: KeyedLimiter, req: Requ
     return;
   }
 
-  // --- 7b. Per-device rate limit (SEC-A L3) — keyed by the device id only now that the signature
-  // proved the sender holds that device's key (keying on the unverified header would let anyone
-  // create unlimited buckets). Before the nonce is claimed (step 8), so the device's queue can
-  // resend the same signed entry later.
-  const limit = deviceLimiter.hit(deviceId);
-  if (!limit.allowed) {
-    res.setHeader('Retry-After', String(limit.retryAfterSec));
-    res.status(429).json({ code: 'RATE_LIMITED', error: 'Too many audit events from this device, please retry later' });
-    return;
-  }
-
   // --- 8. Nonce + audit row, in one transaction (SEC-A L11) ---
   // The nonce is claimed only now — after the signature proved the request — and in the same
   // transaction as the audit row:
@@ -205,7 +194,12 @@ async function handleEmrAudit(pool: Pool, deviceLimiter: KeyedLimiter, req: Requ
   //    401 as before; concurrent duplicates are serialised by the primary-key row lock.
   //  - if the audit INSERT fails, ROLLBACK removes the nonce row too, so the device's queue can resend
   //    the same signed request (this endpoint exists to record the audit row; never 200 without it).
-  // Server-set fields come after the client's `extra`, so a client cannot overwrite them.
+  // Server-set fields come after the client's `extra`, so a client cannot overwrite them; the device
+  // rate limit is counted inside, after the claim.
+  // session_missing / actor_from_queue say how the server authenticated this request — only the
+  // server sets them (a session-authenticated request must not be recorded as a queue replay).
+  const { session_missing: _clientSessionMissing, actor_from_queue: _clientFromQueue, ...clientExtra } = body.extra ?? {};
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -220,6 +214,18 @@ async function handleEmrAudit(pool: Pool, deviceLimiter: KeyedLimiter, req: Requ
       res.status(401).json({ code: 'UNAUTHORIZED', error: 'Duplicate request (nonce reuse)' });
       return;
     }
+    // Per-device rate limit (SEC-A L3) — keyed by the device id only now that the signature proved
+    // the sender holds that device's key (keying on the unverified header would let anyone create
+    // unlimited buckets), and counted only for a nonce claimed just now: replays of an already
+    // recorded request (401 above) do not use up the device's budget. Over the limit → ROLLBACK
+    // releases the nonce, so the device's queue can resend the same signed entry later.
+    const limit = deviceLimiter.hit(deviceId);
+    if (!limit.allowed) {
+      await client.query('ROLLBACK');
+      res.setHeader('Retry-After', String(limit.retryAfterSec));
+      res.status(429).json({ code: 'RATE_LIMITED', error: 'Too many audit events from this device, please retry later' });
+      return;
+    }
     await writeAuditLogStrict(client, {
       actorUserId,
       actorOrgId,
@@ -230,7 +236,7 @@ async function handleEmrAudit(pool: Pool, deviceLimiter: KeyedLimiter, req: Requ
       ip:         req.ip ?? null,
       userAgent:  req.headers['user-agent'] ?? null,
       extra:      {
-        ...(body.extra ?? {}),
+        ...clientExtra,
         deviceId,
         source:   'electron-main',
         ...(sessionMissing ? { session_missing: true, actor_from_queue: true } : {}),
