@@ -43,8 +43,8 @@ import { statsRunExpiresAt as expiresAt } from './statsRunExpiry';
 import { admitAnalysisRun, estimateEngineTimeoutMs } from './statsRunAdmission';
 import type { StatsRunRow } from './statsRunRow';
 import config from './config';
+import { INTERNAL_ERROR_CODE, INTERNAL_ERROR_MESSAGE } from './http/errors';
 
-const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
 const FAILURE_MESSAGES: Record<string, string> = {
   TIMEOUT: 'Analysis timed out.',
@@ -270,7 +270,7 @@ export async function finalizeAnalyzeResponse(
         }),
       });
     } catch {
-      return { status: 500, body: internalError() };
+      return { status: 500, body: { code: INTERNAL_ERROR_CODE, error: INTERNAL_ERROR_MESSAGE } };
     }
     if (signal?.aborted) return { aborted: true };
   } else if (limitedStatus !== null) {
@@ -348,19 +348,15 @@ function sleep(ms: number): Promise<void> {
 export async function handlePostAnalyze(pool: Pool, req: Request, res: Response): Promise<void> {
   if (activeAnalyzeRequests >= config.stats.maxConcurrentAnalyzeRequests) {
     const session = req.sessionInfo;
-    try {
-      await writeAuditLogStrict(pool, {
-        actorUserId: session?.userId ?? null,
-        actorOrgId: session?.organizationId ?? null,
-        action: 'stats_analyze',
-        targetType: 'analysis_recipe',
-        outcome: 'denied' as AuditOutcome,
-        extra: { reasonCode: 'REQUEST_CAPACITY_EXCEEDED' },
-      });
-    } catch {
-      res.status(500).json(internalError());
-      return;
-    }
+    // A failed strict audit write escapes to the central error handler (500 INTERNAL_ERROR, S1).
+    await writeAuditLogStrict(pool, {
+      actorUserId: session?.userId ?? null,
+      actorOrgId: session?.organizationId ?? null,
+      action: 'stats_analyze',
+      targetType: 'analysis_recipe',
+      outcome: 'denied' as AuditOutcome,
+      extra: { reasonCode: 'REQUEST_CAPACITY_EXCEEDED' },
+    });
     res.status(429).json({ code: 'REQUEST_CAPACITY_EXCEEDED', error: 'Too many concurrent analysis requests' });
     return;
   }
@@ -551,9 +547,8 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
         [admission.row.analysis_run_id, ctx.orgId],
       );
       if (polled.rows.length === 0) {
-        // TTL cleanup이 그 사이 지웠을 극단적 경우 — 방어적으로 failed 취급.
-        res.status(500).json(internalError());
-        return;
+        // TTL cleanup이 그 사이 지웠을 극단적 경우 — 방어적으로 failed 취급(중앙 에러 처리기가 500, S1).
+        throw new Error('stats run row disappeared while polling');
       }
       fresh = { ...fresh, ...polled.rows[0] };
     }

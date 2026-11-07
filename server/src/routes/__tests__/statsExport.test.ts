@@ -38,6 +38,8 @@ vi.mock('../../middleware/audit', () => ({
 }));
 
 import { createStatsRouter } from '../stats';
+import { createErrorHandler } from '../../http/errorHandler';
+import { createLogger } from '../../logger';
 import { generateAccessToken } from '../../auth/tokens';
 
 const USER_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
@@ -62,6 +64,7 @@ function makeApp(pool: Pool) {
   app.use(express.json());
   app.use(cookieParser());
   app.use('/api/stats', createStatsRouter(pool));
+  app.use(createErrorHandler(createLogger({ level: 'silent' }))); // as in createApp (S1)
   return app;
 }
 
@@ -230,6 +233,7 @@ describe('POST /export — run 조회 실패', () => {
     });
     const res = await postExport(pool);
     expect(res.status).toBe(500);
+    expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
     expect(writeAuditLogStrict).not.toHaveBeenCalled();
   });
 
@@ -243,6 +247,7 @@ describe('POST /export — run 조회 실패', () => {
     });
     const res = await postExport(pool);
     expect(res.status).toBe(500);
+    expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
   });
 
   it('감사 INSERT가 실패하면 CSV가 전송되지 않고 500을 반환한다', async () => {

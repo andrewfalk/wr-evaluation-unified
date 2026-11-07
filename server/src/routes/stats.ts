@@ -36,8 +36,8 @@ import { assertPredictionWithinLimits, StatsEngineInputTooLargeError } from '../
 import { requestCancel, hasVersionDrifted } from '../statsRunsQueue';
 import { STATS_RUN_COLUMNS, type StatsRunRow } from '../statsRunRow';
 import type { AnalyzeResult, StatsRunManifestSucceeded } from '@wr/contracts';
+import { asyncHandler } from '../http/asyncHandler';
 
-const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
 // grain 단순화(PR0-B4 개정, person grain 삭제 후속) — case/job/disease 3개만 지원한다
 // (statsRecipeValidation.ts의 SUPPORTED_GRAINS와 반드시 같은 목록을 유지할 것).
@@ -485,32 +485,26 @@ export function createStatsRouter(pool: Pool) {
   const router = Router();
   const auth = createAuthMiddleware(pool);
 
-  router.get('/catalog', auth, requireCapability(pool, 'stats.view'), (req, res) =>
-    handleGetCatalog(req, res).catch(() => res.status(500).json(internalError())),
+  router.get('/catalog', auth, requireCapability(pool, 'stats.view'), asyncHandler((req, res) => handleGetCatalog(req, res)),
   );
 
-  router.post('/preview', auth, requireCapability(pool, 'stats.view'), csrfMiddleware, (req, res) =>
-    handlePostPreview(pool, req, res).catch(() => res.status(500).json(internalError())),
+  router.post('/preview', auth, requireCapability(pool, 'stats.view'), csrfMiddleware, asyncHandler((req, res) => handlePostPreview(pool, req, res)),
   );
 
   // PR1 — stats.regression은 0028_capability_grants.sql에서 이미 default_all_roles=true로
   // 정의돼 있다(§4.1) — 별도 user_capability_grants 부여가 새로 필요해지지 않는다.
-  router.post('/analyze', auth, requireCapability(pool, 'stats.regression'), analyzeRateLimit(), csrfMiddleware, (req, res) =>
-    handlePostAnalyze(pool, req, res).catch(() => res.status(500).json(internalError())),
+  router.post('/analyze', auth, requireCapability(pool, 'stats.regression'), analyzeRateLimit(), csrfMiddleware, asyncHandler((req, res) => handlePostAnalyze(pool, req, res)),
   );
 
   // PR4-B1 — 폴링·취소. 기존 POST /analyze와 같은 capability로 게이트(§5 기존 관례).
-  router.get('/runs/:analysisRunId', auth, requireCapability(pool, 'stats.regression'), (req, res) =>
-    handleGetRun(pool, req, res).catch(() => res.status(500).json(internalError())),
+  router.get('/runs/:analysisRunId', auth, requireCapability(pool, 'stats.regression'), asyncHandler((req, res) => handleGetRun(pool, req, res)),
   );
-  router.post('/runs/:analysisRunId/cancel', auth, requireCapability(pool, 'stats.regression'), csrfMiddleware, (req, res) =>
-    handlePostCancelRun(pool, req, res).catch(() => res.status(500).json(internalError())),
+  router.post('/runs/:analysisRunId/cancel', auth, requireCapability(pool, 'stats.regression'), csrfMiddleware, asyncHandler((req, res) => handlePostCancelRun(pool, req, res)),
   );
 
   // PR2 §7 — 집계 결과 내보내기. recipe를 다시 안 받고 analysisRunId로 저장된 결과를 그대로
   // CSV로 포맷한다(재계산 없음) — stats.export_results는 이미 0028에서 default_all_roles=true.
-  router.post('/export', auth, requireCapability(pool, 'stats.export_results'), csrfMiddleware, (req, res) =>
-    handlePostExport(pool, req, res).catch(() => res.status(500).json(internalError())),
+  router.post('/export', auth, requireCapability(pool, 'stats.export_results'), csrfMiddleware, asyncHandler((req, res) => handlePostExport(pool, req, res)),
   );
 
   return router;
