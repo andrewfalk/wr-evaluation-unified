@@ -17,7 +17,7 @@
 //   patients.get    GET  /api/patients/:id             (목록 첫 환자)
 //   patients.patch  PATCH /api/patients/:id            (같은 data 그대로, If-Match: revision)
 //   workspaces.list GET  /api/workspaces
-//   workspaces.save PUT  /api/workspaces/:id           (첫 반복만 POST로 만든 뒤 덮어쓰기, 환자 20명)
+//   workspaces.save PUT  /api/workspaces/:id           (첫 반복만 POST로 만든 뒤 덮어쓰기, 환자 20명 — 끝나면 삭제)
 //   stats.catalog   GET  /api/stats/catalog
 //   stats.preview   POST /api/stats/preview            (기술통계 recipe, 변수 1개)
 //   stats.analyze   POST /api/stats/analyze            (같은 recipe — 두 번째부터는 DB 캐시 적중 경로)
@@ -35,6 +35,18 @@ export function readCookie(setCookieHeaders, name) {
     if (eq > 0 && first.slice(0, eq).trim() === name) return decodeURIComponent(first.slice(eq + 1).trim());
   }
   return null;
+}
+
+/** GET /api/patients/:id 응답의 revision(sync.revision, 예전 모양이면 최상위 revision). */
+export function patientRevision(patient) {
+  const rev = patient?.sync?.revision ?? patient?.revision;
+  return Number.isInteger(rev) ? rev : null;
+}
+
+/** 워크스페이스 저장 응답({ items: [...] } — 갱신된 목록)에서 이름이 같은 항목의 id. */
+export function findWorkspaceId(saveResponse, name) {
+  const items = Array.isArray(saveResponse?.items) ? saveResponse.items : [];
+  return items.find(item => item?.name === name)?.id ?? null;
 }
 
 export function summarizeSamples(samplesByStep) {
@@ -109,6 +121,7 @@ async function main() {
   const golden = JSON.parse(fs.readFileSync(path.resolve('src/core/fixtures/goldenPatients.json'), 'utf8'));
   const workspacePatients = golden.slice(0, 20);
   let workspaceId = null;
+  const workspaceName = `perf-baseline-${Date.now()}`;
   let lastAnalyzeAt = 0;
 
   for (let i = 0; i < iterations; i += 1) {
@@ -116,20 +129,23 @@ async function main() {
     const first = list?.patients?.[0] ?? list?.items?.[0];
     if (first?.id) {
       const full = await timed('patients.get', 'GET', `/api/patients/${first.id}`);
-      const patient = full?.patient ?? full;
-      if (patient?.revision !== undefined && patient?.data) {
+      const revision = patientRevision(full);
+      if (revision !== null && full?.data) {
         await timed('patients.patch', 'PATCH', `/api/patients/${first.id}`, {
-          body: { data: { shared: patient.data.shared, modules: patient.data.modules, activeModules: patient.data.activeModules } },
-          extraHeaders: { 'If-Match': String(patient.revision) },
+          body: { data: { shared: full.data.shared, modules: full.data.modules, activeModules: full.data.activeModules } },
+          extraHeaders: { 'If-Match': String(revision) },
         });
+      } else if (i === 0) {
+        console.error('  patients.patch: 환자 응답에 revision/data가 없어 건너뜀');
       }
     }
     await timed('workspaces.list', 'GET', '/api/workspaces');
     if (workspaceId === null) {
-      const created = await timed('workspaces.create', 'POST', '/api/workspaces', { body: { name: 'perf-baseline', patients: workspacePatients } });
-      workspaceId = created?.id ?? created?.workspace?.id ?? null;
+      const created = await timed('workspaces.create', 'POST', '/api/workspaces', { body: { name: workspaceName, patients: workspacePatients } });
+      workspaceId = findWorkspaceId(created, workspaceName);
+      if (workspaceId === null) { console.error('  workspaces.create: 응답 목록에서 새 워크스페이스를 찾지 못함 — 중단'); process.exit(1); }
     } else {
-      await timed('workspaces.save', 'PUT', `/api/workspaces/${workspaceId}`, { body: { name: 'perf-baseline', patients: workspacePatients } });
+      await timed('workspaces.save', 'PUT', `/api/workspaces/${workspaceId}`, { body: { name: workspaceName, patients: workspacePatients } });
     }
     await timed('stats.catalog', 'GET', '/api/stats/catalog');
     await timed('stats.preview', 'POST', '/api/stats/preview', { body: DESCRIPTIVE_RECIPE });
@@ -141,6 +157,10 @@ async function main() {
   }
   process.stderr.write('\n');
 
+  if (workspaceId !== null) {
+    const del = await fetch(`${base}/api/workspaces/${workspaceId}`, { method: 'DELETE', headers });
+    if (!del.ok) console.error(`  시험 워크스페이스 삭제 실패 HTTP ${del.status} (id ${workspaceId})`);
+  }
   const rows = summarizeSamples(samples);
   console.log(`대상 ${base.startsWith('https://') ? 'Caddy 경유(HTTPS)' : '앱 직접'} · 반복 ${iterations}회`);
   console.log(markdownTable(['단계', '건수', '오류', 'p50 ms', 'p95 ms', '최대 ms'], rows.map(r => [r.step, r.count, r.errors, r.p50, r.p95, r.max])));

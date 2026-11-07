@@ -4,7 +4,7 @@ import { percentile, median, round, normalizeRoute, markdownTable, parseArgs } f
 import { initialAssetsFromHtml, measureFile } from './bundle-size.mjs';
 import { parseAccessLine, aggregate } from './access-log-latency.mjs';
 import { summarizeNetwork } from './page-load.mjs';
-import { readCookie, summarizeSamples } from './api-latency.mjs';
+import { readCookie, summarizeSamples, patientRevision, findWorkspaceId } from './api-latency.mjs';
 import { parseTiming, wrapEngineRequest, readProtocolVersion } from './engine-timing.mjs';
 
 describe('perfLib', () => {
@@ -99,6 +99,20 @@ describe('api-latency', () => {
     expect(readCookie(['wr_refresh=abc; HttpOnly; Path=/', 'wr_csrf=t%20k; Path=/; SameSite=Strict'], 'wr_csrf')).toBe('t k');
     expect(readCookie([], 'wr_csrf')).toBeNull();
     expect(readCookie(undefined, 'wr_csrf')).toBeNull();
+  });
+
+  it('reads the patient revision from sync.revision', () => {
+    expect(patientRevision({ sync: { revision: 3 } })).toBe(3);
+    expect(patientRevision({ revision: 2 })).toBe(2);
+    expect(patientRevision({ sync: {} })).toBeNull();
+    expect(patientRevision(null)).toBeNull();
+  });
+
+  it('finds the saved workspace id by name in the refreshed list', () => {
+    const res = { items: [{ id: 'a', name: 'other' }, { id: 'b', name: 'perf-baseline-1' }] };
+    expect(findWorkspaceId(res, 'perf-baseline-1')).toBe('b');
+    expect(findWorkspaceId(res, 'missing')).toBeNull();
+    expect(findWorkspaceId({}, 'x')).toBeNull();
   });
 
   it('summarizes successful samples only and counts errors', () => {
