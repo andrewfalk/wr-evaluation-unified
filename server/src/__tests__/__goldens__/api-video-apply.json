@@ -1,0 +1,532 @@
+[
+  {
+    "step": "POST /api/video-analysis/jobs/:shellId/apply",
+    "status": 200,
+    "body": {
+      "patient": {
+        "id": "<uuid-3>",
+        "data": {
+          "shared": {
+            "jobs": [
+              {
+                "id": "<uuid-4>",
+                "endDate": "2018-10-23",
+                "jobName": "자동차 도장 작업자",
+                "presetId": null,
+                "startDate": "1998-10-23",
+                "workDaysPerYear": 245,
+                "workPeriodOverride": ""
+              },
+              {
+                "id": "<uuid-5>",
+                "endDate": "2025-10-24",
+                "jobName": "자동차 정비 보조원",
+                "presetId": null,
+                "startDate": "2018-10-24",
+                "workDaysPerYear": 248,
+                "workPeriodOverride": ""
+              }
+            ],
+            "name": "서지연",
+            "gender": "male",
+            "height": "168",
+            "weight": "68",
+            "diabetes": "",
+            "birthDate": "1976-05-15",
+            "diagnoses": [
+              {
+                "id": "<uuid-6>",
+                "code": "M75.1",
+                "name": "회전근개 파열",
+                "side": "right",
+                "ellmanRight": "Grade 3",
+                "confirmedRight": "confirmed",
+                "assessmentRight": "high"
+              },
+              {
+                "id": "<uuid-7>",
+                "code": "M75.4",
+                "name": "어깨 충돌증후군",
+                "side": "left",
+                "ellmanLeft": "Grade 2",
+                "confirmedLeft": "confirmed",
+                "assessmentLeft": "high"
+              }
+            ],
+            "patientNo": "WR240017",
+            "department": "직업환경의학과",
+            "doctorName": "골든 의사",
+            "injuryDate": "2025-10-24",
+            "hospitalName": "근로복지공단 안산병원",
+            "specialNotes": "",
+            "visitHistory": "",
+            "medicalRecord": "",
+            "videoAnalysis": {
+              "appliedInputs": [
+                {
+                  "unit": "hours_per_day",
+                  "recipe": {
+                    "status": "verified",
+                    "codeCommit": "abc1234",
+                    "poseSha256": "<lease-token>",
+                    "modelVersion": "rtmlib-0.0.15",
+                    "detectorSha256": "<lease-token>",
+                    "featureConfigVersion": "fc-1",
+                    "mappingConfigVersion": "pday-1.1.0",
+                    "preprocessConfigHash": "pch",
+                    "viewpointConfigVersion": "vvc-0.2.0"
+                  },
+                  "source": "video",
+                  "clipIds": [
+                    "<uuid-8>"
+                  ],
+                  "moduleId": "shoulder",
+                  "appliedAt": "<time>",
+                  "appliedBy": "<user>",
+                  "confidence": 0.8,
+                  "processIds": [
+                    "p1"
+                  ],
+                  "targetPath": "modules.shoulder.jobExtras[sharedJobId=00000000-0000-4000-8000-000000000124].overheadHours",
+                  "appliedValue": 1.8,
+                  "previousValue": null,
+                  "analysisJobIds": [
+                    "<uuid-9>"
+                  ],
+                  "suggestedValue": 1.8,
+                  "analysisBundleVersion": "golden-bundle"
+                }
+              ]
+            },
+            "evaluationDate": "2025-11-04",
+            "consultReplyNeuro": "",
+            "consultReplyOrtho": "",
+            "consultReplyOther": "",
+            "consultReplyRehab": "",
+            "highBloodPressure": ""
+          },
+          "modules": {
+            "shoulder": {
+              "jobExtras": [
+                {
+                  "sharedJobId": "<uuid-4>",
+                  "overheadHours": "1.2",
+                  "heavyLoadCount": "20",
+                  "vibrationHours": "0.8",
+                  "evidenceSources": [],
+                  "heavyLoadSeconds": "11",
+                  "repetitiveFastHours": "0.9",
+                  "repetitiveMediumHours": "2.0"
+                },
+                {
+                  "sharedJobId": "<uuid-5>",
+                  "overheadHours": "1.0",
+                  "heavyLoadCount": "14",
+                  "vibrationHours": "0.9",
+                  "evidenceSources": [],
+                  "heavyLoadSeconds": "9",
+                  "repetitiveFastHours": "0.4",
+                  "repetitiveMediumHours": "1.2"
+                }
+              ],
+              "returnConsiderations": "어깨 위 작업과 반복 팔 올림 동작을 제한하고 충분한 휴식시간을 배정합니다."
+            }
+          },
+          "activeModules": [
+            "shoulder"
+          ]
+        },
+        "phase": "evaluation",
+        "createdAt": "<time>",
+        "updatedAt": "<time>",
+        "completionStatus": "draft",
+        "serverObservedModulesCompleteAt": null,
+        "serverVerifiedModulesCompleteAt": "<time>",
+        "sync": {
+          "serverId": "<uuid-3>",
+          "revision": 2,
+          "syncStatus": "synced",
+          "lastSyncedAt": "<time>"
+        }
+      }
+    }
+  },
+  {
+    "step": "POST /api/video-analysis/jobs/:shellId/apply (same hash → idempotent replay)",
+    "status": 200,
+    "body": {
+      "idempotent": true,
+      "patient": {
+        "id": "<uuid-3>",
+        "data": {
+          "shared": {
+            "jobs": [
+              {
+                "id": "<uuid-4>",
+                "endDate": "2018-10-23",
+                "jobName": "자동차 도장 작업자",
+                "presetId": null,
+                "startDate": "1998-10-23",
+                "workDaysPerYear": 245,
+                "workPeriodOverride": ""
+              },
+              {
+                "id": "<uuid-5>",
+                "endDate": "2025-10-24",
+                "jobName": "자동차 정비 보조원",
+                "presetId": null,
+                "startDate": "2018-10-24",
+                "workDaysPerYear": 248,
+                "workPeriodOverride": ""
+              }
+            ],
+            "name": "서지연",
+            "gender": "male",
+            "height": "168",
+            "weight": "68",
+            "diabetes": "",
+            "birthDate": "1976-05-15",
+            "diagnoses": [
+              {
+                "id": "<uuid-6>",
+                "code": "M75.1",
+                "name": "회전근개 파열",
+                "side": "right",
+                "ellmanRight": "Grade 3",
+                "confirmedRight": "confirmed",
+                "assessmentRight": "high"
+              },
+              {
+                "id": "<uuid-7>",
+                "code": "M75.4",
+                "name": "어깨 충돌증후군",
+                "side": "left",
+                "ellmanLeft": "Grade 2",
+                "confirmedLeft": "confirmed",
+                "assessmentLeft": "high"
+              }
+            ],
+            "patientNo": "WR240017",
+            "department": "직업환경의학과",
+            "doctorName": "골든 의사",
+            "injuryDate": "2025-10-24",
+            "hospitalName": "근로복지공단 안산병원",
+            "specialNotes": "",
+            "visitHistory": "",
+            "medicalRecord": "",
+            "videoAnalysis": {
+              "appliedInputs": [
+                {
+                  "unit": "hours_per_day",
+                  "recipe": {
+                    "status": "verified",
+                    "codeCommit": "abc1234",
+                    "poseSha256": "<lease-token>",
+                    "modelVersion": "rtmlib-0.0.15",
+                    "detectorSha256": "<lease-token>",
+                    "featureConfigVersion": "fc-1",
+                    "mappingConfigVersion": "pday-1.1.0",
+                    "preprocessConfigHash": "pch",
+                    "viewpointConfigVersion": "vvc-0.2.0"
+                  },
+                  "source": "video",
+                  "clipIds": [
+                    "<uuid-8>"
+                  ],
+                  "moduleId": "shoulder",
+                  "appliedAt": "<time>",
+                  "appliedBy": "<user>",
+                  "confidence": 0.8,
+                  "processIds": [
+                    "p1"
+                  ],
+                  "targetPath": "modules.shoulder.jobExtras[sharedJobId=00000000-0000-4000-8000-000000000124].overheadHours",
+                  "appliedValue": 1.8,
+                  "previousValue": null,
+                  "analysisJobIds": [
+                    "<uuid-9>"
+                  ],
+                  "suggestedValue": 1.8,
+                  "analysisBundleVersion": "golden-bundle"
+                }
+              ]
+            },
+            "evaluationDate": "2025-11-04",
+            "consultReplyNeuro": "",
+            "consultReplyOrtho": "",
+            "consultReplyOther": "",
+            "consultReplyRehab": "",
+            "highBloodPressure": ""
+          },
+          "modules": {
+            "shoulder": {
+              "jobExtras": [
+                {
+                  "sharedJobId": "<uuid-4>",
+                  "overheadHours": "1.2",
+                  "heavyLoadCount": "20",
+                  "vibrationHours": "0.8",
+                  "evidenceSources": [],
+                  "heavyLoadSeconds": "11",
+                  "repetitiveFastHours": "0.9",
+                  "repetitiveMediumHours": "2.0"
+                },
+                {
+                  "sharedJobId": "<uuid-5>",
+                  "overheadHours": "1.0",
+                  "heavyLoadCount": "14",
+                  "vibrationHours": "0.9",
+                  "evidenceSources": [],
+                  "heavyLoadSeconds": "9",
+                  "repetitiveFastHours": "0.4",
+                  "repetitiveMediumHours": "1.2"
+                }
+              ],
+              "returnConsiderations": "어깨 위 작업과 반복 팔 올림 동작을 제한하고 충분한 휴식시간을 배정합니다."
+            }
+          },
+          "activeModules": [
+            "shoulder"
+          ]
+        },
+        "phase": "evaluation",
+        "createdAt": "<time>",
+        "updatedAt": "<time>",
+        "completionStatus": "draft",
+        "serverObservedModulesCompleteAt": null,
+        "serverVerifiedModulesCompleteAt": "<time>",
+        "sync": {
+          "serverId": "<uuid-3>",
+          "revision": 2,
+          "syncStatus": "synced",
+          "lastSyncedAt": "<time>"
+        }
+      }
+    }
+  },
+  {
+    "step": "POST /api/video-analysis/jobs/:shellId/apply (new hash on a done job)",
+    "status": 409,
+    "body": {
+      "code": "JOB_NOT_APPLIABLE",
+      "error": "Job is 'done', expected 'review_pending'",
+      "status": "done"
+    }
+  },
+  {
+    "step": "POST /api/video-analysis/jobs/:shellId/apply (no If-Match)",
+    "status": 400,
+    "body": {
+      "code": "IF_MATCH_REQUIRED",
+      "error": "If-Match header with current revision is required"
+    }
+  },
+  {
+    "step": "GET /api/patients/:id (after apply)",
+    "status": 200,
+    "body": {
+      "id": "<uuid-3>",
+      "data": {
+        "shared": {
+          "jobs": [
+            {
+              "id": "<uuid-4>",
+              "endDate": "2018-10-23",
+              "jobName": "자동차 도장 작업자",
+              "presetId": null,
+              "startDate": "1998-10-23",
+              "workDaysPerYear": 245,
+              "workPeriodOverride": ""
+            },
+            {
+              "id": "<uuid-5>",
+              "endDate": "2025-10-24",
+              "jobName": "자동차 정비 보조원",
+              "presetId": null,
+              "startDate": "2018-10-24",
+              "workDaysPerYear": 248,
+              "workPeriodOverride": ""
+            }
+          ],
+          "name": "서지연",
+          "gender": "male",
+          "height": "168",
+          "weight": "68",
+          "diabetes": "",
+          "birthDate": "1976-05-15",
+          "diagnoses": [
+            {
+              "id": "<uuid-6>",
+              "code": "M75.1",
+              "name": "회전근개 파열",
+              "side": "right",
+              "ellmanRight": "Grade 3",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high"
+            },
+            {
+              "id": "<uuid-7>",
+              "code": "M75.4",
+              "name": "어깨 충돌증후군",
+              "side": "left",
+              "ellmanLeft": "Grade 2",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high"
+            }
+          ],
+          "patientNo": "WR240017",
+          "department": "직업환경의학과",
+          "doctorName": "골든 의사",
+          "injuryDate": "2025-10-24",
+          "hospitalName": "근로복지공단 안산병원",
+          "specialNotes": "",
+          "visitHistory": "",
+          "medicalRecord": "",
+          "videoAnalysis": {
+            "appliedInputs": [
+              {
+                "unit": "hours_per_day",
+                "recipe": {
+                  "status": "verified",
+                  "codeCommit": "abc1234",
+                  "poseSha256": "<lease-token>",
+                  "modelVersion": "rtmlib-0.0.15",
+                  "detectorSha256": "<lease-token>",
+                  "featureConfigVersion": "fc-1",
+                  "mappingConfigVersion": "pday-1.1.0",
+                  "preprocessConfigHash": "pch",
+                  "viewpointConfigVersion": "vvc-0.2.0"
+                },
+                "source": "video",
+                "clipIds": [
+                  "<uuid-8>"
+                ],
+                "moduleId": "shoulder",
+                "appliedAt": "<time>",
+                "appliedBy": "<user>",
+                "confidence": 0.8,
+                "processIds": [
+                  "p1"
+                ],
+                "targetPath": "modules.shoulder.jobExtras[sharedJobId=00000000-0000-4000-8000-000000000124].overheadHours",
+                "appliedValue": 1.8,
+                "previousValue": null,
+                "analysisJobIds": [
+                  "<uuid-9>"
+                ],
+                "suggestedValue": 1.8,
+                "analysisBundleVersion": "golden-bundle"
+              }
+            ]
+          },
+          "evaluationDate": "2025-11-04",
+          "consultReplyNeuro": "",
+          "consultReplyOrtho": "",
+          "consultReplyOther": "",
+          "consultReplyRehab": "",
+          "highBloodPressure": ""
+        },
+        "modules": {
+          "shoulder": {
+            "jobExtras": [
+              {
+                "sharedJobId": "<uuid-4>",
+                "overheadHours": "1.2",
+                "heavyLoadCount": "20",
+                "vibrationHours": "0.8",
+                "evidenceSources": [],
+                "heavyLoadSeconds": "11",
+                "repetitiveFastHours": "0.9",
+                "repetitiveMediumHours": "2.0"
+              },
+              {
+                "sharedJobId": "<uuid-5>",
+                "overheadHours": "1.0",
+                "heavyLoadCount": "14",
+                "vibrationHours": "0.9",
+                "evidenceSources": [],
+                "heavyLoadSeconds": "9",
+                "repetitiveFastHours": "0.4",
+                "repetitiveMediumHours": "1.2"
+              }
+            ],
+            "returnConsiderations": "어깨 위 작업과 반복 팔 올림 동작을 제한하고 충분한 휴식시간을 배정합니다."
+          }
+        },
+        "activeModules": [
+          "shoulder"
+        ]
+      },
+      "phase": "evaluation",
+      "createdAt": "<time>",
+      "assignedDoctorUserId": "<user>",
+      "updatedAt": "<time>",
+      "completionStatus": "draft",
+      "serverObservedModulesCompleteAt": null,
+      "serverVerifiedModulesCompleteAt": "<time>",
+      "sync": {
+        "serverId": "<uuid-3>",
+        "revision": 2,
+        "syncStatus": "synced",
+        "lastSyncedAt": "<time>"
+      }
+    }
+  },
+  {
+    "step": "GET /api/video-analysis/jobs/:analysisId",
+    "status": 200,
+    "body": {
+      "jobId": "<uuid-9>",
+      "clipId": "<uuid-8>",
+      "processId": "p1",
+      "status": "done",
+      "analysisProfile": "posture-basic",
+      "requestedFeatures": [
+        "overheadHours"
+      ],
+      "resultFeatures": {
+        "features": {},
+        "schemaVersion": 1
+      },
+      "recipe": {
+        "status": "verified",
+        "modelVersion": "rtmlib-0.0.15",
+        "detectorSha256": "<lease-token>",
+        "poseSha256": "<lease-token>",
+        "preprocessConfigHash": "pch",
+        "featureConfigVersion": "fc-1",
+        "mappingConfigVersion": "pday-1.1.0",
+        "viewpointConfigVersion": "vvc-0.2.0",
+        "codeCommit": "abc1234"
+      },
+      "analysisBundleVersion": "fc:fc-1+map:pday-1.1.0+vp:vvc-0.2.0+mdl:rtmlib-0.0.15+w:aaaaaaaa/bbbbbbbb+c:abc1234+s:verified",
+      "errorCode": null,
+      "inferenceDeviceUsed": null,
+      "inferenceDeviceFallback": null,
+      "inferenceDeviceFallbackReason": null,
+      "appliedAt": "<time>",
+      "appliedRevision": 2
+    }
+  },
+  {
+    "step": "GET /api/video-analysis/jobs/:shellId",
+    "status": 200,
+    "body": {
+      "jobId": "<uuid-10>",
+      "clipId": "<uuid-8>",
+      "processId": null,
+      "status": "done",
+      "analysisProfile": "posture-basic",
+      "requestedFeatures": [],
+      "resultFeatures": null,
+      "recipe": null,
+      "analysisBundleVersion": null,
+      "errorCode": null,
+      "inferenceDeviceUsed": null,
+      "inferenceDeviceFallback": null,
+      "inferenceDeviceFallbackReason": null,
+      "appliedAt": "<time>",
+      "appliedRevision": 2
+    }
+  }
+]

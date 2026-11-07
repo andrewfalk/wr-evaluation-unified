@@ -6,13 +6,19 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Pool } from 'pg';
 import request from 'supertest';
 import type { Express } from 'express';
 import { createApp } from '../app';
 import { generateAccessToken } from '../auth/tokens';
 import { hashToken, generateToken } from '../auth/tokenHash';
+import { VIDEO_MAPPING_CONFIG_VERSION, VIDEO_VIEWPOINT_CONFIG_VERSION } from '@wr/contracts';
+
+// The video-analysis routes answer 404 unless the feature flag is on. config.ts reads the env once
+// at import, so set it before any import (vi.hoisted runs first). It does not change the patient
+// and workspace responses frozen in the first test.
+vi.hoisted(() => { process.env.VIDEO_ANALYSIS_ENABLED = 'true'; });
 
 const TEST_DB_URL = process.env.TEST_DATABASE_URL;
 const CSRF_TOKEN = 'golden-api-csrf';
@@ -139,5 +145,87 @@ describe.skipIf(!TEST_DB_URL)('G5 — patient and workspace API responses (real 
 
     const ids = new Map<string, string>([[orgId, '<org>'], [userId, '<user>']]);
     await expect(JSON.stringify(normalise(steps, ids), null, 2) + '\n').toMatchFileSnapshot('./__goldens__/api-patients-workspaces.json');
+  });
+
+  // REFACTORING_ROADMAP P1-08 — frozen BEFORE routes/videoAnalysis.ts is touched in S1. The apply path
+  // the client uses (patientServerRepository.js applyVideoAnalysisJob): a per-process analysis job in
+  // review_pending with a stored, verified recipe + an apply shell job; POST /jobs/:shellId/apply with
+  // the patient's whole new data (an appliedInputs entry pointing at the analysis job), then the
+  // replay, a second apply on the consumed job, a missing If-Match, and the patient and job reads.
+  it('video analysis: apply → idempotent replay → re-apply rejected → patient and jobs read', async () => {
+    const all = JSON.parse(fs.readFileSync(GOLDEN_PATIENTS, 'utf8')) as Array<{ id: string }>;
+    const shoulder = JSON.parse(JSON.stringify(all.find((p) => p.id === '00000000-0000-4000-8000-000000000118')!));
+    shoulder.data.shared.doctorName = '골든 의사'; // assigned to this test's doctor (apply needs the assigned doctor)
+    const sharedJobId: string = shoulder.data.shared.jobs[0].id;
+    const steps: Array<{ step: string; status: number; body: unknown }> = [];
+    const record = (step: string, res: request.Response) => steps.push({ step, status: res.status, body: res.body });
+
+    const created = await auth(request(app).post('/api/patients'))
+      .set('Idempotency-Key', 'golden-video-create-1')
+      .send({ id: shoulder.id, phase: shoulder.phase ?? 'intake', data: shoulder.data });
+    expect(created.status, 'POST /api/patients').toBe(201);
+    const pid: string = created.body.id;
+    const revision: number = created.body.sync.revision; // the client sends sync.revision as If-Match
+    expect(revision, 'sync.revision from POST /api/patients').toBe(1);
+
+    // Rows the worker and the client flow would have created (sample-detect, target selection and
+    // inference are outside this golden). Columns: 0016 + 0017 (source_type, file_state) + 0021
+    // (analysis_recipe); every other column keeps its default.
+    const recipe = {
+      status: 'verified', modelVersion: 'rtmlib-0.0.15',
+      detectorSha256: 'a'.repeat(64), poseSha256: 'b'.repeat(64),
+      preprocessConfigHash: 'pch', featureConfigVersion: 'fc-1',
+      mappingConfigVersion: VIDEO_MAPPING_CONFIG_VERSION, viewpointConfigVersion: VIDEO_VIEWPOINT_CONFIG_VERSION,
+      codeCommit: 'abc1234',
+    };
+    const clipId = (await pool.query<{ id: string }>(
+      `INSERT INTO video_analysis_clips (organization_id, patient_record_id, process_id, source_type, file_state)
+       VALUES ($1, $2, 'p1', 'apply_shell', 'none') RETURNING id`,
+      [orgId, pid],
+    )).rows[0].id;
+    const analysisJobId = (await pool.query<{ id: string }>(
+      `INSERT INTO video_analysis_jobs
+         (organization_id, patient_record_id, clip_id, process_id, status, analysis_profile,
+          requested_features, result_features, preprocess_config_hash, analysis_recipe)
+       VALUES ($1, $2, $3, 'p1', 'review_pending', 'posture-basic', $4, $5, 'pch', $6) RETURNING id`,
+      [orgId, pid, clipId, JSON.stringify(['overheadHours']), JSON.stringify({ schemaVersion: 1, features: {} }), JSON.stringify(recipe)],
+    )).rows[0].id;
+    const shellJobId = (await pool.query<{ id: string }>(
+      `INSERT INTO video_analysis_jobs (organization_id, patient_record_id, clip_id, status, analysis_profile)
+       VALUES ($1, $2, $3, 'review_pending', 'posture-basic') RETURNING id`,
+      [orgId, pid, clipId],
+    )).rows[0].id;
+
+    const newData = JSON.parse(JSON.stringify(shoulder.data));
+    newData.shared.videoAnalysis = {
+      appliedInputs: [{
+        moduleId: 'shoulder', targetPath: `modules.shoulder.jobExtras[sharedJobId=${sharedJobId}].overheadHours`,
+        suggestedValue: 1.8, appliedValue: 1.8, previousValue: null, unit: 'hours_per_day',
+        source: 'video', processIds: ['p1'], clipIds: [clipId], analysisJobIds: [analysisJobId], confidence: 0.8,
+        analysisBundleVersion: 'golden-bundle', recipe, appliedAt: '2026-01-01T00:00:00.000Z', appliedBy: userId,
+      }],
+    };
+    const applyBody = {
+      data: newData, appliedInputsHash: 'golden-applied-inputs-1', appliedInputsCount: 1, sourceAnalysisJobIds: [analysisJobId],
+      modulesCompleteObserved: false, completionClientBuildVersion: 'golden-build', completionClientSchemaVersion: 1,
+    };
+    const apply = (body: object) =>
+      auth(request(app).post(`/api/video-analysis/jobs/${shellJobId}/apply`)).set('If-Match', String(revision)).send(body);
+
+    record('POST /api/video-analysis/jobs/:shellId/apply', await apply(applyBody));
+    record('POST /api/video-analysis/jobs/:shellId/apply (same hash → idempotent replay)', await apply(applyBody));
+    record('POST /api/video-analysis/jobs/:shellId/apply (new hash on a done job)', await apply({ ...applyBody, appliedInputsHash: 'golden-applied-inputs-2' }));
+    record('POST /api/video-analysis/jobs/:shellId/apply (no If-Match)',
+      await auth(request(app).post(`/api/video-analysis/jobs/${shellJobId}/apply`)).send(applyBody));
+    record('GET /api/patients/:id (after apply)', await auth(request(app).get(`/api/patients/${pid}`)));
+    record('GET /api/video-analysis/jobs/:analysisId', await auth(request(app).get(`/api/video-analysis/jobs/${analysisJobId}`)));
+    record('GET /api/video-analysis/jobs/:shellId', await auth(request(app).get(`/api/video-analysis/jobs/${shellJobId}`)));
+
+    // Guard the scenario itself, so a broken fixture cannot be frozen as the golden.
+    expect(steps.map((s) => s.status), 'apply, replay, re-apply, no If-Match, reads').toEqual([200, 200, 409, 400, 200, 200, 200]);
+    expect((steps[1].body as { idempotent?: boolean }).idempotent, 'replay is idempotent').toBe(true);
+
+    const ids = new Map<string, string>([[orgId, '<org>'], [userId, '<user>']]);
+    await expect(JSON.stringify(normalise(steps, ids), null, 2) + '\n').toMatchFileSnapshot('./__goldens__/api-video-apply.json');
   });
 });
