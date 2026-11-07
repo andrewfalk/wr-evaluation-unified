@@ -57,7 +57,7 @@ vi.mock('../config', () => ({
 
 describe.skipIf(!AVAILABLE)('runRegressionStatsEngine — 실제 Python + 실제 운영 wrapper(mock 없음)', () => {
   it('OLS(HC3) 요청이 실제 프로세스를 왕복해 정상 추정 결과를 받는다', async () => {
-    const { runRegressionStatsEngine, __resetStatsEngineForTests } = await import('../statsEngine');
+    const { runRegressionStatsEngine, __resetStatsEngineForTests } = await import('../statsEngine.js');
     __resetStatsEngineForTests();
     const n = 40;
     const y = Array.from({ length: n }, (_, i) => 2 + 1.5 * i + (i % 3 === 0 ? 0.7 : -0.4));
@@ -84,7 +84,7 @@ describe.skipIf(!AVAILABLE)('runRegressionStatsEngine — 실제 Python + 실제
   }, 30000);
 
   it('binomial(로지스틱) HC3 요청도 실제 프로세스를 왕복해 정상 추정 결과를 받는다', async () => {
-    const { runRegressionStatsEngine, __resetStatsEngineForTests } = await import('../statsEngine');
+    const { runRegressionStatsEngine, __resetStatsEngineForTests } = await import('../statsEngine.js');
     __resetStatsEngineForTests();
     const n = 40;
     const X: number[][] = [];
@@ -144,7 +144,7 @@ describe.skipIf(!AVAILABLE)('runRegressionStatsEngine — 실제 Python + 실제
     if (!design.ok) return;
     expect(design.design.columns).toHaveLength(4); // intercept + x1 + x2 + x3
 
-    const { runRegressionStatsEngine, __resetStatsEngineForTests } = await import('../statsEngine');
+    const { runRegressionStatsEngine, __resetStatsEngineForTests } = await import('../statsEngine.js');
     __resetStatsEngineForTests();
     const result = await runRegressionStatsEngine({
       family: 'gaussian',

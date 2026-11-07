@@ -40,14 +40,14 @@ describe('computeExecutionDigest', () => {
 describe('computeExecutionDigest — 서버 확장 버전 단독 변경 시 캐시 무효화', () => {
   it('INTEGRATED_CATALOG_VERSION(=CATALOG_VERSION+SERVER_CATALOG_EXTENSION_VERSION)만 달라져도 digest가 달라진다', async () => {
     vi.resetModules();
-    const original = await import('../statsExecutionDigest');
+    const original = await import('../statsExecutionDigest.js');
     const originalDigest = original.computeExecutionDigest(base);
 
     vi.doMock('../statsCatalogVersion', () => ({
       INTEGRATED_CATALOG_VERSION: 'v5-task-grain-diagnosis-module-group+v2-snapshot-columns-changed-for-test',
     }));
     vi.resetModules();
-    const patched = await import('../statsExecutionDigest');
+    const patched = await import('../statsExecutionDigest.js');
     const patchedDigest = patched.computeExecutionDigest(base);
 
     expect(patchedDigest).not.toBe(originalDigest);
@@ -64,7 +64,7 @@ describe('computeExecutionDigest — 서버 확장 버전 단독 변경 시 캐�
 describe('computeExecutionDigest — STATS_ENGINE_VERSION 단독 변경 시 캐시 무효화', () => {
   it('STATS_ENGINE_VERSION만 달라져도 digest가 달라진다', async () => {
     vi.resetModules();
-    const original = await import('../statsExecutionDigest');
+    const original = await import('../statsExecutionDigest.js');
     const originalDigest = original.computeExecutionDigest(base);
 
     vi.doMock('../statsRunManifest', async (importOriginal) => ({
@@ -72,7 +72,7 @@ describe('computeExecutionDigest — STATS_ENGINE_VERSION 단독 변경 시 캐�
       STATS_ENGINE_VERSION: 'v-changed-for-test',
     }));
     vi.resetModules();
-    const patched = await import('../statsExecutionDigest');
+    const patched = await import('../statsExecutionDigest.js');
     const patchedDigest = patched.computeExecutionDigest(base);
 
     expect(patchedDigest).not.toBe(originalDigest);

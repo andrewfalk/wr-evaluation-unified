@@ -208,7 +208,7 @@ describe('CORS dev mode (non-production)', () => {
         cors: { origins: ['https://wr.hospital.local:8443'] },
       },
     }));
-    const { corsMiddleware: corsDevMiddleware } = await import('../corsMiddleware');
+    const { corsMiddleware: corsDevMiddleware } = await import('../corsMiddleware.js');
     const app = express();
     app.use(corsDevMiddleware());
     app.get('/test', (_req, res) => res.json({ ok: true }));

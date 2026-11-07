@@ -72,7 +72,7 @@ function makeSyntheticRequest(n: number, p: number, seed: number) {
 
 describe.skipIf(!AVAILABLE)('runPredictionStatsEngine — 실제 Python + 실제 운영 wrapper(mock 없음)', () => {
   it('정상 요청이 실제 프로세스를 왕복해 estimation:ok 결과를 받는다', async () => {
-    const { runPredictionStatsEngine, buildPredictionEngineRequest, __resetStatsEngineForTests } = await import('../statsEngine');
+    const { runPredictionStatsEngine, buildPredictionEngineRequest, __resetStatsEngineForTests } = await import('../statsEngine.js');
     __resetStatsEngineForTests();
 
     const n = 150;
@@ -102,7 +102,7 @@ describe.skipIf(!AVAILABLE)('runPredictionStatsEngine — 실제 Python + 실제
   }, 60000);
 
   it('buildPredictionEngineRequest가 만든 config를 그대로 써도(정책 기본값) 왕복한다', async () => {
-    const { runPredictionStatsEngine, buildPredictionEngineRequest, __resetStatsEngineForTests } = await import('../statsEngine');
+    const { runPredictionStatsEngine, buildPredictionEngineRequest, __resetStatsEngineForTests } = await import('../statsEngine.js');
     __resetStatsEngineForTests();
 
     const n = 80;

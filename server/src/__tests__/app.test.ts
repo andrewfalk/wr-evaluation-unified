@@ -24,7 +24,7 @@ let Pool: typeof import('pg').Pool;
 let createApp: typeof import('../app').createApp;
 beforeAll(async () => {
   ({ Pool } = await import('pg'));
-  ({ createApp } = await import('../app'));
+  ({ createApp } = await import('../app.js'));
 });
 
 // A pool that is never connected: any use fails the test.

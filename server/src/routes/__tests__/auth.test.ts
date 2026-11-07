@@ -148,7 +148,7 @@ describe('POST /api/auth/signup-requests', () => {
   });
 
   it('returns 201 and writes signup_request_create audit log on success', async () => {
-    const { writeAuditLog } = await import('../../middleware/audit');
+    const { writeAuditLog } = await import('../../middleware/audit.js');
     const pool = makePool();
     (pool.query as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({ rows: [] })                    // users check: no existing user

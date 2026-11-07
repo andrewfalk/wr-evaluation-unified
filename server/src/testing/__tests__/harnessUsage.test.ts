@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 import request from 'supertest';
 
 vi.mock('../../config', async () => ({
-  default: (await import('../configMock')).testConfig(),
+  default: (await import('../configMock.js')).testConfig(),
 }));
 
 import { createPresetsRouter } from '../../routes/presets';

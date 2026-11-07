@@ -65,7 +65,7 @@ describe('GET /api/config/public — statsWorkbenchAvailable is false outside in
         statsWorkbenchEnabled: true,
       },
     }));
-    const { createConfigRouter: createFreshConfigRouter } = await import('../config');
+    const { createConfigRouter: createFreshConfigRouter } = await import('../config.js');
     const app = express();
     app.use('/api/config', createFreshConfigRouter());
     const res = await request(app).get('/api/config/public');
@@ -84,7 +84,7 @@ describe('GET /api/config/public — statsWorkbenchAvailable is false outside in
         statsWorkbenchEnabled: false,
       },
     }));
-    const { createConfigRouter: createFreshConfigRouter } = await import('../config');
+    const { createConfigRouter: createFreshConfigRouter } = await import('../config.js');
     const app = express();
     app.use('/api/config', createFreshConfigRouter());
     const res = await request(app).get('/api/config/public');
@@ -113,7 +113,7 @@ describe('GET /api/config/public — aiFullReportAllowed', () => {
         statsWorkbenchEnabled: false,
       },
     }));
-    const { createConfigRouter: createFreshConfigRouter } = await import('../config');
+    const { createConfigRouter: createFreshConfigRouter } = await import('../config.js');
     const app = express();
     app.use('/api/config', createFreshConfigRouter());
     const res = await request(app).get('/api/config/public');
