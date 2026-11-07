@@ -58,6 +58,8 @@ vi.mock('../../statsEngine', async (importOriginal) => {
 });
 
 import { createStatsRouter } from '../stats';
+import { createErrorHandler } from '../../http/errorHandler';
+import { createLogger } from '../../logger';
 import { generateAccessToken } from '../../auth/tokens';
 import { __resetDifferencingGuardForTests, computeQueryFamilyDigest } from '../../statsDifferencingGuard';
 import { __resetInFlightForTests } from '../../statsAnalyzeInFlight';
@@ -88,6 +90,7 @@ function makeApp(pool: Pool) {
   app.use(express.json());
   app.use(cookieParser());
   app.use('/api/stats', createStatsRouter(pool));
+  app.use(createErrorHandler(createLogger({ level: 'silent' }))); // as in createApp (S1)
   return app;
 }
 
@@ -816,6 +819,7 @@ describe('POST /analyze — 정상 경로(4차 검토 §1 회귀 방지: 응답�
       // 판은 .catch(() => {})로 감사 실패를 삼키고 그대로 429를 내보냈다(기록 없이).
       expect(res.status).toBe(500);
       expect(res.body.code).not.toBe('REQUEST_CAPACITY_EXCEEDED');
+      expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
       // 시도된 감사 호출 자체는 있어야 한다(REQUEST_CAPACITY_EXCEEDED 사유로) — 그 호출이
       // 실패했기 때문에 429가 아니라 500이 된 것이지, 애초에 감사를 안 시도한 게 아니다.
       const attempted = writeAuditLogStrict.mock.calls[0][1];

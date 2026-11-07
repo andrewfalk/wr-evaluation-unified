@@ -477,8 +477,7 @@ export async function handlePostExport(pool: Pool, req: Request, res: Response):
     console.error('[stats-export] unexpected requested_disclosure_profile', {
       analysisRunId, profile: row.requested_disclosure_profile,
     });
-    res.status(500).json({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
-    return;
+    throw new Error('unexpected requested_disclosure_profile'); // central error handler → 500 (S1)
   }
 
   if (new Date(row.expires_at).getTime() <= Date.now()) {
@@ -497,8 +496,7 @@ export async function handlePostExport(pool: Pool, req: Request, res: Response):
       manifestIssues: manifestParsed.success ? null : manifestParsed.error.issues,
       resultIssues: resultParsed.success ? null : resultParsed.error.issues,
     });
-    res.status(500).json({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
-    return;
+    throw new Error('stored manifest/result failed schema validation'); // central error handler → 500 (S1)
   }
 
   // PR3-A §"결과 계약 불변조건" — CSV export 거부는 result.bivariate 존재 여부가
