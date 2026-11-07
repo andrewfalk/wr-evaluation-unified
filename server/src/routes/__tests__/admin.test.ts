@@ -23,6 +23,8 @@ vi.mock('../../config', () => ({
 vi.mock('../../middleware/audit', () => ({ writeAuditLog: vi.fn() }));
 
 import { createAdminRouter } from '../admin';
+import { createErrorHandler } from '../../http/errorHandler';
+import { createLogger } from '../../logger';
 import { generateAccessToken } from '../../auth/tokens';
 import type { Pool } from 'pg';
 
@@ -52,6 +54,7 @@ function makeApp(pool: Pool, auditPool?: Pool) {
   app.use(express.json());
   app.use(cookieParser());
   app.use('/api/admin', createAdminRouter(pool, auditPool ?? pool));
+  app.use(createErrorHandler(createLogger({ level: 'silent' }))); // as in createApp (S1)
   return app;
 }
 
@@ -507,6 +510,18 @@ describe('GET /api/admin/users', () => {
     expect(res.body.users).toHaveLength(2);
     expect(res.body.users[0].disabled).toBe(false);
     expect(res.body.users[1].disabled).toBe(true);
+  });
+
+  it('answers a DB failure with the 500 envelope (central error handler, S1)', async () => {
+    const pool = makePool();
+    (pool.query as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ rows: [{ exists: 1 }] }) // auth middleware
+      .mockRejectedValueOnce(new Error('connection terminated'));
+    const res = await request(makeApp(pool))
+      .get('/api/admin/users')
+      .set('Authorization', `Bearer ${token('admin')}`);
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
   });
 });
 

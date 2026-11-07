@@ -13,6 +13,7 @@ import { adminOnly } from '../middleware/adminOnly';
 import { writeAuditLog } from '../middleware/audit';
 import { checkPasswordPolicy, appendPasswordHistory } from '../auth/passwordPolicy';
 import config from '../config';
+import { asyncHandler } from '../http/asyncHandler';
 
 const execFileAsync = promisify(execFile);
 
@@ -984,7 +985,6 @@ async function setPresetsVisibility(pool: Pool, req: Request, res: Response): Pr
 // ---------------------------------------------------------------------------
 // Router factory
 // ---------------------------------------------------------------------------
-const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
 export function createAdminRouter(pool: Pool, auditPool: Pool): Router {
   const router = Router();
@@ -996,103 +996,103 @@ export function createAdminRouter(pool: Pool, auditPool: Pool): Router {
   router.get(
     '/devices',
     auth, admin,
-    (req, res) => listDevices(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => listDevices(pool, req, res))
   );
 
   router.post(
     '/devices/:id/approve',
     auth, admin, csrfMiddleware,
-    (req, res) => approveDevice(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => approveDevice(pool, req, res))
   );
 
   router.post(
     '/devices/:id/revoke',
     auth, admin, csrfMiddleware,
-    (req, res) => revokeDevice(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => revokeDevice(pool, req, res))
   );
 
   router.get(
     '/audit',
     auth, admin,
-    (req, res) => listAuditLogs(pool, auditPool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => listAuditLogs(pool, auditPool, req, res))
   );
 
   router.delete(
     '/workspaces/:id/purge',
     auth, admin, csrfMiddleware,
-    (req, res) => purgeWorkspace(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => purgeWorkspace(pool, req, res))
   );
 
   router.get(
     '/users',
     auth, admin,
-    (req, res) => listUsers(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => listUsers(pool, req, res))
   );
 
   router.post(
     '/users',
     auth, admin, csrfMiddleware,
-    (req, res) => createUser(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => createUser(pool, req, res))
   );
 
   router.post(
     '/users/:id/reset-password',
     auth, admin, csrfMiddleware,
-    (req, res) => resetUserPassword(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => resetUserPassword(pool, req, res))
   );
 
   router.post(
     '/users/:id/disable',
     auth, admin, csrfMiddleware,
-    (req, res) => disableUser(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => disableUser(pool, req, res))
   );
 
   router.post(
     '/users/:id/enable',
     auth, admin, csrfMiddleware,
-    (req, res) => enableUser(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => enableUser(pool, req, res))
   );
 
   router.get(
     '/org-settings',
     auth, admin,
-    (req, res) => getOrgSettings(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => getOrgSettings(pool, req, res))
   );
 
   router.patch(
     '/org-settings',
     auth, admin, csrfMiddleware,
-    (req, res) => updateOrgSettings(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => updateOrgSettings(pool, req, res))
   );
 
   router.get(
     '/presets',
     auth, admin,
-    (req, res) => listAllPresets(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => listAllPresets(pool, req, res))
   );
 
   router.post(
     '/presets/visibility',
     auth, admin, csrfMiddleware,
-    (req, res) => setPresetsVisibility(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => setPresetsVisibility(pool, req, res))
   );
 
   router.get(
     '/signup-requests',
     auth, admin,
-    (req, res) => listSignupRequests(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => listSignupRequests(pool, req, res))
   );
 
   router.post(
     '/signup-requests/:id/approve',
     auth, admin, csrfMiddleware,
-    (req, res) => approveSignupRequest(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => approveSignupRequest(pool, req, res))
   );
 
   router.post(
     '/signup-requests/:id/reject',
     auth, admin, csrfMiddleware,
-    (req, res) => rejectSignupRequest(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => rejectSignupRequest(pool, req, res))
   );
 
   return router;
