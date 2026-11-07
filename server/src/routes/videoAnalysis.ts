@@ -18,6 +18,7 @@ import crypto from 'crypto';
 import { checkLockForWrite, isAssignedOrAdmin } from '../db/patientLocks';
 import type { QueryRunner } from '../db/patientPersons';
 import { asyncHandler } from '../http/asyncHandler';
+import { lockOf, lockTokenOf, requireLockToken } from '../http/lockToken';
 import { orgIdOf, requireFeature, requireOrg, sessionOf, type SessionInfo } from '../http/authz';
 import {
   CompletionReportFields,
@@ -30,10 +31,6 @@ import {
   type VerificationColumns,
 } from '../completionTracking';
 
-function getLockTokenHeader(req: Request): string | null {
-  const v = req.headers['x-lock-token'];
-  return typeof v === 'string' && v ? v : null;
-}
 
 // ---------------------------------------------------------------------------
 // 작업 영상 인간공학 분석 — clip/job 라이프사이클 + apply(영속화) API (6.0-4, mock).
@@ -758,16 +755,7 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
   const session = sessionOf(req);
   const orgId = orgIdOf(req);
 
-  const ifMatch = req.headers['if-match'];
-  const expectedRevision = typeof ifMatch === 'string' && /^\d+$/.test(ifMatch) ? Number(ifMatch) : null;
-  if (!ifMatch) {
-    res.status(400).json({ code: 'IF_MATCH_REQUIRED', error: 'If-Match header with current revision is required' });
-    return;
-  }
-  if (expectedRevision === null || expectedRevision < 1) {
-    res.status(400).json({ code: 'INVALID_IF_MATCH', error: 'If-Match must be a positive integer revision' });
-    return;
-  }
+  const { ifMatch: expectedRevision } = lockOf(req); // requireLockToken() on the route (S4 / P1-18)
 
   const parse = ApplyBody.safeParse(req.body);
   if (!parse.success) {
@@ -882,7 +870,7 @@ async function applyJob(pool: Pool, req: Request, res: Response): Promise<void> 
     // 재시도가 이 게이트 때문에 불필요하게 423을 받는 일은 없다.
     if (config.lockEnforcementMode !== 'off') {
       const lockCheck = await checkLockForWrite(client as unknown as QueryRunner, {
-        patientId: job.patient_record_id, orgId, leaseToken: getLockTokenHeader(req),
+        patientId: job.patient_record_id, orgId, leaseToken: lockTokenOf(req),
       });
       if (!lockCheck.ok) {
         if (config.lockEnforcementMode === 'enforce') {
@@ -1054,7 +1042,7 @@ export function createVideoAnalysisRouter(pool: Pool): Router {
   router.get('/jobs/:jobId', auth, requireOrg(), wrap(getJob));
   router.get('/jobs/:jobId/overlay', auth, requireOrg(), wrap(getOverlay));
   router.get('/jobs/:jobId/overlay-frame/:frameIndex', auth, requireOrg(), wrap(getOverlayFrame));
-  router.post('/jobs/:jobId/apply', auth, csrfMiddleware, requireOrg(), wrap(applyJob));
+  router.post('/jobs/:jobId/apply', auth, csrfMiddleware, requireOrg(), requireLockToken(), wrap(applyJob));
   router.post('/jobs/:jobId/close-review', auth, csrfMiddleware, requireOrg(), wrap(closeReview));
 
   return router;
