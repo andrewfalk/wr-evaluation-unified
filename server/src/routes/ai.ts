@@ -7,6 +7,7 @@ import { createAuthMiddleware } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { auditMiddleware } from '../middleware/audit';
 import { analyzeRateLimit } from '../middleware/rateLimit';
+import { asyncHandler } from '../http/asyncHandler';
 
 // 업스트림 응답 본문 상한. AI 답변은 수 KB~수십 KB라 1MB면 충분하고, 그 이상은 비정상 응답으로 본다.
 const MAX_UPSTREAM_RESPONSE_BYTES = 1024 * 1024;
@@ -178,12 +179,9 @@ export function createAIRouter(pool: Pool): Router {
     csrfMiddleware,
     analyzeRateLimit(), // 사용자당 분당 20회. 외부 벤더 비용·내부 LLM 부하를 제한한다(keyGenerator가 sessionInfo를 쓰므로 인증 뒤).
     auditMiddleware(pool, 'ai_analyze', 'ai'),
-    (req: Request, res: Response) => {
-      analyzeHandler(req, res).catch((err: unknown) => {
-        console.error('[ai] unexpected error', err instanceof Error ? err.name : typeof err);
-        if (!res.headersSent) res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Unexpected error' } });
-      });
-    }
+    // Upstream failures (timeouts, vendor errors, prompt building) are answered inside the handler
+    // (502/504) and never reach here; only a defect escapes to the central error handler (500).
+    asyncHandler((req: Request, res: Response) => analyzeHandler(req, res)),
   );
 
   return router;

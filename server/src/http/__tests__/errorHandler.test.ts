@@ -209,6 +209,15 @@ describe('logger', () => {
     expect(raw).toContain('ua');
   });
 
+  it('redacts top-level password and refreshToken too', () => {
+    const { logger, lines } = capturingLogger();
+    logger.info({ password: 'top-pw', refreshToken: 'top-rt', loginId: 'kept' }, 'x');
+    const raw = JSON.stringify(lines[0]);
+    expect(raw).not.toContain('top-pw');
+    expect(raw).not.toContain('top-rt');
+    expect(raw).toContain('kept');
+  });
+
   it('serializeError keeps type/message/stack/code/constraint and drops everything else', () => {
     const err = Object.assign(new Error('dup'), { code: '23505', constraint: 'c1', detail: 'Key (x)=(v)', parameters: ['v'] });
     const out = serializeError(err);

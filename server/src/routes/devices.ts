@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { createAuthMiddleware } from '../middleware/auth';
 import { deviceRegisterIpRateLimit, deviceRegisterUserRateLimit } from '../middleware/rateLimit';
 import { writeAuditLog } from '../middleware/audit';
+import { asyncHandler } from '../http/asyncHandler';
 
 // Ed25519 public keys are exactly 32 raw bytes.
 // Accept standard base64 (44 chars, optional trailing =) or
@@ -110,7 +111,6 @@ async function registerDevice(pool: Pool, req: Request, res: Response): Promise<
 // ---------------------------------------------------------------------------
 // Router factory
 // ---------------------------------------------------------------------------
-const internalError = () => ({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
 
 export function createDevicesRouter(pool: Pool): Router {
   const router = Router();
@@ -123,7 +123,7 @@ export function createDevicesRouter(pool: Pool): Router {
     deviceRegisterIpRateLimit(),
     auth,
     deviceRegisterUserRateLimit(),
-    (req, res) => registerDevice(pool, req, res).catch(() => res.status(500).json(internalError()))
+    asyncHandler((req, res) => registerDevice(pool, req, res))
   );
 
   return router;

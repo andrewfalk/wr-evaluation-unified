@@ -27,6 +27,8 @@ vi.mock('../../middleware/audit', () => ({
 }));
 
 import { createCapabilityGrantsRouter } from '../capabilityGrants';
+import { createErrorHandler } from '../../http/errorHandler';
+import { createLogger } from '../../logger';
 import { generateAccessToken } from '../../auth/tokens';
 
 // ---------------------------------------------------------------------------
@@ -51,6 +53,7 @@ function makeApp(pool: Pool) {
   app.use(express.json());
   app.use(cookieParser());
   app.use('/api/capabilities', createCapabilityGrantsRouter(pool));
+  app.use(createErrorHandler(createLogger({ level: 'silent' }))); // as in createApp (S1)
   return app;
 }
 
@@ -283,6 +286,7 @@ describe('POST /api/capabilities/grants', () => {
       .set('x-csrf-token', CSRF_TOKEN)
       .send({ userId: '11111111-1111-4111-8111-111111111111', capability: 'stats.view', reason: 'research' });
     expect(res.status).toBe(500);
+    expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
     expect(q.mock.calls.some(c => c[0] === 'COMMIT')).toBe(false);
     expect(q.mock.calls.some(c => c[0] === 'ROLLBACK')).toBe(true);
   });
@@ -362,6 +366,7 @@ describe('POST /api/capabilities/grants/:id/revoke', () => {
       .set('x-csrf-token', CSRF_TOKEN)
       .send({});
     expect(res.status).toBe(500);
+    expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
     expect(q.mock.calls.some(c => c[0] === 'COMMIT')).toBe(false);
     expect(q.mock.calls.some(c => c[0] === 'ROLLBACK')).toBe(true);
   });
