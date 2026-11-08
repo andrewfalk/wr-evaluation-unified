@@ -1,10 +1,10 @@
 """stats-engine 프로토콜 — 입력 검증 + 상한 상수.
 
 상한 3종(MAX_VALUES_PER_VARIABLE/MAX_TOTAL_VALUES/MAX_STRING_LENGTH)은
-server/src/statsEngineLimits.ts의 같은 이름 상수와 값이 반드시 일치해야 한다
+server/src/stats/engine/engineLimits.ts의 같은 이름 상수와 값이 반드시 일치해야 한다
 (PR1 계획 §1.1/§7.3 — 두 값이 갈리면 Node가 통과시킨 요청을 Python이 거부하는
 결함이 생긴다). 이 세 값은 PR1에서 환경변수로 바꿀 수 없다 — 바꾸려면 이 파일과
-statsEngineLimits.ts를 함께 코드 변경+재배포해야 한다.
+stats/engine/engineLimits.ts를 함께 코드 변경+재배포해야 한다.
 
 PR3-A — protocolVersion을 2로 상향하고 이변량 요청 shape(`bivariate`)을
 `variables`와 상호배타(oneOf)로 추가했다(계획서 § "Node→Python 3-shape").
@@ -50,8 +50,8 @@ MAX_VALUES_PER_VARIABLE = 50000
 MAX_TOTAL_VALUES = 350000
 MAX_STRING_LENGTH = 200
 # PR4-A2 — spline 부분효과 그리드 상한(§2 "예측 그리드(약 40점)"). server/src/
-# statsEngineLimits.ts의 같은 이름 상수와 값이 반드시 일치해야 한다(위 세
-# 상수와 같은 원칙 — statsEngineLimits.consistency.test.ts가 대조한다).
+# stats/engine/engineLimits.ts의 같은 이름 상수와 값이 반드시 일치해야 한다(위 세
+# 상수와 같은 원칙 — stats/engine/__tests__/engineLimits.consistency.test.ts가 대조한다).
 MAX_SPLINE_CONTRAST_POINTS = 60
 
 BIVARIATE_METHODS = (
@@ -93,7 +93,7 @@ _VARIABLES_REQUEST_SCHEMA: dict[str, Any] = {
                     },
                     # histogram bin 개수(Freedman-Diaconis/Sturges) 계산 전용 힌트 — Node가
                     # values(행 수, 브로드캐스트면 중복 포함)와 별도로 실제 서로 다른 인원 수를
-                    # 계산해 넘긴다(continuous에서만, server/src/statsEngine.ts 참고). person
+                    # 계산해 넘긴다(continuous에서만, server/src/stats/engine/index.ts 참고). person
                     # 신원 자체는 여전히 모른다 — 개수 하나만 받는다.
                     "personCount": {"type": "integer", "minimum": 0},
                 },
@@ -614,7 +614,7 @@ def _validate_correlation_matrix_semantics(correlation_matrix: dict[str, Any]) -
 
     # 값 개수 상한은 기존 "variables" shape와 동일한 MAX_TOTAL_VALUES를 재사용한다
     # (계획서 §8 — 상관행렬 전용 새 상수를 두지 않는다). 바이트 길이 상한은
-    # server/src/statsEngine.ts가 stdin 전송 전에 이미 검사한다(§8, 이중 검사).
+    # server/src/stats/engine/index.ts가 stdin 전송 전에 이미 검사한다(§8, 이중 검사).
     total_values = sum(len(v["values"]) for v in variables)
     if total_values > MAX_TOTAL_VALUES:
         raise ProtocolError(

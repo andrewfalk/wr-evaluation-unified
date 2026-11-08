@@ -88,7 +88,7 @@ function describeRecipeError(entry, { catalogByKey, analysisPurpose } = {}) {
   }
 
   // 커스텀 RecipeValidationError({code,path,message})와 원시 zod issue({path:[], message})
-  // 둘 다 올 수 있다(server/src/statsAnalysisContext.ts §9) — path 형태만 다르고 필드명은 같다.
+  // 둘 다 올 수 있다(server/src/stats/recipe/analysisContext.ts §9) — path 형태만 다르고 필드명은 같다.
   const path = Array.isArray(entry?.path) ? entry.path.join('.') : entry?.path;
   // PR3-A — message 자체가 알려진 코드 문자열이면(위 두 경로 모두 해당 가능) 번역한다.
   const message = RECIPE_ERROR_MESSAGE_LABELS[entry?.message] || entry?.message || '유효하지 않은 값';

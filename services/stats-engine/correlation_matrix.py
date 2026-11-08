@@ -4,7 +4,7 @@
 핵심 원칙(계획서 §4의 3단계 순서 중 1단계): 이 모듈은 person도, 반복측정도,
 소수셀도 전혀 모른다. 요청된 모든 쌍에 대해 정직하게 계산하고, "Python 자신이
 계산 가능했던 쌍"만으로 BH-FDR을 수행한다. 공개 여부(소수셀 게이트·§6.1
-반복측정 게이트·계산불가 억제)는 전부 Node(statsCorrelationMatrixSuppression.ts)
+반복측정 게이트·계산불가 억제)는 전부 Node(stats/disclosure/correlationMatrixSuppression.ts)
 가 이 결과를 받은 뒤 사후에 결정한다 — 이 모듈이 반환한 값을 그대로 클라이언트에
 내보내지 않는다.
 

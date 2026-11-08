@@ -1,0 +1,618 @@
+// PR0-C §A — 레시피 검증. variableKeys ∪ filters[].key 전체를 대상으로 카탈로그 존재·
+// 식별자 제한·분석 목적·필터 연산자/값 형태/타입 일치·formulaPolicy 유효성을 검사한다.
+// zod(shared/contracts/stats.ts)는 구조만 검사하고, 여기서는 카탈로그 메타데이터를
+// 참조해야 하는 동적 검사(변수 type별 허용 연산자·값 타입 등)를 한다.
+import { getIntegratedCatalog } from '../catalog/catalog';
+import { isGrainCompatible, isPurposeCompatible } from '@wr/analytics-core';
+import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
+import type { StatsAnalysisRecipe, StatsFilter, StatsFilterOperator } from '@wr/contracts';
+import { getOrdinalOrder, getCategoricalOrder } from './ordinalOrder';
+import { PREDICTION_OUTCOME_SPECS } from '@wr/analytics-core/catalog';
+import { REGISTERED_AT_KEY } from '../dataset/snapshotColumnVariables';
+
+// grain 단순화(PR0-B4 개정) — case/job/disease 3개만 지원한다. job_diagnosis/task/
+// cervical_task/vibration_interval은 소스코드까지 완전히 삭제됐고, person은 case와
+// 실질적으로 구분되지 않아 이후 다시 삭제됐다(변수 자체는 case로 되돌려 존치).
+const SUPPORTED_GRAINS: ReadonlySet<StatsAnalysisRecipe['grain']> = new Set([
+  'case',
+  'job',
+  'disease',
+]);
+
+export interface RecipeValidationError {
+  code: string;
+  path: string;
+  message: string;
+}
+
+export type RecipeValidationResult =
+  | { valid: true; catalogByKey: Map<string, AnalyticsVariableMetadata> }
+  | { valid: false; errors: RecipeValidationError[] };
+
+// §A-5 — 변수 type별 허용 연산자. ordinal은 categorical과 동일하게 취급한다 — 카탈로그에
+// 순위 메타데이터 필드가 아직 없어(elbow/wrist의 burdenGradeMax 값은 한국어 문자열이라
+// 일반 문자열 비교가 심각도 순서와 무관하다, §"코드 사실") 순위 비교 연산자(gt/gte/lt/lte)를
+// 이번 PR에서 아예 허용하지 않는다.
+const TYPE_ALLOWED_OPERATORS: Record<AnalyticsVariableMetadata['type'], StatsFilterOperator[]> = {
+  continuous: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'between', 'is_missing', 'not_missing'],
+  date: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'between', 'is_missing', 'not_missing'],
+  categorical: ['eq', 'neq', 'in', 'is_missing', 'not_missing'],
+  ordinal: ['eq', 'neq', 'in', 'is_missing', 'not_missing'],
+  high_cardinality: ['eq', 'neq', 'in', 'is_missing', 'not_missing'],
+  boolean: ['eq', 'neq', 'is_missing', 'not_missing'],
+};
+
+// §A-5 date 계약(2026-09-12 리뷰 보완) — Date.parse는 '2024/01/15'·'2024-01-15T00:00:00Z'
+// 등 여러 형식을 느슨하게 통과시키는데, 실제 데이터셋 값(stats/dataset/snapshotColumnVariables.ts의
+// toIsoDateOnly)은 항상 'YYYY-MM-DD'다. 검증과 실제 비교(stats/dataset/builder.ts의
+// matchesFilter, 문자열 그대로 비교)가 서로 다른 형식 기준을 쓰면 검증은 통과했는데 실제
+// 매치는 0건이 되는 조용한 오탐이 생긴다(제거해야 할 사례가 그대로 남거나, 있어야 할
+// 결과가 사라짐) — 형식을 이 한 가지로 고정하고, 존재하지 않는 달력 날짜(예: 2024-02-30)
+// 도 실제 날짜 왕복으로 걸러낸다.
+const ISO_DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+function isValidIsoDateOnly(value: string): boolean {
+  if (!ISO_DATE_ONLY_RE.test(value)) return false;
+  const [y, m, d] = value.split('-').map(Number);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
+}
+
+function isValueOfType(type: AnalyticsVariableMetadata['type'], value: unknown): boolean {
+  switch (type) {
+    case 'continuous':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'date':
+      return typeof value === 'string' && isValidIsoDateOnly(value);
+    case 'categorical':
+    case 'ordinal':
+    case 'high_cardinality':
+      return typeof value === 'string';
+    case 'boolean':
+      return typeof value === 'boolean';
+    default:
+      return false;
+  }
+}
+
+// PR3-A §B — 이변량 method별 허용 타입쌍. 카탈로그 metadata만 참조하는 정적
+// 판정(관측 데이터 불필요) — statsMethodCatalog(A-2, 브레이크다운 청결도 판정)과
+// 다른 계층이다(계획서 §"방법 가용성 판정" A-1: METHOD_TYPE_MISMATCH는 항상
+// 안전하게 노출 가능한 사유).
+const GROUP_COMPARISON_METHODS = new Set(['welch_t', 'mann_whitney', 'anova', 'kruskal_wallis']);
+const CONTINGENCY_METHODS = new Set(['chi_square', 'fisher_exact']);
+const CORRELATION_METHODS = new Set(['pearson_correlation', 'spearman_correlation']);
+const PAIRED_METHODS = new Set(['paired_t', 'wilcoxon_signed_rank']);
+// PR4-A1 — 회귀 2종. outcome 타입이 method를 자동 결정하지만 requestedMethod로도
+// 명시 가능(§6.5). date·high_cardinality는 predictor로 쓸 수 없다(계획 §2 ④ 표) —
+// categorical/ordinal/boolean/continuous만 허용.
+const REGRESSION_METHODS = new Set(['ols_linear', 'binary_logistic']);
+const REGRESSION_PREDICTOR_ALLOWED_TYPES: ReadonlySet<AnalyticsVariableMetadata['type']> =
+  new Set(['continuous', 'categorical', 'ordinal', 'boolean']);
+
+// PR4-B2 — 예측 1종. predictor 허용 타입은 회귀와 같다(계획서 §2단계 "predictor
+// 타입은 continuous·boolean·categorical·ordinal(one-hot)이다"). 카탈로그 배선이 이미
+// 이 타입만 predictionRole:'predictor'로 부여했지만(§0단계 허용표), API를 직접
+// 호출하는 우회를 막기 위해 여기서도 다시 강제한다(회귀 REGRESSION_PREDICTOR_ALLOWED_
+// TYPES와 동일 원칙).
+const PREDICTION_METHODS = new Set(['l2_logistic']);
+const PREDICTION_PREDICTOR_ALLOWED_TYPES: ReadonlySet<AnalyticsVariableMetadata['type']> =
+  new Set(['continuous', 'categorical', 'ordinal', 'boolean']);
+// PR4-B2 — 예측 analysis grain은 case/disease만 지원한다(job 제외 — 결정 #3 §0단계
+// 허용표: job-grain 원노출은 case/disease로 역방향 롤업이 안 돼 predictor 후보가 없다).
+const PREDICTION_SUPPORTED_GRAINS: ReadonlySet<StatsAnalysisRecipe['grain']> = new Set(['case', 'disease']);
+
+function isContinuousType(type: AnalyticsVariableMetadata['type']): boolean {
+  return type === 'continuous';
+}
+function isGroupingType(type: AnalyticsVariableMetadata['type']): boolean {
+  return type === 'boolean' || type === 'ordinal' || type === 'categorical';
+}
+
+function isMethodTypeCompatible(
+  method: string,
+  typeA: AnalyticsVariableMetadata['type'],
+  typeB: AnalyticsVariableMetadata['type'],
+): boolean {
+  if (GROUP_COMPARISON_METHODS.has(method)) {
+    return (isContinuousType(typeA) && isGroupingType(typeB)) || (isContinuousType(typeB) && isGroupingType(typeA));
+  }
+  if (CONTINGENCY_METHODS.has(method)) {
+    return isGroupingType(typeA) && isGroupingType(typeB);
+  }
+  if (CORRELATION_METHODS.has(method)) {
+    return isContinuousType(typeA) && isContinuousType(typeB);
+  }
+  return false;
+}
+
+function validateFilterValue(
+  variable: AnalyticsVariableMetadata,
+  filter: StatsFilter,
+  path: string,
+  errors: RecipeValidationError[],
+): void {
+  const { operator, value } = filter;
+
+  if (operator === 'is_missing' || operator === 'not_missing') {
+    if (value !== undefined) {
+      errors.push({
+        code: 'UNEXPECTED_FILTER_VALUE',
+        path,
+        message: `${operator} 연산자는 value를 받지 않는다`,
+      });
+    }
+    return;
+  }
+
+  if (value === undefined) {
+    errors.push({ code: 'INVALID_FILTER_VALUE', path, message: `${operator} 연산자는 value가 필요하다` });
+    return;
+  }
+
+  if (operator === 'between') {
+    if (!Array.isArray(value) || value.length !== 2) {
+      errors.push({ code: 'INVALID_FILTER_RANGE', path, message: 'between은 정확히 2개 원소 배열이어야 한다' });
+      return;
+    }
+    const [lower, upper] = value;
+    if (!isValueOfType(variable.type, lower) || !isValueOfType(variable.type, upper)) {
+      errors.push({ code: 'INVALID_FILTER_VALUE', path, message: `between 값이 변수 type(${variable.type})과 맞지 않는다` });
+      return;
+    }
+    const lowerOk = variable.type === 'date' ? Date.parse(lower as string) <= Date.parse(upper as string) : (lower as number) <= (upper as number);
+    if (!lowerOk) {
+      errors.push({ code: 'INVALID_FILTER_RANGE', path, message: '하한이 상한보다 클 수 없다' });
+    }
+    return;
+  }
+
+  if (operator === 'in') {
+    if (!Array.isArray(value) || value.length === 0) {
+      errors.push({ code: 'INVALID_FILTER_VALUE', path, message: 'in은 비어있지 않은 배열이어야 한다' });
+      return;
+    }
+    for (const element of value) {
+      if (!isValueOfType(variable.type, element)) {
+        errors.push({ code: 'INVALID_FILTER_VALUE', path, message: `in 원소가 변수 type(${variable.type})과 맞지 않는다` });
+        return;
+      }
+    }
+    return;
+  }
+
+  // eq/neq/gt/gte/lt/lte
+  if (Array.isArray(value)) {
+    errors.push({ code: 'INVALID_FILTER_VALUE', path, message: `${operator} 연산자는 배열 값을 받지 않는다` });
+    return;
+  }
+  if (!isValueOfType(variable.type, value)) {
+    errors.push({ code: 'INVALID_FILTER_VALUE', path, message: `값이 변수 type(${variable.type})과 맞지 않는다` });
+  }
+}
+
+// PR3-A — context 인자 추가(계획서 §"파이프라인" — validateRecipe는 기존 책임을
+// 전부 그대로 유지하고 이변량 구조/타입/paired 검사만 추가했다, 축소가 아니다).
+// 'preview'는 관대하다 — requestedMethod 필수 여부·타입정합성·paired영구거부를
+// 검사하지 않는다(방법을 아직 안 고른 최초 /preview도 정상 응답해야 함). 'analyze'
+// 에서만 엄격하게 검사한다.
+export function validateRecipe(
+  recipe: StatsAnalysisRecipe,
+  context: 'preview' | 'analyze',
+): RecipeValidationResult {
+  const errors: RecipeValidationError[] = [];
+
+  // §A-1 grain — 미지원 grain이면 조기 반환(이후 검증은 지원 grain을 전제하므로 의미가 없다).
+  if (!SUPPORTED_GRAINS.has(recipe.grain)) {
+    return {
+      valid: false,
+      errors: [{
+        code: 'GRAIN_NOT_YET_SUPPORTED',
+        path: 'grain',
+        message: `grain "${recipe.grain}"은 아직 지원하지 않는다 — 지원: ${Array.from(SUPPORTED_GRAINS).join(', ')}`,
+      }],
+    };
+  }
+
+  const catalog = getIntegratedCatalog();
+  const catalogByKey = new Map(catalog.map((v) => [v.key, v]));
+
+  const filterKeys = recipe.filters.map((f) => f.key);
+  // Table1 — stratifyByKey도 neededKeys에 포함시킨다. 이 리스트가 아래 §A-2(존재)·
+  // VARIABLE_GRAIN_MISMATCH·§A-3(직접식별자 금지)·§A-8(산식정책)을 전부 담당하므로,
+  // 여기 한 번만 추가하면 그 네 검사가 stratifyByKey에도 자동으로 적용된다
+  // (server/src/stats/dataset/builder.ts의 neededKeys와는 별개 리스트 — 그쪽은 실제
+  // 값을 채우는 쪽, 여기는 검증하는 쪽).
+  const stratifyByKey = recipe.analysisMode === 'descriptive' ? recipe.descriptive?.stratifyByKey : undefined;
+  const neededKeys = Array.from(new Set([
+    ...recipe.variableKeys,
+    ...filterKeys,
+    ...(stratifyByKey ? [stratifyByKey] : []),
+  ]));
+
+  // §A-2 키 존재
+  for (const key of neededKeys) {
+    if (!catalogByKey.has(key)) {
+      errors.push({ code: 'UNKNOWN_VARIABLE', path: key, message: `카탈로그에 없는 변수 key: ${key}` });
+    }
+  }
+
+  // VARIABLE_GRAIN_MISMATCH: 분석 변수뿐 아니라 필터 키도 대상이다(neededKeys는
+  // variableKeys ∪ filters[].key 합집합, §A-2와 동일 대상). 원칙은 "한 recipe는 한
+  // grain만 다룬다"지만, case의 브로드캐스트 안전 변수는 job/disease에도 그대로 복제
+  // 가능하므로 isGrainCompatible(analytics-core/common.ts, 클라이언트 CatalogPanel.jsx/
+  // RecipePanel.jsx와 동일 규칙 공유)로 판정한다 — 세부 grain(job/disease) 변수를
+  // case에 쓰는 역방향, 그리고 job↔disease는 여전히 거부된다.
+  for (const key of neededKeys) {
+    const variable = catalogByKey.get(key);
+    if (variable && !isGrainCompatible(variable, recipe.grain)) {
+      errors.push({
+        code: 'VARIABLE_GRAIN_MISMATCH',
+        path: key,
+        message: `${key}는 grain "${variable.grain}"인데 recipe.grain은 "${recipe.grain}"이다`,
+      });
+    }
+  }
+
+  // §A-3 식별자 제한(방어적 — 현재 카탈로그엔 direct_identifier가 0건)
+  for (const key of neededKeys) {
+    const variable = catalogByKey.get(key);
+    if (variable && variable.sensitivity === 'direct_identifier') {
+      errors.push({ code: 'IDENTIFIER_NOT_ALLOWED', path: key, message: `직접식별자 변수는 어떤 grain에서도 사용할 수 없다: ${key}` });
+    }
+  }
+
+  // PR0-B3 Part C — 필터 전용 변수 계약. filter_only 변수(예: 등록일)는 filters[]에서만
+  // 쓸 수 있고 variableKeys(분석 대상)에는 올 수 없다 — grain 검사와 별개 축이라 위
+  // VARIABLE_GRAIN_MISMATCH 검사와 독립적으로 검사한다. Table1의 stratifyByKey도
+  // "분석 대상 변수 자리"의 일종이라 같은 규칙을 적용한다.
+  for (const key of stratifyByKey ? [...recipe.variableKeys, stratifyByKey] : recipe.variableKeys) {
+    const variable = catalogByKey.get(key);
+    if (variable && variable.analysisRole === 'filter_only') {
+      errors.push({
+        code: 'FILTER_ONLY_VARIABLE_NOT_ANALYZABLE',
+        path: key,
+        message: `${key}는 필터 전용 변수라 분석 변수(variableKeys)로 쓸 수 없다 — 필터로만 사용하라`,
+      });
+    }
+  }
+
+  // §A-4 분석 목적 — variableKeys + stratifyByKey(필터는 대상이 아님)
+  for (const key of stratifyByKey ? [...recipe.variableKeys, stratifyByKey] : recipe.variableKeys) {
+    const variable = catalogByKey.get(key);
+    if (variable && !isPurposeCompatible(variable, recipe.analysisPurpose)) {
+      errors.push({
+        code: 'PURPOSE_NOT_ALLOWED',
+        path: key,
+        message: `${key}는 analysisPurpose "${recipe.analysisPurpose}"를 허용하지 않는다(허용: ${variable.allowedAnalysisPurposes.join(', ')})`,
+      });
+    }
+  }
+
+  // Table1 — 그룹 변수는 boolean/ordinal/categorical만 허용(continuous/high_cardinality/
+  // date는 그룹 축으로 쓸 수 없다 — 이 파일의 기존 isGroupingType 재사용, stats/dataset/bivariateRoles.ts의
+  // 동명 함수와 동일 규칙). 존재하지 않는 키는 위 UNKNOWN_VARIABLE로 이미 보고됐으므로 여기선 스킵.
+  if (stratifyByKey) {
+    const variable = catalogByKey.get(stratifyByKey);
+    if (variable && !isGroupingType(variable.type)) {
+      errors.push({
+        code: 'STRATIFY_KEY_TYPE_UNSUPPORTED',
+        path: 'descriptive.stratifyByKey',
+        message: `${stratifyByKey}는 type "${variable.type}"라 그룹 변수로 쓸 수 없다(허용: boolean/ordinal/categorical)`,
+      });
+    }
+  }
+
+  // §A-5 필터 연산자·값 형태·타입 일치
+  recipe.filters.forEach((filter, index) => {
+    const variable = catalogByKey.get(filter.key);
+    if (!variable) return; // UNKNOWN_VARIABLE로 이미 보고됨
+    const path = `filters[${index}]`;
+    const allowedOperators = TYPE_ALLOWED_OPERATORS[variable.type];
+    if (!allowedOperators.includes(filter.operator)) {
+      errors.push({
+        code: 'OPERATOR_NOT_ALLOWED',
+        path,
+        message: `${filter.key}(type=${variable.type})는 연산자 "${filter.operator}"를 허용하지 않는다(허용: ${allowedOperators.join(', ')})`,
+      });
+      return;
+    }
+    validateFilterValue(variable, filter, path, errors);
+  });
+
+  // §A-8 formulaPolicy 유효성 — family 단위로 한 번씩만 검사(중복 에러 방지).
+  const checkedFamilies = new Set<string>();
+  for (const key of neededKeys) {
+    const variable = catalogByKey.get(key);
+    if (!variable) continue;
+    const { formulaFamily, supportedFormulaPolicies } = variable;
+    if (checkedFamilies.has(formulaFamily)) continue;
+    checkedFamilies.add(formulaFamily);
+
+    const declaredPolicy = recipe.formulaPolicies[formulaFamily];
+    if (supportedFormulaPolicies.length > 1) {
+      if (declaredPolicy === undefined) {
+        errors.push({
+          code: 'FORMULA_POLICY_REQUIRED',
+          path: `formulaPolicies.${formulaFamily}`,
+          message: `formula family "${formulaFamily}"는 정책이 혼재하므로 formulaPolicies.${formulaFamily}를 명시해야 한다(가능: ${supportedFormulaPolicies.join(', ')})`,
+        });
+      } else if (!supportedFormulaPolicies.includes(declaredPolicy)) {
+        errors.push({
+          code: 'UNSUPPORTED_FORMULA_POLICY',
+          path: `formulaPolicies.${formulaFamily}`,
+          message: `formula family "${formulaFamily}"는 정책 "${declaredPolicy}"를 지원하지 않는다(가능: ${supportedFormulaPolicies.join(', ')})`,
+        });
+      }
+    } else if (declaredPolicy !== undefined && !supportedFormulaPolicies.includes(declaredPolicy)) {
+      errors.push({
+        code: 'UNSUPPORTED_FORMULA_POLICY',
+        path: `formulaPolicies.${formulaFamily}`,
+        message: `formula family "${formulaFamily}"는 정책 "${declaredPolicy}"를 지원하지 않는다(가능: ${supportedFormulaPolicies.join(', ')})`,
+      });
+    }
+  }
+
+  // PR3-A §B — 이변량 타입정합성·paired영구거부·method필수여부. 전부 카탈로그
+  // 메타데이터만 참조(관측 데이터 불필요, statsMethodCatalog의 A-2와는 다른 계층).
+  // context==='analyze'일 때만 엄격하게 검사한다(preview는 관대함, 위 함수 주석 참고).
+  if (recipe.analysisMode === 'bivariate' && context === 'analyze') {
+    if (!recipe.requestedMethod) {
+      errors.push({
+        code: 'BIVARIATE_REQUIRES_METHOD',
+        path: 'requestedMethod',
+        message: '이변량 모드에서는 requestedMethod를 지정해야 한다',
+      });
+    } else if (PAIRED_METHODS.has(recipe.requestedMethod)) {
+      errors.push({
+        code: 'PAIRED_TEST_REQUIRES_EXPLICIT_PAIRING',
+        path: 'requestedMethod',
+        message: `${recipe.requestedMethod}는 카탈로그에 대응(좌우 짝) 메타데이터가 있는 변수가 생기기 전까지 지원하지 않는다`,
+      });
+    } else {
+      // zod superRefine이 이미 variableKeys.length===2와 서로 다른 변수임을 보장한다.
+      const [keyA, keyB] = recipe.variableKeys;
+      const varA = catalogByKey.get(keyA);
+      const varB = catalogByKey.get(keyB);
+      // varA/varB가 undefined면 UNKNOWN_VARIABLE로 이미 보고됨 — 중복 보고 방지.
+      if (varA && varB && !isMethodTypeCompatible(recipe.requestedMethod, varA.type, varB.type)) {
+        errors.push({
+          code: 'METHOD_TYPE_MISMATCH',
+          path: 'requestedMethod',
+          message: `${recipe.requestedMethod}는 선택된 변수 타입(${varA.type}, ${varB.type}) 조합에 쓸 수 없다`,
+        });
+      }
+    }
+  }
+
+  // PR3-B §4/§7 — 상관행렬 타입정합성(전부 continuous)·method필수여부. zod
+  // superRefine(shared/contracts/stats.ts)은 variableKeys 개수·중복만 구조적으로
+  // 검사한다 — "전부 continuous"는 카탈로그 조회가 필요해 여기(의미 계층)의
+  // 책임이다. context==='analyze'일 때만 엄격하게 검사(preview는 관대함).
+  if (recipe.analysisMode === 'correlation_matrix' && context === 'analyze') {
+    if (!recipe.requestedMethod) {
+      errors.push({
+        code: 'CORRELATION_MATRIX_REQUIRES_METHOD',
+        path: 'requestedMethod',
+        message: '상관행렬 모드에서는 requestedMethod를 지정해야 한다',
+      });
+    } else if (!CORRELATION_METHODS.has(recipe.requestedMethod)) {
+      errors.push({
+        code: 'CORRELATION_MATRIX_METHOD_NOT_SUPPORTED',
+        path: 'requestedMethod',
+        message: `상관행렬은 pearson_correlation/spearman_correlation만 지원한다(요청: ${recipe.requestedMethod})`,
+      });
+    }
+    for (const key of recipe.variableKeys) {
+      const variable = catalogByKey.get(key);
+      // variable이 undefined면 UNKNOWN_VARIABLE로 이미 보고됨 — 중복 보고 방지.
+      if (variable && !isContinuousType(variable.type)) {
+        errors.push({
+          code: 'METHOD_TYPE_MISMATCH',
+          path: key,
+          message: `상관행렬은 연속형 변수만 지원한다(${key}는 type=${variable.type})`,
+        });
+      }
+    }
+  }
+
+  // PR4-A1 — 회귀 타입정합성·predictor 적격성·기준 레벨 사전검증. zod superRefine
+  // (shared/contracts/stats.ts)은 구조검사만(≥2개 변수·중복 금지·outcome이 variableKeys
+  // 안에 있는지) 했다 — 여기서 카탈로그가 필요한 의미검증을 한다. context==='analyze'
+  // 일 때만 requestedMethod 필수(리뷰 #1 — preview는 관대해야 최초 방법 미선택 상태의
+  // /preview도 통과한다).
+  if (recipe.analysisMode === 'regression' && recipe.regression) {
+    const { outcomeKey, referenceLevels } = recipe.regression;
+    const outcomeVar = catalogByKey.get(outcomeKey);
+    const predictorKeys = recipe.variableKeys.filter((k) => k !== outcomeKey);
+
+    // method 존재 여부·유효성·outcome 타입 정합성은 전부 context==='analyze'
+    // 일 때만 검사한다(bivariate/correlation_matrix와 동일한 관례 — preview는
+    // requestedMethod가 아직 없거나 이후 바뀔 스테일 값이어도 항상 관대해야
+    // 한다. 불일치는 availableMethods의 METHOD_TYPE_MISMATCH로 이미 드러난다).
+    if (context === 'analyze') {
+      if (!recipe.requestedMethod) {
+        errors.push({
+          code: 'REGRESSION_REQUIRES_METHOD',
+          path: 'requestedMethod',
+          message: '회귀 모드에서는 requestedMethod를 지정해야 한다',
+        });
+      } else if (!REGRESSION_METHODS.has(recipe.requestedMethod)) {
+        errors.push({
+          code: 'REGRESSION_METHOD_NOT_SUPPORTED',
+          path: 'requestedMethod',
+          message: `회귀는 ols_linear/binary_logistic만 지원한다(요청: ${recipe.requestedMethod})`,
+        });
+      } else if (outcomeVar) {
+        // outcome 타입 ↔ method 정합성. PR4-A2 — categorical outcome도 binary_logistic에
+        // 허용한다(선언 타입만 본다 — 완전사례 관측 레벨이 정확히 2개인지는 카탈로그로
+        // 알 수 없어 stats/dataset/regressionDesign.ts(④, 데이터 필요)에서 최종 판정한다).
+        const outcomeTypeOk =
+          (recipe.requestedMethod === 'ols_linear' && outcomeVar.type === 'continuous') ||
+          (recipe.requestedMethod === 'binary_logistic' &&
+            (outcomeVar.type === 'boolean' || outcomeVar.type === 'categorical'));
+        if (!outcomeTypeOk) {
+          errors.push({
+            code: 'METHOD_TYPE_MISMATCH',
+            path: 'regression.outcomeKey',
+            message: `${recipe.requestedMethod}는 outcome 타입(${outcomeVar.type})에 쓸 수 없다 — ols_linear는 continuous, binary_logistic은 boolean·categorical(2레벨)만 v1에서 지원한다`,
+          });
+        }
+      }
+      // outcomeVar가 undefined면 UNKNOWN_VARIABLE로 이미 보고됨 — 중복 보고 방지.
+    }
+
+    for (const key of predictorKeys) {
+      const variable = catalogByKey.get(key);
+      if (variable && !REGRESSION_PREDICTOR_ALLOWED_TYPES.has(variable.type)) {
+        errors.push({
+          code: 'REGRESSION_PREDICTOR_TYPE_UNSUPPORTED',
+          path: key,
+          message: `${key}는 type=${variable.type}이라 회귀 predictor로 쓸 수 없다(date·high_cardinality 미지원)`,
+        });
+      }
+    }
+
+    // 기준 레벨 값 검증(계획 §2 ④ "기준 레벨 검증") — 카탈로그에 순서가 선언된
+    // 변수만 여기서 검증한다. 선언이 없는 동적 categorical은 완전사례 관측 레벨
+    // 기준으로만 판정 가능해 stats/dataset/regressionDesign.ts(4단계, 데이터 필요)로 미룬다.
+    for (const [refKey, refValue] of Object.entries(referenceLevels ?? {})) {
+      if (!predictorKeys.includes(refKey)) {
+        errors.push({
+          code: 'REGRESSION_REFERENCE_LEVEL_UNKNOWN_PREDICTOR',
+          path: `regression.referenceLevels.${refKey}`,
+          message: `${refKey}는 predictor 집합에 없다`,
+        });
+        continue;
+      }
+      const variable = catalogByKey.get(refKey);
+      if (!variable) continue; // UNKNOWN_VARIABLE로 이미 보고됨
+      const declared = getOrdinalOrder(refKey) ?? getCategoricalOrder(refKey);
+      if (declared && !declared.includes(refValue)) {
+        errors.push({
+          code: 'REGRESSION_REFERENCE_LEVEL_NOT_DECLARED',
+          path: `regression.referenceLevels.${refKey}`,
+          message: `${refKey}의 선언된 레벨(${declared.join(', ')})에 "${refValue}"가 없다`,
+        });
+      }
+    }
+
+    // PR4-A2 — spline은 continuous만, eventLevel은 categorical outcome만. 일반
+    // predictor 적격성 검사(REGRESSION_PREDICTOR_ALLOWED_TYPES, 위)는 continuous/
+    // categorical/ordinal/boolean을 전부 허용하므로 이 제약을 대신하지 못한다.
+    // UI가 선택을 막아도 API를 직접 호출하면 우회되므로 여기서 다시 강제한다.
+    for (const key of recipe.regression.splineKeys) {
+      const variable = catalogByKey.get(key);
+      if (variable && variable.type !== 'continuous') {
+        errors.push({
+          code: 'SPLINE_PREDICTOR_MUST_BE_CONTINUOUS',
+          path: `regression.splineKeys.${key}`,
+          message: `${key}는 type=${variable.type}이라 spline 대상이 될 수 없다(continuous만 지원)`,
+        });
+      }
+    }
+    if (recipe.regression.eventLevel !== undefined && outcomeVar && outcomeVar.type !== 'categorical') {
+      errors.push({
+        code: 'EVENT_LEVEL_REQUIRES_CATEGORICAL_OUTCOME',
+        path: 'regression.eventLevel',
+        message: `eventLevel은 categorical outcome에만 지정할 수 있다(outcome 타입: ${outcomeVar.type})`,
+      });
+    }
+  }
+
+  // PR4-B2 — 예측(prediction) 역할·명세·grain·필터 검증. zod superRefine(shared/
+  // contracts/stats.ts)은 구조검사만(≥2개 변수·중복 금지·outcome이 variableKeys 안에
+  // 있는지·eventLevel 비어있지 않음) 했다 — 여기서 카탈로그가 필요한 의미검증을 한다.
+  // context 구분 없이 항상 엄격하다(association 모드들과 달리 prediction은 방법이
+  // l2_logistic 1종뿐이라 "미선택 상태의 관대한 preview"가 의미가 없다).
+  if (recipe.analysisMode === 'prediction' && recipe.prediction) {
+    const { outcomeKey, eventLevel } = recipe.prediction;
+    const outcomeVar = catalogByKey.get(outcomeKey);
+    const predictorKeys = recipe.variableKeys.filter((k) => k !== outcomeKey);
+
+    // grain — case/disease만 지원(job 제외). VARIABLE_GRAIN_MISMATCH(§A-2 아래, 이미
+    // 위에서 검사됨)와 별개 축이다 — 그건 "변수가 이 grain과 호환되는가", 이건
+    // "이 grain 자체가 예측을 지원하는가".
+    if (!PREDICTION_SUPPORTED_GRAINS.has(recipe.grain)) {
+      errors.push({
+        code: 'PREDICTION_GRAIN_NOT_SUPPORTED',
+        path: 'grain',
+        message: `예측 분석은 grain "${recipe.grain}"을 지원하지 않는다(지원: ${Array.from(PREDICTION_SUPPORTED_GRAINS).join(', ')})`,
+      });
+    }
+
+    if (recipe.requestedMethod && !PREDICTION_METHODS.has(recipe.requestedMethod)) {
+      errors.push({
+        code: 'PREDICTION_METHOD_NOT_SUPPORTED',
+        path: 'requestedMethod',
+        message: `예측은 l2_logistic만 지원한다(요청: ${recipe.requestedMethod})`,
+      });
+    }
+
+    // outcome 역할 — predictionRole==='outcome'이 아닌 변수를 outcome으로 쓸 수 없다
+    // (예: predictor 역할 변수도 allowedAnalysisPurposes엔 'prediction'이 있어 §A-4
+    // PURPOSE_NOT_ALLOWED만으로는 걸러지지 않는다 — 역할 축이 별도로 필요한 이유).
+    if (outcomeVar && outcomeVar.predictionRole !== 'outcome') {
+      errors.push({
+        code: 'PREDICTION_OUTCOME_INVALID_ROLE',
+        path: 'prediction.outcomeKey',
+        message: `${outcomeKey}는 predictionRole이 'outcome'이 아니다 — 예측 outcome으로 쓸 수 없다`,
+      });
+    } else if (outcomeVar) {
+      // eventLevel — PREDICTION_OUTCOME_SPECS(서버·클라이언트 공유 단일 진실원)의
+      // 허용값 중 하나여야 한다. boolean outcome은 클라이언트가 'true'로 고정해 보낸다
+      // (계획서 §1단계 — 데이터와 무관한 400이라 카탈로그 검사와 별개로 여기서 확정).
+      const spec = PREDICTION_OUTCOME_SPECS[outcomeKey];
+      if (!spec || !spec.eventLevels.includes(eventLevel)) {
+        errors.push({
+          code: 'PREDICTION_EVENT_LEVEL_NOT_ALLOWED',
+          path: 'prediction.eventLevel',
+          message: `eventLevel "${eventLevel}"은 ${outcomeKey}의 허용값(${(spec?.eventLevels ?? []).join(', ')})에 없다`,
+        });
+      }
+    }
+
+    // predictor 역할·타입 — outcome 역할 변수를 predictor로 섞어 쓰거나, predictor가
+    // 아닌 타입(date·high_cardinality 등)을 쓰면 거부한다.
+    for (const key of predictorKeys) {
+      const variable = catalogByKey.get(key);
+      if (!variable) continue; // UNKNOWN_VARIABLE로 이미 보고됨
+      if (variable.predictionRole !== 'predictor') {
+        errors.push({
+          code: 'PREDICTION_PREDICTOR_INVALID_ROLE',
+          path: key,
+          message: `${key}는 predictionRole이 'predictor'가 아니다 — 예측 predictor로 쓸 수 없다`,
+        });
+        continue;
+      }
+      if (!PREDICTION_PREDICTOR_ALLOWED_TYPES.has(variable.type)) {
+        errors.push({
+          code: 'PREDICTION_PREDICTOR_TYPE_UNSUPPORTED',
+          path: key,
+          message: `${key}는 type=${variable.type}이라 예측 predictor로 쓸 수 없다(date·high_cardinality 미지원)`,
+        });
+      }
+    }
+
+    // PREDICTION_FILTER_LEAKAGE — 필터는 predictor 역할 변수, 또는 판정 이전 DB컬럼
+    // 중 명시 허용된 등록일(REGISTERED_AT_KEY)만 허용한다(계획서 §0단계 "필터" 절).
+    // outcome·다른 filter_only 변수(생년월일·재해일자·버전 등)는 필터로도 쓸 수 없다.
+    recipe.filters.forEach((filter, index) => {
+      const variable = catalogByKey.get(filter.key);
+      if (!variable) return; // UNKNOWN_VARIABLE로 이미 보고됨
+      const allowed = variable.predictionRole === 'predictor' || filter.key === REGISTERED_AT_KEY;
+      if (!allowed) {
+        errors.push({
+          code: 'PREDICTION_FILTER_LEAKAGE',
+          path: `filters[${index}]`,
+          message: `${filter.key}는 예측 필터로 쓸 수 없다 — predictor 역할 변수 또는 등록일만 허용된다`,
+        });
+      }
+    });
+  }
+
+  if (errors.length > 0) {
+    return { valid: false, errors };
+  }
+  return { valid: true, catalogByKey };
+}

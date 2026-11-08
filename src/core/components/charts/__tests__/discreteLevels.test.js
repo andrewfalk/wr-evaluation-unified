@@ -95,7 +95,7 @@ describe('buildDiscreteDisplay', () => {
     });
 
     // 외부 리뷰 P3 — localeCompare는 브라우저 언어에 따라 동점 선택이 갈린다(ko: "가", en: "A").
-    // 서버 pickMode와 같은 코드유닛 순서이고, 서버 테스트(statsDescriptiveSuppression.test.ts)가 같은
+    // 서버 pickMode와 같은 코드유닛 순서이고, 서버 테스트(server/src/stats/disclosure/__tests__/descriptiveSuppression.test.ts)가 같은
     // 반례로 고정한다. 이 PC는 ko-KR이라 localeCompare 구현은 여기서도 실패한다.
     it('동점 비교는 로케일과 무관한 코드유닛 순서다 — "A" vs "가"는 "A", "a" vs "B"는 "B"(서버와 동일)', () => {
       expect(pickModeFromLevels([lv('A', 10), lv('가', 10)], false)).toBe('A');

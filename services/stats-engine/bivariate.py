@@ -373,7 +373,7 @@ def pearson_correlation(x: list[float], y: list[float]) -> dict[str, Any]:
     # 수 있어 새 공개통제 검토가 필요하므로 후속 PR로 이연). regressionLine은
     # extra(효과크기 record) 안이 아니라 형제 필드다 — extra는 모든 값이
     # {name,value,ci,ciUnavailableReason} shape이어야 해서 {slope,intercept}를
-    # 그대로 넣을 수 없다(statsEngine.ts의 StatsEngineEffectSizeSchema 확인).
+    # 그대로 넣을 수 없다(stats/engine/index.ts의 StatsEngineEffectSizeSchema 확인).
     sd_x, sd_y = float(np.std(xa, ddof=1)), float(np.std(ya, ddof=1))
     slope = (r * sd_y / sd_x) if sd_x > 0 else None
     intercept = (float(np.mean(ya)) - slope * float(np.mean(xa))) if slope is not None else None

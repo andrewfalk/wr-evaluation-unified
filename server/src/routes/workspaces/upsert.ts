@@ -76,7 +76,7 @@ async function upsertPatientRecordInTx(
 ): Promise<UpsertOutcome> {
   // 같은 id를 동시에 처음 저장하는 요청들을 직렬화한다. 아직 없는 행은 FOR UPDATE로 잠글 수
   // 없어서, 이게 없으면 두 요청이 모두 "기존 행 없음"을 보고 둘 다 쓰기 경로로 들어간다.
-  // 트랜잭션 범위 advisory lock이라 COMMIT/ROLLBACK 때 자동으로 풀린다(statsRunAdmission.ts와 같은 형태).
+  // 트랜잭션 범위 advisory lock이라 COMMIT/ROLLBACK 때 자동으로 풀린다(stats/queue/runAdmission.ts와 같은 형태).
   await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [meta.id]);
 
   // FOR UPDATE 필수: 이 조회와 아래 쓰기 사이에 DELETE가 끼어들면 삭제된 환자에 쓰게 된다.

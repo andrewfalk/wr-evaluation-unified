@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import config from '../config';
-import { getStatsWorkbenchAvailability } from '../statsWorkbenchRuntimeState';
+import { getStatsWorkbenchAvailability } from '../stats/policy/workbenchRuntimeState';
 
 export function createConfigRouter(): Router {
   const router = Router();

@@ -10,7 +10,7 @@
 
 export const TOP_LEVELS_IN_CHART = 20;
 // "기타"는 10명 미만 범주뿐 아니라, 합친 값을 10명 이상으로 맞추려고 서버가 함께 끌어온 공개
-// 범주도 포함할 수 있다(statsDescriptiveSuppression.ts planSmallLevelMerge) — 그래서 "10명 미만
+// 범주도 포함할 수 있다(server/src/stats/disclosure/descriptiveSuppression.ts planSmallLevelMerge) — 그래서 "10명 미만
 // 범주 합계"라고 쓰면 부정확하다.
 export const OTHER_LEVEL_LABEL = '기타 (공개 기준에 따라 병합한 범주 합계)';
 export const OTHER_LEVEL_CHART_LABEL = '기타(병합한 범주 합계)';
@@ -19,7 +19,7 @@ function sumProportion(list) {
   return list.reduce((s, l) => s + l.proportion, 0);
 }
 
-// 원본(rawLevels)을 표시할 때의 최빈값 — 서버의 pickMode(statsDescriptiveSuppression.ts)와 같은
+// 원본(rawLevels)을 표시할 때의 최빈값 — 서버의 pickMode(server/src/stats/disclosure/descriptiveSuppression.ts)와 같은
 // 규칙(가장 큰 건수, 동점이면 순서형은 더 낮은(경한) 등급, 그 외는 값 문자열의 코드유닛 순서)이다.
 // 문자열 비교에 localeCompare를 쓰지 않는다 — 브라우저 언어(ko/en)와 서버 로케일에 따라 동점
 // 선택이 갈려("A" vs "가") 서버 결과·CSV와 원본 화면이 어긋난다.

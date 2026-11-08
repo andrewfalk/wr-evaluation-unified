@@ -118,8 +118,8 @@ function variableLabel(catalogByKey, key) {
 // 식별할 수 있어야 한다. **committedRecipe**(실행 당시 조건)만 읽는다 — 현재
 // 편집 중인 draft 선택값을 쓰면 이전 실행 결과에 지금 고른 변수 이름이 잘못
 // 붙는다(§6 "실행된 결과-조건 연결은 절대 안 바뀜"과 같은 원칙).
-// Node의 statsAnalysisContext.ts:92 `const [keyX, keyY] = recipe.variableKeys`와
-// statsBivariateRoles.ts의 역할판정(타입으로 그룹/값을 가른다, 선택 순서 아님)을
+// Node의 server/src/stats/recipe/analysisContext.ts:92 `const [keyX, keyY] = recipe.variableKeys`와
+// server/src/stats/dataset/bivariateRoles.ts의 역할판정(타입으로 그룹/값을 가른다, 선택 순서 아님)을
 // 그대로 재현한다 — 서버가 실제로 쓰는 규칙과 갈리면 표시가 실제 응답과 어긋난다.
 function resolveBivariateVariableLabels(catalogByKey, committedRecipe) {
   const [keyX, keyY] = committedRecipe?.variableKeys ?? [];
@@ -573,8 +573,8 @@ function interactionScaleNote(interactionOf, standardizedKeys, catalogByKey) {
 }
 
 function regressionTermRowLabel(t, standardizedKeys = [], catalogByKey = new Map()) {
-  // 서버 label이 이미 "변수: 수준"(범주형) / "A × B"(interaction) 형태다(statsRegressionDesign.ts,
-  // statsRegressionSuppression.ts) — 수준을 다시 붙이면 "성별: male: male"이 된다.
+  // 서버 label이 이미 "변수: 수준"(범주형) / "A × B"(interaction) 형태다(server/src/stats/dataset/regressionDesign.ts,
+  // server/src/stats/disclosure/regressionSuppression.ts) — 수준을 다시 붙이면 "성별: male: male"이 된다.
   const base = t.label;
   if (t.termType === 'interaction') {
     const note = interactionScaleNote(t.interactionOf, standardizedKeys, catalogByKey);
@@ -907,7 +907,7 @@ function stratifyGroupLabel(group, stratifyByKey) {
   if (group.kind === 'total') return '전체';
   if (group.kind === 'other') return '기타';
   if (group.kind === 'missing') {
-    // 파티셔너 자체는 변수 종류를 모르는 일반 로직이라(server/src/statsDescriptiveStratify.ts),
+    // 파티셔너 자체는 변수 종류를 모르는 일반 로직이라(server/src/stats/dataset/descriptiveStratify.ts),
     // 라벨은 화면 표시 단계에서 stratifyByKey별로 결정한다 — 담당의만 "미배정",
     // 그 외 일반 범주형 변수는 기본값 "결측".
     return stratifyByKey === 'case.staff.assignedDoctorUserId' ? '미배정' : '결측';
@@ -916,7 +916,7 @@ function stratifyGroupLabel(group, stratifyByKey) {
 }
 
 // 표시명이 겹치는 열을 구분한다 — 담당의 표시명 조회가 실패해 여러 그룹이 전부
-// "(알 수 없음)"이 되거나(statsDescriptiveStratifySuppression.ts의 폴백), 이름이
+// "(알 수 없음)"이 되거나(server/src/stats/disclosure/descriptiveStratifySuppression.ts의 폴백), 이름이
 // 같은 담당의가 둘 이상인 정상 조회에서도 열 제목만으로는 서로 다른 그룹임을
 // 구분할 수 없다 — groupId/CSV엔 구분값이 있지만 화면엔 없었다(리뷰 지적). 원본
 // UUID는 여전히 노출하지 않으면서, 중복된 라벨에만 순번을 붙인다.
@@ -1227,7 +1227,7 @@ export function ResultPanel({
         {/* PR4-A2 — 회귀도 집계 CSV export 지원(exportUnsupported prop이 bivariate/
             correlation_matrix만 막는다 — StatisticsWorkbench.jsx 기준과 동일).
             PR4-B2 — 예측도 집계 CSV export 지원(계수는 서버가 애초에 CSV에 넣지
-            않는다 — statsExportHandler.ts buildPredictionCsv 주석 참고). */}
+            않는다 — server/src/stats/export/exportHandler.ts buildPredictionCsv 주석 참고). */}
         {committedResult && (isDescriptiveRun || isRegressionRun || isPredictionRun) && (
           <button
             type="button"

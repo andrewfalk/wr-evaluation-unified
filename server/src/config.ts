@@ -89,7 +89,7 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
     // 작업 영상 인간공학 분석(v6.0.0). 검증(6.0-B2) 통과 전까지 운영 기본 비활성.
     videoAnalysisEnabled: e.VIDEO_ANALYSIS_ENABLED,
 
-    // 통계분석 워크벤치(PR0-A). 최종 활성화 여부는 statsWorkbenchRuntimeState.ts가 이 값과
+    // 통계분석 워크벤치(PR0-A). 최종 활성화 여부는 stats/policy/workbenchRuntimeState.ts가 이 값과
     // deploymentMode를 함께 본다(§7.6).
     statsWorkbenchEnabled: e.STATS_WORKBENCH_ENABLED,
 
@@ -136,7 +136,7 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
     }),
 
     // PR1 — Python subprocess 통계 엔진. maxValuesPerVariable/maxTotalValues/maxStringLength는
-    // 여기 없다 — statsEngineLimits.ts의 하드코딩 상수(Python jsonschema와 일치해야 함, 계획서 §7.3).
+    // 여기 없다 — stats/engine/engineLimits.ts의 하드코딩 상수(Python jsonschema와 일치해야 함, 계획서 §7.3).
     stats: Object.freeze({
       scriptsDir: statsScriptsDir,
       python: e.STATS_ENGINE_PYTHON ?? venvPython(statsScriptsDir),

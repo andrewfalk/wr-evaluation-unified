@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { checkPredictorVariance } from '../statsRegressionDesign';
+import { checkPredictorVariance } from '../stats/dataset/regressionDesign';
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
-import type { DatasetRow } from '../statsDatasetBuilder';
+import type { DatasetRow } from '../stats/dataset/builder';
 
-// PR4-B2 — statsRegressionDesign.ts에서 추출한 predictor 사전검사(계획서 §3단계
+// PR4-B2 — stats/dataset/regressionDesign.ts에서 추출한 predictor 사전검사(계획서 §3단계
 // "association 코드는 동작을 바꾸지 않는 추출로만 공유한다"). 회귀 쪽 동작 불변은
-// statsRegressionDesign.test.ts(25개, 무수정 통과)가 이미 고정했으므로, 여기서는
+// stats/dataset/__tests__/regressionDesign.test.ts(25개, 무수정 통과)가 이미 고정했으므로, 여기서는
 // 추출된 함수 자체의 계약(maxLevels 인자화 포함)만 직접 확인한다.
 
 function makeVariable(type: AnalyticsVariableMetadata['type']): AnalyticsVariableMetadata {

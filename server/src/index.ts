@@ -10,7 +10,7 @@ import { runVideoClipCleanup } from './jobs/videoClipCleanup';
 import { runStatsRunCleanup } from './jobs/statsRunCleanup';
 import { createAuditNonceSweeper } from './jobs/emrAuditNonces';
 import { createLoginBackoffSweeper } from './jobs/loginBackoff';
-import { createStatsRunsQueueWorker } from './statsRunsQueue';
+import { createStatsRunsQueueWorker } from './stats/queue/runsQueue';
 
 // The server process: create the database pools, build the app (src/app.ts — REFACTORING_ROADMAP
 // P0-3), then run migrations, listen and start the background jobs.

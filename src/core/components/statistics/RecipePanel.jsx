@@ -52,7 +52,7 @@ const METHOD_TOOLTIPS = {
 };
 const METHOD_LIST_PVALUE_NOTE = 'p-값이 작을수록(보통 0.05 미만) 우연이라 보기 어려운 차이·연관으로 해석합니다.';
 
-// server/src/statsRecipeValidation.ts의 TYPE_ALLOWED_OPERATORS와 동일 — 서버가 최종 판정하므로
+// server/src/stats/recipe/validation.ts의 TYPE_ALLOWED_OPERATORS와 동일 — 서버가 최종 판정하므로
 // 여기서 어긋나도 안전하지만(400으로 드러남), UI가 애초에 무효한 조합을 안 보여주기 위해 미러링.
 const TYPE_ALLOWED_OPERATORS = {
   continuous: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'between', 'is_missing', 'not_missing'],
@@ -93,7 +93,7 @@ function sortGrainsForDisplay(grains) {
   });
 }
 
-// server/src/statsSnapshotColumnVariables.ts의 REGISTERED_AT_KEY와 동일 리터럴.
+// server/src/stats/dataset/snapshotColumnVariables.ts의 REGISTERED_AT_KEY와 동일 리터럴.
 
 function needsValue(operator) {
   return operator !== 'is_missing' && operator !== 'not_missing';
@@ -102,7 +102,7 @@ function needsValue(operator) {
 // 1차 리뷰가 잡은 결함 — 연속형만 Number(value), 나머지는 무조건 문자열로 보내던 기존 코드는
 // between(배열 아님)·in(배열 아님)·boolean(문자열 "true"/"false")에서 전부 서버 400을 냈고,
 // 빈 숫자는 Number('')===0으로 조용히 통과했다. 연산자·타입별로 원시 UI 입력을 서버 계약이
-// 요구하는 정확한 형태로 변환하고, 빈/잘못된 입력은 여기서 막는다(server/src/statsRecipeValidation.ts
+// 요구하는 정확한 형태로 변환하고, 빈/잘못된 입력은 여기서 막는다(server/src/stats/recipe/validation.ts
 // 의 isValueOfType·between·in 검증과 대응).
 function buildFilterValue(variable, operator, raw) {
   if (!needsValue(operator)) return { ok: true, value: undefined };
@@ -157,7 +157,7 @@ function emptyRawValueFor(operator) {
 }
 
 // 등록일처럼 date 타입 필터는 자유 텍스트로 두면 "2024/01/15"·"2024-01-15T00:00:00Z" 같은
-// 형식이 섞여 들어온다 — 서버(statsRecipeValidation.ts)는 YYYY-MM-DD만 엄격히 허용하므로
+// 형식이 섞여 들어온다 — 서버(server/src/stats/recipe/validation.ts)는 YYYY-MM-DD만 엄격히 허용하므로
 // (실제 값 비교도 그 형식 기준), 브라우저 네이티브 <input type="date">로 입력 자체를 그
 // 형식으로 고정한다(네이티브 date input의 value는 항상 YYYY-MM-DD).
 function inputTypeFor(variableType) {
@@ -429,7 +429,7 @@ export function RecipePanel({
   );
 
   // PR4-B2 — 예측 필터는 predictor 역할이거나 등록일(REGISTERED_AT_KEY)만 허용된다
-  // (server/src/statsRecipeValidation.ts PREDICTION_FILTER_LEAKAGE — outcome이나
+  // (server/src/stats/recipe/validation.ts PREDICTION_FILTER_LEAKAGE — outcome이나
   // outcome과 얽힌 변수를 필터로 쓰면 결과를 미리 알고 거른 셈이 되는 정보누출을
   // 막는다, 계획서 §0단계 "필터"). 그 외 필터는 여기서 아예 후보에서 뺀다 —
   // "필터를 비활성화할 때 사유를 표시한다"(계획서 §6단계).
@@ -494,7 +494,7 @@ export function RecipePanel({
     () => selectedKeys.filter((k) => k !== outcomeKey && catalogByKey.get(k)?.predictionRole !== 'predictor'),
     [selectedKeys, outcomeKey, catalogByKey],
   );
-  // DTO 필드(routes/stats.ts toCatalogVariableDto) — 자유입력이 아니라 이 목록에서만
+  // DTO 필드(server/src/stats/routes/router.ts toCatalogVariableDto) — 자유입력이 아니라 이 목록에서만
   // 고른다(계획서 §6단계 "eventLevel select는 DTO의 predictionEventLevels에서 만든다").
   const predictionEventLevels = outcomeKey ? (catalogByKey.get(outcomeKey)?.predictionEventLevels ?? []) : [];
   const filtersDirty = JSON.stringify(filterDraft) !== JSON.stringify(appliedFilters);

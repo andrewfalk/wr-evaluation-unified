@@ -14,7 +14,7 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 
 // 락 enforcement 모드를 테스트마다 바꾼다. 실제 config는 Object.freeze라 복사본에 getter를 둔다
-// (statsDescriptiveHttp.integration.test.ts와 같은 방식).
+// (stats/routes/__tests__/descriptiveHttp.integration.test.ts와 같은 방식).
 const lockMode = vi.hoisted(() => ({ mode: 'off' as 'off' | 'observe' | 'enforce' }));
 vi.mock('../../config', async (importOriginal) => {
   const actualModule = await importOriginal<typeof import('../../config')>();

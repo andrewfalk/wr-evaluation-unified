@@ -21,7 +21,7 @@ import {
   StatsEngineProcessError,
   StatsEngineResultInvalidError,
   StatsEngineTimeoutError,
-} from '../../statsEngine';
+} from '../../stats/engine';
 
 const INTERNAL = { code: 'INTERNAL_ERROR', error: 'Internal server error' };
 const ASSIGNED_ONLY = { code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' };

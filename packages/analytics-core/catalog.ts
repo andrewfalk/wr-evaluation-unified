@@ -120,7 +120,7 @@ export function computeRepeatedVariableValue(
 // COMPLETION_ENGINE_VERSION과 같은 "수동 올림" 관례). 카탈로그·extractor 로직이 바뀌면
 // 이 값을 올린다.
 // PR0-B3 Part A — 7개→9개(반복 관측치 계약 신설: vibration_interval grain 변수 2개)로
-// 카탈로그·extractor 계약 자체가 바뀌어 v2로 올린다(statsExecutionDigest.ts의 캐시 키에도
+// 카탈로그·extractor 계약 자체가 바뀌어 v2로 올린다(server/src/stats/queue/executionDigest.ts의 캐시 키에도
 // 이 값이 들어가므로, 안 올리면 옛 카탈로그 기준 캐시 결과가 그대로 재사용된다).
 // PR0-B3 Part B — 9개→15개(diagnosis_side grain 신설: K-L Grade/Ellman Class/확정상병상태/
 // 신청≠확정 여부 4종 + case grain 2종: 척추 수직분포/동반 척추증)로 다시 올린다.
@@ -129,9 +129,9 @@ export function computeRepeatedVariableValue(
 // PR0-B3 Part C-2 — 18개→21개(task grain 신설: MDDM 작업 중량물·빈도 2종 + diagnosis_side
 // grain 1종: 신청상병 부위군, diagnosisMapping.ts 정규식 버그 수정 후 처음 파생 가능해짐).
 // server 전용 SNAPSHOT_COLUMN_VARIABLES(담당의·등록일)는 이 상수가 커버하지 않는다 —
-// server/src/statsSnapshotColumnVariables.ts의 SERVER_CATALOG_EXTENSION_VERSION이 별도로
-// 관리하고, 둘을 합성한 문자열을 GET /catalog·statsRunManifest.ts·statsExecutionDigest.ts
-// 세 곳에 함께 쓴다(계획 "통합 카탈로그" 절 — server/src/statsCatalogVersion.ts 참고).
+// server/src/stats/dataset/snapshotColumnVariables.ts의 SERVER_CATALOG_EXTENSION_VERSION이 별도로
+// 관리하고, 둘을 합성한 문자열을 GET /catalog·server/src/stats/queue/runManifest.ts·server/src/stats/queue/executionDigest.ts
+// 세 곳에 함께 쓴다(계획 "통합 카탈로그" 절 — server/src/stats/catalog/version.ts 참고).
 // PR0-B4 Slice 1 — 21개→36개(spine 잔여 필드 15종: case grain 7 + task grain 4 + vibration_
 // interval grain 4). 매핑표(coverage/PR0-B4-field-mapping.md §4)·fixture(coverage/
 // pr0B4FieldMapping.ts) 참고.
@@ -157,8 +157,8 @@ export function computeRepeatedVariableValue(
 // carryHoursPerShift/forcedNeckPosture는 exposure_types에 shoulder_heavy_load 포함 시만,
 // neckNonneutralHoursPerDay/combinedFlexionRotationPosture/precisionWork는
 // awkward_static_neck_load 포함 시만 — 그 외엔 not_applicable). types.ts/shared/contracts/
-// stats.ts의 grain 유니온, grainEntities.ts의 enumerateCervicalTaskEntities,
-// statsDatasetBuilder.ts/statsRecipeValidation.ts/routes/stats.ts 3곳 배선 완료.
+// server/src/stats/routes/router.ts의 grain 유니온, grainEntities.ts의 enumerateCervicalTaskEntities,
+// server/src/stats/dataset/builder.ts/statsRecipeValidation.ts/routes/stats.ts 3곳 배선 완료.
 // PR0-B4 Slice 8a/8b — 80개→116개. Slice 8a: elbow/wrist temporal 4개씩(병합 결과
 // temporalSequence?? temporalRelation 기준 case grain, temporalSequence/temporalRelation
 // 각각은 변수화하지 않음). Slice 8b: job_diagnosis grain 활성화(기존 미지원 grain, 타입/
@@ -168,7 +168,7 @@ export function computeRepeatedVariableValue(
 // 공통 필드 14개씩(selectedBkType·mainTaskName·directAnatomicLink·exposureType 3종·
 // repetitionLevel·forceLevel·awkwardPostureLevel·workPattern·restDistribution·
 // dailyExposureHours·shiftSharePercent·daysPerWeek) 등록, BK 분기 전용 필드는 Slice 8c로
-// 보류. statsDatasetBuilder.ts/statsRecipeValidation.ts/routes/stats.ts에 job_diagnosis
+// 보류. server/src/stats/dataset/builder.ts/statsRecipeValidation.ts/routes/stats.ts에 job_diagnosis
 // 배선 완료(ALL_GRAINS에는 PR0-B3부터 이미 있었음 — SUPPORTED_GRAINS_SET만 추가).
 // 9차 검토(Slice 8a/8b 리뷰) 결함 수정 — 키 개수는 그대로지만 추출 결과값이 바뀌어
 // 캐시된 실행 다이제스트 무효화가 필요하다: enumerateJobDiagnosisEntities가 ':' 포함
@@ -225,7 +225,7 @@ export function computeRepeatedVariableValue(
 // careerMonths,evalMethod} 3개 삭제. 카탈로그 65개(person 7/case 24/job 19/disease 15) +
 // 서버 전용 meta 2개(통합 카탈로그 67개). person/case↔job/disease 방향(그리고 person↔case
 // 상호간)으로 브로드캐스트 안전 변수(quasi_identifier·high_cardinality 제외) 선택 허용 —
-// statsRecipeValidation.ts/statsDatasetBuilder.ts/CatalogPanel.jsx/RecipePanel.jsx가
+// server/src/stats/recipe/validation.ts/statsDatasetBuilder.ts/CatalogPanel.jsx/RecipePanel.jsx가
 // analytics-core/common.ts의 isGrainCompatible을 공유.
 //
 // person grain 삭제(PR0-B4 후속, v20 대비) — v20에서 활성화했던 person grain을 다시
@@ -304,7 +304,7 @@ export function computeRepeatedVariableValue(
 // (analytics-core 83, 통합 85). 옛 key는 UNKNOWN_VARIABLE로 거부하고 클라이언트가 안내한다(자동 치환 없음).
 export const CATALOG_VERSION = 'v31-knee-load-weighted-cumulative';
 
-// PR4-B2 — outcome 명세(계획서 §2단계). 서버 검증(statsRecipeValidation.ts)과 클라이언트
+// PR4-B2 — outcome 명세(계획서 §2단계). 서버 검증(server/src/stats/recipe/validation.ts)과 클라이언트
 // 선택지(RecipePanel.jsx, 카탈로그 DTO의 predictionOutcomeLevels/predictionEventLevels)가
 // 공유하는 단일 진실원이다. getCategoricalOrder에는 등록하지 않는다(association의
 // 기준레벨·이변량 축 순서에 영향 주지 않는다 — association 동작 불변 원칙).

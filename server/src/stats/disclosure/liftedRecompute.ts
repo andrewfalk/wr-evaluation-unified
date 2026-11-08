@@ -1,0 +1,150 @@
+// 제한데이터(stats.export_limited_rows) 권한자 응답 시점 해제 — 기술통계 외 "조회 시 재계산" 모드(현재 회귀).
+//
+// 기술통계(stats/disclosure/descriptiveUnrestricted.ts)와 같은 원칙이다: 집계 결과(stats_runs.result, 캐시)는 그대로 두고
+// 응답 직전에 원본 행(ctx.dataset)으로 소수 셀(1~9명) 게이트만 끈 컨텍스트(deriveLiftedContext)를 만들어 다시
+// 계산한다. 해제된 수치는 절대 저장하지 않는다. 락·memo·오류→unavailable_* 매핑은 resolveUnrestricted를 그대로 쓴다.
+//
+// 통계적 계산 가능 조건(완전사례 수, 분산 0, EPV, rank 등)은 lifted 컨텍스트에서도 그대로 판정된다 —
+// 소수 인원 때문에 가려졌던 결과가 풀리면 계산 가능 여부에 따라 추정 결과 또는 non_estimable 사유가 나온다.
+import type { Pool } from 'pg';
+import { isDeepStrictEqual } from 'node:util';
+import type { AnalyzeBivariateResult, AnalyzeResult } from '@wr/contracts';
+import config from '../../config';
+import { hasCapability } from '../../middleware/requireCapability';
+import { deriveLiftedContext, type AnalysisContext } from '../recipe/analysisContext';
+import {
+  resolveUnrestricted,
+  UnrestrictedUnavailable,
+  type UnrestrictedOutcome,
+} from './descriptiveUnrestricted';
+import { computeRegressionAnalyzeResult } from './regressionSuppression';
+import { computeBivariateAnalyzeResult } from './bivariateSuppression';
+import { computeAvailableMethods } from '../catalog/methodCatalog';
+import { METHOD_POLICY_VERSION } from '../queue/executionDigest';
+
+/**
+ * 저장된 집계 결과에서 실제로 "풀 것이 있는" 실행인가. 풀 것이 없는데 재계산하면 엔진을 낭비하고
+ * 일반 응답과 같은 결과에 '해제됨' 표시만 붙는다.
+ * - 회귀: 공개통제 ③이 닫혀 suppressed 스텁으로 저장된 실행만. ③을 통과한 실행은 결과 자체에 가려진 값이 없다.
+ * 기술통계는 기존 경로(resolveUnrestrictedDescriptive)가 별도로 처리하므로 여기서 다루지 않는다.
+ */
+export function isLiftApplicable(analysisMode: string, aggregate: AnalyzeResult): boolean {
+  if (analysisMode === 'regression') return aggregate.regression?.suppressed === true;
+  if (analysisMode === 'bivariate') return isBivariateMasked(aggregate.bivariate);
+  return false;
+}
+
+/**
+ * 저장된 이변량 집계본에 소수 셀 때문에 가려진 부분이 있는가. 전체 억제 스텁(그룹/셀·쌍 게이트·Python 계산 불가)뿐 아니라
+ * 공개된 결과 안의 부분 가림도 포함한다 — 제외 사유 상세(exclusions=null), 그룹별 이상치 수 생략, 산점도 그리드 생략.
+ * 이 중 어느 것도 없으면 해제해도 같은 결과이므로 엔진을 다시 돌리지 않는다.
+ */
+function isBivariateMasked(b: AnalyzeBivariateResult | undefined): boolean {
+  if (!b) return false;
+  if (b.suppressed) return true;
+  if (b.exclusions === null) return true;
+  if (b.groupBreakdown?.some((g) => g.boxplot !== undefined && g.boxplot.outlierCount === undefined)) return true;
+  if (b.scatter !== undefined && b.scatter.grid === undefined) return true;
+  return false;
+}
+
+/** restricted 컨텍스트에서 소수 셀(1~9명) 게이트 때문에 "가려진 것"이 있는가. 가려진 게 없으면 해제해도 같은 결과다. */
+function isRestrictedMasked(ctx: AnalysisContext): boolean {
+  if (ctx.recipe.analysisMode === 'regression') return ctx.requestSuppressed || !ctx.regressionDisclosed;
+  // 상관행렬: 미리보기에서 보이는 가림은 전체 N<10으로 availableMethods가 비는 것뿐이다. 쌍별 가림은 분석 응답의 셀에만 나타나며
+  // 실행 시 저장해 둔 해제본(stats/disclosure/storedLimited.ts)이 처리한다.
+  if (ctx.recipe.analysisMode === 'correlation_matrix') return ctx.requestSuppressed;
+  // 예측: 공개통제 ②(소수 집단·제외 집합·전체 N<10)가 닫히면 미리보기가 억제되고 방법 목록이 비어 실행 버튼이 잠긴다.
+  if (ctx.recipe.analysisMode === 'prediction') return ctx.requestSuppressed || !ctx.predictionDisclosed;
+  if (ctx.recipe.analysisMode === 'bivariate') {
+    if (ctx.requestSuppressed || !ctx.pairDisclosed || !ctx.paired) return true;
+    // 쌍 게이트를 통과해도 A-2(브레이크다운 청결도)가 방법별 세부 사유를 가려 'available'로 두었을 수 있다 —
+    // 해제 기준으로 다시 판정한 목록이 다르면 권한자에게는 진짜 사유가 보여야 한다.
+    const [keyX, keyY] = ctx.recipe.variableKeys;
+    const liftedMethods = computeAvailableMethods(keyX, keyY, ctx.catalogByKey, ctx.paired, METHOD_POLICY_VERSION, { lifted: true });
+    return !isDeepStrictEqual(liftedMethods, ctx.availableMethods);
+  }
+  return false;
+}
+
+/**
+ * 미리보기(와 이후 PR의 실행 가능성 판정·admission)가 쓰는 "유효 컨텍스트".
+ * 공개 게이트가 닫히면 availableMethods가 비어 있어(stats/recipe/analysisContext.ts) 권한자도 실행 가능 여부를 알 수 없다.
+ * 권한자이고 풀 것이 있으면 소수 셀 게이트를 끈 컨텍스트를 돌려주고, 아니면 입력 ctx를 그대로 돌려준다.
+ * 권한 조회(DB 1회)는 가려진 것이 실제로 있을 때만 한다 — 대부분의 요청은 조회 없이 끝난다.
+ * differencing(forceSuppress)은 풀지 않는다. 기술통계는 기존 경로(stats/routes/router.ts liftPossible)가 처리한다.
+ */
+export async function resolveEffectiveContext(
+  pool: Pool,
+  ctx: AnalysisContext,
+): Promise<{ ctx: AnalysisContext; lifted: boolean }> {
+  if (ctx.differencing.forceSuppress || !isRestrictedMasked(ctx)) return { ctx, lifted: false };
+  if (!(await hasCapability(pool, 'stats.export_limited_rows', ctx.userId, ctx.orgId))) return { ctx, lifted: false };
+  const built = deriveLiftedContext(ctx);
+  if (!built.ok) return { ctx, lifted: false };
+  return { ctx: built.ctx, lifted: true };
+}
+
+/**
+ * 해제된 응답에 권한자용 원시 필드(회귀 점별 진단 등)를 붙일 때 쓸 컨텍스트. 제한 컨텍스트는 공개통제가 닫혀 있어
+ * regressionDesign이 null이라 진단이 항상 unavailable_computation_failed가 된다 — 해제본을 만든 것과 같은
+ * 해제 컨텍스트로 부착해야 한다. memo hit에서도 해제 결과만 있고 컨텍스트는 없으므로 여기서 다시 만든다.
+ */
+export function liftedContextOrSelf(ctx: AnalysisContext): AnalysisContext {
+  const built = deriveLiftedContext(ctx);
+  return built.ok ? built.ctx : ctx;
+}
+
+async function computeLifted(
+  ctx: AnalysisContext,
+  aggregate: AnalyzeResult,
+  signal: AbortSignal | undefined,
+): Promise<AnalyzeResult> {
+  const built = deriveLiftedContext(ctx);
+  // 입력상한 초과는 gate와 무관하게 restricted에서도 같은 값으로 걸렸을 것이므로 정상 경로에서는 도달하지 않는다.
+  if (!built.ok) throw new UnrestrictedUnavailable('unavailable_input_too_large');
+  const lifted = built.ctx;
+
+  // 실행 가능성 가드 — 이 검사는 POST 핸들러(METHOD_NOT_AVAILABLE)에만 있고 compute* 함수는 다시 하지 않는다.
+  // restricted에서는 소수 셀 때문에 availableMethods가 비거나 세부 사유가 가려져 있었으므로, 해제된 컨텍스트에서
+  // 방법이 실제로 실행 가능한지 다시 확인하지 않으면 통계적으로 불가능한 분석을 계산하게 된다.
+  const selected = lifted.availableMethods.find((m) => m.id === lifted.recipe.requestedMethod);
+  const executable = selected != null && (selected.status === 'available' || selected.status === 'conditional');
+  if (lifted.recipe.analysisMode === 'bivariate') {
+    // 이변량은 실행 불가여도 폴백이 아니라 "사유가 붙은 억제 결과"를 해제본으로 보낸다 — 소수 인원 보호가 풀린 뒤 남은
+    // 이유(반복측정, 그룹 수 등)를 권한자가 알아야 하기 때문이다. 쌍 게이트/설계가 없는 것은 호출 순서 위반.
+    if (!lifted.pairDisclosed || !lifted.paired) throw new UnrestrictedUnavailable('unavailable_method_not_executable');
+    const method = lifted.recipe.requestedMethod!; // validateRecipe(analyze)가 이미 보장
+    if (!executable) {
+      const unavailableReason = selected?.reasonCode ?? undefined;
+      return { ...aggregate, bivariate: { method, suppressed: true, ...(unavailableReason ? { unavailableReason } : {}) } };
+    }
+    const bivariate = await computeBivariateAnalyzeResult(lifted, { timeoutMs: config.stats.timeoutMs, signal });
+    return { ...aggregate, bivariate };
+  }
+  if (!executable) throw new UnrestrictedUnavailable('unavailable_method_not_executable');
+  // 방법이 실행 가능으로 보여도 설계행렬이 없으면 compute*가 결함 오류를 던져 500이 된다(예: 지원하지 않는 outcome 타입으로
+  // regressionMethod가 null). 예상된 폴백으로 처리한다.
+  if (lifted.recipe.analysisMode === 'regression' && (!lifted.regressionDisclosed || !lifted.regressionDesign)) {
+    throw new UnrestrictedUnavailable('unavailable_method_not_executable');
+  }
+
+  if (lifted.recipe.analysisMode === 'regression') {
+    const regression = await computeRegressionAnalyzeResult(lifted, { timeoutMs: config.stats.timeoutMs, signal });
+    return { ...aggregate, regression };
+  }
+  throw new Error(`statsLiftedRecompute: 지원하지 않는 analysisMode=${lifted.recipe.analysisMode} — 호출 순서 위반`);
+}
+
+/**
+ * 호출 전에 호출부가 (1) 조회자의 stats.export_limited_rows 권한 (2) isLiftApplicable (3) !forceSuppress를
+ * 확인해야 한다. memo는 권한 검사 "뒤에" 조회한다.
+ */
+export async function resolveLiftedRecompute(
+  ctx: AnalysisContext,
+  aggregate: AnalyzeResult,
+  executionDigest: string,
+  signal?: AbortSignal,
+): Promise<UnrestrictedOutcome> {
+  return resolveUnrestricted(ctx.userId, executionDigest, signal, () => computeLifted(ctx, aggregate, signal));
+}

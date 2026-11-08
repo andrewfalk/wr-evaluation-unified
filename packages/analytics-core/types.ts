@@ -74,7 +74,7 @@ export interface AnalyticsVariableMetadata {
   // 이관 시 안 써도 돼서 빠졌다. spine.mddm부터 실제로 필요(§2.3, modules.spine.formulaVersion).
   formulaVersionKey?: string;
   // PR0-B3 Part C — 필터 전용 변수 계약. 미지정이면 'analyzable'로 취급한다(shared/contracts/
-  // stats.ts의 CatalogVariableSchema와 동일한 기본값 — 서버 DTO 변환(toCatalogVariableDto)이
+  // server/src/stats/routes/router.ts의 CatalogVariableSchema와 동일한 기본값 — 서버 DTO 변환(toCatalogVariableDto)이
   // 두 곳을 일치시킨다). 등록일처럼 분석 변수로는 부적절하지만(date 타입 — 기술통계 예외
   // 경로에 걸림) 필터로는 유용한 변수에 쓴다.
   analysisRole?: 'analyzable' | 'filter_only';

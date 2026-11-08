@@ -129,7 +129,7 @@ def _ms(start: float, end: float) -> float:
 
 
 def _emit_timing(marks: dict[str, float], mode: str) -> None:
-    """STATS_ENGINE_TIMING {...} 한 줄. Node(statsEngine.ts)가 정상 종료 때만 읽는다.
+    """STATS_ENGINE_TIMING {...} 한 줄. Node(stats/engine/index.ts)가 정상 종료 때만 읽는다.
     processStartWallMs는 벽시계(Node spawn 시각과 비교해 인터프리터 기동 시간을 구함),
     나머지는 단조 시계 구간."""
     timing = {
