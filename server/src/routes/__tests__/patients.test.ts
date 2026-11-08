@@ -1495,6 +1495,7 @@ describe('DELETE /api/patients/:id', () => {
       { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },    // lockPatientAnchor
       { rows: [], rowCount: 1 },              // UPDATE patient (soft-delete succeeds)
       { rows: [] },                           // UPDATE workspaces (snapshot redaction)
+      { rows: [] },                           // UPDATE autosaves (remove the patient, SEC-B L12)
       { rows: [] },                           // DELETE patient_locks (cleanup)
       { rows: [] },                           // COMMIT
     );
@@ -1518,6 +1519,14 @@ describe('DELETE /api/patients/:id', () => {
     expect(redactSql).toContain('EXISTS');
     expect(redactSql).not.toContain('patient_ids @>');
     expect((redactCall![1] as unknown[])[1]).toBe(PAT_ID); // $2 = patient id
+
+    // SEC-B L12: the patient is also dropped from autosave snapshots, in the same transaction
+    // (after the soft-delete, before COMMIT).
+    const sqls = (cq.mock.calls as unknown[][]).map(c => String(c[0]));
+    const autosaveIdx = sqls.findIndex(s => s.includes('UPDATE autosaves'));
+    expect(autosaveIdx).toBeGreaterThan(sqls.findIndex(s => s.includes('SET deleted_at')));
+    expect(autosaveIdx).toBeLessThan(sqls.findIndex(s => /^\s*COMMIT/.test(s)));
+    expect((cq.mock.calls as unknown[][])[autosaveIdx][1]).toEqual([ORG_ID, PAT_ID]);
   });
 
   it('issues soft-delete UPDATE with correct id, org, and revision', async () => {
@@ -1527,6 +1536,7 @@ describe('DELETE /api/patients/:id', () => {
       { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },    // lockPatientAnchor
       { rows: [], rowCount: 1 },              // UPDATE patient
       { rows: [] },                           // UPDATE workspaces
+      { rows: [] },                           // UPDATE autosaves
       { rows: [] },                           // DELETE patient_locks (cleanup)
       { rows: [] },                           // COMMIT
     );
@@ -1649,7 +1659,7 @@ describe('DELETE /api/patients/:id — 권한 정책', () => {
     makeClientSetup(pool, { withAccessCheck: { assigned: USER_ID } },
       { rows: [] },
       { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] }, // lockPatientAnchor
-      { rows: [], rowCount: 1 }, { rows: [] }, { rows: [] }, { rows: [] },
+      { rows: [], rowCount: 1 }, { rows: [] }, { rows: [] }, { rows: [] }, { rows: [] }, // soft-delete, workspaces, autosaves, lock, COMMIT
     );
     const res = await request(makeApp(pool))
       .delete(`/api/patients/${PAT_ID}?revision=1`)
@@ -1674,7 +1684,7 @@ describe('DELETE /api/patients/:id — 권한 정책', () => {
     makeClientSetup(pool,
       { rows: [] },
       { rows: [{ id: PAT_ID, assigned_doctor_user_id: DOCTOR_ID }] }, // lockPatientAnchor — admin은 담당의 무관 통과
-      { rows: [], rowCount: 1 }, { rows: [] }, { rows: [] }, { rows: [] },
+      { rows: [], rowCount: 1 }, { rows: [] }, { rows: [] }, { rows: [] }, { rows: [] }, // soft-delete, workspaces, autosaves, lock, COMMIT
     );
     const res = await request(makeApp(pool))
       .delete(`/api/patients/${PAT_ID}?revision=1`)
@@ -2386,6 +2396,7 @@ describe('DELETE /api/patients/:id — person 해제', () => {
       { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },   // anchor FOR UPDATE
       { rows: [{ patient_person_id: PERSON_ID }], rowCount: 1 },      // soft-delete RETURNING
       { rows: [] },                                                  // workspace redaction
+      { rows: [] },                                                  // autosave cleanup
       { rows: [] },                                                  // delete lock
       { rows: [{ id: PERSON_ID }] },                                 // person SELECT FOR UPDATE
       personRelease,                                                 // person soft-delete

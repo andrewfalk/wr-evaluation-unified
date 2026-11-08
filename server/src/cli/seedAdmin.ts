@@ -4,13 +4,16 @@
  *
  * Usage:
  *   npm run server:seed:admin
+ *   node dist/cli/seedAdmin.js [--force]
  *
  * Prompts for organization, login_id, and password via stdin so credentials
  * are never stored in shell history. Sets must_change_password=true so the
  * admin is forced to set a new password on first login.
  *
  * Safe to run on an existing DB: aborts if a user with the given login_id
- * already exists.
+ * already exists. In production (NODE_ENV=production) it refuses before asking
+ * anything when any admin account already exists, unless --force is given
+ * (SEC-B L12, see seedAdminGuard.ts).
  */
 
 import readline from 'readline';
@@ -18,6 +21,7 @@ import fs from 'fs';
 import bcrypt from 'bcrypt';
 import pg from 'pg';
 import { checkPasswordPolicy } from '../auth/passwordPolicy';
+import { parseSeedAdminArgs, seedAdminRefusal } from './seedAdminGuard';
 
 const BCRYPT_ROUNDS = 12;
 
@@ -72,6 +76,22 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const args = parseSeedAdminArgs(process.argv.slice(2));
+  if ('error' in args) {
+    console.error(`ERROR: ${args.error}`);
+    process.exit(2);
+  }
+
+  // Connect first so the production guard runs before any question is asked.
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  const refusal = await seedAdminRefusal(client, { nodeEnv: process.env.NODE_ENV, force: args.force });
+  if (refusal) {
+    console.error(`ERROR: ${refusal}`);
+    await client.end();
+    process.exit(1);
+  }
+
   const scriptedAnswers = !process.stdin.isTTY
     ? fs.readFileSync(0, 'utf-8').split(/\r?\n/)
     : null;
@@ -116,9 +136,6 @@ async function main(): Promise<void> {
     const name = (await ask('Display name (e.g. 시스템 관리자): ')).trim() || '시스템 관리자';
 
     rl.close();
-
-    const client = new pg.Client({ connectionString: databaseUrl });
-    await client.connect();
 
     try {
       await client.query('BEGIN');
@@ -177,4 +194,7 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+main().catch((err) => {
+  console.error('ERROR:', err);
+  process.exit(1);
+});

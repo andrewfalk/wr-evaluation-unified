@@ -443,7 +443,7 @@ docker compose -p wr-prod exec postgres \
 |---|---|---|
 | AUDIT_DB_PASSWORD | audit_reader 연결 성공 | node 확인 명령 출력 |
 | seedAdmin 성공 | `must_change_password = t` | users 쿼리 |
-| seedAdmin 멱등성 | 재실행 시 "already exists" abort | 콘솔 출력 |
+| seedAdmin 멱등성 | 재실행 시 "already exists" abort(7.2.0부터 운영에서는 관리자 계정이 있으면 입력 전에 거부, `--force`로만 진행) | 콘솔 출력 |
 | 첫 로그인 | `mustChangePassword: true` 수신 | 브라우저/API |
 | 비밀번호 변경 | `must_change_password = f` | users 쿼리 |
 | audit log | `auth_login`, `auth_change_password` 기록 | audit_logs 쿼리 |

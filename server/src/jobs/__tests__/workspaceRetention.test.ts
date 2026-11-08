@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runWorkspaceRetention } from '../workspaceRetention';
+import { countExpiredWorkspaces, runWorkspaceRetention } from '../workspaceRetention';
 import { createFakePool, sequenceHandler, type FakePool, type FakeQueryReply } from '../../testing/fakePool';
 
 // 기존 mockResolvedValueOnce 큐(호출 순서) → sequenceHandler. 응답이 없으면 어떤 쿼리도 받지 않는다.
@@ -49,5 +49,21 @@ describe('runWorkspaceRetention', () => {
     await expect(runWorkspaceRetention(fake.pool, 1.5)).rejects.toThrow('retentionYears must be a positive integer');
     // DB should never have been called
     expect(fake.calls).toHaveLength(0);
+  });
+});
+
+describe('countExpiredWorkspaces (CLI --dry-run, SEC-B L12)', () => {
+  it('counts with the same condition the delete uses, without deleting', async () => {
+    const fake = retentionFake([{ rows: [{ n: 7 }] }]);
+    expect(await countExpiredWorkspaces(fake.pool)).toBe(7);
+    const { sql, params } = fake.calls[0]!;
+    expect(sql).toContain('SELECT count(*)::int AS n FROM workspaces');
+    expect(sql).not.toContain('DELETE');
+    expect(sql).toContain(`created_at < now() - ($1 || ' years')::INTERVAL`);
+    expect(params[0]).toBe(5);
+  });
+
+  it('rejects a non-positive retention like the delete does', async () => {
+    await expect(countExpiredWorkspaces(retentionFake().pool, 0)).rejects.toThrow('retentionYears must be a positive integer');
   });
 });

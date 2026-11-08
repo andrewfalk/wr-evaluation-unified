@@ -962,7 +962,8 @@ async function patchPatient(pool: Pool, req: Request, res: Response): Promise<vo
 // DELETE /api/patients/:id?revision=N
 // Soft-delete (sets deleted_at). Within the same transaction, redacts the
 // deleted patient's PHI from every workspace snapshot in this org so that
-// { id, redacted: true } stubs remain without exposing name/birth_date/etc.
+// { id, redacted: true } stubs remain without exposing name/birth_date/etc.,
+// and removes the patient from autosave snapshots (SEC-B L12).
 // Returns 409 on revision mismatch.
 // ---------------------------------------------------------------------------
 async function deletePatient(pool: Pool, req: Request, res: Response): Promise<void> {
@@ -1050,6 +1051,28 @@ async function deletePatient(pool: Pool, req: Request, res: Response): Promise<v
          AND jsonb_typeof(snapshot_payload) = 'array'
          AND EXISTS (
            SELECT 1 FROM jsonb_array_elements(snapshot_payload) AS p
+           WHERE (p->>'id') = $2 OR (p->'sync'->>'serverId') = $2
+         )`,
+      [orgId, id]
+    );
+
+    // Remove the deleted patient from autosave snapshots too (SEC-B L12). An autosave is a crash-recovery
+    // copy of a user's open patient list, restored as is — a { redacted } stub would come back as a
+    // broken patient, so the entry is dropped instead (the workspace stub exists for its UI notice).
+    // Same match as above (local id or sync.serverId), no reliance on any id index. Rows of users whose
+    // organization was removed (organization_id NULL) are included: patient ids are UUIDs, so only this
+    // patient's entries can match. saved_at is left as is.
+    await client.query(
+      `UPDATE autosaves
+       SET payload = COALESCE((
+         SELECT jsonb_agg(p ORDER BY ord)
+         FROM jsonb_array_elements(payload) WITH ORDINALITY AS e(p, ord)
+         WHERE NOT ((p->>'id') IS NOT DISTINCT FROM $2 OR (p->'sync'->>'serverId') IS NOT DISTINCT FROM $2)
+       ), '[]'::jsonb)
+       WHERE (organization_id = $1 OR organization_id IS NULL)
+         AND jsonb_typeof(payload) = 'array'
+         AND EXISTS (
+           SELECT 1 FROM jsonb_array_elements(payload) AS p
            WHERE (p->>'id') = $2 OR (p->'sync'->>'serverId') = $2
          )`,
       [orgId, id]

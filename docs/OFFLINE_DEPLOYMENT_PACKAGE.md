@@ -481,6 +481,8 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml \
   exec -it app node dist/cli/seedAdmin.js
 ```
 
+7.2.0부터 관리자 계정이 이미 있는 DB에서는 이 명령이 묻기 전에 거부합니다(최초 1회용). 추가 계정은 관리자 콘솔에서 만들고, 꼭 필요할 때만 `--force`를 붙입니다.
+
 화면의 안내에 따라 입력합니다:
 - 병원/기관명
 - 로그인 ID (예: `wradmin`)
