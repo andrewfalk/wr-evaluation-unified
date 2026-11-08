@@ -3,6 +3,8 @@
 // (checked here against the real index — a fake pool cannot), and approval/rejection record the
 // reviewing admin's organization, which then scopes the admin list. Runs in the integration project.
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import bcrypt from 'bcrypt';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
@@ -130,6 +132,33 @@ describe.skipIf(!TEST_DB_URL)('signup requests (real PostgreSQL, SEC-B L4)', () 
     expect(await listIds(adminA)).toContain(pending.id);
     expect(await listIds(adminB)).not.toContain(pending.id);
     expect(await listIds(superAdmin)).toContain(pending.id);
+  });
+
+  it('migration 0041 backfills requests reviewed before it from the reviewer organization', async () => {
+    const adminAId = (await pool.query<{ id: string }>(`SELECT id FROM users WHERE login_id = $1`, [adminA.loginId])).rows[0].id;
+    const superId = (await pool.query<{ id: string }>(`SELECT id FROM users WHERE login_id = $1`, [superAdmin.loginId])).rows[0].id;
+    // Rows as they were before 0041: reviewed, organization_id NULL.
+    const legacy = (await pool.query<{ id: string }>(
+      `INSERT INTO user_signup_requests (login_id, name, requested_role, status, reviewed_by, reviewed_at)
+       VALUES ($1, '옛 승인', 'doctor', 'approved', $2, now()) RETURNING id`,
+      [`sr_${tag}_legacy`, adminAId],
+    )).rows[0].id;
+    const legacySuper = (await pool.query<{ id: string }>(
+      `INSERT INTO user_signup_requests (login_id, name, requested_role, status, reviewed_by, reviewed_at)
+       VALUES ($1, '옛 슈퍼 거절', 'doctor', 'rejected', $2, now()) RETURNING id`,
+      [`sr_${tag}_legacy_super`, superId],
+    )).rows[0].id;
+
+    // Re-run the migration file (idempotent) — the same SQL the runner applied.
+    await pool.query(fs.readFileSync(path.resolve(__dirname, '../../../migrations/0041_signup_request_organization.sql'), 'utf8'));
+
+    expect((await requestRows(`sr_${tag}_legacy`))[0].organization_id).toBe(orgIds[0]);
+    expect((await requestRows(`sr_${tag}_legacy_super`))[0].organization_id).toBeNull();
+    const listIds = async (a: Admin) => (await asAdmin(a, request(app()).get('/api/admin/signup-requests?status=approved')))
+      .body.requests.map((r: { id: string }) => r.id);
+    expect(await listIds(adminA)).toContain(legacy);
+    expect(await listIds(adminB)).not.toContain(legacy);
+    expect(legacySuper).toBeTruthy();
   });
 
   it("an organization admin cannot reject another organization's reviewed request (404)", async () => {

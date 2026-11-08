@@ -8,6 +8,17 @@
 ALTER TABLE user_signup_requests
   ADD COLUMN IF NOT EXISTS organization_id UUID NULL REFERENCES organizations(id) ON DELETE SET NULL;
 
+-- 이미 처리된 기존 행은 처리한 관리자(reviewed_by)의 조직으로 채운다. 채우지 않으면 미배정(NULL)으로
+-- 남아 모든 조직 관리자에게 계속 보인다. 슈퍼관리자가 처리한 행은 지금 규칙과 같이 NULL로 남는다.
+-- 다시 돌려도 결과가 같다(이미 채운 행은 건드리지 않음).
+UPDATE user_signup_requests r
+   SET organization_id = u.organization_id
+  FROM users u
+ WHERE r.reviewed_by = u.id
+   AND r.status <> 'pending'
+   AND r.organization_id IS NULL
+   AND u.organization_id IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_signup_requests_organization_id
   ON user_signup_requests (organization_id);
 
