@@ -102,7 +102,7 @@ const WORST_CASE_METHOD_FOR_BYTE_ESTIMATE = 'spearman_correlation' as const;
 
 /** §8 "상한 검사는 C(k,2) 순회 시작 전에" — 세 상한(변수당 개수/총 개수/직렬화
  * 바이트)을 전부 buildCorrelationMatrixPairedDatasets() 호출 전에 확인한다.
- * 검사 순서는 stats/engine/index.ts의 assertCorrelationMatrixWithinLimits()와 동일
+ * 검사 순서는 stats/engine/limits.ts의 assertCorrelationMatrixWithinLimits()와 동일
  * (변수당 → 총합 → 바이트) — 그쪽은 실제 Python spawn 직전의 최종 안전망으로
  * 그대로 남겨두고, 이 함수는 preview까지 포함해 훨씬 이른 시점에 같은 상한을
  * 선제 적용한다. 통과 시 만들어둔 variables를 반환해 호출자가 재사용하게 한다

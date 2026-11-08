@@ -42,7 +42,7 @@ export function evaluateRegressionInputLimits(
   // 바이트 추정은 실제 설계행렬(더미 확장 후) 조립 시점에 한다 — 값 형태가
   // 아직 정해지지 않은 이 단계에서 정확한 바이트 수를 알 수 없다. §2 ④에서
   // 실제 payload 크기를 config.stats.maxInputBytes와 다시 대조하고, 마지막
-  // 안전망은 stats/engine/index.ts의 assertRegressionWithinLimits(Python spawn 직전).
+  // 안전망은 stats/engine/limits.ts의 assertRegressionWithinLimits(Python spawn 직전).
   return { ok: true };
 }
 
