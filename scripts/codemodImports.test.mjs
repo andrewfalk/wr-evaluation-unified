@@ -115,8 +115,51 @@ describe('codemod-imports', () => {
     expect(r.code).toBe(1);
     expect(r.out).toContain("AMBIGUOUS");
     expect(r.out).toContain("src/routes/app.ts: './config'");
-    expect(read(dir, 'src/routes/app.ts')).toContain("import config from './config'");
-    expect(read(dir, 'src/routes/app.ts')).toContain("from './sibling'"); // the unambiguous one is fixed
+    // The whole file is held back while it has an ambiguity (Codex R7) — even the path that could be fixed.
+    expect(read(dir, 'src/routes/app.ts')).toBe("import config from './config';\nimport { gone } from './old-sibling';\n");
+    // Once a person resolves the ambiguous one, the rest is fixed on the next run.
+    fs.writeFileSync(path.join(dir, 'src/routes/app.ts'), "import config from '../config';\nimport { gone } from './old-sibling';\n");
+    const again = run(dir, { 'src/app.ts': 'src/routes/app.ts', 'src/old-sibling.ts': 'src/routes/sibling.ts' });
+    expect(again.code).toBe(0);
+    expect(read(dir, 'src/routes/app.ts')).toContain("from './sibling'");
+  });
+
+  it('an ambiguity holds the file and its record back, so the next run reports it again (Codex R7)', () => {
+    const dir = repo({
+      'src/lib.ts': 'export const v = "root lib";\n',
+      'src/old.ts': 'export const v = "moved";\n',
+      'src/tests/test.ts': "import { v } from '../old';\n",
+    });
+    const moves = { 'src/old.ts': 'src/feature/lib/index.ts', 'src/tests/test.ts': 'src/feature/deep/test.ts' };
+    expect(run(dir, moves, '--apply-moves').code).toBe(0);
+    const t = 'src/feature/deep/test.ts';
+    expect(read(dir, t)).toContain("from '../lib'");
+    // A rebased branch adds '../lib' meaning src/lib.ts (from the old src/tests/) and a src/feature/lib.ts.
+    fs.writeFileSync(path.join(dir, t), read(dir, t) + "import { v as rootV } from '../lib';\n");
+    fs.writeFileSync(path.join(dir, 'src/feature/lib.ts'), 'export const v = "feature lib";\n');
+    const before = read(dir, t);
+    const recBefore = read(dir, 'moves.applied.json');
+    for (let i = 0; i < 2; i++) {
+      const r = run(dir, moves);
+      expect(r.code, `run ${i + 1}`).toBe(1);
+      expect(read(dir, t)).toBe(before);
+      expect(read(dir, 'moves.applied.json')).toBe(recBefore);
+    }
+  });
+
+  it('a file that did not move records the paths it got rewritten, and their targets are checked later (Codex R7)', () => {
+    const dir = repo({
+      'src/old.ts': 'export const value = "moved";\n',
+      'src/app.ts': "import { value } from './old';\n",
+    });
+    const moves = { 'src/old.ts': 'src/lib/index.ts' };
+    expect(run(dir, moves, '--apply-moves').code).toBe(0);
+    expect(read(dir, 'src/app.ts')).toContain("from './lib'");
+    expect(JSON.parse(read(dir, 'moves.applied.json'))['src/app.ts']).toEqual({ 'm:./lib': { n: 1, target: 'src/lib/index.ts' } });
+    fs.writeFileSync(path.join(dir, 'src/lib.ts'), 'export const value = "other";\n');
+    const r = run(dir, moves);
+    expect(r.code).toBe(0);
+    expect(read(dir, 'src/app.ts')).toContain("from './lib/index'");
   });
 
   it('after a rebase, a moved file whose only import now resolves to a different pre-existing file is reported (Codex R2)', () => {

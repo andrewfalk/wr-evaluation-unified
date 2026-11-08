@@ -1,4 +1,44 @@
 {
+ "server/src/app.ts": {
+  "m:./stats/routes/router": {
+   "n": 1,
+   "target": "server/src/stats/routes/router.ts"
+  }
+ },
+ "server/src/http/errors.ts": {
+  "m:../stats/engine": {
+   "n": 1,
+   "target": "server/src/stats/engine/index.ts"
+  },
+  "m:../stats/engine/errorMapping": {
+   "n": 1,
+   "target": "server/src/stats/engine/errorMapping.ts"
+  }
+ },
+ "server/src/http/__tests__/errors.test.ts": {
+  "m:../../stats/engine": {
+   "n": 1,
+   "target": "server/src/stats/engine/index.ts"
+  }
+ },
+ "server/src/index.ts": {
+  "m:./stats/queue/runsQueue": {
+   "n": 1,
+   "target": "server/src/stats/queue/runsQueue.ts"
+  }
+ },
+ "server/src/middleware/__tests__/requireCapability.test.ts": {
+  "m:../../stats/policy/workbenchRuntimeState": {
+   "n": 1,
+   "target": "server/src/stats/policy/workbenchRuntimeState.ts"
+  }
+ },
+ "server/src/routes/config.ts": {
+  "m:../stats/policy/workbenchRuntimeState": {
+   "n": 1,
+   "target": "server/src/stats/policy/workbenchRuntimeState.ts"
+  }
+ },
  "server/src/stats/catalog/catalog.ts": {
   "m:../dataset/snapshotColumnVariables": {
    "n": 1,
@@ -23,7 +63,6 @@
    "target": "server/src/stats/policy/inferenceGate.ts"
   }
  },
- "server/src/stats/catalog/version.ts": {},
  "server/src/stats/catalog/__tests__/catalog.test.ts": {
   "m:../../dataset/snapshotColumnVariables": {
    "n": 1,
@@ -128,7 +167,6 @@
    "target": "server/src/stats/dataset/builder.ts"
   }
  },
- "server/src/stats/dataset/personCluster.ts": {},
  "server/src/stats/dataset/predictionCohort.ts": {
   "m:../../canonicalSerializer": {
    "n": 1,
@@ -221,7 +259,6 @@
    "target": "server/src/stats/dataset/snapshot.ts"
   }
  },
- "server/src/stats/dataset/splineBasis.ts": {},
  "server/src/stats/dataset/__tests__/bivariate.test.ts": {
   "m:../bivariate": {
    "n": 1,
@@ -1138,7 +1175,6 @@
    "target": "server/src/stats/disclosure/storedLimited.ts"
   }
  },
- "server/src/stats/engine/engineLimits.ts": {},
  "server/src/stats/engine/errorMapping.ts": {
   "m:.": {
    "n": 1,
@@ -1413,8 +1449,6 @@
    "target": "server/src/stats/routes/router.ts"
   }
  },
- "server/src/stats/policy/inferenceGate.ts": {},
- "server/src/stats/policy/policy.ts": {},
  "server/src/stats/policy/workbenchRuntimeState.ts": {
   "m:../../config": {
    "n": 1,
@@ -1431,7 +1465,6 @@
    "target": "server/src/stats/policy/policy.ts"
   }
  },
- "server/src/stats/queue/analyzeInFlight.ts": {},
  "server/src/stats/queue/executionDigest.ts": {
   "m:../../canonicalSerializer": {
    "n": 1,
@@ -1770,7 +1803,6 @@
    "target": "server/src/stats/disclosure/smallCell.ts"
   }
  },
- "server/src/stats/recipe/ordinalOrder.ts": {},
  "server/src/stats/recipe/validation.ts": {
   "m:../catalog/catalog": {
    "n": 1,
@@ -1903,7 +1935,44 @@
    "target": "server/src/stats/routes/responseAbort.ts"
   }
  },
- "server/src/stats/routes/responseAbort.ts": {},
+ "server/src/stats/routes/catalogPreview.ts": {
+  "m:../catalog/catalog": {
+   "n": 1,
+   "target": "server/src/stats/catalog/catalog.ts"
+  },
+  "m:../catalog/version": {
+   "n": 1,
+   "target": "server/src/stats/catalog/version.ts"
+  },
+  "m:../disclosure/liftedRecompute": {
+   "n": 1,
+   "target": "server/src/stats/disclosure/liftedRecompute.ts"
+  },
+  "m:../disclosure/predictionSuppression": {
+   "n": 1,
+   "target": "server/src/stats/disclosure/predictionSuppression.ts"
+  },
+  "m:../engine": {
+   "n": 1,
+   "target": "server/src/stats/engine/index.ts"
+  },
+  "m:../policy/policy": {
+   "n": 1,
+   "target": "server/src/stats/policy/policy.ts"
+  },
+  "m:../queue/runManifest": {
+   "n": 1,
+   "target": "server/src/stats/queue/runManifest.ts"
+  },
+  "m:../recipe/analysisContext": {
+   "n": 1,
+   "target": "server/src/stats/recipe/analysisContext.ts"
+  },
+  "m:../recipe/estimability": {
+   "n": 1,
+   "target": "server/src/stats/recipe/estimability.ts"
+  }
+ },
  "server/src/stats/routes/router.ts": {
   "m:../../http/asyncHandler": {
    "n": 1,
@@ -1950,7 +2019,36 @@
    "target": "server/src/stats/routes/runs.ts"
   }
  },
- "server/src/stats/routes/__tests__/analyze.integration.test.ts": {},
+ "server/src/stats/routes/runs.ts": {
+  "m:../disclosure/liftedRecompute": {
+   "n": 1,
+   "target": "server/src/stats/disclosure/liftedRecompute.ts"
+  },
+  "m:../disclosure/storedLimited": {
+   "n": 1,
+   "target": "server/src/stats/disclosure/storedLimited.ts"
+  },
+  "m:../queue/runRow": {
+   "n": 1,
+   "target": "server/src/stats/queue/runRow.ts"
+  },
+  "m:../queue/runsQueue": {
+   "n": 1,
+   "target": "server/src/stats/queue/runsQueue.ts"
+  },
+  "m:../recipe/analysisContext": {
+   "n": 1,
+   "target": "server/src/stats/recipe/analysisContext.ts"
+  },
+  "m:./analyzeHandler": {
+   "n": 1,
+   "target": "server/src/stats/routes/analyzeHandler.ts"
+  },
+  "m:./responseAbort": {
+   "n": 1,
+   "target": "server/src/stats/routes/responseAbort.ts"
+  }
+ },
  "server/src/stats/routes/__tests__/bivariateHttp.integration.test.ts": {
   "m:../../../auth/tokenHash": {
    "n": 1,
@@ -2325,6 +2423,16 @@
   "m:../router": {
    "n": 1,
    "target": "server/src/stats/routes/router.ts"
+  }
+ },
+ "server/src/__tests__/checkPredictorVariance.test.ts": {
+  "m:../stats/dataset/builder": {
+   "n": 1,
+   "target": "server/src/stats/dataset/builder.ts"
+  },
+  "m:../stats/dataset/regressionDesign": {
+   "n": 1,
+   "target": "server/src/stats/dataset/regressionDesign.ts"
   }
  }
 }

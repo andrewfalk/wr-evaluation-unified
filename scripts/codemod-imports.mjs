@@ -153,12 +153,18 @@ const files = roots.flatMap((r) => walk(r, [])).map(clean);
 if (writeRecordOnly) {
   const broken = [];
   for (const fileRel of files) {
-    if (!backward.has(fileRel)) continue;
-    const specs = relativeSpecCounts(fs.readFileSync(abs(fileRel), 'utf8'));
+    const all = relativeSpecCounts(fs.readFileSync(abs(fileRel), 'utf8'));
     const dir = path.posix.dirname(fileRel);
-    for (const k of Object.keys(specs)) {
-      const isModule = k.startsWith('m:');
-      if (!resolveCurrent(dir, k.slice(2), isModule)) broken.push(`${fileRel}: ${k.slice(2)}`);
+    let specs = all;
+    if (!backward.has(fileRel)) {
+      // A file that stayed: only its paths into moved files (the ones a move rewrote) are recorded.
+      specs = Object.fromEntries(Object.entries(all).filter(([k]) => backward.has(resolveCurrent(dir, k.slice(2), k.startsWith('m:')))));
+      if (Object.keys(specs).length === 0) continue;
+    } else {
+      for (const k of Object.keys(specs)) {
+        const isModule = k.startsWith('m:');
+        if (!resolveCurrent(dir, k.slice(2), isModule)) broken.push(`${fileRel}: ${k.slice(2)}`);
+      }
     }
     record[fileRel] = recordEntries(dir, specs);
   }
@@ -168,7 +174,7 @@ if (writeRecordOnly) {
     process.exit(1);
   }
   fs.writeFileSync(recordFile, JSON.stringify(record, null, 1) + '\n');
-  console.log(`codemod-imports: recorded ${Object.keys(record).length} moved file(s) in ${norm(path.relative(repo, path.resolve(recordFile)))}`);
+  console.log(`codemod-imports: recorded ${Object.keys(record).length} file(s) in ${norm(path.relative(repo, path.resolve(recordFile)))}`);
   process.exit(0);
 }
 
@@ -184,6 +190,12 @@ for (const fileRel of files) {
   const seen = {}; // occurrences met so far per path — those beyond the recorded count are new
   const leftOpen = {}; // occurrences reported as ambiguous/unresolved — not recorded as verified
   const open = (k) => { leftOpen[k] = (leftOpen[k] ?? 0) + 1; };
+  // Any ambiguity holds the WHOLE file back — no source change and no record change — so running again
+  // meets exactly the same state and reports the same thing until a person fixes it.
+  let held = false;
+  const report = (msg, k) => { ambiguous.push(msg); held = true; open(k); };
+  let fileChanged = 0;
+  const rewrittenTo = {}; // new path text → how many occurrences this run wrote
   let out = src;
   const rewrite = (pattern, isModule) => {
     out = out.replace(pattern, (whole, pre, q, spec) => {
@@ -199,8 +211,7 @@ for (const fileRel of files) {
         const recorded = typeof entry === 'object' ? entry.target : undefined;
         if (!recorded || current === recorded) return whole;
         if (!isTarget(recorded, isModule)) {
-          ambiguous.push(`${fileRel}: '${spec}' → now ${current ?? 'nothing'}, recorded target ${recorded} is gone`);
-          open(key);
+          report(`${fileRel}: '${spec}' → now ${current ?? 'nothing'}, recorded target ${recorded} is gone`, key);
           return whole;
         }
         intended = recorded; // shadowed by a file added since (e.g. lib.ts next to lib/) — point back at it
@@ -213,8 +224,7 @@ for (const fileRel of files) {
       if (current && intended && intended !== current && seen[key] > entryCount(entry)) {
         // Before the move it meant one file, now it resolves to another (e.g. a moved file's './config'
         // now lands on a sibling config.ts, moved in or not) — cannot be decided from the tree: report.
-        ambiguous.push(`${fileRel}: '${spec}' → now ${current}, before the move ${intended}`);
-        open(key);
+        report(`${fileRel}: '${spec}' → now ${current}, before the move ${intended}`, key);
         return whole;
       }
       if (!intended) {
@@ -227,35 +237,46 @@ for (const fileRel of files) {
         // e.g. './lib' would load an existing lib.ts instead of the moved lib/index.ts — keep the index.
         next = relativeSpec(newDir, intended, spec, isModule, true);
         if (resolveCurrent(newDir, next, true) !== intended) {
-          ambiguous.push(`${fileRel}: '${spec}' → no relative path reaches ${intended} unambiguously`);
-          open(key);
+          report(`${fileRel}: '${spec}' → no relative path reaches ${intended} unambiguously`, key);
           return whole;
         }
       }
       const plainSame = !isModule && path.posix.normalize(spec) === path.posix.normalize(next);
       if (next === spec || plainSame) return whole;
-      changedSpecs += 1;
+      fileChanged += 1;
+      const nextKey = recordKey(next, isModule);
+      rewrittenTo[nextKey] = (rewrittenTo[nextKey] ?? 0) + 1;
       return `${pre}${q}${next}${q}`;
     });
   };
   for (const p of MODULE_PATTERNS) rewrite(p, true);
   for (const p of PLAIN_PATTERNS) rewrite(p, false);
+  if (held) continue;
+  changedSpecs += fileChanged;
   if (out !== src) {
     fs.writeFileSync(abs(fileRel), out);
     changedFiles += 1;
   }
+  const counts = relativeSpecCounts(out);
+  let keep;
   if (backward.has(fileRel)) {
-    const verified = recordEntries(newDir, Object.fromEntries(Object.entries(relativeSpecCounts(out))
-      .map(([k, n]) => [k, n - (leftOpen[k] ?? 0)]).filter(([, n]) => n > 0)));
-    // A path left open (ambiguous/unresolved) keeps its previous entry: dropping it would let the next
-    // run accept whatever the path resolves to now (e.g. a lib.ts that replaced a deleted lib/index.ts).
-    for (const k of Object.keys(leftOpen)) {
-      if (record[fileRel]?.[k] !== undefined) verified[k] = record[fileRel][k];
+    // A moved file: every relative path it holds now was written or verified for the moved layout.
+    keep = Object.fromEntries(Object.entries(counts).map(([k, n]) => [k, n - (leftOpen[k] ?? 0)]).filter(([, n]) => n > 0));
+  } else {
+    // A file that stayed: record only the paths the codemod rewrote (this run or earlier), so a later run
+    // can check their targets too (e.g. './lib' after lib.ts appears next to a moved-in lib/index.ts).
+    const prior = record[fileRel] ?? {};
+    keep = {};
+    for (const k of new Set([...Object.keys(prior), ...Object.keys(rewrittenTo)])) {
+      const n = Math.min((counts[k] ?? 0) - (leftOpen[k] ?? 0), entryCount(prior[k]) + (rewrittenTo[k] ?? 0));
+      if (n > 0) keep[k] = n;
     }
-    if (JSON.stringify(record[fileRel] ?? null) !== JSON.stringify(verified)) {
-      record[fileRel] = verified;
-      recordChanged = true;
-    }
+  }
+  const entries = recordEntries(newDir, keep);
+  const nextEntry = Object.keys(entries).length > 0 ? entries : undefined;
+  if (JSON.stringify(record[fileRel]) !== JSON.stringify(nextEntry)) {
+    if (nextEntry) record[fileRel] = nextEntry; else delete record[fileRel];
+    recordChanged = true;
   }
 }
 if (recordChanged) fs.writeFileSync(recordFile, JSON.stringify(record, null, 1) + '\n');
