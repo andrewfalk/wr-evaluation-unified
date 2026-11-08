@@ -298,6 +298,8 @@ export interface AuthSessionHandlerOptions {
   revoked?: boolean;
   /** 사용자 비활성화 시각(인증 미들웨어가 401 USER_DISABLED). */
   disabledAt?: string | null;
+  /** 로그인 절대 수명이 지난 세션(인증 미들웨어가 401 SESSION_EXPIRED, SEC-B M3). */
+  absoluteExpired?: boolean;
 }
 
 /**
@@ -308,7 +310,9 @@ export function authSessionHandler(options: AuthSessionHandlerOptions = {}): Que
   return {
     name: 'auth.session',
     match: /FROM\s+sessions\s+s\s+JOIN\s+users\s+u\s+ON\s+u\.id\s*=\s*s\.user_id/i,
-    reply: options.revoked ? { rows: [] } : { rows: [{ disabled_at: options.disabledAt ?? null }] },
+    reply: options.revoked
+      ? { rows: [] }
+      : { rows: [{ disabled_at: options.disabledAt ?? null, ...(options.absoluteExpired ? { absolute_expired: true } : {}) }] },
   };
 }
 

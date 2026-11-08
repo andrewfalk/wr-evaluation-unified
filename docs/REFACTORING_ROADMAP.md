@@ -258,8 +258,8 @@
 | H4 | 업데이트 미서명 + electron-updater CVE | ✅ **HF8(#169~#172, 7.1.4 편입)** — 피드 서명 검증 도입. electron-updater 권고 2건은 미서명 설치본·무토큰 피드 구성에 해당하지 않아 업그레이드하지 않고 수용. 코드서명(Authenticode)은 여전히 없음 |
 | H5 | Electron 22 EOL·no-sandbox | 수용 리스크, Phase 3 문서화·ADR |
 | M1 | 임시비번 강제변경 미적용 | ✅ **HF2(#160)** |
-| M2 | 계정별 brute-force 보호 없음 | S4 뒤 Phase 1 bundle. 참고: Windows Docker Desktop 앞에서는 IP 키 limiter 4종이 병원 전체 한 버킷이었다 — 호스트 Caddy 모드(PRODUCTION_RELEASE_PLAN 9절, #181~#183)에서는 출발지별로 나뉜다(`verify-stack accept` 실측). 계정별 보호는 여전히 필요 |
-| M3 | 세션 무기한 갱신 | Phase 1 bundle |
+| M2 | 계정별 brute-force 보호 없음 | S4 뒤 Phase 1 bundle. 참고: Windows Docker Desktop 앞에서는 IP 키 limiter 4종이 병원 전체 한 버킷이었다 — 호스트 Caddy 모드(PRODUCTION_RELEASE_PLAN 9절, #181~#183)에서는 출발지별로 나뉜다(`verify-stack accept` 실측). 계정별 보호는 여전히 필요 — ✅ 2026-11-08(#234: 마이그레이션 0039 login_backoff, 시도를 비밀번호 확인 전에 원자적으로 계수 → 5회 1분·2배·상한 15분, 429 LOGIN_LOCKED, 없는 ID도 같은 경로) |
+| M3 | 세션 무기한 갱신 | Phase 1 bundle — ✅ 2026-11-08(P1-24: 마이그레이션 0040 sessions.absolute_expires_at, 절대 12시간·유휴 24시간, 회전 상속, 401 SESSION_EXPIRED, 웹 기본 세션 쿠키 + "로그인 유지") |
 | M4 | preload raw IPC·무조건 등록 | ✅ **HF3(#162)** → E2 |
 | M5 | API 키 평문 | Phase 2/3 bundle(safeStorage) |
 | M6 | PHI at rest 평문(웹·독립형) | Phase 2/3 bundle |

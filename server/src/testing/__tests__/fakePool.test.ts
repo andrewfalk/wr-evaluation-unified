@@ -278,6 +278,12 @@ describe('authSessionHandler', () => {
     expect((await revoked.pool.query(sql)).rows).toEqual([]);
     expect((await disabled.pool.query(sql)).rows).toEqual([{ disabled_at: '2026-01-01T00:00:00Z' }]);
   });
+
+  it('can model a session past its absolute lifetime (SEC-B M3)', async () => {
+    const sql = 'SELECT u.disabled_at FROM sessions s JOIN users u ON u.id = s.user_id';
+    const expired = createFakePool({ handlers: [authSessionHandler({ absoluteExpired: true })] });
+    expect((await expired.pool.query(sql)).rows).toEqual([{ disabled_at: null, absolute_expired: true }]);
+  });
 });
 
 describe('sqlPreview', () => {

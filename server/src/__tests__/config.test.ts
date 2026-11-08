@@ -164,13 +164,16 @@ describe('config — auth TTLs', () => {
   it('uses defaults when not set', () => {
     const c = make();
     expect(c.auth.accessTokenTtl).toBe(15 * 60);
-    expect(c.auth.refreshTokenTtl).toBe(7 * 24 * 60 * 60);
+    // SEC-B M3: idle 24 hours (was 7 days), absolute 12 hours.
+    expect(c.auth.refreshTokenTtl).toBe(24 * 60 * 60);
+    expect(c.auth.sessionAbsoluteTtl).toBe(12 * 60 * 60);
   });
 
   it('parses custom TTLs', () => {
-    const c = make({ ACCESS_TOKEN_TTL: '300', REFRESH_TOKEN_TTL: '86400' });
+    const c = make({ ACCESS_TOKEN_TTL: '300', REFRESH_TOKEN_TTL: '604800', SESSION_ABSOLUTE_TTL: '28800' });
     expect(c.auth.accessTokenTtl).toBe(300);
-    expect(c.auth.refreshTokenTtl).toBe(86400);
+    expect(c.auth.refreshTokenTtl).toBe(604800); // an explicit 7-day value in an existing .env is kept
+    expect(c.auth.sessionAbsoluteTtl).toBe(28800);
   });
 
   it('throws on non-integer TTL', () => {

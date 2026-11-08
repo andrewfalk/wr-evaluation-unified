@@ -34,34 +34,55 @@ async function findFamilyIdForToken(client: PoolClient, refreshToken: string): P
 // Types
 // ---------------------------------------------------------------------------
 
+// Absolute lifetime of a session lineage when the caller does not pass one (SEC-B M3). The login route
+// always passes now + config.auth.sessionAbsoluteTtl; this default only covers other callers (tests).
+export const DEFAULT_SESSION_ABSOLUTE_TTL_SECONDS = 12 * 60 * 60;
+
 export interface CreateSessionResult {
-  sessionId:        string;
-  refreshToken:     string; // raw — caller sets as HttpOnly cookie
-  csrfToken:        string; // raw — caller sets as non-HttpOnly cookie
-  expiresAt:        Date;
-  persistentCookie: boolean;
-  familyId:         string;
+  sessionId:         string;
+  refreshToken:      string; // raw — caller sets as HttpOnly cookie
+  csrfToken:         string; // raw — caller sets as non-HttpOnly cookie
+  /** Idle expiry: min(now + ttl, absoluteExpiresAt). Also the cookie's Expires. */
+  expiresAt:         Date;
+  absoluteExpiresAt: Date;
+  persistentCookie:  boolean;
+  familyId:          string;
 }
 
 export interface VerifySessionResult {
-  sessionId:        string;
-  userId:           string;
-  csrfTokenHash:    string;
-  persistentCookie: boolean;
-  familyId:         string;
+  sessionId:         string;
+  userId:            string;
+  csrfTokenHash:     string;
+  persistentCookie:  boolean;
+  familyId:          string;
+  absoluteExpiresAt: Date;
 }
 
 interface SessionRow {
-  id:                string;
-  user_id:           string;
-  csrf_token_hash:   string;
-  persistent_cookie: boolean;
-  family_id:         string;
+  id:                  string;
+  user_id:             string;
+  csrf_token_hash:     string;
+  persistent_cookie:   boolean;
+  family_id:           string;
+  absolute_expires_at: Date;
+}
+
+function toVerifyResult(row: SessionRow): VerifySessionResult {
+  return {
+    sessionId:         row.id,
+    userId:            row.user_id,
+    csrfTokenHash:     row.csrf_token_hash,
+    persistentCookie:  row.persistent_cookie,
+    familyId:          row.family_id,
+    absoluteExpiresAt: row.absolute_expires_at,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // createSession
 // Creates a new session row. Caller supplies the client/transaction.
+// ttlSeconds is the idle lifetime; the row never outlives absoluteExpiresAt (SEC-B M3). A login passes
+// a fresh absolute expiry, a rotation passes the lineage's inherited one with its family_id.
 // ---------------------------------------------------------------------------
 export async function createSession(
   client: PoolClient,
@@ -69,19 +90,22 @@ export async function createSession(
   meta: { userAgent?: string; ip?: string },
   ttlSeconds: number,
   persistentCookie: boolean = true,
-  familyId?: string
+  familyId?: string,
+  absoluteExpiresAt?: Date
 ): Promise<CreateSessionResult> {
   const refreshToken = generateToken();
   const csrfToken    = generateToken();
-  const expiresAt    = new Date(Date.now() + ttlSeconds * 1000);
+  const now          = Date.now();
+  const absolute     = absoluteExpiresAt ?? new Date(now + DEFAULT_SESSION_ABSOLUTE_TTL_SECONDS * 1000);
+  const expiresAt    = new Date(Math.min(now + ttlSeconds * 1000, absolute.getTime()));
   // A fresh login starts a new lineage (family_id = a fresh id of its own).
   // Rotation passes the inherited family_id through instead.
   const resolvedFamilyId = familyId ?? crypto.randomUUID();
 
   const { rows } = await client.query<{ id: string }>(
     `INSERT INTO sessions
-       (user_id, refresh_token_hash, csrf_token_hash, expires_at, user_agent, ip, persistent_cookie, family_id)
-     VALUES ($1, $2, $3, $4, $5, $6::inet, $7, $8)
+       (user_id, refresh_token_hash, csrf_token_hash, expires_at, user_agent, ip, persistent_cookie, family_id, absolute_expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6::inet, $7, $8, $9)
      RETURNING id`,
     [
       userId,
@@ -92,10 +116,14 @@ export async function createSession(
       meta.ip        ?? null,
       persistentCookie,
       resolvedFamilyId,
+      absolute,
     ]
   );
 
-  return { sessionId: rows[0].id, refreshToken, csrfToken, expiresAt, persistentCookie, familyId: resolvedFamilyId };
+  return {
+    sessionId: rows[0].id, refreshToken, csrfToken, expiresAt, absoluteExpiresAt: absolute, persistentCookie,
+    familyId: resolvedFamilyId,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -112,24 +140,38 @@ export async function verifySession(
   refreshToken: string
 ): Promise<VerifySessionResult | null> {
   const { rows } = await client.query<SessionRow>(
-    `SELECT id, user_id, csrf_token_hash, persistent_cookie, family_id
+    `SELECT id, user_id, csrf_token_hash, persistent_cookie, family_id, absolute_expires_at
      FROM sessions
      WHERE refresh_token_hash = $1
        AND expires_at > now()
+       AND absolute_expires_at > now()
        AND invalidated_at IS NULL
        AND (revoked_at IS NULL OR revoked_at > now() - interval '30 seconds')`,
     [hashToken(refreshToken)]
   );
 
   if (rows.length === 0) return null;
+  return toVerifyResult(rows[0]);
+}
 
-  return {
-    sessionId:        rows[0].id,
-    userId:           rows[0].user_id,
-    csrfTokenHash:    rows[0].csrf_token_hash,
-    persistentCookie: rows[0].persistent_cookie,
-    familyId:         rows[0].family_id,
-  };
+// ---------------------------------------------------------------------------
+// isPastAbsoluteLifetime
+// After verifySession returned null: true when the token names a session that was not logged out but
+// whose lineage reached its absolute lifetime (SEC-B M3) — the route answers 401 SESSION_EXPIRED
+// instead of SESSION_INVALID. Only a reason code; it never makes a session valid.
+// ---------------------------------------------------------------------------
+export async function isPastAbsoluteLifetime(
+  client: Pool | PoolClient,
+  refreshToken: string
+): Promise<boolean> {
+  const { rows } = await client.query(
+    `SELECT 1 FROM sessions
+     WHERE refresh_token_hash = $1
+       AND invalidated_at IS NULL
+       AND absolute_expires_at <= now()`,
+    [hashToken(refreshToken)]
+  );
+  return rows.length > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,10 +195,11 @@ async function verifySessionStrict(
   refreshToken: string
 ): Promise<VerifySessionResult | null> {
   const { rows } = await client.query<SessionRow>(
-    `SELECT id, user_id, csrf_token_hash, persistent_cookie, family_id
+    `SELECT id, user_id, csrf_token_hash, persistent_cookie, family_id, absolute_expires_at
      FROM sessions
      WHERE refresh_token_hash = $1
        AND expires_at > now()
+       AND absolute_expires_at > now()
        AND invalidated_at IS NULL
        AND revoked_at IS NULL
      FOR UPDATE`,
@@ -164,14 +207,7 @@ async function verifySessionStrict(
   );
 
   if (rows.length === 0) return null;
-
-  return {
-    sessionId:        rows[0].id,
-    userId:           rows[0].user_id,
-    csrfTokenHash:    rows[0].csrf_token_hash,
-    persistentCookie: rows[0].persistent_cookie,
-    familyId:         rows[0].family_id,
-  };
+  return toVerifyResult(rows[0]);
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +249,10 @@ export async function rotateSession(
       [existing.sessionId]
     );
 
-    const result = await createSession(client, existing.userId, meta, ttlSeconds, existing.persistentCookie, existing.familyId);
+    // The lineage keeps its absolute expiry (SEC-B M3): rotating never extends it.
+    const result = await createSession(
+      client, existing.userId, meta, ttlSeconds, existing.persistentCookie, existing.familyId, existing.absoluteExpiresAt,
+    );
     await client.query('COMMIT');
     return result;
   } catch (err) {
@@ -273,6 +312,7 @@ export async function revokeSessionFamily(
        FROM sessions
        WHERE refresh_token_hash = $1
          AND expires_at > now()
+         AND absolute_expires_at > now()
          AND invalidated_at IS NULL`,
       [hashToken(refreshToken)]
     );

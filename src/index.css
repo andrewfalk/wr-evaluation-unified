@@ -3095,6 +3095,14 @@ body { font-family: 'Pretendard', 'Noto Sans KR', sans-serif; font-weight: 500; 
   outline: none;
   border-color: var(--primary, #0d6efd);
 }
+.login-modal-remember {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #666);
+  cursor: pointer;
+}
 .login-modal-error {
   margin: 0;
   color: var(--danger, #dc3545);
