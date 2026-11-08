@@ -9,6 +9,7 @@ import { runWorkspaceRetention } from './jobs/workspaceRetention';
 import { runVideoClipCleanup } from './jobs/videoClipCleanup';
 import { runStatsRunCleanup } from './jobs/statsRunCleanup';
 import { createAuditNonceSweeper } from './jobs/emrAuditNonces';
+import { createLoginBackoffSweeper } from './jobs/loginBackoff';
 import { createStatsRunsQueueWorker } from './statsRunsQueue';
 
 // The server process: create the database pools, build the app (src/app.ts — REFACTORING_ROADMAP
@@ -43,6 +44,11 @@ if (require.main === module) {
         // with the other timers — until then the interval is unref()'d like the jobs above.
         createAuditNonceSweeper(pool, {
           onError: (err) => console.error('[wr-server] emr-audit-nonce sweep error', err),
+        });
+
+        // Login backoff (SEC-B M2): drop unlocked rows untouched for 24 hours, at start and hourly.
+        createLoginBackoffSweeper(pool, {
+          onError: (err) => console.error('[wr-server] login-backoff sweep error', err),
         });
 
         // 영상 분석 워커: 플래그 on + (fixtureMode 또는 uploadDir 구성됨)일 때 큐 처리.

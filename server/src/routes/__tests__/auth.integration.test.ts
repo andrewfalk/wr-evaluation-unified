@@ -45,6 +45,7 @@ import {
 } from '../../auth/sessionStore';
 import { validateCsrf } from '../../auth/csrf';
 import { createAuthRouter } from '../auth';
+import { loginIdHash } from '../../auth/loginBackoff';
 import { generateAccessToken } from '../../auth/tokens';
 import {
   createFakePool,
@@ -87,6 +88,27 @@ function authApp(fake: FakePool) {
 const lastLoginHandler: QueryHandler = {
   name: 'users.lastLogin', match: /UPDATE users SET last_login_at = now\(\) WHERE id = \$1/, via: 'client', reply: { rowCount: 1 },
 };
+
+// SEC-B M2 계정별 잠금: 확인(pool) → 실패 기록(pool) 또는 성공 시 삭제(로그인 트랜잭션 client).
+function backoffCheckHandler(retryAfterSec: number | null = null): QueryHandler {
+  return {
+    name:  'backoff.check',
+    match: /FROM login_backoff\s+WHERE login_hash = \$1 AND locked_until > now\(\)/,
+    via:   'pool',
+    reply: { rows: retryAfterSec === null ? [] : [{ retry_after: retryAfterSec }] },
+  };
+}
+const backoffFailureHandler: QueryHandler = {
+  name: 'backoff.failure', match: /INSERT INTO login_backoff/, via: 'pool',
+  reply: { rows: [{ failures: 1, locked_until: null }], rowCount: 1 },
+};
+const backoffClearHandler: QueryHandler = {
+  name: 'backoff.clear', match: /DELETE FROM login_backoff WHERE login_hash = \$1/, via: 'client', reply: { rowCount: 1 },
+};
+
+function auditExtras(fake: FakePool): unknown[] {
+  return fake.callsTo('audit').map(c => (c.params[8] === null ? null : JSON.parse(String(c.params[8]))));
+}
 
 // refresh의 회전 전 사용자 조회(별도 client).
 function userLookupHandler(row: Record<string, unknown>): QueryHandler {
@@ -131,7 +153,7 @@ describe('POST /api/auth/login', () => {
   });
 
   it('returns 401 for invalid credentials', async () => {
-    const fake = makeFake();
+    const fake = makeFake([backoffCheckHandler(), backoffFailureHandler]);
     const verifyCredentials = vi.fn().mockResolvedValue(null);
     vi.mocked(LocalDbAuthProvider).mockImplementation(() => ({
       verifyCredentials,
@@ -146,10 +168,40 @@ describe('POST /api/auth/login', () => {
     fake.assertNoUnmatched();
     expect(verifyCredentials).toHaveBeenCalledWith('bad', 'wrong');
     expect(fake.connected).toBe(0);
+    // The failure is counted under the hashed login ID, and the audit row carries only its prefix.
+    const key = loginIdHash('bad');
+    expect(fake.callsTo('backoff.check')[0].params).toEqual([key]);
+    expect(fake.callsTo('backoff.failure')).toHaveLength(1);
+    expect(fake.callsTo('backoff.failure')[0].params[0]).toBe(key);
+    expect(auditExtras(fake)).toEqual([{ loginIdHash: key.slice(0, 16) }]);
+    expect(JSON.stringify(fake.calls.map(c => c.params))).not.toContain('"bad"');
+  });
+
+  it('returns 429 LOGIN_LOCKED without checking the password while the login ID is locked', async () => {
+    const fake = makeFake([backoffCheckHandler(37)]);
+    const verifyCredentials = vi.fn();
+    vi.mocked(LocalDbAuthProvider).mockImplementation(() => ({ verifyCredentials }) as never);
+
+    const res = await request(authApp(fake))
+      .post('/api/auth/login')
+      .send({ loginId: 'doc1', password: 'pass123' });
+
+    expect(res.status).toBe(429);
+    expect(res.headers['retry-after']).toBe('37');
+    expect(res.body).toEqual({
+      code:          'LOGIN_LOCKED',
+      error:         'Too many failed login attempts for this login ID, please try again later',
+      retryAfterSec: 37,
+    });
+    expect(verifyCredentials).not.toHaveBeenCalled();
+    expect(fake.callsTo('backoff.failure')).toHaveLength(0); // a locked attempt does not count
+    expect(fake.connected).toBe(0);
+    expect(auditExtras(fake)).toEqual([{ loginIdHash: loginIdHash('doc1').slice(0, 16), reason: 'locked' }]);
+    fake.assertNoUnmatched();
   });
 
   it('returns 200 with accessToken and sets refresh cookie on success', async () => {
-    const fake = makeFake([lastLoginHandler]);
+    const fake = makeFake([lastLoginHandler, backoffCheckHandler(), backoffClearHandler]);
     vi.mocked(LocalDbAuthProvider).mockImplementation(() => ({
       verifyCredentials: vi.fn().mockResolvedValue({
         userId:             'user-1',
@@ -183,11 +235,18 @@ describe('POST /api/auth/login', () => {
     fake.assertNoUnmatched();
     expect(fake.callsTo('users.lastLogin')).toHaveLength(1);
     expect(fake.transactions.map(t => t.outcome)).toEqual(['commit']);
+    // The failure count is cleared inside the login transaction (before COMMIT).
+    const clear = fake.callsTo('backoff.clear');
+    expect(clear).toHaveLength(1);
+    expect(clear[0].params).toEqual([loginIdHash('doc1')]);
+    const order = fake.calls.filter(c => c.clientId === clear[0].clientId).map(c => c.handler === 'transaction-control' ? c.sql.trim().split(/\s+/)[0].toUpperCase() : c.handler);
+    expect(order.indexOf('backoff.clear')).toBeLessThan(order.indexOf('COMMIT'));
+    expect(auditExtras(fake)).toEqual([null]);
     fake.assertAllReleased();
   });
 
   it('issues a session cookie (no Expires) when rememberMe is false', async () => {
-    const fake = makeFake([lastLoginHandler]);
+    const fake = makeFake([lastLoginHandler, backoffCheckHandler(), backoffClearHandler]);
     vi.mocked(LocalDbAuthProvider).mockImplementation(() => ({
       verifyCredentials: vi.fn().mockResolvedValue({
         userId:             'user-1',

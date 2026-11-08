@@ -296,6 +296,9 @@ describe('verify-stack.ps1 — 호스트 Caddy(릴리스 B PR-4)', () => {
   it('accept: 본문은 파일로(--data-binary @), LAN 주소는 파일에 쓰지 않고, 임시 파일은 finally 에서 지운다', () => {
     expect(fnBody('Send-BadLogin')).toContain('--data-binary "@$script:AcceptBody"');
     expect(fnBody('Send-BadLogin')).toContain('--resolve "${Domain}:${Port}:$Source"');
+    // 요청마다 새 로그인 ID — 같은 ID 5회 실패 잠금(SEC-B M2)이 IP 버킷 판정에 섞이지 않게.
+    expect(fnBody('Send-BadLogin')).toMatch(/Write-Utf8NoBom \$script:AcceptBody \('\{"loginId":"verify-accept-no-such-user-' \+ \[guid\]::NewGuid\(\)\.ToString\('N'\)/);
+    expect(fnBody('Invoke-Accept')).not.toContain('verify-accept-no-such-user');
     const fn = fnBody('Invoke-Accept');
     expect(fn).not.toMatch(/(Set|Add|Out)-(Content|File)[^\n]*\$lan|WriteAllText[^\n]*\$lan|Write-Utf8NoBom[^\n]*\$lan/);
     expect(fn).toMatch(/\} finally \{\s*foreach \(\$f in \$script:AcceptBody, \$script:AcceptHeader\) \{ if \(Test-Path \$f\) \{ Remove-Item \$f -Force \} \}/);

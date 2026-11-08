@@ -121,12 +121,16 @@ export function auditMiddleware(
 // These are called explicitly from route handlers because the session is not
 // yet available on req when login runs.
 // ---------------------------------------------------------------------------
+// extra carries the failure details (SEC-B M2): loginIdHash is the first 16 hex characters of the
+// backoff key (auth/loginBackoff.loginIdHash), never the login ID itself, and reason is 'locked' when
+// the attempt was refused because the ID is locked.
 export function auditLogin(
   pool:    Pool,
   req:     Request,
   outcome: AuditOutcome,
   userId?: string | null,
   orgId?:  string | null,
+  extra?:  { loginIdHash?: string; reason?: 'locked' },
 ): void {
   writeAuditLog(pool, {
     actorUserId: userId   ?? null,
@@ -136,6 +140,7 @@ export function auditLogin(
     outcome,
     ip:          req.ip ?? null,
     userAgent:   req.headers['user-agent'] ?? null,
+    extra:       extra && Object.keys(extra).length > 0 ? extra : null,
   });
 }
 
