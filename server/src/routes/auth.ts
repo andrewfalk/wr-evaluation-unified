@@ -8,6 +8,7 @@ import { claimLoginAttempt, clearLoginFailures, loginIdHash } from '../auth/logi
 import {
   createSession,
   verifySession,
+  isPastAbsoluteLifetime,
   rotateSession,
   revokeSessionFamily,
 } from '../auth/sessionStore';
@@ -20,7 +21,7 @@ import {
   CSRF_HEADER,
   validateCsrf,
 } from '../auth/csrf';
-import { createAuthMiddleware } from '../middleware/auth';
+import { createAuthMiddleware, SESSION_EXPIRED_BODY } from '../middleware/auth';
 import { csrfMiddleware } from '../middleware/csrf';
 import { loginRateLimit, csrfRateLimit, refreshRateLimit, signupRateLimit } from '../middleware/rateLimit';
 import { auditLogin, auditLogout, auditRefreshFail, auditRefreshSuccess, writeAuditLog } from '../middleware/audit';
@@ -81,9 +82,9 @@ function clearAuthCookies(res: Response): void {
 const LoginBody = z.object({
   loginId:    z.string().min(1),
   password:   z.string().min(1),
-  // Electron intranet build sends false so the refresh cookie is issued as a
-  // session cookie (cleared when the app closes). Web keeps the default true.
-  rememberMe: z.boolean().default(true),
+  // false (the default since 7.2.0, SEC-B M3) = the refresh cookie is a session cookie, cleared when the
+  // browser or the Electron app closes. The web login form sends true only when "로그인 유지" is ticked.
+  rememberMe: z.boolean().default(false),
 });
 
 async function login(pool: Pool, req: Request, res: Response): Promise<void> {
@@ -130,7 +131,9 @@ async function login(pool: Pool, req: Request, res: Response): Promise<void> {
       creds.userId,
       { userAgent: req.headers['user-agent'], ip: req.ip },
       config.auth.refreshTokenTtl,
-      parsed.data.rememberMe
+      parsed.data.rememberMe,
+      undefined, // a login starts a new lineage
+      new Date(Date.now() + config.auth.sessionAbsoluteTtl * 1000),
     );
 
     // Record last login
@@ -194,6 +197,11 @@ async function refresh(pool: Pool, req: Request, res: Response): Promise<void> {
   try {
     const existing = await verifySession(client, oldRefreshToken);
     if (!existing) {
+      if (await isPastAbsoluteLifetime(client, oldRefreshToken)) {
+        auditRefreshFail(pool, req, 'SESSION_EXPIRED');
+        res.status(401).json(SESSION_EXPIRED_BODY);
+        return;
+      }
       auditRefreshFail(pool, req, 'SESSION_INVALID');
       res.status(401).json({ code: 'SESSION_INVALID', error: 'Refresh token invalid or expired' });
       return;
@@ -387,6 +395,10 @@ async function csrfReissue(pool: Pool, req: Request, res: Response): Promise<voi
   try {
     const existing = await verifySession(client, rawRefreshToken);
     if (!existing) {
+      if (await isPastAbsoluteLifetime(client, rawRefreshToken)) {
+        res.status(401).json(SESSION_EXPIRED_BODY);
+        return;
+      }
       res.status(401).json({ code: 'SESSION_INVALID', error: 'Refresh token invalid or expired' });
       return;
     }

@@ -98,7 +98,11 @@ export const EnvSchema = z.object({
   // REFRESH_TOKEN_SECRET is no longer read (refresh tokens are random values stored hashed, not JWTs);
   // a value left in an existing .env is ignored (SEC-A L5).
   ACCESS_TOKEN_TTL: positiveInt(15 * 60),
-  REFRESH_TOKEN_TTL: positiveInt(7 * 24 * 60 * 60),
+  // Idle lifetime of a refresh session (seconds). The default went from 7 days to 24 hours in 7.2.0
+  // (SEC-B M3); a value set in an existing .env is kept.
+  REFRESH_TOKEN_TTL: positiveInt(24 * 60 * 60),
+  // Absolute lifetime of a login (seconds): refresh rotations never extend a session past it (SEC-B M3).
+  SESSION_ABSOLUTE_TTL: positiveInt(12 * 60 * 60),
 
   AI_INTERNAL_ENDPOINT: text('http://localhost:11434'),
   AI_INTERNAL_MODEL: text('llama3'),

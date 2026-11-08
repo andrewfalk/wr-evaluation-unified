@@ -28,6 +28,10 @@ export function LoginModal({ apiBaseUrl = '' }) {
   const [error, setError]           = useState('');
   const [loading, setLoading]       = useState(false);
   const [showSignup, setShowSignup] = useState(false);
+  // 웹은 7.2.0부터 기본이 세션 쿠키(브라우저를 닫으면 다시 로그인, SEC-B M3) — "로그인 유지"를 켜야
+  // 영구 쿠키를 받는다. Electron은 항상 false(앱 재시작 시 재로그인, PR#79)라 체크박스를 보이지 않는다.
+  const [rememberMe, setRememberMe] = useState(false);
+  const electron = isElectron();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -38,7 +42,7 @@ export function LoginModal({ apiBaseUrl = '' }) {
       const data = await requestJson('/api/auth/login', {
         baseUrl: apiBaseUrl,
         method: 'POST',
-        body: { loginId: loginId.trim(), password, rememberMe: !isElectron() },
+        body: { loginId: loginId.trim(), password, rememberMe: !electron && rememberMe },
         _retry: true, // login 401 = wrong credentials, not token expiry — skip refresh interceptor
       });
       login(data, apiBaseUrl);
@@ -82,6 +86,17 @@ export function LoginModal({ apiBaseUrl = '' }) {
               required
             />
           </div>
+          {!electron && (
+            <label className="login-modal-remember">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={e => setRememberMe(e.target.checked)}
+                disabled={loading}
+              />
+              로그인 유지
+            </label>
+          )}
           {error && (
             <p className="login-modal-error">{error}</p>
           )}

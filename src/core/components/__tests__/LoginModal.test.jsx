@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // Electron 앱은 재시작 시 재로그인을 강제하기 위해 리프레시 쿠키를 세션 쿠키로 받아야 한다
-// (rememberMe: false). 웹은 기존처럼 영구 로그인 유지가 기본값이어야 한다(rememberMe: true).
+// (rememberMe: false). 웹도 7.2.0부터 기본은 세션 쿠키이고 "로그인 유지"를 켤 때만 true다(SEC-B M3).
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -47,13 +47,34 @@ describe('LoginModal rememberMe', () => {
     }));
   });
 
-  it('sends rememberMe: true on the web (non-Electron)', async () => {
+  it('Electron shows no "로그인 유지" checkbox', () => {
+    vi.mocked(isElectron).mockReturnValue(true);
+    render(<LoginModal />);
+    expect(screen.queryByLabelText('로그인 유지')).toBeNull();
+  });
+
+  // SEC-B M3: 웹 기본은 세션 쿠키 — 체크박스를 켜야 rememberMe: true.
+  it('web: rememberMe is false unless "로그인 유지" is ticked', async () => {
     vi.mocked(isElectron).mockReturnValue(false);
     render(<LoginModal />);
+    expect(screen.getByLabelText('로그인 유지').checked).toBe(false);
 
     await submitLoginForm();
 
-    expect(requestJson).toHaveBeenCalledWith('/api/auth/login', expect.objectContaining({
+    expect(requestJson).toHaveBeenLastCalledWith('/api/auth/login', expect.objectContaining({
+      body: expect.objectContaining({ rememberMe: false }),
+    }));
+  });
+
+  it('web: ticking "로그인 유지" sends rememberMe: true', async () => {
+    vi.mocked(isElectron).mockReturnValue(false);
+    render(<LoginModal />);
+    const user = userEvent.setup();
+    await user.click(screen.getByLabelText('로그인 유지'));
+
+    await submitLoginForm();
+
+    expect(requestJson).toHaveBeenLastCalledWith('/api/auth/login', expect.objectContaining({
       body: expect.objectContaining({ rememberMe: true }),
     }));
   });

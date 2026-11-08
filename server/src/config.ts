@@ -60,8 +60,10 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
       accessTokenSecret:  e.ACCESS_TOKEN_SECRET,
       // access token TTL in seconds (default 15 min)
       accessTokenTtl:  e.ACCESS_TOKEN_TTL,
-      // refresh token TTL in seconds (default 7 days)
+      // refresh session idle TTL in seconds (default 24 hours; 7 days before 7.2.0)
       refreshTokenTtl: e.REFRESH_TOKEN_TTL,
+      // absolute session lifetime in seconds from login (default 12 hours, SEC-B M3)
+      sessionAbsoluteTtl: e.SESSION_ABSOLUTE_TTL,
     }),
 
     ai: Object.freeze({

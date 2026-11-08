@@ -16,6 +16,7 @@ vi.mock('../../auth/sessionStore', () => ({
   verifySession:       vi.fn(),
   rotateSession:       vi.fn(),
   revokeSessionFamily: vi.fn(),
+  isPastAbsoluteLifetime: vi.fn(),
   hashToken:           vi.fn((t: string) => `hash:${t}`),
 }));
 vi.mock('../../auth/csrf', async (importOriginal) => {
@@ -30,7 +31,7 @@ vi.mock('../../auth/csrf', async (importOriginal) => {
 });
 vi.mock('../../config', async () => ({
   default: (await import('../../testing/configMock.js')).testConfig({
-    auth:                 { refreshTokenTtl: 604800 },
+    auth:                 { refreshTokenTtl: 86400, sessionAbsoluteTtl: 43200 },
     ai:                   { enabled: false },
     localFallbackAllowed: false,
   }),
@@ -42,6 +43,7 @@ import {
   verifySession,
   rotateSession,
   revokeSessionFamily,
+  isPastAbsoluteLifetime,
 } from '../../auth/sessionStore';
 import { validateCsrf } from '../../auth/csrf';
 import { createAuthRouter } from '../auth';
@@ -234,9 +236,18 @@ describe('POST /api/auth/login', () => {
     const cookie = res.headers['set-cookie'] as string[] | string;
     const cookieStr = Array.isArray(cookie) ? cookie.join(';') : String(cookie ?? '');
     expect(cookieStr).toContain('wr_refresh');
-    // rememberMe omitted → defaults to true → persistent cookie with Expires.
+    // The mocked session is persistent, so the cookie has Expires. rememberMe omitted → false since
+    // 7.2.0 (SEC-B M3: the web default is a session cookie unless "로그인 유지" is ticked).
     expect(cookieStr).toContain('Expires=');
-    expect(vi.mocked(createSession).mock.calls[0][4]).toBe(true);
+    expect(vi.mocked(createSession).mock.calls[0][4]).toBe(false);
+    // A login starts a new lineage whose absolute expiry is now + sessionAbsoluteTtl (43200 s here).
+    const [, , , idleTtl, , familyId, absolute] = vi.mocked(createSession).mock.calls[0];
+    expect(idleTtl).toBe(86400);
+    expect(familyId).toBeUndefined();
+    expect(absolute).toBeInstanceOf(Date);
+    const absMs = (absolute as Date).getTime() - Date.now();
+    expect(absMs).toBeGreaterThan(43200 * 1000 - 10_000);
+    expect(absMs).toBeLessThanOrEqual(43200 * 1000);
     fake.assertNoUnmatched();
     expect(fake.callsTo('users.lastLogin')).toHaveLength(1);
     expect(fake.transactions.map(t => t.outcome)).toEqual(['commit']);
@@ -323,6 +334,39 @@ describe('POST /api/auth/refresh', () => {
     expect(res.body.code).toBe('SESSION_INVALID');
     fake.assertNoUnmatched();
     expect(verifySession).toHaveBeenCalledWith(expect.anything(), 'bad-token');
+    expect(isPastAbsoluteLifetime).toHaveBeenCalledWith(expect.anything(), 'bad-token');
+    fake.assertAllReleased();
+  });
+
+  it('returns 401 SESSION_EXPIRED (no rotation) when the login reached its absolute lifetime (SEC-B M3)', async () => {
+    const fake = makeFake();
+    vi.mocked(verifySession).mockResolvedValue(null);
+    vi.mocked(isPastAbsoluteLifetime).mockResolvedValueOnce(true);
+
+    const res = await request(authApp(fake))
+      .post('/api/auth/refresh')
+      .set('Cookie', 'wr_refresh=old-token');
+
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ code: 'SESSION_EXPIRED', error: 'Session reached its maximum lifetime, please log in again' });
+    expect(rotateSession).not.toHaveBeenCalled();
+    fake.assertNoUnmatched();
+    fake.assertAllReleased();
+  });
+
+  it('POST /api/auth/csrf answers 401 SESSION_EXPIRED for a login past its absolute lifetime (SEC-B M3)', async () => {
+    const fake = makeFake();
+    vi.mocked(verifySession).mockResolvedValue(null);
+    vi.mocked(isPastAbsoluteLifetime).mockResolvedValueOnce(true);
+
+    const res = await request(authApp(fake))
+      .post('/api/auth/csrf')
+      .set('Cookie', 'wr_refresh=old-token');
+
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('SESSION_EXPIRED');
+    expect(res.headers['set-cookie']).toBeUndefined();
+    fake.assertNoUnmatched();
     fake.assertAllReleased();
   });
 
@@ -478,6 +522,21 @@ describe('GET /api/auth/me', () => {
     fake.assertNoUnmatched();
     expect(fake.callsTo('auth.session')).toHaveLength(1);
     expect(fake.connected).toBe(0);
+  });
+
+  it('returns 401 SESSION_EXPIRED when the session reached its absolute lifetime (SEC-B M3)', async () => {
+    const token = validToken();
+    const fake  = makeFake([authSessionHandler({ absoluteExpired: true })]);
+
+    const res = await request(authApp(fake))
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('SESSION_EXPIRED');
+    fake.assertNoUnmatched();
+    // The single session query returns absolute-expired rows too (so the code can be told apart).
+    expect(fake.callsTo('auth.session')[0].sql).toMatch(/absolute_expires_at <= now\(\)\) AS absolute_expired/);
   });
 
   it('returns 200 with user info when JWT + session are valid', async () => {

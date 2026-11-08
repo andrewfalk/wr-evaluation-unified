@@ -14,7 +14,8 @@
       "auth": {
         "accessTokenSecret": "access-secret-0123456789abcdef0123",
         "accessTokenTtl": 900,
-        "refreshTokenTtl": 604800
+        "refreshTokenTtl": 86400,
+        "sessionAbsoluteTtl": 43200
       },
       "ai": {
         "provider": "none",
@@ -114,7 +115,8 @@
       "auth": {
         "accessTokenSecret": "access-secret-0123456789abcdef0123",
         "accessTokenTtl": 900,
-        "refreshTokenTtl": 604800
+        "refreshTokenTtl": 86400,
+        "sessionAbsoluteTtl": 43200
       },
       "ai": {
         "provider": "none",
@@ -216,7 +218,8 @@
       "auth": {
         "accessTokenSecret": "access-secret-0123456789abcdef0123",
         "accessTokenTtl": 600,
-        "refreshTokenTtl": 86400
+        "refreshTokenTtl": 86400,
+        "sessionAbsoluteTtl": 43200
       },
       "ai": {
         "provider": "external",
@@ -319,7 +322,8 @@
       "auth": {
         "accessTokenSecret": "access-secret-0123456789abcdef0123",
         "accessTokenTtl": 900,
-        "refreshTokenTtl": 604800
+        "refreshTokenTtl": 86400,
+        "sessionAbsoluteTtl": 43200
       },
       "ai": {
         "provider": "none",
@@ -419,7 +423,8 @@
       "auth": {
         "accessTokenSecret": "access-secret-0123456789abcdef0123",
         "accessTokenTtl": 900,
-        "refreshTokenTtl": 604800
+        "refreshTokenTtl": 86400,
+        "sessionAbsoluteTtl": 43200
       },
       "ai": {
         "provider": "none",
@@ -519,7 +524,8 @@
       "auth": {
         "accessTokenSecret": "access-secret-0123456789abcdef0123",
         "accessTokenTtl": 900,
-        "refreshTokenTtl": 604800
+        "refreshTokenTtl": 86400,
+        "sessionAbsoluteTtl": 43200
       },
       "ai": {
         "provider": "none",
@@ -619,7 +625,8 @@
       "auth": {
         "accessTokenSecret": "access-secret-0123456789abcdef0123",
         "accessTokenTtl": 900,
-        "refreshTokenTtl": 604800
+        "refreshTokenTtl": 86400,
+        "sessionAbsoluteTtl": 43200
       },
       "ai": {
         "provider": "none",
@@ -721,7 +728,8 @@
       "auth": {
         "accessTokenSecret": "access-secret-0123456789abcdef0123",
         "accessTokenTtl": 900,
-        "refreshTokenTtl": 604800
+        "refreshTokenTtl": 86400,
+        "sessionAbsoluteTtl": 43200
       },
       "ai": {
         "provider": "none",
@@ -821,7 +829,8 @@
       "auth": {
         "accessTokenSecret": "access-secret-0123456789abcdef0123",
         "accessTokenTtl": 900,
-        "refreshTokenTtl": 604800
+        "refreshTokenTtl": 86400,
+        "sessionAbsoluteTtl": 43200
       },
       "ai": {
         "provider": "internal",
@@ -921,7 +930,8 @@
       "auth": {
         "accessTokenSecret": "access-secret-0123456789abcdef0123",
         "accessTokenTtl": 900,
-        "refreshTokenTtl": 604800
+        "refreshTokenTtl": 86400,
+        "sessionAbsoluteTtl": 43200
       },
       "ai": {
         "provider": "external",
@@ -1021,7 +1031,8 @@
       "auth": {
         "accessTokenSecret": "access-secret-0123456789abcdef0123",
         "accessTokenTtl": 900,
-        "refreshTokenTtl": 604800
+        "refreshTokenTtl": 86400,
+        "sessionAbsoluteTtl": 43200
       },
       "ai": {
         "provider": "none",
@@ -1121,7 +1132,8 @@
       "auth": {
         "accessTokenSecret": "access-secret-0123456789abcdef0123",
         "accessTokenTtl": 900,
-        "refreshTokenTtl": 604800
+        "refreshTokenTtl": 86400,
+        "sessionAbsoluteTtl": 43200
       },
       "ai": {
         "provider": "none",
