@@ -914,7 +914,7 @@ docker inspect wr-prod-app-1 --format '{{.Config.Image}}'
 # 현재 migration 상태 기록
 docker compose -p wr-prod exec postgres \
   psql -U wr_user -d wr_evaluation \
-  -c "SELECT id, applied_at FROM schema_migrations ORDER BY id DESC LIMIT 5;"
+  -c "SELECT filename, applied_at FROM schema_migrations ORDER BY filename DESC LIMIT 5;"
 
 # 롤백 직전 수동 백업 1회 실행 (되돌릴 수 없는 작업 전 안전망)
 docker compose -p wr-prod exec backup sh /scripts/backup.sh

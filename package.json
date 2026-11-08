@@ -55,6 +55,7 @@
     "server:seed:stats-test-patients": "cd server && npm run seed:stats-test-patients --",
     "verify:csp": "node scripts/verify-csp.mjs",
     "verify:browser-compat": "node scripts/verify-browser-compat.mjs",
+    "verify:migrations-immutable": "node scripts/check-migrations-immutable.mjs",
     "verify:audit": "node scripts/verify-audit.mjs",
     "verify:secrets": "node scripts/verify-secrets.mjs"
   },

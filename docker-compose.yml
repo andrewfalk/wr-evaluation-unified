@@ -79,6 +79,10 @@ services:
       VIDEO_ANALYSIS_ALLOW_UNVERIFIED_RECIPE: ${VIDEO_ANALYSIS_ALLOW_UNVERIFIED_RECIPE:-false}
       # 환자 단위 TTL lease lock 3단계 롤아웃(off/observe/enforce). 기본 off — 기존 동작과 동일.
       LOCK_ENFORCEMENT_MODE: ${LOCK_ENFORCEMENT_MODE:-off}
+      # 마이그레이션 체크섬(S10 P1-36): 이미 적용된 마이그레이션 파일이 바뀌었는지 기동 때 확인한다.
+      # 7.2.0은 경고만(warn) — 7.3.0에서 이 줄을 지워 서버 기본값 enforce(불일치 시 기동 실패)로 간다.
+      # 변수로 열지 않고 값을 고정한다(.env로 끄거나 바꿀 수 없음).
+      MIGRATION_CHECKSUM_MODE: warn
       # 성능 노브(기본=현행 동작). poseTier(6.0-14): GPU 서버에서만 auto. detIntervalSec(6.0-15):
       # det 초당 1회+역산 박스 carry — CPU 서버 최대 수혜(실측 2.22×), 활성은 §14-4-2 배포 게이트에서
       # B2·촬영 프로토콜(작업자 1–2명)과 함께 결정. 허용 [0,1.0] 밖은 기동 실패.
