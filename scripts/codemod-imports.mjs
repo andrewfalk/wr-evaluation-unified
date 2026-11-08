@@ -247,6 +247,11 @@ for (const fileRel of files) {
   if (backward.has(fileRel)) {
     const verified = recordEntries(newDir, Object.fromEntries(Object.entries(relativeSpecCounts(out))
       .map(([k, n]) => [k, n - (leftOpen[k] ?? 0)]).filter(([, n]) => n > 0)));
+    // A path left open (ambiguous/unresolved) keeps its previous entry: dropping it would let the next
+    // run accept whatever the path resolves to now (e.g. a lib.ts that replaced a deleted lib/index.ts).
+    for (const k of Object.keys(leftOpen)) {
+      if (record[fileRel]?.[k] !== undefined) verified[k] = record[fileRel][k];
+    }
     if (JSON.stringify(record[fileRel] ?? null) !== JSON.stringify(verified)) {
       record[fileRel] = verified;
       recordChanged = true;

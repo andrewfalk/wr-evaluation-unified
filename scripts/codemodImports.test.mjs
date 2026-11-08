@@ -229,6 +229,25 @@ describe('codemod-imports', () => {
     expect(gone.out).toContain('recorded target src/lib/index.ts is gone');
   });
 
+  it('a path reported as ambiguous keeps its record, so running again still reports it (Codex R6)', () => {
+    const dir = repo({
+      'src/old.ts': 'export const value = "moved";\n',
+      'src/test.ts': "import { value } from './old';\n",
+    });
+    const moves = { 'src/old.ts': 'src/lib/index.ts', 'src/test.ts': 'src/feature/test.ts' };
+    expect(run(dir, moves, '--apply-moves').code).toBe(0);
+    // The recorded target is deleted and a lib.ts now answers '../lib'.
+    fs.rmSync(path.join(dir, 'src/lib/index.ts'));
+    fs.writeFileSync(path.join(dir, 'src/lib.ts'), 'export const value = "other";\n');
+    for (let i = 0; i < 2; i++) {
+      const r = run(dir, moves);
+      expect(r.code, `run ${i + 1}`).toBe(1);
+      expect(r.out).toContain('recorded target src/lib/index.ts is gone');
+    }
+    expect(JSON.parse(read(dir, 'moves.applied.json'))['src/feature/test.ts']['m:../lib'])
+      .toEqual({ n: 1, target: 'src/lib/index.ts' });
+  });
+
   it("'--root ./src' behaves like '--root src' (Codex R4)", () => {
     const files = {
       'src/config.ts': 'export default {};\n',
