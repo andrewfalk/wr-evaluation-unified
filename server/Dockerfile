@@ -72,8 +72,14 @@ COPY --from=web-builder /build/shared/dist ./shared/dist
 COPY --from=web-builder /build/packages/analytics-core/dist ./packages/analytics-core/dist
 COPY server/ ./server/
 # --ignore-scripts: 서버 prebuild(공유 패키지 tsup 재빌드)는 건너뛴다 — 공유 패키지 dist는 위에서 web-builder가
-# 만든 것을 복사했고, 이 단계는 서버 의존성만 설치해 tsup이 없다. build 자체는 tsc -p tsconfig.build.json.
+# 만든 것을 복사했고, 이 단계는 서버 의존성만 설치해 tsup이 없다. build 자체는 dist 삭제 → tsc -p tsconfig.build.json.
 RUN npm run build --workspace @wr/server --ignore-scripts
+# 옛 빌드 잔여물 가드(7.2.0 리허설): x.js 가 같은 이름의 폴더 모듈 x/index.js 를 가리면 Node 는 x.js 를 불러온다.
+# PC 의 server/dist 가 빌드 컨텍스트로 넘어와 S5·S6 이전 라우터(routes/auth.js 등)가 이미지에 섞였던 사고를 막는다
+# (.dockerignore 의 **/dist 와 build 의 dist 삭제가 1·2차 방어, 이것이 3차).
+RUN cd server/dist \
+    && stale="$(find . -name '*.js' | while read -r f; do if [ -f "${f%.js}/index.js" ]; then echo "$f"; fi; done)" \
+    && if [ -n "$stale" ]; then echo "server/dist: 폴더 모듈을 가리는 옛 빌드 파일:" $stale; exit 1; fi
 
 # =============================================================================
 # Stage 3: 서버 운영 의존성만 (dev 의존성·클라이언트 의존성 제외, glibc 네이티브 빌드)

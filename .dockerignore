@@ -1,5 +1,9 @@
 # Build artifacts (rebuilt inside Docker)
+# `dist/` alone matches only the top-level folder — `**/dist` also keeps server/dist, shared/dist and
+# packages/*/dist of this PC out of the build context. A leftover server/dist once put pre-S5 routers
+# (routes/auth.js …, shadowing routes/auth/index.js) into the 7.2.0 image (release rehearsal 2026-11-08).
 dist/
+**/dist
 node_modules/
 server/node_modules/
 shared/node_modules/
