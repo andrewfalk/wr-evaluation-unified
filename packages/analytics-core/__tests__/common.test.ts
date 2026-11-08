@@ -61,7 +61,7 @@ describe('escapeHtml', () => {
 });
 
 // grain 단순화 + 공통변수 브로드캐스트(PR0-B4 개정, person grain 삭제 후속) — 클라이언트
-// (CatalogPanel.jsx/RecipePanel.jsx)와 서버(server/src/stats/recipe/validation.ts)가 이 두 함수를
+// (CatalogPanel.jsx/RecipePanel.jsx)와 서버(server/src/stats/recipe/validate)가 이 두 함수를
 // 그대로 공유한다(복제 구현 금지 — 2차 리뷰 지적). 여기서 판정 규칙 자체를 고정한다.
 describe('isBroadcastSafe', () => {
   it('quasi_identifier는 안전하지 않다', () => {

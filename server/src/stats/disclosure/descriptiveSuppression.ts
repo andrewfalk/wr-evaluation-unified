@@ -22,7 +22,7 @@ import type { StatsEngineRawResult, StatsEngineRequest, StatsEngineVariableKind 
 // "기술통계·필터 용도로만" 카탈로그에 올린다, 회귀 predictor로서의 maxLevels 상한은
 // estimability gate가 아직 없는 PR4-A 전용 범위) 'discrete'로 합류한다 — 수준이 많다는
 // 사실 자체가 계산 kind를 바꾸지는 않는다. date는 여전히 미지원(카탈로그에 date 타입
-// 변수가 아직 0개 — stats/recipe/validation.ts:45-48의 동일한 "죽은 코드" 캐비엇 참고).
+// 변수가 아직 0개 — stats/recipe/validate/filters.ts의 동일한 "죽은 코드" 캐비엇 참고).
 function mapCatalogTypeToKind(type: AnalyticsVariableMetadata['type'] | undefined, key: string): StatsEngineVariableKind {
   if (type === 'continuous') return 'continuous';
   if (type === 'boolean' || type === 'ordinal' || type === 'categorical' || type === 'high_cardinality') return 'discrete';

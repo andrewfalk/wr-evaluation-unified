@@ -308,7 +308,7 @@ export function computePredictionNonEstimableReason(
   // 6 — predictor 사전검사, recipe 순서대로 처음 실패한 predictor의 코드.
   for (const key of input.predictorKeys) {
     const variable = input.catalogByKey.get(key);
-    if (!variable) continue; // UNKNOWN_VARIABLE로 이미 stats/recipe/validation.ts가 거부
+    if (!variable) continue; // UNKNOWN_VARIABLE로 이미 stats/recipe/validate가 거부
     const check = checkPredictorVariance(key, variable, input.s2Rows as DatasetRow[], PREDICTION_POLICY.maxLevels);
     if (!check.ok) return fail(check.reason);
   }

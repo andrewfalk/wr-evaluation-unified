@@ -91,7 +91,7 @@ function resolveReferenceLevel(
     return { level: candidates[0], usedFallback: requestedLevel !== undefined };
   }
 
-  // 선언 없는 동적 categorical(예: 담당의) — stats/recipe/validation.ts 1단계에서
+  // 선언 없는 동적 categorical(예: 담당의) — stats/recipe/validate 1단계에서
   // 이 값의 유효성을 검증할 수 없었으므로 여기서 처음 판정한다. 관측된 값을
   // 사용자가 지정했으면 그대로 쓴다(400도, 조용한 치환도 아님 — 리뷰 #18).
   if (requestedLevel !== undefined && observedSet.has(requestedLevel)) {
@@ -311,7 +311,7 @@ export function buildRegressionDesignMatrix(input: BuildRegressionDesignInput): 
 
   for (const key of predictorKeys) {
     const variable = catalogByKey.get(key);
-    if (!variable) continue; // UNKNOWN_VARIABLE로 이미 stats/recipe/validation.ts가 거부
+    if (!variable) continue; // UNKNOWN_VARIABLE로 이미 stats/recipe/validate가 거부
 
     // PR4-B2 — 단일레벨/레벨과다 검사는 checkPredictorVariance로 추출했다(동작
     // 불변, 위 함수 주석 참고). continuous/boolean은 통과 시 여기서 그대로 이어서

@@ -13,7 +13,7 @@ import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
 import { StatsAnalysisRecipeSchema, type AvailableMethod, type StatsAnalysisRecipe } from '@wr/contracts';
 import { canonicalDigest } from '../../canonicalSerializer';
 import { MINIMUM_COHORT } from '../policy/policy';
-import { validateRecipe } from './validation';
+import { validateRecipe } from './validate';
 import { readSnapshot, type Snapshot } from '../dataset/snapshot';
 import { buildDataset, type DatasetResult } from '../dataset/builder';
 import { partitionRowsForStratify, type StratifyPartitionResult } from '../dataset/descriptiveStratify';
@@ -361,7 +361,7 @@ function buildAnalysisContextTail(input: BuildAnalysisContextTailInput): BuildAn
       methodCatalogVersion = METHOD_POLICY_VERSION;
     }
   } else if (recipe.analysisMode === 'regression' && recipe.regression) {
-    // PR4-A1 §2 실행 순서 ①~④. zod+stats/recipe/validation.ts가 이미
+    // PR4-A1 §2 실행 순서 ①~④. zod+stats/recipe/validate가 이미
     // variableKeys.length>=2 · outcomeKey∈variableKeys를 보장했으므로
     // predictorKeys는 항상 1개 이상이다.
     const {

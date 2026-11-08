@@ -158,7 +158,7 @@ export function computeRepeatedVariableValue(
 // neckNonneutralHoursPerDay/combinedFlexionRotationPosture/precisionWork는
 // awkward_static_neck_load 포함 시만 — 그 외엔 not_applicable). types.ts/shared/contracts/
 // stats.ts의 grain 유니온, grainEntities.ts의 enumerateCervicalTaskEntities,
-// server/src/stats/{dataset/builder,recipe/validation,routes/catalogPreview}.ts 3곳 배선 완료.
+// server/src/stats/{dataset/builder.ts,recipe/validate,routes/catalogPreview.ts} 3곳 배선 완료.
 // PR0-B4 Slice 8a/8b — 80개→116개. Slice 8a: elbow/wrist temporal 4개씩(병합 결과
 // temporalSequence?? temporalRelation 기준 case grain, temporalSequence/temporalRelation
 // 각각은 변수화하지 않음). Slice 8b: job_diagnosis grain 활성화(기존 미지원 grain, 타입/
@@ -169,7 +169,7 @@ export function computeRepeatedVariableValue(
 // repetitionLevel·forceLevel·awkwardPostureLevel·workPattern·restDistribution·
 // dailyExposureHours·shiftSharePercent·daysPerWeek) 등록, BK 분기 전용 필드는 Slice 8c로
 // 보류. server/src/stats/dataset/builder.ts/statsRecipeValidation.ts/routes/stats.ts에 job_diagnosis
-// 배선 완료(ALL_GRAINS에는 PR0-B3부터 이미 있었음 — SUPPORTED_GRAINS_SET만 추가).
+// 배선 완료(ALL_GRAINS에는 PR0-B3부터 이미 있었음 — 지원 목록만 추가, 현재는 server/src/stats/recipe/grains.ts의 SUPPORTED_GRAINS).
 // 9차 검토(Slice 8a/8b 리뷰) 결함 수정 — 키 개수는 그대로지만 추출 결과값이 바뀌어
 // 캐시된 실행 다이제스트 무효화가 필요하다: enumerateJobDiagnosisEntities가 ':' 포함
 // id로 첫 직력을 배제하기 전에(즉 정규화 호출 이전에) 배제해버려, buildLegacyEntryMap의
@@ -225,7 +225,7 @@ export function computeRepeatedVariableValue(
 // careerMonths,evalMethod} 3개 삭제. 카탈로그 65개(person 7/case 24/job 19/disease 15) +
 // 서버 전용 meta 2개(통합 카탈로그 67개). person/case↔job/disease 방향(그리고 person↔case
 // 상호간)으로 브로드캐스트 안전 변수(quasi_identifier·high_cardinality 제외) 선택 허용 —
-// server/src/stats/recipe/validation.ts/statsDatasetBuilder.ts/CatalogPanel.jsx/RecipePanel.jsx가
+// server/src/stats/recipe/validate/statsDatasetBuilder.ts/CatalogPanel.jsx/RecipePanel.jsx가
 // analytics-core/common.ts의 isGrainCompatible을 공유.
 //
 // person grain 삭제(PR0-B4 후속, v20 대비) — v20에서 활성화했던 person grain을 다시
@@ -304,7 +304,7 @@ export function computeRepeatedVariableValue(
 // (analytics-core 83, 통합 85). 옛 key는 UNKNOWN_VARIABLE로 거부하고 클라이언트가 안내한다(자동 치환 없음).
 export const CATALOG_VERSION = 'v31-knee-load-weighted-cumulative';
 
-// PR4-B2 — outcome 명세(계획서 §2단계). 서버 검증(server/src/stats/recipe/validation.ts)과 클라이언트
+// PR4-B2 — outcome 명세(계획서 §2단계). 서버 검증(server/src/stats/recipe/validate)과 클라이언트
 // 선택지(RecipePanel.jsx, 카탈로그 DTO의 predictionOutcomeLevels/predictionEventLevels)가
 // 공유하는 단일 진실원이다. getCategoricalOrder에는 등록하지 않는다(association의
 // 기준레벨·이변량 축 순서에 영향 주지 않는다 — association 동작 불변 원칙).

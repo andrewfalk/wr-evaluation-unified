@@ -221,7 +221,7 @@ describe('computeCorrelationMatrixAvailableMethods', () => {
   // 코드리뷰 수정(2026-09-11) — boolean/ordinal 변수가 하나라도 섞이면 preview
   // 시점에도 METHOD_TYPE_MISMATCH로 unsupported여야 한다. 이전엔 personCount만
   // 보고 항상 available을 반환해, /preview에서는 실행 가능해 보이다가 /analyze
-  // (stats/recipe/validation.ts)에서만 뒤늦게 400으로 거부되는 모순이 있었다.
+  // (stats/recipe/validate)에서만 뒤늦게 400으로 거부되는 모순이 있었다.
   it('변수 중 하나라도 non-continuous(boolean 등)면 둘 다 METHOD_TYPE_MISMATCH — preview에서도 analyze와 동일하게 미리 드러난다', () => {
     const mixed = new Map<string, AnalyticsVariableMetadata>([
       ['a', makeVariable('a', 'continuous')],

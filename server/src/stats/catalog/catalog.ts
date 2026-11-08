@@ -1,8 +1,8 @@
 // PR0-B3 Part A — 통합 카탈로그 접근자. `getFullVariableCatalog()`(analytics-core 전용)를
-// `stats/recipe/validation.ts`/`stats/routes/catalogPreview.ts`(구 routes/stats.ts)가 직접 호출하던 것을 이 함수 하나로 정리한다.
+// `stats/recipe/validate`/`stats/routes/catalogPreview.ts`(구 routes/stats.ts)가 직접 호출하던 것을 이 함수 하나로 정리한다.
 // Part C — SNAPSHOT_COLUMN_VARIABLES(담당의·등록일, payload가 아니라 SnapshotRow에서 오는
 // 변수)를 여기서 병합한다(계획 "통합 카탈로그" 절이 예고한 유일한 합류 지점).
-// `stats/dataset/builder.ts`는 이 함수를 호출하지 않는다 — 검증 단계(stats/recipe/validation.ts)가
+// `stats/dataset/builder.ts`는 이 함수를 호출하지 않는다 — 검증 단계(stats/recipe/validate)가
 // 만든 catalogByKey를 그대로 전달받는 기존 구조를 유지한다.
 import { getFullVariableCatalog, PREDICTION_OUTCOME_SPECS, PREDICTION_REVIEWED_DERIVED_PREDICTORS } from '@wr/analytics-core/catalog';
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';

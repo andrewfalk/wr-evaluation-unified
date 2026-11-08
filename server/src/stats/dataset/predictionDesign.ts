@@ -41,7 +41,7 @@ export function buildPredictionDesignMatrix(
 
   for (const key of predictorKeys) {
     const variable = catalogByKey.get(key);
-    if (!variable) continue; // UNKNOWN_VARIABLE로 이미 stats/recipe/validation.ts가 거부
+    if (!variable) continue; // UNKNOWN_VARIABLE로 이미 stats/recipe/validate가 거부
 
     if (variable.type === 'continuous') {
       columns.push({ name: key, variableKey: key, level: null });

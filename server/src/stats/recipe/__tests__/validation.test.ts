@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateRecipe } from '../validation';
+import { validateRecipe } from '../validate';
 import type { StatsAnalysisRecipe } from '@wr/contracts';
 
 const CATALOG_KEYS = [
@@ -149,7 +149,7 @@ describe('validateRecipe — 필터 전용 변수 계약(analysisRole)', () => {
 
 // Table1 스트라티피케이션 — descriptive.stratifyByKey도 neededKeys에 포함되므로
 // 존재·grain·직접식별자·산식정책 검증이 자동 적용되고, filter_only·목적·타입(그룹
-// 변수 전용) 검사는 별도로 추가했다(stats/recipe/validation.ts §"검증기 neededKeys").
+// 변수 전용) 검사는 별도로 추가했다(stats/recipe/validate §"검증기 neededKeys").
 describe('validateRecipe — Table1 stratifyByKey', () => {
   it('boolean/ordinal/categorical(담당의)은 그룹 변수로 허용된다', () => {
     const result = validateRecipe(
@@ -351,7 +351,7 @@ describe('validateRecipe — 분석 목적(§실측: 공식점수 7개 중 경�
 // PR4-B2 — 예측(prediction) 역할·grain·eventLevel·필터 매트릭스. 위 §실측 테스트에서
 // 공식점수 6개는 predictionRole이 없어 prediction이 불허이고 경추 누적부하량(2026-10-02)만
 // 허용이다. 여기서는 실제로 predictionRole이 배선된 변수들로 새 검증 분기
-// (stats/recipe/validation.ts의 'prediction' 브랜치)를 확인한다.
+// (stats/recipe/validate/prediction.ts)를 확인한다.
 function predictionRecipe(overrides: Partial<StatsAnalysisRecipe> = {}): StatsAnalysisRecipe {
   return baseRecipe({
     grain: 'case',

@@ -871,7 +871,7 @@ const CORRELATION_MATRIX_BODY = {
   filters: [],
   analysisPurpose: 'association',
   // spine.mddm.lifetimeDoseMNh는 유일하게 supportedFormulaPolicies가 2개(spine_mddm
-  // family)라 명시가 필요하다(stats/recipe/validation.ts §A-8).
+  // family)라 명시가 필요하다(stats/recipe/validate/variables.ts §A-8).
   formulaPolicies: { spine_mddm: 'recompute_current' },
   analysisMode: 'correlation_matrix',
   requestedMethod: 'pearson_correlation',
@@ -892,7 +892,7 @@ describe('POST /analyze — correlation_matrix HTTP 라우트 wiring(PR3-B)', ()
       .post('/api/stats/analyze')
       .set(authHeaders(orgToken()))
       .send({ ...CORRELATION_MATRIX_BODY, requestedMethod: 'welch_t' });
-    // welch_t는 상관행렬 모드에서 stats/recipe/validation.ts가 이미 400으로 거부한다
+    // welch_t는 상관행렬 모드에서 stats/recipe/validate/methods.ts가 이미 400으로 거부한다
     // (CORRELATION_MATRIX_METHOD_NOT_SUPPORTED) — availableMethods 조회 이전 단계.
     expect(res.status).toBe(400);
     fakeOf(fx).assertNoUnmatched();

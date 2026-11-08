@@ -24,14 +24,11 @@ import {
 } from '@wr/contracts';
 
 import { writeAuditLogStrict, type AuditOutcome } from '../../middleware/audit';
+import type { StatsRunRow as FullStatsRunRow } from '../queue/runRow';
 
-interface StatsRunRow {
-  manifest: unknown;
-  result: unknown;
-  status: string;
-  requested_disclosure_profile: string;
-  expires_at: string;
-}
+// The columns this handler reads from stats_runs — the full row type lives in queue/runRow.ts (S6 P1-35;
+// the local copy declared expires_at as a string, but pg returns a Date).
+type StatsRunRow = Pick<FullStatsRunRow, 'manifest' | 'result' | 'status' | 'requested_disclosure_profile' | 'expires_at'>;
 
 // CSV formula injection 방어(§7.5) — 문자열 셀만 대상. 숫자 통계값(음수 포함)은 이스케이프
 // 대상이 아니다 — 문자열로 감싸면 엑셀에서 숫자가 아니라 텍스트로 깨진다.

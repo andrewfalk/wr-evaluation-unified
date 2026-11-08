@@ -121,7 +121,7 @@ export const StatsFilterSchema = z.object({
   key:      z.string(),
   operator: StatsFilterOperatorSchema,
   // 타입-값 일치(변수 type별 허용 연산자·값 타입)·ordinal 순위 비교 연산자 제한·결측 취급은
-  // zod가 아니라 server/src/stats/recipe/validation.ts가 카탈로그 메타데이터를 참조해 동적으로
+  // zod가 아니라 server/src/stats/recipe/validate가 카탈로그 메타데이터를 참조해 동적으로
   // 검사한다(정적 스키마로는 "이 key의 type에 따라 값 형태가 달라진다"를 표현할 수 없다).
   value: z.union([
     z.string(),
@@ -152,7 +152,7 @@ export const StatsMethodIdSchema = z.enum([
 export const StatsAnalysisRecipeSchema = z.object({
   grain:           StatsGrainSchema,
   variableKeys:    z.array(z.string().min(1)).min(1).max(20),
-  // 다중 필터는 AND로 결합된다(server/src/stats/recipe/validation.ts §A-7).
+  // 다중 필터는 AND로 결합된다(server/src/stats/recipe/validate §A-7).
   filters:         z.array(StatsFilterSchema).max(10).default([]),
   analysisPurpose: z.enum(['association', 'prediction', 'formula_audit']),
   formulaPolicies: z.record(
@@ -163,14 +163,14 @@ export const StatsAnalysisRecipeSchema = z.object({
   // 요청(이 필드 자체가 없음)을 그대로 기술통계로 해석한다. requestedMethod는 완전
   // optional — /preview는 이 값의 유효성을 검사하지 않는다(계획서 § "preview는
   // 관대하다" — 방법을 아직 안 고른 최초 preview도 정상 응답해야 availableMethods를
-  // 볼 수 있다). /analyze에서만 server/src/stats/recipe/validation.ts(context='analyze')가
+  // 볼 수 있다). /analyze에서만 server/src/stats/recipe/validate(context='analyze')가
   // 엄격하게 검사한다.
   // PR3-B — 'correlation_matrix' 추가(계획서 §4). variableKeys는 3개 이상 선택하는
   // 다중 변수 모드다("전부 continuous여야 한다"는 카탈로그 조회가 필요해 zod가 아니라
-  // server/src/stats/recipe/validation.ts가 검사 — §7 "구조검증/의미검증 분리").
+  // server/src/stats/recipe/validate가 검사 — §7 "구조검증/의미검증 분리").
   // PR4-A1 — 'regression' 추가. requestedMethod는 다른 모드와 마찬가지로 여기서는
   // 계속 optional이다(리뷰 #1) — 방법 미선택 상태의 최초 preview도 정상 응답해야
-  // availableMethods를 볼 수 있다. 필수 여부는 server/src/stats/recipe/validation.ts의
+  // availableMethods를 볼 수 있다. 필수 여부는 server/src/stats/recipe/validate의
   // context==='analyze'에서만 강제한다.
   // PR4-B2 — 'prediction' 추가(계획서 §1단계). 나머지 모드와 원칙 동일(구버전
   // 재파싱 호환 위해 optional 유지 규칙은 requestedMethod에 그대로 적용).
@@ -179,12 +179,12 @@ export const StatsAnalysisRecipeSchema = z.object({
   // PR4-A1 — 회귀 전용 서브객체. variableKeys는 그대로 재사용하고(진실원 하나만
   // 유지), predictors는 variableKeys에서 outcomeKey를 뺀 나머지(원래 순서 유지 —
   // forest plot 행 순서가 된다)로 파생한다. referenceLevels 값 검증(카탈로그 필요)은
-  // server/src/stats/recipe/validation.ts가 담당한다.
+  // server/src/stats/recipe/validate가 담당한다.
   // PR4-A2 — eventLevel(categorical 2레벨 outcome 전용) · standardizePredictors ·
   // interactionTerms · splineKeys 추가. 이 넷의 타입/교차 제약 중 카탈로그가 필요
   // 없는 것(중복·자기자신 쌍·predictor 집합 소속)은 아래 superRefine에서, 카탈로그가
   // 필요한 것(spline은 continuous만·eventLevel은 categorical outcome에만)은
-  // server/src/stats/recipe/validation.ts가 담당한다(계획서 §1 "이것만으로는 부족하다").
+  // server/src/stats/recipe/validate가 담당한다(계획서 §1 "이것만으로는 부족하다").
   regression: z.object({
     outcomeKey: z.string().min(1),
     referenceLevels: z.record(z.string(), z.string()).default({}),
@@ -197,7 +197,7 @@ export const StatsAnalysisRecipeSchema = z.object({
   // 표준화 옵션은 없다(연구용 내부검증 성능평가만 하므로 회귀 진단 기능을 공유하지
   // 않는다). eventLevel은 필수다 — boolean outcome은 클라이언트가 'true'로 고정해
   // 보내고, categorical은 PREDICTION_OUTCOME_SPECS의 허용값 중 하나여야 한다(카탈로그
-  // 조회가 필요해 그 검증은 server/src/stats/recipe/validation.ts가 한다).
+  // 조회가 필요해 그 검증은 server/src/stats/recipe/validate가 한다).
   prediction: z.object({
     outcomeKey: z.string().min(1),
     eventLevel: z.string().min(1),
@@ -242,7 +242,7 @@ export const StatsAnalysisRecipeSchema = z.object({
   }
   // 카탈로그 조회가 필요 없는 순수 구조검사만 여기서 한다(컨텍스트 무관 — preview·
   // analyze 둘 다 항상 참). 타입정합성·paired영구거부·method필수여부(컨텍스트별로
-  // 다름)는 카탈로그가 필요해 server/src/stats/recipe/validation.ts(context 인자)가 담당한다.
+  // 다름)는 카탈로그가 필요해 server/src/stats/recipe/validate(context 인자)가 담당한다.
   if (recipe.analysisMode === 'bivariate') {
     if (recipe.variableKeys.length !== 2) {
       ctx.addIssue({
@@ -261,7 +261,7 @@ export const StatsAnalysisRecipeSchema = z.object({
   }
   if (recipe.analysisMode === 'correlation_matrix') {
     // PR3-B 계획서 §4/§7 — variableKeys 개수·중복만 여기서(구조), "전부
-    // continuous"는 server/src/stats/recipe/validation.ts(의미, 카탈로그 필요).
+    // continuous"는 server/src/stats/recipe/validate(의미, 카탈로그 필요).
     if (recipe.variableKeys.length < 3) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -281,7 +281,7 @@ export const StatsAnalysisRecipeSchema = z.object({
   if (recipe.analysisMode === 'regression') {
     // PR4-A1 — 카탈로그가 필요 없는 구조검사만(리뷰 #1 — requestedMethod 필수여부는
     // 여기서 검사하지 않는다). outcome 타입 정합성·predictor 타입 적격성·
-    // referenceLevels 값 검증은 server/src/stats/recipe/validation.ts(context 인자, 카탈로그 필요).
+    // referenceLevels 값 검증은 server/src/stats/recipe/validate(context 인자, 카탈로그 필요).
     if (!recipe.regression) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -384,7 +384,7 @@ export const StatsAnalysisRecipeSchema = z.object({
   if (recipe.analysisMode === 'prediction') {
     // PR4-B2 — 카탈로그가 필요 없는 구조검사만(계획서 §1단계). outcome이
     // predictionRole==='outcome'인지·eventLevel이 명세 허용값인지·predictor grain
-    // 적격성은 server/src/stats/recipe/validation.ts(context 인자, 카탈로그 필요)가 담당한다.
+    // 적격성은 server/src/stats/recipe/validate(context 인자, 카탈로그 필요)가 담당한다.
     if (!recipe.prediction) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
