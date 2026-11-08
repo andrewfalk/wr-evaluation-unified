@@ -56,6 +56,8 @@ import {
 } from '../db/patientLocks';
 import { asyncHandler } from '../http/asyncHandler';
 import { lockOf, lockTokenOf, parsePositiveInt, requireLockToken } from '../http/lockToken';
+import { evaluateLockGate, lockHolderResponse } from '../http/lockGate';
+import { withDeadlockRetry } from '../db/withDeadlockRetry';
 import { orgIdOf, requireOrg, requirePatientAccess, sessionOf } from '../http/authz';
 
 // ---------------------------------------------------------------------------
@@ -145,29 +147,6 @@ function isUniqueViolation(err: unknown): err is PgErrorLike {
   return (err as PgErrorLike | null)?.code === '23505';
 }
 
-// PostgreSQL deadlock_detected. 두 환자가 서로 등록번호를 맞바꾸면
-// 〈T1: 새 person B 보유 → 옛 person A 대기〉 vs 〈T2: B 보유 → A 대기〉로 순환 대기가
-// 생길 수 있다(새 person은 resolve 시점에 INSERT될 수도 있어 UUID 정렬 선점이 불가능).
-// PostgreSQL이 한쪽을 희생시켜 중단하므로, 희생된 쪽만 다시 돌리면 성공한다.
-export function isDeadlock(err: unknown): boolean {
-  return (err as PgErrorLike | null)?.code === '40P01';
-}
-
-const DEADLOCK_MAX_ATTEMPTS = 3;
-
-// 핸들러가 deadlock으로 던지면 제한 횟수만큼 다시 실행한다.
-// deadlock은 트랜잭션 내부 query에서 발생하고 그 시점엔 응답을 쓰기 전이므로 재실행이 안전하다.
-// 상한을 넘으면 마지막 오류를 그대로 올려 라우트의 500 핸들러가 받는다.
-export async function withDeadlockRetry<T>(run: () => Promise<T>): Promise<T> {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      return await run();
-    } catch (err) {
-      if (!isDeadlock(err) || attempt >= DEADLOCK_MAX_ATTEMPTS) throw err;
-    }
-  }
-}
-
 function uniqueConflictResponse(err: PgErrorLike): { code: string; error: string } {
   if (err.constraint === 'patient_persons_org_patient_no_uniq') {
     return {
@@ -200,59 +179,11 @@ function personVanishedResponse(): { code: string; error: string; retriable: boo
 // ---------------------------------------------------------------------------
 
 
-// holder 응답에는 holderName/acquiredAt/expiresAt만 노출 — leaseToken/clientInstanceId/
-// sessionId/userId는 절대 노출하지 않는다.
-function lockHolderResponse(lock: LockRow): { holderName: string; acquiredAt: string; expiresAt: string } {
-  return {
-    holderName: lock.holderName,
-    acquiredAt: lock.acquiredAt.toISOString(),
-    expiresAt:  lock.expiresAt.toISOString(),
-  };
-}
-
 function lockHeldResponse(lock: LockRow): { code: string; error: string; holder: unknown } {
   return {
     code:   'LOCK_HELD',
     error:  `Currently being edited by ${lock.holderName}`,
     holder: lockHolderResponse(lock),
-  };
-}
-
-// patchPatient/deletePatient/assignPatient의 쓰기 게이트. 호출 전 lockPatientAnchor()로
-// 앵커(FOR UPDATE)를 이미 잡아둔 상태여야 한다.
-// off: 항상 통과(구버전 배포 호환). observe: 평가·감사로그만, 절대 막지 않음. enforce: 실제 차단.
-export async function evaluateLockGate(
-  pool: Pool,
-  client: QueryRunner,
-  req: Request,
-  patientId: string,
-  orgId: string,
-  // 요청 하나에 환자 N명이 실리는 호출부(워크스페이스 저장)는 X-Lock-Token 헤더 하나로 토큰을 못 보낸다 —
-  // 환자별 토큰을 직접 넘긴다. undefined면 기존처럼 헤더에서 읽고, null은 "토큰 없음"을 명시한다.
-  leaseTokenOverride?: string | null
-): Promise<{ status: number; body: Record<string, unknown> } | null> {
-  if (config.lockEnforcementMode === 'off') return null;
-
-  const leaseToken = leaseTokenOverride !== undefined ? leaseTokenOverride : lockTokenOf(req);
-  const result = await checkLockForWrite(client, { patientId, orgId, leaseToken });
-  if (result.ok) return null;
-
-  const session = sessionOf(req);
-  if (config.lockEnforcementMode === 'observe') {
-    // observe 모드는 console.warn이 아니라 감사 로그로 남긴다 — 운영에서 통계·추적 가능해야
-    // "관찰"이 의미가 있다. 절대 요청을 막지 않는다(계속 진행).
-    void writeAuditLog(pool, {
-      actorUserId: session.userId, actorOrgId: orgId, action: 'patient_lock_observed_block',
-      targetType: 'patient', targetId: patientId, outcome: 'success',
-      ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null,
-      extra: { holderName: result.heldBy.holderName },
-    });
-    return null;
-  }
-
-  return {
-    status: 423,
-    body: { code: 'LOCK_HELD', error: `Currently being edited by ${result.heldBy.holderName}`, holder: lockHolderResponse(result.heldBy) },
   };
 }
 
