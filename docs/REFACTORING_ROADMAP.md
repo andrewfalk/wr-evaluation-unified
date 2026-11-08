@@ -270,7 +270,7 @@
 | L1 | 서버 AI 프록시 한도/누출 | ✅ **HF7(b)(#166)** |
 | L2 | 본문 10MB 인증 전 파싱 | Phase 1 bundle — ✅ 2026-11-08(#232: 마운트별 파서 — 환자 운반 4곳만 10mb, ai 2mb, stats 1mb, 나머지 256kb) |
 | L3 | refresh·audit/emr rate limit | Phase 1 bundle — ✅ 2026-11-08(#232: refresh IP 60/분, EMR 감사 IP 120/분 + 서명 검증 후 장치 120/분) |
-| L4 | 가입 ID 노출·org 미연결 | Phase 1 bundle — ✅ 2026-11-08(P1-25: 가입 요청 항상 202 ACCEPTED·중복은 ON CONFLICT 무시, 마이그레이션 0041 organization_id = 승인·거절 관리자 조직, 조직 관리자는 자기 조직+미배정만) |
+| L4 | 가입 ID 노출·org 미연결 | Phase 1 bundle — ✅ 2026-11-08(#236: 가입 요청 항상 202 ACCEPTED·중복은 ON CONFLICT 무시, 마이그레이션 0041 organization_id = 승인·거절 관리자 조직, 조직 관리자는 자기 조직+미배정만) |
 | L5 | JWT alg·비밀키 강도·미사용 secret | Phase 1 bundle — ✅ 2026-11-08(#231: HS256 고정, ACCESS_TOKEN_SECRET 32바이트 미만 기동 실패, REFRESH_TOKEN_SECRET 제거 — 운영 .env 길이 확인을 7.2.0 안내서에) |
 | L6 | 비밀번호 최대 길이 | Phase 1 bundle — ✅ 2026-11-08(#231: 새 비밀번호 128자, 로그인·현재 비밀번호는 상한 없음) |
 | L7 | PHI 응답 no-store | ✅ **HF4(#161)** |
@@ -278,7 +278,7 @@
 | L9 | permission handler·nav guard·모델명 | ✅ **HF9**(handler/guard, #162) + HF7(d)(모델명, #167) |
 | L10 | Python 자식 env 상속 | Phase 1 bundle |
 | L11 | 감사 nonce 메모리·spread 순서 | Phase 1 bundle — ✅ 2026-11-08(#233: 마이그레이션 0038 emr_audit_nonces, nonce 차지·장치 한도·감사 행을 한 트랜잭션, 서버 필드 우선·세션 플래그는 서버만) |
-| L12 | autosave 잔존·retention dry-run·seed 가드 | Phase 1 bundle |
+| L12 | autosave 잔존·retention dry-run·seed 가드 | Phase 1 bundle — ✅ 2026-11-08(P1-26: 환자 삭제 트랜잭션에서 autosave 항목 제거, retention CLI `--dry-run`·운영은 `--yes` 없으면 dry-run, seedAdmin 운영에서 관리자 있으면 거부·`--force`) |
 | L13 | compose 기본값·reader 비번 | Phase 1 bundle |
 | L14 | CSV TAB/CR | Phase 1 bundle — ✅ 2026-11-08(#233: 앞머리 TAB·CR 접두, TAB 인용) |
 | L15 | 웹 CSP/SRI | Phase 2 bundle |

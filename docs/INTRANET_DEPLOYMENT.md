@@ -45,6 +45,8 @@ docker compose up -d
 # 3. Admin 계정 초기 생성 (최초 1회)
 docker compose exec app node dist/cli/seedAdmin.js
 # → stdin에서 비밀번호 입력 (shell history에 남지 않음)
+# → 7.2.0부터 운영(NODE_ENV=production)에서는 관리자 계정이 이미 있으면 묻기 전에 거부합니다.
+#   추가 계정은 관리자 콘솔에서 만듭니다(꼭 필요하면 --force).
 
 # 4. audit reader 비밀번호를 .env의 AUDIT_DB_PASSWORD 값으로 동기화 (최초 1회)
 #    migration이 기본값 'changeme_audit_reader'로 role을 생성하므로,
