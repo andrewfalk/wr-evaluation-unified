@@ -142,6 +142,71 @@ describe('codemod-imports', () => {
     expect(read(dir, 'src/stats/engine/reader.ts')).toContain("path.resolve(__dirname, '../../../services/x/input.json')");
   });
 
+  it('after a rebase, an old path that now lands on a moved-in file is reported, not trusted (Codex R3)', () => {
+    const dir = repo({
+      'src/config.ts': 'export default { real: true };\n',
+      'src/routes/config.ts': 'export default { other: true };\n', // moved in from src/otherConfig.ts
+      'src/routes/app.ts': "import config from './config';\n",
+    });
+    const r = run(dir, { 'src/app.ts': 'src/routes/app.ts', 'src/otherConfig.ts': 'src/routes/config.ts' });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("src/routes/app.ts: './config'");
+    expect(read(dir, 'src/routes/app.ts')).toContain("from './config'");
+  });
+
+  it('keeps the folder index when the shorter path would load a same-named file instead (Codex R3)', () => {
+    const dir = repo({
+      'src/old.ts': 'export const value = "old";\n',
+      'src/lib.ts': 'export const value = "lib";\n',
+      'src/app.ts': "import { value } from './old';\n",
+    });
+    const r = run(dir, { 'src/old.ts': 'src/lib/index.ts' }, '--apply-moves');
+    expect(r.code).toBe(0);
+    expect(read(dir, 'src/app.ts')).toContain("from './lib/index'");
+  });
+
+  it('--apply-moves writes a record; a later run trusts the recorded paths but still checks new ones', () => {
+    const dir = repo({
+      'src/index.ts': 'export {};\n',
+      'src/config.ts': 'export default {};\n',
+      'src/statsEngine.ts': 'export const e = 1;\n',
+      'src/__tests__/statsEngine.test.ts': "import { e } from '../statsEngine.js';\n",
+    });
+    const moves = {
+      'src/statsEngine.ts': 'src/stats/engine/index.ts',
+      'src/__tests__/statsEngine.test.ts': 'src/stats/engine/__tests__/engine.test.ts',
+    };
+    expect(run(dir, moves, '--apply-moves').code).toBe(0);
+    const rec = JSON.parse(read(dir, 'moves.applied.json'));
+    expect(rec['src/stats/engine/__tests__/engine.test.ts']).toEqual(['m:../index.js']);
+    // A rebased branch adds an old-style import to the moved test: '../config' meant src/config.ts.
+    const t = 'src/stats/engine/__tests__/engine.test.ts';
+    fs.writeFileSync(path.join(dir, t), read(dir, t) + "import config from '../config';\n");
+    const r = run(dir, moves);
+    expect(r.code).toBe(0);
+    expect(read(dir, t)).toContain("from '../index.js'"); // trusted, untouched
+    expect(read(dir, t)).toContain("import config from '../../../config';"); // fixed from its old meaning
+  });
+
+  it('--write-record records an already-moved tree and refuses paths that do not resolve', () => {
+    const dir = repo({
+      'src/index.ts': 'export {};\n',
+      'src/stats/engine/index.ts': 'export const e = 1;\n',
+      'src/stats/engine/__tests__/engine.test.ts': "import { e } from '../index.js';\n",
+    });
+    const moves = {
+      'src/statsEngine.ts': 'src/stats/engine/index.ts',
+      'src/__tests__/statsEngine.test.ts': 'src/stats/engine/__tests__/engine.test.ts',
+    };
+    expect(run(dir, moves, '--write-record').code).toBe(0);
+    expect(JSON.parse(read(dir, 'moves.applied.json'))['src/stats/engine/__tests__/engine.test.ts']).toEqual(['m:../index.js']);
+    const again = run(dir, moves);
+    expect(again.code).toBe(0);
+    expect(again.out).not.toContain('AMBIGUOUS');
+    fs.writeFileSync(path.join(dir, 'src/stats/engine/__tests__/engine.test.ts'), "import { x } from './missing';\n");
+    expect(run(dir, moves, '--write-record').code).toBe(1);
+  });
+
   it("a module moved next to its folder index imports it as '.' (not './')", () => {
     const dir = repo({
       'src/statsEngine.ts': 'export const e = 1;\n',

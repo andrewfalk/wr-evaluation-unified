@@ -363,7 +363,7 @@ shared/contracts/{aiAnalysis,aiPrompt,aiModels}.ts  # AI 입력 계약(.strict) 
 ## 기능 PR ↔ 리팩터링 PR 충돌 방지
 
 - **큰 파일 분할(`move`) 먼저, 당일 착륙**(아침 열고 당일 머지; 안 끝나면 더 쪼갬). `App.jsx`/`patients.ts`/`statsEngine.ts`/`main.js`/`index.css`를 건드리는 기능 PR은 분할 전 대기, 후 rebase.
-- **freeze window**: PR 제목 `[freeze App.jsx 10/21]`, 최대 24h, 대상 C3-①⑦⑧·S5·S7-③④·S6-①·E1·C10-①·D5. 창 후 `scripts/codemod-imports.mjs`(경로 변경 맵)로 기능 브랜치 자체 rebase — 사용: rebase 뒤 `node scripts/codemod-imports.mjs scripts/moves/<이동 PR>.json`(이미 맞는 경로는 건드리지 않음, 여러 번 돌려도 같음). 맵은 이동 PR마다 `scripts/moves/`에 둔다(S6-① = `p1-33-stats.json`).
+- **freeze window**: PR 제목 `[freeze App.jsx 10/21]`, 최대 24h, 대상 C3-①⑦⑧·S5·S7-③④·S6-①·E1·C10-①·D5. 창 후 `scripts/codemod-imports.mjs`(경로 변경 맵)로 기능 브랜치 자체 rebase — 사용: rebase 뒤 `node scripts/codemod-imports.mjs scripts/moves/<이동 PR>.json`— 이동 PR이 남긴 기록 파일(`<맵>.applied.json`, 이동 파일마다 검증된 상대 경로)에 있는 경로는 그대로 두고, 그 밖의 경로는 이동 전 의미로 고치며, 이동 전·후 뜻이 다른 파일로 갈리면 AMBIGUOUS로 보고하고 종료 코드 1(사람이 고친다). 맵과 기록은 이동 PR마다 `scripts/moves/`에 둔다(S6-① = `p1-33-stats.json`·`p1-33-stats.applied.json`).
 - **안정 seam**: 공개 팩토리 시그니처(`createPatientsRouter(pool)` 등), `registerModule` 매니페스트 키(추가만), `window.electron` 키(추가만)는 Phase 종료까지 유지; re-export shim은 1릴리스 유지 후 `no-restricted-imports` deprecation으로 제거.
 - 진행 중 기능이 있는 파일은 리팩터링 보류("2주 no-touch" 목록 유지); 리팩터링 브랜치 수명 ≤2일. 주간 리듬: 월·화 `move`/freeze, 수~금 `safe` + 기능.
 - 모든 리팩터링 PR = `npm run check` 통과(DB·동시성·통계 엔진·마이그레이션을 건드린 PR은 `npm run check:full`, D9); `flagged`는 두 Electron 타깃 수동 스모크 추가. 동시성 수정은 실DB로 실패 재현 후 복원(기존 교훈).
