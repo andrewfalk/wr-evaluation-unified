@@ -124,6 +124,15 @@ function relativeSpecCounts(src) {
   for (const p of PLAIN_PATTERNS) for (const m of src.matchAll(p)) if (!m[3].startsWith('/')) add(recordKey(m[3], false));
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
+// Record entry per path: how many occurrences and which file they resolved to when recorded. A later
+// run checks the target again — a file added since (e.g. lib.ts next to lib/) can shadow it.
+function recordEntries(dirRel, counts) {
+  return Object.fromEntries(Object.entries(counts).map(([k, n]) => {
+    const target = resolveCurrent(dirRel, k.slice(2), k.startsWith('m:'));
+    return [k, target ? { n, target } : { n }];
+  }));
+}
+const entryCount = (e) => (typeof e === 'number' ? e : e?.n ?? 0);
 
 function walk(dirRel, out) {
   for (const e of fs.readdirSync(abs(dirRel), { withFileTypes: true })) {
@@ -151,7 +160,7 @@ if (writeRecordOnly) {
       const isModule = k.startsWith('m:');
       if (!resolveCurrent(dir, k.slice(2), isModule)) broken.push(`${fileRel}: ${k.slice(2)}`);
     }
-    record[fileRel] = specs;
+    record[fileRel] = recordEntries(dir, specs);
   }
   if (broken.length > 0) {
     console.error(`--write-record: these paths do not resolve, fix them first (${broken.length}):`);
@@ -181,12 +190,27 @@ for (const fileRel of files) {
       if (!isModule && spec.startsWith('/')) return whole;
       const key = recordKey(spec, isModule);
       seen[key] = (seen[key] ?? 0) + 1;
-      if (seen[key] <= (trusted[key] ?? 0)) return whole; // written/verified for the moved layout
-      const original = resolveOriginal(oldDir, spec, isModule);
-      const current = preMove ? null : resolveCurrent(newDir, spec, isModule);
-      const intended = original ? (forward.get(original) ?? original) : null;
+      const entry = trusted[key];
+      let intended;
+      let current;
+      if (seen[key] <= entryCount(entry)) {
+        // Written/verified for the moved layout — still check it reaches the file it reached then.
+        current = resolveCurrent(newDir, spec, isModule);
+        const recorded = typeof entry === 'object' ? entry.target : undefined;
+        if (!recorded || current === recorded) return whole;
+        if (!isTarget(recorded, isModule)) {
+          ambiguous.push(`${fileRel}: '${spec}' → now ${current ?? 'nothing'}, recorded target ${recorded} is gone`);
+          open(key);
+          return whole;
+        }
+        intended = recorded; // shadowed by a file added since (e.g. lib.ts next to lib/) — point back at it
+      } else {
+        const original = resolveOriginal(oldDir, spec, isModule);
+        current = preMove ? null : resolveCurrent(newDir, spec, isModule);
+        intended = original ? (forward.get(original) ?? original) : null;
+      }
       if (current && (!intended || intended === current)) return whole; // already right
-      if (current && intended && intended !== current) {
+      if (current && intended && intended !== current && seen[key] > entryCount(entry)) {
         // Before the move it meant one file, now it resolves to another (e.g. a moved file's './config'
         // now lands on a sibling config.ts, moved in or not) — cannot be decided from the tree: report.
         ambiguous.push(`${fileRel}: '${spec}' → now ${current}, before the move ${intended}`);
@@ -221,8 +245,8 @@ for (const fileRel of files) {
     changedFiles += 1;
   }
   if (backward.has(fileRel)) {
-    const verified = Object.fromEntries(Object.entries(relativeSpecCounts(out))
-      .map(([k, n]) => [k, n - (leftOpen[k] ?? 0)]).filter(([, n]) => n > 0));
+    const verified = recordEntries(newDir, Object.fromEntries(Object.entries(relativeSpecCounts(out))
+      .map(([k, n]) => [k, n - (leftOpen[k] ?? 0)]).filter(([, n]) => n > 0)));
     if (JSON.stringify(record[fileRel] ?? null) !== JSON.stringify(verified)) {
       record[fileRel] = verified;
       recordChanged = true;

@@ -178,7 +178,7 @@ describe('codemod-imports', () => {
     };
     expect(run(dir, moves, '--apply-moves').code).toBe(0);
     const rec = JSON.parse(read(dir, 'moves.applied.json'));
-    expect(rec['src/stats/engine/__tests__/engine.test.ts']).toEqual({ 'm:../index.js': 1 });
+    expect(rec['src/stats/engine/__tests__/engine.test.ts']).toEqual({ 'm:../index.js': { n: 1, target: 'src/stats/engine/index.ts' } });
     // A rebased branch adds an old-style import to the moved test: '../config' meant src/config.ts.
     const t = 'src/stats/engine/__tests__/engine.test.ts';
     fs.writeFileSync(path.join(dir, t), read(dir, t) + "import config from '../config';\n");
@@ -209,6 +209,26 @@ describe('codemod-imports', () => {
     expect(r.out).toContain(`${t}: '../index.js'`);
   });
 
+  it('a recorded path shadowed by a file added later is pointed back at its recorded target (Codex R5)', () => {
+    const dir = repo({
+      'src/old.ts': 'export const value = "moved";\n',
+      'src/test.ts': "import { value } from './old';\n",
+    });
+    const moves = { 'src/old.ts': 'src/lib/index.ts', 'src/test.ts': 'src/feature/test.ts' };
+    expect(run(dir, moves, '--apply-moves').code).toBe(0);
+    expect(read(dir, 'src/feature/test.ts')).toContain("from '../lib'");
+    // A rebased branch adds src/lib.ts — '../lib' would now load it instead of lib/index.ts.
+    fs.writeFileSync(path.join(dir, 'src/lib.ts'), 'export const value = "other";\n');
+    const r = run(dir, moves);
+    expect(r.code).toBe(0);
+    expect(read(dir, 'src/feature/test.ts')).toContain("from '../lib/index'");
+    // The recorded target is gone and something else answers: reported.
+    fs.rmSync(path.join(dir, 'src/lib/index.ts'));
+    const gone = run(dir, moves);
+    expect(gone.code).toBe(1);
+    expect(gone.out).toContain('recorded target src/lib/index.ts is gone');
+  });
+
   it("'--root ./src' behaves like '--root src' (Codex R4)", () => {
     const files = {
       'src/config.ts': 'export default {};\n',
@@ -235,7 +255,7 @@ describe('codemod-imports', () => {
       'src/__tests__/statsEngine.test.ts': 'src/stats/engine/__tests__/engine.test.ts',
     };
     expect(run(dir, moves, '--write-record').code).toBe(0);
-    expect(JSON.parse(read(dir, 'moves.applied.json'))['src/stats/engine/__tests__/engine.test.ts']).toEqual({ 'm:../index.js': 1 });
+    expect(JSON.parse(read(dir, 'moves.applied.json'))['src/stats/engine/__tests__/engine.test.ts']).toEqual({ 'm:../index.js': { n: 1, target: 'src/stats/engine/index.ts' } });
     const again = run(dir, moves);
     expect(again.code).toBe(0);
     expect(again.out).not.toContain('AMBIGUOUS');
