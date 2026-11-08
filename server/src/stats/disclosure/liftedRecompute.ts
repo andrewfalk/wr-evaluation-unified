@@ -72,7 +72,7 @@ function isRestrictedMasked(ctx: AnalysisContext): boolean {
  * 공개 게이트가 닫히면 availableMethods가 비어 있어(stats/recipe/analysisContext.ts) 권한자도 실행 가능 여부를 알 수 없다.
  * 권한자이고 풀 것이 있으면 소수 셀 게이트를 끈 컨텍스트를 돌려주고, 아니면 입력 ctx를 그대로 돌려준다.
  * 권한 조회(DB 1회)는 가려진 것이 실제로 있을 때만 한다 — 대부분의 요청은 조회 없이 끝난다.
- * differencing(forceSuppress)은 풀지 않는다. 기술통계는 기존 경로(stats/routes/router.ts liftPossible)가 처리한다.
+ * differencing(forceSuppress)은 풀지 않는다. 기술통계는 기존 경로(stats/routes/catalogPreview.ts liftPossible)가 처리한다.
  */
 export async function resolveEffectiveContext(
   pool: Pool,

@@ -347,7 +347,7 @@ export function StatisticsWorkbench({
     setModeChangeBlockedNotice(false);
     // PR4-B2 — 계획서 §6단계 "purpose 강제·복귀": analysisMode==='prediction' ⇔
     // analysisPurpose==='prediction'(서버 PURPOSE_MODE_MISMATCH, shared/contracts/
-    // server/src/stats/routes/router.ts). 예측으로 들어가면 목적을 강제로 맞추고, 예측에서 나가면 목적을
+    // stats.ts). 예측으로 들어가면 목적을 강제로 맞추고, 예측에서 나가면 목적을
     // 기본값으로 되돌린다(그대로 두면 나간 뒤에도 purpose:'prediction'이 남아
     // 다음 모드에서 곧바로 400을 낸다).
     const nextPurpose = nextMode === 'prediction'

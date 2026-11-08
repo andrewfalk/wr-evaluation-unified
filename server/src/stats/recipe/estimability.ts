@@ -1,6 +1,6 @@
 // PR0-C §C(2단계)/§F — estimability 신호 계산 + person 단위 소수 셀 억제. DB/네트워크
 // 의존 없는 순수 함수(단위테스트 용이). §C 1단계(personCount<MINIMUM_COHORT 전체 게이트)는
-// 이 함수를 호출하는 쪽(stats/routes/router.ts)의 책임이다 — 이 함수는 그 게이트를 통과한
+// 이 함수를 호출하는 쪽(stats/routes/catalogPreview.ts)의 책임이다 — 이 함수는 그 게이트를 통과한
 // 뒤에만 호출된다는 전제로 동작한다.
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
 import type { DatasetRow } from '../dataset/builder';
@@ -27,7 +27,7 @@ function distinctPersons(rows: DatasetRow[]): number {
 export interface ComputeEstimabilityOptions {
   /**
    * true면 소수 셀(1~9명) 억제를 끈다. 제한데이터 권한자 미리보기 전용 — 결과를 권한 없는
-   * 조회자에게 보내거나 저장하면 안 된다(stats/routes/router.ts handlePostPreview).
+   * 조회자에게 보내거나 저장하면 안 된다(stats/routes/catalogPreview.ts handlePostPreview).
    */
   unrestricted?: boolean;
 }

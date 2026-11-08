@@ -178,7 +178,7 @@ describe('codemod-imports', () => {
     };
     expect(run(dir, moves, '--apply-moves').code).toBe(0);
     const rec = JSON.parse(read(dir, 'moves.applied.json'));
-    expect(rec['src/stats/engine/__tests__/engine.test.ts']).toEqual(['m:../index.js']);
+    expect(rec['src/stats/engine/__tests__/engine.test.ts']).toEqual({ 'm:../index.js': 1 });
     // A rebased branch adds an old-style import to the moved test: '../config' meant src/config.ts.
     const t = 'src/stats/engine/__tests__/engine.test.ts';
     fs.writeFileSync(path.join(dir, t), read(dir, t) + "import config from '../config';\n");
@@ -186,6 +186,42 @@ describe('codemod-imports', () => {
     expect(r.code).toBe(0);
     expect(read(dir, t)).toContain("from '../index.js'"); // trusted, untouched
     expect(read(dir, t)).toContain("import config from '../../../config';"); // fixed from its old meaning
+  });
+
+  it('a rebased import with the same text as a recorded one is checked again, not trusted (Codex R4)', () => {
+    const dir = repo({
+      'src/index.ts': 'export const e = "root";\n',
+      'src/statsEngine.ts': 'export const e = 1;\n',
+      'src/__tests__/statsEngine.test.ts': "import { e } from '../statsEngine.js';\n",
+    });
+    const moves = {
+      'src/statsEngine.ts': 'src/stats/engine/index.ts',
+      'src/__tests__/statsEngine.test.ts': 'src/stats/engine/__tests__/engine.test.ts',
+    };
+    expect(run(dir, moves, '--apply-moves').code).toBe(0);
+    // The branch (written before the move) imported the ROOT index as '../index.js' — same text as the
+    // recorded, rewritten engine import, but it meant src/index.ts.
+    const t = 'src/stats/engine/__tests__/engine.test.ts';
+    fs.writeFileSync(path.join(dir, t), read(dir, t) + "import { e as rootE } from '../index.js';\n");
+    const r = run(dir, moves);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('AMBIGUOUS');
+    expect(r.out).toContain(`${t}: '../index.js'`);
+  });
+
+  it("'--root ./src' behaves like '--root src' (Codex R4)", () => {
+    const files = {
+      'src/config.ts': 'export default {};\n',
+      'src/routes/config.ts': 'export const c = 1;\n',
+      'src/app.ts': "import config from './config';\n",
+    };
+    for (const root of ['src', './src', 'src/', './src//']) {
+      const dir = repo(files);
+      fs.writeFileSync(path.join(dir, 'moves.json'), JSON.stringify({ 'src/app.ts': 'src/routes/app.ts' }));
+      const r = spawnSync(process.execPath, [SCRIPT, 'moves.json', '--apply-moves', '--root', root], { cwd: dir, encoding: 'utf8' });
+      expect(r.status, root).toBe(0);
+      expect(read(dir, 'src/routes/app.ts'), root).toContain("import config from '../config'");
+    }
   });
 
   it('--write-record records an already-moved tree and refuses paths that do not resolve', () => {
@@ -199,7 +235,7 @@ describe('codemod-imports', () => {
       'src/__tests__/statsEngine.test.ts': 'src/stats/engine/__tests__/engine.test.ts',
     };
     expect(run(dir, moves, '--write-record').code).toBe(0);
-    expect(JSON.parse(read(dir, 'moves.applied.json'))['src/stats/engine/__tests__/engine.test.ts']).toEqual(['m:../index.js']);
+    expect(JSON.parse(read(dir, 'moves.applied.json'))['src/stats/engine/__tests__/engine.test.ts']).toEqual({ 'm:../index.js': 1 });
     const again = run(dir, moves);
     expect(again.code).toBe(0);
     expect(again.out).not.toContain('AMBIGUOUS');

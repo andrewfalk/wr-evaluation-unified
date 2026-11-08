@@ -33,8 +33,11 @@ if (!mapFile) {
   process.exit(2);
 }
 const repo = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+// Repo-relative paths in one form everywhere (map keys, roots, walked files): '/' separators, no
+// leading './', no repeated or trailing '/' — so '--root ./src' and '--root src' behave the same.
+const clean = (p) => path.posix.normalize(p.split(path.sep).join('/')).replace(/^(\.\/)+/, '').replace(/\/+$/, '');
 const roots = [];
-args.forEach((a, i) => { if (a === '--root') roots.push(args[i + 1]); });
+args.forEach((a, i) => { if (a === '--root') roots.push(clean(args[i + 1])); });
 if (roots.length === 0) roots.push('server/src');
 const writeRecordOnly = args.includes('--write-record');
 
@@ -43,7 +46,7 @@ const recordFile = mapFile.replace(/\.json$/, '') + '.applied.json';
 const record = fs.existsSync(recordFile) ? JSON.parse(fs.readFileSync(recordFile, 'utf8')) : {};
 const norm = (p) => p.split(path.sep).join('/');
 const abs = (p) => path.join(repo, p);
-const forward = new Map(Object.entries(moves).map(([a, b]) => [norm(a), norm(b)]));
+const forward = new Map(Object.entries(moves).map(([a, b]) => [clean(a), clean(b)]));
 const backward = new Map([...forward].map(([a, b]) => [b, a]));
 
 // Files moved by this invocation still hold their pre-move specifiers (relative to the old location).
@@ -112,11 +115,14 @@ const PLAIN_PATTERNS = [
   /(\btoMatchFileSnapshot\s*\(\s*)(['"])([^'"]+)\2/g,
 ];
 const recordKey = (spec, isModule) => `${isModule ? 'm' : 'p'}:${spec}`;
-function relativeSpecs(src) {
-  const out = [];
-  for (const p of MODULE_PATTERNS) for (const m of src.matchAll(p)) out.push(recordKey(m[3], true));
-  for (const p of PLAIN_PATTERNS) for (const m of src.matchAll(p)) if (!m[3].startsWith('/')) out.push(recordKey(m[3], false));
-  return [...new Set(out)];
+// Occurrence count of each relative path in a file: the record keeps counts, so a rebased branch that
+// adds another import with the same text as a recorded one gets that extra occurrence checked again.
+function relativeSpecCounts(src) {
+  const out = {};
+  const add = (k) => { out[k] = (out[k] ?? 0) + 1; };
+  for (const p of MODULE_PATTERNS) for (const m of src.matchAll(p)) add(recordKey(m[3], true));
+  for (const p of PLAIN_PATTERNS) for (const m of src.matchAll(p)) if (!m[3].startsWith('/')) add(recordKey(m[3], false));
+  return Object.fromEntries(Object.entries(out).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
 function walk(dirRel, out) {
@@ -133,15 +139,15 @@ let changedFiles = 0;
 let changedSpecs = 0;
 const unresolved = [];
 const ambiguous = [];
-const files = roots.flatMap((r) => walk(norm(r), []));
+const files = roots.flatMap((r) => walk(r, [])).map(clean);
 
 if (writeRecordOnly) {
   const broken = [];
   for (const fileRel of files) {
     if (!backward.has(fileRel)) continue;
-    const specs = relativeSpecs(fs.readFileSync(abs(fileRel), 'utf8'));
+    const specs = relativeSpecCounts(fs.readFileSync(abs(fileRel), 'utf8'));
     const dir = path.posix.dirname(fileRel);
-    for (const k of specs) {
+    for (const k of Object.keys(specs)) {
       const isModule = k.startsWith('m:');
       if (!resolveCurrent(dir, k.slice(2), isModule)) broken.push(`${fileRel}: ${k.slice(2)}`);
     }
@@ -165,13 +171,17 @@ for (const fileRel of files) {
   const src = fs.readFileSync(abs(fileRel), 'utf8');
   // A file moved by this run is known to hold pre-move specifiers: the old meaning wins outright.
   const preMove = movedNow.has(fileRel);
-  const trusted = new Set(preMove ? [] : (record[fileRel] ?? []));
-  const leftOpen = new Set(); // specs reported as ambiguous/unresolved — not recorded as verified
+  const trusted = preMove ? {} : (record[fileRel] ?? {});
+  const seen = {}; // occurrences met so far per path — those beyond the recorded count are new
+  const leftOpen = {}; // occurrences reported as ambiguous/unresolved — not recorded as verified
+  const open = (k) => { leftOpen[k] = (leftOpen[k] ?? 0) + 1; };
   let out = src;
   const rewrite = (pattern, isModule) => {
     out = out.replace(pattern, (whole, pre, q, spec) => {
       if (!isModule && spec.startsWith('/')) return whole;
-      if (trusted.has(recordKey(spec, isModule))) return whole; // written/verified for the moved layout
+      const key = recordKey(spec, isModule);
+      seen[key] = (seen[key] ?? 0) + 1;
+      if (seen[key] <= (trusted[key] ?? 0)) return whole; // written/verified for the moved layout
       const original = resolveOriginal(oldDir, spec, isModule);
       const current = preMove ? null : resolveCurrent(newDir, spec, isModule);
       const intended = original ? (forward.get(original) ?? original) : null;
@@ -180,12 +190,12 @@ for (const fileRel of files) {
         // Before the move it meant one file, now it resolves to another (e.g. a moved file's './config'
         // now lands on a sibling config.ts, moved in or not) — cannot be decided from the tree: report.
         ambiguous.push(`${fileRel}: '${spec}' → now ${current}, before the move ${intended}`);
-        leftOpen.add(recordKey(spec, isModule));
+        open(key);
         return whole;
       }
       if (!intended) {
         if (isModule || oldDir !== newDir) unresolved.push(`${fileRel}: ${spec}`);
-        leftOpen.add(recordKey(spec, isModule));
+        open(key);
         return whole;
       }
       let next = relativeSpec(newDir, intended, spec, isModule, false);
@@ -194,7 +204,7 @@ for (const fileRel of files) {
         next = relativeSpec(newDir, intended, spec, isModule, true);
         if (resolveCurrent(newDir, next, true) !== intended) {
           ambiguous.push(`${fileRel}: '${spec}' → no relative path reaches ${intended} unambiguously`);
-          leftOpen.add(recordKey(spec, isModule));
+          open(key);
           return whole;
         }
       }
@@ -211,7 +221,8 @@ for (const fileRel of files) {
     changedFiles += 1;
   }
   if (backward.has(fileRel)) {
-    const verified = relativeSpecs(out).filter((k) => !leftOpen.has(k));
+    const verified = Object.fromEntries(Object.entries(relativeSpecCounts(out))
+      .map(([k, n]) => [k, n - (leftOpen[k] ?? 0)]).filter(([, n]) => n > 0));
     if (JSON.stringify(record[fileRel] ?? null) !== JSON.stringify(verified)) {
       record[fileRel] = verified;
       recordChanged = true;

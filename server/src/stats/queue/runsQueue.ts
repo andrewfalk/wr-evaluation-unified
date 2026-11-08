@@ -344,7 +344,7 @@ export async function sweepQueuedTerminal(pool: Pool): Promise<void> {
 // §5 버전 드리프트 — claim 시점에 현재 코드의 버전 상수 전부로 execution_digest를
 // 재계산해 행의 execution_digest와 비교한다.
 // ---------------------------------------------------------------------------
-// GET /runs/:analysisRunId(stats/routes/router.ts)도 limited_row 재구성 직전 이 함수로
+// GET /runs/:analysisRunId(stats/routes/runs.ts)도 limited_row 재구성 직전 이 함수로
 // 버전드리프트를 다시 확인한다(§H — 드리프트 시 attached:false로 저하, 이미 저장된
 // aggregate result 자체는 그대로 서빙).
 export function hasVersionDrifted(row: StatsRunRow): boolean {

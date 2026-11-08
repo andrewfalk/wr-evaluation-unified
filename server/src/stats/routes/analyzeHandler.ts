@@ -73,7 +73,7 @@ export function __setActiveAnalyzeRequestsForTests(n: number): void {
 }
 
 /** 응답에서는 항상 기존 RunManifest 계약만 노출한다 — outcome 판별 필드는 저장 계층 전용.
- * GET /runs/:analysisRunId(stats/routes/router.ts)도 이 함수를 재사용한다(export). */
+ * GET /runs/:analysisRunId(stats/routes/runs.ts)도 이 함수를 재사용한다(export). */
 export function toPublicRunManifest(manifest: StatsRunManifestSucceeded): RunManifest {
   const { outcome: _outcome, ...rest } = manifest;
   return rest;

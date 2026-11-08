@@ -494,7 +494,7 @@ export function RecipePanel({
     () => selectedKeys.filter((k) => k !== outcomeKey && catalogByKey.get(k)?.predictionRole !== 'predictor'),
     [selectedKeys, outcomeKey, catalogByKey],
   );
-  // DTO 필드(server/src/stats/routes/router.ts toCatalogVariableDto) — 자유입력이 아니라 이 목록에서만
+  // DTO 필드(server/src/stats/routes/catalogPreview.ts toCatalogVariableDto) — 자유입력이 아니라 이 목록에서만
   // 고른다(계획서 §6단계 "eventLevel select는 DTO의 predictionEventLevels에서 만든다").
   const predictionEventLevels = outcomeKey ? (catalogByKey.get(outcomeKey)?.predictionEventLevels ?? []) : [];
   const filtersDirty = JSON.stringify(filterDraft) !== JSON.stringify(appliedFilters);

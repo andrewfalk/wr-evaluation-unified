@@ -1,776 +1,776 @@
 {
- "server/src/stats/catalog/catalog.ts": [
-  "m:../dataset/snapshotColumnVariables"
- ],
- "server/src/stats/catalog/methodCatalog.ts": [
-  "m:../dataset/bivariate",
-  "m:../disclosure/bivariateGate",
-  "m:../policy/inferenceGate",
-  "m:../dataset/bivariateRoles"
- ],
- "server/src/stats/catalog/version.ts": [],
- "server/src/stats/catalog/__tests__/catalog.test.ts": [
-  "m:../catalog",
-  "m:../../dataset/snapshotColumnVariables"
- ],
- "server/src/stats/catalog/__tests__/catalogPredictionInvariants.test.ts": [
-  "m:../catalog"
- ],
- "server/src/stats/catalog/__tests__/methodCatalog.prediction.test.ts": [
-  "m:../methodCatalog"
- ],
- "server/src/stats/catalog/__tests__/methodCatalog.regression.test.ts": [
-  "m:../methodCatalog",
-  "m:../../dataset/bivariate"
- ],
- "server/src/stats/catalog/__tests__/methodCatalog.test.ts": [
-  "m:../methodCatalog",
-  "m:../../dataset/bivariate"
- ],
- "server/src/stats/dataset/bivariate.ts": [
-  "m:./builder"
- ],
- "server/src/stats/dataset/bivariateRoles.ts": [
-  "m:../recipe/ordinalOrder"
- ],
- "server/src/stats/dataset/builder.ts": [
-  "m:./snapshot",
-  "m:./personCluster",
-  "m:../../canonicalSerializer",
-  "m:./snapshotColumnVariables"
- ],
- "server/src/stats/dataset/correlationMatrix.ts": [
-  "m:./builder",
-  "m:../engine/engineLimits",
-  "m:../../config"
- ],
- "server/src/stats/dataset/descriptiveStratify.ts": [
-  "m:./builder",
-  "m:../disclosure/smallCell",
-  "m:../disclosure/descriptiveSuppression",
-  "m:./bivariateRoles"
- ],
- "server/src/stats/dataset/personCluster.ts": [],
- "server/src/stats/dataset/predictionCohort.ts": [
-  "m:../../canonicalSerializer",
-  "m:../policy/policy",
-  "m:./builder",
-  "m:./regressionDesign",
-  "m:./predictionDesign",
-  "m:../disclosure/smallCell",
-  "m:../disclosure/bivariateGate"
- ],
- "server/src/stats/dataset/predictionDesign.ts": [
-  "m:./builder",
-  "m:../recipe/ordinalOrder",
-  "m:./bivariateRoles"
- ],
- "server/src/stats/dataset/regression.ts": [
-  "m:./builder",
-  "m:../engine/engineLimits"
- ],
- "server/src/stats/dataset/regressionDesign.ts": [
-  "m:./builder",
-  "m:../recipe/ordinalOrder",
-  "m:./bivariateRoles",
-  "m:../policy/policy",
-  "m:./regression",
-  "m:./splineBasis"
- ],
- "server/src/stats/dataset/snapshot.ts": [
-  "m:../../canonicalSerializer"
- ],
- "server/src/stats/dataset/snapshotColumnVariables.ts": [
-  "m:./snapshot"
- ],
- "server/src/stats/dataset/splineBasis.ts": [],
- "server/src/stats/dataset/__tests__/bivariate.test.ts": [
-  "m:../bivariate",
-  "m:../builder"
- ],
- "server/src/stats/dataset/__tests__/bivariateRoles.test.ts": [
-  "m:../bivariateRoles"
- ],
- "server/src/stats/dataset/__tests__/builder.assertObservations.test.ts": [
-  "m:../builder"
- ],
- "server/src/stats/dataset/__tests__/builder.broadcast.test.ts": [
-  "m:../builder",
-  "m:../../disclosure/descriptiveSuppression",
-  "m:../../catalog/catalog",
-  "m:../predictionCohort",
-  "m:../../policy/policy",
-  "m:../snapshot"
- ],
- "server/src/stats/dataset/__tests__/builder.disease.test.ts": [
-  "m:../builder",
-  "m:../bivariate",
-  "m:../../catalog/methodCatalog",
-  "m:../../recipe/ordinalOrder",
-  "m:../snapshot"
- ],
- "server/src/stats/dataset/__tests__/builder.excludeFromAnalysis.test.ts": [
-  "m:../builder",
-  "m:../snapshot"
- ],
- "server/src/stats/dataset/__tests__/builder.job.test.ts": [
-  "m:../builder",
-  "m:../snapshot"
- ],
- "server/src/stats/dataset/__tests__/builder.test.ts": [
-  "m:../builder",
-  "m:../../catalog/catalog",
-  "m:../snapshot"
- ],
- "server/src/stats/dataset/__tests__/correlationMatrix.test.ts": [
-  "m:../correlationMatrix",
-  "m:../bivariate",
-  "m:../../engine/engineLimits",
-  "m:../builder"
- ],
- "server/src/stats/dataset/__tests__/descriptiveStratify.test.ts": [
-  "m:../builder",
-  "m:../descriptiveStratify"
- ],
- "server/src/stats/dataset/__tests__/personCluster.test.ts": [
-  "m:../personCluster"
- ],
- "server/src/stats/dataset/__tests__/predictionCohort.test.ts": [
-  "m:../predictionCohort"
- ],
- "server/src/stats/dataset/__tests__/predictionCohortStages.test.ts": [
-  "m:../predictionCohort",
-  "m:../builder"
- ],
- "server/src/stats/dataset/__tests__/predictionDesign.test.ts": [
-  "m:../predictionDesign",
-  "m:../builder"
- ],
- "server/src/stats/dataset/__tests__/regression.test.ts": [
-  "m:../regression",
-  "m:../builder"
- ],
- "server/src/stats/dataset/__tests__/regressionDesign.test.ts": [
-  "m:../regressionDesign",
-  "m:../builder"
- ],
- "server/src/stats/dataset/__tests__/snapshot.integration.test.ts": [
-  "m:../snapshot"
- ],
- "server/src/stats/dataset/__tests__/snapshotColumnVariables.test.ts": [
-  "m:../snapshotColumnVariables",
-  "m:../snapshot"
- ],
- "server/src/stats/dataset/__tests__/splineBasis.test.ts": [
-  "m:../splineBasis"
- ],
- "server/src/stats/disclosure/bivariateGate.ts": [
-  "m:./smallCell",
-  "m:../policy/policy"
- ],
- "server/src/stats/disclosure/bivariateSuppression.ts": [
-  "m:../engine",
-  "m:./smallCell",
-  "m:./chartDisclosure",
-  "m:./scatterGrid",
-  "m:../recipe/analysisContext",
-  "m:../dataset/bivariate",
-  "m:../dataset/bivariateRoles"
- ],
- "server/src/stats/disclosure/chartDisclosure.ts": [
-  "m:./smallCell",
-  "m:../policy/policy"
- ],
- "server/src/stats/disclosure/correlationMatrixSuppression.ts": [
-  "m:../recipe/analysisContext",
-  "m:../dataset/correlationMatrix",
-  "m:./bivariateGate",
-  "m:../policy/inferenceGate",
-  "m:./suppressedResult",
-  "m:../engine"
- ],
- "server/src/stats/disclosure/descriptiveStratifySuppression.ts": [
-  "m:../recipe/analysisContext",
-  "m:../dataset/descriptiveStratify",
-  "m:./descriptiveSuppression",
-  "m:../engine"
- ],
- "server/src/stats/disclosure/descriptiveSuppression.ts": [
-  "m:../recipe/ordinalOrder",
-  "m:../dataset/builder",
-  "m:./smallCell",
-  "m:./chartDisclosure",
-  "m:../engine"
- ],
- "server/src/stats/disclosure/descriptiveUnrestricted.ts": [
-  "m:../../config",
-  "m:../recipe/analysisContext",
-  "m:./descriptiveSuppression",
-  "m:../dataset/descriptiveStratify",
-  "m:./descriptiveStratifySuppression",
-  "m:../engine",
-  "m:../engine/engineLimits",
-  "m:./limitedDisclosureGuard"
- ],
- "server/src/stats/disclosure/differencingGuard.ts": [
-  "m:../../canonicalSerializer",
-  "m:../policy/policy"
- ],
- "server/src/stats/disclosure/liftedRecompute.ts": [
-  "m:../../config",
-  "m:../../middleware/requireCapability",
-  "m:../recipe/analysisContext",
-  "m:./descriptiveUnrestricted",
-  "m:./regressionSuppression",
-  "m:./bivariateSuppression",
-  "m:../catalog/methodCatalog",
-  "m:../queue/executionDigest"
- ],
- "server/src/stats/disclosure/limitedDisclosureGuard.ts": [
-  "m:../policy/policy"
- ],
- "server/src/stats/disclosure/limitedRowMerge.ts": [
-  "m:../recipe/analysisContext",
-  "m:../dataset/builder",
-  "m:../dataset/bivariate",
-  "m:./chartDisclosure",
-  "m:./descriptiveSuppression",
-  "m:./scatterGrid",
-  "m:./bivariateSuppression",
-  "m:../engine"
- ],
- "server/src/stats/disclosure/predictionDisclosure.ts": [
-  "m:../policy/policy",
-  "m:./smallCell"
- ],
- "server/src/stats/disclosure/predictionSuppression.ts": [
-  "m:../recipe/analysisContext",
-  "m:./suppressedResult",
-  "m:../engine",
-  "m:../policy/policy",
-  "m:../dataset/predictionCohort",
-  "m:../dataset/predictionDesign",
-  "m:./predictionDisclosure"
- ],
- "server/src/stats/disclosure/regressionGate.ts": [
-  "m:./smallCell",
-  "m:./bivariateGate",
-  "m:../dataset/regression"
- ],
- "server/src/stats/disclosure/regressionSuppression.ts": [
-  "m:../recipe/analysisContext",
-  "m:../engine",
-  "m:../policy/policy",
-  "m:../dataset/regressionDesign",
-  "m:../dataset/splineBasis"
- ],
- "server/src/stats/disclosure/scatterGrid.ts": [
-  "m:./smallCell",
-  "m:./chartDisclosure"
- ],
- "server/src/stats/disclosure/smallCell.ts": [
-  "m:../policy/policy"
- ],
- "server/src/stats/disclosure/storedLimited.ts": [
-  "m:../../canonicalSerializer",
-  "m:../../middleware/requireCapability",
-  "m:../../middleware/audit"
- ],
- "server/src/stats/disclosure/suppressedResult.ts": [
-  "m:../recipe/analysisContext",
-  "m:../dataset/correlationMatrix"
- ],
- "server/src/stats/disclosure/__tests__/bivariateGate.test.ts": [
-  "m:../bivariateGate",
-  "m:../../dataset/bivariate"
- ],
- "server/src/stats/disclosure/__tests__/bivariateLifted.test.ts": [
-  "m:../bivariateGate",
-  "m:../../catalog/methodCatalog",
-  "m:../../queue/executionDigest",
-  "m:../scatterGrid",
-  "m:../bivariateSuppression",
-  "m:../liftedRecompute",
-  "m:../limitedDisclosureGuard",
-  "m:../../recipe/analysisContext",
-  "m:../../dataset/bivariate",
-  "m:../../engine",
-  "m:../../../middleware/requireCapability"
- ],
- "server/src/stats/disclosure/__tests__/bivariateSuppression.test.ts": [
-  "m:../bivariateSuppression",
-  "m:../../recipe/analysisContext",
-  "m:../../dataset/bivariate",
-  "m:../../engine"
- ],
- "server/src/stats/disclosure/__tests__/chartDisclosure.test.ts": [
-  "m:../../dataset/builder",
-  "m:../chartDisclosure"
- ],
- "server/src/stats/disclosure/__tests__/correlationMatrixLifted.test.ts": [
-  "m:../correlationMatrixSuppression",
-  "m:../../dataset/correlationMatrix",
-  "m:../../recipe/analysisContext",
-  "m:../../dataset/builder",
-  "m:../../engine"
- ],
- "server/src/stats/disclosure/__tests__/correlationMatrixSuppression.test.ts": [
-  "m:../correlationMatrixSuppression",
-  "m:../../dataset/correlationMatrix",
-  "m:../../recipe/analysisContext",
-  "m:../../dataset/builder",
-  "m:../../engine"
- ],
- "server/src/stats/disclosure/__tests__/descriptiveStratifySuppression.test.ts": [
-  "m:../../dataset/builder",
-  "m:../descriptiveSuppression",
-  "m:../../engine",
-  "m:../descriptiveStratifySuppression",
-  "m:../../dataset/descriptiveStratify",
-  "m:../../recipe/analysisContext"
- ],
- "server/src/stats/disclosure/__tests__/descriptiveSuppression.test.ts": [
-  "m:../../dataset/builder",
-  "m:../descriptiveSuppression",
-  "m:../../engine"
- ],
- "server/src/stats/disclosure/__tests__/differencingGuard.test.ts": [
-  "m:../differencingGuard"
- ],
- "server/src/stats/disclosure/__tests__/histogramParity.test.ts": [
-  "m:../chartDisclosure",
-  "p:fixtures/histogramParity.json"
- ],
- "server/src/stats/disclosure/__tests__/liftedRecompute.test.ts": [
-  "m:../liftedRecompute",
-  "m:../limitedDisclosureGuard",
-  "m:../../engine",
-  "m:../../recipe/analysisContext",
-  "m:../regressionSuppression",
-  "m:../../../middleware/requireCapability"
- ],
- "server/src/stats/disclosure/__tests__/limitedRowMerge.test.ts": [
-  "m:../../recipe/analysisContext",
-  "m:../../dataset/builder",
-  "m:../../dataset/bivariate",
-  "m:../../dataset/regressionDesign",
-  "m:../../../canonicalSerializer",
-  "m:../limitedRowMerge",
-  "m:../chartDisclosure",
-  "m:../descriptiveSuppression",
-  "m:../../engine"
- ],
- "server/src/stats/disclosure/__tests__/niceHistogram.test.ts": [
-  "m:../chartDisclosure"
- ],
- "server/src/stats/disclosure/__tests__/predictionDisclosure.test.ts": [
-  "m:../predictionDisclosure"
- ],
- "server/src/stats/disclosure/__tests__/predictionLifted.test.ts": [
-  "m:../../dataset/predictionCohort",
-  "m:../predictionDisclosure",
-  "m:../predictionSuppression",
-  "m:../../recipe/analysisContext",
-  "m:../../dataset/predictionDesign",
-  "m:../../dataset/builder",
-  "m:../../engine"
- ],
- "server/src/stats/disclosure/__tests__/predictionSuppression.test.ts": [
-  "m:../predictionSuppression",
-  "m:../../recipe/analysisContext",
-  "m:../../dataset/predictionDesign",
-  "m:../../dataset/builder",
-  "m:../../engine"
- ],
- "server/src/stats/disclosure/__tests__/regressionGate.test.ts": [
-  "m:../regressionGate"
- ],
- "server/src/stats/disclosure/__tests__/regressionSuppression.test.ts": [
-  "m:../regressionSuppression",
-  "m:../../engine",
-  "m:../../recipe/analysisContext",
-  "m:../../dataset/regressionDesign"
- ],
- "server/src/stats/disclosure/__tests__/scatterGrid.test.ts": [
-  "m:../scatterGrid"
- ],
- "server/src/stats/disclosure/__tests__/storedLimited.test.ts": [
-  "m:../storedLimited",
-  "m:../../queue/executionDigest",
-  "m:../../../middleware/requireCapability",
-  "m:../../../middleware/audit"
- ],
- "server/src/stats/engine/engineLimits.ts": [],
- "server/src/stats/engine/errorMapping.ts": [
-  "m:."
- ],
- "server/src/stats/engine/index.ts": [
-  "m:../../config",
-  "m:./engineLimits",
-  "m:../policy/policy"
- ],
- "server/src/stats/engine/__tests__/correlationMatrixLimits.test.ts": [
-  "m:../../../config",
-  "m:..",
-  "m:../engineLimits",
-  "m:../../../testing/configMock.js"
- ],
- "server/src/stats/engine/__tests__/engine.realWrapper.smoke.test.ts": [
-  "m:../../../testing/configMock.js",
-  "m:../index.js",
-  "m:../../../config",
-  "p:../../../../../services/stats-engine"
- ],
- "server/src/stats/engine/__tests__/engine.smoke.test.ts": [
-  "m:../../disclosure/chartDisclosure",
-  "p:../../../../../services/stats-engine"
- ],
- "server/src/stats/engine/__tests__/engine.test.ts": [
-  "m:..",
-  "m:../../../testing/configMock.js",
-  "m:../../../config"
- ],
- "server/src/stats/engine/__tests__/engineLimits.consistency.test.ts": [
-  "m:../engineLimits",
-  "p:../../../../../services/stats-engine/protocol.py"
- ],
- "server/src/stats/engine/__tests__/engineTiming.test.ts": [
-  "m:../../../config",
-  "m:..",
-  "m:../../../testing/configMock.js"
- ],
- "server/src/stats/engine/__tests__/golden.engineRequests.test.ts": [
-  "m:../../dataset/builder",
-  "m:../../recipe/analysisContext",
-  "m:../../catalog/catalog",
-  "m:../../../canonicalSerializer",
-  "m:../../dataset/predictionCohort",
-  "m:../../disclosure/descriptiveSuppression",
-  "m:../../disclosure/descriptiveStratifySuppression",
-  "m:../../disclosure/bivariateSuppression",
-  "m:../../disclosure/regressionSuppression",
-  "m:../../disclosure/predictionSuppression",
-  "m:../../dataset/snapshot",
-  "p:../../../../../src/core/fixtures/goldenPatients.json",
-  "p:./__goldens__/stats-engine-requests.json"
- ],
- "server/src/stats/engine/__tests__/predictionEngine.realWrapper.smoke.test.ts": [
-  "m:../../policy/policy",
-  "m:../../dataset/predictionCohort",
-  "m:../../../testing/configMock.js",
-  "m:../index.js",
-  "m:../../../config",
-  "p:../../../../../services/stats-engine"
- ],
- "server/src/stats/engine/__tests__/predictionEngine.test.ts": [
-  "m:..",
-  "m:../../../testing/configMock.js",
-  "m:../../../config"
- ],
- "server/src/stats/engine/__tests__/regressionEngine.realWrapper.smoke.test.ts": [
-  "m:../../dataset/regressionDesign",
-  "m:../../dataset/builder",
-  "m:../../../testing/configMock.js",
-  "m:../index.js",
-  "m:../../../config",
-  "p:../../../../../services/stats-engine"
- ],
- "server/src/stats/export/exportHandler.ts": [
-  "m:../../http/authz",
-  "m:../../middleware/audit"
- ],
- "server/src/stats/export/__tests__/exportCsv.test.ts": [
-  "m:../exportHandler"
- ],
- "server/src/stats/export/__tests__/exportRoute.test.ts": [
-  "m:../../routes/router",
-  "m:../../../testing/fakePool",
-  "m:../../../testing/app",
-  "m:../../../testing/tokens",
-  "m:../../../testing/configMock.js",
-  "m:../../../config",
-  "m:../../policy/workbenchRuntimeState",
-  "m:../../../middleware/audit"
- ],
- "server/src/stats/policy/inferenceGate.ts": [],
- "server/src/stats/policy/policy.ts": [],
- "server/src/stats/policy/workbenchRuntimeState.ts": [
-  "m:../../config"
- ],
- "server/src/stats/policy/__tests__/predictionRequirementsParity.test.ts": [
-  "m:../policy",
-  "m:../../../../../src/core/components/statistics/predictionRequirements.js"
- ],
- "server/src/stats/queue/analyzeInFlight.ts": [],
- "server/src/stats/queue/executionDigest.ts": [
-  "m:../../canonicalSerializer",
-  "m:../policy/policy",
-  "m:./runManifest",
-  "m:../catalog/version"
- ],
- "server/src/stats/queue/runAdmission.ts": [
-  "m:../recipe/analysisContext",
-  "m:./runRow",
-  "m:./runManifest",
-  "m:../../middleware/audit",
-  "m:../engine",
-  "m:../../db/withWriteTransaction",
-  "m:./runExpiry",
-  "m:../policy/policy",
-  "m:./executionDigest",
-  "m:../../config"
- ],
- "server/src/stats/queue/runExpiry.ts": [
-  "m:../../config"
- ],
- "server/src/stats/queue/runManifest.ts": [
-  "m:../../canonicalSerializer",
-  "m:../policy/policy",
-  "m:../catalog/version"
- ],
- "server/src/stats/queue/runRow.ts": [
-  "m:../recipe/analysisContext"
- ],
- "server/src/stats/queue/runsQueue.ts": [
-  "m:../recipe/analysisContext",
-  "m:./runRow",
-  "m:./runManifest",
-  "m:../../canonicalSerializer",
-  "m:./executionDigest",
-  "m:../engine",
-  "m:../disclosure/descriptiveSuppression",
-  "m:../disclosure/descriptiveStratifySuppression",
-  "m:../disclosure/bivariateSuppression",
-  "m:../disclosure/correlationMatrixSuppression",
-  "m:../../middleware/requireCapability",
-  "m:../disclosure/suppressedResult",
-  "m:../disclosure/storedLimited",
-  "m:../policy/policy",
-  "m:../disclosure/regressionSuppression",
-  "m:../disclosure/predictionSuppression",
-  "m:../engine/errorMapping",
-  "m:../../middleware/audit",
-  "m:../../db/withWriteTransaction",
-  "m:./runExpiry",
-  "m:../../config"
- ],
- "server/src/stats/queue/__tests__/analyzeInFlight.test.ts": [
-  "m:../analyzeInFlight"
- ],
- "server/src/stats/queue/__tests__/executionDigest.test.ts": [
-  "m:../executionDigest",
-  "m:../../../canonicalSerializer",
-  "m:../../policy/policy",
-  "m:../executionDigest.js",
-  "m:../runManifest",
-  "m:../../catalog/version"
- ],
- "server/src/stats/queue/__tests__/runsQueue.integration.test.ts": [
-  "m:../runsQueue",
-  "m:../runManifest",
-  "m:../executionDigest",
-  "m:../../../config",
-  "m:../../../middleware/audit"
- ],
- "server/src/stats/queue/__tests__/runsQueue.test.ts": [
-  "m:../runsQueue",
-  "m:../executionDigest",
-  "m:../runRow"
- ],
- "server/src/stats/queue/__tests__/runsQueueClaimGate.test.ts": [
-  "m:../runsQueue",
-  "m:../../../config",
-  "m:../../engine"
- ],
- "server/src/stats/recipe/analysisContext.ts": [
-  "m:../../http/authz",
-  "m:../../canonicalSerializer",
-  "m:../policy/policy",
-  "m:./validation",
-  "m:../dataset/snapshot",
-  "m:../dataset/builder",
-  "m:../dataset/descriptiveStratify",
-  "m:../engine/engineLimits",
-  "m:../disclosure/differencingGuard",
-  "m:../dataset/bivariate",
-  "m:../disclosure/bivariateGate",
-  "m:../catalog/methodCatalog",
-  "m:../dataset/correlationMatrix",
-  "m:../queue/executionDigest",
-  "m:../dataset/regression",
-  "m:../disclosure/regressionGate",
-  "m:../dataset/regressionDesign",
-  "m:../dataset/predictionCohort"
- ],
- "server/src/stats/recipe/estimability.ts": [
-  "m:../dataset/builder",
-  "m:../disclosure/smallCell"
- ],
- "server/src/stats/recipe/ordinalOrder.ts": [],
- "server/src/stats/recipe/validation.ts": [
-  "m:../catalog/catalog",
-  "m:./ordinalOrder",
-  "m:../dataset/snapshotColumnVariables"
- ],
- "server/src/stats/recipe/__tests__/estimability.test.ts": [
-  "m:../estimability",
-  "m:../../dataset/builder"
- ],
- "server/src/stats/recipe/__tests__/validation.test.ts": [
-  "m:../validation"
- ],
- "server/src/stats/routes/analyzeHandler.ts": [
-  "m:../../db/withWriteTransaction",
-  "m:../recipe/analysisContext",
-  "m:../../canonicalSerializer",
-  "m:../queue/executionDigest",
-  "m:../disclosure/storedLimited",
-  "m:../disclosure/descriptiveSuppression",
-  "m:../disclosure/descriptiveStratifySuppression",
-  "m:../engine",
-  "m:../disclosure/bivariateSuppression",
-  "m:../disclosure/predictionSuppression",
-  "m:../disclosure/regressionSuppression",
-  "m:../queue/runManifest",
-  "m:../disclosure/suppressedResult",
-  "m:../disclosure/limitedRowMerge",
-  "m:../disclosure/descriptiveUnrestricted",
-  "m:../disclosure/liftedRecompute",
-  "m:../disclosure/limitedDisclosureGuard",
-  "m:./responseAbort",
-  "m:../../middleware/requireCapability",
-  "m:../../middleware/audit",
-  "m:../queue/runExpiry",
-  "m:../queue/runAdmission",
-  "m:../queue/runRow",
-  "m:../../config",
-  "m:../../http/errors"
- ],
- "server/src/stats/routes/responseAbort.ts": [],
- "server/src/stats/routes/router.ts": [
-  "m:../../middleware/auth",
-  "m:../../middleware/csrf",
-  "m:../../middleware/requireCapability",
-  "m:../../middleware/rateLimit",
-  "m:./analyzeHandler",
-  "m:../export/exportHandler",
-  "m:../../http/asyncHandler",
-  "m:../../http/authz",
-  "m:../policy/workbenchRuntimeState",
-  "m:./catalogPreview",
-  "m:./runs"
- ],
- "server/src/stats/routes/__tests__/analyze.integration.test.ts": [],
- "server/src/stats/routes/__tests__/bivariateHttp.integration.test.ts": [
-  "m:../router",
-  "m:../../queue/runsQueue",
-  "m:../../../auth/tokens",
-  "m:../../../auth/tokenHash",
-  "m:../../policy/workbenchRuntimeState"
- ],
- "server/src/stats/routes/__tests__/bivariateLimitedDisclosure.integration.test.ts": [
-  "m:../router",
-  "m:../../queue/runsQueue",
-  "m:../../../auth/tokens",
-  "m:../../../auth/tokenHash",
-  "m:../../disclosure/differencingGuard",
-  "m:../../disclosure/limitedDisclosureGuard",
-  "m:../../policy/workbenchRuntimeState"
- ],
- "server/src/stats/routes/__tests__/correlationMatrixHttp.integration.test.ts": [
-  "m:../router",
-  "m:../../queue/runsQueue",
-  "m:../../../auth/tokens",
-  "m:../../../auth/tokenHash",
-  "m:../../policy/workbenchRuntimeState"
- ],
- "server/src/stats/routes/__tests__/correlationMatrixLimitedDisclosure.integration.test.ts": [
-  "m:../router",
-  "m:../../queue/runsQueue",
-  "m:../../queue/runManifest",
-  "m:../../../auth/tokens",
-  "m:../../../auth/tokenHash",
-  "m:../../disclosure/differencingGuard",
-  "m:../../disclosure/limitedDisclosureGuard",
-  "m:../../policy/workbenchRuntimeState"
- ],
- "server/src/stats/routes/__tests__/descriptiveHttp.integration.test.ts": [
-  "m:../router",
-  "m:../../queue/runsQueue",
-  "m:../../../auth/tokens",
-  "m:../../../auth/tokenHash",
-  "m:../../engine",
-  "m:../../../config",
-  "m:../../../middleware/audit",
-  "m:../../policy/workbenchRuntimeState"
- ],
- "server/src/stats/routes/__tests__/finalizeLiftedRegression.test.ts": [
-  "m:../analyzeHandler",
-  "m:../../disclosure/limitedDisclosureGuard",
-  "m:../../recipe/analysisContext",
-  "m:../../disclosure/liftedRecompute",
-  "m:../../../middleware/requireCapability",
-  "m:../../../middleware/audit",
-  "m:../../disclosure/limitedRowMerge"
- ],
- "server/src/stats/routes/__tests__/finalizeLimitedDisclosure.test.ts": [
-  "m:../analyzeHandler",
-  "m:../../disclosure/limitedDisclosureGuard",
-  "m:../../recipe/analysisContext",
-  "m:../../engine",
-  "m:../../disclosure/descriptiveUnrestricted",
-  "m:../../../middleware/requireCapability",
-  "m:../../../middleware/audit"
- ],
- "server/src/stats/routes/__tests__/limitedDisclosure.integration.test.ts": [
-  "m:../router",
-  "m:../../queue/runsQueue",
-  "m:../../../auth/tokens",
-  "m:../../../auth/tokenHash",
-  "m:../../engine",
-  "m:../../disclosure/differencingGuard",
-  "m:../../disclosure/limitedDisclosureGuard",
-  "m:../../../middleware/audit",
-  "m:../../policy/workbenchRuntimeState"
- ],
- "server/src/stats/routes/__tests__/predictionLimitedDisclosure.integration.test.ts": [
-  "m:../router",
-  "m:../../queue/runsQueue",
-  "m:../../../auth/tokens",
-  "m:../../../auth/tokenHash",
-  "m:../../disclosure/differencingGuard",
-  "m:../../disclosure/limitedDisclosureGuard",
-  "m:../../policy/workbenchRuntimeState"
- ],
- "server/src/stats/routes/__tests__/regressionHttp.integration.test.ts": [
-  "m:../router",
-  "m:../../queue/runsQueue",
-  "m:../../../auth/tokens",
-  "m:../../../auth/tokenHash",
-  "m:../../policy/workbenchRuntimeState"
- ],
- "server/src/stats/routes/__tests__/regressionLimitedDisclosure.integration.test.ts": [
-  "m:../router",
-  "m:../../queue/runsQueue",
-  "m:../../../auth/tokens",
-  "m:../../../auth/tokenHash",
-  "m:../../disclosure/differencingGuard",
-  "m:../../disclosure/limitedDisclosureGuard",
-  "m:../../policy/workbenchRuntimeState"
- ],
- "server/src/stats/routes/__tests__/router.test.ts": [
-  "m:../router",
-  "m:../../../testing/fakePool",
-  "m:../../../testing/app",
-  "m:../../../testing/tokens",
-  "m:../../disclosure/differencingGuard",
-  "m:../../queue/analyzeInFlight",
-  "m:../../../testing/configMock.js",
-  "m:../../engine",
-  "m:../../disclosure/differencingGuard.js",
-  "m:../analyzeHandler.js",
-  "m:../../../config",
-  "m:../../policy/workbenchRuntimeState",
-  "m:../../../middleware/audit"
- ]
+ "server/src/stats/catalog/catalog.ts": {
+  "m:../dataset/snapshotColumnVariables": 1
+ },
+ "server/src/stats/catalog/methodCatalog.ts": {
+  "m:../dataset/bivariate": 2,
+  "m:../dataset/bivariateRoles": 1,
+  "m:../disclosure/bivariateGate": 1,
+  "m:../policy/inferenceGate": 1
+ },
+ "server/src/stats/catalog/version.ts": {},
+ "server/src/stats/catalog/__tests__/catalog.test.ts": {
+  "m:../../dataset/snapshotColumnVariables": 1,
+  "m:../catalog": 1
+ },
+ "server/src/stats/catalog/__tests__/catalogPredictionInvariants.test.ts": {
+  "m:../catalog": 1
+ },
+ "server/src/stats/catalog/__tests__/methodCatalog.prediction.test.ts": {
+  "m:../methodCatalog": 1
+ },
+ "server/src/stats/catalog/__tests__/methodCatalog.regression.test.ts": {
+  "m:../../dataset/bivariate": 1,
+  "m:../methodCatalog": 1
+ },
+ "server/src/stats/catalog/__tests__/methodCatalog.test.ts": {
+  "m:../../dataset/bivariate": 1,
+  "m:../methodCatalog": 2
+ },
+ "server/src/stats/dataset/bivariate.ts": {
+  "m:./builder": 2
+ },
+ "server/src/stats/dataset/bivariateRoles.ts": {
+  "m:../recipe/ordinalOrder": 1
+ },
+ "server/src/stats/dataset/builder.ts": {
+  "m:../../canonicalSerializer": 1,
+  "m:./personCluster": 1,
+  "m:./snapshot": 1,
+  "m:./snapshotColumnVariables": 1
+ },
+ "server/src/stats/dataset/correlationMatrix.ts": {
+  "m:../../config": 1,
+  "m:../engine/engineLimits": 1,
+  "m:./builder": 1
+ },
+ "server/src/stats/dataset/descriptiveStratify.ts": {
+  "m:../disclosure/descriptiveSuppression": 1,
+  "m:../disclosure/smallCell": 1,
+  "m:./bivariateRoles": 1,
+  "m:./builder": 2
+ },
+ "server/src/stats/dataset/personCluster.ts": {},
+ "server/src/stats/dataset/predictionCohort.ts": {
+  "m:../../canonicalSerializer": 1,
+  "m:../disclosure/bivariateGate": 1,
+  "m:../disclosure/smallCell": 1,
+  "m:../policy/policy": 1,
+  "m:./builder": 1,
+  "m:./predictionDesign": 1,
+  "m:./regressionDesign": 1
+ },
+ "server/src/stats/dataset/predictionDesign.ts": {
+  "m:../recipe/ordinalOrder": 1,
+  "m:./bivariateRoles": 1,
+  "m:./builder": 1
+ },
+ "server/src/stats/dataset/regression.ts": {
+  "m:../engine/engineLimits": 1,
+  "m:./builder": 1
+ },
+ "server/src/stats/dataset/regressionDesign.ts": {
+  "m:../policy/policy": 1,
+  "m:../recipe/ordinalOrder": 1,
+  "m:./bivariateRoles": 1,
+  "m:./builder": 1,
+  "m:./regression": 1,
+  "m:./splineBasis": 1
+ },
+ "server/src/stats/dataset/snapshot.ts": {
+  "m:../../canonicalSerializer": 1
+ },
+ "server/src/stats/dataset/snapshotColumnVariables.ts": {
+  "m:./snapshot": 1
+ },
+ "server/src/stats/dataset/splineBasis.ts": {},
+ "server/src/stats/dataset/__tests__/bivariate.test.ts": {
+  "m:../bivariate": 1,
+  "m:../builder": 1
+ },
+ "server/src/stats/dataset/__tests__/bivariateRoles.test.ts": {
+  "m:../bivariateRoles": 1
+ },
+ "server/src/stats/dataset/__tests__/builder.assertObservations.test.ts": {
+  "m:../builder": 1
+ },
+ "server/src/stats/dataset/__tests__/builder.broadcast.test.ts": {
+  "m:../../catalog/catalog": 1,
+  "m:../../disclosure/descriptiveSuppression": 1,
+  "m:../../policy/policy": 1,
+  "m:../builder": 1,
+  "m:../predictionCohort": 1,
+  "m:../snapshot": 1
+ },
+ "server/src/stats/dataset/__tests__/builder.disease.test.ts": {
+  "m:../../catalog/methodCatalog": 1,
+  "m:../../recipe/ordinalOrder": 1,
+  "m:../bivariate": 1,
+  "m:../builder": 1,
+  "m:../snapshot": 1
+ },
+ "server/src/stats/dataset/__tests__/builder.excludeFromAnalysis.test.ts": {
+  "m:../builder": 1,
+  "m:../snapshot": 1
+ },
+ "server/src/stats/dataset/__tests__/builder.job.test.ts": {
+  "m:../builder": 1,
+  "m:../snapshot": 1
+ },
+ "server/src/stats/dataset/__tests__/builder.test.ts": {
+  "m:../../catalog/catalog": 1,
+  "m:../builder": 1,
+  "m:../snapshot": 1
+ },
+ "server/src/stats/dataset/__tests__/correlationMatrix.test.ts": {
+  "m:../../engine/engineLimits": 1,
+  "m:../bivariate": 1,
+  "m:../builder": 1,
+  "m:../correlationMatrix": 1
+ },
+ "server/src/stats/dataset/__tests__/descriptiveStratify.test.ts": {
+  "m:../builder": 1,
+  "m:../descriptiveStratify": 1
+ },
+ "server/src/stats/dataset/__tests__/personCluster.test.ts": {
+  "m:../personCluster": 1
+ },
+ "server/src/stats/dataset/__tests__/predictionCohort.test.ts": {
+  "m:../predictionCohort": 1
+ },
+ "server/src/stats/dataset/__tests__/predictionCohortStages.test.ts": {
+  "m:../builder": 1,
+  "m:../predictionCohort": 1
+ },
+ "server/src/stats/dataset/__tests__/predictionDesign.test.ts": {
+  "m:../builder": 1,
+  "m:../predictionDesign": 1
+ },
+ "server/src/stats/dataset/__tests__/regression.test.ts": {
+  "m:../builder": 1,
+  "m:../regression": 1
+ },
+ "server/src/stats/dataset/__tests__/regressionDesign.test.ts": {
+  "m:../builder": 1,
+  "m:../regressionDesign": 1
+ },
+ "server/src/stats/dataset/__tests__/snapshot.integration.test.ts": {
+  "m:../snapshot": 1
+ },
+ "server/src/stats/dataset/__tests__/snapshotColumnVariables.test.ts": {
+  "m:../snapshot": 1,
+  "m:../snapshotColumnVariables": 1
+ },
+ "server/src/stats/dataset/__tests__/splineBasis.test.ts": {
+  "m:../splineBasis": 1
+ },
+ "server/src/stats/disclosure/bivariateGate.ts": {
+  "m:../policy/policy": 1,
+  "m:./smallCell": 1
+ },
+ "server/src/stats/disclosure/bivariateSuppression.ts": {
+  "m:../dataset/bivariate": 2,
+  "m:../dataset/bivariateRoles": 1,
+  "m:../engine": 2,
+  "m:../recipe/analysisContext": 1,
+  "m:./chartDisclosure": 1,
+  "m:./scatterGrid": 1,
+  "m:./smallCell": 1
+ },
+ "server/src/stats/disclosure/chartDisclosure.ts": {
+  "m:../policy/policy": 1,
+  "m:./smallCell": 1
+ },
+ "server/src/stats/disclosure/correlationMatrixSuppression.ts": {
+  "m:../dataset/correlationMatrix": 1,
+  "m:../engine": 1,
+  "m:../policy/inferenceGate": 1,
+  "m:../recipe/analysisContext": 1,
+  "m:./bivariateGate": 1,
+  "m:./suppressedResult": 1
+ },
+ "server/src/stats/disclosure/descriptiveStratifySuppression.ts": {
+  "m:../dataset/descriptiveStratify": 1,
+  "m:../engine": 1,
+  "m:../recipe/analysisContext": 1,
+  "m:./descriptiveSuppression": 1
+ },
+ "server/src/stats/disclosure/descriptiveSuppression.ts": {
+  "m:../dataset/builder": 2,
+  "m:../engine": 1,
+  "m:../recipe/ordinalOrder": 1,
+  "m:./chartDisclosure": 1,
+  "m:./smallCell": 1
+ },
+ "server/src/stats/disclosure/descriptiveUnrestricted.ts": {
+  "m:../../config": 1,
+  "m:../dataset/descriptiveStratify": 1,
+  "m:../engine": 1,
+  "m:../engine/engineLimits": 1,
+  "m:../recipe/analysisContext": 1,
+  "m:./descriptiveStratifySuppression": 1,
+  "m:./descriptiveSuppression": 1,
+  "m:./limitedDisclosureGuard": 1
+ },
+ "server/src/stats/disclosure/differencingGuard.ts": {
+  "m:../../canonicalSerializer": 1,
+  "m:../policy/policy": 1
+ },
+ "server/src/stats/disclosure/liftedRecompute.ts": {
+  "m:../../config": 1,
+  "m:../../middleware/requireCapability": 1,
+  "m:../catalog/methodCatalog": 1,
+  "m:../queue/executionDigest": 1,
+  "m:../recipe/analysisContext": 1,
+  "m:./bivariateSuppression": 1,
+  "m:./descriptiveUnrestricted": 1,
+  "m:./regressionSuppression": 1
+ },
+ "server/src/stats/disclosure/limitedDisclosureGuard.ts": {
+  "m:../policy/policy": 1
+ },
+ "server/src/stats/disclosure/limitedRowMerge.ts": {
+  "m:../dataset/bivariate": 1,
+  "m:../dataset/builder": 1,
+  "m:../engine": 1,
+  "m:../recipe/analysisContext": 1,
+  "m:./bivariateSuppression": 1,
+  "m:./chartDisclosure": 1,
+  "m:./descriptiveSuppression": 1,
+  "m:./scatterGrid": 1
+ },
+ "server/src/stats/disclosure/predictionDisclosure.ts": {
+  "m:../policy/policy": 1,
+  "m:./smallCell": 1
+ },
+ "server/src/stats/disclosure/predictionSuppression.ts": {
+  "m:../dataset/predictionCohort": 1,
+  "m:../dataset/predictionDesign": 1,
+  "m:../engine": 1,
+  "m:../policy/policy": 1,
+  "m:../recipe/analysisContext": 1,
+  "m:./predictionDisclosure": 1,
+  "m:./suppressedResult": 1
+ },
+ "server/src/stats/disclosure/regressionGate.ts": {
+  "m:../dataset/regression": 1,
+  "m:./bivariateGate": 1,
+  "m:./smallCell": 1
+ },
+ "server/src/stats/disclosure/regressionSuppression.ts": {
+  "m:../dataset/regressionDesign": 1,
+  "m:../dataset/splineBasis": 1,
+  "m:../engine": 1,
+  "m:../policy/policy": 1,
+  "m:../recipe/analysisContext": 1
+ },
+ "server/src/stats/disclosure/scatterGrid.ts": {
+  "m:./chartDisclosure": 1,
+  "m:./smallCell": 1
+ },
+ "server/src/stats/disclosure/smallCell.ts": {
+  "m:../policy/policy": 1
+ },
+ "server/src/stats/disclosure/storedLimited.ts": {
+  "m:../../canonicalSerializer": 1,
+  "m:../../middleware/audit": 1,
+  "m:../../middleware/requireCapability": 1
+ },
+ "server/src/stats/disclosure/suppressedResult.ts": {
+  "m:../dataset/correlationMatrix": 1,
+  "m:../recipe/analysisContext": 1
+ },
+ "server/src/stats/disclosure/__tests__/bivariateGate.test.ts": {
+  "m:../../dataset/bivariate": 1,
+  "m:../bivariateGate": 1
+ },
+ "server/src/stats/disclosure/__tests__/bivariateLifted.test.ts": {
+  "m:../../../middleware/requireCapability": 1,
+  "m:../../catalog/methodCatalog": 1,
+  "m:../../dataset/bivariate": 1,
+  "m:../../engine": 2,
+  "m:../../queue/executionDigest": 1,
+  "m:../../recipe/analysisContext": 3,
+  "m:../bivariateGate": 1,
+  "m:../bivariateSuppression": 1,
+  "m:../liftedRecompute": 1,
+  "m:../limitedDisclosureGuard": 1,
+  "m:../scatterGrid": 1
+ },
+ "server/src/stats/disclosure/__tests__/bivariateSuppression.test.ts": {
+  "m:../../dataset/bivariate": 1,
+  "m:../../engine": 2,
+  "m:../../recipe/analysisContext": 1,
+  "m:../bivariateSuppression": 1
+ },
+ "server/src/stats/disclosure/__tests__/chartDisclosure.test.ts": {
+  "m:../../dataset/builder": 1,
+  "m:../chartDisclosure": 1
+ },
+ "server/src/stats/disclosure/__tests__/correlationMatrixLifted.test.ts": {
+  "m:../../dataset/builder": 1,
+  "m:../../dataset/correlationMatrix": 1,
+  "m:../../engine": 2,
+  "m:../../recipe/analysisContext": 1,
+  "m:../correlationMatrixSuppression": 1
+ },
+ "server/src/stats/disclosure/__tests__/correlationMatrixSuppression.test.ts": {
+  "m:../../dataset/builder": 1,
+  "m:../../dataset/correlationMatrix": 1,
+  "m:../../engine": 2,
+  "m:../../recipe/analysisContext": 1,
+  "m:../correlationMatrixSuppression": 1
+ },
+ "server/src/stats/disclosure/__tests__/descriptiveStratifySuppression.test.ts": {
+  "m:../../dataset/builder": 1,
+  "m:../../dataset/descriptiveStratify": 1,
+  "m:../../engine": 3,
+  "m:../../recipe/analysisContext": 1,
+  "m:../descriptiveStratifySuppression": 1,
+  "m:../descriptiveSuppression": 1
+ },
+ "server/src/stats/disclosure/__tests__/descriptiveSuppression.test.ts": {
+  "m:../../dataset/builder": 1,
+  "m:../../engine": 1,
+  "m:../descriptiveSuppression": 1
+ },
+ "server/src/stats/disclosure/__tests__/differencingGuard.test.ts": {
+  "m:../differencingGuard": 1
+ },
+ "server/src/stats/disclosure/__tests__/histogramParity.test.ts": {
+  "m:../chartDisclosure": 1,
+  "p:fixtures/histogramParity.json": 1
+ },
+ "server/src/stats/disclosure/__tests__/liftedRecompute.test.ts": {
+  "m:../../../middleware/requireCapability": 1,
+  "m:../../engine": 1,
+  "m:../../recipe/analysisContext": 3,
+  "m:../liftedRecompute": 1,
+  "m:../limitedDisclosureGuard": 1,
+  "m:../regressionSuppression": 2
+ },
+ "server/src/stats/disclosure/__tests__/limitedRowMerge.test.ts": {
+  "m:../../../canonicalSerializer": 1,
+  "m:../../dataset/bivariate": 1,
+  "m:../../dataset/builder": 1,
+  "m:../../dataset/regressionDesign": 1,
+  "m:../../engine": 3,
+  "m:../../recipe/analysisContext": 1,
+  "m:../chartDisclosure": 1,
+  "m:../descriptiveSuppression": 1,
+  "m:../limitedRowMerge": 1
+ },
+ "server/src/stats/disclosure/__tests__/niceHistogram.test.ts": {
+  "m:../chartDisclosure": 1
+ },
+ "server/src/stats/disclosure/__tests__/predictionDisclosure.test.ts": {
+  "m:../predictionDisclosure": 1
+ },
+ "server/src/stats/disclosure/__tests__/predictionLifted.test.ts": {
+  "m:../../dataset/builder": 1,
+  "m:../../dataset/predictionCohort": 1,
+  "m:../../dataset/predictionDesign": 1,
+  "m:../../engine": 2,
+  "m:../../recipe/analysisContext": 1,
+  "m:../predictionDisclosure": 1,
+  "m:../predictionSuppression": 1
+ },
+ "server/src/stats/disclosure/__tests__/predictionSuppression.test.ts": {
+  "m:../../dataset/builder": 1,
+  "m:../../dataset/predictionDesign": 1,
+  "m:../../engine": 2,
+  "m:../../recipe/analysisContext": 1,
+  "m:../predictionSuppression": 1
+ },
+ "server/src/stats/disclosure/__tests__/regressionGate.test.ts": {
+  "m:../regressionGate": 1
+ },
+ "server/src/stats/disclosure/__tests__/regressionSuppression.test.ts": {
+  "m:../../dataset/regressionDesign": 1,
+  "m:../../engine": 3,
+  "m:../../recipe/analysisContext": 1,
+  "m:../regressionSuppression": 1
+ },
+ "server/src/stats/disclosure/__tests__/scatterGrid.test.ts": {
+  "m:../scatterGrid": 1
+ },
+ "server/src/stats/disclosure/__tests__/storedLimited.test.ts": {
+  "m:../../../middleware/audit": 1,
+  "m:../../../middleware/requireCapability": 1,
+  "m:../../queue/executionDigest": 1,
+  "m:../storedLimited": 1
+ },
+ "server/src/stats/engine/engineLimits.ts": {},
+ "server/src/stats/engine/errorMapping.ts": {
+  "m:.": 1
+ },
+ "server/src/stats/engine/index.ts": {
+  "m:../../config": 1,
+  "m:../policy/policy": 1,
+  "m:./engineLimits": 1
+ },
+ "server/src/stats/engine/__tests__/correlationMatrixLimits.test.ts": {
+  "m:..": 1,
+  "m:../../../config": 2,
+  "m:../../../testing/configMock.js": 1,
+  "m:../engineLimits": 1
+ },
+ "server/src/stats/engine/__tests__/engine.realWrapper.smoke.test.ts": {
+  "m:../../../config": 1,
+  "m:../../../testing/configMock.js": 1,
+  "m:../index.js": 2,
+  "p:../../../../../services/stats-engine": 1
+ },
+ "server/src/stats/engine/__tests__/engine.smoke.test.ts": {
+  "m:../../disclosure/chartDisclosure": 1,
+  "p:../../../../../services/stats-engine": 1
+ },
+ "server/src/stats/engine/__tests__/engine.test.ts": {
+  "m:..": 1,
+  "m:../../../config": 1,
+  "m:../../../testing/configMock.js": 1
+ },
+ "server/src/stats/engine/__tests__/engineLimits.consistency.test.ts": {
+  "m:../engineLimits": 1,
+  "p:../../../../../services/stats-engine/protocol.py": 1
+ },
+ "server/src/stats/engine/__tests__/engineTiming.test.ts": {
+  "m:..": 1,
+  "m:../../../config": 2,
+  "m:../../../testing/configMock.js": 1
+ },
+ "server/src/stats/engine/__tests__/golden.engineRequests.test.ts": {
+  "m:../../../canonicalSerializer": 1,
+  "m:../../catalog/catalog": 1,
+  "m:../../dataset/builder": 1,
+  "m:../../dataset/predictionCohort": 1,
+  "m:../../dataset/snapshot": 1,
+  "m:../../disclosure/bivariateSuppression": 1,
+  "m:../../disclosure/descriptiveStratifySuppression": 1,
+  "m:../../disclosure/descriptiveSuppression": 1,
+  "m:../../disclosure/predictionSuppression": 1,
+  "m:../../disclosure/regressionSuppression": 1,
+  "m:../../recipe/analysisContext": 1,
+  "p:../../../../../src/core/fixtures/goldenPatients.json": 1,
+  "p:./__goldens__/stats-engine-requests.json": 1
+ },
+ "server/src/stats/engine/__tests__/predictionEngine.realWrapper.smoke.test.ts": {
+  "m:../../../config": 1,
+  "m:../../../testing/configMock.js": 1,
+  "m:../../dataset/predictionCohort": 1,
+  "m:../../policy/policy": 1,
+  "m:../index.js": 2,
+  "p:../../../../../services/stats-engine": 1
+ },
+ "server/src/stats/engine/__tests__/predictionEngine.test.ts": {
+  "m:..": 1,
+  "m:../../../config": 1,
+  "m:../../../testing/configMock.js": 1
+ },
+ "server/src/stats/engine/__tests__/regressionEngine.realWrapper.smoke.test.ts": {
+  "m:../../../config": 1,
+  "m:../../../testing/configMock.js": 1,
+  "m:../../dataset/builder": 1,
+  "m:../../dataset/regressionDesign": 1,
+  "m:../index.js": 3,
+  "p:../../../../../services/stats-engine": 1
+ },
+ "server/src/stats/export/exportHandler.ts": {
+  "m:../../http/authz": 1,
+  "m:../../middleware/audit": 1
+ },
+ "server/src/stats/export/__tests__/exportCsv.test.ts": {
+  "m:../exportHandler": 1
+ },
+ "server/src/stats/export/__tests__/exportRoute.test.ts": {
+  "m:../../../config": 1,
+  "m:../../../middleware/audit": 1,
+  "m:../../../testing/app": 1,
+  "m:../../../testing/configMock.js": 1,
+  "m:../../../testing/fakePool": 1,
+  "m:../../../testing/tokens": 1,
+  "m:../../policy/workbenchRuntimeState": 1,
+  "m:../../routes/router": 1
+ },
+ "server/src/stats/policy/inferenceGate.ts": {},
+ "server/src/stats/policy/policy.ts": {},
+ "server/src/stats/policy/workbenchRuntimeState.ts": {
+  "m:../../config": 1
+ },
+ "server/src/stats/policy/__tests__/predictionRequirementsParity.test.ts": {
+  "m:../../../../../src/core/components/statistics/predictionRequirements.js": 1,
+  "m:../policy": 1
+ },
+ "server/src/stats/queue/analyzeInFlight.ts": {},
+ "server/src/stats/queue/executionDigest.ts": {
+  "m:../../canonicalSerializer": 1,
+  "m:../catalog/version": 1,
+  "m:../policy/policy": 1,
+  "m:./runManifest": 1
+ },
+ "server/src/stats/queue/runAdmission.ts": {
+  "m:../../config": 1,
+  "m:../../db/withWriteTransaction": 1,
+  "m:../../middleware/audit": 1,
+  "m:../engine": 2,
+  "m:../policy/policy": 1,
+  "m:../recipe/analysisContext": 2,
+  "m:./executionDigest": 1,
+  "m:./runExpiry": 1,
+  "m:./runManifest": 1,
+  "m:./runRow": 1
+ },
+ "server/src/stats/queue/runExpiry.ts": {
+  "m:../../config": 1
+ },
+ "server/src/stats/queue/runManifest.ts": {
+  "m:../../canonicalSerializer": 1,
+  "m:../catalog/version": 1,
+  "m:../policy/policy": 1
+ },
+ "server/src/stats/queue/runRow.ts": {
+  "m:../recipe/analysisContext": 1
+ },
+ "server/src/stats/queue/runsQueue.ts": {
+  "m:../../canonicalSerializer": 1,
+  "m:../../config": 1,
+  "m:../../db/withWriteTransaction": 1,
+  "m:../../middleware/audit": 1,
+  "m:../../middleware/requireCapability": 1,
+  "m:../disclosure/bivariateSuppression": 1,
+  "m:../disclosure/correlationMatrixSuppression": 1,
+  "m:../disclosure/descriptiveStratifySuppression": 1,
+  "m:../disclosure/descriptiveSuppression": 1,
+  "m:../disclosure/predictionSuppression": 1,
+  "m:../disclosure/regressionSuppression": 1,
+  "m:../disclosure/storedLimited": 1,
+  "m:../disclosure/suppressedResult": 1,
+  "m:../engine": 1,
+  "m:../engine/errorMapping": 1,
+  "m:../policy/policy": 1,
+  "m:../recipe/analysisContext": 2,
+  "m:./executionDigest": 1,
+  "m:./runExpiry": 1,
+  "m:./runManifest": 1,
+  "m:./runRow": 1
+ },
+ "server/src/stats/queue/__tests__/analyzeInFlight.test.ts": {
+  "m:../analyzeInFlight": 1
+ },
+ "server/src/stats/queue/__tests__/executionDigest.test.ts": {
+  "m:../../../canonicalSerializer": 1,
+  "m:../../catalog/version": 2,
+  "m:../../policy/policy": 1,
+  "m:../executionDigest": 1,
+  "m:../executionDigest.js": 4,
+  "m:../runManifest": 3
+ },
+ "server/src/stats/queue/__tests__/runsQueue.integration.test.ts": {
+  "m:../../../config": 1,
+  "m:../../../middleware/audit": 5,
+  "m:../executionDigest": 1,
+  "m:../runManifest": 1,
+  "m:../runsQueue": 1
+ },
+ "server/src/stats/queue/__tests__/runsQueue.test.ts": {
+  "m:../executionDigest": 1,
+  "m:../runRow": 1,
+  "m:../runsQueue": 1
+ },
+ "server/src/stats/queue/__tests__/runsQueueClaimGate.test.ts": {
+  "m:../../../config": 1,
+  "m:../../engine": 2,
+  "m:../runsQueue": 1
+ },
+ "server/src/stats/recipe/analysisContext.ts": {
+  "m:../../canonicalSerializer": 1,
+  "m:../../http/authz": 1,
+  "m:../catalog/methodCatalog": 2,
+  "m:../dataset/bivariate": 1,
+  "m:../dataset/builder": 2,
+  "m:../dataset/correlationMatrix": 1,
+  "m:../dataset/descriptiveStratify": 1,
+  "m:../dataset/predictionCohort": 1,
+  "m:../dataset/regression": 1,
+  "m:../dataset/regressionDesign": 1,
+  "m:../dataset/snapshot": 1,
+  "m:../disclosure/bivariateGate": 1,
+  "m:../disclosure/differencingGuard": 1,
+  "m:../disclosure/regressionGate": 1,
+  "m:../engine/engineLimits": 1,
+  "m:../policy/policy": 2,
+  "m:../queue/executionDigest": 1,
+  "m:./validation": 1
+ },
+ "server/src/stats/recipe/estimability.ts": {
+  "m:../dataset/builder": 1,
+  "m:../disclosure/smallCell": 1
+ },
+ "server/src/stats/recipe/ordinalOrder.ts": {},
+ "server/src/stats/recipe/validation.ts": {
+  "m:../catalog/catalog": 1,
+  "m:../dataset/snapshotColumnVariables": 1,
+  "m:./ordinalOrder": 1
+ },
+ "server/src/stats/recipe/__tests__/estimability.test.ts": {
+  "m:../../dataset/builder": 1,
+  "m:../estimability": 1
+ },
+ "server/src/stats/recipe/__tests__/validation.test.ts": {
+  "m:../validation": 1
+ },
+ "server/src/stats/routes/analyzeHandler.ts": {
+  "m:../../canonicalSerializer": 1,
+  "m:../../config": 1,
+  "m:../../db/withWriteTransaction": 1,
+  "m:../../http/errors": 1,
+  "m:../../middleware/audit": 1,
+  "m:../../middleware/requireCapability": 1,
+  "m:../disclosure/bivariateSuppression": 1,
+  "m:../disclosure/descriptiveStratifySuppression": 1,
+  "m:../disclosure/descriptiveSuppression": 1,
+  "m:../disclosure/descriptiveUnrestricted": 1,
+  "m:../disclosure/liftedRecompute": 1,
+  "m:../disclosure/limitedDisclosureGuard": 1,
+  "m:../disclosure/limitedRowMerge": 1,
+  "m:../disclosure/predictionSuppression": 1,
+  "m:../disclosure/regressionSuppression": 1,
+  "m:../disclosure/storedLimited": 1,
+  "m:../disclosure/suppressedResult": 1,
+  "m:../engine": 1,
+  "m:../queue/executionDigest": 1,
+  "m:../queue/runAdmission": 1,
+  "m:../queue/runExpiry": 1,
+  "m:../queue/runManifest": 1,
+  "m:../queue/runRow": 1,
+  "m:../recipe/analysisContext": 1,
+  "m:./responseAbort": 1
+ },
+ "server/src/stats/routes/responseAbort.ts": {},
+ "server/src/stats/routes/router.ts": {
+  "m:../../http/asyncHandler": 1,
+  "m:../../http/authz": 1,
+  "m:../../middleware/auth": 1,
+  "m:../../middleware/csrf": 1,
+  "m:../../middleware/rateLimit": 1,
+  "m:../../middleware/requireCapability": 1,
+  "m:../export/exportHandler": 1,
+  "m:../policy/workbenchRuntimeState": 1,
+  "m:./analyzeHandler": 1,
+  "m:./catalogPreview": 1,
+  "m:./runs": 1
+ },
+ "server/src/stats/routes/__tests__/analyze.integration.test.ts": {},
+ "server/src/stats/routes/__tests__/bivariateHttp.integration.test.ts": {
+  "m:../../../auth/tokenHash": 1,
+  "m:../../../auth/tokens": 1,
+  "m:../../policy/workbenchRuntimeState": 1,
+  "m:../../queue/runsQueue": 1,
+  "m:../router": 1
+ },
+ "server/src/stats/routes/__tests__/bivariateLimitedDisclosure.integration.test.ts": {
+  "m:../../../auth/tokenHash": 1,
+  "m:../../../auth/tokens": 1,
+  "m:../../disclosure/differencingGuard": 1,
+  "m:../../disclosure/limitedDisclosureGuard": 1,
+  "m:../../policy/workbenchRuntimeState": 1,
+  "m:../../queue/runsQueue": 1,
+  "m:../router": 1
+ },
+ "server/src/stats/routes/__tests__/correlationMatrixHttp.integration.test.ts": {
+  "m:../../../auth/tokenHash": 1,
+  "m:../../../auth/tokens": 1,
+  "m:../../policy/workbenchRuntimeState": 1,
+  "m:../../queue/runsQueue": 1,
+  "m:../router": 1
+ },
+ "server/src/stats/routes/__tests__/correlationMatrixLimitedDisclosure.integration.test.ts": {
+  "m:../../../auth/tokenHash": 1,
+  "m:../../../auth/tokens": 1,
+  "m:../../disclosure/differencingGuard": 1,
+  "m:../../disclosure/limitedDisclosureGuard": 1,
+  "m:../../policy/workbenchRuntimeState": 1,
+  "m:../../queue/runManifest": 1,
+  "m:../../queue/runsQueue": 1,
+  "m:../router": 1
+ },
+ "server/src/stats/routes/__tests__/descriptiveHttp.integration.test.ts": {
+  "m:../../../auth/tokenHash": 1,
+  "m:../../../auth/tokens": 1,
+  "m:../../../config": 2,
+  "m:../../../middleware/audit": 11,
+  "m:../../engine": 7,
+  "m:../../policy/workbenchRuntimeState": 1,
+  "m:../../queue/runsQueue": 1,
+  "m:../router": 1
+ },
+ "server/src/stats/routes/__tests__/finalizeLiftedRegression.test.ts": {
+  "m:../../../middleware/audit": 1,
+  "m:../../../middleware/requireCapability": 1,
+  "m:../../disclosure/liftedRecompute": 2,
+  "m:../../disclosure/limitedDisclosureGuard": 1,
+  "m:../../disclosure/limitedRowMerge": 1,
+  "m:../../recipe/analysisContext": 1,
+  "m:../analyzeHandler": 1
+ },
+ "server/src/stats/routes/__tests__/finalizeLimitedDisclosure.test.ts": {
+  "m:../../../middleware/audit": 1,
+  "m:../../../middleware/requireCapability": 1,
+  "m:../../disclosure/descriptiveUnrestricted": 3,
+  "m:../../disclosure/limitedDisclosureGuard": 1,
+  "m:../../engine": 2,
+  "m:../../recipe/analysisContext": 1,
+  "m:../analyzeHandler": 1
+ },
+ "server/src/stats/routes/__tests__/limitedDisclosure.integration.test.ts": {
+  "m:../../../auth/tokenHash": 1,
+  "m:../../../auth/tokens": 1,
+  "m:../../../middleware/audit": 7,
+  "m:../../disclosure/differencingGuard": 1,
+  "m:../../disclosure/limitedDisclosureGuard": 1,
+  "m:../../engine": 14,
+  "m:../../policy/workbenchRuntimeState": 1,
+  "m:../../queue/runsQueue": 1,
+  "m:../router": 1
+ },
+ "server/src/stats/routes/__tests__/predictionLimitedDisclosure.integration.test.ts": {
+  "m:../../../auth/tokenHash": 1,
+  "m:../../../auth/tokens": 1,
+  "m:../../disclosure/differencingGuard": 1,
+  "m:../../disclosure/limitedDisclosureGuard": 1,
+  "m:../../policy/workbenchRuntimeState": 1,
+  "m:../../queue/runsQueue": 1,
+  "m:../router": 1
+ },
+ "server/src/stats/routes/__tests__/regressionHttp.integration.test.ts": {
+  "m:../../../auth/tokenHash": 1,
+  "m:../../../auth/tokens": 1,
+  "m:../../policy/workbenchRuntimeState": 1,
+  "m:../../queue/runsQueue": 1,
+  "m:../router": 1
+ },
+ "server/src/stats/routes/__tests__/regressionLimitedDisclosure.integration.test.ts": {
+  "m:../../../auth/tokenHash": 1,
+  "m:../../../auth/tokens": 1,
+  "m:../../disclosure/differencingGuard": 1,
+  "m:../../disclosure/limitedDisclosureGuard": 1,
+  "m:../../policy/workbenchRuntimeState": 1,
+  "m:../../queue/runsQueue": 1,
+  "m:../router": 1
+ },
+ "server/src/stats/routes/__tests__/router.test.ts": {
+  "m:../../../config": 1,
+  "m:../../../middleware/audit": 1,
+  "m:../../../testing/app": 1,
+  "m:../../../testing/configMock.js": 1,
+  "m:../../../testing/fakePool": 1,
+  "m:../../../testing/tokens": 1,
+  "m:../../disclosure/differencingGuard": 1,
+  "m:../../disclosure/differencingGuard.js": 1,
+  "m:../../engine": 2,
+  "m:../../policy/workbenchRuntimeState": 1,
+  "m:../../queue/analyzeInFlight": 1,
+  "m:../analyzeHandler.js": 1,
+  "m:../router": 1
+ }
 }

@@ -157,8 +157,8 @@ export function computeRepeatedVariableValue(
 // carryHoursPerShift/forcedNeckPosture는 exposure_types에 shoulder_heavy_load 포함 시만,
 // neckNonneutralHoursPerDay/combinedFlexionRotationPosture/precisionWork는
 // awkward_static_neck_load 포함 시만 — 그 외엔 not_applicable). types.ts/shared/contracts/
-// server/src/stats/routes/router.ts의 grain 유니온, grainEntities.ts의 enumerateCervicalTaskEntities,
-// server/src/stats/dataset/builder.ts/statsRecipeValidation.ts/routes/stats.ts 3곳 배선 완료.
+// stats.ts의 grain 유니온, grainEntities.ts의 enumerateCervicalTaskEntities,
+// server/src/stats/{dataset/builder,recipe/validation,routes/catalogPreview}.ts 3곳 배선 완료.
 // PR0-B4 Slice 8a/8b — 80개→116개. Slice 8a: elbow/wrist temporal 4개씩(병합 결과
 // temporalSequence?? temporalRelation 기준 case grain, temporalSequence/temporalRelation
 // 각각은 변수화하지 않음). Slice 8b: job_diagnosis grain 활성화(기존 미지원 grain, 타입/
