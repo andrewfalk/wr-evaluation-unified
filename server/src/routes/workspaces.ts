@@ -6,7 +6,8 @@ import { csrfMiddleware } from '../middleware/csrf';
 import { auditMiddleware, writeAuditLog } from '../middleware/audit';
 import { resolvePatientPersonId, releasePersonIfOrphaned, type QueryRunner } from '../db/patientPersons';
 import { assertAssignedOrAdmin, PatientLockForbiddenError } from '../db/patientLocks';
-import { withDeadlockRetry, evaluateLockGate } from './patients';
+import { withDeadlockRetry } from '../db/withDeadlockRetry';
+import { evaluateLockGate } from '../http/lockGate';
 import { resolveAssignedDoctor } from '../db/resolveAssignedDoctor';
 import { validatePastDate } from '@wr/contracts';
 import {
