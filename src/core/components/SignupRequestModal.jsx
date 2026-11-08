@@ -31,10 +31,13 @@ export function SignupRequestModal({ apiBaseUrl = '', onClose }) {
       });
       setDone(true);
     } catch (err) {
-      const raw = err?.message || '';
-      setError(raw.includes('ALREADY_REQUESTED')
-        ? '이미 대기 중인 신청이 있습니다.'
-        : raw || '요청에 실패했습니다.');
+      // 서버는 형식이 맞으면 중복·기존 아이디도 항상 202로 답한다(SEC-B L4) — 여기 오는 것은 형식 오류(400),
+      // 신청 횟수 제한(429), 네트워크·서버 오류뿐이다.
+      setError(err?.status === 429
+        ? '신청이 너무 많습니다. 잠시 후 다시 시도하세요.'
+        : err?.status === 400
+          ? '입력 내용을 확인하세요.'
+          : err?.message || '요청에 실패했습니다.');
     } finally {
       setLoading(false);
     }
@@ -53,8 +56,11 @@ export function SignupRequestModal({ apiBaseUrl = '', onClose }) {
         {done ? (
           <div style={{ padding: '1.5rem 0', textAlign: 'center' }}>
             <p style={{ marginBottom: '1rem', color: 'var(--text-primary)' }}>
-              신청이 접수되었습니다.<br />
-              관리자 승인 후 로그인 정보가 전달됩니다.
+              요청이 접수되었습니다.<br />
+              관리자 승인 후 로그인 정보를 안내합니다.
+            </p>
+            <p className="modal-section-description" style={{ marginBottom: '1rem' }}>
+              이미 신청했거나 사용 중인 아이디는 새로 접수되지 않습니다. 안내가 없으면 관리자에게 문의하세요.
             </p>
             <button className="btn btn-primary" onClick={onClose}>확인</button>
           </div>

@@ -932,6 +932,92 @@ describe('POST /api/admin/signup-requests/:id/reject', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Signup requests ↔ organization (SEC-B L4, migration 0041)
+// ---------------------------------------------------------------------------
+describe('signup requests: organization scope and recorded organization (SEC-B L4)', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  const superAdminToken = () =>
+    makeAccessToken({ userId: 'admin-1', sessionId: 'sess-1', orgId: null, role: 'admin', name: 'Super Admin' });
+  const poolCalls = (fake: FakePool) => fake.calls.filter(c => c.via === 'pool' && c.handler !== 'auth.session');
+
+  it('an organization admin lists only their own organization and unassigned requests', async () => {
+    const fake = fakeQueries([REQ_ROW]);
+    const res = await request(adminApp(fake))
+      .get('/api/admin/signup-requests')
+      .set('Authorization', `Bearer ${token('admin')}`);
+    expect(res.status).toBe(200);
+    const [list] = poolCalls(fake);
+    expect(list.sql).toMatch(/WHERE r\.status = \$1 AND \(r\.organization_id IS NULL OR r\.organization_id = \$2\)/);
+    expect(list.params).toEqual(['pending', 'org-1']);
+    fake.assertNoUnmatched();
+  });
+
+  it('an admin without an organization (super-administrator) lists every organization', async () => {
+    const fake = fakeQueries([REQ_ROW]);
+    const res = await request(adminApp(fake))
+      .get('/api/admin/signup-requests?status=approved')
+      .set('Authorization', `Bearer ${superAdminToken()}`);
+    expect(res.status).toBe(200);
+    const [list] = poolCalls(fake);
+    expect(list.sql).not.toMatch(/organization_id/);
+    expect(list.params).toEqual(['approved']);
+  });
+
+  it('approval looks the request up within the scope and records the approver organization', async () => {
+    const fake = fakeTx(
+      { rows: [REQ_ROW] },
+      { rows: [{ id: 'new-user-1' }] },
+      { rows: [] },
+    );
+    const res = await request(adminApp(fake))
+      .post('/api/admin/signup-requests/req-1/approve')
+      .set(authHeaders(token('admin')));
+    expect(res.status).toBe(200);
+    const [select, insertUser, update] = fake.callsTo('tx');
+    expect(select.sql).toMatch(/WHERE id = \$1 AND \(organization_id IS NULL OR organization_id = \$2\) FOR UPDATE/);
+    expect(select.params).toEqual(['req-1', 'org-1']);
+    expect(insertUser.params[4]).toBe('org-1'); // the account is created in the same organization
+    expect(update.sql).toMatch(/organization_id = \$3/);
+    expect(update.params).toEqual(['admin-1', 'req-1', 'org-1']);
+    fake.assertNoUnmatched();
+  });
+
+  it("another organization's request is not found (404) for an organization admin", async () => {
+    const fake = fakeTx({ rows: [] }); // scoped SELECT FOR UPDATE finds nothing
+    const res = await request(adminApp(fake))
+      .post('/api/admin/signup-requests/req-other/approve')
+      .set(authHeaders(token('admin')));
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe('REQUEST_NOT_FOUND');
+    fake.assertNoUnmatched();
+  });
+
+  it('rejection is scoped the same way and records the rejecting organization', async () => {
+    const fake = fakeQueries([{ id: 'req-1' }]);
+    const res = await request(adminApp(fake))
+      .post('/api/admin/signup-requests/req-1/reject')
+      .set(authHeaders(token('admin')));
+    expect(res.status).toBe(200);
+    const [update] = poolCalls(fake);
+    expect(update.sql).toMatch(/organization_id = \$3/);
+    expect(update.sql).toMatch(/AND status = 'pending' AND \(organization_id IS NULL OR organization_id = \$4\)/);
+    expect(update.params).toEqual(['admin-1', 'req-1', 'org-1', 'org-1']);
+  });
+
+  it('a rejection outside the scope is 404, not 409 (the scoped lookup finds nothing)', async () => {
+    const fake = fakeQueries([], []); // scoped UPDATE → 0 rows, scoped SELECT → 0 rows
+    const res = await request(adminApp(fake))
+      .post('/api/admin/signup-requests/req-other/reject')
+      .set(authHeaders(token('admin')));
+    expect(res.status).toBe(404);
+    const [, select] = poolCalls(fake);
+    expect(select.sql).toMatch(/WHERE id = \$1 AND \(organization_id IS NULL OR organization_id = \$2\)/);
+    expect(select.params).toEqual(['req-other', 'org-1']);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // DELETE /api/admin/workspaces/:id/purge
 // ---------------------------------------------------------------------------
 describe('DELETE /api/admin/workspaces/:id/purge', () => {
