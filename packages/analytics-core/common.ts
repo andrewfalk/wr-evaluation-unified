@@ -79,7 +79,7 @@ export function escapeHtml(str: unknown): unknown {
 // 받는다 — types.ts의 AnalyticsVariableMetadata를 그대로 import해도 되지만, common.ts는
 // 의도적으로 다른 모듈에 의존하지 않는 leaf 유틸이라 구조적 타입으로 최소화한다.
 // 클라이언트(CatalogPanel.jsx/RecipePanel.jsx, `@wr/analytics-core/common` → dist)와 서버
-// (server/src/stats/recipe/validation.ts, `@wr/analytics-core`) 양쪽이 이 함수 하나를 그대로 import해서
+// (server/src/stats/recipe/validate, `@wr/analytics-core`) 양쪽이 이 함수 하나를 그대로 import해서
 // 쓴다 — 복제 구현 금지(리뷰 지적 — 클라이언트/서버 별도 구현은 드리프트 위험).
 export interface GrainCompatibilityVariable {
   grain: string;
@@ -113,7 +113,7 @@ export interface PurposeCompatibilityVariable {
   allowedAnalysisPurposes: readonly string[];
 }
 
-/** 이 변수를 분석 목적(analysisPurpose)에서 쓸 수 있는가. 서버 검증(server/src/stats/recipe/validation.ts
+/** 이 변수를 분석 목적(analysisPurpose)에서 쓸 수 있는가. 서버 검증(server/src/stats/recipe/validate
  * PURPOSE_NOT_ALLOWED)과 클라이언트 후보 제한(CatalogPanel.jsx)이 이 함수 하나를 공유한다 —
  * 복제 구현 금지(isGrainCompatible과 같은 원칙). 필터 변수에는 적용하지 않는다(서버가 필터는
  * 목적을 검사하지 않는다). */

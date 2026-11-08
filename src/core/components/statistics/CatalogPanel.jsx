@@ -34,7 +34,7 @@ function groupRank(vars) {
 // 거른다 — grain을 바꾼 뒤 사용자가 여전히 다른 grain의 변수를 볼 수 있으면 안 된다
 // (계획 pr0-b3-shimmying-magpie.md "Grain 선택 UI" 절 — 후보 제한과 상태 초기화는 별개다).
 // 분석 목적(analysisPurpose)에서 쓸 수 없는 변수는 숨기지 않고 비활성화한다(왜 못 고르는지
-// 툴팁으로 알 수 있게). 서버(server/src/stats/recipe/validation.ts PURPOSE_NOT_ALLOWED)와 같은 판정 함수를
+// 툴팁으로 알 수 있게). 서버(server/src/stats/recipe/validate/variables.ts PURPOSE_NOT_ALLOWED)와 같은 판정 함수를
 // 공유한다. analysisPurpose가 없으면(구 호출부) 제한하지 않는다.
 export function CatalogPanel({ catalog, grain, analysisPurpose, selectedKeys, onToggleVariable, collapsed, onToggleCollapse }) {
   const [search, setSearch] = useState('');
@@ -55,7 +55,7 @@ export function CatalogPanel({ catalog, grain, analysisPurpose, selectedKeys, on
   // PR0-B3 Part C — 필터 전용 변수(예: 등록일)는 분석 변수 후보에서 뺀다. 필터로는 여전히
   // 선택 가능하다(RecipePanel.jsx의 FilterEditor는 grain만 거르고 analysisRole은 안 봄).
   // grain 단순화(PR0-B4 개정) — 정확히 같은 grain뿐 아니라, case의 브로드캐스트 안전
-  // 변수도 다른 grain(job/disease)의 후보로 보여준다. 서버(server/src/stats/recipe/validation.ts)
+  // 변수도 다른 grain(job/disease)의 후보로 보여준다. 서버(server/src/stats/recipe/validate)
   // 와 같은 판정 함수를 공유한다(analytics-core/common.ts, 복제 구현 금지).
   const grainVariables = useMemo(
     () => variables.filter((v) => isGrainCompatible(v, grain) && v.analysisRole !== 'filter_only'),

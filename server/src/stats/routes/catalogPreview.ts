@@ -18,18 +18,11 @@ import { buildAnalysisContext, type AnalysisContext } from '../recipe/analysisCo
 import { resolveEffectiveContext } from '../disclosure/liftedRecompute';
 import { buildPredictionEngineRequestForState } from '../disclosure/predictionSuppression';
 import { assertPredictionWithinLimits, StatsEngineInputTooLargeError } from '../engine';
+import { SUPPORTED_GRAINS } from '../recipe/grains';
 
-// grain 단순화(PR0-B4 개정, person grain 삭제 후속) — case/job/disease 3개만 지원한다
-// (stats/recipe/validation.ts의 SUPPORTED_GRAINS와 반드시 같은 목록을 유지할 것).
-const CASE_GRAIN = 'case' as const;
-const JOB_GRAIN = 'job' as const;
-const DISEASE_GRAIN = 'disease' as const;
+// grain 단순화(PR0-B4 개정, person grain 삭제 후속) — 계약상 grain 전체 목록. 그중 지원하는
+// 목록은 레시피 검증과 같은 단일 출처(stats/recipe/grains.ts의 SUPPORTED_GRAINS, S6 P1-35)를 쓴다.
 const ALL_GRAINS = ['case', 'job', 'disease'] as const;
-const SUPPORTED_GRAINS_SET = new Set<(typeof ALL_GRAINS)[number]>([
-  CASE_GRAIN,
-  JOB_GRAIN,
-  DISEASE_GRAIN,
-]);
 
 function toCatalogVariableDto(v: AnalyticsVariableMetadata): CatalogVariable {
   // PR4-B2 — outcome 명세는 PREDICTION_OUTCOME_SPECS(단일 진실원)에서만 파생한다.
@@ -65,8 +58,8 @@ export async function handleGetCatalog(_req: Request, res: Response): Promise<vo
   const response: CatalogResponse = {
     catalogVersion: INTEGRATED_CATALOG_VERSION,
     variables,
-    supportedGrains: Array.from(SUPPORTED_GRAINS_SET),
-    unsupportedGrains: ALL_GRAINS.filter((g) => !SUPPORTED_GRAINS_SET.has(g)).map((grain) => ({
+    supportedGrains: Array.from(SUPPORTED_GRAINS),
+    unsupportedGrains: ALL_GRAINS.filter((g) => !SUPPORTED_GRAINS.has(g)).map((grain) => ({
       grain,
       reasonCode: 'GRAIN_NOT_YET_SUPPORTED' as const,
     })),

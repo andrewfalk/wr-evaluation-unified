@@ -2,7 +2,7 @@
 // grain별 fact rows. §1 파이프라인의 ③~⑥(preview용, ⑦은 stats/recipe/estimability.ts) 담당.
 // PR0-B3 Part A — buildDataset을 grain 디스패처로 분리(case → buildCaseGradeDataset,
 // 반복 grain → buildRepeatedGrainDataset). 이 파일은 카탈로그를 직접 조회하지 않는다
-// (기존 구조 그대로 — catalogByKey는 검증 단계인 stats/recipe/validation.ts가 만들어
+// (기존 구조 그대로 — catalogByKey는 검증 단계인 stats/recipe/validate가 만들어
 // 넘겨준다).
 import { deterministicMigrate } from '@wr/analytics-core/migration/deterministicMigrate';
 import { computeVariableValue, computeRepeatedVariableValue } from '@wr/analytics-core/catalog';
@@ -232,7 +232,7 @@ function buildCaseGradeDataset(
 
 // grain 단순화(PR0-B4 개정) — case/job/disease 3개만 남는다. case는
 // buildCaseGradeDataset(비반복)이 담당하고, 여기는 반복 grain(job/disease)만 등록한다.
-// 여기 없는 grain으로 이 함수가 호출되면(= stats/recipe/validation.ts의 SUPPORTED_GRAINS와
+// 여기 없는 grain으로 이 함수가 호출되면(= stats/recipe/grains.ts의 SUPPORTED_GRAINS와
 // 어긋난 상태) 구현 버그이므로 조용히 넘기지 않고 던진다.
 type Enumerator = (mr: MigrationResult<AnalysisPatient>) => GrainEntity<unknown>[];
 const GRAIN_ENTITY_ENUMERATORS: Partial<Record<StatsAnalysisRecipe['grain'], Enumerator>> = {

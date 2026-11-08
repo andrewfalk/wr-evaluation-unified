@@ -193,7 +193,7 @@ function evaluateCorrelation(
 const CORRELATION_MATRIX_METHOD_IDS: StatsMethodId[] = ['pearson_correlation', 'spearman_correlation'];
 
 // 코드리뷰 수정(2026-09-11) — 원래는 personCount만 보고 pearson/spearman을 항상
-// available로 보고했다. 그런데 stats/recipe/validation.ts는 상관행렬의 "전부
+// available로 보고했다. 그런데 stats/recipe/validate/methods.ts는 상관행렬의 "전부
 // continuous"를 context==='analyze'일 때만(§4/§7 "preview는 관대하다") 검사해
 // METHOD_TYPE_MISMATCH로 거부한다 — 그 결과 boolean/ordinal 변수를 섞어 선택해도
 // /preview는 두 방법 다 available로 보여주고, 실행(/analyze) 버튼을 눌러야만
