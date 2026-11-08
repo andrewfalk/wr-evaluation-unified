@@ -5,6 +5,22 @@ import { requestJson } from '../services/httpClient';
 import { isElectron } from '../utils/platform';
 import { SignupRequestModal } from './SignupRequestModal';
 
+// 429 두 종류를 한국어로 안내한다: LOGIN_LOCKED = 같은 아이디로 여러 번 실패해 서버가 잠시 잠금
+// (SEC-B M2, retryAfterSec 포함), RATE_LIMITED = 이 PC(IP)에서 1분에 5회를 넘김.
+function loginErrorMessage(err) {
+  if (err?.status === 429) {
+    if (err.data?.code === 'LOGIN_LOCKED') {
+      const sec = Number(err.data.retryAfterSec);
+      const wait = Number.isFinite(sec) && sec > 0
+        ? (sec >= 60 ? `약 ${Math.ceil(sec / 60)}분` : `${Math.ceil(sec)}초`)
+        : '잠시';
+      return `로그인에 여러 번 실패해 이 아이디가 잠시 잠겼습니다. ${wait} 후 다시 시도하세요.`;
+    }
+    return '로그인 시도가 너무 많습니다. 1분 뒤 다시 시도하세요.';
+  }
+  return err?.message || '로그인에 실패했습니다.';
+}
+
 export function LoginModal({ apiBaseUrl = '' }) {
   const { login } = useAuth();
   const [loginId, setLoginId]       = useState('');
@@ -27,7 +43,7 @@ export function LoginModal({ apiBaseUrl = '' }) {
       });
       login(data, apiBaseUrl);
     } catch (err) {
-      setError(err.message || '로그인에 실패했습니다.');
+      setError(loginErrorMessage(err));
     } finally {
       setLoading(false);
     }

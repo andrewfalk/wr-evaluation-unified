@@ -58,3 +58,41 @@ describe('LoginModal rememberMe', () => {
     }));
   });
 });
+
+// SEC-B M2: 429는 서버 영어 문구 대신 한국어 안내를 보여 준다.
+describe('LoginModal 429 messages', () => {
+  function rejectWith(status, data) {
+    const err = new Error(typeof data?.error === 'string' ? data.error : `Request failed (${status})`);
+    err.status = status;
+    err.data = data;
+    vi.mocked(requestJson).mockRejectedValueOnce(err);
+  }
+
+  it('LOGIN_LOCKED under a minute shows the seconds to wait', async () => {
+    rejectWith(429, { code: 'LOGIN_LOCKED', error: 'Too many failed login attempts', retryAfterSec: 42 });
+    render(<LoginModal />);
+    await submitLoginForm();
+    expect(await screen.findByText('로그인에 여러 번 실패해 이 아이디가 잠시 잠겼습니다. 42초 후 다시 시도하세요.')).toBeTruthy();
+  });
+
+  it('LOGIN_LOCKED of a minute or more shows rounded-up minutes', async () => {
+    rejectWith(429, { code: 'LOGIN_LOCKED', error: 'Too many failed login attempts', retryAfterSec: 125 });
+    render(<LoginModal />);
+    await submitLoginForm();
+    expect(await screen.findByText('로그인에 여러 번 실패해 이 아이디가 잠시 잠겼습니다. 약 3분 후 다시 시도하세요.')).toBeTruthy();
+  });
+
+  it('the IP limiter (RATE_LIMITED) gets its own message', async () => {
+    rejectWith(429, { code: 'RATE_LIMITED', error: 'Too many login attempts, please try again later' });
+    render(<LoginModal />);
+    await submitLoginForm();
+    expect(await screen.findByText('로그인 시도가 너무 많습니다. 1분 뒤 다시 시도하세요.')).toBeTruthy();
+  });
+
+  it('other errors keep the server message', async () => {
+    rejectWith(401, { code: 'INVALID_CREDENTIALS', error: 'Invalid login ID or password' });
+    render(<LoginModal />);
+    await submitLoginForm();
+    expect(await screen.findByText('Invalid login ID or password')).toBeTruthy();
+  });
+});

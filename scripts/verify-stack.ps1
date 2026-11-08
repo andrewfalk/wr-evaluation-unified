@@ -688,7 +688,10 @@ function Get-LanIPv4 {
 }
 
 # 잘못된 로그인 1회. 본문은 파일로 넘긴다(인자 속 JSON 따옴표 문제 회피). 출발지 = --resolve 로 정한 주소.
+# 로그인 ID 는 요청마다 새로 만든 없는 ID 다 — 7.2.0 부터 같은 ID 로 5회 실패하면 그 ID 가 잠겨(429 LOGIN_LOCKED,
+# SEC-B M2) 출발지별 IP 버킷(429 RATE_LIMITED)과 구분할 수 없기 때문. IP 버킷은 ID 와 무관하게 센다.
 function Send-BadLogin([string]$Source, [string]$Agent, [int]$Port = $HttpsPort) {
+    Write-Utf8NoBom $script:AcceptBody ('{"loginId":"verify-accept-no-such-user-' + [guid]::NewGuid().ToString('N') + '","password":"wrong-password"}')
     return (curl.exe -sk --max-time 10 --resolve "${Domain}:${Port}:$Source" -A $Agent -H 'Content-Type: application/json' `
         --data-binary "@$script:AcceptBody" "https://${Domain}:${Port}/api/auth/login" -o NUL -w '%{http_code}')
 }
@@ -726,7 +729,6 @@ function Invoke-Accept {
     Write-Ok "출발지: 루프백 127.0.0.1, LAN $lan (이 주소는 화면에만 출력하고 파일에 쓰지 않습니다)"
     $script:AcceptBody = Join-Path $WorkDir 'accept-login.json'
     $script:AcceptHeader = Join-Path $WorkDir 'accept-header.txt'
-    Write-Utf8NoBom $script:AcceptBody '{"loginId":"verify-accept-no-such-user","password":"wrong-password"}'
     $tag = 'wr-accept-' + (Get-Date -Format 'yyyyMMddHHmmss')
     $results = [ordered]@{}
     try {

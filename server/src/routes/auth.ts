@@ -4,6 +4,7 @@ import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import config from '../config';
 import { LocalDbAuthProvider } from '../auth/LocalDbAuthProvider';
+import { claimLoginAttempt, clearLoginFailures, loginIdHash } from '../auth/loginBackoff';
 import {
   createSession,
   verifySession,
@@ -93,10 +94,29 @@ async function login(pool: Pool, req: Request, res: Response): Promise<void> {
     return;
   }
 
+  // Per-login-ID lockout (SEC-B M2). The attempt is counted as a failure before the password is
+  // checked, in one statement that also refuses a locked ID, so parallel requests (from any number of
+  // IPs) cannot get more than the threshold of guesses past an unlocked ID. A locked ID costs no bcrypt,
+  // and a correct password does not get through while locked. Unknown IDs go through the same steps.
+  const backoffKey = loginIdHash(parsed.data.loginId);
+  const auditExtra = { loginIdHash: backoffKey.slice(0, 16) };
+  const claim = await claimLoginAttempt(pool, backoffKey);
+  if (!claim.allowed) {
+    auditLogin(pool, req, 'failure', null, null, { ...auditExtra, reason: 'locked' });
+    res.setHeader('Retry-After', String(claim.retryAfterSec));
+    res.status(429).json({
+      code:          'LOGIN_LOCKED',
+      error:         'Too many failed login attempts for this login ID, please try again later',
+      retryAfterSec: claim.retryAfterSec,
+    });
+    return;
+  }
+
   const provider = new LocalDbAuthProvider(pool);
   const creds = await provider.verifyCredentials(parsed.data.loginId, parsed.data.password);
   if (!creds) {
-    auditLogin(pool, req, 'failure');
+    // Already counted by claimLoginAttempt.
+    auditLogin(pool, req, 'failure', null, null, auditExtra);
     res.status(401).json({ code: 'INVALID_CREDENTIALS', error: 'Invalid login ID or password' });
     return;
   }
@@ -115,6 +135,9 @@ async function login(pool: Pool, req: Request, res: Response): Promise<void> {
 
     // Record last login
     await client.query('UPDATE users SET last_login_at = now() WHERE id = $1', [creds.userId]);
+
+    // A success clears the login ID's failure count, in the same transaction as the new session.
+    await clearLoginFailures(client, backoffKey);
 
     await client.query('COMMIT');
 
