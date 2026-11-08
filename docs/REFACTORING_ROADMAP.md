@@ -411,7 +411,7 @@ shared/contracts/{aiAnalysis,aiPrompt,aiModels}.ts  # AI 입력 계약(.strict) 
    - 플랜 모드로 Phase 1 세부 계획을 세운다 — PR 단위로 쪼개고, 위 Phase 1 표와 부록 B의 줄 번호는 2026-10 기준이므로 현재 main에서 그래프(code-review-graph)·부분 Read로 다시 확인한다. 계획은 `plan-codex-loop`으로 검토(차단 0)한 뒤 사용자 승인.
    - 승인 후 PR마다: `npm run check`(서버·DB·동시성·통계·마이그레이션·Docker를 건드리면 `npm run check:full`) → `npm run verify:secrets` → push → PR → `pr-codex-loop` → 차단 0이면 squash 머지(Phase 0와 같은 방식, 회차 상한·기각한 차단이 남으면 멈추고 묻는다).
    - Phase 0에서 이어지는 조건: 골든 G1~G10은 리팩터링 PR에서 바뀌면 안 된다(바뀌면 코드를 고친다) · 새 서버 테스트와 S3 이관은 `server/src/testing/`(fakePool·tokens·configMock·makeRouterApp, 사용 예 `harnessUsage.test.ts`)을 쓴다 · S7이 SQL 순서를 바꾸는 라우트는 재목킹 대신 실DB 통합 테스트로 · `videoAnalysis.ts`를 건드리기 전 G5 영상 apply 골든을 먼저 만든다 · 성능 효과를 주장하는 변경은 `docs/PERF_BASELINE.md`의 같은 도구로 전/후를 잰다 · 새 클라이언트 코드는 TS(strict), 새 `@ts-nocheck` 금지(ratchet).
-8. **7.2.0 릴리스(Phase 1 중간 릴리스) 진행**: S1~S6·S10·SEC-A·SEC-B 머지(#213~#247) 뒤 P1-37 버전 범프 ✅ 2026-11-08(package·lock·README·PRD 7.2.0) → P1-38 `docs/UPDATE_7.2.0.md` → 5번의 오프라인 패키지 리허설 → 사용자 배포. P1-22(L10·L13·L17)는 GPU·검증 스택 확인 대기라 7.2.0에서 빠진다. 7.2.0 뒤 개발은 S7부터(착수 전 플랜 모드 재플랜 필수).
+8. **7.2.0 릴리스(Phase 1 중간 릴리스) 진행**: S1~S6·S10·SEC-A·SEC-B 머지(#213~#247) 뒤 P1-37 버전 범프 ✅ 2026-11-08(package·lock·README·PRD 7.2.0, #248) → P1-38 `docs/UPDATE_7.2.0.md` ✅ 2026-11-08(서버 전용 패키지·host 모드 기준 절차, 배포 전 점검=패키지 리허설·현장 Chrome 108 확인, `REFRESH_TOKEN_SECRET`은 7.1.6 롤백용으로 남김) → 5번의 오프라인 패키지 리허설 → 사용자 배포. P1-22(L10·L13·L17)는 GPU·검증 스택 확인 대기라 7.2.0에서 빠진다. 7.2.0 뒤 개발은 S7부터(착수 전 플랜 모드 재플랜 필수).
 
 ---
 
