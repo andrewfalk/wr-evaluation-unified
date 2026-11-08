@@ -150,11 +150,13 @@ docker exec wr-prod-backup-1 sh /scripts/backup.sh
 cd C:\wr\wr-evaluation-unified-7.2.0-intranet
 $envFile = '<운영 .env.production 절대경로>'      # 이후 모든 명령에 이 변수를 쓴다
 
-# ACCESS_TOKEN_SECRET 바이트 길이 — 32 이상이어야 서버가 기동한다
-$line = Select-String -Path $envFile -Pattern '^\s*ACCESS_TOKEN_SECRET\s*=' | Select-Object -Last 1
-$v = ($line.Line -replace '^\s*ACCESS_TOKEN_SECRET\s*=\s*', '').Trim().Trim('"').Trim("'")
-[Text.Encoding]::UTF8.GetByteCount($v)            # → 64(openssl rand -hex 32) 등 32 이상
-Remove-Variable v, line
+# ACCESS_TOKEN_SECRET 바이트 길이 — 32 이상이어야 서버가 기동한다.
+# env 파일 줄을 직접 읽지 않고, compose가 컨테이너에 실제로 넘길 값(따옴표·인라인 주석·셸 변수까지 해석한 값)을 읽는다.
+$cfg = docker compose -p wr-prod --env-file $envFile -f docker-compose.yml -f docker-compose.prod.yml --profile backup config --format json | ConvertFrom-Json
+$len = [Text.Encoding]::UTF8.GetByteCount([string]$cfg.services.app.environment.ACCESS_TOKEN_SECRET)
+Remove-Variable cfg                                # 해석된 설정에는 비밀값이 들어 있다 — 화면에 출력하지 않는다
+$len                                               # → 64(openssl rand -hex 32) 등 32 이상
+if ($len -lt 32) { throw "ACCESS_TOKEN_SECRET 이 $len 바이트입니다 — 아래 방법으로 바꾸기 전에는 업데이트를 진행하지 않는다(0 이면 위 config 명령의 오류부터 본다)" }
 
 .\scripts\check-app-publish.ps1 -EnvFile $envFile -ProjectName wr-prod
 # → 마지막 줄 "App port pre-check passed." 이면 진행한다
