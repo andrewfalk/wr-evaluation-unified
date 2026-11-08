@@ -121,3 +121,5 @@ export function createPatientsRouter(pool: Pool): Router {
 
 // Re-export types so callers only need to import from this module.
 export type { AssignmentWarning, ResolveAssignedDoctorResult };
+// DateFieldFailure was exported by routes/patients.ts before the split; keep the module surface.
+export type { DateFieldFailure } from './shared';
