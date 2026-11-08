@@ -3,10 +3,14 @@
 // server processes still add up. Unknown login IDs take exactly the same path, so a lockout does not
 // tell the caller whether the account exists. Only a hash of the normalised ID is stored.
 //
-// Policy: the 5th consecutive failure locks the ID for 1 minute, every further failure doubles the
-// lock (capped at 15 minutes). A request made while the ID is locked is refused without checking the
-// password and does not count. A success deletes the row. A failure more than 24 hours after the
-// previous one starts the count again. All times come from the database clock.
+// Policy: every attempt for an unlocked ID is counted as a failure *before* the password is checked
+// (claimLoginAttempt), and a success deletes the row. Counting up front is what makes the limit hold
+// under concurrency: the claim is one INSERT … ON CONFLICT DO UPDATE, so parallel attempts are
+// serialised by the row lock and at most `threshold` of them get past an unlocked ID before the lock
+// is set, however many arrive while bcrypt is still running. The 5th attempt sets a 1-minute lock,
+// every further attempt after a lock ends doubles it (capped at 15 minutes). A request made while the
+// ID is locked is refused without checking the password and does not count. A failure more than 24
+// hours after the previous one starts the count again. All times come from the database clock.
 import crypto from 'crypto';
 import type { Pool, PoolClient } from 'pg';
 
@@ -36,35 +40,47 @@ export async function lockedRetryAfterSec(pool: Pool, hash: string): Promise<num
   return rows.length > 0 ? rows[0].retry_after : null;
 }
 
-// One statement, so concurrent failures for the same ID are serialised by the row lock and none is
-// lost. `next` is the failure count after this one; the lock is base * 2^(next - threshold), with the
-// exponent clamped so power() cannot overflow, and capped at maxLockSec.
-const RECORD_FAILURE_SQL = `
+// One statement: count this attempt unless the ID is locked right now. `next` is the count after this
+// attempt (1 again when the previous one is older than resetAfterHours); the lock is
+// base * 2^(next - threshold), with the exponent clamped so power() cannot overflow, capped at maxLockSec.
+// When the row is locked, the DO UPDATE's WHERE is false and nothing is returned.
+const NEXT = `(CASE WHEN b.updated_at < now() - make_interval(hours => $5::int) THEN 1 ELSE b.failures + 1 END)`;
+const CLAIM_ATTEMPT_SQL = `
   INSERT INTO login_backoff AS b (login_hash, failures, locked_until, updated_at)
   VALUES ($1, 1, CASE WHEN 1 >= $2::int THEN now() + make_interval(secs => LEAST($3::int, $4::int)) END, now())
   ON CONFLICT (login_hash) DO UPDATE SET
-    failures = CASE WHEN b.updated_at < now() - make_interval(hours => $5::int) THEN 1 ELSE b.failures + 1 END,
-    locked_until = CASE
-      WHEN (CASE WHEN b.updated_at < now() - make_interval(hours => $5::int) THEN 1 ELSE b.failures + 1 END) >= $2::int
-      THEN now() + make_interval(secs => LEAST(
-             $3::int * power(2, LEAST(
-               (CASE WHEN b.updated_at < now() - make_interval(hours => $5::int) THEN 1 ELSE b.failures + 1 END) - $2::int,
-               20)),
-             $4::int))
-      END,
-    updated_at = now()
+    failures     = ${NEXT},
+    locked_until = CASE WHEN ${NEXT} >= $2::int
+                        THEN now() + make_interval(secs => LEAST($3::int * power(2, LEAST(${NEXT} - $2::int, 20)), $4::int))
+                   END,
+    updated_at   = now()
+  WHERE b.locked_until IS NULL OR b.locked_until <= now()
   RETURNING failures, locked_until`;
 
-export async function recordLoginFailure(
+export type LoginAttemptClaim =
+  | { allowed: true; failures: number; lockedUntil: Date | null }
+  | { allowed: false; retryAfterSec: number };
+
+/**
+ * Count an attempt for this ID before its password is checked. Returns allowed: false (and the wait)
+ * while the ID is locked; the attempt is then not counted. Call clearLoginFailures on success.
+ */
+export async function claimLoginAttempt(
   pool: Pool,
   hash: string,
   policy: LoginBackoffPolicy = LOGIN_BACKOFF_POLICY,
-): Promise<{ failures: number; lockedUntil: Date | null }> {
-  const { rows } = await pool.query<{ failures: number; locked_until: Date | null }>(
-    RECORD_FAILURE_SQL,
-    [hash, policy.threshold, policy.baseLockSec, policy.maxLockSec, policy.resetAfterHours],
-  );
-  return { failures: rows[0].failures, lockedUntil: rows[0].locked_until };
+): Promise<LoginAttemptClaim> {
+  // A lock can end between the claim and the follow-up read; then claim again (bounded).
+  for (let i = 0; i < 3; i++) {
+    const { rows } = await pool.query<{ failures: number; locked_until: Date | null }>(
+      CLAIM_ATTEMPT_SQL,
+      [hash, policy.threshold, policy.baseLockSec, policy.maxLockSec, policy.resetAfterHours],
+    );
+    if (rows.length > 0) return { allowed: true, failures: rows[0].failures, lockedUntil: rows[0].locked_until };
+    const retryAfterSec = await lockedRetryAfterSec(pool, hash);
+    if (retryAfterSec !== null) return { allowed: false, retryAfterSec };
+  }
+  return { allowed: false, retryAfterSec: 1 };
 }
 
 export async function clearLoginFailures(db: Pool | PoolClient, hash: string): Promise<void> {

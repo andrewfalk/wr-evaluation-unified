@@ -1,6 +1,7 @@
-// Per-login-ID backoff on a real PostgreSQL (SEC-B M2, migration 0039). The failure count is one
-// INSERT … ON CONFLICT DO UPDATE statement, so concurrent failures are serialised by the row lock;
-// the lock length doubles from the 5th failure and is capped. Runs in the integration project
+// Per-login-ID backoff on a real PostgreSQL (SEC-B M2, migration 0039). Each attempt is claimed (counted)
+// before its password is checked, in one INSERT … ON CONFLICT DO UPDATE that refuses a locked ID, so
+// parallel attempts are serialised by the row lock and no more than the threshold get through; the
+// lock length doubles with each attempt after a lock ends and is capped. Runs in the integration project
 // (npm run check:full).
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
@@ -8,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
 import request from 'supertest';
 import { createApp } from '../../app';
-import { lockedRetryAfterSec, loginIdHash, recordLoginFailure } from '../loginBackoff';
+import { claimLoginAttempt, lockedRetryAfterSec, loginIdHash } from '../loginBackoff';
 import { sweepLoginBackoff } from '../../jobs/loginBackoff';
 
 const TEST_DB_URL = process.env.TEST_DATABASE_URL;
@@ -50,41 +51,55 @@ describe.skipIf(!TEST_DB_URL)('login backoff (real PostgreSQL, SEC-B M2)', () =>
     await pool.end();
   });
 
-  it('10 concurrent failures for one login ID are all counted (failures = 10)', async () => {
+  const expireLock = (key: string) =>
+    pool.query(`UPDATE login_backoff SET locked_until = now() - interval '1 second' WHERE login_hash = $1`, [key]);
+
+  it('10 concurrent attempts for one unlocked ID: exactly 5 are allowed, 5 refused, failures = 5', async () => {
     const key = freshKey();
-    await Promise.all(Array.from({ length: 10 }, () => recordLoginFailure(pool, key)));
+    const claims = await Promise.all(Array.from({ length: 10 }, () => claimLoginAttempt(pool, key)));
+    expect(claims.filter(c => c.allowed)).toHaveLength(5);
+    const refused = claims.filter(c => !c.allowed);
+    expect(refused).toHaveLength(5);
+    for (const c of refused) if (!c.allowed) expect(c.retryAfterSec).toBeGreaterThan(0);
     const r = await row(key);
-    expect(r.failures).toBe(10);
-    // 10th failure: 60 * 2^(10 - 5) = 1920 s, capped at 900 s.
-    expect(r.lock_sec).toBeGreaterThan(890);
-    expect(r.lock_sec).toBeLessThanOrEqual(900);
+    expect(r.failures).toBe(5);
+    expect(r.lock_sec).toBeGreaterThan(55);
+    expect(r.lock_sec).toBeLessThanOrEqual(60);
   });
 
-  it('no lock for the first 4 failures, 1 minute at the 5th, then doubling', async () => {
+  it('no lock for the first 4 attempts, 1 minute at the 5th, refused while locked, then doubling', async () => {
     const key = freshKey();
-    for (let i = 0; i < 4; i++) await recordLoginFailure(pool, key);
+    for (let i = 0; i < 4; i++) expect((await claimLoginAttempt(pool, key)).allowed).toBe(true);
     expect((await row(key)).lock_sec).toBeNull();
     expect(await lockedRetryAfterSec(pool, key)).toBeNull();
 
-    await recordLoginFailure(pool, key);
+    expect((await claimLoginAttempt(pool, key)).allowed).toBe(true); // the 5th attempt itself still runs
     const fifth = await row(key);
     expect(fifth.failures).toBe(5);
     expect(fifth.lock_sec).toBeGreaterThan(55);
     expect(fifth.lock_sec).toBeLessThanOrEqual(60);
-    const retry = await lockedRetryAfterSec(pool, key);
-    expect(retry).toBeGreaterThan(55);
-    expect(retry).toBeLessThanOrEqual(60);
 
-    await recordLoginFailure(pool, key);
+    const refused = await claimLoginAttempt(pool, key);
+    expect(refused.allowed).toBe(false);
+    if (!refused.allowed) {
+      expect(refused.retryAfterSec).toBeGreaterThan(55);
+      expect(refused.retryAfterSec).toBeLessThanOrEqual(60);
+    }
+    expect((await row(key)).failures).toBe(5); // a refused attempt is not counted
+
+    await expireLock(key);
+    expect((await claimLoginAttempt(pool, key)).allowed).toBe(true);
+    expect(await row(key)).toMatchObject({ failures: 6 });
     expect((await row(key)).lock_sec).toBeGreaterThan(115);
-    await recordLoginFailure(pool, key);
+    await expireLock(key);
+    await claimLoginAttempt(pool, key);
     expect((await row(key)).lock_sec).toBeGreaterThan(235);
   });
 
   it('a huge failure count does not overflow and stays at the 15-minute cap', async () => {
     const key = freshKey();
     await pool.query(`INSERT INTO login_backoff (login_hash, failures) VALUES ($1, 100000)`, [key]);
-    await recordLoginFailure(pool, key);
+    expect((await claimLoginAttempt(pool, key)).allowed).toBe(true);
     const r = await row(key);
     expect(r.failures).toBe(100001);
     expect(r.lock_sec).toBeLessThanOrEqual(900);
@@ -98,7 +113,7 @@ describe.skipIf(!TEST_DB_URL)('login backoff (real PostgreSQL, SEC-B M2)', () =>
        VALUES ($1, 9, now() - interval '24 hours', now() - interval '25 hours')`,
       [key],
     );
-    await recordLoginFailure(pool, key);
+    expect((await claimLoginAttempt(pool, key)).allowed).toBe(true);
     const r = await row(key);
     expect(r.failures).toBe(1);
     expect(r.lock_sec).toBeNull();
@@ -157,6 +172,15 @@ describe.skipIf(!TEST_DB_URL)('login backoff (real PostgreSQL, SEC-B M2)', () =>
     );
     expect(audits.rows.map(r => r.extra?.reason ?? r.outcome)).toEqual(['failure', 'failure', 'failure', 'failure', 'failure', 'locked']);
     expect(JSON.stringify(audits.rows)).not.toContain(loginId);
+  });
+
+  it('route: 10 parallel wrong logins for one ID (each from its own app) — 5 are checked (401), 5 refused (429)', async () => {
+    const id = `__no_such_user_${crypto.randomBytes(6).toString('hex')}__`;
+    usedKeys.push(loginIdHash(id));
+    const results = await Promise.all(Array.from({ length: 10 }, () => login(id, 'wrong')));
+    const statuses = results.map(r => r.status).sort();
+    expect(statuses).toEqual([401, 401, 401, 401, 401, 429, 429, 429, 429, 429]);
+    expect((await row(loginIdHash(id))).failures).toBe(5);
   });
 
   it('route: an unknown login ID is locked the same way (no account-existence signal)', async () => {
