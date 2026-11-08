@@ -55,7 +55,7 @@ vi.mock('../../middleware/csrf', () => ({
 }));
 
 import { createAuthRouter } from '../auth';
-import { createFakePool, pgError, type FakePool, type FakeQueryReply } from '../../testing/fakePool';
+import { createFakePool, type FakePool, type FakeQueryReply } from '../../testing/fakePool';
 import { makeRouterApp } from '../../testing/app';
 
 // ---------------------------------------------------------------------------
@@ -124,30 +124,41 @@ describe('POST /api/auth/signup-requests', () => {
     expect(fake.calls).toHaveLength(0);
   });
 
-  it('returns 409 LOGIN_ID_TAKEN when a user with this loginId already exists', async () => {
+  // SEC-B L4: 이미 있는 계정·대기 중인 신청도 같은 202 — 응답으로 로그인 ID 존재를 알 수 없다.
+  it('answers 202 ACCEPTED (same body) when a user with this loginId already exists, without inserting', async () => {
+    const { writeAuditLog } = await import('../../middleware/audit.js');
     const fake = makeFake({ existing: { rows: [{ id: 'existing-user-1' }] } }); // users check
 
     const res = await request(authApp(fake))
       .post('/api/auth/signup-requests')
       .send(VALID_REQUEST);
-    expect(res.status).toBe(409);
-    expect(res.body.code).toBe('LOGIN_ID_TAKEN');
+    expect(res.status).toBe(202);
+    expect(res.body).toEqual({ code: 'ACCEPTED', message: 'Signup request received; an administrator will review it' });
     fake.assertNoUnmatched();
+    expect(fake.callsTo('signup.insert')).toHaveLength(0);
+    expect(writeAuditLog).toHaveBeenCalledWith(fake.pool, expect.objectContaining({
+      action: 'signup_request_create', outcome: 'failure', targetId: null, extra: { reason: 'login_id_taken' },
+    }));
   });
 
-  it('returns 409 ALREADY_REQUESTED when a pending request for this loginId exists', async () => {
+  it('answers 202 ACCEPTED (same body) when a pending request exists — the insert is a no-op', async () => {
+    const { writeAuditLog } = await import('../../middleware/audit.js');
     const fake = makeFake({
-      existing: { rows: [] },                    // users check: no existing user
-      insert:   pgError('23505', 'duplicate'),   // INSERT INTO user_signup_requests violates unique index
+      existing: { rows: [] },              // users check: no existing user
+      insert:   { rows: [], rowCount: 0 }, // ON CONFLICT … DO NOTHING
     });
 
     const res = await request(authApp(fake))
       .post('/api/auth/signup-requests')
       .send(VALID_REQUEST);
-    expect(res.status).toBe(409);
-    expect(res.body.code).toBe('ALREADY_REQUESTED');
+    expect(res.status).toBe(202);
+    expect(res.body).toEqual({ code: 'ACCEPTED', message: 'Signup request received; an administrator will review it' });
     fake.assertNoUnmatched();
     expect(fake.callsTo('signup.insert')).toHaveLength(1);
+    expect(fake.callsTo('signup.insert')[0].sql).toMatch(/ON CONFLICT \(login_id\) WHERE status = 'pending' DO NOTHING/);
+    expect(writeAuditLog).toHaveBeenCalledWith(fake.pool, expect.objectContaining({
+      outcome: 'failure', extra: { reason: 'already_requested' },
+    }));
   });
 
   it('answers any other DB failure with the 500 envelope (central error handler, S1)', async () => {
@@ -166,7 +177,7 @@ describe('POST /api/auth/signup-requests', () => {
     expect(fake.callsTo('signup.insert')).toHaveLength(1);
   });
 
-  it('returns 201 and writes signup_request_create audit log on success', async () => {
+  it('returns 202 and writes signup_request_create audit log on success', async () => {
     const { writeAuditLog } = await import('../../middleware/audit.js');
     const fake = makeFake({
       existing: { rows: [] },                    // users check: no existing user
@@ -177,8 +188,8 @@ describe('POST /api/auth/signup-requests', () => {
       .post('/api/auth/signup-requests')
       .send(VALID_REQUEST);
 
-    expect(res.status).toBe(201);
-    expect(res.body.id).toBe('req-new-1');
+    expect(res.status).toBe(202);
+    expect(res.body).toEqual({ code: 'ACCEPTED', message: 'Signup request received; an administrator will review it' }); // no request id — same body as the ignored cases
     expect(writeAuditLog).toHaveBeenCalledWith(fake.pool, expect.objectContaining({
       actorUserId: null,
       action:      'signup_request_create',
@@ -199,7 +210,7 @@ describe('POST /api/auth/signup-requests', () => {
       .post('/api/auth/signup-requests')
       .send({ ...VALID_REQUEST, note: '신경외과 협진 담당' });
 
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(202);
     // Verify the note was passed to the INSERT query (4th parameter).
     const insertCall = fake.calls[1]!;
     expect(insertCall.handler).toBe('signup.insert');

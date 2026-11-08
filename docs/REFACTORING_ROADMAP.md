@@ -259,7 +259,7 @@
 | H5 | Electron 22 EOL·no-sandbox | 수용 리스크, Phase 3 문서화·ADR |
 | M1 | 임시비번 강제변경 미적용 | ✅ **HF2(#160)** |
 | M2 | 계정별 brute-force 보호 없음 | S4 뒤 Phase 1 bundle. 참고: Windows Docker Desktop 앞에서는 IP 키 limiter 4종이 병원 전체 한 버킷이었다 — 호스트 Caddy 모드(PRODUCTION_RELEASE_PLAN 9절, #181~#183)에서는 출발지별로 나뉜다(`verify-stack accept` 실측). 계정별 보호는 여전히 필요 — ✅ 2026-11-08(#234: 마이그레이션 0039 login_backoff, 시도를 비밀번호 확인 전에 원자적으로 계수 → 5회 1분·2배·상한 15분, 429 LOGIN_LOCKED, 없는 ID도 같은 경로) |
-| M3 | 세션 무기한 갱신 | Phase 1 bundle — ✅ 2026-11-08(P1-24: 마이그레이션 0040 sessions.absolute_expires_at, 절대 12시간·유휴 24시간, 회전 상속, 401 SESSION_EXPIRED, 웹 기본 세션 쿠키 + "로그인 유지") |
+| M3 | 세션 무기한 갱신 | Phase 1 bundle — ✅ 2026-11-08(#235: 마이그레이션 0040 sessions.absolute_expires_at, 절대 12시간·유휴 24시간, 회전 상속, 401 SESSION_EXPIRED, 웹 기본 세션 쿠키 + "로그인 유지") |
 | M4 | preload raw IPC·무조건 등록 | ✅ **HF3(#162)** → E2 |
 | M5 | API 키 평문 | Phase 2/3 bundle(safeStorage) |
 | M6 | PHI at rest 평문(웹·독립형) | Phase 2/3 bundle |
@@ -270,7 +270,7 @@
 | L1 | 서버 AI 프록시 한도/누출 | ✅ **HF7(b)(#166)** |
 | L2 | 본문 10MB 인증 전 파싱 | Phase 1 bundle — ✅ 2026-11-08(#232: 마운트별 파서 — 환자 운반 4곳만 10mb, ai 2mb, stats 1mb, 나머지 256kb) |
 | L3 | refresh·audit/emr rate limit | Phase 1 bundle — ✅ 2026-11-08(#232: refresh IP 60/분, EMR 감사 IP 120/분 + 서명 검증 후 장치 120/분) |
-| L4 | 가입 ID 노출·org 미연결 | Phase 1 bundle |
+| L4 | 가입 ID 노출·org 미연결 | Phase 1 bundle — ✅ 2026-11-08(P1-25: 가입 요청 항상 202 ACCEPTED·중복은 ON CONFLICT 무시, 마이그레이션 0041 organization_id = 승인·거절 관리자 조직, 조직 관리자는 자기 조직+미배정만) |
 | L5 | JWT alg·비밀키 강도·미사용 secret | Phase 1 bundle — ✅ 2026-11-08(#231: HS256 고정, ACCESS_TOKEN_SECRET 32바이트 미만 기동 실패, REFRESH_TOKEN_SECRET 제거 — 운영 .env 길이 확인을 7.2.0 안내서에) |
 | L6 | 비밀번호 최대 길이 | Phase 1 bundle — ✅ 2026-11-08(#231: 새 비밀번호 128자, 로그인·현재 비밀번호는 상한 없음) |
 | L7 | PHI 응답 no-store | ✅ **HF4(#161)** |

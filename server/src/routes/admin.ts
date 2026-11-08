@@ -657,12 +657,27 @@ interface SignupRequestRow {
   created_at:     Date;
 }
 
+// Which signup requests an admin may see and act on (SEC-B L4, migration 0041): an organization admin
+// sees their own organization's rows and the unassigned ones (every pending request is unassigned —
+// the form has no hospital choice); an admin without an organization (super-administrator) sees all.
+// Returns a SQL condition on alias `r`/the bare table using the next parameter slot, or null for all.
+function signupScope(orgId: string | null, params: unknown[], column = 'organization_id'): string | null {
+  if (orgId === null) return null;
+  params.push(orgId);
+  return `(${column} IS NULL OR ${column} = $${params.length})`;
+}
+
 async function listSignupRequests(pool: Pool, req: Request, res: Response): Promise<void> {
   const status  = (req.query.status as string) || 'pending';
   const allowed = ['pending', 'approved', 'rejected'];
+  const orgId   = sessionOf(req).organizationId ?? null;
 
   const params: unknown[] = [];
-  const where = allowed.includes(status) ? (params.push(status), 'WHERE r.status = $1') : '';
+  const conditions: string[] = [];
+  if (allowed.includes(status)) { params.push(status); conditions.push(`r.status = $${params.length}`); }
+  const scope = signupScope(orgId, params, 'r.organization_id');
+  if (scope) conditions.push(scope);
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const { rows } = await pool.query<SignupRequestRow>(
     `SELECT r.id, r.login_id, r.name, r.requested_role, r.note,
@@ -707,12 +722,14 @@ async function approveSignupRequest(pool: Pool, req: Request, res: Response): Pr
   try {
     await client.query('BEGIN');
 
+    const selectParams: unknown[] = [id];
+    const scope = signupScope(orgId, selectParams);
     const { rows: reqRows } = await client.query<{
       id: string; login_id: string; name: string; requested_role: string; status: string;
     }>(
       `SELECT id, login_id, name, requested_role, status
-       FROM user_signup_requests WHERE id = $1 FOR UPDATE`,
-      [id]
+       FROM user_signup_requests WHERE id = $1${scope ? ` AND ${scope}` : ''} FOR UPDATE`,
+      selectParams
     );
 
     if (reqRows.length === 0) {
@@ -742,11 +759,13 @@ async function approveSignupRequest(pool: Pool, req: Request, res: Response): Pr
       throw insertErr;
     }
 
+    // The approving admin's organization is recorded on the request (SEC-B L4) — the same organization
+    // the new account was created in.
     await client.query(
       `UPDATE user_signup_requests
-       SET status = 'approved', reviewed_by = $1, reviewed_at = now()
+       SET status = 'approved', reviewed_by = $1, reviewed_at = now(), organization_id = $3
        WHERE id = $2`,
-      [session.userId, id]
+      [session.userId, id, orgId]
     );
 
     await client.query('COMMIT');
@@ -776,19 +795,26 @@ async function approveSignupRequest(pool: Pool, req: Request, res: Response): Pr
 async function rejectSignupRequest(pool: Pool, req: Request, res: Response): Promise<void> {
   const { id }  = req.params;
   const session = sessionOf(req);
+  const orgId   = session.organizationId ?? null;
 
+  // Like approval, the rejecting admin's organization is recorded (SEC-B L4), so the rejected row is
+  // listed for that organization only.
+  const updateParams: unknown[] = [session.userId, id, orgId];
+  const updateScope = signupScope(orgId, updateParams);
   const { rows } = await pool.query<{ id: string }>(
     `UPDATE user_signup_requests
-     SET status = 'rejected', reviewed_by = $1, reviewed_at = now()
-     WHERE id = $2 AND status = 'pending'
+     SET status = 'rejected', reviewed_by = $1, reviewed_at = now(), organization_id = $3
+     WHERE id = $2 AND status = 'pending'${updateScope ? ` AND ${updateScope}` : ''}
      RETURNING id`,
-    [session.userId, id]
+    updateParams
   );
 
   if (rows.length === 0) {
+    const selectParams: unknown[] = [id];
+    const selectScope = signupScope(orgId, selectParams);
     const { rows: existing } = await pool.query<{ status: string }>(
-      `SELECT status FROM user_signup_requests WHERE id = $1`,
-      [id]
+      `SELECT status FROM user_signup_requests WHERE id = $1${selectScope ? ` AND ${selectScope}` : ''}`,
+      selectParams
     );
     if (existing.length === 0) {
       res.status(404).json({ code: 'REQUEST_NOT_FOUND', error: 'Signup request not found' });
