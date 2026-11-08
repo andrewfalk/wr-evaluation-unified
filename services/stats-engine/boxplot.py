@@ -9,7 +9,7 @@ quantile(type=7)+수동 Tukey 규칙으로 재현하고, boxplot.stats()는 쓰�
 
 이 모듈은 person을 모른다 — outlierCount/outlierValues의 person 단위 공개통제
 (이상치·비이상치 양쪽 partition의 고유 인원 게이트)는 Node
-(statsChartDisclosure.ts::computeOutlierDisclosure)가 lowerFence/upperFence를
+(stats/disclosure/chartDisclosure.ts::computeOutlierDisclosure)가 lowerFence/upperFence를
 받아 별도로 수행한다(계획서 §1). 이 모듈은 항상 정직하게 전부 계산해서 반환한다
 — 노출 여부는 순수하게 Node의 정책 책임이다.
 """

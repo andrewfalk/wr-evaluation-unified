@@ -476,7 +476,7 @@ export function StatisticsWorkbench({
   const selectedMethod = previewState.result?.availableMethods?.find((m) => m.id === requestedMethod);
   // PR3-B — 상관행렬도 이변량과 동일하게 requestedMethod가 available/conditional
   // 이어야 실행 가능하다(서버 handlePostAnalyze의 METHOD_NOT_AVAILABLE 판정과
-  // 동일 기준 — statsAnalyzeHandler.ts).
+  // 동일 기준 — server/src/stats/routes/analyzeHandler.ts).
   const requiresMethodCheck = analysisMode === 'bivariate' || analysisMode === 'correlation_matrix' || analysisMode === 'regression' || analysisMode === 'prediction';
   const methodExecutable =
     !requiresMethodCheck ||
@@ -584,7 +584,7 @@ export function StatisticsWorkbench({
   // PR3-A §"결과 계약 불변조건" — 내보내기 잠금은 activeScreen이나 현재 활성 탭이
   // 아니라 저장된 실행의 analysisMode 기준(committedRecipe)으로 판정한다. 탭을
   // 바꿔도 내보내기 가능 여부는 바뀌면 안 된다. 서버도 manifest.analysisMode 기준으로
-  // 같은 판정을 하므로(statsExportHandler.ts) 여기서도 동일 기준으로 미리 막는다.
+  // 같은 판정을 하므로(server/src/stats/export/exportHandler.ts) 여기서도 동일 기준으로 미리 막는다.
   // PR4-A2 — 회귀는 CSV export 지원(집계 섹션만, pointDiagnostics는 서버가
   // 애초에 CSV에 넣지 않는다). bivariate/correlation_matrix는 여전히 PR5 범위.
   const exportUnsupported = committedRecipe?.analysisMode === 'bivariate' || committedRecipe?.analysisMode === 'correlation_matrix';

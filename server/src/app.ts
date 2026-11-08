@@ -28,7 +28,7 @@ import { createPresetsRouter } from './routes/presets';
 import { createCapabilityGrantsRouter } from './routes/capabilityGrants';
 import { createOpsStatusRouter } from './routes/opsStatus';
 import { createUpdatesRouter } from './routes/updates';
-import { createStatsRouter } from './routes/stats';
+import { createStatsRouter } from './stats/routes/router';
 import { cspMiddleware, noStoreMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
 import { requestIdMiddleware } from './http/requestId';

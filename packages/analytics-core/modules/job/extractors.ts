@@ -158,7 +158,7 @@ export function extractJobRollupLongestTenureYears(
 
 // job.raw.startDate/endDate — 카탈로그 최초의 date 타입 analytics-core 변수(서버 전용
 // SNAPSHOT_COLUMN_VARIABLES의 case.meta.registeredAt은 이미 있었다). 값 형식은 그
-// 선례와 동일하게 YYYY-MM-DD 문자열을 그대로 쓴다(statsDatasetBuilder.ts의 필터 비교가
+// 선례와 동일하게 YYYY-MM-DD 문자열을 그대로 쓴다(server/src/stats/dataset/builder.ts의 필터 비교가
 // 이 형식을 그대로 문자열 비교하므로, parseStrictIsoDate로 검증만 하고 재포맷하지
 // 않는다 — 원본이 이미 그 형식이어야 통과한다).
 function extractJobRawDateField(

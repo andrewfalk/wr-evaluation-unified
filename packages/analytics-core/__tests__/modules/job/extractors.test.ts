@@ -144,7 +144,7 @@ describe('extractJobIdentityTenureYears — job grain', () => {
   // PR0-B3 Part A "변수 추가/제거해도 모집단 불변" 계약 — jobNameNormalized만 요청·
   // tenureYears만 요청해도 행 개수·entityKey가 같아야 한다(이 파일에서는 각 extractor를
   // 직접 호출해 그 계약이 이 grain에도 성립함을 실측한다. buildDataset 레벨 검증은 서버
-  // 쪽 statsDatasetBuilder.job.test.ts에서 한다).
+  // 쪽 server/src/stats/dataset/__tests__/builder.job.test.ts에서 한다).
   it('이름 없이 기간만 있는 job — jobNameNormalized는 not_entered인데 tenureYears는 정상 계산된다(결측 조건이 서로 다르다)', () => {
     const job = { id: 'job-1', jobName: '', startDate: '2015-01-01', endDate: '2020-01-01' };
     const name = extractJobIdentityJobNameNormalized(jobsMigration([job]));

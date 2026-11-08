@@ -11,7 +11,7 @@ import type { AnalyticsVariableMetadata } from '../../types';
 // getKlGrade(AssessmentIndividualFields.jsx/AssessmentTab.jsx의 klgRight/klgLeft select,
 // KLG_OPTIONS)가 실제로 제공하는 4개 등급의 심각도 순서 — 오름차순. "N/A"(해당없음)는
 // 등급이 아니라 "이 side에는 적용되지 않음"이라는 임상 판단이라 extractor가 missing:
-// 'not_applicable'로 흡수하고, 이 순서에는 절대 끼워넣지 않는다(statsBivariateRoles.ts의
+// 'not_applicable'로 흡수하고, 이 순서에는 절대 끼워넣지 않는다(server/src/stats/dataset/bivariateRoles.ts의
 // resolveLevelOrder가 이 배열을 그대로 순위로 쓴다).
 export const KNEE_KLG_ORDER = ['1', '2', '3', '4'] as const;
 

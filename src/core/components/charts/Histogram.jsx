@@ -29,7 +29,7 @@ function binLabel(b, fmt) {
 // 시도해도 공개 가능한 해상도를 못 찾은 경우(histogramReasonCode==='INSUFFICIENT_
 // DISCLOSABLE_RESOLUTION', 전용 문구). histogram이 있고 merged===true면 원본보다
 // 구간 수를 줄여 재분할했다는 안내를 차트 아래에 덧붙인다(정확한 원본 개수는
-// 일부러 밝히지 않음 — server/src/statsChartDisclosure.ts 주석 참고). 경계
+// 일부러 밝히지 않음 — server/src/stats/disclosure/chartDisclosure.ts 주석 참고). 경계
 // 포함규칙은 서버(buildOriginalHistogram, numpy.histogram과 동일)와 같다 — 마지막 bin만 양끝 포함.
 //
 // 끝 구간 병합 — bin.tailMerged인 막대는 옅은 면+점선 테두리로 구분하고, 막대

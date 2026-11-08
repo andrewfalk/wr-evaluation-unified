@@ -57,7 +57,7 @@ interface DiagnosisModulePresence {
 // 좁힌다: 어떤 부위로도 분류 안 되는(미분류) 진단이 하나라도 남아 있으면 그 진단이
 // 사실 부위 X일 수도 있으므로 X=false를 확정할 수 없다(그래서 hasUnresolved를 따로
 // 추적한다). 이 helper는 변수 키(6개 wrapper)마다 각각 새로 호출된다 — 서버가 변수
-// 키 단위로 extractor를 호출하는 구조라(statsDatasetBuilder.ts) 결과를 캐싱해 1회로
+// 키 단위로 extractor를 호출하는 구조라(server/src/stats/dataset/builder.ts) 결과를 캐싱해 1회로
 // 줄이지는 않는다. qualityFlags는 __none__ 진단을 포함해 스캔한 모든 엔터티에서
 // 무조건 먼저 수집한 뒤 분류를 시도한다.
 function computeDiagnosisModulePresence(migrationResult: MigrationResult<AnalysisPatient>): DiagnosisModulePresence {

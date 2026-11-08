@@ -121,7 +121,7 @@ export const StatsFilterSchema = z.object({
   key:      z.string(),
   operator: StatsFilterOperatorSchema,
   // 타입-값 일치(변수 type별 허용 연산자·값 타입)·ordinal 순위 비교 연산자 제한·결측 취급은
-  // zod가 아니라 server/src/statsRecipeValidation.ts가 카탈로그 메타데이터를 참조해 동적으로
+  // zod가 아니라 server/src/stats/recipe/validation.ts가 카탈로그 메타데이터를 참조해 동적으로
   // 검사한다(정적 스키마로는 "이 key의 type에 따라 값 형태가 달라진다"를 표현할 수 없다).
   value: z.union([
     z.string(),
@@ -152,7 +152,7 @@ export const StatsMethodIdSchema = z.enum([
 export const StatsAnalysisRecipeSchema = z.object({
   grain:           StatsGrainSchema,
   variableKeys:    z.array(z.string().min(1)).min(1).max(20),
-  // 다중 필터는 AND로 결합된다(server/src/statsRecipeValidation.ts §A-7).
+  // 다중 필터는 AND로 결합된다(server/src/stats/recipe/validation.ts §A-7).
   filters:         z.array(StatsFilterSchema).max(10).default([]),
   analysisPurpose: z.enum(['association', 'prediction', 'formula_audit']),
   formulaPolicies: z.record(
@@ -163,14 +163,14 @@ export const StatsAnalysisRecipeSchema = z.object({
   // 요청(이 필드 자체가 없음)을 그대로 기술통계로 해석한다. requestedMethod는 완전
   // optional — /preview는 이 값의 유효성을 검사하지 않는다(계획서 § "preview는
   // 관대하다" — 방법을 아직 안 고른 최초 preview도 정상 응답해야 availableMethods를
-  // 볼 수 있다). /analyze에서만 statsRecipeValidation.ts(context='analyze')가
+  // 볼 수 있다). /analyze에서만 server/src/stats/recipe/validation.ts(context='analyze')가
   // 엄격하게 검사한다.
   // PR3-B — 'correlation_matrix' 추가(계획서 §4). variableKeys는 3개 이상 선택하는
   // 다중 변수 모드다("전부 continuous여야 한다"는 카탈로그 조회가 필요해 zod가 아니라
-  // statsRecipeValidation.ts가 검사 — §7 "구조검증/의미검증 분리").
+  // server/src/stats/recipe/validation.ts가 검사 — §7 "구조검증/의미검증 분리").
   // PR4-A1 — 'regression' 추가. requestedMethod는 다른 모드와 마찬가지로 여기서는
   // 계속 optional이다(리뷰 #1) — 방법 미선택 상태의 최초 preview도 정상 응답해야
-  // availableMethods를 볼 수 있다. 필수 여부는 statsRecipeValidation.ts의
+  // availableMethods를 볼 수 있다. 필수 여부는 server/src/stats/recipe/validation.ts의
   // context==='analyze'에서만 강제한다.
   // PR4-B2 — 'prediction' 추가(계획서 §1단계). 나머지 모드와 원칙 동일(구버전
   // 재파싱 호환 위해 optional 유지 규칙은 requestedMethod에 그대로 적용).
@@ -179,12 +179,12 @@ export const StatsAnalysisRecipeSchema = z.object({
   // PR4-A1 — 회귀 전용 서브객체. variableKeys는 그대로 재사용하고(진실원 하나만
   // 유지), predictors는 variableKeys에서 outcomeKey를 뺀 나머지(원래 순서 유지 —
   // forest plot 행 순서가 된다)로 파생한다. referenceLevels 값 검증(카탈로그 필요)은
-  // statsRecipeValidation.ts가 담당한다.
+  // server/src/stats/recipe/validation.ts가 담당한다.
   // PR4-A2 — eventLevel(categorical 2레벨 outcome 전용) · standardizePredictors ·
   // interactionTerms · splineKeys 추가. 이 넷의 타입/교차 제약 중 카탈로그가 필요
   // 없는 것(중복·자기자신 쌍·predictor 집합 소속)은 아래 superRefine에서, 카탈로그가
   // 필요한 것(spline은 continuous만·eventLevel은 categorical outcome에만)은
-  // statsRecipeValidation.ts가 담당한다(계획서 §1 "이것만으로는 부족하다").
+  // server/src/stats/recipe/validation.ts가 담당한다(계획서 §1 "이것만으로는 부족하다").
   regression: z.object({
     outcomeKey: z.string().min(1),
     referenceLevels: z.record(z.string(), z.string()).default({}),
@@ -197,14 +197,14 @@ export const StatsAnalysisRecipeSchema = z.object({
   // 표준화 옵션은 없다(연구용 내부검증 성능평가만 하므로 회귀 진단 기능을 공유하지
   // 않는다). eventLevel은 필수다 — boolean outcome은 클라이언트가 'true'로 고정해
   // 보내고, categorical은 PREDICTION_OUTCOME_SPECS의 허용값 중 하나여야 한다(카탈로그
-  // 조회가 필요해 그 검증은 statsRecipeValidation.ts가 한다).
+  // 조회가 필요해 그 검증은 server/src/stats/recipe/validation.ts가 한다).
   prediction: z.object({
     outcomeKey: z.string().min(1),
     eventLevel: z.string().min(1),
   }).strict().optional(),
   // Table1 스트라티피케이션 — analysisMode==='descriptive'에서만 의미 있는 옵션
   // 필드(회귀/예측과 달리 필수 아님 — 기존 기술통계 동작이 additive 기본값). 그룹
-  // 변수 하나로 variableKeys 전체를 층화한다(server/src/statsDescriptiveStratify.ts).
+  // 변수 하나로 variableKeys 전체를 층화한다(server/src/stats/dataset/descriptiveStratify.ts).
   descriptive: z.object({
     stratifyByKey: z.string().min(1),
   }).strict().optional(),
@@ -242,7 +242,7 @@ export const StatsAnalysisRecipeSchema = z.object({
   }
   // 카탈로그 조회가 필요 없는 순수 구조검사만 여기서 한다(컨텍스트 무관 — preview·
   // analyze 둘 다 항상 참). 타입정합성·paired영구거부·method필수여부(컨텍스트별로
-  // 다름)는 카탈로그가 필요해 statsRecipeValidation.ts(context 인자)가 담당한다.
+  // 다름)는 카탈로그가 필요해 server/src/stats/recipe/validation.ts(context 인자)가 담당한다.
   if (recipe.analysisMode === 'bivariate') {
     if (recipe.variableKeys.length !== 2) {
       ctx.addIssue({
@@ -261,7 +261,7 @@ export const StatsAnalysisRecipeSchema = z.object({
   }
   if (recipe.analysisMode === 'correlation_matrix') {
     // PR3-B 계획서 §4/§7 — variableKeys 개수·중복만 여기서(구조), "전부
-    // continuous"는 statsRecipeValidation.ts(의미, 카탈로그 필요).
+    // continuous"는 server/src/stats/recipe/validation.ts(의미, 카탈로그 필요).
     if (recipe.variableKeys.length < 3) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -281,7 +281,7 @@ export const StatsAnalysisRecipeSchema = z.object({
   if (recipe.analysisMode === 'regression') {
     // PR4-A1 — 카탈로그가 필요 없는 구조검사만(리뷰 #1 — requestedMethod 필수여부는
     // 여기서 검사하지 않는다). outcome 타입 정합성·predictor 타입 적격성·
-    // referenceLevels 값 검증은 statsRecipeValidation.ts(context 인자, 카탈로그 필요).
+    // referenceLevels 값 검증은 server/src/stats/recipe/validation.ts(context 인자, 카탈로그 필요).
     if (!recipe.regression) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -384,7 +384,7 @@ export const StatsAnalysisRecipeSchema = z.object({
   if (recipe.analysisMode === 'prediction') {
     // PR4-B2 — 카탈로그가 필요 없는 구조검사만(계획서 §1단계). outcome이
     // predictionRole==='outcome'인지·eventLevel이 명세 허용값인지·predictor grain
-    // 적격성은 statsRecipeValidation.ts(context 인자, 카탈로그 필요)가 담당한다.
+    // 적격성은 server/src/stats/recipe/validation.ts(context 인자, 카탈로그 필요)가 담당한다.
     if (!recipe.prediction) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -432,7 +432,7 @@ export const RunManifestSchema = z.object({
   engineVersion:             z.string(),
   serializerVersion:         z.string(),
   // PR3-A — 신규 필드는 전부 optional(구버전 stats_runs.manifest/result JSONB
-  // 재파싱 호환, statsExportHandler.ts의 safeParse가 이 필드 없는 구행도 깨지지
+  // 재파싱 호환, server/src/stats/export/exportHandler.ts의 safeParse가 이 필드 없는 구행도 깨지지
   // 않아야 함). inferenceGatePolicyVersion은 §6.1 게이트 정책 버전, analysisMode는
   // CSV export 거부 판정의 단일 진실원(result.bivariate 존재 여부로 판정하지
   // 않는다 — 계획서 §"결과 계약 불변조건").
@@ -554,7 +554,7 @@ export const StatsRunManifestFailedSchema = RunManifestSchema.omit({ resultDiges
 // failed와 같은 shape(resultDigest 없음)을 공유한다 — 셋 다 "계산 결과가 확정되지
 // 않았거나 폐기됐다"는 점에서 동일. 4개 outcome 전부 admission이 발급한
 // analysisRunId를 그대로 유지한다(buildXxxStatsRunManifest의 analysisRunId? 오버라이드
-// 인자 — statsRunManifest.ts).
+// 인자 — server/src/stats/queue/runManifest.ts).
 export const StatsRunManifestPendingSchema = RunManifestSchema.omit({ resultDigest: true }).extend({
   outcome: z.literal('pending'),
 });
@@ -720,7 +720,7 @@ const AnalyzeDiscreteRevealedSchema = z.object({
   // 함께 합친 공개 범주의 합이다(planSmallLevelMerge). levels에 가짜 "기타"
   // 레벨로 넣지 않는 이유는 실제 범주 값 "기타"와 구분하기 위해서다. 몇 개 범주가
   // 합쳐졌는지는 일부러 내지 않는다(Table1의 mergedLevels 비공개와 같은 원칙).
-  // 그 범주형 변수 하나만 요청했을 때만 생긴다(statsDescriptiveSuppression.ts).
+  // 그 범주형 변수 하나만 요청했을 때만 생긴다(server/src/stats/disclosure/descriptiveSuppression.ts).
   other: z.object({
     count: z.number().int().nonnegative(),
     proportion: z.number(),
@@ -819,7 +819,7 @@ export const AnalyzeDescriptiveStratifiedResultSchema = z.discriminatedUnion('su
     suppressed: z.literal(false),
     stratifyByKey: z.string(),
     // groups[0]은 항상 kind:'total'. total 다음 순서는 [...levels(정해진 순서),
-    // other?, missing?] — server/src/statsDescriptiveStratify.ts 참고.
+    // other?, missing?] — server/src/stats/dataset/descriptiveStratify.ts 참고.
     groups: z.array(AnalyzeDescriptiveStratifyGroupSchema),
     byGroup: z.array(AnalyzeDescriptiveStratifiedGroupResultSchema),
   }).strict(),
@@ -894,7 +894,7 @@ const AnalyzeBivariateRevealedSchema = z.object({
     cells: z.array(z.array(z.number().int().nonnegative())),
   }).optional(),
   // PR3-B — 상관 method(pearson/spearman) 전용, 형제 필드(extra 안이 아님 — extra는
-  // 효과크기 shape 전용이라 {slope,intercept}를 담을 수 없다, statsEngine.ts의
+  // 효과크기 shape 전용이라 {slope,intercept}를 담을 수 없다, server/src/stats/engine/index.ts의
   // StatsEngineEffectSizeSchema 확인). pearson만 값을 가지고, 계산 불가(상수·표본
   // 부족)거나 spearman이면 null.
   regressionLine: z.object({
@@ -1040,7 +1040,7 @@ export const RegressionFitSchema = z.object({
 }).strict();
 
 // PR4-A2 — 행 단위 진단(잔차·leverage·Cook's D). disclosureClass=limited_row라
-// (계획서 §6.8.1) statsLimitedRowMerge.ts가 붙이기 전엔 배열 자체가 없다
+// (계획서 §6.8.1) server/src/stats/disclosure/limitedRowMerge.ts가 붙이기 전엔 배열 자체가 없다
 // (scatter.points와 동일 원칙). pointDiagnosticsStatus==='available'일 때만 이
 // 배열이 존재하고, 존재하면 아래 넷은 전부 non-null이다(모형 단위 판정을 이미
 // 서버가 통과시켰으므로 — 행별 부분 결측은 v1에서 만들지 않는다).
@@ -1076,7 +1076,7 @@ export const RegressionDiagnosticsSchema = z.object({
     'not_requested', 'unavailable_no_access', 'unavailable_model',
     'unavailable_computation_failed', 'available',
     // PR4-B2 — 엔진 동시성은 1이다. limited_row 진단이 큐 밖에서 엔진을 호출할 때
-    // prediction 실행과 겹치면 Busy를 이 값으로 구분한다(statsLimitedRowMerge.ts —
+    // prediction 실행과 겹치면 Busy를 이 값으로 구분한다(server/src/stats/disclosure/limitedRowMerge.ts —
     // 종전엔 Busy도 unavailable_computation_failed로 삼켰다).
     'unavailable_engine_busy',
   ]),
@@ -1638,7 +1638,7 @@ export const AnalyzeResultSchema = z.object({
   // 결과는 동일 원칙으로 항상 존재(optional은 구버전 재파싱 호환뿐). 이 필드가
   // 있으면 최상위 continuous/discrete는 항상 빈 배열이다(진실 공급원 하나만
   // 유지 — 같은 응답 안에 "비층화 전체"와 "층화 total"이 독립 계산되어 서로 다른
-  // 억제 판정이 나오는 걸 막기 위함, server/src/statsDescriptiveStratifySuppression.ts).
+  // 억제 판정이 나오는 걸 막기 위함, server/src/stats/disclosure/descriptiveStratifySuppression.ts).
   descriptiveStratified: AnalyzeDescriptiveStratifiedResultSchema.optional(),
   // 응답 시점 전용(위 LimitedDisclosureStatusSchema 주석). 저장된 집계 결과에는 없다.
   limitedDisclosure: LimitedDisclosureStatusSchema.optional(),

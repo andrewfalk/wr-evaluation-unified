@@ -1,57 +1,57 @@
 {
-  "src/__tests__/statsBivariateHttp.integration.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 2
-    }
-  },
-  "src/__tests__/statsBivariateLimitedDisclosure.integration.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
-  "src/__tests__/statsCorrelationMatrixLimitedDisclosure.integration.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 5
-    }
-  },
-  "src/__tests__/statsDescriptiveHttp.integration.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
-  "src/__tests__/statsPredictionCohortStages.test.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/__tests__/statsPredictionLimitedDisclosure.integration.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 3
-    }
-  },
-  "src/__tests__/statsRegressionHttp.integration.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 3
-    }
-  },
   "src/routes/__tests__/ai.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "src/statsCorrelationMatrixDataset.ts": {
+  "src/stats/dataset/__tests__/predictionCohortStages.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "src/statsDatasetBuilder.ts": {
+  "src/stats/dataset/builder.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "src/statsRunsQueue.ts": {
+  "src/stats/dataset/correlationMatrix.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
+    }
+  },
+  "src/stats/queue/runsQueue.ts": {
+    "@typescript-eslint/no-unused-vars": {
+      "count": 1
+    }
+  },
+  "src/stats/routes/__tests__/bivariateHttp.integration.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "src/stats/routes/__tests__/bivariateLimitedDisclosure.integration.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "src/stats/routes/__tests__/correlationMatrixLimitedDisclosure.integration.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "src/stats/routes/__tests__/descriptiveHttp.integration.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "src/stats/routes/__tests__/predictionLimitedDisclosure.integration.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "src/stats/routes/__tests__/regressionHttp.integration.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
     }
   }
 }

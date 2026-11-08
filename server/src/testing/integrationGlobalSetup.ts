@@ -6,7 +6,7 @@
 //    database must fail instead of silently skipping.
 // 2. Only a dedicated test database is accepted — its name must start with `wr_test`. This setup
 //    applies pending migrations, and the stats queue tests start real workers that claim any
-//    queued job regardless of fixture or organization (statsRunsQueue.ts). Pointed at the
+//    queued job regardless of fixture or organization (stats/queue/runsQueue.ts). Pointed at the
 //    development or production database (`wr_evaluation`), the run could change its schema or
 //    process someone else's work, so it is refused before connecting.
 // 3. Apply migrations (idempotent), so every run starts from the current schema.

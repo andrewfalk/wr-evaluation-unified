@@ -6,9 +6,9 @@
 export type { AnalyticsVariableMetadata } from '../../types';
 import type { AnalyticsVariableMetadata } from '../../types';
 
-// statsOrdinalOrder.ts가 재사용 — 부위군은 값 자체에 의학적 순서가 없지만(명목형),
+// server/src/stats/recipe/ordinalOrder.ts가 재사용 — 부위군은 값 자체에 의학적 순서가 없지만(명목형),
 // 이변량 방법(chi_square/fisher_exact 등)이 groupPairsByLevel()로 값을 순회하려면 고정
-// 순서 선언이 필요하다(server/src/statsBivariateRoles.ts의 resolveLevelOrder — categorical
+// 순서 선언이 필요하다(server/src/stats/dataset/bivariateRoles.ts의 resolveLevelOrder — categorical
 // 타입은 선언된 순서가 없으면 null을 반환해 어떤 이변량 방법도 못 쓴다). 순서 자체의
 // 의미는 없고 결정성만 필요하므로 MODULE_LABELS(diagnosisMapping.ts) 선언 순서를 그대로 쓴다.
 export const DIAGNOSIS_MODULE_GROUP_ORDER = ['knee', 'wrist', 'elbow', 'shoulder', 'spine', 'cervical'] as const;

@@ -179,7 +179,7 @@ export function extractKneeDiagnosisSideKlGrade(
 
 // "상병 상태"(확인/미확인) — AssessmentTab.jsx SideAssessment의 confirmedRight/confirmedLeft.
 // 값이 2상태뿐이라 boolean으로 모델링한다 — categorical 타입을 새로 쓰면
-// statsBivariateRoles.ts의 resolveLevelOrder가 categorical 순서를 아직 못 주는 문제를
+// server/src/stats/dataset/bivariateRoles.ts의 resolveLevelOrder가 categorical 순서를 아직 못 주는 문제를
 // 그대로 만나므로, 이 변수에서는 그 문제 자체를 피해간다(Part B 착수 시 결정).
 export function extractKneeDiagnosisSideConfirmedStatus(
   migrationResult: MigrationResult<AnalysisPatient>,

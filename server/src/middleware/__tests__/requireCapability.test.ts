@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Request, Response, NextFunction } from 'express';
 
 const availabilityState = { available: true };
-vi.mock('../../statsWorkbenchRuntimeState', () => ({
+vi.mock('../../stats/policy/workbenchRuntimeState', () => ({
   getStatsWorkbenchAvailability: () => ({ available: availabilityState.available, reason: null, checkedAt: null }),
 }));
 

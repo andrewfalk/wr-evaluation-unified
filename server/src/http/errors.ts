@@ -9,7 +9,7 @@
 //
 // ZodError is deliberately NOT mapped to 400. Route handlers validate request bodies with
 // `safeParse` and answer 400 themselves; the only `.parse()` that can throw on an HTTP path is the
-// internal result-integrity check (statsDescriptiveStratifySuppression.ts), which is a server
+// internal result-integrity check (stats/disclosure/descriptiveStratifySuppression.ts), which is a server
 // defect and must stay a 500 — mapping it to 400 would report a server bug as the client's fault
 // and echo internal schema paths. (Deviation from the Phase 1 plan's "ZodError → 400"; reported.)
 import {
@@ -30,8 +30,8 @@ import {
   StatsEngineProcessError,
   StatsEngineResultInvalidError,
   StatsEngineTimeoutError,
-} from '../statsEngine';
-import { errorBodyFor, httpStatusFor } from '../statsEngineErrorMapping';
+} from '../stats/engine';
+import { errorBodyFor, httpStatusFor } from '../stats/engine/errorMapping';
 
 export class AppError extends Error {
   readonly status: number;

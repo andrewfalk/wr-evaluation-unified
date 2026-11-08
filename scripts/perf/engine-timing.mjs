@@ -1,6 +1,6 @@
 // P0-13 성능 기준선 ③ — 통계 엔진 기동 vs 계산.
 //
-// G6 골든 요청 본문(server/src/__tests__/__goldens__/stats-engine-requests.json — 기술통계·층화·이변량 2종·
+// G6 골든 요청 본문(server/src/stats/engine/__tests__/__goldens__/stats-engine-requests.json — 기술통계·층화·이변량 2종·
 // OLS 회귀·예측)을 서버와 같은 봉투로 감싸 analyze.py에 넣고, STATS_ENGINE_TIMING=1로 Python이 직접 잰 구간(import·stdin·
 // parse·compute·serialize)과 드라이버가 잰 spawn→close 시간을 모은다. 드라이버는 server의 runEngineProcess와
 // 같은 방식(스레드 환경변수 1·stdin JSON·stdout 결과)으로 spawn한다.
@@ -17,7 +17,7 @@ import { markdownTable, median, parseArgs, round } from './lib/perfLib.mjs';
 // 컨테이너·로컬 공용 드라이버(CommonJS) — `node -e`로 넘기므로 파일 내용을 문자열로 읽는다.
 export const DRIVER_SOURCE = fs.readFileSync(fileURLToPath(new URL('./lib/engineDriver.cjs', import.meta.url)), 'utf8');
 
-/** server/src/statsEngine.ts buildEngineTimingLog와 같은 해석(서버 dist에 의존하지 않으려고 복제 — 표식 형식이 바뀌면 둘 다). */
+/** server/src/stats/engine/index.ts buildEngineTimingLog와 같은 해석(서버 dist에 의존하지 않으려고 복제 — 표식 형식이 바뀌면 둘 다). */
 export function parseTiming(driverResult) {
   const m = String(driverResult.stderr ?? '').match(/^STATS_ENGINE_TIMING (\{.*\})\s*$/m);
   const totalMs = driverResult.closeWallMs - driverResult.spawnWallMs;
@@ -42,10 +42,10 @@ function runDriver({ container, python, script }, body) {
   return JSON.parse(cmd.stdout);
 }
 
-/** server/src/statsEngine.ts의 ENGINE_PROTOCOL_VERSION(소스에서 읽어 서버와 어긋나지 않게). */
+/** server/src/stats/engine/index.ts의 ENGINE_PROTOCOL_VERSION(소스에서 읽어 서버와 어긋나지 않게). */
 export function readProtocolVersion(source) {
   const m = String(source).match(/export const ENGINE_PROTOCOL_VERSION = (\d+);/);
-  if (!m) throw new Error('ENGINE_PROTOCOL_VERSION not found in server/src/statsEngine.ts');
+  if (!m) throw new Error('ENGINE_PROTOCOL_VERSION not found in server/src/stats/engine/index.ts');
   return Number(m[1]);
 }
 
@@ -70,8 +70,8 @@ async function main() {
   const target = container
     ? { container, python: String(args.python ?? '/opt/stats-venv/bin/python'), script: String(args.script ?? '/app/stats-engine/analyze.py') }
     : { container: null, python: String(args.python ?? 'python'), script: path.resolve(String(args.script ?? 'services/stats-engine/analyze.py')) };
-  const goldens = JSON.parse(fs.readFileSync(path.resolve('server/src/__tests__/__goldens__/stats-engine-requests.json'), 'utf8'));
-  const protocolVersion = readProtocolVersion(fs.readFileSync(path.resolve('server/src/statsEngine.ts'), 'utf8'));
+  const goldens = JSON.parse(fs.readFileSync(path.resolve('server/src/stats/engine/__tests__/__goldens__/stats-engine-requests.json'), 'utf8'));
+  const protocolVersion = readProtocolVersion(fs.readFileSync(path.resolve('server/src/stats/engine/index.ts'), 'utf8'));
 
   const results = [];
   for (const [name, entry] of Object.entries(goldens)) {
