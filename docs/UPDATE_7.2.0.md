@@ -4,7 +4,7 @@
 
 > **이번 릴리스는 서버 전용 패키지다(Electron 셸 변경 없음, 설치본 교체 불필요).** 서버 코드 구조를 크게 정리했지만(동작은 골든 테스트로 고정), **보안 강화로 로그인·세션 동작이 바뀌고 DB 마이그레이션 4개(0038~0041)가 적용된다.** 업데이트 전 DB 백업이 필수이고, Docker 이미지 구조가 바뀌었으므로 **개발 PC에서 아래 "배포 전 점검"을 통과한 패키지로만 배포한다.**
 >
-> 이 문서는 운영 서버가 **호스트 Caddy(host 모드, [PRODUCTION_RELEASE_PLAN.md](PRODUCTION_RELEASE_PLAN.md) 9-3 전환 완료)** 상태라고 본다. 아직 Docker Caddy가 8443을 쓰고 있다면 같은 절차에서 호스트 Caddy 확인 줄(B-5)만 건너뛴다.
+> 이 문서는 운영 서버가 **호스트 Caddy(host 모드, [PRODUCTION_RELEASE_PLAN.md](PRODUCTION_RELEASE_PLAN.md) 9-3 전환 완료)** 상태라고 본다. 아직 Docker Caddy가 8443을 쓰고 있다면 같은 절차에서 호스트 Caddy 확인 줄(B-5)을 건너뛰고, "배포 전 점검" 3)의 접속 기록은 호스트 Caddy `access.log` 대신 Docker Caddy 컨테이너 로그에서 본다.
 
 ## 무엇이 바뀌나
 
@@ -76,7 +76,7 @@ Set-Content release\wr-evaluation-unified-7.2.0-intranet\updates\rehearsal.txt o
 
 pwsh -File scripts/verify-stack.ps1 up -PackageDir release\wr-evaluation-unified-7.2.0-intranet -LoadImages
 pwsh -File scripts/verify-stack.ps1 status
-pwsh -File scripts/verify-stack.ps1 accept
+pwsh -File scripts/verify-stack.ps1 accept    # host 모드 검증 스택에서만(Docker Caddy 모드면 건너뛴다)
 ```
 
 | 확인 | 기대 결과 |
@@ -84,12 +84,12 @@ pwsh -File scripts/verify-stack.ps1 accept
 | app 로그의 `[migrate]` | `Recorded checksums for 37 previously applied migration(s).` → `Applied: 0038_…` ~ `0041_…`, `changed since they were applied` 경고 **없음** |
 | 로그인·로그아웃(웹 "로그인 유지" 켬/끔) | 정상. 끈 채로 브라우저를 닫았다 열면 로그인 화면 |
 | 시험 계정으로 비밀번호 5번 틀리기 | 6번째 시도에 "잠시 잠겼습니다" 안내, 1분 뒤 올바른 비밀번호로 로그인 |
-| 환자 열기·저장, 워크스페이스 저장, 자동저장 | 정상 |
+| 환자 열기·저장 | 저장 뒤 새로고침해도 바뀐 값이 남는다(인트라넷 화면에는 워크스페이스 저장·불러오기 버튼과 워크스페이스 자동저장이 없다 — 환자 저장이 곧 서버 기록 갱신) |
 | 통계 분석 1회(통계를 켠 경우) | 결과 표시 |
 | 영상 분석(켠 경우) | 짧은 영상 1개 분석 → 적용 |
 | `https://<도메인>:8443/updates/rehearsal.txt` | 200(`updates/` 마운트 — 실제 피드는 운영에서 옮긴 뒤 B-6에서 확인) |
-| 설치본(7.1.4 셸)으로 접속 | 로그인·EMR 연동 정상 |
-| `verify-stack accept` | 출발지별 감사 IP·로그인 제한 버킷·8 KiB 헤더 통과 |
+| 설치본(7.1.4 셸)으로 접속 | 로그인 정상. EMR 연동은 EMR 프로그램이 있는 PC에서만 확인된다(없으면 장치 등록·EMR 감사 기록이 남지 않는다) |
+| `verify-stack accept`(host 모드 검증 스택만) | 출발지별 감사 IP·로그인 제한 버킷·8 KiB 헤더 통과 |
 
 ### 3) 현장 브라우저 버전 (운영 서버, 관리자 PowerShell — 읽기 전용)
 
@@ -256,7 +256,7 @@ curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local
 
 | 시나리오 | 기대 결과 |
 |---|---|
-| 로그인·로그아웃, 기존 환자 열기·저장, 워크스페이스 저장 | 7.1.6과 같다 |
+| 로그인·로그아웃, 기존 환자 열기·저장 | 7.1.6과 같다 |
 | 시험 계정으로 비밀번호 5번 틀리기 | "이 아이디가 잠시 잠겼습니다. N분 후…" — 1분 뒤 올바른 비밀번호로 로그인 |
 | 웹에서 "로그인 유지" 끄고 로그인 → 브라우저 닫았다 열기 | 로그인 화면 |
 | 설치본(7.1.4 셸)으로 접속 | 인증서 오류 없이 접속, EMR 연동 정상 |
@@ -265,7 +265,20 @@ curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local
 | 통계 분석(켠 경우) | 결과 표시 |
 | 다른 PC에서 `<서버 IP>:3001` | 접속 거부 |
 
-> **사전 검증한 것**(개발 PC, 코드 수준): 서버 단위 1,858건·실DB 통합 221건·운영 버전 pytest 260건·루트 3,731건(`npm run check:full`), 계산·출력·API 응답·통계 엔진 요청 골든 불변, 0037 상태 DB에서 체크섬 열 추가·backfill·0038~0041 적용이 한 번에 되는 것(통합 테스트). **아직 하지 않은 것**: 위 "배포 전 점검"의 패키지 리허설(이 문서와 함께 진행), 운영 서버(구버전 Docker Desktop·Compose v2.22.0)에서의 실제 업데이트.
+> **사전 검증한 것**(2026-11-08, 개발 PC)
+>
+> - **코드 수준**: `npm run check:full` — 서버 단위 1,858건·실DB 통합 221건·운영 버전 pytest 260건·루트 3,731건. 계산·출력·API 응답·통계 엔진 요청 골든 불변. 0037 상태 DB에서 체크섬 열 추가·backfill·0038~0041 적용이 한 번에 되는 것(통합 테스트).
+> - **패키지 리허설**(위 "배포 전 점검" 1)·2), 7.1.x 때 만든 검증 스택 DB 위에 올림): 첫 리허설에서 앱 이미지에 개발 PC의 옛 `server/dist` 파일이 섞여 라우터 5개가 S1 이전 코드로 돈 것을 찾아 #250으로 고쳤다(그 전 패키지는 폐기). main `04c4cd8`로 다시 만든 패키지에서 확인한 것:
+>   - 이미지 안 옛 빌드 파일 0개(이제 Dockerfile 가드가 빌드에서 막는다)
+>   - 마이그레이션 41행, 체크섬 빈 행 0, 이미지 재빌드 뒤에도 체크섬 경고 없음
+>   - 로그인 잠금: API로 6번째 429 `LOGIN_LOCKED`·감사 로그 아이디 해시, 화면에서 잠금 해제 뒤 정상 로그인
+>   - 없는 `/api` 경로 JSON 404, 300 KB 로그인 본문 413, `seedAdmin` 관리자가 이미 있으면 거부, `runRetention` dry-run, 사전 준비 3)의 비밀키 길이 확인 명령
+>   - 헬스·통계 selfcheck·`updates/` 마운트
+>   - 화면: 환자 열기·저장, 통계 분석, 웹 "로그인 유지" 켬/끔(끄고 닫으면 다시 로그인), 설치본(7.1.4 셸) 로그인
+> - **확인하지 못한 것**:
+>   - 설치본 EMR 연동 — 개발 PC에 EMR이 없어 장치 등록·EMR 감사 기록이 남지 않는다. 7.2.0은 EMR 감사 수신에 nonce 재사용 차단(0038)과 rate limit을 더했으므로 **배포 뒤 첫 EMR 사용을 확인**하고, 실패하면 "롤백 절차 1)"로 되돌린다.
+>   - `verify-stack accept`와 감사 로그의 실제 PC 주소 — 개발 PC 검증 스택이 Docker Caddy 모드라 host 모드 전용 검사를 못 했다(7.1.6 host 모드에서 바뀌지 않은 부분).
+>   - "배포 전 점검" 3)(현장 Chrome 버전)과 운영 서버(구버전 Docker Desktop·Compose v2.22.0)에서의 실제 업데이트.
 
 ---
 
