@@ -409,6 +409,28 @@ describe('POST /api/auth/refresh', () => {
     fake.assertAllReleased();
   });
 
+  it('returns 401 SESSION_EXPIRED when the absolute lifetime ends between the check and the rotation (SEC-B M3)', async () => {
+    const fake = makeFake([userLookupHandler({
+      user_id: 'user-1', role: 'doctor', name: 'Dr. Kim',
+      organization_id: 'org-1', must_change_password: false, disabled_at: null,
+    })]);
+    vi.mocked(verifySession).mockResolvedValue(SESSION_ROW as never);
+    vi.mocked(validateCsrf).mockReturnValue(true);
+    vi.mocked(rotateSession).mockResolvedValue(null);
+    vi.mocked(isPastAbsoluteLifetime).mockResolvedValueOnce(true);
+
+    const res = await request(authApp(fake))
+      .post('/api/auth/refresh')
+      .set('Cookie', 'wr_refresh=valid-token')
+      .set('x-csrf-token', 'ok');
+
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('SESSION_EXPIRED');
+    expect(isPastAbsoluteLifetime).toHaveBeenCalledWith(expect.anything(), 'valid-token');
+    fake.assertNoUnmatched();
+    fake.assertAllReleased();
+  });
+
   it('returns 200 with new accessToken and current user on valid refresh', async () => {
     // client query for the user lookup
     const fake = makeFake([userLookupHandler({

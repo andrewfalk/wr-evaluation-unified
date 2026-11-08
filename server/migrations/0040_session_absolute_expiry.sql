@@ -18,6 +18,10 @@ UPDATE sessions s
  WHERE s.family_id = f.family_id
    AND s.absolute_expires_at IS NULL;
 
+-- 유휴 만료도 절대 만료를 넘지 않게 맞춘다(새 행의 규칙과 같게). 그래야 절대 만료가 지난 기존 세션이
+-- 모든 경로(로그아웃 포함)에서 "이미 끝난 세션"으로 똑같이 보인다.
+UPDATE sessions SET expires_at = absolute_expires_at WHERE expires_at > absolute_expires_at;
+
 ALTER TABLE sessions ALTER COLUMN absolute_expires_at SET DEFAULT (now() + interval '12 hours');
 ALTER TABLE sessions ALTER COLUMN absolute_expires_at SET NOT NULL;
 

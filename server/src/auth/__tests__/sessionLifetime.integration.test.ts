@@ -141,6 +141,30 @@ describe.skipIf(!TEST_DB_URL)('session absolute lifetime (real PostgreSQL, SEC-B
     expect((await meCall(s)).body.code).toBe('SESSION_REVOKED');
   });
 
+  it('logout of a session past its absolute lifetime needs no CSRF and clears the cookies (200)', async () => {
+    const s = await login();
+    const row = await sessionRow(s.refresh);
+    // What migration 0040 leaves for an old login: absolute expiry passed, idle expiry capped to it.
+    await pool.query(
+      `UPDATE sessions SET absolute_expires_at = now() - interval '1 second', expires_at = now() - interval '1 second' WHERE family_id = $1`,
+      [row.family_id],
+    );
+    const res = await request(app).post('/api/auth/logout').set('Cookie', `wr_refresh=${s.refresh}`);
+    expect(res.status).toBe(200);
+    expect(cookieHeader(res, 'wr_refresh')).toMatch(/^wr_refresh=;/);
+  });
+
+  it('logout of a session past its absolute lifetime is "nothing to revoke" even if its idle expiry is later', async () => {
+    const s = await login();
+    const row = await sessionRow(s.refresh);
+    await pool.query(
+      `UPDATE sessions SET absolute_expires_at = now() - interval '1 second', expires_at = now() + interval '1 hour' WHERE family_id = $1`,
+      [row.family_id],
+    );
+    const res = await request(app).post('/api/auth/logout').set('Cookie', `wr_refresh=${s.refresh}`);
+    expect(res.status).toBe(200); // no 403 CSRF_INVALID for a session that is already over
+  });
+
   it('rememberMe defaults to false: the refresh cookie is a session cookie unless rememberMe is true', async () => {
     const plain = await login();
     expect(cookieHeader(plain.res, 'wr_refresh')).not.toMatch(/Expires=/i);

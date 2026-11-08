@@ -161,7 +161,7 @@ export async function verifySession(
 // instead of SESSION_INVALID. Only a reason code; it never makes a session valid.
 // ---------------------------------------------------------------------------
 export async function isPastAbsoluteLifetime(
-  client: PoolClient,
+  client: Pool | PoolClient,
   refreshToken: string
 ): Promise<boolean> {
   const { rows } = await client.query(
@@ -312,6 +312,7 @@ export async function revokeSessionFamily(
        FROM sessions
        WHERE refresh_token_hash = $1
          AND expires_at > now()
+         AND absolute_expires_at > now()
          AND invalidated_at IS NULL`,
       [hashToken(refreshToken)]
     );

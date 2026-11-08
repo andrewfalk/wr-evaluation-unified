@@ -252,6 +252,13 @@ async function refresh(pool: Pool, req: Request, res: Response): Promise<void> {
   );
 
   if (!newSession) {
+    // The lineage can reach its absolute lifetime between verifySession above and the strict check in
+    // rotateSession; report that as SESSION_EXPIRED rather than as a concurrent rotation.
+    if (await isPastAbsoluteLifetime(pool, oldRefreshToken)) {
+      auditRefreshFail(pool, req, 'SESSION_EXPIRED');
+      res.status(401).json(SESSION_EXPIRED_BODY);
+      return;
+    }
     // Token was already rotated by a concurrent request (race condition resolved)
     auditRefreshFail(pool, req, 'SESSION_ALREADY_ROTATED');
     res.status(401).json({ code: 'SESSION_ALREADY_ROTATED', error: 'Session was already rotated' });
