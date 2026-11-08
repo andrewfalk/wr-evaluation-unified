@@ -118,4 +118,51 @@ describe('codemod-imports', () => {
     expect(read(dir, 'src/routes/app.ts')).toContain("import config from './config'");
     expect(read(dir, 'src/routes/app.ts')).toContain("from './sibling'"); // the unambiguous one is fixed
   });
+
+  it('after a rebase, a moved file whose only import now resolves to a different pre-existing file is reported (Codex R2)', () => {
+    const dir = repo({
+      'src/config.ts': 'export default {};\n',
+      'src/routes/config.ts': 'export const c = 1;\n',
+      'src/routes/app.ts': "import config from './config';\n",
+    });
+    const r = run(dir, { 'src/app.ts': 'src/routes/app.ts' });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("src/routes/app.ts: './config'");
+    expect(read(dir, 'src/routes/app.ts')).toContain("from './config'");
+  });
+
+  it('a moved file without relative imports still gets its __dirname paths fixed (Codex R2)', () => {
+    const dir = repo({
+      'services/x/input.json': '{}\n',
+      'src/stats/engine/reader.ts': "const p = path.resolve(__dirname, '../services/x/input.json');\n",
+    });
+    // reader.ts was moved by an earlier run from src/reader.ts; its __dirname path still has the old depth.
+    const r = run(dir, { 'src/reader.ts': 'src/stats/engine/reader.ts' });
+    expect(r.code).toBe(0);
+    expect(read(dir, 'src/stats/engine/reader.ts')).toContain("path.resolve(__dirname, '../../../services/x/input.json')");
+  });
+
+  it("a module moved next to its folder index imports it as '.' (not './')", () => {
+    const dir = repo({
+      'src/statsEngine.ts': 'export const e = 1;\n',
+      'src/statsErrors.ts': "import { e } from './statsEngine';\n",
+    });
+    const r = run(dir, { 'src/statsEngine.ts': 'src/stats/engine/index.ts', 'src/statsErrors.ts': 'src/stats/engine/errors.ts' }, '--apply-moves');
+    expect(r.code).toBe(0);
+    expect(read(dir, 'src/stats/engine/errors.ts')).toContain("import { e } from '.';");
+    expect(run(dir, { 'src/statsEngine.ts': 'src/stats/engine/index.ts', 'src/statsErrors.ts': 'src/stats/engine/errors.ts' }).code).toBe(0);
+  });
+
+  it("bare '.' and '..' specifiers are rewritten too (Codex R2)", () => {
+    const dir = repo({
+      'src/index.ts': 'export const value = 1;\n',
+      'src/feature/index.ts': 'export const f = 1;\n',
+      'src/feature/a.ts': "import { value } from '..';\nimport { f } from '.';\n",
+    });
+    const r = run(dir, { 'src/feature/a.ts': 'src/stats/engine/a.ts' }, '--apply-moves');
+    expect(r.code).toBe(0);
+    const a = read(dir, 'src/stats/engine/a.ts');
+    expect(a).toContain("import { value } from '../..';");
+    expect(a).toContain("import { f } from '../../feature';");
+  });
 });

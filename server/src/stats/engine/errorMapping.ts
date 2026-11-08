@@ -18,7 +18,7 @@ import {
   StatsEngineProcessError,
   StatsEngineResultInvalidError,
   StatsEngineTimeoutError,
-} from './';
+} from '.';
 
 export type EngineErrorClassification = 'denied' | 'failure';
 

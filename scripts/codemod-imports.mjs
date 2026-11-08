@@ -57,7 +57,7 @@ const CODE_EXT = ['.ts', '.tsx', '.js', '.mjs'];
 // Resolve a relative module specifier against an (old) directory to a repo-relative file path, as it
 // was before the moves: an old path that has moved no longer exists on disk but is a key of the map.
 function candidates(fromDirRel, spec, isModule) {
-  const base = norm(path.posix.normalize(path.posix.join(fromDirRel, spec)));
+  const base = norm(path.posix.normalize(path.posix.join(fromDirRel, spec))).replace(/\/+$/, '');
   if (!isModule) return [base];
   const stripped = base.replace(/\.(js|mjs)$/, '');
   return [base, ...CODE_EXT.map((e) => stripped + e), ...CODE_EXT.map((e) => `${stripped}/index${e}`)];
@@ -89,17 +89,18 @@ function relativeSpec(fromDirRel, targetRel, originalSpec, isModule) {
     target += ext;
   }
   let rel = path.posix.relative(fromDirRel, target);
-  if (!rel.startsWith('.')) rel = `./${rel}`;
+  if (rel === '') rel = '.';
+  else if (!rel.startsWith('.')) rel = `./${rel}`;
   return rel;
 }
 
 const MODULE_PATTERNS = [
-  /(\bfrom\s+)(['"])(\.{1,2}\/[^'"]+)\2/g,
-  /(\bimport\s*\(\s*)(['"])(\.{1,2}\/[^'"]+)\2/g,
-  /(\brequire\s*\(\s*)(['"])(\.{1,2}\/[^'"]+)\2/g,
+  /(\bfrom\s+)(['"])(\.{1,2}(?:\/[^'"]*)?)\2/g,
+  /(\bimport\s*\(\s*)(['"])(\.{1,2}(?:\/[^'"]*)?)\2/g,
+  /(\brequire\s*\(\s*)(['"])(\.{1,2}(?:\/[^'"]*)?)\2/g,
   // optional type argument: vi.importActual<typeof import('…')>('…')
-  /(\bvi\.(?:mock|doMock|unmock|doUnmock|importActual|importMock)\s*(?:<[^;]*?>)?\s*\(\s*)(['"])(\.{1,2}\/[^'"]+)\2/g,
-  /(^\s*import\s+)(['"])(\.{1,2}\/[^'"]+)\2/gm,
+  /(\bvi\.(?:mock|doMock|unmock|doUnmock|importActual|importMock)\s*(?:<[^;]*?>)?\s*\(\s*)(['"])(\.{1,2}(?:\/[^'"]*)?)\2/g,
+  /(^\s*import\s+)(['"])(\.{1,2}(?:\/[^'"]*)?)\2/gm,
 ];
 const PLAIN_PATTERNS = [
   /(\bpath\.(?:resolve|join)\s*\(\s*__dirname\s*,\s*)(['"])([^'"]+)\2/g,
@@ -128,13 +129,6 @@ for (const root of roots) {
     const src = fs.readFileSync(abs(fileRel), 'utf8');
     // A file moved by this run is known to hold pre-move specifiers: the old meaning wins outright.
     const preMove = movedNow.has(fileRel);
-    // A file moved by an earlier run (rerun, or a branch rebased onto the move) whose relative module
-    // specifiers all resolve from where it is now has already been rewritten — leave it alone, so its
-    // correct paths are not compared with what they would have meant from the old directory.
-    if (!preMove && oldDir !== newDir) {
-      const specs = MODULE_PATTERNS.flatMap((p) => [...src.matchAll(p)].map((m) => m[3]));
-      if (specs.every((sp) => resolveCurrent(newDir, sp, true))) continue;
-    }
     let out = src;
     const rewrite = (pattern, isModule) => {
       out = out.replace(pattern, (whole, pre, q, spec) => {
@@ -143,9 +137,13 @@ for (const root of roots) {
         const current = preMove ? null : resolveCurrent(newDir, spec, isModule);
         const intended = original ? (forward.get(original) ?? original) : null;
         if (current && (!intended || intended === current)) return whole; // correct, or fixed by an earlier run
+        // Points at a file that only exists because of the moves: written after the move (an earlier run
+        // or new code on the moved layout) — already right.
+        if (current && backward.has(current)) return whole;
         if (current && intended && intended !== current) {
-          // The old meaning and the current target are different files (e.g. a moved file's './config'
-          // now lands on a sibling config.ts) — never guess: report and leave it for a person.
+          // Before the move it meant one existing file, now it resolves to another one that was already
+          // there (e.g. a moved file's './config' now lands on a sibling config.ts) — that cannot be
+          // decided from the tree alone: report and leave it for a person.
           ambiguous.push(`${fileRel}: '${spec}' → now ${current}, before the move ${intended}`);
           return whole;
         }
