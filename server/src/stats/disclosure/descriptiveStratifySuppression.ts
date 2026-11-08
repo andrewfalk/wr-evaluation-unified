@@ -34,7 +34,7 @@ export function splitCompositeKey(key: string): { groupId: string; variableKey: 
 // 엔진 호출로 모든 그룹×변수를 처리한다. total 그룹의 rows(=전체 dataset rows)와
 // 나머지 그룹(레벨+기타+결측, 합쳐서 total과 같은 크기)이 같은 데이터를 중복
 // 전송하므로 변수당 전송 값 개수는 그룹 수와 무관하게 약 2×(전체 rows 수)다 —
-// 기존 MAX_TOTAL_VALUES/MAX_VALUES_PER_VARIABLE(stats/engine/index.ts, 무수정)가 그대로
+// 기존 MAX_TOTAL_VALUES/MAX_VALUES_PER_VARIABLE(stats/engine/engineLimits.ts, 무수정)가 그대로
 // 방어한다. assertInputWithinLimitsForMode(stats/routes/analyzeHandler.ts)가 실제 워커와
 // 동일하게 이 함수로 조립한 요청을 검사해야 한다(사전검사-워커 불일치 방지).
 export function buildStratifiedStatsEngineRequest(

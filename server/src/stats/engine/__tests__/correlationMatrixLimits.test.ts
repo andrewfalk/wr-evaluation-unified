@@ -5,7 +5,7 @@
 // 테스트로 고정한다 — 하나로 뭉쳐서 "최대 허용"을 검사하면 이 사실이 가려진다.
 //
 // assertCorrelationMatrixWithinLimits()는 runEngineProcess() 안에서 spawn()보다
-// 먼저 동기 호출된다(stats/engine/index.ts:501 cfg.assertLimits()) — 상한 초과 시
+// 먼저 동기 호출된다(stats/engine/subprocess.ts runEngineProcess의 cfg.assertLimits()) — 상한 초과 시
 // C(k,2) 순회나 서브프로세스 스폰 전에 즉시 reject되는지도 함께 확인한다.
 import { EventEmitter } from 'events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

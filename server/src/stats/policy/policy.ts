@@ -88,7 +88,7 @@ export const REGRESSION_POLICY_VERSION = REGRESSION_POLICY.version;
 // 동일한 교훈).
 //
 // 0단계 실측(2026-09-24, 운영 핀 버전 Docker: node:20-bookworm-slim + numpy==1.26.4,
-// BLAS 스레드=1 — stats/engine/index.ts의 실제 스폰 환경과 동일) — n=700/P=20: 54.4초,
+// BLAS 스레드=1 — stats/engine/subprocess.ts의 실제 스폰 환경과 동일) — n=700/P=20: 54.4초,
 // n=5000/P=20: 308.1초(둘 다 fit_procedure 226회·λ별 적합 29,606회, 계획서 예고치와
 // 정확히 일치). engineTimeoutMs는 이 두 지점에 안전마진 2배를 적용한 선형모델
 // (computePredictionEngineTimeoutMs)로 요청마다 추정한다 — 비동기 job(PR4-B1)이라

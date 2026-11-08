@@ -1,7 +1,7 @@
 // PR4-B2 — 예측(prediction) 분석 코호트 키·fold 배정·자료 단계(S0/S1/S2)·공개통제
 // 카운트·비추정(non_estimable) 사유 판정(계획서 §3단계). 3-4단계 실행 순서(request
 // 억제 → 공개통제 게이트 → 비추정 판정 → 엔진)의 앞 세 단계를 이 파일이 담당한다 —
-// 네 번째(엔진 실행)만 stats/engine/index.ts/Python 쪽 책임이다.
+// 네 번째(엔진 실행)만 stats/engine/(runners/prediction.ts)·Python 쪽 책임이다.
 import { createHash } from 'crypto';
 import { canonicalDigest } from '../../canonicalSerializer';
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
@@ -261,7 +261,7 @@ export function evaluatePredictionDisclosure(
 
 // ============================================================================
 // 3-4단계 ③ — 구조적 추정불가(non_estimable) 순서표 1~10(11=NOT_CONVERGED는
-// 엔진 전용이라 이 함수 밖, stats/engine/index.ts/Python 쪽 책임). 처음 걸리는 사유
+// 엔진 전용이라 이 함수 밖, stats/engine/(runners/prediction.ts)·Python 쪽 책임). 처음 걸리는 사유
 // 하나만 반환한다 — 이 순서 자체가 PredictionNonEstimableReasonSchema의 정의다.
 // ============================================================================
 export interface PredictionNonEstimableCheckInput {

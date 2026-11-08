@@ -894,7 +894,7 @@ const AnalyzeBivariateRevealedSchema = z.object({
     cells: z.array(z.array(z.number().int().nonnegative())),
   }).optional(),
   // PR3-B — 상관 method(pearson/spearman) 전용, 형제 필드(extra 안이 아님 — extra는
-  // 효과크기 shape 전용이라 {slope,intercept}를 담을 수 없다, server/src/stats/engine/index.ts의
+  // 효과크기 shape 전용이라 {slope,intercept}를 담을 수 없다, server/src/stats/engine/responseSchemas.ts의
   // StatsEngineEffectSizeSchema 확인). pearson만 값을 가지고, 계산 불가(상수·표본
   // 부족)거나 spearman이면 null.
   regressionLine: z.object({

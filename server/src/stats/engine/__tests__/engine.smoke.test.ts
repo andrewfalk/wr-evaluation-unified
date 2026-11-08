@@ -279,7 +279,7 @@ describe.skipIf(!AVAILABLE)('statsEngine <-> analyze.py 실제 프로세스 (smo
       values: Array.from({ length: 7062 }, (_, i) => i + 0.123456789),
     }));
     const elapsedMs = runCorrelationMatrixPerf('고정밀 소수(바이트 상한 경계)', variables);
-    // 정밀 벤치마크가 아니라 회귀 감시용 관대한 상한선 — stats/engine/index.ts의
+    // 정밀 벤치마크가 아니라 회귀 감시용 관대한 상한선 — stats/engine/subprocess.ts의
     // timeoutMs 기본값(30s)보다 훨씬 널널하게 잡는다.
     expect(elapsedMs).toBeLessThan(10_000);
   });

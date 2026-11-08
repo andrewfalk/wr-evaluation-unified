@@ -93,7 +93,7 @@ _VARIABLES_REQUEST_SCHEMA: dict[str, Any] = {
                     },
                     # histogram bin 개수(Freedman-Diaconis/Sturges) 계산 전용 힌트 — Node가
                     # values(행 수, 브로드캐스트면 중복 포함)와 별도로 실제 서로 다른 인원 수를
-                    # 계산해 넘긴다(continuous에서만, server/src/stats/engine/index.ts 참고). person
+                    # 계산해 넘긴다(continuous에서만, server/src/stats/engine/protocol.ts 참고). person
                     # 신원 자체는 여전히 모른다 — 개수 하나만 받는다.
                     "personCount": {"type": "integer", "minimum": 0},
                 },
@@ -614,7 +614,7 @@ def _validate_correlation_matrix_semantics(correlation_matrix: dict[str, Any]) -
 
     # 값 개수 상한은 기존 "variables" shape와 동일한 MAX_TOTAL_VALUES를 재사용한다
     # (계획서 §8 — 상관행렬 전용 새 상수를 두지 않는다). 바이트 길이 상한은
-    # server/src/stats/engine/index.ts가 stdin 전송 전에 이미 검사한다(§8, 이중 검사).
+    # server/src/stats/engine/limits.ts가 stdin 전송 전에 이미 검사한다(§8, 이중 검사).
     total_values = sum(len(v["values"]) for v in variables)
     if total_values > MAX_TOTAL_VALUES:
         raise ProtocolError(

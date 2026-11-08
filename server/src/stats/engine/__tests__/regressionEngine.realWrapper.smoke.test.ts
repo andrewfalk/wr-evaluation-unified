@@ -2,7 +2,7 @@
 // runRegressionStatsEngine()이 실제 Python 서브프로세스와 왕복하는지 거치는 테스트가
 // 하나도 없었다. stats/disclosure/__tests__/regressionSuppression.test.ts는 runRegressionStatsEngine 자체를
 // mock하므로 Node→Python 요청 페이로드의 실제 필드명(x vs X)까지는 검증하지 못한다 —
-// 리뷰로 재현된 "stats/engine/index.ts가 소문자 x로 보내 Python이 INVALID_INPUT으로 거부"
+// 리뷰로 재현된 "stats/engine(현 runners/regression.ts)이 소문자 x로 보내 Python이 INVALID_INPUT으로 거부"
 // 버그가 바로 이 경계를 넘지 않아 기존 테스트에 걸리지 않았다. 이 파일은 mock 없이
 // 실제 프로세스를 스폰해 그 경계를 실제로 넘는다.
 //

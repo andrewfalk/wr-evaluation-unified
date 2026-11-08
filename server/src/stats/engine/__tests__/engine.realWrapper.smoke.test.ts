@@ -1,6 +1,6 @@
 // PR1 계획서 §9-item3 — 9차 검토 §2 필수 수정. stats/engine/__tests__/engine.smoke.test.ts는 analyze.py를
 // execFileSync로 직접 호출해 Python 스크립트 자체는 검증하지만, 운영 코드가 실제로 쓰는
-// server/src/stats/engine/index.ts의 runStatsEngine()(세마포어·close 기반 생명주기·zod
+// server/src/stats/engine/runners/descriptive.ts의 runStatsEngine()(세마포어·close 기반 생명주기·zod
 // 재검증·§2.2 의미검증)은 전혀 거치지 않는다 — Node↔Python "wrapper" 경로 자체가
 // 실제로 동작하는지는 이 파일에서만 증명한다(다른 stats/engine/__tests__/engine.test.ts는 child_process를
 // mock하므로 이 경계를 넘지 않는다).
