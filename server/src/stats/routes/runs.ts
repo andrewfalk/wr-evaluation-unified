@@ -12,6 +12,7 @@ import { requestCancel, hasVersionDrifted } from '../queue/runsQueue';
 import { STATS_RUN_COLUMNS, type StatsRunRow } from '../queue/runRow';
 import type { AnalyzeResult, StatsRunManifestSucceeded } from '@wr/contracts';
 import { sessionOf } from '../../http/authz';
+import config from '../../config';
 
 // ---------------------------------------------------------------------------
 // PR4-B1 — GET /runs/:analysisRunId, POST /runs/:analysisRunId/cancel.
@@ -160,7 +161,8 @@ export async function handlePostCancelRun(pool: Pool, req: Request, res: Respons
     return;
   }
 
-  const result = await requestCancel(pool, analysisRunId, session.organizationId!, session.userId);
+  // S8: a run of another queue namespace (visible above, since reads are not namespaced) is not cancelled — 404.
+  const result = await requestCancel(pool, analysisRunId, session.organizationId!, session.userId, config.queueNamespace);
   if (result.outcome === 'not_found') {
     res.status(404).json({ code: 'RUN_NOT_FOUND', error: 'Run not found.' });
     return;

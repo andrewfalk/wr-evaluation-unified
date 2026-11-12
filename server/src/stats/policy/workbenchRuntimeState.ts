@@ -19,6 +19,11 @@ export interface StatsWorkbenchAvailability {
 
 const deploymentGateOpen = config.statsWorkbenchEnabled && config.deploymentMode === 'intranet';
 
+/** The deployment gate alone (flag ∧ intranet) — also what starts the stats queue worker and cleanup (src/index.ts). */
+export function isStatsDeploymentGateOpen(): boolean {
+  return deploymentGateOpen;
+}
+
 let runtimeHealthy = true;
 let lastReason: string | null = null;
 let lastCheckedAt: string | null = null;

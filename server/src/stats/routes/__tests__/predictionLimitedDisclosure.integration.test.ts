@@ -26,6 +26,7 @@ import { generateAccessToken } from '../../../auth/tokens';
 import { hashToken, generateToken } from '../../../auth/tokenHash';
 import { __resetDifferencingGuardForTests } from '../../disclosure/differencingGuard';
 import { __resetLimitedDisclosureGuardForTests } from '../../disclosure/limitedDisclosureGuard';
+import config from '../../../config';
 
 const TEST_DB_URL = process.env.TEST_DATABASE_URL;
 const CSRF_TOKEN = 'itest-pred-limited-csrf';
@@ -310,7 +311,7 @@ describe.skipIf(!TEST_DB_URL)('예측 제한 해제 — HTTP 통합 (실제 Post
       expect((await runRow(analysisRunId)).requested_disclosure_profile).toBe('lift_eligible');
 
       await revoke(); // 접수 후 워커 시작 전에 회수
-      const claimed = await claimNextQueuedRun(pool, 600000);
+      const claimed = await claimNextQueuedRun(pool, 600000, config.queueNamespace);
       expect(claimed?.analysis_run_id).toBe(analysisRunId);
       await attempt(pool, claimed!);
 

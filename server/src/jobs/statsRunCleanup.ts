@@ -5,7 +5,8 @@ import type { Pool } from 'pg';
 // 올바르게 처리한다. 이 job은 순수 저장공간 회수용이라 늦게 돌거나 잠깐 꺼져 있어도 idempotency
 // 캐시의 TTL 준수 자체는 깨지지 않는다. status와 무관하게(요청단위 억제 행·failed 행 포함)
 // 만료된 모든 행을 지운다.
-export async function runStatsRunCleanup(pool: Pool): Promise<{ deleted: number }> {
-  const result = await pool.query(`DELETE FROM stats_runs WHERE expires_at < now()`);
+// S8: only the given queue namespace's rows — another server sharing the database cleans its own.
+export async function runStatsRunCleanup(pool: Pool, queueNamespace: string): Promise<{ deleted: number }> {
+  const result = await pool.query(`DELETE FROM stats_runs WHERE expires_at < now() AND queue_namespace = $1`, [queueNamespace]);
   return { deleted: result.rowCount ?? 0 };
 }

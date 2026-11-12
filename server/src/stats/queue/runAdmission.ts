@@ -72,19 +72,19 @@ async function auditAdmission(
 }
 
 // 동시실행 quota(리소스 점유량) — queued+running 카운트.
-async function inFlightCount(client: PoolClient, column: 'requested_by' | 'organization_id', value: string): Promise<number> {
+async function inFlightCount(client: PoolClient, column: 'requested_by' | 'organization_id', value: string, queueNamespace: string): Promise<number> {
   const { rows } = await client.query<{ count: string }>(
-    `SELECT COUNT(*) AS count FROM stats_runs WHERE ${column}=$1 AND status IN ('queued','running')`,
-    [value],
+    `SELECT COUNT(*) AS count FROM stats_runs WHERE ${column}=$1 AND status IN ('queued','running') AND queue_namespace=$2`,
+    [value, queueNamespace],
   );
   return Number(rows[0].count);
 }
 
 // 시간당 quota(요청 빈도, 상태 무관) — 최근 1시간 내 생성된 행 카운트.
-async function hourlyCount(client: PoolClient, column: 'requested_by' | 'organization_id', value: string): Promise<number> {
+async function hourlyCount(client: PoolClient, column: 'requested_by' | 'organization_id', value: string, queueNamespace: string): Promise<number> {
   const { rows } = await client.query<{ count: string }>(
-    `SELECT COUNT(*) AS count FROM stats_runs WHERE ${column}=$1 AND created_at > now() - interval '1 hour'`,
-    [value],
+    `SELECT COUNT(*) AS count FROM stats_runs WHERE ${column}=$1 AND created_at > now() - interval '1 hour' AND queue_namespace=$2`,
+    [value, queueNamespace],
   );
   return Number(rows[0].count);
 }
@@ -94,14 +94,15 @@ async function hourlyCount(client: PoolClient, column: 'requested_by' | 'organiz
 // in-flight 예측 실행 여부를 판별한다. 조직당 동시에 하나의 예측 실행만 허용한다
 // (엔진 시간이 수 분 단위라 다른 analysisMode처럼 여러 개를 동시에 허용하면 그
 // 조직의 quota를 예측 하나가 오래 독점한다).
-async function predictionInFlightExists(client: PoolClient, orgId: string): Promise<boolean> {
+async function predictionInFlightExists(client: PoolClient, orgId: string, queueNamespace: string): Promise<boolean> {
   const { rows } = await client.query<{ exists: boolean }>(
     `SELECT EXISTS(
        SELECT 1 FROM stats_runs
         WHERE organization_id=$1 AND status IN ('queued','running')
           AND frozen_dataset->'recipe'->>'analysisMode' = 'prediction'
+          AND queue_namespace=$2
      ) AS exists`,
-    [orgId],
+    [orgId, queueNamespace],
   );
   return rows[0].exists;
 }
@@ -149,8 +150,9 @@ async function admitOnce(
       `SELECT ${STATS_RUN_COLUMNS} FROM stats_runs
         WHERE organization_id=$1 AND execution_digest=$2 AND status='succeeded' AND cacheable AND expires_at>now()
           AND (requested_disclosure_profile <> 'lift_eligible' OR limited_result IS NOT NULL)
+          AND queue_namespace=$3
         LIMIT 1`,
-      [ctx.orgId, executionDigest],
+      [ctx.orgId, executionDigest, queueNamespace],
     );
     if (cacheHit.rows.length > 0) {
       const row = cacheHit.rows[0];
@@ -159,13 +161,13 @@ async function admitOnce(
     }
 
     // 2) 기존 in-flight 확인 — quota/degraded보다 먼저. stats_runs_inflight_uniq
-    //    (org, execution_digest) WHERE status IN ('queued','running')가 "한 행뿐"을
+    //    (org, execution_digest, queue_namespace) WHERE status IN ('queued','running')가 "한 행뿐"을
     //    보장하므로 합류는 새 리소스를 소비하지 않는다.
     const existing = await client.query<StatsRunRow>(
       `SELECT ${STATS_RUN_COLUMNS} FROM stats_runs
-        WHERE organization_id=$1 AND execution_digest=$2 AND status IN ('queued','running')
+        WHERE organization_id=$1 AND execution_digest=$2 AND status IN ('queued','running') AND queue_namespace=$3
         LIMIT 1`,
-      [ctx.orgId, executionDigest],
+      [ctx.orgId, executionDigest, queueNamespace],
     );
     if (existing.rows.length > 0) {
       const row = existing.rows[0];
@@ -188,23 +190,23 @@ async function admitOnce(
       await auditAdmission(client, ctx, executionDigest, 'denied', { reasonCode: 'PREDICTION_WORK_BUDGET_EXCEEDED' });
       return { kind: 'denied', status: 400, code: 'PREDICTION_WORK_BUDGET_EXCEEDED' };
     }
-    if (ctx.recipe.analysisMode === 'prediction' && (await predictionInFlightExists(client, ctx.orgId))) {
+    if (ctx.recipe.analysisMode === 'prediction' && (await predictionInFlightExists(client, ctx.orgId, queueNamespace))) {
       await auditAdmission(client, ctx, executionDigest, 'denied', { reasonCode: 'ORG_PREDICTION_CONCURRENCY_LIMIT' });
       return { kind: 'denied', status: 429, code: 'ORG_PREDICTION_CONCURRENCY_LIMIT' };
     }
-    if ((await inFlightCount(client, 'requested_by', ctx.userId)) >= config.stats.async.maxConcurrentPerUser) {
+    if ((await inFlightCount(client, 'requested_by', ctx.userId, queueNamespace)) >= config.stats.async.maxConcurrentPerUser) {
       await auditAdmission(client, ctx, executionDigest, 'denied', { reasonCode: 'USER_CONCURRENCY_LIMIT' });
       return { kind: 'denied', status: 429, code: 'USER_CONCURRENCY_LIMIT' };
     }
-    if ((await inFlightCount(client, 'organization_id', ctx.orgId)) >= config.stats.async.maxConcurrentPerOrg) {
+    if ((await inFlightCount(client, 'organization_id', ctx.orgId, queueNamespace)) >= config.stats.async.maxConcurrentPerOrg) {
       await auditAdmission(client, ctx, executionDigest, 'denied', { reasonCode: 'ORG_CONCURRENCY_LIMIT' });
       return { kind: 'denied', status: 429, code: 'ORG_CONCURRENCY_LIMIT' };
     }
-    if ((await hourlyCount(client, 'requested_by', ctx.userId)) >= config.stats.async.maxHourlyPerUser) {
+    if ((await hourlyCount(client, 'requested_by', ctx.userId, queueNamespace)) >= config.stats.async.maxHourlyPerUser) {
       await auditAdmission(client, ctx, executionDigest, 'denied', { reasonCode: 'USER_HOURLY_LIMIT' });
       return { kind: 'denied', status: 429, code: 'USER_HOURLY_LIMIT' };
     }
-    if ((await hourlyCount(client, 'organization_id', ctx.orgId)) >= config.stats.async.maxHourlyPerOrg) {
+    if ((await hourlyCount(client, 'organization_id', ctx.orgId, queueNamespace)) >= config.stats.async.maxHourlyPerOrg) {
       await auditAdmission(client, ctx, executionDigest, 'denied', { reasonCode: 'ORG_HOURLY_LIMIT' });
       return { kind: 'denied', status: 429, code: 'ORG_HOURLY_LIMIT' };
     }
@@ -246,9 +248,9 @@ async function admitOnce(
     // 이론상 advisory lock으로 도달 불가능하지만 방어적으로 재조회.
     const reselect = await client.query<StatsRunRow>(
       `SELECT ${STATS_RUN_COLUMNS} FROM stats_runs
-        WHERE organization_id=$1 AND execution_digest=$2 AND status IN ('queued','running')
+        WHERE organization_id=$1 AND execution_digest=$2 AND status IN ('queued','running') AND queue_namespace=$3
         LIMIT 1`,
-      [ctx.orgId, executionDigest],
+      [ctx.orgId, executionDigest, queueNamespace],
     );
     if (reselect.rows.length > 0) {
       const row = reselect.rows[0];

@@ -1,6 +1,7 @@
 // PR4-B1 §C/D/D-1/E — 백그라운드 워커(sweepLoop/claimLoop 독립 루프), finishRun
 // (잠금+상태전이+감사를 한 트랜잭션), requeueOrFinish(BUSY 재큐잉), 취소.
 // 계획서(pr4-b-virtual-pnueli.md) 11차 통합본 참고.
+import os from 'os';
 import type { Pool, PoolClient } from 'pg';
 import type { AnalyzeResult } from '@wr/contracts';
 import type { AnalysisContext, FrozenAnalysisInput } from '../recipe/analysisContext';
@@ -94,15 +95,19 @@ async function writeTerminalOutcome(
     // cacheable 성공 행이 남아있으면(admission 캐시확인~합류확인 사이 완료 레이스,
     // §D 주석 참고) 이 행은 cacheable=false로 자기 analysisRunId·자기 result를
     // 유지한 채 종결한다 — unique index는 cacheable 행에만 걸리므로 충돌 없음.
+    // S8: the cache is per queue namespace (stats_runs_succeeded_uniq carries it) — only this row's namespace is
+    // cleaned and checked, so another namespace's success neither demotes this row nor gets deleted by it.
     await client.query(
       `DELETE FROM stats_runs
-        WHERE organization_id=$1 AND execution_digest=$2 AND status='succeeded' AND cacheable AND expires_at<=now()`,
-      [row.organization_id, row.execution_digest],
+        WHERE organization_id=$1 AND execution_digest=$2 AND status='succeeded' AND cacheable AND expires_at<=now()
+          AND queue_namespace=$3`,
+      [row.organization_id, row.execution_digest, row.queue_namespace],
     );
     const stillValid = await client.query(
       `SELECT 1 FROM stats_runs
-        WHERE organization_id=$1 AND execution_digest=$2 AND status='succeeded' AND cacheable AND expires_at>now() AND id != $3`,
-      [row.organization_id, row.execution_digest, row.id],
+        WHERE organization_id=$1 AND execution_digest=$2 AND status='succeeded' AND cacheable AND expires_at>now() AND id != $3
+          AND queue_namespace=$4`,
+      [row.organization_id, row.execution_digest, row.id, row.queue_namespace],
     );
     // 해제 적격(lift_eligible)인데 해제본 없이 끝난 행(워커 시점에 권한이 회수됨)은 캐시에 남기지 않는다 — 남기면 권한을 다시
     // 받은 사용자의 같은 요청이 해제본 없는 이 행에 계속 적중해 재실행으로도 풀리지 않는다(admission의 캐시 조회에도 같은
@@ -273,7 +278,7 @@ export async function requeueOrFinish(pool: Pool, rowId: string): Promise<void> 
     }
     await client.query(
       `UPDATE stats_runs SET status='queued', started_at=NULL, heartbeat_at=NULL,
-         worker_pid=NULL, requeue_count=requeue_count+1 WHERE id=$1`,
+         worker_pid=NULL, claimed_by=NULL, requeue_count=requeue_count+1 WHERE id=$1`,
       [row.id],
     );
     // 종결이 아니므로 감사 없음 — job은 계속 진행 중.
@@ -287,19 +292,24 @@ export async function requeueOrFinish(pool: Pool, rowId: string): Promise<void> 
 // 있다. claim 가능 구간(created_at > cutoff)과 sweep 종결 가능 구간(created_at <=
 // cutoff, finishRun의 queue_wait_exceeded)이 정확히 여집합이 되도록 경계를 맞췄다
 // — 둘 다 DB now()를 쓰므로 시계 소스도 일치한다.
+// S8: a worker claims only its own queue namespace's runs and records who claimed it (<hostname>:<pid>, for
+// diagnosis only — nothing reads it back; requeue clears it).
 // ---------------------------------------------------------------------------
-export async function claimNextQueuedRun(pool: Pool, queueWaitMs: number): Promise<StatsRunRow | null> {
+const CLAIMED_BY = `${os.hostname()}:${process.pid}`;
+
+export async function claimNextQueuedRun(pool: Pool, queueWaitMs: number, queueNamespace: string): Promise<StatsRunRow | null> {
   const { rows } = await pool.query<StatsRunRow>(
-    `UPDATE stats_runs SET status='running', started_at=now(), heartbeat_at=now()
+    `UPDATE stats_runs SET status='running', started_at=now(), heartbeat_at=now(), claimed_by=$3
        WHERE id = (
          SELECT id FROM stats_runs
           WHERE status='queued' AND cancel_requested_at IS NULL AND expires_at>now()
             AND created_at > now() - ($1 * interval '1 millisecond')
+            AND queue_namespace=$2
           ORDER BY created_at
           FOR UPDATE SKIP LOCKED LIMIT 1
        )
      RETURNING ${STATS_RUN_COLUMNS}`,
-    [queueWaitMs],
+    [queueWaitMs, queueNamespace, CLAIMED_BY],
   );
   return rows[0] ?? null;
 }
@@ -308,9 +318,10 @@ export async function claimNextQueuedRun(pool: Pool, queueWaitMs: number): Promi
 // sweepStale — running 행 orphan(heartbeat 만료) 회수. 행별 engine_timeout_ms 기준
 // staleThresholdMs를 각 후보마다 계산해 finishRun에 넘긴다(전역 상수 아님).
 // ---------------------------------------------------------------------------
-export async function sweepStale(pool: Pool): Promise<void> {
+export async function sweepStale(pool: Pool, queueNamespace: string): Promise<void> {
   const { rows } = await pool.query<{ id: string; engine_timeout_ms: number }>(
-    `SELECT id, engine_timeout_ms FROM stats_runs WHERE status='running'`,
+    `SELECT id, engine_timeout_ms FROM stats_runs WHERE status='running' AND queue_namespace=$1`,
+    [queueNamespace],
   );
   for (const row of rows) {
     const staleThresholdMs = row.engine_timeout_ms + config.stats.killGraceMs + config.stats.async.staleSafetyMs;
@@ -322,9 +333,14 @@ export async function sweepStale(pool: Pool): Promise<void> {
 // sweepQueuedTerminal — queued 취소 확정 + 대기예산초과. 후보를 잠금 없이 조회한
 // 뒤 finishRun에 넘긴다(전제조건 재검증은 finishRun 내부에서).
 // ---------------------------------------------------------------------------
-export async function sweepQueuedTerminal(pool: Pool): Promise<void> {
+export async function sweepQueuedTerminal(
+  pool: Pool,
+  queueNamespace: string,
+  queueWaitMs: number = config.stats.async.queueWaitMs,
+): Promise<void> {
   const cancelled = await pool.query<{ id: string }>(
-    `SELECT id FROM stats_runs WHERE status='queued' AND cancel_requested_at IS NOT NULL`,
+    `SELECT id FROM stats_runs WHERE status='queued' AND cancel_requested_at IS NOT NULL AND queue_namespace=$1`,
+    [queueNamespace],
   );
   for (const row of cancelled.rows) {
     await finishRun(pool, row.id, { origin: 'queued_cancel_sweep' });
@@ -332,11 +348,11 @@ export async function sweepQueuedTerminal(pool: Pool): Promise<void> {
 
   const expired = await pool.query<{ id: string }>(
     `SELECT id FROM stats_runs WHERE status='queued' AND started_at IS NULL
-       AND created_at <= now() - ($1 * interval '1 millisecond')`,
-    [config.stats.async.queueWaitMs],
+       AND created_at <= now() - ($1 * interval '1 millisecond') AND queue_namespace=$2`,
+    [queueWaitMs, queueNamespace],
   );
   for (const row of expired.rows) {
-    await finishRun(pool, row.id, { origin: 'queue_wait_sweep', queueWaitMs: config.stats.async.queueWaitMs });
+    await finishRun(pool, row.id, { origin: 'queue_wait_sweep', queueWaitMs });
   }
 }
 
@@ -546,15 +562,17 @@ export async function requestCancel(
   analysisRunId: string,
   organizationId: string,
   cancelledBy: string,
+  // S8: only a run of this server's queue namespace can be cancelled — another namespace's run is 'not_found'.
+  queueNamespace: string,
 ): Promise<RequestCancelResult> {
   const result = await withWriteTransaction(pool, async (client) => {
     const updated = await client.query<{ id: string; status: string }>(
       `UPDATE stats_runs
           SET cancel_requested_at = COALESCE(cancel_requested_at, now()),
               cancelled_by        = COALESCE(cancelled_by, $2)
-        WHERE analysis_run_id=$1 AND organization_id=$3 AND status IN ('queued','running')
+        WHERE analysis_run_id=$1 AND organization_id=$3 AND status IN ('queued','running') AND queue_namespace=$4
         RETURNING id, status`,
-      [analysisRunId, cancelledBy, organizationId],
+      [analysisRunId, cancelledBy, organizationId, queueNamespace],
     );
     if (updated.rows.length > 0) {
       await writeAuditLogStrict(client, {
@@ -568,8 +586,8 @@ export async function requestCancel(
 
     // rowCount=0 — 이미 취소됨(멱등 성공)/이미 succeeded·failed(409)/없음(404) 3갈래.
     const recheck = await client.query<{ status: string }>(
-      `SELECT status FROM stats_runs WHERE analysis_run_id=$1 AND organization_id=$2`,
-      [analysisRunId, organizationId],
+      `SELECT status FROM stats_runs WHERE analysis_run_id=$1 AND organization_id=$2 AND queue_namespace=$3`,
+      [analysisRunId, organizationId, queueNamespace],
     );
     if (recheck.rows.length === 0) {
       await writeAuditLogStrict(client, {
@@ -612,14 +630,18 @@ export async function requestCancel(
 // 워크로드에서 실제로 일어날 일) 다른 queued 작업의 취소 확정·대기예산초과
 // sweep까지 덩달아 지연된다.
 // ---------------------------------------------------------------------------
-export function createStatsRunsQueueWorker(pool: Pool): { stop: () => void } {
+// S8: the worker claims, sweeps and finishes only its own queue namespace's runs (default config.queueNamespace).
+export function createStatsRunsQueueWorker(
+  pool: Pool,
+  { namespace = config.queueNamespace }: { namespace?: string } = {},
+): { stop: () => void } {
   let sweeping = false;
   const sweepTick = async () => {
     if (sweeping) return;
     sweeping = true;
     try {
-      await sweepStale(pool);
-      await sweepQueuedTerminal(pool);
+      await sweepStale(pool, namespace);
+      await sweepQueuedTerminal(pool, namespace);
     } catch (err) {
       console.error('[stats-runs-queue] sweepTick failed', err);
     } finally {
@@ -640,7 +662,7 @@ export function createStatsRunsQueueWorker(pool: Pool): { stop: () => void } {
       // 있어도). claim 자체를 건너뛰면 그 행은 계속 queued로 남아 대기예산만
       // 소비하고, requeue_count는 claim된 뒤 실제로 겪은 경합에만 쓰인다.
       if (!isEngineSlotAvailable()) return;
-      const claimed = await claimNextQueuedRun(pool, config.stats.async.queueWaitMs);
+      const claimed = await claimNextQueuedRun(pool, config.stats.async.queueWaitMs, namespace);
       if (claimed) await attempt(pool, claimed);
     } catch (err) {
       console.error('[stats-runs-queue] claimTick failed', err);
