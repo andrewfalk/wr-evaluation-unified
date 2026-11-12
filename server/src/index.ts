@@ -53,12 +53,12 @@ if (require.main === module) {
         // 영상 분석 워커: 플래그 on + (fixtureMode 또는 uploadDir 구성됨)일 때 큐 처리.
         //  - fixtureMode: dev fixture clip 추론. uploadDir: 실 업로드 clip 추론(M3-7a).
         if (config.videoAnalysisEnabled && (config.video.fixtureMode || config.video.uploadDir)) {
-          createVideoAnalysisWorker(pool);
-          console.log(`[wr-server] video-analysis worker enabled (fixture=${config.video.fixtureMode}, upload=${!!config.video.uploadDir})`);
+          createVideoAnalysisWorker(pool, {}, { namespace: config.queueNamespace });
+          console.log(`[wr-server] video-analysis worker enabled (fixture=${config.video.fixtureMode}, upload=${!!config.video.uploadDir}, namespace=${config.queueNamespace})`);
 
           // 영상 임시파일 회수(TTL·orphan): 시작 시 1회 + 1시간 간격. 비치명적.
           const doVideoCleanup = () => {
-            runVideoClipCleanup(pool)
+            runVideoClipCleanup(pool, config.queueNamespace)
               .then(({ clipsExpired, originalsDeleted, artifactsDeleted, sampleFramesDeleted, orphansDeleted }) => {
                 const total = originalsDeleted + artifactsDeleted + sampleFramesDeleted + orphansDeleted;
                 if (total > 0) console.log(`[wr-server] video-cleanup: clips=${clipsExpired} originals=${originalsDeleted} artifacts=${artifactsDeleted} frames=${sampleFramesDeleted} orphans=${orphansDeleted}`);

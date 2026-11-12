@@ -18,6 +18,7 @@ vi.mock('../../config', async (importOriginal) => {
 });
 
 import { createVideoAnalysisRouter } from '../videoAnalysis';
+import config from '../../config';
 import { makeRouterApp } from '../../testing/app';
 import { acquireLock, lockPatientAnchor } from '../../db/patientLocks';
 import {
@@ -82,21 +83,21 @@ describe.skipIf(!TEST_DATABASE_URL)('video analysis apply → patient_records (r
         JSON.stringify({ id: pid, phase: 'intake', marker: 'before', data: { shared: { name: '영상 환자' }, modules: {}, activeModules: [] } })],
     );
     const clipId = (await holderPool.query<{ id: string }>(
-      `INSERT INTO video_analysis_clips (organization_id, patient_record_id, process_id, source_type, file_state)
-       VALUES ($1, $2, 'p1', 'apply_shell', 'none') RETURNING id`,
-      [org.orgId, pid],
+      `INSERT INTO video_analysis_clips (organization_id, patient_record_id, process_id, source_type, file_state, queue_namespace)
+       VALUES ($1, $2, 'p1', 'apply_shell', 'none', $3) RETURNING id`,
+      [org.orgId, pid, config.queueNamespace],
     )).rows[0].id;
     const analysisJobId = (await holderPool.query<{ id: string }>(
       `INSERT INTO video_analysis_jobs
          (organization_id, patient_record_id, clip_id, process_id, status, analysis_profile,
-          requested_features, result_features, preprocess_config_hash, analysis_recipe)
-       VALUES ($1, $2, $3, 'p1', 'review_pending', 'posture-basic', $4, $5, 'pch', $6) RETURNING id`,
-      [org.orgId, pid, clipId, JSON.stringify(['overheadHours']), JSON.stringify({ schemaVersion: 1, features: {} }), JSON.stringify(RECIPE)],
+          requested_features, result_features, preprocess_config_hash, analysis_recipe, queue_namespace)
+       VALUES ($1, $2, $3, 'p1', 'review_pending', 'posture-basic', $4, $5, 'pch', $6, $7) RETURNING id`,
+      [org.orgId, pid, clipId, JSON.stringify(['overheadHours']), JSON.stringify({ schemaVersion: 1, features: {} }), JSON.stringify(RECIPE), config.queueNamespace],
     )).rows[0].id;
     const shellJobId = (await holderPool.query<{ id: string }>(
-      `INSERT INTO video_analysis_jobs (organization_id, patient_record_id, clip_id, status, analysis_profile)
-       VALUES ($1, $2, $3, 'review_pending', 'posture-basic') RETURNING id`,
-      [org.orgId, pid, clipId],
+      `INSERT INTO video_analysis_jobs (organization_id, patient_record_id, clip_id, status, analysis_profile, queue_namespace)
+       VALUES ($1, $2, $3, 'review_pending', 'posture-basic', $4) RETURNING id`,
+      [org.orgId, pid, clipId, config.queueNamespace],
     )).rows[0].id;
     return { pid, clipId, analysisJobId, shellJobId };
   }
@@ -304,9 +305,9 @@ describe.skipIf(!TEST_DATABASE_URL)('video analysis apply → patient_records (r
     expect(first).toMatchObject({ status: 'modules_complete', source: 'client_reported' });
     // A later apply of another shell job (no new inputs: the stored appliedInputs as they are).
     const secondShell = (await holderPool.query<{ id: string }>(
-      `INSERT INTO video_analysis_jobs (organization_id, patient_record_id, clip_id, status, analysis_profile)
-       VALUES ($1, $2, $3, 'review_pending', 'posture-basic') RETURNING id`,
-      [org.orgId, f.pid, f.clipId],
+      `INSERT INTO video_analysis_jobs (organization_id, patient_record_id, clip_id, status, analysis_profile, queue_namespace)
+       VALUES ($1, $2, $3, 'review_pending', 'posture-basic', $4) RETURNING id`,
+      [org.orgId, f.pid, f.clipId, config.queueNamespace],
     )).rows[0].id;
     const again = await apply(docA, secondShell, 2, {
       ...applyBody(f, { ...reported('build-2'), appliedInputsHash: 'second', appliedInputsCount: 0, sourceAnalysisJobIds: [] }),

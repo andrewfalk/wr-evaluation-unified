@@ -37,6 +37,8 @@ function cleanupFake(opts: {
   referencedClips?: { upload_path?: string | null; sample_frame_path?: string | null }[];
   referencedJobs?: string[];          // keypoints_path 참조
   referencedFramesDirs?: string[];    // frames_path 참조(디렉터리)
+  /** S8: whether the guarded UPDATE … RETURNING clears the row (false = changed since the SELECT). */
+  cleared?: boolean;
 } = {}): FakePool {
   return createFakePool({
     handlers: [
@@ -66,7 +68,7 @@ function cleanupFake(opts: {
           ...(opts.referencedFramesDirs ?? []).map((p) => ({ keypoints_path: null, frames_path: p })),
         ] },
       },
-      { name: 'updates', match: /^\s*UPDATE\b/, reply: { rows: [] } },
+      { name: 'updates', match: /^\s*UPDATE\b/, reply: { rows: opts.cleared === false ? [] : [{ id: 'cleared' }] } },
     ],
   });
 }
@@ -149,6 +151,31 @@ describe('runVideoClipCleanup', () => {
     await runVideoClipCleanup(fake.pool);
     expect(fs.existsSync(refDir)).toBe(true);     // DB 참조 → 보존
     expect(fs.existsSync(orphanDir)).toBe(false); // 미참조 → 재귀삭제
+  });
+
+  // S8: a file is removed only when this run's UPDATE actually cleared the path it read — a row that changed (or
+  // left the namespace's conditions) between the SELECT and the UPDATE keeps its file.
+  it('UPDATE가 행을 바꾸지 못하면(조회 뒤 변경) 원본·keypoints·썸네일·프레임 디렉터리를 지우지 않고 세지 않는다', async () => {
+    const orig = path.join(dir, 'expired.bin');
+    const art = path.join(dir, 'artifacts', 'j1.keypoints.json');
+    const frame = path.join(dir, 'artifacts', 'c1.11111111-2222-3333-4444-555555555555.thumb.jpg');
+    const fdir = path.join(dir, 'artifacts', 'j1.frames');
+    fs.writeFileSync(orig, 'x');
+    fs.writeFileSync(art, '{}');
+    fs.writeFileSync(frame, 'x');
+    fs.mkdirSync(fdir, { recursive: true });
+    const fake = cleanupFake({
+      cleared: false,
+      expiredClips: [{ id: 'c1', upload_path: orig }],
+      staleArtifacts: [{ id: 'j1', keypoints_path: art }],
+      staleFrames: [{ id: 'c1', sample_frame_path: frame }],
+      staleFramesDirs: [{ id: 'j1', frames_path: fdir }],
+      // still referenced, so the orphan sweep keeps them too
+      referencedClips: [{ upload_path: orig, sample_frame_path: frame }], referencedJobs: [art], referencedFramesDirs: [fdir],
+    });
+    const res = await runVideoClipCleanup(fake.pool);
+    expect([orig, art, frame, fdir].map((p) => fs.existsSync(p))).toEqual([true, true, true, true]);
+    expect(res).toMatchObject({ clipsExpired: 0, originalsDeleted: 0, artifactsDeleted: 0, sampleFramesDeleted: 0, framesDirsDeleted: 0 });
   });
 
   it('tmp/ 잔여물은 grace(1h) 초과만 삭제', async () => {
