@@ -103,6 +103,18 @@ describe('createShutdown', () => {
     expect(h.log.error).toHaveBeenCalledTimes(3);
   });
 
+  it.each(['server', 'job', 'pool'] as const)('a failure of the %s step alone still makes the exit code 1', async (failing) => {
+    const order: string[] = [];
+    const h = harness(order, {
+      closeError: failing === 'server' ? new Error('close failed') : undefined,
+      poolError: failing === 'pool' ? new Error('end failed') : undefined,
+    });
+    const jobs = [job('worker', order, { fail: failing === 'job' })];
+    await createShutdown({ server: h.server, jobs, pools: h.pools, exit: h.exit, log: h.log })('SIGTERM');
+    expect(h.exit).toHaveBeenCalledWith(1);
+    expect(h.log.error).toHaveBeenCalledTimes(1);
+  });
+
   it('a stop for a fatal error exits 1 even when every step succeeds', async () => {
     const h = harness([]);
     await createShutdown({ server: h.server, jobs: [], pools: h.pools, exit: h.exit, log: h.log })('uncaughtException', 1);
