@@ -3,9 +3,9 @@
 // defining its own `makePool` / `makeApp` or a hand-written config mock. This test fails when a test
 // file adds one back.
 //
-// ALLOWED: the S7 targets. S7 changes the SQL order of these routes and replaces their order-based
-// unit tests with real-database integration tests, so they are not migrated (Phase 1 plan §3).
-// When S7 migrates one, remove it here — an entry whose file no longer has a local double fails too.
+// ALLOWED was the S7 targets (patients, videoAnalysis, workspaces route tests): S7 replaced their
+// order-based unit tests with real-database integration tests and migrated the rest (S7-1b, S7-2b, S7-8b).
+// It is empty now; an entry whose file no longer has a local double fails too.
 import fs from 'fs';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
@@ -13,9 +13,7 @@ import { describe, expect, it } from 'vitest';
 const SRC = path.resolve(__dirname, '..', '..');
 const SELF = 'testing/__tests__/noLocalHarness.test.ts'; // its detector examples would match
 
-const ALLOWED = new Set([
-  'routes/__tests__/patients.test.ts',
-]);
+const ALLOWED = new Set<string>([]);
 
 function testFiles(dir: string): string[] {
   const out: string[] = [];
