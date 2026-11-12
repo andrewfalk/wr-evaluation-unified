@@ -323,3 +323,33 @@ export async function correctBirthDateForPerson(
   );
   return updated.rows.map(r => r.id);
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Reads outside a transaction (S7-8b — the copies of the visibility predicate in the routes)
+// ---------------------------------------------------------------------------------------------------
+
+/** The live patient's full row (GET /api/patients/:id) — or none. */
+export async function selectLive(db: QueryRunner, id: string, orgId: string): Promise<PatientRow | undefined> {
+  const { rows } = await db.query<PatientRow>(
+    `SELECT ${SELECT_COLS}
+     FROM patient_records
+     WHERE ${VISIBLE_BY_ID}`,
+    [id, orgId]
+  );
+  return rows[0];
+}
+
+/**
+ * The live patient's assigned doctor, not locked — the access checks before a transaction
+ * (requirePatientAccess, the video analysis patient check). Or none.
+ */
+export async function selectAssignment(
+  db: QueryRunner, id: string, orgId: string,
+): Promise<{ id: string; assigned_doctor_user_id: string | null } | undefined> {
+  const { rows } = await db.query<{ id: string; assigned_doctor_user_id: string | null }>(
+    `SELECT id, assigned_doctor_user_id FROM patient_records
+     WHERE ${VISIBLE_BY_ID}`,
+    [id, orgId]
+  );
+  return rows[0];
+}
