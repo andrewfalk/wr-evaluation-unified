@@ -426,7 +426,7 @@ describe.skipIf(!TEST_DATABASE_URL)('PATCH /api/patients/:id (real PostgreSQL, S
   const report = (observed: boolean, build = 'build-1') =>
     ({ modulesCompleteObserved: observed, completionClientBuildVersion: build, completionClientSchemaVersion: 1 });
 
-  it('completion: first true stamps time/source/versions; a later true keeps them; false → draft with them kept; absent → untouched', async () => {
+  it('completion: first true stamps time/source/versions; a later true keeps them; absent → untouched (complete or draft); false → draft with them kept', async () => {
     const { pid } = await seed();
     expect((await patch(docA, pid, 1, { data: data(), ...report(true, 'build-1') })).status).toBe(200);
     const first = await record(pid);
@@ -436,10 +436,13 @@ describe.skipIf(!TEST_DATABASE_URL)('PATCH /api/patients/:id (real PostgreSQL, S
     await patch(docA, pid, 2, { data: data(), ...report(true, 'build-2') });
     expect(await record(pid)).toMatchObject({ status: 'modules_complete', observed_at: first.observed_at, build: 'build-1' });
 
-    await patch(docA, pid, 3, { data: data(), ...report(false) });
+    await patch(docA, pid, 3, { data: data() }); // an old client: no report at all — the status stays
+    expect(await record(pid)).toMatchObject({ status: 'modules_complete', observed_at: first.observed_at, source: 'client_reported', build: 'build-1' });
+
+    await patch(docA, pid, 4, { data: data(), ...report(false) });
     expect(await record(pid)).toMatchObject({ status: 'draft', observed_at: first.observed_at, source: 'client_reported', build: 'build-1' });
 
-    await patch(docA, pid, 4, { data: data() }); // an old client: no report at all
+    await patch(docA, pid, 5, { data: data() });
     expect(await record(pid)).toMatchObject({ status: 'draft', observed_at: first.observed_at, build: 'build-1' });
   });
 
