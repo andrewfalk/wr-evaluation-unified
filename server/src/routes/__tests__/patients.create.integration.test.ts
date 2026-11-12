@@ -279,13 +279,14 @@ describe.skipIf(!TEST_DATABASE_URL)('POST /api/patients (real PostgreSQL, S7-3)'
     shared: { diagnoses: [{ code: 'M17.0', side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' }] },
   };
 
-  it('modulesCompleteObserved: true stamps the client-reported completion at creation', async () => {
+  it('modulesCompleteObserved: true stamps the client-reported completion at creation, not the server verification', async () => {
     const id = crypto.randomUUID();
     const res = await create(docA, key(), body({
       id, top: { modulesCompleteObserved: true, completionClientBuildVersion: 'build-1', completionClientSchemaVersion: 1 },
     }));
     expect(res.status).toBe(201);
-    expect(await record(id)).toMatchObject({ status: 'modules_complete', source: 'client_reported', build: 'build-1' });
+    // The client report alone does not make the server verification: this case is not verifiable.
+    expect(await record(id)).toMatchObject({ status: 'modules_complete', source: 'client_reported', build: 'build-1', verified_at: null, engine: null });
     expect((await record(id)).observed_at).not.toBeNull();
     expect(res.body.completionStatus).toBe('modules_complete');
     expect(res.body.serverObservedModulesCompleteAt).toEqual(expect.any(String));
