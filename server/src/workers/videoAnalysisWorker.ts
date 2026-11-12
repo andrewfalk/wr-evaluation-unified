@@ -1,3 +1,4 @@
+import { logger } from '../logger';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -465,7 +466,7 @@ export async function pollOnce(
       );
       if (succeeded.clip.resolvedPath) await safeUnlink(succeeded.clip.resolvedPath);
     } catch (e) {
-      console.error('[wr-server] video retention cleanup failed (job kept review_pending)', { jobId: job.id, err: e });
+      logger.error({ jobId: job.id, err: e }, '[wr-server] video retention cleanup failed (job kept review_pending)');
     }
   }
 
@@ -477,7 +478,7 @@ export async function pollOnce(
       const real = resolveSampleFramePath(succeeded.clip.sampleFramePath, job.clip_id, config.video.uploadDir);
       if (real) await safeUnlink(real);
     } catch (e) {
-      console.error('[wr-server] sample-frame reclaim failed', { jobId: job.id, err: e });
+      logger.error({ jobId: job.id, err: e }, '[wr-server] sample-frame reclaim failed');
     }
   }
   return true;
@@ -508,7 +509,7 @@ export function createVideoAnalysisWorker(
         let processed = true;
         while (processed && !stopping) processed = await pollOnce(pool, merged, namespace, shutdown.signal);
       } catch (err) {
-        console.error('[wr-server] video-analysis-worker error', err);
+        logger.error({ err }, '[wr-server] video-analysis-worker error');
         if (stopping) stopError = err;
       }
     })();

@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import { z } from 'zod';
 import { verifyAllModulesComplete, COMPLETION_ENGINE_VERSION, type VerifiablePatientData } from '@wr/analytics-core/completion';
 
@@ -120,11 +121,11 @@ export function logCompletionMismatchIfAny(
   check: ModulesCompletionCheck,
 ): void {
   if (modulesCompleteObserved !== true || check.allComplete) return;
-  console.warn('[completion] client reported complete but server verification disagrees', {
+  logger.warn({
     patientId,
     failedModuleIds: check.failedModuleIds,
     errorModuleIds:  check.errorModuleIds,
-  });
+  }, '[completion] client reported complete but server verification disagrees');
 }
 
 // server_observed_modules_complete_at(PR0-A)와 동일하게 false→true 최초 전이에서만

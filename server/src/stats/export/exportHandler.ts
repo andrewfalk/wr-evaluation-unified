@@ -7,6 +7,7 @@
 // "요청자 본인만 export"를 걸면 캐시 히트로 같은 결과를 화면에서 본 다른 사용자가 자기
 // 눈으로 본 결과를 못 내보내는 모순이 생긴다. capability(stats.export_results)는 그대로
 // 유지한다 — 이번 결정은 "누가 실행했는지"만 export 조건에서 빼는 것이다.
+import { logger } from '../../logger';
 import type { Request, Response } from 'express';
 import type { Pool } from 'pg';
 import { sessionOf } from '../../http/authz';
@@ -474,9 +475,7 @@ export async function handlePostExport(pool: Pool, req: Request, res: Response):
   if (row.requested_disclosure_profile !== 'aggregate' && row.requested_disclosure_profile !== 'lift_eligible') {
     // 방어적 검사 — 알 수 없는 프로파일이면 여기서 잡힌다. 미래 PR이 이 라우트를
     // limited_row/phi 등급에 잘못 재사용하면 여기서 잡힌다(§7).
-    console.error('[stats-export] unexpected requested_disclosure_profile', {
-      analysisRunId, profile: row.requested_disclosure_profile,
-    });
+    logger.error({ analysisRunId, profile: row.requested_disclosure_profile }, '[stats-export] unexpected requested_disclosure_profile');
     throw new Error('unexpected requested_disclosure_profile'); // central error handler → 500 (S1)
   }
 
@@ -491,11 +490,11 @@ export async function handlePostExport(pool: Pool, req: Request, res: Response):
   const manifestParsed = RunManifestSchema.safeParse(row.manifest);
   const resultParsed = AnalyzeResultSchema.safeParse(row.result);
   if (!manifestParsed.success || !resultParsed.success) {
-    console.error('[stats-export] stored manifest/result failed schema validation', {
+    logger.error({
       analysisRunId,
       manifestIssues: manifestParsed.success ? null : manifestParsed.error.issues,
       resultIssues: resultParsed.success ? null : resultParsed.error.issues,
-    });
+    }, '[stats-export] stored manifest/result failed schema validation');
     throw new Error('stored manifest/result failed schema validation'); // central error handler → 500 (S1)
   }
 

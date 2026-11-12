@@ -1,3 +1,4 @@
+import { logger } from '../logger';
 import { Pool } from 'pg';
 import config from '../config';
 
@@ -23,7 +24,7 @@ export function createAuditPool(settings: AuditPoolSettings = config): Pool {
         'Set AUDIT_DB_PASSWORD in .env and ensure migration 0004 has run.'
       );
     }
-    console.warn(
+    logger.warn(
       '[audit-db] AUDIT_DATABASE_URL not set — falling back to DATABASE_URL ' +
       '(development only). Set AUDIT_DB_PASSWORD in .env for production.'
     );
@@ -43,7 +44,7 @@ export function createAuditPool(settings: AuditPoolSettings = config): Pool {
   });
 
   auditPool.on('error', (err) => {
-    console.error('[audit-db] Unexpected pool error:', err);
+    logger.error({ err }, '[audit-db] unexpected pool error');
   });
 
   return auditPool;

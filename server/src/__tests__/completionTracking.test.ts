@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { logger } from '../logger';
 import {
   nextCompletionColumns,
   DRAFT_COMPLETION_COLUMNS,
@@ -79,22 +80,22 @@ describe('logCompletionMismatchIfAny', () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   it('클라이언트가 true로 신고했는데 서버 검증이 false면 경고 로그를 남긴다', () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     logCompletionMismatchIfAny('patient-1', true, { allComplete: false, failedModuleIds: ['knee'], errorModuleIds: [] });
     expect(spy).toHaveBeenCalledWith(
-      '[completion] client reported complete but server verification disagrees',
       expect.objectContaining({ patientId: 'patient-1', failedModuleIds: ['knee'], errorModuleIds: [] }),
+      '[completion] client reported complete but server verification disagrees',
     );
   });
 
   it('클라이언트가 true로 신고했고 서버 검증도 true면 로그를 남기지 않는다', () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     logCompletionMismatchIfAny('patient-1', true, { allComplete: true, failedModuleIds: [], errorModuleIds: [] });
     expect(spy).not.toHaveBeenCalled();
   });
 
   it('클라이언트가 false거나 신고하지 않았으면(undefined) 서버 검증이 false여도 로그를 남기지 않는다', () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     logCompletionMismatchIfAny('patient-1', false, { allComplete: false, failedModuleIds: ['knee'], errorModuleIds: [] });
     logCompletionMismatchIfAny('patient-1', undefined, { allComplete: false, failedModuleIds: ['knee'], errorModuleIds: [] });
     expect(spy).not.toHaveBeenCalled();

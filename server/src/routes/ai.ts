@@ -1,3 +1,4 @@
+import { logger } from '../logger';
 import { Router, type Request, type Response } from 'express';
 import type { Pool } from 'pg';
 import { AiAnalysisRequestSchema, AiAnalysisExternalRequestSchema, type AiAnalysisRequest } from '@wr/contracts/aiAnalysis';
@@ -71,7 +72,7 @@ async function analyzeHandler(req: Request, res: Response): Promise<void> {
 function respondUpstreamError(res: Response, err: unknown): void {
   const failure = err instanceof UpstreamError ? err : new UpstreamError('network');
   // 업스트림 메시지·본문은 기록하지 않는다(프롬프트·환자 요약이 섞일 수 있다).
-  console.error('[ai] upstream failure', { kind: failure.kind, status: failure.status });
+  logger.error({ kind: failure.kind, status: failure.status }, '[ai] upstream failure');
   if (failure.kind === 'timeout') {
     res.status(504).json({ error: { code: 'AI_TIMEOUT', message: 'AI 서버 응답 시간 초과' } });
     return;

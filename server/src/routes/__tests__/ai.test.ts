@@ -32,6 +32,7 @@ vi.mock('../../middleware/audit', () => ({
 }));
 
 import { createAIRouter } from '../ai';
+import { logger } from '../../logger';
 import { createFakePool, authSessionHandler } from '../../testing/fakePool';
 import { makeRouterApp } from '../../testing/app';
 import { makeAccessToken, authHeaders } from '../../testing/tokens';
@@ -78,7 +79,7 @@ beforeEach(() => {
   aiState.timeoutMs = 60000;
   fetchMock = vi.fn();
   vi.stubGlobal('fetch', fetchMock);
-  errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -244,6 +245,7 @@ describe('POST /api/ai/analyze — 업스트림 오류는 클라이언트로 새
   const expectScrubbed = (res: request.Response) => {
     expect(JSON.stringify(res.body)).not.toContain('SECRET');
     expect(JSON.stringify(res.body)).not.toContain('사업장명');
+    expect(errorSpy.mock.calls.length).toBeGreaterThan(0); // the failure was logged — and without the upstream body
     expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('SECRET');
     expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('사업장명');
   };
