@@ -20,7 +20,7 @@ vi.mock('../jobs/workspaceRetention', () => ({ runWorkspaceRetention: vi.fn(asyn
 vi.mock('../jobs/videoClipCleanup', () => ({ runVideoClipCleanup: vi.fn(async () => ({ clipsExpired: 0, originalsDeleted: 0, artifactsDeleted: 0, sampleFramesDeleted: 0, orphansDeleted: 0 })) }));
 vi.mock('../jobs/statsRunCleanup', () => ({ runStatsRunCleanup: vi.fn(async () => ({ deleted: 0 })) }));
 
-import { createShutdown, startBackgroundJobs, type Stoppable } from '../boot';
+import { createShutdown, startBackgroundJobs, type ShutdownOptions, type Stoppable } from '../boot';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -28,12 +28,12 @@ afterEach(() => {
 
 function harness(order: string[], overrides: { closeError?: Error; poolError?: Error } = {}) {
   const exit = vi.fn((code: number) => { order.push(`exit:${code}`); });
+  const close = vi.fn((cb?: (err?: Error) => void): void => {
+    order.push('server.close');
+    setImmediate(() => { order.push('server.closed'); cb?.(overrides.closeError); });
+  });
   const server = {
-    close: vi.fn((cb?: (err?: Error) => void) => {
-      order.push('server.close');
-      setImmediate(() => { order.push('server.closed'); cb?.(overrides.closeError); });
-      return server as never;
-    }),
+    close: close as unknown as ShutdownOptions['server']['close'] & typeof close,
     closeIdleConnections: vi.fn(() => { order.push('server.closeIdleConnections'); }),
   };
   const pools = ['app', 'audit'].map((name) => ({
