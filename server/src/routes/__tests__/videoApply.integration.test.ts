@@ -296,6 +296,27 @@ describe.skipIf(!TEST_DATABASE_URL)('video analysis apply → patient_records (r
     expect(p.engine).not.toBeNull();
   });
 
+  it('a second apply keeps the completion provenance of the first (time, source, client versions) and the status follows the report', async () => {
+    const f = await seed();
+    const reported = (build: string) => ({ modulesCompleteObserved: true, completionClientBuildVersion: build, completionClientSchemaVersion: 1 });
+    expect((await apply(docA, f.shellJobId, 1, applyBody(f, reported('build-1')))).status).toBe(200);
+    const first = await patient(f.pid);
+    expect(first).toMatchObject({ status: 'modules_complete', source: 'client_reported' });
+    // A later apply of another shell job (no new inputs: the stored appliedInputs as they are).
+    const secondShell = (await holderPool.query<{ id: string }>(
+      `INSERT INTO video_analysis_jobs (organization_id, patient_record_id, clip_id, status, analysis_profile)
+       VALUES ($1, $2, $3, 'review_pending', 'posture-basic') RETURNING id`,
+      [org.orgId, f.pid, f.clipId],
+    )).rows[0].id;
+    const again = await apply(docA, secondShell, 2, {
+      ...applyBody(f, { ...reported('build-2'), appliedInputsHash: 'second', appliedInputsCount: 0, sourceAnalysisJobIds: [] }),
+    });
+    expect(again.status).toBe(200);
+    expect(await patient(f.pid)).toMatchObject({ revision: 3, status: 'modules_complete', observed_at: first.observed_at, source: 'client_reported' });
+    const build = await holderPool.query<{ b: string }>(`SELECT completion_client_build_version AS b FROM patient_records WHERE id = $1`, [f.pid]);
+    expect(build.rows[0].b).toBe('build-1');
+  });
+
   it('without a report and without a verifiable case the completion columns stay empty', async () => {
     const f = await seed();
     expect((await apply(docA, f.shellJobId, 1, applyBody(f))).status).toBe(200);

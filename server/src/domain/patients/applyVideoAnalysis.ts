@@ -1,5 +1,5 @@
-// Video analysis apply — the patient section (S7-2). Moved from routes/videoAnalysis/apply.ts ③–④;
-// statements, their order and the outcomes are unchanged.
+// Video analysis apply — the patient section (S7-2). Moved from routes/videoAnalysis/apply.ts ③–④; the
+// outcomes are unchanged (S7-8a merged its SQL into the repository's).
 //
 // The route owns the transaction: its first lock is the video job (FOR UPDATE OF j), and the job and
 // source-job transitions after the patient UPDATE are in the same transaction. This runs inside it, on
@@ -10,13 +10,13 @@ import type { Pool } from 'pg';
 import type { LockRow } from '../../db/patientLocks';
 import { isAssignedOrAdmin } from '../../db/patientLocks';
 import type { QueryRunner } from '../../db/queryRunner';
-import { lockForApply, updateFromVideoApply, type ApplyPatientRow } from '../../db/patientRecordsRepo';
-import { nextCompletionColumns, verifyModulesComplete, logCompletionMismatchIfAny, nextVerificationColumns } from '../../completionTracking';
+import { lockLive, updatePayload, type PatientRow } from '../../db/patientRecordsRepo';
 import type { PatientWriteContext } from './context';
 import { runLockGate } from './lockGate';
+import { nextCompletionState } from './completion';
 
 export type ApplyVideoAnalysisResult =
-  | { kind: 'applied'; row: ApplyPatientRow }
+  | { kind: 'applied'; row: PatientRow }
   | { kind: 'patient_not_found' }
   | { kind: 'forbidden' }
   | { kind: 'lock_held'; heldBy: LockRow }
@@ -46,7 +46,7 @@ export async function applyVideoAnalysisInTx(
   const orgId = ctx.orgId;
 
   // ③ patient FOR UPDATE + revision(If-Match)
-  const pat = await lockForApply(db, patientId, orgId);
+  const pat = await lockLive(db, patientId, orgId);
   if (!pat) return { kind: 'patient_not_found' };
 
   // 라우트의 job 확인(canAccess)은 job+patient를 JOIN한 스냅샷(FOR UPDATE OF j — patient_records는 안 잠금)
@@ -78,24 +78,17 @@ export async function applyVideoAnalysisInTx(
 
   const newPayload = { ...existingPayload, data };
 
-  // PR0-A: patients.ts와 동일한 3상태 규칙 — 이미 FOR UPDATE로 잠근 행을 기준으로
-  // 계산해 같은 UPDATE 문장에 얹는다. revision 충돌 시(UPDATE의 WHERE revision = $4) 완료
-  // 보고도 자동으로 함께 거부된다.
-  const nextCompletion = nextCompletionColumns(pat, params.report);
-
-  // PR0-B2: 클라이언트 신고와 별개로 서버가 analytics-core로 직접 재검증한다 — apply가
-  // 갱신하는 새 data를 기준으로, 같은 FOR UPDATE 잠금 하에 계산해 같은 UPDATE 문장에 얹는다.
-  const verified = verifyModulesComplete({
+  // PR0-A/PR0-B2: 3상태 완료 규칙과 서버 재검증 — 이미 FOR UPDATE로 잠근 행을 기준으로, apply가 갱신하는
+  // 새 data로 계산해 같은 UPDATE 문장에 얹는다. revision 충돌 시 완료 보고도 함께 거부된다.
+  const { completion, verification } = nextCompletionState(pat, params.report, {
     shared: data['shared'] as Record<string, unknown> ?? {},
     modules: data['modules'] as Record<string, unknown> ?? {},
     activeModules: data['activeModules'] as string[] ?? [],
-  });
-  logCompletionMismatchIfAny(patientId, params.report.modulesCompleteObserved, verified);
-  const nextVerification = nextVerificationColumns(pat, verified.allComplete);
+  }, patientId);
 
-  const updated = await updateFromVideoApply(db, {
-    id: patientId, orgId, payloadJson: JSON.stringify(newPayload), expectedRevision,
-    completion: nextCompletion, verification: nextVerification,
+  // 영상 apply는 meta 컬럼을 바꾸지 않는다(payload와 완료 컬럼만).
+  const updated = await updatePayload(db, {
+    id: patientId, orgId, expectedRevision, payloadJson: JSON.stringify(newPayload), completion, verification,
   });
   if (!updated) return { kind: 'concurrent_modification' };
   return { kind: 'applied', row: updated };
