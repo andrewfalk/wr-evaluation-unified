@@ -59,9 +59,10 @@ export async function createClip(pool: Pool, req: Request, res: Response): Promi
   }
 
   const { rows } = await pool.query<{ id: string }>(
-    `INSERT INTO video_analysis_clips (organization_id, patient_record_id, process_id, upload_path, source_type, file_state)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-    [session.organizationId, patient.id, parse.data.processId ?? null, uploadPath, sourceType, fileState]
+    `INSERT INTO video_analysis_clips (organization_id, patient_record_id, process_id, upload_path, source_type, file_state, queue_namespace)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    // S8: the clip belongs to this server's queue namespace (its files are on this server's disk).
+    [session.organizationId, patient.id, parse.data.processId ?? null, uploadPath, sourceType, fileState, config.queueNamespace]
   );
   res.status(201).json({ clipId: rows[0].id });
 }

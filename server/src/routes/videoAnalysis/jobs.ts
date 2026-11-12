@@ -62,8 +62,8 @@ export async function createJob(pool: Pool, req: Request, res: Response): Promis
 
   const { rows } = await pool.query<VideoJobRow>(
     `INSERT INTO video_analysis_jobs
-       (organization_id, patient_record_id, clip_id, process_id, status, analysis_profile, requested_features)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (organization_id, patient_record_id, clip_id, process_id, status, analysis_profile, requested_features, queue_namespace)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING *`,
     [
       clip.organizationId, clip.patientRecordId, clip.clipId,
@@ -71,6 +71,7 @@ export async function createJob(pool: Pool, req: Request, res: Response): Promis
       initialStatus,
       parse.data.analysisProfile ?? null,
       JSON.stringify(parse.data.requestedFeatures ?? []),
+      clip.queueNamespace, // S8: a job is in its clip's namespace (the worker that can read the clip's files)
     ]
   );
   void writeAuditLog(pool, {

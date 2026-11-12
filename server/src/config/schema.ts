@@ -67,6 +67,15 @@ const detIntervalSec = raw.transform((v, ctx) => {
   return sec;
 });
 
+// S8: the queue namespace of this server instance — lowercase letters, digits, '.', '_' or '-', starting with a
+// letter or digit, at most 64 characters. Rows of the statistics and video analysis queues carry it.
+const queueNamespace = raw.transform((v, ctx) => {
+  const value = v || 'default';
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(value)) {
+    return fail(ctx, `QUEUE_NAMESPACE must be 1-64 characters of a-z, 0-9, '.', '_' or '-' starting with a letter or digit, got '${value}'`);
+  }
+  return value;
+});
 const corsOrigins = raw.transform((v) => (v ?? '').split(',').map((s) => s.trim()).filter(Boolean));
 
 // Field order = the order the hand-written parser checked them, so a single bad variable reports
@@ -111,6 +120,7 @@ export const EnvSchema = z.object({
 
   VIDEO_ANALYSIS_ENABLED: flag(),
   STATS_WORKBENCH_ENABLED: flag(),
+  QUEUE_NAMESPACE: queueNamespace,
   LOCK_ENFORCEMENT_MODE: oneOf(['off', 'observe', 'enforce'] as const, 'off',
     (got) => `LOCK_ENFORCEMENT_MODE must be 'off', 'observe', or 'enforce', got '${got}'`),
 

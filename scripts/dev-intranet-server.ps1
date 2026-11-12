@@ -57,6 +57,16 @@ if (-not $env:VIDEO_POSE_TIER)    { $env:VIDEO_POSE_TIER = 'auto' }
 # (A/B 검증: 스왑 0·target 매핑 동일·손목 wholebody CPU 약 2배, docs/VIDEO_DET_INTERVAL_6015.md).
 # 기존과 동일 비교가 필요하면 .env에 VIDEO_DET_INTERVAL_SEC=0. 허용 범위 [0,1.0](그 외 기동 실패).
 if (-not $env:VIDEO_DET_INTERVAL_SEC) { $env:VIDEO_DET_INTERVAL_SEC = '1' }
+# 큐 namespace(S8): 같은 DB(wr_evaluation)를 docker app이나 다른 worktree의 dev 서버와 함께 써도 서로의 통계
+# run·영상 job을 claim·정리·캐시 재사용하지 않게 이 저장소 체크아웃마다 고유한 값 — dev-<PC 이름>-<저장소 경로
+# 해시 8자>. 루트 .env에 QUEUE_NAMESPACE를 넣으면 docker app과 같은 값이 되어 격리가 사라지니 넣지 말 것.
+if (-not $env:QUEUE_NAMESPACE) {
+  $nsHost = ($env:COMPUTERNAME ?? 'pc').ToLowerInvariant() -replace '[^a-z0-9-]', '-'
+  $nsHash = [System.BitConverter]::ToString(
+    [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($root.ToLowerInvariant()))
+  ).Replace('-', '').Substring(0, 8).ToLowerInvariant()
+  $env:QUEUE_NAMESPACE = "dev-$nsHost-$nsHash"
+}
 
 # 2.5) 포트 사전 점검. 과거 이 포트를 도커 app 컨테이너가 선점한 채로 이 스크립트를 띄우면
 # node가 EADDRINUSE로 즉시 죽는데(-NoExit라 창은 안 닫힘) 별다른 에러 표시 없이 방치되기 쉬웠다
@@ -93,6 +103,7 @@ Write-Host "[dev-intranet] VIDEO_POSE_TIER=$($env:VIDEO_POSE_TIER) (auto=GPU 검
 Write-Host "[dev-intranet] VIDEO_DET_INTERVAL_SEC=$($env:VIDEO_DET_INTERVAL_SEC) (det 빈도 감소 6.0-15 — 0이면 매 프레임 det)"
 Write-Host "[dev-intranet] uploadDir=$($env:VIDEO_ANALYSIS_UPLOAD_DIR)"
 Write-Host "[dev-intranet] DB=$($env:DATABASE_URL)"
+Write-Host "[dev-intranet] QUEUE_NAMESPACE=$($env:QUEUE_NAMESPACE) (S8 — 0042 적용 전에는 같은 DB를 쓰는 다른 서버를 모두 멈출 것)"
 Write-Host "[dev-intranet] building + starting native server on :$($env:PORT) (auto-migrate on boot)…"
 
 # 3.5) 공유 계약(shared → dist) 재빌드. @contracts(shared/dist)는 gitignore라 pull로 안 바뀌고

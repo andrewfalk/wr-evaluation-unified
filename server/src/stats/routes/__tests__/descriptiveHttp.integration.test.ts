@@ -195,6 +195,11 @@ describe.skipIf(!TEST_DB_URL)('POST /analyze(descriptive) — 실데이터 HTTP 
     expect(res.body.result.continuous[0].variableKey).toBe('knee.relatedness.max');
     expect(res.body.result.continuous[0].suppressed).toBe(false);
     expect(res.body.result.continuous[0].n).toBe(12);
+    // S8: the run is recorded in this server's queue namespace (the integration env's QUEUE_NAMESPACE).
+    const ns = await pool.query<{ queue_namespace: string }>(
+      `SELECT queue_namespace FROM stats_runs WHERE analysis_run_id=$1`, [res.body.runManifest.analysisRunId],
+    );
+    expect(ns.rows[0].queue_namespace).toBe('itest');
   }, 30000);
 
   it('DB 캐시 hit — 같은 recipe 재요청은 Python을 다시 부르지 않고 같은 analysisRunId·같은 결과를 반환한다', async () => {

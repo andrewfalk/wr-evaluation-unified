@@ -434,14 +434,15 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
           `INSERT INTO stats_runs (
              organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
              requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at,
-             analysis_run_id, frozen_dataset
-           ) VALUES ($1,$2,'succeeded',$3,$4,$5,'aggregate',false,$6,$7,$8,now(),$9,$10)`,
+             analysis_run_id, frozen_dataset, queue_namespace
+           ) VALUES ($1,$2,'succeeded',$3,$4,$5,'aggregate',false,$6,$7,$8,now(),$9,$10,$11)`,
           [ctx.orgId, ctx.userId, ctx.recipeDigest, ctx.snapshot.sourceDigest, executionDigest,
             JSON.stringify(manifest), JSON.stringify(suppressedResult), expiresAt(), manifest.analysisRunId,
             // 저장 최소화: 요청 시점에 제한데이터 권한이 있었고 differencing으로 막히지 않은 기술통계·회귀·이변량
             // 실행만 원본을 남긴다(같은 TTL). 그래야 같은 analysisRunId 재조회(GET)에서도 응답 시점 해제가
             // 가능하다. 그 외 억제 실행은 원본이 없어 이후 권한을 받아도 재실행이 필요하다.
-            liftHolder ? JSON.stringify(buildFrozenAnalysisInput(ctx)) : null],
+            liftHolder ? JSON.stringify(buildFrozenAnalysisInput(ctx)) : null,
+            config.queueNamespace], // S8
         );
         await writeAuditLogStrict(client, {
           actorUserId: ctx.userId,
@@ -513,7 +514,7 @@ export async function handlePostAnalyze(pool: Pool, req: Request, res: Response)
 
     // 여기부터만 admission.
     const engineTimeoutMs = estimateEngineTimeoutMs(ctx);
-    const admission = await admitAnalysisRun(pool, ctx, executionDigest, engineTimeoutMs, disclosureProfile);
+    const admission = await admitAnalysisRun(pool, ctx, executionDigest, engineTimeoutMs, disclosureProfile, config.queueNamespace);
 
     if (admission.kind === 'denied') {
       res.status(admission.status).json({ code: admission.code, error: 'Request denied.' });
