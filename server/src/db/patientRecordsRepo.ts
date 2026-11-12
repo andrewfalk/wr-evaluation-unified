@@ -206,3 +206,92 @@ export async function updateFromVideoApply(db: QueryRunner, w: VideoApplyWrite):
   );
   return updated[0];
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Patient create (S7-3, from routes/patients/create.ts). PatientRow and SELECT_COLS moved here from
+// routes/patients/schemas.ts, which re-exports them.
+// ---------------------------------------------------------------------------------------------------
+
+export interface PatientRow {
+  id:                      string;
+  organization_id:         string;
+  patient_person_id:       string;
+  owner_user_id:           string;
+  assigned_doctor_user_id: string | null;
+  name:                    string;
+  patient_no:              string | null;
+  birth_date:              string | null;
+  injury_date:             string | null;
+  evaluation_date:         string | null;
+  active_modules:          string[];
+  diagnoses_codes:         string[];
+  jobs_names:              string[];
+  revision:                number;
+  created_at:              Date;
+  updated_at:              Date;
+  payload:                 unknown;
+  completion_status:                    string;
+  server_observed_modules_complete_at:  Date | null;
+  completion_source:                    string | null;
+  completion_client_build_version:      string | null;
+  completion_client_schema_version:     number | null;
+  server_verified_modules_complete_at:    Date | null;
+  completion_verification_engine_version: string | null;
+}
+
+export const SELECT_COLS = `
+  id, organization_id, patient_person_id, owner_user_id, assigned_doctor_user_id,
+  name, patient_no, birth_date, injury_date, evaluation_date, active_modules,
+  diagnoses_codes, jobs_names, revision, created_at, updated_at, payload,
+  completion_status, server_observed_modules_complete_at, completion_source,
+  completion_client_build_version, completion_client_schema_version,
+  server_verified_modules_complete_at, completion_verification_engine_version`;
+
+export interface CreateWrite {
+  id: string;
+  orgId: string;
+  personId: string;
+  ownerUserId: string;
+  assignedDoctorUserId: string | null;
+  meta: {
+    name: string; patientNo: string | null; birthDate: string | null; injuryDate: string | null; evaluationDate: string | null;
+    activeModules: string[]; diagnosesCodes: string[]; jobsNames: string[];
+  };
+  payloadJson: string;
+  completion: CompletionColumns;
+  verification: VerificationColumns;
+}
+
+/** INSERT of a new patient, revision 1. No ON CONFLICT: an existing id fails with 23505. */
+export async function insertFromCreate(db: QueryRunner, w: CreateWrite): Promise<void> {
+  const { meta } = w;
+  await db.query(
+      `INSERT INTO patient_records
+         (id, organization_id, patient_person_id, owner_user_id, assigned_doctor_user_id,
+          name, patient_no, birth_date, injury_date, evaluation_date,
+          active_modules, diagnoses_codes, jobs_names, revision, payload,
+          completion_status, server_observed_modules_complete_at, completion_source,
+          completion_client_build_version, completion_client_schema_version,
+          server_verified_modules_complete_at, completion_verification_engine_version)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14,$15,$16,$17,$18,$19,$20,$21)`,
+    [
+      w.id, w.orgId, w.personId, w.ownerUserId, w.assignedDoctorUserId,
+      meta.name, meta.patientNo,
+      meta.birthDate, meta.injuryDate, meta.evaluationDate,
+      meta.activeModules, meta.diagnosesCodes, meta.jobsNames,
+      w.payloadJson,
+      w.completion.completion_status, w.completion.server_observed_modules_complete_at, w.completion.completion_source,
+      w.completion.completion_client_build_version, w.completion.completion_client_schema_version,
+      w.verification.server_verified_modules_complete_at, w.verification.completion_verification_engine_version,
+    ]
+  );
+}
+
+/** The patient's full row by id (no organization or deleted_at filter — the caller just wrote it). */
+export async function selectById(db: QueryRunner, id: string): Promise<PatientRow | undefined> {
+  const { rows: newRows } = await db.query<PatientRow>(
+      `SELECT ${SELECT_COLS} FROM patient_records WHERE id = $1`,
+      [id]
+  );
+  return newRows[0];
+}

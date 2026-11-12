@@ -1,25 +1,23 @@
 // Patient route helpers: conflict responses, metadata extraction, date normalisation, response shape.
 // Split out of routes/patients.ts (S5 P1-29); handler bodies unchanged.
 import type { PatientPersonWarning } from '../../db/patientPersons';
-import { validatePastDate } from '@wr/contracts';
 import type { AssignmentWarning } from '../../db/resolveAssignedDoctor';
 import type { LockRow } from '../../db/patientLocks';
 import { lockHolderResponse } from '../../http/lockGate';
 import { PatientRow, PgErrorLike } from './schemas';
+import type { DateFieldFailure } from '../../domain/patients/meta';
+
+// Moved to domain/patients/meta.ts and db/pgErrors.ts (S7-3); re-exported for existing imports.
+export { strOrNull, extractMeta, normalizePatientDates, type ExtractedMeta, type DateFieldFailure } from '../../domain/patients/meta';
+export { isUniqueViolation } from '../../db/pgErrors';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 
-export function strOrNull(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null;
-}
 
 
-export function isUniqueViolation(err: unknown): err is PgErrorLike {
-  return (err as PgErrorLike | null)?.code === '23505';
-}
 
 export function uniqueConflictResponse(err: PgErrorLike): { code: string; error: string } {
   if (err.constraint === 'patient_persons_org_patient_no_uniq') {
@@ -61,88 +59,11 @@ export function lockHeldResponse(lock: LockRow): { code: string; error: string; 
   };
 }
 
-interface ExtractedMeta {
-  name:           string;
-  patientNo:      string | null;
-  birthDate:      string | null;
-  injuryDate:     string | null;
-  evaluationDate: string | null;
-  activeModules:  string[];
-  diagnosesCodes: string[];
-  jobsNames:      string[];
-}
 
-export function extractMeta(data: Record<string, unknown>): ExtractedMeta {
-  const shared = typeof data['shared'] === 'object' && data['shared'] !== null
-    ? (data['shared'] as Record<string, unknown>) : {};
-  const diags = Array.isArray(shared['diagnoses']) ? shared['diagnoses'] as unknown[] : [];
-  const jobs  = Array.isArray(shared['jobs'])      ? shared['jobs']      as unknown[] : [];
 
-  return {
-    name:           strOrNull(shared['name']) ?? '',
-    patientNo:      strOrNull(shared['patientNo']),
-    birthDate:      strOrNull(shared['birthDate']),
-    injuryDate:     strOrNull(shared['injuryDate']),
-    evaluationDate: strOrNull(shared['evaluationDate']),
-    activeModules:  Array.isArray(data['activeModules'])
-      ? (data['activeModules'] as unknown[]).filter((m): m is string => typeof m === 'string')
-      : [],
-    diagnosesCodes: diags
-      .filter((d): d is Record<string, unknown> => typeof d === 'object' && d !== null)
-      .map((d) => d['code'])
-      .filter((c): c is string => typeof c === 'string'),
-    jobsNames: jobs
-      .filter((j): j is Record<string, unknown> => typeof j === 'object' && j !== null)
-      .map((j) => j['jobName'])
-      .filter((n): n is string => typeof n === 'string'),
-  };
-}
 
-// ---------------------------------------------------------------------------
-// 달력 날짜 검증 · canonical 정규화
-//
-// 클라이언트(BatchImportModal)에서 이미 걸러도 서버는 독립적으로 방어해야 한다 —
-// CreateBody.data.shared가 z.record(z.unknown())이라 zod는 어떤 값이든 통과시킨다.
-//
-// 정규화 결과를 DB 컬럼과 payload JSON 양쪽에 써야 한다. `2020/01/02`를 유효로만
-// 판정하고 원본을 payload에 남기면 DB DATE 컬럼(2020-01-02)과 payload(2020/01/02)가
-// 갈려 dateOnly() 비교에서 다시 충돌한다.
-// ---------------------------------------------------------------------------
-const DATE_FIELDS = ['birthDate', 'injuryDate'] as const;
 
-export interface DateFieldFailure {
-  field:  string;
-  reason: string;
-}
 
-type NormalizeDatesResult =
-  | { ok: true;  data: Record<string, unknown> }
-  | { ok: false; failures: DateFieldFailure[] };
-
-export function normalizePatientDates(data: Record<string, unknown>): NormalizeDatesResult {
-  const shared = typeof data['shared'] === 'object' && data['shared'] !== null
-    ? (data['shared'] as Record<string, unknown>) : null;
-  if (!shared) return { ok: true, data };
-
-  const failures: DateFieldFailure[] = [];
-  const patched: Record<string, unknown> = {};
-
-  for (const field of DATE_FIELDS) {
-    const raw = shared[field];
-    const result = validatePastDate(raw);
-    if (!result.valid) {
-      failures.push({ field, reason: result.reason ?? 'format' });
-      continue;
-    }
-    // 빈 값은 ''로, 유효 값은 canonical YYYY-MM-DD로 통일한다.
-    if (raw !== result.normalized) patched[field] = result.normalized;
-  }
-
-  if (failures.length > 0) return { ok: false, failures };
-  if (Object.keys(patched).length === 0) return { ok: true, data };
-
-  return { ok: true, data: { ...data, shared: { ...shared, ...patched } } };
-}
 
 export function invalidBirthDateResponse(failures: DateFieldFailure[]): Record<string, unknown> {
   return {
