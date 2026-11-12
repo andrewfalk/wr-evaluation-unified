@@ -11,6 +11,8 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import type { Express } from 'express';
 import { createApp } from '../app';
+// S8: the video fixtures are rows of this server's queue namespace (the routes only see their own).
+import config from '../config';
 import { generateAccessToken } from '../auth/tokens';
 import { hashToken, generateToken } from '../auth/tokenHash';
 import { VIDEO_MAPPING_CONFIG_VERSION, VIDEO_VIEWPOINT_CONFIG_VERSION } from '@wr/contracts';
@@ -179,21 +181,21 @@ describe.skipIf(!TEST_DB_URL)('G5 — patient and workspace API responses (real 
       codeCommit: 'abc1234',
     };
     const clipId = (await pool.query<{ id: string }>(
-      `INSERT INTO video_analysis_clips (organization_id, patient_record_id, process_id, source_type, file_state)
-       VALUES ($1, $2, 'p1', 'apply_shell', 'none') RETURNING id`,
-      [orgId, pid],
+      `INSERT INTO video_analysis_clips (organization_id, patient_record_id, process_id, source_type, file_state, queue_namespace)
+       VALUES ($1, $2, 'p1', 'apply_shell', 'none', $3) RETURNING id`,
+      [orgId, pid, config.queueNamespace],
     )).rows[0].id;
     const analysisJobId = (await pool.query<{ id: string }>(
       `INSERT INTO video_analysis_jobs
          (organization_id, patient_record_id, clip_id, process_id, status, analysis_profile,
-          requested_features, result_features, preprocess_config_hash, analysis_recipe)
-       VALUES ($1, $2, $3, 'p1', 'review_pending', 'posture-basic', $4, $5, 'pch', $6) RETURNING id`,
-      [orgId, pid, clipId, JSON.stringify(['overheadHours']), JSON.stringify({ schemaVersion: 1, features: {} }), JSON.stringify(recipe)],
+          requested_features, result_features, preprocess_config_hash, analysis_recipe, queue_namespace)
+       VALUES ($1, $2, $3, 'p1', 'review_pending', 'posture-basic', $4, $5, 'pch', $6, $7) RETURNING id`,
+      [orgId, pid, clipId, JSON.stringify(['overheadHours']), JSON.stringify({ schemaVersion: 1, features: {} }), JSON.stringify(recipe), config.queueNamespace],
     )).rows[0].id;
     const shellJobId = (await pool.query<{ id: string }>(
-      `INSERT INTO video_analysis_jobs (organization_id, patient_record_id, clip_id, status, analysis_profile)
-       VALUES ($1, $2, $3, 'review_pending', 'posture-basic') RETURNING id`,
-      [orgId, pid, clipId],
+      `INSERT INTO video_analysis_jobs (organization_id, patient_record_id, clip_id, status, analysis_profile, queue_namespace)
+       VALUES ($1, $2, $3, 'review_pending', 'posture-basic', $4) RETURNING id`,
+      [orgId, pid, clipId, config.queueNamespace],
     )).rows[0].id;
 
     const newData = JSON.parse(JSON.stringify(shoulder.data));

@@ -71,6 +71,7 @@ async function sweepDir(dir: string, referenced: Set<string>, byAge: boolean): P
   return n;
 }
 
+// S8: the references are every namespace's (no queue_namespace condition) — the directory may be shared.
 async function sweepOrphans(pool: Pool, uploadDir: string): Promise<number> {
   const referenced = new Set<string>();
   const clips = await pool.query<{ upload_path: string | null; sample_frame_path: string | null }>(
@@ -107,7 +108,13 @@ export interface VideoClipCleanupResult {
   orphansDeleted: number;
 }
 
-export async function runVideoClipCleanup(pool: Pool): Promise<VideoClipCleanupResult> {
+// S8: steps 1-3b touch only `queueNamespace`'s clips and jobs, and a file is removed only when this run's UPDATE
+// actually cleared the path it read (the UPDATE re-checks the namespace and the path). The orphan sweep (4) keeps
+// the whole database's references: another server sharing the upload directory must not lose its live files.
+export async function runVideoClipCleanup(
+  pool: Pool,
+  queueNamespace: string = config.queueNamespace,
+): Promise<VideoClipCleanupResult> {
   let clipsExpired = 0;
   let originalsDeleted = 0;
   let artifactsDeleted = 0;
@@ -119,13 +126,18 @@ export async function runVideoClipCleanup(pool: Pool): Promise<VideoClipCleanupR
   //    "present인데 파일 없음"으로 DB가 깨지지 않게 한다.
   const expired = await pool.query<{ id: string; upload_path: string | null }>(
     `SELECT id, upload_path FROM video_analysis_clips
-     WHERE expires_at IS NOT NULL AND expires_at < now() AND file_state = 'present' AND source_type = 'upload'`,
+     WHERE expires_at IS NOT NULL AND expires_at < now() AND file_state = 'present' AND source_type = 'upload'
+       AND queue_namespace = $1`,
+    [queueNamespace],
   );
   for (const c of expired.rows) {
-    await pool.query(
-      `UPDATE video_analysis_clips SET upload_path = NULL, file_state = 'deleted' WHERE id = $1`,
-      [c.id],
+    const cleared = await pool.query(
+      `UPDATE video_analysis_clips SET upload_path = NULL, file_state = 'deleted'
+       WHERE id = $1 AND queue_namespace = $2 AND file_state = 'present' AND upload_path IS NOT DISTINCT FROM $3
+       RETURNING id`,
+      [c.id, queueNamespace, c.upload_path],
     );
+    if (cleared.rows.length === 0) continue; // changed since the SELECT — not this run's to delete
     clipsExpired += 1;
     if (c.upload_path) { await safeUnlink(c.upload_path); originalsDeleted += 1; }
   }
@@ -135,23 +147,36 @@ export async function runVideoClipCleanup(pool: Pool): Promise<VideoClipCleanupR
     `SELECT j.id, j.keypoints_path FROM video_analysis_jobs j
      JOIN video_analysis_clips c ON c.id = j.clip_id
      WHERE j.keypoints_path IS NOT NULL
-       AND c.expires_at IS NOT NULL AND c.expires_at < now()`,
+       AND c.expires_at IS NOT NULL AND c.expires_at < now()
+       AND j.queue_namespace = $1`,
+    [queueNamespace],
   );
   for (const j of staleArtifacts.rows) {
-    await pool.query(
-      `UPDATE video_analysis_jobs SET keypoints_path = NULL, keypoints_sha256 = NULL WHERE id = $1`,
-      [j.id],
+    const cleared = await pool.query(
+      `UPDATE video_analysis_jobs SET keypoints_path = NULL, keypoints_sha256 = NULL
+       WHERE id = $1 AND queue_namespace = $2 AND keypoints_path = $3
+       RETURNING id`,
+      [j.id, queueNamespace, j.keypoints_path],
     );
+    if (cleared.rows.length === 0) continue;
     await safeUnlink(j.keypoints_path); artifactsDeleted += 1;
   }
 
   // 3) TTL 만료 clip의 대표 프레임 썸네일 회수(식별 이미지). source 무관, resolver 통과 경로만 unlink.
   const staleFrames = await pool.query<{ id: string; sample_frame_path: string | null }>(
     `SELECT id, sample_frame_path FROM video_analysis_clips
-     WHERE sample_frame_path IS NOT NULL AND expires_at IS NOT NULL AND expires_at < now()`,
+     WHERE sample_frame_path IS NOT NULL AND expires_at IS NOT NULL AND expires_at < now()
+       AND queue_namespace = $1`,
+    [queueNamespace],
   );
   for (const c of staleFrames.rows) {
-    await pool.query(`UPDATE video_analysis_clips SET sample_frame_path = NULL WHERE id = $1`, [c.id]);
+    const cleared = await pool.query(
+      `UPDATE video_analysis_clips SET sample_frame_path = NULL
+       WHERE id = $1 AND queue_namespace = $2 AND sample_frame_path = $3
+       RETURNING id`,
+      [c.id, queueNamespace, c.sample_frame_path],
+    );
+    if (cleared.rows.length === 0) continue;
     const real = resolveSampleFramePath(c.sample_frame_path, c.id, config.video.uploadDir);
     if (real) { await safeUnlink(real); sampleFramesDeleted += 1; }
   }
@@ -160,10 +185,18 @@ export async function runVideoClipCleanup(pool: Pool): Promise<VideoClipCleanupR
   const staleFramesDirs = await pool.query<{ id: string; frames_path: string | null }>(
     `SELECT j.id, j.frames_path FROM video_analysis_jobs j
      JOIN video_analysis_clips c ON c.id = j.clip_id
-     WHERE j.frames_path IS NOT NULL AND c.expires_at IS NOT NULL AND c.expires_at < now()`,
+     WHERE j.frames_path IS NOT NULL AND c.expires_at IS NOT NULL AND c.expires_at < now()
+       AND j.queue_namespace = $1`,
+    [queueNamespace],
   );
   for (const j of staleFramesDirs.rows) {
-    await pool.query(`UPDATE video_analysis_jobs SET frames_path = NULL WHERE id = $1`, [j.id]);
+    const cleared = await pool.query(
+      `UPDATE video_analysis_jobs SET frames_path = NULL
+       WHERE id = $1 AND queue_namespace = $2 AND frames_path = $3
+       RETURNING id`,
+      [j.id, queueNamespace, j.frames_path],
+    );
+    if (cleared.rows.length === 0) continue;
     const dir = resolveOverlayFramesDir(j.frames_path, j.id, config.video.uploadDir);
     if (dir) { await safeRmDir(dir); framesDirsDeleted += 1; }
   }

@@ -201,7 +201,8 @@ async function defaultRunInference(
 }
 
 // queued 1건을 단일 트랜잭션에서 claim(processing 전이). 동시/중복 워커가 같은 job을 못 집게 한다.
-async function claimJob(pool: Pool): Promise<ClaimedJob | null> {
+// S8: only the worker's own queue namespace.
+async function claimJob(pool: Pool, namespace: string): Promise<ClaimedJob | null> {
   const client: PoolClient = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -210,10 +211,11 @@ async function claimJob(pool: Pool): Promise<ClaimedJob | null> {
       `SELECT j.id, j.clip_id, j.analysis_profile, o.inference_device
        FROM video_analysis_jobs j
        JOIN organizations o ON o.id = j.organization_id
-       WHERE j.status = 'queued'
+       WHERE j.status = 'queued' AND j.queue_namespace = $1
        ORDER BY j.created_at
        FOR UPDATE OF j SKIP LOCKED
        LIMIT 1`,
+      [namespace],
     );
     if (rows.length === 0) {
       await client.query('COMMIT');
@@ -345,18 +347,20 @@ async function resolveTargetSelection(pool: Pool, clipId: string): Promise<Targe
 
 // 정체/타임아웃 정리(최소 TTL): processing 타임아웃 → error, queued 정체 → expired.
 // review_pending은 검수 보존을 위해 자동 만료 제외(적용 시 done 전이는 apply 핸들러가 담당).
-async function sweepStale(pool: Pool): Promise<void> {
+// S8: only the worker's own queue namespace.
+async function sweepStale(pool: Pool, namespace: string): Promise<void> {
   // 6.0-12: sweep 임계 = jobDeadlineMs + sweepGraceMs(단일 진실원천에서 파생). 추론 subprocess가 deadline까지
   // 정상 처리 중인 job을 조기에 죽이지 않도록 grace를 더한다. SQL 리터럴 대신 바인딩 파라미터.
   await pool.query(
     `UPDATE video_analysis_jobs
        SET status = 'error', error_code = 'TIMEOUT', error_message = 'processing exceeded timeout'
-     WHERE status = 'processing' AND updated_at < now() - ($1 * interval '1 millisecond')`,
-    [config.video.jobDeadlineMs + config.video.sweepGraceMs],
+     WHERE status = 'processing' AND updated_at < now() - ($1 * interval '1 millisecond') AND queue_namespace = $2`,
+    [config.video.jobDeadlineMs + config.video.sweepGraceMs, namespace],
   );
   await pool.query(
     `UPDATE video_analysis_jobs SET status = 'expired'
-     WHERE status = 'queued' AND created_at < now() - interval '1 hour'`,
+     WHERE status = 'queued' AND created_at < now() - interval '1 hour' AND queue_namespace = $1`,
+    [namespace],
   );
 }
 
@@ -364,9 +368,9 @@ async function sweepStale(pool: Pool): Promise<void> {
  * queued job 1건을 처리한다. 처리했으면 true, 큐가 비었으면 false.
  * 추론은 claim 트랜잭션 밖에서 실행(락 미보유). 성공→review_pending, 실패→error.
  */
-export async function pollOnce(pool: Pool, deps: WorkerDeps): Promise<boolean> {
-  await sweepStale(pool);
-  const job = await claimJob(pool);
+export async function pollOnce(pool: Pool, deps: WorkerDeps, namespace: string = config.queueNamespace): Promise<boolean> {
+  await sweepStale(pool, namespace);
+  const job = await claimJob(pool, namespace);
   if (!job) return false;
 
   // DB에 경로가 기록되기 전 예외 시 즉시 정리할 artifact(orphan 방지). 기록 성공 후 null로 비운다.
@@ -471,7 +475,12 @@ export async function pollOnce(pool: Pool, deps: WorkerDeps): Promise<boolean> {
  * 영상 분석 fixture 워커를 시작한다(2초 간격). 이전 틱이 진행 중이면 skip(재진입 방지).
  * config.videoAnalysisEnabled && config.video.fixtureMode일 때만 등록할 것.
  */
-export function createVideoAnalysisWorker(pool: Pool, deps: Partial<WorkerDeps> = {}): { stop: () => void } {
+// S8: the worker claims and sweeps only its own queue namespace's jobs (default config.queueNamespace).
+export function createVideoAnalysisWorker(
+  pool: Pool,
+  deps: Partial<WorkerDeps> = {},
+  { namespace = config.queueNamespace }: { namespace?: string } = {},
+): { stop: () => void } {
   const merged: WorkerDeps = { runInference: defaultRunInference, ...deps };
   let running = false;
   const tick = async () => {
@@ -480,7 +489,7 @@ export function createVideoAnalysisWorker(pool: Pool, deps: Partial<WorkerDeps> 
     try {
       // 큐를 비울 때까지 순차 처리(동시 1건).
       let processed = true;
-      while (processed) processed = await pollOnce(pool, merged);
+      while (processed) processed = await pollOnce(pool, merged, namespace);
     } catch (err) {
       console.error('[wr-server] video-analysis-worker error', err);
     } finally {

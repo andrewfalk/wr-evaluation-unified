@@ -8,6 +8,7 @@ import { isAssignedOrAdmin } from '../../db/patientLocks';
 import { toQueryRunner } from '../../db/queryRunner';
 import { selectAssignment } from '../../db/patientRecordsRepo';
 import type { SessionInfo } from '../../http/authz';
+import config from '../../config';
 
 // 담당의/admin 판정은 db/patientLocks.ts isAssignedOrAdmin 하나(S4 / P1-17). orgId null(superadmin
 // context)은 라우트의 requireOrg()가 먼저 403으로 거부한다.
@@ -36,6 +37,7 @@ interface ClipCtx {
   queueNamespace: string;
 }
 // clipId → clip + 소속 환자 권한 확인. job-scoped guard의 clip 버전.
+// S8: only this server's queue namespace — another namespace's clip is 404 (every clip route goes through here).
 export async function loadAccessibleClip(
   pool: Pool, session: SessionInfo, orgId: string, clipId: string, res: Response
 ): Promise<ClipCtx | null> {
@@ -49,8 +51,8 @@ export async function loadAccessibleClip(
             c.source_type, c.file_state, c.sample_frame_path, c.queue_namespace
      FROM video_analysis_clips c
      JOIN patient_records p ON p.id = c.patient_record_id AND p.deleted_at IS NULL
-     WHERE c.id = $1 AND c.organization_id = $2`,
-    [clipId, orgId]
+     WHERE c.id = $1 AND c.organization_id = $2 AND c.queue_namespace = $3`,
+    [clipId, orgId, config.queueNamespace]
   );
   if (rows.length === 0) {
     res.status(404).json({ code: 'CLIP_NOT_FOUND', error: 'Clip not found' });
@@ -70,6 +72,7 @@ export async function loadAccessibleClip(
 }
 
 // jobId → job + 소속 환자 권한 확인. (FOR UPDATE 없는 일반 조회용.)
+// S8: only this server's queue namespace — another namespace's job is 404 (apply has its own copy, apply.ts).
 export async function loadAccessibleJob(
   pool: Pool, session: SessionInfo, orgId: string, jobId: string, res: Response
 ): Promise<{ row: VideoJobRow } | null> {
@@ -77,8 +80,8 @@ export async function loadAccessibleJob(
     `SELECT j.*, p.assigned_doctor_user_id
      FROM video_analysis_jobs j
      JOIN patient_records p ON p.id = j.patient_record_id AND p.deleted_at IS NULL
-     WHERE j.id = $1 AND j.organization_id = $2`,
-    [jobId, orgId]
+     WHERE j.id = $1 AND j.organization_id = $2 AND j.queue_namespace = $3`,
+    [jobId, orgId, config.queueNamespace]
   );
   if (rows.length === 0) {
     res.status(404).json({ code: 'JOB_NOT_FOUND', error: 'Job not found' });

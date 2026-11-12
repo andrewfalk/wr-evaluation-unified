@@ -62,14 +62,14 @@ export async function applyJob(pool: Pool, req: Request, res: Response): Promise
   try {
     await client.query('BEGIN');
 
-    // ① job FOR UPDATE + 권한
+    // ① job FOR UPDATE + 권한. S8: this server's queue namespace only (another namespace's job → 404).
     const { rows: jobs } = await client.query<VideoJobRow & { assigned_doctor_user_id: string | null }>(
       `SELECT j.*, p.assigned_doctor_user_id
        FROM video_analysis_jobs j
        JOIN patient_records p ON p.id = j.patient_record_id AND p.deleted_at IS NULL
-       WHERE j.id = $1 AND j.organization_id = $2
+       WHERE j.id = $1 AND j.organization_id = $2 AND j.queue_namespace = $3
        FOR UPDATE OF j`,
-      [req.params.jobId, orgId]
+      [req.params.jobId, orgId, config.queueNamespace]
     );
     if (jobs.length === 0) {
       await client.query('ROLLBACK');
@@ -111,8 +111,8 @@ export async function applyJob(pool: Pool, req: Request, res: Response): Promise
         `SELECT id, analysis_recipe FROM video_analysis_jobs
          WHERE id = ANY($1) AND organization_id = $2 AND patient_record_id = $3
            AND result_features IS NOT NULL AND process_id IS NOT NULL
-           AND status IN ('review_pending','done') AND id <> $4`,
-        [uniqueSourceIds, orgId, job.patient_record_id, job.id]
+           AND status IN ('review_pending','done') AND id <> $4 AND queue_namespace = $5`,
+        [uniqueSourceIds, orgId, job.patient_record_id, job.id, config.queueNamespace]
       );
       if (srcRows.length !== uniqueSourceIds.length) {
         await client.query('ROLLBACK');
@@ -178,8 +178,9 @@ export async function applyJob(pool: Pool, req: Request, res: Response): Promise
       await client.query(
         `UPDATE video_analysis_jobs
          SET status = 'done', applied_at = now(), applied_revision = $4
-         WHERE id = ANY($1) AND organization_id = $2 AND patient_record_id = $3 AND status = 'review_pending'`,
-        [uniqueSourceIds, orgId, job.patient_record_id, newRevision]
+         WHERE id = ANY($1) AND organization_id = $2 AND patient_record_id = $3 AND status = 'review_pending'
+           AND queue_namespace = $5`,
+        [uniqueSourceIds, orgId, job.patient_record_id, newRevision, config.queueNamespace]
       );
     }
 
