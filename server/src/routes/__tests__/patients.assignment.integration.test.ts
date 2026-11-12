@@ -139,6 +139,11 @@ describe.skipIf(!TEST_DATABASE_URL)('POST /api/patients/:id/assignment (real Pos
     const res = await assign(admin, pid, { assignedUserId: null });
     expect(res.body).toEqual({ patientId: pid, assignedUserId: null, revision: 2 });
     expect(await record(pid)).toMatchObject({ assigned: null, doctor_name: '' });
+    // The audit keeps null (not the payload's '') for the new doctor.
+    expect(await auditRows('patient_assignment_change', pid)).toEqual([{
+      actor: admin.id, outcome: 'success',
+      extra: { previousDoctorUserId: docA.id, previousDoctorName: 'Doc A', assignedUserId: null, newDoctorName: null, forcedLockHolder: null },
+    }]);
   });
 
   it('after a reassignment a PATCH with the old revision → 409', async () => {
