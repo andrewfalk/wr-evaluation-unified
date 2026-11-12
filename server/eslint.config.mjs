@@ -10,10 +10,11 @@ export default tseslint.config(
   {
     // S2 / P1-10 — settings come from config (src/config.ts, parsed by src/config/schema.ts), not
     // from process.env. Exceptions: the config module itself, process entry points that run without
-    // the server's config (cli/*, the migrate CLI), and test code.
+    // the server's config (cli/*, the migrate CLI), the logger (S11: it reads only LOG_LEVEL/NODE_ENV through
+    // config/schema.ts resolveLogLevel, so modules the CLIs reach can log without the whole config), and test code.
     files: ['src/**/*.ts'],
     ignores: [
-      'src/config.ts', 'src/config/**', 'src/cli/**', 'src/testing/**', 'src/db/migrate.ts',
+      'src/config.ts', 'src/config/**', 'src/cli/**', 'src/testing/**', 'src/db/migrate.ts', 'src/logger.ts',
       'src/**/__tests__/**', 'src/**/*.test.ts',
     ],
     rules: {

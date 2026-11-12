@@ -1,14 +1,14 @@
 // Server logger (REFACTORING_ROADMAP P1-01). One JSON object per line on stdout — no pretty
 // transport in any environment; pipe to `npx pino-pretty` locally when a readable view is wanted.
-// The access log is http/accessLog.ts (S9). The last console.* calls (db/client.ts and db/migrate.ts, reached by
-// CLIs that do not load the full config, which this module does) move in S11.
+// The access log is http/accessLog.ts (S9). This module reads only LOG_LEVEL/NODE_ENV (config/schema.ts
+// resolveLogLevel), not the whole config, so modules the CLIs reach without the server's settings can log here (S11).
 //
 // Errors are serialised by `serializeError`, not pino's default: a PostgreSQL error carries
 // `detail` / `where` / `parameters`, and `detail` repeats the offending row values
 // (`Key (patient_no)=(…) already exists`), which must not reach the log.
 import pino, { type DestinationStream, type Logger } from 'pino';
 import { ZodError } from 'zod';
-import config from './config';
+import { resolveLogLevel } from './config/schema';
 
 export type { Logger };
 
@@ -81,8 +81,7 @@ export interface CreateLoggerOptions {
 export function createLogger(options: CreateLoggerOptions = {}, destination?: DestinationStream): Logger {
   return pino(
     {
-      // Config mocks in older route tests have no `log` key — fall back instead of throwing.
-      level: options.level ?? config.log?.level ?? 'info',
+      level: options.level ?? resolveLogLevel(process.env),
       base: { service: 'wr-app-server' },
       redact: { paths: REDACT_PATHS, censor: '[redacted]' },
       serializers: { err: serializeError },

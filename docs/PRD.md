@@ -64,7 +64,7 @@
 
 | 영역 | 기술 |
 |------|------|
-| API 서버 | Node.js 20 + TypeScript + Express |
+| API 서버 | Node.js 22 + TypeScript + Express |
 | DB | PostgreSQL 16 (감사 로그 월별 파티셔닝) |
 | HTTPS 리버스 프록시 | Caddy 2 (내부 CA 자동 발급) |
 | 컨테이너 오케스트레이션 | Docker Compose v2.17+ (`!reset` 태그 + profile 기반 backup 분리) |
@@ -1060,7 +1060,7 @@ public/
 ### 인트라넷 모드 추가 디렉터리 (v5.0.0)
 
 ```
-server/                                  # API 백엔드 — Node 20 + TS + Express
+server/                                  # API 백엔드 — Node 22 + TS + Express
 ├── Dockerfile
 ├── migrations/                          # 33개 SQL migration (0028~0033: 통계 워크벤치·완료 추적)
 ├── src/
