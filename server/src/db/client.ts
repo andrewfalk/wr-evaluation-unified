@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { logger } from '../logger';
 
 // Main application pool. Created by the process entry points (index.ts, cli/*) rather than at
 // import time, so importing modules (e.g. app.ts in tests) never opens a database pool
@@ -18,7 +19,7 @@ export function createPool(connectionString: string | undefined): Pool {
   });
 
   pool.on('error', (err) => {
-    console.error('[db] Unexpected pool error:', err);
+    logger.error({ err }, '[db] unexpected pool error');
   });
 
   return pool;

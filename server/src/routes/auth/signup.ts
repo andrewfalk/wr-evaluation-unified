@@ -7,7 +7,7 @@ import { writeAuditLog } from '../../middleware/audit';
 
 // ---------------------------------------------------------------------------
 // POST /api/auth/signup-requests  (public — no auth required)
-// Submits a new account request.  Admins approve/reject in the admin console.
+// Submits a new account request.  Admins approve/reject it on the admin screen.
 // Always answers 202 ACCEPTED once the body is valid (SEC-B L4): a login ID that is already an account
 // or already has a pending request is silently ignored (the existing row stays), so the answer does
 // not reveal which login IDs exist. The audit row records what actually happened.

@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { Pool, PoolClient } from 'pg';
+import { logger } from '../logger';
 
 const MIGRATIONS_DIR = path.join(__dirname, '../../migrations');
 
@@ -45,6 +46,12 @@ export class MigrationChecksumError extends Error {
 }
 
 type MigrationLog = Pick<Console, 'log' | 'warn'>;
+
+// The migration messages ([migrate] Applied: …) as logger lines (S11) — what the server and `npm run migrate` print.
+const MIGRATION_LOGGER: MigrationLog = {
+  log: (message: string) => logger.info(message),
+  warn: (message: string) => logger.warn(message),
+};
 
 export interface RunMigrationsOptions {
   // Default: MIGRATION_CHECKSUM_MODE from the environment, else 'enforce'.
@@ -134,7 +141,7 @@ export async function runMigrations(pool: Pool, options: RunMigrationsOptions = 
   // Resolved before connecting: a mistyped mode stops start-up without touching the database.
   const mode = options.checksumMode ?? resolveChecksumMode(process.env.MIGRATION_CHECKSUM_MODE);
   const dir = options.migrationsDir ?? MIGRATIONS_DIR;
-  const log = options.log ?? console;
+  const log = options.log ?? MIGRATION_LOGGER;
   const client = await pool.connect();
   try {
     // Serialize concurrent migration runners (e.g. multi-instance deploys)
@@ -170,14 +177,14 @@ export async function runMigrations(pool: Pool, options: RunMigrationsOptions = 
 if (require.main === module) {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
-    console.error('[migrate] DATABASE_URL is required');
+    logger.fatal('[migrate] DATABASE_URL is required');
     process.exit(1);
   }
   const pool = new Pool({ connectionString });
   runMigrations(pool)
     .then(() => pool.end())
     .catch((err) => {
-      console.error('[migrate] Fatal:', err);
+      logger.fatal({ err }, '[migrate] fatal');
       process.exit(1);
     });
 }

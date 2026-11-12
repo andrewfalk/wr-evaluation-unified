@@ -192,15 +192,25 @@ export interface ResolvedEnv extends Omit<ParsedEnv, 'LOG_LEVEL' | 'TRUST_PROXY'
  * Parse and cross-check the environment. Throws `Error(message)` with the first problem — the
  * same messages the server has always printed when it refused to start.
  */
+/**
+ * LOG_LEVEL with its NODE_ENV-dependent default. Also what logger.ts uses directly (S11): the logger must not load
+ * the whole config, so modules a CLI reaches without the server's required settings (db/client.ts, db/migrate.ts)
+ * can log through it.
+ */
+export function resolveLogLevel(env: { LOG_LEVEL?: string; NODE_ENV?: string }): LogLevel {
+  const logLevel = env.LOG_LEVEL || (env.NODE_ENV === 'test' ? 'silent' : 'info');
+  if (!LOG_LEVELS.includes(logLevel as LogLevel)) {
+    throw new Error(`LOG_LEVEL must be one of ${LOG_LEVELS.join(', ')}, got '${logLevel}'`);
+  }
+  return logLevel as LogLevel;
+}
+
 export function resolveEnv(env: NodeJS.ProcessEnv): ResolvedEnv {
   const parsed = EnvSchema.safeParse(env);
   if (!parsed.success) throw new Error(parsed.error.issues[0].message);
   const e = parsed.data;
 
-  const logLevel = e.LOG_LEVEL || (e.NODE_ENV === 'test' ? 'silent' : 'info');
-  if (!LOG_LEVELS.includes(logLevel as LogLevel)) {
-    throw new Error(`LOG_LEVEL must be one of ${LOG_LEVELS.join(', ')}, got '${logLevel}'`);
-  }
+  const logLevel = resolveLogLevel(e);
 
   // An empty allowlist in production would silently block every credentialed browser request
   // that carries an Origin header (login, CSRF, …).

@@ -5,7 +5,7 @@
 #   web-builder      → 루트 + @wr/contracts·@wr/analytics-core 설치, 공유 패키지 dist + Vite SPA
 #   server-builder   → @wr/server 설치(dev 포함), TypeScript 컴파일
 #   server-prod-deps → @wr/server 운영 의존성만(npm ci --omit=dev), 네이티브 모듈(bcrypt) glibc 빌드
-#   production       → Node 20 (Debian bookworm) + Python 포즈 추론 런타임 + baked 가중치.
+#   production       → Node 22 (Debian bookworm) + Python 포즈 추론 런타임 + baked 가중치.
 #                      저장소와 같은 경로 구조(/app/node_modules·/app/shared·/app/packages·/app/server)라
 #                      워크스페이스 심링크(node_modules/@wr/* → ../../shared 등)가 그대로 유효하다.
 #
@@ -27,7 +27,7 @@
 # =============================================================================
 # Stage 1: Build web SPA (Vite) — 정적 산출물만 생성(네이티브 모듈 미복사 → alpine 유지 가능)
 # =============================================================================
-FROM node:20-alpine AS web-builder
+FROM node:22-alpine AS web-builder
 WORKDIR /build
 
 # PR0-A: 클라이언트 완료 보고(completionClientBuildVersion)의 빌드 식별자 출처. 이 스테이지엔
@@ -54,7 +54,7 @@ RUN VITE_DEFAULT_INTEGRATION_MODE=intranet npm run build:web
 # =============================================================================
 # Stage 2: Build server TypeScript (glibc — 런타임과 ABI 정합)
 # =============================================================================
-FROM node:20-bookworm-slim AS server-builder
+FROM node:22-bookworm-slim AS server-builder
 WORKDIR /build
 
 # 네이티브 모듈(bcrypt 등) 소스 빌드 폴백 대비(prebuilt 없을 때).
@@ -84,7 +84,7 @@ RUN cd server/dist \
 # =============================================================================
 # Stage 3: 서버 운영 의존성만 (dev 의존성·클라이언트 의존성 제외, glibc 네이티브 빌드)
 # =============================================================================
-FROM node:20-bookworm-slim AS server-prod-deps
+FROM node:22-bookworm-slim AS server-prod-deps
 WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
@@ -97,7 +97,7 @@ RUN npm ci --omit=dev --workspace @wr/server
 # =============================================================================
 # Stage 4: Production runtime — Node(glibc) + Python 포즈 추론 + baked 가중치
 # =============================================================================
-FROM node:20-bookworm-slim AS production
+FROM node:22-bookworm-slim AS production
 ENV NODE_ENV=production
 # recipe(§8.11) code commit 출처 — 빌드 시 주입(scripts/export-offline-package.ps1이 전달).
 ARG WR_GIT_COMMIT=unknown
