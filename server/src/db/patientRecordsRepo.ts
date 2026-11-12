@@ -406,3 +406,43 @@ export async function selectRevisionAndDeleted(
   );
   return rows[0];
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Patient assignment (S7-6, from routes/patients/assignment.ts)
+// ---------------------------------------------------------------------------------------------------
+
+/** The live patient's assigned doctor and that doctor's name (not locked) — or none. */
+export async function selectPreviousDoctor(
+  db: QueryRunner, id: string, orgId: string,
+): Promise<{ assigned_doctor_user_id: string | null; previous_doctor_name: string | null } | undefined> {
+  const { rows: oldRows } = await db.query<{
+      assigned_doctor_user_id: string | null;
+      previous_doctor_name: string | null;
+    }>(
+      `SELECT pr.assigned_doctor_user_id, u.name AS previous_doctor_name
+       FROM patient_records pr
+       LEFT JOIN users u ON u.id = pr.assigned_doctor_user_id
+       WHERE pr.id = $1 AND pr.organization_id = $2 AND pr.deleted_at IS NULL`,
+      [id, orgId]
+  );
+  return oldRows[0];
+}
+
+/**
+ * Assigned doctor (and payload data.shared.doctorName) of a live patient, revision + 1. No revision
+ * condition — an administrative change. None when the patient is gone.
+ */
+export async function setAssignment(
+  db: QueryRunner, w: { id: string; orgId: string; assignedUserId: string | null; doctorName: string },
+): Promise<{ id: string; revision: number } | undefined> {
+  const { rows } = await db.query<{ id: string; revision: number }>(
+      `UPDATE patient_records
+       SET assigned_doctor_user_id = $1,
+           payload  = jsonb_set(payload, '{data,shared,doctorName}', to_jsonb($4::text), true),
+           revision = revision + 1
+       WHERE id = $2 AND organization_id = $3 AND deleted_at IS NULL
+       RETURNING id, revision`,
+      [w.assignedUserId, w.id, w.orgId, w.doctorName]
+  );
+  return rows[0];
+}
