@@ -1,108 +1,107 @@
-import crypto from 'crypto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
-import express from 'express';
-import cookieParser from 'cookie-parser';
+
+// Workspace routes on the shared test harness (src/testing/) — migrated in S7-1b with the same it titles and
+// assertions. The patient_records upsert itself is covered against real PostgreSQL in
+// workspaces.integration.test.ts and workspaces.upsert.integration.test.ts (S7-1).
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
-vi.mock('../../config', () => ({
-  default: {
-    env:  'test',
-    lockEnforcementMode: 'off', // HF1: 워크스페이스 저장도 편집 락 게이트를 거친다 — 테스트별로 바꿀 수 있게 가변 객체로 둔다
-    cors: { origins: [] },
-    auth: {
-      accessTokenTtl:     900,
-      accessTokenSecret:  'test-access-secret-0123456789abcd',
-    },
-  },
-}));
+// HF1: 워크스페이스 저장도 편집 락 게이트를 거친다 — 테스트 중 모드를 바꿀 수 있게 getter로 둔다(lockGate.test.ts와 같은 방식).
+const lockMode = vi.hoisted(() => ({ value: 'off' as 'off' | 'observe' | 'enforce' }));
+vi.mock('../../config', async () => {
+  const cfg = (await import('../../testing/configMock.js')).testConfig();
+  Object.defineProperty(cfg, 'lockEnforcementMode', { get: () => lockMode.value, enumerable: true });
+  return { default: cfg };
+});
 
 vi.mock('../../middleware/audit', () => ({
   writeAuditLog:    vi.fn(),
   auditMiddleware:  vi.fn(() => (_req: unknown, _res: unknown, next: () => void) => next()),
 }));
 
-import config from '../../config';
 import { writeAuditLog } from '../../middleware/audit';
 import { createWorkspacesRouter } from '../workspaces';
-import { createErrorHandler } from '../../http/errorHandler';
-import { createLogger } from '../../logger';
-import { generateAccessToken } from '../../auth/tokens';
-import type { Pool } from 'pg';
+import { createFakePool, authSessionHandler, type FakePool, type FakeQueryReply, type QueryHandler } from '../../testing/fakePool';
+import { makeRouterApp } from '../../testing/app';
+import { makeAccessToken, authHeaders, TEST_CSRF_TOKEN } from '../../testing/tokens';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function makePool(): Pool {
-  const query = vi.fn();
-  const client = { query, release: vi.fn() };
-  return { connect: vi.fn().mockResolvedValue(client), query } as unknown as Pool;
-}
-
-const CSRF_TOKEN = 'ok';
-const CSRF_HASH  = crypto.createHash('sha256').update(CSRF_TOKEN).digest('hex');
-
+// CSRF 원문은 testing/tokens 기본값('ok') — 원래 로컬 도우미와 같은 클레임(sub/orgId는 tokens 기본 UUID).
 /** Token for an org-scoped user. */
 function orgToken(role: 'admin' | 'doctor' = 'doctor'): string {
-  return generateAccessToken({
-    sub: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-    sessionId: 'sess-1', orgId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
-    role, name: 'Dr. Kim', mustChangePassword: false, csrfHash: CSRF_HASH,
-  }).token;
+  return makeAccessToken({ sessionId: 'sess-1', role, name: 'Dr. Kim' });
 }
 
 /** Token for a superadmin (null org). */
 function superToken(): string {
-  return generateAccessToken({
-    sub: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
-    sessionId: 'sess-2', orgId: null,
-    role: 'admin', name: 'Superadmin', mustChangePassword: false, csrfHash: CSRF_HASH,
-  }).token;
-}
-
-function makeApp(pool: Pool) {
-  const app = express();
-  app.use(express.json());
-  app.use(cookieParser());
-  app.use('/api/workspaces', createWorkspacesRouter(pool));
-  app.use(createErrorHandler(createLogger({ level: 'silent' }))); // as in createApp (S1)
-  return app;
-}
-
-// Wire: first call is auth middleware session check, subsequent calls are route queries.
-function wireQueries(pool: Pool, ...results: { rows: unknown[]; rowCount?: number }[]): void {
-  const mock = pool.query as ReturnType<typeof vi.fn>;
-  mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth middleware
-  for (const r of results) {
-    mock.mockResolvedValueOnce(r);
-  }
-}
-
-// 환자 upsert 경로까지 현실적인 값을 돌려주는 SQL 라우팅 목. 쿼리 "순서"가 아니라 SQL 조각으로 응답을
-// 고르므로 쿼리가 추가/재배치돼도 깨지지 않는다(순서 큐 방식은 이 파일의 오래된 테스트에만 남아 있다).
-function routeQueries(
-  mock: ReturnType<typeof vi.fn>,
-  opts: { existing?: Record<string, unknown> | null; lock?: Record<string, unknown> | null } = {},
-): void {
-  mock.mockImplementation(async (sql: unknown) => {
-    const s = typeof sql === 'string' ? sql : '';
-    if (s.includes('FROM sessions')) return { rows: [{ exists: 1 }] };
-    if (s.includes('FROM patient_records') && s.includes('FOR SHARE')) return { rows: [] };
-    if (s.includes('FROM patient_records') && s.includes('FOR UPDATE')) return { rows: opts.existing ? [opts.existing] : [] };
-    if (s.includes('FROM patient_locks')) return { rows: opts.lock ? [opts.lock] : [] };
-    if (s.includes('SELECT patient_no FROM patient_persons')) return { rows: [{ patient_no: null }] };
-    if (s.includes('FROM patient_persons')) return { rows: [] };
-    if (s.includes('INSERT INTO patient_persons')) return { rows: [{ id: PERSON_ID }] };
-    if (s.includes('UPDATE patient_persons')) return { rows: [], rowCount: 1 };
-    if (s.includes('INSERT INTO patient_records')) return { rows: [{ revision: 1, assigned_doctor_user_id: USER_ID }], rowCount: 1 };
-    if (s.includes('UPDATE patient_records')) return { rows: [{ revision: 2, assigned_doctor_user_id: USER_ID }], rowCount: 1 };
-    if (s.includes('INSERT INTO workspaces')) return { rows: [{ id: WS_ID, version: VERSION }], rowCount: 1 };
-    if (s.includes('UPDATE workspaces') && s.includes('RETURNING')) return { rows: [{ version: VERSION }], rowCount: 1 };
-    if (s.includes('FROM workspaces')) return { rows: [WS_ROW] };
-    return { rows: [], rowCount: 1 };
+  return makeAccessToken({
+    userId: 'cccccccc-cccc-cccc-cccc-cccccccccccc', sessionId: 'sess-2', orgId: null,
+    role: 'admin', name: 'Superadmin',
   });
+}
+
+function workspacesApp(fake: FakePool) {
+  return makeRouterApp(a => a.use('/api/workspaces', createWorkspacesRouter(fake.pool)));
+}
+
+// 세션 없음(인증 미들웨어가 401) — 원래 테스트는 모든 쿼리에 빈 결과를 줬다.
+function noSessionFake(): FakePool {
+  return createFakePool({ handlers: [authSessionHandler({ revoked: true })] });
+}
+
+// 인증만 통과하고 라우트 쿼리 handler는 테스트가 덧붙인다.
+function authedFake(...handlers: QueryHandler[]): FakePool {
+  return createFakePool({ handlers: [authSessionHandler(), ...handlers] });
+}
+
+// ---- 라우트 쿼리 handler (SQL로 고른다) ----
+const listHandler = (reply: FakeQueryReply | Error): QueryHandler =>
+  ({ name: 'workspaces.list', match: /FROM workspaces\s+WHERE organization_id = \$1 AND owner_user_id = \$2\s+ORDER BY created_at DESC/, reply });
+const getHandler = (reply: FakeQueryReply): QueryHandler =>
+  ({ name: 'workspaces.get', match: /FROM workspaces\s+WHERE id = \$1 AND organization_id = \$2 AND owner_user_id = \$3/, reply });
+const currentPatientsHandler = (reply: FakeQueryReply): QueryHandler =>
+  ({ name: 'patients.current', match: /FROM patient_records\s+WHERE id = ANY\(\$1::uuid\[\]\) AND organization_id = \$2/, reply });
+const deleteHandler = (reply: FakeQueryReply): QueryHandler =>
+  ({ name: 'workspaces.delete', match: /DELETE FROM workspaces/, reply });
+
+// 저장(POST/PUT) 경로 전체 — 원본 routeQueries(SQL 조각 라우팅)를 handler 목록으로 옮긴 것.
+// 순서 큐가 아니므로 쿼리가 추가/재배치돼도 깨지지 않고, 맞지 않는 SQL은 미매치 오류(fake.unmatched)로 드러난다.
+interface SaveDb {
+  /** 스냅샷 커밋 전 삭제 환자 확인(… FOR SHARE) 결과. */
+  deleted?: unknown[];
+  /** 기존 patient_records 행(SELECT … FOR UPDATE 결과). */
+  existing?: Record<string, unknown> | null;
+  lock?: Record<string, unknown> | null;
+  /** PUT의 UPDATE workspaces … RETURNING 응답. */
+  workspaceUpdate?: FakeQueryReply;
+  /** 저장 뒤 스냅샷 revision 보정 UPDATE 응답. */
+  stamp?: FakeQueryReply | Error;
+  /** 마지막 목록 조회 결과. */
+  list?: unknown[];
+}
+
+function saveHandlers(db: SaveDb = {}): QueryHandler[] {
+  return [
+    authSessionHandler(),
+    { name: 'patients.deletedCheck', match: /FROM patient_records\s+WHERE organization_id = \$1 AND id = ANY\(\$2::uuid\[\]\)\s+FOR SHARE/, reply: { rows: db.deleted ?? [] } },
+    { name: 'workspaces.insert', match: /INSERT INTO workspaces/, reply: { rows: [{ id: WS_ID, version: VERSION }], rowCount: 1 } },
+    { name: 'workspaces.update', match: /UPDATE workspaces\s+SET name = \$4/, reply: db.workspaceUpdate ?? { rows: [{ version: VERSION }], rowCount: 1 } },
+    { name: 'patients.advisoryLock', match: /pg_advisory_xact_lock/, reply: { rows: [] } },
+    { name: 'patients.lockForUpdate', match: /FROM patient_records\s+WHERE id = \$1 AND organization_id = \$2\s+FOR UPDATE/, reply: { rows: db.existing ? [db.existing] : [] } },
+    { name: 'patientLocks.read', match: /FROM patient_locks/, reply: { rows: db.lock ? [db.lock] : [] } },
+    { name: 'persons.currentNo', match: /SELECT patient_no FROM patient_persons/, reply: { rows: [{ patient_no: null }] } },
+    { name: 'persons.update', match: /UPDATE patient_persons/, reply: { rows: [], rowCount: 1 } },
+    { name: 'persons.insert', match: /INSERT INTO patient_persons/, reply: { rows: [{ id: PERSON_ID }] } },
+    { name: 'persons.lookup', match: /FROM patient_persons/, reply: { rows: [] } },
+    { name: 'patients.insert', match: /INSERT INTO patient_records/, reply: { rows: [{ revision: 1, assigned_doctor_user_id: USER_ID }], rowCount: 1 } },
+    { name: 'patients.update', match: /UPDATE patient_records/, reply: { rows: [{ revision: 2, assigned_doctor_user_id: USER_ID }], rowCount: 1 } },
+    { name: 'workspaces.stamp', match: /jsonb_to_recordset/, reply: db.stamp ?? { rows: [], rowCount: 1 } },
+    listHandler({ rows: db.list ?? [WS_ROW] }),
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -169,28 +168,25 @@ describe('GET /api/workspaces', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when not authenticated', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [] });
-    const res = await request(makeApp(pool)).get('/api/workspaces');
+    const fake = noSessionFake();
+    const res = await request(workspacesApp(fake)).get('/api/workspaces');
     expect(res.status).toBe(401);
   });
 
   it('returns 200 with empty items for superadmin (null org)', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake();
+    const res = await request(workspacesApp(fake))
       .get('/api/workspaces')
       .set('Authorization', `Bearer ${superToken()}`);
     expect(res.status).toBe(200);
     expect(res.body.items).toEqual([]);
     // No second DB query — superadmin short-circuits before listing
-    expect((pool.query as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    expect(fake.calls.length).toBe(1);
   });
 
   it('returns 200 with workspace list for org user', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [WS_ROW] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake(listHandler({ rows: [WS_ROW] }));
+    const res = await request(workspacesApp(fake))
       .get('/api/workspaces')
       .set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
@@ -199,21 +195,19 @@ describe('GET /api/workspaces', () => {
   });
 
   it('answers a DB failure with the 500 envelope (central error handler, S1)', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ rows: [{ exists: 1 }] }) // auth middleware
-      .mockRejectedValueOnce(new Error('connection terminated'));
-    const res = await request(makeApp(pool))
+    const fake = authedFake(listHandler(new Error('connection terminated')));
+    const res = await request(workspacesApp(fake))
       .get('/api/workspaces')
       .set('Authorization', `Bearer ${orgToken()}`);
+    // 500의 원인이 목록 쿼리 handler의 오류여야 한다 — 미매치 오류로 우연히 500이 된 것이 아님
+    fake.assertNoUnmatched();
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error' });
   });
 
   it('returns 200 with empty list when user has no workspaces', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake(listHandler({ rows: [] }));
+    const res = await request(workspacesApp(fake))
       .get('/api/workspaces')
       .set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
@@ -228,25 +222,22 @@ describe('GET /api/workspaces/:id', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when not authenticated', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [] });
-    const res = await request(makeApp(pool)).get(`/api/workspaces/${WS_ID}`);
+    const fake = noSessionFake();
+    const res = await request(workspacesApp(fake)).get(`/api/workspaces/${WS_ID}`);
     expect(res.status).toBe(401);
   });
 
   it('returns 403 for superadmin (null org)', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake();
+    const res = await request(workspacesApp(fake))
       .get(`/api/workspaces/${WS_ID}`)
       .set('Authorization', `Bearer ${superToken()}`);
     expect(res.status).toBe(403);
   });
 
   it('returns 404 when workspace not found', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake(getHandler({ rows: [] }));
+    const res = await request(workspacesApp(fake))
       .get(`/api/workspaces/${WS_ID}`)
       .set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(404);
@@ -254,9 +245,8 @@ describe('GET /api/workspaces/:id', () => {
   });
 
   it('returns 200 with snapshot payload (default)', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [WS_ROW] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake(getHandler({ rows: [WS_ROW] }));
+    const res = await request(workspacesApp(fake))
       .get(`/api/workspaces/${WS_ID}`)
       .set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
@@ -265,14 +255,12 @@ describe('GET /api/workspaces/:id', () => {
   });
 
   it('returns live patient payload for ?view=current', async () => {
-    const pool = makePool();
     const live = { ...PATIENT_SNAPSHOT, data: { ...PATIENT_SNAPSHOT.data, shared: { ...PATIENT_SNAPSHOT.data.shared, name: 'Kim Updated' } } };
-    wireQueries(
-      pool,
-      { rows: [WS_ROW] },
-      { rows: [{ id: PAT_ID, deleted_at: null, payload: live }] }
+    const fake = authedFake(
+      getHandler({ rows: [WS_ROW] }),
+      currentPatientsHandler({ rows: [{ id: PAT_ID, deleted_at: null, payload: live }] }),
     );
-    const res = await request(makeApp(pool))
+    const res = await request(workspacesApp(fake))
       .get(`/api/workspaces/${WS_ID}?view=current`)
       .set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
@@ -282,9 +270,8 @@ describe('GET /api/workspaces/:id', () => {
   });
 
   it('returns redacted stub for patient not in patient_records', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [WS_ROW] }, { rows: [] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake(getHandler({ rows: [WS_ROW] }), currentPatientsHandler({ rows: [] }));
+    const res = await request(workspacesApp(fake))
       .get(`/api/workspaces/${WS_ID}?view=current`)
       .set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
@@ -292,13 +279,11 @@ describe('GET /api/workspaces/:id', () => {
   });
 
   it('returns redacted stub for soft-deleted patient', async () => {
-    const pool = makePool();
-    wireQueries(
-      pool,
-      { rows: [WS_ROW] },
-      { rows: [{ id: PAT_ID, deleted_at: new Date(), payload: {} }] }
+    const fake = authedFake(
+      getHandler({ rows: [WS_ROW] }),
+      currentPatientsHandler({ rows: [{ id: PAT_ID, deleted_at: new Date(), payload: {} }] }),
     );
-    const res = await request(makeApp(pool))
+    const res = await request(workspacesApp(fake))
       .get(`/api/workspaces/${WS_ID}?view=current`)
       .set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
@@ -313,45 +298,38 @@ describe('POST /api/workspaces', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when not authenticated', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [] });
-    const res = await request(makeApp(pool))
+    const fake = noSessionFake();
+    const res = await request(workspacesApp(fake))
       .post('/api/workspaces')
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set('x-csrf-token', TEST_CSRF_TOKEN)
       .send(VALID_BODY);
     expect(res.status).toBe(401);
   });
 
   it('returns 403 for superadmin (null org)', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake();
+    const res = await request(workspacesApp(fake))
       .post('/api/workspaces')
-      .set('Authorization', `Bearer ${superToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(superToken()))
       .send(VALID_BODY);
     expect(res.status).toBe(403);
   });
 
   it('returns 400 for empty name', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake();
+    const res = await request(workspacesApp(fake))
       .post('/api/workspaces')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({ name: '', patients: [] });
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('INVALID_BODY');
   });
 
   it('returns 400 for patients not array', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake();
+    const res = await request(workspacesApp(fake))
       .post('/api/workspaces')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({ name: 'Test', patients: 'not-array' });
     expect(res.status).toBe(400);
   });
@@ -360,9 +338,7 @@ describe('POST /api/workspaces', () => {
   // 돌면서 오류를 삼키므로, 거기서 검증하면 API는 201을 반환하고 오염된 생년월일은
   // 이미 snapshot_payload에 저장된 뒤가 된다.
   it('오염된 생년월일이 있으면 400이고 workspace 행을 만들지 않는다', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    const fake = authedFake();
 
     const badPatient = {
       ...PATIENT_SNAPSHOT,
@@ -372,10 +348,9 @@ describe('POST /api/workspaces', () => {
       },
     };
 
-    const res = await request(makeApp(pool))
+    const res = await request(workspacesApp(fake))
       .post('/api/workspaces')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({ name: 'Bad Visit', patients: [badPatient] });
 
     expect(res.status).toBe(400);
@@ -383,73 +358,54 @@ describe('POST /api/workspaces', () => {
     expect(res.body.fields[0]).toMatchObject({ field: 'birthDate', reason: 'future' });
 
     // snapshot 트랜잭션 자체가 열리지 않아야 한다
-    expect(pool.connect).not.toHaveBeenCalled();
-    const insertWs = (mock.mock.calls as unknown[][]).find(
-      (c) => typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO workspaces')
-    );
+    expect(fake.connected).toBe(0);
+    const insertWs = fake.calls.find((c) => c.sql.includes('INSERT INTO workspaces'));
     expect(insertWs).toBeUndefined();
     // 날짜 값 자체는 PHI이므로 응답에 되싣지 않는다
     expect(JSON.stringify(res.body)).not.toContain('4110-02-12');
   });
 
   it('redacts soft-deleted patients before saving a new workspace snapshot', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    mock.mockResolvedValueOnce({ rows: [] }); // BEGIN
-    mock.mockResolvedValueOnce({ rows: [{ id: PAT_ID, deleted_at: new Date('2024-02-01T00:00:00Z') }] });
-    mock.mockResolvedValueOnce({ rows: [{ id: WS_ID, version: VERSION }] }); // INSERT workspace
-    mock.mockResolvedValueOnce({ rows: [] }); // COMMIT
-    mock.mockResolvedValueOnce({
-      rows: [{
-        ...WS_ROW,
-        snapshot_payload: [{ id: PAT_ID, redacted: true }],
-      }],
-    }); // list query
+    const fake = createFakePool({
+      handlers: saveHandlers({
+        deleted: [{ id: PAT_ID, deleted_at: new Date('2024-02-01T00:00:00Z') }],
+        list:    [{ ...WS_ROW, snapshot_payload: [{ id: PAT_ID, redacted: true }] }],
+      }),
+    });
 
-    const res = await request(makeApp(pool))
+    const res = await request(workspacesApp(fake))
       .post('/api/workspaces')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send(VALID_BODY);
 
+    fake.assertNoUnmatched();
     expect(res.status).toBe(201);
-    const calls = mock.mock.calls as unknown[][];
-    const insertWsCall = calls.find((c) =>
-      typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO workspaces')
-    );
+    const calls = fake.calls;
+    const insertWsCall = calls.find((c) => c.sql.includes('INSERT INTO workspaces'));
     expect(insertWsCall).toBeDefined();
-    expect(JSON.parse((insertWsCall![1] as unknown[])[4] as string)).toEqual([
+    expect(JSON.parse(insertWsCall!.params[4] as string)).toEqual([
       { id: PAT_ID, redacted: true },
     ]);
 
-    const upsertCall = calls.find((c) =>
-      typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO patient_records')
-    );
+    const upsertCall = calls.find((c) => c.sql.includes('INSERT INTO patient_records'));
     expect(upsertCall).toBeUndefined();
   });
 
   it('ignores patients with non-UUID or missing id', async () => {
-    const pool = makePool();
-    const mock  = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValue({ rows: [{ exists: 1 }] });
+    const fake = createFakePool({ handlers: saveHandlers({ list: [] }) });
 
-    await request(makeApp(pool))
+    await request(workspacesApp(fake))
       .post('/api/workspaces')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({ name: 'Test', patients: [{ id: 'local-123' }, { id: 'not-a-uuid' }] });
 
-    const calls = (mock).mock.calls;
-    const insertWsCall = calls.find((c: unknown[]) =>
-      typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO workspaces')
-    );
-    expect(insertWsCall![1][3]).toEqual([]); // patient_ids empty
+    fake.assertNoUnmatched();
+    const calls = fake.calls;
+    const insertWsCall = calls.find((c) => c.sql.includes('INSERT INTO workspaces'));
+    expect(insertWsCall!.params[3]).toEqual([]); // patient_ids empty
 
     // No patient_records upsert (name is missing → meta returns null)
-    const upsertCall = calls.find((c: unknown[]) =>
-      typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO patient_records')
-    );
+    const upsertCall = calls.find((c) => c.sql.includes('INSERT INTO patient_records'));
     expect(upsertCall).toBeUndefined();
   });
 
@@ -462,73 +418,47 @@ describe('PUT /api/workspaces/:id', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when not authenticated', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [] });
-    const res = await request(makeApp(pool))
+    const fake = noSessionFake();
+    const res = await request(workspacesApp(fake))
       .put(`/api/workspaces/${WS_ID}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set('x-csrf-token', TEST_CSRF_TOKEN)
       .send(VALID_BODY);
     expect(res.status).toBe(401);
   });
 
   it('returns 404 when workspace not found or not owned', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    mock.mockResolvedValueOnce({ rows: [] }); // BEGIN
-    mock.mockResolvedValueOnce({ rows: [] }); // deleted patient check
-    mock.mockResolvedValueOnce({ rows: [], rowCount: 0 }); // UPDATE workspace
-    mock.mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+    const fake = createFakePool({ handlers: saveHandlers({ workspaceUpdate: { rows: [], rowCount: 0 } }) });
 
-    const res = await request(makeApp(pool))
+    const res = await request(workspacesApp(fake))
       .put(`/api/workspaces/${WS_ID}`)
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send(VALID_BODY);
 
+    fake.assertNoUnmatched();
     expect(res.status).toBe(404);
     expect(res.body.code).toBe('WORKSPACE_NOT_FOUND');
   });
 
   it('returns 200 with updated list on overwrite success', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
     const updatedRow = { ...WS_ROW, name: 'New Visit' };
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    mock.mockResolvedValueOnce({ rows: [] }); // BEGIN
-    mock.mockResolvedValueOnce({ rows: [] }); // deleted patient check
-    mock.mockResolvedValueOnce({ rows: [{ version: VERSION }], rowCount: 1 }); // UPDATE workspace
-    mock.mockResolvedValueOnce({ rows: [] }); // COMMIT
-    mock.mockResolvedValueOnce({ rows: [] }); // BEGIN (환자 트랜잭션)
-    mock.mockResolvedValueOnce({ rows: [] }); // pg_advisory_xact_lock (환자 id별 직렬화)
-    mock.mockResolvedValueOnce({ rows: [] }); // SELECT existing patient_records
-    mock.mockResolvedValueOnce({ rows: [] }); // SELECT patient_persons
-    mock.mockResolvedValueOnce({ rows: [{ id: PERSON_ID }] }); // INSERT patient_persons
-    mock.mockResolvedValueOnce({ rows: [{ revision: 1, assigned_doctor_user_id: USER_ID }], rowCount: 1 }); // upsert patient_records
-    mock.mockResolvedValueOnce({ rows: [] }); // COMMIT (환자 트랜잭션)
-    mock.mockResolvedValueOnce({ rows: [], rowCount: 1 }); // UPDATE workspaces (저장된 환자 revision을 스냅샷에 반영)
-    mock.mockResolvedValueOnce({ rows: [updatedRow] }); // list query
+    const fake = createFakePool({ handlers: saveHandlers({ list: [updatedRow] }) });
 
-    const res = await request(makeApp(pool))
+    const res = await request(workspacesApp(fake))
       .put(`/api/workspaces/${WS_ID}`)
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send(VALID_BODY);
 
+    fake.assertNoUnmatched();
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(1);
     expect(res.body.items[0].name).toBe('New Visit');
 
-    const calls = mock.mock.calls as unknown[][];
-    const updateWsCall = calls.find((c) =>
-      typeof c[0] === 'string' && (c[0] as string).includes('UPDATE workspaces')
-    );
+    const calls = fake.calls;
+    const updateWsCall = calls.find((c) => c.sql.includes('UPDATE workspaces'));
     expect(updateWsCall).toBeDefined();
-    expect((updateWsCall![1] as unknown[])[0]).toBe(WS_ID);
+    expect(updateWsCall!.params[0]).toBe(WS_ID);
 
-    const insertWsCall = calls.find((c) =>
-      typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO workspaces')
-    );
+    const insertWsCall = calls.find((c) => c.sql.includes('INSERT INTO workspaces'));
     expect(insertWsCall).toBeUndefined();
   });
 });
@@ -540,59 +470,51 @@ describe('DELETE /api/workspaces/:id', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when not authenticated', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [] });
-    const res = await request(makeApp(pool))
+    const fake = noSessionFake();
+    const res = await request(workspacesApp(fake))
       .delete(`/api/workspaces/${WS_ID}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set('x-csrf-token', TEST_CSRF_TOKEN);
     expect(res.status).toBe(401);
   });
 
   it('returns 403 for superadmin (null org)', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake();
+    const res = await request(workspacesApp(fake))
       .delete(`/api/workspaces/${WS_ID}`)
-      .set('Authorization', `Bearer ${superToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(superToken()));
     expect(res.status).toBe(403);
   });
 
   it('returns 404 when workspace not found or not owned', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [], rowCount: 0 });
-    const res = await request(makeApp(pool))
+    const fake = authedFake(deleteHandler({ rows: [], rowCount: 0 }));
+    const res = await request(workspacesApp(fake))
       .delete(`/api/workspaces/${WS_ID}`)
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(orgToken()));
     expect(res.status).toBe(404);
     expect(res.body.code).toBe('WORKSPACE_NOT_FOUND');
   });
 
   it('returns 200 with updated list on success', async () => {
-    const pool = makePool();
-    wireQueries(
-      pool,
-      { rows: [], rowCount: 1 },
-      { rows: [] }
+    const fake = authedFake(
+      deleteHandler({ rows: [], rowCount: 1 }),
+      listHandler({ rows: [] }),
     );
-    const res = await request(makeApp(pool))
+    const res = await request(workspacesApp(fake))
       .delete(`/api/workspaces/${WS_ID}`)
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(orgToken()));
     expect(res.status).toBe(200);
     expect(res.body.items).toEqual([]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// HF1: 기존 환자에 대한 쓰기 규칙(담당의 / revision / 편집 락) — SQL 라우팅 목.
+// HF1: 기존 환자에 대한 쓰기 규칙(담당의 / revision / 편집 락) — SQL로 고르는 가짜 Pool.
 // 실DB 동시성은 workspaces.integration.test.ts가 증명한다. 여기는 DB 없이도 도는 회귀 방어선이다.
 // ---------------------------------------------------------------------------
 describe('POST /api/workspaces — 기존 환자 쓰기 규칙 (HF1)', () => {
   const OTHER_DOCTOR = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
   const setLockMode = (mode: 'off' | 'observe' | 'enforce') => {
-    (config as unknown as { lockEnforcementMode: string }).lockEnforcementMode = mode;
+    lockMode.value = mode;
   };
 
   beforeEach(() => { vi.mocked(writeAuditLog).mockClear(); });
@@ -604,29 +526,25 @@ describe('POST /api/workspaces — 기존 환자 쓰기 규칙 (HF1)', () => {
     revision?: number;
     extra?: Record<string, unknown>;
   }) {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    routeQueries(mock, { existing: opts.existing ?? null, lock: opts.lock ?? null });
-    const res = await request(makeApp(pool))
+    const fake = createFakePool({ handlers: saveHandlers({ existing: opts.existing ?? null, lock: opts.lock ?? null }) });
+    const res = await request(workspacesApp(fake))
       .post('/api/workspaces')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({ name: 'HF1', patients: [{ ...ANON_PATIENT, sync: { revision: opts.revision ?? 1 } }], ...opts.extra });
-    const calls = mock.mock.calls as unknown[][];
-    const wrote = calls.some((c) =>
-      typeof c[0] === 'string' && /(INSERT INTO|UPDATE) patient_records/.test(c[0] as string));
-    return { res, calls, wrote };
+    // 모든 쿼리가 handler에 맞았어야 한다 — 미매치 오류로 upsert가 실패해 "보정 UPDATE 없음"이 우연히 성립하지 않게.
+    fake.assertNoUnmatched();
+    return { res, calls: fake.calls };
   }
 
   it('저장된 환자의 확정 revision·담당의를 스냅샷에 찍는다 — 가려진 항목·나중 저장본은 건드리지 않는 조건으로', async () => {
     const { res, calls } = await save({ existing: existingRow() });
-    const stamp = calls.find((c) => typeof c[0] === 'string' && (c[0] as string).includes('jsonb_to_recordset'));
+    const stamp = calls.find((c) => c.sql.includes('jsonb_to_recordset'));
     expect(stamp).toBeDefined();
-    const [stampsJson, workspaceId, orgId, userId, version] = stamp![1] as string[];
+    const [stampsJson, workspaceId, orgId, userId, version] = stamp!.params as string[];
     expect(JSON.parse(stampsJson)).toEqual([{ id: PAT_ID, revision: 2, assigned: USER_ID }]);
     // 소유자·조직·"내가 기록한 저장본" 조건으로만 갱신한다
     expect([workspaceId, orgId, userId, version]).toEqual([WS_ID, ORG_ID, USER_ID, VERSION]);
-    const sql = stamp![0] as string;
+    const sql = stamp!.sql;
     expect(sql).toContain("NOT (e.elem ? 'redacted')");     // 삭제로 가려진 항목은 건드리지 않는다
     expect(sql).toContain('created_at = $5::timestamptz');   // 나중 저장이 덮어쓴 행에는 적용하지 않는다
     expect(res.status).toBe(201);
@@ -634,34 +552,26 @@ describe('POST /api/workspaces — 기존 환자 쓰기 규칙 (HF1)', () => {
 
   it('저장된 환자가 없으면(전부 제외) 스냅샷 보정 UPDATE를 하지 않는다', async () => {
     const { calls } = await save({ existing: existingRow({ assigned_doctor_user_id: OTHER_DOCTOR }) });
-    expect(calls.some((c) => typeof c[0] === 'string' && (c[0] as string).includes('jsonb_to_recordset'))).toBe(false);
+    expect(calls.some((c) => c.sql.includes('jsonb_to_recordset'))).toBe(false);
   });
 
   it('스냅샷 보정이 실패해도 저장은 성공으로 응답한다(환자 기록은 이미 저장됨)', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    routeQueries(mock, { existing: existingRow() });
-    const route = mock.getMockImplementation()!;
-    mock.mockImplementation(async (sql: unknown) => {
-      if (typeof sql === 'string' && sql.includes('jsonb_to_recordset')) throw new Error('stamp failed');
-      return route(sql);
-    });
-    const res = await request(makeApp(pool))
+    const fake = createFakePool({ handlers: saveHandlers({ existing: existingRow(), stamp: new Error('stamp failed') }) });
+    const res = await request(workspacesApp(fake))
       .post('/api/workspaces')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({ name: 'HF1', patients: [{ ...ANON_PATIENT, sync: { revision: 1 } }] });
+    // 보정 실패는 handler가 던진 'stamp failed'여야 한다 — 미매치 오류가 대신 실패시킨 것이 아님
+    fake.assertNoUnmatched();
     expect(res.status).toBe(201);
     expect(res.body.saved).toHaveLength(1);
   });
 
   it('lockTokens 값이 비어 있거나 너무 길면 400', async () => {
-    const pool = makePool();
-    routeQueries(pool.query as ReturnType<typeof vi.fn>);
-    const res = await request(makeApp(pool))
+    const fake = createFakePool({ handlers: saveHandlers() });
+    const res = await request(workspacesApp(fake))
       .post('/api/workspaces')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({ name: 'HF1', patients: [ANON_PATIENT], lockTokens: { [PAT_ID]: 'x'.repeat(257) } });
     expect(res.status).toBe(400);
   });
