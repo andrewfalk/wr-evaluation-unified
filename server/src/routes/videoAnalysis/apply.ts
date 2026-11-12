@@ -6,18 +6,18 @@ import config from '../../config';
 import { writeAuditLog } from '../../middleware/audit';
 import type { AnalysisRecipe } from '@wr/contracts';
 import { validateAppliedRecipes } from '../../workers/recipeValidation';
-import { checkLockForWrite, isAssignedOrAdmin } from '../../db/patientLocks';
-import type { QueryRunner } from '../../db/patientPersons';
-import { lockOf, lockTokenOf } from '../../http/lockToken';
+import { isAssignedOrAdmin } from '../../db/patientLocks';
+import { toQueryRunner } from '../../db/queryRunner';
+import { selectForIdempotentApply, type ApplyPatientRow } from '../../db/patientRecordsRepo';
+import { applyVideoAnalysisInTx } from '../../domain/patients/patientRecordsService';
+import { lockOf } from '../../http/lockToken';
+import { patientWriteContextOf } from '../../http/patientWriteContext';
 import { orgIdOf, sessionOf } from '../../http/authz';
-import { nextCompletionColumns, type CompletionColumns, verifyModulesComplete, logCompletionMismatchIfAny, nextVerificationColumns, type VerificationColumns } from '../../completionTracking';
 import { ApplyBody } from './schemas';
 import { VideoJobRow, parseStoredRecipe, readAppliedInputs } from './access';
 
-// patient_records 행(부분) — apply에서 사용.
-interface PatientRowLite extends CompletionColumns, VerificationColumns {
-  id: string; revision: number; payload: unknown; created_at: Date; updated_at: Date;
-}
+// patient_records 행(부분) — apply에서 사용(db/patientRecordsRepo.ts).
+type PatientRowLite = ApplyPatientRow;
 
 function patientApplyResponse(row: PatientRowLite): Record<string, unknown> {
   const base = typeof row.payload === 'object' && row.payload !== null
@@ -84,18 +84,10 @@ export async function applyJob(pool: Pool, req: Request, res: Response): Promise
 
     // ② 멱등: 이미 적용 + 동일 hash면 저장된(현재) 환자 상태를 그대로 반환.
     if (job.applied_at && job.applied_inputs_hash === appliedInputsHash) {
-      const { rows: cur } = await client.query<PatientRowLite>(
-        `SELECT id, revision, payload, created_at, updated_at,
-                completion_status, server_observed_modules_complete_at, completion_source,
-                completion_client_build_version, completion_client_schema_version,
-                server_verified_modules_complete_at, completion_verification_engine_version
-         FROM patient_records
-         WHERE id = $1 AND organization_id = $2`,
-        [job.patient_record_id, orgId]
-      );
+      const cur = await selectForIdempotentApply(toQueryRunner(client), job.patient_record_id, orgId);
       await client.query('COMMIT');
-      if (cur.length === 0) { res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' }); return; }
-      res.status(200).json({ idempotent: true, patient: patientApplyResponse(cur[0]) });
+      if (!cur) { res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' }); return; }
+      res.status(200).json({ idempotent: true, patient: patientApplyResponse(cur) });
       return;
     }
 
@@ -129,136 +121,52 @@ export async function applyJob(pool: Pool, req: Request, res: Response): Promise
       for (const r of srcRows) sourceRecipes.set(r.id, parseStoredRecipe(r.analysis_recipe));
     }
 
-    // ③ patient FOR UPDATE + revision(If-Match)
-    const { rows: pats } = await client.query<PatientRowLite & { assigned_doctor_user_id: string | null }>(
-      `SELECT id, revision, payload, created_at, updated_at, assigned_doctor_user_id,
-              completion_status, server_observed_modules_complete_at, completion_source,
-              completion_client_build_version, completion_client_schema_version,
-              server_verified_modules_complete_at, completion_verification_engine_version
-       FROM patient_records
-       WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
-       FOR UPDATE`,
-      [job.patient_record_id, orgId]
-    );
-    if (pats.length === 0) {
+    // ③④ patient FOR UPDATE → 담당의 재확인 → 락 게이트 → revision(If-Match) → recipe 검증 → UPDATE
+    // (domain/patients/applyVideoAnalysis.ts, S7-2). 결과마다 이전과 같은 응답을 쓴다.
+    const result = await applyVideoAnalysisInTx(toQueryRunner(client), pool, patientWriteContextOf(req), {
+      patientId: job.patient_record_id,
+      expectedRevision,
+      data,
+      report: { modulesCompleteObserved, completionClientBuildVersion, completionClientSchemaVersion },
+      // recipe 검증 게이트(§8.11, 6.0-9) — payload 무수정, 대조만. 서버가 source of truth.
+      // 새로 추가된 appliedInputs(suffix)만 검증: count·prefix 불변·exact-set·recipe field 대조·unverified fail-closed.
+      validate: (existingPayload) => validateAppliedRecipes({
+        oldAppliedInputs: readAppliedInputs((existingPayload as { data?: unknown }).data),
+        newAppliedInputs: readAppliedInputs(data),
+        appliedInputsCount,
+        sourceAnalysisJobIds: uniqueSourceIds,
+        sourceRecipes,
+        allowUnverified: config.video.allowUnverifiedRecipe,
+      }),
+    });
+    if (result.kind !== 'applied') {
       await client.query('ROLLBACK');
-      res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
-      return;
-    }
-
-    // ①의 canAccess는 job+patient를 JOIN한 스냅샷(FOR UPDATE OF j — patient_records는 안 잠금)
-    // 기준이었다 — 그 확인과 지금 사이에 담당의가 재배정됐을 수 있으므로, patient_records를
-    // 실제로 FOR UPDATE로 잠근 이 시점에 다시 확인한다(TOCTOU 최종 방어선).
-    if (!isAssignedOrAdmin(session, pats[0].assigned_doctor_user_id)) {
-      await client.query('ROLLBACK');
-      res.status(403).json({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
-      return;
-    }
-
-    // 환자 단위 TTL lease lock 게이트 — patchPatient와 동일한 If-Match 계약을 쓰므로 동일하게
-    // 보호한다. 멱등 replay(②)는 이 체크보다 앞서 이미 처리·반환됐으므로, 안전한 네트워크
-    // 재시도가 이 게이트 때문에 불필요하게 423을 받는 일은 없다.
-    if (config.lockEnforcementMode !== 'off') {
-      const lockCheck = await checkLockForWrite(client as unknown as QueryRunner, {
-        patientId: job.patient_record_id, orgId, leaseToken: lockTokenOf(req),
-      });
-      if (!lockCheck.ok) {
-        if (config.lockEnforcementMode === 'enforce') {
-          await client.query('ROLLBACK');
+      switch (result.kind) {
+        case 'patient_not_found':
+          res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
+          return;
+        case 'forbidden':
+          res.status(403).json({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
+          return;
+        case 'lock_held':
           res.status(423).json({
             code: 'LOCK_HELD',
-            error: `Currently being edited by ${lockCheck.heldBy.holderName}`,
-            holder: { holderName: lockCheck.heldBy.holderName, acquiredAt: lockCheck.heldBy.acquiredAt.toISOString(), expiresAt: lockCheck.heldBy.expiresAt.toISOString() },
+            error: `Currently being edited by ${result.heldBy.holderName}`,
+            holder: { holderName: result.heldBy.holderName, acquiredAt: result.heldBy.acquiredAt.toISOString(), expiresAt: result.heldBy.expiresAt.toISOString() },
           });
           return;
-        }
-        void writeAuditLog(pool, {
-          actorUserId: session.userId, actorOrgId: orgId, action: 'patient_lock_observed_block',
-          targetType: 'patient', targetId: job.patient_record_id, outcome: 'success',
-          ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null,
-          extra: { holderName: lockCheck.heldBy.holderName, context: 'video_analysis_apply' },
-        });
+        case 'revision_mismatch':
+          res.status(409).json({ code: 'CONFLICT', error: 'Revision mismatch. Fetch the latest version before retrying.', currentRevision: result.currentRevision });
+          return;
+        case 'rejected':
+          res.status(400).json(result.body);
+          return;
+        case 'concurrent_modification':
+          res.status(409).json({ code: 'CONFLICT', error: 'Concurrent modification detected. Please retry.' });
+          return;
       }
     }
-
-    if (pats[0].revision !== expectedRevision) {
-      await client.query('ROLLBACK');
-      res.status(409).json({ code: 'CONFLICT', error: 'Revision mismatch. Fetch the latest version before retrying.', currentRevision: pats[0].revision });
-      return;
-    }
-
-    // ④ payload 갱신(클라가 계산한 data 영속화 — 영상 apply는 meta 컬럼 불변).
-    const existingPayload = typeof pats[0].payload === 'object' && pats[0].payload !== null
-      ? (pats[0].payload as Record<string, unknown>) : {};
-
-    // recipe 검증 게이트(§8.11, 6.0-9) — payload 무수정, 대조만. 서버가 source of truth.
-    // 새로 추가된 appliedInputs(suffix)만 검증: count·prefix 불변·exact-set·recipe field 대조·unverified fail-closed.
-    const recipeFail = validateAppliedRecipes({
-      oldAppliedInputs: readAppliedInputs((existingPayload as { data?: unknown }).data),
-      newAppliedInputs: readAppliedInputs(data),
-      appliedInputsCount,
-      sourceAnalysisJobIds: uniqueSourceIds,
-      sourceRecipes,
-      allowUnverified: config.video.allowUnverifiedRecipe,
-    });
-    if (recipeFail) {
-      await client.query('ROLLBACK');
-      res.status(400).json(recipeFail);
-      return;
-    }
-
-    const newPayload = { ...existingPayload, data };
     const newRevision = expectedRevision + 1;
-
-    // PR0-A: patients.ts와 동일한 3상태 규칙 — 이미 FOR UPDATE로 잠근 pats[0]을 기준으로
-    // 계산해 같은 UPDATE 문장에 얹는다. revision 충돌 시(아래 WHERE revision = $4) 완료
-    // 보고도 자동으로 함께 거부된다.
-    const nextCompletion = nextCompletionColumns(pats[0], {
-      modulesCompleteObserved, completionClientBuildVersion, completionClientSchemaVersion,
-    });
-
-    // PR0-B2: 클라이언트 신고와 별개로 서버가 analytics-core로 직접 재검증한다 — apply가
-    // 갱신하는 새 data(위 `data`)를 기준으로, 같은 FOR UPDATE 잠금 하에 계산해 같은
-    // UPDATE 문장에 얹는다.
-    const verified = verifyModulesComplete({
-      shared: (data as Record<string, unknown>)['shared'] as Record<string, unknown> ?? {},
-      modules: (data as Record<string, unknown>)['modules'] as Record<string, unknown> ?? {},
-      activeModules: (data as Record<string, unknown>)['activeModules'] as string[] ?? [],
-    });
-    logCompletionMismatchIfAny(job.patient_record_id, modulesCompleteObserved, verified);
-    const nextVerification = nextVerificationColumns(pats[0], verified.allComplete);
-
-    const { rows: updated } = await client.query<PatientRowLite>(
-      `UPDATE patient_records SET
-         payload = $3, revision = revision + 1,
-         completion_status                   = $5,
-         server_observed_modules_complete_at = $6,
-         completion_source                   = $7,
-         completion_client_build_version     = $8,
-         completion_client_schema_version    = $9,
-         server_verified_modules_complete_at    = $10,
-         completion_verification_engine_version = $11
-       WHERE id = $1 AND organization_id = $2 AND revision = $4 AND deleted_at IS NULL
-       RETURNING id, revision, payload, created_at, updated_at,
-                 completion_status, server_observed_modules_complete_at, completion_source,
-                 completion_client_build_version, completion_client_schema_version,
-                 server_verified_modules_complete_at, completion_verification_engine_version`,
-      [
-        job.patient_record_id, orgId, JSON.stringify(newPayload), expectedRevision,
-        nextCompletion.completion_status,
-        nextCompletion.server_observed_modules_complete_at,
-        nextCompletion.completion_source,
-        nextCompletion.completion_client_build_version,
-        nextCompletion.completion_client_schema_version,
-        nextVerification.server_verified_modules_complete_at,
-        nextVerification.completion_verification_engine_version,
-      ]
-    );
-    if (updated.length === 0) {
-      await client.query('ROLLBACK');
-      res.status(409).json({ code: 'CONFLICT', error: 'Concurrent modification detected. Please retry.' });
-      return;
-    }
 
     await client.query(
       `UPDATE video_analysis_jobs
@@ -290,7 +198,7 @@ export async function applyJob(pool: Pool, req: Request, res: Response): Promise
         sourceAnalysisJobIds, // 실제 추론 출처 추적(셸 jobId와 구분)
       },
     });
-    res.status(200).json({ patient: patientApplyResponse(updated[0]) });
+    res.status(200).json({ patient: patientApplyResponse(result.row) });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;

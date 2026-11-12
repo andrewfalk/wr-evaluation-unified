@@ -18,7 +18,6 @@ const ALLOWED = new Set([
   'routes/patients/create.ts',
   'routes/patients/delete.ts',
   'routes/patients/patch.ts',
-  'routes/videoAnalysis/apply.ts',
 ]);
 
 // Whitespace between the keywords may include newlines (wider than the one-line DoD grep).
