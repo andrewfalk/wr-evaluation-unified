@@ -103,6 +103,9 @@ export async function createIntegrationOrg(pool: Pool, label: string): Promise<I
  * Waits until at least `count` sessions named `applicationName` wait on a lock (pg_stat_activity
  * wait_event_type = 'Lock'). Polls; throws after `timeoutMs`. Use it to make "request B is now blocked
  * behind the test's open transaction" deterministic instead of sleeping.
+ *
+ * Pass an `observer` pool other than the application's: if the application's pool is exhausted by the
+ * waiting sessions, a query on it waits for a connection and the timeout is never checked.
  */
 export async function waitForLockWait(
   observer: Pool,
