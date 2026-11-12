@@ -46,7 +46,7 @@ describe.skipIf(!TEST_DB_URL)('stats_runs DDL — 실제 Postgres (integration)'
       `INSERT INTO stats_runs (organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
          requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at, analysis_run_id)
        VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',$4,$5,'{}'::jsonb, now() + interval '1 day', now(), $6)
-       ON CONFLICT (organization_id, execution_digest) WHERE status = 'succeeded' AND cacheable
+       ON CONFLICT (organization_id, execution_digest, queue_namespace) WHERE status = 'succeeded' AND cacheable
        DO NOTHING
        RETURNING id`,
       [orgId, userId, digest, cacheable, manifest, analysisRunId],
@@ -161,7 +161,7 @@ describe.skipIf(!TEST_DB_URL)('stats_runs DDL — 실제 Postgres (integration)'
       `INSERT INTO stats_runs (organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
          requested_disclosure_profile, cacheable, manifest, result, expires_at, finished_at, analysis_run_id)
        VALUES ($1,$2,'succeeded','r','s',$3,'aggregate',true,$4,'{"new":true}'::jsonb, now() + interval '1 day', now(), $5)
-       ON CONFLICT (organization_id, execution_digest) WHERE status='succeeded' AND cacheable DO NOTHING
+       ON CONFLICT (organization_id, execution_digest, queue_namespace) WHERE status='succeeded' AND cacheable DO NOTHING
        RETURNING id`,
       [orgId, userId, digest, newManifest, newAnalysisRunId],
     );
