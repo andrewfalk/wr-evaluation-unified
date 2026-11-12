@@ -6,12 +6,13 @@
 // current runner over it. The database is dropped in afterAll.
 //
 // Runs only with TEST_DATABASE_URL (npm run check:full); skipped otherwise.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { Client, Pool } from 'pg';
 import { runMigrations, migrationChecksum, MigrationChecksumError } from '../migrate';
+import { logger } from '../../logger';
 
 const TEST_DB_URL = process.env.TEST_DATABASE_URL;
 const REAL_DIR = path.resolve(__dirname, '../../../migrations');
@@ -117,6 +118,16 @@ describe.skipIf(!TEST_DB_URL)('runMigrations — checksums on a real database (i
     expect(out.logs).toEqual(['[migrate] No pending migrations.']);
     expect(out.warns).toEqual([]);
     expect(await checksums()).toEqual(before);
+  });
+
+  it('without an injected log, the messages go to the server logger (S11)', async () => {
+    const info = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
+    try {
+      await runMigrations(pool, { checksumMode: 'enforce' });
+      expect(info).toHaveBeenCalledWith('[migrate] No pending migrations.');
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it('does not count CRLF line endings as a change', async () => {
