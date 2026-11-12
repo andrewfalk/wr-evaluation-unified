@@ -18,6 +18,9 @@ export default defineConfig({
     env: {
       DATABASE_URL:         'postgresql://localhost/wr_test',
       ACCESS_TOKEN_SECRET:  'test-access-secret-0123456789abcd',
+      // S8: the integration tests' own queue namespace — rows they create and the workers they start stay
+      // apart from a development server that might use the same test database.
+      QUEUE_NAMESPACE:      'itest',
     },
   },
 });

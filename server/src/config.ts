@@ -98,6 +98,11 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
     // 남기고 막지 않음 → enforce: 실제 게이팅.
     lockEnforcementMode: e.LOCK_ENFORCEMENT_MODE,
 
+    // S8: this instance's queue namespace. Statistics runs and video analysis clips/jobs record it, and the
+    // queue scans (claim, sweeps, cleanup, cache, quota) only see their own namespace — servers sharing one
+    // database stay apart. 'default' in production; development servers get their own (scripts).
+    queueNamespace: e.QUEUE_NAMESPACE,
+
     video: Object.freeze({
       // dev-only fixture 추론 워커 활성(운영 기본 off). enabled와 함께여야 워커가 돈다.
       fixtureMode: e.VIDEO_ANALYSIS_FIXTURE_MODE,

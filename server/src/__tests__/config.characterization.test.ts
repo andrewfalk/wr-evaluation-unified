@@ -14,6 +14,7 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 /** Config keys introduced by S2 — not part of the frozen pre-S2 shape. */
 const NEW_KEYS: ReadonlyArray<readonly string[]> = [
   ['gitCommit'], ['backupsDir'], ['updatesDir'], ['stats', 'timingEnabled'], ['auditDatabaseUrl'],
+  ['queueNamespace'], // S8
 ];
 
 function stripNewKeys(value: Record<string, unknown>): Record<string, unknown> {

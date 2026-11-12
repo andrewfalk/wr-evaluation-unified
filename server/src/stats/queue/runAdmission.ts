@@ -116,9 +116,11 @@ export async function admitAnalysisRun(
   // 'lift_eligible'이면 워커가 해제본까지 만들어 limited_result에 저장한다(stats/queue/runsQueue.ts attempt). executionDigest에도
   // 같은 프로파일이 들어 있어야 한다 — 호출부(handlePostAnalyze)가 둘을 함께 정한다.
   disclosureProfile: RequestedDisclosureProfile = 'aggregate',
+  // S8: the queue namespace the run belongs to (config.queueNamespace of the server taking the request).
+  queueNamespace: string = config.queueNamespace,
 ): Promise<AdmissionResult> {
   for (let attempt = 0; attempt < ADMIT_RETRY_ATTEMPTS; attempt += 1) {
-    const outcome = await admitOnce(pool, ctx, executionDigest, engineTimeoutMs, disclosureProfile);
+    const outcome = await admitOnce(pool, ctx, executionDigest, engineTimeoutMs, disclosureProfile, queueNamespace);
     if (outcome !== 'retry') return outcome;
   }
   // 이론상 advisory lock으로 도달 불가능 — 같은 org 안에서 이 함수를 부르는 모든
@@ -133,6 +135,7 @@ async function admitOnce(
   executionDigest: string,
   engineTimeoutMs: number,
   disclosureProfile: RequestedDisclosureProfile,
+  queueNamespace: string,
 ): Promise<AdmissionResult | 'retry'> {
   return withWriteTransaction(pool, async (client) => {
     // 항상 이 순서로(사용자 락 → 조직 락) — 데드락 방지.
@@ -225,15 +228,15 @@ async function admitOnce(
       `INSERT INTO stats_runs (
          organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
          requested_disclosure_profile, cacheable, manifest, frozen_dataset, engine_timeout_ms,
-         expires_at, analysis_run_id
-       ) VALUES ($1,$2,'queued',$3,$4,$5,$11,true,$6,$7,$8,$9,$10)
-       ON CONFLICT (organization_id, execution_digest) WHERE status IN ('queued','running')
+         expires_at, analysis_run_id, queue_namespace
+       ) VALUES ($1,$2,'queued',$3,$4,$5,$11,true,$6,$7,$8,$9,$10,$12)
+       ON CONFLICT (organization_id, execution_digest, queue_namespace) WHERE status IN ('queued','running')
        DO NOTHING
        RETURNING ${STATS_RUN_COLUMNS}`,
       [
         ctx.orgId, ctx.userId, ctx.recipeDigest, ctx.snapshot.sourceDigest, executionDigest,
         JSON.stringify(manifest), JSON.stringify(frozen), engineTimeoutMs, statsRunExpiresAt(), analysisRunId,
-        disclosureProfile,
+        disclosureProfile, queueNamespace,
       ],
     );
     if (insertResult.rows.length > 0) {

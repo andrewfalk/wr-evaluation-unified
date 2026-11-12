@@ -356,6 +356,16 @@ describe('config — keys added by S2 for former process.env readers (P1-09)', (
     expect(make({ UPDATES_DIR: '/srv/updates' }).updatesDir).toBe('/srv/updates');
   });
 
+  it('queueNamespace (S8): QUEUE_NAMESPACE or "default"; anything else than a short lowercase name fails at start-up', () => {
+    expect(make().queueNamespace).toBe('default');
+    expect(make({ QUEUE_NAMESPACE: '' }).queueNamespace).toBe('default');
+    expect(make({ QUEUE_NAMESPACE: 'dev-pc1-1a2b3c4d' }).queueNamespace).toBe('dev-pc1-1a2b3c4d');
+    expect(make({ QUEUE_NAMESPACE: 'itest' }).queueNamespace).toBe('itest');
+    for (const bad of ['Dev', '-x', 'a b', 'x'.repeat(65), "x';--"]) {
+      expect(() => make({ QUEUE_NAMESPACE: bad })).toThrow(/QUEUE_NAMESPACE/);
+    }
+  });
+
   it('stats.timingEnabled: only STATS_ENGINE_TIMING=1', () => {
     expect(make().stats.timingEnabled).toBe(false);
     expect(make({ STATS_ENGINE_TIMING: 'true' }).stats.timingEnabled).toBe(false);

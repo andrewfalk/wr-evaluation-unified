@@ -32,6 +32,8 @@ interface ClipCtx {
   clipId: string; patientRecordId: string; organizationId: string; processId: string | null;
   uploadPath: string | null; sampleDetectResult: unknown; targetPersonId: string | null;
   sourceType: string; fileState: string; sampleFramePath: string | null;
+  /** S8: the clip's queue namespace — a job created from the clip takes it. */
+  queueNamespace: string;
 }
 // clipId → clip + 소속 환자 권한 확인. job-scoped guard의 clip 버전.
 export async function loadAccessibleClip(
@@ -40,11 +42,11 @@ export async function loadAccessibleClip(
   const { rows } = await pool.query<{
     id: string; patient_record_id: string; organization_id: string; assigned_doctor_user_id: string | null;
     process_id: string | null; upload_path: string | null; sample_detect_result: unknown; target_person_id: string | null;
-    source_type: string; file_state: string; sample_frame_path: string | null;
+    source_type: string; file_state: string; sample_frame_path: string | null; queue_namespace: string;
   }>(
     `SELECT c.id, c.patient_record_id, c.organization_id, p.assigned_doctor_user_id,
             c.process_id, c.upload_path, c.sample_detect_result, c.target_person_id,
-            c.source_type, c.file_state, c.sample_frame_path
+            c.source_type, c.file_state, c.sample_frame_path, c.queue_namespace
      FROM video_analysis_clips c
      JOIN patient_records p ON p.id = c.patient_record_id AND p.deleted_at IS NULL
      WHERE c.id = $1 AND c.organization_id = $2`,
@@ -63,6 +65,7 @@ export async function loadAccessibleClip(
     processId: rows[0].process_id,
     uploadPath: rows[0].upload_path, sampleDetectResult: rows[0].sample_detect_result, targetPersonId: rows[0].target_person_id,
     sourceType: rows[0].source_type, fileState: rows[0].file_state, sampleFramePath: rows[0].sample_frame_path,
+    queueNamespace: rows[0].queue_namespace,
   };
 }
 
