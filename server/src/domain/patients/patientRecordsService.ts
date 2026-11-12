@@ -5,3 +5,4 @@ export type { PatientWriteContext, PatientWriteActor } from './context';
 export { upsertFromWorkspace, type UpsertOutcome, type SkipReason } from './upsertFromWorkspace';
 export { applyVideoAnalysisInTx, type ApplyVideoAnalysisResult, type ApplyVideoAnalysisParams } from './applyVideoAnalysis';
 export { createPatient, type CreatePatientResult, type CreatePatientParams } from './createPatient';
+export { patchPatient, type PatchPatientResult, type PatchPatientParams } from './patchPatient';
