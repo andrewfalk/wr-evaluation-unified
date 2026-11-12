@@ -433,7 +433,8 @@ async function runViewsFor(
 // not cancelled: nobody asked to cancel it. A user's cancel aborts with the default reason (requestCancel).
 const SHUTDOWN_ABORT = Symbol('stats worker shutdown');
 
-export async function attempt(pool: Pool, row: StatsRunRow, shutdown?: AbortSignal): Promise<void> {
+// Resolves true once the outcome is stored, false when every persist retry failed (the run is left to the sweeps).
+export async function attempt(pool: Pool, row: StatsRunRow, shutdown?: AbortSignal): Promise<boolean> {
   const controller = new AbortController();
   activeRuns.set(row.analysis_run_id, { controller, pid: null });
   const onShutdown = () => controller.abort(SHUTDOWN_ABORT);
@@ -548,7 +549,7 @@ export async function attempt(pool: Pool, row: StatsRunRow, shutdown?: AbortSign
   for (let attemptNum = 0; attemptNum < config.stats.async.maxFinishPersistRetries; attemptNum += 1) {
     try {
       await persist();
-      return;
+      return true;
     } catch (persistErr) {
       console.error('[stats-runs-queue] persist failed, retrying', persistErr);
       await new Promise((resolve) => setTimeout(resolve, 200 * 2 ** attemptNum));
@@ -556,6 +557,7 @@ export async function attempt(pool: Pool, row: StatsRunRow, shutdown?: AbortSign
   }
   console.error('[stats-runs-queue] persist exhausted retries — leaving to orphan/queue sweep', row.id);
   // attempt()는 여기서도 reject하지 않는다 — claimTick의 top-level try/catch가 최종 방어선.
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -651,6 +653,8 @@ export function createStatsRunsQueueWorker(
   let stopping = false;
   let sweepRun: Promise<void> | null = null;
   let claimRun: Promise<void> | null = null;
+  // A failure while stopping (the run in flight could not be put back) — stop() rejects with it.
+  let stopError: unknown = null;
 
   let sweeping = false;
   const sweepTick = async () => {
@@ -685,9 +689,12 @@ export function createStatsRunsQueueWorker(
       // 소비하고, requeue_count는 claim된 뒤 실제로 겪은 경합에만 쓰인다.
       if (!isEngineSlotAvailable()) return;
       const claimed = await claimNextQueuedRun(pool, config.stats.async.queueWaitMs, namespace);
-      if (claimed) await attempt(pool, claimed, shutdown.signal);
+      if (claimed && !(await attempt(pool, claimed, shutdown.signal)) && stopping) {
+        stopError = new Error(`stats run ${claimed.analysis_run_id}: its outcome could not be stored while stopping`);
+      }
     } catch (err) {
       console.error('[stats-runs-queue] claimTick failed', err);
+      if (stopping) stopError = err;
     } finally {
       claiming = false;
       done();
@@ -706,6 +713,7 @@ export function createStatsRunsQueueWorker(
       clearInterval(claimTimer);
       shutdown.abort();
       await Promise.all([sweepRun, claimRun]);
+      if (stopError) throw stopError;
     },
   };
 }

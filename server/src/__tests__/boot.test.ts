@@ -115,6 +115,18 @@ describe('createShutdown', () => {
     expect(h.log.error).toHaveBeenCalledTimes(1);
   });
 
+  it('a fatal error while a SIGTERM stop is running makes its exit code 1', async () => {
+    const order: string[] = [];
+    const h = harness(order);
+    const shutdown = createShutdown({ server: h.server, jobs: [job('worker', order, { delayMs: 20 })], pools: h.pools, exit: h.exit, log: h.log });
+    const stopping = shutdown('SIGTERM');
+    await new Promise((r) => setTimeout(r, 5));
+    expect(shutdown('uncaughtException', 1)).toBe(stopping);
+    await stopping;
+    expect(h.exit).toHaveBeenCalledTimes(1);
+    expect(h.exit).toHaveBeenCalledWith(1);
+  });
+
   it('a stop for a fatal error exits 1 even when every step succeeds', async () => {
     const h = harness([]);
     await createShutdown({ server: h.server, jobs: [], pools: h.pools, exit: h.exit, log: h.log })('uncaughtException', 1);

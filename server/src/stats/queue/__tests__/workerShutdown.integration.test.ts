@@ -133,4 +133,18 @@ describe.skipIf(!TEST_DATABASE_URL)('stats worker shutdown (S9, real PostgreSQL)
 
     expect(await row(run.id)).toMatchObject({ status: 'queued', requeue_count: 1 });
   });
+
+  it('worker.stop() rejects when the run in flight cannot be put back (every persist retry fails)', async () => {
+    const run = await queuedRun();
+    const worker = createStatsRunsQueueWorker(pool);
+    await run.engineStarted;
+    // From here on every transaction fails to start (requeueOrFinish → withWriteTransaction → pool.connect).
+    const connect = vi.spyOn(pool, 'connect').mockImplementation((() => Promise.reject(new Error('db down'))) as never);
+    try {
+      await expect(worker.stop()).rejects.toThrow(/could not be stored while stopping/);
+    } finally {
+      connect.mockRestore();
+    }
+    expect((await row(run.id)).status).toBe('running'); // left to the stale sweep, as before
+  });
 });

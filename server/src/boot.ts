@@ -111,11 +111,14 @@ export function createShutdown(options: ShutdownOptions): (reason: string, exitC
   const exit = options.exit ?? ((code: number) => process.exit(code));
   const log = options.log ?? logger;
   let running: Promise<void> | null = null;
+  // The highest exit code any call asked for — a fatal error during a SIGTERM stop still makes it 1.
+  let requestedCode = 0;
 
   return (reason, exitCode = 0) => {
+    requestedCode = Math.max(requestedCode, exitCode);
     if (running) return running;
     running = (async () => {
-      let code = exitCode;
+      let code = 0;
       const force = setTimeout(() => {
         log.error({ reason, timeoutMs }, 'shutdown timed out — exiting');
         exit(1);
@@ -152,6 +155,7 @@ export function createShutdown(options: ShutdownOptions): (reason: string, exitC
       }
 
       clearTimeout(force);
+      code = Math.max(code, requestedCode);
       log.info({ reason, exitCode: code }, 'shutdown complete');
       exit(code);
     })();

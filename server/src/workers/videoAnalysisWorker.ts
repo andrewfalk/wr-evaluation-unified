@@ -498,6 +498,8 @@ export function createVideoAnalysisWorker(
   const shutdown = new AbortController();
   let stopping = false;
   let current: Promise<void> | null = null;
+  // A failure while stopping (e.g. the job could not be put back to 'queued') — stop() rejects with it.
+  let stopError: unknown = null;
   const tick = async () => {
     if (current || stopping) return;
     current = (async () => {
@@ -507,6 +509,7 @@ export function createVideoAnalysisWorker(
         while (processed && !stopping) processed = await pollOnce(pool, merged, namespace, shutdown.signal);
       } catch (err) {
         console.error('[wr-server] video-analysis-worker error', err);
+        if (stopping) stopError = err;
       }
     })();
     try { await current; } finally { current = null; }
@@ -519,6 +522,7 @@ export function createVideoAnalysisWorker(
       clearInterval(timer);
       shutdown.abort();
       if (current) await current;
+      if (stopError) throw stopError;
     },
   };
 }

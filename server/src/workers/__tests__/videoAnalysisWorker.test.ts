@@ -346,4 +346,26 @@ describe('createVideoAnalysisWorker — stop() on shutdown', () => {
       vi.useRealTimers();
     }
   });
+
+  it('a failed requeue while stopping makes stop() reject (the shutdown then exits 1)', async () => {
+    const fake = workerFake({
+      overrides: [{ name: 'requeue.fails', via: 'pool', match: (sql) => sql.includes("SET status = 'queued'"), reply: new Error('db down') }],
+    });
+    let started!: () => void;
+    const inferenceStarted = new Promise<void>((resolve) => { started = resolve; });
+    const runInference = vi.fn((_c: string, _p: string | null, _t: unknown, options?: { signal?: AbortSignal }) =>
+      new Promise<never>((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => reject(new Error('killed')));
+        started();
+      }));
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const worker = createVideoAnalysisWorker(fake.pool, { runInference: runInference as never });
+      vi.advanceTimersByTime(2000);
+      await inferenceStarted;
+      await expect(worker.stop()).rejects.toThrow('db down');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
