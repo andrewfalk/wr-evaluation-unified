@@ -3,6 +3,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { AppError, errorBody, toAppError } from '../errors';
+import { logger } from '../../logger';
 import {
   IdentityCaseLockedError,
   IdentityForbiddenError,
@@ -84,7 +85,7 @@ describe('toAppError — stats engine errors use statsEngineErrorMapping', () =>
     }],
     ['cancelled', new StatsEngineCancelledError(), 500, { code: 'PROCESS_ERROR', error: 'Analysis engine failed to complete.' }],
   ])('%s', (_name, err, status, body) => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {}); // errorBodyFor logs the detail
+    const spy = vi.spyOn(logger, 'error').mockImplementation(() => {}); // errorBodyFor logs the detail
     try {
       expect(mapped(err)).toEqual({ status, body });
     } finally {

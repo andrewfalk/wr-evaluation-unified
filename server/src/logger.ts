@@ -1,6 +1,7 @@
 // Server logger (REFACTORING_ROADMAP P1-01). One JSON object per line on stdout — no pretty
 // transport in any environment; pipe to `npx pino-pretty` locally when a readable view is wanted.
-// The access log (pino-http) arrives in S9 and the remaining console.* calls move here in S9/S11.
+// The access log is http/accessLog.ts (S9). The last console.* calls (db/client.ts and db/migrate.ts, reached by
+// CLIs that do not load the full config, which this module does) move in S11.
 //
 // Errors are serialised by `serializeError`, not pino's default: a PostgreSQL error carries
 // `detail` / `where` / `parameters`, and `detail` repeats the offending row values

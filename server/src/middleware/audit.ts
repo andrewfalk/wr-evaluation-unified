@@ -1,3 +1,4 @@
+import { logger } from '../logger';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import type { Pool } from 'pg';
 
@@ -40,7 +41,7 @@ export async function writeAuditLog(pool: Pool, entry: AuditEntry): Promise<void
   try {
     await pool.query(AUDIT_SQL, auditParams(entry));
   } catch (err) {
-    console.error('[audit] failed to write audit log', { action: entry.action, err });
+    logger.error({ action: entry.action, err }, '[audit] failed to write audit log');
   }
 }
 

@@ -10,6 +10,7 @@
 //
 // 한 환자의 거절/실패가 워크스페이스 저장 전체를 막지 않는 best-effort 철학은 그대로다 —
 // 호출부(saveWorkspace)가 결과를 saved/skipped/conflicts/lockedByOther로 집계해 응답한다.
+import { logger } from '../../logger';
 import type { Pool } from 'pg';
 import { resolvePatientPersonId, releasePersonIfOrphaned } from '../../db/patientPersons';
 import { assertAssignedOrAdmin, PatientLockForbiddenError } from '../../db/patientLocks';
@@ -111,8 +112,8 @@ async function upsertInTx(db: QueryRunner, pool: Pool, ctx: PatientWriteContext,
     { orgId, currentUser: user, requestedDoctorName: meta.doctorName }
   );
   if (assignmentWarnings.length > 0) {
-    console.warn('[upsertPatientRecord] assignment warnings for patient %s:', meta.id,
-      assignmentWarnings.map(w => `${w.code}: ${w.message}`).join('; '));
+    logger.warn({ patientId: meta.id, warnings: assignmentWarnings.map(w => `${w.code}: ${w.message}`) },
+      '[upsertPatientRecord] assignment warnings');
   }
 
   const metaColumns = {

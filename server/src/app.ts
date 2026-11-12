@@ -32,6 +32,7 @@ import { createStatsRouter } from './stats/routes/router';
 import { cspMiddleware, noStoreMiddleware } from './middleware/csp';
 import { corsMiddleware } from './middleware/corsMiddleware';
 import { requestIdMiddleware } from './http/requestId';
+import { accessLogMiddleware } from './http/accessLog';
 import { apiNotFound } from './http/notFound';
 import { createErrorHandler } from './http/errorHandler';
 import defaultLogger, { type Logger } from './logger';
@@ -82,6 +83,8 @@ export function createApp({
   app.set('trust proxy', config.trustProxy);
   // Request id before anything that can answer or fail, so every response and error log has one.
   app.use(requestIdMiddleware());
+  // One access-log line per finished request (S9) — after the request id, so the line carries it.
+  app.use(accessLogMiddleware(logger));
   // Security headers first — applied to every response before any route runs.
   app.use(cspMiddleware());
   app.use(corsMiddleware());

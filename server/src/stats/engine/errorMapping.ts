@@ -10,6 +10,7 @@
 // 이전에 이미 걸러내므로, 워커의 attempt()에서 이 분류를 만나는 건 방어적 재검사가
 // 우연히 트리거된 극히 드문 경우여야 한다 — 그래도 DB error_code에 PROCESS_ERROR
 // 대신 잘못된 값을 넣는 사고를 막기 위해 분류 자체는 여기서 정확히 한다.
+import { logger } from '../../logger';
 import {
   StatsEngineBusyError,
   StatsEngineDegradedError,
@@ -81,6 +82,6 @@ export function errorBodyFor(err: unknown): { code: string; error: string } {
   const classification = classifyEngineError(err);
   const code = classification === 'denied' ? reasonCodeForDenied(err) : errorCodeForFailure(err);
   const message = (classification === 'denied' ? DENIED_MESSAGES[code] : FAILURE_MESSAGES[code]) ?? 'Analysis request failed.';
-  console.error('[stats-analyze] request failed', { code, classification, detail: err instanceof Error ? err.message : err });
+  logger.error({ code, classification, detail: err instanceof Error ? err.message : err }, '[stats-analyze] request failed');
   return { code, error: message };
 }

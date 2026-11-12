@@ -45,16 +45,16 @@ export function startBackgroundJobs(pool: Pool): Stoppable[] {
   jobs.push(intervalJob('workspace-retention', () => {
     runWorkspaceRetention(pool)
       .then(({ deleted }) => {
-        if (deleted > 0) console.log(`[wr-server] workspace-retention: removed ${deleted} expired workspace(s)`);
+        if (deleted > 0) logger.info({ deleted }, '[wr-server] workspace-retention: removed expired workspaces');
       })
-      .catch((err) => console.error('[wr-server] workspace-retention error', err));
+      .catch((err) => logger.error({ err }, '[wr-server] workspace-retention error'));
   }, 24 * 60 * 60 * 1000));
 
   // EMR audit nonces (SEC-A L11): drop rows past the 24-hour retention, at start and hourly.
   jobs.push({
     name: 'emr-audit-nonce-sweeper',
     ...createAuditNonceSweeper(pool, {
-      onError: (err) => console.error('[wr-server] emr-audit-nonce sweep error', err),
+      onError: (err) => logger.error({ err }, '[wr-server] emr-audit-nonce sweep error'),
     }),
   });
 
@@ -62,7 +62,7 @@ export function startBackgroundJobs(pool: Pool): Stoppable[] {
   jobs.push({
     name: 'login-backoff-sweeper',
     ...createLoginBackoffSweeper(pool, {
-      onError: (err) => console.error('[wr-server] login-backoff sweep error', err),
+      onError: (err) => logger.error({ err }, '[wr-server] login-backoff sweep error'),
     }),
   });
 
@@ -70,16 +70,16 @@ export function startBackgroundJobs(pool: Pool): Stoppable[] {
   //  - fixtureMode: dev fixture clip 추론. uploadDir: 실 업로드 clip 추론(M3-7a).
   if (config.videoAnalysisEnabled && (config.video.fixtureMode || config.video.uploadDir)) {
     jobs.push({ name: 'video-analysis-worker', ...createVideoAnalysisWorker(pool, {}, { namespace: config.queueNamespace }) });
-    console.log(`[wr-server] video-analysis worker enabled (fixture=${config.video.fixtureMode}, upload=${!!config.video.uploadDir}, namespace=${config.queueNamespace})`);
+    logger.info({ fixture: config.video.fixtureMode, upload: !!config.video.uploadDir, namespace: config.queueNamespace }, '[wr-server] video-analysis worker enabled');
 
     // 영상 임시파일 회수(TTL·orphan): 시작 시 1회 + 1시간 간격. 비치명적.
     jobs.push(intervalJob('video-clip-cleanup', () => {
       runVideoClipCleanup(pool, config.queueNamespace)
         .then(({ clipsExpired, originalsDeleted, artifactsDeleted, sampleFramesDeleted, orphansDeleted }) => {
           const total = originalsDeleted + artifactsDeleted + sampleFramesDeleted + orphansDeleted;
-          if (total > 0) console.log(`[wr-server] video-cleanup: clips=${clipsExpired} originals=${originalsDeleted} artifacts=${artifactsDeleted} frames=${sampleFramesDeleted} orphans=${orphansDeleted}`);
+          if (total > 0) logger.info({ clips: clipsExpired, originals: originalsDeleted, artifacts: artifactsDeleted, frames: sampleFramesDeleted, orphans: orphansDeleted }, '[wr-server] video-cleanup');
         })
-        .catch((err) => console.error('[wr-server] video-cleanup error', err));
+        .catch((err) => logger.error({ err }, '[wr-server] video-cleanup error'));
     }, 60 * 60 * 1000));
   }
 
@@ -173,13 +173,13 @@ export async function main(): Promise<void> {
   try {
     await runMigrations(pool);
   } catch (err) {
-    console.error('[wr-server] Migration failed — shutting down', err);
+    logger.fatal({ err }, '[wr-server] Migration failed — shutting down');
     process.exit(1);
   }
 
   const server = createServer(app);
   await new Promise<void>((resolve) => server.listen(config.port, resolve));
-  console.log(`[wr-server] Listening on http://localhost:${config.port}`);
+  logger.info({ port: config.port }, `[wr-server] Listening on http://localhost:${config.port}`);
 
   const jobs = startBackgroundJobs(pool);
   const shutdown = createShutdown({

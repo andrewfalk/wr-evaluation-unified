@@ -1,6 +1,7 @@
 // PR4-B1 §C/D/D-1/E — 백그라운드 워커(sweepLoop/claimLoop 독립 루프), finishRun
 // (잠금+상태전이+감사를 한 트랜잭션), requeueOrFinish(BUSY 재큐잉), 취소.
 // 계획서(pr4-b-virtual-pnueli.md) 11차 통합본 참고.
+import { logger } from '../../logger';
 import os from 'os';
 import type { Pool, PoolClient } from 'pg';
 import type { AnalyzeResult } from '@wr/contracts';
@@ -453,7 +454,7 @@ export async function attempt(pool: Pool, row: StatsRunRow, shutdown?: AbortSign
       })
       .catch((err) => {
         consecutiveHeartbeatFailures += 1;
-        console.error('[stats-runs-queue] heartbeat write failed', err);
+        logger.error({ err }, '[stats-runs-queue] heartbeat write failed');
         if (consecutiveHeartbeatFailures >= config.stats.async.maxConsecutiveHeartbeatFailures) {
           clearInterval(heartbeatTimer);
         }
@@ -485,7 +486,7 @@ export async function attempt(pool: Pool, row: StatsRunRow, shutdown?: AbortSign
             const active = activeRuns.get(row.analysis_run_id);
             if (active) active.pid = pid ?? null;
             pool.query(`UPDATE stats_runs SET worker_pid=$2 WHERE id=$1`, [row.id, pid])
-              .catch((err) => console.error('[stats-runs-queue] worker_pid persist failed (best-effort)', err));
+              .catch((err) => logger.error({ err }, '[stats-runs-queue] worker_pid persist failed (best-effort)'));
           },
         };
         // 해제 적격(lift_eligible) 실행 — admission이 요청 시점에 권한자였던 상관행렬·예측 실행. 일반본은 그대로 만들고,
@@ -551,11 +552,11 @@ export async function attempt(pool: Pool, row: StatsRunRow, shutdown?: AbortSign
       await persist();
       return true;
     } catch (persistErr) {
-      console.error('[stats-runs-queue] persist failed, retrying', persistErr);
+      logger.error({ err: persistErr }, '[stats-runs-queue] persist failed, retrying');
       await new Promise((resolve) => setTimeout(resolve, 200 * 2 ** attemptNum));
     }
   }
-  console.error('[stats-runs-queue] persist exhausted retries — leaving to orphan/queue sweep', row.id);
+  logger.error({ runId: row.id }, '[stats-runs-queue] persist exhausted retries — leaving to orphan/queue sweep');
   // attempt()는 여기서도 reject하지 않는다 — claimTick의 top-level try/catch가 최종 방어선.
   return false;
 }
@@ -666,7 +667,7 @@ export function createStatsRunsQueueWorker(
       await sweepStale(pool, namespace);
       await sweepQueuedTerminal(pool, namespace);
     } catch (err) {
-      console.error('[stats-runs-queue] sweepTick failed', err);
+      logger.error({ err }, '[stats-runs-queue] sweepTick failed');
     } finally {
       sweeping = false;
       done();
@@ -693,7 +694,7 @@ export function createStatsRunsQueueWorker(
         stopError = new Error(`stats run ${claimed.analysis_run_id}: its outcome could not be stored while stopping`);
       }
     } catch (err) {
-      console.error('[stats-runs-queue] claimTick failed', err);
+      logger.error({ err }, '[stats-runs-queue] claimTick failed');
       if (stopping) stopError = err;
     } finally {
       claiming = false;

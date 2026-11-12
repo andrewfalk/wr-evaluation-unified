@@ -9,6 +9,7 @@
 //  - 권한은 조회자의 "현재" 권한이다(실행자가 아니다). 조회 직후 한 번 더 확인하고, 회수됐으면 일반본을 돌려준다.
 //  - 해제본을 내보내기 전에 strict 감사를 먼저 쓴다. 감사가 실패하면 500이고 일반본으로 강등하지 않는다.
 //  - 이 모드들은 컨텍스트(frozen_dataset)가 없으므로 감사 extra는 실행 식별 정보만 담는다.
+import { logger } from '../../logger';
 import type { Pool } from 'pg';
 import type { AnalyzeResult, LimitedDisclosureStatus, RunManifest } from '@wr/contracts';
 import { canonicalDigest } from '../../canonicalSerializer';
@@ -114,7 +115,7 @@ export async function deliverStoredLimited(
         extra: auditExtra(run, { limitedRowFieldsAttached: false, smallCellLimitStatus: 'unavailable_source_missing' }),
       });
     } catch (err) {
-      console.error('[stats-stored-limited] best-effort 폴백 감사 실패 — 응답은 그대로 반환', err);
+      logger.error({ err }, '[stats-stored-limited] best-effort 폴백 감사 실패 — 응답은 그대로 반환');
     }
     if (signal?.aborted) return { aborted: true };
     return aggregate('unavailable_source_missing');

@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import type { Request, Response, NextFunction } from 'express';
 import { writeAuditLog, auditMiddleware, auditLogin, auditLogout, auditRefreshFail } from '../audit';
 import { createFakePool, type FakePool } from '../../testing/fakePool';
+import { logger } from '../../logger';
 
 function auditFake(fail = false): FakePool {
   return createFakePool({
@@ -56,7 +57,7 @@ describe('writeAuditLog', () => {
 
   it('does not throw when DB fails (fire-and-forget)', async () => {
     const fake = auditFake(true);
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
     await expect(writeAuditLog(fake.pool, { action: 'test', outcome: 'success' })).resolves.toBeUndefined();
     expect(consoleSpy).toHaveBeenCalled();
     consoleSpy.mockRestore();

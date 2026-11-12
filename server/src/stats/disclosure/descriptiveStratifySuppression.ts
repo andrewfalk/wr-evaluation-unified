@@ -2,6 +2,7 @@
 // 범위는 "동일 변수의 전체·그룹 통계 간 차감 방지"까지다(계획서 §4) — 여러 요청을
 // 조합하는 교차질의 공격은 방어 범위 밖(stats/policy/policy.ts의 differencing guard를
 // 값/관계 기반으로 재설계하는 훨씬 큰 별도 이니셔티브가 필요, 이번 범위 아님).
+import { logger } from '../../logger';
 import type { Pool } from 'pg';
 import type { AnalyticsVariableMetadata } from '@wr/analytics-core';
 import {
@@ -300,7 +301,7 @@ export async function resolveStratifyGroupLabels(
     // 리뷰 지적). "사용자를 못 찾음"과 동일한 중립 라벨로 대체해 안전한 쪽으로
     // 실패한다 — 분석 자체는 계속 성공시키되(표시 전용 기능이 핵심 계산을
     // 막을 이유는 없다), 식별 가능한 원문은 어떤 경로로도 새지 않게 한다.
-    console.error('[stats-descriptive-stratify] 담당의 표시명 조회 실패 — 원본 UUID를 노출하지 않고 중립 라벨로 대체', err);
+    logger.error({ err }, '[stats-descriptive-stratify] 담당의 표시명 조회 실패 — 원본 UUID를 노출하지 않고 중립 라벨로 대체');
     return {
       ...stratified,
       groups: stratified.groups.map((g) => {

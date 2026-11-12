@@ -6,6 +6,7 @@
 //   2) 모든 종료 시도는 requestTermination() 하나로 모은다(kill() 재귀 방지).
 //   3) 세마포어 슬롯 반환은 오직 'close'(정상) 또는 최종 안전 타이머(비정상, 미반환)에서만.
 //   4) requestSettled(호출자에게 확정 알림)와 processClosed(OS가 실제 종료 확인)를 분리한다.
+import { logger } from '../../logger';
 import { spawn } from 'child_process';
 import path from 'path';
 import config from '../../config';
@@ -249,7 +250,7 @@ export async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
       if (exitCode === 0) {
         if (timingEnabled) {
           const timing = buildEngineTimingLog(Buffer.concat(stderrChunks).toString('utf8'), spawnWallMs, Date.now());
-          console.info(`[stats-engine] timing ${JSON.stringify(timing)}`);
+          logger.info({ timing }, '[stats-engine] timing');
         }
         let parsed: unknown;
         try {
@@ -271,9 +272,9 @@ export async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
       const stderrText = Buffer.concat(stderrChunks).toString('utf8');
       const markerMatch = stderrText.match(/STATS_ENGINE_ERROR (\{.*\})/);
       if (markerMatch) {
-        console.error('[stats-engine] process error marker:', markerMatch[1]);
+        logger.error({ marker: markerMatch[1] }, '[stats-engine] process error marker');
       } else if (stderrText) {
-        console.error('[stats-engine] process exited non-zero with stderr:', stderrText.slice(0, 2000));
+        logger.error({ stderr: stderrText.slice(0, 2000) }, '[stats-engine] process exited non-zero with stderr');
       }
       reject(new StatsEngineProcessError('PROCESS_ERROR', `stats-engine 프로세스가 code ${exitCode}로 종료됨`));
     }
@@ -341,7 +342,7 @@ export async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
         // 안전 타이머가 이미 확정한 뒤 늦게 온 close — Promise·슬롯·DB 저장은 다시
         // 만들지 않되 정리 작업(타이머·리스너)은 반드시 수행한다.
         clearAllTimers();
-        console.warn('[stats-engine] degraded 유발 프로세스가 뒤늦게 실제로 종료됨(late close), engineDegraded는 유지됨');
+        logger.warn('[stats-engine] degraded 유발 프로세스가 뒤늦게 실제로 종료됨(late close), engineDegraded는 유지됨');
         removeAllListeners();
         return;
       }

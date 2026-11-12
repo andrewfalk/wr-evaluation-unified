@@ -1,5 +1,6 @@
 // Workspace handlers: list, read, save, delete.
 // Split out of routes/workspaces.ts (S5 P1-31); handler bodies unchanged.
+import { logger } from '../../logger';
 import type { Request, Response } from 'express';
 import type { Pool } from 'pg';
 import { writeAuditLog } from '../../middleware/audit';
@@ -263,7 +264,7 @@ export async function saveWorkspace(
   const ack: WorkspaceSaveAck = { saved: [], skipped: [], conflicts: [], lockedByOther: [] };
   results.forEach((r, i) => {
     const meta = metas[i];
-    if (r.status === 'rejected') console.error('[workspaces] patient_records upsert failed', { patientId: meta.id, err: r.reason });
+    if (r.status === 'rejected') logger.error({ patientId: meta.id, err: r.reason }, '[workspaces] patient_records upsert failed');
     const outcome: UpsertOutcome = r.status === 'fulfilled' ? r.value : { kind: 'skipped', reason: 'error' };
     if (outcome.kind === 'saved') {
       ack.saved.push({ id: meta.id, revision: outcome.revision, assignedDoctorUserId: outcome.assignedDoctorUserId });
@@ -298,7 +299,7 @@ export async function saveWorkspace(
     await pool.query(STAMP_SAVED_SNAPSHOT_SQL, [
       JSON.stringify(ack.saved.map((s) => ({ id: s.id, revision: s.revision, assigned: s.assignedDoctorUserId }))),
       savedWorkspaceId, orgId, session.userId, savedVersion,
-    ]).catch((err: unknown) => console.error('[workspaces] snapshot revision stamp failed', err));
+    ]).catch((err: unknown) => logger.error({ err }, '[workspaces] snapshot revision stamp failed'));
   }
 
   const rows = await listQuery(pool, orgId, session.userId);

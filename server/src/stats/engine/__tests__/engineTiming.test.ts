@@ -25,6 +25,7 @@ vi.mock('../../../config', async () => ({
 
 import { spawn } from 'child_process';
 import config from '../../../config';
+import { logger } from '../../../logger';
 import {
   runStatsEngine,
   buildEngineTimingLog,
@@ -91,7 +92,7 @@ describe('buildEngineTimingLog', () => {
 });
 
 function spyInfo() {
-  return vi.spyOn(console, 'info').mockImplementation(() => undefined);
+  return vi.spyOn(logger, 'info').mockImplementation(() => undefined);
 }
 
 describe('runStatsEngine with STATS_ENGINE_TIMING', () => {
@@ -131,16 +132,16 @@ describe('runStatsEngine with STATS_ENGINE_TIMING', () => {
     const result = await promise;
     expect(result.continuous[0]!.variableKey).toBe('v1');
     expect(info).toHaveBeenCalledTimes(1);
-    const line = String(info.mock.calls[0]![0]);
-    expect(line.startsWith('[stats-engine] timing ')).toBe(true);
-    const logged = JSON.parse(line.slice('[stats-engine] timing '.length)) as Record<string, unknown>;
+    const [fields, msg] = info.mock.calls[0] as unknown as [{ timing: Record<string, unknown> }, string];
+    expect(msg).toBe('[stats-engine] timing');
+    const logged = fields.timing;
     expect(logged).toMatchObject({ mode: 'descriptive', computeMs: 30, markerFound: true });
     expect(typeof logged.totalMs).toBe('number');
   });
 
   it('on: a failed run logs no timing line', async () => {
     setTiming(true);
-    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
     const promise = runStatsEngine(req);
     fake.stderr.emit('data', Buffer.from('STATS_ENGINE_ERROR {"code":"COMPUTE_ERROR","detail":"x"}\n'));
     fake.emit('close', 1, null);

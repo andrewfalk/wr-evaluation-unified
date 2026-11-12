@@ -8,6 +8,7 @@
 //   - 감사는 그 사건이 일어나는 트랜잭션 안에서 즉시 쓴다(admission이 캐시hit/합류/
 //     거절을, finishRun이 실행의 최종 성패를 각각 담당) — §B는 일반 실행 감사를
 //     다시 쓰지 않는다.
+import { logger } from '../../logger';
 import type { Request, Response } from 'express';
 import type { Pool } from 'pg';
 import { withWriteTransaction } from '../../db/withWriteTransaction';
@@ -292,7 +293,7 @@ export async function finalizeAnalyzeResponse(
         }),
       });
     } catch (err) {
-      console.error('[stats-analyze] best-effort 제한 해제 폴백 감사 실패 — 응답은 그대로 반환', err);
+      logger.error({ err }, '[stats-analyze] best-effort 제한 해제 폴백 감사 실패 — 응답은 그대로 반환');
     }
   }
 

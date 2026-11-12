@@ -1,4 +1,5 @@
 // The stats background jobs a server process starts (moved out of src/index.ts in S8 so the start gate is testable).
+import { logger } from '../../logger';
 import type { Pool } from 'pg';
 import config from '../../config';
 import { runStatsRunCleanup } from '../../jobs/statsRunCleanup';
@@ -19,9 +20,9 @@ export function startStatsBackgroundJobs(pool: Pool): { stop: () => Promise<void
   const doStatsRunCleanup = () => {
     runStatsRunCleanup(pool, namespace)
       .then(({ deleted }) => {
-        if (deleted > 0) console.log(`[wr-server] stats-run-cleanup: removed ${deleted} expired stats_runs row(s)`);
+        if (deleted > 0) logger.info({ deleted }, '[wr-server] stats-run-cleanup: removed expired stats_runs rows');
       })
-      .catch((err) => console.error('[wr-server] stats-run-cleanup error', err));
+      .catch((err) => logger.error({ err }, '[wr-server] stats-run-cleanup error'));
   };
   doStatsRunCleanup();
   const cleanupTimer = setInterval(doStatsRunCleanup, 60 * 60 * 1000);
@@ -31,7 +32,7 @@ export function startStatsBackgroundJobs(pool: Pool): { stop: () => Promise<void
   // 독립 등록(계획서 §C — 긴 작업 실행 중에도 다른 queued 작업의 취소·대기초과가
   // 지연되지 않아야 함).
   const worker = createStatsRunsQueueWorker(pool, { namespace });
-  console.log(`[wr-server] stats-runs-queue worker enabled (namespace=${namespace})`);
+  logger.info({ namespace }, '[wr-server] stats-runs-queue worker enabled');
 
   return {
     stop: async () => {
