@@ -225,6 +225,7 @@ describe.skipIf(!TEST_DATABASE_URL)('POST /api/patients/:id/identity-correction 
   it('the caller\'s own lock on the target case does not block the correction', async () => {
     const { ids: [pid] } = await seedPerson(1);
     const token = await holdLock(docA, pid);
+    lockMode.mode = 'enforce'; // the early gate is on too: the caller's token passes it as well
     expect((await correct(docA, pid, body(), '1', { 'X-Lock-Token': token })).status).toBe(200);
   });
 
