@@ -28,7 +28,7 @@ import { makeRouterApp } from '../../testing/app';
 import { pollOnce } from '../../workers/videoAnalysisWorker';
 import { runVideoClipCleanup } from '../../jobs/videoClipCleanup';
 import {
-  createIntegrationOrg, integrationPool, TEST_DATABASE_URL, type IntegrationOrg, type IntegrationUser,
+  createIntegrationOrg, integrationPool, waitForLockWait, TEST_DATABASE_URL, type IntegrationOrg, type IntegrationUser,
 } from '../../testing/integrationDb';
 
 const OTHER = 'ns-other';
@@ -282,6 +282,69 @@ describe.skipIf(!TEST_DATABASE_URL)('video analysis queue namespace isolation (S
       // control: its own cleanup removes them
       await runVideoClipCleanup(pool, OTHER);
       expect(exists(other.files)).toEqual([false, false, false, false]);
+    });
+
+    // A row that changes between the cleanup's SELECT and its UPDATE (here: another cleanup of the same namespace
+    // clears the path first) is not this run's — its UPDATE re-checks the path, changes nothing, and the run neither
+    // removes the file nor counts it. Deterministic: a holder transaction locks the row, the cleanup's UPDATE waits on
+    // it (pg_stat_activity), the holder clears the path and commits.
+    it.each([
+      ['originals', 'clip', `UPDATE video_analysis_clips SET upload_path = NULL, file_state = 'deleted' WHERE id = $1`, 'originalsDeleted'],
+      ['keypoints', 'job', `UPDATE video_analysis_jobs SET keypoints_path = NULL, keypoints_sha256 = NULL WHERE id = $1`, 'artifactsDeleted'],
+      ['thumbnail', 'clip', `UPDATE video_analysis_clips SET sample_frame_path = NULL WHERE id = $1`, 'sampleFramesDeleted'],
+      ['frames dir', 'job', `UPDATE video_analysis_jobs SET frames_path = NULL WHERE id = $1`, 'framesDirsDeleted'],
+    ] as const)('%s: a path cleared after the SELECT is not deleted or counted by this run', async (step, table, clear, counter) => {
+      const CLEAN_APP = 'wr-itest-video-ns-cleanup';
+      const cleanPool = integrationPool(CLEAN_APP, { max: 2 });
+      const holderPool = integrationPool('wr-itest-video-ns-holder', { max: 2 });
+      try {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-ns-race-'));
+        fs.mkdirSync(path.join(dir, 'artifacts'));
+        fs.mkdirSync(path.join(dir, 'tmp'));
+        state.uploadDir = dir;
+        const pid = await seedPatient();
+        // Only the step under test has work: an apply_shell clip is not an original (step 1 skips it).
+        const clipId = await insertClip(pid, OWN, { sourceType: step === 'originals' ? 'upload' : 'apply_shell' });
+        const jobId = await insertJob(pid, clipId, OWN);
+        await pool.query(`UPDATE video_analysis_clips SET expires_at = now() - interval '1 minute' WHERE id = $1`, [clipId]);
+        if (step === 'originals') {
+          const p = path.join(dir, `${clipId}.bin`);
+          fs.writeFileSync(p, 'x');
+          await pool.query(`UPDATE video_analysis_clips SET upload_path = $2, file_state = 'present' WHERE id = $1`, [clipId, p]);
+        } else if (step === 'thumbnail') {
+          const p = path.join(dir, 'artifacts', `${clipId}.${crypto.randomUUID()}.thumb.jpg`);
+          fs.writeFileSync(p, 'x');
+          await pool.query(`UPDATE video_analysis_clips SET sample_frame_path = $2 WHERE id = $1`, [clipId, p]);
+        } else if (step === 'keypoints') {
+          const p = path.join(dir, 'artifacts', `${jobId}.keypoints.json`);
+          fs.writeFileSync(p, '{}');
+          await pool.query(`UPDATE video_analysis_jobs SET keypoints_path = $2, keypoints_sha256 = 'k' WHERE id = $1`, [jobId, p]);
+        } else {
+          const p = path.join(dir, 'artifacts', `${jobId}.frames`);
+          fs.mkdirSync(p);
+          await pool.query(`UPDATE video_analysis_jobs SET frames_path = $2 WHERE id = $1`, [jobId, p]);
+        }
+        const rowId = table === 'clip' ? clipId : jobId;
+
+        const holder = await holderPool.connect();
+        try {
+          await holder.query('BEGIN');
+          await holder.query(`SELECT 1 FROM video_analysis_${table === 'clip' ? 'clips' : 'jobs'} WHERE id = $1 FOR UPDATE`, [rowId]);
+          const cleanup = runVideoClipCleanup(cleanPool, OWN);
+          await waitForLockWait(pool, CLEAN_APP);
+          await holder.query(clear, [rowId]);
+          await holder.query('COMMIT');
+          const res = await cleanup;
+          expect(res[counter]).toBe(0);
+          if (step === 'originals') expect(res.clipsExpired).toBe(0);
+        } finally {
+          await holder.query('ROLLBACK').catch(() => {});
+          holder.release();
+        }
+      } finally {
+        await cleanPool.end();
+        await holderPool.end();
+      }
     });
   });
 });
