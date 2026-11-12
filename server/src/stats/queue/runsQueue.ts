@@ -429,9 +429,17 @@ async function runViewsFor(
 // §C attempt() — claim된 행 하나를 실행한다. heartbeat(연속실패 카운터 리셋 포함)·
 // spawn 직전 재확인(취소+버전드리프트)·BUSY 재큐잉·저장 재시도 루프.
 // ---------------------------------------------------------------------------
-export async function attempt(pool: Pool, row: StatsRunRow): Promise<void> {
+// S9: the reason a server shutdown aborts a run with — such a run goes back to the queue (requeueOrFinish), it is
+// not cancelled: nobody asked to cancel it. A user's cancel aborts with the default reason (requestCancel).
+const SHUTDOWN_ABORT = Symbol('stats worker shutdown');
+
+// Resolves true once the outcome is stored, false when every persist retry failed (the run is left to the sweeps).
+export async function attempt(pool: Pool, row: StatsRunRow, shutdown?: AbortSignal): Promise<boolean> {
   const controller = new AbortController();
   activeRuns.set(row.analysis_run_id, { controller, pid: null });
+  const onShutdown = () => controller.abort(SHUTDOWN_ABORT);
+  if (shutdown?.aborted) onShutdown();
+  else shutdown?.addEventListener('abort', onShutdown, { once: true });
 
   let heartbeatInFlight = false;
   let consecutiveHeartbeatFailures = 0;
@@ -521,6 +529,8 @@ export async function attempt(pool: Pool, row: StatsRunRow): Promise<void> {
   } catch (err) {
     if (err instanceof StatsEngineBusyError) {
       outcome = { kind: 'requeue' }; // 계산 실패가 아니다 — 슬롯을 못 잡았을 뿐
+    } else if (err instanceof StatsEngineCancelledError && controller.signal.reason === SHUTDOWN_ABORT) {
+      outcome = { kind: 'requeue' }; // S9: 서버 종료로 멈춤 — 다음 기동이 다시 처리(취소 요청이 있었으면 requeueOrFinish가 cancelled로)
     } else if (err instanceof StatsEngineCancelledError) {
       outcome = { kind: 'cancelled' }; // finishRun이 cancel_requested_at을 다시 확인하므로 결과는 동일
     } else {
@@ -529,6 +539,7 @@ export async function attempt(pool: Pool, row: StatsRunRow): Promise<void> {
   } finally {
     clearInterval(heartbeatTimer);
     activeRuns.delete(row.analysis_run_id);
+    shutdown?.removeEventListener('abort', onShutdown);
   }
 
   const persist = outcome.kind === 'requeue'
@@ -538,7 +549,7 @@ export async function attempt(pool: Pool, row: StatsRunRow): Promise<void> {
   for (let attemptNum = 0; attemptNum < config.stats.async.maxFinishPersistRetries; attemptNum += 1) {
     try {
       await persist();
-      return;
+      return true;
     } catch (persistErr) {
       console.error('[stats-runs-queue] persist failed, retrying', persistErr);
       await new Promise((resolve) => setTimeout(resolve, 200 * 2 ** attemptNum));
@@ -546,6 +557,7 @@ export async function attempt(pool: Pool, row: StatsRunRow): Promise<void> {
   }
   console.error('[stats-runs-queue] persist exhausted retries — leaving to orphan/queue sweep', row.id);
   // attempt()는 여기서도 reject하지 않는다 — claimTick의 top-level try/catch가 최종 방어선.
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -634,11 +646,22 @@ export async function requestCancel(
 export function createStatsRunsQueueWorker(
   pool: Pool,
   { namespace = config.queueNamespace }: { namespace?: string } = {},
-): { stop: () => void } {
+): { stop: () => Promise<void> } {
+  // S9: stop() stops both loops, aborts the run in flight (it goes back to the queue — attempt()) and resolves once
+  // the ticks in progress, including that run's persistence, are done. The caller closes the pool after it.
+  const shutdown = new AbortController();
+  let stopping = false;
+  let sweepRun: Promise<void> | null = null;
+  let claimRun: Promise<void> | null = null;
+  // A failure while stopping (the run in flight could not be put back) — stop() rejects with it.
+  let stopError: unknown = null;
+
   let sweeping = false;
   const sweepTick = async () => {
-    if (sweeping) return;
+    if (sweeping || stopping) return;
     sweeping = true;
+    let done!: () => void;
+    sweepRun = new Promise<void>((resolve) => { done = resolve; });
     try {
       await sweepStale(pool, namespace);
       await sweepQueuedTerminal(pool, namespace);
@@ -646,13 +669,16 @@ export function createStatsRunsQueueWorker(
       console.error('[stats-runs-queue] sweepTick failed', err);
     } finally {
       sweeping = false;
+      done();
     }
   };
 
   let claiming = false;
   const claimTick = async () => {
-    if (claiming) return;
+    if (claiming || stopping) return;
     claiming = true;
+    let done!: () => void;
+    claimRun = new Promise<void>((resolve) => { done = resolve; });
     try {
       // 코드리뷰(2026-09-24) — §C-1(limited_row 진단 재계산)처럼 큐 밖에서 같은
       // 전역 엔진 세마포어를 점유하는 호출이 있으면, 슬롯을 미리 확인하지 않고
@@ -663,11 +689,15 @@ export function createStatsRunsQueueWorker(
       // 소비하고, requeue_count는 claim된 뒤 실제로 겪은 경합에만 쓰인다.
       if (!isEngineSlotAvailable()) return;
       const claimed = await claimNextQueuedRun(pool, config.stats.async.queueWaitMs, namespace);
-      if (claimed) await attempt(pool, claimed);
+      if (claimed && !(await attempt(pool, claimed, shutdown.signal)) && stopping) {
+        stopError = new Error(`stats run ${claimed.analysis_run_id}: its outcome could not be stored while stopping`);
+      }
     } catch (err) {
       console.error('[stats-runs-queue] claimTick failed', err);
+      if (stopping) stopError = err;
     } finally {
       claiming = false;
+      done();
     }
   };
 
@@ -677,9 +707,13 @@ export function createStatsRunsQueueWorker(
   claimTimer.unref();
 
   return {
-    stop: () => {
+    stop: async () => {
+      stopping = true;
       clearInterval(sweepTimer);
       clearInterval(claimTimer);
+      shutdown.abort();
+      await Promise.all([sweepRun, claimRun]);
+      if (stopError) throw stopError;
     },
   };
 }

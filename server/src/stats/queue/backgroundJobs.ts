@@ -10,7 +10,7 @@ import { createStatsRunsQueueWorker } from './runsQueue';
  * unless the deployment gate is open (flag ∧ intranet, the same gate as the routes): standalone + flag starts no
  * worker, since the routes are closed there anyway.
  */
-export function startStatsBackgroundJobs(pool: Pool): { stop: () => void } | null {
+export function startStatsBackgroundJobs(pool: Pool): { stop: () => Promise<void> } | null {
   if (!isStatsDeploymentGateOpen()) return null;
   const namespace = config.queueNamespace;
 
@@ -34,9 +34,9 @@ export function startStatsBackgroundJobs(pool: Pool): { stop: () => void } | nul
   console.log(`[wr-server] stats-runs-queue worker enabled (namespace=${namespace})`);
 
   return {
-    stop: () => {
+    stop: async () => {
       clearInterval(cleanupTimer);
-      worker.stop();
+      await worker.stop();
     },
   };
 }
