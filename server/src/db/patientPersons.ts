@@ -217,34 +217,37 @@ export async function resolvePatientPersonId(
     return { personId, warnings };
   }
 
-  try {
-    const inserted = await db.query<{ id: string }>(
-      `INSERT INTO patient_persons (organization_id, patient_no, name, birth_date)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id`,
-      [orgId, meta.patientNo, meta.name, meta.birthDate]
-    );
-    return { personId: inserted.rows[0].id, warnings: [] };
-  } catch (err) {
-    // A concurrent request may have inserted the same person after our SELECT.
-    // 위 SELECT와 같은 이유로 여기서도 FOR UPDATE로 행을 잡아야 한다.
-    const retry = await db.query<PatientPersonRow>(
-      `SELECT id, name, birth_date
-       FROM patient_persons
-       WHERE organization_id = $1
-         AND patient_no = $2
-         AND deleted_at IS NULL
-       LIMIT 1
-       FOR UPDATE`,
-      [orgId, meta.patientNo]
-    );
-    if (retry.rows.length > 0) {
-      const row = retry.rows[0];
-      assertCompatibleBirthDate(row.birth_date, meta.birthDate);
-      const warnings = buildNameMismatchWarning(row, meta);
-      const personId = await updateExistingPerson(db, row.id, orgId, meta);
-      return { personId, warnings };
-    }
-    throw err;
+  // A concurrent request may insert the same number after our SELECT. ON CONFLICT DO NOTHING waits for that
+  // transaction: committed → no row here, then the re-read below finds its person (locked FOR UPDATE for the
+  // same reason as above); rolled back → our INSERT goes through. (S7-R2: this used to catch the INSERT's
+  // 23505 and re-read in the same transaction, which PostgreSQL refuses after an error — 25P02 → 500.)
+  const inserted = await db.query<{ id: string }>(
+    `INSERT INTO patient_persons (organization_id, patient_no, name, birth_date)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (organization_id, patient_no) WHERE deleted_at IS NULL AND patient_no IS NOT NULL DO NOTHING
+     RETURNING id`,
+    [orgId, meta.patientNo, meta.name, meta.birthDate]
+  );
+  if (inserted.rows.length > 0) return { personId: inserted.rows[0].id, warnings: [] };
+
+  const retry = await db.query<PatientPersonRow>(
+    `SELECT id, name, birth_date
+     FROM patient_persons
+     WHERE organization_id = $1
+       AND patient_no = $2
+       AND deleted_at IS NULL
+     LIMIT 1
+     FOR UPDATE`,
+    [orgId, meta.patientNo]
+  );
+  if (retry.rows.length > 0) {
+    const row = retry.rows[0];
+    assertCompatibleBirthDate(row.birth_date, meta.birthDate);
+    const warnings = buildNameMismatchWarning(row, meta);
+    const personId = await updateExistingPerson(db, row.id, orgId, meta);
+    return { personId, warnings };
   }
+  // The conflicting person was released (soft-deleted) between our INSERT and the re-read — a timing race,
+  // not a data problem: 409 PATIENT_PERSON_VANISHED (retriable), as when updateExistingPerson loses one.
+  throw new PatientPersonVanishedError();
 }

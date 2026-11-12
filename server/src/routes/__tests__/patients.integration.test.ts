@@ -361,6 +361,25 @@ describe.skipIf(!TEST_DATABASE_URL)('PATCH /api/patients/:id (real PostgreSQL, S
     expect(await personDeleted(personId)).toBe(true);
   });
 
+  it('R2: a new patient number committed by another transaction meanwhile → 200, linked to that person; the old one released', async () => {
+    const no = `NO-${crypto.randomUUID()}`;
+    const { pid, personId: oldPerson } = await seed({ patientNo: `NO-${crypto.randomUUID()}` });
+    let otherPerson!: string;
+    await withHolder(async (t1) => {
+      await t1.query('BEGIN');
+      otherPerson = (await t1.query<{ id: string }>(
+        `INSERT INTO patient_persons (organization_id, patient_no, name) VALUES ($1, $2, '수정 환자') RETURNING id`,
+        [org.orgId, no],
+      )).rows[0].id;
+      const pending = patch(docA, pid, 1, { data: data({ patientNo: no }) });
+      await waitForLockWait(holderPool, APP);
+      await t1.query('COMMIT');
+      expect((await pending).status).toBe(200);
+    });
+    expect((await record(pid)).person).toBe(otherPerson);
+    expect(await personDeleted(oldPerson)).toBe(true);
+  });
+
   it('the same number keeps the person (not released)', async () => {
     const no = `NO-${crypto.randomUUID()}`;
     const { pid, personId } = await seed({ patientNo: no });
