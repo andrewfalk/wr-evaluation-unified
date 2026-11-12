@@ -28,7 +28,7 @@
 
 | 영역 | 기술 |
 |------|------|
-| API 서버 | Node.js 20 + TypeScript + Express |
+| API 서버 | Node.js 22 + TypeScript + Express |
 | 데이터베이스 | PostgreSQL 16 (감사 로그 파티셔닝 포함) |
 | 리버스 프록시 / HTTPS | Caddy 2 (내부 CA 자동 발급) |
 | 컨테이너 | Docker Compose v2.17+ (profile 기반 backup 분리) |
