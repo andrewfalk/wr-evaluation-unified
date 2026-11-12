@@ -7,3 +7,4 @@ export { applyVideoAnalysisInTx, type ApplyVideoAnalysisResult, type ApplyVideoA
 export { createPatient, type CreatePatientResult, type CreatePatientParams } from './createPatient';
 export { patchPatient, type PatchPatientResult, type PatchPatientParams } from './patchPatient';
 export { softDeletePatient, type SoftDeletePatientResult } from './softDeletePatient';
+export { assignPatient, type AssignPatientResult } from './assignPatient';
