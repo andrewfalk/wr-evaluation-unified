@@ -6,3 +6,4 @@ export { upsertFromWorkspace, type UpsertOutcome, type SkipReason } from './upse
 export { applyVideoAnalysisInTx, type ApplyVideoAnalysisResult, type ApplyVideoAnalysisParams } from './applyVideoAnalysis';
 export { createPatient, type CreatePatientResult, type CreatePatientParams } from './createPatient';
 export { patchPatient, type PatchPatientResult, type PatchPatientParams } from './patchPatient';
+export { softDeletePatient, type SoftDeletePatientResult } from './softDeletePatient';

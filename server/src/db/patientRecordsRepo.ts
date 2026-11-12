@@ -373,3 +373,36 @@ export async function updateFromPatch(db: QueryRunner, w: PatchWrite): Promise<P
   );
   return updated[0];
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Patient soft delete (S7-5, from routes/patients/delete.ts)
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * Soft delete at `revision` (the revision is not bumped). `rowCount` 0 when the revision moved on or the
+ * patient is already gone (the caller tells them apart); `personId` is the deleted case's person.
+ */
+export async function softDelete(
+  db: QueryRunner, id: string, orgId: string, revision: number,
+): Promise<{ rowCount: number; personId: string | null | undefined }> {
+  const result = await db.query<{ patient_person_id: string | null }>(
+      `UPDATE patient_records
+       SET deleted_at = now()
+       WHERE id = $1 AND organization_id = $2 AND revision = $3 AND deleted_at IS NULL
+       RETURNING patient_person_id`,
+      [id, orgId, revision]
+  );
+  return { rowCount: result.rowCount ?? 0, personId: result.rows[0]?.patient_person_id };
+}
+
+/** The patient's revision and deleted_at in the organization, deleted or not — or none. */
+export async function selectRevisionAndDeleted(
+  db: QueryRunner, id: string, orgId: string,
+): Promise<{ revision: number; deleted_at: Date | null } | undefined> {
+  const { rows } = await db.query<{ revision: number; deleted_at: Date | null }>(
+        `SELECT revision, deleted_at FROM patient_records
+         WHERE id = $1 AND organization_id = $2`,
+        [id, orgId]
+  );
+  return rows[0];
+}

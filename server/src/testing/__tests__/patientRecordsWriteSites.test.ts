@@ -15,7 +15,6 @@ const ALLOWED = new Set([
   'db/patientRecordsRepo.ts',
   'db/patientIdentityCorrection.ts',
   'routes/patients/assignment.ts',
-  'routes/patients/delete.ts',
 ]);
 
 // Whitespace between the keywords may include newlines (wider than the one-line DoD grep).
