@@ -1,11 +1,7 @@
-interface QueryResult<T> {
-  rows: T[];
-  rowCount?: number | null;
-}
+import type { QueryRunner } from './queryRunner';
 
-export interface QueryRunner {
-  query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<QueryResult<T>>;
-}
+// Moved to db/queryRunner.ts (S7-0); re-exported for existing imports.
+export type { QueryRunner } from './queryRunner';
 
 export interface PatientPersonMeta {
   name: string;

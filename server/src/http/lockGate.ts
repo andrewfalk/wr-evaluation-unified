@@ -5,11 +5,12 @@
 import type { Request } from 'express';
 import type { Pool } from 'pg';
 import config from '../config';
-import { checkLockForWrite, type LockRow } from '../db/patientLocks';
+import type { LockRow } from '../db/patientLocks';
 import type { QueryRunner } from '../db/patientPersons';
-import { writeAuditLog } from '../middleware/audit';
 import { sessionOf } from './authz';
 import { lockTokenOf } from './lockToken';
+import type { PatientWriteContext } from '../domain/patients/context';
+import { runLockGate } from '../domain/patients/lockGate';
 
 // holder 응답에는 holderName/acquiredAt/expiresAt만 노출 — leaseToken/clientInstanceId/
 // sessionId/userId는 절대 노출하지 않는다.
@@ -24,6 +25,8 @@ export function lockHolderResponse(lock: LockRow): { holderName: string; acquire
 // patchPatient/deletePatient/assignPatient의 쓰기 게이트. 호출 전 lockPatientAnchor()로
 // 앵커(FOR UPDATE)를 이미 잡아둔 상태여야 한다.
 // off: 항상 통과(구버전 배포 호환). observe: 평가·감사로그만, 절대 막지 않음. enforce: 실제 차단.
+// S7-0: 본문은 domain/patients/lockGate.ts runLockGate로 옮겼고 이 함수는 요청을 컨텍스트로 바꾸는
+// 어댑터다(S7 경로가 모두 서비스로 옮겨지면 S7-8a에서 삭제).
 export async function evaluateLockGate(
   pool: Pool,
   client: QueryRunner,
@@ -37,24 +40,18 @@ export async function evaluateLockGate(
   if (config.lockEnforcementMode === 'off') return null;
 
   const leaseToken = leaseTokenOverride !== undefined ? leaseTokenOverride : lockTokenOf(req);
-  const result = await checkLockForWrite(client, { patientId, orgId, leaseToken });
-  if (result.ok) return null;
-
   const session = sessionOf(req);
-  if (config.lockEnforcementMode === 'observe') {
-    // observe 모드는 console.warn이 아니라 감사 로그로 남긴다 — 운영에서 통계·추적 가능해야
-    // "관찰"이 의미가 있다. 절대 요청을 막지 않는다(계속 진행).
-    void writeAuditLog(pool, {
-      actorUserId: session.userId, actorOrgId: orgId, action: 'patient_lock_observed_block',
-      targetType: 'patient', targetId: patientId, outcome: 'success',
-      ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null,
-      extra: { holderName: result.heldBy.holderName },
-    });
-    return null;
-  }
+  const ctx: PatientWriteContext = {
+    actor: { userId: session.userId, role: session.role, name: session.name },
+    orgId,
+    leaseToken,
+    audit: { ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null },
+  };
+  const { blocked } = await runLockGate(client, pool, ctx, { patientId, leaseToken });
+  if (!blocked) return null;
 
   return {
     status: 423,
-    body: { code: 'LOCK_HELD', error: `Currently being edited by ${result.heldBy.holderName}`, holder: lockHolderResponse(result.heldBy) },
+    body: { code: 'LOCK_HELD', error: `Currently being edited by ${blocked.holderName}`, holder: lockHolderResponse(blocked) },
   };
 }
