@@ -144,7 +144,7 @@ describe.skipIf(!TEST_DATABASE_URL)('DELETE /api/patients/:id (real PostgreSQL, 
     expect(await personDeleted(personId)).toBe(false);
   });
 
-  it('the deleted patient is redacted in workspace snapshots (by id or sync.serverId), other entries kept', async () => {
+  it('the deleted patient is redacted in workspace snapshots (by id or sync.serverId, whatever patient_ids says), other entries kept', async () => {
     const { pid } = await seed();
     const ws = (await holderPool.query<{ id: string }>(
       `INSERT INTO workspaces (organization_id, owner_user_id, name, patient_ids, snapshot_payload)
@@ -155,7 +155,15 @@ describe.skipIf(!TEST_DATABASE_URL)('DELETE /api/patients/:id (real PostgreSQL, 
         { id: 'keep', data: { shared: { name: '남는 환자' } } },
       ])],
     )).rows[0].id;
+    // A legacy workspace whose patient_ids does not list the patient: redacted too (the match is on the payload).
+    const legacy = (await holderPool.query<{ id: string }>(
+      `INSERT INTO workspaces (organization_id, owner_user_id, name, patient_ids, snapshot_payload)
+       VALUES ($1, $2, 'legacy', '{}', $3) RETURNING id`,
+      [org.orgId, docA.id, JSON.stringify([{ id: pid, data: { shared: { name: '삭제 환자' } } }])],
+    )).rows[0].id;
     expect((await del(docA, pid, 1)).status).toBe(204);
+    const legacyRow = await holderPool.query<{ snapshot_payload: unknown[] }>(`SELECT snapshot_payload FROM workspaces WHERE id = $1`, [legacy]);
+    expect(legacyRow.rows[0].snapshot_payload).toEqual([{ id: pid, redacted: true }]);
     const { rows } = await holderPool.query<{ snapshot_payload: unknown[] }>(`SELECT snapshot_payload FROM workspaces WHERE id = $1`, [ws]);
     expect(rows[0].snapshot_payload).toEqual([
       { id: pid, redacted: true },
@@ -186,8 +194,12 @@ describe.skipIf(!TEST_DATABASE_URL)('DELETE /api/patients/:id (real PostgreSQL, 
 
   it('no revision → 400 REVISION_REQUIRED; a non-integer → 400 INVALID_REVISION', async () => {
     const { pid } = await seed();
-    expect((await del(docA, pid, null)).body).toEqual({ code: 'REVISION_REQUIRED', error: 'revision query parameter is required' });
-    expect((await del(docA, pid, 'x')).body).toEqual({ code: 'INVALID_REVISION', error: 'revision must be a positive integer' });
+    const missing = await del(docA, pid, null);
+    expect(missing.status).toBe(400);
+    expect(missing.body).toEqual({ code: 'REVISION_REQUIRED', error: 'revision query parameter is required' });
+    const invalid = await del(docA, pid, 'x');
+    expect(invalid.status).toBe(400);
+    expect(invalid.body).toEqual({ code: 'INVALID_REVISION', error: 'revision must be a positive integer' });
     expect((await record(pid)).deleted).toBe(false);
   });
 
@@ -197,7 +209,9 @@ describe.skipIf(!TEST_DATABASE_URL)('DELETE /api/patients/:id (real PostgreSQL, 
 
   it('the assigned doctor → 204; another doctor → 403; an admin → 204 regardless of assignment', async () => {
     const a = await seed({ assigned: docA });
-    expect((await del(docB, a.pid, 1)).body).toEqual(FORBIDDEN);
+    const other = await del(docB, a.pid, 1);
+    expect(other.status).toBe(403);
+    expect(other.body).toEqual(FORBIDDEN);
     expect((await del(docA, a.pid, 1)).status).toBe(204);
     const b = await seed({ assigned: docB });
     expect((await del(adminC, b.pid, 1)).status).toBe(204);
@@ -206,15 +220,21 @@ describe.skipIf(!TEST_DATABASE_URL)('DELETE /api/patients/:id (real PostgreSQL, 
   it('an unassigned patient: a doctor → 403; a missing patient → 404; another organization\'s → 404 even for an admin', async () => {
     const { pid } = await seed({ assigned: null });
     expect((await del(docA, pid, 1)).status).toBe(403);
-    expect((await del(docA, crypto.randomUUID(), 1)).body).toEqual(NOT_FOUND);
+    const missing = await del(docA, crypto.randomUUID(), 1);
+    expect(missing.status).toBe(404);
+    expect(missing.body).toEqual(NOT_FOUND);
     const other = await seed({ inOrg: otherOrg, assigned: null });
-    expect((await del(adminC, other.pid, 1)).body).toEqual(NOT_FOUND);
+    const foreign = await del(adminC, other.pid, 1);
+    expect(foreign.status).toBe(404);
+    expect(foreign.body).toEqual(NOT_FOUND);
   });
 
   it('an already deleted patient → 404', async () => {
     const { pid } = await seed();
     await holderPool.query(`UPDATE patient_records SET deleted_at = now() WHERE id = $1`, [pid]);
-    expect((await del(adminC, pid, 1)).body).toEqual(NOT_FOUND);
+    const res = await del(adminC, pid, 1);
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual(NOT_FOUND);
   });
 
   it('reassigned while the delete waits for the anchor (it passed the access middleware) → 403, not deleted', async () => {
