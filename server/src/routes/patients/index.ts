@@ -9,7 +9,6 @@ import { auditMiddleware, auditFailuresOnly } from '../../middleware/audit';
 import type { AssignmentWarning, ResolveAssignedDoctorResult } from '../../db/resolveAssignedDoctor';
 import { asyncHandler } from '../../http/asyncHandler';
 import { requireLockToken } from '../../http/lockToken';
-import { withDeadlockRetry } from '../../db/withDeadlockRetry';
 import { requireOrg, requirePatientAccess } from '../../http/authz';
 import { getDoctorCounts, listPatients } from './list';
 import { getPatient } from './read';
@@ -59,7 +58,8 @@ export function createPatientsRouter(pool: Pool): Router {
   router.patch(
     '/:id',
     auth, csrfMiddleware, requirePatientAccess(pool, 'write'), audit('patient_update'), requireOrg(), requireLockToken(),
-    asyncHandler((req, res) => withDeadlockRetry(() => patchPatient(pool, req, res)))
+    // The deadlock retry is inside the service (domain/patients/patchPatient.ts, S7-4).
+    asyncHandler((req, res) => patchPatient(pool, req, res))
   );
 
   router.delete(

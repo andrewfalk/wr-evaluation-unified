@@ -295,3 +295,81 @@ export async function selectById(db: QueryRunner, id: string): Promise<PatientRo
   );
   return newRows[0];
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Patient PATCH (S7-4, from routes/patients/patch.ts)
+// ---------------------------------------------------------------------------------------------------
+
+/** The live (not deleted) patient's full row locked FOR UPDATE — the PATCH's anchor — or none. */
+export async function lockFullForUpdate(db: QueryRunner, id: string, orgId: string): Promise<PatientRow | undefined> {
+  const { rows: current } = await db.query<PatientRow>(
+      `SELECT ${SELECT_COLS}
+       FROM patient_records
+       WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
+       FOR UPDATE`,
+      [id, orgId]
+  );
+  return current[0];
+}
+
+export interface PatchWrite {
+  id: string;
+  orgId: string;
+  personId: string;
+  meta: {
+    name: string; patientNo: string | null; birthDate: string | null; injuryDate: string | null; evaluationDate: string | null;
+    activeModules: string[]; diagnosesCodes: string[]; jobsNames: string[];
+  };
+  payloadJson: string;
+  expectedRevision: number;
+  completion: CompletionColumns;
+  verification: VerificationColumns;
+}
+
+/**
+ * Meta columns, payload and completion columns from a PATCH, revision + 1 — only while the revision is
+ * still `expectedRevision` and the patient is not deleted (else no row). The completion columns are
+ * assigned as computed (the caller kept the previous provenance).
+ */
+export async function updateFromPatch(db: QueryRunner, w: PatchWrite): Promise<PatientRow | undefined> {
+  const { meta } = w;
+  const { rows: updated } = await db.query<PatientRow>(
+      `UPDATE patient_records SET
+         patient_person_id = $3,
+         name              = $4,
+         patient_no        = $5,
+         birth_date        = $6,
+         injury_date       = $7,
+         evaluation_date   = $8,
+         active_modules    = $9,
+         diagnoses_codes   = $10,
+         jobs_names        = $11,
+         revision          = revision + 1,
+         payload           = $12,
+         completion_status                   = $14,
+         server_observed_modules_complete_at = $15,
+         completion_source                   = $16,
+         completion_client_build_version     = $17,
+         completion_client_schema_version    = $18,
+         server_verified_modules_complete_at    = $19,
+         completion_verification_engine_version = $20
+       WHERE id = $1 AND organization_id = $2 AND revision = $13 AND deleted_at IS NULL
+       RETURNING ${SELECT_COLS}`,
+    [
+      w.id, w.orgId, w.personId,
+      meta.name, meta.patientNo,
+      meta.birthDate, meta.injuryDate, meta.evaluationDate,
+      meta.activeModules, meta.diagnosesCodes, meta.jobsNames,
+      w.payloadJson,
+      w.expectedRevision,
+      w.completion.completion_status,
+      w.completion.server_observed_modules_complete_at,
+      w.completion.completion_source,
+      w.completion.completion_client_build_version,
+      w.completion.completion_client_schema_version,
+      w.verification.server_verified_modules_complete_at,
+      w.verification.completion_verification_engine_version,
+    ]
+  );
+  return updated[0];
+}
