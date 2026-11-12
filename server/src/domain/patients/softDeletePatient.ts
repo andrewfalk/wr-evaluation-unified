@@ -9,7 +9,7 @@ import { deleteLockForPatient, lockPatientAnchor, assertAssignedOrAdmin, Patient
 import { redactPatientInWorkspaces, removePatientFromAutosaves } from '../../db/patientDeletionSideEffects';
 import { toQueryRunner } from '../../db/queryRunner';
 import { withDecidedTransaction, type TransactionDecision } from '../../db/withWriteTransaction';
-import { softDelete, selectRevisionAndDeleted } from '../../db/patientRecordsRepo';
+import { softDelete, selectAnyState } from '../../db/patientRecordsRepo';
 import type { PatientWriteContext } from './context';
 import { runLockGate } from './lockGate';
 
@@ -48,7 +48,7 @@ export async function softDeletePatient(
 
       const result = await softDelete(db, id, orgId, revision);
       if (result.rowCount === 0) {
-        const row = await selectRevisionAndDeleted(db, id, orgId);
+        const row = await selectAnyState(db, id, orgId);
         if (!row || row.deleted_at !== null) return rollback({ kind: 'not_found' });
         return rollback({ kind: 'revision_mismatch', currentRevision: row.revision });
       }

@@ -1,5 +1,5 @@
 // Workspace save → patient_records, one patient per transaction (S7-1). Moved from
-// routes/workspaces/upsert.ts; statements, their order and the outcomes are unchanged.
+// routes/workspaces/upsert.ts; the outcomes are unchanged (S7-8a merged its SQL into the repository's).
 //
 // HF1(H1): patient_records 쓰기는 PATCH와 같은 규칙을 따라야 한다. 기존 행이면
 //   ① 담당의 또는 admin  ② 클라이언트가 마지막으로 본 revision이 서버와 같음  ③ 편집 락 게이트 통과
@@ -16,11 +16,11 @@ import { assertAssignedOrAdmin, PatientLockForbiddenError } from '../../db/patie
 import { withDeadlockRetry } from '../../db/withDeadlockRetry';
 import { withDecidedTransaction } from '../../db/withWriteTransaction';
 import { toQueryRunner, type QueryRunner } from '../../db/queryRunner';
-import { lockAnyStateForUpdate, updateFromSnapshot, insertFromSnapshot, type SnapshotWritten } from '../../db/patientRecordsRepo';
+import { lockAnyState, updatePayload, insertPatient, type PatientRow } from '../../db/patientRecordsRepo';
 import { resolveAssignedDoctor } from '../../db/resolveAssignedDoctor';
-import { nextCompletionColumns, DRAFT_COMPLETION_COLUMNS, verifyModulesComplete, logCompletionMismatchIfAny, nextVerificationColumns, DRAFT_VERIFICATION_COLUMNS } from '../../completionTracking';
 import type { PatientWriteContext } from './context';
 import { runLockGate, lockHolderResponse } from './lockGate';
+import { nextCompletionState } from './completion';
 import type { PatientMeta } from './meta';
 
 export type SkipReason = 'not_assigned' | 'deleted' | 'error';
@@ -61,7 +61,7 @@ async function upsertInTx(db: QueryRunner, pool: Pool, ctx: PatientWriteContext,
 
   // FOR UPDATE 필수: 이 조회와 아래 쓰기 사이에 DELETE가 끼어들면 삭제된 환자에 쓰게 된다.
   // 행을 잡아두면 DELETE/PATCH가 우리 커밋까지 대기한다.
-  const existingRow = await lockAnyStateForUpdate(db, meta.id, orgId);
+  const existingRow = await lockAnyState(db, meta.id, orgId);
   if (existingRow?.deleted_at !== null && existingRow?.deleted_at !== undefined) {
     return { kind: 'skipped', reason: 'deleted' };
   }
@@ -89,28 +89,21 @@ async function upsertInTx(db: QueryRunner, pool: Pool, ctx: PatientWriteContext,
   const existingPersonId = existingRow?.patient_person_id ?? null;
   const { personId } = await resolvePatientPersonId(db, orgId, meta, existingPersonId);
 
-  // PR0-A: PATCH/POST와 동일한 3상태 규칙(§5.5) — workspace 수동 저장도 patient_records를
-  // 직접 갱신하므로 여기서 빠지면 이 경로로만 저장된 환자는 완료돼도 'draft'로 남는다.
-  const nextCompletion = nextCompletionColumns(
-    existingRow ? existingRow : DRAFT_COMPLETION_COLUMNS,
+  // PR0-A/PR0-B2: PATCH/POST와 동일한 3상태 규칙(§5.5)과 서버 재검증 — workspace 수동 저장도
+  // patient_records를 직접 갱신하므로 여기서 빠지면 이 경로로만 저장된 환자는 완료돼도 'draft'로 남는다.
+  const { completion, verification } = nextCompletionState(
+    existingRow ?? null,
     {
       modulesCompleteObserved: meta.modulesCompleteObserved,
       completionClientBuildVersion: meta.completionClientBuildVersion,
       completionClientSchemaVersion: meta.completionClientSchemaVersion,
-    }
-  );
-
-  // PR0-B2: 클라이언트 신고와 별개로 서버가 analytics-core로 직접 재검증한다 — 위와
-  // 동일한 FOR UPDATE 잠금 하에서 계산해 같은 쓰기 문장에 얹는다.
-  const verified = verifyModulesComplete({
-    shared: (meta.data?.['shared'] as Record<string, unknown>) ?? {},
-    modules: (meta.data?.['modules'] as Record<string, unknown>) ?? {},
-    activeModules: (meta.data?.['activeModules'] as string[]) ?? meta.activeModules,
-  });
-  logCompletionMismatchIfAny(meta.id, meta.modulesCompleteObserved, verified);
-  const nextVerification = nextVerificationColumns(
-    existingRow ? existingRow : DRAFT_VERIFICATION_COLUMNS,
-    verified.allComplete,
+    },
+    {
+      shared: (meta.data?.['shared'] as Record<string, unknown>) ?? {},
+      modules: (meta.data?.['modules'] as Record<string, unknown>) ?? {},
+      activeModules: (meta.data?.['activeModules'] as string[]) ?? meta.activeModules,
+    },
+    meta.id,
   );
 
   const { assignedDoctorUserId, assignmentWarnings } = await resolveAssignedDoctor(
@@ -122,39 +115,31 @@ async function upsertInTx(db: QueryRunner, pool: Pool, ctx: PatientWriteContext,
       assignmentWarnings.map(w => `${w.code}: ${w.message}`).join('; '));
   }
 
-  // 두 문장이 공유하는 값. 완료 provenance 컬럼(관측 시각·출처·빌드/스키마 버전·서버 검증 시각·
-  // 엔진 버전)은 UPDATE에서 COALESCE로 "최초 한 번 찍히면 불변"을 지킨다. completion_status만
-  // "현재 상태"라 그대로 덮어쓴다(모듈이 다시 불완전해지면 draft로 돌아가야 한다, §5.5).
-  const write = {
-    id: meta.id, orgId, personId, name: meta.name, patientNo: meta.patientNo,
+  const metaColumns = {
+    personId, name: meta.name, patientNo: meta.patientNo,
     birthDate:      meta.birthDate      ? meta.birthDate      : null,
     injuryDate:     meta.injuryDate     ? meta.injuryDate     : null,
     evaluationDate: meta.evaluationDate ? meta.evaluationDate : null,
     activeModules: meta.activeModules, diagnosesCodes: meta.diagnosesCodes, jobsNames: meta.jobsNames,
-    assignedDoctorUserId,
-    payloadJson: JSON.stringify(meta.payload),
-    completionTail: [
-      nextCompletion.completion_status,
-      nextCompletion.server_observed_modules_complete_at,
-      nextCompletion.completion_source,
-      nextCompletion.completion_client_build_version,
-      nextCompletion.completion_client_schema_version,
-      nextVerification.server_verified_modules_complete_at,
-      nextVerification.completion_verification_engine_version,
-    ],
   };
+  const payloadJson = JSON.stringify(meta.payload);
 
-  let written: SnapshotWritten;
+  let written: PatientRow;
   if (existingRow) {
     // revision 조건은 위 검사와 같은 값이라 FOR UPDATE 아래에선 항상 맞지만, 어긋나면 0행으로
-    // 드러나게 하는 마지막 안전장치다. owner_user_id는 바꾸지 않는다.
-    const updated = await updateFromSnapshot(db, write, existingRow.revision);
+    // 드러나게 하는 마지막 안전장치다. owner_user_id는 바꾸지 않고, 담당의는 비어 있을 때만 채운다.
+    const updated = await updatePayload(db, {
+      id: meta.id, orgId, expectedRevision: existingRow.revision, payloadJson, completion, verification,
+      meta: metaColumns, assignIfUnassigned: assignedDoctorUserId,
+    });
     if (!updated) return { kind: 'conflict', serverRevision: existingRow.revision };
     written = updated;
   } else {
     // ON CONFLICT 없음: 같은 id가 이 사이에 다른 경로(POST /patients)로 생기면 23505로 실패해
     // 호출부가 skipped(error)로 보고한다 — 인가 검사 없이 덮어쓰는 길을 열어두지 않는다.
-    written = await insertFromSnapshot(db, write, user.id);
+    written = await insertPatient(db, {
+      id: meta.id, orgId, ownerUserId: user.id, assignedDoctorUserId, meta: metaColumns, payloadJson, completion, verification,
+    });
   }
 
   // 등록번호가 바뀌어 다른 person으로 옮겨 붙은 경우, 옛 person이 고아로 남지 않게 해제한다

@@ -2,8 +2,6 @@
 // Split out of routes/patients.ts (S5 P1-29); handler bodies unchanged.
 import type { PatientPersonWarning } from '../../db/patientPersons';
 import type { AssignmentWarning } from '../../db/resolveAssignedDoctor';
-import type { LockRow } from '../../db/patientLocks';
-import { lockHolderResponse } from '../../http/lockGate';
 import { PatientRow, PgErrorLike } from './schemas';
 import type { DateFieldFailure } from '../../domain/patients/meta';
 
@@ -51,13 +49,8 @@ export function personVanishedResponse(): { code: string; error: string; retriab
 // ---------------------------------------------------------------------------
 
 
-export function lockHeldResponse(lock: LockRow): { code: string; error: string; holder: unknown } {
-  return {
-    code:   'LOCK_HELD',
-    error:  `Currently being edited by ${lock.holderName}`,
-    holder: lockHolderResponse(lock),
-  };
-}
+// Moved to http/lockGate.ts (S7-8a, one copy with the video apply's); re-exported.
+export { lockHeldResponse } from '../../http/lockGate';
 
 
 

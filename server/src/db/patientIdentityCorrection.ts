@@ -1,6 +1,6 @@
 import type { QueryRunner } from './patientPersons';
 import { checkLockForWrite, isAssignedOrAdmin } from './patientLocks';
-import { correctBirthDateForPerson } from './patientRecordsRepo';
+import { correctBirthDateForPerson, VISIBLE_BY_ID } from './patientRecordsRepo';
 
 // ---------------------------------------------------------------------------
 // 생년월일 정정 — 범용 resolver와 의도적으로 분리된 경로.
@@ -98,7 +98,7 @@ export async function correctPatientIdentity(
   const probe = await db.query<TargetRow>(
     `SELECT id, patient_person_id, revision, assigned_doctor_user_id
      FROM patient_records
-     WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
+     WHERE ${VISIBLE_BY_ID}`,
     [targetId, orgId]
   );
   if (probe.rows.length === 0) throw new IdentityTargetNotFoundError();
@@ -113,7 +113,7 @@ export async function correctPatientIdentity(
   const target = await db.query<TargetRow>(
     `SELECT id, patient_person_id, revision, assigned_doctor_user_id
      FROM patient_records
-     WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
+     WHERE ${VISIBLE_BY_ID}`,
     [targetId, orgId]
   );
   if (target.rows.length === 0) throw new IdentityTargetNotFoundError();

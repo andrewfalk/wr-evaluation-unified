@@ -8,16 +8,17 @@ import type { AnalysisRecipe } from '@wr/contracts';
 import { validateAppliedRecipes } from '../../workers/recipeValidation';
 import { isAssignedOrAdmin } from '../../db/patientLocks';
 import { toQueryRunner } from '../../db/queryRunner';
-import { selectForIdempotentApply, type ApplyPatientRow } from '../../db/patientRecordsRepo';
+import { selectAnyState, type PatientRow } from '../../db/patientRecordsRepo';
 import { applyVideoAnalysisInTx } from '../../domain/patients/patientRecordsService';
 import { lockOf } from '../../http/lockToken';
 import { patientWriteContextOf } from '../../http/patientWriteContext';
+import { lockHeldResponse } from '../../http/lockGate';
 import { orgIdOf, sessionOf } from '../../http/authz';
 import { ApplyBody } from './schemas';
 import { VideoJobRow, parseStoredRecipe, readAppliedInputs } from './access';
 
 // patient_records 행(부분) — apply에서 사용(db/patientRecordsRepo.ts).
-type PatientRowLite = ApplyPatientRow;
+type PatientRowLite = PatientRow;
 
 function patientApplyResponse(row: PatientRowLite): Record<string, unknown> {
   const base = typeof row.payload === 'object' && row.payload !== null
@@ -84,7 +85,7 @@ export async function applyJob(pool: Pool, req: Request, res: Response): Promise
 
     // ② 멱등: 이미 적용 + 동일 hash면 저장된(현재) 환자 상태를 그대로 반환.
     if (job.applied_at && job.applied_inputs_hash === appliedInputsHash) {
-      const cur = await selectForIdempotentApply(toQueryRunner(client), job.patient_record_id, orgId);
+      const cur = await selectAnyState(toQueryRunner(client), job.patient_record_id, orgId);
       await client.query('COMMIT');
       if (!cur) { res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' }); return; }
       res.status(200).json({ idempotent: true, patient: patientApplyResponse(cur) });
@@ -149,11 +150,7 @@ export async function applyJob(pool: Pool, req: Request, res: Response): Promise
           res.status(403).json({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
           return;
         case 'lock_held':
-          res.status(423).json({
-            code: 'LOCK_HELD',
-            error: `Currently being edited by ${result.heldBy.holderName}`,
-            holder: { holderName: result.heldBy.holderName, acquiredAt: result.heldBy.acquiredAt.toISOString(), expiresAt: result.heldBy.expiresAt.toISOString() },
-          });
+          res.status(423).json(lockHeldResponse(result.heldBy));
           return;
         case 'revision_mismatch':
           res.status(409).json({ code: 'CONFLICT', error: 'Revision mismatch. Fetch the latest version before retrying.', currentRevision: result.currentRevision });

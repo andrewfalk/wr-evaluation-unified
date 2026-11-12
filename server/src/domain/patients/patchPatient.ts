@@ -1,6 +1,6 @@
 // PATCH /api/patients/:id — the transaction (S7-4). Moved from routes/patients/patch.ts together with the
-// deadlock retry the router wrapped it in; statements, their order, the checks' order and the outcomes are
-// unchanged:
+// deadlock retry the router wrapped it in; the locking order, the checks' order and the outcomes are unchanged
+// (S7-8a merged its SQL into the repository's):
 //   case anchor FOR UPDATE → 404 → assigned doctor (403) → If-Match revision (409) → edit lock (423)
 //   → dates (400) → name (400) → person → UPDATE … WHERE revision (409 concurrent) → release old person.
 import type { Pool } from 'pg';
@@ -10,10 +10,10 @@ import { isUniqueViolation, type PgErrorLike } from '../../db/pgErrors';
 import { toQueryRunner } from '../../db/queryRunner';
 import { withDeadlockRetry } from '../../db/withDeadlockRetry';
 import { withDecidedTransaction, type TransactionDecision } from '../../db/withWriteTransaction';
-import { lockFullForUpdate, updateFromPatch, type PatientRow } from '../../db/patientRecordsRepo';
-import { nextCompletionColumns, verifyModulesComplete, logCompletionMismatchIfAny, nextVerificationColumns } from '../../completionTracking';
+import { lockLive, updatePayload, type PatientRow } from '../../db/patientRecordsRepo';
 import type { PatientWriteContext } from './context';
 import { runLockGate } from './lockGate';
+import { nextCompletionState } from './completion';
 import { extractMeta, normalizePatientDates, type DateFieldFailure } from './meta';
 
 export type PatchPatientResult =
@@ -67,7 +67,7 @@ async function patchInTx(
 
   // FOR UPDATE — 이 트랜잭션 동안 patient_records 행을 앵커로 잡아, force-takeover 등
   // patient_locks에 대한 다른 트랜잭션의 변경이 이 트랜잭션이 끝날 때까지 끼어들 수 없게 한다.
-  const current = await lockFullForUpdate(db, id, orgId);
+  const current = await lockLive(db, id, orgId);
   if (!current) return rollback({ kind: 'not_found' });
 
   // requirePatientAccess 미들웨어는 이 트랜잭션 밖에서(그리고 FOR UPDATE 없이) 담당의를
@@ -106,25 +106,18 @@ async function patchInTx(
 
   const { personId, warnings } = await resolvePatientPersonId(db, orgId, meta, current.patient_person_id);
 
-  // PR0-A: 완료 필드는 이미 FOR UPDATE로 잠근 행을 기준으로 계산해 같은
-  // UPDATE 문장에 얹는다 — 별도 SQL 분기가 없으므로 revision 충돌 시 완료 보고도
-  // 자동으로 함께 거부된다(UPDATE의 WHERE revision = $13이 0행이면 완료 필드도 반영 안 됨).
-  const nextCompletion = nextCompletionColumns(current, report);
-
-  // PR0-B2: 클라이언트 신고와 별개로 서버가 analytics-core로 직접 재검증한다 — 같은
-  // revision 잠금 하에 같은 UPDATE 문장에 얹으므로 위와 동일한 동시성 보장을 받는다.
-  const verified = verifyModulesComplete({
+  // PR0-A/PR0-B2: 3상태 완료 규칙과 서버 재검증 — 이미 FOR UPDATE로 잠근 행을 기준으로 계산해 같은
+  // UPDATE 문장에 얹는다 — revision 충돌 시(WHERE revision 0행) 완료 보고도 함께 거부된다.
+  const { completion, verification } = nextCompletionState(current, report, {
     shared: (mergedData['shared'] as Record<string, unknown>) ?? {},
     modules: (mergedData['modules'] as Record<string, unknown>) ?? {},
     activeModules: (mergedData['activeModules'] as string[]) ?? [],
-  });
-  logCompletionMismatchIfAny(id, report.modulesCompleteObserved, verified);
-  const nextVerification = nextVerificationColumns(current, verified.allComplete);
+  }, id);
 
   // WHERE clause includes revision to catch concurrent modification between read and write.
-  const updated = await updateFromPatch(db, {
-    id, orgId, personId, meta, payloadJson: JSON.stringify(newPayload), expectedRevision,
-    completion: nextCompletion, verification: nextVerification,
+  const updated = await updatePayload(db, {
+    id, orgId, expectedRevision, payloadJson: JSON.stringify(newPayload), completion, verification,
+    meta: { personId, ...meta },
   });
   if (!updated) return rollback({ kind: 'concurrent_modification' });
 

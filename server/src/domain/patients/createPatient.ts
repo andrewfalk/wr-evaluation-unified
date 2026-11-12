@@ -1,5 +1,6 @@
 // POST /api/patients — create, idempotent on the Idempotency-Key (S7-3). Moved from
-// routes/patients/create.ts; statements, their order and the outcomes are unchanged.
+// routes/patients/create.ts; the locking order and the outcomes are unchanged. S7-8a merged its INSERT with the
+// workspace save's: RETURNING the full row replaces the read-back in the same transaction.
 //
 // All DB work (slot reservation, patient INSERT, idempotency finalization) runs in a single transaction
 // so a crash or error automatically rolls back the slot, letting the client retry with the same key.
@@ -12,11 +13,11 @@ import { PatientIdentityConflictError, PatientPersonVanishedError, resolvePatien
 import { isUniqueViolation, type PgErrorLike } from '../../db/pgErrors';
 import { toQueryRunner } from '../../db/queryRunner';
 import { withDecidedTransaction } from '../../db/withWriteTransaction';
-import { insertFromCreate, selectById, type PatientRow } from '../../db/patientRecordsRepo';
+import { insertPatient, type PatientRow } from '../../db/patientRecordsRepo';
 import { resolveAssignedDoctor, type AssignmentWarning } from '../../db/resolveAssignedDoctor';
-import { nextCompletionColumns, DRAFT_COMPLETION_COLUMNS, verifyModulesComplete, logCompletionMismatchIfAny, nextVerificationColumns, DRAFT_VERIFICATION_COLUMNS } from '../../completionTracking';
 import type { PatientWriteContext } from './context';
 import { strOrNull, type ExtractedMeta } from './meta';
+import { nextCompletionState } from './completion';
 
 export type CreatePatientResult =
   | { kind: 'created'; body: Record<string, unknown> }
@@ -100,25 +101,20 @@ export async function createPatient(pool: Pool, ctx: PatientWriteContext, params
 
       const { personId, warnings } = await resolvePatientPersonId(db, orgId, meta);
 
-      // 신규 행이라 "보존할 이전 값"이 없다 — 초기값(전부 NULL/draft)에서 시작해 계산.
-      const completion = nextCompletionColumns(DRAFT_COMPLETION_COLUMNS, report);
-      // PR0-B2: 클라이언트 신고와 무관하게 서버가 독립적으로(analytics-core) 완료를
-      // 재검증한다. 신규 행이라 "보존할 이전 값"이 없다 — DRAFT에서 시작.
-      const verified = verifyModulesComplete({
+      // 신규 행이라 "보존할 이전 값"이 없다 — 초기값(전부 NULL/draft)에서 시작해 계산. 서버 재검증(PR0-B2)은
+      // 클라이언트 신고와 무관하다.
+      const { completion, verification } = nextCompletionState(null, report, {
         shared: (resolvedData['shared'] as Record<string, unknown>) ?? {},
         modules: (resolvedData['modules'] as Record<string, unknown>) ?? {},
         activeModules: (resolvedData['activeModules'] as string[]) ?? [],
-      });
-      logCompletionMismatchIfAny(patientId, report.modulesCompleteObserved, verified);
-      const verification = nextVerificationColumns(DRAFT_VERIFICATION_COLUMNS, verified.allComplete);
+      }, patientId);
 
-      await insertFromCreate(db, {
-        id: patientId, orgId, personId, ownerUserId: userId, assignedDoctorUserId, meta,
+      // RETURNING이 응답에 쓰는 행 전체를 돌려준다(같은 트랜잭션의 재조회와 같은 값).
+      const row = await insertPatient(db, {
+        id: patientId, orgId, ownerUserId: userId, assignedDoctorUserId, meta: { personId, ...meta },
         payloadJson: JSON.stringify(storedPayload), completion, verification,
       });
-
-      const row = await selectById(db, patientId);
-      const body = params.buildBody(row!, warnings, assignmentWarnings);
+      const body = params.buildBody(row, warnings, assignmentWarnings);
 
       await db.query(
         `UPDATE idempotency_keys SET status = $3, body = $4

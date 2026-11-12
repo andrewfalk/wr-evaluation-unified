@@ -465,6 +465,18 @@ describe.skipIf(!TEST_DATABASE_URL)('PATCH /api/patients/:id (real PostgreSQL, S
     expect(await record(pid)).toMatchObject({ status: 'draft', observed_at: first.observed_at, build: 'build-1' });
   });
 
+  it('a stored provenance with microseconds (set by SQL now()) is kept to the microsecond by a later PATCH', async () => {
+    const { pid } = await seed();
+    await holderPool.query(
+      `UPDATE patient_records SET completion_status = 'modules_complete', server_observed_modules_complete_at = now(),
+              completion_source = 'client_reported', completion_client_build_version = 'b0', completion_client_schema_version = 1
+       WHERE id = $1`, [pid],
+    );
+    const before = (await record(pid)).observed_at;
+    expect(await patch(docA, pid, 1, { data: data(), ...report(true, 'build-9') }).then((r) => r.status)).toBe(200);
+    expect(await record(pid)).toMatchObject({ observed_at: before, build: 'b0', status: 'modules_complete' });
+  });
+
   it('server verification does not depend on the client report; an unverifiable case keeps it empty', async () => {
     const { pid } = await seed();
     expect((await patch(docA, pid, 1, { data: data(KNEE_COMPLETE.shared, KNEE_COMPLETE.extra) })).status).toBe(200);

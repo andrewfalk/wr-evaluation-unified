@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { hashToken } from '../auth/sessionStore';
 import type { QueryRunner } from './patientPersons';
+import { lockAnchor } from './patientRecordsRepo';
 
 // 환자 단위 TTL lease lock — heartbeat 25s / TTL 100s(여유 4배). 이 값 하나가 유일한
 // 소스: acquire/force 응답의 expiresAt/ttlMs로부터 클라이언트가 자기 renew 주기를 역산한다.
@@ -71,13 +72,10 @@ export async function lockPatientAnchor(
   runner: QueryRunner,
   { patientId, orgId }: { patientId: string; orgId: string }
 ): Promise<PatientAnchor> {
-  const { rows } = await runner.query<{ id: string; assigned_doctor_user_id: string | null }>(
-    `SELECT id, assigned_doctor_user_id FROM patient_records
-     WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE`,
-    [patientId, orgId]
-  );
-  if (rows.length === 0) throw new PatientLockTargetNotFoundError();
-  return { id: rows[0].id, assignedDoctorUserId: rows[0].assigned_doctor_user_id };
+  // The SQL is db/patientRecordsRepo.ts lockAnchor (S7-8a).
+  const row = await lockAnchor(runner, patientId, orgId);
+  if (!row) throw new PatientLockTargetNotFoundError();
+  return { id: row.id, assignedDoctorUserId: row.assigned_doctor_user_id };
 }
 
 // 환자 쓰기 권한 판정식 — 이 함수 하나가 정의다(S4 / P1-17). admin이거나 그 환자의 담당의.
