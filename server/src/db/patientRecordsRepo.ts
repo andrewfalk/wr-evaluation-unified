@@ -120,3 +120,89 @@ export async function insertFromSnapshot(db: QueryRunner, w: SnapshotWrite, owne
   );
   return inserted.rows[0];
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Video analysis apply (S7-2, from routes/videoAnalysis/apply.ts)
+// ---------------------------------------------------------------------------------------------------
+
+/** The patient columns the video apply reads back and answers with. */
+export interface ApplyPatientRow extends CompletionColumns, VerificationColumns {
+  id: string; revision: number; payload: unknown; created_at: Date; updated_at: Date;
+}
+
+/**
+ * The patient as stored, for answering an idempotent replay of an apply. Not locked and not filtered on
+ * deleted_at (the replay answers what was applied).
+ */
+export async function selectForIdempotentApply(db: QueryRunner, id: string, orgId: string): Promise<ApplyPatientRow | undefined> {
+  const { rows: cur } = await db.query<ApplyPatientRow>(
+    `SELECT id, revision, payload, created_at, updated_at,
+                completion_status, server_observed_modules_complete_at, completion_source,
+                completion_client_build_version, completion_client_schema_version,
+                server_verified_modules_complete_at, completion_verification_engine_version
+         FROM patient_records
+         WHERE id = $1 AND organization_id = $2`,
+    [id, orgId]
+  );
+  return cur[0];
+}
+
+/** The live (not deleted) patient locked FOR UPDATE for an apply, with its assigned doctor — or none. */
+export async function lockForApply(
+  db: QueryRunner, id: string, orgId: string,
+): Promise<(ApplyPatientRow & { assigned_doctor_user_id: string | null }) | undefined> {
+  const { rows: pats } = await db.query<ApplyPatientRow & { assigned_doctor_user_id: string | null }>(
+    `SELECT id, revision, payload, created_at, updated_at, assigned_doctor_user_id,
+              completion_status, server_observed_modules_complete_at, completion_source,
+              completion_client_build_version, completion_client_schema_version,
+              server_verified_modules_complete_at, completion_verification_engine_version
+       FROM patient_records
+       WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
+       FOR UPDATE`,
+    [id, orgId]
+  );
+  return pats[0];
+}
+
+export interface VideoApplyWrite {
+  id: string;
+  orgId: string;
+  payloadJson: string;
+  expectedRevision: number;
+  completion: CompletionColumns;
+  verification: VerificationColumns;
+}
+
+/**
+ * Payload and completion columns from a video apply, revision + 1 — only while the revision is still
+ * `expectedRevision` and the patient is not deleted (else no row). The meta columns do not change.
+ */
+export async function updateFromVideoApply(db: QueryRunner, w: VideoApplyWrite): Promise<ApplyPatientRow | undefined> {
+  const { rows: updated } = await db.query<ApplyPatientRow>(
+    `UPDATE patient_records SET
+         payload = $3, revision = revision + 1,
+         completion_status                   = $5,
+         server_observed_modules_complete_at = $6,
+         completion_source                   = $7,
+         completion_client_build_version     = $8,
+         completion_client_schema_version    = $9,
+         server_verified_modules_complete_at    = $10,
+         completion_verification_engine_version = $11
+       WHERE id = $1 AND organization_id = $2 AND revision = $4 AND deleted_at IS NULL
+       RETURNING id, revision, payload, created_at, updated_at,
+                 completion_status, server_observed_modules_complete_at, completion_source,
+                 completion_client_build_version, completion_client_schema_version,
+                 server_verified_modules_complete_at, completion_verification_engine_version`,
+    [
+      w.id, w.orgId, w.payloadJson, w.expectedRevision,
+      w.completion.completion_status,
+      w.completion.server_observed_modules_complete_at,
+      w.completion.completion_source,
+      w.completion.completion_client_build_version,
+      w.completion.completion_client_schema_version,
+      w.verification.server_verified_modules_complete_at,
+      w.verification.completion_verification_engine_version,
+    ]
+  );
+  return updated[0];
+}

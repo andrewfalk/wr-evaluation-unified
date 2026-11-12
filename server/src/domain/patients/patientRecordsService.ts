@@ -3,3 +3,4 @@
 // used before S7 (responses are unchanged byte for byte). Errors other than expected outcomes are thrown.
 export type { PatientWriteContext, PatientWriteActor } from './context';
 export { upsertFromWorkspace, type UpsertOutcome, type SkipReason } from './upsertFromWorkspace';
+export { applyVideoAnalysisInTx, type ApplyVideoAnalysisResult, type ApplyVideoAnalysisParams } from './applyVideoAnalysis';
