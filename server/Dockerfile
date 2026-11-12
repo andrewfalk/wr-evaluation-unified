@@ -182,4 +182,6 @@ USER node
 # 운영 문서·스크립트의 `docker compose exec app node dist/cli/seedAdmin.js` 같은 명령이 그대로 동작하도록
 # 서버 패키지 폴더를 작업 폴더로 둔다(그 밖의 경로는 모두 절대 경로 환경변수 — compose·위 ENV).
 WORKDIR /app/server
+# S9: the server stops gracefully on SIGTERM (src/boot.ts) — the compose file gives it stop_grace_period 15s.
+STOPSIGNAL SIGTERM
 CMD ["node", "dist/index.js"]

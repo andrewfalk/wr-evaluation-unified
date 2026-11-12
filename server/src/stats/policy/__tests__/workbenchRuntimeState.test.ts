@@ -1,5 +1,5 @@
 // S8: the stats deployment gate (flag ∧ intranet) — the routes' availability and the queue worker/cleanup start
-// (src/index.ts) read the same function, so standalone + STATS_WORKBENCH_ENABLED starts no stats worker.
+// (src/boot.ts) read the same function, so standalone + STATS_WORKBENCH_ENABLED starts no stats worker.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 async function loadWith(statsWorkbenchEnabled: boolean, deploymentMode: 'intranet' | 'standalone') {

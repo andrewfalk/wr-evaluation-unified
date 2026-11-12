@@ -1,5 +1,3 @@
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -10,6 +8,7 @@ import { VIDEO_MAPPING_CONFIG_VERSION, VIDEO_VIEWPOINT_CONFIG_VERSION } from '@w
 import type { AnalysisRecipe } from '@wr/contracts';
 import config from '../config';
 import { resolveFixtureClip, resolveUploadedClipPath, resolveSampleFramePath } from './fixturePath';
+import { execFileAbortable } from './abortableExec';
 
 // ---------------------------------------------------------------------------
 // 작업 영상 분석 job 워커 (6.0-6b, PR D1). dev-only fixture 영상을 입력으로 실제 추론을 돌려
@@ -20,7 +19,6 @@ import { resolveFixtureClip, resolveUploadedClipPath, resolveSampleFramePath } f
 // 추론(Python subprocess)은 트랜잭션 밖에서 실행해 행 락을 오래 잡지 않는다.
 // ---------------------------------------------------------------------------
 
-const execFileAsync = promisify(execFile);
 
 const PROFILE_FPS: Record<string, number> = {
   'posture-basic': 5,
@@ -68,6 +66,8 @@ export interface RunInferenceOptions {
   framesDir?: string | null;
   // 추론 디바이스 정책(6.0-12, org 설정). infer_clip --device로 전달. 미지정 시 'auto'.
   device?: 'auto' | 'cpu' | 'cuda';
+  // S9: aborted when the server shuts down — the subprocess gets SIGTERM, then SIGKILL after a grace period.
+  signal?: AbortSignal;
 }
 
 export interface WorkerDeps {
@@ -151,7 +151,7 @@ async function defaultRunInference(
     const phaseStart = Date.now();
     const inferArgs = buildInferArgs(scripts, clipPath, kpPath, fps, poseVariant,
       options?.device ?? 'auto', options?.framesDir);
-    await execFileAsync(config.video.python, inferArgs, { timeout: deadlineMs });
+    await execFileAbortable(config.video.python, inferArgs, { timeout: deadlineMs }, options?.signal);
     // 매핑은 keypoints가 나와야 가능 → infer_clip 후에 처리. 선택 있으면 박스→트랙(실패 시 throw → job error).
     const kpRaw = fs.readFileSync(kpPath, 'utf-8');
     const kpDoc = JSON.parse(kpRaw) as {
@@ -176,7 +176,7 @@ async function defaultRunInference(
     if (targetSelection) {
       featureArgs.push('--target-track', mapTargetTrack(kpDoc, targetSelection));
     }
-    await execFileAsync(config.video.python, featureArgs, { timeout: remainingMs });
+    await execFileAbortable(config.video.python, featureArgs, { timeout: remainingMs }, options?.signal);
     const cfRaw = fs.readFileSync(cfPath, 'utf-8');
     const clipFeatures = ClipFeatureSetSchema.parse(JSON.parse(cfRaw)); // 신뢰 경계 — 계약 검증
     const m = kpDoc?.model ?? {};
@@ -368,7 +368,14 @@ async function sweepStale(pool: Pool, namespace: string): Promise<void> {
  * queued job 1건을 처리한다. 처리했으면 true, 큐가 비었으면 false.
  * 추론은 claim 트랜잭션 밖에서 실행(락 미보유). 성공→review_pending, 실패→error.
  */
-export async function pollOnce(pool: Pool, deps: WorkerDeps, namespace: string = config.queueNamespace): Promise<boolean> {
+// S9: `shutdown` aborts the inference of a server that is stopping; the job then goes back to 'queued' (not 'error')
+// so the next start analyses it again.
+export async function pollOnce(
+  pool: Pool,
+  deps: WorkerDeps,
+  namespace: string = config.queueNamespace,
+  shutdown?: AbortSignal,
+): Promise<boolean> {
   await sweepStale(pool, namespace);
   const job = await claimJob(pool, namespace);
   if (!job) return false;
@@ -387,7 +394,7 @@ export async function pollOnce(pool: Pool, deps: WorkerDeps, namespace: string =
     const framesDir = overlayFramesDir(job.id);
     pendingFramesDir = framesDir;
     const device = (['auto', 'cpu', 'cuda'].includes(job.inference_device) ? job.inference_device : 'auto') as 'auto' | 'cpu' | 'cuda';
-    const result = await deps.runInference(clip.resolvedPath, job.analysis_profile, targetSelection, { framesDir, device });
+    const result = await deps.runInference(clip.resolvedPath, job.analysis_profile, targetSelection, { framesDir, device, signal: shutdown });
 
     // keypoints artifact 영속화(overlay 검수 입력, M3-7b). uploadDir 구성 시에만(좌표만, 원본 프레임 없음).
     const { keypointsPath, keypointsSha } = await persistKeypoints(job.id, result.keypointsJson);
@@ -416,6 +423,11 @@ export async function pollOnce(pool: Pool, deps: WorkerDeps, namespace: string =
     // DB에 경로가 기록되기 전 실패한 artifact는 즉시 정리(hourly orphan sweep 대기 없이).
     if (pendingKeypointsPath) await safeUnlink(pendingKeypointsPath);
     if (pendingFramesDir) await safeRmDir(pendingFramesDir);
+    // S9: stopped by a shutdown, not a failure — back to the queue for the next start.
+    if (shutdown?.aborted) {
+      await pool.query(`UPDATE video_analysis_jobs SET status = 'queued' WHERE id = $1 AND status = 'processing'`, [job.id]);
+      return true;
+    }
     // cuda 강제 실패는 infer_clip이 stderr에 __CUDA_UNAVAILABLE__ 마커 + nonzero exit으로 알린다(6.0-12). execFile의
     // err.code는 exit code 숫자라 원인을 못 살리므로 stderr 마커로 CUDA_UNAVAILABLE를 매핑(운영자·UI가 원인 식별).
     const stderr = String((err as { stderr?: unknown })?.stderr ?? '');
@@ -480,23 +492,33 @@ export function createVideoAnalysisWorker(
   pool: Pool,
   deps: Partial<WorkerDeps> = {},
   { namespace = config.queueNamespace }: { namespace?: string } = {},
-): { stop: () => void } {
+): { stop: () => Promise<void> } {
   const merged: WorkerDeps = { runInference: defaultRunInference, ...deps };
-  let running = false;
+  // S9: stop() aborts the inference in flight (the job goes back to 'queued') and resolves once the tick is done.
+  const shutdown = new AbortController();
+  let stopping = false;
+  let current: Promise<void> | null = null;
   const tick = async () => {
-    if (running) return;
-    running = true;
-    try {
-      // 큐를 비울 때까지 순차 처리(동시 1건).
-      let processed = true;
-      while (processed) processed = await pollOnce(pool, merged, namespace);
-    } catch (err) {
-      console.error('[wr-server] video-analysis-worker error', err);
-    } finally {
-      running = false;
-    }
+    if (current || stopping) return;
+    current = (async () => {
+      try {
+        // 큐를 비울 때까지 순차 처리(동시 1건).
+        let processed = true;
+        while (processed && !stopping) processed = await pollOnce(pool, merged, namespace, shutdown.signal);
+      } catch (err) {
+        console.error('[wr-server] video-analysis-worker error', err);
+      }
+    })();
+    try { await current; } finally { current = null; }
   };
   const timer = setInterval(tick, 2000);
   timer.unref();
-  return { stop: () => clearInterval(timer) };
+  return {
+    stop: async () => {
+      stopping = true;
+      clearInterval(timer);
+      shutdown.abort();
+      if (current) await current;
+    },
+  };
 }

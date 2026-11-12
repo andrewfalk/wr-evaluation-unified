@@ -124,6 +124,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # S9 graceful shutdown: `docker compose stop` sends SIGTERM and waits this long before SIGKILL. The server
+    # (src/boot.ts) finishes the requests in flight, stops the workers (a run/job in flight goes back to the queue),
+    # closes the pools and exits within 10 s. init: a small init as PID 1 forwards the signal to Node and reaps the
+    # analysis subprocesses.
+    init: true
+    stop_grace_period: 15s
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]

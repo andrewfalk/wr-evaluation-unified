@@ -23,7 +23,7 @@ vi.mock('../fixturePath', () => ({
   resolveUploadedClipPath: vi.fn((p: unknown) => (typeof p === 'string' && p ? p : null)),
 }));
 
-import { pollOnce, iouXywh, mapTargetTrack, buildInferArgs } from '../videoAnalysisWorker';
+import { pollOnce, iouXywh, mapTargetTrack, buildInferArgs, createVideoAnalysisWorker } from '../videoAnalysisWorker';
 import { createFakePool, type FakePool, type QueryHandler } from '../../testing/fakePool';
 
 const JOB = { id: 'job-1', clip_id: 'clip-1', analysis_profile: 'posture-basic', inference_device: 'auto' };
@@ -308,5 +308,42 @@ describe('box→track 매핑 (PR D2b, §8.7)', () => {
     expect(runInference).not.toHaveBeenCalled();
     const upd = poolUpdate(fake, 'error_code = $2');
     expect(upd).toContain('INVALID_SAMPLE_DETECT');
+  });
+});
+
+// S9: a server shutdown stops the worker — the inference in flight is aborted, the job goes back to 'queued' (the next
+// start analyses it again, it is not an analysis error) and stop() resolves only after that write.
+describe('createVideoAnalysisWorker — stop() on shutdown', () => {
+  it('aborts the inference in flight, puts the job back to queued (no error write) and resolves after it', async () => {
+    const fake = workerFake();
+    let seenSignal: AbortSignal | undefined;
+    let started!: () => void;
+    const inferenceStarted = new Promise<void>((resolve) => { started = resolve; });
+    const runInference = vi.fn((_clip: string, _profile: string | null, _target: unknown, options?: { signal?: AbortSignal }) =>
+      new Promise<never>((_resolve, reject) => {
+        seenSignal = options?.signal;
+        options?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('killed'), { killed: true, signal: 'SIGTERM' })));
+        started();
+      }));
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const worker = createVideoAnalysisWorker(fake.pool, { runInference: runInference as never });
+      vi.advanceTimersByTime(2000);
+      await inferenceStarted;
+      expect(seenSignal?.aborted).toBe(false);
+
+      await worker.stop();
+
+      expect(seenSignal?.aborted).toBe(true);
+      expect(poolUpdate(fake, "SET status = 'queued'")).toEqual(['job-1']);
+      expect(poolUpdate(fake, 'error_code = $2')).toBeUndefined(); // the failure write
+      // stopped: no further claim after the stop
+      const claims = clientSql(fake).filter((q) => q.includes('SKIP LOCKED')).length;
+      vi.advanceTimersByTime(10_000);
+      await new Promise((r) => setImmediate(r));
+      expect(clientSql(fake).filter((q) => q.includes('SKIP LOCKED')).length).toBe(claims);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
