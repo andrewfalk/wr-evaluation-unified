@@ -15,7 +15,6 @@ const ALLOWED = new Set([
   'db/patientRecordsRepo.ts',
   'db/patientIdentityCorrection.ts',
   'routes/patients/assignment.ts',
-  'routes/patients/create.ts',
   'routes/patients/delete.ts',
   'routes/patients/patch.ts',
 ]);
