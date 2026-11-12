@@ -249,25 +249,40 @@ describe.skipIf(!TEST_DATABASE_URL)('POST /api/patients (real PostgreSQL, S7-3)'
     expect(await slot(k, docA)).toBeUndefined();
   });
 
-  // Records the current behavior (S7 plan R2 — reproduced here): two requests creating the same NEW patient
-  // number at the same time. The second one's person INSERT fails on the unique number, and
-  // resolvePatientPersonId re-reads the person in the same (now aborted) transaction → 500.
-  it('R2 record: the same new patient number created concurrently by another transaction', async () => {
+  // S7-R2: two requests creating the same NEW patient number at the same time. The second one's person INSERT
+  // waits for the first transaction; when it commits, the second links to that person (birth date compatible)
+  // or answers PATIENT_IDENTITY_CONFLICT. Before S7-R2 this was 500: the INSERT failed with 23505 and the
+  // re-read ran in the aborted transaction (25P02).
+  async function createWhileAnotherInsertsTheNumber(birthDateOfOther: string) {
     const no = `NO-${crypto.randomUUID()}`;
     const id = crypto.randomUUID();
     let res!: request.Response;
+    let otherPerson!: string;
     await withHolder(async (t1) => {
       await t1.query('BEGIN');
-      await t1.query(
-        `INSERT INTO patient_persons (organization_id, patient_no, name, birth_date) VALUES ($1, $2, 'first', '1980-01-01')`,
-        [org.orgId, no],
-      );
+      otherPerson = (await t1.query<{ id: string }>(
+        `INSERT INTO patient_persons (organization_id, patient_no, name, birth_date) VALUES ($1, $2, '생성 환자', $3) RETURNING id`,
+        [org.orgId, no, birthDateOfOther],
+      )).rows[0].id;
       const pending = create(docA, key(), body({ id, patientNo: no, birthDate: '1980-01-01' }));
       await waitForLockWait(holderPool, APP); // the person INSERT waits on the uncommitted number
       await t1.query('COMMIT');
       res = await pending;
     });
-    expect({ status: res.status, body: res.body }).toEqual(R2_OBSERVED);
+    return { res, id, otherPerson };
+  }
+
+  it('R2: the same new patient number committed by another transaction meanwhile → 201, linked to that person', async () => {
+    const { res, id, otherPerson } = await createWhileAnotherInsertsTheNumber('1980-01-01');
+    expect(res.status).toBe(201);
+    expect((await record(id)).person).toBe(otherPerson);
+  });
+
+  it('R2: … with a different birth date → 409 PATIENT_IDENTITY_CONFLICT, nothing written', async () => {
+    const { res, id } = await createWhileAnotherInsertsTheNumber('1990-05-05');
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ code: 'PATIENT_IDENTITY_CONFLICT', error: 'This patient number belongs to an existing patient with a different birth date' });
+    expect(await record(id)).toBeUndefined();
   });
 
   // ---------------------------------------------------------------------------------------------
@@ -334,8 +349,3 @@ describe.skipIf(!TEST_DATABASE_URL)('POST /api/patients (real PostgreSQL, S7-3)'
     expect((await record(blank)).birth_date).toBeNull();
   });
 });
-
-// Observed on the unchanged handler (2026-11-12): 500. The person INSERT fails with 23505, and
-// resolvePatientPersonId's re-read runs in the aborted transaction. S7-R2 fixes this (after S7-4) and
-// changes this expectation to the fixed response.
-const R2_OBSERVED = { status: 500, body: { code: 'INTERNAL_ERROR', error: 'Internal server error' } };
