@@ -12,13 +12,13 @@ const SRC = path.resolve(__dirname, '..', '..');
 const SKIP_DIRS = new Set(['cli', '__tests__', 'node_modules']);
 
 const ALLOWED = new Set([
+  'db/patientRecordsRepo.ts',
   'db/patientIdentityCorrection.ts',
   'routes/patients/assignment.ts',
   'routes/patients/create.ts',
   'routes/patients/delete.ts',
   'routes/patients/patch.ts',
   'routes/videoAnalysis/apply.ts',
-  'routes/workspaces/upsert.ts',
 ]);
 
 // Whitespace between the keywords may include newlines (wider than the one-line DoD grep).

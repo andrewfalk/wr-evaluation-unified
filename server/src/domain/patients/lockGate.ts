@@ -26,6 +26,17 @@ export interface LockGateParams {
   auditContext?: string;
 }
 
+// Moved from http/lockGate.ts (S7-1).
+// holder 응답에는 holderName/acquiredAt/expiresAt만 노출 — leaseToken/clientInstanceId/
+// sessionId/userId는 절대 노출하지 않는다.
+export function lockHolderResponse(lock: LockRow): { holderName: string; acquiredAt: string; expiresAt: string } {
+  return {
+    holderName: lock.holderName,
+    acquiredAt: lock.acquiredAt.toISOString(),
+    expiresAt:  lock.expiresAt.toISOString(),
+  };
+}
+
 /** Call with the patient's anchor row already locked (FOR UPDATE) in `db`'s transaction. */
 export async function runLockGate(
   db: QueryRunner,
