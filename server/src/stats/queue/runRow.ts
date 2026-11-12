@@ -12,7 +12,7 @@ export const STATS_RUN_COLUMNS = `
   id, organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
   requested_disclosure_profile, cacheable, manifest, result, error_code, worker_pid,
   heartbeat_at, created_at, started_at, finished_at, expires_at, analysis_run_id,
-  frozen_dataset, cancel_requested_at, cancelled_by, requeue_count, engine_timeout_ms
+  frozen_dataset, cancel_requested_at, cancelled_by, requeue_count, engine_timeout_ms, queue_namespace
 `;
 
 export interface StatsRunRow {
@@ -40,4 +40,6 @@ export interface StatsRunRow {
   cancelled_by: string | null;
   requeue_count: number;
   engine_timeout_ms: number;
+  /** S8: the queue namespace of the server that admitted the run (migration 0042). */
+  queue_namespace: string;
 }

@@ -45,6 +45,9 @@ import { buildPendingStatsRunManifest } from '../runManifest';
 import { computeExecutionDigest } from '../executionDigest';
 import config from '../../../config';
 
+// S8: the rows this file inserts and the queue functions it calls use the integration namespace ('itest').
+const NS = config.queueNamespace;
+
 const TEST_DB_URL = process.env.TEST_DATABASE_URL;
 const FAKE_RESULT: AnalyzeResult = { continuous: [], discrete: [] };
 
@@ -138,13 +141,13 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
          organization_id, requested_by, status, recipe_digest, source_digest, execution_digest,
          requested_disclosure_profile, cacheable, manifest, result, error_code, frozen_dataset,
          engine_timeout_ms, expires_at, analysis_run_id, created_at, started_at, heartbeat_at,
-         cancel_requested_at, requeue_count, finished_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,'aggregate',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+         cancel_requested_at, requeue_count, finished_at, queue_namespace
+       ) VALUES ($1,$2,$3,$4,$5,$6,'aggregate',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
       [
         orgId, userId, status, recipeDigest, sourceDigest, executionDigest,
         cacheable, JSON.stringify(manifest), result ? JSON.stringify(result) : null, errorCode,
         JSON.stringify(frozenDataset), engineTimeoutMs, expiresAt, analysisRunId, createdAt,
-        startedAt, heartbeatAt, overrides.cancelRequestedAt ?? null, requeueCount, finishedAt,
+        startedAt, heartbeatAt, overrides.cancelRequestedAt ?? null, requeueCount, finishedAt, NS,
       ],
     );
     return { id: (await rowIdFor(analysisRunId)), analysisRunId, executionDigest };
@@ -375,19 +378,19 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
   describe('claimNextQueuedRun — claim 자격', () => {
     it('cancel_requested_at이 있는 행은 claim하지 않는다', async () => {
       await insertRow({ status: 'queued', cancelRequestedAt: new Date() });
-      const claimed = await claimNextQueuedRun(pool, 600000);
+      const claimed = await claimNextQueuedRun(pool, 600000, NS);
       expect(claimed).toBeNull();
     });
 
     it('이미 만료(expires_at 지남)된 행은 claim하지 않는다', async () => {
       await insertRow({ status: 'queued', expiresAt: new Date(Date.now() - 1000) });
-      const claimed = await claimNextQueuedRun(pool, 600000);
+      const claimed = await claimNextQueuedRun(pool, 600000, NS);
       expect(claimed).toBeNull();
     });
 
     it('claim되면 status=running, started_at/heartbeat_at이 채워진다', async () => {
       const { id } = await insertRow({ status: 'queued' });
-      const claimed = await claimNextQueuedRun(pool, 600000);
+      const claimed = await claimNextQueuedRun(pool, 600000, NS);
       expect(claimed?.id).toBe(id);
       expect(claimed?.status).toBe('running');
       expect(claimed?.started_at).not.toBeNull();
@@ -400,7 +403,7 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
       const cutoff = new Date(nowRows[0].now.getTime() - queueWaitMs);
       const { id } = await insertRow({ status: 'queued', createdAt: new Date(cutoff.getTime() + 50) });
 
-      const claimed = await claimNextQueuedRun(pool, queueWaitMs);
+      const claimed = await claimNextQueuedRun(pool, queueWaitMs, NS);
       expect(claimed?.id).toBe(id);
 
       // 이미 running이므로 queue_wait_sweep 전제조건(status==='queued')에서 걸러진다.
@@ -417,7 +420,7 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
       // claim 호출 시점의 now()는 cutoff 계산 시점보다 항상 같거나 늦으므로(시간은 거꾸로
       // 안 간다) claim의 자체 cutoff' >= cutoff이고, row.created_at(=cutoff) > cutoff'는
       // 항상 거짓이다 — claim 불가가 결정적으로 보장된다.
-      const claimed = await claimNextQueuedRun(pool, queueWaitMs);
+      const claimed = await claimNextQueuedRun(pool, queueWaitMs, NS);
       expect(claimed).toBeNull();
 
       // 같은 이유로 row.created_at(=cutoff) <= cutoff''는 항상 참 — sweep 종결이 결정적으로 보장된다.
@@ -431,7 +434,7 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
       const queueWaitMs = 1000;
       const { id } = await insertRow({ status: 'queued', createdAt: new Date(Date.now() - queueWaitMs - 5000) });
 
-      const claimed = await claimNextQueuedRun(pool, queueWaitMs);
+      const claimed = await claimNextQueuedRun(pool, queueWaitMs, NS);
       expect(claimed).toBeNull();
 
       const outcome = await finishRun(pool, id, { origin: 'queue_wait_sweep', queueWaitMs });
@@ -441,11 +444,11 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
     it('FOR UPDATE SKIP LOCKED — created_at 오름차순으로 하나만 claim한다', async () => {
       const older = await insertRow({ status: 'queued', createdAt: new Date(Date.now() - 5000) });
       const newer = await insertRow({ status: 'queued', createdAt: new Date(Date.now() - 1000) });
-      const claimed1 = await claimNextQueuedRun(pool, 600000);
+      const claimed1 = await claimNextQueuedRun(pool, 600000, NS);
       expect(claimed1?.id).toBe(older.id);
-      const claimed2 = await claimNextQueuedRun(pool, 600000);
+      const claimed2 = await claimNextQueuedRun(pool, 600000, NS);
       expect(claimed2?.id).toBe(newer.id);
-      const claimed3 = await claimNextQueuedRun(pool, 600000);
+      const claimed3 = await claimNextQueuedRun(pool, 600000, NS);
       expect(claimed3).toBeNull();
     });
   });
@@ -458,7 +461,7 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
       const stale = await insertRow({ status: 'running', engineTimeoutMs: 100, heartbeatAt: new Date(Date.now() - 60000) });
       const fresh = await insertRow({ status: 'running', engineTimeoutMs: 60000, heartbeatAt: new Date() });
 
-      await sweepStale(pool);
+      await sweepStale(pool, NS);
 
       expect((await fetchRow(stale.id)).status).toBe('failed');
       expect((await fetchRow(fresh.id)).status).toBe('running');
@@ -469,7 +472,7 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
       const expired = await insertRow({ status: 'queued', createdAt: new Date(Date.now() - config.stats.async.queueWaitMs - 5000) });
       const alive = await insertRow({ status: 'queued', createdAt: new Date() });
 
-      await sweepQueuedTerminal(pool);
+      await sweepQueuedTerminal(pool, NS);
 
       expect((await fetchRow(cancelled.id)).status).toBe('cancelled');
       expect((await fetchRow(expired.id)).status).toBe('failed');
@@ -484,7 +487,7 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
   describe('requestCancel', () => {
     it('queued 행 취소 — cancel_requested_at 설정 + 감사 기록 + 200 상당(outcome:cancelled)', async () => {
       const { analysisRunId } = await insertRow({ status: 'queued' });
-      const result = await requestCancel(pool, analysisRunId, orgId, userId);
+      const result = await requestCancel(pool, analysisRunId, orgId, userId, NS);
       expect(result.outcome).toBe('cancelled');
       const audits = await auditRowsFor(analysisRunId);
       expect(audits).toHaveLength(1);
@@ -494,7 +497,7 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
 
     it('running 행 취소도 동일하게 동작한다', async () => {
       const { analysisRunId, id } = await insertRow({ status: 'running' });
-      const result = await requestCancel(pool, analysisRunId, orgId, userId);
+      const result = await requestCancel(pool, analysisRunId, orgId, userId, NS);
       expect(result.outcome).toBe('cancelled');
       const row = await fetchRow(id);
       expect(row.cancel_requested_at).not.toBeNull();
@@ -503,7 +506,7 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
 
     it('이미 취소된 행에 다시 취소를 요청하면 멱등 성공(outcome:cancelled, idempotent:true)', async () => {
       const { analysisRunId } = await insertRow({ status: 'cancelled' });
-      const result = await requestCancel(pool, analysisRunId, orgId, userId);
+      const result = await requestCancel(pool, analysisRunId, orgId, userId, NS);
       expect(result.outcome).toBe('cancelled');
       const audits = await auditRowsFor(analysisRunId);
       expect(audits[0].extra.idempotent).toBe(true);
@@ -511,14 +514,14 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
 
     it('succeeded/failed처럼 이미 종결된 행은 already_terminal(409 상당)', async () => {
       const { analysisRunId: succeededId } = await insertRow({ status: 'succeeded' });
-      expect((await requestCancel(pool, succeededId, orgId, userId)).outcome).toBe('already_terminal');
+      expect((await requestCancel(pool, succeededId, orgId, userId, NS)).outcome).toBe('already_terminal');
 
       const { analysisRunId: failedId } = await insertRow({ status: 'failed' });
-      expect((await requestCancel(pool, failedId, orgId, userId)).outcome).toBe('already_terminal');
+      expect((await requestCancel(pool, failedId, orgId, userId, NS)).outcome).toBe('already_terminal');
     });
 
     it('존재하지 않는 analysisRunId는 not_found(404 상당)', async () => {
-      const result = await requestCancel(pool, crypto.randomUUID(), orgId, userId);
+      const result = await requestCancel(pool, crypto.randomUUID(), orgId, userId, NS);
       expect(result.outcome).toBe('not_found');
     });
 
@@ -526,7 +529,7 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
       const otherOrg = await pool.query<{ id: string }>(`INSERT INTO organizations (name) VALUES ($1) RETURNING id`, ['__test_statsRunsQueue_other_org__']);
       try {
         const { analysisRunId } = await insertRow({ status: 'queued' });
-        const result = await requestCancel(pool, analysisRunId, otherOrg.rows[0].id, userId);
+        const result = await requestCancel(pool, analysisRunId, otherOrg.rows[0].id, userId, NS);
         expect(result.outcome).toBe('not_found');
       } finally {
         await pool.query(`DELETE FROM organizations WHERE id=$1`, [otherOrg.rows[0].id]);
@@ -546,7 +549,7 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
 
     const [finishOutcome] = await Promise.all([
       finishRun(pool, id, { origin: 'computed', outcome: { kind: 'succeeded', result: FAKE_RESULT } }),
-      requestCancel(pool, analysisRunId, orgId, userId),
+      requestCancel(pool, analysisRunId, orgId, userId, NS),
     ]);
 
     expect(finishOutcome).toBe('finalized'); // finishRun은 cancel_requested_at 유무와 무관하게 항상 스스로 종결시킨다
