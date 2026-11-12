@@ -15,7 +15,6 @@ const SELF = 'testing/__tests__/noLocalHarness.test.ts'; // its detector example
 
 const ALLOWED = new Set([
   'routes/__tests__/patients.test.ts',
-  'routes/__tests__/videoAnalysis.test.ts',
 ]);
 
 function testFiles(dir: string): string[] {
