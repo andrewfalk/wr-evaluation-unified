@@ -258,6 +258,18 @@ describe.skipIf(!TEST_DATABASE_URL)('workspace save → patient_records upsert (
     expect(await provenance(pid)).toEqual({ ...first, completion_status: 'draft' });
   });
 
+  it('server verification does not depend on the client report: a verifiable case without a report gets only the server columns', async () => {
+    const pid = crypto.randomUUID();
+    await save(docA, [patient(pid, 'verified-only', {
+      data: { modules: { knee: {} }, activeModules: ['knee'] },
+      shared: { diagnoses: [{ code: 'M17.0', side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' }] },
+    })]);
+    const p = await provenance(pid);
+    expect(p).toMatchObject({ completion_status: 'draft', observed_at: null, completion_source: null });
+    expect(p.verified_at).not.toBeNull();
+    expect(p.engine).not.toBeNull();
+  });
+
   it('a case the server cannot verify complete gets the client report but no server verification', async () => {
     const pid = crypto.randomUUID();
     await save(docA, [patient(pid, 'spine', {

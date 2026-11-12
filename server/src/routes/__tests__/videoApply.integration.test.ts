@@ -279,6 +279,23 @@ describe.skipIf(!TEST_DATABASE_URL)('video analysis apply → patient_records (r
     expect(p.engine).not.toBeNull();
   });
 
+  it('server verification does not depend on the client report: a verifiable case without a report gets only the server columns', async () => {
+    const f = await seed();
+    const body = applyBody(f);
+    body.data = {
+      shared: {
+        name: '영상 환자', videoAnalysis: { appliedInputs: [appliedInput(f)] },
+        diagnoses: [{ code: 'M17.0', side: 'right', confirmedRight: 'confirmed', assessmentRight: 'high' }],
+      },
+      modules: { knee: {} }, activeModules: ['knee'],
+    };
+    expect((await apply(docA, f.shellJobId, 1, body)).status).toBe(200);
+    const p = await patient(f.pid);
+    expect(p).toMatchObject({ status: 'draft', observed_at: null, source: null });
+    expect(p.verified_at).not.toBeNull();
+    expect(p.engine).not.toBeNull();
+  });
+
   it('without a report and without a verifiable case the completion columns stay empty', async () => {
     const f = await seed();
     expect((await apply(docA, f.shellJobId, 1, applyBody(f))).status).toBe(200);
