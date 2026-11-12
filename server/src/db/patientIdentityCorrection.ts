@@ -1,5 +1,6 @@
 import type { QueryRunner } from './patientPersons';
 import { checkLockForWrite, isAssignedOrAdmin } from './patientLocks';
+import { correctBirthDateForPerson } from './patientRecordsRepo';
 
 // ---------------------------------------------------------------------------
 // 생년월일 정정 — 범용 resolver와 의도적으로 분리된 경로.
@@ -178,19 +179,11 @@ export async function correctPatientIdentity(
   // revision을 올리지 않으면 다른 클라이언트가 구 revision으로 옛 payload를 되덮어쓴다.
   // payload JSON도 함께 고쳐야 한다 — DB 컬럼만 고치면 payload의 옛 생년월일이 다시
   // 올라와 충돌이 재발한다.
-  const updated = await db.query<{ id: string }>(
-    `UPDATE patient_records
-     SET birth_date = $3::date,
-         payload    = jsonb_set(payload, '{data,shared,birthDate}', to_jsonb($3::text), true),
-         revision   = revision + 1
-     WHERE patient_person_id = $1 AND organization_id = $2 AND deleted_at IS NULL
-     RETURNING id`,
-    [personId, orgId, birthDate]
-  );
+  const affectedPatientIds = await correctBirthDateForPerson(db, personId, orgId, birthDate);
 
   return {
     personId,
-    affectedPatientIds: updated.rows.map(r => r.id),
+    affectedPatientIds,
     caseCount: currentIds.length,
   };
 }

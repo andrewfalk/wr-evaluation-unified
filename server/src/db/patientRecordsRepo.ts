@@ -446,3 +446,27 @@ export async function setAssignment(
   );
   return rows[0];
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Identity correction (S7-7, from db/patientIdentityCorrection.ts — called at the same place, the
+// correction's statement order unchanged)
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * Birth date (column and payload data.shared.birthDate) of every live case of the person, revision + 1 —
+ * else another client would write the old payload back at the old revision. The ids of the updated cases.
+ */
+export async function correctBirthDateForPerson(
+  db: QueryRunner, personId: string, orgId: string, birthDate: string,
+): Promise<string[]> {
+  const updated = await db.query<{ id: string }>(
+    `UPDATE patient_records
+     SET birth_date = $3::date,
+         payload    = jsonb_set(payload, '{data,shared,birthDate}', to_jsonb($3::text), true),
+         revision   = revision + 1
+     WHERE patient_person_id = $1 AND organization_id = $2 AND deleted_at IS NULL
+     RETURNING id`,
+    [personId, orgId, birthDate]
+  );
+  return updated.rows.map(r => r.id);
+}
