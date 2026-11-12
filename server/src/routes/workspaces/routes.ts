@@ -6,7 +6,8 @@ import { writeAuditLog } from '../../middleware/audit';
 import type { QueryRunner } from '../../db/patientPersons';
 import { orgIdOf, sessionOf } from '../../http/authz';
 import { SaveBody, WorkspaceRow, extractPatientIds, loadDeletedPatientIds, redactDeletedPatients, PatientMeta, extractPatientMeta, normalizeWorkspacePatients } from './normalize';
-import { SkipReason, UpsertOutcome, upsertPatientRecord } from './upsert';
+import { upsertFromWorkspace, type SkipReason, type UpsertOutcome } from '../../domain/patients/patientRecordsService';
+import { patientWriteContextOf } from '../../http/patientWriteContext';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -251,11 +252,12 @@ export async function saveWorkspace(
   // Failures are logged per patient and do not roll back the workspace row.
   const metas = snapshotPatients.map(extractPatientMeta).filter((m): m is PatientMeta => m !== null);
   const results = await Promise.allSettled(
-    metas.map((meta) => upsertPatientRecord(pool, orgId, { id: session.userId, role: session.role }, meta, {
+    metas.map((meta) => upsertFromWorkspace(
       pool,
-      req,
-      leaseToken: (meta.localId && lockTokens?.[meta.localId]) || null,
-    }))
+      // 환자별 편집 락 lease token(요청 본문 lockTokens에서 로컬 id로 꺼냄). 없으면 null.
+      patientWriteContextOf(req, (meta.localId && lockTokens?.[meta.localId]) || null),
+      meta,
+    ))
   );
 
   const ack: WorkspaceSaveAck = { saved: [], skipped: [], conflicts: [], lockedByOther: [] };

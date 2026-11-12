@@ -5,22 +5,14 @@
 import type { Request } from 'express';
 import type { Pool } from 'pg';
 import config from '../config';
-import type { LockRow } from '../db/patientLocks';
 import type { QueryRunner } from '../db/patientPersons';
 import { sessionOf } from './authz';
 import { lockTokenOf } from './lockToken';
 import type { PatientWriteContext } from '../domain/patients/context';
-import { runLockGate } from '../domain/patients/lockGate';
+import { runLockGate, lockHolderResponse } from '../domain/patients/lockGate';
 
-// holder 응답에는 holderName/acquiredAt/expiresAt만 노출 — leaseToken/clientInstanceId/
-// sessionId/userId는 절대 노출하지 않는다.
-export function lockHolderResponse(lock: LockRow): { holderName: string; acquiredAt: string; expiresAt: string } {
-  return {
-    holderName: lock.holderName,
-    acquiredAt: lock.acquiredAt.toISOString(),
-    expiresAt:  lock.expiresAt.toISOString(),
-  };
-}
+// lockHolderResponse moved to domain/patients/lockGate.ts (S7-1); re-exported.
+export { lockHolderResponse };
 
 // patchPatient/deletePatient/assignPatient의 쓰기 게이트. 호출 전 lockPatientAnchor()로
 // 앵커(FOR UPDATE)를 이미 잡아둔 상태여야 한다.

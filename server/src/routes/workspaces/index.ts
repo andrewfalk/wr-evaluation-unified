@@ -57,4 +57,4 @@ export function createWorkspacesRouter(pool: Pool): Router {
 
 // Exported by routes/workspaces.ts before the split; keep the module surface.
 export { normalizeWorkspacePatients, type WorkspaceDateFailure, type NormalizeWorkspaceResult } from './normalize';
-export type { SkipReason, UpsertOutcome } from './upsert';
+export type { SkipReason, UpsertOutcome } from '../../domain/patients/patientRecordsService';
