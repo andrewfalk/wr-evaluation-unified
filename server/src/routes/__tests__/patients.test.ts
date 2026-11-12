@@ -1,24 +1,17 @@
-import crypto from 'crypto';
+// Patients routes (list · read · lease lock · doctor-counts · birth-date 400) on the shared test harness
+// (src/testing/) — migrated in S7-8b with the same it titles and assertions. Query replies are chosen by SQL
+// (table and key clause fragments, whitespace-tolerant), not by call order. The write paths (create, PATCH,
+// delete, assignment, identity correction) run against real PostgreSQL in patients.*.integration.test.ts.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import express from 'express';
-import cookieParser from 'cookie-parser';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
-vi.mock('../../config', () => ({
-  default: {
-    env:  'test',
-    cors: { origins: [] },
-    auth: {
-      accessTokenTtl:     900,
-      accessTokenSecret:  'test-access-secret-0123456789abcd',
-    },
-    // 'off'가 기본값 — 기존 PATCH/DELETE/assignment 테스트들이 락 게이트 쿼리를 추가로
-    // 목킹하지 않아도 되도록. 락 게이팅 자체를 검증하는 테스트는 이 값을 'enforce'로 덮어쓴다.
-    lockEnforcementMode: 'off',
-  },
+// 원본 config mock과 같은 값 — 'off'가 기본값(testConfig 기본과 같음). 이 파일의 어떤 테스트도 락 모드를
+// 바꾸지 않으므로 가변 getter는 두지 않는다.
+vi.mock('../../config', async () => ({
+  default: (await import('../../testing/configMock.js')).testConfig({ lockEnforcementMode: 'off' }),
 }));
 
 vi.mock('../../middleware/audit', () => ({
@@ -29,99 +22,133 @@ vi.mock('../../middleware/audit', () => ({
 }));
 
 import { createPatientsRouter } from '../patients';
-import { createErrorHandler } from '../../http/errorHandler';
 import { requestIdMiddleware } from '../../http/requestId';
-import { createLogger } from '../../logger';
-import { generateAccessToken } from '../../auth/tokens';
 import { writeAuditLog } from '../../middleware/audit';
-
-import type { Pool } from 'pg';
+import { createFakePool, authSessionHandler, type FakePool, type QueryHandler } from '../../testing/fakePool';
+import { makeRouterApp } from '../../testing/app';
+import { makeAccessToken, authHeaders } from '../../testing/tokens';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function makePool(): Pool {
-  return { connect: vi.fn(), query: vi.fn() } as unknown as Pool;
-}
-
-const CSRF_TOKEN = 'ok';
-const CSRF_HASH  = crypto.createHash('sha256').update(CSRF_TOKEN).digest('hex');
-
+// 원래 로컬 도우미와 같은 클레임(CSRF 원문 'ok' = tokens 기본값, sub/orgId는 tokens 기본 UUID = 원래 상수).
 function orgToken(): string {
-  return generateAccessToken({
-    sub: USER_ID, sessionId: 'sess-1', orgId: ORG_ID,
-    role: 'doctor', name: 'Dr. Kim', mustChangePassword: false, csrfHash: CSRF_HASH,
-  }).token;
+  return makeAccessToken({ sessionId: 'sess-1', role: 'doctor', name: 'Dr. Kim' });
 }
 
 function superToken(): string {
-  return generateAccessToken({
-    sub: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
-    sessionId: 'sess-2', orgId: null,
-    role: 'admin', name: 'Superadmin', mustChangePassword: false, csrfHash: CSRF_HASH,
-  }).token;
+  return makeAccessToken({
+    userId: 'cccccccc-cccc-cccc-cccc-cccccccccccc', sessionId: 'sess-2', orgId: null,
+    role: 'admin', name: 'Superadmin',
+  });
 }
 
 function adminToken(): string {
-  return generateAccessToken({
-    sub: ADMIN_ID, sessionId: 'sess-3', orgId: ORG_ID,
-    role: 'admin', name: 'Admin User', mustChangePassword: false, csrfHash: CSRF_HASH,
-  }).token;
+  return makeAccessToken({ userId: ADMIN_ID, sessionId: 'sess-3', role: 'admin', name: 'Admin User' });
 }
 
-function makeApp(pool: Pool) {
-  const app = express();
-  app.use(express.json());
-  app.use(cookieParser());
-  app.use(requestIdMiddleware());                                  // as in createApp (S1)
-  app.use('/api/patients', createPatientsRouter(pool));
-  app.use(createErrorHandler(createLogger({ level: 'silent' }))); // as in createApp (S1)
-  return app;
+// 원래 makeApp과 같은 구성: json → cookieParser → 요청 ID(createApp과 같이, S1) → 라우터 → 중앙 에러 처리기.
+// makeRouterApp은 요청 ID 미들웨어를 붙이지 않으므로 mount 안에서 라우터 앞에 붙인다 —
+// 500 테스트가 X-Request-Id를 오류 본문의 requestId로 돌려받는다.
+function patientsApp(fake: FakePool) {
+  return makeRouterApp((a) => {
+    a.use(requestIdMiddleware());
+    a.use('/api/patients', createPatientsRouter(fake.pool));
+  });
 }
 
-// first call = auth middleware session check; rest = route queries
-function wireQueries(pool: Pool, ...results: { rows: unknown[]; rowCount?: number }[]): void {
-  const mock = pool.query as ReturnType<typeof vi.fn>;
-  mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-  for (const r of results) {
-    mock.mockResolvedValueOnce(r);
-  }
+// 인증만 통과하고 라우트 쿼리 handler는 테스트가 덧붙인다(넣지 않은 쿼리는 미매치 오류 → fake.unmatched).
+function authedFake(...handlers: QueryHandler[]): FakePool {
+  return createFakePool({ handlers: [authSessionHandler(), ...handlers] });
 }
 
-// Routes that use pool.connect() + client.query() (POST, DELETE, PATCH) need this helper.
-// Auth middleware still goes through pool.query (first call); all subsequent
-// queries go through the dedicated client returned by pool.connect().
-//
-// PATCH/DELETE /:id 는 assignedDoctorOrAdmin 미들웨어가 추가로 pool.query를 호출하므로
-// withAccessCheck 옵션으로 미들웨어 SELECT mock도 끼워준다.
-// withAccessCheck.assigned === undefined 이면 USER_ID (테스트의 기본 caller가 owner)
-function makeClientSetup(
-  pool: Pool,
-  ...args:
-    | [...clientResults: { rows: unknown[]; rowCount?: number }[]]
-    | [{ withAccessCheck: { assigned?: string | null } }, ...clientResults: { rows: unknown[]; rowCount?: number }[]]
-): ReturnType<typeof vi.fn> {
-  let withAccess: { assigned?: string | null } | null = null;
-  let clientResults: { rows: unknown[]; rowCount?: number }[];
-  if (args.length > 0 && typeof args[0] === 'object' && args[0] !== null && 'withAccessCheck' in args[0]) {
-    withAccess = (args[0] as { withAccessCheck: { assigned?: string | null } }).withAccessCheck;
-    clientResults = args.slice(1) as { rows: unknown[]; rowCount?: number }[];
-  } else {
-    clientResults = args as { rows: unknown[]; rowCount?: number }[];
-  }
+/** 오류 경로 테스트용: 실패 원인 handler가 실제로 응답했는지(expect 수를 바꾸지 않도록 throw로). */
+function assertHandled(fake: FakePool, name: string): void {
+  if (fake.callsTo(name).length === 0) throw new Error(`handler ${name} was never called`);
+}
 
-  const clientMock = { query: vi.fn(), release: vi.fn() };
-  (pool.connect as ReturnType<typeof vi.fn>).mockResolvedValueOnce(clientMock);
-  (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-  if (withAccess) {
-    const assigned = withAccess.assigned === undefined ? USER_ID : withAccess.assigned;
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      rows: [{ assigned_doctor_user_id: assigned }],
-    });
+// ---- 목록(GET /api/patients) handler ----
+interface ListDb {
+  /** scope=<doctorId> 검증 쿼리(SELECT 1 FROM patient_records … LIMIT 1) 결과. 생략하면 handler 없음 — 검증 쿼리가 나가면 미매치. */
+  scopeCheck?: unknown[];
+  items: unknown[];
+  /** 필터(scope) 조건이 붙은 COUNT. */
+  total: string;
+  /** 담당의 미배정 COUNT. */
+  unassigned: string;
+  /** 조직 전체 COUNT. */
+  org: string;
+}
+
+// COUNT 세 문장은 Promise.all로 나가므로 순서가 아니라 WHERE 조건으로 고른다. scope가 all/__unassigned__이면
+// 필터 COUNT가 조직/미배정 COUNT와 같은 SQL이 되므로 같은 답을 받는다(실제 DB와 같이).
+function listHandlers(db: ListDb): QueryHandler[] {
+  const handlers: QueryHandler[] = [];
+  if (db.scopeCheck) {
+    handlers.push({ name: 'patients.scopeCheck', match: /SELECT\s+1\s+FROM\s+patient_records/, reply: { rows: db.scopeCheck } });
   }
-  const cq = clientMock.query as ReturnType<typeof vi.fn>;
-  for (const r of clientResults) cq.mockResolvedValueOnce(r);
-  return cq;
+  handlers.push(
+    { name: 'patients.list', match: /FROM\s+patient_records[\s\S]*ORDER\s+BY\s+updated_at/, reply: { rows: db.items } },
+    {
+      name: 'patients.count.unassigned',
+      match: /COUNT\(\*\)[\s\S]*FROM\s+patient_records[\s\S]*assigned_doctor_user_id\s+IS\s+NULL/,
+      reply: { rows: [{ total: db.unassigned }] },
+    },
+    {
+      name: 'patients.count.filtered',
+      match: /COUNT\(\*\)[\s\S]*FROM\s+patient_records[\s\S]*(assigned_doctor_user_id\s*=|FALSE)/,
+      reply: { rows: [{ total: db.total }] },
+    },
+    { name: 'patients.count.org', match: /COUNT\(\*\)[\s\S]*FROM\s+patient_records/, reply: { rows: [{ total: db.org }] } },
+  );
+  return handlers;
+}
+
+const doctorCountsHandler = (rows: unknown[]): QueryHandler =>
+  ({ name: 'patients.doctorCounts', match: /FROM\s+patient_records\s+pr\b[\s\S]*GROUP\s+BY/, reply: { rows } });
+
+// GET /:id 단건 조회(잠금 없음).
+const readHandler = (rows: unknown[]): QueryHandler =>
+  ({ name: 'patients.read', match: (sql) => /FROM\s+patient_records/.test(sql) && !/FOR\s+UPDATE/.test(sql), reply: { rows } });
+
+// ---- 락 경로 handler ----
+// 원래 makeClientSetup의 순서 큐(BEGIN/anchor/…/COMMIT)를 SQL로 고르는 handler로 옮긴 것. BEGIN/COMMIT/ROLLBACK은
+// fakePool 기본 처리(기록만) — 트랜잭션 결과는 fake.transactions에 남는다.
+interface LockDb {
+  /** requirePatientAccess 미들웨어(pool, patient_records 조회) 결과. withAccessCheck: {} = 담당의 USER_ID. */
+  access?: unknown[];
+  /** 트랜잭션 안 앵커(patient_records … FOR UPDATE) 결과. */
+  anchor?: unknown[];
+  /** acquireLock UPSERT(INSERT INTO patient_locks … ON CONFLICT … WHERE) RETURNING. */
+  acquire?: unknown[];
+  /** forceLock UPSERT(조건 없는 덮어쓰기) RETURNING. */
+  force?: unknown[];
+  /** renewLock UPDATE patient_locks … RETURNING. */
+  renew?: unknown[];
+  /** peekLock SELECT … FROM patient_locks. */
+  peek?: unknown[];
+  /** releaseLock DELETE FROM patient_locks. */
+  release?: unknown[];
+}
+
+function lockHandlers(db: LockDb): QueryHandler[] {
+  const h: QueryHandler[] = [];
+  if (db.anchor) h.push({ name: 'patients.anchor', match: /FROM\s+patient_records[\s\S]*FOR\s+UPDATE/, reply: { rows: db.anchor } });
+  if (db.access) {
+    h.push({ name: 'patients.access', via: 'pool', match: (sql) => /FROM\s+patient_records/.test(sql) && !/FOR\s+UPDATE/.test(sql), reply: { rows: db.access } });
+  }
+  if (db.acquire) h.push({ name: 'locks.acquire', match: /INSERT\s+INTO\s+patient_locks[\s\S]*DO\s+UPDATE[\s\S]*\bWHERE\b/, reply: { rows: db.acquire } });
+  if (db.force) {
+    h.push({ name: 'locks.force', match: (sql) => /INSERT\s+INTO\s+patient_locks/.test(sql) && !/\bWHERE\b/.test(sql), reply: { rows: db.force } });
+  }
+  if (db.renew) h.push({ name: 'locks.renew', match: /UPDATE\s+patient_locks/, reply: { rows: db.renew } });
+  if (db.peek) h.push({ name: 'locks.peek', match: /SELECT[\s\S]*FROM\s+patient_locks/, reply: { rows: db.peek } });
+  if (db.release) h.push({ name: 'locks.release', match: /DELETE\s+FROM\s+patient_locks/, reply: { rows: db.release } });
+  return h;
+}
+
+function lockFake(db: LockDb): FakePool {
+  return authedFake(...lockHandlers(db));
 }
 
 // ---------------------------------------------------------------------------
@@ -187,45 +214,38 @@ describe('GET /api/patients', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 401 when not authenticated', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [] });
-    const res = await request(makeApp(pool)).get('/api/patients');
+    const fake = createFakePool({ handlers: [authSessionHandler({ revoked: true })] });
+    const res = await request(patientsApp(fake)).get('/api/patients');
     expect(res.status).toBe(401);
+    fake.assertNoUnmatched();
   });
 
   it('returns 403 for superadmin (null org)', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake();
+    const res = await request(patientsApp(fake))
       .get('/api/patients')
       .set('Authorization', `Bearer ${superToken()}`);
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
   });
 
   it('answers a DB failure with the 500 envelope carrying the request id (central error handler, S1)', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ rows: [{ exists: 1 }] }) // auth middleware
-      .mockRejectedValue(new Error('connection terminated'));
-    const res = await request(makeApp(pool))
+    const fake = authedFake({ name: 'patients.dbDown', match: /FROM\s+patient_records/, reply: new Error('connection terminated') });
+    const res = await request(patientsApp(fake))
       .get('/api/patients')
       .set('Authorization', `Bearer ${orgToken()}`)
       .set('X-Request-Id', 'req-p1-07');
     expect(res.status).toBe(500);
     expect(res.headers['x-request-id']).toBe('req-p1-07');
     expect(res.body).toEqual({ code: 'INTERNAL_ERROR', error: 'Internal server error', requestId: 'req-p1-07' });
+    fake.assertNoUnmatched();
+    assertHandled(fake, 'patients.dbDown');
   });
 
   it('returns 200 with items and total', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    mock.mockResolvedValueOnce({ rows: [PAT_ROW] });        // items (Promise.all first)
-    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] }); // count (Promise.all second)
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // unassignedCount (Promise.all third)
-    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] }); // orgPatientCount (Promise.all fourth)
+    const fake = authedFake(...listHandlers({ items: [PAT_ROW], total: '1', unassigned: '0', org: '1' }));
 
-    const res = await request(makeApp(pool))
+    const res = await request(patientsApp(fake))
       .get('/api/patients')
       .set('Authorization', `Bearer ${orgToken()}`);
 
@@ -237,21 +257,15 @@ describe('GET /api/patients', () => {
     expect(res.body.items[0].sync.serverId).toBe(PAT_ID);
     expect(res.body.items[0].sync.syncStatus).toBe('synced');
 
-    const itemsCall = mock.mock.calls[1] as unknown[];
-    expect(itemsCall[0] as string).toContain('assigned_doctor_user_id');
-    expect(itemsCall[1] as unknown[]).toContain(USER_ID);
+    const itemsCall = fake.callsTo('patients.list')[0];
+    expect(itemsCall.sql).toContain('assigned_doctor_user_id');
+    expect(itemsCall.params).toContain(USER_ID);
   });
 
   it('includes top-level updatedAt and createdAt on each item', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    mock.mockResolvedValueOnce({ rows: [PAT_ROW] });
-    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] });
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] });
-    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] });
+    const fake = authedFake(...listHandlers({ items: [PAT_ROW], total: '1', unassigned: '0', org: '1' }));
 
-    const res = await request(makeApp(pool))
+    const res = await request(patientsApp(fake))
       .get('/api/patients')
       .set('Authorization', `Bearer ${orgToken()}`);
 
@@ -262,8 +276,6 @@ describe('GET /api/patients', () => {
   });
 
   it('overrides stale payload updatedAt with DB updated_at', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
     const stalePayloadRow = {
       ...PAT_ROW,
       updated_at: LATER,
@@ -272,13 +284,9 @@ describe('GET /api/patients', () => {
         updatedAt: '2020-01-01T00:00:00.000Z',
       },
     };
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    mock.mockResolvedValueOnce({ rows: [stalePayloadRow] });
-    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] });
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] });
-    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] });
+    const fake = authedFake(...listHandlers({ items: [stalePayloadRow], total: '1', unassigned: '0', org: '1' }));
 
-    const res = await request(makeApp(pool))
+    const res = await request(patientsApp(fake))
       .get('/api/patients')
       .set('Authorization', `Bearer ${orgToken()}`);
 
@@ -287,8 +295,6 @@ describe('GET /api/patients', () => {
   });
 
   it('preserves payload createdAt when present, falls back to DB created_at when missing', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
     const payloadCreatedAt = '2023-12-15T08:30:00.000Z';
     const withPayloadCreatedAt = {
       ...PAT_ROW,
@@ -303,13 +309,9 @@ describe('GET /api/patients', () => {
       id: '22222222-2222-2222-2222-222222222222',
       payload: payloadWithoutCreatedAt,
     };
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    mock.mockResolvedValueOnce({ rows: [withPayloadCreatedAt, noPayloadCreatedAt] });
-    mock.mockResolvedValueOnce({ rows: [{ total: '2' }] });
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] });
-    mock.mockResolvedValueOnce({ rows: [{ total: '2' }] });
+    const fake = authedFake(...listHandlers({ items: [withPayloadCreatedAt, noPayloadCreatedAt], total: '2', unassigned: '0', org: '2' }));
 
-    const res = await request(makeApp(pool))
+    const res = await request(patientsApp(fake))
       .get('/api/patients')
       .set('Authorization', `Bearer ${orgToken()}`);
 
@@ -319,52 +321,34 @@ describe('GET /api/patients', () => {
   });
 
   it('defaults admin patient list scope to all', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    mock.mockResolvedValueOnce({ rows: [PAT_ROW] });        // items
-    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] }); // count
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // unassignedCount
-    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] }); // orgPatientCount
+    const fake = authedFake(...listHandlers({ items: [PAT_ROW], total: '1', unassigned: '0', org: '1' }));
 
-    const res = await request(makeApp(pool))
+    const res = await request(patientsApp(fake))
       .get('/api/patients')
       .set('Authorization', `Bearer ${adminToken()}`);
 
     expect(res.status).toBe(200);
-    const itemsCall = mock.mock.calls[1] as unknown[];
-    expect(itemsCall[0] as string).not.toMatch(/AND\s+assigned_doctor_user_id\s*=/);
-    expect(itemsCall[1] as unknown[]).toEqual([ORG_ID, 20, 0]);
+    const itemsCall = fake.callsTo('patients.list')[0];
+    expect(itemsCall.sql).not.toMatch(/AND\s+assigned_doctor_user_id\s*=/);
+    expect(itemsCall.params).toEqual([ORG_ID, 20, 0]);
   });
 
   it('allows admin to explicitly request mine scope', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    mock.mockResolvedValueOnce({ rows: [] });              // items
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // count
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // unassignedCount
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // orgPatientCount
+    const fake = authedFake(...listHandlers({ items: [], total: '0', unassigned: '0', org: '0' }));
 
-    const res = await request(makeApp(pool))
+    const res = await request(patientsApp(fake))
       .get('/api/patients?scope=mine')
       .set('Authorization', `Bearer ${adminToken()}`);
 
     expect(res.status).toBe(200);
-    const itemsCall = mock.mock.calls[1] as unknown[];
-    expect(itemsCall[0] as string).toContain('assigned_doctor_user_id');
-    expect(itemsCall[1] as unknown[]).toContain(ADMIN_ID);
+    const itemsCall = fake.callsTo('patients.list')[0];
+    expect(itemsCall.sql).toContain('assigned_doctor_user_id');
+    expect(itemsCall.params).toContain(ADMIN_ID);
   });
 
   it('returns 200 with empty result', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });
-    mock.mockResolvedValueOnce({ rows: [] });
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // count
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // unassignedCount
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // orgPatientCount
-    const res = await request(makeApp(pool))
+    const fake = authedFake(...listHandlers({ items: [], total: '0', unassigned: '0', org: '0' }));
+    const res = await request(patientsApp(fake))
       .get('/api/patients')
       .set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
@@ -382,88 +366,72 @@ describe('GET /api/patients — scope 확장', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('scope=<doctorId> (담당 환자 보유) → 그 의사로 필터', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });   // auth
-    mock.mockResolvedValueOnce({ rows: [{ '?column?': 1 }] }); // scope 검증: 담당 환자 있음
-    mock.mockResolvedValueOnce({ rows: [PAT_ROW] });          // items
-    mock.mockResolvedValueOnce({ rows: [{ total: '1' }] });   // count
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] });   // unassignedCount
-    mock.mockResolvedValueOnce({ rows: [{ total: '5' }] });   // orgPatientCount
+    const fake = authedFake(...listHandlers({
+      scopeCheck: [{ '?column?': 1 }],                     // scope 검증: 담당 환자 있음
+      items: [PAT_ROW], total: '1', unassigned: '0', org: '5',
+    }));
 
-    const res = await request(makeApp(pool))
+    const res = await request(patientsApp(fake))
       .get(`/api/patients?scope=${DOCTOR_ID}`)
       .set('Authorization', `Bearer ${adminToken()}`);
 
     expect(res.status).toBe(200);
     // 검증 쿼리가 assigned_doctor_user_id로 조회됐는지
-    const validateCall = mock.mock.calls[1] as unknown[];
-    expect(validateCall[0] as string).toContain('assigned_doctor_user_id');
-    expect(validateCall[1] as unknown[]).toEqual([ORG_ID, DOCTOR_ID]);
+    const validateCall = fake.callsTo('patients.scopeCheck')[0];
+    expect(validateCall.sql).toContain('assigned_doctor_user_id');
+    expect(validateCall.params).toEqual([ORG_ID, DOCTOR_ID]);
     // items 쿼리가 해당 의사로 필터됐는지
-    const itemsCall = mock.mock.calls[2] as unknown[];
-    expect(itemsCall[0] as string).toContain('assigned_doctor_user_id');
-    expect(itemsCall[1] as unknown[]).toContain(DOCTOR_ID);
+    const itemsCall = fake.callsTo('patients.list')[0];
+    expect(itemsCall.sql).toContain('assigned_doctor_user_id');
+    expect(itemsCall.params).toContain(DOCTOR_ID);
   });
 
   it('scope=<doctorId> (담당 환자 없음) → invalid, 전체로 fallback 안 함 (빈 결과)', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });   // auth
-    mock.mockResolvedValueOnce({ rows: [] });                // scope 검증: 담당 환자 없음 → invalid
-    mock.mockResolvedValueOnce({ rows: [] });                // items
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] });  // count
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] });  // unassignedCount
-    mock.mockResolvedValueOnce({ rows: [{ total: '5' }] });  // orgPatientCount
+    const fake = authedFake(...listHandlers({
+      scopeCheck: [],                                      // scope 검증: 담당 환자 없음 → invalid
+      items: [], total: '0', unassigned: '0', org: '5',
+    }));
 
-    const res = await request(makeApp(pool))
+    const res = await request(patientsApp(fake))
       .get(`/api/patients?scope=${DOCTOR_ID}`)
       .set('Authorization', `Bearer ${adminToken()}`);
 
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(0);
-    const itemsCall = mock.mock.calls[2] as unknown[];
-    expect(itemsCall[0] as string).toContain('FALSE');
+    const itemsCall = fake.callsTo('patients.list')[0];
+    expect(itemsCall.sql).toContain('FALSE');
     // 전체(all)로 새지 않았음: assigned 필터도 아니고 조건 없음도 아님
-    expect(itemsCall[0] as string).not.toMatch(/AND\s+assigned_doctor_user_id\s*=/);
+    expect(itemsCall.sql).not.toMatch(/AND\s+assigned_doctor_user_id\s*=/);
   });
 
   it('scope=__unassigned__ → assigned NULL 필터 (검증 쿼리 없음)', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });  // auth
-    mock.mockResolvedValueOnce({ rows: [] });               // items
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // count
-    mock.mockResolvedValueOnce({ rows: [{ total: '3' }] }); // unassignedCount
-    mock.mockResolvedValueOnce({ rows: [{ total: '5' }] }); // orgPatientCount
+    // scopeCheck handler를 두지 않는다 — 검증 쿼리가 나가면 미매치 오류(→ 500)로 실패한다.
+    const fake = authedFake(...listHandlers({ items: [], total: '0', unassigned: '3', org: '5' }));
 
-    const res = await request(makeApp(pool))
+    const res = await request(patientsApp(fake))
       .get('/api/patients?scope=__unassigned__')
       .set('Authorization', `Bearer ${adminToken()}`);
 
     expect(res.status).toBe(200);
-    // 검증 쿼리 없이 바로 items가 두 번째 호출
-    const itemsCall = mock.mock.calls[1] as unknown[];
-    expect(itemsCall[0] as string).toContain('assigned_doctor_user_id IS NULL');
+    // 검증 쿼리 없이 바로 items (scopeCheck handler 없음 + 미매치 없음으로 확인)
+    fake.assertNoUnmatched();
+    const itemsCall = fake.callsTo('patients.list')[0];
+    expect(itemsCall.sql).toContain('assigned_doctor_user_id IS NULL');
   });
 
   it('scope=아무문자열(비-UUID) → invalid, FALSE 조건 (전체 fallback 금지)', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] });  // auth
-    mock.mockResolvedValueOnce({ rows: [] });               // items
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // count
-    mock.mockResolvedValueOnce({ rows: [{ total: '0' }] }); // unassignedCount
-    mock.mockResolvedValueOnce({ rows: [{ total: '5' }] }); // orgPatientCount
+    // 비-UUID는 검증 쿼리 없이 invalid — scopeCheck handler를 두지 않는다.
+    const fake = authedFake(...listHandlers({ items: [], total: '0', unassigned: '0', org: '5' }));
 
-    const res = await request(makeApp(pool))
+    const res = await request(patientsApp(fake))
       .get('/api/patients?scope=not-a-scope')
       .set('Authorization', `Bearer ${adminToken()}`);
 
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(0);
-    const itemsCall = mock.mock.calls[1] as unknown[];
-    expect(itemsCall[0] as string).toContain('FALSE');
+    fake.assertNoUnmatched();
+    const itemsCall = fake.callsTo('patients.list')[0];
+    expect(itemsCall.sql).toContain('FALSE');
   });
 });
 
@@ -474,15 +442,13 @@ describe('GET /api/patients/doctor-counts', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('/:id 라우트에 먹히지 않고 명부를 반환 (라우트 순서)', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    mock.mockResolvedValueOnce({ rows: [
+    // readHandler를 두지 않는다 — getPatient(:id)로 갔다면 미매치 오류가 된다.
+    const fake = authedFake(doctorCountsHandler([
       { user_id: USER_ID, name: 'Dr. Kim', count: 5 },
       { user_id: null,    name: null,      count: 3 },
-    ] });
+    ]));
 
-    const res = await request(makeApp(pool))
+    const res = await request(patientsApp(fake))
       .get('/api/patients/doctor-counts')
       .set('Authorization', `Bearer ${adminToken()}`);
 
@@ -494,16 +460,13 @@ describe('GET /api/patients/doctor-counts', () => {
   });
 
   it('count 내림차순 정렬, 미배정은 doctors에서 분리', async () => {
-    const pool = makePool();
-    const mock = pool.query as ReturnType<typeof vi.fn>;
-    mock.mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    mock.mockResolvedValueOnce({ rows: [
+    const fake = authedFake(doctorCountsHandler([
       { user_id: 'A', name: '박철수', count: 2 },
       { user_id: 'B', name: '이영희', count: 9 },
       { user_id: null, name: null, count: 4 },
-    ] });
+    ]));
 
-    const res = await request(makeApp(pool))
+    const res = await request(patientsApp(fake))
       .get('/api/patients/doctor-counts')
       .set('Authorization', `Bearer ${adminToken()}`);
 
@@ -513,12 +476,12 @@ describe('GET /api/patients/doctor-counts', () => {
   });
 
   it('returns 403 for superadmin (null org)', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake();
+    const res = await request(patientsApp(fake))
       .get('/api/patients/doctor-counts')
       .set('Authorization', `Bearer ${superToken()}`);
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
   });
 });
 
@@ -529,19 +492,19 @@ describe('GET /api/patients/:id', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 404 when patient not found', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake(readHandler([]));
+    const res = await request(patientsApp(fake))
       .get(`/api/patients/${PAT_ID}`)
       .set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(404);
     expect(res.body.code).toBe('PATIENT_NOT_FOUND');
+    fake.assertNoUnmatched();
+    assertHandled(fake, 'patients.read');
   });
 
   it('returns 200 with full patient response', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [PAT_ROW] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake(readHandler([PAT_ROW]));
+    const res = await request(patientsApp(fake))
       .get(`/api/patients/${PAT_ID}`)
       .set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
@@ -550,9 +513,8 @@ describe('GET /api/patients/:id', () => {
   });
 
   it('GET /:id 응답에도 top-level updatedAt/createdAt이 포함된다', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [PAT_ROW] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake(readHandler([PAT_ROW]));
+    const res = await request(patientsApp(fake))
       .get(`/api/patients/${PAT_ID}`)
       .set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
@@ -568,63 +530,57 @@ describe('POST /api/patients', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('returns 400 when Idempotency-Key is missing', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [{ exists: 1 }] });
-    const res = await request(makeApp(pool))
+    const fake = authedFake();
+    const res = await request(patientsApp(fake))
       .post('/api/patients')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send(CREATE_BODY);
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+    fake.assertNoUnmatched();
   });
 
   it('returns 400 when body is invalid', async () => {
     // Body validation happens before any DB call (idempotency slot not reserved)
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-    const res = await request(makeApp(pool))
+    const fake = authedFake();
+    const res = await request(patientsApp(fake))
       .post('/api/patients')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .set('idempotency-key', IDEMP_KEY)
       .send({ phase: 'evaluation' }); // missing data
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('INVALID_BODY');
+    fake.assertNoUnmatched();
   });
 
   it('returns 400 when patient name is missing', async () => {
     // Name check happens before any DB call (idempotency slot not reserved)
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
+    const fake = authedFake();
     const noName = { ...CREATE_BODY, data: { ...VALID_DATA, shared: { ...SHARED, name: '' } } };
-    const res = await request(makeApp(pool))
+    const res = await request(patientsApp(fake))
       .post('/api/patients')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .set('idempotency-key', IDEMP_KEY)
       .send(noName);
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('NAME_REQUIRED');
+    fake.assertNoUnmatched();
   });
 
   // PR0-A: 신규 환자도 생성 시점에 이미 모든 모듈이 완료돼 있을 수 있다 — PATCH 경로에만
   // 완료 추적을 넣으면 이후 수정이 없는 한 완료시각이 영구히 비게 된다(§Context).
-  // INSERT INTO patient_records 바인드 파라미터 인덱스(0-based): 14=completion_status,
-  // 15=server_observed_modules_complete_at, 16=completion_source, 17=build_version, 18=schema_version.
   describe('완료시각 추적 (modulesCompleteObserved)', () => {
 
     it('modulesCompleteObserved=true인데 버전 필드가 없으면 400을 반환한다', async () => {
-      const pool = makePool();
-      (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] }); // auth
-      const res = await request(makeApp(pool))
+      const fake = authedFake();
+      const res = await request(patientsApp(fake))
         .post('/api/patients')
-        .set('Authorization', `Bearer ${orgToken()}`)
-        .set('x-csrf-token', CSRF_TOKEN)
+        .set(authHeaders(orgToken()))
         .set('idempotency-key', IDEMP_KEY)
         .send({ ...CREATE_BODY, modulesCompleteObserved: true });
       expect(res.status).toBe(400);
       expect(res.body.code).toBe('INVALID_BODY');
+      fake.assertNoUnmatched();
     });
   });
 });
@@ -641,22 +597,21 @@ const LOCK_ROW = {
   acquired_at: NOW,
   expires_at: LATER,
 };
+// 원래 withAccessCheck: {} — 미들웨어 조회가 담당의 USER_ID(= 기본 caller)를 돌려준다.
+const ACCESS_OK = [{ assigned_doctor_user_id: USER_ID }];
 
 describe('POST /api/patients/:id/lock', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('토큰 없음 + force 없음 → acquire, 잠겨있지 않으면 200 + leaseToken 발급', async () => {
-    const pool = makePool();
-    makeClientSetup(pool, { withAccessCheck: {} },
-      { rows: [] },          // BEGIN
-      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] }, // anchor
-      { rows: [LOCK_ROW] },  // acquireLock INSERT...RETURNING
-      { rows: [] },          // COMMIT
-    );
-    const res = await request(makeApp(pool))
+    const fake = lockFake({
+      access: ACCESS_OK,
+      anchor: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }],
+      acquire: [LOCK_ROW],  // acquireLock INSERT...RETURNING
+    });
+    const res = await request(patientsApp(fake))
       .post(`/api/patients/${PAT_ID}/lock`)
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({ clientInstanceId: CLIENT_INSTANCE_ID });
     expect(res.status).toBe(200);
     expect(typeof res.body.leaseToken).toBe('string');
@@ -667,37 +622,34 @@ describe('POST /api/patients/:id/lock', () => {
   });
 
   it('다른 클라이언트가 살아있는 락을 쥐고 있으면 423 + holder 정보', async () => {
-    const pool = makePool();
-    makeClientSetup(pool, { withAccessCheck: {} },
-      { rows: [] },              // BEGIN
-      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] }, // anchor
-      { rows: [] },              // acquireLock UPSERT — WHERE 불만족(다른 세션이 보유)
-      { rows: [LOCK_ROW] },      // peekLock (heldBy 조회)
-      { rows: [] },              // ROLLBACK
-    );
-    const res = await request(makeApp(pool))
+    const fake = lockFake({
+      access: ACCESS_OK,
+      anchor: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }],
+      acquire: [],          // acquireLock UPSERT — WHERE 불만족(다른 세션이 보유)
+      peek: [LOCK_ROW],     // peekLock (heldBy 조회)
+    });
+    const res = await request(patientsApp(fake))
       .post(`/api/patients/${PAT_ID}/lock`)
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({ clientInstanceId: CLIENT_INSTANCE_ID });
     expect(res.status).toBe(423);
     expect(res.body.code).toBe('LOCK_HELD');
     expect(res.body.holder.holderName).toBe('Dr. Kim');
     expect(res.body.holder).not.toHaveProperty('leaseToken');
+    fake.assertNoUnmatched();
+    assertHandled(fake, 'locks.peek');
+    fake.assertAllReleased();
   });
 
   it('X-Lock-Token 헤더가 있으면 renew — 토큰을 회전시키지 않고 expires_at만 반환', async () => {
-    const pool = makePool();
-    makeClientSetup(pool, { withAccessCheck: {} },
-      { rows: [] },                              // BEGIN
-      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },                // anchor
-      { rows: [{ expires_at: LATER }] },         // renewLock UPDATE...RETURNING
-      { rows: [] },                              // COMMIT
-    );
-    const res = await request(makeApp(pool))
+    const fake = lockFake({
+      access: ACCESS_OK,
+      anchor: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }],
+      renew: [{ expires_at: LATER }],  // renewLock UPDATE...RETURNING
+    });
+    const res = await request(patientsApp(fake))
       .post(`/api/patients/${PAT_ID}/lock`)
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .set('x-lock-token', 'sometoken')
       .send({});
     expect(res.status).toBe(200);
@@ -706,42 +658,39 @@ describe('POST /api/patients/:id/lock', () => {
   });
 
   it('renew인데 토큰이 유효하지 않으면 423 LOCK_LOST', async () => {
-    const pool = makePool();
-    makeClientSetup(pool, { withAccessCheck: {} },
-      { rows: [] },                // BEGIN
-      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] },  // anchor
-      { rows: [] },                // renewLock UPDATE — 0 rows
-      { rows: [] },                // ROLLBACK
-    );
-    const res = await request(makeApp(pool))
+    const fake = lockFake({
+      access: ACCESS_OK,
+      anchor: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }],
+      renew: [],            // renewLock UPDATE — 0 rows
+    });
+    const res = await request(patientsApp(fake))
       .post(`/api/patients/${PAT_ID}/lock`)
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .set('x-lock-token', 'expired-or-wrong')
       .send({});
     expect(res.status).toBe(423);
     expect(res.body.code).toBe('LOCK_LOST');
+    fake.assertNoUnmatched();
+    assertHandled(fake, 'locks.renew');
+    fake.assertAllReleased();
   });
 
   it('force=true면 다른 클라이언트가 보유 중이어도 항상 200 + 새 leaseToken', async () => {
-    const pool = makePool();
-    makeClientSetup(pool, { withAccessCheck: {} },
-      { rows: [] },              // BEGIN
-      { rows: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }] }, // anchor
-      { rows: [LOCK_ROW] },      // peekLock — 감사 로그용 이전 보유자 조회
-      { rows: [LOCK_ROW] },      // forceLock INSERT...RETURNING — 항상 성공
-      { rows: [] },              // COMMIT
-    );
-    const res = await request(makeApp(pool))
+    const fake = lockFake({
+      access: ACCESS_OK,
+      anchor: [{ id: PAT_ID, assigned_doctor_user_id: USER_ID }],
+      peek: [LOCK_ROW],     // peekLock — 감사 로그용 이전 보유자 조회
+      force: [LOCK_ROW],    // forceLock INSERT...RETURNING — 항상 성공
+    });
+    const res = await request(patientsApp(fake))
       .post(`/api/patients/${PAT_ID}/lock?force=true`)
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({ clientInstanceId: CLIENT_INSTANCE_ID });
     expect(res.status).toBe(200);
     expect(typeof res.body.leaseToken).toBe('string');
     // 감사 로그는 새로 획득한 사람이 아니라 "밀려난 이전 보유자"를 기록해야 의미가 있다.
     expect(writeAuditLog).toHaveBeenCalledWith(
-      pool,
+      fake.pool,
       expect.objectContaining({
         action: 'patient_lock_takeover',
         extra: expect.objectContaining({ previousHolderName: 'Dr. Kim' }),
@@ -750,38 +699,39 @@ describe('POST /api/patients/:id/lock', () => {
   });
 
   it('환자가 없거나 삭제됐으면 404', async () => {
-    const pool = makePool();
-    makeClientSetup(pool, { withAccessCheck: {} },
-      { rows: [] }, // BEGIN
-      { rows: [] }, // anchor — 존재하지 않음
-      { rows: [] }, // ROLLBACK
-    );
-    const res = await request(makeApp(pool))
+    const fake = lockFake({
+      access: ACCESS_OK,
+      anchor: [],           // anchor — 존재하지 않음
+    });
+    const res = await request(patientsApp(fake))
       .post(`/api/patients/${PAT_ID}/lock`)
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({ clientInstanceId: CLIENT_INSTANCE_ID });
     expect(res.status).toBe(404);
     expect(res.body.code).toBe('PATIENT_NOT_FOUND');
+    fake.assertNoUnmatched();
+    assertHandled(fake, 'patients.anchor');
+    fake.assertAllReleased();
   });
 
   // TOCTOU 재검증(2라운드 외부 리뷰 반영) — assignedDoctorOrAdmin 미들웨어는 여기서 host가
-  // 여전히 담당의(USER_ID)라고 통과시켰지만(withAccessCheck: {}), 그 직후 트랜잭션 안에서
+  // 여전히 담당의(USER_ID)라고 통과시켰지만(access: ACCESS_OK), 그 직후 트랜잭션 안에서
   // 앵커가 실제로 조회한 담당의는 다른 사람이다(미들웨어 확인과 앵커 획득 사이에 재배정된
   // 상황을 흉내). assertAssignedOrAdmin이 이를 잡아 403을 반환해야 한다.
   it('미들웨어 통과 후 트랜잭션 안에서 담당의가 이미 바뀌었으면 403(TOCTOU 재검증)', async () => {
-    const pool = makePool();
-    makeClientSetup(pool, { withAccessCheck: {} },
-      { rows: [] },                                                          // BEGIN
-      { rows: [{ id: PAT_ID, assigned_doctor_user_id: 'other-doctor-id' }] }, // anchor — 재배정된 담당의
-      { rows: [] },                                                          // ROLLBACK
-    );
-    const res = await request(makeApp(pool))
+    const fake = lockFake({
+      access: ACCESS_OK,
+      anchor: [{ id: PAT_ID, assigned_doctor_user_id: 'other-doctor-id' }], // anchor — 재배정된 담당의
+    });
+    const res = await request(patientsApp(fake))
       .post(`/api/patients/${PAT_ID}/lock`)
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .send({ clientInstanceId: CLIENT_INSTANCE_ID });
     expect(res.status).toBe(403);
+    fake.assertNoUnmatched();
+    assertHandled(fake, 'patients.access');
+    assertHandled(fake, 'patients.anchor');
+    fake.assertAllReleased();
   });
 });
 
@@ -789,71 +739,62 @@ describe('DELETE /api/patients/:id/lock', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('토큰 없이 호출하면 DB 접근 없이 204 no-op', async () => {
-    const pool = makePool();
-    (pool.query as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ rows: [{ exists: 1 }] }) // auth
-      .mockResolvedValueOnce({ rows: [{ assigned_doctor_user_id: USER_ID }] }); // middleware
-    const res = await request(makeApp(pool))
+    const fake = lockFake({ access: ACCESS_OK }); // middleware
+    const res = await request(patientsApp(fake))
       .delete(`/api/patients/${PAT_ID}/lock`)
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN);
+      .set(authHeaders(orgToken()));
     expect(res.status).toBe(204);
-    expect((pool.connect as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+    expect(fake.connected).toBe(0);
   });
 
   it('토큰이 일치하면 204, patient_locks에서 삭제', async () => {
-    const pool = makePool();
-    const cq = makeClientSetup(pool, { withAccessCheck: {} },
-      { rows: [] },             // BEGIN
-      { rows: [{ id: PAT_ID }] }, // anchor
-      { rows: [] },             // releaseLock DELETE
-      { rows: [] },             // COMMIT
-    );
-    const res = await request(makeApp(pool))
+    const fake = lockFake({
+      access: ACCESS_OK,
+      anchor: [{ id: PAT_ID }],
+      release: [],          // releaseLock DELETE
+    });
+    const res = await request(patientsApp(fake))
       .delete(`/api/patients/${PAT_ID}/lock`)
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .set('x-lock-token', 'mytoken');
     expect(res.status).toBe(204);
-    const deleteCall = (cq.mock.calls as unknown[][]).find(
-      (c) => typeof c[0] === 'string' && (c[0] as string).includes('DELETE FROM patient_locks')
+    const deleteCall = fake.calls.find(
+      (c) => c.via === 'client' && /DELETE\s+FROM\s+patient_locks/.test(c.sql)
     );
     expect(deleteCall).toBeDefined();
   });
 
   it('환자가 없어도(anchor 실패) 204 no-op으로 처리', async () => {
-    const pool = makePool();
-    makeClientSetup(pool, { withAccessCheck: {} },
-      { rows: [] }, // BEGIN
-      { rows: [] }, // anchor — 존재하지 않음 → PatientLockTargetNotFoundError
-      { rows: [] }, // ROLLBACK
-    );
-    const res = await request(makeApp(pool))
+    const fake = lockFake({
+      access: ACCESS_OK,
+      anchor: [],           // anchor — 존재하지 않음 → PatientLockTargetNotFoundError
+    });
+    const res = await request(patientsApp(fake))
       .delete(`/api/patients/${PAT_ID}/lock`)
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .set('x-lock-token', 'mytoken');
     expect(res.status).toBe(204);
+    fake.assertNoUnmatched();
   });
 });
 
 describe('GET /api/patients/:id/lock', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
+  // access handler를 두지 않는다 — 미들웨어 조회가 나가면 미매치 오류(→ 500)로 실패한다.
   it('잠겨있지 않으면 { lock: null } — assignedDoctorOrAdmin 미들웨어 없이 auth만으로 조회', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [] }); // peekLock — 살아있는 락 없음
-    const res = await request(makeApp(pool))
+    const fake = lockFake({ peek: [] }); // peekLock — 살아있는 락 없음
+    const res = await request(patientsApp(fake))
       .get(`/api/patients/${PAT_ID}/lock`)
       .set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
     expect(res.body.lock).toBeNull();
+    fake.assertNoUnmatched();
   });
 
   it('잠겨있으면 holder 정보만 반환(내부 식별자 미노출)', async () => {
-    const pool = makePool();
-    wireQueries(pool, { rows: [LOCK_ROW] });
-    const res = await request(makeApp(pool))
+    const fake = lockFake({ peek: [LOCK_ROW] });
+    const res = await request(patientsApp(fake))
       .get(`/api/patients/${PAT_ID}/lock`)
       .set('Authorization', `Bearer ${orgToken()}`);
     expect(res.status).toBe(200);
@@ -876,53 +817,53 @@ describe('생년월일 서버 검증', () => {
     shared: { ...SHARED, birthDate },
   });
 
-  function authOnly(pool: Pool) {
-    (pool.query as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ rows: [{ exists: 1 }] });
+  // 인증만 통과 — 라우트 쿼리 handler 없음(DB를 건드리면 미매치).
+  function authOnly(): FakePool {
+    return authedFake();
   }
 
-  function postWith(pool: Pool, data: unknown) {
-    return request(makeApp(pool))
+  function postWith(fake: FakePool, data: unknown) {
+    return request(patientsApp(fake))
       .post('/api/patients')
-      .set('Authorization', `Bearer ${orgToken()}`)
-      .set('x-csrf-token', CSRF_TOKEN)
+      .set(authHeaders(orgToken()))
       .set('idempotency-key', IDEMP_KEY)
       .send({ ...CREATE_BODY, data });
   }
 
   it('POST: 실제 사고 값 4110-02-12를 400으로 거부하고 DB를 건드리지 않는다', async () => {
-    const pool = makePool();
-    authOnly(pool);
+    const fake = authOnly();
 
-    const res = await postWith(pool, withBirthDate('4110-02-12'));
+    const res = await postWith(fake, withBirthDate('4110-02-12'));
 
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('INVALID_BIRTH_DATE');
     expect(res.body.fields[0]).toMatchObject({ field: 'birthDate', reason: 'future' });
     // idempotency 슬롯 예약조차 하지 않아야 한다
-    expect(pool.connect).not.toHaveBeenCalled();
+    expect(fake.connected).toBe(0);
+    fake.assertNoUnmatched();
   });
 
   it('POST: 실재하지 않는 날짜(2월 30일)를 거부한다', async () => {
-    const pool = makePool();
-    authOnly(pool);
-    const res = await postWith(pool, withBirthDate('1980-02-30'));
+    const fake = authOnly();
+    const res = await postWith(fake, withBirthDate('1980-02-30'));
     expect(res.status).toBe(400);
     expect(res.body.fields[0].reason).toBe('not_a_calendar_date');
+    fake.assertNoUnmatched();
   });
 
   it('POST: 1900 이전을 거부한다', async () => {
-    const pool = makePool();
-    authOnly(pool);
-    const res = await postWith(pool, withBirthDate('1899-12-31'));
+    const fake = authOnly();
+    const res = await postWith(fake, withBirthDate('1899-12-31'));
     expect(res.status).toBe(400);
     expect(res.body.fields[0].reason).toBe('too_old');
+    fake.assertNoUnmatched();
   });
 
   it('POST: 응답에 생년월일 값 자체를 되싣지 않는다 (PHI)', async () => {
-    const pool = makePool();
-    authOnly(pool);
-    const res = await postWith(pool, withBirthDate('4110-02-12'));
+    const fake = authOnly();
+    const res = await postWith(fake, withBirthDate('4110-02-12'));
     expect(JSON.stringify(res.body)).not.toContain('4110-02-12');
+    fake.assertNoUnmatched();
   });
 
 });

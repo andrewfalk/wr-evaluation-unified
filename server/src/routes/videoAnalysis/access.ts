@@ -5,6 +5,8 @@ import type { Pool } from 'pg';
 import { AnalysisRecipeSchema, buildAnalysisBundleVersion } from '@wr/contracts';
 import type { AnalysisRecipe } from '@wr/contracts';
 import { isAssignedOrAdmin } from '../../db/patientLocks';
+import { toQueryRunner } from '../../db/queryRunner';
+import { selectAssignment } from '../../db/patientRecordsRepo';
 import type { SessionInfo } from '../../http/authz';
 
 // 담당의/admin 판정은 db/patientLocks.ts isAssignedOrAdmin 하나(S4 / P1-17). orgId null(superadmin
@@ -14,20 +16,16 @@ import type { SessionInfo } from '../../http/authz';
 export async function loadAccessiblePatient(
   pool: Pool, session: SessionInfo, orgId: string, patientId: string, res: Response
 ): Promise<{ id: string } | null> {
-  const { rows } = await pool.query<{ id: string; assigned_doctor_user_id: string | null }>(
-    `SELECT id, assigned_doctor_user_id FROM patient_records
-     WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
-    [patientId, orgId]
-  );
-  if (rows.length === 0) {
+  const row = await selectAssignment(toQueryRunner(pool), patientId, orgId); // db/patientRecordsRepo.ts (S7-8b)
+  if (!row) {
     res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
     return null;
   }
-  if (!isAssignedOrAdmin(session, rows[0].assigned_doctor_user_id)) {
+  if (!isAssignedOrAdmin(session, row.assigned_doctor_user_id)) {
     res.status(403).json({ code: 'FORBIDDEN', error: 'Only the assigned doctor can modify this patient' });
     return null;
   }
-  return { id: rows[0].id };
+  return { id: row.id };
 }
 
 interface ClipCtx {

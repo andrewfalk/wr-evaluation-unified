@@ -17,6 +17,8 @@ import { adminOnly } from '../middleware/adminOnly';
 import type { Pool } from 'pg';
 import { csrfMiddleware } from '../middleware/csrf';
 import { isAssignedOrAdmin } from '../db/patientLocks';
+import { toQueryRunner } from '../db/queryRunner';
+import { selectAssignment } from '../db/patientRecordsRepo';
 import { AppError } from './errors';
 
 export type SessionInfo = NonNullable<Request['sessionInfo']>;
@@ -103,18 +105,14 @@ export function requirePatientAccess(pool: Pool, _mode: 'write'): RequestHandler
     }
 
     try {
-      const { rows } = await pool.query<{ assigned_doctor_user_id: string | null }>(
-        `SELECT assigned_doctor_user_id FROM patient_records
-         WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
-        [id, orgId]
-      );
+      const row = await selectAssignment(toQueryRunner(pool), id, orgId);
 
-      if (rows.length === 0) {
+      if (!row) {
         res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
         return;
       }
 
-      if (!isAssignedOrAdmin(session, rows[0].assigned_doctor_user_id)) {
+      if (!isAssignedOrAdmin(session, row.assigned_doctor_user_id)) {
         res.status(403).json({
           code: 'FORBIDDEN',
           error: 'Only the assigned doctor can modify this patient',

@@ -158,7 +158,7 @@ describe("requirePatientAccess(pool, 'write')", () => {
   const PATIENT = '11111111-1111-4111-8111-111111111111';
   function patientApp(lookup: QueryHandler['reply'] | null) {
     const handlers: QueryHandler[] = [authSessionHandler()];
-    if (lookup) handlers.push({ name: 'patient.assigned', match: /SELECT assigned_doctor_user_id FROM patient_records/, reply: lookup });
+    if (lookup) handlers.push({ name: 'patient.assigned', match: /SELECT (?:id, )?assigned_doctor_user_id FROM patient_records/, reply: lookup });
     const fake = createFakePool({ handlers });
     const app = makeRouterApp((a) => {
       a.patch('/p/:id', requireAuth(fake.pool), requirePatientAccess(fake.pool, 'write'), (_req, res) => { res.json({ ok: true }); });
@@ -208,7 +208,7 @@ describe("requirePatientAccess(pool, 'write')", () => {
   });
 
   it('middleware/patientAccess assignedDoctorOrAdmin is the same guard', async () => {
-    const fake = createFakePool({ handlers: [authSessionHandler(), { name: 'patient.assigned', match: /SELECT assigned_doctor_user_id/, reply: { rows: [] } }] });
+    const fake = createFakePool({ handlers: [authSessionHandler(), { name: 'patient.assigned', match: /SELECT (?:id, )?assigned_doctor_user_id/, reply: { rows: [] } }] });
     const app = makeRouterApp((a) => {
       a.patch('/p/:id', requireAuth(fake.pool), assignedDoctorOrAdmin(fake.pool), (_req, res) => { res.json({ ok: true }); });
     });

@@ -1,9 +1,10 @@
 // GET /api/patients/:id.
-// Split out of routes/patients.ts (S5 P1-29); handler bodies unchanged.
+// Split out of routes/patients.ts (S5 P1-29); the SQL is db/patientRecordsRepo.ts selectLive (S7-8b).
 import type { Request, Response } from 'express';
 import type { Pool } from 'pg';
 import { orgIdOf } from '../../http/authz';
-import { PatientRow, SELECT_COLS } from './schemas';
+import { toQueryRunner } from '../../db/queryRunner';
+import { selectLive } from '../../db/patientRecordsRepo';
 import { toResponse } from './shared';
 
 // ---------------------------------------------------------------------------
@@ -13,17 +14,12 @@ export async function getPatient(pool: Pool, req: Request, res: Response): Promi
   const orgId   = orgIdOf(req);
   const { id }  = req.params;
 
-  const { rows } = await pool.query<PatientRow>(
-    `SELECT ${SELECT_COLS}
-     FROM patient_records
-     WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
-    [id, orgId]
-  );
+  const row = await selectLive(toQueryRunner(pool), id, orgId);
 
-  if (rows.length === 0) {
+  if (!row) {
     res.status(404).json({ code: 'PATIENT_NOT_FOUND', error: 'Patient not found' });
     return;
   }
 
-  res.status(200).json(toResponse(rows[0]));
+  res.status(200).json(toResponse(row));
 }

@@ -4,6 +4,7 @@ import type { Request, Response } from 'express';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import { writeAuditLog } from '../../middleware/audit';
+import { toQueryRunner } from '../../db/queryRunner';
 import type { QueryRunner } from '../../db/patientPersons';
 import { acquireLock, renewLock, forceLock, peekLock, releaseLock, lockPatientAnchor, assertAssignedOrAdmin, PatientLockTargetNotFoundError, PatientLockForbiddenError, LOCK_TTL_MS } from '../../db/patientLocks';
 import { lockTokenOf } from '../../http/lockToken';
@@ -150,6 +151,6 @@ export async function peekPatientLock(pool: Pool, req: Request, res: Response): 
   const orgId   = orgIdOf(req);
   const { id }  = req.params;
 
-  const lock = await peekLock(pool as unknown as QueryRunner, { patientId: id, orgId });
+  const lock = await peekLock(toQueryRunner(pool), { patientId: id, orgId });
   res.status(200).json({ lock: lock ? lockHolderResponse(lock) : null });
 }
