@@ -8,3 +8,4 @@ export { createPatient, type CreatePatientResult, type CreatePatientParams } fro
 export { patchPatient, type PatchPatientResult, type PatchPatientParams } from './patchPatient';
 export { softDeletePatient, type SoftDeletePatientResult } from './softDeletePatient';
 export { assignPatient, type AssignPatientResult } from './assignPatient';
+export { correctIdentity, IDENTITY_CORRECTION_MAX_ATTEMPTS, type CorrectIdentityResult, type CorrectIdentityParams } from './correctIdentity';

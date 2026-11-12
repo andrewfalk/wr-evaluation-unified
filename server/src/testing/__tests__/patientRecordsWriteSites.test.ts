@@ -13,7 +13,6 @@ const SKIP_DIRS = new Set(['cli', '__tests__', 'node_modules']);
 
 const ALLOWED = new Set([
   'db/patientRecordsRepo.ts',
-  'db/patientIdentityCorrection.ts',
 ]);
 
 // Whitespace between the keywords may include newlines (wider than the one-line DoD grep).
