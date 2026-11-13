@@ -10,6 +10,7 @@ import http from 'http';
 import type { AddressInfo } from 'net';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { Pool } from 'pg';
+import { integrationAuditPool } from '../../../testing/integrationDb';
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
@@ -58,6 +59,7 @@ interface TestUser { id: string; token: string }
 
 describe.skipIf(!TEST_DB_URL)('제한데이터 권한자 소수 셀 해제 — HTTP 통합 (실제 Postgres+Python+워커)', () => {
   let pool: Pool;
+  let auditReader: Pool; // wr_audit_reader — the app's audit pool, and how tests read audit rows (M9)
   let orgId: string;
   let otherOrgId: string;
   let owner: TestUser;       // 해제 대상 사용자(권한 grant/revoke를 반복)
@@ -89,6 +91,7 @@ describe.skipIf(!TEST_DB_URL)('제한데이터 권한자 소수 셀 해제 — H
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: TEST_DB_URL });
+    auditReader = integrationAuditPool();
     worker = createStatsRunsQueueWorker(pool);
     orgId = (await pool.query<{ id: string }>(`INSERT INTO organizations (name) VALUES ($1) RETURNING id`, ['__test_limited_org__'])).rows[0].id;
     otherOrgId = (await pool.query<{ id: string }>(`INSERT INTO organizations (name) VALUES ($1) RETURNING id`, ['__test_limited_other_org__'])).rows[0].id;
@@ -110,6 +113,7 @@ describe.skipIf(!TEST_DB_URL)('제한데이터 권한자 소수 셀 해제 — H
     await pool.query(`DELETE FROM users WHERE id = ANY($1)`, [createdUserIds]);
     await pool.query(`DELETE FROM organizations WHERE id = ANY($1)`, [[orgId, otherOrgId]]);
     await pool.end();
+    await auditReader.end();
   });
 
   beforeEach(() => {
@@ -192,7 +196,7 @@ describe.skipIf(!TEST_DB_URL)('제한데이터 권한자 소수 셀 해제 — H
     )).rows[0];
   }
   async function limitedAudits(analysisRunId: string) {
-    return (await pool.query<{ extra: Record<string, unknown> }>(
+    return (await auditReader.query<{ extra: Record<string, unknown> }>(
       `SELECT extra FROM audit_logs WHERE actor_org_id=$1 AND action='stats_analyze'
          AND extra->>'analysisRunId'=$2 AND extra->>'smallCellLimitStatus' IS NOT NULL ORDER BY id`,
       [orgId, analysisRunId],
@@ -395,7 +399,7 @@ describe.skipIf(!TEST_DB_URL)('제한데이터 권한자 소수 셀 해제 — H
     expect(open.body.limitedDisclosure).toBe('applied');
     expect(open.body.estimability.completeCaseN).toBe(5);
 
-    const audit = (await pool.query<{ outcome: string; extra: Record<string, unknown> }>(
+    const audit = (await auditReader.query<{ outcome: string; extra: Record<string, unknown> }>(
       `SELECT outcome, extra FROM audit_logs WHERE actor_org_id=$1 AND action='stats_preview'
          AND extra->>'analysisRunId'=$2`, [orgId, open.body.runManifest.analysisRunId],
     )).rows[0];
@@ -437,7 +441,7 @@ describe.skipIf(!TEST_DB_URL)('제한데이터 권한자 소수 셀 해제 — H
     expect(open.body.estimability.completeCaseN).toBe(50);
     expect(open.body.estimability.missingRatesByVariable[JOB_KEY]).toBeCloseTo(2 / 52, 6);
 
-    const audit = (await pool.query<{ extra: Record<string, unknown> }>(
+    const audit = (await auditReader.query<{ extra: Record<string, unknown> }>(
       `SELECT extra FROM audit_logs WHERE actor_org_id=$1 AND action='stats_preview' AND extra->>'analysisRunId'=$2`,
       [orgId, open.body.runManifest.analysisRunId],
     )).rows[0];
@@ -452,7 +456,7 @@ describe.skipIf(!TEST_DB_URL)('제한데이터 권한자 소수 셀 해제 — H
     await grant();
     const res = await post(owner, 'preview', JOB_BODY);
     expect(res.body.limitedDisclosure).toBeUndefined();
-    const audit = (await pool.query<{ extra: Record<string, unknown> }>(
+    const audit = (await auditReader.query<{ extra: Record<string, unknown> }>(
       `SELECT extra FROM audit_logs WHERE actor_org_id=$1 AND action='stats_preview' AND extra->>'analysisRunId'=$2`,
       [orgId, res.body.runManifest.analysisRunId],
     )).rows[0];

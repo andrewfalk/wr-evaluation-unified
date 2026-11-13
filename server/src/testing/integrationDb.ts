@@ -12,6 +12,11 @@ import { generateAccessToken } from '../auth/tokens';
 import { generateToken, hashToken } from '../auth/tokenHash';
 
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
+// M9: under `npm run check:full` TEST_DATABASE_URL is the app role wr_app; these two are the superuser and the audit
+// reader (testing/integrationGlobalSetup.ts). A quick local run with TEST_DATABASE_URL alone has neither, and the
+// helpers below fall back to it (one role for everything, as before M9).
+export const TEST_ADMIN_DATABASE_URL = process.env.TEST_ADMIN_DATABASE_URL || undefined;
+export const TEST_AUDIT_DATABASE_URL = process.env.TEST_AUDIT_DATABASE_URL || undefined;
 
 /** The CSRF token every integration user's access token carries (send it as X-CSRF-Token). */
 export const INTEGRATION_CSRF_TOKEN = 'wr-integration-csrf';
@@ -20,6 +25,26 @@ export const INTEGRATION_CSRF_TOKEN = 'wr-integration-csrf';
 export function integrationPool(applicationName: string, options: { max?: number } = {}): Pool {
   if (!TEST_DATABASE_URL) throw new Error('integrationPool() needs TEST_DATABASE_URL');
   return new Pool({ connectionString: TEST_DATABASE_URL, application_name: applicationName, max: options.max ?? 10 });
+}
+
+/**
+ * A superuser pool, for what wr_app may not do: creating databases, superuser-only settings
+ * (`SET LOCAL deadlock_timeout`). Falls back to TEST_DATABASE_URL in a single-URL run.
+ */
+export function integrationAdminPool(applicationName: string, options: { max?: number } = {}): Pool {
+  const url = TEST_ADMIN_DATABASE_URL ?? TEST_DATABASE_URL;
+  if (!url) throw new Error('integrationAdminPool() needs TEST_ADMIN_DATABASE_URL or TEST_DATABASE_URL');
+  return new Pool({ connectionString: url, application_name: applicationName, max: options.max ?? 3 });
+}
+
+/**
+ * The audit reader's pool (wr_audit_reader — SELECT on audit_logs only): what the app's `auditPool` is in
+ * production, and how the tests read the audit rows (wr_app may only INSERT them). Falls back to TEST_DATABASE_URL.
+ */
+export function integrationAuditPool(applicationName = 'itest-audit-reader', options: { max?: number } = {}): Pool {
+  const url = TEST_AUDIT_DATABASE_URL ?? TEST_DATABASE_URL;
+  if (!url) throw new Error('integrationAuditPool() needs TEST_AUDIT_DATABASE_URL or TEST_DATABASE_URL');
+  return new Pool({ connectionString: url, application_name: applicationName, max: options.max ?? 3 });
 }
 
 export type IntegrationRole = 'doctor' | 'nurse' | 'admin';

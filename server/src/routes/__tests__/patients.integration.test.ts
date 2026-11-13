@@ -22,6 +22,8 @@ import { acquireLock, lockPatientAnchor } from '../../db/patientLocks';
 import {
   createIntegrationOrg, integrationPool, waitForLockWait, TEST_DATABASE_URL,
   type IntegrationOrg, type IntegrationUser,
+  integrationAuditPool,
+  integrationAdminPool,
 } from '../../testing/integrationDb';
 
 const APP = 'wr-itest-patient-patch';
@@ -30,6 +32,7 @@ const HOLDER_APP = 'wr-itest-patient-patch-holder';
 describe.skipIf(!TEST_DATABASE_URL)('PATCH /api/patients/:id (real PostgreSQL, S7-4)', () => {
   let pool: Pool;
   let holderPool: Pool;
+  let auditReader: Pool; // wr_audit_reader — wr_app may only INSERT audit rows (M9)
   let org: IntegrationOrg;
   let otherOrg: IntegrationOrg;
   let docA: IntegrationUser;
@@ -38,7 +41,9 @@ describe.skipIf(!TEST_DATABASE_URL)('PATCH /api/patients/:id (real PostgreSQL, S
 
   beforeAll(async () => {
     pool = integrationPool(APP);
-    holderPool = integrationPool(HOLDER_APP);
+    // Superuser: the deadlock tests set deadlock_timeout, which only a superuser may (M9 — wr_app gets 42501).
+    holderPool = integrationAdminPool(HOLDER_APP);
+    auditReader = integrationAuditPool();
     org = await createIntegrationOrg(holderPool, 'patient-patch');
     otherOrg = await createIntegrationOrg(holderPool, 'patient-patch-other');
     docA = await org.makeUser('doctor', 'Doc A');
@@ -58,6 +63,7 @@ describe.skipIf(!TEST_DATABASE_URL)('PATCH /api/patients/:id (real PostgreSQL, S
     await otherOrg?.destroy();
     await pool.end();
     await holderPool.end();
+    await auditReader.end();
   });
 
   const app = () => makeRouterApp((a) => { a.use('/api/patients', createPatientsRouter(pool)); });
@@ -120,7 +126,7 @@ describe.skipIf(!TEST_DATABASE_URL)('PATCH /api/patients/:id (real PostgreSQL, S
   async function auditRows(action: string, targetId: string, atLeast = 1) {
     const deadline = Date.now() + 3000;
     for (;;) {
-      const { rows } = await holderPool.query<{ actor: string | null; outcome: string; extra: Record<string, unknown> | null }>(
+      const { rows } = await auditReader.query<{ actor: string | null; outcome: string; extra: Record<string, unknown> | null }>(
         `SELECT actor_user_id AS actor, outcome, extra FROM audit_logs
           WHERE action = $1 AND target_id = $2 AND actor_org_id = $3 ORDER BY created_at, id`,
         [action, targetId, org.orgId],

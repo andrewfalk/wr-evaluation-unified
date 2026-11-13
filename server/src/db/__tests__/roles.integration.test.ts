@@ -7,10 +7,10 @@
 //             → applyGrants → verify
 //   rolesonly — runDbSetup --roles-only: roles and database owner only, no schema
 //
-// The roles are cluster-wide. Their URLs come from TEST_OWNER_DATABASE_URL / TEST_APP_DATABASE_URL /
-// TEST_AUDIT_DATABASE_URL when set; otherwise, only under `npm run check:full` (WR_REQUIRE_INTEGRATION=1, a
-// throwaway cluster), they are derived from the admin URL with fresh random passwords. A plain local run with one
-// URL skips this file (it would change the passwords of roles in a cluster other servers may use).
+// The roles are cluster-wide; their URLs are the suite's own (`npm run check:full` sets all four:
+// TEST_ADMIN_DATABASE_URL superuser, TEST_OWNER_DATABASE_URL, TEST_DATABASE_URL = wr_app, TEST_AUDIT_DATABASE_URL),
+// pointed at each throwaway database with the same passwords — so bootstrapping these databases never changes a
+// password the rest of the suite uses. A local run with TEST_DATABASE_URL alone skips this file with a warning.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -22,23 +22,21 @@ import { bootstrapRoles, type RoleUrls } from '../roles/bootstrapRoles';
 import { applyGrants } from '../roles/applyGrants';
 import { verifyRoleSeparation } from '../roles/verifyRoleSeparation';
 import { assertAuditWritable, assertLeastPrivilege, StartupCheckError } from '../roles/startupChecks';
-import { APP_ROLE, MANAGED_ROLES, OWNER_ROLE, READER_ROLE } from '../roles/policy';
+import { APP_ROLE, MANAGED_ROLES, OWNER_ROLE } from '../roles/policy';
 import {
   assertMigrationsApplied, migrationChecksum, MigrationChecksumError, MigrationsPendingError, runMigrations,
 } from '../migrate';
 import { writeAuditLogStrict } from '../../middleware/audit';
 
-const ADMIN_URL = process.env.TEST_ADMIN_DATABASE_URL || process.env.TEST_DATABASE_URL;
-const EXPLICIT = {
+const ADMIN_URL = process.env.TEST_ADMIN_DATABASE_URL;
+const ROLE_URLS = {
   owner: process.env.TEST_OWNER_DATABASE_URL,
-  app: process.env.TEST_APP_DATABASE_URL,
+  app: process.env.TEST_DATABASE_URL,
   reader: process.env.TEST_AUDIT_DATABASE_URL,
 };
-const HAS_EXPLICIT = Boolean(EXPLICIT.owner && EXPLICIT.app && EXPLICIT.reader);
-const MAY_DERIVE = process.env.WR_REQUIRE_INTEGRATION === '1';
-const RUNNABLE = Boolean(ADMIN_URL) && (HAS_EXPLICIT || MAY_DERIVE);
-if (ADMIN_URL && !RUNNABLE) {
-  console.warn('[integration] roles.integration.test.ts skipped: set TEST_OWNER_DATABASE_URL, TEST_APP_DATABASE_URL and TEST_AUDIT_DATABASE_URL (or run `npm run check:full`).');
+const RUNNABLE = Boolean(ADMIN_URL && ROLE_URLS.owner && ROLE_URLS.app && ROLE_URLS.reader);
+if (process.env.TEST_DATABASE_URL && !RUNNABLE) {
+  console.warn('[integration] roles.integration.test.ts skipped: needs TEST_ADMIN_DATABASE_URL, TEST_OWNER_DATABASE_URL and TEST_AUDIT_DATABASE_URL (run `npm run check:full`).');
 }
 
 const REAL_DIR = path.resolve(__dirname, '../../../migrations');
@@ -48,13 +46,6 @@ const QUIET = { log: () => undefined, warn: () => undefined, info: () => undefin
 function withDatabase(url: string, db: string): string {
   const u = new URL(url);
   u.pathname = `/${db}`;
-  return u.toString();
-}
-
-function withRole(url: string, role: string, password: string, db: string): string {
-  const u = new URL(withDatabase(url, db));
-  u.username = role;
-  u.password = password;
   return u.toString();
 }
 
@@ -82,27 +73,15 @@ describe.skipIf(!RUNNABLE)('M9 role separation (integration)', () => {
   const dbLegacy = `wr_test_m9_legacy_${tag}`;
   const dbRolesOnly = `wr_test_m9_roles_${tag}`;
   const dbNoChecksum = `wr_test_m9_nock_${tag}`;
-  const passwords = {
-    owner: crypto.randomBytes(18).toString('hex'),
-    app: crypto.randomBytes(18).toString('hex'),
-    reader: crypto.randomBytes(18).toString('hex'),
-  };
   let admin: Client;
   const pools: Pool[] = [];
   const tmpDirs: string[] = [];
 
   function roleUrls(db: string): RoleUrls {
-    if (HAS_EXPLICIT) {
-      return {
-        ownerUrl: withDatabase(EXPLICIT.owner!, db),
-        appUrl: withDatabase(EXPLICIT.app!, db),
-        readerUrl: withDatabase(EXPLICIT.reader!, db),
-      };
-    }
     return {
-      ownerUrl: withRole(ADMIN_URL!, OWNER_ROLE, passwords.owner, db),
-      appUrl: withRole(ADMIN_URL!, APP_ROLE, passwords.app, db),
-      readerUrl: withRole(ADMIN_URL!, READER_ROLE, passwords.reader, db),
+      ownerUrl: withDatabase(ROLE_URLS.owner!, db),
+      appUrl: withDatabase(ROLE_URLS.app!, db),
+      readerUrl: withDatabase(ROLE_URLS.reader!, db),
     };
   }
   function pool(url: string): Pool {

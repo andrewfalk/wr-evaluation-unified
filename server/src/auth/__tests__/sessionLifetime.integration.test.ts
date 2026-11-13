@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
+import { integrationAuditPool } from '../../testing/integrationDb';
 import request from 'supertest';
 import type { Express } from 'express';
 import { createApp } from '../../app';
@@ -33,6 +34,7 @@ function cookieHeader(res: request.Response, name: string): string | undefined {
 
 describe.skipIf(!TEST_DB_URL)('session absolute lifetime (real PostgreSQL, SEC-B M3)', () => {
   let pool: Pool;
+  let auditReader: Pool; // wr_audit_reader — the app's audit pool, and how tests read audit rows (M9)
   let app: Express;
   let orgId: string;
   let userId: string;
@@ -41,7 +43,8 @@ describe.skipIf(!TEST_DB_URL)('session absolute lifetime (real PostgreSQL, SEC-B
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: TEST_DB_URL });
-    app = createApp({ pool, auditPool: pool });
+    auditReader = integrationAuditPool();
+    app = createApp({ pool, auditPool: auditReader });
     orgId = (await pool.query<{ id: string }>(`INSERT INTO organizations (name) VALUES ('__lifetime_org__') RETURNING id`)).rows[0].id;
     userId = (await pool.query<{ id: string }>(
       `INSERT INTO users (login_id, password_hash, name, role, organization_id) VALUES ($1, $2, '수명 시험', 'doctor', $3) RETURNING id`,
@@ -55,11 +58,12 @@ describe.skipIf(!TEST_DB_URL)('session absolute lifetime (real PostgreSQL, SEC-B
     await pool.query(`DELETE FROM users WHERE id = $1`, [userId]); // cascades sessions
     await pool.query(`DELETE FROM organizations WHERE id = $1`, [orgId]);
     await pool.end();
+    await auditReader.end();
   });
 
   async function login(body: Record<string, unknown> = {}): Promise<LoggedIn & { res: request.Response }> {
     // A fresh app per login: the per-IP login limiter (5/min) lives in each app's memory.
-    const res = await request(createApp({ pool, auditPool: pool })).post('/api/auth/login').send({ loginId, password, ...body });
+    const res = await request(createApp({ pool, auditPool: auditReader })).post('/api/auth/login').send({ loginId, password, ...body });
     expect(res.status).toBe(200);
     return { res, accessToken: res.body.accessToken, refresh: cookieValue(res, 'wr_refresh'), csrf: cookieValue(res, 'wr_csrf') };
   }

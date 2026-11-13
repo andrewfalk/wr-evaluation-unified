@@ -14,7 +14,9 @@ import { Client, Pool } from 'pg';
 import { runMigrations, migrationChecksum, MigrationChecksumError } from '../migrate';
 import { logger } from '../../logger';
 
-const TEST_DB_URL = process.env.TEST_DATABASE_URL;
+// The superuser URL under `npm run check:full` (M9 — wr_app may not create databases); TEST_DATABASE_URL in a
+// single-URL run.
+const TEST_DB_URL = process.env.TEST_ADMIN_DATABASE_URL || process.env.TEST_DATABASE_URL;
 const REAL_DIR = path.resolve(__dirname, '../../../migrations');
 const PRE_CHECKSUM_LAST = 37; // 0037 — the last migration before 7.2.0
 

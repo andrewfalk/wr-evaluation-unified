@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
+import { integrationAuditPool } from '../../testing/integrationDb';
 import request from 'supertest';
 import type { Express } from 'express';
 import { createApp } from '../../app';
@@ -18,6 +19,7 @@ const GOLDEN_PATIENTS = path.resolve(__dirname, '../../../../src/core/fixtures/g
 
 describe.skipIf(!TEST_DB_URL)('patient delete → autosave cleanup (real PostgreSQL, SEC-B L12)', () => {
   let pool: Pool;
+  let auditReader: Pool; // wr_audit_reader — the app's audit pool, and how tests read audit rows (M9)
   let app: Express;
   let orgId: string;
   let otherOrgId: string;
@@ -26,7 +28,8 @@ describe.skipIf(!TEST_DB_URL)('patient delete → autosave cleanup (real Postgre
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: TEST_DB_URL });
-    app = createApp({ pool, auditPool: pool });
+    auditReader = integrationAuditPool();
+    app = createApp({ pool, auditPool: auditReader });
     orgId = (await pool.query<{ id: string }>(`INSERT INTO organizations (name) VALUES ('__autosave_cleanup_org__') RETURNING id`)).rows[0].id;
     otherOrgId = (await pool.query<{ id: string }>(`INSERT INTO organizations (name) VALUES ('__autosave_cleanup_other__') RETURNING id`)).rows[0].id;
     userId = (await pool.query<{ id: string }>(
@@ -53,6 +56,7 @@ describe.skipIf(!TEST_DB_URL)('patient delete → autosave cleanup (real Postgre
     await pool.query(`DELETE FROM users WHERE id = $1`, [userId]);
     await pool.query(`DELETE FROM organizations WHERE id = ANY($1)`, [[orgId, otherOrgId]]);
     await pool.end();
+    await auditReader.end();
   });
 
   const auth = (req: request.Test) => req.set('Authorization', `Bearer ${token}`).set('X-CSRF-Token', CSRF_TOKEN);

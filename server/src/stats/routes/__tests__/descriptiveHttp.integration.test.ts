@@ -18,6 +18,7 @@
 import crypto from 'crypto';
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { Pool } from 'pg';
+import { integrationAuditPool } from '../../../testing/integrationDb';
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
@@ -84,6 +85,7 @@ const CAP_LIMITED_ROWS = 'stats.export_limited_rows';
 
 describe.skipIf(!TEST_DB_URL)('POST /analyze(descriptive) — 실데이터 HTTP 통합 (실제 Postgres+Python+워커)', () => {
   let pool: Pool;
+  let auditReader: Pool; // wr_audit_reader — the app's audit pool, and how tests read audit rows (M9)
   let orgId: string;
   let userId: string;
   let accessToken: string;
@@ -91,6 +93,7 @@ describe.skipIf(!TEST_DB_URL)('POST /analyze(descriptive) — 실데이터 HTTP 
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: TEST_DB_URL });
+    auditReader = integrationAuditPool();
     worker = createStatsRunsQueueWorker(pool);
     const org = await pool.query<{ id: string }>(
       `INSERT INTO organizations (name) VALUES ($1) RETURNING id`,
@@ -124,6 +127,7 @@ describe.skipIf(!TEST_DB_URL)('POST /analyze(descriptive) — 실데이터 HTTP 
     await pool.query(`DELETE FROM users WHERE id = $1`, [userId]);
     await pool.query(`DELETE FROM organizations WHERE id = $1`, [orgId]);
     await pool.end();
+    await auditReader.end();
   });
 
   afterEach(async () => {
@@ -442,7 +446,7 @@ describe.skipIf(!TEST_DB_URL)('POST /analyze(descriptive) — 실데이터 HTTP 
       );
       expect(JSON.stringify(stored.rows[0].result)).not.toContain('rawHistogram');
 
-      const audits = await pool.query(
+      const audits = await auditReader.query(
         `SELECT 1 FROM audit_logs WHERE actor_org_id=$1 AND extra->>'analysisRunId'=$2 AND extra->>'limitedRowFieldsAttached'='true'`,
         [orgId, res.body.runManifest.analysisRunId],
       );
@@ -611,7 +615,7 @@ describe.skipIf(!TEST_DB_URL)('POST /analyze(descriptive) — 실데이터 HTTP 
       expect(storedJson).not.toContain('limitedDisclosure');
 
       // 해제 전달 1건당 해제 감사 1건(원시 필드는 붙지 않았으므로 limitedRowFieldsAttached=false).
-      const audits = await pool.query(
+      const audits = await auditReader.query(
         `SELECT extra FROM audit_logs WHERE actor_org_id=$1 AND extra->>'analysisRunId'=$2 AND extra->>'smallCellLimitStatus'='applied'`,
         [orgId, res.body.runManifest.analysisRunId],
       );
