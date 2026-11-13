@@ -10,6 +10,7 @@
 import crypto from 'crypto';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { Pool } from 'pg';
+import { integrationAuditPool } from '../../../testing/integrationDb';
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
@@ -41,6 +42,7 @@ interface TestUser { id: string; token: string }
 
 describe.skipIf(!TEST_DB_URL)('상관행렬 제한 해제 — HTTP 통합 (실제 Postgres+Python+워커)', () => {
   let pool: Pool;
+  let auditReader: Pool; // wr_audit_reader — the app's audit pool, and how tests read audit rows (M9)
   let orgId: string;
   let owner: TestUser;      // 해제 대상 사용자(권한 grant/revoke를 반복)
   let adminNoCap: TestUser; // 같은 조직의 admin(제한데이터 권한 없음)
@@ -69,6 +71,7 @@ describe.skipIf(!TEST_DB_URL)('상관행렬 제한 해제 — HTTP 통합 (실�
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: TEST_DB_URL });
+    auditReader = integrationAuditPool();
     worker = createStatsRunsQueueWorker(pool);
     orgId = (await pool.query<{ id: string }>(`INSERT INTO organizations (name) VALUES ($1) RETURNING id`, ['__test_corrlimited_org__'])).rows[0].id;
     owner = await createUser(orgId, 'doctor', '소유자 의사');
@@ -85,6 +88,7 @@ describe.skipIf(!TEST_DB_URL)('상관행렬 제한 해제 — HTTP 통합 (실�
     await pool.query(`DELETE FROM users WHERE id = ANY($1)`, [createdUserIds]);
     await pool.query(`DELETE FROM organizations WHERE id = $1`, [orgId]);
     await pool.end();
+    await auditReader.end();
   });
 
   beforeEach(() => {
@@ -271,7 +275,7 @@ describe.skipIf(!TEST_DB_URL)('상관행렬 제한 해제 — HTTP 통합 (실�
     expect(JSON.stringify(afterRevoke.body)).not.toContain('"r"');
 
     // 해제본을 내보낸 시점마다 strict 감사가 남는다(권한자 조회 1회 = 감사 1건 이상).
-    const audits = await pool.query(
+    const audits = await auditReader.query(
       `SELECT 1 FROM audit_logs WHERE actor_org_id=$1 AND action='stats_analyze'
          AND extra->>'analysisRunId'=$2 AND extra->>'smallCellLimitStatus'='applied' AND extra->>'limitedDisclosureSource'='stored'`,
       [orgId, id],

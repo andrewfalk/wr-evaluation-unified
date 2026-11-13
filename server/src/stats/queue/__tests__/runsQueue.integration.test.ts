@@ -15,6 +15,7 @@
 import crypto from 'crypto';
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { Pool } from 'pg';
+import { integrationAuditPool, integrationAdminPool } from '../../../testing/integrationDb';
 import type { AnalyzeResult } from '@wr/contracts';
 
 // routes/__tests__/stats.test.ts의 "감사 INSERT가 실패하면 같은 트랜잭션의 stats_runs
@@ -53,11 +54,15 @@ const FAKE_RESULT: AnalyzeResult = { continuous: [], discrete: [] };
 
 describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·경계 (integration)', () => {
   let pool: Pool;
+  let auditReader: Pool; // wr_audit_reader — the app's audit pool, and how tests read audit rows (M9)
+  let adminPool: Pool; // superuser — wr_app may not DELETE audit rows (M9)
   let orgId: string;
   let userId: string;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: TEST_DB_URL });
+    auditReader = integrationAuditPool();
+    adminPool = integrationAdminPool('itest-runs-queue-admin');
     const org = await pool.query<{ id: string }>(
       `INSERT INTO organizations (name) VALUES ($1) RETURNING id`,
       ['__test_statsRunsQueue_org__'],
@@ -72,15 +77,17 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
   });
 
   afterAll(async () => {
-    await pool.query(`DELETE FROM audit_logs WHERE actor_org_id = $1`, [orgId]);
+    await adminPool.query(`DELETE FROM audit_logs WHERE actor_org_id = $1`, [orgId]);
     await pool.query(`DELETE FROM stats_runs WHERE organization_id = $1`, [orgId]);
     await pool.query(`DELETE FROM users WHERE organization_id = $1`, [orgId]);
     await pool.query(`DELETE FROM organizations WHERE id = $1`, [orgId]);
     await pool.end();
+    await auditReader.end();
+    await adminPool.end();
   });
 
   afterEach(async () => {
-    await pool.query(`DELETE FROM audit_logs WHERE actor_org_id = $1`, [orgId]);
+    await adminPool.query(`DELETE FROM audit_logs WHERE actor_org_id = $1`, [orgId]);
     await pool.query(`DELETE FROM stats_runs WHERE organization_id = $1`, [orgId]);
     __resetStatsRunsQueueForTests();
     writeAuditLogStrictSpy.mockClear();
@@ -164,7 +171,7 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
   }
 
   async function auditRowsFor(analysisRunId: string) {
-    const { rows } = await pool.query(
+    const { rows } = await auditReader.query(
       `SELECT action, outcome, extra FROM audit_logs WHERE actor_org_id=$1 AND extra->>'analysisRunId'=$2 ORDER BY id`,
       [orgId, analysisRunId],
     );
@@ -558,7 +565,7 @@ describe.skipIf(!TEST_DB_URL)('stats-runs-queue — 실제 Postgres 동시성·�
     expect(row.finished_at).not.toBeNull();
     // 두 쓰기 모두 감사를 남기므로(stats_analyze from finishRun, stats_run_cancel from
     // requestCancel — 서로 다른 action) 경합이 있어도 감사 유실은 없어야 한다.
-    const { rows: allAudits } = await pool.query(
+    const { rows: allAudits } = await auditReader.query(
       `SELECT action FROM audit_logs WHERE actor_org_id=$1 AND extra->>'analysisRunId'=$2 ORDER BY action`,
       [orgId, analysisRunId],
     );

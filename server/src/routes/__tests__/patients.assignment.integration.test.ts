@@ -20,6 +20,7 @@ import { acquireLock, lockPatientAnchor } from '../../db/patientLocks';
 import {
   createIntegrationOrg, integrationPool, TEST_DATABASE_URL,
   type IntegrationOrg, type IntegrationUser,
+  integrationAuditPool,
 } from '../../testing/integrationDb';
 
 const APP = 'wr-itest-patient-assign';
@@ -28,6 +29,7 @@ const HOLDER_APP = 'wr-itest-patient-assign-holder';
 describe.skipIf(!TEST_DATABASE_URL)('POST /api/patients/:id/assignment (real PostgreSQL, S7-6)', () => {
   let pool: Pool;
   let holderPool: Pool;
+  let auditReader: Pool; // wr_audit_reader — wr_app may only INSERT audit rows (M9)
   let org: IntegrationOrg;
   let otherOrg: IntegrationOrg;
   let docA: IntegrationUser;
@@ -39,6 +41,7 @@ describe.skipIf(!TEST_DATABASE_URL)('POST /api/patients/:id/assignment (real Pos
   beforeAll(async () => {
     pool = integrationPool(APP);
     holderPool = integrationPool(HOLDER_APP);
+    auditReader = integrationAuditPool();
     org = await createIntegrationOrg(holderPool, 'patient-assign');
     otherOrg = await createIntegrationOrg(holderPool, 'patient-assign-other');
     docA = await org.makeUser('doctor', 'Doc A');
@@ -59,6 +62,7 @@ describe.skipIf(!TEST_DATABASE_URL)('POST /api/patients/:id/assignment (real Pos
     await otherOrg?.destroy();
     await pool.end();
     await holderPool.end();
+    await auditReader.end();
   });
 
   const app = () => makeRouterApp((a) => { a.use('/api/patients', createPatientsRouter(pool)); });
@@ -96,7 +100,7 @@ describe.skipIf(!TEST_DATABASE_URL)('POST /api/patients/:id/assignment (real Pos
   async function auditRows(action: string, targetId: string, atLeast = 1) {
     const deadline = Date.now() + 3000;
     for (;;) {
-      const { rows } = await holderPool.query<{ actor: string | null; outcome: string; extra: Record<string, unknown> | null }>(
+      const { rows } = await auditReader.query<{ actor: string | null; outcome: string; extra: Record<string, unknown> | null }>(
         `SELECT actor_user_id AS actor, outcome, extra FROM audit_logs
           WHERE action = $1 AND target_id = $2 AND actor_org_id = $3 ORDER BY created_at, id`,
         [action, targetId, org.orgId],

@@ -135,9 +135,16 @@ async function main() {
   const results = await runCheckSteps({ env: pythonEnv });
   const sharedBuilt = results[0].ok;
 
+  // M9: the suite runs role-separated, as production does. The superuser (the image's bootstrap user) prepares the
+  // roles, wr_owner applies the migrations, the tests run as wr_app and read audit rows as wr_audit_reader
+  // (server/src/testing/integrationGlobalSetup.ts). Fresh random passwords every run; the cluster is throwaway.
+  const roleUrl = (user, pw) => `postgres://${user}:${pw}@127.0.0.1:${port}/wr_test`;
   const integrationEnv = {
     ...pythonEnv,
-    TEST_DATABASE_URL: `postgres://wr_user:${password}@127.0.0.1:${port}/wr_test`,
+    TEST_ADMIN_DATABASE_URL: roleUrl('wr_user', password),
+    TEST_OWNER_DATABASE_URL: roleUrl('wr_owner', randomBytes(24).toString('hex')),
+    TEST_DATABASE_URL: roleUrl('wr_app', randomBytes(24).toString('hex')),
+    TEST_AUDIT_DATABASE_URL: roleUrl('wr_audit_reader', randomBytes(24).toString('hex')),
     WR_REQUIRE_INTEGRATION: '1',
   };
   results.push(sharedBuilt

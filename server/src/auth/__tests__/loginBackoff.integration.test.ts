@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
+import { integrationAuditPool } from '../../testing/integrationDb';
 import request from 'supertest';
 import { createApp } from '../../app';
 import { claimLoginAttempt, lockedRetryAfterSec, loginIdHash } from '../loginBackoff';
@@ -16,6 +17,7 @@ const TEST_DB_URL = process.env.TEST_DATABASE_URL;
 
 describe.skipIf(!TEST_DB_URL)('login backoff (real PostgreSQL, SEC-B M2)', () => {
   let pool: Pool;
+  let auditReader: Pool; // wr_audit_reader — the app's audit pool, and how tests read audit rows (M9)
   let orgId: string;
   let userId: string;
   const loginId = `__backoff_${crypto.randomBytes(6).toString('hex')}__`;
@@ -34,6 +36,7 @@ describe.skipIf(!TEST_DB_URL)('login backoff (real PostgreSQL, SEC-B M2)', () =>
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: TEST_DB_URL });
+    auditReader = integrationAuditPool();
     orgId = (await pool.query<{ id: string }>(`INSERT INTO organizations (name) VALUES ('__backoff_org__') RETURNING id`)).rows[0].id;
     userId = (await pool.query<{ id: string }>(
       `INSERT INTO users (login_id, password_hash, name, role, organization_id) VALUES ($1, $2, '잠금 시험', 'doctor', $3) RETURNING id`,
@@ -49,6 +52,7 @@ describe.skipIf(!TEST_DB_URL)('login backoff (real PostgreSQL, SEC-B M2)', () =>
     await pool.query(`DELETE FROM users WHERE id = $1`, [userId]);
     await pool.query(`DELETE FROM organizations WHERE id = $1`, [orgId]);
     await pool.end();
+    await auditReader.end();
   });
 
   const expireLock = (key: string) =>
@@ -145,7 +149,7 @@ describe.skipIf(!TEST_DB_URL)('login backoff (real PostgreSQL, SEC-B M2)', () =>
 
   // Each request uses a fresh app so the per-IP limiter (5/min, in memory per app) does not interfere.
   const login = (id: string, pw: string) =>
-    request(createApp({ pool, auditPool: pool })).post('/api/auth/login').send({ loginId: id, password: pw });
+    request(createApp({ pool, auditPool: auditReader })).post('/api/auth/login').send({ loginId: id, password: pw });
 
   it('route: 5 wrong passwords lock the ID, then even the right password gets 429 until the lock ends', async () => {
     for (let i = 0; i < 5; i++) {
@@ -166,7 +170,7 @@ describe.skipIf(!TEST_DB_URL)('login backoff (real PostgreSQL, SEC-B M2)', () =>
     expect(ok.status).toBe(200);
     expect(await row(loginIdHash(loginId))).toBeUndefined();
 
-    const audits = await pool.query<{ outcome: string; extra: Record<string, unknown> | null }>(
+    const audits = await auditReader.query<{ outcome: string; extra: Record<string, unknown> | null }>(
       `SELECT outcome, extra FROM audit_logs WHERE action = 'auth_login' AND extra->>'loginIdHash' = $1 ORDER BY id`,
       [loginIdHash(loginId).slice(0, 16)],
     );

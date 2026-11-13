@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Pool } from 'pg';
+import { integrationAuditPool } from '../testing/integrationDb';
 import request from 'supertest';
 import type { Express } from 'express';
 import { createApp } from '../app';
@@ -51,6 +52,7 @@ function normalise(value: unknown, ids = new Map<string, string>()): unknown {
 
 describe.skipIf(!TEST_DB_URL)('G5 — patient and workspace API responses (real PostgreSQL)', () => {
   let pool: Pool;
+  let auditReader: Pool; // wr_audit_reader — the app's audit pool, and how tests read audit rows (M9)
   let app: Express;
   let orgId: string;
   let userId: string;
@@ -58,7 +60,8 @@ describe.skipIf(!TEST_DB_URL)('G5 — patient and workspace API responses (real 
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: TEST_DB_URL });
-    app = createApp({ pool, auditPool: pool });
+    auditReader = integrationAuditPool();
+    app = createApp({ pool, auditPool: auditReader });
     orgId = (await pool.query<{ id: string }>(`INSERT INTO organizations (name) VALUES ('__golden_api_org__') RETURNING id`)).rows[0].id;
     userId = (await pool.query<{ id: string }>(
       `INSERT INTO users (login_id, password_hash, name, role, organization_id) VALUES ($1,'x','골든 의사','doctor',$2) RETURNING id`,
@@ -84,6 +87,7 @@ describe.skipIf(!TEST_DB_URL)('G5 — patient and workspace API responses (real 
     await pool.query(`DELETE FROM users WHERE id = $1`, [userId]);
     await pool.query(`DELETE FROM organizations WHERE id = $1`, [orgId]);
     await pool.end();
+    await auditReader.end();
   });
 
   const auth = (req: request.Test) => req.set('Authorization', `Bearer ${token}`).set('X-CSRF-Token', CSRF_TOKEN);

@@ -2,7 +2,8 @@ import { defineConfig } from 'vitest/config';
 
 // Real-Postgres integration tests (REFACTORING_ROADMAP P0-10 / P0-2).
 //   npm run test:integration          (needs TEST_DATABASE_URL → a database named wr_test*)
-//   npm run check:full  (repo root)   (starts a throwaway Postgres container and sets it)
+//   npm run check:full  (repo root)   (starts a throwaway Postgres container and runs role-separated, M9:
+//                                      TEST_ADMIN/OWNER_DATABASE_URL + TEST_DATABASE_URL = wr_app + TEST_AUDIT_DATABASE_URL)
 // globalSetup refuses any database whose name does not start with `wr_test`, then applies
 // migrations. Files run one at a time: they share one database, and the stats queue tests
 // start real workers that claim any queued job.

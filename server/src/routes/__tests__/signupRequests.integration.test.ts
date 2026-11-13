@@ -8,6 +8,7 @@ import path from 'path';
 import bcrypt from 'bcrypt';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
+import { integrationAdminPool, integrationAuditPool } from '../../testing/integrationDb';
 import request from 'supertest';
 import { createApp } from '../../app';
 import { loginIdHash } from '../../auth/loginBackoff';
@@ -27,6 +28,7 @@ function cookieValue(res: request.Response, name: string): string {
 
 describe.skipIf(!TEST_DB_URL)('signup requests (real PostgreSQL, SEC-B L4)', () => {
   let pool: Pool;
+  let auditReader: Pool; // wr_audit_reader — the app's audit pool, and how tests read audit rows (M9)
   const tag = crypto.randomBytes(4).toString('hex');
   const orgIds: string[] = [];
   const userIds: string[] = [];
@@ -36,7 +38,7 @@ describe.skipIf(!TEST_DB_URL)('signup requests (real PostgreSQL, SEC-B L4)', () 
   let superAdmin: Admin;
 
   // A fresh app per call: the per-IP limiters (login 5/min, signup) live in each app's memory.
-  const app = () => createApp({ pool, auditPool: pool });
+  const app = () => createApp({ pool, auditPool: auditReader });
 
   async function makeAdmin(orgId: string | null, label: string): Promise<Admin> {
     const loginId = `sr_${tag}_${label}`;
@@ -64,6 +66,7 @@ describe.skipIf(!TEST_DB_URL)('signup requests (real PostgreSQL, SEC-B L4)', () 
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: TEST_DB_URL });
+    auditReader = integrationAuditPool();
     for (const name of [`__sr_a_${tag}__`, `__sr_b_${tag}__`]) {
       orgIds.push((await pool.query<{ id: string }>(`INSERT INTO organizations (name) VALUES ($1) RETURNING id`, [name])).rows[0].id);
     }
@@ -81,6 +84,7 @@ describe.skipIf(!TEST_DB_URL)('signup requests (real PostgreSQL, SEC-B L4)', () 
     await pool.query(`DELETE FROM users WHERE id = ANY($1)`, [[...userIds, ...created.rows.map(r => r.id)]]);
     await pool.query(`DELETE FROM organizations WHERE id = ANY($1)`, [orgIds]);
     await pool.end();
+    await auditReader.end();
   });
 
   it('a repeated request for the same login ID is 202 both times and keeps the first pending row', async () => {
@@ -149,8 +153,14 @@ describe.skipIf(!TEST_DB_URL)('signup requests (real PostgreSQL, SEC-B L4)', () 
       [`sr_${tag}_legacy_super`, superId],
     )).rows[0].id;
 
-    // Re-run the migration file (idempotent) — the same SQL the runner applied.
-    await pool.query(fs.readFileSync(path.resolve(__dirname, '../../../migrations/0041_signup_request_organization.sql'), 'utf8'));
+    // Re-run the migration file (idempotent) — the same SQL the runner applied. Its DDL needs more than wr_app
+    // (M9): the superuser pool runs it.
+    const migrator = integrationAdminPool('itest-signup-0041');
+    try {
+      await migrator.query(fs.readFileSync(path.resolve(__dirname, '../../../migrations/0041_signup_request_organization.sql'), 'utf8'));
+    } finally {
+      await migrator.end();
+    }
 
     expect((await requestRows(`sr_${tag}_legacy`))[0].organization_id).toBe(orgIds[0]);
     expect((await requestRows(`sr_${tag}_legacy_super`))[0].organization_id).toBeNull();

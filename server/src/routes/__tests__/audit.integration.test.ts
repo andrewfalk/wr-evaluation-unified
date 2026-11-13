@@ -4,6 +4,7 @@
 import crypto from 'crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
+import { integrationAuditPool } from '../../testing/integrationDb';
 import request from 'supertest';
 import type { Express } from 'express';
 import { createApp } from '../../app';
@@ -23,6 +24,7 @@ function sign(priv: crypto.KeyObject, deviceId: string, ts: string, nonce: strin
 
 describe.skipIf(!TEST_DB_URL)('EMR audit nonce (real PostgreSQL, SEC-A L11)', () => {
   let pool: Pool;
+  let auditReader: Pool; // wr_audit_reader — the app's audit pool, and how tests read audit rows (M9)
   let orgId: string;
   let userId: string;
   let deviceId: string;
@@ -30,6 +32,7 @@ describe.skipIf(!TEST_DB_URL)('EMR audit nonce (real PostgreSQL, SEC-A L11)', ()
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: TEST_DB_URL });
+    auditReader = integrationAuditPool();
     orgId = (await pool.query<{ id: string }>(`INSERT INTO organizations (name) VALUES ('__emr_nonce_org__') RETURNING id`)).rows[0].id;
     userId = (await pool.query<{ id: string }>(
       `INSERT INTO users (login_id, password_hash, name, role, organization_id) VALUES ($1,'x','EMR 시험','doctor',$2) RETURNING id`,
@@ -50,9 +53,10 @@ describe.skipIf(!TEST_DB_URL)('EMR audit nonce (real PostgreSQL, SEC-A L11)', ()
     await pool.query(`DELETE FROM users WHERE id = $1`, [userId]);
     await pool.query(`DELETE FROM organizations WHERE id = $1`, [orgId]);
     await pool.end();
+    await auditReader.end();
   });
 
-  const app = (): Express => createApp({ pool, auditPool: pool });
+  const app = (): Express => createApp({ pool, auditPool: auditReader });
 
   // Queue replay form (no Authorization): the actor is the device's user and organization.
   function signedRequest(target: Express, nonce: string) {
@@ -67,7 +71,7 @@ describe.skipIf(!TEST_DB_URL)('EMR audit nonce (real PostgreSQL, SEC-A L11)', ()
       .send(BODY);
   }
 
-  const auditRows = async (nonce: string) => (await pool.query<{ n: string }>(
+  const auditRows = async (nonce: string) => (await auditReader.query<{ n: string }>(
     `SELECT count(*)::text AS n FROM audit_logs
      WHERE actor_org_id = $1 AND action = 'emr_inject' AND extra->>'deviceId' = $2 AND extra->>'nonceProbe' = $3`,
     [orgId, deviceId, nonce],
@@ -112,7 +116,7 @@ describe.skipIf(!TEST_DB_URL)('EMR audit nonce (real PostgreSQL, SEC-A L11)', ()
       .set('x-wr-device-sig', sign(privateKey, deviceId, ts, nonce, forged)).set('x-wr-device-ts', ts).set('x-wr-device-nonce', nonce)
       .send(forged);
     expect(res.status).toBe(200);
-    const row = await pool.query<{ extra: Record<string, unknown> }>(
+    const row = await auditReader.query<{ extra: Record<string, unknown> }>(
       `SELECT extra FROM audit_logs WHERE actor_org_id = $1 AND extra->>'nonceProbe' = $2`, [orgId, nonce],
     );
     expect(row.rows).toHaveLength(1);
