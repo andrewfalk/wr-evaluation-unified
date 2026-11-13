@@ -20,7 +20,15 @@
 #   GPG_PASSPHRASE      — (optional) passphrase for the private key.
 #                         Leave unset when using a passphrase-free restore key (recommended).
 #
-# Required tools: gpg (with private key imported), pg_restore
+# Required tools: gpg (with private key imported), pg_restore, psql
+#
+# The restore runs in a single transaction: it either completes (exit 0, then the
+# row-count check runs) or rolls back and leaves the database unchanged (exit 1).
+# Temporary space in /tmp: the decrypted dump plus the dump rendered as SQL
+# (roughly the uncompressed size of the data) — both are removed on exit.
+# Restoring into an EMPTY cluster: create the roles first (7.3.0~, see
+# docs/BACKUP_RESTORE.md 5-2) — the dump grants to wr_owner·wr_app·wr_audit_reader,
+# and a GRANT to a missing role now fails the restore instead of being skipped.
 
 set -euo pipefail
 
@@ -52,10 +60,14 @@ if [ "${CONFIRM}" != "YES" ]; then
   exit 0
 fi
 
-DUMP_TMP="/tmp/wr-restore-$(date +%s).dump"
+WORK_DIR=$(mktemp -d /tmp/wr-restore.XXXXXX)
+DUMP_TMP="${WORK_DIR}/backup.dump"
+TOC_TMP="${WORK_DIR}/toc.txt"
+SQL_TMP="${WORK_DIR}/restore.sql"
+PRECLEAN_SQL="${WORK_DIR}/preclean.sql"
 
-# Always wipe the plaintext dump on exit, even on error or Ctrl-C.
-trap 'rm -f "${DUMP_TMP}"' EXIT
+# Always wipe the plaintext dump and the rendered SQL on exit, even on error or Ctrl-C.
+trap 'rm -rf "${WORK_DIR}"' EXIT
 
 # ---------------------------------------------------------------------------
 # 1. GPG decrypt
@@ -71,21 +83,81 @@ fi
 echo "[restore] Decryption complete ($(du -sh "${DUMP_TMP}" | cut -f1))"
 
 # ---------------------------------------------------------------------------
-# 2. pg_restore
+# 2. Restore — in ONE transaction
 # ---------------------------------------------------------------------------
-echo "[restore] Restoring to ${PGDATABASE} ..."
-pg_restore \
-  -h "${PGHOST}" \
-  -p "${PGPORT}" \
-  -U "${PGUSER}" \
-  -d "${PGDATABASE}" \
-  --clean \
-  --if-exists \
-  --no-owner \
-  "${DUMP_TMP}"
+# Restoring over an existing database: `pg_restore --clean` drops each partition's
+# primary key (audit_logs_<month>_pkey) before the parent's (audit_logs_pkey). The
+# partition's copy is inherited from the parent and cannot be dropped on its own
+# ("cannot drop inherited constraint"), so a direct pg_restore ended with exit 1
+# even though every row was restored. Instead:
+#   a) read the archive and render it to SQL first — an unreadable or corrupt
+#      archive fails here, before the database is touched;
+#   b) in one transaction: drop the parent-level constraints of the partitioned
+#      tables the dump recreates (pre-clean, below), then run the rendered SQL
+#      with ON_ERROR_STOP. Any error rolls the whole transaction back and the
+#      database is left exactly as it was before the restore.
+echo "[restore] Reading archive ..."
+pg_restore --list "${DUMP_TMP}" > "${TOC_TMP}"
+# Tables the dump recreates (and so `--clean` drops): TOC lines "<id>; <oid> <oid> TABLE <schema> <name> <owner>".
+DUMP_TABLES=$(awk '$1 ~ /^[0-9]+;$/ && $4 == "TABLE" && $5 != "DATA" { printf "%s%s.%s", sep, $5, $6; sep = "," }' "${TOC_TMP}")
+pg_restore --clean --if-exists --no-owner --file="${SQL_TMP}" "${DUMP_TMP}"
+echo "[restore] Archive rendered ($(du -sh "${SQL_TMP}" | cut -f1) of SQL)"
 
-echo "[restore] Restore complete"
-# DUMP_TMP is cleaned up by the EXIT trap.
+# Pre-clean: the parent-level PRIMARY KEY / UNIQUE / FOREIGN KEY constraints of the
+# partitioned tables in the dump, and the foreign keys of dumped tables that point at
+# them. Dropping a parent's constraint drops its partitions' inherited copies with it.
+# `--clean` drops every one of these a few statements later anyway (the dump recreates
+# their tables) — this only moves those drops ahead of the partitions' copies. No table
+# or row is removed here. Anything else that depends on them (an object the dump does
+# not recreate) makes the drop fail, and the whole restore rolls back.
+cat > "${PRECLEAN_SQL}" <<'SQL'
+SET LOCAL wr_restore.dump_tables = :'dump_tables';
+DO $preclean$
+DECLARE
+  dumped text[] := pg_catalog.string_to_array(pg_catalog.current_setting('wr_restore.dump_tables'), ',');
+  r record;
+BEGIN
+  FOR r IN
+    SELECT n.nspname, c.relname, con.conname
+      FROM pg_catalog.pg_constraint con
+      JOIN pg_catalog.pg_class c ON c.oid = con.conrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      LEFT JOIN pg_catalog.pg_class rc ON rc.oid = con.confrelid
+      LEFT JOIN pg_catalog.pg_namespace rn ON rn.oid = rc.relnamespace
+     WHERE con.contype IN ('p', 'u', 'f')
+       AND con.conparentid = 0
+       AND con.conislocal
+       AND (n.nspname || '.' || c.relname) = ANY (dumped)
+       AND (c.relkind = 'p'
+            OR (con.contype = 'f' AND rc.relkind = 'p' AND (rn.nspname || '.' || rc.relname) = ANY (dumped)))
+     ORDER BY con.contype = 'f' DESC, n.nspname, c.relname, con.conname
+  LOOP
+    RAISE NOTICE 'pre-clean: ALTER TABLE %.% DROP CONSTRAINT %', r.nspname, r.relname, r.conname;
+    EXECUTE pg_catalog.format('ALTER TABLE %I.%I DROP CONSTRAINT %I', r.nspname, r.relname, r.conname);
+  END LOOP;
+END
+$preclean$;
+SQL
+
+echo "[restore] Restoring to ${PGDATABASE} (single transaction) ..."
+# -o /dev/null: the dump's own SELECTs (set_config, setval) print nothing useful; errors and
+# notices go to stderr and stay visible.
+if ! psql -X -q -o /dev/null \
+    -h "${PGHOST}" \
+    -p "${PGPORT}" \
+    -U "${PGUSER}" \
+    -d "${PGDATABASE}" \
+    -v ON_ERROR_STOP=1 \
+    -v "dump_tables=${DUMP_TABLES}" \
+    --single-transaction \
+    -f "${PRECLEAN_SQL}" \
+    -f "${SQL_TMP}"; then
+  echo "[restore] ERROR: restore failed — the transaction was rolled back; '${PGDATABASE}' was not changed." >&2
+  exit 1
+fi
+
+echo "[restore] Restore complete (committed)"
+# DUMP_TMP and SQL_TMP are cleaned up by the EXIT trap.
 
 # ---------------------------------------------------------------------------
 # 3. Verification — basic row count sanity check
