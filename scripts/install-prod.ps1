@@ -174,6 +174,22 @@ if (-not $wrVersion) {
 Write-Ok "WR_VERSION=$wrVersion"
 $Passed++
 
+# Role passwords (7.3.0~, M9): the one-shot migrate service sets the wr_owner / wr_app passwords from these values
+# and the partition sidecar passes OWNER_DB_PASSWORD to psql as is — so only characters that need no escaping in a
+# connection URL or an env value. Older packages do not use the keys; a missing key is reported by the compose
+# validation below (docker-compose.prod.yml requires them from 7.3.0).
+foreach ($key in 'OWNER_DB_PASSWORD', 'APP_DB_PASSWORD') {
+    $value = (Get-Content $EnvFile | Where-Object { $_ -match "^\s*$key\s*=" }) |
+        ForEach-Object { ($_ -split '=', 2)[1].Trim() } | Select-Object -First 1
+    if ($null -eq $value) { continue }
+    if ($value -notmatch '^[A-Za-z0-9_-]+$') {
+        Write-Fail "$key may contain only letters, digits, '_' and '-' (generate one with: openssl rand -hex 32)."
+        exit 1
+    }
+    Write-Ok "$key format"
+    $Passed++
+}
+
 # ── Step 4: Compose config validation ────────────────────────────────────────
 
 Write-Step 4 "Compose config validation"
@@ -189,10 +205,15 @@ $composeArgs = @(
 Invoke-Native { docker compose @composeArgs }
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "docker compose config validation failed. Fix the errors above and retry."
+    Write-Host "   From 7.3.0, OWNER_DB_PASSWORD and APP_DB_PASSWORD are required (see .env.production.example)." -ForegroundColor White
     exit 1
 }
 Write-Ok "Compose config is valid"
 $Passed++
+
+# 7.3.0~ (M9): a one-shot `migrate` service prepares the database roles and applies the migrations before the app.
+$servicesArgs = $composeArgs[0..($composeArgs.Count - 3)] + @("config", "--services")
+$hasMigrate = @(Invoke-Native { docker compose @servicesArgs }) -contains "migrate"
 
 # App loopback publish (127.0.0.1:<WR_APP_PORT>): no shell overrides, resolved host IP is
 # 127.0.0.1 only, and the port is free or already held by this project's app. Read-only.
@@ -260,6 +281,10 @@ Invoke-Native { docker compose @upArgs }
 
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "docker compose up failed (exit $LASTEXITCODE). Check logs above."
+    if ($hasMigrate) {
+        Write-Host "   The database setup runs first — its log:" -ForegroundColor White
+        Write-Host "     docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file $EnvFile -p $ProjectName logs migrate" -ForegroundColor White
+    }
     exit 1
 }
 
@@ -271,17 +296,23 @@ Write-Host ""
 Write-Host "Services are starting. Check status:" -ForegroundColor White
 Write-Host "  $composePrefix ps"
 Write-Host "  $composePrefix logs app --tail=100"
+if ($hasMigrate) { Write-Host "  $composePrefix logs migrate    (database setup — 'Exited (0)' in ps -a is normal)" }
 Write-Host ""
 Write-Host "Volumes created (or reused):" -ForegroundColor White
 Invoke-Native { docker volume ls --format "  {{.Name}}" 2>$null } | Where-Object { $_ -match "${ProjectName}_" }
 
 Write-Host ""
 Write-Host "Next steps (PRODUCTION_RELEASE_PLAN.md section 4):" -ForegroundColor White
-Write-Host "  1. Change AUDIT_DB_PASSWORD:"
-Write-Host "     $composePrefix exec postgres psql -U wr_user -d wr_evaluation -c `"ALTER ROLE wr_audit_reader PASSWORD '...';`""
-Write-Host "  2. Seed admin account:"
+$n = 1
+if (-not $hasMigrate) {
+    # Packages before 7.3.0 only: from 7.3.0 the migrate service sets every role password from .env on each `up`.
+    Write-Host "  $n. Change AUDIT_DB_PASSWORD:"
+    Write-Host "     $composePrefix exec postgres psql -U wr_user -d wr_evaluation -c `"ALTER ROLE wr_audit_reader PASSWORD '...';`""
+    $n++
+}
+Write-Host "  $n. Seed admin account:"; $n++
 Write-Host "     $composePrefix exec app node dist/cli/seedAdmin.js"
-Write-Host "  3. Register GPG public key:"
+Write-Host "  $n. Register GPG public key:"; $n++
 Write-Host "     Get-Content .\wr-backup-public.asc | $composePrefix --profile backup run --rm -T backup gpg --import"
-Write-Host "  4. Activate backup profile:"
+Write-Host "  $n. Activate backup profile:"
 Write-Host "     $composePrefix --profile backup up -d"
