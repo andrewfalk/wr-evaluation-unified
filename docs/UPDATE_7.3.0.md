@@ -261,13 +261,14 @@ curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local
    | 다학제 추출 | `emr_extract_consultation` |
    | EMR 직접입력 · 다학제 보내기(EMR에 쓴다) | `emr_inject` |
 
-2. 1분 안에 기록이 생겼는지 본다. 둘 중 하나로 확인한다.
-   - **관리자 콘솔** → "감사 로그" 탭 → "대상 유형" 칸에 `emr` 입력 → 조회. 맨 위에 방금 시각의 행(액션 = 위 표의 이름)이 보이면 된다. "액션 필터" 칸은 이름이 정확히 같아야 걸린다(예: `emr_extract_record`).
+   동작 직전 시각과 그 PC의 IP 주소, 로그인한 아이디를 적어 둔다 — 다른 PC가 같은 시간에 EMR을 쓴 행과 구분하기 위해서다.
+2. 1분 안에 기록이 생겼는지 본다. 둘 중 하나로 확인한다. **판정 기준: 적어 둔 시각 이후의 행이고, 액션이 위 표의 이름이며, 그 PC의 IP·아이디와 맞는 행이 있으면 기록 경로 정상**이다.
+   - **관리자 콘솔** → "감사 로그" 탭 → "대상 유형" 칸에 `emr` 입력 → 조회. 시각·액션·IP 열로 위 기준을 본다("사용자 ID" 열은 내부 ID 앞 8자리라 아이디 대조는 아래 SQL로 한다). "액션 필터" 칸은 이름이 정확히 같아야 걸린다(예: `emr_extract_record`).
    - **서버에서 직접**:
      ```powershell
-     docker exec wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -c "select now() - created_at as ago, action, outcome from audit_logs where action like 'emr_%' order by created_at desc limit 5"
+     docker exec wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -c "select now() - a.created_at as ago, a.action, a.outcome, u.login_id, a.ip from audit_logs a left join users u on u.id = a.actor_user_id where a.action like 'emr_%' order by a.created_at desc limit 5"
      ```
-     → 첫 행의 `ago`가 방금(몇 분 이내)이고 `action`이 위 표의 이름이면 **기록 경로 정상**이다. `outcome`은 EMR 동작의 결과다 — `failure`(예: EMR 창을 찾지 못함)여도 감사 기록 자체는 된 것이다. EMR 동작이 실제로 됐는지는 화면에서 따로 본다.
+     → `ago`가 적어 둔 시각 이후(동작한 지 지난 시간보다 짧다)이고 `login_id`·`ip`가 시험한 아이디·PC와 같은 행을 찾는다. `outcome`은 EMR 동작의 결과다 — `failure`(예: EMR 창을 찾지 못함)여도 감사 기록 자체는 된 것이다. EMR 동작이 실제로 됐는지는 화면에서 따로 본다.
 3. **행이 생기지 않으면**:
    - 서버 로그에서 그 요청을 찾는다:
      ```powershell
