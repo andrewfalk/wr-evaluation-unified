@@ -36,11 +36,15 @@ cp .env.example .env
 # .env 편집: 아래 항목을 반드시 실제 값으로 변경
 #   ACCESS_TOKEN_SECRET   (openssl rand -hex 32, 32바이트 이상 필수 — 7.2.0부터 REFRESH_TOKEN_SECRET은 쓰지 않음)
 #   CORS_ORIGINS, WR_DOMAIN
-#   POSTGRES_PASSWORD                           (기본값 변경 필수)
+#   POSTGRES_PASSWORD                           (기본값 변경 필수 — 부트스트랩 슈퍼유저 wr_user)
+#   OWNER_DB_PASSWORD, APP_DB_PASSWORD          (7.3.0~ 역할 분리: wr_owner·wr_app, 기본값 변경 필수, 영숫자·_·-만)
 #   AUDIT_DB_PASSWORD                           (기본값 changeme_audit_reader 반드시 변경)
 
-# 2. 핵심 서비스 기동 (postgres + app + caddy)
+# 2. 핵심 서비스 기동
+#    postgres → migrate(1회성: 역할 3종 준비·마이그레이션·권한·검증, `ps -a`에 Exited (0)이 정상)
+#    → app(wr_app으로 접속) + partition + caddy
 docker compose up -d
+docker compose logs migrate     # 마지막 줄: "[db-setup] Done — … role separation verified."
 
 # 3. Admin 계정 초기 생성 (최초 1회)
 docker compose exec app node dist/cli/seedAdmin.js
@@ -48,11 +52,8 @@ docker compose exec app node dist/cli/seedAdmin.js
 # → 7.2.0부터 운영(NODE_ENV=production)에서는 관리자 계정이 이미 있으면 묻기 전에 거부합니다.
 #   추가 계정은 관리자 콘솔에서 만듭니다(꼭 필요하면 --force).
 
-# 4. audit reader 비밀번호를 .env의 AUDIT_DB_PASSWORD 값으로 동기화 (최초 1회)
-#    migration이 기본값 'changeme_audit_reader'로 role을 생성하므로,
-#    .env에서 변경한 값으로 아래 명령을 실행해야 합니다.
-docker compose exec postgres psql -U wr_user -d wr_evaluation \
-  -c "ALTER ROLE wr_audit_reader PASSWORD '실제_AUDIT_DB_PASSWORD_값';"
+# 4. (7.3.0~ 삭제) 감사 계정 비밀번호 수동 동기화 — migrate 서비스가 `up`마다 세 역할의 비밀번호를
+#    .env 값으로 맞춘다. 7.2.0 이하 패키지만 예전처럼 ALTER ROLE wr_audit_reader PASSWORD 를 실행한다.
 
 # 5. 백업 사이드카 활성화 (GPG 공개 키 설정 후)
 # .env에 BACKUP_GPG_RECIPIENT 설정 → docs/BACKUP_RESTORE.md 3절 참조
@@ -60,8 +61,9 @@ docker compose exec postgres psql -U wr_user -d wr_evaluation \
 docker compose --profile backup up -d
 ```
 
-> **⚠ 기본 비밀번호 주의**: `POSTGRES_PASSWORD`, `AUDIT_DB_PASSWORD`는 반드시 기본값에서 변경하세요.  
-> 특히 `.env`의 `AUDIT_DB_PASSWORD` 값과 DB role `wr_audit_reader`의 실제 비밀번호가 반드시 일치해야 합니다 — 4단계의 `ALTER ROLE` 명령으로 동기화하며, 불일치 시 서버가 production 모드에서 기동을 거부합니다.
+> **⚠ 기본 비밀번호 주의**: `POSTGRES_PASSWORD`, `OWNER_DB_PASSWORD`, `APP_DB_PASSWORD`, `AUDIT_DB_PASSWORD`는 반드시 기본값에서 변경하세요.  
+> 7.3.0부터 앱은 `wr_app`(소유권 없음, 감사 로그는 INSERT만)으로 접속하고 기동 때 마이그레이션을 하지 않습니다 — 1회성 `migrate` 서비스가 `up`마다 역할·비밀번호(`POSTGRES_PASSWORD` 제외)·마이그레이션·권한을 맞추고 검증한 뒤 끝납니다. 미적용 마이그레이션이 있거나 앱 역할이 감사 로그를 바꿀 수 있으면 앱이 기동을 거부합니다(`docker compose logs app`). `docker compose restart app`·`up -d --no-deps app`은 migrate를 돌리지 않습니다.  
+> `up` 전에는 같은 DB를 쓰는 서버(app·partition·backup, 다른 PC의 개발 서버 등)를 모두 멈추세요 — 소유권 이전이 테이블 잠금을 잡고 10초 뒤 포기합니다. 손으로 만든 스키마·`SECURITY DEFINER` 함수·rule이 있으면 migrate가 위반 목록을 출력하고 실패합니다.
 
 서비스가 정상 기동되면 Caddy가 자동으로 내부 CA를 생성하고 `wr.hospital.local`에 대한 인증서를 발급합니다.
 

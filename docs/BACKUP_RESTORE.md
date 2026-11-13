@@ -169,7 +169,21 @@ docker compose cp backup:/backups/yearly/wr-backup-2026.dump.gpg ./
 
 ### 5-2. 복구 실행
 
+**순서(7.3.0~)**: ① 같은 DB를 쓰는 서비스 정지 → ② 복원 → ③ `up -d`(1회성 `migrate` 서비스가 소유권·권한을 역할 분리
+상태로 되돌리고 미적용 마이그레이션을 적용한다) → ④ 검증. 7.3.0 이전 덤프도 이 순서로 복원하면 `up -d` 뒤 정상이다.
+
 ```bash
+# ① app·partition·backup(과 같은 DB를 쓰는 모든 서버) 정지 — postgres만 남긴다
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod \
+  stop caddy app partition backup
+```
+
+> **빈 클러스터에 복원할 때**(새 서버·볼륨 재생성): postgres만 올린 뒤 **역할만** 먼저 만든다 —
+> `docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod up -d postgres` →
+> `… run --rm migrate node dist/cli/dbSetup.js --roles-only` → 아래 ② 복원 → ③ `up -d`.
+
+```bash
+# ② 복원
 # WR_VERSION을 .env.production에서 읽기
 WR_VERSION=$(grep '^WR_VERSION=' .env.production | cut -d= -f2)
 echo "WR_VERSION=${WR_VERSION}"   # 빈 값이면 중단
@@ -194,17 +208,27 @@ docker run --rm -it \
 
 스크립트가 `YES` 입력을 요구합니다. 확인 후 입력하면 복구가 진행됩니다.
 
+> **기존 DB 위에 덮어쓸 때의 알려진 동작**: `pg_restore --clean`이 파티션의 상속된 기본키 제약을 지우지 못해
+> `cannot drop inherited constraint "audit_logs_…_pkey"` 오류 5건을 내고 0이 아닌 코드로 끝난다. 이 오류는 무해하며
+> **데이터는 전부 복원된다**(7.3.0 리허설에서 행 수 일치 확인). 다만 `restore.sh`가 그 자리에서 멈춰
+> "Restore complete"와 행 수 출력이 나오지 않으므로, 아래 5-3의 행 수 확인을 직접 한다. (M9 이전부터의 동작 — 7.2.0 DB에서도 같다.)
+
 ### 5-3. 복구 후 검증
 
 ```bash
-# restore.sh가 자동으로 row count를 출력함 (users / patient_records / audit_logs)
-# 애플리케이션 재기동 후 정상 동작 확인
+# ③ 전체 기동 — migrate가 먼저 돌아 소유권·권한을 역할 분리 상태로 되돌린다
 docker compose \
   -f docker-compose.yml \
   -f docker-compose.prod.yml \
   --env-file .env.production \
   -p wr-prod \
-  up -d app
+  up -d
+docker compose -p wr-prod logs migrate | tail -3      # "[db-setup] Done — … role separation verified."
+docker compose -p wr-prod ps -a                       # migrate: Exited (0), app: healthy
+
+# ④ 행 수 확인(restore.sh가 중간에 멈췄으면 여기서) + 앱 상태
+docker compose -p wr-prod exec postgres psql -U wr_user -d wr_evaluation -c \
+  "SELECT 'users', COUNT(*) FROM users UNION ALL SELECT 'patient_records', COUNT(*) FROM patient_records UNION ALL SELECT 'audit_logs', COUNT(*) FROM audit_logs;"
 docker compose -p wr-prod exec app wget -qO- http://localhost:3001/health
 ```
 
@@ -248,10 +272,15 @@ docker run -d --name wr-restore-test \
 until docker exec wr-restore-test \
   pg_isready -U wr_user -d wr_evaluation 2>/dev/null; do sleep 2; done
 
-# 1-a. wr_audit_reader role 생성 (dump에 GRANT가 포함되므로 필수)
-docker exec wr-restore-test \
-  psql -U wr_user -d wr_evaluation \
-  -c "CREATE ROLE wr_audit_reader LOGIN PASSWORD 'restore_audit_pw';"
+# 1-a. 역할만 준비 (dump에 wr_owner·wr_app·wr_audit_reader GRANT가 포함되므로 필수 — 7.3.0~)
+#      앱 이미지의 dbSetup --roles-only: 역할 3종 생성·DB 소유자 지정만 하고 마이그레이션은 하지 않는다.
+#      비밀번호는 이 리허설 전용 임시값(운영 값과 다르게).
+docker run --rm --network wr-restore-test-net \
+  -e BOOTSTRAP_DATABASE_URL=postgres://wr_user:test_only@wr-restore-test:5432/wr_evaluation \
+  -e MIGRATION_DATABASE_URL=postgres://wr_owner:restore_owner_pw@wr-restore-test:5432/wr_evaluation \
+  -e DATABASE_URL=postgres://wr_app:restore_app_pw@wr-restore-test:5432/wr_evaluation \
+  -e AUDIT_DATABASE_URL=postgres://wr_audit_reader:restore_audit_pw@wr-restore-test:5432/wr_evaluation \
+  "wr-app-server:${WR_VERSION}" node dist/cli/dbSetup.js --roles-only
 
 # 2. 가장 최근 월간 백업으로 복구 시도
 docker run --rm -it \
