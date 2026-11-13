@@ -176,6 +176,9 @@ docker compose -p wr-prod --env-file $envFile -f docker-compose.yml -f docker-co
 cd C:\wr\wr-evaluation-unified-7.3.0-intranet
 
 # 2. 7.2.0 폴더의 updates/ 를 통째로 옮긴다(이번 패키지의 updates/ 는 비어 있다)
+#    원본 경로는 이 창에서 다시 구한다(사전 준비 0)의 변수는 그 창에만 있다). 아직 재생성 전이라 7.2.0 폴더가 나온다.
+$installDir = (docker inspect wr-prod-app-1 --format '{{json .Config.Labels}}' | ConvertFrom-Json).'com.docker.compose.project.working_dir'
+$installDir                                                                  # → 7.2.0 패키지 폴더여야 한다(아니면 7.2.0 폴더 경로를 직접 넣는다)
 if (-not (Test-Path "$installDir\updates\latest.yml") -or -not (Test-Path "$installDir\updates\latest.yml.sig")) { throw "원본 updates 가 없습니다: $installDir\updates — 여기서 멈추고 경로를 확인한다" }
 Copy-Item "$installDir\updates\*" ".\updates\" -Recurse -ErrorAction Stop
 Get-ChildItem .\updates                                                      # → latest.yml·latest.yml.sig·설치본
@@ -280,10 +283,25 @@ curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local
 cd C:\wr\wr-evaluation-unified-7.3.0-intranet
 docker compose -p wr-prod --env-file $envFile -f docker-compose.yml -f docker-compose.prod.yml --profile backup stop
 
-# 2. postgres 만 올리고, 사전 준비 2)의 백업을 복원한다 — BACKUP_RESTORE.md 5-2 ② 의 복원 컨테이너 명령 그대로
-#    (기존 DB 위 덮어쓰기라 pg_restore 가 "cannot drop inherited constraint" 오류 5건으로 0이 아닌 코드로 끝나고
-#     restore.sh 가 행 수 출력 전에 멈추는 것이 알려진 동작이다 — 데이터는 복원된다. 행 수는 직접 확인한다)
+# 2. postgres 만 올리고, 사전 준비 2)의 백업을 복원한다. 복원 승인(2인)·복구 전용 키 정책은 BACKUP_RESTORE.md 5절과 같다.
+#    이 블록은 $envFile 의 값을 쓴다(현재 폴더에 .env.production 이 없어도 된다). 비밀번호는 화면에 출력하지 않는다.
+#    복구 전용 개인키(wr-backup-private.asc)를 이 폴더(7.3.0 패키지 폴더)에 잠시 둔다.
 docker compose -p wr-prod --env-file $envFile -f docker-compose.yml -f docker-compose.prod.yml up -d postgres
+$cfg = docker compose -p wr-prod --env-file $envFile -f docker-compose.yml -f docker-compose.prod.yml config --format json | ConvertFrom-Json
+$env:PGPASSWORD = [string]$cfg.services.postgres.environment.POSTGRES_PASSWORD; Remove-Variable cfg
+docker run --rm -it --network wr-prod_default `
+  -v "${PWD}\wr-backup-private.asc:/tmp/private.asc:ro" `
+  -v wr-prod_backup_data:/backups:ro `
+  -v "${PWD}\scripts\restore.sh:/scripts/restore.sh:ro" `
+  -e PGHOST=postgres -e PGPASSWORD -e PGDATABASE=wr_evaluation -e RESTORE_AUTH_TICKET=<티켓번호> `
+  wr-backup:7.3.0 `
+  sh -c 'export GNUPGHOME=$(mktemp -d) && gpg --batch --import /tmp/private.asc && sh /scripts/restore.sh /backups/daily/<사전 준비 2)에서 적어 둔 파일 이름>'
+Remove-Item env:PGPASSWORD
+Remove-Item .\wr-backup-private.asc                                       # 복구 전용 키는 바로 지운다(BACKUP_RESTORE.md 5-4)
+#    기존 DB 위 덮어쓰기라 pg_restore 가 "cannot drop inherited constraint" 오류 5건으로 0이 아닌 코드로 끝나고
+#    restore.sh 가 행 수 출력 전에 멈추는 것이 알려진 동작이다 — 데이터는 복원된다. 행 수는 직접 확인한다:
+docker exec wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -tAc "select count(*) from schema_migrations; select count(*) from patient_records; select count(*) from audit_logs"
+# → 41 / 백업 시점의 환자 수 / 백업 시점의 감사 행 수
 
 # 3. .env.production: WR_VERSION=7.3.0 → 7.2.0 (OWNER_DB_PASSWORD·APP_DB_PASSWORD 는 남겨 둬도 7.2.0이 무시한다)
 # 4. 7.2.0 폴더에서 기동
