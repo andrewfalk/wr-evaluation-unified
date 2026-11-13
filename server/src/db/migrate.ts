@@ -173,11 +173,87 @@ export async function runMigrations(pool: Pool, options: RunMigrationsOptions = 
   }
 }
 
-// CLI entry point: tsx src/db/migrate.ts
+// --- Read-only check for a server that does not migrate (M9) ---------------------------------------------------
+// With role separation the server connects as wr_app, which cannot run DDL; the one-shot `migrate` service (cli/
+// dbSetup.ts) applies the migrations as wr_owner before the app starts. On start-up the server only checks, with a
+// single SELECT and no lock, that the database is current. The same file checks as runMigrations (enforce / warn,
+// missing files), except that it cannot record a missing checksum.
+
+const RUN_MIGRATE_HINT =
+  'Run the database setup — `docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm migrate` ' +
+  '(plain `docker compose up -d` runs it first) — and start the server again. The server applies migrations ' +
+  'itself only with AUTO_MIGRATE=true (the default outside NODE_ENV=production).';
+
+export class MigrationsPendingError extends Error {
+  constructor(readonly filenames: string[]) {
+    super(`[migrate] ${filenames.length} migration(s) not applied: ${filenames.join(', ')}. ${RUN_MIGRATE_HINT}`);
+    this.name = 'MigrationsPendingError';
+  }
+}
+
+export async function assertMigrationsApplied(pool: Pool, options: RunMigrationsOptions = {}): Promise<void> {
+  // Resolved before connecting, as in runMigrations.
+  const mode = options.checksumMode ?? resolveChecksumMode(process.env.MIGRATION_CHECKSUM_MODE);
+  const dir = options.migrationsDir ?? MIGRATIONS_DIR;
+  const log = options.log ?? MIGRATION_LOGGER;
+
+  let rows: Array<{ filename: string; checksum: string | null }>;
+  try {
+    rows = (await pool.query<{ filename: string; checksum: string | null }>(
+      'SELECT filename, checksum FROM schema_migrations ORDER BY filename'
+    )).rows;
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    const what =
+      code === '42P01' ? 'the table schema_migrations does not exist (the database was never migrated)'
+      : code === '42703' ? 'schema_migrations has no checksum column (the database predates 7.2.0)'
+      : code === '42501' ? 'the DATABASE_URL role may not read schema_migrations (grants not applied)'
+      : null;
+    if (!what) throw err;
+    const wrapped = new Error(`[migrate] Cannot check the applied migrations: ${what}. ${RUN_MIGRATE_HINT}`);
+    (wrapped as { cause?: unknown }).cause = err;
+    throw wrapped;
+  }
+
+  const changed: string[] = [];
+  const missing: string[] = [];
+  const unrecorded: string[] = [];
+  for (const row of rows) {
+    const file = path.join(dir, row.filename);
+    if (!fs.existsSync(file)) {
+      missing.push(row.filename);
+      continue;
+    }
+    if (row.checksum === null) {
+      unrecorded.push(row.filename);
+    } else if (row.checksum !== migrationChecksum(fs.readFileSync(file, 'utf8'))) {
+      changed.push(row.filename);
+    }
+  }
+  if (unrecorded.length > 0) {
+    log.warn(`[migrate] Checksum not recorded for ${unrecorded.length} applied migration(s): ${unrecorded.join(', ')} (the database setup records them).`);
+  }
+  if (missing.length > 0) {
+    log.warn(`[migrate] Applied migration file(s) not found in ${dir}: ${missing.join(', ')}`);
+  }
+  if (changed.length > 0) {
+    if (mode === 'enforce') throw new MigrationChecksumError(changed);
+    log.warn(
+      `[migrate] Applied migration file(s) changed since they were applied: ${changed.join(', ')} ` +
+      '(MIGRATION_CHECKSUM_MODE=warn — continuing).'
+    );
+  }
+
+  const applied = new Set(rows.map((r) => r.filename));
+  const pending = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort().filter((f) => !applied.has(f));
+  if (pending.length > 0) throw new MigrationsPendingError(pending);
+}
+
+// CLI entry point: tsx src/db/migrate.ts — MIGRATION_DATABASE_URL (the owner role, M9) or else DATABASE_URL.
 if (require.main === module) {
-  const connectionString = process.env.DATABASE_URL;
+  const connectionString = process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL;
   if (!connectionString) {
-    logger.fatal('[migrate] DATABASE_URL is required');
+    logger.fatal('[migrate] MIGRATION_DATABASE_URL or DATABASE_URL is required');
     process.exit(1);
   }
   const pool = new Pool({ connectionString });

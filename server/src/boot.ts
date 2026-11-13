@@ -12,7 +12,8 @@ import config from './config';
 import { createApp } from './app';
 import { createPool } from './db/client';
 import { createAuditPool } from './db/auditClient';
-import { runMigrations } from './db/migrate';
+import { assertMigrationsApplied, runMigrations } from './db/migrate';
+import { assertAuditWritable, assertLeastPrivilege } from './db/roles/startupChecks';
 import { logger, type Logger } from './logger';
 import { createVideoAnalysisWorker } from './workers/videoAnalysisWorker';
 import { runWorkspaceRetention } from './jobs/workspaceRetention';
@@ -163,17 +164,42 @@ export function createShutdown(options: ShutdownOptions): (reason: string, exitC
   };
 }
 
+export interface PrepareDatabaseDeps {
+  runMigrations: (pool: Pool) => Promise<void>;
+  assertMigrationsApplied: (pool: Pool) => Promise<void>;
+  assertLeastPrivilege: (pool: Pool) => Promise<void>;
+  assertAuditWritable: (pool: Pool) => Promise<void>;
+}
+
+const DATABASE_STEPS: PrepareDatabaseDeps = { runMigrations, assertMigrationsApplied, assertLeastPrivilege, assertAuditWritable };
+
+/**
+ * The database steps before the server accepts connections (M9). AUTO_MIGRATE=true (development, one superuser
+ * role): apply pending migrations, as before. false (role-separated, the production default): the one-shot
+ * `migrate` service has applied them as wr_owner; only check that none is pending and that DATABASE_URL's role
+ * cannot change the audit log. Both: the role must be able to write audit rows. Throws on the first failure.
+ */
+export async function prepareDatabase(pool: Pool, autoMigrate: boolean, deps: PrepareDatabaseDeps = DATABASE_STEPS): Promise<void> {
+  if (autoMigrate) {
+    await deps.runMigrations(pool);
+  } else {
+    await deps.assertMigrationsApplied(pool);
+    await deps.assertLeastPrivilege(pool);
+  }
+  await deps.assertAuditWritable(pool);
+}
+
 export async function main(): Promise<void> {
   const pool = createPool(config.databaseUrl);
   const auditPool = createAuditPool();
   const app = createApp({ pool, auditPool });
 
-  // Run pending DB migrations before accepting connections.
-  // Fatal: if migrations fail, the server cannot safely serve requests.
+  // Migrations (AUTO_MIGRATE) or the role-separated start-up checks, before accepting connections.
+  // Fatal: if they fail, the server cannot safely serve requests; the restart policy tries again.
   try {
-    await runMigrations(pool);
+    await prepareDatabase(pool, config.autoMigrate);
   } catch (err) {
-    logger.fatal({ err }, '[wr-server] Migration failed — shutting down');
+    logger.fatal({ err, autoMigrate: config.autoMigrate }, '[wr-server] Migration failed — shutting down');
     process.exit(1);
   }
 

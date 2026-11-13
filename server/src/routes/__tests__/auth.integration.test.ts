@@ -76,7 +76,7 @@ const SESSION_ROW = {
 function makeFake(handlers: QueryHandler[] = []): FakePool {
   return createFakePool({
     handlers: [
-      { name: 'audit', match: /INSERT INTO audit_logs/, via: 'pool', reply: { rowCount: 1 } },
+      { name: 'audit', match: /INSERT INTO public[.]audit_logs/, via: 'pool', reply: { rowCount: 1 } },
       ...handlers,
     ],
   });

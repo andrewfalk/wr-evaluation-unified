@@ -203,6 +203,8 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env) {
     updatesDir: e.UPDATES_DIR,
     // Read-only audit pool (wr_audit_reader) — db/auditClient.ts. Raw env value.
     auditDatabaseUrl: e.AUDIT_DATABASE_URL,
+    // M9: apply migrations on start-up (true) or only check them (false, role-separated) — config/schema.ts.
+    autoMigrate: e.AUTO_MIGRATE,
   });
 }
 

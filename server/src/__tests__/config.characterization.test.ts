@@ -15,6 +15,7 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const NEW_KEYS: ReadonlyArray<readonly string[]> = [
   ['gitCommit'], ['backupsDir'], ['updatesDir'], ['stats', 'timingEnabled'], ['auditDatabaseUrl'],
   ['queueNamespace'], // S8
+  ['autoMigrate'], // M9
 ];
 
 function stripNewKeys(value: Record<string, unknown>): Record<string, unknown> {

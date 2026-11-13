@@ -366,6 +366,21 @@ describe('config — keys added by S2 for former process.env readers (P1-09)', (
     }
   });
 
+  it('autoMigrate (M9): unset → true except under NODE_ENV=production; true/1 and false/0; anything else fails', () => {
+    expect(make().autoMigrate).toBe(true);
+    expect(make({ NODE_ENV: 'development' }).autoMigrate).toBe(true);
+    expect(make({ NODE_ENV: 'test' }).autoMigrate).toBe(true);
+    expect(make({ NODE_ENV: 'production', CORS_ORIGINS: 'https://x' }).autoMigrate).toBe(false);
+    expect(make({ NODE_ENV: 'production', CORS_ORIGINS: 'https://x', AUTO_MIGRATE: '' }).autoMigrate).toBe(false);
+    expect(make({ NODE_ENV: 'production', CORS_ORIGINS: 'https://x', AUTO_MIGRATE: 'true' }).autoMigrate).toBe(true);
+    expect(make({ NODE_ENV: 'production', CORS_ORIGINS: 'https://x', AUTO_MIGRATE: '1' }).autoMigrate).toBe(true);
+    expect(make({ AUTO_MIGRATE: 'false' }).autoMigrate).toBe(false);
+    expect(make({ AUTO_MIGRATE: '0' }).autoMigrate).toBe(false);
+    for (const bad of ['yes', 'TRUE', 'on']) {
+      expect(() => make({ AUTO_MIGRATE: bad })).toThrow(/AUTO_MIGRATE/);
+    }
+  });
+
   it('stats.timingEnabled: only STATS_ENGINE_TIMING=1', () => {
     expect(make().stats.timingEnabled).toBe(false);
     expect(make({ STATS_ENGINE_TIMING: 'true' }).stats.timingEnabled).toBe(false);

@@ -20,7 +20,7 @@ vi.mock('../jobs/workspaceRetention', () => ({ runWorkspaceRetention: vi.fn(asyn
 vi.mock('../jobs/videoClipCleanup', () => ({ runVideoClipCleanup: vi.fn(async () => ({ clipsExpired: 0, originalsDeleted: 0, artifactsDeleted: 0, sampleFramesDeleted: 0, orphansDeleted: 0 })) }));
 vi.mock('../jobs/statsRunCleanup', () => ({ runStatsRunCleanup: vi.fn(async () => ({ deleted: 0 })) }));
 
-import { createShutdown, startBackgroundJobs, type ShutdownOptions, type Stoppable } from '../boot';
+import { createShutdown, prepareDatabase, startBackgroundJobs, type PrepareDatabaseDeps, type ShutdownOptions, type Stoppable } from '../boot';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -161,5 +161,48 @@ describe('startBackgroundJobs', () => {
 
     await Promise.all(jobs.map((j) => j.stop()));
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('prepareDatabase (M9)', () => {
+  function steps(fail?: keyof PrepareDatabaseDeps) {
+    const calls: string[] = [];
+    const step = (name: keyof PrepareDatabaseDeps) => vi.fn(async () => {
+      calls.push(name);
+      if (name === fail) throw new Error(`${name} failed`);
+    });
+    const deps: PrepareDatabaseDeps = {
+      runMigrations: step('runMigrations'),
+      assertMigrationsApplied: step('assertMigrationsApplied'),
+      assertLeastPrivilege: step('assertLeastPrivilege'),
+      assertAuditWritable: step('assertAuditWritable'),
+    };
+    return { calls, deps };
+  }
+  const pool = {} as Pool;
+
+  it('AUTO_MIGRATE=true: applies the migrations, then checks the audit log is writable', async () => {
+    const { calls, deps } = steps();
+    await prepareDatabase(pool, true, deps);
+    expect(calls).toEqual(['runMigrations', 'assertAuditWritable']);
+  });
+
+  it('AUTO_MIGRATE=false: never migrates — checks nothing is pending, the role is least-privileged, audit writable', async () => {
+    const { calls, deps } = steps();
+    await prepareDatabase(pool, false, deps);
+    expect(calls).toEqual(['assertMigrationsApplied', 'assertLeastPrivilege', 'assertAuditWritable']);
+  });
+
+  it('stops at the first failing step', async () => {
+    for (const [autoMigrate, fail, expected] of [
+      [true, 'runMigrations', ['runMigrations']],
+      [false, 'assertMigrationsApplied', ['assertMigrationsApplied']],
+      [false, 'assertLeastPrivilege', ['assertMigrationsApplied', 'assertLeastPrivilege']],
+      [false, 'assertAuditWritable', ['assertMigrationsApplied', 'assertLeastPrivilege', 'assertAuditWritable']],
+    ] as const) {
+      const { calls, deps } = steps(fail);
+      await expect(prepareDatabase(pool, autoMigrate, deps)).rejects.toThrow(`${fail} failed`);
+      expect(calls).toEqual(expected);
+    }
   });
 });
