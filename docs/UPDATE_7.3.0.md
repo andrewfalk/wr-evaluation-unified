@@ -304,7 +304,8 @@ Remove-Item env:PGPASSWORD
 Remove-Item .\wr-backup-private.asc                                       # 복구 전용 키는 바로 지운다(BACKUP_RESTORE.md 5-4)
 #    restore.sh 는 복원 전체를 한 트랜잭션으로 실행하고, 성공하면 "Restore complete (committed)"와 행 수를 출력한 뒤
 #    종료 코드 0으로 끝난다(기존 DB 위 덮어쓰기라 "NOTICE:  pre-clean: … audit_logs_pkey" 한 줄이 나오는 것은 정상).
-#    0이 아니면 롤백돼 DB는 복원 전(7.3.0) 그대로다 — 위 ERROR 줄의 원인을 고친 뒤 다시 실행한다(BACKUP_RESTORE.md 5-2).
+#    "restore failed — the transaction was rolled back"으로 끝났으면 DB는 복원 전(7.3.0) 그대로다 — 위 ERROR 줄의
+#    원인을 고친 뒤 다시 실행한다(BACKUP_RESTORE.md 5-2). "Restore complete (committed)" 뒤에 끊겼으면 복원은 반영됐다.
 #    마이그레이션 수까지 확인한다:
 docker exec wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -tAc "select count(*) from schema_migrations; select count(*) from patient_records; select count(*) from audit_logs"
 # → 41 / 백업 시점의 환자 수 / 백업 시점의 감사 행 수(restore.sh 출력과 같다)

@@ -22,8 +22,11 @@
 #
 # Required tools: gpg (with private key imported), pg_restore, psql
 #
-# The restore runs in a single transaction: it either completes (exit 0, then the
-# row-count check runs) or rolls back and leaves the database unchanged (exit 1).
+# The restore runs in a single transaction: it either commits ("Restore complete
+# (committed)", then the row-count check runs, exit 0) or rolls back and leaves the
+# database unchanged ("restore failed — the transaction was rolled back", exit 1).
+# A failure after "Restore complete (committed)" (the row-count check) means the
+# restore is already in place — check the row counts, do not restore again.
 # Temporary space in /tmp: the decrypted dump plus the dump rendered as SQL
 # (roughly the uncompressed size of the data) — both are removed on exit.
 # Restoring into an EMPTY cluster: create the roles first (7.3.0~, see

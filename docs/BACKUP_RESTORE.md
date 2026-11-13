@@ -215,8 +215,10 @@ docker run --rm -it \
 >   기존 DB 위에 덮어쓸 때는 `NOTICE:  pre-clean: ALTER TABLE public.audit_logs DROP CONSTRAINT audit_logs_pkey`가 한 줄
 >   나온다 — 덤프가 다시 만드는 파티션 테이블의 부모 제약을 먼저 지우는 단계로, `--clean`이 몇 문장 뒤에 어차피 지우는
 >   것의 순서만 앞당긴다(행은 지우지 않는다). 예전의 `cannot drop inherited constraint "audit_logs_…_pkey"` 오류 5건은 더 나지 않는다.
-> - **실패**: 어느 문장이든 오류가 나면 전체가 롤백돼 **DB는 복원 전 그대로** 남고, 바로 위 `ERROR:` 줄과
+> - **실패**: 복원 중 어느 문장이든 오류가 나면 전체가 롤백돼 **DB는 복원 전 그대로** 남고, 바로 위 `ERROR:` 줄과
 >   `[restore] ERROR: restore failed — the transaction was rolled back` 뒤 종료 코드 1. 원인을 고친 뒤 다시 실행한다.
+>   (`Restore complete (committed)`가 이미 나온 뒤 행 수 출력 단계에서 끊겼다면 — 예: 그 순간의 연결 장애 — 복원은
+>   반영된 것이다. 다시 복원하지 말고 5-3의 행 수 확인부터 한다.)
 >   예: 빈 클러스터에 역할 없이 복원하면 `role "wr_app" does not exist`(7.2.0 덤프는 `wr_audit_reader`) — 위
 >   "빈 클러스터에 복원할 때"대로 역할부터 만든다. 덤프에 없는 객체(손으로 만든 뷰 등)가 덤프의 테이블에 기대고 있어도 실패한다.
 > - 임시 공간: 복원 컨테이너의 `/tmp`에 복호화한 덤프와 SQL로 푼 덤프(데이터의 비압축 크기 정도)가 잠시 생겼다가 끝나면 지워진다.
