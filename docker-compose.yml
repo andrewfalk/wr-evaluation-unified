@@ -85,6 +85,10 @@ services:
       # 7.2.0은 경고만(warn) — 7.3.0에서 이 줄을 지워 서버 기본값 enforce(불일치 시 기동 실패)로 간다.
       # 변수로 열지 않고 값을 고정한다(.env로 끄거나 바꿀 수 없음).
       MIGRATION_CHECKSUM_MODE: warn
+      # M9: 서버가 기동 때 스스로 마이그레이션을 적용한다(현행 동작 유지). NODE_ENV=production에서는 미설정 기본값이
+      # false(역할 분리 — migrate 서비스가 적용)라서, 역할 분리 compose 전환(M9-3b) 전까지 값을 고정해 둔다.
+      # 변수로 열지 않는다(.env로 바꿀 수 없음).
+      AUTO_MIGRATE: "true"
       # 성능 노브(기본=현행 동작). poseTier(6.0-14): GPU 서버에서만 auto. detIntervalSec(6.0-15):
       # det 초당 1회+역산 박스 carry — CPU 서버 최대 수혜(실측 2.22×), 활성은 §14-4-2 배포 게이트에서
       # B2·촬영 프로토콜(작업자 1–2명)과 함께 결정. 허용 [0,1.0] 밖은 기동 실패.

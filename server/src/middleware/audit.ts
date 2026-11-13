@@ -16,8 +16,10 @@ export interface AuditEntry {
   extra?:       Record<string, unknown> | null;
 }
 
+// Schema-qualified (M9): a temporary table comes first in search_path, so an unqualified name could be shadowed by a
+// temporary `audit_logs` on a pooled connection. The database setup also revokes TEMPORARY from PUBLIC.
 const AUDIT_SQL = `
-  INSERT INTO audit_logs
+  INSERT INTO public.audit_logs
     (actor_user_id, actor_org_id, action, target_type, target_id, outcome, ip, user_agent, extra)
   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`;
 

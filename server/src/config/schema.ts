@@ -178,13 +178,16 @@ export const EnvSchema = z.object({
   UPDATES_DIR: text('/app/updates'),
   // Raw value (unset, empty or set) — db/auditClient.ts keeps its own unset/empty handling.
   AUDIT_DATABASE_URL: raw,
+  // M9: does the server apply migrations itself on start-up? Default depends on NODE_ENV — resolveEnv().
+  AUTO_MIGRATE: raw,
 });
 
 export type ParsedEnv = z.infer<typeof EnvSchema>;
 
-export interface ResolvedEnv extends Omit<ParsedEnv, 'LOG_LEVEL' | 'TRUST_PROXY'> {
+export interface ResolvedEnv extends Omit<ParsedEnv, 'LOG_LEVEL' | 'TRUST_PROXY' | 'AUTO_MIGRATE'> {
   LOG_LEVEL: LogLevel;
   TRUST_PROXY: boolean | number;
+  AUTO_MIGRATE: boolean;
   aiEnabled: boolean;
 }
 
@@ -222,7 +225,25 @@ export function resolveEnv(env: NodeJS.ProcessEnv): ResolvedEnv {
   // rate-limit buckets see the real client.
   const trustProxyValue = e.TRUST_PROXY === 'default' ? (e.DEPLOYMENT_MODE === 'intranet' ? 1 : false) : e.TRUST_PROXY;
 
-  return { ...e, LOG_LEVEL: logLevel as LogLevel, TRUST_PROXY: trustProxyValue, aiEnabled: resolveAiEnabled(e) };
+  return {
+    ...e, LOG_LEVEL: logLevel as LogLevel, TRUST_PROXY: trustProxyValue, AUTO_MIGRATE: resolveAutoMigrate(e),
+    aiEnabled: resolveAiEnabled(e),
+  };
+}
+
+/**
+ * M9: AUTO_MIGRATE=true — the server applies pending migrations on start-up with its own connection (a development
+ * server on one superuser role). false — role separation: the one-shot `migrate` service applies them as wr_owner,
+ * and the server, as wr_app, only checks that none is pending and that its role cannot change the audit log.
+ * Unset: true except under NODE_ENV=production, so `npm run dev` / `start` and dev-intranet-server.ps1 keep
+ * migrating, while a production container (NODE_ENV=production in docker-compose.yml) does not.
+ */
+function resolveAutoMigrate(e: ParsedEnv): boolean {
+  const v = e.AUTO_MIGRATE;
+  if (v === undefined || v === '') return e.NODE_ENV !== 'production';
+  if (v === 'true' || v === '1') return true;
+  if (v === 'false' || v === '0') return false;
+  throw new Error(`AUTO_MIGRATE must be 'true' or 'false', got '${v}'`);
 }
 
 // AI_PROVIDER=none → off · internal → on (hospital LLM, no de-identification gate) ·

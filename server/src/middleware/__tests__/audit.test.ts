@@ -7,7 +7,7 @@ import { logger } from '../../logger';
 
 function auditFake(fail = false): FakePool {
   return createFakePool({
-    handlers: [{ name: 'audit.insert', match: /INSERT INTO audit_logs/, reply: fail ? new Error('DB down') : { rows: [] } }],
+    handlers: [{ name: 'audit.insert', match: /INSERT INTO public[.]audit_logs/, reply: fail ? new Error('DB down') : { rows: [] } }],
   });
 }
 
@@ -49,7 +49,7 @@ describe('writeAuditLog', () => {
 
     expect(fake.calls).toHaveLength(1);
     const { sql, params } = fake.calls[0]!;
-    expect(sql).toContain('INSERT INTO audit_logs');
+    expect(sql).toContain('INSERT INTO public.audit_logs');
     expect(params[0]).toBe('user-1');   // actor_user_id
     expect(params[2]).toBe('patient_view'); // action
     expect(params[5]).toBe('success');  // outcome

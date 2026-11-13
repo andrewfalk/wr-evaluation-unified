@@ -68,7 +68,7 @@ describe('harness usage — presets router', () => {
     const { fake, app } = setup([
       { name: 'presets.findExisting', match: /SELECT \* FROM custom_presets\s+WHERE deleted_at IS NULL/, reply: { rows: [] } },
       { name: 'presets.insert', match: /INSERT INTO custom_presets/, reply: (_sql, params) => ({ rows: [presetRow({ id: params[0] })] }) },
-      { name: 'audit.insert', match: /INSERT INTO audit_logs/, reply: { rows: [] } },
+      { name: 'audit.insert', match: /INSERT INTO public[.]audit_logs/, reply: { rows: [] } },
     ]);
 
     const res = await request(app)
