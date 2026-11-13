@@ -217,26 +217,23 @@ docker run --rm -it \
 ### 5-3. 복구 후 검증
 
 ```bash
+# 이 절의 compose 명령은 모두 운영 인자를 붙인다(-p wr-prod 만 쓰면 .env.production 을 읽지 않아 필수값 보간 오류가 난다).
+COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod"
+
 # ③ 전체 기동 — migrate가 먼저 돌아 소유권·권한을 역할 분리 상태로 되돌린다
-docker compose \
-  -f docker-compose.yml \
-  -f docker-compose.prod.yml \
-  --env-file .env.production \
-  -p wr-prod \
-  up -d
-docker compose -p wr-prod logs migrate | tail -3      # "[db-setup] Done — … role separation verified."
-docker compose -p wr-prod ps -a                       # migrate: Exited (0), app: healthy
+$COMPOSE up -d
+$COMPOSE logs migrate | tail -3      # "[db-setup] Done — … role separation verified."
+$COMPOSE ps -a                       # migrate: Exited (0), app: healthy
 
 # ④ 행 수 확인(restore.sh가 중간에 멈췄으면 여기서) + 앱 상태
-docker compose -p wr-prod exec postgres psql -U wr_user -d wr_evaluation -c \
+docker exec wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -c \
   "SELECT 'users', COUNT(*) FROM users UNION ALL SELECT 'patient_records', COUNT(*) FROM patient_records UNION ALL SELECT 'audit_logs', COUNT(*) FROM audit_logs;"
-docker compose -p wr-prod exec app wget -qO- http://localhost:3001/health
+docker exec wr-prod-app-1 wget -qO- http://localhost:3001/health
 
 # ⑤ 백업 사이드카 재기동 — backup은 `--profile backup` 서비스라 ③의 `up -d`로는 다시 뜨지 않는다.
 #    ①에서 멈춘 경우(평소 백업 프로필을 쓰는 운영) 반드시 다시 올린다. 안 하면 이후 자동 백업이 멈춘 채로 남는다.
-docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod \
-  --profile backup up -d backup
-docker compose -p wr-prod ps backup                    # running
+$COMPOSE --profile backup up -d backup
+$COMPOSE --profile backup ps backup  # running
 ```
 
 ### 5-4. 개인키 삭제 (필수)
