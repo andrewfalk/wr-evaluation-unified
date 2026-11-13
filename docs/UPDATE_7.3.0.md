@@ -247,6 +247,38 @@ curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local
 
 작업 없음. 새로고침(또는 앱 재시작)하면 된다.
 
+### E. 첫 EMR 감사 기록 확인 (배포 당일, EMR이 있는 PC에서)
+
+7.3.0부터 감사 로그는 앱 계정 `wr_app`(감사 테이블에 INSERT만)으로 기록된다. 개발 PC에는 EMR이 없어 리허설에서 이 경로를 확인하지 못했으므로, 배포 뒤 처음 EMR을 쓸 때 한 번 확인한다.
+
+**알아 둘 동작**: 설치본은 EMR 동작이 끝난 뒤 감사 기록을 서버로 따로 보낸다(`/api/audit/emr`). 보내기가 실패해도 **EMR 동작 자체는 막히지 않고 화면에도 오류가 나지 않는다** — 기록은 그 PC의 암호화된 대기열에 쌓였다가 5분마다 다시 보내진다. 그래서 "화면이 정상"만으로는 확인이 안 되고, 감사 로그에 행이 생겼는지를 봐야 한다.
+
+1. EMR 프로그램이 있는 PC의 설치본(7.1.4 셸)으로 로그인해 EMR 동작을 **한 번** 한다. EMR에 쓰지 않는 읽기 동작을 권한다.
+
+   | 화면 버튼 | 감사 로그의 동작 이름 |
+   |---|---|
+   | **EMR 추출**(환자를 연 상태 또는 목록에서 선택) | `emr_extract_record` |
+   | 다학제 추출 | `emr_extract_consultation` |
+   | EMR 직접입력 · 다학제 보내기(EMR에 쓴다) | `emr_inject` |
+
+2. 1분 안에 기록이 생겼는지 본다. 둘 중 하나로 확인한다.
+   - **관리자 콘솔** → "감사 로그" 탭 → "대상 유형" 칸에 `emr` 입력 → 조회. 맨 위에 방금 시각의 행(액션 = 위 표의 이름)이 보이면 된다. "액션 필터" 칸은 이름이 정확히 같아야 걸린다(예: `emr_extract_record`).
+   - **서버에서 직접**:
+     ```powershell
+     docker exec wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -c "select now() - created_at as ago, action, outcome from audit_logs where action like 'emr_%' order by created_at desc limit 5"
+     ```
+     → 첫 행의 `ago`가 방금(몇 분 이내)이고 `action`이 위 표의 이름이면 **기록 경로 정상**이다. `outcome`은 EMR 동작의 결과다 — `failure`(예: EMR 창을 찾지 못함)여도 감사 기록 자체는 된 것이다. EMR 동작이 실제로 됐는지는 화면에서 따로 본다.
+3. **행이 생기지 않으면**:
+   - 서버 로그에서 그 요청을 찾는다:
+     ```powershell
+     docker logs wr-prod-app-1 --since 15m 2>&1 | Select-String "/api/audit/emr"
+     ```
+     - `"statusCode":500`이면 서버가 기록에 실패한 것이다(이 경로는 기록 실패를 성공으로 넘기지 않는다). 같은 요청의 `request failed` 줄(같은 명령에 함께 걸린다)에 `PostgreSQL error <코드>`가 남는다 — `42501`(권한 없음)이면 B의 `logs migrate` 마지막 줄이 `role separation verified.`인지 확인하고, 아니면 `--profile backup up -d`를 한 번 더 해 `migrate`가 권한을 다시 맞추게 한 뒤 1부터 다시 한다.
+     - `"statusCode":401`이면 장치 문제다(서명·장치 상태). 관리자 콘솔 "디바이스" 탭에서 그 PC의 장치가 활성(승인됨)인지 본다.
+     - 줄이 하나도 없으면 설치본이 아직 보내지 않은 것이다 — 장치가 승인 대기면 기록은 PC에 쌓여 있다가 승인 뒤 전송된다. "디바이스" 탭을 확인한다.
+   - 서버 쪽 원인을 고치면 PC에 쌓인 기록은 5분 안에 다시 전송되어 행이 생긴다(세션이 끝난 뒤 보낸 것은 `extra`에 `actor_from_queue`가 붙는다).
+   - 고쳐지지 않고 EMR 감사 기록이 남지 않는 상태로 운영할 수 없으면 아래 "롤백 절차"로 7.2.0으로 되돌린다.
+
 ---
 
 ## 검증 시나리오
@@ -256,6 +288,7 @@ curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local
 | 로그인·로그아웃, 기존 환자 열기·저장 | 7.2.0과 같다 |
 | 관리자 콘솔 감사 로그 | 방금 한 로그인이 보인다(감사 조회 계정 정상, 감사 기록 정상) |
 | 설치본(7.1.4 셸)으로 접속 | 인증서 오류 없이 접속, EMR 연동 정상 |
+| 첫 EMR 사용(EMR이 있는 PC) | 감사 로그에 `emr_…` 행이 방금 시각으로 생긴다(위 E) |
 | 통계 분석(켠 경우) | 결과 표시 |
 | 다른 PC에서 `<서버 IP>:3001` | 접속 거부 |
 
@@ -274,7 +307,7 @@ curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local
 > - **확인하지 못한 것**:
 >   - 운영 서버의 Compose v2.22.0에서 1회성 서비스 동작(그래서 A-5에서 `run --rm migrate`로 먼저 확인한다)과 운영 데이터 크기에서의 소유권 이전 시간.
 >   - `verify-stack accept`(host 모드 검증) — 개발 PC 검증 스택이 Docker Caddy 모드라 못 했다(7.2.0 때와 같음).
->   - 설치본 EMR 연동 — 개발 PC에 EMR이 없다. 감사 로그 쓰기 계정이 바뀌었으므로 **배포 뒤 첫 EMR 사용(감사 기록)을 확인**한다.
+>   - 설치본 EMR 연동 — 개발 PC에 EMR이 없다. 감사 로그 쓰기 계정이 바뀌었으므로 **배포 뒤 첫 EMR 사용(감사 기록)을 확인**한다 — 절차는 위 "E. 첫 EMR 감사 기록 확인".
 
 ---
 
