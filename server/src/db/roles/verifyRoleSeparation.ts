@@ -125,16 +125,14 @@ async function auditLogViolations(db: Db): Promise<string[]> {
   const triggers = await db.query<{ tgname: string; rel: string }>(
     `SELECT t.tgname, c.relname AS rel FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
       WHERE NOT t.tgisinternal
-        AND (t.tgrelid = 'public.audit_logs'::regclass
-             OR t.tgrelid IN (SELECT inhrelid FROM pg_inherits WHERE inhparent = 'public.audit_logs'::regclass))`,
+        AND t.tgrelid IN (SELECT relid FROM pg_partition_tree('public.audit_logs'::regclass))`,
   );
   for (const t of triggers.rows) out.push(`trigger ${t.tgname} on ${t.rel} (audit_logs must have none)`);
   // Foreign keys in either direction: one referencing audit_logs could block or cascade into deletes elsewhere,
   // and one from audit_logs (or a partition) with ON DELETE / ON UPDATE CASCADE, SET NULL or SET DEFAULT would let
   // DML on an ordinary table change or remove audit rows through the internal FK triggers.
   const fks = await db.query<{ conname: string; rel: string; ref: string }>(
-    `WITH audit AS (SELECT 'public.audit_logs'::regclass::oid AS oid
-                    UNION SELECT inhrelid FROM pg_inherits WHERE inhparent = 'public.audit_logs'::regclass)
+    `WITH audit AS (SELECT relid AS oid FROM pg_partition_tree('public.audit_logs'::regclass)) -- every level
      SELECT conname, conrelid::regclass::text AS rel, confrelid::regclass::text AS ref FROM pg_constraint
       WHERE contype = 'f' AND (conrelid IN (SELECT oid FROM audit) OR confrelid IN (SELECT oid FROM audit))
       ORDER BY 1, 2`,
@@ -145,8 +143,10 @@ async function auditLogViolations(db: Db): Promise<string[]> {
 
 // Ways for the app role to run code with someone else's rights, which would undo the separation even with every ACL
 // right — none is allowed outside extensions:
-//   - a SECURITY DEFINER routine in any schema runs as its owner for anyone allowed to EXECUTE it (PUBLIC by default)
-//   - a rewrite rule (CREATE RULE … DO ALSO DELETE FROM audit_logs) runs its actions with the table owner's rights
+//   - a SECURITY DEFINER routine in any schema, system schemas included (a stock PostgreSQL has none), runs as its
+//     owner for anyone allowed to EXECUTE it (PUBLIC by default)
+//   - a rewrite rule (CREATE RULE … DO ALSO DELETE FROM audit_logs) runs its actions with the table owner's rights;
+//     the only stock ones are the two on pg_catalog.pg_settings
 //   - a schema other than public: its objects are outside the grant policy
 const SYSTEM_SCHEMA = `(n.nspname IN ('pg_catalog', 'information_schema') OR n.nspname LIKE 'pg\\_%')`;
 
@@ -154,7 +154,7 @@ async function definerRightsViolations(db: Db): Promise<string[]> {
   const out: string[] = [];
   const definers = await db.query<{ name: string }>(
     `SELECT p.oid::regprocedure::text AS name FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE p.prosecdef AND NOT ${SYSTEM_SCHEMA}
+      WHERE p.prosecdef
         AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
       ORDER BY 1`,
   );
@@ -163,7 +163,8 @@ async function definerRightsViolations(db: Db): Promise<string[]> {
   const rules = await db.query<{ rulename: string; rel: string }>(
     `SELECT r.rulename, r.ev_class::regclass::text AS rel FROM pg_rewrite r
        JOIN pg_class c ON c.oid = r.ev_class JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE r.rulename <> '_RETURN' AND NOT ${SYSTEM_SCHEMA}
+      WHERE r.rulename <> '_RETURN'
+        AND NOT (r.ev_class = 'pg_catalog.pg_settings'::regclass AND r.rulename IN ('pg_settings_n', 'pg_settings_u'))
         AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
       ORDER BY 2, 1`,
   );

@@ -301,6 +301,30 @@ describe.skipIf(!RUNNABLE)('M9 role separation (integration)', () => {
     expect(await verifyRoleSeparation(ownerNew)).toEqual([]);
   });
 
+  it('a SECURITY DEFINER routine in a system schema (information_schema) is a violation too', async () => {
+    await adminNew.query("CREATE FUNCTION information_schema.m9_erase_audit() RETURNS void LANGUAGE sql SECURITY DEFINER AS 'DELETE FROM public.audit_logs WHERE false'");
+    try {
+      expect((await verifyRoleSeparation(ownerNew)).join('\n')).toMatch(/information_schema\.m9_erase_audit\(\) is SECURITY DEFINER/);
+    } finally {
+      await adminNew.query('DROP FUNCTION information_schema.m9_erase_audit()');
+    }
+    expect(await verifyRoleSeparation(ownerNew)).toEqual([]);
+  });
+
+  it('a foreign key on a leaf two levels below audit_logs (ON DELETE CASCADE) is a violation', async () => {
+    await ownerNew.query("CREATE TABLE audit_logs_2100 PARTITION OF audit_logs FOR VALUES FROM ('2100-01-01') TO ('2101-01-01') PARTITION BY RANGE (created_at)");
+    await ownerNew.query('CREATE TABLE m9_leaf_ref (action text PRIMARY KEY)');
+    try {
+      await ownerNew.query("CREATE TABLE audit_logs_2100_01 PARTITION OF audit_logs_2100 FOR VALUES FROM ('2100-01-01') TO ('2100-02-01')");
+      await ownerNew.query('ALTER TABLE audit_logs_2100_01 ADD CONSTRAINT m9_leaf_fk FOREIGN KEY (action) REFERENCES m9_leaf_ref ON DELETE CASCADE');
+      expect((await verifyRoleSeparation(ownerNew)).join('\n')).toMatch(/m9_leaf_fk on audit_logs_2100_01 → m9_leaf_ref touches audit_logs/);
+    } finally {
+      await ownerNew.query('DROP TABLE audit_logs_2100');
+      await ownerNew.query('DROP TABLE m9_leaf_ref');
+    }
+    expect(await verifyRoleSeparation(ownerNew)).toEqual([]);
+  });
+
   it('a rewrite rule (it runs with the table owner\'s rights) is a violation', async () => {
     await ownerNew.query('CREATE RULE m9_erase_audit AS ON INSERT TO public.organizations DO ALSO DELETE FROM public.audit_logs WHERE false');
     try {
