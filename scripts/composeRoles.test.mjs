@@ -98,9 +98,10 @@ describe('compose — M9 역할 분리', () => {
     expect(env(PROD, 'backup').PGPASSWORD).toMatch(/^\$\{POSTGRES_PASSWORD:\?/);
   });
 
-  it('체크섬 모드는 app 과 migrate 에 같은 고정값(변수로 열지 않음)', () => {
-    expect(env(BASE, 'app').MIGRATION_CHECKSUM_MODE).toBe(env(BASE, 'migrate').MIGRATION_CHECKSUM_MODE);
-    expect(String(env(BASE, 'migrate').MIGRATION_CHECKSUM_MODE)).not.toContain('$');
+  it('7.3.0: 체크섬 모드를 app·migrate 어디에도 두지 않는다(서버 기본값 enforce)', () => {
+    for (const file of [BASE, PROD]) {
+      for (const svc of ['app', 'migrate']) expect(env(file, svc)).not.toHaveProperty('MIGRATION_CHECKSUM_MODE');
+    }
   });
   // `!override` 금지는 appLoopbackPublish.test.mjs 가 이미 검사한다.
 });

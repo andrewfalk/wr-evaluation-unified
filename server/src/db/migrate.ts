@@ -17,8 +17,8 @@ const MIGRATION_LOCK_KEY = 7_369_276;
 //     before any pending migration is applied; 'warn' logs and carries on.
 //   - applied file missing from the folder → logged in either mode (e.g. an older image started
 //     against a newer database); it is not compared.
-// Default is 'enforce'; 7.2.0 sets MIGRATION_CHECKSUM_MODE=warn in docker-compose.yml, so the
-// first release only reports (enforce from 7.3.0).
+// Default is 'enforce'. 7.2.0 set MIGRATION_CHECKSUM_MODE=warn in docker-compose.yml so the first release only
+// reported; 7.3.0 removed it, so compose deployments enforce.
 export type MigrationChecksumMode = 'warn' | 'enforce';
 
 export function resolveChecksumMode(raw: string | undefined): MigrationChecksumMode {

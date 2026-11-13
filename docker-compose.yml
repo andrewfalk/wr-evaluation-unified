@@ -67,8 +67,8 @@ services:
       DATABASE_URL:           postgres://wr_app:${APP_DB_PASSWORD:?APP_DB_PASSWORD is required - for development use --env-file docker/dev.env}@postgres:5432/wr_evaluation
       AUDIT_DATABASE_URL:     postgres://wr_audit_reader:${AUDIT_DB_PASSWORD:?AUDIT_DB_PASSWORD is required - for development use --env-file docker/dev.env}@postgres:5432/wr_evaluation
       NODE_ENV:               production
-      # Same fixed value as the app (7.3.0 removes both lines -> enforce).
-      MIGRATION_CHECKSUM_MODE: warn
+      # MIGRATION_CHECKSUM_MODE is not set: the server default 'enforce' (7.3.0) — a changed applied migration stops
+      # the setup (and the app) instead of being only logged.
     restart: "no"
     # The image's HEALTHCHECK probes the app's /health — meaningless for a one-shot job.
     healthcheck:
@@ -121,10 +121,8 @@ services:
       LOCK_ENFORCEMENT_MODE: ${LOCK_ENFORCEMENT_MODE:-off}
       # S8: queue namespace of this instance (statistics runs, video analysis jobs). 'default' in production.
       QUEUE_NAMESPACE: ${QUEUE_NAMESPACE:-default}
-      # 마이그레이션 체크섬(S10 P1-36): 이미 적용된 마이그레이션 파일이 바뀌었는지 기동 때 확인한다.
-      # 7.2.0은 경고만(warn) — 7.3.0에서 이 줄을 지워 서버 기본값 enforce(불일치 시 기동 실패)로 간다.
-      # 변수로 열지 않고 값을 고정한다(.env로 끄거나 바꿀 수 없음).
-      MIGRATION_CHECKSUM_MODE: warn
+      # 마이그레이션 체크섬(S10 P1-36): 7.3.0부터 서버 기본값 enforce — 이미 적용된 마이그레이션 파일이 바뀌었으면
+      # migrate 서비스와 앱이 기동을 거부한다(7.2.0은 경고만). MIGRATION_CHECKSUM_MODE 는 두지 않는다.
       # M9: AUTO_MIGRATE 는 두지 않는다 — NODE_ENV=production 의 기본값 false(역할 분리)로 동작한다.
       # 성능 노브(기본=현행 동작). poseTier(6.0-14): GPU 서버에서만 auto. detIntervalSec(6.0-15):
       # det 초당 1회+역산 박스 carry — CPU 서버 최대 수혜(실측 2.22×), 활성은 §14-4-2 배포 게이트에서
