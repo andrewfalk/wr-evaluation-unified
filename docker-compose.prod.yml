@@ -32,6 +32,18 @@ services:
     restart: always
 
   # ---------------------------------------------------------------------------
+  # Database setup (one-shot, M9) — the app's image; every password required
+  # ---------------------------------------------------------------------------
+  migrate:
+    image: wr-app-server:${WR_VERSION:?WR_VERSION must be set in .env.production}
+    build: !reset null
+    environment:
+      BOOTSTRAP_DATABASE_URL: "postgres://wr_user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/wr_evaluation"
+      MIGRATION_DATABASE_URL: "postgres://wr_owner:${OWNER_DB_PASSWORD:?OWNER_DB_PASSWORD must be set in .env.production (7.3.0) — see .env.production.example}@postgres:5432/wr_evaluation"
+      DATABASE_URL:           "postgres://wr_app:${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set in .env.production (7.3.0) — see .env.production.example}@postgres:5432/wr_evaluation"
+      AUDIT_DATABASE_URL:     "postgres://wr_audit_reader:${AUDIT_DB_PASSWORD:?AUDIT_DB_PASSWORD must be set}@postgres:5432/wr_evaluation"
+
+  # ---------------------------------------------------------------------------
   # Application server
   #
   # Key changes from base compose:
@@ -52,7 +64,7 @@ services:
     image: wr-app-server:${WR_VERSION:?WR_VERSION must be set in .env.production}
     build: !reset null
     environment:
-      DATABASE_URL:         "postgres://wr_user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/wr_evaluation"
+      DATABASE_URL:         "postgres://wr_app:${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set in .env.production (7.3.0) — see .env.production.example}@postgres:5432/wr_evaluation"
       AUDIT_DATABASE_URL:   "postgres://wr_audit_reader:${AUDIT_DB_PASSWORD:?AUDIT_DB_PASSWORD must be set}@postgres:5432/wr_evaluation"
       ACCESS_TOKEN_SECRET:  "${ACCESS_TOKEN_SECRET:?ACCESS_TOKEN_SECRET must be set}"
       CORS_ORIGINS:         "${CORS_ORIGINS:?CORS_ORIGINS must be set (e.g. https://wr.hospital.local:8443)}"
@@ -74,7 +86,7 @@ services:
   # ---------------------------------------------------------------------------
   partition:
     environment:
-      PGPASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}"
+      PGPASSWORD: "${OWNER_DB_PASSWORD:?OWNER_DB_PASSWORD must be set in .env.production (7.3.0) — see .env.production.example}"
     restart: always
 
   # ---------------------------------------------------------------------------

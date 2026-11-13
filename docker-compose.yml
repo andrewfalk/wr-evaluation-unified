@@ -6,8 +6,11 @@
 #   WR_DOMAIN             — intranet hostname Caddy serves (e.g. wr.hospital.local)
 #
 # Optional:
-#   POSTGRES_PASSWORD     — DB password (default: changeme_for_dev_only)
+#   POSTGRES_PASSWORD     — bootstrap superuser wr_user password (default: changeme_for_dev_only)
+#   OWNER_DB_PASSWORD     — wr_owner password: migrations, object owner (default: changeme_owner_dev_only)
+#   APP_DB_PASSWORD       — wr_app password: the server at run time (default: changeme_app_dev_only)
 #   AUDIT_DB_PASSWORD     — wr_audit_reader password (default: changeme_audit_reader)
+#   The one-shot `migrate` service creates/updates these three roles from the values above on every `up`.
 #   DEPLOYMENT_MODE       — intranet | standalone (default: intranet)
 #   PORT                  — internal app container port (default: 3001, rarely changed)
 #   TRUST_PROXY           — Express trust proxy setting (default: 1 in intranet)
@@ -41,9 +44,41 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Application server
-  # Runs DB migrations automatically on startup before accepting connections.
-  # Not exposed externally — Caddy proxies all inbound traffic.
+  # Database setup (M9) — one-shot, runs on every `docker compose up` before the app and the partition sidecar:
+  # roles wr_owner / wr_app / wr_audit_reader (passwords from the env values) and object ownership as the bootstrap
+  # superuser → pending migrations as wr_owner → grants → verification of the role separation. Exits 0 when done
+  # (`docker compose ps -a` shows `Exited (0)`); a non-zero exit stops `up` and the app does not start.
+  # Log: `docker compose logs migrate`. Same image as the app (cli/dbSetup.js).
+  # Stop every server that uses this database before `up` — moving object ownership takes table locks
+  # (gives up after 10 s with a message).
+  # ---------------------------------------------------------------------------
+  migrate:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+      args:
+        WR_GIT_COMMIT: ${WR_GIT_COMMIT:-unknown}
+    command: ["node", "dist/cli/dbSetup.js"]
+    environment:
+      BOOTSTRAP_DATABASE_URL: postgres://wr_user:${POSTGRES_PASSWORD:-changeme_for_dev_only}@postgres:5432/wr_evaluation
+      MIGRATION_DATABASE_URL: postgres://wr_owner:${OWNER_DB_PASSWORD:-changeme_owner_dev_only}@postgres:5432/wr_evaluation
+      DATABASE_URL:           postgres://wr_app:${APP_DB_PASSWORD:-changeme_app_dev_only}@postgres:5432/wr_evaluation
+      AUDIT_DATABASE_URL:     postgres://wr_audit_reader:${AUDIT_DB_PASSWORD:-changeme_audit_reader}@postgres:5432/wr_evaluation
+      NODE_ENV:               production
+      # Same fixed value as the app (7.3.0 removes both lines -> enforce).
+      MIGRATION_CHECKSUM_MODE: warn
+    restart: "no"
+    # The image's HEALTHCHECK probes the app's /health — meaningless for a one-shot job.
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Application server — connects as wr_app (no ownership, audit_logs INSERT only).
+  # Does not migrate: it refuses to start while a migration is pending or its role could change the audit log
+  # (the migrate service above prepares both). Not exposed externally — Caddy proxies all inbound traffic.
   # ---------------------------------------------------------------------------
   app:
     build:
@@ -52,7 +87,7 @@ services:
       args:
         WR_GIT_COMMIT: ${WR_GIT_COMMIT:-unknown}
     environment:
-      DATABASE_URL:         postgres://wr_user:${POSTGRES_PASSWORD:-changeme_for_dev_only}@postgres:5432/wr_evaluation
+      DATABASE_URL:         postgres://wr_app:${APP_DB_PASSWORD:-changeme_app_dev_only}@postgres:5432/wr_evaluation
       AUDIT_DATABASE_URL:   postgres://wr_audit_reader:${AUDIT_DB_PASSWORD:-changeme_audit_reader}@postgres:5432/wr_evaluation
       NODE_ENV:             production
       PORT:                 3001
@@ -85,10 +120,7 @@ services:
       # 7.2.0은 경고만(warn) — 7.3.0에서 이 줄을 지워 서버 기본값 enforce(불일치 시 기동 실패)로 간다.
       # 변수로 열지 않고 값을 고정한다(.env로 끄거나 바꿀 수 없음).
       MIGRATION_CHECKSUM_MODE: warn
-      # M9: 서버가 기동 때 스스로 마이그레이션을 적용한다(현행 동작 유지). NODE_ENV=production에서는 미설정 기본값이
-      # false(역할 분리 — migrate 서비스가 적용)라서, 역할 분리 compose 전환(M9-3b) 전까지 값을 고정해 둔다.
-      # 변수로 열지 않는다(.env로 바꿀 수 없음).
-      AUTO_MIGRATE: "true"
+      # M9: AUTO_MIGRATE 는 두지 않는다 — NODE_ENV=production 의 기본값 false(역할 분리)로 동작한다.
       # 성능 노브(기본=현행 동작). poseTier(6.0-14): GPU 서버에서만 auto. detIntervalSec(6.0-15):
       # det 초당 1회+역산 박스 carry — CPU 서버 최대 수혜(실측 2.22×), 활성은 §14-4-2 배포 게이트에서
       # B2·촬영 프로토콜(작업자 1–2명)과 함께 결정. 허용 [0,1.0] 밖은 기동 실패.
@@ -128,6 +160,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     # S9 graceful shutdown: `docker compose stop` sends SIGTERM and waits this long before SIGKILL. The server
     # (src/boot.ts) finishes the requests in flight, stops the workers (a run/job in flight goes back to the queue),
     # closes the pools and exits within 10 s. init: a small init as PID 1 forwards the signal to Node and reaps the
@@ -185,25 +219,32 @@ services:
   # Partition sidecar — maintains audit_logs monthly partitions.
   # Always active (no profile) — partition creation must not be gated on
   # GPG backup setup. Runs on the 25th of each month to prepare the next
-  # month's partition before rollover.
+  # month's partition before rollover, and once at start (M9) so a connection
+  # problem shows in `docker compose logs partition` right away instead of on the 25th.
+  # Connects as wr_owner (owner of audit_logs, needed to add partitions); new partitions
+  # are wr_owner's with no grants — the app writes through the parent only.
   # ---------------------------------------------------------------------------
   partition:
     image: postgres:16-alpine
     environment:
       PGHOST:     postgres
       PGPORT:     "5432"
-      PGUSER:     wr_user
-      PGPASSWORD: ${POSTGRES_PASSWORD:-changeme_for_dev_only}
+      PGUSER:     wr_owner
+      PGPASSWORD: ${OWNER_DB_PASSWORD:-changeme_owner_dev_only}
       PGDATABASE: wr_evaluation
     volumes:
       - ./scripts/audit-partition.sh:/scripts/audit-partition.sh:ro
       - ./scripts/partition-crontab:/scripts/partition-crontab:ro
+    # The start-up run may fail (logged) — crond still starts so the monthly run is not lost.
     command: >
-      sh -c "crontab /scripts/partition-crontab &&
+      sh -c "sh /scripts/audit-partition.sh || echo '[audit-partition] start-up run FAILED — see the lines above';
+             crontab /scripts/partition-crontab &&
              crond -f -l 6"
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------

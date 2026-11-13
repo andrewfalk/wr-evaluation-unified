@@ -21,7 +21,7 @@ export function createAuditPool(settings: AuditPoolSettings = config): Pool {
     if (isStrictEnv) {
       throw new Error(
         'AUDIT_DATABASE_URL is required in production/intranet mode. ' +
-        'Set AUDIT_DB_PASSWORD in .env and ensure migration 0004 has run.'
+        'Set AUDIT_DB_PASSWORD in .env — the migrate service (docker compose up) sets the wr_audit_reader password from it.'
       );
     }
     logger.warn(
