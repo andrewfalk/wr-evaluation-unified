@@ -276,14 +276,14 @@
 | L7 | PHI 응답 no-store | ✅ **HF4(#161)** |
 | L8 | EMR 헬퍼 대상 휴리스틱·%TEMP% PHI | Phase 3 bundle |
 | L9 | permission handler·nav guard·모델명 | ✅ **HF9**(handler/guard, #162) + HF7(d)(모델명, #167) |
-| L10 | Python 자식 env 상속 | Phase 1 bundle |
+| L10 | Python 자식 env 상속 | Phase 1 bundle — ✅ 2026-11-13(#279, 사용자 결정으로 7.3.0 편입: `server/src/process/childEnv.ts` `buildChildEnv()` 허용 목록(OS·Python·CUDA/NVIDIA/ONNX Runtime·스레드 + `POSE_MODELS_DIR`·`ORT_*`), 통계 spawn·GPU probe·sample detect·영상 추론 2곳, 래칫 테스트. Tier-3(로컬 GPU) 확인: GPU probe CUDA 가능·영상 분석 1건 `cuda`(조직 `cuda` 강제라 CPU 강등 불가)·`body-l` 모델·통계 1건 성공) |
 | L11 | 감사 nonce 메모리·spread 순서 | Phase 1 bundle — ✅ 2026-11-08(#233: 마이그레이션 0038 emr_audit_nonces, nonce 차지·장치 한도·감사 행을 한 트랜잭션, 서버 필드 우선·세션 플래그는 서버만) |
 | L12 | autosave 잔존·retention dry-run·seed 가드 | Phase 1 bundle — ✅ 2026-11-08(#237: 환자 삭제 트랜잭션에서 autosave 항목 제거, retention CLI `--dry-run`·운영은 `--yes` 없으면 dry-run, seedAdmin 운영에서 관리자 있으면 거부·`--force`) |
-| L13 | compose 기본값·reader 비번 | Phase 1 bundle — reader 비번(0004 고정값) ✅ 2026-11-13(M9 #278: `migrate` 서비스가 `up`마다 env 값으로 맞춤, 수동 `ALTER ROLE` 삭제) · compose `changeme` 기본값·`TRUST_PROXY`는 P1-22 |
+| L13 | compose 기본값·reader 비번 | Phase 1 bundle — reader 비번(0004 고정값) ✅ 2026-11-13(M9 #278: `migrate` 서비스가 `up`마다 env 값으로 맞춤, 수동 `ALTER ROLE` 삭제) · compose 기본값 ✅ 2026-11-13(#279: `docker-compose.yml` 비밀번호 9곳 `${X:?}` 필수, 개발 값은 `docker/dev.env`(`--env-file`), `TRUST_PROXY` base `"0"` 고정; Caddy 게시 기본값은 docker 모드 운영(설치 직후·롤백 후)이 있어 유지; `config.ts`의 intranet 기본 1 분기는 config 특성화 골든 갱신이 필요해 남김) |
 | L14 | CSV TAB/CR | Phase 1 bundle — ✅ 2026-11-08(#233: 앞머리 TAB·CR 접두, TAB 인용) |
 | L15 | 웹 CSP/SRI | Phase 2 bundle |
 | L16 | Dependabot 범위·미사용 deps | Phase 0 훅 + S11 |
-| L17 | Caddy 로그 query string | 호스트 Caddy 템플릿(`caddy/Caddyfile.host.template`, #181)은 반영 — 기본·접속 로거 모두 쿼리 제거. Docker `caddy/Caddyfile`은 Phase 1 bundle |
+| L17 | Caddy 로그 query string | 호스트 Caddy 템플릿(`caddy/Caddyfile.host.template`, #181)은 반영 — 기본·접속 로거 모두 쿼리 제거. Docker `caddy/Caddyfile` ✅ 2026-11-13(#279: 같은 필터를 기본 로거·접속 로그에) |
 | Info | admin 라우터 레벨 가드 · CSRF dead code · `===` 비교 | S4 · ✅ **HF9**(#161) · S4 |
 
 ### 의존성 취약점 분류 (2026-11-06)
