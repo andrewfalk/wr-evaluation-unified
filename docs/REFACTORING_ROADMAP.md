@@ -143,7 +143,7 @@
 
 ---
 
-## Phase 1 — 서버 (S1 → S2∥ → S3 → S4 → S5∥S6 → S7 → S8 → S9 → S10∥ → S11)
+## Phase 1 — 서버 (S1 → S2∥ → S3 → S4 → S5∥S6 → S7 → S8 → S9 → S10∥ → S11) — ✅ 완료(2026-11-13, #213~#280 + 7.3.0 문서 #281; 7.3.0 운영 배포는 사용자)
 
 | # | 목표 | 파일/내용 | 재사용 | 위험/크기 | 검증 |
 |---|---|---|---|---|---|
@@ -376,7 +376,7 @@ shared/contracts/{aiAnalysis,aiPrompt,aiModels}.ts  # AI 입력 계약(.strict) 
 |---|---|---|---|
 | H | HF별 단위/라우트 테스트(간호 계정 비담당 덮어쓰기 불가 · 임시비번 403 · preload 콜백에 event 없음 · `/api` no-store · 외부 벤더 미비식별 400 · 웹 토큰 없음 403/초과 429 · 서명 불일치 다운로드 거부) | 7.1.4 설치본 릴리스 게이트(`docs/UPDATE_7.1.4.md`: 설치·EMR·AI·일괄 import roundtrip·서명 업데이트 실기기 시험), Vercel preview | 7.1.4 운영 배포 완료(HF8 포함; 코드 머지는 완료, 배포는 게이트 통과 후) |
 | 0 — ✅ 달성(2026-11-07: check·check:full 통과, 골든 G1·G1b·G2·G3·G4·G5(영상 apply 이월)·G6·G8·G10 존재 — G7은 Phase 3 Electron 추출 PR마다, G9 `App.smoke`는 Phase 2 착수 전에 만든다, CRLF 0, `.jsx` 린트·src typecheck·`@wr/*` 단일 해석) | `npm run check`·`check:full` 통과(D9), G1–G10 존재, suppressions 수 추세 ↓, `git ls-files --eol` CRLF 0 | 현장 PC 크롬 버전 확인(다음 배포 때) | `.jsx` 린트됨·src typecheck 켜짐·`@wr/*` 단일 해석·skip 0 |
-| 1 | 서버 unit/integration 프로젝트, G5/G6 불변, `grep res.status(500)` 0, `patient_records` 쓰기 파일 1 | 실DB 동시성(PATCH/락/claim), Tier-3(docker postgres → dev-intranet-server.ps1 → `npm run dev`) | 라우트 ≤400줄·하네스 단일·`stats/` 트리·체크섬 활성·SIGTERM 정상 종료·보안 bundle 종결 |
+| 1 — ✅ 달성(2026-11-13: 라우트 최대 341줄, `res.status(500)` 0, `patient_records` 쓰기 = `db/patientRecordsRepo.ts`(+ 시험 시드 CLI), G5/G6 불변, 체크섬 enforce(7.3.0), SIGTERM 종료 코드 0, 보안 bundle 미완료 0, 실DB 통합 417건을 `wr_app`으로, Tier-3 로컬 GPU 확인(P1-22 #279)) | 서버 unit/integration 프로젝트, G5/G6 불변, `grep res.status(500)` 0, `patient_records` 쓰기 파일 1 | 실DB 동시성(PATCH/락/claim), Tier-3(docker postgres → dev-intranet-server.ps1 → `npm run dev`) | 라우트 ≤400줄·하네스 단일·`stats/` 트리·체크섬 활성·SIGTERM 정상 종료·보안 bundle 종결 |
 | 2 | G1–G4·G8·G9 불변, lint: core→modules 0·`window.electron` 어댑터 외 0·stylelint 0, `typecheck:client` 전 파일 | 두 Electron 타깃 + Vercel preview 스모크, 다크모드 육안, Chrome 109 환경 1회 | `App.jsx` ≤200줄·매니페스트 검증·서술 단일 소스 ADR·twin parity·src TS ≥80% |
 | 3 | Electron 테스트 82+·`ipcRegistration`·asar 검사·버전 일관성 | 설치본 2종 설치·업데이트 경로 | `main.js` ≤150줄·타깃별 IPC·`build-target.json` 없음·asar <40MB |
 | 4 | 스키마 생성 diff 0·pytest parity·catalog 가드·distSmoke | – | `protocol.py` dict 0·버전 리터럴 1곳·elbow/wrist 팩토리 |
@@ -412,7 +412,8 @@ shared/contracts/{aiAnalysis,aiPrompt,aiModels}.ts  # AI 입력 계약(.strict) 
    - 승인 후 PR마다: `npm run check`(서버·DB·동시성·통계·마이그레이션·Docker를 건드리면 `npm run check:full`) → `npm run verify:secrets` → push → PR → `pr-codex-loop` → 차단 0이면 squash 머지(Phase 0와 같은 방식, 회차 상한·기각한 차단이 남으면 멈추고 묻는다).
    - Phase 0에서 이어지는 조건: 골든 G1~G10은 리팩터링 PR에서 바뀌면 안 된다(바뀌면 코드를 고친다) · 새 서버 테스트와 S3 이관은 `server/src/testing/`(fakePool·tokens·configMock·makeRouterApp, 사용 예 `harnessUsage.test.ts`)을 쓴다 · S7이 SQL 순서를 바꾸는 라우트는 재목킹 대신 실DB 통합 테스트로 · `videoAnalysis.ts`를 건드리기 전 G5 영상 apply 골든을 먼저 만든다 · 성능 효과를 주장하는 변경은 `docs/PERF_BASELINE.md`의 같은 도구로 전/후를 잰다 · 새 클라이언트 코드는 TS(strict), 새 `@ts-nocheck` 금지(ratchet).
 8. **7.2.0 릴리스(Phase 1 중간 릴리스) 진행**: S1~S6·S10·SEC-A·SEC-B 머지(#213~#247) 뒤 P1-37 버전 범프 ✅ 2026-11-08(package·lock·README·PRD 7.2.0, #248) → P1-38 `docs/UPDATE_7.2.0.md` ✅ 2026-11-08(서버 전용 패키지·host 모드 기준 절차, 배포 전 점검=패키지 리허설·현장 Chrome 108 확인, `REFRESH_TOKEN_SECRET`은 7.1.6 롤백용으로 남김, #249) → 5번의 오프라인 패키지 리허설 ✅ 2026-11-08(첫 리허설에서 앱 이미지에 개발 PC의 옛 `server/dist`가 섞여 라우터 5개가 S1 이전 코드로 돈 것을 발견 → `.dockerignore` `**/dist`·build 전 dist 삭제·Dockerfile 가드로 수정 #250 → 재생성 패키지로 재리허설 통과, 결과는 `UPDATE_7.2.0.md` "사전 검증한 것") → 사용자 배포(배포 전 점검 3) 현장 Chrome 버전 확인 포함, EMR 연동은 배포 뒤 첫 사용에서 확인). P1-22(L10·L13·L17)는 GPU·검증 스택 확인 대기라 7.2.0에서 빠진다. 7.2.0 뒤 개발은 S7부터(착수 전 플랜 모드 재플랜 필수).
-9. **7.3.0 릴리스(Phase 1 종료 릴리스) 진행**: S7~S11·M9·P1-22 머지(#252~#279) 뒤 버전 범프 + compose `MIGRATION_CHECKSUM_MODE: warn` 두 줄 삭제(체크섬 enforce) ✅ 2026-11-13(package·lock·README·PRD 7.3.0, 이 PR) → `docs/UPDATE_7.3.0.md`(누적 flagged: S7-R2, S8 전환 절차, S9 종료 동작·JSON 로그, S11 Node 22, M9 ①~⑩, P1-22) → 오프라인 패키지 생성 + `verify-stack` 리허설(Node 22 이미지 포함) → 사용자 배포(**운영이 7.2.0을 한 번 기동한 뒤에만**).
+9. **7.3.0 릴리스(Phase 1 종료 릴리스) 진행**: S7~S11·M9·P1-22 머지(#252~#279) 뒤 버전 범프 + compose `MIGRATION_CHECKSUM_MODE: warn` 두 줄 삭제(체크섬 enforce) ✅ 2026-11-13(package·lock·README·PRD 7.3.0, 이 PR) → `docs/UPDATE_7.3.0.md`(누적 flagged: S7-R2, S8 전환 절차, S9 종료 동작·JSON 로그, S11 Node 22, M9 ①~⑩, P1-22) → 오프라인 패키지 생성 + `verify-stack` 리허설(Node 22 이미지 포함) → 사용자 배포(**운영이 7.2.0을 한 번 기동한 뒤에만**). — 진행: 버전 범프·체크섬 enforce ✅(#280) → `UPDATE_7.3.0.md` ✅(#281, BACKUP_RESTORE 5-3 검증 명령 운영 인자 포함) → 패키지 `7.3.0`(main `3ecc34a`) 리허설 ✅ 2026-11-13(7.2.0 볼륨 업그레이드·롤백(직전 백업 복원 → 7.2.0)·재업그레이드·신규 설치·`run --rm migrate`, 결과는 안내서 "사전 검증한 것") → **남은 것 = 사용자 배포**(운영 7.2.0 1회 기동 확인 → 배포 → 첫 EMR 사용 확인).
+10. **새 세션 시작점 = Phase 2(클라이언트)** — 선행: G9 `App.smoke.test.jsx`(Phase 0 이월), 플랜 모드로 세부 계획 → `plan-codex-loop` → 승인 뒤 PR 단위. Phase 1에서 남긴 후속 후보(범위 밖): childEnv `extra` 키 대소문자(Windows)·래칫의 `node:child_process` 표기, install-prod의 따옴표 값 거부, 영상 "검토 종료"의 Windows 파일 삭제, `config.ts` intranet `TRUST_PROXY` 기본 1 분기(골든 갱신 필요), 덮어쓰기 복원의 `restore.sh` 종료 코드 1(파티션 상속 제약), S8·S9 노트의 후속 후보.
 
 ---
 
