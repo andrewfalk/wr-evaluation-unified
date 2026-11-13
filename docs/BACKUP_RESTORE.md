@@ -170,10 +170,11 @@ docker compose cp backup:/backups/yearly/wr-backup-2026.dump.gpg ./
 ### 5-2. 복구 실행
 
 **순서(7.3.0~)**: ① 같은 DB를 쓰는 서비스 정지 → ② 복원 → ③ `up -d`(1회성 `migrate` 서비스가 소유권·권한을 역할 분리
-상태로 되돌리고 미적용 마이그레이션을 적용한다) → ④ 검증. 7.3.0 이전 덤프도 이 순서로 복원하면 `up -d` 뒤 정상이다.
+상태로 되돌리고 미적용 마이그레이션을 적용한다) → ④ 검증 → ⑤ 백업 사이드카 재기동(프로필 서비스라 ③으로는 안 뜸). 7.3.0 이전 덤프도 이 순서로 복원하면 `up -d` 뒤 정상이다.
 
 ```bash
 # ① app·partition·backup(과 같은 DB를 쓰는 모든 서버) 정지 — postgres만 남긴다
+#    backup이 실행 중이었는지 기억해 둔다(⑤에서 다시 올린다): docker compose -p wr-prod ps backup
 docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod \
   stop caddy app partition backup
 ```
@@ -230,6 +231,12 @@ docker compose -p wr-prod ps -a                       # migrate: Exited (0), app
 docker compose -p wr-prod exec postgres psql -U wr_user -d wr_evaluation -c \
   "SELECT 'users', COUNT(*) FROM users UNION ALL SELECT 'patient_records', COUNT(*) FROM patient_records UNION ALL SELECT 'audit_logs', COUNT(*) FROM audit_logs;"
 docker compose -p wr-prod exec app wget -qO- http://localhost:3001/health
+
+# ⑤ 백업 사이드카 재기동 — backup은 `--profile backup` 서비스라 ③의 `up -d`로는 다시 뜨지 않는다.
+#    ①에서 멈춘 경우(평소 백업 프로필을 쓰는 운영) 반드시 다시 올린다. 안 하면 이후 자동 백업이 멈춘 채로 남는다.
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod \
+  --profile backup up -d backup
+docker compose -p wr-prod ps backup                    # running
 ```
 
 ### 5-4. 개인키 삭제 (필수)
