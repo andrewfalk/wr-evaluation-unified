@@ -65,6 +65,13 @@ describe('caddy/Caddyfile.host.template', () => {
     }
   });
 
+  it('SEC-A L17: Docker Caddy도 호스트 템플릿처럼 기본 로거와 접근 로그 모두에서 쿼리스트링을 지운다', () => {
+    const docker = read('../caddy/Caddyfile').replace(/\r\n/g, '\n');
+    const filters = docker.match(/format filter \{\s*wrap json\s*fields \{\s*request>uri regexp \[\?\]\.\*\$ ""\s*request>headers>Referer regexp \[\?\]\.\*\$ ""\s*\}\s*\}/g) ?? [];
+    expect(filters).toHaveLength(2); // global default logger + the HTTPS site's access log
+    expect(docker).not.toMatch(/format json\s*\n/);
+  });
+
   it('저장소·로그·사이트·업스트림은 설치 스크립트가 채우는 자리표시자다', () => {
     expect(TEMPLATE).toContain('storage file_system __DATA_DIR__');
     expect(TEMPLATE).toContain('https://__DOMAIN__:__HTTPS_PORT__ {');

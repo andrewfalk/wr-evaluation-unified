@@ -10,6 +10,20 @@
 	# Disable Caddy's public ACME — all certs are issued by internal CA only.
 	auto_https disable_redirects
 
+	# SEC-A L17: every logger that can record a request strips the query string (patient search sends the
+	# name/patient number in ?q=) — same filter as caddy/Caddyfile.host.template. The default logger writes
+	# errors such as a 502 while the app restarts with the full request, so it is filtered too.
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp [?].*$ ""
+				request>headers>Referer regexp [?].*$ ""
+			}
+		}
+	}
+
 	pki {
 		ca local {
 			name "WR Evaluation Internal CA"
@@ -37,9 +51,16 @@ https://{$WR_DOMAIN} {
 		-Server
 	}
 
+	# Access log without the query string (SEC-A L17).
 	log {
 		output stdout
-		format json
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp [?].*$ ""
+				request>headers>Referer regexp [?].*$ ""
+			}
+		}
 	}
 }
 

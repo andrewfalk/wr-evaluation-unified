@@ -12,6 +12,10 @@
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+# docker-compose.yml has no password defaults (SEC-A L13): the development values come from docker/dev.env,
+# then the repository .env (if any) on top — a later --env-file wins.
+$composeEnv = @('--env-file', (Join-Path $root 'docker/dev.env'))
+if (Test-Path (Join-Path $root '.env')) { $composeEnv += @('--env-file', (Join-Path $root '.env')) }
 
 # PATH 방어: 이 스크립트를 실행한 셸이 오래 떠 있어 Node 설치 이후로 PATH가 갱신 안 됐어도
 # node/npm이 잡히도록 표준 설치 경로를 보강한다(이미 PATH에 있으면 중복 추가 안 함). 아래에서
@@ -31,7 +35,7 @@ node (Join-Path $root 'scripts/prebuild-shared.mjs')
 if ($LASTEXITCODE -ne 0) { throw 'prebuild-shared 실패 — 공유 계약(shared/dist) 빌드 오류' }
 
 Write-Host "[dev-stack] 2/4 postgres (docker compose up -d postgres)…" -ForegroundColor Cyan
-docker compose up -d postgres
+docker compose --project-directory $root @composeEnv up -d postgres
 if ($LASTEXITCODE -ne 0) { throw "docker compose up -d postgres 실패 — Docker Desktop이 켜져 있는지 확인" }
 
 Write-Host "[dev-stack] 3/4 네이티브 서버 :3001 (새 창)…" -ForegroundColor Cyan

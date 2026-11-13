@@ -67,7 +67,8 @@ npm run electron:build               # Electron 패키징 (standalone, NSIS)
 ```bash
 # 1) 서버 측 — Docker Compose 기반 풀스택
 # WR_GIT_COMMIT 없이 빌드하면 recipe 출처·완료 보고 빌드 식별자가 'unknown'으로 남는다.
-WR_GIT_COMMIT=$(git rev-parse HEAD) docker compose up -d --build   # 개발용
+# 7.3.0부터 compose에 DB 비밀번호 기본값이 없다 — 개발 값은 docker/dev.env로(.env가 있으면 뒤에 둬서 덮어쓴다).
+WR_GIT_COMMIT=$(git rev-parse HEAD) docker compose --env-file docker/dev.env --env-file .env up -d --build   # 개발용
 docker compose -f docker-compose.yml \
   -f docker-compose.prod.yml \
   --env-file .env.production -p wr-prod up -d     # 프로덕션

@@ -5,15 +5,17 @@
 #   CORS_ORIGINS          — comma-separated allowed origins (e.g. https://wr.hospital.local:8443)
 #   WR_DOMAIN             — intranet hostname Caddy serves (e.g. wr.hospital.local)
 #
-# Optional:
-#   POSTGRES_PASSWORD     — bootstrap superuser wr_user password (default: changeme_for_dev_only)
-#   OWNER_DB_PASSWORD     — wr_owner password: migrations, object owner (default: changeme_owner_dev_only)
-#   APP_DB_PASSWORD       — wr_app password: the server at run time (default: changeme_app_dev_only)
-#   AUDIT_DB_PASSWORD     — wr_audit_reader password (default: changeme_audit_reader)
+#   POSTGRES_PASSWORD     — bootstrap superuser wr_user password
+#   OWNER_DB_PASSWORD     — wr_owner password: migrations, object owner
+#   APP_DB_PASSWORD       — wr_app password: the server at run time
+#   AUDIT_DB_PASSWORD     — wr_audit_reader password
 #   The one-shot `migrate` service creates/updates these three roles from the values above on every `up`.
+#   No defaults (SEC-A L13, 7.3.0) — a missing value stops `docker compose` instead of running with a dev
+#   password. Development values: docker/dev.env (`docker compose --env-file docker/dev.env --env-file .env …`).
+#
+# Optional:
 #   DEPLOYMENT_MODE       — intranet | standalone (default: intranet)
 #   PORT                  — internal app container port (default: 3001, rarely changed)
-#   TRUST_PROXY           — Express trust proxy setting (default: 1 in intranet)
 #   AI_PROVIDER           — none | internal | external (default: none)
 #   WR_GIT_COMMIT         — code commit stamped into recipe provenance(§8.11) and the
 #                           client's completionClientBuildVersion(PR0-A). Without it the
@@ -32,7 +34,7 @@ services:
     environment:
       POSTGRES_DB:       wr_evaluation
       POSTGRES_USER:     wr_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_for_dev_only}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - for development use --env-file docker/dev.env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -60,10 +62,10 @@ services:
         WR_GIT_COMMIT: ${WR_GIT_COMMIT:-unknown}
     command: ["node", "dist/cli/dbSetup.js"]
     environment:
-      BOOTSTRAP_DATABASE_URL: postgres://wr_user:${POSTGRES_PASSWORD:-changeme_for_dev_only}@postgres:5432/wr_evaluation
-      MIGRATION_DATABASE_URL: postgres://wr_owner:${OWNER_DB_PASSWORD:-changeme_owner_dev_only}@postgres:5432/wr_evaluation
-      DATABASE_URL:           postgres://wr_app:${APP_DB_PASSWORD:-changeme_app_dev_only}@postgres:5432/wr_evaluation
-      AUDIT_DATABASE_URL:     postgres://wr_audit_reader:${AUDIT_DB_PASSWORD:-changeme_audit_reader}@postgres:5432/wr_evaluation
+      BOOTSTRAP_DATABASE_URL: postgres://wr_user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - for development use --env-file docker/dev.env}@postgres:5432/wr_evaluation
+      MIGRATION_DATABASE_URL: postgres://wr_owner:${OWNER_DB_PASSWORD:?OWNER_DB_PASSWORD is required - for development use --env-file docker/dev.env}@postgres:5432/wr_evaluation
+      DATABASE_URL:           postgres://wr_app:${APP_DB_PASSWORD:?APP_DB_PASSWORD is required - for development use --env-file docker/dev.env}@postgres:5432/wr_evaluation
+      AUDIT_DATABASE_URL:     postgres://wr_audit_reader:${AUDIT_DB_PASSWORD:?AUDIT_DB_PASSWORD is required - for development use --env-file docker/dev.env}@postgres:5432/wr_evaluation
       NODE_ENV:               production
       # Same fixed value as the app (7.3.0 removes both lines -> enforce).
       MIGRATION_CHECKSUM_MODE: warn
@@ -87,12 +89,15 @@ services:
       args:
         WR_GIT_COMMIT: ${WR_GIT_COMMIT:-unknown}
     environment:
-      DATABASE_URL:         postgres://wr_app:${APP_DB_PASSWORD:-changeme_app_dev_only}@postgres:5432/wr_evaluation
-      AUDIT_DATABASE_URL:   postgres://wr_audit_reader:${AUDIT_DB_PASSWORD:-changeme_audit_reader}@postgres:5432/wr_evaluation
+      DATABASE_URL:         postgres://wr_app:${APP_DB_PASSWORD:?APP_DB_PASSWORD is required - for development use --env-file docker/dev.env}@postgres:5432/wr_evaluation
+      AUDIT_DATABASE_URL:   postgres://wr_audit_reader:${AUDIT_DB_PASSWORD:?AUDIT_DB_PASSWORD is required - for development use --env-file docker/dev.env}@postgres:5432/wr_evaluation
       NODE_ENV:             production
       PORT:                 3001
       DEPLOYMENT_MODE:      ${DEPLOYMENT_MODE:-intranet}
-      TRUST_PROXY:          ${TRUST_PROXY:-}
+      # SEC-A L13: fixed, not a variable. 0 = trust no proxy header here (the development override publishes the app
+      # port directly, so a client could otherwise forge X-Forwarded-For and slip the IP rate limits). Production
+      # (docker-compose.prod.yml) sets "1": the app is reachable only on 127.0.0.1, behind Caddy.
+      TRUST_PROXY:          "0"
       ACCESS_TOKEN_SECRET:  "${ACCESS_TOKEN_SECRET:?ACCESS_TOKEN_SECRET is required}"
       CORS_ORIGINS:         ${CORS_ORIGINS:-https://wr.hospital.local:8443,http://localhost:3001}
       AI_PROVIDER:          ${AI_PROVIDER:-none}
@@ -230,7 +235,7 @@ services:
       PGHOST:     postgres
       PGPORT:     "5432"
       PGUSER:     wr_owner
-      PGPASSWORD: ${OWNER_DB_PASSWORD:-changeme_owner_dev_only}
+      PGPASSWORD: ${OWNER_DB_PASSWORD:?OWNER_DB_PASSWORD is required - for development use --env-file docker/dev.env}
       PGDATABASE: wr_evaluation
     volumes:
       - ./scripts/audit-partition.sh:/scripts/audit-partition.sh:ro
@@ -287,7 +292,7 @@ services:
       PGHOST:               postgres
       PGPORT:               "5432"
       PGUSER:               wr_user
-      PGPASSWORD:           ${POSTGRES_PASSWORD:-changeme_for_dev_only}
+      PGPASSWORD:           ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - for development use --env-file docker/dev.env}
       PGDATABASE:           wr_evaluation
       BACKUP_DIR:           /backups
       BACKUP_GPG_RECIPIENT: ${BACKUP_GPG_RECIPIENT:-}

@@ -15,6 +15,7 @@ export default tseslint.config(
     files: ['src/**/*.ts'],
     ignores: [
       'src/config.ts', 'src/config/**', 'src/cli/**', 'src/testing/**', 'src/db/migrate.ts', 'src/logger.ts',
+      'src/process/childEnv.ts', // SEC-A L10: the one place that decides what a Python child gets from process.env
       'src/**/__tests__/**', 'src/**/*.test.ts',
     ],
     rules: {

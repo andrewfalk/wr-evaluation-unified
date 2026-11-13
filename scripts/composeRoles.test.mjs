@@ -20,20 +20,36 @@ const env = (file, service) => file.services[service]?.environment ?? {};
 const userOf = (url) => /^postgres:\/\/([^:]+):/.exec(url)?.[1];
 
 describe('compose — M9 역할 분리', () => {
-  it('base 의 ${X:-changeme…} 기본값마다 prod 에 같은 서비스·키의 ${X:?…} 재정의가 있다(운영에 개발 기본값이 조용히 들어가지 않게)', () => {
-    const missing = [];
+  // SEC-A L13(P1-22): base 에는 비밀번호 기본값이 없다 — 개발 값은 docker/dev.env 를 보간 입력으로 준다.
+  it('base 의 모든 비밀번호 변수는 기본값 없이 ${X:?…} 필수이고, prod 에도 같은 서비스·키의 ${X:?…} 재정의가 있다', () => {
+    const problems = [];
     let checked = 0;
     for (const [name, svc] of Object.entries(BASE.services)) {
       for (const [key, value] of Object.entries(svc.environment ?? {})) {
-        for (const m of String(value).matchAll(/\$\{([A-Z0-9_]+):-changeme[^}]*\}/g)) {
+        for (const m of String(value).matchAll(/\$\{([A-Z0-9_]*PASSWORD[A-Z0-9_]*)(:?[-?])?[^}]*\}/g)) {
           checked += 1;
+          if (m[2] !== ':?') problems.push(`base ${name}.${key}: \${${m[1]}${m[2] ?? ''}…} (not required)`);
           const prodValue = String(env(PROD, name)[key] ?? '');
-          if (!prodValue.includes(`\${${m[1]}:?`)) missing.push(`${name}.${key} (${m[1]})`);
+          if (!prodValue.includes(`\${${m[1]}:?`)) problems.push(`prod ${name}.${key} (${m[1]}) not required`);
         }
       }
     }
     expect(checked).toBe(9); // postgres 1 · migrate 4 · app 2 · partition 1 · backup 1 — a new one must be added here on purpose
-    expect(missing).toEqual([]);
+    expect(problems).toEqual([]);
+    expect(read('docker-compose.yml')).not.toMatch(/:-changeme/);
+  });
+
+  it('docker/dev.env 는 개발 전용임을 밝히고 base 가 요구하는 비밀번호를 모두 준다', () => {
+    const dev = read('docker/dev.env');
+    expect(dev).toMatch(/^# DEVELOPMENT ONLY/);
+    for (const v of ['POSTGRES_PASSWORD', 'OWNER_DB_PASSWORD', 'APP_DB_PASSWORD', 'AUDIT_DB_PASSWORD']) {
+      expect(dev).toMatch(new RegExp(`^${v}=\\S+$`, 'm'));
+    }
+  });
+
+  it('TRUST_PROXY: base 는 "0" 고정(직접 게시된 개발 앱 포트에서 X-Forwarded-For 위조 방지), prod 는 "1"', () => {
+    expect(env(BASE, 'app').TRUST_PROXY).toBe('0');
+    expect(env(PROD, 'app').TRUST_PROXY).toBe('1');
   });
 
   it('migrate: 1회성(restart no·healthcheck 끔), cli/dbSetup.js, postgres healthy 뒤, 역할별 URL 4개', () => {
@@ -71,7 +87,7 @@ describe('compose — M9 역할 분리', () => {
   it('partition: wr_owner 로 접속(OWNER_DB_PASSWORD), migrate 완료 뒤, 기동 때 한 번 실행하고 실패해도 crond 는 뜬다', () => {
     const p = BASE.services.partition;
     expect(env(BASE, 'partition').PGUSER).toBe('wr_owner');
-    expect(env(BASE, 'partition').PGPASSWORD).toMatch(/^\$\{OWNER_DB_PASSWORD:-/);
+    expect(env(BASE, 'partition').PGPASSWORD).toMatch(/^\$\{OWNER_DB_PASSWORD:\?/);
     expect(env(PROD, 'partition').PGPASSWORD).toMatch(/^\$\{OWNER_DB_PASSWORD:\?/);
     expect(p.depends_on.migrate).toEqual({ condition: 'service_completed_successfully' });
     expect(p.command).toMatch(/sh \/scripts\/audit-partition\.sh \|\| echo [^;]*;\s*crontab \/scripts\/partition-crontab &&\s*crond -f/);

@@ -5,7 +5,7 @@
 # (docker app 컨테이너엔 venv가 없음 — 그게 M4 6.0-9 패키징 과제).
 #
 # 사전조건:
-#   - docker compose up -d postgres   (DB; override가 5432를 host에 노출)
+#   - docker compose --env-file docker/dev.env --env-file .env up -d postgres   (DB; override가 5432를 host에 노출)
 #   - services/pose-inference/.venv + rtmlib 모델 캐시(M2에서 설치됨)
 #   - 루트 .env 에 secrets / DEPLOYMENT_MODE=intranet / VIDEO_ANALYSIS_ENABLED=true /
 #     VIDEO_ANALYSIS_UPLOAD_DIR 존재
