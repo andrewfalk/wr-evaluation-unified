@@ -74,9 +74,12 @@ npm run check:full                                              # 전 단계 PAS
 pwsh -File scripts/verify-stack.ps1 purge -Force
 pwsh -File scripts/verify-stack.ps1 up -PackageDir release\wr-evaluation-unified-7.2.0-intranet
 #    → 6/7 단계가 "감사 계정 비밀번호 동기화(… 7.2.0 이하 패키지)"로 나온다(옛 패키지 경로)
-# b. "업데이트 직전 백업" 대신 덤프를 하나 떠 둔다
-docker exec wr-verify-postgres-1 pg_dump -U wr_user -d wr_evaluation --format=custom --file=/tmp/pre73.dump
-docker cp wr-verify-postgres-1:/tmp/pre73.dump .\pre73.dump
+# b. "업데이트 직전 백업" 대신 덤프를 하나 떠 둔다 — 롤백 리허설에서 restore.sh 가 읽도록 시험용 암호(대칭)로 암호화해
+#    검증 스택의 백업 볼륨에 둔다. 비밀번호는 시험 환경 파일(release\.verify-stack\wr-verify.env)의 POSTGRES_PASSWORD.
+$env:PGPASSWORD = ((Get-Content release\.verify-stack\wr-verify.env) -match '^POSTGRES_PASSWORD=' -replace '^POSTGRES_PASSWORD=', '')
+docker run --rm --network wr-verify_default -e PGPASSWORD -v wr-verify_backup_data:/backups wr-backup:7.2.0 `
+  sh -c 'pg_dump -h postgres -U wr_user -d wr_evaluation --format=custom --file=/tmp/pre73.dump && printf rehearsal | gpg --batch --pinentry-mode loopback --passphrase-fd 0 --symmetric --output /backups/pre73.dump.gpg /tmp/pre73.dump'
+Remove-Item env:PGPASSWORD
 # c. 정지 → 7.3.0 패키지로 업그레이드(시험 환경 파일에 OWNER/APP 비밀번호가 자동 보충된다)
 pwsh -File scripts/verify-stack.ps1 down
 pwsh -File scripts/verify-stack.ps1 up -PackageDir release\wr-evaluation-unified-7.3.0-intranet -LoadImages
@@ -92,7 +95,7 @@ pwsh -File scripts/verify-stack.ps1 up -PackageDir release\wr-evaluation-unified
 | `logs partition` | 기동 때 `[audit-partition] … done` |
 | 로그인 실패 1회 | 감사 행이 1 늘어난다(관리자 콘솔 감사 로그에 보인다) |
 | 환자 열기·저장, 통계 분석 1회 | 7.2.0과 같다 |
-| **롤백 리허설** | 7.3.0 스택 `down` → 볼륨 위에 b의 덤프 복원(`pg_restore --clean --if-exists --no-owner`, 아래 "롤백 절차" 그대로) → 7.2.0 패키지 `up` → 앱 healthy, 마이그레이션 41행, 데이터 유지 |
+| **롤백 리허설** | 7.3.0 스택에서 postgres 만 남기고 정지 → b의 덤프를 아래 "롤백 절차" 2의 복원 명령으로 복원(검증 스택에서는 `wr-verify_default`·`wr-verify_backup_data`, 키 import 대신 `-e GPG_PASSPHRASE=rehearsal`, 파일 `/backups/pre73.dump.gpg`) → 종료 코드 0, `Restore complete (committed)`와 행 수 → `verify-stack down` → 7.2.0 패키지 `up` → 앱 healthy, 마이그레이션 41행, 데이터 유지 |
 
 ---
 
@@ -262,7 +265,8 @@ curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local
 > - **패키지 리허설**(위 "배포 전 점검" 2) 그대로):
 >   - **7.2.0 → 7.3.0**: 7.2.0 패키지로 새 검증 스택(시험 조직·환자 30명·감사 행) → 정지 → 7.3.0. `migrate` `Exited (0)` — 계정 2개 생성·소유권 이전·`Applied: 0042_queue_namespace.sql`·권한 22건·`role separation verified`. app healthy, 앱 연결 전부 `wr_app`(슈퍼유저 아님), 테이블 소유자 전부 `wr_owner`, 마이그레이션 42행·체크섬 빈 행 0, `up -d` 재실행 → `roles: 0 change(s), grants: 0 change(s)`.
 >   - 앱 동작: 실패 로그인 → 감사 행 기록, 환자 열기·`PATCH`(If-Match) 200, 통계 분석 1회 성공, 통계 selfcheck, 컨테이너 안 CLI(통계 시드·정리)가 `wr_app`으로 실행, Node v22, JSON 접근 로그(쿼리 없는 경로), `stop` 종료 코드 0과 정상 종료 로그, 파티션 사이드카 기동 실행, Docker Caddy 로그에 쿼리스트링 없음(P1-22 후보 패키지에서).
->   - **롤백**(위 "롤백 절차" 그대로): 7.3.0 정지 → 업데이트 직전 덤프를 기존 DB 위에 복원 — `pg_restore` 종료 코드 1·오류 5건(전부 `cannot drop inherited constraint "audit_logs_*_pkey"`, 알려진 동작), **데이터는 덤프 시점 그대로**(마이그레이션 41·환자 30·감사 7, 0042의 열 없음) → 7.2.0 패키지로 기동 → healthy, 감사·환자 저장·통계 정상.
+>   - **롤백**(위 "롤백 절차" 그대로): 7.3.0 정지 → 업데이트 직전 덤프를 기존 DB 위에 복원 → 7.2.0 패키지로 기동 → healthy, 감사·환자 저장·통계 정상. 첫 리허설(복원 스크립트 수정 전)에서는 `pg_restore` 종료 코드 1·오류 5건(`cannot drop inherited constraint "audit_logs_*_pkey"`)이었고 데이터는 덤프 시점 그대로였다(마이그레이션 41·환자 30·감사 7, 0042의 열 없음).
+>   - **복원 스크립트 수정 뒤**(같은 7.3.0 이미지 + 이 문서와 함께 고친 `restore.sh`): 7.2.0 덤프를 7.3.0 DB 위에 복원 → 종료 코드 0, 사전 정리 NOTICE 1줄·오류 0, `Restore complete (committed)`와 행 수 출력(마이그레이션 41·환자 30·감사 121) → 7.2.0 패키지 healthy → 다시 7.3.0 `up` → `migrate`가 0042 재적용·권한 22건·역할 분리 검증. 같은 버전 덤프 덮어쓰기 → 종료 코드 0·행 수 일치(덤프 뒤 넣은 행은 사라짐) → `up -d` → `migrate` `Exited (0)`·app healthy. 빈 클러스터 `--roles-only` → 복원 → `migrate` 정상, 역할 없이 복원하면 `role "wr_app" does not exist`로 롤백(테이블 0개). 잘린 덤프·없는 파일 → 종료 코드 1, DB 그대로.
 >   - **롤백 뒤 다시 7.3.0**: `migrate`가 소유권 이전 28건·0042 재적용·권한 22건으로 다시 역할 분리 상태.
 >   - **신규 설치**(빈 볼륨): 0001~0042를 `wr_owner`로 적용, 계정 9건·권한 22건, 감사 기록 정상.
 >   - 수동 순서 `run --rm migrate`(A-5): 종료 코드 0. `.env`에 `OWNER_DB_PASSWORD`가 없으면 `config`가 그 이름을 대며 멈춘다.
@@ -298,10 +302,13 @@ docker run --rm -it --network wr-prod_default `
   sh -c 'export GNUPGHOME=$(mktemp -d) && gpg --batch --import /tmp/private.asc && sh /scripts/restore.sh /backups/daily/<사전 준비 2)에서 적어 둔 파일 이름>'
 Remove-Item env:PGPASSWORD
 Remove-Item .\wr-backup-private.asc                                       # 복구 전용 키는 바로 지운다(BACKUP_RESTORE.md 5-4)
-#    기존 DB 위 덮어쓰기라 pg_restore 가 "cannot drop inherited constraint" 오류 5건으로 0이 아닌 코드로 끝나고
-#    restore.sh 가 행 수 출력 전에 멈추는 것이 알려진 동작이다 — 데이터는 복원된다. 행 수는 직접 확인한다:
+#    restore.sh 는 복원 전체를 한 트랜잭션으로 실행하고, 성공하면 "Restore complete (committed)"와 행 수를 출력한 뒤
+#    종료 코드 0으로 끝난다(기존 DB 위 덮어쓰기라 "NOTICE:  pre-clean: … audit_logs_pkey" 한 줄이 나오는 것은 정상).
+#    "restore failed — the transaction was rolled back"으로 끝났으면 DB는 복원 전(7.3.0) 그대로다 — 위 ERROR 줄의
+#    원인을 고친 뒤 다시 실행한다(BACKUP_RESTORE.md 5-2). "Restore complete (committed)" 뒤에 끊겼으면 복원은 반영됐다.
+#    마이그레이션 수까지 확인한다:
 docker exec wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -tAc "select count(*) from schema_migrations; select count(*) from patient_records; select count(*) from audit_logs"
-# → 41 / 백업 시점의 환자 수 / 백업 시점의 감사 행 수
+# → 41 / 백업 시점의 환자 수 / 백업 시점의 감사 행 수(restore.sh 출력과 같다)
 
 # 3. .env.production: WR_VERSION=7.3.0 → 7.2.0 (OWNER_DB_PASSWORD·APP_DB_PASSWORD 는 남겨 둬도 7.2.0이 무시한다)
 # 4. 7.2.0 폴더에서 기동

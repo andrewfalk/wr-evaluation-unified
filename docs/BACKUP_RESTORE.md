@@ -209,10 +209,19 @@ docker run --rm -it \
 
 스크립트가 `YES` 입력을 요구합니다. 확인 후 입력하면 복구가 진행됩니다.
 
-> **기존 DB 위에 덮어쓸 때의 알려진 동작**: `pg_restore --clean`이 파티션의 상속된 기본키 제약을 지우지 못해
-> `cannot drop inherited constraint "audit_logs_…_pkey"` 오류 5건을 내고 0이 아닌 코드로 끝난다. 이 오류는 무해하며
-> **데이터는 전부 복원된다**(7.3.0 리허설에서 행 수 일치 확인). 다만 `restore.sh`가 그 자리에서 멈춰
-> "Restore complete"와 행 수 출력이 나오지 않으므로, 아래 5-3의 행 수 확인을 직접 한다. (M9 이전부터의 동작 — 7.2.0 DB에서도 같다.)
+> **복원은 한 트랜잭션으로 실행된다(7.3.0~)**: `restore.sh`는 덤프를 먼저 SQL로 풀어 보고(잘리거나 손상된 덤프는
+> 여기서 DB를 건드리기 전에 멈춘다) 사전 정리와 복원 전체를 한 트랜잭션으로 실행한다.
+> - **성공**: `[restore] Restore complete (committed)`와 행 수(users·patient_records·audit_logs)가 출력되고 종료 코드 0.
+>   기존 DB 위에 덮어쓸 때는 `NOTICE:  pre-clean: ALTER TABLE public.audit_logs DROP CONSTRAINT audit_logs_pkey`가 한 줄
+>   나온다 — 덤프가 다시 만드는 파티션 테이블의 부모 제약을 먼저 지우는 단계로, `--clean`이 몇 문장 뒤에 어차피 지우는
+>   것의 순서만 앞당긴다(행은 지우지 않는다). 예전의 `cannot drop inherited constraint "audit_logs_…_pkey"` 오류 5건은 더 나지 않는다.
+> - **실패**: 복원 중 어느 문장이든 오류가 나면 전체가 롤백돼 **DB는 복원 전 그대로** 남고, 바로 위 `ERROR:` 줄과
+>   `[restore] ERROR: restore failed — the transaction was rolled back` 뒤 종료 코드 1. 원인을 고친 뒤 다시 실행한다.
+>   (`Restore complete (committed)`가 이미 나온 뒤 행 수 출력 단계에서 끊겼다면 — 예: 그 순간의 연결 장애 — 복원은
+>   반영된 것이다. 다시 복원하지 말고 5-3의 행 수 확인부터 한다.)
+>   예: 빈 클러스터에 역할 없이 복원하면 `role "wr_app" does not exist`(7.2.0 덤프는 `wr_audit_reader`) — 위
+>   "빈 클러스터에 복원할 때"대로 역할부터 만든다. 덤프에 없는 객체(손으로 만든 뷰 등)가 덤프의 테이블에 기대고 있어도 실패한다.
+> - 임시 공간: 복원 컨테이너의 `/tmp`에 복호화한 덤프와 SQL로 푼 덤프(데이터의 비압축 크기 정도)가 잠시 생겼다가 끝나면 지워진다.
 
 ### 5-3. 복구 후 검증
 
@@ -225,7 +234,7 @@ $COMPOSE up -d
 $COMPOSE logs migrate | tail -3      # "[db-setup] Done — … role separation verified."
 $COMPOSE ps -a                       # migrate: Exited (0), app: healthy
 
-# ④ 행 수 확인(restore.sh가 중간에 멈췄으면 여기서) + 앱 상태
+# ④ 행 수 확인(②에서 restore.sh가 출력한 값과 비교 — ③ 뒤 접속이 있었으면 audit_logs는 그만큼 늘 수 있다) + 앱 상태
 docker exec wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -c \
   "SELECT 'users', COUNT(*) FROM users UNION ALL SELECT 'patient_records', COUNT(*) FROM patient_records UNION ALL SELECT 'audit_logs', COUNT(*) FROM audit_logs;"
 docker exec wr-prod-app-1 wget -qO- http://localhost:3001/health
