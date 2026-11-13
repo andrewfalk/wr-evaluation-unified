@@ -4,11 +4,16 @@
 # Creates monthly partitions for audit_logs for the current month and the
 # next 3 months. Idempotent: safe to run multiple times.
 #
-# Runs inside the 'backup' Docker container (postgres:16-alpine).
-# Invoked by crond at 03:00 on the 25th of each month so the next month's
-# partition is ready before the month turns over.
+# Runs inside the 'partition' Docker container (postgres:16-alpine), once at
+# container start and by crond at 03:00 on the 25th of each month so the next
+# month's partition is ready before the month turns over.
 #
-# Required environment variables (same as backup.sh):
+# Connects as wr_owner (7.3.0~, M9): the owner of audit_logs, which adding a
+# partition requires. New partitions are wr_owner's with no grants — the app
+# role writes audit rows through the parent table only, and the migrate
+# service's verification checks that no partition carries a grant.
+#
+# Required environment variables:
 #   PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE
 
 set -euo pipefail

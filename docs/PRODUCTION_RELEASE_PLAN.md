@@ -43,6 +43,8 @@ production 서버에서 직접 생성. 절대 git에 커밋하지 않는다.
 # 각 값을 별도로 생성
 openssl rand -hex 32   # ACCESS_TOKEN_SECRET
 openssl rand -hex 32   # POSTGRES_PASSWORD (32자 이상 권장)
+openssl rand -hex 32   # OWNER_DB_PASSWORD (7.3.0~)
+openssl rand -hex 32   # APP_DB_PASSWORD   (7.3.0~)
 openssl rand -hex 32   # AUDIT_DB_PASSWORD
 ```
 
@@ -59,7 +61,9 @@ cp .env.production.example .env.production
 |---|---|
 | `ACCESS_TOKEN_SECRET` | JWT access token 서명 키 |
 | ~~`REFRESH_TOKEN_SECRET`~~ | 7.2.0부터 쓰지 않음(남아 있어도 무시됨) |
-| `POSTGRES_PASSWORD` | PostgreSQL 비밀번호 |
+| `POSTGRES_PASSWORD` | 부트스트랩 슈퍼유저 `wr_user` 비밀번호(migrate 서비스의 역할 준비·백업·복원·점검용 psql) |
+| `OWNER_DB_PASSWORD` | 7.3.0~ `wr_owner`(테이블 소유·마이그레이션·파티션 사이드카) — 영숫자·`_`·`-`만 |
+| `APP_DB_PASSWORD` | 7.3.0~ `wr_app`(앱 런타임, 감사 로그 INSERT만) — 영숫자·`_`·`-`만 |
 | `AUDIT_DB_PASSWORD` | wr_audit_reader 역할 비밀번호 |
 | `BACKUP_GPG_RECIPIENT` | GPG 공개키 fingerprint 또는 이메일 |
 | `CORS_ORIGINS` | 실제 인트라넷 도메인 (예: `https://wr.hospital.local`) |
@@ -301,19 +305,22 @@ docker compose \
 
 ## 4. 초기화 절차 (T46e Admin Smoke)
 
-### 4-1. AUDIT_DB_PASSWORD 동기화 ⚠
+### 4-1. DB 역할 준비 확인 (7.3.0~, migrate 서비스)
 
-migration이 기본값 `changeme_audit_reader`로 `wr_audit_reader` 역할을 생성한다.
-`.env.production`의 실제 값으로 **즉시** 변경해야 한다. 이 단계를 생략하면
-`AUDIT_DATABASE_URL`로 연결하는 audit reader가 인증에 실패한다.
+`up` 때 1회성 `migrate` 서비스가 역할 3종(`wr_owner`·`wr_app`·`wr_audit_reader`)의 비밀번호를 `.env.production` 값으로
+맞추고, 마이그레이션을 `wr_owner`로 적용하고, 권한을 정책대로 부여한 뒤 역할 분리 상태를 검증하고 끝난다(**수동 `ALTER ROLE` 없음**).
+테이블 소유자는 `wr_owner`, 앱은 `wr_app`으로 접속한다(점검용 `psql -U wr_user`는 그대로).
 
 ```bash
-docker compose -p wr-prod exec postgres \
-  psql -U wr_user -d wr_evaluation \
-  -c "ALTER ROLE wr_audit_reader PASSWORD '실제_AUDIT_DB_PASSWORD값';"
+docker compose -p wr-prod ps -a            # migrate: Exited (0)
+docker compose -p wr-prod logs migrate     # 마지막 줄: "[db-setup] Done — … role separation verified."
+docker compose -p wr-prod exec postgres psql -U wr_user -d wr_evaluation -c \
+  "SELECT usename, count(*) FROM pg_stat_activity WHERE datname='wr_evaluation' GROUP BY 1;"   # 앱 연결은 wr_app
 ```
 
-변경 확인:
+> 7.2.0 이하 패키지(migrate 서비스 없음)만 예전처럼 `ALTER ROLE wr_audit_reader PASSWORD '…'`를 실행한다.
+
+audit reader 연결 확인:
 ```bash
 docker compose -p wr-prod exec app node -e \
   "const { Pool } = require('pg'); const p = new Pool({ connectionString: process.env.AUDIT_DATABASE_URL }); p.query('SELECT 1').then(() => { console.log('audit_reader OK'); p.end(); }).catch(e => { console.error('FAIL', e.message); p.end(); });"
@@ -441,6 +448,7 @@ docker compose -p wr-prod exec postgres \
 
 | 항목 | 기준 | 증적 |
 |---|---|---|
+| DB 역할 준비 | migrate `Exited (0)` + 로그 "role separation verified", 앱 연결이 `wr_app` | `ps -a`·`logs migrate`·pg_stat_activity |
 | AUDIT_DB_PASSWORD | audit_reader 연결 성공 | node 확인 명령 출력 |
 | seedAdmin 성공 | `must_change_password = t` | users 쿼리 |
 | seedAdmin 멱등성 | 재실행 시 "already exists" abort(7.2.0부터 운영에서는 관리자 계정이 있으면 입력 전에 거부, `--force`로만 진행) | 콘솔 출력 |
@@ -750,12 +758,16 @@ until docker exec wr-restore-test-db \
   pg_isready -U wr_user -d wr_evaluation 2>/dev/null; do sleep 2; done
 echo "restore-test-db ready"
 
-# ── 1-a. wr_audit_reader role 생성 ────────────────────────────────────────────
-# backup dump에 wr_audit_reader GRANT가 포함되어 있으므로 role이 없으면 pg_restore 오류.
+# ── 1-a. 역할만 준비 (7.3.0~) ──────────────────────────────────────────────────
+# backup dump에 wr_owner·wr_app·wr_audit_reader GRANT가 포함되어 있으므로 역할이 없으면 pg_restore 오류.
+# 앱 이미지의 dbSetup --roles-only가 역할 3종 생성·DB 소유자 지정만 한다(마이그레이션 없음).
 # production의 실제 비밀번호와 다른 임시값을 사용한다.
-docker exec wr-restore-test-db \
-  psql -U wr_user -d wr_evaluation \
-  -c "CREATE ROLE wr_audit_reader LOGIN PASSWORD 'restore_audit_pw';"
+docker run --rm --network wr-restore-test-net \
+  -e BOOTSTRAP_DATABASE_URL=postgres://wr_user:restore_test_pw@wr-restore-test-db:5432/wr_evaluation \
+  -e MIGRATION_DATABASE_URL=postgres://wr_owner:restore_owner_pw@wr-restore-test-db:5432/wr_evaluation \
+  -e DATABASE_URL=postgres://wr_app:restore_app_pw@wr-restore-test-db:5432/wr_evaluation \
+  -e AUDIT_DATABASE_URL=postgres://wr_audit_reader:restore_audit_pw@wr-restore-test-db:5432/wr_evaluation \
+  wr-app-server:${WR_VERSION} node dist/cli/dbSetup.js --roles-only
 
 # ── 2. 복구 실행 ──────────────────────────────────────────────────────────────
 # - restore.sh는 이미지에 COPY되지 않으므로 bind mount 필수 (backup/Dockerfile 참조)
@@ -813,10 +825,13 @@ do { Start-Sleep 2 } until (
 )
 Write-Host "restore-test-db ready"
 
-# ── 1-a. wr_audit_reader role 생성 ────────────────────────────────────────────
-docker exec wr-restore-test-db `
-  psql -U wr_user -d wr_evaluation `
-  -c "CREATE ROLE wr_audit_reader LOGIN PASSWORD 'restore_audit_pw';"
+# ── 1-a. 역할만 준비 (7.3.0~, dbSetup --roles-only — 마이그레이션 없음) ─────────
+docker run --rm --network wr-restore-test-net `
+  -e BOOTSTRAP_DATABASE_URL=postgres://wr_user:restore_test_pw@wr-restore-test-db:5432/wr_evaluation `
+  -e MIGRATION_DATABASE_URL=postgres://wr_owner:restore_owner_pw@wr-restore-test-db:5432/wr_evaluation `
+  -e DATABASE_URL=postgres://wr_app:restore_app_pw@wr-restore-test-db:5432/wr_evaluation `
+  -e AUDIT_DATABASE_URL=postgres://wr_audit_reader:restore_audit_pw@wr-restore-test-db:5432/wr_evaluation `
+  "wr-app-server:$WR_VERSION" node dist/cli/dbSetup.js --roles-only
 
 # ── 2. 복구 실행 ──────────────────────────────────────────────────────────────
 docker run --rm -it `
@@ -890,7 +905,7 @@ if (Test-Path wr-backup-private.asc) { Write-Warning "Key not deleted!" } else {
 | 백업 성공 | `backup-status.json` → `status: success` | exec app cat |
 | 백업 파일 존재 | `/backups/daily/wr-backup-*.dump.gpg` 생성 | exec backup ls |
 | monitor ok | `monitor-report.json` → `summary: ok` (dry-run alert 해결 후) | exec app cat |
-| wr_audit_reader role | 임시 DB에 role 생성 후 pg_restore 오류 없음 | docker exec psql |
+| 역할 준비 | 임시 DB에 `dbSetup --roles-only`(역할 3종) 후 pg_restore 오류 없음 | docker run 출력 |
 | 임시 DB 복구 | row count가 백업 시점과 일치 | docker exec psql |
 | production 무영향 | 리허설 전후 production count 동일 | exec postgres psql |
 | private key 삭제 | `wr-backup-private.asc` 없음 | ls / Test-Path |
@@ -1169,7 +1184,7 @@ $env:WR_VERSION = ""  # 원복
 - [ ] app 포트가 외부에 직접 노출되지 않음 (`docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod port app 3001` → `127.0.0.1:3001`만, 다른 PC에서 `Test-NetConnection <서버 주소> -Port 3001` → False)
 - [ ] Caddy 인증서 정상 발급: `https://wr.hospital.local` 접속 시 인증서 오류 없음
 - [ ] admin 계정 초기 비밀번호 변경 완료
-- [ ] AUDIT_DB_PASSWORD ALTER ROLE 실행 완료
+- [ ] (7.3.0~) `migrate` 서비스 `Exited (0)`·로그 "role separation verified", 앱 연결이 `wr_app` (7.2.0 이하: AUDIT_DB_PASSWORD ALTER ROLE 실행 완료)
 - [ ] 사용자 정의 프리셋은 계정별 `private` 저장으로 동작함
 - [ ] GPG 공개키 등록 및 백업 1회 성공
 - [ ] Caddy 내부 CA 키 백업 완료(7-1): `caddy-ca-*.tar.gpg`가 오프라인 매체에 있고, 개인 GPG 키와 다른 곳에 보관됨

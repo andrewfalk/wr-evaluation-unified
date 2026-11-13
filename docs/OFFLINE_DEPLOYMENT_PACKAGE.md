@@ -281,7 +281,9 @@ notepad .env.production
 |---|---|---|
 | `ACCESS_TOKEN_SECRET` | JWT 서명 키 (32바이트 hex) | 아래 명령 참조 |
 | ~~`REFRESH_TOKEN_SECRET`~~ | 7.2.0부터 쓰지 않음(남아 있어도 무시됨) | – |
-| `POSTGRES_PASSWORD` | DB 비밀번호 (32바이트 hex 권장) | 아래 명령 참조 |
+| `POSTGRES_PASSWORD` | DB 부트스트랩 슈퍼유저 비밀번호 (32바이트 hex 권장) | 아래 명령 참조 |
+| `OWNER_DB_PASSWORD` | 7.3.0~ 테이블 소유 계정 `wr_owner` (영숫자·`_`·`-`만) | `openssl rand -hex 32` |
+| `APP_DB_PASSWORD` | 7.3.0~ 앱 런타임 계정 `wr_app` (영숫자·`_`·`-`만) | `openssl rand -hex 32` |
 | `AUDIT_DB_PASSWORD` | 감사 로그 읽기 전용 계정 비밀번호 | 직접 설정 |
 | `WR_DOMAIN` | 서버 도메인 (예: `wr.hospital.local`) | 직접 설정 |
 | `CORS_ORIGINS` | 허용 origin (예: `https://wr.hospital.local`) | 직접 설정 |
@@ -393,7 +395,9 @@ nano .env.production        # 또는 vi .env.production
 |---|---|---|
 | `ACCESS_TOKEN_SECRET` | JWT 서명 키 | `openssl rand -hex 32` |
 | ~~`REFRESH_TOKEN_SECRET`~~ | 7.2.0부터 쓰지 않음(남아 있어도 무시됨) | – |
-| `POSTGRES_PASSWORD` | DB 비밀번호 | `openssl rand -hex 32` |
+| `POSTGRES_PASSWORD` | DB 부트스트랩 슈퍼유저 비밀번호 | `openssl rand -hex 32` |
+| `OWNER_DB_PASSWORD` | 7.3.0~ 테이블 소유 계정 `wr_owner` | `openssl rand -hex 32` |
+| `APP_DB_PASSWORD` | 7.3.0~ 앱 런타임 계정 `wr_app` | `openssl rand -hex 32` |
 | `AUDIT_DB_PASSWORD` | 감사 로그 읽기 전용 계정 비밀번호 | 직접 설정 |
 | `WR_DOMAIN` | 서버 도메인 (예: `wr.hospital.local`) | 직접 설정 |
 | `CORS_ORIGINS` | 허용 origin (예: `https://wr.hospital.local`) | 직접 설정 |
@@ -450,27 +454,22 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml \
 > docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod
 > ```
 
-### 6-1. 감사 로그 DB 계정 비밀번호 동기화
+### 6-1. DB 역할 준비 확인 (7.3.0~)
 
-migration이 기본 비밀번호로 `wr_audit_reader` 계정을 생성합니다.
-`.env.production`의 `AUDIT_DB_PASSWORD` 값과 일치시켜야 합니다.
+7.3.0부터는 **수동 단계가 없습니다**. `up` 때 1회성 `migrate` 서비스가 DB 계정 3종(`wr_owner`·`wr_app`·`wr_audit_reader`)을
+만들거나 비밀번호를 `.env.production` 값으로 맞추고, 마이그레이션·권한 부여·검증을 마친 뒤 종료합니다. 확인만 합니다:
 
-**Windows:**
 ```powershell
-$auditPw = (Get-Content .env.production | Where-Object { $_ -match '^AUDIT_DB_PASSWORD=' }) -replace '^AUDIT_DB_PASSWORD=',''
-docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod `
-  exec postgres psql -U wr_user -d wr_evaluation `
-  -c "ALTER ROLE wr_audit_reader PASSWORD '$auditPw';"
+$compose = 'docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production -p wr-prod'
+Invoke-Expression "$compose ps -a"            # migrate: Exited (0)  (실행 중이 아닌 게 정상)
+Invoke-Expression "$compose logs migrate"     # 마지막 줄: [db-setup] Done — … role separation verified.
 ```
 
-**Linux:**
-```bash
-AUDIT_PW=$(grep '^AUDIT_DB_PASSWORD=' .env.production | cut -d= -f2)
-docker compose -f docker-compose.yml -f docker-compose.prod.yml \
-  --env-file .env.production -p wr-prod \
-  exec postgres psql -U wr_user -d wr_evaluation \
-  -c "ALTER ROLE wr_audit_reader PASSWORD '${AUDIT_PW}';"
-```
+migrate가 0이 아닌 코드로 끝나면 `up`이 실패하고 앱이 뜨지 않습니다 — `logs migrate`의 오류(비밀번호 형식, 다른 서버가
+DB를 쓰는 중이라 잠금 시간 초과, 손으로 만든 스키마·함수 같은 검증 위반)를 고친 뒤 `up -d`를 다시 실행합니다.
+
+> 7.2.0 이하 패키지(migrate 서비스 없음)는 예전처럼 `ALTER ROLE wr_audit_reader PASSWORD '<AUDIT_DB_PASSWORD 값>'`을
+> `exec postgres psql -U wr_user -d wr_evaluation`으로 실행합니다.
 
 ### 6-2. 관리자 계정 초기 생성
 
@@ -1004,7 +1003,7 @@ invalid argument "images/wr-images.tar": no such file or directory
 
 **원인**: `wr_audit_reader` DB 계정 비밀번호가 `.env.production`의 `AUDIT_DB_PASSWORD`와 불일치
 
-**해결**: 6-1절의 `ALTER ROLE` 명령을 다시 실행합니다.
+**해결**: 7.3.0~ — `docker compose … up -d`를 다시 실행합니다(migrate 서비스가 비밀번호를 맞춥니다). 7.2.0 이하 — 6-1절 끝의 `ALTER ROLE` 명령.
 
 ---
 
