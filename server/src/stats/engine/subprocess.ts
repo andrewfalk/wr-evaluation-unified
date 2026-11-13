@@ -8,6 +8,7 @@
 //   4) requestSettled(호출자에게 확정 알림)와 processClosed(OS가 실제 종료 확인)를 분리한다.
 import { logger } from '../../logger';
 import { spawn } from 'child_process';
+import { buildChildEnv } from '../../process/childEnv';
 import path from 'path';
 import config from '../../config';
 import { StatsEngineBusyError, StatsEngineTimeoutError, StatsEngineOutputTooLargeError, StatsEngineProcessError, StatsEngineResultInvalidError, StatsEngineDegradedError, StatsEngineCancelledError } from './errors';
@@ -147,15 +148,16 @@ export async function runEngineProcess<T>(cfg: EngineRunConfig<T>): Promise<T> {
 
   return new Promise<T>((resolve, reject) => {
     const scriptPath = path.join(config.stats.scriptsDir, 'analyze.py');
-    const env = {
-      // eslint-disable-next-line no-restricted-syntax -- 자식 env 최소화는 L10(SEC-A P1-22)에서 buildChildEnv()로.
-      ...process.env,
+    // SEC-A L10: only the allowed variables (process/childEnv.ts) — no DATABASE_URL or secrets. analyze.py reads
+    // STATS_ENGINE_TIMING itself, so it is passed explicitly from config.
+    const env = buildChildEnv({
       OMP_NUM_THREADS: '1',
       OPENBLAS_NUM_THREADS: '1',
       MKL_NUM_THREADS: '1',
       NUMEXPR_NUM_THREADS: '1',
       VECLIB_MAXIMUM_THREADS: '1',
-    };
+      STATS_ENGINE_TIMING: config.stats.timingEnabled ? '1' : undefined,
+    });
 
     // 7차 검토 필수 수정 — spawn() 자체가 동기적으로 throw할 수 있다(예: 잘못된 옵션,
     // 플랫폼별 ENOENT가 비동기 'error' 대신 동기 예외로 오는 경우). 이 시점엔 아직 아무

@@ -150,3 +150,50 @@ describe('runStatsEngine with STATS_ENGINE_TIMING', () => {
     error.mockRestore();
   });
 });
+
+// SEC-A L10 (P1-22): the stats child gets the filtered environment — no DATABASE_URL or secrets — with the thread
+// knobs, and STATS_ENGINE_TIMING only when timing is on (analyze.py reads it itself).
+describe('runStatsEngine child environment (SEC-A L10)', () => {
+  let fake: FakeChildProcess;
+  const setTiming = (on: boolean) => { (config.stats as { timingEnabled: boolean }).timingEnabled = on; };
+  const saved = { db: process.env.DATABASE_URL, secret: process.env.ACCESS_TOKEN_SECRET };
+
+  beforeEach(() => {
+    __resetStatsEngineForTests();
+    fake = new FakeChildProcess();
+    (spawn as unknown as ReturnType<typeof vi.fn>).mockReturnValue(fake);
+    process.env.DATABASE_URL = 'postgres://wr_app:secret@postgres:5432/wr_evaluation';
+    process.env.ACCESS_TOKEN_SECRET = 'x'.repeat(64);
+  });
+
+  afterEach(() => {
+    setTiming(false);
+    if (saved.db === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = saved.db;
+    if (saved.secret === undefined) delete process.env.ACCESS_TOKEN_SECRET; else process.env.ACCESS_TOKEN_SECRET = saved.secret;
+  });
+
+  async function spawnEnv(): Promise<NodeJS.ProcessEnv> {
+    const promise = runStatsEngine(req);
+    fake.stdout.emit('data', Buffer.from(validStdoutPayload()));
+    fake.emit('close', 0, null);
+    await promise;
+    const call = (spawn as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    return (call[2] as { env: NodeJS.ProcessEnv }).env;
+  }
+
+  it('no secrets; thread knobs set; STATS_ENGINE_TIMING only when on', async () => {
+    setTiming(false);
+    const off = await spawnEnv();
+    expect(off).not.toHaveProperty('DATABASE_URL');
+    expect(off).not.toHaveProperty('ACCESS_TOKEN_SECRET');
+    expect(off).not.toHaveProperty('STATS_ENGINE_TIMING');
+    expect(off).toMatchObject({ OMP_NUM_THREADS: '1', OPENBLAS_NUM_THREADS: '1', MKL_NUM_THREADS: '1' });
+    __resetStatsEngineForTests();
+    fake = new FakeChildProcess();
+    (spawn as unknown as ReturnType<typeof vi.fn>).mockReturnValue(fake);
+    setTiming(true);
+    const on = await spawnEnv();
+    expect(on.STATS_ENGINE_TIMING).toBe('1');
+    expect(on).not.toHaveProperty('DATABASE_URL');
+  });
+});

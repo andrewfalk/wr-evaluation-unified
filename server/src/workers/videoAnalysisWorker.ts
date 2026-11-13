@@ -10,6 +10,7 @@ import type { AnalysisRecipe } from '@wr/contracts';
 import config from '../config';
 import { resolveFixtureClip, resolveUploadedClipPath, resolveSampleFramePath } from './fixturePath';
 import { execFileAbortable } from './abortableExec';
+import { buildChildEnv } from '../process/childEnv';
 
 // ---------------------------------------------------------------------------
 // 작업 영상 분석 job 워커 (6.0-6b, PR D1). dev-only fixture 영상을 입력으로 실제 추론을 돌려
@@ -152,7 +153,7 @@ async function defaultRunInference(
     const phaseStart = Date.now();
     const inferArgs = buildInferArgs(scripts, clipPath, kpPath, fps, poseVariant,
       options?.device ?? 'auto', options?.framesDir);
-    await execFileAbortable(config.video.python, inferArgs, { timeout: deadlineMs }, options?.signal);
+    await execFileAbortable(config.video.python, inferArgs, { timeout: deadlineMs, env: buildChildEnv() }, options?.signal);
     // 매핑은 keypoints가 나와야 가능 → infer_clip 후에 처리. 선택 있으면 박스→트랙(실패 시 throw → job error).
     const kpRaw = fs.readFileSync(kpPath, 'utf-8');
     const kpDoc = JSON.parse(kpRaw) as {
@@ -177,7 +178,7 @@ async function defaultRunInference(
     if (targetSelection) {
       featureArgs.push('--target-track', mapTargetTrack(kpDoc, targetSelection));
     }
-    await execFileAbortable(config.video.python, featureArgs, { timeout: remainingMs }, options?.signal);
+    await execFileAbortable(config.video.python, featureArgs, { timeout: remainingMs, env: buildChildEnv() }, options?.signal);
     const cfRaw = fs.readFileSync(cfPath, 'utf-8');
     const clipFeatures = ClipFeatureSetSchema.parse(JSON.parse(cfRaw)); // 신뢰 경계 — 계약 검증
     const m = kpDoc?.model ?? {};

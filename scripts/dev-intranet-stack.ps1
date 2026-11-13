@@ -23,6 +23,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+# docker-compose.yml has no password defaults (SEC-A L13): the development values come from docker/dev.env,
+# then the repository .env (if any) on top — a later --env-file wins.
+$composeEnv = @('--env-file', (Join-Path $root 'docker/dev.env'))
+if (Test-Path (Join-Path $root '.env')) { $composeEnv += @('--env-file', (Join-Path $root '.env')) }
 Set-Location $root
 
 $serverOut = Join-Path $env:TEMP 'wr-server.out.log'
@@ -54,14 +58,14 @@ if ($Down) {
   Write-Host "[stack] 종료 중…" -ForegroundColor Cyan
   Stop-PortListener 3001
   Stop-PortListener 3000
-  docker compose stop postgres
+  docker compose --project-directory $root @composeEnv stop postgres
   Write-Host "[stack] 종료 완료 (운영 wr-prod-postgres-1 은 유지)" -ForegroundColor Green
   return
 }
 
 # 1) dev postgres
 Write-Host "[stack] 1/3 docker postgres 기동…" -ForegroundColor Cyan
-docker compose up -d postgres | Out-Null
+docker compose --project-directory $root @composeEnv up -d postgres | Out-Null
 $pgReady = $false
 for ($i = 0; $i -lt 30; $i++) {
   if (docker exec wr-evaluation-unified-postgres-1 pg_isready -U wr_user -d wr_evaluation 2>$null) { $pgReady = $true; break }

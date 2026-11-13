@@ -4,6 +4,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import config from '../../config';
+import { buildChildEnv } from '../../process/childEnv';
 
 const execFileAsync = promisify(execFile);
 
@@ -14,7 +15,7 @@ const execFileAsync = promisify(execFile);
 export async function probeGpu(): Promise<{ cudaAvailable: boolean; providers: string[]; error?: string }> {
   try {
     const script = path.join(config.video.scriptsDir, 'probe_device.py');
-    const { stdout } = await execFileAsync(config.video.python, [script], { timeout: 15000 });
+    const { stdout } = await execFileAsync(config.video.python, [script], { timeout: 15000, env: buildChildEnv() });
     const parsed = JSON.parse(stdout) as { cudaAvailable?: boolean; providers?: string[] };
     return {
       cudaAvailable: parsed.cudaAvailable === true,
