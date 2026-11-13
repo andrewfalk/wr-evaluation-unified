@@ -146,6 +146,9 @@ WR_DOMAIN=$Domain
 CORS_ORIGINS=$BaseUrl
 POSTGRES_PASSWORD=$(New-HexSecret)
 AUDIT_DB_PASSWORD=$(New-HexSecret)
+# M9(7.3.0~): migrate 서비스가 만드는 역할 wr_owner·wr_app 의 비밀번호. 옛 패키지는 이 두 줄을 쓰지 않는다.
+OWNER_DB_PASSWORD=$(New-HexSecret)
+APP_DB_PASSWORD=$(New-HexSecret)
 ACCESS_TOKEN_SECRET=$(New-HexSecret)
 # docker-compose.prod.yml 이 비어 있으면 거부하는 필수 값 — 이 스택은 backup 서비스를 띄우지 않으므로 자리만 채운다.
 BACKUP_GPG_RECIPIENT=verify-stack-unused@invalid.example
@@ -175,6 +178,34 @@ WR_APP_PORT=$AppPort
         Write-Utf8NoBom $EnvFile ($cur.TrimEnd() + "`nWR_APP_PORT=$AppPort`n")
         Write-Ok "환경 파일에 WR_APP_PORT=$AppPort 보충 (개발 서버 3001 과 충돌 방지)"
     }
+    # M9: 이 두 키가 생기기 전(7.2.0 패키지 시험)에 만든 환경 파일도 7.3.0 패키지로 올릴 수 있게 보충한다 — 없으면 운영 오버레이가
+    # 설정 단계에서 거부한다. 옛 패키지는 쓰지 않으므로 넣어 둬도 영향이 없다.
+    foreach ($key in 'OWNER_DB_PASSWORD', 'APP_DB_PASSWORD') {
+        $cur = Get-Content $EnvFile -Raw
+        if ($cur -notmatch "(?m)^$key=") {
+            Write-Utf8NoBom $EnvFile ($cur.TrimEnd() + "`n$key=$(New-HexSecret)`n")
+            Write-Ok "환경 파일에 $key 보충 (무작위 값 — 7.3.0 역할 분리)"
+        }
+    }
+}
+
+# 해석된 compose 설정에 1회성 migrate 서비스(7.3.0~, M9)가 있는지. 있으면 역할·비밀번호를 그 서비스가 맞추고, 없으면(7.2.0 이하
+# 패키지) 이 스크립트가 감사 계정 비밀번호를 수동으로 맞춘다.
+function Test-MigrateService {
+    $json = (Invoke-Compose @('config', '--format', 'json')) -join "`n"
+    if ($LASTEXITCODE -ne 0) { Stop-WithError 'docker compose config --format json 실패' }
+    return [bool](($json | ConvertFrom-Json).services.PSObject.Properties['migrate'])
+}
+
+# migrate 서비스 컨테이너의 종료 코드(없거나 아직 안 끝났으면 $null). compose 버전에 따라 ps --format json 이 배열 하나 또는
+# 줄마다 객체 하나라 둘 다 받는다.
+function Get-MigrateExitCode {
+    $raw = (Invoke-Compose @('ps', '-a', '--format', 'json', 'migrate') 2>$null) -join "`n"
+    if (-not $raw.Trim()) { return $null }
+    $items = if ($raw.TrimStart().StartsWith('[')) { @($raw | ConvertFrom-Json) } else { @($raw -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json }) }
+    $c = $items | Select-Object -First 1
+    if (-not $c -or $c.State -ne 'exited') { return $null }
+    return [int]$c.ExitCode
 }
 
 # 시험 환경 파일의 앱 게시 포트(키가 없거나 비면 compose 기본값 3001).
@@ -550,8 +581,15 @@ function Invoke-Up {
     # app 이 같은 경로를 읽기 전용 /backups 위에 마운트할 수 있다(빈 새 볼륨에서 app 부터 만들면 runc 가 'read-only file system'으로 실패).
     Invoke-Compose @('up', '-d', 'backup-monitor')
     if ($LASTEXITCODE -ne 0) { Stop-WithError 'backup-monitor 기동 실패' }
+    $hasMigrate = Test-MigrateService
     Invoke-Compose @('up', '-d')
-    if ($LASTEXITCODE -ne 0) { Stop-WithError 'docker compose up 실패' }
+    if ($LASTEXITCODE -ne 0) {
+        if ($hasMigrate) {
+            Write-Host '   --- migrate 로그(마지막 40줄) ---'
+            Invoke-Compose @('logs', 'migrate', '--tail=40')
+        }
+        Stop-WithError 'docker compose up 실패'
+    }
     Write-Host '   app 헬스 대기(최대 3분, 첫 기동은 마이그레이션 때문에 더 걸릴 수 있음)…'
     if (-not (Wait-Healthy 'app' 180)) {
         Write-Host '   --- app 로그(마지막 25줄) ---'
@@ -566,10 +604,21 @@ function Invoke-Up {
         Write-Ok 'app 컨테이너 STATS_ENGINE_TIMING=1 (통계 엔진 구간 시간 로그 켜짐 — docker compose logs app 에서 [stats-engine] timing)'
     }
 
-    Write-Step '6/7 감사 계정 비밀번호 동기화 (INTRANET_DEPLOYMENT.md 2절 4번)'
-    $auditPw = Get-EnvValue 'AUDIT_DB_PASSWORD'
-    Invoke-Compose @('exec', '-T', 'postgres', 'psql', '-U', 'wr_user', '-d', 'wr_evaluation', '-v', 'ON_ERROR_STOP=1', '-c', "ALTER ROLE wr_audit_reader PASSWORD '$auditPw'") | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Warn 'ALTER ROLE 실패 — 감사 로그 조회(관리자 콘솔)가 오류일 수 있음' } else { Write-Ok 'wr_audit_reader 비밀번호 동기화' }
+    if ($hasMigrate) {
+        # 7.3.0~(M9): migrate 서비스가 역할 3종의 비밀번호를 환경 파일 값으로 맞추고 권한을 검증한 뒤 끝난다 — 수동 ALTER ROLE 없음.
+        Write-Step '6/7 DB 역할 준비 확인 (migrate 서비스)'
+        $exit = Get-MigrateExitCode
+        if ($exit -ne 0) {
+            Invoke-Compose @('logs', 'migrate', '--tail=40')
+            Stop-WithError "migrate 서비스가 정상 종료하지 않았습니다(종료 코드: $(if ($null -eq $exit) { '없음' } else { $exit }))."
+        }
+        Write-Ok 'migrate 종료 코드 0 — 역할·마이그레이션·권한 검증 완료 (docker compose logs migrate)'
+    } else {
+        Write-Step '6/7 감사 계정 비밀번호 동기화 (INTRANET_DEPLOYMENT.md 2절 4번 — migrate 서비스가 없는 7.2.0 이하 패키지)'
+        $auditPw = Get-EnvValue 'AUDIT_DB_PASSWORD'
+        Invoke-Compose @('exec', '-T', 'postgres', 'psql', '-U', 'wr_user', '-d', 'wr_evaluation', '-v', 'ON_ERROR_STOP=1', '-c', "ALTER ROLE wr_audit_reader PASSWORD '$auditPw'") | Out-Null
+        if ($LASTEXITCODE -ne 0) { Write-Warn 'ALTER ROLE 실패 — 감사 로그 조회(관리자 콘솔)가 오류일 수 있음' } else { Write-Ok 'wr_audit_reader 비밀번호 동기화' }
+    }
 
     Write-Step '7/7 접속 확인'
     [void](Wait-Https 120 $hc.Host)

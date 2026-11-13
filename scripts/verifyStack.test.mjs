@@ -61,7 +61,7 @@ describe('verify-stack.ps1 — 다른 스택을 건드리지 않는다', () => {
 
   it('비밀값은 무작위로 만들고 고정·changeme 값을 쓰지 않는다', () => {
     expect(SCRIPT).toContain('RandomNumberGenerator');
-    for (const key of ['POSTGRES_PASSWORD', 'AUDIT_DB_PASSWORD', 'ACCESS_TOKEN_SECRET']) {
+    for (const key of ['POSTGRES_PASSWORD', 'AUDIT_DB_PASSWORD', 'OWNER_DB_PASSWORD', 'APP_DB_PASSWORD', 'ACCESS_TOKEN_SECRET']) {
       expect(SCRIPT).toMatch(new RegExp(`${key}=\\$\\(New-HexSecret\\)`));
     }
     expect(SCRIPT.toLowerCase()).not.toContain('changeme');
@@ -203,6 +203,39 @@ describe('verify-stack.ps1 — 기동 순서·검증', () => {
   it('감사 계정 비밀번호는 시험 환경 파일의 값으로 동기화한다(고정 문자열 아님)', () => {
     expect(up()).toMatch(/\$auditPw = Get-EnvValue 'AUDIT_DB_PASSWORD'/);
     expect(up()).toContain("ALTER ROLE wr_audit_reader PASSWORD '$auditPw'");
+  });
+
+  // M9(7.3.0~): migrate 서비스가 있으면 그 서비스가 역할·비밀번호를 맞춘다. 7.2.0 패키지 → 7.3.0 업그레이드 리허설을 위해
+  // 옛 패키지(migrate 없음)에서는 수동 ALTER ROLE 을 그대로 한다.
+  it('M9: 수동 ALTER ROLE 은 해석된 설정에 migrate 서비스가 없을 때만, 있으면 migrate 종료 코드 0 을 확인한다', () => {
+    const fn = up();
+    const detect = fn.indexOf('$hasMigrate = Test-MigrateService');
+    const composeUp = fn.indexOf("Invoke-Compose @('up', '-d')\n");
+    // 기동 실패 시 로그를 보여 주는 if ($hasMigrate) 다음의, 6/7 단계 분기.
+    const branch = fn.indexOf('if ($hasMigrate) {', fn.indexOf("Stop-WithError 'docker compose up 실패'"));
+    const elseAt = fn.indexOf('\n    } else {\n', branch); // the branch's own else line, not an inline if/else
+    const alter = fn.indexOf('ALTER ROLE wr_audit_reader');
+    expect(elseAt).toBeGreaterThan(branch);
+    expect(detect).toBeGreaterThan(0);
+    expect(detect).toBeLessThan(composeUp);
+    expect(branch).toBeGreaterThan(composeUp);
+    expect(alter).toBeGreaterThan(elseAt);
+    expect(fn.slice(branch, elseAt)).toContain("Write-Step '6/7 DB 역할 준비 확인");
+    const migrateBranch = fn.slice(branch, elseAt);
+    expect(migrateBranch).toContain('$exit = Get-MigrateExitCode');
+    expect(migrateBranch).toMatch(/if \(\$exit -ne 0\) \{[\s\S]*?'logs', 'migrate'[\s\S]*?Stop-WithError/);
+    expect(fnBody('Test-MigrateService')).toContain("services.PSObject.Properties['migrate']");
+  });
+
+  it('M9: compose up 이 실패하면 migrate 서비스가 있을 때 그 로그를 보여 준다', () => {
+    expect(up()).toMatch(/Invoke-Compose @\('up', '-d'\)\n\s*if \(\$LASTEXITCODE -ne 0\) \{\n\s*if \(\$hasMigrate\) \{[\s\S]*?'logs', 'migrate'/);
+  });
+
+  it('M9: 새 환경 파일·옛 환경 파일 모두에 OWNER_DB_PASSWORD·APP_DB_PASSWORD 가 무작위 값으로 들어간다', () => {
+    const fn = fnBody('Initialize-EnvFile');
+    expect(fn).toMatch(/^OWNER_DB_PASSWORD=\$\(New-HexSecret\)$/m);
+    expect(fn).toMatch(/^APP_DB_PASSWORD=\$\(New-HexSecret\)$/m);
+    expect(fn).toMatch(/foreach \(\$key in 'OWNER_DB_PASSWORD', 'APP_DB_PASSWORD'\) \{[\s\S]*?-notmatch "\(\?m\)\^\$key="[\s\S]*?\$key=\$\(New-HexSecret\)/);
   });
 
   it('설치본 실행 시 WR_INTRANET_URL 을 비우고(기본 8443 접속) 끝나면 원래 값으로 되돌린다', () => {
