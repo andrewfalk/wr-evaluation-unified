@@ -143,9 +143,24 @@ async function auditLogViolations(db: Db): Promise<string[]> {
   return out;
 }
 
+// A SECURITY DEFINER routine runs as its owner (wr_owner) for anyone allowed to EXECUTE it — PUBLIC by default —
+// so one that deletes from audit_logs would undo the separation. None is allowed outside extensions.
+async function securityDefinerViolations(db: Db): Promise<string[]> {
+  const { rows } = await db.query<{ name: string }>(
+    `SELECT p.oid::regprocedure::text AS name FROM pg_proc p
+      WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef
+        AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
+      ORDER BY 1`,
+  );
+  return rows.map((r) => `routine public.${r.name} is SECURITY DEFINER (none allowed — it would run as ${OWNER_ROLE} for its callers)`);
+}
+
 /** Returns the violations (empty = role-separated). Reads the catalogs only; any role can run it. */
 export async function verifyRoleSeparation(pool: Pool): Promise<string[]> {
-  const out = [...await roleViolations(pool), ...await databaseViolations(pool), ...await ownershipViolations(pool)];
+  const out = [
+    ...await roleViolations(pool), ...await databaseViolations(pool), ...await ownershipViolations(pool),
+    ...await securityDefinerViolations(pool),
+  ];
 
   const defaults = await pool.query<{ n: number }>('SELECT count(*)::int AS n FROM pg_default_acl');
   if (defaults.rows[0].n > 0) out.push(`pg_default_acl has ${defaults.rows[0].n} row(s) (default privileges are not used)`);

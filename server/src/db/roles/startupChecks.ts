@@ -20,24 +20,26 @@ const RUN_MIGRATE =
  * role-separated deployment, where the server must run as wr_app.
  */
 export async function assertLeastPrivilege(pool: Pool): Promise<void> {
+  // audit_logs and every partition under it (pg_partition_tree): a privilege granted directly on a partition
+  // (DELETE ON audit_logs_default) reaches its rows without the parent's ACL.
   const { rows: [r] } = await pool.query<{
     role: string; superuser: boolean; owner: boolean; update: boolean; delete: boolean; truncate: boolean;
   }>(
     `SELECT current_user AS role,
             (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS superuser,
-            pg_has_role(current_user, c.relowner, 'MEMBER') AS owner,
+            bool_or(pg_has_role(current_user, c.relowner, 'MEMBER')) AS owner,
             -- has_any_column_privilege: the table privilege or a grant on any one column (UPDATE (action) …)
-            has_any_column_privilege(current_user, c.oid, 'UPDATE') AS update,
-            has_table_privilege(current_user, c.oid, 'DELETE') AS delete,
-            has_table_privilege(current_user, c.oid, 'TRUNCATE') AS truncate
-       FROM pg_class c WHERE c.oid = 'public.audit_logs'::regclass`,
+            bool_or(has_any_column_privilege(current_user, c.oid, 'UPDATE')) AS update,
+            bool_or(has_table_privilege(current_user, c.oid, 'DELETE')) AS delete,
+            bool_or(has_table_privilege(current_user, c.oid, 'TRUNCATE')) AS truncate
+       FROM pg_partition_tree('public.audit_logs'::regclass) t JOIN pg_class c ON c.oid = t.relid`,
   );
   const why = [
     r.superuser && 'is a superuser',
-    r.owner && 'owns audit_logs',
-    r.update && 'can UPDATE audit_logs',
-    r.delete && 'can DELETE from audit_logs',
-    r.truncate && 'can TRUNCATE audit_logs',
+    r.owner && 'owns audit_logs (or a partition)',
+    r.update && 'can UPDATE audit_logs (or a partition)',
+    r.delete && 'can DELETE from audit_logs (or a partition)',
+    r.truncate && 'can TRUNCATE audit_logs (or a partition)',
   ].filter(Boolean);
   if (why.length > 0) {
     throw new StartupCheckError(

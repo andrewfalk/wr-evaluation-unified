@@ -265,6 +265,27 @@ describe.skipIf(!RUNNABLE)('M9 role separation (integration)', () => {
     expect(await verifyRoleSeparation(ownerNew)).toEqual([]);
   });
 
+  it('a grant made directly on a partition (DELETE ON audit_logs_default) makes assertLeastPrivilege refuse', async () => {
+    await ownerNew.query(`GRANT DELETE ON audit_logs_default TO ${APP_ROLE}`);
+    try {
+      await expect(assertLeastPrivilege(appNew)).rejects.toThrow(/can DELETE from audit_logs \(or a partition\)/);
+      expect((await verifyRoleSeparation(ownerNew)).join('\n')).toContain('REVOKE DELETE ON TABLE public."audit_logs_default"');
+    } finally {
+      await applyGrants(ownerNew, { log: QUIET });
+    }
+    await expect(assertLeastPrivilege(appNew)).resolves.toBeUndefined();
+  });
+
+  it('a SECURITY DEFINER routine in public is a violation (it would delete audit rows as wr_owner for its callers)', async () => {
+    await ownerNew.query("CREATE FUNCTION public.m9_erase_audit() RETURNS void LANGUAGE sql SECURITY DEFINER AS 'DELETE FROM public.audit_logs WHERE false'");
+    try {
+      expect((await verifyRoleSeparation(ownerNew)).join('\n')).toMatch(/m9_erase_audit\(\) is SECURITY DEFINER/);
+    } finally {
+      await ownerNew.query('DROP FUNCTION public.m9_erase_audit()');
+    }
+    expect(await verifyRoleSeparation(ownerNew)).toEqual([]);
+  });
+
   it('a foreign key from audit_logs (ON DELETE CASCADE) or to it is a violation', async () => {
     await ownerNew.query('CREATE TABLE m9_action_ref (action text PRIMARY KEY)');
     try {
