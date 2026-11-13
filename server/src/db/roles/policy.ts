@@ -82,6 +82,30 @@ async function listGrants(client: Pick<PoolClient, 'query'>): Promise<AclEntry[]
                         WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')`)).rows;
 }
 
+interface ColumnAclEntry extends AclEntry {
+  column: string;
+}
+
+/**
+ * Column-level privileges (pg_attribute.attacl) on the managed relations. The policy grants none: a column grant
+ * such as `GRANT UPDATE (action) ON audit_logs` would let a role change audit rows while the table ACL looks right.
+ */
+async function listColumnGrants(client: Pick<PoolClient, 'query'>): Promise<ColumnAclEntry[]> {
+  return (await client.query<ColumnAclEntry>(`
+    SELECT c.relname AS name, att.attname AS column,
+           CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END AS grantee,
+           a.privilege_type AS privilege, a.is_grantable AS grantable
+      FROM pg_class c
+      JOIN pg_attribute att ON att.attrelid = c.oid AND att.attnum > 0 AND NOT att.attisdropped
+     CROSS JOIN aclexplode(att.attacl) a
+     WHERE c.relnamespace = 'public'::regnamespace
+       AND c.relkind IN ('r', 'p', 'S', 'v', 'm', 'f', 'c')
+       AND a.grantee <> c.relowner
+       AND NOT EXISTS (SELECT 1 FROM pg_depend d
+                        WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
+     ORDER BY 1, 2, 3, 4`)).rows;
+}
+
 export function quoteIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
@@ -101,6 +125,7 @@ export interface GrantPlan {
 export async function planGrants(client: Pick<PoolClient, 'query'>): Promise<GrantPlan> {
   const relations = await listManagedRelations(client);
   const grants = await listGrants(client);
+  const columnGrants = await listColumnGrants(client);
   const statements: string[] = [];
   const problems: string[] = [];
 
@@ -129,6 +154,18 @@ export async function planGrants(client: Pick<PoolClient, 'query'>): Promise<Gra
         statements.push(`REVOKE GRANT OPTION FOR ${toUngrantable.join(', ')} ON ${target} FROM ${granteeSql(grantee)}`);
       }
       if (toGrant.length > 0) statements.push(`GRANT ${toGrant.join(', ')} ON ${target} TO ${granteeSql(grantee)}`);
+    }
+    // Column privileges: none allowed. One REVOKE per grantee and privilege, listing its columns.
+    const byGrant = new Map<string, string[]>();
+    for (const g of columnGrants.filter((x) => x.name === rel.name)) {
+      const key = `${g.grantee}\u0000${g.privilege}`;
+      const cols = byGrant.get(key) ?? [];
+      if (!cols.includes(g.column)) cols.push(g.column);
+      byGrant.set(key, cols);
+    }
+    for (const [key, cols] of byGrant) {
+      const [grantee, privilege] = key.split('\u0000');
+      statements.push(`REVOKE ${privilege} (${cols.map(quoteIdent).join(', ')}) ON ${target} FROM ${granteeSql(grantee)}`);
     }
   }
   return { statements, problems };

@@ -247,6 +247,43 @@ describe.skipIf(!RUNNABLE)('M9 role separation (integration)', () => {
     }
   });
 
+  it('a column grant on audit_logs (UPDATE (action)) is caught by verify and assertLeastPrivilege, and revoked by applyGrants', async () => {
+    await ownerNew.query(`GRANT UPDATE (action), SELECT (action) ON audit_logs TO ${APP_ROLE}`);
+    try {
+      expect(await sqlState(appNew.query("UPDATE audit_logs SET action = action WHERE action = 'nothing'"))).toBe('ok');
+      expect((await verifyRoleSeparation(ownerNew)).join('\n')).toMatch(/REVOKE (SELECT|UPDATE) \("action"\) ON TABLE public."audit_logs"/);
+      await expect(assertLeastPrivilege(appNew)).rejects.toThrow(/can UPDATE audit_logs/);
+      expect(await applyGrants(ownerNew, { log: QUIET })).toEqual([
+        'REVOKE SELECT ("action") ON TABLE public."audit_logs" FROM "wr_app"',
+        'REVOKE UPDATE ("action") ON TABLE public."audit_logs" FROM "wr_app"',
+      ]);
+      expect(await sqlState(appNew.query("UPDATE audit_logs SET action = action WHERE action = 'nothing'"))).toBe('42501');
+      await expect(assertLeastPrivilege(appNew)).resolves.toBeUndefined();
+    } finally {
+      await ownerNew.query(`REVOKE ALL (action) ON audit_logs FROM ${APP_ROLE}`);
+    }
+    expect(await verifyRoleSeparation(ownerNew)).toEqual([]);
+  });
+
+  it('a foreign key from audit_logs (ON DELETE CASCADE) or to it is a violation', async () => {
+    await ownerNew.query('CREATE TABLE m9_action_ref (action text PRIMARY KEY)');
+    try {
+      await ownerNew.query('INSERT INTO m9_action_ref SELECT DISTINCT action FROM audit_logs');
+      await ownerNew.query('ALTER TABLE audit_logs ADD CONSTRAINT m9_audit_action_fk FOREIGN KEY (action) REFERENCES m9_action_ref ON DELETE CASCADE');
+      expect((await verifyRoleSeparation(ownerNew)).join('\n')).toMatch(/m9_audit_action_fk on audit_logs → m9_action_ref touches audit_logs/);
+    } finally {
+      await ownerNew.query('ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS m9_audit_action_fk');
+      await ownerNew.query('DROP TABLE m9_action_ref');
+    }
+    await ownerNew.query('CREATE TABLE m9_points_at_audit (id bigint, created_at timestamptz, FOREIGN KEY (id, created_at) REFERENCES audit_logs (id, created_at))');
+    try {
+      expect((await verifyRoleSeparation(ownerNew)).join('\n')).toMatch(/on m9_points_at_audit → audit_logs touches audit_logs/);
+    } finally {
+      await ownerNew.query('DROP TABLE m9_points_at_audit');
+    }
+    expect(await verifyRoleSeparation(ownerNew)).toEqual([]);
+  });
+
   // ---- wr_app: refused ----------------------------------------------------------------------------------------------
 
   it('wr_app cannot read, change or empty audit_logs', async () => {

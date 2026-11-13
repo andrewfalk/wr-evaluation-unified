@@ -129,11 +129,17 @@ async function auditLogViolations(db: Db): Promise<string[]> {
              OR t.tgrelid IN (SELECT inhrelid FROM pg_inherits WHERE inhparent = 'public.audit_logs'::regclass))`,
   );
   for (const t of triggers.rows) out.push(`trigger ${t.tgname} on ${t.rel} (audit_logs must have none)`);
-  const fks = await db.query<{ conname: string; rel: string }>(
-    `SELECT conname, conrelid::regclass::text AS rel FROM pg_constraint
-      WHERE contype = 'f' AND confrelid = 'public.audit_logs'::regclass`,
+  // Foreign keys in either direction: one referencing audit_logs could block or cascade into deletes elsewhere,
+  // and one from audit_logs (or a partition) with ON DELETE / ON UPDATE CASCADE, SET NULL or SET DEFAULT would let
+  // DML on an ordinary table change or remove audit rows through the internal FK triggers.
+  const fks = await db.query<{ conname: string; rel: string; ref: string }>(
+    `WITH audit AS (SELECT 'public.audit_logs'::regclass::oid AS oid
+                    UNION SELECT inhrelid FROM pg_inherits WHERE inhparent = 'public.audit_logs'::regclass)
+     SELECT conname, conrelid::regclass::text AS rel, confrelid::regclass::text AS ref FROM pg_constraint
+      WHERE contype = 'f' AND (conrelid IN (SELECT oid FROM audit) OR confrelid IN (SELECT oid FROM audit))
+      ORDER BY 1, 2`,
   );
-  for (const f of fks.rows) out.push(`foreign key ${f.conname} on ${f.rel} references audit_logs (none allowed)`);
+  for (const f of fks.rows) out.push(`foreign key ${f.conname} on ${f.rel} → ${f.ref} touches audit_logs (none allowed)`);
   return out;
 }
 

@@ -16,7 +16,7 @@ const RUN_MIGRATE =
 
 /**
  * Refuses to start when DATABASE_URL's role could change or remove audit rows: a superuser, a member of the role
- * that owns audit_logs, or a role with UPDATE / DELETE / TRUNCATE on it. Used when AUTO_MIGRATE=false — the
+ * that owns audit_logs, or a role with UPDATE (on the table or any of its columns) / DELETE / TRUNCATE on it. Used when AUTO_MIGRATE=false — the
  * role-separated deployment, where the server must run as wr_app.
  */
 export async function assertLeastPrivilege(pool: Pool): Promise<void> {
@@ -26,7 +26,8 @@ export async function assertLeastPrivilege(pool: Pool): Promise<void> {
     `SELECT current_user AS role,
             (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS superuser,
             pg_has_role(current_user, c.relowner, 'MEMBER') AS owner,
-            has_table_privilege(current_user, c.oid, 'UPDATE') AS update,
+            -- has_any_column_privilege: the table privilege or a grant on any one column (UPDATE (action) …)
+            has_any_column_privilege(current_user, c.oid, 'UPDATE') AS update,
             has_table_privilege(current_user, c.oid, 'DELETE') AS delete,
             has_table_privilege(current_user, c.oid, 'TRUNCATE') AS truncate
        FROM pg_class c WHERE c.oid = 'public.audit_logs'::regclass`,
