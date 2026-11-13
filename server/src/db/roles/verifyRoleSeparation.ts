@@ -143,23 +143,47 @@ async function auditLogViolations(db: Db): Promise<string[]> {
   return out;
 }
 
-// A SECURITY DEFINER routine runs as its owner (wr_owner) for anyone allowed to EXECUTE it — PUBLIC by default —
-// so one that deletes from audit_logs would undo the separation. None is allowed outside extensions.
-async function securityDefinerViolations(db: Db): Promise<string[]> {
-  const { rows } = await db.query<{ name: string }>(
-    `SELECT p.oid::regprocedure::text AS name FROM pg_proc p
-      WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef
+// Ways for the app role to run code with someone else's rights, which would undo the separation even with every ACL
+// right — none is allowed outside extensions:
+//   - a SECURITY DEFINER routine in any schema runs as its owner for anyone allowed to EXECUTE it (PUBLIC by default)
+//   - a rewrite rule (CREATE RULE … DO ALSO DELETE FROM audit_logs) runs its actions with the table owner's rights
+//   - a schema other than public: its objects are outside the grant policy
+const SYSTEM_SCHEMA = `(n.nspname IN ('pg_catalog', 'information_schema') OR n.nspname LIKE 'pg\\_%')`;
+
+async function definerRightsViolations(db: Db): Promise<string[]> {
+  const out: string[] = [];
+  const definers = await db.query<{ name: string }>(
+    `SELECT p.oid::regprocedure::text AS name FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE p.prosecdef AND NOT ${SYSTEM_SCHEMA}
         AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
       ORDER BY 1`,
   );
-  return rows.map((r) => `routine public.${r.name} is SECURITY DEFINER (none allowed — it would run as ${OWNER_ROLE} for its callers)`);
+  for (const r of definers.rows) out.push(`routine ${r.name} is SECURITY DEFINER (none allowed — it runs as its owner for its callers)`);
+
+  const rules = await db.query<{ rulename: string; rel: string }>(
+    `SELECT r.rulename, r.ev_class::regclass::text AS rel FROM pg_rewrite r
+       JOIN pg_class c ON c.oid = r.ev_class JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE r.rulename <> '_RETURN' AND NOT ${SYSTEM_SCHEMA}
+        AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
+      ORDER BY 2, 1`,
+  );
+  for (const r of rules.rows) out.push(`rule ${r.rulename} on ${r.rel} (none allowed — its actions run with the table owner's rights)`);
+
+  const schemas = await db.query<{ nspname: string }>(
+    `SELECT n.nspname FROM pg_namespace n
+      WHERE n.nspname <> 'public' AND NOT ${SYSTEM_SCHEMA}
+        AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_namespace'::regclass AND d.objid = n.oid AND d.deptype = 'e')
+      ORDER BY 1`,
+  );
+  for (const r of schemas.rows) out.push(`schema ${r.nspname} exists (only public is managed — its objects are outside the grant policy)`);
+  return out;
 }
 
 /** Returns the violations (empty = role-separated). Reads the catalogs only; any role can run it. */
 export async function verifyRoleSeparation(pool: Pool): Promise<string[]> {
   const out = [
     ...await roleViolations(pool), ...await databaseViolations(pool), ...await ownershipViolations(pool),
-    ...await securityDefinerViolations(pool),
+    ...await definerRightsViolations(pool),
   ];
 
   const defaults = await pool.query<{ n: number }>('SELECT count(*)::int AS n FROM pg_default_acl');

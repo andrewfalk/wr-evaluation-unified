@@ -286,6 +286,31 @@ describe.skipIf(!RUNNABLE)('M9 role separation (integration)', () => {
     expect(await verifyRoleSeparation(ownerNew)).toEqual([]);
   });
 
+  it('another schema — and a SECURITY DEFINER routine in it that wr_app may call — is a violation', async () => {
+    await ownerNew.query('CREATE SCHEMA m9_tools');
+    try {
+      await ownerNew.query(`GRANT USAGE ON SCHEMA m9_tools TO ${APP_ROLE}`);
+      await ownerNew.query("CREATE FUNCTION m9_tools.erase() RETURNS void LANGUAGE sql SECURITY DEFINER AS 'DELETE FROM public.audit_logs WHERE false'");
+      expect(await sqlState(appNew.query('SELECT m9_tools.erase()'))).toBe('ok'); // the bypass is real
+      const violations = (await verifyRoleSeparation(ownerNew)).join('\n');
+      expect(violations).toMatch(/schema m9_tools exists/);
+      expect(violations).toMatch(/m9_tools\.erase\(\) is SECURITY DEFINER/);
+    } finally {
+      await ownerNew.query('DROP SCHEMA m9_tools CASCADE');
+    }
+    expect(await verifyRoleSeparation(ownerNew)).toEqual([]);
+  });
+
+  it('a rewrite rule (it runs with the table owner\'s rights) is a violation', async () => {
+    await ownerNew.query('CREATE RULE m9_erase_audit AS ON INSERT TO public.organizations DO ALSO DELETE FROM public.audit_logs WHERE false');
+    try {
+      expect((await verifyRoleSeparation(ownerNew)).join('\n')).toMatch(/rule m9_erase_audit on organizations/);
+    } finally {
+      await ownerNew.query('DROP RULE m9_erase_audit ON public.organizations');
+    }
+    expect(await verifyRoleSeparation(ownerNew)).toEqual([]);
+  });
+
   it('a foreign key from audit_logs (ON DELETE CASCADE) or to it is a violation', async () => {
     await ownerNew.query('CREATE TABLE m9_action_ref (action text PRIMARY KEY)');
     try {
