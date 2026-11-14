@@ -370,7 +370,8 @@ function App() {
   }, [setPatients]);
 
   // 평가 완료 시 evaluationDate 자동 설정
-  useEvaluationDateSync({ activeId, patients, setPatients, session });
+  // 편집 권한·현재 환자의 락이 있을 때만 쓴다(P2-39c) — lockState를 넘겨 락을 얻은 뒤 다시 판정.
+  useEvaluationDateSync({ activeId, patients, setPatients, session, lockState });
 
   // Electron 메뉴 이벤트
   useElectronMenuEvents({ handleResetPatientsRef, handleStartIntakeRef, handleOpenStatisticsRef });

@@ -56,4 +56,13 @@ describe('useCommitBarrier', () => {
     await p;
     expect(resolved).toBe(true);
   });
+
+  it('언마운트 뒤에 예약한 대기도 바로 풀린다(#323 Codex 권고 — 언마운트 후 도착한 응답)', async () => {
+    const { result, unmount } = renderBarrier();
+    const next = result.current.next;
+    unmount();
+    let resolved = false;
+    await next().then(() => { resolved = true; });
+    expect(resolved).toBe(true);
+  });
 });

@@ -15,6 +15,7 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { useEvaluationDateSync } from '../../state/patientStore/useEvaluationDateSync';
 import { registerModule } from '../../moduleRegistry';
 import { canEditPatient } from '../../utils/patientOwnership';
+import { clearAllLockTokens, setLockToken } from '../../services/lockTokenStore';
 
 const MODULE_ID = 't4-eval-date-module';
 registerModule({
@@ -46,12 +47,12 @@ function patient(id, { done = true, evaluationDate = '', sync, meta, redacted } 
 
 let writes;
 
-function useHarness({ initialPatients, initialActiveId, session }) {
+function useHarness({ initialPatients, initialActiveId, session, lockState }) {
   const [patients, rawSetPatients] = useState(initialPatients);
   const [activeId, setActiveId] = useState(initialActiveId);
   // setPatients는 고정 참조여야 한다(effect deps). 호출마다 updater를 기록한다.
   const setPatients = useCallback((arg) => { writes.push(arg); rawSetPatients(arg); }, []);
-  useEvaluationDateSync({ activeId, patients, setPatients, session });
+  useEvaluationDateSync({ activeId, patients, setPatients, session, lockState });
   return { patients, activeId, rawSetPatients, setActiveId };
 }
 
@@ -65,6 +66,7 @@ function evaluationDateOf(result, id) {
 
 beforeEach(() => {
   writes = [];
+  clearAllLockTokens();
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(NOW);
 });
@@ -133,7 +135,9 @@ describe('T4 useEvaluationDateSync — 값 결정', () => {
 });
 
 describe('T4 useEvaluationDateSync — 권한·동기화 상태(결정 2의 판단 근거)', () => {
-  it('[확인됨] 편집 권한 없는 환자(다른 의사 담당)에도 평가일자를 쓰고, 서버 환자라 syncStatus가 dirty가 된다', () => {
+  // P2-39c(flagged) 의도 갱신: 옮기기 전에는 "[확인됨] 편집 권한 없는 환자에도 평가일자를 쓰고, 서버 환자라 dirty가 된다"를
+  // 고정했다 — 사용자 결정 2(확인되면 고친다)에 따라 편집 가능 가드를 넣어 이제는 쓰지 않는다(락을 들고 있어도).
+  it('편집 권한 없는 환자(다른 의사 담당)에는 평가일자를 쓰지 않는다(P2-39c — 락을 들고 있어도)', () => {
     const othersPatient = patient('a', {
       sync: { serverId: 's-a', revision: 3, syncStatus: 'synced' },
       meta: { createdBy: 'u2', ownerUserId: 'u2', assignedDoctorUserId: 'u2', organizationId: 'org1' },
@@ -141,12 +145,12 @@ describe('T4 useEvaluationDateSync — 권한·동기화 상태(결정 2의 판�
     // 전제: 이 세션은 이 환자를 편집할 수 없다.
     expect(canEditPatient(othersPatient, INTRANET_DOCTOR)).toBe(false);
 
-    const { result } = renderSubject({ initialPatients: [othersPatient], initialActiveId: 'a', session: INTRANET_DOCTOR });
+    setLockToken('a', 'lease-a');
+    const { result } = renderSubject({ initialPatients: [othersPatient], initialActiveId: 'a', session: INTRANET_DOCTOR, lockState: { status: 'held' } });
 
-    // 현재 동작(가드 없음): 쓴다 → dirty → 자동 push 대상이 된다(서버는 403으로 거절).
-    expect(evaluationDateOf(result, 'a')).toBe(TODAY);
-    expect(result.current.patients[0].sync.syncStatus).toBe('dirty');
-    expect(result.current.patients[0].meta.updatedBy).toBe('u1');
+    expect(evaluationDateOf(result, 'a')).toBe('');
+    expect(result.current.patients[0].sync.syncStatus).toBe('synced');
+    expect(writes).toHaveLength(0);
   });
 
   it('편집 권한 있는 서버 환자도 같은 경로로 dirty가 된다(대조)', () => {
@@ -155,7 +159,9 @@ describe('T4 useEvaluationDateSync — 권한·동기화 상태(결정 2의 판�
       meta: { createdBy: 'u1', ownerUserId: 'u1', assignedDoctorUserId: 'u1', organizationId: 'org1' },
     });
     expect(canEditPatient(mine, INTRANET_DOCTOR)).toBe(true);
-    const { result } = renderSubject({ initialPatients: [mine], initialActiveId: 'a', session: INTRANET_DOCTOR });
+    // P2-39c: 락 대상인 서버 환자는 이 환자의 락을 들고 있어야 쓴다(단언은 그대로 — 쓰고 dirty).
+    setLockToken('a', 'lease-a');
+    const { result } = renderSubject({ initialPatients: [mine], initialActiveId: 'a', session: INTRANET_DOCTOR, lockState: { status: 'held' } });
     expect(evaluationDateOf(result, 'a')).toBe(TODAY);
     expect(result.current.patients[0].sync.syncStatus).toBe('dirty');
   });

@@ -24,6 +24,9 @@ export function useCommitBarrier(): () => Promise<void> {
   const [tick, setTick] = useState(0);
   const counterRef = useRef(0);
   const waitersRef = useRef<Waiter[]>([]);
+  // 마운트 상태 — 언마운트 뒤의 next()는 다시 풀어 줄 effect가 없으므로 즉시 푼다(#323 Codex 권고). StrictMode 개발 모드의
+  // 가짜 언마운트 뒤 재마운트에서 다시 true로 돌리도록 setup에서도 세운다(cleanup에서만 바꾸는 ref 금지).
+  const mountedRef = useRef(false);
 
   useEffect(() => {
     const { ready, rest } = splitReadyWaiters(waitersRef.current, tick);
@@ -31,14 +34,19 @@ export function useCommitBarrier(): () => Promise<void> {
     ready.forEach(w => w.resolve());
   }, [tick]);
 
-  useEffect(() => () => {
-    // 언마운트(또는 StrictMode 개발 모드의 가짜 언마운트) — 남은 대기를 푼다.
-    const all = waitersRef.current;
-    waitersRef.current = [];
-    all.forEach(w => w.resolve());
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      // 언마운트(또는 StrictMode 개발 모드의 가짜 언마운트) — 남은 대기를 푼다.
+      mountedRef.current = false;
+      const all = waitersRef.current;
+      waitersRef.current = [];
+      all.forEach(w => w.resolve());
+    };
   }, []);
 
   return useCallback(() => {
+    if (!mountedRef.current) return Promise.resolve();
     counterRef.current += 1;
     const myTick = counterRef.current;
     const committed = new Promise<void>(resolve => { waitersRef.current.push({ tick: myTick, resolve }); });
