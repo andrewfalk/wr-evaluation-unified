@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { useState, useEffect, useRef } from 'react';
 import { showAlert, showConfirm } from '../utils/platform';
+import { getLegacyImportBridge } from '../../platform/bridge';
 import {
   clearAutoSavedWorkspace,
   deleteWorkspaceSnapshot,
@@ -238,9 +239,10 @@ export function useWorkspacePersistence({
 
   const openLoadModal = () => {
     setShowLoadModal(true);
-    if (window.electron?.loadLegacyData) {
+    const legacyImport = getLegacyImportBridge();
+    if (legacyImport) {
       // Electron: IPC로 구형 앱 LevelDB 읽기
-      window.electron.loadLegacyData().then(result => {
+      legacyImport.loadLegacyData().then(result => {
         if (result?.debug) console.log('[legacy-debug]', result.debug);
         const legacyData = result?.data || result; // 새 형식({ debug, data }) 또는 기존 형식 호환
         if (legacyData?.savedItems) {
