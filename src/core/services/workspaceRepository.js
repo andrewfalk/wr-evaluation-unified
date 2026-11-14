@@ -15,9 +15,7 @@ import {
 import {
   clearRemoteAutoSave,
   deleteRemoteWorkspace,
-  loadRemoteAutoSave,
   loadRemoteWorkspaces,
-  saveRemoteAutoSave,
   saveRemoteWorkspace,
 } from './intranetWorkspaceRepository';
 import {
@@ -25,7 +23,7 @@ import {
   markLocalIntegrationStatus,
   markRemoteIntegrationStatus,
 } from './integrationStatus';
-import { migratePatientRecords } from './patientRecords';
+import { ensurePatientRecords } from './patientRecords';
 import { isIntranetWorkspaceMode } from '../utils/workspaceAutosavePolicy';
 
 import { isIntranetContext } from '../../platform/dataMode';
@@ -68,10 +66,11 @@ export async function loadSavedWorkspaces(options = {}) {
     markLocalIntegrationStatus({ ...options, source: 'workspace-load' });
   }
 
+  // storage.loadSavedItems가 이미 형식 마이그레이션을 했다 — 여기서는 레코드 메타만(P-8, P2-20).
   const items = await loadSavedItems();
   return items.map(item => ({
     ...item,
-    patients: migratePatientRecords(item.patients || [], options),
+    patients: ensurePatientRecords(item.patients || [], options),
   }));
 }
 
@@ -116,47 +115,24 @@ export function hasDuplicateWorkspaceName(name, savedItems) {
   return hasDuplicateName(name, savedItems);
 }
 
+// 인트라넷 문맥이면 자동저장을 쓰지 않는다(null). 원격 자동저장 분기는 위 판정과 같은 술어(isIntranetContext)라 도달할 수
+// 없어서 지웠다(P2-20, 동작 불변 — 계획 flagged 목록 3 "기록용").
 export async function loadAutoSavedWorkspace(options = {}) {
   if (isIntranetWorkspaceMode(options)) return null;
+  markLocalIntegrationStatus({ ...options, source: 'autosave-load' });
 
-  if (shouldUseRemoteRepository(options)) {
-    try {
-      const saved = await loadRemoteAutoSave(options);
-      markRemoteIntegrationStatus({ ...options, source: 'autosave-load' });
-      return saved;
-    } catch (error) {
-      markFallbackIntegrationStatus(error, { ...options, source: 'autosave-load' });
-      if (!shouldFallbackToLocal(error, options)) throw error;
-      console.warn('[workspaceRepository] Falling back to local autosave load:', error.message);
-    }
-  } else {
-    markLocalIntegrationStatus({ ...options, source: 'autosave-load' });
-  }
-
+  // storage.loadAutoSave가 이미 형식 마이그레이션을 했다 — 여기서는 레코드 메타만(P-8, P2-20).
   const saved = await loadAutoSave();
   if (!saved?.patients) return saved;
   return {
     ...saved,
-    patients: migratePatientRecords(saved.patients, options),
+    patients: ensurePatientRecords(saved.patients, options),
   };
 }
 
 export async function saveAutoSavedWorkspace({ patients, ...options }) {
   if (isIntranetWorkspaceMode(options)) return null;
-
-  if (shouldUseRemoteRepository(options)) {
-    try {
-      const result = await saveRemoteAutoSave({ patients, ...options });
-      markRemoteIntegrationStatus({ ...options, source: 'autosave-save' });
-      return result;
-    } catch (error) {
-      markFallbackIntegrationStatus(error, { ...options, source: 'autosave-save' });
-      if (!shouldFallbackToLocal(error, options)) throw error;
-      console.warn('[workspaceRepository] Falling back to local autosave save:', error.message);
-    }
-  } else {
-    markLocalIntegrationStatus({ ...options, source: 'autosave-save' });
-  }
+  markLocalIntegrationStatus({ ...options, source: 'autosave-save' });
 
   return saveAutoSave(patients);
 }

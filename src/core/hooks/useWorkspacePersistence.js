@@ -16,6 +16,7 @@ import {
 import { applyWorkspaceSaveAck } from '../services/patientServerRepository';
 import {
   clonePatientRecordForImport,
+  ensurePatientRecords,
   isRedactedPatientRecord,
   migratePatientRecords,
 } from '../services/patientRecords';
@@ -24,8 +25,11 @@ import {
   shouldUseWorkspaceAutosave,
 } from '../utils/workspaceAutosavePolicy';
 
+// 들어오는 환자는 모두 이미 형식 마이그레이션을 거쳤다(자동저장·저장 목록 = workspaceRepository/storage.js, 원격 저장 목록 =
+// intranetWorkspaceRepository.normalizeSavedItems, 옛 앱 데이터 = openLoadModal) — 여기서는 레코드 메타 보강과 가림 환자
+// 제외만 한다(P-8, P2-20: 로드 시 migratePatient 3회 → 1회).
 export function getLoadablePatientsFromSnapshot(patients = [], context = {}) {
-  const migrated = migratePatientRecords(patients || [], context);
+  const migrated = ensurePatientRecords(patients || [], context);
   const loadablePatients = migrated.filter(patient => !isRedactedPatientRecord(patient));
 
   return {
