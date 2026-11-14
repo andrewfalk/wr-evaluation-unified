@@ -14,7 +14,7 @@ import { useCallback, useState } from 'react';
 import type { PatientRecord } from '../../types/patient';
 import {
   applyActiveId, applyPatientTransition, applySelectedIds, createPatientsState,
-  type PatientsState, type ValueOrUpdater,
+  type ActiveIdUpdater, type PatientsState, type ValueOrUpdater,
 } from './reducer';
 import { isPatientTransition, untaggedFallback, type PatientTransition, type UntaggedSetPatientsArg } from './transitions';
 
@@ -31,7 +31,8 @@ function toTransition(arg: unknown): PatientTransition {
   console.error(UNTAGGED_SET_PATIENTS_MESSAGE, { argKind: Array.isArray(arg) ? 'array' : typeof arg });
   return untaggedFallback(arg as UntaggedSetPatientsArg);
 }
-export type SetActiveId = (arg: ValueOrUpdater<string | null>) => void;
+/** 값 또는 updater — updater는 두 번째 인자로 같은 상태의 최신 환자 목록을 받는다(reducer.ts ActiveIdUpdater). */
+export type SetActiveId = (arg: string | null | ActiveIdUpdater) => void;
 export type SetSelectedIds = (arg: ValueOrUpdater<Set<string>>) => void;
 
 export interface PatientsContainer {

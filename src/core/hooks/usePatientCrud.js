@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { getModule } from '../moduleRegistry';
 import { migratePatientRecords } from '../services/patientRecords';
 import { patientTx } from '../state/patientStore/transitions';
@@ -144,17 +144,22 @@ export function usePatientCrud({
   // 삭제 뒤 처리(활성 환자 폴백·빈 목록이면 위자드 초안 비우기)는 삭제 전이가 반영된 커밋의 최종 상태로 한다
   // (P2-39a flagged, 게이트 A 계획 "flagged 수정 설계 ①"). 삭제 시작 시점 목록이나 전이가 계산한 중간 결과로 정하면,
   // 기다리는 동안·같은 배치에 들어온 목록 교체·활성 지정과 어긋나 목록에 없는 환자를 활성화할 수 있다.
-  // usePatientSync의 커밋 배리어(outcomeTick)와 같은 방식: 같은 동기 구간에서 전이와 tick을 함께 예약하고, effect는
+  // usePatientSync의 커밋 배리어(outcomeTick)와 같은 방식: 같은 동기 구간에서 전이와 tick을 함께 예약하고, 뒤처리는
   // 그 tick 이상인 커밋에서만 한 번 돈다(tick 조건이 없으면 무관한 앞선 커밋에서 먼저 돌아 pending을 지운다).
+  // 뒤처리는 layout effect + 함수형 갱신이다(#322 Codex): passive effect는 커밋과 실행 사이에 다른 갱신(목록 교체·활성 지정)이
+  // 예약될 수 있어 캡처한 값으로 판정하면 그것을 뒤늦게 덮는다. 활성 환자는 컨테이너 setActiveId의 updater가 받는 **최신**
+  // 목록·활성 환자로 다시 판정한다(plain useState setter면 두 번째 인자가 없어 이 커밋의 목록으로).
   const [deleteTick, setDeleteTick] = useState(0);
   const deleteTickRef = useRef(0);
   const pendingDeleteFollowUpRef = useRef(null); // null | { tick, resetIntakeWhenEmpty }
-  useEffect(() => {
+  useLayoutEffect(() => {
     const pending = pendingDeleteFollowUpRef.current;
     if (!pending || deleteTick < pending.tick) return;
     pendingDeleteFollowUpRef.current = null; // 처리 후 비움 — 여기 한 곳에서만(StrictMode 이중 effect 대비)
     if (activeId && !patients.some(p => p.id === activeId)) {
-      setActiveId(patients[0]?.id || null);
+      setActiveId((current, latestPatients = patients) => (
+        current && latestPatients.some(p => p.id === current) ? current : (latestPatients[0]?.id || null)
+      ));
       setCurrentStepIndex(0);
     }
     if (pending.resetIntakeWhenEmpty && patients.length === 0) setIntakeShared(null);
@@ -195,7 +200,12 @@ export function usePatientCrud({
       // 기다리는 동안 바뀐 목록(편집·push 결과·pull·추가)을 보존하도록 적용 시점 목록(prev)에서 빼고 표시한다(P2-39a).
       // 이 셋은 같은 동기 구간 — 한 배치로 같은 커밋에 들어간다.
       deleteTickRef.current += 1;
-      pendingDeleteFollowUpRef.current = { tick: deleteTickRef.current, resetIntakeWhenEmpty };
+      // 아직 처리되지 않은 앞선 삭제의 초안 비움 요청은 OR로 이어 받는다(동시 삭제가 같은 배치에서 끝날 때 — #322 Codex 권고).
+      const unprocessed = pendingDeleteFollowUpRef.current;
+      pendingDeleteFollowUpRef.current = {
+        tick: deleteTickRef.current,
+        resetIntakeWhenEmpty: resetIntakeWhenEmpty || !!unprocessed?.resetIntakeWhenEmpty,
+      };
       setPatients(patientTx.deleteResultsApplied({ deletedIds: [...deletedIds], conflicts: [...conflicts] }));
       setDeleteTick(deleteTickRef.current);
     }

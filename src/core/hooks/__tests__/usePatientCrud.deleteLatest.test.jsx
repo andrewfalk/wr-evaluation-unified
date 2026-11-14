@@ -5,7 +5,7 @@
 // 그사이 들어온 편집·push 결과·pull·추가가 사라지고, 시작 목록 기준으로 활성 환자를 골라 사용자의 선택을 덮거나 목록에 없는
 // 환자를 활성화했다. 진짜 상태(환자 상태 컨테이너 + usePatientCrud), StrictMode.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { StrictMode, useState } from 'react';
+import { StrictMode, useLayoutEffect, useState } from 'react';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { usePatientCrud } from '../usePatientCrud.js';
 import { usePatientsContainer } from '../../state/patientStore/usePatientsContainer';
@@ -163,6 +163,69 @@ describe('P2-39a — 삭제 결과를 최신 목록에 적용', () => {
     expect(ids(result)).toEqual(['c']);
     expect(result.current.activeId).toBe('c');
     expect(result.current.patients.some(p => p.id === result.current.activeId)).toBe(true);
+  });
+
+  it('⑥ 삭제 커밋 직후(뒤처리 전) 예약된 목록 교체·활성 지정을 뒤처리가 덮지 않는다(#322 Codex 차단 지적)', async () => {
+    const pending = deferred();
+    deletePatientOnServer.mockReturnValue(pending.promise);
+    // 삭제가 반영된 커밋의 layout effect에서 목록 [C] 교체 + 활성 C를 예약하는 하니스 — passive effect의 뒤처리가
+    // 캡처한 옛 목록([B,C])·활성(A)으로 판정하면 활성 B를 뒤늦게 예약해 최종 [C]·활성 B(목록에 없음)가 된다.
+    const armed = { current: false };
+    const setCurrentStepIndex = vi.fn();
+    const { result } = renderHook(() => {
+      const store = usePatientsContainer([patient('a'), patient('b'), patient('c')], { initialActiveId: 'a' });
+      const [intakeShared, setIntakeShared] = useState(null);
+      const crud = usePatientCrud({
+        activeId: store.activeId, activeModuleId: null, session: SESSION, settings: {},
+        patients: store.patients, setPatients: store.setPatients,
+        selectedIds: store.selectedIds, setSelectedIds: store.setSelectedIds,
+        setErrors: () => {}, setActiveId: store.setActiveId, setCurrentStepIndex,
+        setIntakeShared, setShowHome: () => {}, handleStartIntake: () => {}, canMutateActivePatient: true,
+      });
+      useLayoutEffect(() => {
+        if (armed.current && !store.patients.some(p => p.id === 'a')) {
+          armed.current = false;
+          store.setPatients(patientTx.replacedAll({ patients: [patient('c')] }));
+          store.setActiveId('c');
+        }
+      });
+      return { ...store, intakeShared, crud };
+    }, { wrapper: StrictMode });
+
+    let removing;
+    await act(async () => { removing = result.current.crud.removePatient('a'); await flush(); });
+    armed.current = true;
+    await act(async () => { pending.resolve(); await removing; await flush(); });
+
+    expect(ids(result)).toEqual(['c']);
+    expect(result.current.activeId).toBe('c');
+  });
+
+  it('⑦ 단일 삭제(초안 비움 요청)와 일괄 삭제가 같은 배치에서 끝나 목록이 비면 초안을 비운다(#322 Codex 권고)', async () => {
+    const single = deferred();
+    const bulk = deferred();
+    deletePatientOnServer.mockImplementation((serverId) => (serverId === 's-a' ? single.promise : bulk.promise));
+    const { result } = renderCrud([patient('a'), patient('b'), patient('c')], 'a');
+    act(() => { result.current.setSelectedIds(new Set(['b', 'c'])); });
+
+    let removingOne;
+    let removingMany;
+    await act(async () => {
+      removingOne = result.current.crud.removePatient('a');
+      await flush();
+    });
+    // 일괄 삭제는 "최소 1명 유지" 검사를 지나도록 선택 2명 < 목록 3명인 상태에서 시작한다.
+    await act(async () => { removingMany = result.current.crud.removeSelectedPatients(); await flush(); });
+    await act(async () => {
+      single.resolve();
+      bulk.resolve();
+      await Promise.all([removingOne, removingMany]);
+      await flush(16);
+    });
+
+    expect(result.current.patients).toEqual([]);
+    expect(result.current.activeId).toBeNull();
+    expect(result.current.intakeShared).toBeNull();
   });
 
   it('삭제 충돌(409)은 최신 목록의 그 환자에 표시하고 목록·활성 환자는 그대로', async () => {
