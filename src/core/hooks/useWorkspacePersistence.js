@@ -13,7 +13,7 @@ import {
   saveAutoSavedWorkspace,
   saveWorkspaceSnapshot,
 } from '../services/workspaceRepository';
-import { applyWorkspaceSaveAck } from '../services/patientServerRepository';
+import { patientTx } from '../state/patientStore/transitions';
 import {
   clonePatientRecordForImport,
   ensurePatientRecords,
@@ -120,7 +120,7 @@ export function useWorkspacePersistence({
         showConfirm(`이전 자동 저장 데이터가 있습니다 (${time}).\n이어서 작업하시겠습니까?`).then(async ok => {
           if (ok && saved.patients?.length) {
             const loadResult = getLoadablePatientsFromSnapshot(saved.patients, { session });
-            setPatients(loadResult.patients);
+            setPatients(patientTx.replacedAll({ patients: loadResult.patients }));
             setActiveId(loadResult.patients[0]?.id || null);
             setCurrentStepIndex(0);
             await showLoadFailureNotice(loadResult);
@@ -176,7 +176,7 @@ export function useWorkspacePersistence({
     try {
       const { items, ack } = await saveWorkspaceSnapshot({ id: existingItem?.id, name: saveName, patients, savedItems, session, settings, serverConfig });
       setSavedItems(items);
-      setPatients(prev => applyWorkspaceSaveAck(prev, patients, ack));
+      setPatients(patientTx.saveAckApplied({ sentPatients: patients, ack }));
       setLastAutoSave(null);
       setShowSaveModal(false);
       setSaveName('');
@@ -192,7 +192,7 @@ export function useWorkspacePersistence({
     try {
       const { items, ack } = await saveWorkspaceSnapshot({ id: item.id, name: item.name, patients, savedItems, session, settings, serverConfig });
       setSavedItems(items);
-      setPatients(prev => applyWorkspaceSaveAck(prev, patients, ack));
+      setPatients(patientTx.saveAckApplied({ sentPatients: patients, ack }));
       setLastAutoSave(null);
       setShowSaveModal(false);
       setSaveName('');
@@ -211,7 +211,7 @@ export function useWorkspacePersistence({
       const confirmed = await showConfirm('현재 데이터를 덮어쓰시겠습니까?');
       if (!confirmed) return;
       const loadResult = getLoadablePatientsFromSnapshot(item.patients || [], { session });
-      setPatients(loadResult.patients);
+      setPatients(patientTx.replacedAll({ patients: loadResult.patients }));
       setActiveId(loadResult.patients[0]?.id || null);
       loadResultForNotice = loadResult;
     } else {
@@ -219,7 +219,7 @@ export function useWorkspacePersistence({
       const newPatients = loadResult.patients
         .map(p => clonePatientRecordForImport(p, { session }))
         .filter(Boolean);
-      setPatients(prev => [...prev, ...newPatients]);
+      setPatients(patientTx.appended({ patients: newPatients }));
       setActiveId(newPatients[0]?.id || null);
       loadResultForNotice = loadResult;
     }
