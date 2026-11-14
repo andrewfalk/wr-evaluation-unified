@@ -216,7 +216,8 @@
 | P2-23 | **C3-A** 죽은 코드: `App.jsx`의 `{false && showOpsBanner && …}`(옛 고정 문구 배너) 삭제 + 걸려 있던 ESLint 동결 2건 정리. 계획의 `StepContent` 미사용 props는 현재 0(확인만) | ✅ 완료(#303, 2026-11-14) |
 | P2-24 | `[freeze App.jsx]` `src/app/screens/WorkspaceScreen.jsx` 이동 — App의 마지막 렌더 블록(파생값 6개 + 작업 화면 JSX)을 **글자 그대로**(9,335자 바이트 동일 확인) 옮기고, App은 그 블록이 쓰던 지역 값 88개를 `workspaceProps`(단축 속성)로 넘긴다. 로직 0, `.jsx` 유지. `App.jsx` 1,004 → 866줄 | ✅ 완료(#304, 2026-11-14) |
 | P2-25 | `src/app/BootGate.tsx`(TS) `renderBootGate` — 부팅 렌더 분기 5개(설정 불러오는 중 → 설정 실패 → 저장된 세션 확인 중 → 로그인 → 비밀번호 변경)를 **조건 순서 그대로** 옮김(렌더만, 상태·effect는 App), `withLocalEscape`도 같은 파일로(부팅 중 서버 목록 로딩 화면도 사용). 순서·조합 단위 테스트 `src/app/__tests__/BootGate.test.jsx` 9건 + G9b 불변. #302 권고: 청크 실패 안내에 닫기 버튼(원래 컴포넌트의 `onClose`가 있으면) | ✅ 완료(#305, 2026-11-14) |
-| P2-28 | **flagged** `jobFilter` 잠복 버그: `usePatientList`(`DEFAULT_FILTERS`·`filterPatients` 기본값)와 `PatientSidebar`(구조 분해 기본값)의 직종 필터 "전체" 값이 `'all'`이라, filters에 `jobFilter`가 없으면 "직종명에 all이 든 환자만" 남기고 고급 필터 1개 활성으로 셌다(App은 `''`을 넘겨 드러나지 않음) → `''`로 통일. T10 의도 갱신(이유는 테스트 주석). #305 권고: BootGate 로그인 ↔ 비밀번호 변경 겹침 순서 테스트 | 진행 중 |
+| P2-28 | **flagged** `jobFilter` 잠복 버그: `usePatientList`(`DEFAULT_FILTERS`·`filterPatients` 기본값)와 `PatientSidebar`(구조 분해 기본값)의 직종 필터 "전체" 값이 `'all'`이라, filters에 `jobFilter`가 없으면 "직종명에 all이 든 환자만" 남기고 고급 필터 1개 활성으로 셌다(App은 `''`을 넘겨 드러나지 않음) → `''`로 통일. T10 의도 갱신(이유는 테스트 주석). #305 권고: BootGate 로그인 ↔ 비밀번호 변경 겹침 순서 테스트 | ✅ 완료(#306, 2026-11-14) |
+| P2-26 | `src/app/useScreenRouter.ts`(TS): **`selectScreen`**(순수 — 부팅 게이트 뒤 분기 순서 그대로: 통계 → 인트라넷 첫 부팅 서버 환자 로딩 → 랜딩/대시보드 → 위자드 → 작업 화면) + **`useScreenRouter`**(화면 상태·`showHome`/`setShowHome` 호환 shim·통계 열기(이미 통계면 무시 → 미저장 초안 → 사용 불가 순 가드)/닫기(연 시점 화면으로 복귀)). App은 `selectScreen` 결과로 렌더만. 테스트 StrictMode 12건("통계 화면이 환자 동기화 로딩보다 먼저" 포함) | 진행 중 |
 
 ---
 
