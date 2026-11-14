@@ -1,9 +1,9 @@
 // @ts-nocheck
 import { useCallback } from 'react';
-import { resolvePatientConflictInList } from '../services/patientConflictResolution';
 import { correctPatientIdentity, deletePatientOnServer } from '../services/patientServerRepository';
 import { getLockToken } from '../services/lockTokenStore';
 import { showAlert, showConfirm } from '../utils/platform';
+import { patientTx } from '../state/patientStore/transitions';
 
 // 환자 동기화 충돌 해결 핸들러
 export function useConflictResolution({
@@ -24,37 +24,24 @@ export function useConflictResolution({
 
   const applyResolvedConflict = (patientId, resolution, options = {}) => {
     if (isDirtyBlocked(patientId)) return;
-    setPatients(prev => {
-      const next = resolvePatientConflictInList(prev, patientId, resolution, options);
-      if (activeId === patientId && !next.some(p => p.id === patientId)) {
-        queueMicrotask(() => {
-          setActiveId(next[0]?.id || null);
-          setCurrentStepIndex(0);
-        });
-      }
-      return next;
-    });
+    setPatients(patientTx.conflictResolved({
+      patientId, resolution, options,
+      // 임시(게이트 B에서 제거) — 옮기기 전 updater 안에서 하던 활성 환자 예약 그대로(병합 결과를 봐야 정할 수 있다).
+      onReduced: (_prev, next) => {
+        if (activeId === patientId && !next.some(p => p.id === patientId)) {
+          queueMicrotask(() => {
+            setActiveId(next[0]?.id || null);
+            setCurrentStepIndex(0);
+          });
+        }
+      },
+    }));
     setConflictPatientId(null);
   };
 
   const markRemoteDeleteConflict = useCallback((patientId) => {
     if (!patientId) return;
-    setPatients(prev => prev.map(p => (
-      p.id === patientId
-        ? {
-            ...p,
-            sync: {
-              ...(p.sync || {}),
-              syncStatus: 'conflict',
-              conflict: {
-                ...(p.sync?.conflict || {}),
-                kind: 'remote-delete',
-                serverRevision: null,
-              },
-            },
-          }
-        : p
-    )));
+    setPatients(patientTx.remoteDeleteMarked({ id: patientId }));
   }, [setPatients]);
 
   // 서버의 잘못된 생년월일을 로컬 값으로 정정한다.
@@ -83,9 +70,7 @@ export function useConflictResolution({
       });
 
       // 서버 응답으로 통째 교체 — dirty로 되돌리지 않는다.
-      setPatients(prev => prev.map(p => (
-        p.id === patient.id ? { ...corrected, id: patient.id, meta: p.meta ?? corrected.meta } : p
-      )));
+      setPatients(patientTx.replacedFromServer({ id: patient.id, serverPatient: corrected, keepLocalMeta: true }));
       setConflictPatientId(null);
 
       // 복수 case가 갱신됐으면 나머지 로컬 case의 revision이 뒤처진다.
@@ -131,21 +116,7 @@ export function useConflictResolution({
           applyResolvedConflict(patient.id, resolution, { serverPatient });
           return;
         }
-        setPatients(prev => prev.map(p => (
-          p.id === patient.id
-            ? {
-                ...p,
-                sync: {
-                  ...(p.sync || {}),
-                  syncStatus: 'conflict',
-                  conflict: {
-                    ...(p.sync?.conflict || {}),
-                    serverRevision: error?.data?.currentRevision ?? p.sync?.conflict?.serverRevision ?? null,
-                  },
-                },
-              }
-            : p
-        )));
+        setPatients(patientTx.deleteRevisionUpdated({ id: patient.id, currentRevision: error?.data?.currentRevision }));
         await showAlert(`Delete failed. ${error?.message || 'Please try again.'}`);
       }
       return;

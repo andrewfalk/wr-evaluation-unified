@@ -12,6 +12,7 @@
 import type { PatientRecord } from '../../types/patient';
 import { touchPatientRecord as touchPatientRecordJs } from '../../services/patientRecords';
 import { applyWorkspaceSaveAck as applyWorkspaceSaveAckJs } from '../../services/patientServerRepository';
+import { resolvePatientConflictInList as resolvePatientConflictInListJs } from '../../services/patientConflictResolution';
 
 // JS 서비스를 TS에서 부를 때의 모양(본체는 그대로 재사용 — 계획 "전이 본체는 기존 순수 함수를 재사용").
 // import 바인딩은 호출 시점에만 읽는다(최상위에서 읽지 않음): 훅 테스트가 서비스 모듈을 일부 export만 가진 vi.mock으로
@@ -24,6 +25,13 @@ function applyWorkspaceSaveAck(localPatients: PatientRecord[], sentPatients: Pat
   return (applyWorkspaceSaveAckJs as unknown as (l: PatientRecord[], s: PatientRecord[], a: unknown) => PatientRecord[])(
     localPatients, sentPatients, ack,
   );
+}
+function resolvePatientConflictInList(
+  patients: PatientRecord[], patientId: string, resolution: string, options: unknown,
+): PatientRecord[] {
+  return (resolvePatientConflictInListJs as unknown as (
+    p: PatientRecord[], id: string, r: string, o: unknown,
+  ) => PatientRecord[])(patients, patientId, resolution, options);
 }
 
 const TRANSITION_TAG: unique symbol = Symbol.for('wr.patientTransition');
@@ -124,6 +132,92 @@ const saveAckApplied = defineTransition<SaveAckAppliedPayload>('workspace/saveAc
   applyWorkspaceSaveAck(prev, sentPatients, ack)
 ));
 
+/**
+ * 임시(게이트 B에서 제거): 옮기기 전 updater 안에서 하던 활성 환자 예약(`queueMicrotask(setActiveId…)`)을 그대로 실행하는 콜백.
+ * 전이 본체는 순수하고 예약만 호출부가 넘긴다 — 병합 결과(next)를 봐야 활성 환자를 정할 수 있는데 훅 인자가 별개 setter라서다(계획 A5).
+ * StrictMode 이중 실행 시 두 번 불리는 것도 옮기기 전과 같다. `conflict/resolved`·`sync/pullApplied`만 받는다.
+ */
+export type OnReduced = (prev: PatientRecord[], next: PatientRecord[]) => void;
+
+export interface ConflictResolvedPayload {
+  patientId: string;
+  resolution: string;
+  options?: unknown;
+  onReduced?: OnReduced;
+}
+
+/** 충돌 해결 — resolvePatientConflictInList 재사용(flatMap이라 늘 새 배열). */
+const conflictResolved = defineTransition<ConflictResolvedPayload>('conflict/resolved', (prev, { patientId, resolution, options, onReduced }) => {
+  // options는 그대로 넘긴다(undefined면 resolvePatientConflictInList의 기본값 — 옮기기 전과 같음).
+  const next = resolvePatientConflictInList(prev, patientId, resolution, options);
+  onReduced?.(prev, next);
+  return next;
+});
+
+export interface PatientIdPayload {
+  id: string;
+}
+
+/** 원격 삭제 충돌 표시. */
+const remoteDeleteMarked = defineTransition<PatientIdPayload>('conflict/remoteDeleteMarked', (prev, { id }) => (
+  prev.map(p => (
+    p.id === id
+      ? {
+        ...p,
+        sync: {
+          ...(p.sync || {}),
+          syncStatus: 'conflict' as const,
+          conflict: {
+            ...(p.sync?.conflict || {}),
+            kind: 'remote-delete',
+            serverRevision: null,
+          },
+        },
+      }
+      : p
+  ))
+));
+
+export interface DeleteRevisionUpdatedPayload {
+  id: string;
+  /** 삭제 응답의 `error.data.currentRevision` — 없으면(undefined·null) 기존 충돌의 serverRevision, 그것도 없으면 null. */
+  currentRevision: number | null | undefined;
+}
+
+/** 충돌 해결 중 서버 삭제가 실패했을 때 충돌의 서버 revision 갱신. */
+const deleteRevisionUpdated = defineTransition<DeleteRevisionUpdatedPayload>('conflict/deleteRevisionUpdated', (prev, { id, currentRevision }) => (
+  prev.map(p => (
+    p.id === id
+      ? {
+        ...p,
+        sync: {
+          ...(p.sync || {}),
+          syncStatus: 'conflict' as const,
+          conflict: {
+            ...(p.sync?.conflict || {}),
+            serverRevision: currentRevision ?? p.sync?.conflict?.serverRevision ?? null,
+          },
+        },
+      }
+      : p
+  ))
+));
+
+export interface ReplacedFromServerPayload {
+  id: string;
+  serverPatient: PatientRecord;
+  /** true면 서버 값에 로컬 id와 로컬 meta(없으면 서버 meta)를 얹는다(#11 생년월일 정정). false면 서버 값 그대로(#2 영상 분석 적용). */
+  keepLocalMeta: boolean;
+}
+
+/** 한 환자를 서버 값으로 교체. */
+const replacedFromServer = defineTransition<ReplacedFromServerPayload>('patient/replacedFromServer', (prev, { id, serverPatient, keepLocalMeta }) => (
+  prev.map(p => {
+    if (p.id !== id) return p;
+    return keepLocalMeta ? { ...serverPatient, id, meta: p.meta ?? serverPatient.meta } : serverPatient;
+  })
+));
+
 /** 이름 붙은 전이 모음. P2-33~39에서 훅별로 채운다(계획 "전이 목록"). */
 export const patientTx = {
   /** #13 usePatientCrud.updatePatient · #23 usePresetManagement.applyPreset */
@@ -134,4 +228,12 @@ export const patientTx = {
   appended,
   /** #5·#6 워크스페이스 저장(새 이름·덮어쓰기) 응답 */
   saveAckApplied,
+  /** #9 충돌 해결(updater 안 활성 환자 예약은 onReduced로 격리 — 게이트 B에서 제거) */
+  conflictResolved,
+  /** #10 원격 삭제 충돌 표시 */
+  remoteDeleteMarked,
+  /** #12 충돌 해결 중 서버 삭제 실패 → 충돌 serverRevision 갱신 */
+  deleteRevisionUpdated,
+  /** #11 생년월일 정정 응답(keepLocalMeta: true) · #2 영상 분석 서버 적용(false) */
+  replacedFromServer,
 } as const;

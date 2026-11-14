@@ -4,7 +4,8 @@
 // sync.conflict의 code·message·holder. 모듈 데이터는 unknown(모듈마다 다름). 타입 전용 import라 번들에는 영향이 없다.
 import type { PatientData, PatientMeta, PatientSync, PatientSyncConflict } from '@wr/contracts';
 
-export type PatientSyncConflictRecord = PatientSyncConflict & {
+// kind는 선택: 클라이언트는 기존 충돌의 serverRevision만 갱신하는 등 kind 없이 충돌 객체를 만들 수 있다(conflict/deleteRevisionUpdated).
+export type PatientSyncConflictRecord = Partial<PatientSyncConflict> & {
   code?: string | null;
   message?: string | null;
   holder?: unknown;
