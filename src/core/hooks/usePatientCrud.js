@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { getModule } from '../moduleRegistry';
 import { migratePatientRecords } from '../services/patientRecords';
 import { patientTx } from '../state/patientStore/transitions';
@@ -141,21 +141,26 @@ export function usePatientCrud({
     hasIntranetSession(session) && !!patient?.sync?.serverId
   );
 
-  const markDeleteConflict = (patient, error) => ({
-    ...patient,
-    sync: {
-      ...(patient.sync || {}),
-      syncStatus: 'conflict',
-      conflict: {
-        kind: 'delete',
-        code: error?.data?.code || null,
-        message: error?.message || error?.data?.error || null,
-        serverRevision: error?.data?.currentRevision ?? null,
-      },
-    },
-  });
+  // 삭제 뒤 처리(활성 환자 폴백·빈 목록이면 위자드 초안 비우기)는 삭제 전이가 반영된 커밋의 최종 상태로 한다
+  // (P2-39a flagged, 게이트 A 계획 "flagged 수정 설계 ①"). 삭제 시작 시점 목록이나 전이가 계산한 중간 결과로 정하면,
+  // 기다리는 동안·같은 배치에 들어온 목록 교체·활성 지정과 어긋나 목록에 없는 환자를 활성화할 수 있다.
+  // usePatientSync의 커밋 배리어(outcomeTick)와 같은 방식: 같은 동기 구간에서 전이와 tick을 함께 예약하고, effect는
+  // 그 tick 이상인 커밋에서만 한 번 돈다(tick 조건이 없으면 무관한 앞선 커밋에서 먼저 돌아 pending을 지운다).
+  const [deleteTick, setDeleteTick] = useState(0);
+  const deleteTickRef = useRef(0);
+  const pendingDeleteFollowUpRef = useRef(null); // null | { tick, resetIntakeWhenEmpty }
+  useEffect(() => {
+    const pending = pendingDeleteFollowUpRef.current;
+    if (!pending || deleteTick < pending.tick) return;
+    pendingDeleteFollowUpRef.current = null; // 처리 후 비움 — 여기 한 곳에서만(StrictMode 이중 effect 대비)
+    if (activeId && !patients.some(p => p.id === activeId)) {
+      setActiveId(patients[0]?.id || null);
+      setCurrentStepIndex(0);
+    }
+    if (pending.resetIntakeWhenEmpty && patients.length === 0) setIntakeShared(null);
+  }, [deleteTick, patients, activeId, setActiveId, setCurrentStepIndex, setIntakeShared]);
 
-  const deletePatientsByIds = async (ids) => {
+  const deletePatientsByIds = async (ids, { resetIntakeWhenEmpty = false } = {}) => {
     const idSet = new Set(ids);
     const targets = patients.filter(p => idSet.has(p.id));
     const deletedIds = new Set();
@@ -186,24 +191,16 @@ export function usePatientCrud({
       }
     }
 
-    const nextPatients = patients
-      .filter(patient => !deletedIds.has(patient.id))
-      .map(patient => (
-        conflicts.has(patient.id)
-          ? markDeleteConflict(patient, conflicts.get(patient.id))
-          : patient
-      ));
-
     if (deletedIds.size > 0 || conflicts.size > 0) {
-      // 현행 그대로 — 서버 삭제를 기다리는 동안의 변경을 클로저 목록으로 덮어쓰는 결함은 P2-39a에서 고친다.
-      setPatients(patientTx.replacedAll({ patients: nextPatients }));
-      if (deletedIds.has(activeId)) {
-        setActiveId(nextPatients[0]?.id || null);
-        setCurrentStepIndex(0);
-      }
+      // 기다리는 동안 바뀐 목록(편집·push 결과·pull·추가)을 보존하도록 적용 시점 목록(prev)에서 빼고 표시한다(P2-39a).
+      // 이 셋은 같은 동기 구간 — 한 배치로 같은 커밋에 들어간다.
+      deleteTickRef.current += 1;
+      pendingDeleteFollowUpRef.current = { tick: deleteTickRef.current, resetIntakeWhenEmpty };
+      setPatients(patientTx.deleteResultsApplied({ deletedIds: [...deletedIds], conflicts: [...conflicts] }));
+      setDeleteTick(deleteTickRef.current);
     }
 
-    return { deletedIds, conflicts, failures, nextPatients };
+    return { deletedIds, conflicts, failures };
   };
 
   const removePatient = async (id) => {
@@ -215,14 +212,14 @@ export function usePatientCrud({
     }
     const confirmed = await showConfirm('이 환자를 삭제하시겠습니까?');
     if (!confirmed) return;
-    const { conflicts, failures, nextPatients } = await deletePatientsByIds([id]);
+    // 결과 목록이 비면 위자드 초안을 비우는 것은 삭제 뒤 처리 effect가 최종 목록으로 판정한다(P2-39a).
+    const { conflicts, failures } = await deletePatientsByIds([id], { resetIntakeWhenEmpty: true });
     if (conflicts.size > 0) {
       await showAlert('Patient was changed on the server. Resolve the conflict before deleting.');
     }
     if (failures.length > 0) {
       await showAlert(`Delete failed. ${failures[0].error?.message || 'Please try again.'}`);
     }
-    if (nextPatients.length === 0) setIntakeShared(null);
   };
 
   const removeSelectedPatients = async () => {
@@ -237,7 +234,8 @@ export function usePatientCrud({
     const confirmed = await showConfirm(`선택된 ${selectedIds.size}명의 환자를 삭제하시겠습니까?`);
     if (!confirmed) return;
     const { deletedIds, conflicts, failures } = await deletePatientsByIds(selectedIds);
-    setSelectedIds(new Set([...selectedIds].filter(id => !deletedIds.has(id))));
+    // 기다리는 동안 바뀐 선택을 보존한다(클로저의 시작 시점 선택 집합으로 덮지 않음 — P2-39a).
+    setSelectedIds(cur => new Set([...cur].filter(id => !deletedIds.has(id))));
     if (conflicts.size > 0 || failures.length > 0) {
       await showAlert(`Some patients could not be deleted. Conflicts: ${conflicts.size}, errors: ${failures.length}`);
     }

@@ -339,11 +339,48 @@ const patientResumed = defineTransition<PatientResumedPayload>('sync/patientResu
   ));
 });
 
+export interface DeleteResultsAppliedPayload {
+  /** 서버(또는 로컬)에서 삭제가 끝난 환자 id */
+  deletedIds: string[];
+  /** 삭제가 409로 거절된 환자 [id, error] — 그 환자에 삭제 충돌을 표시한다 */
+  conflicts: Array<[string, unknown]>;
+}
+
+type DeleteConflictError = { message?: string; data?: { code?: string; error?: string; currentRevision?: number | null } } | null | undefined;
+
+function markDeleteConflict(patient: PatientRecord, error: DeleteConflictError): PatientRecord {
+  return {
+    ...patient,
+    sync: {
+      ...(patient.sync || {}),
+      syncStatus: 'conflict',
+      conflict: {
+        kind: 'delete',
+        code: error?.data?.code || null,
+        message: error?.message || error?.data?.error || null,
+        serverRevision: error?.data?.currentRevision ?? null,
+      },
+    },
+  };
+}
+
+/**
+ * (flagged P2-39a) 삭제 결과를 **적용 시점 목록(prev)** 에 반영 — 삭제 id를 빼고 삭제 충돌을 표시한다. 순수 함수.
+ * 옮기기 전(#14)에는 서버 삭제를 기다리는 동안의 변경을 삭제 시작 시점 목록으로 통째 덮어썼다.
+ */
+const deleteResultsApplied = defineTransition<DeleteResultsAppliedPayload>('patients/deleteResultsApplied', (prev, { deletedIds, conflicts }) => {
+  const deleted = new Set(deletedIds);
+  const conflictById = new Map(conflicts);
+  return prev
+    .filter(p => !deleted.has(p.id))
+    .map(p => (conflictById.has(p.id) ? markDeleteConflict(p, conflictById.get(p.id) as DeleteConflictError) : p));
+});
+
 /** 이름 붙은 전이 모음. P2-33~39에서 훅별로 채운다(계획 "전이 목록"). */
 export const patientTx = {
   /** #13 usePatientCrud.updatePatient · #23 usePresetManagement.applyPreset */
   dataEdited,
-  /** #3 App 초기화 · #4·#7 자동저장 복원·불러오기 · #14 삭제(현행 — 클로저 목록, P2-39a에서 교체) · #15 일괄 가져오기 · #16 테스트 데이터 */
+  /** #3 App 초기화 · #4·#7 자동저장 복원·불러오기 · #15 일괄 가져오기 · #16 테스트 데이터 */
   replacedAll,
   /** #8 불러오기(추가) · #22 위자드 완료 */
   appended,
@@ -369,4 +406,6 @@ export const patientTx = {
   pullApplied,
   /** #19 syncPaused 해제(바뀔 게 없으면 prev) */
   patientResumed,
+  /** (flagged P2-39a) #14 삭제 결과 — 최신 목록에 적용 */
+  deleteResultsApplied,
 } as const;
