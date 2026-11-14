@@ -14,6 +14,12 @@ describe('ts-progress', () => {
     expect(s).toMatchObject({ tsFiles: 1, tsLines: 100, jsFiles: 1, jsLines: 300, linesPct: 25, jsInTsOnlyLayers: [] });
   });
 
+  it('keeps the exact ratio for the floor (44.96% is below 45 even though it displays as 45)', () => {
+    const s = summarize([{ rel: 'src/a.ts', lines: 4496 }, { rel: 'src/b.js', lines: 5504 }]);
+    expect(s.linesPct).toBe(45);
+    expect(s.linesRatio * 100).toBeLessThan(45);
+  });
+
   it('flags JavaScript inside the new Phase 2 layers', () => {
     const s = summarize([
       { rel: 'src/platform/bridge.js', lines: 10 },

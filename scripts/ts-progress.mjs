@@ -57,7 +57,9 @@ export function summarize(files) {
     if (!isTs && TS_ONLY_LAYERS.some((dir) => rel.startsWith(dir))) summary.jsInTsOnlyLayers.push(rel);
   }
   const total = summary.tsLines + summary.jsLines;
-  summary.linesPct = total === 0 ? 0 : Math.round((summary.tsLines / total) * 1000) / 10;
+  // linesRatio is exact (the floor compares this); linesPct is rounded for display only (Codex review of #285).
+  summary.linesRatio = total === 0 ? 0 : summary.tsLines / total;
+  summary.linesPct = Math.round(summary.linesRatio * 1000) / 10;
   return summary;
 }
 
@@ -81,7 +83,7 @@ function main() {
     for (const rel of s.jsInTsOnlyLayers) console.error(`  ${rel}`);
     failed = true;
   }
-  if (minPct !== null && s.linesPct < minPct) {
+  if (minPct !== null && s.linesRatio * 100 < minPct) {
     console.error(`ts-progress: ${s.linesPct}% is below --min-lines-pct ${minPct}.`);
     failed = true;
   }

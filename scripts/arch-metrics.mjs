@@ -91,7 +91,8 @@ function matchingLines(code, re) {
 }
 
 /** Module specifiers on each line: static import/export-from, side-effect import, dynamic import(). */
-const SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"])([^'"\n]+)\1/g;
+// A template literal counts when it has no `${…}` (a static path — Codex review of #285).
+const SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"`])([^'"`\n$]+)\1/g;
 
 export function coreToModulesLines(rel, code) {
   if (!rel.startsWith('src/core/')) return 0;
@@ -113,7 +114,8 @@ export function coreToModulesLines(rel, code) {
 
 export function inlineStyleHexCount(code) {
   let count = 0;
-  const re = /style=\{\{/g;
+  // Any whitespace JSX allows: `style={{`, `style = { {` (Codex review of #285).
+  const re = /\bstyle\s*=\s*\{\s*\{/g;
   let m;
   while ((m = re.exec(code))) {
     let depth = 2;

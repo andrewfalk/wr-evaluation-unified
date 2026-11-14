@@ -27,10 +27,12 @@ describe('arch-metrics', () => {
       "import '../modules/notModules';", // src/core/modules — not src/modules
       "export { b } from '../../modules/elbow/y';",
       "const c = await import('../../modules/wrist/z');",
+      'const t = () => import(`../../modules/knee/index.js`);',
+      'const dyn = (id) => import(`../../modules/${id}/index.js`); // not a static path — not counted',
       "import d from '../utils/modulesHelper';",
       "import e from './modules/local';",
     ].join('\n');
-    expect(coreToModulesLines('src/core/utils/r.js', src)).toBe(4);
+    expect(coreToModulesLines('src/core/utils/r.js', src)).toBe(5);
     expect(coreToModulesLines('src/modules/knee/index.js', "import x from '../spine/a';")).toBe(0);
   });
 
@@ -51,5 +53,6 @@ describe('arch-metrics', () => {
     expect(scanFile('src/index.css', '.a { color: #fff; } /* #000 */ .b { border: 1px solid #12345678; }').cssRawHex).toBe(2);
     expect(scanFile('src/styles/tokens.css', ':root { --c: #fff; }').cssRawHex).toBeUndefined();
     expect(inlineStyleHexCount('<div style={{ color: "#fff", nested: { b: "#000" } }} /> const x = "#abc";')).toBe(2);
+    expect(inlineStyleHexCount('<div style={ { color: "#fff" } } /><p style = {\n  {\n    color: "#000" } } />')).toBe(2);
   });
 });
