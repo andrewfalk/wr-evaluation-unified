@@ -11,7 +11,13 @@
 //   - 옮기기 전 코드가 클로저 값으로 계산하던 것은 payload로 그대로 넘긴다. 고치는 것은 flagged PR에서만.
 import type { PatientRecord } from '../../types/patient';
 import { touchPatientRecord as touchPatientRecordJs } from '../../services/patientRecords';
-import { applyWorkspaceSaveAck as applyWorkspaceSaveAckJs } from '../../services/patientServerRepository';
+import {
+  applyPushFailures as applyPushFailuresJs,
+  applyWorkspaceSaveAck as applyWorkspaceSaveAckJs,
+  mergePushedPatientAck as mergePushedPatientAckJs,
+  reconcilePulledPatients as reconcilePulledPatientsJs,
+} from '../../services/patientServerRepository';
+import { requiresLock as requiresLockJs } from '../../hooks/usePatientLock';
 import { resolvePatientConflictInList as resolvePatientConflictInListJs } from '../../services/patientConflictResolution';
 
 // JS 서비스를 TS에서 부를 때의 모양(본체는 그대로 재사용 — 계획 "전이 본체는 기존 순수 함수를 재사용").
@@ -25,6 +31,24 @@ function applyWorkspaceSaveAck(localPatients: PatientRecord[], sentPatients: Pat
   return (applyWorkspaceSaveAckJs as unknown as (l: PatientRecord[], s: PatientRecord[], a: unknown) => PatientRecord[])(
     localPatients, sentPatients, ack,
   );
+}
+function mergePushedPatientAck(localPatients: PatientRecord[], serverPatient: unknown, pushedPatient: unknown): PatientRecord[] {
+  return (mergePushedPatientAckJs as unknown as (l: PatientRecord[], s: unknown, p: unknown) => PatientRecord[])(
+    localPatients, serverPatient, pushedPatient,
+  );
+}
+function applyPushFailures(localPatients: PatientRecord[], failures: unknown[]): PatientRecord[] {
+  return (applyPushFailuresJs as unknown as (l: PatientRecord[], f: unknown[]) => PatientRecord[])(localPatients, failures);
+}
+function reconcilePulledPatients(
+  localPatients: PatientRecord[], pulledItems: PatientRecord[], options: { authoritativeDeletes: boolean },
+): PatientRecord[] {
+  return (reconcilePulledPatientsJs as unknown as (
+    l: PatientRecord[], p: PatientRecord[], o: { authoritativeDeletes: boolean },
+  ) => PatientRecord[])(localPatients, pulledItems, options);
+}
+function requiresLock(patient: PatientRecord, session: unknown): boolean {
+  return (requiresLockJs as unknown as (p: PatientRecord, s: unknown) => boolean)(patient, session);
 }
 function resolvePatientConflictInList(
   patients: PatientRecord[], patientId: string, resolution: string, options: unknown,
@@ -60,13 +84,15 @@ export function isPatientTransition(value: unknown): value is PatientTransition 
   return typeof value === 'function' && (value as { [TRANSITION_TAG]?: unknown })[TRANSITION_TAG] === true;
 }
 
-/** 꼬리표 없는 인자(옛 `setPatients(값 | updater)`) — P2-39에서 삭제. */
-export type LegacySetPatientsArg = PatientRecord[] | ((prev: PatientRecord[]) => PatientRecord[]);
+/**
+ * 꼬리표 없는 인자(옛 `setPatients(값 | updater)`) — P2-39부터 받지 않는다. 컨테이너가 개발·테스트에서는 던지고,
+ * 운영 빌드에서는 진료 중 화면이 죽지 않게 오류를 남긴 뒤 이 전이로 옛 방식대로 적용한다(이중 안전망 — 정적 보증은 래칫 0).
+ */
+export type UntaggedSetPatientsArg = PatientRecord[] | ((prev: PatientRecord[]) => PatientRecord[]);
 
-export const LEGACY_SET_TYPE = 'patients/__legacySet';
+export const UNTAGGED_FALLBACK_TYPE = 'patients/untaggedFallback';
 
-/** @deprecated P2-33~39에서 호출부를 전이로 옮기는 동안만 — 컨테이너가 꼬리표 없는 인자를 이것으로 감싼다. */
-export const legacySet = defineTransition<LegacySetPatientsArg>(LEGACY_SET_TYPE, (prev, arg) => (
+export const untaggedFallback = defineTransition<UntaggedSetPatientsArg>(UNTAGGED_FALLBACK_TYPE, (prev, arg) => (
   typeof arg === 'function' ? arg(prev) : arg
 ));
 
@@ -261,6 +287,58 @@ const evaluationDateSynced = defineTransition<EvaluationDateSyncedPayload>('pati
   })
 ));
 
+export interface PushResultsAppliedPayload {
+  /** pushPendingPatients의 성공 목록 — { patient: 보낸 스냅샷, serverPatient: 서버 ACK } */
+  synced: Array<{ patient: PatientRecord; serverPatient: PatientRecord }>;
+  /** 실패 목록 — { patient, error, kind } */
+  failed: unknown[];
+}
+
+/** push 결과 병합(순수) — 성공 ACK를 차례로 반영한 뒤 실패(충돌·락)를 표시. 옮기기 전 applySyncedPatients + applyPushFailures. */
+const pushResultsApplied = defineTransition<PushResultsAppliedPayload>('sync/pushResultsApplied', (prev, { synced, failed }) => {
+  const withSynced = synced.reduce(
+    (next, { patient: pushedPatient, serverPatient }) => mergePushedPatientAck(next, serverPatient, pushedPatient),
+    prev,
+  );
+  return applyPushFailures(withSynced, failed);
+});
+
+export interface PullAppliedPayload {
+  pulledItems: PatientRecord[];
+  /** pull한 scope가 'all'일 때만 true — 서버에 없는 synced 환자를 권위 있게 지운다. */
+  authoritativeDeletes: boolean;
+  /** 임시(게이트 B에서 제거) — 옮기기 전 updater 안의 활성 환자 예약(ensureActivePatient·사라진 활성 환자 교체). */
+  onReduced?: OnReduced;
+}
+
+/** pull 병합 — reconcilePulledPatients 재사용. */
+const pullApplied = defineTransition<PullAppliedPayload>('sync/pullApplied', (prev, { pulledItems, authoritativeDeletes, onReduced }) => {
+  const next = reconcilePulledPatients(prev, pulledItems, { authoritativeDeletes });
+  onReduced?.(prev, next);
+  return next;
+});
+
+export interface PatientResumedPayload {
+  id: string;
+  /** effect 시점의 락 상태(옮기기 전처럼 updater 밖에서 읽은 값). */
+  lockStatus: string | undefined;
+  session: unknown;
+}
+
+/**
+ * "저장하지 않고 이동"으로 건 syncPaused 해제 — 그 환자가 락 대상이 아니거나(로컬 전용·비인트라넷) 락을 다시 얻었을 때.
+ * 바뀔 게 없으면 **prev를 그대로** 돌려줘(참조 동일) 재렌더를 건너뛴다 — 옮기기 전과 같고 테스트가 이것을 단언한다.
+ */
+const patientResumed = defineTransition<PatientResumedPayload>('sync/patientResumed', (prev, { id, lockStatus, session }) => {
+  const current = prev.find(p => p.id === id);
+  if (!current?.sync?.syncPaused) return prev;
+  const stillBlocked = requiresLock(current, session) && lockStatus !== 'held';
+  if (stillBlocked) return prev;
+  return prev.map(p => (
+    p.id === id ? { ...p, sync: { ...p.sync, syncPaused: false } } : p
+  ));
+});
+
 /** 이름 붙은 전이 모음. P2-33~39에서 훅별로 채운다(계획 "전이 목록"). */
 export const patientTx = {
   /** #13 usePatientCrud.updatePatient · #23 usePresetManagement.applyPreset */
@@ -285,4 +363,10 @@ export const patientTx = {
   patientPaused,
   /** #24 평가일자 자동 설정(useEvaluationDateSync) */
   evaluationDateSynced,
+  /** #17 push 결과 병합 */
+  pushResultsApplied,
+  /** #18 pull 병합(updater 안 활성 환자 예약은 onReduced로 격리 — 게이트 B에서 제거) */
+  pullApplied,
+  /** #19 syncPaused 해제(바뀔 게 없으면 prev) */
+  patientResumed,
 } as const;

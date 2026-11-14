@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 //
-// 환자 상태 컨테이너(REFACTORING_ROADMAP Phase 2 P2-32) — setter 참조 고정(계획 A3), 값·함수·전이 3형태,
-// 같은 배열이면 재렌더 생략(A6), StrictMode 마운트 반복에도 같은 상태.
-import { describe, expect, it } from 'vitest';
+// 환자 상태 컨테이너(REFACTORING_ROADMAP Phase 2 P2-32·P2-39) — setter 참조 고정(계획 A3), 전이만 받음(P2-39: 꼬리표 없는
+// 값·updater는 개발·테스트에서 throw, 운영 빌드는 오류를 남기고 옛 방식대로 적용), 같은 배열이면 재렌더 생략(A6),
+// StrictMode 마운트 반복에도 같은 상태. (P2-39에서 `__legacySet` 삭제에 맞춰 이 파일의 해당 사례를 바꿨다.)
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StrictMode } from 'react';
 import { act, renderHook } from '@testing-library/react';
 import { usePatientsContainer } from '../usePatientsContainer';
-import { defineTransition, isPatientTransition, legacySet, LEGACY_SET_TYPE } from '../transitions';
+import { defineTransition, isPatientTransition, patientTx, untaggedFallback, UNTAGGED_FALLBACK_TYPE } from '../transitions';
+import { UNTAGGED_SET_PATIENTS_MESSAGE } from '../usePatientsContainer';
 import { applyPatientTransition, createPatientsState } from '../reducer';
 
 const A = { id: 'a' };
@@ -23,6 +25,11 @@ function renderContainer(initial = [A]) {
   }, { wrapper: StrictMode });
   return { ...utils, renders: () => renders };
 }
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
 
 describe('defineTransition·isPatientTransition', () => {
   it('전이는 updater로 쓸 수 있는 함수이고 type·payload를 싣는다', () => {
@@ -43,11 +50,11 @@ describe('defineTransition·isPatientTransition', () => {
     expect(isPatientTransition(fake)).toBe(false);
   });
 
-  it('legacySet은 값이면 그 값을, updater면 prev에 적용한 결과를 낸다', () => {
+  it('untaggedFallback(운영 빌드의 꼬리표 없는 인자 처리)은 값이면 그 값을, updater면 prev에 적용한 결과를 낸다', () => {
     const value = [B];
-    expect(legacySet(value)([A])).toBe(value);
-    expect(legacySet(prev => [...prev, B])([A])).toEqual([A, B]);
-    expect(legacySet(value).type).toBe(LEGACY_SET_TYPE);
+    expect(untaggedFallback(value)([A])).toBe(value);
+    expect(untaggedFallback(prev => [...prev, B])([A])).toEqual([A, B]);
+    expect(untaggedFallback(value).type).toBe(UNTAGGED_FALLBACK_TYPE);
   });
 });
 
@@ -66,19 +73,38 @@ describe('usePatientsContainer', () => {
     const { result } = renderContainer([A]);
     const first = result.current.setPatients;
     expect(result.current.patients).toEqual([A]);
-    act(() => { result.current.setPatients([A, B]); });
+    act(() => { result.current.setPatients(patientTx.replacedAll({ patients: [A, B] })); });
     act(() => { result.current.setPatients(renameTx({ id: 'b', name: 'y' })); });
     expect(result.current.setPatients).toBe(first);
   });
 
-  it('값·updater·전이 세 형태를 모두 적용한다', () => {
+  it('전이를 적용한다(목록 교체·추가·이름 붙은 갱신)', () => {
+    const { result } = renderContainer([A]);
+    act(() => { result.current.setPatients(patientTx.replacedAll({ patients: [B] })); });
+    expect(result.current.patients).toEqual([B]);
+    act(() => { result.current.setPatients(patientTx.appended({ patients: [A] })); });
+    expect(result.current.patients).toEqual([B, A]);
+    act(() => { result.current.setPatients(renameTx({ id: 'a', name: 'z' })); });
+    expect(result.current.patients).toEqual([B, { id: 'a', name: 'z' }]);
+  });
+
+  it('꼬리표 없는 값·updater는 개발·테스트에서 던지고 상태를 바꾸지 않는다(P2-39)', () => {
+    const { result } = renderContainer([A]);
+    expect(() => result.current.setPatients([B])).toThrow(UNTAGGED_SET_PATIENTS_MESSAGE);
+    expect(() => result.current.setPatients(prev => prev)).toThrow(TypeError);
+    expect(result.current.patients).toEqual([A]);
+  });
+
+  it('운영 빌드(DEV=false)에서는 오류를 남기고 옛 방식대로 적용한다 — 진료 중 화면이 죽지 않게', () => {
+    vi.stubEnv('DEV', false);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { result } = renderContainer([A]);
     act(() => { result.current.setPatients([B]); });
     expect(result.current.patients).toEqual([B]);
     act(() => { result.current.setPatients(prev => [...prev, A]); });
     expect(result.current.patients).toEqual([B, A]);
-    act(() => { result.current.setPatients(renameTx({ id: 'a', name: 'z' })); });
-    expect(result.current.patients).toEqual([B, { id: 'a', name: 'z' }]);
+    expect(error).toHaveBeenCalledTimes(2);
+    expect(error.mock.calls[0][0]).toBe(UNTAGGED_SET_PATIENTS_MESSAGE);
   });
 
   it('같은 배열을 내는 갱신(전이·updater)은 다시 렌더하지 않는다', () => {
@@ -86,16 +112,16 @@ describe('usePatientsContainer', () => {
     const before = renders();
     const patientsBefore = result.current.patients;
     act(() => { result.current.setPatients(keepTx()); });
-    act(() => { result.current.setPatients(prev => prev); });
+    act(() => { result.current.setPatients(keepTx()); });
     expect(renders()).toBe(before);
     expect(result.current.patients).toBe(patientsBefore);
   });
 
-  it('한 배치의 여러 갱신은 순서대로 적용된다(앞 갱신 결과가 뒤 updater의 prev)', () => {
+  it('한 배치의 여러 갱신은 순서대로 적용된다(앞 갱신 결과가 뒤 전이의 prev)', () => {
     const { result } = renderContainer([]);
     act(() => {
-      result.current.setPatients([A]);
-      result.current.setPatients(prev => [...prev, B]);
+      result.current.setPatients(patientTx.replacedAll({ patients: [A] }));
+      result.current.setPatients(patientTx.appended({ patients: [B] }));
       result.current.setPatients(renameTx({ id: 'a', name: 'n' }));
     });
     expect(result.current.patients).toEqual([{ id: 'a', name: 'n' }, B]);
@@ -103,7 +129,7 @@ describe('usePatientsContainer', () => {
 
   it('언마운트 뒤 다시 마운트하면 초기값에서 시작한다(StrictMode 이중 마운트는 상태를 잃지 않음)', () => {
     const first = renderContainer([A]);
-    act(() => { first.result.current.setPatients([B]); });
+    act(() => { first.result.current.setPatients(patientTx.replacedAll({ patients: [B] })); });
     expect(first.result.current.patients).toEqual([B]);
     first.unmount();
     const second = renderContainer([A]);

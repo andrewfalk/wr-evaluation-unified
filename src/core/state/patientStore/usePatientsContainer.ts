@@ -8,16 +8,28 @@
 // - useReducer가 아니라 useState(함수형 갱신) 위에 리듀서(reducer.ts)를 얹는다: useState는 큐가 비어 있으면 갱신을 미리
 //   계산해 같은 상태면 렌더 예약 자체를 생략하지만 useReducer(React 18)는 그 최적화가 없어, "바뀔 게 없으면 prev"인
 //   전이(sync/patientResumed 등)·같은 activeId 지정에서 App 렌더가 늘 수 있다(계획 A6) — 옮기기 전과 같은 동작을 지킨다.
-// - P2-39 전까지는 꼬리표 없는 setPatients 인자(값·updater)도 받아 `patients/__legacySet` 전이로 감싼다.
+// - setPatients는 꼬리표 전이(patientTx.…)만 받는다(P2-39 — 정적 보증은 구조 래칫 untaggedSetPatients = 0). 꼬리표 없는
+//   인자가 오면 개발·테스트에서는 던지고, 운영 빌드에서는 진료 중 화면이 죽지 않게 console.error 뒤 옛 방식대로 적용한다.
 import { useCallback, useState } from 'react';
 import type { PatientRecord } from '../../types/patient';
 import {
   applyActiveId, applyPatientTransition, applySelectedIds, createPatientsState,
   type PatientsState, type ValueOrUpdater,
 } from './reducer';
-import { isPatientTransition, legacySet, type LegacySetPatientsArg, type PatientTransition } from './transitions';
+import { isPatientTransition, untaggedFallback, type PatientTransition, type UntaggedSetPatientsArg } from './transitions';
 
-export type SetPatients = (arg: PatientTransition | LegacySetPatientsArg) => void;
+export type SetPatients = (transition: PatientTransition) => void;
+
+export const UNTAGGED_SET_PATIENTS_MESSAGE =
+  '[patientStore] setPatients는 꼬리표 전이(patientTx.…)만 받는다 — 값·updater를 직접 넘기지 말 것(REFACTORING_ROADMAP Phase 2 P2-39)';
+
+/** 꼬리표 없는 인자: 개발·테스트는 던지고, 운영은 오류를 남긴 뒤 옛 방식대로 적용(화면이 죽지 않게). */
+function toTransition(arg: unknown): PatientTransition {
+  if (isPatientTransition(arg)) return arg;
+  if (import.meta.env.DEV) throw new TypeError(UNTAGGED_SET_PATIENTS_MESSAGE);
+  console.error(UNTAGGED_SET_PATIENTS_MESSAGE, arg);
+  return untaggedFallback(arg as UntaggedSetPatientsArg);
+}
 export type SetActiveId = (arg: ValueOrUpdater<string | null>) => void;
 export type SetSelectedIds = (arg: ValueOrUpdater<Set<string>>) => void;
 
@@ -45,7 +57,7 @@ export function usePatientsContainer(
   }));
 
   const setPatients = useCallback<SetPatients>((arg) => {
-    const transition = isPatientTransition(arg) ? arg : legacySet(arg);
+    const transition = toTransition(arg);
     setState((current) => applyPatientTransition(current, transition));
   }, []);
   const setActiveId = useCallback<SetActiveId>((arg) => {

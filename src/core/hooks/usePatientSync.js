@@ -1,16 +1,13 @@
 // @ts-nocheck
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  mergePulledPatients,
-  mergePushedPatientAck,
-  applyPushFailures,
   pullPatients,
   pushPendingPatients,
   computeCommittedFlushOutcomes,
 } from '../services/patientServerRepository';
 import { isRedactedPatientRecord } from '../services/patientRecords';
 import { getLockToken } from '../services/lockTokenStore';
-import { requiresLock } from './usePatientLock';
+import { patientTx } from '../state/patientStore/transitions';
 
 import { hasIntranetSession } from '../../platform/dataMode';
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
@@ -24,14 +21,6 @@ function hasPendingPatients(patients = []) {
     const status = p?.sync?.syncStatus;
     return status === 'local-only' || status === 'dirty';
   });
-}
-
-function applySyncedPatients(localPatients, syncedPairs) {
-  return syncedPairs.reduce(
-    (next, { patient: pushedPatient, serverPatient }) =>
-      mergePushedPatientAck(next, serverPatient, pushedPatient),
-    localPatients
-  );
 }
 
 // 활성 환자에 한해서만 락 상태를 근거로 push 허용 여부를 판정한다(비활성 dirty 환자는 항상
@@ -61,49 +50,9 @@ export function getPushEligibility(patientId, { activeId, lockState, patient } =
   return { allowed: false, reason: 'bootstrap-pending' }; // 'acquiring' 등 아직 결론 안 남
 }
 
-export function reconcilePulledPatients(localPatients, pulledItems, { authoritativeDeletes = true } = {}) {
-  const pulledServerIds = new Set(
-    pulledItems
-      .map(patient => patient?.sync?.serverId || patient?.id)
-      .filter(Boolean)
-  );
-
-  const merged = mergePulledPatients(localPatients, pulledItems);
-
-  return merged
-    .map(patient => {
-      if (!authoritativeDeletes) return patient;
-      const serverId = patient?.sync?.serverId;
-      if (!serverId || pulledServerIds.has(serverId)) return patient;
-
-      if (patient.sync?.syncStatus === 'dirty') {
-        return {
-          ...patient,
-          sync: {
-            ...(patient.sync || {}),
-            syncStatus: 'conflict',
-            conflict: {
-              ...(patient.sync?.conflict || {}),
-              kind: 'remote-delete',
-              serverRevision: null,
-            },
-          },
-        };
-      }
-
-      return patient;
-    })
-    .filter(patient => {
-      const serverId = patient?.sync?.serverId;
-      if (!serverId || pulledServerIds.has(serverId)) return true;
-      if (!authoritativeDeletes) {
-        // scope=mine: remove synced (out-of-scope), keep dirty/conflict (not a real delete)
-        const status = patient.sync?.syncStatus;
-        return status === 'dirty' || status === 'conflict';
-      }
-      return patient.sync?.syncStatus !== 'synced';
-    });
-}
+// reconcilePulledPatients는 pull 병합 전이(sync/pullApplied)가 쓰므로 patientServerRepository.js로 옮겼다(본문 그대로,
+// REFACTORING_ROADMAP Phase 2 P2-39) — 테스트·호출부 호환을 위해 여기서도 다시 내보낸다.
+export { reconcilePulledPatients } from '../services/patientServerRepository';
 
 async function pullAllPatients({ session, settings, scope = 'mine' }) {
   const all = [];
@@ -255,10 +204,7 @@ export function usePatientSync({
 
             if (synced.length > 0 || failed.length > 0) {
               if (synced.length > 0 || failed.some(f => f.kind === 'conflict' || f.kind === 'lock')) {
-                setPatients(prev => {
-                  const withSynced = applySyncedPatients(prev, synced);
-                  return applyPushFailures(withSynced, failed);
-                });
+                setPatients(patientTx.pushResultsApplied({ synced, failed }));
               }
               // flushPatient 호출자에게 이번 사이클의 결과를 알리기 위한 예약 — 실제 판정은
               // patients 커밋 이후에만 실행이 보장되는 post-commit effect에서 처리한다
@@ -308,18 +254,21 @@ export function usePatientSync({
         // authoritativeDeletes도 live scopeRef가 아니라 pulledScope로 판정(방어).
         if (pulledScope === scopeRef.current) {
           appliedScope = pulledScope;
-          setPatients(prev => {
-            const next = reconcilePulledPatients(prev, pulledItems, { authoritativeDeletes: pulledScope === 'all' });
-            ensureActivePatient(prev, next);
-            if (activeIdRef.current && !next.some(p => p.id === activeIdRef.current)) {
-              queueMicrotask(() => {
-                if (activeIdRef.current && !next.some(p => p.id === activeIdRef.current)) {
-                  setActiveId?.(next[0]?.id || null);
-                }
-              });
-            }
-            return next;
-          });
+          setPatients(patientTx.pullApplied({
+            pulledItems,
+            authoritativeDeletes: pulledScope === 'all',
+            // 임시(게이트 B에서 제거) — 옮기기 전 updater 안에서 하던 활성 환자 예약 그대로(병합 결과를 봐야 정할 수 있다).
+            onReduced: (prev, next) => {
+              ensureActivePatient(prev, next);
+              if (activeIdRef.current && !next.some(p => p.id === activeIdRef.current)) {
+                queueMicrotask(() => {
+                  if (activeIdRef.current && !next.some(p => p.id === activeIdRef.current)) {
+                    setActiveId?.(next[0]?.id || null);
+                  }
+                });
+              }
+            },
+          }));
         }
       }
 
@@ -423,15 +372,8 @@ export function usePatientSync({
   useEffect(() => {
     if (!activeId) return;
     const lockStatus = lockStateRef.current?.status;
-    setPatients(prev => {
-      const current = prev.find(p => p.id === activeId);
-      if (!current?.sync?.syncPaused) return prev;
-      const stillBlocked = requiresLock(current, sessionRef.current) && lockStatus !== 'held';
-      if (stillBlocked) return prev;
-      return prev.map(p => (
-        p.id === activeId ? { ...p, sync: { ...p.sync, syncPaused: false } } : p
-      ));
-    });
+    // 바뀔 게 없으면 전이가 prev를 그대로 돌려줘 재렌더를 건너뛴다(참조 동작 보존).
+    setPatients(patientTx.patientResumed({ id: activeId, lockStatus, session: sessionRef.current }));
   }, [activeId, lockState?.status, setPatients]);
 
   // post-commit: 이번 렌더의 patients(=committed state)를 근거로 대기 중인 flushPatient
