@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { loadAllPresets, normalizeBuiltinPreset, saveCustomPreset, deleteCustomPreset, getPresetCategory, getPresetDescription } from '../services/presetRepository';
 import { getModule } from '../moduleRegistry';
-import { touchPatientRecord } from '../services/patientRecords';
+import { patientTx } from '../state/patientStore/transitions';
 import { showAlert, showConfirm } from '../utils/platform';
 import { FALLBACK_PRESETS } from '../../modules/knee/utils/data';
 
@@ -61,25 +61,25 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
       return mod?.presetConfig?.applyToModule && preset.modules?.[moduleId];
     });
 
-    setPatients(prev => prev.map(p => {
-      // 2차 방어: 초입 검사와 setState 실행 사이의 레이스(그 사이 환자 전환 등) 대비.
-      if (p.id !== activeId || !canMutateActivePatient) return p;
-      const newModules = { ...p.data.modules };
-      for (const moduleId of (p.data.activeModules || [])) {
-        const mod = getModule(moduleId);
-        const presetModuleData = preset.modules?.[moduleId];
-        if (mod?.presetConfig?.applyToModule && presetModuleData) {
-          newModules[moduleId] = mod.presetConfig.applyToModule(
-            newModules[moduleId] || mod.createModuleData(),
-            jobId,
-            presetModuleData
-          );
+    setPatients(patientTx.dataEdited({
+      // 2차 방어: 초입 검사와 setState 실행 사이의 레이스(그 사이 환자 전환 등) 대비 — 거짓이면 아무 환자도 바꾸지 않는다.
+      id: canMutateActivePatient ? activeId : null,
+      edit: data => {
+        const newModules = { ...data.modules };
+        for (const moduleId of (data.activeModules || [])) {
+          const mod = getModule(moduleId);
+          const presetModuleData = preset.modules?.[moduleId];
+          if (mod?.presetConfig?.applyToModule && presetModuleData) {
+            newModules[moduleId] = mod.presetConfig.applyToModule(
+              newModules[moduleId] || mod.createModuleData(),
+              jobId,
+              presetModuleData
+            );
+          }
         }
-      }
-      return touchPatientRecord(
-        { ...p, data: { ...p.data, modules: newModules } },
-        { session }
-      );
+        return { ...data, modules: newModules };
+      },
+      session,
     }));
     if (applicableModuleIds.length > 0) {
       await showAlert(`프리셋 "${preset.jobName}"이 적용되었습니다.\n적용 모듈: ${formatModuleNames(applicableModuleIds)}`);

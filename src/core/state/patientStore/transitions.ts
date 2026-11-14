@@ -218,6 +218,28 @@ const replacedFromServer = defineTransition<ReplacedFromServerPayload>('patient/
   })
 ));
 
+export interface SharedReplacedPayload {
+  id: string;
+  /**
+   * 새 shared 전체 — 현행 그대로 EMR 추출·다학제 회신 시작 시점 사본을 기반으로 만든 값(그사이 바뀐 다른 필드·상병을 되돌리는
+   * 결함은 P2-39b에서 `patient/sharedPatched`로 교체한다).
+   */
+  shared: PatientDataValue['shared'];
+  session: unknown;
+}
+
+/** 한 환자의 shared를 통째로 교체하고 touch(옮기기 전처럼 touch 전에 updatedAt을 찍음). */
+const sharedReplaced = defineTransition<SharedReplacedPayload>('patient/sharedReplaced', (prev, { id, shared, session }) => (
+  prev.map(p => (
+    p.id === id
+      ? touchPatientRecord(
+        { ...p, updatedAt: new Date().toISOString(), data: { ...(p.data as PatientDataValue), shared } },
+        { session },
+      )
+      : p
+  ))
+));
+
 /** 이름 붙은 전이 모음. P2-33~39에서 훅별로 채운다(계획 "전이 목록"). */
 export const patientTx = {
   /** #13 usePatientCrud.updatePatient · #23 usePresetManagement.applyPreset */
@@ -236,4 +258,6 @@ export const patientTx = {
   deleteRevisionUpdated,
   /** #11 생년월일 정정 응답(keepLocalMeta: true) · #2 영상 분석 서버 적용(false) */
   replacedFromServer,
+  /** #20 EMR 일괄 추출 · #21 다학제 회신(현행 그대로 — P2-39b에서 sharedPatched로 교체) */
+  sharedReplaced,
 } as const;
