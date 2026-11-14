@@ -1,8 +1,8 @@
 {
   "//": "구조 래칫 기준(REFACTORING_ROADMAP Phase 2 P2-01) — scripts/arch-metrics.mjs가 세고 src/__tests__/architecture.ratchet.test.js가 비교한다. 줄어들기만 한다: 값을 올리지 말 것, 줄였으면 `node scripts/arch-metrics.mjs --lower`.",
   "metrics": {
-    "windowElectronLines": 59,
-    "windowElectronFiles": 14,
+    "windowElectronLines": 54,
+    "windowElectronFiles": 13,
     "coreToModulesImports": 34,
     "rawFetch": 5,
     "webStorageFiles": 7,

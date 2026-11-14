@@ -23,10 +23,11 @@ export class FakeBroadcastChannel {
 
   postMessage(message) {
     if (this.closed) throw new Error('BroadcastChannel is closed');
-    const data = structuredClone(message);
+    const snapshot = structuredClone(message); // 보낸 시점의 값
     for (const peer of FakeBroadcastChannel.registry.get(this.name) ?? []) {
       if (peer === this || peer.closed) continue;
-      setTimeout(() => peer.dispatch(data), 0);
+      // 수신자마다 독립된 복제본(실물과 같음 — #289 Codex 권고)
+      setTimeout(() => peer.dispatch(structuredClone(snapshot)), 0);
     }
   }
 
