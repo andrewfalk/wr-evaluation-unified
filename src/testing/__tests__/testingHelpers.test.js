@@ -1,0 +1,75 @@
+// src/testing 헬퍼 자체 검사(REFACTORING_ROADMAP Phase 2 P2-02).
+import { describe, expect, it } from 'vitest';
+import surface from '../fixtures/legacyShellSurface.json';
+import golden from '../../../electron/__tests__/__goldens__/preload-surface.json';
+import { legacyShellKeys, makeBridgeStub } from '../bridgeStub';
+import { createFetchRouter } from '../fetchRouter';
+
+describe('legacyShellSurface.json (구 셸 표면 고정)', () => {
+  // 구 셸 = 현장 설치본(E0 전). 새 셸 표면(G10 골든)은 Phase 2 동안 키를 "추가만" 한다 —
+  // 구 셸 키가 골든에서 빠지면 현장 설치본이 새 화면에서 기대하는 키가 사라진 것이다.
+  it.each(['intranet', 'standalone'])('%s: every legacy key is still on the current preload surface', (target) => {
+    const current = Object.keys(golden[`preload-${target}.js`]);
+    expect(current).toEqual(expect.arrayContaining(legacyShellKeys(target)));
+  });
+
+  it('records the kind of every key', () => {
+    for (const target of ['intranet', 'standalone']) {
+      for (const kind of Object.values(surface[target])) expect(['invoke', 'send', 'subscribe', 'value']).toContain(kind);
+    }
+  });
+});
+
+describe('makeBridgeStub', () => {
+  it('exposes exactly the legacy keys (+ buildTarget only when given)', () => {
+    expect(Object.keys(makeBridgeStub('intranet')).sort()).toEqual(legacyShellKeys('intranet').sort());
+    expect(makeBridgeStub('standalone', { buildTarget: 'standalone' }).buildTarget).toBe('standalone');
+    expect('buildTarget' in makeBridgeStub('standalone')).toBe(false);
+  });
+
+  it('records calls, resolves invokes, and emits to subscribers', async () => {
+    const bridge = makeBridgeStub('standalone', { overrides: { fsLoadSettings: async () => ({ a: 1 }) } });
+    await expect(bridge.fsLoadSettings()).resolves.toEqual({ a: 1 });
+    await expect(bridge.fsLoadAutoSave()).resolves.toBeUndefined();
+    const seen = [];
+    const off = bridge.onMenuNew((...args) => seen.push(args));
+    bridge.__emit('onMenuNew', 'x');
+    off();
+    bridge.__emit('onMenuNew', 'y');
+    expect(seen).toEqual([['x']]);
+    expect(bridge.__callsOf('fsLoadSettings')).toEqual([[]]);
+  });
+
+  it('rejects overrides for keys the legacy shell does not have', () => {
+    expect(() => makeBridgeStub('intranet', { overrides: { fsLoadSettings: () => null } })).toThrow(/not on the intranet shell surface/);
+  });
+});
+
+describe('createFetchRouter', () => {
+  it('answers registered routes, counts calls, and rejects + records the rest', async () => {
+    const router = createFetchRouter({
+      'GET /api/config/public': { mode: 'intranet' },
+      'POST /api/auth/csrf': (req) => ({ status: 401, body: { seen: req.body } }),
+    });
+    const ok = await router.fetch('https://srv.test/api/config/public?x=1');
+    expect(ok.status).toBe(200);
+    await expect(ok.json()).resolves.toEqual({ mode: 'intranet' });
+    const denied = await router.fetch('/api/auth/csrf', { method: 'POST', body: JSON.stringify({ a: 1 }) });
+    expect(denied.status).toBe(401);
+    await expect(denied.json()).resolves.toEqual({ seen: { a: 1 } });
+    await expect(router.fetch('/api/nope')).rejects.toThrow(TypeError);
+    expect(router.unhandled).toEqual(['GET /api/nope']);
+    expect(router.count('POST /api/auth/csrf')).toBe(1);
+  });
+
+  it('matches `:param` patterns after exact keys', async () => {
+    const router = createFetchRouter({
+      'POST /api/patients/:id/lock': (req) => ({ body: { id: req.params.id } }),
+      'POST /api/patients/special/lock': { exact: true },
+    });
+    await expect((await router.fetch('/api/patients/p%201/lock', { method: 'POST' })).json()).resolves.toEqual({ id: 'p 1' });
+    await expect((await router.fetch('/api/patients/special/lock', { method: 'POST' })).json()).resolves.toEqual({ exact: true });
+    await expect(router.fetch('/api/patients/p1/lock/x', { method: 'POST' })).rejects.toThrow(TypeError);
+    expect(router.count('POST /api/patients/:id/lock')).toBe(1);
+  });
+});

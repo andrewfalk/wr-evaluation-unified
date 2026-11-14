@@ -195,7 +195,8 @@
 | PR | 내용 | 상태 |
 |---|---|---|
 | P2-00 | TS 도구 구멍: 루트 ESLint가 `src/**/*.{ts,tsx}`(typescript-eslint 파서 + react·react-hooks 규칙, `.d.ts` 제외), vitest include `tsx`, `verify-browser-compat.mjs`가 `.ts/.tsx` 스캔(주석 제거는 typescript-estree), `vite.config.js` 주석 정정(eslint-plugin-compat 미도입), 이 절의 세부 계획 반영 + Phase 5 D6 — `scripts/clientTsTooling.test.mjs`·`verifyBrowserCompat.test.mjs`로 고정. Codex 1회차: TS 타입 인자(`Promise.withResolvers<number>()`)·non-null `!` 뒤 호출이 하한 검사를 빠져나감 → AST로 그 구간을 공백 처리 | ✅ 완료(#284, 2026-11-14) |
-| P2-01 | 구조 래칫: `scripts/arch-metrics.mjs`(세는 규칙·`--lower`) + `scripts/arch-baseline.json` + `src/__tests__/architecture.ratchet.test.js`(늘면 실패, 줄었는데 기준을 안 내려도 실패) + `scripts/ts-progress.mjs`(제품 줄 TS 비율·`--min-lines-pct`, 새 계층 `.js/.jsx` 금지는 `npm run check` 단계). 기준(주석 제외 실측): `window.electron` 59줄/14파일 · core→modules 34줄(fixture 1 포함) · raw fetch 5 · Web Storage 접근 파일 7 · CSS raw hex 230(src 전체 CSS) · inline style hex 10. TS 0% (JS 207파일·37,478줄) | 진행 중 |
+| P2-01 | 구조 래칫: `scripts/arch-metrics.mjs`(세는 규칙·`--lower`) + `scripts/arch-baseline.json` + `src/__tests__/architecture.ratchet.test.js`(늘면 실패, 줄었는데 기준을 안 내려도 실패) + `scripts/ts-progress.mjs`(제품 줄 TS 비율·`--min-lines-pct`, 새 계층 `.js/.jsx` 금지는 `npm run check` 단계). 기준(주석 제외 실측): `window.electron` 59줄/14파일 · core→modules 34줄(fixture 1 포함) · raw fetch 5 · Web Storage 접근 파일 7 · CSS raw hex 230(src 전체 CSS) · inline style hex 10. TS 0% (JS 207파일·37,478줄). Codex: JSX 공백 `style={ {`·템플릿 리터럴 동적 import 누락 → 수정, 하한은 반올림 전 비율로 | ✅ 완료(#285, 2026-11-14) |
+| P2-02 | `src/AppRoot.jsx`(StrictMode + AuthProvider + App — `main.jsx`와 G9가 같은 트리) + 테스트 헬퍼 `src/testing/{renderApp.jsx,bridgeStub.js,fetchRouter.js}` + **구 셸 표면 고정** `src/testing/fixtures/legacyShellSurface.json`(인트라넷 16키·독립형 29키와 종류). 착수 확인: `electron/preload-*.js`는 7.1.4 릴리스(`77e6686`, 현장 설치본) 뒤 변경 없음(마지막 변경 #162가 7.1.4에 포함) → 현재 G10 골든의 키 집합 = 현장 셸 표면 | 진행 중 |
 
 ---
 
