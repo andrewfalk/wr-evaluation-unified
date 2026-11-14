@@ -2,6 +2,7 @@ import js from '@eslint/js';
 import globals from 'globals';
 import reactPlugin from 'eslint-plugin-react';
 import reactHooksPlugin from 'eslint-plugin-react-hooks';
+import tseslint from 'typescript-eslint';
 
 // Lint targets: see package.json "lint" (src/ electron/ api/ shared/ packages/).
 //
@@ -13,6 +14,33 @@ import reactHooksPlugin from 'eslint-plugin-react-hooks';
 //     `npx eslint --prune-suppressions src/ electron/ api/ shared/ packages/`.
 //   - Fix frozen violations when you touch the file anyway; no mass-fix PRs.
 const LINTED_FILES = ['**/*.{js,jsx,mjs,cjs}'];
+
+// Client TypeScript (REFACTORING_ROADMAP Phase 2 P2-00): new client code is written in .ts/.tsx, and
+// files moved from .js/.jsx must not drop out of the react-hooks rules or the no-restricted-* rules that
+// later Phase 2 PRs add. Scope is src/ only — shared/ and packages/ TS are type-checked by tsc but not
+// linted yet (turning typescript-eslint on there would surface unrelated findings). Declaration files
+// (src/types/*.d.ts) are skipped: they describe external shapes (the preload bridge) with `any`.
+const CLIENT_TS_FILES = ['src/**/*.{ts,tsx}'];
+const CLIENT_TS_IGNORES = ['src/**/*.d.ts'];
+
+const reactRules = {
+  ...reactPlugin.configs.recommended.rules,
+  ...reactHooksPlugin.configs.recommended.rules,
+  'react/no-danger': 'error',
+  'react/react-in-jsx-scope': 'off',
+  // The codebase does not use PropTypes (0 imports); props are typed via
+  // checkJs/TypeScript instead (REFACTORING_ROADMAP D3). Leaving this on
+  // would report ~2,100 false positives once .jsx files are linted.
+  'react/prop-types': 'off',
+  'react-hooks/set-state-in-effect': 'warn',
+};
+
+const unusedVarsOptions = {
+  ignoreRestSiblings: true,
+  varsIgnorePattern: '^_',
+  argsIgnorePattern: '^_',
+  caughtErrorsIgnorePattern: '^_',
+};
 
 export default [
   { ...js.configs.recommended, files: LINTED_FILES },
@@ -35,21 +63,37 @@ export default [
       react: { version: 'detect' },
     },
     rules: {
-      ...reactPlugin.configs.recommended.rules,
-      ...reactHooksPlugin.configs.recommended.rules,
-      'react/no-danger': 'error',
-      'react/react-in-jsx-scope': 'off',
-      // The codebase does not use PropTypes (0 imports); props are typed via
-      // checkJs/TypeScript instead (REFACTORING_ROADMAP D3). Leaving this on
-      // would report ~2,100 false positives once .jsx files are linted.
-      'react/prop-types': 'off',
-      'react-hooks/set-state-in-effect': 'warn',
-      'no-unused-vars': ['error', {
-        ignoreRestSiblings: true,
-        varsIgnorePattern: '^_',
-        argsIgnorePattern: '^_',
-        caughtErrorsIgnorePattern: '^_',
-      }],
+      ...reactRules,
+      'no-unused-vars': ['error', unusedVarsOptions],
+    },
+  },
+  ...[js.configs.recommended, ...tseslint.configs.recommended].map((config) => ({
+    ...config,
+    files: CLIENT_TS_FILES,
+    ignores: CLIENT_TS_IGNORES,
+  })),
+  {
+    files: CLIENT_TS_FILES,
+    ignores: CLIENT_TS_IGNORES,
+    plugins: {
+      react: reactPlugin,
+      'react-hooks': reactHooksPlugin,
+    },
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: { ecmaFeatures: { jsx: true } },
+      globals: {
+        ...globals.browser,
+        __APP_GIT_COMMIT__: 'readonly',
+      },
+    },
+    settings: {
+      react: { version: 'detect' },
+    },
+    rules: {
+      ...reactRules,
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': ['error', unusedVarsOptions],
     },
   },
   {

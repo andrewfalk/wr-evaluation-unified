@@ -26,8 +26,9 @@ export default defineConfig({
       // .jsx: 컴포넌트/훅을 실제 렌더링(jsdom + @testing-library/react)해 검증하는 테스트용.
       // 파일 내부의 `// @vitest-environment jsdom` 주석으로 이 파일만 jsdom 환경을 쓴다
       // (기본 environment는 'node' — 대다수 순수 함수 테스트는 그대로 빠르게 유지).
-      'src/**/*.test.{js,jsx,ts}',
-      'src/**/__tests__/**/*.{js,jsx,ts}',
+      // .ts/.tsx: Phase 2부터 새 클라이언트 코드는 TS(REFACTORING_ROADMAP P2-00) — 그 옆 테스트도 포함.
+      'src/**/*.test.{js,jsx,ts,tsx}',
+      'src/**/__tests__/**/*.{js,jsx,ts,tsx}',
       'shared/**/*.test.{js,ts}',
       'shared/**/__tests__/**/*.{js,ts}',
       'packages/**/*.test.{js,ts}',

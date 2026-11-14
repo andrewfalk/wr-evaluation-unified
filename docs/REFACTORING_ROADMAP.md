@@ -165,6 +165,14 @@
 
 ## Phase 2 — 클라이언트 (선행: G1–G4·G8·G9, P0-5·P0-6, E0)
 
+> **세부 계획 승인(2026-11-14, main `9b5de2c` 기준) — 정본은 저장소 밖 계획 문서 `phase2-client-plan.md`(사용자 계획 폴더)**. 약 105 PR(P2-00~P2-101), 중간 릴리스 R2a(예정 7.3.1 = P2-00~46)·종료 릴리스 R2b(예정 7.3.2 = P2-48~100), 둘 다 서버 전용 패키지·새 DB 마이그레이션 0건. 아래 C1~C11 표는 2026-10 진단 기준 밑그림이고, 범위·순서·불변 조건·PR별 검증 기준은 세부 계획이 정본이다. 진행 기록은 이 절 끝의 "Phase 2 진행" 표.
+>
+> **사용자 결정(2026-11-14, 뒤집지 않음)**: ① 릴리스는 patch 번호(7.3.1·7.3.2) — 리팩터링 PR은 버전 범프 금지 ② M5·M6(독립형 API 키·PHI 암호화)는 **Phase 3**로(E1 `main.js` 분할 뒤 `electron/main/fs/secureStore.js`) — Phase 2는 화면 쪽 준비(`getFsBridge()`·`settingsStore`)와 웹 보안(L15·웹 로컬 데이터 삭제·`authChannel` 테스트)만 ③ 트랙 P는 P-1·P-2·P-3·P-8만, P-5(증분 동기화)는 Phase 2 뒤 별도 계획 ④ E0(preload `buildTarget`)는 **코드만 머지**하고 설치본 배포는 Phase 3 — 현장 구 설치본이 새 화면을 그대로 돌려야 하므로 `window.electron` 키는 Phase 종료까지 "추가만", 화면 쪽 폴백(키 존재 추측 1벌) 유지 ⑤ 7.3.0 수정용 `release/7.3` 브랜치(`9b5de2c`) — 수정은 main 먼저 → cherry-pick, 운영 배포 전이면 같은 번호로 패키지 재생성 ⑥ **TS 기준 교체**: Phase 2 DoD는 "새 계층(platform·api·state·sync·modules manifest·storage) 100% TS + 제품 코드 줄 기준 ≥45% + `@ts-nocheck` 59 → ≤25", 80%는 Phase 5 D6 ⑦ 외부 글꼴 3종은 자체 호스팅(flagged — 인트라넷 화면 글꼴이 바뀜) ⑧ C7 서술 문구는 구조 단일화 + 출력처별 차이 전수 표 + ADR까지, 통일은 사용자가 표에서 정본을 정한 항목만.
+>
+> **아래 표(2026-10 밑그림)와 다르게 가는 점**: ① C4 shim은 `useReducer` 컨테이너에서 시작하고 외부 스토어(`useSyncExternalStore`) 교체는 명명 액션 이전이 끝난 뒤 1 PR(`await` 뒤 다중 갱신 tearing 우려 — P2-40에서 실측) ② C3의 ModalHost(props 0)·AuthProvider 흡수는 C4 **뒤**(모달 자급에 스토어 필요), 모달 상태는 단일 슬롯이 아니라 **키별 맵**(모달 11개가 동시에 열릴 수 있음) ③ **스토리지 키 이름은 바꾸지 않는다** — `wr-auth-*`는 탭 간 상호배제 프로토콜이라 구·신 번들 탭이 섞이면 "구키 읽기"로 배제를 보장할 수 없음, 레지스트리에 값 그대로 등록만 ④ `PlatformProvider`는 C1이 아니라 C3-C(C1은 순수 함수와 정적 runtime) ⑤ 인트라넷 판정은 1벌이 아니라 **의미별 술어 3개**(`isIntranetContext`·`hasIntranetSession`·`isRefreshEligible` — 합치면 동작이 바뀜) ⑥ `useEvaluationDateSync`는 리듀서 후처리로, `usePatientSync`는 React 밖 엔진 + 얇은 훅으로 ⑦ stylelint 대신 구조 래칫 테스트(P2-01)·`verify-css-rules.mjs`(P2-89), stylelint·prettier·eslint-plugin-compat은 도입하지 않음 ⑧ P2-00(TS 도구 구멍 — 루트 ESLint·vitest·브라우저 하한 검사가 `.ts/.tsx`를 빼고 있었음) 추가 ⑨ L15는 SRI 대신 폴리필 외부 파일화 + 글꼴 자체 호스팅, 웹 CSP는 Report-Only → enforce 2단계 ⑩ P-8(로드 시 마이그레이션 중복 제거)은 **가장 아래 층 `storage.js`의 마이그레이션을 유지**하고 위쪽 중복만 제거(독립형 `localToServerMigrator.collectLocalPatients`가 `storage.js`를 직접 불러, 빼면 구형 환자의 평가 데이터가 서버 이전 중 소실) ⑪ 골든 테스트의 모듈 등록 순서는 유지(JSON 불변), 운영 순서는 `src/modules/index.ts` 한 곳에 고정 ⑫ TS ≥80%는 Phase 5 D6.
+>
+> **재플랜 게이트**(착수 직전 플랜 모드 + `plan-codex-loop`으로 그 구간을 다시 계획): **A** = P2-31 전(C4 착수 — C1~C3-A 뒤 App·훅 구조가 달라짐: 액션 목록·`conflict/*`·리듀서 후처리 트리거·훅별 PR 경계) · **B** = P2-40 전(컨테이너 교체 + sync 엔진, 위험 H: 엔진 인터페이스·배리어 제거 증명·실서버 경합·되돌리기) · **C** = P2-66 전(문구 통일 — 사용자가 승인 표에서 정본을 정해야 범위가 정해짐) · **D** = P2-98 전(웹 로컬 데이터 삭제 — 다중 탭 삭제·저장 경합, 계획 리뷰 5회차 반영분 재검토 미실행).
+
 | # | 목표 | 파일/내용 | 재사용 | 위험/크기 |
 |---|---|---|---|---|
 | C1 | **플랫폼 어댑터** | `src/platform/{runtime,bridge,dataMode,dialogs}.ts` + `PlatformProvider`: `getBridge()`가 `window.electron`을 읽는 **유일한** 파일; `Runtime {host, buildTarget(preload가 명시, E0), dataMode, apiBaseUrl, serverFeatures}`; 인트라넷 판정 6벌 → `resolveDataMode` 1벌(진리표 parity 테스트 선행), `getBaseUrl` 3벌+JSX 5곳 → `resolveApiBaseUrl`(순서 session→settings→'' 고정); `window.electron` 60곳/14파일 코드모드(3–4 PR) + ESLint `no-restricted-globals` | `utils/platform.js` | L/M |
@@ -180,6 +188,13 @@
 | C11 | TS 전환 규칙 | 신규 = TS; 분할되거나 PR이 파일의 ≥30% 줄을 바꾸면 `.ts/.tsx`; 테스트 있는 leaf util은 rename-only PR(≤5파일) 허용; 변환 순서 ① `moduleRegistry.ts`(C5) ② `platform/*` ③ `api/apiClient` ④ `state/patientStore` ⑤ `services/patientRecords` ⑥ `storage/keys` ⑦ 모듈 `index`(C8); 전환율 ≥80%에 `tsconfig.client.json` `files`→glob; 신규 코드 `any` 0 | P0-6 | – |
 
 보안 bundle(Phase 2): M5 독립형 API 키 localStorage(`analysisClient.js:4–14`) → Electron main `safeStorage` IPC(Phase 3 E2와 동시) · **M6 독립형 PHI 저장본 전부 암호화**(Codex 지적: `patients/*.json`만 하면 이름이 든 index(`main.js:1020`)·저장 스냅샷(`:1070`)·autosave(`:1082`)가 평문으로 남고, 인트라넷 이관 리더(`migrationDataReader.js:31`)가 암호화본을 못 읽음): `electron/main/fs/secureStore.js` 한 곳이 `{v:1, enc:'safeStorage', data}` 봉투로 patients/index/items/autosave/settings(API 키 포함, M5)를 읽고 씀, 최초 기동 시 평문 → 암호화 1회 이관(백업 보관 후 삭제), `migrationDataReader`·레거시 import 경로가 평문/암호화 둘 다 읽기, `safeStorage.isEncryptionAvailable()` false면 기동 차단 대신 경고+평문 유지 기록. 웹은 "로컬 데이터 삭제"·경고 · L15 웹 CSP(`vercel.json` 헤더 + `index.html` SRI) · `react/no-danger` 베이스라인 0 · `authChannel` 탭 간 refresh 락 테스트.
+
+
+### Phase 2 진행
+
+| PR | 내용 | 상태 |
+|---|---|---|
+| P2-00 | TS 도구 구멍: 루트 ESLint가 `src/**/*.{ts,tsx}`(typescript-eslint 파서 + react·react-hooks 규칙, `.d.ts` 제외), vitest include `tsx`, `verify-browser-compat.mjs`가 `.ts/.tsx` 스캔(주석 제거는 typescript-estree), `vite.config.js` 주석 정정(eslint-plugin-compat 미도입), 이 절의 세부 계획 반영 + Phase 5 D6 — `scripts/clientTsTooling.test.mjs`·`verifyBrowserCompat.test.mjs`로 고정 | 진행 중 |
 
 ---
 
@@ -223,6 +238,7 @@
 | D3 | `CHANGELOG.md` 단일(Keep a Changelog), README 1줄 상태+링크, PRD는 요구사항만(1회 이관 freeze 커밋) |
 | D4 | dead 삭제: scripts `Test-EMR-Hook.ps1`·`verify-shoulder-roundtrip.mjs`·`dev-intranet-stack.ps1`·`verify-csp.mjs`(→ `csp.test.ts`)·`verify-chart-compat.mjs`; 파일 `knee/components/PresetSearch.jsx`·`spine/utils/time.js`·`core/components/ModuleSelector.jsx`; 생성물 `.code-review-graph/wiki/*.md` 30개 untrack; `.sln/.csproj`(ps1이 정본); 루트 `.xlsm` → `docs/templates/`; `packages/analytics-core/coverage/` 개명 |
 | D5 | `scripts/replace-plan-citations.mjs`(계획서 § → ADR id, 없는 8개는 인용만 제거) — 영역 분할 PR 직후 디렉터리별 실행, CI grep 가드 |
+| D6 | **남은 JS → TS 전환(src 줄 기준 ≥80%, 2026-11-14 추가 — Phase 2 사용자 결정 6)**: Phase 2가 손대지 않은 클라이언트 JS 약 100파일(2026-11-14 기준 제품 JS/JSX 207파일·37,478줄 중 Phase 2 몫을 뺀 나머지)을 `.ts/.tsx`로. 규칙은 C11과 같음(테스트 있는 leaf util부터 rename-only PR ≤5파일, 새 코드 `any` 0, 모듈 데이터 `unknown` 단언은 헬퍼 1곳), 측정은 `scripts/ts-progress.mjs --min-lines-pct`(P2-01), 끝나면 `@ts-nocheck` 0·`tsconfig.client.js.json` 퇴역 검토 |
 
 ---
 
@@ -414,6 +430,7 @@ shared/contracts/{aiAnalysis,aiPrompt,aiModels}.ts  # AI 입력 계약(.strict) 
 8. **7.2.0 릴리스(Phase 1 중간 릴리스) 진행**: S1~S6·S10·SEC-A·SEC-B 머지(#213~#247) 뒤 P1-37 버전 범프 ✅ 2026-11-08(package·lock·README·PRD 7.2.0, #248) → P1-38 `docs/UPDATE_7.2.0.md` ✅ 2026-11-08(서버 전용 패키지·host 모드 기준 절차, 배포 전 점검=패키지 리허설·현장 Chrome 108 확인, `REFRESH_TOKEN_SECRET`은 7.1.6 롤백용으로 남김, #249) → 5번의 오프라인 패키지 리허설 ✅ 2026-11-08(첫 리허설에서 앱 이미지에 개발 PC의 옛 `server/dist`가 섞여 라우터 5개가 S1 이전 코드로 돈 것을 발견 → `.dockerignore` `**/dist`·build 전 dist 삭제·Dockerfile 가드로 수정 #250 → 재생성 패키지로 재리허설 통과, 결과는 `UPDATE_7.2.0.md` "사전 검증한 것") → 사용자 배포(배포 전 점검 3) 현장 Chrome 버전 확인 포함, EMR 연동은 배포 뒤 첫 사용에서 확인). P1-22(L10·L13·L17)는 GPU·검증 스택 확인 대기라 7.2.0에서 빠진다. 7.2.0 뒤 개발은 S7부터(착수 전 플랜 모드 재플랜 필수).
 9. **7.3.0 릴리스(Phase 1 종료 릴리스) 진행**: S7~S11·M9·P1-22 머지(#252~#279) 뒤 버전 범프 + compose `MIGRATION_CHECKSUM_MODE: warn` 두 줄 삭제(체크섬 enforce) ✅ 2026-11-13(package·lock·README·PRD 7.3.0, 이 PR) → `docs/UPDATE_7.3.0.md`(누적 flagged: S7-R2, S8 전환 절차, S9 종료 동작·JSON 로그, S11 Node 22, M9 ①~⑩, P1-22) → 오프라인 패키지 생성 + `verify-stack` 리허설(Node 22 이미지 포함) → 사용자 배포(**운영이 7.2.0을 한 번 기동한 뒤에만**). — 진행: 버전 범프·체크섬 enforce ✅(#280) → `UPDATE_7.3.0.md` ✅(#281, BACKUP_RESTORE 5-3 검증 명령 운영 인자 포함) → 패키지 `7.3.0`(main `3ecc34a`) 리허설 ✅ 2026-11-13(7.2.0 볼륨 업그레이드·롤백(직전 백업 복원 → 7.2.0)·재업그레이드·신규 설치·`run --rm migrate`, 결과는 안내서 "사전 검증한 것") → **남은 것 = 사용자 배포**(운영 7.2.0 1회 기동 확인 → 배포 → 첫 EMR 사용 확인).
 10. **새 세션 시작점 = Phase 2(클라이언트)** — 선행: G9 `App.smoke.test.jsx`(Phase 0 이월), 플랜 모드로 세부 계획 → `plan-codex-loop` → 승인 뒤 PR 단위. Phase 1에서 남긴 후속 후보(범위 밖): childEnv `extra` 키 대소문자(Windows)·래칫의 `node:child_process` 표기, install-prod의 따옴표 값 거부, 영상 "검토 종료"의 Windows 파일 삭제, `config.ts` intranet `TRUST_PROXY` 기본 1 분기(골든 갱신 필요), S8·S9 노트의 후속 후보. (덮어쓰기 복원의 `restore.sh` 종료 코드 1(파티션 상속 제약)은 ✅ 7.3.0 배포 전 수정 — 복원을 한 트랜잭션으로 실행하고 파티션 부모 제약을 먼저 지우는 사전 정리, 실패 시 롤백·종료 코드 1, `docs/BACKUP_RESTORE.md` 5-2. 7.3.0 패키지는 이 수정을 담아 다시 만든다.)
+11. **Phase 2 세부 계획 승인(2026-11-14) → 구현 진행 중** — `release/7.3` 브랜치(`9b5de2c`) 생성·push 완료(2026-11-14). 진행은 Phase 2 절의 "Phase 2 진행" 표. 구현 세션은 P2-00부터 계획 순서대로, **게이트 A(P2-31) 앞에서 멈추고** 플랜 모드 + `plan-codex-loop`으로 C4를 다시 계획한다.
 
 ---
 
