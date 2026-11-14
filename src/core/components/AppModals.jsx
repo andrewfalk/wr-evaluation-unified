@@ -1,16 +1,20 @@
+import { Suspense } from 'react';
 import { AdminConsoleModal } from './AdminConsoleModal';
 import { AccountProfileModal } from './AccountProfileModal';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { SettingsModal } from './SettingsModal';
 import { MigrationReportModal } from './MigrationReportModal';
 import { SaveModal, LoadModal } from './SaveLoadModals';
-import { BatchImportModal } from './BatchImportModal';
 import { PatientIdentityConflictModal } from './PatientIdentityConflictModal';
 import { ConflictResolveModal } from './ConflictResolveModal';
 import { PresetManageModal } from './PresetManageModal';
 import { PresetBrowseModal } from './PresetBrowseModal';
 import { isPatientIdentityPushConflict } from '../services/patientRecords';
 import { resolveApiBaseUrl } from '../../platform/dataMode';
+import { lazyWithReload } from './lazyWithReload';
+
+// 일괄입력 모달은 xlsx(약 490 KB)를 쓰므로 처음 열 때 내려받는다(P-2a, P2-22). 청크를 못 받으면 새로고침 안내.
+const BatchImportModal = lazyWithReload(() => import('./BatchImportModal').then((m) => ({ default: m.BatchImportModal })));
 
 // 공통 모달 렌더링 (App.jsx의 renderModals를 분리)
 export function AppModals({
@@ -91,7 +95,11 @@ export function AppModals({
       )}
       {showSaveModal && <SaveModal patientCount={patients.length} saveName={saveName} onSaveNameChange={e => setSaveName(e.target.value)} savedItems={savedItems} onSave={handleSave} onOverwriteSave={handleOverwriteSave} onDelete={handleDelete} onClose={() => setShowSaveModal(false)} />}
       {showLoadModal && <LoadModal legacyItems={legacyItems} savedItems={savedItems} onLoad={handleLoad} onDelete={handleDelete} onClose={() => setShowLoadModal(false)} />}
-      {showBatchImport && <BatchImportModal onClose={() => setShowBatchImport(false)} onImport={handleBatchImport} existingPatients={patients} />}
+      {showBatchImport && (
+        <Suspense fallback={null}>
+          <BatchImportModal onClose={() => setShowBatchImport(false)} onImport={handleBatchImport} existingPatients={patients} />
+        </Suspense>
+      )}
       {conflictPatient && isPatientIdentityPushConflict(conflictPatient.sync?.conflict) ? (
         <PatientIdentityConflictModal
           patient={conflictPatient}

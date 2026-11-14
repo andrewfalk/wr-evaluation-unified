@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { useRef, useState } from 'react';
-import * as XLSX from 'xlsx';
+import { readFirstSheetRows } from '../utils/xlsxIo';
 import { useAuth } from '../auth/AuthContext';
 import { suggestModules, resolveDiagnosisModule } from '../utils/diagnosisMapping';
 import { getModule, getAllModules } from '../moduleRegistry';
@@ -140,10 +140,7 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
     const reader = new FileReader();
     reader.onload = event => {
       try {
-        const data = new Uint8Array(event.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        const rows = readFirstSheetRows(event.target.result);
         if (rows.length > 0) {
           setPreview(rows);
           setColumns(rows[0]);
