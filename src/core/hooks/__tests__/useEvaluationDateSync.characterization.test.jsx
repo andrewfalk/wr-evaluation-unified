@@ -11,7 +11,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StrictMode, useCallback, useState } from 'react';
 import { act, cleanup, renderHook } from '@testing-library/react';
-import { useEvaluationDateSync } from '../useEvaluationDateSync.js';
+// P2-38: 대상 훅만 환자 상태 컨테이너 모듈의 것으로 바꿨다(옛 src/core/hooks/useEvaluationDateSync.js 삭제) — 단언은 그대로.
+import { useEvaluationDateSync } from '../../state/patientStore/useEvaluationDateSync';
 import { registerModule } from '../../moduleRegistry';
 import { canEditPatient } from '../../utils/patientOwnership';
 

@@ -9,7 +9,7 @@ import { useServerConfig } from './core/hooks/useServerConfig';
 import { useAIAvailable } from './core/hooks/useAIAvailable';
 import { useAuthSync } from './core/hooks/useAuthSync';
 import { useAppSettings } from './core/hooks/useAppSettings';
-import { useEvaluationDateSync } from './core/hooks/useEvaluationDateSync';
+import { useEvaluationDateSync } from './core/state/patientStore/useEvaluationDateSync';
 import { useElectronMenuEvents } from './core/hooks/useElectronMenuEvents';
 import { useConflictResolution } from './core/hooks/useConflictResolution';
 import { useIntegrationStatus } from './core/hooks/useIntegrationStatus';

@@ -245,6 +245,22 @@ const patientPaused = defineTransition<PatientIdPayload>('sync/patientPaused', (
   prev.map(p => (p.id === id ? { ...p, sync: { ...(p.sync || {}), syncPaused: true } } : p))
 ));
 
+export interface EvaluationDateSyncedPayload {
+  id: string;
+  /** 렌더 시점 목록으로 계산한 값(옮기기 전과 같음 — 적용 시점에 다시 비교하지 않는 것도 그대로, 계획 검토 후보). */
+  evaluationDate: string;
+  session: unknown;
+}
+
+/** 평가일자 자동 설정 — shared.evaluationDate만 바꾸고 touch(updatedAt 수동 stamp 없음, 옮기기 전과 같음). */
+const evaluationDateSynced = defineTransition<EvaluationDateSyncedPayload>('patient/evaluationDateSynced', (prev, { id, evaluationDate, session }) => (
+  prev.map(x => {
+    if (x.id !== id) return x;
+    const data = x.data as PatientDataValue;
+    return touchPatientRecord({ ...x, data: { ...data, shared: { ...data.shared, evaluationDate } } }, { session });
+  })
+));
+
 /** 이름 붙은 전이 모음. P2-33~39에서 훅별로 채운다(계획 "전이 목록"). */
 export const patientTx = {
   /** #13 usePatientCrud.updatePatient · #23 usePresetManagement.applyPreset */
@@ -267,4 +283,6 @@ export const patientTx = {
   sharedReplaced,
   /** #1 App 환자 전환 — 저장하지 않고 이동 */
   patientPaused,
+  /** #24 평가일자 자동 설정(useEvaluationDateSync) */
+  evaluationDateSynced,
 } as const;
