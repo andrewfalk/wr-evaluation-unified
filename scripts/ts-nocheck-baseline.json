@@ -39,7 +39,6 @@
   "src/core/hooks/useServerConfig.js",
   "src/core/hooks/useWorkspacePersistence.js",
   "src/core/services/analysisClient.js",
-  "src/core/services/httpClient.js",
   "src/core/services/integrationStatus.js",
   "src/core/services/intranetWorkspaceRepository.js",
   "src/core/services/localToServerMigrator.js",
