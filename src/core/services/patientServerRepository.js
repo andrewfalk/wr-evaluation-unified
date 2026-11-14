@@ -649,3 +649,49 @@ export function mergePulledPatients(localPatients, pulledItems) {
   }
   return result;
 }
+
+// pull 결과를 로컬 목록에 병합하고 서버에서 사라진 환자를 정리한다(REFACTORING_ROADMAP Phase 2 P2-39에서
+// usePatientSync.js에서 본문 그대로 옮김 — 전이 sync/pullApplied가 재사용). authoritativeDeletes: scope=all이면 true.
+export function reconcilePulledPatients(localPatients, pulledItems, { authoritativeDeletes = true } = {}) {
+  const pulledServerIds = new Set(
+    pulledItems
+      .map(patient => patient?.sync?.serverId || patient?.id)
+      .filter(Boolean)
+  );
+
+  const merged = mergePulledPatients(localPatients, pulledItems);
+
+  return merged
+    .map(patient => {
+      if (!authoritativeDeletes) return patient;
+      const serverId = patient?.sync?.serverId;
+      if (!serverId || pulledServerIds.has(serverId)) return patient;
+
+      if (patient.sync?.syncStatus === 'dirty') {
+        return {
+          ...patient,
+          sync: {
+            ...(patient.sync || {}),
+            syncStatus: 'conflict',
+            conflict: {
+              ...(patient.sync?.conflict || {}),
+              kind: 'remote-delete',
+              serverRevision: null,
+            },
+          },
+        };
+      }
+
+      return patient;
+    })
+    .filter(patient => {
+      const serverId = patient?.sync?.serverId;
+      if (!serverId || pulledServerIds.has(serverId)) return true;
+      if (!authoritativeDeletes) {
+        // scope=mine: remove synced (out-of-scope), keep dirty/conflict (not a real delete)
+        const status = patient.sync?.syncStatus;
+        return status === 'dirty' || status === 'conflict';
+      }
+      return patient.sync?.syncStatus !== 'synced';
+    });
+}
