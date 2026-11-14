@@ -8,8 +8,9 @@
 //      workspaceRepository·workspaceAutosavePolicy — 6벌. 아래에서 export된 것과 관찰 가능한 동작으로 확인.
 //   ② 세션만(session.mode === 'intranet'): useAIAvailable·patientScope·analysisClient·videoAnalysisClient 등.
 //   ③ refresh 자격(!session?.mode || session.mode === 'intranet'): httpClient의 401-refresh.
-// T2 baseUrl 우선순위 — session → settings → ''(3벌 + integrationStatus의 정규화판), analysisClient의 웹 경로만
-//   settings → session 역순(P2-12에서 통일 예정 — flagged, 아래 "역순" 테스트를 그때 의도 갱신).
+// T2 baseUrl 우선순위 — session → settings → ''. P2-12(flagged)에서 전부 src/platform/dataMode.resolveApiBaseUrl로
+//   모으며 ① 정규화(앞뒤 공백·끝 "/")를 모든 곳에 ② analysisClient 웹 경로의 settings → session 역순을 통일했다 —
+//   이 두 기대만 의도 갱신, 나머지는 그대로.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../services/httpClient', () => ({
@@ -131,7 +132,7 @@ describe('T2 baseUrl 우선순위', () => {
   const neither = { session: { mode: 'intranet' }, settings: { integrationMode: 'intranet' } };
   const baseUrlOf = (path) => requestJson.mock.calls.find(([p]) => p.startsWith(path))?.[1]?.baseUrl;
 
-  // getBaseUrl 3벌: session → settings → ''(정규화하지 않음) — 세 구현 모두 같은 표로(#288 Codex 권고).
+  // getBaseUrl 3벌(P2-12부터 resolveApiBaseUrl): session → settings → '' — 세 구현 모두 같은 표로(#288 Codex 권고).
   const IMPLS = [
     ['patientServerRepository.pullPatients', (c) => pullPatients(c), '/api/patients'],
     ['intranetWorkspaceRepository.loadRemoteWorkspaces', (c) => loadRemoteWorkspaces(c), '/api/workspaces'],
@@ -141,7 +142,9 @@ describe('T2 baseUrl 우선순위', () => {
     ['both → session', both, 'https://from-session'],
     ['settings만 → settings', onlySettings, 'https://from-settings'],
     ['둘 다 없음 → ""', neither, ''],
-    ['정규화 안 함', { session: { mode: 'intranet', apiBaseUrl: ' https://s/ ' }, settings: {} }, ' https://s/ '],
+    // P2-12(flagged): resolveApiBaseUrl로 바꾸며 앞뒤 공백·끝 "/"를 정규화한다(요청 URL은 httpClient.buildUrl이 이미
+    // 정규화해 같다 — 달라지는 것은 화면·오류 문구에 보이는 URL 끝 "/").
+    ['정규화(P2-12)', { session: { mode: 'intranet', apiBaseUrl: ' https://s/ ' }, settings: {} }, 'https://s'],
   ];
   for (const [name, run, path] of IMPLS) {
     it.each(CONTEXTS)(`${name}: %s`, async (_label, context, expected) => {
@@ -170,7 +173,7 @@ describe('T2 baseUrl 우선순위', () => {
     expect(baseUrlOf('/api/ai/analyze')).toBe('https://from-settings');
   });
 
-  describe('analysisClient 웹(비인트라넷) 경로 — 현재는 settings → session 역순(P2-12에서 통일, flagged)', () => {
+  describe('analysisClient 웹(비인트라넷) 경로 — P2-12(flagged)부터 다른 곳과 같은 session → settings 순서', () => {
     const run = async (session, settings) => {
       const fetchMock = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 }));
       vi.stubGlobal('fetch', fetchMock);
@@ -178,18 +181,20 @@ describe('T2 baseUrl 우선순위', () => {
       return fetchMock.mock.calls[0][0];
     };
 
-    it('둘 다 있으면 settings가 이긴다(역순)', async () => {
-      expect(await run({ mode: 'local', apiBaseUrl: 'https://s' }, { apiBaseUrl: 'https://t/' })).toBe('https://t/api/analyze');
+    it('둘 다 있으면 session이 이긴다(예전에는 settings — 역순 통일)', async () => {
+      expect(await run({ mode: 'local', apiBaseUrl: 'https://s' }, { apiBaseUrl: 'https://t/' })).toBe('https://s/api/analyze');
     });
 
-    it('settings에 없으면 session, 둘 다 없으면 상대 경로', async () => {
+    it('session에 없으면 settings, 둘 다 없으면 상대 경로', async () => {
+      expect(await run({ mode: 'local' }, { apiBaseUrl: 'https://t/' })).toBe('https://t/api/analyze');
       expect(await run({ mode: 'local', apiBaseUrl: 'https://s/' }, {})).toBe('https://s/api/analyze');
       expect(await run({ mode: 'local' }, {})).toBe('/api/analyze');
     });
 
-    it('settings 인자가 없으면 localStorage 설정을 읽는다', async () => {
+    it('settings 인자가 없으면 localStorage 설정을 읽는다(session에 URL이 없을 때 쓰임)', async () => {
       localStorage.setItem('wrEvalUnifiedSettings', JSON.stringify({ apiBaseUrl: 'https://stored' }));
-      expect(await run({ mode: 'local', apiBaseUrl: 'https://s' }, undefined)).toBe('https://stored/api/analyze');
+      expect(await run({ mode: 'local' }, undefined)).toBe('https://stored/api/analyze');
+      expect(await run({ mode: 'local', apiBaseUrl: 'https://s' }, undefined)).toBe('https://s/api/analyze');
     });
 
     it('정상 상태 동치: useAppSettings가 settings URL을 session에 동기화하면 순서와 무관하게 같다', async () => {

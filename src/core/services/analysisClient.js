@@ -2,7 +2,7 @@
 import { buildSessionHeaders } from '../auth/session';
 import { requestJson } from './httpClient';
 
-import { hasIntranetSession } from '../../platform/dataMode';
+import { hasIntranetSession, resolveApiBaseUrl } from '../../platform/dataMode';
 const SETTINGS_KEY = 'wrEvalUnifiedSettings';
 
 function loadAISettings() {
@@ -17,9 +17,9 @@ function loadAISettings() {
 
 function buildAnalyzeUrl(settings, session) {
   const resolvedSettings = settings || loadAISettings();
-  const baseUrl = String(resolvedSettings?.apiBaseUrl || session?.apiBaseUrl || '')
-    .trim()
-    .replace(/\/$/, '');
+  // session → settings 순서(P2-12에서 다른 곳과 통일 — flagged, 웹 로컬 정상 상태에서는 useAppSettings가 settings URL을
+  // session에 동기화해 두 값이 같다).
+  const baseUrl = resolveApiBaseUrl({ session, settings: resolvedSettings });
   return baseUrl ? `${baseUrl}/api/analyze` : '/api/analyze';
 }
 
@@ -63,7 +63,7 @@ export async function analyzeAIRequest({ input, inputError, fullReport, model, s
   if (hasIntranetSession(session)) {
     try {
       const data = await requestJson('/api/ai/analyze', {
-        baseUrl: session.apiBaseUrl || settings?.apiBaseUrl || '',
+        baseUrl: resolveApiBaseUrl({ session, settings }),
         method: 'POST',
         session,
         body: fullReport ? { input, fullReport } : { input },

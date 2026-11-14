@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { useEffect, useState } from 'react';
 import { requestJson } from '../services/httpClient';
+import { resolveApiBaseUrl } from '../../platform/dataMode';
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -22,7 +23,7 @@ export function useOpsStatus({ session, enabled = false }) {
   useEffect(() => {
     if (!enabled) return;
 
-    const baseUrl = session?.apiBaseUrl || '';
+    const baseUrl = resolveApiBaseUrl({ session });
     let cancelled = false;
 
     const poll = async () => {

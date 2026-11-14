@@ -1,4 +1,4 @@
-import { hasIntranetSession } from '../../platform/dataMode';
+import { hasIntranetSession, resolveApiBaseUrl } from '../../platform/dataMode';
 const ROLE_LABELS = { admin: '관리자', doctor: '의사', nurse: '간호사', staff: '직원' };
 
 const SYNC_STATUS_LABELS = {
@@ -30,7 +30,7 @@ export function AccountProfileModal({
   const user        = session?.user ?? {};
   const name        = user.name || user.displayName || '(없음)';
   const role        = ROLE_LABELS[user.role] || user.role || '(없음)';
-  const serverUrl   = session?.apiBaseUrl || settings?.apiBaseUrl || '(없음)';
+  const serverUrl   = resolveApiBaseUrl({ session, settings }) || '(없음)';
   const isIntranet  = hasIntranetSession(session);
   const authStatus  = isIntranet ? '인트라넷 로그인' : '로컬 모드';
   const mustChange  = user.mustChangePassword ? '비밀번호 변경 필요' : null;

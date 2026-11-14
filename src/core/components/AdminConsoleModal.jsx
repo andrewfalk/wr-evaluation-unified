@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { useEffect, useRef, useState } from 'react';
 import { requestJson } from '../services/httpClient';
+import { resolveApiBaseUrl } from '../../platform/dataMode';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -39,7 +40,7 @@ function AuditTab({ session }) {
   const [targetFilter, setTargetFilter]     = useState('');
   const [loading, setLoading]               = useState(false);
   const [error, setError]                   = useState(null);
-  const baseUrl = session?.apiBaseUrl || '';
+  const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async (p = 1) => {
     setLoading(true);
@@ -133,7 +134,7 @@ function DevicesTab({ session }) {
   const [loading, setLoading] = useState(false);
   const [actioning, setActioning] = useState(null);
   const [error, setError] = useState(null);
-  const baseUrl = session?.apiBaseUrl || '';
+  const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async () => {
     setLoading(true);
@@ -227,7 +228,7 @@ function UsersTab({ session }) {
   const [resetTarget, setResetTarget]       = useState(null);
   const [resetPw, setResetPw]               = useState('');
   const [resetError, setResetError]         = useState(null);
-  const baseUrl = session?.apiBaseUrl || '';
+  const baseUrl = resolveApiBaseUrl({ session });
   const selfId  = session?.user?.id;
 
   const load = async () => {
@@ -410,7 +411,7 @@ function SignupRequestsTab({ session }) {
   const [error, setError]               = useState(null);
   const [statusFilter, setStatusFilter] = useState('pending');
   const [approvalResult, setApprovalResult] = useState(null);
-  const baseUrl = session?.apiBaseUrl || '';
+  const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async () => {
     setLoading(true);
@@ -552,7 +553,7 @@ function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
   const [actioning, setActioning] = useState(null);
   const [search, setSearch]       = useState('');
   const controllerRef             = useRef(null);
-  const baseUrl = session?.apiBaseUrl || '';
+  const baseUrl = resolveApiBaseUrl({ session });
 
   // Load doctors once on mount.
   useEffect(() => {
@@ -709,7 +710,7 @@ function OpsTab({ session }) {
   const [loading, setLoading] = useState(false);
   const [error, setError]   = useState(null);
   const [acting, setActing] = useState(null); // runId currently being ack/resolved
-  const baseUrl = session?.apiBaseUrl || '';
+  const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async () => {
     setLoading(true);
@@ -848,7 +849,7 @@ function InferenceDeviceTab({ session }) {
   const [saving, setSaving]   = useState(false);
   const [error, setError]     = useState(null);
   const [savedMsg, setSavedMsg] = useState(null);
-  const baseUrl = session?.apiBaseUrl || '';
+  const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async () => {
     setLoading(true);
@@ -950,7 +951,7 @@ function PresetsTab({ session }) {
   const [visFilter, setVisFilter] = useState('all');
   const [pending, setPending] = useState(null);   // 'organization' | 'private' awaiting confirm
   const [acting, setActing]   = useState(false);
-  const baseUrl = session?.apiBaseUrl || '';
+  const baseUrl = resolveApiBaseUrl({ session });
   // Superadmin (no org bound) sees presets across all orgs → show org column.
   const isSuperadmin = !session?.user?.organizationId;
 
@@ -1121,7 +1122,7 @@ function CapabilitiesTab({ session }) {
   const [formError, setFormError]     = useState(null);
   const [creating, setCreating]       = useState(false);
   const [actioning, setActioning]     = useState(null);
-  const baseUrl = session?.apiBaseUrl || '';
+  const baseUrl = resolveApiBaseUrl({ session });
 
   const load = async () => {
     setLoading(true);

@@ -10,7 +10,7 @@ import {
 import { broadcastLogout } from './authChannel';
 import { requestJson } from '../services/httpClient';
 
-import { hasIntranetSession } from '../../platform/dataMode';
+import { hasIntranetSession, resolveApiBaseUrl } from '../../platform/dataMode';
 const AuthContext = createContext(null);
 
 const REVOKE_TIMEOUT_MS = 2500;
@@ -38,7 +38,7 @@ export function AuthProvider({ children }) {
     // Identity key: uniquely identifies the session at request time so the response
     // handler can detect if login/logout changed the session while the request was in flight.
     const snapIdentity = `${snap.mode}|${snap.apiBaseUrl || ''}|${snap.user?.id || ''}|${snap.refreshedAt || ''}`;
-    const baseUrl = snap.apiBaseUrl || '';
+    const baseUrl = resolveApiBaseUrl({ session: snap });
     fetch(`${baseUrl}/api/auth/csrf`, { method: 'POST', credentials: 'include' })
       .then(async r => {
         // Skip if the session changed while the request was in flight (e.g. login/logout).
@@ -178,7 +178,7 @@ export function AuthProvider({ children }) {
     try {
       await Promise.race([
         requestJson('/api/auth/logout', {
-          baseUrl: snap.apiBaseUrl || '',
+          baseUrl: resolveApiBaseUrl({ session: snap }),
           method: 'POST',
           session: snap,
           _retry: true,

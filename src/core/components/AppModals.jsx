@@ -10,6 +10,7 @@ import { ConflictResolveModal } from './ConflictResolveModal';
 import { PresetManageModal } from './PresetManageModal';
 import { PresetBrowseModal } from './PresetBrowseModal';
 import { isPatientIdentityPushConflict } from '../services/patientRecords';
+import { resolveApiBaseUrl } from '../../platform/dataMode';
 
 // 공통 모달 렌더링 (App.jsx의 renderModals를 분리)
 export function AppModals({
@@ -60,7 +61,7 @@ export function AppModals({
       )}
       {showChangePassword && (
         <ChangePasswordModal
-          apiBaseUrl={session?.apiBaseUrl || settings?.apiBaseUrl || ''}
+          apiBaseUrl={resolveApiBaseUrl({ session, settings })}
           onClose={() => setShowChangePassword(false)}
         />
       )}
