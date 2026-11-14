@@ -39,6 +39,7 @@ import { renderBootGate, withLocalEscape as withLocalEscapeFor } from './app/Boo
 import { selectScreen, useScreenRouter } from './app/useScreenRouter';
 import { useDoctorRoster, usePatientScope } from './app/usePatientScope';
 import { useUnsavedDraftGuard } from './app/useUnsavedDraftGuard';
+import { useModalState } from './app/useModalState';
 import { hasIntranetSession, isIntranetContext } from './platform/dataMode';
 import { getLifecycleBridge } from './platform/bridge';
 
@@ -74,20 +75,23 @@ function App() {
   } = patientScopeState;
   const [patientSyncPaused, setPatientSyncPaused] = useState(false);
   const [activeId, setActiveId] = useState(null);
-  const [showSaveModal, setShowSaveModal] = useState(false);
-  const [showLoadModal, setShowLoadModal] = useState(false);
+  // 모달 열림 상태 — 키별 맵 하나(불리언 8 + 프리셋 3, 여러 모달이 동시에 열릴 수 있음): src/app/useModalState.ts(P2-30).
+  // 아래 이름들은 예전 개별 useState와 같은 값·setter다(AppModals·하위 훅은 아직 props로 받는다).
+  const { modals, setterFor } = useModalState();
+  const showSaveModal = modals.save; const setShowSaveModal = setterFor('save');
+  const showLoadModal = modals.load; const setShowLoadModal = setterFor('load');
   const [errors, setErrors] = useState({});
   const [showSidebar, setShowSidebar] = useState(false);
   const [patientFilters, setPatientFilters] = useState(DEFAULT_PATIENT_FILTERS);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const { settings, handleSaveSettings, switchToLocalMode } = useAppSettings({ session, setSession, resetToLocalSession });
   useAuthSync({ session, setSession, resetToLocalSession, getAuthEpoch });
-  const [showSettings, setShowSettings] = useState(false);
-  const [showAdminConsole, setShowAdminConsole] = useState(false);
-  const [showAccountProfile, setShowAccountProfile] = useState(false);
-  const [showChangePassword, setShowChangePassword] = useState(false);
-  const [showMigrationReport, setShowMigrationReport] = useState(false);
-  const [showBatchImport, setShowBatchImport] = useState(false);
+  const showSettings = modals.settings; const setShowSettings = setterFor('settings');
+  const showAdminConsole = modals.adminConsole; const setShowAdminConsole = setterFor('adminConsole');
+  const showAccountProfile = modals.accountProfile; const setShowAccountProfile = setterFor('accountProfile');
+  const showChangePassword = modals.changePassword; const setShowChangePassword = setterFor('changePassword');
+  const showMigrationReport = modals.migrationReport; const setShowMigrationReport = setterFor('migrationReport');
+  const showBatchImport = modals.batchImport; const setShowBatchImport = setterFor('batchImport');
   // 화면 상태(activeScreen)·showHome 호환 shim·통계 열기/닫기 — src/app/useScreenRouter.ts(P2-26). setShowHome은
   // 훅·컴포넌트 21곳이 그대로 쓰며, true/false 모두 통계 화면을 닫는다(PR2 §1의 단일 진실원 그대로).
   const { activeScreen, setShowHome, openStatistics, closeStatistics } = useScreenRouter();
@@ -143,7 +147,14 @@ function App() {
     setPresetModalJobId, setPresetEditingPreset, setPresetBrowseJobId,
     reloadPresets,
     handlePresetSelect, handleSaveCustomPreset, closePresetManageModal, handleDeleteCustomPreset,
-  } = usePresetManagement({ activeId, activeModules, session, setPatients, canMutateActivePatient });
+  } = usePresetManagement({
+    activeId, activeModules, session, setPatients, canMutateActivePatient,
+    modalSlots: {
+      presetModalJobId: modals.presetManageJobId, setPresetModalJobId: setterFor('presetManageJobId'),
+      presetEditingPreset: modals.presetEditingPreset, setPresetEditingPreset: setterFor('presetEditingPreset'),
+      presetBrowseJobId: modals.presetBrowseJobId, setPresetBrowseJobId: setterFor('presetBrowseJobId'),
+    },
+  });
 
   const {
     status: migrationStatus,

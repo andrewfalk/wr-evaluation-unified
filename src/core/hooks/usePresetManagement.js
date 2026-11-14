@@ -8,13 +8,21 @@ import { FALLBACK_PRESETS } from '../../modules/knee/utils/data';
 // App.jsx가 canEditPatient(담당의/admin) AND 락 보유 여부(다른 사용자가 편집 중이면 false)를
 // 합성해 넘긴다. 프리셋 모달은 StepContent의 read-only 이벤트 차단 바깥에서 열리므로, 담당의
 // 권한만으로는 "모달이 열려있는 동안 락을 상실"하는 레이스를 못 막는다 — 이 값을 그대로 신뢰한다.
-export function usePresetManagement({ activeId, activeModules, session, setPatients, canMutateActivePatient = true }) {
+// modalSlots(선택): 프리셋 모달 3칸을 호출부(App의 useModalState — P2-30, 모달 키별 맵)가 들고 있으면 그것을 쓴다.
+// 없으면 예전처럼 이 훅이 직접 들고 있다(단독 테스트·다른 호출부 호환). 훅 규칙상 내부 useState는 항상 부른다.
+export function usePresetManagement({ activeId, activeModules, session, setPatients, canMutateActivePatient = true, modalSlots = null }) {
   const [presets, setPresets] = useState([]);
   const [presetMeta, setPresetMeta] = useState(null);
   const [presetError, setPresetError] = useState(null);
-  const [presetModalJobId, setPresetModalJobId] = useState(null);
-  const [presetEditingPreset, setPresetEditingPreset] = useState(null);
-  const [presetBrowseJobId, setPresetBrowseJobId] = useState(null);
+  const [ownPresetModalJobId, setOwnPresetModalJobId] = useState(null);
+  const [ownPresetEditingPreset, setOwnPresetEditingPreset] = useState(null);
+  const [ownPresetBrowseJobId, setOwnPresetBrowseJobId] = useState(null);
+  const presetModalJobId = modalSlots ? modalSlots.presetModalJobId : ownPresetModalJobId;
+  const setPresetModalJobId = modalSlots ? modalSlots.setPresetModalJobId : setOwnPresetModalJobId;
+  const presetEditingPreset = modalSlots ? modalSlots.presetEditingPreset : ownPresetEditingPreset;
+  const setPresetEditingPreset = modalSlots ? modalSlots.setPresetEditingPreset : setOwnPresetEditingPreset;
+  const presetBrowseJobId = modalSlots ? modalSlots.presetBrowseJobId : ownPresetBrowseJobId;
+  const setPresetBrowseJobId = modalSlots ? modalSlots.setPresetBrowseJobId : setOwnPresetBrowseJobId;
 
   const reloadPresets = useCallback(async () => {
     try {
