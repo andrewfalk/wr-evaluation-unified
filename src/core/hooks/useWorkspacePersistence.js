@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { showAlert, showConfirm } from '../utils/platform';
 import { getLegacyImportBridge } from '../../platform/bridge';
+import { STORAGE_KEYS } from '../storage/keys';
 import {
   clearAutoSavedWorkspace,
   deleteWorkspaceSnapshot,
@@ -262,7 +263,7 @@ export function useWorkspacePersistence({
     } else {
       // 웹: 같은 도메인이면 localStorage 직접 접근
       try {
-        const legacy = localStorage.getItem('wrEvaluationSavedItems');
+        const legacy = localStorage.getItem(STORAGE_KEYS.legacySavedItems);
         if (legacy) {
           const items = JSON.parse(legacy);
           setLegacyItems(items.map(item => ({

@@ -5,8 +5,9 @@ import { requestJson } from './httpClient';
 import { hasIntranetSession } from '../../platform/dataMode';
 import { getFsBridge } from '../../platform/bridge';
 import { requestEnvelope } from '../api/client';
+import { STORAGE_KEYS } from '../storage/keys';
 
-const CUSTOM_PRESETS_KEY = 'wrEvalUnifiedCustomPresets';
+const CUSTOM_PRESETS_KEY = STORAGE_KEYS.customPresets;
 
 export const DEFAULT_CATEGORY = '미분류';
 

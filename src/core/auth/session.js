@@ -1,6 +1,7 @@
 import { hasBridge } from '../../platform/bridge';
+import { STORAGE_KEYS } from '../storage/keys';
 
-const AUTH_SESSION_KEY = 'wrEvalUnifiedAuthSession';
+const AUTH_SESSION_KEY = STORAGE_KEYS.authSession;
 const AUTH_SESSION_VERSION = 1;
 
 function getRuntimeSource() {

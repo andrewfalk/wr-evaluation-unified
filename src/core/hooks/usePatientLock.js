@@ -9,7 +9,8 @@ import {
 import { setLockToken, getLockToken, clearLockToken } from '../services/lockTokenStore';
 
 import { hasIntranetSession } from '../../platform/dataMode';
-const CLIENT_INSTANCE_STORAGE_KEY = 'wrEvalUnified.lockClientInstanceId';
+import { STORAGE_KEYS } from '../storage/keys';
+const CLIENT_INSTANCE_STORAGE_KEY = STORAGE_KEYS.lockClientInstanceId;
 const DEFAULT_TTL_MS = 100_000;
 const RENEW_DIVISOR = 4; // heartbeat = ttlMs / 4 (서버 TTL의 여유 4배와 대응)
 const MIN_RENEW_DELAY_MS = 1000;

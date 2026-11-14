@@ -5,9 +5,18 @@
     "windowElectronFiles": 0,
     "coreToModulesImports": 34,
     "rawFetch": 0,
-    "webStorageFiles": 7,
+    "webStorageFiles": 6,
     "cssRawHex": 230,
     "inlineStyleHex": 10,
     "intranetModeComparisons": 0
-  }
+  },
+  "webStorageAllowlist": [
+    "src/core/auth/authChannel.js",
+    "src/core/auth/session.js",
+    "src/core/hooks/usePatientLock.js",
+    "src/core/hooks/useWorkspacePersistence.js",
+    "src/core/services/presetRepository.js",
+    "src/core/utils/storage.js"
+  ],
+  "//webStorageAllowlist": "localStorage·sessionStorage를 직접 만지는 제품 파일 허용 목록(P2-18). src/core/storage/** 밖에서는 이 파일들만 — 새 파일은 src/core/storage 레지스트리·settingsStore를 거친다. 목록도 줄기만 한다."
 }

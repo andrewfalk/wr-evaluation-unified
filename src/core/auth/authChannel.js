@@ -9,10 +9,13 @@
 //   SIGNAL_KEY stores only { status, completedAt } — no token.
 //   Tokens travel exclusively via BroadcastChannel payload (in-memory delivery).
 
+import { AUTH_PROTOCOL } from '../storage/keys';
+
 const TAB_ID = Math.random().toString(36).slice(2, 10);
-const LOCK_NAME = 'wr-auth-refresh';       // navigator.locks key
-const LOCK_KEY = 'wr-auth-refresh-lock';   // localStorage fallback key
-const SIGNAL_KEY = 'wr-auth-refresh-sig';  // { status:'success'|'failure', completedAt } — no token
+// 이름은 탭 간 프로토콜의 일부 — 레지스트리(src/core/storage/keys.ts)에 값 그대로 있고 바꾸지 않는다.
+const LOCK_NAME = AUTH_PROTOCOL.refreshLockName;   // navigator.locks key
+const LOCK_KEY = AUTH_PROTOCOL.refreshLockKey;     // localStorage fallback key
+const SIGNAL_KEY = AUTH_PROTOCOL.refreshSignalKey; // { status:'success'|'failure', completedAt } — no token
 const LOCK_TTL_MS = 10_000;
 const WAIT_TIMEOUT_MS = 12_000;
 const POLL_INTERVAL_MS = 300;
@@ -20,7 +23,7 @@ const SIGNAL_TTL_MS = 5_000;
 
 const _ch = (() => {
   if (typeof BroadcastChannel === 'undefined') return null;
-  try { return new BroadcastChannel('wr-auth'); }
+  try { return new BroadcastChannel(AUTH_PROTOCOL.channelName); }
   catch { return null; }
 })();
 
