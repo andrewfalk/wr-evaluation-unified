@@ -31,6 +31,7 @@ export function makeBridgeStub(target, { buildTarget, overrides = {} } = {}) {
     if (kind === 'subscribe') {
       bridge[key] = (listener) => {
         calls.push({ key, args: [] });
+        if (typeof impl === 'function') return impl(listener); // override가 구독 자체를 대신한다
         if (!listeners.has(key)) listeners.set(key, new Set());
         listeners.get(key).add(listener);
         return () => listeners.get(key)?.delete(listener);
