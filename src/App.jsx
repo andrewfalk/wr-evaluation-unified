@@ -38,6 +38,7 @@ import { clearAllLockTokens } from './core/services/lockTokenStore';
 import { StatisticsWorkbench } from './core/components/statistics/StatisticsWorkbench';
 import { WorkspaceScreen } from './app/screens/WorkspaceScreen';
 import { renderBootGate, withLocalEscape as withLocalEscapeFor } from './app/BootGate';
+import { selectScreen, useScreenRouter } from './app/useScreenRouter';
 import { hasIntranetSession, isIntranetContext } from './platform/dataMode';
 import { getLifecycleBridge } from './platform/bridge';
 import { detectRuntime } from './platform/runtime';
@@ -84,16 +85,9 @@ function App() {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showMigrationReport, setShowMigrationReport] = useState(false);
   const [showBatchImport, setShowBatchImport] = useState(false);
-  // PR2 §1 — 화면 상태 단일 진실원. showHome/setShowHome은 21곳 호출부(App 내부 + 4개
-  // 훅/컴포넌트에 props로 전달됨)를 그대로 유지하기 위한 호환 shim이다. 이 shim 덕분에
-  // 기존 호출부가 그대로 동작하면서도(예: Electron "새로 만들기" → setShowHome(true)) 통계
-  // 화면(activeScreen==='statistics')이 자동으로 닫힌다 — 별도 boolean이었다면 이 전환이
-  // 보장되지 않았다(계획서 pr2-dreamy-frog.md §1).
-  const [activeScreen, setActiveScreen] = useState('workspace'); // 'workspace' | 'dashboard' | 'statistics'
-  const showHome = activeScreen === 'dashboard';
-  const setShowHome = useCallback((value) => {
-    setActiveScreen(value ? 'dashboard' : 'workspace');
-  }, []);
+  // 화면 상태(activeScreen)·showHome 호환 shim·통계 열기/닫기 — src/app/useScreenRouter.ts(P2-26). setShowHome은
+  // 훅·컴포넌트 21곳이 그대로 쓰며, true/false 모두 통계 화면을 닫는다(PR2 §1의 단일 진실원 그대로).
+  const { activeScreen, setShowHome, openStatistics, closeStatistics } = useScreenRouter();
   const [conflictPatientId, setConflictPatientId] = useState(null);
 
   // 종합소견 직접 편집 dirty 가드 — 불리언이 아니라 환자 ID를 담는다. 환자를 전환해도
@@ -530,21 +524,14 @@ function App() {
     setShowHome(true);
   };
 
-  // PR2 §1 — 통계 워크벤치 진입/이탈. 헤더 버튼·랜딩 화면 버튼·Electron 메뉴가 전부 이 하나의
-  // 함수를 호출한다(경로별로 다른 가드를 만들지 않는다). returnScreenRef는 'workspace' 아니면
-  // 'dashboard'만 담는다 — 아래 얼리리턴이 이미 통계 화면인 경우를 걸러내므로, 이 함수가 실행될
-  // 때의 activeScreen은 항상 그 둘 중 하나다.
-  const returnScreenRef = useRef('workspace');
-  const handleOpenStatistics = useCallback(() => {
-    if (activeScreen === 'statistics') return; // 이미 통계 화면 — 메뉴 재클릭이 복귀값을 오염시키지 않게
-    if (dirtyAssessmentPatientId) { blockedByUnsavedDraftAlert(); return; }
-    if (!statsAvailable) { showAlert('통계분석 워크벤치를 사용할 수 없습니다.'); return; }
-    returnScreenRef.current = activeScreen;
-    setActiveScreen('statistics');
-  }, [activeScreen, dirtyAssessmentPatientId, statsAvailable]);
-  const handleCloseStatistics = useCallback(() => {
-    setActiveScreen(returnScreenRef.current);
-  }, []);
+  // PR2 §1 — 통계 워크벤치 진입/이탈(헤더·랜딩 버튼·Electron 메뉴가 모두 이것). 가드 순서와 복귀 화면은 useScreenRouter.
+  const handleOpenStatistics = useCallback(() => openStatistics({
+    draftDirty: !!dirtyAssessmentPatientId,
+    onDraftBlocked: blockedByUnsavedDraftAlert,
+    statsAvailable,
+    onUnavailable: () => { showAlert('통계분석 워크벤치를 사용할 수 없습니다.'); },
+  }), [openStatistics, dirtyAssessmentPatientId, blockedByUnsavedDraftAlert, statsAvailable]);
+  const handleCloseStatistics = closeStatistics;
   handleOpenStatisticsRef.current = handleOpenStatistics;
 
   // 렌더러가 아는 가용성을 Electron main에 전파해 메뉴를 켜고 끈다(main은 서버 설정을 모름) —
@@ -590,13 +577,22 @@ function App() {
   });
   if (bootScreen) return bootScreen;
 
+  // 부팅 게이트 뒤의 화면 — 분기 순서(통계 → 서버 환자 로딩 → 랜딩/대시보드 → 위자드 → 작업 화면)는
+  // src/app/useScreenRouter.ts selectScreen(P2-26).
+  const screen = selectScreen({
+    activeScreen,
+    intranetSession: hasIntranetSession(session),
+    patientCount: patients.length,
+    activeId,
+    hasIntake: !!intakeShared,
+    syncStatus: syncState.status,
+    serverPatientCount: syncState.serverPatientCount,
+  });
+
   // ===========================================
-  // 통계분석 워크벤치 (PR2 §1) — 로그인/비밀번호변경 가드 다음, 환자 동기화 로딩·자동 랜딩
-  // 판정보다 먼저 온다. 이 화면은 patients/activeId/patientScope를 전혀 안 쓰므로 그 판정들이
-  // 이 화면을 가리면 안 된다(계획서 §1 "환자 없음에 따른 자동 랜딩과 환자 동기화 로딩이
-  // 통계 화면을 덮지 않도록 분기 순서 조정").
+  // 통계분석 워크벤치 (PR2 §1) — 환자 동기화 로딩·자동 랜딩보다 먼저(이 화면은 환자 목록을 쓰지 않는다)
   // ===========================================
-  if (activeScreen === 'statistics') {
+  if (screen === 'statistics') {
     return (
       <StatisticsWorkbench
         session={session}
@@ -611,19 +607,10 @@ function App() {
   }
 
   // ===========================================
-  // 인트라넷 초기 부팅: pull 중이거나 서버에 환자가 존재하면 랜딩 억제
+  // 인트라넷 초기 부팅: 서버 환자 목록 pull 중 → 로딩 화면(pull 뒤 mine=0이지만 서버에 환자가 있으면 자동 랜딩 억제 —
+  // 환자 목록 껍데기에서 scope 전환·재마이그레이션 등 다음 행동을 하게 함)
   // ===========================================
-  // pull 중: 아직 응답 전 → 로딩 화면
-  // pull 완료 후 mine=0이지만 serverPatientCount>0: 서버에 환자 있음(다른 의사 담당 등)
-  //   → 환자 목록 껍데기를 보여줘서 scope 전환, 재마이그레이션 등 다음 행동 가능하게 함
-  const isBootingFromServer =
-    hasIntranetSession(session)
-    && patients.length === 0
-    && !activeId
-    && !intakeShared
-    && !showHome;
-
-  if (isBootingFromServer && syncState.status === 'syncing') {
+  if (screen === 'serverPatientsLoading') {
     return withLocalEscape(
       <div className="app-boot-overlay">
         <div className="app-boot-box">
@@ -639,12 +626,7 @@ function App() {
   // 자동 진입: 환자가 없을 때만 랜딩으로 보낸다.
   //   인트라넷에서 mine=0이지만 서버에 환자가 있으면 자동 랜딩을 억제 (목록 화면에서 scope 전환 등으로 해결 가능).
   // 사용자 진입: 헤더의 대시보드/홈 버튼(showHome)은 서버 상태와 무관하게 항상 허용.
-  const hasAnyServerPatient =
-    hasIntranetSession(session) && (syncState.serverPatientCount ?? 0) > 0;
-  const shouldAutoShowLanding =
-    patients.length === 0 && !activeId && !intakeShared;
-
-  if (showHome || (!hasAnyServerPatient && shouldAutoShowLanding)) {
+  if (screen === 'landing') {
     return (
       <div className="app-layout landing-layout">
         <LandingScreen
@@ -687,7 +669,7 @@ function App() {
   // ===========================================
   // 신규 환자 위자드 (환자 생성 전)
   // ===========================================
-  if (intakeShared) {
+  if (screen === 'intake') {
     return (
       <IntakeWizard
         shared={intakeShared}
