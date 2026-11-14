@@ -34,8 +34,14 @@ function resolve<T>(arg: ValueOrUpdater<T>, prev: T): T {
   return typeof arg === 'function' ? (arg as (p: T) => T)(prev) : arg;
 }
 
-export function applyActiveId(state: PatientsState, arg: ValueOrUpdater<string | null>): PatientsState {
-  const next = resolve(arg, state.activeId);
+/**
+ * activeId updater는 두 번째 인자로 **같은 상태의 최신 환자 목록**을 받는다 — 앞서 예약된 목록 갱신이 반영된 뒤의 목록으로
+ * 활성 환자를 판정해야 하는 뒤처리용(usePatientCrud 삭제 뒤 폴백, P2-39a). 한 인자 updater는 옮기기 전 useState와 같다.
+ */
+export type ActiveIdUpdater = (prev: string | null, latestPatients: PatientRecord[]) => string | null;
+
+export function applyActiveId(state: PatientsState, arg: string | null | ActiveIdUpdater): PatientsState {
+  const next = typeof arg === 'function' ? arg(state.activeId, state.patients) : arg;
   return Object.is(next, state.activeId) ? state : { ...state, activeId: next };
 }
 
