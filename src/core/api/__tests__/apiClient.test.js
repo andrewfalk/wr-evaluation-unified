@@ -43,6 +43,9 @@ describe('ApiError — 예전 Error 객체와 같은 모양', () => {
     expect(errorCodeOf({ error: { code: 'B' } })).toBe('B');
     expect(errorCodeOf({ code: 'A', error: { code: 'B' } })).toBe('A');
     expect(errorCodeOf(null)).toBeUndefined();
+    // 빈 최상위 code는 중첩 code로 폴백(예전 `||`와 같음 — #296 Codex)
+    expect(errorCodeOf({ code: '', error: { code: 'CSRF_INVALID' } })).toBe('CSRF_INVALID');
+    expect(errorCodeOf({ code: 0, error: { code: 'B' } })).toBe('B');
     expect(errorMessageOf({ error: { message: 'x' } }, 'f')).toBe('x');
     expect(errorMessageOf({ error: 'y' }, 'f')).toBe('y');
     expect(errorMessageOf({ message: 'z' }, 'f')).toBe('f');
@@ -59,6 +62,15 @@ describe('createApiClient 파이프라인', () => {
     await expect(client.request('/a', { session: { mode: 'intranet', accessToken: 'old' } })).rejects.toMatchObject({ status: 401, message: 'still' });
     expect(onRefresh).toHaveBeenCalledTimes(1);
     expect(fetchImpl.mock.calls[1][1].headers.Authorization).toBe('Bearer new');
+  });
+
+  it('403 본문 {code:"", error:{code:"CSRF_INVALID"}}도 CSRF 갱신 뒤 재시도한다', async () => {
+    const { client, fetchImpl } = makeClient([res(403, { code: '', error: { code: 'CSRF_INVALID' } }), res(200, { ok: 1 })]);
+    const onRefresh = vi.fn(async () => ({ mode: 'intranet' }));
+    client.configure({ onRefresh });
+    await expect(client.request('/a', { method: 'POST', session: { mode: 'intranet' } })).resolves.toEqual({ ok: 1 });
+    expect(onRefresh).toHaveBeenCalledWith({ baseUrl: '', forceCsrf: true });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it('처리기를 configure하기 전에는 refresh하지 않는다', async () => {

@@ -33,7 +33,9 @@ type ErrorBody = { code?: unknown; error?: unknown; message?: unknown } | null |
 export function errorCodeOf(data: unknown): string | undefined {
   const body = data as ErrorBody;
   const nested = (body?.error && typeof body.error === 'object') ? (body.error as { code?: unknown }).code : undefined;
-  const code = body?.code ?? nested;
+  // `||`(truthy) 폴백 — 예전 `data?.code || data?.error?.code`와 같게: 최상위 code가 빈 문자열이어도 중첩 code를 본다
+  // (#296 Codex 1회차).
+  const code = body?.code || nested;
   return typeof code === 'string' ? code : undefined;
 }
 
