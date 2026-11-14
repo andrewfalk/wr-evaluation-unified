@@ -201,6 +201,41 @@ describe('P2-39a — 삭제 결과를 최신 목록에 적용', () => {
     expect(result.current.activeId).toBe('c');
   });
 
+  it('⑧ 삭제 커밋에서 앞선 layout effect가 환자를 추가하면 목록이 비지 않으므로 초안을 지우지 않는다(#322 Codex 2회차)', async () => {
+    const pending = deferred();
+    deletePatientOnServer.mockReturnValue(pending.promise);
+    const armed = { current: false };
+    const { result } = renderHook(() => {
+      const store = usePatientsContainer([patient('a')], { initialActiveId: 'a' });
+      const [intakeShared, setIntakeShared] = useState({ draft: true });
+      // usePatientCrud보다 앞에 선언 — 같은 커밋에서 CRUD 뒤처리보다 먼저 돈다.
+      useLayoutEffect(() => {
+        if (armed.current && store.patients.length === 0) {
+          armed.current = false;
+          store.setPatients(patientTx.appended({ patients: [patient('n', { sync: { syncStatus: 'local-only' } })] }));
+          store.setActiveId('n');
+        }
+      });
+      const crud = usePatientCrud({
+        activeId: store.activeId, activeModuleId: null, session: SESSION, settings: {},
+        patients: store.patients, setPatients: store.setPatients,
+        selectedIds: store.selectedIds, setSelectedIds: store.setSelectedIds,
+        setErrors: () => {}, setActiveId: store.setActiveId, setCurrentStepIndex: () => {},
+        setIntakeShared, setShowHome: () => {}, handleStartIntake: () => {}, canMutateActivePatient: true,
+      });
+      return { ...store, intakeShared, crud };
+    }, { wrapper: StrictMode });
+
+    let removing;
+    await act(async () => { removing = result.current.crud.removePatient('a'); await flush(); });
+    armed.current = true;
+    await act(async () => { pending.resolve(); await removing; await flush(); });
+
+    expect(ids(result)).toEqual(['n']);
+    expect(result.current.activeId).toBe('n');
+    expect(result.current.intakeShared).toEqual({ draft: true });
+  });
+
   it('⑦ 단일 삭제(초안 비움 요청)와 일괄 삭제가 같은 배치에서 끝나 목록이 비면 초안을 비운다(#322 Codex 권고)', async () => {
     const single = deferred();
     const bulk = deferred();

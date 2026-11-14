@@ -149,20 +149,30 @@ export function usePatientCrud({
   // 뒤처리는 layout effect + 함수형 갱신이다(#322 Codex): passive effect는 커밋과 실행 사이에 다른 갱신(목록 교체·활성 지정)이
   // 예약될 수 있어 캡처한 값으로 판정하면 그것을 뒤늦게 덮는다. 활성 환자는 컨테이너 setActiveId의 updater가 받는 **최신**
   // 목록·활성 환자로 다시 판정한다(plain useState setter면 두 번째 인자가 없어 이 커밋의 목록으로).
+  // 빈 목록이면 위자드 초안 비우기는 한 커밋 더 미룬다(#322 Codex 2회차): 이 커밋에서 먼저 돈 다른 layout effect가 환자를
+  // 추가했을 수 있으므로, tick을 한 번 더 예약해 그 갱신까지 반영된 다음 렌더의 목록으로 판정한다(stage 'intake').
   const [deleteTick, setDeleteTick] = useState(0);
   const deleteTickRef = useRef(0);
-  const pendingDeleteFollowUpRef = useRef(null); // null | { tick, resetIntakeWhenEmpty }
+  const pendingDeleteFollowUpRef = useRef(null); // null | { tick, stage: 'apply' | 'intake', resetIntakeWhenEmpty }
   useLayoutEffect(() => {
     const pending = pendingDeleteFollowUpRef.current;
     if (!pending || deleteTick < pending.tick) return;
     pendingDeleteFollowUpRef.current = null; // 처리 후 비움 — 여기 한 곳에서만(StrictMode 이중 effect 대비)
+    if (pending.stage === 'intake') {
+      if (patients.length === 0) setIntakeShared(null);
+      return;
+    }
     if (activeId && !patients.some(p => p.id === activeId)) {
       setActiveId((current, latestPatients = patients) => (
         current && latestPatients.some(p => p.id === current) ? current : (latestPatients[0]?.id || null)
       ));
       setCurrentStepIndex(0);
     }
-    if (pending.resetIntakeWhenEmpty && patients.length === 0) setIntakeShared(null);
+    if (pending.resetIntakeWhenEmpty && patients.length === 0) {
+      deleteTickRef.current += 1;
+      pendingDeleteFollowUpRef.current = { tick: deleteTickRef.current, stage: 'intake', resetIntakeWhenEmpty: true };
+      setDeleteTick(deleteTickRef.current);
+    }
   }, [deleteTick, patients, activeId, setActiveId, setCurrentStepIndex, setIntakeShared]);
 
   const deletePatientsByIds = async (ids, { resetIntakeWhenEmpty = false } = {}) => {
@@ -204,6 +214,7 @@ export function usePatientCrud({
       const unprocessed = pendingDeleteFollowUpRef.current;
       pendingDeleteFollowUpRef.current = {
         tick: deleteTickRef.current,
+        stage: 'apply',
         resetIntakeWhenEmpty: resetIntakeWhenEmpty || !!unprocessed?.resetIntakeWhenEmpty,
       };
       setPatients(patientTx.deleteResultsApplied({ deletedIds: [...deletedIds], conflicts: [...conflicts] }));
