@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { useEffect, useMemo, useState } from 'react';
 import { inspectIntegrationStatus } from '../services/integrationStatus';
-import { isElectron } from '../utils/platform';
+import { detectRuntime } from '../../platform/runtime';
 import { PresetsSection } from './PresetsSection';
 
 import { hasIntranetSession, isIntranetContext } from '../../platform/dataMode';
@@ -311,7 +311,7 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
           )}
         </div>
 
-        {isElectron() && !!window.electron?.analyzeAI && (
+        {detectRuntime().hasDirectAi && (
           <div className="settings-section modal-section pattern-surface">
             <div className="settings-section-title">AI 설정 (Electron)</div>
             <div className="settings-row">

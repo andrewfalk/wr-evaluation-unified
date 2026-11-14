@@ -9,6 +9,7 @@ import {
 } from './session';
 import { broadcastLogout } from './authChannel';
 import { requestJson } from '../services/httpClient';
+import { getLifecycleBridge } from '../../platform/bridge';
 
 import { hasIntranetSession, resolveApiBaseUrl } from '../../platform/dataMode';
 const AuthContext = createContext(null);
@@ -209,12 +210,13 @@ export function AuthProvider({ children }) {
   // app is quitting, and resetting first would race useAuthSync's sessionRef
   // (see revokeServerSession's note above).
   useEffect(() => {
-    if (!window.electron?.onQuitRequested) return;
-    return window.electron.onQuitRequested(async () => {
+    const lifecycle = getLifecycleBridge();
+    if (!lifecycle?.onQuitRequested) return;
+    return lifecycle.onQuitRequested(async () => {
       try {
         await revokeServerSession(sessionRef.current);
       } finally {
-        window.electron.notifyQuitLogoutDone();
+        lifecycle.notifyQuitLogoutDone();
       }
     });
   }, [revokeServerSession]);
@@ -222,9 +224,7 @@ export function AuthProvider({ children }) {
   // Propagate the current access token to the Electron main process so the
   // audit module can sign EMR audit entries without going through the renderer.
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.electron?.setAccessToken) {
-      window.electron.setAccessToken(session?.accessToken || '');
-    }
+    getLifecycleBridge()?.setAccessToken?.(session?.accessToken || '');
   }, [session?.accessToken]);
 
   const value = useMemo(() => ({

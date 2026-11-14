@@ -1,6 +1,7 @@
 import { createPatient as createBasePatient, migratePatient } from '../utils/data';
-
 import { hasIntranetSession } from '../../platform/dataMode';
+import { hasBridge } from '../../platform/bridge';
+
 export const DEFAULT_PATIENT_SYNC = {
   serverId: null,
   revision: 0,
@@ -29,7 +30,7 @@ function resolveContextUser(context = {}) {
 
 function getRuntimeSource(context = {}) {
   if (context?.source) return context.source;
-  if (typeof window !== 'undefined' && window.electron) return 'electron';
+  if (hasBridge()) return 'electron';
   return 'web';
 }
 

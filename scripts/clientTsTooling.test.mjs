@@ -46,6 +46,23 @@ describe('client TS tooling (P2-00)', () => {
     ]);
   });
 
+  it('window.electron is forbidden outside src/platform/bridge.ts (P2-15), tests and helpers excepted', async () => {
+    const code = [
+      'export const a = window.electron?.fsLoadItems;',
+      'export const b = window?.electron;',
+      'const { electron } = window;',
+      'export { electron };',
+      '',
+    ].join('\n');
+    const rule = 'no-restricted-properties';
+    const count = (messages) => messages.filter((m) => m === rule).length;
+    expect(count(await lintAs('src/core/__p2_15_probe__.js', code))).toBe(3);
+    expect(count(await lintAs('src/core/__p2_15_probe__.tsx', code))).toBe(3);
+    expect(count(await lintAs('src/platform/bridge.ts', code))).toBe(0);
+    expect(count(await lintAs('src/testing/__p2_15_probe__.js', code))).toBe(0);
+    expect(count(await lintAs('src/core/__tests__/__p2_15_probe__.test.js', code))).toBe(0);
+  });
+
   it('vitest picks up .test.tsx and __tests__/*.tsx under src', () => {
     const include = vitestConfig.test.include;
     expect(include).toContain('src/**/*.test.{js,jsx,ts,tsx}');

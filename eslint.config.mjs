@@ -97,6 +97,20 @@ export default [
     },
   },
   {
+    // REFACTORING_ROADMAP Phase 2 C1(P2-15): window.electron(Electron preload 브리지)은 src/platform/bridge.ts만 읽는다.
+    // 다른 코드는 그 파일의 접근자(getFsBridge·getEmrBridge·getMenuBridge·getLifecycleBridge·getAiBridge…)나
+    // src/platform/runtime.ts의 detectRuntime()을 쓴다. 테스트·테스트 헬퍼는 셸을 흉내 내려고 직접 꽂으므로 예외.
+    files: ['src/**/*.{js,jsx,ts,tsx}'],
+    ignores: ['src/platform/bridge.ts', 'src/testing/**', 'src/**/__tests__/**', 'src/**/*.test.{js,jsx,ts,tsx}', 'src/**/*.d.ts'],
+    rules: {
+      'no-restricted-properties': ['error',
+        { object: 'window', property: 'electron', message: 'window.electron은 src/platform/bridge.ts의 접근자로 읽는다(P2-15).' },
+        { object: 'globalThis', property: 'electron', message: 'window.electron은 src/platform/bridge.ts의 접근자로 읽는다(P2-15).' },
+        { object: 'self', property: 'electron', message: 'window.electron은 src/platform/bridge.ts의 접근자로 읽는다(P2-15).' },
+      ],
+    },
+  },
+  {
     ignores: [
       'dist/**',
       '**/dist/**',

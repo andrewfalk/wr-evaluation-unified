@@ -3,6 +3,7 @@ import { buildSessionHeaders } from '../auth/session';
 import { requestJson } from './httpClient';
 
 import { hasIntranetSession, resolveApiBaseUrl } from '../../platform/dataMode';
+import { getAiBridge } from '../../platform/bridge';
 const SETTINGS_KEY = 'wrEvalUnifiedSettings';
 
 function loadAISettings() {
@@ -79,13 +80,14 @@ export async function analyzeAIRequest({ input, inputError, fullReport, model, s
   }
 
   // Electron (non-intranet): IPC path → direct Gemini/Claude with user API key.
-  if (window.electron?.analyzeAI) {
+  const directAi = getAiBridge();
+  if (directAi) {
     const aiSettings = loadAISettings();
     const isGemini = (model || '').startsWith('gemini');
     const apiKey = isGemini
       ? (aiSettings.geminiApiKey || '')
       : (aiSettings.claudeApiKey || '');
-    const data = await window.electron.analyzeAI({ input, model, apiKey });
+    const data = await directAi.analyzeAI({ input, model, apiKey });
     return { ok: !data?.error, status: data?.error ? 400 : 200, data };
   }
 
