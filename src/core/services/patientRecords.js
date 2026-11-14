@@ -93,6 +93,14 @@ export function migratePatientRecords(patients = [], context = {}) {
   return (patients || []).map(patient => migratePatientRecord(patient, context));
 }
 
+// 이미 형식 마이그레이션(migratePatient)을 거친 환자에 레코드 메타·동기화 기본값만 채운다(가림 환자는 그대로).
+// P-8(REFACTORING_ROADMAP Phase 2 P2-20): 로드 경로에서 migratePatient가 storage.js → workspaceRepository →
+// useWorkspacePersistence 3번 돌던 것 중 위쪽 2번을 없애며, 그 층이 고유하게 하던 일(메타 보강)만 남긴 것이다.
+// migratePatient는 멱등이므로(T11) migratePatientRecords와 출력이 같다 — 마이그레이션 경계는 가장 아래 층 storage.js.
+export function ensurePatientRecords(patients = [], context = {}) {
+  return (patients || []).map(patient => ensurePatientMetadata(patient, context));
+}
+
 function shouldClearConflictOnEdit(sync = {}) {
   return sync.syncStatus === 'conflict' && isPatientIdentityPushConflict(sync.conflict);
 }
