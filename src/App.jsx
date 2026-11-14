@@ -35,12 +35,10 @@ import { getDefaultPatientScope, normalizePatientScopeForSession, getValidPatien
 import { clearAutoSavedWorkspace } from './core/services/workspaceRepository';
 import { fetchDoctorCounts } from './core/services/patientServerRepository';
 import { clearAllLockTokens } from './core/services/lockTokenStore';
-import { LoginModal } from './core/components/LoginModal';
-import { ChangePasswordModal } from './core/components/ChangePasswordModal';
-import { SwitchToLocalButton } from './core/components/SwitchToLocalButton';
 import { StatisticsWorkbench } from './core/components/statistics/StatisticsWorkbench';
 import { WorkspaceScreen } from './app/screens/WorkspaceScreen';
-import { hasIntranetSession, isIntranetContext, resolveApiBaseUrl } from './platform/dataMode';
+import { renderBootGate, withLocalEscape as withLocalEscapeFor } from './app/BootGate';
+import { hasIntranetSession, isIntranetContext } from './platform/dataMode';
 import { getLifecycleBridge } from './platform/bridge';
 import { detectRuntime } from './platform/runtime';
 
@@ -495,14 +493,8 @@ function App() {
     setShowSidebar(true);
   }, []);
 
-  const withLocalEscape = (content) => (
-    <>
-      {content}
-      <div className="app-boot-escape-hatch">
-        <SwitchToLocalButton onSwitch={switchToLocalMode} />
-      </div>
-    </>
-  );
+  // 부팅 화면 아래 "로컬 모드로 전환" 탈출구 — 구현은 src/app/BootGate.tsx(P2-25).
+  const withLocalEscape = (content) => withLocalEscapeFor(content, switchToLocalMode);
 
   const handleResetPatients = async () => {
     if (dirtyAssessmentPatientId) { blockedByUnsavedDraftAlert(); return; }
@@ -592,65 +584,11 @@ function App() {
   // ===========================================
   // 인트라넷 모드 부팅 게이팅
   // ===========================================
-  if (isIntranetMode && configLoading) {
-    return withLocalEscape(
-      <div className="app-boot-overlay">
-        <div className="app-boot-box">
-          <p>서버에 연결 중입니다…</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (isIntranetMode && configError) {
-    const serverUrl = resolveApiBaseUrl({ session, settings });
-    return withLocalEscape(
-      <div className="app-boot-overlay">
-        <div className="app-boot-box app-boot-error">
-          <h2>서버 연결 실패</h2>
-          <p>{configError}</p>
-          <p className="app-boot-hint">
-            인트라넷 서버({serverUrl})에 연결할 수 없습니다.<br />
-            서버 상태를 확인하거나 관리자에게 문의하세요.
-          </p>
-          <button
-            className="btn btn-secondary"
-            onClick={() => window.location.reload()}
-          >
-            다시 시도
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Boot-time session verification in progress (persisted intranet session, not yet confirmed).
-  // hasIntranetSession(session) && !sessionVerified means the /api/auth/csrf check is in flight.
-  if (isIntranetMode && hasIntranetSession(session) && !sessionVerified) {
-    return withLocalEscape(
-      <div className="app-boot-overlay">
-        <div className="app-boot-box">
-          <p>세션을 확인하는 중입니다…</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Login guard: intranet mode but not authenticated (no persisted session, or
-  // verification failed and session was reset to local). Non-dismissable.
-  if (isIntranetMode && !isAuthenticated) {
-    return withLocalEscape(
-      <LoginModal apiBaseUrl={resolveApiBaseUrl({ session, settings })} />
-    );
-  }
-
-  // Password change guard: server flagged must_change_password (e.g. seed admin first login).
-  // Blocks all other UI until the password is changed. Non-dismissable.
-  if (isIntranetMode && isAuthenticated && session?.user?.mustChangePassword) {
-    return withLocalEscape(
-      <ChangePasswordModal apiBaseUrl={resolveApiBaseUrl({ session, settings })} />
-    );
-  }
+  const bootScreen = renderBootGate({
+    isIntranetMode, configLoading, configError, session, settings, sessionVerified, isAuthenticated,
+    onSwitchToLocal: switchToLocalMode,
+  });
+  if (bootScreen) return bootScreen;
 
   // ===========================================
   // 통계분석 워크벤치 (PR2 §1) — 로그인/비밀번호변경 가드 다음, 환자 동기화 로딩·자동 랜딩

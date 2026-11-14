@@ -31,5 +31,15 @@ describe('lazyWithReload', () => {
     vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, reload });
     fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
     expect(reload).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: '닫기' })).toBeNull(); // onClose를 안 넘기면 닫기 없음
+  });
+
+  it('원래 컴포넌트가 받을 onClose가 있으면 닫기 버튼으로 작업에 돌아간다(#302)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const Lazy = lazyWithReload(() => Promise.reject(new Error('offline')));
+    const onClose = vi.fn();
+    render(<StrictMode><Suspense fallback={null}><Lazy onClose={onClose} /></Suspense></StrictMode>);
+    fireEvent.click(await screen.findByRole('button', { name: '닫기' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
