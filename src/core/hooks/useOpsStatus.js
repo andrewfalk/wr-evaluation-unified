@@ -1,7 +1,7 @@
-// @ts-nocheck
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { requestJson } from '../services/httpClient';
 import { resolveApiBaseUrl } from '../../platform/dataMode';
+import { useAsync } from './useAsync';
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -18,28 +18,21 @@ const BANNER_MESSAGES = {
 };
 
 export function useOpsStatus({ session, enabled = false }) {
-  const [opsStatus, setOpsStatus] = useState(null);
+  // P2-19: 손으로 쓰던 opsStatus state + cancelled 플래그 → useAsync(늦은 응답·언마운트 뒤 응답은 버림).
+  // 실패는 조용히 넘어가고 마지막 값을 유지한다(배너는 부가 기능 — 핵심 경로가 아님, 예전과 같음).
+  const { data, run, cancel } = useAsync();
+  const opsStatus = data ?? null;
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) return undefined;
 
     const baseUrl = resolveApiBaseUrl({ session });
-    let cancelled = false;
-
-    const poll = async () => {
-      try {
-        const data = await requestJson('/api/admin/ops/backup-status', { baseUrl, session });
-        if (!cancelled) setOpsStatus(data);
-      } catch {
-        // Best-effort: silently ignore network/auth errors.
-        // The ops banner is an enhancement, not a critical path.
-      }
-    };
+    const poll = () => { run(() => requestJson('/api/admin/ops/backup-status', { baseUrl, session })); };
 
     poll();
     const id = setInterval(poll, POLL_INTERVAL_MS);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [enabled, session]);
+    return () => { cancel(); clearInterval(id); };
+  }, [enabled, session, run, cancel]);
 
   const summary = opsStatus?.monitorReport?.summary ?? null;
   const showBanner = enabled && WARN_SUMMARIES.has(summary);
