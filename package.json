@@ -47,6 +47,8 @@
     "pretypecheck": "node scripts/prebuild-shared.mjs && node scripts/prebuild-analytics-core.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc -p tsconfig.client.json && tsc -p tsconfig.client.js.json",
     "verify:ts-ratchet": "node scripts/ts-ratchet.mjs",
+    "verify:ts-progress": "node scripts/ts-progress.mjs",
+    "arch:metrics": "node scripts/arch-metrics.mjs",
     "typecheck:analytics-core": "npm --prefix packages/analytics-core run typecheck",
     "lint": "eslint src/ electron/ api/ shared/ packages/",
     "check": "node scripts/check.mjs",

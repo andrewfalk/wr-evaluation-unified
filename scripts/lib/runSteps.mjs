@@ -25,6 +25,7 @@ export const CHECK_STEPS = [
   ['migrations immutable (vs origin/main)', 'npm run verify:migrations-immutable'],
   ['typecheck (root)', 'npm run typecheck'],
   ['ts ratchet (@ts-nocheck baseline)', 'npm run verify:ts-ratchet'],
+  ['ts progress (new layers TS-only)', 'npm run verify:ts-progress'],
   ['test (root)', 'npm test'],
   ['typecheck (server)', 'npm --prefix server run typecheck'],
   ['test (server)', 'npm --prefix server test'],
