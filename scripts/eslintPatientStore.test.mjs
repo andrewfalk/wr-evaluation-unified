@@ -24,6 +24,9 @@ describe('touchPatientRecord import 금지(P2-39)', () => {
     expect(count(await lintAs('src/core/components/__p2_39_probe__.jsx', code))).toBe(1);
     expect(count(await lintAs('src/app/__p2_39_probe__.ts', code))).toBe(1);
     expect(count(await lintAs('src/core/utils/sub/__p2_39_probe__.js', deep))).toBe(1);
+    // 같은 폴더 상대경로(#321 Codex 권고)
+    const sameDir = "import { touchPatientRecord } from './patientRecords';\nexport { touchPatientRecord };\n";
+    expect(count(await lintAs('src/core/services/__p2_39_probe__.js', sameDir))).toBe(1);
   });
 
   it('같은 모듈의 다른 export는 허용', async () => {

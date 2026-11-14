@@ -105,6 +105,10 @@ describe('usePatientsContainer', () => {
     expect(result.current.patients).toEqual([B, A]);
     expect(error).toHaveBeenCalledTimes(2);
     expect(error.mock.calls[0][0]).toBe(UNTAGGED_SET_PATIENTS_MESSAGE);
+    // 환자 원본은 로그에 남기지 않는다(#321 Codex) — 인자 종류만.
+    expect(error.mock.calls[0][1]).toEqual({ argKind: 'array' });
+    expect(error.mock.calls[1][1]).toEqual({ argKind: 'function' });
+    expect(JSON.stringify(error.mock.calls)).not.toContain('"id"');
   });
 
   it('같은 배열을 내는 갱신(전이·updater)은 다시 렌더하지 않는다', () => {

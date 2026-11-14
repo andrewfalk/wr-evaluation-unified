@@ -27,7 +27,8 @@ export const UNTAGGED_SET_PATIENTS_MESSAGE =
 function toTransition(arg: unknown): PatientTransition {
   if (isPatientTransition(arg)) return arg;
   if (import.meta.env.DEV) throw new TypeError(UNTAGGED_SET_PATIENTS_MESSAGE);
-  console.error(UNTAGGED_SET_PATIENTS_MESSAGE, arg);
+  // 인자 원본(환자 목록·updater)은 로그에 남기지 않는다 — 환자 이름·진료 데이터가 오류 로그로 새지 않게(#321 Codex). 종류만.
+  console.error(UNTAGGED_SET_PATIENTS_MESSAGE, { argKind: Array.isArray(arg) ? 'array' : typeof arg });
   return untaggedFallback(arg as UntaggedSetPatientsArg);
 }
 export type SetActiveId = (arg: ValueOrUpdater<string | null>) => void;

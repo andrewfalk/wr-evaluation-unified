@@ -133,7 +133,8 @@ export default [
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['**/services/patientRecords', '**/services/patientRecords.js'],
+          // 같은 폴더 상대경로('./patientRecords')도 잡는다(#321 Codex 권고).
+          group: ['**/patientRecords', '**/patientRecords.js'],
           importNames: ['touchPatientRecord'],
           message: '환자 레코드 touch는 환자 상태 전이에서만 — setPatients(patientTx.…)를 쓴다(P2-39).',
         }],
