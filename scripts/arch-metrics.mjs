@@ -27,6 +27,9 @@
  *   inlineStyleHex — hex colour literals inside JSX `style={{…}}` in product code (P2-92~93).
  *   intranetModeComparisons — `mode`/`integrationMode` compared with 'intranet' outside src/platform/
  *       (use isIntranetContext·hasIntranetSession·isRefreshEligible from src/platform/dataMode.ts). 0 since P2-11.
+ *   untaggedSetPatients — `setPatients(` calls whose argument is not a tagged transition (`patientTx.…`),
+ *       outside the patient store (src/core/state/). Counted per call, not per line. Target 0 at P2-39
+ *       (REFACTORING_ROADMAP Phase 2 C4 gate A: every patient-list write goes through a named transition).
  *
  * Usage:
  *   node scripts/arch-metrics.mjs           # print current counts vs baseline
@@ -47,6 +50,9 @@ const REQUEST_LAYER = (rel) => rel === 'src/core/services/httpClient.js' || rel.
 const STORAGE_LAYER = (rel) => rel.startsWith('src/core/storage/');
 const TOKENS_CSS = new Set(['src/styles/tokens.css']);
 const PLATFORM_LAYER = (rel) => rel.startsWith('src/platform/');
+const PATIENT_STORE_LAYER = (rel) => rel.startsWith('src/core/state/');
+// A `setPatients(` call (not `x.setPatients(` / `resetPatients(`) whose first argument is not `patientTx.…`.
+const UNTAGGED_SET_PATIENTS = /(?<![.\w$])setPatients\s*\((?!\s*patientTx\s*\.)/g; // whitespace inside the lookahead — no backtracking past it
 const INTRANET_COMPARISON = /(?:\b(?:mode|integrationMode)\s*[!=]==?\s*['"`]intranet['"`])|(?:['"`]intranet['"`]\s*[!=]==?\s*[\w$.?\s]*?\b(?:mode|integrationMode)\b)/g;
 
 const toRel = (full) => path.relative(ROOT, full).replace(/\\/g, '/');
@@ -161,6 +167,10 @@ export function scanFile(rel, content) {
     const comparisons = matchingLines(code, INTRANET_COMPARISON).size;
     if (comparisons) result.intranetModeComparisons = comparisons;
   }
+  if (!PATIENT_STORE_LAYER(rel)) {
+    const untagged = (code.match(UNTAGGED_SET_PATIENTS) || []).length;
+    if (untagged) result.untaggedSetPatients = untagged;
+  }
   return result;
 }
 
@@ -173,6 +183,7 @@ export const METRICS = [
   'cssRawHex',
   'inlineStyleHex',
   'intranetModeComparisons',
+  'untaggedSetPatients',
 ];
 
 export function computeMetrics() {
