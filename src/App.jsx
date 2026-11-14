@@ -38,9 +38,9 @@ import { WorkspaceScreen } from './app/screens/WorkspaceScreen';
 import { renderBootGate, withLocalEscape as withLocalEscapeFor } from './app/BootGate';
 import { selectScreen, useScreenRouter } from './app/useScreenRouter';
 import { useDoctorRoster, usePatientScope } from './app/usePatientScope';
+import { useUnsavedDraftGuard } from './app/useUnsavedDraftGuard';
 import { hasIntranetSession, isIntranetContext } from './platform/dataMode';
 import { getLifecycleBridge } from './platform/bridge';
-import { detectRuntime } from './platform/runtime';
 
 const DEFAULT_PATIENT_FILTERS = {
   searchQuery: '',
@@ -93,38 +93,23 @@ function App() {
   const { activeScreen, setShowHome, openStatistics, closeStatistics } = useScreenRouter();
   const [conflictPatientId, setConflictPatientId] = useState(null);
 
-  // 종합소견 직접 편집 dirty 가드 — 불리언이 아니라 환자 ID를 담는다. 환자를 전환해도
-  // dirty가 잘못 따라붙지 않게 하기 위함(AssessmentStep이 재마운트 없이 patient prop만
-  // 바뀌는 구조라 patient.id를 직접 대조해야 한다).
-  const [dirtyAssessmentPatientId, setDirtyAssessmentPatientId] = useState(null);
-  const blockedByUnsavedDraftAlert = useCallback(() => {
-    showAlert('저장하지 않은 종합소견 편집 내용이 있습니다.\n"편집 완료" 또는 "취소"로 마무리한 뒤 다시 시도하세요.');
-  }, []);
-  // AssessmentStep이 편집 모드 진입/종료를 알려올 때 호출한다. prev===patientId 가드는
-  // 종료(false) 신호가 다른(이미 전환된) 환자의 낡은 신호로 잘못 도착해도 활성 dirty를
-  // 지우지 않게 한다.
-  const handleAssessmentEditingChange = useCallback((patientId, isEditing) => {
-    setDirtyAssessmentPatientId(prev => {
-      if (isEditing) return patientId;
-      return prev === patientId ? null : prev;
-    });
-  }, []);
+  // 종합소견 미저장 초안 — 상태(환자 ID)·안내·편집 신호·가드·셸 신호·beforeunload는 src/app/useUnsavedDraftGuard.ts(P2-29).
+  const {
+    dirtyAssessmentPatientId, blockedByUnsavedDraftAlert, handleAssessmentEditingChange, blockIfDraftDirty,
+  } = useUnsavedDraftGuard();
   // guardedSelectPatient()로 모으지 못한 직접 setActiveId 호출부(랜딩 화면의 "이어서 작업",
   // 충돌 모달의 "정정 화면으로 이동")가 개별적으로 재구현하지 않도록 공용 가드를 둔다.
   const guardedSelectPatient = useCallback((patientId, { stepIndex = 0 } = {}) => {
     // 이미 활성인 환자를 다시 선택했으면 스텝을 건드리지 않는다(useStepNavigation의
     // switchPatient와 동일한 이유 — dirty 여부와 무관하게 항상 no-op이어야 한다).
     if (patientId === activeId) { setShowHome(false); return true; }
-    if (dirtyAssessmentPatientId) {
-      blockedByUnsavedDraftAlert();
-      return false;
-    }
+    if (blockIfDraftDirty()) return false;
     setActiveId(patientId);
     setCurrentStepIndex(stepIndex);
     setShowHome(false);
     return true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dirtyAssessmentPatientId, activeId, blockedByUnsavedDraftAlert]);
+  }, [blockIfDraftDirty, activeId]);
   const { serverConfig, configLoading, configError, refetchConfig, refreshing: statsConfigRefreshing, refreshError: statsConfigRefreshError } =
     useServerConfig({ session, settings });
   const { aiAvailable } = useAIAvailable({ serverConfig, session });
@@ -316,7 +301,7 @@ function App() {
     if (patientId === activeId) { switchPatient(patientId); return; }
     // switchPatient(useStepNavigation)도 같은 조건으로 다시 막지만, 여기서 먼저 막아야
     // 아래 동기화 상태 확인 다이얼로그("저장되지 않은 변경사항이…")가 무관하게 뜨지 않는다.
-    if (dirtyAssessmentPatientId) { blockedByUnsavedDraftAlert(); return; }
+    if (blockIfDraftDirty()) return;
 
     const current = patients.find(p => p.id === activeId);
     const status = current?.sync?.syncStatus;
@@ -365,7 +350,7 @@ function App() {
     }
 
     switchPatient(patientId);
-  }, [activeId, patients, switchPatient, flushPatient, setPatients, dirtyAssessmentPatientId, blockedByUnsavedDraftAlert, isIntranetMode]);
+  }, [activeId, patients, switchPatient, flushPatient, setPatients, blockIfDraftDirty, isIntranetMode]);
 
   // 영상 분석 서버 적용 후 서버 동기화 환자를 목록에 반영(로컬 id 보존 → id로 교체).
   const onVideoServerApplied = useCallback((serverPatient) => {
@@ -379,32 +364,7 @@ function App() {
   // Electron 메뉴 이벤트
   useElectronMenuEvents({ handleResetPatientsRef, handleStartIntakeRef, handleOpenStatisticsRef });
 
-  // 종합소견 편집 dirty 상태를 Electron main에 동기화한다 — 창 닫기(win.on('close'))와
-  // 메뉴 새로고침(Ctrl+R)이 이 값을 보고 네이티브 confirm을 띄운다. PHI(환자 ID)는 절대
-  // 넘기지 않고 boolean만 전달한다(main.js의 set-has-unsaved-draft 채널).
-  // preload가 채널을 노출하지 않는 빌드(standalone/웹)에서는 optional chaining으로 조용히 no-op.
-  useEffect(() => {
-    getLifecycleBridge()?.setHasUnsavedDraft?.(!!dirtyAssessmentPatientId);
-  }, [dirtyAssessmentPatientId]);
-
-  // 웹 탭 닫기·새로고침 경고 — Electron 인트라넷 빌드는 setHasUnsavedDraft 채널이 있고
-  // win.on('close')/Ctrl+R이 이미 main.js에서 네이티브 confirm으로 가드한다(A-1). 그 경우
-  // 여기서도 beforeunload를 등록하면, 사용자가 그 네이티브 confirm에서 "계속"을 선택해
-  // win.close()/reload()가 실행돼도 renderer에 남아있는 beforeunload가 다시 개입해
-  // Electron이 페이지의 beforeunload를 존중하는 특성상 종료가 조용히 취소되거나 confirm이
-  // 이중으로 뜰 수 있다. 그래서 그 채널이 없는 웹/standalone 빌드에서만 폴백으로 등록한다
-  // (standalone은 close 가로채기가 없어 beforeunload가 유일한 안전망).
-  useEffect(() => {
-    // 셸이 창 닫기를 가로채면(인트라넷 셸 setHasUnsavedDraft — 구 셸 포함, 키로 판정) beforeunload를 두지 않는다.
-    if (detectRuntime().hasNativeCloseGuard) return;
-    const handleBeforeUnload = (e) => {
-      if (!dirtyAssessmentPatientId) return;
-      e.preventDefault();
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [dirtyAssessmentPatientId]);
+  // (셸 초안 신호·beforeunload는 useUnsavedDraftGuard — P2-29)
 
   const displayPatients = usePatientList(patients, patientFilters);
 
@@ -439,7 +399,7 @@ function App() {
   const withLocalEscape = (content) => withLocalEscapeFor(content, switchToLocalMode);
 
   const handleResetPatients = async () => {
-    if (dirtyAssessmentPatientId) { blockedByUnsavedDraftAlert(); return; }
+    if (blockIfDraftDirty()) return;
     const ok = await showConfirm('현재 작업 중인 환자 목록을 모두 삭제하시겠습니까?');
     if (!ok) return;
     setPatientSyncPaused(true);
@@ -463,12 +423,12 @@ function App() {
   // 로그아웃은 렌더러 세션만 정리하는 게 아니라(Electron은 서버 세션까지 정리) 화면을
   // 완전히 떠나므로 dirty 편집 중이면 막는다.
   const handleLogout = () => {
-    if (dirtyAssessmentPatientId) { blockedByUnsavedDraftAlert(); return; }
+    if (blockIfDraftDirty()) return;
     logout();
   };
 
   const handleShowHome = () => {
-    if (dirtyAssessmentPatientId) { blockedByUnsavedDraftAlert(); return; }
+    if (blockIfDraftDirty()) return;
     setShowHome(true);
   };
 
