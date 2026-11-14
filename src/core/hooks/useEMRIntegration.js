@@ -1,13 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
 import { showAlert, showConfirm } from '../utils/platform';
-import { isSharedPatchApplicable, patientTx } from '../state/patientStore/transitions';
+import { patientTx } from '../state/patientStore/transitions';
 import { getEmrBridge } from '../../platform/bridge';
 
 export function useEMRIntegration({ activePatient, patients, selectedIds, session, setPatients, dirtyAssessmentPatientId }) {
-  // 렌더된 최신 목록 미러 — 추출·확인창을 기다리는 동안 환자 식별정보가 바뀌었는지 미리 확인해 "건너뜀"으로 안내하는 데만 쓴다
-  // (최종 판정은 전이 patient/sharedPatched 안의 같은 검사, P2-39b).
-  const patientsRef = useRef(patients);
-  useEffect(() => { patientsRef.current = patients; }, [patients]);
+  // 커밋 배리어(P2-39b, #323 Codex) — 전이 patient/sharedPatched가 적용 시점 목록으로 적용했는지(receipt)는 커밋 뒤에야
+  // 확정된다. 미리 렌더된 목록으로 판정하면 같은 배치에 들어온 식별정보 변경을 놓쳐 저장하지 않은 결과를 성공으로 알린다.
+  // 전이와 tick을 같은 동기 구간에서 예약하고, tick이 반영된 커밋의 effect에서 기다리던 쪽을 깨운다(usePatientSync outcomeTick과 같은 방식).
+  const [commitTick, setCommitTick] = useState(0);
+  const commitWaitersRef = useRef([]);
+  useEffect(() => {
+    if (commitWaitersRef.current.length === 0) return;
+    commitWaitersRef.current.splice(0).forEach(resolve => resolve());
+  }, [commitTick]);
+  // 언마운트 시 기다리던 쪽을 놓아준다(무한 대기 방지).
+  useEffect(() => () => { commitWaitersRef.current.splice(0).forEach(resolve => resolve()); }, []);
+  const applySharedPatch = (payload) => {
+    const receipt = { applied: undefined };
+    const committed = new Promise(resolve => { commitWaitersRef.current.push(resolve); });
+    setPatients(patientTx.sharedPatched({ ...payload, receipt }));
+    setCommitTick(t => t + 1);
+    return committed.then(() => receipt.applied === true);
+  };
   const [extractProgress, setExtractProgress] = useState(null);
 
   const handleInjectEMR = async () => {
@@ -151,19 +165,6 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
             failCount++;
             continue;
           }
-          if (!isSharedPatchApplicable(patientsRef.current.find(x => x.id === p.id), requested)) {
-            skippedCount++;
-            warnings.push(`${patientLabel}: 추출 중 환자 정보가 바뀌어 건너뜀`);
-            continue;
-          }
-          successCount++;
-          // 재해일자별 신청건 매칭 결과 경고 누적
-          if (!hadInjuryDate && result.multipleEntries) {
-            warnings.push(`${patientLabel}: 재해일자가 다른 신청건이 있습니다 (1번 항목을 불러왔습니다)`);
-          }
-          if (hadInjuryDate && result.injuryDateMismatch) {
-            warnings.push(`${patientLabel}: 일치하는 재해일자의 신청건이 없어 1번 항목을 불러왔습니다`);
-          }
           // 새 상병 후보의 id는 전이 밖에서 미리 만든다 — 전이(updater)는 StrictMode에서 두 번 돌 수 있어 순수해야 한다.
           const diseaseCandidates = (result.diseases || [])
             .filter(d => d.code)
@@ -189,7 +190,21 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
             return updated;
           };
 
-          setPatients(patientTx.sharedPatched({ id: p.id, requested, patch, session }));
+          // 적용 여부는 커밋 뒤 전이의 판정으로 — 그사이 등록번호·재해일자가 바뀌었거나 삭제됐으면 건너뜀.
+          const applied = await applySharedPatch({ id: p.id, requested, patch, session });
+          if (!applied) {
+            skippedCount++;
+            warnings.push(`${patientLabel}: 추출 중 환자 정보가 바뀌어 건너뜀`);
+            continue;
+          }
+          successCount++;
+          // 재해일자별 신청건 매칭 결과 경고 누적
+          if (!hadInjuryDate && result.multipleEntries) {
+            warnings.push(`${patientLabel}: 재해일자가 다른 신청건이 있습니다 (1번 항목을 불러왔습니다)`);
+          }
+          if (hadInjuryDate && result.injuryDateMismatch) {
+            warnings.push(`${patientLabel}: 일치하는 재해일자의 신청건이 없어 1번 항목을 불러왔습니다`);
+          }
         } else {
           failCount++;
         }
@@ -224,10 +239,6 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
 
         // 확인창을 띄운 시점의 환자(등록번호) — 확인하는 동안 바뀌었으면 저장하지 않는다(P2-39b).
         const requested = { patientNo: activePatient.data.shared.patientNo || '' };
-        if (!isSharedPatchApplicable(patientsRef.current.find(x => x.id === activePatient.id), requested)) {
-          await showAlert('다학제 회신을 저장하지 않았습니다 — 확인하는 동안 환자 정보가 바뀌어(등록번호 변경 또는 삭제) 다른 환자에 저장될 수 있습니다. 다시 추출해 주세요.');
-          return;
-        }
         // 회신은 적용 시점의 최신 값 뒤에 덧붙인다(기다리는 동안 직접 쓴 회신·다른 필드 보존).
         const patch = (current) => {
           const updated = { ...current };
@@ -242,7 +253,12 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
           }
           return updated;
         };
-        setPatients(patientTx.sharedPatched({ id: activePatient.id, requested, patch, session }));
+        // 적용 여부는 커밋 뒤 전이의 판정으로(확인하는 동안 등록번호가 바뀌었거나 삭제됐으면 저장하지 않음).
+        const applied = await applySharedPatch({ id: activePatient.id, requested, patch, session });
+        if (!applied) {
+          await showAlert('다학제 회신을 저장하지 않았습니다 — 확인하는 동안 환자 정보가 바뀌어(등록번호 변경 또는 삭제) 다른 환자에 저장될 수 있습니다. 다시 추출해 주세요.');
+          return;
+        }
         await showAlert(`${result.consultations.length}개 과목 회신을 가져왔습니다.`);
       } else {
         await showAlert(`다학제회신 추출 실패: ${result.error || result.message || '알 수 없는 오류'}`);

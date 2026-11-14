@@ -61,6 +61,17 @@ async function flush(n = 8) {
   for (let i = 0; i < n; i += 1) await Promise.resolve();
 }
 
+// 훅이 커밋 배리어(전이 적용 여부를 커밋 뒤에 확인)를 기다리므로, act 안에서 그 promise를 await하지 않고
+// act를 여러 번 돌려 렌더·effect를 흘려보낸다(act는 콜백이 끝나야 쌓인 렌더를 처리한다).
+async function settle(promise, rounds = 20) {
+  let done = false;
+  promise.then(() => { done = true; }, () => { done = true; });
+  for (let i = 0; i < rounds && !done; i += 1) {
+    await act(async () => { await flush(); });
+  }
+  expect(done).toBe(true);
+}
+
 let extract;
 let consult;
 beforeEach(() => {
@@ -89,7 +100,8 @@ describe('P2-39b — EMR 일괄 추출 결과를 최신 값에 병합', () => {
     await act(async () => { running = result.current.emr.handleEmrExtractBatch(); await flush(); });
     expect(extract).toHaveBeenCalledWith('N-a', '');
     editShared(result, 'a', s => ({ ...s, specialNotes: '대기 중 메모', diagnoses: [...s.diagnoses, { id: 'a-d9', code: 'M9', name: 'm9', side: '' }] }));
-    await act(async () => { pending.resolve(EMR_OK('N-a')); await running; await flush(); });
+    await act(async () => { pending.resolve(EMR_OK('N-a')); await flush(); });
+    await settle(running);
 
     const shared = sharedOf(result, 'a');
     expect(shared.name).toBe('EMR이름');
@@ -107,7 +119,8 @@ describe('P2-39b — EMR 일괄 추출 결과를 최신 값에 병합', () => {
     let running;
     await act(async () => { running = result.current.emr.handleEmrExtractBatch(); await flush(); });
     editShared(result, 'a', { patientNo: 'N-other' });
-    await act(async () => { pending.resolve(EMR_OK('N-a')); await running; await flush(); });
+    await act(async () => { pending.resolve(EMR_OK('N-a')); await flush(); });
+    await settle(running);
 
     const shared = sharedOf(result, 'a');
     expect(shared.patientNo).toBe('N-other');
@@ -125,7 +138,8 @@ describe('P2-39b — EMR 일괄 추출 결과를 최신 값에 병합', () => {
     let running;
     await act(async () => { running = result.current.emr.handleEmrExtractBatch(); await flush(); });
     editShared(result, 'a', { injuryDate: '2026-03-03' });
-    await act(async () => { pending.resolve(EMR_OK('N-a', { accidentDate: '2025-01-01' })); await running; await flush(); });
+    await act(async () => { pending.resolve(EMR_OK('N-a', { accidentDate: '2025-01-01' })); await flush(); });
+    await settle(running);
 
     const shared = sharedOf(result, 'a');
     expect(shared.injuryDate).toBe('2026-03-03');
@@ -141,7 +155,8 @@ describe('P2-39b — EMR 일괄 추출 결과를 최신 값에 병합', () => {
     let running;
     await act(async () => { running = result.current.emr.handleEmrExtractBatch(); await flush(); });
     act(() => { result.current.setPatients(patientTx.replacedAll({ patients: [result.current.patients[1]] })); });
-    await act(async () => { pending.resolve(EMR_OK('N-a')); await running; await flush(); });
+    await act(async () => { pending.resolve(EMR_OK('N-a')); await flush(); });
+    await settle(running);
 
     expect(result.current.patients.map(p => p.id)).toEqual(['b']);
     expect(sharedOf(result, 'b').name).toBe('old-b');
@@ -149,10 +164,32 @@ describe('P2-39b — EMR 일괄 추출 결과를 최신 값에 병합', () => {
     expect(lastAlert()).toContain('건너뜀 1명');
   });
 
+  it('②-c 등록번호 변경과 추출 완료가 같은 배치에 들어와도 적용되지 않은 결과를 성공으로 세지 않는다(#323 Codex)', async () => {
+    const pending = deferred();
+    extract.mockReturnValue(pending.promise);
+    const { result } = renderEmr([patient('a')], 'a');
+
+    let running;
+    await act(async () => { running = result.current.emr.handleEmrExtractBatch(); await flush(); });
+    await act(async () => {
+      result.current.setPatients(patientTx.dataEdited({ id: 'a', session: SESSION, edit: d => ({ ...d, shared: { ...d.shared, patientNo: 'N-other' } }) }));
+      pending.resolve(EMR_OK('N-a'));
+      await flush();
+    });
+    await settle(running);
+
+    expect(sharedOf(result, 'a').patientNo).toBe('N-other');
+    expect(sharedOf(result, 'a').name).toBe('old-a');
+    expect(lastAlert()).toContain('성공 0명');
+    expect(lastAlert()).toContain('건너뜀 1명');
+  });
+
   it('응답 등록번호 교차검증(다른 환자 데이터)은 그대로 실패로 센다', async () => {
     extract.mockResolvedValue(EMR_OK('N-zzz'));
     const { result } = renderEmr([patient('a')], 'a');
-    await act(async () => { await result.current.emr.handleEmrExtractBatch(); await flush(); });
+    let run;
+    act(() => { run = result.current.emr.handleEmrExtractBatch(); });
+    await settle(run);
     expect(sharedOf(result, 'a').name).toBe('old-a');
     expect(lastAlert()).toContain('실패 1명');
     expect(lastAlert()).not.toContain('건너뜀');
@@ -161,7 +198,9 @@ describe('P2-39b — EMR 일괄 추출 결과를 최신 값에 병합', () => {
   it('바뀐 것이 없으면 옮기기 전과 같은 결과(재해일자 비어 있으면 추출 값으로 채움·상병 코드 중복 제거)', async () => {
     extract.mockResolvedValue(EMR_OK('N-a', { accidentDate: '2025-05-05', diseases: [{ code: 'M1', name: 'dup' }, { code: 'M3', name: 'm3' }], medicalRecord: '기록' }));
     const { result } = renderEmr([patient('a')], 'a');
-    await act(async () => { await result.current.emr.handleEmrExtractBatch(); await flush(); });
+    let run;
+    act(() => { run = result.current.emr.handleEmrExtractBatch(); });
+    await settle(run);
     const shared = sharedOf(result, 'a');
     expect(shared.injuryDate).toBe('2025-05-05');
     expect(shared.medicalRecord).toBe('기록');
@@ -180,11 +219,32 @@ describe('P2-39b — 다학제 회신을 최신 값에 병합', () => {
     let running;
     await act(async () => { running = result.current.emr.handleExtractConsultation(); await flush(); });
     editShared(result, 'a', { consultReplyOrtho: '직접 쓴 회신', specialNotes: '메모' });
-    await act(async () => { confirm.resolve(true); await running; await flush(); });
+    await act(async () => { confirm.resolve(true); await flush(); });
+    await settle(running);
 
     const shared = sharedOf(result, 'a');
     expect(shared.consultReplyOrtho).toBe('직접 쓴 회신\n---\nEMR 회신');
     expect(shared.specialNotes).toBe('메모');
+  });
+
+  it('④-c 등록번호 변경과 확인이 같은 배치에 들어와도 저장하지 않은 회신을 성공으로 알리지 않는다(#323 Codex)', async () => {
+    consult.mockResolvedValue({ success: true, consultations: [{ department: '재활의학과', content: 'EMR 회신' }] });
+    const confirm = deferred();
+    showConfirm.mockReturnValueOnce(confirm.promise);
+    const { result } = renderEmr([patient('a')], 'a');
+
+    let running;
+    await act(async () => { running = result.current.emr.handleExtractConsultation(); await flush(); });
+    await act(async () => {
+      result.current.setPatients(patientTx.dataEdited({ id: 'a', session: SESSION, edit: d => ({ ...d, shared: { ...d.shared, patientNo: 'N-other' } }) }));
+      confirm.resolve(true);
+      await flush();
+    });
+    await settle(running);
+
+    expect(sharedOf(result, 'a').consultReplyRehab).toBeUndefined();
+    expect(lastAlert()).toContain('환자 정보가 바뀌어');
+    expect(lastAlert()).not.toContain('회신을 가져왔습니다');
   });
 
   it('④-b 확인창이 떠 있는 동안 등록번호가 바뀌면 저장하지 않고 알린다', async () => {
@@ -196,7 +256,8 @@ describe('P2-39b — 다학제 회신을 최신 값에 병합', () => {
     let running;
     await act(async () => { running = result.current.emr.handleExtractConsultation(); await flush(); });
     editShared(result, 'a', { patientNo: 'N-other' });
-    await act(async () => { confirm.resolve(true); await running; await flush(); });
+    await act(async () => { confirm.resolve(true); await flush(); });
+    await settle(running);
 
     const shared = sharedOf(result, 'a');
     expect(shared.patientNo).toBe('N-other');

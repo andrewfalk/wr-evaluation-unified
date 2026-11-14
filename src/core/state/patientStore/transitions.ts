@@ -254,7 +254,7 @@ export interface SharedPatchRequest {
 /**
  * 적용 시점 환자가 요청 당시 식별정보와 같은가 — 목록에 있고, 가림 환자가 아니며, 등록번호(그리고 요청에 있으면 재해일자)가 같다.
  * 다르면 그사이 다른 환자·다른 신청건이 된 것이라 추출 결과를 섞지 않는다(P2-39b, Codex 계획 리뷰 1회차).
- * 훅은 이것으로 "건너뜀"을 미리 세고(안내용), 최종 판정은 전이 안의 같은 검사다.
+ * 판정은 전이 안에서 적용 시점 목록으로 한다 — 훅은 결과를 payload의 receipt로 커밋 뒤에 받아 성공·건너뜀을 센다.
  */
 export function isSharedPatchApplicable(patient: PatientRecord | null | undefined, requested: SharedPatchRequest): boolean {
   if (!patient || patient.redacted === true || !patient.data) return false;
@@ -270,14 +270,21 @@ export interface SharedPatchedPayload {
   /** 적용 시점 shared를 받아 새 shared를 낸다(추출 값 우선, 그사이 바뀐 다른 필드·추가된 상병은 그대로). 순수해야 한다. */
   patch: (shared: PatientDataValue['shared']) => PatientDataValue['shared'];
   session: unknown;
+  /**
+   * 적용 여부 보고용(선택) — 전이가 판정 결과를 `applied`에 적는다. 같은 입력이면 같은 값을 쓰므로 StrictMode 이중 실행에도
+   * 결과가 같고 상태에는 영향이 없다. 호출부는 커밋 뒤(커밋 배리어)에 읽는다 — 그 전에는 전이가 아직 돌지 않았을 수 있다(#323 Codex).
+   */
+  receipt?: { applied?: boolean };
 }
 
 /**
  * (flagged P2-39b) EMR 추출·다학제 회신을 **적용 시점의 최신 shared** 에 병합 — 요청 당시 식별정보와 같을 때만, 다르면 prev 그대로
  * (touch 없음, dirty 안 됨). 옮기기 전(#20·#21 patient/sharedReplaced)에는 시작 시점 사본으로 shared를 통째 교체했다.
  */
-const sharedPatched = defineTransition<SharedPatchedPayload>('patient/sharedPatched', (prev, { id, requested, patch, session }) => {
-  if (!isSharedPatchApplicable(prev.find(p => p.id === id), requested)) return prev;
+const sharedPatched = defineTransition<SharedPatchedPayload>('patient/sharedPatched', (prev, { id, requested, patch, session, receipt }) => {
+  const applicable = isSharedPatchApplicable(prev.find(p => p.id === id), requested);
+  if (receipt) receipt.applied = applicable;
+  if (!applicable) return prev;
   return prev.map(p => {
     if (p.id !== id) return p;
     const data = p.data as PatientDataValue;
