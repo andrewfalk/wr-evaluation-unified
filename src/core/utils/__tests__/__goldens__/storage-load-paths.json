@@ -1,0 +1,2386 @@
+{
+  "paths": {
+    "web": {
+      "storage.loadSavedItems": [
+        {
+          "id": "item-1",
+          "name": "저장1",
+          "count": 6,
+          "savedAt": "2025-12-31T00:00:00.000Z",
+          "patients": [
+            "#0",
+            "#1",
+            "#2",
+            "#3",
+            "#4",
+            "#5"
+          ]
+        }
+      ],
+      "storage.loadAutoSave": {
+        "savedAt": "2025-12-31T01:00:00.000Z",
+        "patients": [
+          "#0",
+          "#1",
+          "#2",
+          "#3",
+          "#4",
+          "#5"
+        ]
+      },
+      "workspaceRepository.loadSavedWorkspaces": [
+        {
+          "id": "item-1",
+          "name": "저장1",
+          "count": 6,
+          "savedAt": "2025-12-31T00:00:00.000Z",
+          "patients": [
+            "#6",
+            "#7",
+            "#8",
+            "#9",
+            "#10",
+            "#5"
+          ]
+        }
+      ],
+      "workspaceRepository.loadAutoSavedWorkspace": {
+        "savedAt": "2025-12-31T01:00:00.000Z",
+        "patients": [
+          "#6",
+          "#7",
+          "#8",
+          "#9",
+          "#10",
+          "#5"
+        ]
+      },
+      "useWorkspacePersistence.getLoadablePatientsFromSnapshot(autosave)": {
+        "patients": [
+          "#6",
+          "#7",
+          "#8",
+          "#9",
+          "#10"
+        ],
+        "failedCount": 1,
+        "totalCount": 6
+      },
+      "localToServerMigrator.collectLocalPatients(standalone)": [
+        "#0",
+        "#1",
+        "#2",
+        "#3",
+        "#4"
+      ]
+    },
+    "fs": {
+      "storage.loadSavedItems": [
+        {
+          "id": "item-1",
+          "name": "저장1",
+          "count": 6,
+          "savedAt": "2025-12-31T00:00:00.000Z",
+          "patients": [
+            "#0",
+            "#1",
+            "#2",
+            "#3",
+            "#4",
+            "#5"
+          ]
+        }
+      ],
+      "storage.loadAutoSave": {
+        "savedAt": "2025-12-31T01:00:00.000Z",
+        "patients": [
+          "#0",
+          "#1",
+          "#2",
+          "#3",
+          "#4",
+          "#5"
+        ]
+      },
+      "workspaceRepository.loadSavedWorkspaces": [
+        {
+          "id": "item-1",
+          "name": "저장1",
+          "count": 6,
+          "savedAt": "2025-12-31T00:00:00.000Z",
+          "patients": [
+            "#11",
+            "#12",
+            "#13",
+            "#14",
+            "#15",
+            "#5"
+          ]
+        }
+      ],
+      "workspaceRepository.loadAutoSavedWorkspace": {
+        "savedAt": "2025-12-31T01:00:00.000Z",
+        "patients": [
+          "#11",
+          "#12",
+          "#13",
+          "#14",
+          "#15",
+          "#5"
+        ]
+      },
+      "useWorkspacePersistence.getLoadablePatientsFromSnapshot(autosave)": {
+        "patients": [
+          "#11",
+          "#12",
+          "#13",
+          "#14",
+          "#15"
+        ],
+        "failedCount": 1,
+        "totalCount": 6
+      },
+      "localToServerMigrator.collectLocalPatients(standalone)": [
+        "#0",
+        "#1",
+        "#2",
+        "#3",
+        "#4"
+      ]
+    }
+  },
+  "patients": [
+    {
+      "id": "00000000-0000-4000-8000-00000000aa01",
+      "createdAt": "2024-05-01T00:00:00.000Z",
+      "moduleId": "knee",
+      "data": {
+        "shared": {
+          "patientNo": "LEGACY-01",
+          "name": "구형환자",
+          "gender": "male",
+          "height": "160",
+          "weight": "60",
+          "birthDate": "1960-01-15",
+          "injuryDate": "2025-10-05",
+          "hospitalName": "근로복지공단 안산병원",
+          "department": "직업환경의학과",
+          "doctorName": "김호길",
+          "evaluationDate": "2025-10-20",
+          "medicalRecord": "",
+          "highBloodPressure": "",
+          "diabetes": "",
+          "visitHistory": "",
+          "consultReplyOrtho": "",
+          "consultReplyNeuro": "",
+          "consultReplyRehab": "",
+          "consultReplyOther": "",
+          "specialNotes": "기타 동반 질환 없음",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high",
+              "klgRight": "3"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high",
+              "klgLeft": "2",
+              "reasonLeft": [],
+              "reasonLeftOther": ""
+            }
+          ],
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000008",
+              "jobName": "축산물 가공 작업자",
+              "presetId": null,
+              "startDate": "1997-12-03",
+              "endDate": "2015-01-03",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 251
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000007",
+              "jobName": "건설 현장 배관공",
+              "presetId": null,
+              "startDate": "2015-01-04",
+              "endDate": "2021-04-04",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 248
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "jobName": "물류센터 상하차원",
+              "presetId": null,
+              "startDate": "2021-04-05",
+              "endDate": "2025-10-05",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 260
+            }
+          ],
+          "videoAnalysis": {
+            "processes": [],
+            "clips": [],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            }
+          }
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000008",
+                "weight": "1900",
+                "squatting": "44",
+                "evidenceSources": [],
+                "stairs": false,
+                "kneeTwist": true,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000007",
+                "weight": "2360",
+                "squatting": "63",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": true,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000006",
+                "weight": "1920",
+                "squatting": "40",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": false,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              }
+            ],
+            "returnConsiderations": "무거운 물건 취급을 제한하고 쪼그려 앉는 작업은 피하는 것이 좋습니다."
+          }
+        },
+        "activeModules": [
+          "knee"
+        ]
+      },
+      "phase": "evaluation"
+    },
+    {
+      "id": "00000000-0000-4000-8000-00000000aa02",
+      "moduleId": "knee",
+      "data": {
+        "shared": {
+          "patientNo": "LEGACY-01",
+          "name": "구형환자",
+          "gender": "male",
+          "height": "160",
+          "weight": "60",
+          "birthDate": "1960-01-15",
+          "injuryDate": "2025-10-05",
+          "hospitalName": "근로복지공단 안산병원",
+          "department": "직업환경의학과",
+          "doctorName": "김호길",
+          "evaluationDate": "2025-10-20",
+          "medicalRecord": "",
+          "highBloodPressure": "",
+          "diabetes": "",
+          "visitHistory": "",
+          "consultReplyOrtho": "",
+          "consultReplyNeuro": "",
+          "consultReplyRehab": "",
+          "consultReplyOther": "",
+          "specialNotes": "기타 동반 질환 없음",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high",
+              "klgRight": "3"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high",
+              "klgLeft": "2",
+              "reasonLeft": [],
+              "reasonLeftOther": ""
+            }
+          ],
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000008",
+              "jobName": "축산물 가공 작업자",
+              "presetId": null,
+              "startDate": "1997-12-03",
+              "endDate": "2015-01-03",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 251
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000007",
+              "jobName": "건설 현장 배관공",
+              "presetId": null,
+              "startDate": "2015-01-04",
+              "endDate": "2021-04-04",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 248
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "jobName": "물류센터 상하차원",
+              "presetId": null,
+              "startDate": "2021-04-05",
+              "endDate": "2025-10-05",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 260
+            }
+          ],
+          "videoAnalysis": {
+            "processes": [],
+            "clips": [],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            }
+          }
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000008",
+                "weight": "1900",
+                "squatting": "44",
+                "evidenceSources": [],
+                "stairs": false,
+                "kneeTwist": true,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000007",
+                "weight": "2360",
+                "squatting": "63",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": true,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000006",
+                "weight": "1920",
+                "squatting": "40",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": false,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              }
+            ],
+            "returnConsiderations": "무거운 물건 취급을 제한하고 쪼그려 앉는 작업은 피하는 것이 좋습니다."
+          }
+        },
+        "activeModules": [
+          "knee"
+        ]
+      },
+      "createdAt": "2025-10-20",
+      "phase": "evaluation"
+    },
+    {
+      "id": "00000000-0000-4000-8000-00000000aa04",
+      "moduleId": "knee",
+      "data": {
+        "shared": {
+          "patientNo": "LEGACY-01",
+          "name": "구형환자",
+          "gender": "male",
+          "height": "160",
+          "weight": "60",
+          "birthDate": "1960-01-15",
+          "injuryDate": "2025-10-05",
+          "hospitalName": "근로복지공단 안산병원",
+          "department": "직업환경의학과",
+          "doctorName": "김호길",
+          "evaluationDate": "",
+          "medicalRecord": "",
+          "highBloodPressure": "",
+          "diabetes": "",
+          "visitHistory": "",
+          "consultReplyOrtho": "",
+          "consultReplyNeuro": "",
+          "consultReplyRehab": "",
+          "consultReplyOther": "",
+          "specialNotes": "기타 동반 질환 없음",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high",
+              "klgRight": "3"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high",
+              "klgLeft": "2",
+              "reasonLeft": [],
+              "reasonLeftOther": ""
+            }
+          ],
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000008",
+              "jobName": "축산물 가공 작업자",
+              "presetId": null,
+              "startDate": "1997-12-03",
+              "endDate": "2015-01-03",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 251
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000007",
+              "jobName": "건설 현장 배관공",
+              "presetId": null,
+              "startDate": "2015-01-04",
+              "endDate": "2021-04-04",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 248
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "jobName": "물류센터 상하차원",
+              "presetId": null,
+              "startDate": "2021-04-05",
+              "endDate": "2025-10-05",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 260
+            }
+          ],
+          "videoAnalysis": {
+            "processes": [],
+            "clips": [],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            }
+          }
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000008",
+                "weight": "1900",
+                "squatting": "44",
+                "evidenceSources": [],
+                "stairs": false,
+                "kneeTwist": true,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000007",
+                "weight": "2360",
+                "squatting": "63",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": true,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000006",
+                "weight": "1920",
+                "squatting": "40",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": false,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              }
+            ],
+            "returnConsiderations": "무거운 물건 취급을 제한하고 쪼그려 앉는 작업은 피하는 것이 좋습니다."
+          }
+        },
+        "activeModules": [
+          "knee"
+        ]
+      },
+      "createdAt": "2025-12-31T00:00:00.000Z",
+      "phase": "evaluation"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000009",
+      "createdAt": "2025-10-08T09:04:00.000Z",
+      "phase": "evaluation",
+      "data": {
+        "shared": {
+          "patientNo": "WR240002",
+          "name": "이영미",
+          "gender": "female",
+          "height": "160",
+          "weight": "60",
+          "birthDate": "1961-02-15",
+          "injuryDate": "2025-10-08",
+          "hospitalName": "근로복지공단 안산병원",
+          "department": "직업환경의학과",
+          "doctorName": "김호길",
+          "evaluationDate": "",
+          "medicalRecord": "",
+          "highBloodPressure": "",
+          "diabetes": "",
+          "visitHistory": "",
+          "consultReplyOrtho": "",
+          "consultReplyNeuro": "",
+          "consultReplyRehab": "",
+          "consultReplyOther": "",
+          "specialNotes": "",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000012",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000013",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000014",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": ""
+            }
+          ],
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000016",
+              "jobName": "병원 행정 사무원",
+              "presetId": null,
+              "startDate": "2012-04-07",
+              "endDate": "2020-10-07",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 238
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000015",
+              "jobName": "고객센터 상담원",
+              "presetId": null,
+              "startDate": "2020-10-08",
+              "endDate": "2025-10-08",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 239
+            }
+          ],
+          "videoAnalysis": {
+            "processes": [],
+            "clips": [],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            }
+          }
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000016",
+                "weight": "760",
+                "squatting": "13",
+                "evidenceSources": [],
+                "stairs": false,
+                "kneeTwist": false,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000015",
+                "weight": "620",
+                "squatting": "12",
+                "evidenceSources": [],
+                "stairs": false,
+                "kneeTwist": false,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              }
+            ],
+            "returnConsiderations": ""
+          },
+          "spine": {
+            "formulaVersion": "v5.1.3",
+            "tasks": [
+              {
+                "id": 101,
+                "sharedJobId": "00000000-0000-4000-8000-000000000016",
+                "name": "문서 상자 이동",
+                "posture": "G3",
+                "weight": 9,
+                "frequency": 16,
+                "timeValue": 5,
+                "timeUnit": "sec",
+                "correctionFactor": 1.1,
+                "force": 0
+              },
+              {
+                "id": 102,
+                "sharedJobId": "00000000-0000-4000-8000-000000000016",
+                "name": "사무 비품 정리",
+                "posture": "G4",
+                "weight": 8,
+                "frequency": 22,
+                "timeValue": 4,
+                "timeUnit": "sec",
+                "correctionFactor": 1,
+                "force": 0
+              },
+              {
+                "id": 121,
+                "sharedJobId": "00000000-0000-4000-8000-000000000015",
+                "name": "문서 상자 이동",
+                "posture": "G3",
+                "weight": 10,
+                "frequency": 18,
+                "timeValue": 5,
+                "timeUnit": "sec",
+                "correctionFactor": 1,
+                "force": 0
+              },
+              {
+                "id": 122,
+                "sharedJobId": "00000000-0000-4000-8000-000000000015",
+                "name": "사무 비품 정리",
+                "posture": "G4",
+                "weight": 6,
+                "frequency": 24,
+                "timeValue": 4,
+                "timeUnit": "sec",
+                "correctionFactor": 1.1,
+                "force": 0
+              }
+            ]
+          }
+        },
+        "activeModules": [
+          "knee",
+          "spine"
+        ]
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000017",
+      "createdAt": "2025-10-15T09:08:00.000Z",
+      "phase": "evaluation",
+      "data": {
+        "shared": {
+          "patientNo": "WR240003",
+          "name": "박준호",
+          "gender": "male",
+          "height": "161",
+          "weight": "61",
+          "birthDate": "1962-03-15",
+          "injuryDate": "2025-10-15",
+          "hospitalName": "근로복지공단 안산병원",
+          "department": "직업환경의학과",
+          "doctorName": "김호길",
+          "evaluationDate": "",
+          "medicalRecord": "",
+          "highBloodPressure": "",
+          "diabetes": "",
+          "visitHistory": "",
+          "consultReplyOrtho": "",
+          "consultReplyNeuro": "",
+          "consultReplyRehab": "",
+          "consultReplyOther": "",
+          "specialNotes": "",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000020",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": ""
+            }
+          ],
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000022",
+              "jobName": "학교 시설관리원",
+              "presetId": null,
+              "startDate": "2007-08-14",
+              "endDate": "2018-08-14",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 245
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000021",
+              "jobName": "통학버스 운전원",
+              "presetId": null,
+              "startDate": "2018-08-15",
+              "endDate": "2025-10-15",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 244
+            }
+          ],
+          "videoAnalysis": {
+            "processes": [],
+            "clips": [],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            }
+          }
+        },
+        "modules": {
+          "spine": {
+            "formulaVersion": "v5.1.3",
+            "tasks": [
+              {
+                "id": 201,
+                "sharedJobId": "00000000-0000-4000-8000-000000000022",
+                "name": "설비 부품 교체",
+                "posture": "G6",
+                "weight": 19,
+                "frequency": 30,
+                "timeValue": 7,
+                "timeUnit": "sec",
+                "correctionFactor": 1.3,
+                "force": 0
+              },
+              {
+                "id": 202,
+                "sharedJobId": "00000000-0000-4000-8000-000000000022",
+                "name": "공구함 이동",
+                "posture": "G4",
+                "weight": 13,
+                "frequency": 36,
+                "timeValue": 5,
+                "timeUnit": "sec",
+                "correctionFactor": 1.2,
+                "force": 0
+              },
+              {
+                "id": 221,
+                "sharedJobId": "00000000-0000-4000-8000-000000000021",
+                "name": "적재함 정리",
+                "posture": "G4",
+                "weight": 11,
+                "frequency": 24,
+                "timeValue": 5,
+                "timeUnit": "sec",
+                "correctionFactor": 1.1,
+                "force": 0
+              }
+            ]
+          }
+        },
+        "activeModules": [
+          "spine"
+        ]
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-00000000aa03",
+      "redacted": true
+    },
+    {
+      "id": "00000000-0000-4000-8000-00000000aa01",
+      "createdAt": "2024-05-01T00:00:00.000Z",
+      "moduleId": "knee",
+      "data": {
+        "shared": {
+          "patientNo": "LEGACY-01",
+          "name": "구형환자",
+          "gender": "male",
+          "height": "160",
+          "weight": "60",
+          "birthDate": "1960-01-15",
+          "injuryDate": "2025-10-05",
+          "hospitalName": "근로복지공단 안산병원",
+          "department": "직업환경의학과",
+          "doctorName": "김호길",
+          "evaluationDate": "2025-10-20",
+          "medicalRecord": "",
+          "highBloodPressure": "",
+          "diabetes": "",
+          "visitHistory": "",
+          "consultReplyOrtho": "",
+          "consultReplyNeuro": "",
+          "consultReplyRehab": "",
+          "consultReplyOther": "",
+          "specialNotes": "기타 동반 질환 없음",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high",
+              "klgRight": "3"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high",
+              "klgLeft": "2",
+              "reasonLeft": [],
+              "reasonLeftOther": ""
+            }
+          ],
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000008",
+              "jobName": "축산물 가공 작업자",
+              "presetId": null,
+              "startDate": "1997-12-03",
+              "endDate": "2015-01-03",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 251
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000007",
+              "jobName": "건설 현장 배관공",
+              "presetId": null,
+              "startDate": "2015-01-04",
+              "endDate": "2021-04-04",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 248
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "jobName": "물류센터 상하차원",
+              "presetId": null,
+              "startDate": "2021-04-05",
+              "endDate": "2025-10-05",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 260
+            }
+          ],
+          "videoAnalysis": {
+            "processes": [],
+            "clips": [],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            }
+          }
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000008",
+                "weight": "1900",
+                "squatting": "44",
+                "evidenceSources": [],
+                "stairs": false,
+                "kneeTwist": true,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000007",
+                "weight": "2360",
+                "squatting": "63",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": true,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000006",
+                "weight": "1920",
+                "squatting": "40",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": false,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              }
+            ],
+            "returnConsiderations": "무거운 물건 취급을 제한하고 쪼그려 앉는 작업은 피하는 것이 좋습니다."
+          }
+        },
+        "activeModules": [
+          "knee"
+        ]
+      },
+      "phase": "evaluation",
+      "meta": {
+        "organizationId": "local-web-workspace",
+        "ownerUserId": "web-user",
+        "createdBy": "web-user",
+        "updatedBy": "web-user",
+        "authMode": "local",
+        "source": "web"
+      },
+      "sync": {
+        "serverId": null,
+        "revision": 0,
+        "syncStatus": "local-only",
+        "lastSyncedAt": null
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-00000000aa02",
+      "moduleId": "knee",
+      "data": {
+        "shared": {
+          "patientNo": "LEGACY-01",
+          "name": "구형환자",
+          "gender": "male",
+          "height": "160",
+          "weight": "60",
+          "birthDate": "1960-01-15",
+          "injuryDate": "2025-10-05",
+          "hospitalName": "근로복지공단 안산병원",
+          "department": "직업환경의학과",
+          "doctorName": "김호길",
+          "evaluationDate": "2025-10-20",
+          "medicalRecord": "",
+          "highBloodPressure": "",
+          "diabetes": "",
+          "visitHistory": "",
+          "consultReplyOrtho": "",
+          "consultReplyNeuro": "",
+          "consultReplyRehab": "",
+          "consultReplyOther": "",
+          "specialNotes": "기타 동반 질환 없음",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high",
+              "klgRight": "3"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high",
+              "klgLeft": "2",
+              "reasonLeft": [],
+              "reasonLeftOther": ""
+            }
+          ],
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000008",
+              "jobName": "축산물 가공 작업자",
+              "presetId": null,
+              "startDate": "1997-12-03",
+              "endDate": "2015-01-03",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 251
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000007",
+              "jobName": "건설 현장 배관공",
+              "presetId": null,
+              "startDate": "2015-01-04",
+              "endDate": "2021-04-04",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 248
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "jobName": "물류센터 상하차원",
+              "presetId": null,
+              "startDate": "2021-04-05",
+              "endDate": "2025-10-05",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 260
+            }
+          ],
+          "videoAnalysis": {
+            "processes": [],
+            "clips": [],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            }
+          }
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000008",
+                "weight": "1900",
+                "squatting": "44",
+                "evidenceSources": [],
+                "stairs": false,
+                "kneeTwist": true,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000007",
+                "weight": "2360",
+                "squatting": "63",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": true,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000006",
+                "weight": "1920",
+                "squatting": "40",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": false,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              }
+            ],
+            "returnConsiderations": "무거운 물건 취급을 제한하고 쪼그려 앉는 작업은 피하는 것이 좋습니다."
+          }
+        },
+        "activeModules": [
+          "knee"
+        ]
+      },
+      "createdAt": "2025-10-20",
+      "phase": "evaluation",
+      "meta": {
+        "organizationId": "local-web-workspace",
+        "ownerUserId": "web-user",
+        "createdBy": "web-user",
+        "updatedBy": "web-user",
+        "authMode": "local",
+        "source": "web"
+      },
+      "sync": {
+        "serverId": null,
+        "revision": 0,
+        "syncStatus": "local-only",
+        "lastSyncedAt": null
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-00000000aa04",
+      "moduleId": "knee",
+      "data": {
+        "shared": {
+          "patientNo": "LEGACY-01",
+          "name": "구형환자",
+          "gender": "male",
+          "height": "160",
+          "weight": "60",
+          "birthDate": "1960-01-15",
+          "injuryDate": "2025-10-05",
+          "hospitalName": "근로복지공단 안산병원",
+          "department": "직업환경의학과",
+          "doctorName": "김호길",
+          "evaluationDate": "",
+          "medicalRecord": "",
+          "highBloodPressure": "",
+          "diabetes": "",
+          "visitHistory": "",
+          "consultReplyOrtho": "",
+          "consultReplyNeuro": "",
+          "consultReplyRehab": "",
+          "consultReplyOther": "",
+          "specialNotes": "기타 동반 질환 없음",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high",
+              "klgRight": "3"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high",
+              "klgLeft": "2",
+              "reasonLeft": [],
+              "reasonLeftOther": ""
+            }
+          ],
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000008",
+              "jobName": "축산물 가공 작업자",
+              "presetId": null,
+              "startDate": "1997-12-03",
+              "endDate": "2015-01-03",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 251
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000007",
+              "jobName": "건설 현장 배관공",
+              "presetId": null,
+              "startDate": "2015-01-04",
+              "endDate": "2021-04-04",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 248
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "jobName": "물류센터 상하차원",
+              "presetId": null,
+              "startDate": "2021-04-05",
+              "endDate": "2025-10-05",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 260
+            }
+          ],
+          "videoAnalysis": {
+            "processes": [],
+            "clips": [],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            }
+          }
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000008",
+                "weight": "1900",
+                "squatting": "44",
+                "evidenceSources": [],
+                "stairs": false,
+                "kneeTwist": true,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000007",
+                "weight": "2360",
+                "squatting": "63",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": true,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000006",
+                "weight": "1920",
+                "squatting": "40",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": false,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              }
+            ],
+            "returnConsiderations": "무거운 물건 취급을 제한하고 쪼그려 앉는 작업은 피하는 것이 좋습니다."
+          }
+        },
+        "activeModules": [
+          "knee"
+        ]
+      },
+      "createdAt": "2025-12-31T00:00:00.000Z",
+      "phase": "evaluation",
+      "meta": {
+        "organizationId": "local-web-workspace",
+        "ownerUserId": "web-user",
+        "createdBy": "web-user",
+        "updatedBy": "web-user",
+        "authMode": "local",
+        "source": "web"
+      },
+      "sync": {
+        "serverId": null,
+        "revision": 0,
+        "syncStatus": "local-only",
+        "lastSyncedAt": null
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000009",
+      "createdAt": "2025-10-08T09:04:00.000Z",
+      "phase": "evaluation",
+      "data": {
+        "shared": {
+          "patientNo": "WR240002",
+          "name": "이영미",
+          "gender": "female",
+          "height": "160",
+          "weight": "60",
+          "birthDate": "1961-02-15",
+          "injuryDate": "2025-10-08",
+          "hospitalName": "근로복지공단 안산병원",
+          "department": "직업환경의학과",
+          "doctorName": "김호길",
+          "evaluationDate": "",
+          "medicalRecord": "",
+          "highBloodPressure": "",
+          "diabetes": "",
+          "visitHistory": "",
+          "consultReplyOrtho": "",
+          "consultReplyNeuro": "",
+          "consultReplyRehab": "",
+          "consultReplyOther": "",
+          "specialNotes": "",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000012",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000013",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000014",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": ""
+            }
+          ],
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000016",
+              "jobName": "병원 행정 사무원",
+              "presetId": null,
+              "startDate": "2012-04-07",
+              "endDate": "2020-10-07",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 238
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000015",
+              "jobName": "고객센터 상담원",
+              "presetId": null,
+              "startDate": "2020-10-08",
+              "endDate": "2025-10-08",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 239
+            }
+          ],
+          "videoAnalysis": {
+            "processes": [],
+            "clips": [],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            }
+          }
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000016",
+                "weight": "760",
+                "squatting": "13",
+                "evidenceSources": [],
+                "stairs": false,
+                "kneeTwist": false,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000015",
+                "weight": "620",
+                "squatting": "12",
+                "evidenceSources": [],
+                "stairs": false,
+                "kneeTwist": false,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              }
+            ],
+            "returnConsiderations": ""
+          },
+          "spine": {
+            "formulaVersion": "v5.1.3",
+            "tasks": [
+              {
+                "id": 101,
+                "sharedJobId": "00000000-0000-4000-8000-000000000016",
+                "name": "문서 상자 이동",
+                "posture": "G3",
+                "weight": 9,
+                "frequency": 16,
+                "timeValue": 5,
+                "timeUnit": "sec",
+                "correctionFactor": 1.1,
+                "force": 0
+              },
+              {
+                "id": 102,
+                "sharedJobId": "00000000-0000-4000-8000-000000000016",
+                "name": "사무 비품 정리",
+                "posture": "G4",
+                "weight": 8,
+                "frequency": 22,
+                "timeValue": 4,
+                "timeUnit": "sec",
+                "correctionFactor": 1,
+                "force": 0
+              },
+              {
+                "id": 121,
+                "sharedJobId": "00000000-0000-4000-8000-000000000015",
+                "name": "문서 상자 이동",
+                "posture": "G3",
+                "weight": 10,
+                "frequency": 18,
+                "timeValue": 5,
+                "timeUnit": "sec",
+                "correctionFactor": 1,
+                "force": 0
+              },
+              {
+                "id": 122,
+                "sharedJobId": "00000000-0000-4000-8000-000000000015",
+                "name": "사무 비품 정리",
+                "posture": "G4",
+                "weight": 6,
+                "frequency": 24,
+                "timeValue": 4,
+                "timeUnit": "sec",
+                "correctionFactor": 1.1,
+                "force": 0
+              }
+            ]
+          }
+        },
+        "activeModules": [
+          "knee",
+          "spine"
+        ]
+      },
+      "meta": {
+        "organizationId": "local-web-workspace",
+        "ownerUserId": "web-user",
+        "createdBy": "web-user",
+        "updatedBy": "web-user",
+        "authMode": "local",
+        "source": "web"
+      },
+      "sync": {
+        "serverId": null,
+        "revision": 0,
+        "syncStatus": "local-only",
+        "lastSyncedAt": null
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000017",
+      "createdAt": "2025-10-15T09:08:00.000Z",
+      "phase": "evaluation",
+      "data": {
+        "shared": {
+          "patientNo": "WR240003",
+          "name": "박준호",
+          "gender": "male",
+          "height": "161",
+          "weight": "61",
+          "birthDate": "1962-03-15",
+          "injuryDate": "2025-10-15",
+          "hospitalName": "근로복지공단 안산병원",
+          "department": "직업환경의학과",
+          "doctorName": "김호길",
+          "evaluationDate": "",
+          "medicalRecord": "",
+          "highBloodPressure": "",
+          "diabetes": "",
+          "visitHistory": "",
+          "consultReplyOrtho": "",
+          "consultReplyNeuro": "",
+          "consultReplyRehab": "",
+          "consultReplyOther": "",
+          "specialNotes": "",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000020",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": ""
+            }
+          ],
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000022",
+              "jobName": "학교 시설관리원",
+              "presetId": null,
+              "startDate": "2007-08-14",
+              "endDate": "2018-08-14",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 245
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000021",
+              "jobName": "통학버스 운전원",
+              "presetId": null,
+              "startDate": "2018-08-15",
+              "endDate": "2025-10-15",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 244
+            }
+          ],
+          "videoAnalysis": {
+            "processes": [],
+            "clips": [],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            }
+          }
+        },
+        "modules": {
+          "spine": {
+            "formulaVersion": "v5.1.3",
+            "tasks": [
+              {
+                "id": 201,
+                "sharedJobId": "00000000-0000-4000-8000-000000000022",
+                "name": "설비 부품 교체",
+                "posture": "G6",
+                "weight": 19,
+                "frequency": 30,
+                "timeValue": 7,
+                "timeUnit": "sec",
+                "correctionFactor": 1.3,
+                "force": 0
+              },
+              {
+                "id": 202,
+                "sharedJobId": "00000000-0000-4000-8000-000000000022",
+                "name": "공구함 이동",
+                "posture": "G4",
+                "weight": 13,
+                "frequency": 36,
+                "timeValue": 5,
+                "timeUnit": "sec",
+                "correctionFactor": 1.2,
+                "force": 0
+              },
+              {
+                "id": 221,
+                "sharedJobId": "00000000-0000-4000-8000-000000000021",
+                "name": "적재함 정리",
+                "posture": "G4",
+                "weight": 11,
+                "frequency": 24,
+                "timeValue": 5,
+                "timeUnit": "sec",
+                "correctionFactor": 1.1,
+                "force": 0
+              }
+            ]
+          }
+        },
+        "activeModules": [
+          "spine"
+        ]
+      },
+      "meta": {
+        "organizationId": "local-web-workspace",
+        "ownerUserId": "web-user",
+        "createdBy": "web-user",
+        "updatedBy": "web-user",
+        "authMode": "local",
+        "source": "web"
+      },
+      "sync": {
+        "serverId": null,
+        "revision": 0,
+        "syncStatus": "local-only",
+        "lastSyncedAt": null
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-00000000aa01",
+      "createdAt": "2024-05-01T00:00:00.000Z",
+      "moduleId": "knee",
+      "data": {
+        "shared": {
+          "patientNo": "LEGACY-01",
+          "name": "구형환자",
+          "gender": "male",
+          "height": "160",
+          "weight": "60",
+          "birthDate": "1960-01-15",
+          "injuryDate": "2025-10-05",
+          "hospitalName": "근로복지공단 안산병원",
+          "department": "직업환경의학과",
+          "doctorName": "김호길",
+          "evaluationDate": "2025-10-20",
+          "medicalRecord": "",
+          "highBloodPressure": "",
+          "diabetes": "",
+          "visitHistory": "",
+          "consultReplyOrtho": "",
+          "consultReplyNeuro": "",
+          "consultReplyRehab": "",
+          "consultReplyOther": "",
+          "specialNotes": "기타 동반 질환 없음",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high",
+              "klgRight": "3"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high",
+              "klgLeft": "2",
+              "reasonLeft": [],
+              "reasonLeftOther": ""
+            }
+          ],
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000008",
+              "jobName": "축산물 가공 작업자",
+              "presetId": null,
+              "startDate": "1997-12-03",
+              "endDate": "2015-01-03",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 251
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000007",
+              "jobName": "건설 현장 배관공",
+              "presetId": null,
+              "startDate": "2015-01-04",
+              "endDate": "2021-04-04",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 248
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "jobName": "물류센터 상하차원",
+              "presetId": null,
+              "startDate": "2021-04-05",
+              "endDate": "2025-10-05",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 260
+            }
+          ],
+          "videoAnalysis": {
+            "processes": [],
+            "clips": [],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            }
+          }
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000008",
+                "weight": "1900",
+                "squatting": "44",
+                "evidenceSources": [],
+                "stairs": false,
+                "kneeTwist": true,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000007",
+                "weight": "2360",
+                "squatting": "63",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": true,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000006",
+                "weight": "1920",
+                "squatting": "40",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": false,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              }
+            ],
+            "returnConsiderations": "무거운 물건 취급을 제한하고 쪼그려 앉는 작업은 피하는 것이 좋습니다."
+          }
+        },
+        "activeModules": [
+          "knee"
+        ]
+      },
+      "phase": "evaluation",
+      "meta": {
+        "organizationId": "local-web-workspace",
+        "ownerUserId": "web-user",
+        "createdBy": "web-user",
+        "updatedBy": "web-user",
+        "authMode": "local",
+        "source": "electron"
+      },
+      "sync": {
+        "serverId": null,
+        "revision": 0,
+        "syncStatus": "local-only",
+        "lastSyncedAt": null
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-00000000aa02",
+      "moduleId": "knee",
+      "data": {
+        "shared": {
+          "patientNo": "LEGACY-01",
+          "name": "구형환자",
+          "gender": "male",
+          "height": "160",
+          "weight": "60",
+          "birthDate": "1960-01-15",
+          "injuryDate": "2025-10-05",
+          "hospitalName": "근로복지공단 안산병원",
+          "department": "직업환경의학과",
+          "doctorName": "김호길",
+          "evaluationDate": "2025-10-20",
+          "medicalRecord": "",
+          "highBloodPressure": "",
+          "diabetes": "",
+          "visitHistory": "",
+          "consultReplyOrtho": "",
+          "consultReplyNeuro": "",
+          "consultReplyRehab": "",
+          "consultReplyOther": "",
+          "specialNotes": "기타 동반 질환 없음",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high",
+              "klgRight": "3"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high",
+              "klgLeft": "2",
+              "reasonLeft": [],
+              "reasonLeftOther": ""
+            }
+          ],
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000008",
+              "jobName": "축산물 가공 작업자",
+              "presetId": null,
+              "startDate": "1997-12-03",
+              "endDate": "2015-01-03",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 251
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000007",
+              "jobName": "건설 현장 배관공",
+              "presetId": null,
+              "startDate": "2015-01-04",
+              "endDate": "2021-04-04",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 248
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "jobName": "물류센터 상하차원",
+              "presetId": null,
+              "startDate": "2021-04-05",
+              "endDate": "2025-10-05",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 260
+            }
+          ],
+          "videoAnalysis": {
+            "processes": [],
+            "clips": [],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            }
+          }
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000008",
+                "weight": "1900",
+                "squatting": "44",
+                "evidenceSources": [],
+                "stairs": false,
+                "kneeTwist": true,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000007",
+                "weight": "2360",
+                "squatting": "63",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": true,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000006",
+                "weight": "1920",
+                "squatting": "40",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": false,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              }
+            ],
+            "returnConsiderations": "무거운 물건 취급을 제한하고 쪼그려 앉는 작업은 피하는 것이 좋습니다."
+          }
+        },
+        "activeModules": [
+          "knee"
+        ]
+      },
+      "createdAt": "2025-10-20",
+      "phase": "evaluation",
+      "meta": {
+        "organizationId": "local-web-workspace",
+        "ownerUserId": "web-user",
+        "createdBy": "web-user",
+        "updatedBy": "web-user",
+        "authMode": "local",
+        "source": "electron"
+      },
+      "sync": {
+        "serverId": null,
+        "revision": 0,
+        "syncStatus": "local-only",
+        "lastSyncedAt": null
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-00000000aa04",
+      "moduleId": "knee",
+      "data": {
+        "shared": {
+          "patientNo": "LEGACY-01",
+          "name": "구형환자",
+          "gender": "male",
+          "height": "160",
+          "weight": "60",
+          "birthDate": "1960-01-15",
+          "injuryDate": "2025-10-05",
+          "hospitalName": "근로복지공단 안산병원",
+          "department": "직업환경의학과",
+          "doctorName": "김호길",
+          "evaluationDate": "",
+          "medicalRecord": "",
+          "highBloodPressure": "",
+          "diabetes": "",
+          "visitHistory": "",
+          "consultReplyOrtho": "",
+          "consultReplyNeuro": "",
+          "consultReplyRehab": "",
+          "consultReplyOther": "",
+          "specialNotes": "기타 동반 질환 없음",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right",
+              "confirmedRight": "confirmed",
+              "assessmentRight": "high",
+              "klgRight": "3"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000005",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left",
+              "confirmedLeft": "confirmed",
+              "assessmentLeft": "high",
+              "klgLeft": "2",
+              "reasonLeft": [],
+              "reasonLeftOther": ""
+            }
+          ],
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000008",
+              "jobName": "축산물 가공 작업자",
+              "presetId": null,
+              "startDate": "1997-12-03",
+              "endDate": "2015-01-03",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 251
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000007",
+              "jobName": "건설 현장 배관공",
+              "presetId": null,
+              "startDate": "2015-01-04",
+              "endDate": "2021-04-04",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 248
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000006",
+              "jobName": "물류센터 상하차원",
+              "presetId": null,
+              "startDate": "2021-04-05",
+              "endDate": "2025-10-05",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 260
+            }
+          ],
+          "videoAnalysis": {
+            "processes": [],
+            "clips": [],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            }
+          }
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000008",
+                "weight": "1900",
+                "squatting": "44",
+                "evidenceSources": [],
+                "stairs": false,
+                "kneeTwist": true,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000007",
+                "weight": "2360",
+                "squatting": "63",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": true,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": true,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000006",
+                "weight": "1920",
+                "squatting": "40",
+                "evidenceSources": [],
+                "stairs": true,
+                "kneeTwist": false,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              }
+            ],
+            "returnConsiderations": "무거운 물건 취급을 제한하고 쪼그려 앉는 작업은 피하는 것이 좋습니다."
+          }
+        },
+        "activeModules": [
+          "knee"
+        ]
+      },
+      "createdAt": "2025-12-31T00:00:00.000Z",
+      "phase": "evaluation",
+      "meta": {
+        "organizationId": "local-web-workspace",
+        "ownerUserId": "web-user",
+        "createdBy": "web-user",
+        "updatedBy": "web-user",
+        "authMode": "local",
+        "source": "electron"
+      },
+      "sync": {
+        "serverId": null,
+        "revision": 0,
+        "syncStatus": "local-only",
+        "lastSyncedAt": null
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000009",
+      "createdAt": "2025-10-08T09:04:00.000Z",
+      "phase": "evaluation",
+      "data": {
+        "shared": {
+          "patientNo": "WR240002",
+          "name": "이영미",
+          "gender": "female",
+          "height": "160",
+          "weight": "60",
+          "birthDate": "1961-02-15",
+          "injuryDate": "2025-10-08",
+          "hospitalName": "근로복지공단 안산병원",
+          "department": "직업환경의학과",
+          "doctorName": "김호길",
+          "evaluationDate": "",
+          "medicalRecord": "",
+          "highBloodPressure": "",
+          "diabetes": "",
+          "visitHistory": "",
+          "consultReplyOrtho": "",
+          "consultReplyNeuro": "",
+          "consultReplyRehab": "",
+          "consultReplyOther": "",
+          "specialNotes": "",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000012",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "right"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000013",
+              "code": "M17.1",
+              "name": "양측성 무릎관절증",
+              "side": "left"
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000014",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": ""
+            }
+          ],
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000016",
+              "jobName": "병원 행정 사무원",
+              "presetId": null,
+              "startDate": "2012-04-07",
+              "endDate": "2020-10-07",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 238
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000015",
+              "jobName": "고객센터 상담원",
+              "presetId": null,
+              "startDate": "2020-10-08",
+              "endDate": "2025-10-08",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 239
+            }
+          ],
+          "videoAnalysis": {
+            "processes": [],
+            "clips": [],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            }
+          }
+        },
+        "modules": {
+          "knee": {
+            "jobExtras": [
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000016",
+                "weight": "760",
+                "squatting": "13",
+                "evidenceSources": [],
+                "stairs": false,
+                "kneeTwist": false,
+                "startStop": true,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              },
+              {
+                "sharedJobId": "00000000-0000-4000-8000-000000000015",
+                "weight": "620",
+                "squatting": "12",
+                "evidenceSources": [],
+                "stairs": false,
+                "kneeTwist": false,
+                "startStop": false,
+                "tightSpace": false,
+                "kneeContact": false,
+                "jumpDown": false
+              }
+            ],
+            "returnConsiderations": ""
+          },
+          "spine": {
+            "formulaVersion": "v5.1.3",
+            "tasks": [
+              {
+                "id": 101,
+                "sharedJobId": "00000000-0000-4000-8000-000000000016",
+                "name": "문서 상자 이동",
+                "posture": "G3",
+                "weight": 9,
+                "frequency": 16,
+                "timeValue": 5,
+                "timeUnit": "sec",
+                "correctionFactor": 1.1,
+                "force": 0
+              },
+              {
+                "id": 102,
+                "sharedJobId": "00000000-0000-4000-8000-000000000016",
+                "name": "사무 비품 정리",
+                "posture": "G4",
+                "weight": 8,
+                "frequency": 22,
+                "timeValue": 4,
+                "timeUnit": "sec",
+                "correctionFactor": 1,
+                "force": 0
+              },
+              {
+                "id": 121,
+                "sharedJobId": "00000000-0000-4000-8000-000000000015",
+                "name": "문서 상자 이동",
+                "posture": "G3",
+                "weight": 10,
+                "frequency": 18,
+                "timeValue": 5,
+                "timeUnit": "sec",
+                "correctionFactor": 1,
+                "force": 0
+              },
+              {
+                "id": 122,
+                "sharedJobId": "00000000-0000-4000-8000-000000000015",
+                "name": "사무 비품 정리",
+                "posture": "G4",
+                "weight": 6,
+                "frequency": 24,
+                "timeValue": 4,
+                "timeUnit": "sec",
+                "correctionFactor": 1.1,
+                "force": 0
+              }
+            ]
+          }
+        },
+        "activeModules": [
+          "knee",
+          "spine"
+        ]
+      },
+      "meta": {
+        "organizationId": "local-web-workspace",
+        "ownerUserId": "web-user",
+        "createdBy": "web-user",
+        "updatedBy": "web-user",
+        "authMode": "local",
+        "source": "electron"
+      },
+      "sync": {
+        "serverId": null,
+        "revision": 0,
+        "syncStatus": "local-only",
+        "lastSyncedAt": null
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000017",
+      "createdAt": "2025-10-15T09:08:00.000Z",
+      "phase": "evaluation",
+      "data": {
+        "shared": {
+          "patientNo": "WR240003",
+          "name": "박준호",
+          "gender": "male",
+          "height": "161",
+          "weight": "61",
+          "birthDate": "1962-03-15",
+          "injuryDate": "2025-10-15",
+          "hospitalName": "근로복지공단 안산병원",
+          "department": "직업환경의학과",
+          "doctorName": "김호길",
+          "evaluationDate": "",
+          "medicalRecord": "",
+          "highBloodPressure": "",
+          "diabetes": "",
+          "visitHistory": "",
+          "consultReplyOrtho": "",
+          "consultReplyNeuro": "",
+          "consultReplyRehab": "",
+          "consultReplyOther": "",
+          "specialNotes": "",
+          "diagnoses": [
+            {
+              "id": "00000000-0000-4000-8000-000000000020",
+              "code": "M51.1",
+              "name": "요추추간판탈출증",
+              "side": ""
+            }
+          ],
+          "jobs": [
+            {
+              "id": "00000000-0000-4000-8000-000000000022",
+              "jobName": "학교 시설관리원",
+              "presetId": null,
+              "startDate": "2007-08-14",
+              "endDate": "2018-08-14",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 245
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000021",
+              "jobName": "통학버스 운전원",
+              "presetId": null,
+              "startDate": "2018-08-15",
+              "endDate": "2025-10-15",
+              "workPeriodOverride": "",
+              "workDaysPerYear": 244
+            }
+          ],
+          "videoAnalysis": {
+            "processes": [],
+            "clips": [],
+            "processFeatures": [],
+            "jobFeatures": [],
+            "candidateFeatures": [],
+            "appliedInputs": [],
+            "settings": {
+              "retentionMode": "privacy_first"
+            }
+          }
+        },
+        "modules": {
+          "spine": {
+            "formulaVersion": "v5.1.3",
+            "tasks": [
+              {
+                "id": 201,
+                "sharedJobId": "00000000-0000-4000-8000-000000000022",
+                "name": "설비 부품 교체",
+                "posture": "G6",
+                "weight": 19,
+                "frequency": 30,
+                "timeValue": 7,
+                "timeUnit": "sec",
+                "correctionFactor": 1.3,
+                "force": 0
+              },
+              {
+                "id": 202,
+                "sharedJobId": "00000000-0000-4000-8000-000000000022",
+                "name": "공구함 이동",
+                "posture": "G4",
+                "weight": 13,
+                "frequency": 36,
+                "timeValue": 5,
+                "timeUnit": "sec",
+                "correctionFactor": 1.2,
+                "force": 0
+              },
+              {
+                "id": 221,
+                "sharedJobId": "00000000-0000-4000-8000-000000000021",
+                "name": "적재함 정리",
+                "posture": "G4",
+                "weight": 11,
+                "frequency": 24,
+                "timeValue": 5,
+                "timeUnit": "sec",
+                "correctionFactor": 1.1,
+                "force": 0
+              }
+            ]
+          }
+        },
+        "activeModules": [
+          "spine"
+        ]
+      },
+      "meta": {
+        "organizationId": "local-web-workspace",
+        "ownerUserId": "web-user",
+        "createdBy": "web-user",
+        "updatedBy": "web-user",
+        "authMode": "local",
+        "source": "electron"
+      },
+      "sync": {
+        "serverId": null,
+        "revision": 0,
+        "syncStatus": "local-only",
+        "lastSyncedAt": null
+      }
+    }
+  ]
+}

@@ -17,11 +17,26 @@ import goldenPatients from './core/fixtures/goldenPatients.json';
 const jobPresets = JSON.parse(readFileSync('public/job-presets.json', 'utf8'));
 const AUTO_SAVE_KEY = 'wrEvalUnifiedAutoSave';
 
-afterEach(() => resetAppEnvironment());
+// 테스트에서 만든 라우터 전부 — 끝날 때 등록 안 된 요청이 하나도 없어야 한다(#287 Codex 권고: 화면 단언만으로는
+// 앱이 조용히 삼킨 추가 요청을 못 잡는다).
+const routers = [];
+function trackRouter(router) {
+  routers.push(router);
+  return router;
+}
+
+afterEach(() => {
+  try {
+    for (const router of routers) expect(router.unhandled, 'unregistered requests').toEqual([]);
+  } finally {
+    routers.length = 0;
+    resetAppEnvironment();
+  }
+});
 
 function webLocalRouter() {
   // 웹 로컬 모드가 부팅 중에 내는 요청은 내장 직종 프리셋 1종뿐이다(StrictMode라 2회).
-  return createFetchRouter({ 'GET /job-presets.json': jobPresets });
+  return trackRouter(createFetchRouter({ 'GET /job-presets.json': jobPresets }));
 }
 
 function seedAutoSave(patients) {
@@ -142,7 +157,7 @@ function serverPatient(p, revision = 1) {
 }
 
 function intranetRouter(extra = {}) {
-  return createFetchRouter({
+  return trackRouter(createFetchRouter({
     'GET /job-presets.json': jobPresets,
     'GET /api/config/public': PUBLIC_CONFIG,
     'POST /api/auth/csrf': { accessToken: 'tok-1', accessExpiresAt: '2099-01-01T00:00:00.000Z', user: DOCTOR },
@@ -155,7 +170,7 @@ function intranetRouter(extra = {}) {
     'POST /api/patients/:id/lock': { leaseToken: 'lease-1', expiresAt: '2099-01-01T00:00:00.000Z', ttlMs: 60000 },
     'DELETE /api/patients/:id/lock': () => ({ status: 204 }),
     ...extra,
-  });
+  }));
 }
 
 // 부팅 무한루프 감지 상한: StrictMode 이중 effect로 2회가 정상(세션 확인 1 + 재마운트 1).

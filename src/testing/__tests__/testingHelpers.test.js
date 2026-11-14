@@ -79,6 +79,14 @@ describe('createFetchRouter', () => {
     expect(router.unhandled).toEqual([]);
   });
 
+  it('reads body and headers from a Request unless init overrides them', async () => {
+    const router = createFetchRouter({ 'POST /api/x': (req) => ({ body: { body: req.body, auth: req.headers.authorization ?? req.headers.Authorization } }) });
+    const request = new Request('https://srv.test/api/x', { method: 'POST', body: JSON.stringify({ a: 1 }), headers: { Authorization: 'Bearer t' } });
+    await expect((await router.fetch(request)).json()).resolves.toEqual({ body: { a: 1 }, auth: 'Bearer t' });
+    const overridden = await router.fetch(new Request('https://srv.test/api/x', { method: 'POST', body: '{"a":1}' }), { body: '{"b":2}', headers: { Authorization: 'Bearer u' } });
+    await expect(overridden.json()).resolves.toEqual({ body: { b: 2 }, auth: 'Bearer u' });
+  });
+
   it('matches `:param` patterns after exact keys', async () => {
     const router = createFetchRouter({
       'POST /api/patients/:id/lock': (req) => ({ body: { id: req.params.id } }),
