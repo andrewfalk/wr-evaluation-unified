@@ -240,6 +240,11 @@ const sharedReplaced = defineTransition<SharedReplacedPayload>('patient/sharedRe
   ))
 ));
 
+/** "저장하지 않고 이동" — 그 환자를 자동 push 대상에서 뺀다(usePatientSync가 다시 열 때 푼다). */
+const patientPaused = defineTransition<PatientIdPayload>('sync/patientPaused', (prev, { id }) => (
+  prev.map(p => (p.id === id ? { ...p, sync: { ...(p.sync || {}), syncPaused: true } } : p))
+));
+
 /** 이름 붙은 전이 모음. P2-33~39에서 훅별로 채운다(계획 "전이 목록"). */
 export const patientTx = {
   /** #13 usePatientCrud.updatePatient · #23 usePresetManagement.applyPreset */
@@ -260,4 +265,6 @@ export const patientTx = {
   replacedFromServer,
   /** #20 EMR 일괄 추출 · #21 다학제 회신(현행 그대로 — P2-39b에서 sharedPatched로 교체) */
   sharedReplaced,
+  /** #1 App 환자 전환 — 저장하지 않고 이동 */
+  patientPaused,
 } as const;

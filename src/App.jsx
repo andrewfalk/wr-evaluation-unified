@@ -41,6 +41,7 @@ import { useDoctorRoster, usePatientScope } from './app/usePatientScope';
 import { useUnsavedDraftGuard } from './app/useUnsavedDraftGuard';
 import { useModalState } from './app/useModalState';
 import { usePatientsContainer } from './core/state/patientStore/usePatientsContainer';
+import { patientTx } from './core/state/patientStore/transitions';
 import { hasIntranetSession, isIntranetContext } from './platform/dataMode';
 import { getLifecycleBridge } from './platform/bridge';
 
@@ -67,8 +68,9 @@ import './modules/wrist';
 
 function App() {
   const { session, setSession, resetToLocalSession, getAuthEpoch, isAuthenticated, sessionVerified, logout } = useAuth();
-  // 환자 목록 — 환자 상태 컨테이너(src/core/state/patientStore, REFACTORING_ROADMAP Phase 2 C4·P2-32). setPatients는 참조 고정.
-  const { patients, setPatients } = usePatientsContainer();
+  // 환자 목록·활성 환자·선택 집합 — 환자 상태 컨테이너(src/core/state/patientStore, REFACTORING_ROADMAP Phase 2 C4·P2-32·P2-37).
+  // setter는 전부 참조 고정, 훅에는 지금처럼 따로 넘긴다.
+  const { patients, setPatients, activeId, setActiveId, selectedIds, setSelectedIds } = usePatientsContainer();
   // 목록·대시보드 scope 상태·파생값, 세션이 바뀌면 기본값으로 — src/app/usePatientScope.ts(P2-27).
   const patientScopeState = usePatientScope(session);
   const {
@@ -76,7 +78,6 @@ function App() {
     effectivePatientScope, canUseDashboardScope, effectiveDashboardScope,
   } = patientScopeState;
   const [patientSyncPaused, setPatientSyncPaused] = useState(false);
-  const [activeId, setActiveId] = useState(null);
   // 모달 열림 상태 — 키별 맵 하나(불리언 8 + 프리셋 3, 여러 모달이 동시에 열릴 수 있음): src/app/useModalState.ts(P2-30).
   // 아래 이름들은 예전 개별 useState와 같은 값·setter다(AppModals·하위 훅은 아직 props로 받는다).
   const { modals, setterFor } = useModalState();
@@ -85,7 +86,6 @@ function App() {
   const [errors, setErrors] = useState({});
   const [showSidebar, setShowSidebar] = useState(false);
   const [patientFilters, setPatientFilters] = useState(DEFAULT_PATIENT_FILTERS);
-  const [selectedIds, setSelectedIds] = useState(new Set());
   const { settings, handleSaveSettings, switchToLocalMode } = useAppSettings({ session, setSession, resetToLocalSession });
   useAuthSync({ session, setSession, resetToLocalSession, getAuthEpoch });
   const showSettings = modals.settings; const setShowSettings = setterFor('settings');
@@ -327,9 +327,7 @@ function App() {
     const proceedUnresolved = (message) => async () => {
       const ok = await showConfirm(message);
       if (!ok) return false;
-      setPatients(prev => prev.map(p => (
-        p.id === current.id ? { ...p, sync: { ...(p.sync || {}), syncPaused: true } } : p
-      )));
+      setPatients(patientTx.patientPaused({ id: current.id }));
       switchPatient(patientId);
       return true;
     };
@@ -368,7 +366,7 @@ function App() {
   // 영상 분석 서버 적용 후 서버 동기화 환자를 목록에 반영(로컬 id 보존 → id로 교체).
   const onVideoServerApplied = useCallback((serverPatient) => {
     if (!serverPatient?.id) return;
-    setPatients(prev => prev.map(p => (p.id === serverPatient.id ? serverPatient : p)));
+    setPatients(patientTx.replacedFromServer({ id: serverPatient.id, serverPatient, keepLocalMeta: false }));
   }, [setPatients]);
 
   // 평가 완료 시 evaluationDate 자동 설정
@@ -416,7 +414,7 @@ function App() {
     const ok = await showConfirm('현재 작업 중인 환자 목록을 모두 삭제하시겠습니까?');
     if (!ok) return;
     setPatientSyncPaused(true);
-    setPatients([]);
+    setPatients(patientTx.replacedAll({ patients: [] }));
     setActiveId(null);
     setSelectedIds(new Set());
     setIntakeShared(null);

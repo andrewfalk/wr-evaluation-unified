@@ -9,7 +9,7 @@
     "cssRawHex": 230,
     "inlineStyleHex": 10,
     "intranetModeComparisons": 0,
-    "untaggedSetPatients": 7
+    "untaggedSetPatients": 4
   },
   "webStorageAllowlist": [
     "src/core/auth/authChannel.js",
