@@ -40,6 +40,7 @@ import { selectScreen, useScreenRouter } from './app/useScreenRouter';
 import { useDoctorRoster, usePatientScope } from './app/usePatientScope';
 import { useUnsavedDraftGuard } from './app/useUnsavedDraftGuard';
 import { useModalState } from './app/useModalState';
+import { usePatientsContainer } from './core/state/patientStore/usePatientsContainer';
 import { hasIntranetSession, isIntranetContext } from './platform/dataMode';
 import { getLifecycleBridge } from './platform/bridge';
 
@@ -66,7 +67,8 @@ import './modules/wrist';
 
 function App() {
   const { session, setSession, resetToLocalSession, getAuthEpoch, isAuthenticated, sessionVerified, logout } = useAuth();
-  const [patients, setPatients] = useState([]);
+  // 환자 목록 — 환자 상태 컨테이너(src/core/state/patientStore, REFACTORING_ROADMAP Phase 2 C4·P2-32). setPatients는 참조 고정.
+  const { patients, setPatients } = usePatientsContainer();
   // 목록·대시보드 scope 상태·파생값, 세션이 바뀌면 기본값으로 — src/app/usePatientScope.ts(P2-27).
   const patientScopeState = usePatientScope(session);
   const {

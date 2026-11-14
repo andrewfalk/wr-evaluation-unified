@@ -546,7 +546,7 @@ function SignupRequestsTab({ session }) {
 // ── Patient Assignment Tab ────────────────────────────────────────────────────
 function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
   const [doctors, setDoctors]     = useState([]);
-  const [patients, setPatients]   = useState([]);
+  const [patients, setServerPatients] = useState([]);
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState(null);
   const [pending, setPending]     = useState({}); // { patientId: userId | '' }
@@ -587,7 +587,7 @@ function PatientAssignmentTab({ session, onPatientAssignmentChanged }) {
         if (all.length >= (data.total ?? 0)) break;
         offset += LIMIT;
       }
-      setPatients(all);
+      setServerPatients(all);
       setPending({});
     } catch (err) {
       if (signal.aborted) return; // stale request superseded by a newer one
