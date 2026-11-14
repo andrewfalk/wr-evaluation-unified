@@ -42,42 +42,60 @@ afterEach(() => {
   delete window.electron;
 });
 
+// 저장원(자동저장·저장 목록)마다 다른 구형 환자를 둔다 — 한 저장원을 읽지 않는 회귀가 다른 저장원에 가려지지 않게
+// (#300 Codex 권고). 둘 다 수집·업로드돼야 한다.
+const legacyFromAutoSave = { ...legacy, id: '00000000-0000-4000-8000-00000000bb02', data: { ...legacy.data, shared: { ...legacy.data.shared, patientNo: 'LEGACY-AUTO' } } };
+const legacyFromSavedItems = { ...legacy, id: '00000000-0000-4000-8000-00000000bb03', data: { ...legacy.data, shared: { ...legacy.data.shared, patientNo: 'LEGACY-SAVED' } } };
+
 describe.each([
-  ['웹 localStorage(자동저장 + 저장 목록)', () => {
-    localStorage.setItem('wrEvalUnifiedAutoSave', JSON.stringify({ savedAt: 'x', patients: [legacy] }));
-    localStorage.setItem('wrEvalUnifiedSavedItems', JSON.stringify([{ id: 'i1', name: 'A', patients: [legacy] }]));
+  ['웹 localStorage', () => {
+    localStorage.setItem('wrEvalUnifiedAutoSave', JSON.stringify({ savedAt: 'x', patients: [legacyFromAutoSave] }));
+    localStorage.setItem('wrEvalUnifiedSavedItems', JSON.stringify([{ id: 'i1', name: 'A', patients: [legacyFromSavedItems] }]));
   }],
   ['독립형 FS(fs* IPC)', () => {
     window.electron = makeBridgeStub('standalone', {
       overrides: {
-        fsLoadItems: async () => [{ id: 'i1', name: 'A', patients: [legacy] }],
-        fsLoadAutoSave: async () => ({ savedAt: 'x', patients: [legacy] }),
+        fsLoadItems: async () => [{ id: 'i1', name: 'A', patients: [legacyFromSavedItems] }],
+        fsLoadAutoSave: async () => ({ savedAt: 'x', patients: [legacyFromAutoSave] }),
       },
     });
   }],
 ])('구형 환자 이관 — %s', (_label, seed) => {
-  it('collectLocalPatients가 구형 환자를 신형식(modules·activeModules)으로 내보낸다', async () => {
+  it('collectLocalPatients가 두 저장원의 구형 환자를 모두 신형식(modules·activeModules)으로 내보낸다', async () => {
     seed();
-    const [p] = await collectLocalPatients();
-    expect(p.id).toBe(legacy.id);
-    expect(p.data.activeModules).toEqual(['knee']);
-    expect(p.data.modules.knee).toEqual(kneeModule); // 무릎 평가 데이터가 그대로 옮겨진다
-    expect('module' in p.data).toBe(false);
+    const patients = await collectLocalPatients();
+    expect(patients.map((p) => p.id).sort()).toEqual([legacyFromAutoSave.id, legacyFromSavedItems.id].sort());
+    for (const p of patients) {
+      expect(p.data.activeModules).toEqual(['knee']);
+      expect(p.data.modules.knee).toEqual(kneeModule); // 무릎 평가 데이터가 그대로 옮겨진다
+      expect('module' in p.data).toBe(false);
+    }
   });
 
-  it('runMigration → pushPatient POST 본문에 modules·activeModules가 채워진다(평가 데이터 보존)', async () => {
+  it('runMigration → pushPatient POST 본문에 modules·activeModules가 채워진다(평가 데이터 보존, 두 저장원 모두)', async () => {
     seed();
     const result = await runMigration({ session: SESSION, settings: {} });
     expect(result.failed).toEqual([]);
     const bodies = postBodies();
-    expect(bodies).toHaveLength(1);
-    const [body] = bodies;
-    expect(body.id).toBe(legacy.id);
-    expect(body.data.activeModules).toEqual(['knee']);
-    expect(Object.keys(body.data.modules)).toEqual(['knee']);
-    expect(body.data.modules.knee).toEqual(kneeModule);
-    expect('module' in body.data).toBe(false);
-    expect(body.data.shared.patientNo).toBe('LEGACY-PUSH');
-    expect(body.data.shared.doctorName).toBe('김의사'); // stampDoctorName
+    expect(bodies.map((b) => b.data.shared.patientNo).sort()).toEqual(['LEGACY-AUTO', 'LEGACY-SAVED']);
+    for (const body of bodies) {
+      expect(body.data.activeModules).toEqual(['knee']);
+      expect(Object.keys(body.data.modules)).toEqual(['knee']);
+      expect(body.data.modules.knee).toEqual(kneeModule);
+      expect('module' in body.data).toBe(false);
+      expect(body.data.shared.doctorName).toBe('김의사'); // stampDoctorName
+    }
+  });
+});
+
+describe('저장원 하나만 있을 때도 수집된다', () => {
+  it('자동저장만', async () => {
+    localStorage.setItem('wrEvalUnifiedAutoSave', JSON.stringify({ savedAt: 'x', patients: [legacyFromAutoSave] }));
+    expect((await collectLocalPatients()).map((p) => p.id)).toEqual([legacyFromAutoSave.id]);
+  });
+
+  it('저장 목록만', async () => {
+    localStorage.setItem('wrEvalUnifiedSavedItems', JSON.stringify([{ id: 'i1', name: 'A', patients: [legacyFromSavedItems] }]));
+    expect((await collectLocalPatients()).map((p) => p.id)).toEqual([legacyFromSavedItems.id]);
   });
 });
