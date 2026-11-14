@@ -42,6 +42,19 @@ export interface RequestOptions {
   notFoundAsNull?: boolean;
   csrfRetry?: boolean;
   wrongPasswordShortCircuit?: boolean;
+  /** fetch의 credentials. 기본 'include', null이면 키를 넣지 않는다(브라우저 기본 same-origin — 외부 origin에 쿠키를 싣지 않음). */
+  credentials?: RequestCredentials | null;
+  /**
+   * true면 HTTP 오류로 던지지 않고 `{ ok, status, data }`를 돌려준다(본문은 상태와 무관하게 JSON으로 읽고 실패하면 null).
+   * refresh·CSRF 재시도도 하지 않는다. 네트워크 오류·AbortError는 그대로 던진다. 예전 raw fetch 자리(P2-17)용.
+   */
+  envelope?: boolean;
+}
+
+export interface ResponseEnvelope {
+  ok: boolean;
+  status: number;
+  data: unknown;
 }
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -80,16 +93,19 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
     const {
       baseUrl = '', method = 'GET', body, session, headers = {}, signal, skipAuthRefresh = false,
       parse = 'json', jsonRequest = true, readErrorBody = true, notFoundAsNull = false, csrfRetry = true,
-      wrongPasswordShortCircuit = false,
+      wrongPasswordShortCircuit = false, credentials = 'include', envelope = false,
     } = options;
 
-    const response = await doFetch(buildUrl(baseUrl, path), {
-      method,
-      credentials: 'include',
-      headers: buildHeaders(method, session, headers, jsonRequest),
-      ...(jsonRequest ? { body: body === undefined ? undefined : JSON.stringify(body) } : {}),
-      ...(signal !== undefined ? { signal } : {}),
-    });
+    const init: RequestInit = { method };
+    if (credentials !== null) init.credentials = credentials;
+    init.headers = buildHeaders(method, session, headers, jsonRequest);
+    if (jsonRequest || body !== undefined) init.body = body === undefined ? undefined : JSON.stringify(body);
+    if (signal !== undefined) init.signal = signal;
+    const response = await doFetch(buildUrl(baseUrl, path), init);
+
+    if (envelope) {
+      return { ok: response.ok, status: response.status, data: await readJson(response) } satisfies ResponseEnvelope;
+    }
 
     // 오류 본문은 한 번만 읽을 수 있어 먼저 읽어 둔다(401이면 refresh 판단에 code가 필요).
     let data: unknown = null;

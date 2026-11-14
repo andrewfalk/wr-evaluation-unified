@@ -9,6 +9,7 @@ import {
 } from './session';
 import { broadcastLogout } from './authChannel';
 import { requestJson } from '../services/httpClient';
+import { verifyStoredSession } from '../api/authApi';
 import { getLifecycleBridge } from '../../platform/bridge';
 
 import { hasIntranetSession, resolveApiBaseUrl } from '../../platform/dataMode';
@@ -30,8 +31,8 @@ export function AuthProvider({ children }) {
   // see resetToLocalSession's comment for why this exists.
   const authEpochRef = useRef(0);
 
-  // Verify a persisted intranet session on mount. Uses plain fetch (not httpClient)
-  // to avoid triggering the refresh interceptor before configureHttpClient is wired.
+  // Verify a persisted intranet session on mount. Uses verifyStoredSession (requestEnvelope — no 401-refresh
+  // interceptor) because the interceptor is not wired yet at this point (useAuthSync wires it).
   // On failure, falls back to local session rather than leaving a stale intranet session.
   useEffect(() => {
     const snap = sessionRef.current;
@@ -40,8 +41,8 @@ export function AuthProvider({ children }) {
     // handler can detect if login/logout changed the session while the request was in flight.
     const snapIdentity = `${snap.mode}|${snap.apiBaseUrl || ''}|${snap.user?.id || ''}|${snap.refreshedAt || ''}`;
     const baseUrl = resolveApiBaseUrl({ session: snap });
-    fetch(`${baseUrl}/api/auth/csrf`, { method: 'POST', credentials: 'include' })
-      .then(async r => {
+    verifyStoredSession(baseUrl)
+      .then(r => {
         // Skip if the session changed while the request was in flight (e.g. login/logout).
         const currentIdentity = `${sessionRef.current.mode}|${sessionRef.current.apiBaseUrl || ''}|${sessionRef.current.user?.id || ''}|${sessionRef.current.refreshedAt || ''}`;
         if (currentIdentity !== snapIdentity) return;
@@ -55,8 +56,8 @@ export function AuthProvider({ children }) {
           return;
         }
         // Apply access token if the server returns one (forward-compatible: no-op if absent).
-        let data = null;
-        try { data = await r.json(); } catch { /* csrf-only response with no body */ }
+        // r.data is null when the body is not JSON (csrf-only response with no body).
+        const data = r.data;
         const next = normalizeSession({
           ...sessionRef.current,
           ...(data?.accessToken ? {

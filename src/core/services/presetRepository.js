@@ -4,6 +4,7 @@ import { ServerPresetSchema } from '@wr/contracts/preset';
 import { requestJson } from './httpClient';
 import { hasIntranetSession } from '../../platform/dataMode';
 import { getFsBridge } from '../../platform/bridge';
+import { requestEnvelope } from '../api/client';
 
 const CUSTOM_PRESETS_KEY = 'wrEvalUnifiedCustomPresets';
 
@@ -371,9 +372,11 @@ export async function loadAllPresets(session) {
   let builtinError = null;
 
   try {
-    const res = await fetch('./job-presets.json');
+    // 정적 파일(내장 직종 프리셋) — 인증·refresh와 무관, 브라우저 기본 credentials.
+    const res = await requestEnvelope('./job-presets.json', { credentials: null });
     if (!res.ok) throw new Error('Not found');
-    const data = await res.json();
+    if (res.data === null) throw new Error('Invalid job-presets.json'); // 예전: response.json()이 여기서 던짐
+    const data = res.data;
     builtins = (data.presets || []).map(normalizeBuiltinPreset);
   } catch (e) {
     builtinError = e;

@@ -111,6 +111,18 @@ export default [
     },
   },
   {
+    // REFACTORING_ROADMAP Phase 2 C2(P2-17): 요청은 src/core/api(apiClient·client·authApi)를 거친다 — 401 refresh·CSRF 재시도·
+    // 오류 모양이 한 곳에서 정해진다. 인증 부트스트랩·정적 파일·외부 엔드포인트처럼 인터셉터를 타면 안 되는 요청은
+    // requestEnvelope를 쓴다. 테스트·테스트 헬퍼는 fetch를 흉내 내므로 예외.
+    files: ['src/**/*.{js,jsx,ts,tsx}'],
+    ignores: ['src/core/api/**', 'src/testing/**', 'src/**/__tests__/**', 'src/**/*.test.{js,jsx,ts,tsx}', 'src/**/*.d.ts'],
+    rules: {
+      'no-restricted-globals': ['error',
+        { name: 'fetch', message: '요청은 src/core/api(requestJson·requestEnvelope 등)로 보낸다(P2-17).' },
+      ],
+    },
+  },
+  {
     ignores: [
       'dist/**',
       '**/dist/**',
