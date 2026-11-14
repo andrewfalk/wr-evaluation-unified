@@ -115,10 +115,21 @@ describe('FakeBroadcastChannel', () => {
     await new Promise((r) => setTimeout(r, 5));
     expect(seen).toEqual({ a: [], b: [{ type: 'LOGOUT', nested: { x: 1 } }], other: [] });
     expect(seen.b[0]).not.toBe(payload); // structured clone
+    // 수신자마다 독립된 복제본 — 한 수신자가 바꿔도 다른 수신자·보낸 쪽은 그대로
+    const c = new FakeBroadcastChannel('wr-test');
+    const seenC = [];
+    b.onmessage = (e) => { e.data.nested.x = 99; seen.b.push(e.data); };
+    c.addEventListener('message', (e) => seenC.push(e.data));
+    const shared = { nested: { x: 1 } };
+    a.postMessage(shared);
+    shared.nested.x = 2; // 보낸 뒤의 변경은 전달되지 않는다
+    await new Promise((r) => setTimeout(r, 5));
+    expect(seenC).toEqual([{ nested: { x: 1 } }]);
+    c.close();
     b.close();
     a.postMessage({ type: 'X' });
     await new Promise((r) => setTimeout(r, 5));
-    expect(seen.b).toHaveLength(1);
+    expect(seen.b).toHaveLength(2);
     a.close();
     other.close();
   });
