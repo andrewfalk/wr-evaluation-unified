@@ -1,4 +1,4 @@
-// 전이 = 옮기기 전 익명 updater(REFACTORING_ROADMAP Phase 2 P2-36: useEMRIntegration #20·21, usePresetManagement #23,
+// 전이 = 옮기기 전 익명 updater(REFACTORING_ROADMAP Phase 2 P2-36: usePresetManagement #23,
 // useIntakeWizard #22). 옛 구현을 이 파일에 옮겨 적고 같은 입력에 같은 출력(값·참조)을 내는지 비교한다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { touchPatientRecord } from '../../../services/patientRecords';
@@ -16,11 +16,6 @@ registerModule({
 registerModule({ id: 'p236-b', createModuleData: () => ({ b: 0 }) }); // 프리셋 미지원
 
 // --- 옛 구현(main) ---
-const oldEmrShared = (targetId, updated, session) => prev => prev.map(pt =>
-  pt.id === targetId
-    ? touchPatientRecord({ ...pt, updatedAt: new Date().toISOString(), data: { ...pt.data, shared: updated } }, { session })
-    : pt
-);
 const oldPreset = (activeId, canMutateActivePatient, preset, jobId, session) => prev => prev.map(p => {
   if (p.id !== activeId || !canMutateActivePatient) return p;
   const newModules = { ...p.data.modules };
@@ -49,18 +44,8 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); });
 
-describe('patient/sharedReplaced = 옛 EMR 추출·다학제 회신 updater(#20·#21, 현행 그대로)', () => {
-  const updated = { name: '추출 이름', birthDate: '1970-01-01', diagnoses: [{ code: 'M1' }, { id: 'n', code: 'M2', name: 'new', side: '' }] };
-  for (const id of ['x', 'y', 'r', 'missing']) {
-    it(id, () => {
-      const prev = list();
-      const actual = patientTx.sharedReplaced({ id, shared: updated, session: SESSION })(prev);
-      expect(actual).toEqual(oldEmrShared(id, updated, SESSION)(list()));
-      expect(actual).not.toBe(prev);
-      prev.forEach((p, i) => { if (p.id !== id) expect(actual[i]).toBe(p); });
-    });
-  }
-});
+// patient/sharedReplaced(#20·#21 현행 그대로)는 P2-39b(flagged)에서 patient/sharedPatched로 교체돼 삭제했다 — 새 동작은
+// src/core/hooks/__tests__/useEMRIntegration.latestMerge.test.jsx와 transitions.sharedPatched.test.js.
 
 describe('patient/dataEdited(프리셋) = 옛 applyPreset updater(#23)', () => {
   const preset = { jobName: 'J', modules: { 'p236-a': { v: 1 }, 'p236-b': { v: 2 } } };
