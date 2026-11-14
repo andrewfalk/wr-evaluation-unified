@@ -31,14 +31,13 @@ import { generateUnifiedReport } from './core/utils/reportGenerator';
 import { buildSteps } from './core/utils/steps';
 import { isRedactedPatientRecord } from './core/services/patientRecords';
 import { canEditPatient } from './core/utils/patientOwnership';
-import { getDefaultPatientScope, normalizePatientScopeForSession, getValidPatientScopes } from './core/utils/patientScope';
 import { clearAutoSavedWorkspace } from './core/services/workspaceRepository';
-import { fetchDoctorCounts } from './core/services/patientServerRepository';
 import { clearAllLockTokens } from './core/services/lockTokenStore';
 import { StatisticsWorkbench } from './core/components/statistics/StatisticsWorkbench';
 import { WorkspaceScreen } from './app/screens/WorkspaceScreen';
 import { renderBootGate, withLocalEscape as withLocalEscapeFor } from './app/BootGate';
 import { selectScreen, useScreenRouter } from './app/useScreenRouter';
+import { useDoctorRoster, usePatientScope } from './app/usePatientScope';
 import { hasIntranetSession, isIntranetContext } from './platform/dataMode';
 import { getLifecycleBridge } from './platform/bridge';
 import { detectRuntime } from './platform/runtime';
@@ -67,8 +66,12 @@ import './modules/wrist';
 function App() {
   const { session, setSession, resetToLocalSession, getAuthEpoch, isAuthenticated, sessionVerified, logout } = useAuth();
   const [patients, setPatients] = useState([]);
-  const [patientScope, setPatientScope] = useState(() => getDefaultPatientScope(session));
-  const [dashboardScope, setDashboardScope] = useState(() => getDefaultPatientScope(session));
+  // 목록·대시보드 scope 상태·파생값, 세션이 바뀌면 기본값으로 — src/app/usePatientScope.ts(P2-27).
+  const patientScopeState = usePatientScope(session);
+  const {
+    setPatientScope, setDashboardScope,
+    effectivePatientScope, canUseDashboardScope, effectiveDashboardScope,
+  } = patientScopeState;
   const [patientSyncPaused, setPatientSyncPaused] = useState(false);
   const [activeId, setActiveId] = useState(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -130,14 +133,6 @@ function App() {
   const statsAvailable = !!serverConfig?.statsWorkbenchAvailable;
   const isIntranetMode =
     isIntranetContext({ session, settings });
-  const canUseMinePatientScope = !hasIntranetSession(session) || session?.user?.role === 'doctor';
-  const effectivePatientScope = normalizePatientScopeForSession(session, patientScope);
-  const canUseDashboardScope = hasIntranetSession(session) && !!session?.user?.id;
-  const effectiveDashboardScope = canUseDashboardScope ? dashboardScope : 'all';
-  const [doctorRoster, setDoctorRoster] = useState({ doctors: [], unassignedCount: 0 });
-  // 'loading'/'ready'/'error' — 초기 로딩 전, 정상 조회(빈 명부 포함), 조회 실패를 구분해
-  // scope 유효성 가드가 오판(예: 마지막 의사 재배정으로 인한 정상 빈 명부를 "로딩 중"으로 오인)하지 않게 한다.
-  const [doctorRosterStatus, setDoctorRosterStatus] = useState('loading');
   const { status: integrationStatus } = useIntegrationStatus({ session, settings });
   const activePatient = patients.find(p => p.id === activeId);
   const conflictPatient = patients.find(
@@ -209,9 +204,8 @@ function App() {
   });
   handleStartIntakeRef.current = handleStartIntake;
 
+  // 세션이 바뀌면 동기화 일시정지도 푼다(scope 초기화는 usePatientScope가 같은 deps로 먼저 한다).
   useEffect(() => {
-    setPatientScope(getDefaultPatientScope(session));
-    setDashboardScope(getDefaultPatientScope(session));
     setPatientSyncPaused(false);
   }, [session?.mode, session?.user?.id, session?.user?.role]);
 
@@ -277,56 +271,10 @@ function App() {
     await forceAcquire();
   }, [lockState.holder, forceAcquire]);
 
-  // 대시보드 스코프 드롭다운용 의사 명부(경량 집계, PHI 미포함) 로드.
-  // 초기 + 매 동기화 완료(lastSyncedAt) 후 갱신 → 옵션·카운트 최신 유지.
-  const rosterIdentityRef = useRef(null);
-  useEffect(() => {
-    // 임시 비밀번호 상태에서는 서버가 이 조회를 403으로 거절한다(HF2) — 변경 전에는 부르지 않고, 플래그가 풀리면
-    // 아래 deps가 바뀌어 바로 조회한다.
-    if (!canUseDashboardScope || !isAuthenticated || !sessionVerified || session?.user?.mustChangePassword) {
-      setDoctorRoster({ doctors: [], unassignedCount: 0 });
-      setDoctorRosterStatus('loading');
-      rosterIdentityRef.current = null;
-      return undefined;
-    }
-    // 세션/조직 경계가 바뀌면(로그아웃→다른 계정/조직) 이전 조직의 명부를 즉시 비운다.
-    // 새 fetch가 지연·실패해도 이전 조직 의사 이름/카운트가 드롭다운에 남지 않도록 방지.
-    // (routine 재조회 = lastSyncedAt만 변경 시엔 비우지 않아 깜빡임 없음)
-    const identity = `${session?.user?.id ?? ''}:${session?.user?.organizationId ?? ''}`;
-    if (rosterIdentityRef.current !== identity) {
-      rosterIdentityRef.current = identity;
-      setDoctorRoster({ doctors: [], unassignedCount: 0 });
-      setDoctorRosterStatus('loading');
-    }
-    let cancelled = false;
-    fetchDoctorCounts({ session, settings })
-      .then(roster => { if (!cancelled) { setDoctorRoster(roster); setDoctorRosterStatus('ready'); } })
-      .catch(() => { if (!cancelled) setDoctorRosterStatus('error'); /* 명부는 마지막 성공값 유지, 상태만 error로 표시 */ });
-    return () => { cancelled = true; };
-    // session/settings 객체는 deps에서 제외(식별자 변동으로 인한 재조회 루프 방지)
-  }, [canUseDashboardScope, isAuthenticated, sessionVerified, session?.user?.id, session?.user?.organizationId, session?.user?.mustChangePassword, syncState.lastSyncedAt]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 사이드바(patientScope)·대시보드(dashboardScope) 공통 scope 유효성 가드.
-  // 명부 갱신 후 선택된 의사 userId(또는 __unassigned__)가 더 이상 유효하지 않으면
-  // (퇴사·전체 재배정 등) 기본 스코프로 되돌린다. 두 스코프를 한 곳에서 같은 정책으로
-  // 검증해야 Dashboard 자체 가드(→'all' 복귀)와 정책이 어긋나지 않는다.
-  // status==='loading'|'error'에서는 보류 — 로딩 중 오탐, 실패 시 마지막 유효 명부 기준 유지.
-  useEffect(() => {
-    if (!hasIntranetSession(session)) return;
-    if (doctorRosterStatus !== 'ready') return;
-    const validScopes = getValidPatientScopes(doctorRoster, { canUseMineScope: canUseMinePatientScope });
-    const fallback = getDefaultPatientScope(session);
-    if (!validScopes.has(effectivePatientScope)) setPatientScope(fallback);
-    if (!validScopes.has(effectiveDashboardScope)) setDashboardScope(fallback);
-    // session 객체 자체는 deps에서 제외(식별자 변동 방지) — mode/role만 실질적으로 영향
-  }, [session?.mode, session?.user?.role, doctorRosterStatus, doctorRoster, canUseMinePatientScope, effectivePatientScope, effectiveDashboardScope]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 대시보드 스코프 변경 pull이 진행 중인지 판정.
-  // status==='syncing' AND 조건을 반드시 유지 — loadedScope 단독 비교는 실패/오프라인 시 영구 로딩처럼 보임.
-  const isDashboardScopeLoading =
-    canUseDashboardScope &&
-    syncState.status === 'syncing' &&
-    syncState.loadedScope !== effectiveDashboardScope;
+  // 의사 명부 조회 + 명부 기준 scope 유효성 가드 + 대시보드 scope 로딩 판정 — src/app/usePatientScope.ts(P2-27).
+  const { doctorRoster, isDashboardScopeLoading } = useDoctorRoster({
+    session, settings, isAuthenticated, sessionVerified, syncState, scope: patientScopeState,
+  });
 
   const {
     savedItems, setSavedItems, saveName, setSaveName, lastAutoSave, legacyItems,
