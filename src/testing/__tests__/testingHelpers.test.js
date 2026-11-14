@@ -40,6 +40,16 @@ describe('makeBridgeStub', () => {
     expect(bridge.__callsOf('fsLoadSettings')).toEqual([[]]);
   });
 
+  it('a subscribe override replaces the subscription (its unsubscribe is returned as is)', () => {
+    const off = () => 'off';
+    const custom = (listener) => { custom.listener = listener; return off; };
+    const bridge = makeBridgeStub('standalone', { overrides: { onMenuNew: custom } });
+    const handler = () => {};
+    expect(bridge.onMenuNew(handler)).toBe(off);
+    expect(custom.listener).toBe(handler);
+    expect(bridge.__callsOf('onMenuNew')).toEqual([[]]);
+  });
+
   it('rejects overrides for keys the legacy shell does not have', () => {
     expect(() => makeBridgeStub('intranet', { overrides: { fsLoadSettings: () => null } })).toThrow(/not on the intranet shell surface/);
   });
@@ -60,6 +70,13 @@ describe('createFetchRouter', () => {
     await expect(router.fetch('/api/nope')).rejects.toThrow(TypeError);
     expect(router.unhandled).toEqual(['GET /api/nope']);
     expect(router.count('POST /api/auth/csrf')).toBe(1);
+  });
+
+  it('accepts URL objects and Request objects like fetch does', async () => {
+    const router = createFetchRouter({ 'GET /api/config/public': { ok: 1 }, 'POST /api/x': { ok: 2 } });
+    await expect((await router.fetch(new URL('https://srv.test/api/config/public'))).json()).resolves.toEqual({ ok: 1 });
+    await expect((await router.fetch(new Request('https://srv.test/api/x', { method: 'POST' }))).json()).resolves.toEqual({ ok: 2 });
+    expect(router.unhandled).toEqual([]);
   });
 
   it('matches `:param` patterns after exact keys', async () => {

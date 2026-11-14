@@ -53,8 +53,9 @@ export function createFetchRouter(initialRoutes = {}) {
   const unhandled = [];
 
   async function fetch(input, init = {}) {
-    const rawUrl = typeof input === 'string' ? input : input.url;
-    const method = (init.method || (typeof input === 'object' && input.method) || 'GET').toUpperCase();
+    // fetch가 받는 세 형태: 문자열 · URL 객체(href) · Request(url, method)
+    const rawUrl = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    const method = (init.method || (typeof input === 'object' && !(input instanceof URL) && input.method) || 'GET').toUpperCase();
     const url = new URL(rawUrl, 'http://localhost');
     const key = `${method} ${url.pathname}`;
     let body = init.body;
