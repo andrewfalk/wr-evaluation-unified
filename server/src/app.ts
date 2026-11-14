@@ -71,6 +71,16 @@ export interface AppDeps {
   logger?: Logger;
 }
 
+// Static web caching (P-1, P2-21) — see the static SPA block in createApp.
+export const IMMUTABLE_ASSET_CACHE = 'public, max-age=31536000, immutable';
+export const REVALIDATE_CACHE = 'no-cache';
+
+/** True for files under <webDir>/assets/ — Vite's content-hashed build output (build.assetsDir = 'assets'). */
+function isHashedAsset(webDir: string, filePath: string): boolean {
+  const rel = path.relative(webDir, filePath).split(path.sep);
+  return rel.length > 1 && rel[0] === 'assets';
+}
+
 export function createApp({
   pool,
   auditPool,
@@ -130,10 +140,22 @@ export function createApp({
   // SPA fallback: serve index.html for any non-API GET (React Router handles it).
   // The directory is optional; when absent the server runs in API-only mode.
   // ---------------------------------------------------------------------------
+  //
+  // Caching (REFACTORING_ROADMAP Phase 2 P-1, P2-21):
+  //   - /assets/* are Vite's content-hashed bundles (name changes whenever the content does) → cache for a year,
+  //     immutable — a returning visit downloads nothing for unchanged chunks.
+  //   - everything else (index.html — also the SPA fallback — and the unhashed public/ files such as
+  //     job-presets.json and images/) → no-cache: the browser may keep a copy but revalidates (ETag) every time,
+  //     so a server update is picked up on the next load. /api keeps its own no-store (middleware/csp.ts).
   if (fs.existsSync(webDir)) {
-    app.use(express.static(webDir));
+    app.use(express.static(webDir, {
+      setHeaders(res, filePath) {
+        res.setHeader('Cache-Control', isHashedAsset(webDir, filePath) ? IMMUTABLE_ASSET_CACHE : REVALIDATE_CACHE);
+      },
+    }));
     app.get('*', (req, res, next) => {
       if (req.path.startsWith('/api/') || req.path === '/health') return next();
+      res.setHeader('Cache-Control', REVALIDATE_CACHE);
       res.sendFile(path.join(webDir, 'index.html'));
     });
   }
