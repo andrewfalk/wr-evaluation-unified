@@ -34,7 +34,6 @@
   "src/core/hooks/useConflictResolution.js",
   "src/core/hooks/useIntegrationStatus.js",
   "src/core/hooks/useMigration.js",
-  "src/core/hooks/useOpsStatus.js",
   "src/core/hooks/usePatientSync.js",
   "src/core/hooks/useServerConfig.js",
   "src/core/hooks/useWorkspacePersistence.js",

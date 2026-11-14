@@ -85,8 +85,15 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
     };
   }
 
-  async function readJson(response: Response): Promise<unknown> {
-    try { return await response.json(); } catch { return null; }
+  // 본문이 JSON이 아니면 null. rethrowAbort면 본문 수신 중 취소(AbortError)는 그대로 던진다 — envelope의 계약
+  // (#297 Codex 권고). 예전 requestJson·requestBlobPost 경로는 취소도 null로 삼켰으므로 그쪽은 그대로 둔다.
+  async function readJson(response: Response, { rethrowAbort = false } = {}): Promise<unknown> {
+    try {
+      return await response.json();
+    } catch (error) {
+      if (rethrowAbort && (error as { name?: string } | null)?.name === 'AbortError') throw error;
+      return null;
+    }
   }
 
   async function request(path: string, options: RequestOptions = {}): Promise<unknown> {
@@ -104,7 +111,7 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
     const response = await doFetch(buildUrl(baseUrl, path), init);
 
     if (envelope) {
-      return { ok: response.ok, status: response.status, data: await readJson(response) } satisfies ResponseEnvelope;
+      return { ok: response.ok, status: response.status, data: await readJson(response, { rethrowAbort: true }) } satisfies ResponseEnvelope;
     }
 
     // 오류 본문은 한 번만 읽을 수 있어 먼저 읽어 둔다(401이면 refresh 판단에 code가 필요).

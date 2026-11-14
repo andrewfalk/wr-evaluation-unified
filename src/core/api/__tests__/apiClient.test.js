@@ -107,6 +107,14 @@ describe('createApiClient 파이프라인', () => {
     expect(fetchImpl.mock.calls[1][1]).toEqual({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"q":1}' });
   });
 
+  it('envelope: 본문 수신 중 취소(AbortError)는 그대로 던진다, 예전 json 경로는 null로 삼킨다(그대로)', async () => {
+    const abort = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    const aborting = { status: 200, ok: true, json: vi.fn(async () => { throw abort; }) };
+    const { client } = makeClient([aborting, { ...aborting, json: vi.fn(async () => { throw abort; }) }]);
+    await expect(client.request('/a', { envelope: true })).rejects.toBe(abort);
+    await expect(client.request('/a')).resolves.toBeNull();
+  });
+
   it('성공 본문이 JSON이 아니면 null', async () => {
     const { client } = makeClient([res(200)]);
     await expect(client.request('/a')).resolves.toBeNull();
