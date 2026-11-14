@@ -43,6 +43,12 @@ https://{$WR_DOMAIN} {
 		}
 	}
 
+	# P-1(REFACTORING_ROADMAP Phase 2 P2-21): compress responses (zstd, else gzip — the browser picks by
+	# Accept-Encoding; Chrome 108/109 gets gzip). /api/auth/* is excluded: those responses carry access tokens and
+	# reflect request data, so their compressed length must not leak secrets (BREACH-style).
+	@compress not path /api/auth/*
+	encode @compress zstd gzip
+
 	reverse_proxy app:3001
 
 	header {

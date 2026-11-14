@@ -42,12 +42,43 @@ describe('createApp', () => {
   beforeAll(() => {
     webDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-app-test-'));
     fs.writeFileSync(path.join(webDir, 'index.html'), '<!doctype html><title>SPA</title>');
+    fs.mkdirSync(path.join(webDir, 'assets'));
+    fs.writeFileSync(path.join(webDir, 'assets', 'index-AbC123.js'), 'console.log(1);');
+    fs.mkdirSync(path.join(webDir, 'images'));
+    fs.writeFileSync(path.join(webDir, 'images', 'G1.png'), 'png');
+    fs.writeFileSync(path.join(webDir, 'job-presets.json'), '{"presets":[]}');
   });
-  afterAll(() => fs.rmSync(webDir, { recursive: true, force: true }));
 
   it('importing app.ts does not create a database pool', () => {
     expect(poolConstructions.count).toBe(0);
   });
+
+  // P-1(REFACTORING_ROADMAP Phase 2 P2-21) — 정적 자산 캐시 헤더.
+  it.each([
+    ['hashed bundle /assets/*', '/assets/index-AbC123.js', 'public, max-age=31536000, immutable'],
+    ['index.html (direct)', '/index.html', 'no-cache'],
+    ['index.html (root)', '/', 'no-cache'],
+    ['SPA fallback', '/patients/123', 'no-cache'],
+    ['unhashed public file', '/job-presets.json', 'no-cache'],
+    ['unhashed public image', '/images/G1.png', 'no-cache'],
+  ])('static caching: %s', async (_label, url, expected) => {
+    const { pool } = untouchablePool();
+    const app = createApp({ pool, auditPool: pool, webDir });
+    const res = await request(app).get(url);
+    expect(res.status).toBe(200);
+    expect(res.headers['cache-control']).toBe(expected);
+  });
+
+  it('static caching: /api keeps no-store, an unknown /assets file is not served as the SPA', async () => {
+    const { pool } = untouchablePool();
+    const app = createApp({ pool, auditPool: pool, webDir });
+    const api = await request(app).get('/api/config/public');
+    expect(api.headers['cache-control']).toBe('no-store');
+    const missing = await request(app).get('/assets/gone-123.js');
+    // 옛 청크(배포 뒤 사라진 해시 파일)는 SPA fallback(index.html)로 응답된다 — 캐시는 no-cache(immutable 아님).
+    expect(missing.headers['cache-control']).toBe('no-cache');
+  });
+  afterAll(() => fs.rmSync(webDir, { recursive: true, force: true }));
 
   it('builds the whole app from injected pools without touching them', async () => {
     const main = untouchablePool();

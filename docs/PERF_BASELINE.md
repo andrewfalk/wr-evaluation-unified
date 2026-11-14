@@ -133,6 +133,18 @@ React commit 시간 — React 프로파일링 빌드(`scripts/perf/vite.profilin
 
 결론: **이 측정으로는 차이가 구분되지 않는다(잡음 범위)** — 같은 코드도 회차마다 복원 렌더가 185~228 ms로 흔들리고, 줄인 일(500명 × 순수 함수 2회)은 렌더·확인창 흐름에 비해 작다. 복원 commit(프로파일링 빌드)도 58.8 → 60.3·60.9 ms로 같은 범위. P-8의 효과는 시간보다 "마이그레이션 경계가 한 곳"이라는 구조에 있다(업로드 경로 회귀 방지 테스트는 `localToServerMigrator.legacyPush.test.js`). (전 측정의 프로파일링 빌드는 다시 빌드하지 않은 옛 산출물이라 표에서 뺐다.)
 
+### P-1 압축·정적 캐시(REFACTORING_ROADMAP Phase 2 P2-21, 2026-11-14)
+
+Caddy `encode zstd gzip`(`/api/auth/*` 제외) + 서버 정적 캐시 헤더(`/assets/*` = `public, max-age=31536000, immutable`, 그 밖과 `index.html`·SPA fallback = `no-cache`, `/api` = `no-store` 그대로). 측정: 저장소에 고정된 Caddy 2.11.7(`caddy/windows-amd64/caddy.exe`, `Caddyfile.host.template`을 localhost용으로 채움) → `createApp`(DB 없이 fakePool)로 `dist/web` 서빙, 첫 화면 문서와 그 문서가 바로 부르는 자산 5개(`index.html`·CSS·`index`·`vendor`·`xlsx` JS)의 실제 전송 바이트(`curl --write-out %{size_download}`):
+
+| Accept-Encoding | 첫 화면 전송 | 비고 |
+| --- | --- | --- |
+| identity(압축 전, 이전 배포와 같음) | 1,888,695 B(1,844 KiB) | §1 기준선 1,896 KiB와 같은 수준 |
+| gzip | 560,856 B(547 KiB, **−70%**) | Win7 Chrome 109·설치본 Electron 22가 받는 쪽 |
+| zstd | 539,398 B(526 KiB, −71%) | 최신 브라우저 |
+
+재방문은 해시 자산이 캐시에서 바로 쓰이고(`immutable` — 요청 없음) `index.html`만 ETag로 재검증한다. `page-load.mjs`(시험 스택 8443)는 이 PC에 패키지 스택이 없어 돌리지 않았다(내부 CA가 신뢰되지 않은 `--ignore-https-errors`로는 모듈 스크립트를 받지 못해 요청 4개만 잡혔다) — R2a 릴리스 리허설의 `verify-stack.ps1`에서 cold/warm을 다시 잰다.
+
 ## 다시 재는 방법
 
 ```bash
