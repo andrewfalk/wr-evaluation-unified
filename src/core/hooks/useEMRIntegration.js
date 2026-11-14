@@ -1,9 +1,20 @@
 import { useState } from 'react';
 import { showAlert, showConfirm } from '../utils/platform';
 import { patientTx } from '../state/patientStore/transitions';
+import { useCommitBarrier } from '../state/patientStore/useCommitBarrier';
 import { getEmrBridge } from '../../platform/bridge';
 
 export function useEMRIntegration({ activePatient, patients, selectedIds, session, setPatients, dirtyAssessmentPatientId }) {
+  // 커밋 배리어(P2-39b, #323 Codex) — 전이 patient/sharedPatched가 적용 시점 목록으로 적용했는지(receipt)는 커밋 뒤에야
+  // 확정된다. 미리 렌더된 목록으로 판정하면 같은 배치에 들어온 식별정보 변경을 놓쳐 저장하지 않은 결과를 성공으로 알린다.
+  // 전이와 배리어 tick을 같은 동기 구간에서 예약하고, 그 tick이 반영된 커밋 뒤에 receipt를 읽는다(useCommitBarrier).
+  const waitForCommit = useCommitBarrier();
+  const applySharedPatch = (payload) => {
+    const receipt = { applied: undefined };
+    setPatients(patientTx.sharedPatched({ ...payload, receipt }));
+    // 언마운트로 풀린 경우 등 판정이 없으면(undefined) 적용되지 않은 것으로 본다.
+    return waitForCommit().then(() => receipt.applied === true);
+  };
   const [extractProgress, setExtractProgress] = useState(null);
 
   const handleInjectEMR = async () => {
@@ -126,7 +137,7 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
     const ok = await showConfirm(`${targets.length}명의 환자 데이터를 EMR에서 추출합니다.\n진료기록분석지 페이지가 열려있는지 확인하세요.\n\n계속하시겠습니까?`);
     if (!ok) return;
 
-    let successCount = 0, failCount = 0;
+    let successCount = 0, failCount = 0, skippedCount = 0;
     const warnings = [];
     setExtractProgress({ current: 0, total: targets.length, currentName: '', status: 'running' });
 
@@ -136,6 +147,8 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
 
       const hadInjuryDate = !!p.data.shared.injuryDate;
       const patientLabel = p.data.shared.name || p.data.shared.patientNo;
+      // 요청 당시 식별정보 — 적용 시점에 이것과 다르면(그사이 등록번호·재해일자 변경, 삭제) 결과를 섞지 않는다.
+      const requested = { patientNo: p.data.shared.patientNo, injuryDate: p.data.shared.injuryDate || '' };
 
       try {
         const result = await getEmrBridge().extractRecord(p.data.shared.patientNo, p.data.shared.injuryDate || '');
@@ -143,6 +156,38 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
           // patientNo 교차검증: EMR이 다른 환자 데이터를 반환한 경우 skip
           if (result.patientNo && result.patientNo !== p.data.shared.patientNo) {
             failCount++;
+            continue;
+          }
+          // 새 상병 후보의 id는 전이 밖에서 미리 만든다 — 전이(updater)는 StrictMode에서 두 번 돌 수 있어 순수해야 한다.
+          const diseaseCandidates = (result.diseases || [])
+            .filter(d => d.code)
+            .map(d => ({ id: crypto.randomUUID(), code: d.code, name: d.name, side: '' }));
+          // 적용 시점의 최신 shared에 병합(P2-39b): 추출 값은 옮기기 전처럼 덮어쓰고, 추출이 건드리지 않는 필드와
+          // 기다리는 동안 추가된 상병은 그대로 둔다. 상병은 적용 시점 목록 기준으로 코드 중복을 뺀다.
+          const patch = (current) => {
+            const updated = { ...current };
+            if (result.patientName) updated.name = result.patientName;
+            if (result.birthDate) updated.birthDate = result.birthDate;
+            if (result.gender) updated.gender = result.gender;
+            // 재해일자: 사용자가 입력하지 않은 경우에만 자동 채움(요청 때 비어 있었음 = 적용 시점에도 비어 있음이 식별 검사로 보장).
+            if (!hadInjuryDate && result.accidentDate) updated.injuryDate = result.accidentDate;
+            if (result.medicalRecord) updated.medicalRecord = result.medicalRecord;
+            if (result.highBloodPressure) updated.highBloodPressure = result.highBloodPressure;
+            if (result.diabetes) updated.diabetes = result.diabetes;
+            if (result.visitHistory) updated.visitHistory = result.visitHistory;
+            if (diseaseCandidates.length > 0) {
+              const existingCodes = new Set((updated.diagnoses || []).map(d => d.code).filter(Boolean));
+              const diseasesToAdd = diseaseCandidates.filter(d => !existingCodes.has(d.code));
+              if (diseasesToAdd.length > 0) updated.diagnoses = [...(updated.diagnoses || []), ...diseasesToAdd];
+            }
+            return updated;
+          };
+
+          // 적용 여부는 커밋 뒤 전이의 판정으로 — 그사이 등록번호·재해일자가 바뀌었거나 삭제됐으면 건너뜀.
+          const applied = await applySharedPatch({ id: p.id, requested, patch, session });
+          if (!applied) {
+            skippedCount++;
+            warnings.push(`${patientLabel}: 추출 중 환자 정보가 바뀌어 건너뜀`);
             continue;
           }
           successCount++;
@@ -153,34 +198,6 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
           if (hadInjuryDate && result.injuryDateMismatch) {
             warnings.push(`${patientLabel}: 일치하는 재해일자의 신청건이 없어 1번 항목을 불러왔습니다`);
           }
-          const updated = { ...p.data.shared };
-          if (result.patientName) updated.name = result.patientName;
-          if (result.birthDate) updated.birthDate = result.birthDate;
-          if (result.gender) updated.gender = result.gender;
-          // 재해일자: 사용자가 입력하지 않은 경우에만 자동 채움.
-          // 입력했으면(매칭 기준값) 보존 — 불일치 폴백으로 1번 항목을 불러와도 입력값을 덮어쓰지 않음.
-          if (!hadInjuryDate && result.accidentDate) updated.injuryDate = result.accidentDate;
-          if (result.medicalRecord) updated.medicalRecord = result.medicalRecord;
-          if (result.highBloodPressure) updated.highBloodPressure = result.highBloodPressure;
-          if (result.diabetes) updated.diabetes = result.diabetes;
-          if (result.visitHistory) updated.visitHistory = result.visitHistory;
-
-          if (result.diseases?.length > 0) {
-            const existingCodes = new Set((updated.diagnoses || []).map(d => d.code).filter(Boolean));
-            const newDiseases = result.diseases.filter(d => d.code && !existingCodes.has(d.code));
-            if (newDiseases.length > 0) {
-              const diseasesToAdd = newDiseases.map(d => ({
-                id: crypto.randomUUID(),
-                code: d.code,
-                name: d.name,
-                side: ''
-              }));
-              updated.diagnoses = [...(updated.diagnoses || []), ...diseasesToAdd];
-            }
-          }
-
-          // 현행 그대로 — 추출 시작 시점 사본 기반 shared로 통째 교체(대기 중 바뀐 값을 되돌리는 결함은 P2-39b에서 고친다).
-          setPatients(patientTx.sharedReplaced({ id: p.id, shared: updated, session }));
         } else {
           failCount++;
         }
@@ -191,6 +208,7 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
 
     setExtractProgress(null);
     let doneMsg = `EMR 추출 완료: ${targets.length}명 중 성공 ${successCount}명, 실패 ${failCount}명`;
+    if (skippedCount > 0) doneMsg += `, 건너뜀 ${skippedCount}명`;
     if (warnings.length > 0) {
       doneMsg += `\n\n⚠ 확인 필요:\n${warnings.join('\n')}`;
     }
@@ -212,17 +230,28 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
         );
         if (!confirmed) return;
 
-        const updated = { ...activePatient.data.shared };
-        const appendReply = (key, content) => {
-          updated[key] = updated[key] ? updated[key] + '\n---\n' + content : content;
+        // 확인창을 띄운 시점의 환자(등록번호) — 확인하는 동안 바뀌었으면 저장하지 않는다(P2-39b).
+        const requested = { patientNo: activePatient.data.shared.patientNo || '' };
+        // 회신은 적용 시점의 최신 값 뒤에 덧붙인다(기다리는 동안 직접 쓴 회신·다른 필드 보존).
+        const patch = (current) => {
+          const updated = { ...current };
+          const appendReply = (key, content) => {
+            updated[key] = updated[key] ? updated[key] + '\n---\n' + content : content;
+          };
+          for (const c of result.consultations) {
+            if (c.department === '정형외과') appendReply('consultReplyOrtho', c.content);
+            else if (c.department === '신경외과') appendReply('consultReplyNeuro', c.content);
+            else if (c.department === '재활의학과') appendReply('consultReplyRehab', c.content);
+            else appendReply('consultReplyOther', c.content);
+          }
+          return updated;
         };
-        for (const c of result.consultations) {
-          if (c.department === '정형외과') appendReply('consultReplyOrtho', c.content);
-          else if (c.department === '신경외과') appendReply('consultReplyNeuro', c.content);
-          else if (c.department === '재활의학과') appendReply('consultReplyRehab', c.content);
-          else appendReply('consultReplyOther', c.content);
+        // 적용 여부는 커밋 뒤 전이의 판정으로(확인하는 동안 등록번호가 바뀌었거나 삭제됐으면 저장하지 않음).
+        const applied = await applySharedPatch({ id: activePatient.id, requested, patch, session });
+        if (!applied) {
+          await showAlert('다학제 회신을 저장하지 않았습니다 — 확인하는 동안 환자 정보가 바뀌어(등록번호 변경 또는 삭제) 다른 환자에 저장될 수 있습니다. 다시 추출해 주세요.');
+          return;
         }
-        setPatients(patientTx.sharedReplaced({ id: activePatient.id, shared: updated, session }));
         await showAlert(`${result.consultations.length}개 과목 회신을 가져왔습니다.`);
       } else {
         await showAlert(`다학제회신 추출 실패: ${result.error || result.message || '알 수 없는 오류'}`);

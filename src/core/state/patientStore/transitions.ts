@@ -244,27 +244,53 @@ const replacedFromServer = defineTransition<ReplacedFromServerPayload>('patient/
   })
 ));
 
-export interface SharedReplacedPayload {
-  id: string;
-  /**
-   * 새 shared 전체 — 현행 그대로 EMR 추출·다학제 회신 시작 시점 사본을 기반으로 만든 값(그사이 바뀐 다른 필드·상병을 되돌리는
-   * 결함은 P2-39b에서 `patient/sharedPatched`로 교체한다).
-   */
-  shared: PatientDataValue['shared'];
-  session: unknown;
+export interface SharedPatchRequest {
+  /** 요청(추출 시작·확인창) 당시 환자등록번호 */
+  patientNo: string;
+  /** 요청 당시 재해일자('' = 비어 있음). undefined면 재해일자는 보지 않는다(다학제 회신 — 화면 기준 추출). */
+  injuryDate?: string;
 }
 
-/** 한 환자의 shared를 통째로 교체하고 touch(옮기기 전처럼 touch 전에 updatedAt을 찍음). */
-const sharedReplaced = defineTransition<SharedReplacedPayload>('patient/sharedReplaced', (prev, { id, shared, session }) => (
-  prev.map(p => (
-    p.id === id
-      ? touchPatientRecord(
-        { ...p, updatedAt: new Date().toISOString(), data: { ...(p.data as PatientDataValue), shared } },
-        { session },
-      )
-      : p
-  ))
-));
+/**
+ * 적용 시점 환자가 요청 당시 식별정보와 같은가 — 목록에 있고, 가림 환자가 아니며, 등록번호(그리고 요청에 있으면 재해일자)가 같다.
+ * 다르면 그사이 다른 환자·다른 신청건이 된 것이라 추출 결과를 섞지 않는다(P2-39b, Codex 계획 리뷰 1회차).
+ * 판정은 전이 안에서 적용 시점 목록으로 한다 — 훅은 결과를 payload의 receipt로 커밋 뒤에 받아 성공·건너뜀을 센다.
+ */
+export function isSharedPatchApplicable(patient: PatientRecord | null | undefined, requested: SharedPatchRequest): boolean {
+  if (!patient || patient.redacted === true || !patient.data) return false;
+  const shared = (patient.data as PatientDataValue).shared as { patientNo?: string; injuryDate?: string } | undefined;
+  if ((shared?.patientNo || '') !== (requested.patientNo || '')) return false;
+  if (requested.injuryDate !== undefined && (shared?.injuryDate || '') !== requested.injuryDate) return false;
+  return true;
+}
+
+export interface SharedPatchedPayload {
+  id: string;
+  requested: SharedPatchRequest;
+  /** 적용 시점 shared를 받아 새 shared를 낸다(추출 값 우선, 그사이 바뀐 다른 필드·추가된 상병은 그대로). 순수해야 한다. */
+  patch: (shared: PatientDataValue['shared']) => PatientDataValue['shared'];
+  session: unknown;
+  /**
+   * 적용 여부 보고용(선택) — 전이가 판정 결과를 `applied`에 적는다. 같은 입력이면 같은 값을 쓰므로 StrictMode 이중 실행에도
+   * 결과가 같고 상태에는 영향이 없다. 호출부는 커밋 뒤(커밋 배리어)에 읽는다 — 그 전에는 전이가 아직 돌지 않았을 수 있다(#323 Codex).
+   */
+  receipt?: { applied?: boolean };
+}
+
+/**
+ * (flagged P2-39b) EMR 추출·다학제 회신을 **적용 시점의 최신 shared** 에 병합 — 요청 당시 식별정보와 같을 때만, 다르면 prev 그대로
+ * (touch 없음, dirty 안 됨). 옮기기 전(#20·#21 patient/sharedReplaced)에는 시작 시점 사본으로 shared를 통째 교체했다.
+ */
+const sharedPatched = defineTransition<SharedPatchedPayload>('patient/sharedPatched', (prev, { id, requested, patch, session, receipt }) => {
+  const applicable = isSharedPatchApplicable(prev.find(p => p.id === id), requested);
+  if (receipt) receipt.applied = applicable;
+  if (!applicable) return prev;
+  return prev.map(p => {
+    if (p.id !== id) return p;
+    const data = p.data as PatientDataValue;
+    return touchPatientRecord({ ...p, updatedAt: new Date().toISOString(), data: { ...data, shared: patch(data.shared) } }, { session });
+  });
+});
 
 /** "저장하지 않고 이동" — 그 환자를 자동 push 대상에서 뺀다(usePatientSync가 다시 열 때 푼다). */
 const patientPaused = defineTransition<PatientIdPayload>('sync/patientPaused', (prev, { id }) => (
@@ -394,8 +420,8 @@ export const patientTx = {
   deleteRevisionUpdated,
   /** #11 생년월일 정정 응답(keepLocalMeta: true) · #2 영상 분석 서버 적용(false) */
   replacedFromServer,
-  /** #20 EMR 일괄 추출 · #21 다학제 회신(현행 그대로 — P2-39b에서 sharedPatched로 교체) */
-  sharedReplaced,
+  /** (flagged P2-39b) #20 EMR 일괄 추출 · #21 다학제 회신 — 최신 shared에 병합, 식별정보가 바뀌었으면 적용 안 함 */
+  sharedPatched,
   /** #1 App 환자 전환 — 저장하지 않고 이동 */
   patientPaused,
   /** #24 평가일자 자동 설정(useEvaluationDateSync) */
