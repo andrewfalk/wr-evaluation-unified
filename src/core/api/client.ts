@@ -2,7 +2,7 @@
 // 401 refresh·로그아웃 처리기는 부팅 때 useAuthSync가 configureApiClient()로 꽂는다(예전 configureHttpClient).
 import { buildSessionHeaders } from '../auth/session';
 import { getCsrfToken } from '../utils/csrfCookie';
-import { createApiClient, type RefreshHandler, type RequestOptions, type SessionLike } from './apiClient';
+import { createApiClient, type RefreshHandler, type RequestOptions, type ResponseEnvelope, type SessionLike } from './apiClient';
 import { requestMultipartWith, type MultipartOptions } from './multipart';
 
 // session.js·csrfCookie.js는 아직 JS(타입 추론값이 좁다) — 여기서 계약 타입으로 맞춘다.
@@ -39,4 +39,17 @@ export function requestBlobPost(path: string, options: CommonOptions & Pick<Requ
 /** 대용량 multipart 업로드(XHR, 진행률). refresh·재시도 없음. */
 export function requestMultipart(path: string, options: MultipartOptions = {}): Promise<unknown> {
   return requestMultipartWith(deps, path, options);
+}
+
+/**
+ * HTTP 상태와 본문을 그대로 돌려받는 요청(`{ ok, status, data }`) — 오류로 던지지 않고, refresh·CSRF 재시도도 하지 않는다.
+ * 예전 raw fetch 자리(정적 JSON·외부 AI 엔드포인트·인증 부트스트랩)가 쓴다. 헤더는 headers로 직접 준다(jsonRequest=false).
+ */
+export function requestEnvelope(
+  path: string,
+  options: Pick<RequestOptions, 'baseUrl' | 'method' | 'body' | 'session' | 'headers' | 'signal' | 'credentials'> = {},
+): Promise<ResponseEnvelope> {
+  return apiClient.request(path, {
+    ...options, envelope: true, jsonRequest: false, skipAuthRefresh: true,
+  }) as Promise<ResponseEnvelope>;
 }

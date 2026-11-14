@@ -63,6 +63,16 @@ describe('client TS tooling (P2-00)', () => {
     expect(count(await lintAs('src/core/__tests__/__p2_15_probe__.test.js', code))).toBe(0);
   });
 
+  it('global fetch is forbidden outside src/core/api (P2-17), tests and helpers excepted', async () => {
+    const code = "export const r = () => fetch('/api/x');\n";
+    const rule = 'no-restricted-globals';
+    const count = (messages) => messages.filter((m) => m === rule).length;
+    expect(count(await lintAs('src/core/services/__p2_17_probe__.js', code))).toBe(1);
+    expect(count(await lintAs('src/core/services/__p2_17_probe__.ts', code))).toBe(1);
+    expect(count(await lintAs('src/core/api/__p2_17_probe__.ts', code))).toBe(0);
+    expect(count(await lintAs('src/testing/__p2_17_probe__.js', code))).toBe(0);
+  });
+
   it('vitest picks up .test.tsx and __tests__/*.tsx under src', () => {
     const include = vitestConfig.test.include;
     expect(include).toContain('src/**/*.test.{js,jsx,ts,tsx}');

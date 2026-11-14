@@ -1,9 +1,9 @@
 // @ts-nocheck
-import { buildSessionHeaders } from '../auth/session';
 import { requestJson } from './httpClient';
 
 import { hasIntranetSession, resolveApiBaseUrl } from '../../platform/dataMode';
 import { getAiBridge } from '../../platform/bridge';
+import { requestEnvelope } from '../api/client';
 const SETTINGS_KEY = 'wrEvalUnifiedSettings';
 
 function loadAISettings() {
@@ -31,20 +31,16 @@ function webClientHeaders() {
   return token ? { 'X-WR-Client': token } : {};
 }
 
-async function fetchAnalyze(url, payload, session) {
-  const res = await fetch(url, {
+// 웹(Vercel) 분석 엔드포인트 — 외부 origin일 수 있어 credentials를 싣지 않는다(브라우저 기본 same-origin, 예전 raw fetch와 같음).
+// HTTP 오류는 던지지 않고 {ok, status, data}로 돌려준다(호출부가 404/405/501이면 상대 경로로 다시 시도).
+function fetchAnalyze(url, payload, session) {
+  return requestEnvelope(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...buildSessionHeaders(session),
-      ...webClientHeaders(),
-    },
-    body: JSON.stringify(payload),
+    credentials: null,
+    session,
+    headers: { 'Content-Type': 'application/json', ...webClientHeaders() },
+    body: payload,
   });
-
-  let data = null;
-  try { data = await res.json(); } catch { data = null; }
-  return { ok: res.ok, status: res.status, data };
 }
 
 const INPUT_ERROR_FALLBACK = 'AI 분석 입력을 만들 수 없습니다. 입력값을 확인해 주세요.';

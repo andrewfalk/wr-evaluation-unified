@@ -89,11 +89,22 @@ describe('createApiClient 파이프라인', () => {
     const { client, fetchImpl } = makeClient([res(200, {}), res(200, {}), res(200)]);
     await client.request('/a', { method: 'GET' });
     await client.request('/a', { method: 'delete', body: { x: 1 } });
-    await client.request('/a', { method: 'GET', jsonRequest: false, parse: 'blob', body: { x: 1 } });
+    await client.request('/a', { method: 'GET', jsonRequest: false, parse: 'blob' });
     expect(fetchImpl.mock.calls[0][1].headers).toEqual({ 'Content-Type': 'application/json' });
     expect(fetchImpl.mock.calls[1][1].headers['X-CSRF-Token']).toBe('csrf-1');
     expect(fetchImpl.mock.calls[1][1].body).toBe('{"x":1}');
     expect(fetchImpl.mock.calls[2][1]).toEqual({ method: 'GET', credentials: 'include', headers: {} });
+  });
+
+  it('envelope: HTTP 오류로 던지지 않고 {ok,status,data}, refresh 없음 / credentials null이면 키 없음 / jsonRequest=false여도 body는 보냄', async () => {
+    const { client, fetchImpl } = makeClient([res(503, { error: 'down' }), res(200)]);
+    const onRefresh = vi.fn();
+    client.configure({ onRefresh });
+    await expect(client.request('/a', { envelope: true, session: { mode: 'intranet' } })).resolves.toEqual({ ok: false, status: 503, data: { error: 'down' } });
+    await expect(client.request('/b', { envelope: true, jsonRequest: false, credentials: null, method: 'POST', body: { q: 1 }, headers: { 'Content-Type': 'application/json' } }))
+      .resolves.toEqual({ ok: true, status: 200, data: null });
+    expect(onRefresh).not.toHaveBeenCalled();
+    expect(fetchImpl.mock.calls[1][1]).toEqual({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"q":1}' });
   });
 
   it('성공 본문이 JSON이 아니면 null', async () => {

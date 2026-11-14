@@ -6,6 +6,7 @@ import { normalizeSession } from '../auth/session';
 import { runRefreshWithBroadcast, onAuthBroadcast, broadcastLogout } from '../auth/authChannel';
 
 import { hasIntranetSession } from '../../platform/dataMode';
+import { refreshAccessToken, renewCsrf } from '../api/authApi';
 export function applyAuthUpdate(currentSession, authUpdate) {
   const patch = typeof authUpdate === 'string'
     ? { accessToken: authUpdate }
@@ -55,28 +56,13 @@ export function useAuthSync({ session, setSession, resetToLocalSession, getAuthE
             // for this endpoint). It re-validates the HttpOnly refresh cookie,
             // sets a new wr_csrf cookie, and returns a fresh accessToken.
             if (forceCsrf || !csrfToken) {
-              const csrfRes = await fetch(`${base}/api/auth/csrf`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: { 'Content-Type': 'application/json' },
-              });
-              if (!csrfRes.ok) throw new Error('CSRF renewal failed');
-              const csrfData = await csrfRes.json();
+              const csrfData = await renewCsrf(base);
               const newSession = applyAuthUpdate(sessionRef.current, csrfData);
               if (!isStale()) setSession(newSession);
               return newSession;
             }
 
-            const res = await fetch(`${base}/api/auth/refresh`, {
-              method: 'POST',
-              credentials: 'include',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken,
-              },
-            });
-            if (!res.ok) throw new Error('Refresh failed');
-            const data = await res.json();
+            const data = await refreshAccessToken(base, csrfToken);
             const newSession = applyAuthUpdate(sessionRef.current, data);
             if (!isStale()) setSession(newSession);
             return newSession;
