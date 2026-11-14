@@ -234,7 +234,7 @@ export function PatientSidebar({
     searchQuery = '',
     statusFilter = 'all',
     moduleFilter = 'all',
-    jobFilter = 'all',
+    jobFilter = '', // P2-28: 직종 필터 "전체" = ''(usePatientList와 같은 값 — 예전 'all'은 고급 필터 1개 활성으로 셌다)
     registrationFrom = '',
     registrationTo = '',
     completionFrom = '',

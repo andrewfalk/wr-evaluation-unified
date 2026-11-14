@@ -2,8 +2,8 @@
 //
 // T9·T10 특성화(REFACTORING_ROADMAP Phase 2 P2-08) — 테스트가 없던 훅의 현재 동작을 얼린다.
 //   T9  useElectronMenuEvents(P2-14 코드모드 B 대상) · useAppSettings · useAIAvailable
-//   T10 usePatientList/filterPatients의 jobFilter — 기본값 'all'이 "직종명에 all이 든 환자만"으로 동작하는 잠복 버그를
-//       **현재 동작 그대로** 기록한다(App은 ''을 넘겨 드러나지 않음). P2-28(flagged)에서 의도대로 고치며 이 기대를 바꾼다.
+//   T10 usePatientList/filterPatients의 jobFilter — 기본값 'all'이 "직종명에 all이 든 환자만"으로 동작하던 잠복 버그를
+//       P2-08에서 그대로 기록했고, P2-28(flagged)에서 고치며 기대를 의도대로 바꿨다(App은 ''을 넘겨 드러나지 않았다).
 // 새 훅 테스트 규칙: StrictMode 렌더(cleanup에서만 값을 세우는 ref가 없는지 함께 본다).
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -148,7 +148,7 @@ describe('T9 useAIAvailable', () => {
   });
 });
 
-describe('T10 usePatientList — jobFilter 현재 동작(잠복 버그 그대로)', () => {
+describe('T10 usePatientList — jobFilter(P2-28에서 잠복 버그를 고쳐 의도 갱신)', () => {
   const patients = goldenPatients.slice(0, 6);
   const withJob = (p, jobName) => ({ ...p, data: { ...p.data, shared: { ...p.data.shared, jobs: [{ id: 'j', jobName }] } } });
 
@@ -156,13 +156,15 @@ describe('T10 usePatientList — jobFilter 현재 동작(잠복 버그 그대로
     expect(filterPatients(patients, { jobFilter: '' })).toHaveLength(patients.length);
   });
 
-  it("filters 인자를 생략하면 usePatientList 기본값 jobFilter 'all'이 '직종명에 all 포함' 필터로 동작한다(현재)", () => {
-    expect(filterPatients(patients)).toEqual([]);
-    expect(filterPatients(patients, {})).toEqual([]);
+  // 예전(P2-08 특성화): filters를 생략하면 기본값 'all'이 "직종명에 all 포함" 필터로 동작해 결과가 []였다.
+  // P2-28(flagged): 기본값을 ''로 — filters를 생략해도 직종으로 거르지 않는다.
+  it('filters 인자를 생략하면 직종으로 거르지 않는다(기본 jobFilter = "")', () => {
+    expect(filterPatients(patients)).toHaveLength(patients.length);
+    expect(filterPatients(patients, {})).toHaveLength(patients.length);
     const tall = withJob(patients[0], 'Install 기사');
-    expect(filterPatients([tall, patients[1]]).map((p) => p.id)).toEqual([tall.id]);
+    expect(filterPatients([tall, patients[1]]).map((p) => p.id)).toEqual([tall.id, patients[1].id]);
     const { result } = renderHook(() => usePatientList(patients), { wrapper: StrictMode });
-    expect(result.current).toEqual([]);
+    expect(result.current).toHaveLength(patients.length);
   });
 
   it('jobFilter는 앞뒤 공백을 무시하고 대소문자 구분 없이 직종명 부분 일치', () => {

@@ -57,6 +57,12 @@ describe('renderBootGate', () => {
     expect(screen.getByRole('heading', { name: '인트라넷 로그인' })).toBeTruthy();
   });
 
+  it('④ 로그인이 ⑤ 비밀번호 변경보다 먼저 — 인증 안 됐으면 mustChangePassword여도 로그인 화면(#305 Codex 권고)', () => {
+    show({ isAuthenticated: false, session: { ...base.session, user: { id: 'u1', mustChangePassword: true } } });
+    expect(screen.getByRole('heading', { name: '인트라넷 로그인' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '비밀번호 변경 필요' })).toBeNull();
+  });
+
   it('⑤ 비밀번호 변경 필요(인증된 뒤에만)', () => {
     show({ session: { ...base.session, user: { id: 'u1', mustChangePassword: true } } });
     expect(screen.getByRole('heading', { name: '비밀번호 변경 필요' })).toBeTruthy();
