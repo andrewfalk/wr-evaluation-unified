@@ -236,6 +236,13 @@ describe('G9w-b — 인트라넷 쓰기', () => {
     await wait(2500);
     expect(router.count('PATCH /api/patients/:id')).toBe(1);
     expect(screen.getByText('김철수수정')).toBeTruthy();
+
+    // #313 Codex 권고: ack가 반영됐다면 다음 편집은 서버가 준 새 revision(2)으로 나간다.
+    fireEvent.change(screen.getByDisplayValue('김철수수정'), { target: { value: '김철수재수정' } });
+    await waitFor(() => expect(router.count('PATCH /api/patients/:id')).toBe(2), { timeout: 3000 });
+    const second = router.calls.filter((c) => c.method === 'PATCH')[1];
+    expect(second.headers['If-Match']).toBe('2');
+    expect(second.body.data.shared.name).toBe('김철수재수정');
     expect(router.count('POST /api/auth/csrf')).toBeLessThanOrEqual(BOOT_CSRF_LIMIT);
   }, 20000);
 
