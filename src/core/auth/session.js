@@ -1,8 +1,10 @@
+import { hasBridge } from '../../platform/bridge';
+
 const AUTH_SESSION_KEY = 'wrEvalUnifiedAuthSession';
 const AUTH_SESSION_VERSION = 1;
 
 function getRuntimeSource() {
-  if (typeof window !== 'undefined' && window.electron) {
+  if (hasBridge()) {
     return 'electron';
   }
   return 'web';

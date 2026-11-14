@@ -45,6 +45,8 @@ import { ChangePasswordModal } from './core/components/ChangePasswordModal';
 import { SwitchToLocalButton } from './core/components/SwitchToLocalButton';
 import { StatisticsWorkbench } from './core/components/statistics/StatisticsWorkbench';
 import { hasIntranetSession, isIntranetContext, resolveApiBaseUrl } from './platform/dataMode';
+import { getLifecycleBridge } from './platform/bridge';
+import { detectRuntime } from './platform/runtime';
 
 const DEFAULT_PATIENT_FILTERS = {
   searchQuery: '',
@@ -446,7 +448,7 @@ function App() {
   // 넘기지 않고 boolean만 전달한다(main.js의 set-has-unsaved-draft 채널).
   // preload가 채널을 노출하지 않는 빌드(standalone/웹)에서는 optional chaining으로 조용히 no-op.
   useEffect(() => {
-    window.electron?.setHasUnsavedDraft?.(!!dirtyAssessmentPatientId);
+    getLifecycleBridge()?.setHasUnsavedDraft?.(!!dirtyAssessmentPatientId);
   }, [dirtyAssessmentPatientId]);
 
   // 웹 탭 닫기·새로고침 경고 — Electron 인트라넷 빌드는 setHasUnsavedDraft 채널이 있고
@@ -457,7 +459,8 @@ function App() {
   // 이중으로 뜰 수 있다. 그래서 그 채널이 없는 웹/standalone 빌드에서만 폴백으로 등록한다
   // (standalone은 close 가로채기가 없어 beforeunload가 유일한 안전망).
   useEffect(() => {
-    if (window.electron?.setHasUnsavedDraft) return;
+    // 셸이 창 닫기를 가로채면(인트라넷 셸 setHasUnsavedDraft — 구 셸 포함, 키로 판정) beforeunload를 두지 않는다.
+    if (detectRuntime().hasNativeCloseGuard) return;
     const handleBeforeUnload = (e) => {
       if (!dirtyAssessmentPatientId) return;
       e.preventDefault();
@@ -559,7 +562,7 @@ function App() {
   // 렌더러가 아는 가용성을 Electron main에 전파해 메뉴를 켜고 끈다(main은 서버 설정을 모름) —
   // set-has-unsaved-draft와 같은 renderer→main IPC 패턴.
   useEffect(() => {
-    window.electron?.setStatsAvailable?.(statsAvailable);
+    getLifecycleBridge()?.setStatsAvailable?.(statsAvailable);
   }, [statsAvailable]);
 
   // 공통 모달 props (AppModals)
