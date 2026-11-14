@@ -2,7 +2,7 @@
 //
 // window.electron — Electron preload(electron/preload-intranet.js·preload-standalone.js)가 contextBridge로 노출하는
 // 브리지. 웹 빌드에서는 없으므로 통째로 optional이고, 두 preload가 서로 다른 키를 노출하므로 키마다 optional이다.
-// 키 목록은 G10 골든(electron/__tests__/__goldens__/preload-surface.json)의 두 preload 합집합(34개)과 같아야 한다 —
+// 키 목록은 G10 골든(electron/__tests__/__goldens__/preload-surface.json)의 두 preload 합집합(35개 — E0 buildTarget 포함, P2-09)과 같아야 한다 —
 // preload에 키를 더하거나 빼면 여기도 고친다. 인자·반환 타입은 Phase 3(E 트랙)에서 preload를 TS로 옮길 때 좁힌다.
 
 type Unsubscribe = () => void;
@@ -13,7 +13,10 @@ type IpcSubscribe = (listener: (...args: any[]) => void) => Unsubscribe;
 interface ElectronBridge {
   // 공통(두 preload)
   platform?: string;
-  version?: string;
+  /** E0(P2-09): preload가 밝힌 빌드 타깃. 현장 구 설치본(E0 전)에는 없다 — src/platform/runtime.ts가 키로 추측. */
+  buildTarget?: 'standalone' | 'intranet';
+  /** preload가 넘기는 버전 묶음(app은 main process의 app.getVersion()). */
+  version?: { app: string; electron: string; node: string; chrome: string };
   onMenuNew?: IpcSubscribe;
   onGotoModule?: IpcSubscribe;
   onOpenStatistics?: IpcSubscribe;

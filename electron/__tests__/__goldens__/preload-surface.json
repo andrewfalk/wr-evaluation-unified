@@ -10,9 +10,11 @@
     "injectEMR",
     "extractRecord",
     "extractConsultation",
-    "version"
+    "version",
+    "buildTarget"
   ],
   "preload-intranet.js": {
+    "buildTarget": "intranet",
     "extractConsultation": {
       "calls": [
         {
@@ -225,6 +227,7 @@
       ],
       "returnsUnsubscribe": false
     },
+    "buildTarget": "standalone",
     "extractConsultation": {
       "calls": [
         {

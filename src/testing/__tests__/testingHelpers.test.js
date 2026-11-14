@@ -98,3 +98,28 @@ describe('createFetchRouter', () => {
     expect(router.count('POST /api/patients/:id/lock')).toBe(1);
   });
 });
+
+describe('FakeBroadcastChannel', () => {
+  it('delivers asynchronously to other instances with the same name only (not to itself, not after close)', async () => {
+    const { FakeBroadcastChannel } = await import('../fakeBroadcastChannel');
+    const a = new FakeBroadcastChannel('wr-test');
+    const b = new FakeBroadcastChannel('wr-test');
+    const other = new FakeBroadcastChannel('wr-other');
+    const seen = { a: [], b: [], other: [] };
+    a.addEventListener('message', (e) => seen.a.push(e.data));
+    b.onmessage = (e) => seen.b.push(e.data);
+    other.addEventListener('message', (e) => seen.other.push(e.data));
+    const payload = { type: 'LOGOUT', nested: { x: 1 } };
+    a.postMessage(payload);
+    expect(seen.b).toEqual([]); // async
+    await new Promise((r) => setTimeout(r, 5));
+    expect(seen).toEqual({ a: [], b: [{ type: 'LOGOUT', nested: { x: 1 } }], other: [] });
+    expect(seen.b[0]).not.toBe(payload); // structured clone
+    b.close();
+    a.postMessage({ type: 'X' });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(seen.b).toHaveLength(1);
+    a.close();
+    other.close();
+  });
+});

@@ -197,10 +197,22 @@ describe('T8 workspaceRepository — 인트라넷 문맥 자동저장', () => {
     ['session', { session: { mode: 'intranet' }, settings: {} }],
     ['settings', { session: { mode: 'local' }, settings: { integrationMode: 'intranet' } }],
   ])('%s가 인트라넷이면 load·save 모두 null, 로컬 자동저장 키를 읽지도 쓰지도 않는다', async (_label, context) => {
-    localStorage.setItem(AUTO_SAVE_KEY, JSON.stringify({ savedAt: 'x', patients: [goldenPatients[1]] }));
+    const before = JSON.stringify({ savedAt: 'x', patients: [goldenPatients[1]] });
+    localStorage.setItem(AUTO_SAVE_KEY, before);
+    // 자동저장 키 접근을 직접 감시한다(#288 Codex 권고 — 반환값만으로는 "읽고 버림"·"덮어쓰고 null"을 못 잡는다).
+    const touched = [];
+    for (const method of ['getItem', 'setItem', 'removeItem']) {
+      const original = Storage.prototype[method];
+      vi.spyOn(Storage.prototype, method).mockImplementation(function spy(key, ...rest) {
+        if (key === AUTO_SAVE_KEY) touched.push(method);
+        return original.call(this, key, ...rest);
+      });
+    }
     await expect(loadAutoSavedWorkspace(context)).resolves.toBeNull();
     await expect(saveAutoSavedWorkspace({ patients: [goldenPatients[2]], ...context })).resolves.toBeNull();
-    expect(JSON.parse(localStorage.getItem(AUTO_SAVE_KEY)).patients).toHaveLength(1);
+    expect(touched).toEqual([]);
+    vi.restoreAllMocks();
+    expect(localStorage.getItem(AUTO_SAVE_KEY)).toBe(before);
   });
 
   it('로컬 문맥이면 storage.js로 저장·복원(환자 레코드 메타 보강)', async () => {
