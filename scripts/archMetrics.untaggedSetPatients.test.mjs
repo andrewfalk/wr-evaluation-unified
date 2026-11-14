@@ -29,6 +29,12 @@ describe('arch-metrics untaggedSetPatients', () => {
     expect(scanFile('src/App.jsx', src).untaggedSetPatients).toBeUndefined();
   });
 
+  it('함수 선언 `function setPatients(`는 호출이 아니다(#314 Codex 권고)', () => {
+    expect(scanFile('src/core/a.js', 'function setPatients(next) { return next; }').untaggedSetPatients).toBeUndefined();
+    expect(scanFile('src/core/b.js', 'export async function  setPatients (next) {}').untaggedSetPatients).toBeUndefined();
+    expect(scanFile('src/core/c.js', 'function setPatients(next) {}\nsetPatients([]);').untaggedSetPatients).toBe(1);
+  });
+
   it('컨테이너 계층(src/core/state/)과 테스트는 세지 않는다', () => {
     expect(scanFile('src/core/state/patientStore/usePatientsContainer.ts', 'setPatients(x);').untaggedSetPatients).toBeUndefined();
     expect(scanFile('src/core/hooks/__tests__/x.test.jsx', 'setPatients([]);').untaggedSetPatients).toBeUndefined();

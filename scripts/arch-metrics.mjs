@@ -51,8 +51,9 @@ const STORAGE_LAYER = (rel) => rel.startsWith('src/core/storage/');
 const TOKENS_CSS = new Set(['src/styles/tokens.css']);
 const PLATFORM_LAYER = (rel) => rel.startsWith('src/platform/');
 const PATIENT_STORE_LAYER = (rel) => rel.startsWith('src/core/state/');
-// A `setPatients(` call (not `x.setPatients(` / `resetPatients(`) whose first argument is not `patientTx.…`.
-const UNTAGGED_SET_PATIENTS = /(?<![.\w$])setPatients\s*\((?!\s*patientTx\s*\.)/g; // whitespace inside the lookahead — no backtracking past it
+// A `setPatients(` call (not `x.setPatients(` / `resetPatients(` / a `function setPatients(` declaration — #314 Codex advisory)
+// whose first argument is not `patientTx.…`.
+const UNTAGGED_SET_PATIENTS = /(?<![.\w$])(?<!\bfunction\s+)setPatients\s*\((?!\s*patientTx\s*\.)/g; // whitespace inside the lookahead — no backtracking past it
 const INTRANET_COMPARISON = /(?:\b(?:mode|integrationMode)\s*[!=]==?\s*['"`]intranet['"`])|(?:['"`]intranet['"`]\s*[!=]==?\s*[\w$.?\s]*?\b(?:mode|integrationMode)\b)/g;
 
 const toRel = (full) => path.relative(ROOT, full).replace(/\\/g, '/');
