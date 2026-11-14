@@ -11,10 +11,20 @@
 //   - 옮기기 전 코드가 클로저 값으로 계산하던 것은 payload로 그대로 넘긴다. 고치는 것은 flagged PR에서만.
 import type { PatientRecord } from '../../types/patient';
 import { touchPatientRecord as touchPatientRecordJs } from '../../services/patientRecords';
+import { applyWorkspaceSaveAck as applyWorkspaceSaveAckJs } from '../../services/patientServerRepository';
 
 // JS 서비스를 TS에서 부를 때의 모양(본체는 그대로 재사용 — 계획 "전이 본체는 기존 순수 함수를 재사용").
+// import 바인딩은 호출 시점에만 읽는다(최상위에서 읽지 않음): 훅 테스트가 서비스 모듈을 일부 export만 가진 vi.mock으로
+// 바꿔 두면 최상위 접근은 모듈 로드 자체를 실패시킨다(그 테스트가 부르지 않는 전이까지).
 type TouchContext = { session?: unknown };
-const touchPatientRecord = touchPatientRecordJs as unknown as (patient: PatientRecord, context: TouchContext) => PatientRecord;
+function touchPatientRecord(patient: PatientRecord, context: TouchContext): PatientRecord {
+  return (touchPatientRecordJs as unknown as (p: PatientRecord, c: TouchContext) => PatientRecord)(patient, context);
+}
+function applyWorkspaceSaveAck(localPatients: PatientRecord[], sentPatients: PatientRecord[], ack: unknown): PatientRecord[] {
+  return (applyWorkspaceSaveAckJs as unknown as (l: PatientRecord[], s: PatientRecord[], a: unknown) => PatientRecord[])(
+    localPatients, sentPatients, ack,
+  );
+}
 
 const TRANSITION_TAG: unique symbol = Symbol.for('wr.patientTransition');
 
@@ -96,10 +106,32 @@ export interface ReplacedAllPayload {
 /** 목록 전체 교체 — prev를 보지 않는다(옮기기 전 `setPatients(값)`과 같음). */
 const replacedAll = defineTransition<ReplacedAllPayload>('patients/replacedAll', (_prev, { patients }) => patients);
 
+export interface AppendedPayload {
+  patients: PatientRecord[];
+}
+
+/** 목록 끝에 덧붙인다 — 늘 새 배열(옮기기 전 `[...prev, ...추가]`, 빈 추가여도). */
+const appended = defineTransition<AppendedPayload>('patients/appended', (prev, { patients }) => [...prev, ...patients]);
+
+export interface SaveAckAppliedPayload {
+  /** 저장 요청에 실어 보낸 스냅샷 — 옮기기 전 updater가 클로저로 읽던 `patients`(의도된 "보낸 스냅샷"). */
+  sentPatients: PatientRecord[];
+  ack: unknown;
+}
+
+/** 워크스페이스 저장 응답을 적용 시점 목록(prev)에 반영 — applyWorkspaceSaveAck 재사용(ack 없으면 prev 그대로). */
+const saveAckApplied = defineTransition<SaveAckAppliedPayload>('workspace/saveAckApplied', (prev, { sentPatients, ack }) => (
+  applyWorkspaceSaveAck(prev, sentPatients, ack)
+));
+
 /** 이름 붙은 전이 모음. P2-33~39에서 훅별로 채운다(계획 "전이 목록"). */
 export const patientTx = {
   /** #13 usePatientCrud.updatePatient · #23 usePresetManagement.applyPreset */
   dataEdited,
   /** #3 App 초기화 · #4·#7 자동저장 복원·불러오기 · #14 삭제(현행 — 클로저 목록, P2-39a에서 교체) · #15 일괄 가져오기 · #16 테스트 데이터 */
   replacedAll,
+  /** #8 불러오기(추가) · #22 위자드 완료 */
+  appended,
+  /** #5·#6 워크스페이스 저장(새 이름·덮어쓰기) 응답 */
+  saveAckApplied,
 } as const;
