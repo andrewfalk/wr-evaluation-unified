@@ -901,16 +901,6 @@ function App() {
           </button>
         )}
 
-        {false && showOpsBanner && (
-          <button
-            className="ops-alert-banner"
-            type="button"
-            onClick={() => setShowAdminConsole(true)}
-          >
-            백업 이상 감지 — 관리자 콘솔 &gt; 운영 상태 탭에서 확인하세요
-          </button>
-        )}
-
         {activePatient && (
           <>
             {/* 스텝 인디케이터 */}

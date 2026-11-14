@@ -15,9 +15,6 @@
     }
   },
   "src/App.jsx": {
-    "no-constant-binary-expression": {
-      "count": 2
-    },
     "no-unused-vars": {
       "count": 1
     },
