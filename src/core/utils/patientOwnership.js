@@ -1,5 +1,6 @@
 import { isRedactedPatientRecord } from '../services/patientRecords';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 const hasOwn = (obj, key) =>
   obj != null && Object.prototype.hasOwnProperty.call(obj, key);
 
@@ -31,7 +32,7 @@ export function isMyPatient(patient, session) {
 // redacted/null patient는 어떤 경우에도 false (admin/로컬 무관 — 서버 deleted_at IS NULL과 일관).
 export function canEditPatient(patient, session) {
   if (!patient || isRedactedPatientRecord(patient)) return false;
-  if (session?.mode !== 'intranet') return true;
+  if (!hasIntranetSession(session)) return true;
   const userId = session?.user?.id;
   if (!userId) return false;
   if (session.user.role === 'admin') return true;

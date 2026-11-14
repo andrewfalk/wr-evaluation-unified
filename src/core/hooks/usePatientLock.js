@@ -8,6 +8,7 @@ import {
 } from '../services/patientServerRepository';
 import { setLockToken, getLockToken, clearLockToken } from '../services/lockTokenStore';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 const CLIENT_INSTANCE_STORAGE_KEY = 'wrEvalUnified.lockClientInstanceId';
 const DEFAULT_TTL_MS = 100_000;
 const RENEW_DIVISOR = 4; // heartbeat = ttlMs / 4 (서버 TTL의 여유 4배와 대응)
@@ -67,7 +68,7 @@ function getOrCreateClientInstanceId() {
 // 그 id로 된 patient_records 행이 없으므로 잠글 대상 자체가 없다 — 첫 push(POST) 이후에야
 // serverId가 생기고 그때부터 잠글 수 있다.
 export function requiresLock(patient, session) {
-  return session?.mode === 'intranet' && !!patient?.sync?.serverId;
+  return hasIntranetSession(session) && !!patient?.sync?.serverId;
 }
 
 const NONE_STATE = { status: 'none', holder: null, expiresAt: null };

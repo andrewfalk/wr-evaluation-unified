@@ -1,6 +1,7 @@
 // @ts-nocheck
+import { isIntranetContext } from '../../platform/dataMode';
 export function isIntranetWorkspaceMode({ session, settings } = {}) {
-  return session?.mode === 'intranet' || settings?.integrationMode === 'intranet';
+  return isIntranetContext({ session, settings });
 }
 
 export function shouldUseWorkspaceAutosave({ disabled = false, session, settings } = {}) {

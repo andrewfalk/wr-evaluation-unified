@@ -7,6 +7,7 @@ import { canDeletePatient } from '../utils/patientOwnership';
 import { getDoctorOptionsFromRoster } from '../utils/dashboardStats';
 import { toLocalDateString } from '../utils/common';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 const DEFAULT_SORT_DIRECTION = {
   default: 'asc',
   name: 'asc',
@@ -289,7 +290,7 @@ export function PatientSidebar({
         </div>
 
         <div className="sidebar-filter">
-          {session?.mode === 'intranet' && (
+          {hasIntranetSession(session) && (
             <select
               className="patient-scope-select patient-scope-select--sidebar"
               value={scope}
@@ -421,7 +422,7 @@ export function PatientSidebar({
           )}
         </div>
 
-        {session?.mode === 'intranet' && (() => {
+        {hasIntranetSession(session) && (() => {
           const count = typeof serverUnassignedCount === 'number'
             ? serverUnassignedCount
             : patients.filter(p => p.redacted !== true && p.assignedDoctorUserId === null).length;
@@ -472,7 +473,7 @@ export function PatientSidebar({
                         {isRedacted && <span className="patient-sync-badge patient-sync-badge-redacted">삭제됨</span>}
                         {hasConflict && <span className="patient-sync-badge">{conflictKind}</span>}
                         {nameWarning && <span className="patient-sync-badge patient-sync-badge-warning" title={nameWarningTitle}>이름 확인</span>}
-                        {scope === 'all' && session?.mode === 'intranet' && p.assignedDoctorUserId === null && (() => {
+                        {scope === 'all' && hasIntranetSession(session) && p.assignedDoctorUserId === null && (() => {
                           const { hasWarning, tooltip } = getUnassignedBadgeInfo(p);
                           return (
                             <span
@@ -481,7 +482,7 @@ export function PatientSidebar({
                             >미배정</span>
                           );
                         })()}
-                        {scope === 'all' && session?.mode === 'intranet' && p.assignedDoctorUserId && p.assignedDoctorUserId !== session?.user?.id && (
+                        {scope === 'all' && hasIntranetSession(session) && p.assignedDoctorUserId && p.assignedDoctorUserId !== session?.user?.id && (
                           <span className="patient-others-badge">타 담당</span>
                         )}
                         <div className="patient-item-modules">

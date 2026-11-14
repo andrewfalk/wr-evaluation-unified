@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { requestJson } from './httpClient';
 
+import { isIntranetContext } from '../../platform/dataMode';
 const listeners = new Set();
 let probeSequence = 0;
 
@@ -9,7 +10,7 @@ function normalizeBaseUrl(baseUrl = '') {
 }
 
 function isIntranetMode({ session, settings } = {}) {
-  return settings?.integrationMode === 'intranet' || session?.mode === 'intranet';
+  return isIntranetContext({ session, settings });
 }
 
 function buildSessionInfo(context = {}) {

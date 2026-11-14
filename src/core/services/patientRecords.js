@@ -1,5 +1,6 @@
 import { createPatient as createBasePatient, migratePatient } from '../utils/data';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 export const DEFAULT_PATIENT_SYNC = {
   serverId: null,
   revision: 0,
@@ -45,7 +46,7 @@ export function createPatientMeta(context = {}) {
   // 인트라넷 doctor가 신규 생성 시 서버(resolveAssignedDoctor)는 자동으로
   // assigned_doctor_user_id = currentUser.id 로 세팅한다 (doctorName 없는 경우).
   // 클라단에도 동일하게 미리 찍어둬야 sync 전에 본인 환자를 정상 수정 가능.
-  if (context?.session?.mode === 'intranet' && user?.id && user?.role === 'doctor') {
+  if (hasIntranetSession(context?.session) && user?.id && user?.role === 'doctor') {
     meta.assignedDoctorUserId = user.id;
   }
   return meta;

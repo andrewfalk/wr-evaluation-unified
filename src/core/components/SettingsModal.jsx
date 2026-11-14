@@ -4,6 +4,7 @@ import { inspectIntegrationStatus } from '../services/integrationStatus';
 import { isElectron } from '../utils/platform';
 import { PresetsSection } from './PresetsSection';
 
+import { hasIntranetSession, isIntranetContext } from '../../platform/dataMode';
 const DEFAULT_INTRANET_URL = 'https://wr.hospital.local';
 
 function normalizeUrl(value = '') {
@@ -15,7 +16,7 @@ function getEffectiveServerUrl({ session, diagnostic, draft } = {}) {
     session?.apiBaseUrl ||
     diagnostic?.baseUrl ||
     draft?.apiBaseUrl ||
-    (session?.mode === 'intranet' || draft?.integrationMode === 'intranet' ? DEFAULT_INTRANET_URL : '')
+    (isIntranetContext({ session, settings: draft }) ? DEFAULT_INTRANET_URL : '')
   );
 }
 
@@ -23,9 +24,9 @@ function buildPreviewSession(session, draft) {
   const draftUrl = normalizeUrl(draft.apiBaseUrl || '');
   return {
     ...session,
-    mode: draft.integrationMode === 'intranet' ? 'intranet' : 'local',
+    mode: isIntranetContext({ settings: draft }) ? 'intranet' : 'local',
     apiBaseUrl: draftUrl || (
-      session?.mode === 'intranet' || draft.integrationMode === 'intranet'
+      isIntranetContext({ session, settings: draft })
         ? DEFAULT_INTRANET_URL
         : ''
     ),
@@ -74,7 +75,7 @@ function DiagnosticItem({ label, value }) {
 }
 
 export function SettingsModal({ settings, session, integrationStatus, onSave, onClose, onLogout, onMigrate, onPresetsImported }) {
-  const isIntranetLocked = session?.mode === 'intranet';
+  const isIntranetLocked = hasIntranetSession(session);
   const [draft, setDraft] = useState({ ...settings });
   const [diagnostic, setDiagnostic] = useState(integrationStatus);
   const [isCheckingConnection, setIsCheckingConnection] = useState(false);
@@ -267,7 +268,7 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
 
           <div className="settings-diagnostic-grid">
             <DiagnosticItem label="진단 기준" value={hasConnectionDraftChanges ? '미저장 입력값' : '현재 설정'} />
-            <DiagnosticItem label="저장 방식" value={draft.integrationMode === 'intranet' ? '인트라넷' : '로컬'} />
+            <DiagnosticItem label="저장 방식" value={isIntranetContext({ settings: draft }) ? '인트라넷' : '로컬'} />
             <DiagnosticItem label="대상 URL" value={baseUrl || '(기본 /api)'} />
             <DiagnosticItem label="활성 저장소" value={diagnostic?.activeStore || '-'} />
             <DiagnosticItem label="사용자 ID" value={diagnostic?.sessionInfo?.userId} />

@@ -2,6 +2,7 @@
 import { buildSessionHeaders } from '../auth/session';
 import { requestJson } from './httpClient';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 const SETTINGS_KEY = 'wrEvalUnifiedSettings';
 
 function loadAISettings() {
@@ -59,7 +60,7 @@ export async function analyzeAIRequest({ input, inputError, fullReport, model, s
 
   // Intranet mode: route through the server proxy only.
   // Direct external LLM calls are prohibited by server policy (aiEnabled gate + CSP).
-  if (session?.mode === 'intranet') {
+  if (hasIntranetSession(session)) {
     try {
       const data = await requestJson('/api/ai/analyze', {
         baseUrl: session.apiBaseUrl || settings?.apiBaseUrl || '',

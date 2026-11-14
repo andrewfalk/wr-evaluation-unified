@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { requestJson } from '../services/httpClient';
 
+import { isIntranetContext } from '../../platform/dataMode';
 const FAIL_CLOSED_CONFIG = {
   mode: 'intranet',
   aiEnabled: false,
@@ -19,7 +20,7 @@ const FAIL_CLOSED_CONFIG = {
 
 export function useServerConfig({ session, settings }) {
   const isIntranet =
-    session?.mode === 'intranet' || settings?.integrationMode === 'intranet';
+    isIntranetContext({ session, settings });
   const baseUrl = session?.apiBaseUrl || settings?.apiBaseUrl || '';
 
   // fetchedBaseUrl in state (not ref) so render can safely read it for

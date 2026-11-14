@@ -2,6 +2,7 @@
 import { buildSessionHeaders } from '../auth/session';
 import { getCsrfToken } from '../utils/csrfCookie';
 
+import { isRefreshEligible } from '../../platform/dataMode';
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 // Configured once at app boot via configureHttpClient().
@@ -22,7 +23,7 @@ export function configureHttpClient({ onRefresh, onLogout }) {
 // Only skip when the session positively declares a non-intranet mode; callers that
 // pass no session — or one without a mode — keep the previous behaviour.
 function canRefreshSession(session) {
-  return !session?.mode || session.mode === 'intranet';
+  return isRefreshEligible(session);
 }
 
 function normalizeBaseUrl(baseUrl = '') {

@@ -44,6 +44,7 @@ import { LoginModal } from './core/components/LoginModal';
 import { ChangePasswordModal } from './core/components/ChangePasswordModal';
 import { SwitchToLocalButton } from './core/components/SwitchToLocalButton';
 import { StatisticsWorkbench } from './core/components/statistics/StatisticsWorkbench';
+import { hasIntranetSession, isIntranetContext } from './platform/dataMode';
 
 const DEFAULT_PATIENT_FILTERS = {
   searchQuery: '',
@@ -138,10 +139,10 @@ function App() {
   // 별도 훅 없이 statsWorkbenchAvailable 플래그 하나로 메뉴 노출을 결정한다.
   const statsAvailable = !!serverConfig?.statsWorkbenchAvailable;
   const isIntranetMode =
-    session?.mode === 'intranet' || settings?.integrationMode === 'intranet';
-  const canUseMinePatientScope = session?.mode !== 'intranet' || session?.user?.role === 'doctor';
+    isIntranetContext({ session, settings });
+  const canUseMinePatientScope = !hasIntranetSession(session) || session?.user?.role === 'doctor';
   const effectivePatientScope = normalizePatientScopeForSession(session, patientScope);
-  const canUseDashboardScope = session?.mode === 'intranet' && !!session?.user?.id;
+  const canUseDashboardScope = hasIntranetSession(session) && !!session?.user?.id;
   const effectiveDashboardScope = canUseDashboardScope ? dashboardScope : 'all';
   const [doctorRoster, setDoctorRoster] = useState({ doctors: [], unassignedCount: 0 });
   // 'loading'/'ready'/'error' — 초기 로딩 전, 정상 조회(빈 명부 포함), 조회 실패를 구분해
@@ -321,7 +322,7 @@ function App() {
   // 검증해야 Dashboard 자체 가드(→'all' 복귀)와 정책이 어긋나지 않는다.
   // status==='loading'|'error'에서는 보류 — 로딩 중 오탐, 실패 시 마지막 유효 명부 기준 유지.
   useEffect(() => {
-    if (session?.mode !== 'intranet') return;
+    if (!hasIntranetSession(session)) return;
     if (doctorRosterStatus !== 'ready') return;
     const validScopes = getValidPatientScopes(doctorRoster, { canUseMineScope: canUseMinePatientScope });
     const fallback = getDefaultPatientScope(session);
@@ -625,8 +626,8 @@ function App() {
   }
 
   // Boot-time session verification in progress (persisted intranet session, not yet confirmed).
-  // session.mode==='intranet' && !sessionVerified means the /api/auth/csrf check is in flight.
-  if (isIntranetMode && session?.mode === 'intranet' && !sessionVerified) {
+  // hasIntranetSession(session) && !sessionVerified means the /api/auth/csrf check is in flight.
+  if (isIntranetMode && hasIntranetSession(session) && !sessionVerified) {
     return withLocalEscape(
       <div className="app-boot-overlay">
         <div className="app-boot-box">
@@ -679,7 +680,7 @@ function App() {
   // pull 완료 후 mine=0이지만 serverPatientCount>0: 서버에 환자 있음(다른 의사 담당 등)
   //   → 환자 목록 껍데기를 보여줘서 scope 전환, 재마이그레이션 등 다음 행동 가능하게 함
   const isBootingFromServer =
-    session?.mode === 'intranet'
+    hasIntranetSession(session)
     && patients.length === 0
     && !activeId
     && !intakeShared
@@ -702,7 +703,7 @@ function App() {
   //   인트라넷에서 mine=0이지만 서버에 환자가 있으면 자동 랜딩을 억제 (목록 화면에서 scope 전환 등으로 해결 가능).
   // 사용자 진입: 헤더의 대시보드/홈 버튼(showHome)은 서버 상태와 무관하게 항상 허용.
   const hasAnyServerPatient =
-    session?.mode === 'intranet' && (syncState.serverPatientCount ?? 0) > 0;
+    hasIntranetSession(session) && (syncState.serverPatientCount ?? 0) > 0;
   const shouldAutoShowLanding =
     patients.length === 0 && !activeId && !intakeShared;
 
@@ -722,7 +723,7 @@ function App() {
           onGoBack={() => setShowHome(false)}
           onResetPatients={handleResetPatients}
           onSelectPatient={(id) => guardedSelectPatient(id)}
-          isIntranetMode={session?.mode === 'intranet'}
+          hasIntranetSession={hasIntranetSession(session)}
           session={session}
           dashboardScope={effectiveDashboardScope}
           onDashboardScopeChange={(s) => {
@@ -737,7 +738,7 @@ function App() {
           isDashboardScopeLoading={isDashboardScopeLoading}
           onShowPatientList={showPatientList}
           canShowPatientList={
-            session?.mode === 'intranet' &&
+            hasIntranetSession(session) &&
             ((syncState.serverPatientCount ?? 0) > 0 || patients.length > 0)
           }
         />

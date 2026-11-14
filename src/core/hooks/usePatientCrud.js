@@ -8,6 +8,7 @@ import { canDeletePatient } from '../utils/patientOwnership';
 import { preserveDeletedSpineCommonFields } from '../utils/spineAssessmentMigration';
 import { isValidDiagnosisModuleId, resolveDiagnosisModule } from '../utils/diagnosisMapping';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 export function usePatientCrud({
   activeId, activeModuleId, session, settings,
   patients, setPatients,
@@ -147,7 +148,7 @@ export function usePatientCrud({
   const addPatient = () => { handleStartIntake(); };
 
   const shouldDeleteOnServer = (patient) => (
-    session?.mode === 'intranet' && !!patient?.sync?.serverId
+    hasIntranetSession(session) && !!patient?.sync?.serverId
   );
 
   const markDeleteConflict = (patient, error) => ({
@@ -262,7 +263,7 @@ export function usePatientCrud({
     }
     setIntakeShared(null);
     setShowHome(false);
-    const doctorNote = session?.mode === 'intranet' && stats.withDoctorName > 0
+    const doctorNote = hasIntranetSession(session) && stats.withDoctorName > 0
       ? `, 담당의 입력 ${stats.withDoctorName}명 (동기화 시 자동 배정 시도)`
       : '';
     const assessmentNote = stats.updatedAssessments > 0
@@ -273,7 +274,7 @@ export function usePatientCrud({
 
   const handleLoadTestData = async () => {
     if (dirtyAssessmentPatientId) { onBlockedByUnsavedDraft?.(); return; }
-    const isIntranet = session?.mode === 'intranet';
+    const isIntranet = hasIntranetSession(session);
     const isAdmin = session?.user?.role === 'admin';
     if (isIntranet && !isAdmin) return;
     if (isIntranet && isAdmin) {

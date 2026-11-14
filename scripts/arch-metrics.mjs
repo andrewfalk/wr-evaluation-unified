@@ -25,6 +25,8 @@
  *       registry (src/core/storage/**). Allowed list fixed at P2-18.
  *   cssRawHex — #rgb…#rrggbbaa literals in src/**\/*.css outside src/styles/tokens.css (P2-92~93).
  *   inlineStyleHex — hex colour literals inside JSX `style={{…}}` in product code (P2-92~93).
+ *   intranetModeComparisons — `mode`/`integrationMode` compared with 'intranet' outside src/platform/
+ *       (use isIntranetContext·hasIntranetSession·isRefreshEligible from src/platform/dataMode.ts). 0 since P2-11.
  *
  * Usage:
  *   node scripts/arch-metrics.mjs           # print current counts vs baseline
@@ -44,6 +46,8 @@ const BRIDGE_FILES = new Set(['src/platform/bridge.ts']);
 const REQUEST_LAYER = (rel) => rel === 'src/core/services/httpClient.js' || rel.startsWith('src/core/api/');
 const STORAGE_LAYER = (rel) => rel.startsWith('src/core/storage/');
 const TOKENS_CSS = new Set(['src/styles/tokens.css']);
+const PLATFORM_LAYER = (rel) => rel.startsWith('src/platform/');
+const INTRANET_COMPARISON = /(?:\b(?:mode|integrationMode)\s*[!=]==?\s*['"`]intranet['"`])|(?:['"`]intranet['"`]\s*[!=]==?\s*[\w$.?]*\b(?:mode|integrationMode)\b)/g;
 
 const toRel = (full) => path.relative(ROOT, full).replace(/\\/g, '/');
 
@@ -153,6 +157,10 @@ export function scanFile(rel, content) {
   if (!STORAGE_LAYER(rel) && /\b(?:localStorage|sessionStorage)\b/.test(code)) result.webStorageFiles = 1;
   const inlineHex = inlineStyleHexCount(code);
   if (inlineHex) result.inlineStyleHex = inlineHex;
+  if (!PLATFORM_LAYER(rel)) {
+    const comparisons = matchingLines(code, INTRANET_COMPARISON).size;
+    if (comparisons) result.intranetModeComparisons = comparisons;
+  }
   return result;
 }
 
@@ -164,6 +172,7 @@ export const METRICS = [
   'webStorageFiles',
   'cssRawHex',
   'inlineStyleHex',
+  'intranetModeComparisons',
 ];
 
 export function computeMetrics() {

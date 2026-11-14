@@ -28,10 +28,11 @@ import {
 import { migratePatientRecords } from './patientRecords';
 import { isIntranetWorkspaceMode } from '../utils/workspaceAutosavePolicy';
 
+import { isIntranetContext } from '../../platform/dataMode';
 // This repository keeps the current local/Electron implementation,
 // while giving us a single seam to replace with intranet APIs later.
 function shouldUseRemoteRepository({ session, settings } = {}) {
-  return settings?.integrationMode === 'intranet' || session?.mode === 'intranet';
+  return isIntranetContext({ session, settings });
 }
 
 // Errors that indicate "endpoint not implemented yet" — safe to fall back to local.
