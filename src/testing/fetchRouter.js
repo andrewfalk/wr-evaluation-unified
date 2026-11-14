@@ -58,14 +58,19 @@ export function createFetchRouter(initialRoutes = {}) {
     const method = (init.method || (typeof input === 'object' && !(input instanceof URL) && input.method) || 'GET').toUpperCase();
     const url = new URL(rawUrl, 'http://localhost');
     const key = `${method} ${url.pathname}`;
-    let body = init.body;
+    const isRequest = typeof Request !== 'undefined' && input instanceof Request;
+    // init이 우선(fetch와 같음), 없으면 Request 객체의 본문·헤더.
+    let body = init.body !== undefined ? init.body : isRequest ? (await input.clone().text()) || undefined : undefined;
+    const headers = init.headers !== undefined
+      ? init.headers
+      : isRequest ? Object.fromEntries(input.headers.entries()) : {};
     if (typeof body === 'string') {
       try { body = JSON.parse(body); } catch { /* keep text */ }
     }
     const match = resolve(key);
     const req = {
       method, url: rawUrl, path: url.pathname, query: Object.fromEntries(url.searchParams), body,
-      headers: init.headers ?? {}, params: match?.params ?? {}, route: match?.route ?? null,
+      headers, params: match?.params ?? {}, route: match?.route ?? null,
     };
     calls.push(req);
     if (!match) {
