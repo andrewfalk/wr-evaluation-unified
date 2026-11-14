@@ -1,4 +1,6 @@
-import * as XLSX from 'xlsx';
+// 일괄입력 순수 파서(REFACTORING_ROADMAP Phase 2 P-2a, P2-22) — xlsx를 import하지 않는다. 6개 모듈의 index.js가 이 파일을
+// 가져오므로, 여기서 xlsx를 정적 import하면 xlsx 전체가 메인 청크에 들어간다(계획 F8). 엑셀 파일 읽기는 xlsxIo.js.
+import { excelSerialToYmd } from './excelDate';
 import { getModule } from '../moduleRegistry';
 import { createDiagnosis, createSharedJob } from './data';
 import { LOW_REASON_OPTIONS } from '../../modules/knee/utils/data';
@@ -17,7 +19,7 @@ export function normalizeHeader(value) {
 export function parseDate(value) {
   if (!value) return '';
   if (typeof value === 'number') {
-    const parsed = XLSX.SSF.parse_date_code(value);
+    const parsed = excelSerialToYmd(value); // = XLSX.SSF.parse_date_code의 날짜 부분(excelDate.parity.test.js)
     if (!parsed) return '';
     return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
   }
