@@ -4,16 +4,10 @@ import { requestJson } from './httpClient';
 import { hasIntranetSession, resolveApiBaseUrl } from '../../platform/dataMode';
 import { getAiBridge } from '../../platform/bridge';
 import { requestEnvelope } from '../api/client';
-const SETTINGS_KEY = 'wrEvalUnifiedSettings';
-
+import { readStoredSettings } from '../storage/settingsStore';
+// 설정(독립형 AI API 키 포함)은 settingsStore 한 곳에서 읽는다(P2-18 — 예전엔 storage.js와 같은 키를 여기서 다시 선언).
 function loadAISettings() {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+  return readStoredSettings() ?? {};
 }
 
 function buildAnalyzeUrl(settings, session) {

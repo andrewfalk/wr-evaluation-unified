@@ -67,20 +67,59 @@ describe('useOpsStatus', () => {
     spy.mockRestore();
   });
 
-  it('비활성으로 바뀌면 배너를 숨기고 폴링을 멈춘다, 언마운트 뒤 응답은 무시', async () => {
-    vi.mocked(requestJson).mockResolvedValue(report('stale_and_alert'));
-    const { result, rerender, unmount } = renderHook((props) => useOpsStatus(props), {
+  // #298 Codex 권고: 진행 중 요청을 붙잡은 채 비활성화·언마운트하고, 그 뒤 응답 완료·타이머 진행에도 상태·요청이 그대로인지.
+  function captureOpsInterval() {
+    const ticks = [];
+    const cleared = [];
+    const realSetInterval = globalThis.setInterval;
+    const realClearInterval = globalThis.clearInterval;
+    let nextId = 1000;
+    vi.spyOn(globalThis, 'setInterval').mockImplementation((fn, ms, ...rest) => {
+      if (ms !== 5 * 60 * 1000) return realSetInterval(fn, ms, ...rest);
+      const id = nextId++;
+      ticks.push({ id, fn });
+      return id;
+    });
+    vi.spyOn(globalThis, 'clearInterval').mockImplementation((id) => {
+      if (ticks.some((t) => t.id === id)) { cleared.push(id); return undefined; }
+      return realClearInterval(id);
+    });
+    const live = () => ticks.filter((t) => !cleared.includes(t.id));
+    return { live };
+  }
+
+  it('비활성으로 바뀌면 진행 중 응답을 버리고 폴링 타이머를 멈춘다', async () => {
+    const timers = captureOpsInterval();
+    vi.mocked(requestJson).mockResolvedValue(report('stale'));
+    const { result, rerender } = renderHook((props) => useOpsStatus(props), {
       wrapper: StrictMode, initialProps: { session: SESSION, enabled: true },
     });
-    await waitFor(() => expect(result.current.showBanner).toBe(true));
+    await waitFor(() => expect(result.current.opsStatus).toEqual(report('stale')));
+    // 다음 폴링을 진행 중으로 붙잡는다
+    let release;
+    vi.mocked(requestJson).mockImplementationOnce(() => new Promise((r) => { release = r; }));
+    await act(async () => { timers.live().forEach((t) => t.fn()); await Promise.resolve(); });
+    expect(release).toBeTypeOf('function');
+    const calls = requestJson.mock.calls.length;
     rerender({ session: SESSION, enabled: false });
     expect(result.current.showBanner).toBe(false);
-    const calls = requestJson.mock.calls.length;
-    let late;
-    vi.mocked(requestJson).mockImplementationOnce(() => new Promise((r) => { late = r; }));
-    rerender({ session: { ...SESSION }, enabled: true });
+    expect(timers.live()).toEqual([]); // clearInterval됨
+    await act(async () => { release(report('ok')); await Promise.resolve(); });
+    expect(result.current.opsStatus).toEqual(report('stale')); // 취소된 응답은 반영 안 됨
+    expect(requestJson.mock.calls.length).toBe(calls);
+  });
+
+  it('언마운트 뒤에는 진행 중 응답을 반영하지 않고 타이머도 남지 않는다', async () => {
+    const timers = captureOpsInterval();
+    let release;
+    vi.mocked(requestJson).mockImplementation(() => new Promise((r) => { release = r; }));
+    const { result, unmount } = renderHook(() => useOpsStatus({ session: SESSION, enabled: true }), { wrapper: StrictMode });
+    await waitFor(() => expect(release).toBeTypeOf('function'));
+    const last = result.current;
     unmount();
-    late?.(report('ok'));
-    expect(requestJson.mock.calls.length).toBeGreaterThanOrEqual(calls);
+    expect(timers.live()).toEqual([]);
+    await act(async () => { release(report('stale')); await Promise.resolve(); });
+    expect(result.current).toBe(last); // 언마운트 뒤 렌더 없음
+    expect(result.current.opsStatus).toBeNull();
   });
 });

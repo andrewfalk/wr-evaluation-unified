@@ -2,11 +2,13 @@
 import { migratePatients } from './data';
 import { isIntranetContext } from '../../platform/dataMode';
 import { getFsBridge } from '../../platform/bridge';
+import { STORAGE_KEYS } from '../storage/keys';
+import { readStoredSettings, writeStoredSettings } from '../storage/settingsStore';
 
-const SAVED_ITEMS_KEY = 'wrEvalUnifiedSavedItems';
-const AUTO_SAVE_KEY = 'wrEvalUnifiedAutoSave';
-const SETTINGS_KEY = 'wrEvalUnifiedSettings';
-const DEVICE_ID_KEY = 'wrEvalUnifiedDeviceId';
+const SAVED_ITEMS_KEY = STORAGE_KEYS.savedItems;
+const AUTO_SAVE_KEY = STORAGE_KEYS.autoSave;
+const SETTINGS_KEY = STORAGE_KEYS.settings;
+const DEVICE_ID_KEY = STORAGE_KEYS.deviceId;
 
 function safeSetItem(key, value) {
   try {
@@ -144,16 +146,14 @@ export const clearAutoSave = async () => {
 export const loadSettings = (defaults) => {
   // 동기 함수 유지 (초기 렌더링에서 사용)
   // Electron에서도 첫 로드는 localStorage 폴백 후, 비동기로 갱신
-  const saved = localStorage.getItem(SETTINGS_KEY);
+  // 읽기는 settingsStore 한 곳(P2-18) — 없거나 깨졌으면 기본값.
+  const saved = readStoredSettings();
   if (saved) {
-    try {
-      const merged = { ...defaults, ...JSON.parse(saved) };
-      if (isIntranetContext({ settings: defaults })) {
-        return { ...merged, integrationMode: 'intranet' };
-      }
-      return merged;
+    const merged = { ...defaults, ...saved };
+    if (isIntranetContext({ settings: defaults })) {
+      return { ...merged, integrationMode: 'intranet' };
     }
-    catch { /* ignore parse errors, return defaults */ }
+    return merged;
   }
   return { ...defaults };
 };
@@ -172,8 +172,8 @@ export const saveSettings = async (settings) => {
   if (fs) {
     await fs.fsSaveSettings(settings);
   }
-  // 항상 localStorage에도 저장 (동기 loadSettings 폴백용)
-  safeSetItem(SETTINGS_KEY, JSON.stringify(settings));
+  // 항상 localStorage에도 저장 (동기 loadSettings 폴백용) — settingsStore 한 곳(P2-18)
+  writeStoredSettings(settings);
 };
 
 // ======================================================

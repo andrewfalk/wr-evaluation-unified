@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { computeMetrics, METRICS, readBaseline } from '../../scripts/arch-metrics.mjs';
 
 const { totals, byFile } = computeMetrics();
-const baseline = readBaseline().metrics;
+const baselineFile = readBaseline();
+const baseline = baselineFile.metrics;
 
 describe('architecture ratchet (P2-01)', () => {
   it('baseline covers exactly the measured metrics', () => {
@@ -20,5 +21,11 @@ describe('architecture ratchet (P2-01)', () => {
   it.each(METRICS)('%s baseline is lowered when the count goes down', (key) => {
     expect(totals[key], `${key} went down — run \`node scripts/arch-metrics.mjs --lower\` and commit the baseline.`)
       .toBeGreaterThanOrEqual(baseline[key]);
+  });
+
+  it('Web Storage를 직접 만지는 파일은 허용 목록 안(P2-18)', () => {
+    const touching = Object.keys(byFile.webStorageFiles).sort();
+    expect(touching.filter((f) => !baselineFile.webStorageAllowlist.includes(f)), 'src/core/storage(keys·settingsStore)를 거친다').toEqual([]);
+    expect(baselineFile.webStorageAllowlist.filter((f) => !touching.includes(f)), '더 이상 만지지 않는 파일은 목록에서 지운다').toEqual([]);
   });
 });
