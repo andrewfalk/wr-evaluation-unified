@@ -3,6 +3,7 @@ import { getModule } from '../moduleRegistry';
 import { createSharedData } from '../utils/data';
 import { createManagedPatient } from '../services/patientRecords';
 import { buildSteps } from '../utils/steps';
+import { patientTx } from '../state/patientStore/transitions';
 
 import { hasIntranetSession } from '../../platform/dataMode';
 export function useIntakeWizard({ settings, session, setPatients, setActiveId, setCurrentStepIndex, setShowHome, videoAnalysisEnabled = false, hasUnsavedAssessmentDraft = false, onBlockedByUnsavedDraft }) {
@@ -34,7 +35,7 @@ export function useIntakeWizard({ settings, session, setPatients, setActiveId, s
     }
     const p = createManagedPatient(selectedModuleIds, modulesData, { session });
     p.data.shared = { ...intakeShared };
-    setPatients(prev => [...prev, p]);
+    setPatients(patientTx.appended({ patients: [p] }));
     setActiveId(p.id);
     const newSteps = buildSteps(selectedModuleIds, { videoAnalysisEnabled });
     const firstModuleIdx = newSteps.findIndex(s => s.group !== 'shared');

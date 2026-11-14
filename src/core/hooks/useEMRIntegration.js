@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { showAlert, showConfirm } from '../utils/platform';
-import { touchPatientRecord } from '../services/patientRecords';
+import { patientTx } from '../state/patientStore/transitions';
 import { getEmrBridge } from '../../platform/bridge';
 
 export function useEMRIntegration({ activePatient, patients, selectedIds, session, setPatients, dirtyAssessmentPatientId }) {
@@ -179,14 +179,8 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
             }
           }
 
-          setPatients(prev => prev.map(pt =>
-            pt.id === p.id
-              ? touchPatientRecord(
-                  { ...pt, updatedAt: new Date().toISOString(), data: { ...pt.data, shared: updated } },
-                  { session }
-                )
-              : pt
-          ));
+          // 현행 그대로 — 추출 시작 시점 사본 기반 shared로 통째 교체(대기 중 바뀐 값을 되돌리는 결함은 P2-39b에서 고친다).
+          setPatients(patientTx.sharedReplaced({ id: p.id, shared: updated, session }));
         } else {
           failCount++;
         }
@@ -228,14 +222,7 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
           else if (c.department === '재활의학과') appendReply('consultReplyRehab', c.content);
           else appendReply('consultReplyOther', c.content);
         }
-        setPatients(prev => prev.map(p =>
-          p.id === activePatient.id
-            ? touchPatientRecord(
-                { ...p, updatedAt: new Date().toISOString(), data: { ...p.data, shared: updated } },
-                { session }
-              )
-            : p
-        ));
+        setPatients(patientTx.sharedReplaced({ id: activePatient.id, shared: updated, session }));
         await showAlert(`${result.consultations.length}개 과목 회신을 가져왔습니다.`);
       } else {
         await showAlert(`다학제회신 추출 실패: ${result.error || result.message || '알 수 없는 오류'}`);
