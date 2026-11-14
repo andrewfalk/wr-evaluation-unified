@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { IntegrationStatusBadge } from './IntegrationStatusBadge';
-
 import { hasIntranetSession } from '../../platform/dataMode';
+import { getEmrBridge } from '../../platform/bridge';
+
 const ROLE_LABELS = { admin: '관리자', doctor: '의사', nurse: '간호사', staff: '직원' };
 
 function AccountMenu({ session, onShowAdminConsole, onLogout, onChangePassword, onShowAccountProfile }) {
@@ -94,18 +95,18 @@ function EMRButtons({ activePatient, activeModules, selectedIds, extractProgress
 
   return (
     <>
-      {window.electron?.extractRecord && (selectedIds.size > 0 || activePatient?.data?.shared?.patientNo) && (
+      {getEmrBridge()?.extractRecord && (selectedIds.size > 0 || activePatient?.data?.shared?.patientNo) && (
         <button className="btn btn-primary btn-sm" onClick={onEmrExtractBatch} disabled={!!extractProgress}>
           {selectedIds.size > 0 ? `EMR 추출 (${selectedIds.size})` : 'EMR 추출'}
         </button>
       )}
-      {window.electron?.extractConsultation && activePatient && (
+      {getEmrBridge()?.extractConsultation && activePatient && (
         <button className="btn btn-primary btn-sm" onClick={onExtractConsultation}>다학제 추출</button>
       )}
-      {window.electron?.injectEMR && activePatient && activeModules.length > 0 && (
+      {getEmrBridge()?.injectEMR && activePatient && activeModules.length > 0 && (
         <button className="btn btn-primary btn-sm" onClick={onInjectEMR}>EMR 직접입력</button>
       )}
-      {window.electron?.injectEMR && activePatient && (
+      {getEmrBridge()?.injectEMR && activePatient && (
         <button className="btn btn-primary btn-sm" onClick={onInjectConsultReply}>다학제 보내기</button>
       )}
     </>

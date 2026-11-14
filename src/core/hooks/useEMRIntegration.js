@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { showAlert, showConfirm } from '../utils/platform';
 import { touchPatientRecord } from '../services/patientRecords';
+import { getEmrBridge } from '../../platform/bridge';
 
 export function useEMRIntegration({ activePatient, patients, selectedIds, session, setPatients, dirtyAssessmentPatientId }) {
   const [extractProgress, setExtractProgress] = useState(null);
 
   const handleInjectEMR = async () => {
-    if (!activePatient || !window.electron?.injectEMR) return;
+    if (!activePatient || !getEmrBridge()?.injectEMR) return;
     if (dirtyAssessmentPatientId === activePatient.id) {
       await showAlert('저장하지 않은 종합소견 편집 내용이 있습니다.\n"편집 완료"로 저장한 뒤 다시 시도하세요.');
       return;
@@ -73,7 +74,7 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
         if (!proceed) return;
       }
 
-      const result = await window.electron.injectEMR({ ...fieldData, _source: effective.isOverride ? 'edited' : 'auto' });
+      const result = await getEmrBridge().injectEMR({ ...fieldData, _source: effective.isOverride ? 'edited' : 'auto' });
       if (result.success) {
         let msg = `${result.message}`;
         if (result.truncatedFields?.length > 0) {
@@ -90,13 +91,13 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
   };
 
   const handleInjectConsultReply = async () => {
-    if (!activePatient || !window.electron?.injectEMR) return;
+    if (!activePatient || !getEmrBridge()?.injectEMR) return;
     const ok = await showConfirm('다학제 회신 내용을 EMR 종합소견 2,3번 칸에 입력합니다.\nEMR 업무관련성 특별진찰소견서가 열려있는지 확인하세요.\n\n계속하시겠습니까?');
     if (!ok) return;
     try {
       const { generateConsultReplyFieldData } = await import('../utils/exportService');
       const fieldData = generateConsultReplyFieldData(activePatient);
-      const result = await window.electron.injectEMR(fieldData);
+      const result = await getEmrBridge().injectEMR(fieldData);
       if (result.success) {
         let msg = `${result.message}`;
         if (result.truncatedFields?.length > 0) {
@@ -114,7 +115,7 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
 
   // EMR 데이터 일괄 추출 (선택된 환자들의 patientNo 기반)
   const handleEmrExtractBatch = async () => {
-    if (!window.electron?.extractRecord) return;
+    if (!getEmrBridge()?.extractRecord) return;
     const targets = selectedIds.size > 0
       ? patients.filter(p => selectedIds.has(p.id) && p.data?.shared?.patientNo)
       : (activePatient?.data?.shared?.patientNo ? [activePatient] : []);
@@ -137,7 +138,7 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
       const patientLabel = p.data.shared.name || p.data.shared.patientNo;
 
       try {
-        const result = await window.electron.extractRecord(p.data.shared.patientNo, p.data.shared.injuryDate || '');
+        const result = await getEmrBridge().extractRecord(p.data.shared.patientNo, p.data.shared.injuryDate || '');
         if (result.success) {
           // patientNo 교차검증: EMR이 다른 환자 데이터를 반환한 경우 skip
           if (result.patientNo && result.patientNo !== p.data.shared.patientNo) {
@@ -204,9 +205,9 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
 
   // 다학제회신 추출 (현재 환자, 진료메인 페이지 대상)
   const handleExtractConsultation = async () => {
-    if (!window.electron?.extractConsultation) return;
+    if (!getEmrBridge()?.extractConsultation) return;
     try {
-      const result = await window.electron.extractConsultation();
+      const result = await getEmrBridge().extractConsultation();
       if (result.success && result.consultations) {
         // 환자 식별 확인: EMR 진료메인 화면의 환자와 앱의 현재 환자가 일치하는지 사용자에게 확인
         const patientLabel = activePatient.data.shared.name
