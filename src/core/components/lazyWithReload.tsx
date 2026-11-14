@@ -8,12 +8,17 @@ import { lazy, type ComponentType, type LazyExoticComponent } from 'react';
 
 export const CHUNK_LOAD_FAILED_MESSAGE = '앱이 업데이트되었거나 연결이 끊겨 화면 일부를 불러오지 못했습니다. 새로고침한 뒤 다시 시도하세요.';
 
-function ChunkLoadFailed() {
+// 대신 렌더되므로 원래 컴포넌트가 받을 props를 그대로 받는다 — onClose가 있으면 닫기 버튼도(#302 Codex 권고: 일시 오류일 때
+// 새로고침 없이 하던 작업으로 돌아갈 수 있게).
+function ChunkLoadFailed({ onClose }: { onClose?: () => void }) {
   return (
     <div className="modal-overlay" role="alertdialog" aria-label="화면을 불러오지 못함">
       <div className="modal">
         <p>{CHUNK_LOAD_FAILED_MESSAGE}</p>
         <div className="modal-actions">
+          {typeof onClose === 'function' && (
+            <button type="button" className="btn btn-secondary" onClick={onClose}>닫기</button>
+          )}
           <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>새로고침</button>
         </div>
       </div>
