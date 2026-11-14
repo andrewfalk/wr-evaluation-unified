@@ -1,13 +1,9 @@
 // @ts-nocheck
 import { requestJson } from './httpClient';
 
-import { isIntranetContext } from '../../platform/dataMode';
+import { isIntranetContext, resolveApiBaseUrl } from '../../platform/dataMode';
 const listeners = new Set();
 let probeSequence = 0;
-
-function normalizeBaseUrl(baseUrl = '') {
-  return String(baseUrl || '').trim().replace(/\/$/, '');
-}
 
 function isIntranetMode({ session, settings } = {}) {
   return isIntranetContext({ session, settings });
@@ -22,7 +18,7 @@ function buildSessionInfo(context = {}) {
 }
 
 function getContextBaseUrl(context = {}) {
-  return normalizeBaseUrl(context?.session?.apiBaseUrl || context?.settings?.apiBaseUrl || '');
+  return resolveApiBaseUrl({ session: context?.session, settings: context?.settings });
 }
 
 function createBaseStatus() {

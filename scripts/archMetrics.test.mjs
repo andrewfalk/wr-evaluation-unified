@@ -58,8 +58,9 @@ describe('arch-metrics', () => {
       "// session.mode === 'intranet' in a comment",
       "const e = hasIntranetSession(session);",
       "const f = remode === 'intranet';", // a different identifier — not counted
+      "const g = 'intranet' === session . mode;", // whitespace around member access (#291 Codex)
     ].join('\n');
-    expect(scanFile('src/core/a.js', src).intranetModeComparisons).toBe(4);
+    expect(scanFile('src/core/a.js', src).intranetModeComparisons).toBe(5);
     expect(scanFile('src/platform/dataMode.ts', "return session?.mode === 'intranet';").intranetModeComparisons).toBeUndefined();
   });
 

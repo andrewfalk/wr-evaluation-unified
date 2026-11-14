@@ -47,7 +47,7 @@ const REQUEST_LAYER = (rel) => rel === 'src/core/services/httpClient.js' || rel.
 const STORAGE_LAYER = (rel) => rel.startsWith('src/core/storage/');
 const TOKENS_CSS = new Set(['src/styles/tokens.css']);
 const PLATFORM_LAYER = (rel) => rel.startsWith('src/platform/');
-const INTRANET_COMPARISON = /(?:\b(?:mode|integrationMode)\s*[!=]==?\s*['"`]intranet['"`])|(?:['"`]intranet['"`]\s*[!=]==?\s*[\w$.?]*\b(?:mode|integrationMode)\b)/g;
+const INTRANET_COMPARISON = /(?:\b(?:mode|integrationMode)\s*[!=]==?\s*['"`]intranet['"`])|(?:['"`]intranet['"`]\s*[!=]==?\s*[\w$.?\s]*?\b(?:mode|integrationMode)\b)/g;
 
 const toRel = (full) => path.relative(ROOT, full).replace(/\\/g, '/');
 

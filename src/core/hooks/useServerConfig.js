@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { requestJson } from '../services/httpClient';
 
-import { isIntranetContext } from '../../platform/dataMode';
+import { isIntranetContext, resolveApiBaseUrl } from '../../platform/dataMode';
 const FAIL_CLOSED_CONFIG = {
   mode: 'intranet',
   aiEnabled: false,
@@ -21,7 +21,7 @@ const FAIL_CLOSED_CONFIG = {
 export function useServerConfig({ session, settings }) {
   const isIntranet =
     isIntranetContext({ session, settings });
-  const baseUrl = session?.apiBaseUrl || settings?.apiBaseUrl || '';
+  const baseUrl = resolveApiBaseUrl({ session, settings });
 
   // fetchedBaseUrl in state (not ref) so render can safely read it for
   // effectiveLoading without triggering the react-hooks/exhaustive-deps lint rule.

@@ -13,6 +13,7 @@ import {
   PutAutosaveResponseSchema,
   DeleteAutosaveResponseSchema,
 } from '@wr/contracts/autosave';
+import { resolveApiBaseUrl } from '../../platform/dataMode';
 
 // Wraps schema.parse() so ZodErrors get status=502 + code='CONTRACT_VIOLATION'.
 // Without this, shouldFallbackToLocal() in workspaceRepository treats ZodErrors
@@ -46,7 +47,7 @@ function autosavePath() {
 }
 
 function getBaseUrl(session, settings) {
-  return session?.apiBaseUrl || settings?.apiBaseUrl || '';
+  return resolveApiBaseUrl({ session, settings });
 }
 
 export async function loadRemoteWorkspaces({ session, settings }) {

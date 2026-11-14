@@ -4,9 +4,10 @@ import { isRedactedPatientRecord } from './patientRecords';
 import { requireSyncedServerId } from './videoAnalysisClient';
 import { getLockToken } from './lockTokenStore';
 import { completionReportFields } from '../utils/patientCompletion';
+import { resolveApiBaseUrl } from '../../platform/dataMode';
 
 function getBaseUrl(session, settings) {
-  return session?.apiBaseUrl || settings?.apiBaseUrl || '';
+  return resolveApiBaseUrl({ session, settings });
 }
 
 // leaseToken이 있으면 X-Lock-Token 헤더로 실어보낸다. 없어도(opt-in) 정상 동작 —

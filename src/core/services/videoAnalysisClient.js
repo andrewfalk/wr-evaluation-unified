@@ -4,9 +4,9 @@
 // 미지원 stub(§8.2). 실제 업로드(multipart)는 M3에서 추가된다.
 import { requestJson, requestMultipart, requestBlob } from './httpClient';
 
-import { hasIntranetSession } from '../../platform/dataMode';
+import { hasIntranetSession, resolveApiBaseUrl } from '../../platform/dataMode';
 function getBaseUrl(session, settings) {
-  return session?.apiBaseUrl || settings?.apiBaseUrl || '';
+  return resolveApiBaseUrl({ session, settings });
 }
 
 export function isVideoAnalysisSupported(session) {

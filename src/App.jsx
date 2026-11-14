@@ -44,7 +44,7 @@ import { LoginModal } from './core/components/LoginModal';
 import { ChangePasswordModal } from './core/components/ChangePasswordModal';
 import { SwitchToLocalButton } from './core/components/SwitchToLocalButton';
 import { StatisticsWorkbench } from './core/components/statistics/StatisticsWorkbench';
-import { hasIntranetSession, isIntranetContext } from './platform/dataMode';
+import { hasIntranetSession, isIntranetContext, resolveApiBaseUrl } from './platform/dataMode';
 
 const DEFAULT_PATIENT_FILTERS = {
   searchQuery: '',
@@ -604,7 +604,7 @@ function App() {
   }
 
   if (isIntranetMode && configError) {
-    const serverUrl = session?.apiBaseUrl || settings?.apiBaseUrl || '';
+    const serverUrl = resolveApiBaseUrl({ session, settings });
     return withLocalEscape(
       <div className="app-boot-overlay">
         <div className="app-boot-box app-boot-error">
@@ -641,7 +641,7 @@ function App() {
   // verification failed and session was reset to local). Non-dismissable.
   if (isIntranetMode && !isAuthenticated) {
     return withLocalEscape(
-      <LoginModal apiBaseUrl={session?.apiBaseUrl || settings?.apiBaseUrl || ''} />
+      <LoginModal apiBaseUrl={resolveApiBaseUrl({ session, settings })} />
     );
   }
 
@@ -649,7 +649,7 @@ function App() {
   // Blocks all other UI until the password is changed. Non-dismissable.
   if (isIntranetMode && isAuthenticated && session?.user?.mustChangePassword) {
     return withLocalEscape(
-      <ChangePasswordModal apiBaseUrl={session?.apiBaseUrl || settings?.apiBaseUrl || ''} />
+      <ChangePasswordModal apiBaseUrl={resolveApiBaseUrl({ session, settings })} />
     );
   }
 
