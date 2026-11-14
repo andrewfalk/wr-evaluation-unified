@@ -2,13 +2,12 @@
 import { z } from 'zod';
 import { ServerPresetSchema } from '@wr/contracts/preset';
 import { requestJson } from './httpClient';
-
 import { hasIntranetSession } from '../../platform/dataMode';
+import { getFsBridge } from '../../platform/bridge';
+
 const CUSTOM_PRESETS_KEY = 'wrEvalUnifiedCustomPresets';
 
 export const DEFAULT_CATEGORY = '미분류';
-
-const isElectronFS = () => !!window.electron?.fsLoadAllPatients;
 
 // ---------------------------------------------------------------------------
 // Identity helpers
@@ -232,16 +231,17 @@ async function saveServerCustomPreset(preset, options, session) {
 // ---------------------------------------------------------------------------
 
 async function loadCustomPresetsLocal() {
-  if (isElectronFS() && window.electron.fsLoadCustomPresets) {
-    const presets = await window.electron.fsLoadCustomPresets();
+  const fs = getFsBridge();
+  if (fs?.fsLoadCustomPresets) {
+    const presets = await fs.fsLoadCustomPresets();
     if (Array.isArray(presets) && presets.length > 0) {
       return presets;
     }
 
     const legacyPresets = loadCustomPresetsFromLocalStorage();
     if (legacyPresets.length > 0) {
-      if (window.electron.fsSaveCustomPresets) {
-        await window.electron.fsSaveCustomPresets(legacyPresets);
+      if (fs.fsSaveCustomPresets) {
+        await fs.fsSaveCustomPresets(legacyPresets);
       }
       localStorage.removeItem(CUSTOM_PRESETS_KEY);
       return legacyPresets;
@@ -254,8 +254,9 @@ async function loadCustomPresetsLocal() {
 }
 
 async function saveCustomPresetsAll(list) {
-  if (isElectronFS() && window.electron.fsSaveCustomPresets) {
-    await window.electron.fsSaveCustomPresets(list);
+  const fs = getFsBridge();
+  if (fs?.fsSaveCustomPresets) {
+    await fs.fsSaveCustomPresets(list);
   } else {
     safeSetItem(CUSTOM_PRESETS_KEY, JSON.stringify(list));
   }

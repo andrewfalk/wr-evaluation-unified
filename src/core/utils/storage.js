@@ -1,13 +1,12 @@
 // 통합 스토리지 (웹: localStorage / Electron: 파일 시스템)
 import { migratePatients } from './data';
-
 import { isIntranetContext } from '../../platform/dataMode';
+import { getFsBridge } from '../../platform/bridge';
+
 const SAVED_ITEMS_KEY = 'wrEvalUnifiedSavedItems';
 const AUTO_SAVE_KEY = 'wrEvalUnifiedAutoSave';
 const SETTINGS_KEY = 'wrEvalUnifiedSettings';
 const DEVICE_ID_KEY = 'wrEvalUnifiedDeviceId';
-
-const isElectronFS = () => !!window.electron?.fsLoadAllPatients;
 
 function safeSetItem(key, value) {
   try {
@@ -25,8 +24,9 @@ function safeSetItem(key, value) {
 // ======================================================
 
 export const loadSavedItems = async () => {
-  if (isElectronFS()) {
-    const items = await window.electron.fsLoadItems();
+  const fs = getFsBridge();
+  if (fs) {
+    const items = await fs.fsLoadItems();
     return (items || []).map(item => ({
       ...item,
       patients: item.patients ? migratePatients(item.patients) : []
@@ -68,13 +68,14 @@ export const savePatientsData = async (saveName, patients, savedItems) => {
     items = [...savedItems, item];
   }
 
-  if (isElectronFS()) {
+  const fs = getFsBridge();
+  if (fs) {
     if (existingIndex >= 0 && savedItems[existingIndex].id !== item.id) {
-      await window.electron.fsDeleteItem(savedItems[existingIndex].id);
+      await fs.fsDeleteItem(savedItems[existingIndex].id);
     }
-    await window.electron.fsSaveItem(item);
-    await window.electron.fsSaveAllPatients(patients);
-    await window.electron.fsClearAutoSave();
+    await fs.fsSaveItem(item);
+    await fs.fsSaveAllPatients(patients);
+    await fs.fsClearAutoSave();
   } else {
     safeSetItem(SAVED_ITEMS_KEY, JSON.stringify(items));
     localStorage.removeItem(AUTO_SAVE_KEY);
@@ -84,8 +85,9 @@ export const savePatientsData = async (saveName, patients, savedItems) => {
 
 export const deleteSavedItem = async (id, savedItems) => {
   const items = savedItems.filter(x => x.id !== id);
-  if (isElectronFS()) {
-    await window.electron.fsDeleteItem(id);
+  const fs = getFsBridge();
+  if (fs) {
+    await fs.fsDeleteItem(id);
   } else {
     safeSetItem(SAVED_ITEMS_KEY, JSON.stringify(items));
   }
@@ -98,16 +100,18 @@ export const deleteSavedItem = async (id, savedItems) => {
 
 export const saveAutoSave = async (patients) => {
   const data = { savedAt: new Date().toISOString(), patients };
-  if (isElectronFS()) {
-    await window.electron.fsSaveAutoSave(data);
+  const fs = getFsBridge();
+  if (fs) {
+    await fs.fsSaveAutoSave(data);
   } else {
     safeSetItem(AUTO_SAVE_KEY, JSON.stringify(data));
   }
 };
 
 export const loadAutoSave = async () => {
-  if (isElectronFS()) {
-    const data = await window.electron.fsLoadAutoSave();
+  const fs = getFsBridge();
+  if (fs) {
+    const data = await fs.fsLoadAutoSave();
     if (data?.patients) data.patients = migratePatients(data.patients);
     return data;
   }
@@ -125,8 +129,9 @@ export const loadAutoSave = async () => {
 };
 
 export const clearAutoSave = async () => {
-  if (isElectronFS()) {
-    await window.electron.fsClearAutoSave();
+  const fs = getFsBridge();
+  if (fs) {
+    await fs.fsClearAutoSave();
   } else {
     localStorage.removeItem(AUTO_SAVE_KEY);
   }
@@ -154,16 +159,18 @@ export const loadSettings = (defaults) => {
 };
 
 export const loadSettingsAsync = async (defaults) => {
-  if (isElectronFS()) {
-    const settings = await window.electron.fsLoadSettings();
+  const fs = getFsBridge();
+  if (fs) {
+    const settings = await fs.fsLoadSettings();
     if (settings) return { ...defaults, ...settings };
   }
   return loadSettings(defaults);
 };
 
 export const saveSettings = async (settings) => {
-  if (isElectronFS()) {
-    await window.electron.fsSaveSettings(settings);
+  const fs = getFsBridge();
+  if (fs) {
+    await fs.fsSaveSettings(settings);
   }
   // 항상 localStorage에도 저장 (동기 loadSettings 폴백용)
   safeSetItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -174,7 +181,8 @@ export const saveSettings = async (settings) => {
 // ======================================================
 
 export const migrateToFileStorage = async () => {
-  if (!isElectronFS()) return;
+  const fs = getFsBridge();
+  if (!fs) return;
 
   const savedItemsRaw = localStorage.getItem(SAVED_ITEMS_KEY);
   const autoSaveRaw = localStorage.getItem(AUTO_SAVE_KEY);
@@ -191,7 +199,7 @@ export const migrateToFileStorage = async () => {
   // 마이그레이션할 데이터가 없으면 스킵
   if (!savedItems && !autoSave && !settings) return;
 
-  const result = await window.electron.fsMigrate({ savedItems, autoSave, settings });
+  const result = await fs.fsMigrate({ savedItems, autoSave, settings });
   if (result?.migrated) {
     // 마이그레이션 성공 시 localStorage 정리 (설정은 폴백용으로 유지)
     localStorage.removeItem(SAVED_ITEMS_KEY);

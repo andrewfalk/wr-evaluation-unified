@@ -2,6 +2,7 @@
 import { loadAutoSave, loadSavedItems } from '../utils/storage';
 import { isRedactedPatientRecord } from './patientRecords';
 import { pushPatient } from './patientServerRepository';
+import { getMigrationBridge } from '../../platform/bridge';
 import {
   fetchServerPresets,
   createServerPreset,
@@ -64,7 +65,7 @@ export function mergePatientsFromSnapshot(snapshot) {
 
 // ---------------------------------------------------------------------------
 // Collection — gather all unique local patients and presets.
-// Intranet build: when window.electron.loadLocalMigrationData exists, use it
+// Intranet build: when the shell's loadLocalMigrationData IPC exists (getMigrationBridge), use it
 // exclusively. No silent fallback — denied/error must surface.
 // Standalone / legacy: fall back to storage utilities (which themselves prefer
 // fs-* IPCs and otherwise read localStorage).
@@ -74,9 +75,7 @@ export function mergePatientsFromSnapshot(snapshot) {
 // Calling collectLocalPatients() and collectLocalPresets() separately would
 // invoke the IPC (and show the native confirm dialog) twice.
 async function collectLocalSnapshot() {
-  const ipc = typeof window !== 'undefined'
-    ? window.electron?.loadLocalMigrationData
-    : undefined;
+  const ipc = getMigrationBridge()?.loadLocalMigrationData;
 
   if (typeof ipc !== 'function') return null; // standalone: no IPC
 
