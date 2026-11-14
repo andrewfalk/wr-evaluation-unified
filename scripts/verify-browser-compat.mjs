@@ -17,7 +17,8 @@
  * instance methods such as `.toSorted()`. Keep the list below to features the app could
  * realistically pick up; add an entry when a new feature tempts you.
  *
- * Scope: src/**\/*.{js,jsx,css}, tests excluded (they run in jsdom/Node).
+ * Scope: src/**\/*.{js,jsx,ts,tsx,css}, tests excluded (they run in jsdom/Node). TypeScript was added in
+ * REFACTORING_ROADMAP Phase 2 P2-00 — new client code is .ts/.tsx and must stay under the same floor.
  * Comments are ignored. To allow a deliberate, feature-detected use, put
  * `browser-compat-ignore` in a comment on the reported line (the line with the call's `(` or
  * the nesting `&`) with the reason.
@@ -29,14 +30,16 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as espree from 'espree';
+import { parse as parseTypeScript } from '@typescript-eslint/typescript-estree';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC_DIR = path.join(root, 'src');
-const EXTENSIONS = new Set(['.js', '.jsx', '.css']);
+const EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.css']);
+const TS_EXTENSIONS = new Set(['.ts', '.tsx']);
 
 // [where, pattern, first Chrome version that supports it, name]
 // 'css' rules run on .css only (so JSX `&&` cannot look like CSS nesting);
-// 'js' rules run on .js/.jsx only. Patterns are matched against the whole file with comments
+// 'js' rules run on .js/.jsx/.ts/.tsx. Patterns are matched against the whole file with comments
 // blanked (not line by line), so `\s` also spans line breaks: `arr\n  .toSorted ()` is caught.
 // This is a grep heuristic, not a type-aware parser: dynamic access such as `arr['toSorted']()`
 // or aliasing (`const s = arr.toSorted; s()`) is not detected.
@@ -137,20 +140,23 @@ function cssCommentRanges(content) {
 
 // Blank out comments only — never string, template, regex or JSX text contents — so code after
 // `'a//b'` or `/['"]/` is still checked. JS comment positions come from espree (ESLint's parser,
-// JSX enabled): a hand-written scanner cannot tell regex literals and JSX text from strings
-// (Codex review of #191). If a file does not parse, nothing is stripped: a comment may then
-// cause a false alarm, but real code is never hidden. CSS has only /* */ comments.
+// JSX enabled; .ts/.tsx through typescript-estree, the parser typescript-eslint uses): a hand-written
+// scanner cannot tell regex literals and JSX text from strings (Codex review of #191). If a file does
+// not parse, nothing is stripped: a comment may then cause a false alarm, but real code is never
+// hidden. CSS has only /* */ comments.
 export function stripComments(content, ext) {
   if (ext === '.css') return blankRanges(content, cssCommentRanges(content));
   let comments;
   try {
-    comments = espree.parse(content, {
-      ecmaVersion: 'latest',
-      sourceType: 'module',
-      ecmaFeatures: { jsx: true },
-      comment: true,
-      range: true,
-    }).comments;
+    comments = TS_EXTENSIONS.has(ext)
+      ? parseTypeScript(content, { jsx: ext === '.tsx', comment: true, range: true }).comments
+      : espree.parse(content, {
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+        ecmaFeatures: { jsx: true },
+        comment: true,
+        range: true,
+      }).comments;
   } catch {
     return content;
   }

@@ -74,6 +74,28 @@ describe('verify-browser-compat — JS rules', () => {
   });
 });
 
+describe('verify-browser-compat — TypeScript sources (P2-00)', () => {
+  it('flags features newer than the floor in .ts and .tsx', () => {
+    expect(names('const s: number[] = [2, 1].toSorted();', '.ts')).toContain('Array.prototype.toSorted/toReversed/toSpliced');
+    const tsx = 'export function C({ xs }: { xs: number[] }) {\n  return <ul>{xs.toSorted().map((x) => <li key={x}>{x}</li>)}</ul>;\n}';
+    expect(scanSource(tsx, '.tsx', FLOOR).map((v) => [v.line, v.name])).toEqual([
+      [2, 'Array.prototype.toSorted/toReversed/toSpliced'],
+    ]);
+  });
+
+  it('strips TS comments through the TypeScript parser (type syntax does not disable stripping)', () => {
+    const src = 'type T = { a: string }; // [1].toSorted()\nconst x = <T,>(v: T): T => v; /* Promise.withResolvers() */';
+    expect(names(src, '.tsx')).toEqual([]);
+    expect(stripComments(src, '.tsx')).not.toContain('toSorted');
+    // espree alone cannot parse type annotations, so the TS path must not fall back to "strip nothing".
+    expect(stripComments('const a: string = "x"; // gone', '.ts')).not.toContain('gone');
+  });
+
+  it('honours the browser-compat-ignore marker in TS', () => {
+    expect(names('const s = [1].toSorted(); // browser-compat-ignore -- feature-detected', '.ts')).toEqual([]);
+  });
+});
+
 describe('verify-browser-compat — CSS rules', () => {
   it('flags color-mix and nesting', () => {
     expect(names('.a { background: color-mix(in srgb, red 10%, blue); }\n.b {\n  & .x { color: red; }\n}', '.css'))
