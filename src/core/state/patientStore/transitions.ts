@@ -10,6 +10,11 @@
 //     그대로 내던 곳은 `prev`. "최적화"하지 않는다.
 //   - 옮기기 전 코드가 클로저 값으로 계산하던 것은 payload로 그대로 넘긴다. 고치는 것은 flagged PR에서만.
 import type { PatientRecord } from '../../types/patient';
+import { touchPatientRecord as touchPatientRecordJs } from '../../services/patientRecords';
+
+// JS 서비스를 TS에서 부를 때의 모양(본체는 그대로 재사용 — 계획 "전이 본체는 기존 순수 함수를 재사용").
+type TouchContext = { session?: unknown };
+const touchPatientRecord = touchPatientRecordJs as unknown as (patient: PatientRecord, context: TouchContext) => PatientRecord;
 
 const TRANSITION_TAG: unique symbol = Symbol.for('wr.patientTransition');
 
@@ -47,5 +52,54 @@ export const legacySet = defineTransition<LegacySetPatientsArg>(LEGACY_SET_TYPE,
   typeof arg === 'function' ? arg(prev) : arg
 ));
 
+// ---------------------------------------------------------------------------
+// 전이 본체(계획 "전이 목록"). 주석의 #번호는 계획의 쓰기 지점 표.
+// ---------------------------------------------------------------------------
+
+type PatientDataValue = NonNullable<PatientRecord['data']>;
+/** 함수면 그 환자의 data를 받아 새 data를, 객체면 data에 얕게 합친다(옮기기 전 updatePatient와 같음). */
+export type DataEdit = Partial<PatientDataValue> | ((data: PatientDataValue) => PatientDataValue);
+
+export interface DataEditedPayload {
+  /** 편집할 환자. null이면 아무 환자도 바꾸지 않는다(그래도 prev.map처럼 새 배열 — 옮기기 전과 같음). */
+  id: string | null;
+  edit: DataEdit;
+  session: unknown;
+  /**
+   * touch 전에 updatedAt을 찍는다 — 옮기기 전 updatePatient(#13)가 하던 그대로. touch가 늘 다시 쓰므로 보통은 결과가 같고,
+   * 가림 환자처럼 touch가 입력을 그대로 돌려주는 경우에만 차이가 난다(그 차이까지 보존하려고 둔다).
+   */
+  stampUpdatedAt?: boolean;
+}
+
+const dataEdited = defineTransition<DataEditedPayload>('patient/dataEdited', (prev, { id, edit, session, stampUpdatedAt }) => (
+  prev.map(p => (
+    p.id === id
+      ? touchPatientRecord(
+        {
+          ...p,
+          ...(stampUpdatedAt ? { updatedAt: new Date().toISOString() } : {}),
+          data: typeof edit === 'function'
+            ? edit(p.data as PatientDataValue)
+            : { ...(p.data as PatientDataValue), ...edit },
+        },
+        { session },
+      )
+      : p
+  ))
+));
+
+export interface ReplacedAllPayload {
+  patients: PatientRecord[];
+}
+
+/** 목록 전체 교체 — prev를 보지 않는다(옮기기 전 `setPatients(값)`과 같음). */
+const replacedAll = defineTransition<ReplacedAllPayload>('patients/replacedAll', (_prev, { patients }) => patients);
+
 /** 이름 붙은 전이 모음. P2-33~39에서 훅별로 채운다(계획 "전이 목록"). */
-export const patientTx = {} as const;
+export const patientTx = {
+  /** #13 usePatientCrud.updatePatient · #23 usePresetManagement.applyPreset */
+  dataEdited,
+  /** #3 App 초기화 · #4·#7 자동저장 복원·불러오기 · #14 삭제(현행 — 클로저 목록, P2-39a에서 교체) · #15 일괄 가져오기 · #16 테스트 데이터 */
+  replacedAll,
+} as const;

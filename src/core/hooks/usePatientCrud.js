@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import { getModule } from '../moduleRegistry';
-import { touchPatientRecord, migratePatientRecords } from '../services/patientRecords';
+import { migratePatientRecords } from '../services/patientRecords';
+import { patientTx } from '../state/patientStore/transitions';
 import { deletePatientOnServer, isConflictError } from '../services/patientServerRepository';
 import { getLockToken } from '../services/lockTokenStore';
 import { showAlert, showConfirm } from '../utils/platform';
@@ -45,18 +46,7 @@ export function usePatientCrud({
     // handlePresetSelect가 자체적으로 canEditPatient 가드를 갖는다.)
     if (!canMutateRef.current) return;
 
-    setPatients(prev => prev.map(p =>
-      p.id === activeId
-        ? touchPatientRecord(
-          {
-            ...p,
-            updatedAt: new Date().toISOString(),
-            data: typeof updater === 'function' ? updater(p.data) : { ...p.data, ...updater }
-          },
-          { session }
-        )
-        : p
-    ));
+    setPatients(patientTx.dataEdited({ id: activeId, edit: updater, session, stampUpdatedAt: true }));
     setErrors(prev => (Object.keys(prev).length ? {} : prev));
   };
 
@@ -205,7 +195,8 @@ export function usePatientCrud({
       ));
 
     if (deletedIds.size > 0 || conflicts.size > 0) {
-      setPatients(nextPatients);
+      // 현행 그대로 — 서버 삭제를 기다리는 동안의 변경을 클로저 목록으로 덮어쓰는 결함은 P2-39a에서 고친다.
+      setPatients(patientTx.replacedAll({ patients: nextPatients }));
       if (deletedIds.has(activeId)) {
         setActiveId(nextPatients[0]?.id || null);
         setCurrentStepIndex(0);
@@ -256,7 +247,7 @@ export function usePatientCrud({
     // 일괄 가져오기는 환자 목록 전체를 갈아치운다 — 편집 중인 환자가 무엇이든 영향을 받는다.
     if (dirtyAssessmentPatientId) { onBlockedByUnsavedDraft?.(); return; }
     const nextPatients = migratePatientRecords(importedPatients, { session });
-    setPatients(nextPatients);
+    setPatients(patientTx.replacedAll({ patients: nextPatients }));
     if (nextPatients.length > 0) {
       setActiveId(nextPatients[nextPatients.length - 1].id);
       setCurrentStepIndex(0);
@@ -283,7 +274,7 @@ export function usePatientCrud({
     }
     const { createTestPatients } = await import('../fixtures/createTestPatients');
     const testPatients = migratePatientRecords(createTestPatients(), { session });
-    setPatients(testPatients);
+    setPatients(patientTx.replacedAll({ patients: testPatients }));
     if (testPatients.length > 0) {
       setActiveId(testPatients[0].id);
       setCurrentStepIndex(0);
