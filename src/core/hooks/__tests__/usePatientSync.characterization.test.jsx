@@ -184,6 +184,27 @@ describe('T3 usePatientSync — 타이머', () => {
     expect(pullPatients).toHaveBeenCalledTimes(2);
   });
 
+  // #312 Codex 권고: 위 테스트는 빈 목록이라 interval의 push 경로를 고정하지 못한다.
+  it('5분 interval은 dirty 환자를 push한다(1초 debounce보다 먼저 도는 경우)', async () => {
+    pullPatients.mockResolvedValue({ items: [serverPatient('a')], total: 1 });
+    const { result } = renderSync({ initialPatients: [serverPatient('a')], initialActiveId: null });
+    await settle();
+    await advance(FIVE_MINUTES - 500);
+    pushPendingPatients.mockClear();
+    pullPatients.mockClear();
+
+    act(() => {
+      result.current.rawSetPatients(prev => prev.map(p => ({ ...p, sync: { ...p.sync, syncStatus: 'dirty' } })));
+    });
+    await advance(499);
+    expect(pushPendingPatients).not.toHaveBeenCalled();
+
+    await advance(1);
+    expect(pushPendingPatients).toHaveBeenCalledTimes(1);
+    expect(pushPendingPatients.mock.calls[0][0].map(p => p.id)).toEqual(['a']);
+    expect(pullPatients).toHaveBeenCalledTimes(1);
+  });
+
   it('로컬 변경(dirty) 뒤 1초 debounce로 push — 창 안의 추가 변경은 타이머를 다시 시작한다', async () => {
     const synced = serverPatient('a');
     // 부팅 pull이 이 환자를 돌려주지 않으면 scope=mine에서 synced 환자는 out-of-scope로 지워진다.

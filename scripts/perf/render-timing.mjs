@@ -6,6 +6,8 @@
 //   - boot:          탐색 시작 → 앱이 자동저장 복원 확인을 묻는 순간(앱 기동·설정 로드)
 //   - restoreRender: 확인 수락 → 환자 목록에 N개 카드가 모두 그려짐
 //   - switchPatient: 마지막 환자 카드 클릭 → 기본정보 폼의 환자등록번호가 그 환자 값이 됨
+//   - typeChar:      그 환자의 이름 칸 끝에 1글자 입력(input 이벤트) → 사이드바 카드 이름이 바뀜(P-3 기준선,
+//                    REFACTORING_ROADMAP Phase 2 P2-31b — C4 환자 상태 컨테이너 전후·P2-42 셀렉터 전후 비교용)
 //   - dashboard:     '대시보드' 클릭 → 대시보드 표(최근 목록)가 그려짐
 // --profiling 빌드(scripts/perf/vite.profiling.config.mjs)로 돌리면 각 구간의 React commit 횟수·
 // actualDuration 합계·최대도 함께 모은다(가짜 DevTools 훅, 앱 코드 수정 없음).
@@ -31,9 +33,10 @@ function initScript({ key, payload }) {
     localStorage.setItem(key, payload);
     sessionStorage.setItem('__perfSeeded', '1');
   }
-  window.__perf = { confirmAt: null, clickAt: null, commits: [] };
+  window.__perf = { confirmAt: null, clickAt: null, inputAt: null, commits: [] };
   window.confirm = () => { window.__perf.confirmAt = performance.now(); return true; };
   document.addEventListener('click', () => { window.__perf.clickAt = performance.now(); }, true);
+  document.addEventListener('input', () => { window.__perf.inputAt = performance.now(); }, true);
   window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
     supportsFiber: true,
     isDisabled: false,
@@ -83,6 +86,26 @@ async function measureOnce(browser, baseUrl, patients) {
     ).then(h => h.jsonValue());
     const switchClick = await page.evaluate(() => window.__perf.clickAt);
 
+    // 입력 1글자: 기본정보 폼에서 값이 그 환자 이름인 입력칸 끝에 'x'를 친다. 이름은 골든 복제라 겹칠 수 있지만
+    // 'x'가 붙은 이름은 이 환자 하나뿐이다.
+    const lastName = patients[n - 1].data.shared.name;
+    const marked = await page.evaluate((name) => {
+      const el = [...document.querySelectorAll('input')].find(i => i.value === name);
+      if (!el) return false;
+      el.setAttribute('data-perf-type-target', '1');
+      return true;
+    }, lastName);
+    if (!marked) throw new Error(`이름 입력칸(값 ${lastName})을 찾지 못했습니다`);
+    const typeTarget = page.locator('[data-perf-type-target]');
+    await typeTarget.focus();
+    await page.keyboard.press('End');
+    await page.keyboard.type('x');
+    const typedAt = await page.waitForFunction(
+      expected => [...document.querySelectorAll('.patient-list .patient-item-title')].some(t => t.textContent === expected) ? performance.now() : null,
+      `${lastName}x`, { polling: 'raf', timeout: TIMEOUT_MS },
+    ).then(h => h.jsonValue());
+    const inputAt = await page.evaluate(() => window.__perf.inputAt);
+
     await page.getByRole('button', { name: '대시보드', exact: true }).first().click();
     const dashAt = await page.waitForFunction(
       () => document.querySelector('.dashboard .dashboard-table') ? performance.now() : null,
@@ -95,10 +118,12 @@ async function measureOnce(browser, baseUrl, patients) {
       boot: confirmAt,
       restoreRender: restoredAt - confirmAt,
       switchPatient: switchedAt - switchClick,
+      typeChar: typedAt - inputAt,
       dashboard: dashAt - dashClick,
       commits: {
         restoreRender: commitStats(commits, confirmAt, restoredAt),
         switchPatient: commitStats(commits, switchClick, switchedAt),
+        typeChar: commitStats(commits, inputAt, typedAt),
         dashboard: commitStats(commits, dashClick, dashAt),
       },
     };
@@ -107,13 +132,14 @@ async function measureOnce(browser, baseUrl, patients) {
   }
 }
 
-const PHASES = ['boot', 'restoreRender', 'switchPatient', 'dashboard'];
+const PHASES = ['boot', 'restoreRender', 'switchPatient', 'typeChar', 'dashboard'];
+const COMMIT_PHASES = ['restoreRender', 'switchPatient', 'typeChar', 'dashboard'];
 
 function summarizeRuns(runs) {
   const out = {};
   for (const phase of PHASES) out[phase] = round(median(runs.map(r => r[phase])));
   out.commits = {};
-  for (const phase of ['restoreRender', 'switchPatient', 'dashboard']) {
+  for (const phase of COMMIT_PHASES) {
     const list = runs.map(r => r.commits[phase]).filter(Boolean);
     out.commits[phase] = list.length === 0 ? null : {
       count: median(list.map(c => c.count)),
@@ -159,16 +185,16 @@ async function main() {
   }
 
   console.log(markdownTable(
-    ['빌드', '환자 수', '기동 ms', '복원 렌더 ms', '환자 전환 ms', '대시보드 ms'],
-    results.map(r => [r.build, r.n, r.median.boot, r.median.restoreRender, r.median.switchPatient, r.median.dashboard]),
+    ['빌드', '환자 수', '기동 ms', '복원 렌더 ms', '환자 전환 ms', '입력 1글자 ms', '대시보드 ms'],
+    results.map(r => [r.build, r.n, r.median.boot, r.median.restoreRender, r.median.switchPatient, r.median.typeChar, r.median.dashboard]),
   ));
   const profiled = results.filter(r => r.median.commits.restoreRender);
   if (profiled.length > 0) {
     const cell = c => (c ? `${c.count}회 / 합 ${c.total} / 최대 ${c.max}` : null);
     console.log('');
     console.log(markdownTable(
-      ['빌드', '환자 수', '복원 commit', '환자 전환 commit', '대시보드 commit'],
-      profiled.map(r => [r.build, r.n, cell(r.median.commits.restoreRender), cell(r.median.commits.switchPatient), cell(r.median.commits.dashboard)]),
+      ['빌드', '환자 수', '복원 commit', '환자 전환 commit', '입력 1글자 commit', '대시보드 commit'],
+      profiled.map(r => [r.build, r.n, cell(r.median.commits.restoreRender), cell(r.median.commits.switchPatient), cell(r.median.commits.typeChar), cell(r.median.commits.dashboard)]),
     ));
   }
   if (typeof args.json === 'string') {
