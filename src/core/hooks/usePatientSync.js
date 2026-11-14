@@ -12,6 +12,7 @@ import { isRedactedPatientRecord } from '../services/patientRecords';
 import { getLockToken } from '../services/lockTokenStore';
 import { requiresLock } from './usePatientLock';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const PUSH_DEBOUNCE_MS = 1000;
 const PULL_PAGE_SIZE = 100;
@@ -173,7 +174,7 @@ export function usePatientSync({
 
   const canSync = useMemo(() => (
     enabled &&
-    session?.mode === 'intranet' &&
+    hasIntranetSession(session) &&
     !!session?.user?.id &&
     !!session?.accessToken
   ), [

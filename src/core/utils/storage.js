@@ -1,6 +1,7 @@
 // 통합 스토리지 (웹: localStorage / Electron: 파일 시스템)
 import { migratePatients } from './data';
 
+import { isIntranetContext } from '../../platform/dataMode';
 const SAVED_ITEMS_KEY = 'wrEvalUnifiedSavedItems';
 const AUTO_SAVE_KEY = 'wrEvalUnifiedAutoSave';
 const SETTINGS_KEY = 'wrEvalUnifiedSettings';
@@ -142,7 +143,7 @@ export const loadSettings = (defaults) => {
   if (saved) {
     try {
       const merged = { ...defaults, ...JSON.parse(saved) };
-      if (defaults.integrationMode === 'intranet') {
+      if (isIntranetContext({ settings: defaults })) {
         return { ...merged, integrationMode: 'intranet' };
       }
       return merged;

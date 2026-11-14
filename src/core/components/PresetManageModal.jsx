@@ -11,6 +11,7 @@ import {
   normalizePresetIdentityPart,
 } from '../services/presetRepository';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 const CATEGORY_OPTIONS = ['건설업', '제조업', '사회복지업', '서비스업', '운수업', '농림어업', '기타'];
 
 function getPresetDraft(preset) {
@@ -141,7 +142,7 @@ export function PresetManageModal({ jobId, patient, presets, editingPreset = nul
     new Set(editingPreset ? Object.keys(editingPreset.modules || {}) : Object.keys(moduleExtracts))
   ));
 
-  const isIntranet = session?.mode === 'intranet';
+  const isIntranet = hasIntranetSession(session);
   const defaultVisibility = isIntranet ? 'organization' : 'private';
   const [visibility, setVisibility] = useState(
     editingPreset ? (getPresetVisibility(editingPreset) ?? defaultVisibility) : defaultVisibility

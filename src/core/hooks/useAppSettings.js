@@ -6,6 +6,7 @@ import {
   saveAppSettings,
 } from '../services/workspaceRepository';
 
+import { hasIntranetSession, isIntranetContext } from '../../platform/dataMode';
 export function normalizeBaseUrl(baseUrl = '') {
   return String(baseUrl || '').trim().replace(/\/$/, '');
 }
@@ -35,12 +36,12 @@ export function useAppSettings({ session, setSession, resetToLocalSession }) {
     skipNextSettingsUrlResetRef.current = false;
     if (prevBaseUrl === nextBaseUrl) return;
     if (skipReset) {
-      if (prev.mode !== 'intranet') {
+      if (!hasIntranetSession(prev)) {
         setSession(s => ({ ...s, apiBaseUrl: nextBaseUrl }));
       }
       return;
     }
-    if (prev.mode === 'intranet') {
+    if (hasIntranetSession(prev)) {
       resetToLocalSession();
     } else {
       setSession(s => ({ ...s, apiBaseUrl: nextBaseUrl }));
@@ -63,10 +64,10 @@ export function useAppSettings({ session, setSession, resetToLocalSession }) {
     setSettings(newSettings);
     saveAppSettings(newSettings);
     const nextBaseUrl = normalizeBaseUrl(newSettings.apiBaseUrl);
-    const switchingToLocal = newSettings.integrationMode !== 'intranet';
+    const switchingToLocal = !isIntranetContext({ settings: newSettings });
     // Reset intranet session when: switching to local mode, or changing the server URL.
     // Either case means the existing auth token is no longer valid for the new context.
-    if (session.mode === 'intranet' && (switchingToLocal || normalizeBaseUrl(session.apiBaseUrl) !== nextBaseUrl)) {
+    if (hasIntranetSession(session) && (switchingToLocal || normalizeBaseUrl(session.apiBaseUrl) !== nextBaseUrl)) {
       resetToLocalSession();
     } else {
       setSession(prev => ({ ...prev, apiBaseUrl: nextBaseUrl }));

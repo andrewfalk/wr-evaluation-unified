@@ -5,6 +5,7 @@ import { getCsrfToken } from '../utils/csrfCookie';
 import { normalizeSession } from '../auth/session';
 import { runRefreshWithBroadcast, onAuthBroadcast, broadcastLogout } from '../auth/authChannel';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 export function applyAuthUpdate(currentSession, authUpdate) {
   const patch = typeof authUpdate === 'string'
     ? { accessToken: authUpdate }
@@ -101,7 +102,7 @@ export function useAuthSync({ session, setSession, resetToLocalSession, getAuthE
       // it processed an earlier LOGOUT broadcast, or its own logout timed
       // out and reset). Applying it here would silently resurrect this tab's
       // session right after the user logged out.
-      if (msg?.type === 'REFRESH_SUCCESS' && msg.accessToken && sessionRef.current?.mode === 'intranet') {
+      if (msg?.type === 'REFRESH_SUCCESS' && msg.accessToken && hasIntranetSession(sessionRef.current)) {
         setSession(prev => applyAuthUpdate(prev, msg));
       } else if (msg?.type === 'LOGOUT') {
         resetToLocalSession();

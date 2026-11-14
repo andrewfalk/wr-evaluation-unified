@@ -5,6 +5,7 @@ import {
   loadAllPresets,
 } from '../services/presetRepository';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 export function PresetsSection({ onPresetsImported, session }) {
   const fileInputRef = useRef(null);
   const [presetMsg, setPresetMsg] = useState(null);
@@ -31,7 +32,7 @@ export function PresetsSection({ onPresetsImported, session }) {
     }
   };
 
-  const isServer = session?.mode === 'intranet';
+  const isServer = hasIntranetSession(session);
 
   return (
     <div className="migration-presets-section">

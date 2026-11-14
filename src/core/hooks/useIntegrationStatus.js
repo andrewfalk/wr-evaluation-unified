@@ -7,8 +7,9 @@ import {
   subscribeIntegrationStatus,
 } from '../services/integrationStatus';
 
+import { isIntranetContext } from '../../platform/dataMode';
 function isIntranetMode({ session, settings } = {}) {
-  return settings?.integrationMode === 'intranet' || session?.mode === 'intranet';
+  return isIntranetContext({ session, settings });
 }
 
 export function useIntegrationStatus({ session, settings }) {

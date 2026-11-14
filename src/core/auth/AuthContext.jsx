@@ -10,6 +10,7 @@ import {
 import { broadcastLogout } from './authChannel';
 import { requestJson } from '../services/httpClient';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 const AuthContext = createContext(null);
 
 const REVOKE_TIMEOUT_MS = 2500;
@@ -19,7 +20,7 @@ export function AuthProvider({ children }) {
   // Boot-time flag: false for persisted intranet sessions until /api/auth/csrf confirms
   // the refresh cookie is still valid. True immediately for local/non-intranet sessions.
   const [sessionVerified, setSessionVerified] = useState(
-    () => loadStoredSession()?.mode !== 'intranet'
+    () => !hasIntranetSession(loadStoredSession())
   );
   // Ref that shadows session state so callbacks don't close over stale values.
   const sessionRef = useRef(session);
@@ -33,7 +34,7 @@ export function AuthProvider({ children }) {
   // On failure, falls back to local session rather than leaving a stale intranet session.
   useEffect(() => {
     const snap = sessionRef.current;
-    if (snap?.mode !== 'intranet') return;
+    if (!hasIntranetSession(snap)) return;
     // Identity key: uniquely identifies the session at request time so the response
     // handler can detect if login/logout changed the session while the request was in flight.
     const snapIdentity = `${snap.mode}|${snap.apiBaseUrl || ''}|${snap.user?.id || ''}|${snap.refreshedAt || ''}`;
@@ -169,7 +170,7 @@ export function AuthProvider({ children }) {
   // session's cookies). Skipping refresh entirely removes that race instead
   // of just narrowing it.
   const revokeServerSession = useCallback(async (snap) => {
-    if (snap?.mode !== 'intranet') return;
+    if (!hasIntranetSession(snap)) return;
     let raceTimer;
     const raceTimeout = new Promise((resolve) => {
       raceTimer = setTimeout(resolve, REVOKE_TIMEOUT_MS);
@@ -231,7 +232,7 @@ export function AuthProvider({ children }) {
     user: normalizeSession(session).user,
     // sessionVerified gates isAuthenticated: persisted intranet sessions are not
     // trusted until the boot-time /api/auth/csrf check confirms the refresh cookie.
-    isAuthenticated: session?.mode === 'intranet' && !!session?.user?.id && sessionVerified,
+    isAuthenticated: hasIntranetSession(session) && !!session?.user?.id && sessionVerified,
     sessionVerified,
     setSession,
     resetToLocalSession,

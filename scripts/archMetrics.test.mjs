@@ -49,6 +49,20 @@ describe('arch-metrics', () => {
     expect(scanFile('src/core/storage/keys.ts', 'localStorage.getItem("k");').webStorageFiles).toBeUndefined();
   });
 
+  it('counts intranet mode comparisons outside src/platform (comments ignored)', () => {
+    const src = [
+      "if (session?.mode === 'intranet') a();",
+      "const b = settings.integrationMode !== 'intranet';",
+      "const c = 'intranet' === session?.mode;",
+      "const d = mode == \"intranet\";",
+      "// session.mode === 'intranet' in a comment",
+      "const e = hasIntranetSession(session);",
+      "const f = remode === 'intranet';", // a different identifier — not counted
+    ].join('\n');
+    expect(scanFile('src/core/a.js', src).intranetModeComparisons).toBe(4);
+    expect(scanFile('src/platform/dataMode.ts', "return session?.mode === 'intranet';").intranetModeComparisons).toBeUndefined();
+  });
+
   it('counts raw hex in CSS (not in comments, not in tokens.css) and inside inline styles', () => {
     expect(scanFile('src/index.css', '.a { color: #fff; } /* #000 */ .b { border: 1px solid #12345678; }').cssRawHex).toBe(2);
     expect(scanFile('src/styles/tokens.css', ':root { --c: #fff; }').cssRawHex).toBeUndefined();

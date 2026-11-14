@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ServerPresetSchema } from '@wr/contracts/preset';
 import { requestJson } from './httpClient';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 const CUSTOM_PRESETS_KEY = 'wrEvalUnifiedCustomPresets';
 
 export const DEFAULT_CATEGORY = '미분류';
@@ -75,7 +76,7 @@ export function getPresetVisibility(preset) {
 export function isOwnPreset(preset, session) {
   if (preset?.source === 'builtin' && !preset?._customId) return false;
   const ownerId = preset?.ownerUserId ?? preset?._customOwnerUserId ?? null;
-  if (session?.mode === 'intranet') {
+  if (hasIntranetSession(session)) {
     return !!ownerId && ownerId === session?.user?.id;
   }
   return ownerId == null || ownerId === session?.user?.id;
@@ -145,7 +146,7 @@ export function normalizeBuiltinPreset(raw) {
 // ---------------------------------------------------------------------------
 
 function isIntranetSession(session) {
-  return session?.mode === 'intranet';
+  return hasIntranetSession(session);
 }
 
 function buildIdempotencyKey(preset) {

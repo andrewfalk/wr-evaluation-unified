@@ -5,6 +5,7 @@ import { formatWorkPeriod } from '../utils/workPeriod';
 import { createSharedJob } from '../utils/data';
 import { PresetSearch } from './PresetSearch';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 export function BasicInfoForm({
   shared,
   onChange,
@@ -482,7 +483,7 @@ export function BasicInfoSidePanel({ shared, onChange, session }) {
         <div className="form-row">
           <div className="form-group">
             <label>담당의</label>
-            {session?.mode === 'intranet' ? (
+            {hasIntranetSession(session) ? (
               <>
                 <div className="readonly-field">{shared.doctorName || '미배정'}</div>
                 <div className="form-hint">인트라넷 모드에서는 관리자 콘솔에서 담당의를 배정합니다.</div>

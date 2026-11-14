@@ -6,6 +6,7 @@ import { isMyPatient, getOwnerGroupKey } from '../utils/patientOwnership';
 import { isRedactedPatientRecord } from '../services/patientRecords';
 import { isPatientComplete } from '../utils/patientCompletion';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 const MODULE_LABELS = { knee: '무릎', spine: '허리', shoulder: '어깨', elbow: '팔꿈치', wrist: '손목', cervical: '목' };
 const MODULE_COLORS = { knee: 'var(--accent)', spine: '#f59e0b', shoulder: 'var(--color-safe)', elbow: '#8b5cf6', wrist: '#ec4899', cervical: '#06b6d4' };
 
@@ -331,7 +332,7 @@ const Dashboard = ({
   const allModules = getAllModules();
 
   const userBadge = (() => {
-    if (session?.mode !== 'intranet' || !session?.user) return null;
+    if (!hasIntranetSession(session) || !session?.user) return null;
     const displayName = session.user.name || session.user.displayName || session.user.loginId;
     if (!displayName) return null;
     const role = session.user.role;

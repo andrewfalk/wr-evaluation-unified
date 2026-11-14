@@ -4,6 +4,7 @@ import { createSharedData } from '../utils/data';
 import { createManagedPatient } from '../services/patientRecords';
 import { buildSteps } from '../utils/steps';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 export function useIntakeWizard({ settings, session, setPatients, setActiveId, setCurrentStepIndex, setShowHome, videoAnalysisEnabled = false, hasUnsavedAssessmentDraft = false, onBlockedByUnsavedDraft }) {
   const [intakeShared, setIntakeShared] = useState(null);
 
@@ -19,7 +20,7 @@ export function useIntakeWizard({ settings, session, setPatients, setActiveId, s
     newShared.department = s.department;
     // In intranet mode, default to the logged-in user's name so the patient is
     // immediately associated with the right doctor without manual entry.
-    const intranetName = session?.mode === 'intranet' ? (session?.user?.name || '') : '';
+    const intranetName = hasIntranetSession(session) ? (session?.user?.name || '') : '';
     newShared.doctorName = intranetName || s.doctorName;
     setIntakeShared(newShared);
     setShowHome(false);

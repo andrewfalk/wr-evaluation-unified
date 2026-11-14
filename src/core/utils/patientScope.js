@@ -1,9 +1,10 @@
 // @ts-nocheck
+import { hasIntranetSession } from '../../platform/dataMode';
 // 환자 목록/대시보드 scope(내 담당/전체/의사별/미배정) 관련 순수 함수.
 // App.jsx에서 분리 — 렌더링 없이 단위 테스트 가능하게 하기 위함.
 
 export function getDefaultPatientScope(session) {
-  return session?.mode === 'intranet' && session?.user?.role !== 'doctor'
+  return hasIntranetSession(session) && session?.user?.role !== 'doctor'
     ? 'all'
     : 'mine';
 }
@@ -14,7 +15,7 @@ export function getDefaultPatientScope(session) {
 // - doctor / 로컬: 'mine' / 'all' / doctor-id / '__unassigned__' 그대로 통과
 // - 그 외/빈 값: 'all'
 export function normalizePatientScopeForSession(session, scope) {
-  const canUseMine = session?.mode !== 'intranet' || session?.user?.role === 'doctor';
+  const canUseMine = !hasIntranetSession(session) || session?.user?.role === 'doctor';
   if (scope === 'all' || scope === '__unassigned__') return scope;
   if (scope === 'mine') return canUseMine ? 'mine' : 'all';
   if (typeof scope === 'string' && scope) return scope; // 특정 의사 userId (서버가 검증)

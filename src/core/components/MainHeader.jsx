@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { IntegrationStatusBadge } from './IntegrationStatusBadge';
 
+import { hasIntranetSession } from '../../platform/dataMode';
 const ROLE_LABELS = { admin: '관리자', doctor: '의사', nurse: '간호사', staff: '직원' };
 
 function AccountMenu({ session, onShowAdminConsole, onLogout, onChangePassword, onShowAccountProfile }) {
   const [open, setOpen] = useState(false);
-  if (session?.mode !== 'intranet') return null;
+  if (!hasIntranetSession(session)) return null;
 
   const user        = session.user;
   const roleLabel   = ROLE_LABELS[user?.role] || user?.role || '';
@@ -127,7 +128,7 @@ export function MainHeader({
       <header className="header pattern-surface pattern-surface-hero">
         <div className="header-title-row">
           <h1>{title}</h1>
-          {session?.mode !== 'intranet' && lastAutoSave && <span className="header-meta">자동저장 {lastAutoSave.toLocaleTimeString('ko-KR')}</span>}
+          {!hasIntranetSession(session) && lastAutoSave && <span className="header-meta">자동저장 {lastAutoSave.toLocaleTimeString('ko-KR')}</span>}
         </div>
         <IntegrationStatusBadge status={integrationStatus} />
         <div className="header-actions action-bar">
@@ -136,11 +137,11 @@ export function MainHeader({
             {statsAvailable && (
               <button className="btn btn-secondary btn-sm" onClick={onShowStatistics} title="통계분석 워크벤치">통계분석</button>
             )}
-            {session?.mode !== 'intranet' && (
+            {!hasIntranetSession(session) && (
               <button className="btn btn-danger btn-sm" onClick={onResetPatients} title="환자 목록 초기화">초기화</button>
             )}
             <button className="btn btn-secondary btn-sm sidebar-toggle" onClick={onToggleSidebar}>환자 ({patients.length})</button>
-            {session?.mode !== 'intranet' && (
+            {!hasIntranetSession(session) && (
               <>
                 <button className="btn btn-secondary btn-sm" onClick={onShowSaveModal}>저장</button>
                 <button className="btn btn-secondary btn-sm" onClick={onOpenLoadModal}>불러오기</button>
