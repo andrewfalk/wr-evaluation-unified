@@ -6,13 +6,22 @@
 //
 // 규칙: 단언은 역할·화면 텍스트로만(getByRole·findByText). 클래스명·DOM 스냅샷·내부 훅 mock 금지.
 // 네트워크는 createFetchRouter(등록 안 된 요청은 실패·기록), 저장소는 jsdom localStorage, 셸은 makeBridgeStub.
-import { afterEach, describe, expect, it } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { configure, fireEvent, screen, waitFor } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { renderApp, resetAppEnvironment } from './testing/renderApp';
 import { createFetchRouter } from './testing/fetchRouter';
 import { makeBridgeStub } from './testing/bridgeStub';
 import goldenPatients from './core/fixtures/goldenPatients.json';
+
+// 다른 테스트 파일(다른 vitest worker)의 BroadcastChannel('wr-auth') 메시지가 이 앱에 닿지 않게 — Node 내장 채널은
+// worker 사이에도 전달돼, 전체 스위트에서 authChannel 테스트의 LOGOUT이 G9b-2를 로그인 화면으로 되돌렸다(P2-09).
+// authChannel은 모듈 로드 때 채널을 만들므로 정적 import보다 먼저 설치한다.
+await vi.hoisted(async () => (await import('./testing/fakeBroadcastChannel.js')).installFakeBroadcastChannel());
+
+// 앱 전체 부팅은 전체 스위트를 병렬로 돌릴 때 1초(기본값)를 넘길 수 있다 — findBy·waitFor 대기 상한을 늘린다
+// (P2-09 check에서 G9b-2가 부하로 1회 실패). 단언 내용은 그대로다.
+configure({ asyncUtilTimeout: 5000 });
 
 const jobPresets = JSON.parse(readFileSync('public/job-presets.json', 'utf8'));
 const AUTO_SAVE_KEY = 'wrEvalUnifiedAutoSave';
@@ -304,15 +313,19 @@ describe('G9c — Electron 셸', () => {
     }
   });
 
-  it('G9c-2 구 인트라넷 셸(buildTarget 없음): 로그인 뒤 setAccessToken·setHasUnsavedDraft(false)·setStatsAvailable, beforeunload 미등록', async () => {
+  // G9c-2(구 셸)와 G9c-3(새 셸, E0 buildTarget — P2-09)은 같은 단언이다: 새 화면은 두 셸에서 똑같이 동작해야 한다.
+  it.each([
+    ['G9c-2 구 인트라넷 셸(buildTarget 없음)', undefined],
+    ['G9c-3 새 인트라넷 셸(buildTarget: intranet)', 'intranet'],
+  ])('%s: 로그인 뒤 setAccessToken·setHasUnsavedDraft(false)·setStatsAvailable, beforeunload 미등록', async (_label, buildTarget) => {
     // 인트라넷 셸은 서버가 내준 화면을 loadURL로 띄운다 — 같은 origin이라 apiBaseUrl ''.
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ integrationMode: 'intranet', apiBaseUrl: '' }));
     localStorage.setItem(SESSION_KEY, JSON.stringify({
       version: 1, mode: 'intranet', status: 'ready', apiBaseUrl: '',
       refreshedAt: '2026-11-13T00:00:00.000Z', user: { ...DOCTOR, authProvider: 'intranet' },
     }));
-    const bridge = makeBridgeStub('intranet');
-    expect('buildTarget' in bridge).toBe(false);
+    const bridge = makeBridgeStub('intranet', { buildTarget });
+    expect(bridge.buildTarget).toBe(buildTarget);
     const items = goldenPatients.slice(0, 2).map((p) => serverPatient(p));
     const router = intranetRouter({ 'GET /api/patients': { items, total: items.length } });
     const beforeUnload = recordBeforeUnloadRegistrations();

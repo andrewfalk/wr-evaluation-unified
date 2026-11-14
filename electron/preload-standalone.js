@@ -11,6 +11,9 @@ function subscribe(channel, callback) {
 
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
+  // 빌드 타깃을 화면에 밝힌다(REFACTORING_ROADMAP Phase 2 E0, P2-09). sandbox preload는 로컬 모듈을 require할 수 없어
+  // 파일마다 리터럴로 둔다. 현장 구 설치본에는 이 키가 없으므로 화면(src/platform/runtime.ts)은 키 존재 추측 폴백을 유지한다.
+  buildTarget: 'standalone',
 
   // 메뉴 이벤트
   onMenuNew: (callback) => subscribe('menu-new', callback),

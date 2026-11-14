@@ -131,27 +131,25 @@ describe('T2 baseUrl 우선순위', () => {
   const neither = { session: { mode: 'intranet' }, settings: { integrationMode: 'intranet' } };
   const baseUrlOf = (path) => requestJson.mock.calls.find(([p]) => p.startsWith(path))?.[1]?.baseUrl;
 
-  it.each([
-    ['patientServerRepository.pullPatients', () => pullPatients(both), '/api/patients'],
-    ['intranetWorkspaceRepository.loadRemoteWorkspaces', () => loadRemoteWorkspaces(both), '/api/workspaces'],
-    ['videoAnalysisClient.createClip', () => createClip({ id: 'p1', sync: { serverId: 'p1', syncStatus: 'synced' } }, { processId: 'x', purpose: 'analysis_upload', ...both }), '/api/video-analysis'],
-  ])('%s: session → settings → ""', async (_name, run, path) => {
-    vi.mocked(requestJson).mockResolvedValue({ items: [] });
-    await run().catch(() => {});
-    expect(baseUrlOf(path)).toBe('https://from-session');
-  });
-
-  it('getBaseUrl 3벌: session 값이 없으면 settings, 둘 다 없으면 "" (정규화하지 않음)', async () => {
-    vi.mocked(requestJson).mockResolvedValue({ items: [] });
-    await pullPatients(onlySettings);
-    expect(baseUrlOf('/api/patients')).toBe('https://from-settings');
-    requestJson.mockClear();
-    await pullPatients(neither);
-    expect(baseUrlOf('/api/patients')).toBe('');
-    requestJson.mockClear();
-    await pullPatients({ session: { mode: 'intranet', apiBaseUrl: ' https://s/ ' }, settings: {} });
-    expect(baseUrlOf('/api/patients')).toBe(' https://s/ '); // 그대로 넘김 — 정규화는 httpClient.buildUrl
-  });
+  // getBaseUrl 3벌: session → settings → ''(정규화하지 않음) — 세 구현 모두 같은 표로(#288 Codex 권고).
+  const IMPLS = [
+    ['patientServerRepository.pullPatients', (c) => pullPatients(c), '/api/patients'],
+    ['intranetWorkspaceRepository.loadRemoteWorkspaces', (c) => loadRemoteWorkspaces(c), '/api/workspaces'],
+    ['videoAnalysisClient.createClip', (c) => createClip({ id: 'p1', sync: { serverId: 'p1', syncStatus: 'synced' } }, { processId: 'x', purpose: 'analysis_upload', ...c }), '/api/video-analysis'],
+  ];
+  const CONTEXTS = [
+    ['both → session', both, 'https://from-session'],
+    ['settings만 → settings', onlySettings, 'https://from-settings'],
+    ['둘 다 없음 → ""', neither, ''],
+    ['정규화 안 함', { session: { mode: 'intranet', apiBaseUrl: ' https://s/ ' }, settings: {} }, ' https://s/ '],
+  ];
+  for (const [name, run, path] of IMPLS) {
+    it.each(CONTEXTS)(`${name}: %s`, async (_label, context, expected) => {
+      vi.mocked(requestJson).mockResolvedValue({ items: [] });
+      await run(context).catch(() => {});
+      expect(baseUrlOf(path)).toBe(expected);
+    });
+  }
 
   it('integrationStatus(getContextBaseUrl): session → settings, 앞뒤 공백·끝 "/" 제거', async () => {
     vi.mocked(requestJson).mockRejectedValue(Object.assign(new Error('x'), { status: 0 }));

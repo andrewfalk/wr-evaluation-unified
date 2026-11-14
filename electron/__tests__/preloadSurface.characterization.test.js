@@ -1,5 +1,5 @@
 // Golden (characterization) test G10 — the window.electron surface each preload exposes
-// (REFACTORING_ROADMAP P0-9): the 11 keys both builds share, every key of each build, and for each
+// (REFACTORING_ROADMAP P0-9): the 12 keys both builds share (buildTarget added by E0, P2-09), every key of each build, and for each
 // function the IPC call it makes (method, channel, forwarded arguments). Also: the intranet preload
 // exposes an empty object on a foreign origin.
 // Sandboxed preloads cannot be imported, so the source runs in vm with a fake electron and window
@@ -20,6 +20,7 @@ const PRELOADS = ['preload-intranet.js', 'preload-standalone.js'];
 const COMMON_KEYS = [
   'platform', 'onMenuNew', 'onGotoModule', 'onOpenStatistics', 'setStatsAvailable',
   'showAlert', 'showConfirm', 'injectEMR', 'extractRecord', 'extractConsultation', 'version',
+  'buildTarget', // E0(REFACTORING_ROADMAP Phase 2 P2-09)
 ];
 
 function loadPreload(file, { origin = ORIGIN } = {}) {

@@ -4,13 +4,18 @@
 // refresh 락 테스트" 겸함). 지금까지는 useAuthSync.test.jsx가 간접으로만 덮었다.
 //
 // 탭 = authChannel 모듈 인스턴스 하나(vi.resetModules 뒤 다시 import → TAB_ID·BroadcastChannel이 따로 생김).
-// 같은 origin이므로 localStorage(jsdom)와 BroadcastChannel('wr-auth')(Node 내장)는 두 탭이 공유한다.
+// 같은 origin이므로 localStorage(jsdom)와 BroadcastChannel('wr-auth')(이 파일 안의 가짜 — 아래)는 두 탭이 공유한다.
 // navigator.locks는 jsdom에 없어서 ifAvailable만 흉내 내는 최소 구현을 두 탭이 공유하게 설치한다.
 //
 // 지키는 것: ① 동시 refresh는 한 탭만 서버를 부르고 나머지는 브로드캐스트로 토큰을 받는다(locks·CAS 두 경로)
 // ② 보유 탭 실패 → 대기 탭이 직접 refresh ③ 같은 탭 안 중복 호출은 1회 ④ localStorage에는 토큰을 쓰지 않는다
 // ⑤ CAS 락 TTL(10초)이 지나면 넘겨받는다 ⑥ 키 이름(탭 간 프로토콜 — 구·신 번들 탭이 섞여도 같아야 함).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { installFakeBroadcastChannel } from '../../../testing/fakeBroadcastChannel';
+
+// Node 내장 BroadcastChannel은 vitest의 다른 worker(다른 테스트 파일)에도 전달된다 — 여기서 보내는 LOGOUT이 동시에 도는
+// 앱 테스트를 로그아웃시키지 않도록 이 파일 안에서만 오가는 가짜를 쓴다(authChannel import 전에 설치 — openTab이 동적 import).
+installFakeBroadcastChannel();
 
 const LOCK_KEY = 'wr-auth-refresh-lock';
 const SIGNAL_KEY = 'wr-auth-refresh-sig';
