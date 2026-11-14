@@ -91,6 +91,15 @@ describe('verify-browser-compat — TypeScript sources (P2-00)', () => {
     expect(stripComments('const a: string = "x"; // gone', '.ts')).not.toContain('gone');
   });
 
+  it('sees through type arguments and non-null `!` before the call (Codex review of #284)', () => {
+    expect(names('const p = Promise.withResolvers<number>();', '.ts')).toContain('Promise.withResolvers()');
+    expect(names('const p = Promise.withResolvers<{ a: string /* x */ }>();', '.tsx')).toContain('Promise.withResolvers()');
+    expect(names('const s = xs.toSorted<number>((a, b) => a - b);', '.tsx')).toContain('Array.prototype.toSorted/toReversed/toSpliced');
+    expect(names('const s = maybe!.toSorted!();', '.ts')).toContain('Array.prototype.toSorted/toReversed/toSpliced');
+    const multi = scanSource('const p = Promise\n  .withResolvers<\n    number\n  >();', '.ts', FLOOR);
+    expect(multi.map((v) => [v.line, v.name])).toEqual([[4, 'Promise.withResolvers()']]);
+  });
+
   it('honours the browser-compat-ignore marker in TS', () => {
     expect(names('const s = [1].toSorted(); // browser-compat-ignore -- feature-detected', '.ts')).toEqual([]);
   });

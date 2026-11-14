@@ -138,29 +138,69 @@ function cssCommentRanges(content) {
   return ranges;
 }
 
+// TypeScript-only syntax that sits between a method name and its call: type arguments
+// (`Promise.withResolvers<number>()`, `arr.toSorted<T>()`) and the non-null `!` (`a.toSorted!()`).
+// Vite strips both, so the call still runs on the old browser; blank them so the rules see
+// `Promise.withResolvers   ()` (Codex review of #284). Walks the typescript-estree AST.
+function typeOnlyRanges(ast) {
+  const ranges = [];
+  const visit = (node) => {
+    if (!node || typeof node.type !== 'string') return;
+    if (node.type === 'TSTypeParameterInstantiation') {
+      ranges.push(node.range);
+      return;
+    }
+    if (node.type === 'TSNonNullExpression') ranges.push([node.range[1] - 1, node.range[1]]);
+    for (const key of Object.keys(node)) {
+      if (key === 'parent' || key === 'loc' || key === 'range') continue;
+      const value = node[key];
+      if (Array.isArray(value)) value.forEach(visit);
+      else if (value && typeof value === 'object') visit(value);
+    }
+  };
+  visit(ast);
+  return ranges;
+}
+
+// Sort and merge overlapping [start, end) ranges (a comment may sit inside type arguments).
+function mergeRanges(ranges) {
+  const sorted = [...ranges].sort((a, b) => a[0] - b[0]);
+  const out = [];
+  for (const [start, end] of sorted) {
+    const last = out[out.length - 1];
+    if (last && start <= last[1]) last[1] = Math.max(last[1], end);
+    else out.push([start, end]);
+  }
+  return out;
+}
+
 // Blank out comments only — never string, template, regex or JSX text contents — so code after
 // `'a//b'` or `/['"]/` is still checked. JS comment positions come from espree (ESLint's parser,
 // JSX enabled; .ts/.tsx through typescript-estree, the parser typescript-eslint uses): a hand-written
-// scanner cannot tell regex literals and JSX text from strings (Codex review of #191). If a file does
-// not parse, nothing is stripped: a comment may then cause a false alarm, but real code is never
-// hidden. CSS has only /* */ comments.
+// scanner cannot tell regex literals and JSX text from strings (Codex review of #191). For .ts/.tsx
+// the type arguments and non-null `!` between a name and its call are blanked too (typeOnlyRanges).
+// If a file does not parse, nothing is stripped: a comment may then cause a false alarm, but real
+// code is never hidden. CSS has only /* */ comments.
 export function stripComments(content, ext) {
   if (ext === '.css') return blankRanges(content, cssCommentRanges(content));
-  let comments;
+  let ranges;
   try {
-    comments = TS_EXTENSIONS.has(ext)
-      ? parseTypeScript(content, { jsx: ext === '.tsx', comment: true, range: true }).comments
-      : espree.parse(content, {
+    if (TS_EXTENSIONS.has(ext)) {
+      const ast = parseTypeScript(content, { jsx: ext === '.tsx', comment: true, range: true });
+      ranges = [...ast.comments.map((c) => c.range), ...typeOnlyRanges(ast)];
+    } else {
+      ranges = espree.parse(content, {
         ecmaVersion: 'latest',
         sourceType: 'module',
         ecmaFeatures: { jsx: true },
         comment: true,
         range: true,
-      }).comments;
+      }).comments.map((c) => c.range);
+    }
   } catch {
     return content;
   }
-  return blankRanges(content, comments.map((c) => c.range));
+  return blankRanges(content, mergeRanges(ranges));
 }
 
 // Violations in one file's source. Exported for scripts/verifyBrowserCompat.test.mjs.
