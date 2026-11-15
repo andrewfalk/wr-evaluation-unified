@@ -278,3 +278,17 @@ export function onAuthBroadcast(handler) {
 export function broadcastLogout() {
   _ch?.postMessage({ type: 'LOGOUT' });
 }
+
+// 이 탭에서 로그인했음을 다른 탭에 알린다 — 서버 식별자와 신원 키(user.id|organizationId)만 싣는다(토큰·이름 없음).
+// 같은 서버를 다른 계정으로 쓰던 탭은 로그인 화면으로 간다(useAuthSync). 옛 번들의 탭은 모르는 종류를 무시한다.
+export function broadcastLogin({ server, identity } = {}) {
+  if (!identity || typeof server !== 'string') return;
+  _ch?.postMessage({ type: 'LOGIN', server, identity });
+}
+
+// LOGIN 방송의 서버 식별자 — 정규화한 apiBaseUrl, 비어 있으면(같은 origin) 이 페이지의 origin.
+export function authServerKeyOf(apiBaseUrl) {
+  const base = String(apiBaseUrl || '').trim().replace(/\/$/, '');
+  if (base) return base;
+  return typeof window !== 'undefined' && window.location ? window.location.origin : '';
+}

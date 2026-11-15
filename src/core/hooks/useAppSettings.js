@@ -11,10 +11,19 @@ export function normalizeBaseUrl(baseUrl = '') {
   return String(baseUrl || '').trim().replace(/\/$/, '');
 }
 
+// 인증 문맥이 바뀌는 설정 변경 — 모드(인트라넷 문맥 여부)나 정규화한 서버 주소.
+function authContextChanged(prev, next) {
+  return isIntranetContext({ settings: prev }) !== isIntranetContext({ settings: next })
+    || normalizeBaseUrl(prev?.apiBaseUrl) !== normalizeBaseUrl(next?.apiBaseUrl);
+}
+
 // 설정 라이프사이클(테마/폰트, apiBaseUrl 동기화, Electron 비동기 로드) + 설정 저장/로컬모드 전환
-export function useAppSettings({ session, setSession, resetToLocalSession }) {
+export function useAppSettings({ session, setSession, resetToLocalSession, invalidateAuthContext }) {
   const [settings, setSettings] = useState(() => loadAppSettings(DEFAULT_SETTINGS));
   const skipNextSettingsUrlResetRef = useRef(false);
+  // 지금 설정(비동기 로드 결과와 비교용 — 마운트 effect의 클로저는 첫 값만 본다).
+  const settingsRef = useRef(settings);
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
 
   // 테마/폰트 적용
   useEffect(() => {
@@ -54,13 +63,18 @@ export function useAppSettings({ session, setSession, resetToLocalSession }) {
     let cancelled = false;
     loadAppSettingsAsync(DEFAULT_SETTINGS).then(s => {
       if (cancelled) return;
+      // 불러온 설정이 모드나 서버 주소를 바꾸면, 그 전에 시작한 로그인 시도를 무효로 한다(사용자 저장과 같은 규칙).
+      if (authContextChanged(settingsRef.current, s)) invalidateAuthContext?.();
       skipNextSettingsUrlResetRef.current = true;
       setSettings(s);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- mount-only(invalidateAuthContext는 고정 참조)
 
   const handleSaveSettings = (newSettings) => {
+    // 모드나 서버 주소가 바뀌면 진행 중인 로그인 시도·로그아웃을 무효로 한다(작업 공간 주인 유무와 무관) — 늦게 도착한
+    // 로그인 응답이 바뀐 문맥에 적용되지 않게.
+    if (authContextChanged(settings, newSettings)) invalidateAuthContext?.();
     setSettings(newSettings);
     saveAppSettings(newSettings);
     const nextBaseUrl = normalizeBaseUrl(newSettings.apiBaseUrl);
