@@ -60,24 +60,74 @@ function resolvePatientConflictInList(
 
 const TRANSITION_TAG: unique symbol = Symbol.for('wr.patientTransition');
 
+/** 전이 적용 직전의 컨테이너 상태(reducer.ts PatientsState와 같은 모양 — 순환 import를 피해 여기 둔다). */
+export interface TransitionStateView {
+  readonly patients: PatientRecord[];
+  readonly activeId: string | null;
+  readonly selectedIds: Set<string>;
+}
+
+/** derive가 정하는 다른 칸. 키가 없으면 그 칸은 그대로(activeId: null은 "활성 없음"으로 지정). */
+export interface TransitionDerived {
+  activeId?: string | null;
+}
+
 export interface PatientTransition<P = unknown> {
   (prev: PatientRecord[]): PatientRecord[];
   readonly type: string;
   readonly payload: P;
   readonly [TRANSITION_TAG]: true;
+  /**
+   * (선택, 게이트 B 설계 2) 목록과 함께 활성 환자를 정해야 하는 전이만 갖는다 — **스토어만** 부른다(목록 함수로 쓰는 `vi.fn()`·
+   * 맨 배열 테스트에는 영향 없음). 같은 적용의 직전 상태와 새 목록을 받는다.
+   */
+  readonly derive?: (prevState: TransitionStateView, nextPatients: PatientRecord[]) => TransitionDerived;
+  /**
+   * 같은 전이의 사본 — payload의 `receipt`만 뺀다(없으면 자기 자신). React가 lane 때문에 다시 적용(replay)할 때 이미 읽힌 receipt를
+   * 덮어쓰지 않게 스토어가 쓴다(게이트 B 설계 2).
+   */
+  withoutReceipt(): PatientTransition<P>;
 }
 
 export type PatientReduce<P> = (prev: PatientRecord[], payload: P) => PatientRecord[];
+export type PatientDerive<P> = (prevState: TransitionStateView, nextPatients: PatientRecord[], payload: P) => TransitionDerived;
 
-/** `defineTransition(type, reduce)` → payload를 받아 꼬리표 붙은 전이를 만드는 함수. */
-export function defineTransition<P>(type: string, reduce: PatientReduce<P>): (payload: P) => PatientTransition<P> {
-  return (payload: P) => {
+export interface DefineTransitionOptions<P> {
+  derive?: PatientDerive<P>;
+}
+
+function stripReceipt<P>(payload: P): P {
+  if (!payload || typeof payload !== 'object' || !('receipt' in payload)) return payload;
+  if ((payload as { receipt?: unknown }).receipt === undefined) return payload;
+  return { ...(payload as object), receipt: undefined } as P;
+}
+
+/** `defineTransition(type, reduce, { derive? })` → payload를 받아 꼬리표 붙은 전이를 만드는 함수. */
+export function defineTransition<P>(
+  type: string,
+  reduce: PatientReduce<P>,
+  options: DefineTransitionOptions<P> = {},
+): (payload: P) => PatientTransition<P> {
+  const make = (payload: P): PatientTransition<P> => {
     const apply = (prev: PatientRecord[]) => reduce(prev, payload);
     Object.defineProperty(apply, 'type', { value: type, enumerable: true });
     Object.defineProperty(apply, 'payload', { value: payload, enumerable: true });
     Object.defineProperty(apply, TRANSITION_TAG, { value: true });
+    const { derive } = options;
+    if (derive) {
+      Object.defineProperty(apply, 'derive', {
+        value: (prevState: TransitionStateView, nextPatients: PatientRecord[]) => derive(prevState, nextPatients, payload),
+      });
+    }
+    Object.defineProperty(apply, 'withoutReceipt', {
+      value: () => {
+        const stripped = stripReceipt(payload);
+        return stripped === payload ? (apply as PatientTransition<P>) : make(stripped);
+      },
+    });
     return apply as PatientTransition<P>;
   };
+  return make;
 }
 
 export function isPatientTransition(value: unknown): value is PatientTransition {
