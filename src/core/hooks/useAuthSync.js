@@ -5,7 +5,7 @@ import { getCsrfToken } from '../utils/csrfCookie';
 import { normalizeSession } from '../auth/session';
 import { runRefreshWithBroadcast, onAuthBroadcast, broadcastLogout, authServerKeyOf } from '../auth/authChannel';
 
-import { hasIntranetSession, intranetIdentityOf } from '../../platform/dataMode';
+import { hasIntranetSession, intranetIdentityOf, sessionIdentityOf } from '../../platform/dataMode';
 import { refreshAccessToken, renewCsrf } from '../api/authApi';
 export function applyAuthUpdate(currentSession, authUpdate) {
   const patch = typeof authUpdate === 'string'
@@ -40,11 +40,11 @@ export function useAuthSync({ session, setSession, resetToLocalSession, getAuthE
         // is then applied to authChannel's cross-tab broadcast only, never
         // to this tab's own session, so it can't resurrect a logged-out tab.
         const epoch = getAuthEpoch?.();
-        // 갱신을 시작한 계정 — 기다리는 사이 화면의 계정이 바뀌었으면(로그인·되돌림) 결과로 지금 세션을 덮어쓰지 않는다.
+        // 갱신을 시작한 계정(서버 주소 포함) — 기다리는 사이 화면의 계정·서버가 바뀌었으면(로그인·되돌림) 결과로 지금 세션을 덮어쓰지 않는다.
         const readCurrent = () => (getSession ? getSession() : sessionRef.current);
-        const startIdentity = intranetIdentityOf(readCurrent());
+        const startIdentity = sessionIdentityOf(readCurrent());
         const isStale = () => (epoch !== undefined && getAuthEpoch?.() !== epoch)
-          || intranetIdentityOf(readCurrent()) !== startIdentity;
+          || sessionIdentityOf(readCurrent()) !== startIdentity;
 
         return runRefreshWithBroadcast(
           // doRefresh: this tab won the lock and performs the actual refresh.
