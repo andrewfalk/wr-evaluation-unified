@@ -211,7 +211,7 @@ const saveAckApplied = defineTransition<SaveAckAppliedPayload>('workspace/saveAc
 /**
  * 임시(게이트 B에서 제거): 옮기기 전 updater 안에서 하던 활성 환자 예약(`queueMicrotask(setActiveId…)`)을 그대로 실행하는 콜백.
  * 전이 본체는 순수하고 예약만 호출부가 넘긴다 — 병합 결과(next)를 봐야 활성 환자를 정할 수 있는데 훅 인자가 별개 setter라서다(계획 A5).
- * StrictMode 이중 실행 시 두 번 불리는 것도 옮기기 전과 같다. `conflict/resolved`·`sync/pullApplied`만 받는다.
+ * StrictMode 이중 실행 시 두 번 불리는 것도 옮기기 전과 같다. `sync/pullApplied`만 받는다(`conflict/resolved`는 P2-40c에서 derive로).
  */
 export type OnReduced = (prev: PatientRecord[], next: PatientRecord[]) => void;
 
@@ -219,15 +219,28 @@ export interface ConflictResolvedPayload {
   patientId: string;
   resolution: string;
   options?: unknown;
-  onReduced?: OnReduced;
+  /**
+   * 해결을 시작한 시점의 활성 환자(훅의 렌더 값). 활성 환자 폴백은 지금 활성 환자가 아니라 이 값으로 판정한다 — 옮기기 전과
+   * 같다(D4: 그사이 사용자가 다른 환자로 옮겼어도 첫 환자로 덮는다 — 검토 후보, 이 구간은 보존).
+   */
+  activeIdAtStart?: string | null;
+  /** (선택) derive가 적는다: `activeChanged` = 해결로 시작 시점 활성 환자가 목록에서 사라져 폴백했다. dispatch 다음 줄에서 읽는다. */
+  receipt?: { activeChanged?: boolean };
 }
 
-/** 충돌 해결 — resolvePatientConflictInList 재사용(flatMap이라 늘 새 배열). */
-const conflictResolved = defineTransition<ConflictResolvedPayload>('conflict/resolved', (prev, { patientId, resolution, options, onReduced }) => {
+/**
+ * 충돌 해결 — resolvePatientConflictInList 재사용(flatMap이라 늘 새 배열). derive(P2-40c): 시작 시점 활성 환자가 해결 결과에서
+ * 사라지면 남은 첫 환자(없으면 null)로 — 옮기기 전 updater 안 `queueMicrotask(setActiveId…)` 예약(`onReduced`)을 대체.
+ */
+const conflictResolved = defineTransition<ConflictResolvedPayload>('conflict/resolved', (prev, { patientId, resolution, options }) => (
   // options는 그대로 넘긴다(undefined면 resolvePatientConflictInList의 기본값 — 옮기기 전과 같음).
-  const next = resolvePatientConflictInList(prev, patientId, resolution, options);
-  onReduced?.(prev, next);
-  return next;
+  resolvePatientConflictInList(prev, patientId, resolution, options)
+), {
+  derive: (_prevState, next, { patientId, activeIdAtStart, receipt }) => {
+    if (activeIdAtStart !== patientId || next.some(p => p.id === patientId)) return {};
+    if (receipt) receipt.activeChanged = true;
+    return { activeId: next[0]?.id || null };
+  },
 });
 
 export interface PatientIdPayload {
@@ -462,7 +475,7 @@ export const patientTx = {
   appended,
   /** #5·#6 워크스페이스 저장(새 이름·덮어쓰기) 응답 */
   saveAckApplied,
-  /** #9 충돌 해결(updater 안 활성 환자 예약은 onReduced로 격리 — 게이트 B에서 제거) */
+  /** #9 충돌 해결(활성 환자 폴백은 derive — P2-40c) */
   conflictResolved,
   /** #10 원격 삭제 충돌 표시 */
   remoteDeleteMarked,

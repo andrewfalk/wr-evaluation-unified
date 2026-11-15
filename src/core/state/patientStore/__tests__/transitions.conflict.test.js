@@ -1,6 +1,6 @@
 // 전이 = 옮기기 전 익명 updater(REFACTORING_ROADMAP Phase 2 P2-35, useConflictResolution #9~12).
 // 옛 구현을 이 파일에 옮겨 적고 같은 입력에 같은 출력(값·참조)을 내는지 비교한다.
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { resolvePatientConflictInList } from '../../../services/patientConflictResolution';
 import { patientTx } from '../transitions';
 
@@ -57,13 +57,20 @@ describe('conflict/resolved = 옛 resolvePatientConflictInList updater(#9)', () 
     it(`${id} · ${resolution}`, () => {
       const prev = list();
       const expected = oldResolved(id, resolution, options)(list());
-      const onReduced = vi.fn();
-      const actual = patientTx.conflictResolved({ patientId: id, resolution, options, onReduced })(prev);
+      const receipt = {};
+      const tx = patientTx.conflictResolved({ patientId: id, resolution, options, activeIdAtStart: id, receipt });
+      const actual = tx(prev);
       expect(actual).toEqual(expected);
       prev.forEach((p, i) => { if (p.id !== id) expect(actual).toContain(prev[i]); }); // 비대상은 같은 참조
-      expect(onReduced).toHaveBeenCalledTimes(1);
-      expect(onReduced.mock.calls[0][0]).toBe(prev);
-      expect(onReduced.mock.calls[0][1]).toBe(actual);
+      // derive(P2-40c, 옛 onReduced 대체): 시작 시점 활성 환자(id)가 결과에서 사라지면 첫 환자(없으면 null)로 폴백 + receipt.
+      const derived = tx.derive({ patients: prev, activeId: 'whatever', selectedIds: new Set() }, actual);
+      const gone = !actual.some(p => p.id === id);
+      expect(derived).toEqual(gone ? { activeId: actual[0]?.id || null } : {});
+      expect(receipt.activeChanged === true).toBe(gone);
+      // 시작 시점 활성 환자가 다른 환자면 폴백하지 않는다
+      expect(patientTx.conflictResolved({ patientId: id, resolution, options, activeIdAtStart: 'other' }).derive(
+        { patients: prev, activeId: id, selectedIds: new Set() }, actual,
+      )).toEqual({});
     });
   }
 
