@@ -164,7 +164,8 @@ export async function migrateToServer(patients, { session, settings } = {}) {
 // fetchServerPresets failure is absorbed into the result (does not propagate)
 // so a preset-fetch error never hides patient migration results.
 // ---------------------------------------------------------------------------
-export async function migratePresetsToServer(presets, { session } = {}) {
+// shouldProceed(선택): 기존 프리셋 조회가 끝난 뒤 올리기 직전에 확인 — false면 취소로 끝낸다(계정 전환 수정 AS-4).
+export async function migratePresetsToServer(presets, { session, shouldProceed } = {}) {
   if (!presets || presets.length === 0) {
     return { migrated: 0, skipped: 0, failed: [] };
   }
@@ -194,6 +195,7 @@ export async function migratePresetsToServer(presets, { session } = {}) {
 
   const skipped = presets.length - toUpload.length;
 
+  if (shouldProceed && !shouldProceed()) throw new MigrationCanceledError();
   const results = await Promise.allSettled(
     toUpload.map(p => createServerPreset(p, session))
   );
@@ -234,7 +236,7 @@ export async function runMigration({ session, settings, shouldProceed } = {}) {
 
   const [patientResult, presetResult] = await Promise.all([
     migrateToServer(patients, { session, settings }),
-    migratePresetsToServer(presets, { session }),
+    migratePresetsToServer(presets, { session, shouldProceed }),
   ]);
 
   return { ...patientResult, presetResult };

@@ -10,12 +10,13 @@ import { useWorkspaceLifetime } from '../../app/useWorkspaceLifetime';
 export function PresetsSection({ onPresetsImported, session }) {
   const fileInputRef = useRef(null);
   const [presetMsg, setPresetMsg] = useState(null);
-  // 화면 수명(계정 전환 수정 AS-4) — 가져오는 동안 화면이 내려가면 남은 프리셋을 보내지 않는다.
+  // 화면 수명(계정 전환 수정 AS-4) — 가져오는 동안 화면이 내려가면 남은 프리셋을 보내지 않고, 내보내기 파일도 만들지 않는다.
   const { isAlive } = useWorkspaceLifetime();
 
   const handleExport = async () => {
     try {
       const { merged } = await loadAllPresets(session);
+      if (!isAlive()) return; // 불러오는 사이 화면이 내려갔으면(계정 전환) 이전 계정의 프리셋 파일을 만들지 않는다
       exportPresetsToJSON(merged);
     } catch {
       setPresetMsg({ type: 'error', text: '내보내기 실패' });

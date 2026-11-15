@@ -18,6 +18,9 @@ export interface LocalWorkBeforeLoginArgs {
   getWorkspaceOwner: () => string | null;
 }
 
+// 저장하는 동안 목록이 계속 바뀌면 이 횟수까지 다시 저장하고, 그래도 바뀌면 실패로 본다(로그인하지 않고 다시 시도 안내).
+const MAX_SAVE_ROUNDS = 5;
+
 function saveAutoSave(patients: unknown[]): Promise<void> {
   return (saveAutoSaveJs as unknown as (p: unknown[]) => Promise<void>)(patients);
 }
@@ -28,9 +31,16 @@ export function useLocalWorkBeforeLogin({ patients, getWorkspaceOwner }: LocalWo
     latestRef.current = { patients, getWorkspaceOwner };
   }, [patients, getWorkspaceOwner]);
   return useCallback(async () => {
-    const { patients: list, getWorkspaceOwner: ownerOf } = latestRef.current;
-    if (ownerOf() !== null) return;
-    if (!Array.isArray(list) || list.length === 0) return;
-    await saveAutoSave(list);
+    // 저장을 기다리는 사이 목록이 바뀌면(예: 자동저장 복원이 끝남) 최종 목록까지 저장한 뒤에 돌아간다 — 복원은 커밋 뒤
+    // 저장본을 지우므로, 마지막으로 본 목록을 저장하지 않고 로그인하면 그 목록이 사라진다.
+    let saved: unknown[] | null = null;
+    for (let round = 0; round < MAX_SAVE_ROUNDS; round += 1) {
+      const { patients: list, getWorkspaceOwner: ownerOf } = latestRef.current;
+      if (ownerOf() !== null) return;
+      if (!Array.isArray(list) || list.length === 0 || list === saved) return;
+      await saveAutoSave(list);
+      saved = list;
+    }
+    throw new Error('local work kept changing while saving');
   }, []);
 }

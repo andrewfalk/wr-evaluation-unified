@@ -85,6 +85,7 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
           const clip = await createClip(patient, { processId: p.id, purpose: 'fixture', fixtureClipName: clipMeta.fixtureClipName, session, settings });
           serverClipId = clip.clipId;
         }
+        ensureContinue(); // 클립 생성을 기다리는 사이 취소됐으면 분석 작업을 만들지 않는다
         const job = await createJob(
           { clipId: serverClipId, processId: p.id, analysisProfile: p.analysisProfile, requestedFeatures: requestedForProcess },
           { session, settings }
@@ -129,6 +130,8 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
       if (conv.missingActiveTime.length > 0) missingActiveTime[p.id] = conv.missingActiveTime;
       bundleVersion = buildRecipeVersion(conv.featureConfigVersion);
     } catch (e) {
+      // 취소는 공정 오류로 바꾸지 않고 그대로 던진다(다음 공정으로 넘어가지 않는다).
+      if (e?.code === 'ANALYSIS_CANCELLED') throw e;
       // 6.0-12: 폴링 타임아웃은 status로 뭉개지 않고 phase별 명확한 메시지로 안내(서버는 계속 처리 중일 수 있음).
       if (e?.code === 'POLL_TIMEOUT') {
         const msg = e.timeoutPhase === 'queued'

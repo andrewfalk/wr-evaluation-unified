@@ -37,3 +37,21 @@ describe('runServerAnalysis — shouldContinue', () => {
     expect(requestJson).not.toHaveBeenCalled();
   });
 });
+
+describe('runServerAnalysis — 클립 생성을 기다리는 사이 취소', () => {
+  it('클립 생성 응답 뒤 취소됐으면 분석 작업을 만들지 않고 취소로 끝낸다(다음 공정으로 넘어가지 않는다)', async () => {
+    let alive = true;
+    requestJson.mockImplementation(async (path) => {
+      if (String(path).endsWith('/clips')) { alive = false; return { clipId: 'c-srv' }; }
+      return { jobId: 'j1', status: 'queued' };
+    });
+    const patient = { id: 'p1', sync: { serverId: 's1', revision: 1, syncStatus: 'synced' } };
+    const va = {
+      processes: [{ id: 'pr1', name: '공정1', analysisProfile: 'posture-basic' }, { id: 'pr2', name: '공정2', analysisProfile: 'posture-basic' }],
+      clips: [{ id: 'c1', processId: 'pr1', fixtureClipName: 'x.mp4' }, { id: 'c2', processId: 'pr2', fixtureClipName: 'y.mp4' }],
+    };
+    await expect(runServerAnalysis(patient, va, { ...intranet, activeModules: ['knee'], shouldContinue: () => alive }))
+      .rejects.toMatchObject({ code: 'ANALYSIS_CANCELLED' });
+    expect(requestJson.mock.calls.map(([path]) => path)).toEqual(['/api/video-analysis/clips']);
+  });
+});
