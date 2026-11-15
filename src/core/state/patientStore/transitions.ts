@@ -304,7 +304,7 @@ export interface SharedPatchRequest {
 /**
  * 적용 시점 환자가 요청 당시 식별정보와 같은가 — 목록에 있고, 가림 환자가 아니며, 등록번호(그리고 요청에 있으면 재해일자)가 같다.
  * 다르면 그사이 다른 환자·다른 신청건이 된 것이라 추출 결과를 섞지 않는다(P2-39b, Codex 계획 리뷰 1회차).
- * 판정은 전이 안에서 적용 시점 목록으로 한다 — 훅은 결과를 payload의 receipt로 커밋 뒤에 받아 성공·건너뜀을 센다.
+ * 판정은 전이 안에서 적용 시점 목록으로 한다 — 훅은 결과를 payload의 receipt로 dispatch 직후 받아 성공·건너뜀을 센다.
  */
 export function isSharedPatchApplicable(patient: PatientRecord | null | undefined, requested: SharedPatchRequest): boolean {
   if (!patient || patient.redacted === true || !patient.data) return false;
@@ -321,8 +321,8 @@ export interface SharedPatchedPayload {
   patch: (shared: PatientDataValue['shared']) => PatientDataValue['shared'];
   session: unknown;
   /**
-   * 적용 여부 보고용(선택) — 전이가 판정 결과를 `applied`에 적는다. 같은 입력이면 같은 값을 쓰므로 StrictMode 이중 실행에도
-   * 결과가 같고 상태에는 영향이 없다. 호출부는 커밋 뒤(커밋 배리어)에 읽는다 — 그 전에는 전이가 아직 돌지 않았을 수 있다(#323 Codex).
+   * 적용 여부 보고용(선택) — 전이가 판정 결과를 `applied`에 적는다. 환자 스토어가 dispatch 때 전이를 동기로 한 번 실행하므로
+   * 호출부는 **dispatch 다음 줄에서** 읽는다(P2-40b — 커밋 배리어 삭제). React의 replay는 receipt를 뺀 사본으로 돈다(P2-40a).
    */
   receipt?: { applied?: boolean };
 }
