@@ -5,7 +5,7 @@ import { getCsrfToken } from '../utils/csrfCookie';
 import { normalizeSession } from '../auth/session';
 import { runRefreshWithBroadcast, onAuthBroadcast, broadcastLogout } from '../auth/authChannel';
 
-import { hasIntranetSession } from '../../platform/dataMode';
+import { hasIntranetSession, intranetIdentityOf } from '../../platform/dataMode';
 import { refreshAccessToken, renewCsrf } from '../api/authApi';
 export function applyAuthUpdate(currentSession, authUpdate) {
   const patch = typeof authUpdate === 'string'
@@ -40,7 +40,11 @@ export function useAuthSync({ session, setSession, resetToLocalSession, getAuthE
         // is then applied to authChannel's cross-tab broadcast only, never
         // to this tab's own session, so it can't resurrect a logged-out tab.
         const epoch = getAuthEpoch?.();
-        const isStale = () => epoch !== undefined && getAuthEpoch?.() !== epoch;
+        // 갱신을 시작한 계정 — 기다리는 사이 화면의 계정이 바뀌었으면(로그인·되돌림) 결과로 지금 세션을 덮어쓰지 않는다.
+        const readCurrent = () => (getSession ? getSession() : sessionRef.current);
+        const startIdentity = intranetIdentityOf(readCurrent());
+        const isStale = () => (epoch !== undefined && getAuthEpoch?.() !== epoch)
+          || intranetIdentityOf(readCurrent()) !== startIdentity;
 
         return runRefreshWithBroadcast(
           // doRefresh: this tab won the lock and performs the actual refresh.
@@ -57,20 +61,20 @@ export function useAuthSync({ session, setSession, resetToLocalSession, getAuthE
             // sets a new wr_csrf cookie, and returns a fresh accessToken.
             if (forceCsrf || !csrfToken) {
               const csrfData = await renewCsrf(base);
-              const newSession = applyAuthUpdate(sessionRef.current, csrfData);
+              const newSession = applyAuthUpdate(readCurrent(), csrfData);
               if (!isStale()) setSession(newSession);
               return newSession;
             }
 
             const data = await refreshAccessToken(base, csrfToken);
-            const newSession = applyAuthUpdate(sessionRef.current, data);
+            const newSession = applyAuthUpdate(readCurrent(), data);
             if (!isStale()) setSession(newSession);
             return newSession;
           },
           // applyToken: another tab broadcast REFRESH_SUCCESS — update this
           // tab's session without a server round-trip.
           (authUpdate) => {
-            const newSession = applyAuthUpdate(sessionRef.current, authUpdate);
+            const newSession = applyAuthUpdate(readCurrent(), authUpdate);
             if (!isStale()) setSession(newSession);
             return newSession;
           },
