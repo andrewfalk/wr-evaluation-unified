@@ -37,7 +37,7 @@ export interface PatientStore {
   getState(): PatientsState;
   /** 전이를 동기로 정확히 한 번 실행해 앞선 상태를 갱신하고 React 큐에 항목을 넣는다. 갱신 뒤 앞선 상태를 돌려준다. */
   dispatch(transition: PatientTransition): PatientsState;
-  /** 값 또는 updater(두 번째 인자 = 같은 상태의 최신 환자 목록, reducer.ts ActiveIdUpdater). */
+  /** 값 또는 updater(옮기기 전 useState와 같은 한 인자). */
   setActiveId(arg: string | null | ActiveIdUpdater): void;
   setSelectedIds(arg: ValueOrUpdater<Set<string>>): void;
 }

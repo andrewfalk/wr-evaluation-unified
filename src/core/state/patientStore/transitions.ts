@@ -433,6 +433,11 @@ export interface DeleteResultsAppliedPayload {
   deletedIds: string[];
   /** 삭제가 409로 거절된 환자 [id, error] — 그 환자에 삭제 충돌을 표시한다 */
   conflicts: Array<[string, unknown]>;
+  /**
+   * (선택) derive가 적는다(P2-40d): `activeChanged` = 활성 환자가 결과 목록에 없어 폴백했다(→ 스텝 0),
+   * `listEmptied` = 결과 목록이 비었다(→ 위자드 초안 비우기). dispatch 다음 줄에서 읽는다.
+   */
+  receipt?: { activeChanged?: boolean; listEmptied?: boolean };
 }
 
 type DeleteConflictError = { message?: string; data?: { code?: string; error?: string; currentRevision?: number | null } } | null | undefined;
@@ -463,6 +468,14 @@ const deleteResultsApplied = defineTransition<DeleteResultsAppliedPayload>('pati
   return prev
     .filter(p => !deleted.has(p.id))
     .map(p => (conflictById.has(p.id) ? markDeleteConflict(p, conflictById.get(p.id) as DeleteConflictError) : p));
+}, {
+  // (P2-40d) 같은 적용의 활성 환자 — 지금 활성 환자가 결과 목록에 없으면 첫 환자(없으면 null). 목록이 비었는지도 보고한다.
+  derive: (prevState, next, { receipt }) => {
+    if (receipt && next.length === 0) receipt.listEmptied = true;
+    if (!prevState.activeId || next.some(p => p.id === prevState.activeId)) return {};
+    if (receipt) receipt.activeChanged = true;
+    return { activeId: next[0]?.id || null };
+  },
 });
 
 /** 이름 붙은 전이 모음. P2-33~39에서 훅별로 채운다(계획 "전이 목록"). */

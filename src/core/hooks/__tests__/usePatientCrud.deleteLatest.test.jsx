@@ -201,7 +201,10 @@ describe('P2-39a — 삭제 결과를 최신 목록에 적용', () => {
     expect(result.current.activeId).toBe('c');
   });
 
-  it('⑧ 삭제 커밋에서 앞선 layout effect가 환자를 추가하면 목록이 비지 않으므로 초안을 지우지 않는다(#322 Codex 2회차)', async () => {
+  // ⑧(P2-40d 다시 씀 — 게이트 B 계획 B5·"동작이 바뀌는 PR"): 판정 시점은 "삭제 전이가 적용되는 순간의 목록"이다. 그 순간 목록이
+  // 비면 초안을 비운다 — 삭제 커밋의 layout effect가 그 뒤에 환자를 추가하는 것은 나중 사건이라 판정을 바꾸지 않는다(그런 effect는
+  // 제품에 없다). 옮기기 전(P2-39a)에는 판정을 한 커밋 미뤄 이 가상 사례에서 초안을 남겼다.
+  it('⑧ 삭제 결과로 목록이 비면 초안을 비운다 — 삭제 커밋의 layout effect가 그 뒤에 환자를 추가해도(나중 사건) 판정은 그대로', async () => {
     const pending = deferred();
     deletePatientOnServer.mockReturnValue(pending.promise);
     const armed = { current: false };
@@ -233,7 +236,7 @@ describe('P2-39a — 삭제 결과를 최신 목록에 적용', () => {
 
     expect(ids(result)).toEqual(['n']);
     expect(result.current.activeId).toBe('n');
-    expect(result.current.intakeShared).toEqual({ draft: true });
+    expect(result.current.intakeShared).toBeNull();
   });
 
   it('⑦ 단일 삭제(초안 비움 요청)와 일괄 삭제가 같은 배치에서 끝나 목록이 비면 초안을 비운다(#322 Codex 권고)', async () => {
