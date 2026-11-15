@@ -3,10 +3,14 @@
 // usePatientSync의 flushPatient/notifyLockOutcome/getPushEligibility 검증.
 // pull/merge/reconcile 로직 자체는 usePatientSync.test.js(순수 함수 reconcilePulledPatients)가
 // 다루므로 여기서는 락 게이팅 + 커밋 배리어 경로만 다룬다.
+//
+// 하니스는 App과 같은 환자 상태 컨테이너(patients·activeId + store) — 게이트 B P2-41a에서 맨 useState 두 개를
+// 컨테이너로 바꿨다(본문·단언은 그대로, store 인자는 P2-41c 전까지 옛 훅이 무시한다). StrictMode 없이 둔다 — 호출 횟수
+// 단언이 바뀐다(게이트 B 계획 "공통 절차").
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useState } from 'react';
 import { cleanup, renderHook, waitFor } from '@testing-library/react';
 import { usePatientSync, getPushEligibility } from '../usePatientSync.js';
+import { usePatientsContainer } from '../../state/patientStore/usePatientsContainer';
 
 vi.mock('../../services/patientServerRepository', async () => {
   const actual = await vi.importActual('../../services/patientServerRepository');
@@ -32,10 +36,11 @@ function dirtyPatient(overrides = {}) {
 }
 
 function useHarness({ initialPatients, enabled, lockState }) {
-  const [patients, setPatients] = useState(initialPatients);
-  const [activeId, setActiveId] = useState(initialPatients[0]?.id ?? null);
+  const { patients, setPatients, activeId, setActiveId, store } = usePatientsContainer(initialPatients, {
+    initialActiveId: initialPatients[0]?.id ?? null,
+  });
   const sync = usePatientSync({
-    patients, setPatients, activeId, setActiveId,
+    patients, setPatients, activeId, setActiveId, store,
     session: SESSION, settings: {}, enabled, lockState,
   });
   return { patients, activeId, ...sync };
