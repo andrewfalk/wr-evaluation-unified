@@ -11,8 +11,8 @@ import {
 
 const withRetryFlag = ({ _retry = false, ...options } = {}) => ({ ...options, skipAuthRefresh: _retry });
 
-export function configureHttpClient({ onRefresh, onLogout }) {
-  configureApiClient({ onRefresh, onLogout });
+export function configureHttpClient({ onRefresh, onLogout, getCurrentSession }) {
+  configureApiClient({ onRefresh, onLogout, getCurrentSession });
 }
 
 // JS 호출부가 응답 필드를 바로 읽으므로(예전 그대로) 반환 타입은 any로 둔다 — 새 TS 코드는 '../api/client'를 쓴다.

@@ -13,7 +13,7 @@
 //   | csrfRetry       | O                              | X                  | O                     |
 //   | wrongPassword   | O(401 WRONG_CURRENT_PASSWORD는 refresh 안 함, 문구에 data.message 폴백) | X | X |
 import { ApiError, errorCodeOf, errorMessageOf } from './errors';
-import { isRefreshEligible, normalizeBaseUrl } from '../../platform/dataMode';
+import { intranetIdentityOf, isRefreshEligible, normalizeBaseUrl } from '../../platform/dataMode';
 
 // 세션은 화면마다 모양이 넓어(사용자·토큰·모드…) 여기서는 필요한 만큼만 본다.
 export type SessionLike = { mode?: string | null; accessToken?: string | null; [key: string]: unknown } | null | undefined;
@@ -25,6 +25,8 @@ export interface ApiClientDeps {
   fetchImpl?: typeof fetch;
   getCsrfToken: () => string | null | undefined;
   buildSessionHeaders: (session: SessionLike) => Record<string, string>;
+  /** 지금 화면의 세션(요청 신원 고정 — 이미 떠난 계정의 요청은 갱신하지 않는다). configure()로도 꽂을 수 있다. */
+  getCurrentSession?: () => SessionLike;
 }
 
 export interface RequestOptions {
@@ -64,14 +66,24 @@ export function buildUrl(baseUrl: string | null | undefined, path: string): stri
   return base ? `${base}${path}` : path;
 }
 
+export interface ApiClientHandlers {
+  onRefresh?: RefreshHandler | null;
+  onLogout?: (() => void) | null;
+  getCurrentSession?: (() => SessionLike) | null;
+}
+
+// 인증 갱신으로 고칠 수 없는 신원 불일치 — 다른 계정의 세션으로 같은 본문을 보내지 않는다.
+const identityChangedError = () => new ApiError('인증이 만료되었습니다. 다시 로그인해 주세요.', 401);
+
 export interface ApiClient {
-  configure(handlers: { onRefresh?: RefreshHandler | null; onLogout?: (() => void) | null }): void;
+  configure(handlers: ApiClientHandlers): void;
   request(path: string, options?: RequestOptions): Promise<unknown>;
 }
 
 export function createApiClient(deps: ApiClientDeps): ApiClient {
   let onRefresh: RefreshHandler | null = null;
   let onLogout: (() => void) | null = null;
+  let getCurrentSession: (() => SessionLike) | null = deps.getCurrentSession ?? null;
   const doFetch = (input: string, init: RequestInit): Promise<Response> => (deps.fetchImpl ?? globalThis.fetch)(input, init);
 
   function buildHeaders(method: string, session: SessionLike, extra: Record<string, string>, jsonRequest: boolean) {
@@ -123,7 +135,19 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
     }
 
     const canRetry = !skipAuthRefresh && !!onRefresh && isRefreshEligible(session);
-    const retry = (newSession: SessionLike) => request(path, { ...options, session: newSession, skipAuthRefresh: true });
+    // 요청 신원 고정: 요청에 실린 세션이 인트라넷 신원을 가질 때만 본다(신원 없는 요청은 예전 흐름).
+    //  - 요청 신원 ≠ 지금 화면의 신원 → 이미 떠난 계정의 요청이다. 갱신도 로그아웃도 하지 않는다.
+    //  - 갱신 결과의 신원 ≠ 요청 신원 → 그 세션으로 같은 본문을 다시 보내지 않는다.
+    const requestIdentity = intranetIdentityOf(session);
+    const leftAccount = () => requestIdentity !== null && !!getCurrentSession
+      && intranetIdentityOf(getCurrentSession()) !== requestIdentity;
+    const retry = (newSession: SessionLike) => {
+      // 갱신 결과가 다른 계정이거나, 갱신을 기다리는 사이 화면의 계정이 바뀌었으면 다시 보내지 않는다.
+      if (requestIdentity !== null && (intranetIdentityOf(newSession) !== requestIdentity || leftAccount())) {
+        throw identityChangedError();
+      }
+      return request(path, { ...options, session: newSession, skipAuthRefresh: true });
+    };
 
     // 1) 401 → refresh 1회 뒤 재시도
     if (response.status === 401 && canRetry && onRefresh) {
@@ -131,6 +155,7 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
         // 새 토큰으로도 고칠 수 없는 도메인 오류 — refresh하지 않는다.
         throw new ApiError(errorMessageOf(data, `Request failed (${response.status})`, { allowDataMessage: true }), 401, { data });
       }
+      if (leftAccount()) throw identityChangedError();
       let newSession: SessionLike;
       try {
         newSession = await onRefresh({ baseUrl });
@@ -139,6 +164,8 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
         if ((refreshErr as { retryable?: boolean } | null)?.retryable) {
           throw new ApiError('일시적인 인증 조율 오류입니다. 잠시 후 다시 시도해 주세요.', 401, { retryable: true });
         }
+        // 갱신을 기다리는 사이 화면의 계정이 바뀌었으면 이전 계정 요청의 실패로 지금 계정을 로그아웃시키지 않는다.
+        if (leftAccount()) throw identityChangedError();
         onLogout?.();
         throw new ApiError('인증이 만료되었습니다. 다시 로그인해 주세요.', 401);
       }
@@ -147,6 +174,7 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
 
     // 2) 403 CSRF_INVALID → CSRF 갱신(forceCsrf) 1회 뒤 재시도
     if (csrfRetry && response.status === 403 && errorCodeOf(data) === 'CSRF_INVALID' && canRetry && onRefresh) {
+      if (leftAccount()) throw identityChangedError();
       let newSession: SessionLike;
       try {
         newSession = await onRefresh({ baseUrl, forceCsrf: true });
@@ -173,6 +201,7 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
     configure(handlers) {
       onRefresh = handlers.onRefresh ?? null;
       onLogout = handlers.onLogout ?? null;
+      getCurrentSession = handlers.getCurrentSession ?? deps.getCurrentSession ?? null;
     },
     request,
   };
