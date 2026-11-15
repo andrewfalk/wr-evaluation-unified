@@ -62,9 +62,8 @@ const UNTAGGED_SET_PATIENTS = /(?<![.\w$])(?<!\bfunction\s+)setPatients\s*\((?!\
 const UNTAGGED_DISPATCH = /(?<![\w$])(?<!\bfunction\s+)dispatch\s*\((?!\s*patientTx\s*\.)/g;
 // `getState(` — bare or a member call (`store.getState(`), not `function getState(` (P2-40a).
 const STORE_GET_STATE = /(?<![\w$])(?<!\bfunction\s+)getState\s*\(/g;
-// The sync engine reads the store. Until P2-41d moves it to src/core/sync/, usePatientSync.js holds that engine body (P2-41c) —
-// a temporary entry that P2-41d removes together with the move.
-const PATIENT_SYNC_LAYER = (rel) => rel.startsWith('src/core/sync/') || rel === 'src/core/hooks/usePatientSync.js';
+// The sync engine (src/core/sync/patientSyncEngine.ts, P2-41d) is the only reader of the store outside the store layer.
+const PATIENT_SYNC_LAYER = (rel) => rel.startsWith('src/core/sync/');
 const INTRANET_COMPARISON = /(?:\b(?:mode|integrationMode)\s*[!=]==?\s*['"`]intranet['"`])|(?:['"`]intranet['"`]\s*[!=]==?\s*[\w$.?\s]*?\b(?:mode|integrationMode)\b)/g;
 
 const toRel = (full) => path.relative(ROOT, full).replace(/\\/g, '/');
