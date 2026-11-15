@@ -75,7 +75,7 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
   const { isAlive, alertAlive, confirmAlive } = useGuardedDialogs(showAlert, showConfirm);
   // 환자 목록·활성 환자·선택 집합 — 환자 상태 컨테이너(src/core/state/patientStore, REFACTORING_ROADMAP Phase 2 C4·P2-32·P2-37).
   // setter는 전부 참조 고정, 훅에는 지금처럼 따로 넘긴다.
-  const { patients, setPatients, activeId, setActiveId, selectedIds, setSelectedIds } = usePatientsContainer();
+  const { patients, setPatients, activeId, setActiveId, selectedIds, setSelectedIds, store: patientStore } = usePatientsContainer();
   // 목록·대시보드 scope 상태·파생값, 세션이 바뀌면 기본값으로 — src/app/usePatientScope.ts(P2-27).
   const patientScopeState = usePatientScope(session);
   const {
@@ -218,9 +218,8 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
 
   const { syncState, syncNow, flushPatient, notifyLockOutcome } = usePatientSync({
     patients,
-    setPatients,
     activeId,
-    setActiveId,
+    store: patientStore,
     session,
     settings,
     scope: effectivePatientScope,

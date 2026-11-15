@@ -70,12 +70,17 @@ describe('sync/pullApplied = 옛 pull 병합 updater 본체(#18)', () => {
     for (const scope of ['mine', 'all']) {
       it(`${label} · scope=${scope}`, () => {
         const prev = list();
-        const onReduced = vi.fn();
-        const actual = patientTx.pullApplied({ pulledItems: items, authoritativeDeletes: scope === 'all', onReduced })(prev);
+        const tx = patientTx.pullApplied({ pulledItems: items, authoritativeDeletes: scope === 'all' });
+        const actual = tx(prev);
         expect(actual).toEqual(oldPullBody(items, scope)(list()));
-        expect(onReduced).toHaveBeenCalledTimes(1);
-        expect(onReduced.mock.calls[0][0]).toBe(prev);
-        expect(onReduced.mock.calls[0][1]).toBe(actual);
+        // derive(P2-41c, 옛 onReduced의 활성 환자 예약 대체): 활성 환자가 결과에 있으면 그대로, 없으면 첫 환자(없으면 null).
+        for (const activeId of prev.map(p => p.id)) {
+          const derived = tx.derive({ patients: prev, activeId, selectedIds: new Set() }, actual);
+          expect(derived).toEqual(actual.some(p => p.id === activeId) ? {} : { activeId: actual[0]?.id || null });
+        }
+        // 활성 환자가 없을 때: 목록이 비어 있다가 채워지면 첫 환자, 이미 있던 목록이면 그대로.
+        expect(tx.derive({ patients: [], activeId: null, selectedIds: new Set() }, actual)).toEqual(actual.length > 0 ? { activeId: actual[0].id } : {});
+        expect(tx.derive({ patients: prev, activeId: null, selectedIds: new Set() }, actual)).toEqual({});
       });
     }
   }

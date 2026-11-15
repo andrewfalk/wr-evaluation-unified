@@ -228,6 +228,17 @@ const pullNow = (page) => page.evaluate(() => window.dispatchEvent(new Event('fo
 async function editable(page) {
   return until(async () => !/조회만 가능합니다|편집 권한을 상실/.test(await bodyText(page)), 15000);
 }
+// 편집 전에 이 창이 락을 갖게 한다 — 같은 계정의 다른 창이 같은 환자를 열어 두면(시나리오 순서에 따라) 그쪽이 락을 다시 잡아
+// 이 창은 조회 전용이 된다. 그러면 강제 인수한다. 결과(이미 보유/강제 인수/실패)를 돌려줘 기록에 남긴다.
+async function ensureEditable(page) {
+  if (await until(async () => !/조회만 가능합니다|편집 권한을 상실/.test(await bodyText(page)), 5000)) return 'held';
+  const force = page.getByRole('button', { name: '강제로 편집 권한 가져오기' });
+  if (await force.isVisible().catch(() => false)) {
+    await force.click();
+    if (await editable(page)) return 'forced';
+  }
+  return 'view-only';
+}
 
 async function step(name, fn) {
   try { await fn(); } catch (error) { record(`${name} — 스크립트 오류`, false, String(error?.message || error).split('\n')[0]); }
@@ -297,21 +308,27 @@ async function run(browser) {
   await step('④ 저장 중 환자 전환(flush 대기) → 전환 뒤 이전 환자 synced', async () => {
     let release;
     const gate = new Promise((r) => { release = r; });
+    let intercepted = false;
     await a2.route('**/api/patients/*', async (route) => {
-      if (route.request().method() === 'PATCH') await gate;
+      if (route.request().method() === 'PATCH') { intercepted = true; await gate; }
       await route.continue();
     });
     const i = a2.__calls.length;
     a2.__dialogs.length = 0;
     await setActiveName(a2, `동기화환자1전환-${RUN}`);
     await row(a2, P2).click();
+    // 저장(PATCH)이 붙잡혀 있는 동안에는 전환되지 않아야 한다(flush 대기, #341 Codex 3회차 권고).
+    await until(() => intercepted, 10000);
     await wait(800);
+    const heldBeforeRelease = (await a2.getByPlaceholder('등록번호').inputValue().catch(() => '')) === P1;
     release();
     const switched = await until(async () => (await a2.getByPlaceholder('등록번호').inputValue().catch(() => '')) === P2, 15000);
     await a2.unrouteAll({ behavior: 'ignoreErrors' });
     const saved = callsSince(a2, i, 'PATCH').some((c) => c.status < 300);
     const dbName = patientRow(P1)?.name;
-    record('④ 저장 후 이동 확인 → PATCH 2xx → 전환, 이전 환자 저장됨', switched && saved && dbName === `동기화환자1전환-${RUN}`, `dialogs=${JSON.stringify(a2.__dialogs)}`);
+    record('④ 저장 후 이동 확인 → 저장이 끝날 때까지 전환 대기 → PATCH 2xx → 전환, 이전 환자 저장됨',
+      intercepted && heldBeforeRelease && switched && saved && dbName === `동기화환자1전환-${RUN}`,
+      `intercepted=${intercepted} held=${heldBeforeRelease} dialogs=${JSON.stringify(a2.__dialogs)}`);
   });
 
   await step('⑤ "저장하지 않고 이동" → 다시 열면 저장 재개', async () => {
@@ -381,7 +398,7 @@ async function run(browser) {
 
   await step('⑧(기록, D1 경로) 저장 응답을 기다리는 중 로그아웃 → 같은 계정 재로그인 뒤 편집', async () => {
     await openPatient(a2, P1);
-    await editable(a2);
+    const lockBefore = await ensureEditable(a2);
     // 요청은 서버로 보내 저장을 끝내고, 응답만 붙잡아 로그아웃 뒤에 클라이언트에 넘긴다(D1: 서버는 새 revision, 클라이언트는 ACK를 못 받음).
     let release;
     const gate = new Promise((r) => { release = r; });
@@ -412,18 +429,18 @@ async function run(browser) {
     await a2.unrouteAll({ behavior: 'ignoreErrors' });
     await login(a2, accounts.a);
     await openPatient(a2, P1);
-    await editable(a2);
+    const lockAfter = await ensureEditable(a2);
     const i = a2.__calls.length;
     await setActiveName(a2, `동기화환자1D1재편집-${RUN}`);
     await until(() => callsSince(a2, i, 'PATCH').length > 0, 10000);
     await wait(1500);
     const statuses = callsSince(a2, i, 'PATCH').map((c) => c.status);
-    record('⑧(기록) 서버는 저장했고 응답을 기다리는 중 로그아웃 → 재로그인 뒤 다음 저장', null, `서버 저장=${serverSaved && dbAfter?.name === `동기화환자1D1-${RUN}`}(${fetchNote}), 재편집 PATCH 상태=${JSON.stringify(statuses)}, 충돌 표시=${(await row(a2, P1).innerText()).includes('Resolve')}`);
+    record('⑧(기록) 서버는 저장했고 응답을 기다리는 중 로그아웃 → 재로그인 뒤 다음 저장', null, `서버 저장=${serverSaved && dbAfter?.name === `동기화환자1D1-${RUN}`}(${fetchNote}), 락 ${lockBefore}→${lockAfter}, 재편집 PATCH 상태=${JSON.stringify(statuses)}, 충돌 표시=${(await row(a2, P1).innerText()).includes('Resolve')}`);
   });
 
   await step('⑨ 오프라인 → 편집 → 온라인 복귀 뒤 저장', async () => {
     await openPatient(a2, P1);
-    await editable(a2);
+    const lock = await ensureEditable(a2);
     await ctxA2.setOffline(true);
     await setActiveName(a2, `동기화환자1오프-${RUN}`);
     await wait(2500);
@@ -432,7 +449,7 @@ async function run(browser) {
     await setActiveName(a2, `동기화환자1온라인-${RUN}`);
     const saved = await until(() => callsSince(a2, i, 'PATCH').some((c) => c.status < 300), 15000);
     await wait(1500);
-    record('⑨ 오프라인 편집 → 온라인 뒤 편집 → PATCH 2xx·DB 최신', saved && patientRow(P1)?.name === `동기화환자1온라인-${RUN}`);
+    record('⑨ 오프라인 편집 → 온라인 뒤 편집 → PATCH 2xx·DB 최신', saved && patientRow(P1)?.name === `동기화환자1온라인-${RUN}`, `락 ${lock}`);
   });
 
   await step('⑩ 담당 변경 뒤 pull', async () => {
