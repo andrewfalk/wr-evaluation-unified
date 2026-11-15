@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { buildSessionHeaders } from '../auth/session';
 import { getCsrfToken } from '../utils/csrfCookie';
-import { intranetIdentityOf } from '../../platform/dataMode';
+import { sessionIdentityOf } from '../../platform/dataMode';
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -16,7 +16,7 @@ export function configureHttpClient({ onRefresh, onLogout, getCurrentSession }) 
   _getCurrentSession = getCurrentSession ?? null;
 }
 
-// 요청 신원 고정(계정 전환 수정) — 요청에 실린 세션이 인트라넷 신원을 가질 때만 본다(신원 없는 요청은 예전 흐름).
+// 요청 신원 고정(계정 전환 수정) — 요청에 실린 세션이 인트라넷 신원(서버 주소 + 사용자·조직)을 가질 때만 본다(신원 없는 요청은 예전 흐름).
 //  - 요청 신원 ≠ 지금 화면의 신원 → 이미 떠난 계정의 요청이다. 갱신도 로그아웃도 하지 않는다.
 //  - 갱신 결과의 신원 ≠ 요청 신원(또는 기다리는 사이 화면의 계정이 바뀜) → 그 세션으로 같은 본문을 다시 보내지 않는다.
 function identityChangedError() {
@@ -27,13 +27,13 @@ function identityChangedError() {
 
 function leftAccount(requestIdentity) {
   return requestIdentity !== null && !!_getCurrentSession
-    && intranetIdentityOf(_getCurrentSession()) !== requestIdentity;
+    && sessionIdentityOf(_getCurrentSession()) !== requestIdentity;
 }
 
 // 401(forceCsrf=false) 또는 403 CSRF_INVALID(forceCsrf=true) 뒤 인증을 갱신하고 다시 보낼 세션을 돌려준다. 다시 보내면
 // 안 되면 던진다. 다섯 재시도 자리(requestBlob·requestJson·requestBlobPost)가 같은 규칙을 쓴다.
 async function refreshForRetry({ session, baseUrl, forceCsrf = false, csrfData }) {
-  const requestIdentity = intranetIdentityOf(session);
+  const requestIdentity = sessionIdentityOf(session);
   if (leftAccount(requestIdentity)) throw identityChangedError();
   let newSession;
   try {
@@ -60,7 +60,7 @@ async function refreshForRetry({ session, baseUrl, forceCsrf = false, csrfData }
     err.status = 401;
     throw err;
   }
-  if (requestIdentity !== null && (intranetIdentityOf(newSession) !== requestIdentity || leftAccount(requestIdentity))) {
+  if (requestIdentity !== null && (sessionIdentityOf(newSession) !== requestIdentity || leftAccount(requestIdentity))) {
     throw identityChangedError();
   }
   return newSession;

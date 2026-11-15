@@ -112,3 +112,32 @@ describe('R2 — 요청을 보낸 계정이 현재 계정이 아니면 갱신·�
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('요청 신원에는 서버 주소도 포함된다', () => {
+  const onServer = (base, userId) => ({ ...sessionOf(userId), apiBaseUrl: base });
+
+  it('같은 사용자·조직 ID라도 다른 서버의 현재 세션이면 이전 서버 요청은 갱신·로그아웃하지 않는다', async () => {
+    queue(res(401, {}), res(200, { ok: 1 }));
+    const onRefresh = vi.fn(async () => onServer('https://s2', 'a'));
+    const onLogout = vi.fn();
+    configureHttpClient({ onRefresh, onLogout, getCurrentSession: () => onServer('https://s2', 'a') });
+    await expect(requestJson('/api/patients', { baseUrl: 'https://s1', method: 'POST', body: {}, session: onServer('https://s1', 'a') }))
+      .rejects.toMatchObject({ status: 401 });
+    expect(onRefresh).not.toHaveBeenCalled();
+    expect(onLogout).not.toHaveBeenCalled();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('갱신 결과가 다른 서버의 세션이면 다시 보내지 않는다', async () => {
+    queue(res(401, {}), res(200, { ok: 1 }));
+    configureHttpClient({ onRefresh: vi.fn(async () => onServer('https://s2', 'a')), onLogout: vi.fn() });
+    await expect(requestJson('/x', { baseUrl: 'https://s1', session: onServer('https://s1', 'a') })).rejects.toMatchObject({ status: 401 });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('주소 표기만 다른(끝의 "/") 같은 서버는 같은 신원', async () => {
+    queue(res(401, {}), res(200, { ok: 1 }));
+    configureHttpClient({ onRefresh: vi.fn(async () => onServer('https://s1/', 'a')), onLogout: vi.fn(), getCurrentSession: () => onServer('https://s1', 'a') });
+    await expect(requestJson('/x', { baseUrl: 'https://s1', session: onServer('https://s1', 'a') })).resolves.toEqual({ ok: 1 });
+  });
+});

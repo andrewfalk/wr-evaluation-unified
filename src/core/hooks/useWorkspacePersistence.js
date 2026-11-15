@@ -152,11 +152,12 @@ export function useWorkspacePersistence({
           await showLoadFailureNotice(loadResult, alertAlive);
           return;
         }
+        // 거절: 저장본 삭제가 끝난 뒤에 보존 대기를 푼다(삭제와 재기록의 순서를 저장소에 기대지 않는다).
         clearAutoSavedWorkspace(options)
           .catch(error => {
             console.warn('[autosave-clear]', error);
-          });
-        endRestore(entry);
+          })
+          .finally(() => { endRestore(entry); });
       });
     }, () => { endRestore(entry); });
   }, [autosaveEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -167,12 +168,14 @@ export function useWorkspacePersistence({
   useLayoutEffect(() => {
     if (!restoreClearRequest || restoreClearDoneRef.current === restoreClearRequest) return;
     restoreClearDoneRef.current = restoreClearRequest;
+    // 복원 목록이 커밋됐다(같은 커밋에서 로그인 직전 보존의 목록 ref도 갱신된다). 저장본 삭제가 끝난 뒤에 기다리던 보존을
+    // 푼다 — 삭제가 늦게 끝나 방금 재기록한 사본을 지우지 않게(삭제와 재기록의 순서를 저장소에 기대지 않는다).
+    const { entry } = restoreClearRequest;
     clearAutoSavedWorkspace(restoreClearRequest.options)
       .catch(error => {
         console.warn('[autosave-clear]', error);
-      });
-    // 복원 목록이 커밋됐다(같은 커밋에서 로그인 직전 보존의 목록 ref도 갱신된다) — 기다리던 보존을 푼다.
-    endRestore(restoreClearRequest.entry);
+      })
+      .finally(() => { endRestore(entry); });
   }, [restoreClearRequest]);
 
   useEffect(() => {
