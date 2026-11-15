@@ -188,6 +188,12 @@ export function getIntegrationStatus() {
   return currentStatus;
 }
 
+// 작업 공간이 새로 시작될 때(계정 전환) 이전 계정의 표시 정보를 비운다. 진행 중이던 확인(probe)의 결과도 버린다.
+export function resetIntegrationStatus() {
+  probeSequence += 1;
+  return commitStatus(createBaseStatus());
+}
+
 export function subscribeIntegrationStatus(listener) {
   listeners.add(listener);
   return () => listeners.delete(listener);

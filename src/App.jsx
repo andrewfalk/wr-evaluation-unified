@@ -11,8 +11,6 @@ import { AppModals } from './core/components/AppModals';
 import { useAuth } from './core/auth/AuthContext';
 import { useServerConfig } from './core/hooks/useServerConfig';
 import { useAIAvailable } from './core/hooks/useAIAvailable';
-import { useAuthSync } from './core/hooks/useAuthSync';
-import { useAppSettings } from './core/hooks/useAppSettings';
 import { useEvaluationDateSync } from './core/hooks/useEvaluationDateSync';
 import { useElectronMenuEvents } from './core/hooks/useElectronMenuEvents';
 import { useConflictResolution } from './core/hooks/useConflictResolution';
@@ -44,6 +42,8 @@ import { LoginModal } from './core/components/LoginModal';
 import { ChangePasswordModal } from './core/components/ChangePasswordModal';
 import { SwitchToLocalButton } from './core/components/SwitchToLocalButton';
 import { StatisticsWorkbench } from './core/components/statistics/StatisticsWorkbench';
+import { useLocalWorkBeforeLogin } from './app/useLocalWorkBeforeLogin';
+import { useGuardedDialogs } from './app/useWorkspaceLifetime';
 
 const DEFAULT_PATIENT_FILTERS = {
   searchQuery: '',
@@ -66,8 +66,13 @@ import './modules/shoulder';
 import './modules/elbow';
 import './modules/wrist';
 
-function App() {
-  const { session, setSession, resetToLocalSession, getAuthEpoch, isAuthenticated, sessionVerified, logout } = useAuth();
+// 설정(settings·handleSaveSettings·switchToLocalMode)은 작업 공간 경계(src/app/WorkspaceBoundary)가 넘긴다 — 계정이 바뀌어
+// App이 다시 띄워져도 설정(특히 운영 인트라넷 빌드의 "로컬 모드로 전환")이 유지되도록(계정 전환 수정).
+function App({ settings, handleSaveSettings, switchToLocalMode }) {
+  const { session, isAuthenticated, sessionVerified, logout, getWorkspaceOwner, getAuthEpoch } = useAuth();
+  // 화면 수명(계정 전환 수정) — 계정이 바뀌어 이 화면이 내려간 뒤에는 기다리던 처리의 저장소 쓰기·서버 요청·알림·확인창을
+  // 이어 가지 않는다(src/app/useWorkspaceLifetime).
+  const { isAlive, alertAlive, confirmAlive } = useGuardedDialogs(showAlert, showConfirm);
   const [patients, setPatients] = useState([]);
   const [patientScope, setPatientScope] = useState(() => getDefaultPatientScope(session));
   const [dashboardScope, setDashboardScope] = useState(() => getDefaultPatientScope(session));
@@ -79,8 +84,6 @@ function App() {
   const [showSidebar, setShowSidebar] = useState(false);
   const [patientFilters, setPatientFilters] = useState(DEFAULT_PATIENT_FILTERS);
   const [selectedIds, setSelectedIds] = useState(new Set());
-  const { settings, handleSaveSettings, switchToLocalMode } = useAppSettings({ session, setSession, resetToLocalSession });
-  useAuthSync({ session, setSession, resetToLocalSession, getAuthEpoch });
   const [showSettings, setShowSettings] = useState(false);
   const [showAdminConsole, setShowAdminConsole] = useState(false);
   const [showAccountProfile, setShowAccountProfile] = useState(false);
@@ -281,10 +284,10 @@ function App() {
 
   const handleForceTakeover = useCallback(async () => {
     const holderName = lockState.holder?.holderName || '다른 사용자';
-    const ok = await showConfirm(`${holderName}이(가) 편집 중인 환자입니다. 강제로 편집 권한을 가져오시겠습니까?`);
+    const ok = await confirmAlive(`${holderName}이(가) 편집 중인 환자입니다. 강제로 편집 권한을 가져오시겠습니까?`);
     if (!ok) return;
     await forceAcquire();
-  }, [lockState.holder, forceAcquire]);
+  }, [lockState.holder, forceAcquire, confirmAlive]);
 
   // 대시보드 스코프 드롭다운용 의사 명부(경량 집계, PHI 미포함) 로드.
   // 초기 + 매 동기화 완료(lastSyncedAt) 후 갱신 → 옵션·카운트 최신 유지.
@@ -339,7 +342,7 @@ function App() {
 
   const {
     savedItems, setSavedItems, saveName, setSaveName, lastAutoSave, legacyItems,
-    handleSave, handleOverwriteSave, handleLoad, handleDelete, openLoadModal,
+    handleSave, handleOverwriteSave, handleLoad, handleDelete, openLoadModal, waitForAutosaveRestore,
   } = useWorkspacePersistence({
     patients, setPatients,
     session, settings, serverConfig,
@@ -388,7 +391,7 @@ function App() {
     }
 
     const proceedUnresolved = (message) => async () => {
-      const ok = await showConfirm(message);
+      const ok = await confirmAlive(message);
       if (!ok) return false;
       setPatients(prev => prev.map(p => (
         p.id === current.id ? { ...p, sync: { ...(p.sync || {}), syncPaused: true } } : p
@@ -403,13 +406,16 @@ function App() {
     }
 
     if (status === 'dirty' || status === 'local-only') {
-      const ok = await showConfirm('저장되지 않은 변경사항이 있습니다. 저장 후 이동하시겠습니까?');
+      const ok = await confirmAlive('저장되지 않은 변경사항이 있습니다. 저장 후 이동하시겠습니까?');
       if (!ok) return;
 
       let outcome = 'still-dirty';
       for (let attempt = 0; attempt < 3 && outcome === 'still-dirty'; attempt += 1) {
+        // 화면이 내려갔으면(계정 전환) 이전 화면의 저장을 더 기다리지도, 다시 요청하지도 않는다.
+        if (!isAlive()) return;
         outcome = await flushPatient(current.id);
       }
+      if (!isAlive()) return;
 
       if (outcome === 'synced') { switchPatient(patientId); return; }
       if (outcome === 'conflict') {
@@ -417,7 +423,7 @@ function App() {
         return;
       }
       if (outcome === 'still-dirty') {
-        await showAlert('아직 저장 중입니다. 잠시 후 다시 시도해 주세요.');
+        await alertAlive('아직 저장 중입니다. 잠시 후 다시 시도해 주세요.');
         return;
       }
       // lock-lost / permission / offline / error
@@ -426,7 +432,7 @@ function App() {
     }
 
     switchPatient(patientId);
-  }, [activeId, patients, switchPatient, flushPatient, setPatients, dirtyAssessmentPatientId, blockedByUnsavedDraftAlert, isIntranetMode]);
+  }, [activeId, patients, switchPatient, flushPatient, setPatients, dirtyAssessmentPatientId, blockedByUnsavedDraftAlert, isIntranetMode, isAlive, alertAlive, confirmAlive]);
 
   // 영상 분석 서버 적용 후 서버 동기화 환자를 목록에 반영(로컬 id 보존 → id로 교체).
   const onVideoServerApplied = useCallback((serverPatient) => {
@@ -435,7 +441,8 @@ function App() {
   }, [setPatients]);
 
   // 평가 완료 시 evaluationDate 자동 설정
-  useEvaluationDateSync({ activeId, patients, setPatients, session });
+  // 로그인 화면이 떠 있는 동안(인트라넷 모드인데 인증 안 됨)은 쓰지 않는다 — 로컬 세션은 편집 권한을 항상 참으로 본다.
+  useEvaluationDateSync({ activeId, patients, setPatients, session, suspended: isIntranetMode && !isAuthenticated });
 
   // Electron 메뉴 이벤트
   useElectronMenuEvents({ handleResetPatientsRef, handleStartIntakeRef, handleOpenStatisticsRef });
@@ -495,19 +502,23 @@ function App() {
     setShowSidebar(true);
   }, []);
 
+  // 로그인 직전 로컬 작업 보존(src/app/useLocalWorkBeforeLogin) + 로그인 요청 중 표시(로컬 전환 버튼을 막는다).
+  const onBeforeLogin = useLocalWorkBeforeLogin({ patients, getWorkspaceOwner, waitForPendingRestore: waitForAutosaveRestore });
+  const [loginPending, setLoginPending] = useState(false);
+
   const withLocalEscape = (content) => (
     <>
       {content}
       <div className="app-boot-escape-hatch">
-        <SwitchToLocalButton onSwitch={switchToLocalMode} />
+        <SwitchToLocalButton onSwitch={switchToLocalMode} disabled={loginPending} />
       </div>
     </>
   );
 
   const handleResetPatients = async () => {
     if (dirtyAssessmentPatientId) { blockedByUnsavedDraftAlert(); return; }
-    const ok = await showConfirm('현재 작업 중인 환자 목록을 모두 삭제하시겠습니까?');
-    if (!ok) return;
+    const ok = await confirmAlive('현재 작업 중인 환자 목록을 모두 삭제하시겠습니까?');
+    if (!ok) return; // 묻는 동안 화면이 내려갔으면 false — 다음 화면의 자동저장을 지우지 않는다
     setPatientSyncPaused(true);
     setPatients([]);
     setActiveId(null);
@@ -528,9 +539,27 @@ function App() {
 
   // 로그아웃은 렌더러 세션만 정리하는 게 아니라(Electron은 서버 세션까지 정리) 화면을
   // 완전히 떠나므로 dirty 편집 중이면 막는다.
-  const handleLogout = () => {
-    if (dirtyAssessmentPatientId) { blockedByUnsavedDraftAlert(); return; }
-    logout();
+  // 로그아웃하면 화면의 목록이 비워진다(계정 전환 수정) — 인트라넷 세션에서 저장되지 않은 환자(저장 대기·충돌·락 상실)가
+  // 있으면 먼저 묻고, 취소하면 아무 요청도 보내지 않는다. 진행 중에는 다시 누를 수 없다. 로그아웃을 시작했으면 true.
+  const logoutInFlightRef = useRef(false);
+  const handleLogout = async () => {
+    if (dirtyAssessmentPatientId) { blockedByUnsavedDraftAlert(); return false; }
+    if (logoutInFlightRef.current) return false;
+    logoutInFlightRef.current = true;
+    try {
+      // 확인창을 열기 전의 인증 문맥 세대 — 확인을 기다리는 동안 바뀌었으면(다른 탭의 로그인 방송으로 되돌려짐 등) 로그아웃하지 않는다.
+      const gen = getAuthEpoch();
+      const unsaved = session?.mode === 'intranet'
+        ? syncSummary.pendingCount + syncSummary.conflictCount + syncSummary.lockLostCount
+        : 0;
+      if (unsaved > 0) {
+        const ok = await confirmAlive(`저장되지 않은 환자가 ${unsaved}명 있습니다. 로그아웃하면 이 내용은 사라집니다. 로그아웃할까요?`);
+        if (!ok) return false;
+      }
+      return await logout({ expectedGen: gen });
+    } finally {
+      logoutInFlightRef.current = false;
+    }
   };
 
   const handleShowHome = () => {
@@ -640,7 +669,11 @@ function App() {
   // verification failed and session was reset to local). Non-dismissable.
   if (isIntranetMode && !isAuthenticated) {
     return withLocalEscape(
-      <LoginModal apiBaseUrl={session?.apiBaseUrl || settings?.apiBaseUrl || ''} />
+      <LoginModal
+        apiBaseUrl={session?.apiBaseUrl || settings?.apiBaseUrl || ''}
+        onBeforeLogin={onBeforeLogin}
+        onPendingChange={setLoginPending}
+      />
     );
   }
 

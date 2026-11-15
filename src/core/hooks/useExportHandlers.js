@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { showAlert } from '../utils/platform';
+import { useGuardedDialogs } from '../../app/useWorkspaceLifetime';
 import { resolveAssessment } from '../utils/emrReport';
 
 // hasInvalidOverride는 generatedB8과 무관하게 오버라이드 객체 자체의 형태만 본다
@@ -25,6 +26,8 @@ async function guardExportTargets(targets, dirtyAssessmentPatientId) {
 }
 
 export function useExportHandlers({ activePatient, patients, selectedIds, dirtyAssessmentPatientId }) {
+  // 화면 수명(계정 전환 수정 AS-4) — 화면이 내려간 뒤에는(계정이 바뀜) 이전 화면의 내보내기 파일·알림을 만들지 않는다.
+  const { isAlive, alertAlive } = useGuardedDialogs(showAlert);
   const [exportDropdown, setExportDropdown] = useState(null);
 
   useEffect(() => {
@@ -39,8 +42,9 @@ export function useExportHandlers({ activePatient, patients, selectedIds, dirtyA
     if (await guardExportTargets([activePatient], dirtyAssessmentPatientId)) return;
     try {
       const { exportSingle } = await import('../utils/exportService');
+      if (!isAlive()) return;
       exportSingle(activePatient);
-    } catch (err) { await showAlert(err.message); }
+    } catch (err) { await alertAlive(err.message); }
   };
 
   const handleExportSelected = async () => {
@@ -48,16 +52,18 @@ export function useExportHandlers({ activePatient, patients, selectedIds, dirtyA
     if (await guardExportTargets(targets, dirtyAssessmentPatientId)) return;
     try {
       const { exportSelected } = await import('../utils/exportService');
+      if (!isAlive()) return;
       await exportSelected(patients, selectedIds);
-    } catch (err) { await showAlert(err.message); }
+    } catch (err) { await alertAlive(err.message); }
   };
 
   const handleExportBatch = async () => {
     if (await guardExportTargets(patients, dirtyAssessmentPatientId)) return;
     try {
       const { exportBatch } = await import('../utils/exportService');
+      if (!isAlive()) return;
       await exportBatch(patients);
-    } catch (err) { await showAlert(err.message); }
+    } catch (err) { await alertAlive(err.message); }
   };
 
   const handleExportBatchFormatSingle = async () => {
@@ -65,8 +71,9 @@ export function useExportHandlers({ activePatient, patients, selectedIds, dirtyA
     if (await guardExportTargets([activePatient], dirtyAssessmentPatientId)) return;
     try {
       const { exportBatchFormatSingle } = await import('../utils/exportService');
+      if (!isAlive()) return;
       exportBatchFormatSingle(activePatient);
-    } catch (err) { await showAlert(err.message); }
+    } catch (err) { await alertAlive(err.message); }
   };
 
   const handleExportBatchFormatSelected = async () => {
@@ -74,24 +81,27 @@ export function useExportHandlers({ activePatient, patients, selectedIds, dirtyA
     if (await guardExportTargets(targets, dirtyAssessmentPatientId)) return;
     try {
       const { exportBatchFormatSelected } = await import('../utils/exportService');
+      if (!isAlive()) return;
       await exportBatchFormatSelected(patients, selectedIds);
-    } catch (err) { await showAlert(err.message); }
+    } catch (err) { await alertAlive(err.message); }
   };
 
   const handleExportBatchFormatAll = async () => {
     if (await guardExportTargets(patients, dirtyAssessmentPatientId)) return;
     try {
       const { exportBatchFormatAll } = await import('../utils/exportService');
+      if (!isAlive()) return;
       await exportBatchFormatAll(patients);
-    } catch (err) { await showAlert(err.message); }
+    } catch (err) { await alertAlive(err.message); }
   };
 
   // 헤더만 있는 빈 일괄입력 양식 — 환자 데이터를 전혀 담지 않으므로 dirty·invalid 차단에서 예외.
   const handleExportBatchTemplate = async () => {
     try {
       const { exportBatchTemplate } = await import('../utils/exportService');
+      if (!isAlive()) return;
       exportBatchTemplate();
-    } catch (err) { await showAlert(err.message); }
+    } catch (err) { await alertAlive(err.message); }
   };
 
   return {

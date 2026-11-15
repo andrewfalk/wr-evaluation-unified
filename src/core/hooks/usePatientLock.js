@@ -8,6 +8,7 @@ import {
 } from '../services/patientServerRepository';
 import { setLockToken, getLockToken, clearLockToken } from '../services/lockTokenStore';
 
+import { useWorkspaceLifetime } from '../../app/useWorkspaceLifetime';
 const CLIENT_INSTANCE_STORAGE_KEY = 'wrEvalUnified.lockClientInstanceId';
 const DEFAULT_TTL_MS = 100_000;
 const RENEW_DIVISOR = 4; // heartbeat = ttlMs / 4 (서버 TTL의 여유 4배와 대응)
@@ -84,9 +85,14 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
   // 빠른 A→B→C 전환에서 늦게 도착한 응답이 최신 상태를 덮지 않도록 하는 세대번호.
   const generationRef = useRef(0);
   const renewTimerRef = useRef(null);
+  // 이 훅이 받은 리스 `{ activeId, token }` — 전역 토큰 저장소는 작업 공간 세대가 오르면(계정 전환·로컬 전환) 화면이
+  // 내려가기 전에 비워진다. 그때도 언마운트 정리가 자기가 잡은 락을 해제할 수 있게 따로 들고 있는다.
+  const heldLeaseRef = useRef(null);
   const inFlightAcquireRef = useRef(new Map()); // patientId -> in-flight acquire Promise
 
   const serverId = requiresLock(activePatient, session) ? activePatient.sync.serverId : null;
+  // 화면 수명(계정 전환 수정 AS-4) — 화면이 내려간 뒤에는 강제 선점·재시도로 락 요청을 보내지 않는다.
+  const { isAlive } = useWorkspaceLifetime();
   const lockStateRef = useRef(lockState);
   useEffect(() => { lockStateRef.current = lockState; }, [lockState]);
 
@@ -111,6 +117,7 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
         const result = await renewPatientLock(serverId, token, { session, settings });
         if (generationRef.current !== myGeneration) return;
         setLockToken(activeId, token, result.expiresAt);
+        heldLeaseRef.current = { activeId, token };
         setLockState({ status: 'held', holder: null, expiresAt: result.expiresAt });
         const nextDelay = Math.max(MIN_RENEW_DELAY_MS, Math.floor((result.ttlMs || DEFAULT_TTL_MS) / RENEW_DIVISOR));
         renewTimerRef.current = window.setTimeout(tick, nextDelay);
@@ -120,6 +127,7 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
         // 내용(patients 배열)은 여기서 절대 건드리지 않는다.
         if (generationRef.current !== myGeneration) return;
         clearLockToken(activeId);
+        heldLeaseRef.current = null;
         setLockState({ status: 'lost', holder: null, expiresAt: null });
       }
     }, delay);
@@ -140,6 +148,7 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
       );
       if (generationRef.current !== myGeneration) return null;
       setLockToken(activeId, result.leaseToken, result.expiresAt);
+      heldLeaseRef.current = { activeId, token: result.leaseToken };
       setLockState({ status: 'held', holder: null, expiresAt: result.expiresAt });
       startRenewLoop(myGeneration, result.ttlMs);
       return 'held';
@@ -174,7 +183,10 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
       clearRenewTimer();
       // best-effort 해제 — 응답을 기다리지 않는다(사용자 조작을 막을 이유가 없음).
       // 서버는 opt-in(락 없음=통과)이라 해제 실패해도 TTL 만료로 자연 정리된다.
-      const token = getLockToken(activeId);
+      // 전역 저장소가 이미 비워졌으면(작업 공간 세대 증가) 이 훅이 받은 리스로 해제한다.
+      const held = heldLeaseRef.current?.activeId === activeId ? heldLeaseRef.current.token : null;
+      heldLeaseRef.current = null;
+      const token = getLockToken(activeId) ?? held;
       if (token) {
         releasePatientLock(serverId, token, { session, settings }).catch(() => {});
         clearLockToken(activeId);
@@ -195,6 +207,8 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
     let backoffMs = STUCK_RETRY_BASE_MS;
     let lastAttemptAt = 0;
     let timer = null;
+    // 정리된 뒤 await 중이던 tick이 타이머를 다시 걸지 않게(계정이 바뀌어 화면이 내려간 뒤 락 요청이 끝없이 반복되지 않게).
+    let disposed = false;
 
     const clearTimer = () => {
       if (timer) { window.clearTimeout(timer); timer = null; }
@@ -202,15 +216,18 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
 
     const scheduleNext = () => {
       clearTimer();
+      if (disposed) return;
       timer = window.setTimeout(tick, backoffMs);
     };
 
     async function tick() {
+      if (disposed) return;
       const status = lockStateRef.current.status;
       if (status === 'lost' || status === 'held-by-other') {
         lastAttemptAt = Date.now();
         const myGeneration = ++generationRef.current;
         const outcome = await attemptAcquire(myGeneration);
+        if (disposed) return;
         backoffMs = outcome === 'held'
           ? STUCK_RETRY_BASE_MS // 성공하면 백오프 초기화
           : Math.min(backoffMs * 2, STUCK_RETRY_MAX_MS);
@@ -240,6 +257,7 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
     scheduleNext();
 
     return () => {
+      disposed = true;
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibilityChange);
       clearTimer();
@@ -248,13 +266,15 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
 
   // 사용자가 명시적으로 동의한 뒤에만 호출 — 다른 사람이 보유한 락을 무조건 선점한다.
   const forceAcquire = useCallback(async () => {
-    if (!serverId) return { ok: false };
+    // 확인창을 기다리는 사이 화면이 내려갔으면 선점하지 않는다(언마운트 정리가 올린 세대를 잡으면 세대 검사가 통과한다).
+    if (!serverId || !isAlive()) return { ok: false };
     const myGeneration = generationRef.current;
     setLockState(prev => ({ ...prev, status: 'acquiring' }));
     try {
       const result = await forcePatientLock(serverId, clientInstanceIdRef.current, { session, settings });
       if (generationRef.current !== myGeneration) return { ok: false };
       setLockToken(activeId, result.leaseToken, result.expiresAt);
+      heldLeaseRef.current = { activeId, token: result.leaseToken };
       setLockState({ status: 'held', holder: null, expiresAt: result.expiresAt });
       startRenewLoop(myGeneration, result.ttlMs);
       return { ok: true };
@@ -263,7 +283,7 @@ export function usePatientLock({ activeId, activePatient, session, settings }) {
       setLockState({ status: 'held-by-other', holder: err?.data?.holder || null, expiresAt: null });
       return { ok: false, error: err };
     }
-  }, [activeId, serverId, session, settings, startRenewLoop]);
+  }, [activeId, serverId, session, settings, startRenewLoop, isAlive]);
 
   return { lockState, forceAcquire, clientInstanceId: clientInstanceIdRef.current };
 }

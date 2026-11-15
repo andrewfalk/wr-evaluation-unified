@@ -209,7 +209,11 @@ export function SettingsModal({ settings, session, integrationStatus, onSave, on
               <label>계정</label>
               <button
                 className="btn btn-secondary btn-sm"
-                onClick={() => { onLogout(); onClose(); }}
+                onClick={async () => {
+                  // 확인창에서 취소하면(저장되지 않은 환자가 있을 때) 설정 창을 닫지 않는다(AS-5).
+                  const started = await onLogout();
+                  if (started !== false) onClose();
+                }}
               >
                 로그아웃
               </button>

@@ -593,6 +593,8 @@ export function StatisticsWorkbench({
     setExportState({ status: 'exporting', error: null });
     try {
       const blob = await exportStatsAggregate(committedResult.runManifest.analysisRunId, session);
+      // 받는 동안 화면이 내려갔으면(계정 전환 등) 이전 화면의 내보내기 파일을 만들지 않는다(AS-4).
+      if (!mountedRef.current) return;
       downloadBlob(blob, `stats-export-${committedResult.runManifest.analysisRunId}.csv`);
       setExportState({ status: 'idle', error: null });
     } catch (err) {
