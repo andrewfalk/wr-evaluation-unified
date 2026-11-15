@@ -120,6 +120,23 @@ describe('createPatientStore', () => {
     expect(drain(initial, queue)).toBe(store.getState());
   });
 
+  it('운영 빌드: 재진입을 미뤄 둔 바깥 전이가 실패하면 미룬 갱신도 버린다(다음 dispatch에 섞이지 않음, #336 Codex)', () => {
+    vi.stubEnv('DEV', false);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { store, queue } = setup([]);
+    const before = store.getState();
+    const failing = defineTransition('test/failing', () => {
+      store.dispatch(patientTx.appended({ patients: [{ id: 'inner' }] }));
+      throw new Error('outer failed');
+    });
+    expect(() => store.dispatch(failing({}))).toThrow('outer failed');
+    expect(store.getState()).toBe(before);
+    expect(queue).toHaveLength(0);
+    store.dispatch(patientTx.appended({ patients: [{ id: 'ok' }] }));
+    expect(store.getState().patients.map(p => p.id)).toEqual(['ok']);
+    expect(queue).toHaveLength(1);
+  });
+
   it('전이가 던진 예외는 dispatch 호출부로 나가고 앞선 상태·큐는 그대로다', () => {
     const { store, queue } = setup([{ id: 'a' }]);
     const before = store.getState();

@@ -73,6 +73,11 @@ export function createPatientStore(initial: PatientsState, enqueue: StoreEnqueue
       const next = compute(base);
       ahead = next;
       entry = { base, next, replay };
+    } catch (error) {
+      // 실패한 전이가 실행 중에 미뤄 둔 재진입 갱신도 버린다 — 남겨 두면 다음 무관한 갱신 뒤에 적용된다(#336 Codex 1회차).
+      // running 중에는 바깥 갱신 하나만 돌므로 지금 pending에 있는 것은 전부 이 전이가 넣은 것이다.
+      pending.length = 0;
+      throw error;
     } finally {
       running = false;
     }
