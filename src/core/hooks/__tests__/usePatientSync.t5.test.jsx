@@ -148,18 +148,27 @@ describe('T5 usePatientSync — 선행 특성화(지금 동작)', () => {
   });
 
   it('T5-2 진행 중인 sync가 있으면 syncNow는 곧바로 null을 돌려주고(큐에 합침) 끝난 뒤 큐가 돈다', async () => {
+    pullPatients.mockResolvedValue({ items: [serverPatient('a')], total: 1 });
+    const { result } = renderSync({ initialPatients: [serverPatient('a')] });
+    await settle(); // 부팅 sync(StrictMode 이중 예약 포함)를 모두 끝낸다 — 그 큐가 아래 단언을 가리지 않게(#341 Codex 2회차)
+    const pullsAfterBoot = pullPatients.mock.calls.length;
+
     const pull = deferred();
     pullPatients.mockImplementationOnce(() => pull.promise);
-    const { result } = renderSync({ initialPatients: [serverPatient('a')] });
+    let first;
+    act(() => { first = result.current.syncNow({ pull: true, reason: 'manual-1' }); });
     await settle(2);
-    expect(pullPatients).toHaveBeenCalledTimes(1);
+    expect(pullPatients.mock.calls.length).toBe(pullsAfterBoot + 1); // manual-1이 진행 중
 
     let returned;
-    await act(async () => { returned = await result.current.syncNow({ pull: true, reason: 'manual' }); });
+    await act(async () => { returned = await result.current.syncNow({ pull: true, reason: 'manual-2' }); });
     expect(returned).toBeNull();
+    expect(pullPatients.mock.calls.length).toBe(pullsAfterBoot + 1); // 바로 보내지 않고 큐에
+
     await act(async () => { pull.resolve({ items: [serverPatient('a')], total: 1 }); });
     await settle();
-    expect(pullPatients).toHaveBeenCalledTimes(2); // 큐에 합쳐진 manual(StrictMode 부팅 2회분도 한 큐로)
+    expect((await first)?.ok).toBe(true);
+    expect(pullPatients.mock.calls.length).toBe(pullsAfterBoot + 2); // 끝난 뒤 큐의 manual-2
   });
 
   it('T5-3 언마운트 때 기다리던 flush는 error로 풀리고, 늦게 온 push 응답은 아무것도 다시 보내지 않는다', async () => {

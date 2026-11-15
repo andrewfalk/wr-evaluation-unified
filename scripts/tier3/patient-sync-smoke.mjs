@@ -438,7 +438,6 @@ async function run(browser) {
   await step('⑩ 담당 변경 뒤 pull', async () => {
     const p1 = patientRow(P1);
     sql(`UPDATE patient_records SET assigned_doctor_user_id = ${q(accounts.b.id)} WHERE id = ${q(p1.id)};`);
-    await openPatient(a1, P2).catch(() => {});
     await pullNow(a1);
     const goneInA1 = await until(async () => (await row(a1, P1).count()) === 0, 15000);
     await pullNow(b1);
