@@ -5,7 +5,7 @@
 // D2b: 클립에 대상자 선택(detection: serverClipId+selectedId)이 있으면 그 serverClipId로 job을 돌려
 // 서버에 보존된 target을 쓴다(새 clip 미생성). 선택 없으면 createClip(fixtureClipName)→job(dominant).
 import { VIDEO_FEATURE_TARGETS } from '@wr/contracts/index';
-import { createClip, createJob, pollJob } from './videoAnalysisClient';
+import { analysisCancelledError, createClip, createJob, pollJob } from './videoAnalysisClient';
 import { convertClipFeaturesToPerDay, buildRecipeVersion } from './videoPerDayConversion';
 import { fuseClipFeatureSetsWithEvidence } from './videoViewpointFusion';
 import { REPETITION_BAND_FEATURE_KEYS } from './videoFeatureProfiles';
@@ -37,9 +37,12 @@ function requestedFeaturesForProcess(requested, profile) {
  *   missingActiveTime: { [processId]: featureKey[] } — 활동시간 누락으로 못 만든 per-day feature
  *   errors: [{ processId, message }]
  */
-export async function runServerAnalysis(patient, va, { activeModules = [], session, settings, detections = {}, serverConfig = null } = {}) {
+// shouldContinue(선택): 공정·클립마다, 그리고 폴링마다 확인 — false면 ANALYSIS_CANCELLED로 멈춘다(계정 전환 수정 AS-4).
+export async function runServerAnalysis(patient, va, { activeModules = [], session, settings, detections = {}, serverConfig = null, shouldContinue } = {}) {
+  const ensureContinue = () => { if (shouldContinue && !shouldContinue()) throw analysisCancelledError(); };
   // 6.0-12: 폴링 상한을 서버 deadline에서 파생(공개 config). 미전달 시 pollJob 기본값(안전 600s)으로 폴백.
   const pollOpts = {
+    ...(shouldContinue ? { shouldContinue } : {}),
     ...(serverConfig?.videoAnalysisQueueWaitMs ? { queueWaitMs: serverConfig.videoAnalysisQueueWaitMs } : {}),
     ...(serverConfig?.videoAnalysisJobDeadlineMs ? { processingDeadlineMs: serverConfig.videoAnalysisJobDeadlineMs } : {}),
   };
@@ -53,6 +56,7 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
   const recipesByJobId = {};
 
   for (const p of va.processes || []) {
+    ensureContinue();
     // 공정에 연결된 분석 가능 클립(들). D3b: 공정당 다중 시점 클립 허용(시점 융합).
     // 분석 가능 = fixture 파일명 보유(dev) 또는 실 업로드 완료(serverClipId 보유, M3-7a).
     const clipMetas = (va.clips || []).filter(
@@ -73,6 +77,7 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
       // 6.0-12: 실제 실행 디바이스(검토 UI 배지). 공정 내 클립은 동일 org 설정 → fallback은 하나라도 있으면 true.
       let inferenceDevice = null;
       for (const clipMeta of clipMetas) {
+        ensureContinue();
         // 업로드 완료/대상자 선택 클립은 기존 serverClipId 재사용. 없으면(fixture만) 새 clip 생성.
         const det = detections[clipMeta.id];
         let serverClipId = det?.serverClipId || clipMeta.serverClipId;
@@ -80,6 +85,7 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
           const clip = await createClip(patient, { processId: p.id, purpose: 'fixture', fixtureClipName: clipMeta.fixtureClipName, session, settings });
           serverClipId = clip.clipId;
         }
+        ensureContinue(); // 클립 생성을 기다리는 사이 취소됐으면 분석 작업을 만들지 않는다
         const job = await createJob(
           { clipId: serverClipId, processId: p.id, analysisProfile: p.analysisProfile, requestedFeatures: requestedForProcess },
           { session, settings }
@@ -124,6 +130,8 @@ export async function runServerAnalysis(patient, va, { activeModules = [], sessi
       if (conv.missingActiveTime.length > 0) missingActiveTime[p.id] = conv.missingActiveTime;
       bundleVersion = buildRecipeVersion(conv.featureConfigVersion);
     } catch (e) {
+      // 취소는 공정 오류로 바꾸지 않고 그대로 던진다(다음 공정으로 넘어가지 않는다).
+      if (e?.code === 'ANALYSIS_CANCELLED') throw e;
       // 6.0-12: 폴링 타임아웃은 status로 뭉개지 않고 phase별 명확한 메시지로 안내(서버는 계속 처리 중일 수 있음).
       if (e?.code === 'POLL_TIMEOUT') {
         const msg = e.timeoutPhase === 'queued'

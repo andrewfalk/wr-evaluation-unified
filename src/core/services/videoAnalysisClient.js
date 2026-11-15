@@ -112,6 +112,11 @@ export async function getJob(jobId, { session, settings } = {}) {
   });
 }
 
+// 호출한 화면이 내려가 이어 갈 필요가 없을 때(계정 전환 수정 AS-4 — shouldContinue가 false) 던지는 오류.
+export function analysisCancelledError() {
+  return Object.assign(new Error('analysis cancelled'), { code: 'ANALYSIS_CANCELLED' });
+}
+
 const TERMINAL_STATUSES = new Set(['review_pending', 'done', 'error', 'expired', 'cancelled']);
 
 // 폴링 기본값(6.0-12). 서버 deadline을 모를 때의 안전값(fail-closed config와 동일 600s).
@@ -130,15 +135,18 @@ function pollTimeoutError(phase) {
 //  - queued(및 전이 전 상태): queueWaitMs 예산. 처리 deadline 카운트다운은 아직 시작 안 함.
 //  - processing: 첫 진입 시점부터 processingDeadlineMs + processingGraceMs 예산.
 // 예산 소진 시 마지막 job을 반환하지 않고 POLL_TIMEOUT(timeoutPhase)을 throw한다(6.0-12).
+// shouldContinue(선택): 매 조회 전에 확인 — false면 ANALYSIS_CANCELLED로 멈춘다(화면이 내려가면 이전 세션으로 계속 조회하지 않게).
 export async function pollJob(jobId, { session, settings } = {}, {
   intervalMs = POLL_INTERVAL_MS,
   queueWaitMs = DEFAULT_QUEUE_WAIT_MS,
   processingDeadlineMs = DEFAULT_PROCESSING_DEADLINE_MS,
   processingGraceMs = PROCESSING_POLL_GRACE_MS,
+  shouldContinue,
 } = {}) {
   const queueDeadlineAt = Date.now() + queueWaitMs;
   let processingStartedAt = null;
   for (;;) {
+    if (shouldContinue && !shouldContinue()) throw analysisCancelledError();
     const last = await getJob(jobId, { session, settings });
     if (last && TERMINAL_STATUSES.has(last.status)) return last;
     const now = Date.now();

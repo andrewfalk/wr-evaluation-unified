@@ -9,12 +9,12 @@ import { ChangePasswordModal } from '../core/components/ChangePasswordModal';
 import { SwitchToLocalButton } from '../core/components/SwitchToLocalButton';
 import { hasIntranetSession, resolveApiBaseUrl, type SessionLike, type SettingsLike } from '../platform/dataMode';
 
-export function withLocalEscape(content: ReactNode, onSwitchToLocal: () => void): ReactNode {
+export function withLocalEscape(content: ReactNode, onSwitchToLocal: () => void, disabled = false): ReactNode {
   return (
     <>
       {content}
       <div className="app-boot-escape-hatch">
-        <SwitchToLocalButton onSwitch={onSwitchToLocal} />
+        <SwitchToLocalButton onSwitch={onSwitchToLocal} disabled={disabled} />
       </div>
     </>
   );
@@ -29,11 +29,17 @@ export interface BootGateInput {
   sessionVerified: boolean;
   isAuthenticated: boolean;
   onSwitchToLocal: () => void;
+  /** 로그인을 적용하기 직전에 기다릴 일(로컬 작업 보존 — 실패하면 던진다). 계정 전환 수정 AS-4. */
+  onBeforeLogin?: () => Promise<void>;
+  /** 로그인 요청이 진행 중인가(이 동안 "로컬 모드로 전환"을 막는다). */
+  loginPending?: boolean;
+  onLoginPendingChange?: (pending: boolean) => void;
 }
 
 /** 부팅 게이트에 걸리면 그 화면, 아니면 null(앱 본문으로 진행). */
 export function renderBootGate({
   isIntranetMode, configLoading, configError, session, settings, sessionVerified, isAuthenticated, onSwitchToLocal,
+  onBeforeLogin, loginPending = false, onLoginPendingChange,
 }: BootGateInput): ReactNode | null {
   if (!isIntranetMode) return null;
 
@@ -85,7 +91,15 @@ export function renderBootGate({
 
   // 로그인 필요: 인트라넷 모드인데 인증 안 됨(저장된 세션 없음, 또는 확인 실패로 로컬로 되돌아감). 닫을 수 없음.
   if (!isAuthenticated) {
-    return withLocalEscape(<LoginModal apiBaseUrl={resolveApiBaseUrl({ session, settings })} />, onSwitchToLocal);
+    return withLocalEscape(
+      <LoginModal
+        apiBaseUrl={resolveApiBaseUrl({ session, settings })}
+        onBeforeLogin={onBeforeLogin}
+        onPendingChange={onLoginPendingChange}
+      />,
+      onSwitchToLocal,
+      loginPending,
+    );
   }
 
   // 비밀번호 변경 필요(서버가 must_change_password — 예: 시드 관리자 첫 로그인). 다른 화면을 모두 막음. 닫을 수 없음.

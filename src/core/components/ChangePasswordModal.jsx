@@ -1,10 +1,17 @@
 // @ts-nocheck
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { requestJson } from '../services/httpClient';
+import { intranetIdentityOf } from '../../platform/dataMode';
 
 export function ChangePasswordModal({ apiBaseUrl = '', onClose }) {
-  const { session, setSession } = useAuth();
+  const { session, setSession, getSession } = useAuth();
+  // 언마운트된 화면은 늦게 끝난 요청의 결과를 세션에 섞지 않는다(StrictMode의 시험 언마운트 뒤에는 setup이 되돌린다).
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -20,6 +27,7 @@ export function ChangePasswordModal({ apiBaseUrl = '', onClose }) {
     if (!canSubmit) return;
     setLoading(true);
     setError('');
+    const submittedIdentity = intranetIdentityOf(session);
     try {
       const data = await requestJson('/api/auth/change-password', {
         baseUrl: apiBaseUrl,
@@ -30,6 +38,9 @@ export function ChangePasswordModal({ apiBaseUrl = '', onClose }) {
         // Wrong password 401 → httpClient detects WRONG_CURRENT_PASSWORD code and throws directly,
         // skipping refresh entirely (see httpClient.js WRONG_CURRENT_PASSWORD guard).
       });
+      // 기다리는 사이 이 화면이 내려갔거나(계정 전환) 세션의 계정이 바뀌었으면 결과를 지금 세션에 섞지 않는다(AS-4).
+      const currentIdentity = getSession ? intranetIdentityOf(getSession()) : submittedIdentity;
+      if (!mountedRef.current || currentIdentity !== submittedIdentity) return;
       // Server returns updated user (mustChangePassword=false) and optionally new tokens.
       if (data?.accessToken) {
         // Full session rotation (server revoked other sessions, issued new token).
