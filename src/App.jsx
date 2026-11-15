@@ -279,7 +279,7 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
 
   const {
     savedItems, setSavedItems, saveName, setSaveName, lastAutoSave, legacyItems,
-    handleSave, handleOverwriteSave, handleLoad, handleDelete, openLoadModal,
+    handleSave, handleOverwriteSave, handleLoad, handleDelete, openLoadModal, waitForAutosaveRestore,
   } = useWorkspacePersistence({
     patients, setPatients,
     session, settings, serverConfig,
@@ -402,7 +402,7 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
   }, [activePatient, activeModules]);
 
   // 로그인 직전 로컬 작업 보존(J2, src/app/useLocalWorkBeforeLogin) + 로그인 요청 중 표시(로컬 전환 버튼을 막는다) — AS-4.
-  const onBeforeLogin = useLocalWorkBeforeLogin({ patients, getWorkspaceOwner });
+  const onBeforeLogin = useLocalWorkBeforeLogin({ patients, getWorkspaceOwner, waitForPendingRestore: waitForAutosaveRestore });
   const [loginPending, setLoginPending] = useState(false);
 
   // --- 핸들러 ---

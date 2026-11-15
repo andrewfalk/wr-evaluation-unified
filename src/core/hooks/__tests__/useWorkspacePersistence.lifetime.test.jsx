@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StrictMode, useState } from 'react';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { useWorkspacePersistence } from '../useWorkspacePersistence.js';
+import { useLocalWorkBeforeLogin } from '../../../app/useLocalWorkBeforeLogin';
 
 vi.mock('../../utils/platform', () => ({
   showAlert: vi.fn(async () => {}),
@@ -110,5 +111,53 @@ describe('R19 — 자동저장 복원 중 화면이 내려가면 저장본을 �
     const view = render();
     await waitFor(() => expect(clearAutoSavedWorkspace).toHaveBeenCalledTimes(1));
     expect(view.result.current.patients).toHaveLength(0);
+  });
+});
+
+describe('자동저장 복원과 로그인 직전 로컬 보존의 직렬화', () => {
+  it('복원 확인이 진행 중이면 보존은 복원이 끝날 때까지 기다리고, 복원된 목록을 저장한 뒤 돌아간다', async () => {
+    const saves = [];
+    window.electron = {
+      fsLoadAllPatients: async () => [],
+      fsSaveAutoSave: vi.fn((data) => { const d = deferred(); saves.push({ data, d }); return d.promise; }),
+    };
+    try {
+      loadAutoSavedWorkspace.mockResolvedValueOnce(SAVED);
+      const answer = deferred();
+      showConfirm.mockImplementationOnce(() => answer.promise);
+      const local = { id: 'L1', data: { shared: { name: '화면의 로컬 환자' }, modules: {}, activeModules: [] }, sync: { syncStatus: 'local-only' } };
+      const view = renderHook(() => {
+        const [patients, setPatients] = useState([local]);
+        const persistence = useWorkspacePersistence({
+          patients, setPatients,
+          session: { mode: 'local' }, settings: { autoSaveInterval: 0 }, serverConfig: {},
+          setActiveId: vi.fn(), setCurrentStepIndex: vi.fn(), setIntakeShared: vi.fn(), setShowHome: vi.fn(),
+          setShowSaveModal: vi.fn(), setShowLoadModal: vi.fn(),
+          disabled: false, dirtyAssessmentPatientId: null, onBlockedByUnsavedDraft: vi.fn(),
+        });
+        const beforeLogin = useLocalWorkBeforeLogin({
+          patients, getWorkspaceOwner: () => null, waitForPendingRestore: persistence.waitForAutosaveRestore,
+        });
+        return { patients, beforeLogin };
+      }, { wrapper: StrictMode });
+      await waitFor(() => expect(showConfirm).toHaveBeenCalledTimes(1));
+
+      let done = false;
+      let pending;
+      act(() => { pending = view.result.current.beforeLogin().then(() => { done = true; }); });
+      await flush(3);
+      expect(saves).toHaveLength(0); // 복원이 끝나기 전에는 쓰지 않는다
+
+      await act(async () => { answer.resolve(true); }); // 복원 수락
+      await waitFor(() => expect(saves).toHaveLength(1));
+      expect(saves[0].data.patients.map((p) => p.id)).toEqual(['p1']); // 복원된 목록
+      expect(clearAutoSavedWorkspace).toHaveBeenCalledTimes(1); // 복원본 삭제가 먼저, 재기록이 나중
+      expect(done).toBe(false);
+      await act(async () => { saves[0].d.resolve(); await pending; });
+      expect(done).toBe(true);
+      expect(saves).toHaveLength(1);
+    } finally {
+      delete window.electron;
+    }
   });
 });

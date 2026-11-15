@@ -58,6 +58,7 @@ describe('useLocalWorkBeforeLogin', () => {
     let done = false;
     let pending;
     act(() => { pending = view.result.current().then(() => { done = true; }); });
+    await vi.waitFor(() => expect(saveAutoSave).toHaveBeenCalledTimes(1)); // L의 저장이 시작됨
     view.rerender({ patients: S, owner: null });
     await act(async () => { first.resolve(); await Promise.resolve(); });
     await act(async () => { await pending; });
@@ -69,5 +70,40 @@ describe('useLocalWorkBeforeLogin', () => {
     saveAutoSave.mockRejectedValueOnce(new Error('quota'));
     const view = render({ patients: ['로컬'], owner: null });
     await expect(view.result.current()).rejects.toThrow('quota');
+  });
+});
+
+describe('useLocalWorkBeforeLogin — 진행 중인 자동저장 복원과 직렬화', () => {
+  it('복원이 끝날 때까지 기다린 뒤 그때의 최신 목록을 쓴다', async () => {
+    let finishRestore;
+    const restore = new Promise((r) => { finishRestore = r; });
+    const view = renderHook(({ patients }) => useLocalWorkBeforeLogin({
+      patients, getWorkspaceOwner: () => null, waitForPendingRestore: () => restore,
+    }), { initialProps: { patients: ['처음 목록'] }, wrapper: StrictMode });
+    let pending;
+    act(() => { pending = view.result.current(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(saveAutoSave).not.toHaveBeenCalled(); // 복원이 끝나기 전에는 쓰지 않는다
+    view.rerender({ patients: ['복원된 목록'] });
+    await act(async () => { finishRestore(); await pending; });
+    expect(saveAutoSave.mock.calls.map(([list]) => list)).toEqual([['복원된 목록']]);
+  });
+
+  it('상한 직전 회차에서 안정되면 성공으로 돌아간다(마지막 저장 뒤에도 다시 확인)', async () => {
+    const view = render({ patients: ['v0'], owner: null });
+    const saves = [];
+    saveAutoSave.mockImplementation(() => { const d = deferred(); saves.push(d); return d.promise; });
+    let done = false;
+    let pending;
+    act(() => { pending = view.result.current().then(() => { done = true; }); });
+    for (let i = 1; i <= 4; i += 1) { // 처음 네 번은 저장하는 사이 목록이 바뀜
+      await vi.waitFor(() => expect(saves).toHaveLength(i));
+      view.rerender({ patients: [`v${i}`], owner: null });
+      await act(async () => { saves[i - 1].resolve(); });
+    }
+    await vi.waitFor(() => expect(saves).toHaveLength(5));
+    await act(async () => { saves[4].resolve(); await pending; });
+    expect(done).toBe(true);
+    expect(saveAutoSave).toHaveBeenCalledTimes(5);
   });
 });

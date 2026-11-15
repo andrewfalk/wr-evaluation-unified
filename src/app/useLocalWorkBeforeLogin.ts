@@ -16,6 +16,8 @@ import { saveAutoSave as saveAutoSaveJs } from '../core/utils/storage';
 export interface LocalWorkBeforeLoginArgs {
   patients: unknown[];
   getWorkspaceOwner: () => string | null;
+  /** 진행 중인 자동저장 복원이 끝날 때까지(수락이면 복원 목록 커밋까지) — useWorkspacePersistence가 준다. */
+  waitForPendingRestore?: () => Promise<void>;
 }
 
 // 저장하는 동안 목록이 계속 바뀌면 이 횟수까지 다시 저장하고, 그래도 바뀌면 실패로 본다(로그인하지 않고 다시 시도 안내).
@@ -25,22 +27,31 @@ function saveAutoSave(patients: unknown[]): Promise<void> {
   return (saveAutoSaveJs as unknown as (p: unknown[]) => Promise<void>)(patients);
 }
 
-export function useLocalWorkBeforeLogin({ patients, getWorkspaceOwner }: LocalWorkBeforeLoginArgs): () => Promise<void> {
-  const latestRef = useRef<{ patients: unknown[]; getWorkspaceOwner: () => string | null }>({ patients, getWorkspaceOwner });
+interface Latest {
+  patients: unknown[];
+  getWorkspaceOwner: () => string | null;
+  waitForPendingRestore?: () => Promise<void>;
+}
+
+export function useLocalWorkBeforeLogin({ patients, getWorkspaceOwner, waitForPendingRestore }: LocalWorkBeforeLoginArgs): () => Promise<void> {
+  const latestRef = useRef<Latest>({ patients, getWorkspaceOwner, waitForPendingRestore });
   useLayoutEffect(() => {
-    latestRef.current = { patients, getWorkspaceOwner };
-  }, [patients, getWorkspaceOwner]);
+    latestRef.current = { patients, getWorkspaceOwner, waitForPendingRestore };
+  }, [patients, getWorkspaceOwner, waitForPendingRestore]);
   return useCallback(async () => {
     // 저장을 기다리는 사이 목록이 바뀌면(예: 자동저장 복원이 끝남) 최종 목록까지 저장한 뒤에 돌아간다 — 복원은 커밋 뒤
     // 저장본을 지우므로, 마지막으로 본 목록을 저장하지 않고 로그인하면 그 목록이 사라진다.
+    // 자동저장 복원이 진행 중이면 그것이 끝날 때까지 기다린 뒤 판정한다(복원 목록이 커밋돼야 그 목록을 본다).
     let saved: unknown[] | null = null;
-    for (let round = 0; round < MAX_SAVE_ROUNDS; round += 1) {
+    for (let round = 0; ; round += 1) {
+      const waitForRestore = latestRef.current.waitForPendingRestore;
+      if (waitForRestore) await waitForRestore();
       const { patients: list, getWorkspaceOwner: ownerOf } = latestRef.current;
       if (ownerOf() !== null) return;
       if (!Array.isArray(list) || list.length === 0 || list === saved) return;
+      if (round >= MAX_SAVE_ROUNDS) throw new Error('local work kept changing while saving');
       await saveAutoSave(list);
       saved = list;
     }
-    throw new Error('local work kept changing while saving');
   }, []);
 }

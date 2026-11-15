@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { showAlert, showConfirm } from '../utils/platform';
 import { getLegacyImportBridge } from '../../platform/bridge';
 import { STORAGE_KEYS } from '../storage/keys';
@@ -83,6 +83,17 @@ export function useWorkspacePersistence({
   // 삭제하지 않아 저장본이 디스크에 남는다(다음에 로컬 모드에서 다시 복원 안내).
   const [restoreClearRequest, setRestoreClearRequest] = useState(null);
   const restoreClearDoneRef = useRef(null);
+  // 진행 중인 자동저장 복원(읽기 → 확인창 → 수락이면 복원 목록 커밋까지). 로그인 직전 로컬 보존(useLocalWorkBeforeLogin)이
+  // 이것이 끝날 때까지 기다린다 — 복원이 끝나기 전에 보존이 끝나 로그인하면 복원 목록이 저장되지 않은 채 사라진다.
+  const restorePendingRef = useRef(null);
+  const endRestore = (entry) => {
+    if (!entry) return;
+    entry.resolve();
+    if (restorePendingRef.current === entry) restorePendingRef.current = null;
+  };
+  const waitForAutosaveRestore = useCallback(() => restorePendingRef.current?.promise ?? Promise.resolve(), []);
+  // (언마운트 정리로 풀지 않는다 — StrictMode의 시험 언마운트가 진행 중 표시를 지운다. 모든 경로가 끝에서 풀고, 기다리는 쪽
+  // 로그인 화면도 같은 화면이라 함께 내려간다.)
   const intranetWorkspaceMode = isIntranetWorkspaceMode({ session, settings });
   const autosaveEnabled = shouldUseWorkspaceAutosave({ disabled, session, settings });
 
@@ -122,19 +133,22 @@ export function useWorkspacePersistence({
     autosaveRestoreCheckedRef.current = true;
 
     const options = { session, settings, serverConfig };
+    let resolveRestore;
+    const entry = { promise: new Promise((r) => { resolveRestore = r; }), resolve: () => resolveRestore() };
+    restorePendingRef.current = entry;
     loadAutoSavedWorkspace(options).then(saved => {
       // 읽는 동안 화면이 내려갔으면(계정 전환) 묻지도 지우지도 않는다 — 로컬 자동저장의 유일한 사본일 수 있다.
-      if (!saved || !isAlive()) return;
+      if (!saved || !isAlive()) { endRestore(entry); return; }
       const time = new Date(saved.savedAt).toLocaleString('ko-KR');
       confirmAlive(`이전 자동 저장 데이터가 있습니다 (${time}).\n이어서 작업하시겠습니까?`).then(async ok => {
         // 확인하는 동안 화면이 내려갔으면 아무것도 하지 않는다(수락이든 거절이든 저장본을 남긴다).
-        if (!isAlive()) return;
+        if (!isAlive()) { endRestore(entry); return; }
         if (ok && saved.patients?.length) {
           const loadResult = getLoadablePatientsFromSnapshot(saved.patients, { session });
           setPatients(patientTx.replacedAll({ patients: loadResult.patients }));
           setActiveId(loadResult.patients[0]?.id || null);
           setCurrentStepIndex(0);
-          setRestoreClearRequest(options); // 같은 배치 — 저장본 삭제는 복원 목록이 커밋된 뒤(아래 layout effect)
+          setRestoreClearRequest({ options, entry }); // 같은 배치 — 저장본 삭제는 복원 목록이 커밋된 뒤(아래 layout effect)
           await showLoadFailureNotice(loadResult, alertAlive);
           return;
         }
@@ -142,8 +156,9 @@ export function useWorkspacePersistence({
           .catch(error => {
             console.warn('[autosave-clear]', error);
           });
+        endRestore(entry);
       });
-    });
+    }, () => { endRestore(entry); });
   }, [autosaveEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 복원된 목록이 커밋된 뒤 저장본을 지운다. layout effect라서 같은 커밋에서 로그인 직전 보존의 목록 ref
@@ -152,10 +167,12 @@ export function useWorkspacePersistence({
   useLayoutEffect(() => {
     if (!restoreClearRequest || restoreClearDoneRef.current === restoreClearRequest) return;
     restoreClearDoneRef.current = restoreClearRequest;
-    clearAutoSavedWorkspace(restoreClearRequest)
+    clearAutoSavedWorkspace(restoreClearRequest.options)
       .catch(error => {
         console.warn('[autosave-clear]', error);
       });
+    // 복원 목록이 커밋됐다(같은 커밋에서 로그인 직전 보존의 목록 ref도 갱신된다) — 기다리던 보존을 푼다.
+    endRestore(restoreClearRequest.entry);
   }, [restoreClearRequest]);
 
   useEffect(() => {
@@ -312,5 +329,6 @@ export function useWorkspacePersistence({
     legacyItems,
     handleSave, handleOverwriteSave, handleLoad, handleDelete,
     openLoadModal,
+    waitForAutosaveRestore,
   };
 }
