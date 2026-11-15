@@ -120,6 +120,29 @@ describe('R2 — 요청을 보낸 계정이 현재 계정이 아니면 갱신·�
     expect(onLogout).not.toHaveBeenCalled();
   });
 
+  it('갱신을 기다리는 사이 현재 계정이 바뀐 뒤 갱신이 실패해도 로그아웃 처리기를 부르지 않는다', async () => {
+    const { client } = makeClient([res(401, {})]);
+    let current = sessionOf('a');
+    let rejectRefresh;
+    const onRefresh = vi.fn(() => new Promise((_, reject) => { rejectRefresh = reject; }));
+    const onLogout = vi.fn();
+    client.configure({ onRefresh, onLogout, getCurrentSession: () => current });
+    const pending = client.request('/api/patients', { method: 'POST', body: {}, session: sessionOf('a') });
+    await vi.waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+    current = sessionOf('b');
+    rejectRefresh(new Error('Refresh failed'));
+    await expect(pending).rejects.toMatchObject({ status: 401 });
+    expect(onLogout).not.toHaveBeenCalled();
+  });
+
+  it('같은 계정 요청의 갱신이 실패하면 지금처럼 로그아웃 처리기를 부른다', async () => {
+    const { client } = makeClient([res(401, {})]);
+    const onLogout = vi.fn();
+    client.configure({ onRefresh: vi.fn(async () => { throw new Error('Refresh failed'); }), onLogout, getCurrentSession: () => sessionOf('a') });
+    await expect(client.request('/x', { session: sessionOf('a') })).rejects.toMatchObject({ status: 401 });
+    expect(onLogout).toHaveBeenCalledTimes(1);
+  });
+
   it('요청 신원 = 현재 세션 신원이면 지금처럼 갱신·재시도', async () => {
     const { client, fetchImpl } = makeClient([res(401, {}), res(200, { ok: 1 })]);
     const onRefresh = vi.fn(async () => sessionOf('a', 'org-1', 'tok-new'));

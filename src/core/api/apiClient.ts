@@ -163,6 +163,8 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
         if ((refreshErr as { retryable?: boolean } | null)?.retryable) {
           throw new ApiError('일시적인 인증 조율 오류입니다. 잠시 후 다시 시도해 주세요.', 401, { retryable: true });
         }
+        // 갱신을 기다리는 사이 화면의 계정이 바뀌었으면 이전 계정 요청의 실패로 지금 계정을 로그아웃시키지 않는다.
+        if (leftAccount()) throw identityChangedError();
         onLogout?.();
         throw new ApiError('인증이 만료되었습니다. 다시 로그인해 주세요.', 401);
       }
