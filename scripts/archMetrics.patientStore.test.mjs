@@ -45,6 +45,9 @@ describe('arch-metrics storeGetStateOutsideSync(P2-40a)', () => {
   it('src/core/state/·src/core/sync/·테스트·함수 선언·주석·속성 정의는 세지 않는다', () => {
     expect(scanFile('src/core/state/patientStore/store.ts', 'store.getState();').storeGetStateOutsideSync).toBeUndefined();
     expect(scanFile('src/core/sync/patientSyncEngine.ts', 'store.getState();').storeGetStateOutsideSync).toBeUndefined();
+    // P2-41c 임시: 엔진 본체가 아직 usePatientSync.js에 있다 — P2-41d에서 src/core/sync/로 옮기면 이 예외를 뺀다.
+    expect(scanFile('src/core/hooks/usePatientSync.js', 'store.getState();').storeGetStateOutsideSync).toBeUndefined();
+    expect(scanFile('src/core/hooks/usePatientCrud.js', 'store.getState();').storeGetStateOutsideSync).toBe(1);
     expect(scanFile('src/core/hooks/__tests__/x.test.jsx', 'store.getState();').storeGetStateOutsideSync).toBeUndefined();
     const src = [
       'function getState() { return 1; }',

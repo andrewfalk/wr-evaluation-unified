@@ -208,13 +208,6 @@ const saveAckApplied = defineTransition<SaveAckAppliedPayload>('workspace/saveAc
   applyWorkspaceSaveAck(prev, sentPatients, ack)
 ));
 
-/**
- * 임시(게이트 B에서 제거): 옮기기 전 updater 안에서 하던 활성 환자 예약(`queueMicrotask(setActiveId…)`)을 그대로 실행하는 콜백.
- * 전이 본체는 순수하고 예약만 호출부가 넘긴다 — 병합 결과(next)를 봐야 활성 환자를 정할 수 있는데 훅 인자가 별개 setter라서다(계획 A5).
- * StrictMode 이중 실행 시 두 번 불리는 것도 옮기기 전과 같다. `sync/pullApplied`만 받는다(`conflict/resolved`는 P2-40c에서 derive로).
- */
-export type OnReduced = (prev: PatientRecord[], next: PatientRecord[]) => void;
-
 export interface ConflictResolvedPayload {
   patientId: string;
   resolution: string;
@@ -396,15 +389,21 @@ export interface PullAppliedPayload {
   pulledItems: PatientRecord[];
   /** pull한 scope가 'all'일 때만 true — 서버에 없는 synced 환자를 권위 있게 지운다. */
   authoritativeDeletes: boolean;
-  /** 임시(게이트 B에서 제거) — 옮기기 전 updater 안의 활성 환자 예약(ensureActivePatient·사라진 활성 환자 교체). */
-  onReduced?: OnReduced;
 }
 
-/** pull 병합 — reconcilePulledPatients 재사용. */
-const pullApplied = defineTransition<PullAppliedPayload>('sync/pullApplied', (prev, { pulledItems, authoritativeDeletes, onReduced }) => {
-  const next = reconcilePulledPatients(prev, pulledItems, { authoritativeDeletes });
-  onReduced?.(prev, next);
-  return next;
+/**
+ * pull 병합 — reconcilePulledPatients 재사용. derive(P2-41c): 옮기기 전 updater 안의 활성 환자 예약(ensureActivePatient·사라진
+ * 활성 환자 교체, `onReduced` + queueMicrotask)을 대체 — 활성 환자가 없고 목록이 비어 있다가 채워지면 첫 환자, 활성 환자가
+ * 결과에 없으면 첫 환자(없으면 null). 스텝은 건드리지 않는다(옮기기 전과 같음 — 충돌 해결·삭제와 다르다).
+ */
+const pullApplied = defineTransition<PullAppliedPayload>('sync/pullApplied', (prev, { pulledItems, authoritativeDeletes }) => (
+  reconcilePulledPatients(prev, pulledItems, { authoritativeDeletes })
+), {
+  derive: (prevState, next) => {
+    const { activeId } = prevState;
+    if (!activeId) return prevState.patients.length === 0 && next.length > 0 ? { activeId: next[0].id } : {};
+    return next.some(p => p.id === activeId) ? {} : { activeId: next[0]?.id || null };
+  },
 });
 
 export interface PatientResumedPayload {
@@ -504,7 +503,7 @@ export const patientTx = {
   evaluationDateSynced,
   /** #17 push 결과 병합 */
   pushResultsApplied,
-  /** #18 pull 병합(updater 안 활성 환자 예약은 onReduced로 격리 — 게이트 B에서 제거) */
+  /** #18 pull 병합(활성 환자 폴백은 derive — P2-41c) */
   pullApplied,
   /** #19 syncPaused 해제(바뀔 게 없으면 prev) */
   patientResumed,

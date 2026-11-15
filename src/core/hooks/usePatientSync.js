@@ -80,10 +80,11 @@ async function pullAllPatients({ session, settings, scope = 'mine' }) {
 }
 
 export function usePatientSync({
+  // patients·activeId는 effect 트리거용 렌더 값이다(debounce·waiter 안전망·재개). 동기화 판정은 store의 앞선 상태로 한다(P2-41c).
   patients,
-  setPatients,
   activeId,
-  setActiveId,
+  // 환자 상태 컨테이너의 스토어(P2-40a) — push 스냅샷·flush 판정·push 결과 판정이 커밋을 기다리지 않고 동기로 읽는다.
+  store,
   session,
   settings,
   enabled = true,
@@ -104,8 +105,6 @@ export function usePatientSync({
     loadedScope: null,
   });
 
-  const patientsRef = useRef(patients || []);
-  const activeIdRef = useRef(activeId || null);
   const sessionRef = useRef(session || null);
   const settingsRef = useRef(settings || null);
   const enabledRef = useRef(false);
@@ -113,13 +112,9 @@ export function usePatientSync({
   const queuedRef = useRef(null);
   const lockStateRef = useRef(lockState);
 
-  // flushPatient/커밋 배리어 상태 — 모두 ref/effect로만 다뤄서 리렌더를 유발하지 않는다
-  // (outcomeTick만 예외: post-commit effect를 확실히 재실행시키기 위한 트리거).
+  // flushPatient 대기 상태 — ref로만 다뤄서 리렌더를 유발하지 않는다.
   const cycleCounterRef = useRef(0);
   const flushWaitersRef = useRef(new Map()); // patientId -> [{ resolve, targetCycleId }]
-  const pendingPushResultsRef = useRef([]); // [{ cycleId, synced, failed }]
-  const pendingCommitRef = useRef(null); // null | (() => void) — 현재 대기 중인 커밋 배리어의 resolve
-  const [outcomeTick, setOutcomeTick] = useState(0);
 
   const canSync = useMemo(() => (
     enabled &&
@@ -136,8 +131,6 @@ export function usePatientSync({
   const scopeRef = useRef(scope);
 
   enabledRef.current = canSync;
-  useEffect(() => { patientsRef.current = patients || []; }, [patients]);
-  useEffect(() => { activeIdRef.current = activeId || null; }, [activeId]);
   useEffect(() => { sessionRef.current = session || null; }, [session]);
   useEffect(() => { settingsRef.current = settings || null; }, [settings]);
   // 언마운트되면 동기화를 끈다 — 진행 중이던 sync가 끝난 뒤 큐에 남은 다음 sync가 이전 화면의 목록·세션으로 저장 요청을
@@ -150,14 +143,22 @@ export function usePatientSync({
   useEffect(() => { scopeRef.current = scope; }, [scope]);
   useEffect(() => { lockStateRef.current = lockState; }, [lockState]);
 
-  const ensureActivePatient = useCallback((before, after) => {
-    if (activeIdRef.current || before.length > 0 || after.length === 0 || !setActiveId) {
-      return;
+  // 이번 push 사이클의 결과로 대기 중인 flushPatient를 확정한다. 판정은 store.dispatch(pushResultsApplied) 직후 같은 동기
+  // 구간의 앞선 상태(= 서버 ACK가 병합된 목록)로 한다 — 옮기기 전 커밋 배리어(outcomeTick·pendingCommitRef)가 기다리던
+  // "커밋 뒤"와 같은 목록이고, 판정과 병합 사이에 다른 쓰기가 끼어들 동기 구간이 없다(게이트 B 계획 설계 4 I1·I2).
+  const settleCycleWaiters = useCallback((cycleId, outcomes) => {
+    for (const [patientId, waiters] of flushWaitersRef.current) {
+      const outcome = outcomes.get(patientId);
+      if (outcome === undefined) continue;
+      const remaining = waiters.filter(w => {
+        if (cycleId < w.targetCycleId) return true; // 아직 내 목표 cycle 전 — 계속 대기
+        w.resolve(outcome);
+        return false;
+      });
+      if (remaining.length > 0) flushWaitersRef.current.set(patientId, remaining);
+      else flushWaitersRef.current.delete(patientId);
     }
-    queueMicrotask(() => {
-      if (!activeIdRef.current) setActiveId(after[0].id);
-    });
-  }, [setActiveId]);
+  }, []);
 
   const runSync = useCallback(async ({
     push = false,
@@ -184,12 +185,13 @@ export function usePatientSync({
 
     try {
       if (push) {
-        const snapshot = patientsRef.current;
+        // 앞선 상태(store) — 앞서 dispatch된 편집·ACK 병합이 전부 반영된 목록(커밋을 기다리지 않는다, P2-41c).
+        const { patients: snapshot, activeId: snapshotActiveId } = store.getState();
         if (hasPendingPatients(snapshot)) {
           // 환자마다 개별 판정한다 — 활성 환자는 락 상태로, 비활성 환자는 opt-in 그대로
           // 허용하되 syncPaused("저장하지 않고 이동")만은 활성 여부와 무관하게 제외한다.
           const pushTargets = snapshot.filter(p => getPushEligibility(p.id, {
-            activeId: activeIdRef.current,
+            activeId: snapshotActiveId || null,
             lockState: lockStateRef.current,
             patient: p,
           }).allowed);
@@ -210,18 +212,11 @@ export function usePatientSync({
 
             if (synced.length > 0 || failed.length > 0) {
               if (synced.length > 0 || failed.some(f => f.kind === 'conflict' || f.kind === 'lock')) {
-                setPatients(patientTx.pushResultsApplied({ synced, failed }));
+                store.dispatch(patientTx.pushResultsApplied({ synced, failed }));
               }
-              // flushPatient 호출자에게 이번 사이클의 결과를 알리기 위한 예약 — 실제 판정은
-              // patients 커밋 이후에만 실행이 보장되는 post-commit effect에서 처리한다
-              // (updater 함수 자체는 순수 병합만 하고 부수효과를 갖지 않아야 하므로).
-              pendingPushResultsRef.current.push({ cycleId: myCycleId, synced, failed });
-              setOutcomeTick(t => t + 1);
-              // 이 사이클은 자신이 만든 커밋(또는 결과)이 post-commit effect에서 실제로 처리될
-              // 때까지 기다린다 — 그래야 finally에서 큐잉된 다음 사이클을 시작해도
-              // patientsRef가 이미 최신이라, 방금 성공한 걸 stale revision으로 재전송해
-              // 가짜 409를 만드는 일이 없다.
-              await new Promise(resolve => { pendingCommitRef.current = resolve; });
+              // dispatch가 돌아온 지금 앞선 상태는 ACK가 병합된 목록이다 — 같은 동기 구간에서 flushPatient 대기를 확정한다.
+              // 큐에 있던 다음 사이클도 이 목록에서 스냅샷을 뜨므로 방금 성공한 것을 옛 revision으로 재전송(가짜 409)하지 않는다.
+              settleCycleWaiters(myCycleId, computeCommittedFlushOutcomes(store.getState().patients, { synced, failed }));
             }
 
             permissionDeniedCount = failed.filter(f => f.kind === 'permission').length;
@@ -260,20 +255,11 @@ export function usePatientSync({
         // authoritativeDeletes도 live scopeRef가 아니라 pulledScope로 판정(방어).
         if (pulledScope === scopeRef.current) {
           appliedScope = pulledScope;
-          setPatients(patientTx.pullApplied({
+          // 활성 환자 폴백(비어 있다가 채워지면 첫 환자 / 활성 환자가 결과에 없으면 첫 환자·null)은 전이의 derive가 같은
+          // 적용 안에서 정한다(P2-41c — 옮기기 전 updater 안 queueMicrotask 예약을 대체). 스텝은 옮기기 전처럼 건드리지 않는다.
+          store.dispatch(patientTx.pullApplied({
             pulledItems,
             authoritativeDeletes: pulledScope === 'all',
-            // 임시(게이트 B에서 제거) — 옮기기 전 updater 안에서 하던 활성 환자 예약 그대로(병합 결과를 봐야 정할 수 있다).
-            onReduced: (prev, next) => {
-              ensureActivePatient(prev, next);
-              if (activeIdRef.current && !next.some(p => p.id === activeIdRef.current)) {
-                queueMicrotask(() => {
-                  if (activeIdRef.current && !next.some(p => p.id === activeIdRef.current)) {
-                    setActiveId?.(next[0]?.id || null);
-                  }
-                });
-              }
-            },
           }));
         }
       }
@@ -314,7 +300,7 @@ export function usePatientSync({
         queueMicrotask(() => { runSync(queued); });
       }
     }
-  }, [ensureActivePatient, setActiveId, setPatients]);
+  }, [store, settleCycleWaiters]);
 
   useEffect(() => {
     if (!canSync) return;
@@ -375,58 +361,29 @@ export function usePatientSync({
   //   (b) 락 대상이지만 재획득에 성공함 — lockState.status === 'held'
   // patients/activeId를 deps에 직접 두지 않고 updater 안에서 최신 prev를 읽는다 — 아무 것도
   // 안 바뀌면 prev를 그대로 반환해(참조 동일) React가 리렌더 자체를 건너뛰게 한다.
+  //
+  // 재개 dispatch는 이 effect 단계가 끝난 뒤(마이크로태스크)로 미룬다(게이트 B 계획 B7): 옮기기 전에는 같은 커밋의 다른
+  // effect(App의 락 브리지 — held가 되면 flushPatient)가 재개 전 목록(syncPaused)을 보고 즉시 'lock-lost'로 확정하고, 1초
+  // debounce가 대신 push + pull 했다. 스토어는 dispatch를 바로 반영하므로 미루지 않으면 브리지 flush가 재개된 환자를 보고
+  // 즉시 PATCH(pull 없음)로 바뀐다. 락 상태·세션은 옮기기 전처럼 effect 시점 값으로 넘긴다. 즉시 flush는 검토 후보.
   useEffect(() => {
     if (!activeId) return;
     const lockStatus = lockStateRef.current?.status;
-    // 바뀔 게 없으면 전이가 prev를 그대로 돌려줘 재렌더를 건너뛴다(참조 동작 보존).
-    setPatients(patientTx.patientResumed({ id: activeId, lockStatus, session: sessionRef.current }));
-  }, [activeId, lockState?.status, setPatients]);
+    const sessionAtEffect = sessionRef.current;
+    queueMicrotask(() => {
+      // 재개할 것이 없으면(일시정지가 아님) dispatch하지 않는다 — effect 밖의 같은 값 갱신은 옮기기 전(effect 안, 다른 갱신과
+      // 한 배치)과 달리 따로 한 번 더 렌더·커밋된다(render-timing 환자 전환 commit 2 → 3, P2-41c에서 측정). 재개 여부 판정은
+      // 전이가 다시 한다(바뀔 게 없으면 prev 그대로).
+      if (!store.getState().patients.some(p => p.id === activeId && p.sync?.syncPaused)) return;
+      store.dispatch(patientTx.patientResumed({ id: activeId, lockStatus, session: sessionAtEffect }));
+    });
+  }, [activeId, lockState?.status, store]);
 
-  // post-commit: 이번 렌더의 patients(=committed state)를 근거로 대기 중인 flushPatient
-  // 호출들을 확정 판정한다. runSync의 setPatients updater 내부에서 직접 resolve하지 않는
-  // 이유: React updater는 순수해야 하고, 커밋된 patient는 mergePushedPatientAck가 서버
-  // ACK로 이미 교체했으므로 여기서 다시 비교하면 정상 저장까지 "다르다"고 오판한다 —
-  // computeCommittedFlushOutcomes가 이미 끝난 판정을 그대로 읽기만 한다.
-  useEffect(() => {
-    if (pendingPushResultsRef.current.length === 0) return;
-    const results = pendingPushResultsRef.current.splice(0);
-
-    // patientId -> 가장 최근(가장 큰 cycleId) outcome. 여러 사이클의 결과가 한 effect
-    // 실행에 몰려 있을 수 있으므로(예: 빠른 연속 push) 항상 최신 것으로 덮어쓴다.
-    const latestByPatient = new Map();
-    for (const r of results) {
-      const outcomes = computeCommittedFlushOutcomes(patients, r);
-      for (const [id, outcome] of outcomes) {
-        const prevEntry = latestByPatient.get(id);
-        if (!prevEntry || r.cycleId > prevEntry.cycleId) latestByPatient.set(id, { cycleId: r.cycleId, outcome });
-      }
-    }
-
-    for (const [patientId, waiters] of flushWaitersRef.current) {
-      const entry = latestByPatient.get(patientId);
-      if (!entry) continue;
-      const remaining = waiters.filter(w => {
-        if (entry.cycleId < w.targetCycleId) return true; // 아직 내 목표 cycle 전 — 계속 대기
-        w.resolve(entry.outcome);
-        return false;
-      });
-      if (remaining.length > 0) flushWaitersRef.current.set(patientId, remaining);
-      else flushWaitersRef.current.delete(patientId);
-    }
-
-    // 배리어를 풀기 직전에 patientsRef도 이 effect가 직접 갱신한다 — 다른 effect(:206)의
-    // 등록 순서에 기대지 않기 위한 방어적 조치.
-    patientsRef.current = patients;
-    if (pendingCommitRef.current) {
-      pendingCommitRef.current();
-      pendingCommitRef.current = null;
-    }
-  }, [outcomeTick, patients]);
-
-  // 두 번째 안전망: push 사이클과 무관하게, patients가 바뀔 때마다 이미 결론이 난
+  // 안전망: push 사이클과 무관하게, patients(렌더 값)가 바뀔 때마다 이미 결론이 난
   // (synced/conflict) 상태로 대기 중인 waiter를 정리한다 — pull 등 다른 경로로 상태가
   // 정리된 경우까지 포괄. cycleId 비교가 필요 없다 — "확정적으로 끝났다"고 읽을 수 있는
-  // 상태만 다루므로, 아직 dirty인 채로는 무엇도 resolve하지 않는다.
+  // 상태만 다루므로, 아직 dirty인 채로는 무엇도 resolve하지 않는다. 렌더 값에 건 effect라 사이클 판정(dispatch 직후 동기)
+  // 뒤의 커밋에서 돈다 — 스토어 구독으로 바꾸면 423 락 실패가 'lock-lost'보다 먼저 'conflict'로 풀린다(계획 B6).
   useEffect(() => {
     if (flushWaitersRef.current.size === 0) return;
     for (const [patientId, waiters] of flushWaitersRef.current) {
@@ -453,10 +410,6 @@ export function usePatientSync({
       // eslint-disable-next-line react-hooks/exhaustive-deps
       for (const waiters of flushWaitersRef.current.values()) waiters.forEach(w => w.resolve('error'));
       flushWaitersRef.current.clear();
-      if (pendingCommitRef.current) {
-        pendingCommitRef.current();
-        pendingCommitRef.current = null;
-      }
     };
   }, [canSync]);
 
@@ -464,12 +417,15 @@ export function usePatientSync({
   // 독자적으로 실행하지 않고 기존 autosync 큐(runSync)에 합류한다. 그렇지 않으면 마침 같은
   // 순간 실행 중인 autosync와 같은 revision으로 동시에 PATCH해 가짜 충돌(409)이 생긴다.
   const flushPatient = useCallback((patientId) => {
-    const current = patientsRef.current.find(p => p.id === patientId);
+    // 앞선 상태(store) 기준(P2-41c). 같은 커밋의 재개 dispatch는 마이크로태스크로 미뤄져 있어(위 재개 effect) 옮기기 전처럼
+    // 재개 전 값을 본다(계획 B7).
+    const { patients: latest, activeId: latestActiveId } = store.getState();
+    const current = latest.find(p => p.id === patientId);
     if (!current) return Promise.resolve('error');
     if (current.sync?.syncStatus === 'conflict') return Promise.resolve('conflict');
 
     const eligibility = getPushEligibility(patientId, {
-      activeId: activeIdRef.current,
+      activeId: latestActiveId || null,
       lockState: lockStateRef.current,
       patient: current,
     });
@@ -491,7 +447,7 @@ export function usePatientSync({
       flushWaitersRef.current.set(patientId, [...waiters, { resolve, targetCycleId }]);
       runSync({ push: true, reason: 'flush' }); // in-flight면 기존 queuedRef 병합 동작 그대로
     });
-  }, [runSync]);
+  }, [runSync, store]);
 
   // usePatientLock이 활성 환자에 대해 held-by-other/lost/403/acquire 네트워크 실패로
   // "확정"되면(§4-4의 재-flush 트리거가 절대 오지 않는 종결 상태) App.jsx가 이 함수를 호출해
