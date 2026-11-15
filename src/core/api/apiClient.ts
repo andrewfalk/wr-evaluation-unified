@@ -142,7 +142,8 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
     const leftAccount = () => requestIdentity !== null && !!getCurrentSession
       && intranetIdentityOf(getCurrentSession()) !== requestIdentity;
     const retry = (newSession: SessionLike) => {
-      if (requestIdentity !== null && intranetIdentityOf(newSession) !== requestIdentity) {
+      // 갱신 결과가 다른 계정이거나, 갱신을 기다리는 사이 화면의 계정이 바뀌었으면 다시 보내지 않는다.
+      if (requestIdentity !== null && (intranetIdentityOf(newSession) !== requestIdentity || leftAccount())) {
         throw identityChangedError();
       }
       return request(path, { ...options, session: newSession, skipAuthRefresh: true });

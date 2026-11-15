@@ -135,6 +135,23 @@ describe('R2 — 요청을 보낸 계정이 현재 계정이 아니면 갱신·�
     expect(onLogout).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['401', res(401, {}), 'POST'],
+    ['403 CSRF_INVALID', res(403, { code: 'CSRF_INVALID' }), 'PATCH'],
+  ])('%s: 갱신을 기다리는 사이 현재 계정이 바뀌면, 갱신이 이전 계정으로 성공해도 다시 보내지 않는다', async (_name, first, method) => {
+    const { client, fetchImpl } = makeClient([first, res(200, { ok: 1 })]);
+    let current = sessionOf('a');
+    let resolveRefresh;
+    const onRefresh = vi.fn(() => new Promise((resolve) => { resolveRefresh = resolve; }));
+    client.configure({ onRefresh, onLogout: vi.fn(), getCurrentSession: () => current });
+    const pending = client.request('/api/patients', { method, body: {}, session: sessionOf('a') });
+    await vi.waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+    current = sessionOf('b');
+    resolveRefresh(sessionOf('a', 'org-1', 'tok-a2'));
+    await expect(pending).rejects.toMatchObject({ status: 401 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('같은 계정 요청의 갱신이 실패하면 지금처럼 로그아웃 처리기를 부른다', async () => {
     const { client } = makeClient([res(401, {})]);
     const onLogout = vi.fn();
