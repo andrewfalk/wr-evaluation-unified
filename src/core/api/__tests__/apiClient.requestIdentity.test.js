@@ -2,7 +2,7 @@
 // 현재 계정이 아니면 같은 본문을 다시 보내지 않는다. 신원 = 인트라넷 세션의 `user.id|organizationId`.
 import { describe, expect, it, vi } from 'vitest';
 import { createApiClient } from '../apiClient';
-import { intranetIdentityOf } from '../../../platform/dataMode';
+import { intranetIdentityOf, sessionIdentityOf } from '../../../platform/dataMode';
 
 const res = (status, json) => ({
   status,
@@ -175,5 +175,44 @@ describe('R2 — 요청을 보낸 계정이 현재 계정이 아니면 갱신·�
     client.configure({ onRefresh, onLogout: vi.fn(), getCurrentSession: () => sessionOf('b') });
     await expect(client.request('/x', { session: { accessToken: 'old' } })).resolves.toEqual({ ok: 1 });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('요청 신원에는 서버 주소도 포함된다', () => {
+  const onServer = (base, userId) => ({ ...sessionOf(userId), apiBaseUrl: base });
+
+  it('sessionIdentityOf: 정규화한 서버 주소 + 사용자·조직, 인트라넷 세션이 아니면 null', () => {
+    expect(sessionIdentityOf(onServer('https://s1/', 'a'))).toBe(sessionIdentityOf(onServer('https://s1', 'a')));
+    expect(sessionIdentityOf(onServer('https://s1', 'a'))).not.toBe(sessionIdentityOf(onServer('https://s2', 'a')));
+    expect(sessionIdentityOf({ mode: 'local', apiBaseUrl: 'https://s1', user: { id: 'a' } })).toBeNull();
+    expect(sessionIdentityOf(null)).toBeNull();
+  });
+
+  it('같은 사용자·조직 ID라도 다른 서버의 현재 세션이면 이전 서버 요청은 갱신·로그아웃하지 않는다', async () => {
+    const { client, fetchImpl } = makeClient([res(401, {}), res(200, { ok: 1 })]);
+    const onRefresh = vi.fn(async () => onServer('https://s2', 'a'));
+    const onLogout = vi.fn();
+    client.configure({ onRefresh, onLogout, getCurrentSession: () => onServer('https://s2', 'a') });
+    await expect(client.request('/api/patients', { method: 'POST', body: {}, session: onServer('https://s1', 'a') }))
+      .rejects.toMatchObject({ status: 401 });
+    expect(onRefresh).not.toHaveBeenCalled();
+    expect(onLogout).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('갱신 결과가 다른 서버의 세션이면 다시 보내지 않는다', async () => {
+    const { client, fetchImpl } = makeClient([res(401, {}), res(200, { ok: 1 })]);
+    client.configure({ onRefresh: vi.fn(async () => onServer('https://s2', 'a')), onLogout: vi.fn() });
+    await expect(client.request('/x', { session: onServer('https://s1', 'a') })).rejects.toMatchObject({ status: 401 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('주소 표기만 다른(끝의 "/") 같은 서버는 같은 신원', async () => {
+    const { client } = makeClient([res(401, {}), res(200, { ok: 1 })]);
+    client.configure({
+      onRefresh: vi.fn(async () => onServer('https://s1/', 'a')), onLogout: vi.fn(),
+      getCurrentSession: () => onServer('https://s1', 'a'),
+    });
+    await expect(client.request('/x', { session: onServer('https://s1', 'a') })).resolves.toEqual({ ok: 1 });
   });
 });

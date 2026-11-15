@@ -13,7 +13,7 @@
 //   | csrfRetry       | O                              | X                  | O                     |
 //   | wrongPassword   | O(401 WRONG_CURRENT_PASSWORD는 refresh 안 함, 문구에 data.message 폴백) | X | X |
 import { ApiError, errorCodeOf, errorMessageOf } from './errors';
-import { intranetIdentityOf, isRefreshEligible, normalizeBaseUrl } from '../../platform/dataMode';
+import { isRefreshEligible, normalizeBaseUrl, sessionIdentityOf } from '../../platform/dataMode';
 
 // 세션은 화면마다 모양이 넓어(사용자·토큰·모드…) 여기서는 필요한 만큼만 본다.
 export type SessionLike = { mode?: string | null; accessToken?: string | null; [key: string]: unknown } | null | undefined;
@@ -135,15 +135,15 @@ export function createApiClient(deps: ApiClientDeps): ApiClient {
     }
 
     const canRetry = !skipAuthRefresh && !!onRefresh && isRefreshEligible(session);
-    // 요청 신원 고정: 요청에 실린 세션이 인트라넷 신원을 가질 때만 본다(신원 없는 요청은 예전 흐름).
+    // 요청 신원 고정: 요청에 실린 세션이 인트라넷 신원(서버 주소 + 사용자·조직)을 가질 때만 본다(신원 없는 요청은 예전 흐름).
     //  - 요청 신원 ≠ 지금 화면의 신원 → 이미 떠난 계정의 요청이다. 갱신도 로그아웃도 하지 않는다.
     //  - 갱신 결과의 신원 ≠ 요청 신원 → 그 세션으로 같은 본문을 다시 보내지 않는다.
-    const requestIdentity = intranetIdentityOf(session);
+    const requestIdentity = sessionIdentityOf(session);
     const leftAccount = () => requestIdentity !== null && !!getCurrentSession
-      && intranetIdentityOf(getCurrentSession()) !== requestIdentity;
+      && sessionIdentityOf(getCurrentSession()) !== requestIdentity;
     const retry = (newSession: SessionLike) => {
       // 갱신 결과가 다른 계정이거나, 갱신을 기다리는 사이 화면의 계정이 바뀌었으면 다시 보내지 않는다.
-      if (requestIdentity !== null && (intranetIdentityOf(newSession) !== requestIdentity || leftAccount())) {
+      if (requestIdentity !== null && (sessionIdentityOf(newSession) !== requestIdentity || leftAccount())) {
         throw identityChangedError();
       }
       return request(path, { ...options, session: newSession, skipAuthRefresh: true });

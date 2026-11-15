@@ -197,3 +197,35 @@ describe('자동저장 복원이 다시 시작되면 이전 복원은 끝나고 
     expect(showConfirm).toHaveBeenCalledTimes(1); // 대체된 복원은 묻지도 않는다
   });
 });
+
+describe('복원본 삭제가 끝난 뒤에 로그인 직전 보존 대기를 푼다', () => {
+  function renderWithWait() {
+    return renderHook(() => {
+      const [patients, setPatients] = useState([]);
+      const persistence = useWorkspacePersistence({
+        patients, setPatients,
+        session: { mode: 'local' }, settings: { autoSaveInterval: 0 }, serverConfig: {},
+        setActiveId: vi.fn(), setCurrentStepIndex: vi.fn(), setIntakeShared: vi.fn(), setShowHome: vi.fn(),
+        setShowSaveModal: vi.fn(), setShowLoadModal: vi.fn(),
+        disabled: false, dirtyAssessmentPatientId: null, onBlockedByUnsavedDraft: vi.fn(),
+      });
+      return { patients, wait: persistence.waitForAutosaveRestore };
+    }, { wrapper: StrictMode });
+  }
+
+  it.each([['수락', true], ['거절', false]])('%s: 삭제가 보류된 동안에는 대기가 풀리지 않는다', async (_name, accept) => {
+    loadAutoSavedWorkspace.mockResolvedValueOnce(SAVED);
+    showConfirm.mockResolvedValueOnce(accept);
+    const clear = deferred();
+    clearAutoSavedWorkspace.mockImplementationOnce(() => clear.promise);
+    const view = renderWithWait();
+    await waitFor(() => expect(clearAutoSavedWorkspace).toHaveBeenCalledTimes(1));
+    let settled = false;
+    view.result.current.wait().then(() => { settled = true; });
+    await flush();
+    expect(settled).toBe(false);
+    await act(async () => { clear.resolve(); });
+    await flush();
+    expect(settled).toBe(true);
+  });
+});
