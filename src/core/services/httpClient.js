@@ -1,16 +1,69 @@
 // @ts-nocheck
 import { buildSessionHeaders } from '../auth/session';
 import { getCsrfToken } from '../utils/csrfCookie';
+import { intranetIdentityOf } from '../../platform/dataMode';
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 // Configured once at app boot via configureHttpClient().
 let _onRefresh = null; // async () => newSession — called on 401
 let _onLogout = null;  // () => void — called when refresh also fails
+let _getCurrentSession = null; // () => session — 지금 화면의 세션(요청 신원 고정, 계정 전환 수정)
 
-export function configureHttpClient({ onRefresh, onLogout }) {
+export function configureHttpClient({ onRefresh, onLogout, getCurrentSession }) {
   _onRefresh = onRefresh;
   _onLogout = onLogout;
+  _getCurrentSession = getCurrentSession ?? null;
+}
+
+// 요청 신원 고정(계정 전환 수정) — 요청에 실린 세션이 인트라넷 신원을 가질 때만 본다(신원 없는 요청은 예전 흐름).
+//  - 요청 신원 ≠ 지금 화면의 신원 → 이미 떠난 계정의 요청이다. 갱신도 로그아웃도 하지 않는다.
+//  - 갱신 결과의 신원 ≠ 요청 신원(또는 기다리는 사이 화면의 계정이 바뀜) → 그 세션으로 같은 본문을 다시 보내지 않는다.
+function identityChangedError() {
+  const err = new Error('인증이 만료되었습니다. 다시 로그인해 주세요.');
+  err.status = 401;
+  return err;
+}
+
+function leftAccount(requestIdentity) {
+  return requestIdentity !== null && !!_getCurrentSession
+    && intranetIdentityOf(_getCurrentSession()) !== requestIdentity;
+}
+
+// 401(forceCsrf=false) 또는 403 CSRF_INVALID(forceCsrf=true) 뒤 인증을 갱신하고 다시 보낼 세션을 돌려준다. 다시 보내면
+// 안 되면 던진다. 다섯 재시도 자리(requestBlob·requestJson·requestBlobPost)가 같은 규칙을 쓴다.
+async function refreshForRetry({ session, baseUrl, forceCsrf = false, csrfData }) {
+  const requestIdentity = intranetIdentityOf(session);
+  if (leftAccount(requestIdentity)) throw identityChangedError();
+  let newSession;
+  try {
+    newSession = await _onRefresh(forceCsrf ? { baseUrl, forceCsrf: true } : { baseUrl });
+  } catch (refreshErr) {
+    if (forceCsrf) {
+      const err = new Error('CSRF token renewal failed');
+      err.status = 403;
+      err.data = csrfData;
+      throw err;
+    }
+    // Retryable coordination errors (e.g. cross-tab lock contention) should not
+    // log the user out — only this request fails; the next 401 will re-enter refresh.
+    if (refreshErr?.retryable) {
+      const err = new Error('일시적인 인증 조율 오류입니다. 잠시 후 다시 시도해 주세요.');
+      err.status = 401;
+      err.retryable = true;
+      throw err;
+    }
+    // 갱신을 기다리는 사이 화면의 계정이 바뀌었으면 이전 계정 요청의 실패로 지금 계정을 로그아웃시키지 않는다.
+    if (leftAccount(requestIdentity)) throw identityChangedError();
+    _onLogout?.();
+    const err = new Error('인증이 만료되었습니다. 다시 로그인해 주세요.');
+    err.status = 401;
+    throw err;
+  }
+  if (requestIdentity !== null && (intranetIdentityOf(newSession) !== requestIdentity || leftAccount(requestIdentity))) {
+    throw identityChangedError();
+  }
+  return newSession;
 }
 
 // A local (non-intranet) session has no server auth state to renew, so an auth
@@ -130,18 +183,7 @@ export async function requestBlob(path, { baseUrl = '', session, headers = {}, s
   });
 
   if (response.status === 401 && !_retry && _onRefresh && canRefreshSession(session)) {
-    let newSession;
-    try {
-      newSession = await _onRefresh({ baseUrl });
-    } catch (refreshErr) {
-      if (refreshErr?.retryable) {
-        const err = new Error('일시적인 인증 조율 오류입니다. 잠시 후 다시 시도해 주세요.');
-        err.status = 401; err.retryable = true; throw err;
-      }
-      _onLogout?.();
-      const err = new Error('인증이 만료되었습니다. 다시 로그인해 주세요.');
-      err.status = 401; throw err;
-    }
+    const newSession = await refreshForRetry({ session, baseUrl });
     return requestBlob(path, { baseUrl, session: newSession, headers, signal, _retry: true });
   }
 
@@ -195,23 +237,7 @@ export async function requestJson(path, {
       throw err;
     }
 
-    let newSession;
-    try {
-      newSession = await _onRefresh({ baseUrl });
-    } catch (refreshErr) {
-      // Retryable coordination errors (e.g. cross-tab lock contention) should not
-      // log the user out — only this request fails; the next 401 will re-enter refresh.
-      if (refreshErr?.retryable) {
-        const err = new Error('일시적인 인증 조율 오류입니다. 잠시 후 다시 시도해 주세요.');
-        err.status = 401;
-        err.retryable = true;
-        throw err;
-      }
-      _onLogout?.();
-      const err = new Error('인증이 만료되었습니다. 다시 로그인해 주세요.');
-      err.status = 401;
-      throw err;
-    }
+    const newSession = await refreshForRetry({ session, baseUrl });
     return requestJson(path, { baseUrl, method, body, session: newSession, headers, signal, _retry: true });
   }
 
@@ -223,15 +249,7 @@ export async function requestJson(path, {
     && _onRefresh
     && canRefreshSession(session)
   ) {
-    let newSession;
-    try {
-      newSession = await _onRefresh({ baseUrl, forceCsrf: true });
-    } catch {
-      const err = new Error('CSRF token renewal failed');
-      err.status = 403;
-      err.data = data;
-      throw err;
-    }
+    const newSession = await refreshForRetry({ session, baseUrl, forceCsrf: true, csrfData: data });
     return requestJson(path, { baseUrl, method, body, session: newSession, headers, signal, _retry: true });
   }
 
@@ -281,21 +299,7 @@ export async function requestBlobPost(path, {
   }
 
   if (response.status === 401 && !_retry && _onRefresh && canRefreshSession(session)) {
-    let newSession;
-    try {
-      newSession = await _onRefresh({ baseUrl });
-    } catch (refreshErr) {
-      if (refreshErr?.retryable) {
-        const err = new Error('일시적인 인증 조율 오류입니다. 잠시 후 다시 시도해 주세요.');
-        err.status = 401;
-        err.retryable = true;
-        throw err;
-      }
-      _onLogout?.();
-      const err = new Error('인증이 만료되었습니다. 다시 로그인해 주세요.');
-      err.status = 401;
-      throw err;
-    }
+    const newSession = await refreshForRetry({ session, baseUrl });
     return requestBlobPost(path, { baseUrl, body, session: newSession, headers, signal, _retry: true });
   }
 
@@ -307,15 +311,7 @@ export async function requestBlobPost(path, {
     && _onRefresh
     && canRefreshSession(session)
   ) {
-    let newSession;
-    try {
-      newSession = await _onRefresh({ baseUrl, forceCsrf: true });
-    } catch {
-      const err = new Error('CSRF token renewal failed');
-      err.status = 403;
-      err.data = data;
-      throw err;
-    }
+    const newSession = await refreshForRetry({ session, baseUrl, forceCsrf: true, csrfData: data });
     return requestBlobPost(path, { baseUrl, body, session: newSession, headers, signal, _retry: true });
   }
 

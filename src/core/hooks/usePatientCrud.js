@@ -8,6 +8,7 @@ import { canDeletePatient } from '../utils/patientOwnership';
 import { preserveDeletedSpineCommonFields } from '../utils/spineAssessmentMigration';
 import { isValidDiagnosisModuleId, resolveDiagnosisModule } from '../utils/diagnosisMapping';
 
+import { useGuardedDialogs } from '../../app/useWorkspaceLifetime';
 export function usePatientCrud({
   activeId, activeModuleId, session, settings,
   patients, setPatients,
@@ -24,6 +25,8 @@ export function usePatientCrud({
   dirtyAssessmentPatientId,
   onBlockedByUnsavedDraft,
 }) {
+  // 화면 수명(계정 전환 수정 AS-4) — 화면이 내려간 뒤에는 기다리던 삭제·불러오기의 서버 요청·알림·확인창을 이어 가지 않는다.
+  const { isAlive, alertAlive, confirmAlive } = useGuardedDialogs(showAlert, showConfirm);
   // updateModuleById/updateActiveModules는 useCallback([activeId, session])로 메모이즈되어
   // 그 시점의 updatePatient를 붙잡는다. 락 취득/해제는 usePatientLock의 useEffect에서
   // 비동기로 일어나므로(await acquireOnce), activeId가 바뀐 렌더에서는 아직 이전 판정값이
@@ -172,6 +175,8 @@ export function usePatientCrud({
     const failures = [];
 
     for (const patient of targets) {
+      // 화면이 내려갔으면(계정 전환) 이전 화면의 삭제 요청을 더 보내지 않는다.
+      if (!isAlive()) break;
       if (!shouldDeleteOnServer(patient)) {
         deletedIds.add(patient.id);
         continue;
@@ -218,17 +223,17 @@ export function usePatientCrud({
     if (dirtyAssessmentPatientId && dirtyAssessmentPatientId === id) { onBlockedByUnsavedDraft?.(); return; }
     const patient = patients.find(p => p.id === id);
     if (!canDeletePatient(patient, session)) {
-      await showAlert('이 환자를 삭제할 권한이 없습니다.');
+      await alertAlive('이 환자를 삭제할 권한이 없습니다.');
       return;
     }
-    const confirmed = await showConfirm('이 환자를 삭제하시겠습니까?');
+    const confirmed = await confirmAlive('이 환자를 삭제하시겠습니까?');
     if (!confirmed) return;
     const { conflicts, failures, nextPatients } = await deletePatientsByIds([id]);
     if (conflicts.size > 0) {
-      await showAlert('Patient was changed on the server. Resolve the conflict before deleting.');
+      await alertAlive('Patient was changed on the server. Resolve the conflict before deleting.');
     }
     if (failures.length > 0) {
-      await showAlert(`Delete failed. ${failures[0].error?.message || 'Please try again.'}`);
+      await alertAlive(`Delete failed. ${failures[0].error?.message || 'Please try again.'}`);
     }
     if (nextPatients.length === 0) setIntakeShared(null);
   };
@@ -238,16 +243,16 @@ export function usePatientCrud({
     if (dirtyAssessmentPatientId && selectedIds.has(dirtyAssessmentPatientId)) { onBlockedByUnsavedDraft?.(); return; }
     const selected = patients.filter(p => selectedIds.has(p.id));
     if (!selected.every(p => canDeletePatient(p, session))) {
-      await showAlert('선택 항목 중 권한 없는 환자가 있어 일괄 삭제할 수 없습니다.');
+      await alertAlive('선택 항목 중 권한 없는 환자가 있어 일괄 삭제할 수 없습니다.');
       return;
     }
-    if (selectedIds.size >= patients.length) { await showAlert('최소 1명의 환자는 유지해야 합니다'); return; }
-    const confirmed = await showConfirm(`선택된 ${selectedIds.size}명의 환자를 삭제하시겠습니까?`);
+    if (selectedIds.size >= patients.length) { await alertAlive('최소 1명의 환자는 유지해야 합니다'); return; }
+    const confirmed = await confirmAlive(`선택된 ${selectedIds.size}명의 환자를 삭제하시겠습니까?`);
     if (!confirmed) return;
     const { deletedIds, conflicts, failures } = await deletePatientsByIds(selectedIds);
     setSelectedIds(new Set([...selectedIds].filter(id => !deletedIds.has(id))));
     if (conflicts.size > 0 || failures.length > 0) {
-      await showAlert(`Some patients could not be deleted. Conflicts: ${conflicts.size}, errors: ${failures.length}`);
+      await alertAlive(`Some patients could not be deleted. Conflicts: ${conflicts.size}, errors: ${failures.length}`);
     }
   };
 
@@ -277,10 +282,11 @@ export function usePatientCrud({
     const isAdmin = session?.user?.role === 'admin';
     if (isIntranet && !isAdmin) return;
     if (isIntranet && isAdmin) {
-      const ok = await showConfirm('테스트 데이터가 로드되면 현재 환자 목록이 교체되고, 서버 모드에서는 서버로 동기화될 수 있습니다. 진행하시겠습니까?');
+      const ok = await confirmAlive('테스트 데이터가 로드되면 현재 환자 목록이 교체되고, 서버 모드에서는 서버로 동기화될 수 있습니다. 진행하시겠습니까?');
       if (!ok) return;
     }
     const { createTestPatients } = await import('../fixtures/createTestPatients');
+    if (!isAlive()) return;
     const testPatients = migratePatientRecords(createTestPatients(), { session });
     setPatients(testPatients);
     if (testPatients.length > 0) {
@@ -288,7 +294,7 @@ export function usePatientCrud({
       setCurrentStepIndex(0);
     }
     setShowHome(false);
-    showAlert(`테스트 데이터 로드 완료: ${testPatients.length}명`);
+    alertAlive(`테스트 데이터 로드 완료: ${testPatients.length}명`);
   };
 
   return {

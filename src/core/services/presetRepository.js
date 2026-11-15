@@ -432,7 +432,8 @@ export function exportPresetsToJSON(presets) {
   URL.revokeObjectURL(url);
 }
 
-export async function importPresetsFromJSON(file, session) {
+// shouldContinue(선택): 서버로 하나씩 보내기 전에 확인 — false면 멈춘다(계정 전환 수정 AS-4: 화면이 내려간 뒤 이전 세션으로 계속 보내지 않게).
+export async function importPresetsFromJSON(file, session, { shouldContinue } = {}) {
   const text = await file.text();
   const data = JSON.parse(text);
   const imported = data.presets || [];
@@ -443,6 +444,7 @@ export async function importPresetsFromJSON(file, session) {
     let addedCount = 0;
 
     for (const preset of imported) {
+      if (shouldContinue && !shouldContinue()) break;
       const normalized = normalizePresetRecord(preset);
       const identity = buildPresetIdentity(normalized);
       if (existingIdentities.has(identity)) continue;

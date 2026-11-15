@@ -5,6 +5,7 @@ import {
   runMigration,
   MigrationCanceledError,
 } from '../services/localToServerMigrator';
+import { useWorkspaceLifetime } from '../../app/useWorkspaceLifetime';
 
 // Hook wrapping the local-to-server migration.
 // session and settings must come from the caller (same pattern as usePatientSync).
@@ -14,13 +15,15 @@ import {
 export function useMigration({ session, settings } = {}) {
   const [status, setStatus] = useState('idle');
   const [result, setResult] = useState(null);
+  // 화면 수명(계정 전환 수정 AS-4) — 확인창을 기다리는 사이 화면이 내려갔으면 이관을 서버로 보내지 않는다.
+  const { isAlive } = useWorkspaceLifetime();
 
   const start = useCallback(async () => {
     if (status === 'running') return;
     setStatus('running');
     setResult(null);
     try {
-      const r = await runMigration({ session, settings });
+      const r = await runMigration({ session, settings, shouldProceed: isAlive });
       setResult(r);
       setStatus('done');
     } catch (err) {
@@ -34,7 +37,7 @@ export function useMigration({ session, settings } = {}) {
       setResult({ error: err });
       setStatus('error');
     }
-  }, [session, settings, status]);
+  }, [session, settings, status, isAlive]);
 
   // Retry only the previously-failed patients without re-collecting from storage.
   // Merges new successes into the existing result so the total counts stay accurate.

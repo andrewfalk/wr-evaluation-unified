@@ -21,6 +21,7 @@ import { DEFAULT_CONFIDENCE_THRESHOLDS } from '../services/videoConfidenceConfig
 import { isVideoAnalysisSupported, createClip, uploadClip, sampleDetectClip, selectTarget, fetchSampleFrame, fetchOverlay, closeReview } from '../services/videoAnalysisClient';
 import { applyVideoFeatureViaServer } from '../services/videoServerApply';
 import { runServerAnalysis } from '../services/videoAnalysisRun';
+import { useWorkspaceLifetime } from '../../app/useWorkspaceLifetime';
 import { TargetPicker } from './TargetPicker';
 import { SkeletonOverlay } from './SkeletonOverlay';
 import { getModule } from '../moduleRegistry';
@@ -613,6 +614,8 @@ export function resolveApplyMode(serverSupported, isSynced) {
 
 // ── 컴포넌트 ──────────────────────────────────────────────────────────────
 export function VideoAnalysisStep({ shared, updateShared, updatePatient, activePatient, activeModules = [], session, settings, fixtureMode = false, serverConfig = null, onServerApplied }) {
+  // 화면 수명(계정 전환 수정 AS-4) — 화면이 내려가면 진행 중이던 분석·적용이 이전 세션으로 서버 요청·조회를 이어 가지 않는다.
+  const { isAlive } = useWorkspaceLifetime();
   const va = shared?.videoAnalysis || {
     processes: [], clips: [], processFeatures: [], jobFeatures: [], candidateFeatures: [], appliedInputs: [],
   };
@@ -890,7 +893,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
         }
       }
       const { processFeatures, processEvidence, missingActiveTime: missing, bundleVersion, recipesByJobId, errors } =
-        await runServerAnalysis(activePatient, va, { activeModules, session, settings, detections, serverConfig });
+        await runServerAnalysis(activePatient, va, { activeModules, session, settings, detections, serverConfig, shouldContinue: isAlive });
       setAnalysisBundle(bundleVersion || MOCK_BUNDLE);
       setAnalysisRecipes(recipesByJobId || {}); // 적용 시 source job recipe 대조용(§8.11).
       setMissingActiveTime(missing);
@@ -940,7 +943,7 @@ export function VideoAnalysisStep({ shared, updateShared, updatePatient, activeP
       const serverPatient = await applyVideoFeatureViaServer(
         activePatient,
         { moduleId, ctx, featureKey: s.featureKey, suggestedValue: s.suggestedValue, confidence: s.confidence, processIds: processIds || [], analysisJobIds, analysisBundleVersion: bundleForApply, recipe: appliedRecipe, editReason, analysisProfile },
-        { session, settings, appliedBy }
+        { session, settings, appliedBy, shouldContinue: isAlive }
       );
       onServerApplied?.(serverPatient);
     } catch (e) {

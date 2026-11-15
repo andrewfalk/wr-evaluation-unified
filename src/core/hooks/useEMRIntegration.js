@@ -1,17 +1,21 @@
 import { useState } from 'react';
 import { showAlert, showConfirm } from '../utils/platform';
 import { touchPatientRecord } from '../services/patientRecords';
+import { useGuardedDialogs } from '../../app/useWorkspaceLifetime';
 
 export function useEMRIntegration({ activePatient, patients, selectedIds, session, setPatients, dirtyAssessmentPatientId }) {
   const [extractProgress, setExtractProgress] = useState(null);
+  // 화면 수명(계정 전환 수정 AS-4) — 화면이 내려간 뒤에는(계정이 바뀜) 기다리던 EMR 작업이 다음 브리지 호출·알림·확인창을
+  // 이어 가지 않는다. 네이티브·window 알림은 화면을 다시 띄워도 사라지지 않아 이전 계정 환자 이름이 새 계정 화면에 뜬다.
+  const { isAlive, alertAlive, confirmAlive } = useGuardedDialogs(showAlert, showConfirm);
 
   const handleInjectEMR = async () => {
     if (!activePatient || !window.electron?.injectEMR) return;
     if (dirtyAssessmentPatientId === activePatient.id) {
-      await showAlert('저장하지 않은 종합소견 편집 내용이 있습니다.\n"편집 완료"로 저장한 뒤 다시 시도하세요.');
+      await alertAlive('저장하지 않은 종합소견 편집 내용이 있습니다.\n"편집 완료"로 저장한 뒤 다시 시도하세요.');
       return;
     }
-    const ok = await showConfirm('EMR 소견서에 현재 환자 데이터를 직접 입력합니다.\nEMR 업무관련성 특별진찰소견서가 열려있는지 확인하세요.\n\n계속하시겠습니까?');
+    const ok = await confirmAlive('EMR 소견서에 현재 환자 데이터를 직접 입력합니다.\nEMR 업무관련성 특별진찰소견서가 열려있는지 확인하세요.\n\n계속하시겠습니까?');
     if (!ok) return;
     try {
       const { prepareEmrInjection } = await import('../utils/emrReport');
@@ -20,13 +24,13 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
       const { fieldData, effective, bytes, confirmedDx } = prepareEmrInjection(activePatient);
 
       if (effective.hasInvalidOverride) {
-        await showAlert('저장된 종합소견 편집 데이터가 손상되어 전송할 수 없습니다.\n종합평가 화면에서 "깨진 편집 데이터 삭제" 후 다시 시도하세요.');
+        await alertAlive('저장된 종합소견 편집 데이터가 손상되어 전송할 수 없습니다.\n종합평가 화면에서 "깨진 편집 데이터 삭제" 후 다시 시도하세요.');
         return;
       }
       // isStale은 오버라이드가 유효할 때만 true(resolveAssessment) — 차단하지 않고 전송
       // 직전에 한 번 더 확인만 한다(정책: 화면 경고 배너 + 전송 직전 재확인).
       if (effective.isStale) {
-        const proceedStale = await showConfirm(
+        const proceedStale = await confirmAlive(
           '⚠ 직접 편집한 종합소견 이후 상병·직업·평가 데이터가 변경되었습니다.\n'
           + '전송될 내용은 편집 시점 그대로이며 최신 데이터와 다를 수 있습니다.\n\n'
           + '편집본을 그대로 전송하시겠습니까?'
@@ -67,12 +71,13 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
         );
       }
       if (warnings.length > 0) {
-        const proceed = await showConfirm(
+        const proceed = await confirmAlive(
           warnings.join('\n\n') + '\n\n' + (willTruncate ? '잘린 상태로 계속 전송하시겠습니까?' : '계속 전송하시겠습니까?')
         );
         if (!proceed) return;
       }
 
+      if (!isAlive()) return;
       const result = await window.electron.injectEMR({ ...fieldData, _source: effective.isOverride ? 'edited' : 'auto' });
       if (result.success) {
         let msg = `${result.message}`;
@@ -82,20 +87,21 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
         if (result.failedFields?.length > 0) {
           msg += `\n\n일부 실패:\n${result.failedFields.map(f => `- ${f.field}: ${f.reason}`).join('\n')}`;
         }
-        await showAlert(msg);
+        await alertAlive(msg);
       } else {
-        await showAlert(`EMR 입력 실패: ${result.message}`);
+        await alertAlive(`EMR 입력 실패: ${result.message}`);
       }
-    } catch (err) { await showAlert('EMR 입력 오류: ' + err.message); }
+    } catch (err) { await alertAlive('EMR 입력 오류: ' + err.message); }
   };
 
   const handleInjectConsultReply = async () => {
     if (!activePatient || !window.electron?.injectEMR) return;
-    const ok = await showConfirm('다학제 회신 내용을 EMR 종합소견 2,3번 칸에 입력합니다.\nEMR 업무관련성 특별진찰소견서가 열려있는지 확인하세요.\n\n계속하시겠습니까?');
+    const ok = await confirmAlive('다학제 회신 내용을 EMR 종합소견 2,3번 칸에 입력합니다.\nEMR 업무관련성 특별진찰소견서가 열려있는지 확인하세요.\n\n계속하시겠습니까?');
     if (!ok) return;
     try {
       const { generateConsultReplyFieldData } = await import('../utils/exportService');
       const fieldData = generateConsultReplyFieldData(activePatient);
+      if (!isAlive()) return;
       const result = await window.electron.injectEMR(fieldData);
       if (result.success) {
         let msg = `${result.message}`;
@@ -105,11 +111,11 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
         if (result.failedFields?.length > 0) {
           msg += `\n\n일부 실패:\n${result.failedFields.map(f => `- ${f.field}: ${f.reason}`).join('\n')}`;
         }
-        await showAlert(msg);
+        await alertAlive(msg);
       } else {
-        await showAlert(`다학제 회신 입력 실패: ${result.message}`);
+        await alertAlive(`다학제 회신 입력 실패: ${result.message}`);
       }
-    } catch (err) { await showAlert('다학제 회신 입력 오류: ' + err.message); }
+    } catch (err) { await alertAlive('다학제 회신 입력 오류: ' + err.message); }
   };
 
   // EMR 데이터 일괄 추출 (선택된 환자들의 patientNo 기반)
@@ -119,10 +125,10 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
       ? patients.filter(p => selectedIds.has(p.id) && p.data?.shared?.patientNo)
       : (activePatient?.data?.shared?.patientNo ? [activePatient] : []);
     if (targets.length === 0) {
-      await showAlert('선택된 환자 중 환자등록번호가 입력된 환자가 없습니다.');
+      await alertAlive('선택된 환자 중 환자등록번호가 입력된 환자가 없습니다.');
       return;
     }
-    const ok = await showConfirm(`${targets.length}명의 환자 데이터를 EMR에서 추출합니다.\n진료기록분석지 페이지가 열려있는지 확인하세요.\n\n계속하시겠습니까?`);
+    const ok = await confirmAlive(`${targets.length}명의 환자 데이터를 EMR에서 추출합니다.\n진료기록분석지 페이지가 열려있는지 확인하세요.\n\n계속하시겠습니까?`);
     if (!ok) return;
 
     let successCount = 0, failCount = 0;
@@ -130,6 +136,8 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
     setExtractProgress({ current: 0, total: targets.length, currentName: '', status: 'running' });
 
     for (let i = 0; i < targets.length; i++) {
+      // 화면이 내려갔으면 다음 환자의 추출을 부르지 않는다(완료 알림도 띄우지 않는다).
+      if (!isAlive()) return;
       const p = targets[i];
       setExtractProgress({ current: i + 1, total: targets.length, currentName: p.data.shared.name || p.data.shared.patientNo, status: 'running' });
 
@@ -138,6 +146,7 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
 
       try {
         const result = await window.electron.extractRecord(p.data.shared.patientNo, p.data.shared.injuryDate || '');
+        if (!isAlive()) return;
         if (result.success) {
           // patientNo 교차검증: EMR이 다른 환자 데이터를 반환한 경우 skip
           if (result.patientNo && result.patientNo !== p.data.shared.patientNo) {
@@ -194,12 +203,13 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
       }
     }
 
+    if (!isAlive()) return;
     setExtractProgress(null);
     let doneMsg = `EMR 추출 완료: ${targets.length}명 중 성공 ${successCount}명, 실패 ${failCount}명`;
     if (warnings.length > 0) {
       doneMsg += `\n\n⚠ 확인 필요:\n${warnings.join('\n')}`;
     }
-    await showAlert(doneMsg);
+    await alertAlive(doneMsg);
   };
 
   // 다학제회신 추출 (현재 환자, 진료메인 페이지 대상)
@@ -207,12 +217,13 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
     if (!window.electron?.extractConsultation) return;
     try {
       const result = await window.electron.extractConsultation();
+      if (!isAlive()) return;
       if (result.success && result.consultations) {
         // 환자 식별 확인: EMR 진료메인 화면의 환자와 앱의 현재 환자가 일치하는지 사용자에게 확인
         const patientLabel = activePatient.data.shared.name
           ? `${activePatient.data.shared.name}(${activePatient.data.shared.patientNo || ''})`
           : activePatient.data.shared.patientNo || '현재 환자';
-        const confirmed = await showConfirm(
+        const confirmed = await confirmAlive(
           `EMR 화면의 다학제 회신 ${result.consultations.length}건을 [${patientLabel}]에게 저장합니다.\nEMR 진료메인 화면이 이 환자의 화면인지 확인해주세요.`
         );
         if (!confirmed) return;
@@ -235,12 +246,12 @@ export function useEMRIntegration({ activePatient, patients, selectedIds, sessio
               )
             : p
         ));
-        await showAlert(`${result.consultations.length}개 과목 회신을 가져왔습니다.`);
+        await alertAlive(`${result.consultations.length}개 과목 회신을 가져왔습니다.`);
       } else {
-        await showAlert(`다학제회신 추출 실패: ${result.error || result.message || '알 수 없는 오류'}`);
+        await alertAlive(`다학제회신 추출 실패: ${result.error || result.message || '알 수 없는 오류'}`);
       }
     } catch (err) {
-      await showAlert('다학제회신 추출 오류: ' + err.message);
+      await alertAlive('다학제회신 추출 오류: ' + err.message);
     }
   };
 
