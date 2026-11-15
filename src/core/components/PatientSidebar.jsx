@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { getAllModules, getModule } from '../moduleRegistry';
 import { isPatientComplete } from '../utils/patientCompletion';
 import { formatBirthDate } from '../utils/data';
@@ -102,6 +102,106 @@ function getPatientNameWarning(patient, warningMap) {
     || warningMap?.get(patient?.id)
     || null;
 }
+
+// 환자 카드 1장(REFACTORING_ROADMAP Phase 2 P2-42, 트랙 P P-3). 입력 1글자에 목록 전체(500명이면 카드 500장)가 다시 그려지던 것을
+// 줄이려고 memo로 뺐다 — 바뀐 환자(객체 참조)·활성 여부·선택 여부·이름 경고 문자열·범위·세션이 같으면 다시 그리지 않는다.
+// 출력 DOM은 옮기기 전 목록 안의 카드와 같다. 콜백은 PatientSidebar가 최신 값을 가리키는 고정 참조로 넘긴다(옛 콜백 호출 없음).
+/**
+ * @typedef {object} PatientCardProps
+ * @property {any} patient
+ * @property {number} index
+ * @property {boolean} isActive
+ * @property {boolean} isChecked
+ * @property {string} [nameWarningExisting]
+ * @property {string} [nameWarningIncoming]
+ * @property {boolean} hasNameWarning
+ * @property {string} scope
+ * @property {any} session
+ * @property {(id: string) => void} onSwitch
+ * @property {(id: string) => void} onToggleSelect
+ * @property {(id: string) => void} onResolve
+ * @property {(id: string) => void} onRemove
+ */
+const PatientCard = memo(/** @param {PatientCardProps} props */ function PatientCard({
+  patient: p, index, isActive, isChecked, nameWarningExisting, nameWarningIncoming, hasNameWarning,
+  scope, session, onSwitch, onToggleSelect, onResolve, onRemove,
+}) {
+  const isRedacted = isRedactedPatientRecord(p);
+  const pModules = p.data?.activeModules || [];
+  const isComplete = !isRedacted && isPatientComplete(p);
+  const patientName = isRedacted ? '삭제된 환자' : (p.data?.shared?.name || `환자 #${index + 1}`);
+  const patientNo = p.data?.shared?.patientNo || '';
+  const registrationDate = formatShortDate(p.createdAt || p._savedAt);
+  const evaluationDate = formatShortDate(p.data?.shared?.evaluationDate);
+  const primaryDiagnosis = isRedacted ? '개인정보 삭제됨' : (p.data?.shared?.diagnoses?.[0]?.name || '-');
+  const hasConflict = p.sync?.syncStatus === 'conflict';
+  const conflictKind = p.sync?.conflict?.kind || 'conflict';
+  const nameWarningTitle = hasNameWarning
+    ? `같은 등록번호와 생년월일의 기존 이름(${nameWarningExisting || '-'})과 현재 이름(${nameWarningIncoming || patientName})이 다릅니다. 개명 또는 입력 오류인지 확인하세요.`
+    : '';
+
+  return (
+    <div className={`patient-item ${isActive ? 'active' : ''} ${hasConflict ? 'conflict' : ''} ${isRedacted ? 'redacted' : ''}`} onClick={() => onSwitch(p.id)}>
+      <div className="patient-item-grid">
+        <div className="patient-item-select">
+          <input
+            type="checkbox"
+            checked={isChecked}
+            onClick={e => e.stopPropagation()}
+            onChange={() => onToggleSelect(p.id)}
+          />
+        </div>
+        <div className="patient-item-content">
+          <div className="patient-item-top">
+            <div className="patient-item-name-row">
+              <span className="patient-item-title">{patientName}</span>
+              {patientNo && <span className="patient-no">#{patientNo}</span>}
+              {isRedacted && <span className="patient-sync-badge patient-sync-badge-redacted">삭제됨</span>}
+              {hasConflict && <span className="patient-sync-badge">{conflictKind}</span>}
+              {hasNameWarning && <span className="patient-sync-badge patient-sync-badge-warning" title={nameWarningTitle}>이름 확인</span>}
+              {scope === 'all' && hasIntranetSession(session) && p.assignedDoctorUserId === null && (() => {
+                const { hasWarning, tooltip } = getUnassignedBadgeInfo(p);
+                return (
+                  <span
+                    className={`patient-unassigned-badge${hasWarning ? ' patient-unassigned-badge--warning' : ''}`}
+                    title={tooltip}
+                  >미배정</span>
+                );
+              })()}
+              {scope === 'all' && hasIntranetSession(session) && p.assignedDoctorUserId && p.assignedDoctorUserId !== session?.user?.id && (
+                <span className="patient-others-badge">타 담당</span>
+              )}
+              <div className="patient-item-modules">
+                {pModules.map(mId => {
+                  const mod = getModule(mId);
+                  return <span key={mId} className="module-badge" title={mod?.name}>{mod?.icon || '?'}</span>;
+                })}
+              </div>
+            </div>
+            <span className={isRedacted ? 'status-dot redacted' : (isComplete ? 'status-dot complete' : 'status-dot')} title={isRedacted ? '삭제된 환자' : (isComplete ? '완료' : '미완료')}>{isRedacted ? '삭제' : '●'}</span>
+          </div>
+          <div className="patient-item-info patient-item-meta">
+            <span>{formatBirthDate(p.data?.shared?.birthDate)}</span>
+            <span className="patient-item-divider">•</span>
+            <span className="patient-item-diagnosis">{primaryDiagnosis}</span>
+          </div>
+          <div className="patient-item-dates">
+            <span>등록 {registrationDate}</span>
+            <span>완료 {evaluationDate}</span>
+          </div>
+          <div className="patient-item-actions">
+            {hasConflict && (
+              <button className="btn btn-info btn-xs" onClick={e => { e.stopPropagation(); onResolve(p.id); }}>Resolve</button>
+            )}
+            {canDeletePatient(p, session) && (
+              <button className="btn btn-danger btn-xs" onClick={e => { e.stopPropagation(); onRemove(p.id); }}>삭제</button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
 
 function JobFilterCombobox({ patients, value, onChange }) {
   const [showList, setShowList] = useState(false);
@@ -224,6 +324,22 @@ export function PatientSidebar({
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const allModules = useMemo(() => getAllModules(), []);
   const nameWarningMap = useMemo(() => buildPatientNameWarningMap(patients), [patients]);
+  // 카드 번호("환자 #N")용 원래 순번 — 카드마다 patients.indexOf(O(n), 목록 전체 O(n²)) 하던 것을 렌더당 한 번(P2-42).
+  const indexById = useMemo(() => new Map(patients.map((p, i) => [p, i])), [patients]);
+  // 카드에 넘기는 콜백은 고정 참조 — 부모의 콜백(onSwitchPatient 등)은 목록이 바뀔 때마다 새로 만들어져 memo를 깨므로, 최신 값을
+  // ref에 두고 그것을 부른다(커밋마다 갱신 — 옛 콜백을 부르지 않는다).
+  const cardHandlersRef = useRef({ onSwitchPatient, onRemovePatient, onResolveConflict });
+  useLayoutEffect(() => { cardHandlersRef.current = { onSwitchPatient, onRemovePatient, onResolveConflict }; });
+  const onCardSwitch = useCallback((id) => { cardHandlersRef.current.onSwitchPatient(id); }, []);
+  const onCardRemove = useCallback((id) => { cardHandlersRef.current.onRemovePatient(id); }, []);
+  const onCardResolve = useCallback((id) => { cardHandlersRef.current.onResolveConflict?.(id); }, []);
+  const onCardToggleSelect = useCallback((id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, [setSelectedIds]);
   const canUseMineScope = session?.user?.role === 'doctor';
   const { options: doctorOptions, myCount } = useMemo(
     () => getDoctorOptionsFromRoster(doctorRoster, { currentUserId: session?.user?.id }),
@@ -432,88 +548,24 @@ export function PatientSidebar({
 
         <div className="patient-list">
           {displayPatients.map(p => {
-            const origIndex = patients.indexOf(p);
-            const isRedacted = isRedactedPatientRecord(p);
-            const pModules = p.data?.activeModules || [];
-            const isComplete = !isRedacted && isPatientComplete(p);
-            const patientName = isRedacted ? '삭제된 환자' : (p.data?.shared?.name || `환자 #${origIndex + 1}`);
-            const patientNo = p.data?.shared?.patientNo || '';
-            const registrationDate = formatShortDate(p.createdAt || p._savedAt);
-            const evaluationDate = formatShortDate(p.data?.shared?.evaluationDate);
-            const primaryDiagnosis = isRedacted ? '개인정보 삭제됨' : (p.data?.shared?.diagnoses?.[0]?.name || '-');
-            const hasConflict = p.sync?.syncStatus === 'conflict';
-            const conflictKind = p.sync?.conflict?.kind || 'conflict';
             const nameWarning = getPatientNameWarning(p, nameWarningMap);
-            const nameWarningTitle = nameWarning
-              ? `같은 등록번호와 생년월일의 기존 이름(${nameWarning.existingName || '-'})과 현재 이름(${nameWarning.incomingName || patientName})이 다릅니다. 개명 또는 입력 오류인지 확인하세요.`
-              : '';
-
             return (
-              <div key={p.id} className={`patient-item ${p.id === activeId ? 'active' : ''} ${hasConflict ? 'conflict' : ''} ${isRedacted ? 'redacted' : ''}`} onClick={() => onSwitchPatient(p.id)}>
-                <div className="patient-item-grid">
-                  <div className="patient-item-select">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(p.id)}
-                      onClick={e => e.stopPropagation()}
-                      onChange={() => {
-                        setSelectedIds(prev => {
-                          const next = new Set(prev);
-                          next.has(p.id) ? next.delete(p.id) : next.add(p.id);
-                          return next;
-                        });
-                      }}
-                    />
-                  </div>
-                  <div className="patient-item-content">
-                    <div className="patient-item-top">
-                      <div className="patient-item-name-row">
-                        <span className="patient-item-title">{patientName}</span>
-                        {patientNo && <span className="patient-no">#{patientNo}</span>}
-                        {isRedacted && <span className="patient-sync-badge patient-sync-badge-redacted">삭제됨</span>}
-                        {hasConflict && <span className="patient-sync-badge">{conflictKind}</span>}
-                        {nameWarning && <span className="patient-sync-badge patient-sync-badge-warning" title={nameWarningTitle}>이름 확인</span>}
-                        {scope === 'all' && hasIntranetSession(session) && p.assignedDoctorUserId === null && (() => {
-                          const { hasWarning, tooltip } = getUnassignedBadgeInfo(p);
-                          return (
-                            <span
-                              className={`patient-unassigned-badge${hasWarning ? ' patient-unassigned-badge--warning' : ''}`}
-                              title={tooltip}
-                            >미배정</span>
-                          );
-                        })()}
-                        {scope === 'all' && hasIntranetSession(session) && p.assignedDoctorUserId && p.assignedDoctorUserId !== session?.user?.id && (
-                          <span className="patient-others-badge">타 담당</span>
-                        )}
-                        <div className="patient-item-modules">
-                          {pModules.map(mId => {
-                            const mod = getModule(mId);
-                            return <span key={mId} className="module-badge" title={mod?.name}>{mod?.icon || '?'}</span>;
-                          })}
-                        </div>
-                      </div>
-                      <span className={isRedacted ? 'status-dot redacted' : (isComplete ? 'status-dot complete' : 'status-dot')} title={isRedacted ? '삭제된 환자' : (isComplete ? '완료' : '미완료')}>{isRedacted ? '삭제' : '●'}</span>
-                    </div>
-                    <div className="patient-item-info patient-item-meta">
-                      <span>{formatBirthDate(p.data?.shared?.birthDate)}</span>
-                      <span className="patient-item-divider">•</span>
-                      <span className="patient-item-diagnosis">{primaryDiagnosis}</span>
-                    </div>
-                    <div className="patient-item-dates">
-                      <span>등록 {registrationDate}</span>
-                      <span>완료 {evaluationDate}</span>
-                    </div>
-                    <div className="patient-item-actions">
-                      {hasConflict && (
-                        <button className="btn btn-info btn-xs" onClick={e => { e.stopPropagation(); onResolveConflict?.(p.id); }}>Resolve</button>
-                      )}
-                      {canDeletePatient(p, session) && (
-                        <button className="btn btn-danger btn-xs" onClick={e => { e.stopPropagation(); onRemovePatient(p.id); }}>삭제</button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <PatientCard
+                key={p.id}
+                patient={p}
+                index={indexById.get(p) ?? -1}
+                isActive={p.id === activeId}
+                isChecked={selectedIds.has(p.id)}
+                hasNameWarning={!!nameWarning}
+                nameWarningExisting={nameWarning?.existingName}
+                nameWarningIncoming={nameWarning?.incomingName}
+                scope={scope}
+                session={session}
+                onSwitch={onCardSwitch}
+                onToggleSelect={onCardToggleSelect}
+                onResolve={onCardResolve}
+                onRemove={onCardRemove}
+              />
             );
           })}
         </div>
