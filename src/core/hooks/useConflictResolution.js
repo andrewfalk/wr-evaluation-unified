@@ -8,7 +8,7 @@ import { patientTx } from '../state/patientStore/transitions';
 
 // 환자 동기화 충돌 해결 핸들러
 export function useConflictResolution({
-  setPatients, activeId, setActiveId, setCurrentStepIndex,
+  setPatients, activeId, setCurrentStepIndex,
   session, settings, setConflictPatientId, syncNow,
   dirtyAssessmentPatientId, onBlockedByUnsavedDraft,
 }) {
@@ -27,18 +27,12 @@ export function useConflictResolution({
 
   const applyResolvedConflict = (patientId, resolution, options = {}) => {
     if (isDirtyBlocked(patientId)) return;
-    setPatients(patientTx.conflictResolved({
-      patientId, resolution, options,
-      // 임시(게이트 B에서 제거) — 옮기기 전 updater 안에서 하던 활성 환자 예약 그대로(병합 결과를 봐야 정할 수 있다).
-      onReduced: (_prev, next) => {
-        if (activeId === patientId && !next.some(p => p.id === patientId)) {
-          queueMicrotask(() => {
-            setActiveId(next[0]?.id || null);
-            setCurrentStepIndex(0);
-          });
-        }
-      },
-    }));
+    // 활성 환자 폴백은 전이의 derive가 같은 적용 안에서 정한다(P2-40c — 옮기기 전 updater 안 queueMicrotask 예약을 대체).
+    // 판정은 옮기기 전처럼 **이 처리를 시작한 시점의 activeId**로 한다(D4 보존 — 검토 후보). 폴백했는지는 receipt로
+    // dispatch 다음 줄에서 읽어 스텝을 처음으로 되돌린다(폴백 때 스텝 초기화 — 옮기기 전과 같음).
+    const receipt = {};
+    setPatients(patientTx.conflictResolved({ patientId, resolution, options, activeIdAtStart: activeId, receipt }));
+    if (receipt.activeChanged) setCurrentStepIndex(0);
     setConflictPatientId(null);
   };
 

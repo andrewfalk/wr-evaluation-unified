@@ -4,7 +4,7 @@
 // 해결로 활성 환자가 목록에서 사라지면 남은 첫 환자를 고른다 — 옮기기 전 updater 안의 queueMicrotask 예약을
 // `onReduced`로 격리한 뒤에도 같은지, 진짜 상태(환자 상태 컨테이너 + activeId useState)·StrictMode로 확인한다.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { StrictMode, useState } from 'react';
+import { StrictMode } from 'react';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { useConflictResolution } from '../useConflictResolution.js';
 import { usePatientsContainer } from '../../state/patientStore/usePatientsContainer';
@@ -30,8 +30,7 @@ function renderResolver(initialPatients, initialActiveId) {
   const setCurrentStepIndex = vi.fn();
   const setConflictPatientId = vi.fn();
   const utils = renderHook(() => {
-    const { patients, setPatients } = usePatientsContainer(initialPatients);
-    const [activeId, setActiveId] = useState(initialActiveId);
+    const { patients, setPatients, activeId, setActiveId } = usePatientsContainer(initialPatients, { initialActiveId });
     const resolver = useConflictResolution({
       setPatients, activeId, setActiveId, setCurrentStepIndex,
       session: {}, settings: {}, setConflictPatientId, syncNow: vi.fn(),
