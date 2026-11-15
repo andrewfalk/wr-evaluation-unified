@@ -10,27 +10,22 @@
 //   전이(sync/patientResumed 등)·같은 activeId 지정에서 App 렌더가 늘 수 있다(계획 A6) — 옮기기 전과 같은 동작을 지킨다.
 // - setPatients는 꼬리표 전이(patientTx.…)만 받는다(P2-39 — 정적 보증은 구조 래칫 untaggedSetPatients = 0). 꼬리표 없는
 //   인자가 오면 개발·테스트에서는 던지고, 운영 빌드에서는 진료 중 화면이 죽지 않게 console.error 뒤 옛 방식대로 적용한다.
-import { useCallback, useState } from 'react';
+// - (P2-40a, 게이트 B 설계 3) 안쪽은 "앞서 실행하는 스토어 + 함수형 갱신 큐"다: setter는 스토어(store.ts)에 묶여 전이를
+//   지금 한 번 실행해 앞선 상태를 갱신하고, React에는 지금처럼 setState(함수)를 한 번 넣는다(prev가 base와 같으면 미리 계산된
+//   next를 그대로). 커밋 구성·렌더 횟수·다른 setState와의 lane 관계는 옮기기 전과 같다. 반환에 `store`가 더해졌다.
+import { useState } from 'react';
 import type { PatientRecord } from '../../types/patient';
 import {
-  applyActiveId, applyPatientTransition, applySelectedIds, createPatientsState,
+  createPatientsState,
   type ActiveIdUpdater, type PatientsState, type ValueOrUpdater,
 } from './reducer';
-import { isPatientTransition, untaggedFallback, type PatientTransition, type UntaggedSetPatientsArg } from './transitions';
+import { createPatientStore, resolveQueueEntry, UNTAGGED_SET_PATIENTS_MESSAGE, type PatientStore } from './store';
+import type { PatientTransition } from './transitions';
 
 export type SetPatients = (transition: PatientTransition) => void;
 
-export const UNTAGGED_SET_PATIENTS_MESSAGE =
-  '[patientStore] setPatients는 꼬리표 전이(patientTx.…)만 받는다 — 값·updater를 직접 넘기지 말 것(REFACTORING_ROADMAP Phase 2 P2-39)';
+export { UNTAGGED_SET_PATIENTS_MESSAGE };
 
-/** 꼬리표 없는 인자: 개발·테스트는 던지고, 운영은 오류를 남긴 뒤 옛 방식대로 적용(화면이 죽지 않게). */
-function toTransition(arg: unknown): PatientTransition {
-  if (isPatientTransition(arg)) return arg;
-  if (import.meta.env.DEV) throw new TypeError(UNTAGGED_SET_PATIENTS_MESSAGE);
-  // 인자 원본(환자 목록·updater)은 로그에 남기지 않는다 — 환자 이름·진료 데이터가 오류 로그로 새지 않게(#321 Codex). 종류만.
-  console.error(UNTAGGED_SET_PATIENTS_MESSAGE, { argKind: Array.isArray(arg) ? 'array' : typeof arg });
-  return untaggedFallback(arg as UntaggedSetPatientsArg);
-}
 /** 값 또는 updater — updater는 두 번째 인자로 같은 상태의 최신 환자 목록을 받는다(reducer.ts ActiveIdUpdater). */
 export type SetActiveId = (arg: string | null | ActiveIdUpdater) => void;
 export type SetSelectedIds = (arg: ValueOrUpdater<Set<string>>) => void;
@@ -42,6 +37,8 @@ export interface PatientsContainer {
   setActiveId: SetActiveId;
   selectedIds: Set<string>;
   setSelectedIds: SetSelectedIds;
+  /** 앞서 실행하는 스토어(P2-40a) — sync 엔진만 getState()를 읽는다(훅 본문·이벤트 핸들러 금지, 래칫 storeGetStateOutsideSync). */
+  store: PatientStore;
 }
 
 export interface PatientsContainerOptions {
@@ -57,21 +54,22 @@ export function usePatientsContainer(
   const [state, setState] = useState<PatientsState>(() => createPatientsState(initialPatients, {
     activeId: initialActiveId, selectedIds: initialSelectedIds,
   }));
-
-  const setPatients = useCallback<SetPatients>((arg) => {
-    const transition = toTransition(arg);
-    setState((current) => applyPatientTransition(current, transition));
-  }, []);
-  const setActiveId = useCallback<SetActiveId>((arg) => {
-    setState((current) => applyActiveId(current, arg));
-  }, []);
-  const setSelectedIds = useCallback<SetSelectedIds>((arg) => {
-    setState((current) => applySelectedIds(current, arg));
-  }, []);
+  // 스토어는 React 초기 상태와 **같은 객체**에서 시작한다(state는 첫 렌더의 초기값). 인스턴스는 컨테이너(= App, 작업 공간 경계 아래)
+  // 하나당 하나 — 모듈 싱글턴이면 계정이 바뀌어 App이 다시 마운트돼도 이전 계정의 목록이 살아남는다(계정 전환 수정 AS-4).
+  // StrictMode가 초기화 함수를 두 번 불러도 생성에는 부수효과가 없다. setState는 참조 고정이라 enqueue도 고정.
+  const [api] = useState(() => {
+    const store = createPatientStore(state, (entry) => { setState(prev => resolveQueueEntry(prev, entry)); });
+    const setPatients: SetPatients = (arg) => { store.dispatch(arg); };
+    const setActiveId: SetActiveId = (arg) => { store.setActiveId(arg); };
+    const setSelectedIds: SetSelectedIds = (arg) => { store.setSelectedIds(arg); };
+    return { store, setPatients, setActiveId, setSelectedIds };
+  });
+  const { store, setPatients, setActiveId, setSelectedIds } = api;
 
   return {
     patients: state.patients, setPatients,
     activeId: state.activeId, setActiveId,
     selectedIds: state.selectedIds, setSelectedIds,
+    store,
   };
 }

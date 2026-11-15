@@ -30,6 +30,10 @@
  *   untaggedSetPatients — `setPatients(` calls whose argument is not a tagged transition (`patientTx.…`),
  *       outside the patient store (src/core/state/). Counted per call, not per line. Target 0 at P2-39
  *       (REFACTORING_ROADMAP Phase 2 C4 gate A: every patient-list write goes through a named transition).
+ *       Since P2-40a (gate B) also `dispatch(` / `store.dispatch(` calls whose argument is not `patientTx.…`.
+ *   storeGetStateOutsideSync — `getState(` calls in product code outside src/core/state/ and src/core/sync/ (P2-40a).
+ *       Hook bodies and event handlers must not read the patient store's "ahead" state — only the sync engine does
+ *       (transitions use their prev/derive arguments). Target 0.
  *
  * Usage:
  *   node scripts/arch-metrics.mjs           # print current counts vs baseline
@@ -54,6 +58,11 @@ const PATIENT_STORE_LAYER = (rel) => rel.startsWith('src/core/state/');
 // A `setPatients(` call (not `x.setPatients(` / `resetPatients(` / a `function setPatients(` declaration — #314 Codex advisory)
 // whose first argument is not `patientTx.…`.
 const UNTAGGED_SET_PATIENTS = /(?<![.\w$])(?<!\bfunction\s+)setPatients\s*\((?!\s*patientTx\s*\.)/g; // whitespace inside the lookahead — no backtracking past it
+// `dispatch(` — bare or a member call (`store.dispatch(`), not `function dispatch(`, not `onDispatch(`/`dispatchEvent(` (P2-40a).
+const UNTAGGED_DISPATCH = /(?<![\w$])(?<!\bfunction\s+)dispatch\s*\((?!\s*patientTx\s*\.)/g;
+// `getState(` — bare or a member call (`store.getState(`), not `function getState(` (P2-40a).
+const STORE_GET_STATE = /(?<![\w$])(?<!\bfunction\s+)getState\s*\(/g;
+const PATIENT_SYNC_LAYER = (rel) => rel.startsWith('src/core/sync/');
 const INTRANET_COMPARISON = /(?:\b(?:mode|integrationMode)\s*[!=]==?\s*['"`]intranet['"`])|(?:['"`]intranet['"`]\s*[!=]==?\s*[\w$.?\s]*?\b(?:mode|integrationMode)\b)/g;
 
 const toRel = (full) => path.relative(ROOT, full).replace(/\\/g, '/');
@@ -169,8 +178,12 @@ export function scanFile(rel, content) {
     if (comparisons) result.intranetModeComparisons = comparisons;
   }
   if (!PATIENT_STORE_LAYER(rel)) {
-    const untagged = (code.match(UNTAGGED_SET_PATIENTS) || []).length;
+    const untagged = (code.match(UNTAGGED_SET_PATIENTS) || []).length + (code.match(UNTAGGED_DISPATCH) || []).length;
     if (untagged) result.untaggedSetPatients = untagged;
+  }
+  if (!PATIENT_STORE_LAYER(rel) && !PATIENT_SYNC_LAYER(rel)) {
+    const reads = (code.match(STORE_GET_STATE) || []).length;
+    if (reads) result.storeGetStateOutsideSync = reads;
   }
   return result;
 }
@@ -185,6 +198,7 @@ export const METRICS = [
   'inlineStyleHex',
   'intranetModeComparisons',
   'untaggedSetPatients',
+  'storeGetStateOutsideSync',
 ];
 
 export function computeMetrics() {

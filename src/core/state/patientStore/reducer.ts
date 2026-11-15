@@ -22,9 +22,16 @@ export function createPatientsState(
   return { patients, activeId, selectedIds };
 }
 
+/**
+ * 전이를 적용한다. 전이가 `derive`를 가지면(스토어 경로) 같은 적용 안에서 활성 환자도 정한다(게이트 B 설계 2).
+ * 목록·활성 환자가 모두 같으면 같은 상태 객체.
+ */
 export function applyPatientTransition(state: PatientsState, transition: PatientTransition): PatientsState {
   const next = transition(state.patients);
-  return Object.is(next, state.patients) ? state : { ...state, patients: next };
+  const derived = transition.derive ? transition.derive(state, next) : undefined;
+  const activeId = derived && 'activeId' in derived ? (derived.activeId ?? null) : state.activeId;
+  if (Object.is(next, state.patients) && Object.is(activeId, state.activeId)) return state;
+  return { ...state, patients: next, activeId };
 }
 
 /** `useState` setter와 같은 규칙: 함수면 이전 값에 적용, 같은 값(Object.is)이면 같은 상태. */
