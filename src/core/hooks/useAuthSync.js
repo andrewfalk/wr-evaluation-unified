@@ -77,6 +77,8 @@ export function useAuthSync({ session, setSession, resetToLocalSession, getAuthE
         );
       },
       onLogout: () => { broadcastLogout(); resetToLocalSession(); },
+      // 요청 신원 고정 — 이미 떠난 계정의 요청이 401을 받으면 갱신·로그아웃하지 않는다(apiClient).
+      getCurrentSession: () => sessionRef.current,
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

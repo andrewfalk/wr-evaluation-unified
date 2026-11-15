@@ -37,6 +37,19 @@ export function isRefreshEligible(session?: SessionLike | null): boolean {
   return !session?.mode || session.mode === 'intranet';
 }
 
+/**
+ * 인트라넷 세션의 신원 키 `user.id|organizationId` — 인트라넷 세션이 아니거나 user.id가 없으면 null.
+ * 역할·이름·토큰은 넣지 않는다(역할이 바뀌어도 같은 사람). 요청 재시도·작업 공간 주인 판정이 같은 키를 쓴다.
+ */
+export function intranetIdentityOf(session?: { mode?: string | null; user?: unknown } | null): string | null {
+  if (!hasIntranetSession(session)) return null;
+  const user = (session?.user ?? null) as { id?: unknown; organizationId?: unknown } | null;
+  const id = user?.id;
+  if (id === undefined || id === null || id === '') return null;
+  const organizationId = user?.organizationId;
+  return `${String(id)}|${organizationId === undefined || organizationId === null ? '' : String(organizationId)}`;
+}
+
 /** 'intranet' = 인증된 인트라넷 세션, 'intranet-pending' = 인트라넷 설정이지만 아직 로그인 전, 'local' = 그 밖. */
 export function resolveDataMode(context: DataModeContext = {}): DataMode {
   if (hasIntranetSession(context.session)) return 'intranet';

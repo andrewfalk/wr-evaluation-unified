@@ -2,7 +2,7 @@
 // 401 refresh·로그아웃 처리기는 부팅 때 useAuthSync가 configureApiClient()로 꽂는다(예전 configureHttpClient).
 import { buildSessionHeaders } from '../auth/session';
 import { getCsrfToken } from '../utils/csrfCookie';
-import { createApiClient, type RefreshHandler, type RequestOptions, type ResponseEnvelope, type SessionLike } from './apiClient';
+import { createApiClient, type ApiClientHandlers, type RequestOptions, type ResponseEnvelope, type SessionLike } from './apiClient';
 import { requestMultipartWith, type MultipartOptions } from './multipart';
 
 // session.js·csrfCookie.js는 아직 JS(타입 추론값이 좁다) — 여기서 계약 타입으로 맞춘다.
@@ -13,7 +13,7 @@ const deps = {
 
 export const apiClient = createApiClient(deps);
 
-export function configureApiClient(handlers: { onRefresh?: RefreshHandler | null; onLogout?: (() => void) | null }): void {
+export function configureApiClient(handlers: ApiClientHandlers): void {
   apiClient.configure(handlers);
 }
 
