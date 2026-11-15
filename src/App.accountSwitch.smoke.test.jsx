@@ -353,3 +353,49 @@ describe('로그인 요청 중에는 로컬 전환 버튼을 쓸 수 없다', ()
     await waitFor(() => expect(screen.getByRole('button', { name: /김의사/ })).toBeTruthy());
   }, 20000);
 });
+
+describe('로그아웃 확인(AS-5)', () => {
+  const UNSAVED_MESSAGE = '저장되지 않은 환자가 1명 있습니다. 로그아웃하면 이 내용은 사라집니다. 로그아웃할까요?';
+
+  it('R11 저장되지 않은 환자가 있으면 묻고, 취소하면 로그아웃 요청을 보내지 않는다', async () => {
+    const { app, srv } = await bootAsA({ confirm: (msg) => msg !== UNSAVED_MESSAGE });
+    srv.hold.patch = () => new Promise(() => {}); // 저장이 끝나지 않아 저장 대기로 남는다
+    fireEvent.change(screen.getByDisplayValue(nameOf(KIM)), { target: { value: '김철수수정' } });
+    await logoutViaMenu('김의사');
+    await wait(200);
+    expect(app.dialogs.confirms).toContain(UNSAVED_MESSAGE);
+    expect(srv.router.count('POST /api/auth/logout')).toBe(0);
+    expect(screen.getByRole('button', { name: /김의사/ })).toBeTruthy();
+    expect(screen.getByDisplayValue('김철수수정')).toBeTruthy();
+  }, 20000);
+
+  it('R11 확인하면 로그아웃하고 화면을 비운다', async () => {
+    const { app, srv } = await bootAsA({ confirm: () => true });
+    srv.hold.patch = () => new Promise(() => {});
+    fireEvent.change(screen.getByDisplayValue(nameOf(KIM)), { target: { value: '김철수수정' } });
+    await logoutViaMenu('김의사');
+    await screen.findByRole('heading', { name: '인트라넷 로그인' });
+    expect(app.dialogs.confirms).toContain(UNSAVED_MESSAGE);
+    expect(srv.router.count('POST /api/auth/logout')).toBe(1);
+  }, 20000);
+
+  it('R11 저장되지 않은 환자가 없으면 묻지 않고 로그아웃한다', async () => {
+    const { app, srv } = await bootAsA({ confirm: () => true });
+    await logoutViaMenu('김의사');
+    await screen.findByRole('heading', { name: '인트라넷 로그인' });
+    expect(app.dialogs.confirms.filter((m) => m.includes('저장되지 않은 환자'))).toEqual([]);
+    expect(srv.router.count('POST /api/auth/logout')).toBe(1);
+  }, 20000);
+
+  it('설정 창의 로그아웃에서 확인창을 취소하면 설정 창이 닫히지 않는다', async () => {
+    const { srv } = await bootAsA({ confirm: (msg) => msg !== UNSAVED_MESSAGE });
+    srv.hold.patch = () => new Promise(() => {});
+    fireEvent.change(screen.getByDisplayValue(nameOf(KIM)), { target: { value: '김철수수정' } });
+    fireEvent.click(screen.getAllByRole('button', { name: '설정' })[0]);
+    await screen.findByText('데이터 저장 방식');
+    fireEvent.click(screen.getAllByRole('button', { name: '로그아웃' }).at(-1));
+    await wait(200);
+    expect(screen.getByText('데이터 저장 방식')).toBeTruthy();
+    expect(srv.router.count('POST /api/auth/logout')).toBe(0);
+  }, 20000);
+});

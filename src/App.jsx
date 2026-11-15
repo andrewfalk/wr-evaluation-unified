@@ -377,7 +377,8 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
 
   // 평가 완료 시 evaluationDate 자동 설정
   // 편집 권한·현재 환자의 락이 있을 때만 쓴다(P2-39c) — lockState를 넘겨 락을 얻은 뒤 다시 판정.
-  useEvaluationDateSync({ activeId, patients, setPatients, session, lockState });
+  // 로그인 화면이 떠 있는 동안(인트라넷 모드인데 인증 안 됨)은 쓰지 않는다 — 로컬 세션은 편집 권한을 항상 참으로 본다(AS-5).
+  useEvaluationDateSync({ activeId, patients, setPatients, session, lockState, suspended: isIntranetMode && !isAuthenticated });
 
   // Electron 메뉴 이벤트
   useElectronMenuEvents({ handleResetPatientsRef, handleStartIntakeRef, handleOpenStatisticsRef });
@@ -444,9 +445,26 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
 
   // 로그아웃은 렌더러 세션만 정리하는 게 아니라(Electron은 서버 세션까지 정리) 화면을
   // 완전히 떠나므로 dirty 편집 중이면 막는다.
-  const handleLogout = () => {
-    if (blockIfDraftDirty()) return;
-    logout();
+  // 로그아웃하면 화면의 목록이 비워진다(계정 전환 수정 AS-5) — 인트라넷 세션에서 저장되지 않은 환자(저장 대기·충돌·락 상실)가
+  // 있으면 먼저 묻고, 취소하면 아무 요청도 보내지 않는다. 진행 중에는 다시 누를 수 없다. 로그아웃을 시작했으면 true.
+  const logoutInFlightRef = useRef(false);
+  const handleLogout = async () => {
+    if (blockIfDraftDirty()) return false;
+    if (logoutInFlightRef.current) return false;
+    logoutInFlightRef.current = true;
+    try {
+      const unsaved = hasIntranetSession(session)
+        ? syncSummary.pendingCount + syncSummary.conflictCount + syncSummary.lockLostCount
+        : 0;
+      if (unsaved > 0) {
+        const ok = await confirmAlive(`저장되지 않은 환자가 ${unsaved}명 있습니다. 로그아웃하면 이 내용은 사라집니다. 로그아웃할까요?`);
+        if (!ok) return false;
+      }
+      await logout();
+      return true;
+    } finally {
+      logoutInFlightRef.current = false;
+    }
   };
 
   const handleShowHome = () => {

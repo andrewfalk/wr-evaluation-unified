@@ -56,11 +56,16 @@ export interface EvaluationDateSyncArgs {
   session: unknown;
   /** usePatientLock의 lockState(P2-39c) — 락을 얻은 뒤(새 객체) 다시 판정하려고 deps에 둔다. */
   lockState?: LockStateLike | null;
+  /**
+   * true인 동안 쓰지 않는다 — 로그인 화면이 떠 있는 동안(인트라넷 모드인데 인증 안 됨, 계정 전환 수정 AS-5). 세션이 로컬로
+   * 돌아간 그동안 로컬 세션은 편집 권한을 항상 참으로 보아, 이전 사용자가 열람만 하던 환자에 써서 저장 대기로 만들 수 있다.
+   */
+  suspended?: boolean;
 }
 
-export function useEvaluationDateSync({ activeId, patients, setPatients, session, lockState }: EvaluationDateSyncArgs): void {
+export function useEvaluationDateSync({ activeId, patients, setPatients, session, lockState, suspended = false }: EvaluationDateSyncArgs): void {
   useEffect(() => {
-    if (!activeId) return;
+    if (suspended || !activeId) return;
     const p = patients.find(x => x.id === activeId);
     if (!p || isRedactedPatientRecord(p) || !p.data) return;
     // (flagged P2-39c) 편집 권한·현재 환자의 락이 없으면 쓰지 않는다 — 옮기기 전에는 다른 의사 담당 환자에도 써서 dirty로 만들었다(T4).
@@ -71,5 +76,5 @@ export function useEvaluationDateSync({ activeId, patients, setPatients, session
     if (currentEvaluationDate === nextEvaluationDate) return;
 
     setPatients(patientTx.evaluationDateSynced({ id: activeId, evaluationDate: nextEvaluationDate, session }));
-  }, [activeId, patients, session, setPatients, lockState]);
+  }, [activeId, patients, session, setPatients, lockState, suspended]);
 }
