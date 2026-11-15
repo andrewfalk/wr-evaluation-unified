@@ -27,9 +27,10 @@ import { requestJson } from '../../services/httpClient';
 import { verifyStoredSession } from '../../api/authApi';
 import { getLockToken, setLockToken } from '../../services/lockTokenStore';
 import { getIntegrationStatus, markRemoteIntegrationStatus } from '../../services/integrationStatus';
-import { AUTH_PROTOCOL } from '../../storage/keys';
+import { AUTH_PROTOCOL, STORAGE_KEYS } from '../../storage/keys';
 
 const SERVER = 'https://srv';
+const SETTINGS_KEY = STORAGE_KEYS.settings;
 const userOf = (id) => ({ id, organizationId: 'org-1', name: `이름-${id}`, role: 'doctor' });
 const responseOf = (id) => ({ user: userOf(id), accessToken: `tok-${id}`, accessExpiresAt: new Date(Date.now() + 60_000).toISOString() });
 
@@ -225,7 +226,7 @@ describe('R15 — 다른 탭의 로그인 방송', () => {
     const { result } = renderAuth();
     loginAs(result, 'a');
     const tab = otherTab();
-    tab.post({ type: 'LOGIN', identity: 'b|org-1' });
+    tab.post({ type: 'LOGIN', server: SERVER, identity: 'b|org-1' });
     await flushBroadcast();
     tab.close();
     expect(result.current.session.mode).toBe('local');
@@ -236,12 +237,12 @@ describe('R15 — 다른 탭의 로그인 방송', () => {
   it('같은 신원의 LOGIN 방송·로컬 세션에서 받은 방송은 무시한다', async () => {
     const { result } = renderAuth();
     const tab = otherTab();
-    tab.post({ type: 'LOGIN', identity: 'b|org-1' });
+    tab.post({ type: 'LOGIN', server: SERVER, identity: 'b|org-1' });
     await flushBroadcast();
     expect(result.current.session.mode).toBe('local');
     expect(result.current.workspaceEpoch).toBe(0);
     loginAs(result, 'a');
-    tab.post({ type: 'LOGIN', identity: 'a|org-1' });
+    tab.post({ type: 'LOGIN', server: SERVER, identity: 'a|org-1' });
     await flushBroadcast();
     tab.close();
     expect(result.current.session.mode).toBe('intranet');
@@ -253,7 +254,19 @@ describe('R15 — 다른 탭의 로그인 방송', () => {
     loginAs(result, 'a');
     await flushBroadcast();
     tab.close();
-    expect(tab.received.filter(m => m?.type === 'LOGIN')).toEqual([{ type: 'LOGIN', identity: 'a|org-1' }]);
+    expect(tab.received.filter(m => m?.type === 'LOGIN')).toEqual([{ type: 'LOGIN', server: SERVER, identity: 'a|org-1' }]);
+  });
+
+  it('다른 서버의 LOGIN 방송·서버 정보가 없는 방송은 무시한다(쿠키가 따로)', async () => {
+    const { result } = renderAuth();
+    loginAs(result, 'a');
+    const tab = otherTab();
+    tab.post({ type: 'LOGIN', server: 'https://other', identity: 'b|org-1' });
+    tab.post({ type: 'LOGIN', identity: 'b|org-1' });
+    await flushBroadcast();
+    tab.close();
+    expect(result.current.session.mode).toBe('intranet');
+    expect(result.current.session.user.id).toBe('a');
   });
 });
 
@@ -304,6 +317,38 @@ describe('R20 — 모드·서버 주소 변경은 진행 중인 로그인 시도
     act(() => { applied = result.current.auth.login(responseOf('a'), SERVER, attempt); });
     expect(applied).toBe(false);
     expect(result.current.auth.session.mode).toBe('local');
+  });
+
+  it('Electron의 비동기 설정 로드가 서버 주소를 바꾸면, 그 전에 시작한 시도도 무효가 된다', async () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ integrationMode: 'intranet', apiBaseUrl: 'https://old' }));
+    let resolveSettings;
+    window.electron = { fsLoadAllPatients: async () => [], fsLoadSettings: () => new Promise((r) => { resolveSettings = r; }) };
+    try {
+      const { result } = renderHook(() => useSettingsHarness(), { wrapper });
+      const attempt = result.current.auth.beginLoginAttempt();
+      await act(async () => { resolveSettings({ integrationMode: 'intranet', apiBaseUrl: 'https://new' }); });
+      expect(attempt.signal.aborted).toBe(true);
+      let applied;
+      act(() => { applied = result.current.auth.login(responseOf('a'), 'https://old', attempt); });
+      expect(applied).toBe(false);
+      expect(result.current.auth.session.mode).toBe('local');
+    } finally {
+      delete window.electron;
+    }
+  });
+
+  it('비동기 설정 로드가 모드·서버 주소를 바꾸지 않으면 시도는 그대로', async () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ integrationMode: 'intranet', apiBaseUrl: 'https://old' }));
+    let resolveSettings;
+    window.electron = { fsLoadAllPatients: async () => [], fsLoadSettings: () => new Promise((r) => { resolveSettings = r; }) };
+    try {
+      const { result } = renderHook(() => useSettingsHarness(), { wrapper });
+      const attempt = result.current.auth.beginLoginAttempt();
+      await act(async () => { resolveSettings({ integrationMode: 'intranet', apiBaseUrl: 'https://old/', theme: 'dark' }); });
+      expect(attempt.signal.aborted).toBe(false);
+    } finally {
+      delete window.electron;
+    }
   });
 
   it('모드·서버 주소와 무관한 설정 변경은 시도를 무효로 하지 않는다', () => {

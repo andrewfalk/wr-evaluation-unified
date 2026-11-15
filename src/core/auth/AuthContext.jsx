@@ -7,7 +7,7 @@ import {
   normalizeSession,
   saveStoredSession,
 } from './session';
-import { broadcastLogin, broadcastLogout } from './authChannel';
+import { authServerKeyOf, broadcastLogin, broadcastLogout } from './authChannel';
 import { INITIAL_WORKSPACE, nextWorkspace, workspaceOwnerOf } from './workspaceOwner';
 import { requestJson } from '../services/httpClient';
 import { clearAllLockTokens } from '../services/lockTokenStore';
@@ -227,7 +227,7 @@ export function AuthProvider({ children }) {
     // 같은 사용자(만료 뒤 재로그인)면 작업을 이어 가고, 다른 사용자·로컬 작업이면 화면을 새로 시작한다.
     applyWorkspace({ type: 'login', owner: workspaceOwnerOf(next) });
     // 같은 브라우저의 다른 탭에 알린다(신원 키만 — 토큰·이름 없음). 다른 계정으로 쓰던 탭은 로그인 화면으로 간다.
-    broadcastLogin(intranetIdentityOf(next));
+    broadcastLogin({ server: authServerKeyOf(next.apiBaseUrl), identity: intranetIdentityOf(next) });
     return next;
   }, [applyWorkspace, bumpAuthContext]);
 

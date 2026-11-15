@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 import { configureHttpClient } from '../services/httpClient';
 import { getCsrfToken } from '../utils/csrfCookie';
 import { normalizeSession } from '../auth/session';
-import { runRefreshWithBroadcast, onAuthBroadcast, broadcastLogout } from '../auth/authChannel';
+import { runRefreshWithBroadcast, onAuthBroadcast, broadcastLogout, authServerKeyOf } from '../auth/authChannel';
 
 import { hasIntranetSession, intranetIdentityOf } from '../../platform/dataMode';
 import { refreshAccessToken, renewCsrf } from '../api/authApi';
@@ -100,10 +100,15 @@ export function useAuthSync({ session, setSession, resetToLocalSession, getAuthE
       } else if (msg?.type === 'LOGOUT') {
         resetToLocalSession();
       } else if (msg?.type === 'LOGIN') {
-        // 다른 탭이 로그인했다 — 같은 브라우저의 로그인 쿠키는 이제 그 계정 것이다. 이 탭이 다른 계정의 인트라넷 세션이면
-        // 로그인 화면으로 되돌린다(작업 공간 주인은 유지 — 원래 계정으로 다시 로그인하면 이어 간다). 같은 계정·로컬 세션은 무시.
-        const mine = intranetIdentityOf(getSession ? getSession() : sessionRef.current);
-        if (mine !== null && typeof msg.identity === 'string' && msg.identity !== mine) {
+        // 다른 탭이 같은 서버에 로그인했다 — 그 서버의 로그인 쿠키는 이제 그 계정 것이다. 이 탭이 같은 서버를 다른 계정으로
+        // 쓰고 있으면 로그인 화면으로 되돌린다(작업 공간 주인은 유지 — 원래 계정으로 다시 로그인하면 이어 간다).
+        // 같은 계정·로컬 세션·다른 서버(쿠키가 따로)·서버 정보가 없는 방송은 무시.
+        const current = getSession ? getSession() : sessionRef.current;
+        const mine = intranetIdentityOf(current);
+        if (
+          mine !== null && typeof msg.identity === 'string' && typeof msg.server === 'string'
+          && msg.server === authServerKeyOf(current?.apiBaseUrl) && msg.identity !== mine
+        ) {
           resetToLocalSession();
         }
       }
