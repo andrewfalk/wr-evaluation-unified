@@ -91,3 +91,44 @@ describe('useAuthSync — 요청 신원 고정 배선', () => {
     expect(last[1].headers.Authorization).toBe('Bearer tok-a2');
   });
 });
+
+describe('useAuthSync — 갱신을 기다리는 사이 서버가 바뀌면 결과를 적용하지 않는다', () => {
+  const onServer = (base) => ({ ...sessionOf('a'), apiBaseUrl: base });
+
+  function holdRefresh() {
+    let release;
+    const fetchMock = vi.fn((url) => {
+      if (String(url).endsWith('/api/auth/refresh')) {
+        return new Promise((resolve) => {
+          release = () => resolve(jsonRes(200, { accessToken: 'tok-a2', accessExpiresAt: new Date().toISOString(), user: { id: 'a', organizationId: 'org-1' } }));
+        });
+      }
+      return Promise.resolve(jsonRes(401, { code: 'UNAUTHORIZED' }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return { fetchMock, release: () => release() };
+  }
+
+  it('같은 사용자·조직이라도 s1에서 시작한 갱신 결과를 s2 세션에 적용하지 않는다', async () => {
+    const { fetchMock, release } = holdRefresh();
+    const { rerender, setSession } = renderAuthSync(onServer('https://s1'));
+    const pending = requestJson('/api/patients', { baseUrl: 'https://s1', method: 'POST', body: {}, session: onServer('https://s1') })
+      .catch((error) => error);
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/api/auth/refresh'))).toBe(true));
+    rerender({ session: onServer('https://s2') });
+    release();
+    await pending;
+    expect(setSession).not.toHaveBeenCalled();
+  });
+
+  it('서버가 그대로면 갱신 결과를 적용한다', async () => {
+    const { fetchMock, release } = holdRefresh();
+    const { setSession } = renderAuthSync(onServer('https://s1'));
+    const pending = requestJson('/api/patients', { baseUrl: 'https://s1', method: 'POST', body: {}, session: onServer('https://s1') })
+      .catch((error) => error);
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/api/auth/refresh'))).toBe(true));
+    release();
+    await pending;
+    expect(setSession).toHaveBeenCalled();
+  });
+});

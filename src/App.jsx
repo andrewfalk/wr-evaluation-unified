@@ -69,7 +69,7 @@ import './modules/wrist';
 // 설정(settings·handleSaveSettings·switchToLocalMode)은 작업 공간 경계(src/app/WorkspaceBoundary)가 넘긴다 — 계정이 바뀌어
 // App이 다시 띄워져도 설정(특히 운영 인트라넷 빌드의 "로컬 모드로 전환")이 유지되도록(계정 전환 수정 AS-4).
 function App({ settings, handleSaveSettings, switchToLocalMode }) {
-  const { session, isAuthenticated, sessionVerified, logout, getWorkspaceOwner } = useAuth();
+  const { session, isAuthenticated, sessionVerified, logout, getWorkspaceOwner, getAuthEpoch } = useAuth();
   // 화면 수명(계정 전환 수정 AS-4) — 계정이 바뀌어 이 화면이 내려간 뒤에는 기다리던 처리의 저장소 쓰기·서버 요청·알림·확인창을
   // 이어 가지 않는다(src/app/useWorkspaceLifetime).
   const { isAlive, alertAlive, confirmAlive } = useGuardedDialogs(showAlert, showConfirm);
@@ -453,6 +453,8 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
     if (logoutInFlightRef.current) return false;
     logoutInFlightRef.current = true;
     try {
+      // 확인창을 열기 전의 인증 문맥 세대 — 확인을 기다리는 동안 바뀌었으면(다른 탭의 로그인 방송으로 되돌려짐 등) 로그아웃하지 않는다.
+      const gen = getAuthEpoch();
       const unsaved = hasIntranetSession(session)
         ? syncSummary.pendingCount + syncSummary.conflictCount + syncSummary.lockLostCount
         : 0;
@@ -460,8 +462,7 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
         const ok = await confirmAlive(`저장되지 않은 환자가 ${unsaved}명 있습니다. 로그아웃하면 이 내용은 사라집니다. 로그아웃할까요?`);
         if (!ok) return false;
       }
-      await logout();
-      return true;
+      return await logout({ expectedGen: gen });
     } finally {
       logoutInFlightRef.current = false;
     }
