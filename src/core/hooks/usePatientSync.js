@@ -140,7 +140,13 @@ export function usePatientSync({
   useEffect(() => { activeIdRef.current = activeId || null; }, [activeId]);
   useEffect(() => { sessionRef.current = session || null; }, [session]);
   useEffect(() => { settingsRef.current = settings || null; }, [settings]);
-  useEffect(() => { enabledRef.current = canSync; }, [canSync]);
+  // 언마운트되면 동기화를 끈다 — 진행 중이던 sync가 끝난 뒤 큐에 남은 다음 sync가 이전 화면의 목록·세션으로 저장 요청을
+  // 보내지 않게(계정이 바뀌면 화면이 다시 띄워진다). canSync가 바뀔 때도 정리가 돌지만 바로 뒤 setup이 새 값으로 맞춘다
+  // (StrictMode의 시험 언마운트 뒤 다시 마운트될 때도 setup이 되돌린다).
+  useEffect(() => {
+    enabledRef.current = canSync;
+    return () => { enabledRef.current = false; };
+  }, [canSync]);
   useEffect(() => { scopeRef.current = scope; }, [scope]);
   useEffect(() => { lockStateRef.current = lockState; }, [lockState]);
 
