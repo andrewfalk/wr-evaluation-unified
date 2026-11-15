@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import { suggestModules, resolveDiagnosisModule } from '../utils/diagnosisMapping';
 import { getModule, getAllModules } from '../moduleRegistry';
 import { showAlert, showConfirm } from '../utils/platform';
-import { createManagedPatient, touchPatientRecord } from '../services/patientRecords';
+import { createManagedPatient } from '../services/patientRecords';
 import {
   normalizeHeader, parseDate, parseGender, parseSide, getCell, buildColMap,
   ensureDiagnosis, ensureSharedJob, applyReturnConsiderations, applyDiagnosisAssessment,
@@ -264,7 +264,8 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
       return;
     }
 
-    onImport(resultPatients.map(patient => touchPatientRecord(patient, { session })), stats);
+    // 편집 표시(touch)는 환자 상태 전이 patients/batchImportApplied가 한다(P2-43 — touch 쓰기 단일화).
+    onImport(resultPatients, stats);
     onClose();
   };
 

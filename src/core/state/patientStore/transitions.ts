@@ -10,7 +10,7 @@
 //     그대로 내던 곳은 `prev`. "최적화"하지 않는다.
 //   - 옮기기 전 코드가 클로저 값으로 계산하던 것은 payload로 그대로 넘긴다. 고치는 것은 flagged PR에서만.
 import type { PatientRecord } from '../../types/patient';
-import { touchPatientRecord as touchPatientRecordJs } from '../../services/patientRecords';
+import { migratePatientRecords as migratePatientRecordsJs, touchPatientRecord as touchPatientRecordJs } from '../../services/patientRecords';
 import {
   applyPushFailures as applyPushFailuresJs,
   applyWorkspaceSaveAck as applyWorkspaceSaveAckJs,
@@ -26,6 +26,9 @@ import { resolvePatientConflictInList as resolvePatientConflictInListJs } from '
 type TouchContext = { session?: unknown };
 function touchPatientRecord(patient: PatientRecord, context: TouchContext): PatientRecord {
   return (touchPatientRecordJs as unknown as (p: PatientRecord, c: TouchContext) => PatientRecord)(patient, context);
+}
+function migratePatientRecords(patients: PatientRecord[], context: TouchContext): PatientRecord[] {
+  return (migratePatientRecordsJs as unknown as (p: PatientRecord[], c: TouchContext) => PatientRecord[])(patients, context);
 }
 function applyWorkspaceSaveAck(localPatients: PatientRecord[], sentPatients: PatientRecord[], ack: unknown): PatientRecord[] {
   return (applyWorkspaceSaveAckJs as unknown as (l: PatientRecord[], s: PatientRecord[], a: unknown) => PatientRecord[])(
@@ -477,12 +480,31 @@ const deleteResultsApplied = defineTransition<DeleteResultsAppliedPayload>('pati
   },
 });
 
+export interface BatchImportAppliedPayload {
+  /** BatchImportModal이 만든 가져오기 결과 목록(기존 환자 사본 + 새 환자, touch 전) */
+  importedPatients: PatientRecord[];
+  session: unknown;
+}
+
+/**
+ * #15 일괄 가져오기(P2-43) — 모달이 하던 `.map(touchPatientRecord)`를 전이 안으로 옮겼다. 순서는 옮기기 전 그대로(touch → migrate,
+ * 결과 동일 — 순서를 바꿔도 같은지는 확인하지 않았다). 목록을 통째로 교체하고(replacedAll과 같음) derive가 마지막 환자를 활성으로
+ * 정한다(옮기기 전 usePatientCrud.handleBatchImport의 setActiveId(마지막)). 기존 환자 전원 touch(D2)는 P2-43b에서 다룬다.
+ */
+const batchImportApplied = defineTransition<BatchImportAppliedPayload>('patients/batchImportApplied', (_prev, { importedPatients, session }) => (
+  migratePatientRecords(importedPatients.map(patient => touchPatientRecord(patient, { session })), { session })
+), {
+  derive: (_prevState, next) => (next.length > 0 ? { activeId: next[next.length - 1].id } : {}),
+});
+
 /** 이름 붙은 전이 모음. P2-33~39에서 훅별로 채운다(계획 "전이 목록"). */
 export const patientTx = {
   /** #13 usePatientCrud.updatePatient · #23 usePresetManagement.applyPreset */
   dataEdited,
-  /** #3 App 초기화 · #4·#7 자동저장 복원·불러오기 · #15 일괄 가져오기 · #16 테스트 데이터 */
+  /** #3 App 초기화 · #4·#7 자동저장 복원·불러오기 · #16 테스트 데이터 */
   replacedAll,
+  /** #15 일괄 가져오기(touch → migrate, 마지막 환자 활성 — P2-43) */
+  batchImportApplied,
   /** #8 불러오기(추가) · #22 위자드 완료 */
   appended,
   /** #5·#6 워크스페이스 저장(새 이름·덮어쓰기) 응답 */

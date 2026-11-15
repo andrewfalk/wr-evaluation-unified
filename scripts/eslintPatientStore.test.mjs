@@ -1,4 +1,4 @@
-// REFACTORING_ROADMAP Phase 2 C4(P2-39) — touchPatientRecord import는 환자 상태 전이(src/core/state/**)·BatchImportModal·테스트만.
+// REFACTORING_ROADMAP Phase 2 C4(P2-39) — touchPatientRecord import는 환자 상태 전이(src/core/state/**)·테스트만(BatchImportModal 예외는 P2-43에서 삭제).
 import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,9 +33,9 @@ describe('touchPatientRecord import 금지(P2-39)', () => {
     expect(count(await lintAs('src/core/hooks/__p2_39_probe__.js', other))).toBe(0);
   });
 
-  it('환자 상태 계층·일괄 가져오기 모달·테스트는 예외', async () => {
+  it('환자 상태 계층·테스트는 예외(일괄 가져오기 모달은 P2-43부터 금지)', async () => {
     expect(count(await lintAs('src/core/state/patientStore/__p2_39_probe__.ts', deep))).toBe(0);
-    expect(count(await lintAs('src/core/components/BatchImportModal.jsx', code))).toBe(0);
+    expect(count(await lintAs('src/core/components/BatchImportModal.jsx', code))).toBe(1);
     expect(count(await lintAs('src/core/hooks/__tests__/__p2_39_probe__.test.js', code))).toBe(0);
     expect(count(await lintAs('src/testing/__p2_39_probe__.js', code))).toBe(0);
   });

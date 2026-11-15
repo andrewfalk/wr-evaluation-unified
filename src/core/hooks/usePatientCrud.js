@@ -234,12 +234,9 @@ export function usePatientCrud({
   const handleBatchImport = (importedPatients, stats) => {
     // 일괄 가져오기는 환자 목록 전체를 갈아치운다 — 편집 중인 환자가 무엇이든 영향을 받는다.
     if (dirtyAssessmentPatientId) { onBlockedByUnsavedDraft?.(); return; }
-    const nextPatients = migratePatientRecords(importedPatients, { session });
-    setPatients(patientTx.replacedAll({ patients: nextPatients }));
-    if (nextPatients.length > 0) {
-      setActiveId(nextPatients[nextPatients.length - 1].id);
-      setCurrentStepIndex(0);
-    }
+    // touch → migrate·목록 교체·마지막 환자 활성은 전이 하나(P2-43 — 옮기기 전에는 모달이 touch, 여기서 migrate + replacedAll + setActiveId).
+    setPatients(patientTx.batchImportApplied({ importedPatients, session }));
+    if (importedPatients.length > 0) setCurrentStepIndex(0);
     setIntakeShared(null);
     setShowHome(false);
     const doctorNote = hasIntranetSession(session) && stats.withDoctorName > 0
