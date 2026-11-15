@@ -179,11 +179,11 @@ describe('createPatientStore', () => {
     expect(store.getState()).not.toBe(before); // filter는 늘 새 배열(참조 동작 보존 — 전이 규칙)
   });
 
-  it('setActiveId·setSelectedIds도 앞선 상태를 갱신하고 큐에 항목을 넣는다(값·updater, updater 둘째 인자는 최신 목록)', () => {
+  it('setActiveId·setSelectedIds도 앞선 상태를 갱신하고 큐에 항목을 넣는다(값·updater)', () => {
     const { store, queue } = setup([{ id: 'a' }, { id: 'b' }]);
     const initial = store.getState();
     store.dispatch(patientTx.appended({ patients: [{ id: 'c' }] }));
-    store.setActiveId((prev, latest) => latest.at(-1).id);
+    store.setActiveId(prev => (prev === null ? 'c' : prev));
     store.setSelectedIds(prev => new Set([...prev, 'a']));
     expect(store.getState().activeId).toBe('c');
     expect([...store.getState().selectedIds]).toEqual(['a']);

@@ -26,7 +26,7 @@ export type SetPatients = (transition: PatientTransition) => void;
 
 export { UNTAGGED_SET_PATIENTS_MESSAGE };
 
-/** 값 또는 updater — updater는 두 번째 인자로 같은 상태의 최신 환자 목록을 받는다(reducer.ts ActiveIdUpdater). */
+/** 값 또는 updater(옮기기 전 useState와 같은 한 인자, reducer.ts ActiveIdUpdater). */
 export type SetActiveId = (arg: string | null | ActiveIdUpdater) => void;
 export type SetSelectedIds = (arg: ValueOrUpdater<Set<string>>) => void;
 
