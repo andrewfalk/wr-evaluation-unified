@@ -22,7 +22,7 @@ export function applyAuthUpdate(currentSession, authUpdate) {
 }
 
 // 인증 토큰 리프레시 + 멀티탭 브로드캐스트 와이어링
-export function useAuthSync({ session, setSession, resetToLocalSession, getAuthEpoch }) {
+export function useAuthSync({ session, setSession, resetToLocalSession, getAuthEpoch, getSession }) {
   // Keep a stable ref to the latest session so the refresh handler never
   // captures a stale closure value.
   const sessionRef = useRef(session);
@@ -78,7 +78,8 @@ export function useAuthSync({ session, setSession, resetToLocalSession, getAuthE
       },
       onLogout: () => { broadcastLogout(); resetToLocalSession(); },
       // 요청 신원 고정 — 이미 떠난 계정의 요청이 401을 받으면 갱신·로그아웃하지 않는다(apiClient).
-      getCurrentSession: () => sessionRef.current,
+      // AuthContext의 getSession은 세션이 바뀌는 그 동기 구간에 갱신된다(이 훅의 sessionRef는 effect 뒤라 늦다).
+      getCurrentSession: () => (getSession ? getSession() : sessionRef.current),
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

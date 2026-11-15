@@ -138,6 +138,9 @@ export function AuthProvider({ children }) {
   }, []);
 
   const getAuthEpoch = useCallback(() => authEpochRef.current, []);
+  // 지금 세션 — setSession·login·resetToLocalSession이 같은 동기 구간에서 갱신하는 ref를 읽는다(렌더·effect를 기다리지 않음).
+  // 요청 신원 고정(apiClient)이 계정이 바뀐 직후에도 새 계정을 보게 한다.
+  const getSession = useCallback(() => sessionRef.current, []);
 
   // Called after a successful server login. serverResponse = { user, accessToken, accessExpiresAt }.
   const login = useCallback((serverResponse, apiBaseUrl = '') => {
@@ -238,9 +241,10 @@ export function AuthProvider({ children }) {
     setSession,
     resetToLocalSession,
     getAuthEpoch,
+    getSession,
     login,
     logout,
-  }), [session, sessionVerified, setSession, resetToLocalSession, getAuthEpoch, login, logout]);
+  }), [session, sessionVerified, setSession, resetToLocalSession, getAuthEpoch, getSession, login, logout]);
 
   return (
     <AuthContext.Provider value={value}>
