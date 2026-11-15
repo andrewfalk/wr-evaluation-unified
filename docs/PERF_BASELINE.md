@@ -217,6 +217,23 @@ commit(프로파일링, 3회 중앙값, 횟수 / 합 ms):
 
 첫 구현에서 **환자 전환 commit이 2 → 3회**로 늘었다. 원인: 계획 B7대로 `sync/patientResumed` dispatch를 effect 밖(마이크로태스크)으로 미루자, 재개할 것이 없는(일시정지가 아닌) 평범한 전환에서도 같은 값 갱신이 effect 안의 다른 갱신과 한 배치가 되지 못하고 따로 한 번 더 렌더·커밋됐다(직전 갱신 뒤 첫 같은 값 setState는 eager bailout이 안 된다). 마이크로태스크 안에서 "활성 환자가 일시정지 상태일 때만 dispatch"로 바꾸자 commit 수가 P2-40a A/B 기준과 같아졌다. 운영 빌드 입력 1글자(500명) 33.0 ms(첫 구현 측정, 회차 흔들림 안).
 
+### P2-42 — 입력 1글자 commit 분해와 사이드바 카드 memo(REFACTORING_ROADMAP Phase 2 P2-42, 트랙 P P-3, 2026-11-15)
+
+**분해**(`scripts/perf/render-breakdown.mjs` — 이름이 남는 프로파일링 빌드 `vite.profiling-names.config.mjs`로, 입력 구간 commit의 fiber마다 자기 시간을 컴포넌트별로 합침, 500명 3회 중앙값): commit 합 34.1 ms 중 **`PatientSidebar`가 32.6 ms**(카드 500장이 목록 안 인라인 JSX라 이름 1글자에 전부 다시 그려짐). 나머지 컴포넌트는 각 1 ms 미만. (이 도구의 자기 시간은 DOM 노드를 건너 부모에도 겹쳐 잡혀 `WorkspaceScreen` 값이 부풀어 보인다 — 순위 판단용.)
+
+**변경**: 카드를 `React.memo` 컴포넌트(`PatientCard`)로 빼고(출력 DOM 동일), 카드 콜백은 최신 값을 가리키는 고정 참조로, 카드마다 하던 `patients.indexOf`(목록 전체 O(n²))는 렌더당 한 번 만든 순번 Map으로. 수정 뒤 같은 분해: commit 합 2.5 ms(`PatientSidebar` 1.3 ms).
+
+같은 시각·같은 main에서 `PatientSidebar.jsx`만 옛 것으로 되돌린 A/B(`render-timing.mjs --runs 5`, 중앙값):
+
+| 측정 | 환자 수 | 환자 전환 ms(운영) | **입력 1글자 ms(운영)** | 환자 전환 commit | **입력 1글자 commit** |
+| --- | --- | --- | --- | --- | --- |
+| A/B(옛 사이드바) | 100 | 19.7 | 11.2 | 2 / 8.4 | 1 / 6.2 |
+| A/B(옛 사이드바) | 500 | 42.5 | 34.9 | 2 / 27.1 | 2 / 27.9 |
+| **P2-42** | 100 | 17.0 | **4.6** | 2 / 2.7 | 2 / 1.5 |
+| **P2-42** | 500 | 17.8 | **8.1** | 2 / 2.2 | 1 / **2.0** |
+
+500명 입력 commit 합 27.9 → 2.0 ms(회차 흔들림 ±10 ms를 넘어 줄어 머지 기준 충족). 복원·대시보드는 같은 범위(복원 commit 합은 카드 첫 렌더라 그대로). **commit 수**: 위 표의 입력 1글자 횟수(100명 1 → 2, 500명 2 → 1)는 render-timing의 구간이 "사이드바 반영 시각"에서 끊기기 때문에, 빨라진 쪽에서 입력 직후의 후속 commit이 구간 안·밖으로 갈린 것이다 — **입력 후 500 ms로 고정한 구간에서는 두 버전 모두 100·500명 5회 모두 정확히 2회**(`render-breakdown.mjs --window 500`, commit 합 100명 6.9 → 1.5 ms, 500명 30.2 → 2.1 ms). 복원·환자 전환·대시보드 commit 수는 기준과 같다.
+
 ## 다시 재는 방법
 
 ```bash
@@ -224,6 +241,8 @@ npm run build:web
 npx vite build --config scripts/perf/vite.profiling.config.mjs
 node scripts/perf/bundle-size.mjs
 node scripts/perf/render-timing.mjs --counts 100,500 --runs 3   # 기동·복원·환자 전환·입력 1글자·대시보드
+npx vite build --config scripts/perf/vite.profiling-names.config.mjs
+node scripts/perf/render-breakdown.mjs --count 500 --runs 3      # 입력 1글자 commit의 컴포넌트별 분해(--window 500: 고정 구간 commit 수)
 ```
 
 배포 경로(1-b·2·3절)는 측정할 커밋으로 시험 패키지를 새로 만들어 띄운다(기존 버전 폴더·이미지 태그를 덮어쓰지 않게 버전 꼬리표를 붙인다):
