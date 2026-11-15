@@ -148,7 +148,7 @@ async function newTab(context, tag) {
   page.on('response', (res) => {
     const u = new URL(res.url());
     if (u.pathname.startsWith('/api/patients')) {
-      page.__calls.push({ method: res.request().method(), path: u.pathname, query: u.search, status: res.status(), t: Date.now() });
+      page.__calls.push({ method: res.request().method(), path: u.pathname, query: u.search, status: res.status(), t: Date.now(), injected: !!page.__injecting });
     }
   });
   page.on('pageerror', (e) => console.log(`[${tag}] pageerror ${e.message}`));
@@ -317,6 +317,7 @@ async function run(browser) {
   await step('⑤ "저장하지 않고 이동" → 다시 열면 저장 재개', async () => {
     await openPatient(a2, P1);
     await editable(a2);
+    a2.__injecting = true; // 이 구간의 PATCH 503은 스크립트가 만든 것 — 마지막 5xx 검사에서 뺀다
     await a2.route('**/api/patients/*', (route) => (route.request().method() === 'PATCH'
       ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' })
       : route.continue()));
@@ -326,6 +327,7 @@ async function run(browser) {
     const moved = await until(async () => (await a2.getByPlaceholder('등록번호').inputValue().catch(() => '')) === P2, 20000);
     const askedSkip = a2.__dialogs.some((m) => m.includes('저장하지 않고 이동'));
     await a2.unrouteAll({ behavior: 'ignoreErrors' });
+    a2.__injecting = false;
     await wait(2500);
     const stillOld = patientRow(P1)?.name !== `동기화환자1보류-${RUN}`;
     const i = a2.__calls.length;
@@ -380,19 +382,34 @@ async function run(browser) {
   await step('⑧(기록, D1 경로) 저장 응답을 기다리는 중 로그아웃 → 같은 계정 재로그인 뒤 편집', async () => {
     await openPatient(a2, P1);
     await editable(a2);
+    // 요청은 서버로 보내 저장을 끝내고, 응답만 붙잡아 로그아웃 뒤에 클라이언트에 넘긴다(D1: 서버는 새 revision, 클라이언트는 ACK를 못 받음).
     let release;
     const gate = new Promise((r) => { release = r; });
+    let serverSaved = false;
+    let fetchNote = 'PATCH 없음';
     await a2.route('**/api/patients/*', async (route) => {
-      if (route.request().method() === 'PATCH') await gate;
-      await route.continue();
+      if (route.request().method() !== 'PATCH') { await route.continue(); return; }
+      let response;
+      try {
+        response = await route.fetch();
+        fetchNote = `서버 응답 ${response.status()}`;
+        serverSaved = response.ok();
+      } catch (error) {
+        // 서버로 보내지 못했으면 요청을 매달아 두지 않고 그대로 보낸다(다음 시나리오가 막히지 않게).
+        fetchNote = `route.fetch 실패: ${String(error?.message || error).split('\n')[0]}`;
+        await route.continue().catch(() => {});
+        return;
+      }
+      await gate;
+      await route.fulfill({ response }).catch(() => {}); // 로그아웃으로 요청이 취소됐으면 넘길 곳이 없다
     });
     await setActiveName(a2, `동기화환자1D1-${RUN}`);
-    await wait(1500); // PATCH가 나가 응답을 기다리는 중
+    await until(() => serverSaved, 10000); // 서버는 저장을 끝냈고 응답은 붙잡혀 있다
+    const dbAfter = patientRow(P1);
     await logout(a2, accounts.a);
     release();
     await wait(1500);
     await a2.unrouteAll({ behavior: 'ignoreErrors' });
-    const dbAfter = patientRow(P1);
     await login(a2, accounts.a);
     await openPatient(a2, P1);
     await editable(a2);
@@ -401,7 +418,7 @@ async function run(browser) {
     await until(() => callsSince(a2, i, 'PATCH').length > 0, 10000);
     await wait(1500);
     const statuses = callsSince(a2, i, 'PATCH').map((c) => c.status);
-    record('⑧(기록) 응답 대기 중 로그아웃 → 재로그인 뒤 다음 저장', null, `대기 중이던 PATCH 반영=${dbAfter?.name === `동기화환자1D1-${RUN}`}, 재편집 PATCH 상태=${JSON.stringify(statuses)}, 충돌 표시=${(await row(a2, P1).innerText()).includes('Resolve')}`);
+    record('⑧(기록) 서버는 저장했고 응답을 기다리는 중 로그아웃 → 재로그인 뒤 다음 저장', null, `서버 저장=${serverSaved && dbAfter?.name === `동기화환자1D1-${RUN}`}(${fetchNote}), 재편집 PATCH 상태=${JSON.stringify(statuses)}, 충돌 표시=${(await row(a2, P1).innerText()).includes('Resolve')}`);
   });
 
   await step('⑨ 오프라인 → 편집 → 온라인 복귀 뒤 저장', async () => {
@@ -452,8 +469,8 @@ async function run(browser) {
     record('⑫ 재로그인 뒤 목록 = 서버 내 환자 수, 저장 대기 없음', after === `환자 목록 (${serverCount})` && noPending, `전 ${before} → 후 ${after}, 서버 ${serverCount}`);
   });
 
-  const fiveXX = [a1, a2, b1].flatMap((p) => p.__calls.filter((c) => c.status >= 500 && c.status !== 503));
-  record('5xx 응답 없음(⑤의 의도된 503 제외)', fiveXX.length === 0, JSON.stringify(fiveXX.slice(0, 3)));
+  const fiveXX = [a1, a2, b1].flatMap((p) => p.__calls.filter((c) => c.status >= 500 && !(c.injected && c.method === 'PATCH' && c.status === 503)));
+  record('5xx 응답 없음(⑤에서 스크립트가 만든 PATCH 503만 제외)', fiveXX.length === 0, JSON.stringify(fiveXX.slice(0, 3)));
 }
 
 const browser = await chromium.launch();
@@ -465,12 +482,14 @@ try {
   record('스크립트 오류', false, String(error?.message || error).split('\n')[0]);
 } finally {
   await browser.close().catch(() => {});
+  // 정리 실패·남은 시험 조직은 실패로 기록한다(종료 코드 1 — 시험 데이터가 남았는데 성공으로 보고하지 않게, #341 Codex).
   try {
     if (orgId) deleteOrg(orgId);
     const left = sql(`SELECT count(*) FROM organizations WHERE name = ${q(ORG_NAME)};`);
-    console.log(`정리: 시험 조직 ${left === '0' ? '삭제됨' : `남음(${left}) — --cleanup-stale로 지우세요`}. 남은 시험 조직(모든 실행) ${staleOrgIds().length}개.`);
+    const stale = staleOrgIds().length;
+    record('정리: 이번 시험 조직 삭제·남은 시험 조직 0', left === '0' && stale === 0, `이번 실행 남음 ${left}, 모든 실행 남음 ${stale}${left === '0' && stale === 0 ? '' : ' — --cleanup-stale로 지우세요'}`);
   } catch (error) {
-    console.log(`정리 실패 — --cleanup-stale로 지우세요: ${String(error?.message || error).split('\n')[0]}`);
+    record('정리 — 스크립트 오류(--cleanup-stale로 지우세요)', false, String(error?.message || error).split('\n')[0]);
   }
   const failed = results.filter((r) => r.ok === false).length;
   console.log(`\n결과: 통과 ${results.filter((r) => r.ok === true).length} · 실패 ${failed} · 기록 ${results.filter((r) => r.ok === null).length}`);
