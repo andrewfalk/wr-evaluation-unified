@@ -92,7 +92,10 @@ function deleteFixtures() {
 
 // 이전 실행이 정리하지 못하고 남긴 시험 조직(이 스크립트가 만든 이름 형식)만 지운다.
 if (process.argv.includes('--cleanup-stale')) {
-  const stale = sql(`SELECT id FROM organizations WHERE name LIKE 'tier3-account-switch-%';`).split('\n').filter(Boolean);
+  // 이 스크립트가 만드는 이름 형식(접두사 + 소문자 hex 8자리)과 정확히 같고, 사용자가 모두 이 스크립트의 시험 계정 형식인 조직만.
+  const stale = sql(`SELECT o.id FROM organizations o
+    WHERE o.name ~ '^tier3-account-switch-[0-9a-f]{8}$'
+      AND NOT EXISTS (SELECT 1 FROM users u WHERE u.organization_id = o.id AND u.login_id !~ '^t3[ab]-[0-9a-f]{8}$');`).split('\n').filter(Boolean);
   for (const id of stale) deleteOrg(id);
   console.log(`남아 있던 시험 조직 ${stale.length}개를 지웠습니다.`);
   process.exit(0);
@@ -118,6 +121,13 @@ async function newTab(context) {
   page.on('dialog', (d) => { page.__dialogs.push(d.message()); d.accept(); });
   page.__dialogs = [];
   page.__confirmAnswer = true;
+  // 이 탭이 마지막으로 받은 인증 응답의 사용자(로그인·세션 확인). 저장 세션은 탭끼리 공유돼 다른 탭이 덮을 수 있어
+  // (한 탭이 로컬로 되돌아가면 공유 저장 세션도 로컬이 된다) 탭별 판정에 쓰지 않는다.
+  page.__authUser = null;
+  page.on('response', async (res) => {
+    if (!/\/api\/auth\/(login|csrf|refresh)$/.test(new URL(res.url()).pathname) || res.status() !== 200) return;
+    try { const body = await res.json(); if (body?.user?.id) page.__authUser = body.user.id; } catch { /* 본문 없음 */ }
+  });
   await page.goto(WEB_URL);
   return page;
 }
@@ -151,6 +161,15 @@ function answerNextConfirm(page, accept) {
 const LOGIN_LIMIT = 4;
 const LOGIN_WINDOW_MS = 62_000;
 const loginTimes = [];
+// 지금 바로 로그인할 수 있을 때까지 기다린다(자리를 쓰지는 않는다) — 시간을 재는 경합 시나리오 앞에서.
+async function ensureLoginSlot() {
+  for (;;) {
+    const now = Date.now();
+    while (loginTimes.length && now - loginTimes[0] > LOGIN_WINDOW_MS) loginTimes.shift();
+    if (loginTimes.length < LOGIN_LIMIT) return;
+    await wait(LOGIN_WINDOW_MS - (now - loginTimes[0]) + 200);
+  }
+}
 async function paceLogin() {
   for (;;) {
     const now = Date.now();
@@ -183,7 +202,7 @@ async function login(page, acct) {
   }
 }
 
-// 이 탭의 저장 세션 사용자(로그인 화면이 아니면 인증된 것) — 화면에 계정 메뉴가 없는 시작 화면도 있어 세션으로 확인한다.
+// 저장 세션의 사용자(탭끼리 공유 — 새 탭이 어떤 세션으로 열릴지 판정할 때만 쓴다).
 const sessionUserId = (page) => page.evaluate(() => {
   try { const s = JSON.parse(localStorage.getItem('wrEvalUnifiedAuthSession') || 'null'); return s?.mode === 'intranet' ? s.user?.id ?? null : null; }
   catch { return null; }
@@ -193,7 +212,7 @@ const onLoginScreen = (page) => page.getByRole('heading', { name: '인트라넷 
 async function waitLoggedIn(page, acct) {
   const deadline = Date.now() + 20000;
   while (Date.now() < deadline) {
-    if (!(await onLoginScreen(page)) && (await sessionUserId(page)) === acct.id) {
+    if (!(await onLoginScreen(page)) && page.__authUser === acct.id) {
       await page.getByRole('button', { name: /^\+ (추가|새환자)$/ }).first().waitFor({ timeout: 10000 }).catch(() => {});
       return;
     }
@@ -203,7 +222,7 @@ async function waitLoggedIn(page, acct) {
 }
 
 async function isLoggedInAs(page, acct) {
-  return !(await onLoginScreen(page)) && (await sessionUserId(page)) === acct.id;
+  return !(await onLoginScreen(page)) && page.__authUser === acct.id;
 }
 
 async function logout(page, acct) {
@@ -417,21 +436,41 @@ async function scenario6(browser) {
   //     B가 다시 로그인하면 편집이 남고 섞인 저장이 없음
   {
     const context = await newContext(browser);
+    // B 탭은 A가 로그인하기 전에 로그인 화면으로 열어 둔다(A의 저장 세션으로 열었다 바로 닫으면 탭 간 갱신 조율이 끊겨
+    // A 탭까지 로그아웃될 수 있다 — 이 시나리오가 보려는 것과 무관한 상황).
+    const tabB = await newTab(context);
+    await tabB.getByRole('heading', { name: '인트라넷 로그인' }).waitFor({ timeout: 15000 });
     const tabA = await newTab(context);
     await login(tabA, accounts.a);
     await waitLoggedIn(tabA, accounts.a);
     let releaseLogout;
-    await tabA.route('**/api/auth/logout', async (route) => { await new Promise((r) => { releaseLogout = r; }); await route.continue().catch(() => {}); });
+    let logoutSentAt = 0;
+    await tabA.route('**/api/auth/logout', async (route) => {
+      logoutSentAt = Date.now();
+      await new Promise((r) => { releaseLogout = r; });
+      await route.continue().catch(() => {});
+    });
+    // 경합을 시작하기 전에 로그인 자리를 준비한다 — 그 사이 대기가 끼면 제한 시간을 넘긴다.
+    await ensureLoginSlot();
     answerNextConfirm(tabA, true);
     await logout(tabA, accounts.a);
-    const tabB = await newTabOnLoginScreen(context);
-    await login(tabB, accounts.b);
+    const sentDeadline = Date.now() + 2000;
+    while (!logoutSentAt && Date.now() < sentDeadline) await wait(20);
+    // (A의 로그아웃 방송으로 B 탭의 로그인 화면이 다시 그려질 수 있어, 입력은 로그아웃 뒤에 — 수십 ms)
+    await tabB.getByRole('heading', { name: '인트라넷 로그인' }).waitFor();
+    await tabB.getByLabel('아이디').fill(accounts.b.loginId);
+    await tabB.getByLabel('비밀번호').fill(accounts.b.password);
+    await paceLogin();
+    await tabB.getByRole('button', { name: '로그인', exact: true }).click();
     await waitLoggedIn(tabB, accounts.b);
-    releaseLogout?.(); // 제한 시간 안
+    const elapsed = logoutSentAt ? Date.now() - logoutSentAt : Infinity;
+    releaseLogout?.();
     await wait(1500);
     const cookies = await context.cookies();
     const hasRefresh = cookies.some((c) => /refresh/i.test(c.name));
-    record('⑥(b) [기록] 제한 시간 안에 도착한 A의 로그아웃 응답 뒤 B의 갱신 쿠키', true, hasRefresh ? '남음' : '지워짐(잔여 위험 — 가용성)');
+    // 제한 시간(2.5초) 안에 놓아줬을 때만 이 경합을 확인한 것이다.
+    record('⑥(b) 이전 계정의 로그아웃 응답을 제한 시간 안에 도착시킴', elapsed < 2400, `${elapsed}ms`);
+    record('⑥(b) [기록] 그 뒤 B의 갱신 쿠키', true, hasRefresh ? '남음' : '지워짐(잔여 위험 — 가용성)');
     const bBefore = patientNamesOwnedBy(accounts.b);
     await addPatient(tabB, `B6b-${RUN}`).catch(() => {});
     await settleSync();
@@ -471,11 +510,18 @@ async function scenario6(browser) {
     await login(page, accounts.a);
     await waitLoggedIn(page, accounts.a);
     // 다른 계정 쿠키로 바꿔치기: 같은 컨텍스트의 요청으로 B 로그인(화면에는 적용하지 않음)
-    await paceLogin();
-    const status = await page.evaluate(async ({ loginId, password, apiBase }) => {
-      const res = await fetch(`${apiBase}/api/auth/login`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loginId, password, rememberMe: true }) });
-      return res.status;
-    }, { loginId: accounts.b.loginId, password: accounts.b.password, apiBase: API_BASE });
+    let status = 0;
+    for (let attempt = 0; attempt < 2 && status !== 200; attempt += 1) {
+      if (attempt > 0) await wait(LOGIN_WINDOW_MS); // 로그인 제한(429)이면 한 번 기다렸다가 다시
+      await paceLogin();
+      status = await page.evaluate(async ({ loginId, password, apiBase }) => {
+        const res = await fetch(`${apiBase}/api/auth/login`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ loginId, password, rememberMe: true }) });
+        return res.status;
+      }, { loginId: accounts.b.loginId, password: accounts.b.password, apiBase: API_BASE });
+      if (status !== 429) break;
+    }
+    // B 로그인이 성공해야(쿠키가 B 것으로 바뀌어야) 버려진 로그인 상황이 만들어진 것이다.
+    record('⑥(d) 버려진 로그인 상황 만들기(쿠키만 B로 로그인)', status === 200, `login ${status}`);
     await page.reload();
     await wait(3000);
     const showsB = await isLoggedInAs(page, accounts.b);
@@ -504,9 +550,14 @@ try {
   console.error('ERROR', error?.stack || error);
   // 진단용(선택): WR_ARTIFACT_DIR에 마지막 탭의 화면·텍스트를 남긴다(저장소 밖 경로를 준다).
   if (process.env.WR_ARTIFACT_DIR && lastPage) {
-    await lastPage.screenshot({ path: path.join(process.env.WR_ARTIFACT_DIR, `account-switch-${RUN}.png`), fullPage: true }).catch(() => {});
-    const text = await lastPage.evaluate(() => document.body.innerText).catch(() => '');
-    (await import('node:fs')).writeFileSync(path.join(process.env.WR_ARTIFACT_DIR, `account-switch-${RUN}.txt`), text);
+    const pages = browser.contexts().flatMap((c) => c.pages());
+    let i = 0;
+    for (const pg of pages) {
+      i += 1;
+      await pg.screenshot({ path: path.join(process.env.WR_ARTIFACT_DIR, `account-switch-${RUN}-tab${i}.png`), fullPage: true }).catch(() => {});
+      const text = await pg.evaluate(() => document.body.innerText).catch(() => '');
+      (await import('node:fs')).writeFileSync(path.join(process.env.WR_ARTIFACT_DIR, `account-switch-${RUN}-tab${i}.txt`), text);
+    }
   }
 } finally {
   await browser.close().catch(() => {});
