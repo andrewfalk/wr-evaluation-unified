@@ -18,7 +18,7 @@ function authContextChanged(prev, next) {
 }
 
 // 설정 라이프사이클(테마/폰트, apiBaseUrl 동기화, Electron 비동기 로드) + 설정 저장/로컬모드 전환
-export function useAppSettings({ session, setSession, resetToLocalSession, invalidateAuthContext }) {
+export function useAppSettings({ session, setSession, resetToLocalSession, invalidateAuthContext, discardWorkspace }) {
   const [settings, setSettings] = useState(() => loadAppSettings(DEFAULT_SETTINGS));
   const skipNextSettingsUrlResetRef = useRef(false);
   // 지금 설정(비동기 로드 결과와 비교용 — 마운트 effect의 클로저는 첫 값만 본다).
@@ -86,6 +86,9 @@ export function useAppSettings({ session, setSession, resetToLocalSession, inval
     } else {
       setSession(prev => ({ ...prev, apiBaseUrl: nextBaseUrl }));
     }
+    // 로컬 문맥이 되거나 서버 주소가 바뀌면, 화면의 목록이 다른 계정의 작업(주인 있음)일 때 화면을 새로 시작한다.
+    // 주인이 없으면(로컬 작업) AuthContext가 그대로 둔다.
+    if (switchingToLocal || normalizeBaseUrl(settings.apiBaseUrl) !== nextBaseUrl) discardWorkspace?.();
   };
 
   const switchToLocalMode = () => {

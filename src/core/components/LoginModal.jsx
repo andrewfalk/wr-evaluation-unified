@@ -21,7 +21,9 @@ function loginErrorMessage(err) {
   return err?.message || '로그인에 실패했습니다.';
 }
 
-export function LoginModal({ apiBaseUrl = '' }) {
+// onBeforeLogin: 서버 인증에 성공한 뒤 로그인을 적용하기 직전에 기다릴 일(로컬 작업 보존 — 실패하면 던진다, AS-4).
+// onPendingChange: 로그인 요청이 진행 중인지 알린다(그동안 "로컬 모드로 전환"을 막는다).
+export function LoginModal({ apiBaseUrl = '', onBeforeLogin, onPendingChange }) {
   const { login, beginLoginAttempt } = useAuth();
   // 언마운트된 화면은 늦게 끝난 로그인 요청을 적용하지 않는다(StrictMode의 시험 언마운트 뒤에는 setup이 되돌린다).
   const mountedRef = useRef(true);
@@ -44,6 +46,7 @@ export function LoginModal({ apiBaseUrl = '' }) {
     if (!loginId.trim() || !password) return;
     setLoading(true);
     setError('');
+    onPendingChange?.(true);
     // 로그인 시도 — 인증 문맥이 바뀌면(다른 로그인·로컬 전환·화면 재시작) 요청이 취소되고 응답이 와도 적용되지 않는다.
     const attempt = beginLoginAttempt?.();
     try {
@@ -55,6 +58,16 @@ export function LoginModal({ apiBaseUrl = '' }) {
         ...(attempt ? { signal: attempt.signal } : {}),
       });
       if (!mountedRef.current) return;
+      if (onBeforeLogin) {
+        try {
+          await onBeforeLogin();
+        } catch {
+          if (mountedRef.current) setError('로컬 작업을 저장하지 못했습니다. 다시 시도하세요.');
+          return;
+        }
+        // 기다리는 사이 화면이 내려갔으면 적용하지 않는다(문맥이 바뀌었으면 login이 시도 세대로 거른다).
+        if (!mountedRef.current) return;
+      }
       login(data, apiBaseUrl, attempt);
     } catch (err) {
       // 문맥이 바뀌어 취소된 시도는 안내하지 않는다(사용자가 다른 동작을 했다).
@@ -62,6 +75,7 @@ export function LoginModal({ apiBaseUrl = '' }) {
       setError(loginErrorMessage(err));
     } finally {
       setLoading(false);
+      onPendingChange?.(false);
     }
   };
 

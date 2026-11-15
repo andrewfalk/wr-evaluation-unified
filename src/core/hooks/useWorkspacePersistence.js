@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { showAlert, showConfirm } from '../utils/platform';
 import { getLegacyImportBridge } from '../../platform/bridge';
 import { STORAGE_KEYS } from '../storage/keys';
@@ -14,6 +14,7 @@ import {
   saveWorkspaceSnapshot,
 } from '../services/workspaceRepository';
 import { patientTx } from '../state/patientStore/transitions';
+import { useGuardedDialogs } from '../../app/useWorkspaceLifetime';
 import {
   clonePatientRecordForImport,
   ensurePatientRecords,
@@ -57,10 +58,10 @@ export function buildSaveAckMessage(ack) {
   return lines.join('\n');
 }
 
-async function showLoadFailureNotice(loadResult) {
+async function showLoadFailureNotice(loadResult, alert = showAlert) {
   if (!loadResult) return;
   const message = buildLoadFailureMessage(loadResult);
-  if (message) await showAlert(message);
+  if (message) await alert(message);
 }
 
 export function useWorkspacePersistence({
@@ -76,6 +77,12 @@ export function useWorkspacePersistence({
   const [lastAutoSave, setLastAutoSave] = useState(null);
   const [legacyItems, setLegacyItems] = useState(null);
   const autosaveRestoreCheckedRef = useRef(false);
+  // 화면 수명(계정 전환 수정 AS-4) — 화면이 내려간 뒤에는 기다리던 처리의 저장소 쓰기·삭제·알림·확인창을 하지 않는다.
+  const { isAlive, alertAlive, confirmAlive } = useGuardedDialogs(showAlert, showConfirm);
+  // 자동저장 복원을 수락했을 때 저장본 삭제는 복원된 목록이 커밋된 뒤에 한다(아래 layout effect). 그 전에 화면이 내려가면
+  // 삭제하지 않아 저장본이 디스크에 남는다(다음에 로컬 모드에서 다시 복원 안내).
+  const [restoreClearRequest, setRestoreClearRequest] = useState(null);
+  const restoreClearDoneRef = useRef(null);
   const intranetWorkspaceMode = isIntranetWorkspaceMode({ session, settings });
   const autosaveEnabled = shouldUseWorkspaceAutosave({ disabled, session, settings });
 
@@ -114,25 +121,42 @@ export function useWorkspacePersistence({
     if (autosaveRestoreCheckedRef.current) return;
     autosaveRestoreCheckedRef.current = true;
 
-    loadAutoSavedWorkspace({ session, settings, serverConfig }).then(saved => {
-      if (saved) {
-        const time = new Date(saved.savedAt).toLocaleString('ko-KR');
-        showConfirm(`이전 자동 저장 데이터가 있습니다 (${time}).\n이어서 작업하시겠습니까?`).then(async ok => {
-          if (ok && saved.patients?.length) {
-            const loadResult = getLoadablePatientsFromSnapshot(saved.patients, { session });
-            setPatients(patientTx.replacedAll({ patients: loadResult.patients }));
-            setActiveId(loadResult.patients[0]?.id || null);
-            setCurrentStepIndex(0);
-            await showLoadFailureNotice(loadResult);
-          }
-          clearAutoSavedWorkspace({ session, settings, serverConfig })
-            .catch(error => {
-              console.warn('[autosave-clear]', error);
-            });
-        });
-      }
+    const options = { session, settings, serverConfig };
+    loadAutoSavedWorkspace(options).then(saved => {
+      // 읽는 동안 화면이 내려갔으면(계정 전환) 묻지도 지우지도 않는다 — 로컬 자동저장의 유일한 사본일 수 있다.
+      if (!saved || !isAlive()) return;
+      const time = new Date(saved.savedAt).toLocaleString('ko-KR');
+      confirmAlive(`이전 자동 저장 데이터가 있습니다 (${time}).\n이어서 작업하시겠습니까?`).then(async ok => {
+        // 확인하는 동안 화면이 내려갔으면 아무것도 하지 않는다(수락이든 거절이든 저장본을 남긴다).
+        if (!isAlive()) return;
+        if (ok && saved.patients?.length) {
+          const loadResult = getLoadablePatientsFromSnapshot(saved.patients, { session });
+          setPatients(patientTx.replacedAll({ patients: loadResult.patients }));
+          setActiveId(loadResult.patients[0]?.id || null);
+          setCurrentStepIndex(0);
+          setRestoreClearRequest(options); // 같은 배치 — 저장본 삭제는 복원 목록이 커밋된 뒤(아래 layout effect)
+          await showLoadFailureNotice(loadResult, alertAlive);
+          return;
+        }
+        clearAutoSavedWorkspace(options)
+          .catch(error => {
+            console.warn('[autosave-clear]', error);
+          });
+      });
     });
   }, [autosaveEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 복원된 목록이 커밋된 뒤 저장본을 지운다. layout effect라서 같은 커밋에서 로그인 직전 보존의 목록 ref
+  // (src/app/useLocalWorkBeforeLogin)가 이미 복원 목록을 가리킨다 — "저장본이 지워졌다 ⇒ 로그인 직전 보존이 그 목록을 본다".
+  // (passive effect면 커밋과 이 삭제 사이에 로그인 직전 보존의 재기록이 끼어 그 기록을 지울 수 있다.)
+  useLayoutEffect(() => {
+    if (!restoreClearRequest || restoreClearDoneRef.current === restoreClearRequest) return;
+    restoreClearDoneRef.current = restoreClearRequest;
+    clearAutoSavedWorkspace(restoreClearRequest)
+      .catch(error => {
+        console.warn('[autosave-clear]', error);
+      });
+  }, [restoreClearRequest]);
 
   useEffect(() => {
     if (intranetWorkspaceMode && lastAutoSave) {
@@ -168,9 +192,9 @@ export function useWorkspacePersistence({
 
   const handleSave = async () => {
     const existingItem = savedItems.find(item => item.name === saveName);
-    if (!saveName.trim()) { await showAlert('저장명 필수'); return; }
+    if (!saveName.trim()) { await alertAlive('저장명 필수'); return; }
     if (hasDuplicateWorkspaceName(saveName, savedItems)) {
-      const confirmed = await showConfirm(`"${saveName}" 이름의 저장 데이터가 이미 존재합니다. 덮어쓰시겠습니까?`);
+      const confirmed = await confirmAlive(`"${saveName}" 이름의 저장 데이터가 이미 존재합니다. 덮어쓰시겠습니까?`);
       if (!confirmed) return;
     }
     try {
@@ -180,14 +204,14 @@ export function useWorkspacePersistence({
       setLastAutoSave(null);
       setShowSaveModal(false);
       setSaveName('');
-      await showAlert(['저장됨', buildSaveAckMessage(ack)].filter(Boolean).join('\n'));
+      await alertAlive(['저장됨', buildSaveAckMessage(ack)].filter(Boolean).join('\n'));
     } catch (err) {
-      await showAlert(`저장에 실패했습니다. ${err?.message || '서버 오류'}`);
+      await alertAlive(`저장에 실패했습니다. ${err?.message || '서버 오류'}`);
     }
   };
 
   const handleOverwriteSave = async (item) => {
-    const confirmed = await showConfirm(`"${item.name}"에 덮어쓰시겠습니까?`);
+    const confirmed = await confirmAlive(`"${item.name}"에 덮어쓰시겠습니까?`);
     if (!confirmed) return;
     try {
       const { items, ack } = await saveWorkspaceSnapshot({ id: item.id, name: item.name, patients, savedItems, session, settings, serverConfig });
@@ -196,9 +220,9 @@ export function useWorkspacePersistence({
       setLastAutoSave(null);
       setShowSaveModal(false);
       setSaveName('');
-      await showAlert(['저장됨', buildSaveAckMessage(ack)].filter(Boolean).join('\n'));
+      await alertAlive(['저장됨', buildSaveAckMessage(ack)].filter(Boolean).join('\n'));
     } catch (err) {
-      await showAlert(`저장에 실패했습니다. ${err?.message || '서버 오류'}`);
+      await alertAlive(`저장에 실패했습니다. ${err?.message || '서버 오류'}`);
     }
   };
 
@@ -208,7 +232,7 @@ export function useWorkspacePersistence({
     if (dirtyAssessmentPatientId) { onBlockedByUnsavedDraft?.(); return; }
     let loadResultForNotice = null;
     if (mode === 'overwrite') {
-      const confirmed = await showConfirm('현재 데이터를 덮어쓰시겠습니까?');
+      const confirmed = await confirmAlive('현재 데이터를 덮어쓰시겠습니까?');
       if (!confirmed) return;
       const loadResult = getLoadablePatientsFromSnapshot(item.patients || [], { session });
       setPatients(patientTx.replacedAll({ patients: loadResult.patients }));
@@ -227,17 +251,17 @@ export function useWorkspacePersistence({
     setShowLoadModal(false);
     setIntakeShared(null);
     setShowHome(false);
-    await showLoadFailureNotice(loadResultForNotice);
+    await showLoadFailureNotice(loadResultForNotice, alertAlive);
   };
 
   const handleDelete = async (id) => {
-    const confirmed = await showConfirm('삭제하시겠습니까?');
+    const confirmed = await confirmAlive('삭제하시겠습니까?');
     if (confirmed) {
       try {
         const items = await deleteWorkspaceSnapshot({ id, savedItems, session, settings, serverConfig });
         setSavedItems(items);
       } catch (err) {
-        await showAlert(`삭제에 실패했습니다. ${err?.message || '서버 오류'}`);
+        await alertAlive(`삭제에 실패했습니다. ${err?.message || '서버 오류'}`);
       }
     }
   };

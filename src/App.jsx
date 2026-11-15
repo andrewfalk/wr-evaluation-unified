@@ -7,8 +7,6 @@ import { AppModals } from './core/components/AppModals';
 import { useAuth } from './core/auth/AuthContext';
 import { useServerConfig } from './core/hooks/useServerConfig';
 import { useAIAvailable } from './core/hooks/useAIAvailable';
-import { useAuthSync } from './core/hooks/useAuthSync';
-import { useAppSettings } from './core/hooks/useAppSettings';
 import { useEvaluationDateSync } from './core/state/patientStore/useEvaluationDateSync';
 import { useElectronMenuEvents } from './core/hooks/useElectronMenuEvents';
 import { useConflictResolution } from './core/hooks/useConflictResolution';
@@ -36,6 +34,8 @@ import { clearAllLockTokens } from './core/services/lockTokenStore';
 import { StatisticsWorkbench } from './core/components/statistics/StatisticsWorkbench';
 import { WorkspaceScreen } from './app/screens/WorkspaceScreen';
 import { renderBootGate, withLocalEscape as withLocalEscapeFor } from './app/BootGate';
+import { useLocalWorkBeforeLogin } from './app/useLocalWorkBeforeLogin';
+import { useGuardedDialogs } from './app/useWorkspaceLifetime';
 import { selectScreen, useScreenRouter } from './app/useScreenRouter';
 import { useDoctorRoster, usePatientScope } from './app/usePatientScope';
 import { useUnsavedDraftGuard } from './app/useUnsavedDraftGuard';
@@ -66,8 +66,13 @@ import './modules/shoulder';
 import './modules/elbow';
 import './modules/wrist';
 
-function App() {
-  const { session, setSession, resetToLocalSession, getAuthEpoch, getSession, invalidateAuthContext, isAuthenticated, sessionVerified, logout } = useAuth();
+// 설정(settings·handleSaveSettings·switchToLocalMode)은 작업 공간 경계(src/app/WorkspaceBoundary)가 넘긴다 — 계정이 바뀌어
+// App이 다시 띄워져도 설정(특히 운영 인트라넷 빌드의 "로컬 모드로 전환")이 유지되도록(계정 전환 수정 AS-4).
+function App({ settings, handleSaveSettings, switchToLocalMode }) {
+  const { session, isAuthenticated, sessionVerified, logout, getWorkspaceOwner } = useAuth();
+  // 화면 수명(계정 전환 수정 AS-4) — 계정이 바뀌어 이 화면이 내려간 뒤에는 기다리던 처리의 저장소 쓰기·서버 요청·알림·확인창을
+  // 이어 가지 않는다(src/app/useWorkspaceLifetime).
+  const { isAlive, alertAlive, confirmAlive } = useGuardedDialogs(showAlert, showConfirm);
   // 환자 목록·활성 환자·선택 집합 — 환자 상태 컨테이너(src/core/state/patientStore, REFACTORING_ROADMAP Phase 2 C4·P2-32·P2-37).
   // setter는 전부 참조 고정, 훅에는 지금처럼 따로 넘긴다.
   const { patients, setPatients, activeId, setActiveId, selectedIds, setSelectedIds } = usePatientsContainer();
@@ -86,8 +91,6 @@ function App() {
   const [errors, setErrors] = useState({});
   const [showSidebar, setShowSidebar] = useState(false);
   const [patientFilters, setPatientFilters] = useState(DEFAULT_PATIENT_FILTERS);
-  const { settings, handleSaveSettings, switchToLocalMode } = useAppSettings({ session, setSession, resetToLocalSession, invalidateAuthContext });
-  useAuthSync({ session, setSession, resetToLocalSession, getAuthEpoch, getSession });
   const showSettings = modals.settings; const setShowSettings = setterFor('settings');
   const showAdminConsole = modals.adminConsole; const setShowAdminConsole = setterFor('adminConsole');
   const showAccountProfile = modals.accountProfile; const setShowAccountProfile = setterFor('accountProfile');
@@ -264,10 +267,10 @@ function App() {
 
   const handleForceTakeover = useCallback(async () => {
     const holderName = lockState.holder?.holderName || '다른 사용자';
-    const ok = await showConfirm(`${holderName}이(가) 편집 중인 환자입니다. 강제로 편집 권한을 가져오시겠습니까?`);
+    const ok = await confirmAlive(`${holderName}이(가) 편집 중인 환자입니다. 강제로 편집 권한을 가져오시겠습니까?`);
     if (!ok) return;
     await forceAcquire();
-  }, [lockState.holder, forceAcquire]);
+  }, [lockState.holder, forceAcquire, confirmAlive]);
 
   // 의사 명부 조회 + 명부 기준 scope 유효성 가드 + 대시보드 scope 로딩 판정 — src/app/usePatientScope.ts(P2-27).
   const { doctorRoster, isDashboardScopeLoading } = useDoctorRoster({
@@ -325,7 +328,7 @@ function App() {
     }
 
     const proceedUnresolved = (message) => async () => {
-      const ok = await showConfirm(message);
+      const ok = await confirmAlive(message);
       if (!ok) return false;
       setPatients(patientTx.patientPaused({ id: current.id }));
       switchPatient(patientId);
@@ -338,13 +341,16 @@ function App() {
     }
 
     if (status === 'dirty' || status === 'local-only') {
-      const ok = await showConfirm('저장되지 않은 변경사항이 있습니다. 저장 후 이동하시겠습니까?');
+      const ok = await confirmAlive('저장되지 않은 변경사항이 있습니다. 저장 후 이동하시겠습니까?');
       if (!ok) return;
 
       let outcome = 'still-dirty';
       for (let attempt = 0; attempt < 3 && outcome === 'still-dirty'; attempt += 1) {
+        // 화면이 내려갔으면(계정 전환) 이전 화면의 저장을 더 기다리지도, 다시 요청하지도 않는다.
+        if (!isAlive()) return;
         outcome = await flushPatient(current.id);
       }
+      if (!isAlive()) return;
 
       if (outcome === 'synced') { switchPatient(patientId); return; }
       if (outcome === 'conflict') {
@@ -352,7 +358,7 @@ function App() {
         return;
       }
       if (outcome === 'still-dirty') {
-        await showAlert('아직 저장 중입니다. 잠시 후 다시 시도해 주세요.');
+        await alertAlive('아직 저장 중입니다. 잠시 후 다시 시도해 주세요.');
         return;
       }
       // lock-lost / permission / offline / error
@@ -361,7 +367,7 @@ function App() {
     }
 
     switchPatient(patientId);
-  }, [activeId, patients, switchPatient, flushPatient, setPatients, blockIfDraftDirty, isIntranetMode]);
+  }, [activeId, patients, switchPatient, flushPatient, setPatients, blockIfDraftDirty, isIntranetMode, isAlive, alertAlive, confirmAlive]);
 
   // 영상 분석 서버 적용 후 서버 동기화 환자를 목록에 반영(로컬 id 보존 → id로 교체).
   const onVideoServerApplied = useCallback((serverPatient) => {
@@ -395,6 +401,10 @@ function App() {
     return generateUnifiedReport(activePatient);
   }, [activePatient, activeModules]);
 
+  // 로그인 직전 로컬 작업 보존(J2, src/app/useLocalWorkBeforeLogin) + 로그인 요청 중 표시(로컬 전환 버튼을 막는다) — AS-4.
+  const onBeforeLogin = useLocalWorkBeforeLogin({ patients, getWorkspaceOwner });
+  const [loginPending, setLoginPending] = useState(false);
+
   // --- 핸들러 ---
 
   const handleSaveSettingsAndClose = (newSettings) => {
@@ -412,8 +422,8 @@ function App() {
 
   const handleResetPatients = async () => {
     if (blockIfDraftDirty()) return;
-    const ok = await showConfirm('현재 작업 중인 환자 목록을 모두 삭제하시겠습니까?');
-    if (!ok) return;
+    const ok = await confirmAlive('현재 작업 중인 환자 목록을 모두 삭제하시겠습니까?');
+    if (!ok) return; // 묻는 동안 화면이 내려갔으면 false — 다음 화면의 자동저장을 지우지 않는다
     setPatientSyncPaused(true);
     setPatients(patientTx.replacedAll({ patients: [] }));
     setActiveId(null);
@@ -494,6 +504,7 @@ function App() {
   const bootScreen = renderBootGate({
     isIntranetMode, configLoading, configError, session, settings, sessionVerified, isAuthenticated,
     onSwitchToLocal: switchToLocalMode,
+    onBeforeLogin, loginPending, onLoginPendingChange: setLoginPending,
   });
   if (bootScreen) return bootScreen;
 

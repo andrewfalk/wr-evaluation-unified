@@ -6,9 +6,12 @@ import {
 } from '../services/presetRepository';
 
 import { hasIntranetSession } from '../../platform/dataMode';
+import { useWorkspaceLifetime } from '../../app/useWorkspaceLifetime';
 export function PresetsSection({ onPresetsImported, session }) {
   const fileInputRef = useRef(null);
   const [presetMsg, setPresetMsg] = useState(null);
+  // 화면 수명(계정 전환 수정 AS-4) — 가져오는 동안 화면이 내려가면 남은 프리셋을 보내지 않는다.
+  const { isAlive } = useWorkspaceLifetime();
 
   const handleExport = async () => {
     try {
@@ -24,7 +27,7 @@ export function PresetsSection({ onPresetsImported, session }) {
     if (!file) return;
     e.target.value = '';
     try {
-      const { addedCount } = await importPresetsFromJSON(file, session);
+      const { addedCount } = await importPresetsFromJSON(file, session, { shouldContinue: isAlive });
       setPresetMsg({ type: 'ok', text: `${addedCount}개 프리셋을 가져왔습니다.` });
       onPresetsImported?.();
     } catch {

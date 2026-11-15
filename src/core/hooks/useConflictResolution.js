@@ -3,6 +3,7 @@ import { useCallback } from 'react';
 import { correctPatientIdentity, deletePatientOnServer } from '../services/patientServerRepository';
 import { getLockToken } from '../services/lockTokenStore';
 import { showAlert, showConfirm } from '../utils/platform';
+import { useGuardedDialogs } from '../../app/useWorkspaceLifetime';
 import { patientTx } from '../state/patientStore/transitions';
 
 // 환자 동기화 충돌 해결 핸들러
@@ -11,6 +12,8 @@ export function useConflictResolution({
   session, settings, setConflictPatientId, syncNow,
   dirtyAssessmentPatientId, onBlockedByUnsavedDraft,
 }) {
+  // 화면 수명(계정 전환 수정 AS-4) — 화면이 내려간 뒤에는 기다리던 처리의 서버 요청·파일·알림·확인창을 이어 가지 않는다.
+  const { isAlive, alertAlive, confirmAlive } = useGuardedDialogs(showAlert, showConfirm);
   // 지금 종합소견을 편집 중인 환자를 충돌 해결/생년월일 정정으로 교체·삭제하면 draft가
   // 어느 데이터를 기준으로 저장될지 불명확해진다 — 편집 완료/취소로 먼저 마무리하게 한다.
   // useCallback으로 고정해 handleCorrectServerIdentity의 deps에 안전하게 넣는다.
@@ -53,7 +56,7 @@ export function useConflictResolution({
     if (!patient || !birthDate) return;
     if (isDirtyBlocked(patient.id)) return;
 
-    const ok = await showConfirm(
+    const ok = await confirmAlive(
       `서버에 저장된 생년월일을 '${birthDate}'로 정정합니다.\n`
       + `같은 등록번호를 쓰는 다른 평가 건이 있으면 함께 갱신됩니다.\n\n`
       + `이 등록번호가 정말 이 환자의 것인지 확인하셨나요?`
@@ -77,8 +80,9 @@ export function useConflictResolution({
       // 알림만 띄우고 끝내면 그 case들은 구 revision을 들고 있다가 다음 저장에서 409가 난다.
       // 실제로 pull을 돌려 최신 revision을 받아온다.
       if (affectedPatientIds.length > 1) {
+        if (!isAlive()) return;
         await syncNow?.({ pull: true, reason: 'identity-correction' });
-        await showAlert(
+        await alertAlive(
           `생년월일을 정정했습니다.\n`
           + `같은 환자의 다른 평가 ${affectedPatientIds.length - 1}건도 함께 갱신되어 최신 상태로 동기화했습니다.`
         );
@@ -86,16 +90,16 @@ export function useConflictResolution({
     } catch (error) {
       const code = error?.data?.code;
       if (code === 'IDENTITY_CORRECTION_REQUIRES_ADMIN') {
-        await showAlert('이 등록번호에는 여러 평가 건이 연결되어 있어 관리자만 정정할 수 있습니다.\n관리자에게 요청하세요.');
+        await alertAlive('이 등록번호에는 여러 평가 건이 연결되어 있어 관리자만 정정할 수 있습니다.\n관리자에게 요청하세요.');
         return;
       }
       if (code === 'LOCK_HELD') {
-        await showAlert(`다른 사용자가 관련 평가 건을 편집 중입니다.\n${error?.message || ''}`);
+        await alertAlive(`다른 사용자가 관련 평가 건을 편집 중입니다.\n${error?.message || ''}`);
         return;
       }
-      await showAlert(`생년월일 정정에 실패했습니다. ${error?.message || '다시 시도해 주세요.'}`);
+      await alertAlive(`생년월일 정정에 실패했습니다. ${error?.message || '다시 시도해 주세요.'}`);
     }
-  }, [session, settings, setPatients, setConflictPatientId, syncNow, isDirtyBlocked]);
+  }, [session, settings, setPatients, setConflictPatientId, syncNow, isDirtyBlocked, isAlive, alertAlive, confirmAlive]);
 
   const handleResolveConflict = async (resolution, { patient, serverPatient, mergedData } = {}) => {
     if (!patient) return;
@@ -117,7 +121,7 @@ export function useConflictResolution({
           return;
         }
         setPatients(patientTx.deleteRevisionUpdated({ id: patient.id, currentRevision: error?.data?.currentRevision }));
-        await showAlert(`Delete failed. ${error?.message || 'Please try again.'}`);
+        await alertAlive(`Delete failed. ${error?.message || 'Please try again.'}`);
       }
       return;
     }

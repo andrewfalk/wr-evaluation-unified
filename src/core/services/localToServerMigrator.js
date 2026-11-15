@@ -215,7 +215,9 @@ export async function migratePresetsToServer(presets, { session } = {}) {
 // May throw MigrationCanceledError / MigrationDeniedError / MigrationReadError
 // during the collect phase — caller decides how to surface each.
 // ---------------------------------------------------------------------------
-export async function runMigration({ session, settings } = {}) {
+// shouldProceed(선택): 수집(확인창 포함)이 끝난 뒤 서버로 보내기 직전에 확인한다 — false면 취소로 끝낸다(계정 전환 수정 AS-4:
+// 확인창을 기다리는 사이 화면이 내려가면 이전 화면의 이관을 보내지 않는다).
+export async function runMigration({ session, settings, shouldProceed } = {}) {
   const snapshot = await collectLocalSnapshot();
 
   let patients, presets;
@@ -227,6 +229,8 @@ export async function runMigration({ session, settings } = {}) {
     patients = mergePatientsFromSnapshot(snapshot);
     presets = Array.isArray(snapshot.customPresets) ? snapshot.customPresets : [];
   }
+
+  if (shouldProceed && !shouldProceed()) throw new MigrationCanceledError();
 
   const [patientResult, presetResult] = await Promise.all([
     migrateToServer(patients, { session, settings }),

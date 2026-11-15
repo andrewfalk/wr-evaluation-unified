@@ -3,6 +3,7 @@ import { loadAllPresets, normalizeBuiltinPreset, saveCustomPreset, deleteCustomP
 import { getModule } from '../moduleRegistry';
 import { patientTx } from '../state/patientStore/transitions';
 import { showAlert, showConfirm } from '../utils/platform';
+import { useGuardedDialogs } from '../../app/useWorkspaceLifetime';
 import { FALLBACK_PRESETS } from '../../modules/knee/utils/data';
 
 // App.jsx가 canEditPatient(담당의/admin) AND 락 보유 여부(다른 사용자가 편집 중이면 false)를
@@ -11,6 +12,8 @@ import { FALLBACK_PRESETS } from '../../modules/knee/utils/data';
 // modalSlots(선택): 프리셋 모달 3칸을 호출부(App의 useModalState — P2-30, 모달 키별 맵)가 들고 있으면 그것을 쓴다.
 // 없으면 예전처럼 이 훅이 직접 들고 있다(단독 테스트·다른 호출부 호환). 훅 규칙상 내부 useState는 항상 부른다.
 export function usePresetManagement({ activeId, activeModules, session, setPatients, canMutateActivePatient = true, modalSlots = null }) {
+  // 화면 수명(계정 전환 수정 AS-4) — 화면이 내려간 뒤에는 기다리던 저장·삭제 뒤의 알림·확인창을 띄우지 않는다.
+  const { alertAlive, confirmAlive } = useGuardedDialogs(showAlert, showConfirm);
   const [presets, setPresets] = useState([]);
   const [presetMeta, setPresetMeta] = useState(null);
   const [presetError, setPresetError] = useState(null);
@@ -52,7 +55,7 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
     // StepContent의 UI 차단(클릭/키보드)이 정상 흐름에서 이 함수 호출 자체를 막지만, 여기
     // 도달했다면(우회 경로) 조용히 무시하지 않고 거짓 성공 알림 없이 명확히 알린다.
     if (!canMutateActivePatient) {
-      await showAlert('담당 의사가 아니거나 다른 사용자가 편집 중이어서 프리셋을 적용할 수 없습니다.');
+      await alertAlive('담당 의사가 아니거나 다른 사용자가 편집 중이어서 프리셋을 적용할 수 없습니다.');
       return;
     }
 
@@ -82,11 +85,11 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
       session,
     }));
     if (applicableModuleIds.length > 0) {
-      await showAlert(`프리셋 "${preset.jobName}"이 적용되었습니다.\n적용 모듈: ${formatModuleNames(applicableModuleIds)}`);
+      await alertAlive(`프리셋 "${preset.jobName}"이 적용되었습니다.\n적용 모듈: ${formatModuleNames(applicableModuleIds)}`);
     } else {
-      await showAlert(`프리셋 "${preset.jobName}"을 선택했지만 현재 활성 모듈과 겹치는 저장 데이터가 없습니다.`);
+      await alertAlive(`프리셋 "${preset.jobName}"을 선택했지만 현재 활성 모듈과 겹치는 저장 데이터가 없습니다.`);
     }
-  }, [activeId, activeModules, formatModuleNames, session, setPatients, canMutateActivePatient]);
+  }, [activeId, activeModules, formatModuleNames, session, setPatients, canMutateActivePatient, alertAlive]);
 
   const handleSaveCustomPreset = useCallback(async (preset, feedback = {}) => {
     const savedPreset = await saveCustomPreset(preset, { replaceModules: feedback.replaceModules }, session);
@@ -101,15 +104,15 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
       const removedModulesLine = feedback.removedModuleIds?.length
         ? `\n제거된 모듈: ${formatModuleNames(feedback.removedModuleIds)}`
         : '';
-      await showAlert(
+      await alertAlive(
         `기존 프리셋 업데이트 완료\n프리셋: ${presetLabel}\n기존 모듈: ${formatModuleNames(feedback.existingModuleIds)}\n이번 저장 모듈: ${formatModuleNames(feedback.selectedModuleIds)}\n저장 후 모듈: ${formatModuleNames(feedback.mergedModuleIds)}${removedModulesLine}`
       );
       return;
     }
-    await showAlert(
+    await alertAlive(
       `새 프리셋 저장 완료\n프리셋: ${presetLabel}\n저장 모듈: ${formatModuleNames(feedback.selectedModuleIds || Object.keys(savedPreset.modules || {}))}`
     );
-  }, [formatModuleNames, reloadPresets, session]);
+  }, [formatModuleNames, reloadPresets, session, alertAlive]);
 
   const closePresetManageModal = useCallback(() => {
     if (presetEditingPreset && presetModalJobId) {
@@ -134,7 +137,7 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
         : `${preset.jobName} / ${getPresetCategory(preset)}`
       : null;
 
-    const confirmed = await showConfirm(
+    const confirmed = await confirmAlive(
       label ? `"${label}" 프리셋을 삭제하시겠습니까?` : '이 프리셋을 삭제하시겠습니까?'
     );
     if (!confirmed) return false;
@@ -142,7 +145,7 @@ export function usePresetManagement({ activeId, activeModules, session, setPatie
     await deleteCustomPreset(id, session, revision);
     await reloadPresets();
     return true;
-  }, [presets, reloadPresets, session]);
+  }, [presets, reloadPresets, session, confirmAlive]);
 
   return {
     presets,
