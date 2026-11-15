@@ -1,20 +1,19 @@
 import { useState } from 'react';
 import { showAlert, showConfirm } from '../utils/platform';
 import { patientTx } from '../state/patientStore/transitions';
-import { useCommitBarrier } from '../state/patientStore/useCommitBarrier';
 import { getEmrBridge } from '../../platform/bridge';
 import { useGuardedDialogs } from '../../app/useWorkspaceLifetime';
 
 export function useEMRIntegration({ activePatient, patients, selectedIds, session, setPatients, dirtyAssessmentPatientId }) {
-  // 커밋 배리어(P2-39b, #323 Codex) — 전이 patient/sharedPatched가 적용 시점 목록으로 적용했는지(receipt)는 커밋 뒤에야
-  // 확정된다. 미리 렌더된 목록으로 판정하면 같은 배치에 들어온 식별정보 변경을 놓쳐 저장하지 않은 결과를 성공으로 알린다.
-  // 전이와 배리어 tick을 같은 동기 구간에서 예약하고, 그 tick이 반영된 커밋 뒤에 receipt를 읽는다(useCommitBarrier).
-  const waitForCommit = useCommitBarrier();
+  // 적용 여부(receipt) — 전이 patient/sharedPatched는 적용 시점 목록으로 판정해 receipt에 적는다(P2-39b). 환자 스토어가
+  // dispatch 때 전이를 동기로 실행하므로(P2-40a) **setPatients 다음 줄에서 읽는다**(그 뒤에는 읽지 않는다). 그 시점의 목록은
+  // 앞서 dispatch된 갱신(같은 배치의 식별정보 변경 포함)이 전부 적용된 것이라 커밋을 기다릴 필요가 없다(옮기기 전
+  // useCommitBarrier의 목적 — P2-40b에서 삭제). 판정이 없으면(전이가 실행되지 않음 — vi.fn() 테스트) 적용되지 않은 것으로 본다.
+  // 전이가 던지면 예외는 이 호출(호출부의 catch)로 나온다 — 옮기기 전에는 렌더 중 오류였다.
   const applySharedPatch = (payload) => {
     const receipt = { applied: undefined };
     setPatients(patientTx.sharedPatched({ ...payload, receipt }));
-    // 언마운트로 풀린 경우 등 판정이 없으면(undefined) 적용되지 않은 것으로 본다.
-    return waitForCommit().then(() => receipt.applied === true);
+    return Promise.resolve(receipt.applied === true);
   };
   const [extractProgress, setExtractProgress] = useState(null);
   // 화면 수명(계정 전환 수정 AS-4) — 화면이 내려간 뒤에는(계정이 바뀜) 기다리던 EMR 작업이 다음 브리지 호출·알림·확인창을
