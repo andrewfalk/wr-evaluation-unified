@@ -3,10 +3,15 @@
 // usePatientSync 언마운트 가드(계정 전환 수정 AS-2) — 화면이 내려간 뒤에는 큐에 남아 있던 동기화가
 // 옛 목록·옛 세션으로 서버에 저장 요청을 보내지 않는다. 계정이 바뀌면 화면(App)을 다시 띄우므로
 // 이전 화면의 훅 인스턴스가 언마운트된 뒤에도 돌면 안 된다.
+//
+// 하니스는 App과 같은 환자 상태 컨테이너(patients·activeId + store) — 게이트 B P2-41a에서 T3·flush와 함께 맨 useState를
+// 컨테이너로 바꿨다(본문·단언은 그대로, store 인자는 P2-41c 전까지 옛 훅이 무시한다).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { StrictMode, useState } from 'react';
+import { StrictMode } from 'react';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { usePatientSync } from '../usePatientSync.js';
+import { usePatientsContainer } from '../../state/patientStore/usePatientsContainer';
+import { defineTransition } from '../../state/patientStore/transitions';
 
 vi.mock('../../services/patientServerRepository', async () => {
   const actual = await vi.importActual('../../services/patientServerRepository');
@@ -31,14 +36,16 @@ function serverPatient(id, overrides = {}) {
   };
 }
 
+// 테스트가 목록을 직접 바꾸는 경로(옛 하니스의 맨 setState와 같은 의미 — 값 또는 updater).
+const rawSet = defineTransition('test/rawSet', (prev, arg) => (typeof arg === 'function' ? arg(prev) : arg));
+
 function useHarness({ initialPatients, initialActiveId }) {
-  const [patients, setPatients] = useState(initialPatients);
-  const [activeId, setActiveId] = useState(initialActiveId);
+  const { patients, setPatients, activeId, setActiveId, store } = usePatientsContainer(initialPatients, { initialActiveId });
   const sync = usePatientSync({
-    patients, setPatients, activeId, setActiveId,
+    patients, setPatients, activeId, setActiveId, store,
     session: SESSION, settings: {}, enabled: true, scope: 'mine', lockState: { status: 'none' },
   });
-  return { patients, rawSetPatients: setPatients, ...sync };
+  return { patients, rawSetPatients: arg => setPatients(rawSet(arg)), ...sync };
 }
 
 async function settle(rounds = 8) {

@@ -6,13 +6,17 @@
 // scope 변경 재pull, stale-pull 가드, 첫 환자 자동 선택, 사라진 활성 환자 교체,
 // focus/visibility pull, 권한 거부 배너 카운트.
 //
-// 하니스는 flush 테스트와 같은 진짜 useState 두 개(patients·activeId) — 훅 인자 모양을
-// 바꾸는 C4 리팩터링(P2-32~39)에서도 이 파일은 수정하지 않는다. App이 StrictMode로 돌므로
-// 여기서도 StrictMode로 렌더한다(부팅 sync가 이중 effect로 두 번 예약되는 것까지 그대로).
+// 하니스는 App과 같은 환자 상태 컨테이너(patients·activeId + store) — 게이트 B P2-41a에서 맨 useState 두 개를
+// 컨테이너로 바꿨다(본문·단언은 그대로). usePatientSync가 스토어를 직접 읽게 되는 P2-41c 전에, 옛 훅을 상대로 같은
+// 결과가 나오는지 먼저 확인하려는 것이다(store 인자는 옛 훅이 무시한다). rawSetPatients는 하니스가 꼬리표 붙인 전이로
+// 감싼다(컨테이너는 꼬리표 없는 인자를 받지 않는다). App이 StrictMode로 돌므로 여기서도 StrictMode로 렌더한다
+// (부팅 sync가 이중 effect로 두 번 예약되는 것까지 그대로).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { StrictMode, useState } from 'react';
+import { StrictMode } from 'react';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { usePatientSync } from '../usePatientSync.js';
+import { usePatientsContainer } from '../../state/patientStore/usePatientsContainer';
+import { defineTransition } from '../../state/patientStore/transitions';
 
 vi.mock('../../services/patientServerRepository', async () => {
   const actual = await vi.importActual('../../services/patientServerRepository');
@@ -38,14 +42,18 @@ function serverPatient(id, overrides = {}) {
   };
 }
 
+// 테스트가 목록을 직접 바꾸는 경로(옛 하니스의 맨 setState와 같은 의미 — 값 또는 updater).
+const rawSet = defineTransition('test/rawSet', (prev, arg) => (typeof arg === 'function' ? arg(prev) : arg));
+
 function useHarness({ initialPatients, initialActiveId, scope = 'mine', enabled = true, lockState = { status: 'none' } }) {
-  const [patients, setPatients] = useState(initialPatients);
-  const [activeId, setActiveId] = useState(initialActiveId === undefined ? (initialPatients[0]?.id ?? null) : initialActiveId);
+  const { patients, setPatients, activeId, setActiveId, store } = usePatientsContainer(initialPatients, {
+    initialActiveId: initialActiveId === undefined ? (initialPatients[0]?.id ?? null) : initialActiveId,
+  });
   const sync = usePatientSync({
-    patients, setPatients, activeId, setActiveId,
+    patients, setPatients, activeId, setActiveId, store,
     session: SESSION, settings: {}, enabled, scope, lockState,
   });
-  return { patients, activeId, rawSetPatients: setPatients, ...sync };
+  return { patients, activeId, rawSetPatients: arg => setPatients(rawSet(arg)), ...sync };
 }
 
 function renderSync(initialProps) {
