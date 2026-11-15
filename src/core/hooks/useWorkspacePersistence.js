@@ -127,6 +127,8 @@ export function useWorkspacePersistence({
   useEffect(() => {
     if (!autosaveEnabled) {
       autosaveRestoreCheckedRef.current = false;
+      // 자동저장 문맥을 벗어나면(인트라넷으로 전환) 진행 중이던 복원은 끝낸다 — 늦게 수락돼도 적용하지 않고 저장본을 남긴다.
+      endRestore(restorePendingRef.current);
       return;
     }
     if (autosaveRestoreCheckedRef.current) return;
@@ -135,14 +137,18 @@ export function useWorkspacePersistence({
     const options = { session, settings, serverConfig };
     let resolveRestore;
     const entry = { promise: new Promise((r) => { resolveRestore = r; }), resolve: () => resolveRestore() };
+    // 이전 복원이 아직 진행 중이면(모드를 오가 다시 시작됨) 끝내고 대체한다 — 늦은 응답은 적용하지 않는다.
+    endRestore(restorePendingRef.current);
     restorePendingRef.current = entry;
+    // 이 복원이 아직 유효한가 — 화면이 떠 있고, 다른 복원으로 대체되지 않았다.
+    const stillCurrent = () => isAlive() && restorePendingRef.current === entry;
     loadAutoSavedWorkspace(options).then(saved => {
       // 읽는 동안 화면이 내려갔으면(계정 전환) 묻지도 지우지도 않는다 — 로컬 자동저장의 유일한 사본일 수 있다.
-      if (!saved || !isAlive()) { endRestore(entry); return; }
+      if (!saved || !stillCurrent()) { endRestore(entry); return; }
       const time = new Date(saved.savedAt).toLocaleString('ko-KR');
       confirmAlive(`이전 자동 저장 데이터가 있습니다 (${time}).\n이어서 작업하시겠습니까?`).then(async ok => {
-        // 확인하는 동안 화면이 내려갔으면 아무것도 하지 않는다(수락이든 거절이든 저장본을 남긴다).
-        if (!isAlive()) { endRestore(entry); return; }
+        // 확인하는 동안 화면이 내려갔거나 대체됐으면 아무것도 하지 않는다(수락이든 거절이든 저장본을 남긴다).
+        if (!stillCurrent()) { endRestore(entry); return; }
         if (ok && saved.patients?.length) {
           const loadResult = getLoadablePatientsFromSnapshot(saved.patients, { session });
           setPatients(patientTx.replacedAll({ patients: loadResult.patients }));

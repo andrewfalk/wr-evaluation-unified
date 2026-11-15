@@ -161,3 +161,39 @@ describe('자동저장 복원과 로그인 직전 로컬 보존의 직렬화', (
     }
   });
 });
+
+describe('자동저장 복원이 다시 시작되면 이전 복원은 끝나고 적용되지 않는다', () => {
+  it('로컬→인트라넷→로컬로 두 복원이 겹치고 응답이 한꺼번에 도착해도: 대기가 풀리고, 나중 복원만 적용·삭제 1회', async () => {
+    const reads = [deferred(), deferred()];
+    loadAutoSavedWorkspace.mockImplementationOnce(() => reads[0].promise).mockImplementationOnce(() => reads[1].promise);
+    const old = { savedAt: SAVED.savedAt, patients: [{ ...SAVED.patients[0], id: 'old' }] };
+    const fresh = { savedAt: SAVED.savedAt, patients: [{ ...SAVED.patients[0], id: 'new' }] };
+    const view = renderHook(({ settings }) => {
+      const [patients, setPatients] = useState([]);
+      const persistence = useWorkspacePersistence({
+        patients, setPatients,
+        session: { mode: 'local' }, settings, serverConfig: {},
+        setActiveId: vi.fn(), setCurrentStepIndex: vi.fn(), setIntakeShared: vi.fn(), setShowHome: vi.fn(),
+        setShowSaveModal: vi.fn(), setShowLoadModal: vi.fn(),
+        disabled: false, dirtyAssessmentPatientId: null, onBlockedByUnsavedDraft: vi.fn(),
+      });
+      return { patients, wait: persistence.waitForAutosaveRestore };
+    }, { initialProps: { settings: { autoSaveInterval: 0 } }, wrapper: StrictMode });
+    await flush(2);
+    view.rerender({ settings: { autoSaveInterval: 0, integrationMode: 'intranet' } });
+    view.rerender({ settings: { autoSaveInterval: 0 } });
+    await flush(2);
+    expect(loadAutoSavedWorkspace).toHaveBeenCalledTimes(2);
+
+    let settled = false;
+    const waiting = view.result.current.wait().then(() => { settled = true; });
+    await act(async () => { reads[1].resolve(fresh); reads[0].resolve(old); });
+    await flush();
+    await act(async () => { await waiting; });
+
+    expect(settled).toBe(true);
+    expect(view.result.current.patients.map((p) => p.id)).toEqual(['new']);
+    expect(clearAutoSavedWorkspace).toHaveBeenCalledTimes(1);
+    expect(showConfirm).toHaveBeenCalledTimes(1); // 대체된 복원은 묻지도 않는다
+  });
+});
