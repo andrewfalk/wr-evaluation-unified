@@ -278,3 +278,10 @@ export function onAuthBroadcast(handler) {
 export function broadcastLogout() {
   _ch?.postMessage({ type: 'LOGOUT' });
 }
+
+// 이 탭에서 로그인했음을 다른 탭에 알린다 — 신원 키(user.id|organizationId)만 싣는다(토큰·이름 없음).
+// 다른 계정으로 쓰던 탭은 로그인 화면으로 간다(useAuthSync). 옛 번들의 탭은 모르는 종류를 무시한다.
+export function broadcastLogin(identity) {
+  if (!identity) return;
+  _ch?.postMessage({ type: 'LOGIN', identity });
+}

@@ -5,6 +5,9 @@
 import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, renderHook } from '@testing-library/react';
+
+// 'wr-auth' 채널이 다른 테스트 파일(다른 worker)의 로그인·로그아웃 방송과 섞이지 않도록 authChannel을 불러오기 전에 가짜 채널을 설치한다.
+await vi.hoisted(async () => (await import('../../../testing/fakeBroadcastChannel.js')).installFakeBroadcastChannel());
 import { useAuthSync } from '../useAuthSync.js';
 import { configureHttpClient, requestJson } from '../../services/httpClient';
 

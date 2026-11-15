@@ -67,7 +67,7 @@ import './modules/elbow';
 import './modules/wrist';
 
 function App() {
-  const { session, setSession, resetToLocalSession, getAuthEpoch, getSession, isAuthenticated, sessionVerified, logout } = useAuth();
+  const { session, setSession, resetToLocalSession, getAuthEpoch, getSession, invalidateAuthContext, isAuthenticated, sessionVerified, logout } = useAuth();
   // 환자 목록·활성 환자·선택 집합 — 환자 상태 컨테이너(src/core/state/patientStore, REFACTORING_ROADMAP Phase 2 C4·P2-32·P2-37).
   // setter는 전부 참조 고정, 훅에는 지금처럼 따로 넘긴다.
   const { patients, setPatients, activeId, setActiveId, selectedIds, setSelectedIds } = usePatientsContainer();
@@ -86,7 +86,7 @@ function App() {
   const [errors, setErrors] = useState({});
   const [showSidebar, setShowSidebar] = useState(false);
   const [patientFilters, setPatientFilters] = useState(DEFAULT_PATIENT_FILTERS);
-  const { settings, handleSaveSettings, switchToLocalMode } = useAppSettings({ session, setSession, resetToLocalSession });
+  const { settings, handleSaveSettings, switchToLocalMode } = useAppSettings({ session, setSession, resetToLocalSession, invalidateAuthContext });
   useAuthSync({ session, setSession, resetToLocalSession, getAuthEpoch, getSession });
   const showSettings = modals.settings; const setShowSettings = setterFor('settings');
   const showAdminConsole = modals.adminConsole; const setShowAdminConsole = setterFor('adminConsole');

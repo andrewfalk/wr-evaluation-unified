@@ -99,7 +99,14 @@ export function useAuthSync({ session, setSession, resetToLocalSession, getAuthE
         setSession(prev => applyAuthUpdate(prev, msg));
       } else if (msg?.type === 'LOGOUT') {
         resetToLocalSession();
+      } else if (msg?.type === 'LOGIN') {
+        // 다른 탭이 로그인했다 — 같은 브라우저의 로그인 쿠키는 이제 그 계정 것이다. 이 탭이 다른 계정의 인트라넷 세션이면
+        // 로그인 화면으로 되돌린다(작업 공간 주인은 유지 — 원래 계정으로 다시 로그인하면 이어 간다). 같은 계정·로컬 세션은 무시.
+        const mine = intranetIdentityOf(getSession ? getSession() : sessionRef.current);
+        if (mine !== null && typeof msg.identity === 'string' && msg.identity !== mine) {
+          resetToLocalSession();
+        }
       }
     });
-  }, [setSession, resetToLocalSession]);
+  }, [setSession, resetToLocalSession, getSession]);
 }

@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { requestJson } from '../services/httpClient';
 import { isElectron } from '../utils/platform';
@@ -22,7 +22,13 @@ function loginErrorMessage(err) {
 }
 
 export function LoginModal({ apiBaseUrl = '' }) {
-  const { login } = useAuth();
+  const { login, beginLoginAttempt } = useAuth();
+  // 언마운트된 화면은 늦게 끝난 로그인 요청을 적용하지 않는다(StrictMode의 시험 언마운트 뒤에는 setup이 되돌린다).
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [loginId, setLoginId]       = useState('');
   const [password, setPassword]     = useState('');
   const [error, setError]           = useState('');
@@ -38,15 +44,21 @@ export function LoginModal({ apiBaseUrl = '' }) {
     if (!loginId.trim() || !password) return;
     setLoading(true);
     setError('');
+    // 로그인 시도 — 인증 문맥이 바뀌면(다른 로그인·로컬 전환·화면 재시작) 요청이 취소되고 응답이 와도 적용되지 않는다.
+    const attempt = beginLoginAttempt?.();
     try {
       const data = await requestJson('/api/auth/login', {
         baseUrl: apiBaseUrl,
         method: 'POST',
         body: { loginId: loginId.trim(), password, rememberMe: !electron && rememberMe },
         _retry: true, // login 401 = wrong credentials, not token expiry — skip refresh interceptor
+        ...(attempt ? { signal: attempt.signal } : {}),
       });
-      login(data, apiBaseUrl);
+      if (!mountedRef.current) return;
+      login(data, apiBaseUrl, attempt);
     } catch (err) {
+      // 문맥이 바뀌어 취소된 시도는 안내하지 않는다(사용자가 다른 동작을 했다).
+      if (err?.name === 'AbortError' || attempt?.signal.aborted) return;
       setError(loginErrorMessage(err));
     } finally {
       setLoading(false);

@@ -12,7 +12,7 @@ export function normalizeBaseUrl(baseUrl = '') {
 }
 
 // 설정 라이프사이클(테마/폰트, apiBaseUrl 동기화, Electron 비동기 로드) + 설정 저장/로컬모드 전환
-export function useAppSettings({ session, setSession, resetToLocalSession }) {
+export function useAppSettings({ session, setSession, resetToLocalSession, invalidateAuthContext }) {
   const [settings, setSettings] = useState(() => loadAppSettings(DEFAULT_SETTINGS));
   const skipNextSettingsUrlResetRef = useRef(false);
 
@@ -61,6 +61,11 @@ export function useAppSettings({ session, setSession, resetToLocalSession }) {
   }, []);
 
   const handleSaveSettings = (newSettings) => {
+    // 모드나 서버 주소가 바뀌면 진행 중인 로그인 시도·로그아웃을 무효로 한다(작업 공간 주인 유무와 무관) — 늦게 도착한
+    // 로그인 응답이 바뀐 문맥에 적용되지 않게.
+    const modeChanged = isIntranetContext({ settings }) !== isIntranetContext({ settings: newSettings });
+    const urlChanged = normalizeBaseUrl(settings.apiBaseUrl) !== normalizeBaseUrl(newSettings.apiBaseUrl);
+    if (modeChanged || urlChanged) invalidateAuthContext?.();
     setSettings(newSettings);
     saveAppSettings(newSettings);
     const nextBaseUrl = normalizeBaseUrl(newSettings.apiBaseUrl);
