@@ -10,6 +10,7 @@ import { act, configure, fireEvent, screen, waitFor } from '@testing-library/rea
 import { readFileSync } from 'node:fs';
 import { renderApp, resetAppEnvironment } from './testing/renderApp';
 import { createFetchRouter } from './testing/fetchRouter';
+import { FakeBroadcastChannel } from './testing/fakeBroadcastChannel.js';
 import goldenPatients from './core/fixtures/goldenPatients.json';
 
 // G9와 같은 이유(P2-09): 다른 worker의 BroadcastChannel('wr-auth') 메시지가 닿지 않게 정적 import보다 먼저 설치.
@@ -397,5 +398,49 @@ describe('로그아웃 확인(AS-5)', () => {
     await wait(200);
     expect(screen.getByText('데이터 저장 방식')).toBeTruthy();
     expect(srv.router.count('POST /api/auth/logout')).toBe(0);
+  }, 20000);
+});
+
+describe('로그아웃과 편집 락·다른 탭의 로그인(계정 전환 수정 후속)', () => {
+  const UNSAVED_MESSAGE = '저장되지 않은 환자가 1명 있습니다. 로그아웃하면 이 내용은 사라집니다. 로그아웃할까요?';
+
+  it('편집 락을 잡은 채 로그아웃하면 그 락을 해제한다', async () => {
+    const { srv } = await bootAsA();
+    await logoutViaMenu('김의사');
+    await screen.findByRole('heading', { name: '인트라넷 로그인' });
+    await waitFor(() => expect(srv.router.count('DELETE /api/patients/:id/lock')).toBeGreaterThan(0));
+  }, 20000);
+
+  it('로그아웃 확인창이 떠 있는 동안 다른 탭이 다른 계정으로 로그인하면, 확인해도 로그아웃 방송·요청을 보내지 않는다', async () => {
+    const heard = [];
+    const otherTab = new BroadcastChannel('wr-auth'); // 방금 B로 로그인한 다른 탭
+    otherTab.onmessage = (e) => { heard.push(e.data); };
+    // 셸의 확인창은 비동기라 떠 있는 동안 다른 탭의 방송이 처리된다 — 여기서는 확인창 안에서 바로 전달해 그 순서를 만든다.
+    const deliverNow = (msg) => {
+      for (const peer of FakeBroadcastChannel.registry.get('wr-auth') ?? []) {
+        if (peer !== otherTab && !peer.closed) peer.dispatch(structuredClone(msg));
+      }
+    };
+    try {
+      const { app, srv } = await bootAsA({
+        confirm: (msg) => {
+          if (msg === UNSAVED_MESSAGE) {
+            srv.state.cookie = 'b';
+            deliverNow({ type: 'LOGIN', server: BASE, identity: `${USERS.b.id}|org-1` });
+          }
+          return true;
+        },
+      });
+      srv.hold.patch = () => new Promise(() => {}); // 저장 대기로 남겨 확인창이 뜨게
+      fireEvent.change(screen.getByDisplayValue(nameOf(KIM)), { target: { value: '김철수수정' } });
+      await logoutViaMenu('김의사');
+      await screen.findByRole('heading', { name: '인트라넷 로그인' });
+      await wait(200);
+      expect(app.dialogs.confirms).toContain(UNSAVED_MESSAGE);
+      expect(heard.filter((m) => m?.type === 'LOGOUT')).toEqual([]);
+      expect(srv.router.count('POST /api/auth/logout')).toBe(0);
+    } finally {
+      otherTab.close();
+    }
   }, 20000);
 });

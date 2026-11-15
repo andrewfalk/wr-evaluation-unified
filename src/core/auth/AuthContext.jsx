@@ -285,15 +285,19 @@ export function AuthProvider({ children }) {
   // live intranet session), then clears local state.
   // 시작할 때 인증 문맥 세대를 잡고, revoke를 기다린 뒤 그대로일 때만 방송 + 세션 리셋 + 작업 공간 비우기를 같은 동기
   // 구간에서 한다. 달라졌으면(그사이 강제 로그아웃 뒤 다른 계정 로그인 등) 아무것도 하지 않는다.
-  const logout = useCallback(async () => {
+  // expectedGen을 주면(로그아웃 확인창을 연 시점의 세대) 시작할 때 이미 달라졌으면 아무것도 하지 않는다 — 확인창이 떠 있는
+  // 동안 다른 탭의 로그인 방송으로 되돌려졌으면 그 탭까지 로그아웃시키지 않게. 끝까지 진행했으면 true.
+  const logout = useCallback(async ({ expectedGen } = {}) => {
     const snap = sessionRef.current;
     const gen = authEpochRef.current;
+    if (expectedGen !== undefined && expectedGen !== gen) return false;
     await revokeServerSession(snap, { cancelOnContextChange: true });
-    if (authEpochRef.current !== gen) return;
+    if (authEpochRef.current !== gen) return false;
     broadcastLogout();
     resetToLocalSession();
     // 인트라넷 세션의 로그아웃이면 화면을 비운다. 로컬 세션이면 주인이 있을 때만(로컬 작업 보존).
     applyWorkspace({ type: hasIntranetSession(snap) ? 'logout' : 'discard' });
+    return true;
   }, [applyWorkspace, resetToLocalSession, revokeServerSession]);
 
   // Electron: main process asks the renderer to log out before the window
