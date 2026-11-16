@@ -4,7 +4,7 @@
 // P2-41c(훅이 스토어를 직접 읽음)·P2-41d(엔진으로 이동) 전에 **지금 코드에서 통과하는** 동작을 고정한다 — 고치는 것이 아니다.
 // 결함 후보 D1(비활성화 순간 push ACK 버림)·D2(일괄 가져오기가 기존 환자 전원을 dirty로)·D3(push 못 하는 dirty 환자의 1초 pull
 // 반복)는 "지금 그렇게 동작한다"로 고정해 확인 여부를 기록한다(D1·D2는 확인되면 P2-43a·43b에서 의도대로 바꾸고 이 파일의 해당
-// 단언을 갱신한다 — T5-1은 P2-43a에서 갱신, D3는 보고만). D5(계정 전환)는 App.accountSwitch.smoke.test.jsx R6이 맡는다.
+// 단언을 갱신한다 — T5-1은 P2-43a, T5-9는 P2-43b, T5-8(D3)은 D3 수정에서 갱신). D5(계정 전환)는 App.accountSwitch.smoke.test.jsx R6이 맡는다.
 //
 // 하니스는 T3와 같은 환자 상태 컨테이너(+ store) + StrictMode. 락 전이 사례는 App.jsx의 브리지 effect(락이 held가 되면
 // flushPatient, held-by-other/lost면 notifyLockOutcome)를 같은 순서(훅 뒤)로 흉내 낸다.
@@ -270,7 +270,10 @@ describe('T5 usePatientSync — 선행 특성화(지금 동작)', () => {
     expect(pushPendingPatients).toHaveBeenCalledTimes(1);
   });
 
-  it('T5-8(D3) push할 수 없는 dirty 환자(403)가 있으면 pull → 새 배열 → 1초 debounce → push+pull이 약 1초마다 반복된다', async () => {
+  // T5-8은 D3 수정(2026-11-16, 사용자 결정 "A 방식")에서 의도대로 갱신했다. 옮기기 전: pull이 서버 내용이 같아도 새 배열을 내서
+  // "1초 debounce → push(403) + pull → 새 배열"이 약 1초마다 반복(5초에 5회씩). 이제: pull 결과가 같으면 목록을 그대로 두어
+  // debounce가 다시 잡히지 않는다 — 처음 한 번 뒤 멈춘다(transitions.pullSame.test.js).
+  it('T5-8(D3 → 수정) push할 수 없는 dirty 환자(403)가 있어도 pull 결과가 같으면 반복하지 않는다', async () => {
     pushPendingPatients.mockImplementation(async (targets) => ({
       synced: [],
       failed: targets.map(p => ({ patient: p, kind: 'permission', error: Object.assign(new Error('forbidden'), { status: 403, data: {} }) })),
@@ -281,9 +284,12 @@ describe('T5 usePatientSync — 선행 특성화(지금 동작)', () => {
     const pushes0 = pushPendingPatients.mock.calls.length;
     const pulls0 = pullPatients.mock.calls.length;
     for (let i = 0; i < 5; i += 1) await advance(1000);
-    // 5초 동안 사이클마다 push 1 + pull 1 — 반복이 멈추지 않는다.
-    expect(pushPendingPatients.mock.calls.length - pushes0).toBe(5);
-    expect(pullPatients.mock.calls.length - pulls0).toBe(5);
+    // 처음 debounce 한 번(push 1 + pull 1) 뒤에는 목록이 그대로라 다시 잡히지 않는다(옮기기 전 5회씩).
+    expect(pushPendingPatients.mock.calls.length - pushes0).toBe(1);
+    expect(pullPatients.mock.calls.length - pulls0).toBe(1);
+    const pushes1 = pushPendingPatients.mock.calls.length;
+    for (let i = 0; i < 5; i += 1) await advance(1000);
+    expect(pushPendingPatients.mock.calls.length).toBe(pushes1);
   });
 });
 
