@@ -422,13 +422,48 @@ export interface PullAppliedPayload {
   authoritativeDeletes: boolean;
 }
 
+/** JSON 값(객체·배열·원시값)의 구조 비교 — 없는 키와 undefined 값은 같게 본다. 서버 응답·환자 레코드는 JSON이라 이것으로 충분하다. */
+function sameJsonValue(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    const bb = b as unknown[];
+    return a.length === bb.length && a.every((v, i) => sameJsonValue(v, bb[i]));
+  }
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const keys = new Set([...Object.keys(ao), ...Object.keys(bo)]);
+  for (const key of keys) if (!sameJsonValue(ao[key], bo[key])) return false;
+  return true;
+}
+
 /**
- * pull 병합 — reconcilePulledPatients 재사용. derive(P2-41c): 옮기기 전 updater 안의 활성 환자 예약(ensureActivePatient·사라진
+ * (D3, 2026-11-16) pull 병합 결과에서 직전 목록과 내용이 같은 환자는 직전 객체를 쓰고, 전부 같으면 직전 배열을 돌려준다.
+ * reconcilePulledPatients는 서버 내용이 같아도 synced·충돌 환자를 새 객체로 다시 만들고 늘 새 배열을 낸다 — 그러면 push할 수 없는
+ * dirty 환자(403 등)가 있을 때 "목록 바뀜 → 1초 debounce → push(실패) + pull → 새 배열"이 약 1초마다 반복됐다. 같은 객체를 쓰면
+ * 사이드바 카드 memo(P2-42)도 유지된다.
+ */
+function reuseUnchangedPatients(prev: PatientRecord[], next: PatientRecord[]): PatientRecord[] {
+  if (next === prev) return prev;
+  const prevById = new Map(prev.map(p => [p.id, p]));
+  let allSame = next.length === prev.length;
+  const result = next.map((patient, i) => {
+    const before = prevById.get(patient.id);
+    const kept = before && (before === patient || sameJsonValue(before, patient)) ? before : patient;
+    if (kept !== prev[i]) allSame = false;
+    return kept;
+  });
+  return allSame ? prev : result;
+}
+
+/**
+ * pull 병합 — reconcilePulledPatients 재사용(D3: 내용이 같은 환자는 직전 객체, 전부 같으면 직전 배열 — reuseUnchangedPatients). derive(P2-41c): 옮기기 전 updater 안의 활성 환자 예약(ensureActivePatient·사라진
  * 활성 환자 교체, `onReduced` + queueMicrotask)을 대체 — 활성 환자가 없고 목록이 비어 있다가 채워지면 첫 환자, 활성 환자가
  * 결과에 없으면 첫 환자(없으면 null). 스텝은 건드리지 않는다(옮기기 전과 같음 — 충돌 해결·삭제와 다르다).
  */
 const pullApplied = defineTransition<PullAppliedPayload>('sync/pullApplied', (prev, { pulledItems, authoritativeDeletes }) => (
-  reconcilePulledPatients(prev, pulledItems, { authoritativeDeletes })
+  reuseUnchangedPatients(prev, reconcilePulledPatients(prev, pulledItems, { authoritativeDeletes }))
 ), {
   derive: (prevState, next) => {
     const { activeId } = prevState;

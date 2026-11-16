@@ -11,6 +11,8 @@
 //   WR_API_BASE       화면 설정의 서버 주소(없으면 '' = 같은 origin)
 //   WR_IGNORE_HTTPS_ERRORS=1  자체 서명 인증서(패키지 스택 리허설)
 //
+// ⑬은 D3(push 못 하는 dirty 환자의 1초 pull 반복, 2026-11-16 수정)를 실서버에서 확인한다.
+//
 // 사용: WR_WEB_URL=… WR_PG_CONTAINER=… node scripts/tier3/patient-sync-smoke.mjs
 //       WR_PG_CONTAINER=… node scripts/tier3/patient-sync-smoke.mjs --cleanup-stale   (이전 실행이 남긴 시험 조직만 지움)
 // "기록" 항목(⑧ D1 경로·⑪ D2 PATCH 수)은 통과·실패가 아니라 관찰값을 남긴다(결함 후보의 실서버 확인용).
@@ -484,6 +486,36 @@ async function run(browser) {
     const serverCount = sql(`SELECT count(*) FROM patient_records WHERE organization_id = ${q(orgId)} AND assigned_doctor_user_id = ${q(accounts.b.id)} AND deleted_at IS NULL;`);
     const noPending = !(await bodyText(b1)).includes('저장 대기');
     record('⑫ 재로그인 뒤 목록 = 서버 내 환자 수, 저장 대기 없음', after === `환자 목록 (${serverCount})` && noPending, `전 ${before} → 후 ${after}, 서버 ${serverCount}`);
+  });
+
+  await step('⑬ 저장이 거절되는(403) dirty 환자가 있어도 pull이 1초마다 반복되지 않는다(D3)', async () => {
+    await openPatient(b1, PB);
+    await ensureEditable(b1);
+    // 이 환자의 저장만 403으로 거절한다(권한이 바뀐 상황 흉내 — 서버 데이터는 그대로).
+    await b1.route('**/api/patients/*', (route) => (route.request().method() === 'PATCH'
+      ? route.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"forbidden"}' })
+      : route.continue()));
+    const before = b1.__calls.length;
+    await setActiveName(b1, `B환자-거절-${RUN}`);
+    // 의도한 상황을 실제로 지났는지 먼저 확인한다(#349 Codex 권고): 첫 debounce 뒤 PATCH가 403으로 거절되고 이어서 pull이 끝났다.
+    const rejected = await until(() => callsSince(b1, before, 'PATCH').some((c) => c.status === 403), 10000);
+    // 위치는 걸러내기 전 전체 응답 로그에서 잡는다(#349 Codex 2회차 — PATCH만 남긴 배열의 인덱스를 전체 오프셋으로 쓰면 안 된다).
+    const rejectedAt = b1.__calls.findIndex((c, k) => k >= before && c.method === 'PATCH' && c.status === 403);
+    const pulledAfter = rejectedAt >= 0
+      && await until(() => callsSince(b1, rejectedAt + 1, 'GET').some((c) => c.path === '/api/patients'), 10000);
+    await wait(500);
+    const i = b1.__calls.length;
+    await wait(6000);
+    const pulls = callsSince(b1, i, 'GET').filter((c) => c.path === '/api/patients').length;
+    const patches = callsSince(b1, i, 'PATCH').length;
+    await b1.unrouteAll({ behavior: 'ignoreErrors' });
+    // 정리: 다시 편집하면 저장된다(저장이 재개되는지도 판정에 넣는다).
+    const j = b1.__calls.length;
+    await setActiveName(b1, `B환자-${RUN}`);
+    const resumed = await until(() => callsSince(b1, j, 'PATCH').some((c) => c.status < 300), 10000);
+    record('⑬ 거절된 dirty 환자가 있어도 6초 동안 pull·PATCH 반복 없음(옮기기 전에는 약 1초마다), 다시 편집하면 저장',
+      rejected && pulledAfter && pulls <= 1 && patches <= 1 && resumed,
+      `403 거절=${rejected} 뒤 pull=${pulledAfter}, 6초 동안 pull ${pulls}회·PATCH ${patches}회, 재편집 저장=${resumed}`);
   });
 
   const fiveXX = [a1, a2, b1].flatMap((p) => p.__calls.filter((c) => c.status >= 500 && !(c.injected && c.method === 'PATCH' && c.status === 503)));
