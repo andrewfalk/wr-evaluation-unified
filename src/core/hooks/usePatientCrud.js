@@ -231,12 +231,14 @@ export function usePatientCrud({
     }
   };
 
-  const handleBatchImport = (importedPatients, stats) => {
+  // importResult = { newPatients, changed: [{ patient, base }] } — BatchImportModal이 만든다(P2-43b).
+  const handleBatchImport = (importResult, stats) => {
     // 일괄 가져오기는 환자 목록 전체를 갈아치운다 — 편집 중인 환자가 무엇이든 영향을 받는다.
     if (dirtyAssessmentPatientId) { onBlockedByUnsavedDraft?.(); return; }
-    // touch → migrate·목록 교체·마지막 환자 활성은 전이 하나(P2-43 — 옮기기 전에는 모달이 touch, 여기서 migrate + replacedAll + setActiveId).
-    setPatients(patientTx.batchImportApplied({ importedPatients, session }));
-    if (importedPatients.length > 0) setCurrentStepIndex(0);
+    // 최신 목록에 병합·touch → migrate·마지막 환자 활성은 전이 하나(P2-43·P2-43b). 결과는 dispatch 다음 줄의 receipt로 읽는다.
+    const receipt = {};
+    setPatients(patientTx.batchImportApplied({ newPatients: importResult.newPatients, changed: importResult.changed, session, receipt }));
+    if (receipt.total > 0) setCurrentStepIndex(0);
     setIntakeShared(null);
     setShowHome(false);
     const doctorNote = hasIntranetSession(session) && stats.withDoctorName > 0
@@ -245,7 +247,13 @@ export function usePatientCrud({
     const assessmentNote = stats.updatedAssessments > 0
       ? `, 종합소견 ${stats.updatedAssessments}건 갱신`
       : '';
-    showAlert(`가져오기 완료: 신규 ${stats.newPatients}명, 상병 ${stats.newDiagnoses}건, 직업 ${stats.newJobs}건 추가 (중복 ${stats.skipped}건 건너뜀)${assessmentNote}${doctorNote}`);
+    // (P2-43b) 가져오기 창을 연 뒤 다른 곳(동기화·다른 창)에서 바뀌었거나 지워진 기존 환자는 덮어쓰지 않고 건너뛴다.
+    // 위 건수(상병·직업·종합소견)는 파일에서 읽은 시도 건수라 건너뛴 환자의 몫도 들어 있다 — 그 환자에는 반영하지 않았음을 밝힌다
+    // (#347 Codex 1회차 권고).
+    const changedSkipNote = receipt.skipped > 0
+      ? `\n건너뜀 ${receipt.skipped}명: 가져오는 동안 다른 곳에서 바뀐 기존 환자라 위 변경을 반영하지 않았습니다. 다시 가져오세요.`
+      : '';
+    showAlert(`가져오기 완료: 신규 ${stats.newPatients}명, 상병 ${stats.newDiagnoses}건, 직업 ${stats.newJobs}건 추가 (중복 ${stats.skipped}건 건너뜀)${assessmentNote}${doctorNote}${changedSkipNote}`);
   };
 
   const handleLoadTestData = async () => {

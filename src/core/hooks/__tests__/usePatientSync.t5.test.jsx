@@ -308,7 +308,10 @@ function ImportHarness({ initialPatients, onPatients }) {
   return <BatchImportModal onClose={() => {}} onImport={crud.handleBatchImport} existingPatients={patients} />;
 }
 
-describe('T5-9(D2) 일괄 가져오기 — 지금 동작', () => {
+// T5-9는 P2-43b(flagged, D2)에서 의도대로 갱신했다. 옮기기 전: 새 환자 1명만 가져와도 기존 서버 환자 3명이 전원 touch돼 dirty →
+// 다음 push가 PATCH 3 + POST 1. 이제: 행이 바꾼 기존 환자만 touch하므로 기존 환자는 synced 그대로 → POST 1만(경합·건너뜀은
+// batchImport.latestMerge.test.jsx).
+describe('T5-9(D2 → P2-43b) 일괄 가져오기', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearAllLockTokens();
@@ -320,7 +323,7 @@ describe('T5-9(D2) 일괄 가져오기 — 지금 동작', () => {
     vi.restoreAllMocks();
   });
 
-  it('새 환자 1명을 가져오면 기존 서버 환자 3명도 전원 dirty가 되고, 다음 push는 4명(PATCH 3 + POST 1)을 보낸다', async () => {
+  it('새 환자 1명을 가져오면 기존 서버 환자 3명은 synced 그대로이고, 다음 push는 새 환자 1명(POST 1)만 보낸다', async () => {
     const captured = {};
     const existing = ['a', 'b', 'c'].map(id => ({ ...serverPatient(id), data: { ...serverPatient(id).data, shared: { name: id, patientNo: `N-${id}` } } }));
     // pull은 그 세 환자를 돌려준다('mine' pull에 없는 synced 환자는 범위 밖으로 빠지므로).
@@ -339,11 +342,11 @@ describe('T5-9(D2) 일괄 가져오기 — 지금 동작', () => {
 
     await waitFor(() => expect(captured.patients).toHaveLength(4));
     const statuses = Object.fromEntries(captured.patients.map(p => [p.data.shared.patientNo, p.sync?.syncStatus]));
-    expect(statuses).toEqual({ 'N-a': 'dirty', 'N-b': 'dirty', 'N-c': 'dirty', 'N-new': 'local-only' });
+    expect(statuses).toEqual({ 'N-a': 'synced', 'N-b': 'synced', 'N-c': 'synced', 'N-new': 'local-only' });
 
     await waitFor(() => expect(pushPendingPatients).toHaveBeenCalled(), { timeout: 3000 });
     const targets = pushPendingPatients.mock.calls[0][0].filter(isPending);
-    expect(targets.filter(p => p.sync?.serverId).length).toBe(3); // PATCH 대상
+    expect(targets.filter(p => p.sync?.serverId).length).toBe(0); // PATCH 대상(옮기기 전 3)
     expect(targets.filter(p => !p.sync?.serverId).length).toBe(1); // POST 대상
   });
 });
