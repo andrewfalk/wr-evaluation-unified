@@ -124,10 +124,10 @@ export default [
   },
   {
     // REFACTORING_ROADMAP Phase 2 C4(P2-39): 환자 레코드 touch(편집 시각·dirty 전환)는 환자 상태 전이(src/core/state/**)에서만 —
-    // 훅·컴포넌트는 setPatients(patientTx.…)로 쓴다. 일괄 가져오기 모달(BatchImportModal)의 호출은 게이트 B의 쓰기 단일화 때 정리한다.
+    // 훅·컴포넌트는 setPatients(patientTx.…)로 쓴다. 일괄 가져오기 모달의 예외는 P2-43(patients/batchImportApplied)에서 없앴다.
     files: ['src/**/*.{js,jsx,ts,tsx}'],
     ignores: [
-      'src/core/state/**', 'src/core/services/patientRecords.js', 'src/core/components/BatchImportModal.jsx',
+      'src/core/state/**', 'src/core/services/patientRecords.js',
       'src/testing/**', 'src/**/__tests__/**', 'src/**/*.test.{js,jsx,ts,tsx}', 'src/**/*.d.ts',
     ],
     rules: {
