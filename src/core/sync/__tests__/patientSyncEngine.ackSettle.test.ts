@@ -112,13 +112,34 @@ describe('P2-43a — 비활성화 순간의 push ACK(세션이 같으면 남아 
     expect(ctx.store.getState().patients.map(p => p.id)).toEqual(['a']);
   });
 
-  it('충돌·락 실패 표시도 남아 있는 환자에만 한다', async () => {
+  const failure = (kind: string, status: number) => (sent: PatientRecord[]) => ({
+    synced: [],
+    failed: sent.map(p => ({ patient: p, kind, error: Object.assign(new Error(kind), { status, data: { currentRevision: 3 } }) })),
+  });
+
+  it.each([['conflict', 409], ['lock', 423]])('%s(%s) 실패 표시는 남아 있는 환자에 한다', async (kind, status) => {
     const ctx = setup([patient('a'), patient('b', { syncStatus: 'dirty' })]);
-    await pushWhile(ctx, () => { ctx.inputs.enabled = false; }, (sent) => ({
-      synced: [],
-      failed: sent.map(p => ({ patient: p, kind: 'conflict', error: Object.assign(new Error('c'), { status: 409, data: { currentRevision: 3 } }) })),
-    }));
+    await pushWhile(ctx, () => { ctx.inputs.enabled = false; }, failure(kind as string, status as number));
     expect(syncOf(ctx.store, 'b')?.syncStatus).toBe('conflict');
+  });
+
+  it.each([['conflict', 409], ['lock', 423]])('%s(%s) 실패라도 기다리는 동안 지운 환자·초기화로 비운 목록은 되살리지 않는다', async (kind, status) => {
+    const deleted = setup([patient('a'), patient('b', { syncStatus: 'dirty' })]);
+    await pushWhile(deleted, () => {
+      deleted.inputs.enabled = false;
+      deleted.store.dispatch(patientTx.deleteResultsApplied({ deletedIds: ['b'], conflicts: [] }));
+    }, failure(kind as string, status as number));
+    expect(deleted.store.getState().patients.map(p => p.id)).toEqual(['a']);
+    expect(syncOf(deleted.store, 'a')?.syncStatus).toBe('synced');
+
+    vi.clearAllMocks();
+    push.mockResolvedValue({ synced: [], failed: [] });
+    const cleared = setup([patient('a'), patient('b', { syncStatus: 'dirty' })]);
+    await pushWhile(cleared, () => {
+      cleared.inputs.enabled = false;
+      cleared.store.dispatch(patientTx.replacedAll({ patients: [] }));
+    }, failure(kind as string, status as number));
+    expect(cleared.store.getState().patients).toEqual([]);
   });
 
   it('세션이 바뀌었으면(다른 계정) 지금처럼 버린다', async () => {
