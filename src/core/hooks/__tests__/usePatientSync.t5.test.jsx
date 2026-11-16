@@ -4,7 +4,7 @@
 // P2-41c(훅이 스토어를 직접 읽음)·P2-41d(엔진으로 이동) 전에 **지금 코드에서 통과하는** 동작을 고정한다 — 고치는 것이 아니다.
 // 결함 후보 D1(비활성화 순간 push ACK 버림)·D2(일괄 가져오기가 기존 환자 전원을 dirty로)·D3(push 못 하는 dirty 환자의 1초 pull
 // 반복)는 "지금 그렇게 동작한다"로 고정해 확인 여부를 기록한다(D1·D2는 확인되면 P2-43a·43b에서 의도대로 바꾸고 이 파일의 해당
-// 단언을 갱신한다, D3는 보고만). D5(계정 전환)는 App.accountSwitch.smoke.test.jsx R6이 맡는다.
+// 단언을 갱신한다 — T5-1은 P2-43a에서 갱신, D3는 보고만). D5(계정 전환)는 App.accountSwitch.smoke.test.jsx R6이 맡는다.
 //
 // 하니스는 T3와 같은 환자 상태 컨테이너(+ store) + StrictMode. 락 전이 사례는 App.jsx의 브리지 effect(락이 held가 되면
 // flushPatient, held-by-other/lost면 notifyLockOutcome)를 같은 순서(훅 뒤)로 흉내 낸다.
@@ -114,7 +114,12 @@ describe('T5 usePatientSync — 선행 특성화(지금 동작)', () => {
     vi.restoreAllMocks();
   });
 
-  it('T5-1(D1) 비활성화 순간 진행 중이던 push의 ACK는 버려진다 → 다시 켜면 옛 revision으로 재전송 → 서버 409면 충돌 표시', async () => {
+  // T5-1은 P2-43a(flagged, D1)에서 의도대로 갱신했다. 옮기기 전: ACK를 버려 로컬은 dirty·revision 1 → 다시 켜면 옛 revision으로
+  // 재전송 → 서버 409로 충돌 표시(내용이 같아도). 이제: 같은 세션이면 남아 있는 환자에 ACK를 반영해 synced·revision 2 → 다시 켜도
+  // 보낼 것이 없어 충돌이 없다(세션이 바뀐 경우·초기화·삭제와의 경합은 patientSyncEngine.ackSettle.test.ts).
+  it('T5-1(D1 → P2-43a) 비활성화 순간 진행 중이던 push의 ACK는 같은 세션이면 반영된다 → 다시 켜도 재전송·409 없음', async () => {
+    // 다시 켤 때의 pull은 서버의 두 환자를 돌려준다('mine' pull에 없는 synced 환자는 범위 밖으로 빠지므로).
+    pullPatients.mockResolvedValue({ items: [serverPatient('a'), serverPatient('b', { revision: 2 })], total: 2 });
     const firstPush = deferred();
     pushPendingPatients.mockImplementationOnce(() => firstPush.promise);
     const initialPatients = [serverPatient('a'), serverPatient('b', { syncStatus: 'dirty' })];
@@ -130,10 +135,10 @@ describe('T5 usePatientSync — 선행 특성화(지금 동작)', () => {
       firstPush.resolve({ synced: [{ patient: pushed, serverPatient: serverPatient('b', { revision: 2 }) }], failed: [] });
     });
     await settle();
-    // ACK가 반영되지 않았다: 로컬은 여전히 dirty·revision 1(서버는 2).
-    expect(byId(result, 'b').sync).toMatchObject({ syncStatus: 'dirty', revision: 1 });
+    // ACK가 반영됐다: 로컬은 synced·revision 2(서버와 같음).
+    expect(byId(result, 'b').sync).toMatchObject({ syncStatus: 'synced', revision: 2 });
 
-    // 다시 켜면 옛 revision(1)으로 다시 보낸다 — 서버는 이미 2라 409(내용이 같아도).
+    // 다시 켜도 보낼 것이 없다(옛 revision 재전송 → 409 없음).
     pushPendingPatients.mockImplementationOnce(async (targets) => ({
       synced: [],
       failed: targets.map(p => ({
@@ -143,8 +148,8 @@ describe('T5 usePatientSync — 선행 특성화(지금 동작)', () => {
     }));
     rerender({ initialPatients, initialActiveId: 'a', enabled: true });
     await settle();
-    expect(pushedRevisions().at(-1)).toEqual(['b@1']);
-    expect(byId(result, 'b').sync.syncStatus).toBe('conflict');
+    expect(pushedRevisions().slice(1).flat()).toEqual([]);
+    expect(byId(result, 'b').sync.syncStatus).toBe('synced');
   });
 
   it('T5-2 진행 중인 sync가 있으면 syncNow는 곧바로 null을 돌려주고(큐에 합침) 끝난 뒤 큐가 돈다', async () => {

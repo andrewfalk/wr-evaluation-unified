@@ -111,7 +111,7 @@ describe('createPatientSyncEngine', () => {
     expect(syncState().loadedScope).toBeNull();
   });
 
-  it('비활성화 순간의 push: ACK를 버리고 idle로 끝나며 큐를 돌리지 않는다(D1 — 이 구간은 보존)', async () => {
+  it('비활성화 순간의 push: 같은 세션이면 ACK를 반영하고(P2-43a) idle로 끝나며 큐를 돌리지 않는다', async () => {
     const { store, inputs, engine, syncState } = setup([patient('a', { syncStatus: 'dirty' })]);
     const first = deferred<unknown>();
     push.mockImplementationOnce(() => first.promise);
@@ -123,7 +123,8 @@ describe('createPatientSyncEngine', () => {
     first.resolve({ synced: [ack(pushed, 2)], failed: [] });
     expect(await run).toBeNull();
     await flushMicrotasks();
-    expect(ofStore(store, 'a').sync).toMatchObject({ revision: 1, syncStatus: 'dirty' });
+    // P2-43a(flagged, D1): 옮기기 전에는 ACK를 버려 revision 1·dirty로 남았다.
+    expect(ofStore(store, 'a').sync).toMatchObject({ revision: 2, syncStatus: 'synced' });
     expect(syncState().status).toBe('idle');
     expect(pull).not.toHaveBeenCalled();
   });

@@ -388,6 +388,34 @@ const pushResultsApplied = defineTransition<PushResultsAppliedPayload>('sync/pus
   return applyPushFailures(withSynced, failed);
 });
 
+type AckMatchable = { id?: string; sync?: { serverId?: string | null } | null };
+
+/** 이 서버 ACK가 가리키는 로컬 환자가 목록에 있는가 — mergePushedPatientAck의 찾기와 같은 규칙(id 또는 serverId). */
+function hasAckTarget(patients: PatientRecord[], serverPatient: PatientRecord): boolean {
+  const server = serverPatient as unknown as AckMatchable;
+  const serverId = server.sync?.serverId ?? server.id;
+  return patients.some(p => {
+    const local = p as unknown as AckMatchable;
+    return local.id === server.id || (!!local.sync?.serverId && local.sync.serverId === serverId);
+  });
+}
+
+/**
+ * (flagged P2-43a, D1) 동기화가 꺼지는 순간 진행 중이던 push의 결과 — push를 시작할 때와 같은 세션일 때만 엔진이 dispatch한다.
+ * pushResultsApplied와 달리 **적용 시점 목록에 남아 있는 환자에만** 반영한다: 목록에 없는 환자의 ACK는 버린다(추가하지 않음 —
+ * 초기화로 비운 목록이나 기다리는 동안 지운 환자가 되살아나지 않게, 목록 길이가 늘지 않으니 App의 일시정지 해제 effect도 돌지
+ * 않는다). 충돌·락 실패 표시는 applyPushFailures가 원래 목록에 있는 환자에만 한다.
+ */
+const pushAckSettled = defineTransition<PushResultsAppliedPayload>('sync/pushAckSettled', (prev, { synced, failed }) => {
+  const withSynced = synced.reduce(
+    (next, { patient: pushedPatient, serverPatient }) => (
+      hasAckTarget(next, serverPatient) ? mergePushedPatientAck(next, serverPatient, pushedPatient) : next
+    ),
+    prev,
+  );
+  return applyPushFailures(withSynced, failed);
+});
+
 export interface PullAppliedPayload {
   pulledItems: PatientRecord[];
   /** pull한 scope가 'all'일 때만 true — 서버에 없는 synced 환자를 권위 있게 지운다. */
@@ -525,6 +553,8 @@ export const patientTx = {
   evaluationDateSynced,
   /** #17 push 결과 병합 */
   pushResultsApplied,
+  /** (flagged P2-43a) 동기화가 꺼지는 순간의 push 결과 — 같은 세션일 때만, 남아 있는 환자에만 */
+  pushAckSettled,
   /** #18 pull 병합(활성 환자 폴백은 derive — P2-41c) */
   pullApplied,
   /** #19 syncPaused 해제(바뀔 게 없으면 prev) */
