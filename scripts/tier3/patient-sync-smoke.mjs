@@ -499,8 +499,10 @@ async function run(browser) {
     await setActiveName(b1, `B환자-거절-${RUN}`);
     // 의도한 상황을 실제로 지났는지 먼저 확인한다(#349 Codex 권고): 첫 debounce 뒤 PATCH가 403으로 거절되고 이어서 pull이 끝났다.
     const rejected = await until(() => callsSince(b1, before, 'PATCH').some((c) => c.status === 403), 10000);
-    const rejectedAt = callsSince(b1, before, 'PATCH').findIndex((c) => c.status === 403);
-    const pulledAfter = await until(() => callsSince(b1, before + rejectedAt + 1, 'GET').some((c) => c.path === '/api/patients'), 10000);
+    // 위치는 걸러내기 전 전체 응답 로그에서 잡는다(#349 Codex 2회차 — PATCH만 남긴 배열의 인덱스를 전체 오프셋으로 쓰면 안 된다).
+    const rejectedAt = b1.__calls.findIndex((c, k) => k >= before && c.method === 'PATCH' && c.status === 403);
+    const pulledAfter = rejectedAt >= 0
+      && await until(() => callsSince(b1, rejectedAt + 1, 'GET').some((c) => c.path === '/api/patients'), 10000);
     await wait(500);
     const i = b1.__calls.length;
     await wait(6000);
