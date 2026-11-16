@@ -21,6 +21,7 @@ import {
 } from '../services/patientServerRepository';
 import { isRedactedPatientRecord as isRedactedPatientRecordJs } from '../services/patientRecords';
 import { getLockToken as getLockTokenJs } from '../services/lockTokenStore';
+import { sessionIdentityOf } from '../../platform/dataMode';
 
 const PULL_PAGE_SIZE = 100;
 
@@ -251,9 +252,22 @@ export function createPatientSyncEngine({ store, getInputs, setSyncState }: Pati
           if (pushTargets.length > 0) {
             const myCycleId = ++cycleCounter;
             const { session, settings } = getInputs();
+            // push를 보낸 세션의 식별(서버 주소 + 계정 + 조직 — 계정 전환 수정의 요청 신원과 같은 키).
+            const pushIdentity = sessionIdentityOf(session as Parameters<typeof sessionIdentityOf>[0]);
             const { synced, failed } = await pushPendingPatients(pushTargets, { session, settings });
 
             if (!getInputs().enabled) {
+              // (flagged P2-43a, D1) 응답을 기다리는 동안 동기화가 꺼졌다. 서버는 이미 저장했으므로 같은 세션이면 ACK를
+              // **목록에 남아 있는 환자에만** 반영한다 — 버리면 로컬은 옛 revision이라 다시 켰을 때 409 충돌로 표시된다(내용이
+              // 같아도). 세션(서버·계정·조직)이 바뀌었으면 옮기기 전처럼 버린다. pull은 하지 않고 idle로 끝낸다.
+              const sameSession = pushIdentity !== null
+                && pushIdentity === sessionIdentityOf(getInputs().session as Parameters<typeof sessionIdentityOf>[0]);
+              if (sameSession && (synced.length > 0 || failed.length > 0)) {
+                if (synced.length > 0 || failed.some(f => f.kind === 'conflict' || f.kind === 'lock')) {
+                  store.dispatch(patientTx.pushAckSettled({ synced, failed }));
+                }
+                settleCycleWaiters(myCycleId, computeCommittedFlushOutcomes(store.getState().patients, { synced, failed }));
+              }
               setSyncState(prev => ({ ...prev, status: 'idle' }));
               return null;
             }

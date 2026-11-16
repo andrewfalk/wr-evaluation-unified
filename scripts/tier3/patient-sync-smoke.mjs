@@ -333,7 +333,7 @@ async function run(browser) {
 
   await step('⑤ "저장하지 않고 이동" → 다시 열면 저장 재개', async () => {
     await openPatient(a2, P1);
-    await editable(a2);
+    const lockBefore = await ensureEditable(a2);
     a2.__injecting = true; // 이 구간의 PATCH 503은 스크립트가 만든 것 — 마지막 5xx 검사에서 뺀다
     await a2.route('**/api/patients/*', (route) => (route.request().method() === 'PATCH'
       ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' })
@@ -349,10 +349,11 @@ async function run(browser) {
     const stillOld = patientRow(P1)?.name !== `동기화환자1보류-${RUN}`;
     const i = a2.__calls.length;
     await openPatient(a2, P1);
-    await editable(a2);
+    // 다시 열 때 다른 창(A1 — ③부터 P1을 열어 둠)이 그사이 락을 다시 잡았으면 강제 인수한다(재개는 락을 얻어야 된다).
+    const lockAfter = await ensureEditable(a2);
     const resumed = await until(() => callsSince(a2, i, 'PATCH').some((c) => c.status < 300), 15000);
     record('⑤ 저장 실패 → 저장하지 않고 이동 → 일시정지(저장 안 됨) → 다시 열면 저장', moved && askedSkip && stillOld && resumed
-      && patientRow(P1)?.name === `동기화환자1보류-${RUN}`, `moved=${moved} asked=${askedSkip} paused=${stillOld} resumed=${resumed}`);
+      && patientRow(P1)?.name === `동기화환자1보류-${RUN}`, `moved=${moved} asked=${askedSkip} paused=${stillOld} resumed=${resumed} 락 ${lockBefore}→${lockAfter}`);
   });
 
   await step('⑥ 삭제 → 다른 창 pull에서 사라짐, 활성 환자 폴백', async () => {
