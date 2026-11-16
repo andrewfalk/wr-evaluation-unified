@@ -495,18 +495,25 @@ async function run(browser) {
     await b1.route('**/api/patients/*', (route) => (route.request().method() === 'PATCH'
       ? route.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"forbidden"}' })
       : route.continue()));
+    const before = b1.__calls.length;
     await setActiveName(b1, `B환자-거절-${RUN}`);
-    await wait(2500); // 첫 debounce(1초) 뒤 PATCH 403 + pull 한 번
+    // 의도한 상황을 실제로 지났는지 먼저 확인한다(#349 Codex 권고): 첫 debounce 뒤 PATCH가 403으로 거절되고 이어서 pull이 끝났다.
+    const rejected = await until(() => callsSince(b1, before, 'PATCH').some((c) => c.status === 403), 10000);
+    const rejectedAt = callsSince(b1, before, 'PATCH').findIndex((c) => c.status === 403);
+    const pulledAfter = await until(() => callsSince(b1, before + rejectedAt + 1, 'GET').some((c) => c.path === '/api/patients'), 10000);
+    await wait(500);
     const i = b1.__calls.length;
     await wait(6000);
     const pulls = callsSince(b1, i, 'GET').filter((c) => c.path === '/api/patients').length;
     const patches = callsSince(b1, i, 'PATCH').length;
     await b1.unrouteAll({ behavior: 'ignoreErrors' });
-    record('⑬ 거절된 dirty 환자가 있어도 6초 동안 pull·PATCH 반복 없음(옮기기 전에는 약 1초마다)', pulls <= 1 && patches <= 1, `pull ${pulls}회, PATCH ${patches}회`);
-    // 정리: 다시 편집하면 저장된다.
+    // 정리: 다시 편집하면 저장된다(저장이 재개되는지도 판정에 넣는다).
     const j = b1.__calls.length;
     await setActiveName(b1, `B환자-${RUN}`);
-    await until(() => callsSince(b1, j, 'PATCH').some((c) => c.status < 300), 10000);
+    const resumed = await until(() => callsSince(b1, j, 'PATCH').some((c) => c.status < 300), 10000);
+    record('⑬ 거절된 dirty 환자가 있어도 6초 동안 pull·PATCH 반복 없음(옮기기 전에는 약 1초마다), 다시 편집하면 저장',
+      rejected && pulledAfter && pulls <= 1 && patches <= 1 && resumed,
+      `403 거절=${rejected} 뒤 pull=${pulledAfter}, 6초 동안 pull ${pulls}회·PATCH ${patches}회, 재편집 저장=${resumed}`);
   });
 
   const fiveXX = [a1, a2, b1].flatMap((p) => p.__calls.filter((c) => c.status >= 500 && !(c.injected && c.method === 'PATCH' && c.status === 503)));
