@@ -268,15 +268,11 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
     }
 
     // 편집 표시(touch)·최신 목록 병합은 환자 상태 전이 patients/batchImportApplied가 한다(P2-43·P2-43b). 새 환자와 행이 바꾼 기존
-    // 환자만 넘기고, 기존 환자에는 사본을 뜬 시점의 revision·updatedAt을 붙인다(그사이 달라졌으면 전이가 건너뛴다).
+    // 환자만 넘기고, 기존 환자에는 사본을 뜬 시점의 원래 객체를 붙인다(그사이 다른 전이로 바뀌었으면 전이가 건너뛴다).
     const changed = [];
     for (let i = 0; i < existingCount; i += 1) {
       if (JSON.stringify(resultPatients[i]) === beforeJson[i]) continue;
-      const original = existingPatients[i];
-      changed.push({
-        patient: resultPatients[i],
-        base: { revision: original?.sync?.revision ?? null, updatedAt: original?.updatedAt ?? null },
-      });
+      changed.push({ patient: resultPatients[i], base: { patient: existingPatients[i] } });
     }
     onImport({ newPatients: resultPatients.slice(existingCount), changed }, stats);
     onClose();

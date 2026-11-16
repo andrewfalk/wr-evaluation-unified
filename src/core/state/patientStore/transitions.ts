@@ -508,10 +508,13 @@ const deleteResultsApplied = defineTransition<DeleteResultsAppliedPayload>('pati
   },
 });
 
-/** 모달이 사본을 뜬 시점의 기존 환자 — 적용 시점 환자가 이것과 같아야(revision·updatedAt) 가져오기 결과를 반영한다. */
+/**
+ * 모달이 사본을 뜬 시점의 기존 환자 **객체 그대로** — 적용 시점 목록의 그 환자가 같은 객체일 때만 가져오기 결과를 반영한다.
+ * 전이는 바뀐 환자를 늘 새 객체로 내므로, revision·updatedAt을 바꾸지 않는 변경(원격 삭제 충돌 표시·"저장하지 않고 이동" 등)까지
+ * 잡는다(#347 Codex 1회차 — 처음 기준은 revision·updatedAt이었다).
+ */
 export interface BatchImportBase {
-  revision: number | null;
-  updatedAt: string | null;
+  patient: PatientRecord;
 }
 
 export interface BatchImportAppliedPayload {
@@ -524,18 +527,17 @@ export interface BatchImportAppliedPayload {
   receipt?: { skipped?: number; total?: number };
 }
 
-type ImportMatchable = { id?: string; updatedAt?: string | null; sync?: { revision?: number | null } | null };
+type ImportMatchable = { id?: string };
 
-/** 적용 시점 환자가 모달이 사본을 뜬 시점 그대로인가(그사이 pull·ACK·편집이 없었다). */
+/** 적용 시점 환자가 모달이 사본을 뜬 시점 그대로인가(그사이 pull·ACK·편집·충돌 표시·일시정지 등 어떤 전이도 없었다). */
 function isUnchangedSinceImport(patient: PatientRecord, base: BatchImportBase): boolean {
-  const p = patient as unknown as ImportMatchable;
-  return (p.sync?.revision ?? null) === base.revision && (p.updatedAt ?? null) === base.updatedAt;
+  return patient === base.patient;
 }
 
 /**
  * #15 일괄 가져오기 — (P2-43) 모달이 하던 `touchPatientRecord`를 전이 안으로 옮겼다(touch → migrate 순서 그대로).
  * (flagged P2-43b, D2) **적용 시점 목록에 병합**한다: 행이 바꾼 기존 환자만 그 사본으로 바꿔 touch하고(손대지 않은 환자는 같은 객체
- * 그대로 — dirty가 되지 않는다), 새 환자는 끝에 붙인다. 모달이 사본을 뜬 뒤 달라졌거나(revision·updatedAt 불일치) 지워진 기존 환자는
+ * 그대로 — dirty가 되지 않는다), 새 환자는 끝에 붙인다. 모달이 사본을 뜬 뒤 달라졌거나(같은 객체가 아님) 지워진 기존 환자는
  * 건너뛰고 receipt.skipped로 센다. 옮기기 전에는 기존 목록 전체의 사본으로 통째 교체하며 전원 touch(→ 서버 환자 전원 PATCH)했고,
  * 사본을 뜬 뒤 들어온 pull·ACK를 덮었다. derive는 옮기기 전처럼 결과 목록의 마지막 환자를 활성으로.
  */

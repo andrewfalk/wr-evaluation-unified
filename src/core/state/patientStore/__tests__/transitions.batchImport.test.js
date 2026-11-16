@@ -25,7 +25,7 @@ function base(id, sync, extra = {}) {
     ...extra,
   };
 }
-const baseOf = (p) => ({ revision: p.sync?.revision ?? null, updatedAt: p.updatedAt ?? null });
+const baseOf = (p) => ({ patient: p }); // 사본을 뜬 시점의 원래 객체(참조 동일성으로 비교)
 /** 가져오기 행이 바꾼 사본(상병 1건 추가) */
 const edited = (p) => {
   const copy = structuredClone(p);
@@ -56,7 +56,7 @@ describe('patients/batchImportApplied — 반영되는 환자는 옛 경로와 �
         const prev = [structuredClone(patient), other];
         const changedCopy = edited(patient);
         const expected = oldPipeline([structuredClone(changedCopy)], session)[0];
-        const actual = patientTx.batchImportApplied({ newPatients: [], changed: [{ patient: changedCopy, base: baseOf(patient) }], session })(prev);
+        const actual = patientTx.batchImportApplied({ newPatients: [], changed: [{ patient: changedCopy, base: baseOf(prev[0]) }], session })(prev);
         expect(actual[0]).toEqual(expected);
         expect(actual[1]).toBe(prev[1]); // 손대지 않은 환자는 같은 객체(touch·dirty 없음)
       });
@@ -73,7 +73,7 @@ describe('patients/batchImportApplied — 반영되는 환자는 옛 경로와 �
 });
 
 describe('patients/batchImportApplied — 최신 목록에 병합(P2-43b)', () => {
-  it('사본을 뜬 뒤 달라진(revision·updatedAt) 기존 환자와 지워진 환자는 건너뛰고 receipt에 센다', () => {
+  it('사본을 뜬 뒤 달라진(다른 객체) 기존 환자와 지워진 환자는 건너뛰고 receipt에 센다', () => {
     const a = base('a', { serverId: 's-a', revision: 1, syncStatus: 'synced' });
     const b = base('b', { serverId: 's-b', revision: 1, syncStatus: 'synced' });
     const gone = base('g', { serverId: 's-g', revision: 1, syncStatus: 'synced' });
@@ -91,6 +91,21 @@ describe('patients/batchImportApplied — 최신 목록에 병합(P2-43b)', () =
     expect(actual[0].sync.syncStatus).toBe('dirty');
     expect(actual[1]).toBe(bAfterPull); // 건너뜀 — pull 결과 유지
     expect(receipt).toEqual({ skipped: 2, total: 3 });
+  });
+
+  it.each([
+    ['원격 삭제 충돌 표시(remoteDeleteMarked)', (id) => patientTx.remoteDeleteMarked({ id })],
+    ['저장하지 않고 이동(patientPaused)', (id) => patientTx.patientPaused({ id })],
+  ])('revision·updatedAt을 바꾸지 않는 변경(%s)도 그사이 변경으로 보고 건너뛴다(#347 Codex 1회차)', (_label, makeTx) => {
+    const a = base('a', { serverId: 's-a', revision: 1, syncStatus: 'dirty' });
+    const changedLater = makeTx('a')([a])[0];
+    expect(changedLater.sync.revision).toBe(1); // 기준값(revision)은 그대로인 변경
+    const receipt = {};
+    const actual = patientTx.batchImportApplied({
+      newPatients: [], changed: [{ patient: edited(a), base: baseOf(a) }], session: INTRANET, receipt,
+    })([changedLater]);
+    expect(actual[0]).toBe(changedLater); // 충돌 표시·일시정지 유지(옛 사본으로 덮지 않음)
+    expect(receipt.skipped).toBe(1);
   });
 
   it('스토어 경로: 결과 목록의 마지막 환자를 활성으로 — 결과가 비면 활성 그대로', () => {

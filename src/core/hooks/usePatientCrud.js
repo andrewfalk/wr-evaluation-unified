@@ -248,8 +248,10 @@ export function usePatientCrud({
       ? `, 종합소견 ${stats.updatedAssessments}건 갱신`
       : '';
     // (P2-43b) 가져오기 창을 연 뒤 다른 곳(동기화·다른 창)에서 바뀌었거나 지워진 기존 환자는 덮어쓰지 않고 건너뛴다.
+    // 위 건수(상병·직업·종합소견)는 파일에서 읽은 시도 건수라 건너뛴 환자의 몫도 들어 있다 — 그 환자에는 반영하지 않았음을 밝힌다
+    // (#347 Codex 1회차 권고).
     const changedSkipNote = receipt.skipped > 0
-      ? `, 건너뜀 ${receipt.skipped}명(가져오는 동안 다른 곳에서 바뀐 기존 환자 — 다시 가져오세요)`
+      ? `\n건너뜀 ${receipt.skipped}명: 가져오는 동안 다른 곳에서 바뀐 기존 환자라 위 변경을 반영하지 않았습니다. 다시 가져오세요.`
       : '';
     showAlert(`가져오기 완료: 신규 ${stats.newPatients}명, 상병 ${stats.newDiagnoses}건, 직업 ${stats.newJobs}건 추가 (중복 ${stats.skipped}건 건너뜀)${assessmentNote}${doctorNote}${changedSkipNote}`);
   };
