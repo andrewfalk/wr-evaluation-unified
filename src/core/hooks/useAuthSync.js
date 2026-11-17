@@ -95,7 +95,9 @@ export function useAuthSync({ session, setSession, resetToLocalSession, getAuthE
       // it processed an earlier LOGOUT broadcast, or its own logout timed
       // out and reset). Applying it here would silently resurrect this tab's
       // session right after the user logged out.
-      if (msg?.type === 'REFRESH_SUCCESS' && msg.accessToken && hasIntranetSession(sessionRef.current)) {
+      // 판정은 AuthContext의 getSession()(세션이 바뀌는 그 동기 구간에 갱신)으로 — 이 훅의 sessionRef는 커밋 뒤 effect에서야
+      // 따라와, 로컬 세션으로 바뀐 직후·다음 커밋 전에는 이전(인트라넷) 세션을 가리킨다(아래 LOGIN 처리와 같은 방식, P2-46b).
+      if (msg?.type === 'REFRESH_SUCCESS' && msg.accessToken && hasIntranetSession(getSession ? getSession() : sessionRef.current)) {
         setSession(prev => applyAuthUpdate(prev, msg));
       } else if (msg?.type === 'LOGOUT') {
         resetToLocalSession();
