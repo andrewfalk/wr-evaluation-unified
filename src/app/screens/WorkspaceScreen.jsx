@@ -1,7 +1,7 @@
 // 메인 작업 화면(사이드바·헤더·단계 표시·단계 내용·이전/다음) — REFACTORING_ROADMAP Phase 2 C3-A(P2-24).
 // App.jsx의 마지막 렌더 블록을 **글자 그대로** 옮긴 것이다(로직 변경 0, .jsx 유지 — TS 전환은 다음 PR). App이 쓰던 지역 값은
 // 모두 props로 받는다(이름 그대로). prop 수를 줄이는 일은 C3-C(AppProviders·ModalHost)에서 한다.
-import { AppModals } from '../../core/components/AppModals';
+import { ModalHost } from '../modals/ModalHost';
 import { MainHeader } from '../../core/components/MainHeader';
 import { PatientSidebar } from '../../core/components/PatientSidebar';
 import { StepContent } from '../../core/components/StepContent';
@@ -55,7 +55,6 @@ export function WorkspaceScreen({
   isIntranetMode,
   lastAutoSave,
   lockState,
-  modalsProps,
   onVideoServerApplied,
   openLoadModal,
   opsBannerMessage,
@@ -318,7 +317,7 @@ export function WorkspaceScreen({
       </div>
 
       {/* 모달들 */}
-      <AppModals {...modalsProps} />
+      <ModalHost />
     </div>
   );
 }
