@@ -3,7 +3,7 @@
 // 코드를 고친다(골든을 갱신하지 않는다).
 import { describe, expect, it } from 'vitest';
 import ts from 'typescript';
-import { collectHookOrder, effectFreeViolations, findFunctionBody, hookCallsIn } from './app-hook-order.mjs';
+import { collectHookOrder, effectFreeViolations, findFunctionBody, hookCallsIn, REACT_NON_EFFECT } from './app-hook-order.mjs';
 
 const parseTs = (text) => ts.createSourceFile('x.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 
@@ -29,5 +29,13 @@ describe('App 훅 호출 순서(P2-44a)', () => {
     `);
     expect(hookCallsIn(findFunctionBody(sf, 'App')).map((c) => c.name))
       .toEqual(['useA', 'useB', 'useC', 'useEffect', 'useCallback']);
+  });
+
+  it('추출 규칙: 인자 안의 훅이 먼저(평가 순서), useSyncExternalStore는 effect 훅으로 기록(#351 Codex 권고)', () => {
+    const body = (src) => findFunctionBody(parseTs(src), 'App');
+    expect(hookCallsIn(body('function App() { useA(); useB(); }')).map((c) => c.name)).toEqual(['useA', 'useB']);
+    expect(hookCallsIn(body('function App() { useA(useB()); }')).map((c) => c.name)).toEqual(['useB', 'useA']);
+    expect(REACT_NON_EFFECT.has('useSyncExternalStore')).toBe(false);
+    expect(REACT_NON_EFFECT.has('useState')).toBe(true);
   });
 });

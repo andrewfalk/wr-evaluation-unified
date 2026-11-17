@@ -4,13 +4,9 @@ import { getModule } from './core/moduleRegistry';
 import { LandingScreen } from './core/components/LandingScreen';
 import { IntakeWizard } from './core/components/IntakeWizard';
 import { AppModals } from './core/components/AppModals';
-import { useAuth } from './core/auth/AuthContext';
-import { useServerConfig } from './core/hooks/useServerConfig';
-import { useAIAvailable } from './core/hooks/useAIAvailable';
 import { useEvaluationDateSync } from './core/state/patientStore/useEvaluationDateSync';
 import { useElectronMenuEvents } from './core/hooks/useElectronMenuEvents';
 import { useConflictResolution } from './core/hooks/useConflictResolution';
-import { useIntegrationStatus } from './core/hooks/useIntegrationStatus';
 import { usePatientList } from './core/hooks/usePatientList';
 import { useExportHandlers } from './core/hooks/useExportHandlers';
 import { usePresetManagement } from './core/hooks/usePresetManagement';
@@ -24,7 +20,7 @@ import { usePatientCrud } from './core/hooks/usePatientCrud';
 import { usePatientSync } from './core/hooks/usePatientSync';
 import { usePatientLock, requiresLock } from './core/hooks/usePatientLock';
 import { useSyncStatusSummary } from './core/hooks/useSyncStatusSummary';
-import { showAlert, showConfirm } from './core/utils/platform';
+import { showAlert } from './core/utils/platform';
 import { generateUnifiedReport } from './core/utils/reportGenerator';
 import { buildSteps } from './core/utils/steps';
 import { isRedactedPatientRecord } from './core/services/patientRecords';
@@ -35,28 +31,13 @@ import { StatisticsWorkbench } from './core/components/statistics/StatisticsWork
 import { WorkspaceScreen } from './app/screens/WorkspaceScreen';
 import { renderBootGate, withLocalEscape as withLocalEscapeFor } from './app/BootGate';
 import { useLocalWorkBeforeLogin } from './app/useLocalWorkBeforeLogin';
-import { useGuardedDialogs } from './app/useWorkspaceLifetime';
-import { selectScreen, useScreenRouter } from './app/useScreenRouter';
-import { useDoctorRoster, usePatientScope } from './app/usePatientScope';
-import { useUnsavedDraftGuard } from './app/useUnsavedDraftGuard';
-import { useModalState } from './app/useModalState';
-import { usePatientsContainer } from './core/state/patientStore/usePatientsContainer';
+import { selectScreen } from './app/useScreenRouter';
+import { useDoctorRoster } from './app/usePatientScope';
+import { useShellController } from './app/workspace/useShellController';
+import { useEnvController } from './app/workspace/useEnvController';
 import { patientTx } from './core/state/patientStore/transitions';
-import { hasIntranetSession, isIntranetContext } from './platform/dataMode';
+import { hasIntranetSession } from './platform/dataMode';
 import { getLifecycleBridge } from './platform/bridge';
-
-const DEFAULT_PATIENT_FILTERS = {
-  searchQuery: '',
-  statusFilter: 'all',
-  moduleFilter: 'all',
-  jobFilter: '',
-  registrationFrom: '',
-  registrationTo: '',
-  completionFrom: '',
-  completionTo: '',
-  sortKey: 'default',
-  sortDirection: 'asc',
-};
 
 // 모듈 등록 (사이드이펙트 import)
 import './modules/knee';
@@ -69,43 +50,23 @@ import './modules/wrist';
 // 설정(settings·handleSaveSettings·switchToLocalMode)은 작업 공간 경계(src/app/WorkspaceBoundary)가 넘긴다 — 계정이 바뀌어
 // App이 다시 띄워져도 설정(특히 운영 인트라넷 빌드의 "로컬 모드로 전환")이 유지되도록(계정 전환 수정 AS-4).
 function App({ settings, handleSaveSettings, switchToLocalMode }) {
-  const { session, isAuthenticated, sessionVerified, logout, getWorkspaceOwner, getAuthEpoch } = useAuth();
-  // 화면 수명(계정 전환 수정 AS-4) — 계정이 바뀌어 이 화면이 내려간 뒤에는 기다리던 처리의 저장소 쓰기·서버 요청·알림·확인창을
-  // 이어 가지 않는다(src/app/useWorkspaceLifetime).
-  const { isAlive, alertAlive, confirmAlive } = useGuardedDialogs(showAlert, showConfirm);
-  // 환자 목록·활성 환자·선택 집합 — 환자 상태 컨테이너(src/core/state/patientStore, REFACTORING_ROADMAP Phase 2 C4·P2-32·P2-37).
-  // setter는 전부 참조 고정, 훅에는 지금처럼 따로 넘긴다.
-  const { patients, setPatients, activeId, setActiveId, selectedIds, setSelectedIds, store: patientStore } = usePatientsContainer();
-  // 목록·대시보드 scope 상태·파생값, 세션이 바뀌면 기본값으로 — src/app/usePatientScope.ts(P2-27).
-  const patientScopeState = usePatientScope(session);
+  // 컨트롤러 1 shell(P2-44b) — 인증·화면 수명 가드·환자 상태 컨테이너·scope·동기화 일시정지·모달 열림 상태·UI 상태·
+  // 화면 라우터·충돌 대상·종합소견 초안 가드: src/app/workspace/useShellController.ts. 이름은 옛 지역 변수 그대로.
   const {
-    setPatientScope, setDashboardScope,
-    effectivePatientScope, canUseDashboardScope, effectiveDashboardScope,
-  } = patientScopeState;
-  const [patientSyncPaused, setPatientSyncPaused] = useState(false);
-  // 모달 열림 상태 — 키별 맵 하나(불리언 8 + 프리셋 3, 여러 모달이 동시에 열릴 수 있음): src/app/useModalState.ts(P2-30).
-  // 아래 이름들은 예전 개별 useState와 같은 값·setter다(AppModals·하위 훅은 아직 props로 받는다).
-  const { modals, setterFor } = useModalState();
-  const showSaveModal = modals.save; const setShowSaveModal = setterFor('save');
-  const showLoadModal = modals.load; const setShowLoadModal = setterFor('load');
-  const [errors, setErrors] = useState({});
-  const [showSidebar, setShowSidebar] = useState(false);
-  const [patientFilters, setPatientFilters] = useState(DEFAULT_PATIENT_FILTERS);
-  const showSettings = modals.settings; const setShowSettings = setterFor('settings');
-  const showAdminConsole = modals.adminConsole; const setShowAdminConsole = setterFor('adminConsole');
-  const showAccountProfile = modals.accountProfile; const setShowAccountProfile = setterFor('accountProfile');
-  const showChangePassword = modals.changePassword; const setShowChangePassword = setterFor('changePassword');
-  const showMigrationReport = modals.migrationReport; const setShowMigrationReport = setterFor('migrationReport');
-  const showBatchImport = modals.batchImport; const setShowBatchImport = setterFor('batchImport');
-  // 화면 상태(activeScreen)·showHome 호환 shim·통계 열기/닫기 — src/app/useScreenRouter.ts(P2-26). setShowHome은
-  // 훅·컴포넌트 21곳이 그대로 쓰며, true/false 모두 통계 화면을 닫는다(PR2 §1의 단일 진실원 그대로).
-  const { activeScreen, setShowHome, openStatistics, closeStatistics } = useScreenRouter();
-  const [conflictPatientId, setConflictPatientId] = useState(null);
-
-  // 종합소견 미저장 초안 — 상태(환자 ID)·안내·편집 신호·가드·셸 신호·beforeunload는 src/app/useUnsavedDraftGuard.ts(P2-29).
-  const {
+    session, isAuthenticated, sessionVerified, logout, getWorkspaceOwner, getAuthEpoch,
+    isAlive, alertAlive, confirmAlive,
+    patients, setPatients, activeId, setActiveId, selectedIds, setSelectedIds, patientStore,
+    patientScopeState, setPatientScope, setDashboardScope, effectivePatientScope, canUseDashboardScope, effectiveDashboardScope,
+    patientSyncPaused, setPatientSyncPaused,
+    modals, setterFor,
+    showSaveModal, setShowSaveModal, showLoadModal, setShowLoadModal,
+    errors, setErrors, showSidebar, setShowSidebar, patientFilters, setPatientFilters,
+    showSettings, setShowSettings, showAdminConsole, setShowAdminConsole, showAccountProfile, setShowAccountProfile,
+    showChangePassword, setShowChangePassword, showMigrationReport, setShowMigrationReport, showBatchImport, setShowBatchImport,
+    activeScreen, setShowHome, openStatistics, closeStatistics,
+    conflictPatientId, setConflictPatientId,
     dirtyAssessmentPatientId, blockedByUnsavedDraftAlert, handleAssessmentEditingChange, blockIfDraftDirty,
-  } = useUnsavedDraftGuard();
+  } = useShellController();
   // guardedSelectPatient()로 모으지 못한 직접 setActiveId 호출부(랜딩 화면의 "이어서 작업",
   // 충돌 모달의 "정정 화면으로 이동")가 개별적으로 재구현하지 않도록 공용 가드를 둔다.
   const guardedSelectPatient = useCallback((patientId, { stepIndex = 0 } = {}) => {
@@ -119,20 +80,12 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
     return true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blockIfDraftDirty, activeId]);
-  const { serverConfig, configLoading, configError, refetchConfig, refreshing: statsConfigRefreshing, refreshError: statsConfigRefreshError } =
-    useServerConfig({ session, settings });
-  const { aiAvailable } = useAIAvailable({ serverConfig, session });
-  // PR2 §4 — 통계 워크벤치 가용성. videoAnalysisEnabled(:190)와 같은 단순 boolean 패턴 —
-  // 별도 훅 없이 statsWorkbenchAvailable 플래그 하나로 메뉴 노출을 결정한다.
-  const statsAvailable = !!serverConfig?.statsWorkbenchAvailable;
-  const isIntranetMode =
-    isIntranetContext({ session, settings });
-  const { status: integrationStatus } = useIntegrationStatus({ session, settings });
-  const activePatient = patients.find(p => p.id === activeId);
-  const conflictPatient = patients.find(
-    p => p.id === conflictPatientId && p.sync?.syncStatus === 'conflict'
-  );
-  const activeModules = isRedactedPatientRecord(activePatient) ? [] : (activePatient?.data?.activeModules || []);
+  // 컨트롤러 2 env(P2-44b) — 서버 설정·AI·연동 상태와 파생값, 활성·충돌 대상 환자, 활성 모듈: src/app/workspace/useEnvController.ts.
+  const {
+    serverConfig, configLoading, configError, refetchConfig, statsConfigRefreshing, statsConfigRefreshError,
+    aiAvailable, statsAvailable, isIntranetMode, integrationStatus,
+    activePatient, conflictPatient, activeModules,
+  } = useEnvController({ session, settings, patients, activeId, conflictPatientId });
 
   // 환자를 여는 것 자체가 편집 세션의 시작 — 서버 측 TTL lease lock을 자동으로 acquire/renew한다.
   // usePatientSync/usePresetManagement는 이 lockState(또는 그로부터 합성한 canMutateActivePatient)를

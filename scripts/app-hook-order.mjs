@@ -28,10 +28,12 @@ export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 export const APP_SHELL_CANDIDATES = ['src/app/App.tsx', 'src/App.jsx'];
 export const CONTROLLER_DIR = 'src/app/workspace';
 
-const REACT_NON_EFFECT = new Set([
+export const REACT_NON_EFFECT = new Set([
   'useState', 'useRef', 'useMemo', 'useCallback', 'useReducer', 'useContext', 'useId',
-  'useTransition', 'useDeferredValue', 'useSyncExternalStore', 'useDebugValue',
+  'useTransition', 'useDeferredValue', 'useDebugValue',
 ]);
+// useSyncExternalStore는 구독을 passive effect로 설치한다 — 비-effect 집합에 넣지 않는다(이름으로 기록, #351 Codex 권고).
+
 const REACT_EFFECT = new Set(['useEffect', 'useLayoutEffect', 'useInsertionEffect']);
 
 /** effect가 없는 커스텀 훅(이름 → 선언 파일). 본문에 effect·커스텀 훅 호출이 없다는 것을 테스트가 확인한다. */
@@ -92,16 +94,17 @@ export function calleeName(expression) {
   return ts.isIdentifier(e) ? e.text : null;
 }
 
-/** 본문을 소스 순서로 훑어 훅 호출 `{ name, node }`를 모은다(함수 안으로는 내려가지 않는다). */
+/**
+ * 본문을 **평가 순서**로 훑어 훅 호출 `{ name, node }`를 모은다(함수 안으로는 내려가지 않는다). 호출의 인자가 먼저 평가되므로
+ * `useA(useB())`는 B → A(#351 Codex 권고).
+ */
 export function hookCallsIn(body) {
   const calls = [];
   const visit = (node) => {
     if (node !== body && isFunctionLike(node)) return;
     const name = ts.isCallExpression(node) ? calleeName(node.expression) : null;
-    if (name && HOOK_NAME.test(name)) {
-      calls.push({ name, node });
-    }
     ts.forEachChild(node, visit);
+    if (name && HOOK_NAME.test(name)) calls.push({ name, node });
   };
   visit(body);
   return calls;
