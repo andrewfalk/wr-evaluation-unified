@@ -5,7 +5,7 @@
 // `(useX as unknown as UseX)(…)`로 캐스트한다(선례 WorkspaceBoundary.tsx — 최상위 별칭 캐스트는 부분 vi.mock 함정 때문에 쓰지 않는다).
 // 훅이 TS가 되면 그 훅의 계약과 캐스트를 지운다. `useAuth` 계약은 WorkspaceBoundary.tsx의 경계용 계약과 따로 둔다(그 파일은
 // 이 구간에서 고치지 않는다 — 합치는 일은 AuthContext가 TS가 될 때).
-import type { Dispatch, SetStateAction } from 'react';
+import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { PatientRecord } from '../../core/types/patient';
 import type { SetActiveId, SetPatients } from '../../core/state/patientStore/usePatientsContainer';
 import type { SlotSetter } from '../useModalState';
@@ -34,7 +34,7 @@ export interface AuthForApp {
   isAuthenticated: boolean;
   sessionVerified: boolean;
   logout: (options?: { expectedGen?: number }) => Promise<boolean>;
-  getWorkspaceOwner: () => unknown;
+  getWorkspaceOwner: () => string | null;
   getAuthEpoch: () => number;
 }
 export type UseAuth = () => AuthForApp;
@@ -236,7 +236,7 @@ export interface WorkspacePersistenceApi {
   handleLoad: ForwardedHandler;
   handleDelete: ForwardedHandler;
   openLoadModal: ForwardedHandler;
-  waitForAutosaveRestore: () => Promise<unknown>;
+  waitForAutosaveRestore: () => Promise<void>;
 }
 export type UseWorkspacePersistence = (args: object) => WorkspacePersistenceApi;
 
@@ -254,3 +254,21 @@ export interface PatientCrudApi {
   handleLoadTestData: ForwardedHandler;
 }
 export type UsePatientCrud = (args: object) => PatientCrudApi;
+
+// --- 컨트롤러 7 commands(P2-44e) ---
+
+/** Electron 메뉴가 ref로 부르는 최신 핸들러(src/core/hooks/useElectronMenuEvents.js). */
+export type MenuHandlerRef = MutableRefObject<(() => unknown) | null>;
+export type UseElectronMenuEvents = (refs: {
+  handleResetPatientsRef: MenuHandlerRef; handleStartIntakeRef: MenuHandlerRef; handleOpenStatisticsRef: MenuHandlerRef;
+}) => void;
+
+export type UsePatientList = (patients: PatientRecord[], filters: unknown) => PatientRecord[];
+
+/** 충돌 해결(src/core/hooks/useConflictResolution.js). */
+export interface ConflictResolutionApi {
+  markRemoteDeleteConflict: ForwardedHandler;
+  handleResolveConflict: (choice: string, payload?: unknown) => unknown;
+  handleCorrectServerIdentity: (args: { patient: PatientRecord; birthDate: unknown; reasonCode: unknown }) => unknown;
+}
+export type UseConflictResolution = (args: object) => ConflictResolutionApi;
