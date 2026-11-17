@@ -1,48 +1,66 @@
-import { Suspense } from 'react';
-import { AdminConsoleModal } from './AdminConsoleModal';
-import { AccountProfileModal } from './AccountProfileModal';
-import { ChangePasswordModal } from './ChangePasswordModal';
-import { SettingsModal } from './SettingsModal';
-import { MigrationReportModal } from './MigrationReportModal';
-import { SaveModal, LoadModal } from './SaveLoadModals';
-import { PatientIdentityConflictModal } from './PatientIdentityConflictModal';
-import { ConflictResolveModal } from './ConflictResolveModal';
-import { PresetManageModal } from './PresetManageModal';
-import { PresetBrowseModal } from './PresetBrowseModal';
-import { isPatientIdentityPushConflict } from '../services/patientRecords';
+// 공통 모달(REFACTORING_ROADMAP Phase 2 C3-C, P2-45a) — 옛 `src/core/components/AppModals.jsx`의 JSX 본문을 **그대로** 옮기고 값의
+// 출처만 props → useWorkspace()로 바꿨다. 인라인 람다는 인라인 그대로, 직접 넘기던 참조는 직접 넘긴다(참조가 바뀌면 자식 effect가
+// 다시 도는 값이 있다 — markRemoteDeleteConflict·settings·integrationStatus 등, 계획 C7).
+// 렌더 위치는 옛 AppModals와 같은 두 곳(랜딩·작업 화면). 새 lazy 모달은 만들지 않는다(계획 C15 — 설정 창은 즉시 렌더).
+//
+// 이름만 같던 별칭 2개(계획 C6)는 Context에서 **다른 이름**이다:
+//   모달의 로그아웃 = `handleLogout`(초안·미저장 확인·expectedGen 가드) — 원본 `logout`이 아니다
+//   설정 창의 저장 = `handleSaveSettingsAndClose`(저장 뒤 창 닫기) — 원본 `handleSaveSettings`가 아니다
+import { Suspense, type ChangeEvent, type ComponentType } from 'react';
+import { AdminConsoleModal } from '../../core/components/AdminConsoleModal';
+import { AccountProfileModal } from '../../core/components/AccountProfileModal';
+import { ChangePasswordModal } from '../../core/components/ChangePasswordModal';
+import { SettingsModal } from '../../core/components/SettingsModal';
+import { MigrationReportModal } from '../../core/components/MigrationReportModal';
+import { SaveModal, LoadModal } from '../../core/components/SaveLoadModals';
+import { PatientIdentityConflictModal } from '../../core/components/PatientIdentityConflictModal';
+import { ConflictResolveModal } from '../../core/components/ConflictResolveModal';
+import { PresetManageModal } from '../../core/components/PresetManageModal';
+import { PresetBrowseModal } from '../../core/components/PresetBrowseModal';
+import { isPatientIdentityPushConflict } from '../../core/services/patientRecords';
 import { resolveApiBaseUrl } from '../../platform/dataMode';
-import { lazyWithReload } from './lazyWithReload';
+import { lazyWithReload } from '../../core/components/lazyWithReload';
+import { useWorkspace } from '../providers/WorkspaceContext';
 
 // 일괄입력 모달은 xlsx(약 490 KB)를 쓰므로 처음 열 때 내려받는다(P-2a, P2-22). 청크를 못 받으면 새로고침 안내.
-const BatchImportModal = lazyWithReload(() => import('./BatchImportModal').then((m) => ({ default: m.BatchImportModal })));
+interface BatchImportModalProps {
+  onClose: () => void;
+  onImport: unknown;
+  existingPatients?: unknown[];
+}
+const BatchImportModal = lazyWithReload<BatchImportModalProps>(() => import('../../core/components/BatchImportModal')
+  .then((m) => ({ default: m.BatchImportModal as unknown as ComponentType<BatchImportModalProps> })));
 
-// 공통 모달 렌더링 (App.jsx의 renderModals를 분리)
-export function AppModals({
-  session, settings, integrationStatus, syncState, syncNow, logout,
-  patients, activePatient, steps,
-  setActiveId, setCurrentStepIndex, setShowHome,
+export function ModalHost() {
+  const {
+    session, settings, integrationStatus, syncState, syncNow, handleLogout,
+    patients, activePatient, steps,
+    setActiveId, setCurrentStepIndex, setShowHome,
+    dirtyAssessmentPatientId, blockedByUnsavedDraftAlert,
 
-  showAdminConsole, setShowAdminConsole,
-  showAccountProfile, setShowAccountProfile,
-  showChangePassword, setShowChangePassword,
-  showSettings, setShowSettings, handleSaveSettings,
-  showMigrationReport, setShowMigrationReport,
-  migrationStatus, migrationResult, startMigration, retryMigration, resetMigration,
-  reloadPresets,
+    showAdminConsole, setShowAdminConsole,
+    showAccountProfile, setShowAccountProfile,
+    showChangePassword, setShowChangePassword,
+    showSettings, setShowSettings, handleSaveSettingsAndClose,
+    showMigrationReport, setShowMigrationReport,
+    migrationStatus, migrationResult, startMigration, retryMigration, resetMigration,
+    reloadPresets,
 
-  showSaveModal, setShowSaveModal,
-  saveName, setSaveName, savedItems, handleSave, handleOverwriteSave, handleDelete,
-  showLoadModal, setShowLoadModal, legacyItems, handleLoad,
+    showSaveModal, setShowSaveModal,
+    saveName, setSaveName, savedItems, handleSave, handleOverwriteSave, handleDelete,
+    showLoadModal, setShowLoadModal, legacyItems, handleLoad,
 
-  showBatchImport, setShowBatchImport, handleBatchImport,
+    showBatchImport, setShowBatchImport, handleBatchImport,
 
-  conflictPatient, setConflictPatientId, handleResolveConflict, handleCorrectServerIdentity, markRemoteDeleteConflict,
-  hasUnsavedAssessmentDraft = false, onBlockedByUnsavedDraft,
+    conflictPatient, setConflictPatientId, handleResolveConflict, handleCorrectServerIdentity, markRemoteDeleteConflict,
 
-  presetModalJobId, setPresetModalJobId, presetEditingPreset, setPresetEditingPreset,
-  presetBrowseJobId, setPresetBrowseJobId,
-  presets, handleSaveCustomPreset, closePresetManageModal, handleDeleteCustomPreset, handlePresetSelect,
-}) {
+    presetModalJobId, setPresetModalJobId, presetEditingPreset, setPresetEditingPreset,
+    presetBrowseJobId, setPresetBrowseJobId,
+    presets, handleSaveCustomPreset, closePresetManageModal, handleDeleteCustomPreset, handlePresetSelect,
+  } = useWorkspace();
+  const hasUnsavedAssessmentDraft = !!dirtyAssessmentPatientId;
+  const onBlockedByUnsavedDraft = blockedByUnsavedDraftAlert;
+
   return (
     <>
       {showAdminConsole && (
@@ -58,7 +76,7 @@ export function AppModals({
           settings={settings}
           syncState={syncState}
           onClose={() => setShowAccountProfile(false)}
-          onLogout={logout}
+          onLogout={handleLogout}
           onChangePassword={() => { setShowAccountProfile(false); setShowChangePassword(true); }}
           onShowAdminConsole={() => { setShowAccountProfile(false); setShowAdminConsole(true); }}
         />
@@ -74,9 +92,9 @@ export function AppModals({
           settings={settings}
           session={session}
           integrationStatus={integrationStatus}
-          onSave={handleSaveSettings}
+          onSave={handleSaveSettingsAndClose}
           onClose={() => setShowSettings(false)}
-          onLogout={logout}
+          onLogout={handleLogout}
           onMigrate={() => { setShowSettings(false); setShowMigrationReport(true); }}
           onPresetsImported={reloadPresets}
         />
@@ -93,7 +111,7 @@ export function AppModals({
           session={session}
         />
       )}
-      {showSaveModal && <SaveModal patientCount={patients.length} saveName={saveName} onSaveNameChange={e => setSaveName(e.target.value)} savedItems={savedItems} onSave={handleSave} onOverwriteSave={handleOverwriteSave} onDelete={handleDelete} onClose={() => setShowSaveModal(false)} />}
+      {showSaveModal && <SaveModal patientCount={patients.length} saveName={saveName} onSaveNameChange={(e: ChangeEvent<HTMLInputElement>) => setSaveName(e.target.value)} savedItems={savedItems} onSave={handleSave} onOverwriteSave={handleOverwriteSave} onDelete={handleDelete} onClose={() => setShowSaveModal(false)} />}
       {showLoadModal && <LoadModal legacyItems={legacyItems} savedItems={savedItems} onLoad={handleLoad} onDelete={handleDelete} onClose={() => setShowLoadModal(false)} />}
       {showBatchImport && (
         <Suspense fallback={null}>
@@ -105,10 +123,10 @@ export function AppModals({
           patient={conflictPatient}
           session={session}
           settings={settings}
-          onUseServer={(serverPatient) =>
+          onUseServer={(serverPatient: unknown) =>
             handleResolveConflict('use-server', { patient: conflictPatient, serverPatient })
           }
-          onCorrectServer={({ birthDate, reasonCode }) =>
+          onCorrectServer={({ birthDate, reasonCode }: { birthDate: unknown; reasonCode: unknown }) =>
             handleCorrectServerIdentity({ patient: conflictPatient, birthDate, reasonCode })
           }
           onEditIdentity={() => {
@@ -138,7 +156,7 @@ export function AppModals({
           jobId={presetModalJobId}
           patient={activePatient}
           presets={presets}
-          editingPreset={presetEditingPreset}
+          editingPreset={presetEditingPreset as null} // JS 기본값(null)으로 추론된 prop 타입 — 실제 값은 프리셋 객체 또는 null
           onSave={handleSaveCustomPreset}
           onClose={closePresetManageModal}
           session={session}
@@ -149,12 +167,12 @@ export function AppModals({
           job={(activePatient.data?.shared?.jobs || []).find(job => job.id === presetBrowseJobId)}
           presets={presets}
           onDelete={handleDeleteCustomPreset}
-          onEdit={(preset) => {
+          onEdit={(preset: unknown) => {
             setPresetEditingPreset(preset);
             setPresetModalJobId(presetBrowseJobId);
             setPresetBrowseJobId(null);
           }}
-          onSelect={async (preset) => {
+          onSelect={async (preset: unknown) => {
             await handlePresetSelect(presetBrowseJobId, preset);
             setPresetBrowseJobId(null);
           }}
