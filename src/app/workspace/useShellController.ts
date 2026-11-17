@@ -75,7 +75,7 @@ export function useShellController(): ShellController {
   } = patientScopeState;
   const [patientSyncPaused, setPatientSyncPaused] = useState(false);
   // 모달 열림 상태 — 키별 맵 하나(불리언 8 + 프리셋 3, 여러 모달이 동시에 열릴 수 있음): src/app/useModalState.ts(P2-30).
-  // 아래 이름들은 예전 개별 useState와 같은 값·setter다(AppModals·하위 훅은 아직 props로 받는다).
+  // 아래 이름들은 예전 개별 useState와 같은 값·setter다(하위 훅은 인자로, 모달은 ModalHost가 작업 공간 Context로 받는다 — P2-45a).
   const { modals, setterFor } = useModalState();
   const showSaveModal = modals.save; const setShowSaveModal = setterFor('save');
   const showLoadModal = modals.load; const setShowLoadModal = setterFor('load');
