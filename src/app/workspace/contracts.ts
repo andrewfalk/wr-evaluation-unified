@@ -114,7 +114,7 @@ export interface MigrationApi {
 }
 export type UseMigration = (args: { session: AppSession; settings: AppSettings }) => MigrationApi;
 
-export type UseOpsStatus = (args: { session: AppSession; enabled: boolean }) => { showBanner: boolean; bannerMessage: unknown };
+export type UseOpsStatus = (args: { session: AppSession; enabled: boolean }) => { showBanner: boolean; bannerMessage: string | null };
 
 /** 내보내기(src/core/hooks/useExportHandlers.js). */
 export interface ExportHandlersApi {
