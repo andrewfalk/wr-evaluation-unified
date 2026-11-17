@@ -1,10 +1,6 @@
 // @ts-nocheck
-import { LandingScreen } from './core/components/LandingScreen';
-import { IntakeWizard } from './core/components/IntakeWizard';
-import { ModalHost } from './app/modals/ModalHost';
 import { WorkspaceProvider } from './app/providers/WorkspaceContext';
-import { StatisticsWorkbench } from './core/components/statistics/StatisticsWorkbench';
-import { WorkspaceScreen } from './app/screens/WorkspaceScreen';
+import { ScreenRouter } from './app/router/ScreenRouter';
 import { renderBootGate, withLocalEscape as withLocalEscapeFor } from './app/BootGate';
 import { selectScreen } from './app/useScreenRouter';
 import { useShellController } from './app/workspace/useShellController';
@@ -33,17 +29,14 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
   const {
     session, isAuthenticated, sessionVerified, logout, getWorkspaceOwner, getAuthEpoch, isAlive, alertAlive, confirmAlive,
     patients, setPatients, activeId, setActiveId, selectedIds, setSelectedIds, patientStore, patientScopeState,
-    setPatientScope, setDashboardScope, effectivePatientScope, canUseDashboardScope, effectiveDashboardScope,
-    patientSyncPaused, setPatientSyncPaused, modals, setterFor, setShowSaveModal, setShowLoadModal, errors, setErrors,
-    setShowSidebar, patientFilters, setShowSettings, setShowBatchImport, activeScreen, setShowHome, openStatistics,
-    closeStatistics, conflictPatientId, setConflictPatientId, dirtyAssessmentPatientId, blockedByUnsavedDraftAlert,
-    blockIfDraftDirty,
+    effectivePatientScope, patientSyncPaused, setPatientSyncPaused, modals, setterFor, setShowSaveModal, setShowLoadModal,
+    setErrors, setShowSidebar, patientFilters, setShowSettings, activeScreen, setShowHome, openStatistics, closeStatistics,
+    conflictPatientId, setConflictPatientId, dirtyAssessmentPatientId, blockedByUnsavedDraftAlert, blockIfDraftDirty,
   } = shell;
   // 컨트롤러 2 env(P2-44b) — 서버 설정·AI·연동 상태와 파생값, 활성·충돌 대상 환자, 활성 모듈: src/app/workspace/useEnvController.ts.
   const env = useEnvController({ session, settings, patients, activeId, conflictPatientId });
   const {
-    serverConfig, configLoading, configError, refetchConfig, statsConfigRefreshing, statsConfigRefreshError, statsAvailable,
-    isIntranetMode, activePatient, activeModules,
+    serverConfig, configLoading, configError, statsAvailable, isIntranetMode, activePatient, activeModules,
   } = env;
 
   // 컨트롤러 3 editing(P2-44c) — 편집 락·편집 가능 여부·프리셋·마이그레이션·운영 알림·내보내기·EMR:
@@ -53,7 +46,7 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
     modals, setterFor, dirtyAssessmentPatientId,
   });
   const {
-    lockState, forceAcquire, canMutateActivePatient, presets, presetMeta, presetError,
+    lockState, forceAcquire, canMutateActivePatient,
   } = editing;
 
   // 컨트롤러 4 nav(P2-44c) — Electron 메뉴 ref·단계 목록·단계 이동·새 환자 위자드·공용 환자 선택 가드:
@@ -64,7 +57,7 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
   });
   const {
     handleStartIntakeRef, handleResetPatientsRef, handleOpenStatisticsRef, steps, currentStepIndex, setCurrentStepIndex,
-    switchPatient, intakeShared, setIntakeShared, handleStartIntake, handleIntakeComplete, guardedSelectPatient,
+    switchPatient, intakeShared, setIntakeShared, handleStartIntake,
   } = nav;
 
   // 컨트롤러 5 sync(P2-44d) — 일시정지 해제 effect 2·환자 동기화·락 브리지·락 토큰 초기화·동기화 요약·강제 인수·의사 명부:
@@ -75,7 +68,7 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
     intakeShared, confirmAlive,
   });
   const {
-    syncState, syncNow, flushPatient, syncSummary, doctorRoster, isDashboardScopeLoading,
+    syncState, syncNow, flushPatient, syncSummary,
   } = sync;
 
   // 컨트롤러 6 data(P2-44d) — 작업 공간 저장/불러오기·자동저장·현재 단계·활성 모듈·환자 CRUD:
@@ -87,7 +80,7 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
     blockedByUnsavedDraftAlert,
   });
   const {
-    openLoadModal, waitForAutosaveRestore, activeModuleId, activeModule, handleLoadTestData,
+    waitForAutosaveRestore, activeModuleId, activeModule,
   } = data;
 
   // 컨트롤러 7 commands(P2-44e) — 환자 전환 게이팅·영상 분석 반영·평가일자·Electron 메뉴·목록·계산·로그인 직전 보존·
@@ -101,8 +94,7 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
     waitForAutosaveRestore, dirtyAssessmentPatientId, blockedByUnsavedDraftAlert, blockIfDraftDirty,
   });
   const {
-    onBeforeLogin, loginPending, setLoginPending, showPatientList, handleResetPatients, handleOpenStatistics,
-    handleCloseStatistics,
+    onBeforeLogin, loginPending, setLoginPending,
   } = commands;
 
   // 작업 공간 Context 값(P2-45a) — 컨트롤러 반환 묶음 + 작업 공간 경계가 준 설정 props. 모달(ModalHost)이 useWorkspace()로 읽는다.
@@ -135,23 +127,6 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
   });
 
   // ===========================================
-  // 통계분석 워크벤치 (PR2 §1) — 환자 동기화 로딩·자동 랜딩보다 먼저(이 화면은 환자 목록을 쓰지 않는다)
-  // ===========================================
-  if (screen === 'statistics') {
-    return (
-      <StatisticsWorkbench
-        session={session}
-        serverConfig={serverConfig}
-        statsAvailable={statsAvailable}
-        refetchConfig={refetchConfig}
-        configRefreshing={statsConfigRefreshing}
-        configRefreshError={statsConfigRefreshError}
-        onClose={handleCloseStatistics}
-      />
-    );
-  }
-
-  // ===========================================
   // 인트라넷 초기 부팅: 서버 환자 목록 pull 중 → 로딩 화면(pull 뒤 mine=0이지만 서버에 환자가 있으면 자동 랜딩 억제 —
   // 환자 목록 껍데기에서 scope 전환·재마이그레이션 등 다음 행동을 하게 함)
   // ===========================================
@@ -165,79 +140,8 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
     );
   }
 
-  // ===========================================
-  // 랜딩 / 대시보드 화면
-  // ===========================================
-  // 자동 진입: 환자가 없을 때만 랜딩으로 보낸다.
-  //   인트라넷에서 mine=0이지만 서버에 환자가 있으면 자동 랜딩을 억제 (목록 화면에서 scope 전환 등으로 해결 가능).
-  // 사용자 진입: 헤더의 대시보드/홈 버튼(showHome)은 서버 상태와 무관하게 항상 허용.
-  if (screen === 'landing') {
-    return (
-      <WorkspaceProvider value={ws}>
-      <div className="app-layout landing-layout">
-        <LandingScreen
-          patients={patients}
-          onStartIntake={handleStartIntake}
-          onOpenLoadModal={openLoadModal}
-          onShowSaveModal={() => setShowSaveModal(true)}
-          onShowBatchImport={() => setShowBatchImport(true)}
-          onLoadTestData={handleLoadTestData}
-          onShowSettings={() => setShowSettings(true)}
-          onShowStatistics={handleOpenStatistics}
-          statsAvailable={statsAvailable}
-          onGoBack={() => setShowHome(false)}
-          onResetPatients={handleResetPatients}
-          onSelectPatient={(id) => guardedSelectPatient(id)}
-          hasIntranetSession={hasIntranetSession(session)}
-          session={session}
-          dashboardScope={effectiveDashboardScope}
-          onDashboardScopeChange={(s) => {
-            setDashboardScope(s);
-            // 로드 스코프를 대시보드 선택과 일치시킨다. 특정 의사/미배정은 그 범위만,
-            // 'all'은 조직 전체만 로드(정규화는 effectivePatientScope에서 처리).
-            // usePatientSync가 scope 변경 시 해당 범위로 재pull → 전체 payload는 'all'일 때만.
-            setPatientScope(s);
-          }}
-          canUseDashboardScope={canUseDashboardScope}
-          doctorRoster={doctorRoster}
-          isDashboardScopeLoading={isDashboardScopeLoading}
-          onShowPatientList={showPatientList}
-          canShowPatientList={
-            hasIntranetSession(session) &&
-            ((syncState.serverPatientCount ?? 0) > 0 || patients.length > 0)
-          }
-        />
-        <ModalHost />
-      </div>
-      </WorkspaceProvider>
-    );
-  }
-
-  // ===========================================
-  // 신규 환자 위자드 (환자 생성 전)
-  // ===========================================
-  if (screen === 'intake') {
-    return (
-      <IntakeWizard
-        shared={intakeShared}
-        onSharedChange={setIntakeShared}
-        hasExistingPatients={patients.length > 0}
-        onCancel={() => { setIntakeShared(null); if (patients.length > 0) setActiveId(patients[0].id); }}
-        onComplete={handleIntakeComplete}
-        errors={errors}
-        presets={presets}
-        presetMeta={presetMeta}
-        presetError={presetError}
-        session={session}
-      />
-    );
-  }
-
-  // ===========================================
-  // 메인 작업 화면 (위자드 전체 흐름)
-  // ===========================================
-  // 메인 작업 화면 — src/app/screens/WorkspaceScreen.jsx(P2-24), 값은 작업 공간 Context에서(P2-45b).
-  return <WorkspaceProvider value={ws}><WorkspaceScreen /></WorkspaceProvider>;
+  // 통계 → 랜딩/대시보드 → 위자드 → 작업 화면 — src/app/router/ScreenRouter.tsx(P2-45c), 값은 작업 공간 Context에서.
+  return <WorkspaceProvider value={ws}><ScreenRouter screen={screen} /></WorkspaceProvider>;
 }
 
 export default App;
