@@ -31,26 +31,19 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
   // 화면 라우터·충돌 대상·종합소견 초안 가드: src/app/workspace/useShellController.ts. 이름은 옛 지역 변수 그대로.
   const shell = useShellController();
   const {
-    session, isAuthenticated, sessionVerified, logout, getWorkspaceOwner, getAuthEpoch,
-    isAlive, alertAlive, confirmAlive,
-    patients, setPatients, activeId, setActiveId, selectedIds, setSelectedIds, patientStore,
-    patientScopeState, setPatientScope, setDashboardScope, effectivePatientScope, canUseDashboardScope, effectiveDashboardScope,
-    patientSyncPaused, setPatientSyncPaused,
-    modals, setterFor,
-    setShowSaveModal, setShowLoadModal,
-    errors, setErrors, showSidebar, setShowSidebar, patientFilters, setPatientFilters,
-    setShowSettings, setShowAdminConsole, setShowAccountProfile,
-    setShowChangePassword, setShowBatchImport,
-    activeScreen, setShowHome, openStatistics, closeStatistics,
-    conflictPatientId, setConflictPatientId,
-    dirtyAssessmentPatientId, blockedByUnsavedDraftAlert, handleAssessmentEditingChange, blockIfDraftDirty,
+    session, isAuthenticated, sessionVerified, logout, getWorkspaceOwner, getAuthEpoch, isAlive, alertAlive, confirmAlive,
+    patients, setPatients, activeId, setActiveId, selectedIds, setSelectedIds, patientStore, patientScopeState,
+    setPatientScope, setDashboardScope, effectivePatientScope, canUseDashboardScope, effectiveDashboardScope,
+    patientSyncPaused, setPatientSyncPaused, modals, setterFor, setShowSaveModal, setShowLoadModal, errors, setErrors,
+    setShowSidebar, patientFilters, setShowSettings, setShowBatchImport, activeScreen, setShowHome, openStatistics,
+    closeStatistics, conflictPatientId, setConflictPatientId, dirtyAssessmentPatientId, blockedByUnsavedDraftAlert,
+    blockIfDraftDirty,
   } = shell;
   // 컨트롤러 2 env(P2-44b) — 서버 설정·AI·연동 상태와 파생값, 활성·충돌 대상 환자, 활성 모듈: src/app/workspace/useEnvController.ts.
   const env = useEnvController({ session, settings, patients, activeId, conflictPatientId });
   const {
-    serverConfig, configLoading, configError, refetchConfig, statsConfigRefreshing, statsConfigRefreshError,
-    aiAvailable, statsAvailable, isIntranetMode, integrationStatus,
-    activePatient, activeModules,
+    serverConfig, configLoading, configError, refetchConfig, statsConfigRefreshing, statsConfigRefreshError, statsAvailable,
+    isIntranetMode, activePatient, activeModules,
   } = env;
 
   // 컨트롤러 3 editing(P2-44c) — 편집 락·편집 가능 여부·프리셋·마이그레이션·운영 알림·내보내기·EMR:
@@ -60,17 +53,7 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
     modals, setterFor, dirtyAssessmentPatientId,
   });
   const {
-    lockState, forceAcquire, canMutateActivePatient,
-    presets, presetMeta, presetError,
-    setPresetModalJobId, setPresetBrowseJobId, handlePresetSelect,
-    showOpsBanner, opsBannerMessage,
-    exportDropdown, setExportDropdown,
-    handleExportSingle, handleExportSelected, handleExportBatch,
-    handleExportBatchFormatSingle, handleExportBatchFormatSelected, handleExportBatchFormatAll,
-    handleExportBatchTemplate,
-    extractProgress, setExtractProgress,
-    handleInjectEMR, handleInjectConsultReply,
-    handleEmrExtractBatch, handleExtractConsultation,
+    lockState, forceAcquire, canMutateActivePatient, presets, presetMeta, presetError,
   } = editing;
 
   // 컨트롤러 4 nav(P2-44c) — Electron 메뉴 ref·단계 목록·단계 이동·새 환자 위자드·공용 환자 선택 가드:
@@ -80,11 +63,8 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
     dirtyAssessmentPatientId, blockedByUnsavedDraftAlert, blockIfDraftDirty,
   });
   const {
-    handleStartIntakeRef, handleResetPatientsRef, handleOpenStatisticsRef,
-    steps,
-    currentStepIndex, setCurrentStepIndex, goToStep, goNext, goPrev, switchPatient,
-    intakeShared, setIntakeShared, handleStartIntake, handleIntakeComplete,
-    guardedSelectPatient,
+    handleStartIntakeRef, handleResetPatientsRef, handleOpenStatisticsRef, steps, currentStepIndex, setCurrentStepIndex,
+    switchPatient, intakeShared, setIntakeShared, handleStartIntake, handleIntakeComplete, guardedSelectPatient,
   } = nav;
 
   // 컨트롤러 5 sync(P2-44d) — 일시정지 해제 effect 2·환자 동기화·락 브리지·락 토큰 초기화·동기화 요약·강제 인수·의사 명부:
@@ -95,8 +75,7 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
     intakeShared, confirmAlive,
   });
   const {
-    syncState, syncNow, flushPatient,
-    syncSummary, handleForceTakeover, doctorRoster, isDashboardScopeLoading,
+    syncState, syncNow, flushPatient, syncSummary, doctorRoster, isDashboardScopeLoading,
   } = sync;
 
   // 컨트롤러 6 data(P2-44d) — 작업 공간 저장/불러오기·자동저장·현재 단계·활성 모듈·환자 CRUD:
@@ -108,12 +87,7 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
     blockedByUnsavedDraftAlert,
   });
   const {
-    lastAutoSave, openLoadModal, waitForAutosaveRestore,
-    currentStep, activeModuleId, activeModule,
-    updatePatient, updateShared, updateActiveModules,
-    updateModule, updateModuleById, updateDiagnoses,
-    addPatient, removePatient, removeSelectedPatients,
-    handleLoadTestData,
+    openLoadModal, waitForAutosaveRestore, activeModuleId, activeModule, handleLoadTestData,
   } = data;
 
   // 컨트롤러 7 commands(P2-44e) — 환자 전환 게이팅·영상 분석 반영·평가일자·Electron 메뉴·목록·계산·로그인 직전 보존·
@@ -127,9 +101,8 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
     waitForAutosaveRestore, dirtyAssessmentPatientId, blockedByUnsavedDraftAlert, blockIfDraftDirty,
   });
   const {
-    handleSwitchPatient, onVideoServerApplied, displayPatients, calc, unifiedPreviewText, onBeforeLogin, loginPending, setLoginPending,
-    showPatientList, handleResetPatients,
-    handleLogout, handleShowHome, handleOpenStatistics, handleCloseStatistics,
+    onBeforeLogin, loginPending, setLoginPending, showPatientList, handleResetPatients, handleOpenStatistics,
+    handleCloseStatistics,
   } = commands;
 
   // 작업 공간 Context 값(P2-45a) — 컨트롤러 반환 묶음 + 작업 공간 경계가 준 설정 props. 모달(ModalHost)이 useWorkspace()로 읽는다.
@@ -263,97 +236,8 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
   // ===========================================
   // 메인 작업 화면 (위자드 전체 흐름)
   // ===========================================
-  // 메인 작업 화면 — src/app/screens/WorkspaceScreen.jsx로 옮겼다(P2-24, 로직 변경 0). 그 화면이 쓰는 App 지역 값을 그대로 넘긴다.
-  const workspaceProps = {
-    activeId,
-    activeModule,
-    activeModuleId,
-    activeModules,
-    activePatient,
-    addPatient,
-    aiAvailable,
-    calc,
-    canMutateActivePatient,
-    currentStep,
-    currentStepIndex,
-    displayPatients,
-    doctorRoster,
-    effectivePatientScope,
-    errors,
-    exportDropdown,
-    extractProgress,
-    goNext,
-    goPrev,
-    goToStep,
-    handleAssessmentEditingChange,
-    handleEmrExtractBatch,
-    handleExportBatch,
-    handleExportBatchFormatAll,
-    handleExportBatchFormatSelected,
-    handleExportBatchFormatSingle,
-    handleExportBatchTemplate,
-    handleExportSelected,
-    handleExportSingle,
-    handleExtractConsultation,
-    handleForceTakeover,
-    handleInjectConsultReply,
-    handleInjectEMR,
-    handleLogout,
-    handleOpenStatistics,
-    handlePresetSelect,
-    handleResetPatients,
-    handleShowHome,
-    handleSwitchPatient,
-    integrationStatus,
-    isIntranetMode,
-    lastAutoSave,
-    lockState,
-    onVideoServerApplied,
-    openLoadModal,
-    opsBannerMessage,
-    patientFilters,
-    patients,
-    presetError,
-    presetMeta,
-    presets,
-    removePatient,
-    removeSelectedPatients,
-    selectedIds,
-    serverConfig,
-    session,
-    setConflictPatientId,
-    setDashboardScope,
-    setExportDropdown,
-    setExtractProgress,
-    setPatientFilters,
-    setPatientScope,
-    setPatientSyncPaused,
-    setPresetBrowseJobId,
-    setPresetModalJobId,
-    setSelectedIds,
-    setShowAccountProfile,
-    setShowAdminConsole,
-    setShowBatchImport,
-    setShowChangePassword,
-    setShowSaveModal,
-    setShowSettings,
-    setShowSidebar,
-    settings,
-    showOpsBanner,
-    showSidebar,
-    statsAvailable,
-    steps,
-    syncState,
-    syncSummary,
-    unifiedPreviewText,
-    updateActiveModules,
-    updateDiagnoses,
-    updateModule,
-    updateModuleById,
-    updatePatient,
-    updateShared,
-  };
-  return <WorkspaceProvider value={ws}><WorkspaceScreen {...workspaceProps} /></WorkspaceProvider>;
+  // 메인 작업 화면 — src/app/screens/WorkspaceScreen.jsx(P2-24), 값은 작업 공간 Context에서(P2-45b).
+  return <WorkspaceProvider value={ws}><WorkspaceScreen /></WorkspaceProvider>;
 }
 
 export default App;

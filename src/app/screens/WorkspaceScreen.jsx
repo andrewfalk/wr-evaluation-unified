@@ -1,7 +1,8 @@
-// 메인 작업 화면(사이드바·헤더·단계 표시·단계 내용·이전/다음) — REFACTORING_ROADMAP Phase 2 C3-A(P2-24).
-// App.jsx의 마지막 렌더 블록을 **글자 그대로** 옮긴 것이다(로직 변경 0, .jsx 유지 — TS 전환은 다음 PR). App이 쓰던 지역 값은
-// 모두 props로 받는다(이름 그대로). prop 수를 줄이는 일은 C3-C(AppProviders·ModalHost)에서 한다.
+// 메인 작업 화면(사이드바·헤더·단계 표시·단계 내용·이전/다음) — REFACTORING_ROADMAP Phase 2 C3-A(P2-24)에서 App.jsx의 마지막 렌더
+// 블록을 글자 그대로 옮겼고, C3-C(P2-45b)에서 값을 props 대신 작업 공간 Context(useWorkspace)에서 받는다(이름 그대로, .jsx 유지).
+// MainHeader·StepContent·PatientSidebar에 넘기는 JSX는 그대로다(core 컴포넌트 props 시그니처 불변 — 계획 원칙 5).
 import { ModalHost } from '../modals/ModalHost';
+import { useWorkspace } from '../providers/WorkspaceContext';
 import { MainHeader } from '../../core/components/MainHeader';
 import { PatientSidebar } from '../../core/components/PatientSidebar';
 import { StepContent } from '../../core/components/StepContent';
@@ -11,96 +12,25 @@ import { getAllModules } from '../../core/moduleRegistry';
 import { normalizePatientScopeForSession } from '../../core/utils/patientScope';
 import { suggestModules } from '../../core/utils/diagnosisMapping';
 
-export function WorkspaceScreen({
-  activeId,
-  activeModule,
-  activeModuleId,
-  activeModules,
-  activePatient,
-  addPatient,
-  aiAvailable,
-  calc,
-  canMutateActivePatient,
-  currentStep,
-  currentStepIndex,
-  displayPatients,
-  doctorRoster,
-  effectivePatientScope,
-  errors,
-  exportDropdown,
-  extractProgress,
-  goNext,
-  goPrev,
-  goToStep,
-  handleAssessmentEditingChange,
-  handleEmrExtractBatch,
-  handleExportBatch,
-  handleExportBatchFormatAll,
-  handleExportBatchFormatSelected,
-  handleExportBatchFormatSingle,
-  handleExportBatchTemplate,
-  handleExportSelected,
-  handleExportSingle,
-  handleExtractConsultation,
-  handleForceTakeover,
-  handleInjectConsultReply,
-  handleInjectEMR,
-  handleLogout,
-  handleOpenStatistics,
-  handlePresetSelect,
-  handleResetPatients,
-  handleShowHome,
-  handleSwitchPatient,
-  integrationStatus,
-  isIntranetMode,
-  lastAutoSave,
-  lockState,
-  onVideoServerApplied,
-  openLoadModal,
-  opsBannerMessage,
-  patientFilters,
-  patients,
-  presetError,
-  presetMeta,
-  presets,
-  removePatient,
-  removeSelectedPatients,
-  selectedIds,
-  serverConfig,
-  session,
-  setConflictPatientId,
-  setDashboardScope,
-  setExportDropdown,
-  setExtractProgress,
-  setPatientFilters,
-  setPatientScope,
-  setPatientSyncPaused,
-  setPresetBrowseJobId,
-  setPresetModalJobId,
-  setSelectedIds,
-  setShowAccountProfile,
-  setShowAdminConsole,
-  setShowBatchImport,
-  setShowChangePassword,
-  setShowSaveModal,
-  setShowSettings,
-  setShowSidebar,
-  settings,
-  showOpsBanner,
-  showSidebar,
-  statsAvailable,
-  steps,
-  syncState,
-  syncSummary,
-  unifiedPreviewText,
-  updateActiveModules,
-  updateDiagnoses,
-  updateModule,
-  updateModuleById,
-  updatePatient,
-  updateShared,
-}) {
-  const shared = activePatient?.data?.shared || {};
+export function WorkspaceScreen() {
+  // 값은 작업 공간 Context에서(P2-45b) — 옛 App.jsx가 넘기던 props와 이름·참조가 같다.
+  const {
+    activeId, activeModule, activeModuleId, activeModules, activePatient, addPatient, aiAvailable, calc,
+    canMutateActivePatient, currentStep, currentStepIndex, displayPatients, doctorRoster, effectivePatientScope, errors,
+    exportDropdown, extractProgress, goNext, goPrev, goToStep, handleAssessmentEditingChange, handleEmrExtractBatch,
+    handleExportBatch, handleExportBatchFormatAll, handleExportBatchFormatSelected, handleExportBatchFormatSingle,
+    handleExportBatchTemplate, handleExportSelected, handleExportSingle, handleExtractConsultation, handleForceTakeover,
+    handleInjectConsultReply, handleInjectEMR, handleLogout, handleOpenStatistics, handlePresetSelect, handleResetPatients,
+    handleShowHome, handleSwitchPatient, integrationStatus, isIntranetMode, lastAutoSave, lockState, onVideoServerApplied,
+    openLoadModal, opsBannerMessage, patientFilters, patients, presetError, presetMeta, presets, removePatient,
+    removeSelectedPatients, selectedIds, serverConfig, session, setConflictPatientId, setDashboardScope, setExportDropdown,
+    setExtractProgress, setPatientFilters, setPatientScope, setPatientSyncPaused, setPresetBrowseJobId, setPresetModalJobId,
+    setSelectedIds, setShowAccountProfile, setShowAdminConsole, setShowBatchImport, setShowChangePassword, setShowSaveModal,
+    setShowSettings, setShowSidebar, settings, showOpsBanner, showSidebar, statsAvailable, steps, syncState, syncSummary,
+    unifiedPreviewText, updateActiveModules, updateDiagnoses, updateModule, updateModuleById, updatePatient, updateShared,
+  } = useWorkspace();
+  // (JSDoc: Context 값은 타입이 있어 `|| {}` 합집합에서 diagnoses를 못 읽는다 — 옛 props(타입 없음)와 같은 값·같은 식)
+  const shared = /** @type {{ diagnoses?: unknown[], [key: string]: unknown }} */ (activePatient?.data?.shared || {});
   const diagnoses = shared.diagnoses || [];
   const allModules = getAllModules();
   const suggested = suggestModules(diagnoses);

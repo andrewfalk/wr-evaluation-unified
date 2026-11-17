@@ -44,7 +44,7 @@ export interface EditingController extends
   retryMigration: MigrationApi['retry'];
   resetMigration: MigrationApi['reset'];
   showOpsBanner: boolean;
-  opsBannerMessage: unknown;
+  opsBannerMessage: string | null;
 }
 
 export function useEditingController({
