@@ -9,6 +9,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { PatientRecord } from '../../core/types/patient';
 import type { SetActiveId, SetPatients } from '../../core/state/patientStore/usePatientsContainer';
 import type { SlotSetter } from '../useModalState';
+import type { PatientStore } from '../../core/state/patientStore/store';
 export type AppSettings = Record<string, unknown>;
 
 export interface AppSessionUser {
@@ -180,3 +181,76 @@ export type UseIntakeWizard = (args: {
   setCurrentStepIndex: Dispatch<SetStateAction<number>>; setShowHome: (value: boolean) => void; videoAnalysisEnabled: boolean;
   hasUnsavedAssessmentDraft: boolean; onBlockedByUnsavedDraft: () => void;
 }) => IntakeWizardApi;
+
+// --- 컨트롤러 5 sync(P2-44d) ---
+
+/** 동기화 상태(src/core/hooks/usePatientSync.js) — App·화면이 읽는 필드만. */
+export interface SyncState {
+  status?: string;
+  serverPatientCount?: number | null;
+  serverUnassignedCount?: number | null;
+  lastPermissionDeniedCount?: number;
+  [field: string]: unknown;
+}
+
+export type FlushOutcome = 'synced' | 'conflict' | 'still-dirty' | 'lock-lost' | 'permission' | 'offline' | 'error' | string;
+
+export interface PatientSyncApi {
+  syncState: SyncState;
+  syncNow: (options?: { pull?: boolean; reason?: string }) => unknown;
+  flushPatient: (patientId: string | null) => Promise<FlushOutcome>;
+  notifyLockOutcome: (patientId: string | null, outcome: string) => void;
+}
+export type UsePatientSync = (args: {
+  patients: PatientRecord[]; activeId: string | null; store: PatientStore; session: AppSession; settings: AppSettings;
+  scope: string; lockState: LockState; enabled: boolean;
+}) => PatientSyncApi;
+
+/** 동기화 요약(src/core/hooks/useSyncStatusSummary.js). */
+export interface SyncStatusSummary {
+  pendingCount: number;
+  conflictCount: number;
+  lockLostCount: number;
+  offline: boolean;
+  [field: string]: unknown;
+}
+export type UseSyncStatusSummary = (patients: PatientRecord[], syncState: SyncState) => SyncStatusSummary;
+
+// --- 컨트롤러 6 data(P2-44d) ---
+
+/** 모듈(src/core/moduleRegistry.js getModule) — App이 읽는 필드만. */
+export interface AppModule {
+  computeCalc?: (input: { shared: unknown; module: unknown }) => unknown;
+  EvaluationComponent?: unknown;
+  [field: string]: unknown;
+}
+
+export interface WorkspacePersistenceApi {
+  savedItems: unknown[];
+  saveName: string;
+  setSaveName: Dispatch<SetStateAction<string>>;
+  lastAutoSave: unknown;
+  legacyItems: unknown[];
+  handleSave: ForwardedHandler;
+  handleOverwriteSave: ForwardedHandler;
+  handleLoad: ForwardedHandler;
+  handleDelete: ForwardedHandler;
+  openLoadModal: ForwardedHandler;
+  waitForAutosaveRestore: () => Promise<unknown>;
+}
+export type UseWorkspacePersistence = (args: object) => WorkspacePersistenceApi;
+
+export interface PatientCrudApi {
+  updatePatient: ForwardedHandler;
+  updateShared: ForwardedHandler;
+  updateActiveModules: ForwardedHandler;
+  updateModule: ForwardedHandler;
+  updateModuleById: ForwardedHandler;
+  updateDiagnoses: ForwardedHandler;
+  addPatient: ForwardedHandler;
+  removePatient: ForwardedHandler;
+  removeSelectedPatients: ForwardedHandler;
+  handleBatchImport: ForwardedHandler;
+  handleLoadTestData: ForwardedHandler;
+}
+export type UsePatientCrud = (args: object) => PatientCrudApi;

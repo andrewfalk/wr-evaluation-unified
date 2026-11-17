@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { getModule } from './core/moduleRegistry';
 import { LandingScreen } from './core/components/LandingScreen';
 import { IntakeWizard } from './core/components/IntakeWizard';
 import { AppModals } from './core/components/AppModals';
@@ -8,25 +7,21 @@ import { useEvaluationDateSync } from './core/state/patientStore/useEvaluationDa
 import { useElectronMenuEvents } from './core/hooks/useElectronMenuEvents';
 import { useConflictResolution } from './core/hooks/useConflictResolution';
 import { usePatientList } from './core/hooks/usePatientList';
-import { useWorkspacePersistence } from './core/hooks/useWorkspacePersistence';
-import { usePatientCrud } from './core/hooks/usePatientCrud';
-import { usePatientSync } from './core/hooks/usePatientSync';
-import { useSyncStatusSummary } from './core/hooks/useSyncStatusSummary';
 import { showAlert } from './core/utils/platform';
 import { generateUnifiedReport } from './core/utils/reportGenerator';
 import { isRedactedPatientRecord } from './core/services/patientRecords';
 import { clearAutoSavedWorkspace } from './core/services/workspaceRepository';
-import { clearAllLockTokens } from './core/services/lockTokenStore';
 import { StatisticsWorkbench } from './core/components/statistics/StatisticsWorkbench';
 import { WorkspaceScreen } from './app/screens/WorkspaceScreen';
 import { renderBootGate, withLocalEscape as withLocalEscapeFor } from './app/BootGate';
 import { useLocalWorkBeforeLogin } from './app/useLocalWorkBeforeLogin';
 import { selectScreen } from './app/useScreenRouter';
-import { useDoctorRoster } from './app/usePatientScope';
 import { useShellController } from './app/workspace/useShellController';
 import { useEnvController } from './app/workspace/useEnvController';
 import { useEditingController } from './app/workspace/useEditingController';
 import { useNavController } from './app/workspace/useNavController';
+import { useSyncController } from './app/workspace/useSyncController';
+import { useDataController } from './app/workspace/useDataController';
 import { patientTx } from './core/state/patientStore/transitions';
 import { hasIntranetSession } from './platform/dataMode';
 import { getLifecycleBridge } from './platform/bridge';
@@ -102,109 +97,32 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
     dirtyAssessmentPatientId, blockedByUnsavedDraftAlert, blockIfDraftDirty,
   });
 
-  // 세션이 바뀌면 동기화 일시정지도 푼다(scope 초기화는 usePatientScope가 같은 deps로 먼저 한다).
-  useEffect(() => {
-    setPatientSyncPaused(false);
-  }, [session?.mode, session?.user?.id, session?.user?.role]);
-
-  useEffect(() => {
-    if (patients.length > 0 || intakeShared) {
-      setPatientSyncPaused(false);
-    }
-  }, [patients.length, intakeShared]);
-
-  const { syncState, syncNow, flushPatient, notifyLockOutcome } = usePatientSync({
-    patients,
-    activeId,
-    store: patientStore,
-    session,
-    settings,
-    scope: effectivePatientScope,
-    lockState,
-    enabled:
-      isIntranetMode &&
-      isAuthenticated &&
-      sessionVerified &&
-      !session?.user?.mustChangePassword &&
-      !configLoading &&
-      !configError &&
-      !patientSyncPaused,
-  });
-
-  // lockState 전이를 관찰해 필요한 시점에만 usePatientSync 쪽 함수를 호출한다 — 두 훅은
-  // 서로를 모른다(usePatientLock은 sync 콜백을 아예 받지 않음).
-  const prevLockStatusRef = useRef(lockState.status);
-  useEffect(() => {
-    if (prevLockStatusRef.current === lockState.status) return;
-    prevLockStatusRef.current = lockState.status;
-    if (lockState.status === 'held') {
-      // "저장하지 않고 이동"으로 걸어둔 일시정지(syncPaused) 해제는 usePatientSync 내부의
-      // 전용 effect가 담당한다(activeId/lockState.status 변화를 직접 관찰) — local-only
-      // 환자처럼 lockState가 절대 'held'가 되지 않는 경우까지 한 곳에서 처리하기 위함.
-      flushPatient(activeId);
-    } else if (lockState.status === 'held-by-other' || lockState.status === 'lost') {
-      notifyLockOutcome(activeId, 'lock-lost');
-    }
-  }, [lockState.status, activeId, flushPatient, notifyLockOutcome]);
-
-  // 세션 identity(로그인/로그아웃/서버 URL/계정/조직 변경)가 바뀌면 이전 계정의 leaseToken이
-  // 다음 계정으로 넘어가지 않도록 일괄 초기화한다. accessToken/refreshedAt은 순수 토큰
-  // refresh(회전)만으로는 안 바뀌는 값이라 여기 포함하지 않는다 — 어떤 함수가 그 변화를
-  // 일으켰는지와 무관하게 identity 자체의 변화만 포착한다.
-  const lockIdentity = `${session?.mode ?? ''}|${session?.apiBaseUrl || ''}|${session?.user?.id || ''}|${session?.user?.organizationId || ''}`;
-  const prevLockIdentityRef = useRef(lockIdentity);
-  useEffect(() => {
-    if (prevLockIdentityRef.current === lockIdentity) return;
-    prevLockIdentityRef.current = lockIdentity;
-    clearAllLockTokens();
-  }, [lockIdentity]);
-
-  const syncSummary = useSyncStatusSummary(patients, syncState);
-
-  const handleForceTakeover = useCallback(async () => {
-    const holderName = lockState.holder?.holderName || '다른 사용자';
-    const ok = await confirmAlive(`${holderName}이(가) 편집 중인 환자입니다. 강제로 편집 권한을 가져오시겠습니까?`);
-    if (!ok) return;
-    await forceAcquire();
-  }, [lockState.holder, forceAcquire, confirmAlive]);
-
-  // 의사 명부 조회 + 명부 기준 scope 유효성 가드 + 대시보드 scope 로딩 판정 — src/app/usePatientScope.ts(P2-27).
-  const { doctorRoster, isDashboardScopeLoading } = useDoctorRoster({
-    session, settings, isAuthenticated, sessionVerified, syncState, scope: patientScopeState,
-  });
-
+  // 컨트롤러 5 sync(P2-44d) — 일시정지 해제 effect 2·환자 동기화·락 브리지·락 토큰 초기화·동기화 요약·강제 인수·의사 명부:
+  // src/app/workspace/useSyncController.ts. 순서가 의미를 갖는 구간(계획 C2) — 안에서도 옛 순서 그대로.
   const {
-    savedItems, setSavedItems, saveName, setSaveName, lastAutoSave, legacyItems,
+    syncState, syncNow, flushPatient,
+    syncSummary, handleForceTakeover, doctorRoster, isDashboardScopeLoading,
+  } = useSyncController({
+    session, settings, patients, activeId, patientStore, effectivePatientScope, patientScopeState, lockState, forceAcquire,
+    isIntranetMode, isAuthenticated, sessionVerified, configLoading, configError, patientSyncPaused, setPatientSyncPaused,
+    intakeShared, confirmAlive,
+  });
+
+  // 컨트롤러 6 data(P2-44d) — 작업 공간 저장/불러오기·자동저장·현재 단계·활성 모듈·환자 CRUD:
+  // src/app/workspace/useDataController.ts(옛 App이 받기만 하던 setSavedItems는 받지 않는다).
+  const {
+    savedItems, saveName, setSaveName, lastAutoSave, legacyItems,
     handleSave, handleOverwriteSave, handleLoad, handleDelete, openLoadModal, waitForAutosaveRestore,
-  } = useWorkspacePersistence({
-    patients, setPatients,
-    session, settings, serverConfig,
-    setActiveId, setCurrentStepIndex, setIntakeShared, setShowHome,
-    setShowSaveModal, setShowLoadModal,
-    disabled: isIntranetMode && (configLoading || !!configError),
-    dirtyAssessmentPatientId, onBlockedByUnsavedDraft: blockedByUnsavedDraftAlert,
-  });
-  const currentStep = steps[currentStepIndex] || steps[0];
-
-  // 현재 스텝의 모듈 정보
-  const activeModuleId = currentStep?.moduleId || null;
-  const activeModule = activeModuleId ? getModule(activeModuleId) : null;
-
-  const {
+    currentStep, activeModuleId, activeModule,
     updatePatient, updateShared, updateActiveModules,
     updateModule, updateModuleById, updateDiagnoses,
     addPatient, removePatient, removeSelectedPatients,
     handleBatchImport, handleLoadTestData,
-  } = usePatientCrud({
-    activeId, activeModuleId, session, settings,
-    patients, setPatients,
-    selectedIds, setSelectedIds,
-    setErrors,
-    setActiveId, setCurrentStepIndex,
-    setIntakeShared, setShowHome,
-    handleStartIntake,
-    canMutateActivePatient,
-    dirtyAssessmentPatientId, onBlockedByUnsavedDraft: blockedByUnsavedDraftAlert,
+  } = useDataController({
+    patients, setPatients, session, settings, serverConfig, activeId, setActiveId, selectedIds, setSelectedIds, setErrors,
+    setCurrentStepIndex, setIntakeShared, setShowHome, setShowSaveModal, setShowLoadModal, isIntranetMode, configLoading,
+    configError, steps, currentStepIndex, handleStartIntake, canMutateActivePatient, dirtyAssessmentPatientId,
+    blockedByUnsavedDraftAlert,
   });
 
   // 환자 전환 게이팅(§5-3): synced면 즉시 전환, conflict면 push 자체를 시도하지 않고 확인 후
