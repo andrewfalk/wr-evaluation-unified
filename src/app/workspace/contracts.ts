@@ -16,7 +16,7 @@ export interface AppSessionUser {
   id?: string | null;
   role?: string | null;
   organizationId?: string | null;
-  mustChangePassword?: boolean | null;
+  mustChangePassword?: boolean;
   [field: string]: unknown;
 }
 
@@ -51,7 +51,7 @@ export type ServerConfig = {
 export interface ServerConfigApi {
   serverConfig: ServerConfig;
   configLoading: boolean;
-  configError: unknown;
+  configError: string | null;
   refetchConfig: () => unknown;
   refreshing: boolean;
   refreshError: unknown;

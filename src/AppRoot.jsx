@@ -1,5 +1,5 @@
 import React from 'react';
-import App from './App';
+import App from './app/App';
 import { AuthProvider } from './core/auth/AuthContext';
 import { WorkspaceBoundary } from './app/WorkspaceBoundary';
 

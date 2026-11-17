@@ -1,5 +1,4 @@
 [
-  "src/App.jsx",
   "src/core/auth/AuthContext.jsx",
   "src/core/auth/authChannel.js",
   "src/core/components/AIAnalysisPanel.jsx",
