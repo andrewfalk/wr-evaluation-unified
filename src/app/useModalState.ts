@@ -1,7 +1,7 @@
 // 모달 열림 상태 — REFACTORING_ROADMAP Phase 2 C3-A(P2-30). App.jsx의 모달 불리언 8개와 usePresetManagement의 프리셋 모달
 // 3칸을 **키별 맵 하나**로 모은다. 단일 슬롯(`modal: {name, payload}`)이 아니라 키별인 이유: 모달들이 서로 독립 조건이라
 // 동시에 열릴 수 있다(계획 F4 — 예: 프리셋 조회 → 관리 전환 중 두 칸이 함께 차 있음, 충돌 해결 모달 + 다른 모달).
-// 단일 슬롯으로 바꾸면 동작이 바뀐다. AppModals는 아직 props로 받는다(자급은 C3-C P2-44).
+// 단일 슬롯으로 바꾸면 동작이 바뀐다. 모달은 src/app/modals/ModalHost.tsx가 작업 공간 Context로 받는다(C3-C P2-45a).
 import { useCallback, useMemo, useState, type SetStateAction } from 'react';
 
 export interface ModalSlots {

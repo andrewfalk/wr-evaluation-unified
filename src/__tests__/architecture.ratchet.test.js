@@ -2,6 +2,7 @@
 // 세는 규칙은 scripts/arch-metrics.mjs 머리 주석, 기준은 scripts/arch-baseline.json.
 import { describe, expect, it } from 'vitest';
 import { appFileLines, computeMetrics, METRICS, readBaseline } from '../../scripts/arch-metrics.mjs';
+import { appShellPath } from '../../scripts/app-hook-order.mjs';
 
 const { totals, byFile } = computeMetrics();
 const baselineFile = readBaseline();
@@ -32,5 +33,10 @@ describe('architecture ratchet (P2-01)', () => {
   it('src/app 아래 제품 파일은 400줄 이하(P2-44a)', () => {
     const over = Object.entries(appFileLines()).filter(([, n]) => n > 400).map(([f, n]) => `${f}: ${n}`);
     expect(over, '파일을 나눈다').toEqual([]);
+  });
+  // C3-C 완료 기준(P2-46a) — App 셸은 src/app/App.tsx, 200줄 이하.
+  it('App 셸은 src/app/App.tsx이고 200줄 이하(P2-46a)', () => {
+    expect(appShellPath()).toBe('src/app/App.tsx');
+    expect(totals.appShellLines).toBeLessThanOrEqual(200);
   });
 });

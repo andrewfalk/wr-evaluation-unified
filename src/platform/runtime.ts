@@ -1,5 +1,5 @@
 // 실행 환경 판정 — REFACTORING_ROADMAP Phase 2 C1(P2-10). React 상태와 무관한 정적 사실만 다룬다
-// (dataMode·apiBaseUrl·serverFeatures는 설정·세션에 따라 바뀌므로 C3-C의 PlatformProvider가 제공).
+// (dataMode·apiBaseUrl·serverFeatures는 설정·세션에 따라 바뀌므로 React 쪽에서 — C3-C의 작업 공간 Context, env 컨트롤러 필드).
 import { getBridge, type Bridge } from './bridge';
 
 export type Host = 'web' | 'electron';

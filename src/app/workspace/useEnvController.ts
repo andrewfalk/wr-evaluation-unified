@@ -22,7 +22,7 @@ export interface EnvControllerInput {
 export interface EnvController {
   serverConfig: ServerConfig;
   configLoading: boolean;
-  configError: unknown;
+  configError: string | null;
   refetchConfig: () => unknown;
   statsConfigRefreshing: boolean;
   statsConfigRefreshError: unknown;
