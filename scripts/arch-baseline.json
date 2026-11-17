@@ -10,7 +10,9 @@
     "inlineStyleHex": 10,
     "intranetModeComparisons": 0,
     "untaggedSetPatients": 0,
-    "storeGetStateOutsideSync": 0
+    "storeGetStateOutsideSync": 0,
+    "appShellLines": 735,
+    "coreToAppImports": 10
   },
   "webStorageAllowlist": [
     "src/core/auth/authChannel.js",
