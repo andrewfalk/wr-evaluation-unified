@@ -11,7 +11,7 @@
     "intranetModeComparisons": 0,
     "untaggedSetPatients": 0,
     "storeGetStateOutsideSync": 0,
-    "appShellLines": 550,
+    "appShellLines": 380,
     "coreToAppImports": 10
   },
   "webStorageAllowlist": [

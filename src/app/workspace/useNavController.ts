@@ -3,17 +3,15 @@
 // 단계 이동 훅 뒤로 옮겼다 — 그 안에서 쓰는 setCurrentStepIndex가 여기서 선언된다(계획 C11; useCallback은 effect가 없어
 // effect 순서는 그대로).
 // 규칙은 useShellController.ts 머리 주석과 같다.
-import { useCallback, useMemo, useRef, type MutableRefObject } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { useStepNavigation } from '../../core/hooks/useStepNavigation';
 import { useIntakeWizard } from '../../core/hooks/useIntakeWizard';
 import { buildSteps } from '../../core/utils/steps';
 import type { SetActiveId, SetPatients } from '../../core/state/patientStore/usePatientsContainer';
 import type { Dispatch, SetStateAction } from 'react';
 import type {
-  AppSession, AppSettings, IntakeWizardApi, ServerConfig, Step, StepNavigationApi, UseIntakeWizard, UseStepNavigation,
+  AppSession, AppSettings, IntakeWizardApi, MenuHandlerRef, ServerConfig, Step, StepNavigationApi, UseIntakeWizard, UseStepNavigation,
 } from './contracts';
-
-type MenuHandlerRef = MutableRefObject<(() => unknown) | null>;
 
 export interface NavControllerInput {
   settings: AppSettings;
