@@ -1,6 +1,6 @@
 // scripts/arch-metrics.mjs — counting rules (REFACTORING_ROADMAP Phase 2 P2-01).
 import { describe, expect, it } from 'vitest';
-import { coreToModulesLines, inlineStyleHexCount, isProductCode, scanFile } from './arch-metrics.mjs';
+import { coreToAppLines, coreToModulesLines, countLines, inlineStyleHexCount, isProductCode, scanFile } from './arch-metrics.mjs';
 
 describe('arch-metrics', () => {
   it('product code excludes tests, src/testing and declaration files', () => {
@@ -69,5 +69,23 @@ describe('arch-metrics', () => {
     expect(scanFile('src/styles/tokens.css', ':root { --c: #fff; }').cssRawHex).toBeUndefined();
     expect(inlineStyleHexCount('<div style={{ color: "#fff", nested: { b: "#000" } }} /> const x = "#abc";')).toBe(2);
     expect(inlineStyleHexCount('<div style={ { color: "#fff" } } /><p style = {\n  {\n    color: "#000" } } />')).toBe(2);
+  });
+  it('counts core → app imports by resolved path (P2-44a)', () => {
+    const src = [
+      "import { useGuardedDialogs } from '../../app/useWorkspaceLifetime';",
+      "export { x } from '../../app/screens/WorkspaceScreen';",
+      "const y = () => import('../../app/BootGate');",
+      "import z from '../appHelpers/a';", // src/core/appHelpers — not src/app
+      "import w from '../../application/b';", // src/application — not src/app
+    ].join('\n');
+    expect(coreToAppLines('src/core/hooks/a.js', src)).toBe(3);
+    expect(scanFile('src/core/hooks/a.js', src).coreToAppImports).toBe(3);
+    expect(coreToAppLines('src/modules/knee/a.js', "import { a } from '../../app/useModalState';")).toBe(0);
+  });
+
+  it('counts lines the way wc -l does for newline-terminated files (P2-44a)', () => {
+    expect(countLines('')).toBe(0);
+    expect(countLines('a\nb\n')).toBe(2);
+    expect(countLines('a\nb')).toBe(2);
   });
 });

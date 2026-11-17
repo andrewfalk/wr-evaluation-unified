@@ -34,6 +34,12 @@
  *   storeGetStateOutsideSync — `getState(` calls in product code outside src/core/state/ and src/core/sync/ (P2-40a).
  *       Hook bodies and event handlers must not read the patient store's "ahead" state — only the sync engine does
  *       (transitions use their prev/derive arguments). Target 0.
+ *   appShellLines — lines of the App shell file (src/App.jsx, from P2-46a src/app/App.tsx — scripts/app-hook-order.mjs
+ *       APP_SHELL_CANDIDATES). Phase 2 C3-C (P2-44a): 735 at the start, ≤200 at P2-46a.
+ *   coreToAppImports — import/export-from/import() lines in src/core/** whose specifier resolves into src/app/ (P2-44a).
+ *       src/core already imports src/app/useWorkspaceLifetime — the count must not grow.
+ *
+ * Also exported: appFileLines() — line count of every product file under src/app/ (the ratchet test asserts ≤400, P2-44a).
  *
  * Usage:
  *   node scripts/arch-metrics.mjs           # print current counts vs baseline
@@ -43,6 +49,7 @@ import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './verify-browser-compat.mjs';
+import { appShellPath } from './app-hook-order.mjs';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const BASELINE_PATH = path.join(ROOT, 'scripts', 'arch-baseline.json');
@@ -115,7 +122,7 @@ function matchingLines(code, re) {
 // A template literal counts when it has no `${…}` (a static path — Codex review of #285).
 const SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"`])([^'"`\n$]+)\1/g;
 
-export function coreToModulesLines(rel, code) {
+function coreImportLinesInto(rel, code, targetDir) {
   if (!rel.startsWith('src/core/')) return 0;
   const lines = new Set();
   const lineStarts = [0];
@@ -124,13 +131,29 @@ export function coreToModulesLines(rel, code) {
     const spec = m[2];
     if (!spec.startsWith('.')) continue;
     const target = path.posix.normalize(path.posix.join(path.posix.dirname(rel), spec));
-    if (target === 'src/modules' || target.startsWith('src/modules/')) {
+    if (target === targetDir || target.startsWith(`${targetDir}/`)) {
       let line = 0;
       while (line + 1 < lineStarts.length && lineStarts[line + 1] <= m.index) line += 1;
       lines.add(line);
     }
   }
   return lines.size;
+}
+
+export function coreToModulesLines(rel, code) {
+  return coreImportLinesInto(rel, code, 'src/modules');
+}
+
+/** src/core/** → src/app/ import lines (P2-44a). */
+export function coreToAppLines(rel, code) {
+  return coreImportLinesInto(rel, code, 'src/app');
+}
+
+/** Line count as `wc -l` would show it for a file ending in a newline. */
+export function countLines(content) {
+  if (content === '') return 0;
+  const n = content.split('\n').length;
+  return content.endsWith('\n') ? n - 1 : n;
 }
 
 export function inlineStyleHexCount(code) {
@@ -167,6 +190,8 @@ export function scanFile(rel, content) {
   }
   const imports = coreToModulesLines(rel, code);
   if (imports) result.coreToModulesImports = imports;
+  const appImports = coreToAppLines(rel, code);
+  if (appImports) result.coreToAppImports = appImports;
   if (!REQUEST_LAYER(rel)) {
     const fetches = matchingLines(code, /(?<![.\w$])fetch\s*\(/g).size;
     if (fetches) result.rawFetch = fetches;
@@ -200,6 +225,8 @@ export const METRICS = [
   'intranetModeComparisons',
   'untaggedSetPatients',
   'storeGetStateOutsideSync',
+  'appShellLines',
+  'coreToAppImports',
 ];
 
 export function computeMetrics() {
@@ -215,7 +242,21 @@ export function computeMetrics() {
       byFile[key][rel] = value;
     }
   }
+  const shell = appShellPath();
+  totals.appShellLines = countLines(readFileSync(path.join(ROOT, shell), 'utf8'));
+  byFile.appShellLines[shell] = totals.appShellLines;
   return { totals, byFile };
+}
+
+/** Product files under src/app/ → line count (P2-44a: each ≤400). */
+export function appFileLines() {
+  const out = {};
+  for (const full of walk(path.join(SRC, 'app'))) {
+    const rel = toRel(full);
+    if (!isProductCode(rel)) continue;
+    out[rel] = countLines(readFileSync(full, 'utf8'));
+  }
+  return out;
 }
 
 export function readBaseline() {
