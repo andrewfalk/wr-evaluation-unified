@@ -18,11 +18,8 @@
     "no-unused-vars": {
       "count": 1
     },
-    "react-hooks/immutability": {
-      "count": 1
-    },
     "react-hooks/refs": {
-      "count": 3
+      "count": 2
     }
   },
   "src/core/auth/__tests__/authRevokeIntegration.test.jsx": {

@@ -8,23 +8,13 @@ import { useEvaluationDateSync } from './core/state/patientStore/useEvaluationDa
 import { useElectronMenuEvents } from './core/hooks/useElectronMenuEvents';
 import { useConflictResolution } from './core/hooks/useConflictResolution';
 import { usePatientList } from './core/hooks/usePatientList';
-import { useExportHandlers } from './core/hooks/useExportHandlers';
-import { usePresetManagement } from './core/hooks/usePresetManagement';
-import { useEMRIntegration } from './core/hooks/useEMRIntegration';
-import { useStepNavigation } from './core/hooks/useStepNavigation';
-import { useIntakeWizard } from './core/hooks/useIntakeWizard';
 import { useWorkspacePersistence } from './core/hooks/useWorkspacePersistence';
-import { useMigration } from './core/hooks/useMigration';
-import { useOpsStatus } from './core/hooks/useOpsStatus';
 import { usePatientCrud } from './core/hooks/usePatientCrud';
 import { usePatientSync } from './core/hooks/usePatientSync';
-import { usePatientLock, requiresLock } from './core/hooks/usePatientLock';
 import { useSyncStatusSummary } from './core/hooks/useSyncStatusSummary';
 import { showAlert } from './core/utils/platform';
 import { generateUnifiedReport } from './core/utils/reportGenerator';
-import { buildSteps } from './core/utils/steps';
 import { isRedactedPatientRecord } from './core/services/patientRecords';
-import { canEditPatient } from './core/utils/patientOwnership';
 import { clearAutoSavedWorkspace } from './core/services/workspaceRepository';
 import { clearAllLockTokens } from './core/services/lockTokenStore';
 import { StatisticsWorkbench } from './core/components/statistics/StatisticsWorkbench';
@@ -35,6 +25,8 @@ import { selectScreen } from './app/useScreenRouter';
 import { useDoctorRoster } from './app/usePatientScope';
 import { useShellController } from './app/workspace/useShellController';
 import { useEnvController } from './app/workspace/useEnvController';
+import { useEditingController } from './app/workspace/useEditingController';
+import { useNavController } from './app/workspace/useNavController';
 import { patientTx } from './core/state/patientStore/transitions';
 import { hasIntranetSession } from './platform/dataMode';
 import { getLifecycleBridge } from './platform/bridge';
@@ -67,19 +59,6 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
     conflictPatientId, setConflictPatientId,
     dirtyAssessmentPatientId, blockedByUnsavedDraftAlert, handleAssessmentEditingChange, blockIfDraftDirty,
   } = useShellController();
-  // guardedSelectPatient()로 모으지 못한 직접 setActiveId 호출부(랜딩 화면의 "이어서 작업",
-  // 충돌 모달의 "정정 화면으로 이동")가 개별적으로 재구현하지 않도록 공용 가드를 둔다.
-  const guardedSelectPatient = useCallback((patientId, { stepIndex = 0 } = {}) => {
-    // 이미 활성인 환자를 다시 선택했으면 스텝을 건드리지 않는다(useStepNavigation의
-    // switchPatient와 동일한 이유 — dirty 여부와 무관하게 항상 no-op이어야 한다).
-    if (patientId === activeId) { setShowHome(false); return true; }
-    if (blockIfDraftDirty()) return false;
-    setActiveId(patientId);
-    setCurrentStepIndex(stepIndex);
-    setShowHome(false);
-    return true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blockIfDraftDirty, activeId]);
   // 컨트롤러 2 env(P2-44b) — 서버 설정·AI·연동 상태와 파생값, 활성·충돌 대상 환자, 활성 모듈: src/app/workspace/useEnvController.ts.
   const {
     serverConfig, configLoading, configError, refetchConfig, statsConfigRefreshing, statsConfigRefreshError,
@@ -87,76 +66,41 @@ function App({ settings, handleSaveSettings, switchToLocalMode }) {
     activePatient, conflictPatient, activeModules,
   } = useEnvController({ session, settings, patients, activeId, conflictPatientId });
 
-  // 환자를 여는 것 자체가 편집 세션의 시작 — 서버 측 TTL lease lock을 자동으로 acquire/renew한다.
-  // usePatientSync/usePresetManagement는 이 lockState(또는 그로부터 합성한 canMutateActivePatient)를
-  // 읽기 전용으로만 받는다(콜백을 주고받지 않음). 두 훅과의 연결(브리지)은 아래 별도 effect가
-  // lockState 전이를 관찰해 담당한다.
-  const { lockState, forceAcquire } = usePatientLock({ activeId, activePatient, session, settings });
-  // 프리셋 모달은 StepContent의 read-only 이벤트 차단 바깥에서 열리므로(§리뷰), 담당의 권한만으로는
-  // "모달이 열려있는 동안 락을 상실"하는 레이스를 못 막는다 — canEditPatient AND 락 보유를 합성해
-  // usePatientCrud/usePresetManagement/StepContent 모두가 이 값 하나만 신뢰하게 한다.
-  const canMutateActivePatient =
-    canEditPatient(activePatient, session) &&
-    (!requiresLock(activePatient, session) || lockState.status === 'held');
-
+  // 컨트롤러 3 editing(P2-44c) — 편집 락·편집 가능 여부·프리셋·마이그레이션·운영 알림·내보내기·EMR:
+  // src/app/workspace/useEditingController.ts.
   const {
+    lockState, forceAcquire, canMutateActivePatient,
     presets, presetMeta, presetError,
     presetModalJobId, presetEditingPreset, presetBrowseJobId,
     setPresetModalJobId, setPresetEditingPreset, setPresetBrowseJobId,
     reloadPresets,
     handlePresetSelect, handleSaveCustomPreset, closePresetManageModal, handleDeleteCustomPreset,
-  } = usePresetManagement({
-    activeId, activeModules, session, setPatients, canMutateActivePatient,
-    modalSlots: {
-      presetModalJobId: modals.presetManageJobId, setPresetModalJobId: setterFor('presetManageJobId'),
-      presetEditingPreset: modals.presetEditingPreset, setPresetEditingPreset: setterFor('presetEditingPreset'),
-      presetBrowseJobId: modals.presetBrowseJobId, setPresetBrowseJobId: setterFor('presetBrowseJobId'),
-    },
-  });
-
-  const {
-    status: migrationStatus,
-    result: migrationResult,
-    start:  startMigration,
-    retry:  retryMigration,
-    reset:  resetMigration,
-  } = useMigration({ session, settings });
-
-  const isAdmin = session?.user?.role === 'admin' && isAuthenticated;
-  const { showBanner: showOpsBanner, bannerMessage: opsBannerMessage } = useOpsStatus({ session, enabled: isAdmin });
-
-  const {
+    migrationStatus, migrationResult, startMigration, retryMigration, resetMigration,
+    showOpsBanner, opsBannerMessage,
     exportDropdown, setExportDropdown,
     handleExportSingle, handleExportSelected, handleExportBatch,
     handleExportBatchFormatSingle, handleExportBatchFormatSelected, handleExportBatchFormatAll,
     handleExportBatchTemplate,
-  } = useExportHandlers({ activePatient, patients, selectedIds, dirtyAssessmentPatientId });
-
-  const {
     extractProgress, setExtractProgress,
     handleInjectEMR, handleInjectConsultReply,
     handleEmrExtractBatch, handleExtractConsultation,
-  } = useEMRIntegration({ activePatient, patients, selectedIds, session, setPatients, dirtyAssessmentPatientId });
-
-  const handleStartIntakeRef = useRef(null);
-  const handleResetPatientsRef = useRef(null);
-  const handleOpenStatisticsRef = useRef(null); // PR2 §3 — Electron 메뉴가 구독
-
-  // 현재 환자의 스텝 목록
-  const videoAnalysisEnabled = !!serverConfig?.videoAnalysisEnabled;
-  const steps = useMemo(
-    () => buildSteps(activeModules, { videoAnalysisEnabled }),
-    [activeModules, videoAnalysisEnabled]
-  );
-  const { currentStepIndex, setCurrentStepIndex, goToStep, goNext, goPrev, switchPatient } = useStepNavigation({
-    steps, activeId, setActiveId, setShowSidebar,
-    hasUnsavedAssessmentDraft: !!dirtyAssessmentPatientId, onBlockedByUnsavedDraft: blockedByUnsavedDraftAlert,
+  } = useEditingController({
+    activeId, activePatient, activeModules, patients, selectedIds, session, settings, isAuthenticated, setPatients,
+    modals, setterFor, dirtyAssessmentPatientId,
   });
-  const { intakeShared, setIntakeShared, handleStartIntake, handleIntakeComplete } = useIntakeWizard({
-    settings, session, setPatients, setActiveId, setCurrentStepIndex, setShowHome, videoAnalysisEnabled,
-    hasUnsavedAssessmentDraft: !!dirtyAssessmentPatientId, onBlockedByUnsavedDraft: blockedByUnsavedDraftAlert,
+
+  // 컨트롤러 4 nav(P2-44c) — Electron 메뉴 ref·단계 목록·단계 이동·새 환자 위자드·공용 환자 선택 가드:
+  // src/app/workspace/useNavController.ts.
+  const {
+    handleStartIntakeRef, handleResetPatientsRef, handleOpenStatisticsRef,
+    steps,
+    currentStepIndex, setCurrentStepIndex, goToStep, goNext, goPrev, switchPatient,
+    intakeShared, setIntakeShared, handleStartIntake, handleIntakeComplete,
+    guardedSelectPatient,
+  } = useNavController({
+    settings, session, serverConfig, activeModules, activeId, setActiveId, setPatients, setShowSidebar, setShowHome,
+    dirtyAssessmentPatientId, blockedByUnsavedDraftAlert, blockIfDraftDirty,
   });
-  handleStartIntakeRef.current = handleStartIntake;
 
   // 세션이 바뀌면 동기화 일시정지도 푼다(scope 초기화는 usePatientScope가 같은 deps로 먼저 한다).
   useEffect(() => {
