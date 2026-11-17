@@ -234,6 +234,21 @@ commit(프로파일링, 3회 중앙값, 횟수 / 합 ms):
 
 500명 입력 commit 합 27.9 → 2.0 ms(회차 흔들림 ±10 ms를 넘어 줄어 머지 기준 충족). 복원·대시보드는 같은 범위(복원 commit 합은 카드 첫 렌더라 그대로). **commit 수**: 위 표의 입력 1글자 횟수(100명 1 → 2, 500명 2 → 1)는 render-timing의 구간이 "사이드바 반영 시각"에서 끊기기 때문에, 빨라진 쪽에서 입력 직후의 후속 commit이 구간 안·밖으로 갈린 것이다 — **입력 후 500 ms로 고정한 구간에서는 두 버전 모두 100·500명 5회 모두 정확히 2회**(`render-breakdown.mjs --window 500`, commit 합 100명 6.9 → 1.5 ms, 500명 30.2 → 2.1 ms). 복원·환자 전환·대시보드 commit 수는 기준과 같다.
 
+### C3-C — App 분해 뒤(작업 공간 Context 1개, REFACTORING_ROADMAP Phase 2 P2-46a, 2026-11-17)
+
+`src/App.jsx`를 컨트롤러 훅 7개 + 작업 공간 Context 1개(`WorkspaceProvider` → `ScreenRouter`·`WorkspaceScreen`·`ModalHost`)로 나눈 뒤 같은 도구로 다시 쟀다(P2-46a 브랜치 `55f3b57`, 같은 PC). 비교 기준은 위 P2-42 표, 머지 조건은 계획(`phase2-c3c-plan.md`)의 "commit 수 같음, 500명 입력 1글자 commit 합 +1.0 ms 이내(≤3.0), 환자 전환 +1.0 ms 이내".
+
+`render-timing.mjs --counts 100,500 --runs 5`(중앙값):
+
+| 측정 | 환자 수 | 환자 전환 ms(운영) | 입력 1글자 ms(운영) | 환자 전환 commit | 입력 1글자 commit | 복원 commit | 대시보드 commit |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **C3-C** | 100 | 15.8 | 5.4 | 2 / 3.1 | 1 / 1.8 | 2 / 28.1 | 1 / 12.7 |
+| **C3-C** | 500 | 18.3 | 11.9 | 2 / 2.7 | 1 / **2.8** | 2 / 69.2 | 1 / 41.1 |
+
+`render-breakdown.mjs --window 500 --runs 3`(입력 후 500 ms 고정 구간): 500명 commit 2회 / 합 2.8 ms(P2-42 2.1), 100명 2회 / 2.1 ms(P2-42 1.5) — commit 수는 P2-42와 같다. 분해에 새로 보이는 `WorkspaceProvider` 자기 시간(500명 2.2 ms)은 Provider 값이 바뀔 때 그 아래 fiber를 훑는 몫이다(React 18.3.1 `enableLazyContextPropagation = false`; 이 도구의 자기 시간은 DOM을 건너 부모에도 겹쳐 잡혀 순위용).
+
+판정: commit 수는 모두 기준과 같고, 500명 입력 1글자 commit 합 2.0 → 2.8 ms(+0.8), 환자 전환 2.2 → 2.7 ms(500명 +0.5)·2.7 → 3.1 ms(100명 +0.4)로 한도 안. 운영 빌드의 ms 값은 회차 흔들림(±10 ms) 범위다.
+
 ## 다시 재는 방법
 
 ```bash
