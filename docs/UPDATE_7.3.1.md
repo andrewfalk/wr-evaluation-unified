@@ -132,8 +132,8 @@ pwsh -File scripts/verify-stack.ps1 up -PackageDir release\wr-evaluation-unified
 | 로그인 실패 1회 | 감사 행이 1 늘어난다(관리자 콘솔 감사 로그에 보인다) |
 | 환자 열기·저장, 통계 분석 1회 | 7.2.0과 같다 |
 | 업그레이드 전에 열어 둔 화면 | 새로고침 없이 "내보내기"를 누르면 오류 알림(아래 "알려진 함정"), 새로고침 뒤 정상·데이터 그대로 |
-| **되돌리기 ① 리허설**(7.3.0 이미지) | 아래 "롤백 절차" ①을 검증 스택에서(프로젝트 `wr-verify`, 환경 파일 `release\.verify-stack\wr-verify.env`) → 로그인·데이터 그대로, `migrate` `roles: 0 · grants: 0`, 마이그레이션 42행 → 다시 7.3.1 |
-| **되돌리기 ② 리허설**(7.2.0) | 7.3.1 스택에서 postgres 만 남기고 정지 → b의 덤프를 아래 "롤백 절차" ②의 복원 명령으로 복원(검증 스택에서는 `wr-verify_default`·`wr-verify_backup_data`, 키 import 대신 `-e GPG_PASSPHRASE=rehearsal`, 파일 `/backups/pre731.dump.gpg`) → 종료 코드 0, `Restore complete (committed)`와 행 수 → `verify-stack down` → 7.2.0 패키지 `up` → 앱 healthy, 마이그레이션 41행, 데이터 유지 |
+| **되돌리기 ① 리허설**(7.3.0 이미지) | 아래 "롤백 절차" ①을 검증 스택에서(7.3.1 패키지 폴더에서 `import-images.ps1 -ImagesPath` 7.3.0 tar → 환경 파일 `release\.verify-stack\wr-verify.env`의 `WR_VERSION=7.3.0` → `docker compose --project-directory . -f docker-compose.yml -f docker-compose.prod.yml -f ..\.verify-stack\wr-verify.override.yml --env-file ..\.verify-stack\wr-verify.env -p wr-verify up -d` — 검증 스택은 `--profile backup` 없이) → postgres 컨테이너가 다시 만들어지지 않음, 로그인·데이터 그대로, `migrate` `roles: 0 · grants: 0`, 마이그레이션 42행 → 다시 7.3.1 |
+| **되돌리기 ② 리허설**(7.2.0) | 7.3.1 스택에서 postgres 만 남기고 정지 → b의 덤프를 아래 "롤백 절차" ②의 복원 명령으로 복원(검증 스택에서는 `wr-verify_default`·`wr-verify_backup_data`, 키 import 대신 `-e GPG_PASSPHRASE=rehearsal`, 파일 `/backups/pre731.dump.gpg`, 복원 확인 질문에 `YES` 입력) → 종료 코드 0, `Restore complete (committed)`와 행 수 → `verify-stack down` → 7.2.0 패키지 `up` → 앱 healthy, 마이그레이션 41행, 데이터 유지 |
 
 ### 3) 현장 브라우저 버전 (운영 서버, 관리자 PowerShell — 읽기 전용)
 
@@ -329,7 +329,7 @@ curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local
 
 **업데이트 전에 열려 있던 모든 화면은 새로고침(F5)하고, 설치본은 한 번 종료했다가 다시 실행한다.** 설치본 교체는 필요 없다.
 
-새로고침하지 않은 옛 화면은 서버에서 이미 사라진 이전 화면 파일을 찾다가, "내보내기"·"EMR 입력" 같은 일부 기능에서 영어 오류 알림을 띄운다(데이터는 잃지 않고 새로고침하면 해소 — "알려진 함정"). 옛 화면에는 7.3.x의 계정 전환 보호도 적용되지 않으므로, 사용자에게 업데이트 직후 새로고침을 꼭 안내한다.
+새로고침하지 않은 옛 화면은 서버에서 이미 사라진 이전 화면 파일을 찾다가, "내보내기"·"EMR 입력" 같은 일부 기능에서 영어 오류 알림을 띄운다(데이터는 잃지 않고 새로고침하면 해소 — "알려진 함정"). 옛 화면은 새로고침할 때까지 이전 버전 화면으로 동작하므로(7.3.x의 계정 전환·병합 동작도 새로고침 뒤부터 적용된다), 사용자에게 업데이트 직후 새로고침을 꼭 안내한다.
 
 ### E. 첫 EMR 감사 기록 확인 (배포 당일, EMR이 있는 PC에서)
 
@@ -381,7 +381,25 @@ curl.exe -k --resolve wr.hospital.local:8443:127.0.0.1 https://wr.hospital.local
 | 새로고침한 화면에서 내보내기 | 7.2.0과 같다 |
 | 브라우저 자동저장·저장 목록 | 업데이트 전 것이 그대로 보인다 |
 
-⟪리허설: 사전 검증한 것 / 확인하지 못한 것 — P2-47b에서 채움⟫
+> **사전 검증한 것**(2026-11-18, 개발 PC — 검증 스택 `wr-verify`, Docker Caddy 모드. 리허설 패키지 `7.3.1` = 이 문서 초안이 든 가지 커밋 `3ea0199`. 배포 패키지는 이 문서가 들어간 `main` 커밋에서 다시 만들고, 리허설 이미지와 `node -v`·두 Python venv의 `pip freeze`·`dpkg -l`·`/app/server/dist` 파일 해시·화면 자산 개수와 크기가 같은지 대조하고 약식 재확인(health·통계·계정 전환·환자 동기화 시나리오)을 거친다 — 배포 패키지의 커밋은 `release-manifest.json`의 `gitCommit`)
+>
+> - **코드 수준**: `npm run check:full` 16단계 전부 통과(루트 4,571건, 서버 1,821건, 실DB 통합 테스트(`wr_app`), 운영 버전 pytest, audit, gitleaks). 7.3.0 대비 서버 코드 차이는 정적 파일 캐시 헤더(`server/src/app.ts`)뿐이고 마이그레이션·compose·스크립트는 같다.
+> - **7.3.1 패키지로 다시 확인한 것**(위 "배포 전 점검" 2) 그대로):
+>   - **신규 설치**(빈 볼륨): `migrate` `roles: 9 · grants: 22 · role separation verified`, 마이그레이션 42행·체크섬 빈 행 0, 소유자 `wr_owner`, 앱 연결 `wr_app`, 계정 전환 실서버 시나리오 19/19.
+>   - **7.2.0 → 7.3.1**: 7.2.0 패키지로 새 검증 스택(시험 조직·환자 2명·로그인 실패 감사 행, 로컬 모드 자동저장, 화면 하나를 열어 둠) → 덤프 → 정지 → 7.3.1. `Applied: 0042_queue_namespace.sql`, `roles: 34 · grants: 22 · role separation verified`, 42행·체크섬 빈 행 0, 소유자 `wr_owner`, 앱 연결 `wr_app`, `[audit-partition] … done`, 데이터 유지, `up` 재실행 → `roles: 0 · grants: 0`. 통계 selfcheck, 통계 분석 1회(HTTP), 서버 환자 열기·이름 수정 저장(revision 1 → 2), 계정 전환 실서버 시나리오 19/19, 환자 동기화 실서버 시나리오 통과 13·실패 0·기록 2, 실행 뒤 시험 조직 0.
+>   - **열려 있던 7.2.0 화면**: 새로고침 없이 "Excel(현재) → EMR 형식" → 아래 "알려진 함정"의 영어 알림(데이터 그대로). 새로고침하면 새 화면 파일을 받고(인증서 오류를 무시하지 않는 브라우저 프로필) 내보내기 정상.
+>   - **브라우저 저장 데이터**: 7.2.0 화면이 쓴 로컬 자동저장을 7.3.1 화면이 복원했고, 7.3.1이 쓴 자동저장을 7.3.0 화면이 복원했다(되돌리기 ① 뒤). 운영 웹 빌드에서도 자동저장 100·500명 복원 정상.
+>   - **되돌리기 ①(7.3.0 이미지, 아래 "롤백 절차" ① 그대로)**: 7.3.1 폴더에서 7.3.0 tar 로드 → `WR_VERSION=7.3.0` → `up -d`. `migrate` `roles: 0 · grants: 0`, 마이그레이션 42행·데이터 그대로, **postgres·caddy 컨테이너는 다시 만들어지지 않았다**(7.2.0·7.3.0·7.3.1 tar의 postgres·caddy 이미지가 같다), 계정 전환 시나리오 19/19(7.3.0). 그 상태에서 새로고침하지 않은 7.3.1 화면의 "일괄"은 새로고침 안내와 버튼을 띄웠다.
+>   - **되돌리기 ②(7.2.0, 아래 "롤백 절차" ② 그대로)**: 정지 → 업데이트 직전 덤프를 기존 DB 위에 복원 → 종료 코드 0, `NOTICE:  pre-clean: … audit_logs_pkey` 1줄, `Restore complete (committed)`와 행 수(마이그레이션 41·환자 2·감사 14) → 7.2.0 healthy·로그인·데이터 → 다시 7.3.0(`roles: 28 · grants: 22`) → 7.3.1(`roles: 0 · grants: 0`) → 계정 전환 시나리오 19/19.
+>   - 첫 화면(Docker Caddy 모드, 압축 켜짐): 첫 방문 368 KiB·재방문 때 해시 화면 파일은 요청 없이 캐시에서. 압축 없는 host 모드에 해당하는 원본 전송량은 1,380 KiB(`docs/PERF_BASELINE.md`).
+> - **7.3.0 리허설(2026-11-13·15)에서 확인했고, 서버 차이가 정적 파일 캐시 헤더뿐이라 이번에 다시 하지 않은 것**: 같은 버전 덤프 덮어쓰기·빈 클러스터 `--roles-only` 복원·잘린 덤프 거부, 수동 순서 `run --rm migrate`(A-5), `stop` 종료 코드 0과 정상 종료 로그, JSON 접근 로그, 컨테이너 안 CLI가 `wr_app`으로 실행, Docker Caddy 로그의 쿼리스트링 제거.
+> - **확인하지 못한 것**:
+>   - 설치본(현장 7.1.4 셸)으로 7.3.1 화면 점검 — 사람이 직접 하는 위 "배포 전 점검" 4).
+>   - 운영 서버의 Compose v2.22.0에서 1회성 서비스 동작(그래서 A-5에서 `run --rm migrate`로 먼저 확인한다)과 운영 데이터 크기에서의 소유권 이전 시간.
+>   - host 모드(호스트 Caddy) 경로 — 개발 PC 검증 스택이 Docker Caddy 모드라 `verify-stack accept`를 못 했다(7.2.0·7.3.0 때와 같음).
+>   - 설치본 EMR 연동과 EMR 추출 결과 반영 — 개발 PC에 EMR이 없다. **배포 뒤 첫 EMR 사용을 확인**한다(위 E).
+>   - 열려 있던 옛 화면의 "EMR 입력" 알림 — "내보내기"만 실측했다(같은 방식으로 화면 파일을 받는다).
+>   - 독립형 설치본 — 이번에 나가지 않는다.
 
 ---
 
@@ -404,7 +422,7 @@ docker exec wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -tAc "select cou
 ```
 
 - 되돌린 뒤 **열려 있던 모든 화면을 새로고침**한다(D절과 같은 이유).
-- ⟪리허설: 7.3.0·7.3.1 tar의 postgres·caddy base 이미지가 같은지와 postgres 컨테이너 재생성 여부⟫
+- 7.3.0·7.3.1 tar의 postgres·caddy 이미지는 같아서 1의 로드로 바뀌지 않고, 3의 `up -d`는 app·백업 모니터만 다시 만든다(postgres·caddy 컨테이너는 그대로 — 리허설에서 확인).
 - 다시 7.3.1로 올릴 때는 `WR_VERSION=7.3.1`로 고치고 3의 `up -d`만 하면 된다(7.3.1 이미지는 이미 로드돼 있다).
 
 ### ② 7.2.0으로 (직전 백업 복원)
@@ -454,7 +472,7 @@ docker exec wr-prod-postgres-1 psql -U wr_user -d wr_evaluation -tAc "select cou
 ## 알려진 함정·한계
 
 ### 업데이트 전에 열어 둔 화면에서 "내보내기"·"EMR 입력"을 누르면 영어 오류 알림
-**원인**: 옛 화면은 기능을 처음 쓸 때 그 기능의 화면 파일을 서버에서 받는데, 업데이트 뒤 서버에는 새 파일만 있다. **알림 원문**: ⟪리허설 R5-a에서 실측⟫. **해결**: 화면을 새로고침한다(설치본은 다시 실행). 데이터는 잃지 않는다. 새 화면의 일괄입력은 같은 상황에서 영어 알림 대신 "새로고침" 안내와 버튼을 띄운다(나머지 기능의 안내는 다음 릴리스 후보).
+**원인**: 옛 화면은 기능을 처음 쓸 때 그 기능의 화면 파일을 서버에서 받는데, 업데이트 뒤 서버에는 새 파일만 있다. **알림 원문**(리허설에서 "내보내기"로 실측): `Failed to fetch dynamically imported module: https://wr.hospital.local:8443/assets/exportService-<해시>.js`(도메인은 운영 주소). 개발자 도구 콘솔에는 `Failed to load module script: … MIME type of "text/html"`이 함께 남는다. **해결**: 화면을 새로고침한다(설치본은 다시 실행). 데이터는 잃지 않는다. 새 화면의 일괄입력은 같은 상황에서 영어 알림 대신 "새로고침" 안내와 버튼을 띄운다(나머지 기능의 안내는 다음 릴리스 후보).
 
 ### host 모드에서 응답이 압축되지 않음
 **원인**: 이번 릴리스는 호스트 Caddy 설정을 바꾸지 않는다(머리말). **영향**: 첫 접속의 전송량이 Docker Caddy 모드보다 크다. 두 번째 접속부터는 캐시 헤더로 화면 파일을 다시 받지 않는다. 호스트 Caddy 설정 반영은 다음 릴리스 후보.
