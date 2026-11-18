@@ -47,6 +47,29 @@ describe('verify-stack.ps1 — 다른 스택을 건드리지 않는다', () => {
     expect(fn).toMatch(/&\s*docker\s+@script:ComposeBase/);
   });
 
+  // Docker 는 UTF-8 로 쓰고 PowerShell 은 콘솔 코드 페이지로 읽는다 — 한글 Windows 기본 콘솔(CP949)에서 compose ps 의 JSON 이
+  // 깨져 up 이 6/7 단계에서 멈췄다(7.3.1 리허설 점검). JSON 으로 읽는 docker 출력은 UTF-8 로 받고, 끝나면 콘솔을 되돌린다.
+  it('docker 출력(JSON)은 콘솔 코드 페이지와 무관하게 UTF-8 로 읽고, 끝나면 콘솔 인코딩을 되돌린다', () => {
+    const enter = fnBody('Enter-Utf8Console');
+    expect(enter).toMatch(/\$prev = \[Console\]::OutputEncoding/);
+    expect(enter).toMatch(/\[Console\]::OutputEncoding = \[System\.Text\.UTF8Encoding\]::new\(\$false\)/);
+    expect(enter).toMatch(/return \$prev\s*\n\}/);
+    // 바꿀 수 없는 환경(콘솔 없음)에서는 멈추지 않는다.
+    expect(enter).toMatch(/try \{ \[Console\]::OutputEncoding = [^}]*\} catch \{ return \$null \}/);
+    expect(fnBody('Exit-Utf8Console')).toMatch(/if \(\$null -ne \$Prev\) \{ try \{ \[Console\]::OutputEncoding = \$Prev \}/);
+
+    // compose 호출 전체와, 모든 컨테이너를 읽는 docker inspect: 바꾸기 → 호출 → finally 에서 되돌리기.
+    expect(fnBody('Invoke-Compose')).toMatch(
+      /\$prevEnc = Enter-Utf8Console\n\s*try \{ & docker @script:ComposeBase @ComposeArgs \} finally \{ Exit-Utf8Console \$prevEnc \}/,
+    );
+    expect(fnBody('Get-PortOwners')).toMatch(
+      /\$prevEnc = Enter-Utf8Console\n\s*try \{ \$inspect = docker inspect @ids [^\n]*\} finally \{ Exit-Utf8Console \$prevEnc \}/,
+    );
+    // docker 출력을 인코딩 전환 없이 곧바로 ConvertFrom-Json 에 넘기는 줄은 없다.
+    const direct = CODE_NO_HELP().split('\n').filter((l) => /\bdocker\b[^\n]*\|[^\n]*ConvertFrom-Json/.test(l));
+    expect(direct).toEqual([]);
+  });
+
   it('compose 기본 인자의 -p 는 $ProjectName 이다', () => {
     const fn = fnBody('Get-ComposeBase');
     expect(fn).toMatch(/'-p',\s*\$ProjectName/);

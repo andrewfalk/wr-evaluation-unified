@@ -261,10 +261,27 @@ function Get-ComposeBase([string]$PkgDir) {
     )
 }
 
+# Docker CLI 는 출력을 항상 UTF-8 로 쓰지만 PowerShell 은 네이티브 명령의 출력을 콘솔 코드 페이지([Console]::OutputEncoding)로
+# 읽는다. 한글 Windows 기본 콘솔(CP949)에서는 비ASCII 글자(예: compose ps 가 Command 를 줄일 때 넣는 '…')가 깨지면서 뒤따르는
+# 글자까지 삼켜 JSON 이 망가진다. 그래서 docker 출력을 받는 동안만 UTF-8 로 바꾸고 끝나면 되돌린다 — 이 스크립트의 한글 출력과
+# 부른 터미널의 설정은 그대로다. 콘솔이 없어 바꿀 수 없으면 예전처럼 그대로 진행한다.
+# Enter 가 돌려주는 값 = 되돌릴 인코딩(이미 UTF-8 이거나 바꾸지 못했으면 $null → Exit 는 아무것도 하지 않는다).
+function Enter-Utf8Console {
+    $prev = [Console]::OutputEncoding
+    if ($prev.CodePage -eq 65001) { return $null }
+    try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { return $null }
+    return $prev
+}
+
+function Exit-Utf8Console($Prev) {
+    if ($null -ne $Prev) { try { [Console]::OutputEncoding = $Prev } catch { } }
+}
+
 # 모든 compose 호출은 이 함수를 거친다 — 프로젝트 이름이 wr-verify 가 아니면 즉시 중단한다(마지막 안전장치).
 function Invoke-Compose([string[]]$ComposeArgs) {
     if ($ProjectName -ne 'wr-verify') { throw "프로젝트 이름이 wr-verify 가 아닙니다: $ProjectName" }
-    & docker @script:ComposeBase @ComposeArgs
+    $prevEnc = Enter-Utf8Console
+    try { & docker @script:ComposeBase @ComposeArgs } finally { Exit-Utf8Console $prevEnc }
 }
 
 # 패키지 매니페스트에 적힌 이미지 ID 와 로컬 이미지가 같은지 — "시험한 것 = 배포할 것"을 보장한다.
@@ -298,7 +315,10 @@ function Get-OwnContainers {
 function Get-PortOwners {
     $ids = @(docker ps -q 2>$null | Where-Object { $_ })
     if ($ids.Count -eq 0) { return @() }
-    $owners = foreach ($c in (docker inspect @ids 2>$null | Out-String | ConvertFrom-Json)) {
+    # inspect 결과에는 이 PC 의 모든 컨테이너 라벨·경로가 들어 있다(비ASCII 가능) — UTF-8 로 읽는다.
+    $prevEnc = Enter-Utf8Console
+    try { $inspect = docker inspect @ids 2>$null | Out-String } finally { Exit-Utf8Console $prevEnc }
+    $owners = foreach ($c in ($inspect | ConvertFrom-Json)) {
         $labels = $c.Config.Labels
         $project = if ($labels -and $labels.PSObject.Properties['com.docker.compose.project']) { $labels.'com.docker.compose.project' } else { '' }
         $service = if ($labels -and $labels.PSObject.Properties['com.docker.compose.service']) { $labels.'com.docker.compose.service' } else { '' }
