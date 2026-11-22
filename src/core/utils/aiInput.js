@@ -24,11 +24,11 @@ import { computeAgeAt } from './dashboardStats';
 import { getEffectiveWorkPeriod } from './workPeriod';
 import { buildAssessmentUnits } from './assessmentGroups';
 import { resolveDiagnosisModule } from './diagnosisMapping';
-import { classifySpineSeverity } from '../../modules/spine/utils/calculations';
-import { thresholds } from '../../modules/spine/utils/thresholds';
-import { SPINE_FORMULA_V513 } from '../../modules/spine/utils/formulaVersion';
-import { groupSummariesByBkType as groupElbow, mergeBkGroupSummaries as mergeElbow, getElbowBurdenGrade } from '../../modules/elbow/utils/calculations';
-import { groupSummariesByBkType as groupWrist, mergeBkGroupSummaries as mergeWrist, getWristBurdenGrade } from '../../modules/wrist/utils/calculations';
+import { classifySpineSeverity } from '@wr/analytics-core/modules/spine/index';
+import { thresholds } from '@wr/analytics-core/modules/spine/index';
+import { SPINE_FORMULA_V513 } from '@wr/analytics-core/modules/spine/index';
+import { groupSummariesByBkType as groupElbow, mergeBkGroupSummaries as mergeElbow, getElbowBurdenGrade } from '@wr/analytics-core/modules/elbow/index';
+import { groupSummariesByBkType as groupWrist, mergeBkGroupSummaries as mergeWrist, getWristBurdenGrade } from '@wr/analytics-core/modules/wrist/index';
 
 // ---------------------------------------------------------------------------
 // 환자 → AI 비식별 구조화 입력(AiAnalysisInput). 외부 AI로 나가는 유일한 입력이다.
