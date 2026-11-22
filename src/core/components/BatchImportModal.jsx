@@ -2,19 +2,9 @@
 import { useRef, useState } from 'react';
 import { readFirstSheetRows } from '../utils/xlsxIo';
 import { useAuth } from '../auth/AuthContext';
-import { suggestModules, resolveDiagnosisModule } from '../utils/diagnosisMapping';
-import { getModule, getAllModules } from '../moduleRegistry';
 import { showAlert, showConfirm } from '../utils/platform';
-import { createManagedPatient } from '../services/patientRecords';
-import {
-  normalizeHeader, parseDate, parseGender, parseSide, getCell, buildColMap,
-  ensureDiagnosis, ensureSharedJob, applyReturnConsiderations, applyDiagnosisAssessment,
-  collectImportDateErrors, BASE_COLUMNS,
-} from '../utils/batchImportHelpers';
-
-function clonePatients(existingPatients = []) {
-  return JSON.parse(JSON.stringify(existingPatients || []));
-}
+import { collectImportDateErrors } from '../utils/batchImportHelpers';
+import { runBatchImport } from '../services/batchImport';
 
 const IMPORT_FIELD_GROUPS = [
   {
@@ -174,107 +164,15 @@ export function BatchImportModal({ onClose, onImport, existingPatients = [] }) {
       return;
     }
 
-    const headerRow = preview[0].map(normalizeHeader);
-    const moduleConfigs = getAllModules()
-      .map(mod => ({ id: mod.id, batchImportConfig: mod.batchImportConfig }))
-      .filter(mod => mod.batchImportConfig);
-
-    const colMap = buildColMap(headerRow, [
-      BASE_COLUMNS,
-      ...moduleConfigs.map(mod => mod.batchImportConfig.columns || {}),
-    ]);
-
-    const resultPatients = clonePatients(existingPatients);
-    // (P2-43b) 기존 환자 사본의 원래 모습 — 행이 실제로 바꾼 환자만 넘기려고 비교한다(손대지 않은 환자는 touch되지 않게).
-    const existingCount = resultPatients.length;
-    const beforeJson = resultPatients.map(patient => JSON.stringify(patient));
-    const stats = { newPatients: 0, newDiagnoses: 0, newJobs: 0, updatedAssessments: 0, skipped: 0, withDoctorName: 0 };
-
-    for (let rowIndex = 1; rowIndex < preview.length; rowIndex += 1) {
-      const row = preview[rowIndex];
-      if (!row || row.length === 0) continue;
-
-      const name = String(getCell(row, colMap.name) || '').trim();
-      if (!name) continue;
-
-      // 사전검증에서 날짜 오류로 표시된 행은 건너뛴다(allowPartialImport 확인을 거친 경우).
-      if (errorRowIndexes.has(rowIndex)) {
-        stats.skipped += 1;
-        continue;
-      }
-
-      const birthDate = parseDate(getCell(row, colMap.birthDate));
-      const injuryDate = parseDate(getCell(row, colMap.injuryDate));
-      const diagCode = String(getCell(row, colMap.diagCode) || '').trim();
-      const diagName = String(getCell(row, colMap.diagName) || '').trim();
-      const side = parseSide(getCell(row, colMap.side));
-
-      let patient = resultPatients.find(item =>
-        item.data.shared?.name === name
-        && item.data.shared?.birthDate === birthDate
-        && item.data.shared?.injuryDate === injuryDate
-      );
-
-      if (!patient) {
-        const suggestedModules = suggestModules([{ code: diagCode, name: diagName, side }]);
-        const modulesData = {};
-        suggestedModules.forEach(moduleId => {
-          const mod = getModule(moduleId);
-          if (mod?.createModuleData) modulesData[moduleId] = mod.createModuleData();
-        });
-
-        patient = createManagedPatient(suggestedModules, modulesData, { session });
-        patient.data.shared.name = name;
-        patient.data.shared.patientNo = String(getCell(row, colMap.patientNo) || '').trim();
-        patient.data.shared.birthDate = birthDate;
-        patient.data.shared.injuryDate = injuryDate;
-        patient.data.shared.height = String(getCell(row, colMap.height) || '');
-        patient.data.shared.weight = String(getCell(row, colMap.weight) || '');
-        patient.data.shared.gender = parseGender(getCell(row, colMap.gender));
-        patient.data.shared.hospitalName = String(getCell(row, colMap.hospitalName) || '').trim();
-        patient.data.shared.department = String(getCell(row, colMap.department) || '').trim();
-        patient.data.shared.doctorName = String(getCell(row, colMap.doctorName) || '').trim();
-        patient.data.shared.specialNotes = String(getCell(row, colMap.specialNotes) || '').trim();
-        patient.data.shared.diagnoses = [];
-        patient.data.shared.jobs = [];
-        if (patient.data.shared.doctorName) stats.withDoctorName += 1;
-        resultPatients.push(patient);
-        stats.newPatients += 1;
-      }
-
-      const diagnosis = ensureDiagnosis(patient, diagCode, diagName, side, stats);
-      if (diagnosis) {
-        const diagModuleId = resolveDiagnosisModule(diagnosis, patient.data.activeModules)?.moduleId;
-        if (applyDiagnosisAssessment(diagnosis, row, colMap, getCell, diagModuleId)) {
-          stats.updatedAssessments += 1;
-        }
-      }
-      const job = ensureSharedJob(patient, row, colMap, getCell, stats);
-
-      moduleConfigs.forEach(mod => {
-        mod.batchImportConfig.applyRow({ patient, row, diagnosis, job, colMap, getCell, rowIndex });
-      });
-
-      applyReturnConsiderations(
-        patient,
-        String(getCell(row, colMap.returnConsiderations) || '').trim(),
-        moduleConfigs.map(mod => mod.id)
-      );
-    }
-
-    if (stats.newPatients === 0 && stats.newDiagnoses === 0 && stats.newJobs === 0 && stats.updatedAssessments === 0) {
+    // 행 → 새 환자·기존 환자 변경 계산은 runBatchImport(src/core/services/batchImport.ts, P2-56)가 한다.
+    const { newPatients, changed, stats, empty } = runBatchImport({
+      rows: preview, existingPatients, errorRowIndexes, session,
+    });
+    if (empty) {
       await showAlert('가져올 데이터가 없습니다.');
       return;
     }
-
-    // 편집 표시(touch)·최신 목록 병합은 환자 상태 전이 patients/batchImportApplied가 한다(P2-43·P2-43b). 새 환자와 행이 바꾼 기존
-    // 환자만 넘기고, 기존 환자에는 사본을 뜬 시점의 원래 객체를 붙인다(그사이 다른 전이로 바뀌었으면 전이가 건너뛴다).
-    const changed = [];
-    for (let i = 0; i < existingCount; i += 1) {
-      if (JSON.stringify(resultPatients[i]) === beforeJson[i]) continue;
-      changed.push({ patient: resultPatients[i], base: { patient: existingPatients[i] } });
-    }
-    onImport({ newPatients: resultPatients.slice(existingCount), changed }, stats);
+    onImport({ newPatients, changed }, stats);
     onClose();
   };
 
